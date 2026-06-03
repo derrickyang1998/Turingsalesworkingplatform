@@ -31,3 +31,19 @@ All notable changes to this project will be documented in this file.
 - Port: 3002
 
 ---
+
+## v5.2 (2026-06-03) - Phase 1: Influencer Database + Smart Matching (completed)
+
+**Branch:** codex/phase-1-influencer-db
+
+### Planned
+- [x] SQLite influencer table + server API (GET/POST/filter)
+- [ ] Seed real influencer data from vault knowledge
+- [ ] Smart matching algorithm: budget x followers x engagement x category
+- [ ] Collaboration tracking workflow
+- [ ] M4 frontend upgrade
+
+### Tech Details
+- Table: influencers (platform, handle, followers, engagement, category, region, cost_range, collab_type, past_brands)
+- Table: collaborations (demand_id, influencer_id, status, notes, timeline)
+- API: CRUD + filter by platform/category/region/followers_range + smart match endpoint

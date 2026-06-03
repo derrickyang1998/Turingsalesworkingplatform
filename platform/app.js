@@ -525,95 +525,224 @@ function escapeHTML(s){return String(s||"").replace(/&/g,"&amp;").replace(/</g,"
 
 function switchTab(id) { document.querySelectorAll('#tabBar .tab').forEach(function (t) { t.classList.remove('active') }); var tabEl = document.querySelector('[data-tab="' + id + '"]'); if (tabEl) tabEl.classList.add('active'); var t1=document.getElementById('tab1-content');var t2=document.getElementById('tab2-content');var t3=document.getElementById('tab3-content');if(t1)t1.classList.toggle('hidden',id!=='tab1');if(t2)t2.classList.toggle('hidden',id!=='tab2');if(t3)t3.classList.toggle('hidden',id!=='tab3') }
 function initM4() { matchInfluencers() }
+// ===== M4: INFLUENCER MATCHING (API-driven) =====
+var lastMatch = [], lastInfAPI = [];
+
+async function initM4() {
+  await loadInfluencersFromAPI();
+  await loadCollaborations();
+  var cnt = document.getElementById('m4InfCount');
+  if (cnt) cnt.textContent = lastInfAPI.length + ' influencers in database · 智能匹配 · 合作追踪';
+}
+
+async function loadInfluencersFromAPI() {
+  var search = document.getElementById('filt_search')?.value || '';
+  var platform = document.getElementById('filt_platform')?.value || '';
+  var category = document.getElementById('filt_category')?.value || '';
+  var region = document.getElementById('filt_region')?.value || '';
+  var sort = document.getElementById('filt_sort')?.value || 'followers';
+  var qs = '?sort_by=' + sort;
+  if (search) qs += '&search=' + encodeURIComponent(search);
+  if (platform) qs += '&platform=' + encodeURIComponent(platform);
+  if (category) qs += '&category=' + encodeURIComponent(category);
+  if (region) qs += '&region=' + encodeURIComponent(region);
+  try {
+    var r = await apiFetch('/influencers' + qs);
+    var d = await r.json();
+    lastInfAPI = d.influencers || [];
+    lastMatch = lastInfAPI;
+    return lastInfAPI;
+  } catch (e) { console.error(e); lastInfAPI = []; lastMatch = []; return []; }
+}
+
+function matchInfluencers() {
+  var c = document.getElementById('infTableContainer');
+  c.innerHTML = '<p style=\"text-align:center;padding:30px;opacity:.5\">Loading...</p>';
+  loadInfluencersFromAPI().then(function (data) { renderInfTable(data); });
+}
+
+async function smartMatch() {
+  var c = document.getElementById('infTableContainer');
+  c.innerHTML = '<p style=\"text-align:center;padding:30px;opacity:.5\">智能匹配中...</p>';
+  var body = {};
+  var cat = document.getElementById('filt_category')?.value;
+  var plat = document.getElementById('filt_platform')?.value;
+  var region = document.getElementById('filt_region')?.value;
+  if (cat) body.category = cat;
+  if (plat) body.platform = plat;
+  if (region) body.region = region;
+  try {
+    var r = await apiFetch('/influencers/match', { method: 'POST', body: JSON.stringify(body) });
+    var d = await r.json();
+    lastMatch = d.matches || [];
+    renderInfTable(d.matches || [], true);
+    toast('Smart matched ' + (d.matches || []).length + ' influencers');
+  } catch (e) {
+    c.innerHTML = '<p style=\"text-align:center;padding:30px;opacity:.5\">Match failed: ' + e.message + '</p>';
+  }
+}
+
+function renderInfTable(data, showScore) {
+  var c = document.getElementById('infTableContainer');
+  if (!data || !data.length) { c.innerHTML = '<p style=\"text-align:center;padding:30px;opacity:.5\">No influencers found</p>'; return; }
+  var h = '<table class=\"influencer-table\"><thead><tr><th><input type=\"checkbox\" onclick=\"toggleAll(this)\"></th><th>#</th><th>网红</th><th>Platform</th><th>Followers</th><th>Engagement</th><th>Region</th><th>Category</th><th>Cost(USD)</th><th>CPM</th>' + (showScore ? '<th>Match</th>' : '') + '<th>操作</th></tr></thead><tbody>';
+  data.forEach(function(inf, i) {
+    h += '<tr><td><input type=\"checkbox\" class=\"infcb\" data-idx=\"' + i + '\"></td><td>' + (i + 1) + '</td>';
+    h += '<td><strong>' + esc(inf.kol_handle || '') + '</strong><br><span style=\"font-size:10px;opacity:.6\">' + esc(inf.content_style || '') + '</span></td>';
+    h += '<td>' + esc(inf.platform || '-') + '</td>';
+    h += '<td>' + ((inf.followers || 0) >= 1000 ? ((inf.followers / 1000).toFixed(0) + 'K') : (inf.followers || 0)) + '</td>';
+    h += '<td>' + (inf.avg_engagement ? (inf.avg_engagement.toFixed(1) + '%') : '-') + '</td>';
+    h += '<td>' + esc(inf.region || '-') + '</td>';
+    h += '<td>' + esc(inf.category || '-') + '</td>';
+    h += '<td>\$' + (inf.cost_usd || 0) + '</td>';
+    h += '<td>' + (inf.cpm || '-') + '</td>';
+    if (showScore) h += '<td><span style=\"font-weight:700;color:var(--green)\">' + (inf.match_score || 0) + '</span></td>';
+    h += '<td><button class=\"btn btn-sm\" onclick=\"startCollab(' + inf.id + ')\">合作</button></td></tr>';
+  });
+  h += '</tbody></table>';
+  c.innerHTML = h;
+  var cnt = document.getElementById('m4InfCount');
+  if (cnt) cnt.textContent = data.length + ' results · 智能匹配 · 合作追踪';
+}
+
+// ===== COLLABORATION TRACKING =====
+async function loadCollaborations(status) {
+  var filterEl = document.getElementById('collabFilter');
+  var s = status || (filterEl ? filterEl.value : '');
+  try {
+    var qs = s ? '?status=' + encodeURIComponent(s) : '';
+    var r = await apiFetch('/collaborations' + qs);
+    var d = await r.json();
+    var cs = d.collaborations || [];
+    renderCollabTable(cs);
+    var st = document.getElementById('collabStatsBar');
+    if (st) {
+      var counts = {}; cs.forEach(function(c) { counts[c.status] = (counts[c.status] || 0) + 1; });
+      var labels = { proposed: '提案中', contacted: '已建联', negotiating: '谈判中', confirmed: '已确认', contract_sent: '合同已发', live: '合作中', content_review: '审核中', completed: '已完成', cancelled: '已取消' };
+      st.innerHTML = Object.keys(counts).map(function(k) { return '<span style=\"font-size:11px;background:var(--surface2);padding:4px 10px;border-radius:20px\">' + (labels[k] || k) + ': <strong>' + counts[k] + '</strong></span>'; }).join('');
+    }
+  } catch (e) {
+    document.getElementById('execTableContainer').innerHTML = '<p style=\"text-align:center;padding:30px;opacity:.5\">加载失败: ' + e.message + '</p>';
+  }
+}
+
+function renderCollabTable(data) {
+  var c = document.getElementById('execTableContainer');
+  c.innerHTML = '<div id=\"execTableArea\"></div>';
+  var area = document.getElementById('execTableArea');
+  if (!data || !data.length) { area.innerHTML = '<p style=\"text-align:center;padding:30px;opacity:.5\">暂无合作记录</p>'; return; }
+  var STATUS_LABELS = { proposed: '提案中', contacted: '已建联', negotiating: '谈判中', confirmed: '已确认', contract_sent: '合同已发', live: '合作中', content_review: '审核中', completed: '已完成', cancelled: '已取消' };
+  var h = '<table><thead><tr><th>网红</th><th>Platform</th><th>Followers</th><th>状态</th><th>报价</th><th>备注</th><th>更新</th><th>操作</th></tr></thead><tbody>';
+  data.forEach(function(collab) {
+    h += '<tr><td><strong>' + esc(collab.kol_handle || '') + '</strong></td>';
+    h += '<td>' + esc(collab.platform || '-') + '</td>';
+    h += '<td>' + ((collab.followers || 0) >= 1000 ? ((collab.followers / 1000).toFixed(0) + 'K') : (collab.followers || 0)) + '</td>';
+    h += '<td><select id=\"st_' + collab.id + '\" onchange=\"updateCollabStatus(' + collab.id + ')\" style=\"width:auto;font-size:11px\">';
+    Object.keys(STATUS_LABELS).forEach(function(k) { h += '<option value=\"' + k + '\"' + (collab.status === k ? ' selected' : '') + '>' + STATUS_LABELS[k] + '</option>'; });
+    h += '</select></td>';
+    h += '<td>\$' + (collab.cost_quoted || 0) + '</td>';
+    h += '<td style=\"max-width:120px;font-size:10px\">' + esc(collab.notes || '-') + '</td>';
+    h += '<td style=\"font-size:9px;opacity:.5\">' + (collab.updated_at ? collab.updated_at.substring(0, 16) : '-') + '</td>';
+    h += '<td><button class=\"btn btn-sm\" onclick=\"updateCollabStatus(' + collab.id + ')\">保存</button></td></tr>';
+  });
+  h += '</tbody></table>';
+  area.innerHTML = h;
+}
+
+async function startCollab(infId) {
+  var notes = prompt('合作备注（可选）：');
+  if (notes === null) return;
+  try {
+    var r = await apiFetch('/collaborations', { method: 'POST', body: JSON.stringify({ influencer_id: infId, notes: notes || '' }) });
+    if (!r.ok) throw new Error(await r.text());
+    var d = await r.json();
+    toast('Collaboration started: #' + d.id);
+    switchTab('tab2');
+    loadCollaborations();
+  } catch (e) { toast('Failed: ' + e.message, 'error'); }
+}
+
+async function updateCollabStatus(collabId) {
+  var sel = document.getElementById('st_' + collabId);
+  if (!sel) return;
+  var newStatus = sel.value;
+  try {
+    var r = await apiFetch('/collaborations/' + collabId, { method: 'PUT', body: JSON.stringify({ status: newStatus }) });
+    if (!r.ok) throw new Error(await r.text());
+    toast('Status updated to: ' + newStatus);
+    loadCollaborations(newStatus);
+  } catch (e) { toast('Failed: ' + e.message, 'error'); }
+}
+
+// ===== KEEP: legacy upload support =====
 function handleUpload(e) {
-  var f=e.target.files[0];if(!f)return;
-  var s=document.getElementById("uploadOK");
-  var ext=f.name.split(".").pop().toLowerCase();
-  if(["csv","json","xls","xlsx"].indexOf(ext)===-1){
-    s.innerHTML="<span style=color:#d94641>不支持 ."+ext+" 格式，请上传 CSV/JSON/XLS/XLSX</span>";
+  var f = e.target.files[0]; if (!f) return;
+  var s = document.getElementById('uploadOK');
+  var ext = f.name.split('.').pop().toLowerCase();
+  if (['csv', 'json', 'xls', 'xlsx'].indexOf(ext) === -1) {
+    s.innerHTML = '<span style=\"color:#d94641\">不支持 .' + ext + ' 格式，请上传 CSV/JSON/XLS/XLSX</span>';
     return;
   }
-  s.innerHTML="<span>正在读取: "+f.name+" ("+(f.size/1024).toFixed(1)+"KB)...</span>";
-  
-  var r=new FileReader();
-  if(ext==="json"){
-    r.onload=function(ev){
-      try{
-        var d=JSON.parse(ev.target.result);
-        var inf=Array.isArray(d)?d:(d.influencers||d.data||[]);
-        if(inf.length){INFLUENCERS=inf;s.innerHTML="<span style=color:#0f7b3c>✅ "+inf.length+" 位网红已加载</span>";matchInfluencers();showInfPreview(inf)}
-        else{s.innerHTML="<span style=color:#d94641>未找到网红数据</span>"}
-      }catch(err){s.innerHTML="<span style=color:#d94641>JSON 解析失败: "+err.message+"</span>"}
+  s.innerHTML = '<span>正在读取: ' + f.name + ' (' + (f.size / 1024).toFixed(1) + 'KB)...</span>';
+  var r = new FileReader();
+  if (ext === 'json') {
+    r.onload = function(ev) {
+      try {
+        var d = JSON.parse(ev.target.result);
+        var inf = Array.isArray(d) ? d : (d.influencers || d.data || []);
+        if (inf.length) { INFLUENCERS = inf; s.innerHTML = '<span style=\"color:#0f7b3c\">' + inf.length + ' 位网红已加载</span>'; matchInfluencers(); showInfPreview(inf); }
+        else { s.innerHTML = '<span style=\"color:#d94641\">未找到网红数据</span>'; }
+      } catch (err) { s.innerHTML = '<span style=\"color:#d94641\">JSON 解析失败: ' + err.message + '</span>'; }
     };
     r.readAsText(f);
   } else {
-    // CSV / XLS / XLSX - read as text
-    r.onload=function(ev){
-      var txt=ev.target.result||"";
-      if(!txt.trim()){s.innerHTML="<span style=color:#d94641>文件为空</span>";return}
-      var rows=txt.split("\n").filter(function(l){return l.trim()});
-      var headers=rows[0].split(/[,\t;]/).map(function(h){return h.trim().replace(/"/g,"").replace(/^\uFEFF/,"")});
-      var inf=rows.slice(1).map(function(row){
-        var vals=row.match(/(".*?"|[^",\t\s;]+)(?=\s*[,;\t]|\s*$)/g)||row.split(/[,\t;]/);
-        var o={};
-        headers.forEach(function(h,i){o[h]=vals[i]?vals[i].trim().replace(/^"|"$/g,""):""});
+    r.onload = function(ev) {
+      var txt = ev.target.result || '';
+      if (!txt.trim()) { s.innerHTML = '<span style=\"color:#d94641\">文件为空</span>'; return; }
+      var rows = txt.split('\n').filter(function(l) { return l.trim(); });
+      var headers = rows[0].split(/[,\t;]/).map(function(h) { return h.trim().replace(/"/g, '').replace(/^\uFEFF/, ''); });
+      var inf = rows.slice(1).map(function(row) {
+        var vals = row.match(/(".*?"|[^',\t\s;]+)(?=\s*[,;\t]|\s*$)/g) || row.split(/[,\t;]/);
+        var o = {};
+        headers.forEach(function(h, i) { o[h] = vals[i] ? vals[i].trim().replace(/^'|'$/g, '') : ''; });
         return o;
-      }).filter(function(o){return o.kol_handle||o.name||o.Name||o["KOL Handle"]});
-      if(inf.length){
-        INFLUENCERS=inf;
-        s.innerHTML="<span style=color:#0f7b3c>✅ "+inf.length+" 位网红已加载</span>";
-        matchInfluencers();
-        showInfPreview(inf);
-      } else {
-        s.innerHTML="<span style=color:#d94641>未识别到网红数据，请检查格式</span>";
-      }
+      }).filter(function(o) { return o.kol_handle || o.name || o.Name || o['KOL Handle']; });
+      if (inf.length) { INFLUENCERS = inf; s.innerHTML = '<span style=\"color:#0f7b3c\">' + inf.length + ' 位网红已加载</span>'; matchInfluencers(); showInfPreview(inf); }
+      else { s.innerHTML = '<span style=\"color:#d94641\">未识别到网红数据，请检查格式</span>'; }
     };
     r.readAsText(f);
   }
 }
-
-function showInfPreview(data){
-  var c=document.getElementById("infPreview");
-  if(!c)return;
-  var h="<table style=width:100%;font-size:10px;border-collapse:collapse>";
-  h+="<tr style=border-bottom:1px solid var(--border)>";
-  var keys=Object.keys(data[0]||{}).slice(0,6);
-  keys.forEach(function(k){h+="<th style=text-align:left;padding:4px;opacity:.5>"+esc(k)+"</th>"});
-  h+="</tr>";
-  data.slice(0,5).forEach(function(r){
-    h+="<tr style=border-bottom:1px solid var(--border)>";
-    keys.forEach(function(k){h+="<td style=padding:4px;font-size:9px>"+esc(String(r[k]||""))+"</td>"});
-    h+="</tr>";
+function showInfPreview(data) {
+  var c = document.getElementById('infPreview'); if (!c) return;
+  var h = '<table style=\"width:100%;font-size:10px;border-collapse:collapse\"><tr style=\"border-bottom:1px solid var(--border)\">';
+  var keys = Object.keys(data[0] || {}).slice(0, 6);
+  keys.forEach(function(k) { h += '<th style=\"text-align:left;padding:4px;opacity:.5\">' + esc(k) + '</th>'; });
+  h += '</tr>';
+  data.slice(0, 5).forEach(function(r) {
+    h += '<tr style=\"border-bottom:1px solid var(--border)\">';
+    keys.forEach(function(k) { h += '<td style=\"padding:4px;font-size:9px\">' + esc(String(r[k] || '')) + '</td>'; });
+    h += '</tr>';
   });
-  if(data.length>5)h+="<tr><td colspan="+keys.length+" style=padding:4px;opacity:.4;text-align:center>... 共 "+data.length+" 条</td></tr>";
-  h+="</table>";
-  c.innerHTML=h;
+  if (data.length > 5) h += '<tr><td colspan=\"' + keys.length + '\" style=\"padding:4px;opacity:.4;text-align:center\">... 共 ' + data.length + ' 条</td></tr>';
+  h += '</table>'; c.innerHTML = h;
 }
-
 function downloadInfTemplateJSON() {
-  var tpl = [
-    {
-      "kol_handle": "@example_kol",
-      "platform": "YouTube",
-      "profile_link": "https://youtube.com/@example",
-      "followers": 50000,
-      "region": "US",
-      "category": "Tech/3C",
-      "avg_views_10": 25000,
-      "collab_type": "Dedicated Video",
-      "cost_usd": 2500,
-      "cpm": 50
-    }
-  ];
+  var tpl = [{ kol_handle: '@example_kol', platform: 'YouTube', profile_link: 'https://youtube.com/@example', followers: 50000, region: 'US', category: '3C', avg_views_10: 25000, collab_type: 'Dedicated Video', cost_usd: 2500, cpm: 50 }];
   dlFile('influencer_template.json', JSON.stringify(tpl, null, 2), 'application/json');
 }
-
-function downloadInfTemplate() { dlFile('influencer_template.csv', '\uFEFF' + 'kol_handle,platform,profile_link,followers,avg_views_10,category,region,language,collab_type,cost_usd,cpm,content_style,brand_collab_history,contact_email\n@TechReviewPro,YouTube,https://youtube.com/@example,125000,45000,Tech/3C,US,EN,Dedicated,2500,55,Reviews,Anker;Ugreen,contact@example.com\n', 'text/csv') }
-function matchInfluencers() { var plat = document.getElementById('filt_platform')?.value || '', cat = document.getElementById('filt_category')?.value || ''; var m = [].concat(INFLUENCERS); if (plat) m = m.filter(function (i) { return i.platform === plat }); if (cat) m = m.filter(function (i) { return i.category === cat }); lastMatch = m; var c = document.getElementById('infTableContainer'); if (!m.length) { c.innerHTML = '<p style=text-align:center;padding:30px;opacity:.5>No matches</p>'; return } var h = '<table class=influencer-table><thead><tr><th><input type=checkbox onclick="toggleAll(this)"></th><th>No.</th><th>Date</th><th>KOL Handle</th><th>Followers</th><th>Link</th><th>Platform</th><th>Region</th><th>Category</th><th>Avg Views</th><th>Collab Type</th><th>Cost(USD)</th><th>CPM</th></tr></thead><tbody>'; m.forEach(function (inf, i) { h += '<tr><td><input type=checkbox class=infcb data-idx=' + i + '></td><td>' + (i + 1) + '</td><td>' + getDate() + '</td><td><strong>' + (inf.kol_handle || inf.name || '') + '</strong></td><td>' + ((inf.followers || 0).toLocaleString()) + '</td><td><a href="' + (inf.profile_link || '#') + '" target=_blank style=font-size:10px>Link</a></td><td>' + (inf.platform || '-') + '</td><td>' + (inf.region || '-') + '</td><td>' + (inf.category || '-') + '</td><td>' + ((inf.avg_views_10 || 0).toLocaleString()) + '</td><td>' + (inf.collab_type || '-') + '</td><td>$' + (inf.cost_usd || 0) + '</td><td>' + (inf.cpm || '-') + '</td></tr>' }); h += '</tbody></table>'; c.innerHTML = h }
-function toggleAll(cb) { document.querySelectorAll('.infcb').forEach(function (c) { c.checked = cb.checked }) }
-function exportSubmissionCSV() { var chk = [], cbs = document.querySelectorAll('.infcb:checked'); cbs.forEach(function (c) { chk.push(parseInt(c.dataset.idx)) }); chk = chk.filter(function (i) { return !isNaN(i) }); var data = chk.length ? chk.map(function (i) { return lastMatch[i] }).filter(Boolean) : lastMatch; if (!data.length) { toast('No data', 'error'); return } var csv = 'No.,Date,KOL Handle,Followers,Link,Platform,Region,Category,Avg Views,Collab Type,Cost(USD),CPM\n'; data.forEach(function (inf, i) { csv += (i + 1) + ',' + getDate() + ',"' + (inf.kol_handle || inf.name || '') + '",' + (inf.followers || 0) + ',"' + (inf.profile_link || '') + '",' + inf.platform + ',' + inf.region + ',' + inf.category + ',' + (inf.avg_views_10 || 0) + ',' + inf.collab_type + ',' + (inf.cost_usd || 0) + ',' + (inf.cpm || '') + '\n' }); dlFile('influencer_' + getDate() + '.csv', '\uFEFF' + csv, 'text/csv'); toast('Exported ' + data.length) }
-
-// ===== M5: AI CHAT =====
+function downloadInfTemplate() { dlFile('influencer_template.csv', '\uFEFF' + 'kol_handle,platform,profile_link,followers,avg_views_10,category,region,language,collab_type,cost_usd,cpm,content_style,brand_collab_history,contact_email\n@TechReviewPro,YouTube,https://youtube.com/@example,125000,45000,3C,US,EN,Dedicated,2500,55,Reviews,Anker;Ugreen,contact@example.com\n', 'text/csv'); }
+function toggleAll(cb) { document.querySelectorAll('.infcb').forEach(function(c) { c.checked = cb.checked; }); }
+function exportSubmissionCSV() {
+  var chk = [], cbs = document.querySelectorAll('.infcb:checked');
+  cbs.forEach(function(c) { chk.push(parseInt(c.dataset.idx)); });
+  chk = chk.filter(function(i) { return !isNaN(i); });
+  var data = chk.length ? chk.map(function(i) { return lastMatch[i]; }).filter(Boolean) : lastMatch;
+  if (!data.length) { toast('No data', 'error'); return; }
+  var csv = 'No.,Date,KOL Handle,Followers,Link,Platform,Region,Category,Avg Views,Collab Type,Cost(USD),CPM\n';
+  data.forEach(function(inf, i) { csv += (i + 1) + ',' + getDate() + ',\"' + (inf.kol_handle || inf.name || '') + '\",' + (inf.followers || 0) + ',\"' + (inf.profile_link || '') + '\",' + inf.platform + ',' + inf.region + ',' + inf.category + ',' + (inf.avg_views_10 || 0) + ',' + inf.collab_type + ',' + (inf.cost_usd || 0) + ',' + (inf.cpm || '') + '\n'; });
+  dlFile('influencer_' + getDate() + '.csv', '\uFEFF' + csv, 'text/csv'); toast('Exported ' + data.length);
+}
 async function sendChat() { var inp = document.getElementById('chatInput'); var msg = inp.value.trim(); if (!msg) return; addChatMsg('user', msg); inp.value = ''; chatHistory.push({ role: 'user', content: msg }); var msgs = document.getElementById('chatMessages'); var td = document.createElement('div'); td.className = 'chat-msg assistant'; td.innerHTML = '<div class=bubble>...</div>'; msgs.appendChild(td); msgs.scrollTop = msgs.scrollHeight; try { var ctx = JSON.stringify({ brandCount: BRANDS.length, sample: BRANDS.slice(0, 10).map(function (b) { return { name: b.name, industry: b.industry_tags.slice(0, 3) } }) }); var systemMsg = { role: 'system', content: chatHistory[0].content + '\n\nDB: ' + ctx }; var allMsgs = [systemMsg]; for (var i = 1; i < chatHistory.length; i++) allMsgs.push(chatHistory[i]); var resp = await fetch(DS_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + DS_KEY }, body: JSON.stringify({ model: 'deepseek-chat', messages: allMsgs, temperature: 0.7, max_tokens: 1500 }) }); td.remove(); if (!resp.ok) throw new Error('API:' + resp.status); var d = await resp.json(); var usage = d.usage || {}; trackTokenUsage('deepseek-chat', 'ai_chat', usage.prompt_tokens || 0, usage.completion_tokens || 0, usage.total_tokens || 0); var reply = d.choices[0].message.content; chatHistory.push({ role: 'assistant', content: reply }); addChatMsg('assistant', reply); if (chatHistory.length > 20) chatHistory = [chatHistory[0]].concat(chatHistory.slice(-19)) } catch (e) { td.remove(); addChatMsg('assistant', 'Error: ' + e.message) } }
 function addChatMsg(role, content) { var msgs = document.getElementById('chatMessages'); var div = document.createElement('div'); div.className = 'chat-msg ' + role; var formatted = content.replace(/\n/g, '<br>').replace(/```([^`]+)```/g, '<pre>$1</pre>'); div.innerHTML = '<div class=bubble>' + formatted + '</div>'; msgs.appendChild(div); msgs.scrollTop = msgs.scrollHeight }
 function clearChat() { chatHistory = [chatHistory[0]]; document.getElementById('chatMessages').innerHTML = '<div class="chat-msg assistant"><div class=bubble>Chat cleared. How can I help?</div></div>' }

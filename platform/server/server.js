@@ -193,6 +193,10 @@ app.post('/api/admin/invites', authMiddleware, adminOnly, (req, res) => {
   res.json({ code, expires_at: expiresAt });
 });
 
+
+// ===== INFLUENCER & COLLABORATION ROUTES =====
+require('./routes')(app, db, authMiddleware);
+
 // ===== HEALTH CHECK =====
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });

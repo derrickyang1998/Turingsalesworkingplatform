@@ -338,7 +338,7 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
 <!-- M4: Influencer -->
 <div class="page" id="page-m4">
 <h2>👥 网红匹配 & 执行管理</h2>
-<p class="subtitle">提报资源名单 · 下单合作追踪 · 飞书同步</p>
+<p class="subtitle">提报资源名单 · 智能匹配 · 合作追踪 · 飞书同步</p>
 <div class="tabs" id="tabBar">
   <div class="tab active" data-tab="tab1" onclick="switchTab('tab1')">📋 提报资源名单</div>
   <div class="tab" data-tab="tab2" onclick="switchTab('tab2')">📊 下单合作资源</div>
@@ -346,17 +346,16 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
 </div>
 <div id="tab1-content">
   <div class="card">
-    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
-      <select id="filt_platform" style="width:auto" onchange="matchInfluencers()"><option value="">全部平台</option><option>YouTube</option><option>TikTok</option><option>Instagram</option></select>
-      <select id="filt_category" style="width:auto" onchange="matchInfluencers()"><option value="">全部类别</option><option>Tech/3C</option><option>Beauty</option><option>Home/Garden</option><option>Outdoor</option><option>Pet</option></select>
-      <button class="btn btn-sm" onclick="matchInfluencers()">🔍 筛选</button>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px"><input type="text" id="filt_search" placeholder="搜索网红/品牌/风格..." style="width:180px" onkeydown="if(event.key==='Enter')matchInfluencers()"> $2 style="width:auto" onchange="matchInfluencers()"><option value="">全部平台</option><option>YouTube</option><option>TikTok</option><option>Instagram</option></select>
+      <select id="filt_category" style="width:auto" onchange="matchInfluencers()"><option value="">全部类别</option><option>3C</option><option>智能家居</option><option>美妆</option><option>户外</option><option>宠物</option><option>储能</option><option>医疗</option><option>出行</option></select>
+      <select id="filt_region" style="width:auto" onchange="matchInfluencers()"><option value="">全部地区</option><option>US</option><option>DE</option><option>JP</option><option>KR</option></select><select id="filt_sort" style="width:auto" onchange="matchInfluencers()"><option value="followers">按粉丝数</option><option value="engagement">按互动率</option><option value="cost_usd">按报价</option></select><button class="btn btn-primary btn-sm" onclick="matchInfluencers()">🔍 筛选</button><button class="btn btn-sm" onclick="smartMatch()">🤖 智能匹配</button>
       <button class="btn btn-sm" onclick="exportSubmissionCSV()">📥 导出CSV</button>
     </div>
     <div class="table-container" id="infTableContainer" style="max-height:450px;overflow-y:auto"><p style="text-align:center;padding:30px;opacity:.5">请先在「导入 & 飞书」页面上传网红数据</p></div>
   </div>
 </div>
 <div id="tab2-content" class="hidden">
-  <div class="card"><h3>客户下单合作资源</h3><div class="table-container" id="execTableContainer" style="max-height:450px;overflow-y:auto"><p style="text-align:center;padding:30px;opacity:.5">合作确认后填充</p></div></div>
+  <div class="card"><h3>合作追踪工作台</h3><div class="table-container" id="execTableContainer" style="max-height:450px;overflow-y:auto"><p style="text-align:center;padding:30px;opacity:.5"><div id="collabStatsBar" style="display:flex;gap:16px;margin-bottom:12px"></div><div id="execTableArea"></div></p></div></div>
 </div>
 <div id="tab3-content" class="hidden">
   <div class="grid grid-2">
