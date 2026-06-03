@@ -22,6 +22,31 @@ db.exec(`
     is_active INTEGER DEFAULT 1
   );
 
+  CREATE TABLE IF NOT EXISTS brands (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    name_cn TEXT,
+    industry_tags TEXT,
+    market TEXT DEFAULT 'global',
+    estimated_annual_revenue TEXT,
+    user_base TEXT,
+    amazon_rating REAL,
+    youtube_followers INTEGER DEFAULT 0,
+    instagram_followers INTEGER DEFAULT 0,
+    tiktok_followers INTEGER DEFAULT 0,
+    search_volume_monthly INTEGER DEFAULT 0,
+    monthly_posts INTEGER DEFAULT 0,
+    avg_engagement TEXT,
+    avg_views INTEGER DEFAULT 0,
+    top_platform TEXT,
+    creative_angles TEXT,
+    top_products TEXT,
+    data_source TEXT DEFAULT 'user_enrich',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE INDEX IF NOT EXISTS idx_brands_name ON brands(name);
+
+
   CREATE TABLE IF NOT EXISTS sessions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,

@@ -197,6 +197,7 @@ app.post('/api/admin/invites', authMiddleware, adminOnly, (req, res) => {
 // ===== INFLUENCER & COLLABORATION ROUTES =====
 require('./routes')(app, db, authMiddleware);
 require('./routes_customers')(app, db, authMiddleware);
+require('./routes_brands')(app, db, authMiddleware);
 
 // ===== HEALTH CHECK =====
 app.get('/api/health', (req, res) => {
