@@ -640,6 +640,45 @@ function updateStrategy() {
 }
 
 
+
+// ===== M3: DEMAND & PROPOSAL =====
+function initM3() {
+  var c = document.getElementById('tmplSelect');
+  if (!c || !TEMPLATES.length) return;
+  var h = "";
+  for (var ti = 0; ti < TEMPLATES.length; ti++) {
+    var t = TEMPLATES[ti];
+    h += '<div class="card" style="cursor:pointer;padding:14px" id="tcard-' + t.id + '" onclick="selTmpl(' + "'" + t.id + "'" + ')"><h3 style="font-size:14px">' + t.name + '</h3><p style="font-size:11px;opacity:.6;margin:6px 0">' + t.description + '</p></div>';
+  }
+  c.innerHTML = h;
+}
+function goAnalyze() {
+  var brand = gv("d_brand"), product = gv("d_product"), usp = gv("d_usp");
+  if (!brand || !product || !usp) { toast("请至少填写品牌、产品、USP", "error"); return; }
+  curDemand = { brand: brand, company: gv("d_company"), product: product, usp: usp, budget: gv("d_budget"), platform: gv("d_platform"), area: gv("d_area"), category: gv("d_category"), competitors: gv("d_competitors"), notes: gv("d_notes") };
+  document.getElementById("analysisResult").innerHTML = "<table style='width:100%;font-size:12px'><tr><td><strong>品牌:</strong> " + esc(brand) + "</td><td><strong>产品:</strong> " + esc(product) + "</td></tr><tr><td><strong>卖点:</strong> " + esc(usp) + "</td><td><strong>预算:</strong> " + (curDemand.budget || "待定") + "</td></tr></table>";
+  document.getElementById("m3s1").classList.add("hidden");
+  document.getElementById("m3s2").classList.remove("hidden");
+  updSteps(2);
+}
+function goGenerate() { document.getElementById("m3s2").classList.add("hidden"); document.getElementById("m3s3").classList.remove("hidden"); updSteps(3); initM3(); }
+function updSteps(n) { for (var i = 1; i <= 3; i++) { var el = document.getElementById("step" + i); if (el) { el.classList.remove("active", "done"); if (i < n) el.classList.add("done"); if (i === n) el.classList.add("active"); } } }
+function selTmpl(id) { selTpl = id; }
+function generateProposal() {
+  if (!curDemand) { toast("请先完成需求分析", "error"); return; }
+  if (!selTpl) { toast("请选择方案模板", "error"); return; }
+  var tpl = TEMPLATES.find(function(t) { return t.id === selTpl; });
+  if (!tpl) return;
+  var nl = "\n"; var h = "# " + (curDemand.brand || "品牌") + " 红人营销方案" + nl + nl + "**TuringMarket 图灵集市**" + nl + nl + "## 客户需求" + nl + "- 品牌: " + (curDemand.brand || "") + nl + "- 产品: " + (curDemand.product || "") + nl + "- 卖点: " + (curDemand.usp || "") + nl + "- 平台: " + (curDemand.platform || "") + nl + "- 市场: " + (curDemand.area || "") + nl + "- 预算: " + (curDemand.budget || "") + nl + nl + "## 模板: " + tpl.name + nl;
+  for (var si = 0; si < tpl.sections.length; si++) { h += (si + 1) + ". " + tpl.sections[si] + nl; }
+  lastProp = h;
+  var displayH = h.replace(/&/g,"&amp;").replace(/</g,"&lt;");
+  document.getElementById("propResult").innerHTML = '<div class="card"><h3>✅ 方案已生成</h3><pre style="font-size:12px;max-height:300px;overflow-y:auto;background:var(--surface2);padding:12px;border-radius:8px;white-space:pre-wrap">' + displayH + '</pre><div class="btn-group"><button class="btn btn-primary btn-sm" onclick="downloadProposal()">📥 下载 MD</button><button class="btn btn-sm" onclick="copyProposal()">📋 复制</button></div></div>';
+  toast("方案已生成");
+}
+function downloadProposal() { if (lastProp) dlFile((curDemand ? curDemand.brand : "proposal") + "_proposal.md", lastProp, "text/markdown"); }
+function copyProposal() { if (lastProp) { try { navigator.clipboard.writeText(lastProp); toast("已复制"); } catch(e) {} } }
+
 // ===== HTML PPT GENERATION (reveal.js) =====
 var lastPPT="";
 ;
@@ -935,6 +974,30 @@ async function loadAdminDashboard() {
       actH += "<div style='display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:11px'><span><strong>" + a.display_name + "</strong> " + a.action + "</span><span style=opacity:.5>" + (a.created_at ? a.created_at.substring(11, 16) : "") + "</span></div>";
     }
     document.getElementById("ad_recentActivity").innerHTML = actH || "<p style=opacity:.5>No activity yet</p>";
+  } catch(e) { console.error("Admin load error:", e); }
+}
+async function adminResetPw(userId) { try { await apiFetch("/admin/users/reset-password/" + userId, { method: "POST" }); toast("Password reset to: turing2026"); } catch(e) { toast("Failed: " + e.message, "error"); } }
+async function adminCreateInvite() { try { var r = await apiFetch("/admin/invites", { method: "POST" }); var d = await r.json(); document.getElementById("ad_inviteResult").textContent = "邀请码: " + d.code + " (7天有效)"; toast("Invite code: " + d.code); } catch(e) { toast("Failed: " + e.message, "error"); } }
+
+
+// ===== ADMIN DASHBOARD =====
+async function loadAdminDashboard() {
+  try {
+    var r = await apiFetch("/admin/overview");
+    var s = await r.json();
+    s = s.stats || s;
+    document.getElementById("ad_totalUsers").textContent = s.totalUsers || 0;
+    document.getElementById("ad_totalDemands").textContent = s.totalDemands || 0;
+    document.getElementById("ad_totalProposals").textContent = s.totalProposals || 0;
+    document.getElementById("ad_totalTokens").textContent = ((s.totalTokens || 0) / 1000).toFixed(0) + "K";
+    var ur = await apiFetch("/admin/users");
+    var ud = await ur.json();
+    var userH = "";
+    for (var ui = 0; ui < ud.users.length; ui++) {
+      var u = ud.users[ui];
+      userH += "<tr><td><strong>" + u.username + "</strong></td><td>" + u.display_name + "</td><td>" + (u.department || "-") + "</td><td>" + u.role + "</td><td>" + (u.api_quota || 0).toLocaleString() + "</td><td>" + (u.is_active ? "✅" : "❌") + "</td><td><button class='btn btn-sm' onclick='adminResetPw(" + u.id + ")'>重置密码</button></td></tr>";
+    }
+    document.getElementById("ad_userTableBody").innerHTML = userH;
   } catch(e) { console.error("Admin load error:", e); }
 }
 async function adminResetPw(userId) { try { await apiFetch("/admin/users/reset-password/" + userId, { method: "POST" }); toast("Password reset to: turing2026"); } catch(e) { toast("Failed: " + e.message, "error"); } }
