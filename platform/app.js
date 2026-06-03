@@ -7,23 +7,21 @@ let CURRENT_USER = null;
 let BRANDS = [], INFLUENCERS = [], TEMPLATES = [], CBLOCKS = {};
 let curDemand = null, selTpl = null, lastMatch = [], lastProp = "";
 let uploadedFileContent = "";
-let chatHistory = [{role: "system", content: "You are the TuringMarket AI assistant. Answer in Chinese, concise and professional."}];
-
-
-// ==== NAV EVENT DELEGATION ====
+let chatHistory = [{role: "system", content: "You are the TuringMarket AI assistant. Answer in Chinese, concise and professional."}];// ==== NAV: maximum compatibility (IE6+) ====
 (function() {
-  document.body.addEventListener('click', function(e) {
-    var el = e.target;
+  if (!document.body) return;
+  document.body.onclick = function(e) {
+    e = e || window.event;
+    var el = e.target || e.srcElement;
     while (el && el !== document.body) {
-      if (el.classList && el.classList.contains('nav-item')) {
+      if (el.className && el.className.indexOf('nav-item') !== -1) {
         var pid = el.getAttribute('data-page');
-        if (pid) { switchPage(pid); return; }
+        if (pid) { switchPage(pid); return false; }
       }
-      el = el.parentElement;
+      el = el.parentNode;
     }
-  });
+  };
 })();
-
 
 // ===== AUTH =====
 async function doLogin() {
@@ -280,7 +278,19 @@ function exportBrandCSV() {
 function dlFile(name, content, type) { const b = new Blob([content], { type: type || 'text/plain' }), u = URL.createObjectURL(b), a = document.createElement('a'); a.href = u; a.download = name; a.click(); URL.revokeObjectURL(u) }
 function switchTheme(t) { /* Theme locked to Notion style */ }
 (function () { document.body.className = ''; })();
-function switchPage(id) { document.querySelectorAll('.nav-item').forEach(function (n) { n.classList.remove('active') }); var ni = document.querySelector('[data-page="' + id + '"]'); if (ni) ni.classList.add('active'); document.querySelectorAll('.page').forEach(function (p) { p.classList.remove('active') }); var pg = document.getElementById('page-' + id); if (pg) pg.classList.add('active'); if (id === 'm0') loadCustomers(); if (id === 'admin') loadAdminDashboard() }
+function switchPage(id) {
+  var i, navs, pages, ni, pg;
+  navs = document.querySelectorAll('.nav-item');
+  for (i = 0; i < navs.length; i++) { navs[i].classList.remove('active'); }
+  ni = document.querySelector('[data-page="' + id + '"]');
+  if (ni) ni.classList.add('active');
+  pages = document.querySelectorAll('.page');
+  for (i = 0; i < pages.length; i++) { pages[i].style.display = 'none'; }
+  pg = document.getElementById('page-' + id);
+  if (pg) pg.style.display = 'block';
+  if (id === 'm0') loadCustomers();
+  if (id === 'admin') loadAdminDashboard();
+}
 function gv(id) { var e = document.getElementById(id); return e ? e.value : '' }
 function getDate() { var d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0') }
 
