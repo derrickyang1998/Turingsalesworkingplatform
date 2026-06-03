@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TuringMarket 商务工作平台</title>
+<style>
+/* ===== Notion-Style Warmth Theme ===== */
+:root {
+  --bg: #fbfbfa;
+  --surface: #ffffff;
+  --surface2: #f5f5f4;
+  --border: #e8e8e5;
+  --text: #1a1a1a;
+  --text2: #999;
+  --accent: #1a1a1a;
+  --accent-dim: #999;
+  --green: #0f7b3c;
+  --amber: #d49900;
+  --red: #d94641;
+  --blue: #2f6feb;
+  --purple: #7b61ff;
+  --radius: 12px;
+  --radius-sm: 8px;
+  --font: -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  --font-ui: var(--font);
+  --shadow: 0 1px 3px rgba(0,0,0,0.04);
+  --transition: 200ms ease;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--font);background:var(--bg);color:var(--text);letter-spacing:-0.01em;line-height:1.6}
+#app{display:flex;height:100vh;overflow:hidden}
+.sidebar{width:220px;min-width:220px;border-right:1px solid var(--border);background:#fafaf9;display:flex;flex-direction:column;padding:20px 0;gap:4px}
+.sidebar-logo{padding:0 20px 16px;border-bottom:1px solid var(--border);margin-bottom:8px}
+.sidebar-logo h1{font-weight:600;font-size:16px;margin:0}
+.nav-item{padding:10px 16px;cursor:pointer;font-size:13px;border-radius:0 8px 8px 0;margin-right:8px;transition:all .15s;display:flex;align-items:center;gap:8px;opacity:.7}
+.nav-item:hover{opacity:1;background:#f0f0ed}
+.nav-item.active{opacity:1;background:#f0f0ed;font-weight:600}
+.nav-item .nav-icon{font-size:16px;width:22px;text-align:center}
+.admin-only{display:none!important}
+.admin-only.visible{display:flex!important}
+.sidebar-footer{padding:12px 20px;font-size:10px;opacity:.4;margin-top:auto;border-top:1px solid var(--border)}
+main{flex:1;overflow-y:auto;padding:32px 36px}
+.page{display:none}
+.page.active{display:block}
+h2{font-size:22px;font-weight:700;margin-bottom:2px}
+.subtitle{font-size:13px;opacity:.5;margin-bottom:20px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;box-shadow:0 1px 2px rgba(0,0,0,.03);margin-bottom:16px}
+.grid{display:grid;gap:12px}
+.grid-2{grid-template-columns:1fr 1fr}
+.grid-3{grid-template-columns:1fr 1fr 1fr}
+.grid-4{grid-template-columns:1fr 1fr 1fr 1fr}
+label{display:block;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;opacity:.5;margin-bottom:4px}
+input,select,textarea{width:100%;padding:8px 12px;border:1px solid #e0e0dd;border-radius:8px;font-size:13px;font-family:var(--font);background:#fff;outline:none;transition:all .15s}
+input:focus,select:focus,textarea:focus{border-color:#1a1a1a;box-shadow:0 0 0 3px rgba(0,0,0,.04)}
+.btn{padding:8px 16px;border:none;border-radius:8px;font-size:13px;font-weight:500;cursor:pointer;transition:all .2s;font-family:var(--font);display:inline-flex;align-items:center;gap:6px}
+.btn-sm{padding:5px 12px;font-size:12px}
+.btn-primary{background:#1a1a1a;color:#fff}
+.btn-primary:hover{background:#333;box-shadow:0 2px 8px rgba(0,0,0,.1)}
+.btn-outline{border:1px solid #e0e0dd;background:#fff}
+.btn-outline:hover{border-color:#1a1a1a;background:#fafaf9}
+.btn-danger{background:#d94641;color:#fff}
+.btn-group{display:flex;gap:8px;align-items:center;margin-top:12px}
+.tag{display:inline-block;padding:4px 12px;border-radius:20px;font-size:11px;cursor:pointer;border:1px solid #e8e8e5;background:#f5f5f4;color:#666;transition:all .15s}
+.tag.active{background:#1a1a1a;color:#fff;border-color:#1a1a1a}
+.tag-group{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
+.brand-row{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-radius:10px;border:1px solid var(--border);margin-bottom:6px;background:var(--surface);transition:all .15s;cursor:pointer}
+.brand-row:hover{background:#fafaf9;border-color:#1a1a1a;box-shadow:0 2px 12px rgba(0,0,0,.04)}
+.brand-info{flex:1;min-width:0}
+.brand-name{font-weight:600;font-size:14px}
+.brand-tags{display:flex;gap:4px;flex-wrap:wrap;margin-top:4px}
+.brand-metrics{display:flex;gap:16px;font-size:12px;opacity:.6}
+.brand-metrics span{white-space:nowrap}
+.stat{text-align:center;padding:16px;border-radius:12px;background:#fafaf9;border:1px solid #e8e8e5}
+.stat-value{font-size:26px;font-weight:700;display:block}
+.stat-label{font-size:11px;opacity:.5;margin-top:4px}
+.tabs{display:flex;gap:4px;margin-bottom:16px;border-bottom:1px solid var(--border)}
+.tab{padding:8px 16px;font-size:12px;cursor:pointer;border-bottom:2px solid transparent;transition:all .15s;opacity:.6}
+.tab.active{border-bottom-color:#1a1a1a;opacity:1;font-weight:600}
+.tab:hover{opacity:1}
+.hidden{display:none!important}
+.table-container{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{text-align:left;padding:8px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.5px;font-weight:600;opacity:.5;background:var(--surface);border-bottom:1px solid var(--border)}
+td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
+.search-box{position:relative}
+.search-box input{padding-left:32px}
+.search-icon{position:absolute;left:10px;top:50%;transform:translateY(-50%);font-size:14px;opacity:.3}
+.file-upload{border:2px dashed #e0e0dd;border-radius:10px;padding:28px;text-align:center;cursor:pointer;transition:all .2s;background:#fafaf9}
+.file-upload:hover{border-color:#1a1a1a;background:#f5f5f4}
+.upload-icon{font-size:28px;margin-bottom:8px}
+.upload-text{font-size:13px;opacity:.5}
+.chat-container{display:flex;flex-direction:column;height:calc(100vh - 200px)}
+.chat-messages{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px}
+.chat-msg{display:flex}
+.chat-msg.user{justify-content:flex-end}
+.bubble{max-width:70%;padding:10px 14px;border-radius:12px;font-size:13px;line-height:1.5}
+.chat-msg.user .bubble{background:#1a1a1a;color:#fff}
+.chat-msg.assistant .bubble{background:#f5f5f4}
+.chat-input-area{display:flex;gap:8px;padding:12px 16px;border-top:1px solid var(--border)}
+.chat-input-area input{flex:1}
+.toast{position:fixed;bottom:20px;right:20px;padding:12px 20px;border-radius:8px;font-size:13px;z-index:9999;animation:slideIn .3s ease;background:#1a1a1a;color:#fff;box-shadow:0 4px 16px rgba(0,0,0,.15)}
+.toast-error{background:#d94641}
+@keyframes slideIn{from{transform:translateY(10px);opacity:0}to{transform:translateY(0);opacity:1}}
+.auth-overlay{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:9999;flex-direction:column}
+.auth-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:32px;width:360px;box-shadow:0 4px 24px rgba(0,0,0,.06)}
+.auth-card h1{font-size:20px;margin-bottom:4px;text-align:center}
+.auth-card input{margin-bottom:12px}
+.auth-card .btn{width:100%;justify-content:center}
+.step{display:inline-flex;align-items:center;gap:8px;padding:8px 16px;border-radius:8px;font-size:12px;opacity:.5}
+.step.active{opacity:1;background:#1a1a1a;color:#fff;font-weight:600}
+.step.done{opacity:.8;color:#0f7b3c}
+.brand-detail{display:none;padding:12px 16px;font-size:12px;opacity:.7;background:#fafaf9;border-radius:0 0 10px 10px;border:1px solid var(--border);border-top:none;margin-top:-6px;margin-bottom:6px}
+.brand-detail.open{display:block}
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.3);display:flex;align-items:center;justify-content:center;z-index:9998}
+.modal{background:var(--surface);border-radius:12px;padding:24px;width:560px;max-height:80vh;overflow-y:auto;box-shadow:0 8px 40px rgba(0,0,0,.12)}
+.modal h3{font-size:18px;margin-bottom:16px}
+.modal-close{float:right;background:none;border:none;font-size:20px;cursor:pointer;opacity:.5}
+
+/* ===== V5 Enhanced Styles (trimmed) ===== */
+.tree-container{max-height:500px;overflow-y:auto;padding-right:8px}
+.tree-node{margin-left:0;user-select:none}
+.tree-parent{cursor:pointer;padding:8px 12px;border-radius:8px;display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;transition:all .15s}
+.tree-parent:hover{background:#f0f0ed}
+.tree-parent .tree-icon{font-size:12px;transition:transform .2s;display:inline-block;width:14px;text-align:center}
+.tree-parent.expanded .tree-icon{transform:rotate(90deg)}
+.tree-children{display:none;margin-left:12px;padding-left:8px;border-left:2px solid #e8e8e5}
+.tree-children.open{display:block}
+.tree-child{padding:5px 10px;font-size:12px;cursor:pointer;border-radius:6px;transition:all .12s;opacity:.7}
+.tree-child:hover{opacity:1;background:#f0f0ed}
+.tree-child.active{opacity:1;background:#1a1a1a;color:#fff}
+.tree-child .count{font-size:10px;opacity:.4;float:right}
+.brand-expanded{background:var(--surface);border:1px solid var(--border);border-radius:12px;margin-bottom:12px;overflow:hidden}
+.brand-expanded-header{padding:16px 20px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;transition:all .15s}
+.brand-expanded-header:hover{background:#fafaf9}
+.brand-expanded-body{display:none;padding:0 20px 20px;border-top:1px solid var(--border)}
+.brand-expanded-body.open{display:block}
+.video-card-grid{display:grid;grid-template-columns:repeat(auto-fill, minmax(280px, 1fr));gap:10px;margin-top:8px}
+.video-card{background:#fafaf9;border:1px solid #e8e8e5;border-radius:8px;padding:12px;font-size:11px;transition:all .15s;cursor:pointer}
+.video-card:hover{border-color:#1a1a1a;box-shadow:0 2px 8px rgba(0,0,0,.06)}
+.video-card .vc-title{font-weight:600;font-size:12px;margin-bottom:4px}
+.video-card .vc-stats{display:flex;gap:12px;opacity:.6;font-size:10px}
+.video-card .vc-link{color:var(--blue);font-size:10px;margin-top:4px;display:block}
+.video-card .vc-theme{display:inline-block;padding:1px 6px;background:#e8e8e5;border-radius:4px;font-size:9px;margin-top:4px}
+.platform-tabs{display:flex;gap:4px;margin-bottom:12px}
+.platform-tab{padding:6px 14px;font-size:11px;border-radius:20px;cursor:pointer;border:1px solid #e8e8e5;background:#fff;transition:all .15s}
+.platform-tab.active{background:#1a1a1a;color:#fff;border-color:#1a1a1a}
+.platform-tab:hover{border-color:#1a1a1a}
+.pr-list{font-size:11px}
+.pr-item{padding:8px 0;border-bottom:1px solid #f0f0ed;display:flex;justify-content:space-between;align-items:center}
+.pr-item .pr-source{font-size:10px;opacity:.5}
+.pr-item .pr-sentiment{font-size:10px;padding:2px 6px;border-radius:4px}
+.pr-item .pr-sentiment.positive{background:#e8f5e9;color:#2e7d32}
+.contact-card{display:flex;align-items:center;gap:10px;padding:10px 14px;background:#fafaf9;border-radius:8px;margin-bottom:6px}
+.contact-card .cc-avatar{width:36px;height:36px;border-radius:50%;background:#e8e8e5;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:14px}
+.contact-card .cc-info{flex:1}
+.contact-card .cc-name{font-weight:600;font-size:13px}
+.contact-card .cc-title{font-size:11px;opacity:.5}
+
+.bd-insight-card .bd-label{font-size:10px;text-transform:uppercase;letter-spacing:1px;opacity:.5;margin-bottom:4px}
+.bd-insight-card .bd-value{font-size:13px;font-weight:600}
+.bd-insight-card .bd-reason{font-size:10px;opacity:.5;margin-top:4px}
+
+
+
+
+
+</style>
+</head>
+<body>
+<!-- AUTH OVERLAY -->
+<div id="authOverlay" class="auth-overlay">
+  <div class="auth-card">
+    <h1>TuringMarket</h1>
+    <p style="text-align:center;font-size:13px;opacity:.5;margin-bottom:20px">商务工作平台</p>
+    <input type="text" id="loginUser" placeholder="用户名">
+    <input type="password" id="loginPass" placeholder="密码" onkeydown="if(event.key==='Enter')doLogin()">
+    <button class="btn btn-primary" onclick="doLogin()">登录</button>
+    <p style="text-align:center;font-size:11px;opacity:.4;margin-top:16px">管理员: admin / turing2026<br>团队成员: 联系管理员获取账号</p>
+  </div>
+</div>
+
+<!-- MAIN APP -->
+<div id="app" style="display:none">
+  <nav class="sidebar">
+    <div class="sidebar-logo"><h1>TuringMarket</h1></div>
+    <div class="nav-item active" data-page="m1" onclick="switchPage('m1')"><span class="nav-icon">📊</span> 行业品牌智库</div>
+    <div class="nav-item" data-page="m2" onclick="switchPage('m2')"><span class="nav-icon">🎯</span> 客户策略规划</div>
+    <div class="nav-item" data-page="m3" onclick="switchPage('m3')"><span class="nav-icon">📋</span> 需求接入 & 方案生成</div>
+    <div class="nav-item" data-page="m4" onclick="switchPage('m4')"><span class="nav-icon">👥</span> 网红匹配 & 执行管理</div>
+    <div class="nav-item" data-page="m5" onclick="switchPage('m5')"><span class="nav-icon">🤖</span> AI 助手</div>
+    <div class="nav-item admin-only" data-page="admin" onclick="switchPage('admin')"><span class="nav-icon">🛡️</span> 管理控制室</div>
+    <div class="sidebar-footer" id="sidebarFooter"></div>
+  </nav>
+  <main>
+
+<!-- M1: Brand Hub -->
+<div class="page active" id="page-m1">
+<h2>行业品牌智库</h2>
+<p class="subtitle">1871个出海品牌 · 13大行业 · 189个细分标签 · AI数据补充 · 竞品对标</p>
+
+<div style="display:flex;gap:16px;height:calc(100vh - 160px)">
+  <div style="width:260px;min-width:260px;overflow-y:auto;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+      <strong style="font-size:13px">行业标签树</strong>
+      <span style="font-size:10px;opacity:.5" id="tagCount">189 tags</span>
+    </div>
+    <div id="tagGroup"></div>
+    <div id="brandEnrichArea" style="margin-top:8px;font-size:11px"></div>
+  </div>
+  <div style="flex:1;display:flex;flex-direction:column;min-width:0">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+      <div class="search-box" style="flex:1;max-width:300px;margin-left:auto">
+        <span class="search-icon">search</span>
+        <input id="brandSearch" placeholder="Search brands..." oninput="filterBrands()">
+      </div>
+      <button class="btn btn-sm" onclick="searchNewBrand()">AI Search</button>
+      <button class="btn btn-sm" onclick="exportBrandCSV()">Export CSV</button>
+      <span id="brandCount" style="font-size:11px;opacity:.5;white-space:nowrap"></span>
+    </div>
+    <div id="brandList" style="flex:1;overflow-y:auto"></div>
+    </div>
+
+<!-- M2: Strategy -->
+<div class="page" id="page-m2">
+<h2>🎯 客户策略规划</h2>
+<p class="subtitle">根据客户阶段制定差异化红人营销策略</p>
+
+<div class="card">
+<div class="grid grid-3" style="margin-bottom:12px">
+<div><label>品牌阶段</label><select id="s_stage" onchange="updateStrategy()"><option value="">请选择...</option><option value="new">新品牌出海</option><option value="growing">增长期</option><option value="established">成熟品牌</option><option value="launch">新品发布</option></select></div>
+<div><label>目标行业</label><select id="s_industry" onchange="updateStrategy()"><option value="">请选择...</option><option>3C</option><option>储能</option><option>智能家居</option><option>美妆</option><option>户外</option><option>宠物</option><option>医疗</option><option>出行</option></select></div>
+<div><label>预算范围</label><select id="s_budget" onchange="updateStrategy()"><option value="">请选择...</option><option value="low">$5K-15K/mo</option><option value="mid">$15K-50K/mo</option><option value="high">$50K-150K+/mo</option></select></div>
+</div>
+<div style="margin-bottom:12px"><label>核心目标</label><select id="s_goal" onchange="updateStrategy()"><option value="">请选择...</option><option value="awareness">品牌认知</option><option value="conversion">销售转化</option><option value="both">品效合一</option></select></div>
+</div>
+
+<div class="card hidden" id="strategyOut"><h3>📋 策略建议</h3><div id="strategyContent"></div></div>
+</div>
+</div>
+
+<!-- M3: Demand & Proposal -->
+<div class="page" id="page-m3">
+<h2>📋 需求接入 & 方案生成</h2>
+<p class="subtitle">上传客户需求文件 → AI自动解析 → 智能分析 → 一键生成方案</p>
+
+<!-- Steps -->
+<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px">
+  <div class="step active" id="step1">1. 上传需求</div>
+  <div class="step" id="step2">2. AI分析结果</div>
+  <div class="step" id="step3">3. 选择模板生成方案</div>
+</div>
+
+<!-- Step 1: Upload -->
+<div id="m3s1">
+  <div class="card">
+    <h3>📤 上传客户需求文件</h3>
+    <p style="font-size:12px;opacity:.6;margin-bottom:8px">支持 PDF / DOCX / XLSX / XLS / 图片格式。AI 将自动识别品牌、产品、预算、目标市场等关键信息。</p>
+    <div class="file-upload" id="demandDropZone" onclick="document.getElementById('demandFile').click()"
+         ondragover="event.preventDefault();this.style.borderColor='#1a1a1a';this.style.background='#f5f5f4'"
+         ondragleave="event.preventDefault();this.style.borderColor='';this.style.background=''"
+         ondrop="event.preventDefault();this.style.borderColor='';this.style.background='';handleDemandDrop(event)">
+      <div class="upload-icon">📄</div>
+      <div class="upload-text">拖拽需求文件到此处，或点击上传</div>
+      <div style="font-size:11px;opacity:.4;margin-top:4px">PDF · DOCX · XLSX · XLS · JPG · PNG</div>
+    </div>
+    <input type="file" id="demandFile" accept=".pdf,.docx,.xlsx,.xls,.jpg,.jpeg,.png" style="display:none" onchange="handleDemandFile(event)">
+    <div id="demandFileStatus" style="font-size:11px;opacity:.5;margin-top:8px"></div>
+    <div style="margin-top:16px;text-align:center">
+      <button class="btn btn-primary" id="btnAnalyzeAI" onclick="analyzeDemandAI()" disabled>🤖 AI 分析需求</button>
+      <span style="font-size:11px;opacity:.4;margin-left:8px" id="aiAnalyzeHint">请先上传文件</span>
+    </div>
+  </div>
+
+  <!-- Manual quick-fill (optional) -->
+  <details style="margin-top:12px">
+    <summary style="cursor:pointer;font-size:12px;opacity:.5;padding:8px">或手动快速填写（可选）</summary>
+    <div class="card" style="margin-top:8px">
+      <div class="grid grid-3">
+        <div><label>品牌名称</label><input id="d_brand" placeholder="客户品牌名"></div>
+        <div><label>产品名称</label><input id="d_product" placeholder="推广产品"></div>
+        <div><label>核心USP</label><input id="d_usp" placeholder="产品核心卖点"></div>
+        <div><label>行业类别</label><select id="d_category"><option value="">请选择...</option><option>3C</option><option>储能</option><option>智能家居</option><option>美妆</option><option>户外</option><option>宠物</option><option>医疗</option><option>出行</option></select></div>
+        <div><label>目标市场</label><select id="d_area"><option value="">请选择...</option><option>北美</option><option>欧洲</option><option>日本</option><option>东南亚</option><option>中东</option><option>全球</option></select></div>
+        <div><label>预算范围</label><select id="d_budget"><option value="">请选择...</option><option>$5K-15K</option><option>$15K-50K</option><option>$50K-100K</option><option>$100K+</option></select></div>
+      </div>
+      <button class="btn btn-sm" style="margin-top:8px" onclick="analyzeDemandManual()">手动提交分析</button>
+    </div>
+  </details>
+</div>
+
+<!-- Step 2: AI Analysis Result -->
+<div id="m3s2" class="hidden">
+  <div class="card">
+    <div id="analysisOut"></div>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button class="btn btn-primary" onclick="goStep3()">下一步 → 选择模板</button>
+      <button class="btn btn-outline btn-sm" onclick="resetDemand()">↩ 返回重传</button>
+    </div>
+  </div>
+</div>
+
+<!-- Step 3: Template + Proposal -->
+<div id="m3s3" class="hidden">
+  <div class="card">
+    <h3>🎨 选择方案模板</h3>
+    <div class="grid grid-2" id="tmplSelect" style="margin-bottom:12px"></div>
+  </div>
+  <div class="card" style="margin-top:16px" id="templateCard">
+    <h3>📝 生成方案</h3>
+    <button class="btn btn-primary" style="width:100%" onclick="generateProposal()">🚀 自动生成方案</button>
+    <button class="btn btn-outline btn-sm" style="width:100%;margin-top:8px" onclick="copyProposal()">📋 复制方案</button>
+    <button class="btn btn-primary btn-sm" id="btnGenPPT" style="width:100%;margin-top:8px;background:#635bff" onclick="generateHTMLPPT()">📊 生成 HTML PPT (reveal.js)</button>
+      <div id="proposalOutput" style="margin-top:12px;padding:16px;background:var(--surface2);border-radius:8px;font-size:12px;white-space:pre-wrap;max-height:400px;overflow-y:auto"></div>
+    <div id="aiWorkNotes" style="margin-top:12px;padding:12px;background:#fefce8;border-radius:8px;font-size:11px;opacity:.8;display:none"></div>
+  </div>
+</div>
+</div>
+
+<!-- M4: Influencer -->
+<div class="page" id="page-m4">
+<h2>👥 网红匹配 & 执行管理</h2>
+<p class="subtitle">提报资源名单 · 下单合作追踪 · 飞书同步</p>
+<div class="tabs" id="tabBar">
+  <div class="tab active" data-tab="tab1" onclick="switchTab('tab1')">📋 提报资源名单</div>
+  <div class="tab" data-tab="tab2" onclick="switchTab('tab2')">📊 下单合作资源</div>
+  <div class="tab" data-tab="tab3" onclick="switchTab('tab3')">📤 导入 & 飞书</div>
+</div>
+<div id="tab1-content">
+  <div class="card">
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
+      <select id="filt_platform" style="width:auto" onchange="matchInfluencers()"><option value="">全部平台</option><option>YouTube</option><option>TikTok</option><option>Instagram</option></select>
+      <select id="filt_category" style="width:auto" onchange="matchInfluencers()"><option value="">全部类别</option><option>Tech/3C</option><option>Beauty</option><option>Home/Garden</option><option>Outdoor</option><option>Pet</option></select>
+      <button class="btn btn-sm" onclick="matchInfluencers()">🔍 筛选</button>
+      <button class="btn btn-sm" onclick="exportSubmissionCSV()">📥 导出CSV</button>
+    </div>
+    <div class="table-container" id="infTableContainer" style="max-height:450px;overflow-y:auto"><p style="text-align:center;padding:30px;opacity:.5">请先在「导入 & 飞书」页面上传网红数据</p></div>
+  </div>
+</div>
+<div id="tab2-content" class="hidden">
+  <div class="card"><h3>客户下单合作资源</h3><div class="table-container" id="execTableContainer" style="max-height:450px;overflow-y:auto"><p style="text-align:center;padding:30px;opacity:.5">合作确认后填充</p></div></div>
+</div>
+<div id="tab3-content" class="hidden">
+  <div class="grid grid-2">
+    <div class="card">
+      <h3>📤 网红数据导入</h3>
+      <p style="font-size:12px;opacity:.6;margin-bottom:16px">支持 CSV / JSON / XLS / XLSX 格式，拖拽或点击上传</p>
+      <div class="file-upload" id="infDropZone" onclick="document.getElementById('infFile').click()" 
+           ondragover="event.preventDefault();this.style.borderColor='#1a1a1a';this.style.background='#f5f5f4'"
+           ondragleave="event.preventDefault();this.style.borderColor='';this.style.background=''"
+           ondrop="event.preventDefault();this.style.borderColor='';this.style.background='';handleDrop(event)">
+        <div class="upload-icon">📁</div>
+        <div class="upload-text">拖拽文件到此处或点击上传</div>
+        <div style="font-size:11px;opacity:.4;margin-top:4px">CSV / JSON / XLS / XLSX</div>
+      </div>
+      <input type="file" id="infFile" accept=".csv,.json,.xls,.xlsx" style="display:none" onchange="handleUpload(event)">
+      <div style="display:flex;gap:6px;margin-top:8px">
+        <button class="btn btn-outline btn-sm" onclick="downloadInfTemplate()">📋 下载模板</button>
+        <button class="btn btn-outline btn-sm" onclick="openInfUploadModal()">📂 浏览文件上传</button>
+        <span id="uploadOK" style="font-size:11px;opacity:.6;align-self:center"></span>
+      </div>
+      <div id="infPreview" style="margin-top:12px;max-height:120px;overflow-y:auto;font-size:11px"></div>
+    </div>
+    <div class="card">
+      <h3>📊 飞书同步</h3>
+      <p style="font-size:12px;opacity:.7;margin-bottom:8px">在 Tab 1 中勾选网红 → 一键推送到飞书表格</p>
+      <button class="btn btn-primary btn-sm" onclick="pushToFeishu()">📨 推送到飞书</button>
+      <div id="feishuStatus" style="font-size:11px;opacity:.6;margin-top:6px"></div>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- M5: AI Chat -->
+<div class="page" id="page-m5">
+<h2>🤖 AI 助手</h2>
+<p class="subtitle">DeepSeek V4 Flash · 基于90品牌数据库 · 策略咨询</p>
+<div class="card" style="padding:0;overflow:hidden">
+  <div class="chat-container">
+    <div class="chat-messages" id="chatMessages">
+      <div class="chat-msg assistant"><div class="bubble">👋 你好！我是 TuringMarket AI 助手。<br><br>我可以帮你：<br>• 分析行业品牌数据和竞品<br>• 给出红人营销策略建议<br>• 评估预算合理性和ROI<br>• 推荐红人匹配方案<br><br>请直接提问！</div></div>
+    </div>
+    <div class="chat-input-area">
+      <input type="text" id="chatInput" placeholder="输入问题..." onkeydown="if(event.key==='Enter')sendChat()">
+      <button class="btn btn-primary btn-sm" onclick="sendChat()">发送</button>
+      <button class="btn btn-sm" onclick="clearChat()">清空</button>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- ADMIN DASHBOARD -->
+<div class="page" id="page-admin">
+<h2>🛡️ 管理控制室</h2>
+<p class="subtitle">全盘需求监控 · 用户管理 · Token消耗追踪 · 功能使用统计</p>
+
+<div class="grid grid-4" style="margin-bottom:20px">
+  <div class="stat"><div class="stat-value" id="ad_totalUsers">-</div><div class="stat-label">活跃用户</div></div>
+  <div class="stat"><div class="stat-value" id="ad_totalDemands">-</div><div class="stat-label">总需求数</div></div>
+  <div class="stat"><div class="stat-value" id="ad_totalProposals">-</div><div class="stat-label">生成方案</div></div>
+  <div class="stat"><div class="stat-value" id="ad_totalTokens">-</div><div class="stat-label">Token消耗</div></div>
+</div>
+
+<div class="card">
+  <h3>👥 团队成员</h3>
+  <div class="table-container" style="max-height:400px;overflow-y:auto">
+    <table>
+      <thead><tr><th>用户名</th><th>姓名</th><th>部门</th><th>角色</th><th>Token配额</th><th>需求数</th><th>方案数</th><th>最后登录</th><th>状态</th><th>操作</th></tr></thead>
+      <tbody id="ad_userTableBody"></tbody>
+    </table>
+  </div>
+  <div class="btn-group">
+    <button class="btn btn-sm" onclick="adminCreateInvite()">🔗 生成邀请码</button>
+    <span id="ad_inviteResult" style="font-size:12px;align-self:center;opacity:.7"></span>
+  </div>
+</div>
+
+<div class="grid grid-2">
+  <div class="card">
+    <h3>📊 Token消耗排行</h3>
+    <div id="ad_tokenRank"></div>
+  </div>
+  <div class="card">
+    <h3>📈 最近活动</h3>
+    <div id="ad_recentActivity" style="max-height:350px;overflow-y:auto"></div>
+  </div>
+</div>
+</div>
+
+  </main>
+</div>
+
+<!-- Influencer Upload Modal -->
+<div class="modal-overlay" id="infUploadModal" style="display:none" onclick="if(event.target===this)this.style.display='none'">
+  <div class="modal" onclick="event.stopPropagation()">
+    <button class="modal-close" onclick="document.getElementById('infUploadModal').style.display='none'">&times;</button>
+    <h3>📤 网红数据上传</h3>
+    <p style="font-size:12px;opacity:.6;margin-bottom:16px">选择文件上传，支持 CSV、JSON 格式。文件需包含网红基本信息。</p>
+    <div style="border:2px dashed #e0e0dd;border-radius:8px;padding:40px;text-align:center;margin-bottom:16px;background:#fafaf9">
+      <div style="font-size:40px;margin-bottom:12px">📂</div>
+      <input type="file" id="infFileModal" accept=".csv,.json" style="display:none" onchange="handleUploadModal(event)">
+      <button class="btn btn-primary" onclick="document.getElementById('infFileModal').click()">📁 选择文件</button>
+      <p style="font-size:11px;opacity:.4;margin-top:8px">或拖拽文件到此区域</p>
+    </div>
+    <div id="infModalStatus" style="font-size:12px"></div>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button class="btn btn-outline btn-sm" onclick="downloadInfTemplate()">📋 下载 CSV 模板</button>
+      <button class="btn btn-outline btn-sm" onclick="downloadInfTemplateJSON()">📋 下载 JSON 模板</button>
+    </div>
+  </div>
+</div>
+
+<div id="toastContainer"></div>
+<script src="app.js"></script>
+<script src="ppt.js"></script>
+</body>
+</html>

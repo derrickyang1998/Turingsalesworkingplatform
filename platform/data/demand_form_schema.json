@@ -1,0 +1,35 @@
+﻿{
+  "name": "红人营销需求表 (客户Brief)",
+  "fields": [
+    {"id":"project_background","label":"项目背景","section":"项目信息","type":"textarea","required":false,"row":3},
+    {"id":"company_name","label":"公司名称","section":"基础信息","type":"text","required":true,"row":4},
+    {"id":"brand_name","label":"品牌名称","section":"基础信息","type":"text","required":true,"row":5},
+    {"id":"product_name","label":"推广产品名","section":"基础信息","type":"text","required":true,"row":6},
+    {"id":"product_link","label":"推广产品链接","section":"基础信息","type":"url","required":false,"row":7},
+    {"id":"product_usp","label":"推广产品关键卖点信息","section":"基础信息","type":"textarea","required":true,"row":8},
+    {"id":"target_audience","label":"受众定位","section":"基础信息","type":"textarea","required":false,"row":11},
+    {"id":"top3_competitors","label":"Top 3 竞品品牌（官网链接）","section":"基础信息","type":"textarea","required":false,"row":14},
+    {"id":"budget_usd","label":"预算总金额 budget (USD)","section":"KOL投放需求","type":"text","required":true,"row":15},
+    {"id":"publish_date_range","label":"预期视频发布日期范围","section":"KOL投放需求","type":"text","required":false,"row":16,"placeholder":"XX月XX日～XX月XX日"},
+    {"id":"kol_count","label":"所需KOL数量","section":"KOL投放需求","type":"text","required":false,"row":17},
+    {"id":"target_platform","label":"意向平台","section":"KOL投放需求","type":"multi_select","options":["YouTube","Instagram","TikTok"],"required":true,"row":18},
+    {"id":"follower_requirement","label":"粉丝量级要求","section":"KOL投放需求","type":"text","required":false,"row":19},
+    {"id":"avg_views_requirement","label":"均播要求","section":"KOL投放需求","type":"text","required":false,"row":20},
+    {"id":"video_duration","label":"视频时长","section":"KOL投放需求","type":"text","required":false,"row":21},
+    {"id":"video_type","label":"视频形式（完播/植入）","section":"KOL投放需求","type":"select","options":["完播 Dedicated","植入 Integration","均可"],"required":false,"row":22},
+    {"id":"category_requirement","label":"类型要求","section":"KOL投放需求","type":"text","required":false,"row":23,"placeholder":"如家居, Lifestyle, Fashion, Beauty等"},
+    {"id":"delivery_area","label":"投放地区","section":"KOL投放需求","type":"text","required":true,"row":24},
+    {"id":"language_requirement","label":"账号语言要求","section":"KOL投放需求","type":"text","required":false,"row":25},
+    {"id":"sample_value_usd","label":"样品货值（USD）","section":"KOL投放需求","type":"text","required":false,"row":26},
+    {"id":"incentive_system","label":"激励制度（如佣金/多样品）","section":"KOL投放需求","type":"text","required":false,"row":27},
+    {"id":"sample_gifted","label":"样品是否赠送给达人","section":"KOL投放需求","type":"select","options":["是","否"],"required":false,"row":28},
+    {"id":"commercial_license","label":"是否需要商用授权","section":"KOL投放需求","type":"select","options":["是","否"],"required":false,"row":29},
+    {"id":"video_main_content","label":"视频主要展现的内容","section":"内容概要","type":"textarea","required":false,"row":30},
+    {"id":"reference_case_link","label":"您理想中的参考案例链接","section":"案例","type":"url","required":false,"row":31},
+    {"id":"other_notes","label":"其他备注（如有）","section":"KOL投放需求","type":"textarea","required":false,"row":32}
+  ],
+  "rules": {
+    "demand_modification": "为促成高效合作，需求可修改1次",
+    "kol_addition": "如需后期增加KOL筛选要求，请先与运营协商一致"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "name": "platform",
+  "version": "1.0.0",
+  "description": "> 为商务团队打造的线上工作平台 — 行业智库 + 策略规划 + 方案生成 + 网红匹配",
+  "main": "app.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "playwright": "^1.60.0",
+    "reveal.js": "^6.0.1"
+  }
+}

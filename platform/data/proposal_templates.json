@@ -1,0 +1,82 @@
+{
+  "templates": [
+    {
+      "id": "tpl_full_strategy",
+      "name": "全案战略方案（大客户版）",
+      "description": "适合年度框架/无限预算客户，完整展示ROI模型、竞品分析、分层红人矩阵",
+      "sections": [
+        "执行摘要 Executive Summary",
+        "市场与产品深度分析",
+        "竞品社媒营销策略分析",
+        "目标受众画像与洞察",
+        "红人矩阵设计（分层金字塔）",
+        "平台策略（YouTube+TikTok+Instagram）",
+        "内容创意方向与脚本框架",
+        "预算分配与ROI预估（60-30-10模型）",
+        "执行时间线与里程碑",
+        "效果衡量标准与复盘机制"
+      ],
+      "best_for": ["大型出海品牌", "年度合作客户", "有明确预算框架"]
+    },
+    {
+      "id": "tpl_testing_phase",
+      "name": "测试期方案（新品/新市场版）",
+      "description": "适合初次合作测试，聚焦验证内容方向和红人类型，控制预算风险",
+      "sections": [
+        "项目背景与目标",
+        "市场环境速览",
+        "消费者洞察",
+        "红人矩阵设计（3类×N人测试矩阵）",
+        "内容方向测试计划",
+        "预算与时间规划",
+        "数据回收与评估标准"
+      ],
+      "best_for": ["首次合作客户", "新品上市测试", "新市场验证"]
+    },
+    {
+      "id": "tpl_execution",
+      "name": "执行方案（竞标/落地版）",
+      "description": "适合投标和执行落地，强调需求理解深度、抗风险能力、交付保障",
+      "sections": [
+        "执行摘要 Executive Summary",
+        "项目需求理解 Project Understanding",
+        "差异化优势与内容转化策略",
+        "三平台内容策略（TikTok+Instagram+YouTube）",
+        "红人筛选标准与矩阵",
+        "执行里程碑与交付计划",
+        "团队配置与质量保障",
+        "预算方案"
+      ],
+      "best_for": ["竞标比稿", "明确交付物要求", "客户已有brief"]
+    },
+    {
+      "id": "tpl_kol_matching",
+      "name": "红人专项匹配方案",
+      "description": "专注红人筛选推荐，含频道分析、合作历史、预期效果评估",
+      "sections": [
+        "目标受众与平台匹配分析",
+        "红人筛选维度说明",
+        "推荐红人名单（含数据分析）",
+        "红人分层策略",
+        "预期效果与ROI预估",
+        "合作执行建议"
+      ],
+      "best_for": ["已有明确平台偏好", "客户自投红人预算", "快速匹配需求"]
+    }
+  ],
+  "common_blocks": {
+    "company_intro": "图灵集市 TuringMarket — 全球首个按效果付费海外红人Agent。自有AI红人库7000万+，服务出海品牌500+，团队来自大疆、Anker、传音等头部品牌。",
+    "methodology": "60-30-10 ROI优化模型: 60%预算投已验证高ROI渠道 → 30%投内容放大 → 10%投实验性渠道。小型创作者(Nano/Micro)策略 — 互动率是头部红人3-4倍。",
+    "influencer_tiers": [
+      {"tier":"Nano","range":"1K-10K粉丝","cost_per_post":"$150-$800","avg_engagement":"4-6%","budget_share":"40%"},
+      {"tier":"Micro","range":"10K-50K粉丝","cost_per_post":"$500-$2000","avg_engagement":"3-5%","budget_share":"35%"},
+      {"tier":"Mid","range":"50K-200K粉丝","cost_per_post":"$2000-$8000","avg_engagement":"2-4%","budget_share":"20%"},
+      {"tier":"Macro","range":"200K-500K+粉丝","cost_per_post":"$8000-$20000","avg_engagement":"1-2%","budget_share":"5%"}
+    ],
+    "platform_strategy": {
+      "youtube": "深度种草+购买决策信任，8-15分钟测评/教程内容，SEO长尾效果强",
+      "tiktok": "病毒传播+品牌认知引爆，15-60秒视觉钩子，年轻用户群",
+      "instagram": "品牌美学+社交信任建立，Reels+Stories+Posts组合，生活方式植入"
+    }
+  }
+}

@@ -1,0 +1,4139 @@
+{
+  "brands": [
+    {
+      "id": "b001",
+      "name": "Anker",
+      "name_cn": "安克创新",
+      "industry_tags": [
+        "3C",
+        "充电",
+        "智能家居"
+      ],
+      "market": "global",
+      "estimated_annual_revenue": "$1.8B+",
+      "user_base": "5000万+",
+      "overseas_presence": {
+        "amazon_rating": 4.6,
+        "social_followers": {
+          "youtube": 120000,
+          "instagram": 350000,
+          "tiktok": 800000
+        },
+        "brand_search_volume_monthly": 2200000
+      },
+      "social_content_monthly": {
+        "total_posts": 180,
+        "creative_angles": [
+          "科技生活方式",
+          "充电效率对比",
+          "户外场景",
+          "极简桌面美学"
+        ],
+        "top_products_featured": [
+          "Anker Nano",
+          "PowerCore",
+          "Soundcore耳机"
+        ],
+        "last_12_months": {
+          "avg_engagement_rate": "3.8%",
+          "avg_views_per_post": 85000,
+          "top_platform": "YouTube"
+        }
+      },
+      "case_study_available": true,
+      "website": "https://www.anker.com",
+      "amazon_store": "https://www.amazon.com/stores/Anker/page/",
+      "contact_emails": "partner@anker.com,press@anker.com,bd@anker.com",
+      "linkedin_url": "https://www.linkedin.com/company/anker",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b002",
+      "name": "DJI",
+      "name_cn": "大疆创新",
+      "industry_tags": [
+        "3C",
+        "无人机",
+        "影像"
+      ],
+      "market": "global",
+      "estimated_annual_revenue": "$4B+",
+      "user_base": "全球消费无人机70%+份额",
+      "overseas_presence": {
+        "amazon_rating": 4.7,
+        "social_followers": {
+          "youtube": 2800000,
+          "instagram": 4500000,
+          "tiktok": 8500000
+        },
+        "brand_search_volume_monthly": 5500000
+      },
+      "social_content_monthly": {
+        "total_posts": 200,
+        "creative_angles": [
+          "极限航拍",
+          "电影级影像",
+          "创作者工具",
+          "户外探险"
+        ],
+        "top_products_featured": [
+          "DJI Mini 4 Pro",
+          "Osmo Pocket 3",
+          "RS 4"
+        ],
+        "last_12_months": {
+          "avg_engagement_rate": "4.2%",
+          "avg_views_per_post": 220000,
+          "top_platform": "YouTube"
+        }
+      },
+      "case_study_available": true,
+      "website": "https://www.dji.com",
+      "amazon_store": "https://www.amazon.com/stores/DJI/page/",
+      "contact_emails": "partner@dji.com,marketing@dji.com",
+      "linkedin_url": "https://www.linkedin.com/company/dji",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b003",
+      "name": "Xiaomi",
+      "name_cn": "小米",
+      "industry_tags": [
+        "3C",
+        "智能家居",
+        "IoT"
+      ],
+      "market": "global",
+      "estimated_annual_revenue": "$38B+",
+      "user_base": "6亿+MIUI月活",
+      "overseas_presence": {
+        "amazon_rating": 4.4,
+        "social_followers": {
+          "youtube": 4500000,
+          "instagram": 5200000,
+          "tiktok": 12000000
+        },
+        "brand_search_volume_monthly": 18500000
+      },
+      "social_content_monthly": {
+        "total_posts": 450,
+        "creative_angles": [
+          "极致性价比",
+          "生态联动体验",
+          "科技民主化",
+          "生活场景全覆盖"
+        ],
+        "top_products_featured": [
+          "Xiaomi 14 Ultra",
+          "Robot Vacuum X20+",
+          "Xiaomi Band 8"
+        ],
+        "last_12_months": {
+          "avg_engagement_rate": "2.9%",
+          "avg_views_per_post": 320000,
+          "top_platform": "TikTok"
+        }
+      },
+      "case_study_available": true,
+      "website": "https://www.mi.com",
+      "amazon_store": "https://www.amazon.com/stores/Xiaomi/page/",
+      "contact_emails": "partner@xiaomi.com,global@xiaomi.com",
+      "linkedin_url": "https://www.linkedin.com/company/xiaomi",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b004",
+      "name": "EcoFlow",
+      "name_cn": "正浩创新",
+      "industry_tags": [
+        "储能",
+        "户外",
+        "新能源"
+      ],
+      "market": "global",
+      "estimated_annual_revenue": "$1.2B+",
+      "user_base": "300万+全球用户",
+      "overseas_presence": {
+        "amazon_rating": 4.5,
+        "social_followers": {
+          "youtube": 350000,
+          "instagram": 280000,
+          "tiktok": 650000
+        },
+        "brand_search_volume_monthly": 1100000
+      },
+      "social_content_monthly": {
+        "total_posts": 120,
+        "creative_angles": [
+          "户外露营供电",
+          "家庭应急备用",
+          "极客装备展示",
+          "离网生活方式"
+        ],
+        "top_products_featured": [
+          "DELTA Pro",
+          "RIVER 2",
+          "Wave 2"
+        ],
+        "last_12_months": {
+          "avg_engagement_rate": "3.5%",
+          "avg_views_per_post": 65000,
+          "top_platform": "YouTube"
+        }
+      },
+      "case_study_available": true,
+      "website": "https://www.ecoflow.com",
+      "amazon_store": "https://www.amazon.com/stores/EcoFlow/page/",
+      "contact_emails": "partner@ecoflow.com,marketing@ecoflow.com",
+      "linkedin_url": "https://www.linkedin.com/company/ecoflow",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b005",
+      "name": "Bluetti",
+      "name_cn": "铂陆帝",
+      "industry_tags": [
+        "储能",
+        "户外",
+        "新能源"
+      ],
+      "market": "global",
+      "estimated_annual_revenue": "$800M+",
+      "user_base": "200万+全球用户",
+      "overseas_presence": {
+        "amazon_rating": 4.4,
+        "social_followers": {
+          "youtube": 280000,
+          "instagram": 180000,
+          "tiktok": 420000
+        },
+        "brand_search_volume_monthly": 880000
+      },
+      "social_content_monthly": {
+        "total_posts": 100,
+        "creative_angles": [
+          "房车旅行供电",
+          "户外作业",
+          "灾难应急准备",
+          "太阳能生态"
+        ],
+        "top_products_featured": [
+          "AC200MAX",
+          "EB3A",
+          "AC300"
+        ],
+        "last_12_months": {
+          "avg_engagement_rate": "3.1%",
+          "avg_views_per_post": 48000,
+          "top_platform": "YouTube"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.bluettipower.com",
+      "amazon_store": "https://www.amazon.com/stores/BLUETTI/page/",
+      "contact_emails": "affiliate@bluetti.com,marketing@bluettipower.com",
+      "linkedin_url": "https://www.linkedin.com/company/bluetti",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b006",
+      "name": "Ugreen",
+      "name_cn": "绿联科技",
+      "industry_tags": [
+        "3C",
+        "充电",
+        "配件"
+      ],
+      "market": "global",
+      "estimated_annual_revenue": "$600M+",
+      "user_base": "4000万+全球用户",
+      "overseas_presence": {
+        "amazon_rating": 4.5,
+        "social_followers": {
+          "youtube": 150000,
+          "instagram": 120000,
+          "tiktok": 300000
+        },
+        "brand_search_volume_monthly": 720000
+      },
+      "social_content_monthly": {
+        "total_posts": 90,
+        "creative_angles": [
+          "桌面数码美学",
+          "办公效率提升",
+          "游戏外设",
+          "充电解决方案"
+        ],
+        "top_products_featured": [
+          "Nexode Pro充电器",
+          "Revodok扩展坞",
+          "HiTune耳机"
+        ],
+        "last_12_months": {
+          "avg_engagement_rate": "2.8%",
+          "avg_views_per_post": 32000,
+          "top_platform": "Instagram"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.ugreen.com",
+      "amazon_store": "https://www.amazon.com/stores/UGREEN/page/",
+      "contact_emails": "partner@ugreen.com,marketing@ugreen.com",
+      "linkedin_url": "https://www.linkedin.com/company/ugreen",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b007",
+      "name": "Insta360",
+      "name_cn": "影石创新",
+      "industry_tags": [
+        "3C",
+        "影像",
+        "户外"
+      ],
+      "market": "global",
+      "estimated_annual_revenue": "$500M+",
+      "user_base": "全景相机全球第一",
+      "overseas_presence": {
+        "amazon_rating": 4.5,
+        "social_followers": {
+          "youtube": 1800000,
+          "instagram": 2200000,
+          "tiktok": 5500000
+        },
+        "brand_search_volume_monthly": 2400000
+      },
+      "social_content_monthly": {
+        "total_posts": 160,
+        "creative_angles": [
+          "极限运动第一视角",
+          "创意旅拍",
+          "子弹时间特效",
+          "vlog创作"
+        ],
+        "top_products_featured": [
+          "Insta360 X4",
+          "Ace Pro",
+          "GO 3"
+        ],
+        "last_12_months": {
+          "avg_engagement_rate": "4.5%",
+          "avg_views_per_post": 180000,
+          "top_platform": "TikTok"
+        }
+      },
+      "case_study_available": true,
+      "website": "https://www.insta360.com",
+      "amazon_store": "https://www.amazon.com/stores/Insta360/page/",
+      "contact_emails": "partner@insta360.com,marketing@insta360.com",
+      "linkedin_url": "https://www.linkedin.com/company/insta360",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b008",
+      "name": "Roborock",
+      "name_cn": "石头科技",
+      "industry_tags": [
+        "智能家居",
+        "清洁家电"
+      ],
+      "market": "global",
+      "estimated_annual_revenue": "$1.2B+",
+      "user_base": "全球扫地机器人TOP3",
+      "overseas_presence": {
+        "amazon_rating": 4.5,
+        "social_followers": {
+          "youtube": 220000,
+          "instagram": 180000,
+          "tiktok": 400000
+        },
+        "brand_search_volume_monthly": 950000
+      },
+      "social_content_monthly": {
+        "total_posts": 110,
+        "creative_angles": [
+          "全能基站对比",
+          "宠物家庭清洁",
+          "智能家居联动",
+          "极致清洁力测试"
+        ],
+        "top_products_featured": [
+          "S8 MaxV Ultra",
+          "Qrevo Master",
+          "Dyad Pro"
+        ],
+        "last_12_months": {
+          "avg_engagement_rate": "3.2%",
+          "avg_views_per_post": 55000,
+          "top_platform": "YouTube"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.roborock.com",
+      "amazon_store": "https://www.amazon.com/stores/Roborock/page/",
+      "contact_emails": "partner@roborock.com",
+      "linkedin_url": "https://www.linkedin.com/company/roborock",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b009",
+      "name": "Petlibro",
+      "name_cn": "佩利博",
+      "industry_tags": [
+        "宠物",
+        "智能家居"
+      ],
+      "market": "北美/欧洲",
+      "estimated_annual_revenue": "$200M+",
+      "user_base": "亚马逊宠物喂食器TOP1",
+      "overseas_presence": {
+        "amazon_rating": 4.4,
+        "social_followers": {
+          "youtube": 35000,
+          "instagram": 120000,
+          "tiktok": 450000
+        },
+        "brand_search_volume_monthly": 380000
+      },
+      "social_content_monthly": {
+        "total_posts": 85,
+        "creative_angles": [
+          "猫咪日常照护",
+          "多猫家庭解决方案",
+          "智能宠物生活",
+          "宠物健康管理"
+        ],
+        "top_products_featured": [
+          "Granary喂食器",
+          "Dockstream饮水机",
+          "Luma猫砂盆"
+        ],
+        "last_12_months": {
+          "avg_engagement_rate": "3.9%",
+          "avg_views_per_post": 42000,
+          "top_platform": "TikTok"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.petlibro.com",
+      "amazon_store": "https://www.amazon.com/stores/Petlibro/page/",
+      "contact_emails": "partner@petlibro.com,marketing@petlibro.com,press@petlibro.com",
+      "linkedin_url": "https://www.linkedin.com/company/petlibro",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b010",
+      "name": "Narwal",
+      "name_cn": "云鲸智能",
+      "industry_tags": [
+        "智能家居",
+        "清洁家电"
+      ],
+      "market": "global",
+      "estimated_annual_revenue": "$500M+",
+      "user_base": "中国扫拖机器人TOP品牌",
+      "overseas_presence": {
+        "amazon_rating": 4.3,
+        "social_followers": {
+          "youtube": 80000,
+          "instagram": 90000,
+          "tiktok": 200000
+        },
+        "brand_search_volume_monthly": 520000
+      },
+      "social_content_monthly": {
+        "total_posts": 75,
+        "creative_angles": [
+          "自清洁基站",
+          "拖地效果对比",
+          "智能避障展示",
+          "全屋清洁方案"
+        ],
+        "top_products_featured": [
+          "Freo Z",
+          "S20 Pro"
+        ],
+        "last_12_months": {
+          "avg_engagement_rate": "2.6%",
+          "avg_views_per_post": 28000,
+          "top_platform": "YouTube"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.narwal.com",
+      "amazon_store": "https://www.amazon.com/stores/Narwal/page/",
+      "contact_emails": "partner@narwal.com",
+      "linkedin_url": "https://www.linkedin.com/company/narwal",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b011",
+      "name": "Olight",
+      "name_cn": "傲雷",
+      "industry_tags": [
+        "户外",
+        "3C",
+        "照明"
+      ],
+      "market": "全球/北美为主",
+      "estimated_annual_revenue": "$300M+",
+      "user_base": "EDC手电品类TOP1",
+      "overseas_presence": {
+        "amazon_rating": 4.6,
+        "social_followers": {
+          "youtube": 85000,
+          "instagram": 200000,
+          "tiktok": 350000
+        },
+        "brand_search_volume_monthly": 280000
+      },
+      "social_content_monthly": {
+        "total_posts": 70,
+        "creative_angles": [
+          "EDC日常装备展示",
+          "战术照明场景",
+          "户外探险照明",
+          "收藏级手电开箱"
+        ],
+        "top_products_featured": [
+          "Arkfeld Pro",
+          "Seeker 4 Pro",
+          "Baton 4"
+        ],
+        "last_12_months": {
+          "avg_engagement_rate": "4.1%",
+          "avg_views_per_post": 38000,
+          "top_platform": "TikTok"
+        }
+      },
+      "case_study_available": true,
+      "website": "https://www.olightstore.com",
+      "amazon_store": "https://www.amazon.com/stores/Olight/page/",
+      "contact_emails": "affiliate@olightstore.com",
+      "linkedin_url": "https://www.linkedin.com/company/olight",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b012",
+      "name": "ANTHBOT",
+      "name_cn": "安斯博",
+      "industry_tags": [
+        "智能家居",
+        "户外",
+        "机器人"
+      ],
+      "market": "欧洲/北美",
+      "estimated_annual_revenue": "$80M+",
+      "user_base": "欧洲割草机器人新锐品牌",
+      "overseas_presence": {
+        "amazon_rating": 4.2,
+        "social_followers": {
+          "youtube": 25000,
+          "instagram": 18000,
+          "tiktok": 45000
+        },
+        "brand_search_volume_monthly": 65000
+      },
+      "social_content_monthly": {
+        "total_posts": 45,
+        "creative_angles": [
+          "草坪自动化变革",
+          "家庭园艺升级",
+          "安静环保科技",
+          "庭院美学"
+        ],
+        "top_products_featured": [
+          "ANTHBOT N系列",
+          "M系列"
+        ],
+        "last_12_months": {
+          "avg_engagement_rate": "2.7%",
+          "avg_views_per_post": 12000,
+          "top_platform": "YouTube"
+        }
+      },
+      "case_study_available": true,
+      "website": "https://www.anthbot.com",
+      "amazon_store": "https://www.amazon.com/stores/ANTHBOT/page/",
+      "contact_emails": "partner@anthbot.com,marketing@anthbot.com,press@anthbot.com",
+      "linkedin_url": "https://www.linkedin.com/company/anthbot",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b013",
+      "name": "Huawei",
+      "name_cn": "华为",
+      "industry_tags": [
+        "3C",
+        "IoT",
+        "智能家居"
+      ],
+      "market": "global",
+      "estimated_annual_revenue": "+",
+      "user_base": "全球第二大手机厂商",
+      "overseas_presence": {
+        "amazon_rating": 4.3,
+        "social_followers": {
+          "youtube": 3500000,
+          "instagram": 4200000,
+          "tiktok": 9500000
+        },
+        "brand_search_volume_monthly": 28000000
+      },
+      "social_content_monthly": {
+        "total_posts": 300,
+        "creative_angles": 380000,
+        "top_products_featured": "TikTok",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "技术创新",
+            "影像突破",
+            "折叠屏美学"
+          ],
+          "avg_views_per_post": [
+            "Mate 70 Pro",
+            "FreeBuds Pro"
+          ],
+          "top_platform": "3.2%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.huawei.com",
+      "amazon_store": "https://www.amazon.com/stores/Huawei/page/",
+      "contact_emails": "partner@huawei.com,marketing@huawei.com,press@huawei.com",
+      "linkedin_url": "https://www.linkedin.com/company/huawei",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b014",
+      "name": "Oppo",
+      "name_cn": "OPPO",
+      "industry_tags": [
+        "3C",
+        "影像"
+      ],
+      "market": "全球/东南亚",
+      "estimated_annual_revenue": "+",
+      "user_base": "5亿+ColorOS月活",
+      "overseas_presence": {
+        "amazon_rating": 4.2,
+        "social_followers": {
+          "youtube": 1800000,
+          "instagram": 2500000,
+          "tiktok": 6800000
+        },
+        "brand_search_volume_monthly": 8500000
+      },
+      "social_content_monthly": {
+        "total_posts": 220,
+        "creative_angles": 210000,
+        "top_products_featured": "TikTok",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "人像摄影",
+            "快充技术",
+            "时尚设计"
+          ],
+          "avg_views_per_post": [
+            "Find X8 Pro",
+            "Reno 12"
+          ],
+          "top_platform": "2.8%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.oppo.com",
+      "amazon_store": "https://www.amazon.com/stores/Oppo/page/",
+      "contact_emails": "partner@oppo.com,marketing@oppo.com,press@oppo.com",
+      "linkedin_url": "https://www.linkedin.com/company/oppo",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b015",
+      "name": "OnePlus",
+      "name_cn": "一加",
+      "industry_tags": [
+        "3C",
+        "手机"
+      ],
+      "market": "全球",
+      "estimated_annual_revenue": "+",
+      "user_base": "高端安卓用户群",
+      "overseas_presence": {
+        "amazon_rating": 4.4,
+        "social_followers": {
+          "youtube": 2200000,
+          "instagram": 3200000,
+          "tiktok": 4500000
+        },
+        "brand_search_volume_monthly": 4200000
+      },
+      "social_content_monthly": {
+        "total_posts": 140,
+        "creative_angles": 160000,
+        "top_products_featured": "YouTube",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "旗舰杀手",
+            "极速流畅",
+            "游戏性能"
+          ],
+          "avg_views_per_post": [
+            "OnePlus 13",
+            "Buds Pro 3"
+          ],
+          "top_platform": "3.5%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.oneplus.com",
+      "amazon_store": "https://www.amazon.com/stores/OnePlus/page/",
+      "contact_emails": "partner@oneplus.com,marketing@oneplus.com,press@oneplus.com",
+      "linkedin_url": "https://www.linkedin.com/company/oneplus",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b016",
+      "name": "Baseus",
+      "name_cn": "倍思",
+      "industry_tags": [
+        "3C",
+        "充电",
+        "配件"
+      ],
+      "market": "global",
+      "estimated_annual_revenue": "+",
+      "user_base": "全球配件TOP5",
+      "overseas_presence": {
+        "amazon_rating": 4.5,
+        "social_followers": {
+          "youtube": 120000,
+          "instagram": 200000,
+          "tiktok": 550000
+        },
+        "brand_search_volume_monthly": 680000
+      },
+      "social_content_monthly": {
+        "total_posts": 130,
+        "creative_angles": 38000,
+        "top_products_featured": "TikTok",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "桌面充电站",
+            "出行EDC"
+          ],
+          "avg_views_per_post": [
+            "Blade充电宝",
+            "GaN5 Pro充电器"
+          ],
+          "top_platform": "3.1%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.baseus.com",
+      "amazon_store": "https://www.amazon.com/stores/Baseus/page/",
+      "contact_emails": "partner@baseus.com,marketing@baseus.com,press@baseus.com",
+      "linkedin_url": "https://www.linkedin.com/company/baseus",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b017",
+      "name": "Belkin",
+      "name_cn": "贝尔金",
+      "industry_tags": [
+        "3C",
+        "配件",
+        "充电"
+      ],
+      "market": "北美/欧洲",
+      "estimated_annual_revenue": "+",
+      "user_base": "苹果官方合作",
+      "overseas_presence": {
+        "amazon_rating": 4.5,
+        "social_followers": {
+          "youtube": 80000,
+          "instagram": 250000,
+          "tiktok": 150000
+        },
+        "brand_search_volume_monthly": 920000
+      },
+      "social_content_monthly": {
+        "total_posts": 95,
+        "creative_angles": 28000,
+        "top_products_featured": "Instagram",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "Apple生态",
+            "专业品质"
+          ],
+          "avg_views_per_post": [
+            "BoostCharge Pro",
+            "SoundForm耳机"
+          ],
+          "top_platform": "2.5%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.belkin.com",
+      "amazon_store": "https://www.amazon.com/stores/Belkin/page/",
+      "contact_emails": "partner@belkin.com,marketing@belkin.com,press@belkin.com",
+      "linkedin_url": "https://www.linkedin.com/company/belkin",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b018",
+      "name": "Razer",
+      "name_cn": "雷蛇",
+      "industry_tags": [
+        "3C",
+        "游戏",
+        "配件"
+      ],
+      "market": "global",
+      "estimated_annual_revenue": ".6B+",
+      "user_base": "全球游戏外设第一",
+      "overseas_presence": {
+        "amazon_rating": 4.5,
+        "social_followers": {
+          "youtube": 4200000,
+          "instagram": 5800000,
+          "tiktok": 7500000
+        },
+        "brand_search_volume_monthly": 1800000
+      },
+      "social_content_monthly": {
+        "total_posts": 200,
+        "creative_angles": 180000,
+        "top_products_featured": "YouTube",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "电竞装备",
+            "RGB光效"
+          ],
+          "avg_views_per_post": [
+            "Blade 18",
+            "DeathAdder V4"
+          ],
+          "top_platform": "4.0%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.razer.com",
+      "amazon_store": "https://www.amazon.com/stores/Razer/page/",
+      "contact_emails": "partner@razer.com",
+      "linkedin_url": "https://www.linkedin.com/company/razer",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b019",
+      "name": "Soundcore",
+      "name_cn": "声阔",
+      "industry_tags": [
+        "3C",
+        "音频"
+      ],
+      "market": "global",
+      "estimated_annual_revenue": "+",
+      "user_base": "Anker旗下音频品牌",
+      "overseas_presence": {
+        "amazon_rating": 4.5,
+        "social_followers": {
+          "youtube": 180000,
+          "instagram": 250000,
+          "tiktok": 400000
+        },
+        "brand_search_volume_monthly": 450000
+      },
+      "social_content_monthly": {
+        "total_posts": 100,
+        "creative_angles": 42000,
+        "top_products_featured": "TikTok",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "音频测评",
+            "降噪对比"
+          ],
+          "avg_views_per_post": [
+            "Liberty 4 Pro",
+            "Space One"
+          ],
+          "top_platform": "3.6%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.soundcore.com",
+      "amazon_store": "https://www.amazon.com/stores/Soundcore/page/",
+      "contact_emails": "partner@soundcore.com",
+      "linkedin_url": "https://www.linkedin.com/company/soundcore",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b020",
+      "name": "Shokz",
+      "name_cn": "韶音",
+      "industry_tags": [
+        "3C",
+        "音频",
+        "运动"
+      ],
+      "market": "global",
+      "estimated_annual_revenue": "+",
+      "user_base": "骨传导耳机全球第一",
+      "overseas_presence": {
+        "amazon_rating": 4.6,
+        "social_followers": {
+          "youtube": 350000,
+          "instagram": 400000,
+          "tiktok": 650000
+        },
+        "brand_search_volume_monthly": 820000
+      },
+      "social_content_monthly": {
+        "total_posts": 110,
+        "creative_angles": 95000,
+        "top_products_featured": "TikTok",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "运动场景",
+            "马拉松",
+            "游泳防水"
+          ],
+          "avg_views_per_post": [
+            "OpenRun Pro 2",
+            "OpenSwim Pro"
+          ],
+          "top_platform": "4.3%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.shokz.com",
+      "amazon_store": "https://www.amazon.com/stores/Shokz/page/",
+      "contact_emails": "partner@shokz.com,marketing@shokz.com,press@shokz.com",
+      "linkedin_url": "https://www.linkedin.com/company/shokz",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b021",
+      "name": "Garmin",
+      "name_cn": "佳明",
+      "industry_tags": [
+        "3C",
+        "户外",
+        "运动"
+      ],
+      "market": "global",
+      "estimated_annual_revenue": "+",
+      "user_base": "全球运动手表第一",
+      "overseas_presence": {
+        "amazon_rating": 4.6,
+        "social_followers": {
+          "youtube": 1800000,
+          "instagram": 3500000,
+          "tiktok": 2800000
+        },
+        "brand_search_volume_monthly": 3200000
+      },
+      "social_content_monthly": {
+        "total_posts": 160,
+        "creative_angles": 120000,
+        "top_products_featured": "YouTube",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "极限运动",
+            "马拉松",
+            "健康监测"
+          ],
+          "avg_views_per_post": [
+            "Fenix 8",
+            "Forerunner 975"
+          ],
+          "top_platform": "3.8%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.garmin.com",
+      "amazon_store": "https://www.amazon.com/stores/Garmin/page/",
+      "contact_emails": "partner@garmin.com,marketing@garmin.com,press@garmin.com",
+      "linkedin_url": "https://www.linkedin.com/company/garmin",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b022",
+      "name": "TP-Link",
+      "name_cn": "普联",
+      "industry_tags": [
+        "3C",
+        "智能家居",
+        "网络"
+      ],
+      "market": "global",
+      "estimated_annual_revenue": "+",
+      "user_base": "全球路由器第一",
+      "overseas_presence": {
+        "amazon_rating": 4.4,
+        "social_followers": {
+          "youtube": 250000,
+          "instagram": 180000,
+          "tiktok": 250000
+        },
+        "brand_search_volume_monthly": 1100000
+      },
+      "social_content_monthly": {
+        "total_posts": 85,
+        "creative_angles": 18000,
+        "top_products_featured": "YouTube",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "智能家居网络",
+            "Mesh组网"
+          ],
+          "avg_views_per_post": [
+            "Archer BE900",
+            "Deco XE200"
+          ],
+          "top_platform": "2.2%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.tp-link.com",
+      "amazon_store": "https://www.amazon.com/stores/TPLink/page/",
+      "contact_emails": "partner@tp-link.com",
+      "linkedin_url": "https://www.linkedin.com/company/tp-link",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b023",
+      "name": "Jackery",
+      "name_cn": "电小二",
+      "industry_tags": [
+        "储能",
+        "户外",
+        "新能源"
+      ],
+      "market": "北美/欧洲",
+      "estimated_annual_revenue": "+",
+      "user_base": "便携储能TOP2",
+      "overseas_presence": {
+        "amazon_rating": 4.4,
+        "social_followers": {
+          "youtube": 200000,
+          "instagram": 280000,
+          "tiktok": 550000
+        },
+        "brand_search_volume_monthly": 750000
+      },
+      "social_content_monthly": {
+        "total_posts": 95,
+        "creative_angles": 48000,
+        "top_products_featured": "TikTok",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "露营自驾",
+            "房车生活",
+            "应急备电"
+          ],
+          "avg_views_per_post": [
+            "Explorer 2000 Pro",
+            "Solar Generator 3000"
+          ],
+          "top_platform": "3.2%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.jackery.com",
+      "amazon_store": "https://www.amazon.com/stores/Jackery/page/",
+      "contact_emails": "partner@jackery.com,marketing@jackery.com,press@jackery.com",
+      "linkedin_url": "https://www.linkedin.com/company/jackery",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b024",
+      "name": "Anker SOLIX",
+      "name_cn": "安克储能",
+      "industry_tags": [
+        "储能",
+        "户外",
+        "新能源"
+      ],
+      "market": "global",
+      "estimated_annual_revenue": "+",
+      "user_base": "Anker旗下储能",
+      "overseas_presence": {
+        "amazon_rating": 4.5,
+        "social_followers": {
+          "youtube": 120000,
+          "instagram": 150000,
+          "tiktok": 280000
+        },
+        "brand_search_volume_monthly": 420000
+      },
+      "social_content_monthly": {
+        "total_posts": 85,
+        "creative_angles": 38000,
+        "top_products_featured": "YouTube",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "阳台光伏",
+            "家庭储能",
+            "户外电源"
+          ],
+          "avg_views_per_post": [
+            "SOLIX F3800",
+            "SOLIX C1000"
+          ],
+          "top_platform": "3.5%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.ankersolix.com",
+      "amazon_store": "https://www.amazon.com/stores/Anker SOLIX/page/",
+      "contact_emails": "partner@ankersolix.com,marketing@ankersolix.com,press@ankersolix.com",
+      "linkedin_url": "https://www.linkedin.com/company/ankersolix",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b025",
+      "name": "Goal Zero",
+      "name_cn": "零目标",
+      "industry_tags": [
+        "储能",
+        "户外",
+        "新能源"
+      ],
+      "market": "北美",
+      "estimated_annual_revenue": "+",
+      "user_base": "北美户外储能老牌",
+      "overseas_presence": {
+        "amazon_rating": 4.4,
+        "social_followers": {
+          "youtube": 150000,
+          "instagram": 220000,
+          "tiktok": 180000
+        },
+        "brand_search_volume_monthly": 350000
+      },
+      "social_content_monthly": {
+        "total_posts": 70,
+        "creative_angles": 32000,
+        "top_products_featured": "Instagram",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "极致户外",
+            "登山露营",
+            "可持续生活"
+          ],
+          "avg_views_per_post": [
+            "Yeti 1500X",
+            "Yeti PRO 4000"
+          ],
+          "top_platform": "3.0%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.goalzero.com",
+      "amazon_store": "https://www.amazon.com/stores/Goal Zero/page/",
+      "contact_emails": "partner@goalzero.com,marketing@goalzero.com,press@goalzero.com",
+      "linkedin_url": "https://www.linkedin.com/company/goalzero",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b026",
+      "name": "Zendure",
+      "name_cn": "征拓",
+      "industry_tags": [
+        "储能",
+        "户外",
+        "新能源"
+      ],
+      "market": "欧洲",
+      "estimated_annual_revenue": "+",
+      "user_base": "欧洲阳台光伏热门",
+      "overseas_presence": {
+        "amazon_rating": 4.3,
+        "social_followers": {
+          "youtube": 80000,
+          "instagram": 120000,
+          "tiktok": 250000
+        },
+        "brand_search_volume_monthly": 280000
+      },
+      "social_content_monthly": {
+        "total_posts": 65,
+        "creative_angles": 28000,
+        "top_products_featured": "YouTube",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "阳台光伏",
+            "智能储能",
+            "极简设计"
+          ],
+          "avg_views_per_post": [
+            "SuperBase V",
+            "SolarFlow Hyper"
+          ],
+          "top_platform": "3.3%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.zendure.com",
+      "amazon_store": "https://www.amazon.com/stores/Zendure/page/",
+      "contact_emails": "partner@zendure.com,marketing@zendure.com,press@zendure.com",
+      "linkedin_url": "https://www.linkedin.com/company/zendure",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b027",
+      "name": "Renogy",
+      "name_cn": "融程",
+      "industry_tags": [
+        "储能",
+        "新能源",
+        "户外"
+      ],
+      "market": "北美",
+      "estimated_annual_revenue": "+",
+      "user_base": "北美太阳能离网TOP",
+      "overseas_presence": {
+        "amazon_rating": 4.3,
+        "social_followers": {
+          "youtube": 120000,
+          "instagram": 100000,
+          "tiktok": 85000
+        },
+        "brand_search_volume_monthly": 220000
+      },
+      "social_content_monthly": {
+        "total_posts": 60,
+        "creative_angles": 15000,
+        "top_products_featured": "YouTube",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "房车太阳能",
+            "离网生活",
+            "DIY安装"
+          ],
+          "avg_views_per_post": [
+            "REGO 12V 400Ah",
+            "Phoenix 3000"
+          ],
+          "top_platform": "2.6%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.renogy.com",
+      "amazon_store": "https://www.amazon.com/stores/Renogy/page/",
+      "contact_emails": "partner@renogy.com,marketing@renogy.com,press@renogy.com",
+      "linkedin_url": "https://www.linkedin.com/company/renogy",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b028",
+      "name": "Pecron",
+      "name_cn": "百克龙",
+      "industry_tags": [
+        "储能",
+        "户外",
+        "新能源"
+      ],
+      "market": "global",
+      "estimated_annual_revenue": "+",
+      "user_base": "大容量储能新锐",
+      "overseas_presence": {
+        "amazon_rating": 4.4,
+        "social_followers": {
+          "youtube": 50000,
+          "instagram": 35000,
+          "tiktok": 120000
+        },
+        "brand_search_volume_monthly": 120000
+      },
+      "social_content_monthly": {
+        "total_posts": 55,
+        "creative_angles": 22000,
+        "top_products_featured": "TikTok",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "家庭应急",
+            "户外作业"
+          ],
+          "avg_views_per_post": [
+            "E1500 LFP",
+            "EP3000"
+          ],
+          "top_platform": "3.1%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.pecron.com",
+      "amazon_store": "https://www.amazon.com/stores/Pecron/page/",
+      "contact_emails": "partner@pecron.com,marketing@pecron.com,press@pecron.com",
+      "linkedin_url": "https://www.linkedin.com/company/pecron",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b029",
+      "name": "Allpowers",
+      "name_cn": "奥鹏",
+      "industry_tags": [
+        "储能",
+        "户外"
+      ],
+      "market": "欧洲/北美",
+      "estimated_annual_revenue": "+",
+      "user_base": "亚马逊储能热销",
+      "overseas_presence": {
+        "amazon_rating": 4.3,
+        "social_followers": {
+          "youtube": 65000,
+          "instagram": 80000,
+          "tiktok": 150000
+        },
+        "brand_search_volume_monthly": 180000
+      },
+      "social_content_monthly": {
+        "total_posts": 60,
+        "creative_angles": 18000,
+        "top_products_featured": "TikTok",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "露营自驾",
+            "家庭园艺"
+          ],
+          "avg_views_per_post": [
+            "R3500",
+            "S2000 Pro"
+          ],
+          "top_platform": "2.9%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.allpowers.com",
+      "amazon_store": "https://www.amazon.com/stores/Allpowers/page/",
+      "contact_emails": "partner@allpowers.com,marketing@allpowers.com,press@allpowers.com",
+      "linkedin_url": "https://www.linkedin.com/company/allpowers",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b030",
+      "name": "DJI Power",
+      "name_cn": "大疆电源",
+      "industry_tags": [
+        "储能",
+        "户外",
+        "新能源"
+      ],
+      "market": "global",
+      "estimated_annual_revenue": "+",
+      "user_base": "大疆旗下储能",
+      "overseas_presence": {
+        "amazon_rating": 4.6,
+        "social_followers": {
+          "youtube": 200000,
+          "instagram": 300000,
+          "tiktok": 500000
+        },
+        "brand_search_volume_monthly": 350000
+      },
+      "social_content_monthly": {
+        "total_posts": 50,
+        "creative_angles": 55000,
+        "top_products_featured": "YouTube",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "无人机供电",
+            "户外拍摄"
+          ],
+          "avg_views_per_post": [
+            "Power 1000",
+            "Power 500"
+          ],
+          "top_platform": "4.0%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.djipower.com",
+      "amazon_store": "https://www.amazon.com/stores/DJI Power/page/",
+      "contact_emails": "partner@djipower.com,marketing@djipower.com,press@djipower.com",
+      "linkedin_url": "https://www.linkedin.com/company/djipower",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b031",
+      "name": "Dreame",
+      "name_cn": "追觅科技",
+      "industry_tags": [
+        "智能家居",
+        "清洁家电"
+      ],
+      "market": "global",
+      "estimated_annual_revenue": ".5B+",
+      "user_base": "清洁电器全球TOP5",
+      "overseas_presence": {
+        "amazon_rating": 4.5,
+        "social_followers": {
+          "youtube": 250000,
+          "instagram": 200000,
+          "tiktok": 450000
+        },
+        "brand_search_volume_monthly": 880000
+      },
+      "social_content_monthly": {
+        "total_posts": 120,
+        "creative_angles": 62000,
+        "top_products_featured": "YouTube",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "极致吸力",
+            "宠物家庭",
+            "全能基站"
+          ],
+          "avg_views_per_post": [
+            "X50 Ultra",
+            "H14 Pro"
+          ],
+          "top_platform": "3.4%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.dreame.com",
+      "amazon_store": "https://www.amazon.com/stores/DreameTech/page/",
+      "contact_emails": "partner@dreame.com",
+      "linkedin_url": "https://www.linkedin.com/company/dreame",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b032",
+      "name": "Ecovacs",
+      "name_cn": "科沃斯",
+      "industry_tags": [
+        "智能家居",
+        "清洁家电",
+        "机器人"
+      ],
+      "market": "global",
+      "estimated_annual_revenue": "+",
+      "user_base": "扫地机器人TOP品牌",
+      "overseas_presence": {
+        "amazon_rating": 4.3,
+        "social_followers": {
+          "youtube": 180000,
+          "instagram": 150000,
+          "tiktok": 300000
+        },
+        "brand_search_volume_monthly": 650000
+      },
+      "social_content_monthly": {
+        "total_posts": 100,
+        "creative_angles": 38000,
+        "top_products_featured": "YouTube",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "家用机器人",
+            "全屋清洁",
+            "智能避障"
+          ],
+          "avg_views_per_post": [
+            "X5 Omni",
+            "GOAT G1"
+          ],
+          "top_platform": "2.8%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.ecovacs.com",
+      "amazon_store": "https://www.amazon.com/stores/ECOVACS/page/",
+      "contact_emails": "partner@ecovacs.com",
+      "linkedin_url": "https://www.linkedin.com/company/ecovacs",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b033",
+      "name": "Eufy",
+      "name_cn": "悠飞",
+      "industry_tags": [
+        "智能家居",
+        "清洁家电",
+        "安防"
+      ],
+      "market": "北美/欧洲",
+      "estimated_annual_revenue": "+",
+      "user_base": "Anker旗下智能家居",
+      "overseas_presence": {
+        "amazon_rating": 4.4,
+        "social_followers": {
+          "youtube": 150000,
+          "instagram": 300000,
+          "tiktok": 450000
+        },
+        "brand_search_volume_monthly": 680000
+      },
+      "social_content_monthly": {
+        "total_posts": 120,
+        "creative_angles": 48000,
+        "top_products_featured": "Instagram",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "家庭安防",
+            "智能清洁"
+          ],
+          "avg_views_per_post": [
+            "X10 Pro Omni",
+            "S350安防摄像头"
+          ],
+          "top_platform": "3.5%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.eufy.com",
+      "amazon_store": "https://www.amazon.com/stores/Eufy/page/",
+      "contact_emails": "partner@eufy.com,marketing@eufy.com,press@eufy.com",
+      "linkedin_url": "https://www.linkedin.com/company/eufy",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b034",
+      "name": "SwitchBot",
+      "name_cn": "思威驰",
+      "industry_tags": [
+        "智能家居",
+        "IoT",
+        "机器人"
+      ],
+      "market": "日本/北美",
+      "estimated_annual_revenue": "+",
+      "user_base": "日本众筹明星",
+      "overseas_presence": {
+        "amazon_rating": 4.3,
+        "social_followers": {
+          "youtube": 60000,
+          "instagram": 80000,
+          "tiktok": 250000
+        },
+        "brand_search_volume_monthly": 180000
+      },
+      "social_content_monthly": {
+        "total_posts": 90,
+        "creative_angles": 32000,
+        "top_products_featured": "TikTok",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "智能改造",
+            "懒人神器",
+            "机器人管家"
+          ],
+          "avg_views_per_post": [
+            "S10",
+            "Curtain 3"
+          ],
+          "top_platform": "3.7%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.switchbot.com",
+      "amazon_store": "https://www.amazon.com/stores/SwitchBot/page/",
+      "contact_emails": "partner@switchbot.com,marketing@switchbot.com,press@switchbot.com",
+      "linkedin_url": "https://www.linkedin.com/company/switchbot",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b035",
+      "name": "Aqara",
+      "name_cn": "绿米",
+      "industry_tags": [
+        "智能家居",
+        "IoT",
+        "安防"
+      ],
+      "market": "global",
+      "estimated_annual_revenue": "+",
+      "user_base": "Apple HomeKit生态TOP",
+      "overseas_presence": {
+        "amazon_rating": 4.4,
+        "social_followers": {
+          "youtube": 100000,
+          "instagram": 180000,
+          "tiktok": 220000
+        },
+        "brand_search_volume_monthly": 320000
+      },
+      "social_content_monthly": {
+        "total_posts": 85,
+        "creative_angles": 22000,
+        "top_products_featured": "YouTube",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "全屋智能",
+            "HomeKit",
+            "绿建节能"
+          ],
+          "avg_views_per_post": [
+            "U300智能门锁",
+            "G5 Pro摄像头"
+          ],
+          "top_platform": "2.6%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.aqara.com",
+      "amazon_store": "https://www.amazon.com/stores/Aqara/page/",
+      "contact_emails": "partner@aqara.com,marketing@aqara.com,press@aqara.com",
+      "linkedin_url": "https://www.linkedin.com/company/aqara",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b036",
+      "name": "Yeelight",
+      "name_cn": "易来",
+      "industry_tags": [
+        "智能家居",
+        "照明"
+      ],
+      "market": "global",
+      "estimated_annual_revenue": "+",
+      "user_base": "小米生态链照明",
+      "overseas_presence": {
+        "amazon_rating": 4.4,
+        "social_followers": {
+          "youtube": 60000,
+          "instagram": 120000,
+          "tiktok": 180000
+        },
+        "brand_search_volume_monthly": 200000
+      },
+      "social_content_monthly": {
+        "total_posts": 70,
+        "creative_angles": 25000,
+        "top_products_featured": "Instagram",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "智能灯光",
+            "氛围场景",
+            "游戏联动"
+          ],
+          "avg_views_per_post": [
+            "Cube智能灯",
+            "Lightstrip Pro"
+          ],
+          "top_platform": "2.9%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.yeelight.com",
+      "amazon_store": "https://www.amazon.com/stores/Yeelight/page/",
+      "contact_emails": "partner@yeelight.com",
+      "linkedin_url": "https://www.linkedin.com/company/yeelight",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b037",
+      "name": "Philips Hue",
+      "name_cn": "Hue",
+      "industry_tags": [
+        "智能家居",
+        "照明",
+        "IoT"
+      ],
+      "market": "global",
+      "estimated_annual_revenue": "+",
+      "user_base": "全球智能照明第一",
+      "overseas_presence": {
+        "amazon_rating": 4.5,
+        "social_followers": {
+          "youtube": 300000,
+          "instagram": 800000,
+          "tiktok": 400000
+        },
+        "brand_search_volume_monthly": 850000
+      },
+      "social_content_monthly": {
+        "total_posts": 80,
+        "creative_angles": 32000,
+        "top_products_featured": "Instagram",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "氛围灯光",
+            "电影联动",
+            "色彩美学"
+          ],
+          "avg_views_per_post": [
+            "Hue Play",
+            "Hue Gradient"
+          ],
+          "top_platform": "3.2%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.philipshue.com",
+      "amazon_store": "https://www.amazon.com/stores/Philips Hue/page/",
+      "contact_emails": "partner@philipshue.com,marketing@philipshue.com,press@philipshue.com",
+      "linkedin_url": "https://www.linkedin.com/company/philipshue",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b038",
+      "name": "Wyze",
+      "name_cn": "怀兹",
+      "industry_tags": [
+        "智能家居",
+        "安防",
+        "IoT"
+      ],
+      "market": "北美",
+      "estimated_annual_revenue": "+",
+      "user_base": "北美性价比智能家居",
+      "overseas_presence": {
+        "amazon_rating": 4.2,
+        "social_followers": {
+          "youtube": 150000,
+          "instagram": 200000,
+          "tiktok": 350000
+        },
+        "brand_search_volume_monthly": 520000
+      },
+      "social_content_monthly": {
+        "total_posts": 100,
+        "creative_angles": 35000,
+        "top_products_featured": "TikTok",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "家居安防",
+            "DIY安装",
+            "宠物生活"
+          ],
+          "avg_views_per_post": [
+            "Cam v4",
+            "Robot Vacuum"
+          ],
+          "top_platform": "2.7%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.wyze.com",
+      "amazon_store": "https://www.amazon.com/stores/Wyze/page/",
+      "contact_emails": "partner@wyze.com",
+      "linkedin_url": "https://www.linkedin.com/company/wyze",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b039",
+      "name": "TP-Link Tapo",
+      "name_cn": "普联智能",
+      "industry_tags": [
+        "智能家居",
+        "安防",
+        "IoT"
+      ],
+      "market": "global",
+      "estimated_annual_revenue": "+",
+      "user_base": "TP-Link智能家居线",
+      "overseas_presence": {
+        "amazon_rating": 4.3,
+        "social_followers": {
+          "youtube": 80000,
+          "instagram": 120000,
+          "tiktok": 350000
+        },
+        "brand_search_volume_monthly": 380000
+      },
+      "social_content_monthly": {
+        "total_posts": 95,
+        "creative_angles": 28000,
+        "top_products_featured": "TikTok",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "家庭安防",
+            "智能插座"
+          ],
+          "avg_views_per_post": [
+            "Tapo C530",
+            "Tapo L930"
+          ],
+          "top_platform": "2.5%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.tp-linktapo.com",
+      "amazon_store": "https://www.amazon.com/stores/TP-Link Tapo/page/",
+      "contact_emails": "partner@tp-linktapo.com,marketing@tp-linktapo.com,press@tp-linktapo.com",
+      "linkedin_url": "https://www.linkedin.com/company/tp-linktapo",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b040",
+      "name": "LIFX",
+      "name_cn": "力夫斯",
+      "industry_tags": [
+        "智能家居",
+        "照明"
+      ],
+      "market": "北美/欧洲",
+      "estimated_annual_revenue": "+",
+      "user_base": "智能彩灯创新品牌",
+      "overseas_presence": {
+        "amazon_rating": 4.3,
+        "social_followers": {
+          "youtube": 40000,
+          "instagram": 180000,
+          "tiktok": 150000
+        },
+        "brand_search_volume_monthly": 120000
+      },
+      "social_content_monthly": {
+        "total_posts": 60,
+        "creative_angles": 18000,
+        "top_products_featured": "Instagram",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "色彩灯光",
+            "智能场景",
+            "派对"
+          ],
+          "avg_views_per_post": [
+            "LIFX Beam",
+            "LIFX Clean"
+          ],
+          "top_platform": "3.4%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.lifx.com",
+      "amazon_store": "https://www.amazon.com/stores/LIFX/page/",
+      "contact_emails": "partner@lifx.com,marketing@lifx.com,press@lifx.com",
+      "linkedin_url": "https://www.linkedin.com/company/lifx",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b041",
+      "name": "Florasis",
+      "name_cn": "花西子",
+      "industry_tags": [
+        "美妆",
+        "彩妆"
+      ],
+      "market": "东南亚/日本",
+      "estimated_annual_revenue": "+",
+      "user_base": "国风彩妆代表",
+      "overseas_presence": {
+        "amazon_rating": 4.4,
+        "social_followers": {
+          "youtube": 80000,
+          "instagram": 500000,
+          "tiktok": 850000
+        },
+        "brand_search_volume_monthly": 280000
+      },
+      "social_content_monthly": {
+        "total_posts": 150,
+        "creative_angles": 120000,
+        "top_products_featured": "TikTok",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "国风美学",
+            "东方妆容",
+            "文化输出"
+          ],
+          "avg_views_per_post": [
+            "浮雕彩妆盘",
+            "同心锁口红"
+          ],
+          "top_platform": "4.2%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.florasis.com",
+      "amazon_store": "https://www.amazon.com/stores/Florasis/page/",
+      "contact_emails": "partner@florasis.com,marketing@florasis.com,press@florasis.com",
+      "linkedin_url": "https://www.linkedin.com/company/florasis",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b042",
+      "name": "CosRx",
+      "name_cn": "蔻瑞希",
+      "industry_tags": [
+        "美妆",
+        "护肤"
+      ],
+      "market": "全球/韩国",
+      "estimated_annual_revenue": "+",
+      "user_base": "TikTok爆火护肤",
+      "overseas_presence": {
+        "amazon_rating": 4.6,
+        "social_followers": {
+          "youtube": 350000,
+          "instagram": 850000,
+          "tiktok": 1500000
+        },
+        "brand_search_volume_monthly": 650000
+      },
+      "social_content_monthly": {
+        "total_posts": 130,
+        "creative_angles": 150000,
+        "top_products_featured": "TikTok",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "成分护肤",
+            "痘痘肌",
+            "韩国爆款"
+          ],
+          "avg_views_per_post": [
+            "蜗牛精华",
+            "AHA/BHA爽肤水"
+          ],
+          "top_platform": "4.5%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.cosrx.com",
+      "amazon_store": "https://www.amazon.com/stores/CosRx/page/",
+      "contact_emails": "partner@cosrx.com,marketing@cosrx.com,press@cosrx.com",
+      "linkedin_url": "https://www.linkedin.com/company/cosrx",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b043",
+      "name": "KLAIRS",
+      "name_cn": "蔻莱尔",
+      "industry_tags": [
+        "美妆",
+        "护肤"
+      ],
+      "market": "全球/韩国",
+      "estimated_annual_revenue": "+",
+      "user_base": "韩国天然护肤代表",
+      "overseas_presence": {
+        "amazon_rating": 4.5,
+        "social_followers": {
+          "youtube": 200000,
+          "instagram": 450000,
+          "tiktok": 280000
+        },
+        "brand_search_volume_monthly": 320000
+      },
+      "social_content_monthly": {
+        "total_posts": 110,
+        "creative_angles": 42000,
+        "top_products_featured": "Instagram",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "天然成分",
+            "敏感肌",
+            "极简流程"
+          ],
+          "avg_views_per_post": [
+            "紫苏精华",
+            "VC精华"
+          ],
+          "top_platform": "3.9%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.klairs.com",
+      "amazon_store": "https://www.amazon.com/stores/KLAIRS/page/",
+      "contact_emails": "partner@klairs.com,marketing@klairs.com,press@klairs.com",
+      "linkedin_url": "https://www.linkedin.com/company/klairs",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b044",
+      "name": "SK-II",
+      "name_cn": "SK-II",
+      "industry_tags": [
+        "美妆",
+        "护肤"
+      ],
+      "market": "全球/日本",
+      "estimated_annual_revenue": "+",
+      "user_base": "宝洁旗下高端护肤",
+      "overseas_presence": {
+        "amazon_rating": 4.7,
+        "social_followers": {
+          "youtube": 800000,
+          "instagram": 2500000,
+          "tiktok": 1500000
+        },
+        "brand_search_volume_monthly": 2500000
+      },
+      "social_content_monthly": {
+        "total_posts": 90,
+        "creative_angles": 88000,
+        "top_products_featured": "YouTube",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "神仙水",
+            "抗老科技",
+            "成分科普"
+          ],
+          "avg_views_per_post": [
+            "神仙水",
+            "小灯泡",
+            "大红瓶"
+          ],
+          "top_platform": "3.5%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.sk-ii.com",
+      "amazon_store": "https://www.amazon.com/stores/SK-II/page/",
+      "contact_emails": "partner@sk-ii.com,marketing@sk-ii.com,press@sk-ii.com",
+      "linkedin_url": "https://www.linkedin.com/company/sk-ii",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b045",
+      "name": "INTO YOU",
+      "name_cn": "印兔",
+      "industry_tags": [
+        "美妆",
+        "彩妆"
+      ],
+      "market": "东南亚",
+      "estimated_annual_revenue": "+",
+      "user_base": "唇泥品类开创者",
+      "overseas_presence": {
+        "amazon_rating": 4.4,
+        "social_followers": {
+          "youtube": 50000,
+          "instagram": 350000,
+          "tiktok": 650000
+        },
+        "brand_search_volume_monthly": 150000
+      },
+      "social_content_monthly": {
+        "total_posts": 140,
+        "creative_angles": 98000,
+        "top_products_featured": "TikTok",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "唇泥",
+            "哑光妆容",
+            "Z世代"
+          ],
+          "avg_views_per_post": [
+            "女主角唇泥",
+            "空气唇釉"
+          ],
+          "top_platform": "4.0%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.intoyou.com",
+      "amazon_store": "https://www.amazon.com/stores/INTO YOU/page/",
+      "contact_emails": "partner@intoyou.com,marketing@intoyou.com,press@intoyou.com",
+      "linkedin_url": "https://www.linkedin.com/company/intoyou",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b046",
+      "name": "Laneige",
+      "name_cn": "兰芝",
+      "industry_tags": [
+        "美妆",
+        "护肤"
+      ],
+      "market": "全球/韩国",
+      "estimated_annual_revenue": "+",
+      "user_base": "爱茉莉旗下国际品牌",
+      "overseas_presence": {
+        "amazon_rating": 4.5,
+        "social_followers": {
+          "youtube": 500000,
+          "instagram": 1200000,
+          "tiktok": 800000
+        },
+        "brand_search_volume_monthly": 920000
+      },
+      "social_content_monthly": {
+        "total_posts": 100,
+        "creative_angles": 65000,
+        "top_products_featured": "Instagram",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "水光肌",
+            "睡眠面膜",
+            "韩系妆容"
+          ],
+          "avg_views_per_post": [
+            "睡眠面膜",
+            "水酷精华"
+          ],
+          "top_platform": "3.1%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.laneige.com",
+      "amazon_store": "https://www.amazon.com/stores/Laneige/page/",
+      "contact_emails": "partner@laneige.com,marketing@laneige.com,press@laneige.com",
+      "linkedin_url": "https://www.linkedin.com/company/laneige",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b047",
+      "name": "Colorkey",
+      "name_cn": "珂拉琪",
+      "industry_tags": [
+        "美妆",
+        "彩妆"
+      ],
+      "market": "东南亚",
+      "estimated_annual_revenue": "+",
+      "user_base": "抖音爆火唇釉品牌",
+      "overseas_presence": {
+        "amazon_rating": 4.3,
+        "social_followers": {
+          "youtube": 60000,
+          "instagram": 400000,
+          "tiktok": 850000
+        },
+        "brand_search_volume_monthly": 120000
+      },
+      "social_content_monthly": {
+        "total_posts": 160,
+        "creative_angles": 150000,
+        "top_products_featured": "TikTok",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "唇釉",
+            "平价替代",
+            "唇泥"
+          ],
+          "avg_views_per_post": [
+            "小黑镜唇釉",
+            "空气唇泥"
+          ],
+          "top_platform": "4.3%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.colorkey.com",
+      "amazon_store": "https://www.amazon.com/stores/Colorkey/page/",
+      "contact_emails": "partner@colorkey.com,marketing@colorkey.com,press@colorkey.com",
+      "linkedin_url": "https://www.linkedin.com/company/colorkey",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b048",
+      "name": "FOCALLURE",
+      "name_cn": "菲鹿儿",
+      "industry_tags": [
+        "美妆",
+        "彩妆"
+      ],
+      "market": "东南亚/中东",
+      "estimated_annual_revenue": "+",
+      "user_base": "出海彩妆黑马",
+      "overseas_presence": {
+        "amazon_rating": 4.2,
+        "social_followers": {
+          "youtube": 30000,
+          "instagram": 250000,
+          "tiktok": 550000
+        },
+        "brand_search_volume_monthly": 85000
+      },
+      "social_content_monthly": {
+        "total_posts": 130,
+        "creative_angles": 85000,
+        "top_products_featured": "TikTok",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "平价彩妆",
+            "中东定制",
+            "眼影盘"
+          ],
+          "avg_views_per_post": [
+            "16色眼影盘",
+            "唇釉套装"
+          ],
+          "top_platform": "4.1%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.focallure.com",
+      "amazon_store": "https://www.amazon.com/stores/FOCALLURE/page/",
+      "contact_emails": "partner@focallure.com,marketing@focallure.com,press@focallure.com",
+      "linkedin_url": "https://www.linkedin.com/company/focallure",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b049",
+      "name": "JudyDoll",
+      "name_cn": "橘朵",
+      "industry_tags": [
+        "美妆",
+        "彩妆"
+      ],
+      "market": "东南亚/日本",
+      "estimated_annual_revenue": "+",
+      "user_base": "国民平价彩妆出海",
+      "overseas_presence": {
+        "amazon_rating": 4.4,
+        "social_followers": {
+          "youtube": 40000,
+          "instagram": 350000,
+          "tiktok": 550000
+        },
+        "brand_search_volume_monthly": 120000
+      },
+      "social_content_monthly": {
+        "total_posts": 140,
+        "creative_angles": 120000,
+        "top_products_featured": "TikTok",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "平价好物",
+            "学生党",
+            "腮红"
+          ],
+          "avg_views_per_post": [
+            "单色腮红",
+            "眼线液笔"
+          ],
+          "top_platform": "4.4%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.judydoll.com",
+      "amazon_store": "https://www.amazon.com/stores/JudyDoll/page/",
+      "contact_emails": "partner@judydoll.com,marketing@judydoll.com,press@judydoll.com",
+      "linkedin_url": "https://www.linkedin.com/company/judydoll",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b050",
+      "name": "Docolor",
+      "name_cn": "朵朵",
+      "industry_tags": [
+        "美妆",
+        "彩妆"
+      ],
+      "market": "东南亚/中东",
+      "estimated_annual_revenue": "+",
+      "user_base": "新锐彩妆工具出海",
+      "overseas_presence": {
+        "amazon_rating": 4.3,
+        "social_followers": {
+          "youtube": 15000,
+          "instagram": 200000,
+          "tiktok": 350000
+        },
+        "brand_search_volume_monthly": 55000
+      },
+      "social_content_monthly": {
+        "total_posts": 120,
+        "creative_angles": 65000,
+        "top_products_featured": "TikTok",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "化妆刷",
+            "美妆工具",
+            "眼部"
+          ],
+          "avg_views_per_post": [
+            "化妆刷套装",
+            "美妆蛋"
+          ],
+          "top_platform": "4.0%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.docolor.com",
+      "amazon_store": "https://www.amazon.com/stores/Docolor/page/",
+      "contact_emails": "partner@docolor.com,marketing@docolor.com,press@docolor.com",
+      "linkedin_url": "https://www.linkedin.com/company/docolor",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b051",
+      "name": "Naturehike",
+      "name_cn": "挪客",
+      "industry_tags": [
+        "户外",
+        "露营"
+      ],
+      "market": "全球",
+      "estimated_annual_revenue": "+",
+      "user_base": "中国露营装备出海第一",
+      "overseas_presence": {
+        "amazon_rating": 4.5,
+        "social_followers": {
+          "youtube": 120000,
+          "instagram": 250000,
+          "tiktok": 350000
+        },
+        "brand_search_volume_monthly": 380000
+      },
+      "social_content_monthly": {
+        "total_posts": 110,
+        "creative_angles": 42000,
+        "top_products_featured": "Instagram",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "轻量露营",
+            "背包旅行",
+            "亲子露营"
+          ],
+          "avg_views_per_post": [
+            "Cloud UP帐篷",
+            "超轻睡袋"
+          ],
+          "top_platform": "3.8%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.naturehike.com",
+      "amazon_store": "https://www.amazon.com/stores/Naturehike/page/",
+      "contact_emails": "partner@naturehike.com,marketing@naturehike.com,press@naturehike.com",
+      "linkedin_url": "https://www.linkedin.com/company/naturehike",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b052",
+      "name": "Nitecore",
+      "name_cn": "奈特科尔",
+      "industry_tags": [
+        "户外",
+        "照明",
+        "3C"
+      ],
+      "market": "global",
+      "estimated_annual_revenue": "+",
+      "user_base": "战术手电全球TOP3",
+      "overseas_presence": {
+        "amazon_rating": 4.5,
+        "social_followers": {
+          "youtube": 100000,
+          "instagram": 180000,
+          "tiktok": 120000
+        },
+        "brand_search_volume_monthly": 180000
+      },
+      "social_content_monthly": {
+        "total_posts": 75,
+        "creative_angles": 28000,
+        "top_products_featured": "YouTube",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "战术手电",
+            "户外照明",
+            "EDC装备"
+          ],
+          "avg_views_per_post": [
+            "TM39",
+            "P23i"
+          ],
+          "top_platform": "3.5%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.nitecore.com",
+      "amazon_store": "https://www.amazon.com/stores/Nitecore/page/",
+      "contact_emails": "partner@nitecore.com,marketing@nitecore.com,press@nitecore.com",
+      "linkedin_url": "https://www.linkedin.com/company/nitecore",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b053",
+      "name": "Black Diamond",
+      "name_cn": "黑钻",
+      "industry_tags": [
+        "户外",
+        "登山"
+      ],
+      "market": "北美/欧洲",
+      "estimated_annual_revenue": "+",
+      "user_base": "攀岩装备全球第一",
+      "overseas_presence": {
+        "amazon_rating": 4.6,
+        "social_followers": {
+          "youtube": 250000,
+          "instagram": 650000,
+          "tiktok": 300000
+        },
+        "brand_search_volume_monthly": 420000
+      },
+      "social_content_monthly": {
+        "total_posts": 80,
+        "creative_angles": 42000,
+        "top_products_featured": "Instagram",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "攀岩",
+            "登山",
+            "越野跑"
+          ],
+          "avg_views_per_post": [
+            "Storm头灯",
+            "Distance登山杖"
+          ],
+          "top_platform": "3.5%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.blackdiamond.com",
+      "amazon_store": "https://www.amazon.com/stores/Black Diamond/page/",
+      "contact_emails": "partner@blackdiamond.com,marketing@blackdiamond.com,press@blackdiamond.com",
+      "linkedin_url": "https://www.linkedin.com/company/blackdiamond",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b054",
+      "name": "Osprey",
+      "name_cn": "鱼鹰",
+      "industry_tags": [
+        "户外",
+        "背包"
+      ],
+      "market": "global",
+      "estimated_annual_revenue": "+",
+      "user_base": "户外背包全球TOP3",
+      "overseas_presence": {
+        "amazon_rating": 4.7,
+        "social_followers": {
+          "youtube": 180000,
+          "instagram": 450000,
+          "tiktok": 200000
+        },
+        "brand_search_volume_monthly": 350000
+      },
+      "social_content_monthly": {
+        "total_posts": 70,
+        "creative_angles": 22000,
+        "top_products_featured": "Instagram",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "徒步旅行",
+            "城市通勤",
+            "轻量背包"
+          ],
+          "avg_views_per_post": [
+            "Atmos AG",
+            "Daylite Plus"
+          ],
+          "top_platform": "2.8%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.osprey.com",
+      "amazon_store": "https://www.amazon.com/stores/Osprey/page/",
+      "contact_emails": "partner@osprey.com,marketing@osprey.com,press@osprey.com",
+      "linkedin_url": "https://www.linkedin.com/company/osprey",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b055",
+      "name": "Yeti",
+      "name_cn": "野地",
+      "industry_tags": [
+        "户外",
+        "保温"
+      ],
+      "market": "北美",
+      "estimated_annual_revenue": ".6B+",
+      "user_base": "户外冰桶全球第一",
+      "overseas_presence": {
+        "amazon_rating": 4.8,
+        "social_followers": {
+          "youtube": 400000,
+          "instagram": 1800000,
+          "tiktok": 800000
+        },
+        "brand_search_volume_monthly": 1500000
+      },
+      "social_content_monthly": {
+        "total_posts": 95,
+        "creative_angles": 85000,
+        "top_products_featured": "Instagram",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "户外生活",
+            "露营",
+            "钓鱼",
+            "烧烤"
+          ],
+          "avg_views_per_post": [
+            "Rambler水杯",
+            "Tundra冰桶"
+          ],
+          "top_platform": "3.8%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.yeti.com",
+      "amazon_store": "https://www.amazon.com/stores/Yeti/page/",
+      "contact_emails": "partner@yeti.com,marketing@yeti.com,press@yeti.com",
+      "linkedin_url": "https://www.linkedin.com/company/yeti",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b056",
+      "name": "Fenix",
+      "name_cn": "菲尼克斯",
+      "industry_tags": [
+        "户外",
+        "照明"
+      ],
+      "market": "全球",
+      "estimated_annual_revenue": "+",
+      "user_base": "户外照明专业品牌",
+      "overseas_presence": {
+        "amazon_rating": 4.5,
+        "social_followers": {
+          "youtube": 80000,
+          "instagram": 120000,
+          "tiktok": 85000
+        },
+        "brand_search_volume_monthly": 130000
+      },
+      "social_content_monthly": {
+        "total_posts": 65,
+        "creative_angles": 20000,
+        "top_products_featured": "YouTube",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "户外手电",
+            "头灯",
+            "登山",
+            "工业照明"
+          ],
+          "avg_views_per_post": [
+            "TK35UE",
+            "HM70R"
+          ],
+          "top_platform": "3.2%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.fenix.com",
+      "amazon_store": "https://www.amazon.com/stores/Fenix/page/",
+      "contact_emails": "partner@fenix.com,marketing@fenix.com,press@fenix.com",
+      "linkedin_url": "https://www.linkedin.com/company/fenix",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b057",
+      "name": "Hobolite",
+      "name_cn": "和博",
+      "industry_tags": [
+        "户外",
+        "照明",
+        "影像"
+      ],
+      "market": "北美/欧洲",
+      "estimated_annual_revenue": "+",
+      "user_base": "专业摄影灯光出海",
+      "overseas_presence": {
+        "amazon_rating": 4.6,
+        "social_followers": {
+          "youtube": 35000,
+          "instagram": 120000,
+          "tiktok": 85000
+        },
+        "brand_search_volume_monthly": 65000
+      },
+      "social_content_monthly": {
+        "total_posts": 65,
+        "creative_angles": 18000,
+        "top_products_featured": "YouTube",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "摄影灯光",
+            "户外人像",
+            "vlog"
+          ],
+          "avg_views_per_post": [
+            "Iris",
+            "Mini"
+          ],
+          "top_platform": "3.6%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.hobolite.com",
+      "amazon_store": "https://www.amazon.com/stores/Hobolite/page/",
+      "contact_emails": "partner@hobolite.com,marketing@hobolite.com,press@hobolite.com",
+      "linkedin_url": "https://www.linkedin.com/company/hobolite",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b058",
+      "name": "TOURBON",
+      "name_cn": "途邦",
+      "industry_tags": [
+        "户外",
+        "狩猎",
+        "射击"
+      ],
+      "market": "北美/欧洲",
+      "estimated_annual_revenue": "+",
+      "user_base": "狩猎装备出海品牌",
+      "overseas_presence": {
+        "amazon_rating": 4.3,
+        "social_followers": {
+          "youtube": 15000,
+          "instagram": 45000,
+          "tiktok": 85000
+        },
+        "brand_search_volume_monthly": 45000
+      },
+      "social_content_monthly": {
+        "total_posts": 55,
+        "creative_angles": 15000,
+        "top_products_featured": "TikTok",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "狩猎装备",
+            "射击运动",
+            "野外生存"
+          ],
+          "avg_views_per_post": [
+            "枪包",
+            "战术背心"
+          ],
+          "top_platform": "3.0%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.tourbon.com",
+      "amazon_store": "https://www.amazon.com/stores/TOURBON/page/",
+      "contact_emails": "partner@tourbon.com,marketing@tourbon.com,press@tourbon.com",
+      "linkedin_url": "https://www.linkedin.com/company/tourbon",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b059",
+      "name": "CAMEL",
+      "name_cn": "骆驼",
+      "industry_tags": [
+        "户外",
+        "露营",
+        "服装"
+      ],
+      "market": "中国/东南亚",
+      "estimated_annual_revenue": "+",
+      "user_base": "中国户外装备巨头",
+      "overseas_presence": {
+        "amazon_rating": 4.3,
+        "social_followers": {
+          "youtube": 50000,
+          "instagram": 150000,
+          "tiktok": 250000
+        },
+        "brand_search_volume_monthly": 180000
+      },
+      "social_content_monthly": {
+        "total_posts": 80,
+        "creative_angles": 25000,
+        "top_products_featured": "TikTok",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "国货户外",
+            "露营",
+            "徒步"
+          ],
+          "avg_views_per_post": [
+            "帐篷",
+            "冲锋衣",
+            "登山鞋"
+          ],
+          "top_platform": "2.8%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.camel.com",
+      "amazon_store": "https://www.amazon.com/stores/CAMEL/page/",
+      "contact_emails": "partner@camel.com,marketing@camel.com,press@camel.com",
+      "linkedin_url": "https://www.linkedin.com/company/camel",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b060",
+      "name": "Decathlon",
+      "name_cn": "迪卡侬",
+      "industry_tags": [
+        "户外",
+        "运动",
+        "服装"
+      ],
+      "market": "全球",
+      "estimated_annual_revenue": "+",
+      "user_base": "全球运动零售巨头",
+      "overseas_presence": {
+        "amazon_rating": 4.6,
+        "social_followers": {
+          "youtube": 1500000,
+          "instagram": 3000000,
+          "tiktok": 4500000
+        },
+        "brand_search_volume_monthly": 8500000
+      },
+      "social_content_monthly": {
+        "total_posts": 200,
+        "creative_angles": 120000,
+        "top_products_featured": "Instagram",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "全民运动",
+            "高性价比",
+            "全品类"
+          ],
+          "avg_views_per_post": [
+            "Quechua帐篷",
+            "Tribord浮潜"
+          ],
+          "top_platform": "3.0%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.decathlon.com",
+      "amazon_store": "https://www.amazon.com/stores/Decathlon/page/",
+      "contact_emails": "partner@decathlon.com,marketing@decathlon.com,press@decathlon.com",
+      "linkedin_url": "https://www.linkedin.com/company/decathlon",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b061",
+      "name": "Segway-Ninebot",
+      "name_cn": "九号",
+      "industry_tags": [
+        "出行",
+        "电动",
+        "3C"
+      ],
+      "market": "global",
+      "estimated_annual_revenue": "+",
+      "user_base": "全球电动滑板车第一",
+      "overseas_presence": {
+        "amazon_rating": 4.4,
+        "social_followers": {
+          "youtube": 300000,
+          "instagram": 450000,
+          "tiktok": 1200000
+        },
+        "brand_search_volume_monthly": 850000
+      },
+      "social_content_monthly": {
+        "total_posts": 130,
+        "creative_angles": 180000,
+        "top_products_featured": "TikTok",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "城市通勤",
+            "极客出行",
+            "校园代步"
+          ],
+          "avg_views_per_post": [
+            "MAX G3",
+            "GT3"
+          ],
+          "top_platform": "3.6%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.segway-ninebot.com",
+      "amazon_store": "https://www.amazon.com/stores/Segway-Ninebot/page/",
+      "contact_emails": "partner@segway-ninebot.com,marketing@segway-ninebot.com,press@segway-ninebot.com",
+      "linkedin_url": "https://www.linkedin.com/company/segway-ninebot",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b062",
+      "name": "Niu Technologies",
+      "name_cn": "小牛电动",
+      "industry_tags": [
+        "出行",
+        "电动"
+      ],
+      "market": "全球/欧洲",
+      "estimated_annual_revenue": "+",
+      "user_base": "智能电动两轮出海",
+      "overseas_presence": {
+        "amazon_rating": 4.3,
+        "social_followers": {
+          "youtube": 150000,
+          "instagram": 280000,
+          "tiktok": 350000
+        },
+        "brand_search_volume_monthly": 380000
+      },
+      "social_content_monthly": {
+        "total_posts": 100,
+        "creative_angles": 52000,
+        "top_products_featured": "Instagram",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "城市骑行",
+            "智能出行",
+            "环保"
+          ],
+          "avg_views_per_post": [
+            "NQi GT",
+            "MQi GT EVO"
+          ],
+          "top_platform": "3.2%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.niutechnologies.com",
+      "amazon_store": "https://www.amazon.com/stores/Niu Technologies/page/",
+      "contact_emails": "partner@niutechnologies.com,marketing@niutechnologies.com,press@niutechnologies.com",
+      "linkedin_url": "https://www.linkedin.com/company/niutechnologies",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b063",
+      "name": "Himiway",
+      "name_cn": "喜美威",
+      "industry_tags": [
+        "出行",
+        "电动自行车"
+      ],
+      "market": "北美/欧洲",
+      "estimated_annual_revenue": "+",
+      "user_base": "e-bike DTC品牌",
+      "overseas_presence": {
+        "amazon_rating": 4.4,
+        "social_followers": {
+          "youtube": 45000,
+          "instagram": 80000,
+          "tiktok": 120000
+        },
+        "brand_search_volume_monthly": 120000
+      },
+      "social_content_monthly": {
+        "total_posts": 75,
+        "creative_angles": 18000,
+        "top_products_featured": "YouTube",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "户外骑行",
+            "通勤",
+            "家庭骑行"
+          ],
+          "avg_views_per_post": [
+            "Cobra Pro",
+            "Zebra"
+          ],
+          "top_platform": "2.9%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.himiway.com",
+      "amazon_store": "https://www.amazon.com/stores/Himiway/page/",
+      "contact_emails": "partner@himiway.com,marketing@himiway.com,press@himiway.com",
+      "linkedin_url": "https://www.linkedin.com/company/himiway",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b064",
+      "name": "Aventon",
+      "name_cn": "艾文顿",
+      "industry_tags": [
+        "出行",
+        "电动自行车"
+      ],
+      "market": "北美",
+      "estimated_annual_revenue": "+",
+      "user_base": "北美e-bike热门",
+      "overseas_presence": {
+        "amazon_rating": 4.5,
+        "social_followers": {
+          "youtube": 80000,
+          "instagram": 200000,
+          "tiktok": 250000
+        },
+        "brand_search_volume_monthly": 250000
+      },
+      "social_content_monthly": {
+        "total_posts": 85,
+        "creative_angles": 28000,
+        "top_products_featured": "Instagram",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "城市骑行",
+            "健身",
+            "周末出游"
+          ],
+          "avg_views_per_post": [
+            "Ramblas",
+            "Sinch.3"
+          ],
+          "top_platform": "3.4%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.aventon.com",
+      "amazon_store": "https://www.amazon.com/stores/Aventon/page/",
+      "contact_emails": "partner@aventon.com,marketing@aventon.com,press@aventon.com",
+      "linkedin_url": "https://www.linkedin.com/company/aventon",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b065",
+      "name": "Exway",
+      "name_cn": "极限",
+      "industry_tags": [
+        "出行",
+        "电动滑板"
+      ],
+      "market": "global",
+      "estimated_annual_revenue": "+",
+      "user_base": "电动滑板全球TOP3",
+      "overseas_presence": {
+        "amazon_rating": 4.4,
+        "social_followers": {
+          "youtube": 60000,
+          "instagram": 120000,
+          "tiktok": 200000
+        },
+        "brand_search_volume_monthly": 85000
+      },
+      "social_content_monthly": {
+        "total_posts": 70,
+        "creative_angles": 25000,
+        "top_products_featured": "TikTok",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "电动滑板",
+            "街头文化",
+            "极客"
+          ],
+          "avg_views_per_post": [
+            "Atlas Pro",
+            "Flex SE"
+          ],
+          "top_platform": "3.8%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.exway.com",
+      "amazon_store": "https://www.amazon.com/stores/Exway/page/",
+      "contact_emails": "partner@exway.com,marketing@exway.com,press@exway.com",
+      "linkedin_url": "https://www.linkedin.com/company/exway",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b066",
+      "name": "TASACA",
+      "name_cn": "塔萨卡",
+      "industry_tags": [
+        "出行",
+        "电动越野"
+      ],
+      "market": "北美/欧洲",
+      "estimated_annual_revenue": "+",
+      "user_base": "电动越野摩托新锐",
+      "overseas_presence": {
+        "amazon_rating": 4,
+        "social_followers": {
+          "youtube": 15000,
+          "instagram": 25000,
+          "tiktok": 55000
+        },
+        "brand_search_volume_monthly": 18000
+      },
+      "social_content_monthly": {
+        "total_posts": 40,
+        "creative_angles": 12000,
+        "top_products_featured": "TikTok",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "越野摩托",
+            "极限运动"
+          ],
+          "avg_views_per_post": [
+            "Storm",
+            "Blaze"
+          ],
+          "top_platform": "4.2%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.tasaca.com",
+      "amazon_store": "https://www.amazon.com/stores/TASACA/page/",
+      "contact_emails": "partner@tasaca.com,marketing@tasaca.com,press@tasaca.com",
+      "linkedin_url": "https://www.linkedin.com/company/tasaca",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b067",
+      "name": "Mearth",
+      "name_cn": "米斯",
+      "industry_tags": [
+        "出行",
+        "电动滑板"
+      ],
+      "market": "东南亚/澳洲",
+      "estimated_annual_revenue": "+",
+      "user_base": "澳洲电动滑板TOP",
+      "overseas_presence": {
+        "amazon_rating": 4.3,
+        "social_followers": {
+          "youtube": 20000,
+          "instagram": 45000,
+          "tiktok": 85000
+        },
+        "brand_search_volume_monthly": 45000
+      },
+      "social_content_monthly": {
+        "total_posts": 50,
+        "creative_angles": 15000,
+        "top_products_featured": "TikTok",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "通勤代步",
+            "校园",
+            "城市"
+          ],
+          "avg_views_per_post": [
+            "GTS EVO",
+            "Cyberscooter"
+          ],
+          "top_platform": "3.0%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.mearth.com",
+      "amazon_store": "https://www.amazon.com/stores/Mearth/page/",
+      "contact_emails": "partner@mearth.com,marketing@mearth.com,press@mearth.com",
+      "linkedin_url": "https://www.linkedin.com/company/mearth",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b068",
+      "name": "Whisker",
+      "name_cn": "惠斯克",
+      "industry_tags": [
+        "宠物",
+        "智能家居"
+      ],
+      "market": "北美",
+      "estimated_annual_revenue": "+",
+      "user_base": "Litter-Robot制造商",
+      "overseas_presence": {
+        "amazon_rating": 4.7,
+        "social_followers": {
+          "youtube": 180000,
+          "instagram": 450000,
+          "tiktok": 550000
+        },
+        "brand_search_volume_monthly": 750000
+      },
+      "social_content_monthly": {
+        "total_posts": 90,
+        "creative_angles": 52000,
+        "top_products_featured": "TikTok",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "智能猫砂盆",
+            "猫咪健康",
+            "宠物科技"
+          ],
+          "avg_views_per_post": [
+            "Litter-Robot 4",
+            "Feeder-Robot"
+          ],
+          "top_platform": "3.8%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.whisker.com",
+      "amazon_store": "https://www.amazon.com/stores/Whisker/page/",
+      "contact_emails": "partner@whisker.com,marketing@whisker.com,press@whisker.com",
+      "linkedin_url": "https://www.linkedin.com/company/whisker",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b069",
+      "name": "Furbo",
+      "name_cn": "福宝",
+      "industry_tags": [
+        "宠物",
+        "智能家居"
+      ],
+      "market": "北美/欧洲",
+      "estimated_annual_revenue": "+",
+      "user_base": "宠物智能摄像头TOP1",
+      "overseas_presence": {
+        "amazon_rating": 4.5,
+        "social_followers": {
+          "youtube": 60000,
+          "instagram": 250000,
+          "tiktok": 300000
+        },
+        "brand_search_volume_monthly": 350000
+      },
+      "social_content_monthly": {
+        "total_posts": 80,
+        "creative_angles": 35000,
+        "top_products_featured": "Instagram",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "狗狗看护",
+            "分离焦虑",
+            "零食互动"
+          ],
+          "avg_views_per_post": [
+            "Furbo 360",
+            "Dog Nanny"
+          ],
+          "top_platform": "3.6%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.furbo.com",
+      "amazon_store": "https://www.amazon.com/stores/Furbo/page/",
+      "contact_emails": "partner@furbo.com,marketing@furbo.com,press@furbo.com",
+      "linkedin_url": "https://www.linkedin.com/company/furbo",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b070",
+      "name": "OneIsAll",
+      "name_cn": "万事利",
+      "industry_tags": [
+        "宠物",
+        "智能家居"
+      ],
+      "market": "北美",
+      "estimated_annual_revenue": "+",
+      "user_base": "宠物理容工具出海",
+      "overseas_presence": {
+        "amazon_rating": 4.3,
+        "social_followers": {
+          "youtube": 25000,
+          "instagram": 55000,
+          "tiktok": 120000
+        },
+        "brand_search_volume_monthly": 85000
+      },
+      "social_content_monthly": {
+        "total_posts": 65,
+        "creative_angles": 22000,
+        "top_products_featured": "TikTok",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "宠物美容",
+            "猫狗理容",
+            "安静低噪"
+          ],
+          "avg_views_per_post": [
+            "Ease S1猫砂盆",
+            "剃毛器"
+          ],
+          "top_platform": "3.5%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.oneisall.com",
+      "amazon_store": "https://www.amazon.com/stores/OneIsAll/page/",
+      "contact_emails": "partner@oneisall.com,marketing@oneisall.com,press@oneisall.com",
+      "linkedin_url": "https://www.linkedin.com/company/oneisall",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b071",
+      "name": "PATPET",
+      "name_cn": "派宠",
+      "industry_tags": [
+        "宠物",
+        "智能家居"
+      ],
+      "market": "北美/欧洲",
+      "estimated_annual_revenue": "+",
+      "user_base": "宠物训练项圈TOP",
+      "overseas_presence": {
+        "amazon_rating": 4.2,
+        "social_followers": {
+          "youtube": 30000,
+          "instagram": 45000,
+          "tiktok": 100000
+        },
+        "brand_search_volume_monthly": 75000
+      },
+      "social_content_monthly": {
+        "total_posts": 55,
+        "creative_angles": 15000,
+        "top_products_featured": "TikTok",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "狗狗训练",
+            "宠物科技",
+            "行为矫正"
+          ],
+          "avg_views_per_post": [
+            "P-collar 820",
+            "自动喂食器"
+          ],
+          "top_platform": "2.8%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.patpet.com",
+      "amazon_store": "https://www.amazon.com/stores/PATPET/page/",
+      "contact_emails": "partner@patpet.com,marketing@patpet.com,press@patpet.com",
+      "linkedin_url": "https://www.linkedin.com/company/patpet",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b072",
+      "name": "CatLink",
+      "name_cn": "猫联",
+      "industry_tags": [
+        "宠物",
+        "智能家居"
+      ],
+      "market": "北美/欧洲",
+      "estimated_annual_revenue": "+",
+      "user_base": "智能猫砂盆创新",
+      "overseas_presence": {
+        "amazon_rating": 4.3,
+        "social_followers": {
+          "youtube": 35000,
+          "instagram": 60000,
+          "tiktok": 95000
+        },
+        "brand_search_volume_monthly": 65000
+      },
+      "social_content_monthly": {
+        "total_posts": 60,
+        "creative_angles": 18000,
+        "top_products_featured": "YouTube",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "多猫家庭",
+            "智能猫砂盆",
+            "猫咪健康"
+          ],
+          "avg_views_per_post": [
+            "Open-X",
+            "Young"
+          ],
+          "top_platform": "3.2%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.catlink.com",
+      "amazon_store": "https://www.amazon.com/stores/CatLink/page/",
+      "contact_emails": "partner@catlink.com,marketing@catlink.com,press@catlink.com",
+      "linkedin_url": "https://www.linkedin.com/company/catlink",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b073",
+      "name": "Pidan",
+      "name_cn": "彼诞",
+      "industry_tags": [
+        "宠物",
+        "用品"
+      ],
+      "market": "日本/北美",
+      "estimated_annual_revenue": "+",
+      "user_base": "设计美学宠物品牌",
+      "overseas_presence": {
+        "amazon_rating": 4.5,
+        "social_followers": {
+          "youtube": 35000,
+          "instagram": 200000,
+          "tiktok": 280000
+        },
+        "brand_search_volume_monthly": 120000
+      },
+      "social_content_monthly": {
+        "total_posts": 85,
+        "creative_angles": 38000,
+        "top_products_featured": "Instagram",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "极简设计",
+            "猫砂创新",
+            "品质生活"
+          ],
+          "avg_views_per_post": [
+            "混合猫砂",
+            "雪屋猫砂盆"
+          ],
+          "top_platform": "4.0%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.pidan.com",
+      "amazon_store": "https://www.amazon.com/stores/Pidan/page/",
+      "contact_emails": "partner@pidan.com,marketing@pidan.com,press@pidan.com",
+      "linkedin_url": "https://www.linkedin.com/company/pidan",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b074",
+      "name": "VETRESKA",
+      "name_cn": "未卡",
+      "industry_tags": [
+        "宠物",
+        "食品",
+        "用品"
+      ],
+      "market": "东南亚",
+      "estimated_annual_revenue": "+",
+      "user_base": "新锐宠物生活方式",
+      "overseas_presence": {
+        "amazon_rating": 4.4,
+        "social_followers": {
+          "youtube": 25000,
+          "instagram": 180000,
+          "tiktok": 350000
+        },
+        "brand_search_volume_monthly": 85000
+      },
+      "social_content_monthly": {
+        "total_posts": 100,
+        "creative_angles": 65000,
+        "top_products_featured": "TikTok",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "宠物零食",
+            "猫爬架设计",
+            "宠物时尚"
+          ],
+          "avg_views_per_post": [
+            "冻干零食",
+            "仙人掌猫爬架"
+          ],
+          "top_platform": "4.5%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.vetreska.com",
+      "amazon_store": "https://www.amazon.com/stores/VETRESKA/page/",
+      "contact_emails": "partner@vetreska.com,marketing@vetreska.com,press@vetreska.com",
+      "linkedin_url": "https://www.linkedin.com/company/vetreska",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b075",
+      "name": "Petsafe",
+      "name_cn": "宠安",
+      "industry_tags": [
+        "宠物",
+        "用品"
+      ],
+      "market": "北美/欧洲",
+      "estimated_annual_revenue": "+",
+      "user_base": "宠物用品老牌巨头",
+      "overseas_presence": {
+        "amazon_rating": 4.5,
+        "social_followers": {
+          "youtube": 100000,
+          "instagram": 280000,
+          "tiktok": 200000
+        },
+        "brand_search_volume_monthly": 450000
+      },
+      "social_content_monthly": {
+        "total_posts": 70,
+        "creative_angles": 18000,
+        "top_products_featured": "YouTube",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "狗狗训练",
+            "宠物安全",
+            "智能门"
+          ],
+          "avg_views_per_post": [
+            "ScoopFree猫砂盆",
+            "Smart Feed"
+          ],
+          "top_platform": "2.5%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.petsafe.com",
+      "amazon_store": "https://www.amazon.com/stores/Petsafe/page/",
+      "contact_emails": "partner@petsafe.com,marketing@petsafe.com,press@petsafe.com",
+      "linkedin_url": "https://www.linkedin.com/company/petsafe",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b076",
+      "name": "Wild One",
+      "name_cn": "荒野一号",
+      "industry_tags": [
+        "宠物",
+        "用品"
+      ],
+      "market": "北美",
+      "estimated_annual_revenue": "+",
+      "user_base": "DTC宠物潮牌",
+      "overseas_presence": {
+        "amazon_rating": 4.5,
+        "social_followers": {
+          "youtube": 30000,
+          "instagram": 180000,
+          "tiktok": 250000
+        },
+        "brand_search_volume_monthly": 120000
+      },
+      "social_content_monthly": {
+        "total_posts": 65,
+        "creative_angles": 25000,
+        "top_products_featured": "Instagram",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "宠物潮牌",
+            "遛狗装备",
+            "城市养宠"
+          ],
+          "avg_views_per_post": [
+            "牵引绳套装",
+            "宠物碗"
+          ],
+          "top_platform": "3.8%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.wildone.com",
+      "amazon_store": "https://www.amazon.com/stores/Wild One/page/",
+      "contact_emails": "partner@wildone.com,marketing@wildone.com,press@wildone.com",
+      "linkedin_url": "https://www.linkedin.com/company/wildone",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b077",
+      "name": "Yuwell",
+      "name_cn": "鱼跃医疗",
+      "industry_tags": [
+        "医疗",
+        "健康监测"
+      ],
+      "market": "东南亚",
+      "estimated_annual_revenue": ".5B+",
+      "user_base": "中国医疗器械龙头出海",
+      "overseas_presence": {
+        "amazon_rating": 4.4,
+        "social_followers": {
+          "youtube": 50000,
+          "instagram": 80000,
+          "tiktok": 120000
+        },
+        "brand_search_volume_monthly": 150000
+      },
+      "social_content_monthly": {
+        "total_posts": 60,
+        "creative_angles": 12000,
+        "top_products_featured": "YouTube",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "家用医疗",
+            "慢病管理",
+            "呼吸健康"
+          ],
+          "avg_views_per_post": [
+            "指夹血氧仪",
+            "电子血压计",
+            "制氧机"
+          ],
+          "top_platform": "2.3%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.yuwell.com",
+      "amazon_store": "https://www.amazon.com/stores/Yuwell/page/",
+      "contact_emails": "partner@yuwell.com,marketing@yuwell.com,press@yuwell.com",
+      "linkedin_url": "https://www.linkedin.com/company/yuwell",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b078",
+      "name": "Breo",
+      "name_cn": "倍轻松",
+      "industry_tags": [
+        "医疗",
+        "健康",
+        "个护"
+      ],
+      "market": "东南亚",
+      "estimated_annual_revenue": "+",
+      "user_base": "智能按摩仪出海",
+      "overseas_presence": {
+        "amazon_rating": 4.3,
+        "social_followers": {
+          "youtube": 35000,
+          "instagram": 150000,
+          "tiktok": 250000
+        },
+        "brand_search_volume_monthly": 180000
+      },
+      "social_content_monthly": {
+        "total_posts": 90,
+        "creative_angles": 38000,
+        "top_products_featured": "TikTok",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "眼部按摩",
+            "筋膜放松",
+            "办公健康"
+          ],
+          "avg_views_per_post": [
+            "iNeck 5",
+            "iSee 4"
+          ],
+          "top_platform": "3.6%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.breo.com",
+      "amazon_store": "https://www.amazon.com/stores/Breo/page/",
+      "contact_emails": "partner@breo.com,marketing@breo.com,press@breo.com",
+      "linkedin_url": "https://www.linkedin.com/company/breo",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b079",
+      "name": "SKG",
+      "name_cn": "SKG",
+      "industry_tags": [
+        "医疗",
+        "健康",
+        "个护"
+      ],
+      "market": "东南亚/欧洲",
+      "estimated_annual_revenue": "+",
+      "user_base": "智能穿戴按摩仪出海",
+      "overseas_presence": {
+        "amazon_rating": 4.3,
+        "social_followers": {
+          "youtube": 50000,
+          "instagram": 200000,
+          "tiktok": 350000
+        },
+        "brand_search_volume_monthly": 250000
+      },
+      "social_content_monthly": {
+        "total_posts": 85,
+        "creative_angles": 52000,
+        "top_products_featured": "TikTok",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "颈椎健康",
+            "腰部按摩",
+            "科技养生"
+          ],
+          "avg_views_per_post": [
+            "G7 Pro颈椎按摩仪",
+            "W7腰部"
+          ],
+          "top_platform": "3.8%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.skg.com",
+      "amazon_store": "https://www.amazon.com/stores/SKG/page/",
+      "contact_emails": "partner@skg.com,marketing@skg.com,press@skg.com",
+      "linkedin_url": "https://www.linkedin.com/company/skg",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b080",
+      "name": "Omron Healthcare",
+      "name_cn": "欧姆龙健康",
+      "industry_tags": [
+        "医疗",
+        "健康监测"
+      ],
+      "market": "global",
+      "estimated_annual_revenue": "+",
+      "user_base": "全球血压计第一",
+      "overseas_presence": {
+        "amazon_rating": 4.6,
+        "social_followers": {
+          "youtube": 200000,
+          "instagram": 350000,
+          "tiktok": 250000
+        },
+        "brand_search_volume_monthly": 650000
+      },
+      "social_content_monthly": {
+        "total_posts": 70,
+        "creative_angles": 18000,
+        "top_products_featured": "YouTube",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "家庭健康",
+            "血压管理",
+            "心血管"
+          ],
+          "avg_views_per_post": [
+            "Platinum血压计",
+            "TENS理疗仪"
+          ],
+          "top_platform": "2.5%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.omronhealthcare.com",
+      "amazon_store": "https://www.amazon.com/stores/Omron Healthcare/page/",
+      "contact_emails": "partner@omronhealthcare.com,marketing@omronhealthcare.com,press@omronhealthcare.com",
+      "linkedin_url": "https://www.linkedin.com/company/omronhealthcare",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b081",
+      "name": "Withings",
+      "name_cn": "威信",
+      "industry_tags": [
+        "医疗",
+        "健康监测"
+      ],
+      "market": "欧洲/北美",
+      "estimated_annual_revenue": "+",
+      "user_base": "法式健康科技品牌",
+      "overseas_presence": {
+        "amazon_rating": 4.4,
+        "social_followers": {
+          "youtube": 80000,
+          "instagram": 250000,
+          "tiktok": 120000
+        },
+        "brand_search_volume_monthly": 220000
+      },
+      "social_content_monthly": {
+        "total_posts": 55,
+        "creative_angles": 18000,
+        "top_products_featured": "Instagram",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "健康监测",
+            "设计美学",
+            "睡眠追踪"
+          ],
+          "avg_views_per_post": [
+            "Body Scan",
+            "ScanWatch 2"
+          ],
+          "top_platform": "2.8%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.withings.com",
+      "amazon_store": "https://www.amazon.com/stores/Withings/page/",
+      "contact_emails": "partner@withings.com,marketing@withings.com,press@withings.com",
+      "linkedin_url": "https://www.linkedin.com/company/withings",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b082",
+      "name": "Mobvoi",
+      "name_cn": "出门问问",
+      "industry_tags": [
+        "医疗",
+        "可穿戴",
+        "3C"
+      ],
+      "market": "全球",
+      "estimated_annual_revenue": "+",
+      "user_base": "AI可穿戴出海品牌",
+      "overseas_presence": {
+        "amazon_rating": 4.2,
+        "social_followers": {
+          "youtube": 35000,
+          "instagram": 65000,
+          "tiktok": 85000
+        },
+        "brand_search_volume_monthly": 120000
+      },
+      "social_content_monthly": {
+        "total_posts": 65,
+        "creative_angles": 15000,
+        "top_products_featured": "YouTube",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "智能手表",
+            "健康监测",
+            "AI语音"
+          ],
+          "avg_views_per_post": [
+            "TicWatch Pro 5",
+            "TicPods"
+          ],
+          "top_platform": "2.7%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.mobvoi.com",
+      "amazon_store": "https://www.amazon.com/stores/Mobvoi/page/",
+      "contact_emails": "partner@mobvoi.com,marketing@mobvoi.com,press@mobvoi.com",
+      "linkedin_url": "https://www.linkedin.com/company/mobvoi",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b083",
+      "name": "Cofoe",
+      "name_cn": "可孚",
+      "industry_tags": [
+        "医疗",
+        "健康监测"
+      ],
+      "market": "东南亚",
+      "estimated_annual_revenue": "+",
+      "user_base": "家用医疗器械出海",
+      "overseas_presence": {
+        "amazon_rating": 4.3,
+        "social_followers": {
+          "youtube": 20000,
+          "instagram": 35000,
+          "tiktok": 55000
+        },
+        "brand_search_volume_monthly": 85000
+      },
+      "social_content_monthly": {
+        "total_posts": 45,
+        "creative_angles": 8000,
+        "top_products_featured": "YouTube",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "家用医疗",
+            "康复护理",
+            "慢病"
+          ],
+          "avg_views_per_post": [
+            "血压计",
+            "血糖仪",
+            "雾化器"
+          ],
+          "top_platform": "2.1%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.cofoe.com",
+      "amazon_store": "https://www.amazon.com/stores/Cofoe/page/",
+      "contact_emails": "partner@cofoe.com,marketing@cofoe.com,press@cofoe.com",
+      "linkedin_url": "https://www.linkedin.com/company/cofoe",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b084",
+      "name": "GoPro",
+      "name_cn": "GoPro",
+      "industry_tags": [
+        "影像",
+        "户外",
+        "3C"
+      ],
+      "market": "全球",
+      "estimated_annual_revenue": "+",
+      "user_base": "运动相机全球第一",
+      "overseas_presence": {
+        "amazon_rating": 4.5,
+        "social_followers": {
+          "youtube": 10000000,
+          "instagram": 18000000,
+          "tiktok": 12000000
+        },
+        "brand_search_volume_monthly": 5500000
+      },
+      "social_content_monthly": {
+        "total_posts": 150,
+        "creative_angles": 280000,
+        "top_products_featured": "YouTube",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "极限运动",
+            "水下世界",
+            "旅行vlog"
+          ],
+          "avg_views_per_post": [
+            "HERO13 Black",
+            "MAX 2"
+          ],
+          "top_platform": "4.0%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.gopro.com",
+      "amazon_store": "https://www.amazon.com/stores/GoPro/page/",
+      "contact_emails": "partner@gopro.com,marketing@gopro.com,press@gopro.com",
+      "linkedin_url": "https://www.linkedin.com/company/gopro",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b085",
+      "name": "Zhiyun",
+      "name_cn": "智云",
+      "industry_tags": [
+        "影像",
+        "3C"
+      ],
+      "market": "global",
+      "estimated_annual_revenue": "+",
+      "user_base": "稳定器全球TOP2",
+      "overseas_presence": {
+        "amazon_rating": 4.4,
+        "social_followers": {
+          "youtube": 200000,
+          "instagram": 300000,
+          "tiktok": 350000
+        },
+        "brand_search_volume_monthly": 450000
+      },
+      "social_content_monthly": {
+        "total_posts": 100,
+        "creative_angles": 35000,
+        "top_products_featured": "YouTube",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "vlog创作",
+            "专业影像",
+            "手机拍摄"
+          ],
+          "avg_views_per_post": [
+            "Crane 5",
+            "Smooth 6"
+          ],
+          "top_platform": "3.5%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.zhiyun.com",
+      "amazon_store": "https://www.amazon.com/stores/Zhiyun/page/",
+      "contact_emails": "partner@zhiyun.com,marketing@zhiyun.com,press@zhiyun.com",
+      "linkedin_url": "https://www.linkedin.com/company/zhiyun",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b086",
+      "name": "SmallRig",
+      "name_cn": "斯莫格",
+      "industry_tags": [
+        "影像",
+        "配件",
+        "3C"
+      ],
+      "market": "全球",
+      "estimated_annual_revenue": "+",
+      "user_base": "相机配件全球第一",
+      "overseas_presence": {
+        "amazon_rating": 4.6,
+        "social_followers": {
+          "youtube": 300000,
+          "instagram": 600000,
+          "tiktok": 450000
+        },
+        "brand_search_volume_monthly": 580000
+      },
+      "social_content_monthly": {
+        "total_posts": 130,
+        "creative_angles": 48000,
+        "top_products_featured": "YouTube",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "相机兔笼",
+            "DIY扩展",
+            "vlog装备"
+          ],
+          "avg_views_per_post": [
+            "Black Mamba兔笼",
+            "RC 350B灯"
+          ],
+          "top_platform": "4.2%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.smallrig.com",
+      "amazon_store": "https://www.amazon.com/stores/SmallRig/page/",
+      "contact_emails": "partner@smallrig.com,marketing@smallrig.com,press@smallrig.com",
+      "linkedin_url": "https://www.linkedin.com/company/smallrig",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b087",
+      "name": "Godox",
+      "name_cn": "神牛",
+      "industry_tags": [
+        "影像",
+        "照明",
+        "3C"
+      ],
+      "market": "global",
+      "estimated_annual_revenue": "+",
+      "user_base": "闪光灯全球第一",
+      "overseas_presence": {
+        "amazon_rating": 4.5,
+        "social_followers": {
+          "youtube": 250000,
+          "instagram": 380000,
+          "tiktok": 280000
+        },
+        "brand_search_volume_monthly": 420000
+      },
+      "social_content_monthly": {
+        "total_posts": 95,
+        "creative_angles": 25000,
+        "top_products_featured": "YouTube",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "专业灯光",
+            "人像摄影",
+            "直播布光"
+          ],
+          "avg_views_per_post": [
+            "AD600Pro",
+            "V1Pro"
+          ],
+          "top_platform": "3.4%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.godox.com",
+      "amazon_store": "https://www.amazon.com/stores/Godox/page/",
+      "contact_emails": "partner@godox.com,marketing@godox.com,press@godox.com",
+      "linkedin_url": "https://www.linkedin.com/company/godox",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b088",
+      "name": "Hollyland",
+      "name_cn": "好利兰",
+      "industry_tags": [
+        "影像",
+        "3C"
+      ],
+      "market": "全球",
+      "estimated_annual_revenue": "+",
+      "user_base": "无线图传全球TOP3",
+      "overseas_presence": {
+        "amazon_rating": 4.4,
+        "social_followers": {
+          "youtube": 80000,
+          "instagram": 100000,
+          "tiktok": 65000
+        },
+        "brand_search_volume_monthly": 95000
+      },
+      "social_content_monthly": {
+        "total_posts": 65,
+        "creative_angles": 15000,
+        "top_products_featured": "YouTube",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "直播方案",
+            "无线图传",
+            "影视"
+          ],
+          "avg_views_per_post": [
+            "Pyro S",
+            "Lark M2"
+          ],
+          "top_platform": "2.8%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.hollyland.com",
+      "amazon_store": "https://www.amazon.com/stores/Hollyland/page/",
+      "contact_emails": "partner@hollyland.com,marketing@hollyland.com,press@hollyland.com",
+      "linkedin_url": "https://www.linkedin.com/company/hollyland",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b089",
+      "name": "FeelWorld",
+      "name_cn": "富威德",
+      "industry_tags": [
+        "影像",
+        "3C"
+      ],
+      "market": "global",
+      "estimated_annual_revenue": "+",
+      "user_base": "监视器全球TOP1",
+      "overseas_presence": {
+        "amazon_rating": 4.3,
+        "social_followers": {
+          "youtube": 80000,
+          "instagram": 120000,
+          "tiktok": 85000
+        },
+        "brand_search_volume_monthly": 120000
+      },
+      "social_content_monthly": {
+        "total_posts": 60,
+        "creative_angles": 12000,
+        "top_products_featured": "YouTube",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "摄影监视",
+            "直播方案",
+            "外拍"
+          ],
+          "avg_views_per_post": [
+            "LUT7S",
+            "FW279S"
+          ],
+          "top_platform": "2.6%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.feelworld.com",
+      "amazon_store": "https://www.amazon.com/stores/FeelWorld/page/",
+      "contact_emails": "partner@feelworld.com,marketing@feelworld.com,press@feelworld.com",
+      "linkedin_url": "https://www.linkedin.com/company/feelworld",
+      "last_updated": "2026-06-02"
+    },
+    {
+      "id": "b090",
+      "name": "Viltrox",
+      "name_cn": "唯卓仕",
+      "industry_tags": [
+        "影像",
+        "镜头",
+        "3C"
+      ],
+      "market": "全球",
+      "estimated_annual_revenue": "+",
+      "user_base": "国产镜头出海黑马",
+      "overseas_presence": {
+        "amazon_rating": 4.4,
+        "social_followers": {
+          "youtube": 50000,
+          "instagram": 120000,
+          "tiktok": 85000
+        },
+        "brand_search_volume_monthly": 85000
+      },
+      "social_content_monthly": {
+        "total_posts": 70,
+        "creative_angles": 18000,
+        "top_products_featured": "YouTube",
+        "last_12_months": {
+          "avg_engagement_rate": [
+            "定焦镜头",
+            "人像摄影",
+            "性价比"
+          ],
+          "avg_views_per_post": [
+            "AF 75mm F1.2",
+            "AF 27mm F1.2"
+          ],
+          "top_platform": "3.7%"
+        }
+      },
+      "case_study_available": false,
+      "website": "https://www.viltrox.com",
+      "amazon_store": "https://www.amazon.com/stores/Viltrox/page/",
+      "contact_emails": "partner@viltrox.com,marketing@viltrox.com,press@viltrox.com",
+      "linkedin_url": "https://www.linkedin.com/company/viltrox",
+      "last_updated": "2026-06-02"
+    }
+  ],
+  "industry_tags": [
+    {
+      "tag": "3C",
+      "description": "消费电子",
+      "sub_tags": [
+        "充电",
+        "配件",
+        "手机",
+        "无人机",
+        "照明"
+      ]
+    },
+    {
+      "tag": "储能",
+      "description": "新能源储能",
+      "sub_tags": [
+        "户外电源",
+        "家庭储能",
+        "太阳能"
+      ]
+    },
+    {
+      "tag": "智能家居",
+      "description": "Smart Home",
+      "sub_tags": [
+        "清洁家电",
+        "机器人",
+        "安防",
+        "厨房"
+      ]
+    },
+    {
+      "tag": "美妆",
+      "description": "Beauty",
+      "sub_tags": [
+        "护肤",
+        "彩妆",
+        "个护工具"
+      ]
+    },
+    {
+      "tag": "户外",
+      "description": "Outdoor",
+      "sub_tags": [
+        "露营",
+        "照明",
+        "骑行",
+        "运动"
+      ]
+    },
+    {
+      "tag": "出行",
+      "description": "Mobility",
+      "sub_tags": [
+        "电动自行车",
+        "电动滑板车",
+        "汽车配件"
+      ]
+    },
+    {
+      "tag": "宠物",
+      "description": "Pet",
+      "sub_tags": [
+        "宠物用品",
+        "宠物食品",
+        "宠物健康"
+      ]
+    },
+    {
+      "tag": "医疗",
+      "description": "Healthcare",
+      "sub_tags": [
+        "家用医疗",
+        "健康监测",
+        "康复"
+      ]
+    },
+    {
+      "tag": "影像",
+      "description": "Imaging",
+      "sub_tags": [
+        "相机",
+        "镜头",
+        "配件"
+      ]
+    },
+    {
+      "tag": "新能源",
+      "description": "New Energy",
+      "sub_tags": [
+        "储能",
+        "充电桩",
+        "光伏"
+      ]
+    },
+    {
+      "tag": "IoT",
+      "description": "物联网",
+      "sub_tags": [
+        "可穿戴",
+        "传感器",
+        "平台"
+      ]
+    },
+    {
+      "tag": "机器人",
+      "description": "Robotics",
+      "sub_tags": [
+        "割草",
+        "清洁",
+        "服务"
+      ]
+    }
+  ]
+}

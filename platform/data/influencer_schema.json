@@ -1,0 +1,64 @@
+{
+  "tables": {
+    "influencer_submission": {
+      "name": "红人提报资源名单",
+      "description": "向客户提报匹配红人名单",
+      "columns": [
+        {"id":"no","label":"No.","type":"number","required":true},
+        {"id":"submit_date","label":"提报日期","type":"date","required":true},
+        {"id":"kol_handle","label":"KOL Handle / 博主ID","type":"text","required":true},
+        {"id":"followers","label":"followers / 粉丝量","type":"number","required":true},
+        {"id":"profile_link","label":"Profile Link / 链接","type":"url","required":true},
+        {"id":"platform","label":"Platform / 平台","type":"select","options":["YouTube","TikTok","Instagram","X/Twitter","Facebook"],"required":true},
+        {"id":"region","label":"Region / 地区","type":"text","required":true},
+        {"id":"category","label":"Category / 类型","type":"text","required":true},
+        {"id":"avg_views_10","label":"近10个视频平均播放量","type":"number","required":false},
+        {"id":"collab_type","label":"Collab. Type / 合作形式","type":"select","options":["Dedicated 完播","Integration 植入","Affiliate 分佣"],"required":true},
+        {"id":"cost_usd","label":"Cost (USD) / 价格","type":"number","required":true},
+        {"id":"cpm","label":"CPM","type":"number","required":false},
+        {"id":"is_cooperated","label":"是否合作","type":"select","options":["是","否","待定"],"required":false},
+        {"id":"client_feedback","label":"Client Feedback / 品牌方反馈","type":"text","required":false},
+        {"id":"tm_followup","label":"TuringMarket 运营跟进","type":"text","required":false},
+        {"id":"client_feedback_2","label":"Client Feedback / 品牌方反馈2","type":"text","required":false},
+        {"id":"tm_followup_2","label":"TuringMarket 运营跟进2","type":"text","required":false},
+        {"id":"status_update","label":"网红状态更新","type":"text","required":false}
+      ]
+    },
+    "execution_tracking": {
+      "name": "客户下单合作资源 (执行追踪)",
+      "description": "合作确认后的执行追踪表",
+      "columns": [
+        {"id":"no","label":"No.","type":"number","required":true},
+        {"id":"kol_handle","label":"KOL Handle / 博主ID","type":"text","required":true},
+        {"id":"profile_link","label":"Profile Link / 链接","type":"url","required":true},
+        {"id":"platform","label":"Platform / 平台","type":"select","options":["YouTube","TikTok","Instagram"],"required":true},
+        {"id":"cost_usd","label":"Cost (USD) / 价格","type":"number","required":true},
+        {"id":"collab_type","label":"Collab. Type / 合作形式","type":"text","required":true},
+        {"id":"progress","label":"Progress / 红人进度更新","type":"text","required":true},
+        {"id":"shipping_address","label":"Shipping Address / 寄送地址","type":"text","required":false},
+        {"id":"tracking_number","label":"Tracking Number / 寄件单号","type":"text","required":false},
+        {"id":"tracking_link","label":"Tracking Link / 追踪码","type":"url","required":false},
+        {"id":"brand_copywriting","label":"品牌方指定发布文案","type":"text","required":false},
+        {"id":"track_link","label":"Track Link / 追踪链接","type":"url","required":true},
+        {"id":"exclusive_code","label":"专属CODE","type":"text","required":false},
+        {"id":"script_link","label":"Script link / 脚本链接","type":"url","required":false},
+        {"id":"script_feedback","label":"Script Feedback / 脚本客户反馈","type":"text","required":false},
+        {"id":"draft_video_feedback","label":"Draft Video Feedback / 视频稿客户反馈","type":"text","required":false},
+        {"id":"posting_url","label":"Posting URL / 发布链接","type":"url","required":false},
+        {"id":"posted_screenshot","label":"Posted Video Screenshot / 发布截屏","type":"text","required":false},
+        {"id":"views_14days","label":"14 Days View / 发布后14天播放量","type":"number","required":false},
+        {"id":"actual_cpm","label":"Actual CPM / 实际最终CPM","type":"number","required":false}
+      ]
+    }
+  },
+  "platforms": ["YouTube","TikTok","Instagram","X/Twitter","Facebook"],
+  "categories": ["Tech/3C","Beauty","Home/Garden","Outdoor","Pet","Health","Lifestyle","Fashion","Gaming","Food"],
+  "sample_influencers": [
+    {
+      "id":"inf_001","kol_handle":"@TechReviewPro","platform":"YouTube","profile_link":"https://youtube.com/@techreviewpro","followers":125000,"avg_views_10":45000,"category":"Tech/3C","region":"US","language":"EN","content_style":"深度测评+对比","collab_type":"Dedicated 完播","cost_usd":2500,"cpm":55,"brand_collab_history":"Anker;Ugreen;Baseus","audience_demographics":{"age_18_34":65,"male_pct":72,"top_countries":["US","UK","CA"]}},
+    {"id":"inf_002","kol_handle":"@GardenLifeDIY","platform":"Instagram","profile_link":"https://instagram.com/gardenlife_diy","followers":48000,"avg_views_10":28000,"category":"Home/Garden","region":"DE","language":"DE/EN","content_style":"庭院改造+生活方式","collab_type":"Integration 植入","cost_usd":1000,"cpm":36,"brand_collab_history":"Bosch;Gardena","audience_demographics":{"age_25_54":70,"male_pct":58,"top_countries":["DE","AT","CH"]}},
+    {"id":"inf_003","kol_handle":"@OutdoorGearLab","platform":"YouTube","profile_link":"https://youtube.com/@outdoorgearlab","followers":320000,"avg_views_10":95000,"category":"Outdoor","region":"US","language":"EN","content_style":"户外装备实测","collab_type":"Dedicated 完播","cost_usd":4000,"cpm":42,"brand_collab_history":"EcoFlow;Bluetti;Goal Zero","audience_demographics":{"age_25_44":62,"male_pct":78,"top_countries":["US","CA","AU"]}},
+    {"id":"inf_004","kol_handle":"@PetMomLife","platform":"TikTok","profile_link":"https://tiktok.com/@petmomlife","followers":95000,"avg_views_10":120000,"category":"Pet","region":"US","language":"EN","content_style":"萌宠日常+好物推荐","collab_type":"Affiliate 分佣","cost_usd":800,"cpm":7,"brand_collab_history":"Petlibro;Whisker","audience_demographics":{"age_18_34":72,"male_pct":35,"top_countries":["US","UK"]}},
+    {"id":"inf_005","kol_handle":"@BeautyScience","platform":"Instagram","profile_link":"https://instagram.com/beautyscience","followers":185000,"avg_views_10":65000,"category":"Beauty","region":"FR","language":"FR/EN","content_style":"成分分析+实测对比","collab_type":"Integration 植入","cost_usd":3000,"cpm":46,"brand_collab_history":"LOreal;Caudalie","audience_demographics":{"age_18_34":68,"male_pct":15,"top_countries":["FR","BE","CH"]}}
+  ]
+}
