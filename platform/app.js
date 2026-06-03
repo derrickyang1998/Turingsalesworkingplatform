@@ -7,21 +7,7 @@ let CURRENT_USER = null;
 let BRANDS = [], INFLUENCERS = [], TEMPLATES = [], CBLOCKS = {};
 let curDemand = null, selTpl = null, lastMatch = [], lastProp = "";
 let uploadedFileContent = "";
-let chatHistory = [{role: "system", content: "You are the TuringMarket AI assistant. Answer in Chinese, concise and professional."}];// ==== NAV: maximum compatibility (IE6+) ====
-(function() {
-  if (!document.body) return;
-  document.body.onclick = function(e) {
-    e = e || window.event;
-    var el = e.target || e.srcElement;
-    while (el && el !== document.body) {
-      if (el.className && el.className.indexOf('nav-item') !== -1) {
-        var pid = el.getAttribute('data-page');
-        if (pid) { switchPage(pid); return false; }
-      }
-      el = el.parentNode;
-    }
-  };
-})();
+let chatHistory = [{role: "system", content: "You are the TuringMarket AI assistant. Answer in Chinese, concise and professional."}];
 
 // ===== AUTH =====
 async function doLogin() {
@@ -291,6 +277,18 @@ function switchPage(id) {
   if (id === 'm0') loadCustomers();
   if (id === 'admin') loadAdminDashboard();
 }
+
+// Hash-driven routing
+window.onhashchange = function() {
+  var h = location.hash.replace('#', '') || 'm1';
+  switchPage(h);
+};
+
+// Initial hash
+(function() {
+  var h = location.hash.replace('#', '') || 'm1';
+  if (h !== 'm1') setTimeout(function() { switchPage(h); }, 200);
+})();
 function gv(id) { var e = document.getElementById(id); return e ? e.value : '' }
 function getDate() { var d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0') }
 
