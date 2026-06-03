@@ -313,9 +313,15 @@ function switchPage(id) {
   ni = document.querySelector('[data-page="' + id + '"]');
   if (ni) ni.classList.add('active');
   pages = document.querySelectorAll('.page');
-  for (i = 0; i < pages.length; i++) { pages[i].style.cssText = 'display:none!important'; }
+  for (i = 0; i < pages.length; i++) { pages[i].classList.remove('active'); }
   pg = document.getElementById('page-' + id);
-  if (pg) pg.style.cssText = 'display:block!important';
+  if (pg) {
+    pg.classList.add('active');
+    // Force layout recalculation
+    pg.style.display = 'block';
+    pg.offsetHeight;
+    pg.style.display = '';
+  }
   if (id === 'm0') loadCustomers();
   if (id === 'admin') loadAdminDashboard();
 }
