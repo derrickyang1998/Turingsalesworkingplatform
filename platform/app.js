@@ -325,6 +325,7 @@ function switchPage(id) {
     pg.style.display = '';
   }
   if (id === 'm0') loadCustomers();
+  if (id === 'admin') loadAdminDashboard();
   
 }
 
