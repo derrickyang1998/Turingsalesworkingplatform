@@ -524,7 +524,6 @@ function escapeHTML(s){return String(s||"").replace(/&/g,"&amp;").replace(/</g,"
 
 
 function switchTab(id) { document.querySelectorAll('#tabBar .tab').forEach(function (t) { t.classList.remove('active') }); var tabEl = document.querySelector('[data-tab="' + id + '"]'); if (tabEl) tabEl.classList.add('active'); var t1=document.getElementById('tab1-content');var t2=document.getElementById('tab2-content');var t3=document.getElementById('tab3-content');if(t1)t1.classList.toggle('hidden',id!=='tab1');if(t2)t2.classList.toggle('hidden',id!=='tab2');if(t3)t3.classList.toggle('hidden',id!=='tab3') }
-function initM4() { matchInfluencers() }
 // ===== M4: INFLUENCER MATCHING (API-driven) =====
 lastMatch = []; var lastInfAPI = [];
 
