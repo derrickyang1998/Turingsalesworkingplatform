@@ -1,7 +1,7 @@
 ﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-<meta charset="UTF-8"><meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"><meta http-equiv="Pragma" content="no-cache"><meta http-equiv="Expires" content="0">
+<meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>TuringMarket 商务工作平台</title>
 <style>
@@ -34,7 +34,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);letter-spaci
 .sidebar-logo{padding:0 20px 16px;border-bottom:1px solid var(--border);margin-bottom:8px}
 .sidebar-logo h1{font-weight:600;font-size:16px;margin:0}
 .nav-item{padding:10px 16px;cursor:pointer;font-size:13px;border-radius:0 8px 8px 0;margin-right:8px;transition:all .15s;display:flex;align-items:center;gap:8px;opacity:.7}
-.nav-item:hover{opacity:1;background:#f0f0ed}a.nav-item{text-decoration:none;color:inherit;}
+.nav-item:hover{opacity:1;background:#f0f0ed}
 .nav-item.active{opacity:1;background:#f0f0ed;font-weight:600}
 .nav-item .nav-icon{font-size:16px;width:22px;text-align:center}
 .admin-only{display:none!important}
@@ -183,7 +183,7 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
 .brand-link:hover{background:#f5f5f4}
 .brand-emails{font-size:10px;color:#666}
 
-button.nav-item{font-family:inherit;font-size:inherit;text-align:left;display:flex;align-items:center;gap:8px}</style>
+</style>
 </head>
 <body>
 <!-- AUTH OVERLAY -->
@@ -193,7 +193,7 @@ button.nav-item{font-family:inherit;font-size:inherit;text-align:left;display:fl
     <p style="text-align:center;font-size:13px;opacity:.5;margin-bottom:20px">商务工作平台</p>
     <input type="text" id="loginUser" placeholder="用户名">
     <input type="password" id="loginPass" placeholder="密码" onkeydown="if(event.key==='Enter')doLogin()">
-    <button class="btn btn-primary">登录</button>
+    <button class="btn btn-primary" onclick="doLogin()">登录</button>
     <p style="text-align:center;font-size:11px;opacity:.4;margin-top:16px">管理员: admin / turing2026<br>团队成员: 联系管理员获取账号</p>
   </div>
 </div>
@@ -202,34 +202,34 @@ button.nav-item{font-family:inherit;font-size:inherit;text-align:left;display:fl
 <div id="app" style="display:none">
   <nav class="sidebar">
     <div class="sidebar-logo"><h1>TuringMarket</h1></div>
-      <button class="nav-item" data-page="m0" onclick="switchPage('m0')"><span class="nav-icon">🚀</span> 客户管道</button>
-      <button class="nav-item active" data-page="m1" onclick="switchPage('m1')"><span class="nav-icon">📊</span> 行业品牌智库</button>
-      <button class="nav-item" data-page="m2" onclick="switchPage('m2')"><span class="nav-icon">🎯</span> 客户策略规划</button>
-      <button class="nav-item" data-page="m3" onclick="switchPage('m3')"><span class="nav-icon">📋</span> 需求接入 & 方案生成</button>
-      <button class="nav-item" data-page="m4" onclick="switchPage('m4')"><span class="nav-icon">👥</span> 网红匹配 & 执行管理</button>
-      <button class="nav-item" data-page="m5" onclick="switchPage('m5')"><span class="nav-icon">🤖</span> AI 助手</button>
-      <button class="nav-item admin-only" data-page="admin" onclick="switchPage('admin')"><span class="nav-icon">🛡️</span> 管理控制室</button>
-      <div class="sidebar-footer">v5.4 · Codex</div>
-    </div>
+    <div class="nav-item" data-page="m0" onclick="switchPage('m0')"><span class="nav-icon">🚀</span> 客户管道</div>
+      <div class="nav-item active" data-page="m1" onclick="switchPage('m1')"><span class="nav-icon">📊</span> 行业品牌智库</div>
+    <div class="nav-item" data-page="m2" onclick="switchPage('m2')"><span class="nav-icon">🎯</span> 客户策略规划</div>
+    <div class="nav-item" data-page="m3" onclick="switchPage('m3')"><span class="nav-icon">📋</span> 需求接入 & 方案生成</div>
+    <div class="nav-item" data-page="m4" onclick="switchPage('m4')"><span class="nav-icon">👥</span> 网红匹配 & 执行管理</div>
+    <div class="nav-item" data-page="m5" onclick="switchPage('m5')"><span class="nav-icon">🤖</span> AI 助手</div>
+    <div class="nav-item admin-only" data-page="admin" onclick="switchPage('admin')"><span class="nav-icon">🛡️</span> 管理控制室</div>
+    <div class="sidebar-footer" id="sidebarFooter"></div>
+  </nav>
   <main>
 
 
-<!-- M0: Customer Pipeline -->
+<!-- M0: Customer Pipeline (auto-loaded from server) -->
 <div class="page" id="page-m0">
 <h2>🚀 客户管道</h2>
 <p class="subtitle" id="m0Stats">商务SOP · 线索→成交全流程跟踪</p>
 
 <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px" id="m0StageFilter">
-  <span class="tag active">全部</span>
-  <span class="tag">活跃中</span>
-  <span class="tag">暂停/成交/丢失</span>
+  <span class="tag active" onclick="filterCustomers('')">全部</span>
+  <span class="tag" onclick="filterCustomers('','active')">活跃中</span>
+  <span class="tag" onclick="filterCustomers('','terminal')">暂停/成交/丢失</span>
 </div>
 
 <div style="display:flex;gap:8px;margin-bottom:16px">
   <input type="text" id="custSearch" placeholder="搜索品牌/公司/联系人..." style="width:250px" onkeydown="if(event.key==='Enter')loadCustomers()">
-  <button class="btn btn-primary btn-sm">🔍 搜索</button>
-  <button class="btn btn-sm">+ 新增客户</button>
-  <button class="btn btn-sm">🔄 刷新</button>
+  <button class="btn btn-primary btn-sm" onclick="loadCustomers()">🔍 搜索</button>
+  <button class="btn btn-sm" onclick="showAddCustomer()">+ 新增客户</button>
+  <button class="btn btn-sm" onclick="loadCustomers()">🔄 刷新</button>
 </div>
 
 <div class="card hidden" id="addCustomerCard" style="margin-bottom:16px">
@@ -250,8 +250,8 @@ button.nav-item{font-family:inherit;font-size:inherit;text-align:left;display:fl
     <div style="flex:1"><label>备注</label><input id="custNotes" placeholder="跟进备注"></div>
   </div>
   <div class="btn-group">
-    <button class="btn btn-primary btn-sm">保存</button>
-    <button class="btn btn-sm">取消</button>
+    <button class="btn btn-primary btn-sm" onclick="saveCustomer()">保存</button>
+    <button class="btn btn-sm" onclick="hideAddCustomer()">取消</button>
   </div>
 </div>
 
@@ -264,7 +264,6 @@ button.nav-item{font-family:inherit;font-size:inherit;text-align:left;display:fl
   </div>
 </div>
 </div>
-
 <!-- M1: Brand Hub -->
 <div class="page active" id="page-m1">
 <h2>行业品牌智库</h2>
@@ -285,8 +284,8 @@ button.nav-item{font-family:inherit;font-size:inherit;text-align:left;display:fl
         <span class="search-icon">🔍</span>
         <input id="brandSearch" placeholder="Search brands..." oninput="filterBrands()">
       </div>
-      <button class="btn btn-sm">AI Search</button>
-      <button class="btn btn-sm">Export CSV</button>
+      <button class="btn btn-sm" onclick="searchNewBrand()">AI Search</button>
+      <button class="btn btn-sm" onclick="exportBrandCSV()">Export CSV</button>
       <span id="brandCount" style="font-size:11px;opacity:.5;white-space:nowrap"></span>
     </div>
     <div id="brandList" style="flex:1;overflow-y:auto"></div>
@@ -327,7 +326,7 @@ button.nav-item{font-family:inherit;font-size:inherit;text-align:left;display:fl
   <div class="card">
     <h3>📤 上传客户需求文件</h3>
     <p style="font-size:12px;opacity:.6;margin-bottom:8px">支持 PDF / DOCX / XLSX / XLS / 图片格式。AI 将自动识别品牌、产品、预算、目标市场等关键信息。</p>
-    <div class="file-upload" id="demandDropZone"
+    <div class="file-upload" id="demandDropZone" onclick="document.getElementById('demandFile').click()"
          ondragover="event.preventDefault();this.style.borderColor='#1a1a1a';this.style.background='#f5f5f4'"
          ondragleave="event.preventDefault();this.style.borderColor='';this.style.background=''"
          ondrop="event.preventDefault();this.style.borderColor='';this.style.background='';handleDemandDrop(event)">
@@ -338,7 +337,7 @@ button.nav-item{font-family:inherit;font-size:inherit;text-align:left;display:fl
     <input type="file" id="demandFile" accept=".pdf,.docx,.xlsx,.xls,.jpg,.jpeg,.png" style="display:none" onchange="handleDemandFile(event)">
     <div id="demandFileStatus" style="font-size:11px;opacity:.5;margin-top:8px"></div>
     <div style="margin-top:16px;text-align:center">
-      <button class="btn btn-primary" id="btnAnalyzeAI" disabled>🤖 AI 分析需求</button>
+      <button class="btn btn-primary" id="btnAnalyzeAI" onclick="analyzeDemandAI()" disabled>🤖 AI 分析需求</button>
       <span style="font-size:11px;opacity:.4;margin-left:8px" id="aiAnalyzeHint">请先上传文件</span>
     </div>
   </div>
@@ -355,7 +354,7 @@ button.nav-item{font-family:inherit;font-size:inherit;text-align:left;display:fl
         <div><label>目标市场</label><select id="d_area"><option value="">请选择...</option><option>北美</option><option>欧洲</option><option>日本</option><option>东南亚</option><option>中东</option><option>全球</option></select></div>
         <div><label>预算范围</label><select id="d_budget"><option value="">请选择...</option><option>$5K-15K</option><option>$15K-50K</option><option>$50K-100K</option><option>$100K+</option></select></div>
       </div>
-      <button class="btn btn-sm" style="margin-top:8px">手动提交分析</button>
+      <button class="btn btn-sm" style="margin-top:8px" onclick="analyzeDemandManual()">手动提交分析</button>
     </div>
   </details>
 </div>
@@ -365,8 +364,8 @@ button.nav-item{font-family:inherit;font-size:inherit;text-align:left;display:fl
   <div class="card">
     <div id="analysisOut"></div>
     <div style="display:flex;gap:8px;margin-top:12px">
-      <button class="btn btn-primary">下一步 → 选择模板</button>
-      <button class="btn btn-outline btn-sm">↩ 返回重传</button>
+      <button class="btn btn-primary" onclick="goStep3()">下一步 → 选择模板</button>
+      <button class="btn btn-outline btn-sm" onclick="resetDemand()">↩ 返回重传</button>
     </div>
   </div>
 </div>
@@ -379,9 +378,9 @@ button.nav-item{font-family:inherit;font-size:inherit;text-align:left;display:fl
   </div>
   <div class="card" style="margin-top:16px" id="templateCard">
     <h3>📝 生成方案</h3>
-    <button class="btn btn-primary" style="width:100%">🚀 自动生成方案</button>
-    <button class="btn btn-outline btn-sm" style="width:100%;margin-top:8px">📋 复制方案</button>
-    <button class="btn btn-primary btn-sm" id="btnGenPPT" style="width:100%;margin-top:8px;background:#635bff">📊 生成 HTML PPT (reveal.js)</button>
+    <button class="btn btn-primary" style="width:100%" onclick="generateProposal()">🚀 自动生成方案</button>
+    <button class="btn btn-outline btn-sm" style="width:100%;margin-top:8px" onclick="copyProposal()">📋 复制方案</button>
+    <button class="btn btn-primary btn-sm" id="btnGenPPT" style="width:100%;margin-top:8px;background:#635bff" onclick="generateHTMLPPT()">📊 生成 HTML PPT (reveal.js)</button>
       <div id="proposalOutput" style="margin-top:12px;padding:16px;background:var(--surface2);border-radius:8px;font-size:12px;white-space:pre-wrap;max-height:400px;overflow-y:auto"></div>
     <div id="aiWorkNotes" style="margin-top:12px;padding:12px;background:#fefce8;border-radius:8px;font-size:11px;opacity:.8;display:none"></div>
   </div>
@@ -391,31 +390,32 @@ button.nav-item{font-family:inherit;font-size:inherit;text-align:left;display:fl
 <!-- M4: Influencer -->
 <div class="page" id="page-m4">
 <h2>👥 网红匹配 & 执行管理</h2>
-<p class="subtitle">提报资源名单 · 智能匹配 · 合作追踪 · 飞书同步</p>
+<p class="subtitle">提报资源名单 · 下单合作追踪 · 飞书同步</p>
 <div class="tabs" id="tabBar">
-  <div class="tab active" data-tab="tab1">📋 提报资源名单</div>
-  <div class="tab" data-tab="tab2">📊 下单合作资源</div>
-  <div class="tab" data-tab="tab3">📤 导入 & 飞书</div>
+  <div class="tab active" data-tab="tab1" onclick="switchTab('tab1')">📋 提报资源名单</div>
+  <div class="tab" data-tab="tab2" onclick="switchTab('tab2')">📊 下单合作资源</div>
+  <div class="tab" data-tab="tab3" onclick="switchTab('tab3')">📤 导入 & 飞书</div>
 </div>
 <div id="tab1-content">
   <div class="card">
-    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px"><input type="text" id="filt_search" placeholder="搜索网红/品牌/风格..." style="width:180px" onkeydown="if(event.key==='Enter')matchInfluencers()"> $2 style="width:auto" onchange="matchInfluencers()"><option value="">全部平台</option><option>YouTube</option><option>TikTok</option><option>Instagram</option></select>
-      <select id="filt_category" style="width:auto" onchange="matchInfluencers()"><option value="">全部类别</option><option>3C</option><option>智能家居</option><option>美妆</option><option>户外</option><option>宠物</option><option>储能</option><option>医疗</option><option>出行</option></select>
-      <select id="filt_region" style="width:auto" onchange="matchInfluencers()"><option value="">全部地区</option><option>US</option><option>DE</option><option>JP</option><option>KR</option></select><select id="filt_sort" style="width:auto" onchange="matchInfluencers()"><option value="followers">按粉丝数</option><option value="engagement">按互动率</option><option value="cost_usd">按报价</option></select><button class="btn btn-primary btn-sm">🔍 筛选</button><button class="btn btn-sm">🤖 智能匹配</button>
-      <button class="btn btn-sm">📥 导出CSV</button>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
+      <select id="filt_platform" style="width:auto" onchange="matchInfluencers()"><option value="">全部平台</option><option>YouTube</option><option>TikTok</option><option>Instagram</option></select>
+      <select id="filt_category" style="width:auto" onchange="matchInfluencers()"><option value="">全部类别</option><option>Tech/3C</option><option>Beauty</option><option>Home/Garden</option><option>Outdoor</option><option>Pet</option></select>
+      <button class="btn btn-sm" onclick="matchInfluencers()">🔍 筛选</button>
+      <button class="btn btn-sm" onclick="exportSubmissionCSV()">📥 导出CSV</button>
     </div>
-    <div class="table-container" id="infTableContainer" style="max-height:450px;overflow-y:auto"><p style="text-align:center;padding:30px;opacity:.5">点击筛选或智能匹配加载网红数据</p></div>
+    <div class="table-container" id="infTableContainer" style="max-height:450px;overflow-y:auto"><p style="text-align:center;padding:30px;opacity:.5">请先在「导入 & 飞书」页面上传网红数据</p></div>
   </div>
 </div>
 <div id="tab2-content" class="hidden">
-  <div class="card"><h3>合作追踪工作台</h3><div class="table-container" id="execTableContainer" style="max-height:450px;overflow-y:auto"><p style="text-align:center;padding:30px;opacity:.5"><div id="collabStatsBar" style="display:flex;gap:16px;margin-bottom:12px"></div><div id="execTableArea"></div></p></div></div>
+  <div class="card"><h3>客户下单合作资源</h3><div class="table-container" id="execTableContainer" style="max-height:450px;overflow-y:auto"><p style="text-align:center;padding:30px;opacity:.5">合作确认后填充</p></div></div>
 </div>
 <div id="tab3-content" class="hidden">
   <div class="grid grid-2">
     <div class="card">
       <h3>📤 网红数据导入</h3>
       <p style="font-size:12px;opacity:.6;margin-bottom:16px">支持 CSV / JSON / XLS / XLSX 格式，拖拽或点击上传</p>
-      <div class="file-upload" id="infDropZone" 
+      <div class="file-upload" id="infDropZone" onclick="document.getElementById('infFile').click()" 
            ondragover="event.preventDefault();this.style.borderColor='#1a1a1a';this.style.background='#f5f5f4'"
            ondragleave="event.preventDefault();this.style.borderColor='';this.style.background=''"
            ondrop="event.preventDefault();this.style.borderColor='';this.style.background='';handleDrop(event)">
@@ -425,8 +425,8 @@ button.nav-item{font-family:inherit;font-size:inherit;text-align:left;display:fl
       </div>
       <input type="file" id="infFile" accept=".csv,.json,.xls,.xlsx" style="display:none" onchange="handleUpload(event)">
       <div style="display:flex;gap:6px;margin-top:8px">
-        <button class="btn btn-outline btn-sm">📋 下载模板</button>
-        <button class="btn btn-outline btn-sm">📂 浏览文件上传</button>
+        <button class="btn btn-outline btn-sm" onclick="downloadInfTemplate()">📋 下载模板</button>
+        <button class="btn btn-outline btn-sm" onclick="openInfUploadModal()">📂 浏览文件上传</button>
         <span id="uploadOK" style="font-size:11px;opacity:.6;align-self:center"></span>
       </div>
       <div id="infPreview" style="margin-top:12px;max-height:120px;overflow-y:auto;font-size:11px"></div>
@@ -434,7 +434,7 @@ button.nav-item{font-family:inherit;font-size:inherit;text-align:left;display:fl
     <div class="card">
       <h3>📊 飞书同步</h3>
       <p style="font-size:12px;opacity:.7;margin-bottom:8px">在 Tab 1 中勾选网红 → 一键推送到飞书表格</p>
-      <button class="btn btn-primary btn-sm">📨 推送到飞书</button>
+      <button class="btn btn-primary btn-sm" onclick="pushToFeishu()">📨 推送到飞书</button>
       <div id="feishuStatus" style="font-size:11px;opacity:.6;margin-top:6px"></div>
     </div>
   </div>
@@ -452,8 +452,8 @@ button.nav-item{font-family:inherit;font-size:inherit;text-align:left;display:fl
     </div>
     <div class="chat-input-area">
       <input type="text" id="chatInput" placeholder="输入问题..." onkeydown="if(event.key==='Enter')sendChat()">
-      <button class="btn btn-primary btn-sm">发送</button>
-      <button class="btn btn-sm">清空</button>
+      <button class="btn btn-primary btn-sm" onclick="sendChat()">发送</button>
+      <button class="btn btn-sm" onclick="clearChat()">清空</button>
     </div>
   </div>
 </div>
@@ -480,7 +480,7 @@ button.nav-item{font-family:inherit;font-size:inherit;text-align:left;display:fl
     </table>
   </div>
   <div class="btn-group">
-    <button class="btn btn-sm">🔗 生成邀请码</button>
+    <button class="btn btn-sm" onclick="adminCreateInvite()">🔗 生成邀请码</button>
     <span id="ad_inviteResult" style="font-size:12px;align-self:center;opacity:.7"></span>
   </div>
 </div>
@@ -501,27 +501,27 @@ button.nav-item{font-family:inherit;font-size:inherit;text-align:left;display:fl
 </div>
 
 <!-- Influencer Upload Modal -->
-<div class="modal-overlay" id="infUploadModal" style="display:none">
-  <div class="modal">
-    <button class="modal-close">&times;</button>
+<div class="modal-overlay" id="infUploadModal" style="display:none" onclick="if(event.target===this)this.style.display='none'">
+  <div class="modal" onclick="event.stopPropagation()">
+    <button class="modal-close" onclick="document.getElementById('infUploadModal').style.display='none'">&times;</button>
     <h3>📤 网红数据上传</h3>
     <p style="font-size:12px;opacity:.6;margin-bottom:16px">选择文件上传，支持 CSV、JSON 格式。文件需包含网红基本信息。</p>
     <div style="border:2px dashed #e0e0dd;border-radius:8px;padding:40px;text-align:center;margin-bottom:16px;background:#fafaf9">
       <div style="font-size:40px;margin-bottom:12px">📂</div>
       <input type="file" id="infFileModal" accept=".csv,.json" style="display:none" onchange="handleUploadModal(event)">
-      <button class="btn btn-primary">📁 选择文件</button>
+      <button class="btn btn-primary" onclick="document.getElementById('infFileModal').click()">📁 选择文件</button>
       <p style="font-size:11px;opacity:.4;margin-top:8px">或拖拽文件到此区域</p>
     </div>
     <div id="infModalStatus" style="font-size:12px"></div>
     <div style="display:flex;gap:8px;margin-top:12px">
-      <button class="btn btn-outline btn-sm">📋 下载 CSV 模板</button>
-      <button class="btn btn-outline btn-sm">📋 下载 JSON 模板</button>
+      <button class="btn btn-outline btn-sm" onclick="downloadInfTemplate()">📋 下载 CSV 模板</button>
+      <button class="btn btn-outline btn-sm" onclick="downloadInfTemplateJSON()">📋 下载 JSON 模板</button>
     </div>
   </div>
 </div>
 
 <div id="toastContainer"></div>
-<script src="app.js?v=20260603181958"></script>
-<script src="ppt.js?v=20260603164821"></script>
+<script src="app.js?v=20260603183430"></script>
+<script src="ppt.js?v=20260603143232"></script>
 </body>
 </html>
