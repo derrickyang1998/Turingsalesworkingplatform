@@ -57,6 +57,15 @@ function apiFetch(url, opts) {
 
 // ===== APP INIT =====
 async function initApp() { console.log("[TM] initApp starting");
+  (function initNavigation() {
+    document.querySelectorAll(".nav-item[data-page]").forEach(function(item) {
+      var pageId = item.getAttribute("data-page");
+      if (pageId) {
+        item.style.cursor = "pointer";
+        item.addEventListener("click", function() { switchPage(pageId); });
+      }
+    });
+  })();
   try {
     const [bdResp, ir, tr] = await Promise.all([
       fetch('data/industry_brands_v2.json'),
@@ -725,8 +734,8 @@ lastMatch = []; var lastInfAPI = [];
 async function initM4() {
   await loadInfluencersFromAPI();
   renderInfTable(lastMatch);
-  var cnt = document.getElementById('m4InfCount');
   await loadCollaborations();
+  var cnt = document.getElementById('m4InfCount');
   if (cnt) cnt.textContent = lastInfAPI.length + ' influencers in database · 智能匹配 · 合作追踪';
 }
 
