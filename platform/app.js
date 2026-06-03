@@ -9,6 +9,22 @@ let curDemand = null, selTpl = null, lastMatch = [], lastProp = "";
 let uploadedFileContent = "";
 let chatHistory = [{role: "system", content: "You are the TuringMarket AI assistant. Answer in Chinese, concise and professional."}];
 
+
+// ==== NAV EVENT DELEGATION ====
+(function() {
+  document.body.addEventListener('click', function(e) {
+    var el = e.target;
+    while (el && el !== document.body) {
+      if (el.classList && el.classList.contains('nav-item')) {
+        var pid = el.getAttribute('data-page');
+        if (pid) { switchPage(pid); return; }
+      }
+      el = el.parentElement;
+    }
+  });
+})();
+
+
 // ===== AUTH =====
 async function doLogin() {
   const u = document.getElementById('loginUser').value.trim();
@@ -57,15 +73,6 @@ function apiFetch(url, opts) {
 
 // ===== APP INIT =====
 async function initApp() { console.log("[TM] initApp starting");
-  (function initNavigation() {
-    document.querySelectorAll(".nav-item[data-page]").forEach(function(item) {
-      var pageId = item.getAttribute("data-page");
-      if (pageId) {
-        item.style.cursor = "pointer";
-        item.addEventListener("click", function() { switchPage(pageId); });
-      }
-    });
-  })();
   try {
     const [bdResp, ir, tr] = await Promise.all([
       fetch('data/industry_brands_v2.json'),
