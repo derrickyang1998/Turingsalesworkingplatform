@@ -659,121 +659,84 @@ function updateStrategy() {
   document.getElementById('strategyContent').innerHTML = h
 }
 
-// ===== M3: DEMAND & PROPOSAL =====
-function handleDemandFile(e) {
-  var f=e.target.files[0];if(!f)return;
-  var s=document.getElementById("demandFileStatus");
-  var ext=f.name.split(".").pop().toLowerCase();
-  var ok=["pdf","xlsx","xls","docx","doc","txt","csv","jpg","jpeg","png"];
-  if(ok.indexOf(ext)===-1){s.innerHTML="<span style=color:#d94641>不支持 ."+ext+" 格式</span>";return}
-  s.innerHTML="<span>正在读取: "+f.name+" ("+(f.size/1024).toFixed(1)+"KB)...</span>";
-  var r=new FileReader();
-  if(ext==="txt"||ext==="csv"){
-    r.onload=function(ev){uploadedFileContent=ev.target.result||"";onFileReady(f.name,uploadedFileContent.length)};
-    r.readAsText(f);
-  }else{
-    r.onload=function(ev){uploadedFileContent="[File: "+f.name+" | Size: "+(f.size/1024).toFixed(1)+"KB | Type: "+ext.toUpperCase()+"]";onFileReady(f.name,f.size)};
-    r.readAsDataURL(f);
-  }
-}
-function handleDemandDrop(e){var files=e.dataTransfer.files;if(files.length){document.getElementById("demandFile").files=files;handleDemandFile({target:{files:files}})}}
-function onFileReady(name,size){var s=document.getElementById("demandFileStatus");s.innerHTML="<span style=color:#0f7b3c>文件已就绪: "+name+"</span>";document.getElementById("btnAnalyzeAI").disabled=false;document.getElementById("aiAnalyzeHint").textContent="点击 AI 分析需求";toast("文件已加载")}
 
-﻿function analyzeDemandAI() {
-  var s=document.getElementById("demandFileStatus"),btn=document.getElementById("btnAnalyzeAI");
-  btn.disabled=true;btn.textContent="AI 分析中...";
-  s.innerHTML="<span>DeepSeek 正在分析需求...</span>";
-  var ctx="你是出海品牌红人营销专家。请从客户需求中提取关键信息，以JSON格式返回。";if(uploadedFileContent.indexOf("[Binary:")===0){ctx+="文件为二进制格式(需xlsx解析)，请优先从文件名推断品牌/产品信息。文件名: "+uploadedFileContent+"。";}else{ctx+="\n文件内容: "+uploadedFileContent.slice(0,3000);}
-  ctx+="\n返回JSON: {\"brand\":\"品牌名\",\"product\":\"产品名\",\"usp\":\"核心卖点\",\"category\":\"行业\",\"area\":\"目标市场\",\"budget\":\"预算\",\"platform\":\"平台\",\"kolcount\":\"KOL数量\",\"videotype\":\"视频类型\",\"competitors\":\"竞品\",\"notes\":\"重点注意事项和下一步建议\"}";
-  fetch(DS_URL,{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+DS_KEY},body:JSON.stringify({model:"deepseek-chat",messages:[{role:"user",content:ctx}],temperature:0.3,max_tokens:2000})})
-  .then(function(r){return r.json()})
-  .then(function(data){
-    var reply=data.choices[0].message.content;
-    try{apiFetch("/token-usage",{method:"POST",body:JSON.stringify({model:"deepseek-chat",endpoint:"demand_ai",prompt_tokens:data.usage.prompt_tokens||0,completion_tokens:data.usage.completion_tokens||0,total_tokens:data.usage.total_tokens||0})})}catch(e){}
-    var parsed={};try{var m=reply.match(/\{[\s\S]*\}/);if(m)parsed=JSON.parse(m[0])}catch(e){}
-    curDemand={brand:parsed.brand||gv("d_brand")||"待确认",company:parsed.company||gv("d_company")||"",product:parsed.product||gv("d_product")||"待确认",usp:parsed.usp||gv("d_usp")||"",category:parsed.category||gv("d_category")||"",budget:parsed.budget||gv("d_budget")||"",platform:parsed.platform||gv("d_platform")||"",area:parsed.area||gv("d_area")||"",kolcount:parsed.kolcount||gv("d_kolcount")||"",videotype:parsed.videotype||gv("d_videotype")||"",competitors:parsed.competitors||gv("d_competitors")||"",notes:parsed.notes||gv("d_notes")||""};
-    try{apiFetch("/demands",{method:"POST",body:JSON.stringify({brand_name:curDemand.brand,company_name:curDemand.company,product_name:curDemand.product,industry:curDemand.category,budget:curDemand.budget,target_market:curDemand.area,platform:curDemand.platform,data_json:curDemand})})}catch(e){}
-    showAnalysisResult();btn.disabled=false;btn.textContent="AI 分析需求";
-  })
-  .catch(function(e){s.innerHTML="<span style=color:#d94641>AI分析失败: "+e.message+"</span>";btn.disabled=false;btn.textContent="AI 分析需求";toast("AI分析失败","error")});
+// ===== M3: DEMAND & PROPOSAL (rebuilt) =====
+function initM3() {
+  var c = document.getElementById('tmplSelect');
+  if (!c || !TEMPLATES.length) return;
+  var h = '';
+  TEMPLATES.forEach(function(t) {
+    h += '<div class="card" style="cursor:pointer;padding:14px" id="tcard-' + t.id + '" onclick="selTmpl(\'' + t.id + '\')"><h3 style="font-size:14px">' + t.name + '</h3><p style="font-size:11px;opacity:.6;margin:6px 0">' + t.description + '</p><div style="display:flex;flex-wrap:wrap;gap:3px">';
+    (t.best_for || []).forEach(function(bf) { h += '<span class="badge">' + bf + '</span>'; });
+    h += '</div><div style="font-size:10px;opacity:.4;margin-top:6px">' + t.sections.length + ' sections</div></div>';
+  });
+  c.innerHTML = h;
 }
 
-function analyzeDemandManual(){var brand=gv("d_brand"),product=gv("d_product"),usp=gv("d_usp");if(!brand||!product||!usp){toast("请至少填写品牌、产品、USP","error");return}curDemand={brand:brand,company:gv("d_company"),product:product,usp:usp,budget:gv("d_budget"),platform:gv("d_platform"),area:gv("d_area"),category:gv("d_category"),kolcount:gv("d_kolcount"),videotype:gv("d_videotype"),competitors:gv("d_competitors"),notes:gv("d_notes")||""};try{apiFetch("/demands",{method:"POST",body:JSON.stringify({brand_name:brand,company_name:curDemand.company,product_name:product,industry:curDemand.category,budget:curDemand.budget,target_market:curDemand.area,platform:curDemand.platform,data_json:curDemand})})}catch(e){}showAnalysisResult()}
-
-function showAnalysisResult() {
-  var d=curDemand;
-  var comps=d.competitors?d.competitors.split(/[,;，；\n]/).map(function(c){return c.trim()}).filter(Boolean):[];
-  var mb=BRANDS.filter(function(b){return b.industry_tags.some(function(t){return (d.category||"").indexOf(t)>=0})});
-  var risks=[];if(!d.budget)risks.push("预算未明确");if(!d.area)risks.push("目标市场未明确");if(!d.platform)risks.push("推广平台未明确");
-  var bn=d.budget?parseInt(d.budget.replace(/[^0-9]/g,"")):0;
-  var recTmpl=bn>30000?"Full Strategy":bn>10000?"Execution":"Test Phase";
-  var h="<h3>AI 分析结果</h3>";
-  h+="<div class=\"grid grid-2\" style=\"margin-top:12px\">";
-  h+="<div class=\"stat\" style=\"padding:14px\"><div style=\"font-size:11px;opacity:.5\">品牌</div><div style=\"font-weight:700\">"+(d.brand||"-")+"</div></div>";
-  h+="<div class=\"stat\" style=\"padding:14px\"><div style=\"font-size:11px;opacity:.5\">产品</div><div style=\"font-weight:700\">"+(d.product||"-")+"</div></div>";
-  h+="<div class=\"stat\" style=\"padding:14px\"><div style=\"font-size:11px;opacity:.5\">行业</div><div style=\"font-weight:700\">"+(d.category||"-")+"</div></div>";
-  h+="<div class=\"stat\" style=\"padding:14px\"><div style=\"font-size:11px;opacity:.5\">预算</div><div style=\"font-weight:700\">"+(d.budget||"待确认")+"</div></div>";
-  h+="<div class=\"stat\" style=\"padding:14px\"><div style=\"font-size:11px;opacity:.5\">市场</div><div style=\"font-weight:700\">"+(d.area||"待确认")+"</div></div>";
-  h+="<div class=\"stat\" style=\"padding:14px\"><div style=\"font-size:11px;opacity:.5\">平台</div><div style=\"font-weight:700\">"+(d.platform||"待确认")+"</div></div>";
-  h+="</div>";
-  if(d.usp)h+="<div style=\"margin-top:12px;padding:12px;background:#fafaf9;border-radius:8px;font-size:12px\"><strong>核心卖点:</strong> "+d.usp+"</div>";
-  h+="<h3 style=\"margin-top:16px\">下一步工作建议</h3><ol style=\"font-size:12px;padding-left:18px;line-height:2\">";
-  h+="<li><strong>预算确认</strong> — "+(d.budget||"需与客户确认")+"</li>";
-  h+="<li><strong>竞品对标</strong> — "+(comps.length?comps.slice(0,3).join(", "):"需收集竞品信息")+"</li>";
-  h+="<li><strong>样品安排</strong> — 确认寄送时间线</li><li><strong>合同流程</strong> — 准备合作协议</li></ol>";
-  h+="<h3 style=\"margin-top:16px\">重点关注</h3><ul style=\"font-size:12px;padding-left:18px;line-height:1.8\">";
-  if(risks.length)risks.forEach(function(r){h+="<li>"+r+"</li>"});else h+="<li>需求信息基本完整</li>";
-  h+="<li>行业对标: "+(mb.length?mb.slice(0,5).map(function(b){return b.name}).join(", "):"暂无")+"</li></ul>";
-  h+="<h3 style=\"margin-top:16px\">推荐方案</h3><table style=\"width:100%;font-size:12px;border-collapse:collapse\">";
-  h+="<tr><td style=\"padding:6px;font-weight:600\">模板</td><td style=\"padding:6px\">"+recTmpl+"</td></tr>";
-  h+="<tr><td style=\"padding:6px;font-weight:600\">对标品牌</td><td style=\"padding:6px\">"+(mb.length?mb.slice(0,5).map(function(b){return b.name}).join(", "):"暂无")+"</td></tr>";
-  h+="<tr><td style=\"padding:6px;font-weight:600\">下一步</td><td style=\"padding:6px\">确认分析 → 选择模板 → 生成方案</td></tr></table>";
-  document.getElementById("analysisOut").innerHTML=h;
-  document.getElementById("m3s2").classList.remove("hidden");
-  document.getElementById("m3s1").classList.add("hidden");
+function goAnalyze() {
+  var brand = gv('d_brand'), product = gv('d_product'), usp = gv('d_usp');
+  if (!brand || !product || !usp) { toast('请至少填写品牌、产品、USP', 'error'); return; }
+  curDemand = {
+    brand: brand, company: gv('d_company'), product: product, usp: usp,
+    budget: gv('d_budget'), platform: gv('d_platform'), area: gv('d_area'),
+    category: gv('d_category'), competitors: gv('d_competitors'), notes: gv('d_notes')
+  };
+  // Save to server
+  try { apiFetch('/demands', { method: 'POST', body: JSON.stringify({ brand_name: brand, company_name: curDemand.company, product_name: product, industry: curDemand.category, budget: curDemand.budget, target_market: curDemand.area, platform: curDemand.platform, data_json: curDemand }) }); } catch(e) {}
+  // Show analysis
+  var h = '<div class="grid grid-3" style="margin-bottom:12px"><div class="stat"><div class="stat-value" style="font-size:16px">' + esc(brand) + '</div><div class="stat-label">品牌</div></div><div class="stat"><div class="stat-value" style="font-size:16px">' + esc(product) + '</div><div class="stat-label">产品</div></div><div class="stat"><div class="stat-value" style="font-size:16px">$' + (curDemand.budget || 'N/A') + '</div><div class="stat-label">预算</div></div></div>';
+  h += '<h4>下一步工作建议</h4><ul style="font-size:12px;padding-left:18px;opacity:.7"><li>分析 ' + (curDemand.area || '目标市场') + ' 市场的红人生态</li><li>根据 60-30-10 模型分配预算</li><li>Nano/Micro 红人为主策略</li><li>选择合适的方案模板</li></ul>';
+  h += '<h4>重点注意</h4><ul style="font-size:12px;padding-left:18px;opacity:.7"><li>确认竞品: ' + (curDemand.competitors || '待补充') + '</li><li>平台策略: ' + (curDemand.platform || '待确定') + '</li></ul>';
+  document.getElementById('analysisResult').innerHTML = h;
+  document.getElementById('m3s1').classList.add('hidden');
+  document.getElementById('m3s2').classList.remove('hidden');
   updSteps(2);
 }
-function goStep3() { document.getElementById('m3s3').classList.remove('hidden'); document.getElementById('m3s2').classList.add('hidden'); updSteps(3); initM3(); }
-function updSteps(n) { for (var i = 1; i <= 3; i++) { var e = document.getElementById('step' + i); e.classList.remove('active', 'done'); if (i < n) e.classList.add('done'); if (i === n) e.classList.add('active') } }
-function resetDemand() { ['f_company', 'f_brand', 'f_product', 'f_usp', 'f_budget', 'f_platform', 'f_area', 'f_category', 'f_followers', 'f_videotype', 'f_kolcount', 'f_publish', 'f_link', 'f_competitors', 'f_audience', 'f_notes'].forEach(function (id) { var e = document.getElementById(id); if (e) e.value = '' }); document.getElementById('m3s2').classList.add('hidden'); document.getElementById('m3s3').classList.add('hidden'); document.getElementById('m3s1').classList.remove('hidden'); updSteps(1); curDemand = null; selTpl = null; document.getElementById('demandFileStatus').innerHTML = '' }
-function initM3() { var c = document.getElementById('tmplSelect'); if (!c || !TEMPLATES.length) return; var h = ''; TEMPLATES.forEach(function (t) { h += '<div class="card" style="cursor:pointer;padding:14px" id=tcard-' + t.id + ' onclick=selTmpl("' + t.id + '")><h3 style=font-size:14px>' + t.name + '</h3><p style="font-size:11px;opacity:.6;margin:6px 0">' + t.description + '</p><div style="display:flex;flex-wrap:wrap;gap:3px">'; (t.best_for || []).forEach(function (bf) { h += '<span class=badge>' + bf + '</span>' }); h += '</div><div style="font-size:10px;opacity:.4;margin-top:6px">' + t.sections.length + ' sections</div></div>' }); c.innerHTML = h }
-function selTmpl(id) { selTpl = id; document.querySelectorAll('#tmplSelect .card').forEach(function (c) { c.style.borderColor = '' }); var card = document.getElementById('tcard-' + id); if (card) card.style.borderColor = 'var(--accent)' }
+
+function goGenerate() {
+  document.getElementById('m3s2').classList.add('hidden');
+  document.getElementById('m3s3').classList.remove('hidden');
+  updSteps(3);
+  initM3();
+}
+
+function updSteps(n) {
+  for (var i = 1; i <= 3; i++) {
+    var el = document.getElementById('step' + i);
+    el.classList.remove('active', 'done');
+    if (i < n) el.classList.add('done');
+    if (i === n) el.classList.add('active');
+  }
+}
+
+function selTmpl(id) {
+  selTpl = id;
+  document.querySelectorAll('#tmplSelect .card').forEach(function(c) { c.style.borderColor = ''; });
+  var card = document.getElementById('tcard-' + id);
+  if (card) card.style.borderColor = 'var(--accent)';
+}
 
 function generateProposal() {
-  if (!curDemand) { toast('Analyze demand first', 'error'); return }
-  if (!selTpl) { toast('Select a template', 'error'); return }
-  var t = TEMPLATES.find(function (x) { return x.id === selTpl }); if (!t) return;
-  var d = curDemand;
-  var p = '# ' + d.brand + ' Influencer Marketing Proposal\n\n> TuringMarket | ' + new Date().toLocaleDateString('zh-CN') + '\n> Template: ' + t.name + '\n\n---\n\n## About TuringMarket\n' + (CBLOCKS.company_intro || '') + '\n\n**Methodology:** ' + (CBLOCKS.methodology || '') + '\n\n---\n\n';
-  t.sections.forEach(function (sec, i) {
-    p += '## ' + (i + 1) + '. ' + sec + '\n\n';
-    if (sec.indexOf('Executive') >= 0 || sec.indexOf('摘要') >= 0) p += 'Based on **' + d.brand + '**, **' + d.product + '** in **' + d.area + '**.\n\n**Core:**\n- USP: ' + d.usp + '\n- Platform: ' + (d.platform || 'YT+TK+IG') + '\n- Budget: ' + (d.budget || 'TBD') + '\n\n';
-    else if (sec.indexOf('Market') >= 0 || sec.indexOf('市场') >= 0) p += '### Target: ' + d.area + '\n- Audience: ' + (d.audience || 'TBD') + '\n- Competitors: ' + (d.competitors || 'TBD') + '\n\n';
-    else if (sec.indexOf('Competitor') >= 0 || sec.indexOf('竞品') >= 0) p += '### Competitors\n' + (d.competitors ? d.competitors.split(/[,;，；\n]/).filter(Boolean).map(function (c) { return '- **' + c.trim() + '**' }).join('\n') : '- TBD') + '\n\n';
-    else if (sec.indexOf('Audience') >= 0 || sec.indexOf('受众') >= 0) p += '### Audience\n' + (d.audience || 'TBD') + '\n\n';
-    else if (sec.indexOf('Influencer') >= 0 || sec.indexOf('红人') >= 0) p += '### Influencers\nKOLs: ' + (d.kolcount || 'TBD') + ' | Followers: ' + (d.followers || 'TBD') + ' | Format: ' + (d.videotype || 'TBD') + '\n\nRecommended: Nano 40% | Micro 35% | Mid 20% | Macro 5%\n\n';
-    else if (sec.indexOf('Platform') >= 0 || sec.indexOf('平台') >= 0) p += '### Platform\n' + (d.platform || 'YT+TK+IG') + '\n\n|Platform|Role|Share|\n|---|---|---|\n|YouTube|Trust|40-50%|\n|TikTok|Viral|25-35%|\n|Instagram|Aesthetic|20-25%|\n\n';
-    else if (sec.indexOf('Budget') >= 0 || sec.indexOf('预算') >= 0) p += '### Budget\nClient: ' + (d.budget || 'TBD') + '\n\n60-30-10 model\n\n';
-    else if (sec.indexOf('Timeline') >= 0 || sec.indexOf('时间') >= 0) p += '### Timeline\nTarget: ' + (d.publish || 'TBD') + '\n\n|Phase|Time|Actions|\n|---|---|---|\n|Prep|W1-2|Screening|\n|Test|W3-6|Content|\n|Scale|W7-12|Expand|\n|Review|W13|Analysis|\n\n';
-    else if (sec.indexOf('KPI') >= 0 || sec.indexOf('效果') >= 0) p += '### KPIs\nEngagement ≥3% | CPM<$45 | ROI≥3:1 | 50+ assets\n\nNotes: ' + (d.notes || '') + '\n\n'
-  });
-  p += '\n---\n\n*TuringMarket | ' + new Date().toISOString().split('T')[0] + '*\n';
-  lastProp = p;
-  
-  // Save proposal to server
-  apiFetch('/proposals', { method: 'POST', body: JSON.stringify({ demand_id: null, template_id: selTpl, content: p }) }).catch(function (e) { });
-
-  var c = document.getElementById('proposalOutput');
-  c.classList.remove('hidden');
-  c.innerHTML = p.replace(/\n/g, '<br>');
-  // btnDL removed
-  // btnCP removed
-  c.scrollIntoView({ behavior: 'smooth' });
-  toast('Proposal generated!')
+  if (!curDemand) { toast('请先完成需求分析', 'error'); return; }
+  if (!selTpl) { toast('请选择方案模板', 'error'); return; }
+  var tpl = TEMPLATES.find(function(t) { return t.id === selTpl; });
+  if (!tpl) return;
+  var h = '# ' + (curDemand.brand || '品牌') + ' 红人营销方案\n\n';
+  h += '**TuringMarket 图灵集市** | 全球首个按效果付费海外红人Agent\n\n';
+  h += '## 执行摘要\n针对 ' + (curDemand.brand || '') + ' ' + (curDemand.product || '') + ' 的海外红人营销方案。\n\n';
+  h += '## 客户需求\n- 品牌: ' + (curDemand.brand || '') + '\n- 产品: ' + (curDemand.product || '') + '\n- 卖点: ' + (curDemand.usp || '') + '\n- 平台: ' + (curDemand.platform || '') + '\n- 市场: ' + (curDemand.area || '') + '\n- 预算: $' + (curDemand.budget || '') + '\n\n';
+  h += '## 模板: ' + tpl.name + '\n';
+  tpl.sections.forEach(function(s, i) { h += (i + 1) + '. ' + s + '\n'; });
+  h += '\n## 方法论\n' + (CBLOCKS.methodology || '') + '\n';
+  h += '\n## 红人分层策略\n';
+  (CBLOCKS.influencer_tiers || []).forEach(function(t) { h += '- **' + t.tier + '**: ' + t.range + ' | ' + t.cost_per_post + ' | 互动率 ' + t.avg_engagement + '\n'; });
+  lastProp = h;
+  document.getElementById('propResult').innerHTML = '<div class="card"><h3>✅ 方案已生成</h3><pre style="font-size:12px;max-height:300px;overflow-y:auto;background:var(--surface2);padding:12px;border-radius:8px;white-space:pre-wrap">' + h + '</pre><div class="btn-group"><button class="btn btn-primary btn-sm" onclick="downloadProposal()">📥 下载 MD</button><button class="btn btn-sm" onclick="copyProposal()">📋 复制</button></div></div>';
+  toast('方案已生成');
 }
-function downloadProposal() { if (lastProp) dlFile((curDemand?.brand || 'proposal') + '_proposal.md', lastProp, 'text/markdown') }
-function copyProposal() { if (lastProp) navigator.clipboard.writeText(lastProp).then(function () { toast('Copied') }) }
 
+function downloadProposal() { if (lastProp) dlFile((curDemand ? curDemand.brand : 'proposal') + '_proposal.md', lastProp, 'text/markdown'); }
+function copyProposal() { if (lastProp) navigator.clipboard.writeText(lastProp).then(function() { toast('已复制'); }); }
 
 // ===== HTML PPT GENERATION (reveal.js) =====
 var lastPPT="";
