@@ -88,6 +88,7 @@ const CUST_STAGES = {
   influencer_matching: '红人匹配', submitted: '已提报', won: '成交', lost: '丢失'
 };
 let curStageFilter = '';
+let curStatusFilter = '';
 let customersCache = [];
 
 async function loadCustomers() {
