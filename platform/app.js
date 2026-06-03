@@ -37,8 +37,7 @@ let chatHistory = [{role: "system", content: "You are the TuringMarket AI assist
       if (p.adminOnly) el.className += ' admin-only';
       if (p.id === 'm1') el.className += ' active';
       el.setAttribute('data-page', p.id);
-      el.onclick = function() { window._switchPage(p.id); };
-      el.onmousedown = function() { window._switchPage(p.id); };
+      el.onclick = function() { switchPage(p.id); };
       el.style.cursor = 'pointer';
       el.innerHTML = '<span class="nav-icon">' + p.icon + '</span> ' + p.label;
       // Insert after sidebar-logo, before sidebar-footer
@@ -50,22 +49,6 @@ let chatHistory = [{role: "system", content: "You are the TuringMarket AI assist
       }
     })(pages[j]);
   }
-})();
-
-
-// ==== GLOBAL CLICK CATCH-ALL ====
-(function() {
-  document.body.onmousedown = function(e) {
-    e = e || window.event;
-    var el = e.target || e.srcElement;
-    while (el && el !== document.body) {
-      if (el.className && el.className.indexOf('nav-item') !== -1) {
-        var pid = el.getAttribute('data-page');
-        if (pid && window._switchPage) { window._switchPage(pid); return false; }
-      }
-      el = el.parentNode;
-    }
-  };
 })();
 
 // ===== AUTH =====
@@ -324,7 +307,6 @@ function dlFile(name, content, type) { const b = new Blob([content], { type: typ
 function switchTheme(t) { /* Theme locked to Notion style */ }
 (function () { document.body.className = ''; })();
 function switchPage(id) {
-  window._switchPage = switchPage;
   var i, navs, pages, ni, pg;
   navs = document.querySelectorAll('.nav-item');
   for (i = 0; i < navs.length; i++) { navs[i].classList.remove('active'); }
