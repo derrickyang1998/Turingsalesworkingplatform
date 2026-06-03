@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
@@ -165,6 +165,24 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
 
 
 
+
+/* ===== Flat brand cards ===== */
+.brand-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;margin-bottom:8px;overflow:hidden;transition:all .15s}
+.brand-card:hover{border-color:#1a1a1a;box-shadow:0 2px 8px rgba(0,0,0,.04)}
+.brand-card-main{padding:14px 18px}
+.brand-card-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px}
+.brand-card-name{font-weight:600;font-size:14px}
+.brand-card-name-cn{font-size:11px;opacity:.4;font-weight:400;margin-left:6px}
+.brand-card-tags{display:flex;gap:3px;flex-wrap:wrap;margin-top:4px}
+.brand-tag{display:inline-block;padding:2px 8px;border-radius:12px;font-size:10px;background:#f0f0ed;color:#666}
+.brand-card-rev{text-align:right;flex-shrink:0}
+.rev-value{font-size:13px;font-weight:600}
+.rev-users{font-size:10px;opacity:.4}
+.brand-card-metrics{display:flex;gap:12px;flex-wrap:wrap;align-items:center;font-size:11px;opacity:.6;border-top:1px solid #f0f0ed;padding-top:8px;margin-top:4px}
+.brand-link{color:#1a1a1a;text-decoration:none;font-weight:500;padding:2px 8px;border:1px solid #e0e0dd;border-radius:6px;font-size:10px}
+.brand-link:hover{background:#f5f5f4}
+.brand-emails{font-size:10px;color:#666}
+
 </style>
 </head>
 <body>
@@ -211,7 +229,7 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
   <div style="flex:1;display:flex;flex-direction:column;min-width:0">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
       <div class="search-box" style="flex:1;max-width:300px;margin-left:auto">
-        <span class="search-icon">search</span>
+        <span class="search-icon">🔍</span>
         <input id="brandSearch" placeholder="Search brands..." oninput="filterBrands()">
       </div>
       <button class="btn btn-sm" onclick="searchNewBrand()">AI Search</button>
@@ -451,7 +469,7 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
 </div>
 
 <div id="toastContainer"></div>
-<script src="app.js"></script>
-<script src="ppt.js"></script>
+<script src="app.js?v=20260603143232"></script>
+<script src="ppt.js?v=20260603143232"></script>
 </body>
 </html>

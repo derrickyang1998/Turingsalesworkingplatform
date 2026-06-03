@@ -1,4 +1,4 @@
-// TuringMarket v4.0 - Multi-user Team Platform
+﻿// TuringMarket v4.0 - Multi-user Team Platform
 const API = window.location.origin + '/api';
 const DS_URL = "https://api.deepseek.com/v1/chat/completions";
 const DS_KEY = "sk-5951a22df4fc48ca874b86b87f43cee3";
@@ -56,7 +56,7 @@ function apiFetch(url, opts) {
 }
 
 // ===== APP INIT =====
-async function initApp() {
+async function initApp() { console.log("[TM] initApp starting");
   try {
     const [bdResp, ir, tr] = await Promise.all([
       fetch('data/industry_brands_v2.json'),
@@ -71,7 +71,7 @@ async function initApp() {
     INFLUENCERS = idata.sample_influencers || [];
     TEMPLATES = tdata.templates;
     CBLOCKS = tdata.common_blocks || {};
-    initM1(); initM3(); initM4();
+    console.log("[TM] Calling initM1, initM3, initM4"); initM1(); initM3(); initM4(); console.log("[TM] init complete");
     var brandCountEl = document.getElementById('brandCount'); if (brandCountEl) brandCountEl.textContent = BRANDS.length + ' brands';
     var sfEl = document.getElementById('sidebarFooter'); if (sfEl && CURRENT_USER) sfEl.textContent = CURRENT_USER.display_name + ' . ' + CURRENT_USER.department;
     return
@@ -110,6 +110,27 @@ async function initApp() {
 
 function esc(s){return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;")}
 function toast(m, ty) { ty = ty || 'success'; const c = document.getElementById('toastContainer'), e = document.createElement('div'); e.className = 'toast toast-' + ty; e.textContent = m; c.appendChild(e); setTimeout(function () { e.remove() }, 3000) }
+
+function exportBrandCSV() {
+  if (!BRANDS || !BRANDS.length) { toast("No brands to export", "error"); return; }
+  var csv = "Name,CN_Name,Industry,Revenue,Users,Website,Amazon,Contact_Emails,LinkedIn\n";
+  BRANDS.forEach(function(b) {
+    csv += [
+      '"' + (b.name || "").replace(/"/g,'""') + '"',
+      '"' + (b.name_cn || "").replace(/"/g,'""') + '"',
+      '"' + ((b.industry_tags || []).join("; ")).replace(/"/g,'""') + '"',
+      b.estimated_annual_revenue || "N/A",
+      b.user_base || "N/A",
+      b.website || "",
+      b.amazon_store || "",
+      b.contact_emails || "",
+      b.linkedin_url || ""
+    ].join(",") + "\n";
+  });
+  dlFile("turingmarket_brands_" + getDate() + ".csv", "\uFEFF" + csv, "text/csv");
+  toast("Exported " + BRANDS.length + " brands");
+}
+
 function dlFile(name, content, type) { const b = new Blob([content], { type: type || 'text/plain' }), u = URL.createObjectURL(b), a = document.createElement('a'); a.href = u; a.download = name; a.click(); URL.revokeObjectURL(u) }
 function switchTheme(t) { /* Theme locked to Notion style */ }
 (function () { document.body.className = ''; })();
@@ -213,79 +234,57 @@ function filterByTreeTag(tag, el) {
 
 
 // ===== V5: Enhanced brand rendering with social videos, PR, contacts =====
-function renderBrandsV5(brands){ brands = brands.slice(0, 50);
-var c=document.getElementById("brandList");
-if(!brands.length){c.innerHTML="<div class=card>No matching brands</div>";return}
-var h="";
-brands.forEach(function(b){
-var sf=(b.overseas_presence||{}).social_followers||{};
-var ytK=((sf.youtube||0)/1000).toFixed(0);
-var igK=((sf.instagram||0)/1000).toFixed(0);
-var tkK=((sf.tiktok||0)/1000).toFixed(0);
-var rev=b.estimated_annual_revenue||"N/A";
-var users=b.user_base||"N/A";
-var bid=b.id;
-h+="<div class=brand-expanded id=be-"+bid+">";
-h+="<div class=brand-expanded-header onclick=toggleBrandExpanded(\""+bid+"\")>";
-h+="<div><div style=font-weight:600;font-size:14px>"+esc(b.name)+" <span style=font-size:11px;opacity:.4>"+esc(b.name_cn||"")+"</span></div>";
-h+="<div style=font-size:11px;opacity:.5;margin-top:2px>";
-(b.industry_tags||[]).forEach(function(t){h+="<span style=margin-right:6px>#"+esc(t)+"</span>"});
-h+="</div></div>";
-h+="<div style=text-align:right><div style=font-size:13px;font-weight:600>"+esc(rev)+"</div><div style=font-size:10px;opacity:.4>"+esc(users)+"</div></div>";
-h+="</div>";
-h+="<div class=brand-expanded-body id=beb-"+bid+">";
-h+="<div class=grid grid-4 style=margin-bottom:12px>";
-h+="<div class=stat><div class=stat-value>"+ytK+"K</div><div class=stat-label>YouTube</div></div>";
-h+="<div class=stat><div class=stat-value>"+igK+"K</div><div class=stat-label>Instagram</div></div>";
-h+="<div class=stat><div class=stat-value>"+tkK+"K</div><div class=stat-label>TikTok</div></div>";
-var apw=(b.content_strategy||{}).avg_posts_per_week||"N/A";
-h+="<div class=stat><div class=stat-value>"+apw+"</div><div class=stat-label>Posts/Week</div></div>";
-h+="</div>";
-h+="<div style=display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px>";
-if(b.website)h+="<a href="+esc(b.website)+" target=_blank class=btn btn-outline btn-sm>Website</a>";
-if(b.amazon_store)h+="<a href="+esc(b.amazon_store)+" target=_blank class=btn btn-outline btn-sm>Amazon</a>";
-if(b.linkedin_url)h+="<a href="+esc(b.linkedin_url)+" target=_blank class=btn btn-outline btn-sm>LinkedIn</a>";
-h+="</div>";
-h+="<div class=platform-tabs>";
-var plats=["youtube","instagram","tiktok","pr","contacts","bd"];
-var platLabels={youtube:"YT Top 20",instagram:"IG Top 20",tiktok:"TK Top 20",pr:"PR",contacts:"Contacts",bd:"BD Intel"};
-plats.forEach(function(p){h+="<span class=platform-tab data-bid="+bid+" data-plat="+p+" onclick=switchPlatformTab(this,"+bid+",\""+p+"\")>"+platLabels[p]+"</span>"});
-h+="</div>";
-["youtube","instagram","tiktok"].forEach(function(p){var vids=(b.social_top_content||{})[p]||[];var d=p==="youtube"?"grid":"none";h+="<div class=video-card-grid id=videos-"+bid+"-"+p+" style=display:"+d+">";vids.forEach(function(v){h+="<div class=video-card onclick=window.open(\""+esc(v.url||"#")+"\",\"_blank\")>";h+="<div class=vc-title>"+esc(v.title||"Video")+"</div>";h+="<div class=vc-stats><span>"+(v.views||0).toLocaleString()+" views</span><span>"+(v.likes||0).toLocaleString()+" likes</span><span>"+(v.engagement_rate||"N/A")+"</span></div>";h+="<div class=vc-theme>"+esc(v.content_angle||"")+"</div>";h+="<a class=vc-link href="+esc(v.url||"#")+" target=_blank>View</a>";h+="</div>"});if(!vids.length)h+="<p style=opacity:.4>No data</p>";h+="</div>"});
-h+="<div id=pr-"+bid+" class=pr-list style=display:none>";
-(b.pr_mentions||[]).forEach(function(pr){h+="<div class=pr-item><div><a href="+esc(pr.url)+" target=_blank>"+esc(pr.title)+"</a><div class=pr-source>"+esc(pr.source)+" "+(pr.date||"")+"</div></div></div>"});
-h+="</div>";
-h+="<div id=contacts-"+bid+" style=display:none>";
-(b.key_contacts||[]).forEach(function(ct){h+="<div class=contact-card><div class=cc-avatar>"+esc((ct.name||"?")[0])+"</div><div class=cc-info><div class=cc-name>"+esc(ct.name||"")+"</div><div class=cc-title>"+esc(ct.title||"")+"</div></div>";if(ct.linkedin)h+="<a href="+esc(ct.linkedin)+" target=_blank class=btn btn-outline btn-sm>LI</a>";h+="</div>"});
-h+="</div>";
-h+="<div id=bd-"+bid+" style=display:none>";
-if(b.bd_intelligence){
-var emb=b.bd_intelligence.estimated_marketing_budget||{};
-h+="<h4 style=margin-bottom:8px>营销预算估算</h4>";
-h+="<div class=grid grid-3 style=margin-bottom:12px>";
-h+="<div class=stat style=padding:10px><div class=stat-value style=font-size:16px>"+esc(emb.total_marketing||"N/A")+"</div><div class=stat-label>总营销预算</div></div>";
-h+="<div class=stat style=padding:10px><div class=stat-value style=font-size:16px>"+esc(emb.influencer_marketing||"N/A")+"</div><div class=stat-label>红人营销预算</div></div>";
-var cby=(b.content_strategy||{}).collab_brands_yearly||"N/A";
-h+="<div class=stat style=padding:10px><div class=stat-value style=font-size:16px>"+cby+"</div><div class=stat-label>年合作品牌数</div></div>";
-h+="</div>";
-h+="<div style=font-size:12px><strong>营销渠道:</strong> "+(emb.channels||[]).join(" | ")+" <span style=opacity:.4>(FY"+esc(emb.fiscal_year||"2026")+")</span></div>";
-h+="<hr style=margin:10px 0;opacity:.1>";
-h+="<h4 style=margin-bottom:4px>客户痛点</h4>";
-h+="<div style=font-size:12px;margin-bottom:8px>"+(b.bd_intelligence.pain_points||[]).map(function(p){return "<span style=display:inline-block;padding:2px 8px;background:#f0f0ed;border-radius:4px;margin:2px;font-size:11px>"+esc(p)+"</span>"}).join("")+"</div>";
-h+="<h4 style=margin-bottom:4px>触达偏好</h4>";
-h+="<div style=font-size:12px;margin-bottom:8px>"+(b.bd_intelligence.outreach_channel_preference||[]).join(" | ")+"</div>";
-if(b.bd_intelligence.recent_news&&b.bd_intelligence.recent_news.length){
-h+="<hr style=margin:10px 0;opacity:.1>";
-h+="<h4 style=margin-bottom:4px>近期动态与融资信息</h4>";
-b.bd_intelligence.recent_news.forEach(function(n){
-var badge=n.impact=== "高" ? "hot":n.impact=== "中" ? "warm":"cold";
-h+="<div style=font-size:11px;padding:4px 0;display:flex;align-items:center;gap:6px><span style=flex:1>"+esc(n.headline)+"</span><span style=opacity:.4;white-space:nowrap>"+(n.date||"")+"</span><span class=bd-badge "+badge+">"+n.impact+"影响</span></div>";
-});
-}
-}
-h+="</div>";
 
-c.innerHTML=h});
+function filterByTag(t) {
+  activeTag = activeTag === t ? null : t;
+  document.querySelectorAll("#tagGroup .tag").forEach(function(e) {
+    e.classList.toggle("active", e.dataset.tag === activeTag);
+  });
+  filterBrands();
+}
+
+function renderBrandsV5(brands) {
+  // Show ALL brands (no slice limit)
+  brands = brands || BRANDS;
+  var container = document.getElementById("brandList");
+  if (!container) return;
+  if (!brands.length) {
+    container.innerHTML = "<div class='card' style='text-align:center;padding:40px;opacity:.5'>No matching brands</div>";
+    return;
+  }
+  var h = "";
+  brands.forEach(function(b) {
+    var sf = (b.overseas_presence || {}).social_followers || {};
+    var ytK = ((sf.youtube || 0)/1000).toFixed(0);
+    var igK = ((sf.instagram || 0)/1000).toFixed(0);
+    var tkK = ((sf.tiktok || 0)/1000).toFixed(0);
+    var rev = b.estimated_annual_revenue || "N/A";
+    var users = b.user_base || "N/A";
+    var tags = (b.industry_tags || []).slice(0,4);
+    
+    h += "<div class='brand-card'>";
+    h += "<div class='brand-card-main'>";
+    h += "<div class='brand-card-header'>";
+    h += "<div><div class='brand-card-name'>" + esc(b.name) + " <span class='brand-card-name-cn'>" + esc(b.name_cn || "") + "</span></div>";
+    h += "<div class='brand-card-tags'>";
+    tags.forEach(function(t) { h += "<span class='brand-tag'>" + esc(t) + "</span>"; });
+    h += "</div></div>";
+    h += "<div class='brand-card-rev'><div class='rev-value'>" + esc(rev) + "</div><div class='rev-users'>" + esc(users) + "</div></div>";
+    h += "</div>";
+    // Social + links row
+    h += "<div class='brand-card-metrics'>";
+    h += "<span>YouTube " + ytK + "K</span>";
+    h += "<span>Instagram " + igK + "K</span>";
+    h += "<span>TikTok " + tkK + "K</span>";
+    if (b.website) h += "<a href='" + esc(b.website) + "' target='_blank' class='brand-link'>Website</a>";
+    if (b.amazon_store) h += "<a href='" + esc(b.amazon_store) + "' target='_blank' class='brand-link'>Amazon</a>";
+    if (b.contact_emails) h += "<span class='brand-emails'>" + esc(b.contact_emails) + "</span>";
+    h += "</div>";
+    h += "</div></div>";
+  });
+  container.innerHTML = h;
+  var bc = document.getElementById("brandCount");
+  if (bc) bc.textContent = brands.length + " / " + BRANDS.length + " brands";
 }
 
 function toggleBrandExpanded(id) {

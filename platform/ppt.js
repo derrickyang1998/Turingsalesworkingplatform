@@ -1,4 +1,4 @@
-﻿// ===== TuringMarket HTML PPT Generator (reveal.js) =====
+// ===== TuringMarket HTML PPT Generator (reveal.js) =====
 // Based on 20+ past proposals from vault: D:\主盘\图灵集市
 // Format: Cover -> About Turing -> Market/Challenge -> Strategy -> Influencer Matrix -> Timeline -> KPI -> Next Steps
 
