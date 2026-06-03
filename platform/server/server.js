@@ -204,7 +204,7 @@ app.get('/api/health', (req, res) => {
 });
 
 // ===== SPA FALLBACK =====
-app.get('/{*path}', (req, res) => {
+app.get('/{*path}', (req, res) => { res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate'); res.set('Pragma', 'no-cache'); res.set('Expires', '0');
   res.sendFile(path.join(__dirname, '..', 'index.html'));
 });
 
