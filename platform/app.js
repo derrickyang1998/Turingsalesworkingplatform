@@ -9,6 +9,48 @@ let curDemand = null, selTpl = null, lastMatch = [], lastProp = "";
 let uploadedFileContent = "";
 let chatHistory = [{role: "system", content: "You are the TuringMarket AI assistant. Answer in Chinese, concise and professional."}];
 
+
+// ==== DYNAMIC NAV REBUILD ====
+(function rebuildNav() {
+  var sidebar = document.querySelector('.sidebar');
+  if (!sidebar) return;
+  
+  var pages = [
+    { id: 'm0', icon: '🚀', label: '客户管道' },
+    { id: 'm1', icon: '📊', label: '行业品牌智库' },
+    { id: 'm2', icon: '🎯', label: '客户策略规划' },
+    { id: 'm3', icon: '📋', label: '需求接入 & 方案生成' },
+    { id: 'm4', icon: '👥', label: '网红匹配 & 执行管理' },
+    { id: 'm5', icon: '🤖', label: 'AI 助手' },
+    { id: 'admin', icon: '🛡️', label: '管理控制室', adminOnly: true }
+  ];
+  
+  // Remove all existing nav items
+  var existing = sidebar.querySelectorAll('.nav-item');
+  for (var i = 0; i < existing.length; i++) { existing[i].remove(); }
+  
+  // Create new nav items
+  for (var j = 0; j < pages.length; j++) {
+    (function(p) {
+      var el = document.createElement('div');
+      el.className = 'nav-item';
+      if (p.adminOnly) el.className += ' admin-only';
+      if (p.id === 'm1') el.className += ' active';
+      el.setAttribute('data-page', p.id);
+      el.onclick = function() { switchPage(p.id); };
+      el.style.cursor = 'pointer';
+      el.innerHTML = '<span class="nav-icon">' + p.icon + '</span> ' + p.label;
+      // Insert after sidebar-logo, before sidebar-footer
+      var footer = sidebar.querySelector('.sidebar-footer');
+      if (footer) {
+        sidebar.insertBefore(el, footer);
+      } else {
+        sidebar.appendChild(el);
+      }
+    })(pages[j]);
+  }
+})();
+
 // ===== AUTH =====
 async function doLogin() {
   const u = document.getElementById('loginUser').value.trim();
