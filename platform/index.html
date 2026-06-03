@@ -212,6 +212,63 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
   </nav>
   <main>
 
+
+<!-- M0: Customer Pipeline -->
+<div class="page" id="page-m0">
+<h2>🚀 客户管道</h2>
+<p class="subtitle" id="m0Stats">商务SOP · 线索→成交全流程跟踪</p>
+
+<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px" id="m0StageFilter">
+  <span class="tag active" onclick="filterCustomers('')">全部</span>
+  <span class="tag" data-stage="new_lead" onclick="filterCustomers('new_lead')">新线索</span>
+  <span class="tag" data-stage="inquiry" onclick="filterCustomers('inquiry')">需求沟通</span>
+  <span class="tag" data-stage="proposal" onclick="filterCustomers('proposal')">方案中</span>
+  <span class="tag" data-stage="influencer_matching" onclick="filterCustomers('influencer_matching')">红人匹配</span>
+  <span class="tag" data-stage="submitted" onclick="filterCustomers('submitted')">已提报</span>
+  <span class="tag" data-stage="won" onclick="filterCustomers('won')">成交</span>
+  <span class="tag" data-stage="lost" onclick="filterCustomers('lost')">丢失</span>
+</div>
+
+<div style="display:flex;gap:8px;margin-bottom:16px">
+  <input type="text" id="custSearch" placeholder="搜索品牌/公司/联系人..." style="width:250px" onkeydown="if(event.key==='Enter')loadCustomers()">
+  <button class="btn btn-primary btn-sm" onclick="loadCustomers()">🔍 搜索</button>
+  <button class="btn btn-sm" onclick="showAddCustomer()">+ 新增客户</button>
+  <button class="btn btn-sm" onclick="loadCustomers()">🔄 刷新</button>
+</div>
+
+<div class="card hidden" id="addCustomerCard" style="margin-bottom:16px">
+  <h3 id="addCustomerTitle">新增客户</h3>
+  <input type="hidden" id="custEditId">
+  <div class="grid grid-3" style="margin-bottom:12px">
+    <div><label>品牌名称 *</label><input id="custBrand" placeholder="如 Anker"></div>
+    <div><label>公司名称</label><input id="custCompany" placeholder="如 安克创新"></div>
+    <div><label>行业</label><input id="custIndustry" placeholder="如 3C"></div>
+  </div>
+  <div class="grid grid-3" style="margin-bottom:12px">
+    <div><label>联系人</label><input id="custContact" placeholder="姓名"></div>
+    <div><label>联系方式</label><input id="custContactInfo" placeholder="微信/邮箱/电话"></div>
+    <div><label>来源</label><input id="custSource" placeholder="如 展会/飞书/转介绍"></div>
+  </div>
+  <div style="display:flex;gap:8px">
+    <div style="flex:1"><label>预算预估</label><input id="custBudget" placeholder="如 $10K-50K"></div>
+    <div style="flex:1"><label>备注</label><input id="custNotes" placeholder="跟进备注"></div>
+  </div>
+  <div class="btn-group">
+    <button class="btn btn-primary btn-sm" onclick="saveCustomer()">保存</button>
+    <button class="btn btn-sm" onclick="hideAddCustomer()">取消</button>
+  </div>
+</div>
+
+<div class="card" style="padding:0;overflow:hidden">
+  <div class="table-container" style="max-height:500px;overflow-y:auto">
+    <table>
+      <thead><tr><th>品牌</th><th>公司</th><th>行业</th><th>阶段</th><th>联系人</th><th>预算</th><th>来源</th><th>最近更新</th><th>操作</th></tr></thead>
+      <tbody id="custTableBody"><tr><td colspan="9" style="text-align:center;padding:30px;opacity:.5">加载中...</td></tr></tbody>
+    </table>
+  </div>
+</div>
+</div>
+
 <!-- M1: Brand Hub -->
 <div class="page active" id="page-m1">
 <h2>行业品牌智库</h2>
@@ -468,7 +525,7 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
 </div>
 
 <div id="toastContainer"></div>
-<script src="app.js?v=20260603163447"></script>
-<script src="ppt.js?v=20260603163447"></script>
+<script src="app.js?v=20260603164547"></script>
+<script src="ppt.js?v=20260603164547"></script>
 </body>
 </html>

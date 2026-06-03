@@ -96,6 +96,42 @@ db.exec(`
     FOREIGN KEY (created_by) REFERENCES users(id)
   );
 
+  CREATE TABLE IF NOT EXISTS customers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    brand_name TEXT NOT NULL,
+    company_name TEXT,
+    contact_person TEXT,
+    contact_info TEXT,
+    industry TEXT,
+    stage TEXT DEFAULT 'new_lead',
+    source TEXT,
+    budget_estimate TEXT,
+    notes TEXT,
+    created_by INTEGER NOT NULL,
+    assigned_to INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (created_by) REFERENCES users(id),
+    FOREIGN KEY (assigned_to) REFERENCES users(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS customer_activity (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    customer_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    action TEXT NOT NULL,
+    stage_from TEXT,
+    stage_to TEXT,
+    notes TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (customer_id) REFERENCES customers(id),
+    FOREIGN KEY (user_id) REFERENCES users(id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_customers_stage ON customers(stage);
+  CREATE INDEX IF NOT EXISTS idx_customers_industry ON customers(industry);
+  CREATE INDEX IF NOT EXISTS idx_customers_assigned ON customers(assigned_to);
+
   CREATE TABLE IF NOT EXISTS influencers (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     platform TEXT NOT NULL,

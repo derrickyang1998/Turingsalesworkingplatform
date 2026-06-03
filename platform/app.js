@@ -71,7 +71,7 @@ async function initApp() { console.log("[TM] initApp starting");
     INFLUENCERS = idata.sample_influencers || [];
     TEMPLATES = tdata.templates;
     CBLOCKS = tdata.common_blocks || {};
-    console.log("[TM] Calling initM1, initM3, initM4"); initM1(); initM3(); initM4(); console.log("[TM] init complete");
+    console.log("[TM] Calling initM1, initM3, initM4"); loadCustomers(); initM1(); initM3(); initM4(); console.log("[TM] init complete");
     var brandCountEl = document.getElementById('brandCount'); if (brandCountEl) brandCountEl.textContent = BRANDS.length + ' brands';
     var sfEl = document.getElementById('sidebarFooter'); if (sfEl && CURRENT_USER) sfEl.textContent = CURRENT_USER.display_name + ' . ' + CURRENT_USER.department;
     return
@@ -80,6 +80,135 @@ async function initApp() { console.log("[TM] initApp starting");
       document.getElementById('sidebarFooter').textContent = CURRENT_USER.display_name + ' · ' + CURRENT_USER.department;
     }
   } catch (e) { console.error('initApp error:', e); document.getElementById('app').style.display = 'flex'; toast('Data load failed: ' + e.message, 'error'); try { initM1(); } catch(e2) {} }
+}
+
+// ===== C0: CUSTOMER PIPELINE =====
+const CUST_STAGES = {
+  new_lead: '新线索', inquiry: '需求沟通', proposal: '方案中',
+  influencer_matching: '红人匹配', submitted: '已提报', won: '成交', lost: '丢失'
+};
+let curStageFilter = '';
+let customersCache = [];
+
+async function loadCustomers() {
+  var search = document.getElementById('custSearch')?.value || '';
+  var qs = curStageFilter ? '?stage=' + curStageFilter : '';
+  if (search) qs += (qs ? '&' : '?') + 'search=' + encodeURIComponent(search);
+  try {
+    var r = await apiFetch('/customers' + qs);
+    var d = await r.json();
+    customersCache = d.customers || [];
+    renderCustomerTable(customersCache);
+    loadCustomerStats();
+    var m0El = document.getElementById('m0Stats');
+    if (m0El) m0El.textContent = '商务SOP · 线索→成交全流程跟踪 · ' + d.total + ' 个客户';
+  } catch (e) { console.error(e); }
+}
+
+async function loadCustomerStats() {
+  try {
+    var r = await apiFetch('/customers/stats');
+    var d = await r.json();
+    var tags = document.querySelectorAll('#m0StageFilter .tag');
+    tags.forEach(function(t) {
+      var stage = t.getAttribute('data-stage');
+      if (!stage) return;
+      var found = (d.byStage || []).find(function(s) { return s.stage === stage; });
+      t.textContent = CUST_STAGES[stage] + (found ? ' (' + found.count + ')' : '');
+    });
+  } catch (e) {}
+}
+
+function filterCustomers(stage) {
+  curStageFilter = stage;
+  document.querySelectorAll('#m0StageFilter .tag').forEach(function(t) { t.classList.remove('active'); });
+  var activeEl = document.querySelector('#m0StageFilter [data-stage="' + stage + '"]');
+  if (activeEl) activeEl.classList.add('active');
+  else document.querySelector('#m0StageFilter .tag').classList.add('active');
+  loadCustomers();
+}
+
+function renderCustomerTable(data) {
+  var tbody = document.getElementById('custTableBody');
+  if (!data || !data.length) { tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:30px;opacity:.5">暂无客户数据，点击"新增客户"开始</td></tr>'; return; }
+  var h = '';
+  data.forEach(function(c) {
+    var stageLabel = CUST_STAGES[c.stage] || c.stage;
+    h += '<tr><td><strong>' + esc(c.brand_name || '-') + '</strong></td>';
+    h += '<td>' + esc(c.company_name || '-') + '</td>';
+    h += '<td>' + esc(c.industry || '-') + '</td>';
+    h += '<td><select onchange="changeCustomerStage(' + c.id + ', this.value)" style="width:auto;font-size:11px">';
+    Object.keys(CUST_STAGES).forEach(function(k) { h += '<option value="' + k + '"' + (c.stage === k ? ' selected' : '') + '>' + CUST_STAGES[k] + '</option>'; });
+    h += '</select></td>';
+    h += '<td>' + esc(c.contact_person || '-') + '</td>';
+    h += '<td style="font-size:11px">' + esc(c.budget_estimate || '-') + '</td>';
+    h += '<td style="font-size:10px;opacity:.6">' + esc(c.source || '-') + '</td>';
+    h += '<td style="font-size:10px;opacity:.6">' + (c.updated_at ? c.updated_at.substring(0, 10) : '-') + '</td>';
+    h += '<td><button class="btn btn-sm" onclick="editCustomer(' + c.id + ')">编辑</button></td></tr>';
+  });
+  tbody.innerHTML = h;
+}
+
+function showAddCustomer() {
+  document.getElementById('custEditId').value = '';
+  document.getElementById('addCustomerTitle').textContent = '新增客户';
+  ['custBrand','custCompany','custIndustry','custContact','custContactInfo','custSource','custBudget','custNotes'].forEach(function(id) { var el = document.getElementById(id); if (el) el.value = ''; });
+  document.getElementById('addCustomerCard').classList.remove('hidden');
+}
+
+function hideAddCustomer() {
+  document.getElementById('addCustomerCard').classList.add('hidden');
+}
+
+function editCustomer(id) {
+  var c = customersCache.find(function(x) { return x.id === id; });
+  if (!c) return;
+  document.getElementById('custEditId').value = c.id;
+  document.getElementById('addCustomerTitle').textContent = '编辑客户: ' + c.brand_name;
+  document.getElementById('custBrand').value = c.brand_name || '';
+  document.getElementById('custCompany').value = c.company_name || '';
+  document.getElementById('custIndustry').value = c.industry || '';
+  document.getElementById('custContact').value = c.contact_person || '';
+  document.getElementById('custContactInfo').value = c.contact_info || '';
+  document.getElementById('custSource').value = c.source || '';
+  document.getElementById('custBudget').value = c.budget_estimate || '';
+  document.getElementById('custNotes').value = c.notes || '';
+  document.getElementById('addCustomerCard').classList.remove('hidden');
+}
+
+async function saveCustomer() {
+  var brand = document.getElementById('custBrand').value.trim();
+  if (!brand) { toast('请填写品牌名称', 'error'); return; }
+  var editId = document.getElementById('custEditId').value;
+  var body = {
+    brand_name: brand,
+    company_name: document.getElementById('custCompany').value.trim(),
+    industry: document.getElementById('custIndustry').value.trim(),
+    contact_person: document.getElementById('custContact').value.trim(),
+    contact_info: document.getElementById('custContactInfo').value.trim(),
+    source: document.getElementById('custSource').value.trim(),
+    budget_estimate: document.getElementById('custBudget').value.trim(),
+    notes: document.getElementById('custNotes').value.trim()
+  };
+  try {
+    if (editId) {
+      await apiFetch('/customers/' + editId, { method: 'PUT', body: JSON.stringify(body) });
+      toast('客户已更新');
+    } else {
+      await apiFetch('/customers', { method: 'POST', body: JSON.stringify(body) });
+      toast('客户已创建');
+    }
+    hideAddCustomer();
+    loadCustomers();
+  } catch (e) { toast('保存失败: ' + e.message, 'error'); }
+}
+
+async function changeCustomerStage(id, newStage) {
+  try {
+    await apiFetch('/customers/' + id, { method: 'PUT', body: JSON.stringify({ stage: newStage }) });
+    toast('阶段已更新: ' + (CUST_STAGES[newStage] || newStage));
+    loadCustomerStats();
+  } catch (e) { toast('更新失败: ' + e.message, 'error'); }
 }
 
 // Page load - check for existing session
@@ -134,7 +263,7 @@ function exportBrandCSV() {
 function dlFile(name, content, type) { const b = new Blob([content], { type: type || 'text/plain' }), u = URL.createObjectURL(b), a = document.createElement('a'); a.href = u; a.download = name; a.click(); URL.revokeObjectURL(u) }
 function switchTheme(t) { /* Theme locked to Notion style */ }
 (function () { document.body.className = ''; })();
-function switchPage(id) { document.querySelectorAll('.nav-item').forEach(function (n) { n.classList.remove('active') }); var ni = document.querySelector('[data-page="' + id + '"]'); if (ni) ni.classList.add('active'); document.querySelectorAll('.page').forEach(function (p) { p.classList.remove('active') }); var pg = document.getElementById('page-' + id); if (pg) pg.classList.add('active'); if (id === 'admin') loadAdminDashboard() }
+function switchPage(id) { document.querySelectorAll('.nav-item').forEach(function (n) { n.classList.remove('active') }); var ni = document.querySelector('[data-page="' + id + '"]'); if (ni) ni.classList.add('active'); document.querySelectorAll('.page').forEach(function (p) { p.classList.remove('active') }); var pg = document.getElementById('page-' + id); if (pg) pg.classList.add('active'); if (id === 'm0') loadCustomers(); if (id === 'admin') loadAdminDashboard() }
 function gv(id) { var e = document.getElementById(id); return e ? e.value : '' }
 function getDate() { var d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0') }
 
