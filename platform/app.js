@@ -313,9 +313,9 @@ function switchPage(id) {
   ni = document.querySelector('[data-page="' + id + '"]');
   if (ni) ni.classList.add('active');
   pages = document.querySelectorAll('.page');
-  for (i = 0; i < pages.length; i++) { pages[i].style.display = 'none'; }
+  for (i = 0; i < pages.length; i++) { pages[i].style.cssText = 'display:none!important'; }
   pg = document.getElementById('page-' + id);
-  if (pg) pg.style.display = 'block';
+  if (pg) pg.style.cssText = 'display:block!important';
   if (id === 'm0') loadCustomers();
   if (id === 'admin') loadAdminDashboard();
 }
