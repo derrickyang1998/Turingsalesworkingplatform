@@ -103,7 +103,7 @@ db.exec(`
     contact_person TEXT,
     contact_info TEXT,
     industry TEXT,
-    stage TEXT DEFAULT 'new_lead',
+    stage TEXT DEFAULT 'lead',
     source TEXT,
     budget_estimate TEXT,
     notes TEXT,

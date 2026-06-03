@@ -92,7 +92,7 @@ let customersCache = [];
 
 async function loadCustomers() {
   var search = document.getElementById('custSearch')?.value || '';
-  var qs = curStageFilter ? '?stage=' + curStageFilter : '';
+  var qs = ''; if (curStageFilter) qs = '?stage=' + curStageFilter; if (curStatusFilter) qs += (qs ? '&' : '?') + 'status=' + curStatusFilter;
   if (search) qs += (qs ? '&' : '?') + 'search=' + encodeURIComponent(search);
   try {
     var r = await apiFetch('/customers' + qs);

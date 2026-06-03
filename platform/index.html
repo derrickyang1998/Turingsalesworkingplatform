@@ -220,13 +220,8 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
 
 <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px" id="m0StageFilter">
   <span class="tag active" onclick="filterCustomers('')">全部</span>
-  <span class="tag" data-stage="new_lead" onclick="filterCustomers('new_lead')">新线索</span>
-  <span class="tag" data-stage="inquiry" onclick="filterCustomers('inquiry')">需求沟通</span>
-  <span class="tag" data-stage="proposal" onclick="filterCustomers('proposal')">方案中</span>
-  <span class="tag" data-stage="influencer_matching" onclick="filterCustomers('influencer_matching')">红人匹配</span>
-  <span class="tag" data-stage="submitted" onclick="filterCustomers('submitted')">已提报</span>
-  <span class="tag" data-stage="won" onclick="filterCustomers('won')">成交</span>
-  <span class="tag" data-stage="lost" onclick="filterCustomers('lost')">丢失</span>
+  <span class="tag" onclick="filterCustomers('','active')">活跃中</span>
+  <span class="tag" onclick="filterCustomers('','terminal')">暂停/成交/丢失</span>
 </div>
 
 <div style="display:flex;gap:8px;margin-bottom:16px">
@@ -525,7 +520,7 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
 </div>
 
 <div id="toastContainer"></div>
-<script src="app.js?v=20260603164547"></script>
-<script src="ppt.js?v=20260603164547"></script>
+<script src="app.js?v=20260603164821"></script>
+<script src="ppt.js?v=20260603164821"></script>
 </body>
 </html>
