@@ -204,15 +204,11 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
     <div class="sidebar-logo"><h1>TuringMarket</h1></div>
     <div class="nav-item" data-page="m0" onclick="switchPage('m0')"><span class="nav-icon">🚀</span> 客户管道</div>
       <div class="nav-item active" data-page="m1" onclick="switchPage('m1')"><span class="nav-icon">📊</span> 行业品牌智库</div>
-    <div class="nav-item" data-page="m2" onclick="switchPage('m2')"><span class="nav-icon">🎯</span> 客户策略规划</div>
-    <div class="nav-item" data-page="m3" onclick="switchPage('m3')"><span class="nav-icon">📋</span> 需求接入 & 方案生成</div>
-    <div class="nav-item" data-page="m4" onclick="switchPage('m4')"><span class="nav-icon">👥</span> 网红匹配 & 执行管理</div>
-    <div class="nav-item" data-page="m5" onclick="switchPage('m5')"><span class="nav-icon">🤖</span> AI 助手</div>
-    <div class="nav-item admin-only" data-page="admin" onclick="switchPage('admin')"><span class="nav-icon">🛡️</span> 管理控制室</div>
+    <div class="nav-item" data-page="m2" onclick="switchPage('m2')"><span class="nav-icon">🎯</span> 客户策略规划</div>
     <div class="sidebar-footer" id="sidebarFooter"></div>
   </nav>
   <main>
-<div style="padding:8px 0;border-bottom:1px solid var(--border);margin-bottom:8px"><select onchange="switchPage(this.value)" style="width:200px"><option value="m0">🚀 客户管道</option><option value="m1" selected>📊 行业品牌智库</option><option value="m2">🎯 客户策略规划</option><option value="m3">📋 需求接入 & 方案生成</option><option value="m4">👥 网红匹配 & 执行管理</option><option value="m5">🤖 AI 助手</option><option value="admin">🛡️ 管理控制室</option></select></div>
+<div style="padding:8px 0;border-bottom:1px solid var(--border);margin-bottom:8px"><select onchange="switchPage(this.value)" style="width:200px"><option value="m0">🚀 客户管道</option><option value="m1" selected>📊 行业品牌智库</option><option value="m2">🎯 客户策略规划</option></select></div>
 
 
 <!-- M0: Customer Pipeline -->
@@ -307,14 +303,7 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
 </div>
 </div>
 
-<!-- M3: Demand & Proposal -->
-<div class="page" id="page-m3">
-<h2>📋 需求接入 & 方案生成</h2>
-<p class="subtitle">上传客户需求文件 → AI自动解析 → 智能分析 → 一键生成方案</p>
 
-<!-- Steps -->
-<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px">
-  <div class="step active" id="step1">1. 上传需求</div>
   <div class="step" id="step2">2. AI分析结果</div>
   <div class="step" id="step3">3. 选择模板生成方案</div>
 </div>
@@ -385,12 +374,7 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
 </div>
 </div>
 
-<!-- M4: Influencer -->
-<div class="page" id="page-m4">
-<h2>👥 网红匹配 & 执行管理</h2>
-<p class="subtitle">提报资源名单 · 下单合作追踪 · 飞书同步</p>
-<div class="tabs" id="tabBar">
-  <div class="tab active" data-tab="tab1" onclick="switchTab('tab1')">📋 提报资源名单</div>
+
   <div class="tab" data-tab="tab2" onclick="switchTab('tab2')">📊 下单合作资源</div>
   <div class="tab" data-tab="tab3" onclick="switchTab('tab3')">📤 导入 & 飞书</div>
 </div>
@@ -439,14 +423,7 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
 </div>
 </div>
 
-<!-- M5: AI Chat -->
-<div class="page" id="page-m5">
-<h2>🤖 AI 助手</h2>
-<p class="subtitle">DeepSeek V4 Flash · 基于90品牌数据库 · 策略咨询</p>
-<div class="card" style="padding:0;overflow:hidden">
-  <div class="chat-container">
-    <div class="chat-messages" id="chatMessages">
-      <div class="chat-msg assistant"><div class="bubble">👋 你好！我是 TuringMarket AI 助手。<br><br>我可以帮你：<br>• 分析行业品牌数据和竞品<br>• 给出红人营销策略建议<br>• 评估预算合理性和ROI<br>• 推荐红人匹配方案<br><br>请直接提问！</div></div>
+</div>
     </div>
     <div class="chat-input-area">
       <input type="text" id="chatInput" placeholder="输入问题..." onkeydown="if(event.key==='Enter')sendChat()">
@@ -458,12 +435,7 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
 </div>
 
 <!-- ADMIN DASHBOARD -->
-<div class="page" id="page-admin">
-<h2>🛡️ 管理控制室</h2>
-<p class="subtitle">全盘需求监控 · 用户管理 · Token消耗追踪 · 功能使用统计</p>
-
-<div class="grid grid-4" style="margin-bottom:20px">
-  <div class="stat"><div class="stat-value" id="ad_totalUsers">-</div><div class="stat-label">活跃用户</div></div>
+<div class="stat-label">活跃用户</div></div>
   <div class="stat"><div class="stat-value" id="ad_totalDemands">-</div><div class="stat-label">总需求数</div></div>
   <div class="stat"><div class="stat-value" id="ad_totalProposals">-</div><div class="stat-label">生成方案</div></div>
   <div class="stat"><div class="stat-value" id="ad_totalTokens">-</div><div class="stat-label">Token消耗</div></div>
