@@ -183,7 +183,7 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
 .brand-link:hover{background:#f5f5f4}
 .brand-emails{font-size:10px;color:#666}
 
-</style>
+button.nav-item{font-family:inherit;font-size:inherit;text-align:left;display:flex;align-items:center;gap:8px}</style>
 </head>
 <body>
 <!-- AUTH OVERLAY -->
@@ -202,15 +202,15 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
 <div id="app" style="display:none">
   <nav class="sidebar">
     <div class="sidebar-logo"><h1>TuringMarket</h1></div>
-      <a class="nav-item" href="#m0" data-page="m0" onclick="switchPage('m0');return false;"><span class="nav-icon">🚀</span> 客户管道</a>
-    <a class="nav-item" href="#m1" data-page="m1" onclick="switchPage('m1');return false;"><span class="nav-icon">📊</span> 行业品牌智库</a>
-    <a class="nav-item" href="#m2" data-page="m2" onclick="switchPage('m2');return false;"><span class="nav-icon">🎯</span> 客户策略规划</a>
-    <a class="nav-item" href="#m3" data-page="m3" onclick="switchPage('m3');return false;"><span class="nav-icon">📋</span> 需求接入 & 方案生成</a>
-    <a class="nav-item" href="#m4" data-page="m4" onclick="switchPage('m4');return false;"><span class="nav-icon">👥</span> 网红匹配 & 执行管理</a>
-    <a class="nav-item" href="#m5" data-page="m5" onclick="switchPage('m5');return false;"><span class="nav-icon">🤖</span> AI 助手</a>
-    <div class="nav-item admin-only" data-page="admin"><span class="nav-icon">🛡️</span> 管理控制室</div>
-    <div class="sidebar-footer" id="sidebarFooter"></div>
-  </nav>
+      <button class="nav-item" data-page="m0" onclick="switchPage('m0')"><span class="nav-icon">🚀</span> 客户管道</button>
+      <button class="nav-item active" data-page="m1" onclick="switchPage('m1')"><span class="nav-icon">📊</span> 行业品牌智库</button>
+      <button class="nav-item" data-page="m2" onclick="switchPage('m2')"><span class="nav-icon">🎯</span> 客户策略规划</button>
+      <button class="nav-item" data-page="m3" onclick="switchPage('m3')"><span class="nav-icon">📋</span> 需求接入 & 方案生成</button>
+      <button class="nav-item" data-page="m4" onclick="switchPage('m4')"><span class="nav-icon">👥</span> 网红匹配 & 执行管理</button>
+      <button class="nav-item" data-page="m5" onclick="switchPage('m5')"><span class="nav-icon">🤖</span> AI 助手</button>
+      <button class="nav-item admin-only" data-page="admin" onclick="switchPage('admin')"><span class="nav-icon">🛡️</span> 管理控制室</button>
+      <div class="sidebar-footer">v5.4 · Codex</div>
+    </div>
   <main>
 
 
