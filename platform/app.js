@@ -267,6 +267,71 @@ function switchPage(id) { document.querySelectorAll('.nav-item').forEach(functio
 function gv(id) { var e = document.getElementById(id); return e ? e.value : '' }
 function getDate() { var d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0') }
 
+// ===== CROSS-MODULE INTERCONNECT =====
+let currentCustomer = null;
+
+function setCurrentCustomer(cust) {
+  currentCustomer = cust;
+  if (cust) toast('已选择客户: ' + cust.brand_name);
+}
+
+function clearCurrentCustomer() {
+  currentCustomer = null;
+}
+
+function goToM1(cust) {
+  setCurrentCustomer(cust);
+  switchPage('m1');
+  setTimeout(function() {
+    // Auto-filter brand tree by customer industry
+    if (cust.industry) {
+      var treeTags = document.querySelectorAll('#industryTreeContainer .tag');
+      treeTags.forEach(function(t) {
+        if (t.textContent.trim() === cust.industry || t.getAttribute('data-tag') === cust.industry) {
+          t.click();
+        }
+      });
+      // Also set the search to the customer brand
+      var searchEl = document.getElementById('brandSearch');
+      if (searchEl) {
+        searchEl.value = cust.industry;
+      }
+    }
+  }, 500);
+}
+
+function goToM3(cust) {
+  setCurrentCustomer(cust);
+  switchPage('m3');
+  setTimeout(function() {
+    // Pre-fill demand form
+    var brandEl = document.getElementById('d_brand');
+    var companyEl = document.getElementById('d_company');
+    var categoryEl = document.getElementById('d_category');
+    var areaEl = document.getElementById('d_area');
+    if (brandEl) brandEl.value = cust.brand_name || '';
+    if (companyEl) companyEl.value = cust.company_name || '';
+    if (categoryEl && cust.industry) categoryEl.value = cust.industry;
+    if (cust.budget_estimate && areaEl) {
+      // budget estimate can be used as initial context
+    }
+    toast('已预填客户: ' + (cust.brand_name || ''));
+  }, 500);
+}
+
+function goToM4(cust) {
+  setCurrentCustomer(cust);
+  switchPage('m4');
+  setTimeout(function() {
+    // Pre-filter by customer industry
+    var catEl = document.getElementById('filt_category');
+    if (catEl && cust.industry) {
+      catEl.value = cust.industry;
+      matchInfluencers();
+    }
+  }, 500);
+}
+
 // ===== M1: BRAND HUB =====
 let activeTag = null;
 function initM1() {
