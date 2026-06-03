@@ -724,8 +724,9 @@ lastMatch = []; var lastInfAPI = [];
 
 async function initM4() {
   await loadInfluencersFromAPI();
-  await loadCollaborations();
+  renderInfTable(lastMatch);
   var cnt = document.getElementById('m4InfCount');
+  await loadCollaborations();
   if (cnt) cnt.textContent = lastInfAPI.length + ' influencers in database · 智能匹配 · 合作追踪';
 }
 
