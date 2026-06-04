@@ -50,6 +50,22 @@ let chatHistory = [{role: "system", content: "You are the TuringMarket AI assist
     })(pages[j]);
   }
 })();
+// ==== FIX DOM NESTING: ensure all page-* divs are direct children of <main> ====
+(function fixPageParents() {
+  var main = document.querySelector('main');
+  if (!main) return;
+  // Wait a tick for DOM to settle, then move any misplaced page divs
+  setTimeout(function() {
+    var allPages = document.querySelectorAll('[id^="page-"]');
+    for (var i = 0; i < allPages.length; i++) {
+      if (allPages[i].parentElement !== main) {
+        console.log('[TM] Fixing parent for: ' + allPages[i].id);
+        main.appendChild(allPages[i]);
+      }
+    }
+  }, 100);
+})();
+
 
 // ===== AUTH =====
 async function doLogin() {
@@ -100,7 +116,7 @@ function apiFetch(url, opts) {
 // ===== APP INIT =====
 async function initApp() { console.log("[TM] initApp starting");
   // Hide all non-M1 pages (they start visible for text metrics)
-  (function() { var pages = document.querySelectorAll('.page'); for (var i = 0; i < pages.length; i++) { var pid = pages[i].id.replace('page-', ''); if (pid !== 'm1') { pages[i].setAttribute('style', 'display:none'); } } })();
+  
   try {
     const [bdResp, ir, tr] = await Promise.all([
       fetch('data/industry_brands_v2.json'),
@@ -312,21 +328,20 @@ function switchPage(id) {
   var i, navs, pages, ni, pg;
   navs = document.querySelectorAll('.nav-item');
   for (i = 0; i < navs.length; i++) { navs[i].classList.remove('active'); }
-  ni = document.querySelector('[data-page="' + id + '"]');
+  ni = document.querySelector('[data-page=\"' + id + '\"]');
   if (ni) ni.classList.add('active');
   pages = document.querySelectorAll('.page');
-  for (i = 0; i < pages.length; i++) { pages[i].classList.remove('active'); }
+  for (i = 0; i < pages.length; i++) { 
+    pages[i].classList.remove('active'); 
+    pages[i].style.display = 'none'; 
+  }
   pg = document.getElementById('page-' + id);
-  if (pg) {
-    pg.classList.add('active');
-    // Force layout recalculation
-    pg.setAttribute('style', 'display:block');
-    pg.offsetHeight;
-    pg.style.display = '';
+  if (pg) { 
+    pg.classList.add('active'); 
+    pg.style.display = 'block';
   }
   if (id === 'm0') loadCustomers();
   if (id === 'admin') loadAdminDashboard();
-  
 }
 
 // Hash-driven routing
@@ -1011,3 +1026,7 @@ async function adminCreateInvite() { try { var r = await apiFetch("/admin/invite
     footer.innerHTML = '<a href="#" onclick="doLogout()" style="color:var(--text2);font-size:10px">🚪 退出登录</a> · <span id="sidebarUser" style="font-size:10px;opacity:.5"></span>';
   }
 })();
+
+
+
+
