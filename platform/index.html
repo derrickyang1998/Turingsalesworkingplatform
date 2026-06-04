@@ -202,7 +202,8 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
 <div id="app" style="display:none">
   <nav class="sidebar">
     <div class="sidebar-logo"><h1>TuringMarket</h1></div>
-    <div class="nav-item" data-page="m1" onclick="switchPage('m1')" class="active"><span class="nav-icon">📊</span> 行业品牌智库</div>
+    <div class="nav-item" data-page="m0" onclick="switchPage('m0')"><span class="nav-icon">🚀</span> 客户管道</div>
+      <div class="nav-item active" data-page="m1" onclick="switchPage('m1')"><span class="nav-icon">📊</span> 行业品牌智库</div>
     <div class="nav-item" data-page="m2" onclick="switchPage('m2')"><span class="nav-icon">🎯</span> 客户策略规划</div>
     <div class="nav-item" data-page="m3" onclick="switchPage('m3')"><span class="nav-icon">📋</span> 需求接入 & 方案生成</div>
     <div class="nav-item" data-page="m4" onclick="switchPage('m4')"><span class="nav-icon">👥</span> 网红匹配 & 执行管理</div>
@@ -261,153 +262,7 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
 </div>
 </div>
 
-<!-- M3: Demand & Proposal -->
-<div class="page" id="page-m3">
-<h2>📋 需求接入 & 方案生成</h2>
-<p class="subtitle">三步完成专业红人营销方案</p>
-<div class="card" style="margin-bottom:16px">
-  <div style="display:flex;gap:12px;margin-bottom:12px" id="m3Steps">
-    <span class="tag active" id="step1">1. 需求填写</span><span style="opacity:.3">→</span>
-    <span class="tag" id="step2">2. AI 分析</span><span style="opacity:.3">→</span>
-    <span class="tag" id="step3">3. 方案生成</span>
-  </div>
-  <div id="m3s1">
-    <div class="grid grid-2" style="margin-bottom:8px">
-      <div><label>品牌名称 *</label><input id="d_brand" placeholder="如 Olight"></div>
-      <div><label>公司名称</label><input id="d_company" placeholder="如 傲雷"></div>
-    </div>
-    <div class="grid grid-2" style="margin-bottom:8px">
-      <div><label>产品名称</label><input id="d_product" placeholder="如 ArkPro EDC"></div>
-      <div><label>核心卖点 USP *</label><input id="d_usp" placeholder="4光源/7模式/一体式设计"></div>
-    </div>
-    <div class="grid grid-2" style="margin-bottom:8px">
-      <div><label>推广平台</label><input id="d_platform" placeholder="如 YouTube+TikTok"></div>
-      <div><label>目标市场</label><input id="d_area" placeholder="如 北美"></div>
-    </div>
-    <div class="grid grid-2" style="margin-bottom:8px">
-      <div><label>预算 USD</label><input id="d_budget" placeholder="如 50000"></div>
-      <div><label>行业</label><input id="d_category" placeholder="如 3C"></div>
-    </div>
-    <div style="margin-bottom:8px"><label>竞品</label><input id="d_competitors" placeholder="竞品品牌，逗号分隔"></div>
-    <div style="margin-bottom:8px"><label>备注</label><input id="d_notes" placeholder="其他需求"></div>
-    <button class="btn btn-primary" onclick="goAnalyze()">去 AI 分析 →</button>
-  </div>
-  <div id="m3s2" class="hidden">
-    <div id="analysisResult" style="background:var(--surface2);border-radius:8px;padding:16px;margin-bottom:12px;min-height:60px"></div>
-    <button class="btn btn-primary" onclick="goGenerate()">选模板生成方案 →</button>
-  </div>
-  <div id="m3s3" class="hidden">
-    <div id="tmplSelect" style="margin-bottom:12px"></div>
-    <button class="btn btn-primary" style="width:100%" onclick="generateProposal()">🚀 自动生成方案</button>
-    <div id="propResult" style="margin-top:16px"></div>
-  </div>
-</div>
-</div>
-
-<!-- M4: Influencer -->
-<div class="page" id="page-m4">
-<h2>👥 网红匹配 & 执行管理</h2>
-<p class="subtitle" id="m4InfCount">15 influencers in database · 智能匹配 · 合作追踪</p>
-<div class="tabs" id="tabBar">
-  <div class="tab active" data-tab="tab1" onclick="switchTab('tab1')">📋 提报资源名单</div>
-  <div class="tab" data-tab="tab2" onclick="switchTab('tab2')">📊 合作追踪</div>
-  <div class="tab" data-tab="tab3" onclick="switchTab('tab3')">📤 导入 & 飞书</div>
-</div>
-<div id="tab1-content">
-  <div class="card">
-    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
-      <input type="text" id="filt_search" placeholder="搜索网红/品牌/风格..." style="width:180px" onkeydown="if(event.key==='Enter')matchInfluencers()">
-      <select id="filt_platform" style="width:auto" onchange="matchInfluencers()"><option value="">全部平台</option><option>YouTube</option><option>TikTok</option><option>Instagram</option></select>
-      <select id="filt_category" style="width:auto" onchange="matchInfluencers()"><option value="">全部类别</option><option>3C</option><option>智能家居</option><option>美妆</option><option>户外</option><option>宠物</option><option>储能</option><option>医疗</option><option>出行</option></select>
-      <select id="filt_region" style="width:auto" onchange="matchInfluencers()"><option value="">全部地区</option><option>US</option><option>DE</option><option>JP</option><option>KR</option></select>
-      <select id="filt_sort" style="width:auto" onchange="matchInfluencers()"><option value="followers">按粉丝数</option><option value="engagement">按互动率</option><option value="cost_usd">按报价</option></select>
-      <button class="btn btn-primary btn-sm" onclick="matchInfluencers()">🔍 筛选</button>
-      <button class="btn btn-sm" onclick="smartMatch()">🤖 智能匹配</button>
-      <button class="btn btn-sm" onclick="exportSubmissionCSV()">📥 导出CSV</button>
-    </div>
-    <div class="table-container" id="infTableContainer" style="max-height:450px;overflow-y:auto"><p style="text-align:center;padding:30px;opacity:.5">点击筛选或智能匹配加载网红数据</p></div>
-  </div>
-</div>
-<div id="tab2-content" class="hidden">
-  <div class="card"><h3>📊 合作追踪</h3><div style="display:flex;gap:6px;margin-bottom:12px"><select id="collabFilter" style="width:auto" onchange="loadCollaborations()"><option value="">全部状态</option><option value="proposed">提案中</option><option value="contacted">已建联</option><option value="negotiating">谈判中</option><option value="confirmed">已确认</option><option value="contract_sent">合同已发</option><option value="live">合作中</option><option value="content_review">内容审核</option><option value="completed">已完成</option><option value="cancelled">已取消</option></select><button class="btn btn-sm" onclick="loadCollaborations()">🔄 刷新</button></div><div id="collabStatsBar" style="display:flex;gap:16px;margin-bottom:12px"></div><div class="table-container" id="execTableContainer" style="max-height:450px;overflow-y:auto"><p style="text-align:center;padding:30px;opacity:.5">加载中...</p></div></div>
-</div>
-<div id="tab3-content" class="hidden">
-  <div class="grid grid-2">
-    <div class="card">
-      <h3>📤 网红数据导入</h3>
-      <p style="font-size:12px;opacity:.6;margin-bottom:16px">支持 CSV / JSON / XLS / XLSX 格式</p>
-      <div class="file-upload" onclick="document.getElementById('infFile').click()">
-        <div class="upload-icon">📁</div>
-        <div class="upload-text">点击或拖拽上传</div>
-      </div>
-      <input type="file" id="infFile" accept=".csv,.json,.xls,.xlsx" style="display:none" onchange="handleUpload(event)">
-      <div style="display:flex;gap:6px;margin-top:8px">
-        <button class="btn btn-outline btn-sm" onclick="downloadInfTemplate()">📋 下载模板</button>
-        <span id="uploadOK" style="font-size:11px;opacity:.6;align-self:center"></span>
-      </div>
-      <div id="infPreview" style="margin-top:12px;max-height:120px;overflow-y:auto;font-size:11px"></div>
-    </div>
-    <div class="card">
-      <h3>📊 飞书同步</h3>
-      <p style="font-size:12px;opacity:.7;margin-bottom:8px">勾选网红 → 导出CSV → 导入飞书</p>
-      <button class="btn btn-primary btn-sm" onclick="pushToFeishu()">📨 导出CSV到飞书</button>
-      <div id="feishuStatus" style="font-size:11px;opacity:.6;margin-top:6px"></div>
-    </div>
-  </div>
-</div>
-</div>
-
-<!-- M5: AI Chat -->
-<div class="page" id="page-m5">
-<h2>🤖 AI 助手</h2>
-<p class="subtitle">DeepSeek V4 · 基于品牌数据库 · 策略咨询</p>
-<div class="card" style="padding:0;overflow:hidden">
-  <div class="chat-container">
-    <div class="chat-messages" id="chatMessages">
-      <div class="chat-msg assistant"><div class="bubble">👋 你好！我是 TuringMarket AI 助手。可以帮你分析行业品牌、给出策略建议、评估预算ROI、推荐红人方案。直接提问吧！</div></div>
-    </div>
-    <div class="chat-input-area">
-      <input type="text" id="chatInput" placeholder="输入问题..." onkeydown="if(event.key==='Enter')sendChat()">
-      <button class="btn btn-primary btn-sm" onclick="sendChat()">发送</button>
-      <button class="btn btn-sm" onclick="clearChat()">清空</button>
-    </div>
-  </div>
-</div>
-</div>
-
-<!-- Admin Dashboard -->
-<div class="page" id="page-admin">
-<h2>🛡️ 管理控制室</h2>
-<p class="subtitle">全盘需求监控 · 用户管理 · Token消耗追踪</p>
-<div class="grid grid-4" style="margin-bottom:20px">
-  <div class="stat"><div class="stat-value" id="ad_totalUsers">-</div><div class="stat-label">活跃用户</div></div>
-  <div class="stat"><div class="stat-value" id="ad_totalDemands">-</div><div class="stat-label">总需求数</div></div>
-  <div class="stat"><div class="stat-value" id="ad_totalProposals">-</div><div class="stat-label">生成方案</div></div>
-  <div class="stat"><div class="stat-value" id="ad_totalTokens">-</div><div class="stat-label">Token消耗</div></div>
-</div>
-<div class="card">
-  <h3>团队成员</h3>
-  <div class="table-container" style="max-height:400px;overflow-y:auto">
-    <table>
-      <thead><tr><th>用户名</th><th>姓名</th><th>部门</th><th>角色</th><th>Token配额</th><th>状态</th><th>操作</th></tr></thead>
-      <tbody id="ad_userTableBody"><tr><td colspan="7" style="text-align:center;padding:30px;opacity:.5">加载中...</td></tr></tbody>
-    </table>
-  </div>
-  <div class="btn-group">
-    <button class="btn btn-sm" onclick="adminCreateInvite()">🔗 生成邀请码</button>
-    <span id="ad_inviteResult" style="font-size:12px;align-self:center;opacity:.7"></span>
-  </div>
-</div>
-</div>
-
-      <div class="nav-item" data-page="m0" onclick="switchPage('m0')"><span class="nav-icon">🚀</span> 客户管道</div>
-      <div class="nav-item" data-page="m2" onclick="switchPage('m2')"><span class="nav-icon">🎯</span> 客户策略规划</div>
-      <div class="nav-item" data-page="m3" onclick="switchPage('m3')"><span class="nav-icon">📋</span> 需求接入 & 方案生成</div>
-      <div class="nav-item" data-page="m4" onclick="switchPage('m4')"><span class="nav-icon">👥</span> 网红匹配 & 执行管理</div>
-      <div class="nav-item" data-page="m5" onclick="switchPage('m5')"><span class="nav-icon">🤖</span> AI 助手</div>
-      <div class="nav-item admin-only" data-page="admin" onclick="switchPage('admin')"><span class="nav-icon">🛡️</span> 管理控制室</div>
-
-
+<!-- M1: Brand Hub -->
 <div class="page active" id="page-m1">
 <h2>行业品牌智库</h2>
 <p class="subtitle">1871个出海品牌 · 13大行业 · 189个细分标签 · AI数据补充 · 竞品对标</p>
