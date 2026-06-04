@@ -109,42 +109,7 @@ function closeCustDetail() { document.getElementById('custDetailPanel').style.di
 
 // ===== DEDUPLICATION =====
 var pendingDupCheck = null;
-async function saveCustomer() {
-  var brand = document.getElementById('custBrand').value.trim();
-  var company = document.getElementById('custCompany').value.trim();
-  if (!brand) { toast('请填写品牌名称', 'error'); return; }
-  
-  var custData = {
-    brand_name: brand,
-    company_name: company,
-    contact_person: document.getElementById('custContact').value.trim(),
-    contact_info: document.getElementById('custContactInfo').value.trim(),
-    industry: document.getElementById('custIndustry').value,
-    source: document.getElementById('custSource').value,
-    stage: document.getElementById('custStage').value,
-    budget_estimate: document.getElementById('custBudget').value,
-    notes: document.getElementById('custNotes').value.trim()
-  };
 
-  // Check duplicates
-  try {
-    var qs = '?brand=' + encodeURIComponent(brand);
-    if (company) qs += '&company=' + encodeURIComponent(company);
-    var dupResp = await apiFetch('/customers/check-duplicate' + qs);
-    var dups = await dupResp.json();
-    if (dups && dups.length > 0) {
-      pendingDupCheck = { custData: custData, dups: dups };
-      document.getElementById('dupNames').textContent = dups[0].brand_name + (dups[0].company_name ? ' / ' + dups[0].company_name : '');
-      document.getElementById('dupOwner').textContent = dups[0].assigned_name || '其他商务';
-      document.getElementById('custModal').style.display = 'none';
-      document.getElementById('dupWarning').style.display = '';
-      window._dupCustomerId = dups[0].id;
-      return;
-    }
-  } catch(e) { /* proceed if dedup check fails */ }
-  
-  await saveCustData(custData);
-}
 
 async function forceSaveCustomer() {
   if (pendingDupCheck) { await saveCustData(pendingDupCheck.custData); }
@@ -174,7 +139,7 @@ async function saveCustData(custData) {
   if (!sidebar) return;
   
   var pages = [
-    { id: 'm0', icon: '🚀', label: '客户管道' },
+    { id: 'm0', icon: '🚀', label: '客户库' },
     { id: 'm1', icon: '📊', label: '行业品牌智库' },
     { id: 'm2', icon: '🎯', label: '客户策略规划' },
     { id: 'm3', icon: '📋', label: '需求接入 & 方案生成' },
@@ -340,8 +305,12 @@ async function loadCustomerStats() {
 
 function filterCustomers(stage) {
   curStageFilter = stage;
+  // Update tag styling
   document.querySelectorAll('#m0StageFilter .tag').forEach(function(t) { t.classList.remove('active'); });
-  var activeEl = document.querySelector('#m0StageFilter [data-stage="' + stage + '"]');
+  if (event && event.target) event.target.classList.add('active');
+  else { var tags = document.querySelectorAll('#m0StageFilter .tag'); for (var k = 0; k < tags.length; k++) { if (tags[k].getAttribute('onclick') && tags[k].getAttribute('onclick').indexOf("'" + stage + "'") >= 0) tags[k].classList.add('active'); } }
+  loadCustomers();
+}ySelector('#m0StageFilter [data-stage="' + stage + '"]');
   if (activeEl) activeEl.classList.add('active');
   else document.querySelector('#m0StageFilter .tag').classList.add('active');
   loadCustomers();
@@ -379,6 +348,22 @@ function hideAddCustomer() {
   document.getElementById('addCustomerCard').classList.add('hidden');
 }
 
+
+function openAddCustomer() {
+  document.getElementById('custModalTitle').textContent = '新增客户';
+  document.getElementById('custEditId').value = '';
+  document.getElementById('custBrand').value = '';
+  document.getElementById('custCompany').value = '';
+  document.getElementById('custContact').value = '';
+  document.getElementById('custContactInfo').value = '';
+  document.getElementById('custIndustry').value = '';
+  document.getElementById('custStage').value = 'lead';
+  document.getElementById('custSource').value = '自主开发';
+  document.getElementById('custBudget').value = '';
+  document.getElementById('custNotes').value = '';
+  document.getElementById('custModal').style.display = 'flex';
+}
+function closeCustModal() { document.getElementById('custModal').style.display = 'none'; dismissDup(); }
 function editCustomer(id) {
   var c = customersCache.find(function(x) { return x.id === id; });
   if (!c) return;
@@ -402,11 +387,12 @@ async function saveCustomer() {
   var body = {
     brand_name: brand,
     company_name: document.getElementById('custCompany').value.trim(),
-    industry: document.getElementById('custIndustry').value.trim(),
     contact_person: document.getElementById('custContact').value.trim(),
     contact_info: document.getElementById('custContactInfo').value.trim(),
-    source: document.getElementById('custSource').value.trim(),
-    budget_estimate: document.getElementById('custBudget').value.trim(),
+    industry: document.getElementById('custIndustry').value,
+    stage: document.getElementById('custStage').value,
+    source: document.getElementById('custSource').value,
+    budget_estimate: document.getElementById('custBudget').value,
     notes: document.getElementById('custNotes').value.trim()
   };
   try {
@@ -414,15 +400,36 @@ async function saveCustomer() {
       await apiFetch('/customers/' + editId, { method: 'PUT', body: JSON.stringify(body) });
       toast('客户已更新');
     } else {
+      // Dedup check
+      var dupR = await apiFetch('/customers/check-duplicate?brand=' + encodeURIComponent(brand));
+      var dupD = await dupR.json();
+      if (dupD && dupD.length > 0) {
+        document.getElementById('dupNames').textContent = dupD[0].brand_name || '';
+        document.getElementById('dupOwner').textContent = dupD[0].assigned_name || '';
+        document.getElementById('custModal').style.display = 'none';
+        document.getElementById('dupWarning').style.display = '';
+        window._dupCustomerId = dupD[0].id;
+        pendingDupCheck = { body: body };
+        return;
+      }
       await apiFetch('/customers', { method: 'POST', body: JSON.stringify(body) });
       toast('客户已创建');
     }
-    hideAddCustomer();
+    closeCustModal();
     loadCustomers();
   } catch (e) { toast('保存失败: ' + e.message, 'error'); }
 }
-
-async function changeCustomerStage(id, newStage) {
+async function forceSaveCustomer() {
+  if (pendingDupCheck) {
+    try {
+      await apiFetch('/customers', { method: 'POST', body: JSON.stringify(pendingDupCheck.body) });
+      toast('客户已创建');
+      document.getElementById('dupWarning').style.display = 'none';
+      closeCustModal();
+      loadCustomers();
+    } catch(e) { toast('保存失败: ' + e.message, 'error'); }
+  }
+}async function changeCustomerStage(id, newStage) {
   try {
     await apiFetch('/customers/' + id, { method: 'PUT', body: JSON.stringify({ stage: newStage }) });
     toast('阶段已更新: ' + (CUST_STAGES[newStage] || newStage));
@@ -1184,6 +1191,12 @@ async function adminCreateInvite() { try { var r = await apiFetch("/admin/invite
     footer.innerHTML = '<a href="#" onclick="doLogout()" style="color:var(--text2);font-size:10px">🚪 退出登录</a> · <span id="sidebarUser" style="font-size:10px;opacity:.5"></span>';
   }
 })();
+
+
+
+
+
+
 
 
 
