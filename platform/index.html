@@ -202,7 +202,7 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
 <div id="app" style="display:none">
   <nav class="sidebar">
     <div class="sidebar-logo"><h1>TuringMarket</h1></div>
-    <div class="nav-item" data-page="m0" onclick="switchPage('m0')"><span class="nav-icon">🚀</span> 客户管道</div>
+    <div class="nav-item" data-page="m0" onclick="switchPage('m0')"><span class="nav-icon">🚀</span> 客户库</div>
       <div class="nav-item active" data-page="m1" onclick="switchPage('m1')"><span class="nav-icon">📊</span> 行业品牌智库</div>
     <div class="nav-item" data-page="m2" onclick="switchPage('m2')"><span class="nav-icon">🎯</span> 客户策略规划</div>
     <div class="nav-item" data-page="m3" onclick="switchPage('m3')"><span class="nav-icon">📋</span> 需求接入 & 方案生成</div>
@@ -212,56 +212,95 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
     <div class="sidebar-footer" id="sidebarFooter"></div>
   </nav>
   <main>
-<div style="padding:8px 0;border-bottom:1px solid var(--border);margin-bottom:8px"><select onchange="switchPage(this.value)" style="width:200px"><option value="m0">🚀 客户管道</option><option value="m1" selected>📊 行业品牌智库</option><option value="m2">🎯 客户策略规划</option><option value="m3">📋 需求接入 & 方案生成</option><option value="m4">👥 网红匹配 & 执行管理</option><option value="m5">🤖 AI 助手</option><option value="admin">🛡️ 管理控制室</option></select></div>
 
 
-<!-- M0: Customer Pipeline -->
+
+
+<!-- M0: Customer Library (Salesforce-style) -->
 <div class="page" id="page-m0">
-<h2>🚀 客户管道</h2>
-<p class="subtitle" id="m0Stats">商务SOP · 线索→成交全流程跟踪</p>
-<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px" id="m0StageFilter">
+<h2>🚀 客户库</h2>
+<p class="subtitle" id="m0Stats">线索→成交全流程管理 · 跨账号去重</p>
+
+<!-- View Toggle + Search Bar -->
+<div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+  <div style="display:flex;gap:0;border:1px solid var(--border);border-radius:8px;overflow:hidden">
+    <button class="btn btn-sm" id="viewTableBtn" onclick="switchCustView('table')" style="border-radius:0;background:var(--surface2);border-right:1px solid var(--border)">📋 列表</button>
+    <button class="btn btn-sm" id="viewKanbanBtn" onclick="switchCustView('kanban')" style="border-radius:0">📌 看板</button>
+  </div>
+  <div class="search-box" style="flex:1;max-width:300px"><span class="search-icon">🔍</span><input id="custSearch" placeholder="搜索品牌/公司/联系人..." oninput="loadCustomers()"></div>
+  <select id="custStageFilter" onchange="loadCustomers()" style="width:100px"><option value="">全部阶段</option><option value="lead">开发中</option><option value="proposal">方案</option><option value="negotiation">谈判</option><option value="won">成交</option><option value="maintenance">维护</option></select>
+  <select id="custSourceFilter" onchange="loadCustomers()" style="width:90px"><option value="">全部来源</option><option value="自主开发">自主开发</option><option value="展会">展会</option><option value="转介绍">转介绍</option><option value="平台询盘">平台询盘</option></select>
+  <button class="btn btn-primary btn-sm" onclick="openAddCustomer()">+ 新增客户</button>
+</div>
+
+<!-- Stage Filter Tags -->
+<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px" id="m0StageFilter">
   <span class="tag active" onclick="filterCustomers('')">全部</span>
-  <span class="tag" onclick="filterCustomers('','active')">活跃中</span>
-  <span class="tag" onclick="filterCustomers('','terminal')">暂停/成交/丢失</span>
+  <span class="tag" onclick="filterCustomers('lead')">🔍 开发中</span>
+  <span class="tag" onclick="filterCustomers('proposal')">📝 方案</span>
+  <span class="tag" onclick="filterCustomers('negotiation')">🤝 谈判</span>
+  <span class="tag" onclick="filterCustomers('won')">✅ 成交</span>
+  <span class="tag" onclick="filterCustomers('maintenance')">🔄 维护</span>
 </div>
-<div style="display:flex;gap:8px;margin-bottom:16px">
-  <input type="text" id="custSearch" placeholder="搜索品牌/公司/联系人..." style="width:250px" onkeydown="if(event.key==='Enter')loadCustomers()">
-  <button class="btn btn-primary btn-sm" onclick="loadCustomers()">🔍 搜索</button>
-  <button class="btn btn-sm" onclick="showAddCustomer()">+ 新增客户</button>
-  <button class="btn btn-sm" onclick="loadCustomers()">🔄 刷新</button>
-</div>
-<div class="card hidden" id="addCustomerCard" style="margin-bottom:16px">
-  <h3 id="addCustomerTitle">新增客户</h3>
-  <input type="hidden" id="custEditId">
-  <div class="grid grid-3" style="margin-bottom:12px">
-    <div><label>品牌名称 *</label><input id="custBrand" placeholder="如 Anker"></div>
-    <div><label>公司名称</label><input id="custCompany" placeholder="如 安克创新"></div>
-    <div><label>行业</label><input id="custIndustry" placeholder="如 3C"></div>
-  </div>
-  <div class="grid grid-3" style="margin-bottom:12px">
-    <div><label>联系人</label><input id="custContact" placeholder="姓名"></div>
-    <div><label>联系方式</label><input id="custContactInfo" placeholder="微信/邮箱/电话"></div>
-    <div><label>来源</label><input id="custSource" placeholder="如 展会/飞书/转介绍"></div>
-  </div>
-  <div style="display:flex;gap:8px">
-    <div style="flex:1"><label>预算预估</label><input id="custBudget" placeholder="如 $10K-50K"></div>
-    <div style="flex:1"><label>备注</label><input id="custNotes" placeholder="跟进备注"></div>
-  </div>
-  <div class="btn-group">
-    <button class="btn btn-primary btn-sm" onclick="saveCustomer()">保存</button>
-    <button class="btn btn-sm" onclick="hideAddCustomer()">取消</button>
-  </div>
-</div>
-<div class="card" style="padding:0;overflow:hidden">
-  <div class="table-container" style="max-height:500px;overflow-y:auto">
+
+<!-- Table View -->
+<div class="card" id="custTableView" style="padding:0;overflow:hidden">
+  <div class="table-container" style="max-height:550px;overflow-y:auto">
     <table>
-      <thead><tr><th>品牌</th><th>公司</th><th>行业</th><th>阶段</th><th>联系人</th><th>预算</th><th>来源</th><th>最近更新</th><th>操作</th></tr></thead>
-      <tbody id="custTableBody"><tr><td colspan="9" style="text-align:center;padding:30px;opacity:.5">加载中...</td></tr></tbody>
+      <thead><tr><th style="width:120px">品牌</th><th style="width:140px">公司</th><th>联系人</th><th style="width:70px">行业</th><th style="width:80px">阶段</th><th style="width:70px">来源</th><th style="width:90px">预算</th><th style="width:60px">负责人</th><th style="width:130px">操作</th></tr></thead>
+      <tbody id="custTableBody"></tbody>
     </table>
   </div>
 </div>
+
+<!-- Kanban View -->
+<div id="custKanbanView" style="display:none;overflow-x:auto;padding-bottom:20px">
+  <div style="display:flex;gap:12px;min-width:900px" id="kanbanColumns"></div>
 </div>
 
+<!-- Customer Detail Slide-in Panel -->
+<div class="modal-overlay" id="custDetailPanel" style="display:none" onclick="if(event.target===this)closeCustDetail()">
+<div style="position:fixed;top:0;right:0;width:520px;max-width:100vw;height:100vh;background:var(--surface);box-shadow:-4px 0 20px rgba(0,0,0,.1);overflow-y:auto;z-index:100;padding:24px">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+    <h3 id="detailTitle" style="margin:0">客户详情</h3>
+    <button class="btn btn-sm" onclick="closeCustDetail()">✕</button>
+  </div>
+  <div id="detailContent"></div>
+</div>
+</div>
+
+<!-- Duplicate Warning Toast (top banner) -->
+<div id="dupWarning" style="display:none;background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:12px 16px;margin-bottom:12px" id="dupWarning">
+  <div style="display:flex;justify-content:space-between;align-items:center">
+    <span>⚠️ 发现可能存在重复客户：<strong id="dupNames"></strong>（已有<strong id="dupOwner"></strong>在跟进）</span>
+    <div style="display:flex;gap:4px">
+      <button class="btn btn-sm" onclick="viewDupCustomer()">查看已有</button>
+      <button class="btn btn-sm btn-primary" onclick="forceSaveCustomer()">仍然保存</button>
+      <button class="btn btn-sm" onclick="dismissDup()">忽略</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add/Edit Modal -->
+<div class="modal-overlay" id="custModal" style="display:none" onclick="if(event.target===this)closeCustModal()">
+<div class="modal">
+<h3 id="custModalTitle">新增客户</h3>
+<div class="grid grid-2" style="gap:12px;margin-bottom:16px">
+<div><label>品牌名称 *</label><input id="custBrand"></div>
+<div><label>公司名称</label><input id="custCompany"></div>
+<div><label>联系人</label><input id="custContact"></div>
+<div><label>联系方式</label><input id="custContactInfo"></div>
+<div><label>行业</label><select id="custIndustry"><option value="">请选择</option><option>3C</option><option>储能</option><option>智能家居</option><option>美妆</option><option>户外</option><option>宠物</option><option>医疗</option><option>出行</option><option>其他</option></select></div>
+<div><label>来源</label><select id="custSource"><option value="自主开发">自主开发</option><option value="展会">展会</option><option value="转介绍">转介绍</option><option value="平台询盘">平台询盘</option></select></div>
+<div><label>阶段</label><select id="custStage"><option value="lead">开发中</option><option value="proposal">方案</option><option value="negotiation">谈判</option><option value="won">成交</option><option value="maintenance">维护</option></select></div>
+<div><label>预算预估</label><select id="custBudget"><option value="">未知</option><option value="lt15k"><""/mo</option><option value="15_50k">-50K/mo</option><option value="gt50k">>""/mo</option></select></div>
+<div><label>备注</label><input id="custNotes"></div>
+</div>
+<div class="btn-group"><button class="btn btn-primary" onclick="saveCustomer()">保存</button><button class="btn" onclick="closeCustModal()">取消</button></div>
+<input type="hidden" id="custEditId">
+</div>
+</div>
+</div>
 <!-- M1: Brand Hub -->
 <div class="page active" id="page-m1">
 <h2>行业品牌智库</h2>
@@ -526,3 +565,5 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
 <script src="ppt.js?v=20260603143232"></script>
 </body>
 </html>
+
+
