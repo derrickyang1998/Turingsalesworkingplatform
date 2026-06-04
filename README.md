@@ -1,119 +1,95 @@
-﻿# 海外品牌推广·红人营销·图灵
+﻿# TuringMarket 图灵商务在线工作平台
 
-> **Project: Cross-Border Brand Marketing & Influencer Marketing**
-> **Company: 图灵集市 TuringMarket** — AI-driven overseas influencer marketing agency
-> **Tagline:** 开启全球网红营销新时代
-> **Owner:** Derrick
-> **Last Updated:** 2026-06-02
+> **全球首个按效果付费海外红人Agent** — AI驱动的出海品牌红人营销全流程平台
+> 
+> 官方网站: [turingmarket.cn](https://www.turingmarket.cn) | 在线平台: [8.163.129.160](http://8.163.129.160)
 
 ---
 
-## 双线结构 / Dual Structure
+## 项目概述
 
-本项目包含两条并行的工作线：
-
-### 🏢 图灵集市 (TuringMarket) — 公司业务线
-- 海外红人营销服务 (AI驱动、按效果付费)
-- SaaS产品 (AI全流程自动化)
-- API数据合作
-- Obsidian Vault: `D:\主盘\图灵集市\`
-
-### 🎬 Derrick 个人内容线
-- 10-13分钟深度人物专访视频 (抖音/小红书/视频号)
-- 程前朋友圈风格
-- 访谈素材: `C:\Users\29272\Desktop\访谈\`
-
----
-
-## 项目结构 / Project Structure
+TuringMarket 是为商务团队打造的线上SOP工作平台，覆盖从客户开发到网红提报的全流程：
 
 ```
-海外品牌推广-红人营销-图灵/
-├── README.md                          # 本文件 - 项目总览
-├── AGENTS.md                          # Codex Agent 完整上下文
-├── company/                           # 公司知识库
-│   └── turingmarket-overview.md       # 图灵集市公司概览
-├── knowledge-base/                    # 知识库
-│   ├── content-strategy.md            # 内容策略与风格指南
-│   ├── interview-methodology.md       # 访谈方法论
-│   ├── cross-border-insights.md       # 跨境电商行业洞察
-│   ├── influencer-methodology.md      # 红人营销方法论 (60-30-10等)
-│   └── brand-list.md                  # 品牌与嘉宾名录
-├── workflows/                         # 工作流
-│   ├── video-editing-guide.md         # 视频剪辑工作流
-│   ├── pre-interview-checklist.md     # 访前准备清单
-│   └── publishing-workflow.md         # 发布与分发流程
-├── interviews/                        # 访谈记录
-│   ├── episode-01-geo.md              # EP01: 胡总 - GEO专题
-│   ├── episode-02-gordon.md           # EP02: Gordon - 小棉花SVP
-│   ├── episode-03-rhea.md             # EP03: Rhea (剪辑中)
-│   ├── upcoming-ruofan.md             # EP04: 若凡 Devin
-│   └── upcoming-lisa.md               # EP05: Lisa 郭美珠
-└── assets/                            # 资源文件
+客户获取 → 客户信息确认 → 行业/竞品数据分析 → 红人营销方案生成 → 网红匹配提报 → 合作落地跟踪
 ```
 
+**核心数据：** 7000万+ 海外红人库 | 服务上千出海品牌 | 12+ 行业覆盖 | 全球布局深圳/北京/杭州/纽约
+
 ---
 
-## 图灵集市核心信息 / TuringMarket at a Glance
+## 功能模块 (v7.0)
 
-| 维度 | 信息 |
+| 模块 | 标识 | 功能描述 |
+|------|------|----------|
+| 客户管道 | M0 | 商务SOP全流程跟踪，线索→成交，阶段筛选，状态管理 |
+| 行业品牌智库 | M1 | 1871个出海品牌，13大行业，189个细分标签，AI数据补充 |
+| 客户策略规划 | M2 | 品牌阶段×行业×预算×目标→自动策略建议→行业对标 |
+| 需求接入 & 方案生成 | M3 | 文件上传→AI解析→智能分析→一键生成PPT/Word方案 |
+| 网红匹配 & 执行管理 | M4 | 提报资源名单，下单合作追踪，飞书同步 |
+| AI 助手 | M5 | DeepSeek V4 Flash，基于品牌数据库的策略咨询 |
+| 管理控制室 | Admin | 全盘需求监控，用户管理，Token消耗追踪 |
+
+---
+
+## 技术架构
+
+| 层级 | 技术 |
 |------|------|
-| **官网** | www.turingmarket.cn |
-| **定位** | 全球首个按效果付费海外红人Agent |
-| **AI红人库** | 7000万+ 海外达人 |
-| **服务品牌** | 1000+ (含Anker, Xiaomi, Shein等) |
-| **团队分布** | 深圳/北京/杭州/纽约 |
-| **核心模型** | 60-30-10 ROI优化 |
-| **方法论来源** | 销售培训手册45KB + 实战手册190KB + 客户方案 |
-
-### 客户方案库 (Vault中)
-- Olight 全年ROI优化方案 (98KB, $275K-$385K预算)
-- ANTHBOT 全球红人营销战略方案
-- TASACA 电动越野摩托车方案 ($300K预算)
-- Arspura 海外红人营销执行方案
-- Even Realities 破圈内容策划案
-- OneIsAll Ease S1 竞品定位分析
-- Seno Oral Film 社媒方案
-- 鱼跃医疗推广方案
-- + 更多...
+| 前端 | 纯 HTML/CSS/JS (Vanilla) — 零框架依赖 |
+| 后端 | Node.js + Express 5 |
+| 数据库 | sql.js (纯 JavaScript SQLite，零编译) |
+| AI | DeepSeek API (V4 Pro) |
+| 测试 | Playwright (端到端自动化) |
+| 部署 | Ubuntu 22.04 + PM2 + Nginx |
+| 版本管理 | Git + GitHub |
 
 ---
 
-## 访谈嘉宾总览 / Interview Guest Overview
+## 一键部署
 
-| 期数 | 嘉宾 | 身份 | 主题 | 状态 |
-|------|------|------|------|------|
-| EP01 | 胡总 | Cross Border Digital CEO | GEO出海营销 | ✅ 已完成 |
-| EP02 | Gordon | 小棉花Xcotton SVP | SVP视角的出海增长 | ✅ 剪辑方案完成 |
-| EP03 | Rhea | - | - | 🔄 剪辑中 |
-| EP04 | 若凡 Devin | 若聚凡星创始人 | 十年破局之路 | 📋 待拍摄 |
-| EP05 | Lisa 郭美珠 | 深圳艾维广告联合创始人 | 第一批Google优化师 | 📋 待拍摄 |
+```bash
+git clone https://github.com/derrickyang1998/Turingsalesworkingplatform.git
+cd Turingsalesworkingplatform/platform
+sudo bash install.sh
+```
 
----
+详细指南: [DEPLOY.md](platform/DEPLOY.md)
 
-## 数据来源 / Data Sources
-
-| 来源 | 内容 |
-|------|------|
-| `D:\主盘\图灵集市\` | 公司知识库 — 培训手册、实战手册、客户方案、合同模板 |
-| `C:\Users\29272\Desktop\访谈\` | 访谈素材 — 逐字稿、剪辑方案、问题大纲 |
-| `C:\Users\29272\.claude\projects\D----\` | Claude Code 历史会话 |
-| `C:\Users\29272\.codex\sessions\` | Codex 工作记录 |
-| `C:\Users\29272\.hermes\sessions\` | Hermes WebUI 会话 |
+**默认账号：** `admin` / `turing2026`
 
 ---
 
-## 当前任务 / Current Tasks
+## 版本历史
 
-- [x] 完成 EP01 (GEO) 剪辑
-- [x] 完成 EP02 (Gordon) 剪辑方案
-- [ ] 完成 EP03 (Rhea) 剪辑
-- [ ] 准备 EP04 (若凡) 拍摄
-- [ ] 准备 EP05 (Lisa) 拍摄
-- [x] 建立知识库 .md 文件体系
-- [x] 提炼 Obsidian Vault 知识到本仓库
-- [ ] 将本仓库与 Vault 双向同步
+| 版本 | 日期 | 里程碑 |
+|------|------|--------|
+| v1.0 | 2025-05 | 初始概念：行业品牌智库 (M1) + 客户策略规划 (M2) |
+| v5.1 | 2025-06 | Codex接手开发，确立完整架构基线 |
+| v5.2 | - | 网红数据库 + 智能匹配 (M4) |
+| v5.3 | - | 客户管道 SOP (M0) |
+| v5.4 | - | 模块互联 — SOP管道链接各模块 |
+| v5.5 | - | M2-M5 + Admin 清零重建 |
+| v6.0 | - | 全部7个模块完成 (HTML+JS) |
+| **v7.0** | **2025-06-04** | **生产就绪：页面隔离修复，阿里云部署，一键安装** |
+
+完整变更日志: [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
-*本项目为 Derrick 个人品牌内容项目 + 图灵集市公司知识管理项目。*
+## 公司背景
+
+图灵集市 TuringMarket — 专注海外红人营销的AI驱动服务商
+
+- **服务模式：** 按效果付费 (Performance-based) | 全流程托管 | SaaS产品 | API数据合作
+- **方法论：** 60-30-10 ROI优化模型，小型创作者(Nano/Micro)优先策略
+- **曾服务品牌：** Anker, Xiaomi, Shein, Bluetti, Ugreen, Narwal 等
+- **团队成员：** 来自 Dji, Anker, 创想三维, 传音等品牌大厂
+
+---
+
+## 开发者
+
+代码仓库由 Codex AI 驱动开发。商务需求由 TuringMarket 团队提供。
+
+📧 联系: admin@turingmarket.cn
