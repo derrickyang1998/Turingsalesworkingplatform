@@ -100,7 +100,7 @@ function apiFetch(url, opts) {
 // ===== APP INIT =====
 async function initApp() { console.log("[TM] initApp starting");
   // Hide all non-M1 pages (they start visible for text metrics)
-  (function() { var pages = document.querySelectorAll('.page'); for (var i = 0; i < pages.length; i++) { var pid = pages[i].id.replace('page-', ''); if (pid !== 'm1') { pages[i].style.display = 'none'; } } })();
+  (function() { var pages = document.querySelectorAll('.page'); for (var i = 0; i < pages.length; i++) { var pid = pages[i].id.replace('page-', ''); if (pid !== 'm1') { pages[i].setAttribute('style', 'display:none'); } } })();
   try {
     const [bdResp, ir, tr] = await Promise.all([
       fetch('data/industry_brands_v2.json'),
@@ -320,7 +320,7 @@ function switchPage(id) {
   if (pg) {
     pg.classList.add('active');
     // Force layout recalculation
-    pg.style.display = 'block';
+    pg.setAttribute('style', 'display:block');
     pg.offsetHeight;
     pg.style.display = '';
   }
