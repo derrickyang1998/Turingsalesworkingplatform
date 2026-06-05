@@ -8,129 +8,6 @@ let BRANDS = [], INFLUENCERS = [], TEMPLATES = [], CBLOCKS = {};
 let curDemand = null, selTpl = null, lastMatch = [], lastProp = "";
 let uploadedFileContent = "";
 let chatHistory = [{role: "system", content: "You are the TuringMarket AI assistant. Answer in Chinese, concise and professional."}];
-// ===== KANBAN VIEW =====
-var custViewMode = 'table';
-function switchCustView(mode) {
-  custViewMode = mode;
-  document.getElementById('custTableView').style.display = mode === 'table' ? '' : 'none';
-  document.getElementById('custKanbanView').style.display = mode === 'kanban' ? '' : 'none';
-  document.getElementById('viewTableBtn').style.background = mode === 'table' ? 'var(--surface2)' : '';
-  document.getElementById('viewKanbanBtn').style.background = mode === 'kanban' ? 'var(--surface2)' : '';
-  if (mode === 'kanban') renderKanbanBoard();
-}
-
-function renderKanbanBoard() {
-  var columns = document.getElementById('kanbanColumns');
-  var stages = [
-    { id: 'lead', label: '🔍 开发中', color: '#fef3c7' },
-    { id: 'proposal', label: '📝 方案', color: '#dbeafe' },
-    { id: 'negotiation', label: '🤝 谈判', color: '#ede9fe' },
-    { id: 'won', label: '✅ 成交', color: '#d1fae5' },
-    { id: 'maintenance', label: '🔄 维护', color: '#e0e7ff' }
-  ];
-  var h = '';
-  for (var i = 0; i < stages.length; i++) {
-    var s = stages[i];
-    var stageCustomers = (customersCache || []).filter(function(c) { return c.stage === s.id; });
-    h += '<div style="flex:1;min-width:160px;background:' + s.color + ';border-radius:8px;padding:12px"><div style="font-weight:600;margin-bottom:8px;font-size:13px">' + s.label + ' <span style="opacity:.5">' + stageCustomers.length + '</span></div>';
-    for (var j = 0; j < stageCustomers.length; j++) {
-      var c = stageCustomers[j];
-      h += '<div draggable="true" ondragstart="dragCust(event,' + c.id + ')" style="background:#fff;border-radius:6px;padding:10px;margin-bottom:6px;cursor:grab;box-shadow:0 1px 3px rgba(0,0,0,.06);font-size:12px"><strong>' + (c.brand_name || '') + '</strong><br><span style="opacity:.6">' + (c.company_name || '') + '</span><br><span style="font-size:10px;opacity:.4">' + (c.contact_person || '') + ' · ' + (c.budget_estimate || '') + '</span></div>';
-    }
-    h += '</div>';
-  }
-  columns.innerHTML = h;
-  // Set up drop zones
-  document.querySelectorAll('#kanbanColumns > div').forEach(function(col, i) {
-    col.ondragover = function(e) { e.preventDefault(); };
-    col.ondrop = function(e) { e.preventDefault(); var id = parseInt(e.dataTransfer.getData('text')); if (id) updateCustomerStage(id, stages[i].id); };
-  });
-}
-
-function dragCust(e, id) { e.dataTransfer.setData('text', id); }
-
-async function updateCustomerStage(id, stage) {
-  try {
-    await apiFetch('/customers/' + id, { method: 'PUT', body: JSON.stringify({ stage: stage }) });
-    loadCustomers();
-    toast('已更新阶段');
-  } catch(e) { toast('更新失败', 'error'); }
-}
-
-function advanceStage(id) {
-  var stages = ['lead','proposal','negotiation','won','maintenance'];
-  var c = customersCache.find(function(x) { return x.id === id; });
-  if (!c) return;
-  var idx = stages.indexOf(c.stage);
-  if (idx < stages.length - 1) updateCustomerStage(id, stages[idx + 1]);
-}
-
-// ===== CUSTOMER DETAIL PANEL =====
-async function openCustDetail(id) {
-  try {
-    var r = await apiFetch('/customers/' + id);
-    var c = await r.json();
-    var panel = document.getElementById('custDetailPanel');
-    var content = document.getElementById('detailContent');
-    document.getElementById('detailTitle').textContent = c.brand_name || '客户详情';
-    
-    var stageNames = {lead:'开发中',proposal:'方案',negotiation:'谈判',won:'成交',maintenance:'维护'};
-    var h = '<div style="background:var(--surface2);border-radius:8px;padding:16px;margin-bottom:16px">';
-    h += '<div style="display:flex;justify-content:space-between;margin-bottom:8px"><strong style="font-size:18px">' + (c.brand_name || '') + '</strong><span class="tag">' + (stageNames[c.stage] || c.stage) + '</span></div>';
-    h += '<div style="font-size:13px;opacity:.7;margin-bottom:12px">' + (c.company_name || '') + '</div>';
-    h += '<div class="grid grid-2" style="gap:8px;font-size:12px">';
-    h += '<div><label>联系人</label><span>' + (c.contact_person || '-') + '</span></div>';
-    h += '<div><label>联系方式</label><span>' + (c.contact_info || '-') + '</span></div>';
-    h += '<div><label>行业</label><span>' + (c.industry || '-') + '</span></div>';
-    h += '<div><label>来源</label><span>' + (c.source || '-') + '</span></div>';
-    h += '<div><label>预算</label><span>' + (c.budget_estimate || '-') + '</span></div>';
-    h += '<div><label>负责人</label><span>' + (c.assigned_name || CURRENT_USER.display_name) + '</span></div>';
-    h += '<div><label>创建时间</label><span>' + (c.created_at || '-') + '</span></div>';
-    h += '<div><label>更新时间</label><span>' + (c.updated_at || '-') + '</span></div>';
-    h += '</div></div>';
-    
-    // Quick actions
-    h += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px">';
-    h += '<button class="btn btn-sm btn-primary" onclick="editCustomer(' + c.id + ');closeCustDetail()">✏ 编辑</button>';
-    h += '<button class="btn btn-sm" onclick="advanceStage(' + c.id + ')">▶ 推进阶段</button>';
-    h += '<button class="btn btn-sm" onclick="setCurrentCustomer(customersCache.find(function(x){return x.id===' + c.id + '}));goToM2();closeCustDetail()">🎯 策略规划</button>';
-    h += '<button class="btn btn-sm" onclick="setCurrentCustomer(customersCache.find(function(x){return x.id===' + c.id + '}));switchPage(\"m3\");closeCustDetail()">📋 需求 & 方案</button>';
-    h += '</div>';
-    
-    // Notes
-    if (c.notes) h += '<div style="background:#fefce8;border-radius:8px;padding:12px;font-size:12px;margin-bottom:12px"><strong>备注:</strong><br>' + c.notes + '</div>';
-    
-    content.innerHTML = h;
-    panel.style.display = 'flex';
-  } catch(e) { toast('Failed to load customer: ' + e.message, 'error'); }
-}
-
-function closeCustDetail() { document.getElementById('custDetailPanel').style.display = 'none'; }
-
-// ===== DEDUPLICATION =====
-var pendingDupCheck = null;
-
-
-async function forceSaveCustomer() {
-  if (pendingDupCheck) { await saveCustData(pendingDupCheck.custData); }
-  document.getElementById('dupWarning').style.display = 'none';
-}
-
-function dismissDup() { document.getElementById('dupWarning').style.display = 'none'; }
-function viewDupCustomer() { if (window._dupCustomerId) { closeCustModal(); dismissDup(); openCustDetail(window._dupCustomerId); } }
-
-async function saveCustData(custData) {
-  var editId = document.getElementById('custEditId').value;
-  var method = editId ? 'PUT' : 'POST';
-  var url = editId ? '/customers/' + editId : '/customers';
-  try {
-    await apiFetch(url, { method: method, body: JSON.stringify(custData) });
-    closeCustModal();
-    loadCustomers();
-    toast(editId ? '客户已更新' : '客户已创建');
-  } catch (e) { toast('保存失败: ' + e.message, 'error'); }
-}
-
 
 
 // ==== DYNAMIC NAV REBUILD ====
@@ -139,7 +16,7 @@ async function saveCustData(custData) {
   if (!sidebar) return;
   
   var pages = [
-    { id: 'm0', icon: '🚀', label: '客户库' },
+    { id: 'm0', icon: '🚀', label: '客户管道' },
     { id: 'm1', icon: '📊', label: '行业品牌智库' },
     { id: 'm2', icon: '🎯', label: '客户策略规划' },
     { id: 'm3', icon: '📋', label: '需求接入 & 方案生成' },
@@ -305,12 +182,8 @@ async function loadCustomerStats() {
 
 function filterCustomers(stage) {
   curStageFilter = stage;
-  // Update tag styling
   document.querySelectorAll('#m0StageFilter .tag').forEach(function(t) { t.classList.remove('active'); });
-  if (event && event.target) event.target.classList.add('active');
-  else { var tags = document.querySelectorAll('#m0StageFilter .tag'); for (var k = 0; k < tags.length; k++) { if (tags[k].getAttribute('onclick') && tags[k].getAttribute('onclick').indexOf("'" + stage + "'") >= 0) tags[k].classList.add('active'); } }
-  loadCustomers();
-}ySelector('#m0StageFilter [data-stage="' + stage + '"]');
+  var activeEl = document.querySelector('#m0StageFilter [data-stage="' + stage + '"]');
   if (activeEl) activeEl.classList.add('active');
   else document.querySelector('#m0StageFilter .tag').classList.add('active');
   loadCustomers();
@@ -344,26 +217,19 @@ function showAddCustomer() {
   document.getElementById('addCustomerCard').classList.remove('hidden');
 }
 
-function hideAddCustomer() {
+function closeCustModal() {
   document.getElementById('addCustomerCard').classList.add('hidden');
 }
-
 
 function openAddCustomer() {
   document.getElementById('custModalTitle').textContent = '新增客户';
   document.getElementById('custEditId').value = '';
-  document.getElementById('custBrand').value = '';
-  document.getElementById('custCompany').value = '';
-  document.getElementById('custContact').value = '';
-  document.getElementById('custContactInfo').value = '';
-  document.getElementById('custIndustry').value = '';
+  ['custBrand','custCompany','custContact','custContactInfo','custIndustry','custSource','custBudget','custNotes'].forEach(function(id) { var el = document.getElementById(id); if (el) el.value = ''; });
   document.getElementById('custStage').value = 'lead';
-  document.getElementById('custSource').value = '自主开发';
-  document.getElementById('custBudget').value = '';
-  document.getElementById('custNotes').value = '';
   document.getElementById('custModal').style.display = 'flex';
 }
-function closeCustModal() { document.getElementById('custModal').style.display = 'none'; dismissDup(); }
+function closeCustModal() { document.getElementById('custModal').style.display = 'none'; }
+function dismissDup() { document.getElementById('dupWarning').style.display = 'none'; }
 function editCustomer(id) {
   var c = customersCache.find(function(x) { return x.id === id; });
   if (!c) return;
@@ -387,49 +253,28 @@ async function saveCustomer() {
   var body = {
     brand_name: brand,
     company_name: document.getElementById('custCompany').value.trim(),
+    industry: document.getElementById('custIndustry').value.trim(),
     contact_person: document.getElementById('custContact').value.trim(),
     contact_info: document.getElementById('custContactInfo').value.trim(),
-    industry: document.getElementById('custIndustry').value,
-    stage: document.getElementById('custStage').value,
-    source: document.getElementById('custSource').value,
-    budget_estimate: document.getElementById('custBudget').value,
-    notes: document.getElementById('custNotes').value.trim()
+    source: document.getElementById('custSource').value.trim(),
+    budget_estimate: document.getElementById('custBudget').value.trim(),
+    notes: document.getElementById('custNotes').value.trim(),
+    stage: document.getElementById('custStage').value
   };
   try {
     if (editId) {
       await apiFetch('/customers/' + editId, { method: 'PUT', body: JSON.stringify(body) });
       toast('客户已更新');
     } else {
-      // Dedup check
-      var dupR = await apiFetch('/customers/check-duplicate?brand=' + encodeURIComponent(brand));
-      var dupD = await dupR.json();
-      if (dupD && dupD.length > 0) {
-        document.getElementById('dupNames').textContent = dupD[0].brand_name || '';
-        document.getElementById('dupOwner').textContent = dupD[0].assigned_name || '';
-        document.getElementById('custModal').style.display = 'none';
-        document.getElementById('dupWarning').style.display = '';
-        window._dupCustomerId = dupD[0].id;
-        pendingDupCheck = { body: body };
-        return;
-      }
       await apiFetch('/customers', { method: 'POST', body: JSON.stringify(body) });
       toast('客户已创建');
     }
     closeCustModal();
-    loadCustomers();
+    await loadCustomers();
   } catch (e) { toast('保存失败: ' + e.message, 'error'); }
 }
-async function forceSaveCustomer() {
-  if (pendingDupCheck) {
-    try {
-      await apiFetch('/customers', { method: 'POST', body: JSON.stringify(pendingDupCheck.body) });
-      toast('客户已创建');
-      document.getElementById('dupWarning').style.display = 'none';
-      closeCustModal();
-      loadCustomers();
-    } catch(e) { toast('保存失败: ' + e.message, 'error'); }
-  }
-}async function changeCustomerStage(id, newStage) {
+
+async function changeCustomerStage(id, newStage) {
   try {
     await apiFetch('/customers/' + id, { method: 'PUT', body: JSON.stringify({ stage: newStage }) });
     toast('阶段已更新: ' + (CUST_STAGES[newStage] || newStage));
@@ -1191,12 +1036,6 @@ async function adminCreateInvite() { try { var r = await apiFetch("/admin/invite
     footer.innerHTML = '<a href="#" onclick="doLogout()" style="color:var(--text2);font-size:10px">🚪 退出登录</a> · <span id="sidebarUser" style="font-size:10px;opacity:.5"></span>';
   }
 })();
-
-
-
-
-
-
 
 
 
