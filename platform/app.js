@@ -477,6 +477,110 @@ window.onhashchange = function() {
 function gv(id) { var e = document.getElementById(id); return e ? e.value : '' }
 function getDate() { var d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0') }
 
+
+// ===== PHASE 5: DEMAND FILE ANALYSIS =====
+var uploadedDemandContent = '';
+function analyzeDemandFile(e) {
+  var f = e.target.files[0]; if (!f) return;
+  var s = document.getElementById('uploadOK'); if (!s) return;
+  s.innerHTML = '<span>Analyzing: ' + f.name + '...</span>';
+  var reader = new FileReader();
+  reader.onload = function(ev) {
+    uploadedDemandContent = ev.target.result.substring(0, 8000);
+    s.innerHTML = '<span style="color:#0f7b3c">File loaded ('+(f.size/1024).toFixed(1)+'KB). Click "AI Analyze" to generate proposal.</span>';
+  };
+  reader.readAsText(f);
+}
+async function analyzeDemandWithAI() {
+  if (!uploadedDemandContent) { toast('Please upload a file first', 'error'); return; }
+  var output = document.getElementById('proposalOutput');
+  output.innerHTML = '<span style="opacity:.5">AI analyzing demand...</span>';
+  var prompt = 'Analyze this customer demand document and generate a structured influencer marketing proposal in Chinese. Include: 1) Executive summary 2) Market analysis 3) Recommended strategy (60-30-10 model) 4) Influencer matching criteria 5) Budget estimation 6) Timeline 7) KPIs.\n\nDocument: ' + uploadedDemandContent;
+  try {
+    var resp = await fetch(DS_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + DS_KEY }, body: JSON.stringify({ model: 'deepseek-chat', messages: [{ role: 'user', content: prompt }], temperature: 0.7, max_tokens: 3000 }) });
+    var d = await resp.json();
+    output.innerHTML = '<div style="white-space:pre-wrap;font-size:13px;line-height:1.6">' + d.choices[0].message.content.replace(/\n/g,'<br>').replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>') + '</div><div style="margin-top:12px"><button class="btn btn-primary btn-sm" onclick="downloadProposal()">Download MD</button><button class="btn btn-sm" onclick="downloadProposalHTML()">Export HTML</button></div>';
+    lastProp = d.choices[0].message.content;
+    toast('Proposal generated');
+  } catch(e) { output.innerHTML = '<span style="color:#d94641">Analysis failed: ' + e.message + '</span>'; }
+}
+function downloadProposalHTML() {
+  if (!lastProp) return;
+  var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Influencer Marketing Proposal</title><style>body{font-family:system-ui;max-width:800px;margin:40px auto;padding:20px;line-height:1.8}h2{color:#1a1a1a;border-bottom:2px solid #1a1a1a;padding-bottom:8px}ul{margin:12px 0}li{margin:6px 0}</style></head><body>' + lastProp.replace(/\n/g,'<br>').replace(/### (.*)/g,'<h2>$1</h2>').replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>') + '</body></html>';
+  dlFile('proposal.html', html, 'text/html');
+  toast('HTML downloaded');
+}
+
+// ===== PHASE 6: INFLUENCER FILTERS + EXPORT =====
+function applyInfFilters() {
+  var project = document.getElementById('filt_project')?.value || '';
+  var product = document.getElementById('filt_product')?.value || '';
+  var platform = document.getElementById('filt_platform')?.value || '';
+  var country = document.getElementById('filt_region')?.value || '';
+  var tag = document.getElementById('filt_category')?.value || '';
+  var filtered = (lastMatch.length ? lastMatch : INFLUENCERS).filter(function(inf) {
+    if (project && (inf.project||'') !== project) return false;
+    if (product && (inf.product||'') !== product) return false;
+    if (platform && (inf.platform||'') !== platform) return false;
+    if (country && (inf.region||'') !== country) return false;
+    if (tag && (inf.category||'') !== tag) return false;
+    return true;
+  });
+  renderInfTable(filtered, false);
+}
+function exportFilteredInf() {
+  var chk = []; document.querySelectorAll('.infcb:checked').forEach(function(c) { chk.push(parseInt(c.dataset.idx)); });
+  var data = chk.length ? chk.map(function(i) { return lastMatch[i]; }).filter(Boolean) : lastMatch;
+  if (!data || !data.length) { toast('No data to export', 'error'); return; }
+  var csv = 'No.,KOL Handle,Platform,Followers,Category,Region,Collab Type,Cost(USD),CPM\n';
+  data.forEach(function(inf, i) { csv += (i+1)+',"'+(inf.kol_handle||'')+'",'+inf.platform+','+(inf.followers||0)+','+(inf.category||'')+','+(inf.region||'')+','+(inf.collab_type||'')+','+(inf.cost_usd||0)+','+(inf.cpm||'')+'\n'; });
+  dlFile('influencers_'+getDate()+'.csv', '\uFEFF'+csv, 'text/csv');
+  toast('Exported '+data.length+' influencers');
+}
+
+// ===== PHASE 7: AI ASSISTANT WITH MEMORY =====
+let aiMemory = {};
+let aiMemoryKey = 'tm_ai_memory';
+(function loadAIMemory() {
+  try { aiMemory = JSON.parse(localStorage.getItem(aiMemoryKey) || '{}'); } catch(e) { aiMemory = {}; }
+})();
+function saveAIMemory() { localStorage.setItem(aiMemoryKey, JSON.stringify(aiMemory)); }
+function enhancedSendChat() {
+  var inp = document.getElementById('chatInput'); var msg = inp.value.trim();
+  if (!msg) return;
+  addChatMsg('user', msg); inp.value = '';
+  // Build context from memory
+  var memKeys = Object.keys(aiMemory).slice(-5);
+  var memContext = memKeys.length ? '\n\nPrevious discussions: ' + memKeys.map(function(k) { return k + ': ' + aiMemory[k].substring(0, 100); }).join('\n') : '';
+  chatHistory.push({ role: 'user', content: msg });
+  // Store in memory
+  var memId = 'm' + Date.now();
+  aiMemory[memId] = msg;
+  saveAIMemory();
+  
+  var msgs = document.getElementById('chatMessages');
+  var td = document.createElement('div'); td.className = 'chat-msg assistant'; td.innerHTML = '<div class=bubble>...</div>'; msgs.appendChild(td);
+  
+  fetch(DS_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + DS_KEY }, body: JSON.stringify({ model: 'deepseek-chat', messages: [{ role: 'system', content: 'You are TuringMarket AI assistant. You have access to: ' + BRANDS.length + ' brands database. Be concise and professional in Chinese. Previous context: ' + memContext }, { role: 'user', content: msg }], temperature: 0.7, max_tokens: 1500 }) })
+    .then(function(r) { return r.json(); })
+    .then(function(d) { td.remove(); var reply = d.choices[0].message.content; chatHistory.push({ role: 'assistant', content: reply }); aiMemory[memId+'_r'] = reply; saveAIMemory(); addChatMsg('assistant', reply); })
+    .catch(function(e) { td.remove(); addChatMsg('assistant', 'Error: ' + e.message); });
+}
+
+// ===== PHASE 8: ADMIN USER MANAGEMENT (纷享销客 Style) =====
+async function loadAdminUsers() {
+  try { var r = await apiFetch('/admin/users'); var d = await r.json(); renderAdminUserTable(d.users || []); } catch(e) {}
+}
+function renderAdminUserTable(users) {
+  var tbody = document.getElementById('ad_userTableBody'); if (!tbody) return;
+  var h = '';
+  users.forEach(function(u) {
+    h += '<tr><td><strong>'+u.username+'</strong></td><td>'+u.display_name+'</td><td>'+(u.department||'-')+'</td><td>'+u.role+'</td><td>'+(u.api_quota||0).toLocaleString()+'</td><td>'+(u.last_login||'Never').substring(0,10)+'</td><td>'+(u.is_active?'<span style="color:#0f7b3c">Active</span>':'<span style="color:#d94641">Inactive</span>')+'</td><td><button class="btn btn-sm" onclick="adminResetPw('+u.id+')">Reset PW</button><button class="btn btn-sm" onclick="toggleUserActive('+u.id+','+!u.is_active+')">'+(u.is_active?'Deactivate':'Activate')+'</button></td></tr>';
+  });
+  tbody.innerHTML = h;
+}
+async function toggleUserActive(id, active) { try { await apiFetch('/admin/users/'+id, {method:'PUT',body:JSON.stringify({is_active:active})}); loadAdminUsers(); toast('User '+(active?'activated':'deactivated')); } catch(e) { toast('Failed','error'); } }
+async function adminResetPw(userId) { try { await apiFetch('/admin/users/reset-password/'+userId, {method:'POST'}); toast('Password reset to turing2026'); } catch(e) { toast('Failed','error'); } }
 // ===== CROSS-MODULE INTERCONNECT =====
 let currentCustomer = null;
 
@@ -1181,6 +1285,7 @@ async function adminCreateInvite() { try { var r = await apiFetch("/admin/invite
     footer.innerHTML = '<a href="#" onclick="doLogout()" style="color:var(--text2);font-size:10px">🚪 退出登录</a> · <span id="sidebarUser" style="font-size:10px;opacity:.5"></span>';
   }
 })();
+
 
 
 
