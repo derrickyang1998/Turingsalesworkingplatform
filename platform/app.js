@@ -567,6 +567,91 @@ function enhancedSendChat() {
     .catch(function(e) { td.remove(); addChatMsg('assistant', 'Error: ' + e.message); });
 }
 
+
+// ===== PHASE 9: KNOWLEDGE BASE ACCUMULATION SYSTEM =====
+let knowledgeBase = [];
+let KB_STORAGE_KEY = 'tm_knowledge_base';
+
+// Load KB from server on init
+async function loadKnowledgeBase() {
+  try {
+    var r = await apiFetch('/knowledge');
+    var d = await r.json();
+    knowledgeBase = d.entries || [];
+    console.log('[KB] Loaded ' + knowledgeBase.length + ' entries');
+  } catch(e) { 
+    try { knowledgeBase = JSON.parse(localStorage.getItem(KB_STORAGE_KEY) || '[]'); } catch(x) { knowledgeBase = []; }
+  }
+}
+
+// Save KB to server
+async function saveKnowledgeEntry(entry) {
+  knowledgeBase.push(entry);
+  // Keep last 500 entries locally
+  if (knowledgeBase.length > 500) knowledgeBase = knowledgeBase.slice(-500);
+  localStorage.setItem(KB_STORAGE_KEY, JSON.stringify(knowledgeBase));
+  // Sync to server
+  try {
+    await apiFetch('/knowledge', { method: 'POST', body: JSON.stringify(entry) });
+  } catch(e) { /* offline - saved locally */ }
+}
+
+// Search KB for relevant entries  
+function searchKnowledge(query) {
+  var q = (query || '').toLowerCase();
+  if (!q) return [];
+  return knowledgeBase.filter(function(e) {
+    return (e.title||'').toLowerCase().indexOf(q) >= 0 ||
+           (e.content||'').toLowerCase().indexOf(q) >= 0 ||
+           (e.tags||[]).some(function(t) { return t.toLowerCase().indexOf(q) >= 0; });
+  }).slice(0, 10);
+}
+
+// Auto-archive: save demand files, AI outputs, and proposals to KB
+async function archiveToKB(type, title, content, tags) {
+  var entry = {
+    type: type || 'note',
+    title: title || '',
+    content: content || '',
+    tags: tags || [],
+    timestamp: new Date().toISOString(),
+    user: CURRENT_USER ? CURRENT_USER.display_name : 'system'
+  };
+  await saveKnowledgeEntry(entry);
+}
+
+// Hook into existing flows to auto-archive
+var _origSaveCustomer = saveCustomer;
+saveCustomer = async function() {
+  await _origSaveCustomer();
+  var brand = document.getElementById('custBrand').value.trim();
+  var company = document.getElementById('custCompany').value.trim();
+  var industry = document.getElementById('custIndustry').value;
+  if (brand) {
+    await archiveToKB('customer', 'New customer: ' + brand, brand + ' / ' + company + ' / ' + industry, [industry, 'customer']);
+  }
+};
+
+var _origGenerateAIStrategy = generateAIStrategy;
+generateAIStrategy = async function() {
+  await _origGenerateAIStrategy();
+  var input = document.getElementById('aiStrategyInput').value.trim();
+  if (input) {
+    await archiveToKB('strategy', 'Strategy for: ' + input.substring(0, 50), input, ['strategy', 'ai']);
+  }
+};
+
+// KB search UI for AI Assistant
+function searchKBForAI(query) {
+  var results = searchKnowledge(query);
+  if (!results.length) return '';
+  return '\n\n[Knowledge Base Results]:\n' + results.map(function(e, i) { 
+    return (i+1) + '. ' + e.title + ': ' + (e.content||'').substring(0, 200); 
+  }).join('\n');
+}
+
+// Initialize KB on startup
+setTimeout(function() { loadKnowledgeBase(); }, 3000);
 // ===== PHASE 8: ADMIN USER MANAGEMENT (纷享销客 Style) =====
 async function loadAdminUsers() {
   try { var r = await apiFetch('/admin/users'); var d = await r.json(); renderAdminUserTable(d.users || []); } catch(e) {}
@@ -1285,6 +1370,7 @@ async function adminCreateInvite() { try { var r = await apiFetch("/admin/invite
     footer.innerHTML = '<a href="#" onclick="doLogout()" style="color:var(--text2);font-size:10px">🚪 退出登录</a> · <span id="sidebarUser" style="font-size:10px;opacity:.5"></span>';
   }
 })();
+
 
 
 
