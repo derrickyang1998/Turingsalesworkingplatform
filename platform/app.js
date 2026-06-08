@@ -462,6 +462,42 @@ function goToM1(cust) {
 
 
 
+// ===== PHASE 3: BRAND SEARCH + SIMILAR BRANDS =====
+function searchNewBrand() {
+  var q = (document.getElementById('brandSearch').value || '').trim();
+  if (!q) { toast('Please enter a brand name', 'error'); return; }
+  var results = BRANDS.filter(function(b) {
+    return (b.name||'').toLowerCase().indexOf(q.toLowerCase()) >= 0 || 
+           (b.name_cn||'').indexOf(q) >= 0;
+  });
+  if (results.length) { renderBrands(results); toast('Found ' + results.length + ' brands matching ' + q); }
+  else { toast('No exact match - showing similar brands', 'info'); showSimilarBrands(q); }
+  try { apiFetch('/brands', { method: 'POST', body: JSON.stringify({ name: q, data_source: 'search_archive' }) }); } catch(e) {}
+}
+function filterBrands() {
+  var q = (document.getElementById('brandSearch').value || '').trim().toLowerCase();
+  if (!q) { renderBrands(BRANDS); hideSimilarBrands(); return; }
+  var results = BRANDS.filter(function(b) {
+    return (b.name||'').toLowerCase().indexOf(q) >= 0 || (b.name_cn||'').indexOf(q) >= 0;
+  });
+  renderBrands(results);
+  if (results.length === 0) showSimilarBrands(q); else hideSimilarBrands();
+}
+function showSimilarBrands(query) {
+  var sim = BRANDS.filter(function(b) {
+    return (b.industry_tags||[]).some(function(t) { return t.toLowerCase().indexOf(query.toLowerCase()) >= 0; });
+  }).slice(0, 8);
+  var c = document.getElementById('similarBrandsContainer');
+  if (!c) return;
+  if (sim.length) {
+    var h = '<div style="font-size:11px;margin-top:8px"><strong>Similar Brands:</strong> ';
+    sim.forEach(function(b) { h += '<span class="sim-tag" style="cursor:pointer;margin:2px;padding:2px 8px;background:var(--surface2);border-radius:12px;font-size:10px" onclick="document.getElementById(\x27brandSearch\x27).value=\x27'+(b.name||'').replace(/\x27/g,'')+'\x27;filterBrands()">'+(b.name||'')+'</span>'; });
+    h += '</div>';
+    c.innerHTML = h;
+  }
+}
+function hideSimilarBrands() { var c = document.getElementById('similarBrandsContainer'); if (c) c.innerHTML = ''; }
+// ===== END PHASE 3 =====
 // ===== M1: BRAND HUB =====
 let activeTag = null;
 function initM1() {
@@ -1093,6 +1129,7 @@ async function adminCreateInvite() { try { var r = await apiFetch("/admin/invite
     footer.innerHTML = '<a href="#" onclick="doLogout()" style="color:var(--text2);font-size:10px">🚪 退出登录</a> · <span id="sidebarUser" style="font-size:10px;opacity:.5"></span>';
   }
 })();
+
 
 
 
