@@ -216,25 +216,39 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
 
 
 
-<!-- M0: Customer Library (Salesforce-style) -->
-<div class="page" id="page-m0">
-<h2>🚀 客户库</h2>
-<p class="subtitle" id="m0Stats">线索→成交全流程管理 · 跨账号去重</p>
 
-<!-- View Toggle + Search Bar -->
-<div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
-  <div style="display:flex;gap:0;border:1px solid var(--border);border-radius:8px;overflow:hidden">
-    <button class="btn btn-sm" id="viewTableBtn" onclick="switchCustView('table')" style="border-radius:0;background:var(--surface2);border-right:1px solid var(--border)">📋 列表</button>
-    <button class="btn btn-sm" id="viewKanbanBtn" onclick="switchCustView('kanban')" style="border-radius:0">📌 看板</button>
+<!-- M0: Customer Library (纷享销客CRM Style) -->
+<div class="page" id="page-m0">
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+  <div>
+    <h2 style="margin:0;display:inline">🚀 客户库</h2>
+    <span style="font-size:11px;opacity:.5;margin-left:12px">CRM · 线索→成交</span>
   </div>
-  <div class="search-box" style="flex:1;max-width:300px"><span class="search-icon">🔍</span><input id="custSearch" placeholder="搜索品牌/公司/联系人..." oninput="loadCustomers()"></div>
-  <select id="custStageFilter" onchange="loadCustomers()" style="width:100px"><option value="">全部阶段</option><option value="lead">开发中</option><option value="proposal">方案</option><option value="negotiation">谈判</option><option value="won">成交</option><option value="maintenance">维护</option></select>
-  <select id="custSourceFilter" onchange="loadCustomers()" style="width:90px"><option value="">全部来源</option><option value="自主开发">自主开发</option><option value="展会">展会</option><option value="转介绍">转介绍</option><option value="平台询盘">平台询盘</option></select>
+  <div style="display:flex;gap:8px;align-items:center">
+    <span style="font-size:11px;background:var(--surface2);padding:4px 10px;border-radius:4px">📊 <strong id="m0_totalCustomers">0</strong> 客户</span>
+    <span style="font-size:11px;background:#fef3c7;padding:4px 10px;border-radius:4px">🌊 <strong id="m0_poolCount">0</strong> 公海</span>
+    <span style="font-size:11px;background:#dbeafe;padding:4px 10px;border-radius:4px">💰 ¥<strong id="m0_totalValue">0</strong></span>
+  </div>
+</div>
+
+<!-- View Tabs -->
+<div style="display:flex;gap:0;border-bottom:2px solid var(--border);margin-bottom:12px">
+  <div class="crm-tab active" onclick="switchCrmView('pipeline')" style="padding:8px 16px;cursor:pointer;font-size:13px;border-bottom:2px solid #1a1a1a;margin-bottom:-2px">📊 客户列表</div>
+  <div class="crm-tab" onclick="switchCrmView('seapool')" style="padding:8px 16px;cursor:pointer;font-size:13px;color:var(--text2)">🌊 公海池（<span id="m0_seapoolTabCount">0</span>）</div>
+  <div class="crm-tab" onclick="switchCrmView('opportunities')" style="padding:8px 16px;cursor:pointer;font-size:13px;color:var(--text2)">💼 商机看板</div>
+</div>
+
+<!-- Search + Actions -->
+<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
+  <div class="search-box" style="flex:1;max-width:280px"><span class="search-icon">🔍</span><input id="custSearch" placeholder="搜索品牌/公司/联系人..." oninput="loadCustomers()"></div>
+  <select id="custStageFilter" onchange="loadCustomers()" style="width:110px"><option value="">全部阶段</option><option value="lead">开发中</option><option value="proposal">方案</option><option value="negotiation">谈判</option><option value="won">成交</option><option value="maintenance">维护</option></select>
+  <select id="custPriorityFilter" onchange="loadCustomers()" style="width:90px"><option value="">全部优先级</option><option value="high">高</option><option value="medium">中</option><option value="low">低</option></select>
   <button class="btn btn-primary btn-sm" onclick="openAddCustomer()">+ 新增客户</button>
+  <button class="btn btn-sm" onclick="switchCrmView('seapool');loadSeaPool()">🌊 公海池</button>
 </div>
 
 <!-- Stage Filter Tags -->
-<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px" id="m0StageFilter">
+<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px" id="m0StageFilter">
   <span class="tag active" onclick="filterCustomers('')">全部</span>
   <span class="tag" onclick="filterCustomers('lead')">🔍 开发中</span>
   <span class="tag" onclick="filterCustomers('proposal')">📝 方案</span>
@@ -243,34 +257,31 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
   <span class="tag" onclick="filterCustomers('maintenance')">🔄 维护</span>
 </div>
 
-<!-- Table View -->
-<div class="card" id="custTableView" style="padding:0;overflow:hidden">
-  <div class="table-container" style="max-height:550px;overflow-y:auto">
-    <table>
-      <thead><tr><th style="width:120px">品牌</th><th style="width:140px">公司</th><th>联系人</th><th style="width:70px">行业</th><th style="width:80px">阶段</th><th style="width:70px">来源</th><th style="width:90px">预算</th><th style="width:60px">负责人</th><th style="width:130px">操作</th></tr></thead>
-      <tbody id="custTableBody"></tbody>
-    </table>
+<!-- Pipeline Table View -->
+<div id="crmPipelineView">
+  <div class="card" style="padding:0;overflow:hidden">
+    <div class="table-container" style="max-height:500px;overflow-y:auto">
+      <table>
+        <thead><tr><th style="width:100px">品牌</th><th style="width:110px">公司</th><th>联系人</th><th style="width:70px">行业</th><th style="width:75px">阶段</th><th style="width:60px">优先级</th><th style="width:70px">商机价值</th><th style="width:60px">负责人</th><th style="width:115px">操作</th></tr></thead>
+        <tbody id="custTableBody"></tbody>
+      </table>
+    </div>
   </div>
 </div>
 
-<!-- Kanban View -->
-<div id="custKanbanView" style="display:none;overflow-x:auto;padding-bottom:20px">
-  <div style="display:flex;gap:12px;min-width:900px" id="kanbanColumns"></div>
+<!-- Sea Pool View -->
+<div id="crmSeaPoolView" style="display:none">
+  <div style="font-size:12px;opacity:.7;margin-bottom:8px">🌊 公海池 — 超过30天未跟进的客户或标记为公海的客户。可认领到自己的客户库。</div>
+  <div class="table-container" style="max-height:500px;overflow-y:auto" id="seaPoolTable"></div>
 </div>
 
-<!-- Customer Detail Slide-in Panel -->
-<div class="modal-overlay" id="custDetailPanel" style="display:none" onclick="if(event.target===this)closeCustDetail()">
-<div style="position:fixed;top:0;right:0;width:520px;max-width:100vw;height:100vh;background:var(--surface);box-shadow:-4px 0 20px rgba(0,0,0,.1);overflow-y:auto;z-index:100;padding:24px">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
-    <h3 id="detailTitle" style="margin:0">客户详情</h3>
-    <button class="btn btn-sm" onclick="closeCustDetail()">✕</button>
-  </div>
-  <div id="detailContent"></div>
-</div>
+<!-- Opportunities Kanban -->
+<div id="crmOpportunityView" style="display:none;overflow-x:auto;padding-bottom:20px">
+  <div style="display:flex;gap:10px;min-width:900px" id="oppKanbanColumns"></div>
 </div>
 
-<!-- Duplicate Warning Toast (top banner) -->
-<div id="dupWarning" style="display:none;background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:12px 16px;margin-bottom:12px" id="dupWarning">
+<!-- Duplicate Warning -->
+<div id="dupWarning" style="display:none;background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:12px 16px;margin-top:12px">
   <div style="display:flex;justify-content:space-between;align-items:center">
     <span>⚠️ 发现可能存在重复客户：<strong id="dupNames"></strong>（已有<strong id="dupOwner"></strong>在跟进）</span>
     <div style="display:flex;gap:4px">
@@ -285,7 +296,7 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
 <div class="modal-overlay" id="custModal" style="display:none" onclick="if(event.target===this)closeCustModal()">
 <div class="modal">
 <h3 id="custModalTitle">新增客户</h3>
-<div class="grid grid-2" style="gap:12px;margin-bottom:16px">
+<div class="grid grid-2" style="gap:10px;margin-bottom:16px">
 <div><label>品牌名称 *</label><input id="custBrand"></div>
 <div><label>公司名称</label><input id="custCompany"></div>
 <div><label>联系人</label><input id="custContact"></div>
@@ -293,7 +304,10 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
 <div><label>行业</label><select id="custIndustry"><option value="">请选择</option><option>3C</option><option>储能</option><option>智能家居</option><option>美妆</option><option>户外</option><option>宠物</option><option>医疗</option><option>出行</option><option>其他</option></select></div>
 <div><label>来源</label><select id="custSource"><option value="自主开发">自主开发</option><option value="展会">展会</option><option value="转介绍">转介绍</option><option value="平台询盘">平台询盘</option></select></div>
 <div><label>阶段</label><select id="custStage"><option value="lead">开发中</option><option value="proposal">方案</option><option value="negotiation">谈判</option><option value="won">成交</option><option value="maintenance">维护</option></select></div>
-<div><label>预算预估</label><select id="custBudget"><option value="">未知</option><option value="lt15k"><""/mo</option><option value="15_50k">-50K/mo</option><option value="gt50k">>""/mo</option></select></div>
+<div><label>优先级</label><select id="custPriority"><option value="medium">中</option><option value="high">高</option><option value="low">低</option></select></div>
+<div><label>商机价值(USD)</label><input id="custOppValue" type="number" placeholder="预估金额"></div>
+<div><label>预计成交时间</label><input id="custCloseDate" type="date"></div>
+<div><label>预算预估</label><select id="custBudget"><option value="">未知</option><option value="<15K">&lt;$15K/mo</option><option value="15-50K">$15K-50K/mo</option><option value=">50K">&gt;$50K/mo</option></select></div>
 <div><label>备注</label><input id="custNotes"></div>
 </div>
 <div class="btn-group"><button class="btn btn-primary" onclick="saveCustomer()">保存</button><button class="btn" onclick="closeCustModal()">取消</button></div>
@@ -565,5 +579,6 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
 <script src="ppt.js?v=20260603143232"></script>
 </body>
 </html>
+
 
 

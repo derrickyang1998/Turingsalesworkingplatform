@@ -354,6 +354,63 @@ function switchPage(id) {
   if (id === 'admin') loadAdminDashboard();
 }
 
+
+// ===== CRM FUNCTIONS =====
+var crmCurrentView = 'pipeline';
+function switchCrmView(view) {
+  crmCurrentView = view;
+  document.querySelectorAll('.crm-tab').forEach(function(t) { t.style.color = 'var(--text2)'; t.style.borderBottom = '2px solid transparent'; });
+  if (event && event.target) { event.target.style.color = ''; event.target.style.borderBottom = '2px solid #1a1a1a'; }
+  document.getElementById('crmPipelineView').style.display = view === 'pipeline' ? '' : 'none';
+  document.getElementById('crmSeaPoolView').style.display = view === 'seapool' ? '' : 'none';
+  document.getElementById('crmOpportunityView').style.display = view === 'opportunities' ? '' : 'none';
+  if (view === 'seapool') loadSeaPool();
+  if (view === 'opportunities') loadOpportunityKanban();
+}
+async function loadSeaPool() {
+  try {
+    var r = await apiFetch('/customers/sea-pool');
+    var d = await r.json();
+    var customers = d.customers || [];
+    var h = '<table><thead><tr><th>品牌</th><th>公司</th><th>行业</th><th>最后更新</th><th style="width:65px">操作</th></tr></thead><tbody>';
+    if (!customers.length) { h += '<tr><td colspan="5" style="text-align:center;padding:30px;opacity:.5">🌊 公海池暂无客户</td></tr>'; }
+    else { customers.forEach(function(c) { h += '<tr><td><strong>'+(c.brand_name||'')+'</strong></td><td>'+(c.company_name||'')+'</td><td>'+(c.industry||'')+'</td><td style="font-size:11px;opacity:.6">'+(c.updated_at||'').substring(0,10)+'</td><td><button class="btn btn-sm btn-primary" onclick="claimCustomer('+c.id+')">认领</button></td></tr>'; }); }
+    h += '</tbody></table>';
+    document.getElementById('seaPoolTable').innerHTML = h;
+    document.getElementById('m0_seapoolTabCount').textContent = customers.length;
+  } catch(e) {}
+}
+async function claimCustomer(id) {
+  try { await apiFetch('/customers/' + id + '/claim', { method: 'POST' }); toast('客户已认领到你的库'); loadCustomers(); loadSeaPool(); loadDashboard(); } catch(e) { toast('认领失败', 'error'); }
+}
+async function loadDashboard() {
+  try {
+    var r = await apiFetch('/customers/dashboard');
+    var d = await r.json();
+    document.getElementById('m0_totalCustomers').textContent = d.total || 0;
+    document.getElementById('m0_poolCount').textContent = d.poolCount || 0;
+    document.getElementById('m0_totalValue').textContent = (d.totalValue||0).toLocaleString();
+  } catch(e) {}
+}
+async function loadOpportunityKanban() {
+  try {
+    var r = await apiFetch('/customers?stage=proposal&stage=negotiation');
+    var d = await r.json();
+    var opps = (d.customers||[]).filter(function(c) { return c.opportunity_value > 0; });
+    var stages = [{id:'proposal',label:'📝 方案',color:'#dbeafe'},{id:'negotiation',label:'🤝 谈判',color:'#ede9fe'}];
+    var h = '';
+    stages.forEach(function(s) {
+      var items = opps.filter(function(o) { return o.stage === s.id; });
+      h += '<div style="flex:1;min-width:200px;background:'+s.color+';border-radius:8px;padding:12px"><div style="font-weight:600;margin-bottom:8px">'+s.label+' ('+items.length+')</div>';
+      items.forEach(function(o) { h += '<div style="background:#fff;border-radius:6px;padding:8px;margin-bottom:6px;font-size:12px"><strong>'+(o.brand_name||'')+'</strong><br><span style="opacity:.6">'+(o.company_name||'')+'</span><br><span style="color:#0f7b3c;font-weight:600">$'+(o.opportunity_value||0).toLocaleString()+'</span></div>'; });
+      h += '</div>';
+    });
+    document.getElementById('oppKanbanColumns').innerHTML = h || '<p style="opacity:.5">暂无商机数据</p>';
+  } catch(e) {}
+}
+// Update loadCustomers to call dashboard
+var _origLoadCustomers = loadCustomers;
+loadCustomers = async function() { await _origLoadCustomers(); /*loadDashboard();*/ };
 // Hash-driven routing
 window.onhashchange = function() {
   var h = location.hash.replace('#', '') || 'm1';
@@ -1036,6 +1093,7 @@ async function adminCreateInvite() { try { var r = await apiFetch("/admin/invite
     footer.innerHTML = '<a href="#" onclick="doLogout()" style="color:var(--text2);font-size:10px">🚪 退出登录</a> · <span id="sidebarUser" style="font-size:10px;opacity:.5"></span>';
   }
 })();
+
 
 
 
