@@ -323,7 +323,7 @@ async function generateAIStrategy() {
     industries: Object.keys((window.INDUSTRY_TREE || {})).join(', ')
   };
   
-  var searchHint = '[Web Search Recommended] For latest market data and competitor analysis, search: ' + input.substring(0,60) + '; var prompt = 'You are a senior overseas influencer marketing strategist at TuringMarket. Analyze the customer profile below and provide a comprehensive strategy in Chinese:\n\nCustomer: ' + input + '\n\nReference data (from our brand database): ' + JSON.stringify(context) + '\n\nProvide: 1) Market opportunity analysis 2) Recommended influencer types and platforms 3) Estimated budget allocation (60-30-10 model) 4) Competitor benchmarking suggestions 5) 3-month execution roadmap 6) Risk factors and mitigation. Format with clear headings and bullet points. Be specific and actionable.';
+  var prompt = 'You are a senior overseas influencer marketing strategist at TuringMarket. Analyze the customer profile below and provide a comprehensive strategy in Chinese:\n\nCustomer: ' + input + '\n\nReference data (from our brand database): ' + JSON.stringify(context) + '\n\nProvide: 1) Market opportunity analysis 2) Recommended influencer types and platforms 3) Estimated budget allocation (60-30-10 model) 4) Competitor benchmarking suggestions 5) 3-month execution roadmap 6) Risk factors and mitigation. Format with clear headings and bullet points. Be specific and actionable.';
   
   try {
     var resp = await fetch(DS_URL, {
@@ -1372,6 +1372,7 @@ async function adminCreateInvite() { try { var r = await apiFetch("/admin/invite
     footer.innerHTML = '<a href="#" onclick="doLogout()" style="color:var(--text2);font-size:10px">🚪 退出登录</a> · <span id="sidebarUser" style="font-size:10px;opacity:.5"></span>';
   }
 })();
+
 
 
 
