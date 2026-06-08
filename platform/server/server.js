@@ -1,25 +1,4 @@
-﻿c
-// Customer Detail (single customer)
-app.get("/api/customers/:id", authMiddleware, (req, res) => {
-  var c = global.db.prepare("SELECT c.*, u.display_name as assigned_name FROM customers c LEFT JOIN users u ON c.assigned_to = u.id WHERE c.id = ?").get(req.params.id);
-  if (!c) return res.status(404).json({ error: "Customer not found" });
-  res.json(c);
-});
-
-// Deduplication check (across ALL users)
-app.get("/api/customers/check-duplicate", authMiddleware, (req, res) => {
-  var brand = req.query.brand || '';
-  var company = req.query.company || '';
-  if (!brand) return res.json([]);
-  var dups;
-  if (company) {
-    dups = global.db.prepare("SELECT c.id, c.brand_name, c.company_name, c.stage, u.display_name as assigned_name FROM customers c LEFT JOIN users u ON c.assigned_to = u.id WHERE (c.brand_name LIKE ? OR c.company_name LIKE ?) AND c.id != COALESCE(?,0) LIMIT 5").all('%' + brand + '%', '%' + company + '%', req.user.id);
-  } else {
-    dups = global.db.prepare("SELECT c.id, c.brand_name, c.company_name, c.stage, u.display_name as assigned_name FROM customers c LEFT JOIN users u ON c.assigned_to = u.id WHERE c.brand_name LIKE ? AND c.id != COALESCE(?,0) LIMIT 5").all('%' + brand + '%', req.user.id);
-  }
-  res.json(dups);
-});
-onst express = require('express');
+﻿const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const bcrypt = require('bcryptjs');
@@ -247,4 +226,3 @@ app.listen(PORT, '0.0.0.0', () => {
 �^�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�a
   `);
 });
-
