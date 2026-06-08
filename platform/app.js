@@ -22,6 +22,10 @@ let chatHistory = [{role: "system", content: "You are the TuringMarket AI assist
     { id: 'm3', icon: '📋', label: '需求接入 & 方案生成' },
     { id: 'm4', icon: '👥', label: '网红匹配 & 执行管理' },
     { id: 'm5', icon: '🤖', label: 'AI 助手' },
+    { id: 'workflow-designer', icon: '✏️', label: '流程设计' },
+    { id: 'workflow-templates', icon: '📋', label: '流程模板' },
+    { id: 'workflow-instances', icon: '⚡', label: '流程实例' },
+    { id: 'workflow-tasks', icon: '📌', label: '我的待办' },
     { id: 'admin', icon: '🛡️', label: '管理控制室', adminOnly: true }
   ];
   
@@ -404,6 +408,9 @@ function switchPage(id) {
   }
   if (id === 'm0') loadCustomers();
   if (id === 'admin') loadAdminDashboard();
+  if (id === 'workflow-templates') { setTimeout(function() { if (typeof wfLoadTemplates === 'function') wfLoadTemplates(); }, 200); }
+  if (id === 'workflow-instances') { setTimeout(function() { if (typeof wfLoadInstances === 'function') wfLoadInstances(); }, 200); }
+  if (id === 'workflow-tasks') { setTimeout(function() { if (typeof wfLoadTasks === 'function') wfLoadTasks(); }, 200); }
 }
 
 
@@ -1372,6 +1379,677 @@ async function adminCreateInvite() { try { var r = await apiFetch("/admin/invite
     footer.innerHTML = '<a href="#" onclick="doLogout()" style="color:var(--text2);font-size:10px">🚪 退出登录</a> · <span id="sidebarUser" style="font-size:10px;opacity:.5"></span>';
   }
 })();
+
+// ==========================================
+// WORKFLOW ENGINE - Frontend Module
+// ==========================================
+
+// ---- API Helper ----
+function wfApi(path, method, body) {
+  return fetch(API + '/workflow' + path, {
+    method: method || 'GET',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + AUTH_TOKEN },
+    body: body ? JSON.stringify(body) : undefined
+  }).then(function(r) { return r.json(); });
+}
+
+// ---- State ----
+var wfState = {
+  templateId: null,
+  nodes: [],
+  edges: [],
+  selectedNode: null,
+  selectedEdge: null,
+  nodeCounter: 0,
+  connectingFrom: null,
+  history: [],
+  historyIndex: -1
+};
+
+// ---- Designer Init ----
+function initWorkflowDesigner() {
+  var canvas = document.getElementById('wf-svg-canvas');
+  if (!canvas) return;
+
+  var wrapper = document.getElementById('wf-canvas-wrapper');
+
+  canvas.addEventListener('dragover', function(e) { e.preventDefault(); });
+  canvas.addEventListener('drop', function(e) {
+    e.preventDefault();
+    var type = e.dataTransfer.getData('text/plain');
+    if (!type) return;
+    var rect = canvas.getBoundingClientRect();
+    wfAddNode(type, e.clientX - rect.left, e.clientY - rect.top);
+  });
+
+  // Palette drag
+  var palettes = document.querySelectorAll('.wf-node-palette');
+  for (var p = 0; p < palettes.length; p++) {
+    palettes[p].addEventListener('dragstart', function(e) {
+      e.dataTransfer.setData('text/plain', this.dataset.type);
+    });
+  }
+
+  // Canvas click - deselect
+  canvas.addEventListener('click', function(e) {
+    if (e.target === canvas || e.target.id === 'wf-edges-layer' || e.target.id === 'wf-nodes-layer') {
+      wfDeselectAll();
+    }
+  });
+
+  // Keyboard shortcuts
+  document.addEventListener('keydown', function(e) {
+    var designerPage = document.getElementById('page-workflow-designer');
+    if (!designerPage || designerPage.style.display === 'none') return;
+    if ((e.key === 'Delete' || e.key === 'Backspace') && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA') {
+      wfDeleteSelected();
+    }
+    if (e.ctrlKey && e.key === 'z') { e.preventDefault(); wfUndo(); }
+    if (e.ctrlKey && e.key === 'y') { e.preventDefault(); wfRedo(); }
+  });
+}
+
+// ---- Node Management ----
+function wfAddNode(type, x, y) {
+  var nodeId = 'node_' + (++wfState.nodeCounter);
+  var labels = { start: '开始', end: '结束', approval: '审批', task: '任务',
+    condition: '条件', parallel: '并行', timer: '定时',
+    webhook: 'Webhook', auto_action: '自动动作', sub_process: '子流程' };
+  var widths = { start: 100, end: 100, approval: 120, task: 120, condition: 100,
+    parallel: 100, timer: 100, webhook: 120, auto_action: 120, sub_process: 120 };
+
+  var node = { id: nodeId, type: type, label: labels[type] || type,
+    x: x - (widths[type] || 100) / 2, y: y - 30,
+    width: widths[type] || 100, height: 60, config: wfDefaultConfig(type) };
+
+  wfSaveState();
+  wfState.nodes.push(node);
+  wfRenderAll();
+  wfSelectNode(nodeId);
+}
+
+function wfDefaultConfig(type) {
+  switch (type) {
+    case 'start': return { trigger: 'manual' };
+    case 'approval': return { title: '请审批', assignee_role: 'admin' };
+    case 'task': return { title: '请处理', assignee_role: 'user' };
+    case 'condition': return { expression: { operator: '==', left: { var: 'data.status' }, right: 'approved' } };
+    case 'timer': return { delay_minutes: 60 };
+    case 'webhook': return { url: '', method: 'POST', headers: {} };
+    case 'auto_action': return { action_type: 'update_field', field: 'status', value: 'processed' };
+    case 'sub_process': return { template_id: null };
+    default: return {};
+  }
+}
+
+// ---- SVG Rendering ----
+function wfRenderAll() {
+  var nodesLayer = document.getElementById('wf-nodes-layer');
+  var edgesLayer = document.getElementById('wf-edges-layer');
+  var empty = document.getElementById('wf-canvas-empty');
+  if (empty) empty.style.display = wfState.nodes.length === 0 ? 'block' : 'none';
+
+  if (nodesLayer) { nodesLayer.innerHTML = '';
+    for (var n = 0; n < wfState.nodes.length; n++) wfRenderNode(wfState.nodes[n]); }
+  if (edgesLayer) { edgesLayer.innerHTML = '';
+    for (var e = 0; e < wfState.edges.length; e++) wfRenderEdge(wfState.edges[e]); }
+}
+
+function wfRenderNode(node) {
+  var ns = 'http://www.w3.org/2000/svg';
+  var g = document.createElementNS(ns, 'g');
+  g.setAttribute('class', 'wf-node-svg' + (wfState.selectedNode === node.id ? ' wf-node-selected' : ''));
+  g.dataset.nodeId = node.id;
+
+  var isRounded = node.type === 'start' || node.type === 'end';
+  var rx = isRounded ? 30 : 6;
+  var colors = { start: '#e8f5e9', end: '#fbe9e7', approval: '#fff3e0', task: '#e3f2fd',
+    condition: '#f3e5f5', parallel: '#e0f2f1', timer: '#fff8e1',
+    webhook: '#fce4ec', auto_action: '#e8eaf6', sub_process: '#f1f8e9' };
+
+  var rect = document.createElementNS(ns, 'rect');
+  rect.setAttribute('class', 'wf-node-bg');
+  rect.setAttribute('x', node.x); rect.setAttribute('y', node.y);
+  rect.setAttribute('width', node.width); rect.setAttribute('height', node.height);
+  rect.setAttribute('rx', rx); rect.setAttribute('ry', rx);
+  rect.setAttribute('fill', colors[node.type] || '#f5f5f5');
+  rect.setAttribute('stroke', '#999'); rect.setAttribute('stroke-width', '1.5');
+  g.appendChild(rect);
+
+  var text = document.createElementNS(ns, 'text');
+  text.setAttribute('x', node.x + node.width / 2); text.setAttribute('y', node.y + node.height / 2);
+  text.setAttribute('text-anchor', 'middle'); text.setAttribute('dominant-baseline', 'middle');
+  text.setAttribute('font-size', '13px'); text.setAttribute('fill', '#333');
+  text.setAttribute('pointer-events', 'none');
+  text.textContent = node.label;
+  g.appendChild(text);
+
+  var typeText = document.createElementNS(ns, 'text');
+  typeText.setAttribute('x', node.x + node.width / 2); typeText.setAttribute('y', node.y + node.height - 10);
+  typeText.setAttribute('text-anchor', 'middle'); typeText.setAttribute('font-size', '9px');
+  typeText.setAttribute('fill', '#999'); typeText.setAttribute('pointer-events', 'none');
+  typeText.textContent = node.type;
+  g.appendChild(typeText);
+
+  // Top anchor
+  if (node.type !== 'start') {
+    var topA = document.createElementNS(ns, 'circle');
+    topA.setAttribute('class', 'wf-anchor'); topA.setAttribute('cx', node.x + node.width / 2);
+    topA.setAttribute('cy', node.y); topA.setAttribute('r', '5');
+    topA.dataset.anchor = 'input'; topA.dataset.nodeId = node.id;
+    g.appendChild(topA);
+  }
+
+  // Bottom anchor
+  if (node.type !== 'end') {
+    var botA = document.createElementNS(ns, 'circle');
+    botA.setAttribute('class', 'wf-anchor'); botA.setAttribute('cx', node.x + node.width / 2);
+    botA.setAttribute('cy', node.y + node.height); botA.setAttribute('r', '5');
+    botA.dataset.anchor = 'output'; botA.dataset.nodeId = node.id;
+    g.appendChild(botA);
+  }
+
+  // Click
+  g.addEventListener('click', function(e) { e.stopPropagation(); wfSelectNode(this.dataset.nodeId); });
+
+  // Drag handlers
+  var dragging = false, startX, startY, nodeStartX, nodeStartY;
+  g.addEventListener('mousedown', function(e) {
+    if (e.target.classList.contains('wf-anchor')) return;
+    dragging = true; startX = e.clientX; startY = e.clientY;
+    nodeStartX = node.x; nodeStartY = node.y;
+  });
+
+  document.addEventListener('mousemove', function(e) {
+    if (!dragging) return;
+    node.x = Math.max(0, nodeStartX + e.clientX - startX);
+    node.y = Math.max(0, nodeStartY + e.clientY - startY);
+    wfRenderAll();
+    if (wfState.selectedNode === node.id) wfSelectNode(node.id);
+  });
+
+  document.addEventListener('mouseup', function() {
+    if (dragging) { dragging = false; wfSaveState(); }
+  });
+
+  // Connection anchors
+  var anchors = g.querySelectorAll('.wf-anchor');
+  for (var a = 0; a < anchors.length; a++) {
+    anchors[a].addEventListener('mousedown', function(e) {
+      e.stopPropagation();
+      if (this.dataset.anchor === 'output') {
+        wfState.connectingFrom = { nodeId: this.dataset.nodeId };
+        var line = document.getElementById('wf-connection-line');
+        line.setAttribute('x1', this.getAttribute('cx'));
+        line.setAttribute('y1', this.getAttribute('cy'));
+        line.setAttribute('x2', this.getAttribute('cx'));
+        line.setAttribute('y2', this.getAttribute('cy'));
+        line.style.display = 'block';
+      }
+    });
+  }
+
+  var nl = document.getElementById('wf-nodes-layer');
+  if (nl) nl.appendChild(g);
+}
+
+function wfRenderEdge(edge) {
+  var fromNode = null, toNode = null;
+  for (var i = 0; i < wfState.nodes.length; i++) {
+    if (wfState.nodes[i].id === edge.from) fromNode = wfState.nodes[i];
+    if (wfState.nodes[i].id === edge.to) toNode = wfState.nodes[i];
+  }
+  if (!fromNode || !toNode) return;
+
+  var x1 = fromNode.x + fromNode.width / 2;
+  var y1 = fromNode.y + fromNode.height;
+  var x2 = toNode.x + toNode.width / 2;
+  var y2 = toNode.y;
+  var cy1 = y1 + Math.abs(y2 - y1) * 0.5;
+  var cy2 = y2 - Math.abs(y2 - y1) * 0.5;
+  var d = 'M ' + x1 + ' ' + y1 + ' C ' + x1 + ' ' + cy1 + ', ' + x2 + ' ' + cy2 + ', ' + x2 + ' ' + y2;
+
+  var ns = 'http://www.w3.org/2000/svg';
+  var g = document.createElementNS(ns, 'g');
+  g.style.cursor = 'pointer'; g.dataset.edgeId = edge.id;
+
+  var path = document.createElementNS(ns, 'path');
+  path.setAttribute('class', 'wf-edge');
+  path.setAttribute('d', d);
+  path.setAttribute('marker-end', 'url(#arrowhead)');
+  if (edge.condition) path.setAttribute('stroke-dasharray', '5,3');
+  g.appendChild(path);
+
+  if (edge.label) {
+    var label = document.createElementNS(ns, 'text');
+    label.setAttribute('class', 'wf-edge-label');
+    label.setAttribute('x', (x1 + x2) / 2); label.setAttribute('y', (y1 + y2) / 2 - 10);
+    label.setAttribute('text-anchor', 'middle');
+    label.textContent = edge.label;
+    g.appendChild(label);
+  }
+
+  g.addEventListener('click', function(e) { e.stopPropagation(); wfSelectEdge(this.dataset.edgeId); });
+
+  var el = document.getElementById('wf-edges-layer');
+  if (el) el.appendChild(g);
+}
+
+// ---- Connection Line ----
+document.addEventListener('mousemove', function(e) {
+  if (!wfState.connectingFrom) return;
+  var line = document.getElementById('wf-connection-line');
+  if (!line) return;
+  var canvas = document.getElementById('wf-svg-canvas');
+  if (!canvas) return;
+  var rect = canvas.getBoundingClientRect();
+  line.setAttribute('x2', e.clientX - rect.left);
+  line.setAttribute('y2', e.clientY - rect.top);
+});
+
+document.addEventListener('mouseup', function(e) {
+  if (!wfState.connectingFrom) return;
+  var line = document.getElementById('wf-connection-line');
+  if (line) line.style.display = 'none';
+
+  if (e.target.classList.contains('wf-anchor') && e.target.dataset.anchor === 'input') {
+    var toNodeId = e.target.dataset.nodeId;
+    var fromNodeId = wfState.connectingFrom.nodeId;
+    if (fromNodeId !== toNodeId) {
+      var exists = false;
+      for (var i = 0; i < wfState.edges.length; i++) {
+        if (wfState.edges[i].from === fromNodeId && wfState.edges[i].to === toNodeId) { exists = true; break; }
+      }
+      if (!exists) {
+        wfSaveState();
+        wfState.edges.push({ id: 'edge_' + Date.now(), from: fromNodeId, to: toNodeId, label: '', condition: null });
+        wfRenderAll();
+      }
+    }
+  }
+  wfState.connectingFrom = null;
+});
+
+// ---- Selection ----
+function wfSelectNode(nodeId) { wfState.selectedNode = nodeId; wfState.selectedEdge = null; wfRenderAll(); wfShowNodeProperties(nodeId); }
+function wfSelectEdge(edgeId) { wfState.selectedNode = null; wfState.selectedEdge = edgeId; wfRenderAll(); wfShowEdgeProperties(edgeId); }
+
+function wfDeselectAll() {
+  wfState.selectedNode = null; wfState.selectedEdge = null; wfRenderAll();
+  var pc = document.getElementById('wf-prop-content');
+  if (pc) pc.innerHTML = '<p style="color:#999;padding:20px;text-align:center;">点击节点或连线<br>编辑属性</p>';
+}
+
+function wfDeleteSelected() {
+  if (wfState.selectedNode) {
+    wfSaveState();
+    var nodeId = wfState.selectedNode;
+    wfState.nodes = wfState.nodes.filter(function(n) { return n.id !== nodeId; });
+    wfState.edges = wfState.edges.filter(function(e) { return e.from !== nodeId && e.to !== nodeId; });
+    wfState.selectedNode = null;
+    wfRenderAll();
+    wfDeselectAll();
+  } else if (wfState.selectedEdge) {
+    wfSaveState();
+    wfState.edges = wfState.edges.filter(function(e) { return e.id !== wfState.selectedEdge; });
+    wfState.selectedEdge = null;
+    wfRenderAll();
+    wfDeselectAll();
+  }
+}
+
+// ---- Property Panels ----
+function wfShowNodeProperties(nodeId) {
+  var node = null;
+  for (var i = 0; i < wfState.nodes.length; i++) {
+    if (wfState.nodes[i].id === nodeId) { node = wfState.nodes[i]; break; }
+  }
+  if (!node) return;
+
+  var config = node.config || {};
+  var html = '<div class="wf-prop-field"><label>节点ID</label><input value="' + node.id + '" readonly></div>';
+  html += '<div class="wf-prop-field"><label>类型</label><input value="' + node.type + '" readonly></div>';
+  html += '<div class="wf-prop-field"><label>显示名称</label><input value="' + node.label + '" onchange="wfUpdateNodeProp(\'' + nodeId + '\',\'label\',this.value)"></div>';
+
+  if (node.type === 'approval' || node.type === 'task') {
+    html += '<div class="wf-prop-field"><label>标题</label><input value="' + (config.title || '') + '" onchange="wfUpdateNodeConfig(\'' + nodeId + '\',\'title\',this.value)"></div>';
+    html += '<div class="wf-prop-field"><label>负责人角色</label><select onchange="wfUpdateNodeConfig(\'' + nodeId + '\',\'assignee_role\',this.value)">'
+      + '<option value="user"' + (config.assignee_role === 'user' ? ' selected' : '') + '>普通用户</option>'
+      + '<option value="admin"' + (config.assignee_role === 'admin' ? ' selected' : '') + '>管理员</option></select></div>';
+  }
+
+  if (node.type === 'condition') {
+    html += '<div class="wf-prop-field"><label>条件表达式 (JSON)</label><textarea onchange="wfUpdateCondition(\'' + nodeId + '\',this.value)">' + JSON.stringify(config.expression || {}, null, 2) + '</textarea>'
+      + '<small style="color:#999">示例: {"operator":"==","left":{"var":"data.value"},"right":"high"}</small></div>';
+  }
+
+  if (node.type === 'timer') {
+    html += '<div class="wf-prop-field"><label>延迟(分钟)</label><input type="number" value="' + (config.delay_minutes || 60) + '" onchange="wfUpdateNodeConfig(\'' + nodeId + '\',\'delay_minutes\',parseInt(this.value))"></div>';
+  }
+
+  if (node.type === 'webhook') {
+    html += '<div class="wf-prop-field"><label>URL</label><input value="' + (config.url || '') + '" onchange="wfUpdateNodeConfig(\'' + nodeId + '\',\'url\',this.value)"></div>';
+  }
+
+  if (node.type === 'auto_action') {
+    html += '<div class="wf-prop-field"><label>字段名</label><input value="' + (config.field || '') + '" onchange="wfUpdateNodeConfig(\'' + nodeId + '\',\'field\',this.value)"></div>';
+    html += '<div class="wf-prop-field"><label>字段值</label><input value="' + (config.value || '') + '" onchange="wfUpdateNodeConfig(\'' + nodeId + '\',\'value\',this.value)"></div>';
+  }
+
+  if (node.type === 'start') {
+    html += '<div class="wf-prop-field"><label>触发方式</label><select onchange="wfUpdateNodeConfig(\'' + nodeId + '\',\'trigger\',this.value)">'
+      + '<option value="manual"' + (config.trigger === 'manual' ? ' selected' : '') + '>手动触发</option>'
+      + '<option value="auto"' + (config.trigger === 'auto' ? ' selected' : '') + '>自动触发</option></select></div>';
+  }
+
+  html += '<div style="padding:10px 16px;"><button onclick="wfDeleteSelected()" style="padding:6px 14px;background:#f44336;color:white;border:none;border-radius:4px;cursor:pointer;">删除节点</button></div>';
+
+  var pc = document.getElementById('wf-prop-content');
+  if (pc) pc.innerHTML = html;
+}
+
+function wfShowEdgeProperties(edgeId) {
+  var edge = null;
+  for (var i = 0; i < wfState.edges.length; i++) {
+    if (wfState.edges[i].id === edgeId) { edge = wfState.edges[i]; break; }
+  }
+  if (!edge) return;
+
+  var html = '<div class="wf-prop-field"><label>连线ID</label><input value="' + edge.id + '" readonly></div>';
+  html += '<div class="wf-prop-field"><label>标签</label><input value="' + (edge.label || '') + '" onchange="wfUpdateEdgeProp(\'' + edgeId + '\',\'label\',this.value)"></div>';
+  html += '<div class="wf-prop-field"><label>条件(JSON,可选)</label><textarea onchange="wfUpdateEdgeCondition(\'' + edgeId + '\',this.value)">' + (edge.condition ? JSON.stringify(edge.condition, null, 2) : '') + '</textarea></div>';
+  html += '<div style="padding:10px 16px;"><button onclick="wfDeleteSelected()" style="padding:6px 14px;background:#f44336;color:white;border:none;border-radius:4px;cursor:pointer;">删除连线</button></div>';
+
+  var pc = document.getElementById('wf-prop-content');
+  if (pc) pc.innerHTML = html;
+}
+
+function wfUpdateNodeProp(nodeId, prop, value) {
+  for (var i = 0; i < wfState.nodes.length; i++) {
+    if (wfState.nodes[i].id === nodeId) { wfState.nodes[i][prop] = value; break; }
+  }
+  wfRenderAll(); wfSaveState();
+}
+
+function wfUpdateNodeConfig(nodeId, key, value) {
+  for (var i = 0; i < wfState.nodes.length; i++) {
+    if (wfState.nodes[i].id === nodeId) { wfState.nodes[i].config[key] = value; break; }
+  }
+  wfSaveState();
+}
+
+function wfUpdateEdgeProp(edgeId, prop, value) {
+  for (var i = 0; i < wfState.edges.length; i++) {
+    if (wfState.edges[i].id === edgeId) { wfState.edges[i][prop] = value; break; }
+  }
+  wfRenderAll(); wfSaveState();
+}
+
+function wfUpdateCondition(nodeId, jsonStr) {
+  try {
+    for (var i = 0; i < wfState.nodes.length; i++) {
+      if (wfState.nodes[i].id === nodeId) { wfState.nodes[i].config.expression = JSON.parse(jsonStr); break; }
+    }
+    wfSaveState();
+  } catch(e) { alert('JSON格式错误: ' + e.message); }
+}
+
+function wfUpdateEdgeCondition(edgeId, jsonStr) {
+  try {
+    for (var i = 0; i < wfState.edges.length; i++) {
+      if (wfState.edges[i].id === edgeId) { wfState.edges[i].condition = jsonStr ? JSON.parse(jsonStr) : null; break; }
+    }
+    wfRenderAll(); wfSaveState();
+  } catch(e) { alert('JSON格式错误: ' + e.message); }
+}
+
+// ---- Undo/Redo ----
+function wfSaveState() {
+  var state = { nodes: JSON.parse(JSON.stringify(wfState.nodes)), edges: JSON.parse(JSON.stringify(wfState.edges)), nodeCounter: wfState.nodeCounter };
+  if (wfState.historyIndex < wfState.history.length - 1) {
+    wfState.history = wfState.history.slice(0, wfState.historyIndex + 1);
+  }
+  wfState.history.push(state);
+  if (wfState.history.length > 50) wfState.history.shift();
+  wfState.historyIndex = wfState.history.length - 1;
+}
+
+function wfUndo() {
+  if (wfState.historyIndex <= 0) return;
+  wfState.historyIndex--;
+  var state = wfState.history[wfState.historyIndex];
+  wfState.nodes = JSON.parse(JSON.stringify(state.nodes));
+  wfState.edges = JSON.parse(JSON.stringify(state.edges));
+  wfState.nodeCounter = state.nodeCounter;
+  wfDeselectAll();
+}
+
+function wfRedo() {
+  if (wfState.historyIndex >= wfState.history.length - 1) return;
+  wfState.historyIndex++;
+  var state = wfState.history[wfState.historyIndex];
+  wfState.nodes = JSON.parse(JSON.stringify(state.nodes));
+  wfState.edges = JSON.parse(JSON.stringify(state.edges));
+  wfState.nodeCounter = state.nodeCounter;
+  wfDeselectAll();
+}
+
+function wfClearCanvas() {
+  if (!confirm('确定清空画布？')) return;
+  wfSaveState();
+  wfState.nodes = []; wfState.edges = [];
+  wfState.selectedNode = null; wfState.selectedEdge = null;
+  wfState.templateId = null;
+  document.getElementById('wf-template-name').value = '';
+  document.getElementById('wf-template-id').textContent = '';
+  wfRenderAll(); wfDeselectAll();
+}
+
+// ---- Save/Load Template ----
+function wfSaveTemplate() {
+  var name = document.getElementById('wf-template-name').value.trim();
+  if (!name) { alert('请输入流程名称'); return; }
+  if (wfState.nodes.length === 0) { alert('画布为空'); return; }
+
+  var templateId = document.getElementById('wf-template-id').textContent;
+  var data = { name: name, nodes: wfState.nodes, edges: wfState.edges };
+
+  if (templateId) {
+    wfApi('/templates/' + templateId, 'PUT', data).then(function(r) {
+      if (r.success) alert('保存成功'); else alert('保存失败: ' + (r.error || '未知错误'));
+    });
+  } else {
+    wfApi('/templates', 'POST', data).then(function(r) {
+      if (r.id) { document.getElementById('wf-template-id').textContent = r.id; alert('保存成功，ID: ' + r.id); }
+      else alert('保存失败: ' + (r.error || '未知错误'));
+    });
+  }
+}
+
+function wfPublishTemplate() {
+  var templateId = document.getElementById('wf-template-id').textContent;
+  if (!templateId) { alert('请先保存模板'); return; }
+  wfApi('/templates/' + templateId + '/publish', 'POST').then(function(r) {
+    if (r.success) alert('发布成功');
+  });
+}
+
+function wfLoadTemplate(templateId) {
+  wfApi('/templates/' + templateId).then(function(r) {
+    if (!r.template) { alert('模板不存在'); return; }
+    var t = r.template;
+    switchPage('workflow-designer');
+    document.getElementById('wf-template-name').value = t.name;
+    document.getElementById('wf-template-id').textContent = t.id;
+    wfState.nodes = t.nodes || [];
+    wfState.edges = t.edges || [];
+    wfState.nodeCounter = wfState.nodes.length;
+    wfState.history = [{ nodes: JSON.parse(JSON.stringify(wfState.nodes)), edges: JSON.parse(JSON.stringify(wfState.edges)), nodeCounter: wfState.nodeCounter }];
+    wfState.historyIndex = 0;
+    wfRenderAll();
+  });
+}
+
+// ---- Templates List ----
+function wfLoadTemplates() {
+  wfApi('/templates').then(function(r) {
+    var tbody = document.getElementById('wf-templates-body');
+    if (!tbody) return;
+    if (!r.templates || r.templates.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#999;">暂无模板</td></tr>';
+      return;
+    }
+    tbody.innerHTML = r.templates.map(function(t) {
+      return '<tr><td><strong>' + t.name + '</strong></td><td>' + (t.module || '-') + '</td><td>' + (t.category || '-')
+        + '</td><td>v' + t.version + '</td><td><span class="wf-badge ' + (t.is_active ? 'wf-badge-completed' : 'wf-badge-paused') + '">'
+        + (t.is_active ? '已发布' : '草稿') + '</span></td><td>' + (t.created_at || '-')
+        + '</td><td><button onclick="wfLoadTemplate(' + t.id + ')" style="padding:4px 10px;border:1px solid #ccc;border-radius:3px;cursor:pointer;background:white;">编辑</button> '
+        + '<button onclick="wfDeleteTemplate(' + t.id + ')" style="padding:4px 10px;border:1px solid #f44336;border-radius:3px;cursor:pointer;background:white;color:#f44336;">删除</button></td></tr>';
+    }).join('');
+  });
+}
+
+function wfDeleteTemplate(id) {
+  if (!confirm('确定删除模板？')) return;
+  wfApi('/templates/' + id, 'DELETE').then(function(r) {
+    if (r.success) wfLoadTemplates();
+  });
+}
+
+// ---- Instances ----
+function wfLoadInstances() {
+  var statusFilter = document.getElementById('wf-inst-filter-status');
+  var url = '/instances';
+  if (statusFilter && statusFilter.value) url += '?status=' + statusFilter.value;
+
+  wfApi(url).then(function(r) {
+    var tbody = document.getElementById('wf-instances-body');
+    if (!tbody) return;
+    if (!r.instances || r.instances.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#999;">暂无流程实例</td></tr>';
+      return;
+    }
+    tbody.innerHTML = r.instances.map(function(inst) {
+      return '<tr><td>#' + inst.id + '</td><td>' + (inst.template_name || '-') + '</td><td>' + inst.business_type
+        + '</td><td>' + inst.business_id + '</td><td><span class="wf-badge wf-badge-' + inst.status + '">' + inst.status + '</span></td>'
+        + '<td>' + (inst.started_by || '-') + '</td><td>' + (inst.created_at || '-')
+        + '</td><td><button onclick="wfShowInstanceDetail(' + inst.id + ')" style="padding:4px 10px;border:1px solid #2196F3;border-radius:3px;cursor:pointer;background:white;color:#2196F3;">详情</button>'
+        + (inst.status === 'active' ? ' <button onclick="wfCancelInstance(' + inst.id + ')" style="padding:4px 10px;border:1px solid #f44336;border-radius:3px;cursor:pointer;background:white;color:#f44336;">取消</button>' : '')
+        + '</td></tr>';
+    }).join('');
+  });
+}
+
+function wfShowInstanceDetail(instanceId) {
+  wfApi('/instances/' + instanceId).then(function(r) {
+    if (!r.instance) { alert('实例不存在'); return; }
+    var modal = document.getElementById('wf-instance-modal');
+    var body = document.getElementById('wf-instance-modal-body');
+    var title = document.getElementById('wf-instance-modal-title');
+    if (!modal || !body) return;
+    if (title) title.textContent = '流程实例 #' + instanceId;
+
+    var nodeStatuses = r.node_statuses || {};
+    var nodeColors = { start: '#e8f5e9', end: '#fbe9e7', approval: '#fff3e0', task: '#e3f2fd',
+      condition: '#f3e5f5', parallel: '#e0f2f1', timer: '#fff8e1',
+      webhook: '#fce4ec', auto_action: '#e8eaf6', sub_process: '#f1f8e9' };
+
+    var html = '<div style="margin-bottom:20px;">';
+    html += '<p>模板: <strong>' + (r.instance.template_name || '-') + '</strong> | 状态: <span class="wf-badge wf-badge-' + r.instance.status + '">' + r.instance.status + '</span></p>';
+
+    // Flow visualization
+    html += '<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:16px 0;">';
+    if (r.nodes) {
+      for (var i = 0; i < r.nodes.length; i++) {
+        var node = r.nodes[i];
+        var ns = nodeStatuses[node.id];
+        var borderColor = node.is_current ? '#FF9800' : (ns && ns.completed ? '#4CAF50' : '#ddd');
+        html += '<div style="padding:8px 16px;border:2px solid ' + borderColor + ';border-radius:6px;background:' + (nodeColors[node.type] || '#f5f5f5') + ';font-size:13px;">'
+          + node.label + (node.is_current ? ' ⬅' : '') + '</div>';
+        if (i < r.nodes.length - 1) html += '<span style="color:#999;">→</span>';
+      }
+    }
+    html += '</div>';
+
+    // Tasks
+    if (r.tasks && r.tasks.length > 0) {
+      html += '<h4 style="margin:16px 0 8px;">任务列表</h4><table class="wf-table"><thead><tr><th>任务</th><th>类型</th><th>状态</th><th>处理人</th><th>备注</th></tr></thead><tbody>';
+      for (var t = 0; t < r.tasks.length; t++) {
+        var task = r.tasks[t];
+        html += '<tr><td>' + task.title + '</td><td>' + task.node_type + '</td>'
+          + '<td><span class="wf-badge wf-badge-' + task.status + '">' + task.status + '</span></td>'
+          + '<td>' + (task.completed_by || '-') + '</td><td>' + (task.comment || '-') + '</td></tr>';
+      }
+      html += '</tbody></table>';
+    }
+
+    // Logs
+    if (r.logs && r.logs.length > 0) {
+      html += '<h4 style="margin:16px 0 8px;">执行日志</h4><div style="max-height:200px;overflow-y:auto;background:#fafafa;padding:12px;border-radius:4px;font-size:12px;">';
+      for (var l = 0; l < r.logs.length; l++) {
+        var log = r.logs[l];
+        html += '<div style="padding:4px 0;border-bottom:1px solid #eee;"><span style="color:#999;">' + log.created_at + '</span> '
+          + '<span style="font-weight:600;">' + (log.node_id || '-') + '</span> '
+          + '<span>' + log.action + '</span>'
+          + (log.user_id ? ' <span style="color:#888;">by user#' + log.user_id + '</span>' : '') + '</div>';
+      }
+      html += '</div>';
+    }
+
+    html += '</div>';
+    body.innerHTML = html;
+    modal.style.display = 'flex';
+  });
+}
+
+function wfCancelInstance(id) {
+  if (!confirm('确定取消此流程？')) return;
+  wfApi('/instances/' + id + '/cancel', 'POST').then(function(r) {
+    if (r.success) wfLoadInstances();
+  });
+}
+
+// ---- Tasks ----
+function wfLoadTasks() {
+  var filter = document.getElementById('wf-task-filter');
+  var url = '/tasks';
+  if (filter && filter.value) url += '?status=' + filter.value;
+
+  wfApi(url).then(function(r) {
+    var container = document.getElementById('wf-tasks-list');
+    if (!container) return;
+    if (!r.tasks || r.tasks.length === 0) {
+      container.innerHTML = '<p style="text-align:center;color:#999;padding:40px;">暂无任务</p>';
+      return;
+    }
+    container.innerHTML = r.tasks.map(function(task) {
+      return '<div class="wf-task-card"><div class="wf-task-title">' + task.title + '</div>'
+        + '<div class="wf-task-meta">流程: ' + (task.template_name || '-') + ' | '
+        + '业务: ' + (task.business_type || '-') + '#' + (task.business_id || '-') + ' | '
+        + '状态: <span class="wf-badge wf-badge-' + task.status + '">' + task.status + '</span>'
+        + (task.created_at ? ' | 创建: ' + task.created_at : '') + '</div>'
+        + (task.description ? '<p style="font-size:13px;color:#555;margin-bottom:10px;">' + task.description + '</p>' : '')
+        + '<div class="wf-task-actions">'
+        + (task.node_type === 'approval'
+          ? '<button class="btn-approve" onclick="wfHandleTask(' + task.id + ',\'approve\')">✓ 批准</button>'
+            + '<button class="btn-reject" onclick="wfHandleTask(' + task.id + ',\'reject\')">✗ 驳回</button>'
+          : '<button class="btn-complete" onclick="wfHandleTask(' + task.id + ',\'complete\')">完成</button>')
+        + '<input id="wf-task-comment-' + task.id + '" placeholder="备注..." style="flex:1;padding:6px 10px;border:1px solid #ddd;border-radius:4px;font-size:13px;">'
+        + '</div></div>';
+    }).join('');
+  });
+}
+
+function wfHandleTask(taskId, action) {
+  var commentEl = document.getElementById('wf-task-comment-' + taskId);
+  var comment = commentEl ? commentEl.value : '';
+  var endpoint = action === 'reject' ? '/reject' : (action === 'approve' ? '/approve' : '/complete');
+
+  wfApi('/tasks/' + taskId + endpoint, 'POST', { comment: comment }).then(function(r) {
+    if (r.success) { wfLoadTasks(); }
+    else { alert('操作失败: ' + (r.error || '未知错误')); }
+  });
+}
 
 
 

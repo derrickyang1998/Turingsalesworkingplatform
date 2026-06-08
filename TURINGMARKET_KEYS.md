@@ -1,0 +1,11 @@
+﻿DEEPSEEK_API_KEY=sk-5951a22df4fc48ca874b86b87f43cee3
+SERVER_IP=8.163.129.160
+SSH_KEY_PATH=C:\Users\29272\.ssh\turingmarket_deploy
+ROOT_PASSWORD=turing19980225.
+GITHUB_REPO=https://github.com/derrickyang1998/Turingsalesworkingplatform
+GIT_BRANCH=codex/phase-2-customer-pipeline
+ADMIN_LOGIN=admin / turing2026
+NODE_VERSION=v20.20.2
+SERVER_DIR=/root/turingmarket/platform
+DB_TYPE=sql.js (WASM SQLite)
+PORT=3002 (Node) / 80 (Nginx)

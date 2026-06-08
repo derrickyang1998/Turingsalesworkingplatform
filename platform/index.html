@@ -186,6 +186,57 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
 
 .brand-tooltip{position:relative;cursor:help;border-bottom:1px dotted var(--text2)}
 .brand-tooltip:hover::after{content:attr(data-tip);position:absolute;left:0;top:100%;background:#1a1a1a;color:#fff;padding:6px 10px;border-radius:4px;font-size:11px;white-space:nowrap;z-index:10}
+
+/* ===== WORKFLOW ENGINE STYLES ===== */
+.wf-designer-container { display:flex;flex-direction:column;height:calc(100vh - 80px); }
+.wf-toolbar { display:flex;align-items:center;gap:8px;padding:8px 16px;background:#f5f5f5;border-bottom:1px solid #ddd; }
+.wf-toolbar button { padding:6px 14px;border:1px solid #ccc;border-radius:4px;background:white;cursor:pointer;font-size:13px; }
+.wf-toolbar button:hover { background:#e8e8e8; }
+.wf-toolbox { width:140px;background:#fafafa;border-right:1px solid #ddd;padding:8px;overflow-y:auto;flex-shrink:0; }
+.wf-toolbox-title { font-weight:bold;padding:8px 0;font-size:13px;color:#555; }
+.wf-toolbox-group { display:flex;flex-direction:column;gap:4px; }
+.wf-node-palette { padding:8px 10px;background:white;border:1px solid #ddd;border-radius:4px;cursor:grab;font-size:13px;transition:all 0.15s;user-select:none; }
+.wf-node-palette:hover { border-color:#2196F3;background:#e3f2fd; }
+.wf-canvas-wrapper { flex:1;position:relative;overflow:hidden;background:#fff;background-image:radial-gradient(circle,#ddd 1px,transparent 1px);background-size:20px 20px; }
+#wf-svg-canvas { display:block;width:100%;height:100%; }
+.wf-canvas-empty { position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;color:#bbb;font-size:16px;pointer-events:none; }
+.wf-node-svg { cursor:pointer; }
+.wf-node-svg:hover .wf-node-bg { stroke:#2196F3;stroke-width:2; }
+.wf-node-selected .wf-node-bg { stroke:#2196F3;stroke-width:2;stroke-dasharray:4,2; }
+.wf-anchor { fill:#fff;stroke:#2196F3;stroke-width:2;cursor:crosshair; }
+.wf-anchor:hover { fill:#2196F3; }
+.wf-edge { stroke:#666;stroke-width:2;fill:none;cursor:pointer; }
+.wf-edge:hover { stroke:#2196F3;stroke-width:3; }
+.wf-edge-label { font-size:11px;fill:#666; }
+.wf-property-panel { width:280px;background:#fafafa;border-left:1px solid #ddd;padding:0;flex-shrink:0;overflow-y:auto; }
+.wf-prop-header { font-weight:bold;padding:12px 16px;background:#f0f0f0;border-bottom:1px solid #ddd; }
+.wf-prop-field { padding:10px 16px; }
+.wf-prop-field label { display:block;font-size:12px;color:#666;margin-bottom:4px; }
+.wf-prop-field input,.wf-prop-field select,.wf-prop-field textarea { width:100%;padding:6px 8px;border:1px solid #ddd;border-radius:3px;font-size:13px;box-sizing:border-box; }
+.wf-prop-field textarea { min-height:60px;resize:vertical; }
+.wf-table { width:100%;border-collapse:collapse;background:white; }
+.wf-table th,.wf-table td { padding:10px 12px;text-align:left;border-bottom:1px solid #eee;font-size:13px; }
+.wf-table th { background:#f5f5f5;font-weight:600; }
+.wf-table tr:hover td { background:#f8f9fa; }
+.wf-badge { display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600; }
+.wf-badge-active { background:#fff3e0;color:#e65100; }
+.wf-badge-completed { background:#e8f5e9;color:#2e7d32; }
+.wf-badge-paused { background:#e3f2fd;color:#1565c0; }
+.wf-badge-cancelled { background:#fbe9e7;color:#c62828; }
+.wf-badge-pending { background:#fff8e1;color:#f57f17; }
+.wf-task-card { background:white;border:1px solid #eee;border-radius:8px;padding:16px;margin-bottom:12px; }
+.wf-task-card:hover { box-shadow:0 2px 8px rgba(0,0,0,0.1); }
+.wf-task-title { font-size:15px;font-weight:600;margin-bottom:6px; }
+.wf-task-meta { font-size:12px;color:#888;margin-bottom:10px; }
+.wf-task-actions { display:flex;gap:8px; }
+.wf-task-actions button { padding:8px 20px;border:none;border-radius:4px;cursor:pointer;font-size:13px; }
+.btn-approve { background:#4CAF50;color:white; }
+.btn-reject { background:#f44336;color:white; }
+.btn-complete { background:#2196F3;color:white; }
+.wf-modal { position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:center;justify-content:center; }
+.wf-modal-content { background:white;border-radius:8px;padding:24px;max-height:80vh;overflow-y:auto;position:relative; }
+.wf-modal-close { position:absolute;top:10px;right:15px;font-size:24px;cursor:pointer;color:#999; }
+.wf-modal-close:hover { color:#333; }
 </style>
 </head>
 <body>
@@ -211,7 +262,11 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
     <div class="nav-item" data-page="m3" onclick="switchPage('m3')"><span class="nav-icon">📋</span> 需求接入 & 方案生成</div>
     <div class="nav-item" data-page="m4" onclick="switchPage('m4')"><span class="nav-icon">👥</span> 网红匹配 & 执行管理</div>
     <div class="nav-item" data-page="m5" onclick="switchPage('m5')"><span class="nav-icon">🤖</span> AI 助手</div>
-    <div class="nav-item admin-only" data-page="admin" onclick="switchPage('admin')"><span class="nav-icon">🛡️</span> 管理控制室</div>
+    <div class="nav-item" data-page="workflow-designer" onclick="switchPage('workflow-designer')"><span class="nav-icon">✏️</span> 流程设计</div>
+	    <div class="nav-item" data-page="workflow-templates" onclick="switchPage('workflow-templates')"><span class="nav-icon">📋</span> 流程模板</div>
+	    <div class="nav-item" data-page="workflow-instances" onclick="switchPage('workflow-instances')"><span class="nav-icon">⚡</span> 流程实例</div>
+	    <div class="nav-item" data-page="workflow-tasks" onclick="switchPage('workflow-tasks')"><span class="nav-icon">📌</span> 我的待办</div>
+	    <div class="nav-item admin-only" data-page="admin" onclick="switchPage('admin')"><span class="nav-icon">🛡️</span> 管理控制室</div>
     <div class="sidebar-footer" id="sidebarFooter"></div>
   </nav>
   <main>
@@ -566,6 +621,135 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
     <div id="ad_recentActivity" style="max-height:350px;overflow-y:auto"></div>
   </div>
 </div>
+</div>
+
+<!-- ===== WORKFLOW DESIGNER PAGE ===== -->
+<div id="page-workflow-designer" class="page" style="display:none;">
+  <div class="wf-designer-container">
+    <div class="wf-toolbar">
+      <input type="text" id="wf-template-name" placeholder="流程名称..." style="font-size:16px;font-weight:bold;border:none;outline:none;flex:1;">
+      <button onclick="wfSaveTemplate()">💾 保存</button>
+      <button onclick="wfPublishTemplate()">🚀 发布</button>
+      <button onclick="wfUndo()">↩ 撤销</button>
+      <button onclick="wfRedo()">↪ 重做</button>
+      <button onclick="wfClearCanvas()">🗑 清空</button>
+      <span id="wf-template-id" style="display:none;"></span>
+    </div>
+    <div style="display:flex;flex:1;overflow:hidden;">
+      <div class="wf-toolbox">
+        <div class="wf-toolbox-title">节点工具箱</div>
+        <div class="wf-toolbox-group">
+          <div class="wf-node-palette" data-type="start" draggable="true">● 开始</div>
+          <div class="wf-node-palette" data-type="end" draggable="true">● 结束</div>
+          <div class="wf-node-palette" data-type="approval" draggable="true">✓ 审批</div>
+          <div class="wf-node-palette" data-type="task" draggable="true">☰ 任务</div>
+          <div class="wf-node-palette" data-type="condition" draggable="true">◇ 条件</div>
+          <div class="wf-node-palette" data-type="parallel" draggable="true">≡ 并行</div>
+          <div class="wf-node-palette" data-type="timer" draggable="true">⏱ 定时</div>
+          <div class="wf-node-palette" data-type="webhook" draggable="true">↻ Webhook</div>
+          <div class="wf-node-palette" data-type="auto_action" draggable="true">⚡ 自动</div>
+          <div class="wf-node-palette" data-type="sub_process" draggable="true">⊞ 子流程</div>
+        </div>
+      </div>
+      <div class="wf-canvas-wrapper" id="wf-canvas-wrapper">
+        <svg id="wf-svg-canvas" width="100%" height="100%">
+          <defs>
+            <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+              <polygon points="0 0, 10 3.5, 0 7" fill="#666" />
+            </marker>
+          </defs>
+          <g id="wf-edges-layer"></g>
+          <g id="wf-nodes-layer"></g>
+          <line id="wf-connection-line" stroke="#2196F3" stroke-width="2" stroke-dasharray="5,5" style="display:none" marker-end="url(#arrowhead)"/>
+          <rect id="wf-selection-box" stroke="#2196F3" stroke-width="1" fill="rgba(33,150,243,0.1)" style="display:none"/>
+        </svg>
+        <div id="wf-canvas-empty" class="wf-canvas-empty">
+          从左侧拖拽节点到这里开始设计流程<br>
+          <small>从一个「开始」节点 → 添加审批/任务 → 连接到「结束」节点</small>
+        </div>
+      </div>
+      <div class="wf-property-panel" id="wf-property-panel">
+        <div class="wf-prop-header">属性配置</div>
+        <div id="wf-prop-content">
+          <p style="color:#999;padding:20px;text-align:center;">点击节点或连线<br>编辑属性</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== WORKFLOW TEMPLATES PAGE ===== -->
+<div id="page-workflow-templates" class="page" style="display:none;">
+  <div style="padding:20px;max-width:1200px;margin:0 auto;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+      <h2>📋 流程模板</h2>
+      <div>
+        <input type="text" id="wf-tpl-search" placeholder="搜索模板..." oninput="wfLoadTemplates()" style="padding:6px;margin-right:8px;">
+        <button onclick="switchPage('workflow-designer')" style="padding:8px 16px;background:#4CAF50;color:white;border:none;border-radius:4px;cursor:pointer;">+ 新建模板</button>
+      </div>
+    </div>
+    <table class="wf-table" id="wf-templates-table">
+      <thead><tr>
+        <th>名称</th><th>模块</th><th>分类</th><th>版本</th><th>状态</th><th>创建时间</th><th>操作</th>
+      </tr></thead>
+      <tbody id="wf-templates-body">
+        <tr><td colspan="7" style="text-align:center;color:#999;">加载中...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ===== WORKFLOW INSTANCES PAGE ===== -->
+<div id="page-workflow-instances" class="page" style="display:none;">
+  <div style="padding:20px;max-width:1200px;margin:0 auto;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+      <h2>⚡ 流程实例</h2>
+      <div>
+        <select id="wf-inst-filter-status" onchange="wfLoadInstances()">
+          <option value="">全部状态</option>
+          <option value="active">运行中</option>
+          <option value="completed">已完成</option>
+          <option value="paused">已暂停</option>
+          <option value="cancelled">已取消</option>
+        </select>
+      </div>
+    </div>
+    <table class="wf-table" id="wf-instances-table">
+      <thead><tr>
+        <th>ID</th><th>模板</th><th>业务类型</th><th>业务ID</th><th>状态</th><th>启动人</th><th>时间</th><th>操作</th>
+      </tr></thead>
+      <tbody id="wf-instances-body">
+        <tr><td colspan="8" style="text-align:center;color:#999;">加载中...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ===== WORKFLOW TASKS PAGE ===== -->
+<div id="page-workflow-tasks" class="page" style="display:none;">
+  <div style="padding:20px;max-width:1200px;margin:0 auto;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+      <h2>📌 我的待办</h2>
+      <div>
+        <select id="wf-task-filter" onchange="wfLoadTasks()">
+          <option value="pending">待处理</option>
+          <option value="">全部</option>
+          <option value="completed">已完成</option>
+          <option value="rejected">已拒绝</option>
+        </select>
+      </div>
+    </div>
+    <div id="wf-tasks-list"></div>
+  </div>
+</div>
+
+<!-- ===== WORKFLOW INSTANCE DETAIL MODAL ===== -->
+<div id="wf-instance-modal" class="wf-modal" style="display:none;">
+  <div class="wf-modal-content" style="width:80%;max-width:900px;">
+    <span class="wf-modal-close" onclick="document.getElementById('wf-instance-modal').style.display='none'">&times;</span>
+    <h3 id="wf-instance-modal-title">流程实例详情</h3>
+    <div id="wf-instance-modal-body"></div>
+  </div>
 </div>
 
   </main>

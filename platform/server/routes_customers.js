@@ -74,6 +74,15 @@
     );
     if (stage && old && old.stage !== stage) {
       db.prepare('INSERT INTO customer_activity (customer_id, user_id, action, stage_from, stage_to, notes) VALUES (?, ?, ?, ?, ?, ?)').run(req.params.id, req.user.id, 'stage_change', old.stage, stage, '阶段变更: ' + (STAGE_LABELS[old.stage] || old.stage) + ' -> ' + (STAGE_LABELS[stage] || stage));
+
+      // Trigger workflow on customer stage change
+      try {
+        const tpls = db.prepare("SELECT id FROM workflow_templates WHERE module = 'customer' AND is_active = 1").all();
+        const wfEngine = require('./workflow_engine');
+        for (const t of tpls) {
+          try { wfEngine.startWorkflow(t.id, 'customer', parseInt(req.params.id), { stage: stage, previous_stage: old.stage, customer_id: parseInt(req.params.id) }, req.user.id); } catch(ew) { console.error('WF trigger:', ew.message); }
+        }
+      } catch(ew) { /* workflow engine not available */ }
     }
     db.prepare('INSERT INTO activity_log (user_id, action, module, details, ip_address) VALUES (?, ?, ?, ?, ?)').run(req.user.id, 'update_customer', 'customer', 'Updated customer #' + req.params.id, req.ip);
     res.json({ success: true });

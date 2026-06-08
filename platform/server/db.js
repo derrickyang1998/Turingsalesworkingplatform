@@ -212,6 +212,71 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_influencers_followers ON influencers(followers);
   CREATE INDEX IF NOT EXISTS idx_collaborations_status ON collaborations(status);
   CREATE INDEX IF NOT EXISTS idx_collaborations_demand ON collaborations(demand_id);
+
+  CREATE TABLE IF NOT EXISTS workflow_templates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    description TEXT DEFAULT '',
+    module TEXT DEFAULT '',
+    category TEXT DEFAULT 'approval',
+    nodes TEXT NOT NULL DEFAULT '[]',
+    edges TEXT NOT NULL DEFAULT '[]',
+    version INTEGER DEFAULT 1,
+    is_active INTEGER DEFAULT 1,
+    created_by INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS workflow_instances (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    template_id INTEGER NOT NULL,
+    business_type TEXT NOT NULL,
+    business_id INTEGER NOT NULL,
+    current_node_id TEXT,
+    status TEXT DEFAULT 'active',
+    node_data TEXT DEFAULT '{}',
+    started_by INTEGER,
+    completed_at DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS workflow_tasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    instance_id INTEGER NOT NULL,
+    node_id TEXT NOT NULL,
+    node_type TEXT NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT DEFAULT '',
+    assignee_id INTEGER,
+    assignee_role TEXT,
+    status TEXT DEFAULT 'pending',
+    comment TEXT DEFAULT '',
+    due_at DATETIME,
+    completed_at DATETIME,
+    completed_by INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS workflow_timers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    instance_id INTEGER NOT NULL,
+    node_id TEXT NOT NULL,
+    fire_at DATETIME NOT NULL,
+    action TEXT DEFAULT 'advance',
+    fired INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS workflow_node_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    instance_id INTEGER NOT NULL,
+    node_id TEXT NOT NULL,
+    action TEXT NOT NULL,
+    user_id INTEGER,
+    details TEXT DEFAULT '{}',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
 `);
 
 // Seed default admin and team users

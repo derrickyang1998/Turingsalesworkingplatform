@@ -200,6 +200,13 @@ require('./routes')(app, db, authMiddleware);
 require('./routes_customers')(app, db, authMiddleware);
 require('./routes_brands')(app, db, authMiddleware);
 
+// ===== WORKFLOW ENGINE ROUTES =====
+require('./routes_workflow')(app, db, authMiddleware, adminOnly);
+
+// ===== WORKFLOW ENGINE INIT =====
+const workflowEngine = require('./workflow_engine');
+workflowEngine.initEngine();
+
 // ===== HEALTH CHECK =====
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
