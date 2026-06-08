@@ -169,13 +169,32 @@ app.get('/api/admin/overview', authMiddleware, adminOnly, (req, res) => {
 
 // ===== USER MANAGEMENT (Admin) =====
 app.get('/api/admin/users', authMiddleware, adminOnly, (req, res) => {
-  const users = db.prepare('SELECT id, username, display_name, role, department, email, api_quota, created_at, last_login, is_active FROM users ORDER BY id').all();
+  const users = db.prepare('SELECT id, username, display_name, role, department, email, api_quota, created_at, last_login, is_active FROM users ORDER BY department, id').all();
   res.json({ users });
 });
 
+app.post('/api/admin/users', authMiddleware, adminOnly, (req, res) => {
+  const { username, display_name, role, department, email } = req.body;
+  if (!username) return res.status(400).json({ error: 'Username required' });
+  const salt = bcrypt.genSaltSync(10);
+  const hash = bcrypt.hashSync('turing2026', salt);
+  try {
+    const result = db.prepare('INSERT INTO users (username, password_hash, display_name, role, email, department) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(username, hash, display_name || username, role || 'user', email || '', department || '');
+    res.json({ id: result.lastInsertRowid });
+  } catch(e) {
+    res.status(400).json({ error: 'Username may already exist' });
+  }
+});
+
 app.put('/api/admin/users/:id', authMiddleware, adminOnly, (req, res) => {
-  const { display_name, department, api_quota, is_active } = req.body;
-  db.prepare('UPDATE users SET display_name = COALESCE(?, display_name), department = COALESCE(?, department), api_quota = COALESCE(?, api_quota), is_active = COALESCE(?, is_active) WHERE id = ?').run(display_name, department, api_quota, is_active, req.params.id);
+  const { display_name, department, api_quota, is_active, role } = req.body;
+  db.prepare('UPDATE users SET display_name = COALESCE(?, display_name), department = COALESCE(?, department), api_quota = COALESCE(?, api_quota), is_active = COALESCE(?, is_active), role = COALESCE(?, role) WHERE id = ?').run(display_name, department, api_quota, is_active, role, req.params.id);
+  res.json({ success: true });
+});
+
+app.delete('/api/admin/users/:id', authMiddleware, adminOnly, (req, res) => {
+  db.prepare("UPDATE users SET is_active = 0 WHERE id = ?").run(req.params.id);
   res.json({ success: true });
 });
 
@@ -194,6 +213,26 @@ app.post('/api/admin/invites', authMiddleware, adminOnly, (req, res) => {
   res.json({ code, expires_at: expiresAt });
 });
 
+// ===== PPT GENERATION =====
+app.post('/api/proposal/generate-ppt', authMiddleware, (req, res) => {
+  const path = require('path');
+  const fs = require('fs');
+  const cp = require('child_process');
+  const tmpDir = path.join(__dirname, '..', 'tmp');
+  if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+  const dataPath = path.join(tmpDir, 'ppt_data_' + Date.now() + '.json');
+  const outPath = path.join(tmpDir, 'proposal_' + Date.now() + '.pptx');
+  fs.writeFileSync(dataPath, JSON.stringify(req.body));
+  try {
+    cp.execSync('python3 "' + path.join(__dirname, 'generate_ppt.py') + '" "' + dataPath + '" "' + outPath + '"', { timeout: 30000, cwd: __dirname });
+    fs.unlinkSync(dataPath);
+    res.download(outPath, 'proposal.pptx', function() { try { fs.unlinkSync(outPath); } catch(e) {} });
+  } catch (e) {
+    try { fs.unlinkSync(dataPath); } catch(e2) {}
+    res.status(500).json({ error: 'PPT generation failed: ' + e.message });
+  }
+});
+
 
 // ===== INFLUENCER & COLLABORATION ROUTES =====
 require('./routes')(app, db, authMiddleware);
@@ -203,6 +242,52 @@ require('./routes_brands')(app, db, authMiddleware);
 // ===== WORKFLOW ENGINE ROUTES =====
 require('./routes_workflow')(app, db, authMiddleware, adminOnly);
 
+
+// ===== KNOWLEDGE BASE ROUTES =====
+app.get('/api/knowledge', authMiddleware, (req, res) => {
+  try {
+    const { type, search } = req.query;
+    let sql = 'SELECT * FROM knowledge_entries WHERE 1=1';
+    let params = [];
+    if (type) { sql += ' AND entry_type = ?'; params.push(type); }
+    if (search) { sql += ' AND (key_terms LIKE ? OR content LIKE ?)'; params.push('%' + search + '%', '%' + search + '%'); }
+    if (req.user.role !== 'admin') { sql += ' AND (created_by = ? OR is_public = 1)'; params.push(req.user.id); }
+    sql += ' ORDER BY usage_count DESC, created_at DESC LIMIT 100';
+    const entries = db.prepare(sql).all(...params);
+    res.json({ entries });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/knowledge', authMiddleware, (req, res) => {
+  try {
+    const { entry_type, title, content, tags, source_type, source_id } = req.body;
+    const result = db.prepare('INSERT INTO knowledge_entries (entry_type, source_type, source_id, key_terms, content, created_by, is_public) VALUES (?, ?, ?, ?, ?, ?, 1)')
+      .run(entry_type || 'note', source_type || null, source_id || null, JSON.stringify(tags || []), content || '', req.user.id);
+    res.json({ id: result.lastInsertRowid });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/knowledge/:id/use', authMiddleware, (req, res) => {
+  db.prepare('UPDATE knowledge_entries SET usage_count = usage_count + 1, updated_at = datetime('now') WHERE id = ?').run(req.params.id);
+  res.json({ success: true });
+});
+
+// ===== SALES DASHBOARD =====
+app.get('/api/dashboard/sales', authMiddleware, (req, res) => {
+  try {
+    const userFilter = req.user.role !== 'admin' ? ' WHERE assigned_to = ' + req.user.id : '';
+    const stats = {
+      totalCustomers: db.prepare('SELECT COUNT(*) as count FROM customers' + userFilter).get().count,
+      activeDeals: db.prepare("SELECT COUNT(*) as count FROM customers WHERE stage IN ('lead','info_confirmed','advantage_shared','needs_confirmed','analysis','proposal','kol_matching','cooperation')" + userFilter).get().count,
+      wonDeals: db.prepare("SELECT COUNT(*) as count FROM customers WHERE stage='won'" + userFilter).get().count,
+      totalPipeline: db.prepare("SELECT COALESCE(SUM(COALESCE(opportunity_value,0)),0) as total FROM customers WHERE stage IN ('lead','info_confirmed','advantage_shared','needs_confirmed','analysis','proposal','kol_matching','cooperation')" + userFilter).get().total,
+      stageDistribution: db.prepare('SELECT stage, COUNT(*) as count, COALESCE(SUM(COALESCE(opportunity_value,0)),0) as value FROM customers' + userFilter + ' GROUP BY stage').all(),
+      monthlyTrend: db.prepare("SELECT strftime('%Y-%m', created_at) as month, COUNT(*) as count FROM customers" + userFilter + " GROUP BY month ORDER BY month DESC LIMIT 12").all(),
+      topUsers: db.prepare('SELECT u.display_name, u.department, COUNT(c.id) as deals FROM users u LEFT JOIN customers c ON c.assigned_to = u.id AND c.stage='won' GROUP BY u.id ORDER BY deals DESC LIMIT 10').all()
+    };
+    res.json({ stats });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 // ===== WORKFLOW ENGINE INIT =====
 const workflowEngine = require('./workflow_engine');
 workflowEngine.initEngine();
@@ -214,22 +299,4 @@ app.get('/api/health', (req, res) => {
 
 // ===== SPA FALLBACK =====
 app.get('/{*path}', (req, res) => { res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate'); res.set('Pragma', 'no-cache'); res.set('Expires', '0');
-  res.sendFile(path.join(__dirname, '..', 'index.html'));
-});
-
-// Start server
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`
-�X�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�[
-�U   TuringMarket ������ƽ̨ v3.0         �U
-�U   Server running on port ${PORT}             �U
-�U                                          �U
-�U   Local:    http://localhost:${PORT}         �U
-�U   Network:  http://YOUR_IP:${PORT}           �U
-�U                                          �U
-�U   Admin:    admin / turing2026           �U
-�U   Users:    10 team members configured   �U
-�U   Default:  username / turing2026        �U
-�^�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�a
-  `);
-});
+  re

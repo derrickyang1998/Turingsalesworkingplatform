@@ -237,6 +237,26 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
 .wf-modal-content { background:white;border-radius:8px;padding:24px;max-height:80vh;overflow-y:auto;position:relative; }
 .wf-modal-close { position:absolute;top:10px;right:15px;font-size:24px;cursor:pointer;color:#999; }
 .wf-modal-close:hover { color:#333; }
+
+/* Customer Detail Slide-out Panel */
+.detail-overlay { display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.3);z-index:999; }
+.detail-panel { position:fixed;top:0;right:-600px;width:580px;height:100%;background:#fff;box-shadow:-4px 0 20px rgba(0,0,0,0.1);z-index:1000;transition:right 0.3s ease;overflow-y:auto; }
+.detail-panel.open { right:0; }
+.detail-panel-header { display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid var(--border);position:sticky;top:0;background:#fff;z-index:1; }
+.detail-panel-header h3 { margin:0;font-size:18px; }
+.detail-panel-body { padding:20px;font-size:14px; }
+.detail-section { margin-bottom:24px; }
+.detail-section h4 { font-size:14px;font-weight:600;margin:0 0 8px;color:#555; }
+.detail-field { display:flex;padding:6px 0;border-bottom:1px solid #f0f0f0; }
+.detail-field-label { width:100px;color:#999;flex-shrink:0; }
+.detail-field-value { flex:1; }
+/* Opportunity Kanban */
+.opp-column { background:var(--surface2);border-radius:8px;padding:12px;min-width:200px;flex:1; }
+.opp-column h4 { margin:0 0 8px;font-size:13px; }
+.opp-card { background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin-bottom:8px;cursor:pointer; }
+.opp-card:hover { border-color:#999; }
+.opp-card-title { font-weight:600;font-size:13px; }
+.opp-card-meta { font-size:11px;color:#999;margin-top:4px; }
 </style>
 </head>
 <body>
@@ -373,6 +393,19 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
 </div>
 </div>
 </div>
+
+<!-- Customer 360 Slide-out Panel -->
+<div id="customerDetailOverlay" class="detail-overlay" onclick="closeCustomerDetail()"></div>
+<div id="customerDetailPanel" class="detail-panel">
+  <div class="detail-panel-header">
+    <h3 id="cdp-title">客户详情</h3>
+    <button onclick="closeCustomerDetail()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button>
+  </div>
+  <div class="detail-panel-body" id="cdp-body">
+    <div style="text-align:center;padding:40px;color:#999">加载中...</div>
+  </div>
+</div>
+
 <!-- M1: Brand Hub -->
 <div class="page active" id="page-m1">
 <h2>行业品牌智库</h2>
@@ -524,11 +557,17 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
 </div>
 <div id="tab1-content">
   <div class="card">
-    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
-      <select id="filt_platform" style="width:auto" onchange="matchInfluencers()"><option value="">全部平台</option><option>YouTube</option><option>TikTok</option><option>Instagram</option></select>
-      <select id="filt_category" style="width:auto" onchange="matchInfluencers()"><option value="">全部类别</option><option>Tech/3C</option><option>Beauty</option><option>Home/Garden</option><option>Outdoor</option><option>Pet</option></select>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;align-items:center">
+      <input id="filt_project" placeholder="项目" onchange="matchInfluencers()" style="width:80px;font-size:12px">
+      <input id="filt_product" placeholder="推广产品" onchange="matchInfluencers()" style="width:90px;font-size:12px">
+      <select id="filt_platform" style="width:auto;font-size:12px" onchange="matchInfluencers()"><option value="">全部平台</option><option>YouTube</option><option>TikTok</option><option>Instagram</option></select>
+      <select id="filt_region" style="width:auto;font-size:12px" onchange="matchInfluencers()"><option value="">全部国家</option><option>US</option><option>DE</option><option>JP</option><option>KR</option><option>UK</option><option>FR</option></select>
+      <input id="filt_tags" placeholder="标签" onchange="matchInfluencers()" style="width:80px;font-size:12px">
       <button class="btn btn-sm" onclick="matchInfluencers()">🔍 筛选</button>
-      <button class="btn btn-sm" onclick="exportSubmissionCSV()">📥 导出CSV</button>
+      <span style="flex:1"></span>
+      <button class="btn btn-sm" onclick="exportAll()">📥 导出全部</button>
+      <button class="btn btn-sm" onclick="exportFiltered()">📥 导出筛选</button>
+      <button class="btn btn-sm" onclick="exportSelected()">📥 导出选中</button>
     </div>
     <div class="table-container" id="infTableContainer" style="max-height:450px;overflow-y:auto"><p style="text-align:center;padding:30px;opacity:.5">请先在「导入 & 飞书」页面上传网红数据</p></div>
   </div>
@@ -567,192 +606,107 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
 </div>
 </div>
 
-<!-- M5: AI Chat -->
+<!-- M5: AI Chat (v8.0) -->
 <div class="page" id="page-m5">
-<h2>🤖 AI 助手</h2>
-<p class="subtitle">DeepSeek V4 Flash · 基于90品牌数据库 · 策略咨询</p>
-<div class="card" style="padding:0;overflow:hidden">
-  <div class="chat-container">
-    <div class="chat-messages" id="chatMessages">
-      <div class="chat-msg assistant"><div class="bubble">👋 你好！我是 TuringMarket AI 助手。<br><br>我可以帮你：<br>• 分析行业品牌数据和竞品<br>• 给出红人营销策略建议<br>• 评估预算合理性和ROI<br>• 推荐红人匹配方案<br><br>请直接提问！</div></div>
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+  <div>
+    <h2 style="margin:0;display:inline">🤖 AI 助手</h2>
+    <span style="font-size:11px;opacity:.5;margin-left:12px">DeepSeek V4 Flash · with Web Search · Memory</span>
+  </div>
+  <div style="display:flex;gap:6px;align-items:center">
+    <span id="aiMemoryStatus" style="font-size:11px;opacity:.5">🧠 0 memories</span>
+    <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer">
+      <input type="checkbox" id="webSearchToggle" checked> 🌍 Web Search
+    </label>
+    <button class="btn btn-xs" onclick="clearChat()">清空聊天</button>
+    <button class="btn btn-xs" onclick="clearAIMemory()" style="color:#f44336">清除记忆</button>
+  </div>
+</div>
+<div class="card" style="padding:0;overflow:hidden;flex:1;display:flex;flex-direction:column;min-height:500px">
+  <div class="chat-container" style="flex:1;display:flex;flex-direction:column">
+    <div class="chat-messages" id="chatMessages" style="flex:1;overflow-y:auto;padding:16px">
+      <div class="chat-msg assistant"><div class="bubble">👋 你好！我是 TuringMarket AI 助手。<br><br>我可以帮你：<br>• 分析行业品牌数据和竞品<br>• 给出红人营销策略建议<br>• 评估预算合理性和ROI<br>• 推荐红人匹配方案<br>• 联网搜索最新信息<br><br>请直接提问！</div></div>
     </div>
-    <div class="chat-input-area">
-      <input type="text" id="chatInput" placeholder="输入问题..." onkeydown="if(event.key==='Enter')sendChat()">
+    <div class="chat-input-area" style="border-top:1px solid var(--border);padding:12px 16px;display:flex;gap:8px;align-items:center">
+      <input type="text" id="chatInput" placeholder="输入问题..." onkeydown="if(event.key==='Enter')sendChat()" style="flex:1">
       <button class="btn btn-primary btn-sm" onclick="sendChat()">发送</button>
-      <button class="btn btn-sm" onclick="clearChat()">清空</button>
     </div>
   </div>
 </div>
 </div>
-
-<!-- ADMIN DASHBOARD -->
+<!-- ADMIN DASHBOARD (v8.0) -->
 <div class="page" id="page-admin">
-<h2>🛡️ 管理控制室</h2>
-<p class="subtitle">全盘需求监控 · 用户管理 · Token消耗追踪 · 功能使用统计</p>
-
-<div class="grid grid-4" style="margin-bottom:20px">
-  <div class="stat"><div class="stat-value" id="ad_totalUsers">-</div><div class="stat-label">活跃用户</div></div>
-  <div class="stat"><div class="stat-value" id="ad_totalDemands">-</div><div class="stat-label">总需求数</div></div>
-  <div class="stat"><div class="stat-value" id="ad_totalProposals">-</div><div class="stat-label">生成方案</div></div>
-  <div class="stat"><div class="stat-value" id="ad_totalTokens">-</div><div class="stat-label">Token消耗</div></div>
-</div>
-
-<div class="card">
-  <h3>👥 团队成员</h3>
-  <div class="table-container" style="max-height:400px;overflow-y:auto">
-    <table>
-      <thead><tr><th>用户名</th><th>姓名</th><th>部门</th><th>角色</th><th>Token配额</th><th>需求数</th><th>方案数</th><th>最后登录</th><th>状态</th><th>操作</th></tr></thead>
-      <tbody id="ad_userTableBody"></tbody>
-    </table>
-  </div>
-  <div class="btn-group">
-    <button class="btn btn-sm" onclick="adminCreateInvite()">🔗 生成邀请码</button>
-    <span id="ad_inviteResult" style="font-size:12px;align-self:center;opacity:.7"></span>
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+  <h2 style="margin:0">🛡️ 管理控制室</h2>
+  <div style="display:flex;gap:8px">
+    <button class="btn btn-sm" onclick="switchAdminTab('overview')">📊 概览</button>
+    <button class="btn btn-sm" onclick="switchAdminTab('users')">👥 用户</button>
+    <button class="btn btn-sm" onclick="switchAdminTab('knowledge')">📚 知识库</button>
+    <button class="btn btn-sm" onclick="switchAdminTab('tokens')">🔋 Token</button>
   </div>
 </div>
 
-<div class="grid grid-2">
+<!-- Overview Tab -->
+<div id="admin-tab-overview" style="display:block">
+  <div class="grid grid-4" style="margin-bottom:16px">
+    <div class="stat"><div class="stat-value" id="ad_totalUsers">-</div><div class="stat-label">Active Users</div></div>
+    <div class="stat"><div class="stat-value" id="ad_totalCustomers">-</div><div class="stat-label">Total Customers</div></div>
+    <div class="stat"><div class="stat-value" id="ad_totalDemands">-</div><div class="stat-label">Demands</div></div>
+    <div class="stat"><div class="stat-value" id="ad_totalTokens">-</div><div class="stat-label">Tokens Used</div></div>
+  </div>
+  <div class="card" style="margin-bottom:16px">
+    <h3>📊 Sales Pipeline</h3>
+    <div id="ad_pipelineTable"></div>
+  </div>
+  <div class="grid grid-2" style="margin-bottom:16px">
+    <div class="card"><h3>📈 Stage Distribution</h3><div id="ad_stageChart"></div></div>
+    <div class="card"><h3>🏆 Top Performers</h3><div id="ad_topPerformers"></div></div>
+  </div>
+</div>
+
+<!-- Users Tab -->
+<div id="admin-tab-users" style="display:none">
   <div class="card">
-    <h3>📊 Token消耗排行</h3>
-    <div id="ad_tokenRank"></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <h3 style="margin:0">👥 Team Members</h3>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-sm" onclick="adminCreateInvite()">🔗 Generate Invite</button>
+      </div>
+    </div>
+    <div class="table-container" style="max-height:400px;overflow-y:auto">
+      <table><thead><tr><th>Username</th><th>Name</th><th>Department</th><th>Role</th><th>Quota</th><th>Last Login</th><th>Status</th><th>Action</th></tr></thead>
+        <tbody id="ad_userTableBody"></tbody>
+      </table>
+    </div>
+    <div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <input id="ad_newUsername" placeholder="Username" style="width:120px;font-size:12px">
+      <input id="ad_newDisplay" placeholder="Display Name" style="width:120px;font-size:12px">
+      <select id="ad_newDept" style="font-size:12px"><option value="">Dept</option><option>商务一部</option><option>商务二部</option><option>商务三部</option><option>运营部</option><option>红人组</option><option>策略组</option></select>
+      <button class="btn btn-sm btn-primary" onclick="adminAddUser()">+ Add User</button>
+      <span id="ad_inviteResult" style="font-size:11px;opacity:.7"></span>
+    </div>
   </div>
+</div>
+
+<!-- Knowledge Tab -->
+<div id="admin-tab-knowledge" style="display:none">
   <div class="card">
-    <h3>📈 最近活动</h3>
-    <div id="ad_recentActivity" style="max-height:350px;overflow-y:auto"></div>
-  </div>
-</div>
-</div>
-
-<!-- ===== WORKFLOW DESIGNER PAGE ===== -->
-<div id="page-workflow-designer" class="page" style="display:none;">
-  <div class="wf-designer-container">
-    <div class="wf-toolbar">
-      <input type="text" id="wf-template-name" placeholder="流程名称..." style="font-size:16px;font-weight:bold;border:none;outline:none;flex:1;">
-      <button onclick="wfSaveTemplate()">💾 保存</button>
-      <button onclick="wfPublishTemplate()">🚀 发布</button>
-      <button onclick="wfUndo()">↩ 撤销</button>
-      <button onclick="wfRedo()">↪ 重做</button>
-      <button onclick="wfClearCanvas()">🗑 清空</button>
-      <span id="wf-template-id" style="display:none;"></span>
-    </div>
-    <div style="display:flex;flex:1;overflow:hidden;">
-      <div class="wf-toolbox">
-        <div class="wf-toolbox-title">节点工具箱</div>
-        <div class="wf-toolbox-group">
-          <div class="wf-node-palette" data-type="start" draggable="true">● 开始</div>
-          <div class="wf-node-palette" data-type="end" draggable="true">● 结束</div>
-          <div class="wf-node-palette" data-type="approval" draggable="true">✓ 审批</div>
-          <div class="wf-node-palette" data-type="task" draggable="true">☰ 任务</div>
-          <div class="wf-node-palette" data-type="condition" draggable="true">◇ 条件</div>
-          <div class="wf-node-palette" data-type="parallel" draggable="true">≡ 并行</div>
-          <div class="wf-node-palette" data-type="timer" draggable="true">⏱ 定时</div>
-          <div class="wf-node-palette" data-type="webhook" draggable="true">↻ Webhook</div>
-          <div class="wf-node-palette" data-type="auto_action" draggable="true">⚡ 自动</div>
-          <div class="wf-node-palette" data-type="sub_process" draggable="true">⊞ 子流程</div>
-        </div>
-      </div>
-      <div class="wf-canvas-wrapper" id="wf-canvas-wrapper">
-        <svg id="wf-svg-canvas" width="100%" height="100%">
-          <defs>
-            <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
-              <polygon points="0 0, 10 3.5, 0 7" fill="#666" />
-            </marker>
-          </defs>
-          <g id="wf-edges-layer"></g>
-          <g id="wf-nodes-layer"></g>
-          <line id="wf-connection-line" stroke="#2196F3" stroke-width="2" stroke-dasharray="5,5" style="display:none" marker-end="url(#arrowhead)"/>
-          <rect id="wf-selection-box" stroke="#2196F3" stroke-width="1" fill="rgba(33,150,243,0.1)" style="display:none"/>
-        </svg>
-        <div id="wf-canvas-empty" class="wf-canvas-empty">
-          从左侧拖拽节点到这里开始设计流程<br>
-          <small>从一个「开始」节点 → 添加审批/任务 → 连接到「结束」节点</small>
-        </div>
-      </div>
-      <div class="wf-property-panel" id="wf-property-panel">
-        <div class="wf-prop-header">属性配置</div>
-        <div id="wf-prop-content">
-          <p style="color:#999;padding:20px;text-align:center;">点击节点或连线<br>编辑属性</p>
-        </div>
-      </div>
-    </div>
+    <h3>📚 Knowledge Base</h3>
+    <p style="font-size:12px;opacity:.6;margin-bottom:12px">Auto-archived from customer creation, strategy generation, and demand analysis</p>
+    <input id="kbSearch" placeholder="Search knowledge base..." oninput="loadKnowledgeBase()" style="margin-bottom:12px;width:300px">
+    <div id="kbEntries" style="max-height:400px;overflow-y:auto"></div>
   </div>
 </div>
 
-<!-- ===== WORKFLOW TEMPLATES PAGE ===== -->
-<div id="page-workflow-templates" class="page" style="display:none;">
-  <div style="padding:20px;max-width:1200px;margin:0 auto;">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
-      <h2>📋 流程模板</h2>
-      <div>
-        <input type="text" id="wf-tpl-search" placeholder="搜索模板..." oninput="wfLoadTemplates()" style="padding:6px;margin-right:8px;">
-        <button onclick="switchPage('workflow-designer')" style="padding:8px 16px;background:#4CAF50;color:white;border:none;border-radius:4px;cursor:pointer;">+ 新建模板</button>
-      </div>
-    </div>
-    <table class="wf-table" id="wf-templates-table">
-      <thead><tr>
-        <th>名称</th><th>模块</th><th>分类</th><th>版本</th><th>状态</th><th>创建时间</th><th>操作</th>
-      </tr></thead>
-      <tbody id="wf-templates-body">
-        <tr><td colspan="7" style="text-align:center;color:#999;">加载中...</td></tr>
-      </tbody>
-    </table>
+<!-- Tokens Tab -->
+<div id="admin-tab-tokens" style="display:none">
+  <div class="card">
+    <h3>🔋 Token Usage by User</h3>
+    <div id="ad_tokenTable"></div>
   </div>
 </div>
-
-<!-- ===== WORKFLOW INSTANCES PAGE ===== -->
-<div id="page-workflow-instances" class="page" style="display:none;">
-  <div style="padding:20px;max-width:1200px;margin:0 auto;">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
-      <h2>⚡ 流程实例</h2>
-      <div>
-        <select id="wf-inst-filter-status" onchange="wfLoadInstances()">
-          <option value="">全部状态</option>
-          <option value="active">运行中</option>
-          <option value="completed">已完成</option>
-          <option value="paused">已暂停</option>
-          <option value="cancelled">已取消</option>
-        </select>
-      </div>
-    </div>
-    <table class="wf-table" id="wf-instances-table">
-      <thead><tr>
-        <th>ID</th><th>模板</th><th>业务类型</th><th>业务ID</th><th>状态</th><th>启动人</th><th>时间</th><th>操作</th>
-      </tr></thead>
-      <tbody id="wf-instances-body">
-        <tr><td colspan="8" style="text-align:center;color:#999;">加载中...</td></tr>
-      </tbody>
-    </table>
-  </div>
 </div>
-
-<!-- ===== WORKFLOW TASKS PAGE ===== -->
-<div id="page-workflow-tasks" class="page" style="display:none;">
-  <div style="padding:20px;max-width:1200px;margin:0 auto;">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
-      <h2>📌 我的待办</h2>
-      <div>
-        <select id="wf-task-filter" onchange="wfLoadTasks()">
-          <option value="pending">待处理</option>
-          <option value="">全部</option>
-          <option value="completed">已完成</option>
-          <option value="rejected">已拒绝</option>
-        </select>
-      </div>
-    </div>
-    <div id="wf-tasks-list"></div>
-  </div>
-</div>
-
-<!-- ===== WORKFLOW INSTANCE DETAIL MODAL ===== -->
-<div id="wf-instance-modal" class="wf-modal" style="display:none;">
-  <div class="wf-modal-content" style="width:80%;max-width:900px;">
-    <span class="wf-modal-close" onclick="document.getElementById('wf-instance-modal').style.display='none'">&times;</span>
-    <h3 id="wf-instance-modal-title">流程实例详情</h3>
-    <div id="wf-instance-modal-body"></div>
-  </div>
-</div>
-
-  </main>
+</main>
 </div>
 
 <!-- Influencer Upload Modal -->
@@ -769,19 +723,6 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
     </div>
     <div id="infModalStatus" style="font-size:12px"></div>
     <div style="display:flex;gap:8px;margin-top:12px">
-      <button class="btn btn-outline btn-sm" onclick="downloadInfTemplate()">📋 下载 CSV 模板</button>
-      <button class="btn btn-outline btn-sm" onclick="downloadInfTemplateJSON()">📋 下载 JSON 模板</button>
-    </div>
-  </div>
-</div>
-
-<div id="toastContainer"></div>
-<script>(function(){var p=document.querySelectorAll(".page");for(var i=0;i<p.length;i++){p[i].setAttribute("style","display:none")}var m1=document.getElementById("page-m1");if(m1)m1.setAttribute("style","display:block")})();</script>
-<script src="app.js?v=20260603143232"></script>
-<script src="ppt.js?v=20260603143232"></script>
-</body>
-</html>
-
-
-
-
+      <button class="btn btn-outline btn-sm" onclick="downloadInfTemplate()">📋 下载 CSV �
+<script src="app.js?v=20260608"></script>
+<script src="ppt.js?v=20260608"></script>

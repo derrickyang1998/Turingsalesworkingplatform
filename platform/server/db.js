@@ -277,6 +277,78 @@ db.exec(`
     details TEXT DEFAULT '{}',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
+
+  -- ===== V8.0 CRM Enhancements =====
+  CREATE TABLE IF NOT EXISTS leads (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    brand_name TEXT,
+    company_name TEXT,
+    contact_person TEXT,
+    contact_info TEXT,
+    source TEXT DEFAULT 'manual',
+    industry TEXT,
+    lead_score INTEGER DEFAULT 0,
+    status TEXT DEFAULT 'new',
+    assigned_to INTEGER,
+    notes TEXT,
+    converted_customer_id INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS opportunities (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    customer_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    stage TEXT DEFAULT 'discovery',
+    value REAL DEFAULT 0,
+    win_probability INTEGER DEFAULT 50,
+    product_name TEXT,
+    channel_type TEXT,
+    expected_close_date DATETIME,
+    competitor_info TEXT,
+    decision_chain TEXT,
+    notes TEXT,
+    created_by INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (customer_id) REFERENCES customers(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS sales_targets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    team_name TEXT,
+    target_type TEXT,
+    target_value REAL,
+    period TEXT,
+    period_start DATE,
+    period_end DATE,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS activity_log_ext (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    customer_id INTEGER,
+    user_id INTEGER,
+    action_type TEXT,
+    content TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS knowledge_entries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    entry_type TEXT DEFAULT 'note',
+    source_type TEXT,
+    source_id INTEGER,
+    key_terms TEXT,
+    content TEXT,
+    created_by INTEGER,
+    is_public INTEGER DEFAULT 1,
+    usage_count INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
 `);
 
 // Seed default admin and team users
@@ -343,4 +415,9 @@ if (existingInfluencers.count === 0) {
   console.log('✅ Database seeded with 15 portfolio influencers');
 }
 
-module.exports = db;
+// ===== V8.0 Migration: Add new columns to customers table =====
+try { db.prepare("ALTER TABLE customers ADD COLUMN lead_source TEXT").run(); } catch(e) {}
+try { db.prepare("ALTER TABLE customers ADD COLUMN lead_score INTEGER DEFAULT 0").run(); } catch(e) {}
+try { db.prepare("ALTER TABLE customers ADD COLUMN assigned_at DATETIME").run(); } catch(e) {}
+try { db.prepare("ALTER TABLE customers ADD COLUMN last_followup DATETIME").run(); } catch(e) {}
+try { d

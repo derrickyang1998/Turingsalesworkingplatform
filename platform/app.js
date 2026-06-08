@@ -2061,3 +2061,334 @@ function wfHandleTask(taskId, action) {
 
 
 
+// ===== M1: BRAND INTELLIGENCE HUB (v8.0) =====
+var brandSearchHistory = JSON.parse(localStorage.getItem('tm_brand_search_history') || '[]');
+function initM1() {
+  if (window.INDUSTRY_TREE) { renderIndustryTree(); }
+  else {
+    var tags = [], seen = {};
+    BRANDS.forEach(function(b) { (b.industry_tags || []).forEach(function(t) { if (!seen[t]) { seen[t] = true; tags.push(t); } }); });
+    tags.sort();
+    var c = document.getElementById('tagGroup');
+    if (c) c.innerHTML = tags.map(function(t) { return '<span class=tag data-tag="' + t + '" onclick=filterByTag("' + t + '")>' + t + '</span>'; }).join('');
+  }
+  renderBrands(BRANDS);
+  renderSearchHistory();
+}
+function renderIndustryTree() {
+  var tree = window.INDUSTRY_TREE || {};
+  var container = document.getElementById('tagGroup');
+  if (!container) return;
+  var h = '<div class="tree-container">';
+  Object.keys(tree).sort().forEach(function(cat) {
+    var cd = tree[cat];
+    var bc = BRANDS.filter(function(b) { return b.industry_tags && b.industry_tags.some(function(t) { return cd.sub_tags && cd.sub_tags.indexOf(t) >= 0; }); }).length;
+    h += '<div class="tree-node"><div class="tree-parent" onclick="toggleTreeNode(this)"><span class="tree-icon">&#9658;</span><span>' + esc(cat) + '</span><span style="font-size:10px;opacity:.4">(' + bc + ')</span></div>';
+    h += '<div class="tree-children">';
+    (cd.sub_tags || []).forEach(function(tag) {
+      var cnt = BRANDS.filter(function(b) { return (b.industry_tags || []).indexOf(tag) >= 0; }).length;
+      h += '<div class="tree-child" data-tag="' + esc(tag) + '" onclick="filterByTreeTag(this.getAttribute(\'data-tag\'),this)">' + esc(tag) + '<span class="count">' + cnt + '</span></div>';
+    });
+    h += '</div></div>';
+  });
+  h += '</div>';
+  container.innerHTML = h;
+}
+function toggleTreeNode(el) { el.classList.toggle('expanded'); var ch = el.nextElementSibling; if (ch) ch.classList.toggle('open'); }
+function filterBrands() {
+  var q = (document.getElementById('brandSearch')?.value || '').trim().toLowerCase();
+  var f = BRANDS;
+  if (activeTag) { f = f.filter(function(b) { return (b.industry_tags || []).indexOf(activeTag) >= 0; }); }
+  if (q) {
+    f = f.filter(function(b) { return b.name.toLowerCase().includes(q) || (b.name_cn || '').toLowerCase().includes(q); });
+    archiveBrandSearch(q);
+  }
+  renderBrands(f);
+  var bc = document.getElementById('brandCount');
+  if (bc) bc.textContent = f.length + ' / ' + BRANDS.length + ' brands';
+}
+function filterByTag(t) { activeTag = activeTag === t ? null : t; document.querySelectorAll('#tagGroup .tag').forEach(function(e) { e.classList.toggle('active', e.dataset.tag === activeTag); }); filterBrands(); }
+function filterByTreeTag(tag, el) { activeTag = activeTag === tag ? null : tag; document.querySelectorAll('.tree-child').forEach(function(c) { c.classList.remove('active'); }); if (activeTag && el) el.classList.add('active'); filterBrands(); }
+function archiveBrandSearch(q) { if (!q) return; brandSearchHistory = brandSearchHistory.filter(function(s) { return s !== q; }); brandSearchHistory.unshift(q); if (brandSearchHistory.length > 20) brandSearchHistory = brandSearchHistory.slice(0, 20); localStorage.setItem('tm_brand_search_history', JSON.stringify(brandSearchHistory)); renderSearchHistory(); }
+function renderSearchHistory() {
+  var c = document.getElementById('searchHistory');
+  if (!c) return;
+  if (!brandSearchHistory.length) { c.innerHTML = ''; return; }
+  c.innerHTML = '<div style="font-size:11px;margin-top:6px;color:#999">Recent: ' + brandSearchHistory.slice(0, 5).map(function(s) { return '<span style="cursor:pointer;margin:2px;padding:1px 6px;background:var(--surface2);border-radius:8px;font-size:10px" onclick="document.getElementById(\'brandSearch\').value=\'' + esc(s).replace(/'/g, '') + '\';filterBrands()">' + esc(s) + '</span>'; }).join('') + '</div>';
+}
+function renderBrands(brands) {
+  brands = brands || BRANDS;
+  var container = document.getElementById('brandList');
+  if (!container) return;
+  if (!brands.length) { container.innerHTML = '<div class="card" style="text-align:center;padding:40px;opacity:.5">No matching brands</div>'; return; }
+  var h = '';
+  brands.forEach(function(b, idx) {
+    var sf = (b.overseas_presence || {}).social_followers || {};
+    var bid = 'b_' + (b.id || idx);
+    h += '<div class="brand-card">';
+    h += '<div class="brand-card-main" onclick="toggleBrandSocial(this,\'' + bid + '\')">';
+    h += '<div class="brand-card-header"><div><div class="brand-card-name">' + esc(b.name) + '</div>';
+    h += '<div class="brand-card-tags">' + (b.industry_tags || []).slice(0, 4).map(function(t) { return '<span class="brand-tag">' + esc(t) + '</span>'; }).join('') + '</div></div>';
+    h += '<div class="brand-card-rev"><div class="rev-value">' + esc(b.estimated_annual_revenue || 'N/A') + '</div><div class="rev-users">' + esc(b.user_base || '') + '</div></div></div>';
+    h += '<div class="brand-card-metrics"><span>YT ' + (((sf.youtube||0)/1000).toFixed(0)) + 'K</span><span>IG ' + (((sf.instagram||0)/1000).toFixed(0)) + 'K</span><span>TT ' + (((sf.tiktok||0)/1000).toFixed(0)) + 'K</span>';
+    if (b.website) h += '<a href="' + esc(b.website) + '" target="_blank" class="brand-link">Web</a>';
+    h += '</div></div>';
+    h += '<div class="brand-social-panel" id="bsp-' + bid + '" style="display:none;padding:10px;border-top:1px solid var(--border)">';
+    h += '<div class="platform-tabs" style="display:flex;gap:4px;margin-bottom:8px">';
+    h += '<span class="platform-tab active" data-plat="youtube" data-bid="' + bid + '" onclick="switchPlatformTab(this)">YouTube</span>';
+    h += '<span class="platform-tab" data-plat="instagram" data-bid="' + bid + '" onclick="switchPlatformTab(this)">Instagram</span>';
+    h += '<span class="platform-tab" data-plat="tiktok" data-bid="' + bid + '" onclick="switchPlatformTab(this)">TikTok</span></div>';
+    h += '<div id="videos-' + bid + '-youtube" class="sg"><div style="text-align:center;padding:15px;color:#999;font-size:12px">Click refresh to load videos</div></div>';
+    h += '<div id="videos-' + bid + '-instagram" class="sg" style="display:none"></div>';
+    h += '<div id="videos-' + bid + '-tiktok" class="sg" style="display:none"></div>';
+    h += '<button class="btn btn-xs" onclick="loadSocialForBrand(\'' + esc(b.name) + '\',\'' + bid + '\',\'youtube\')">Refresh</button></div></div>';
+  });
+  container.innerHTML = h;
+  var bc = document.getElementById('brandCount');
+  if (bc) bc.textContent = brands.length + ' / ' + BRANDS.length + ' brands';
+}
+function toggleBrandSocial(el, bid) { var p = document.getElementById('bsp-' + bid); if (p) { p.style.display = p.style.display === 'none' ? 'block' : 'none'; } }
+function switchPlatformTab(el) {
+  var p = el.parentElement;
+  p.querySelectorAll('.platform-tab').forEach(function(t) { t.classList.remove('active'); });
+  el.classList.add('active');
+  var bid = el.getAttribute('data-bid');
+  var plat = el.getAttribute('data-plat');
+  ['youtube','instagram','tiktok'].forEach(function(pf) { var v = document.getElementById('videos-' + bid + '-' + pf); if (v) v.style.display = pf === plat ? 'block' : 'none'; });
+}
+function loadSocialForBrand(bn, bid, pf) {
+  var c = document.getElementById('videos-' + bid + '-' + pf);
+  if (!c) return;
+  c.innerHTML = '<div style="text-align:center;padding:15px;color:#999;font-size:12px">Loading...</div>';
+}
+function exportBrandCSV() {
+  if (!BRANDS || !BRANDS.length) { toast('No brands', 'error'); return; }
+  var csv = 'Name,Industry,Revenue,YouTube,Instagram,TikTok\\n';
+  BRANDS.forEach(function(b) { var sf = (b.overseas_presence||{}).social_followers||{}; csv += esc(b.name) + ',' + ((b.industry_tags||[]).join(';')) + ',' + (b.estimated_annual_revenue||'') + ',' + ((sf.youtube||0)/1000).toFixed(0) + 'K' + ',' + ((sf.instagram||0)/1000).toFixed(0) + 'K' + ',' + ((sf.tiktok||0)/1000).toFixed(0) + 'K\\n'; });
+  dlFile('brands.csv', '\\ufeff' + csv, 'text/csv');
+}
+// ===== M3: DEMAND & PROPOSAL (v8.0) =====
+var uploadedDemandContent = '';
+var demandAnalysisResult = '';
+function handleDemandFile(event) {
+  var file = event.target.files[0];
+  if (!file) return;
+  processDemandFile(file);
+}
+function handleDemandDrop(event) {
+  event.preventDefault();
+  var file = event.dataTransfer.files[0];
+  if (!file) return;
+  processDemandFile(file);
+}
+function processDemandFile(file) {
+  var status = document.getElementById('demandFileStatus');
+  if (!status) return;
+  status.innerHTML = 'Reading: ' + file.name + '...';
+  document.getElementById('btnAnalyzeAI').disabled = true;
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    uploadedDemandContent = e.target.result;
+    status.innerHTML = 'OK: ' + file.name + ' (' + (uploadedDemandContent.length / 1024).toFixed(1) + 'KB)';
+    document.getElementById('btnAnalyzeAI').disabled = false;
+    document.getElementById('aiAnalyzeHint').textContent = 'Ready to analyze';
+  };
+  reader.readAsText(file);
+}
+function analyzeDemandAI() {
+  var status = document.getElementById('demandFileStatus');
+  var out = document.getElementById('analysisOut');
+  var hint = document.getElementById('aiAnalyzeHint');
+  if (!uploadedDemandContent && !document.getElementById('d_brand')?.value) {
+    toast('Upload a file or fill info', 'error');
+    return;
+  }
+  hint.textContent = 'Analyzing...';
+  var prompt = 'Analyze this demand and extract as JSON with: brand, company, product, usp, industry, budget_range, target_market, platforms, competitors(array), requirements(array) Content: ' + (uploadedDemandContent || ('Brand: ' + (document.getElementById('d_brand')?.value||'') + ' Product: ' + (document.getElementById('d_product')?.value||'')));
+  fetch(DS_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + DS_KEY }, body: JSON.stringify({ model: 'deepseek-chat', messages: [{ role: 'system', content: 'Output JSON only.' }, { role: 'user', content: prompt }], temperature: 0.1, max_tokens: 2000 }) })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      var content = d.choices?.[0]?.message?.content || '';
+      if (content.includes('{')) { var js = content.indexOf('{'); var je = content.lastIndexOf('}') + 1; content = content.substring(js, je); }
+      var parsed = JSON.parse(content);
+      demandAnalysisResult = parsed;
+      var h = '<h3>AI Analysis</h3><div class="detail-section">';
+      h += '<div class="detail-field"><span class="detail-field-label">Brand</span><span class="detail-field-value"><input id="edit_brand" value="' + esc(parsed.brand||'') + '"></span></div>';
+      h += '<div class="detail-field"><span class="detail-field-label">Product</span><span class="detail-field-value"><input id="edit_product" value="' + esc(parsed.product||'') + '"></span></div>';
+      h += '<div class="detail-field"><span class="detail-field-label">Industry</span><span class="detail-field-value"><input id="edit_industry" value="' + esc(parsed.industry||'') + '"></span></div>';
+      h += '<div class="detail-field"><span class="detail-field-label">Budget</span><span class="detail-field-value"><input id="edit_budget" value="' + esc(parsed.budget_range||'') + '"></span></div>';
+      h += '<div class="detail-field"><span class="detail-field-label">Market</span><span class="detail-field-value"><input id="edit_market" value="' + esc(parsed.target_market||'') + '"></span></div>';
+      h += '<div class="detail-field"><span class="detail-field-label">Platforms</span><span class="detail-field-value"><input id="edit_platforms" value="' + esc((parsed.platforms||[]).join(', ')) + '"></span></div>';
+      h += '</div><p style="font-size:11px;color:#999">Edit fields above if needed. Then click Next to generate proposal.</p>';
+      out.innerHTML = h;
+      hint.textContent = 'OK';
+      document.getElementById('m3s1').classList.add('hidden');
+      document.getElementById('m3s2').classList.remove('hidden');
+      updSteps(2);
+    }).catch(function(e) { hint.textContent = 'Failed'; out.innerHTML = '<p style="color:red">' + e.message + '</p>'; });
+}
+function getEditedDemand() {
+  return {
+    brand: document.getElementById('edit_brand')?.value || document.getElementById('d_brand')?.value || '',
+    product: document.getElementById('edit_product')?.value || document.getElementById('d_product')?.value || '',
+    industry: document.getElementById('edit_industry')?.value || document.getElementById('d_category')?.value || '',
+    budget: document.getElementById('edit_budget')?.value || document.getElementById('d_budget')?.value || '',
+    market: document.getElementById('edit_market')?.value || document.getElementById('d_area')?.value || '',
+    platforms: document.getElementById('edit_platforms')?.value || ''
+  };
+}
+function goStep3() { document.getElementById('m3s2').classList.add('hidden'); document.getElementById('m3s3').classList.remove('hidden'); updSteps(3); }
+function resetDemand() { uploadedDemandContent = ''; demandAnalysisResult = ''; document.getElementById('m3s2').classList.add('hidden'); document.getElementById('m3s3').classList.add('hidden'); document.getElementById('m3s1').classList.remove('hidden'); document.getElementById('demandFileStatus').innerHTML = ''; document.getElementById('btnAnalyzeAI').disabled = true; document.getElementById('aiAnalyzeHint').textContent = 'Upload first'; updSteps(1); }
+function generateHTMLPPT() {
+  var demand = getEditedDemand();
+  var brand = demand.brand || 'Brand';
+  var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>' + esc(brand) + ' Proposal</title>';
+  html += '<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.3.1/reveal.min.css">';
+  html += '<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.3.1/theme/night.min.css">';
+  html += '<style>.reveal section{padding:40px}.reveal h2{color:#e94560}</style></head><body><div class="reveal"><div class="slides">';
+  html += '<section class="cover-slide"><h1>' + esc(brand) + '</h1><h3>Influencer Marketing Proposal</h3></section>';
+  var sections = lastProp ? lastProp.split('\n').filter(Boolean) : ['Strategy', 'Execution'];
+  sections.forEach(function(s) { html += '<section><h2>' + esc(s) + '</h2></section>'; });
+  html += '</div></div><script src="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.3.1/reveal.min.js"><\/script><script>Reveal.initialize({hash:true})<\/script></body></html>';
+  dlFile(brand + '_proposal.html', html, 'text/html');
+  toast('HTML proposal downloaded');
+}
+// ===== M4: INFLUENCER (v8.0) =====
+function initM4() { loadInfluencersFromAPI().then(function() { renderInfTable(lastInfAPI); loadCollaborations(); }); }
+function loadInfluencersFromAPI() {
+  var qs = '?sort_by=followers';
+  var p = document.getElementById('filt_platform')?.value;
+  var r = document.getElementById('filt_region')?.value;
+  if (p) qs += '&platform=' + encodeURIComponent(p);
+  if (r) qs += '&region=' + encodeURIComponent(r);
+  return apiFetch('/influencers' + qs).then(function(r) { return r.json(); }).then(function(d) { lastInfAPI = d.influencers || []; renderInfTable(lastInfAPI); }).catch(function() { lastInfAPI = []; });
+}
+function matchInfluencers() { loadInfluencersFromAPI(); }
+function renderInfTable(data) {
+  var c = document.getElementById('infTableContainer');
+  if (!c) return;
+  if (!data || !data.length) { c.innerHTML = '<p style="text-align:center;padding:30px;opacity:.5">No influencers</p>'; return; }
+  var h = '<table><thead><tr><th><input type="checkbox" id="selectAllInf" onchange="document.querySelectorAll(\'.infcb\').forEach(function(cb){cb.checked=this.checked})"></th><th>KOL</th><th>Platform</th><th>Followers</th><th>Project</th><th>Product</th><th>Region</th><th>Tags</th><th>Cost</th><th>CPM</th></tr></thead><tbody>';
+  data.forEach(function(inf) {
+    h += '<tr><td><input type="checkbox" class="infcb" value="' + inf.id + '"></td>';
+    h += '<td><strong>' + esc(inf.kol_handle||'') + '</strong></td>';
+    h += '<td>' + esc(inf.platform||'-') + '</td>';
+    h += '<td>' + ((inf.followers||0)>=1000?((inf.followers/1000).toFixed(0)+'K'):(inf.followers||0)) + '</td>';
+    h += '<td>' + esc(inf.project_name||'-') + '</td>';
+    h += '<td>' + esc(inf.product_name||'-') + '</td>';
+    h += '<td>' + esc(inf.region||'-') + '</td>';
+    h += '<td>' + esc(inf.tags||'-') + '</td>';
+    h += '<td>$' + (inf.cost_usd||0) + '</td>';
+    h += '<td>' + (inf.cpm||'-') + '</td></tr>';
+  });
+  h += '</tbody></table>';
+  c.innerHTML = h;
+}
+function getSelectedInfIds() { var ids = []; document.querySelectorAll('.infcb:checked').forEach(function(cb) { if (cb.value) ids.push(parseInt(cb.value)); }); return ids; }
+function exportAll() { return exportInf('all'); }
+function exportFiltered() { return exportInf('filtered'); }
+function exportSelected() { var ids = getSelectedInfIds(); if (!ids.length) { toast('Select influencers first', 'error'); return; } return exportInf('selected', ids); }
+function exportInf(mode, ids) {
+  var body = { mode: mode };
+  if (mode === 'selected' && ids) body.ids = ids;
+  if (mode === 'filtered') body.filters = { platform: document.getElementById('filt_platform')?.value||'', region: document.getElementById('filt_region')?.value||'',
+    project_name: document.getElementById('filt_project')?.value||'', product_name: document.getElementById('filt_product')?.value||'', tags: document.getElementById('filt_tags')?.value||'' };
+  return apiFetch('/influencers/export', { method: 'POST', body: JSON.stringify(body) }).then(function(r) { if (!r.ok) throw new Error(); return r.blob(); }).then(function(blob) {
+    var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'influencers_export.csv'; a.click(); toast('Export done');
+  }).catch(function(e) { toast('Export failed', 'error'); });
+}
+function importInfluencers(rows) {
+  if (!rows || !rows.length) return;
+  apiFetch('/influencers/import', { method: 'POST', body: JSON.stringify({ rows: rows }) }).then(function(r) { return r.json(); }).then(function(d) {
+    if (d.imported) { toast('Imported ' + d.imported); loadInfluencersFromAPI(); }
+  }).catch(function(e) { toast('Import: ' + e.message, 'error'); });
+}
+function downloadInfTemplate() {
+  var csv = '日期,提报人,项目,推广产品,是否重复,网红频道名称,网红粉丝量,网红频道链接,社媒平台,国家,标签,近10个视频均播,成本价,网红交付物,Turing备注,对外商务报价,邮箱,cpm,cpv';
+  dlFile('influencer_template.csv', csv + '\n', 'text/csv');
+}
+// ===== M5: AI ASSISTANT (v8.0) =====
+aiMemory = aiMemory || {};
+try { aiMemory = JSON.parse(localStorage.getItem('tm_ai_memory') || '{}'); } catch(e) { aiMemory = {}; }
+function saveAIMemory() { localStorage.setItem('tm_ai_memory', JSON.stringify(aiMemory)); }
+function sendChat() {
+  var inp = document.getElementById('chatInput');
+  var msg = inp ? inp.value.trim() : '';
+  if (!msg) return;
+  addChatMsg('user', msg);
+  inp.value = '';
+  var memKeys = Object.keys(aiMemory).slice(-10);
+  var memContext = memKeys.length ? '\n\nPast:\n' + memKeys.map(function(k) { return '- ' + String(aiMemory[k]).substring(0, 200); }).join('\n') : '';
+  var memId = 'm' + Date.now();
+  aiMemory[memId] = msg;
+  saveAIMemory();
+  var msgs = document.getElementById('chatMessages');
+  var td = document.createElement('div');
+  td.className = 'chat-msg assistant';
+  td.innerHTML = '<div class="bubble">Thinking...</div>';
+  msgs.appendChild(td);
+  msgs.scrollTop = msgs.scrollHeight;
+  var systemPrompt = 'You are TuringMarket AI, an expert in influencer marketing. Be concise in Chinese. Database: ' + BRANDS.length + ' brands.' + memContext;
+  var messages = [{role:'system', content: systemPrompt}];
+  for (var ci = 0; ci < chatHistory.length && ci < 8; ci++) { messages.push(chatHistory[ci]); }
+  messages.push({role:'user', content: msg});
+  fetch(DS_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + DS_KEY }, body: JSON.stringify({ model: 'deepseek-chat', messages: messages, temperature: 0.7, max_tokens: 2048 }) })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      td.remove();
+      var reply = d.choices ? d.choices[0].message.content : 'No response.';
+      chatHistory.push({role:'assistant', content: reply});
+      aiMemory[memId + '_r'] = reply.substring(0, 500);
+      saveAIMemory();
+      addChatMsg('assistant', reply);
+    }).catch(function(e) { td.innerHTML = '<div class="bubble" style="color:#f44336">Error: ' + e.message + '</div>'; });
+}
+function addChatMsg(role, text) {
+  var msgs = document.getElementById('chatMessages');
+  if (!msgs) return;
+  var div = document.createElement('div');
+  div.className = 'chat-msg ' + role;
+  var formatted = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>').replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  div.innerHTML = '<div class="bubble">' + formatted + '</div>';
+  msgs.appendChild(div);
+  msgs.scrollTop = msgs.scrollHeight;
+}
+function clearChat() { document.getElementById('chatMessages').innerHTML = '<div class="chat-msg assistant"><div class="bubble">Chat cleared</div></div>'; chatHistory = [{role:'system', content:'You are TuringMarket AI assistant.'}]; }
+function clearAIMemory() { if (!confirm('Clear memory?')) return; aiMemory = {}; saveAIMemory(); toast('Memory cleared'); }
+// ===== ADMIN (v8.0) =====
+function switchAdminTab(tab) {
+  ['overview','users','knowledge','tokens'].forEach(function(t) { var el = document.getElementById('admin-tab-' + t); if (el) el.style.display = t === tab ? 'block' : 'none'; });
+  if (tab === 'overview') loadAdminDashboard();
+  if (tab === 'users') loadAdminUsers();
+  if (tab === 'tokens') loadAdminTokens();
+}
+function loadAdminDashboard() {
+  apiFetch('/admin/overview').then(function(r) { return r.json(); }).then(function(d) {
+    var s = d.stats || d;
+    ['ad_totalUsers','ad_totalDemands','ad_totalTokens'].forEach(function(id) { var el = document.getElementById(id); if (el) el.textContent = id === 'ad_totalTokens' ? ((s.totalTokens||0)/1000).toFixed(0)+'K' : (s.totalUsers||s.totalDemands||0); });
+  }).catch(function(e) {});
+}
+function loadAdminUsers() {
+  apiFetch('/admin/users').then(function(r) { return r.json(); }).then(function(d) { renderAdminUserTable(d.users||[]); }).catch(function(e) {});
+}
+function renderAdminUserTable(users) {
+  var tbody = document.getElementById('ad_userTableBody');
+  if (!tbody) return;
+  tbody.innerHTML = users.map(function(u) {
+    return '<tr><td><strong>' + esc(u.username) + '</strong></td><td>' + esc(u.display_name) + '</td><td>' + esc(u.department||'-') + '</td><td>' + u.role + '</td><td>' + (u.api_quota||0).toLocaleString() + '</td><td>' + (u.last_login||'').substring(0,10) + '</td><td>' + (u.is_active ? '<span style="color:#0f7b3c">Active</span>' : '<span style="color:#d94641">Inactive</span>') + '</td><td><button class="btn btn-xs" onclick="adminResetPw('+u.id+')">Reset</button> <button class="btn btn-xs" onclick="toggleUserActive('+u.id+','+(u.is_active?0:1)+')">'+(u.is_active?'Disable':'Enable')+'</button></td></tr>';
+  }).join('');
+}
+function loadAdminTokens() {
+  apiFetch('/token-usage').then(function(r) { return r.json(); }).then(function(d) {
+    var c = document.getElementById('ad_tokenTable');
+    if (!c) return;
+    var usage = d.usage || [];
+    if (!usage.length) { c.innerHTML = '<p style="opacity:.5">No data</p>'; return; }
+    c.innerHTML = '<table><thead><tr><th>User</th><th>Dept</th><th>Requests</th><th>Tokens</th><th>Last</th></tr></thead><tbody>' + usage.map(function(u) {
+      return '<tr><td>' + esc(u.display_name||u.username||'') + '</td><td>' + esc(u.department||'-') + '</td><td>' + (u.request_count||0) + '</td><td>' + (u.total_tokens||0).toLocaleString() + '</td><td>' + (u.last_used||'').substring(0,10) + '</td></tr>';
+    }).join('') + '</tbody></table>';
+  }).catch(function(e) {});
+}
+function toggleUserActive(id, active) { apiFetch('/admin/users/'+id, {method:'PUT', body:JSON.stringify({is_active:active})}).then(function() { loadAdminUsers(); toast(active?'Activated':'Deactivated'); }).catch(function(e) { toast('Failed','error'); }); }
+function adminResetPw(id) { apiFetch('/admin/users/reset-password/'+id, {method:'POST'}).then(function() { toast('Reset to turing2026'); }).catch(function(e) { toast('Failed','error'); }); }
+function adminCreateInvite() { apiFetch('/admin/invites', {method:'POST'}).then(function(r){return r.json();}).then(function(d) { var el = document.getElementById('ad_inviteResult'); if (el) el.textContent = 'Code: ' + d.code; toast('Invite: '+d.code); }).catch(function(e) { toast('Failed','error'); }); }

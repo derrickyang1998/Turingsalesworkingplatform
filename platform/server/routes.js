@@ -89,4 +89,78 @@ app.get('/api/collaborations/stats', authMiddleware, (req, res) => {
   res.json({ stats });
 });
 
+// ===== V8.1: INFLUENCER IMPORT/EXPORT =====
+app.post('/api/influencers/import', authMiddleware, (req, res) => {
+  try {
+    const { rows, batch_id } = req.body;
+    if (!rows || !rows.length) return res.status(400).json({ error: 'No rows provided' });
+    const insert = db.prepare(\`INSERT INTO influencers (platform, kol_handle, profile_link, followers, avg_views_10, avg_engagement, category, sub_category, region, language, content_style, collab_type, cost_usd, cpm, brand_collab_history, contact_email, project_name, product_name, reporter, tags, quoted_price, content_deliverable, is_duplicate, import_batch, data_source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\`);
+    let imported = 0, skipped = 0;
+    const batch = batch_id || 'import_' + Date.now();
+    const doImport = db.transaction(function() {
+      for (const row of rows) {
+        const platform = row['\u793e\u5a92\u5e73\u53f0'] || row['platform'] || '';
+        const kol_handle = row['\u7f51\u7ea2\u9891\u9053\u540d\u79f0'] || row['kol_handle'] || '';
+        if (!kol_handle) { skipped++; continue; }
+        const link = row['\u7f51\u7ea2\u9891\u9053\u94fe\u63a5'] || row['profile_link'] || '';
+        insert.run(
+          platform, kol_handle, link,
+          parseInt(row['\u7f51\u7ea2\u7c89\u4e1d\u91cf'] || row['followers'] || 0),
+          parseFloat(row['\u8fd110\u4e2a\u89c6\u9891\u5747\u64ad'] || row['avg_views_10'] || 0) || 0,
+          parseFloat(row['cpm'] || row['avg_engagement'] || 0) || 0,
+          row['\u6807\u7b7e'] || row['category'] || '', '',
+          row['\u56fd\u5bb6'] || row['region'] || '', '',
+          '', 'Dedicated',
+          parseFloat(row['\u6210\u672c\u4ef7'] || row['cost_usd'] || 0) || 0,
+          parseFloat(row['cpm'] || 0) || 0,
+          '', row['\u90ae\u7bb1'] || row['contact_email'] || '',
+          row['\u9879\u76ee'] || row['project_name'] || '',
+          row['\u63a8\u5e7f\u4ea7\u54c1'] || row['product_name'] || '',
+          row['\u63d0\u62a5\u4eba'] || row['reporter'] || '',
+          row['\u6807\u7b7e'] || row['tags'] || '',
+          parseFloat(row['\u5bf9\u5916\u5546\u52a1\u62a5\u4ef7'] || row['quoted_price'] || 0) || 0,
+          row['\u7f51\u7ea2\u4ea4\u4ed8\u7269'] || row['content_deliverable'] || '',
+          0, batch, 'import'
+        );
+        imported++;
+      }
+    });
+    doImport();
+    res.json({ imported, skipped, batch, total: rows.length });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/influencers/export', authMiddleware, (req, res) => {
+  try {
+    const { mode, ids, filters } = req.body;
+    let sql = 'SELECT * FROM influencers WHERE 1=1';
+    const params = [];
+    if (mode === 'selected' && ids && ids.length) {
+      sql += ' AND id IN (' + ids.map(function() { return '?' }).join(',') + ')';
+      params.push.apply(params, ids);
+    } else if (mode === 'filtered' && filters) {
+      if (filters.platform) { sql += ' AND platform = ?'; params.push(filters.platform); }
+      if (filters.region) { sql += ' AND region = ?'; params.push(filters.region); }
+      if (filters.project_name) { sql += ' AND project_name = ?'; params.push(filters.project_name); }
+      if (filters.product_name) { sql += ' AND product_name = ?'; params.push(filters.product_name); }
+      if (filters.tags) { sql += ' AND tags LIKE ?'; params.push('%' + filters.tags + '%'); }
+      if (filters.search) { sql += ' AND (kol_handle LIKE ? OR project_name LIKE ? OR product_name LIKE ?)'; params.push('%' + filters.search + '%', '%' + filters.search + '%', '%' + filters.search + '%'); }
+    }
+    sql += ' ORDER BY followers DESC';
+    const influencers = db.prepare(sql).all(...params);
+    const headers = ['\u65e5\u671f', '\u63d0\u62a5\u4eba', '\u9879\u76ee', '\u63a8\u5e7f\u4ea7\u54c1', '\u662f\u5426\u91cd\u590d', '\u7f51\u7ea2\u9891\u9053\u540d\u79f0', '\u7f51\u7ea2\u7c89\u4e1d\u91cf', '\u7f51\u7ea2\u9891\u9053\u94fe\u63a5', '\u793e\u5a92\u5e73\u53f0', '\u56fd\u5bb6', '\u6807\u7b7e', '\u8fd110\u4e2a\u89c6\u9891\u5747\u64ad', '\u6210\u672c\u4ef7', '\u7f51\u7ea2\u4ea4\u4ed8\u7269', 'Turing\u5907\u6ce8', '\u5bf9\u5916\u5546\u52a1\u62a5\u4ef7', '\u90ae\u7bb1', 'cpm', 'cpv'];
+    const csvRows = influencers.map(function(inf) {
+      return [ (inf.created_at||'').substring(0,10), inf.reporter||'', inf.project_name||'', inf.product_name||'', inf.is_duplicate ? '\u662f' : '\u5426', inf.kol_handle||'', inf.followers||0, inf.profile_link||'', inf.platform||'', inf.region||'', inf.tags||'', inf.avg_views_10||0, inf.cost_usd||0, inf.content_deliverable||'', '', inf.quoted_price||0, inf.contact_email||'', inf.cpm||0, '' ].join(',');
+    });
+    const csv = '\ufeff' + headers.join(',') + '\n' + csvRows.join('\n');
+    res.setHeader('Content-Type', 'text/csv;charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename=influencers_export.csv');
+    res.send(csv);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 };
