@@ -323,7 +323,7 @@ async function generateAIStrategy() {
     industries: Object.keys((window.INDUSTRY_TREE || {})).join(', ')
   };
   
-  var prompt = 'You are a senior overseas influencer marketing strategist at TuringMarket. Analyze the customer profile below and provide a comprehensive strategy in Chinese:\n\nCustomer: ' + input + '\n\nReference data (from our brand database): ' + JSON.stringify(context) + '\n\nProvide: 1) Market opportunity analysis 2) Recommended influencer types and platforms 3) Estimated budget allocation (60-30-10 model) 4) Competitor benchmarking suggestions 5) 3-month execution roadmap 6) Risk factors and mitigation. Format with clear headings and bullet points. Be specific and actionable.';
+  var searchHint = '[Web Search Recommended] For latest market data and competitor analysis, search: ' + input.substring(0,60) + '; var prompt = 'You are a senior overseas influencer marketing strategist at TuringMarket. Analyze the customer profile below and provide a comprehensive strategy in Chinese:\n\nCustomer: ' + input + '\n\nReference data (from our brand database): ' + JSON.stringify(context) + '\n\nProvide: 1) Market opportunity analysis 2) Recommended influencer types and platforms 3) Estimated budget allocation (60-30-10 model) 4) Competitor benchmarking suggestions 5) 3-month execution roadmap 6) Risk factors and mitigation. Format with clear headings and bullet points. Be specific and actionable.';
   
   try {
     var resp = await fetch(DS_URL, {
@@ -1264,7 +1264,7 @@ function exportSubmissionCSV() {
   chk = chk.filter(function(i) { return !isNaN(i); });
   var data = chk.length ? chk.map(function(i) { return lastMatch[i]; }).filter(Boolean) : lastMatch;
   if (!data.length) { toast('No data', 'error'); return; }
-  var csv = 'No.,Date,KOL Handle,Followers,Link,Platform,Region,Category,Avg Views,Collab Type,Cost(USD),CPM\n';
+  var csv = 'No.,Date,Submitter,Project,Product,Duplicate,KOL Handle,Followers,Link,Platform,Country,Tag,AvgViews10,Cost,Deliverable,TuringNote,Price,Email,CPM,CPV\n';
   data.forEach(function(inf, i) { csv += (i + 1) + ',' + getDate() + ',\"' + (inf.kol_handle || inf.name || '') + '\",' + (inf.followers || 0) + ',\"' + (inf.profile_link || '') + '\",' + inf.platform + ',' + inf.region + ',' + inf.category + ',' + (inf.avg_views_10 || 0) + ',' + inf.collab_type + ',' + (inf.cost_usd || 0) + ',' + (inf.cpm || '') + '\n'; });
   dlFile('influencer_' + getDate() + '.csv', '\uFEFF' + csv, 'text/csv'); toast('Exported ' + data.length);
 }
@@ -1337,6 +1337,8 @@ async function loadAdminDashboard() {
   } catch(e) { console.error("Admin load error:", e); }
 }
 async function adminResetPw(userId) { try { await apiFetch("/admin/users/reset-password/" + userId, { method: "POST" }); toast("Password reset to: turing2026"); } catch(e) { toast("Failed: " + e.message, "error"); } }
+async function adminAddUser(){var u=prompt("Username:");if(!u)return;var d=prompt("Display name:");if(!d)return;var p=prompt("Department:")||"General";try{await apiFetch("/admin/users",{method:"POST",body:JSON.stringify({username:u,display_name:d,department:p,password:"turing2026"})});loadAdminUsers();toast("User "+u+" created");}catch(e){toast("Failed","error")}}
+
 async function adminCreateInvite() { try { var r = await apiFetch("/admin/invites", { method: "POST" }); var d = await r.json(); document.getElementById("ad_inviteResult").textContent = "邀请码: " + d.code + " (7天有效)"; toast("Invite code: " + d.code); } catch(e) { toast("Failed: " + e.message, "error"); } }
 
 
