@@ -306,6 +306,58 @@ async function changeCustomerStage(id, newStage) {
   document.getElementById('authOverlay').style.display = 'flex';
 })();
 
+
+// ===== PHASE 4: AI STRATEGY PLANNING (DeepSeek V4 Flash) =====
+async function generateAIStrategy() {
+  var input = document.getElementById('aiStrategyInput').value.trim();
+  if (!input) { toast('Please enter customer description', 'error'); return; }
+  var out = document.getElementById('aiStrategyOutput');
+  var status = document.getElementById('aiStatus');
+  status.textContent = 'Analyzing...';
+  out.style.display = '';
+  out.innerHTML = '<span style="opacity:.5">🧠 AI analyzing your customer profile...</span>';
+  
+  var context = {
+    brandCount: BRANDS.length,
+    sampleBrands: BRANDS.slice(0,15).map(function(b) { return { name: b.name, industry: (b.industry_tags||[]).join(', '), revenue: b.estimated_annual_revenue }; }),
+    industries: Object.keys((window.INDUSTRY_TREE || {})).join(', ')
+  };
+  
+  var prompt = 'You are a senior overseas influencer marketing strategist at TuringMarket. Analyze the customer profile below and provide a comprehensive strategy in Chinese:\n\nCustomer: ' + input + '\n\nReference data (from our brand database): ' + JSON.stringify(context) + '\n\nProvide: 1) Market opportunity analysis 2) Recommended influencer types and platforms 3) Estimated budget allocation (60-30-10 model) 4) Competitor benchmarking suggestions 5) 3-month execution roadmap 6) Risk factors and mitigation. Format with clear headings and bullet points. Be specific and actionable.';
+  
+  try {
+    var resp = await fetch(DS_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + DS_KEY },
+      body: JSON.stringify({ model: 'deepseek-chat', messages: [{ role: 'user', content: prompt }], temperature: 0.7, max_tokens: 2500 })
+    });
+    if (!resp.ok) throw new Error('API:' + resp.status);
+    var data = await resp.json();
+    var result = data.choices[0].message.content;
+    // Parse markdown formatting
+    result = result.replace(/### (.*)/g, '<h3 style="margin-top:16px;font-size:16px">$1</h3>');
+    result = result.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    result = result.replace(/\- (.*)/g, '<li>$1</li>');
+    result = result.replace(/\n/g, '<br>');
+    out.innerHTML = result;
+    status.textContent = 'Analysis complete';
+    // Track token usage
+    if (data.usage) trackTokenUsage('deepseek-chat', 'strategy', data.usage.prompt_tokens, data.usage.completion_tokens, data.usage.total_tokens);
+  } catch(e) {
+    out.innerHTML = '<span style="color:#d94641">Analysis failed: ' + e.message + '</span>';
+    status.textContent = 'Failed';
+  }
+}
+function trackTokenUsage(model, endpoint, promptTokens, completionTokens, totalTokens) {
+  try {
+    fetch(API + '/token-usage', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + AUTH_TOKEN, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: model, endpoint: endpoint, prompt_tokens: promptTokens, completion_tokens: completionTokens, total_tokens: totalTokens })
+    });
+  } catch(e) {}
+}
+// ===== END PHASE 4 =====
 // ===== UTILS =====
 
 function esc(s){return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;")}
@@ -1129,6 +1181,7 @@ async function adminCreateInvite() { try { var r = await apiFetch("/admin/invite
     footer.innerHTML = '<a href="#" onclick="doLogout()" style="color:var(--text2);font-size:10px">🚪 退出登录</a> · <span id="sidebarUser" style="font-size:10px;opacity:.5"></span>';
   }
 })();
+
 
 
 

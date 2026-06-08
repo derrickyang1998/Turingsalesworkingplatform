@@ -349,6 +349,21 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
 <h2>🎯 客户策略规划</h2>
 <p class="subtitle">根据客户阶段制定差异化红人营销策略</p>
 
+
+<div class="card" style="margin-bottom:16px;background:linear-gradient(135deg,#667eea10,#764ba210)">
+<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+  <span style="font-size:20px">🤖</span>
+  <strong>AI 智能策略分析 (DeepSeek V4 Flash)</strong>
+  <span style="font-size:10px;opacity:.5;margin-left:8px">基于品牌数据库 · 行业知识 · 红人营销最佳实践</span>
+</div>
+<textarea id="aiStrategyInput" rows="4" placeholder="输入客户描述...&#10;例如：某储能品牌，年营收$5M，主打北美市场，希望拓展欧洲，预算$15K/mo，需要了解欧洲红人营销策略和竞品打法..." style="width:100%;border:1px solid var(--border);border-radius:8px;padding:12px;resize:vertical;font-size:13px;margin-bottom:10px"></textarea>
+<div style="display:flex;gap:8px;align-items:center">
+  <button class="btn btn-primary" onclick="generateAIStrategy()" style="display:flex;align-items:center;gap:6px"><span style="font-size:16px">🧠</span> AI 分析并生成策略</button>
+  <button class="btn btn-sm" onclick="document.getElementById('aiStrategyInput').value=''">清空</button>
+  <span id="aiStatus" style="font-size:11px;opacity:.5"></span>
+</div>
+<div id="aiStrategyOutput" style="margin-top:12px;padding:16px;background:var(--surface2);border-radius:8px;font-size:13px;white-space:pre-wrap;display:none"></div>
+</div>
 <div class="card">
 <div class="grid grid-3" style="margin-bottom:12px">
 <div><label>品牌阶段</label><select id="s_stage" onchange="updateStrategy()"><option value="">请选择...</option><option value="new">新品牌出海</option><option value="growing">增长期</option><option value="established">成熟品牌</option><option value="launch">新品发布</option></select></div>
@@ -579,6 +594,7 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
 <script src="ppt.js?v=20260603143232"></script>
 </body>
 </html>
+
 
 
 
