@@ -102,12 +102,18 @@ module.exports = function(app, db, authMiddleware) {
 
   app.get('/api/customers/stats', authMiddleware, (req, res) => {
     const userFilter = req.user.role !== 'admin' ? ' WHERE assigned_to = ' + req.user.id : '';
-    const byStage = db.prepare('SELECT stage, COUNT(*) as count FROM customers' + userFilter + ' GROUP BY stage').all();
+    const byStageArr = db.prepare('SELECT stage, COUNT(*) as count FROM customers' + userFilter + ' GROUP BY stage').all();
     const total = db.prepare('SELECT COUNT(*) as count FROM customers' + userFilter).get().count;
     const active = db.prepare("SELECT COUNT(*) as count FROM customers WHERE stage IN ('" + ACTIVE_STAGES + "')" + (req.user.role !== 'admin' ? ' AND assigned_to = ' + req.user.id : '')).get().count;
     const paused = db.prepare("SELECT COUNT(*) as count FROM customers WHERE stage = 'paused'" + (req.user.role !== 'admin' ? ' AND assigned_to = ' + req.user.id : '')).get().count;
     const byIndustry = db.prepare('SELECT industry, COUNT(*) as count FROM customers' + userFilter + ' GROUP BY industry ORDER BY count DESC LIMIT 10').all();
-    res.json({ byStage, total, active, paused, byIndustry, stages: STAGE_LABELS });
+    // Convert byStage array to object for frontend compatibility
+    var byStage = {}; byStageArr.forEach(function(s) { byStage[s.stage] = s.count; });
+    var won = byStage['won'] || 0;
+    var publicPool = db.prepare("SELECT COUNT(*) as count FROM customers WHERE is_public = 1" + (req.user.role !== 'admin' ? ' AND (assigned_to IS NULL OR assigned_to = ' + req.user.id + ')' : '')).get().count;
+    var assigned = db.prepare('SELECT COUNT(*) as count FROM customers WHERE assigned_to = ?').get(req.user.id).count;
+    var weeklyNew = db.prepare("SELECT COUNT(*) as count FROM customers WHERE created_at >= datetime('now', '-7 days')" + userFilter).get().count;
+    res.json({ byStage, total, active, paused, byIndustry, stages: STAGE_LABELS, won, publicPool, assigned, weeklyNew });
   });
 
   // Customer detail with opportunities and activity
@@ -292,4 +298,7 @@ module.exports = function(app, db, authMiddleware) {
       const upcoming = db.prepare("SELECT * FROM customers WHERE stage IN ('" + ACTIVE_STAGES + "')" + userFilter + " ORDER BY updated_at DESC LIMIT 5").all();
 
       res.json({ pipeline, recentWon, upcoming, stages: STAGE_LABELS });
-    } catch (e) { res.status(500).json({ error
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+};

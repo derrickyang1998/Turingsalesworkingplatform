@@ -268,7 +268,7 @@ app.post('/api/knowledge', authMiddleware, (req, res) => {
 });
 
 app.post('/api/knowledge/:id/use', authMiddleware, (req, res) => {
-  db.prepare('UPDATE knowledge_entries SET usage_count = usage_count + 1, updated_at = datetime('now') WHERE id = ?').run(req.params.id);
+  db.prepare(`UPDATE knowledge_entries SET usage_count = usage_count + 1, updated_at = datetime('now') WHERE id = ?`).run(req.params.id);
   res.json({ success: true });
 });
 
@@ -283,10 +283,88 @@ app.get('/api/dashboard/sales', authMiddleware, (req, res) => {
       totalPipeline: db.prepare("SELECT COALESCE(SUM(COALESCE(opportunity_value,0)),0) as total FROM customers WHERE stage IN ('lead','info_confirmed','advantage_shared','needs_confirmed','analysis','proposal','kol_matching','cooperation')" + userFilter).get().total,
       stageDistribution: db.prepare('SELECT stage, COUNT(*) as count, COALESCE(SUM(COALESCE(opportunity_value,0)),0) as value FROM customers' + userFilter + ' GROUP BY stage').all(),
       monthlyTrend: db.prepare("SELECT strftime('%Y-%m', created_at) as month, COUNT(*) as count FROM customers" + userFilter + " GROUP BY month ORDER BY month DESC LIMIT 12").all(),
-      topUsers: db.prepare('SELECT u.display_name, u.department, COUNT(c.id) as deals FROM users u LEFT JOIN customers c ON c.assigned_to = u.id AND c.stage='won' GROUP BY u.id ORDER BY deals DESC LIMIT 10').all()
+      topUsers: db.prepare("SELECT u.display_name, u.department, COUNT(c.id) as deals FROM users u LEFT JOIN customers c ON c.assigned_to = u.id AND c.stage='won' GROUP BY u.id ORDER BY deals DESC LIMIT 10").all()
     };
     res.json({ stats });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ===== ENHANCED CUSTOMER STATS (for new frontend) =====
+app.get('/api/customers/stats', authMiddleware, (req, res) => {
+  try {
+    const userFilter = req.user.role !== 'admin' ? ' WHERE assigned_to = ' + req.user.id : '';
+    const total = db.prepare('SELECT COUNT(*) as count FROM customers' + userFilter).get().count;
+    const publicPool = db.prepare("SELECT COUNT(*) as count FROM customers WHERE is_public = 1" + (req.user.role !== 'admin' ? '' : '')).get().count;
+    const assigned = db.prepare('SELECT COUNT(*) as count FROM customers WHERE assigned_to IS NOT NULL AND assigned_to = ?').get(req.user.id).count;
+    const won = db.prepare("SELECT COUNT(*) as count FROM customers WHERE stage='won'" + userFilter).get().count;
+    const byStageRows = db.prepare('SELECT stage, COUNT(*) as count FROM customers' + userFilter + ' GROUP BY stage').all();
+    const byStage = {}; byStageRows.forEach(function(r) { byStage[r.stage] = r.count; });
+    const totalOppValue = db.prepare("SELECT COALESCE(SUM(COALESCE(opportunity_value,0)),0) as total FROM customers WHERE opportunity_value > 0" + userFilter).get().total;
+    const weeklyNew = db.prepare("SELECT COUNT(*) as count FROM customers WHERE created_at >= datetime('now', '-7 days')" + userFilter).get().count;
+    const winRateRows = db.prepare("SELECT COUNT(*) as total FROM customers WHERE stage IN ('won','lost')" + userFilter).get().total;
+    const winRate = winRateRows > 0 ? Math.round((won / winRateRows) * 100) : 0;
+
+    res.json({
+      total, weeklyNew, publicPool, assigned, won,
+      totalOppValue, winRate, avgCycle: '-',
+      byStage: byStage
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ===== CUSTOMER ACTIVITY ROUTES =====
+app.post('/api/customers/:id/activity', authMiddleware, (req, res) => {
+  try {
+    const { action, notes } = req.body;
+    const customer = db.prepare('SELECT * FROM customers WHERE id = ?').get(req.params.id);
+    if (!customer) return res.status(404).json({ error: 'Customer not found' });
+    db.prepare('INSERT INTO customer_activity (customer_id, user_id, action, stage_from, stage_to, notes) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(req.params.id, req.user.id, action || 'note', customer.stage, customer.stage, notes || '');
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ===== DASHBOARD STATS =====
+app.get('/api/dashboard/stats', authMiddleware, (req, res) => {
+  try {
+    const userFilter = req.user.role !== 'admin' ? ' WHERE assigned_to = ' + req.user.id : '';
+    const totalCustomers = db.prepare('SELECT COUNT(*) as count FROM customers' + userFilter).get().count;
+    const totalOppValue = db.prepare("SELECT COALESCE(SUM(COALESCE(opportunity_value,0)),0) as total FROM customers" + userFilter).get().total;
+    const wonDeals = db.prepare("SELECT COUNT(*) as count FROM customers WHERE stage='won'" + userFilter).get().count;
+    const lostDeals = db.prepare("SELECT COUNT(*) as count FROM customers WHERE stage='lost'" + userFilter).get().count;
+    const stageRows = db.prepare('SELECT stage, COUNT(*) as count FROM customers' + userFilter + ' GROUP BY stage').all();
+    const recentActivity = db.prepare('SELECT ca.*, u.display_name FROM customer_activity ca JOIN users u ON ca.user_id = u.id ORDER BY ca.created_at DESC LIMIT 20').all();
+    res.json({ totalCustomers, totalOppValue, wonDeals, lostDeals, stageRows, recentActivity });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ===== KNOWLEDGE CATEGORIES =====
+app.get('/api/knowledge/categories', authMiddleware, (req, res) => {
+  try {
+    const categories = db.prepare("SELECT entry_type, COUNT(*) as count FROM knowledge_entries GROUP BY entry_type").all();
+    res.json({ categories });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ===== AUTH REGISTER (admin) =====
+app.post('/api/auth/register', authMiddleware, adminOnly, (req, res) => {
+  const { username, password, display_name, role, department, email } = req.body;
+  if (!username) return res.status(400).json({ error: 'Username required' });
+  const salt = bcrypt.genSaltSync(10);
+  const hash = bcrypt.hashSync(password || 'turing2026', salt);
+  try {
+    const result = db.prepare('INSERT INTO users (username, password_hash, display_name, role, email, department) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(username, hash, display_name || username, role || 'user', email || '', department || '');
+    res.json({ id: result.lastInsertRowid });
+  } catch(e) {
+    res.status(400).json({ error: 'Username may already exist' });
+  }
+});
+
+// ===== USERS LIST (for frontend) =====
+app.get('/api/users', authMiddleware, (req, res) => {
+  const users = db.prepare('SELECT id, username, display_name, role, department, email, api_quota, created_at, last_login, is_active FROM users ORDER BY department, id').all();
+  res.json({ users });
 });
 // ===== WORKFLOW ENGINE INIT =====
 const workflowEngine = require('./workflow_engine');
@@ -298,5 +376,12 @@ app.get('/api/health', (req, res) => {
 });
 
 // ===== SPA FALLBACK =====
-app.get('/{*path}', (req, res) => { res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate'); res.set('Pragma', 'no-cache'); res.set('Expires', '0');
-  re
+app.get('/{*path}', (req, res) => {
+  res.sendFile(path.join(__dirname, '../index.html'), {
+    headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate', 'Pragma': 'no-cache', 'Expires': '0' }
+  });
+});
+
+app.listen(PORT, () => {
+  console.log(`🚀 TuringMarket server running on http://localhost:${PORT}`);
+});

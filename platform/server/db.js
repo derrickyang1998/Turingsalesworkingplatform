@@ -420,4 +420,19 @@ try { db.prepare("ALTER TABLE customers ADD COLUMN lead_source TEXT").run(); } c
 try { db.prepare("ALTER TABLE customers ADD COLUMN lead_score INTEGER DEFAULT 0").run(); } catch(e) {}
 try { db.prepare("ALTER TABLE customers ADD COLUMN assigned_at DATETIME").run(); } catch(e) {}
 try { db.prepare("ALTER TABLE customers ADD COLUMN last_followup DATETIME").run(); } catch(e) {}
-try { d
+try { db.prepare("ALTER TABLE customers ADD COLUMN opportunity_value REAL DEFAULT 0").run(); } catch(e) {}
+try { db.prepare("ALTER TABLE customers ADD COLUMN win_probability INTEGER DEFAULT 50").run(); } catch(e) {}
+try { db.prepare("ALTER TABLE customers ADD COLUMN tags TEXT").run(); } catch(e) {}
+try { db.prepare("ALTER TABLE customers ADD COLUMN is_public INTEGER DEFAULT 1").run(); } catch(e) {}
+
+// ===== V8.1 Migration: Add new columns to influencers table =====
+try { db.prepare("ALTER TABLE influencers ADD COLUMN project_name TEXT").run(); } catch(e) {}
+try { db.prepare("ALTER TABLE influencers ADD COLUMN product_name TEXT").run(); } catch(e) {}
+try { db.prepare("ALTER TABLE influencers ADD COLUMN reporter TEXT").run(); } catch(e) {}
+try { db.prepare("ALTER TABLE influencers ADD COLUMN tags TEXT").run(); } catch(e) {}
+try { db.prepare("ALTER TABLE influencers ADD COLUMN quoted_price INTEGER DEFAULT 0").run(); } catch(e) {}
+try { db.prepare("ALTER TABLE influencers ADD COLUMN content_deliverable TEXT").run(); } catch(e) {}
+try { db.prepare("ALTER TABLE influencers ADD COLUMN is_duplicate INTEGER DEFAULT 0").run(); } catch(e) {}
+try { db.prepare("ALTER TABLE influencers ADD COLUMN import_batch TEXT").run(); } catch(e) {}
+
+module.exports = db;
