@@ -257,6 +257,19 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
 .opp-card:hover { border-color:#999; }
 .opp-card-title { font-weight:600;font-size:13px; }
 .opp-card-meta { font-size:11px;color:#999;margin-top:4px; }
+.sidebar-overlay { position:fixed; inset:0; background:rgba(0,0,0,.3); z-index:999; }
+/* ===== CRM Sidebar ===== */
+.detail-sidebar { position:fixed; top:0; right:-520px; width:520px; height:100%; background:#fff; z-index:1000; box-shadow:-4px 0 20px rgba(0,0,0,.12); transition:right .3s ease; display:flex; flex-direction:column; }
+.detail-sidebar.open { right:0; }
+.sidebar-header { display:flex; align-items:center; justify-content:space-between; padding:16px 20px; border-bottom:1px solid #e8e8e5; flex-shrink:0; }
+.sidebar-body { flex:1; overflow-y:auto; padding:20px; }
+.sidebar-section { margin-bottom:20px; }
+.sidebar-section h4 { font-size:13px; color:#999; margin-bottom:10px; padding-bottom:6px; border-bottom:1px solid #e8e8e5; text-transform:uppercase; letter-spacing:.03em; }
+.sidebar-section .field { display:flex; margin-bottom:8px; font-size:13px; }
+.sidebar-section .field-label { width:80px; flex-shrink:0; color:#999; }
+.sidebar-section .field-value { flex:1; word-break:break-all; }
+/* ===== Opp Table ===== */
+#oppTable { display:none; }
 </style>
 </head>
 <body>
@@ -322,7 +335,7 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
   <select id="custStageFilter" onchange="loadCustomers()" style="width:110px"><option value="">全部阶段</option><option value="lead">开发中</option><option value="proposal">方案</option><option value="negotiation">谈判</option><option value="won">成交</option><option value="maintenance">维护</option></select>
   <select id="custPriorityFilter" onchange="loadCustomers()" style="width:90px"><option value="">全部优先级</option><option value="high">高</option><option value="medium">中</option><option value="low">低</option></select>
   <button class="btn btn-primary btn-sm" onclick="openAddCustomer()">+ 新增客户</button>
-  <button class="btn btn-sm" onclick="switchCrmView('seapool');loadSeaPool()">🌊 公海池</button>
+  <button class="btn btn-sm" onclick="switchCrmView('seapool')">🌊 公海池</button>
 </div>
 
 <!-- Stage Filter Tags -->
@@ -340,7 +353,7 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
   <div class="card" style="padding:0;overflow:hidden">
     <div class="table-container" style="max-height:500px;overflow-y:auto">
       <table>
-        <thead><tr><th style="width:100px">品牌</th><th style="width:110px">公司</th><th>联系人</th><th style="width:70px">行业</th><th style="width:75px">阶段</th><th style="width:60px">优先级</th><th style="width:70px">商机价值</th><th style="width:60px">负责人</th><th style="width:115px">操作</th></tr></thead>
+        <thead><tr><th>品牌</th><th>公司</th><th>行业</th><th>阶段</th><th>联系人</th><th>商机金额</th><th>负责人</th><th>更新时间</th><th style="width:100px">操作</th></tr></thead>
         <tbody id="custTableBody"></tbody>
       </table>
     </div>
@@ -723,6 +736,63 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
     </div>
     <div id="infModalStatus" style="font-size:12px"></div>
     <div style="display:flex;gap:8px;margin-top:12px">
-      <button class="btn btn-outline btn-sm" onclick="downloadInfTemplate()">📋 下载 CSV �
+      <button class="btn btn-outline btn-sm" onclick="downloadInfTemplate()">📋 下载 CSV 模板</button>
+    </div>
+  </div>
+</div>
+
+<!-- Customer Detail Sidebar -->
+<div class="sidebar-overlay" id="custDetailOverlay" style="display:none"></div>
+<div class="detail-sidebar" id="custDetailSidebar">
+  <div class="sidebar-header">
+    <h3 id="custDetailTitle">客户详情</h3>
+    <button class="modal-close" onclick="closeCustomerDetail()">&times;</button>
+  </div>
+  <div class="sidebar-body" id="custDetailBody"></div>
+</div>
+
+<!-- Opportunity Modal -->
+<div class="modal-overlay" id="oppModalOverlay" style="display:none" onclick="if(event.target===this)closeOppModal()">
+  <div class="modal">
+    <button class="modal-close" onclick="closeOppModal()">&times;</button>
+    <h3 id="oppModalTitle">新增商机</h3>
+    <input type="hidden" id="oppEditId">
+    <input type="hidden" id="oppCustomerId">
+    <label>商机名称</label><input id="oppName" placeholder="输入商机名称">
+    <label>金额 ($)</label><input id="oppValue" type="number" placeholder="0">
+    <label>阶段</label><select id="oppStage">
+      <option value="discovery">需求分析</option>
+      <option value="qualification">资格确认</option>
+      <option value="proposal">方案报价</option>
+      <option value="negotiation">谈判中</option>
+      <option value="won">已赢单</option>
+      <option value="lost">已输单</option>
+    </select>
+    <label>赢单概率 (%)</label><input id="oppProbability" type="number" value="50">
+    <label>产品</label><input id="oppProduct">
+    <label>渠道类型</label><input id="oppChannel">
+    <label>预计成交日期</label><input id="oppCloseDate" type="date">
+    <label>备注</label><textarea id="oppNotes"></textarea>
+    <div class="btn-group" style="margin-top:12px">
+      <button class="btn btn-primary" onclick="saveOpportunity()">保存</button>
+      <button class="btn btn-outline" onclick="closeOppModal()">取消</button>
+    </div>
+  </div>
+</div>
+
+<!-- Opportunity Table -->
+<div id="oppTable" style="display:none">
+  <div class="card" style="padding:0;overflow:hidden">
+    <div class="table-container" style="max-height:500px;overflow-y:auto">
+      <table>
+        <thead><tr><th>商机名称</th><th>客户</th><th>金额</th><th>阶段</th><th>概率</th><th>预计成交</th><th>操作</th></tr></thead>
+        <tbody id="oppTableBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
 <script src="app.js?v=20260608"></script>
 <script src="ppt.js?v=20260608"></script>
+</body>
+</html>

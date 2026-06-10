@@ -176,6 +176,10 @@ module.exports = function(app, db, authMiddleware) {
     db.prepare("UPDATE customers SET assigned_to=NULL, is_public=1, updated_at=datetime('now') WHERE id=?").run(req.params.id);
     res.json({ success: true });
   });
+  app.post('/api/customers/:id/return', authMiddleware, (req, res) => {
+    db.prepare("UPDATE customers SET assigned_to=NULL, is_public=1, updated_at=datetime('now') WHERE id=?").run(req.params.id);
+    res.json({ success: true });
+  });
 
   // ============================================================
   // OPPORTUNITY ROUTES (商机管理)

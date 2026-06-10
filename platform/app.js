@@ -146,27 +146,31 @@ async function initApp() { console.log("[TM] initApp starting");
   } catch (e) { console.error('initApp error:', e); document.getElementById('app').style.display = 'flex'; toast('Data load failed: ' + e.message, 'error'); try { initM1(); } catch(e2) {} }
 }
 
-// ===== C0: CUSTOMER PIPELINE =====
+// ===== C0: CUSTOMER PIPELINE (纷享销客CRM Style) =====
 const CUST_STAGES = {
-  new_lead: '新线索', inquiry: '需求沟通', proposal: '方案中',
-  influencer_matching: '红人匹配', submitted: '已提报', won: '成交', lost: '丢失'
+  lead: '开发中', proposal: '方案中', negotiation: '谈判中',
+  won: '成交', maintenance: '维护中', lost: '丢失'
 };
+let curCrmView = 'pipeline';
 let curStageFilter = '';
-let curStatusFilter = '';
+let curPriorityFilter = '';
 let customersCache = [];
 
 async function loadCustomers() {
   var search = document.getElementById('custSearch')?.value || '';
-  var qs = ''; if (curStageFilter) qs = '?stage=' + curStageFilter; if (curStatusFilter) qs += (qs ? '&' : '?') + 'status=' + curStatusFilter;
-  if (search) qs += (qs ? '&' : '?') + 'search=' + encodeURIComponent(search);
+  var stage = document.getElementById('custStageFilter')?.value || '';
+  var priority = document.getElementById('custPriorityFilter')?.value || '';
+  var isPool = curCrmView === 'seapool';
+  var qs = '?';
+  if (isPool) qs += 'is_public=1';
+  if (stage) qs += (qs.length > 1 ? '&' : '') + 'stage=' + stage;
+  if (search) qs += (qs.length > 1 ? '&' : '') + 'search=' + encodeURIComponent(search);
   try {
     var r = await apiFetch('/customers' + qs);
     var d = await r.json();
     customersCache = d.customers || [];
-    renderCustomerTable(customersCache);
+    renderCustomerTable(customersCache, isPool);
     loadCustomerStats();
-    var m0El = document.getElementById('m0Stats');
-    if (m0El) m0El.textContent = '商务SOP · 线索→成交全流程跟踪 · ' + d.total + ' 个客户';
   } catch (e) { console.error(e); }
 }
 
@@ -174,15 +178,264 @@ async function loadCustomerStats() {
   try {
     var r = await apiFetch('/customers/stats');
     var d = await r.json();
-    var tags = document.querySelectorAll('#m0StageFilter .tag');
-    tags.forEach(function(t) {
-      var stage = t.getAttribute('data-stage');
-      if (!stage) return;
-      var found = (d.byStage || []).find(function(s) { return s.stage === stage; });
-      t.textContent = CUST_STAGES[stage] + (found ? ' (' + found.count + ')' : '');
-    });
+    // Update stats badges
+    var total = document.getElementById('m0_totalCustomers');
+    if (total) total.textContent = d.total || 0;
+    var pool = document.getElementById('m0_poolCount');
+    if (pool) pool.textContent = d.publicPool || 0;
+    var val = document.getElementById('m0_totalValue');
+    if (val) val.textContent = d.totalOppValue ? d.totalOppValue.toLocaleString() : '0';
+    var poolTab = document.getElementById('m0_seapoolTabCount');
+    if (poolTab) poolTab.textContent = d.publicPool || 0;
   } catch (e) {}
 }
+
+function switchCrmView(view) {
+  curCrmView = view;
+  document.querySelectorAll('.crm-tab').forEach(function(t) {
+    t.style.borderBottomColor = 'transparent';
+    t.style.color = 'var(--text2)';
+    t.style.fontWeight = 'normal';
+  });
+  var tabs = document.querySelectorAll('.crm-tab');
+  var idx = view === 'pipeline' ? 0 : view === 'seapool' ? 1 : 2;
+  if (tabs[idx]) {
+    tabs[idx].style.borderBottomColor = '#1a1a1a';
+    tabs[idx].style.color = '#1a1a1a';
+    tabs[idx].style.fontWeight = '600';
+  }
+  // Toggle views
+  var pipeView = document.getElementById('crmPipelineView');
+  var poolView = document.getElementById('crmSeaPoolView');
+  var oppView = document.getElementById('oppTable');
+  if (pipeView) pipeView.style.display = view === 'pipeline' ? 'block' : 'none';
+  if (poolView) poolView.style.display = view === 'seapool' ? 'block' : 'none';
+  if (oppView) oppView.style.display = view === 'opportunities' ? 'block' : 'none';
+  if (view === 'opportunities') { loadOpportunities(); return; }
+  loadCustomers();
+}
+
+function renderCustomerTable(data, isPool) {
+  var tbody = document.getElementById('custTableBody');
+  if (!data || !data.length) {
+    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:30px;opacity:.5">暂无客户数据</td></tr>';
+    return;
+  }
+  var h = '';
+  data.forEach(function(c) {
+    var stageLabel = CUST_STAGES[c.stage] || c.stage;
+    h += '<tr style="cursor:pointer" onclick="openCustomerDetail(' + c.id + ')">';
+    h += '<td><strong>' + esc(c.brand_name || '-') + '</strong></td>';
+    h += '<td>' + esc(c.company_name || '-') + '</td>';
+    h += '<td>' + esc(c.industry || '-') + '</td>';
+    h += '<td><select onclick="event.stopPropagation()" onchange="changeCustomerStage(' + c.id + ', this.value)" style="width:auto;font-size:11px">';
+    Object.keys(CUST_STAGES).forEach(function(k) {
+      h += '<option value="' + k + '"' + (c.stage === k ? ' selected' : '') + '>' + CUST_STAGES[k] + '</option>';
+    });
+    h += '</select></td>';
+    h += '<td>' + esc(c.contact_person || '-') + '</td>';
+    h += '<td>' + (c.opportunity_value ? '¥' + Number(c.opportunity_value).toLocaleString() : '-') + '</td>';
+    h += '<td>' + esc(c.created_by_name || '-') + '</td>';
+    h += '<td style="font-size:10px;opacity:.6">' + (c.updated_at ? c.updated_at.substring(0, 10) : '-') + '</td>';
+    h += '<td onclick="event.stopPropagation()">';
+    if (isPool) {
+      h += '<button class="btn btn-sm btn-primary" onclick="claimCustomer(' + c.id + ')">认领</button>';
+    } else {
+      h += '<button class="btn btn-sm btn-outline" onclick="openCustomerDetail(' + c.id + ')">详情</button>';
+    }
+    h += '</td></tr>';
+  });
+  tbody.innerHTML = h;
+}
+
+// ===== CUSTOMER DETAIL SIDEBAR =====
+async function openCustomerDetail(id) {
+  try {
+    var r = await apiFetch('/customers/' + id + '/detail');
+    var d = await r.json();
+    if (!d.customer) { toast('客户不存在', 'error'); return; }
+    var c = d.customer;
+    var html = '<div class="sidebar-section"><h4>基本信息</h4>';
+    html += '<div class="field"><span class="field-label">品牌</span><span class="field-value">' + esc(c.brand_name || '-') + '</span></div>';
+    html += '<div class="field"><span class="field-label">公司</span><span class="field-value">' + esc(c.company_name || '-') + '</span></div>';
+    html += '<div class="field"><span class="field-label">行业</span><span class="field-value">' + esc(c.industry || '-') + '</span></div>';
+    html += '<div class="field"><span class="field-label">联系人</span><span class="field-value">' + esc(c.contact_person || '-') + '</span></div>';
+    html += '<div class="field"><span class="field-label">阶段</span><span class="field-value">' + (CUST_STAGES[c.stage] || c.stage) + '</span></div>';
+    html += '<div class="field"><span class="field-label">来源</span><span class="field-value">' + esc(c.source || '-') + '</span></div>';
+    html += '<div class="field"><span class="field-label">预算</span><span class="field-value">' + esc(c.budget_estimate || '-') + '</span></div>';
+    html += '<div class="field"><span class="field-label">备注</span><span class="field-value">' + esc(c.notes || '-') + '</span></div>';
+    html += '</div>';
+
+    // Actions
+    html += '<div class="sidebar-section" style="display:flex;gap:8px;flex-wrap:wrap">';
+    if (c.is_public == 1) {
+      html += '<button class="btn btn-primary btn-sm" onclick="claimCustomer(' + c.id + ');closeCustomerDetail()">📥 认领客户</button>';
+    } else {
+      html += '<button class="btn btn-outline btn-sm" onclick="returnToPool(' + c.id + ');closeCustomerDetail()">🌊 释放到公海</button>';
+    }
+    html += '<button class="btn btn-outline btn-sm" onclick="editCustomer(' + c.id + ');closeCustomerDetail()">✏️ 编辑</button>';
+    html += '<button class="btn btn-sm btn-primary" onclick="showOppModal(' + c.id + ')">💼 新增商机</button>';
+    html += '</div>';
+
+    // Opportunities
+    html += '<div class="sidebar-section"><h4>商机 (' + (d.opportunities || []).length + ')</h4>';
+    if (d.opportunities && d.opportunities.length) {
+      html += '<div style="font-size:12px">';
+      d.opportunities.forEach(function(o) {
+        html += '<div style="padding:8px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px">';
+        html += '<div style="font-weight:600">' + esc(o.name) + '</div>';
+        html += '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text2)">';
+        html += '<span>¥' + (o.value || 0).toLocaleString() + '</span>';
+        html += '<span>' + (o.stage || '-') + ' | ' + (o.win_probability || 0) + '%</span>';
+        html += '</div></div>';
+      });
+      html += '</div>';
+    } else {
+      html += '<p style="font-size:12px;color:var(--text2)">暂无商机</p>';
+    }
+    html += '</div>';
+
+    // Activity log
+    html += '<div class="sidebar-section"><h4>活动日志</h4>';
+    if (d.activity && d.activity.length) {
+      html += '<div style="font-size:12px;max-height:300px;overflow-y:auto">';
+      d.activity.forEach(function(a) {
+        html += '<div style="padding:6px 0;border-bottom:1px solid var(--border)">';
+        html += '<span style="color:var(--text2)">' + (a.created_at || '').substring(0, 16) + '</span> ';
+        html += '<strong>' + esc(a.action || '') + '</strong>';
+        if (a.display_name) html += ' <span style="color:var(--text2)">by ' + esc(a.display_name) + '</span>';
+        if (a.notes) html += '<br><span style="color:#666">' + esc(a.notes) + '</span>';
+        html += '</div>';
+      });
+      html += '</div>';
+    } else {
+      html += '<p style="font-size:12px;color:var(--text2)">暂无活动记录</p>';
+    }
+    html += '</div>';
+
+    // Add activity form
+    html += '<div class="sidebar-section">';
+    html += '<h4>添加跟进</h4>';
+    html += '<div style="display:flex;gap:6px">';
+    html += '<input id="activityText" placeholder="输入跟进内容..." style="flex:1;padding:6px 10px;font-size:12px">';
+    html += '<button class="btn btn-primary btn-sm" onclick="addCustomerActivity(' + c.id + ')">记录</button>';
+    html += '</div></div>';
+
+    document.getElementById('custDetailTitle').textContent = c.brand_name || '客户详情';
+    document.getElementById('custDetailBody').innerHTML = html;
+    document.getElementById('custDetailOverlay').style.display = 'block';
+    document.getElementById('custDetailSidebar').classList.add('open');
+  } catch (e) { toast('加载失败: ' + e.message, 'error'); }
+}
+
+function closeCustomerDetail() {
+  document.getElementById('custDetailOverlay').style.display = 'none';
+  document.getElementById('custDetailSidebar').classList.remove('open');
+}
+
+// ===== CLAIM / RETURN POOL =====
+async function claimCustomer(id) {
+  try {
+    await apiFetch('/customers/' + id + '/claim', { method: 'POST' });
+    toast('已认领客户');
+    loadCustomers();
+  } catch (e) { toast('认领失败: ' + e.message, 'error'); }
+}
+async function returnToPool(id) {
+  try {
+    await apiFetch('/customers/' + id + '/return', { method: 'POST' });
+    toast('已释放到公海');
+    loadCustomers();
+  } catch (e) { toast('释放失败: ' + e.message, 'error'); }
+}
+
+// ===== OPPORTUNITIES =====
+async function loadOpportunities() {
+  document.getElementById('custTable').style.display = 'none';
+  document.getElementById('oppTable').style.display = 'block';
+  try {
+    var r = await apiFetch('/opportunities?pageSize=1000');
+    var d = await r.json();
+    var tbody = document.getElementById('oppTableBody');
+    var rows = d.rows || d.opportunities || [];
+    if (!rows.length) { tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:30px;opacity:.5">暂无商机</td></tr>'; return; }
+    var h = '';
+    rows.forEach(function(o) {
+      h += '<tr><td><strong>' + esc(o.name) + '</strong></td>';
+      h += '<td>' + (o.customer_name || '-') + '</td>';
+      h += '<td>¥' + (o.value || 0).toLocaleString() + '</td>';
+      h += '<td>' + esc(o.stage || '-') + '</td>';
+      h += '<td>' + (o.win_probability || 0) + '%</td>';
+      h += '<td style="font-size:11px">' + (o.expected_close_date || '-') + '</td>';
+      h += '<td><button class="btn btn-sm btn-outline" onclick="deleteOpportunity(' + o.id + ')">删除</button></td></tr>';
+    });
+    tbody.innerHTML = h;
+  } catch (e) {
+    document.getElementById('oppTableBody').innerHTML = '<tr><td colspan="7" style="text-align:center;padding:30px">加载失败: ' + e.message + '</td></tr>';
+  }
+}
+
+var currentOppCustomerId = null;
+function showOppModal(customerId) {
+  currentOppCustomerId = customerId;
+  document.getElementById('oppEditId').value = '';
+  document.getElementById('oppCustomerId').value = customerId || '';
+  document.getElementById('oppName').value = '';
+  document.getElementById('oppValue').value = '';
+  document.getElementById('oppStage').value = 'discovery';
+  document.getElementById('oppProbability').value = '50';
+  document.getElementById('oppProduct').value = '';
+  document.getElementById('oppChannel').value = '';
+  document.getElementById('oppCloseDate').value = '';
+  document.getElementById('oppNotes').value = '';
+  document.getElementById('oppModalTitle').textContent = '新增商机';
+  document.getElementById('oppModalOverlay').style.display = 'flex';
+}
+function closeOppModal() { document.getElementById('oppModalOverlay').style.display = 'none'; }
+
+async function saveOpportunity() {
+  var name = document.getElementById('oppName').value.trim();
+  if (!name) { toast('请输入商机名称', 'error'); return; }
+  var body = {
+    customer_id: currentOppCustomerId || document.getElementById('oppCustomerId').value,
+    name: name,
+    value: Number(document.getElementById('oppValue').value) || 0,
+    stage: document.getElementById('oppStage').value,
+    win_probability: Number(document.getElementById('oppProbability').value) || 50,
+    product_name: document.getElementById('oppProduct').value.trim(),
+    channel_type: document.getElementById('oppChannel').value.trim(),
+    expected_close_date: document.getElementById('oppCloseDate').value || null,
+    notes: document.getElementById('oppNotes').value.trim()
+  };
+  try {
+    await apiFetch('/opportunities', { method: 'POST', body: JSON.stringify(body) });
+    toast('商机已创建');
+    closeOppModal();
+    loadOpportunities();
+  } catch (e) { toast('保存失败: ' + e.message, 'error'); }
+}
+async function deleteOpportunity(id) {
+  if (!confirm('确定删除此商机？')) return;
+  try { await apiFetch('/opportunities/' + id, { method: 'DELETE' }); toast('已删除'); loadOpportunities(); }
+  catch (e) { toast('删除失败', 'error'); }
+}
+
+// ===== ACTIVITY LOG =====
+async function addCustomerActivity(customerId) {
+  var text = document.getElementById('activityText')?.value;
+  if (!text) { toast('请输入跟进内容', 'error'); return; }
+  try {
+    await apiFetch('/customers/' + customerId + '/activity', {
+      method: 'POST',
+      body: JSON.stringify({ action: '跟进', notes: text })
+    });
+    toast('已记录');
+    openCustomerDetail(customerId);
+  } catch (e) { toast('记录失败: ' + e.message, 'error'); }
+}
+
+// ===== ORIGINAL CRM FUNCTIONS (enhanced) =====
+async function loadCustomerStats_old() { /* kept for compatibility */ }
 
 function filterCustomers(stage) {
   curStageFilter = stage;
@@ -191,99 +444,6 @@ function filterCustomers(stage) {
   if (activeEl) activeEl.classList.add('active');
   else document.querySelector('#m0StageFilter .tag').classList.add('active');
   loadCustomers();
-}
-
-function renderCustomerTable(data) {
-  var tbody = document.getElementById('custTableBody');
-  if (!data || !data.length) { tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:30px;opacity:.5">暂无客户数据，点击"新增客户"开始</td></tr>'; return; }
-  var h = '';
-  data.forEach(function(c) {
-    var stageLabel = CUST_STAGES[c.stage] || c.stage;
-    h += '<tr><td><strong>' + esc(c.brand_name || '-') + '</strong></td>';
-    h += '<td>' + esc(c.company_name || '-') + '</td>';
-    h += '<td>' + esc(c.industry || '-') + '</td>';
-    h += '<td><select onchange="changeCustomerStage(' + c.id + ', this.value)" style="width:auto;font-size:11px">';
-    Object.keys(CUST_STAGES).forEach(function(k) { h += '<option value="' + k + '"' + (c.stage === k ? ' selected' : '') + '>' + CUST_STAGES[k] + '</option>'; });
-    h += '</select></td>';
-    h += '<td>' + esc(c.contact_person || '-') + '</td>';
-    h += '<td style="font-size:11px">' + esc(c.budget_estimate || '-') + '</td>';
-    h += '<td style="font-size:10px;opacity:.6">' + esc(c.source || '-') + '</td>';
-    h += '<td style="font-size:10px;opacity:.6">' + (c.updated_at ? c.updated_at.substring(0, 10) : '-') + '</td>';
-    h += '<td><button class="btn btn-sm" onclick="editCustomer(' + c.id + ')">编辑</button></td></tr>';
-  });
-  tbody.innerHTML = h;
-}
-
-function showAddCustomer() {
-  document.getElementById('custEditId').value = '';
-  document.getElementById('addCustomerTitle').textContent = '新增客户';
-  ['custBrand','custCompany','custIndustry','custContact','custContactInfo','custSource','custBudget','custNotes'].forEach(function(id) { var el = document.getElementById(id); if (el) el.value = ''; });
-  document.getElementById('addCustomerCard').classList.remove('hidden');
-}
-
-function closeCustModal() {
-  document.getElementById('addCustomerCard').classList.add('hidden');
-}
-
-function openAddCustomer() {
-  document.getElementById('custModalTitle').textContent = '新增客户';
-  document.getElementById('custEditId').value = '';
-  ['custBrand','custCompany','custContact','custContactInfo','custIndustry','custSource','custBudget','custNotes'].forEach(function(id) { var el = document.getElementById(id); if (el) el.value = ''; });
-  document.getElementById('custStage').value = 'lead';
-  document.getElementById('custModal').style.display = 'flex';
-}
-function closeCustModal() { document.getElementById('custModal').style.display = 'none'; }
-function dismissDup() { document.getElementById('dupWarning').style.display = 'none'; }
-function editCustomer(id) {
-  var c = customersCache.find(function(x) { return x.id === id; });
-  if (!c) return;
-  document.getElementById('custEditId').value = c.id;
-  document.getElementById('addCustomerTitle').textContent = '编辑客户: ' + c.brand_name;
-  document.getElementById('custBrand').value = c.brand_name || '';
-  document.getElementById('custCompany').value = c.company_name || '';
-  document.getElementById('custIndustry').value = c.industry || '';
-  document.getElementById('custContact').value = c.contact_person || '';
-  document.getElementById('custContactInfo').value = c.contact_info || '';
-  document.getElementById('custSource').value = c.source || '';
-  document.getElementById('custBudget').value = c.budget_estimate || '';
-  document.getElementById('custNotes').value = c.notes || '';
-  document.getElementById('addCustomerCard').classList.remove('hidden');
-}
-
-async function saveCustomer() {
-  var brand = document.getElementById('custBrand').value.trim();
-  if (!brand) { toast('请填写品牌名称', 'error'); return; }
-  var editId = document.getElementById('custEditId').value;
-  var body = {
-    brand_name: brand,
-    company_name: document.getElementById('custCompany').value.trim(),
-    industry: document.getElementById('custIndustry').value.trim(),
-    contact_person: document.getElementById('custContact').value.trim(),
-    contact_info: document.getElementById('custContactInfo').value.trim(),
-    source: document.getElementById('custSource').value.trim(),
-    budget_estimate: document.getElementById('custBudget').value.trim(),
-    notes: document.getElementById('custNotes').value.trim(),
-    stage: document.getElementById('custStage').value
-  };
-  try {
-    if (editId) {
-      await apiFetch('/customers/' + editId, { method: 'PUT', body: JSON.stringify(body) });
-      toast('客户已更新');
-    } else {
-      await apiFetch('/customers', { method: 'POST', body: JSON.stringify(body) });
-      toast('客户已创建');
-    }
-    closeCustModal();
-    await loadCustomers();
-  } catch (e) { toast('保存失败: ' + e.message, 'error'); }
-}
-
-async function changeCustomerStage(id, newStage) {
-  try {
-    await apiFetch('/customers/' + id, { method: 'PUT', body: JSON.stringify({ stage: newStage }) });
-    toast('阶段已更新: ' + (CUST_STAGES[newStage] || newStage));
-    loadCustomerStats();
-  } catch (e) { toast('更新失败: ' + e.message, 'error'); }
 }
 
 // Page load - check for existing session
