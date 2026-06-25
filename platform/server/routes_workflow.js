@@ -315,13 +315,33 @@ module.exports = function(app, db, authMiddleware, adminOnly) {
         FROM workflow_tasks wt
         JOIN workflow_instances wi ON wt.instance_id = wi.id
         JOIN workflow_templates wtn ON wi.template_id = wtn.id
-        WHERE (wt.assignee_id = ? OR wt.assignee_id IS NULL)
+        WHERE 1=1
       `;
-      const params = [req.user.id];
+      const params = [];
+
+      if (req.user.role !== 'admin') {
+        query += ' AND (wt.assignee_id = ? OR wt.assignee_id IS NULL)';
+        params.push(req.user.id);
+      }
 
       if (req.query.status) {
         query += ' AND wt.status = ?';
         params.push(req.query.status);
+      }
+
+      if (req.query.business_type) {
+        query += ' AND wi.business_type = ?';
+        params.push(req.query.business_type);
+      }
+
+      if (req.query.overdue === '1') {
+        query += " AND wt.status = 'pending' AND wt.due_at IS NOT NULL AND datetime(wt.due_at) < datetime('now')";
+      }
+
+      if (req.query.search) {
+        query += ' AND (wt.title LIKE ? OR wt.description LIKE ? OR wtn.name LIKE ? OR CAST(wi.business_id AS TEXT) LIKE ?)';
+        const like = '%' + req.query.search + '%';
+        params.push(like, like, like, like);
       }
 
       query += ' ORDER BY wt.created_at DESC LIMIT 200';

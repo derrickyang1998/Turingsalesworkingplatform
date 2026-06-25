@@ -4,6 +4,7 @@ const path = require('path');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const multer = require('multer');
+const crypto = require('crypto');
 const db = require('./db');
 
 const app = express();
@@ -61,7 +62,7 @@ app.post('/api/auth/login', (req, res) => {
   if (!valid) return res.status(401).json({ error: 'Invalid credentials' });
   
   // Create session
-  const token = jwt.sign({ userId: user.id, role: user.role }, JWT_SECRET, { expiresIn: TOKEN_EXPIRY });
+  const token = jwt.sign({ userId: user.id, role: user.role, jti: crypto.randomBytes(12).toString('hex') }, JWT_SECRET, { expiresIn: TOKEN_EXPIRY });
   const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
   db.prepare('INSERT INTO sessions (user_id, token, ip_address, expires_at) VALUES (?, ?, ?, ?)').run(user.id, token, req.ip, expiresAt);
   db.prepare('UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?').run(user.id);
@@ -152,15 +153,57 @@ app.get('/api/token-usage', authMiddleware, (req, res) => {
 
 // ===== ADMIN DASHBOARD =====
 app.get('/api/admin/overview', authMiddleware, adminOnly, (req, res) => {
+  const taskCounts = db.prepare("SELECT status, COUNT(*) as count FROM workflow_tasks GROUP BY status").all();
+  const pendingTasks = taskCounts.find(t => t.status === 'pending')?.count || 0;
+  const completedTasks = taskCounts.find(t => t.status === 'completed')?.count || 0;
+  const totalTasks = taskCounts.reduce((sum, t) => sum + t.count, 0);
+  const taskCompletionRate = totalTasks ? Math.round((completedTasks / totalTasks) * 100) : 0;
+  const overdueTasks = db.prepare("SELECT COUNT(*) as count FROM workflow_tasks WHERE status = 'pending' AND due_at IS NOT NULL AND datetime(due_at) < datetime('now')").get().count;
+  const wonCustomers = db.prepare("SELECT COUNT(*) as count FROM customers WHERE stage = 'won'").get().count;
+  const lostCustomers = db.prepare("SELECT COUNT(*) as count FROM customers WHERE stage = 'lost'").get().count;
+  const activeCustomers = db.prepare("SELECT COUNT(*) as count FROM customers WHERE COALESCE(is_public, 0) = 0 AND stage NOT IN ('won','lost')").get().count;
+  const totalCustomers = db.prepare('SELECT COUNT(*) as count FROM customers').get().count;
   const stats = {
     totalUsers: db.prepare('SELECT COUNT(*) as count FROM users WHERE is_active = 1').get().count,
+    totalCustomers,
+    activeCustomers,
+    wonCustomers,
+    lostCustomers,
+    totalOpportunityValue: db.prepare('SELECT COALESCE(SUM(value), 0) as total FROM opportunities').get().total,
+    customerOpportunityValue: db.prepare('SELECT COALESCE(SUM(COALESCE(opportunity_value, 0)), 0) as total FROM customers').get().total,
     totalDemands: db.prepare('SELECT COUNT(*) as count FROM demands').get().count,
     totalProposals: db.prepare('SELECT COUNT(*) as count FROM proposals').get().count,
+    aiArtifacts: db.prepare("SELECT COUNT(*) as count FROM knowledge_entries WHERE entry_type IN ('strategy','proposal')").get().count,
+    totalKnowledgeEntries: db.prepare('SELECT COUNT(*) as count FROM knowledge_entries').get().count,
     totalTokens: db.prepare('SELECT COALESCE(SUM(total_tokens), 0) as total FROM token_usage').get().total,
+    totalTasks,
+    pendingTasks,
+    completedTasks,
+    overdueTasks,
+    taskCompletionRate,
     activeSessions: db.prepare(`SELECT COUNT(*) as count FROM sessions WHERE expires_at > datetime('now')`).get().count,
     todayLogins: db.prepare(`SELECT COUNT(DISTINCT user_id) as count FROM activity_log WHERE action = 'login' AND date(created_at) = date('now')`).get().count,
+    customerStages: db.prepare("SELECT stage, COUNT(*) as count, COALESCE(SUM(COALESCE(opportunity_value, 0)), 0) as value FROM customers GROUP BY stage ORDER BY count DESC").all(),
+    opportunityStages: db.prepare("SELECT stage, COUNT(*) as count, COALESCE(SUM(value), 0) as value FROM opportunities GROUP BY stage ORDER BY count DESC").all(),
     demandsByStatus: db.prepare('SELECT status, COUNT(*) as count FROM demands GROUP BY status').all(),
     demandsByUser: db.prepare('SELECT u.display_name, u.department, COUNT(d.id) as count FROM users u LEFT JOIN demands d ON u.id = d.user_id GROUP BY u.id ORDER BY count DESC').all(),
+    teamPerformance: db.prepare(`
+      SELECT u.id, u.display_name, u.department,
+             COUNT(DISTINCT c.id) as customers,
+             COUNT(DISTINCT o.id) as opportunities,
+             COALESCE(SUM(o.value), 0) as opportunity_value,
+             SUM(CASE WHEN c.stage = 'won' THEN 1 ELSE 0 END) as won_customers
+      FROM users u
+      LEFT JOIN customers c ON c.assigned_to = u.id
+      LEFT JOIN opportunities o ON o.created_by = u.id
+      WHERE u.is_active = 1
+      GROUP BY u.id
+      ORDER BY opportunity_value DESC, customers DESC
+      LIMIT 10
+    `).all(),
+    taskStatus: taskCounts,
+    knowledgeByType: db.prepare("SELECT entry_type, COUNT(*) as count FROM knowledge_entries GROUP BY entry_type ORDER BY count DESC").all(),
+    artifactTrend: db.prepare("SELECT date(created_at) as date, COUNT(*) as count FROM knowledge_entries WHERE entry_type IN ('strategy','proposal') GROUP BY date(created_at) ORDER BY date DESC LIMIT 14").all(),
     recentActivity: db.prepare('SELECT a.*, u.display_name FROM activity_log a JOIN users u ON a.user_id = u.id ORDER BY a.created_at DESC LIMIT 50').all(),
     tokenUsageTrend: db.prepare('SELECT date(created_at) as date, SUM(total_tokens) as tokens FROM token_usage GROUP BY date(created_at) ORDER BY date DESC LIMIT 30').all(),
   };
@@ -255,6 +298,65 @@ app.get('/api/knowledge', authMiddleware, (req, res) => {
     sql += ' ORDER BY usage_count DESC, created_at DESC LIMIT 100';
     const entries = db.prepare(sql).all(...params);
     res.json({ entries });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/knowledge/similar', authMiddleware, (req, res) => {
+  try {
+    const { brand, industry, product, market, type, limit } = req.query;
+    const terms = [brand, industry, product, market]
+      .filter(Boolean)
+      .flatMap(v => String(v).split(/[\s,，、/|]+/))
+      .map(v => v.trim().toLowerCase())
+      .filter(v => v.length >= 2);
+
+    let sql = 'SELECT * FROM knowledge_entries WHERE 1=1';
+    const params = [];
+    if (type) {
+      sql += ' AND entry_type = ?';
+      params.push(type);
+    } else {
+      sql += " AND entry_type IN ('strategy', 'proposal', 'note')";
+    }
+    if (req.user.role !== 'admin') {
+      sql += ' AND (created_by = ? OR is_public = 1)';
+      params.push(req.user.id);
+    }
+    sql += ' ORDER BY usage_count DESC, created_at DESC LIMIT 300';
+
+    const rows = db.prepare(sql).all(...params);
+    const scored = rows.map(row => {
+      const haystack = [
+        row.entry_type,
+        row.source_type,
+        row.key_terms,
+        row.content
+      ].join(' ').toLowerCase();
+      let score = 0;
+      for (const term of terms) {
+        if (haystack.includes(term)) score += term === String(brand || '').toLowerCase() ? 5 : 3;
+      }
+      if (row.entry_type === type) score += 2;
+      if (row.entry_type === 'strategy' || row.entry_type === 'proposal') score += 1;
+      score += Math.min(row.usage_count || 0, 5) * 0.5;
+      return { ...row, similarity_score: score };
+    })
+      .filter(row => row.similarity_score > 0 || terms.length === 0)
+      .sort((a, b) => b.similarity_score - a.similarity_score)
+      .slice(0, Math.min(parseInt(limit) || 5, 10))
+      .map(row => ({
+        id: row.id,
+        entry_type: row.entry_type,
+        source_type: row.source_type,
+        source_id: row.source_id,
+        key_terms: row.key_terms,
+        content: row.content,
+        usage_count: row.usage_count,
+        created_at: row.created_at,
+        similarity_score: row.similarity_score
+      }));
+
+    res.json({ entries: scored, terms });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

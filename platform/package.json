@@ -4,7 +4,8 @@
   "description": "> 为商务团队打造的线上工作平台 — 行业智库 + 策略规划 + 方案生成 + 网红匹配",
   "main": "app.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "npm run test:release",
+    "test:release": "node tests/phase8_release_gate.js"
   },
   "keywords": [],
   "author": "",

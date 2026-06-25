@@ -41,7 +41,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);letter-spaci
 .admin-only.visible{display:flex!important}
 .sidebar-footer{padding:12px 20px;font-size:10px;opacity:.4;margin-top:auto;border-top:1px solid var(--border)}
 main{flex:1;overflow-y:auto;padding:32px 36px}
-.page{display:block}
+.page{display:none}
 .page.active{display:block}
 h2{font-size:22px;font-weight:700;margin-bottom:2px}
 .subtitle{font-size:13px;opacity:.5;margin-bottom:20px}
@@ -224,12 +224,24 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
 .wf-badge-paused { background:#e3f2fd;color:#1565c0; }
 .wf-badge-cancelled { background:#fbe9e7;color:#c62828; }
 .wf-badge-pending { background:#fff8e1;color:#f57f17; }
-.wf-task-card { background:white;border:1px solid #eee;border-radius:8px;padding:16px;margin-bottom:12px; }
+.wf-task-toolbar { display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px;background:#fff;border:1px solid #eee;border-radius:10px;padding:12px; }
+.wf-task-toolbar input,.wf-task-toolbar select { width:auto;min-width:120px;font-size:12px; }
+.wf-task-summary { display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:14px; }
+.wf-task-summary .stat { padding:14px;border-radius:10px;background:#fff;border:1px solid #eee; }
+.wf-task-summary .stat-value { font-size:22px;font-weight:700;line-height:1.1; }
+.wf-task-card { background:white;border:1px solid #eee;border-radius:10px;padding:16px;margin-bottom:12px; }
 .wf-task-card:hover { box-shadow:0 2px 8px rgba(0,0,0,0.1); }
-.wf-task-title { font-size:15px;font-weight:600;margin-bottom:6px; }
-.wf-task-meta { font-size:12px;color:#888;margin-bottom:10px; }
-.wf-task-actions { display:flex;gap:8px; }
+.wf-task-card.overdue { border-color:#fecaca;background:#fff7f7; }
+.wf-task-title { font-size:15px;font-weight:600;margin-bottom:6px;display:flex;justify-content:space-between;gap:10px;align-items:flex-start; }
+.wf-task-meta { font-size:12px;color:#888;margin-bottom:10px;line-height:1.8; }
+.wf-task-actions { display:flex;gap:8px;align-items:center;flex-wrap:wrap; }
 .wf-task-actions button { padding:8px 20px;border:none;border-radius:4px;cursor:pointer;font-size:13px; }
+.wf-task-actions input { min-width:220px; }
+.wf-task-link { border:1px solid #ddd;background:#fff;border-radius:4px;padding:7px 12px;cursor:pointer;font-size:13px; }
+.wf-task-link:hover { background:#f5f5f5; }
+.wf-overdue-chip { display:inline-block;background:#fee2e2;color:#b91c1c;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:700; }
+.wf-task-detail-grid { display:grid;grid-template-columns:120px 1fr;gap:8px 12px;font-size:13px; }
+.wf-task-detail-grid strong { color:#666; }
 .btn-approve { background:#4CAF50;color:white; }
 .btn-reject { background:#f44336;color:white; }
 .btn-complete { background:#2196F3;color:white; }
@@ -268,8 +280,6 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
 .sidebar-section .field { display:flex; margin-bottom:8px; font-size:13px; }
 .sidebar-section .field-label { width:80px; flex-shrink:0; color:#999; }
 .sidebar-section .field-value { flex:1; word-break:break-all; }
-/* ===== Opp Table ===== */
-#oppTable { display:none; }
 </style>
 </head>
 <body>
@@ -309,7 +319,7 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
 
 
 <!-- M0: Customer Library (纷享销客CRM Style) -->
-<div class="page" id="page-m0">
+<div class="page active" id="page-m0">
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
   <div>
     <h2 style="margin:0;display:inline">🚀 客户库</h2>
@@ -330,9 +340,14 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
 </div>
 
 <!-- Search + Actions -->
-<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
+<div class="toolbar-area" style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
+  <div style="display:flex;gap:4px;border:1px solid var(--border);border-radius:6px;overflow:hidden;background:var(--surface)" id="customerScopeTabs">
+    <button class="btn btn-sm cust-scope-btn active" data-scope="my" onclick="setCustomerScope('my')" style="border-radius:0">我的客户</button>
+    <button class="btn btn-sm cust-scope-btn" data-scope="team" onclick="setCustomerScope('team')" style="border-radius:0">团队客户</button>
+    <button class="btn btn-sm cust-scope-btn admin-only" data-scope="all" onclick="setCustomerScope('all')" style="border-radius:0">全部客户</button>
+  </div>
   <div class="search-box" style="flex:1;max-width:280px"><span class="search-icon">🔍</span><input id="custSearch" placeholder="搜索品牌/公司/联系人..." oninput="loadCustomers()"></div>
-  <select id="custStageFilter" onchange="loadCustomers()" style="width:110px"><option value="">全部阶段</option><option value="lead">开发中</option><option value="proposal">方案</option><option value="negotiation">谈判</option><option value="won">成交</option><option value="maintenance">维护</option></select>
+  <select id="custStageFilter" onchange="filterCustomers(this.value)" style="width:110px"><option value="">全部阶段</option><option value="lead">开发中</option><option value="proposal">方案</option><option value="negotiation">谈判</option><option value="won">成交</option><option value="maintenance">维护</option></select>
   <select id="custPriorityFilter" onchange="loadCustomers()" style="width:90px"><option value="">全部优先级</option><option value="high">高</option><option value="medium">中</option><option value="low">低</option></select>
   <button class="btn btn-primary btn-sm" onclick="openAddCustomer()">+ 新增客户</button>
   <button class="btn btn-sm" onclick="switchCrmView('seapool')">🌊 公海池</button>
@@ -340,12 +355,12 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
 
 <!-- Stage Filter Tags -->
 <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px" id="m0StageFilter">
-  <span class="tag active" onclick="filterCustomers('')">全部</span>
-  <span class="tag" onclick="filterCustomers('lead')">🔍 开发中</span>
-  <span class="tag" onclick="filterCustomers('proposal')">📝 方案</span>
-  <span class="tag" onclick="filterCustomers('negotiation')">🤝 谈判</span>
-  <span class="tag" onclick="filterCustomers('won')">✅ 成交</span>
-  <span class="tag" onclick="filterCustomers('maintenance')">🔄 维护</span>
+  <span class="tag active" data-stage="" data-label="全部" onclick="filterCustomers('')">全部</span>
+  <span class="tag" data-stage="lead" data-label="🔍 开发中" onclick="filterCustomers('lead')">🔍 开发中</span>
+  <span class="tag" data-stage="proposal" data-label="📝 方案" onclick="filterCustomers('proposal')">📝 方案</span>
+  <span class="tag" data-stage="negotiation" data-label="🤝 谈判" onclick="filterCustomers('negotiation')">🤝 谈判</span>
+  <span class="tag" data-stage="won" data-label="✅ 成交" onclick="filterCustomers('won')">✅ 成交</span>
+  <span class="tag" data-stage="maintenance" data-label="🔄 维护" onclick="filterCustomers('maintenance')">🔄 维护</span>
 </div>
 
 <!-- Pipeline Table View -->
@@ -367,8 +382,31 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
 </div>
 
 <!-- Opportunities Kanban -->
-<div id="crmOpportunityView" style="display:none;overflow-x:auto;padding-bottom:20px">
-  <div style="display:flex;gap:10px;min-width:900px" id="oppKanbanColumns"></div>
+<div id="crmOpportunityView" style="display:none;padding-bottom:20px">
+  <!-- Opp-specific filters -->
+  <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
+    <label style="font-size:12px;font-weight:600;opacity:.5;margin:0">商机筛选:</label>
+    <input id="oppCustomerFilter" placeholder="客户品牌名..." style="width:160px;padding:6px 10px;border:1px solid var(--border);border-radius:6px 0 0 6px;font-size:12px;border-right:none" onkeyup="if(event.key==='Enter')loadOpportunities()">
+    <button class="btn btn-sm btn-outline" onclick="loadOpportunities()" style="border-radius:0 6px 6px 0;border-left:none">🔍</button>
+    <select id="oppStageFilter" onchange="loadOpportunities()" style="width:120px;padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px">
+      <option value="">全部阶段</option>
+      <option value="discovery">需求分析</option>
+      <option value="qualification">资格确认</option>
+      <option value="proposal">方案报价</option>
+      <option value="negotiation">谈判中</option>
+      <option value="won">已赢单</option>
+      <option value="lost">已输单</option>
+    </select>
+    <span id="oppCount" style="font-size:11px;opacity:.5"></span>
+  </div>
+  <div class="card" style="padding:0;overflow:hidden">
+    <div class="table-container" style="max-height:500px;overflow-y:auto">
+      <table>
+        <thead><tr><th>商机名称</th><th>客户</th><th>金额</th><th>阶段</th><th>概率</th><th>预计成交</th><th>操作</th></tr></thead>
+        <tbody id="oppTableBody"></tbody>
+      </table>
+    </div>
+  </div>
 </div>
 
 <!-- Duplicate Warning -->
@@ -420,7 +458,7 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
 </div>
 
 <!-- M1: Brand Hub -->
-<div class="page active" id="page-m1">
+<div class="page" id="page-m1">
 <h2>行业品牌智库</h2>
 <p class="subtitle">1871个出海品牌 · 13大行业 · 189个细分标签 · AI数据补充 · 竞品对标</p>
 
@@ -437,7 +475,7 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
       <div class="search-box" style="flex:1;max-width:300px;margin-left:auto">
         <span class="search-icon">🔍</span>
-        <input id="brandSearch" placeholder="Search brands..." oninput="filterBrands()">
+        <input id="brandSearch" placeholder="🔍 搜索品牌名 / 行业 / 中文名..." oninput="filterBrands()">
       </div>
       <button class="btn btn-sm" onclick="searchNewBrand()">AI Search</button>
       <button class="btn btn-sm" onclick="exportBrandCSV()">Export CSV</button>
@@ -647,6 +685,132 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
   </div>
 </div>
 </div>
+
+<!-- WORKFLOW DESIGNER -->
+<div class="page" id="page-workflow-designer">
+<div class="wf-designer-container">
+  <div class="wf-toolbar">
+    <input id="wf-template-name" placeholder="流程模板名称" style="width:220px;font-size:13px">
+    <span style="font-size:12px;color:#777">ID: <span id="wf-template-id"></span></span>
+    <button onclick="wfSaveTemplate()">保存模板</button>
+    <button onclick="wfPublishTemplate()">发布</button>
+    <button onclick="wfUndo()">撤销</button>
+    <button onclick="wfRedo()">重做</button>
+    <button onclick="wfClearCanvas()">清空</button>
+  </div>
+  <div style="display:flex;min-height:560px;border:1px solid #eee;border-radius:10px;overflow:hidden;background:#fff">
+    <div class="wf-toolbox">
+      <div class="wf-toolbox-title">节点</div>
+      <div class="wf-toolbox-group">
+        <div class="wf-node-palette" draggable="true" data-type="start">开始</div>
+        <div class="wf-node-palette" draggable="true" data-type="task">任务</div>
+        <div class="wf-node-palette" draggable="true" data-type="approval">审批</div>
+        <div class="wf-node-palette" draggable="true" data-type="condition">条件</div>
+        <div class="wf-node-palette" draggable="true" data-type="timer">定时器</div>
+        <div class="wf-node-palette" draggable="true" data-type="end">结束</div>
+      </div>
+    </div>
+    <div class="wf-canvas-wrapper" id="wf-canvas-wrapper">
+      <div class="wf-canvas-empty" id="wf-canvas-empty">拖拽左侧节点到画布开始设计流程</div>
+      <svg id="wf-svg-canvas">
+        <defs>
+          <marker id="wf-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#666"></path>
+          </marker>
+        </defs>
+        <g id="wf-edges-layer"></g>
+        <g id="wf-nodes-layer"></g>
+        <line id="wf-connection-line" style="display:none;stroke:#2196F3;stroke-width:2;stroke-dasharray:4 4"></line>
+      </svg>
+    </div>
+    <div class="wf-property-panel">
+      <div class="wf-prop-header">属性面板</div>
+      <div id="wf-prop-content" style="padding:16px;font-size:13px;color:#888">选择节点或连线后编辑属性</div>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- WORKFLOW TEMPLATES -->
+<div class="page" id="page-workflow-templates">
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+  <div>
+    <h2 style="margin:0">📋 流程模板</h2>
+    <p class="subtitle">管理商务流程模板，支持编辑、发布和删除</p>
+  </div>
+  <button class="btn btn-primary btn-sm" onclick="switchPage('workflow-designer')">+ 新建流程</button>
+</div>
+<div class="card" style="padding:0;overflow:hidden">
+  <table class="wf-table">
+    <thead><tr><th>模板名称</th><th>模块</th><th>分类</th><th>版本</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead>
+    <tbody id="wf-templates-body"></tbody>
+  </table>
+</div>
+</div>
+
+<!-- WORKFLOW INSTANCES -->
+<div class="page" id="page-workflow-instances">
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+  <div>
+    <h2 style="margin:0">⚡ 流程实例</h2>
+    <p class="subtitle">查看客户、方案和自动化触发出的流程实例</p>
+  </div>
+  <select id="wf-inst-filter-status" onchange="wfLoadInstances()" style="width:140px">
+    <option value="">全部状态</option>
+    <option value="running">运行中</option>
+    <option value="completed">已完成</option>
+    <option value="paused">已暂停</option>
+    <option value="cancelled">已取消</option>
+  </select>
+</div>
+<div class="card" style="padding:0;overflow:hidden">
+  <table class="wf-table">
+    <thead><tr><th>ID</th><th>模板</th><th>业务类型</th><th>业务ID</th><th>状态</th><th>当前节点</th><th>创建时间</th><th>操作</th></tr></thead>
+    <tbody id="wf-instances-body"></tbody>
+  </table>
+</div>
+</div>
+
+<!-- WORKFLOW TASKS -->
+<div class="page" id="page-workflow-tasks">
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+  <div>
+    <h2 style="margin:0">📌 商务待办中心</h2>
+    <p class="subtitle">集中处理阶段跟进、AI 方案确认、审批和自动化任务</p>
+  </div>
+  <button class="btn btn-sm" onclick="wfLoadTasks()">刷新</button>
+</div>
+<div class="wf-task-summary">
+  <div class="stat"><div class="stat-value" id="wfTaskTotal">0</div><div class="stat-label">当前结果</div></div>
+  <div class="stat"><div class="stat-value" id="wfTaskPending">0</div><div class="stat-label">待处理</div></div>
+  <div class="stat"><div class="stat-value" id="wfTaskOverdue">0</div><div class="stat-label">已逾期</div></div>
+  <div class="stat"><div class="stat-value" id="wfTaskDone">0</div><div class="stat-label">已完成</div></div>
+</div>
+<div class="wf-task-toolbar">
+  <select id="wf-task-filter" onchange="wfLoadTasks()">
+    <option value="">全部状态</option>
+    <option value="pending">待处理</option>
+    <option value="completed">已完成</option>
+    <option value="rejected">已驳回</option>
+  </select>
+  <select id="wf-task-business-filter" onchange="wfLoadTasks()">
+    <option value="">全部业务</option>
+    <option value="customer">客户</option>
+    <option value="demand">需求</option>
+    <option value="proposal">方案</option>
+    <option value="collaboration">合作</option>
+  </select>
+  <select id="wf-task-overdue-filter" onchange="wfLoadTasks()">
+    <option value="">全部时效</option>
+    <option value="1">只看逾期</option>
+  </select>
+  <input id="wf-task-search" placeholder="搜索任务/流程/业务ID" onkeydown="if(event.key==='Enter')wfLoadTasks()">
+  <button class="btn btn-sm" onclick="wfLoadTasks()">筛选</button>
+  <button class="btn btn-sm btn-outline" onclick="wfResetTaskFilters()">重置</button>
+</div>
+<div id="wf-tasks-list"></div>
+</div>
+
 <!-- ADMIN DASHBOARD (v8.0) -->
 <div class="page" id="page-admin">
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
@@ -662,18 +826,28 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
 <!-- Overview Tab -->
 <div id="admin-tab-overview" style="display:block">
   <div class="grid grid-4" style="margin-bottom:16px">
-    <div class="stat"><div class="stat-value" id="ad_totalUsers">-</div><div class="stat-label">Active Users</div></div>
-    <div class="stat"><div class="stat-value" id="ad_totalCustomers">-</div><div class="stat-label">Total Customers</div></div>
-    <div class="stat"><div class="stat-value" id="ad_totalDemands">-</div><div class="stat-label">Demands</div></div>
-    <div class="stat"><div class="stat-value" id="ad_totalTokens">-</div><div class="stat-label">Tokens Used</div></div>
+    <div class="stat"><div class="stat-value" id="ad_totalCustomers">-</div><div class="stat-label">客户总数</div></div>
+    <div class="stat"><div class="stat-value" id="ad_activeCustomers">-</div><div class="stat-label">推进中客户</div></div>
+    <div class="stat"><div class="stat-value" id="ad_pipelineValue">-</div><div class="stat-label">商机金额</div></div>
+    <div class="stat"><div class="stat-value" id="ad_taskRate">-</div><div class="stat-label">待办完成率</div></div>
   </div>
-  <div class="card" style="margin-bottom:16px">
-    <h3>📊 Sales Pipeline</h3>
-    <div id="ad_pipelineTable"></div>
+  <div class="grid grid-4" style="margin-bottom:16px">
+    <div class="stat"><div class="stat-value" id="ad_totalUsers">-</div><div class="stat-label">活跃成员</div></div>
+    <div class="stat"><div class="stat-value" id="ad_totalDemands">-</div><div class="stat-label">需求数</div></div>
+    <div class="stat"><div class="stat-value" id="ad_aiArtifacts">-</div><div class="stat-label">AI策略/方案</div></div>
+    <div class="stat"><div class="stat-value" id="ad_totalTokens">-</div><div class="stat-label">Token消耗</div></div>
   </div>
   <div class="grid grid-2" style="margin-bottom:16px">
-    <div class="card"><h3>📈 Stage Distribution</h3><div id="ad_stageChart"></div></div>
-    <div class="card"><h3>🏆 Top Performers</h3><div id="ad_topPerformers"></div></div>
+    <div class="card"><h3>📊 客户阶段漏斗</h3><div id="ad_customerStageChart"></div></div>
+    <div class="card"><h3>💼 商机阶段分布</h3><div id="ad_opportunityStageChart"></div></div>
+  </div>
+  <div class="grid grid-2" style="margin-bottom:16px">
+    <div class="card"><h3>📌 待办健康度</h3><div id="ad_taskHealth"></div></div>
+    <div class="card"><h3>🧠 AI与知识库</h3><div id="ad_knowledgeHealth"></div></div>
+  </div>
+  <div class="grid grid-2" style="margin-bottom:16px">
+    <div class="card"><h3>🏆 团队商务排行</h3><div id="ad_teamPerformance"></div></div>
+    <div class="card"><h3>🕒 最近平台活动</h3><div id="ad_recentActivity"></div></div>
   </div>
 </div>
 
@@ -742,13 +916,22 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
 </div>
 
 <!-- Customer Detail Sidebar -->
-<div class="sidebar-overlay" id="custDetailOverlay" style="display:none"></div>
+<div class="sidebar-overlay" id="custDetailOverlay" style="display:none" onclick="closeCustomerDetail()"></div>
 <div class="detail-sidebar" id="custDetailSidebar">
   <div class="sidebar-header">
     <h3 id="custDetailTitle">客户详情</h3>
     <button class="modal-close" onclick="closeCustomerDetail()">&times;</button>
   </div>
   <div class="sidebar-body" id="custDetailBody"></div>
+</div>
+
+<!-- Workflow Detail Modal -->
+<div class="wf-modal" id="wf-instance-modal" style="display:none" onclick="if(event.target===this)this.style.display='none'">
+  <div class="wf-modal-content" style="width:760px;max-width:92vw">
+    <button class="wf-modal-close" onclick="document.getElementById('wf-instance-modal').style.display='none'">&times;</button>
+    <h3 id="wf-instance-modal-title">流程详情</h3>
+    <div id="wf-instance-modal-body"></div>
+  </div>
 </div>
 
 <!-- Opportunity Modal -->
@@ -779,18 +962,17 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
     </div>
   </div>
 </div>
-
-<!-- Opportunity Table -->
-<div id="oppTable" style="display:none">
-  <div class="card" style="padding:0;overflow:hidden">
-    <div class="table-container" style="max-height:500px;overflow-y:auto">
-      <table>
-        <thead><tr><th>商机名称</th><th>客户</th><th>金额</th><th>阶段</th><th>概率</th><th>预计成交</th><th>操作</th></tr></thead>
-        <tbody id="oppTableBody"></tbody>
-      </table>
+  <!-- Confirm Dialog (center of page) -->
+  <div class="modal-overlay" id="confirmDialogOverlay" style="display:none">
+    <div class="modal" style="width:400px;text-align:center">
+      <h3 id="confirmDialogTitle">确认</h3>
+      <p id="confirmDialogMessage" style="margin:16px 0;font-size:14px;color:#555"></p>
+      <div style="display:flex;gap:12px;justify-content:center">
+        <button class="btn btn-primary" id="confirmDialogOk">确定</button>
+        <button class="btn btn-outline" id="confirmDialogCancel">取消</button>
+      </div>
     </div>
   </div>
-</div>
 
 <script src="app.js?v=20260608"></script>
 <script src="ppt.js?v=20260608"></script>

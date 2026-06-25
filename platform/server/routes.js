@@ -2,13 +2,19 @@
 
 // ===== INFLUENCER ROUTES =====
 app.get('/api/influencers', authMiddleware, (req, res) => {
-  const { platform, category, region, search, min_followers, max_followers, sort_by } = req.query;
+  const { platform, category, region, search, min_followers, max_followers, sort_by, project_name, product_name, tags } = req.query;
   let sql = 'SELECT * FROM influencers WHERE is_active = 1';
   const params = [];
   if (platform) { sql += ' AND platform = ?'; params.push(platform); }
   if (category) { sql += ' AND category = ?'; params.push(category); }
   if (region) { sql += ' AND region = ?'; params.push(region); }
-  if (search) { sql += ' AND (kol_handle LIKE ? OR content_style LIKE ? OR brand_collab_history LIKE ?)'; params.push('%' + search + '%', '%' + search + '%', '%' + search + '%'); }
+  if (project_name) { sql += ' AND project_name = ?'; params.push(project_name); }
+  if (product_name) { sql += ' AND product_name = ?'; params.push(product_name); }
+  if (tags) { sql += ' AND tags LIKE ?'; params.push('%' + tags + '%'); }
+  if (search) {
+    sql += ' AND (kol_handle LIKE ? OR content_style LIKE ? OR brand_collab_history LIKE ? OR project_name LIKE ? OR product_name LIKE ? OR tags LIKE ?)';
+    params.push('%' + search + '%', '%' + search + '%', '%' + search + '%', '%' + search + '%', '%' + search + '%', '%' + search + '%');
+  }
   if (min_followers) { sql += ' AND followers >= ?'; params.push(parseInt(min_followers)); }
   if (max_followers) { sql += ' AND followers <= ?'; params.push(parseInt(max_followers)); }
   sql += ' ORDER BY ' + ((sort_by === 'engagement' || sort_by === 'followers' || sort_by === 'cost_usd') ? sort_by : 'followers') + ' DESC LIMIT 200';

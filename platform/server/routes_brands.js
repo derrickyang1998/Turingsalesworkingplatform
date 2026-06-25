@@ -1,4 +1,4 @@
-﻿module.exports = function(app, db, authMiddleware) {
+module.exports = function(app, db, authMiddleware) {
   app.post('/api/brands', authMiddleware, (req, res) => {
     var b = req.body;
     var existing = db.prepare('SELECT id FROM brands WHERE name = ?').get(b.name);
@@ -40,5 +40,17 @@
       };
     });
     res.json({ brands: formatted });
+  });
+
+  app.get('/api/brands/social-search', authMiddleware, (req, res) => {
+    var brand = req.query.brand;
+    var platform = req.query.platform || 'youtube';
+    if (!brand) return res.status(400).json({ error: 'Brand name required' });
+    var searchUrls = {
+      youtube: 'https://www.youtube.com/results?search_query=' + encodeURIComponent(brand + ' review') + '&sp=CAI%253D',
+      tiktok: 'https://www.tiktok.com/search/video?q=' + encodeURIComponent(brand),
+      instagram: 'https://www.instagram.com/explore/tags/' + brand.replace(/[^a-zA-Z0-9]/g, '') + '/'
+    };
+    res.json({ items: [], platform: platform, brand: brand, searchUrl: searchUrls[platform] || searchUrls.youtube });
   });
 };
