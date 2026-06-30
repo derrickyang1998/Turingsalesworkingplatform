@@ -2,6 +2,14 @@
 
 ## v9.0 (2026-06-26) — Apple-style UI 第一阶段
 
+### v9.13 需求表上传登录态失效提示修复
+- 修复“上传客户需求文件”中 `.xlsx` 需求表显示 `文件内容解析失败：Invalid token` 的问题。
+- 根因：页面长时间停留或后端重启后，浏览器内存中的旧 `AUTH_TOKEN` 已失效，但前端仍继续调用受保护接口；Excel 上传接口直接 `fetch`，没有统一处理 401。
+- `apiFetch` 新增 401 处理：自动清理本地 token、显示登录页，并提示重新登录。
+- `apiFetch` 现在识别 `FormData` 请求，不再给 Excel 上传强行设置 `Content-Type: application/json`，避免破坏 multipart 上传。
+- 需求表上传与 AI 分析接口在 401 时显示明确的“登录状态已过期，请重新登录”提示，不再误导为 Excel 文件解析器故障。
+- 新增 `server/frontend_auth_fetch_test.js`，覆盖 FormData header 与 401 清理登录态两个回归点。
+
 ### v9.12 HTMLPPT / PPTX 结构化编辑器
 - 在“需求接入 & 方案生成”Step 3 的 PPT 生成结果区新增 `编辑大纲/页面` 入口。
 - 新增平台内编辑子界面：支持编辑方案标题、副标题、当前页标题、页面类型、备注和逐行页面要点。
