@@ -1,6 +1,7 @@
 ﻿// Database setup
 const Database = require('better-sqlite3');
 const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '..', '.env'), quiet: true });
 const bcrypt = require('bcryptjs');
 
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'db', 'turingmarket.db');
@@ -424,10 +425,14 @@ db.exec(`
 
 // Seed default admin and team users
 const salt = bcrypt.genSaltSync(10);
-const defaultPassword = bcrypt.hashSync('turing2026', salt);
+const defaultSeedPassword = process.env.DEFAULT_ADMIN_PASSWORD || process.env.DEFAULT_USER_PASSWORD || 'turing2026';
+const defaultPassword = bcrypt.hashSync(defaultSeedPassword, salt);
 
 const existingAdmin = db.prepare('SELECT id FROM users WHERE username = ?').get('admin');
 if (!existingAdmin) {
+  if (process.env.NODE_ENV === 'production' && !process.env.DEFAULT_ADMIN_PASSWORD && !process.env.DEFAULT_USER_PASSWORD) {
+    throw new Error('DEFAULT_ADMIN_PASSWORD must be configured before seeding users in production');
+  }
   const insertUser = db.prepare('INSERT INTO users (username, password_hash, display_name, role, email, department, api_quota) VALUES (?, ?, ?, ?, ?, ?, ?)');
 
   // Admin

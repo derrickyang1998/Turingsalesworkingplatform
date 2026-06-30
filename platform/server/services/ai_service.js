@@ -153,7 +153,8 @@ async function handleChat(db, opts) {
     } else {
       searchResult = await webSearch.searchWeb(message, {
         provider: opts.webProvider || process.env.WEB_SEARCH_PROVIDER || 'tavily',
-        maxResults: opts.webMaxResults || 5
+        maxResults: opts.webMaxResults || 5,
+        db: db
       });
     }
     webSearch.cacheSearchResult(db, message, searchResult);

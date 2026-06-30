@@ -1,5 +1,7 @@
 ﻿module.exports = function(app, db, authMiddleware) {
 
+const businessKnowledge = require('./services/business_knowledge_service');
+
 // ===== INFLUENCER ROUTES =====
 app.get('/api/influencers', authMiddleware, (req, res) => {
   const { platform, category, region, search, min_followers, max_followers, sort_by } = req.query;
@@ -21,6 +23,7 @@ app.post('/api/influencers', authMiddleware, (req, res) => {
   const result = db.prepare(`INSERT INTO influencers (platform, kol_handle, profile_link, followers, avg_views_10, avg_engagement, category, sub_category, region, language, content_style, collab_type, cost_usd, cost_range_min, cost_range_max, cpm, brand_collab_history, contact_email) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
     platform, kol_handle, profile_link, followers || 0, avg_views_10 || 0, avg_engagement || 0, category, sub_category, region, language, content_style, collab_type || 'Dedicated', cost_usd || 0, cost_range_min, cost_range_max, cpm, brand_collab_history, contact_email
   );
+  businessKnowledge.archiveInfluencer(db, db.prepare('SELECT * FROM influencers WHERE id = ?').get(result.lastInsertRowid), req.user);
   res.json({ id: result.lastInsertRowid });
 });
 
@@ -56,6 +59,7 @@ app.post('/api/collaborations', authMiddleware, (req, res) => {
     demand_id, influencer_id, req.user.id, status || 'proposed', proposal_notes, cost_quoted || 0, notes
   );
   db.prepare('INSERT INTO activity_log (user_id, action, module, details, ip_address) VALUES (?, ?, ?, ?, ?)').run(req.user.id, 'create_collab', 'collaboration', 'Created collaboration for influencer ' + influencer_id, req.ip);
+  businessKnowledge.archiveCollaboration(db, db.prepare('SELECT * FROM collaborations WHERE id = ?').get(result.lastInsertRowid), req.user);
   res.json({ id: result.lastInsertRowid });
 });
 
@@ -76,6 +80,7 @@ app.put('/api/collaborations/:id', authMiddleware, (req, res) => {
   const { status, cost_quoted, cost_actual, content_url, notes, timeline_start, timeline_end } = req.body;
   db.prepare('UPDATE collaborations SET status = COALESCE(?, status), cost_quoted = COALESCE(?, cost_quoted), cost_actual = COALESCE(?, cost_actual), content_url = COALESCE(?, content_url), notes = COALESCE(?, notes), timeline_start = COALESCE(?, timeline_start), timeline_end = COALESCE(?, timeline_end), updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(status, cost_quoted, cost_actual, content_url, notes, timeline_start, timeline_end, req.params.id);
   db.prepare('INSERT INTO activity_log (user_id, action, module, details, ip_address) VALUES (?, ?, ?, ?, ?)').run(req.user.id, 'update_collab', 'collaboration', 'Updated collaboration ' + req.params.id + ' to ' + (status || 'no_status_change'), req.ip);
+  businessKnowledge.archiveCollaboration(db, db.prepare('SELECT * FROM collaborations WHERE id = ?').get(req.params.id), req.user);
   res.json({ success: true });
 });
 

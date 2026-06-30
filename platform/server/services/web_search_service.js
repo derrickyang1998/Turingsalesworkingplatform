@@ -30,22 +30,31 @@ async function searchWeb(query, opts) {
     return { used: false, provider: provider, results: [], reason: 'fetch not available' };
   }
 
-  const response = await fetchImpl(opts.url || DEFAULT_TAVILY_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': 'Bearer ' + apiKey
-    },
-    body: JSON.stringify({
-      query: query,
-      search_depth: opts.searchDepth || 'basic',
-      max_results: maxResults,
-      include_answer: false,
-      include_raw_content: false
-    })
-  });
+  let response;
+  try {
+    response = await fetchImpl(opts.url || DEFAULT_TAVILY_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + apiKey
+      },
+      body: JSON.stringify({
+        query: query,
+        search_depth: opts.searchDepth || 'basic',
+        max_results: maxResults,
+        include_answer: false,
+        include_raw_content: false
+      })
+    });
+  } catch (e) {
+    const cached = getCachedSearchResult(opts.db, query, provider);
+    if (cached) return cached;
+    return { used: false, provider: provider, results: [], reason: 'web search network error: ' + e.message };
+  }
 
   if (!response.ok) {
+    const cached = getCachedSearchResult(opts.db, query, provider);
+    if (cached) return cached;
     return {
       used: false,
       provider: provider,
@@ -79,12 +88,32 @@ function cacheSearchResult(db, query, result) {
   if (!db || !result || !result.used) return;
   try {
     db.prepare('INSERT INTO web_search_cache (provider, query, response_json) VALUES (?, ?, ?)')
-      .run(result.provider || 'tavily', query, JSON.stringify(result.response || result.results || {}));
+      .run(result.provider || 'tavily', query, JSON.stringify(result));
   } catch (e) {}
+}
+
+function getCachedSearchResult(db, query, provider) {
+  if (!db || !query) return null;
+  try {
+    const row = db.prepare(`
+      SELECT response_json
+      FROM web_search_cache
+      WHERE provider = ? AND query = ? AND created_at >= datetime('now', '-1 day')
+      ORDER BY created_at DESC, id DESC
+      LIMIT 1
+    `).get(provider || 'tavily', query);
+    if (!row) return null;
+    const parsed = JSON.parse(row.response_json || '{}');
+    if (parsed && Array.isArray(parsed.results)) {
+      return Object.assign({}, parsed, { used: true, provider: parsed.provider || provider || 'tavily', cached: true });
+    }
+  } catch (e) {}
+  return null;
 }
 
 module.exports = {
   searchWeb,
   formatWebContext,
-  cacheSearchResult
+  cacheSearchResult,
+  getCachedSearchResult
 };

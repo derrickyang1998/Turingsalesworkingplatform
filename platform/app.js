@@ -111,7 +111,9 @@ function apiFetch(url, opts) {
   opts = opts || {};
   opts.headers = opts.headers || {};
   opts.headers['Authorization'] = 'Bearer ' + AUTH_TOKEN;
-  opts.headers['Content-Type'] = opts.headers['Content-Type'] || 'application/json';
+  if (!(opts.body instanceof FormData)) {
+    opts.headers['Content-Type'] = opts.headers['Content-Type'] || 'application/json';
+  }
   return fetch(API + url, opts);
 }
 
@@ -749,9 +751,50 @@ function renderKnowledgeBase() {
     return '<div style="border-bottom:1px solid var(--border);padding:10px 0">' +
       '<div style="display:flex;justify-content:space-between;gap:10px"><strong>' + esc(e.title || e.entry_type || 'Knowledge') + '</strong><span style="font-size:11px;opacity:.55">' + esc(e.visibility || '-') + ' · used ' + (e.usage_count || 0) + '</span></div>' +
       '<div style="font-size:12px;opacity:.7;margin:4px 0">' + esc(e.summary || e.snippet || (e.content || '').substring(0, 160)) + '</div>' +
-      '<div style="font-size:11px;opacity:.55">' + esc(e.entry_type || '') + ' · ' + esc(e.source_type || '') + (tags.length ? ' · ' + tags.map(esc).join(', ') : '') + '</div>' +
+      '<div style="font-size:11px;opacity:.55">' + esc(e.entry_type || '') + ' · ' + esc(e.source_type || '') + (e.source_id ? ' · ' + esc(e.source_id) : '') + (e.business_type ? ' · ' + esc(e.business_type + ':' + (e.business_id || '')) : '') + (tags.length ? ' · ' + tags.map(esc).join(', ') : '') + '</div>' +
+      '<div style="font-size:11px;opacity:.45;margin-top:2px">' + esc(e.updated_at || e.created_at || '') + '</div>' +
       '</div>';
   }).join('');
+}
+
+async function syncObsidianKnowledge(dryRun) {
+  var result = document.getElementById('kbSyncResult');
+  if (result) result.textContent = dryRun ? 'Checking Obsidian vault...' : 'Syncing Obsidian vault...';
+  try {
+    var root = document.getElementById('obsidianRootPath')?.value || 'D:\\主盘\\图灵集市';
+    var r = await apiFetch('/admin/knowledge/import/obsidian', {
+      method: 'POST',
+      body: JSON.stringify({ root_path: root, dry_run: !!dryRun, visibility: 'team' })
+    });
+    if (!r.ok) throw new Error(await r.text());
+    var d = await r.json();
+    if (result) {
+      result.textContent = (d.dryRun ? 'Dry run' : 'Synced') + ': eligible ' + (d.eligible || 0) + ', imported ' + (d.imported || 0) + ', skipped ' + (d.skipped || 0);
+    }
+    if (!dryRun) loadKnowledgeBase();
+  } catch(e) {
+    if (result) result.textContent = 'Obsidian sync failed: ' + e.message;
+    toast('Obsidian sync failed', 'error');
+  }
+}
+
+async function exportKnowledgeVault() {
+  var result = document.getElementById('kbSyncResult');
+  if (result) result.textContent = 'Exporting platform vault...';
+  try {
+    var root = document.getElementById('vaultRootPath')?.value || 'D:\\图灵商务在线平台';
+    var r = await apiFetch('/admin/knowledge/vault/export', {
+      method: 'POST',
+      body: JSON.stringify({ root_path: root, limit: 5000 })
+    });
+    if (!r.ok) throw new Error(await r.text());
+    var d = await r.json();
+    if (result) result.textContent = 'Exported ' + (d.exported || 0) + ' entries to ' + (d.rootPath || root);
+    toast('Knowledge vault exported');
+  } catch(e) {
+    if (result) result.textContent = 'Vault export failed: ' + e.message;
+    toast('Vault export failed', 'error');
+  }
 }
 
 // Save KB to server
@@ -790,16 +833,112 @@ async function archiveToKB(type, title, content, tags) {
   await saveKnowledgeEntry(entry);
 }
 
+function customerFormPayload() {
+  return {
+    brand_name: document.getElementById('custBrand')?.value.trim() || '',
+    company_name: document.getElementById('custCompany')?.value.trim() || '',
+    contact_person: document.getElementById('custContact')?.value.trim() || '',
+    contact_info: document.getElementById('custContactInfo')?.value.trim() || '',
+    industry: document.getElementById('custIndustry')?.value || '',
+    stage: document.getElementById('custStage')?.value || 'lead',
+    source: document.getElementById('custSource')?.value || 'manual',
+    budget_estimate: document.getElementById('custBudget')?.value || '',
+    notes: document.getElementById('custNotes')?.value.trim() || '',
+    opportunity_value: Number(document.getElementById('custOppValue')?.value || 0) || 0
+  };
+}
+
+function openAddCustomer() {
+  var modal = document.getElementById('custModal');
+  if (!modal) return;
+  document.getElementById('custModalTitle').textContent = '新增客户';
+  ['custBrand','custCompany','custContact','custContactInfo','custNotes','custOppValue','custCloseDate'].forEach(function(id) {
+    var el = document.getElementById(id); if (el) el.value = '';
+  });
+  var edit = document.getElementById('custEditId'); if (edit) edit.value = '';
+  var stage = document.getElementById('custStage'); if (stage) stage.value = 'lead';
+  modal.style.display = 'flex';
+}
+
+function closeCustModal() {
+  var modal = document.getElementById('custModal');
+  if (modal) modal.style.display = 'none';
+}
+
+function fillCustomerForm(c) {
+  c = c || {};
+  var map = {
+    custBrand: c.brand_name,
+    custCompany: c.company_name,
+    custContact: c.contact_person,
+    custContactInfo: c.contact_info,
+    custIndustry: c.industry,
+    custStage: c.stage,
+    custSource: c.source,
+    custBudget: c.budget_estimate,
+    custNotes: c.notes,
+    custOppValue: c.opportunity_value
+  };
+  Object.keys(map).forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) el.value = map[id] || '';
+  });
+}
+
+async function editCustomer(id) {
+  try {
+    var r = await apiFetch('/customers/' + id + '/detail');
+    if (!r.ok) throw new Error('Customer not found');
+    var d = await r.json();
+    document.getElementById('custModalTitle').textContent = '编辑客户';
+    var edit = document.getElementById('custEditId'); if (edit) edit.value = id;
+    fillCustomerForm(d.customer || {});
+    var modal = document.getElementById('custModal'); if (modal) modal.style.display = 'flex';
+  } catch(e) { toast('Load customer failed: ' + e.message, 'error'); }
+}
+
+async function saveCustomer() {
+  var payload = customerFormPayload();
+  if (!payload.brand_name) { toast('Brand name required', 'error'); return false; }
+  var editId = document.getElementById('custEditId')?.value || '';
+  try {
+    var r = await apiFetch(editId ? ('/customers/' + editId) : '/customers', {
+      method: editId ? 'PUT' : 'POST',
+      body: JSON.stringify(payload)
+    });
+    if (!r.ok) throw new Error(await r.text());
+    closeCustModal();
+    await loadCustomers();
+    toast(editId ? 'Customer updated' : 'Customer created');
+    return true;
+  } catch(e) { toast('Save failed: ' + e.message, 'error'); return false; }
+}
+
+async function changeCustomerStage(id, stage) {
+  try {
+    var r = await apiFetch('/customers/' + id, { method: 'PUT', body: JSON.stringify({ stage: stage }) });
+    if (!r.ok) throw new Error(await r.text());
+    await loadCustomers();
+    toast('Stage updated');
+  } catch(e) { toast('Stage update failed', 'error'); }
+}
+
+function forceSaveCustomer() { saveCustomer(); }
+function dismissDup() { var el = document.getElementById('dupWarning'); if (el) el.style.display = 'none'; }
+function viewDupCustomer() { toast('Open the existing customer from search results'); }
+
 // Hook into existing flows to auto-archive
 var _origSaveCustomer = saveCustomer;
 saveCustomer = async function() {
-  await _origSaveCustomer();
+  var ok = await _origSaveCustomer();
+  if (!ok) return false;
   var brand = document.getElementById('custBrand').value.trim();
   var company = document.getElementById('custCompany').value.trim();
   var industry = document.getElementById('custIndustry').value;
   if (brand) {
     await archiveToKB('customer', 'New customer: ' + brand, brand + ' / ' + company + ' / ' + industry, [industry, 'customer']);
   }
+  return true;
 };
 
 var _origGenerateAIStrategy = generateAIStrategy;
@@ -1392,6 +1531,19 @@ async function updateCollabStatus(collabId) {
 }
 
 // ===== KEEP: legacy upload support =====
+async function finishInfluencerUpload(inf, statusEl) {
+  INFLUENCERS = inf;
+  if (statusEl) statusEl.innerHTML = '<span style="color:#0f7b3c">' + inf.length + ' 位网红已解析，正在导入知识库...</span>';
+  showInfPreview(inf);
+  try {
+    var d = await importInfluencers(inf);
+    if (statusEl) statusEl.innerHTML = '<span style="color:#0f7b3c">' + (d.imported || 0) + ' 位网红已导入，KB #' + (d.knowledge_entry_id || '-') + '</span>';
+    await loadInfluencersFromAPI();
+  } catch (err) {
+    if (statusEl) statusEl.innerHTML = '<span style="color:#d94641">导入失败: ' + esc(err.message) + '</span>';
+  }
+}
+
 function handleUpload(e) {
   var f = e.target.files[0]; if (!f) return;
   var s = document.getElementById('uploadOK');
@@ -1407,7 +1559,7 @@ function handleUpload(e) {
       try {
         var d = JSON.parse(ev.target.result);
         var inf = Array.isArray(d) ? d : (d.influencers || d.data || []);
-        if (inf.length) { INFLUENCERS = inf; s.innerHTML = '<span style=\"color:#0f7b3c\">' + inf.length + ' 位网红已加载</span>'; matchInfluencers(); showInfPreview(inf); }
+        if (inf.length) { finishInfluencerUpload(inf, s); }
         else { s.innerHTML = '<span style=\"color:#d94641\">未找到网红数据</span>'; }
       } catch (err) { s.innerHTML = '<span style=\"color:#d94641\">JSON 解析失败: ' + err.message + '</span>'; }
     };
@@ -1424,7 +1576,7 @@ function handleUpload(e) {
         headers.forEach(function(h, i) { o[h] = vals[i] ? vals[i].trim().replace(/^'|'$/g, '') : ''; });
         return o;
       }).filter(function(o) { return o.kol_handle || o.name || o.Name || o['KOL Handle']; });
-      if (inf.length) { INFLUENCERS = inf; s.innerHTML = '<span style=\"color:#0f7b3c\">' + inf.length + ' 位网红已加载</span>'; matchInfluencers(); showInfPreview(inf); }
+      if (inf.length) { finishInfluencerUpload(inf, s); }
       else { s.innerHTML = '<span style=\"color:#d94641\">未识别到网红数据，请检查格式</span>'; }
     };
     r.readAsText(f);
@@ -2355,6 +2507,7 @@ function exportBrandCSV() {
 // ===== M3: DEMAND & PROPOSAL (v8.0) =====
 var uploadedDemandContent = '';
 var demandAnalysisResult = '';
+var uploadedDemandEntryId = null;
 function handleDemandFile(event) {
   var file = event.target.files[0];
   if (!file) return;
@@ -2366,14 +2519,34 @@ function handleDemandDrop(event) {
   if (!file) return;
   processDemandFile(file);
 }
-function processDemandFile(file) {
+async function processDemandFile(file) {
   var status = document.getElementById('demandFileStatus');
   if (!status) return;
-  status.innerHTML = 'Reading: ' + file.name + '...';
+  status.innerHTML = 'Uploading: ' + file.name + '...';
   document.getElementById('btnAnalyzeAI').disabled = true;
+  try {
+    var fd = new FormData();
+    fd.append('file', file);
+    fd.append('entry_type', 'demand_upload');
+    fd.append('source_type', 'demand_upload');
+    fd.append('visibility', 'private');
+    fd.append('tags', JSON.stringify(['demand', 'upload']));
+    var resp = await apiFetch('/knowledge/upload', { method: 'POST', body: fd });
+    if (!resp.ok) throw new Error(await resp.text());
+    var data = await resp.json();
+    uploadedDemandEntryId = data.entry && data.entry.id ? data.entry.id : null;
+    uploadedDemandContent = data.entry ? (data.entry.content || data.entry.summary || '') : '';
+    status.innerHTML = 'OK: ' + file.name + ' (' + (data.rows || 0) + ' rows, KB #' + (uploadedDemandEntryId || '-') + ')';
+    document.getElementById('btnAnalyzeAI').disabled = false;
+    document.getElementById('aiAnalyzeHint').textContent = 'Ready to analyze';
+    return;
+  } catch(uploadErr) {
+    status.innerHTML = 'Server upload failed, reading locally: ' + file.name;
+  }
   var reader = new FileReader();
   reader.onload = function(e) {
     uploadedDemandContent = e.target.result;
+    uploadedDemandEntryId = null;
     status.innerHTML = 'OK: ' + file.name + ' (' + (uploadedDemandContent.length / 1024).toFixed(1) + 'KB)';
     document.getElementById('btnAnalyzeAI').disabled = false;
     document.getElementById('aiAnalyzeHint').textContent = 'Ready to analyze';
@@ -2391,7 +2564,7 @@ async function analyzeDemandAI() {
   hint.textContent = 'Analyzing...';
   var prompt = 'Analyze this demand and extract as JSON with: brand, company, product, usp, industry, budget_range, target_market, platforms, competitors(array), requirements(array) Content: ' + (uploadedDemandContent || ('Brand: ' + (document.getElementById('d_brand')?.value||'') + ' Product: ' + (document.getElementById('d_product')?.value||'')));
   try {
-    var r = await apiFetch('/ai/chat', { method: 'POST', body: JSON.stringify({ message: 'Output JSON only.\n' + prompt, allow_web: false, source_module: 'demand_analysis', summary_visibility: 'private' }) });
+    var r = await apiFetch('/ai/chat', { method: 'POST', body: JSON.stringify({ message: 'Output JSON only.\n' + prompt, allow_web: false, source_module: 'demand_analysis', business_type: uploadedDemandEntryId ? 'demand' : '', business_id: uploadedDemandEntryId || '', summary_visibility: 'private' }) });
     if (!r.ok) throw new Error('API:' + r.status);
     var d = await r.json();
     var content = d.answer || '';
@@ -2433,7 +2606,7 @@ function getEditedDemand() {
   };
 }
 function goStep3() { document.getElementById('m3s2').classList.add('hidden'); document.getElementById('m3s3').classList.remove('hidden'); updSteps(3); initM3(); }
-function resetDemand() { uploadedDemandContent = ''; demandAnalysisResult = ''; document.getElementById('m3s2').classList.add('hidden'); document.getElementById('m3s3').classList.add('hidden'); document.getElementById('m3s1').classList.remove('hidden'); document.getElementById('demandFileStatus').innerHTML = ''; document.getElementById('btnAnalyzeAI').disabled = true; document.getElementById('aiAnalyzeHint').textContent = 'Upload first'; updSteps(1); }
+function resetDemand() { uploadedDemandContent = ''; uploadedDemandEntryId = null; demandAnalysisResult = ''; document.getElementById('m3s2').classList.add('hidden'); document.getElementById('m3s3').classList.add('hidden'); document.getElementById('m3s1').classList.remove('hidden'); document.getElementById('demandFileStatus').innerHTML = ''; document.getElementById('btnAnalyzeAI').disabled = true; document.getElementById('aiAnalyzeHint').textContent = 'Upload first'; updSteps(1); }
 function generateHTMLPPT() {
   var demand = getEditedDemand();
   var brand = demand.brand || 'Brand';
@@ -2495,9 +2668,13 @@ function exportInf(mode, ids) {
 }
 function importInfluencers(rows) {
   if (!rows || !rows.length) return;
-  apiFetch('/influencers/import', { method: 'POST', body: JSON.stringify({ rows: rows }) }).then(function(r) { return r.json(); }).then(function(d) {
-    if (d.imported) { toast('Imported ' + d.imported); loadInfluencersFromAPI(); }
-  }).catch(function(e) { toast('Import: ' + e.message, 'error'); });
+  return apiFetch('/influencers/import', { method: 'POST', body: JSON.stringify({ rows: rows }) }).then(function(r) {
+    if (!r.ok) throw new Error('Import failed: ' + r.status);
+    return r.json();
+  }).then(function(d) {
+    if (d.imported) { toast('Imported ' + d.imported); }
+    return d;
+  }).catch(function(e) { toast('Import: ' + e.message, 'error'); throw e; });
 }
 function downloadInfTemplate() {
   var csv = '日期,提报人,项目,推广产品,是否重复,网红频道名称,网红粉丝量,网红频道链接,社媒平台,国家,标签,近10个视频均播,成本价,网红交付物,Turing备注,对外商务报价,邮箱,cpm,cpv';

@@ -1,4 +1,5 @@
 const engine = require('./workflow_engine');
+const businessKnowledge = require('./services/business_knowledge_service');
 
 module.exports = function(app, db, authMiddleware, adminOnly) {
   // ============================================================
@@ -46,6 +47,7 @@ module.exports = function(app, db, authMiddleware, adminOnly) {
         JSON.stringify(nodes || []), JSON.stringify(edges || []),
         req.user.id
       );
+      businessKnowledge.archiveWorkflowTemplate(db, db.prepare('SELECT * FROM workflow_templates WHERE id = ?').get(result.lastInsertRowid), req.user);
       res.json({ id: result.lastInsertRowid });
     } catch (e) {
       res.status(500).json({ error: e.message });
@@ -76,6 +78,7 @@ module.exports = function(app, db, authMiddleware, adminOnly) {
         edges ? JSON.stringify(edges) : template.edges,
         req.params.id
       );
+      businessKnowledge.archiveWorkflowTemplate(db, db.prepare('SELECT * FROM workflow_templates WHERE id = ?').get(req.params.id), req.user);
       res.json({ success: true });
     } catch (e) {
       res.status(500).json({ error: e.message });
@@ -98,6 +101,7 @@ module.exports = function(app, db, authMiddleware, adminOnly) {
     try {
       const result = db.prepare("UPDATE workflow_templates SET is_active = 1, updated_at = datetime('now') WHERE id = ?").run(req.params.id);
       if (result.changes === 0) return res.status(404).json({ error: 'Template not found' });
+      businessKnowledge.archiveWorkflowTemplate(db, db.prepare('SELECT * FROM workflow_templates WHERE id = ?').get(req.params.id), req.user);
       res.json({ success: true });
     } catch (e) {
       res.status(500).json({ error: e.message });
@@ -116,6 +120,7 @@ module.exports = function(app, db, authMiddleware, adminOnly) {
         return res.status(400).json({ error: 'template_id, business_type, and business_id are required' });
       }
       const instanceId = engine.startWorkflow(template_id, business_type, business_id, data || {}, req.user.id);
+      businessKnowledge.archiveWorkflowInstance(db, db.prepare('SELECT * FROM workflow_instances WHERE id = ?').get(instanceId), req.user, 'started');
       res.json({ id: instanceId });
     } catch (e) {
       res.status(500).json({ error: e.message });
@@ -267,6 +272,7 @@ module.exports = function(app, db, authMiddleware, adminOnly) {
       if (instance.status !== 'active') return res.status(400).json({ error: 'Only active instances can be paused' });
 
       engine.pauseWorkflow(req.params.id);
+      businessKnowledge.archiveWorkflowInstance(db, db.prepare('SELECT * FROM workflow_instances WHERE id = ?').get(req.params.id), req.user, 'paused');
       res.json({ success: true });
     } catch (e) {
       res.status(500).json({ error: e.message });
@@ -281,6 +287,7 @@ module.exports = function(app, db, authMiddleware, adminOnly) {
       if (instance.status !== 'paused') return res.status(400).json({ error: 'Only paused instances can be resumed' });
 
       engine.resumeWorkflow(req.params.id);
+      businessKnowledge.archiveWorkflowInstance(db, db.prepare('SELECT * FROM workflow_instances WHERE id = ?').get(req.params.id), req.user, 'resumed');
       res.json({ success: true });
     } catch (e) {
       res.status(500).json({ error: e.message });
@@ -297,6 +304,7 @@ module.exports = function(app, db, authMiddleware, adminOnly) {
       }
 
       engine.cancelWorkflow(req.params.id);
+      businessKnowledge.archiveWorkflowInstance(db, db.prepare('SELECT * FROM workflow_instances WHERE id = ?').get(req.params.id), req.user, 'cancelled');
       res.json({ success: true });
     } catch (e) {
       res.status(500).json({ error: e.message });
@@ -391,6 +399,7 @@ module.exports = function(app, db, authMiddleware, adminOnly) {
       }
 
       engine.handleTaskAction(req.params.id, 'approve', req.user.id, req.body.comment || '');
+      businessKnowledge.archiveWorkflowTask(db, db.prepare('SELECT * FROM workflow_tasks WHERE id = ?').get(req.params.id), req.user, 'approve', req.body.comment || '');
       res.json({ success: true });
     } catch (e) {
       res.status(500).json({ error: e.message });
@@ -407,6 +416,7 @@ module.exports = function(app, db, authMiddleware, adminOnly) {
       }
 
       engine.handleTaskAction(req.params.id, 'reject', req.user.id, req.body.comment || '');
+      businessKnowledge.archiveWorkflowTask(db, db.prepare('SELECT * FROM workflow_tasks WHERE id = ?').get(req.params.id), req.user, 'reject', req.body.comment || '');
       res.json({ success: true });
     } catch (e) {
       res.status(500).json({ error: e.message });
@@ -431,6 +441,7 @@ module.exports = function(app, db, authMiddleware, adminOnly) {
           JSON.stringify({ taskId: parseInt(req.params.id), comment: req.body.comment || '' }));
 
       engine.advanceNode(task.instance_id, { userId: req.user.id });
+      businessKnowledge.archiveWorkflowTask(db, db.prepare('SELECT * FROM workflow_tasks WHERE id = ?').get(req.params.id), req.user, 'complete', req.body.comment || '');
       res.json({ success: true });
     } catch (e) {
       res.status(500).json({ error: e.message });

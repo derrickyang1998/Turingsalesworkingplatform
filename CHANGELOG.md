@@ -1,5 +1,33 @@
 ﻿# Changelog — TuringMarket 图灵商务在线工作平台
 
+## v0.2.1-knowledge-vault-bridge (2026-06-30) — 全模块知识归档与平台 Vault
+
+### 🔗 全模块知识归档
+- 新增 `business_knowledge_service`，统一沉淀 CRM 线索、客户、商机、品牌画像、达人档案、合作记录、工作流模板/实例/任务动作。
+- 后端写操作自动归档到知识库，主业务保存不再依赖前端本地 `archiveToKB`。
+- M3 需求文件上传改为优先走 `/api/knowledge/upload`，上传即进入知识库；M4 网红文件解析后会调用 `/api/influencers/import` 并生成批次知识摘要。
+
+### 📚 Obsidian 与平台 Vault
+- 新增 `obsidian_ingest_service`，支持递归扫描 Obsidian Vault，跳过 `.obsidian/.git/99-private/private/secrets/密钥/密码` 等路径和疑似密钥内容。
+- 新增管理员接口 `POST /api/admin/knowledge/import/obsidian`，支持 dry-run 和正式同步，默认导入路径 `D:\主盘\图灵集市`。
+- 新增 `vault_export_service` 和管理员接口 `POST /api/admin/knowledge/vault/export`，将平台知识导出为 Obsidian 兼容 Markdown，默认路径 `D:\图灵商务在线平台`。
+- 导入/导出路径限制在服务端配置白名单内，并限制文件数、目录深度、单文件大小和总读取字节数。
+- Admin 知识库页新增 Obsidian 导入、平台 Vault 导出、业务来源/更新时间展示。
+
+### 🤖 AI/RAG 稳定性
+- RAG 系统提示改为稳定中文上下文标记，要求回答优先引用 `[KB-n]` / `[WEB-n]`。
+- DeepSeek key 缺失、HTTP 失败或网络异常时，不再直接中断 AI 请求，会基于已命中的知识库上下文降级回复。
+- Tavily 网络异常时优先使用 24 小时内缓存，无法联网时降级为仅知识库回答。
+- `/api/ai/proposal-draft` 不再把检索范围锁死到当前 demand，避免漏掉方法论、历史方案和网红批次摘要。
+
+### ✅ 验证
+- `node --check app.js; node --check ppt.js; node --check server/server.js; node --check server/routes*.js; node --check server/services/*.js`
+- `npm test`（10 项通过：原 AI/KB 用例 + Obsidian 安全导入 + 路径白名单拒绝 + 业务归档权限 + Markdown Vault 导出）
+- API smoke：临时服务健康检查、管理员登录、Obsidian dry-run、平台 Vault export 通过。
+- 真实本地同步：`D:\主盘\图灵集市` dry-run 命中 65 个可导入文件、跳过 9 个敏感/私密路径；已导入 65 条并导出 65 个 Markdown 到 `D:\图灵商务在线平台`。
+
+---
+
 ## v0.2.0-ai-knowledge-foundation (2026-06-30) — AI 对话与自成长知识库底座
 
 ### 🧠 知识底座

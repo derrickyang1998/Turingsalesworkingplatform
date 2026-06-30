@@ -1,4 +1,5 @@
 ﻿module.exports = function(app, db, authMiddleware) {
+  const businessKnowledge = require('./services/business_knowledge_service');
   app.post('/api/brands', authMiddleware, (req, res) => {
     var b = req.body;
     var existing = db.prepare('SELECT id FROM brands WHERE name = ?').get(b.name);
@@ -6,11 +7,13 @@
       db.prepare('UPDATE brands SET name_cn=?, industry_tags=?, market=?, estimated_annual_revenue=?, user_base=?, amazon_rating=?, youtube_followers=?, instagram_followers=?, tiktok_followers=?, search_volume_monthly=?, monthly_posts=?, avg_engagement=?, avg_views=?, top_platform=?, creative_angles=?, top_products=? WHERE id=?').run(
         b.name_cn, (b.industry_tags||[]).join(','), b.market, b.estimated_annual_revenue, b.user_base, b.amazon_rating, b.youtube_followers, b.instagram_followers, b.tiktok_followers, b.search_volume_monthly, b.monthly_posts, b.avg_engagement, b.avg_views, b.top_platform, (b.creative_angles||[]).join(','), (b.top_products||[]).join(','), existing.id
       );
+      businessKnowledge.archiveBrand(db, Object.assign({}, b, { id: existing.id }), req.user);
       return res.json({ id: existing.id, updated: true });
     }
     var r = db.prepare('INSERT INTO brands (name, name_cn, industry_tags, market, estimated_annual_revenue, user_base, amazon_rating, youtube_followers, instagram_followers, tiktok_followers, search_volume_monthly, monthly_posts, avg_engagement, avg_views, top_platform, creative_angles, top_products) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(
       b.name, b.name_cn, (b.industry_tags||[]).join(','), b.market, b.estimated_annual_revenue, b.user_base, b.amazon_rating, b.youtube_followers, b.instagram_followers, b.tiktok_followers, b.search_volume_monthly, b.monthly_posts, b.avg_engagement, b.avg_views, b.top_platform, (b.creative_angles||[]).join(','), (b.top_products||[]).join(',')
     );
+    businessKnowledge.archiveBrand(db, Object.assign({}, b, { id: r.lastInsertRowid }), req.user);
     res.json({ id: r.lastInsertRowid, updated: false });
   });
 

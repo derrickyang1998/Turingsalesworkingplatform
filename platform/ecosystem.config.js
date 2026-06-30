@@ -7,7 +7,6 @@ module.exports = {
     env: {
       NODE_ENV: "production",
       PORT: "3002",
-      JWT_SECRET: "turingmarket-jwt-please-change-me",
       DB_PATH: "server/db/turingmarket.db"
     },
     instances: 1,

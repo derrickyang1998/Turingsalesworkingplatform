@@ -1,4 +1,5 @@
 module.exports = function(app, db, authMiddleware) {
+  const businessKnowledge = require('./services/business_knowledge_service');
 
   const STAGES = ['lead', 'info_confirmed', 'advantage_shared', 'needs_confirmed', 'analysis', 'proposal', 'kol_matching', 'cooperation'];
   const TERMINAL_STAGES = ['paused', 'won', 'lost'];
@@ -42,6 +43,7 @@ module.exports = function(app, db, authMiddleware) {
       const { brand_name, company_name, contact_person, contact_info, source, industry, notes } = req.body;
       const result = db.prepare(`INSERT INTO leads (brand_name, company_name, contact_person, contact_info, source, industry, notes, assigned_to, lead_score) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
         .run(brand_name, company_name, contact_person, contact_info, source || 'manual', industry, notes, req.user.id, 10);
+      businessKnowledge.archiveLead(db, db.prepare('SELECT * FROM leads WHERE id = ?').get(result.lastInsertRowid), req.user);
       res.json({ id: result.lastInsertRowid });
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
@@ -51,6 +53,7 @@ module.exports = function(app, db, authMiddleware) {
       const { brand_name, company_name, contact_person, contact_info, source, industry, notes, status, lead_score } = req.body;
       db.prepare(`UPDATE leads SET brand_name=COALESCE(?,brand_name), company_name=COALESCE(?,company_name), contact_person=COALESCE(?,contact_person), contact_info=COALESCE(?,contact_info), source=COALESCE(?,source), industry=COALESCE(?,industry), notes=COALESCE(?,notes), status=COALESCE(?,status), lead_score=COALESCE(?,lead_score), updated_at=datetime('now') WHERE id=?`)
         .run(brand_name, company_name, contact_person, contact_info, source, industry, notes, status, lead_score, req.params.id);
+      businessKnowledge.archiveLead(db, db.prepare('SELECT * FROM leads WHERE id = ?').get(req.params.id), req.user);
       res.json({ success: true });
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
@@ -63,6 +66,8 @@ module.exports = function(app, db, authMiddleware) {
       const result = db.prepare(`INSERT INTO customers (brand_name, company_name, industry, contact_person, contact_info, source, stage, assigned_to, lead_source, created_by) VALUES (?, ?, ?, ?, ?, ?, 'lead', ?, ?, ?)`)
         .run(lead.brand_name, lead.company_name, lead.industry, lead.contact_person, lead.contact_info, lead.source, req.user.id, 'lead_conversion', req.user.id);
       db.prepare("UPDATE leads SET status='converted', converted_customer_id=?, updated_at=datetime('now') WHERE id=?").run(result.lastInsertRowid, req.params.id);
+      businessKnowledge.archiveLead(db, db.prepare('SELECT * FROM leads WHERE id = ?').get(req.params.id), req.user);
+      businessKnowledge.archiveCustomer(db, db.prepare('SELECT * FROM customers WHERE id = ?').get(result.lastInsertRowid), req.user);
       res.json({ customer_id: result.lastInsertRowid });
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
@@ -133,6 +138,7 @@ module.exports = function(app, db, authMiddleware) {
       brand_name, company_name, contact_person, contact_info, industry, stage || 'lead', source, budget_estimate, notes, req.user.id, assigned_to || req.user.id
     );
     db.prepare('INSERT INTO activity_log (user_id, action, module, details, ip_address) VALUES (?, ?, ?, ?, ?)').run(req.user.id, 'create_customer', 'customer', 'Created customer: ' + brand_name, req.ip);
+    businessKnowledge.archiveCustomer(db, db.prepare('SELECT * FROM customers WHERE id = ?').get(result.lastInsertRowid), req.user);
     db.prepare('INSERT INTO customer_activity (customer_id, user_id, action, stage_to, notes) VALUES (?, ?, ?, ?, ?)').run(result.lastInsertRowid, req.user.id, 'created', stage || 'lead', '客户创建');
     res.json({ id: result.lastInsertRowid });
   });
@@ -154,6 +160,7 @@ module.exports = function(app, db, authMiddleware) {
       } catch(ew) {}
     }
     db.prepare('INSERT INTO activity_log (user_id, action, module, details, ip_address) VALUES (?, ?, ?, ?, ?)').run(req.user.id, 'update_customer', 'customer', 'Updated customer #' + req.params.id, req.ip);
+    businessKnowledge.archiveCustomer(db, db.prepare('SELECT * FROM customers WHERE id = ?').get(req.params.id), req.user);
     res.json({ success: true });
   });
 
@@ -168,16 +175,19 @@ module.exports = function(app, db, authMiddleware) {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
     const { user_id } = req.body;
     db.prepare('UPDATE customers SET assigned_to=?, is_public=0, assigned_at=datetime(\'now\') WHERE id=?').run(user_id, req.params.id);
+    businessKnowledge.archiveCustomer(db, db.prepare('SELECT * FROM customers WHERE id = ?').get(req.params.id), req.user);
     res.json({ success: true });
   });
 
   // Return to public pool
   app.post('/api/customers/:id/return-pool', authMiddleware, (req, res) => {
     db.prepare("UPDATE customers SET assigned_to=NULL, is_public=1, updated_at=datetime('now') WHERE id=?").run(req.params.id);
+    businessKnowledge.archiveCustomer(db, db.prepare('SELECT * FROM customers WHERE id = ?').get(req.params.id), req.user);
     res.json({ success: true });
   });
   app.post('/api/customers/:id/return', authMiddleware, (req, res) => {
     db.prepare("UPDATE customers SET assigned_to=NULL, is_public=1, updated_at=datetime('now') WHERE id=?").run(req.params.id);
+    businessKnowledge.archiveCustomer(db, db.prepare('SELECT * FROM customers WHERE id = ?').get(req.params.id), req.user);
     res.json({ success: true });
   });
 
@@ -203,6 +213,7 @@ module.exports = function(app, db, authMiddleware) {
       const { customer_id, name, stage, value, win_probability, product_name, channel_type, expected_close_date, notes } = req.body;
       const result = db.prepare(`INSERT INTO opportunities (customer_id, name, stage, value, win_probability, product_name, channel_type, expected_close_date, notes, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
         .run(customer_id, name, stage || 'discovery', value || 0, win_probability || 50, product_name, channel_type, expected_close_date, notes, req.user.id);
+      businessKnowledge.archiveOpportunity(db, db.prepare('SELECT * FROM opportunities WHERE id = ?').get(result.lastInsertRowid), req.user);
       res.json({ id: result.lastInsertRowid });
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
@@ -212,6 +223,7 @@ module.exports = function(app, db, authMiddleware) {
       const { name, stage, value, win_probability, product_name, channel_type, expected_close_date, notes } = req.body;
       db.prepare(`UPDATE opportunities SET name=COALESCE(?,name), stage=COALESCE(?,stage), value=COALESCE(?,value), win_probability=COALESCE(?,win_probability), product_name=COALESCE(?,product_name), channel_type=COALESCE(?,channel_type), expected_close_date=COALESCE(?,expected_close_date), notes=COALESCE(?,notes), updated_at=datetime('now') WHERE id=?`)
         .run(name, stage, value, win_probability, product_name, channel_type, expected_close_date, notes, req.params.id);
+      businessKnowledge.archiveOpportunity(db, db.prepare('SELECT * FROM opportunities WHERE id = ?').get(req.params.id), req.user);
       res.json({ success: true });
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
@@ -285,6 +297,7 @@ module.exports = function(app, db, authMiddleware) {
   app.post('/api/customers/:id/claim', authMiddleware, (req, res) => {
     try {
       db.prepare("UPDATE customers SET assigned_to=?, is_public=0, assigned_at=datetime('now'), updated_at=datetime('now') WHERE id=? AND (is_public=1 OR assigned_to IS NULL)").run(req.user.id, req.params.id);
+      businessKnowledge.archiveCustomer(db, db.prepare('SELECT * FROM customers WHERE id = ?').get(req.params.id), req.user);
       res.json({ success: true });
     } catch (e) { res.status(500).json({ error: e.message }); }
   });

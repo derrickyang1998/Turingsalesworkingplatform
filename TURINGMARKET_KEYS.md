@@ -1,7 +1,7 @@
-﻿DEEPSEEK_API_KEY=sk-5951a22df4fc48ca874b86b87f43cee3
+﻿DEEPSEEK_API_KEY=replace_with_private_value
 SERVER_IP=8.163.129.160
 SSH_KEY_PATH=C:\Users\29272\.ssh\turingmarket_deploy
-ROOT_PASSWORD=turing19980225.
+ROOT_PASSWORD=replace_with_private_value
 GITHUB_REPO=https://github.com/derrickyang1998/Turingsalesworkingplatform
 GIT_BRANCH=codex/phase-2-customer-pipeline
 ADMIN_LOGIN=admin / turing2026

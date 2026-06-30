@@ -1,6 +1,7 @@
 ﻿const express = require('express');
 const cors = require('cors');
 const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '..', '.env'), quiet: true });
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const multer = require('multer');
@@ -10,10 +11,17 @@ const db = require('./db');
 const knowledgeService = require('./services/knowledge_service');
 const aiService = require('./services/ai_service');
 const fileIngestService = require('./services/file_ingest_service');
+const obsidianIngestService = require('./services/obsidian_ingest_service');
+const businessKnowledge = require('./services/business_knowledge_service');
+const vaultExportService = require('./services/vault_export_service');
 const app = express();
 const PORT = process.env.PORT || 3002;
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'db', 'turingmarket.db');
-const JWT_SECRET = process.env.JWT_SECRET || 'turingmarket-platform-jwt-secret-2026';
+const DEFAULT_DEV_JWT_SECRET = 'turingmarket-platform-jwt-secret-2026';
+if (process.env.NODE_ENV === 'production' && (!process.env.JWT_SECRET || process.env.JWT_SECRET === DEFAULT_DEV_JWT_SECRET || /please-change/i.test(process.env.JWT_SECRET))) {
+  throw new Error('JWT_SECRET must be configured to a strong private value in production');
+}
+const JWT_SECRET = process.env.JWT_SECRET || DEFAULT_DEV_JWT_SECRET;
 const TOKEN_EXPIRY = '24h';
 const UPLOAD_DIR = path.join(__dirname, '..', 'uploads');
 const ALLOWED_UPLOAD_EXTS = new Set(['.txt', '.md', '.csv', '.json', '.xlsx']);
@@ -304,6 +312,22 @@ app.post('/api/proposal/generate-ppt', authMiddleware, (req, res) => {
   const outPath = path.join(tmpDir, 'proposal_' + Date.now() + '.pptx');
   fs.writeFileSync(dataPath, JSON.stringify(req.body));
   try {
+    try {
+      knowledgeService.ingestKnowledge(db, {
+        title: 'PPT 生成请求：' + (req.body.brand || req.body.title || Date.now()),
+        summary: String(req.body.summary || req.body.title || req.body.brand || '').slice(0, 240),
+        content: JSON.stringify(req.body, null, 2),
+        entry_type: 'proposal_ppt_request',
+        source_type: 'ppt_generation',
+        source_id: req.body.demand_id || req.body.brand || dataPath,
+        visibility: 'private',
+        tags: ['ppt', 'proposal', req.body.brand].filter(Boolean),
+        business_type: 'proposal',
+        business_id: req.body.demand_id || '',
+        created_by: req.user.id,
+        actor_role: req.user.role
+      });
+    } catch (archiveErr) {}
     cp.execSync('python3 "' + path.join(__dirname, 'generate_ppt.py') + '" "' + dataPath + '" "' + outPath + '"', { timeout: 30000, cwd: __dirname });
     fs.unlinkSync(dataPath);
     res.download(outPath, 'proposal.pptx', function() { try { fs.unlinkSync(outPath); } catch(e) {} });
@@ -416,6 +440,40 @@ app.post('/api/knowledge/upload', authMiddleware, uploadLimiter, function(req, r
   }
 });
 
+app.post('/api/admin/knowledge/import/obsidian', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const result = await obsidianIngestService.syncObsidianFolder(db, {
+      rootPath: req.body.root_path || req.body.rootPath || process.env.OBSIDIAN_KB_ROOT || 'D:\\主盘\\图灵集市',
+      dryRun: boolParam(req.body.dry_run !== undefined ? req.body.dry_run : req.body.dryRun, true),
+      visibility: req.body.visibility || 'team',
+      user: req.user
+    });
+    db.prepare('INSERT INTO activity_log (user_id, action, module, details, ip_address) VALUES (?, ?, ?, ?, ?)')
+      .run(req.user.id, result.dryRun ? 'obsidian_dry_run' : 'obsidian_sync', 'knowledge', 'Obsidian sync eligible=' + result.eligible + ' imported=' + result.imported + ' skipped=' + result.skipped, req.ip);
+    res.json(result);
+  } catch (e) {
+    res.status(/admin only/i.test(e.message) ? 403 : 500).json({ error: e.message });
+  }
+});
+
+app.post('/api/admin/knowledge/vault/export', authMiddleware, adminOnly, (req, res) => {
+  try {
+    const result = vaultExportService.exportKnowledgeVault(db, {
+      rootPath: req.body.root_path || req.body.rootPath || process.env.PLATFORM_KB_VAULT_ROOT || 'D:\\图灵商务在线平台',
+      entry_type: req.body.entry_type,
+      source_type: req.body.source_type,
+      visibility: req.body.visibility,
+      limit: req.body.limit || 5000,
+      user: req.user
+    });
+    db.prepare('INSERT INTO activity_log (user_id, action, module, details, ip_address) VALUES (?, ?, ?, ?, ?)')
+      .run(req.user.id, 'knowledge_vault_export', 'knowledge', 'Exported ' + result.exported + ' knowledge entries to vault', req.ip);
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.post('/api/knowledge/:id/use', authMiddleware, (req, res) => {
   knowledgeService.markKnowledgeUsed(db, [req.params.id]);
   res.json({ success: true });
@@ -500,8 +558,7 @@ app.post('/api/ai/proposal-draft', authMiddleware, aiLimiter, aiQuotaGuard, asyn
       message: prompt,
       allowWeb: boolParam(req.body.allow_web, false),
       source_module: 'proposal',
-      business_type: 'demand',
-      business_id: req.body.demand_id || demandEntry.id,
+      knowledgeLimit: req.body.knowledge_limit || 10,
       summaryVisibility: req.body.summary_visibility || 'private'
     });
     res.json({ draft: result.answer, demand_entry: demandEntry, ai: result });
@@ -556,6 +613,9 @@ app.post('/api/customers/:id/activity', authMiddleware, (req, res) => {
     if (!customer) return res.status(404).json({ error: 'Customer not found' });
     db.prepare('INSERT INTO customer_activity (customer_id, user_id, action, stage_from, stage_to, notes) VALUES (?, ?, ?, ?, ?, ?)')
       .run(req.params.id, req.user.id, action || 'note', customer.stage, customer.stage, notes || '');
+    businessKnowledge.archiveCustomer(db, Object.assign({}, customer, {
+      latest_activity: { action: action || 'note', notes: notes || '' }
+    }), req.user);
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
