@@ -2,6 +2,17 @@
 
 ## v9.0 (2026-06-26) — Apple-style UI 第一阶段
 
+### v9.14 浅色白底 HTMLPPT / PPTX 同构生成
+- 修复线上生成结果仍像旧版样式的问题：HTML 默认生成链路从暗色横向 `buildFrontendSlidesDeckHTML()` 切换为浅色白底纵向 `buildCampaignReportHTML()`。
+- HTMLPPT 新增纵向整页翻页体验：`scroll-snap-type: y mandatory`、右侧上下翻页控件、顶部进度条、键盘 PageUp/PageDown/上下箭头翻页和光标跟随动效。
+- PPTX 生成脚本重写为浅色同构模板：封面、内容卡片、调研信号、预算/KPI、执行排期、下一步、来源、补充材料和结尾页均使用同一套白底卡片视觉。
+- HTML 和 PPTX 继续共用同一份 `lastPPTOutline`，编辑器保存后两种格式同步使用更新后的结构化 slides 数据。
+- PPTX 生成保留 `research` 与 `materials` 字段，自动补充调研来源页和补充材料页，避免只在 HTML 中展示。
+- 构建标识更新为 `20260630-v914-lightdeck`，`index.html` 引用 `ppt.js?v=20260630v914lightdeck`，降低浏览器缓存旧脚本概率。
+- 本地验证：`node -c platform/ppt.js`、`node -c platform/app.js`、`node -c platform/server/server.js`、`py_compile generate_ppt.py` 通过。
+- 本地样例验证：HTML 10 个纵向 section，浅色背景、页控、光标动效可见；PPTX 10 页，关键标题顺序、来源页、材料页、结尾页和浅色背景检查通过。
+- 线上验证：`/api/health` 返回 `status=ok`，公网脚本包含浅色模板和 v9.14 标识，浏览器 smoke test 显示 `window.tmPPTBuild=20260630-v914-lightdeck` 且无前端错误。
+
 ### v9.13 需求表上传登录态失效提示修复
 - 修复“上传客户需求文件”中 `.xlsx` 需求表显示 `文件内容解析失败：Invalid token` 的问题。
 - 根因：页面长时间停留或后端重启后，浏览器内存中的旧 `AUTH_TOKEN` 已失效，但前端仍继续调用受保护接口；Excel 上传接口直接 `fetch`，没有统一处理 401。
