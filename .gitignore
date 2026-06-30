@@ -5,6 +5,12 @@ uploads/
 *.db-wal
 *.db-shm
 .env
+!.env.example
+99-private/
+**/99-private/
+*.pem
+*.key
+id_rsa*
 .DS_Store
 Thumbs.db
 _*.js

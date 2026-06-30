@@ -1,5 +1,19 @@
 ﻿# Changelog — TuringMarket 图灵商务在线工作平台
 
+## v0.1.0-handoff (2026-06-30) — 交接归档与版本治理基线
+
+### 📚 归档
+- 新增 `docs/handoff/2026-06-30/`：当前静态前端工作区的交接手册、服务器与密钥脱敏说明、团队版本迭代规范、安全规则。
+- 新增 `docs/version-records/2026-06-30-v0.1.0-handoff-baseline.md`：本次可交接基线记录。
+- 新增 `archive/static-frontend-2026-06-30/`：当前 `C:\Users\29272\Documents\在线商务平台` 静态前端快照。
+- 新增 `.env.example`：公开环境变量模板，真实密钥继续保存在私有 Obsidian 或密钥管理器。
+
+### 🔐 安全
+- `.gitignore` 明确排除本地私有交接目录、SSH 私钥、真实 `.env`。
+- GitHub 仅保存脱敏文档，不新增真实 API key、服务器密码或 SSH 私钥。
+
+---
+
 ## v7.0 (2025-06-04) — 生产就绪版本
 
 ### 🎯 里程碑
