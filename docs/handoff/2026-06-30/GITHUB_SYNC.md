@@ -10,14 +10,15 @@
 - 本地同步工作树：`C:\Users\29272\Documents\在线商务平台-github-sync`
 - 提交号：`b7ccfd8`
 - 推送状态：已成功推送到 GitHub
-- PR 状态：未自动创建。GitHub 集成返回 `403 Resource not accessible by integration`，本机 `gh` 当前未登录。
+- PR 状态：已通过 GitHub CLI 创建 draft PR。
+- PR 地址：`https://github.com/derrickyang1998/Turingsalesworkingplatform/pull/1`
 
 ## 手动创建 PR
 
-打开：
+PR 地址：
 
 ```text
-https://github.com/derrickyang1998/Turingsalesworkingplatform/pull/new/codex/archive-handoff-baseline
+https://github.com/derrickyang1998/Turingsalesworkingplatform/pull/1
 ```
 
 建议目标分支：`master`  
@@ -33,4 +34,3 @@ https://github.com/derrickyang1998/Turingsalesworkingplatform/pull/new/codex/arc
 4. 推送分支。
 5. 创建 PR，审核后合并。
 6. 打版本 tag。
-
