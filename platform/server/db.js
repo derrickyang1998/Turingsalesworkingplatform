@@ -349,6 +349,77 @@ db.exec(`
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
+
+  CREATE TABLE IF NOT EXISTS knowledge_chunks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    entry_id INTEGER NOT NULL,
+    chunk_index INTEGER NOT NULL DEFAULT 0,
+    content TEXT NOT NULL DEFAULT '',
+    metadata_json TEXT DEFAULT '{}',
+    token_count INTEGER DEFAULT 0,
+    embedding_json TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (entry_id) REFERENCES knowledge_entries(id) ON DELETE CASCADE
+  );
+
+  CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_chunks_fts USING fts5(
+    title,
+    content,
+    tags,
+    entry_id UNINDEXED,
+    chunk_id UNINDEXED
+  );
+
+  CREATE TABLE IF NOT EXISTS ai_conversations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    title TEXT DEFAULT '',
+    visibility TEXT DEFAULT 'private',
+    source_module TEXT DEFAULT 'assistant',
+    archived_summary_id INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id),
+    FOREIGN KEY (archived_summary_id) REFERENCES knowledge_entries(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS ai_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    conversation_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    role TEXT NOT NULL,
+    content TEXT NOT NULL DEFAULT '',
+    model TEXT,
+    prompt_tokens INTEGER DEFAULT 0,
+    completion_tokens INTEGER DEFAULT 0,
+    total_tokens INTEGER DEFAULT 0,
+    metadata_json TEXT DEFAULT '{}',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (conversation_id) REFERENCES ai_conversations(id),
+    FOREIGN KEY (user_id) REFERENCES users(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS ai_references (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    message_id INTEGER NOT NULL,
+    reference_type TEXT NOT NULL,
+    reference_id TEXT,
+    title TEXT DEFAULT '',
+    url TEXT DEFAULT '',
+    snippet TEXT DEFAULT '',
+    provider TEXT DEFAULT '',
+    metadata_json TEXT DEFAULT '{}',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (message_id) REFERENCES ai_messages(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS web_search_cache (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    provider TEXT NOT NULL,
+    query TEXT NOT NULL,
+    response_json TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
 `);
 
 // Seed default admin and team users
@@ -434,5 +505,22 @@ try { db.prepare("ALTER TABLE influencers ADD COLUMN quoted_price INTEGER DEFAUL
 try { db.prepare("ALTER TABLE influencers ADD COLUMN content_deliverable TEXT").run(); } catch(e) {}
 try { db.prepare("ALTER TABLE influencers ADD COLUMN is_duplicate INTEGER DEFAULT 0").run(); } catch(e) {}
 try { db.prepare("ALTER TABLE influencers ADD COLUMN import_batch TEXT").run(); } catch(e) {}
+
+// ===== AI Knowledge Foundation Migration =====
+try { db.prepare("ALTER TABLE knowledge_entries ADD COLUMN title TEXT DEFAULT ''").run(); } catch(e) {}
+try { db.prepare("ALTER TABLE knowledge_entries ADD COLUMN summary TEXT DEFAULT ''").run(); } catch(e) {}
+try { db.prepare("ALTER TABLE knowledge_entries ADD COLUMN tags_json TEXT DEFAULT '[]'").run(); } catch(e) {}
+try { db.prepare("ALTER TABLE knowledge_entries ADD COLUMN visibility TEXT DEFAULT 'team'").run(); } catch(e) {}
+try { db.prepare("ALTER TABLE knowledge_entries ADD COLUMN source_hash TEXT").run(); } catch(e) {}
+try { db.prepare("ALTER TABLE knowledge_entries ADD COLUMN business_type TEXT").run(); } catch(e) {}
+try { db.prepare("ALTER TABLE knowledge_entries ADD COLUMN business_id TEXT").run(); } catch(e) {}
+try { db.prepare("ALTER TABLE knowledge_entries ADD COLUMN metadata_json TEXT DEFAULT '{}'").run(); } catch(e) {}
+try { db.prepare("ALTER TABLE knowledge_entries ADD COLUMN embedding_json TEXT").run(); } catch(e) {}
+try { db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_knowledge_source_hash ON knowledge_entries(source_hash) WHERE source_hash IS NOT NULL AND source_hash != ''").run(); } catch(e) {}
+try { db.prepare("CREATE INDEX IF NOT EXISTS idx_knowledge_visibility ON knowledge_entries(visibility, created_by)").run(); } catch(e) {}
+try { db.prepare("CREATE INDEX IF NOT EXISTS idx_knowledge_source ON knowledge_entries(source_type, source_id)").run(); } catch(e) {}
+try { db.prepare("CREATE INDEX IF NOT EXISTS idx_ai_conversations_user ON ai_conversations(user_id, updated_at)").run(); } catch(e) {}
+try { db.prepare("CREATE INDEX IF NOT EXISTS idx_ai_messages_conversation ON ai_messages(conversation_id, created_at)").run(); } catch(e) {}
+try { db.prepare("CREATE INDEX IF NOT EXISTS idx_ai_references_message ON ai_references(message_id)").run(); } catch(e) {}
 
 module.exports = db;

@@ -4,13 +4,20 @@ const path = require('path');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const multer = require('multer');
+const rateLimit = require('express-rate-limit');
+const fs = require('fs');
 const db = require('./db');
-
+const knowledgeService = require('./services/knowledge_service');
+const aiService = require('./services/ai_service');
+const fileIngestService = require('./services/file_ingest_service');
 const app = express();
 const PORT = process.env.PORT || 3002;
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'db', 'turingmarket.db');
 const JWT_SECRET = process.env.JWT_SECRET || 'turingmarket-platform-jwt-secret-2026';
 const TOKEN_EXPIRY = '24h';
+const UPLOAD_DIR = path.join(__dirname, '..', 'uploads');
+const ALLOWED_UPLOAD_EXTS = new Set(['.txt', '.md', '.csv', '.json', '.xlsx']);
+fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
 // Middleware
 app.use(cors());
@@ -21,9 +28,36 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, '..'), { etag: false, lastModified: false, setHeaders: function(res) { res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate'); res.set('Pragma', 'no-cache'); res.set('Expires', '0'); } }));
 
 // File upload config
-const upload = multer({ 
-  dest: path.join(__dirname, '..', 'uploads'),
-  limits: { fileSize: 50 * 1024 * 1024 }
+const upload = multer({
+  dest: UPLOAD_DIR,
+  limits: {
+    fileSize: 15 * 1024 * 1024,
+    files: 1,
+    fields: 20,
+    parts: 25,
+    fieldSize: 256 * 1024
+  },
+  fileFilter: function(req, file, cb) {
+    const ext = path.extname(file.originalname || '').toLowerCase();
+    if (!ALLOWED_UPLOAD_EXTS.has(ext)) {
+      return cb(new Error('Unsupported file type. Supported: TXT, MD, CSV, JSON, XLSX.'));
+    }
+    cb(null, true);
+  }
+});
+
+const aiLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 20,
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+const uploadLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  limit: 10,
+  standardHeaders: true,
+  legacyHeaders: false
 });
 
 // ===== AUTH MIDDLEWARE =====
@@ -46,6 +80,19 @@ function authMiddleware(req, res, next) {
 
 function adminOnly(req, res, next) {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+  next();
+}
+
+function boolParam(value, defaultValue) {
+  if (value === undefined || value === null || value === '') return defaultValue;
+  return value === true || value === 'true' || value === '1' || value === 1;
+}
+
+function aiQuotaGuard(req, res, next) {
+  const quota = Number(req.user.api_quota || 0);
+  if (!quota || req.user.role === 'admin') return next();
+  const used = db.prepare('SELECT COALESCE(SUM(total_tokens), 0) AS total FROM token_usage WHERE user_id = ?').get(req.user.id).total;
+  if (used >= quota) return res.status(429).json({ error: 'AI quota exceeded' });
   next();
 }
 
@@ -100,6 +147,22 @@ app.post('/api/demands', authMiddleware, (req, res) => {
     req.user.id, brand_name, company_name, product_name, industry, budget, target_market, platform, JSON.stringify(data_json)
   );
   db.prepare('INSERT INTO activity_log (user_id, action, module, details, ip_address) VALUES (?, ?, ?, ?, ?)').run(req.user.id, 'create_demand', 'demand', `Created demand for ${brand_name}`, req.ip);
+  try {
+    knowledgeService.ingestKnowledge(db, {
+      title: '需求归档：' + (brand_name || product_name || result.lastInsertRowid),
+      summary: [brand_name, product_name, industry, target_market, budget].filter(Boolean).join(' / '),
+      content: JSON.stringify({ brand_name, company_name, product_name, industry, budget, target_market, platform, data_json }, null, 2),
+      entry_type: 'demand',
+      source_type: 'demand_record',
+      source_id: result.lastInsertRowid,
+      visibility: 'private',
+      tags: ['demand', industry, target_market].filter(Boolean),
+      business_type: 'demand',
+      business_id: result.lastInsertRowid,
+      created_by: req.user.id,
+      actor_role: req.user.role
+    });
+  } catch(e) {}
   res.json({ id: result.lastInsertRowid });
 });
 
@@ -115,6 +178,23 @@ app.post('/api/proposals', authMiddleware, (req, res) => {
   const { demand_id, template_id, content } = req.body;
   const result = db.prepare('INSERT INTO proposals (user_id, demand_id, template_id, content) VALUES (?, ?, ?, ?)').run(req.user.id, demand_id, template_id, content);
   db.prepare('INSERT INTO activity_log (user_id, action, module, details, ip_address) VALUES (?, ?, ?, ?, ?)').run(req.user.id, 'generate_proposal', 'proposal', `Generated proposal with template ${template_id}`, req.ip);
+  try {
+    knowledgeService.ingestKnowledge(db, {
+      title: '确认方案：' + (demand_id || result.lastInsertRowid),
+      summary: String(content || '').slice(0, 240),
+      content: content || '',
+      entry_type: 'proposal_confirmed',
+      source_type: 'proposal_record',
+      source_id: result.lastInsertRowid,
+      visibility: 'team',
+      tags: ['proposal', 'confirmed', template_id].filter(Boolean),
+      business_type: 'proposal',
+      business_id: result.lastInsertRowid,
+      created_by: req.user.id,
+      metadata: { demand_id, template_id },
+      actor_role: req.user.role
+    });
+  } catch(e) {}
   res.json({ id: result.lastInsertRowid });
 });
 
@@ -246,30 +326,186 @@ require('./routes_workflow')(app, db, authMiddleware, adminOnly);
 // ===== KNOWLEDGE BASE ROUTES =====
 app.get('/api/knowledge', authMiddleware, (req, res) => {
   try {
-    const { type, search } = req.query;
-    let sql = 'SELECT * FROM knowledge_entries WHERE 1=1';
-    let params = [];
-    if (type) { sql += ' AND entry_type = ?'; params.push(type); }
-    if (search) { sql += ' AND (key_terms LIKE ? OR content LIKE ?)'; params.push('%' + search + '%', '%' + search + '%'); }
-    if (req.user.role !== 'admin') { sql += ' AND (created_by = ? OR is_public = 1)'; params.push(req.user.id); }
-    sql += ' ORDER BY usage_count DESC, created_at DESC LIMIT 100';
-    const entries = db.prepare(sql).all(...params);
+    const entries = knowledgeService.searchKnowledge(db, {
+      q: req.query.q || req.query.search || '',
+      type: req.query.type,
+      entry_type: req.query.entry_type,
+      source_type: req.query.source_type,
+      visibility: req.query.visibility,
+      business_type: req.query.business_type,
+      business_id: req.query.business_id,
+      tags: req.query.tags,
+      limit: req.query.limit || 100,
+      user: req.user
+    });
     res.json({ entries });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.post('/api/knowledge', authMiddleware, (req, res) => {
   try {
-    const { entry_type, title, content, tags, source_type, source_id } = req.body;
-    const result = db.prepare('INSERT INTO knowledge_entries (entry_type, source_type, source_id, key_terms, content, created_by, is_public) VALUES (?, ?, ?, ?, ?, ?, 1)')
-      .run(entry_type || 'note', source_type || null, source_id || null, JSON.stringify(tags || []), content || '', req.user.id);
-    res.json({ id: result.lastInsertRowid });
+    const entry = knowledgeService.ingestKnowledge(db, Object.assign({}, req.body, { created_by: req.user.id, actor_role: req.user.role }));
+    res.json({ entry, id: entry.id });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+app.get('/api/knowledge/search', authMiddleware, (req, res) => {
+  try {
+    const entries = knowledgeService.searchKnowledge(db, {
+      q: req.query.q || req.query.search || '',
+      entry_type: req.query.entry_type || req.query.type,
+      source_type: req.query.source_type,
+      visibility: req.query.visibility,
+      business_type: req.query.business_type,
+      business_id: req.query.business_id,
+      tags: req.query.tags,
+      limit: req.query.limit || 50,
+      user: req.user
+    });
+    res.json({ entries, total: entries.length });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/knowledge/ingest', authMiddleware, (req, res) => {
+  try {
+    const entry = knowledgeService.ingestKnowledge(db, Object.assign({}, req.body, {
+      created_by: req.user.id,
+      actor_role: req.user.role
+    }));
+    db.prepare('INSERT INTO activity_log (user_id, action, module, details, ip_address) VALUES (?, ?, ?, ?, ?)')
+      .run(req.user.id, 'knowledge_ingest', 'knowledge', 'Ingested knowledge entry ' + entry.id, req.ip);
+    res.json({ entry, id: entry.id });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/knowledge/upload', authMiddleware, uploadLimiter, function(req, res, next) {
+  upload.single('file')(req, res, function(err) {
+    if (err) return res.status(400).json({ error: err.message });
+    next();
+  });
+}, async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'File required' });
+    const parsed = await fileIngestService.readUploadedFile(req.file);
+    const entry = knowledgeService.ingestKnowledge(db, {
+      title: req.body.title || req.file.originalname,
+      summary: req.body.summary || '',
+      content: parsed.content,
+      entry_type: req.body.entry_type || (parsed.kind === 'table' ? 'uploaded_table' : 'uploaded_document'),
+      source_type: req.body.source_type || 'knowledge_upload',
+      source_id: req.body.source_id || req.file.originalname,
+      visibility: req.body.visibility || 'private',
+      tags: req.body.tags || [],
+      business_type: req.body.business_type,
+      business_id: req.body.business_id,
+      created_by: req.user.id,
+      actor_role: req.user.role,
+      metadata: {
+        originalname: req.file.originalname,
+        mimetype: req.file.mimetype,
+        size: req.file.size,
+        kind: parsed.kind,
+        row_count: parsed.rows ? parsed.rows.length : 0
+      }
+    });
+    try { fs.unlinkSync(req.file.path); } catch (e2) {}
+    res.json({ entry, rows: parsed.rows ? parsed.rows.length : 0 });
+  } catch (e) {
+    try { if (req.file && req.file.path) fs.unlinkSync(req.file.path); } catch (e2) {}
+    res.status(e.code === 'XLSX_NOT_INSTALLED' ? 501 : 500).json({ error: e.message });
+  }
+});
+
 app.post('/api/knowledge/:id/use', authMiddleware, (req, res) => {
-  db.prepare(`UPDATE knowledge_entries SET usage_count = usage_count + 1, updated_at = datetime('now') WHERE id = ?`).run(req.params.id);
+  knowledgeService.markKnowledgeUsed(db, [req.params.id]);
   res.json({ success: true });
+});
+
+// ===== AI CONVERSATION + RAG ROUTES =====
+app.post('/api/ai/chat', authMiddleware, aiLimiter, aiQuotaGuard, async (req, res) => {
+  try {
+    const result = await aiService.handleChat(db, {
+      user: req.user,
+      message: req.body.message,
+      conversation_id: req.body.conversation_id,
+      allowWeb: boolParam(req.body.allow_web, false),
+      source_module: req.body.source_module || 'assistant',
+      business_type: req.body.business_type,
+      business_id: req.body.business_id,
+      summaryVisibility: req.body.summary_visibility || 'private',
+      knowledgeLimit: req.body.knowledge_limit || 8,
+      max_tokens: req.body.max_tokens
+    });
+    res.json(result);
+  } catch (e) {
+    const status = /forbidden|not found/i.test(e.message) ? 403 : 400;
+    res.status(status).json({ error: e.message });
+  }
+});
+
+app.get('/api/ai/conversations', authMiddleware, (req, res) => {
+  try {
+    const conversations = aiService.listConversations(db, {
+      user: req.user,
+      q: req.query.q || '',
+      user_id: req.query.user_id,
+      source_module: req.query.source_module,
+      limit: req.query.limit || 100
+    });
+    res.json({ conversations });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/ai/conversations/:id', authMiddleware, (req, res) => {
+  try {
+    const conversation = aiService.getConversation(db, { id: req.params.id, user: req.user });
+    if (!conversation) return res.status(404).json({ error: 'Conversation not found' });
+    if (req.user.role === 'admin' && Number(conversation.user_id) !== Number(req.user.id)) {
+      try {
+        db.prepare('INSERT INTO activity_log (user_id, action, module, details, ip_address) VALUES (?, ?, ?, ?, ?)')
+          .run(req.user.id, 'admin_view_ai_conversation', 'ai_audit', 'Viewed AI conversation ' + req.params.id + ' owned by user ' + conversation.user_id, req.ip);
+      } catch (e2) {}
+    }
+    res.json({ conversation });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/ai/proposal-draft', authMiddleware, aiLimiter, aiQuotaGuard, async (req, res) => {
+  try {
+    const demandText = req.body.demand_content || req.body.content || JSON.stringify(req.body.demand || {});
+    const demandTitle = req.body.title || (req.body.demand && (req.body.demand.brand || req.body.demand.product)) || '需求方案草稿';
+    const demandEntry = knowledgeService.ingestKnowledge(db, {
+      title: '需求归档：' + demandTitle,
+      summary: String(demandText).slice(0, 240),
+      content: demandText,
+      entry_type: 'demand',
+      source_type: req.body.source_type || 'proposal_draft_request',
+      source_id: req.body.demand_id || req.body.source_id || demandTitle,
+      visibility: req.body.visibility || 'private',
+      tags: req.body.tags || ['demand', 'proposal'],
+      business_type: 'demand',
+      business_id: req.body.demand_id || '',
+      created_by: req.user.id,
+      actor_role: req.user.role,
+      metadata: { demand: req.body.demand || null }
+    });
+    const prompt = [
+      '请基于以下客户需求和平台知识库，生成红人营销方案草稿。',
+      '必须包含：执行摘要、市场/竞品判断、达人类型与平台建议、60-30-10预算建议、执行时间线、KPI、风险与下一步确认项。',
+      '',
+      demandText
+    ].join('\n');
+    const result = await aiService.handleChat(db, {
+      user: req.user,
+      message: prompt,
+      allowWeb: boolParam(req.body.allow_web, false),
+      source_module: 'proposal',
+      business_type: 'demand',
+      business_id: req.body.demand_id || demandEntry.id,
+      summaryVisibility: req.body.summary_visibility || 'private'
+    });
+    res.json({ draft: result.answer, demand_entry: demandEntry, ai: result });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ===== SALES DASHBOARD =====
@@ -341,7 +577,9 @@ app.get('/api/dashboard/stats', authMiddleware, (req, res) => {
 // ===== KNOWLEDGE CATEGORIES =====
 app.get('/api/knowledge/categories', authMiddleware, (req, res) => {
   try {
-    const categories = db.prepare("SELECT entry_type, COUNT(*) as count FROM knowledge_entries GROUP BY entry_type").all();
+    const categories = req.user.role === 'admin'
+      ? db.prepare("SELECT entry_type, COUNT(*) as count FROM knowledge_entries GROUP BY entry_type").all()
+      : db.prepare("SELECT entry_type, COUNT(*) as count FROM knowledge_entries WHERE created_by = ? OR visibility IN ('team','public','shared') OR is_public = 1 GROUP BY entry_type").all(req.user.id);
     res.json({ categories });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

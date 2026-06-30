@@ -126,7 +126,37 @@ app.post('/api/influencers/import', authMiddleware, (req, res) => {
       }
     });
     doImport();
-    res.json({ imported, skipped, batch, total: rows.length });
+    const knowledgeService = require('./services/knowledge_service');
+    const sample = rows.slice(0, 20);
+    const projectNames = Array.from(new Set(rows.map(function(row) { return row['项目'] || row.project_name || ''; }).filter(Boolean))).slice(0, 20);
+    const productNames = Array.from(new Set(rows.map(function(row) { return row['推广产品'] || row.product_name || ''; }).filter(Boolean))).slice(0, 20);
+    const importedTags = Array.from(new Set(rows.map(function(row) { return row['标签'] || row.tags || row.category || ''; }).filter(Boolean))).slice(0, 30);
+    const knowledgeEntry = knowledgeService.ingestKnowledge(db, {
+      title: '网红导入批次：' + batch,
+      summary: '导入 ' + imported + ' 条网红数据，跳过 ' + skipped + ' 条。项目：' + (projectNames.join('、') || '-'),
+      content: [
+        'Batch: ' + batch,
+        'Imported: ' + imported,
+        'Skipped: ' + skipped,
+        'Projects: ' + (projectNames.join(', ') || '-'),
+        'Products: ' + (productNames.join(', ') || '-'),
+        'Tags: ' + (importedTags.join(', ') || '-'),
+        '',
+        'Sample rows:',
+        JSON.stringify(sample, null, 2)
+      ].join('\n'),
+      entry_type: 'influencer_batch',
+      source_type: 'influencer_import',
+      source_id: batch,
+      visibility: 'team',
+      tags: ['influencer', 'import'].concat(importedTags.slice(0, 10)),
+      business_type: 'influencer',
+      business_id: batch,
+      created_by: req.user.id,
+      actor_role: req.user.role,
+      metadata: { imported, skipped, total: rows.length, projectNames, productNames }
+    });
+    res.json({ imported, skipped, batch, total: rows.length, knowledge_entry_id: knowledgeEntry.id });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

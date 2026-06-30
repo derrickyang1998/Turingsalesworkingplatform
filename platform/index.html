@@ -655,6 +655,7 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
     <button class="btn btn-sm" onclick="switchAdminTab('overview')">📊 概览</button>
     <button class="btn btn-sm" onclick="switchAdminTab('users')">👥 用户</button>
     <button class="btn btn-sm" onclick="switchAdminTab('knowledge')">📚 知识库</button>
+    <button class="btn btn-sm" onclick="switchAdminTab('ai-chat')">💬 AI 对话</button>
     <button class="btn btn-sm" onclick="switchAdminTab('tokens')">🔋 Token</button>
   </div>
 </div>
@@ -706,8 +707,48 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
   <div class="card">
     <h3>📚 Knowledge Base</h3>
     <p style="font-size:12px;opacity:.6;margin-bottom:12px">Auto-archived from customer creation, strategy generation, and demand analysis</p>
-    <input id="kbSearch" placeholder="Search knowledge base..." oninput="loadKnowledgeBase()" style="margin-bottom:12px;width:300px">
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+      <input id="kbSearch" placeholder="Search knowledge base..." oninput="loadKnowledgeBase()" style="width:260px">
+      <select id="kbSourceFilter" onchange="loadKnowledgeBase()" style="width:160px">
+        <option value="">All sources</option>
+        <option value="knowledge_upload">Upload</option>
+        <option value="influencer_import">Influencer import</option>
+        <option value="ai_message">AI summary</option>
+        <option value="proposal_draft_request">Proposal draft</option>
+      </select>
+      <select id="kbVisibilityFilter" onchange="loadKnowledgeBase()" style="width:140px">
+        <option value="">All visibility</option>
+        <option value="private">Private</option>
+        <option value="team">Team</option>
+        <option value="public">Public</option>
+      </select>
+    </div>
     <div id="kbEntries" style="max-height:400px;overflow-y:auto"></div>
+  </div>
+</div>
+
+<!-- AI Chat Audit Tab -->
+<div id="admin-tab-ai-chat" style="display:none">
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:8px;flex-wrap:wrap">
+      <h3 style="margin:0">💬 AI 对话审计</h3>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <input id="aiAuditSearch" placeholder="Search messages..." oninput="loadAdminAiConversations()" style="width:220px">
+        <input id="aiAuditUser" placeholder="User ID" oninput="loadAdminAiConversations()" style="width:90px">
+        <select id="aiAuditModule" onchange="loadAdminAiConversations()" style="width:150px">
+          <option value="">All modules</option>
+          <option value="assistant">Assistant</option>
+          <option value="strategy">Strategy</option>
+          <option value="proposal">Proposal</option>
+          <option value="demand_analysis">Demand</option>
+          <option value="brand_enrich">Brand enrich</option>
+        </select>
+      </div>
+    </div>
+    <div class="grid grid-2">
+      <div id="aiAuditList" style="max-height:460px;overflow-y:auto;border-right:1px solid var(--border);padding-right:12px"></div>
+      <div id="aiAuditDetail" style="max-height:460px;overflow-y:auto;padding-left:4px"><p style="opacity:.5">Select a conversation</p></div>
+    </div>
   </div>
 </div>
 

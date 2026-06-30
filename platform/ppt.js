@@ -72,31 +72,21 @@ async function generateHTMLPPT() {
     
     var prompt = ctx.join("\n");
     
-    var r = await fetch(DS_URL, {
+    var r = await apiFetch("/ai/chat", {
       method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + DS_KEY },
       body: JSON.stringify({
-        model: "deepseek-chat",
-        messages: [{ role: "user", content: prompt }],
-        temperature: 0.4,
+        message: prompt,
+        allow_web: true,
+        source_module: "ppt",
+        business_type: "proposal",
+        summary_visibility: "team",
         max_tokens: 4000
       })
     });
-    
+
+    if (!r.ok) throw new Error("API:" + r.status);
     var d = await r.json();
-    var reply = d.choices[0].message.content;
-    
-    try {
-      apiFetch("/token-usage", {
-        method: "POST",
-        body: JSON.stringify({
-          model: "deepseek-chat", endpoint: "ppt_gen",
-          prompt_tokens: d.usage?.prompt_tokens || 0,
-          completion_tokens: d.usage?.completion_tokens || 0,
-          total_tokens: d.usage?.total_tokens || 0
-        })
-      });
-    } catch (e) {}
+    var reply = d.answer || "";
     
     var parsed = {};
     try {

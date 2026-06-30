@@ -1,7 +1,5 @@
 ﻿// TuringMarket v4.0 - Multi-user Team Platform
 const API = window.location.origin + '/api';
-const DS_URL = "https://api.deepseek.com/v1/chat/completions";
-const DS_KEY = "sk-5951a22df4fc48ca874b86b87f43cee3";
 let AUTH_TOKEN = localStorage.getItem('tm_token') || '';
 let CURRENT_USER = null;
 let BRANDS = [], INFLUENCERS = [], TEMPLATES = [], CBLOCKS = {};
@@ -490,23 +488,15 @@ async function generateAIStrategy() {
   var prompt = 'You are a senior overseas influencer marketing strategist at TuringMarket. Analyze the customer profile below and provide a comprehensive strategy in Chinese:\n\nCustomer: ' + input + '\n\nReference data (from our brand database): ' + JSON.stringify(context) + '\n\nProvide: 1) Market opportunity analysis 2) Recommended influencer types and platforms 3) Estimated budget allocation (60-30-10 model) 4) Competitor benchmarking suggestions 5) 3-month execution roadmap 6) Risk factors and mitigation. Format with clear headings and bullet points. Be specific and actionable.';
   
   try {
-    var resp = await fetch(DS_URL, {
+    var resp = await apiFetch('/ai/chat', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + DS_KEY },
-      body: JSON.stringify({ model: 'deepseek-chat', messages: [{ role: 'user', content: prompt }], temperature: 0.7, max_tokens: 2500 })
+      body: JSON.stringify({ message: prompt, allow_web: true, source_module: 'strategy', summary_visibility: 'team' })
     });
     if (!resp.ok) throw new Error('API:' + resp.status);
     var data = await resp.json();
-    var result = data.choices[0].message.content;
-    // Parse markdown formatting
-    result = result.replace(/### (.*)/g, '<h3 style="margin-top:16px;font-size:16px">$1</h3>');
-    result = result.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-    result = result.replace(/\- (.*)/g, '<li>$1</li>');
-    result = result.replace(/\n/g, '<br>');
-    out.innerHTML = result;
+    var result = data.answer || '';
+    out.innerHTML = formatAIText(result);
     status.textContent = 'Analysis complete';
-    // Track token usage
-    if (data.usage) trackTokenUsage('deepseek-chat', 'strategy', data.usage.prompt_tokens, data.usage.completion_tokens, data.usage.total_tokens);
   } catch(e) {
     out.innerHTML = '<span style="color:#d94641">Analysis failed: ' + e.message + '</span>';
     status.textContent = 'Failed';
@@ -525,6 +515,13 @@ function trackTokenUsage(model, endpoint, promptTokens, completionTokens, totalT
 // ===== UTILS =====
 
 function esc(s){return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;")}
+function formatAIText(s) {
+  return esc(s || '')
+    .replace(/### (.*)/g, '<h3 style="margin-top:16px;font-size:16px">$1</h3>')
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\- (.*)/g, '<li>$1</li>')
+    .replace(/\n/g, '<br>');
+}
 function toast(m, ty) { ty = ty || 'success'; const c = document.getElementById('toastContainer'), e = document.createElement('div'); e.className = 'toast toast-' + ty; e.textContent = m; c.appendChild(e); setTimeout(function () { e.remove() }, 3000) }
 
 function exportBrandCSV() {
@@ -662,18 +659,18 @@ async function analyzeDemandWithAI() {
   if (!uploadedDemandContent) { toast('Please upload a file first', 'error'); return; }
   var output = document.getElementById('proposalOutput');
   output.innerHTML = '<span style="opacity:.5">AI analyzing demand...</span>';
-  var prompt = 'Analyze this customer demand document and generate a structured influencer marketing proposal in Chinese. Include: 1) Executive summary 2) Market analysis 3) Recommended strategy (60-30-10 model) 4) Influencer matching criteria 5) Budget estimation 6) Timeline 7) KPIs.\n\nDocument: ' + uploadedDemandContent;
   try {
-    var resp = await fetch(DS_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + DS_KEY }, body: JSON.stringify({ model: 'deepseek-chat', messages: [{ role: 'user', content: prompt }], temperature: 0.7, max_tokens: 3000 }) });
+    var resp = await apiFetch('/ai/proposal-draft', { method: 'POST', body: JSON.stringify({ title: '需求文件方案草稿', demand_content: uploadedDemandContent, allow_web: true, visibility: 'private' }) });
+    if (!resp.ok) throw new Error('API:' + resp.status);
     var d = await resp.json();
-    output.innerHTML = '<div style="white-space:pre-wrap;font-size:13px;line-height:1.6">' + d.choices[0].message.content.replace(/\n/g,'<br>').replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>') + '</div><div style="margin-top:12px"><button class="btn btn-primary btn-sm" onclick="downloadProposal()">Download MD</button><button class="btn btn-sm" onclick="downloadProposalHTML()">Export HTML</button></div>';
-    lastProp = d.choices[0].message.content;
+    lastProp = d.draft || '';
+    output.innerHTML = '<div style="white-space:pre-wrap;font-size:13px;line-height:1.6">' + formatAIText(lastProp) + '</div><div style="margin-top:12px"><button class="btn btn-primary btn-sm" onclick="downloadProposal()">Download MD</button><button class="btn btn-sm" onclick="downloadProposalHTML()">Export HTML</button></div>';
     toast('Proposal generated');
   } catch(e) { output.innerHTML = '<span style="color:#d94641">Analysis failed: ' + e.message + '</span>'; }
 }
 function downloadProposalHTML() {
   if (!lastProp) return;
-  var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Influencer Marketing Proposal</title><style>body{font-family:system-ui;max-width:800px;margin:40px auto;padding:20px;line-height:1.8}h2{color:#1a1a1a;border-bottom:2px solid #1a1a1a;padding-bottom:8px}ul{margin:12px 0}li{margin:6px 0}</style></head><body>' + lastProp.replace(/\n/g,'<br>').replace(/### (.*)/g,'<h2>$1</h2>').replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>') + '</body></html>';
+  var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Influencer Marketing Proposal</title><style>body{font-family:system-ui;max-width:800px;margin:40px auto;padding:20px;line-height:1.8}h2{color:#1a1a1a;border-bottom:2px solid #1a1a1a;padding-bottom:8px}ul{margin:12px 0}li{margin:6px 0}</style></head><body>' + formatAIText(lastProp) + '</body></html>';
   dlFile('proposal.html', html, 'text/html');
   toast('HTML downloaded');
 }
@@ -713,25 +710,7 @@ let aiMemoryKey = 'tm_ai_memory';
 })();
 function saveAIMemory() { localStorage.setItem(aiMemoryKey, JSON.stringify(aiMemory)); }
 function enhancedSendChat() {
-  var inp = document.getElementById('chatInput'); var msg = inp.value.trim();
-  if (!msg) return;
-  addChatMsg('user', msg); inp.value = '';
-  // Build context from memory
-  var memKeys = Object.keys(aiMemory).slice(-5);
-  var memContext = memKeys.length ? '\n\nPrevious discussions: ' + memKeys.map(function(k) { return k + ': ' + aiMemory[k].substring(0, 100); }).join('\n') : '';
-  chatHistory.push({ role: 'user', content: msg });
-  // Store in memory
-  var memId = 'm' + Date.now();
-  aiMemory[memId] = msg;
-  saveAIMemory();
-  
-  var msgs = document.getElementById('chatMessages');
-  var td = document.createElement('div'); td.className = 'chat-msg assistant'; td.innerHTML = '<div class=bubble>...</div>'; msgs.appendChild(td);
-  
-  fetch(DS_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + DS_KEY }, body: JSON.stringify({ model: 'deepseek-chat', messages: [{ role: 'system', content: 'You are TuringMarket AI assistant. You have access to: ' + BRANDS.length + ' brands database. Be concise and professional in Chinese. Previous context: ' + memContext }, { role: 'user', content: msg }], temperature: 0.7, max_tokens: 1500 }) })
-    .then(function(r) { return r.json(); })
-    .then(function(d) { td.remove(); var reply = d.choices[0].message.content; chatHistory.push({ role: 'assistant', content: reply }); aiMemory[memId+'_r'] = reply; saveAIMemory(); addChatMsg('assistant', reply); })
-    .catch(function(e) { td.remove(); addChatMsg('assistant', 'Error: ' + e.message); });
+  return sendChat();
 }
 
 
@@ -742,13 +721,37 @@ let KB_STORAGE_KEY = 'tm_knowledge_base';
 // Load KB from server on init
 async function loadKnowledgeBase() {
   try {
-    var r = await apiFetch('/knowledge');
+    var q = document.getElementById('kbSearch')?.value || '';
+    var source = document.getElementById('kbSourceFilter')?.value || '';
+    var visibility = document.getElementById('kbVisibilityFilter')?.value || '';
+    var url = '/knowledge/search?limit=100';
+    if (q) url += '&q=' + encodeURIComponent(q);
+    if (source) url += '&source_type=' + encodeURIComponent(source);
+    if (visibility) url += '&visibility=' + encodeURIComponent(visibility);
+    var r = await apiFetch(url);
     var d = await r.json();
     knowledgeBase = d.entries || [];
+    renderKnowledgeBase();
     console.log('[KB] Loaded ' + knowledgeBase.length + ' entries');
   } catch(e) { 
     try { knowledgeBase = JSON.parse(localStorage.getItem(KB_STORAGE_KEY) || '[]'); } catch(x) { knowledgeBase = []; }
+    renderKnowledgeBase();
   }
+}
+
+function renderKnowledgeBase() {
+  var c = document.getElementById('kbEntries');
+  if (!c) return;
+  if (!knowledgeBase.length) { c.innerHTML = '<p style="opacity:.5">No knowledge entries</p>'; return; }
+  c.innerHTML = knowledgeBase.map(function(e) {
+    var tags = e.tags || [];
+    if (!Array.isArray(tags)) { try { tags = JSON.parse(tags || '[]'); } catch(x) { tags = []; } }
+    return '<div style="border-bottom:1px solid var(--border);padding:10px 0">' +
+      '<div style="display:flex;justify-content:space-between;gap:10px"><strong>' + esc(e.title || e.entry_type || 'Knowledge') + '</strong><span style="font-size:11px;opacity:.55">' + esc(e.visibility || '-') + ' · used ' + (e.usage_count || 0) + '</span></div>' +
+      '<div style="font-size:12px;opacity:.7;margin:4px 0">' + esc(e.summary || e.snippet || (e.content || '').substring(0, 160)) + '</div>' +
+      '<div style="font-size:11px;opacity:.55">' + esc(e.entry_type || '') + ' · ' + esc(e.source_type || '') + (tags.length ? ' · ' + tags.map(esc).join(', ') : '') + '</div>' +
+      '</div>';
+  }).join('');
 }
 
 // Save KB to server
@@ -1111,15 +1114,17 @@ async function searchNewBrand() {
   var a = document.getElementById('brandEnrichArea');
   a.innerHTML = '<div class=brand-enrich>Searching: ' + q + '...</div>';
   try {
-    var r = await fetch(DS_URL, {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + DS_KEY },
-      body: JSON.stringify({ model: 'deepseek-chat', messages: [{ role: 'system', content: 'You are a brand data analyst. Output JSON only.' }, { role: 'user', content: 'Provide data for brand "' + q + '" as JSON with fields: name, name_cn, industry_tags, market, estimated_annual_revenue, user_base, amazon_rating, youtube_followers, instagram_followers, tiktok_followers, brand_search_volume_monthly, total_posts, avg_engagement_rate, avg_views_per_post, top_platform, creative_angles, top_products_featured' }], temperature: 0.3, max_tokens: 600 })
+    var r = await apiFetch('/ai/chat', {
+      method: 'POST',
+      body: JSON.stringify({
+        source_module: 'brand_enrich',
+        allow_web: true,
+        message: 'You are a brand data analyst. Output JSON only. Provide data for brand "' + q + '" as JSON with fields: name, name_cn, industry_tags, market, estimated_annual_revenue, user_base, amazon_rating, youtube_followers, instagram_followers, tiktok_followers, brand_search_volume_monthly, total_posts, avg_engagement_rate, avg_views_per_post, top_platform, creative_angles, top_products_featured'
+      })
     });
     if (!r.ok) throw new Error('API:' + r.status);
     var d = await r.json();
-    var usage = d.usage || {};
-    trackTokenUsage('deepseek-chat', 'brand_enrich', usage.prompt_tokens || 0, usage.completion_tokens || 0, usage.total_tokens || 0);
-    var t = d.choices[0].message.content;
+    var t = d.answer || '';
     if (t.includes('```')) t = t.split('```')[1].replace(/json\n?/, '') || t;
     var bd = JSON.parse(t);
     var nb = { id: 'cust_' + Date.now(), name: bd.name || q, name_cn: bd.name_cn || '', industry_tags: bd.industry_tags || ['Other'], market: bd.market || 'global', estimated_annual_revenue: bd.estimated_annual_revenue || '$100M+', user_base: bd.user_base || '', overseas_presence: { amazon_rating: bd.amazon_rating || 4.0, social_followers: { youtube: bd.youtube_followers || 0, instagram: bd.instagram_followers || 0, tiktok: bd.tiktok_followers || 0 }, brand_search_volume_monthly: bd.brand_search_volume_monthly || 0 }, social_content_monthly: { total_posts: bd.total_posts || 0, creative_angles: bd.creative_angles || [], top_products_featured: bd.top_products_featured || [], last_12_months: { avg_engagement_rate: bd.avg_engagement_rate || '3.0%', avg_views_per_post: bd.avg_views_per_post || 0, top_platform: bd.top_platform || 'YouTube' } }, case_study_available: false };
@@ -1191,17 +1196,37 @@ function goAnalyze() {
 function goGenerate() { document.getElementById("m3s2").classList.add("hidden"); document.getElementById("m3s3").classList.remove("hidden"); updSteps(3); initM3(); }
 function updSteps(n) { for (var i = 1; i <= 3; i++) { var el = document.getElementById("step" + i); if (el) { el.classList.remove("active", "done"); if (i < n) el.classList.add("done"); if (i === n) el.classList.add("active"); } } }
 function selTmpl(id) { selTpl = id; }
-function generateProposal() {
+async function generateProposal() {
+  var edited = getEditedDemand ? getEditedDemand() : null;
+  if (!curDemand && edited) {
+    curDemand = { brand: edited.brand, product: edited.product, industry: edited.industry, budget: edited.budget, area: edited.market, platform: edited.platforms };
+  }
   if (!curDemand) { toast("请先完成需求分析", "error"); return; }
   if (!selTpl) { toast("请选择方案模板", "error"); return; }
   var tpl = TEMPLATES.find(function(t) { return t.id === selTpl; });
   if (!tpl) return;
-  var nl = "\n"; var h = "# " + (curDemand.brand || "品牌") + " 红人营销方案" + nl + nl + "**TuringMarket 图灵集市**" + nl + nl + "## 客户需求" + nl + "- 品牌: " + (curDemand.brand || "") + nl + "- 产品: " + (curDemand.product || "") + nl + "- 卖点: " + (curDemand.usp || "") + nl + "- 平台: " + (curDemand.platform || "") + nl + "- 市场: " + (curDemand.area || "") + nl + "- 预算: " + (curDemand.budget || "") + nl + nl + "## 模板: " + tpl.name + nl;
-  for (var si = 0; si < tpl.sections.length; si++) { h += (si + 1) + ". " + tpl.sections[si] + nl; }
-  lastProp = h;
-  var displayH = h.replace(/&/g,"&amp;").replace(/</g,"&lt;");
-  document.getElementById("propResult").innerHTML = '<div class="card"><h3>✅ 方案已生成</h3><pre style="font-size:12px;max-height:300px;overflow-y:auto;background:var(--surface2);padding:12px;border-radius:8px;white-space:pre-wrap">' + displayH + '</pre><div class="btn-group"><button class="btn btn-primary btn-sm" onclick="downloadProposal()">📥 下载 MD</button><button class="btn btn-sm" onclick="copyProposal()">📋 复制</button></div></div>';
-  toast("方案已生成");
+  var out = document.getElementById('proposalOutput') || document.getElementById('propResult');
+  if (out) out.innerHTML = 'AI 正在结合知识库生成方案...';
+  try {
+    var payload = {
+      title: (curDemand.brand || '客户') + ' ' + (curDemand.product || '') + ' 方案',
+      demand: curDemand,
+      demand_content: JSON.stringify({ demand: curDemand, template: tpl, analysis: demandAnalysisResult || null }, null, 2),
+      allow_web: true,
+      visibility: 'private',
+      tags: ['proposal', curDemand.industry || curDemand.category || '', curDemand.brand || ''].filter(Boolean)
+    };
+    var r = await apiFetch('/ai/proposal-draft', { method: 'POST', body: JSON.stringify(payload) });
+    if (!r.ok) throw new Error('API:' + r.status);
+    var d = await r.json();
+    lastProp = d.draft || '';
+    var displayH = formatAIText(lastProp);
+    if (out) out.innerHTML = '<div style="white-space:pre-wrap;font-size:12px;line-height:1.65">' + displayH + '</div>';
+    toast("方案已生成");
+  } catch(e) {
+    if (out) out.innerHTML = '<span style="color:#d94641">方案生成失败：' + esc(e.message) + '</span>';
+    toast('方案生成失败', 'error');
+  }
 }
 function downloadProposal() { if (lastProp) dlFile((curDemand ? curDemand.brand : "proposal") + "_proposal.md", lastProp, "text/markdown"); }
 function copyProposal() { if (lastProp) { try { navigator.clipboard.writeText(lastProp); toast("已复制"); } catch(e) {} } }
@@ -1435,8 +1460,8 @@ function exportSubmissionCSV() {
   data.forEach(function(inf, i) { csv += (i + 1) + ',' + getDate() + ',\"' + (inf.kol_handle || inf.name || '') + '\",' + (inf.followers || 0) + ',\"' + (inf.profile_link || '') + '\",' + inf.platform + ',' + inf.region + ',' + inf.category + ',' + (inf.avg_views_10 || 0) + ',' + inf.collab_type + ',' + (inf.cost_usd || 0) + ',' + (inf.cpm || '') + '\n'; });
   dlFile('influencer_' + getDate() + '.csv', '\uFEFF' + csv, 'text/csv'); toast('Exported ' + data.length);
 }
-async function sendChat() { var inp = document.getElementById('chatInput'); var msg = inp.value.trim(); if (!msg) return; addChatMsg('user', msg); inp.value = ''; chatHistory.push({ role: 'user', content: msg }); var msgs = document.getElementById('chatMessages'); var td = document.createElement('div'); td.className = 'chat-msg assistant'; td.innerHTML = '<div class=bubble>...</div>'; msgs.appendChild(td); msgs.scrollTop = msgs.scrollHeight; try { var ctx = JSON.stringify({ brandCount: BRANDS.length, sample: BRANDS.slice(0, 10).map(function (b) { return { name: b.name, industry: b.industry_tags.slice(0, 3) } }) }); var systemMsg = { role: 'system', content: chatHistory[0].content + '\n\nDB: ' + ctx }; var allMsgs = [systemMsg]; for (var i = 1; i < chatHistory.length; i++) allMsgs.push(chatHistory[i]); var resp = await fetch(DS_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + DS_KEY }, body: JSON.stringify({ model: 'deepseek-chat', messages: allMsgs, temperature: 0.7, max_tokens: 1500 }) }); td.remove(); if (!resp.ok) throw new Error('API:' + resp.status); var d = await resp.json(); var usage = d.usage || {}; trackTokenUsage('deepseek-chat', 'ai_chat', usage.prompt_tokens || 0, usage.completion_tokens || 0, usage.total_tokens || 0); var reply = d.choices[0].message.content; chatHistory.push({ role: 'assistant', content: reply }); addChatMsg('assistant', reply); if (chatHistory.length > 20) chatHistory = [chatHistory[0]].concat(chatHistory.slice(-19)) } catch (e) { td.remove(); addChatMsg('assistant', 'Error: ' + e.message) } }
-function addChatMsg(role, content) { var msgs = document.getElementById('chatMessages'); var div = document.createElement('div'); div.className = 'chat-msg ' + role; var formatted = content.replace(/\n/g, '<br>').replace(/```([^`]+)```/g, '<pre>$1</pre>'); div.innerHTML = '<div class=bubble>' + formatted + '</div>'; msgs.appendChild(div); msgs.scrollTop = msgs.scrollHeight }
+async function legacyDirectSendChat() { return sendChat(); }
+function legacyAddChatMsg(role, content) { var msgs = document.getElementById('chatMessages'); var div = document.createElement('div'); div.className = 'chat-msg ' + role; var formatted = esc(content).replace(/\n/g, '<br>').replace(/```([^`]+)```/g, '<pre>$1</pre>'); div.innerHTML = '<div class=bubble>' + formatted + '</div>'; msgs.appendChild(div); msgs.scrollTop = msgs.scrollHeight }
 function clearChat() { chatHistory = [chatHistory[0]]; document.getElementById('chatMessages').innerHTML = '<div class="chat-msg assistant"><div class=bubble>Chat cleared. How can I help?</div></div>' }
 
 // ===== FEISHU =====
@@ -2355,7 +2380,7 @@ function processDemandFile(file) {
   };
   reader.readAsText(file);
 }
-function analyzeDemandAI() {
+async function analyzeDemandAI() {
   var status = document.getElementById('demandFileStatus');
   var out = document.getElementById('analysisOut');
   var hint = document.getElementById('aiAnalyzeHint');
@@ -2365,27 +2390,37 @@ function analyzeDemandAI() {
   }
   hint.textContent = 'Analyzing...';
   var prompt = 'Analyze this demand and extract as JSON with: brand, company, product, usp, industry, budget_range, target_market, platforms, competitors(array), requirements(array) Content: ' + (uploadedDemandContent || ('Brand: ' + (document.getElementById('d_brand')?.value||'') + ' Product: ' + (document.getElementById('d_product')?.value||'')));
-  fetch(DS_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + DS_KEY }, body: JSON.stringify({ model: 'deepseek-chat', messages: [{ role: 'system', content: 'Output JSON only.' }, { role: 'user', content: prompt }], temperature: 0.1, max_tokens: 2000 }) })
-    .then(function(r) { return r.json(); })
-    .then(function(d) {
-      var content = d.choices?.[0]?.message?.content || '';
-      if (content.includes('{')) { var js = content.indexOf('{'); var je = content.lastIndexOf('}') + 1; content = content.substring(js, je); }
-      var parsed = JSON.parse(content);
-      demandAnalysisResult = parsed;
-      var h = '<h3>AI Analysis</h3><div class="detail-section">';
-      h += '<div class="detail-field"><span class="detail-field-label">Brand</span><span class="detail-field-value"><input id="edit_brand" value="' + esc(parsed.brand||'') + '"></span></div>';
-      h += '<div class="detail-field"><span class="detail-field-label">Product</span><span class="detail-field-value"><input id="edit_product" value="' + esc(parsed.product||'') + '"></span></div>';
-      h += '<div class="detail-field"><span class="detail-field-label">Industry</span><span class="detail-field-value"><input id="edit_industry" value="' + esc(parsed.industry||'') + '"></span></div>';
-      h += '<div class="detail-field"><span class="detail-field-label">Budget</span><span class="detail-field-value"><input id="edit_budget" value="' + esc(parsed.budget_range||'') + '"></span></div>';
-      h += '<div class="detail-field"><span class="detail-field-label">Market</span><span class="detail-field-value"><input id="edit_market" value="' + esc(parsed.target_market||'') + '"></span></div>';
-      h += '<div class="detail-field"><span class="detail-field-label">Platforms</span><span class="detail-field-value"><input id="edit_platforms" value="' + esc((parsed.platforms||[]).join(', ')) + '"></span></div>';
-      h += '</div><p style="font-size:11px;color:#999">Edit fields above if needed. Then click Next to generate proposal.</p>';
-      out.innerHTML = h;
-      hint.textContent = 'OK';
-      document.getElementById('m3s1').classList.add('hidden');
-      document.getElementById('m3s2').classList.remove('hidden');
-      updSteps(2);
-    }).catch(function(e) { hint.textContent = 'Failed'; out.innerHTML = '<p style="color:red">' + e.message + '</p>'; });
+  try {
+    var r = await apiFetch('/ai/chat', { method: 'POST', body: JSON.stringify({ message: 'Output JSON only.\n' + prompt, allow_web: false, source_module: 'demand_analysis', summary_visibility: 'private' }) });
+    if (!r.ok) throw new Error('API:' + r.status);
+    var d = await r.json();
+    var content = d.answer || '';
+    if (content.includes('{')) { var js = content.indexOf('{'); var je = content.lastIndexOf('}') + 1; content = content.substring(js, je); }
+    var parsed = JSON.parse(content);
+    demandAnalysisResult = parsed;
+    curDemand = { brand: parsed.brand || '', company: parsed.company || '', product: parsed.product || '', usp: parsed.usp || '', industry: parsed.industry || '', budget: parsed.budget_range || '', area: parsed.target_market || '', platform: (parsed.platforms || []).join(', ') };
+    await archiveToKB('demand', '需求归档：' + (parsed.brand || parsed.product || '未命名需求'), uploadedDemandContent || JSON.stringify(parsed), ['demand', parsed.industry || '', parsed.brand || ''].filter(Boolean));
+    var h = '<h3>AI Analysis</h3><div class="detail-section">';
+    h += '<div class="detail-field"><span class="detail-field-label">Brand</span><span class="detail-field-value"><input id="edit_brand" value="' + esc(parsed.brand||'') + '"></span></div>';
+    h += '<div class="detail-field"><span class="detail-field-label">Product</span><span class="detail-field-value"><input id="edit_product" value="' + esc(parsed.product||'') + '"></span></div>';
+    h += '<div class="detail-field"><span class="detail-field-label">Industry</span><span class="detail-field-value"><input id="edit_industry" value="' + esc(parsed.industry||'') + '"></span></div>';
+    h += '<div class="detail-field"><span class="detail-field-label">Budget</span><span class="detail-field-value"><input id="edit_budget" value="' + esc(parsed.budget_range||'') + '"></span></div>';
+    h += '<div class="detail-field"><span class="detail-field-label">Market</span><span class="detail-field-value"><input id="edit_market" value="' + esc(parsed.target_market||'') + '"></span></div>';
+    h += '<div class="detail-field"><span class="detail-field-label">Platforms</span><span class="detail-field-value"><input id="edit_platforms" value="' + esc((parsed.platforms||[]).join(', ')) + '"></span></div>';
+    h += '</div><p style="font-size:11px;color:#999">Edit fields above if needed. Then click Next to generate proposal.</p>';
+    out.innerHTML = h;
+    hint.textContent = 'OK';
+    document.getElementById('m3s1').classList.add('hidden');
+    document.getElementById('m3s2').classList.remove('hidden');
+    updSteps(2);
+  } catch(e) {
+    hint.textContent = 'Failed';
+    out.innerHTML = '<p style="color:red">' + e.message + '</p>';
+  }
+}
+function analyzeDemandManual() {
+  uploadedDemandContent = '';
+  analyzeDemandAI();
 }
 function getEditedDemand() {
   return {
@@ -2397,7 +2432,7 @@ function getEditedDemand() {
     platforms: document.getElementById('edit_platforms')?.value || ''
   };
 }
-function goStep3() { document.getElementById('m3s2').classList.add('hidden'); document.getElementById('m3s3').classList.remove('hidden'); updSteps(3); }
+function goStep3() { document.getElementById('m3s2').classList.add('hidden'); document.getElementById('m3s3').classList.remove('hidden'); updSteps(3); initM3(); }
 function resetDemand() { uploadedDemandContent = ''; demandAnalysisResult = ''; document.getElementById('m3s2').classList.add('hidden'); document.getElementById('m3s3').classList.add('hidden'); document.getElementById('m3s1').classList.remove('hidden'); document.getElementById('demandFileStatus').innerHTML = ''; document.getElementById('btnAnalyzeAI').disabled = true; document.getElementById('aiAnalyzeHint').textContent = 'Upload first'; updSteps(1); }
 function generateHTMLPPT() {
   var demand = getEditedDemand();
@@ -2410,6 +2445,7 @@ function generateHTMLPPT() {
   var sections = lastProp ? lastProp.split('\n').filter(Boolean) : ['Strategy', 'Execution'];
   sections.forEach(function(s) { html += '<section><h2>' + esc(s) + '</h2></section>'; });
   html += '</div></div><script src="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.3.1/reveal.min.js"><\/script><script>Reveal.initialize({hash:true})<\/script></body></html>';
+  if (lastProp) archiveToKB('proposal_confirmed', '确认方案：' + brand, lastProp, ['proposal', 'ppt', brand]).catch(function() {});
   dlFile(brand + '_proposal.html', html, 'text/html');
   toast('HTML proposal downloaded');
 }
@@ -2471,14 +2507,13 @@ function downloadInfTemplate() {
 aiMemory = aiMemory || {};
 try { aiMemory = JSON.parse(localStorage.getItem('tm_ai_memory') || '{}'); } catch(e) { aiMemory = {}; }
 function saveAIMemory() { localStorage.setItem('tm_ai_memory', JSON.stringify(aiMemory)); }
-function sendChat() {
+let currentAiConversationId = null;
+async function sendChat() {
   var inp = document.getElementById('chatInput');
   var msg = inp ? inp.value.trim() : '';
   if (!msg) return;
   addChatMsg('user', msg);
   inp.value = '';
-  var memKeys = Object.keys(aiMemory).slice(-10);
-  var memContext = memKeys.length ? '\n\nPast:\n' + memKeys.map(function(k) { return '- ' + String(aiMemory[k]).substring(0, 200); }).join('\n') : '';
   var memId = 'm' + Date.now();
   aiMemory[memId] = msg;
   saveAIMemory();
@@ -2488,38 +2523,60 @@ function sendChat() {
   td.innerHTML = '<div class="bubble">Thinking...</div>';
   msgs.appendChild(td);
   msgs.scrollTop = msgs.scrollHeight;
-  var systemPrompt = 'You are TuringMarket AI, an expert in influencer marketing. Be concise in Chinese. Database: ' + BRANDS.length + ' brands.' + memContext;
-  var messages = [{role:'system', content: systemPrompt}];
-  for (var ci = 0; ci < chatHistory.length && ci < 8; ci++) { messages.push(chatHistory[ci]); }
-  messages.push({role:'user', content: msg});
-  fetch(DS_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + DS_KEY }, body: JSON.stringify({ model: 'deepseek-chat', messages: messages, temperature: 0.7, max_tokens: 2048 }) })
-    .then(function(r) { return r.json(); })
-    .then(function(d) {
-      td.remove();
-      var reply = d.choices ? d.choices[0].message.content : 'No response.';
-      chatHistory.push({role:'assistant', content: reply});
-      aiMemory[memId + '_r'] = reply.substring(0, 500);
-      saveAIMemory();
-      addChatMsg('assistant', reply);
-    }).catch(function(e) { td.innerHTML = '<div class="bubble" style="color:#f44336">Error: ' + e.message + '</div>'; });
+  try {
+    var webEnabled = !!document.getElementById('webSearchToggle')?.checked;
+    var r = await apiFetch('/ai/chat', { method: 'POST', body: JSON.stringify({ message: msg, conversation_id: currentAiConversationId, allow_web: webEnabled, source_module: 'assistant', summary_visibility: 'private' }) });
+    if (!r.ok) throw new Error('API:' + r.status);
+    var d = await r.json();
+    td.remove();
+    currentAiConversationId = d.conversation_id || currentAiConversationId;
+    var reply = d.answer || 'No response.';
+    chatHistory.push({role:'user', content: msg});
+    chatHistory.push({role:'assistant', content: reply});
+    aiMemory[memId + '_r'] = reply.substring(0, 500);
+    saveAIMemory();
+    addChatMsg('assistant', reply, d);
+    if (chatHistory.length > 20) chatHistory = chatHistory.slice(-20);
+  } catch(e) {
+    td.innerHTML = '<div class="bubble" style="color:#f44336">Error: ' + e.message + '</div>';
+  }
 }
-function addChatMsg(role, text) {
+function renderAIReferences(meta) {
+  if (!meta) return '';
+  var kb = meta.knowledge_references || [];
+  var web = meta.web_results || [];
+  if (!kb.length && !web.length) return '';
+  var h = '<div style="border-top:1px solid rgba(0,0,0,.08);margin-top:10px;padding-top:8px;font-size:11px;line-height:1.5;opacity:.78">';
+  if (kb.length) {
+    h += '<div style="font-weight:600;margin-bottom:4px">知识库引用</div>';
+    h += kb.map(function(ref) { return '<div>KB#' + ref.id + ' · ' + esc(ref.title || '') + '</div>'; }).join('');
+  }
+  if (web.length) {
+    h += '<div style="font-weight:600;margin:6px 0 4px">联网来源</div>';
+    h += web.map(function(ref) { return '<div><a href="' + esc(ref.url || '#') + '" target="_blank" rel="noopener">' + esc(ref.title || ref.url || 'source') + '</a></div>'; }).join('');
+  }
+  h += '</div>';
+  return h;
+}
+function addChatMsg(role, text, meta) {
   var msgs = document.getElementById('chatMessages');
   if (!msgs) return;
   var div = document.createElement('div');
   div.className = 'chat-msg ' + role;
   var formatted = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>').replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-  div.innerHTML = '<div class="bubble">' + formatted + '</div>';
+  div.innerHTML = '<div class="bubble">' + formatted + renderAIReferences(meta) + '</div>';
   msgs.appendChild(div);
   msgs.scrollTop = msgs.scrollHeight;
 }
-function clearChat() { document.getElementById('chatMessages').innerHTML = '<div class="chat-msg assistant"><div class="bubble">Chat cleared</div></div>'; chatHistory = [{role:'system', content:'You are TuringMarket AI assistant.'}]; }
+function clearChat() { document.getElementById('chatMessages').innerHTML = '<div class="chat-msg assistant"><div class="bubble">Chat cleared</div></div>'; chatHistory = [{role:'system', content:'You are TuringMarket AI assistant.'}]; currentAiConversationId = null; }
 function clearAIMemory() { if (!confirm('Clear memory?')) return; aiMemory = {}; saveAIMemory(); toast('Memory cleared'); }
 // ===== ADMIN (v8.0) =====
 function switchAdminTab(tab) {
-  ['overview','users','knowledge','tokens'].forEach(function(t) { var el = document.getElementById('admin-tab-' + t); if (el) el.style.display = t === tab ? 'block' : 'none'; });
+  ['overview','users','knowledge','ai-chat','tokens'].forEach(function(t) { var el = document.getElementById('admin-tab-' + t); if (el) el.style.display = t === tab ? 'block' : 'none'; });
   if (tab === 'overview') loadAdminDashboard();
   if (tab === 'users') loadAdminUsers();
+  if (tab === 'knowledge') loadKnowledgeBase();
+  if (tab === 'ai-chat') loadAdminAiConversations();
   if (tab === 'tokens') loadAdminTokens();
 }
 function loadAdminDashboard() {
@@ -2548,6 +2605,54 @@ function loadAdminTokens() {
       return '<tr><td>' + esc(u.display_name||u.username||'') + '</td><td>' + esc(u.department||'-') + '</td><td>' + (u.request_count||0) + '</td><td>' + (u.total_tokens||0).toLocaleString() + '</td><td>' + (u.last_used||'').substring(0,10) + '</td></tr>';
     }).join('') + '</tbody></table>';
   }).catch(function(e) {});
+}
+function loadAdminAiConversations() {
+  var q = document.getElementById('aiAuditSearch')?.value || '';
+  var userId = document.getElementById('aiAuditUser')?.value || '';
+  var module = document.getElementById('aiAuditModule')?.value || '';
+  var url = '/ai/conversations?limit=100';
+  if (q) url += '&q=' + encodeURIComponent(q);
+  if (userId) url += '&user_id=' + encodeURIComponent(userId);
+  if (module) url += '&source_module=' + encodeURIComponent(module);
+  apiFetch(url).then(function(r) { return r.json(); }).then(function(d) {
+    var c = document.getElementById('aiAuditList');
+    if (!c) return;
+    var rows = d.conversations || [];
+    if (!rows.length) { c.innerHTML = '<p style="opacity:.5">No conversations</p>'; return; }
+    c.innerHTML = rows.map(function(item) {
+      return '<div onclick="viewAdminAiConversation(' + item.id + ')" style="cursor:pointer;border-bottom:1px solid var(--border);padding:10px 0">' +
+        '<div style="display:flex;justify-content:space-between;gap:8px"><strong>' + esc(item.title || 'Conversation') + '</strong><span style="font-size:11px;opacity:.55">#' + item.id + '</span></div>' +
+        '<div style="font-size:12px;opacity:.65">' + esc(item.display_name || item.username || '') + ' · ' + esc(item.source_module || '-') + ' · ' + (item.message_count || 0) + ' msgs</div>' +
+        '<div style="font-size:11px;opacity:.55">' + esc((item.last_answer || '').substring(0, 120)) + '</div>' +
+        '</div>';
+    }).join('');
+  }).catch(function(e) {
+    var c = document.getElementById('aiAuditList');
+    if (c) c.innerHTML = '<p style="color:#d94641">' + esc(e.message) + '</p>';
+  });
+}
+function viewAdminAiConversation(id) {
+  apiFetch('/ai/conversations/' + id).then(function(r) { return r.json(); }).then(function(d) {
+    var c = document.getElementById('aiAuditDetail');
+    var conv = d.conversation;
+    if (!c || !conv) return;
+    var h = '<div style="border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:8px">' +
+      '<strong>' + esc(conv.title || 'Conversation') + '</strong><br>' +
+      '<span style="font-size:12px;opacity:.65">' + esc(conv.display_name || conv.username || '') + ' · ' + esc(conv.source_module || '-') + ' · ' + esc(conv.updated_at || '') + '</span></div>';
+    h += (conv.messages || []).map(function(m) {
+      var refs = m.references || [];
+      var refHtml = refs.length ? '<div style="font-size:11px;opacity:.65;margin-top:6px">' + refs.map(function(r) {
+        return esc(r.reference_type || '') + ': ' + esc(r.title || r.url || r.reference_id || '');
+      }).join('<br>') + '</div>' : '';
+      return '<div style="margin-bottom:10px;padding:8px;border:1px solid var(--border);border-radius:6px;background:' + (m.role === 'user' ? '#fff' : 'var(--surface2)') + '">' +
+        '<div style="font-size:11px;opacity:.55;margin-bottom:4px">' + esc(m.role) + ' · ' + esc(m.model || '') + ' · tokens ' + (m.total_tokens || 0) + '</div>' +
+        '<div style="white-space:pre-wrap;font-size:12px;line-height:1.55">' + esc(m.content || '') + '</div>' + refHtml + '</div>';
+    }).join('');
+    c.innerHTML = h;
+  }).catch(function(e) {
+    var c = document.getElementById('aiAuditDetail');
+    if (c) c.innerHTML = '<p style="color:#d94641">' + esc(e.message) + '</p>';
+  });
 }
 function toggleUserActive(id, active) { apiFetch('/admin/users/'+id, {method:'PUT', body:JSON.stringify({is_active:active})}).then(function() { loadAdminUsers(); toast(active?'Activated':'Deactivated'); }).catch(function(e) { toast('Failed','error'); }); }
 function adminResetPw(id) { apiFetch('/admin/users/reset-password/'+id, {method:'POST'}).then(function() { toast('Reset to turing2026'); }).catch(function(e) { toast('Failed','error'); }); }
