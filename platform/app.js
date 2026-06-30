@@ -4,6 +4,7 @@ const DS_URL = "https://api.deepseek.com/v1/chat/completions";
 const DS_KEY = "sk-5951a22df4fc48ca874b86b87f43cee3";
 let AUTH_TOKEN = localStorage.getItem('tm_token') || '';
 let CURRENT_USER = null;
+let authExpiredNotified = false;
 let BRANDS = [], INFLUENCERS = [], TEMPLATES = [], CBLOCKS = {};
 let curDemand = null, selTpl = null, lastMatch = [], lastProp = "";
 let uploadedFileContent = "";
@@ -17,17 +18,17 @@ let chatHistory = [{role: "system", content: "You are the TuringMarket AI assist
   if (!sidebar) return;
   
   var pages = [
-    { id: 'm0', icon: '🚀', label: '客户库' },
-    { id: 'm1', icon: '📊', label: '行业品牌智库' },
-    { id: 'm2', icon: '🎯', label: '客户策略规划' },
-    { id: 'm3', icon: '📋', label: '需求接入 & 方案生成' },
-    { id: 'm4', icon: '👥', label: '网红匹配 & 执行管理' },
+    { id: 'm0', icon: '客', label: '客户库' },
+    { id: 'm1', icon: '智', label: '行业品牌智库' },
+    { id: 'm2', icon: '策', label: '客户策略规划' },
+    { id: 'm3', icon: '需', label: '需求接入 & 方案生成' },
+    { id: 'm4', icon: '红', label: '网红匹配 & 执行管理' },
     { id: 'm5', icon: '🤖', label: 'AI 助手' },
-    { id: 'workflow-designer', icon: '✏️', label: '流程设计' },
-    { id: 'workflow-templates', icon: '📋', label: '流程模板' },
-    { id: 'workflow-instances', icon: '⚡', label: '流程实例' },
-    { id: 'workflow-tasks', icon: '📌', label: '我的待办' },
-    { id: 'admin', icon: '🛡️', label: '管理控制室', adminOnly: true }
+    { id: 'workflow-designer', icon: '流', label: '流程设计' },
+    { id: 'workflow-templates', icon: '模', label: '流程模板' },
+    { id: 'workflow-instances', icon: '实', label: '流程实例' },
+    { id: 'workflow-tasks', icon: '待', label: '我的待办' },
+    { id: 'admin', icon: '管', label: '管理控制室', adminOnly: true }
   ];
   
   // Remove all existing nav items
@@ -40,7 +41,7 @@ let chatHistory = [{role: "system", content: "You are the TuringMarket AI assist
       var el = document.createElement('div');
       el.className = 'nav-item';
       if (p.adminOnly) el.className += ' admin-only';
-      if (p.id === 'm1') el.className += ' active';
+      if (p.id === 'm0') el.className += ' active';
       el.setAttribute('data-page', p.id);
       el.onclick = function() { switchPage(p.id); };
       el.style.cursor = 'pointer';
@@ -86,6 +87,7 @@ async function doLogin() {
     if (!r.ok) return showLoginError(d.error || '登录失败');
     AUTH_TOKEN = d.token;
     CURRENT_USER = d.user;
+    authExpiredNotified = false;
     localStorage.setItem('tm_token', AUTH_TOKEN);
     localStorage.setItem('tm_user', JSON.stringify(CURRENT_USER));
     document.getElementById('authOverlay').style.display = 'none';
@@ -112,12 +114,31 @@ async function doLogout() {
   location.reload();
 }
 
-function apiFetch(url, opts) {
+function handleAuthExpired(message) {
+  AUTH_TOKEN = '';
+  CURRENT_USER = null;
+  localStorage.removeItem('tm_token');
+  localStorage.removeItem('tm_user');
+  var app = document.getElementById('app');
+  var auth = document.getElementById('authOverlay');
+  if (app) app.style.display = 'none';
+  if (auth) auth.style.display = 'flex';
+  if (!authExpiredNotified) {
+    authExpiredNotified = true;
+    toast(message || '登录已过期，请重新登录后再操作。', 'error');
+  }
+}
+
+async function apiFetch(url, opts) {
   opts = opts || {};
-  opts.headers = opts.headers || {};
-  opts.headers['Authorization'] = 'Bearer ' + AUTH_TOKEN;
-  opts.headers['Content-Type'] = opts.headers['Content-Type'] || 'application/json';
-  return fetch(API + url, opts);
+  var isFormData = typeof FormData !== 'undefined' && opts.body instanceof FormData;
+  var headers = new Headers(opts.headers || {});
+  if (AUTH_TOKEN) headers.set('Authorization', 'Bearer ' + AUTH_TOKEN);
+  if (!isFormData && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+  opts.headers = headers;
+  var resp = await fetch(API + url, opts);
+  if (resp.status === 401) handleAuthExpired();
+  return resp;
 }
 
 // ===== APP INIT =====
@@ -190,6 +211,7 @@ async function loadCustomers() {
     var d = await r.json();
     customersCache = d.customers || [];
     renderCustomerTable(customersCache);
+    renderCrmCommandCenter();
     loadCustomerStats();
     var m0El = document.getElementById('m0Stats');
     if (m0El) m0El.textContent = '商务SOP · 线索→成交全流程跟踪 · ' + d.total + ' 个客户';
@@ -216,7 +238,79 @@ async function loadCustomerStats() {
     if (poolTab) poolTab.textContent = d.publicPool || 0;
     var val = document.getElementById('m0_totalValue');
     if (val) val.textContent = d.totalOppValue ? Number(d.totalOppValue).toLocaleString() : '0';
+    renderCrmCommandCenter(d);
   } catch (e) {}
+}
+
+function countByStageGroup(stageCounts, keys) {
+  return keys.reduce(function(sum, key) { return sum + Number(stageCounts[key] || 0); }, 0);
+}
+
+function renderCrmCommandCenter(stats) {
+  var data = Array.isArray(customersCache) ? customersCache : [];
+  var stageCounts = (stats && stats.byStage) || {};
+  if (!Object.keys(stageCounts).length && data.length) {
+    data.forEach(function(c) {
+      var key = c.stage || 'lead';
+      stageCounts[key] = (stageCounts[key] || 0) + 1;
+    });
+  }
+
+  var highIntent = countByStageGroup(stageCounts, ['needs_confirmed', 'analysis', 'proposal', 'kol_matching', 'negotiation']);
+  var highIntentEl = document.getElementById('m0_highIntentCount');
+  if (highIntentEl) highIntentEl.textContent = highIntent;
+
+  var riskNote = document.getElementById('m0_riskNote');
+  if (riskNote) riskNote.textContent = highIntent ? highIntent + ' 个需推进' : '节奏健康';
+
+  var groups = [
+    { name: '公海池', count: Number((stats && stats.publicPool) || 0) },
+    { name: '开发中', count: countByStageGroup(stageCounts, ['lead', 'info_confirmed', 'advantage_shared']) },
+    { name: '需求确认', count: countByStageGroup(stageCounts, ['needs_confirmed', 'analysis']) },
+    { name: '方案/谈判', count: countByStageGroup(stageCounts, ['proposal', 'kol_matching', 'cooperation', 'negotiation']) },
+    { name: '成交/维护', count: countByStageGroup(stageCounts, ['won', 'maintenance']) }
+  ];
+  var max = Math.max.apply(null, groups.map(function(g) { return g.count; }).concat([1]));
+  var bars = document.getElementById('m0StageBars');
+  if (bars) {
+    bars.innerHTML = groups.map(function(g, idx) {
+      var height = Math.max(18, Math.round((g.count / max) * 100));
+      var colors = ['#bfdfff', '#9cd0ff', '#7ebdff', '#4aa3ff', '#007aff'];
+      return '<div class="tm-stage-bar">'
+        + '<div class="tm-stage-track"><div class="tm-stage-fill" style="height:' + height + '%;background:linear-gradient(180deg,' + colors[idx] + ',#007aff)"></div></div>'
+        + '<div class="tm-stage-name">' + g.name + '</div>'
+        + '<div class="tm-stage-count">' + g.count + '</div>'
+        + '</div>';
+    }).join('');
+  }
+
+  var focus = data.slice().sort(function(a, b) {
+    var stageWeight = { negotiation: 5, proposal: 4, kol_matching: 4, needs_confirmed: 3, analysis: 3, cooperation: 3, won: 2, maintenance: 1 };
+    var av = Number(a.opportunity_value || 0) + (stageWeight[a.stage] || 0) * 100000;
+    var bv = Number(b.opportunity_value || 0) + (stageWeight[b.stage] || 0) * 100000;
+    return bv - av;
+  })[0];
+  var brandEl = document.getElementById('m0FocusBrand');
+  var bodyEl = document.getElementById('m0FocusBody');
+  if (brandEl && bodyEl) {
+    if (focus) {
+      brandEl.textContent = focus.brand_name || focus.company_name || '未命名客户';
+      bodyEl.textContent = (focus.industry ? focus.industry + '行业，' : '')
+        + '当前阶段为' + (CUST_STAGES[focus.stage] || focus.stage || '开发中')
+        + '。建议先确认下一步动作，并根据客户预算生成策略草稿。';
+    } else {
+      brandEl.textContent = '等待客户数据';
+      bodyEl.textContent = '新增或导入客户后，系统会根据阶段和商机金额推荐优先跟进对象。';
+    }
+  }
+
+  var aiEl = document.getElementById('m0AiInsightText');
+  if (aiEl) {
+    var activeCount = data.filter(function(c) { return ['lead', 'needs_confirmed', 'analysis', 'proposal', 'negotiation'].indexOf(c.stage) >= 0; }).length;
+    aiEl.textContent = activeCount
+      ? '检测到 ' + activeCount + ' 个客户仍在推进中。建议为高意向客户生成跟进任务，并把成功策略归档到知识库。'
+      : '当前没有明显推进风险。可继续从公海池认领客户或新增线索。';
+  }
 }
 
 function filterCustomers(stage) {
@@ -342,11 +436,12 @@ function switchCrmView(view) {
   curCrmView = view;
   var tabs = document.querySelectorAll('.crm-tab');
   for (var i = 0; i < tabs.length; i++) {
+    tabs[i].classList.remove('active');
     tabs[i].style.color = 'var(--text2)';
     tabs[i].style.borderBottom = '2px solid transparent';
   }
   var idx = view === 'pipeline' ? 0 : view === 'seapool' ? 1 : 2;
-  if (tabs[idx]) { tabs[idx].style.color = ''; tabs[idx].style.borderBottom = '2px solid #1a1a1a'; }
+  if (tabs[idx]) { tabs[idx].classList.add('active'); tabs[idx].style.color = ''; tabs[idx].style.borderBottom = '2px solid transparent'; }
 
   var pv = document.getElementById('crmPipelineView');
   var sv = document.getElementById('crmSeaPoolView');
@@ -461,6 +556,7 @@ function fillWorkflowDemand(context) {
     var el = document.getElementById(id);
     if (el) el.value = mapping[id];
   });
+  uploadedDemandFileName = '';
   uploadedDemandContent = 'Brand: ' + (context.brand || '') + '\nCompany: ' + (context.company || '') + '\nIndustry: ' + (context.industry || '') + '\nProduct: ' + (context.product || '') + '\nBudget: ' + (context.budget || '') + '\nChannel: ' + (context.platform || '') + '\nNotes: ' + (context.notes || '');
   var statusEl = document.getElementById('demandFileStatus');
   if (statusEl) statusEl.innerHTML = '已从客户详情带入上下文，无需重新上传文件';
@@ -753,29 +849,34 @@ async function generateAIStrategy() {
   var prompt = 'You are a senior overseas influencer marketing strategist at TuringMarket. Analyze the customer profile below and provide a comprehensive strategy in Chinese:\n\nCustomer: ' + input + '\n\nReference data (from our brand database and reusable historical cases): ' + JSON.stringify(context) + '\n\nWhen reusableCases are relevant, explicitly borrow their proven tactics, but do not copy text verbatim. Provide: 1) Market opportunity analysis 2) Recommended influencer types and platforms 3) Estimated budget allocation (60-30-10 model) 4) Competitor benchmarking suggestions 5) 3-month execution roadmap 6) Risk factors and mitigation 7) Reusable historical lessons. Format with clear headings and bullet points. Be specific and actionable.';
   
   try {
-    var resp = await fetch(DS_URL, {
+    var resp = await apiFetch('/ai/strategy', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + DS_KEY },
-      body: JSON.stringify({ model: 'deepseek-chat', messages: [{ role: 'user', content: prompt }], temperature: 0.7, max_tokens: 2500 })
+      body: JSON.stringify({ prompt: prompt, input: input })
     });
-    if (!resp.ok) throw new Error('API:' + resp.status);
+    if (!resp.ok) {
+      var errText = '';
+      try { var errJson = await resp.json(); errText = errJson.error || JSON.stringify(errJson); } catch(e0) {}
+      throw new Error(errText || ('服务请求失败: ' + resp.status));
+    }
     var data = await resp.json();
-    var result = data.choices[0].message.content;
+    var result = data.content || '';
+    if (!result) throw new Error('AI 服务未返回内容');
     lastAIStrategyRaw = result;
     // Parse markdown formatting
     result = result.replace(/### (.*)/g, '<h3 style="margin-top:16px;font-size:16px">$1</h3>');
     result = result.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
     result = result.replace(/\- (.*)/g, '<li>$1</li>');
     result = result.replace(/\n/g, '<br>');
-    out.innerHTML = renderKnowledgeReuse(similarCases, '本次策略参考的历史案例') + result;
+    var aiNotice = data.fallback
+      ? '<div style="margin-bottom:12px;padding:10px 12px;border-radius:12px;background:#fff7ed;color:#c2410c;font-size:13px">AI 服务当前处于降级模式：' + esc(data.warning || '请检查服务器 DeepSeek API Key') + '</div>'
+      : '';
+    out.innerHTML = aiNotice + renderKnowledgeReuse(similarCases, '本次策略参考的历史案例') + result;
     if (activeWorkflowContext && activeWorkflowContext.customer_id) {
       out.innerHTML += '<div style="margin-top:12px"><button class="btn btn-primary btn-sm" onclick="saveCurrentStrategy()">保存到客户记录和知识库</button></div>';
     }
-    status.textContent = 'Analysis complete';
-    // Track token usage
-    if (data.usage) trackTokenUsage('deepseek-chat', 'strategy', data.usage.prompt_tokens, data.usage.completion_tokens, data.usage.total_tokens);
+    status.textContent = data.fallback ? 'Basic draft generated' : 'Analysis complete';
   } catch(e) {
-    out.innerHTML = '<span style="color:#d94641">Analysis failed: ' + e.message + '</span>';
+    out.innerHTML = '<span style="color:#d94641">AI 策略生成失败：' + esc(e.message) + '。请检查登录状态或联系管理员查看服务器 AI 配置。</span>';
     status.textContent = 'Failed';
   }
 }
@@ -892,9 +993,24 @@ function initM3() {
   var h = "";
   for (var ti = 0; ti < TEMPLATES.length; ti++) {
     var t = TEMPLATES[ti];
-    h += '<div class="card" style="cursor:pointer;padding:14px" id="tcard-' + t.id + '" onclick="selTmpl(' + "'" + t.id + "'" + ')"><h3 style="font-size:14px">' + t.name + '</h3><p style="font-size:11px;opacity:.6;margin:6px 0">' + t.description + '</p></div>';
+    h += '<div class="card tm-template-card" id="tcard-' + t.id + '" onclick="selTmpl(' + "'" + t.id + "'" + ')"><h3 style="font-size:14px">' + esc(t.name) + '</h3><p style="font-size:11px;opacity:.6;margin:6px 0">' + esc(t.description) + '</p></div>';
   }
+  h += '<div class="card tm-template-card" id="tcard-custom" onclick="selTmpl(' + "'custom'" + ')"><h3 style="font-size:14px">自定义方案</h3><p style="font-size:11px;opacity:.6;margin:6px 0">按本次客户需求自定义方案标题、汇报结构和页面模块。</p><div style="font-size:11px;color:var(--text2)">适合非标准 brief、临时新增页面或客户指定格式。</div></div>';
   c.innerHTML = h;
+  var customBox = document.getElementById('customTemplateBox');
+  if (!customBox) {
+    c.insertAdjacentHTML('afterend',
+      '<div class="tm-custom-template" id="customTemplateBox">'
+      + '<div class="grid grid-2">'
+      + '<div><label>自定义方案名称</label><input id="customTplName" placeholder="例如：BLUETTI 新品红人营销专项方案"></div>'
+      + '<div><label>方案定位</label><input id="customTplDesc" placeholder="例如：适合新品上市、预算拆解、达人执行落地"></div>'
+      + '</div>'
+      + '<label style="margin-top:10px">方案页面结构（一行一个模块）</label>'
+      + '<textarea id="customTplSections" placeholder="例如：\n项目背景与甲方需求理解\n产品卖点与目标人群洞察\n竞品与内容机会分析\n红人矩阵与筛选标准\n预算拆分与执行排期\n风险控制与下一步确认" style="min-height:150px"></textarea>'
+      + '</div>'
+    );
+  }
+  updateTemplateSelectionUI();
 }
 function goAnalyze() {
   var brand = gv("d_brand"), product = gv("d_product"), usp = gv("d_usp");
@@ -907,12 +1023,37 @@ function goAnalyze() {
 }
 function goGenerate() { document.getElementById("m3s2").classList.add("hidden"); document.getElementById("m3s3").classList.remove("hidden"); updSteps(3); initM3(); }
 function updSteps(n) { for (var i = 1; i <= 3; i++) { var el = document.getElementById("step" + i); if (el) { el.classList.remove("active", "done"); if (i < n) el.classList.add("done"); if (i === n) el.classList.add("active"); } } }
-function selTmpl(id) { selTpl = id; }
+function selTmpl(id) {
+  selTpl = id;
+  updateTemplateSelectionUI();
+}
+function updateTemplateSelectionUI() {
+  document.querySelectorAll('#tmplSelect .tm-template-card').forEach(function(card) {
+    card.classList.toggle('active', card.id === 'tcard-' + selTpl);
+  });
+  var customBox = document.getElementById('customTemplateBox');
+  if (customBox) customBox.classList.toggle('active', selTpl === 'custom');
+}
+function getSelectedProposalTemplate() {
+  if (selTpl === 'custom') {
+    var name = (document.getElementById('customTplName')?.value || '').trim() || '自定义方案';
+    var desc = (document.getElementById('customTplDesc')?.value || '').trim() || '本次客户需求定制方案';
+    var sections = String(document.getElementById('customTplSections')?.value || '')
+      .split(/\n+/)
+      .map(function(s) { return s.trim(); })
+      .filter(Boolean);
+    if (!sections.length) {
+      sections = ['项目背景与客户需求理解', '产品卖点与目标人群洞察', '红人策略与内容方向', '执行排期与预算拆分', '风险控制与下一步确认'];
+    }
+    return { id: 'custom', name: name, description: desc, sections: sections };
+  }
+  return TEMPLATES.find(function(t) { return t.id === selTpl; });
+}
 async function generateProposal() {
   if (!curDemand && typeof syncCurDemandFromAnalysis === 'function') syncCurDemandFromAnalysis();
   if (!curDemand) { toast("请先完成需求分析", "error"); return; }
   if (!selTpl) { toast("请选择方案模板", "error"); return; }
-  var tpl = TEMPLATES.find(function(t) { return t.id === selTpl; });
+  var tpl = getSelectedProposalTemplate();
   if (!tpl) return;
   var similarCases = [];
   try {
@@ -928,14 +1069,24 @@ async function generateProposal() {
     });
   }
   lastProp = h;
-  var displayH = h.replace(/&/g,"&amp;").replace(/</g,"&lt;");
   var proposalOut = document.getElementById("proposalOutput") || document.getElementById("propResult");
   var saveBtn = (curDemand.customer_id || activeWorkflowContext?.customer_id) ? '<button class="btn btn-primary btn-sm" onclick="saveCurrentProposal()">保存到客户记录和知识库</button>' : '';
-  if (proposalOut) proposalOut.innerHTML = renderKnowledgeReuse(similarCases, '本次方案参考的历史案例') + '<div class="card"><h3>✅ 方案已生成</h3><pre style="font-size:12px;max-height:300px;overflow-y:auto;background:var(--surface2);padding:12px;border-radius:8px;white-space:pre-wrap">' + displayH + '</pre><div class="btn-group"><button class="btn btn-primary btn-sm" onclick="downloadProposal()">📥 下载 MD</button><button class="btn btn-sm" onclick="copyProposal()">📋 复制</button><button class="btn btn-sm" onclick="openProposalToInfluencers()">👥 去匹配达人</button>' + saveBtn + '</div></div>';
+  if (proposalOut) proposalOut.innerHTML = renderKnowledgeReuse(similarCases, '本次方案参考的历史案例') + '<div class="card"><div style="display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:8px"><h3 style="margin:0">✅ 方案已生成，可直接编辑</h3><span style="font-size:11px;color:var(--text2)">编辑后下载、复制、生成 PPT 都会使用最新草稿</span></div><textarea id="proposalEditor" class="tm-proposal-editor" oninput="updateProposalDraftFromEditor()">' + esc(h) + '</textarea><div id="proposalTextMirror" style="font-size:1px;line-height:1px;max-height:1px;overflow:hidden;opacity:.01;white-space:pre-wrap">' + esc(h) + '</div><div class="btn-group" style="margin-top:10px"><button class="btn btn-primary btn-sm" onclick="downloadProposal()">📥 下载 MD</button><button class="btn btn-sm" onclick="copyProposal()">📋 复制</button><button class="btn btn-sm" onclick="openProposalToInfluencers()">👥 去匹配达人</button>' + saveBtn + '</div></div>';
   toast("方案已生成");
 }
-function downloadProposal() { if (lastProp) dlFile((curDemand ? curDemand.brand : "proposal") + "_proposal.md", lastProp, "text/markdown"); }
-function copyProposal() { if (lastProp) { try { navigator.clipboard.writeText(lastProp); toast("已复制"); } catch(e) {} } }
+function updateProposalDraftFromEditor() {
+  var editor = document.getElementById('proposalEditor');
+  if (editor) lastProp = editor.value;
+  var mirror = document.getElementById('proposalTextMirror');
+  if (mirror) mirror.textContent = lastProp || '';
+  return lastProp;
+}
+function getCurrentProposalDraft() {
+  updateProposalDraftFromEditor();
+  return lastProp || '';
+}
+function downloadProposal() { var content = getCurrentProposalDraft(); if (content) dlFile((curDemand ? curDemand.brand : "proposal") + "_proposal.md", content, "text/markdown"); }
+function copyProposal() { var content = getCurrentProposalDraft(); if (content) { try { navigator.clipboard.writeText(content); toast("已复制"); } catch(e) {} } }
 function openProposalToInfluencers() {
   if (!curDemand) {
     toast('当前方案上下文为空', 'error');
@@ -2195,6 +2346,7 @@ function exportBrandCSV() {
 }
 // ===== M3: DEMAND & PROPOSAL (v8.0) =====
 var uploadedDemandContent = '';
+var uploadedDemandFileName = '';
 var demandAnalysisResult = '';
 function handleDemandFile(event) {
   var file = event.target.files[0];
@@ -2210,18 +2362,200 @@ function handleDemandDrop(event) {
 function processDemandFile(file) {
   var status = document.getElementById('demandFileStatus');
   if (!status) return;
+  uploadedDemandFileName = file.name || '';
+  renderDemandUploadState(file, 'reading', '已选择文件，正在读取...');
   status.innerHTML = 'Reading: ' + file.name + '...';
   document.getElementById('btnAnalyzeAI').disabled = true;
+  var metadata = buildDemandFileMetadata(file);
+  if (!isTextLikeDemandFile(file)) {
+    uploadedDemandContent = metadata;
+    renderDemandUploadState(file, 'parsing', '已选择文件，正在解析结构化内容...');
+    status.innerHTML = '已读取文件信息，正在解析结构化内容...';
+    document.getElementById('aiAnalyzeHint').textContent = 'Parsing file...';
+    parseDemandFileOnServer(file, metadata);
+    return;
+  }
   var reader = new FileReader();
   reader.onload = function(e) {
-    uploadedDemandContent = e.target.result;
+    uploadedDemandContent = metadata + '\n\nText content:\n' + String(e.target.result || '').slice(0, 12000);
+    renderDemandUploadState(file, 'ready', '文本已读取，可以开始 AI 分析。');
     status.innerHTML = 'OK: ' + file.name + ' (' + (uploadedDemandContent.length / 1024).toFixed(1) + 'KB)';
     document.getElementById('btnAnalyzeAI').disabled = false;
     document.getElementById('aiAnalyzeHint').textContent = 'Ready to analyze';
   };
+  reader.onerror = function() {
+    renderDemandUploadState(file, 'error', '浏览器读取文件失败，请重新选择文件或换用文本格式。');
+    status.innerHTML = '浏览器读取文件失败，请重新选择文件';
+    document.getElementById('aiAnalyzeHint').textContent = 'Upload failed';
+  };
   reader.readAsText(file);
 }
-function analyzeDemandAI() {
+async function parseDemandFileOnServer(file, fallbackMetadata) {
+  var status = document.getElementById('demandFileStatus');
+  var hint = document.getElementById('aiAnalyzeHint');
+  if (status) status.innerHTML = '正在解析需求表内容: ' + file.name + '...';
+  if (hint) hint.textContent = 'Parsing file...';
+  try {
+    var form = new FormData();
+    form.append('file', file);
+    var r = await apiFetch('/demand/parse-file', {
+      method: 'POST',
+      body: form
+    });
+    var d = await r.json().catch(function() { return {}; });
+    if (!r.ok) throw new Error(r.status === 401 ? '登录状态已过期，请重新登录后再上传需求表。' : (d.error || ('文件解析失败: ' + r.status)));
+    uploadedDemandContent = d.extractedText || fallbackMetadata;
+    if (status) {
+      var parseState = d.ocrUsed
+        ? 'OCR 已提取'
+        : (d.needsOcr ? '需要 OCR 服务，当前仅有文件信息' : (d.fallback ? '降级解析' : '已解析'));
+      var warning = d.warning ? '<br><span style="color:#b45309">' + esc(d.warning) + '</span>' : '';
+      renderDemandUploadState(file, d.needsOcr && !d.ocrUsed ? 'error' : 'ready', parseState + (d.warning ? '：' + d.warning : ''));
+      status.innerHTML = 'OK: ' + file.name + ' (' + (uploadedDemandContent.length / 1024).toFixed(1) + 'KB · ' + parseState + ')' + warning;
+    }
+    if (hint) hint.textContent = d.needsOcr && !d.ocrUsed ? 'Ready with OCR fallback' : 'Ready to analyze';
+  } catch (e) {
+    uploadedDemandContent = fallbackMetadata;
+    var errorMessage = String(e && e.message ? e.message : e);
+    var fallbackMessage = /50[234]/.test(errorMessage)
+      ? '解析服务暂时不可用，已保留文件名和元数据继续。请确认后端解析服务已重启后再试。'
+      : '文件内容解析失败，已使用文件名和元数据继续：' + errorMessage;
+    renderDemandUploadState(file, 'error', fallbackMessage);
+    if (status) status.innerHTML = esc(fallbackMessage);
+    if (hint) hint.textContent = 'Ready with fallback';
+  } finally {
+    var btn = document.getElementById('btnAnalyzeAI');
+    if (btn) btn.disabled = false;
+  }
+}
+function renderDemandUploadState(file, state, message) {
+  var box = document.getElementById('demandDropZone');
+  if (!box || !file) return;
+  var isError = state === 'error';
+  box.classList.add('has-file');
+  box.classList.toggle('error', isError);
+  box.innerHTML = ''
+    + '<div class="upload-file-card">'
+    + '<div class="upload-file-icon">' + (isError ? '⚠️' : '📄') + '</div>'
+    + '<div style="flex:1;min-width:0">'
+    + '<div class="upload-file-name">' + esc(file.name || '已选择文件') + '</div>'
+    + '<div class="upload-file-meta">' + esc(getDemandFileExtension(file).toUpperCase() || 'FILE') + ' · ' + formatDemandFileSize(file.size || 0) + '</div>'
+    + '<div class="upload-file-status">' + esc(message || '已选择文件') + '</div>'
+    + '<div style="font-size:11px;color:var(--text2);margin-top:8px">点击此区域可重新选择文件</div>'
+    + '</div></div>';
+}
+function formatDemandFileSize(size) {
+  size = Number(size || 0);
+  if (size >= 1024 * 1024) return (size / 1024 / 1024).toFixed(1) + 'MB';
+  if (size >= 1024) return (size / 1024).toFixed(1) + 'KB';
+  return size + 'B';
+}
+function resetDemandUploadState() {
+  var box = document.getElementById('demandDropZone');
+  if (!box) return;
+  box.classList.remove('has-file', 'error');
+  box.innerHTML = ''
+    + '<div class="upload-icon">📄</div>'
+    + '<div class="upload-text">拖拽需求文件到此处，或点击上传</div>'
+    + '<div style="font-size:11px;opacity:.4;margin-top:4px">PDF · DOCX · XLSX · XLS · JPG · PNG</div>';
+}
+function getDemandFileExtension(file) {
+  var name = String(file?.name || '');
+  var match = name.match(/\.([a-z0-9]+)$/i);
+  return match ? match[1].toLowerCase() : '';
+}
+function isTextLikeDemandFile(file) {
+  var ext = getDemandFileExtension(file);
+  var type = String(file?.type || '').toLowerCase();
+  return ['txt', 'csv', 'tsv', 'md', 'json'].includes(ext) || type.indexOf('text/') === 0 || type.indexOf('json') >= 0 || type.indexOf('csv') >= 0;
+}
+function buildDemandFileMetadata(file) {
+  var ext = getDemandFileExtension(file);
+  return [
+    'File name: ' + (file?.name || ''),
+    'File type: ' + (file?.type || ext || 'unknown'),
+    'File size: ' + (file?.size || 0) + ' bytes',
+    'Note: Structured or binary demand files such as XLSX, DOCX, PDF and images may need server-side parsing. Use the file name and any visible metadata to infer brand, product, industry and requirements; leave uncertain fields editable for human confirmation.'
+  ].join('\n');
+}
+function normalizeDemandArray(value, splitter) {
+  if (Array.isArray(value)) return value.map(function(v) { return String(v || '').trim(); }).filter(Boolean);
+  return String(value || '').split(splitter || /[,，、/]+/).map(function(v) { return v.trim(); }).filter(Boolean);
+}
+function inferDemandFromText(source) {
+  var text = String(source || '');
+  function pick(regex) {
+    var match = text.match(regex);
+    return match ? String(match[1] || '').trim().slice(0, 120) : '';
+  }
+  var fileName = pick(/File name:\s*([^\n]+)/i) || uploadedDemandFileName || '';
+  var baseName = fileName.replace(/\.[^.]+$/i, '').replace(/[_-]+/g, ' ');
+  var combined = text + '\n' + baseName;
+  var brand = pick(/(?:品牌名称|品牌|Brand)[:：\s]+([^\n,，;；]+)/i);
+  if (!brand) {
+    var brandMatch = baseName.match(/\b([A-Z][A-Z0-9]{1,})\b/);
+    if (brandMatch) brand = brandMatch[1];
+  }
+  var product = pick(/(?:推广产品名|推广产品|产品名称|产品|Product)[:：\s]+([^\n,，;；]+)/i);
+  if (!product) {
+    var productMatch = baseName.match(/\b([A-Z][A-Za-z]+(?:\s*[A-Za-z])?\s*\d{2,}[A-Za-z0-9-]*)\b/);
+    if (productMatch && productMatch[1] !== brand) product = productMatch[1].replace(/\s+/g, ' ').trim();
+  }
+  var industry = pick(/(?:行业|品类|Industry)[:：\s]+([^\n,，;；]+)/i);
+  if (!industry) {
+    industry = /储能|电源|电池|太阳能|户外|power\s*station|portable\s*power|elite|bluetti/i.test(combined) ? '储能'
+      : /美妆|护肤|美容/i.test(combined) ? '美妆'
+      : /宠物|猫|狗/i.test(combined) ? '宠物'
+      : /3C|电子|手机|电脑/i.test(combined) ? '3C'
+      : '';
+  }
+  var market = pick(/(?:目标市场|市场|Market)[:：\s]+([^\n,，;；]+)/i);
+  if (!market) {
+    market = /北美|美国|United States|North America|\bUS\b/i.test(combined) ? '北美/美国'
+      : /欧洲|EU|Europe/i.test(combined) ? '欧洲'
+      : '';
+  }
+  var budget = pick(/(?:预算范围|预算|Budget)[:：\s]+([^\n,，;；]+)/i);
+  var platforms = /红人|达人|推广|需求|influencer|KOL|社媒|social|TuringMarket|\.xlsx/i.test(combined) ? ['YouTube', 'Instagram', 'TikTok'] : [];
+  var requirements = [];
+  if (/红人|达人|influencer|KOL/i.test(combined)) requirements.push('红人推广需求');
+  if (/新品|new\s*product|launch/i.test(combined)) requirements.push('新品上市传播');
+  if (fileName) requirements.push('已根据上传文件名预填，需人工确认字段');
+  return {
+    brand: brand || '',
+    company: pick(/(?:公司名称|公司|Company)[:：\s]+([^\n,，;；]+)/i),
+    product: product || '',
+    usp: pick(/(?:核心USP|卖点|USP)[:：\s]+([^\n]+)/i),
+    industry: industry || '',
+    budget_range: budget || '',
+    target_market: market || '',
+    platforms: platforms,
+    competitors: [],
+    requirements: requirements
+  };
+}
+function normalizeDemandAnalysis(analysis) {
+  var parsed = analysis || {};
+  parsed.platforms = normalizeDemandArray(parsed.platforms, /[,，、/]+/);
+  parsed.competitors = normalizeDemandArray(parsed.competitors, /[,，、/]+/);
+  parsed.requirements = normalizeDemandArray(parsed.requirements, /[;；\n]+/);
+  return parsed;
+}
+function hasDemandAnalysisValue(parsed) {
+  return !!(parsed && (parsed.brand || parsed.company || parsed.product || parsed.usp || parsed.industry || parsed.budget_range || parsed.target_market || (parsed.platforms || []).length || (parsed.competitors || []).length || (parsed.requirements || []).length));
+}
+function mergeDemandAnalysis(parsed, fallback) {
+  parsed = normalizeDemandAnalysis(parsed || {});
+  fallback = normalizeDemandAnalysis(fallback || {});
+  ['brand', 'company', 'product', 'usp', 'industry', 'budget_range', 'target_market'].forEach(function(key) {
+    if (!parsed[key] && fallback[key]) parsed[key] = fallback[key];
+  });
+  ['platforms', 'competitors', 'requirements'].forEach(function(key) {
+    if (!parsed[key].length && fallback[key].length) parsed[key] = fallback[key];
+  });
+  return parsed;
+}
+async function analyzeDemandAI() {
   var status = document.getElementById('demandFileStatus');
   var out = document.getElementById('analysisOut');
   var hint = document.getElementById('aiAnalyzeHint');
@@ -2229,29 +2563,60 @@ function analyzeDemandAI() {
     toast('Upload a file or fill info', 'error');
     return;
   }
+  if (!out || !hint) return;
   hint.textContent = 'Analyzing...';
-  var prompt = 'Analyze this demand and extract as JSON with: brand, company, product, usp, industry, budget_range, target_market, platforms, competitors(array), requirements(array) Content: ' + (uploadedDemandContent || ('Brand: ' + (document.getElementById('d_brand')?.value||'') + ' Product: ' + (document.getElementById('d_product')?.value||'')));
-  fetch(DS_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + DS_KEY }, body: JSON.stringify({ model: 'deepseek-chat', messages: [{ role: 'system', content: 'Output JSON only.' }, { role: 'user', content: prompt }], temperature: 0.1, max_tokens: 2000 }) })
-    .then(function(r) { return r.json(); })
-    .then(function(d) {
-      var content = d.choices?.[0]?.message?.content || '';
-      if (content.includes('{')) { var js = content.indexOf('{'); var je = content.lastIndexOf('}') + 1; content = content.substring(js, je); }
-      var parsed = JSON.parse(content);
-      demandAnalysisResult = parsed;
-      var h = '<h3>AI Analysis</h3><div class="detail-section">';
-      h += '<div class="detail-field"><span class="detail-field-label">Brand</span><span class="detail-field-value"><input id="edit_brand" value="' + esc(parsed.brand||'') + '"></span></div>';
-      h += '<div class="detail-field"><span class="detail-field-label">Product</span><span class="detail-field-value"><input id="edit_product" value="' + esc(parsed.product||'') + '"></span></div>';
-      h += '<div class="detail-field"><span class="detail-field-label">Industry</span><span class="detail-field-value"><input id="edit_industry" value="' + esc(parsed.industry||'') + '"></span></div>';
-      h += '<div class="detail-field"><span class="detail-field-label">Budget</span><span class="detail-field-value"><input id="edit_budget" value="' + esc(parsed.budget_range||'') + '"></span></div>';
-      h += '<div class="detail-field"><span class="detail-field-label">Market</span><span class="detail-field-value"><input id="edit_market" value="' + esc(parsed.target_market||'') + '"></span></div>';
-      h += '<div class="detail-field"><span class="detail-field-label">Platforms</span><span class="detail-field-value"><input id="edit_platforms" value="' + esc((parsed.platforms||[]).join(', ')) + '"></span></div>';
-      h += '</div><p style="font-size:11px;color:#999">Edit fields above if needed. Then click Next to generate proposal.</p>';
-      out.innerHTML = h;
-      hint.textContent = 'OK';
-      document.getElementById('m3s1').classList.add('hidden');
-      document.getElementById('m3s2').classList.remove('hidden');
-      updSteps(2);
-    }).catch(function(e) { hint.textContent = 'Failed'; out.innerHTML = '<p style="color:red">' + e.message + '</p>'; });
+  if (status) status.innerHTML = 'AI 正在分析需求...';
+  var source = uploadedDemandContent || [
+    'Brand: ' + (document.getElementById('d_brand')?.value || ''),
+    'Product: ' + (document.getElementById('d_product')?.value || ''),
+    'USP: ' + (document.getElementById('d_usp')?.value || ''),
+    'Industry: ' + (document.getElementById('d_category')?.value || ''),
+    'Market: ' + (document.getElementById('d_area')?.value || ''),
+    'Budget: ' + (document.getElementById('d_budget')?.value || '')
+  ].join('\n');
+  if (uploadedDemandFileName && source.indexOf('File name:') < 0) source = 'File name: ' + uploadedDemandFileName + '\n' + source;
+  var prompt = 'Analyze this demand and extract as JSON with: brand, company, product, usp, industry, budget_range, target_market, platforms(array), competitors(array), requirements(array). Content: ' + source;
+  try {
+    var r = await apiFetch('/ai/demand-analysis', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: prompt, input: source, fileName: uploadedDemandFileName })
+    });
+    if (!r.ok) {
+      var errText = '';
+      try { var errJson = await r.json(); errText = errJson.error || JSON.stringify(errJson); } catch(e0) {}
+      if (r.status === 401) errText = '登录状态已过期，请重新登录后再分析需求。';
+      throw new Error(errText || ('服务请求失败: ' + r.status));
+    }
+    var d = await r.json();
+    var parsed = mergeDemandAnalysis(d.analysis || {}, inferDemandFromText(source));
+    if (!hasDemandAnalysisValue(parsed)) {
+      parsed.requirements = ['AI 未能识别有效字段，请在本页手动补充后继续生成方案'];
+    }
+    demandAnalysisResult = parsed;
+    var notice = d.fallback
+      ? '<div style="margin-bottom:12px;padding:10px 12px;border-radius:12px;background:#fff7ed;color:#c2410c;font-size:13px">AI 自动解析处于降级模式：' + esc(d.warning || '请检查服务器 AI 配置') + '</div>'
+      : '';
+    var h = notice + '<h3>AI Analysis</h3><div class="detail-section">';
+    h += '<div class="detail-field"><span class="detail-field-label">Brand</span><span class="detail-field-value"><input id="edit_brand" value="' + esc(parsed.brand||'') + '"></span></div>';
+    h += '<div class="detail-field"><span class="detail-field-label">Product</span><span class="detail-field-value"><input id="edit_product" value="' + esc(parsed.product||'') + '"></span></div>';
+    h += '<div class="detail-field"><span class="detail-field-label">Industry</span><span class="detail-field-value"><input id="edit_industry" value="' + esc(parsed.industry||'') + '"></span></div>';
+    h += '<div class="detail-field"><span class="detail-field-label">Budget</span><span class="detail-field-value"><input id="edit_budget" value="' + esc(parsed.budget_range||'') + '"></span></div>';
+    h += '<div class="detail-field"><span class="detail-field-label">Market</span><span class="detail-field-value"><input id="edit_market" value="' + esc(parsed.target_market||'') + '"></span></div>';
+    h += '<div class="detail-field"><span class="detail-field-label">Platforms</span><span class="detail-field-value"><input id="edit_platforms" value="' + esc(parsed.platforms.join(', ')) + '"></span></div>';
+    if (parsed.competitors.length) h += '<div class="detail-field"><span class="detail-field-label">Competitors</span><span class="detail-field-value">' + esc(parsed.competitors.join(', ')) + '</span></div>';
+    if (parsed.requirements.length) h += '<div class="detail-field"><span class="detail-field-label">Needs</span><span class="detail-field-value">' + esc(parsed.requirements.join('；')) + '</span></div>';
+    h += '</div><p style="font-size:11px;color:#999">Edit fields above if needed. Then click Next to generate proposal.</p>';
+    out.innerHTML = h;
+    hint.textContent = d.fallback ? 'Basic analysis generated' : 'OK';
+    if (status) status.innerHTML = 'AI 分析完成';
+    document.getElementById('m3s1').classList.add('hidden');
+    document.getElementById('m3s2').classList.remove('hidden');
+    updSteps(2);
+  } catch(e) {
+    hint.textContent = 'Failed';
+    if (status) status.innerHTML = '<span style="color:#d94641">AI 分析失败：' + esc(e.message) + '</span>';
+    out.innerHTML = '<p style="color:#d94641">AI 分析失败：' + esc(e.message) + '。请检查登录状态或联系管理员查看服务器 AI 配置。</p>';
+  }
 }
 function getEditedDemand() {
   return {
@@ -2279,7 +2644,8 @@ function syncCurDemandFromAnalysis() {
     category: demand.industry || '',
     industry: demand.industry || '',
     competitors: Array.isArray(demandAnalysisResult?.competitors) ? demandAnalysisResult.competitors.join(', ') : '',
-    notes: Array.isArray(demandAnalysisResult?.requirements) ? demandAnalysisResult.requirements.join('；') : ''
+    notes: Array.isArray(demandAnalysisResult?.requirements) ? demandAnalysisResult.requirements.join('；') : '',
+    source_text: uploadedDemandContent || ''
   };
   return curDemand;
 }
@@ -2292,16 +2658,19 @@ function goStep3() {
 }
 function resetDemand() {
   uploadedDemandContent = '';
+  uploadedDemandFileName = '';
   demandAnalysisResult = '';
   curDemand = null;
   document.getElementById('m3s2').classList.add('hidden');
   document.getElementById('m3s3').classList.add('hidden');
   document.getElementById('m3s1').classList.remove('hidden');
   document.getElementById('demandFileStatus').innerHTML = '';
+  resetDemandUploadState();
   document.getElementById('btnAnalyzeAI').disabled = true;
   document.getElementById('aiAnalyzeHint').textContent = 'Upload first';
   var proposalOutput = document.getElementById('proposalOutput');
   if (proposalOutput) proposalOutput.innerHTML = '';
+  if (typeof clearPPTContext === 'function') clearPPTContext(true);
   updSteps(1);
 }
 function generateHTMLPPT() {
@@ -2660,3 +3029,27 @@ function switchPage(id) {
   if (id === 'workflow-instances') { setTimeout(function() { if (typeof wfLoadInstances === 'function') wfLoadInstances(); }, 200); }
   if (id === 'workflow-tasks') { setTimeout(function() { if (typeof wfLoadTasks === 'function') wfLoadTasks(); }, 200); }
 }
+
+(function exposeInlineHandlers() {
+  var names = [
+    'doLogin', 'doLogout', 'switchPage', 'apiFetch', 'toast', 'esc',
+    'openAddCustomer', 'showAddCustomer', 'closeCustModal', 'dismissDup', 'saveCustomer', 'filterCustomers', 'setCustomerScope', 'switchCrmView',
+    'closeCustomerDetail', 'loadOpportunities', 'showOppModal', 'closeOppModal', 'saveOpportunity',
+    'generateAIStrategy', 'updateStrategy', 'searchNewBrand', 'exportBrandCSV',
+    'initM3', 'goAnalyze', 'goGenerate', 'goStep3', 'resetDemand', 'updSteps', 'selTmpl', 'updateTemplateSelectionUI',
+    'generateProposal', 'updateProposalDraftFromEditor', 'getCurrentProposalDraft', 'downloadProposal', 'copyProposal', 'openProposalToInfluencers',
+    'getEditedDemand', 'syncCurDemandFromAnalysis', 'handleDemandFile', 'analyzeDemandAI',
+    'switchTab', 'matchInfluencers', 'smartMatch', 'handleUpload', 'downloadInfTemplate', 'exportAll', 'exportFiltered', 'exportSelected',
+    'sendChat', 'clearChat', 'clearAIMemory', 'pushToFeishu',
+    'switchAdminTab', 'loadAdminDashboard', 'loadAdminUsers', 'adminAddUser', 'adminCreateInvite', 'adminResetPw',
+    'wfUndo', 'wfRedo', 'wfClearCanvas', 'wfSaveTemplate', 'wfPublishTemplate', 'wfResetTaskFilters', 'wfLoadTasks', 'wfLoadInstances',
+    'showRelatedBrands', 'closeBrandRelModal'
+  ];
+  names.forEach(function(name) {
+    try {
+      var fn = eval('typeof ' + name + ' !== "undefined" ? ' + name + ' : null');
+      if (typeof fn === 'function') window[name] = fn;
+    } catch(e) {}
+  });
+  window.tmAppBuild = '20260630-auth-upload-fix';
+})();
