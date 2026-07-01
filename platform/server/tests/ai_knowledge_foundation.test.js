@@ -83,6 +83,32 @@ test('rag service returns knowledge context and records usage', () => {
   db.close();
 });
 
+test('rag service extracts Chinese business terms from long questions', () => {
+  const db = freshDb();
+  const knowledge = require('../services/knowledge_service');
+  const rag = require('../services/rag_service');
+
+  const entry = knowledge.ingestKnowledge(db, {
+    title: '海外红人营销执行手册',
+    content: '红人营销执行需要确认达人 brief、授权范围、发布时间、数据回收和复盘节奏。',
+    entry_type: 'methodology',
+    visibility: 'team',
+    tags: ['红人营销', '执行'],
+    created_by: 1
+  });
+
+  const context = rag.buildRagContext(db, {
+    query: '请结合知识库，用三点概括海外红人营销执行的关键注意事项。',
+    user: { id: 2, role: 'user' },
+    limit: 5
+  });
+
+  assert.equal(context.references.length, 1);
+  assert.equal(context.references[0].id, entry.id);
+
+  db.close();
+});
+
 test('private source hashes are scoped to the owner', () => {
   const db = freshDb();
   const knowledge = require('../services/knowledge_service');

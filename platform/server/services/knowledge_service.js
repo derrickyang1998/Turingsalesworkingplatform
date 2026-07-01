@@ -222,6 +222,34 @@ function buildWhere(opts) {
   return { clause: where.join(' AND '), params: params };
 }
 
+function extractSearchTerms(query) {
+  const text = String(query || '').toLowerCase();
+  const terms = [];
+  const seen = new Set();
+  function add(term) {
+    const normalized = String(term || '').trim();
+    if (normalized.length < 2 || seen.has(normalized)) return;
+    seen.add(normalized);
+    terms.push(normalized);
+  }
+
+  text.split(/[\s,，。.!！？?；;：:、/\\()[\]{}【】《》"'`~|+-]+/).forEach(add);
+  const tokens = text.match(/[\u4e00-\u9fff]+|[a-z0-9][a-z0-9_-]*/g) || [];
+  tokens.forEach(function(token) {
+    add(token);
+    if (!/^[\u4e00-\u9fff]+$/.test(token) || token.length <= 2) return;
+    const maxLen = Math.min(6, token.length);
+    for (let len = maxLen; len >= 2; len--) {
+      for (let index = 0; index <= token.length - len; index++) {
+        add(token.slice(index, index + len));
+        if (terms.length >= 80) return;
+      }
+      if (terms.length >= 80) return;
+    }
+  });
+  return terms.slice(0, 80);
+}
+
 function scoreEntry(entry, terms, rawQuery) {
   if (!terms.length && !rawQuery) return 1;
   const title = String(entry.title || '').toLowerCase();
@@ -264,7 +292,7 @@ function searchKnowledge(db, opts) {
   }
 
   if (query) {
-    const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+    const terms = extractSearchTerms(query);
     entries = entries
       .map(function(entry) { return Object.assign({}, entry, { score: scoreEntry(entry, terms, query) }); })
       .filter(function(entry) { return entry.score > 0; })
