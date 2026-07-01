@@ -60,6 +60,15 @@ function canAccessOpportunity(user, opportunity) {
   return id(opportunity.created_by) === id(user && user.id) || canAccessCustomer(user, customer);
 }
 
+function canManageOpportunity(user, opportunity) {
+  if (!opportunity) return false;
+  if (isAdmin(user)) return true;
+  const userId = id(user && user.id);
+  return id(opportunity.created_by) === userId ||
+    id(opportunity.customer_assigned_to) === userId ||
+    id(opportunity.customer_created_by) === userId;
+}
+
 function customerOwnerId(customer, fallbackUser) {
   return id(customer && customer.assigned_to) || id(customer && customer.created_by) || id(fallbackUser && fallbackUser.id) || null;
 }
@@ -87,6 +96,7 @@ module.exports = {
   canManageCustomer,
   canAccessLead,
   canAccessOpportunity,
+  canManageOpportunity,
   getCustomer,
   getLead,
   getOpportunityWithCustomer,

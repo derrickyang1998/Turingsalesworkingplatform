@@ -425,19 +425,24 @@ db.exec(`
 `);
 
 // Seed default admin and team users
-const salt = bcrypt.genSaltSync(10);
-const defaultSeedPassword = process.env.DEFAULT_ADMIN_PASSWORD || process.env.DEFAULT_USER_PASSWORD || crypto.randomBytes(18).toString('base64url');
-const defaultPassword = bcrypt.hashSync(defaultSeedPassword, salt);
+function seedPasswordHash(seedPassword) {
+  const password = seedPassword || crypto.randomBytes(18).toString('base64url');
+  return bcrypt.hashSync(password, bcrypt.genSaltSync(10));
+}
+
+function userPasswordEnvKey(username) {
+  return 'USER_PASSWORD_' + String(username || '').toUpperCase().replace(/[^A-Z0-9]/g, '_');
+}
 
 const existingAdmin = db.prepare('SELECT id FROM users WHERE username = ?').get('admin');
 if (!existingAdmin) {
-  if (process.env.NODE_ENV === 'production' && !process.env.DEFAULT_ADMIN_PASSWORD && !process.env.DEFAULT_USER_PASSWORD) {
+  if (process.env.NODE_ENV === 'production' && !process.env.DEFAULT_ADMIN_PASSWORD) {
     throw new Error('DEFAULT_ADMIN_PASSWORD must be configured before seeding users in production');
   }
   const insertUser = db.prepare('INSERT INTO users (username, password_hash, display_name, role, email, department, api_quota) VALUES (?, ?, ?, ?, ?, ?, ?)');
 
   // Admin
-  insertUser.run('admin', defaultPassword, '管理员', 'admin', 'admin@turingmarket.cn', '管理', 200000);
+  insertUser.run('admin', seedPasswordHash(process.env.DEFAULT_ADMIN_PASSWORD), '管理员', 'admin', 'admin@turingmarket.cn', '管理', 200000);
 
   // 10 team members
   const teamMembers = [
@@ -454,7 +459,7 @@ if (!existingAdmin) {
   ];
 
   teamMembers.forEach(([username, displayName, role, email, dept]) => {
-    try { insertUser.run(username, defaultPassword, displayName, role, email, dept, 50000); } catch(e) {}
+    try { insertUser.run(username, seedPasswordHash(process.env[userPasswordEnvKey(username)]), displayName, role, email, dept, 50000); } catch(e) {}
   });
 
   console.log('✅ Database seeded with admin + 10 team members');

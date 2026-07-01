@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const bcrypt = require('bcryptjs');
 
 function freshDb() {
   const dbPath = path.join(os.tmpdir(), `tm-security-crm-${Date.now()}-${Math.random().toString(16).slice(2)}.db`);
@@ -92,12 +93,48 @@ test('crm customer and opportunity routes reject cross-user access by id', () =>
 
   assert.equal(invoke(routes, 'GET /api/customers/:id/detail', { user: other, params: { id: customerId } }).statusCode, 403);
   assert.equal(invoke(routes, 'PUT /api/customers/:id', { user: other, params: { id: customerId }, body: { stage: 'won' } }).statusCode, 403);
+  const leakedPrivateList = invoke(routes, 'GET /api/customers', { user: other, query: { is_public: 0 } });
+  assert.equal(leakedPrivateList.statusCode, 200);
+  assert.equal(leakedPrivateList.payload.customers.some(function(customer) { return Number(customer.id) === Number(customerId); }), false);
   assert.equal(invoke(routes, 'POST /api/customers/:id/return-pool', { user: other, params: { id: customerId } }).statusCode, 403);
   assert.equal(invoke(routes, 'POST /api/opportunities', { user: other, body: { customer_id: customerId, name: 'Unauthorized' } }).statusCode, 403);
   assert.equal(invoke(routes, 'PUT /api/opportunities/:id', { user: other, params: { id: opportunityId }, body: { stage: 'won' } }).statusCode, 403);
 
   assert.equal(invoke(routes, 'GET /api/customers/:id/detail', { user: owner, params: { id: customerId } }).statusCode, 200);
   assert.equal(invoke(routes, 'PUT /api/opportunities/:id', { user: owner, params: { id: opportunityId }, body: { stage: 'won' } }).statusCode, 200);
+
+  db.close();
+});
+
+test('public-pool customer visibility does not allow opportunity mutation', () => {
+  const db = freshDb();
+  const routes = mountCustomerRoutes(db);
+  const owner = { id: 2, role: 'user' };
+  const other = { id: 3, role: 'user' };
+  const customerId = db.prepare(`
+    INSERT INTO customers (brand_name, company_name, created_by, assigned_to, is_public, stage)
+    VALUES (?, ?, ?, NULL, 1, ?)
+  `).run('Public Pool Brand', 'Public Pool Inc', owner.id, 'proposal').lastInsertRowid;
+  const opportunityId = db.prepare(`
+    INSERT INTO opportunities (customer_id, name, stage, value, created_by)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(customerId, 'Public Pool Opportunity', 'proposal', 5000, owner.id).lastInsertRowid;
+
+  assert.equal(invoke(routes, 'GET /api/customers/:id/detail', { user: other, params: { id: customerId } }).statusCode, 200);
+  assert.equal(invoke(routes, 'PUT /api/opportunities/:id', { user: other, params: { id: opportunityId }, body: { stage: 'won' } }).statusCode, 403);
+  assert.equal(invoke(routes, 'DELETE /api/opportunities/:id', { user: other, params: { id: opportunityId } }).statusCode, 403);
+
+  db.close();
+});
+
+test('seeded admin and team users do not share the same default password', () => {
+  const db = freshDb();
+  const admin = db.prepare('SELECT password_hash FROM users WHERE username = ?').get('admin');
+  const member = db.prepare('SELECT password_hash FROM users WHERE username = ?').get('zhangwei');
+
+  assert.notEqual(admin.password_hash, member.password_hash);
+  assert.equal(bcrypt.compareSync(process.env.DEFAULT_ADMIN_PASSWORD, admin.password_hash), true);
+  assert.equal(bcrypt.compareSync(process.env.DEFAULT_ADMIN_PASSWORD, member.password_hash), false);
 
   db.close();
 });

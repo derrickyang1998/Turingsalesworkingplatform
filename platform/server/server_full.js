@@ -9,7 +9,7 @@ const db = global.db;
 
 const app = express();
 const PORT = process.env.PORT || 3002;
-const JWT_SECRET = 'turingmarket-platform-jwt-secret-2026';
+const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(48).toString('hex');
 const TOKEN_EXPIRY = '24h';
 
 // Middleware

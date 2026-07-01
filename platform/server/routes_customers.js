@@ -246,7 +246,7 @@ module.exports = function(app, db, authMiddleware) {
     try {
       const opportunity = crmAccess.getOpportunityWithCustomer(db, req.params.id);
       if (!opportunity) return crmAccess.notFound(res, 'Opportunity');
-      if (!crmAccess.canAccessOpportunity(req.user, opportunity)) return crmAccess.forbidden(res);
+      if (!crmAccess.canManageOpportunity(req.user, opportunity)) return crmAccess.forbidden(res);
       const { name, stage, value, win_probability, product_name, channel_type, expected_close_date, notes } = req.body;
       db.prepare(`UPDATE opportunities SET name=COALESCE(?,name), stage=COALESCE(?,stage), value=COALESCE(?,value), win_probability=COALESCE(?,win_probability), product_name=COALESCE(?,product_name), channel_type=COALESCE(?,channel_type), expected_close_date=COALESCE(?,expected_close_date), notes=COALESCE(?,notes), updated_at=datetime('now') WHERE id=?`)
         .run(name, stage, value, win_probability, product_name, channel_type, expected_close_date, notes, req.params.id);
@@ -259,7 +259,7 @@ module.exports = function(app, db, authMiddleware) {
     try {
       const opportunity = crmAccess.getOpportunityWithCustomer(db, req.params.id);
       if (!opportunity) return crmAccess.notFound(res, 'Opportunity');
-      if (!crmAccess.canAccessOpportunity(req.user, opportunity)) return crmAccess.forbidden(res);
+      if (!crmAccess.canManageOpportunity(req.user, opportunity)) return crmAccess.forbidden(res);
       db.prepare('DELETE FROM opportunities WHERE id=?').run(req.params.id);
       res.json({ success: true });
     } catch (e) { res.status(500).json({ error: e.message }); }
