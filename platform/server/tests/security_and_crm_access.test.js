@@ -83,8 +83,8 @@ test('crm customer and opportunity routes reject cross-user access by id', () =>
   const other = { id: 3, role: 'user' };
 
   const customerId = db.prepare(`
-    INSERT INTO customers (brand_name, company_name, created_by, assigned_to, stage)
-    VALUES (?, ?, ?, ?, ?)
+    INSERT INTO customers (brand_name, company_name, created_by, assigned_to, is_public, stage)
+    VALUES (?, ?, ?, ?, 0, ?)
   `).run('Aurora Beauty', 'Aurora Inc', owner.id, owner.id, 'proposal').lastInsertRowid;
   const opportunityId = db.prepare(`
     INSERT INTO opportunities (customer_id, name, stage, value, created_by)
@@ -102,6 +102,26 @@ test('crm customer and opportunity routes reject cross-user access by id', () =>
 
   assert.equal(invoke(routes, 'GET /api/customers/:id/detail', { user: owner, params: { id: customerId } }).statusCode, 200);
   assert.equal(invoke(routes, 'PUT /api/opportunities/:id', { user: owner, params: { id: opportunityId }, body: { stage: 'won' } }).statusCode, 200);
+
+  db.close();
+});
+
+test('assigned customers cannot be claimed from the public pool', () => {
+  const db = freshDb();
+  const routes = mountCustomerRoutes(db);
+  const owner = { id: 2, role: 'user' };
+  const other = { id: 3, role: 'user' };
+  const customerId = db.prepare(`
+    INSERT INTO customers (brand_name, company_name, created_by, assigned_to, is_public, stage)
+    VALUES (?, ?, ?, ?, 1, ?)
+  `).run('Assigned Public Flag Brand', 'Assigned Public Flag Inc', owner.id, owner.id, 'proposal').lastInsertRowid;
+
+  const claim = invoke(routes, 'POST /api/customers/:id/claim', { user: other, params: { id: customerId } });
+
+  assert.equal(claim.statusCode, 409);
+  const customer = db.prepare('SELECT assigned_to, is_public FROM customers WHERE id = ?').get(customerId);
+  assert.equal(customer.assigned_to, owner.id);
+  assert.equal(customer.is_public, 1);
 
   db.close();
 });

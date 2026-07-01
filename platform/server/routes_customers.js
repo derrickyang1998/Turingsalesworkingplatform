@@ -99,9 +99,13 @@ module.exports = function(app, db, authMiddleware) {
     if (search) { conditions.push('(c.brand_name LIKE ? OR c.company_name LIKE ? OR c.contact_person LIKE ?)'); params.push('%' + search + '%', '%' + search + '%', '%' + search + '%'); }
     if (is_public !== undefined) { conditions.push('c.is_public = ?'); params.push(is_public); }
 
-    // Non-admin users only see their own customers (unless querying public pool)
-    if (req.user.role !== 'admin' && is_public === undefined) {
-      conditions.push('c.assigned_to = ?'); params.push(req.user.id);
+    // Non-admin users see their own customers; public-pool queries can also show unassigned public customers.
+    if (req.user.role !== 'admin') {
+      if (String(is_public) === '1') {
+        conditions.push('(c.assigned_to = ? OR c.assigned_to IS NULL)'); params.push(req.user.id);
+      } else {
+        conditions.push('c.assigned_to = ?'); params.push(req.user.id);
+      }
     }
 
     if (conditions.length) sql += ' WHERE ' + conditions.join(' AND ');
@@ -141,7 +145,7 @@ module.exports = function(app, db, authMiddleware) {
   app.post('/api/customers', authMiddleware, (req, res) => {
     const { brand_name, company_name, contact_person, contact_info, industry, stage, source, budget_estimate, notes, assigned_to } = req.body;
     const assignedUserId = req.user.role === 'admin' ? (assigned_to || req.user.id) : req.user.id;
-    const result = db.prepare('INSERT INTO customers (brand_name, company_name, contact_person, contact_info, industry, stage, source, budget_estimate, notes, created_by, assigned_to) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
+    const result = db.prepare('INSERT INTO customers (brand_name, company_name, contact_person, contact_info, industry, stage, source, budget_estimate, notes, created_by, assigned_to, is_public) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)').run(
       brand_name, company_name, contact_person, contact_info, industry, stage || 'lead', source, budget_estimate, notes, req.user.id, assignedUserId
     );
     db.prepare('INSERT INTO activity_log (user_id, action, module, details, ip_address) VALUES (?, ?, ?, ?, ?)').run(req.user.id, 'create_customer', 'customer', 'Created customer: ' + brand_name, req.ip);
@@ -326,7 +330,7 @@ module.exports = function(app, db, authMiddleware) {
   // Claim customer from public pool
   app.post('/api/customers/:id/claim', authMiddleware, (req, res) => {
     try {
-      const result = db.prepare("UPDATE customers SET assigned_to=?, is_public=0, assigned_at=datetime('now'), updated_at=datetime('now') WHERE id=? AND (is_public=1 OR assigned_to IS NULL)").run(req.user.id, req.params.id);
+      const result = db.prepare("UPDATE customers SET assigned_to=?, is_public=0, assigned_at=datetime('now'), updated_at=datetime('now') WHERE id=? AND is_public=1 AND assigned_to IS NULL").run(req.user.id, req.params.id);
       if (!result.changes) return res.status(409).json({ error: 'Customer is not available in public pool' });
       businessKnowledge.archiveCustomer(db, db.prepare('SELECT * FROM customers WHERE id = ?').get(req.params.id), req.user);
       res.json({ success: true });
