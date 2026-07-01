@@ -434,7 +434,16 @@ function userPasswordEnvKey(username) {
   return 'USER_PASSWORD_' + String(username || '').toUpperCase().replace(/[^A-Z0-9]/g, '_');
 }
 
-const existingAdmin = db.prepare('SELECT id FROM users WHERE username = ?').get('admin');
+function configuredAdminUsername() {
+  const username = String(process.env.DEFAULT_ADMIN_USERNAME || 'admin').trim();
+  if (!/^[A-Za-z0-9_.-]{3,64}$/.test(username)) {
+    throw new Error('DEFAULT_ADMIN_USERNAME must be 3-64 characters and only use letters, numbers, dot, underscore, or dash');
+  }
+  return username;
+}
+
+const defaultAdminUsername = configuredAdminUsername();
+const existingAdmin = db.prepare("SELECT id FROM users WHERE role = 'admin' LIMIT 1").get();
 if (!existingAdmin) {
   if (process.env.NODE_ENV === 'production' && !process.env.DEFAULT_ADMIN_PASSWORD) {
     throw new Error('DEFAULT_ADMIN_PASSWORD must be configured before seeding users in production');
@@ -442,7 +451,7 @@ if (!existingAdmin) {
   const insertUser = db.prepare('INSERT INTO users (username, password_hash, display_name, role, email, department, api_quota) VALUES (?, ?, ?, ?, ?, ?, ?)');
 
   // Admin
-  insertUser.run('admin', seedPasswordHash(process.env.DEFAULT_ADMIN_PASSWORD), '管理员', 'admin', 'admin@turingmarket.cn', '管理', 200000);
+  insertUser.run(defaultAdminUsername, seedPasswordHash(process.env.DEFAULT_ADMIN_PASSWORD), '管理员', 'admin', 'admin@turingmarket.cn', '管理', 200000);
 
   // 10 team members
   const teamMembers = [

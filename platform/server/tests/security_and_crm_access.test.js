@@ -5,10 +5,16 @@ const os = require('node:os');
 const path = require('node:path');
 const bcrypt = require('bcryptjs');
 
-function freshDb() {
+function freshDb(options) {
+  options = options || {};
   const dbPath = path.join(os.tmpdir(), `tm-security-crm-${Date.now()}-${Math.random().toString(16).slice(2)}.db`);
   process.env.DB_PATH = dbPath;
   process.env.DEFAULT_ADMIN_PASSWORD = 'test-only-admin-password';
+  if (Object.prototype.hasOwnProperty.call(options, 'DEFAULT_ADMIN_USERNAME')) {
+    process.env.DEFAULT_ADMIN_USERNAME = options.DEFAULT_ADMIN_USERNAME;
+  } else {
+    delete process.env.DEFAULT_ADMIN_USERNAME;
+  }
   const dbModule = path.resolve(__dirname, '../db.js');
   delete require.cache[dbModule];
   return require(dbModule);
@@ -155,6 +161,17 @@ test('seeded admin and team users do not share the same default password', () =>
   assert.notEqual(admin.password_hash, member.password_hash);
   assert.equal(bcrypt.compareSync(process.env.DEFAULT_ADMIN_PASSWORD, admin.password_hash), true);
   assert.equal(bcrypt.compareSync(process.env.DEFAULT_ADMIN_PASSWORD, member.password_hash), false);
+
+  db.close();
+});
+
+test('seeded admin username can be configured without recreating legacy admin', () => {
+  const db = freshDb({ DEFAULT_ADMIN_USERNAME: 'derrick' });
+  const admins = db.prepare("SELECT username FROM users WHERE role = 'admin' ORDER BY id").all();
+  const legacyAdmin = db.prepare('SELECT id FROM users WHERE username = ?').get('admin');
+
+  assert.deepEqual(admins.map(function(admin) { return admin.username; }), ['derrick']);
+  assert.equal(legacyAdmin, undefined);
 
   db.close();
 });

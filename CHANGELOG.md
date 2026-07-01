@@ -28,10 +28,11 @@
 - 公海客户仅可查看，未领取前不能修改或删除其关联商机。
 - 新建/分配客户默认退出公海；客户领取必须同时满足 `is_public=1` 且未分配，防止已分配客户被他人直接 claim。
 - CRM 私有知识归档改为归属业务负责人，管理员代操作不会让已分配客户的知识只留在管理员私有空间。
+- 管理员种子账号支持 `DEFAULT_ADMIN_USERNAME`，并改为按 admin 角色判断是否已存在管理员，避免生产重启后重新补建旧 `admin` 账号。
 
 ### ✅ 验证
 - `node --check app.js; node --check ppt.js; node --check server/server.js; node --check server/routes*.js; node --check server/services/*.js`
-- `npm test`（17 项通过：原 AI/KB 用例 + 中文长句 RAG 引用 + Obsidian 安全导入 + 路径白名单拒绝 + 业务归档权限 + CRM 越权拒绝 + 私有客户列表防绕过 + 已分配客户防 claim + 公海商机写权限拒绝 + 种子密码不复用 + 默认密码扫描 + Markdown Vault 导出）
+- `npm test`（18 项通过：原 AI/KB 用例 + 中文长句 RAG 引用 + Obsidian 安全导入 + 路径白名单拒绝 + 业务归档权限 + CRM 越权拒绝 + 私有客户列表防绕过 + 已分配客户防 claim + 公海商机写权限拒绝 + 种子密码不复用 + 管理员用户名可配置 + 默认密码扫描 + Markdown Vault 导出）
 - API smoke：临时服务健康检查、管理员登录、Obsidian dry-run、平台 Vault export 通过。
 - 真实本地同步：`D:\主盘\图灵集市` dry-run 命中 65 个可导入文件、跳过 9 个敏感/私密路径；已导入 65 条并导出 65 个 Markdown 到 `D:\图灵商务在线平台`。
 - 线上部署回归：`8.163.129.160` PM2 服务在线，健康检查通过；已同步安全筛选后的 Obsidian 65 个文件并导入 65 条知识，Vault 导出 66 条，AI 对话返回 5 条 `knowledge_references` 且 `ai_references` 落库。
