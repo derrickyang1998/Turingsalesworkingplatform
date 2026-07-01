@@ -1,13 +1,13 @@
 #!/bin/bash
-# TuringMarket �� һ����װ�ű�
-# �÷�: sudo bash install.sh
+# TuringMarket — 一键安装脚本
+# 用法: sudo bash install.sh
 
 set -e
-echo "=== TuringMarket һ������ʼ ==="
+echo "=== TuringMarket 一键部署开始 ==="
 
 # 1. Node.js 20
 if ! command -v node &>/dev/null; then
-  echo ">>> ��װ Node.js 20..."
+  echo ">>> 安装 Node.js 20..."
   curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
   apt-get install -y nodejs
 fi
@@ -15,24 +15,24 @@ echo "Node.js $(node -v)"
 
 # 2. PM2
 if ! command -v pm2 &>/dev/null; then
-  echo ">>> ��װ PM2..."
+  echo ">>> 安装 PM2..."
   npm install -g pm2
 fi
 
-# 3. ��Ŀ����
-echo ">>> ��װ��Ŀ����..."
+# 3. 项目依赖
+echo ">>> 安装项目依赖..."
 cd "$(dirname "$0")/server"
 npm install --production
 mkdir -p db
 
-# 4. ��������
-echo ">>> ���� TuringMarket..."
+# 4. 启动服务
+echo ">>> 启动 TuringMarket..."
 pm2 delete turingmarket 2>/dev/null || true
 pm2 start ecosystem.config.js
 pm2 save
 pm2 startup systemd -u root --hp /root 2>/dev/null || true
 
-# 5. Nginx (��ѡ)
+# 5. Nginx (可选)
 if ! command -v nginx &>/dev/null; then
   apt-get install -y nginx
 fi
@@ -54,6 +54,6 @@ rm -f /etc/nginx/sites-enabled/default
 nginx -t && systemctl restart nginx
 
 echo ""
-echo "=== �������! ==="
-echo "���ʵ�ַ: http://$(curl -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')"
-echo "����Ա�˺�: admin / turing2026"
+echo "=== 部署完成! ==="
+echo "访问地址: http://$(curl -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')"
+echo "管理员账号密码请使用私有 .env 或后台一次性临时密码配置"

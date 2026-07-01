@@ -72,11 +72,8 @@ npm install --production
 pm2 restart turingmarket
 ```
 
-## 👤 默认账号
-| 角色 | 用户名 | 密码 |
-|------|--------|------|
-| 管理员 | admin | turing2026 |
-| 商务成员 | zhangwei, wangfang 等10人 | turing2026 |
+## 👤 登录账号
+管理员和团队成员密码必须通过私有 `.env` 或后台一次性临时密码配置，不在仓库中记录固定默认密码。
 
 ## 🛠 技术栈
 - 前端: 纯 HTML/CSS/JS + Playwright 测试

@@ -1,4 +1,5 @@
 const knowledgeService = require('./knowledge_service');
+const crmAccess = require('./crm_access_service');
 
 function compact(value, maxLength) {
   const text = String(value === undefined || value === null ? '' : value).replace(/\s+/g, ' ').trim();
@@ -20,17 +21,17 @@ function actor(user) {
   return user || { id: null, role: 'system' };
 }
 
-function ingest(db, input, user) {
+function ingest(db, input, user, ownerId) {
   const current = actor(user);
   return knowledgeService.ingestKnowledge(db, Object.assign({
-    created_by: current.id,
+    created_by: ownerId || current.id,
     actor_role: current.role
   }, input));
 }
 
-function safeIngest(db, input, user) {
+function safeIngest(db, input, user, ownerId) {
   try {
-    return ingest(db, input, user);
+    return ingest(db, input, user, ownerId);
   } catch (e) {
     return null;
   }
@@ -50,7 +51,7 @@ function archiveLead(db, lead, user) {
     business_type: 'lead',
     business_id: lead.id,
     metadata: { module: 'crm' }
-  }, user);
+  }, user, crmAccess.leadOwnerId(lead, user));
 }
 
 function archiveCustomer(db, customer, user) {
@@ -67,7 +68,7 @@ function archiveCustomer(db, customer, user) {
     business_type: 'customer',
     business_id: customer.id,
     metadata: { module: 'crm' }
-  }, user);
+  }, user, crmAccess.customerOwnerId(customer, user));
 }
 
 function archiveOpportunity(db, opportunity, user) {
@@ -84,7 +85,7 @@ function archiveOpportunity(db, opportunity, user) {
     business_type: 'opportunity',
     business_id: opportunity.id,
     metadata: { module: 'crm', customer_id: opportunity.customer_id }
-  }, user);
+  }, user, crmAccess.opportunityOwnerId(db, opportunity, user));
 }
 
 function archiveBrand(db, brand, user) {

@@ -4,6 +4,7 @@ const path = require('path');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const multer = require('multer');
+const crypto = require('crypto');
 const db = global.db;
 
 const app = express();
@@ -179,10 +180,11 @@ app.put('/api/admin/users/:id', authMiddleware, adminOnly, (req, res) => {
 });
 
 app.post('/api/admin/users/reset-password/:id', authMiddleware, adminOnly, (req, res) => {
+  const temporaryPassword = crypto.randomBytes(18).toString('base64url');
   const salt = bcrypt.genSaltSync(10);
-  const hash = bcrypt.hashSync('turing2026', salt);
+  const hash = bcrypt.hashSync(temporaryPassword, salt);
   db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hash, req.params.id);
-  res.json({ success: true, message: 'Password reset to turing2026' });
+  res.json({ success: true, temporary_password: temporaryPassword, message: 'Password reset. Share the temporary password securely.' });
 });
 
 // ===== INVITE SYSTEM =====
@@ -213,9 +215,9 @@ app.listen(PORT, '0.0.0.0', () => {
 �U   Local:    http://localhost:${PORT}         �U
 �U   Network:  http://YOUR_IP:${PORT}           �U
 �U                                          �U
-�U   Admin:    admin / turing2026           �U
+�U   Admin:    configured privately         �U
 �U   Users:    10 team members configured   �U
-�U   Default:  username / turing2026        �U
+�U   Password: private or temporary reset   �U
 �^�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�a
   `);
 });

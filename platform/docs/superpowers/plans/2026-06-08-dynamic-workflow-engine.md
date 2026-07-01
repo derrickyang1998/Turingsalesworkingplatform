@@ -2038,7 +2038,7 @@ Expected: Server starts, no errors, workflow timer engine initialized
 # Login first
 TOKEN=$(curl -s -X POST http://localhost:3002/api/auth/login \
   -H 'Content-Type: application/json' \
-  -d '{"username":"admin","password":"turing2026"}' | node -e "process.stdin.on('data',d=>{try{console.log(JSON.parse(d).token)}catch(e){console.log('FAIL')}})")
+  -d "{\"username\":\"admin\",\"password\":\"$SMOKE_ADMIN_PASSWORD\"}" | node -e "process.stdin.on('data',d=>{try{console.log(JSON.parse(d).token)}catch(e){console.log('FAIL')}})")
 
 echo "Token: $TOKEN"
 

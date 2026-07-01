@@ -3,6 +3,7 @@ const Database = require('better-sqlite3');
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env'), quiet: true });
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'db', 'turingmarket.db');
 const db = new Database(DB_PATH);
@@ -425,7 +426,7 @@ db.exec(`
 
 // Seed default admin and team users
 const salt = bcrypt.genSaltSync(10);
-const defaultSeedPassword = process.env.DEFAULT_ADMIN_PASSWORD || process.env.DEFAULT_USER_PASSWORD || 'turing2026';
+const defaultSeedPassword = process.env.DEFAULT_ADMIN_PASSWORD || process.env.DEFAULT_USER_PASSWORD || crypto.randomBytes(18).toString('base64url');
 const defaultPassword = bcrypt.hashSync(defaultSeedPassword, salt);
 
 const existingAdmin = db.prepare('SELECT id FROM users WHERE username = ?').get('admin');

@@ -56,7 +56,7 @@ sudo bash install.sh
 
 详细指南: [DEPLOY.md](platform/DEPLOY.md)
 
-**默认账号：** `admin` / `turing2026`
+**登录账号：** 由管理员在平台后台创建；初始密码和重置密码只通过私有环境或后台一次性返回，不写入仓库。
 
 ---
 

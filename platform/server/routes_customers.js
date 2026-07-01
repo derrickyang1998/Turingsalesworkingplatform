@@ -1,5 +1,6 @@
 module.exports = function(app, db, authMiddleware) {
   const businessKnowledge = require('./services/business_knowledge_service');
+  const crmAccess = require('./services/crm_access_service');
 
   const STAGES = ['lead', 'info_confirmed', 'advantage_shared', 'needs_confirmed', 'analysis', 'proposal', 'kol_matching', 'cooperation'];
   const TERMINAL_STAGES = ['paused', 'won', 'lost'];
@@ -50,6 +51,9 @@ module.exports = function(app, db, authMiddleware) {
 
   app.put('/api/leads/:id', authMiddleware, (req, res) => {
     try {
+      const lead = crmAccess.getLead(db, req.params.id);
+      if (!lead) return crmAccess.notFound(res, 'Lead');
+      if (!crmAccess.canAccessLead(req.user, lead)) return crmAccess.forbidden(res);
       const { brand_name, company_name, contact_person, contact_info, source, industry, notes, status, lead_score } = req.body;
       db.prepare(`UPDATE leads SET brand_name=COALESCE(?,brand_name), company_name=COALESCE(?,company_name), contact_person=COALESCE(?,contact_person), contact_info=COALESCE(?,contact_info), source=COALESCE(?,source), industry=COALESCE(?,industry), notes=COALESCE(?,notes), status=COALESCE(?,status), lead_score=COALESCE(?,lead_score), updated_at=datetime('now') WHERE id=?`)
         .run(brand_name, company_name, contact_person, contact_info, source, industry, notes, status, lead_score, req.params.id);
@@ -61,8 +65,9 @@ module.exports = function(app, db, authMiddleware) {
   // Convert lead to customer
   app.post('/api/leads/:id/convert', authMiddleware, (req, res) => {
     try {
-      const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(req.params.id);
-      if (!lead) return res.status(404).json({ error: 'Lead not found' });
+      const lead = crmAccess.getLead(db, req.params.id);
+      if (!lead) return crmAccess.notFound(res, 'Lead');
+      if (!crmAccess.canAccessLead(req.user, lead)) return crmAccess.forbidden(res);
       const result = db.prepare(`INSERT INTO customers (brand_name, company_name, industry, contact_person, contact_info, source, stage, assigned_to, lead_source, created_by) VALUES (?, ?, ?, ?, ?, ?, 'lead', ?, ?, ?)`)
         .run(lead.brand_name, lead.company_name, lead.industry, lead.contact_person, lead.contact_info, lead.source, req.user.id, 'lead_conversion', req.user.id);
       db.prepare("UPDATE leads SET status='converted', converted_customer_id=?, updated_at=datetime('now') WHERE id=?").run(result.lastInsertRowid, req.params.id);
@@ -124,8 +129,9 @@ module.exports = function(app, db, authMiddleware) {
   // Customer detail with opportunities and activity
   app.get('/api/customers/:id/detail', authMiddleware, (req, res) => {
     try {
-      const customer = db.prepare('SELECT * FROM customers WHERE id = ?').get(req.params.id);
-      if (!customer) return res.status(404).json({ error: 'Customer not found' });
+      const customer = crmAccess.getCustomer(db, req.params.id);
+      if (!customer) return crmAccess.notFound(res, 'Customer');
+      if (!crmAccess.canAccessCustomer(req.user, customer)) return crmAccess.forbidden(res);
       const opportunities = db.prepare('SELECT * FROM opportunities WHERE customer_id = ? ORDER BY created_at DESC').all(req.params.id);
       const activity = db.prepare('SELECT a.*, u.display_name FROM customer_activity a LEFT JOIN users u ON a.user_id = u.id WHERE a.customer_id = ? ORDER BY a.created_at DESC LIMIT 50').all(req.params.id);
       res.json({ customer, opportunities, activity });
@@ -134,8 +140,9 @@ module.exports = function(app, db, authMiddleware) {
 
   app.post('/api/customers', authMiddleware, (req, res) => {
     const { brand_name, company_name, contact_person, contact_info, industry, stage, source, budget_estimate, notes, assigned_to } = req.body;
+    const assignedUserId = req.user.role === 'admin' ? (assigned_to || req.user.id) : req.user.id;
     const result = db.prepare('INSERT INTO customers (brand_name, company_name, contact_person, contact_info, industry, stage, source, budget_estimate, notes, created_by, assigned_to) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
-      brand_name, company_name, contact_person, contact_info, industry, stage || 'lead', source, budget_estimate, notes, req.user.id, assigned_to || req.user.id
+      brand_name, company_name, contact_person, contact_info, industry, stage || 'lead', source, budget_estimate, notes, req.user.id, assignedUserId
     );
     db.prepare('INSERT INTO activity_log (user_id, action, module, details, ip_address) VALUES (?, ?, ?, ?, ?)').run(req.user.id, 'create_customer', 'customer', 'Created customer: ' + brand_name, req.ip);
     businessKnowledge.archiveCustomer(db, db.prepare('SELECT * FROM customers WHERE id = ?').get(result.lastInsertRowid), req.user);
@@ -145,9 +152,12 @@ module.exports = function(app, db, authMiddleware) {
 
   app.put('/api/customers/:id', authMiddleware, (req, res) => {
     const { brand_name, company_name, contact_person, contact_info, industry, stage, source, budget_estimate, notes, assigned_to, opportunity_value, win_probability } = req.body;
-    const old = db.prepare('SELECT stage FROM customers WHERE id = ?').get(req.params.id);
+    const old = crmAccess.getCustomer(db, req.params.id);
+    if (!old) return crmAccess.notFound(res, 'Customer');
+    if (!crmAccess.canManageCustomer(req.user, old)) return crmAccess.forbidden(res);
+    const nextAssignedTo = req.user.role === 'admin' ? assigned_to : null;
     db.prepare('UPDATE customers SET brand_name = COALESCE(?, brand_name), company_name = COALESCE(?, company_name), contact_person = COALESCE(?, contact_person), contact_info = COALESCE(?, contact_info), industry = COALESCE(?, industry), stage = COALESCE(?, stage), source = COALESCE(?, source), budget_estimate = COALESCE(?, budget_estimate), notes = COALESCE(?, notes), assigned_to = COALESCE(?, assigned_to), opportunity_value = COALESCE(?, opportunity_value), win_probability = COALESCE(?, win_probability), updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(
-      brand_name, company_name, contact_person, contact_info, industry, stage, source, budget_estimate, notes, assigned_to, opportunity_value, win_probability, req.params.id
+      brand_name, company_name, contact_person, contact_info, industry, stage, source, budget_estimate, notes, nextAssignedTo, opportunity_value, win_probability, req.params.id
     );
     if (stage && old && old.stage !== stage) {
       db.prepare('INSERT INTO customer_activity (customer_id, user_id, action, stage_from, stage_to, notes) VALUES (?, ?, ?, ?, ?, ?)').run(req.params.id, req.user.id, 'stage_change', old.stage, stage, '阶段变更: ' + (STAGE_LABELS[old.stage] || old.stage) + ' -> ' + (STAGE_LABELS[stage] || stage));
@@ -165,6 +175,9 @@ module.exports = function(app, db, authMiddleware) {
   });
 
   app.delete('/api/customers/:id', authMiddleware, (req, res) => {
+    const customer = crmAccess.getCustomer(db, req.params.id);
+    if (!customer) return crmAccess.notFound(res, 'Customer');
+    if (!crmAccess.canManageCustomer(req.user, customer)) return crmAccess.forbidden(res);
     db.prepare('DELETE FROM customer_activity WHERE customer_id = ?').run(req.params.id);
     db.prepare('DELETE FROM customers WHERE id = ?').run(req.params.id);
     res.json({ success: true });
@@ -174,6 +187,8 @@ module.exports = function(app, db, authMiddleware) {
   app.post('/api/customers/:id/assign', authMiddleware, (req, res) => {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
     const { user_id } = req.body;
+    const customer = crmAccess.getCustomer(db, req.params.id);
+    if (!customer) return crmAccess.notFound(res, 'Customer');
     db.prepare('UPDATE customers SET assigned_to=?, is_public=0, assigned_at=datetime(\'now\') WHERE id=?').run(user_id, req.params.id);
     businessKnowledge.archiveCustomer(db, db.prepare('SELECT * FROM customers WHERE id = ?').get(req.params.id), req.user);
     res.json({ success: true });
@@ -181,11 +196,17 @@ module.exports = function(app, db, authMiddleware) {
 
   // Return to public pool
   app.post('/api/customers/:id/return-pool', authMiddleware, (req, res) => {
+    const customer = crmAccess.getCustomer(db, req.params.id);
+    if (!customer) return crmAccess.notFound(res, 'Customer');
+    if (!crmAccess.canManageCustomer(req.user, customer)) return crmAccess.forbidden(res);
     db.prepare("UPDATE customers SET assigned_to=NULL, is_public=1, updated_at=datetime('now') WHERE id=?").run(req.params.id);
     businessKnowledge.archiveCustomer(db, db.prepare('SELECT * FROM customers WHERE id = ?').get(req.params.id), req.user);
     res.json({ success: true });
   });
   app.post('/api/customers/:id/return', authMiddleware, (req, res) => {
+    const customer = crmAccess.getCustomer(db, req.params.id);
+    if (!customer) return crmAccess.notFound(res, 'Customer');
+    if (!crmAccess.canManageCustomer(req.user, customer)) return crmAccess.forbidden(res);
     db.prepare("UPDATE customers SET assigned_to=NULL, is_public=1, updated_at=datetime('now') WHERE id=?").run(req.params.id);
     businessKnowledge.archiveCustomer(db, db.prepare('SELECT * FROM customers WHERE id = ?').get(req.params.id), req.user);
     res.json({ success: true });
@@ -211,6 +232,9 @@ module.exports = function(app, db, authMiddleware) {
   app.post('/api/opportunities', authMiddleware, (req, res) => {
     try {
       const { customer_id, name, stage, value, win_probability, product_name, channel_type, expected_close_date, notes } = req.body;
+      const customer = crmAccess.getCustomer(db, customer_id);
+      if (!customer) return crmAccess.notFound(res, 'Customer');
+      if (!crmAccess.canManageCustomer(req.user, customer)) return crmAccess.forbidden(res);
       const result = db.prepare(`INSERT INTO opportunities (customer_id, name, stage, value, win_probability, product_name, channel_type, expected_close_date, notes, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
         .run(customer_id, name, stage || 'discovery', value || 0, win_probability || 50, product_name, channel_type, expected_close_date, notes, req.user.id);
       businessKnowledge.archiveOpportunity(db, db.prepare('SELECT * FROM opportunities WHERE id = ?').get(result.lastInsertRowid), req.user);
@@ -220,6 +244,9 @@ module.exports = function(app, db, authMiddleware) {
 
   app.put('/api/opportunities/:id', authMiddleware, (req, res) => {
     try {
+      const opportunity = crmAccess.getOpportunityWithCustomer(db, req.params.id);
+      if (!opportunity) return crmAccess.notFound(res, 'Opportunity');
+      if (!crmAccess.canAccessOpportunity(req.user, opportunity)) return crmAccess.forbidden(res);
       const { name, stage, value, win_probability, product_name, channel_type, expected_close_date, notes } = req.body;
       db.prepare(`UPDATE opportunities SET name=COALESCE(?,name), stage=COALESCE(?,stage), value=COALESCE(?,value), win_probability=COALESCE(?,win_probability), product_name=COALESCE(?,product_name), channel_type=COALESCE(?,channel_type), expected_close_date=COALESCE(?,expected_close_date), notes=COALESCE(?,notes), updated_at=datetime('now') WHERE id=?`)
         .run(name, stage, value, win_probability, product_name, channel_type, expected_close_date, notes, req.params.id);
@@ -230,6 +257,9 @@ module.exports = function(app, db, authMiddleware) {
 
   app.delete('/api/opportunities/:id', authMiddleware, (req, res) => {
     try {
+      const opportunity = crmAccess.getOpportunityWithCustomer(db, req.params.id);
+      if (!opportunity) return crmAccess.notFound(res, 'Opportunity');
+      if (!crmAccess.canAccessOpportunity(req.user, opportunity)) return crmAccess.forbidden(res);
       db.prepare('DELETE FROM opportunities WHERE id=?').run(req.params.id);
       res.json({ success: true });
     } catch (e) { res.status(500).json({ error: e.message }); }
@@ -296,7 +326,8 @@ module.exports = function(app, db, authMiddleware) {
   // Claim customer from public pool
   app.post('/api/customers/:id/claim', authMiddleware, (req, res) => {
     try {
-      db.prepare("UPDATE customers SET assigned_to=?, is_public=0, assigned_at=datetime('now'), updated_at=datetime('now') WHERE id=? AND (is_public=1 OR assigned_to IS NULL)").run(req.user.id, req.params.id);
+      const result = db.prepare("UPDATE customers SET assigned_to=?, is_public=0, assigned_at=datetime('now'), updated_at=datetime('now') WHERE id=? AND (is_public=1 OR assigned_to IS NULL)").run(req.user.id, req.params.id);
+      if (!result.changes) return res.status(409).json({ error: 'Customer is not available in public pool' });
       businessKnowledge.archiveCustomer(db, db.prepare('SELECT * FROM customers WHERE id = ?').get(req.params.id), req.user);
       res.json({ success: true });
     } catch (e) { res.status(500).json({ error: e.message }); }

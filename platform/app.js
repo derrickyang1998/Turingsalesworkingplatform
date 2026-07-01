@@ -973,8 +973,14 @@ function renderAdminUserTable(users) {
   });
   tbody.innerHTML = h;
 }
+function showAdminTemporaryPassword(result, fallbackMessage) {
+  if (result && result.temporary_password) {
+    window.prompt('Temporary password - copy now:', result.temporary_password);
+  }
+  toast((result && result.message) || fallbackMessage || 'Done');
+}
 async function toggleUserActive(id, active) { try { await apiFetch('/admin/users/'+id, {method:'PUT',body:JSON.stringify({is_active:active})}); loadAdminUsers(); toast('User '+(active?'activated':'deactivated')); } catch(e) { toast('Failed','error'); } }
-async function adminResetPw(userId) { try { await apiFetch('/admin/users/reset-password/'+userId, {method:'POST'}); toast('Password reset to turing2026'); } catch(e) { toast('Failed','error'); } }
+async function adminResetPw(userId) { try { var r = await apiFetch('/admin/users/reset-password/'+userId, {method:'POST'}); var d = await r.json(); showAdminTemporaryPassword(d, 'Password reset'); } catch(e) { toast('Failed','error'); } }
 // ===== CROSS-MODULE INTERCONNECT =====
 let currentCustomer = null;
 
@@ -1680,8 +1686,8 @@ async function loadAdminDashboard() {
     document.getElementById("ad_recentActivity").innerHTML = actH || "<p style=opacity:.5>No activity yet</p>";
   } catch(e) { console.error("Admin load error:", e); }
 }
-async function adminResetPw(userId) { try { await apiFetch("/admin/users/reset-password/" + userId, { method: "POST" }); toast("Password reset to: turing2026"); } catch(e) { toast("Failed: " + e.message, "error"); } }
-async function adminAddUser(){var u=prompt("Username:");if(!u)return;var d=prompt("Display name:");if(!d)return;var p=prompt("Department:")||"General";try{await apiFetch("/admin/users",{method:"POST",body:JSON.stringify({username:u,display_name:d,department:p,password:"turing2026"})});loadAdminUsers();toast("User "+u+" created");}catch(e){toast("Failed","error")}}
+async function adminResetPw(userId) { try { var r = await apiFetch("/admin/users/reset-password/" + userId, { method: "POST" }); var d = await r.json(); showAdminTemporaryPassword(d, "Password reset"); } catch(e) { toast("Failed: " + e.message, "error"); } }
+async function adminAddUser(){var u=prompt("Username:");if(!u)return;var d=prompt("Display name:");if(!d)return;var p=prompt("Department:")||"General";try{var r=await apiFetch("/admin/users",{method:"POST",body:JSON.stringify({username:u,display_name:d,department:p})});var x=await r.json();loadAdminUsers();showAdminTemporaryPassword(x,"User "+u+" created");}catch(e){toast("Failed","error")}}
 
 async function adminCreateInvite() { try { var r = await apiFetch("/admin/invites", { method: "POST" }); var d = await r.json(); document.getElementById("ad_inviteResult").textContent = "邀请码: " + d.code + " (7天有效)"; toast("Invite code: " + d.code); } catch(e) { toast("Failed: " + e.message, "error"); } }
 
@@ -1706,7 +1712,7 @@ async function loadAdminDashboard() {
     document.getElementById("ad_userTableBody").innerHTML = userH;
   } catch(e) { console.error("Admin load error:", e); }
 }
-async function adminResetPw(userId) { try { await apiFetch("/admin/users/reset-password/" + userId, { method: "POST" }); toast("Password reset to: turing2026"); } catch(e) { toast("Failed: " + e.message, "error"); } }
+async function adminResetPw(userId) { try { var r = await apiFetch("/admin/users/reset-password/" + userId, { method: "POST" }); var d = await r.json(); showAdminTemporaryPassword(d, "Password reset"); } catch(e) { toast("Failed: " + e.message, "error"); } }
 async function adminCreateInvite() { try { var r = await apiFetch("/admin/invites", { method: "POST" }); var d = await r.json(); document.getElementById("ad_inviteResult").textContent = "邀请码: " + d.code + " (7天有效)"; toast("Invite code: " + d.code); } catch(e) { toast("Failed: " + e.message, "error"); } }
 
 // ===== LOGOUT BUTTON (add to sidebar) =====
@@ -2832,5 +2838,5 @@ function viewAdminAiConversation(id) {
   });
 }
 function toggleUserActive(id, active) { apiFetch('/admin/users/'+id, {method:'PUT', body:JSON.stringify({is_active:active})}).then(function() { loadAdminUsers(); toast(active?'Activated':'Deactivated'); }).catch(function(e) { toast('Failed','error'); }); }
-function adminResetPw(id) { apiFetch('/admin/users/reset-password/'+id, {method:'POST'}).then(function() { toast('Reset to turing2026'); }).catch(function(e) { toast('Failed','error'); }); }
+function adminResetPw(id) { apiFetch('/admin/users/reset-password/'+id, {method:'POST'}).then(function(r) { return r.json(); }).then(function(d) { showAdminTemporaryPassword(d, 'Password reset'); }).catch(function(e) { toast('Failed','error'); }); }
 function adminCreateInvite() { apiFetch('/admin/invites', {method:'POST'}).then(function(r){return r.json();}).then(function(d) { var el = document.getElementById('ad_inviteResult'); if (el) el.textContent = 'Code: ' + d.code; toast('Invite: '+d.code); }).catch(function(e) { toast('Failed','error'); }); }

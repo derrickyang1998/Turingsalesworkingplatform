@@ -21,9 +21,14 @@
 - `/api/ai/proposal-draft` 不再把检索范围锁死到当前 demand，避免漏掉方法论、历史方案和网红批次摘要。
 - 线上回归修复中文长句 RAG 检索：知识检索会从中文问题中提取 2-6 字业务关键词，避免“请结合知识库，用三点概括...”这类完整句子无法命中知识条目。
 
+### 🔐 安全加固
+- 移除前端、部署文档、迁移文档和旧验证脚本中的静态默认密码；后台创建/重置用户改为返回一次性临时密码或使用管理员显式提供的密码。
+- CRM 客户、线索、商机按 id 读写增加归属校验，普通用户不能读取、修改或归档他人客户/商机。
+- CRM 私有知识归档改为归属业务负责人，管理员代操作不会让已分配客户的知识只留在管理员私有空间。
+
 ### ✅ 验证
 - `node --check app.js; node --check ppt.js; node --check server/server.js; node --check server/routes*.js; node --check server/services/*.js`
-- `npm test`（11 项通过：原 AI/KB 用例 + 中文长句 RAG 引用 + Obsidian 安全导入 + 路径白名单拒绝 + 业务归档权限 + Markdown Vault 导出）
+- `npm test`（14 项通过：原 AI/KB 用例 + 中文长句 RAG 引用 + Obsidian 安全导入 + 路径白名单拒绝 + 业务归档权限 + CRM 越权拒绝 + 默认密码扫描 + Markdown Vault 导出）
 - API smoke：临时服务健康检查、管理员登录、Obsidian dry-run、平台 Vault export 通过。
 - 真实本地同步：`D:\主盘\图灵集市` dry-run 命中 65 个可导入文件、跳过 9 个敏感/私密路径；已导入 65 条并导出 65 个 Markdown 到 `D:\图灵商务在线平台`。
 - 线上部署回归：`8.163.129.160` PM2 服务在线，健康检查通过；已同步安全筛选后的 Obsidian 65 个文件并导入 65 条知识，Vault 导出 66 条，AI 对话返回 5 条 `knowledge_references` 且 `ai_references` 落库。

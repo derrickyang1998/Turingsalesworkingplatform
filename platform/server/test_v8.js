@@ -39,7 +39,7 @@ async function run() {
     const r = await fetch(TOKEN_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: 'admin', password: 'turing2026' })
+      body: JSON.stringify({ username: 'admin', password: process.env.SMOKE_ADMIN_PASSWORD || process.env.DEFAULT_ADMIN_PASSWORD || '' })
     });
     const d = await r.json();
     if (d.token) token = d.token;

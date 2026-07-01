@@ -7,6 +7,7 @@ const jwt = require('jsonwebtoken');
 const multer = require('multer');
 const rateLimit = require('express-rate-limit');
 const fs = require('fs');
+const crypto = require('crypto');
 const db = require('./db');
 const knowledgeService = require('./services/knowledge_service');
 const aiService = require('./services/ai_service');
@@ -14,6 +15,7 @@ const fileIngestService = require('./services/file_ingest_service');
 const obsidianIngestService = require('./services/obsidian_ingest_service');
 const businessKnowledge = require('./services/business_knowledge_service');
 const vaultExportService = require('./services/vault_export_service');
+const crmAccess = require('./services/crm_access_service');
 const app = express();
 const PORT = process.env.PORT || 3002;
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'db', 'turingmarket.db');
@@ -94,6 +96,15 @@ function adminOnly(req, res, next) {
 function boolParam(value, defaultValue) {
   if (value === undefined || value === null || value === '') return defaultValue;
   return value === true || value === 'true' || value === '1' || value === 1;
+}
+
+function generateTemporaryPassword() {
+  return crypto.randomBytes(18).toString('base64url');
+}
+
+function hashPassword(password) {
+  const salt = bcrypt.genSaltSync(10);
+  return bcrypt.hashSync(password, salt);
 }
 
 function aiQuotaGuard(req, res, next) {
@@ -262,14 +273,18 @@ app.get('/api/admin/users', authMiddleware, adminOnly, (req, res) => {
 });
 
 app.post('/api/admin/users', authMiddleware, adminOnly, (req, res) => {
-  const { username, display_name, role, department, email } = req.body;
+  const { username, display_name, role, department, email, password } = req.body;
   if (!username) return res.status(400).json({ error: 'Username required' });
-  const salt = bcrypt.genSaltSync(10);
-  const hash = bcrypt.hashSync('turing2026', salt);
+  const temporaryPassword = password || generateTemporaryPassword();
+  const hash = hashPassword(temporaryPassword);
   try {
     const result = db.prepare('INSERT INTO users (username, password_hash, display_name, role, email, department) VALUES (?, ?, ?, ?, ?, ?)')
       .run(username, hash, display_name || username, role || 'user', email || '', department || '');
-    res.json({ id: result.lastInsertRowid });
+    res.json({
+      id: result.lastInsertRowid,
+      temporary_password: password ? undefined : temporaryPassword,
+      message: password ? 'User created with provided password' : 'User created. Share the temporary password securely.'
+    });
   } catch(e) {
     res.status(400).json({ error: 'Username may already exist' });
   }
@@ -287,10 +302,14 @@ app.delete('/api/admin/users/:id', authMiddleware, adminOnly, (req, res) => {
 });
 
 app.post('/api/admin/users/reset-password/:id', authMiddleware, adminOnly, (req, res) => {
-  const salt = bcrypt.genSaltSync(10);
-  const hash = bcrypt.hashSync('turing2026', salt);
+  const temporaryPassword = req.body.password || generateTemporaryPassword();
+  const hash = hashPassword(temporaryPassword);
   db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hash, req.params.id);
-  res.json({ success: true, message: 'Password reset to turing2026' });
+  res.json({
+    success: true,
+    temporary_password: req.body.password ? undefined : temporaryPassword,
+    message: req.body.password ? 'Password reset to provided value' : 'Password reset. Share the temporary password securely.'
+  });
 });
 
 // ===== INVITE SYSTEM =====
@@ -609,8 +628,9 @@ app.get('/api/customers/stats', authMiddleware, (req, res) => {
 app.post('/api/customers/:id/activity', authMiddleware, (req, res) => {
   try {
     const { action, notes } = req.body;
-    const customer = db.prepare('SELECT * FROM customers WHERE id = ?').get(req.params.id);
-    if (!customer) return res.status(404).json({ error: 'Customer not found' });
+    const customer = crmAccess.getCustomer(db, req.params.id);
+    if (!customer) return crmAccess.notFound(res, 'Customer');
+    if (!crmAccess.canManageCustomer(req.user, customer)) return crmAccess.forbidden(res);
     db.prepare('INSERT INTO customer_activity (customer_id, user_id, action, stage_from, stage_to, notes) VALUES (?, ?, ?, ?, ?, ?)')
       .run(req.params.id, req.user.id, action || 'note', customer.stage, customer.stage, notes || '');
     businessKnowledge.archiveCustomer(db, Object.assign({}, customer, {
@@ -629,7 +649,17 @@ app.get('/api/dashboard/stats', authMiddleware, (req, res) => {
     const wonDeals = db.prepare("SELECT COUNT(*) as count FROM customers WHERE stage='won'" + userFilter).get().count;
     const lostDeals = db.prepare("SELECT COUNT(*) as count FROM customers WHERE stage='lost'" + userFilter).get().count;
     const stageRows = db.prepare('SELECT stage, COUNT(*) as count FROM customers' + userFilter + ' GROUP BY stage').all();
-    const recentActivity = db.prepare('SELECT ca.*, u.display_name FROM customer_activity ca JOIN users u ON ca.user_id = u.id ORDER BY ca.created_at DESC LIMIT 20').all();
+    const recentActivity = req.user.role === 'admin'
+      ? db.prepare('SELECT ca.*, u.display_name FROM customer_activity ca JOIN users u ON ca.user_id = u.id ORDER BY ca.created_at DESC LIMIT 20').all()
+      : db.prepare(`
+          SELECT ca.*, u.display_name
+          FROM customer_activity ca
+          JOIN users u ON ca.user_id = u.id
+          JOIN customers c ON c.id = ca.customer_id
+          WHERE ca.user_id = ? OR c.assigned_to = ? OR c.created_by = ?
+          ORDER BY ca.created_at DESC
+          LIMIT 20
+        `).all(req.user.id, req.user.id, req.user.id);
     res.json({ totalCustomers, totalOppValue, wonDeals, lostDeals, stageRows, recentActivity });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -648,12 +678,16 @@ app.get('/api/knowledge/categories', authMiddleware, (req, res) => {
 app.post('/api/auth/register', authMiddleware, adminOnly, (req, res) => {
   const { username, password, display_name, role, department, email } = req.body;
   if (!username) return res.status(400).json({ error: 'Username required' });
-  const salt = bcrypt.genSaltSync(10);
-  const hash = bcrypt.hashSync(password || 'turing2026', salt);
+  const temporaryPassword = password || generateTemporaryPassword();
+  const hash = hashPassword(temporaryPassword);
   try {
     const result = db.prepare('INSERT INTO users (username, password_hash, display_name, role, email, department) VALUES (?, ?, ?, ?, ?, ?)')
       .run(username, hash, display_name || username, role || 'user', email || '', department || '');
-    res.json({ id: result.lastInsertRowid });
+    res.json({
+      id: result.lastInsertRowid,
+      temporary_password: password ? undefined : temporaryPassword,
+      message: password ? 'User created with provided password' : 'User created. Share the temporary password securely.'
+    });
   } catch(e) {
     res.status(400).json({ error: 'Username may already exist' });
   }
