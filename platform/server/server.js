@@ -1,4 +1,4 @@
-﻿const express = require('express');
+const express = require('express');
 const cors = require('cors');
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env'), quiet: true });
@@ -16,6 +16,7 @@ const obsidianIngestService = require('./services/obsidian_ingest_service');
 const businessKnowledge = require('./services/business_knowledge_service');
 const vaultExportService = require('./services/vault_export_service');
 const crmAccess = require('./services/crm_access_service');
+const latestUiCompat = require('./services/latest_ui_compat_service');
 const app = express();
 const PORT = process.env.PORT || 3002;
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'db', 'turingmarket.db');
@@ -26,7 +27,11 @@ if (process.env.NODE_ENV === 'production' && (!process.env.JWT_SECRET || process
 const JWT_SECRET = process.env.JWT_SECRET || DEFAULT_DEV_JWT_SECRET;
 const TOKEN_EXPIRY = '24h';
 const UPLOAD_DIR = path.join(__dirname, '..', 'uploads');
-const ALLOWED_UPLOAD_EXTS = new Set(['.txt', '.md', '.csv', '.json', '.xlsx']);
+const ALLOWED_UPLOAD_EXTS = new Set([
+  '.txt', '.md', '.csv', '.json', '.xlsx', '.xlsm', '.xls',
+  '.pdf', '.docx', '.pptx',
+  '.jpg', '.jpeg', '.png', '.webp', '.bmp', '.tif', '.tiff'
+]);
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
 // Middleware
@@ -50,7 +55,7 @@ const upload = multer({
   fileFilter: function(req, file, cb) {
     const ext = path.extname(file.originalname || '').toLowerCase();
     if (!ALLOWED_UPLOAD_EXTS.has(ext)) {
-      return cb(new Error('Unsupported file type. Supported: TXT, MD, CSV, JSON, XLSX.'));
+      return cb(new Error('Unsupported file type. Supported: TXT, MD, CSV, JSON, XLSX/XLSM/XLS, PDF, DOCX, PPTX, images.'));
     }
     cb(null, true);
   }
@@ -74,15 +79,15 @@ const uploadLimiter = rateLimit({
 function authMiddleware(req, res, next) {
   const token = req.headers.authorization?.replace('Bearer ', '') || req.query.token;
   if (!token) return res.status(401).json({ error: 'No token provided' });
-  
+
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
     const session = db.prepare(`SELECT * FROM sessions WHERE token = ? AND expires_at > datetime('now')`).get(token);
     if (!session) return res.status(401).json({ error: 'Session expired' });
-    
+
     const user = db.prepare('SELECT id, username, display_name, role, department, api_quota FROM users WHERE id = ? AND is_active = 1').get(decoded.userId);
     if (!user) return res.status(401).json({ error: 'User not found' });
-    
+
     req.user = user;
     next();
   } catch(e) { return res.status(401).json({ error: 'Invalid token' }); }
@@ -107,6 +112,32 @@ function hashPassword(password) {
   return bcrypt.hashSync(password, salt);
 }
 
+function normalizePptRequestPayload(body) {
+  body = body || {};
+  if (!body.outline) return body;
+  const outline = body.outline || {};
+  const demand = body.demand || {};
+  const brand = body.brand || demand.brand || demand.brand_name || demand.company || demand.company_name || outline.title || 'Brand';
+  const tagline = body.tagline || outline.subtitle || [demand.product || demand.product_name, demand.target_market || demand.market].filter(Boolean).join(' / ');
+  const sections = Array.isArray(outline.sections) ? outline.sections : [];
+  return {
+    brand,
+    tagline,
+    title: outline.title || body.title || brand,
+    sections: sections.map(function(section) {
+      const items = Array.isArray(section.items) ? section.items
+        : Array.isArray(section.points) ? section.points
+          : String(section.points || section.note || '').split(/\n|;|；/).filter(Boolean);
+      return {
+        title: section.title || '',
+        items: items.map(function(item) { return String(item); }).filter(Boolean)
+      };
+    }).filter(function(section) { return section.title || section.items.length; }),
+    outline,
+    demand
+  };
+}
+
 function aiQuotaGuard(req, res, next) {
   const quota = Number(req.user.api_quota || 0);
   if (!quota || req.user.role === 'admin') return next();
@@ -119,22 +150,22 @@ function aiQuotaGuard(req, res, next) {
 app.post('/api/auth/login', (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
-  
+
   const user = db.prepare('SELECT * FROM users WHERE username = ? AND is_active = 1').get(username);
   if (!user) return res.status(401).json({ error: 'Invalid credentials' });
-  
+
   const valid = bcrypt.compareSync(password, user.password_hash);
   if (!valid) return res.status(401).json({ error: 'Invalid credentials' });
-  
+
   // Create session
   const token = jwt.sign({ userId: user.id, role: user.role }, JWT_SECRET, { expiresIn: TOKEN_EXPIRY });
   const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
   db.prepare('INSERT INTO sessions (user_id, token, ip_address, expires_at) VALUES (?, ?, ?, ?)').run(user.id, token, req.ip, expiresAt);
   db.prepare('UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?').run(user.id);
-  
+
   // Log activity
   db.prepare('INSERT INTO activity_log (user_id, action, module, ip_address) VALUES (?, ?, ?, ?)').run(user.id, 'login', 'auth', req.ip);
-  
+
   res.json({
     token,
     user: {
@@ -186,7 +217,7 @@ app.post('/api/demands', authMiddleware, (req, res) => {
 });
 
 app.get('/api/demands', authMiddleware, (req, res) => {
-  const demands = req.user.role === 'admin' 
+  const demands = req.user.role === 'admin'
     ? db.prepare('SELECT d.*, u.display_name, u.department FROM demands d JOIN users u ON d.user_id = u.id ORDER BY d.created_at DESC LIMIT 200').all()
     : db.prepare('SELECT * FROM demands WHERE user_id = ? ORDER BY created_at DESC LIMIT 200').all(req.user.id);
   res.json({ demands });
@@ -236,7 +267,7 @@ app.post('/api/token-usage', authMiddleware, (req, res) => {
 app.get('/api/token-usage', authMiddleware, (req, res) => {
   const usage = req.user.role === 'admin'
     ? db.prepare(`
-        SELECT u.username, u.display_name, u.department, 
+        SELECT u.username, u.display_name, u.department,
                COALESCE(SUM(tu.total_tokens), 0) as total_tokens,
                COALESCE(SUM(tu.prompt_tokens), 0) as prompt_tokens,
                COALESCE(SUM(tu.completion_tokens), 0) as completion_tokens,
@@ -329,25 +360,27 @@ app.post('/api/proposal/generate-ppt', authMiddleware, (req, res) => {
   if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
   const dataPath = path.join(tmpDir, 'ppt_data_' + Date.now() + '.json');
   const outPath = path.join(tmpDir, 'proposal_' + Date.now() + '.pptx');
-  fs.writeFileSync(dataPath, JSON.stringify(req.body));
+  const pptPayload = normalizePptRequestPayload(req.body);
+  fs.writeFileSync(dataPath, JSON.stringify(pptPayload));
   try {
     try {
       knowledgeService.ingestKnowledge(db, {
-        title: 'PPT 生成请求：' + (req.body.brand || req.body.title || Date.now()),
-        summary: String(req.body.summary || req.body.title || req.body.brand || '').slice(0, 240),
-        content: JSON.stringify(req.body, null, 2),
+        title: 'PPT 生成请求：' + (pptPayload.brand || pptPayload.title || Date.now()),
+        summary: String(req.body.summary || pptPayload.title || pptPayload.brand || '').slice(0, 240),
+        content: JSON.stringify(pptPayload, null, 2),
         entry_type: 'proposal_ppt_request',
         source_type: 'ppt_generation',
-        source_id: req.body.demand_id || req.body.brand || dataPath,
+        source_id: req.body.demand_id || pptPayload.brand || dataPath,
         visibility: 'private',
-        tags: ['ppt', 'proposal', req.body.brand].filter(Boolean),
+        tags: ['ppt', 'proposal', pptPayload.brand].filter(Boolean),
         business_type: 'proposal',
         business_id: req.body.demand_id || '',
         created_by: req.user.id,
         actor_role: req.user.role
       });
     } catch (archiveErr) {}
-    cp.execSync('python3 "' + path.join(__dirname, 'generate_ppt.py') + '" "' + dataPath + '" "' + outPath + '"', { timeout: 30000, cwd: __dirname });
+    const python = process.env.PYTHON_BIN || (process.platform === 'win32' ? 'python' : 'python3');
+    cp.execFileSync(python, [path.join(__dirname, 'generate_ppt.py'), dataPath, outPath], { timeout: 30000, cwd: __dirname });
     fs.unlinkSync(dataPath);
     res.download(outPath, 'proposal.pptx', function() { try { fs.unlinkSync(outPath); } catch(e) {} });
   } catch (e) {
@@ -360,7 +393,7 @@ app.post('/api/proposal/generate-ppt', authMiddleware, (req, res) => {
 // ===== INFLUENCER & COLLABORATION ROUTES =====
 require('./routes')(app, db, authMiddleware);
 require('./routes_customers')(app, db, authMiddleware);
-require('./routes_brands')(app, db, authMiddleware);
+require('./routes_brands')(app, db, authMiddleware, aiLimiter, aiQuotaGuard);
 
 // ===== WORKFLOW ENGINE ROUTES =====
 require('./routes_workflow')(app, db, authMiddleware, adminOnly);
@@ -429,7 +462,20 @@ app.post('/api/knowledge/upload', authMiddleware, uploadLimiter, function(req, r
 }, async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'File required' });
-    const parsed = await fileIngestService.readUploadedFile(req.file);
+    let parsed;
+    try {
+      parsed = await fileIngestService.readUploadedFile(req.file);
+    } catch (parseError) {
+      const demandParsed = await latestUiCompat.parseDemandFile(req.file);
+      parsed = {
+        content: demandParsed.text,
+        kind: 'document',
+        rows: [],
+        parser: demandParsed.parser,
+        fallback: demandParsed.fallback,
+        warning: demandParsed.warnings && demandParsed.warnings.length ? demandParsed.warnings.join(' | ') : parseError.message
+      };
+    }
     const entry = knowledgeService.ingestKnowledge(db, {
       title: req.body.title || req.file.originalname,
       summary: req.body.summary || '',
@@ -448,7 +494,10 @@ app.post('/api/knowledge/upload', authMiddleware, uploadLimiter, function(req, r
         mimetype: req.file.mimetype,
         size: req.file.size,
         kind: parsed.kind,
-        row_count: parsed.rows ? parsed.rows.length : 0
+        row_count: parsed.rows ? parsed.rows.length : 0,
+        parser: parsed.parser,
+        fallback: parsed.fallback,
+        warning: parsed.warning
       }
     });
     try { fs.unlinkSync(req.file.path); } catch (e2) {}
@@ -488,6 +537,15 @@ app.post('/api/admin/knowledge/vault/export', authMiddleware, adminOnly, (req, r
     db.prepare('INSERT INTO activity_log (user_id, action, module, details, ip_address) VALUES (?, ?, ?, ?, ?)')
       .run(req.user.id, 'knowledge_vault_export', 'knowledge', 'Exported ' + result.exported + ' knowledge entries to vault', req.ip);
     res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/knowledge/similar', authMiddleware, (req, res) => {
+  try {
+    const entries = latestUiCompat.similarKnowledge(db, req.query || {}, req.user);
+    res.json({ entries });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -582,6 +640,100 @@ app.post('/api/ai/proposal-draft', authMiddleware, aiLimiter, aiQuotaGuard, asyn
     });
     res.json({ draft: result.answer, demand_entry: demandEntry, ai: result });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ===== LATEST UI COMPATIBILITY ROUTES =====
+app.post('/api/demand/parse-file', authMiddleware, uploadLimiter, upload.single('file'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'File required' });
+  try {
+    const parsed = await latestUiCompat.parseDemandFile(req.file);
+    const inferred = latestUiCompat.inferDemandAnalysis(parsed.text, parsed.warning || '', req.file.originalname);
+    try {
+      knowledgeService.ingestKnowledge(db, {
+        title: 'Demand upload: ' + (req.file.originalname || 'uploaded file'),
+        summary: String(parsed.text || '').replace(/\s+/g, ' ').trim().slice(0, 240),
+        content: parsed.text,
+        entry_type: 'demand_upload',
+        source_type: 'demand_parse_file',
+        source_id: req.file.originalname || req.file.filename,
+        visibility: 'private',
+        tags: ['demand', 'upload', path.extname(req.file.originalname || '').replace('.', '')],
+        business_type: 'demand',
+        business_id: '',
+        created_by: req.user.id,
+        actor_role: req.user.role,
+        metadata: {
+          parser: parsed.parser,
+          fallback: parsed.fallback,
+          needsOcr: parsed.needsOcr,
+          ocrUsed: parsed.ocrUsed,
+          fileName: req.file.originalname
+        }
+      });
+    } catch (e2) {}
+    res.json({
+      fileName: req.file.originalname,
+      extractedText: parsed.text,
+      analysisHint: inferred,
+      fallback: parsed.fallback,
+      warning: parsed.warnings && parsed.warnings.length ? parsed.warnings.join(' | ') : undefined,
+      parser: parsed.parser,
+      needsOcr: parsed.needsOcr,
+      ocrUsed: parsed.ocrUsed
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  } finally {
+    latestUiCompat.safeUnlink(req.file.path);
+  }
+});
+
+app.post('/api/ai/strategy', authMiddleware, aiLimiter, aiQuotaGuard, async (req, res) => {
+  try {
+    const result = await latestUiCompat.generateStrategy(db, req.user, req.body.prompt, req.body.input);
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: e.message, content: '', fallback: true, warning: e.message });
+  }
+});
+
+app.post('/api/ai/demand-analysis', authMiddleware, aiLimiter, aiQuotaGuard, async (req, res) => {
+  try {
+    const result = await latestUiCompat.generateDemandAnalysis(req.body.prompt, req.body.input, req.body.fileName, { db, user: req.user });
+    try {
+      knowledgeService.ingestKnowledge(db, {
+        title: 'Demand analysis: ' + (result.analysis.brand || result.analysis.product || req.body.fileName || 'untitled'),
+        summary: JSON.stringify(result.analysis).slice(0, 240),
+        content: JSON.stringify(result.analysis, null, 2),
+        entry_type: 'demand_analysis',
+        source_type: 'ai_demand_analysis',
+        source_id: req.body.fileName || result.analysis.brand || Date.now(),
+        visibility: 'private',
+        tags: ['demand', 'analysis', result.analysis.industry || '', result.analysis.brand || ''],
+        business_type: 'demand',
+        business_id: result.analysis.brand || result.analysis.product || '',
+        created_by: req.user.id,
+        actor_role: req.user.role,
+        metadata: { fallback: !!result.fallback }
+      });
+    } catch (e2) {}
+    res.json(result);
+  } catch (e) {
+    res.json({
+      analysis: latestUiCompat.inferDemandAnalysis(req.body.input || req.body.prompt || '', e.message, req.body.fileName),
+      fallback: true,
+      warning: e.message
+    });
+  }
+});
+
+app.post('/api/ai/ppt-outline', authMiddleware, aiLimiter, aiQuotaGuard, async (req, res) => {
+  try {
+    const result = await latestUiCompat.generatePptOutline(db, req.user, req.body || {});
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // ===== SALES DASHBOARD =====

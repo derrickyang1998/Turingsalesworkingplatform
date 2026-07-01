@@ -1,6 +1,7 @@
 module.exports = function(app, db, authMiddleware) {
   const businessKnowledge = require('./services/business_knowledge_service');
   const crmAccess = require('./services/crm_access_service');
+  const knowledgeService = require('./services/knowledge_service');
 
   const STAGES = ['lead', 'info_confirmed', 'advantage_shared', 'needs_confirmed', 'analysis', 'proposal', 'kol_matching', 'cooperation'];
   const TERMINAL_STAGES = ['paused', 'won', 'lost'];
@@ -19,6 +20,36 @@ module.exports = function(app, db, authMiddleware) {
   };
 
   const ACTIVE_STAGES = STAGES.join("','");
+
+  function addCustomerScope(conditions, params, req, alias) {
+    alias = alias || 'c';
+    const scope = String(req.query.scope || (req.user.role === 'admin' ? 'all' : 'my'));
+    if (req.user.role === 'admin') {
+      if (scope === 'my') {
+        conditions.push(alias + '.assigned_to = ?'); params.push(req.user.id);
+      } else if (scope === 'team') {
+        conditions.push('(' + alias + '.assigned_to IN (SELECT id FROM users WHERE department = ?) OR ' + alias + '.created_by IN (SELECT id FROM users WHERE department = ?))');
+        params.push(req.user.department || '', req.user.department || '');
+      }
+      return;
+    }
+    if (scope === 'team') {
+      conditions.push('(' + alias + '.assigned_to IN (SELECT id FROM users WHERE department = ?) OR ' + alias + '.created_by IN (SELECT id FROM users WHERE department = ?))');
+      params.push(req.user.department || '', req.user.department || '');
+      return;
+    }
+    conditions.push(alias + '.assigned_to = ?'); params.push(req.user.id);
+  }
+
+  function scopedCustomerWhere(req) {
+    const conditions = [];
+    const params = [];
+    addCustomerScope(conditions, params, req, 'customers');
+    return {
+      where: conditions.length ? ' WHERE ' + conditions.join(' AND ') : '',
+      params
+    };
+  }
 
   // ============================================================
   // LEAD ROUTES (线索管理)
@@ -99,13 +130,11 @@ module.exports = function(app, db, authMiddleware) {
     if (search) { conditions.push('(c.brand_name LIKE ? OR c.company_name LIKE ? OR c.contact_person LIKE ?)'); params.push('%' + search + '%', '%' + search + '%', '%' + search + '%'); }
     if (is_public !== undefined) { conditions.push('c.is_public = ?'); params.push(is_public); }
 
-    // Non-admin users see their own customers; public-pool queries can also show unassigned public customers.
-    if (req.user.role !== 'admin') {
-      if (String(is_public) === '1') {
-        conditions.push('(c.assigned_to = ? OR c.assigned_to IS NULL)'); params.push(req.user.id);
-      } else {
-        conditions.push('c.assigned_to = ?'); params.push(req.user.id);
-      }
+    // Non-admin users see their own or team-scoped customers; public-pool queries can also show unassigned public customers.
+    if (String(is_public) === '1' && req.user.role !== 'admin') {
+      conditions.push('(c.assigned_to = ? OR c.assigned_to IS NULL)'); params.push(req.user.id);
+    } else {
+      addCustomerScope(conditions, params, req, 'c');
     }
 
     if (conditions.length) sql += ' WHERE ' + conditions.join(' AND ');
@@ -115,18 +144,19 @@ module.exports = function(app, db, authMiddleware) {
   });
 
   app.get('/api/customers/stats', authMiddleware, (req, res) => {
-    const userFilter = req.user.role !== 'admin' ? ' WHERE assigned_to = ' + req.user.id : '';
-    const byStageArr = db.prepare('SELECT stage, COUNT(*) as count FROM customers' + userFilter + ' GROUP BY stage').all();
-    const total = db.prepare('SELECT COUNT(*) as count FROM customers' + userFilter).get().count;
-    const active = db.prepare("SELECT COUNT(*) as count FROM customers WHERE stage IN ('" + ACTIVE_STAGES + "')" + (req.user.role !== 'admin' ? ' AND assigned_to = ' + req.user.id : '')).get().count;
-    const paused = db.prepare("SELECT COUNT(*) as count FROM customers WHERE stage = 'paused'" + (req.user.role !== 'admin' ? ' AND assigned_to = ' + req.user.id : '')).get().count;
-    const byIndustry = db.prepare('SELECT industry, COUNT(*) as count FROM customers' + userFilter + ' GROUP BY industry ORDER BY count DESC LIMIT 10').all();
+    const scoped = scopedCustomerWhere(req);
+    const prefix = scoped.where ? scoped.where + ' AND ' : ' WHERE ';
+    const byStageArr = db.prepare('SELECT stage, COUNT(*) as count FROM customers' + scoped.where + ' GROUP BY stage').all(...scoped.params);
+    const total = db.prepare('SELECT COUNT(*) as count FROM customers' + scoped.where).get(...scoped.params).count;
+    const active = db.prepare("SELECT COUNT(*) as count FROM customers" + prefix + "stage IN ('" + ACTIVE_STAGES + "')").get(...scoped.params).count;
+    const paused = db.prepare("SELECT COUNT(*) as count FROM customers" + prefix + "stage = 'paused'").get(...scoped.params).count;
+    const byIndustry = db.prepare('SELECT industry, COUNT(*) as count FROM customers' + scoped.where + ' GROUP BY industry ORDER BY count DESC LIMIT 10').all(...scoped.params);
     // Convert byStage array to object for frontend compatibility
     var byStage = {}; byStageArr.forEach(function(s) { byStage[s.stage] = s.count; });
     var won = byStage['won'] || 0;
     var publicPool = db.prepare("SELECT COUNT(*) as count FROM customers WHERE is_public = 1" + (req.user.role !== 'admin' ? ' AND (assigned_to IS NULL OR assigned_to = ' + req.user.id + ')' : '')).get().count;
     var assigned = db.prepare('SELECT COUNT(*) as count FROM customers WHERE assigned_to = ?').get(req.user.id).count;
-    var weeklyNew = db.prepare("SELECT COUNT(*) as count FROM customers WHERE created_at >= datetime('now', '-7 days')" + userFilter).get().count;
+    var weeklyNew = db.prepare("SELECT COUNT(*) as count FROM customers" + prefix + "created_at >= datetime('now', '-7 days')").get(...scoped.params).count;
     res.json({ byStage, total, active, paused, byIndustry, stages: STAGE_LABELS, won, publicPool, assigned, weeklyNew });
   });
 
@@ -152,6 +182,40 @@ module.exports = function(app, db, authMiddleware) {
     businessKnowledge.archiveCustomer(db, db.prepare('SELECT * FROM customers WHERE id = ?').get(result.lastInsertRowid), req.user);
     db.prepare('INSERT INTO customer_activity (customer_id, user_id, action, stage_to, notes) VALUES (?, ?, ?, ?, ?)').run(result.lastInsertRowid, req.user.id, 'created', stage || 'lead', '客户创建');
     res.json({ id: result.lastInsertRowid });
+  });
+
+  app.post('/api/customers/:id/archive-result', authMiddleware, (req, res) => {
+    try {
+      const customer = crmAccess.getCustomer(db, req.params.id);
+      if (!customer) return crmAccess.notFound(res, 'Customer');
+      if (!crmAccess.canManageCustomer(req.user, customer)) return crmAccess.forbidden(res);
+      const { artifact_type, title, content, tags, source_type } = req.body || {};
+      if (!content || !String(content).trim()) return res.status(400).json({ error: 'Content required' });
+      const type = artifact_type || 'note';
+      const safeTitle = title || ((customer.brand_name || customer.company_name || 'Customer') + ' ' + type);
+      const tagList = Array.isArray(tags) ? tags : [customer.brand_name, customer.company_name, customer.industry, type].filter(Boolean);
+      const entry = knowledgeService.ingestKnowledge(db, {
+        title: safeTitle,
+        summary: String(content).replace(/\s+/g, ' ').trim().slice(0, 240),
+        content: content,
+        entry_type: type,
+        source_type: source_type || 'customer',
+        source_id: req.params.id + ':' + type + ':' + safeTitle,
+        visibility: 'team',
+        tags: tagList,
+        business_type: 'customer',
+        business_id: req.params.id,
+        created_by: crmAccess.customerOwnerId(customer, req.user),
+        actor_role: req.user.role,
+        metadata: { customer_id: req.params.id, archived_by: req.user.id }
+      });
+      const activityAction = type === 'strategy' ? 'archive_strategy' : type === 'proposal' ? 'archive_proposal' : 'archive_note';
+      db.prepare('INSERT INTO customer_activity (customer_id, user_id, action, stage_from, stage_to, notes) VALUES (?, ?, ?, ?, ?, ?)')
+        .run(req.params.id, req.user.id, activityAction, customer.stage, customer.stage, safeTitle);
+      db.prepare('INSERT INTO activity_log (user_id, action, module, details, ip_address) VALUES (?, ?, ?, ?, ?)')
+        .run(req.user.id, activityAction, 'customer', 'Archived ' + type + ' for customer #' + req.params.id, req.ip);
+      res.json({ id: entry.id, success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
   app.put('/api/customers/:id', authMiddleware, (req, res) => {

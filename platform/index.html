@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
@@ -41,7 +41,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);letter-spaci
 .admin-only.visible{display:flex!important}
 .sidebar-footer{padding:12px 20px;font-size:10px;opacity:.4;margin-top:auto;border-top:1px solid var(--border)}
 main{flex:1;overflow-y:auto;padding:32px 36px}
-.page{display:block}
+.page{display:none}
 .page.active{display:block}
 h2{font-size:22px;font-weight:700;margin-bottom:2px}
 .subtitle{font-size:13px;opacity:.5;margin-bottom:20px}
@@ -88,8 +88,16 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
 .search-icon{position:absolute;left:10px;top:50%;transform:translateY(-50%);font-size:14px;opacity:.3}
 .file-upload{border:2px dashed #e0e0dd;border-radius:10px;padding:28px;text-align:center;cursor:pointer;transition:all .2s;background:#fafaf9}
 .file-upload:hover{border-color:#1a1a1a;background:#f5f5f4}
+.file-upload.has-file{border-color:#3b82f6;background:#eff6ff;text-align:left}
+.file-upload.error{border-color:#f59e0b;background:#fffbeb;text-align:left}
 .upload-icon{font-size:28px;margin-bottom:8px}
 .upload-text{font-size:13px;opacity:.5}
+.upload-file-card{display:flex;gap:12px;align-items:flex-start}
+.upload-file-icon{width:42px;height:42px;border-radius:14px;background:#dbeafe;display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0}
+.upload-file-name{font-size:14px;font-weight:700;color:var(--text);word-break:break-all}
+.upload-file-meta{font-size:12px;color:var(--text2);margin-top:3px}
+.upload-file-status{font-size:12px;margin-top:8px;color:#1d4ed8;line-height:1.45}
+.file-upload.error .upload-file-status{color:#b45309}
 .chat-container{display:flex;flex-direction:column;height:calc(100vh - 200px)}
 .chat-messages{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px}
 .chat-msg{display:flex}
@@ -224,12 +232,24 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
 .wf-badge-paused { background:#e3f2fd;color:#1565c0; }
 .wf-badge-cancelled { background:#fbe9e7;color:#c62828; }
 .wf-badge-pending { background:#fff8e1;color:#f57f17; }
-.wf-task-card { background:white;border:1px solid #eee;border-radius:8px;padding:16px;margin-bottom:12px; }
+.wf-task-toolbar { display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px;background:#fff;border:1px solid #eee;border-radius:10px;padding:12px; }
+.wf-task-toolbar input,.wf-task-toolbar select { width:auto;min-width:120px;font-size:12px; }
+.wf-task-summary { display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:14px; }
+.wf-task-summary .stat { padding:14px;border-radius:10px;background:#fff;border:1px solid #eee; }
+.wf-task-summary .stat-value { font-size:22px;font-weight:700;line-height:1.1; }
+.wf-task-card { background:white;border:1px solid #eee;border-radius:10px;padding:16px;margin-bottom:12px; }
 .wf-task-card:hover { box-shadow:0 2px 8px rgba(0,0,0,0.1); }
-.wf-task-title { font-size:15px;font-weight:600;margin-bottom:6px; }
-.wf-task-meta { font-size:12px;color:#888;margin-bottom:10px; }
-.wf-task-actions { display:flex;gap:8px; }
+.wf-task-card.overdue { border-color:#fecaca;background:#fff7f7; }
+.wf-task-title { font-size:15px;font-weight:600;margin-bottom:6px;display:flex;justify-content:space-between;gap:10px;align-items:flex-start; }
+.wf-task-meta { font-size:12px;color:#888;margin-bottom:10px;line-height:1.8; }
+.wf-task-actions { display:flex;gap:8px;align-items:center;flex-wrap:wrap; }
 .wf-task-actions button { padding:8px 20px;border:none;border-radius:4px;cursor:pointer;font-size:13px; }
+.wf-task-actions input { min-width:220px; }
+.wf-task-link { border:1px solid #ddd;background:#fff;border-radius:4px;padding:7px 12px;cursor:pointer;font-size:13px; }
+.wf-task-link:hover { background:#f5f5f5; }
+.wf-overdue-chip { display:inline-block;background:#fee2e2;color:#b91c1c;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:700; }
+.wf-task-detail-grid { display:grid;grid-template-columns:120px 1fr;gap:8px 12px;font-size:13px; }
+.wf-task-detail-grid strong { color:#666; }
 .btn-approve { background:#4CAF50;color:white; }
 .btn-reject { background:#f44336;color:white; }
 .btn-complete { background:#2196F3;color:white; }
@@ -268,8 +288,176 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
 .sidebar-section .field { display:flex; margin-bottom:8px; font-size:13px; }
 .sidebar-section .field-label { width:80px; flex-shrink:0; color:#999; }
 .sidebar-section .field-value { flex:1; word-break:break-all; }
-/* ===== Opp Table ===== */
-#oppTable { display:none; }
+
+/* ===== Apple-style v9 visual framework ===== */
+:root {
+  --bg: #f5f7fb;
+  --surface: rgba(255,255,255,.78);
+  --surface2: rgba(248,250,252,.86);
+  --border: rgba(148,163,184,.22);
+  --text: #0b1220;
+  --text2: #64748b;
+  --accent: #007aff;
+  --accent-dim: rgba(0,122,255,.12);
+  --green: #34c759;
+  --amber: #ff9500;
+  --red: #ff3b30;
+  --blue: #007aff;
+  --radius: 26px;
+  --radius-sm: 16px;
+  --shadow: 0 24px 70px rgba(15,23,42,.10);
+  --shadow-soft: 0 12px 34px rgba(15,23,42,.08);
+}
+body{
+  min-height:100vh;
+  background:
+    radial-gradient(circle at 12% 14%, rgba(191,223,255,.58), transparent 26%),
+    radial-gradient(circle at 88% 18%, rgba(216,248,230,.58), transparent 25%),
+    linear-gradient(135deg,#f7faff 0%,#eef4fa 100%);
+}
+#app{gap:20px;padding:20px;background:transparent}
+.sidebar{
+  width:268px;min-width:268px;border:1px solid rgba(255,255,255,.74);
+  border-right:1px solid rgba(255,255,255,.74);
+  background:rgba(255,255,255,.68);backdrop-filter:blur(28px);
+  border-radius:34px;padding:24px 12px;box-shadow:var(--shadow);gap:8px;
+}
+.sidebar-logo{padding:8px 18px 22px;border-bottom:0;margin-bottom:6px}
+.sidebar-logo h1{font-size:24px;font-weight:800;letter-spacing:-.04em}
+.sidebar-logo::after{content:"图灵商务在线工作平台";display:block;margin-top:4px;font-size:12px;color:var(--text2)}
+.nav-item{
+  margin:0;padding:13px 14px;border-radius:18px;font-size:14px;color:#334155;
+  opacity:1;gap:12px;letter-spacing:-.02em;
+}
+.nav-item:hover{background:rgba(255,255,255,.72);transform:translateX(2px)}
+.nav-item.active{background:#0b1220;color:#fff;box-shadow:0 16px 34px rgba(15,23,42,.18)}
+.nav-item .nav-icon{
+  width:28px;height:28px;border-radius:11px;background:rgba(0,122,255,.10);
+  color:#007aff;display:inline-flex;align-items:center;justify-content:center;
+  font-size:12px;font-weight:800;
+}
+.nav-item.active .nav-icon{background:rgba(255,255,255,.16);color:#fff}
+.sidebar-footer{
+  margin:14px 8px 0;padding:16px;border-top:0;border-radius:24px;
+  background:linear-gradient(135deg,rgba(248,251,255,.95),rgba(232,242,255,.88));
+  opacity:1;color:var(--text2);font-size:11px;
+}
+main{padding:26px 26px 48px;scroll-behavior:smooth}
+.page{animation:tmFadeUp .28s ease both}
+@keyframes tmFadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.card{
+  background:var(--surface);border:1px solid rgba(255,255,255,.78);
+  border-radius:28px;box-shadow:var(--shadow-soft);backdrop-filter:blur(22px);
+}
+input,select,textarea{
+  min-height:42px;border:1px solid rgba(148,163,184,.24);border-radius:16px;
+  background:rgba(255,255,255,.82);box-shadow:inset 0 1px 0 rgba(255,255,255,.68);
+}
+input:focus,select:focus,textarea:focus{border-color:rgba(0,122,255,.56);box-shadow:0 0 0 4px rgba(0,122,255,.12)}
+.btn{border-radius:16px;min-height:40px;font-weight:700;letter-spacing:-.02em}
+.btn-primary{background:#007aff;color:#fff;box-shadow:0 12px 26px rgba(0,122,255,.24)}
+.btn-primary:hover{background:#006ee6;box-shadow:0 16px 32px rgba(0,122,255,.30);transform:translateY(-1px)}
+.btn-outline,.btn:not(.btn-primary):not(.btn-danger){background:rgba(255,255,255,.72);border:1px solid rgba(148,163,184,.22)}
+.tag{padding:7px 13px;border-radius:999px;background:rgba(255,255,255,.72);border-color:rgba(148,163,184,.20);color:#475569}
+.tag.active{background:#0b1220;border-color:#0b1220;color:#fff}
+.tm-template-card{cursor:pointer;padding:16px;border:1px solid rgba(148,163,184,.18);transition:all .18s ease}
+.tm-template-card:hover{transform:translateY(-2px);border-color:rgba(0,122,255,.36);box-shadow:0 16px 34px rgba(15,23,42,.10)}
+.tm-template-card.active{background:linear-gradient(135deg,#0b1220,#0f2a4c);border-color:#0b1220;color:#fff;box-shadow:0 20px 42px rgba(15,23,42,.22)}
+.tm-template-card.active p,.tm-template-card.active div{color:rgba(255,255,255,.72)!important;opacity:1!important}
+.tm-custom-template{display:none;margin-top:12px;padding:14px;border:1px dashed rgba(0,122,255,.32);border-radius:20px;background:rgba(239,246,255,.68)}
+.tm-custom-template.active{display:block}
+.tm-proposal-editor{width:100%;min-height:360px;font-size:12px;line-height:1.65;white-space:pre-wrap;font-family:"SFMono-Regular","Consolas","Microsoft YaHei",monospace;background:rgba(255,255,255,.84)}
+table{border-spacing:0 8px;border-collapse:separate}
+th{background:transparent;border-bottom:0;color:#64748b;opacity:1;padding:8px 14px}
+td{background:rgba(255,255,255,.72);border-bottom:0;padding:13px 14px}
+tbody tr td:first-child{border-radius:18px 0 0 18px}
+tbody tr td:last-child{border-radius:0 18px 18px 0}
+tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
+.tm-page-shell{max-width:1280px;margin:0 auto}
+.tm-page-hero{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;margin-bottom:24px}
+.tm-eyebrow{font-size:13px;color:var(--text2);font-weight:700;margin-bottom:8px}
+.tm-page-title{font-size:42px;line-height:1.08;font-weight:850;letter-spacing:-.055em;margin:0;color:var(--text)}
+.tm-page-subtitle{font-size:15px;color:var(--text2);margin-top:12px;max-width:620px}
+.tm-command-search{width:286px;padding:13px 18px;border-radius:999px;background:rgba(255,255,255,.78);box-shadow:var(--shadow-soft);color:#94a3b8;font-size:14px}
+.tm-metric-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin-bottom:22px}
+.tm-metric-card{background:rgba(255,255,255,.78);border:1px solid rgba(255,255,255,.82);border-radius:28px;padding:22px 24px;box-shadow:var(--shadow-soft)}
+.tm-metric-label{font-size:13px;color:#64748b;font-weight:700}
+.tm-metric-value{font-size:34px;line-height:1.1;font-weight:850;letter-spacing:-.05em;margin-top:7px}
+.tm-metric-note{display:inline-flex;margin-top:13px;padding:6px 11px;border-radius:999px;background:rgba(0,122,255,.10);color:#007aff;font-size:12px;font-weight:800}
+.tm-metric-note.green{background:rgba(52,199,89,.12);color:#199a42}
+.tm-metric-note.orange{background:rgba(255,149,0,.14);color:#b86b00}
+.tm-metric-note.red{background:rgba(255,59,48,.12);color:#d92d24}
+.tm-crm-grid{display:grid;grid-template-columns:minmax(0,1fr) 326px;gap:20px;align-items:start}
+.tm-glass-panel{background:rgba(255,255,255,.78);border:1px solid rgba(255,255,255,.82);border-radius:34px;padding:26px;box-shadow:var(--shadow);backdrop-filter:blur(24px)}
+.tm-panel-title{font-size:23px;font-weight:850;letter-spacing:-.04em;margin-bottom:18px}
+.tm-stage-bars{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:14px;align-items:end;min-height:270px}
+.tm-stage-bar{display:flex;flex-direction:column;justify-content:flex-end;gap:10px;min-height:250px}
+.tm-stage-track{height:190px;border-radius:999px;background:rgba(226,232,240,.72);position:relative;overflow:hidden}
+.tm-stage-fill{position:absolute;left:0;right:0;bottom:0;border-radius:999px;background:linear-gradient(180deg,#9cd0ff,#007aff);min-height:18px}
+.tm-stage-name{font-size:12px;color:#64748b;font-weight:800;text-align:center}
+.tm-stage-count{font-size:20px;font-weight:850;text-align:center;color:#0b1220}
+.tm-focus-card{background:#0b1220;color:#fff;border-radius:34px;padding:26px;box-shadow:0 26px 56px rgba(15,23,42,.22);margin-bottom:18px}
+.tm-focus-card .tm-kicker{font-size:13px;color:#cbd5e1;font-weight:800;margin-bottom:14px}
+.tm-focus-brand{font-size:29px;line-height:1.05;font-weight:850;letter-spacing:-.05em;margin-bottom:12px}
+.tm-focus-body{font-size:14px;line-height:1.65;color:#cbd5e1}
+.tm-ai-panel{background:linear-gradient(145deg,rgba(255,255,255,.94),rgba(232,244,255,.88));border-radius:34px;padding:24px;box-shadow:var(--shadow-soft)}
+.tm-ai-chip{display:inline-flex;margin-top:18px;padding:8px 12px;border-radius:999px;background:rgba(0,122,255,.10);color:#007aff;font-size:12px;font-weight:800}
+.tm-crm-tabs{display:flex;gap:8px;margin:22px 0 16px;flex-wrap:wrap}
+.crm-tab{border-radius:999px!important;border:1px solid rgba(148,163,184,.20)!important;background:rgba(255,255,255,.72)!important;margin-bottom:0!important}
+.crm-tab.active{background:#0b1220!important;color:#fff!important;border-color:#0b1220!important}
+.toolbar-area{background:rgba(255,255,255,.70);border:1px solid rgba(255,255,255,.80);border-radius:30px;padding:18px;box-shadow:var(--shadow-soft)}
+.tm-filter-card{display:grid;gap:16px;margin-bottom:16px}
+.tm-filter-top{display:flex;align-items:center;justify-content:space-between;gap:16px}
+.tm-scope-tabs{display:inline-flex;gap:6px;padding:5px;border:1px solid rgba(148,163,184,.20);border-radius:22px;background:rgba(248,250,252,.82)}
+.tm-scope-tabs .btn{min-height:38px;border-radius:17px!important;padding:7px 16px;background:transparent;border:0;color:#64748b;box-shadow:none}
+.tm-scope-tabs .btn.active{background:#0b1220;color:#fff;box-shadow:0 12px 24px rgba(15,23,42,.16)}
+.tm-filter-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.tm-filter-main{display:grid;grid-template-columns:minmax(320px,1fr) 180px 180px;gap:12px;align-items:end}
+.tm-filter-field{display:grid;gap:7px}
+.tm-filter-field label{font-size:11px;font-weight:800;color:#64748b;letter-spacing:.02em;opacity:1;text-transform:none;margin:0}
+.tm-filter-search{max-width:none!important;width:100%}
+.tm-filter-search input{height:52px;padding-left:42px;border-radius:22px}
+.tm-filter-main select{width:100%!important;height:52px;border-radius:22px;padding:0 18px}
+.tm-stage-filter-strip{display:flex;gap:10px;flex-wrap:wrap;margin:4px 0 18px;padding:10px;border-radius:28px;background:rgba(255,255,255,.38)}
+.tm-stage-filter-strip .tag{min-height:40px;display:inline-flex;align-items:center;padding:8px 16px;font-size:13px;font-weight:800;border:1px solid rgba(148,163,184,.18);box-shadow:0 8px 18px rgba(15,23,42,.04)}
+.auth-overlay{
+  background:
+    radial-gradient(circle at 72% 22%, rgba(191,223,255,.72), transparent 28%),
+    radial-gradient(circle at 24% 78%, rgba(216,248,230,.72), transparent 26%),
+    linear-gradient(135deg,#f7faff,#eaf1fa);
+  overflow:hidden;
+}
+.auth-overlay::before{content:"";position:absolute;width:380px;height:380px;border-radius:50%;background:rgba(191,223,255,.46);right:13%;top:12%;filter:blur(2px)}
+.auth-overlay::after{content:"";position:absolute;width:340px;height:260px;border-radius:130px;background:rgba(216,248,230,.58);left:14%;bottom:8%;filter:blur(1px)}
+.auth-card{
+  position:relative;z-index:1;width:464px;border-radius:38px;padding:56px 60px;
+  background:rgba(255,255,255,.74);border:1px solid rgba(255,255,255,.82);
+  box-shadow:0 34px 90px rgba(15,23,42,.16);backdrop-filter:blur(28px);
+}
+.auth-card h1{text-align:left;font-size:38px;line-height:1.05;font-weight:850;letter-spacing:-.055em;margin-bottom:10px}
+.auth-card .auth-subtitle{text-align:left;font-size:16px;color:#64748b;margin-bottom:28px}
+.auth-card .auth-intro{font-size:16px;color:#475569;line-height:1.65;margin-bottom:30px}
+.auth-card input{height:56px;margin-bottom:14px;padding:0 18px;border-radius:18px}
+.auth-card .btn{height:56px;border-radius:28px;margin-top:10px;font-size:15px}
+.auth-card .auth-footnote{text-align:center;font-size:12px;color:#64748b;margin-top:22px}
+@media (max-width: 1100px){
+  #app{padding:12px;gap:12px}
+  .sidebar{width:230px;min-width:230px}
+  .tm-metric-grid,.grid-4{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .tm-crm-grid{grid-template-columns:1fr}
+}
+@media (max-width: 760px){
+  #app{display:block!important;overflow:auto;height:auto}
+  .sidebar{width:auto;min-width:0;margin-bottom:14px}
+  main{padding:12px}
+  .tm-page-hero{display:block}
+  .tm-command-search{width:100%;margin-top:16px}
+  .tm-metric-grid{grid-template-columns:1fr}
+  .tm-filter-top,.tm-filter-actions{align-items:stretch;flex-direction:column}
+  .tm-scope-tabs{display:grid;grid-template-columns:1fr;align-self:stretch}
+  .tm-filter-main{grid-template-columns:1fr}
+  .auth-card{width:calc(100vw - 32px);padding:38px 28px}
+}
 </style>
 </head>
 <body>
@@ -277,11 +465,12 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
 <div id="authOverlay" class="auth-overlay">
   <div class="auth-card">
     <h1>TuringMarket</h1>
-    <p style="text-align:center;font-size:13px;opacity:.5;margin-bottom:20px">商务工作平台</p>
+    <p class="auth-subtitle">图灵商务在线工作平台</p>
+    <p class="auth-intro">让客户资产、AI 策略、网红执行和团队管理在一个清晰工作台中流动。</p>
     <input type="text" id="loginUser" placeholder="用户名">
     <input type="password" id="loginPass" placeholder="密码" onkeydown="if(event.key==='Enter')doLogin()">
-    <button class="btn btn-primary" onclick="doLogin()">登录</button>
-    <p style="text-align:center;font-size:11px;opacity:.4;margin-top:16px">请使用管理员分配的账号登录</p>
+    <button class="btn btn-primary" onclick="doLogin()">进入工作台</button>
+    <p class="auth-footnote">商务团队专用入口 · AI 辅助生成需人工确认</p>
   </div>
 </div>
 
@@ -309,43 +498,110 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
 
 
 <!-- M0: Customer Library (纷享销客CRM Style) -->
-<div class="page" id="page-m0">
-<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+<div class="page active" id="page-m0">
+<div class="tm-page-shell">
+<div class="tm-page-hero">
   <div>
-    <h2 style="margin:0;display:inline">🚀 客户库</h2>
-    <span style="font-size:11px;opacity:.5;margin-left:12px">CRM · 线索→成交</span>
+    <div class="tm-eyebrow">客户库 CRM · 线索到成交</div>
+    <h2 class="tm-page-title">客户经营中枢</h2>
+    <p class="tm-page-subtitle" id="m0Stats">商务 SOP · 公海认领、客户跟进、商机推进和 AI 策略建议统一管理。</p>
   </div>
-  <div style="display:flex;gap:8px;align-items:center">
-    <span style="font-size:11px;background:var(--surface2);padding:4px 10px;border-radius:4px">📊 <strong id="m0_totalCustomers">0</strong> 客户</span>
-    <span style="font-size:11px;background:#fef3c7;padding:4px 10px;border-radius:4px">🌊 <strong id="m0_poolCount">0</strong> 公海</span>
-    <span style="font-size:11px;background:#dbeafe;padding:4px 10px;border-radius:4px">💰 ¥<strong id="m0_totalValue">0</strong></span>
+  <div class="tm-command-search">搜索客户、任务或知识库</div>
+</div>
+
+<div class="tm-metric-grid">
+  <div class="tm-metric-card">
+    <div class="tm-metric-label">总客户数</div>
+    <div class="tm-metric-value" id="m0_totalCustomers">0</div>
+    <span class="tm-metric-note">客户资产</span>
   </div>
+  <div class="tm-metric-card">
+    <div class="tm-metric-label">高意向客户</div>
+    <div class="tm-metric-value" id="m0_highIntentCount">0</div>
+    <span class="tm-metric-note green">优先跟进</span>
+  </div>
+  <div class="tm-metric-card">
+    <div class="tm-metric-label">公海池</div>
+    <div class="tm-metric-value" id="m0_poolCount">0</div>
+    <span class="tm-metric-note orange">可认领</span>
+  </div>
+  <div class="tm-metric-card">
+    <div class="tm-metric-label">商机金额</div>
+    <div class="tm-metric-value">¥<span id="m0_totalValue">0</span></div>
+    <span class="tm-metric-note red" id="m0_riskNote">需关注</span>
+  </div>
+</div>
+
+<div class="tm-crm-grid">
+  <section class="tm-glass-panel">
+    <div class="tm-panel-title">客户阶段漏斗</div>
+    <div class="tm-stage-bars" id="m0StageBars">
+      <div class="tm-stage-bar"><div class="tm-stage-track"><div class="tm-stage-fill" style="height:18%"></div></div><div class="tm-stage-name">公海池</div><div class="tm-stage-count">0</div></div>
+      <div class="tm-stage-bar"><div class="tm-stage-track"><div class="tm-stage-fill" style="height:18%"></div></div><div class="tm-stage-name">开发中</div><div class="tm-stage-count">0</div></div>
+      <div class="tm-stage-bar"><div class="tm-stage-track"><div class="tm-stage-fill" style="height:18%"></div></div><div class="tm-stage-name">需求确认</div><div class="tm-stage-count">0</div></div>
+      <div class="tm-stage-bar"><div class="tm-stage-track"><div class="tm-stage-fill" style="height:18%"></div></div><div class="tm-stage-name">方案/谈判</div><div class="tm-stage-count">0</div></div>
+      <div class="tm-stage-bar"><div class="tm-stage-track"><div class="tm-stage-fill" style="height:18%"></div></div><div class="tm-stage-name">成交/维护</div><div class="tm-stage-count">0</div></div>
+    </div>
+  </section>
+  <aside>
+    <div class="tm-focus-card">
+      <div class="tm-kicker">今日重点客户</div>
+      <div class="tm-focus-brand" id="m0FocusBrand">等待客户数据</div>
+      <div class="tm-focus-body" id="m0FocusBody">登录后系统会根据客户阶段和商机金额推荐优先跟进对象。</div>
+      <button class="btn btn-primary btn-sm" style="margin-top:20px" onclick="switchPage('m2')">生成策略</button>
+    </div>
+    <div class="tm-ai-panel">
+      <div class="tm-panel-title" style="font-size:21px;margin-bottom:12px">AI 洞察</div>
+      <div class="tm-focus-body" id="m0AiInsightText" style="color:#475569">系统会检测缺少下一步动作的客户，并建议生成跟进任务。</div>
+      <span class="tm-ai-chip">AI草稿 -> 人工确认 -> 最终生成</span>
+    </div>
+  </aside>
 </div>
 
 <!-- View Tabs -->
-<div style="display:flex;gap:0;border-bottom:2px solid var(--border);margin-bottom:12px">
-  <div class="crm-tab active" onclick="switchCrmView('pipeline')" style="padding:8px 16px;cursor:pointer;font-size:13px;border-bottom:2px solid #1a1a1a;margin-bottom:-2px">📊 客户列表</div>
-  <div class="crm-tab" onclick="switchCrmView('seapool')" style="padding:8px 16px;cursor:pointer;font-size:13px;color:var(--text2)">🌊 公海池（<span id="m0_seapoolTabCount">0</span>）</div>
-  <div class="crm-tab" onclick="switchCrmView('opportunities')" style="padding:8px 16px;cursor:pointer;font-size:13px;color:var(--text2)">💼 商机看板</div>
+<div class="tm-crm-tabs">
+  <div class="crm-tab active" onclick="switchCrmView('pipeline')" style="padding:10px 16px;cursor:pointer;font-size:13px">客户列表</div>
+  <div class="crm-tab" onclick="switchCrmView('seapool')" style="padding:10px 16px;cursor:pointer;font-size:13px;color:var(--text2)">公海池（<span id="m0_seapoolTabCount">0</span>）</div>
+  <div class="crm-tab" onclick="switchCrmView('opportunities')" style="padding:10px 16px;cursor:pointer;font-size:13px;color:var(--text2)">商机看板</div>
 </div>
 
 <!-- Search + Actions -->
-<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
-  <div class="search-box" style="flex:1;max-width:280px"><span class="search-icon">🔍</span><input id="custSearch" placeholder="搜索品牌/公司/联系人..." oninput="loadCustomers()"></div>
-  <select id="custStageFilter" onchange="loadCustomers()" style="width:110px"><option value="">全部阶段</option><option value="lead">开发中</option><option value="proposal">方案</option><option value="negotiation">谈判</option><option value="won">成交</option><option value="maintenance">维护</option></select>
-  <select id="custPriorityFilter" onchange="loadCustomers()" style="width:90px"><option value="">全部优先级</option><option value="high">高</option><option value="medium">中</option><option value="low">低</option></select>
-  <button class="btn btn-primary btn-sm" onclick="openAddCustomer()">+ 新增客户</button>
-  <button class="btn btn-sm" onclick="switchCrmView('seapool')">🌊 公海池</button>
+<div class="toolbar-area tm-filter-card">
+  <div class="tm-filter-top">
+    <div class="tm-scope-tabs" id="customerScopeTabs">
+      <button class="btn btn-sm cust-scope-btn active" data-scope="my" onclick="setCustomerScope('my')">我的客户</button>
+      <button class="btn btn-sm cust-scope-btn" data-scope="team" onclick="setCustomerScope('team')">团队客户</button>
+      <button class="btn btn-sm cust-scope-btn admin-only" data-scope="all" onclick="setCustomerScope('all')">全部客户</button>
+    </div>
+    <div class="tm-filter-actions">
+      <button class="btn btn-primary btn-sm" onclick="openAddCustomer()">+ 新增客户</button>
+      <button class="btn btn-sm" onclick="switchCrmView('seapool')">公海池</button>
+    </div>
+  </div>
+  <div class="tm-filter-main">
+    <div class="tm-filter-field">
+      <label>搜索客户</label>
+      <div class="search-box tm-filter-search"><span class="search-icon">🔍</span><input id="custSearch" placeholder="搜索品牌 / 公司 / 联系人..." oninput="loadCustomers()"></div>
+    </div>
+    <div class="tm-filter-field">
+      <label>阶段筛选</label>
+      <select id="custStageFilter" onchange="filterCustomers(this.value)"><option value="">全部阶段</option><option value="lead">开发中</option><option value="proposal">方案</option><option value="negotiation">谈判</option><option value="won">成交</option><option value="maintenance">维护</option></select>
+    </div>
+    <div class="tm-filter-field">
+      <label>优先级</label>
+      <select id="custPriorityFilter" onchange="loadCustomers()"><option value="">全部优先级</option><option value="high">高</option><option value="medium">中</option><option value="low">低</option></select>
+    </div>
+  </div>
 </div>
 
 <!-- Stage Filter Tags -->
-<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px" id="m0StageFilter">
-  <span class="tag active" onclick="filterCustomers('')">全部</span>
-  <span class="tag" onclick="filterCustomers('lead')">🔍 开发中</span>
-  <span class="tag" onclick="filterCustomers('proposal')">📝 方案</span>
-  <span class="tag" onclick="filterCustomers('negotiation')">🤝 谈判</span>
-  <span class="tag" onclick="filterCustomers('won')">✅ 成交</span>
-  <span class="tag" onclick="filterCustomers('maintenance')">🔄 维护</span>
+<div class="tm-stage-filter-strip" id="m0StageFilter">
+  <span class="tag active" data-stage="" data-label="全部" onclick="filterCustomers('')">全部</span>
+  <span class="tag" data-stage="lead" data-label="🔍 开发中" onclick="filterCustomers('lead')">🔍 开发中</span>
+  <span class="tag" data-stage="proposal" data-label="📝 方案" onclick="filterCustomers('proposal')">📝 方案</span>
+  <span class="tag" data-stage="negotiation" data-label="🤝 谈判" onclick="filterCustomers('negotiation')">🤝 谈判</span>
+  <span class="tag" data-stage="won" data-label="✅ 成交" onclick="filterCustomers('won')">✅ 成交</span>
+  <span class="tag" data-stage="maintenance" data-label="🔄 维护" onclick="filterCustomers('maintenance')">🔄 维护</span>
 </div>
 
 <!-- Pipeline Table View -->
@@ -367,8 +623,31 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
 </div>
 
 <!-- Opportunities Kanban -->
-<div id="crmOpportunityView" style="display:none;overflow-x:auto;padding-bottom:20px">
-  <div style="display:flex;gap:10px;min-width:900px" id="oppKanbanColumns"></div>
+<div id="crmOpportunityView" style="display:none;padding-bottom:20px">
+  <!-- Opp-specific filters -->
+  <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
+    <label style="font-size:12px;font-weight:600;opacity:.5;margin:0">商机筛选:</label>
+    <input id="oppCustomerFilter" placeholder="客户品牌名..." style="width:160px;padding:6px 10px;border:1px solid var(--border);border-radius:6px 0 0 6px;font-size:12px;border-right:none" onkeyup="if(event.key==='Enter')loadOpportunities()">
+    <button class="btn btn-sm btn-outline" onclick="loadOpportunities()" style="border-radius:0 6px 6px 0;border-left:none">🔍</button>
+    <select id="oppStageFilter" onchange="loadOpportunities()" style="width:120px;padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px">
+      <option value="">全部阶段</option>
+      <option value="discovery">需求分析</option>
+      <option value="qualification">资格确认</option>
+      <option value="proposal">方案报价</option>
+      <option value="negotiation">谈判中</option>
+      <option value="won">已赢单</option>
+      <option value="lost">已输单</option>
+    </select>
+    <span id="oppCount" style="font-size:11px;opacity:.5"></span>
+  </div>
+  <div class="card" style="padding:0;overflow:hidden">
+    <div class="table-container" style="max-height:500px;overflow-y:auto">
+      <table>
+        <thead><tr><th>商机名称</th><th>客户</th><th>金额</th><th>阶段</th><th>概率</th><th>预计成交</th><th>操作</th></tr></thead>
+        <tbody id="oppTableBody"></tbody>
+      </table>
+    </div>
+  </div>
 </div>
 
 <!-- Duplicate Warning -->
@@ -381,6 +660,8 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
       <button class="btn btn-sm" onclick="dismissDup()">忽略</button>
     </div>
   </div>
+</div>
+
 </div>
 
 <!-- Add/Edit Modal -->
@@ -420,7 +701,7 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
 </div>
 
 <!-- M1: Brand Hub -->
-<div class="page active" id="page-m1">
+<div class="page" id="page-m1">
 <h2>行业品牌智库</h2>
 <p class="subtitle">1871个出海品牌 · 13大行业 · 189个细分标签 · AI数据补充 · 竞品对标</p>
 
@@ -437,7 +718,7 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
       <div class="search-box" style="flex:1;max-width:300px;margin-left:auto">
         <span class="search-icon">🔍</span>
-        <input id="brandSearch" placeholder="Search brands..." oninput="filterBrands()">
+        <input id="brandSearch" placeholder="🔍 搜索品牌名 / 行业 / 中文名..." oninput="filterBrands()">
       </div>
       <button class="btn btn-sm" onclick="searchNewBrand()">AI Search</button>
       <button class="btn btn-sm" onclick="exportBrandCSV()">Export CSV</button>
@@ -497,16 +778,16 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
 <div id="m3s1">
   <div class="card">
     <h3>📤 上传客户需求文件</h3>
-    <p style="font-size:12px;opacity:.6;margin-bottom:8px">支持 XLSX / CSV / JSON / TXT / MD。AI 将自动识别品牌、产品、预算、目标市场等关键信息。</p>
+    <p style="font-size:12px;opacity:.6;margin-bottom:8px">支持 PDF / DOCX / XLSX / XLSM / 图片格式；旧版 XLS 可上传但建议另存为 XLSX 以读取正文。AI 将自动识别品牌、产品、预算、目标市场等关键信息。</p>
     <div class="file-upload" id="demandDropZone" onclick="document.getElementById('demandFile').click()"
          ondragover="event.preventDefault();this.style.borderColor='#1a1a1a';this.style.background='#f5f5f4'"
          ondragleave="event.preventDefault();this.style.borderColor='';this.style.background=''"
          ondrop="event.preventDefault();this.style.borderColor='';this.style.background='';handleDemandDrop(event)">
       <div class="upload-icon">📄</div>
       <div class="upload-text">拖拽需求文件到此处，或点击上传</div>
-      <div style="font-size:11px;opacity:.4;margin-top:4px">XLSX · CSV · JSON · TXT · MD</div>
+      <div style="font-size:11px;opacity:.4;margin-top:4px">PDF · DOCX · PPTX · XLSX/XLSM · XLS(元数据兜底) · JPG · PNG</div>
     </div>
-    <input type="file" id="demandFile" accept=".xlsx,.csv,.json,.txt,.md" style="display:none" onchange="handleDemandFile(event)">
+    <input type="file" id="demandFile" accept=".pdf,.docx,.pptx,.xlsx,.xls,.xlsm,.txt,.csv,.md,.json,.jpg,.jpeg,.png,.webp,.bmp,.tif,.tiff" style="display:none" onchange="handleDemandFile(event)">
     <div id="demandFileStatus" style="font-size:11px;opacity:.5;margin-top:8px"></div>
     <div style="margin-top:16px;text-align:center">
       <button class="btn btn-primary" id="btnAnalyzeAI" onclick="analyzeDemandAI()" disabled>🤖 AI 分析需求</button>
@@ -550,9 +831,26 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
   </div>
   <div class="card" style="margin-top:16px" id="templateCard">
     <h3>📝 生成方案</h3>
+    <div style="margin-bottom:12px;padding:14px;background:rgba(255,255,255,.72);border:1px solid var(--border);border-radius:18px">
+      <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:8px">
+        <div>
+          <strong>🧠 PPT 汇报要求与补充材料</strong>
+          <div style="font-size:12px;color:var(--text2);margin-top:4px">支持多轮补充要求、修改建议、追加页面说明，也可上传 PDF / Word / PPTX / Excel / 文本文件作为参考材料。</div>
+        </div>
+        <button class="btn btn-outline btn-sm" onclick="clearPPTContext()">清空要求</button>
+      </div>
+      <div id="pptContextThread" style="min-height:42px;max-height:180px;overflow-y:auto;margin:10px 0;padding:10px;background:rgba(248,250,252,.9);border-radius:14px;font-size:12px;color:var(--text2)">暂无补充要求。可在下方输入你希望 PPT 增加、删减、强化或修改的内容。</div>
+      <textarea id="pptContextInput" placeholder="例如：请新增一页竞品对比；强化 Elite 300 的户外应急场景；预算页要拆到达人层级；整体语气更像乙方正式提案..." style="width:100%;min-height:78px;resize:vertical;margin-bottom:8px"></textarea>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <button class="btn btn-primary btn-sm" onclick="addPPTInstruction()">提交要求</button>
+        <button type="button" class="btn btn-outline btn-sm" id="btnUploadPPTContextFile" onclick="document.getElementById('pptContextFile').click()">上传补充文件</button>
+        <input type="file" id="pptContextFile" accept=".pdf,.docx,.pptx,.xlsx,.xlsm,.txt,.csv,.md,.json,.jpg,.jpeg,.png,.webp,.bmp,.tif,.tiff" onchange="handlePPTContextFile(event)" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0">
+        <span id="pptContextStatus" style="font-size:12px;color:var(--text2)">生成 PPT 时会自动带入这些上下文。</span>
+      </div>
+    </div>
     <button class="btn btn-primary" style="width:100%" onclick="generateProposal()">🚀 自动生成方案</button>
     <button class="btn btn-outline btn-sm" style="width:100%;margin-top:8px" onclick="copyProposal()">📋 复制方案</button>
-    <button class="btn btn-primary btn-sm" id="btnGenPPT" style="width:100%;margin-top:8px;background:#635bff" onclick="generateHTMLPPT()">📊 生成 HTML PPT (reveal.js)</button>
+    <button class="btn btn-primary btn-sm" id="btnGenPPT" style="width:100%;margin-top:8px;background:#635bff" onclick="generateHTMLPPT()">📊 生成 / 修改 PPT</button>
       <div id="proposalOutput" style="margin-top:12px;padding:16px;background:var(--surface2);border-radius:8px;font-size:12px;white-space:pre-wrap;max-height:400px;overflow-y:auto"></div>
     <div id="aiWorkNotes" style="margin-top:12px;padding:12px;background:#fefce8;border-radius:8px;font-size:11px;opacity:.8;display:none"></div>
   </div>
@@ -593,7 +891,7 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
     <div class="card">
       <h3>📤 网红数据导入</h3>
       <p style="font-size:12px;opacity:.6;margin-bottom:16px">支持 CSV / JSON / XLS / XLSX 格式，拖拽或点击上传</p>
-      <div class="file-upload" id="infDropZone" onclick="document.getElementById('infFile').click()" 
+      <div class="file-upload" id="infDropZone" onclick="document.getElementById('infFile').click()"
            ondragover="event.preventDefault();this.style.borderColor='#1a1a1a';this.style.background='#f5f5f4'"
            ondragleave="event.preventDefault();this.style.borderColor='';this.style.background=''"
            ondrop="event.preventDefault();this.style.borderColor='';this.style.background='';handleDrop(event)">
@@ -647,6 +945,132 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
   </div>
 </div>
 </div>
+
+<!-- WORKFLOW DESIGNER -->
+<div class="page" id="page-workflow-designer">
+<div class="wf-designer-container">
+  <div class="wf-toolbar">
+    <input id="wf-template-name" placeholder="流程模板名称" style="width:220px;font-size:13px">
+    <span style="font-size:12px;color:#777">ID: <span id="wf-template-id"></span></span>
+    <button onclick="wfSaveTemplate()">保存模板</button>
+    <button onclick="wfPublishTemplate()">发布</button>
+    <button onclick="wfUndo()">撤销</button>
+    <button onclick="wfRedo()">重做</button>
+    <button onclick="wfClearCanvas()">清空</button>
+  </div>
+  <div style="display:flex;min-height:560px;border:1px solid #eee;border-radius:10px;overflow:hidden;background:#fff">
+    <div class="wf-toolbox">
+      <div class="wf-toolbox-title">节点</div>
+      <div class="wf-toolbox-group">
+        <div class="wf-node-palette" draggable="true" data-type="start">开始</div>
+        <div class="wf-node-palette" draggable="true" data-type="task">任务</div>
+        <div class="wf-node-palette" draggable="true" data-type="approval">审批</div>
+        <div class="wf-node-palette" draggable="true" data-type="condition">条件</div>
+        <div class="wf-node-palette" draggable="true" data-type="timer">定时器</div>
+        <div class="wf-node-palette" draggable="true" data-type="end">结束</div>
+      </div>
+    </div>
+    <div class="wf-canvas-wrapper" id="wf-canvas-wrapper">
+      <div class="wf-canvas-empty" id="wf-canvas-empty">拖拽左侧节点到画布开始设计流程</div>
+      <svg id="wf-svg-canvas">
+        <defs>
+          <marker id="wf-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#666"></path>
+          </marker>
+        </defs>
+        <g id="wf-edges-layer"></g>
+        <g id="wf-nodes-layer"></g>
+        <line id="wf-connection-line" style="display:none;stroke:#2196F3;stroke-width:2;stroke-dasharray:4 4"></line>
+      </svg>
+    </div>
+    <div class="wf-property-panel">
+      <div class="wf-prop-header">属性面板</div>
+      <div id="wf-prop-content" style="padding:16px;font-size:13px;color:#888">选择节点或连线后编辑属性</div>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- WORKFLOW TEMPLATES -->
+<div class="page" id="page-workflow-templates">
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+  <div>
+    <h2 style="margin:0">📋 流程模板</h2>
+    <p class="subtitle">管理商务流程模板，支持编辑、发布和删除</p>
+  </div>
+  <button class="btn btn-primary btn-sm" onclick="switchPage('workflow-designer')">+ 新建流程</button>
+</div>
+<div class="card" style="padding:0;overflow:hidden">
+  <table class="wf-table">
+    <thead><tr><th>模板名称</th><th>模块</th><th>分类</th><th>版本</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead>
+    <tbody id="wf-templates-body"></tbody>
+  </table>
+</div>
+</div>
+
+<!-- WORKFLOW INSTANCES -->
+<div class="page" id="page-workflow-instances">
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+  <div>
+    <h2 style="margin:0">⚡ 流程实例</h2>
+    <p class="subtitle">查看客户、方案和自动化触发出的流程实例</p>
+  </div>
+  <select id="wf-inst-filter-status" onchange="wfLoadInstances()" style="width:140px">
+    <option value="">全部状态</option>
+    <option value="running">运行中</option>
+    <option value="completed">已完成</option>
+    <option value="paused">已暂停</option>
+    <option value="cancelled">已取消</option>
+  </select>
+</div>
+<div class="card" style="padding:0;overflow:hidden">
+  <table class="wf-table">
+    <thead><tr><th>ID</th><th>模板</th><th>业务类型</th><th>业务ID</th><th>状态</th><th>当前节点</th><th>创建时间</th><th>操作</th></tr></thead>
+    <tbody id="wf-instances-body"></tbody>
+  </table>
+</div>
+</div>
+
+<!-- WORKFLOW TASKS -->
+<div class="page" id="page-workflow-tasks">
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+  <div>
+    <h2 style="margin:0">📌 商务待办中心</h2>
+    <p class="subtitle">集中处理阶段跟进、AI 方案确认、审批和自动化任务</p>
+  </div>
+  <button class="btn btn-sm" onclick="wfLoadTasks()">刷新</button>
+</div>
+<div class="wf-task-summary">
+  <div class="stat"><div class="stat-value" id="wfTaskTotal">0</div><div class="stat-label">当前结果</div></div>
+  <div class="stat"><div class="stat-value" id="wfTaskPending">0</div><div class="stat-label">待处理</div></div>
+  <div class="stat"><div class="stat-value" id="wfTaskOverdue">0</div><div class="stat-label">已逾期</div></div>
+  <div class="stat"><div class="stat-value" id="wfTaskDone">0</div><div class="stat-label">已完成</div></div>
+</div>
+<div class="wf-task-toolbar">
+  <select id="wf-task-filter" onchange="wfLoadTasks()">
+    <option value="">全部状态</option>
+    <option value="pending">待处理</option>
+    <option value="completed">已完成</option>
+    <option value="rejected">已驳回</option>
+  </select>
+  <select id="wf-task-business-filter" onchange="wfLoadTasks()">
+    <option value="">全部业务</option>
+    <option value="customer">客户</option>
+    <option value="demand">需求</option>
+    <option value="proposal">方案</option>
+    <option value="collaboration">合作</option>
+  </select>
+  <select id="wf-task-overdue-filter" onchange="wfLoadTasks()">
+    <option value="">全部时效</option>
+    <option value="1">只看逾期</option>
+  </select>
+  <input id="wf-task-search" placeholder="搜索任务/流程/业务ID" onkeydown="if(event.key==='Enter')wfLoadTasks()">
+  <button class="btn btn-sm" onclick="wfLoadTasks()">筛选</button>
+  <button class="btn btn-sm btn-outline" onclick="wfResetTaskFilters()">重置</button>
+</div>
+<div id="wf-tasks-list"></div>
+</div>
+
 <!-- ADMIN DASHBOARD (v8.0) -->
 <div class="page" id="page-admin">
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
@@ -655,7 +1079,7 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
     <button class="btn btn-sm" onclick="switchAdminTab('overview')">📊 概览</button>
     <button class="btn btn-sm" onclick="switchAdminTab('users')">👥 用户</button>
     <button class="btn btn-sm" onclick="switchAdminTab('knowledge')">📚 知识库</button>
-    <button class="btn btn-sm" onclick="switchAdminTab('ai-chat')">💬 AI 对话</button>
+    <button class="btn btn-sm" onclick="switchAdminTab('ai-audit')">🤖 AI对话</button>
     <button class="btn btn-sm" onclick="switchAdminTab('tokens')">🔋 Token</button>
   </div>
 </div>
@@ -663,18 +1087,28 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
 <!-- Overview Tab -->
 <div id="admin-tab-overview" style="display:block">
   <div class="grid grid-4" style="margin-bottom:16px">
-    <div class="stat"><div class="stat-value" id="ad_totalUsers">-</div><div class="stat-label">Active Users</div></div>
-    <div class="stat"><div class="stat-value" id="ad_totalCustomers">-</div><div class="stat-label">Total Customers</div></div>
-    <div class="stat"><div class="stat-value" id="ad_totalDemands">-</div><div class="stat-label">Demands</div></div>
-    <div class="stat"><div class="stat-value" id="ad_totalTokens">-</div><div class="stat-label">Tokens Used</div></div>
+    <div class="stat"><div class="stat-value" id="ad_totalCustomers">-</div><div class="stat-label">客户总数</div></div>
+    <div class="stat"><div class="stat-value" id="ad_activeCustomers">-</div><div class="stat-label">推进中客户</div></div>
+    <div class="stat"><div class="stat-value" id="ad_pipelineValue">-</div><div class="stat-label">商机金额</div></div>
+    <div class="stat"><div class="stat-value" id="ad_taskRate">-</div><div class="stat-label">待办完成率</div></div>
   </div>
-  <div class="card" style="margin-bottom:16px">
-    <h3>📊 Sales Pipeline</h3>
-    <div id="ad_pipelineTable"></div>
+  <div class="grid grid-4" style="margin-bottom:16px">
+    <div class="stat"><div class="stat-value" id="ad_totalUsers">-</div><div class="stat-label">活跃成员</div></div>
+    <div class="stat"><div class="stat-value" id="ad_totalDemands">-</div><div class="stat-label">需求数</div></div>
+    <div class="stat"><div class="stat-value" id="ad_aiArtifacts">-</div><div class="stat-label">AI策略/方案</div></div>
+    <div class="stat"><div class="stat-value" id="ad_totalTokens">-</div><div class="stat-label">Token消耗</div></div>
   </div>
   <div class="grid grid-2" style="margin-bottom:16px">
-    <div class="card"><h3>📈 Stage Distribution</h3><div id="ad_stageChart"></div></div>
-    <div class="card"><h3>🏆 Top Performers</h3><div id="ad_topPerformers"></div></div>
+    <div class="card"><h3>📊 客户阶段漏斗</h3><div id="ad_customerStageChart"></div></div>
+    <div class="card"><h3>💼 商机阶段分布</h3><div id="ad_opportunityStageChart"></div></div>
+  </div>
+  <div class="grid grid-2" style="margin-bottom:16px">
+    <div class="card"><h3>📌 待办健康度</h3><div id="ad_taskHealth"></div></div>
+    <div class="card"><h3>🧠 AI与知识库</h3><div id="ad_knowledgeHealth"></div></div>
+  </div>
+  <div class="grid grid-2" style="margin-bottom:16px">
+    <div class="card"><h3>🏆 团队商务排行</h3><div id="ad_teamPerformance"></div></div>
+    <div class="card"><h3>🕒 最近平台活动</h3><div id="ad_recentActivity"></div></div>
   </div>
 </div>
 
@@ -707,67 +1141,29 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
   <div class="card">
     <h3>📚 Knowledge Base</h3>
     <p style="font-size:12px;opacity:.6;margin-bottom:12px">Auto-archived from customer creation, strategy generation, and demand analysis</p>
-    <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
-      <input id="kbSearch" placeholder="Search knowledge base..." oninput="loadKnowledgeBase()" style="width:260px">
-      <select id="kbSourceFilter" onchange="loadKnowledgeBase()" style="width:160px">
-        <option value="">All sources</option>
-        <option value="knowledge_upload">Upload</option>
-        <option value="obsidian">Obsidian</option>
-        <option value="crm_customer">CRM customer</option>
-        <option value="brand_profile">Brand</option>
-        <option value="influencer_import">Influencer import</option>
-        <option value="ai_message">AI summary</option>
-        <option value="proposal_draft_request">Proposal draft</option>
-      </select>
-      <select id="kbVisibilityFilter" onchange="loadKnowledgeBase()" style="width:140px">
-        <option value="">All visibility</option>
-        <option value="private">Private</option>
-        <option value="team">Team</option>
-        <option value="public">Public</option>
-      </select>
-    </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
-      <div style="border:1px solid var(--border);border-radius:6px;padding:10px">
-        <div style="font-size:12px;font-weight:700;margin-bottom:8px">Obsidian Import</div>
-        <input id="obsidianRootPath" value="D:\主盘\图灵集市" style="width:100%;margin-bottom:8px">
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <button class="btn btn-sm" onclick="syncObsidianKnowledge(true)">Dry Run</button>
-          <button class="btn btn-sm btn-primary" onclick="syncObsidianKnowledge(false)">Sync</button>
-        </div>
-      </div>
-      <div style="border:1px solid var(--border);border-radius:6px;padding:10px">
-        <div style="font-size:12px;font-weight:700;margin-bottom:8px">Platform Vault</div>
-        <input id="vaultRootPath" value="D:\图灵商务在线平台" style="width:100%;margin-bottom:8px">
-        <button class="btn btn-sm btn-primary" onclick="exportKnowledgeVault()">Export Markdown</button>
-      </div>
-    </div>
-    <div id="kbSyncResult" style="font-size:12px;opacity:.75;margin-bottom:10px"></div>
+    <input id="kbSearch" placeholder="Search knowledge base..." oninput="loadKnowledgeBase()" style="margin-bottom:12px;width:300px">
     <div id="kbEntries" style="max-height:400px;overflow-y:auto"></div>
   </div>
 </div>
 
-<!-- AI Chat Audit Tab -->
-<div id="admin-tab-ai-chat" style="display:none">
+<!-- AI Audit Tab -->
+<div id="admin-tab-ai-audit" style="display:none">
   <div class="card">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:8px;flex-wrap:wrap">
-      <h3 style="margin:0">💬 AI 对话审计</h3>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <input id="aiAuditSearch" placeholder="Search messages..." oninput="loadAdminAiConversations()" style="width:220px">
-        <input id="aiAuditUser" placeholder="User ID" oninput="loadAdminAiConversations()" style="width:90px">
-        <select id="aiAuditModule" onchange="loadAdminAiConversations()" style="width:150px">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap">
+      <h3 style="margin:0">🤖 AI Conversation Audit</h3>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <input id="ad_aiAuditSearch" placeholder="Search conversations..." onkeydown="if(event.key==='Enter')loadAdminAIAudit()" style="width:240px;font-size:12px">
+        <select id="ad_aiAuditModule" onchange="loadAdminAIAudit()" style="font-size:12px">
           <option value="">All modules</option>
           <option value="assistant">Assistant</option>
           <option value="strategy">Strategy</option>
           <option value="proposal">Proposal</option>
-          <option value="demand_analysis">Demand</option>
-          <option value="brand_enrich">Brand enrich</option>
         </select>
+        <button class="btn btn-sm" onclick="loadAdminAIAudit()">Refresh</button>
       </div>
     </div>
-    <div class="grid grid-2">
-      <div id="aiAuditList" style="max-height:460px;overflow-y:auto;border-right:1px solid var(--border);padding-right:12px"></div>
-      <div id="aiAuditDetail" style="max-height:460px;overflow-y:auto;padding-left:4px"><p style="opacity:.5">Select a conversation</p></div>
-    </div>
+    <div id="ad_aiAuditList" style="max-height:480px;overflow-y:auto"></div>
+    <div id="ad_aiAuditDetail" style="margin-top:12px"></div>
   </div>
 </div>
 
@@ -802,13 +1198,22 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
 </div>
 
 <!-- Customer Detail Sidebar -->
-<div class="sidebar-overlay" id="custDetailOverlay" style="display:none"></div>
+<div class="sidebar-overlay" id="custDetailOverlay" style="display:none" onclick="closeCustomerDetail()"></div>
 <div class="detail-sidebar" id="custDetailSidebar">
   <div class="sidebar-header">
     <h3 id="custDetailTitle">客户详情</h3>
     <button class="modal-close" onclick="closeCustomerDetail()">&times;</button>
   </div>
   <div class="sidebar-body" id="custDetailBody"></div>
+</div>
+
+<!-- Workflow Detail Modal -->
+<div class="wf-modal" id="wf-instance-modal" style="display:none" onclick="if(event.target===this)this.style.display='none'">
+  <div class="wf-modal-content" style="width:760px;max-width:92vw">
+    <button class="wf-modal-close" onclick="document.getElementById('wf-instance-modal').style.display='none'">&times;</button>
+    <h3 id="wf-instance-modal-title">流程详情</h3>
+    <div id="wf-instance-modal-body"></div>
+  </div>
 </div>
 
 <!-- Opportunity Modal -->
@@ -839,20 +1244,19 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
     </div>
   </div>
 </div>
-
-<!-- Opportunity Table -->
-<div id="oppTable" style="display:none">
-  <div class="card" style="padding:0;overflow:hidden">
-    <div class="table-container" style="max-height:500px;overflow-y:auto">
-      <table>
-        <thead><tr><th>商机名称</th><th>客户</th><th>金额</th><th>阶段</th><th>概率</th><th>预计成交</th><th>操作</th></tr></thead>
-        <tbody id="oppTableBody"></tbody>
-      </table>
+  <!-- Confirm Dialog (center of page) -->
+  <div class="modal-overlay" id="confirmDialogOverlay" style="display:none">
+    <div class="modal" style="width:400px;text-align:center">
+      <h3 id="confirmDialogTitle">确认</h3>
+      <p id="confirmDialogMessage" style="margin:16px 0;font-size:14px;color:#555"></p>
+      <div style="display:flex;gap:12px;justify-content:center">
+        <button class="btn btn-primary" id="confirmDialogOk">确定</button>
+        <button class="btn btn-outline" id="confirmDialogCancel">取消</button>
+      </div>
     </div>
   </div>
-</div>
 
-<script src="app.js?v=20260608"></script>
-<script src="ppt.js?v=20260608"></script>
+<script src="app.js?v=20260630authupload"></script>
+<script src="ppt.js?v=20260630v914lightdeck"></script>
 </body>
 </html>

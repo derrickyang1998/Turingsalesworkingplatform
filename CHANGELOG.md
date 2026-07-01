@@ -1,4 +1,32 @@
-﻿# Changelog — TuringMarket 图灵商务在线工作平台
+# Changelog — TuringMarket 图灵商务在线工作平台
+## v0.2.3-latest-ui-knowledge-bridge (2026-07-01) — 最新 PPT/UI 基线恢复与知识库桥接
+
+### 🧯 回退事故修复
+- 根因：上一轮知识库底座部署使用 `在线商务平台-github-sync/platform` 的旧前端作为发布基线，覆盖了 2026-06-30 在 `海外品牌推广-红人营销-图灵/platform` 完成的最新 PPT/UI 文件。
+- 恢复最新 `index.html`、`app.js`、`ppt.js` 基线，保留 v9.14 light deck、PPT 汇报补充材料、方案编辑器、HTML/PPTX 生成等最新界面能力。
+- 新增后端兼容接口，确保最新界面不再依赖旧直连逻辑：`/api/demand/parse-file`、`/api/ai/strategy`、`/api/ai/demand-analysis`、`/api/ai/ppt-outline`、`/api/knowledge/similar`、`/api/brands/enrich`。
+
+### 🤖 知识库与 AI 接入
+- M5 AI 助手改为统一调用 `/api/ai/chat`，对话、回复、知识引用和联网来源进入后端会话表，管理员可审计。
+- Admin 增加 AI 对话审计 tab，可查看全平台对话、消息、token、知识引用和联网来源。
+- 品牌补全改为后端 DeepSeek/Tavily 路径，移除前端 DeepSeek key/URL，失败时返回保底结构以保持界面可用。
+- 需求文件、知识库上传、PPT outline 生成接入统一解析与知识归档，支持 TXT/MD/CSV/JSON/XLSX/XLSM/XLS/PDF/DOCX/PPTX/图片降级解析。
+
+### 🔐 安全与兼容
+- 修复最新版前端带回的旧固定管理员密码文案；新增用户/重置密码继续使用后端一次性临时密码。
+- AI 策略输出先转义再做有限 markdown 渲染，避免模型/知识库内容被作为 HTML 执行。
+- `/api/brands/enrich` 接入 AI 限流和额度守卫；需求分析和 PPT outline 的 DeepSeek 调用写入 `token_usage`。
+- PPTX 下载兼容最新 UI 的 `outline.sections[].points` payload，后端会转换为旧 Python 生成器需要的 `sections[].items`。
+- CRM 客户列表和统计支持前端 `scope=my/team/all`，普通用户团队视图限定同部门，管理员可看全量。
+
+### ✅ 验证
+- `node --check platform/app.js; node --check platform/ppt.js; node --check platform/server/server.js; node --check platform/server/routes_brands.js; node --check platform/server/routes_customers.js; node --check platform/server/services/latest_ui_compat_service.js`
+- `npm test`：18/18 通过。
+- `git diff --check`：通过。
+- 前端密钥扫描：`DS_KEY`、`DS_URL`、`api.deepseek.com`、`sk-*` 未出现在公开前端文件。
+- 本地 API smoke：临时服务登录 `derrick`、AI 对话归档、Admin 对话列表、需求 TXT 解析、PPT outline、PPTX 生成、品牌补全通过；临时库写入 1 个 AI conversation、2 条 message、4 条知识记录、1 条 PPT 请求归档，PPTX 输出 38KB。
+
+---
 
 ## v0.2.1-knowledge-vault-bridge (2026-06-30) — 全模块知识归档与平台 Vault
 
