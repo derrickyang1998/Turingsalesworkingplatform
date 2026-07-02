@@ -12,6 +12,31 @@ var TM_BOILERPLATE = [
   "核心方法：60-30-10 预算模型 + 垂类达人内容资产沉淀"
 ];
 
+var TM_INTERNAL_MATERIAL_PATTERNS = [
+  /File name:/i,
+  /File type:/i,
+  /File size:/i,
+  /Parser note:/i,
+  /document parser returned no text/i,
+  /The file could not be fully parsed/i,
+  /Ask the user to confirm/i,
+  /No readable text found/i,
+  /PDF parser unavailable/i,
+  /Unsupported document type/i,
+  /OCR service required/i,
+  /required_not_used/i,
+  /补充文件解析降级/,
+  /文件名:/,
+  /文件类型:/,
+  /文件大小:/,
+  /降级原因:/,
+  /处理建议:/,
+  /解析状态:/,
+  /未成功提取正文/,
+  /仅有文件元数据/,
+  /仅文件信息/
+];
+
 async function generateHTMLPPT() {
   if (!curDemand && typeof syncCurDemandFromAnalysis === "function") syncCurDemandFromAnalysis();
   if (!curDemand) {
@@ -129,7 +154,9 @@ async function handlePPTContextFile(event) {
       extracted = await buildPPTContextFileFallback(file, "服务器未提取到正文");
       d.fallback = true;
     }
-    d.fallback = d.fallback || (d.needsOcr && !d.ocrUsed) || !hasReadableExtractedText(extracted);
+    var materialCheck = { name: file.name, type: file.type, text: extracted, preview: extracted };
+    var hasReadableMaterial = hasReadableExtractedText(extracted) || hasShortReadableTextMaterial(materialCheck);
+    d.fallback = ((d.fallback && !hasShortReadableTextMaterial(materialCheck)) || (d.needsOcr && !d.ocrUsed) || !hasReadableMaterial);
     pptContextFiles.push({
       name: d.fileName || file.name,
       text: extracted,
@@ -184,9 +211,39 @@ async function parsePPTContextFileOnServer(file) {
 }
 
 function hasReadableExtractedText(text) {
-  var s = String(text || "").trim();
+  var s = sanitizeClientMaterialText(text);
   if (s.length < 80) return false;
-  if (/No readable text found|PDF parser unavailable|Unsupported document type|OCR service required|required_not_used|解析降级/i.test(s)) return false;
+  if (hasInternalMaterialPattern(text) && s.length < 240) return false;
+  return true;
+}
+
+function hasInternalMaterialPattern(text) {
+  return TM_INTERNAL_MATERIAL_PATTERNS.some(function(pattern) { return pattern.test(String(text || "")); });
+}
+
+function sanitizeClientMaterialText(text) {
+  var source = String(text || "").replace(/\r/g, "\n");
+  var lines = source.split(/\n+/).map(function(line) {
+    return line.trim();
+  }).filter(function(line) {
+    if (!line) return false;
+    return !TM_INTERNAL_MATERIAL_PATTERNS.some(function(pattern) { return pattern.test(line); });
+  });
+  return lines.join(" ").replace(/\s+/g, " ").trim();
+}
+
+function isClientVisibleMaterial(file) {
+  if (!file) return false;
+  if (file.is_readable_material === true) return true;
+  return hasReadableExtractedText(file.text || file.preview || "") || hasShortReadableTextMaterial(file);
+}
+
+function hasShortReadableTextMaterial(file) {
+  if (!file || !isTextLikePPTContextFile(file)) return false;
+  var raw = String(file.text || file.preview || "");
+  var text = sanitizeClientMaterialText(raw).replace(/^可读取文本片段:\s*/i, "").trim();
+  if (text.length < 8) return false;
+  if (hasInternalMaterialPattern(raw) && !text) return false;
   return true;
 }
 
@@ -249,26 +306,28 @@ function buildPPTDeckContext() {
       blocks.push((idx + 1) + ". " + msg.text);
     });
   }
-  if (pptContextFiles.length) {
-    blocks.push("## 上传补充材料解析");
-    pptContextFiles.forEach(function(file, idx) {
-      blocks.push("### 文件 " + (idx + 1) + ": " + file.name);
-      blocks.push("解析状态: " + (file.parsed === false ? "未成功提取正文，仅有文件元数据" : "已成功提取正文"));
-      blocks.push(String(file.text || "").slice(0, 12000));
+  var readableFiles = pptContextFiles.filter(isClientVisibleMaterial);
+  if (readableFiles.length) {
+    blocks.push("## 上传补充材料正文");
+    readableFiles.forEach(function(file, idx) {
+      blocks.push("### 补充材料 " + (idx + 1));
+      blocks.push(sanitizeClientMaterialText(file.text || file.preview || "").slice(0, 12000));
     });
   }
   return blocks.join("\n\n");
 }
 
 function buildPPTMaterialReferences() {
-  return pptContextFiles.map(function(file, idx) {
-    var text = String(file.text || "").trim();
+  return pptContextFiles.filter(isClientVisibleMaterial).map(function(file, idx) {
+    var text = sanitizeClientMaterialText(file.text || file.preview || "");
     return {
       index: idx + 1,
-      name: file.name || ("补充文件 " + (idx + 1)),
-      parsed: file.parsed !== false && hasReadableExtractedText(text),
+      name: file.name || ("补充材料 " + (idx + 1)),
+      type: file.type || "",
+      is_readable_material: true,
+      parsed: true,
       chars: text.length,
-      preview: text.replace(/\s+/g, " ").slice(0, 900),
+      preview: text.slice(0, 900),
       text: text.slice(0, 4000)
     };
   });
@@ -299,12 +358,12 @@ function buildClientPPTFallback(demand, proposal, reason) {
   var wantsBudget = /预算|报价|budget|cost|达人层级|tier/i.test(context);
   var wantsExtraPage = /新增|添加|增加|add|page|页面/i.test(context);
   return {
-    title: brand + " " + product + " 海外红人营销 Campaign Deck",
+    title: brand + " " + product + " 海外红人营销方案",
     subtitle: "基于需求表、补充材料与对话要求生成的甲方汇报版 | TuringMarket",
     sections: [
-      { title: brand + " " + product + " 海外红人营销 Campaign Deck", type: "cover", points: [market + " | " + platforms + " | 乙方策略汇报版"], note: "TuringMarket" },
+      { title: brand + " " + product + " 海外红人营销方案", type: "cover", points: [market + " | " + platforms + " | 乙方策略汇报版"], note: "TuringMarket" },
       { title: "01 执行摘要：本次方案如何回应甲方需求", type: "content", points: ["客户目标: " + (notes || "围绕 " + product + " 获取海外红人内容与销售转化"), "产品核心: " + product + " / " + usp, "市场与平台: " + market + " / " + platforms, "预算口径: " + budget, "补充要求: " + (contextBrief || "未提供额外补充，按需求表生成")] },
-      { title: "02 对话要求与补充材料吸收", type: "content", points: customRequests.length ? customRequests : ["处理原则: 用户未提供可解析补充材料时，系统不虚构附件信息", "生成约束: 所有页面必须围绕品牌、产品、目标市场和预算落地", "交付格式: 固定 1920×1080 单文件 HTML deck，并支持 PPTX 下载"] },
+      { title: "02 补充要求与资料口径", type: "content", points: customRequests.length ? customRequests : ["资料口径: 仅引用已读取或已确认的品牌、产品、市场和预算信息", "策略约束: 所有页面必须围绕品牌、产品、目标市场和预算落地", "交付内容: 甲方汇报版策略方案、执行排期、达人筛选逻辑和复盘口径"] },
       { title: "03 产品理解：先把内容讲具体", type: "content", points: ["核心产品: " + product, "关键卖点: " + usp, "内容切入点: 用真实场景解释产品价值，而不是只做参数罗列", "甲方表达: " + (contextBrief || "待从需求表和补充材料进一步确认")] },
       { title: "04 目标用户与使用场景", type: "content", points: ["核心人群: " + inferDeckAudience(industry, product, notes + " " + context), "高频场景: 围绕" + product + "的真实使用场景拆分内容主题", "决策阻力: 价格、可靠性、真实体验和售后信任", "内容任务: 用达人体验降低潜客理解成本和信任成本"] },
       { title: wantsCompetitor ? "05 竞品对比与内容截流策略" : "05 策略主线：先建立信任，再放大转化", type: "content", points: wantsCompetitor ? ["对比目标: 围绕甲方指定竞品/同类产品建立差异化内容框架", "内容形式: YouTube 深度横评 + TikTok 场景短视频 + Instagram Reels 生活方式表达", "截流逻辑: 标题、脚本和评论区 FAQ 承接竞品搜索与购买前疑问", "交付物: 竞品对比脚本模板、禁用表达表、达人 brief"] : ["Phase 1 信任建立: 产品评测、开箱、真实使用场景演示", "Phase 2 场景扩散: 不同人群/场景的短视频素材矩阵", "Phase 3 转化承接: 优惠码、落地页、评论区答疑与二次投放", "核心原则: 达人内容服务销售转化，而不是只追求曝光"] },
@@ -322,12 +381,7 @@ function buildClientPPTFallback(demand, proposal, reason) {
 }
 
 function summarizeDeckContext(text) {
-  var s = String(text || "")
-    .replace(/File name:[^\n]+\n?/gi, "")
-    .replace(/File type:[^\n]+\n?/gi, "")
-    .replace(/File size:[^\n]+\n?/gi, "")
-    .replace(/\s+/g, " ")
-    .trim();
+  var s = sanitizeClientMaterialText(text);
   if (!s) return "";
   return s.slice(0, 240);
 }
@@ -337,7 +391,7 @@ function extractContextBullets(text, maxItems) {
   var lines = source.split(/\n+/).map(function(line) {
     return line.replace(/^[-*\d.、\s]+/, "").trim();
   }).filter(function(line) {
-    return line.length > 8 && !/^File (name|type|size):/i.test(line) && !/^解析状态/.test(line);
+    return line.length > 8 && !TM_INTERNAL_MATERIAL_PATTERNS.some(function(pattern) { return pattern.test(line); });
   });
   var picked = [];
   lines.forEach(function(line) {
@@ -378,6 +432,7 @@ function normalizePPTData(data) {
     title: String(data.title || demandTitle).trim(),
     subtitle: String(data.subtitle || "TuringMarket 海外增长提案").trim(),
     research: data.research || null,
+    knowledge_references: data.knowledge_references || data.kb_references || [],
     theme: data.theme || null,
     sections: sections
   };
@@ -462,8 +517,8 @@ function buildRevealHTML(data) {
 function buildFrontendSlidesDeckHTML(data) {
   var brand = curDemand?.brand || inferBrandFromTitle(data.title) || "CLIENT";
   var product = curDemand?.product || "";
-  var title = data.title || (brand + " 海外红人营销 Campaign Deck");
-  var subtitle = data.subtitle || "Strategy · Creator · Content · Conversion";
+  var title = data.title || (brand + " 海外红人营销方案");
+  var subtitle = data.subtitle || "策略 · 达人 · 内容 · 转化";
   var theme = selectPPTVisualTheme(data, curDemand || {});
   var sections = (data.sections || []).filter(function(sec) { return sec.type !== "cover"; });
   var research = data.research || null;
@@ -486,13 +541,13 @@ function buildFrontendSlidesDeckHTML(data) {
       });
     }
   }
-  var materials = Array.isArray(data.materials) ? data.materials : [];
+  var materials = (Array.isArray(data.materials) ? data.materials : []).filter(isClientVisibleMaterial);
   if (materials.length) {
     sections.push({
-      title: "补充材料引用：已进入本次方案",
+      title: "补充材料洞察：已进入本次方案",
       type: "content",
-      points: materials.map(function(file) {
-        return file.name + ": " + (file.parsed ? file.preview : "未读取正文，仅作为附件清单保留；如需引用正文，请配置 OCR 或粘贴关键内容");
+      points: materials.map(function(file, idx) {
+        return "材料洞察 " + (idx + 1) + ": " + sanitizeClientMaterialText(file.preview || file.text || "").slice(0, 360);
       })
     });
   }
@@ -557,9 +612,9 @@ function frontendSlidesCSS(theme) {
 function renderFrontendCoverSlide(brand, product, title, subtitle, theme) {
   var chips = coverChips({ title: title, subtitle: subtitle, sections: lastPPTOutline?.sections || [] }).slice(0, 4);
   if (theme && theme.name && chips.indexOf(theme.name) < 0) chips.push(theme.name);
-  while (chips.length < 4) chips.push(["甲方汇报版", "固定 1920×1080", "单文件 HTML", "可编辑 PPTX"][chips.length]);
+  while (chips.length < 4) chips.push(["甲方汇报版", "策略落地闭环", "达人执行排期", "数据复盘优化"][chips.length]);
   chips = chips.slice(0, 4);
-  return '<section class="slide cover active"><div class="chrome"><div class="brand-mark">TuringMarket</div><div class="page-code">CLIENT DECK</div></div><div class="cover-kicker">Influencer Marketing Strategy</div><h1 class="cover-title"><span class="grad">' + esc(brand) + '</span>' + (product ? ' ' + esc(product) : '') + '<br>' + esc(trimDeckTitle(title, brand, product)) + '</h1><div class="cover-sub">' + esc(subtitle) + '</div><div class="cover-grid">' + chips.map(function(c) { return '<div class="cover-tile"><strong>' + esc(metricLead(c) || "●") + '</strong><span>' + esc(c) + '</span></div>'; }).join('') + '</div><div class="footer"><span>Prepared for ' + esc(brand) + '</span><span>Confidential · 2026</span></div></section>';
+  return '<section class="slide cover active"><div class="chrome"><div class="brand-mark">TuringMarket 图灵集市</div><div class="page-code">客户汇报版</div></div><div class="cover-kicker">海外红人营销策略方案</div><h1 class="cover-title"><span class="grad">' + esc(brand) + '</span>' + (product ? ' ' + esc(product) : '') + '<br>' + esc(trimDeckTitle(title, brand, product)) + '</h1><div class="cover-sub">' + esc(subtitle) + '</div><div class="cover-grid">' + chips.map(function(c) { return '<div class="cover-tile"><strong>' + esc(metricLead(c) || "●") + '</strong><span>' + esc(c) + '</span></div>'; }).join('') + '</div><div class="footer"><span>为 ' + esc(brand) + ' 准备</span><span>客户汇报版 · 2026</span></div></section>';
 }
 
 function renderFrontendSlide(sec, page, total, brand) {
@@ -582,12 +637,12 @@ function renderFrontendResearch(points) {
   return '<div class="research-layout"><div class="research-main">'
     + main.map(function(p, idx) {
       var pair = splitPoint(p);
-      return '<article class="research-card"><div class="insight-index">SIGNAL ' + pad2(idx + 1) + '</div><div class="research-title">' + esc(pair.label) + '</div><div class="research-body">' + esc(pair.body) + '</div></article>';
+      return '<article class="research-card"><div class="insight-index">信号 ' + pad2(idx + 1) + '</div><div class="research-title">' + esc(pair.label) + '</div><div class="research-body">' + esc(pair.body) + '</div></article>';
     }).join('')
     + '</div><div class="research-side">'
     + rest.map(function(p, idx) {
       var pair = splitPoint(p);
-      return '<div class="source-row"><strong>' + esc(pair.label || ("SOURCE " + (idx + 1))) + '</strong><span>' + esc(pair.body || p) + '</span></div>';
+      return '<div class="source-row"><strong>' + esc(pair.label || ("来源 " + (idx + 1))) + '</strong><span>' + esc(pair.body || p) + '</span></div>';
     }).join('')
     + '</div></div>';
 }
@@ -629,24 +684,24 @@ function frontendSlidesScript() {
 function buildCampaignReportHTML(data) {
   var brand = curDemand?.brand || inferBrandFromTitle(data.title) || "CLIENT";
   var product = curDemand?.product || "";
-  var title = data.title || (brand + " 海外红人营销 Campaign");
+  var title = data.title || (brand + " 海外红人营销方案");
   var subtitle = data.subtitle || "面向甲方汇报的策略、执行与复盘方案";
   data = prepareCampaignReportData(data);
   var sections = (data.sections || []).filter(function(sec) { return (sec.type || "") !== "cover"; });
   if (!sections.length) sections = normalizePPTData(data).sections.filter(function(sec) { return sec.type !== "cover"; });
-  var materials = Array.isArray(data.materials) ? data.materials : [];
+  var materials = (Array.isArray(data.materials) ? data.materials : []).filter(isClientVisibleMaterial);
   var nav = ['<a href="#cover">封面</a>'];
   sections.forEach(function(_, idx) { nav.push('<a href="#s' + pad2(idx + 1) + '">' + pad2(idx + 1) + '</a>'); });
-  if (materials.length) nav.push('<a href="#materials">材料</a>');
+  if (materials.length) nav.push('<a href="#materials">材料洞察</a>');
   nav.push('<a href="#closing">结尾</a>');
 
   var h = '<!DOCTYPE html>\n<html lang="zh-CN">\n<head>\n<meta charset="UTF-8">\n<meta name="viewport" content="width=device-width, initial-scale=1.0">\n';
   h += '<title>' + esc(title) + '</title>\n<style>\n' + campaignReportCSS() + '\n</style>\n</head>\n<body>\n';
-  h += '<nav><div class="nav-brand"><span>' + esc(brand) + '</span> · CAMPAIGN REPORT <span style="font-size:10px;opacity:.6;font-weight:400">by TuringMarket</span></div><div class="nav-links">' + nav.join('') + '</div></nav>\n';
-  h += '<div class="cursor-orb" id="cursorOrb"></div><div class="confidential">Confidential Proposal · TuringMarket</div>\n';
-  h += '<section id="cover"><div class="orb orb-1"></div><div class="fade-in"><div class="cover-eyebrow">INFLUENCER MARKETING STRATEGY</div></div><div class="fade-in delay-1"><h1 class="cover-title"><span class="accent-grad">' + esc(brand) + '</span>' + (product ? ' ' + esc(product) : '') + '<br>' + esc(trimDeckTitle(title, brand, product)) + '</h1></div><div class="fade-in delay-2"><p class="cover-sub">' + esc(subtitle) + '</p></div>';
+  h += '<nav><div class="nav-brand"><span>' + esc(brand) + '</span> · 海外红人营销方案 <span style="font-size:10px;opacity:.68;font-weight:500">图灵集市 TuringMarket</span></div><div class="nav-links">' + nav.join('') + '</div></nav>\n';
+  h += '<div class="cursor-orb" id="cursorOrb"></div><div class="confidential">客户汇报版 · TuringMarket</div>\n';
+  h += '<section id="cover"><div class="orb orb-1"></div><div class="fade-in"><div class="cover-eyebrow">海外红人营销策略方案</div></div><div class="fade-in delay-1"><h1 class="cover-title"><span class="accent-grad">' + esc(brand) + '</span>' + (product ? ' ' + esc(product) : '') + '<br>' + esc(trimDeckTitle(title, brand, product)) + '</h1></div><div class="fade-in delay-2"><p class="cover-sub">' + esc(subtitle) + '</p></div>';
   h += '<div class="fade-in delay-3"><div class="chips">' + coverChips(data).map(function(c) { return '<div class="chip">' + esc(c) + '</div>'; }).join('') + '</div></div>';
-  h += '<div class="fade-in delay-4"><div class="cover-footer">Presented by TuringMarket图灵集市 · Prepared for ' + esc(brand) + ' · ' + new Date().getFullYear() + '</div></div></section>\n';
+  h += '<div class="fade-in delay-4"><div class="cover-footer">图灵集市 TuringMarket · 为 ' + esc(brand) + ' 准备 · ' + new Date().getFullYear() + '</div></div></section>\n';
 
   sections.forEach(function(sec, idx) {
     h += renderCampaignSection(sec, idx + 1, sections);
@@ -780,23 +835,26 @@ function renderNextSteps(points) {
   var h = '<div class="wave-grid fade-in delay-1">';
   points.forEach(function(p, i) {
     var pair = splitPoint(p);
-    h += '<div class="wave-card"><div class="wave-header"><div class="wave-num">NEXT ' + pad2(i + 1) + '</div><div class="wave-title">' + esc(pair.label) + '</div><div class="wave-period">需甲方确认</div></div><div class="wave-body"><div class="wave-actions">' + esc(pair.body) + '</div><div class="wave-kpi-row"><div class="wave-kpi">确认口径</div><div class="wave-kpi">进入执行</div></div></div></div>';
+    h += '<div class="wave-card"><div class="wave-header"><div class="wave-num">行动 ' + pad2(i + 1) + '</div><div class="wave-title">' + esc(pair.label) + '</div><div class="wave-period">需甲方确认</div></div><div class="wave-body"><div class="wave-actions">' + esc(pair.body) + '</div><div class="wave-kpi-row"><div class="wave-kpi">确认口径</div><div class="wave-kpi">进入执行</div></div></div></div>';
   });
   h += '</div>';
   return h;
 }
 
 function renderMaterialsSection(materials) {
-  var h = '<section id="materials"><div class="fade-in"><div class="section-num">SOURCE MATERIALS</div><h2 class="section-title">补充材料引用</h2><div class="divider"></div><p class="section-sub">以下内容来自你上传的 PDF / Word / PPTX / Excel / 文本文件。若状态显示“仅文件信息”，说明该文件可能是扫描件或服务器未能提取正文。</p></div><div class="summary-grid">';
-  materials.forEach(function(file, idx) {
-    h += '<div class="material-card fade-in delay-' + Math.min(4, (idx % 4) + 1) + '"><div class="material-head"><div class="material-title">' + esc(file.name) + '</div><div class="material-state">' + (file.parsed ? "已提取正文" : "仅文件信息") + '</div></div><div class="material-preview">' + esc(file.preview || "未提取到可读正文。") + '</div></div>';
+  var safeMaterials = (materials || []).filter(isClientVisibleMaterial);
+  if (!safeMaterials.length) return "";
+  var h = '<section id="materials"><div class="fade-in"><div class="section-num">补充洞察</div><h2 class="section-title">补充材料洞察</h2><div class="divider"></div><p class="section-sub">以下内容来自可读取的补充材料，已转化为本方案可使用的业务判断，不展示内部解析状态。</p></div><div class="summary-grid">';
+  safeMaterials.forEach(function(file, idx) {
+    var preview = sanitizeClientMaterialText(file.preview || file.text || "").slice(0, 520);
+    h += '<div class="material-card fade-in delay-' + Math.min(4, (idx % 4) + 1) + '"><div class="material-head"><div class="material-title">材料洞察 ' + pad2(idx + 1) + '</div><div class="material-state">已纳入策略</div></div><div class="material-preview">' + esc(preview) + '</div></div>';
   });
   h += '</div></section>\n';
   return h;
 }
 
 function renderClosingSection(brand, product, title) {
-  return '<section id="closing"><div class="orb orb-1" style="opacity:.6"></div><div class="fade-in"><h2 class="closing-title">让 <span class="accent-grad">' + esc(brand) + '</span><br>在目标市场建立可复用增长资产</h2></div><div class="fade-in delay-1"><p class="closing-sub">' + esc(product || trimDeckTitle(title, brand, product)) + '</p></div><div class="fade-in delay-2"><div class="chips"><div class="chip">策略 · 达人 · 内容 · 数据闭环</div><div class="chip">可执行交付物</div><div class="chip">PowerPoint 可编辑 PPTX 同步支持</div></div></div><div class="fade-in delay-3"><div class="closing-footer"><div style="font-size:20px;margin-bottom:12px;letter-spacing:.08em;color:var(--text)">Thank You · 感谢垂阅</div><div>Presented by TuringMarket图灵集市</div></div></div></section>\n';
+  return '<section id="closing"><div class="orb orb-1" style="opacity:.6"></div><div class="fade-in"><h2 class="closing-title">让 <span class="accent-grad">' + esc(brand) + '</span><br>在目标市场建立可复用增长资产</h2></div><div class="fade-in delay-1"><p class="closing-sub">' + esc(product || trimDeckTitle(title, brand, product)) + '</p></div><div class="fade-in delay-2"><div class="chips"><div class="chip">策略落地闭环</div><div class="chip">达人执行排期</div><div class="chip">数据复盘优化</div></div></div><div class="fade-in delay-3"><div class="closing-footer"><div style="font-size:20px;margin-bottom:12px;letter-spacing:.08em;color:var(--text)">感谢垂阅</div><div>图灵集市 TuringMarket · 海外红人营销服务团队</div></div></div></section>\n';
 }
 
 function campaignReportScript() {
@@ -826,7 +884,7 @@ function trimDeckTitle(title, brand, product) {
   [brand, product].forEach(function(part) {
     if (part) text = text.replace(new RegExp(escapeRegExp(part), "ig"), "").trim();
   });
-  return text.replace(/^[·\-\s]+/, "") || "海外红人营销 Campaign";
+  return text.replace(/^[·\-\s]+/, "").replace(/\bCampaign Deck\b/ig, "营销方案").replace(/\bCampaign\b/ig, "营销方案") || "海外红人营销方案";
 }
 
 function escapeRegExp(text) {
@@ -847,16 +905,16 @@ function coverChips(data) {
 
 function sectionEnglishLabel(type, title) {
   var text = String(title || "");
-  if (type === "research" || /联网调研|市场信号|调研/.test(text)) return "MARKET RESEARCH";
-  if (type === "sources" || /来源|引用/.test(text)) return "SOURCES";
-  if (type === "timeline" || /排期|timeline|里程碑/i.test(text)) return "TIMELINE";
-  if (type === "stats" || /预算|budget|平台|platform/i.test(text)) return "BUDGET & CHANNEL MIX";
-  if (type === "kpi" || /KPI|复盘|指标/i.test(text)) return "KPI & REVIEW";
-  if (type === "next" || /下一步|确认/i.test(text)) return "NEXT STEPS";
-  if (/竞品|市场/i.test(text)) return "MARKET INSIGHTS";
-  if (/内容|脚本|创意/i.test(text)) return "CONTENT STRATEGY";
-  if (/红人|达人/i.test(text)) return "INFLUENCER MATRIX";
-  return "STRATEGY";
+  if (type === "research" || /联网调研|市场信号|调研/.test(text)) return "市场调研";
+  if (type === "sources" || /来源|引用/.test(text)) return "来源口径";
+  if (type === "timeline" || /排期|timeline|里程碑/i.test(text)) return "执行排期";
+  if (type === "stats" || /预算|budget|平台|platform/i.test(text)) return "预算与渠道";
+  if (type === "kpi" || /KPI|复盘|指标/i.test(text)) return "指标复盘";
+  if (type === "next" || /下一步|确认/i.test(text)) return "下一步";
+  if (/竞品|市场/i.test(text)) return "市场洞察";
+  if (/内容|脚本|创意/i.test(text)) return "内容策略";
+  if (/红人|达人/i.test(text)) return "达人矩阵";
+  return "策略方案";
 }
 
 function splitPoint(point) {
@@ -1191,7 +1249,7 @@ function movePPTEditorSlide(delta) {
 }
 
 if (typeof window !== "undefined") {
-  window.tmPPTBuild = "20260630-v914-lightdeck";
+  window.tmPPTBuild = "20260702-v916-kb-bridge-client-cn";
   window.generateHTMLPPT = generateHTMLPPT;
   window.handlePPTContextFile = handlePPTContextFile;
   window.addPPTInstruction = addPPTInstruction;

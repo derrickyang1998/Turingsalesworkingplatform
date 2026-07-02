@@ -63,10 +63,12 @@ function invoke(routes, key, opts) {
 
 test('public files and admin APIs do not expose the legacy default password', () => {
   const repoRoot = path.resolve(__dirname, '../../..');
-  const files = [
+  const optionalFiles = [
     path.join(repoRoot, 'README.md'),
     path.join(repoRoot, 'TURINGMARKET_KEYS.md'),
-    path.join(repoRoot, 'CLAUDE_CODE_MIGRATION.md'),
+    path.join(repoRoot, 'CLAUDE_CODE_MIGRATION.md')
+  ];
+  const requiredFiles = [
     path.join(repoRoot, 'platform', 'index.html'),
     path.join(repoRoot, 'platform', 'app.js'),
     path.join(repoRoot, 'platform', 'DEPLOY.md'),
@@ -77,6 +79,10 @@ test('public files and admin APIs do not expose the legacy default password', ()
     path.join(repoRoot, 'platform', 'server', 'test_v8.js')
   ];
   const legacyDefault = /admin\s*\/\s*turing2026|turing2026|Password reset to turing2026|hashSync\(['"]turing2026['"]|DEFAULT_USER_PASSWORD\s*\|\|\s*['"]turing2026['"]/i;
+  requiredFiles.forEach(function(file) {
+    assert.equal(fs.existsSync(file), true, file + ' should exist for legacy password scanning');
+  });
+  const files = requiredFiles.concat(optionalFiles.filter(function(file) { return fs.existsSync(file); }));
   files.forEach(function(file) {
     assert.doesNotMatch(fs.readFileSync(file, 'utf8'), legacyDefault, file + ' exposes the legacy default password');
   });
@@ -155,9 +161,10 @@ test('public-pool customer visibility does not allow opportunity mutation', () =
 
 test('seeded admin and team users do not share the same default password', () => {
   const db = freshDb();
-  const admin = db.prepare('SELECT password_hash FROM users WHERE username = ?').get('admin');
+  const admin = db.prepare("SELECT password_hash FROM users WHERE role = 'admin' ORDER BY id LIMIT 1").get();
   const member = db.prepare('SELECT password_hash FROM users WHERE username = ?').get('zhangwei');
 
+  assert.ok(admin);
   assert.notEqual(admin.password_hash, member.password_hash);
   assert.equal(bcrypt.compareSync(process.env.DEFAULT_ADMIN_PASSWORD, admin.password_hash), true);
   assert.equal(bcrypt.compareSync(process.env.DEFAULT_ADMIN_PASSWORD, member.password_hash), false);

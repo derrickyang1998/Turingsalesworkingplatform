@@ -648,16 +648,20 @@ app.post('/api/demand/parse-file', authMiddleware, uploadLimiter, upload.single(
   try {
     const parsed = await latestUiCompat.parseDemandFile(req.file);
     const inferred = latestUiCompat.inferDemandAnalysis(parsed.text, parsed.warning || '', req.file.originalname);
+    const archiveContent = parsed.fallback ? '' : parsed.text;
+    const archiveSummary = parsed.fallback
+      ? 'File parsed without readable business text; parser details kept in metadata and excluded from RAG content.'
+      : String(parsed.text || '').replace(/\s+/g, ' ').trim().slice(0, 240);
     try {
       knowledgeService.ingestKnowledge(db, {
         title: 'Demand upload: ' + (req.file.originalname || 'uploaded file'),
-        summary: String(parsed.text || '').replace(/\s+/g, ' ').trim().slice(0, 240),
-        content: parsed.text,
-        entry_type: 'demand_upload',
+        summary: archiveSummary,
+        content: archiveContent,
+        entry_type: parsed.fallback ? 'demand_upload_parse_failure' : 'demand_upload',
         source_type: 'demand_parse_file',
         source_id: req.file.originalname || req.file.filename,
         visibility: 'private',
-        tags: ['demand', 'upload', path.extname(req.file.originalname || '').replace('.', '')],
+        tags: ['demand', 'upload', path.extname(req.file.originalname || '').replace('.', ''), parsed.fallback ? 'parse_failure' : 'parsed'].filter(Boolean),
         business_type: 'demand',
         business_id: '',
         created_by: req.user.id,
@@ -665,6 +669,8 @@ app.post('/api/demand/parse-file', authMiddleware, uploadLimiter, upload.single(
         metadata: {
           parser: parsed.parser,
           fallback: parsed.fallback,
+          parse_failure: !!parsed.fallback,
+          parser_text: parsed.fallback ? parsed.text : '',
           needsOcr: parsed.needsOcr,
           ocrUsed: parsed.ocrUsed,
           fileName: req.file.originalname

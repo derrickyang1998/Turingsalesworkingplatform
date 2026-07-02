@@ -65,12 +65,20 @@ nginx -t && systemctl restart nginx
 
 ## 🔄 从 GitHub 更新
 ```bash
-cd Turingsalesworkingplatform
-git pull origin master
-cd platform/server
+cd /root/turingmarket/platform
+git fetch origin
+git checkout codex/ai-knowledge-foundation
+git pull --ff-only origin codex/ai-knowledge-foundation
+cd server
 npm install --production
 pm2 restart turingmarket
 ```
+
+## 🚫 发布源护栏
+- 当前唯一发布源是 `C:\Users\29272\Documents\在线商务平台-github-sync\platform` 或线上同源 Git 分支 `codex/ai-knowledge-foundation`。
+- 不要从 `C:\Users\29272\Documents\在线商务平台` 或旧 `海外品牌推广-红人营销-图灵` 静态目录发布。
+- PowerShell 部署请使用 `platform/deploy_v8.ps1`；脚本会拒绝非 `github-sync` 路径，并校验 `ppt.js` build 与首页缓存版本。
+- 发布后必须确认首页包含 `ppt.js?v=20260702v916kbbridge`，且 `ppt.js` 包含 `window.tmPPTBuild = "20260702-v916-kb-bridge-client-cn"`。
 
 ## 👤 登录账号
 管理员和团队成员密码必须通过私有 `.env` 或后台一次性临时密码配置，不在仓库中记录固定默认密码。

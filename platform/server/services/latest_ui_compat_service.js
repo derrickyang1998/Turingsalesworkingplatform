@@ -3,6 +3,7 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 const knowledgeService = require('./knowledge_service');
 const llm = require('./llm_service');
+const rag = require('./rag_service');
 const webSearch = require('./web_search_service');
 
 const TEXT_EXTS = new Set(['.txt', '.md', '.csv', '.json']);
@@ -261,6 +262,12 @@ async function generatePptOutline(db, user, body) {
   const demand = body.demand || {};
   const proposal = [body.proposal || '', body.deckContext || ''].filter(Boolean).join('\n\n');
   const query = [demand.brand, demand.company, demand.product, demand.product_name, demand.target_market, demand.market, 'influencer marketing'].filter(Boolean).join(' ');
+  const ragContext = rag.buildRagContext(db, {
+    user,
+    query: [query, proposal].filter(Boolean).join('\n\n'),
+    limit: body.knowledge_limit || 8,
+    business_type: body.business_type || ''
+  });
   const research = await webSearch.searchWeb(query || 'overseas influencer marketing campaign', { db, maxResults: 5 });
   webSearch.cacheSearchResult(db, query || 'overseas influencer marketing campaign', research);
   const fallback = buildPptOutlineFallback(demand, proposal, '', research);
@@ -268,12 +275,16 @@ async function generatePptOutline(db, user, body) {
     'Create a client-facing overseas influencer marketing PPT outline for TuringMarket.',
     'Return JSON only with title, subtitle, sections. sections must include title, type, points array, note.',
     'Use 9-12 sections and include market research, product angle, creator mix, budget, timeline, KPI, risks, next steps.',
+    'Use the internal knowledge base first when it is relevant. When using it, reference [KB-n] in slide points or notes.',
     'Demand JSON:', JSON.stringify(demand),
     'Proposal/context:', compactText(proposal, 5000),
+    'Internal knowledge base context:', ragContext.contextText || 'No relevant internal knowledge was found.',
     'Web research:', JSON.stringify((research.results || []).slice(0, 5))
   ].join('\n');
   const generated = await generateJsonWithDeepSeek(prompt, fallback, { db, user, temperature: 0.25, max_tokens: 3200, endpoint: 'ppt_outline' });
   const outline = normalizePptOutline(generated.value, fallback, research);
+  outline.knowledge_references = ragContext.references;
+  knowledgeService.markKnowledgeUsed(db, ragContext.references.map(function(ref) { return ref.id; }));
   try {
     knowledgeService.ingestKnowledge(db, {
       title: 'PPT outline: ' + (outline.title || demand.brand || 'campaign'),
@@ -288,11 +299,15 @@ async function generatePptOutline(db, user, body) {
       business_id: demand.id || demand.brand || '',
       created_by: user.id,
       actor_role: user.role,
-      metadata: { research_used: !!research.used }
+      metadata: {
+        research_used: !!research.used,
+        knowledge_reference_ids: ragContext.references.map(function(ref) { return ref.id; })
+      }
     });
   } catch (e) {}
   return {
     outline,
+    knowledge_references: ragContext.references,
     research,
     fallback: generated.fallback,
     warning: generated.warning

@@ -1,4 +1,31 @@
 # Changelog — TuringMarket 图灵商务在线工作平台
+## v0.2.4-kb-bridge-on-latest-ppt (2026-07-02) — 最新 PPT 界面与知识库底座合并修复
+
+### 回退根因修复
+- 确认 `C:\Users\29272\Documents\在线商务平台` 是旧 `master` 基线，不能作为当前平台发布源。
+- 将线上最新 PPT 生成修复 `20260701-v915-client-cn` 回写到 `C:\Users\29272\Documents\在线商务平台-github-sync`，避免后续知识库开发再次覆盖最新 PPT/UI。
+- 保留 `github-sync` 分支中的知识库/RAG、M5 AI 对话、Admin AI 对话审计、PPT outline 归档与后端兼容接口。
+
+### 最新界面接入
+- `platform/ppt.js` 合并客户端中文汇报版、补充材料清洗、材料洞察页、客户汇报版文案和内部解析状态过滤。
+- 短 TXT/MD/CSV/JSON 补充材料即使少于 80 字，也会作为有效业务上下文进入 PPT；解析失败元数据仍会被过滤，不展示给客户。
+- `platform/index.html` 更新 PPT 脚本缓存版本到 `20260702v916kbbridge`，强制浏览器加载合并后的最新 PPT + 知识库桥接文件。
+- `/api/ai/ppt-outline` 生成前接入 `rag_service` 检索平台知识库，并把 `knowledge_references` 写入返回值、outline 内容和知识库归档 metadata。
+- 需求文件解析失败时不再把 parser note 写入 RAG 正文；失败记录改为 `demand_upload_parse_failure` 并在 metadata 保留解析状态。
+
+### 发布护栏
+- `platform/deploy_v8.ps1` 改为只允许从 `在线商务平台-github-sync` 发布，上传清单加入 `ppt.js` 和 AI/知识库服务文件，并在发布后校验 PPT build、首页缓存版本和健康检查。
+- `platform/DEPLOY.md` 更新为 `codex/ai-knowledge-foundation` 分支和当前线上目录结构，明确禁止旧目录发布。
+
+### 验证
+- `node --check platform/app.js`
+- `node --check platform/ppt.js`
+- `node --check platform/server/server.js`
+- `node --test server/tests/ai_knowledge_foundation.test.js server/tests/obsidian_and_business_knowledge.test.js server/tests/security_and_crm_access.test.js`
+- 生产部署后校验 `/api/health`、首页脚本版本、`window.tmPPTBuild`、Admin AI 对话入口、AI chat 与 PPT outline API。
+
+---
+
 ## v0.2.3-latest-ui-knowledge-bridge (2026-07-01) — 最新 PPT/UI 基线恢复与知识库桥接
 
 ### 🧯 回退事故修复

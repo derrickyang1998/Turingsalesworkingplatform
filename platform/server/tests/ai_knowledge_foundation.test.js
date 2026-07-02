@@ -232,6 +232,46 @@ test('ai service persists conversations and restricts non-admin visibility', asy
   db.close();
 });
 
+test('ppt outline generation retrieves knowledge and archives references', async () => {
+  const db = freshDb();
+  const oldDeepSeek = process.env.DEEPSEEK_API_KEY;
+  const oldTavily = process.env.TAVILY_API_KEY;
+  delete process.env.DEEPSEEK_API_KEY;
+  delete process.env.TAVILY_API_KEY;
+  try {
+    const knowledge = require('../services/knowledge_service');
+    const latestUi = require('../services/latest_ui_compat_service');
+    const entry = knowledge.ingestKnowledge(db, {
+      title: 'PPT internal case method',
+      content: 'PPT generation should use the internal case library and confirmed proposal knowledge before web research.',
+      entry_type: 'proposal',
+      visibility: 'team',
+      tags: ['ppt', 'proposal', 'case'],
+      created_by: 1
+    });
+
+    const result = await latestUi.generatePptOutline(db, { id: 2, role: 'user' }, {
+      demand: { brand: 'Aurora', product: 'Solar Kit', market: 'US' },
+      proposal: 'Use the internal case library before generating the client deck.',
+      knowledge_limit: 5
+    });
+
+    assert.equal(result.knowledge_references.length, 1);
+    assert.equal(result.knowledge_references[0].id, entry.id);
+    assert.equal(result.outline.knowledge_references[0].id, entry.id);
+    const archived = db.prepare("SELECT metadata_json, content FROM knowledge_entries WHERE entry_type = 'ppt_outline' ORDER BY id DESC LIMIT 1").get();
+    const metadata = JSON.parse(archived.metadata_json || '{}');
+    assert.deepEqual(metadata.knowledge_reference_ids, [entry.id]);
+    assert.match(archived.content, /knowledge_references/);
+  } finally {
+    if (oldDeepSeek === undefined) delete process.env.DEEPSEEK_API_KEY;
+    else process.env.DEEPSEEK_API_KEY = oldDeepSeek;
+    if (oldTavily === undefined) delete process.env.TAVILY_API_KEY;
+    else process.env.TAVILY_API_KEY = oldTavily;
+    db.close();
+  }
+});
+
 test('web search service degrades when tavily api key is missing', async () => {
   const web = require('../services/web_search_service');
   const result = await web.searchWeb('latest influencer trend', { provider: 'tavily', apiKey: '' });
