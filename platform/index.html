@@ -195,6 +195,68 @@ td{padding:7px 10px;font-size:12px;border-bottom:1px solid #f0f0ed}
 .brand-tooltip{position:relative;cursor:help;border-bottom:1px dotted var(--text2)}
 .brand-tooltip:hover::after{content:attr(data-tip);position:absolute;left:0;top:100%;background:#1a1a1a;color:#fff;padding:6px 10px;border-radius:4px;font-size:11px;white-space:nowrap;z-index:10}
 
+/* ===== M1 Brand Intelligence Workspace ===== */
+.brand-workspace{display:flex;flex-direction:column;gap:14px;height:calc(100vh - 104px);min-height:640px;letter-spacing:0}
+.brand-workspace-header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}
+.brand-workspace-header h2{margin:0;font-size:24px;line-height:1.2}
+.brand-workspace-actions{display:flex;align-items:center;gap:8px;min-width:520px;justify-content:flex-end}
+.brand-workspace-actions .search-box{flex:1;max-width:360px}
+.brand-workspace-actions .btn{white-space:nowrap}
+.brand-count-pill{font-size:11px;color:var(--text2);white-space:nowrap}
+.brand-workspace-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.brand-stat-tile{border:1px solid var(--border);background:var(--surface);border-radius:8px;padding:12px 14px;min-height:70px}
+.brand-stat-tile strong{display:block;font-size:18px;line-height:1.2}
+.brand-stat-tile span{display:block;font-size:11px;color:var(--text2);margin-top:5px}
+.brand-workspace-layout{display:grid;grid-template-columns:260px minmax(380px,.9fr) minmax(420px,1.1fr);gap:12px;min-height:0;flex:1}
+.brand-rail,.brand-results-shell,.brand-detail-panel{border:1px solid var(--border);border-radius:8px;background:var(--surface);min-height:0;overflow:hidden}
+.brand-rail{display:flex;flex-direction:column;padding:14px}
+.brand-panel-title{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px}
+.brand-panel-title strong{font-size:13px}
+.brand-panel-title span{font-size:11px;color:var(--text2)}
+.brand-tree-scroll{min-height:0;overflow-y:auto;padding-right:4px}
+.brand-enrich-status{margin-top:10px;font-size:11px;color:var(--text2);line-height:1.55}
+.brand-history{border-top:1px solid var(--border);padding-top:10px;margin-top:10px}
+.brand-history button{border:1px solid var(--border);background:var(--surface2);border-radius:999px;padding:3px 8px;font-size:10px;margin:2px;cursor:pointer}
+.brand-results-shell{display:flex;flex-direction:column}
+.brand-results-toolbar{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 14px;border-bottom:1px solid var(--border)}
+.brand-results-toolbar select{width:auto;min-width:132px;font-size:12px}
+.brand-active-filter{font-size:12px;color:var(--text2)}
+.brand-results-list{overflow-y:auto;padding:10px;min-height:0}
+.brand-result-item{border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:8px;background:#fff;cursor:pointer;transition:all .15s}
+.brand-result-item:hover{border-color:#b8b8b2;box-shadow:0 2px 10px rgba(0,0,0,.04)}
+.brand-result-item.active{border-color:#1a1a1a;background:#fafaf9}
+.brand-result-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+.brand-result-name{font-size:14px;font-weight:700;line-height:1.25}
+.brand-result-sub{font-size:11px;color:var(--text2);margin-top:2px}
+.brand-result-tags,.brand-chip-row{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px}
+.brand-chip{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--border);background:var(--surface2);border-radius:999px;padding:2px 8px;font-size:10px;color:#555}
+.brand-chip.dark{background:#1a1a1a;color:#fff;border-color:#1a1a1a}
+.brand-result-metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:10px}
+.brand-mini-metric{border:1px solid #f0f0ed;border-radius:8px;padding:6px 8px;font-size:11px;background:#fbfbfa}
+.brand-mini-metric strong{display:block;font-size:12px}
+.brand-detail-panel{overflow-y:auto;padding:0}
+.brand-detail-header{padding:18px;border-bottom:1px solid var(--border)}
+.brand-detail-name{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.brand-detail-name h3{margin:0;font-size:22px}
+.brand-detail-section{padding:14px 18px;border-bottom:1px solid var(--border)}
+.brand-detail-section h4{margin:0 0 10px 0;font-size:13px}
+.brand-kpi-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.brand-kpi{border:1px solid var(--border);border-radius:8px;background:#fbfbfa;padding:10px}
+.brand-kpi span{display:block;font-size:10px;color:var(--text2);margin-bottom:3px}
+.brand-kpi strong{font-size:14px}
+.brand-data-tip{cursor:help;border-bottom:1px dotted #aaa}
+.brand-action-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.brand-empty-state{padding:40px 20px;text-align:center;color:var(--text2);font-size:13px}
+.brand-source-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.brand-source-card{border:1px solid var(--border);border-radius:8px;padding:10px;background:#fff}
+.brand-source-card strong{display:block;font-size:12px}
+.brand-source-card span{display:block;font-size:10px;color:var(--text2);margin:4px 0 8px}
+.brand-inline-list{display:flex;flex-wrap:wrap;gap:6px}
+.brand-inline-list button{border:1px solid var(--border);background:var(--surface2);border-radius:999px;padding:4px 9px;font-size:11px;cursor:pointer}
+.brand-inline-list button:hover{border-color:#1a1a1a;background:#fff}
+@media (max-width:1400px){.brand-workspace-layout{grid-template-columns:240px minmax(330px,.9fr) minmax(360px,1fr)}.brand-workspace-actions{min-width:440px}}
+@media (max-width:1100px){.brand-workspace{height:auto}.brand-workspace-header{flex-direction:column}.brand-workspace-actions{width:100%;min-width:0;justify-content:flex-start}.brand-workspace-layout{grid-template-columns:1fr}.brand-rail,.brand-results-shell,.brand-detail-panel{min-height:320px}.brand-workspace-stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
 /* ===== WORKFLOW ENGINE STYLES ===== */
 .wf-designer-container { display:flex;flex-direction:column;height:calc(100vh - 80px); }
 .wf-toolbar { display:flex;align-items:center;gap:8px;padding:8px 16px;background:#f5f5f5;border-bottom:1px solid #ddd; }
@@ -702,31 +764,62 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
 
 <!-- M1: Brand Hub -->
 <div class="page" id="page-m1">
-<h2>行业品牌智库</h2>
-<p class="subtitle">1871个出海品牌 · 13大行业 · 189个细分标签 · AI数据补充 · 竞品对标</p>
-
-<div style="display:flex;gap:16px;height:calc(100vh - 160px)">
-  <div style="width:260px;min-width:260px;overflow-y:auto;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-      <strong style="font-size:13px">行业标签树</strong>
-      <span style="font-size:10px;opacity:.5" id="tagCount">189 tags</span>
-    </div>
-    <div id="tagGroup"></div>
-    <div id="brandEnrichArea" style="margin-top:8px;font-size:11px"></div>
-  </div>
-  <div style="flex:1;display:flex;flex-direction:column;min-width:0">
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
-      <div class="search-box" style="flex:1;max-width:300px;margin-left:auto">
-        <span class="search-icon">🔍</span>
-        <input id="brandSearch" placeholder="🔍 搜索品牌名 / 行业 / 中文名..." oninput="filterBrands()">
+  <div class="brand-workspace" id="brandWorkspace">
+    <div class="brand-workspace-header">
+      <div>
+        <h2>行业品牌智库</h2>
+        <p class="subtitle">品牌情报 · 竞品关系 · 内容机会 · 知识库沉淀 · 方案/PPT 联动</p>
       </div>
-      <button class="btn btn-sm" onclick="searchNewBrand()">AI Search</button>
-      <button class="btn btn-sm" onclick="exportBrandCSV()">Export CSV</button>
-      <span id="brandCount" style="font-size:11px;opacity:.5;white-space:nowrap"></span>
-    </div>
-    <div id="brandList" style="flex:1;overflow-y:auto"></div>
+      <div class="brand-workspace-actions">
+        <div class="search-box">
+          <span class="search-icon">⌕</span>
+          <input id="brandSearch" placeholder="搜索品牌名 / 中文名 / 行业标签 / 市场..." oninput="filterBrands()">
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="searchNewBrand()">AI Search</button>
+        <button class="btn btn-outline btn-sm" onclick="exportBrandCSV()">导出 CSV</button>
+        <span class="brand-count-pill" id="brandCount"></span>
+      </div>
     </div>
 
+    <div class="brand-workspace-stats" id="brandWorkspaceStats">
+      <div class="brand-stat-tile"><strong>--</strong><span>品牌总量</span></div>
+      <div class="brand-stat-tile"><strong>--</strong><span>行业标签</span></div>
+      <div class="brand-stat-tile"><strong>--</strong><span>知识库可用</span></div>
+      <div class="brand-stat-tile"><strong>--</strong><span>当前筛选</span></div>
+    </div>
+
+    <div class="brand-workspace-layout">
+      <aside class="brand-rail">
+        <div class="brand-panel-title">
+          <strong>行业标签树</strong>
+          <span id="tagCount">-- tags</span>
+        </div>
+        <div class="brand-tree-scroll" id="tagGroup"></div>
+        <div class="brand-history" id="searchHistory"></div>
+        <div class="brand-enrich-status" id="brandEnrichArea">AI Search 后会自动写入品牌库和知识库。</div>
+      </aside>
+
+      <section class="brand-results-shell">
+        <div class="brand-results-toolbar">
+          <span class="brand-active-filter" id="brandActiveFilter">全部品牌</span>
+          <select id="brandSort" onchange="filterBrands()">
+            <option value="relevance">默认排序</option>
+            <option value="revenue">收入规模优先</option>
+            <option value="social">社媒规模优先</option>
+            <option value="search">搜索量优先</option>
+          </select>
+        </div>
+        <div class="brand-results-list" id="brandResults"></div>
+      </section>
+
+      <aside class="brand-detail-panel" id="brandDetailPanel">
+        <div class="brand-empty-state">选择一个品牌后查看情报详情。</div>
+        <div id="brandKnowledgeStatus" style="display:none"></div>
+        <div id="brandOpportunityPanel" style="display:none"></div>
+        <div id="brandSocialSources" style="display:none"></div>
+      </aside>
+    </div>
+  </div>
 </div>
 
 <!-- M2: Strategy -->

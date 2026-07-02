@@ -928,9 +928,9 @@ function copyEmail(email){
 // Brand enrichment with token tracking
 async function searchNewBrand() {
   var q = (document.getElementById('brandSearch')?.value || '').trim();
-  if (!q) { toast('Enter brand name', 'error'); return }
+  if (!q) { toast('请输入品牌名称', 'error'); return }
   var a = document.getElementById('brandEnrichArea');
-  a.innerHTML = '<div class=brand-enrich>Searching: ' + q + '...</div>';
+  if (a) a.innerHTML = '<div class=brand-enrich>正在联网补充品牌情报：' + esc(q) + '...</div>';
   try {
     var r = await apiFetch('/brands/enrich', {
       method: 'POST',
@@ -939,12 +939,21 @@ async function searchNewBrand() {
     if (!r.ok) throw new Error('API:' + r.status);
     var d = await r.json();
     var bd = d.brand || d;
-    var nb = { id: 'cust_' + Date.now(), name: bd.name || q, name_cn: bd.name_cn || '', industry_tags: bd.industry_tags || ['Other'], market: bd.market || 'global', estimated_annual_revenue: bd.estimated_annual_revenue || '$100M+', user_base: bd.user_base || '', overseas_presence: { amazon_rating: bd.amazon_rating || 4.0, social_followers: { youtube: bd.youtube_followers || 0, instagram: bd.instagram_followers || 0, tiktok: bd.tiktok_followers || 0 }, brand_search_volume_monthly: bd.brand_search_volume_monthly || 0 }, social_content_monthly: { total_posts: bd.total_posts || 0, creative_angles: bd.creative_angles || [], top_products_featured: bd.top_products_featured || [], last_12_months: { avg_engagement_rate: bd.avg_engagement_rate || '3.0%', avg_views_per_post: bd.avg_views_per_post || 0, top_platform: bd.top_platform || 'YouTube' } }, case_study_available: false };
-    BRANDS.unshift(nb); renderBrands([nb]); try { var sd={name:nb.name,name_cn:nb.name_cn,industry_tags:nb.industry_tags,market:nb.market,estimated_annual_revenue:nb.estimated_annual_revenue,user_base:nb.user_base,amazon_rating:(nb.overseas_presence||{}).amazon_rating,youtube_followers:(nb.overseas_presence||{}).social_followers?nb.overseas_presence.social_followers.youtube:0,instagram_followers:(nb.overseas_presence||{}).social_followers?nb.overseas_presence.social_followers.instagram:0,tiktok_followers:(nb.overseas_presence||{}).social_followers?nb.overseas_presence.social_followers.tiktok:0,search_volume_monthly:(nb.overseas_presence||{}).brand_search_volume_monthly,monthly_posts:(nb.social_content_monthly||{}).total_posts,avg_engagement:(nb.social_content_monthly||{}).last_12_months?nb.social_content_monthly.last_12_months.avg_engagement_rate:'',avg_views:(nb.social_content_monthly||{}).last_12_months?nb.social_content_monthly.last_12_months.avg_views_per_post:0,top_platform:(nb.social_content_monthly||{}).last_12_months?nb.social_content_monthly.last_12_months.top_platform:'',creative_angles:nb.social_content_monthly?nb.social_content_monthly.creative_angles:[],top_products:nb.social_content_monthly?nb.social_content_monthly.top_products_featured:[]}; apiFetch('/brands',{method:'POST',body:JSON.stringify(sd)}); } catch(e) {}
-    document.getElementById('brandCount').textContent = BRANDS.length + ' brands';
-    a.innerHTML = '<div class=brand-enrich>✅ Enriched: ' + nb.name + ' · ' + nb.industry_tags.join(' · ') + ' · ' + nb.estimated_annual_revenue + '</div>';
-    toast('Brand enriched: ' + nb.name)
-  } catch (e) { a.innerHTML = '<div class=brand-enrich>❌ Failed: ' + e.message + '</div>' }
+    var nb = normalizeEnrichedBrand(bd, q);
+    upsertBrandRecord(nb);
+    selectedBrandName = nb.name;
+    _brandRelationCache = null;
+    buildBrandRelationCache();
+    try { await apiFetch('/brands', { method: 'POST', body: JSON.stringify(brandToApiPayload(nb)) }); } catch(e2) {}
+    filterBrands();
+    renderBrandDetail(nb);
+    var webNote = d.web_search && d.web_search.used ? ' · 已结合 Tavily 联网来源' : '';
+    if (a) a.innerHTML = '<div class=brand-enrich>已补充并归档：' + esc(nb.name) + ' · ' + esc((nb.industry_tags || []).join(' / ')) + ' · ' + esc(nb.estimated_annual_revenue || '') + webNote + '</div>';
+    toast('品牌已补充并写入知识库：' + nb.name);
+  } catch (e) {
+    if (a) a.innerHTML = '<div class=brand-enrich>补充失败：' + esc(e.message) + '</div>';
+    toast('品牌补充失败', 'error');
+  }
 }
 
 async function trackTokenUsage(model, endpoint, prompt, completion, total) {
@@ -2343,6 +2352,418 @@ function exportBrandCSV() {
   BRANDS.forEach(function(b) { var sf = (b.overseas_presence||{}).social_followers||{}; csv += esc(b.name) + ',' + ((b.industry_tags||[]).join(';')) + ',' + (b.estimated_annual_revenue||'') + ',' + ((sf.youtube||0)/1000).toFixed(0) + 'K' + ',' + ((sf.instagram||0)/1000).toFixed(0) + 'K' + ',' + ((sf.tiktok||0)/1000).toFixed(0) + 'K\\n'; });
   dlFile('brands.csv', '\\ufeff' + csv, 'text/csv');
 }
+// ===== M1: BRAND INTELLIGENCE WORKSPACE (v0.2.5) =====
+var activeTag = null;
+var selectedBrandName = '';
+var currentBrandResults = [];
+
+function initM1() {
+  buildBrandRelationCache();
+  if (window.INDUSTRY_TREE) renderIndustryTree();
+  currentBrandResults = BRANDS.slice();
+  if (!selectedBrandName && currentBrandResults.length) selectedBrandName = currentBrandResults[0].name;
+  renderBrandWorkspaceStats(currentBrandResults);
+  renderBrands(currentBrandResults);
+  renderSearchHistory();
+  renderBrandDetail(getSelectedBrand());
+}
+
+function renderIndustryTree() {
+  var tree = window.INDUSTRY_TREE || {};
+  var container = document.getElementById('tagGroup');
+  if (!container) return;
+  var tagTotal = 0;
+  var h = '<div class="tree-container">';
+  Object.keys(tree).sort().forEach(function(cat) {
+    var cd = tree[cat] || {};
+    var subTags = cd.sub_tags || [];
+    var bc = BRANDS.filter(function(b) {
+      return brandTags(b).some(function(t) { return subTags.indexOf(t) >= 0; });
+    }).length;
+    var open = activeTag && subTags.indexOf(activeTag) >= 0;
+    h += '<div class="tree-node"><div class="tree-parent' + (open ? ' expanded' : '') + '" onclick="toggleTreeNode(this)"><span class="tree-icon">&#9658;</span><span>' + esc(cat) + '</span><span style="font-size:10px;opacity:.4">(' + bc + ')</span></div>';
+    h += '<div class="tree-children' + (open ? ' open' : '') + '">';
+    subTags.forEach(function(tag) {
+      tagTotal++;
+      var cnt = BRANDS.filter(function(b) { return brandTags(b).indexOf(tag) >= 0; }).length;
+      h += '<div class="tree-child' + (activeTag === tag ? ' active' : '') + '" data-tag="' + esc(tag) + '" onclick="filterByTreeTag(this.getAttribute(\'data-tag\'),this)">' + esc(tag) + '<span class="count">' + cnt + '</span></div>';
+    });
+    h += '</div></div>';
+  });
+  h += '</div>';
+  container.innerHTML = h;
+  var tagCount = document.getElementById('tagCount');
+  if (tagCount) tagCount.textContent = tagTotal + ' tags';
+}
+
+function filterBrands() {
+  var q = (document.getElementById('brandSearch')?.value || '').trim().toLowerCase();
+  var f = BRANDS.slice();
+  if (activeTag) f = f.filter(function(b) { return brandTags(b).indexOf(activeTag) >= 0; });
+  if (q) {
+    f = f.filter(function(b) {
+      return [b.name, b.name_cn, b.company, b.market, b.description, brandTags(b).join(' ')].join(' ').toLowerCase().includes(q);
+    });
+    archiveBrandSearch(q);
+  }
+  f = sortBrandResults(f);
+  currentBrandResults = f;
+  if (!f.some(function(b) { return b.name === selectedBrandName; })) selectedBrandName = f[0] ? f[0].name : '';
+  renderBrands(f);
+  renderBrandWorkspaceStats(f);
+  renderBrandDetail(getSelectedBrand());
+  var bc = document.getElementById('brandCount');
+  if (bc) bc.textContent = f.length + ' / ' + BRANDS.length + ' brands';
+  var active = document.getElementById('brandActiveFilter');
+  if (active) active.textContent = activeTag ? ('筛选：' + activeTag) : (q ? ('搜索：' + q) : '全部品牌');
+}
+
+function filterByTag(t) { filterByTreeTag(t); }
+function filterByTreeTag(tag, el) {
+  activeTag = activeTag === tag ? null : tag;
+  document.querySelectorAll('.tree-child').forEach(function(c) { c.classList.remove('active'); });
+  if (activeTag && el) el.classList.add('active');
+  filterBrands();
+}
+
+function renderSearchHistory() {
+  var c = document.getElementById('searchHistory');
+  if (!c) return;
+  if (!brandSearchHistory.length) { c.innerHTML = ''; return; }
+  c.innerHTML = '<div style="font-size:11px;color:#999;margin-bottom:4px">最近搜索</div>' + brandSearchHistory.slice(0, 6).map(function(s) {
+    return '<button onclick="document.getElementById(\'brandSearch\').value=' + inlineJsArg(s) + ';filterBrands()">' + esc(s) + '</button>';
+  }).join('');
+}
+
+function renderBrands(brands) {
+  brands = brands || BRANDS;
+  currentBrandResults = brands.slice();
+  var container = document.getElementById('brandResults') || document.getElementById('brandList');
+  if (!container) return;
+  if (!brands.length) {
+    container.innerHTML = '<div class="brand-empty-state">没有匹配的品牌。可以调整筛选，或用 AI Search 补充新品牌。</div>';
+    return;
+  }
+  var h = '';
+  brands.forEach(function(b, idx) {
+    var sf = brandFollowers(b);
+    var tags = brandTags(b);
+    var selected = b.name === selectedBrandName;
+    h += '<div class="brand-result-item' + (selected ? ' active' : '') + '" onclick="selectBrand(' + idx + ')">';
+    h += '<div class="brand-result-head"><div><div class="brand-result-name">' + esc(b.name || '-') + '</div>';
+    h += '<div class="brand-result-sub">' + esc([b.name_cn, b.company, b.market].filter(Boolean).join(' · ') || '品牌资料待补充') + '</div></div>';
+    h += '<span class="brand-chip dark" title="估算年营收，用于判断品牌规模">' + esc(b.estimated_annual_revenue || 'N/A') + '</span></div>';
+    h += '<div class="brand-result-tags">' + tags.slice(0, 5).map(function(t) { return '<span class="brand-chip">' + esc(t) + '</span>'; }).join('') + '</div>';
+    h += '<div class="brand-result-metrics">';
+    h += '<div class="brand-mini-metric" title="YouTube 粉丝量"><strong>' + formatCompactNumber(sf.youtube || 0) + '</strong><span>YT</span></div>';
+    h += '<div class="brand-mini-metric" title="Instagram 粉丝量"><strong>' + formatCompactNumber(sf.instagram || 0) + '</strong><span>IG</span></div>';
+    h += '<div class="brand-mini-metric" title="TikTok 粉丝量"><strong>' + formatCompactNumber(sf.tiktok || 0) + '</strong><span>TT</span></div>';
+    h += '</div></div>';
+  });
+  container.innerHTML = h;
+  var bc = document.getElementById('brandCount');
+  if (bc) bc.textContent = brands.length + ' / ' + BRANDS.length + ' brands';
+}
+
+function selectBrand(index) {
+  var b = typeof index === 'number' ? currentBrandResults[index] : BRANDS.find(function(item) { return item.name === index; });
+  if (!b) return;
+  selectedBrandName = b.name;
+  renderBrands(currentBrandResults.length ? currentBrandResults : BRANDS);
+  renderBrandDetail(b);
+}
+
+function selectBrandByName(name) {
+  var b = BRANDS.find(function(item) { return item.name === name; });
+  if (!b) return;
+  selectedBrandName = b.name;
+  var input = document.getElementById('brandSearch');
+  if (input) input.value = '';
+  activeTag = null;
+  filterBrands();
+  renderBrandDetail(b);
+}
+
+function getSelectedBrand() {
+  if (!selectedBrandName && BRANDS.length) selectedBrandName = BRANDS[0].name;
+  return BRANDS.find(function(b) { return b.name === selectedBrandName; }) || currentBrandResults[0] || BRANDS[0] || null;
+}
+
+function renderBrandWorkspaceStats(results) {
+  results = results || BRANDS;
+  var el = document.getElementById('brandWorkspaceStats');
+  if (!el) return;
+  var tags = {};
+  BRANDS.forEach(function(b) { brandTags(b).forEach(function(t) { tags[t] = true; }); });
+  var kbReady = BRANDS.filter(function(b) { return isBrandKnowledgeReady(b); }).length;
+  var topPlatform = results.length ? (brandContent(results[0]).last_12_months || {}).top_platform || 'YouTube' : '-';
+  el.innerHTML =
+    '<div class="brand-stat-tile"><strong>' + BRANDS.length + '</strong><span>品牌总量</span></div>' +
+    '<div class="brand-stat-tile"><strong>' + Object.keys(tags).length + '</strong><span>行业标签</span></div>' +
+    '<div class="brand-stat-tile"><strong>' + kbReady + '</strong><span>已具备知识库沉淀</span></div>' +
+    '<div class="brand-stat-tile"><strong>' + results.length + '</strong><span>当前筛选 · Top ' + esc(topPlatform) + '</span></div>';
+}
+
+function renderBrandDetail(brand) {
+  var panel = document.getElementById('brandDetailPanel');
+  if (!panel) return;
+  if (!brand) {
+    panel.innerHTML = '<div class="brand-empty-state">选择一个品牌后查看情报详情。</div><div id="brandKnowledgeStatus" style="display:none"></div><div id="brandOpportunityPanel" style="display:none"></div><div id="brandSocialSources" style="display:none"></div>';
+    return;
+  }
+  var sf = brandFollowers(brand);
+  var content = brandContent(brand);
+  var last = content.last_12_months || {};
+  var contacts = brandContacts(brand);
+  panel.innerHTML =
+    '<div class="brand-detail-header">' +
+      '<div class="brand-detail-name"><div><h3>' + esc(brand.name || '-') + '</h3><div class="brand-result-sub">' + esc([brand.name_cn, brand.company, brand.market].filter(Boolean).join(' · ')) + '</div></div>' +
+      '<span class="brand-chip dark">' + esc(brand.estimated_annual_revenue || 'N/A') + '</span></div>' +
+      '<div class="brand-chip-row">' + brandTags(brand).slice(0, 8).map(function(t) { return '<span class="brand-chip">' + esc(t) + '</span>'; }).join('') + '</div>' +
+      '<div class="brand-action-row"><button class="btn btn-primary btn-sm" onclick="copyBrandBriefToDemand(' + inlineJsArg(brand.name) + ')">进入需求/方案</button><button class="btn btn-outline btn-sm" onclick="showRelatedBrands(' + inlineJsArg(brand.name) + ')">查看关系图</button></div>' +
+    '</div>' +
+    '<div class="brand-detail-section"><h4>核心指标</h4><div class="brand-kpi-grid">' +
+      brandKpi('品牌规模', brand.estimated_annual_revenue || 'N/A', '估算年营收，辅助判断预算承载能力') +
+      brandKpi('用户基础', brand.user_base || '待补充', '品牌公开用户或消费群体描述') +
+      brandKpi('搜索量', formatCompactNumber((brand.overseas_presence || {}).brand_search_volume_monthly || brand.brand_search_volume_monthly || 0), '月度品牌搜索量或 AI 补充估算') +
+      brandKpi('内容活跃', formatCompactNumber(content.total_posts || 0) + ' posts/mo', '品牌相关月度社媒内容量') +
+      brandKpi('平均观看', formatCompactNumber(last.avg_views_per_post || 0), '近 12 个月内容平均观看') +
+      brandKpi('互动率', last.avg_engagement_rate || '待补充', '近 12 个月内容平均互动率') +
+    '</div></div>' +
+    renderBrandKnowledgeStatus(brand) +
+    renderBrandOpportunityPanel(brand) +
+    renderBrandSocialSources(brand, sf, contacts) +
+    renderBrandRelations(brand);
+}
+
+function renderBrandKnowledgeStatus(brand) {
+  var ready = isBrandKnowledgeReady(brand);
+  var source = String(brand.id || '').indexOf('db_') === 0 || String(brand.id || '').indexOf('cust_') === 0 ? '平台 AI Search / 手动补充' : '内置行业品牌样本';
+  var text = ready ? '可被 AI 对话、方案生成和 PPT 大纲作为品牌知识引用。' : '资料可用，但建议通过 AI Search 刷新后写入后端知识库。';
+  return '<div class="brand-detail-section" id="brandKnowledgeStatus"><h4>知识库状态</h4><div class="brand-chip-row"><span class="brand-chip dark">' + (ready ? '已沉淀' : '待增强') + '</span><span class="brand-chip">' + esc(source) + '</span><span class="brand-chip">最后更新 ' + esc(brand.last_updated || '待补充') + '</span></div><p style="font-size:12px;color:var(--text2);margin-top:8px">' + text + '</p></div>';
+}
+
+function renderBrandOpportunityPanel(brand) {
+  var content = brandContent(brand);
+  var angles = normalizeList(content.creative_angles);
+  var products = normalizeList(content.top_products_featured || brand.top_products);
+  if (!angles.length) angles = ['产品评测', '场景演示', '竞品对比', '真实用户体验'];
+  return '<div class="brand-detail-section" id="brandOpportunityPanel"><h4>内容机会</h4>' +
+    '<div style="font-size:12px;color:var(--text2);margin-bottom:8px">可直接带入 M3 需求和后续 PPT 的品牌卖点素材。</div>' +
+    '<div class="brand-chip-row">' + angles.slice(0, 8).map(function(a) { return '<span class="brand-chip">' + esc(a) + '</span>'; }).join('') + '</div>' +
+    (products.length ? '<div style="font-size:12px;margin-top:10px"><strong>主推产品：</strong>' + esc(products.join(' / ')) + '</div>' : '') +
+    '</div>';
+}
+
+function renderBrandSocialSources(brand, sf, contacts) {
+  var platforms = [
+    { key: 'youtube', label: 'YouTube', value: sf.youtube || 0 },
+    { key: 'instagram', label: 'Instagram', value: sf.instagram || 0 },
+    { key: 'tiktok', label: 'TikTok', value: sf.tiktok || 0 }
+  ];
+  var html = '<div class="brand-detail-section" id="brandSocialSources"><h4>社媒与外部来源</h4><div class="brand-source-grid">';
+  platforms.forEach(function(p) {
+    html += '<div class="brand-source-card"><strong>' + p.label + '</strong><span>' + formatCompactNumber(p.value) + ' followers</span><button class="btn btn-outline btn-sm" onclick="openBrandSocialSearch(' + inlineJsArg(brand.name) + ',' + inlineJsArg(p.key) + ')">打开搜索</button></div>';
+  });
+  html += '</div>';
+  var site = brand.website || brand.amazon_store || brand.linkedin_url;
+  if (site || contacts.length) {
+    html += '<div class="brand-chip-row" style="margin-top:10px">';
+    if (site) html += '<a class="brand-chip" target="_blank" href="' + esc(site) + '">官网/店铺</a>';
+    contacts.slice(0, 3).forEach(function(mail) { html += '<button class="brand-chip" onclick="copyText(' + inlineJsArg(mail) + ')">' + esc(mail) + '</button>'; });
+    html += '</div>';
+  }
+  html += '</div>';
+  return html;
+}
+
+function renderBrandRelations(brand) {
+  var related = findRelatedBrands(brand);
+  var competitors = findCompetitorBrands(brand);
+  var html = '<div class="brand-detail-section"><h4>竞品与关联品牌</h4>';
+  html += '<div style="font-size:12px;color:var(--text2);margin-bottom:8px">基于标签重叠和集团关系推断，用于竞品对标和方案论证。</div>';
+  html += '<div class="brand-inline-list">';
+  related.concat(competitors).slice(0, 12).forEach(function(b) {
+    html += '<button onclick="selectBrandByName(' + inlineJsArg(b.name) + ')">' + esc(b.name) + '</button>';
+  });
+  if (!related.length && !competitors.length) html += '<span style="font-size:12px;color:var(--text2)">暂无足够关系数据</span>';
+  html += '</div></div>';
+  return html;
+}
+
+function brandKpi(label, value, tip) {
+  return '<div class="brand-kpi"><span class="brand-data-tip" title="' + esc(tip || '') + '">' + esc(label) + '</span><strong>' + esc(value) + '</strong></div>';
+}
+
+function openBrandSocialSearch(brandName, platform) {
+  apiFetch('/brands/social-search?brand=' + encodeURIComponent(brandName) + '&platform=' + encodeURIComponent(platform || 'youtube'))
+    .then(function(r) { return r.json(); })
+    .then(function(d) { window.open(d.searchUrl || buildBrandSearchUrl(brandName, platform), '_blank'); })
+    .catch(function() { window.open(buildBrandSearchUrl(brandName, platform), '_blank'); });
+}
+
+function loadSocialForBrand(bn, bid, pf) { openBrandSocialSearch(bn, pf || 'youtube'); }
+function switchPlatformTab(el) { if (el) openBrandSocialSearch(selectedBrandName || '', el.getAttribute('data-plat') || 'youtube'); }
+function toggleBrandSocial(el, bid) { if (selectedBrandName) renderBrandDetail(getSelectedBrand()); }
+
+function copyBrandBriefToDemand(brandName) {
+  var brand = BRANDS.find(function(b) { return b.name === brandName; });
+  if (!brand) return;
+  var tags = brandTags(brand);
+  var content = brandContent(brand);
+  var angles = normalizeList(content.creative_angles);
+  var competitors = findCompetitorBrands(brand).slice(0, 5).map(function(b) { return b.name; });
+  switchPage('m3');
+  setTimeout(function() {
+    setValueIfPresent('d_brand', brand.name || '');
+    setValueIfPresent('d_company', brand.company || brand.name_cn || '');
+    setValueIfPresent('d_category', tags[0] || '');
+    setValueIfPresent('d_competitors', competitors.join(', '));
+    setValueIfPresent('d_usp', angles.slice(0, 3).join(' / ') || brand.description || '');
+    setValueIfPresent('d_notes', '来自品牌智库：' + (brand.name || '') + '，规模 ' + (brand.estimated_annual_revenue || '待补充') + '，用户基础 ' + (brand.user_base || '待补充') + '。');
+    toast('已把品牌情报带入需求/方案页');
+  }, 80);
+}
+
+function setValueIfPresent(id, value) { var el = document.getElementById(id); if (el) el.value = value || ''; }
+
+function exportBrandCSV() {
+  var rows = currentBrandResults && currentBrandResults.length ? currentBrandResults : BRANDS;
+  if (!rows || !rows.length) { toast('没有可导出的品牌', 'error'); return; }
+  var csv = 'Name,Chinese Name,Industry Tags,Market,Revenue,User Base,Search Volume,YouTube,Instagram,TikTok,Top Platform,Website,Contacts\n';
+  rows.forEach(function(b) {
+    var sf = brandFollowers(b);
+    var content = brandContent(b);
+    var last = content.last_12_months || {};
+    csv += [
+      csvCell(b.name),
+      csvCell(b.name_cn),
+      csvCell(brandTags(b).join(';')),
+      csvCell(b.market),
+      csvCell(b.estimated_annual_revenue),
+      csvCell(b.user_base),
+      csvCell((b.overseas_presence || {}).brand_search_volume_monthly || 0),
+      csvCell(sf.youtube || 0),
+      csvCell(sf.instagram || 0),
+      csvCell(sf.tiktok || 0),
+      csvCell(last.top_platform || ''),
+      csvCell(b.website || b.amazon_store || b.linkedin_url || ''),
+      csvCell(brandContacts(b).join(';'))
+    ].join(',') + '\n';
+  });
+  dlFile('brands.csv', '\ufeff' + csv, 'text/csv');
+}
+
+function normalizeEnrichedBrand(bd, q) {
+  bd = bd || {};
+  return {
+    id: 'cust_' + Date.now(),
+    name: bd.name || q,
+    name_cn: bd.name_cn || '',
+    industry_tags: normalizeList(bd.industry_tags || ['Other']),
+    market: bd.market || 'global',
+    estimated_annual_revenue: bd.estimated_annual_revenue || '$100M+',
+    user_base: bd.user_base || '',
+    overseas_presence: {
+      amazon_rating: bd.amazon_rating || 4.0,
+      social_followers: {
+        youtube: Number(bd.youtube_followers || 0),
+        instagram: Number(bd.instagram_followers || 0),
+        tiktok: Number(bd.tiktok_followers || 0)
+      },
+      brand_search_volume_monthly: Number(bd.brand_search_volume_monthly || 0)
+    },
+    social_content_monthly: {
+      total_posts: Number(bd.total_posts || 0),
+      creative_angles: normalizeList(bd.creative_angles),
+      top_products_featured: normalizeList(bd.top_products_featured),
+      last_12_months: {
+        avg_engagement_rate: bd.avg_engagement_rate || '3.0%',
+        avg_views_per_post: Number(bd.avg_views_per_post || 0),
+        top_platform: bd.top_platform || 'YouTube'
+      }
+    },
+    case_study_available: true,
+    last_updated: new Date().toISOString().slice(0, 10)
+  };
+}
+
+function upsertBrandRecord(brand) {
+  var idx = BRANDS.findIndex(function(b) { return String(b.name || '').toLowerCase() === String(brand.name || '').toLowerCase(); });
+  if (idx >= 0) BRANDS[idx] = Object.assign({}, BRANDS[idx], brand, { id: BRANDS[idx].id || brand.id });
+  else BRANDS.unshift(brand);
+}
+
+function brandToApiPayload(b) {
+  var sf = brandFollowers(b);
+  var content = brandContent(b);
+  var last = content.last_12_months || {};
+  return {
+    name: b.name,
+    name_cn: b.name_cn,
+    industry_tags: brandTags(b),
+    market: b.market,
+    estimated_annual_revenue: b.estimated_annual_revenue,
+    user_base: b.user_base,
+    amazon_rating: (b.overseas_presence || {}).amazon_rating,
+    youtube_followers: sf.youtube || 0,
+    instagram_followers: sf.instagram || 0,
+    tiktok_followers: sf.tiktok || 0,
+    search_volume_monthly: (b.overseas_presence || {}).brand_search_volume_monthly || 0,
+    monthly_posts: content.total_posts || 0,
+    avg_engagement: last.avg_engagement_rate || '',
+    avg_views: last.avg_views_per_post || 0,
+    top_platform: last.top_platform || '',
+    creative_angles: normalizeList(content.creative_angles),
+    top_products: normalizeList(content.top_products_featured)
+  };
+}
+
+function brandTags(b) { return normalizeList(b && b.industry_tags); }
+function brandFollowers(b) { return (b && (b.social_followers || (b.overseas_presence || {}).social_followers)) || {}; }
+function brandContent(b) { return (b && (b.social_content_monthly || {})) || {}; }
+function brandContacts(b) { return normalizeList((b && (b.contact_emails || b.contact_email || b.contacts)) || ''); }
+function isBrandKnowledgeReady(b) { return !!(b && (b.case_study_available || b.last_updated || String(b.id || '').indexOf('db_') === 0 || String(b.id || '').indexOf('cust_') === 0)); }
+
+function normalizeList(value) {
+  if (Array.isArray(value)) return value.map(function(v) { return String(v || '').trim(); }).filter(Boolean);
+  return String(value || '').split(/[,;，、/]+/).map(function(v) { return v.trim(); }).filter(Boolean);
+}
+
+function sortBrandResults(rows) {
+  var mode = document.getElementById('brandSort')?.value || 'relevance';
+  if (mode === 'revenue') rows.sort(function(a, b) { return brandRevenueScore(b) - brandRevenueScore(a); });
+  else if (mode === 'social') rows.sort(function(a, b) { return brandSocialScore(b) - brandSocialScore(a); });
+  else if (mode === 'search') rows.sort(function(a, b) { return brandSearchScore(b) - brandSearchScore(a); });
+  return rows;
+}
+
+function brandRevenueScore(b) {
+  var raw = String((b && b.estimated_annual_revenue) || '').toUpperCase();
+  var n = parseFloat((raw.match(/[\d.]+/) || [0])[0]) || 0;
+  if (raw.indexOf('B') >= 0) return n * 1000;
+  if (raw.indexOf('M') >= 0) return n;
+  if (n > 1000000) return n / 1000000;
+  return n;
+}
+function brandSocialScore(b) { var sf = brandFollowers(b); return Number(sf.youtube || 0) + Number(sf.instagram || 0) + Number(sf.tiktok || 0); }
+function brandSearchScore(b) { return Number(((b || {}).overseas_presence || {}).brand_search_volume_monthly || (b || {}).brand_search_volume_monthly || 0); }
+
+function formatCompactNumber(n) {
+  n = Number(n || 0);
+  if (n >= 100000000) return (n / 100000000).toFixed(n >= 1000000000 ? 1 : 0) + '亿';
+  if (n >= 10000) return (n / 10000).toFixed(n >= 100000 ? 0 : 1) + '万';
+  if (n >= 1000) return (n / 1000).toFixed(n >= 10000 ? 0 : 1) + 'K';
+  return String(n);
+}
+
+function inlineJsArg(v) { return esc(JSON.stringify(String(v || ''))); }
+function csvCell(v) { return '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"'; }
+function buildBrandSearchUrl(brandName, platform) {
+  if (platform === 'instagram') return 'https://www.instagram.com/explore/tags/' + encodeURIComponent(String(brandName || '').replace(/[^a-zA-Z0-9]/g, ''));
+  if (platform === 'tiktok') return 'https://www.tiktok.com/search/video?q=' + encodeURIComponent(brandName || '');
+  return 'https://www.youtube.com/results?search_query=' + encodeURIComponent((brandName || '') + ' review');
+}
 // ===== M3: DEMAND & PROPOSAL (v8.0) =====
 var uploadedDemandContent = '';
 var uploadedDemandFileName = '';
@@ -3128,7 +3549,8 @@ function switchPage(id) {
     'doLogin', 'doLogout', 'switchPage', 'apiFetch', 'toast', 'esc',
     'openAddCustomer', 'showAddCustomer', 'closeCustModal', 'dismissDup', 'saveCustomer', 'filterCustomers', 'setCustomerScope', 'switchCrmView',
     'closeCustomerDetail', 'loadOpportunities', 'showOppModal', 'closeOppModal', 'saveOpportunity',
-    'generateAIStrategy', 'updateStrategy', 'searchNewBrand', 'exportBrandCSV',
+    'generateAIStrategy', 'updateStrategy', 'searchNewBrand', 'exportBrandCSV', 'filterBrands', 'filterByTreeTag',
+    'selectBrand', 'selectBrandByName', 'openBrandSocialSearch', 'copyBrandBriefToDemand',
     'initM3', 'goAnalyze', 'goGenerate', 'goStep3', 'resetDemand', 'updSteps', 'selTmpl', 'updateTemplateSelectionUI',
     'generateProposal', 'updateProposalDraftFromEditor', 'getCurrentProposalDraft', 'downloadProposal', 'copyProposal', 'openProposalToInfluencers',
     'getEditedDemand', 'syncCurDemandFromAnalysis', 'handleDemandFile', 'analyzeDemandAI',

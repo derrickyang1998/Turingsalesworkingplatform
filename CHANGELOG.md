@@ -234,3 +234,32 @@
 - M1: 行业品牌智库 — 标签树 + 品牌搜索 + 数据展示
 - M2: 客户策略规划 — 品牌阶段×行业×预算策略模型
 - 纯前端 HTML 双击运行
+# Changelog Update - v0.2.5-brand-intelligence-workspace (2026-07-02)
+
+## v0.2.5-brand-intelligence-workspace (2026-07-02) - M1 品牌情报工作台重设计
+
+### 品牌库 UI 重设计
+- 将 M1 从旧版“标签树 + 单列品牌卡片”改为三栏品牌情报工作台：行业标签筛选、品牌结果列表、右侧品牌详情面板。
+- 新增品牌统计条，显示品牌总量、行业标签数量、知识库沉淀状态和当前筛选结果。
+- 右侧详情面板集中展示品牌规模、用户基础、搜索量、社媒粉丝、内容活跃度、互动率、内容机会、主推产品、社媒来源和竞品/关联品牌。
+- 保留品牌数据 hover/title 解释，关键指标可查看口径说明。
+
+### 功能闭环
+- `AI Search` 继续走后端 `/api/brands/enrich`，补充后通过 `/api/brands` 保存，沿用后端品牌知识库归档路径。
+- 品牌搜索历史、标签筛选、排序、CSV 导出、社媒搜索入口、竞品选择和“进入需求/方案”动作接入新版工作台。
+- 品牌情报可直接带入 M3 需求/方案页，保持后续方案和 PPT 生成链路不变。
+
+### 安全边界
+- 未修改 `platform/ppt.js`、PPT 脚本版本、M3 方案生成、`latest_ui_compat_service` 或 RAG/PPT 后端桥接。
+- 保留 `ppt.js?v=20260702v916kbbridge` 和 `window.tmPPTBuild = 20260702-v916-kb-bridge-client-cn`。
+
+### 验证
+- `node --test tests/brand_workspace_ui.test.js`
+- `node --check platform/app.js`
+- `node --check platform/ppt.js`
+- `node --check platform/server/server.js`
+- `node --check platform/server/routes_brands.js`
+- `npm test` in `platform/server`: 21/21 passing
+- Playwright smoke: login, open M1, search `EcoFlow`, verify workspace/detail/knowledge/opportunity/social sections and latest PPT bridge build.
+
+---
