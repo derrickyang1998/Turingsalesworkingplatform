@@ -47,6 +47,27 @@ function parseJson(text) {
   return { rows: [], content: JSON.stringify(data, null, 2), kind: 'json' };
 }
 
+function unwrapXlsxRows(rawRows) {
+  if (!Array.isArray(rawRows)) return [];
+  if (rawRows.length && rawRows[0] && !Array.isArray(rawRows[0]) && Array.isArray(rawRows[0].data)) {
+    const sheet = rawRows.find(function(item) { return item && Array.isArray(item.data) && item.data.length; });
+    return sheet ? sheet.data : [];
+  }
+  return rawRows;
+}
+
+function normalizeXlsxRows(rawRows) {
+  const tableRows = unwrapXlsxRows(rawRows);
+  if (!tableRows || !tableRows.length) return [];
+  if (!Array.isArray(tableRows[0])) return tableRows.filter(function(row) { return row && typeof row === 'object'; });
+  const headers = tableRows[0].map(function(value, index) { return String(value || ('col_' + index)).trim(); });
+  return tableRows.slice(1).map(function(cells) {
+    const row = {};
+    headers.forEach(function(header, index) { row[header || ('col_' + index)] = cells[index] === undefined || cells[index] === null ? '' : cells[index]; });
+    return row;
+  });
+}
+
 async function parseXlsx(filePath) {
   let readXlsxFile;
   try {
@@ -57,13 +78,7 @@ async function parseXlsx(filePath) {
     throw err;
   }
   const rawRows = await readXlsxFile(filePath);
-  if (!rawRows || !rawRows.length) return { rows: [], content: 'Rows: 0', kind: 'table' };
-  const headers = rawRows[0].map(function(value, index) { return String(value || ('col_' + index)).trim(); });
-  const rows = rawRows.slice(1).map(function(cells) {
-    const row = {};
-    headers.forEach(function(header, index) { row[header || ('col_' + index)] = cells[index] === undefined || cells[index] === null ? '' : cells[index]; });
-    return row;
-  });
+  const rows = normalizeXlsxRows(rawRows);
   return { rows: rows, content: tableSummary(rows, 15), kind: 'table' };
 }
 
@@ -88,5 +103,6 @@ async function readUploadedFile(file) {
 module.exports = {
   readUploadedFile,
   parseCsv,
-  tableSummary
+  tableSummary,
+  normalizeXlsxRows
 };

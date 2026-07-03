@@ -29,13 +29,16 @@ app.get('/api/influencers', authMiddleware, (req, res) => {
       region LIKE ? OR
       contact_email LIKE ? OR
       content_deliverable LIKE ? OR
+      influencer_type LIKE ? OR
+      parent_record LIKE ? OR
       CAST(followers AS TEXT) LIKE ? OR
       CAST(avg_views_10 AS TEXT) LIKE ? OR
       CAST(cost_usd AS TEXT) LIKE ? OR
       CAST(quoted_price AS TEXT) LIKE ? OR
-      CAST(cpm AS TEXT) LIKE ?
+      CAST(cpm AS TEXT) LIKE ? OR
+      CAST(cpv AS TEXT) LIKE ?
     )`;
-    for (let i = 0; i < 18; i++) params.push('%' + search + '%');
+    for (let i = 0; i < 21; i++) params.push('%' + search + '%');
   }
   if (min_followers) { sql += ' AND followers >= ?'; params.push(parseInt(min_followers)); }
   if (max_followers) { sql += ' AND followers <= ?'; params.push(parseInt(max_followers)); }

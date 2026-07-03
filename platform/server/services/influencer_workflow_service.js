@@ -1,26 +1,26 @@
 const knowledgeService = require('./knowledge_service');
 
 const TEMPLATE_HEADERS = [
-  'No.',
-  'Date',
-  'Submitter',
-  'Project',
-  'Product',
-  'Duplicate',
-  'KOL Handle',
-  'Followers',
-  'Link',
-  'Platform',
-  'Country',
-  'Tag',
-  'AvgViews10',
-  'Cost',
-  'Deliverable',
-  'TuringNote',
-  'Price',
-  'Email',
-  'CPM',
-  'CPV'
+  '日期',
+  '提报人',
+  '项目&客户',
+  '推广产品',
+  '是否重复',
+  '网红频道名称',
+  '网红粉丝量',
+  '网红频道链接',
+  '社媒平台',
+  '国家',
+  '网红类型',
+  '近10个视频均播',
+  '网红成本价格（折算美元）',
+  '网红交付物（植入-完播等信息）',
+  'Turing备注',
+  '对外商务报价（美元）',
+  '网红联系方式',
+  'CPM（自动计算）',
+  'CPV(自动计算)',
+  '父记录'
 ];
 
 const FIELD_ALIASES = {
@@ -30,23 +30,25 @@ const FIELD_ALIASES = {
   followers: ['Followers', 'followers', '网红粉丝量', '粉丝量', 'Fans'],
   avg_views_10: ['AvgViews10', 'Avg Views 10', 'avg_views_10', '近10个视频均播', '近10个视频平均播放', '均播'],
   avg_engagement: ['Engagement', 'avg_engagement', '互动率', 'engagement_rate'],
-  category: ['Category', 'category', 'Tag', 'tags', '标签', '类目'],
+  category: ['Category', 'category', 'Tag', 'tags', '标签', '类目', '网红类型'],
+  influencer_type: ['网红类型', 'Influencer Type', 'Type', 'type', 'KOL Type', '达人类型'],
   tags: ['Tag', 'Tags', 'tags', '标签'],
   region: ['Country', 'country', 'region', '国家', '地区', 'Region'],
   language: ['Language', 'language', '语言'],
   content_style: ['Content Style', 'content_style', '内容风格'],
   collab_type: ['Collab Type', 'collab_type', '合作形式'],
-  cost_usd: ['Cost', 'Cost(USD)', 'cost_usd', '成本价', '报价成本'],
-  cpm: ['CPM', 'cpm'],
+  cost_usd: ['Cost', 'Cost(USD)', 'cost_usd', '成本价', '报价成本', '网红成本价格（折算美元）', '网红成本价格(折算美元)', '网红成本价格'],
+  cpm: ['CPM', 'cpm', 'CPM（自动计算）', 'CPM(自动计算)'],
   brand_collab_history: ['TuringNote', 'Brand History', 'brand_collab_history', 'Turing备注', '备注', '历史合作品牌'],
-  contact_email: ['Email', 'email', 'contact_email', '邮箱'],
-  project_name: ['Project', 'project_name', '项目'],
+  contact_email: ['Email', 'email', 'contact_email', '邮箱', '网红联系方式', '联系方式', '联系信息'],
+  project_name: ['Project', 'project_name', '项目', '项目&客户', '项目客户'],
   product_name: ['Product', 'product_name', '推广产品', '产品'],
   reporter: ['Submitter', 'reporter', '提报人'],
-  quoted_price: ['Price', 'quoted_price', '对外商务报价', '商务报价'],
-  content_deliverable: ['Deliverable', 'content_deliverable', '网红交付物', '交付物'],
+  quoted_price: ['Price', 'quoted_price', '对外商务报价', '商务报价', '对外商务报价（美元）', '对外商务报价(美元)'],
+  content_deliverable: ['Deliverable', 'content_deliverable', '网红交付物', '交付物', '网红交付物（植入-完播等信息）', '网红交付物(植入-完播等信息)'],
   is_duplicate: ['Duplicate', 'is_duplicate', '是否重复'],
-  cpv: ['CPV', 'cpv']
+  cpv: ['CPV', 'cpv', 'CPV(自动计算)', 'CPV（自动计算）'],
+  parent_record: ['父记录', 'Parent Record', 'parent_record', 'Parent']
 };
 
 function normalizeKey(key) {
@@ -100,25 +102,23 @@ function normalizeInfluencerRow(row) {
   Object.keys(FIELD_ALIASES).forEach(function(field) {
     normalized[field] = firstValue(row, FIELD_ALIASES[field], '');
   });
-  const cpv = normalized.cpv;
   normalized.platform = String(normalized.platform || '').trim();
   normalized.kol_handle = String(normalized.kol_handle || '').trim();
   normalized.profile_link = String(normalized.profile_link || '').trim();
   normalized.followers = Math.round(parseNumber(normalized.followers));
   normalized.avg_views_10 = Math.round(parseNumber(normalized.avg_views_10));
   normalized.avg_engagement = parseNumber(normalized.avg_engagement);
-  normalized.category = String(normalized.category || normalized.tags || '').trim();
-  normalized.tags = String(normalized.tags || normalized.category || '').trim();
+  normalized.influencer_type = String(normalized.influencer_type || normalized.category || normalized.tags || '').trim();
+  normalized.category = String(normalized.category || normalized.influencer_type || normalized.tags || '').trim();
+  normalized.tags = String(normalized.tags || normalized.category || normalized.influencer_type || '').trim();
   normalized.region = String(normalized.region || '').trim();
   normalized.language = String(normalized.language || '').trim();
   normalized.content_style = String(normalized.content_style || '').trim();
   normalized.collab_type = String(normalized.collab_type || 'Dedicated').trim();
   normalized.cost_usd = Math.round(parseNumber(normalized.cost_usd));
   normalized.cpm = parseNumber(normalized.cpm);
+  normalized.cpv = parseNumber(normalized.cpv);
   normalized.brand_collab_history = String(normalized.brand_collab_history || '').trim();
-  if (cpv) {
-    normalized.brand_collab_history = [normalized.brand_collab_history, 'CPV: ' + cpv].filter(Boolean).join(' | ');
-  }
   normalized.contact_email = String(normalized.contact_email || '').trim();
   normalized.project_name = String(normalized.project_name || '').trim();
   normalized.product_name = String(normalized.product_name || '').trim();
@@ -126,6 +126,7 @@ function normalizeInfluencerRow(row) {
   normalized.quoted_price = Math.round(parseNumber(normalized.quoted_price));
   normalized.content_deliverable = String(normalized.content_deliverable || '').trim();
   normalized.is_duplicate = parseBoolean(normalized.is_duplicate);
+  normalized.parent_record = String(normalized.parent_record || '').trim();
   return normalized;
 }
 
@@ -173,7 +174,7 @@ function importInfluencerRows(db, rows, opts) {
     err.statusCode = 400;
     throw err;
   }
-  const insert = db.prepare(`INSERT INTO influencers (platform, kol_handle, profile_link, followers, avg_views_10, avg_engagement, category, sub_category, region, language, content_style, collab_type, cost_usd, cpm, brand_collab_history, contact_email, project_name, product_name, reporter, tags, quoted_price, content_deliverable, is_duplicate, import_batch, data_source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  const insert = db.prepare(`INSERT INTO influencers (platform, kol_handle, profile_link, followers, avg_views_10, avg_engagement, category, sub_category, region, language, content_style, collab_type, cost_usd, cpm, brand_collab_history, contact_email, project_name, product_name, reporter, tags, quoted_price, content_deliverable, is_duplicate, import_batch, data_source, influencer_type, cpv, parent_record) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   let imported = 0;
   let skipped = 0;
   const normalizedRows = [];
@@ -212,7 +213,10 @@ function importInfluencerRows(db, rows, opts) {
         normalized.content_deliverable,
         normalized.is_duplicate,
         batch,
-        opts.data_source || 'import'
+        opts.data_source || 'import',
+        normalized.influencer_type,
+        normalized.cpv,
+        normalized.parent_record
       );
       imported++;
       normalizedRows.push(normalized);
@@ -244,7 +248,6 @@ function csvLine(values) {
 function influencerToTemplateRow(inf, index) {
   inf = inf || {};
   return [
-    index + 1,
     (inf.created_at || '').substring(0, 10),
     inf.reporter || '',
     inf.project_name || '',
@@ -255,7 +258,7 @@ function influencerToTemplateRow(inf, index) {
     inf.profile_link || '',
     inf.platform || '',
     inf.region || '',
-    inf.tags || inf.category || '',
+    inf.influencer_type || inf.category || inf.tags || '',
     inf.avg_views_10 || 0,
     inf.cost_usd || 0,
     inf.content_deliverable || inf.collab_type || '',
@@ -263,7 +266,8 @@ function influencerToTemplateRow(inf, index) {
     inf.quoted_price || 0,
     inf.contact_email || '',
     inf.cpm || 0,
-    ''
+    inf.cpv || 0,
+    inf.parent_record || ''
   ];
 }
 
@@ -284,7 +288,7 @@ function buildTemplateCsv() {
   return buildInfluencerCsv([{
     created_at: '2026-07-03',
     reporter: 'Derrick',
-    project_name: 'Sample Launch',
+    project_name: 'Sample Launch / Sample Customer',
     product_name: 'Sample Product',
     is_duplicate: 0,
     kol_handle: '@sample_creator',
@@ -292,15 +296,18 @@ function buildTemplateCsv() {
     profile_link: 'https://example.com/@sample_creator',
     platform: 'TikTok',
     region: 'US',
-    tags: 'outdoor, tech',
+    influencer_type: 'Outdoor Tech',
+    tags: 'Outdoor Tech',
     avg_views_10: 45000,
     cost_usd: 1500,
     content_deliverable: '1 short video',
     brand_collab_history: 'TuringNote sample',
     quoted_price: 2500,
     contact_email: 'creator@example.com',
-    cpm: 33
-  }], { includeAliasHint: true });
+    cpm: 33,
+    cpv: 0.05,
+    parent_record: 'CRM-001'
+  }]);
 }
 
 function queryInfluencers(db, opts) {

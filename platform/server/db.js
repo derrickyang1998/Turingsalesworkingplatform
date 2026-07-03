@@ -525,6 +525,9 @@ try { db.prepare("ALTER TABLE influencers ADD COLUMN quoted_price INTEGER DEFAUL
 try { db.prepare("ALTER TABLE influencers ADD COLUMN content_deliverable TEXT").run(); } catch(e) {}
 try { db.prepare("ALTER TABLE influencers ADD COLUMN is_duplicate INTEGER DEFAULT 0").run(); } catch(e) {}
 try { db.prepare("ALTER TABLE influencers ADD COLUMN import_batch TEXT").run(); } catch(e) {}
+try { db.prepare("ALTER TABLE influencers ADD COLUMN influencer_type TEXT").run(); } catch(e) {}
+try { db.prepare("ALTER TABLE influencers ADD COLUMN cpv REAL DEFAULT 0").run(); } catch(e) {}
+try { db.prepare("ALTER TABLE influencers ADD COLUMN parent_record TEXT").run(); } catch(e) {}
 
 // ===== AI Knowledge Foundation Migration =====
 try { db.prepare("ALTER TABLE knowledge_entries ADD COLUMN title TEXT DEFAULT ''").run(); } catch(e) {}

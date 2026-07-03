@@ -3185,7 +3185,7 @@ function ensureM4TableStyles() {
   if (document.getElementById('m4TableStickyStyles')) return;
   var style = document.createElement('style');
   style.id = 'm4TableStickyStyles';
-  style.textContent = '.m4-table{border-collapse:separate;border-spacing:0;min-width:1180px}.m4-table thead th{position:sticky;top:0;z-index:3;background:var(--surface);box-shadow:0 1px 0 var(--border)}.m4-table th:first-child,.m4-table td:first-child{width:42px;text-align:center}.m4-table input[type="checkbox"]{width:16px!important;height:16px!important;min-width:16px;margin:0;vertical-align:middle;accent-color:#1a1a1a}.m4-table tbody tr:hover{background:#fafaf9}';
+  style.textContent = '.m4-table{border-collapse:separate;border-spacing:0;min-width:1320px}.m4-table thead th{position:sticky;top:0;z-index:3;background:var(--surface);box-shadow:0 1px 0 var(--border)}.m4-table th:first-child,.m4-table td:first-child{width:42px;text-align:center}.m4-table input[type="checkbox"]{width:16px!important;height:16px!important;min-width:16px;margin:0;vertical-align:middle;accent-color:#1a1a1a}.m4-table tbody tr:hover{background:#fafaf9}';
   document.head.appendChild(style);
 }
 function initM4() {
@@ -3233,7 +3233,7 @@ function renderInfTable(data) {
   var c = document.getElementById('infTableContainer');
   if (!c) return;
   if (!data || !data.length) { c.innerHTML = '<p style="text-align:center;padding:30px;opacity:.5">No influencers</p>'; return; }
-  var h = '<table class="m4-table"><thead><tr><th><input type="checkbox" id="selectAllInf" onchange="toggleAll(this)"></th><th>ID</th><th>KOL</th><th>Platform</th><th>Followers</th><th>Project</th><th>Product</th><th>Region</th><th>Tags</th><th>Link</th><th>Deliverable</th><th>Cost</th><th>Action</th></tr></thead><tbody>';
+  var h = '<table class="m4-table"><thead><tr><th><input type="checkbox" id="selectAllInf" onchange="toggleAll(this)"></th><th>ID</th><th>KOL</th><th>Platform</th><th>Followers</th><th>Project</th><th>Product</th><th>Region</th><th>Type</th><th>Parent</th><th>Link</th><th>Deliverable</th><th>Cost</th><th>Action</th></tr></thead><tbody>';
   data.forEach(function(inf) {
     h += '<tr><td><input type="checkbox" class="infcb" value="' + esc(inf.id || '') + '"></td>';
     h += '<td>#' + esc(inf.id || '') + '</td>';
@@ -3243,7 +3243,8 @@ function renderInfTable(data) {
     h += '<td>' + esc(inf.project_name || '-') + '</td>';
     h += '<td>' + esc(inf.product_name || '-') + '</td>';
     h += '<td>' + esc(inf.region || '-') + '</td>';
-    h += '<td>' + esc(inf.tags || inf.category || '-') + '</td>';
+    h += '<td>' + esc(inf.influencer_type || inf.tags || inf.category || '-') + '</td>';
+    h += '<td>' + esc(inf.parent_record || '-') + '</td>';
     h += '<td style="max-width:160px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(inf.profile_link || '-') + '</td>';
     h += '<td style="max-width:150px">' + esc(inf.content_deliverable || inf.collab_type || '-') + '</td>';
     h += '<td>$' + (inf.quoted_price || inf.cost_usd || 0) + '</td>';
@@ -3355,7 +3356,7 @@ async function downloadInfTemplate() {
     var blob = await r.blob();
     dlFile('influencer_import_template.csv', blob, 'text/csv;charset=utf-8');
   } catch (e) {
-    var csv = '\uFEFFNo.,Date,Submitter,Project,Product,Duplicate,KOL Handle,Followers,Link,Platform,Country,Tag,AvgViews10,Cost,Deliverable,TuringNote,Price,Email,CPM,CPV\n';
+    var csv = '\uFEFF日期,提报人,项目&客户,推广产品,是否重复,网红频道名称,网红粉丝量,网红频道链接,社媒平台,国家,网红类型,近10个视频均播,网红成本价格（折算美元）,网红交付物（植入-完播等信息）,Turing备注,对外商务报价（美元）,网红联系方式,CPM（自动计算）,CPV(自动计算),父记录\n';
     dlFile('influencer_import_template.csv', csv, 'text/csv;charset=utf-8');
   }
 }

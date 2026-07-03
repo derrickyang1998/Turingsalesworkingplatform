@@ -120,7 +120,60 @@ test('influencer import accepts the historical 19-column template aliases', asyn
   db.close();
 });
 
-test('influencer template download keeps the 19-column export contract', async () => {
+test('influencer import accepts the custom upload header workbook contract', async () => {
+  const db = freshDb();
+  const routes = mountRoutes(db);
+
+  const result = await invoke(routes, 'POST /api/influencers/import', {
+    body: {
+      batch_id: 'custom-header-batch',
+      rows: [{
+        '日期': '2026-07-03',
+        '提报人': 'Derrick',
+        '项目&客户': 'Bluetti / Summer Launch',
+        '推广产品': 'Power Station',
+        '是否重复': '否',
+        '网红频道名称': '@custom_kol',
+        '网红粉丝量': '88K',
+        '网红频道链接': 'https://example.com/custom-kol',
+        '社媒平台': 'Instagram',
+        '国家': 'US',
+        '网红类型': 'Outdoor Tech',
+        '近10个视频均播': '22000',
+        '网红成本价格（折算美元）': '900',
+        '网红交付物（植入-完播等信息）': '1 reel + 1 story',
+        'Turing备注': 'Custom header note',
+        '对外商务报价（美元）': '1600',
+        '网红联系方式': 'custom@example.com',
+        'CPM（自动计算）': '41',
+        'CPV(自动计算)': '0.04',
+        '父记录': 'CRM-001'
+      }]
+    }
+  });
+
+  assert.equal(result.statusCode, 200);
+  assert.equal(result.payload.imported, 1);
+  const inf = db.prepare("SELECT * FROM influencers WHERE import_batch = ? AND kol_handle = ?").get('custom-header-batch', '@custom_kol');
+  assert.ok(inf);
+  assert.equal(inf.project_name, 'Bluetti / Summer Launch');
+  assert.equal(inf.influencer_type, 'Outdoor Tech');
+  assert.equal(inf.category, 'Outdoor Tech');
+  assert.equal(inf.cost_usd, 900);
+  assert.equal(inf.content_deliverable, '1 reel + 1 story');
+  assert.equal(inf.quoted_price, 1600);
+  assert.equal(inf.contact_email, 'custom@example.com');
+  assert.equal(inf.cpm, 41);
+  assert.equal(inf.cpv, 0.04);
+  assert.equal(inf.parent_record, 'CRM-001');
+
+  const byParent = await invoke(routes, 'GET /api/influencers', { query: { search: 'CRM-001' } });
+  assert.equal(byParent.payload.influencers.some(function(row) { return row.id === inf.id; }), true);
+
+  db.close();
+});
+
+test('influencer template download uses the custom upload headers', async () => {
   const db = freshDb();
   const routes = mountRoutes(db);
 
@@ -129,8 +182,8 @@ test('influencer template download keeps the 19-column export contract', async (
   assert.equal(result.statusCode, 200);
   assert.match(result.headers['content-type'], /text\/csv/);
   assert.match(result.headers['content-disposition'], /influencer_import_template\.csv/);
-  assert.match(result.body, /No\.,Date,Submitter,Project,Product,Duplicate,KOL Handle,Followers,Link,Platform,Country,Tag,AvgViews10,Cost,Deliverable,TuringNote,Price,Email,CPM,CPV/);
-  assert.match(result.body, /网红频道名称/);
+  assert.match(result.body, /日期,提报人,项目&客户,推广产品,是否重复,网红频道名称,网红粉丝量,网红频道链接,社媒平台,国家,网红类型,近10个视频均播,网红成本价格（折算美元）,网红交付物（植入-完播等信息）,Turing备注,对外商务报价（美元）,网红联系方式,CPM（自动计算）,CPV\(自动计算\),父记录/);
+  assert.match(result.body, /@sample_creator/);
 
   db.close();
 });

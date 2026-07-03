@@ -1,4 +1,28 @@
 # Changelog – TuringMarket 图灵商务在线工作平台
+## v0.2.8-influencer-custom-upload-headers (2026-07-03) - M4 自定义网红上传表头
+
+### 自定义上传表头
+- 根据 `推广项目-网红合作数据表-上传表头.xlsx` 建立 M4 网红导入模板，下载模板改为 20 个中文表头：日期、提报人、项目&客户、推广产品、是否重复、网红频道名称、网红粉丝量、网红频道链接、社媒平台、国家、网红类型、近10个视频均播、网红成本价格（折算美元）、网红交付物（植入-完播等信息）、Turing备注、对外商务报价（美元）、网红联系方式、CPM（自动计算）、CPV(自动计算)、父记录。
+- 保留历史 19 列英文模板别名兼容，旧 `No./Date/Submitter/Project/Product/.../CPV` 文件仍可导入。
+- 新增 `influencer_type`、`cpv`、`parent_record` 字段入库，`网红类型` 同步映射到分类/标签，`父记录` 可用于关联 CRM 或飞书父级记录。
+
+### 上传解析与搜索
+- 修复 XLSX 上传解析器兼容问题：`read-excel-file` 返回 `{ sheet, data }` 工作表对象时不再报 `rawRows[0].map is not a function`。
+- M4 统一搜索扩展到 `influencer_type`、`parent_record` 和 `cpv`，可直接搜索网红类型、父记录、链接、ID、标签和表格展示字段。
+- M4 列表增加 Type、Parent 展示列，模板下载 API 失败时的前端兜底模板也改为同一套中文 20 列表头。
+- 发布脚本补充上传 `file_ingest_service.js` 和新增测试，线上部署会同步校验 XLSX 解析服务。
+
+### 验证
+- `node --test platform/server/tests/file_ingest_service.test.js`
+- `node --test platform/server/tests/influencer_workflow.test.js`
+- `node --test platform/server/tests/*.test.js`：32/32 passing
+- `node --check platform/app.js`
+- `node --check platform/server/services/file_ingest_service.js`
+- `node --check platform/server/services/influencer_workflow_service.js`
+- 使用真实附件 `C:\Users\29272\Desktop\推广项目-网红合作数据表-上传表头.xlsx` 验证服务层读取不再抛错；附件本身只有表头，因此 rows=0 符合表头说明用途。
+
+---
+
 ## v0.2.7-influencer-workflow-import-feishu-order (2026-07-03) - M4 网红导入、飞书同步与下单资源修复
 
 ### 网红导入与模板
