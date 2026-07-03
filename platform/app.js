@@ -3171,6 +3171,349 @@ function downloadInfTemplate() {
   var csv = '日期,提报人,项目,推广产品,是否重复,网红频道名称,网红粉丝量,网红频道链接,社媒平台,国家,标签,近10个视频均播,成本价,网红交付物,Turing备注,对外商务报价,邮箱,cpm,cpv';
   dlFile('influencer_template.csv', csv + '\n', 'text/csv');
 }
+// ===== M4: INFLUENCER WORKFLOW FIX (final override) =====
+function dlFile(name, content, mime) {
+  var blob = content instanceof Blob ? content : new Blob([content], { type: mime || 'text/plain;charset=utf-8' });
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(function() { URL.revokeObjectURL(a.href); a.remove(); }, 0);
+}
+function ensureM4TableStyles() {
+  if (document.getElementById('m4TableStickyStyles')) return;
+  var style = document.createElement('style');
+  style.id = 'm4TableStickyStyles';
+  style.textContent = '.m4-table{border-collapse:separate;border-spacing:0;min-width:1180px}.m4-table thead th{position:sticky;top:0;z-index:3;background:var(--surface);box-shadow:0 1px 0 var(--border)}.m4-table th:first-child,.m4-table td:first-child{width:42px;text-align:center}.m4-table input[type="checkbox"]{width:16px!important;height:16px!important;min-width:16px;margin:0;vertical-align:middle;accent-color:#1a1a1a}.m4-table tbody tr:hover{background:#fafaf9}';
+  document.head.appendChild(style);
+}
+function initM4() {
+  ensureM4TableStyles();
+  loadInfluencersFromAPI().then(function() { loadCollaborations(); });
+}
+function m4Filters() {
+  return {
+    platform: document.getElementById('filt_platform')?.value || '',
+    region: document.getElementById('filt_region')?.value || '',
+    project_name: document.getElementById('filt_project')?.value || '',
+    product_name: document.getElementById('filt_product')?.value || '',
+    tags: document.getElementById('filt_tags')?.value || '',
+    search: document.getElementById('filt_search')?.value || document.getElementById('filt_project')?.value || document.getElementById('filt_product')?.value || document.getElementById('filt_tags')?.value || ''
+  };
+}
+function loadInfluencersFromAPI() {
+  var filters = m4Filters();
+  var qs = '?sort_by=followers';
+  Object.keys(filters).forEach(function(key) {
+    if (filters[key]) qs += '&' + encodeURIComponent(key) + '=' + encodeURIComponent(filters[key]);
+  });
+  return apiFetch('/influencers' + qs).then(function(r) { return r.json(); }).then(function(d) {
+    lastInfAPI = d.influencers || [];
+    lastMatch = lastInfAPI;
+    renderInfTable(lastInfAPI);
+    return lastInfAPI;
+  }).catch(function(e) {
+    lastInfAPI = [];
+    lastMatch = [];
+    var c = document.getElementById('infTableContainer');
+    if (c) c.innerHTML = '<p style="text-align:center;padding:30px;opacity:.5">Load failed: ' + esc(e.message) + '</p>';
+    return [];
+  });
+}
+function matchInfluencers() { return loadInfluencersFromAPI(); }
+function fmtCount(n) {
+  n = Number(n || 0);
+  if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+  if (n >= 1000) return Math.round(n / 1000) + 'K';
+  return String(n);
+}
+function renderInfTable(data) {
+  ensureM4TableStyles();
+  var c = document.getElementById('infTableContainer');
+  if (!c) return;
+  if (!data || !data.length) { c.innerHTML = '<p style="text-align:center;padding:30px;opacity:.5">No influencers</p>'; return; }
+  var h = '<table class="m4-table"><thead><tr><th><input type="checkbox" id="selectAllInf" onchange="toggleAll(this)"></th><th>ID</th><th>KOL</th><th>Platform</th><th>Followers</th><th>Project</th><th>Product</th><th>Region</th><th>Tags</th><th>Link</th><th>Deliverable</th><th>Cost</th><th>Action</th></tr></thead><tbody>';
+  data.forEach(function(inf) {
+    h += '<tr><td><input type="checkbox" class="infcb" value="' + esc(inf.id || '') + '"></td>';
+    h += '<td>#' + esc(inf.id || '') + '</td>';
+    h += '<td><strong>' + esc(inf.kol_handle || '') + '</strong></td>';
+    h += '<td>' + esc(inf.platform || '-') + '</td>';
+    h += '<td>' + fmtCount(inf.followers) + '</td>';
+    h += '<td>' + esc(inf.project_name || '-') + '</td>';
+    h += '<td>' + esc(inf.product_name || '-') + '</td>';
+    h += '<td>' + esc(inf.region || '-') + '</td>';
+    h += '<td>' + esc(inf.tags || inf.category || '-') + '</td>';
+    h += '<td style="max-width:160px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(inf.profile_link || '-') + '</td>';
+    h += '<td style="max-width:150px">' + esc(inf.content_deliverable || inf.collab_type || '-') + '</td>';
+    h += '<td>$' + (inf.quoted_price || inf.cost_usd || 0) + '</td>';
+    h += '<td><button class="btn btn-sm btn-primary" onclick="startCollab(' + Number(inf.id || 0) + ')">下单</button></td></tr>';
+  });
+  h += '</tbody></table>';
+  c.innerHTML = h;
+}
+function toggleAll(cb) {
+  document.querySelectorAll('.infcb').forEach(function(item) { item.checked = cb.checked; });
+}
+function getSelectedInfIds() {
+  var ids = [];
+  document.querySelectorAll('.infcb:checked').forEach(function(cb) {
+    var id = parseInt(cb.value, 10);
+    if (!isNaN(id)) ids.push(id);
+  });
+  return ids;
+}
+function exportAll() { return exportInf('all'); }
+function exportFiltered() { return exportInf('filtered'); }
+function exportSelected() {
+  var ids = getSelectedInfIds();
+  if (!ids.length) { toast('Select influencers first', 'error'); return; }
+  return exportInf('selected', ids);
+}
+function exportInf(mode, ids) {
+  var body = { mode: mode };
+  if (mode === 'selected' && ids) body.ids = ids;
+  if (mode === 'filtered') body.filters = m4Filters();
+  return apiFetch('/influencers/export', { method: 'POST', body: JSON.stringify(body) }).then(function(r) {
+    if (!r.ok) throw new Error('Export failed');
+    return r.blob();
+  }).then(function(blob) {
+    dlFile('influencers_export.csv', blob, 'text/csv;charset=utf-8');
+    toast('Export done');
+  }).catch(function(e) { toast(e.message || 'Export failed', 'error'); });
+}
+async function importInfluencerFile(file, statusEl) {
+  if (!file) return;
+  var ext = (file.name.split('.').pop() || '').toLowerCase();
+  if (['csv', 'json', 'xlsx', 'xls'].indexOf(ext) === -1) {
+    if (statusEl) statusEl.innerHTML = '<span style="color:#d94641">Unsupported file type: .' + esc(ext) + '</span>';
+    return;
+  }
+  if (statusEl) statusEl.innerHTML = '<span>Uploading ' + esc(file.name) + '...</span>';
+  var fd = new FormData();
+  fd.append('file', file);
+  fd.append('batch_id', file.name);
+  try {
+    var r = await apiFetch('/influencers/upload', { method: 'POST', body: fd });
+    var d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Upload failed');
+    if (statusEl) statusEl.innerHTML = '<span style="color:#0f7b3c">Imported ' + (d.imported || 0) + ', skipped ' + (d.skipped || 0) + '</span>';
+    showInfPreview(d.sample || []);
+    await loadInfluencersFromAPI();
+    toast('Imported ' + (d.imported || 0));
+  } catch (e) {
+    if (statusEl) statusEl.innerHTML = '<span style="color:#d94641">' + esc(e.message) + '</span>';
+    toast(e.message, 'error');
+  }
+}
+function handleUpload(e) {
+  var file = e && e.target && e.target.files ? e.target.files[0] : null;
+  importInfluencerFile(file, document.getElementById('uploadOK'));
+  if (e && e.target) e.target.value = '';
+}
+function handleDrop(event) {
+  var file = event && event.dataTransfer && event.dataTransfer.files ? event.dataTransfer.files[0] : null;
+  importInfluencerFile(file, document.getElementById('uploadOK'));
+}
+function openInfUploadModal() {
+  var modal = document.getElementById('infUploadModal');
+  if (modal) modal.style.display = 'flex';
+}
+function handleUploadModal(event) {
+  var file = event && event.target && event.target.files ? event.target.files[0] : null;
+  importInfluencerFile(file, document.getElementById('infModalStatus'));
+  if (event && event.target) event.target.value = '';
+}
+function importInfluencers(rows) {
+  if (!rows || !rows.length) return;
+  apiFetch('/influencers/import', { method: 'POST', body: JSON.stringify({ rows: rows }) }).then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); }).then(function(result) {
+    if (!result.ok) throw new Error(result.data.error || 'Import failed');
+    toast('Imported ' + (result.data.imported || 0));
+    loadInfluencersFromAPI();
+  }).catch(function(e) { toast('Import: ' + e.message, 'error'); });
+}
+function showInfPreview(data) {
+  var c = document.getElementById('infPreview');
+  if (!c) return;
+  if (!data || !data.length) { c.innerHTML = ''; return; }
+  var keys = Object.keys(data[0] || {}).slice(0, 6);
+  var h = '<table style="width:100%;font-size:10px;border-collapse:collapse"><thead><tr>';
+  keys.forEach(function(k) { h += '<th style="text-align:left;padding:4px;opacity:.5">' + esc(k) + '</th>'; });
+  h += '</tr></thead><tbody>';
+  data.slice(0, 5).forEach(function(row) {
+    h += '<tr>';
+    keys.forEach(function(k) { h += '<td style="padding:4px;border-top:1px solid var(--border)">' + esc(row[k] || '') + '</td>'; });
+    h += '</tr>';
+  });
+  h += '</tbody></table>';
+  c.innerHTML = h;
+}
+async function downloadInfTemplate() {
+  try {
+    var r = await apiFetch('/influencers/template');
+    if (!r.ok) throw new Error('Template download failed');
+    var blob = await r.blob();
+    dlFile('influencer_import_template.csv', blob, 'text/csv;charset=utf-8');
+  } catch (e) {
+    var csv = '\uFEFFNo.,Date,Submitter,Project,Product,Duplicate,KOL Handle,Followers,Link,Platform,Country,Tag,AvgViews10,Cost,Deliverable,TuringNote,Price,Email,CPM,CPV\n';
+    dlFile('influencer_import_template.csv', csv, 'text/csv;charset=utf-8');
+  }
+}
+async function pushToFeishu() {
+  var status = document.getElementById('feishuStatus');
+  var ids = getSelectedInfIds();
+  if (!ids.length) {
+    if (status) status.innerHTML = '<span style="color:#d94641">Select influencers in Tab 1 first</span>';
+    toast('Select influencers first', 'error');
+    return;
+  }
+  if (status) status.innerHTML = '<span>Syncing selected influencers...</span>';
+  try {
+    var r = await apiFetch('/influencers/feishu/sync', { method: 'POST', body: JSON.stringify({ ids: ids }) });
+    var d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Feishu sync failed');
+    if (d.configured === false) {
+      dlFile('feishu_influencers_fallback.csv', d.csv || '', 'text/csv;charset=utf-8');
+      if (status) status.innerHTML = '<span style="color:#d49900">FEISHU_WEBHOOK_URL not configured. CSV fallback downloaded.</span>';
+      toast('Feishu fallback CSV downloaded');
+      return;
+    }
+    if (status) status.innerHTML = '<span style="color:#0f7b3c">Synced ' + (d.synced || d.records || ids.length) + ' influencers to Feishu</span>';
+    toast('Synced to Feishu');
+  } catch (e) {
+    if (status) status.innerHTML = '<span style="color:#d94641">' + esc(e.message) + '</span>';
+    toast(e.message, 'error');
+  }
+}
+var pendingCollabInfId = null;
+function findInfluencerById(infId) {
+  var id = Number(infId);
+  return (lastInfAPI || lastMatch || []).find(function(inf) { return Number(inf.id) === id; }) || {};
+}
+function startCollab(infId) {
+  pendingCollabInfId = Number(infId);
+  var inf = findInfluencerById(infId);
+  var existing = document.getElementById('collabOrderModal');
+  if (existing) existing.remove();
+  var overlay = document.createElement('div');
+  overlay.id = 'collabOrderModal';
+  overlay.className = 'modal-overlay';
+  overlay.onclick = function(e) { if (e.target === overlay) closeCollabOrderModal(); };
+  overlay.innerHTML = '<div class="modal" onclick="event.stopPropagation()">' +
+    '<button class="modal-close" onclick="closeCollabOrderModal()">&times;</button>' +
+    '<h3>下单合作资源</h3>' +
+    '<p style="font-size:12px;opacity:.6;margin-bottom:12px">' + esc(inf.kol_handle || '') + ' / ' + esc(inf.platform || '') + '</p>' +
+    '<div class="grid grid-2">' +
+    '<div><label>项目</label><input id="orderProject" value="' + esc(inf.project_name || '') + '"></div>' +
+    '<div><label>推广产品</label><input id="orderProduct" value="' + esc(inf.product_name || '') + '"></div>' +
+    '<div><label>对外报价</label><input id="orderQuotedPrice" type="number" value="' + esc(inf.quoted_price || inf.cost_usd || '') + '"></div>' +
+    '<div><label>状态</label><select id="orderStatus"><option value="confirmed">已确认</option><option value="proposed">待提案</option><option value="negotiating">谈判中</option><option value="live">执行中</option></select></div>' +
+    '<div><label>开始时间</label><input id="orderTimelineStart" type="date"></div>' +
+    '<div><label>结束时间</label><input id="orderTimelineEnd" type="date"></div>' +
+    '</div>' +
+    '<div style="margin-top:10px"><label>交付物</label><textarea id="orderDeliverable" rows="3">' + esc(inf.content_deliverable || inf.collab_type || '') + '</textarea></div>' +
+    '<div style="margin-top:10px"><label>备注</label><textarea id="orderNotes" rows="3"></textarea></div>' +
+    '<div class="btn-group" style="justify-content:flex-end"><button class="btn btn-outline" onclick="closeCollabOrderModal()">取消</button><button class="btn btn-primary" onclick="submitCollabOrder()">确认下单</button></div>' +
+    '</div>';
+  document.body.appendChild(overlay);
+}
+function closeCollabOrderModal() {
+  var overlay = document.getElementById('collabOrderModal');
+  if (overlay) overlay.remove();
+}
+async function submitCollabOrder() {
+  if (!pendingCollabInfId) return;
+  var resource = {
+    project_name: document.getElementById('orderProject')?.value || '',
+    product_name: document.getElementById('orderProduct')?.value || '',
+    deliverable: document.getElementById('orderDeliverable')?.value || '',
+    quoted_price: Number(document.getElementById('orderQuotedPrice')?.value || 0)
+  };
+  var body = {
+    influencer_id: pendingCollabInfId,
+    status: document.getElementById('orderStatus')?.value || 'confirmed',
+    cost_quoted: resource.quoted_price,
+    timeline_start: document.getElementById('orderTimelineStart')?.value || '',
+    timeline_end: document.getElementById('orderTimelineEnd')?.value || '',
+    notes: document.getElementById('orderNotes')?.value || '',
+    resource: resource
+  };
+  try {
+    var r = await apiFetch('/collaborations', { method: 'POST', body: JSON.stringify(body) });
+    var d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Order failed');
+    closeCollabOrderModal();
+    toast('Order created #' + d.id);
+    switchTab('tab2');
+    loadCollaborations();
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+var STATUS_LABELS = { proposed: '待提案', contacted: '已建联', negotiating: '谈判中', confirmed: '已确认', contract_sent: '合同已发', live: '执行中', content_review: '内容审核', completed: '已完成', cancelled: '已取消' };
+async function loadCollaborations(status) {
+  var filterEl = document.getElementById('collabFilter');
+  var selectedStatus = status || (filterEl ? filterEl.value : '');
+  try {
+    var qs = selectedStatus ? '?status=' + encodeURIComponent(selectedStatus) : '';
+    var r = await apiFetch('/collaborations' + qs);
+    var d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Load collaborations failed');
+    var rows = d.collaborations || [];
+    renderCollabTable(rows);
+    var stats = document.getElementById('collabStatsBar');
+    if (stats) {
+      var counts = {};
+      rows.forEach(function(row) { counts[row.status] = (counts[row.status] || 0) + 1; });
+      stats.innerHTML = Object.keys(counts).map(function(key) {
+        return '<span style="font-size:11px;background:var(--surface2);padding:4px 10px;border-radius:20px">' + esc(STATUS_LABELS[key] || key) + ': <strong>' + counts[key] + '</strong></span>';
+      }).join('');
+    }
+  } catch (e) {
+    var c = document.getElementById('execTableContainer');
+    if (c) c.innerHTML = '<p style="text-align:center;padding:30px;opacity:.5">Load failed: ' + esc(e.message) + '</p>';
+  }
+}
+function collabResource(collab) {
+  try { return collab.proposal_notes ? JSON.parse(collab.proposal_notes) : {}; } catch (e) { return {}; }
+}
+function renderCollabTable(data) {
+  var c = document.getElementById('execTableContainer');
+  if (!c) return;
+  if (!data || !data.length) { c.innerHTML = '<p style="text-align:center;padding:30px;opacity:.5">暂无合作记录</p>'; return; }
+  var h = '<table><thead><tr><th>KOL</th><th>Project / Product</th><th>Deliverable</th><th>Status</th><th>Price</th><th>Timeline</th><th>Notes</th><th>Action</th></tr></thead><tbody>';
+  data.forEach(function(collab) {
+    var resource = collabResource(collab);
+    var project = resource.project_name || collab.project_name || '-';
+    var product = resource.product_name || collab.product_name || '-';
+    var deliverable = resource.deliverable || collab.content_deliverable || '-';
+    h += '<tr><td><strong>' + esc(collab.kol_handle || '') + '</strong><br><span style="font-size:10px;opacity:.55">' + esc(collab.platform || '') + ' / ' + fmtCount(collab.followers) + '</span></td>';
+    h += '<td><strong>' + esc(project) + '</strong><br><span style="font-size:10px;opacity:.6">' + esc(product) + '</span></td>';
+    h += '<td style="max-width:180px">' + esc(deliverable) + '</td>';
+    h += '<td><select id="st_' + collab.id + '" onchange="updateCollabStatus(' + collab.id + ')" style="width:auto;font-size:11px">';
+    Object.keys(STATUS_LABELS).forEach(function(key) { h += '<option value="' + key + '"' + (collab.status === key ? ' selected' : '') + '>' + STATUS_LABELS[key] + '</option>'; });
+    h += '</select></td>';
+    h += '<td>$' + (collab.cost_quoted || resource.quoted_price || 0) + '</td>';
+    h += '<td style="font-size:10px">' + esc([collab.timeline_start || '', collab.timeline_end || ''].filter(Boolean).join(' -> ') || '-') + '</td>';
+    h += '<td style="max-width:140px;font-size:10px">' + esc(collab.notes || '-') + '</td>';
+    h += '<td><button class="btn btn-sm" onclick="updateCollabStatus(' + collab.id + ')">保存</button></td></tr>';
+  });
+  h += '</tbody></table>';
+  c.innerHTML = h;
+}
+async function updateCollabStatus(collabId) {
+  var sel = document.getElementById('st_' + collabId);
+  if (!sel) return;
+  try {
+    var r = await apiFetch('/collaborations/' + collabId, { method: 'PUT', body: JSON.stringify({ status: sel.value }) });
+    var d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Status update failed');
+    toast('Status updated');
+    loadCollaborations();
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
 // ===== M5: AI ASSISTANT (v8.0) =====
 var aiMemory = {};
 try { aiMemory = JSON.parse(localStorage.getItem('tm_ai_memory') || '{}'); } catch(e) { aiMemory = {}; }
@@ -3556,7 +3899,8 @@ function switchPage(id) {
     'initM3', 'goAnalyze', 'goGenerate', 'goStep3', 'resetDemand', 'updSteps', 'selTmpl', 'updateTemplateSelectionUI',
     'generateProposal', 'updateProposalDraftFromEditor', 'getCurrentProposalDraft', 'downloadProposal', 'copyProposal', 'openProposalToInfluencers',
     'getEditedDemand', 'syncCurDemandFromAnalysis', 'handleDemandFile', 'analyzeDemandAI',
-    'switchTab', 'matchInfluencers', 'smartMatch', 'handleUpload', 'downloadInfTemplate', 'exportAll', 'exportFiltered', 'exportSelected',
+    'switchTab', 'matchInfluencers', 'smartMatch', 'handleUpload', 'handleDrop', 'openInfUploadModal', 'handleUploadModal', 'downloadInfTemplate', 'exportAll', 'exportFiltered', 'exportSelected',
+    'toggleAll', 'startCollab', 'submitCollabOrder', 'closeCollabOrderModal', 'loadCollaborations', 'updateCollabStatus',
     'sendChat', 'clearChat', 'clearAIMemory', 'pushToFeishu',
     'switchAdminTab', 'loadAdminDashboard', 'loadAdminUsers', 'adminAddUser', 'adminCreateInvite', 'adminResetPw',
     'wfUndo', 'wfRedo', 'wfClearCanvas', 'wfSaveTemplate', 'wfPublishTemplate', 'wfResetTaskFilters', 'wfLoadTasks', 'wfLoadInstances',

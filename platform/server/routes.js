@@ -1,16 +1,42 @@
 ﻿module.exports = function(app, db, authMiddleware) {
 
 const businessKnowledge = require('./services/business_knowledge_service');
+const influencerWorkflow = require('./services/influencer_workflow_service');
 
 // ===== INFLUENCER ROUTES =====
 app.get('/api/influencers', authMiddleware, (req, res) => {
-  const { platform, category, region, search, min_followers, max_followers, sort_by } = req.query;
+  const { platform, category, region, search, min_followers, max_followers, sort_by, project_name, product_name, tags } = req.query;
   let sql = 'SELECT * FROM influencers WHERE is_active = 1';
   const params = [];
   if (platform) { sql += ' AND platform = ?'; params.push(platform); }
   if (category) { sql += ' AND category = ?'; params.push(category); }
   if (region) { sql += ' AND region = ?'; params.push(region); }
-  if (search) { sql += ' AND (kol_handle LIKE ? OR content_style LIKE ? OR brand_collab_history LIKE ?)'; params.push('%' + search + '%', '%' + search + '%', '%' + search + '%'); }
+  if (project_name) { sql += ' AND project_name LIKE ?'; params.push('%' + project_name + '%'); }
+  if (product_name) { sql += ' AND product_name LIKE ?'; params.push('%' + product_name + '%'); }
+  if (tags) { sql += ' AND (tags LIKE ? OR category LIKE ?)'; params.push('%' + tags + '%', '%' + tags + '%'); }
+  if (search) {
+    sql += ` AND (
+      CAST(id AS TEXT) LIKE ? OR
+      kol_handle LIKE ? OR
+      profile_link LIKE ? OR
+      content_style LIKE ? OR
+      brand_collab_history LIKE ? OR
+      project_name LIKE ? OR
+      product_name LIKE ? OR
+      tags LIKE ? OR
+      category LIKE ? OR
+      platform LIKE ? OR
+      region LIKE ? OR
+      contact_email LIKE ? OR
+      content_deliverable LIKE ? OR
+      CAST(followers AS TEXT) LIKE ? OR
+      CAST(avg_views_10 AS TEXT) LIKE ? OR
+      CAST(cost_usd AS TEXT) LIKE ? OR
+      CAST(quoted_price AS TEXT) LIKE ? OR
+      CAST(cpm AS TEXT) LIKE ?
+    )`;
+    for (let i = 0; i < 18; i++) params.push('%' + search + '%');
+  }
   if (min_followers) { sql += ' AND followers >= ?'; params.push(parseInt(min_followers)); }
   if (max_followers) { sql += ' AND followers <= ?'; params.push(parseInt(max_followers)); }
   sql += ' ORDER BY ' + ((sort_by === 'engagement' || sort_by === 'followers' || sort_by === 'cost_usd') ? sort_by : 'followers') + ' DESC LIMIT 200';
@@ -54,9 +80,15 @@ app.post('/api/influencers/match', authMiddleware, (req, res) => {
 
 // ===== COLLABORATION ROUTES =====
 app.post('/api/collaborations', authMiddleware, (req, res) => {
-  const { demand_id, influencer_id, status, proposal_notes, cost_quoted, notes } = req.body;
-  const result = db.prepare('INSERT INTO collaborations (demand_id, influencer_id, user_id, status, proposal_notes, cost_quoted, notes) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
-    demand_id, influencer_id, req.user.id, status || 'proposed', proposal_notes, cost_quoted || 0, notes
+  const { demand_id, influencer_id, status, proposal_notes, cost_quoted, notes, resource, timeline_start, timeline_end } = req.body;
+  const resourcePayload = resource && typeof resource === 'object' ? resource : {};
+  const hasResource = Object.keys(resourcePayload).length > 0;
+  const resourceNotes = proposal_notes || (hasResource ? JSON.stringify(resourcePayload) : null);
+  const quoted = cost_quoted !== undefined && cost_quoted !== null && cost_quoted !== ''
+    ? cost_quoted
+    : (resourcePayload.quoted_price || resourcePayload.price || 0);
+  const result = db.prepare('INSERT INTO collaborations (demand_id, influencer_id, user_id, status, proposal_notes, cost_quoted, notes, timeline_start, timeline_end) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
+    demand_id, influencer_id, req.user.id, status || 'proposed', resourceNotes, quoted || 0, notes || resourcePayload.notes || '', timeline_start || resourcePayload.timeline_start || null, timeline_end || resourcePayload.timeline_end || null
   );
   db.prepare('INSERT INTO activity_log (user_id, action, module, details, ip_address) VALUES (?, ?, ?, ?, ?)').run(req.user.id, 'create_collab', 'collaboration', 'Created collaboration for influencer ' + influencer_id, req.ip);
   businessKnowledge.archiveCollaboration(db, db.prepare('SELECT * FROM collaborations WHERE id = ?').get(result.lastInsertRowid), req.user);
@@ -65,7 +97,7 @@ app.post('/api/collaborations', authMiddleware, (req, res) => {
 
 app.get('/api/collaborations', authMiddleware, (req, res) => {
   const { status, demand_id } = req.query;
-  let sql = 'SELECT c.*, i.kol_handle, i.platform, i.followers, i.category FROM collaborations c JOIN influencers i ON c.influencer_id = i.id';
+  let sql = 'SELECT c.*, i.kol_handle, i.platform, i.followers, i.category, i.region, i.project_name, i.product_name, i.content_deliverable, i.quoted_price FROM collaborations c JOIN influencers i ON c.influencer_id = i.id';
   const params = [];
   const conditions = [];
   if (status) { conditions.push('c.status = ?'); params.push(status); }
@@ -95,73 +127,64 @@ app.get('/api/collaborations/stats', authMiddleware, (req, res) => {
 });
 
 // ===== V8.1: INFLUENCER IMPORT/EXPORT =====
+app.get('/api/influencers/template', authMiddleware, (req, res) => {
+  const csv = influencerWorkflow.buildTemplateCsv();
+  res.setHeader('Content-Type', 'text/csv;charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename=influencer_import_template.csv');
+  res.send(csv);
+});
+
 app.post('/api/influencers/import', authMiddleware, (req, res) => {
   try {
     const { rows, batch_id } = req.body;
-    if (!rows || !rows.length) return res.status(400).json({ error: 'No rows provided' });
-    const insert = db.prepare(`INSERT INTO influencers (platform, kol_handle, profile_link, followers, avg_views_10, avg_engagement, category, sub_category, region, language, content_style, collab_type, cost_usd, cpm, brand_collab_history, contact_email, project_name, product_name, reporter, tags, quoted_price, content_deliverable, is_duplicate, import_batch, data_source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
-    let imported = 0, skipped = 0;
-    const batch = batch_id || 'import_' + Date.now();
-    const doImport = db.transaction(function() {
-      for (const row of rows) {
-        const platform = row['\u793e\u5a92\u5e73\u53f0'] || row['platform'] || '';
-        const kol_handle = row['\u7f51\u7ea2\u9891\u9053\u540d\u79f0'] || row['kol_handle'] || '';
-        if (!kol_handle) { skipped++; continue; }
-        const link = row['\u7f51\u7ea2\u9891\u9053\u94fe\u63a5'] || row['profile_link'] || '';
-        insert.run(
-          platform, kol_handle, link,
-          parseInt(row['\u7f51\u7ea2\u7c89\u4e1d\u91cf'] || row['followers'] || 0),
-          parseFloat(row['\u8fd110\u4e2a\u89c6\u9891\u5747\u64ad'] || row['avg_views_10'] || 0) || 0,
-          parseFloat(row['cpm'] || row['avg_engagement'] || 0) || 0,
-          row['\u6807\u7b7e'] || row['category'] || '', '',
-          row['\u56fd\u5bb6'] || row['region'] || '', '',
-          '', 'Dedicated',
-          parseFloat(row['\u6210\u672c\u4ef7'] || row['cost_usd'] || 0) || 0,
-          parseFloat(row['cpm'] || 0) || 0,
-          '', row['\u90ae\u7bb1'] || row['contact_email'] || '',
-          row['\u9879\u76ee'] || row['project_name'] || '',
-          row['\u63a8\u5e7f\u4ea7\u54c1'] || row['product_name'] || '',
-          row['\u63d0\u62a5\u4eba'] || row['reporter'] || '',
-          row['\u6807\u7b7e'] || row['tags'] || '',
-          parseFloat(row['\u5bf9\u5916\u5546\u52a1\u62a5\u4ef7'] || row['quoted_price'] || 0) || 0,
-          row['\u7f51\u7ea2\u4ea4\u4ed8\u7269'] || row['content_deliverable'] || '',
-          0, batch, 'import'
-        );
-        imported++;
-      }
+    const result = influencerWorkflow.importInfluencerRows(db, rows, {
+      batch_id,
+      user: req.user,
+      data_source: 'import'
     });
-    doImport();
-    const knowledgeService = require('./services/knowledge_service');
-    const sample = rows.slice(0, 20);
-    const projectNames = Array.from(new Set(rows.map(function(row) { return row['项目'] || row.project_name || ''; }).filter(Boolean))).slice(0, 20);
-    const productNames = Array.from(new Set(rows.map(function(row) { return row['推广产品'] || row.product_name || ''; }).filter(Boolean))).slice(0, 20);
-    const importedTags = Array.from(new Set(rows.map(function(row) { return row['标签'] || row.tags || row.category || ''; }).filter(Boolean))).slice(0, 30);
-    const knowledgeEntry = knowledgeService.ingestKnowledge(db, {
-      title: '网红导入批次：' + batch,
-      summary: '导入 ' + imported + ' 条网红数据，跳过 ' + skipped + ' 条。项目：' + (projectNames.join('、') || '-'),
-      content: [
-        'Batch: ' + batch,
-        'Imported: ' + imported,
-        'Skipped: ' + skipped,
-        'Projects: ' + (projectNames.join(', ') || '-'),
-        'Products: ' + (productNames.join(', ') || '-'),
-        'Tags: ' + (importedTags.join(', ') || '-'),
-        '',
-        'Sample rows:',
-        JSON.stringify(sample, null, 2)
-      ].join('\n'),
-      entry_type: 'influencer_batch',
-      source_type: 'influencer_import',
-      source_id: batch,
-      visibility: 'team',
-      tags: ['influencer', 'import'].concat(importedTags.slice(0, 10)),
-      business_type: 'influencer',
-      business_id: batch,
-      created_by: req.user.id,
-      actor_role: req.user.role,
-      metadata: { imported, skipped, total: rows.length, projectNames, productNames }
+    res.json(result);
+  } catch (e) {
+    res.status(e.statusCode || 500).json({ error: e.message });
+  }
+});
+
+app.post('/api/influencers/feishu/sync', authMiddleware, async (req, res) => {
+  try {
+    const ids = Array.isArray(req.body.ids) ? req.body.ids.map(Number).filter(Boolean) : [];
+    const rows = ids.length ? influencerWorkflow.queryInfluencers(db, { ids }) : [];
+    if (!rows.length) return res.status(400).json({ error: 'No influencers selected' });
+    const csv = influencerWorkflow.buildInfluencerCsv(rows);
+    const records = rows.map(function(row, index) {
+      const values = influencerWorkflow.influencerToTemplateRow(row, index);
+      const record = {};
+      influencerWorkflow.TEMPLATE_HEADERS.forEach(function(header, headerIndex) { record[header] = values[headerIndex]; });
+      return record;
     });
-    res.json({ imported, skipped, batch, total: rows.length, knowledge_entry_id: knowledgeEntry.id });
+    const webhook = process.env.FEISHU_WEBHOOK_URL || process.env.FEISHU_WEBHOOK;
+    if (!webhook) {
+      return res.json({
+        configured: false,
+        records: records.length,
+        csv,
+        message: 'FEISHU_WEBHOOK_URL is not configured. CSV fallback is ready for manual upload.'
+      });
+    }
+    const response = await fetch(webhook, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        event: 'turingmarket.influencers.sync',
+        source: 'TuringMarket',
+        records,
+        csv
+      })
+    });
+    if (!response.ok) {
+      return res.status(502).json({ configured: true, synced: 0, records: records.length, error: 'Feishu webhook failed with HTTP ' + response.status, csv });
+    }
+    db.prepare('INSERT INTO activity_log (user_id, action, module, details, ip_address) VALUES (?, ?, ?, ?, ?)')
+      .run(req.user.id, 'feishu_sync', 'influencer', 'Synced ' + records.length + ' influencers to Feishu workflow', req.ip);
+    res.json({ configured: true, synced: records.length, records: records.length });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -185,11 +208,7 @@ app.post('/api/influencers/export', authMiddleware, (req, res) => {
     }
     sql += ' ORDER BY followers DESC';
     const influencers = db.prepare(sql).all(...params);
-    const headers = ['\u65e5\u671f', '\u63d0\u62a5\u4eba', '\u9879\u76ee', '\u63a8\u5e7f\u4ea7\u54c1', '\u662f\u5426\u91cd\u590d', '\u7f51\u7ea2\u9891\u9053\u540d\u79f0', '\u7f51\u7ea2\u7c89\u4e1d\u91cf', '\u7f51\u7ea2\u9891\u9053\u94fe\u63a5', '\u793e\u5a92\u5e73\u53f0', '\u56fd\u5bb6', '\u6807\u7b7e', '\u8fd110\u4e2a\u89c6\u9891\u5747\u64ad', '\u6210\u672c\u4ef7', '\u7f51\u7ea2\u4ea4\u4ed8\u7269', 'Turing\u5907\u6ce8', '\u5bf9\u5916\u5546\u52a1\u62a5\u4ef7', '\u90ae\u7bb1', 'cpm', 'cpv'];
-    const csvRows = influencers.map(function(inf) {
-      return [ (inf.created_at||'').substring(0,10), inf.reporter||'', inf.project_name||'', inf.product_name||'', inf.is_duplicate ? '\u662f' : '\u5426', inf.kol_handle||'', inf.followers||0, inf.profile_link||'', inf.platform||'', inf.region||'', inf.tags||'', inf.avg_views_10||0, inf.cost_usd||0, inf.content_deliverable||'', '', inf.quoted_price||0, inf.contact_email||'', inf.cpm||0, '' ].join(',');
-    });
-    const csv = '\ufeff' + headers.join(',') + '\n' + csvRows.join('\n');
+    const csv = influencerWorkflow.buildInfluencerCsv(influencers);
     res.setHeader('Content-Type', 'text/csv;charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename=influencers_export.csv');
     res.send(csv);

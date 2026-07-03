@@ -44,10 +44,12 @@ $FILES = @(
     "server\services\knowledge_service.js",
     "server\services\rag_service.js",
     "server\services\web_search_service.js",
+    "server\services\influencer_workflow_service.js",
     "server\tests\ai_knowledge_foundation.test.js",
     "server\tests\obsidian_and_business_knowledge.test.js",
     "server\tests\customer_workspace_ui.test.js",
     "server\tests\security_and_crm_access.test.js",
+    "server\tests\influencer_workflow.test.js",
     "server\generate_ppt.py"
 )
 
@@ -91,6 +93,7 @@ node --check app.js
 node --check ppt.js
 node --check server/server.js
 node --check server/services/latest_ui_compat_service.js
+node --check server/services/influencer_workflow_service.js
 pm2 restart turingmarket 2>/dev/null || pm2 start server/server.js --name turingmarket
 grep -q "$EXPECTED_PPT_QUERY" index.html
 grep -q "$EXPECTED_PPT_BUILD" ppt.js

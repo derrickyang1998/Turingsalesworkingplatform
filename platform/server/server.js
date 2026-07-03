@@ -17,6 +17,7 @@ const businessKnowledge = require('./services/business_knowledge_service');
 const vaultExportService = require('./services/vault_export_service');
 const crmAccess = require('./services/crm_access_service');
 const latestUiCompat = require('./services/latest_ui_compat_service');
+const influencerWorkflow = require('./services/influencer_workflow_service');
 const app = express();
 const PORT = process.env.PORT || 3002;
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'db', 'turingmarket.db');
@@ -505,6 +506,30 @@ app.post('/api/knowledge/upload', authMiddleware, uploadLimiter, function(req, r
   } catch (e) {
     try { if (req.file && req.file.path) fs.unlinkSync(req.file.path); } catch (e2) {}
     res.status(e.code === 'XLSX_NOT_INSTALLED' ? 501 : 500).json({ error: e.message });
+  }
+});
+
+app.post('/api/influencers/upload', authMiddleware, uploadLimiter, function(req, res, next) {
+  upload.single('file')(req, res, function(err) {
+    if (err) return res.status(400).json({ error: err.message });
+    next();
+  });
+}, async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'File required' });
+    const parsed = await fileIngestService.readUploadedFile(req.file);
+    if (!parsed.rows || !parsed.rows.length) return res.status(400).json({ error: 'No table rows found in uploaded file' });
+    const result = influencerWorkflow.importInfluencerRows(db, parsed.rows, {
+      batch_id: req.body.batch_id || req.file.originalname,
+      user: req.user,
+      data_source: 'upload'
+    });
+    try { fs.unlinkSync(req.file.path); } catch (e2) {}
+    res.json(Object.assign({ parser: parsed.parser, warning: parsed.warning }, result));
+  } catch (e) {
+    try { if (req.file && req.file.path) fs.unlinkSync(req.file.path); } catch (e2) {}
+    const status = e.code === 'UNSUPPORTED_FILE_TYPE' ? 415 : e.code === 'XLSX_NOT_INSTALLED' ? 501 : (e.statusCode || 500);
+    res.status(status).json({ error: e.message });
   }
 });
 

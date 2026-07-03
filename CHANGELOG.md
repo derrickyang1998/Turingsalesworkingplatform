@@ -1,4 +1,32 @@
-# Changelog — TuringMarket 图灵商务在线工作平台
+# Changelog – TuringMarket 图灵商务在线工作平台
+## v0.2.7-influencer-workflow-import-feishu-order (2026-07-03) - M4 网红导入、飞书同步与下单资源修复
+
+### 网红导入与模板
+- 新增 `/api/influencers/template`，下载恢复为历史 19 列合同模板：`No./Date/Submitter/Project/Product/Duplicate/KOL Handle/Followers/Link/Platform/Country/Tag/AvgViews10/Cost/Deliverable/TuringNote/Price/Email/CPM/CPV`。
+- 新增 `influencer_workflow_service`，统一兼容历史英文模板和现有中文模板字段，支持旧模板中的 KOL Handle、Link、Tag、Deliverable、Price、CPM/CPV 等字段入库。
+- 新增 `/api/influencers/upload`，CSV/JSON/XLSX 文件上传改为后端解析后入库；旧 XLS 明确提示另存为 XLSX/CSV。
+
+### 飞书与下单合作资源
+- 新增 `/api/influencers/feishu/sync`，前端只提交选中网红 ID；后端通过 `FEISHU_WEBHOOK_URL` 或 `FEISHU_WEBHOOK` 接入飞书工作流。
+- 飞书未配置时不再静默失败，会返回并下载兼容历史 19 列模板的 CSV 兜底文件。
+- M4 网红表格恢复“下单”动作，新增合作资源弹窗，可定义项目、推广产品、交付物、报价、执行时间和备注；Tab 2 合作资源表展示这些字段。
+
+### M4 列表 UI
+- 新增统一搜索框，覆盖网红 ID、账号、标签、链接，以及表格展示字段如平台、项目、产品、地区、交付物、报价、粉丝数、CPM。
+- 网红列表表头改为 sticky，下滑列表时字段标题保持可见。
+- 修复复选框继承全局 input 宽度导致图标过大的问题，仅在 M4 表格内固定为 16px。
+
+### 验证
+- `node --check platform/app.js`
+- `node --check platform/server/routes.js`
+- `node --check platform/server/server.js`
+- `node --check platform/server/services/influencer_workflow_service.js`
+- `node --test platform/server/tests/influencer_workflow.test.js`
+- `node --test platform/server/tests/*.test.js`：30/30 passing
+- Playwright 本地烟测：模板下载、历史 19 列 CSV 上传、ID/链接/标签搜索、sticky 表头、复选框尺寸、飞书未配置 CSV 降级、合作资源下单与 Tab 2 展示通过。
+
+---
+
 ## v0.2.6-customer-board-detail-split (2026-07-03) — 客户库看板与明细拆分
 
 ### 客户库信息架构
