@@ -46,6 +46,7 @@ $FILES = @(
     "server\services\web_search_service.js",
     "server\tests\ai_knowledge_foundation.test.js",
     "server\tests\obsidian_and_business_knowledge.test.js",
+    "server\tests\customer_workspace_ui.test.js",
     "server\tests\security_and_crm_access.test.js",
     "server\generate_ppt.py"
 )

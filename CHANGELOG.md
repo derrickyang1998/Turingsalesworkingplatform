@@ -1,4 +1,27 @@
 # Changelog — TuringMarket 图灵商务在线工作平台
+## v0.2.6-customer-board-detail-split (2026-07-03) — 客户库看板与明细拆分
+
+### 客户库信息架构
+- 将 M0 客户库拆成两个独立入口：`客户看板` 和 `客户明细`，避免经营漏斗、AI 洞察与客户列表/详情操作挤在同一个页面。
+- `客户看板` 只保留客户经营中枢、统计卡片、阶段漏斗、今日重点客户和 AI 洞察，并提供进入客户明细的轻入口。
+- `客户明细` 承接客户列表、公海池、阶段筛选、搜索、客户新增/编辑、客户详情面板和商机看板。
+- 待办任务跳转客户记录时改为进入 `客户明细`，保证打开客户详情时上下文正确。
+
+### 回归护栏
+- 新增 `customer_workspace_ui.test.js`，锁定 `page-m0` 与 `page-m0-detail` 必须分离，并校验 PPT bridge 版本不变。
+- 保留最新 PPT 生成支撑：未修改 `platform/ppt.js`，继续使用 `ppt.js?v=20260702v916kbbridge` 和 `window.tmPPTBuild = "20260702-v916-kb-bridge-client-cn"`。
+
+### 验证
+- `node --test platform/server/tests/customer_workspace_ui.test.js`
+- `node --check platform/app.js`
+- `node --check platform/ppt.js`
+- `node --check platform/server/server.js`
+- `node --check platform/server/routes_customers.js`
+- `npm test` in `platform/server`: 25/25 passing
+- Playwright 本地烟测：登录、客户看板默认可见、看板不包含明细搜索/表格、客户明细包含搜索/表格/公海池/商机看板、返回看板、PPT bridge build 不变。
+
+---
+
 ## v0.2.4-kb-bridge-on-latest-ppt (2026-07-02) — 最新 PPT 界面与知识库底座合并修复
 
 ### 回退根因修复

@@ -540,8 +540,9 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
 <div id="app" style="display:none">
   <nav class="sidebar">
     <div class="sidebar-logo"><h1>TuringMarket</h1></div>
-    <div class="nav-item" data-page="m0" onclick="switchPage('m0')"><span class="nav-icon">🚀</span> 客户库</div>
-      <div class="nav-item active" data-page="m1" onclick="switchPage('m1')"><span class="nav-icon">📊</span> 行业品牌智库</div>
+    <div class="nav-item active" data-page="m0" onclick="switchPage('m0')"><span class="nav-icon">看</span> 客户看板</div>
+    <div class="nav-item" data-page="m0-detail" onclick="switchPage('m0-detail')"><span class="nav-icon">客</span> 客户明细</div>
+      <div class="nav-item" data-page="m1" onclick="switchPage('m1')"><span class="nav-icon">📊</span> 行业品牌智库</div>
     <div class="nav-item" data-page="m2" onclick="switchPage('m2')"><span class="nav-icon">🎯</span> 客户策略规划</div>
     <div class="nav-item" data-page="m3" onclick="switchPage('m3')"><span class="nav-icon">📋</span> 需求接入 & 方案生成</div>
     <div class="nav-item" data-page="m4" onclick="switchPage('m4')"><span class="nav-icon">👥</span> 网红匹配 & 执行管理</div>
@@ -568,7 +569,7 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
     <h2 class="tm-page-title">客户经营中枢</h2>
     <p class="tm-page-subtitle" id="m0Stats">商务 SOP · 公海认领、客户跟进、商机推进和 AI 策略建议统一管理。</p>
   </div>
-  <div class="tm-command-search">搜索客户、任务或知识库</div>
+  <div class="tm-command-search" onclick="switchPage('m0-detail')" style="cursor:pointer">进入客户明细 / 搜索客户、任务或知识库</div>
 </div>
 
 <div class="tm-metric-grid">
@@ -618,6 +619,24 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
       <span class="tm-ai-chip">AI草稿 -> 人工确认 -> 最终生成</span>
     </div>
   </aside>
+</div>
+
+</div>
+</div>
+
+<!-- M0 Detail: Customer List + Public Pool + Opportunity Board -->
+<div class="page" id="page-m0-detail">
+<div class="tm-page-shell">
+<div class="tm-page-hero">
+  <div>
+    <div class="tm-eyebrow">客户库 CRM · 明细管理</div>
+    <h2 class="tm-page-title">客户明细</h2>
+    <p class="tm-page-subtitle">客户列表、公海池、阶段筛选、客户详情和商机看板集中在此处理。</p>
+  </div>
+  <div class="tm-filter-actions">
+    <button class="btn btn-sm" onclick="switchPage('m0')">客户看板</button>
+    <button class="btn btn-primary btn-sm" onclick="openAddCustomer()">+ 新增客户</button>
+  </div>
 </div>
 
 <!-- View Tabs -->

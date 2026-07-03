@@ -17,7 +17,8 @@ let chatHistory = [{role: "system", content: "You are the TuringMarket AI assist
   if (!sidebar) return;
 
   var pages = [
-    { id: 'm0', icon: '客', label: '客户库' },
+    { id: 'm0', icon: '看', label: '客户看板' },
+    { id: 'm0-detail', icon: '客', label: '客户明细' },
     { id: 'm1', icon: '智', label: '行业品牌智库' },
     { id: 'm2', icon: '策', label: '客户策略规划' },
     { id: 'm3', icon: '需', label: '需求接入 & 方案生成' },
@@ -449,7 +450,7 @@ function switchCrmView(view) {
   if (sv) sv.style.display = view === 'seapool' ? '' : 'none';
   if (ov) ov.style.display = view === 'opportunities' ? '' : 'none';
 
-  var tb = document.querySelector('#page-m0 .toolbar-area');
+  var tb = document.querySelector('#page-m0-detail .toolbar-area');
   if (tb) tb.style.display = view === 'opportunities' ? 'none' : '';
   var sf = document.getElementById('m0StageFilter');
   if (sf) sf.style.display = view === 'opportunities' ? 'none' : '';
@@ -2183,7 +2184,7 @@ function wfOpenBusiness(taskId) {
       alert('该任务没有可打开的客户记录');
       return;
     }
-    switchPage('m0');
+    switchPage('m0-detail');
     if (typeof openCustomerDetail === 'function') {
       setTimeout(function() { openCustomerDetail(r.task.business_id); }, 150);
     }
@@ -3536,7 +3537,8 @@ function switchPage(id) {
   for (var j = 0; j < pages.length; j++) { pages[j].classList.remove('active'); pages[j].style.display = 'none'; }
   var pg = document.getElementById('page-' + id);
   if (pg) { pg.classList.add('active'); pg.style.display = 'block'; }
-  if (id === 'm0') { switchCrmView(curCrmView || 'pipeline'); loadCustomers(); }
+  if (id === 'm0') { loadCustomerStats(); renderCrmCommandCenter(); }
+  if (id === 'm0-detail') { switchCrmView(curCrmView || 'pipeline'); }
   if (id === 'admin') loadAdminDashboard();
   if (id === 'workflow-designer') { setTimeout(function() { if (typeof initWorkflowDesigner === 'function') initWorkflowDesigner(); }, 200); }
   if (id === 'workflow-templates') { setTimeout(function() { if (typeof wfLoadTemplates === 'function') wfLoadTemplates(); }, 200); }
