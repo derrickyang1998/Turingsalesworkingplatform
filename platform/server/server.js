@@ -80,8 +80,14 @@ const uploadLimiter = rateLimit({
 });
 
 // ===== AUTH MIDDLEWARE =====
+function bearerTokenFromAuthorization(authorization) {
+  if (typeof authorization !== 'string') return null;
+  const match = /^Bearer ([^\s]+)$/.exec(authorization);
+  return match ? match[1] : null;
+}
+
 function authMiddleware(req, res, next) {
-  const token = req.headers.authorization?.replace('Bearer ', '');
+  const token = bearerTokenFromAuthorization(req.headers.authorization);
   if (!token) return res.status(401).json({ error: 'No token provided' });
 
   try {
@@ -200,7 +206,7 @@ app.post('/api/auth/login', (req, res) => {
 });
 
 app.post('/api/auth/logout', authMiddleware, (req, res) => {
-  const token = req.headers.authorization?.replace('Bearer ', '');
+  const token = bearerTokenFromAuthorization(req.headers.authorization);
   db.prepare('DELETE FROM sessions WHERE token = ?').run(token);
   db.prepare('INSERT INTO activity_log (user_id, action, module, ip_address) VALUES (?, ?, ?, ?)').run(req.user.id, 'logout', 'auth', req.ip);
   res.json({ success: true });

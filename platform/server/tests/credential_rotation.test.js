@@ -18,6 +18,7 @@ const {
 
 const platformRoot = path.join(__dirname, '..', '..');
 const serverEntry = path.join(platformRoot, 'server', 'server.js');
+const dbEntry = path.join(platformRoot, 'server', 'db.js');
 const cliEntry = path.join(platformRoot, 'server', 'scripts', 'rotate_user_credentials.js');
 
 function freshDb() {
@@ -150,6 +151,15 @@ function readUserByUsername(dbPath, username) {
   }
 }
 
+function readUserSessionCount(dbPath, userId) {
+  const db = new Database(dbPath, { readonly: true });
+  try {
+    return db.prepare('SELECT COUNT(*) AS count FROM sessions WHERE user_id = ?').get(userId).count;
+  } finally {
+    db.close();
+  }
+}
+
 function recordEqual(failures, label, actual, expected) {
   if (actual !== expected) failures.push(`${label}: expected ${expected}, got ${actual}`);
 }
@@ -203,6 +213,45 @@ function cleanupCliFixture(fixture) {
   [fixture.dbPath, fixture.dbPath + '-wal', fixture.dbPath + '-shm'].forEach(function(filePath) {
     fs.rmSync(filePath, { force: true });
   });
+}
+
+function cleanupDbFiles(dbPath) {
+  [dbPath, dbPath + '-wal', dbPath + '-shm'].forEach(function(filePath) {
+    fs.rmSync(filePath, { force: true });
+  });
+}
+
+function isolatedServerEnv(overrides) {
+  const env = Object.assign({}, process.env);
+  ['DB_PATH', 'NODE_ENV', 'DEFAULT_ADMIN_USERNAME', 'DEFAULT_ADMIN_PASSWORD'].forEach(function(key) {
+    delete env[key];
+  });
+  Object.keys(env).forEach(function(key) {
+    if (/^USER_PASSWORD_/i.test(key)) delete env[key];
+  });
+  return Object.assign(env, overrides || {});
+}
+
+function requireDbInChild(env) {
+  return spawnSync(process.execPath, ['-e', 'const db = require(process.env.TM_DB_ENTRY); db.close();'], {
+    cwd: platformRoot,
+    env: isolatedServerEnv(Object.assign({ TM_DB_ENTRY: dbEntry }, env || {})),
+    encoding: 'utf8',
+    maxBuffer: 1024 * 1024
+  });
+}
+
+function readUserCount(dbPath) {
+  if (!fs.existsSync(dbPath)) return 0;
+  const db = openDatabase(dbPath, { readonly: true });
+  try {
+    return db.prepare('SELECT COUNT(*) AS count FROM users').get().count;
+  } catch (error) {
+    if (/no such table/i.test(error.message)) return 0;
+    throw error;
+  } finally {
+    db.close();
+  }
 }
 
 function assertCliSummaryOnly(result, expectedRotatedUsers, expectedSessionsRevoked) {
@@ -572,6 +621,66 @@ test('admin reset route redacts caller password when it collides with the audite
   }
 });
 
+test('admin reset route rejects a weak password equal to the target username without leaking or mutating state', { timeout: 30000 }, async () => {
+  const port = await reservePort();
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-credential-route-weak-collision-'));
+  const dbPath = path.join(tempDir, 'test.db');
+  const outputChunks = [];
+  const targetUsername = 'zhangwei';
+  const oldPassword = 'CollisionOld1!Secure';
+  const child = spawn(process.execPath, [serverEntry], {
+    cwd: platformRoot,
+    env: Object.assign({}, process.env, {
+      NODE_ENV: 'test',
+      PORT: String(port),
+      DB_PATH: dbPath,
+      JWT_SECRET: 'credential-route-weak-collision-test-secret',
+      DEFAULT_ADMIN_USERNAME: 'admin',
+      DEFAULT_ADMIN_PASSWORD: 'AdminTest1!Secure',
+      USER_PASSWORD_ZHANGWEI: oldPassword
+    }),
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+  child.stdout.on('data', (chunk) => outputChunks.push(chunk.toString()));
+  child.stderr.on('data', (chunk) => outputChunks.push(chunk.toString()));
+
+  try {
+    const baseUrl = `http://127.0.0.1:${port}`;
+    await waitForHealth(baseUrl, child, () => outputChunks.join(''));
+
+    const adminLogin = await jsonRequest(baseUrl, '/api/auth/login', {
+      method: 'POST',
+      body: { username: 'admin', password: 'AdminTest1!Secure' }
+    });
+    assert.equal(adminLogin.status, 200, 'admin login should succeed before weak collision reset check');
+    const memberLogin = await jsonRequest(baseUrl, '/api/auth/login', {
+      method: 'POST',
+      body: { username: targetUsername, password: oldPassword }
+    });
+    assert.equal(memberLogin.status, 200, 'member login should create a session before rejected reset');
+
+    const beforeUser = readUserByUsername(dbPath, targetUsername);
+    const beforeSessionCount = readUserSessionCount(dbPath, beforeUser.id);
+    const reset = await jsonRequest(baseUrl, `/api/admin/users/reset-password/${beforeUser.id}`, {
+      method: 'POST',
+      token: adminLogin.body.token,
+      body: { password: targetUsername }
+    });
+    const afterUser = readUserByUsername(dbPath, targetUsername);
+
+    assert.equal(reset.status, 400);
+    assert.equal(JSON.stringify(reset.body).includes(targetUsername), false);
+    assert.doesNotMatch(JSON.stringify(reset.body), /\$2[aby]\$/i);
+    assert.equal(afterUser.password_hash, beforeUser.password_hash);
+    assert.equal(readUserSessionCount(dbPath, beforeUser.id), beforeSessionCount);
+    assert.equal(bcrypt.compareSync(oldPassword, afterUser.password_hash), true);
+    assert.equal(readAdminResetAudits(dbPath).length, 0);
+  } finally {
+    await stopChild(child);
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
 test('admin user creation routes reject weak supplied passwords and generate policy-compliant temporary passwords', { timeout: 30000 }, async () => {
   const port = await reservePort();
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-user-create-policy-route-'));
@@ -649,6 +758,84 @@ test('admin user creation routes reject weak supplied passwords and generate pol
   }
 });
 
+test('production empty DB rejects weak DEFAULT_ADMIN_PASSWORD before inserting any user', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-prod-seed-admin-policy-'));
+  const dbPath = path.join(tempDir, 'test.db');
+  const weakPassword = 'weakpass';
+  try {
+    const result = requireDbInChild({
+      NODE_ENV: 'production',
+      DB_PATH: dbPath,
+      DEFAULT_ADMIN_USERNAME: 'admin',
+      DEFAULT_ADMIN_PASSWORD: weakPassword
+    });
+    const output = `${result.stdout}\n${result.stderr}`;
+
+    assert.notEqual(result.status, 0, output);
+    assert.match(output, /Password policy failed/);
+    assert.equal(output.includes(weakPassword), false);
+    assert.doesNotMatch(output, /\$2[aby]\$/i);
+    assert.equal(readUserCount(dbPath), 0);
+  } finally {
+    cleanupDbFiles(dbPath);
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('production empty DB rejects weak supplied USER_PASSWORD values before inserting any user', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-prod-seed-user-policy-'));
+  const dbPath = path.join(tempDir, 'test.db');
+  const weakPassword = 'weakpass';
+  try {
+    const result = requireDbInChild({
+      NODE_ENV: 'production',
+      DB_PATH: dbPath,
+      DEFAULT_ADMIN_USERNAME: 'admin',
+      DEFAULT_ADMIN_PASSWORD: 'AdminSeed1!Secure',
+      USER_PASSWORD_ZHANGWEI: weakPassword
+    });
+    const output = `${result.stdout}\n${result.stderr}`;
+
+    assert.notEqual(result.status, 0, output);
+    assert.match(output, /Password policy failed/);
+    assert.equal(output.includes(weakPassword), false);
+    assert.doesNotMatch(output, /\$2[aby]\$/i);
+    assert.equal(readUserCount(dbPath), 0);
+  } finally {
+    cleanupDbFiles(dbPath);
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('production startup with an existing admin ignores weak legacy seed env', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-prod-existing-admin-policy-'));
+  const dbPath = path.join(tempDir, 'test.db');
+  try {
+    const initial = requireDbInChild({
+      NODE_ENV: 'production',
+      DB_PATH: dbPath,
+      DEFAULT_ADMIN_USERNAME: 'admin',
+      DEFAULT_ADMIN_PASSWORD: 'AdminSeed1!Secure'
+    });
+    assert.equal(initial.status, 0, `${initial.stdout}\n${initial.stderr}`);
+    const seededUserCount = readUserCount(dbPath);
+    assert.equal(seededUserCount > 0, true);
+
+    const restart = requireDbInChild({
+      NODE_ENV: 'production',
+      DB_PATH: dbPath,
+      DEFAULT_ADMIN_USERNAME: 'admin',
+      DEFAULT_ADMIN_PASSWORD: 'weakpass',
+      USER_PASSWORD_ZHANGWEI: 'weakpass'
+    });
+    assert.equal(restart.status, 0, `${restart.stdout}\n${restart.stderr}`);
+    assert.equal(readUserCount(dbPath), seededUserCount);
+  } finally {
+    cleanupDbFiles(dbPath);
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
 test('auth me accepts valid tokens only through Authorization Bearer headers', { timeout: 30000 }, async () => {
   const port = await reservePort();
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-auth-me-bearer-only-'));
@@ -681,9 +868,13 @@ test('auth me accepts valid tokens only through Authorization Bearer headers', {
 
     const token = adminLogin.body.token;
     const queryTokenMe = await jsonRequest(baseUrl, `/api/auth/me?token=${encodeURIComponent(token)}`);
+    const rawAuthorizationMe = await jsonRequest(baseUrl, '/api/auth/me', {
+      headers: { Authorization: token }
+    });
     const bearerMe = await jsonRequest(baseUrl, '/api/auth/me', { token });
 
     assert.equal(queryTokenMe.status, 401);
+    assert.equal(rawAuthorizationMe.status, 401);
     assert.equal(bearerMe.status, 200);
     assert.equal(bearerMe.body.user.username, 'admin');
   } finally {
@@ -750,6 +941,41 @@ function assertPolicyRejectionDoesNotMutate(password, expectedError) {
   test('rotation rejects missing ' + policyCase.category + ' before mutating users, sessions, or audit logs', () => {
     assertPolicyRejectionDoesNotMutate(policyCase.password, policyCase.error);
   });
+});
+
+test('rotation policy rejection does not leak the target username when it equals the supplied password', () => {
+  const db = freshDb();
+  try {
+    const targetUsername = 'zhangwei';
+    const user = getUser(db, targetUsername);
+    insertSession(db, user.id, 'weak-collision-session');
+    const before = {
+      hash: user.password_hash,
+      sessions: db.prepare('SELECT COUNT(*) AS count FROM sessions WHERE user_id = ?').get(user.id).count,
+      audits: credentialAuditCount(db)
+    };
+
+    assert.throws(function() {
+      rotateUserPasswords(db, {
+        actorUserId: 1,
+        rotations: [{ username: targetUsername, password: targetUsername }],
+        invalidateAllSessions: true,
+        ipAddress: '127.0.0.1',
+        reason: 'weak username collision'
+      });
+    }, function(error) {
+      assert.match(error.message, /Password policy failed/);
+      assert.equal(error.message.includes(targetUsername), false);
+      assert.doesNotMatch(error.message, /\$2[aby]\$/i);
+      return true;
+    });
+
+    assert.equal(getUser(db, targetUsername).password_hash, before.hash);
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM sessions WHERE user_id = ?').get(user.id).count, before.sessions);
+    assert.equal(credentialAuditCount(db), before.audits);
+  } finally {
+    db.close();
+  }
 });
 
 test('multi-user rotation changes hashes, revokes affected sessions, and writes sanitized audit rows', () => {

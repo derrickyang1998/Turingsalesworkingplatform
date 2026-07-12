@@ -3,7 +3,7 @@ const Database = require('better-sqlite3');
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env'), quiet: true });
 const bcrypt = require('bcryptjs');
-const crypto = require('crypto');
+const credentialRotation = require('./services/credential_rotation_service');
 
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'db', 'turingmarket.db');
 const db = new Database(DB_PATH);
@@ -425,13 +425,49 @@ db.exec(`
 `);
 
 // Seed default admin and team users
-function seedPasswordHash(seedPassword) {
-  const password = seedPassword || crypto.randomBytes(18).toString('base64url');
+function seedPasswordHash(password) {
   return bcrypt.hashSync(password, bcrypt.genSaltSync(10));
 }
 
 function userPasswordEnvKey(username) {
   return 'USER_PASSWORD_' + String(username || '').toUpperCase().replace(/[^A-Z0-9]/g, '_');
+}
+
+function hasEnvKey(envKey) {
+  return Object.prototype.hasOwnProperty.call(process.env, envKey);
+}
+
+function productionPasswordPolicyError(envKey, errors) {
+  return envKey + ' Password policy failed: ' + errors.join(' ');
+}
+
+function resolveSeedPassword(envKey, options) {
+  options = options || {};
+  if (!hasEnvKey(envKey)) {
+    if (process.env.NODE_ENV === 'production' && options.requiredInProduction) {
+      throw new Error(envKey + ' must be configured before seeding users in production');
+    }
+    return credentialRotation.generateTemporaryPassword();
+  }
+
+  const password = String(process.env[envKey] || '');
+  if (process.env.NODE_ENV === 'production') {
+    const errors = credentialRotation.passwordPolicyErrors(password);
+    if (errors.length) throw new Error(productionPasswordPolicyError(envKey, errors));
+  }
+  return password;
+}
+
+function resolveSeedPasswords(teamMembers) {
+  const passwords = {
+    admin: resolveSeedPassword('DEFAULT_ADMIN_PASSWORD', { requiredInProduction: true }),
+    members: {}
+  };
+  teamMembers.forEach(function(member) {
+    const username = member[0];
+    passwords.members[username] = resolveSeedPassword(userPasswordEnvKey(username));
+  });
+  return passwords;
 }
 
 function configuredAdminUsername() {
@@ -445,15 +481,6 @@ function configuredAdminUsername() {
 const defaultAdminUsername = configuredAdminUsername();
 const existingAdmin = db.prepare("SELECT id FROM users WHERE role = 'admin' LIMIT 1").get();
 if (!existingAdmin) {
-  if (process.env.NODE_ENV === 'production' && !process.env.DEFAULT_ADMIN_PASSWORD) {
-    throw new Error('DEFAULT_ADMIN_PASSWORD must be configured before seeding users in production');
-  }
-  const insertUser = db.prepare('INSERT INTO users (username, password_hash, display_name, role, email, department, api_quota) VALUES (?, ?, ?, ?, ?, ?, ?)');
-
-  // Admin
-  insertUser.run(defaultAdminUsername, seedPasswordHash(process.env.DEFAULT_ADMIN_PASSWORD), '管理员', 'admin', 'admin@turingmarket.cn', '管理', 200000);
-
-  // 10 team members
   const teamMembers = [
     ['zhangwei', '张伟', 'user', 'zhangwei@turingmarket.cn', '商务一部'],
     ['wangfang', '王芳', 'user', 'wangfang@turingmarket.cn', '商务一部'],
@@ -466,9 +493,14 @@ if (!existingAdmin) {
     ['zhoujie', '周杰', 'user', 'zhoujie@turingmarket.cn', '红人组'],
     ['wulei', '吴磊', 'user', 'wulei@turingmarket.cn', '策略组'],
   ];
+  const seedPasswords = resolveSeedPasswords(teamMembers);
+  const insertUser = db.prepare('INSERT INTO users (username, password_hash, display_name, role, email, department, api_quota) VALUES (?, ?, ?, ?, ?, ?, ?)');
+
+  // Admin
+  insertUser.run(defaultAdminUsername, seedPasswordHash(seedPasswords.admin), '管理员', 'admin', 'admin@turingmarket.cn', '管理', 200000);
 
   teamMembers.forEach(([username, displayName, role, email, dept]) => {
-    try { insertUser.run(username, seedPasswordHash(process.env[userPasswordEnvKey(username)]), displayName, role, email, dept, 50000); } catch(e) {}
+    try { insertUser.run(username, seedPasswordHash(seedPasswords.members[username]), displayName, role, email, dept, 50000); } catch(e) {}
   });
 
   console.log('✅ Database seeded with admin + 10 team members');

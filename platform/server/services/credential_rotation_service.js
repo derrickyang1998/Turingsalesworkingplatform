@@ -64,7 +64,7 @@ function validateRotations(rotations) {
     }
     seen.add(username);
     if (errors.length) {
-      throw new Error('Password policy failed for ' + username + ': ' + errors.join(' '));
+      throw new Error('Password policy failed: ' + errors.join(' '));
     }
     return { username: username, password: password };
   });
