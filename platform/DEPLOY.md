@@ -6,8 +6,8 @@
 
 ```bash
 # 1. 克隆项目
-git clone https://github.com/derrickyang1998/Turingsalesworkingplatform.git
-cd Turingsalesworkingplatform/platform
+git clone <github-repo-url>
+cd <repo-directory>/platform
 
 # 2. 运行安装脚本（自动安装 Node.js + 依赖 + PM2 + Nginx）
 chmod +x install.sh
@@ -85,7 +85,14 @@ pm2 restart turingmarket
 ## 👤 登录账号
 管理员和团队成员密码必须通过私有 `.env` 或后台一次性临时密码配置，不在仓库中记录固定默认密码。
 
+## 凭据轮换与会话撤销
+- 凭据轮换运行手册：`docs/runbooks/credential-rotation.md`。
+- 生产密码、JWT、DeepSeek、Tavily 和 `FEISHU_WEBHOOK_URL` 真实值只保存在服务端密钥存储或受保护的生产 `.env`，不得进入 Git。
+- 批量账号轮换必须使用仅标准输入 CLI：`node scripts/rotate_user_credentials.js < ./rotation-payload.private.json`。
+- 轮换后必须确认 `SELECT COUNT(*) AS count FROM sessions;` 返回 `0`，并完成旧密码/旧令牌拒绝测试。
+- 回滚只允许恢复代码，不得恢复旧密码哈希、旧 JWT 密钥或明文 `.env.bak*`。
+
 ## 🛠 技术栈
 - 前端: 纯 HTML/CSS/JS + Playwright 测试
-- 后端: Node.js + Express 5 + sql.js
+- 后端: Node.js + Express 5 + SQLite (better-sqlite3)
 - 部署: PM2 + Nginx (Ubuntu)

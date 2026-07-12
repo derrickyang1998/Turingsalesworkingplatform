@@ -61,6 +61,51 @@ function invoke(routes, key, opts) {
   return { statusCode, payload };
 }
 
+function readRepoFile(repoRoot, relativePath) {
+  const file = path.join(repoRoot, ...relativePath.split('/'));
+  assert.equal(fs.existsSync(file), true, relativePath + ' should exist');
+  return fs.readFileSync(file, 'utf8');
+}
+
+test('credential rotation runbook and public configuration docs keep the security contract', () => {
+  const repoRoot = path.resolve(__dirname, '../../..');
+  const runbook = readRepoFile(repoRoot, 'docs/runbooks/credential-rotation.md');
+  const envExample = readRepoFile(repoRoot, '.env.example');
+  const deploy = readRepoFile(repoRoot, 'platform/DEPLOY.md');
+  const security = readRepoFile(repoRoot, 'docs/handoff/2026-06-30/SECURITY.md');
+  const operations = readRepoFile(repoRoot, 'docs/handoff/2026-06-30/OPERATIONS.md');
+  const allDocs = [runbook, envExample, deploy, security, operations].join('\n');
+
+  assert.match(runbook, /Credential Rotation Runbook[\s\S]*凭据轮换运行手册/);
+  assert.match(runbook, /STDIN-ONLY CLI[\s\S]*仅标准输入 CLI/);
+  assert.match(runbook, /node\s+scripts\/rotate_user_credentials\.js\s*</);
+  assert.match(runbook, /SESSION REVOCATION VERIFICATION[\s\S]*会话撤销验证/);
+  assert.match(runbook, /SELECT COUNT\(\*\) AS count FROM sessions/);
+  assert.match(runbook, /Provider Evidence Classification[\s\S]*第三方服务证据分类/);
+  assert.match(runbook, /DeepSeek[\s\S]*Tavily[\s\S]*Feishu/);
+  assert.match(runbook, /D:\\主盘\\图灵集市\\图灵商务平台开发\\99-private/);
+  assert.match(runbook, /Protected Backup[\s\S]*受保护备份/);
+  assert.match(runbook, /Rollback Rule[\s\S]*must never restore old password hashes[\s\S]*不得恢复旧密码/);
+  assert.match(runbook, /\.env\.bak[\s\S]*清理/);
+  assert.match(runbook, /Evidence Retention[\s\S]*证据留存/);
+
+  ['DEFAULT_ADMIN_USERNAME', 'FEISHU_WEBHOOK_URL', 'WEB_SEARCH_PROVIDER'].forEach(function(name) {
+    assert.match(envExample, new RegExp('^' + name + '=', 'm'), '.env.example should declare ' + name);
+    assert.match(allDocs, new RegExp(name), 'docs should mention ' + name);
+  });
+  assert.match(envExample, /real production values remain server-side[\s\S]*真实生产值仅保存在服务器端/i);
+  assert.doesNotMatch(envExample, /DEFAULT_ADMIN_PASSWORD=(?!replace_with_private_value|$).+/);
+
+  assert.match(deploy, /Express 5 \+ SQLite \(better-sqlite3\)/);
+  assert.doesNotMatch(deploy, /sql\.js/);
+  assert.match(operations, /current production platform[\s\S]*Express \+ SQLite[\s\S]*当前生产平台/);
+  assert.match(operations, /C:\\Users\\29272\\Documents\\在线商务平台-github-sync/);
+  assert.doesNotMatch(operations, /当前 .*仓库是静态前端版本/);
+  assert.match(allDocs, /ppt\.js\?v=20260702v916kbbridge/);
+  assert.match(allDocs, /window\.tmPPTBuild = "20260702-v916-kb-bridge-client-cn"/);
+  assert.match(security, /private credential destination[\s\S]*私有凭据目标目录/i);
+});
+
 test('public files and admin APIs do not expose the legacy default password', () => {
   const repoRoot = path.resolve(__dirname, '../../..');
   const optionalFiles = [
@@ -78,7 +123,14 @@ test('public files and admin APIs do not expose the legacy default password', ()
     path.join(repoRoot, 'platform', 'server', 'server_full.js'),
     path.join(repoRoot, 'platform', 'server', 'test_v8.js')
   ];
-  const legacyDefault = /admin\s*\/\s*turing2026|turing2026|Password reset to turing2026|hashSync\(['"]turing2026['"]|DEFAULT_USER_PASSWORD\s*\|\|\s*['"]turing2026['"]/i;
+  const legacyPassword = ['turing', '2026'].join('');
+  const legacyDefault = new RegExp([
+    'admin\\s*\\/\\s*' + legacyPassword,
+    legacyPassword,
+    'Password reset to ' + legacyPassword,
+    "hashSync\\([\"']" + legacyPassword + "[\"']",
+    "DEFAULT_USER_PASSWORD\\s*\\|\\|\\s*[\"']" + legacyPassword + "[\"']"
+  ].join('|'), 'i');
   requiredFiles.forEach(function(file) {
     assert.equal(fs.existsSync(file), true, file + ' should exist for legacy password scanning');
   });
@@ -173,11 +225,11 @@ test('seeded admin and team users do not share the same default password', () =>
 });
 
 test('seeded admin username can be configured without recreating legacy admin', () => {
-  const db = freshDb({ DEFAULT_ADMIN_USERNAME: 'derrick' });
+  const db = freshDb({ DEFAULT_ADMIN_USERNAME: 'opsadmin' });
   const admins = db.prepare("SELECT username FROM users WHERE role = 'admin' ORDER BY id").all();
   const legacyAdmin = db.prepare('SELECT id FROM users WHERE username = ?').get('admin');
 
-  assert.deepEqual(admins.map(function(admin) { return admin.username; }), ['derrick']);
+  assert.deepEqual(admins.map(function(admin) { return admin.username; }), ['opsadmin']);
   assert.equal(legacyAdmin, undefined);
 
   db.close();
