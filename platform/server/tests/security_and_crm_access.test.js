@@ -3,7 +3,21 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const bcrypt = require('bcryptjs');
+
+const LEGACY_CREDENTIAL_LENGTH = 10;
+const LEGACY_CREDENTIAL_SHA256 = '0f92bb29dad79e922a92eba3deb0e6be044632fa5aca97a748adb7659d382c6a';
+
+function containsLegacyCredential(content) {
+  const normalized = content.toLowerCase();
+  for (let index = 0; index <= normalized.length - LEGACY_CREDENTIAL_LENGTH; index++) {
+    const candidate = normalized.slice(index, index + LEGACY_CREDENTIAL_LENGTH);
+    const fingerprint = crypto.createHash('sha256').update(candidate, 'utf8').digest('hex');
+    if (fingerprint === LEGACY_CREDENTIAL_SHA256) return true;
+  }
+  return false;
+}
 
 function freshDb(options) {
   options = options || {};
@@ -114,6 +128,15 @@ test('credential rotation runbook and public configuration docs keep the securit
   assert.match(security, /private credential destination[\s\S]*私有凭据目标目录/i);
 });
 
+test('security test source cannot reconstruct the legacy password from array fragments', () => {
+  const source = fs.readFileSync(__filename, 'utf8');
+  assert.doesNotMatch(
+    source,
+    /\b(?:const|let|var)\s+legacyPassword\s*=\s*\[[\s\S]*?\]\s*\.join\s*\(\s*(['"])\1\s*\)/,
+    'security test source must not reconstruct the legacy password from array fragments'
+  );
+});
+
 test('public files and admin APIs do not expose the legacy default password', () => {
   const repoRoot = path.resolve(__dirname, '../../..');
   const optionalFiles = [
@@ -131,20 +154,16 @@ test('public files and admin APIs do not expose the legacy default password', ()
     path.join(repoRoot, 'platform', 'server', 'server_full.js'),
     path.join(repoRoot, 'platform', 'server', 'test_v8.js')
   ];
-  const legacyPassword = ['turing', '2026'].join('');
-  const legacyDefault = new RegExp([
-    'admin\\s*\\/\\s*' + legacyPassword,
-    legacyPassword,
-    'Password reset to ' + legacyPassword,
-    "hashSync\\([\"']" + legacyPassword + "[\"']",
-    "DEFAULT_USER_PASSWORD\\s*\\|\\|\\s*[\"']" + legacyPassword + "[\"']"
-  ].join('|'), 'i');
   requiredFiles.forEach(function(file) {
     assert.equal(fs.existsSync(file), true, file + ' should exist for legacy password scanning');
   });
   const files = requiredFiles.concat(optionalFiles.filter(function(file) { return fs.existsSync(file); }));
   files.forEach(function(file) {
-    assert.doesNotMatch(fs.readFileSync(file, 'utf8'), legacyDefault, file + ' exposes the legacy default password');
+    assert.equal(
+      containsLegacyCredential(fs.readFileSync(file, 'utf8')),
+      false,
+      file + ' exposes the legacy default password'
+    );
   });
 });
 
