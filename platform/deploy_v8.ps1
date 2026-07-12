@@ -7,7 +7,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$SERVER = "8.163.129.160"
+$SERVER = $env:TURINGMARKET_SERVER
 $SSH_KEY = "$env:USERPROFILE\.ssh\turingmarket_deploy"
 $REMOTE_DIR = "/root/turingmarket/platform"
 $LOCAL_DIR = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -20,6 +20,10 @@ if ($PreserveSessions) {
     Write-Warning "Existing sessions will be preserved because -PreserveSessions was explicitly supplied."
 }
 
+if ([string]::IsNullOrWhiteSpace($SERVER)) {
+    throw "TURINGMARKET_SERVER environment variable is required for production deploy."
+}
+$SERVER = $SERVER.Trim()
 if ((Split-Path -Leaf $REPO_DIR) -notmatch "github-sync$") {
     throw "Refusing to deploy from non github-sync checkout: $REPO_DIR"
 }
@@ -35,7 +39,6 @@ if (-not (Select-String -LiteralPath "$LOCAL_DIR\index.html" -Pattern $EXPECTED_
 
 Write-Host "TuringMarket guarded deploy starting" -ForegroundColor Cyan
 Write-Host "Source: $LOCAL_DIR" -ForegroundColor Yellow
-Write-Host "Target: ${SERVER}:$REMOTE_DIR" -ForegroundColor Yellow
 
 $FILES = @(
     "app.js",
@@ -76,8 +79,8 @@ $ROOT_FILES = @(
 )
 
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
-$backupDir = "backups/backup-v029-$stamp"
-ssh -i $SSH_KEY -o StrictHostKeyChecking=no root@$SERVER "cd $REMOTE_DIR && mkdir -p $backupDir nginx server/scripts server/services server/tests && cp index.html app.js ppt.js CHANGELOG.md server/server.js server/services/latest_ui_compat_service.js $backupDir/ 2>/dev/null || true; if [ -f /etc/nginx/sites-enabled/turingmarket ]; then cp -L /etc/nginx/sites-enabled/turingmarket $backupDir/nginx-turingmarket.conf; fi"
+$backupDir = "backups/v0210-security-$stamp"
+ssh -i $SSH_KEY -o BatchMode=yes root@$SERVER "cd $REMOTE_DIR && mkdir -p $backupDir/nginx $backupDir/server/scripts $backupDir/server/services $backupDir/server/tests && cp index.html app.js ppt.js CHANGELOG.md $backupDir/ 2>/dev/null || true; cp server/server.js $backupDir/server/server.js 2>/dev/null || true; cp server/services/credential_rotation_service.js $backupDir/server/services/credential_rotation_service.js 2>/dev/null || true; cp server/scripts/rotate_user_credentials.js $backupDir/server/scripts/rotate_user_credentials.js 2>/dev/null || true; if [ -f /etc/nginx/sites-enabled/turingmarket ]; then cp -L /etc/nginx/sites-enabled/turingmarket $backupDir/nginx/turingmarket.conf; fi"
 
 foreach ($file in $FILES) {
     $local = Join-Path $LOCAL_DIR $file
@@ -86,7 +89,7 @@ foreach ($file in $FILES) {
     }
     $remote = "$REMOTE_DIR/$($file -replace '\\', '/')"
     Write-Host "Uploading $file ..." -NoNewline
-    scp -i $SSH_KEY -o StrictHostKeyChecking=no $local "root@${SERVER}:$remote" 2>$null
+    scp -i $SSH_KEY -o BatchMode=yes $local "root@${SERVER}:$remote" 2>$null
     if ($LASTEXITCODE -ne 0) {
         throw "Upload failed: $file"
     }
@@ -98,14 +101,14 @@ foreach ($item in $ROOT_FILES) {
         throw "Local deploy file missing: $($item.Local)"
     }
     Write-Host "Uploading $(Split-Path -Leaf $item.Local) ..." -NoNewline
-    scp -i $SSH_KEY -o StrictHostKeyChecking=no $item.Local "root@${SERVER}:$($item.Remote)" 2>$null
+    scp -i $SSH_KEY -o BatchMode=yes $item.Local "root@${SERVER}:$($item.Remote)" 2>$null
     if ($LASTEXITCODE -ne 0) {
         throw "Upload failed: $($item.Local)"
     }
     Write-Host " ok" -ForegroundColor Green
 }
 
-ssh -i $SSH_KEY -o StrictHostKeyChecking=no root@$SERVER @"
+ssh -i $SSH_KEY -o BatchMode=yes root@$SERVER @"
 set -e
 cd $REMOTE_DIR
 node --check app.js
@@ -123,8 +126,8 @@ rm -f /etc/nginx/sites-enabled/turingmarket
 ln -s /etc/nginx/sites-available/turingmarket.candidate /etc/nginx/sites-enabled/turingmarket
 if ! nginx -t; then
   rm -f /etc/nginx/sites-enabled/turingmarket
-  if [ -f "$REMOTE_DIR/$backupDir/nginx-turingmarket.conf" ]; then
-    install -m 0644 "$REMOTE_DIR/$backupDir/nginx-turingmarket.conf" /etc/nginx/sites-available/turingmarket
+  if [ -f "$REMOTE_DIR/$backupDir/nginx/turingmarket.conf" ]; then
+    install -m 0644 "$REMOTE_DIR/$backupDir/nginx/turingmarket.conf" /etc/nginx/sites-available/turingmarket
     ln -s /etc/nginx/sites-available/turingmarket /etc/nginx/sites-enabled/turingmarket
   elif [ -f /etc/nginx/sites-available/turingmarket ]; then
     ln -s /etc/nginx/sites-available/turingmarket /etc/nginx/sites-enabled/turingmarket
@@ -141,7 +144,7 @@ pm2 restart turingmarket 2>/dev/null || pm2 start server/server.js --name turing
 grep -q "$EXPECTED_PPT_QUERY" index.html
 grep -q "$EXPECTED_PPT_BUILD" ppt.js
 for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
-  if curl -fsS http://127.0.0.1:3002/api/health >/dev/null 2>&1; then
+  if curl -fsS http://localhost:3002/api/health >/dev/null 2>&1; then
     break
   fi
   if [ "`$i" = "20" ]; then
@@ -167,4 +170,4 @@ fi
 echo "DEPLOY_OK"
 "@
 
-Write-Host "Deploy complete: http://$SERVER/" -ForegroundColor Cyan
+Write-Host "Deploy complete" -ForegroundColor Cyan

@@ -118,7 +118,36 @@ test('guarded deploy validates and installs the versioned nginx config', () => {
   assert.match(deploy, /systemctl reload nginx/);
   assert.match(deploy, /sites-available\/turingmarket/);
   assert.match(deploy, /if \(!? nginx -t|if ! nginx -t/);
-  assert.match(deploy, /nginx-turingmarket\.conf/);
+  assert.match(deploy, /\$REMOTE_DIR\/\$backupDir\/nginx\/turingmarket\.conf/);
+});
+
+test('guarded deploy keeps production host external and SSH host checking enabled', () => {
+  const deploy = fs.readFileSync(path.join(platformRoot, 'deploy_v8.ps1'), 'utf8');
+  const commandLines = deploy.split(/\r?\n/).filter((line) => /^\s*(ssh|scp)\b/.test(line));
+
+  assert.match(deploy, /\$SERVER\s*=\s*\$env:TURINGMARKET_SERVER\b/);
+  assert.match(deploy, /TURINGMARKET_SERVER/);
+  assert.match(deploy, /throw\s+"[^"]*TURINGMARKET_SERVER/);
+  assert.doesNotMatch(deploy, /\b(?:\d{1,3}\.){3}\d{1,3}\b/);
+  assert.doesNotMatch(deploy, /^\s*Write-(?:Host|Output|Information|Warning|Verbose|Debug).*?(?:\$SERVER|\$\{SERVER\}|TURINGMARKET_SERVER|root@|https?:\/\/)/gmi);
+  assert.equal(commandLines.length >= 3, true, 'deploy script should keep ssh/scp commands explicit');
+  for (const line of commandLines) {
+    assert.match(line, /-o\s+BatchMode=yes\b/, `${line} must force BatchMode`);
+  }
+  assert.doesNotMatch(deploy, /StrictHostKeyChecking\s*=\s*no/i);
+  assert.doesNotMatch(deploy, /UserKnownHostsFile\s*=\s*(?:NUL|\/dev\/null)/i);
+});
+
+test('guarded deploy creates v0210-security backups for security-critical files with tree structure', () => {
+  const deploy = fs.readFileSync(path.join(platformRoot, 'deploy_v8.ps1'), 'utf8');
+
+  assert.match(deploy, /\$backupDir\s*=\s*"backups\/v0210-security-\$stamp"/);
+  assert.match(deploy, /mkdir -p \$backupDir\/nginx \$backupDir\/server\/scripts \$backupDir\/server\/services/);
+  assert.match(deploy, /cp server\/server\.js \$backupDir\/server\/server\.js/);
+  assert.match(deploy, /cp server\/services\/credential_rotation_service\.js \$backupDir\/server\/services\/credential_rotation_service\.js/);
+  assert.match(deploy, /cp server\/scripts\/rotate_user_credentials\.js \$backupDir\/server\/scripts\/rotate_user_credentials\.js/);
+  assert.match(deploy, /cp -L \/etc\/nginx\/sites-enabled\/turingmarket \$backupDir\/nginx\/turingmarket\.conf/);
+  assert.match(deploy, /\$REMOTE_DIR\/\$backupDir\/nginx\/turingmarket\.conf/);
 });
 
 test('guarded deploy can invalidate and verify all production sessions', () => {
