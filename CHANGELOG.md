@@ -1,4 +1,31 @@
-# Changelog – TuringMarket 图灵商务在线工作平台
+# Changelog — TuringMarket 图灵商务在线工作平台
+
+## v0.2.9-production-static-exposure-hotfix (2026-07-12) - 生产静态资源安全热修
+
+### 暴露面收口
+- 移除 Express 对整个 `platform/` 目录的静态开放，改为仅允许 `index.html`、`app.js`、`ppt.js`、`data/` 和已登记的 SPA 页面路径。
+- `/server`、数据库/WAL、`uploads`、`tmp`、`backups`、部署脚本、dotfile 和未知顶层文件在进入 SPA fallback 前统一返回 `404`。
+- 未注册 `/api` 路径不再返回前端首页，统一返回 JSON `404`。
+
+### 双层防护与事件处置
+- 新增版本化 Nginx 配置，在代理层重复拦截后端目录、数据库目录、dotfile 和部署文件。
+- 部署脚本使用 candidate 配置执行 `nginx -t`，失败时恢复旧配置，验证通过后才 reload。
+- 安全热修部署默认清空 `sessions` 表并校验剩余会话为 0；只有显式传入 `-PreserveSessions` 才会保留会话。
+
+### 验证
+- TDD 红灯确认真实 Express 服务对 `/server/server.js` 返回 `200`，修复后敏感路径、编码路径和目录穿越路径均返回 `404`。
+- `node --test platform/server/tests/public_static_security.test.js`：4/4 通过。
+- `npm test` in `platform/server`：36/36 通过。
+- `node --check`、PowerShell 脚本解析和 `git diff --check` 通过。
+- `minimal-change-engineer`、`code-reviewer`、`application-security-engineer` 复审均为 `APPROVE`。
+- 生产部署：Nginx 配置校验通过，PM2 `turingmarket` online，清除 14 个旧会话并校验剩余 0。
+- 公网回归：UI/PPT/data/health 保持 `200`；后端源码、SQLite/WAL、部署文件、dotfile、大小写/编码/目录穿越路径均为 `404`。
+- 生产鉴权烟测：管理员登录、`/api/auth/me`、网红模板下载、退出登录均为 `200`，测试前后会话数均为 0。
+- 服务器完整测试：36/36 通过；线上关键文件 SHA-256 与本地一致。
+- 生产备份：`/root/turingmarket/platform/backups/backup-v029-20260712-152827`。
+
+---
+
 ## v0.2.8-influencer-custom-upload-headers (2026-07-03) - M4 自定义网红上传表头
 
 ### 自定义上传表头

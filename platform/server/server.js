@@ -18,6 +18,7 @@ const vaultExportService = require('./services/vault_export_service');
 const crmAccess = require('./services/crm_access_service');
 const latestUiCompat = require('./services/latest_ui_compat_service');
 const influencerWorkflow = require('./services/influencer_workflow_service');
+const publicAssets = require('./services/public_assets_service');
 const app = express();
 const PORT = process.env.PORT || 3002;
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'db', 'turingmarket.db');
@@ -40,8 +41,8 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// Serve static files from parent directory
-app.use(express.static(path.join(__dirname, '..'), { etag: false, lastModified: false, setHeaders: function(res) { res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate'); res.set('Pragma', 'no-cache'); res.set('Expires', '0'); } }));
+// Serve only the browser assets required by the platform UI.
+publicAssets.registerPublicAssets(app, express, path.join(__dirname, '..'));
 
 // File upload config
 const upload = multer({
@@ -888,6 +889,10 @@ workflowEngine.initEngine();
 // ===== HEALTH CHECK =====
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+app.use('/api', (_req, res) => {
+  res.status(404).json({ error: 'Not found' });
 });
 
 // ===== SPA FALLBACK =====

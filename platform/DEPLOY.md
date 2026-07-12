@@ -79,6 +79,8 @@ pm2 restart turingmarket
 - 不要从 `C:\Users\29272\Documents\在线商务平台` 或旧 `海外品牌推广-红人营销-图灵` 静态目录发布。
 - PowerShell 部署请使用 `platform/deploy_v8.ps1`；脚本会拒绝非 `github-sync` 路径，并校验 `ppt.js` build 与首页缓存版本。
 - 发布后必须确认首页包含 `ppt.js?v=20260702v916kbbridge`，且 `ppt.js` 包含 `window.tmPPTBuild = "20260702-v916-kb-bridge-client-cn"`。
+- 安全事件热修后，`deploy_v8.ps1` 默认清空现有登录会话并校验剩余为 0；只有明确评估无需强制重新登录时才可显式传入 `-PreserveSessions`。
+- 部署脚本会安装版本化 Nginx 配置；候选配置必须通过 `nginx -t`，失败时自动恢复上一版配置。
 
 ## 👤 登录账号
 管理员和团队成员密码必须通过私有 `.env` 或后台一次性临时密码配置，不在仓库中记录固定默认密码。

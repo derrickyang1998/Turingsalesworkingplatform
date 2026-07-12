@@ -1,6 +1,10 @@
 # TuringMarket guarded deploy script.
 # Run from the current github-sync checkout only.
 
+param(
+    [switch]$PreserveSessions
+)
+
 $ErrorActionPreference = "Stop"
 
 $SERVER = "8.163.129.160"
@@ -10,6 +14,11 @@ $LOCAL_DIR = Split-Path -Parent $MyInvocation.MyCommand.Path
 $REPO_DIR = Split-Path -Parent $LOCAL_DIR
 $EXPECTED_PPT_BUILD = "20260702-v916-kb-bridge-client-cn"
 $EXPECTED_PPT_QUERY = "20260702v916kbbridge"
+$invalidateSessionsFlag = if ($PreserveSessions) { "0" } else { "1" }
+
+if ($PreserveSessions) {
+    Write-Warning "Existing sessions will be preserved because -PreserveSessions was explicitly supplied."
+}
 
 if ((Split-Path -Leaf $REPO_DIR) -notmatch "github-sync$") {
     throw "Refusing to deploy from non github-sync checkout: $REPO_DIR"
@@ -34,6 +43,7 @@ $FILES = @(
     "ppt.js",
     "DEPLOY.md",
     "deploy_v8.ps1",
+    "nginx\turingmarket.conf",
     "server\db.js",
     "server\server.js",
     "server\routes_customers.js",
@@ -46,6 +56,7 @@ $FILES = @(
     "server\services\web_search_service.js",
     "server\services\file_ingest_service.js",
     "server\services\influencer_workflow_service.js",
+    "server\services\public_assets_service.js",
     "server\tests\ai_knowledge_foundation.test.js",
     "server\tests\brand_workspace_ui.test.js",
     "server\tests\obsidian_and_business_knowledge.test.js",
@@ -53,6 +64,7 @@ $FILES = @(
     "server\tests\security_and_crm_access.test.js",
     "server\tests\influencer_workflow.test.js",
     "server\tests\file_ingest_service.test.js",
+    "server\tests\public_static_security.test.js",
     "server\generate_ppt.py"
 )
 
@@ -61,7 +73,8 @@ $ROOT_FILES = @(
 )
 
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
-ssh -i $SSH_KEY -o StrictHostKeyChecking=no root@$SERVER "cd $REMOTE_DIR && mkdir -p backups/backup-v024-$stamp && cp index.html app.js ppt.js CHANGELOG.md server/server.js server/services/latest_ui_compat_service.js backups/backup-v024-$stamp/ 2>/dev/null || true"
+$backupDir = "backups/backup-v029-$stamp"
+ssh -i $SSH_KEY -o StrictHostKeyChecking=no root@$SERVER "cd $REMOTE_DIR && mkdir -p $backupDir nginx && cp index.html app.js ppt.js CHANGELOG.md server/server.js server/services/latest_ui_compat_service.js $backupDir/ 2>/dev/null || true; if [ -f /etc/nginx/sites-enabled/turingmarket ]; then cp -L /etc/nginx/sites-enabled/turingmarket $backupDir/nginx-turingmarket.conf; fi"
 
 foreach ($file in $FILES) {
     $local = Join-Path $LOCAL_DIR $file
@@ -98,6 +111,26 @@ node --check server/server.js
 node --check server/services/latest_ui_compat_service.js
 node --check server/services/file_ingest_service.js
 node --check server/services/influencer_workflow_service.js
+node --check server/services/public_assets_service.js
+install -m 0644 nginx/turingmarket.conf /etc/nginx/sites-available/turingmarket.candidate
+rm -f /etc/nginx/sites-enabled/turingmarket
+ln -s /etc/nginx/sites-available/turingmarket.candidate /etc/nginx/sites-enabled/turingmarket
+if ! nginx -t; then
+  rm -f /etc/nginx/sites-enabled/turingmarket
+  if [ -f "$REMOTE_DIR/$backupDir/nginx-turingmarket.conf" ]; then
+    install -m 0644 "$REMOTE_DIR/$backupDir/nginx-turingmarket.conf" /etc/nginx/sites-available/turingmarket
+    ln -s /etc/nginx/sites-available/turingmarket /etc/nginx/sites-enabled/turingmarket
+  elif [ -f /etc/nginx/sites-available/turingmarket ]; then
+    ln -s /etc/nginx/sites-available/turingmarket /etc/nginx/sites-enabled/turingmarket
+  fi
+  rm -f /etc/nginx/sites-available/turingmarket.candidate
+  exit 1
+fi
+mv /etc/nginx/sites-available/turingmarket.candidate /etc/nginx/sites-available/turingmarket
+rm -f /etc/nginx/sites-enabled/turingmarket
+ln -s /etc/nginx/sites-available/turingmarket /etc/nginx/sites-enabled/turingmarket
+nginx -t
+systemctl reload nginx
 pm2 restart turingmarket 2>/dev/null || pm2 start server/server.js --name turingmarket
 grep -q "$EXPECTED_PPT_QUERY" index.html
 grep -q "$EXPECTED_PPT_BUILD" ppt.js
@@ -111,6 +144,20 @@ for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
   fi
   sleep 1
 done
+if [ "$invalidateSessionsFlag" = "1" ]; then
+  cd server
+  node <<'NODE'
+const Database = require('better-sqlite3');
+const database = new Database('db/turingmarket.db');
+const removed = database.prepare('DELETE FROM sessions').run();
+const remaining = database.prepare('SELECT COUNT(*) AS count FROM sessions').get().count;
+database.close();
+if (remaining !== 0) throw new Error('Session invalidation verification failed');
+console.log('SESSIONS_INVALIDATED=' + removed.changes);
+console.log('SESSIONS_REMAINING=0');
+NODE
+  cd ..
+fi
 echo "DEPLOY_OK"
 "@
 
