@@ -78,6 +78,17 @@ function requireActorUserId(actorUserId) {
   return id;
 }
 
+function redactPasswords(value, passwords) {
+  let sanitized = String(value);
+  passwords
+    .slice()
+    .sort(function(left, right) { return right.length - left.length; })
+    .forEach(function(password) {
+      sanitized = sanitized.split(password).join('[REDACTED]');
+    });
+  return sanitized;
+}
+
 function loadUsers(db, rotations) {
   const selectUser = db.prepare('SELECT id, username FROM users WHERE username = ? AND is_active = 1');
   return rotations.map(function(rotation) {
@@ -102,9 +113,10 @@ function rotateUserPasswords(db, options) {
   const actorUserId = requireActorUserId(options.actorUserId);
   const users = loadUsers(db, rotations);
   const userIds = users.map(function(user) { return user.userId; });
+  const passwords = rotations.map(function(rotation) { return String(rotation.password); });
   const invalidateAllSessions = Boolean(options.invalidateAllSessions);
-  const ipAddress = options.ipAddress ? String(options.ipAddress) : null;
-  const reason = options.reason ? String(options.reason) : '';
+  const ipAddress = options.ipAddress ? redactPasswords(options.ipAddress, passwords) : null;
+  const reason = options.reason ? redactPasswords(options.reason, passwords) : '';
 
   const transaction = db.transaction(function() {
     const updateUser = db.prepare('UPDATE users SET password_hash = ? WHERE id = ?');
@@ -124,7 +136,7 @@ function rotateUserPasswords(db, options) {
       insertAudit.run(actorUserId, 'credential_rotation', 'security', JSON.stringify({
         actorUserId: actorUserId,
         targetUserId: user.userId,
-        targetUsername: user.username,
+        targetUsername: redactPasswords(user.username, passwords),
         reason: reason,
         invalidateAllSessions: invalidateAllSessions,
         sessionsRevoked: sessionsRevoked

@@ -59,33 +59,47 @@ test('temporary passwords are long and satisfy every required category', () => {
   }
 });
 
-test('rotation rejects invalid passwords before mutating users, sessions, or audit logs', () => {
+function assertPolicyRejectionDoesNotMutate(password, expectedError) {
   const db = freshDb();
-  const user = db.prepare('SELECT id, password_hash FROM users WHERE username = ?').get('zhangwei');
-  const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
-  db.prepare('INSERT INTO sessions (user_id, token, ip_address, expires_at) VALUES (?, ?, ?, ?)').run(user.id, 'weak-session', '127.0.0.1', expiresAt);
+  try {
+    const user = db.prepare('SELECT id, password_hash FROM users WHERE username = ?').get('zhangwei');
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    db.prepare('INSERT INTO sessions (user_id, token, ip_address, expires_at) VALUES (?, ?, ?, ?)').run(user.id, 'weak-session', '127.0.0.1', expiresAt);
 
-  const before = {
-    hash: user.password_hash,
-    sessions: db.prepare('SELECT COUNT(*) AS count FROM sessions').get().count,
-    audits: credentialAuditCount(db)
-  };
+    const before = {
+      hash: user.password_hash,
+      sessions: db.prepare('SELECT COUNT(*) AS count FROM sessions').get().count,
+      audits: credentialAuditCount(db)
+    };
 
-  assert.throws(function() {
-    rotateUserPasswords(db, {
-      actorUserId: 1,
-      rotations: [{ username: 'zhangwei', password: 'TooShort1!' }],
-      invalidateAllSessions: true,
-      ipAddress: '127.0.0.1',
-      reason: 'policy test'
-    });
-  }, /Password policy failed for zhangwei/);
+    assert.throws(function() {
+      rotateUserPasswords(db, {
+        actorUserId: 1,
+        rotations: [{ username: 'zhangwei', password: password }],
+        invalidateAllSessions: true,
+        ipAddress: '127.0.0.1',
+        reason: 'policy test'
+      });
+    }, expectedError);
 
-  assert.equal(db.prepare('SELECT password_hash FROM users WHERE id = ?').get(user.id).password_hash, before.hash);
-  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM sessions').get().count, before.sessions);
-  assert.equal(credentialAuditCount(db), before.audits);
+    assert.equal(db.prepare('SELECT password_hash FROM users WHERE id = ?').get(user.id).password_hash, before.hash);
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM sessions').get().count, before.sessions);
+    assert.equal(credentialAuditCount(db), before.audits);
+  } finally {
+    db.close();
+  }
+}
 
-  db.close();
+[
+  { category: 'minimum length', password: 'TooShort1!', error: /at least 12 characters/ },
+  { category: 'uppercase', password: 'lowercase123!', error: /uppercase letter/ },
+  { category: 'lowercase', password: 'UPPERCASE123!', error: /lowercase letter/ },
+  { category: 'digit', password: 'NoDigitsHere!', error: /include a digit/ },
+  { category: 'symbol', password: 'NoSymbol1234', error: /include a symbol/ }
+].forEach(function(policyCase) {
+  test('rotation rejects missing ' + policyCase.category + ' before mutating users, sessions, or audit logs', () => {
+    assertPolicyRejectionDoesNotMutate(policyCase.password, policyCase.error);
+  });
 });
 
 test('multi-user rotation changes hashes, revokes affected sessions, and writes sanitized audit rows', () => {
@@ -140,6 +154,50 @@ test('multi-user rotation changes hashes, revokes affected sessions, and writes 
   });
 
   db.close();
+});
+
+test('rotation redacts every supplied password from audit strings while preserving incident reason', () => {
+  const db = freshDb();
+  try {
+    const actor = getUser(db, 'admin');
+    const rotations = [
+      { username: 'zhangwei', password: 'ReasonLeakZhang1!Secure' },
+      { username: 'wangfang', password: 'ReasonLeakWang2!Secure' }
+    ];
+    const secrets = rotations.map(function(rotation) { return rotation.password; });
+
+    rotateUserPasswords(db, {
+      actorUserId: actor.id,
+      rotations: rotations,
+      invalidateAllSessions: false,
+      ipAddress: '10.0.0.12/' + secrets[1],
+      reason: 'Incident 42 exposed ' + secrets[0] + ' and ' + secrets[1] + '; SOC requested forced rotation.'
+    });
+
+    const audits = db.prepare(`
+      SELECT action, module, details, ip_address
+      FROM activity_log
+      WHERE action = ?
+      ORDER BY id
+    `).all('credential_rotation');
+    assert.equal(audits.length, 2);
+    audits.forEach(function(row) {
+      Object.entries(row).forEach(function(entry) {
+        const field = entry[0];
+        const value = entry[1];
+        if (typeof value !== 'string') return;
+        secrets.forEach(function(secret) {
+          assert.equal(value.includes(secret), false, 'secret leaked in audit field: ' + field);
+        });
+      });
+
+      const details = JSON.parse(row.details);
+      assert.equal(details.reason, 'Incident 42 exposed [REDACTED] and [REDACTED]; SOC requested forced rotation.');
+      assert.equal(row.ip_address, '10.0.0.12/[REDACTED]');
+    });
+  } finally {
+    db.close();
+  }
 });
 
 test('rotation can revoke all active sessions when requested', () => {
