@@ -8,6 +8,7 @@ const bcrypt = require('bcryptjs');
 
 const LEGACY_CREDENTIAL_LENGTH = 10;
 const LEGACY_CREDENTIAL_SHA256 = '0f92bb29dad79e922a92eba3deb0e6be044632fa5aca97a748adb7659d382c6a';
+const PRIVATE_ROTATION_ROOT = 'D:\\主盘\\图灵集市\\图灵商务平台开发\\99-private';
 
 function containsLegacyCredential(content) {
   const normalized = content.toLowerCase();
@@ -81,14 +82,20 @@ function readRepoFile(repoRoot, relativePath) {
   return fs.readFileSync(file, 'utf8');
 }
 
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 test('credential rotation runbook and public configuration docs keep the security contract', () => {
   const repoRoot = path.resolve(__dirname, '../../..');
+  const gitignore = readRepoFile(repoRoot, '.gitignore');
   const runbook = readRepoFile(repoRoot, 'docs/runbooks/credential-rotation.md');
   const envExample = readRepoFile(repoRoot, '.env.example');
   const deploy = readRepoFile(repoRoot, 'platform/DEPLOY.md');
   const security = readRepoFile(repoRoot, 'docs/handoff/2026-06-30/SECURITY.md');
   const operations = readRepoFile(repoRoot, 'docs/handoff/2026-06-30/OPERATIONS.md');
   const allDocs = [runbook, envExample, deploy, security, operations].join('\n');
+  const privateRootPattern = escapeRegExp(PRIVATE_ROTATION_ROOT);
 
   assert.match(runbook, /Credential Rotation Runbook[\s\S]*凭据轮换运行手册/);
   assert.match(runbook, /STDIN-ONLY CLI[\s\S]*仅标准输入 CLI/);
@@ -102,6 +109,20 @@ test('credential rotation runbook and public configuration docs keep the securit
   assert.match(runbook, /Rollback Rule[\s\S]*must never restore old password hashes[\s\S]*不得恢复旧密码/);
   assert.match(runbook, /\.env\.bak[\s\S]*清理/);
   assert.match(runbook, /Evidence Retention[\s\S]*证据留存/);
+  assert.match(gitignore, /^rotation-payload\*\.private\.json$/m);
+  assert.match(gitignore, /^\*\*\/rotation-payload\*\.private\.json$/m);
+  assert.doesNotMatch(runbook, /\.\/rotation-payload(?:[\w.-]*)?\.private\.json/);
+  assert.match(
+    runbook,
+    new RegExp('node\\s+scripts/rotate_user_credentials\\.js\\s*<\\s*"' + privateRootPattern + '\\\\rotation-payload\\.private\\.json"')
+  );
+  assert.match(
+    runbook,
+    new RegExp('ssh\\s+<production-host>[\\s\\S]*<\\s*"' + privateRootPattern + '\\\\rotation-payload\\.private\\.json"')
+  );
+  assert.match(runbook, new RegExp('icacls\\s+"' + privateRootPattern + '"\\s+/inheritance:r'));
+  assert.match(runbook, new RegExp('icacls\\s+"' + privateRootPattern + '"[\\s\\S]*/grant:r\\s+"\\$\\{env:USERNAME\\}:\\(OI\\)\\(CI\\)F"'));
+  assert.match(runbook, new RegExp('icacls\\s+"' + privateRootPattern + '"[\\s\\S]*/remove:g[\\s\\S]*Users[\\s\\S]*Authenticated Users[\\s\\S]*Everyone'));
 
   ['DEFAULT_ADMIN_USERNAME', 'FEISHU_WEBHOOK_URL', 'WEB_SEARCH_PROVIDER'].forEach(function(name) {
     assert.match(envExample, new RegExp('^' + name + '=', 'm'), '.env.example should declare ' + name);
@@ -145,9 +166,16 @@ test('public files and admin APIs do not expose the legacy default password', ()
     path.join(repoRoot, 'CLAUDE_CODE_MIGRATION.md')
   ];
   const requiredFiles = [
+    path.join(repoRoot, '.env.example'),
+    path.join(repoRoot, 'docs', 'runbooks', 'credential-rotation.md'),
+    path.join(repoRoot, 'docs', 'handoff', '2026-06-30', 'SECURITY.md'),
+    path.join(repoRoot, 'docs', 'handoff', '2026-06-30', 'OPERATIONS.md'),
+    path.join(repoRoot, 'docs', 'superpowers', 'plans', '2026-07-12-phase-1-credential-rotation.md'),
+    path.join(repoRoot, 'docs', 'superpowers', 'plans', '2026-07-12-turingmarket-platform-roadmap.md'),
     path.join(repoRoot, 'platform', 'index.html'),
     path.join(repoRoot, 'platform', 'app.js'),
     path.join(repoRoot, 'platform', 'DEPLOY.md'),
+    path.join(repoRoot, 'platform', 'deploy_v8.ps1'),
     path.join(repoRoot, 'platform', 'install.sh'),
     path.join(repoRoot, 'platform', 'server', 'server.js'),
     path.join(repoRoot, 'platform', 'server', 'db.js'),

@@ -8,9 +8,12 @@ uploads/
 !.env.example
 99-private/
 **/99-private/
+rotation-payload*.private.json
+**/rotation-payload*.private.json
 *.pem
 *.key
 id_rsa*
 .DS_Store
 Thumbs.db
 _*.js
+.superpowers/

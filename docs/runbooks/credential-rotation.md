@@ -34,6 +34,14 @@ D:\主盘\图灵集市\图灵商务平台开发\99-private\2026-07-12-v0.2.10-us
 ```
 
 4. Restrict the local private directory to the operator account before writing generated credentials. / 写入生成凭据前，先把本机私有目录权限限制为操作者账号可读写。
+
+```powershell
+New-Item -ItemType Directory -Force -Path "D:\主盘\图灵集市\图灵商务平台开发\99-private" | Out-Null
+icacls "D:\主盘\图灵集市\图灵商务平台开发\99-private" /inheritance:r
+icacls "D:\主盘\图灵集市\图灵商务平台开发\99-private" /grant:r "${env:USERNAME}:(OI)(CI)F"
+icacls "D:\主盘\图灵集市\图灵商务平台开发\99-private" /remove:g "Users" "Authenticated Users" "Everyone"
+```
+
 5. Create placeholders for evidence records. Public evidence may contain timestamps, command names, counts, checksums, and redacted screenshots; private evidence that identifies secret locations stays under `99-private`. / 建立证据记录占位；公开证据只能包含时间、命令、数量、校验和和脱敏截图，涉及密钥位置的私有证据保存在 `99-private`。
 
 ## Protected Backup / 受保护备份
@@ -84,15 +92,15 @@ The batch rotation CLI must receive UTF-8 JSON through stdin only. / 批量轮�
 
 Allowed local form / 允许的本地形式：
 
-```bash
+```powershell
 cd platform/server
-node scripts/rotate_user_credentials.js < ./rotation-payload.private.json
+node scripts/rotate_user_credentials.js < "D:\主盘\图灵集市\图灵商务平台开发\99-private\rotation-payload.private.json"
 ```
 
 Allowed production form / 允许的生产形式：
 
-```bash
-ssh <production-host> "cd /root/turingmarket/platform/server && node scripts/rotate_user_credentials.js" < ./rotation-payload.private.json
+```powershell
+ssh <production-host> "cd /root/turingmarket/platform/server && node scripts/rotate_user_credentials.js" < "D:\主盘\图灵集市\图灵商务平台开发\99-private\rotation-payload.private.json"
 ```
 
 Expected summary-only output / 预期只输出汇总：
