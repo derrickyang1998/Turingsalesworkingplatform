@@ -6,6 +6,7 @@ const jwt = require('jsonwebtoken');
 const multer = require('multer');
 const crypto = require('crypto');
 const db = global.db;
+const credentialRotation = require('./services/credential_rotation_service');
 
 const app = express();
 const PORT = process.env.PORT || 3002;
@@ -28,7 +29,7 @@ const upload = multer({
 
 // ===== AUTH MIDDLEWARE =====
 function authMiddleware(req, res, next) {
-  const token = req.headers.authorization?.replace('Bearer ', '') || req.query.token;
+  const token = req.headers.authorization?.replace('Bearer ', '');
   if (!token) return res.status(401).json({ error: 'No token provided' });
   
   try {
@@ -180,7 +181,7 @@ app.put('/api/admin/users/:id', authMiddleware, adminOnly, (req, res) => {
 });
 
 app.post('/api/admin/users/reset-password/:id', authMiddleware, adminOnly, (req, res) => {
-  const temporaryPassword = crypto.randomBytes(18).toString('base64url');
+  const temporaryPassword = credentialRotation.generateTemporaryPassword();
   const salt = bcrypt.genSaltSync(10);
   const hash = bcrypt.hashSync(temporaryPassword, salt);
   db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hash, req.params.id);

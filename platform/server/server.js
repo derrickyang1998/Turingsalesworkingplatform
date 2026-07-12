@@ -81,7 +81,7 @@ const uploadLimiter = rateLimit({
 
 // ===== AUTH MIDDLEWARE =====
 function authMiddleware(req, res, next) {
-  const token = req.headers.authorization?.replace('Bearer ', '') || req.query.token;
+  const token = req.headers.authorization?.replace('Bearer ', '');
   if (!token) return res.status(401).json({ error: 'No token provided' });
 
   try {
@@ -107,13 +107,22 @@ function boolParam(value, defaultValue) {
   return value === true || value === 'true' || value === '1' || value === 1;
 }
 
-function generateTemporaryPassword() {
-  return crypto.randomBytes(18).toString('base64url');
-}
-
 function hashPassword(password) {
   const salt = bcrypt.genSaltSync(10);
   return bcrypt.hashSync(password, salt);
+}
+
+function resolveUserCreationPassword(body) {
+  const hasSuppliedPassword = Object.prototype.hasOwnProperty.call(body || {}, 'password');
+  const password = hasSuppliedPassword
+    ? String(body.password || '')
+    : credentialRotation.generateTemporaryPassword();
+  const policyErrors = credentialRotation.passwordPolicyErrors(password);
+  return {
+    hasSuppliedPassword,
+    password,
+    policyErrors
+  };
 }
 
 function redactSecretValue(value, secret) {
@@ -315,17 +324,21 @@ app.get('/api/admin/users', authMiddleware, adminOnly, (req, res) => {
 });
 
 app.post('/api/admin/users', authMiddleware, adminOnly, (req, res) => {
-  const { username, display_name, role, department, email, password } = req.body;
+  const { username, display_name, role, department, email } = req.body;
   if (!username) return res.status(400).json({ error: 'Username required' });
-  const temporaryPassword = password || generateTemporaryPassword();
+  const passwordResult = resolveUserCreationPassword(req.body);
+  if (passwordResult.policyErrors.length) {
+    return res.status(400).json({ error: 'Password policy failed', details: passwordResult.policyErrors });
+  }
+  const temporaryPassword = passwordResult.password;
   const hash = hashPassword(temporaryPassword);
   try {
     const result = db.prepare('INSERT INTO users (username, password_hash, display_name, role, email, department) VALUES (?, ?, ?, ?, ?, ?)')
       .run(username, hash, display_name || username, role || 'user', email || '', department || '');
     res.json({
       id: result.lastInsertRowid,
-      temporary_password: password ? undefined : temporaryPassword,
-      message: password ? 'User created with provided password' : 'User created. Share the temporary password securely.'
+      temporary_password: passwordResult.hasSuppliedPassword ? undefined : temporaryPassword,
+      message: passwordResult.hasSuppliedPassword ? 'User created with provided password' : 'User created. Share the temporary password securely.'
     });
   } catch(e) {
     res.status(400).json({ error: 'Username may already exist' });
@@ -905,17 +918,21 @@ app.get('/api/knowledge/categories', authMiddleware, (req, res) => {
 
 // ===== AUTH REGISTER (admin) =====
 app.post('/api/auth/register', authMiddleware, adminOnly, (req, res) => {
-  const { username, password, display_name, role, department, email } = req.body;
+  const { username, display_name, role, department, email } = req.body;
   if (!username) return res.status(400).json({ error: 'Username required' });
-  const temporaryPassword = password || generateTemporaryPassword();
+  const passwordResult = resolveUserCreationPassword(req.body);
+  if (passwordResult.policyErrors.length) {
+    return res.status(400).json({ error: 'Password policy failed', details: passwordResult.policyErrors });
+  }
+  const temporaryPassword = passwordResult.password;
   const hash = hashPassword(temporaryPassword);
   try {
     const result = db.prepare('INSERT INTO users (username, password_hash, display_name, role, email, department) VALUES (?, ?, ?, ?, ?, ?)')
       .run(username, hash, display_name || username, role || 'user', email || '', department || '');
     res.json({
       id: result.lastInsertRowid,
-      temporary_password: password ? undefined : temporaryPassword,
-      message: password ? 'User created with provided password' : 'User created. Share the temporary password securely.'
+      temporary_password: passwordResult.hasSuppliedPassword ? undefined : temporaryPassword,
+      message: passwordResult.hasSuppliedPassword ? 'User created with provided password' : 'User created. Share the temporary password securely.'
     });
   } catch(e) {
     res.status(400).json({ error: 'Username may already exist' });

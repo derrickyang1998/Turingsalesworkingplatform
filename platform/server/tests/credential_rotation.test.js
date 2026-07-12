@@ -141,6 +141,15 @@ function readAdminResetAudits(dbPath) {
   }
 }
 
+function readUserByUsername(dbPath, username) {
+  const db = new Database(dbPath, { readonly: true });
+  try {
+    return db.prepare('SELECT id, username, password_hash FROM users WHERE username = ?').get(username);
+  } finally {
+    db.close();
+  }
+}
+
 function recordEqual(failures, label, actual, expected) {
   if (actual !== expected) failures.push(`${label}: expected ${expected}, got ${actual}`);
 }
@@ -557,6 +566,126 @@ test('admin reset route redacts caller password when it collides with the audite
     assert.equal(details.targetUserId, createUser.body.id);
     assert.equal(details.targetUsername, '[REDACTED]');
     assertNoSecretLeak(details, [collidingSecret]);
+  } finally {
+    await stopChild(child);
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('admin user creation routes reject weak supplied passwords and generate policy-compliant temporary passwords', { timeout: 30000 }, async () => {
+  const port = await reservePort();
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-user-create-policy-route-'));
+  const dbPath = path.join(tempDir, 'test.db');
+  const outputChunks = [];
+  const child = spawn(process.execPath, [serverEntry], {
+    cwd: platformRoot,
+    env: Object.assign({}, process.env, {
+      NODE_ENV: 'test',
+      PORT: String(port),
+      DB_PATH: dbPath,
+      JWT_SECRET: 'user-create-policy-route-test-secret',
+      DEFAULT_ADMIN_USERNAME: 'admin',
+      DEFAULT_ADMIN_PASSWORD: 'AdminTest1!Secure'
+    }),
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+  child.stdout.on('data', (chunk) => outputChunks.push(chunk.toString()));
+  child.stderr.on('data', (chunk) => outputChunks.push(chunk.toString()));
+
+  try {
+    const baseUrl = `http://127.0.0.1:${port}`;
+    await waitForHealth(baseUrl, child, () => outputChunks.join(''));
+
+    const adminLogin = await jsonRequest(baseUrl, '/api/auth/login', {
+      method: 'POST',
+      body: { username: 'admin', password: 'AdminTest1!Secure' }
+    });
+    assert.equal(adminLogin.status, 200, 'admin login should succeed before user creation route checks');
+    const adminToken = adminLogin.body.token;
+
+    const createRouteCases = [
+      { route: '/api/admin/users', weakUsername: 'weak_admin_users_route', generatedUsername: 'generated_admin_users_route' },
+      { route: '/api/auth/register', weakUsername: 'weak_auth_register_route', generatedUsername: 'generated_auth_register_route' }
+    ];
+
+    for (const routeCase of createRouteCases) {
+      const weakPassword = 'weak';
+      const weakCreate = await jsonRequest(baseUrl, routeCase.route, {
+        method: 'POST',
+        token: adminToken,
+        body: {
+          username: routeCase.weakUsername,
+          display_name: routeCase.weakUsername,
+          role: 'user',
+          password: weakPassword
+        }
+      });
+      assert.equal(weakCreate.status, 400, `${routeCase.route} should reject a weak supplied password`);
+      assert.equal(readUserByUsername(dbPath, routeCase.weakUsername), undefined, `${routeCase.route} should not create a weak-password user`);
+      const weakCreateText = JSON.stringify(weakCreate.body);
+      assert.equal(weakCreateText.includes(weakPassword), false);
+      assert.doesNotMatch(weakCreateText, /\$2[aby]\$/i);
+
+      const generatedCreate = await jsonRequest(baseUrl, routeCase.route, {
+        method: 'POST',
+        token: adminToken,
+        body: {
+          username: routeCase.generatedUsername,
+          display_name: routeCase.generatedUsername,
+          role: 'user'
+        }
+      });
+      assert.equal(generatedCreate.status, 200, `${routeCase.route} should create a user without a caller-supplied password`);
+      assert.equal(typeof generatedCreate.body.temporary_password, 'string');
+      assert.deepEqual(passwordPolicyErrors(generatedCreate.body.temporary_password), []);
+
+      const createdUser = readUserByUsername(dbPath, routeCase.generatedUsername);
+      assert.ok(createdUser, `${routeCase.route} should persist the generated-password user`);
+      assert.equal(bcrypt.compareSync(generatedCreate.body.temporary_password, createdUser.password_hash), true);
+    }
+  } finally {
+    await stopChild(child);
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('auth me accepts valid tokens only through Authorization Bearer headers', { timeout: 30000 }, async () => {
+  const port = await reservePort();
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-auth-me-bearer-only-'));
+  const dbPath = path.join(tempDir, 'test.db');
+  const outputChunks = [];
+  const child = spawn(process.execPath, [serverEntry], {
+    cwd: platformRoot,
+    env: Object.assign({}, process.env, {
+      NODE_ENV: 'test',
+      PORT: String(port),
+      DB_PATH: dbPath,
+      JWT_SECRET: 'auth-me-bearer-only-test-secret',
+      DEFAULT_ADMIN_USERNAME: 'admin',
+      DEFAULT_ADMIN_PASSWORD: 'AdminTest1!Secure'
+    }),
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+  child.stdout.on('data', (chunk) => outputChunks.push(chunk.toString()));
+  child.stderr.on('data', (chunk) => outputChunks.push(chunk.toString()));
+
+  try {
+    const baseUrl = `http://127.0.0.1:${port}`;
+    await waitForHealth(baseUrl, child, () => outputChunks.join(''));
+
+    const adminLogin = await jsonRequest(baseUrl, '/api/auth/login', {
+      method: 'POST',
+      body: { username: 'admin', password: 'AdminTest1!Secure' }
+    });
+    assert.equal(adminLogin.status, 200, 'admin login should succeed before auth/me route checks');
+
+    const token = adminLogin.body.token;
+    const queryTokenMe = await jsonRequest(baseUrl, `/api/auth/me?token=${encodeURIComponent(token)}`);
+    const bearerMe = await jsonRequest(baseUrl, '/api/auth/me', { token });
+
+    assert.equal(queryTokenMe.status, 401);
+    assert.equal(bearerMe.status, 200);
+    assert.equal(bearerMe.body.user.username, 'admin');
   } finally {
     await stopChild(child);
     fs.rmSync(tempDir, { recursive: true, force: true });
