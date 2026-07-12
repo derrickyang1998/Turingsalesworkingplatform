@@ -19,7 +19,9 @@ const crmAccess = require('./services/crm_access_service');
 const latestUiCompat = require('./services/latest_ui_compat_service');
 const influencerWorkflow = require('./services/influencer_workflow_service');
 const publicAssets = require('./services/public_assets_service');
+const credentialRotation = require('./services/credential_rotation_service');
 const app = express();
+app.set('trust proxy', 'loopback');
 const PORT = process.env.PORT || 3002;
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'db', 'turingmarket.db');
 const DEFAULT_DEV_JWT_SECRET = 'turingmarket-platform-jwt-secret-2026';
@@ -112,6 +114,13 @@ function generateTemporaryPassword() {
 function hashPassword(password) {
   const salt = bcrypt.genSaltSync(10);
   return bcrypt.hashSync(password, salt);
+}
+
+function redactSecretValue(value, secret) {
+  if (value === undefined || value === null) return value;
+  const secretText = String(secret || '');
+  if (!secretText) return String(value);
+  return String(value).split(secretText).join('[REDACTED]');
 }
 
 function normalizePptRequestPayload(body) {
@@ -335,14 +344,50 @@ app.delete('/api/admin/users/:id', authMiddleware, adminOnly, (req, res) => {
 });
 
 app.post('/api/admin/users/reset-password/:id', authMiddleware, adminOnly, (req, res) => {
-  const temporaryPassword = req.body.password || generateTemporaryPassword();
-  const hash = hashPassword(temporaryPassword);
-  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hash, req.params.id);
-  res.json({
-    success: true,
-    temporary_password: req.body.password ? undefined : temporaryPassword,
-    message: req.body.password ? 'Password reset to provided value' : 'Password reset. Share the temporary password securely.'
-  });
+  const target = db.prepare('SELECT id, username FROM users WHERE id = ? AND is_active = 1').get(req.params.id);
+  if (!target) return res.status(404).json({ error: 'User not found' });
+
+  const hasSuppliedPassword = Object.prototype.hasOwnProperty.call(req.body || {}, 'password');
+  const temporaryPassword = hasSuppliedPassword
+    ? String(req.body.password || '')
+    : credentialRotation.generateTemporaryPassword();
+
+  try {
+    const resetTransaction = db.transaction(function() {
+      const auditIp = redactSecretValue(req.ip, temporaryPassword);
+      const result = credentialRotation.rotateUserPasswords(db, {
+        actorUserId: req.user.id,
+        rotations: [{ username: target.username, password: temporaryPassword }],
+        invalidateAllSessions: false,
+        ipAddress: auditIp,
+        reason: 'admin reset'
+      });
+
+      db.prepare(`
+        INSERT INTO activity_log (user_id, action, module, details, ip_address)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(req.user.id, 'admin_reset_password', 'security', JSON.stringify({
+        actorUserId: req.user.id,
+        targetUserId: Number(target.id),
+        targetUsername: redactSecretValue(target.username, temporaryPassword),
+        sessionsRevoked: result.sessionsRevoked
+      }), auditIp);
+
+      return result;
+    });
+    const result = resetTransaction();
+
+    res.json({
+      success: true,
+      sessions_revoked: result.sessionsRevoked,
+      temporary_password: hasSuppliedPassword ? undefined : temporaryPassword,
+      message: hasSuppliedPassword ? 'Password reset to provided value' : 'Password reset. Share the temporary password securely.'
+    });
+  } catch(e) {
+    if (/Password policy failed/.test(e.message)) return res.status(400).json({ error: e.message });
+    if (/Active user not found/.test(e.message)) return res.status(404).json({ error: 'User not found' });
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // ===== INVITE SYSTEM =====
