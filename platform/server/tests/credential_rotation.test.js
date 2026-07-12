@@ -5,7 +5,7 @@ const net = require('node:net');
 const os = require('node:os');
 const path = require('node:path');
 const { once } = require('node:events');
-const { spawn } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 const bcrypt = require('bcryptjs');
 const Database = require('better-sqlite3');
 const jwt = require('jsonwebtoken');
@@ -18,6 +18,7 @@ const {
 
 const platformRoot = path.join(__dirname, '..', '..');
 const serverEntry = path.join(platformRoot, 'server', 'server.js');
+const cliEntry = path.join(platformRoot, 'server', 'scripts', 'rotate_user_credentials.js');
 
 function freshDb() {
   const dbPath = path.join(os.tmpdir(), `tm-credential-rotation-${Date.now()}-${Math.random().toString(16).slice(2)}.db`);
@@ -151,6 +152,185 @@ function recordNoSecretValue(failures, label, value, secrets) {
   });
   if (/\$2[aby]\$/i.test(text)) failures.push(`${label}: leaked bcrypt hash`);
 }
+
+function openDatabase(dbPath, options) {
+  return new Database(dbPath, options || {});
+}
+
+function createCliFixture() {
+  const db = freshDb();
+  const dbPath = process.env.DB_PATH;
+  const zhangwei = getUser(db, 'zhangwei');
+  const wangfang = getUser(db, 'wangfang');
+  insertSession(db, zhangwei.id, 'cli-zhangwei-session');
+  insertSession(db, wangfang.id, 'cli-wangfang-session');
+  const snapshot = {
+    zhangweiHash: zhangwei.password_hash,
+    wangfangHash: wangfang.password_hash,
+    sessionCount: db.prepare('SELECT COUNT(*) AS count FROM sessions').get().count,
+    auditCount: credentialAuditCount(db)
+  };
+  db.close();
+  return { dbPath, snapshot };
+}
+
+function runCredentialCli(fixture, input) {
+  const options = {
+    cwd: platformRoot,
+    env: Object.assign({}, process.env, {
+      NODE_ENV: 'test',
+      DB_PATH: fixture.dbPath,
+      DEFAULT_ADMIN_USERNAME: 'admin',
+      DEFAULT_ADMIN_PASSWORD: 'AdminTest1!Secure'
+    }),
+    encoding: 'utf8',
+    maxBuffer: 1024 * 1024
+  };
+  if (arguments.length === 2) options.input = input;
+  return spawnSync(process.execPath, [cliEntry], options);
+}
+
+function cleanupCliFixture(fixture) {
+  [fixture.dbPath, fixture.dbPath + '-wal', fixture.dbPath + '-shm'].forEach(function(filePath) {
+    fs.rmSync(filePath, { force: true });
+  });
+}
+
+function assertCliSummaryOnly(result, expectedRotatedUsers, expectedSessionsRevoked) {
+  assert.equal(result.stdout, [
+    `ROTATED_USERS=${expectedRotatedUsers}`,
+    `SESSIONS_REVOKED=${expectedSessionsRevoked}`,
+    'PASSWORD_VALUES_PRINTED=0',
+    ''
+  ].join('\n'));
+  assert.equal(result.stderr, '');
+}
+
+function assertCliDidNotPrintSecrets(result, secrets) {
+  const combinedOutput = `${result.stdout}\n${result.stderr}`;
+  secrets.forEach(function(secret) {
+    assert.equal(combinedOutput.includes(secret), false, 'CLI output leaked password value: ' + secret);
+  });
+  assert.doesNotMatch(combinedOutput, /\$2[aby]\$/i);
+}
+
+function assertCliFailurePreservedSnapshot(fixture, result, secrets) {
+  assert.notEqual(result.status, 0);
+  assertCliSummaryOnly(result, 0, 0);
+  assertCliDidNotPrintSecrets(result, secrets);
+
+  const db = openDatabase(fixture.dbPath, { readonly: true });
+  try {
+    assert.equal(getUser(db, 'zhangwei').password_hash, fixture.snapshot.zhangweiHash);
+    assert.equal(getUser(db, 'wangfang').password_hash, fixture.snapshot.wangfangHash);
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM sessions').get().count, fixture.snapshot.sessionCount);
+    assert.equal(credentialAuditCount(db), fixture.snapshot.auditCount);
+  } finally {
+    db.close();
+  }
+}
+
+test('stdin-only credential rotation CLI rejects invalid inputs without partial mutation or secret output', () => {
+  const cases = [
+    {
+      label: 'no stdin input',
+      input: undefined,
+      secrets: []
+    },
+    {
+      label: 'malformed JSON',
+      input: '{"actor_username":',
+      secrets: []
+    },
+    {
+      label: 'weak password',
+      input: JSON.stringify({
+        actor_username: 'admin',
+        invalidate_all_sessions: true,
+        rotations: [
+          { username: 'zhangwei', password: 'ValidZhang1!Secure' },
+          { username: 'wangfang', password: 'weak' }
+        ],
+        reason: 'cli weak password test'
+      }),
+      secrets: ['ValidZhang1!Secure', 'weak']
+    },
+    {
+      label: 'unknown target user',
+      input: JSON.stringify({
+        actor_username: 'admin',
+        invalidate_all_sessions: true,
+        rotations: [
+          { username: 'zhangwei', password: 'ValidZhang1!Secure' },
+          { username: 'missing-user', password: 'MissingUser1!Secure' }
+        ],
+        reason: 'cli unknown user test'
+      }),
+      secrets: ['ValidZhang1!Secure', 'MissingUser1!Secure']
+    },
+    {
+      label: 'actor mismatch',
+      input: JSON.stringify({
+        actor_username: 'zhangwei',
+        invalidate_all_sessions: true,
+        rotations: [
+          { username: 'zhangwei', password: 'ValidZhang1!Secure' },
+          { username: 'wangfang', password: 'ValidWang2!Secure' }
+        ],
+        reason: 'cli actor mismatch test'
+      }),
+      secrets: ['ValidZhang1!Secure', 'ValidWang2!Secure']
+    }
+  ];
+
+  cases.forEach(function(cliCase) {
+    const fixture = createCliFixture();
+    const result = cliCase.input === undefined
+      ? runCredentialCli(fixture)
+      : runCredentialCli(fixture, cliCase.input);
+    assertCliFailurePreservedSnapshot(fixture, result, cliCase.secrets, cliCase.label);
+    cleanupCliFixture(fixture);
+  });
+});
+
+test('stdin-only credential rotation CLI rotates two users atomically and prints only sanitized summary lines', () => {
+  const fixture = createCliFixture();
+  const zhangweiPassword = 'CliRotateZhang1!Secure';
+  const wangfangPassword = 'CliRotateWang2!Secure';
+  const result = runCredentialCli(fixture, JSON.stringify({
+    actor_username: 'admin',
+    invalidate_all_sessions: true,
+    rotations: [
+      { username: 'zhangwei', password: zhangweiPassword },
+      { username: 'wangfang', password: wangfangPassword }
+    ],
+    reason: 'cli success rotation test'
+  }));
+
+  assert.equal(result.status, 0, `CLI failed:\nstdout=${result.stdout}\nstderr=${result.stderr}`);
+  assertCliSummaryOnly(result, 2, 2);
+  assertCliDidNotPrintSecrets(result, [zhangweiPassword, wangfangPassword]);
+
+  const db = openDatabase(fixture.dbPath, { readonly: true });
+  try {
+    const zhangweiAfter = getUser(db, 'zhangwei');
+    const wangfangAfter = getUser(db, 'wangfang');
+    assert.notEqual(zhangweiAfter.password_hash, fixture.snapshot.zhangweiHash);
+    assert.notEqual(wangfangAfter.password_hash, fixture.snapshot.wangfangHash);
+    assert.equal(bcrypt.compareSync(zhangweiPassword, zhangweiAfter.password_hash), true);
+    assert.equal(bcrypt.compareSync(wangfangPassword, wangfangAfter.password_hash), true);
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM sessions').get().count, 0);
+
+    const audits = db.prepare('SELECT details FROM activity_log WHERE action = ? ORDER BY id').all('credential_rotation');
+    assert.equal(audits.length, 2);
+    audits.forEach(function(row) {
+      assertNoSecretLeak(JSON.parse(row.details), [zhangweiPassword, wangfangPassword]);
+    });
+  } finally {
+    db.close();
+    cleanupCliFixture(fixture);
+  }
+});
 
 test('two same-user logins within one JWT second return distinct session tokens', { timeout: 30000 }, async () => {
   const port = await reservePort();

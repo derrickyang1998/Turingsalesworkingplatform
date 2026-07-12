@@ -49,7 +49,9 @@ $FILES = @(
     "server\routes_customers.js",
     "server\routes_brands.js",
     "server\routes.js",
+    "server\scripts\rotate_user_credentials.js",
     "server\services\latest_ui_compat_service.js",
+    "server\services\credential_rotation_service.js",
     "server\services\ai_service.js",
     "server\services\knowledge_service.js",
     "server\services\rag_service.js",
@@ -62,6 +64,7 @@ $FILES = @(
     "server\tests\obsidian_and_business_knowledge.test.js",
     "server\tests\customer_workspace_ui.test.js",
     "server\tests\security_and_crm_access.test.js",
+    "server\tests\credential_rotation.test.js",
     "server\tests\influencer_workflow.test.js",
     "server\tests\file_ingest_service.test.js",
     "server\tests\public_static_security.test.js",
@@ -74,7 +77,7 @@ $ROOT_FILES = @(
 
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $backupDir = "backups/backup-v029-$stamp"
-ssh -i $SSH_KEY -o StrictHostKeyChecking=no root@$SERVER "cd $REMOTE_DIR && mkdir -p $backupDir nginx && cp index.html app.js ppt.js CHANGELOG.md server/server.js server/services/latest_ui_compat_service.js $backupDir/ 2>/dev/null || true; if [ -f /etc/nginx/sites-enabled/turingmarket ]; then cp -L /etc/nginx/sites-enabled/turingmarket $backupDir/nginx-turingmarket.conf; fi"
+ssh -i $SSH_KEY -o StrictHostKeyChecking=no root@$SERVER "cd $REMOTE_DIR && mkdir -p $backupDir nginx server/scripts server/services server/tests && cp index.html app.js ppt.js CHANGELOG.md server/server.js server/services/latest_ui_compat_service.js $backupDir/ 2>/dev/null || true; if [ -f /etc/nginx/sites-enabled/turingmarket ]; then cp -L /etc/nginx/sites-enabled/turingmarket $backupDir/nginx-turingmarket.conf; fi"
 
 foreach ($file in $FILES) {
     $local = Join-Path $LOCAL_DIR $file
@@ -108,10 +111,13 @@ cd $REMOTE_DIR
 node --check app.js
 node --check ppt.js
 node --check server/server.js
+node --check server/scripts/rotate_user_credentials.js
 node --check server/services/latest_ui_compat_service.js
+node --check server/services/credential_rotation_service.js
 node --check server/services/file_ingest_service.js
 node --check server/services/influencer_workflow_service.js
 node --check server/services/public_assets_service.js
+node --check server/tests/credential_rotation.test.js
 install -m 0644 nginx/turingmarket.conf /etc/nginx/sites-available/turingmarket.candidate
 rm -f /etc/nginx/sites-enabled/turingmarket
 ln -s /etc/nginx/sites-available/turingmarket.candidate /etc/nginx/sites-enabled/turingmarket
