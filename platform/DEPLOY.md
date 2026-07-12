@@ -88,7 +88,7 @@ pm2 restart turingmarket
 ## 凭据轮换与会话撤销
 - 凭据轮换运行手册：`docs/runbooks/credential-rotation.md`。
 - 生产密码、JWT、DeepSeek、Tavily 和 `FEISHU_WEBHOOK_URL` 真实值只保存在服务端密钥存储或受保护的生产 `.env`，不得进入 Git。
-- 批量账号轮换必须使用仅标准输入 CLI：`node scripts/rotate_user_credentials.js < ./rotation-payload.private.json`。
+- 批量账号轮换必须使用仅标准输入 CLI；私有载荷固定为 `D:\主盘\图灵集市\图灵商务平台开发\99-private\rotation-payload-v0.2.10.private.json`，执行形式为 `$payloadPath = 'D:\主盘\图灵集市\图灵商务平台开发\99-private\rotation-payload-v0.2.10.private.json'; Get-Content -Raw -Encoding UTF8 -LiteralPath $payloadPath | node scripts/rotate_user_credentials.js`，不得把载荷 JSON 或密钥放入命令参数。
 - 轮换后必须确认 `SELECT COUNT(*) AS count FROM sessions;` 返回 `0`，并完成旧密码/旧令牌拒绝测试。
 - 回滚只允许恢复代码，不得恢复旧密码哈希、旧 JWT 密钥或明文 `.env.bak*`。
 

@@ -33,6 +33,12 @@ Recommended private manifest path / 建议私有清单路径：
 D:\主盘\图灵集市\图灵商务平台开发\99-private\2026-07-12-v0.2.10-user-credentials.md
 ```
 
+Required private rotation payload path / 必须使用的私有轮换载荷路径：
+
+```text
+D:\主盘\图灵集市\图灵商务平台开发\99-private\rotation-payload-v0.2.10.private.json
+```
+
 4. Restrict the local private directory to the operator account before writing generated credentials. / 写入生成凭据前，先把本机私有目录权限限制为操作者账号可读写。
 
 ```powershell
@@ -93,14 +99,17 @@ The batch rotation CLI must receive UTF-8 JSON through stdin only. / 批量轮�
 Allowed local form / 允许的本地形式：
 
 ```powershell
+$payloadPath = 'D:\主盘\图灵集市\图灵商务平台开发\99-private\rotation-payload-v0.2.10.private.json'
 cd platform/server
-node scripts/rotate_user_credentials.js < "D:\主盘\图灵集市\图灵商务平台开发\99-private\rotation-payload.private.json"
+Get-Content -Raw -Encoding UTF8 -LiteralPath $payloadPath | node scripts/rotate_user_credentials.js
 ```
 
 Allowed production form / 允许的生产形式：
 
 ```powershell
-ssh <production-host> "cd /root/turingmarket/platform/server && node scripts/rotate_user_credentials.js" < "D:\主盘\图灵集市\图灵商务平台开发\99-private\rotation-payload.private.json"
+$payloadPath = 'D:\主盘\图灵集市\图灵商务平台开发\99-private\rotation-payload-v0.2.10.private.json'
+$productionHost = '<production-host>'
+Get-Content -Raw -Encoding UTF8 -LiteralPath $payloadPath | ssh $productionHost "cd /root/turingmarket/platform/server && node scripts/rotate_user_credentials.js"
 ```
 
 Expected summary-only output / 预期只输出汇总：

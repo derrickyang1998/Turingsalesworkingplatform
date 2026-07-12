@@ -69,7 +69,7 @@ Follow `docs/runbooks/credential-rotation.md` for preparation, protected backup,
 Operational rules / 运维规则：
 
 - Do not print credentials, provider keys, JWT values, cookies, or bearer tokens. / 不输出凭据、供应商密钥、JWT 值、Cookie 或 Bearer Token。
-- Run the rotation CLI through stdin only: `node scripts/rotate_user_credentials.js < ./rotation-payload.private.json`. / 轮换 CLI 只通过标准输入执行。
+- Run the rotation CLI through stdin only with `$payloadPath = 'D:\主盘\图灵集市\图灵商务平台开发\99-private\rotation-payload-v0.2.10.private.json'; Get-Content -Raw -Encoding UTF8 -LiteralPath $payloadPath | node scripts/rotate_user_credentials.js`; do not pass the payload JSON or credential values as process arguments. / 轮换 CLI 只通过标准输入执行；私有载荷固定为上述 `99-private` 路径，不得把载荷 JSON 或凭据值放入进程参数。
 - Verify `SELECT COUNT(*) AS count FROM sessions;` returns `0` after all-session invalidation. / 全会话失效后验证会话数量为 `0`。
 - Rollback may restore code but must never restore old password hashes, old JWT secrets, or plaintext `.env.bak*` files. / 回滚可以恢复代码，但不得恢复旧密码哈希、旧 JWT 密钥或明文 `.env.bak*` 文件。
 

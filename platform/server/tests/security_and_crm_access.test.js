@@ -9,6 +9,7 @@ const bcrypt = require('bcryptjs');
 const LEGACY_CREDENTIAL_LENGTH = 10;
 const LEGACY_CREDENTIAL_SHA256 = '0f92bb29dad79e922a92eba3deb0e6be044632fa5aca97a748adb7659d382c6a';
 const PRIVATE_ROTATION_ROOT = 'D:\\主盘\\图灵集市\\图灵商务平台开发\\99-private';
+const PRIVATE_ROTATION_PAYLOAD_PATH = PRIVATE_ROTATION_ROOT + '\\rotation-payload-v0.2.10.private.json';
 
 function containsLegacyCredential(content) {
   const normalized = content.toLowerCase();
@@ -86,6 +87,16 @@ function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+function extractFencedCodeBlocks(markdown, language) {
+  const blocks = [];
+  const fencePattern = new RegExp('```' + language + '\\s*\\r?\\n([\\s\\S]*?)```', 'gi');
+  let match;
+  while ((match = fencePattern.exec(markdown)) !== null) {
+    blocks.push(match[1]);
+  }
+  return blocks;
+}
+
 test('credential rotation runbook and public configuration docs keep the security contract', () => {
   const repoRoot = path.resolve(__dirname, '../../..');
   const gitignore = readRepoFile(repoRoot, '.gitignore');
@@ -96,10 +107,11 @@ test('credential rotation runbook and public configuration docs keep the securit
   const operations = readRepoFile(repoRoot, 'docs/handoff/2026-06-30/OPERATIONS.md');
   const allDocs = [runbook, envExample, deploy, security, operations].join('\n');
   const privateRootPattern = escapeRegExp(PRIVATE_ROTATION_ROOT);
+  const privatePayloadPattern = escapeRegExp(PRIVATE_ROTATION_PAYLOAD_PATH);
 
   assert.match(runbook, /Credential Rotation Runbook[\s\S]*凭据轮换运行手册/);
   assert.match(runbook, /STDIN-ONLY CLI[\s\S]*仅标准输入 CLI/);
-  assert.match(runbook, /node\s+scripts\/rotate_user_credentials\.js\s*</);
+  assert.doesNotMatch(runbook, /node\s+scripts\/rotate_user_credentials\.js\s*<\s*/);
   assert.match(runbook, /SESSION REVOCATION VERIFICATION[\s\S]*会话撤销验证/);
   assert.match(runbook, /SELECT COUNT\(\*\) AS count FROM sessions/);
   assert.match(runbook, /Provider Evidence Classification[\s\S]*第三方服务证据分类/);
@@ -111,18 +123,41 @@ test('credential rotation runbook and public configuration docs keep the securit
   assert.match(runbook, /Evidence Retention[\s\S]*证据留存/);
   assert.match(gitignore, /^rotation-payload\*\.private\.json$/m);
   assert.match(gitignore, /^\*\*\/rotation-payload\*\.private\.json$/m);
-  assert.doesNotMatch(runbook, /\.\/rotation-payload(?:[\w.-]*)?\.private\.json/);
+  assert.doesNotMatch(allDocs, /\.\/rotation-payload(?:[\w.-]*)?\.private\.json/);
+  assert.doesNotMatch(allDocs, /(?<!v0\.2\.10)\brotation-payload\.private\.json\b/);
   assert.match(
     runbook,
-    new RegExp('node\\s+scripts/rotate_user_credentials\\.js\\s*<\\s*"' + privateRootPattern + '\\\\rotation-payload\\.private\\.json"')
+    new RegExp("\\$payloadPath\\s*=\\s*'" + privatePayloadPattern + "'[\\s\\S]*Get-Content\\s+-Raw\\s+-Encoding\\s+UTF8\\s+-LiteralPath\\s+\\$payloadPath\\s*\\|\\s*node\\s+scripts/rotate_user_credentials\\.js")
   );
   assert.match(
     runbook,
-    new RegExp('ssh\\s+<production-host>[\\s\\S]*<\\s*"' + privateRootPattern + '\\\\rotation-payload\\.private\\.json"')
+    new RegExp("\\$payloadPath\\s*=\\s*'" + privatePayloadPattern + "'[\\s\\S]*\\$productionHost\\s*=\\s*'<production-host>'[\\s\\S]*Get-Content\\s+-Raw\\s+-Encoding\\s+UTF8\\s+-LiteralPath\\s+\\$payloadPath\\s*\\|\\s*ssh\\s+\\$productionHost[\\s\\S]*node\\s+scripts/rotate_user_credentials\\.js")
   );
+  assert.match(deploy, new RegExp(privatePayloadPattern));
+  assert.match(operations, new RegExp(privatePayloadPattern));
   assert.match(runbook, new RegExp('icacls\\s+"' + privateRootPattern + '"\\s+/inheritance:r'));
   assert.match(runbook, new RegExp('icacls\\s+"' + privateRootPattern + '"[\\s\\S]*/grant:r\\s+"\\$\\{env:USERNAME\\}:\\(OI\\)\\(CI\\)F"'));
   assert.match(runbook, new RegExp('icacls\\s+"' + privateRootPattern + '"[\\s\\S]*/remove:g[\\s\\S]*Users[\\s\\S]*Authenticated Users[\\s\\S]*Everyone'));
+
+  const powershellRotationBlocks = extractFencedCodeBlocks(runbook, 'powershell')
+    .filter(function(block) { return /rotate_user_credentials\.js/.test(block); });
+  assert.ok(powershellRotationBlocks.length > 0, 'runbook should include PowerShell rotation examples');
+  powershellRotationBlocks.forEach(function(block) {
+    assert.doesNotMatch(
+      block,
+      /(^|\s)<\s*(?:"|'|\.|[A-Za-z]:\\|\$payloadPath)/m,
+      'PowerShell rotation examples must pipe UTF-8 payload content instead of using input redirection'
+    );
+    assert.match(block, new RegExp("\\$payloadPath\\s*=\\s*'" + privatePayloadPattern + "'"));
+    assert.match(
+      block,
+      /Get-Content\s+-Raw\s+-Encoding\s+UTF8\s+-LiteralPath\s+\$payloadPath\s*\|\s*(node|ssh)\b/
+    );
+    if (/ssh\b/.test(block)) {
+      assert.match(block, /\$productionHost\s*=\s*'<production-host>'/);
+      assert.match(block, /\|\s*ssh\s+\$productionHost\b/);
+    }
+  });
 
   ['DEFAULT_ADMIN_USERNAME', 'FEISHU_WEBHOOK_URL', 'WEB_SEARCH_PROVIDER'].forEach(function(name) {
     assert.match(envExample, new RegExp('^' + name + '=', 'm'), '.env.example should declare ' + name);
