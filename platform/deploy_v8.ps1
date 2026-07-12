@@ -80,7 +80,20 @@ $ROOT_FILES = @(
 
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $backupDir = "backups/v0210-security-$stamp"
-ssh -i $SSH_KEY -o BatchMode=yes root@$SERVER "cd $REMOTE_DIR && mkdir -p $backupDir/nginx $backupDir/server/scripts $backupDir/server/services $backupDir/server/tests && cp index.html app.js ppt.js CHANGELOG.md $backupDir/ 2>/dev/null || true; cp server/server.js $backupDir/server/server.js 2>/dev/null || true; cp server/services/credential_rotation_service.js $backupDir/server/services/credential_rotation_service.js 2>/dev/null || true; cp server/scripts/rotate_user_credentials.js $backupDir/server/scripts/rotate_user_credentials.js 2>/dev/null || true; if [ -f /etc/nginx/sites-enabled/turingmarket ]; then cp -L /etc/nginx/sites-enabled/turingmarket $backupDir/nginx/turingmarket.conf; fi"
+ssh -i $SSH_KEY -o BatchMode=yes -o StrictHostKeyChecking=yes root@$SERVER @"
+set -e
+cd $REMOTE_DIR
+mkdir -p server/scripts server/services server/tests
+mkdir -p $backupDir/nginx $backupDir/server/scripts $backupDir/server/services $backupDir/server/tests
+cp index.html app.js ppt.js CHANGELOG.md $backupDir/
+cp server/server.js $backupDir/server/server.js
+if [ -f server/services/credential_rotation_service.js ]; then cp server/services/credential_rotation_service.js $backupDir/server/services/credential_rotation_service.js; fi
+if [ -f server/scripts/rotate_user_credentials.js ]; then cp server/scripts/rotate_user_credentials.js $backupDir/server/scripts/rotate_user_credentials.js; fi
+if [ -f /etc/nginx/sites-enabled/turingmarket ]; then cp -L /etc/nginx/sites-enabled/turingmarket $backupDir/nginx/turingmarket.conf; fi
+"@
+if ($LASTEXITCODE -ne 0) {
+    throw "Remote backup failed"
+}
 
 foreach ($file in $FILES) {
     $local = Join-Path $LOCAL_DIR $file
@@ -89,7 +102,7 @@ foreach ($file in $FILES) {
     }
     $remote = "$REMOTE_DIR/$($file -replace '\\', '/')"
     Write-Host "Uploading $file ..." -NoNewline
-    scp -i $SSH_KEY -o BatchMode=yes $local "root@${SERVER}:$remote" 2>$null
+    scp -i $SSH_KEY -o BatchMode=yes -o StrictHostKeyChecking=yes $local "root@${SERVER}:$remote" 2>$null
     if ($LASTEXITCODE -ne 0) {
         throw "Upload failed: $file"
     }
@@ -101,14 +114,14 @@ foreach ($item in $ROOT_FILES) {
         throw "Local deploy file missing: $($item.Local)"
     }
     Write-Host "Uploading $(Split-Path -Leaf $item.Local) ..." -NoNewline
-    scp -i $SSH_KEY -o BatchMode=yes $item.Local "root@${SERVER}:$($item.Remote)" 2>$null
+    scp -i $SSH_KEY -o BatchMode=yes -o StrictHostKeyChecking=yes $item.Local "root@${SERVER}:$($item.Remote)" 2>$null
     if ($LASTEXITCODE -ne 0) {
         throw "Upload failed: $($item.Local)"
     }
     Write-Host " ok" -ForegroundColor Green
 }
 
-ssh -i $SSH_KEY -o BatchMode=yes root@$SERVER @"
+ssh -i $SSH_KEY -o BatchMode=yes -o StrictHostKeyChecking=yes root@$SERVER @"
 set -e
 cd $REMOTE_DIR
 node --check app.js
@@ -169,5 +182,8 @@ NODE
 fi
 echo "DEPLOY_OK"
 "@
+if ($LASTEXITCODE -ne 0) {
+    throw "Remote deploy verification failed"
+}
 
 Write-Host "Deploy complete" -ForegroundColor Cyan

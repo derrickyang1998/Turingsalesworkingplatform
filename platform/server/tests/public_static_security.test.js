@@ -9,6 +9,17 @@ const { spawn } = require('node:child_process');
 
 const platformRoot = path.join(__dirname, '..', '..');
 const serverEntry = path.join(platformRoot, 'server', 'server.js');
+const deployScriptPath = path.join(platformRoot, 'deploy_v8.ps1');
+
+function readDeployScript() {
+  return fs.readFileSync(deployScriptPath, 'utf8');
+}
+
+function extractRemoteBackupBlock(deploy) {
+  const match = deploy.match(/\$backupDir\s*=\s*"backups\/v0210-security-\$stamp"\r?\n(?<block>[\s\S]*?)\r?\nforeach \(\$file in \$FILES\)/);
+  assert.ok(match, 'deploy script must define a remote backup block before uploads begin');
+  return match.groups.block;
+}
 
 function reservePort() {
   return new Promise((resolve, reject) => {
@@ -112,7 +123,7 @@ test('nginx config blocks private platform paths before proxying', () => {
 });
 
 test('guarded deploy validates and installs the versioned nginx config', () => {
-  const deploy = fs.readFileSync(path.join(platformRoot, 'deploy_v8.ps1'), 'utf8');
+  const deploy = readDeployScript();
   assert.match(deploy, /nginx\\turingmarket\.conf/);
   assert.match(deploy, /nginx -t/);
   assert.match(deploy, /systemctl reload nginx/);
@@ -122,7 +133,7 @@ test('guarded deploy validates and installs the versioned nginx config', () => {
 });
 
 test('guarded deploy keeps production host external and SSH host checking enabled', () => {
-  const deploy = fs.readFileSync(path.join(platformRoot, 'deploy_v8.ps1'), 'utf8');
+  const deploy = readDeployScript();
   const commandLines = deploy.split(/\r?\n/).filter((line) => /^\s*(ssh|scp)\b/.test(line));
 
   assert.match(deploy, /\$SERVER\s*=\s*\$env:TURINGMARKET_SERVER\b/);
@@ -133,16 +144,19 @@ test('guarded deploy keeps production host external and SSH host checking enable
   assert.equal(commandLines.length >= 3, true, 'deploy script should keep ssh/scp commands explicit');
   for (const line of commandLines) {
     assert.match(line, /-o\s+BatchMode=yes\b/, `${line} must force BatchMode`);
+    assert.match(line, /-o\s+StrictHostKeyChecking=yes\b/, `${line} must fail closed on unknown SSH host keys`);
   }
   assert.doesNotMatch(deploy, /StrictHostKeyChecking\s*=\s*no/i);
   assert.doesNotMatch(deploy, /UserKnownHostsFile\s*=\s*(?:NUL|\/dev\/null)/i);
 });
 
 test('guarded deploy creates v0210-security backups for security-critical files with tree structure', () => {
-  const deploy = fs.readFileSync(path.join(platformRoot, 'deploy_v8.ps1'), 'utf8');
+  const deploy = readDeployScript();
+  const backupBlock = extractRemoteBackupBlock(deploy);
 
   assert.match(deploy, /\$backupDir\s*=\s*"backups\/v0210-security-\$stamp"/);
-  assert.match(deploy, /mkdir -p \$backupDir\/nginx \$backupDir\/server\/scripts \$backupDir\/server\/services/);
+  assert.match(backupBlock, /mkdir -p server\/scripts server\/services server\/tests/);
+  assert.match(backupBlock, /mkdir -p \$backupDir\/nginx \$backupDir\/server\/scripts \$backupDir\/server\/services \$backupDir\/server\/tests/);
   assert.match(deploy, /cp server\/server\.js \$backupDir\/server\/server\.js/);
   assert.match(deploy, /cp server\/services\/credential_rotation_service\.js \$backupDir\/server\/services\/credential_rotation_service\.js/);
   assert.match(deploy, /cp server\/scripts\/rotate_user_credentials\.js \$backupDir\/server\/scripts\/rotate_user_credentials\.js/);
@@ -150,8 +164,50 @@ test('guarded deploy creates v0210-security backups for security-critical files 
   assert.match(deploy, /\$REMOTE_DIR\/\$backupDir\/nginx\/turingmarket\.conf/);
 });
 
+test('guarded deploy fails closed if remote backup or final remote verification fails', () => {
+  const deploy = readDeployScript();
+
+  assert.match(
+    deploy,
+    /ssh[\s\S]*?\r?\nif \(\$LASTEXITCODE -ne 0\) \{\r?\n\s*throw "Remote backup failed/,
+    'remote backup ssh must be checked before uploads begin'
+  );
+  assert.match(
+    deploy,
+    /"@\r?\nif \(\$LASTEXITCODE -ne 0\) \{\r?\n\s*throw "Remote deploy verification failed/,
+    'final remote verification ssh must be checked before reporting completion'
+  );
+  assert.match(deploy, /Write-Host "Deploy complete"/);
+});
+
+test('guarded deploy does not swallow required backup failures and guards optional backup files', () => {
+  const deploy = readDeployScript();
+  const backupBlock = extractRemoteBackupBlock(deploy);
+
+  assert.doesNotMatch(
+    backupBlock,
+    /cp index\.html app\.js ppt\.js CHANGELOG\.md \$backupDir\/[^\n;]*(?:\|\|\s*true)/,
+    'required top-level backup files must not be hidden behind || true'
+  );
+  assert.doesNotMatch(
+    backupBlock,
+    /cp server\/server\.js \$backupDir\/server\/server\.js[^\n;]*(?:\|\|\s*true)/,
+    'required server backup files must not be hidden behind || true'
+  );
+  assert.match(backupBlock, /cp index\.html app\.js ppt\.js CHANGELOG\.md \$backupDir\//);
+  assert.match(backupBlock, /cp server\/server\.js \$backupDir\/server\/server\.js/);
+  assert.match(
+    backupBlock,
+    /if \[ -f server\/services\/credential_rotation_service\.js \]; then\s*cp server\/services\/credential_rotation_service\.js \$backupDir\/server\/services\/credential_rotation_service\.js;\s*fi/
+  );
+  assert.match(
+    backupBlock,
+    /if \[ -f server\/scripts\/rotate_user_credentials\.js \]; then\s*cp server\/scripts\/rotate_user_credentials\.js \$backupDir\/server\/scripts\/rotate_user_credentials\.js;\s*fi/
+  );
+});
+
 test('guarded deploy can invalidate and verify all production sessions', () => {
-  const deploy = fs.readFileSync(path.join(platformRoot, 'deploy_v8.ps1'), 'utf8');
+  const deploy = readDeployScript();
   assert.doesNotMatch(deploy, /\[switch\]\$InvalidateSessions/);
   assert.match(deploy, /\[switch\]\$PreserveSessions/);
   assert.match(deploy, /if \(\$PreserveSessions\) \{ "0" \} else \{ "1" \}/);
