@@ -42,6 +42,14 @@ function assertNoSecretLeak(value, secrets) {
   assert.doesNotMatch(text, /password/i);
 }
 
+function assertRotationResult(result, expectedUserIds, expectedSessionsRevoked) {
+  assert.deepEqual(Object.keys(result).sort(), ['rotatedUsers', 'sessionsRevoked']);
+  assert.equal(Array.isArray(result.rotatedUsers), true);
+  assert.equal(result.rotatedUsers.every(Number.isInteger), true);
+  assert.deepEqual(result.rotatedUsers, expectedUserIds);
+  assert.equal(result.sessionsRevoked, expectedSessionsRevoked);
+}
+
 test('password policy reports short passwords and missing required categories', () => {
   assert.deepEqual(passwordPolicyErrors('Aa1!Aa1!Aa1!'), []);
   assert.deepEqual(passwordPolicyErrors('Aa1!'), ['Password must be at least 12 characters long.']);
@@ -125,11 +133,7 @@ test('multi-user rotation changes hashes, revokes affected sessions, and writes 
     reason: 'incident response'
   });
 
-  assert.deepEqual(result, {
-    rotatedUserIds: [zhangwei.id, wangfang.id],
-    rotatedCount: 2,
-    sessionsRevoked: 3
-  });
+  assertRotationResult(result, [zhangwei.id, wangfang.id], 3);
   assertNoSecretLeak(result, rotations.map(function(rotation) { return rotation.password; }));
 
   const zhangweiAfter = getUser(db, 'zhangwei');
@@ -233,11 +237,7 @@ test('rotation result cannot leak a password that equals another target username
     });
 
     assertNoSecretLeak(result, secrets);
-    assert.deepEqual(result, {
-      rotatedUserIds: [zhangwei.id, collisionUserId],
-      rotatedCount: 2,
-      sessionsRevoked: 0
-    });
+    assertRotationResult(result, [zhangwei.id, collisionUserId], 0);
 
     const audits = db.prepare('SELECT details FROM activity_log WHERE action = ? ORDER BY id').all('credential_rotation');
     const details = audits.map(function(row) { return JSON.parse(row.details); });
@@ -268,11 +268,7 @@ test('rotation can revoke all active sessions when requested', () => {
     reason: 'global revocation'
   });
 
-  assert.deepEqual(result, {
-    rotatedUserIds: [zhangwei.id],
-    rotatedCount: 1,
-    sessionsRevoked: 2
-  });
+  assertRotationResult(result, [zhangwei.id], 2);
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM sessions').get().count, 0);
   const audit = db.prepare('SELECT details FROM activity_log WHERE action = ?').get('credential_rotation');
   assert.equal(JSON.parse(audit.details).invalidateAllSessions, true);

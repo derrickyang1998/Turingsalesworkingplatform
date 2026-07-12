@@ -144,8 +144,7 @@ function rotateUserPasswords(db, options) {
     });
 
     return {
-      rotatedUserIds: userIds.slice(),
-      rotatedCount: userIds.length,
+      rotatedUsers: userIds.slice(),
       sessionsRevoked: sessionsRevoked
     };
   });
