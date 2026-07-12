@@ -93,6 +93,14 @@ test('credential rotation runbook and public configuration docs keep the securit
     assert.match(envExample, new RegExp('^' + name + '=', 'm'), '.env.example should declare ' + name);
     assert.match(allDocs, new RegExp(name), 'docs should mention ' + name);
   });
+  const webSearchProviderLines = envExample
+    .split(/\r?\n/)
+    .filter(function(line) { return line.startsWith('WEB_SEARCH_PROVIDER='); });
+  assert.deepEqual(
+    webSearchProviderLines,
+    ['WEB_SEARCH_PROVIDER=replace_with_provider_name'],
+    'WEB_SEARCH_PROVIDER must be a single placeholder-only example'
+  );
   assert.match(envExample, /real production values remain server-side[\s\S]*真实生产值仅保存在服务器端/i);
   assert.doesNotMatch(envExample, /DEFAULT_ADMIN_PASSWORD=(?!replace_with_private_value|$).+/);
 
