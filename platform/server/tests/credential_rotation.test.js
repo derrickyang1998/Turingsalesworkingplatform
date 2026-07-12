@@ -8,6 +8,7 @@ const { once } = require('node:events');
 const { spawn } = require('node:child_process');
 const bcrypt = require('bcryptjs');
 const Database = require('better-sqlite3');
+const jwt = require('jsonwebtoken');
 
 const {
   passwordPolicyErrors,
@@ -117,6 +118,14 @@ async function jsonRequest(baseUrl, requestPath, options) {
   return { status: response.status, body, text };
 }
 
+async function waitForFreshJwtSecond() {
+  const deadline = Date.now() + 2000;
+  while (Date.now() % 1000 > 50) {
+    if (Date.now() >= deadline) throw new Error('Timed out waiting for a fresh JWT timestamp second');
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
 function readAdminResetAudits(dbPath) {
   const db = new Database(dbPath, { readonly: true });
   try {
@@ -142,6 +151,52 @@ function recordNoSecretValue(failures, label, value, secrets) {
   });
   if (/\$2[aby]\$/i.test(text)) failures.push(`${label}: leaked bcrypt hash`);
 }
+
+test('two same-user logins within one JWT second return distinct session tokens', { timeout: 30000 }, async () => {
+  const port = await reservePort();
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-login-jti-route-'));
+  const dbPath = path.join(tempDir, 'test.db');
+  const outputChunks = [];
+  const memberPassword = 'SameSecond1!Secure';
+  const child = spawn(process.execPath, [serverEntry], {
+    cwd: platformRoot,
+    env: Object.assign({}, process.env, {
+      NODE_ENV: 'test',
+      PORT: String(port),
+      DB_PATH: dbPath,
+      JWT_SECRET: 'same-second-login-test-secret',
+      USER_PASSWORD_ZHANGWEI: memberPassword
+    }),
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+  child.stdout.on('data', (chunk) => outputChunks.push(chunk.toString()));
+  child.stderr.on('data', (chunk) => outputChunks.push(chunk.toString()));
+
+  try {
+    const baseUrl = `http://127.0.0.1:${port}`;
+    await waitForHealth(baseUrl, child, () => outputChunks.join(''));
+    await waitForFreshJwtSecond();
+
+    const loginRequest = () => jsonRequest(baseUrl, '/api/auth/login', {
+      method: 'POST',
+      body: { username: 'zhangwei', password: memberPassword }
+    });
+    const [firstLogin, secondLogin] = await Promise.all([loginRequest(), loginRequest()]);
+
+    assert.equal(firstLogin.status, 200, `first same-second login failed: ${firstLogin.text}`);
+    assert.equal(secondLogin.status, 200, `second same-second login failed: ${secondLogin.text}\n${outputChunks.join('')}`);
+    const firstPayload = jwt.decode(firstLogin.body.token);
+    const secondPayload = jwt.decode(secondLogin.body.token);
+    assert.equal(firstPayload.iat, secondPayload.iat, 'test precondition: both tokens must be issued in the same JWT second');
+    assert.notEqual(firstLogin.body.token, secondLogin.body.token);
+    assert.equal(typeof firstPayload.jti, 'string');
+    assert.equal(typeof secondPayload.jti, 'string');
+    assert.notEqual(firstPayload.jti, secondPayload.jti);
+  } finally {
+    await stopChild(child);
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
 
 test('admin reset route rejects weak passwords, revokes the old token, supports new login, and writes sanitized audit IPs', { timeout: 30000 }, async () => {
   const port = await reservePort();
@@ -176,11 +231,12 @@ test('admin reset route rejects weak passwords, revokes the old token, supports 
       method: 'POST',
       body: { username: 'admin', password: 'AdminTest1!Secure' }
     });
+    assert.equal(adminLogin.status, 200, 'admin login should succeed before route checks');
+    await waitForFreshJwtSecond();
     const memberLogin = await jsonRequest(baseUrl, '/api/auth/login', {
       method: 'POST',
       body: { username: 'zhangwei', password: oldPassword }
     });
-    assert.equal(adminLogin.status, 200, 'admin login should succeed before route checks');
     assert.equal(memberLogin.status, 200, 'member login should establish an old token before reset');
 
     const adminToken = adminLogin.body.token;
@@ -194,14 +250,14 @@ test('admin reset route rejects weak passwords, revokes the old token, supports 
       headers: { 'X-Forwarded-For': forwardedIp },
       body: { password: newPassword }
     });
+    const newPasswordLogin = await jsonRequest(baseUrl, '/api/auth/login', {
+      method: 'POST',
+      body: { username: 'zhangwei', password: newPassword }
+    });
     const oldTokenMe = await jsonRequest(baseUrl, '/api/auth/me', { token: oldMemberToken });
     const oldPasswordLogin = await jsonRequest(baseUrl, '/api/auth/login', {
       method: 'POST',
       body: { username: 'zhangwei', password: oldPassword }
-    });
-    const newPasswordLogin = await jsonRequest(baseUrl, '/api/auth/login', {
-      method: 'POST',
-      body: { username: 'zhangwei', password: newPassword }
     });
     const weakReset = await jsonRequest(baseUrl, `/api/admin/users/reset-password/${memberId}`, {
       method: 'POST',
@@ -224,6 +280,14 @@ test('admin reset route rejects weak passwords, revokes the old token, supports 
     recordEqual(failures, 'old token /api/auth/me status after reset', oldTokenMe.status, 401);
     recordEqual(failures, 'old password login status after reset', oldPasswordLogin.status, 401);
     recordEqual(failures, 'new password login status after reset', newPasswordLogin.status, 200);
+    if (newPasswordLogin.status === 200) {
+      const oldPayload = jwt.decode(oldMemberToken);
+      const newPayload = jwt.decode(newPasswordLogin.body.token);
+      recordEqual(failures, 'old and immediate new token JWT second', newPayload.iat, oldPayload.iat);
+      if (newPasswordLogin.body.token === oldMemberToken) failures.push('immediate new login recreated the captured old token');
+      if (typeof newPayload.jti !== 'string') failures.push('immediate new login token is missing a string jti');
+      if (newPayload.jti === oldPayload.jti) failures.push('immediate new login reused the old token jti');
+    }
     recordEqual(failures, 'weak supplied password reset status', weakReset.status, 400);
     recordNoSecretValue(failures, 'weak reset response', weakReset.body, [weakPassword]);
     recordEqual(failures, 'unknown user reset status', unknownReset.status, 404);
