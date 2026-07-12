@@ -1,5 +1,5 @@
-﻿DEEPSEEK_API_KEY=replace_with_private_value
-SERVER_IP=8.163.129.160
+DEEPSEEK_API_KEY=replace_with_private_value
+SERVER_IP=<protected-production-host>
 SSH_KEY_PATH=C:\Users\29272\.ssh\turingmarket_deploy
 ROOT_PASSWORD=replace_with_private_value
 GITHUB_REPO=https://github.com/derrickyang1998/Turingsalesworkingplatform

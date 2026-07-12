@@ -1,4 +1,4 @@
-﻿# ==============================
+# ==============================
 # TURINGMARKET 图灵商务平台
 # 完整上下文迁移文档
 # → Claude Code 接力开发
@@ -7,7 +7,7 @@
 ## 🔑 API KEYS & 凭据
 
 DEEPSEEK_API_KEY=replace_with_private_value
-SERVER_IP=8.163.129.160
+SERVER_IP=<protected-production-host>
 SSH_KEY=C:\Users\29272\.ssh\turingmarket_deploy
 ROOT_PASSWORD=replace_with_private_value
 GITHUB_REPO=https://github.com/derrickyang1998/Turingsalesworkingplatform

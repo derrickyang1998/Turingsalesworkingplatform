@@ -1,5 +1,27 @@
 # Changelog — TuringMarket 图灵商务在线工作平台
 
+## v0.2.10-security-credential-rotation (2026-07-12) - 凭据轮换与安全事件闭环
+
+### 账号、会话与认证 / Accounts, Sessions, And Authentication
+- 新增统一凭据轮换服务与 stdin-only 批量 CLI，11 个活动账号已在同一事务内完成密码轮换；旧管理员密码已在线验证失效，最终会话数为 0。
+- 管理员重置、新建用户、注册和生产空库初始化统一执行强密码策略；失败信息不再泄露目标用户名或调用方密码。
+- JWT 增加每会话随机 `jti`，生产签名密钥已轮换为 96 字符以上高熵值；移除 query-token 认证，仅接受规范 `Authorization: Bearer`。
+- 生产 `.env` 已移除 `DEFAULT_ADMIN_PASSWORD`，历史 3 份明文 `.env.bak-*` 已清理。
+
+### 受保护发布 / Guarded Release
+- 部署主机改为本机环境变量注入，所有 SSH/SCP 强制 host-key 校验并检查原生命令退出码；首次升级会创建远端脚本目录，备份与部署验证均 fail-closed。
+- 已创建 root-only SQLite 一致性备份、代码/Nginx 归档与 SHA-256 校验和，常规归档不包含 `.env`。
+- DeepSeek 与 Tavily 根据访问日志证据分类为 `NO_ROTATION_REQUIRED` 并通过真实线上冒烟；飞书保持 `UNCONFIGURED` 和 CSV 兜底。
+
+### 验证 / Verification
+- 本地完整测试：66/66；生产完整测试：66/66；`npm audit --omit=dev`：0 vulnerabilities。
+- 线上冒烟通过：管理员/团队账号登录、`/api/auth/me`、网红模板、DeepSeek、Tavily、管理员 AI 对话审计、PPT 标记、退出和会话清零。
+- 7 个公开敏感路径均返回 `404`；13 个关键生产文件 SHA-256 与本地一致。
+- 保留最新 PPT：`ppt.js?v=20260702v916kbbridge` 与 `20260702-v916-kb-bridge-client-cn` 未变化。
+- 最终 `minimal-change-engineer`、`code-reviewer`、`application-security-engineer` 审查全部 `APPROVE`，发布闸门开放。
+
+---
+
 ## v0.2.9-production-static-exposure-hotfix (2026-07-12) - 生产静态资源安全热修
 
 ### 暴露面收口
@@ -192,7 +214,7 @@
 - `npm test`（18 项通过：原 AI/KB 用例 + 中文长句 RAG 引用 + Obsidian 安全导入 + 路径白名单拒绝 + 业务归档权限 + CRM 越权拒绝 + 私有客户列表防绕过 + 已分配客户防 claim + 公海商机写权限拒绝 + 种子密码不复用 + 管理员用户名可配置 + 默认密码扫描 + Markdown Vault 导出）
 - API smoke：临时服务健康检查、管理员登录、Obsidian dry-run、平台 Vault export 通过。
 - 真实本地同步：`D:\主盘\图灵集市` dry-run 命中 65 个可导入文件、跳过 9 个敏感/私密路径；已导入 65 条并导出 65 个 Markdown 到 `D:\图灵商务在线平台`。
-- 线上部署回归：`8.163.129.160` PM2 服务在线，健康检查通过；已同步安全筛选后的 Obsidian 65 个文件并导入 65 条知识，Vault 导出 66 条，AI 对话返回 5 条 `knowledge_references` 且 `ai_references` 落库。
+- 线上部署回归：`<protected-production-host>` PM2 服务在线，健康检查通过；已同步安全筛选后的 Obsidian 65 个文件并导入 65 条知识，Vault 导出 66 条，AI 对话返回 5 条 `knowledge_references` 且 `ai_references` 落库。
 
 ---
 
@@ -249,7 +271,7 @@
 
 ### 🎯 里程碑
 - ✅ 全部7个模块可正常使用，页面切换不堆积
-- ✅ 阿里云生产环境部署 (8.163.129.160)
+- ✅ 阿里云生产环境部署 (<protected-production-host>)
 - ✅ 一键安装脚本 (install.sh)
 - ✅ GitHub 完整存档
 

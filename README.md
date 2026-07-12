@@ -1,8 +1,8 @@
-﻿# TuringMarket 图灵商务在线工作平台
+# TuringMarket 图灵商务在线工作平台
 
 > **全球首个按效果付费海外红人Agent** — AI驱动的出海品牌红人营销全流程平台
 > 
-> 官方网站: [turingmarket.cn](https://www.turingmarket.cn) | 在线平台: [8.163.129.160](http://8.163.129.160)
+> 官方网站: [turingmarket.cn](https://www.turingmarket.cn) | 在线平台: [<protected-production-host>](http://<protected-production-host>)
 
 ---
 

@@ -18,8 +18,8 @@
 
 | 项 | 值 |
 |---|---|
-| 服务器 IP | `8.163.129.160` |
-| 健康检查 | `http://8.163.129.160/api/health` |
+| 服务器 IP | `<protected-production-host>` |
+| 健康检查 | `http://<protected-production-host>/api/health` |
 | 2026-06-30 检查结果 | `status=ok` |
 | 历史服务器目录 | `/root/turingmarket/platform` |
 | 历史 Node 端口 | `3002` |
@@ -51,7 +51,7 @@ D:\主盘\图灵集市\图灵商务平台开发\99-private
 
 ```env
 DEEPSEEK_API_KEY=replace_with_private_value
-SERVER_IP=8.163.129.160
+SERVER_IP=<protected-production-host>
 SERVER_PORT=3002
 PUBLIC_HTTP_PORT=80
 SERVER_DIR=/root/turingmarket/platform
