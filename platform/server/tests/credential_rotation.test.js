@@ -25,7 +25,7 @@ function freshDb() {
   const dbPath = path.join(os.tmpdir(), `tm-credential-rotation-${Date.now()}-${Math.random().toString(16).slice(2)}.db`);
   process.env.DB_PATH = dbPath;
   process.env.DEFAULT_ADMIN_PASSWORD = 'test-only-admin-password';
-  delete process.env.DEFAULT_ADMIN_USERNAME;
+  process.env.DEFAULT_ADMIN_USERNAME = 'admin';
   const dbModule = path.resolve(__dirname, '../db.js');
   delete require.cache[dbModule];
   return require(dbModule);

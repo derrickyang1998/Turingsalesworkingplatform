@@ -29,7 +29,7 @@ function freshDb(options) {
   if (Object.prototype.hasOwnProperty.call(options, 'DEFAULT_ADMIN_USERNAME')) {
     process.env.DEFAULT_ADMIN_USERNAME = options.DEFAULT_ADMIN_USERNAME;
   } else {
-    delete process.env.DEFAULT_ADMIN_USERNAME;
+    process.env.DEFAULT_ADMIN_USERNAME = 'admin';
   }
   const dbModule = path.resolve(__dirname, '../db.js');
   delete require.cache[dbModule];
