@@ -125,8 +125,11 @@ test('multi-user rotation changes hashes, revokes affected sessions, and writes 
     reason: 'incident response'
   });
 
-  assert.deepEqual(result.rotatedUsers.map(function(user) { return user.username; }).sort(), ['wangfang', 'zhangwei']);
-  assert.equal(result.sessionsRevoked, 3);
+  assert.deepEqual(result, {
+    rotatedUserIds: [zhangwei.id, wangfang.id],
+    rotatedCount: 2,
+    sessionsRevoked: 3
+  });
   assertNoSecretLeak(result, rotations.map(function(rotation) { return rotation.password; }));
 
   const zhangweiAfter = getUser(db, 'zhangwei');
@@ -200,6 +203,55 @@ test('rotation redacts every supplied password from audit strings while preservi
   }
 });
 
+test('rotation result cannot leak a password that equals another target username', () => {
+  const db = freshDb();
+  try {
+    const actor = getUser(db, 'admin');
+    const zhangwei = getUser(db, 'zhangwei');
+    const collidingUsername = 'CollisionUser1!Secure';
+    const collisionUserId = Number(db.prepare(`
+      INSERT INTO users (username, password_hash, display_name, role, is_active)
+      VALUES (?, ?, ?, ?, 1)
+    `).run(
+      collidingUsername,
+      bcrypt.hashSync('ExistingCollision3!Secure', 10),
+      'Collision User',
+      'user'
+    ).lastInsertRowid);
+    const rotations = [
+      { username: zhangwei.username, password: collidingUsername },
+      { username: collidingUsername, password: 'ReplacementCollision2!Secure' }
+    ];
+    const secrets = rotations.map(function(rotation) { return rotation.password; });
+
+    const result = rotateUserPasswords(db, {
+      actorUserId: actor.id,
+      rotations: rotations,
+      invalidateAllSessions: false,
+      ipAddress: '10.0.0.13',
+      reason: 'username collision regression'
+    });
+
+    assertNoSecretLeak(result, secrets);
+    assert.deepEqual(result, {
+      rotatedUserIds: [zhangwei.id, collisionUserId],
+      rotatedCount: 2,
+      sessionsRevoked: 0
+    });
+
+    const audits = db.prepare('SELECT details FROM activity_log WHERE action = ? ORDER BY id').all('credential_rotation');
+    const details = audits.map(function(row) { return JSON.parse(row.details); });
+    assert.deepEqual(details.map(function(entry) { return entry.targetUserId; }), [zhangwei.id, collisionUserId]);
+    assert.equal(details[1].targetUsername, '[REDACTED]');
+    details.forEach(function(entry) {
+      assert.equal(entry.reason, 'username collision regression');
+      assertNoSecretLeak(entry, secrets);
+    });
+  } finally {
+    db.close();
+  }
+});
+
 test('rotation can revoke all active sessions when requested', () => {
   const db = freshDb();
   const actor = getUser(db, 'admin');
@@ -216,7 +268,11 @@ test('rotation can revoke all active sessions when requested', () => {
     reason: 'global revocation'
   });
 
-  assert.equal(result.sessionsRevoked, 2);
+  assert.deepEqual(result, {
+    rotatedUserIds: [zhangwei.id],
+    rotatedCount: 1,
+    sessionsRevoked: 2
+  });
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM sessions').get().count, 0);
   const audit = db.prepare('SELECT details FROM activity_log WHERE action = ?').get('credential_rotation');
   assert.equal(JSON.parse(audit.details).invalidateAllSessions, true);
