@@ -125,6 +125,56 @@ async function openM4(page, tab) {
   await waitForBaselineReady(page);
 }
 
+async function installWorkflowListenerAudit(page) {
+  await page.addInitScript(() => {
+    const originalAddEventListener = EventTarget.prototype.addEventListener;
+    const registrations = Object.create(null);
+    const invocations = Object.create(null);
+
+    function workflowListenerKey(target, type) {
+      if (target === document && ['keydown', 'mousemove', 'mouseup'].includes(type)) {
+        return `document:${type}`;
+      }
+      if (!(target instanceof Element)) return null;
+      if (target.id === 'wf-svg-canvas' && ['dragover', 'drop', 'click'].includes(type)) {
+        return `canvas:${type}`;
+      }
+      if (target.classList.contains('wf-node-palette') && type === 'dragstart') {
+        return `palette:${target.dataset.type}:dragstart`;
+      }
+      return null;
+    }
+
+    EventTarget.prototype.addEventListener = function(type, listener, options) {
+      const key = workflowListenerKey(this, type);
+      if (!key || typeof listener !== 'function') {
+        return originalAddEventListener.call(this, type, listener, options);
+      }
+
+      registrations[key] = (registrations[key] || 0) + 1;
+      if (!(key in invocations)) invocations[key] = 0;
+      const auditedListener = function(...args) {
+        invocations[key] += 1;
+        return listener.apply(this, args);
+      };
+      return originalAddEventListener.call(this, type, auditedListener, options);
+    };
+
+    window.__tmWorkflowListenerAudit = {
+      snapshot() {
+        return {
+          registrations: { ...registrations },
+          invocations: { ...invocations }
+        };
+      }
+    };
+  });
+}
+
+async function workflowListenerSnapshot(page) {
+  return page.evaluate(() => window.__tmWorkflowListenerAudit.snapshot());
+}
+
 async function expectM4Tab(page, tab) {
   await expect.poll(() => page.evaluate((expected) => {
     const active = document.querySelector('#tabBar .tab.active');
@@ -352,6 +402,175 @@ test.describe('deterministic pre-edit browser baseline', () => {
     }, { fixture });
     await waitForBaselineReady(page);
     await exerciseBrandWorkspace(page);
+  });
+
+  test('Task 11 workflow event binding stays idempotent through navigation, render, drag, and keyboard use', async ({ page }, testInfo) => {
+    await installWorkflowListenerAudit(page);
+    await navigateBaselineJourney(page, {
+      role: 'admin',
+      journey: 'admin-workflow-designer',
+      pageId: 'workflow-designer',
+      substate: null
+    }, { fixture });
+    await page.waitForTimeout(300);
+    await expect(page.locator('#page-workflow-designer')).toBeVisible();
+
+    const expectedRegistrations = {
+      'document:keydown': 1,
+      'document:mousemove': 1,
+      'document:mouseup': 1,
+      'canvas:dragover': 1,
+      'canvas:drop': 1,
+      'canvas:click': 1,
+      'palette:start:dragstart': 1,
+      'palette:task:dragstart': 1,
+      'palette:approval:dragstart': 1,
+      'palette:condition:dragstart': 1,
+      'palette:timer:dragstart': 1,
+      'palette:end:dragstart': 1
+    };
+    const initialAudit = await workflowListenerSnapshot(page);
+    expect(initialAudit.registrations).toEqual(expectedRegistrations);
+
+    for (let pass = 0; pass < 3; pass += 1) {
+      await page.evaluate(() => {
+        window.switchPage('m0');
+        window.switchPage('workflow-designer');
+        window.initWorkflowDesigner();
+        window.initWorkflowDesigner();
+      });
+      await page.waitForTimeout(250);
+    }
+    const afterReentryAudit = await workflowListenerSnapshot(page);
+    expect(afterReentryAudit.registrations).toEqual(initialAudit.registrations);
+
+    const dropAuditBefore = afterReentryAudit.invocations['canvas:drop'];
+    const dropResult = await page.evaluate(() => {
+      const canvas = document.getElementById('wf-svg-canvas');
+      const rect = canvas.getBoundingClientRect();
+      const dataTransfer = new DataTransfer();
+      dataTransfer.setData('text/plain', 'task');
+      const nodesBefore = window.wfState.nodes.length;
+      canvas.dispatchEvent(new DragEvent('drop', {
+        bubbles: true,
+        cancelable: true,
+        clientX: rect.left + 180,
+        clientY: rect.top + 140,
+        dataTransfer
+      }));
+      return {
+        nodesAdded: window.wfState.nodes.length - nodesBefore,
+        nodeId: window.wfState.nodes[window.wfState.nodes.length - 1].id
+      };
+    });
+    expect(dropResult.nodesAdded).toBe(1);
+    await expect(page.locator('.wf-node-svg')).toHaveCount(1);
+    const dropAuditAfter = await workflowListenerSnapshot(page);
+    expect(dropAuditAfter.invocations['canvas:drop'] - dropAuditBefore).toBe(1);
+
+    const beforeRerenderAudit = await workflowListenerSnapshot(page);
+    await page.evaluate(() => {
+      for (let pass = 0; pass < 6; pass += 1) window.wfRenderAll();
+    });
+    const afterRerenderAudit = await workflowListenerSnapshot(page);
+    expect(afterRerenderAudit.registrations).toEqual(beforeRerenderAudit.registrations);
+
+    const nodeBeforeDrag = await page.evaluate((nodeId) => {
+      const node = window.wfState.nodes.find((candidate) => candidate.id === nodeId);
+      return {
+        x: node.x,
+        y: node.y,
+        historyLength: window.wfState.history.length,
+        historyIndex: window.wfState.historyIndex
+      };
+    }, dropResult.nodeId);
+    const nodeLocator = page.locator(`.wf-node-svg[data-node-id="${dropResult.nodeId}"]`);
+    await nodeLocator.scrollIntoViewIfNeeded();
+    const nodeBox = await nodeLocator.boundingBox();
+    expect(nodeBox).toBeTruthy();
+    const viewport = page.viewportSize();
+    const nodeIsInsideViewport = nodeBox.x >= 0 && nodeBox.y >= 0
+      && nodeBox.x + 52 < viewport.width && nodeBox.y + 44 < viewport.height;
+    if (nodeIsInsideViewport && testInfo.project.name !== 'fixture-mobile') {
+      await page.mouse.move(nodeBox.x + 20, nodeBox.y + 20);
+      await page.mouse.down();
+      await page.mouse.move(nodeBox.x + 52, nodeBox.y + 44);
+      await page.mouse.up();
+    } else {
+      await nodeLocator.dispatchEvent('mousedown', {
+        bubbles: true,
+        button: 0,
+        clientX: 100,
+        clientY: 100
+      });
+      await page.evaluate(() => {
+        document.dispatchEvent(new MouseEvent('mousemove', {
+          bubbles: true,
+          buttons: 1,
+          clientX: 132,
+          clientY: 124
+        }));
+        document.dispatchEvent(new MouseEvent('mouseup', {
+          bubbles: true,
+          button: 0,
+          clientX: 132,
+          clientY: 124
+        }));
+      });
+    }
+
+    const dragResult = await page.evaluate((nodeId) => {
+      const node = window.wfState.nodes.find((candidate) => candidate.id === nodeId);
+      return {
+        x: node.x,
+        y: node.y,
+        historyLengthAfterDrag: window.wfState.history.length,
+        historyIndex: window.wfState.historyIndex,
+        draggingNode: window.wfState.draggingNode
+      };
+    }, dropResult.nodeId);
+    expect(dragResult.x).toBeCloseTo(nodeBeforeDrag.x + 32, 5);
+    expect(dragResult.y).toBeCloseTo(nodeBeforeDrag.y + 24, 5);
+    expect(dragResult.historyLengthAfterDrag - nodeBeforeDrag.historyLength).toBe(1);
+    expect(dragResult.draggingNode).toBeNull();
+    const afterDragAudit = await workflowListenerSnapshot(page);
+    expect(afterDragAudit.registrations).toEqual(afterRerenderAudit.registrations);
+
+    await page.evaluate(() => {
+      const originalUndo = window.wfUndo;
+      const originalRedo = window.wfRedo;
+      window.__tmTask11UndoCalls = 0;
+      window.__tmTask11RedoCalls = 0;
+      window.wfUndo = function(...args) {
+        window.__tmTask11UndoCalls += 1;
+        return originalUndo.apply(this, args);
+      };
+      window.wfRedo = function(...args) {
+        window.__tmTask11RedoCalls += 1;
+        return originalRedo.apply(this, args);
+      };
+    });
+    await page.keyboard.press('Control+z');
+    const undoResult = await page.evaluate(() => ({
+      historyIndex: window.wfState.historyIndex,
+      nodeCount: window.wfState.nodes.length,
+      undoCalls: window.__tmTask11UndoCalls
+    }));
+    expect(undoResult.undoCalls).toBe(1);
+    expect(undoResult.historyIndex).toBe(dragResult.historyIndex - 1);
+    expect(undoResult.nodeCount).toBe(0);
+
+    await page.keyboard.press('Control+y');
+    const redoResult = await page.evaluate(() => ({
+      historyIndex: window.wfState.historyIndex,
+      nodeCount: window.wfState.nodes.length,
+      redoCalls: window.__tmTask11RedoCalls
+    }));
+    expect(redoResult.redoCalls).toBe(1);
+    expect(redoResult.historyIndex).toBe(dragResult.historyIndex);
+    expect(redoResult.nodeCount).toBe(1);
+
+    await waitForBaselineReady(page);
   });
 
   test('restores direct URL page and substate after confirmed session restore', async ({ page }) => {

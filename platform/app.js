@@ -1143,14 +1143,17 @@ var wfState = {
   selectedEdge: null,
   nodeCounter: 0,
   connectingFrom: null,
+  draggingNode: null,
   history: [],
-  historyIndex: -1
+  historyIndex: -1,
+  designerBindingsBound: false
 };
 
 // ---- Designer Init ----
 function initWorkflowDesigner() {
   var canvas = document.getElementById('wf-svg-canvas');
   if (!canvas) return;
+  if (wfState.designerBindingsBound) return;
 
   var wrapper = document.getElementById('wf-canvas-wrapper');
 
@@ -1188,6 +1191,10 @@ function initWorkflowDesigner() {
     if (e.ctrlKey && e.key === 'z') { e.preventDefault(); wfUndo(); }
     if (e.ctrlKey && e.key === 'y') { e.preventDefault(); wfRedo(); }
   });
+
+  document.addEventListener('mousemove', wfHandleWorkflowPointerMove);
+  document.addEventListener('mouseup', wfHandleWorkflowPointerUp);
+  wfState.designerBindingsBound = true;
 }
 
 // ---- Node Management ----
@@ -1294,23 +1301,15 @@ function wfRenderNode(node) {
   g.addEventListener('click', function(e) { e.stopPropagation(); wfSelectNode(this.dataset.nodeId); });
 
   // Drag handlers
-  var dragging = false, startX, startY, nodeStartX, nodeStartY;
   g.addEventListener('mousedown', function(e) {
     if (e.target.classList.contains('wf-anchor')) return;
-    dragging = true; startX = e.clientX; startY = e.clientY;
-    nodeStartX = node.x; nodeStartY = node.y;
-  });
-
-  document.addEventListener('mousemove', function(e) {
-    if (!dragging) return;
-    node.x = Math.max(0, nodeStartX + e.clientX - startX);
-    node.y = Math.max(0, nodeStartY + e.clientY - startY);
-    wfRenderAll();
-    if (wfState.selectedNode === node.id) wfSelectNode(node.id);
-  });
-
-  document.addEventListener('mouseup', function() {
-    if (dragging) { dragging = false; wfSaveState(); }
+    wfState.draggingNode = {
+      nodeId: node.id,
+      startX: e.clientX,
+      startY: e.clientY,
+      nodeStartX: node.x,
+      nodeStartY: node.y
+    };
   });
 
   // Connection anchors
@@ -1376,8 +1375,24 @@ function wfRenderEdge(edge) {
   if (el) el.appendChild(g);
 }
 
-// ---- Connection Line ----
-document.addEventListener('mousemove', function(e) {
+// ---- Central Pointer Lifecycle ----
+function wfHandleWorkflowPointerMove(e) {
+  var drag = wfState.draggingNode;
+  if (drag) {
+    var node = null;
+    for (var n = 0; n < wfState.nodes.length; n++) {
+      if (wfState.nodes[n].id === drag.nodeId) { node = wfState.nodes[n]; break; }
+    }
+    if (!node) {
+      wfState.draggingNode = null;
+    } else {
+      node.x = Math.max(0, drag.nodeStartX + e.clientX - drag.startX);
+      node.y = Math.max(0, drag.nodeStartY + e.clientY - drag.startY);
+      wfRenderAll();
+      if (wfState.selectedNode === node.id) wfShowNodeProperties(node.id);
+    }
+  }
+
   if (!wfState.connectingFrom) return;
   var line = document.getElementById('wf-connection-line');
   if (!line) return;
@@ -1386,14 +1401,19 @@ document.addEventListener('mousemove', function(e) {
   var rect = canvas.getBoundingClientRect();
   line.setAttribute('x2', e.clientX - rect.left);
   line.setAttribute('y2', e.clientY - rect.top);
-});
+}
 
-document.addEventListener('mouseup', function(e) {
+function wfHandleWorkflowPointerUp(e) {
+  if (wfState.draggingNode) {
+    wfState.draggingNode = null;
+    wfSaveState();
+  }
+
   if (!wfState.connectingFrom) return;
   var line = document.getElementById('wf-connection-line');
   if (line) line.style.display = 'none';
 
-  if (e.target.classList.contains('wf-anchor') && e.target.dataset.anchor === 'input') {
+  if (e.target && e.target.classList && e.target.classList.contains('wf-anchor') && e.target.dataset.anchor === 'input') {
     var toNodeId = e.target.dataset.nodeId;
     var fromNodeId = wfState.connectingFrom.nodeId;
     if (fromNodeId !== toNodeId) {
@@ -1409,7 +1429,7 @@ document.addEventListener('mouseup', function(e) {
     }
   }
   wfState.connectingFrom = null;
-});
+}
 
 // ---- Selection ----
 function wfSelectNode(nodeId) { wfState.selectedNode = nodeId; wfState.selectedEdge = null; wfRenderAll(); wfShowNodeProperties(nodeId); }
