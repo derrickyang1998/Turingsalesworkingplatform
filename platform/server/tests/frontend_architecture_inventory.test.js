@@ -12,11 +12,6 @@ const generatorPath = path.join(serverRoot, 'scripts', 'generate_ui_baseline_man
 const fixturePath = path.join(__dirname, 'fixtures', 'frontend-active-definitions.json');
 
 const reviewedDuplicateNames = Object.freeze([
-  'addChatMsg',
-  'adminCreateInvite',
-  'adminResetPw',
-  'clearChat',
-  'closeCustModal',
   'downloadInfTemplate',
   'esc',
   'exportAll',
@@ -33,7 +28,6 @@ const reviewedDuplicateNames = Object.freeze([
   'importInfluencers',
   'initM1',
   'initM4',
-  'loadAdminDashboard',
   'loadCollaborations',
   'loadInfluencersFromAPI',
   'loadSocialForBrand',
@@ -49,20 +43,68 @@ const reviewedDuplicateNames = Object.freeze([
   'switchPlatformTab',
   'toggleAll',
   'toggleBrandSocial',
-  'trackTokenUsage',
   'updateCollabStatus'
 ]);
 
 const expectedActiveDefinitions = Object.freeze({
-  closeCustModal: { source: 'platform/app.js', line: 331, loadOrder: 1, occurrenceIndex: 2 },
-  trackTokenUsage: { source: 'platform/app.js', line: 917, loadOrder: 1, occurrenceIndex: 2 },
-  initM1: { source: 'platform/app.js', line: 2318, loadOrder: 1, occurrenceIndex: 2 },
-  initM4: { source: 'platform/app.js', line: 3148, loadOrder: 1, occurrenceIndex: 3 },
-  downloadInfTemplate: { source: 'platform/app.js', line: 3309, loadOrder: 1, occurrenceIndex: 3 },
-  addChatMsg: { source: 'platform/app.js', line: 3541, loadOrder: 1, occurrenceIndex: 2 },
-  loadAdminDashboard: { source: 'platform/app.js', line: 3561, loadOrder: 1, occurrenceIndex: 3 },
+  initM1: { source: 'platform/app.js', line: 2247, loadOrder: 1, occurrenceIndex: 2 },
+  initM4: { source: 'platform/app.js', line: 3077, loadOrder: 1, occurrenceIndex: 3 },
+  downloadInfTemplate: { source: 'platform/app.js', line: 3238, loadOrder: 1, occurrenceIndex: 3 },
   generateHTMLPPT: { source: 'platform/ppt.js', line: 40, loadOrder: 2, occurrenceIndex: 2 },
   esc: { source: 'platform/ppt.js', line: 864, loadOrder: 2, occurrenceIndex: 2 }
+});
+
+const task7ConsolidatedDefinitionContracts = Object.freeze({
+  closeCustModal: [
+    "document.getElementById('custModal').style.display = 'none';"
+  ],
+  trackTokenUsage: [
+    'async function trackTokenUsage(model, endpoint, prompt, completion, total)',
+    "await apiFetch('/token-usage'",
+    'prompt_tokens: prompt',
+    'completion_tokens: completion',
+    'total_tokens: total'
+  ],
+  addChatMsg: [
+    "var msgs = document.getElementById('chatMessages');",
+    'if (!msgs) return;',
+    "div.className = 'chat-msg ' + role;",
+    ".replace(/&/g, '&amp;')",
+    ".replace(/</g, '&lt;')",
+    ".replace(/>/g, '&gt;')",
+    ".replace(/\\n/g, '<br>')",
+    ".replace(/\\*\\*(.+?)\\*\\*/g, '<strong>$1</strong>')",
+    'msgs.scrollTop = msgs.scrollHeight;'
+  ],
+  clearChat: [
+    'Chat cleared',
+    "chatHistory = [{role:'system', content:'You are TuringMarket AI assistant.'}];",
+    'currentAIConversationId = null;'
+  ],
+  loadAdminDashboard: [
+    "apiFetch('/admin/overview')",
+    "setText('ad_totalCustomers'",
+    "setText('ad_activeCustomers'",
+    "setText('ad_pipelineValue'",
+    "renderAdminStageChart('ad_customerStageChart'",
+    "renderAdminStageChart('ad_opportunityStageChart'",
+    'renderAdminTaskHealth(s);',
+    'renderAdminKnowledgeHealth(s);',
+    'renderAdminTeamPerformance(s.teamPerformance || []);',
+    'renderAdminRecentActivity(s.recentActivity || []);'
+  ],
+  adminResetPw: [
+    "apiFetch('/admin/users/reset-password/'+id",
+    "method:'POST'",
+    'Temporary password:',
+    ".catch(function(e) { toast('Failed','error'); });"
+  ],
+  adminCreateInvite: [
+    "apiFetch('/admin/invites'",
+    "var el = document.getElementById('ad_inviteResult');",
+    "if (el) el.textContent = 'Code: ' + d.code;",
+    "toast('Invite: '+d.code);"
+  ]
 });
 
 const expectedRouteSources = Object.freeze([
@@ -157,6 +199,22 @@ function explicitActiveShape(definition) {
   };
 }
 
+function readTopLevelFunctionBody(definition) {
+  const sourcePath = path.join(repoRoot, definition.source.split('/').join(path.sep));
+  const lines = fs.readFileSync(sourcePath, 'utf8').split(/\r?\n/);
+  const start = definition.line - 1;
+  let end = lines.length;
+
+  for (let i = start + 1; i < lines.length; i += 1) {
+    if (/^(?:async\s+)?function\s+\w+\s*\(/.test(lines[i])) {
+      end = i;
+      break;
+    }
+  }
+
+  return lines.slice(start, end).join('\n');
+}
+
 test('Task 2 generator and reviewed duplicate fixture are checked in', () => {
   assert.deepEqual(
     {
@@ -208,11 +266,32 @@ const expression = function expressionLocal() {};
   });
 });
 
-test('scanClassicScripts records the reviewed 39-name duplicate inventory and explicit active definitions', () => {
+test('Task 7 consolidated functions keep active behavior and one app.js definition', () => {
+  const inventory = scanCurrentScripts();
+
+  for (const [name, expectedSnippets] of Object.entries(task7ConsolidatedDefinitionContracts)) {
+    const actual = inventory.activeDefinitions[name];
+    assert.ok(actual, `${name} must have an active definition`);
+    assert.equal(actual.source, 'platform/app.js', `${name} active source`);
+    assert.equal(actual.loadOrder, 1, `${name} active load order`);
+
+    const activeBody = readTopLevelFunctionBody(actual);
+    for (const snippet of expectedSnippets) {
+      assert.ok(activeBody.includes(snippet), `${name} active body must preserve: ${snippet}`);
+    }
+
+    const appJsDefinitions = inventory.declarations.filter((definition) => (
+      definition.name === name && definition.source === 'platform/app.js'
+    ));
+    assert.equal(appJsDefinitions.length, 1, `${name} must have exactly one app.js definition`);
+  }
+});
+
+test('scanClassicScripts records the reviewed 32-name duplicate inventory and explicit active definitions', () => {
   const inventory = scanCurrentScripts();
 
   assert.deepEqual(inventory.duplicates.map((entry) => entry.name), reviewedDuplicateNames);
-  assert.equal(inventory.duplicates.length, 39);
+  assert.equal(inventory.duplicates.length, 32);
 
   for (const [name, expected] of Object.entries(expectedActiveDefinitions)) {
     const actual = inventory.activeDefinitions[name];
@@ -236,7 +315,7 @@ test('frontend-active-definitions fixture mirrors the current duplicate inventor
   }
 
   assert.equal(fixture.metadata.schemaVersion, 1);
-  assert.equal(fixture.metadata.reviewedDuplicateCount, 39);
+  assert.equal(fixture.metadata.reviewedDuplicateCount, 32);
   assert.equal(fixture.metadata.activeDefinitionPolicy, 'last definition by app.js then ppt.js load order');
   assert.deepEqual(fixture.metadata.loadOrder, ['platform/app.js', 'platform/ppt.js']);
   assert.deepEqual(fixture.duplicates, reviewedDuplicateNames);
@@ -298,7 +377,7 @@ test('generateManifest includes hashes, build/cache markers, routes, fixture met
     assert.ok(slot.sha256 === null || /^[a-f0-9]{64}$/.test(slot.sha256));
   }
 
-  assert.equal(manifest.duplicateInventory.reviewedDuplicateCount, 39);
+  assert.equal(manifest.duplicateInventory.reviewedDuplicateCount, 32);
   assert.deepEqual(manifest.duplicateInventory.duplicates, reviewedDuplicateNames);
 
   const serialized = JSON.stringify(manifest);

@@ -2,7 +2,7 @@
   "metadata": {
     "schemaVersion": 1,
     "reviewedAt": "2026-07-13",
-    "reviewedDuplicateCount": 39,
+    "reviewedDuplicateCount": 32,
     "activeDefinitionPolicy": "last definition by app.js then ppt.js load order",
     "loadOrder": [
       "platform/app.js",
@@ -10,11 +10,6 @@
     ]
   },
   "duplicates": [
-    "addChatMsg",
-    "adminCreateInvite",
-    "adminResetPw",
-    "clearChat",
-    "closeCustModal",
     "downloadInfTemplate",
     "esc",
     "exportAll",
@@ -31,7 +26,6 @@
     "importInfluencers",
     "initM1",
     "initM4",
-    "loadAdminDashboard",
     "loadCollaborations",
     "loadInfluencersFromAPI",
     "loadSocialForBrand",
@@ -47,75 +41,19 @@
     "switchPlatformTab",
     "toggleAll",
     "toggleBrandSocial",
-    "trackTokenUsage",
     "updateCollabStatus"
   ],
   "activeDefinitions": {
-    "addChatMsg": {
-      "name": "addChatMsg",
-      "source": "platform/app.js",
-      "kind": "function",
-      "async": false,
-      "line": 3541,
-      "column": 1,
-      "loadOrder": 1,
-      "occurrenceIndex": 2,
-      "globalIndex": 266
-    },
-    "adminCreateInvite": {
-      "name": "adminCreateInvite",
-      "source": "platform/app.js",
-      "kind": "function",
-      "async": false,
-      "line": 3740,
-      "column": 1,
-      "loadOrder": 1,
-      "occurrenceIndex": 3,
-      "globalIndex": 285
-    },
-    "adminResetPw": {
-      "name": "adminResetPw",
-      "source": "platform/app.js",
-      "kind": "function",
-      "async": false,
-      "line": 3739,
-      "column": 1,
-      "loadOrder": 1,
-      "occurrenceIndex": 3,
-      "globalIndex": 284
-    },
-    "clearChat": {
-      "name": "clearChat",
-      "source": "platform/app.js",
-      "kind": "function",
-      "async": false,
-      "line": 3551,
-      "column": 1,
-      "loadOrder": 1,
-      "occurrenceIndex": 2,
-      "globalIndex": 267
-    },
-    "closeCustModal": {
-      "name": "closeCustModal",
-      "source": "platform/app.js",
-      "kind": "function",
-      "async": false,
-      "line": 331,
-      "column": 1,
-      "loadOrder": 1,
-      "occurrenceIndex": 2,
-      "globalIndex": 19
-    },
     "downloadInfTemplate": {
       "name": "downloadInfTemplate",
       "source": "platform/app.js",
       "kind": "function",
       "async": true,
-      "line": 3309,
+      "line": 3238,
       "column": 1,
       "loadOrder": 1,
       "occurrenceIndex": 3,
-      "globalIndex": 253
+      "globalIndex": 243
     },
     "esc": {
       "name": "esc",
@@ -126,95 +64,95 @@
       "column": 1,
       "loadOrder": 2,
       "occurrenceIndex": 2,
-      "globalIndex": 341
+      "globalIndex": 331
     },
     "exportAll": {
       "name": "exportAll",
       "source": "platform/app.js",
       "kind": "function",
       "async": false,
-      "line": 3224,
+      "line": 3153,
       "column": 1,
       "loadOrder": 1,
       "occurrenceIndex": 2,
-      "globalIndex": 242
+      "globalIndex": 232
     },
     "exportBrandCSV": {
       "name": "exportBrandCSV",
       "source": "platform/app.js",
       "kind": "function",
       "async": false,
-      "line": 2588,
+      "line": 2517,
       "column": 1,
       "loadOrder": 1,
       "occurrenceIndex": 2,
-      "globalIndex": 182
+      "globalIndex": 172
     },
     "exportFiltered": {
       "name": "exportFiltered",
       "source": "platform/app.js",
       "kind": "function",
       "async": false,
-      "line": 3225,
+      "line": 3154,
       "column": 1,
       "loadOrder": 1,
       "occurrenceIndex": 2,
-      "globalIndex": 243
+      "globalIndex": 233
     },
     "exportInf": {
       "name": "exportInf",
       "source": "platform/app.js",
       "kind": "function",
       "async": false,
-      "line": 3231,
+      "line": 3160,
       "column": 1,
       "loadOrder": 1,
       "occurrenceIndex": 2,
-      "globalIndex": 245
+      "globalIndex": 235
     },
     "exportSelected": {
       "name": "exportSelected",
       "source": "platform/app.js",
       "kind": "function",
       "async": false,
-      "line": 3226,
+      "line": 3155,
       "column": 1,
       "loadOrder": 1,
       "occurrenceIndex": 2,
-      "globalIndex": 244
+      "globalIndex": 234
     },
     "filterBrands": {
       "name": "filterBrands",
       "source": "platform/app.js",
       "kind": "function",
       "async": false,
-      "line": 2357,
+      "line": 2286,
       "column": 1,
       "loadOrder": 1,
       "occurrenceIndex": 2,
-      "globalIndex": 161
+      "globalIndex": 151
     },
     "filterByTag": {
       "name": "filterByTag",
       "source": "platform/app.js",
       "kind": "function",
       "async": false,
-      "line": 2379,
+      "line": 2308,
       "column": 1,
       "loadOrder": 1,
       "occurrenceIndex": 2,
-      "globalIndex": 162
+      "globalIndex": 152
     },
     "filterByTreeTag": {
       "name": "filterByTreeTag",
       "source": "platform/app.js",
       "kind": "function",
       "async": false,
-      "line": 2380,
+      "line": 2309,
       "column": 1,
       "loadOrder": 1,
       "occurrenceIndex": 2,
-      "globalIndex": 163
+      "globalIndex": 153
     },
     "generateHTMLPPT": {
       "name": "generateHTMLPPT",
@@ -225,260 +163,238 @@
       "column": 1,
       "loadOrder": 2,
       "occurrenceIndex": 2,
-      "globalIndex": 292
+      "globalIndex": 282
     },
     "getSelectedInfIds": {
       "name": "getSelectedInfIds",
       "source": "platform/app.js",
       "kind": "function",
       "async": false,
-      "line": 3216,
+      "line": 3145,
       "column": 1,
       "loadOrder": 1,
       "occurrenceIndex": 2,
-      "globalIndex": 241
+      "globalIndex": 231
     },
     "handleUpload": {
       "name": "handleUpload",
       "source": "platform/app.js",
       "kind": "function",
       "async": false,
-      "line": 3267,
+      "line": 3196,
       "column": 1,
       "loadOrder": 1,
       "occurrenceIndex": 2,
-      "globalIndex": 247
+      "globalIndex": 237
     },
     "importInfluencers": {
       "name": "importInfluencers",
       "source": "platform/app.js",
       "kind": "function",
       "async": false,
-      "line": 3285,
+      "line": 3214,
       "column": 1,
       "loadOrder": 1,
       "occurrenceIndex": 2,
-      "globalIndex": 251
+      "globalIndex": 241
     },
     "initM1": {
       "name": "initM1",
       "source": "platform/app.js",
       "kind": "function",
       "async": false,
-      "line": 2318,
+      "line": 2247,
       "column": 1,
       "loadOrder": 1,
       "occurrenceIndex": 2,
-      "globalIndex": 159
+      "globalIndex": 149
     },
     "initM4": {
       "name": "initM4",
       "source": "platform/app.js",
       "kind": "function",
       "async": false,
-      "line": 3148,
+      "line": 3077,
       "column": 1,
       "loadOrder": 1,
       "occurrenceIndex": 3,
-      "globalIndex": 234
-    },
-    "loadAdminDashboard": {
-      "name": "loadAdminDashboard",
-      "source": "platform/app.js",
-      "kind": "function",
-      "async": false,
-      "line": 3561,
-      "column": 1,
-      "loadOrder": 1,
-      "occurrenceIndex": 3,
-      "globalIndex": 270
+      "globalIndex": 224
     },
     "loadCollaborations": {
       "name": "loadCollaborations",
       "source": "platform/app.js",
       "kind": "function",
       "async": true,
-      "line": 3412,
+      "line": 3341,
       "column": 1,
       "loadOrder": 1,
       "occurrenceIndex": 2,
-      "globalIndex": 259
+      "globalIndex": 249
     },
     "loadInfluencersFromAPI": {
       "name": "loadInfluencersFromAPI",
       "source": "platform/app.js",
       "kind": "function",
       "async": false,
-      "line": 3162,
+      "line": 3091,
       "column": 1,
       "loadOrder": 1,
       "occurrenceIndex": 3,
-      "globalIndex": 236
+      "globalIndex": 226
     },
     "loadSocialForBrand": {
       "name": "loadSocialForBrand",
       "source": "platform/app.js",
       "kind": "function",
       "async": false,
-      "line": 2563,
+      "line": 2492,
       "column": 1,
       "loadOrder": 1,
       "occurrenceIndex": 2,
-      "globalIndex": 177
+      "globalIndex": 167
     },
     "matchInfluencers": {
       "name": "matchInfluencers",
       "source": "platform/app.js",
       "kind": "function",
       "async": false,
-      "line": 3181,
+      "line": 3110,
       "column": 1,
       "loadOrder": 1,
       "occurrenceIndex": 3,
-      "globalIndex": 237
+      "globalIndex": 227
     },
     "pushToFeishu": {
       "name": "pushToFeishu",
       "source": "platform/app.js",
       "kind": "function",
       "async": true,
-      "line": 3320,
+      "line": 3249,
       "column": 1,
       "loadOrder": 1,
       "occurrenceIndex": 2,
-      "globalIndex": 254
+      "globalIndex": 244
     },
     "renderBrands": {
       "name": "renderBrands",
       "source": "platform/app.js",
       "kind": "function",
       "async": false,
-      "line": 2396,
+      "line": 2325,
       "column": 1,
       "loadOrder": 1,
       "occurrenceIndex": 2,
-      "globalIndex": 165
+      "globalIndex": 155
     },
     "renderCollabTable": {
       "name": "renderCollabTable",
       "source": "platform/app.js",
       "kind": "function",
       "async": false,
-      "line": 3438,
+      "line": 3367,
       "column": 1,
       "loadOrder": 1,
       "occurrenceIndex": 2,
-      "globalIndex": 261
+      "globalIndex": 251
     },
     "renderIndustryTree": {
       "name": "renderIndustryTree",
       "source": "platform/app.js",
       "kind": "function",
       "async": false,
-      "line": 2329,
+      "line": 2258,
       "column": 1,
       "loadOrder": 1,
       "occurrenceIndex": 2,
-      "globalIndex": 160
+      "globalIndex": 150
     },
     "renderInfTable": {
       "name": "renderInfTable",
       "source": "platform/app.js",
       "kind": "function",
       "async": false,
-      "line": 3188,
+      "line": 3117,
       "column": 1,
       "loadOrder": 1,
       "occurrenceIndex": 3,
-      "globalIndex": 239
+      "globalIndex": 229
     },
     "renderSearchHistory": {
       "name": "renderSearchHistory",
       "source": "platform/app.js",
       "kind": "function",
       "async": false,
-      "line": 2387,
+      "line": 2316,
       "column": 1,
       "loadOrder": 1,
       "occurrenceIndex": 2,
-      "globalIndex": 164
+      "globalIndex": 154
     },
     "showInfPreview": {
       "name": "showInfPreview",
       "source": "platform/app.js",
       "kind": "function",
       "async": false,
-      "line": 3293,
+      "line": 3222,
       "column": 1,
       "loadOrder": 1,
       "occurrenceIndex": 2,
-      "globalIndex": 252
+      "globalIndex": 242
     },
     "startCollab": {
       "name": "startCollab",
       "source": "platform/app.js",
       "kind": "function",
       "async": false,
-      "line": 3351,
+      "line": 3280,
       "column": 1,
       "loadOrder": 1,
       "occurrenceIndex": 2,
-      "globalIndex": 256
+      "globalIndex": 246
     },
     "switchPlatformTab": {
       "name": "switchPlatformTab",
       "source": "platform/app.js",
       "kind": "function",
       "async": false,
-      "line": 2564,
+      "line": 2493,
       "column": 1,
       "loadOrder": 1,
       "occurrenceIndex": 2,
-      "globalIndex": 178
+      "globalIndex": 168
     },
     "toggleAll": {
       "name": "toggleAll",
       "source": "platform/app.js",
       "kind": "function",
       "async": false,
-      "line": 3213,
+      "line": 3142,
       "column": 1,
       "loadOrder": 1,
       "occurrenceIndex": 2,
-      "globalIndex": 240
+      "globalIndex": 230
     },
     "toggleBrandSocial": {
       "name": "toggleBrandSocial",
       "source": "platform/app.js",
       "kind": "function",
       "async": false,
-      "line": 2565,
+      "line": 2494,
       "column": 1,
       "loadOrder": 1,
       "occurrenceIndex": 2,
-      "globalIndex": 179
-    },
-    "trackTokenUsage": {
-      "name": "trackTokenUsage",
-      "source": "platform/app.js",
-      "kind": "function",
-      "async": true,
-      "line": 917,
-      "column": 1,
-      "loadOrder": 1,
-      "occurrenceIndex": 2,
-      "globalIndex": 64
+      "globalIndex": 169
     },
     "updateCollabStatus": {
       "name": "updateCollabStatus",
       "source": "platform/app.js",
       "kind": "function",
       "async": true,
-      "line": 3462,
+      "line": 3391,
       "column": 1,
       "loadOrder": 1,
       "occurrenceIndex": 2,
-      "globalIndex": 262
+      "globalIndex": 252
     }
   }
 }

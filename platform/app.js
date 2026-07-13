@@ -317,10 +317,6 @@ function showAddCustomer() {
   document.getElementById('addCustomerCard').classList.remove('hidden');
 }
 
-function closeCustModal() {
-  document.getElementById('addCustomerCard').classList.add('hidden');
-}
-
 function openAddCustomer() {
   document.getElementById('custModalTitle').textContent = '新增客户';
   document.getElementById('custEditId').value = '';
@@ -833,15 +829,6 @@ async function generateAIStrategy() {
     status.textContent = 'Failed';
   }
 }
-function trackTokenUsage(model, endpoint, promptTokens, completionTokens, totalTokens) {
-  try {
-    fetch(API + '/token-usage', {
-      method: 'POST',
-      headers: { 'Authorization': 'Bearer ' + AUTH_TOKEN, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: model, endpoint: endpoint, prompt_tokens: promptTokens, completion_tokens: completionTokens, total_tokens: totalTokens })
-    });
-  } catch(e) {}
-}
 // ===== END PHASE 4 =====
 // ===== UTILS =====
 
@@ -1301,8 +1288,6 @@ function exportSubmissionCSV() {
   dlFile('influencer_' + getDate() + '.csv', '\uFEFF' + csv, 'text/csv'); toast('Exported ' + data.length);
 }
 async function sendChatLegacyUnused() { return sendChat(); }
-function addChatMsg(role, content) { var msgs = document.getElementById('chatMessages'); var div = document.createElement('div'); div.className = 'chat-msg ' + role; var formatted = content.replace(/\n/g, '<br>').replace(/```([^`]+)```/g, '<pre>$1</pre>'); div.innerHTML = '<div class=bubble>' + formatted + '</div>'; msgs.appendChild(div); msgs.scrollTop = msgs.scrollHeight }
-function clearChat() { chatHistory = [chatHistory[0]]; document.getElementById('chatMessages').innerHTML = '<div class="chat-msg assistant"><div class=bubble>Chat cleared. How can I help?</div></div>' }
 
 // ===== FEISHU =====
 async function pushToFeishu() {
@@ -1336,66 +1321,10 @@ async function pushToFeishu() {
   }
 }
 
-﻿// ===== ADMIN DASHBOARD =====
-async function loadAdminDashboard() {
-  try {
-    var r = await apiFetch("/admin/overview");
-    var s = await r.json();
-    s = s.stats || s;
-    document.getElementById("ad_totalUsers").textContent = s.totalUsers || 0;
-    document.getElementById("ad_totalDemands").textContent = s.totalDemands || 0;
-    document.getElementById("ad_totalProposals").textContent = s.totalProposals || 0;
-    document.getElementById("ad_totalTokens").textContent = ((s.totalTokens || 0) / 1000).toFixed(0) + "K";
-    var ur = await apiFetch("/admin/users");
-    var ud = await ur.json();
-    var userH = "";
-    for (var ui = 0; ui < ud.users.length; ui++) {
-      var u = ud.users[ui];
-      userH += "<tr><td><strong>" + u.username + "</strong></td><td>" + u.display_name + "</td><td>" + (u.department || "-") + "</td><td>" + u.role + "</td><td>" + (u.api_quota || 0).toLocaleString() + "</td><td>" + (u.is_active ? "✅" : "❌") + "</td><td><button class='btn btn-sm' onclick='adminResetPw(" + u.id + ")'>重置密码</button></td></tr>";
-    }
-    document.getElementById("ad_userTableBody").innerHTML = userH;
-    var tu = s.tokenUsageTrend || [];
-    var tokenH = "<div style='font-size:12px;margin-bottom:8px;opacity:.5'>最近30天</div>";
-    for (var ti = 0; ti < Math.min(tu.length, 7); ti++) {
-      tokenH += "<div style='display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px'><span>" + tu[ti].date + "</span><span style=font-weight:600>" + ((tu[ti].tokens || 0) / 1000).toFixed(0) + "K</span></div>";
-    }
-    document.getElementById("ad_tokenRank").innerHTML = tokenH;
-    var actH = "";
-    for (var ai = 0; ai < Math.min((s.recentActivity || []).length, 30); ai++) {
-      var a = s.recentActivity[ai];
-      actH += "<div style='display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:11px'><span><strong>" + a.display_name + "</strong> " + a.action + "</span><span style=opacity:.5>" + (a.created_at ? a.created_at.substring(11, 16) : "") + "</span></div>";
-    }
-    document.getElementById("ad_recentActivity").innerHTML = actH || "<p style=opacity:.5>No activity yet</p>";
-  } catch(e) { console.error("Admin load error:", e); }
-}
-async function adminResetPw(userId) { try { var r = await apiFetch("/admin/users/reset-password/" + userId, { method: "POST" }); var d = await r.json(); toast(d.temporary_password ? "Temporary password: " + d.temporary_password : (d.message || "Password reset")); } catch(e) { toast("Failed: " + e.message, "error"); } }
 async function adminAddUser(){var u=prompt("Username:");if(!u)return;var d=prompt("Display name:");if(!d)return;var p=prompt("Department:")||"General";try{var r=await apiFetch("/admin/users",{method:"POST",body:JSON.stringify({username:u,display_name:d,department:p})});var res=await r.json();loadAdminUsers();toast(res.temporary_password?"User "+u+" created. Temporary password: "+res.temporary_password:"User "+u+" created");}catch(e){toast("Failed","error")}}
 
-async function adminCreateInvite() { try { var r = await apiFetch("/admin/invites", { method: "POST" }); var d = await r.json(); document.getElementById("ad_inviteResult").textContent = "邀请码: " + d.code + " (7天有效)"; toast("Invite code: " + d.code); } catch(e) { toast("Failed: " + e.message, "error"); } }
 
 
-// ===== ADMIN DASHBOARD =====
-async function loadAdminDashboard() {
-  try {
-    var r = await apiFetch("/admin/overview");
-    var s = await r.json();
-    s = s.stats || s;
-    document.getElementById("ad_totalUsers").textContent = s.totalUsers || 0;
-    document.getElementById("ad_totalDemands").textContent = s.totalDemands || 0;
-    document.getElementById("ad_totalProposals").textContent = s.totalProposals || 0;
-    document.getElementById("ad_totalTokens").textContent = ((s.totalTokens || 0) / 1000).toFixed(0) + "K";
-    var ur = await apiFetch("/admin/users");
-    var ud = await ur.json();
-    var userH = "";
-    for (var ui = 0; ui < ud.users.length; ui++) {
-      var u = ud.users[ui];
-      userH += "<tr><td><strong>" + u.username + "</strong></td><td>" + u.display_name + "</td><td>" + (u.department || "-") + "</td><td>" + u.role + "</td><td>" + (u.api_quota || 0).toLocaleString() + "</td><td>" + (u.is_active ? "✅" : "❌") + "</td><td><button class='btn btn-sm' onclick='adminResetPw(" + u.id + ")'>重置密码</button></td></tr>";
-    }
-    document.getElementById("ad_userTableBody").innerHTML = userH;
-  } catch(e) { console.error("Admin load error:", e); }
-}
-async function adminResetPw(userId) { try { var r = await apiFetch("/admin/users/reset-password/" + userId, { method: "POST" }); var d = await r.json(); toast(d.temporary_password ? "Temporary password: " + d.temporary_password : (d.message || "Password reset")); } catch(e) { toast("Failed: " + e.message, "error"); } }
-async function adminCreateInvite() { try { var r = await apiFetch("/admin/invites", { method: "POST" }); var d = await r.json(); document.getElementById("ad_inviteResult").textContent = "邀请码: " + d.code + " (7天有效)"; toast("Invite code: " + d.code); } catch(e) { toast("Failed: " + e.message, "error"); } }
 
 // ===== LOGOUT BUTTON (add to sidebar) =====
 (function () {
