@@ -1047,7 +1047,7 @@ printf 'TM_SCHEMA_FINGERPRINT_AFTER=%s\n' "$TM_SCHEMA_FINGERPRINT_AFTER"
 [ "$TM_ROW_COUNTS_BEFORE" = "$TM_ROW_COUNTS_AFTER" ]
 printf 'TM_SCHEMA_COMPATIBILITY_OK=%s\n' "$TM_ROW_COUNTS_AFTER"
 
-NODE_ENV=test TM_DISABLE_DOTENV=1 DB_PATH="$TestDb" UPLOAD_DIR="$TEST_ROOT/uploads" TMP_DIR="$TEST_ROOT/tmp" \
+NODE_ENV=test TM_DISABLE_DOTENV=1 DB_PATH="$DB_PATH" UPLOAD_DIR="$TEST_ROOT/uploads" TMP_DIR="$TEST_ROOT/tmp" \
   node --test --test-concurrency=1 tests/*.test.js
 cd ..
 TM_DEPLOYMENT_SMOKE_PORT=43188 node node_modules/playwright-deploy/cli.js test -c server/tests/deployment-browser-smoke.config.js

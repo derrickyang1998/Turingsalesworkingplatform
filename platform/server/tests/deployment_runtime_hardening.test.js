@@ -314,3 +314,15 @@ test('guarded deploy runs the full gate unprivileged and seals only external-sta
   assert.doesNotMatch(deploy, /npx\s+playwright/);
   assert.doesNotMatch(deploy, /for path in \.env server\/db uploads tmp/);
 });
+
+test('unprivileged gate uses only variables explicitly passed through env -i', () => {
+  const deploy = read('platform/deploy_v8.ps1');
+  const match = deploy.match(/<<'TM_UNPRIVILEGED_GATE'\r?\n([\s\S]*?)\r?\nTM_UNPRIVILEGED_GATE/);
+  assert.ok(match, 'unprivileged gate heredoc must exist');
+  const gate = match[1];
+  const envBoundary = deploy.slice(deploy.lastIndexOf('timeout --signal=KILL', match.index), match.index);
+
+  assert.match(envBoundary, /DB_PATH="\$TestDb"/);
+  assert.doesNotMatch(gate, /\$TestDb\b/, 'parent-shell TestDb is unavailable after env -i');
+  assert.match(gate, /DB_PATH="\$DB_PATH"/);
+});
