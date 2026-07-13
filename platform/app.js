@@ -525,8 +525,7 @@ function fillWorkflowDemand(context) {
   toast('已带入客户上下文到需求方案');
 }
 function fillWorkflowInfluencers(context) {
-  switchPage('m4');
-  switchTab('tab1');
+  switchPage('m4', { substate: { tab: 'tab1' } });
   var fieldMap = {
     filt_project: context.brand || '',
     filt_product: context.product || '',

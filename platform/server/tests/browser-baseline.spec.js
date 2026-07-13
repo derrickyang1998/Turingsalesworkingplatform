@@ -224,6 +224,40 @@ test.describe('deterministic pre-edit browser baseline', () => {
     await waitForBaselineReady(page);
   });
 
+  test('customer workflow M4 handoff adds exactly one history entry', async ({ page }) => {
+    await installBaselineAuthState(page, fixture.auth.admin);
+    await page.goto('/m0-detail?view=pipeline', { waitUntil: 'domcontentloaded' });
+    await page.locator('#app').waitFor({ state: 'visible' });
+    await page.waitForFunction(() => typeof window.openWorkflowFromCustomer === 'function');
+
+    const customerRow = page.locator('#custTableBody tr').filter({ hasText: 'Fixture Labs' });
+    await expect(customerRow).toBeVisible();
+    const historyLengthBeforeHandoff = await page.evaluate(() => history.length);
+
+    await customerRow.locator('td').first().click();
+    const customerSidebar = page.locator('#custDetailSidebar');
+    await expect(customerSidebar).toHaveClass(/open/);
+    await customerSidebar.getByRole('button', { name: /匹配达人/ }).click();
+
+    await expect(page).toHaveURL(/\/m4\?tab=tab1$/);
+    await expect(page.locator('#page-m4')).toBeVisible();
+    await expectM4Tab(page, 'tab1');
+    const historyLengthAfterHandoff = await page.evaluate(() => history.length);
+
+    await page.goBack();
+    await expect.poll(() => page.evaluate(({ before, after }) => ({
+      historyEntriesAdded: after - before,
+      pathAfterBack: location.pathname + location.search,
+      priorPageVisible: getComputedStyle(document.getElementById('page-m0-detail')).display !== 'none',
+      m4Visible: getComputedStyle(document.getElementById('page-m4')).display !== 'none'
+    }), { before: historyLengthBeforeHandoff, after: historyLengthAfterHandoff })).toEqual({
+      historyEntriesAdded: 1,
+      pathAfterBack: '/m0-detail?view=pipeline',
+      priorPageVisible: true,
+      m4Visible: false
+    });
+  });
+
   test('page navigation focuses the active page first h2 at every viewport', async ({ page }) => {
     await navigateBaselineJourney(page, { role: 'admin', pageId: 'm4' }, { fixture });
     await expectActiveHeadingFocused(page, 'm4');
