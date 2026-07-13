@@ -107,6 +107,19 @@ async function expectActiveHeadingFocused(page, pageId) {
   });
 }
 
+async function prepareLockedScreenshotCapture(page, journey) {
+  await page.mouse.move(0, 0);
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  if (journey.journey === 'public-login') {
+    await expect.poll(() => page.evaluate(() => {
+      const loginButton = document.querySelector('#authOverlay .btn-primary');
+      return !!loginButton && loginButton.matches(':hover');
+    }), {
+      message: 'public login button must not be hovered before locked screenshot capture'
+    }).toBe(false);
+  }
+}
+
 async function exerciseBrandWorkspace(page) {
   await page.evaluate(() => {
     window.__tmTask8Opened = [];
@@ -252,6 +265,7 @@ test.describe('deterministic pre-edit browser baseline', () => {
       }
 
       await recordKnownBaselineGaps(page, journey, runContext);
+      await prepareLockedScreenshotCapture(page, journey);
       await page.screenshot({
         path: screenshotPathForSlot(runContext, slot),
         fullPage: false,
