@@ -1,7 +1,7 @@
 'use strict';
 
 const path = require('node:path');
-const { defineConfig, devices } = require('playwright/test');
+const { defineConfig, devices } = require('playwright-deploy/test');
 
 const repoRoot = path.resolve(__dirname, '..', '..', '..');
 const platformRoot = path.join(repoRoot, 'platform');
@@ -35,6 +35,7 @@ module.exports = defineConfig({
     timezoneId: 'Asia/Shanghai',
     colorScheme: 'light',
     reducedMotion: 'reduce',
+    launchOptions: { chromiumSandbox: true },
     screenshot: 'only-on-failure',
     video: 'off',
     trace: 'off'

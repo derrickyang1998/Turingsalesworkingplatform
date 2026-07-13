@@ -13,6 +13,8 @@ $SERVER = $env:TURINGMARKET_SERVER
 $SSH_KEY = "$env:USERPROFILE\.ssh\turingmarket_deploy"
 $REMOTE_ROOT = "/root/turingmarket"
 $REMOTE_DIR = "$REMOTE_ROOT/platform"
+$CANDIDATE_ROOT = "/var/lib/turingmarket-gate/releases"
+$GATE_USER = "turingmarket-gate"
 $LOCAL_DIR = Split-Path -Parent $MyInvocation.MyCommand.Path
 $REPO_DIR = Split-Path -Parent $LOCAL_DIR
 $EXPECTED_REPO_DIR_B64 = "QzpcVXNlcnNcMjkyNzJcRG9jdW1lbnRzXOWcqOe6v+WVhuWKoeW5s+WPsC1naXRodWItc3luYw=="
@@ -81,6 +83,7 @@ $FILES = @(
     "server\services\vault_export_service.js",
     "server\services\web_search_service.js",
     "server\scripts\bootstrap_production_browser_state.js",
+    "server\scripts\bootstrap_production_runtime.sh",
     "server\scripts\capture_production_browser_baseline.js",
     "server\scripts\compare_ui_baseline_runs.js",
     "server\scripts\generate_ui_baseline_manifest.js",
@@ -93,6 +96,7 @@ $FILES = @(
     "server\tests\credential_rotation.test.js",
     "server\tests\customer_workspace_ui.test.js",
     "server\tests\deployment_source_contract.test.js",
+    "server\tests\deployment_runtime_hardening.test.js",
     "server\tests\file_ingest_service.test.js",
     "server\tests\frontend_architecture_inventory.test.js",
     "server\tests\frontend_event_binding_contract.test.js",
@@ -814,8 +818,8 @@ foreach ($file in $ROOT_RELATIVE_FILES) {
 
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $backupDir = "backups/v030-baseline-consolidation-$stamp"
-$releaseDir = "releases/v030-baseline-consolidation-$stamp"
-$remoteReleaseRoot = "$REMOTE_ROOT/$releaseDir"
+$releaseDir = "v030-baseline-consolidation-$stamp"
+$remoteReleaseRoot = "$CANDIDATE_ROOT/$releaseDir"
 $remoteCandidateDir = "$remoteReleaseRoot/platform"
 $backupCreated = $false
 $deploymentLockAcquired = $false
@@ -833,6 +837,37 @@ set -euo pipefail
 RemoteRoot="__REMOTE_ROOT__"
 ReleaseRoot="__RELEASE_ROOT__"
 CandidateDir="__CANDIDATE_DIR__"
+CandidateRoot="__CANDIDATE_ROOT__"
+GateUser="__GATE_USER__"
+validate_gate_identity() {
+  local GatePasswd GateGroup GateName GateUid GatePrimaryGid GateHome GateShell GateGroupName GateGroupGid GateExpectedHome
+  GatePasswd="$(getent passwd "$GateUser")"
+  GateGroup="$(getent group "$GateUser")"
+  GateExpectedHome="$(dirname "$CandidateRoot")"
+  IFS=: read -r GateName _ GateUid GatePrimaryGid _ GateHome GateShell <<< "$GatePasswd"
+  IFS=: read -r GateGroupName _ GateGroupGid _ <<< "$GateGroup"
+  test "$GateName" = "$GateUser"
+  test "$GateUid" -gt 0
+  test "$GateUid" -lt 1000
+  test "$GateGroupName" = "$GateUser"
+  test "$GatePrimaryGid" = "$GateGroupGid"
+  test "$GateHome" = "$GateExpectedHome"
+  test "$GateShell" = "/usr/sbin/nologin"
+  test "$(id -nG "$GateUser")" = "$GateUser"
+  test "$(passwd -S "$GateUser" | awk '{print $2}')" = "L"
+}
+validate_gate_identity
+test -d "$CandidateRoot"
+test ! -L "$CandidateRoot"
+test "$(stat -c '%U:%G' "$CandidateRoot")" = "root:root"
+test -L "$RemoteRoot/platform/.env"
+test "$(readlink "$RemoteRoot/platform/.env")" = "/etc/turingmarket/turingmarket.env"
+test -L "$RemoteRoot/platform/server/db"
+test "$(readlink "$RemoteRoot/platform/server/db")" = "/var/lib/turingmarket/db"
+test -L "$RemoteRoot/platform/uploads"
+test "$(readlink "$RemoteRoot/platform/uploads")" = "/var/lib/turingmarket/uploads"
+test -L "$RemoteRoot/platform/tmp"
+test "$(readlink "$RemoteRoot/platform/tmp")" = "/var/lib/turingmarket/tmp"
 test ! -e "$ReleaseRoot"
 mkdir -p "$CandidateDir"
 cat > "$ReleaseRoot/.deploy-v030-paths" <<'TM_DEPLOY_PATHS'
@@ -847,6 +882,8 @@ rm -f "$ReleaseRoot/.deploy-v030-paths"
     $prepareScript = $prepareScript.Replace('__REMOTE_ROOT__', $REMOTE_ROOT)
     $prepareScript = $prepareScript.Replace('__RELEASE_ROOT__', $remoteReleaseRoot)
     $prepareScript = $prepareScript.Replace('__CANDIDATE_DIR__', $remoteCandidateDir)
+    $prepareScript = $prepareScript.Replace('__CANDIDATE_ROOT__', $CANDIDATE_ROOT)
+    $prepareScript = $prepareScript.Replace('__GATE_USER__', $GATE_USER)
     $prepareScript = $prepareScript.Replace('__REMOTE_PATHS__', $remotePathManifest)
     Invoke-RemoteBash -Script $prepareScript -FailureMessage "Remote candidate preparation failed" -RequireDeploymentLock
 
@@ -865,14 +902,18 @@ rm -f "$ReleaseRoot/.deploy-v030-paths"
     $verifyUploadScript = @'
 set -euo pipefail
 ReleaseRoot="__RELEASE_ROOT__"
+RemoteRoot="__REMOTE_ROOT__"
+LockDir="$RemoteRoot/.deploy-v030.lock"
 cd "$ReleaseRoot"
-cat > .deploy-v030-sha256 <<'TM_UPLOAD_SHA256'
+cat > "$LockDir/upload.sha256" <<'TM_UPLOAD_SHA256'
 __UPLOAD_CHECKSUMS__
 TM_UPLOAD_SHA256
-sha256sum --check --status .deploy-v030-sha256
-rm -f .deploy-v030-sha256
+chmod 0600 "$LockDir/upload.sha256"
+chown root:root "$LockDir/upload.sha256"
+sha256sum --check --status "$LockDir/upload.sha256"
 '@
     $verifyUploadScript = $verifyUploadScript.Replace('__RELEASE_ROOT__', $remoteReleaseRoot)
+    $verifyUploadScript = $verifyUploadScript.Replace('__REMOTE_ROOT__', $REMOTE_ROOT)
     $verifyUploadScript = $verifyUploadScript.Replace('__UPLOAD_CHECKSUMS__', $uploadChecksums)
     Invoke-RemoteBash -Script $verifyUploadScript -FailureMessage "Candidate upload checksum verification failed" -RequireDeploymentLock
 
@@ -882,52 +923,234 @@ LiveDir="__REMOTE_DIR__"
 RemoteRoot="__REMOTE_ROOT__"
 ReleaseRoot="__RELEASE_ROOT__"
 CandidateDir="__CANDIDATE_DIR__"
-cd "$CandidateDir"
+CandidateRoot="__CANDIDATE_ROOT__"
+GateUser="__GATE_USER__"
+LockDir="$RemoteRoot/.deploy-v030.lock"
+BackupAbsolute="$RemoteRoot/__BACKUP_PATH__"
+TestRoot="$ReleaseRoot/tmp/deploy-v030-gate-__STAMP__"
+TestDb="$TestRoot/test.db"
+SchemaDb="$TestRoot/schema.db"
+BrowserCache="$TestRoot/browser-cache"
+
+validate_gate_identity() {
+  local GatePasswd GateGroup GateName GateUid GatePrimaryGid GateHome GateShell GateGroupName GateGroupGid GateExpectedHome
+  GatePasswd="$(getent passwd "$GateUser")"
+  GateGroup="$(getent group "$GateUser")"
+  GateExpectedHome="$(dirname "$CandidateRoot")"
+  IFS=: read -r GateName _ GateUid GatePrimaryGid _ GateHome GateShell <<< "$GatePasswd"
+  IFS=: read -r GateGroupName _ GateGroupGid _ <<< "$GateGroup"
+  test "$GateName" = "$GateUser"
+  test "$GateUid" -gt 0
+  test "$GateUid" -lt 1000
+  test "$GateGroupName" = "$GateUser"
+  test "$GatePrimaryGid" = "$GateGroupGid"
+  test "$GateHome" = "$GateExpectedHome"
+  test "$GateShell" = "/usr/sbin/nologin"
+  test "$(id -nG "$GateUser")" = "$GateUser"
+  test "$(passwd -S "$GateUser" | awk '{print $2}')" = "L"
+}
+
+test -f "$CandidateDir/server/scripts/bootstrap_production_runtime.sh"
+bash -n "$CandidateDir/server/scripts/bootstrap_production_runtime.sh"
+test -f "$BackupAbsolute/database/turingmarket.db"
+test -f "$LockDir/upload.sha256"
+rm -rf "$TestRoot"
+mkdir -p "$TestRoot/home" "$TestRoot/uploads" "$TestRoot/tmp" "$TestRoot/nginx-prefix"
+cp "$BackupAbsolute/database/turingmarket.db" "$SchemaDb"
+chown -R "$GateUser:$GateUser" "$ReleaseRoot"
+validate_gate_identity
+
+set +e
+timeout --signal=KILL 30m runuser -u "$GateUser" -- env -i \
+  HOME="$TestRoot/home" \
+  PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+  NODE_ENV="test" \
+  TM_DISABLE_DOTENV="1" \
+  TM_ENV_FILE="$TestRoot/no-production.env" \
+  DB_PATH="$TestDb" \
+  UPLOAD_DIR="$TestRoot/uploads" \
+  TMP_DIR="$TestRoot/tmp" \
+  PLAYWRIGHT_BROWSERS_PATH="$BrowserCache" \
+  npm_config_cache="$TestRoot/npm-cache" \
+  CANDIDATE_DIR="$CandidateDir" \
+  RELEASE_ROOT="$ReleaseRoot" \
+  TEST_ROOT="$TestRoot" \
+  SCHEMA_DB="$SchemaDb" \
+  APP_QUERY="__APP_QUERY__" \
+  APP_BUILD="__APP_BUILD__" \
+  PPT_QUERY="__PPT_QUERY__" \
+  PPT_BUILD="__PPT_BUILD__" \
+  PPT_SHA256="__PPT_SHA256__" \
+  bash --noprofile --norc -s <<'TM_UNPRIVILEGED_GATE'
+set -euo pipefail
+cd "$CANDIDATE_DIR"
 node --check app.js
 node --check ppt.js
 node --check client/shared/build_info.js
 node --check client/core/navigation.js
 node --check server/server.js
-grep -Fq "__APP_QUERY__" index.html
-grep -Fq "__APP_BUILD__" client/shared/build_info.js
-grep -Fq "__PPT_QUERY__" index.html
-grep -Fq "__PPT_BUILD__" ppt.js
-echo "__PPT_SHA256__  ppt.js" | sha256sum --check --status
-
-TestRoot="$ReleaseRoot/tmp/deploy-v030-gate-__STAMP__"
-TestDb="$TestRoot/test.db"
-mkdir -p "$TestRoot"
-cleanup_test_gate() {
-  rm -rf "$TestRoot" "$ReleaseRoot/.superpowers/sdd/deployment-smoke-artifacts"
-}
-trap cleanup_test_gate EXIT
+grep -Fq "$APP_QUERY" index.html
+grep -Fq "$APP_BUILD" client/shared/build_info.js
+grep -Fq "$PPT_QUERY" index.html
+grep -Fq "$PPT_BUILD" ppt.js
+echo "$PPT_SHA256  ppt.js" | sha256sum --check --status
 
 npm ci --ignore-scripts
-npx playwright install chromium
+node node_modules/playwright-deploy/cli.js install-deps --dry-run chromium
+node node_modules/playwright-deploy/cli.js install chromium
 cd server
 npm ci --ignore-scripts
 npm rebuild better-sqlite3
-NODE_ENV=test TM_DISABLE_DOTENV=1 DB_PATH="$TestDb" node --test --test-concurrency=1 tests/*.test.js
-cd ..
-TM_DEPLOYMENT_SMOKE_PORT=43188 npx playwright test -c server/tests/deployment-browser-smoke.config.js
 
-cat > "$ReleaseRoot/nginx-test.conf" <<'TM_NGINX_TEST'
-pid __RELEASE_ROOT__/nginx-test.pid;
+fingerprint_db() {
+  DB_FINGERPRINT_PATH="$1" node <<'NODE'
+const crypto = require('node:crypto');
+const Database = require('better-sqlite3');
+const database = new Database(process.env.DB_FINGERPRINT_PATH, { readonly: true, fileMustExist: true });
+const schema = database.prepare(`
+  SELECT type, name, tbl_name, COALESCE(sql, '') AS sql
+  FROM sqlite_master
+  WHERE name NOT LIKE 'sqlite_%'
+  ORDER BY type, name, tbl_name
+`).all();
+const userVersion = database.pragma('user_version', { simple: true });
+database.close();
+process.stdout.write(crypto.createHash('sha256').update(JSON.stringify({ userVersion, schema })).digest('hex'));
+NODE
+}
+
+business_counts() {
+  DB_COUNT_PATH="$1" node <<'NODE'
+const Database = require('better-sqlite3');
+const database = new Database(process.env.DB_COUNT_PATH, { readonly: true, fileMustExist: true });
+const hasTable = (name) => Boolean(database.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name));
+const count = (name) => hasTable(name) ? database.prepare(`SELECT COUNT(*) AS count FROM ${name}`).get().count : null;
+const result = { users: count('users'), sessions: count('sessions') };
+database.close();
+process.stdout.write(JSON.stringify(result));
+NODE
+}
+
+TM_SCHEMA_FINGERPRINT_BEFORE="$(fingerprint_db "$SCHEMA_DB")"
+TM_ROW_COUNTS_BEFORE="$(business_counts "$SCHEMA_DB")"
+printf 'TM_SCHEMA_FINGERPRINT_BEFORE=%s\n' "$TM_SCHEMA_FINGERPRINT_BEFORE"
+NODE_ENV=test TM_DISABLE_DOTENV=1 DB_PATH="$SCHEMA_DB" node <<'NODE'
+const database = require('./db');
+const result = database.pragma('quick_check', { simple: true });
+database.close();
+if (result !== 'ok') throw new Error(`Candidate DB quick_check failed: ${result}`);
+NODE
+TM_SCHEMA_FINGERPRINT_AFTER="$(fingerprint_db "$SCHEMA_DB")"
+TM_ROW_COUNTS_AFTER="$(business_counts "$SCHEMA_DB")"
+printf 'TM_SCHEMA_FINGERPRINT_AFTER=%s\n' "$TM_SCHEMA_FINGERPRINT_AFTER"
+[ "$TM_SCHEMA_FINGERPRINT_BEFORE" = "$TM_SCHEMA_FINGERPRINT_AFTER" ]
+[ "$TM_ROW_COUNTS_BEFORE" = "$TM_ROW_COUNTS_AFTER" ]
+printf 'TM_SCHEMA_COMPATIBILITY_OK=%s\n' "$TM_ROW_COUNTS_AFTER"
+
+NODE_ENV=test TM_DISABLE_DOTENV=1 DB_PATH="$TestDb" UPLOAD_DIR="$TEST_ROOT/uploads" TMP_DIR="$TEST_ROOT/tmp" \
+  node --test --test-concurrency=1 tests/*.test.js
+cd ..
+TM_DEPLOYMENT_SMOKE_PORT=43188 node node_modules/playwright-deploy/cli.js test -c server/tests/deployment-browser-smoke.config.js
+
+mkdir -p "$TEST_ROOT/nginx-client" "$TEST_ROOT/nginx-proxy" "$TEST_ROOT/nginx-fastcgi" "$TEST_ROOT/nginx-uwsgi" "$TEST_ROOT/nginx-scgi"
+cat > "$TEST_ROOT/nginx-test.conf" <<TM_NGINX_TEST
+error_log $TEST_ROOT/nginx-error.log notice;
+pid $TEST_ROOT/nginx.pid;
 events {}
 http {
+  access_log off;
+  client_body_temp_path $TEST_ROOT/nginx-client;
+  proxy_temp_path $TEST_ROOT/nginx-proxy;
+  fastcgi_temp_path $TEST_ROOT/nginx-fastcgi;
+  uwsgi_temp_path $TEST_ROOT/nginx-uwsgi;
+  scgi_temp_path $TEST_ROOT/nginx-scgi;
   include /etc/nginx/mime.types;
-  include __CANDIDATE_DIR__/nginx/turingmarket.conf;
+  include $CANDIDATE_DIR/nginx/turingmarket.conf;
 }
 TM_NGINX_TEST
-if ! nginx -t -p / -c "$ReleaseRoot/nginx-test.conf"; then
+nginx -t -p "$TEST_ROOT/nginx-prefix/" -c "$TEST_ROOT/nginx-test.conf"
+printf '%s\n' "UNPRIVILEGED_GATE_OK"
+TM_UNPRIVILEGED_GATE
+GateStatus=$?
+set -e
+
+pkill -KILL -u "$GateUser" 2>/dev/null || true
+for _attempt in $(seq 1 20); do
+  if ! pgrep -u "$GateUser" >/dev/null; then
+    break
+  fi
+  sleep 0.2
+done
+if pgrep -u "$GateUser" >/dev/null; then
+  echo "Gate user processes survived candidate validation" >&2
   exit 1
 fi
-rm -f "$ReleaseRoot/nginx-test.conf" "$ReleaseRoot/nginx-test.pid"
+[ "$GateStatus" = "0" ] || exit "$GateStatus"
+
+cd "$ReleaseRoot"
+sha256sum --check --status "$LockDir/upload.sha256"
+rm -rf "$TestRoot" "$ReleaseRoot/.superpowers"
+
+rm -rf "$CandidateDir/.env" "$CandidateDir/server/db" "$CandidateDir/uploads" "$CandidateDir/tmp"
+ln -s /etc/turingmarket/turingmarket.env "$CandidateDir/.env"
+ln -s /var/lib/turingmarket/db "$CandidateDir/server/db"
+ln -s /var/lib/turingmarket/uploads "$CandidateDir/uploads"
+ln -s /var/lib/turingmarket/tmp "$CandidateDir/tmp"
+
+setfacl -Rb "$ReleaseRoot"
+chown -hR root:root "$CandidateDir"
+chown -hR root:root "$ReleaseRoot"
+chmod -R go-w "$ReleaseRoot"
+if find "$CandidateDir" -xdev \( -type b -o -type c -o -type p -o -type s \) -print -quit | grep -q .; then
+  echo "Candidate contains a special file" >&2
+  exit 1
+fi
+if find "$CandidateDir" -xdev -type f -perm /6000 -print -quit | grep -q .; then
+  echo "Candidate contains a setuid or setgid file" >&2
+  exit 1
+fi
+if [ -n "$(getcap -r "$CandidateDir" 2>/dev/null)" ]; then
+  echo "Candidate contains a file capability" >&2
+  exit 1
+fi
+
+python3 - "$CandidateDir" <<'PY'
+import os
+import sys
+
+root = os.path.abspath(sys.argv[1])
+allowed = {
+    '.env': '/etc/turingmarket/turingmarket.env',
+    'server/db': '/var/lib/turingmarket/db',
+    'uploads': '/var/lib/turingmarket/uploads',
+    'tmp': '/var/lib/turingmarket/tmp',
+}
+seen = set()
+for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+    for name in dirnames + filenames:
+        path = os.path.join(dirpath, name)
+        if not os.path.islink(path):
+            continue
+        relative = os.path.relpath(path, root).replace(os.sep, '/')
+        target = os.readlink(path)
+        if relative in allowed:
+            if target != allowed[relative]:
+                raise SystemExit(f'Unexpected runtime link: {relative}')
+            seen.add(relative)
+            continue
+        resolved = os.path.realpath(path)
+        if os.path.commonpath([root, resolved]) != root:
+            raise SystemExit(f'Candidate symlink escapes release: {relative}')
+if seen != set(allowed):
+    raise SystemExit(f'Missing runtime links: {sorted(set(allowed) - seen)}')
+PY
 
 test -d "$LiveDir"
 test ! -L "$LiveDir"
-test "$(stat -c '%d' "$LiveDir")" = "$(stat -c '%d' "$CandidateDir")"
-python3 - "$RemoteRoot" <<'PY'
+CandidateDevice="$(stat -c %d "$CandidateDir")"
+LiveDevice="$(stat -c %d "$LiveDir")"
+test "$CandidateDevice" = "$LiveDevice"
+python3 - "$CandidateRoot" <<'PY'
 import ctypes
 import os
 import shutil
@@ -949,12 +1172,56 @@ try:
 finally:
     shutil.rmtree(probe)
 PY
+
+cat > "$LockDir/candidate_digest.py" <<'PY'
+import hashlib
+import os
+import stat
+import sys
+
+root = os.path.abspath(sys.argv[1])
+digest = hashlib.sha256()
+
+def emit(value):
+    data = value if isinstance(value, bytes) else value.encode('utf-8', 'surrogateescape')
+    digest.update(len(data).to_bytes(8, 'big'))
+    digest.update(data)
+
+def visit(path, relative):
+    metadata = os.lstat(path)
+    emit(relative)
+    emit(f'{stat.S_IFMT(metadata.st_mode)}:{stat.S_IMODE(metadata.st_mode)}:{metadata.st_uid}:{metadata.st_gid}')
+    if stat.S_ISLNK(metadata.st_mode):
+        emit(os.fsencode(os.readlink(path)))
+    elif stat.S_ISREG(metadata.st_mode):
+        file_hash = hashlib.sha256()
+        with open(path, 'rb') as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b''):
+                file_hash.update(chunk)
+        emit(file_hash.hexdigest())
+    elif stat.S_ISDIR(metadata.st_mode):
+        for name in sorted(os.listdir(path), key=os.fsencode):
+            visit(os.path.join(path, name), f'{relative}/{name}' if relative else name)
+    else:
+        raise SystemExit(f'Unsupported candidate entry: {relative}')
+
+visit(root, '')
+print(digest.hexdigest())
+PY
+chmod 0600 "$LockDir/candidate_digest.py"
+CANDIDATE_TREE_SHA256="$(python3 "$LockDir/candidate_digest.py" "$CandidateDir")"
+printf '%s\n' "$CANDIDATE_TREE_SHA256" > "$LockDir/candidate-tree.sha256"
+chmod 0600 "$LockDir/candidate-tree.sha256"
+printf 'CANDIDATE_TREE_SHA256=%s\n' "$CANDIDATE_TREE_SHA256"
 echo "CANDIDATE_OK"
 '@
     $candidateGate = $candidateGate.Replace('__REMOTE_DIR__', $REMOTE_DIR)
     $candidateGate = $candidateGate.Replace('__REMOTE_ROOT__', $REMOTE_ROOT)
     $candidateGate = $candidateGate.Replace('__RELEASE_ROOT__', $remoteReleaseRoot)
     $candidateGate = $candidateGate.Replace('__CANDIDATE_DIR__', $remoteCandidateDir)
+    $candidateGate = $candidateGate.Replace('__CANDIDATE_ROOT__', $CANDIDATE_ROOT)
+    $candidateGate = $candidateGate.Replace('__GATE_USER__', $GATE_USER)
+    $candidateGate = $candidateGate.Replace('__BACKUP_PATH__', $backupDir)
     $candidateGate = $candidateGate.Replace('__APP_QUERY__', $EXPECTED_APP_QUERY)
     $candidateGate = $candidateGate.Replace('__APP_BUILD__', $EXPECTED_APP_BUILD)
     $candidateGate = $candidateGate.Replace('__PPT_QUERY__', $EXPECTED_PPT_QUERY)
@@ -1001,6 +1268,29 @@ if ! test -f "$LockDir/owner" ||
   exit 1
 fi
 
+ExpectedCandidateDigest="$(cat "$LockDir/candidate-tree.sha256")"
+CurrentCandidateDigest="$(python3 "$LockDir/candidate_digest.py" "$CandidateDir")"
+if [ "$CurrentCandidateDigest" != "$ExpectedCandidateDigest" ]; then
+  echo "Candidate tree changed after validation" >&2
+  exit 1
+fi
+echo "CANDIDATE_TREE_RECHECK_OK"
+
+assert_runtime_link() {
+  link="$1"
+  target="$2"
+  test -L "$link"
+  test "$(readlink "$link")" = "$target"
+}
+assert_runtime_link "$LiveDir/.env" /etc/turingmarket/turingmarket.env
+assert_runtime_link "$LiveDir/server/db" /var/lib/turingmarket/db
+assert_runtime_link "$LiveDir/uploads" /var/lib/turingmarket/uploads
+assert_runtime_link "$LiveDir/tmp" /var/lib/turingmarket/tmp
+assert_runtime_link "$CandidateDir/.env" /etc/turingmarket/turingmarket.env
+assert_runtime_link "$CandidateDir/server/db" /var/lib/turingmarket/db
+assert_runtime_link "$CandidateDir/uploads" /var/lib/turingmarket/uploads
+assert_runtime_link "$CandidateDir/tmp" /var/lib/turingmarket/tmp
+
 record_phase() {
   printf '%s\n' "$1" > "$LockDir/phase.next"
   mv -f "$LockDir/phase.next" "$LockDir/phase"
@@ -1017,20 +1307,10 @@ done < "$BackupAbsolute/root-files.requested"
 
 record_phase mutation-started
 pm2 stop turingmarket
-sync_runtime_path() {
-  relative="$1"
-  source="$LiveDir/$relative"
-  target="$CandidateDir/$relative"
-  rm -rf -- "$target"
-  if [ -e "$source" ] || [ -L "$source" ]; then
-    mkdir -p "$(dirname "$target")"
-    cp -a -- "$source" "$target"
-  fi
-}
-sync_runtime_path .env
-sync_runtime_path server/db
-sync_runtime_path uploads
-sync_runtime_path tmp
+assert_runtime_link "$LiveDir/.env" /etc/turingmarket/turingmarket.env
+assert_runtime_link "$LiveDir/server/db" /var/lib/turingmarket/db
+assert_runtime_link "$LiveDir/uploads" /var/lib/turingmarket/uploads
+assert_runtime_link "$LiveDir/tmp" /var/lib/turingmarket/tmp
 
 python3 - "$LiveDir" "$CandidateDir" <<'PY'
 import ctypes

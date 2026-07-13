@@ -31,7 +31,8 @@ if (process.env.NODE_ENV === 'production' && (!process.env.JWT_SECRET || process
 }
 const JWT_SECRET = process.env.JWT_SECRET || DEFAULT_DEV_JWT_SECRET;
 const TOKEN_EXPIRY = '24h';
-const UPLOAD_DIR = path.join(__dirname, '..', 'uploads');
+const UPLOAD_DIR = path.resolve(process.env.UPLOAD_DIR || path.join(__dirname, '..', 'uploads'));
+const TMP_DIR = path.resolve(process.env.TMP_DIR || path.join(__dirname, '..', 'tmp'));
 const ALLOWED_UPLOAD_EXTS = new Set([
   '.txt', '.md', '.csv', '.json', '.xlsx', '.xlsm', '.xls',
   '.pdf', '.docx', '.pptx',
@@ -423,7 +424,7 @@ app.post('/api/proposal/generate-ppt', authMiddleware, (req, res) => {
   const path = require('path');
   const fs = require('fs');
   const cp = require('child_process');
-  const tmpDir = path.join(__dirname, '..', 'tmp');
+  const tmpDir = TMP_DIR;
   if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
   const dataPath = path.join(tmpDir, 'ppt_data_' + Date.now() + '.json');
   const outPath = path.join(tmpDir, 'proposal_' + Date.now() + '.pptx');

@@ -231,9 +231,9 @@ test('production helper CLIs redact missing environment failures and capture use
 });
 
 test('browser redaction removes visible account, contact, link, and storage values before screenshots', async () => {
-  const { chromium } = require('playwright');
+  const { chromium } = require('playwright-deploy');
   const { sanitizeProductionPage } = require(captureScript);
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({ headless: true, chromiumSandbox: true });
   try {
     const page = await browser.newPage();
     await page.route('https://production.invalid/**', async (route) => {

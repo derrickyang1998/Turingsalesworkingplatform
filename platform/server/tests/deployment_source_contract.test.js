@@ -469,12 +469,12 @@ function Assert-Actions {
 foreach ($phase in @('locked', 'candidate-ready', 'cutover-complete')) {
   Reset-Case
   $script:Phase = $phase
-  Invoke-DeploymentFailureRecovery -BackupPath 'backups/v030-baseline-consolidation-20260713-120000' -ReleaseRoot '/root/turingmarket/releases/test' -BackupCreated $true
+  Invoke-DeploymentFailureRecovery -BackupPath 'backups/v030-baseline-consolidation-20260713-120000' -ReleaseRoot '/var/lib/turingmarket-gate/releases/test' -BackupCreated $true
   Assert-Actions 'writer-enter,cleanup,exit'
 }
 Reset-Case
 $script:Phase = 'mutation-started'
-Invoke-DeploymentFailureRecovery -BackupPath 'backups/v030-baseline-consolidation-20260713-120000' -ReleaseRoot '/root/turingmarket/releases/test' -BackupCreated $true
+Invoke-DeploymentFailureRecovery -BackupPath 'backups/v030-baseline-consolidation-20260713-120000' -ReleaseRoot '/var/lib/turingmarket-gate/releases/test' -BackupCreated $true
 Assert-Actions 'writer-enter,restore,cleanup,exit'
 
 Reset-Case
@@ -555,18 +555,18 @@ Write-Output 'MANUAL_ROLLBACK_PREFLIGHT_OK'
 test('Task 12 remote deploy gate runs full tests and exact route/static smoke before success', () => {
   const deploy = read(deployPath);
   assert.match(deploy, /npm ci --ignore-scripts/);
-  assert.match(deploy, /npx playwright install chromium/);
+  assert.match(deploy, /node node_modules\/playwright-deploy\/cli\.js install chromium/);
   assert.match(deploy, /TM_DISABLE_DOTENV=1/);
   assert.match(deploy, /DB_PATH=/);
   assert.match(deploy, /cd server[\s\S]*?node --test --test-concurrency=1 tests\/\*\.test\.js/);
   assert.doesNotMatch(deploy, /npm test -- --test-concurrency=1/);
   assert.ok(
-    deploy.indexOf('npx playwright install chromium') <
+    deploy.indexOf('node node_modules/playwright-deploy/cli.js install chromium') <
       deploy.indexOf('node --test --test-concurrency=1 tests/*.test.js'),
     'Chromium must be installed before the full Node suite launches browser-backed tests'
   );
-  assert.match(deploy, /npx playwright test -c server\/tests\/deployment-browser-smoke\.config\.js/);
-  assert.doesNotMatch(deploy, /npx playwright test -c server\/tests\/browser-baseline\.config\.js/);
+  assert.match(deploy, /node node_modules\/playwright-deploy\/cli\.js test -c server\/tests\/deployment-browser-smoke\.config\.js/);
+  assert.doesNotMatch(deploy, /npx\s+playwright|playwright-deploy\/cli\.js test -c server\/tests\/browser-baseline\.config\.js/);
   assert.match(deploy, /pm2 start ecosystem\.config\.js --only turingmarket|pm2 restart ecosystem\.config\.js --only turingmarket/);
   for (const route of ['/api/health', '/m0', '/m0-detail', '/m4', '/admin']) {
     assert.ok(deploy.includes(route), `route smoke must include ${route}`);

@@ -44,6 +44,17 @@ Set-Location 'C:\Users\29272\Documents\在线商务平台-github-sync'
 .\platform\deploy_v8.ps1
 ```
 
+Before the first deployment using the external runtime layout, run the audited bootstrap once. It installs only the simulated and reviewed Ubuntu 26.04 browser dependency set, creates the no-login `turingmarket-gate` account and AppArmor user-namespace profile, migrates mutable state, restarts the existing root-owned PM2 process, and proves health plus SQLite `quick_check`. / 首次使用外置运行时布局发布前，必须执行一次经审查的引导脚本。它只安装已模拟审查的 Ubuntu 26.04 浏览器依赖，创建禁止登录的门禁账号和 AppArmor user namespace 配置，迁移可变状态，重启现有 root PM2，并验证健康检查与 SQLite `quick_check`。
+
+Before stopping PM2, the bootstrap durably records its phase at `/var/lib/turingmarket-bootstrap/active`. Only after writers stop does it capture the rollback database through the SQLite Backup API and copy uploads. `ERR`, `INT`, `TERM`, and `HUP` trigger recovery; a later rerun also recovers or finalizes a journal left by process or host interruption. The journal is cleared only after database validation and production health succeed. / 引导脚本在停止 PM2 前持久记录迁移阶段；停服后才通过 SQLite Backup API 和文件复制建立一致回滚快照。错误、终止信号或主机中断后重跑都会先执行恢复或完成已提交迁移；只有数据库验证与生产健康均成功后才清除 journal。
+
+```powershell
+scp -i "$env:USERPROFILE\.ssh\turingmarket_deploy" -o BatchMode=yes -o StrictHostKeyChecking=yes .\platform\server\scripts\bootstrap_production_runtime.sh "root@$env:TURINGMARKET_SERVER`:/root/turingmarket/bootstrap_production_runtime.sh"
+ssh -i "$env:USERPROFILE\.ssh\turingmarket_deploy" -o BatchMode=yes -o StrictHostKeyChecking=yes "root@$env:TURINGMARKET_SERVER" "bash /root/turingmarket/bootstrap_production_runtime.sh"
+```
+
+The resulting mutable paths are `/etc/turingmarket/turingmarket.env`, `/var/lib/turingmarket/db`, `/var/lib/turingmarket/uploads`, and `/var/lib/turingmarket/tmp`; the active release contains only exact root-owned symlinks to them. Root-owned PM2 remains the production process manager in this phase. / 迁移后的可变路径固定为上述四处，活动版本中仅保留指向它们的精确 root 所有软链接；本阶段生产进程仍由 root PM2 管理。
+
 `-ValidateLocalOnly` is a local-only mode and performs zero remote operations. It cannot be combined with `-RollbackBackup`. Supplying `-RollbackBackup` explicitly with an empty, blank, malformed, or unsupported value is rejected locally and never falls through to deployment. / `-ValidateLocalOnly` 是零远端操作的纯本地模式，禁止与 `-RollbackBackup` 组合使用；显式传入空值、空白、格式错误或不受支持的回滚编号时会在本地拒绝，绝不会回落到正式部署。
 
 By default, deployment invalidates all existing sessions. Use `-PreserveSessions` only after an explicit security decision. / 默认发布会撤销全部现有会话；只有经过明确安全评估后才使用 `-PreserveSessions`。
@@ -55,9 +66,10 @@ The script performs these gates in order / 脚本按以下顺序执行：
 1. Verify checkout, branch, clean state, build markers, cache keys, and frozen PPT hash. / 校验工作区、分支、干净状态、构建标记、缓存键及冻结 PPT 哈希。
 2. Acquire the fail-closed lifecycle lock at `/root/turingmarket/.deploy-v030.lock`; deployment and manual rollback share it for their complete remote lifecycle, while production mutation additionally requires the stable global writer mutex. / 获取失败关闭的远端生命周期锁；正式发布与手工回滚在完整远端生命周期内共用该锁，生产变更还必须另外取得稳定的全局 writer 互斥。
 3. Create `/root/turingmarket/backups/v030-baseline-consolidation-<timestamp>` with present/absent manifests, both root and server `node_modules`, a consistent `better-sqlite3` backup, Nginx configuration, and SHA-256 checksums. The backup path must not already exist. / 在生产根目录外置建立版本化备份，记录存在/缺失文件、两层 Node 依赖、一致性数据库副本、Nginx 配置与校验和；同名备份存在时立即失败。
-4. Upload every runtime, browser, test, and evidence file only to `/root/turingmarket/releases/v030-baseline-consolidation-<timestamp>` and verify every checksum there. The active `/root/turingmarket/platform` tree is not overwritten during validation. / 所有文件只上传到独立候选发布目录并逐项校验；验证期间绝不覆盖活动生产目录。
-5. In the candidate directory, install locked dependencies, run the complete Node suite against an absolute isolated database with dotenv disabled, run the Linux deployment browser smoke, and validate the candidate Nginx configuration. The frozen 102-test Windows browser baseline remains the required local gate. / 在候选目录中安装锁定依赖，使用绝对隔离数据库且禁用 dotenv 执行完整 Node、Linux 浏览器冒烟及候选 Nginx 校验；冻结的 102 项 Windows 基线仍为本地门禁。
-6. Stop PM2, copy only live mutable state (`.env`, `server/db`, `uploads`, and `tmp`) into the validated candidate, then atomically exchange the candidate and active directories with Linux `renameat2(RENAME_EXCHANGE)`. Restart only from `platform/ecosystem.config.js`. / 停止 PM2 后，仅同步生产可变状态，再通过 Linux 原子目录交换切换版本，并只从版本化 PM2 配置重启；用户不会收到测试中的混合版本。
+4. Upload every runtime, browser, test, and evidence file only to `/var/lib/turingmarket-gate/releases/v030-baseline-consolidation-<timestamp>`; store the immutable upload manifest under the root-only lifecycle lock and verify it before and after candidate testing. The active `/root/turingmarket/platform` tree is not overwritten during validation. / 所有文件只上传到外置候选目录；不可变上传清单保存在仅 root 可读的生命周期锁内，并在候选测试前后各校验一次，验证期间绝不覆盖活动生产目录。
+5. Run dependency installation, the complete Node suite, schema fingerprint and user/session count comparison, native Ubuntu 26 Playwright 1.61.1 browser smoke with Chromium sandboxing, and writable-prefix Nginx validation as the no-login `turingmarket-gate` user. The frozen Playwright 1.60.0 Windows baseline remains unchanged. / 依赖安装、完整 Node、数据库结构指纹与用户/会话计数对比、Ubuntu 26 原生 Playwright 1.61.1 沙箱浏览器冒烟和可写前缀 Nginx 校验全部以禁止登录的门禁用户执行；冻结的 Playwright 1.60.0 Windows 基线保持不变。
+   Bootstrap and deploy independently validate the account's system UID, primary and supplementary groups, locked credentials, fixed home, and nologin shell before candidate code can run. / 引导和发布会分别核验门禁账号的系统 UID、主组、补充组、锁定凭据、固定 home 与 nologin shell，身份漂移时禁止运行候选代码。
+6. Kill and verify the absence of all gate-user processes, recheck uploaded sources, recreate only the four exact external-state symlinks, remove ACL/write escalation, and seal the complete candidate tree including `node_modules`. After acquiring the writer lock, recheck the same digest immediately before stopping PM2 and atomically exchange the sealed candidate with Linux `renameat2(RENAME_EXCHANGE)`. / 门禁结束后清理并确认该用户无残留进程，复验上传源码，仅重建四个精确外置状态链接，移除 ACL 与多余写权限，并封存包含 `node_modules` 的完整候选树；取得 writer 锁后、停止 PM2 前再次核对同一摘要，再执行 Linux 原子目录交换。
 7. Verify `/api/health`, `/m0`, `/m0-detail`, `/m4`, `/admin`, the exact public allowlist, and private-path denial before session invalidation and success. / 在撤销会话和判定成功前，验证健康检查、核心页面、公开白名单与私有路径拒绝。
 8. A candidate-validation failure removes only the candidate and leaves active PM2 untouched. Automatic restore runs only after production mutation begins; it restores code, both dependency trees, repository evidence, and Nginx through the reviewed rollback function before restart and health verification. / 候选验证失败只清理候选目录，不停止活动 PM2；只有生产变更已开始时才自动恢复代码、两层依赖、公开证据与 Nginx，并重启后验证健康状态。
 
@@ -67,7 +79,7 @@ The remote full Node gate is equivalent to / 远端完整 Node 门禁等价于�
 
 ```bash
 cd server
-NODE_ENV=test TM_DISABLE_DOTENV=1 DB_PATH=/root/turingmarket/releases/<release>/tmp/deploy-v030-gate-<timestamp>/test.db node --test --test-concurrency=1 tests/*.test.js
+NODE_ENV=test TM_DISABLE_DOTENV=1 DB_PATH=/var/lib/turingmarket-gate/releases/<release>/tmp/deploy-v030-gate-<timestamp>/test.db node --test --test-concurrency=1 tests/*.test.js
 ```
 
 ## Rollback / 回滚

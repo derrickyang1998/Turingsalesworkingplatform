@@ -144,7 +144,7 @@ test('guarded deploy validates and installs the versioned nginx config', () => {
   assert.match(deploy, /nginx -t/);
   assert.match(deploy, /systemctl reload nginx/);
   assert.match(deploy, /sites-available\/turingmarket/);
-  assert.match(deploy, /if \(!? nginx -t|if ! nginx -t/);
+  assert.match(deploy, /set -euo pipefail[\s\S]*?nginx -t/);
   assert.match(deploy, /\$BackupAbsolute\/nginx\/turingmarket\.conf/);
 });
 

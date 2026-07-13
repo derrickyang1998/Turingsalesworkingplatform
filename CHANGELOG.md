@@ -1,4 +1,22 @@
-# Changelog — TuringMarket 图灵商务在线工作平台
+# Changelog - TuringMarket 图灵商务在线工作平台
+
+## v0.3.0-baseline-consolidation (2026-07-13) - 最新界面基线整合与生产候选门禁
+
+### 最新功能基线 / Latest Functional Baseline
+- 以当前生产 UI、PPT bridge、CRM 客户看板/明细拆分、M4 自定义网红表头/导入/搜索/飞书/合作资源，以及 AI 对话与知识库底座作为唯一发布基线；冻结 `app.js`、`index.html`、`ppt.js` 和 72 张视觉基线，防止后续底层改造覆盖最新界面。
+- 发布脚本锁定 App build `20260713-v030-baseline-consolidation`、PPT build `20260702-v916-kb-bridge-client-cn` 与 PPT SHA-256，并继续保护公开资源白名单和私有源码 `404` 边界。
+
+### 外置运行时与非特权门禁 / External Runtime And Unprivileged Gate
+- 新增一次性、可审计、失败自动恢复的 Ubuntu 26.04 运行时引导：创建禁止登录的 `turingmarket-gate`，安装经过 apt 模拟的浏览器依赖与窄化 AppArmor user-namespace 配置，并把环境文件、SQLite、上传和临时文件外置到 `/etc/turingmarket` 与 `/var/lib/turingmarket`。
+- 引导迁移在停服前写入 root-only 持久 journal，停服后才通过 SQLite Backup API 与静态文件复制建立一致回滚快照；`ERR`、`INT`、`TERM`、`HUP` 或主机中断后重跑会先恢复或完成已提交迁移，数据库 `quick_check` 成功后才允许重启 PM2。
+- 冻结浏览器基线继续精确使用 Playwright 1.60.0；生产证据与 Linux 部署冒烟通过 npm alias 独立使用原生支持 Ubuntu 26 的 Playwright 1.61.1，并强制 `chromiumSandbox: true`。
+- 候选发布只写入 `/var/lib/turingmarket-gate/releases`；bootstrap 与 deploy 都校验 gate 账号的系统 UID、主组、补充组、锁定凭据、home 和 nologin shell，完整 Node、数据库结构指纹与用户/会话计数、浏览器和 Nginx 门禁均以该非特权账号运行。测试后由 root 复验上传清单、清理门禁进程、重建四个精确外置状态链接、去除写权限，并封存包含 `node_modules` 的完整候选树。
+- writer 锁取得后、任何生产变更前再次核对候选树摘要；只有经过测试且摘要一致的目录可通过 `renameat2(RENAME_EXCHANGE)` 原子切换。当前 root PM2 保持不变，非 root PM2、私有命名空间和 canary 另列后续加固阶段。
+
+### 验证与发布证据 / Verification And Release Evidence
+- 本地 TDD、新部署浏览器冒烟、完整 Node 回归、冻结 102 项浏览器基线、72 图只读对比、独立代码与安全审查，以及生产引导、候选门禁和线上登录态业务验收结果在本版本最终发布记录中统一归档。
+
+---
 
 ## v0.2.10-security-credential-rotation (2026-07-12) - 凭据轮换与安全事件闭环
 

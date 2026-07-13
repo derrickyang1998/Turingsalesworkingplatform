@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const net = require('node:net');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
-const { chromium } = require('playwright');
+const { chromium } = require('playwright-deploy');
 const {
   installBaselineAuthState,
   installBaselineBrowserControls,
@@ -306,7 +306,7 @@ test('Task 10 locked ppt.js owns and preserves the complete browser PPT workflow
   const previousFixturePort = process.env.TM_BROWSER_FIXTURE_PORT;
   try {
     server = await startFixtureServer();
-    browser = await chromium.launch({ headless: true });
+    browser = await chromium.launch({ headless: true, chromiumSandbox: true });
 
     const success = await createScenario(browser, server.baseUrl, server.port, 'success');
     try {

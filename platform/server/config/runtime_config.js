@@ -7,7 +7,7 @@ const defaultEnvPath = path.resolve(__dirname, '..', '..', '.env');
 
 function loadPlatformEnvironment(options = {}) {
   const environment = options.environment || process.env;
-  const envPath = options.envPath || defaultEnvPath;
+  const envPath = options.envPath || environment.TM_ENV_FILE || defaultEnvPath;
   if (environment.NODE_ENV === 'test' && environment.TM_DISABLE_DOTENV === '1') {
     return { skipped: true };
   }

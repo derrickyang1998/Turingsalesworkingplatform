@@ -14,6 +14,10 @@ The current production platform uses Express + SQLite with `better-sqlite3`, PM2
 | Database / 数据库 | SQLite through `better-sqlite3` |
 | PM2 / 进程 | `platform/ecosystem.config.js` -> `server/server.js`, name `turingmarket` |
 | Production directory / 生产目录 | `/root/turingmarket/platform` |
+| Candidate root / 候选根目录 | `/var/lib/turingmarket-gate/releases` |
+| Environment / 环境文件 | `/etc/turingmarket/turingmarket.env` |
+| Mutable data / 可变数据 | `/var/lib/turingmarket/db`, `/var/lib/turingmarket/uploads`, `/var/lib/turingmarket/tmp` |
+| Gate identity / 门禁身份 | no-login `turingmarket-gate`; production PM2 remains root-owned in this phase |
 | Reverse proxy / 反向代理 | Versioned Nginx configuration to local port 3002 |
 | Health / 健康检查 | `/api/health` |
 
@@ -53,14 +57,20 @@ Each release creates `/root/turingmarket/backups/v030-baseline-consolidation-<ti
 - The active Nginx configuration / 当前 Nginx 配置
 - `SHA256SUMS` for fail-closed verification / 用于失败关闭校验的哈希清单
 
-After backup, files are uploaded only to an isolated `/root/turingmarket/releases/v030-baseline-consolidation-<timestamp>` candidate and checksum-verified there. The candidate gate installs locked dependencies, rebuilds only the required native SQLite module, runs the full Node suite with an absolute isolated database and dotenv disabled, installs Chromium, and runs the cross-platform deployment browser smoke. The active tree remains untouched during these gates. / 备份后所有文件只进入隔离候选目录并逐项校验；候选门禁安装锁定依赖、重建必要原生模块，以绝对隔离数据库且禁用 dotenv 运行完整 Node 和浏览器冒烟；期间活动目录保持不变。
+Before the first deployment, run the audited `platform/server/scripts/bootstrap_production_runtime.sh` once as root. It snapshots apt/PM2/health state, simulates and then installs the exact Ubuntu 26 browser dependency set, creates the no-login gate account and AppArmor user-namespace profile, externalizes all mutable state, and automatically restores the old layout if PM2 health or SQLite `quick_check` fails. / 首次发布前，以 root 执行一次经审查的生产运行时引导脚本；它会记录 apt、PM2 和健康状态快照，先模拟再安装精确的 Ubuntu 26 浏览器依赖，创建禁止登录的门禁账号与 AppArmor 配置，外置全部可变状态，并在 PM2 健康或 SQLite 完整性失败时自动恢复旧布局。
+
+The bootstrap writes a root-only phase journal at `/var/lib/turingmarket-bootstrap/active` before downtime, captures its database rollback snapshot with the SQLite Backup API after PM2 stops, and verifies the restored database before any restart. If the shell or host is interrupted, rerun the same script; it first recovers or finalizes the journaled migration. Do not delete the journal manually while recovery is unresolved. / 引导脚本在停服前写入 root-only 阶段 journal，停服后通过 SQLite Backup API 建立数据库回滚快照，并在任何重启前验证恢复数据库。Shell 或主机中断后直接重跑同一脚本，它会先恢复或完成已记录迁移；恢复未明确完成前不得手工删除 journal。
+
+After backup, files are uploaded only to an isolated `/var/lib/turingmarket-gate/releases/v030-baseline-consolidation-<timestamp>` candidate. The root-only upload manifest is verified before and after the no-login gate user installs locked dependencies, rebuilds only the required native SQLite module, runs the full Node suite, compares database schema fingerprints and user/session counts, runs Playwright 1.61.1 with the Chromium sandbox, and validates Nginx with writable test paths. The active tree and production secrets remain untouched during these gates. / 备份后所有文件只进入外置隔离候选目录；仅 root 可读的上传清单会在门禁测试前后各校验一次。禁止登录的门禁用户负责依赖安装、SQLite 原生模块重建、完整 Node、数据库结构与用户/会话计数对比、Playwright 1.61.1 Chromium 沙箱冒烟和可写测试路径 Nginx 校验；期间活动目录与生产密钥保持不变。
+
+Before candidate preparation and again immediately before `runuser`, deployment verifies that `turingmarket-gate` has a nonzero system UID, the expected primary group, no supplementary groups, locked credentials, `/var/lib/turingmarket-gate` home, and `/usr/sbin/nologin`. / 候选准备前及 `runuser` 执行前，发布脚本都会再次核验门禁账号的非零系统 UID、预期主组、无补充组、锁定凭据、固定 home 与 nologin shell。
 
 ```bash
 cd server
-NODE_ENV=test TM_DISABLE_DOTENV=1 DB_PATH=/root/turingmarket/releases/<release>/tmp/deploy-v030-gate-<timestamp>/test.db node --test --test-concurrency=1 tests/*.test.js
+NODE_ENV=test TM_DISABLE_DOTENV=1 DB_PATH=/var/lib/turingmarket-gate/releases/<release>/tmp/deploy-v030-gate-<timestamp>/test.db node --test --test-concurrency=1 tests/*.test.js
 ```
 
-The complete deterministic 102-test browser baseline runs locally on locked Windows browser/font revisions; the Linux server runs the deployment smoke. After all candidate gates pass, PM2 is stopped, live mutable state is copied into the candidate, and `renameat2(RENAME_EXCHANGE)` atomically swaps the candidate with `/root/turingmarket/platform`. Nginx and PM2 are restarted only after the exchange. / 完整 102 项确定性浏览器基线在锁定的 Windows 环境执行，Linux 服务器执行部署冒烟；候选门禁全部通过后停止 PM2，同步生产可变状态，并用原子目录交换切换活动版本，随后才重载 Nginx 和重启 PM2。
+The complete deterministic 102-test browser baseline remains on locked Playwright 1.60.0 Windows browser/font revisions; Linux deployment evidence uses the separate Playwright 1.61.1 alias. After all gates pass, root kills and verifies the absence of gate-user processes, rechecks uploaded sources, recreates only exact external-state symlinks, removes ACL/write escalation, and seals the full candidate tree including `node_modules`. The writer lock then rechecks the same digest immediately before PM2 stops and `renameat2(RENAME_EXCHANGE)` atomically swaps the sealed candidate with `/root/turingmarket/platform`. / 冻结的 102 项 Windows 浏览器基线继续使用 Playwright 1.60.0，Linux 发布证据使用独立的 1.61.1 别名。门禁通过后，root 清理并确认门禁用户无残留进程，复验上传源码，仅重建精确外置状态链接，移除 ACL 与多余写权限，并封存包含 `node_modules` 的完整候选树；writer 锁在停止 PM2 前立即复核同一摘要，再原子交换活动版本。
 
 If candidate validation fails, only the candidate is removed and active PM2 remains untouched. The current lifecycle moves from `locked` directly into writer-protected `mutation-intent`, confirmed `mutation-started`, and `cutover-complete`; historical `candidate-ready` is accepted only for recovery compatibility and is not independently written. Recovery first acquires the stable global writer mutex and rechecks the lifecycle generation, so it cannot overlap an original cutover process that survived an SSH disconnect, admit an old delayed process into a new lifecycle lock, or overwrite a newer phase. An unreadable or uncertain phase, or an active/stale writer mutex, performs no further automatic production action and deliberately retains the locks as incident markers. / 候选验证失败时只清理候选目录，活动 PM2 保持不变；当前生命周期从 `locked` 直接进入受 writer 保护的 `mutation-intent`、确认开始变更和切换完成，历史 `candidate-ready` 仅作恢复兼容，不再独立写入。恢复前必须取得稳定的全局 writer 互斥并重新校验生命周期代际，因此不会与 SSH 中断后仍存活的原切换进程并发，不会让旧延迟进程进入新生命周期锁，也不会覆盖新阶段。阶段不可读、不确定或 writer 活动/残留时不再自动操作生产，并保留锁作为故障标记。
 

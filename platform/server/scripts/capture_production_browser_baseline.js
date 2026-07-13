@@ -3,7 +3,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { chromium } = require('playwright');
+const { chromium } = require('playwright-deploy');
 const {
   EvidenceError,
   destroySession,
@@ -173,7 +173,7 @@ async function captureScreenshots(options) {
   const routeMap = new Map();
   const createdFiles = options.createdFiles;
   try {
-    browser = await browserType.launch({ headless: true });
+    browser = await browserType.launch({ headless: true, chromiumSandbox: true });
     for (const viewport of viewports) {
       phase = 'CONTEXT_CREATE';
       const context = await browser.newContext({

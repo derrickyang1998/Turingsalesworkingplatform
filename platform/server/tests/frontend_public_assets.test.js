@@ -139,13 +139,13 @@ test('guarded deploy uploads, checks, verifies, and backs up public build metada
   assert.match(deploy, /"client\\core\\navigation\.js"/);
   assert.match(deploy, /\$requiredPublicAssets\s*=\s*@\("client\/shared\/build_info\.js", "client\/core\/navigation\.js"\)/);
   assert.match(deploy, /if \[ -f "\$file" \]; then[\s\S]*?cp -- "\$file" "\$BackupAbsolute\/platform\/\$file"/);
-  assert.match(deploy, /sha256sum --check --status \.deploy-v030-sha256/);
+  assert.match(deploy, /sha256sum --check --status "\$LockDir\/upload\.sha256"/);
   assert.match(deploy, /node --check client\/shared\/build_info\.js/);
   assert.match(deploy, /node --check client\/core\/navigation\.js/);
-  assert.match(deploy, /grep -Fq "__APP_QUERY__" index\.html/);
-  assert.match(deploy, /grep -Fq "__APP_BUILD__" client\/shared\/build_info\.js/);
-  assert.match(deploy, /grep -Fq "__PPT_QUERY__" index\.html/);
-  assert.match(deploy, /grep -Fq "__PPT_BUILD__" ppt\.js/);
+  assert.match(deploy, /grep -Fq "\$APP_QUERY" index\.html/);
+  assert.match(deploy, /grep -Fq "\$APP_BUILD" client\/shared\/build_info\.js/);
+  assert.match(deploy, /grep -Fq "\$PPT_QUERY" index\.html/);
+  assert.match(deploy, /grep -Fq "\$PPT_BUILD" ppt\.js/);
   assert.match(deploy, /\.Replace\('__APP_QUERY__', \$EXPECTED_APP_QUERY\)/);
   assert.match(deploy, /\.Replace\('__PPT_BUILD__', \$EXPECTED_PPT_BUILD\)/);
 });
@@ -161,7 +161,7 @@ test('guarded deploy verifies the full build-info contract and exact remote SHA-
   assert.equal(compatibilityChecks.length, 1, 'tmAppBuild compatibility marker must be validated before upload');
   assert.match(deploy, /foreach \(\$file in \$FILES\)[\s\S]*?Get-FileHash -Algorithm SHA256 -LiteralPath \$localPath/);
   assert.match(deploy, /\$remoteRelative = "platform\/\$\(Convert-ToRemotePath \$file\)"/);
-  assert.match(deploy, /sha256sum --check --status \.deploy-v030-sha256/);
+  assert.match(deploy, /sha256sum --check --status "\$LockDir\/upload\.sha256"/);
 });
 
 test('guarded deploy uploads and syntax-checks the baseline generator and architecture inventory test', () => {
@@ -175,5 +175,5 @@ test('guarded deploy uploads and syntax-checks the baseline generator and archit
   assert.match(deploy, /cd server\s*\r?\n+npm ci --ignore-scripts\s*\r?\n+npm rebuild better-sqlite3/);
   assert.match(deploy, /node --test --test-concurrency=1 tests\/\*\.test\.js/);
   assert.doesNotMatch(deploy, /npm test -- --test-concurrency=1/);
-  assert.match(deploy, /npx playwright test -c server\/tests\/deployment-browser-smoke\.config\.js/);
+  assert.match(deploy, /node node_modules\/playwright-deploy\/cli\.js test -c server\/tests\/deployment-browser-smoke\.config\.js/);
 });
