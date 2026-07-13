@@ -1,7 +1,8 @@
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
-require('dotenv').config({ path: path.join(__dirname, '..', '.env'), quiet: true });
+const runtimeConfig = require('./config/runtime_config');
+runtimeConfig.loadPlatformEnvironment();
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const multer = require('multer');
@@ -970,6 +971,6 @@ app.get('/{*path}', (req, res) => {
   });
 });
 
-app.listen(PORT, () => {
+app.listen(...runtimeConfig.serverListenArgs(PORT), () => {
   console.log(`🚀 TuringMarket server running on http://localhost:${PORT}`);
 });

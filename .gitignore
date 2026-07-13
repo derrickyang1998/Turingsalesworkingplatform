@@ -17,3 +17,8 @@ id_rsa*
 Thumbs.db
 _*.js
 .superpowers/
+platform/playwright-report/
+platform/test-results/
+platform/server/tests/.auth/
+platform/server/tests/fixtures/*.tmp.db
+platform/server/tests/fixtures/*.log

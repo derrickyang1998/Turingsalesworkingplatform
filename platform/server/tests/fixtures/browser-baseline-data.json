@@ -1,0 +1,640 @@
+{
+  "version": "v0.2.9-ui-fixture-1",
+  "frozenTime": "2026-07-13T10:00:00.000+08:00",
+  "mask": {
+    "version": "v0.2.9-mask-1",
+    "selectors": [
+      "[data-baseline-mask]",
+      ".timestamp",
+      ".user-email",
+      ".customer-contact",
+      ".ai-response",
+      ".kb-reference",
+      ".workflow-runtime",
+      "a[href^=\"http\"]"
+    ]
+  },
+  "auth": {
+    "admin": {
+      "token": "fixture-admin-token",
+      "user": {
+        "id": 1,
+        "username": "fixture_admin",
+        "display_name": "Fixture Admin",
+        "role": "admin",
+        "department": "Baseline QA",
+        "email": "admin@example.invalid",
+        "api_quota": 100000
+      }
+    },
+    "user": {
+      "token": "fixture-user-token",
+      "user": {
+        "id": 2,
+        "username": "fixture_user",
+        "display_name": "Fixture User",
+        "role": "user",
+        "department": "Sales",
+        "email": "user@example.invalid",
+        "api_quota": 30000
+      }
+    }
+  },
+  "users": [
+    {
+      "id": 1,
+      "username": "fixture_admin",
+      "display_name": "Fixture Admin",
+      "role": "admin",
+      "department": "Baseline QA",
+      "email": "admin@example.invalid",
+      "api_quota": 100000,
+      "last_login": "2026-07-13T09:30:00.000Z",
+      "is_active": 1
+    },
+    {
+      "id": 2,
+      "username": "fixture_user",
+      "display_name": "Fixture User",
+      "role": "user",
+      "department": "Sales",
+      "email": "user@example.invalid",
+      "api_quota": 30000,
+      "last_login": "2026-07-12T15:00:00.000Z",
+      "is_active": 1
+    }
+  ],
+  "brands": [
+    {
+      "id": 101,
+      "name": "Fixture Labs",
+      "name_cn": "Fixture Labs",
+      "company": "Fixture Labs Ltd.",
+      "industry": "Consumer Electronics",
+      "industry_tags": ["electronics", "smart-home", "launch"],
+      "relation_group": "Fixture Group",
+      "estimated_annual_revenue": "$50M-$100M",
+      "headquarter": "Singapore",
+      "description": "Synthetic brand used for deterministic UI baselines.",
+      "contact_email": "brand@example.invalid",
+      "contact_source": "fixture",
+      "website": "https://fixture.invalid/brand"
+    },
+    {
+      "id": 102,
+      "name": "Sample Home",
+      "name_cn": "Sample Home",
+      "company": "Sample Home Inc.",
+      "industry": "Smart Home",
+      "industry_tags": ["smart-home", "iot", "appliance"],
+      "relation_group": "Fixture Group",
+      "estimated_annual_revenue": "$10M-$50M",
+      "headquarter": "Berlin",
+      "description": "Synthetic related brand for fixture-only screenshots.",
+      "contact_email": "sample@example.invalid",
+      "contact_source": "fixture",
+      "website": "https://fixture.invalid/sample-home"
+    }
+  ],
+  "brandSocialSearch": {
+    "brand": "Fixture Labs",
+    "platform": "YouTube",
+    "videos": [
+      {
+        "title": "Fixture launch review",
+        "url": "https://fixture.invalid/video",
+        "views": 120000,
+        "sentiment": "positive"
+      }
+    ],
+    "contacts": [
+      {
+        "name": "Fixture Creator",
+        "email": "creator@example.invalid"
+      }
+    ]
+  },
+  "customers": [
+    {
+      "id": 201,
+      "brand_name": "Fixture Labs",
+      "company_name": "Fixture Labs Ltd.",
+      "industry": "Consumer Electronics",
+      "stage": "proposal",
+      "contact_person": "Fixture Contact",
+      "contact_info": "contact@example.invalid",
+      "source": "fixture-import",
+      "budget_estimate": "$15K-$50K",
+      "opportunity_value": 45000,
+      "win_probability": 60,
+      "assigned_to_name": "Fixture User",
+      "created_by_name": "Fixture Admin",
+      "updated_at": "2026-07-13T09:00:00.000Z",
+      "notes": "Synthetic customer row.",
+      "is_public": 0
+    },
+    {
+      "id": 202,
+      "brand_name": "Sample Home",
+      "company_name": "Sample Home Inc.",
+      "industry": "Smart Home",
+      "stage": "lead",
+      "contact_person": "Sample Contact",
+      "contact_info": "sample-contact@example.invalid",
+      "source": "fixture-pool",
+      "budget_estimate": "$5K-$15K",
+      "opportunity_value": 12000,
+      "win_probability": 35,
+      "assigned_to_name": "Fixture User",
+      "created_by_name": "Fixture Admin",
+      "updated_at": "2026-07-12T12:00:00.000Z",
+      "notes": "Synthetic customer row.",
+      "is_public": 1
+    }
+  ],
+  "seaPoolCustomers": [
+    {
+      "id": 203,
+      "brand_name": "Public Fixture",
+      "company_name": "Public Fixture Co.",
+      "industry": "Outdoor",
+      "stage": "lead",
+      "updated_at": "2026-07-11T10:00:00.000Z"
+    }
+  ],
+  "customerStats": {
+    "total": 2,
+    "publicPool": 1,
+    "totalOppValue": 57000,
+    "byStage": {
+      "lead": 1,
+      "proposal": 1,
+      "won": 0
+    }
+  },
+  "customerDashboard": {
+    "total": 2,
+    "active": 2,
+    "publicPool": 1,
+    "pipelineValue": 57000
+  },
+  "customerDetail": {
+    "customer": {
+      "id": 201,
+      "brand_name": "Fixture Labs",
+      "company_name": "Fixture Labs Ltd.",
+      "industry": "Consumer Electronics",
+      "stage": "proposal",
+      "contact_person": "Fixture Contact",
+      "contact_info": "contact@example.invalid",
+      "budget_estimate": "$15K-$50K",
+      "notes": "Synthetic customer detail."
+    },
+    "opportunities": [
+      {
+        "id": 301,
+        "customer_id": 201,
+        "name": "Fixture launch",
+        "value": 45000,
+        "stage": "proposal",
+        "win_probability": 60,
+        "product_name": "Fixture Device",
+        "channel_type": "YouTube",
+        "expected_close_date": "2026-07-31"
+      }
+    ],
+    "activities": [
+      {
+        "id": 1,
+        "action": "fixture-follow-up",
+        "notes": "Synthetic activity.",
+        "created_at": "2026-07-13T09:15:00.000Z"
+      }
+    ]
+  },
+  "opportunities": [
+    {
+      "id": 301,
+      "customer_id": 201,
+      "name": "Fixture launch",
+      "value": 45000,
+      "stage": "proposal",
+      "win_probability": 60,
+      "product_name": "Fixture Device",
+      "channel_type": "YouTube",
+      "expected_close_date": "2026-07-31",
+      "notes": "Synthetic opportunity."
+    }
+  ],
+  "salesTargets": [
+    {
+      "id": 1,
+      "month": "2026-07",
+      "target_value": 100000,
+      "owner": "Fixture User"
+    }
+  ],
+  "salesPerformance": {
+    "month": "2026-07",
+    "closedValue": 0,
+    "pipelineValue": 57000,
+    "targetValue": 100000
+  },
+  "salesDashboard": {
+    "pipelineValue": 57000,
+    "closedValue": 0,
+    "winRate": 0.6
+  },
+  "dashboardStats": {
+    "totalCustomers": 2,
+    "totalInfluencers": 2,
+    "totalDemands": 1,
+    "totalKnowledge": 1
+  },
+  "influencers": [
+    {
+      "id": 401,
+      "platform": "YouTube",
+      "kol_handle": "FixtureCreator",
+      "profile_link": "https://fixture.invalid/creator",
+      "followers": 125000,
+      "avg_views_10": 42000,
+      "avg_engagement": 4.2,
+      "category": "Consumer Electronics",
+      "sub_category": "Reviews",
+      "region": "US",
+      "language": "en",
+      "content_style": "review",
+      "collab_type": "Dedicated",
+      "cost_usd": 2500,
+      "quoted_price": 3000,
+      "brand_collab_history": "fixture collaborations",
+      "contact_email": "creator@example.invalid",
+      "project_name": "Fixture Launch",
+      "product_name": "Fixture Device",
+      "reporter": "Fixture User",
+      "tags": "electronics,review",
+      "content_deliverable": "1 dedicated video",
+      "influencer_type": "micro",
+      "parent_record": "fixture-parent"
+    },
+    {
+      "id": 402,
+      "platform": "Instagram",
+      "kol_handle": "SampleCreator",
+      "profile_link": "https://fixture.invalid/sample-creator",
+      "followers": 88000,
+      "avg_views_10": 25000,
+      "avg_engagement": 5.1,
+      "category": "Smart Home",
+      "sub_category": "Lifestyle",
+      "region": "DE",
+      "language": "en",
+      "content_style": "short-form",
+      "collab_type": "Reels",
+      "cost_usd": 1200,
+      "quoted_price": 1500,
+      "brand_collab_history": "fixture collaborations",
+      "contact_email": "sample-creator@example.invalid",
+      "project_name": "Sample Home",
+      "product_name": "Fixture Sensor",
+      "reporter": "Fixture User",
+      "tags": "smart-home,lifestyle",
+      "content_deliverable": "2 reels",
+      "influencer_type": "micro",
+      "parent_record": "fixture-parent"
+    }
+  ],
+  "collaborations": [
+    {
+      "id": 501,
+      "influencer_id": 401,
+      "kol_handle": "FixtureCreator",
+      "platform": "YouTube",
+      "followers": 125000,
+      "status": "confirmed",
+      "cost_quoted": 3000,
+      "timeline_start": "2026-07-15",
+      "timeline_end": "2026-07-30",
+      "notes": "Synthetic collaboration.",
+      "proposal_notes": "{\"project_name\":\"Fixture Launch\",\"product_name\":\"Fixture Device\",\"deliverable\":\"1 dedicated video\",\"quoted_price\":3000}"
+    }
+  ],
+  "collaborationStats": {
+    "stats": {
+      "byStatus": [
+        {
+          "status": "confirmed",
+          "count": 1
+        }
+      ],
+      "totalActive": 1,
+      "totalCompleted": 0,
+      "totalCost": 3000
+    }
+  },
+  "demands": [
+    {
+      "id": 601,
+      "brand_name": "Fixture Labs",
+      "company_name": "Fixture Labs Ltd.",
+      "product_name": "Fixture Device",
+      "industry": "Consumer Electronics",
+      "budget": "$15K-$50K",
+      "target_market": "US",
+      "platform": "YouTube"
+    }
+  ],
+  "proposals": [
+    {
+      "id": 701,
+      "demand_id": 601,
+      "title": "Fixture Proposal",
+      "content": "Synthetic proposal content.",
+      "created_at": "2026-07-13T09:40:00.000Z"
+    }
+  ],
+  "ai": {
+    "demandParse": {
+      "success": true,
+      "demand": {
+        "brand": "Fixture Labs",
+        "product": "Fixture Device",
+        "budget": "$15K-$50K"
+      }
+    },
+    "demandAnalysis": {
+      "analysis": "Synthetic demand analysis.",
+      "references": []
+    },
+    "pptOutline": {
+      "outline": ["Fixture overview", "Channel plan", "Execution cadence"]
+    },
+    "proposalDraft": {
+      "draft": "Synthetic proposal draft.",
+      "references": []
+    },
+    "strategy": {
+      "strategy": "Synthetic AI strategy.",
+      "references": []
+    },
+    "chat": {
+      "answer": "Synthetic assistant answer.",
+      "conversation_id": 801,
+      "references": []
+    },
+    "generatedPpt": {
+      "success": true,
+      "downloadUrl": "/api/fixture-ppt-download"
+    },
+    "conversations": [
+      {
+        "id": 801,
+        "title": "Fixture AI audit",
+        "source_module": "baseline",
+        "display_name": "Fixture User",
+        "username": "fixture_user",
+        "message_count": 2,
+        "last_answer": "Synthetic assistant answer.",
+        "created_at": "2026-07-13T09:45:00.000Z",
+        "updated_at": "2026-07-13T09:45:00.000Z"
+      }
+    ],
+    "conversationDetail": {
+      "id": 801,
+      "title": "Fixture AI audit",
+      "source_module": "baseline",
+      "display_name": "Fixture User",
+      "username": "fixture_user",
+      "created_at": "2026-07-13T09:45:00.000Z",
+      "messages": [
+        {
+          "id": 1,
+          "role": "user",
+          "model": "fixture",
+          "content": "Synthetic question.",
+          "total_tokens": 12,
+          "references": []
+        },
+        {
+          "id": 2,
+          "role": "assistant",
+          "model": "fixture",
+          "content": "Synthetic assistant answer.",
+          "total_tokens": 24,
+          "references": []
+        }
+      ]
+    }
+  },
+  "knowledge": {
+    "entries": [
+      {
+        "id": 901,
+        "title": "Fixture knowledge entry",
+        "summary": "Synthetic knowledge summary.",
+        "entry_type": "case",
+        "source_type": "fixture",
+        "visibility": "team",
+        "created_at": "2026-07-13T09:50:00.000Z"
+      }
+    ],
+    "categories": [
+      {
+        "name": "fixture",
+        "count": 1
+      }
+    ]
+  },
+  "admin": {
+    "overview": {
+      "totalCustomers": 2,
+      "activeCustomers": 2,
+      "totalOpportunityValue": 57000,
+      "customerOpportunityValue": 0,
+      "taskCompletionRate": 75,
+      "totalUsers": 2,
+      "totalDemands": 1,
+      "aiArtifacts": 2,
+      "totalTokens": 12000,
+      "customerStages": [
+        {
+          "stage": "lead",
+          "count": 1,
+          "value": 12000
+        },
+        {
+          "stage": "proposal",
+          "count": 1,
+          "value": 45000
+        }
+      ],
+      "opportunityStages": [
+        {
+          "stage": "proposal",
+          "count": 1,
+          "value": 45000
+        }
+      ],
+      "totalTasks": 4,
+      "pendingTasks": 1,
+      "completedTasks": 3,
+      "overdueTasks": 0,
+      "totalKnowledgeEntries": 1,
+      "knowledgeByType": [
+        {
+          "entry_type": "case",
+          "count": 1
+        }
+      ],
+      "teamPerformance": [
+        {
+          "display_name": "Fixture User",
+          "department": "Sales",
+          "customers": 2,
+          "opportunities": 1,
+          "opportunity_value": 57000
+        }
+      ],
+      "recentActivity": [
+        {
+          "display_name": "Fixture User",
+          "action": "fixture_update",
+          "module": "baseline",
+          "created_at": "2026-07-13T09:55:00.000Z"
+        }
+      ]
+    }
+  },
+  "tokenUsage": [
+    {
+      "username": "fixture_user",
+      "display_name": "Fixture User",
+      "department": "Sales",
+      "request_count": 4,
+      "total_tokens": 12000,
+      "last_used": "2026-07-13T09:45:00.000Z"
+    }
+  ],
+  "workflow": {
+    "templates": [
+      {
+        "id": 1001,
+        "name": "Fixture approval workflow",
+        "module": "customer",
+        "category": "baseline",
+        "version": 1,
+        "is_active": 1,
+        "created_at": "2026-07-13T09:20:00.000Z",
+        "nodes": [
+          {
+            "id": "start",
+            "type": "start",
+            "label": "Start",
+            "x": 120,
+            "y": 80,
+            "width": 100,
+            "height": 60
+          },
+          {
+            "id": "approval",
+            "type": "approval",
+            "label": "Approve",
+            "x": 280,
+            "y": 80,
+            "width": 120,
+            "height": 60
+          }
+        ],
+        "edges": [
+          {
+            "from": "start",
+            "to": "approval"
+          }
+        ]
+      }
+    ],
+    "instances": [
+      {
+        "id": 1101,
+        "template_name": "Fixture approval workflow",
+        "business_type": "customer",
+        "business_id": 201,
+        "status": "active",
+        "started_by": "Fixture User",
+        "created_at": "2026-07-13T09:25:00.000Z"
+      }
+    ],
+    "instanceDetail": {
+      "instance": {
+        "id": 1101,
+        "template_name": "Fixture approval workflow",
+        "status": "active"
+      },
+      "nodes": [
+        {
+          "id": "start",
+          "type": "start",
+          "label": "Start",
+          "is_current": false
+        },
+        {
+          "id": "approval",
+          "type": "approval",
+          "label": "Approve",
+          "is_current": true
+        }
+      ],
+      "tasks": [
+        {
+          "id": 1201,
+          "title": "Review fixture customer",
+          "node_type": "approval",
+          "status": "pending",
+          "completed_by": null,
+          "comment": ""
+        }
+      ],
+      "logs": [
+        {
+          "created_at": "2026-07-13T09:25:00.000Z",
+          "node_id": "start",
+          "action": "created",
+          "user_id": 2
+        }
+      ],
+      "node_statuses": {
+        "start": {
+          "completed": true
+        },
+        "approval": {
+          "completed": false
+        }
+      }
+    },
+    "tasks": [
+      {
+        "id": 1201,
+        "title": "Review fixture customer",
+        "description": "Synthetic workflow task.",
+        "node_type": "approval",
+        "status": "pending",
+        "template_name": "Fixture approval workflow",
+        "business_type": "customer",
+        "business_id": 201,
+        "assignee_id": 2,
+        "due_at": "2026-07-20T10:00:00.000Z",
+        "created_at": "2026-07-13T09:30:00.000Z"
+      }
+    ],
+    "stats": {
+      "activeInstances": 1,
+      "pendingTasks": 1,
+      "completedTasks": 3
+    }
+  },
+  "csv": {
+    "influencerTemplate": "date,reporter,project,product,kol_handle,platform,followers,profile_link\n2026-07-13,fixture,Fixture Launch,Fixture Device,FixtureCreator,YouTube,125000,https://fixture.invalid/creator\n",
+    "influencerExport": "id,kol_handle,platform,followers\n401,FixtureCreator,YouTube,125000\n402,SampleCreator,Instagram,88000\n"
+  }
+}
