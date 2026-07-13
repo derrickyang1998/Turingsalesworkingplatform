@@ -960,6 +960,20 @@ cp "$BackupAbsolute/database/turingmarket.db" "$SchemaDb"
 chown -R "$GateUser:$GateUser" "$ReleaseRoot"
 validate_gate_identity
 
+NginxGateDir=""
+cleanup_nginx_gate_dir() {
+  if [ -n "$NginxGateDir" ]; then
+    rm -rf -- "$NginxGateDir"
+  fi
+}
+trap cleanup_nginx_gate_dir EXIT
+NginxGateDir="$(mktemp -d /tmp/tm-nginx-gate.XXXXXX)"
+case "$NginxGateDir" in
+  /tmp/tm-nginx-gate.*) ;;
+  *) echo "Unexpected Nginx gate path" >&2; exit 1 ;;
+esac
+chown "$GateUser:$GateUser" "$NginxGateDir"
+
 set +e
 timeout --signal=KILL 30m runuser -u "$GateUser" -- env -i \
   HOME="$TestRoot/home" \
@@ -976,6 +990,7 @@ timeout --signal=KILL 30m runuser -u "$GateUser" -- env -i \
   RELEASE_ROOT="$ReleaseRoot" \
   TEST_ROOT="$TestRoot" \
   SCHEMA_DB="$SchemaDb" \
+  NGINX_GATE_DIR="$NginxGateDir" \
   APP_QUERY="__APP_QUERY__" \
   APP_BUILD="__APP_BUILD__" \
   PPT_QUERY="__PPT_QUERY__" \
@@ -1052,6 +1067,24 @@ NODE_ENV=test TM_DISABLE_DOTENV=1 DB_PATH="$DB_PATH" UPLOAD_DIR="$TEST_ROOT/uplo
 cd ..
 TM_DEPLOYMENT_SMOKE_PORT=43188 node node_modules/playwright-deploy/cli.js test -c server/tests/deployment-browser-smoke.config.js
 
+NGINX_TEST_SOCKET="$NGINX_GATE_DIR/listen.sock"
+python3 - "$CANDIDATE_DIR/nginx/turingmarket.conf" "$TEST_ROOT/turingmarket-gate.conf" "$NGINX_TEST_SOCKET" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+source_path, target_path, socket_path = sys.argv[1:]
+source = Path(source_path).read_text(encoding='utf-8')
+pattern = re.compile(r'(?m)^(\s*listen\s+)80(\s*;\s*(?:#.*)?)$')
+rendered, replacement_count = pattern.subn(
+    lambda match: f'{match.group(1)}unix:{socket_path}{match.group(2)}',
+    source,
+)
+if replacement_count != 1:
+    raise SystemExit(f'expected one privileged Nginx listener, found {replacement_count}')
+Path(target_path).write_text(rendered, encoding='utf-8')
+PY
+
 mkdir -p "$TEST_ROOT/nginx-client" "$TEST_ROOT/nginx-proxy" "$TEST_ROOT/nginx-fastcgi" "$TEST_ROOT/nginx-uwsgi" "$TEST_ROOT/nginx-scgi"
 cat > "$TEST_ROOT/nginx-test.conf" <<TM_NGINX_TEST
 error_log $TEST_ROOT/nginx-error.log notice;
@@ -1065,7 +1098,7 @@ http {
   uwsgi_temp_path $TEST_ROOT/nginx-uwsgi;
   scgi_temp_path $TEST_ROOT/nginx-scgi;
   include /etc/nginx/mime.types;
-  include $CANDIDATE_DIR/nginx/turingmarket.conf;
+  include $TEST_ROOT/turingmarket-gate.conf;
 }
 TM_NGINX_TEST
 nginx -t -p "$TEST_ROOT/nginx-prefix/" -c "$TEST_ROOT/nginx-test.conf"
@@ -1085,6 +1118,8 @@ if pgrep -u "$GateUser" >/dev/null; then
   echo "Gate user processes survived candidate validation" >&2
   exit 1
 fi
+cleanup_nginx_gate_dir
+trap - EXIT
 [ "$GateStatus" = "0" ] || exit "$GateStatus"
 
 cd "$ReleaseRoot"

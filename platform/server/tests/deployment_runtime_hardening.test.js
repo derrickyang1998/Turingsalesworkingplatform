@@ -326,3 +326,33 @@ test('unprivileged gate uses only variables explicitly passed through env -i', (
   assert.doesNotMatch(gate, /\$TestDb\b/, 'parent-shell TestDb is unavailable after env -i');
   assert.match(gate, /DB_PATH="\$DB_PATH"/);
 });
+
+test('unprivileged nginx gate derives a socket listener while root validates the original config', () => {
+  const deploy = read('platform/deploy_v8.ps1');
+  const match = deploy.match(/<<'TM_UNPRIVILEGED_GATE'\r?\n([\s\S]*?)\r?\nTM_UNPRIVILEGED_GATE/);
+  assert.ok(match, 'unprivileged gate heredoc must exist');
+  const gate = match[1];
+  const gateSetup = deploy.slice(deploy.lastIndexOf('validate_gate_identity', match.index), match.index);
+  const envBoundary = deploy.slice(deploy.lastIndexOf('set +e', match.index), match.index);
+  const afterGate = deploy.slice(match.index + match[0].length);
+
+  assert.match(gateSetup, /NginxGateDir="\$\(mktemp -d \/tmp\/tm-nginx-gate\.XXXXXX\)"/);
+  assert.match(gateSetup, /trap cleanup_nginx_gate_dir EXIT/);
+  assert.match(gateSetup, /chown "\$GateUser:\$GateUser" "\$NginxGateDir"/);
+  assert.match(envBoundary, /NGINX_GATE_DIR="\$NginxGateDir"/);
+  assert.doesNotMatch(gate, /mktemp -d \/tmp\/tm-nginx-gate/);
+  assert.match(gate, /turingmarket-gate\.conf/);
+  assert.ok(gate.includes("pattern = re.compile(r'(?m)^(\\s*listen\\s+)80(\\s*;\\s*(?:#.*)?)$')"));
+  assert.match(gate, /unix:\{socket_path\}/, 'the derived config must replace the privileged listener with a Unix socket');
+  assert.match(gate, /replacement_count.*!= 1/, 'the listener rewrite must reject zero or multiple replacements');
+  assert.match(gate, /python3 - "\$CANDIDATE_DIR\/nginx\/turingmarket\.conf" "\$TEST_ROOT\/turingmarket-gate\.conf"/);
+  assert.match(gate, /include \$TEST_ROOT\/turingmarket-gate\.conf;/);
+  assert.doesNotMatch(gate, /include \$CANDIDATE_DIR\/nginx\/turingmarket\.conf;/);
+
+  assert.match(afterGate, /pkill -KILL -u "\$GateUser"[\s\S]*?cleanup_nginx_gate_dir[\s\S]*?trap - EXIT[\s\S]*?\[ "\$GateStatus" = "0" \]/);
+  assert.match(afterGate, /\[ "\$GateStatus" = "0" \][\s\S]*?sha256sum --check --status "\$LockDir\/upload\.sha256"/);
+  assert.match(
+    afterGate,
+    /install -m 0644 "\$LiveDir\/nginx\/turingmarket\.conf" \/etc\/nginx\/sites-available\/turingmarket[\s\S]*?nginx -t\s*\r?\n\s*systemctl reload nginx/
+  );
+});
