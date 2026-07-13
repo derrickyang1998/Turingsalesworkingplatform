@@ -628,7 +628,27 @@ test.describe('Task 9 M4 workflow', () => {
     await expect(page.locator('#execTableContainer')).toContainText('Task 9 browser order');
 
     const statusSelect = page.locator('#execTableContainer select').first();
+    const statusPutPromise = page.waitForRequest((request) => {
+      const url = new URL(request.url());
+      return request.method() === 'PUT' && /^\/api\/collaborations\/\d+$/.test(url.pathname);
+    });
+    const statusReloadPromise = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return response.request().method() === 'GET' && url.pathname === '/api/collaborations' && response.ok();
+    });
     await statusSelect.selectOption('completed');
-    await expect(statusSelect).toHaveValue('completed');
+    await statusPutPromise;
+    await statusReloadPromise;
+    await expect.poll(() => page.locator('#execTableContainer select').first().inputValue()).toBe('completed');
+
+    const fixtureEvents = page.__tmTask9M4Calls || [];
+    const putEvent = fixtureEvents.find((event) => event.type === 'collaboration-status-put' && event.body.status === 'completed');
+    expect(putEvent).toBeTruthy();
+    const reloadEvent = fixtureEvents.find((event) => (
+      event.type === 'collaboration-list' &&
+      event.index > putEvent.index &&
+      event.collaborations.some((row) => row.id === putEvent.id && row.status === 'completed')
+    ));
+    expect(reloadEvent).toBeTruthy();
   });
 });

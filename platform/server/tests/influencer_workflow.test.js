@@ -78,6 +78,56 @@ function once(emitter, event) {
   return new Promise((resolve) => emitter.once(event, resolve));
 }
 
+function tempDbPaths(dbPath) {
+  return [dbPath, `${dbPath}-wal`, `${dbPath}-shm`];
+}
+
+function processExists(pid) {
+  if (!pid) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+async function waitForChildExit(child, timeoutMs) {
+  if (child.exitCode !== null || child.signalCode !== null) return true;
+  let timer = null;
+  const exited = await Promise.race([
+    once(child, 'exit').then(function() { return true; }),
+    new Promise((resolve) => {
+      timer = setTimeout(function() { resolve(false); }, timeoutMs);
+    })
+  ]);
+  if (timer) clearTimeout(timer);
+  return exited || child.exitCode !== null || child.signalCode !== null;
+}
+
+async function terminateTempServer(child, output) {
+  if (child.exitCode === null && child.signalCode === null) child.kill();
+  let exited = await waitForChildExit(child, 5000);
+  if (!exited && child.exitCode === null && child.signalCode === null) {
+    child.kill(process.platform === 'win32' ? undefined : 'SIGKILL');
+    exited = await waitForChildExit(child, 5000);
+  }
+  assert.equal(
+    exited || child.exitCode !== null || child.signalCode !== null,
+    true,
+    'Temp server failed to exit after termination: ' + output.join('\n')
+  );
+}
+
+function cleanupTempDbFiles(dbPath) {
+  for (const filePath of tempDbPaths(dbPath)) {
+    fs.rmSync(filePath, { force: true });
+  }
+  for (const filePath of tempDbPaths(dbPath)) {
+    assert.equal(fs.existsSync(filePath), false, `Expected temp cleanup to remove ${filePath}`);
+  }
+}
+
 async function reservePort() {
   const server = net.createServer();
   await new Promise((resolve, reject) => {
@@ -104,7 +154,8 @@ async function waitForServer(baseUrl, child, output) {
   throw new Error('Timed out waiting for temp server: ' + output.join('\n'));
 }
 
-async function withTempServer(callback) {
+async function withTempServer(callback, options) {
+  options = options || {};
   const dbPath = path.join(os.tmpdir(), `tm-influencer-upload-${Date.now()}-${Math.random().toString(16).slice(2)}.db`);
   const port = await reservePort();
   const baseUrl = `http://127.0.0.1:${port}`;
@@ -136,14 +187,13 @@ async function withTempServer(callback) {
     const loginText = await login.text();
     assert.equal(login.status, 200, loginText);
     const auth = JSON.parse(loginText);
-    await callback({ baseUrl, token: auth.token, dbPath });
+    await callback({ baseUrl, token: auth.token, dbPath, child });
   } finally {
-    if (child.exitCode === null) child.kill();
-    await Promise.race([
-      once(child, 'exit'),
-      new Promise((resolve) => setTimeout(resolve, 5000))
-    ]);
-    try { fs.rmSync(dbPath, { force: true }); } catch (e) {}
+    await terminateTempServer(child, output);
+    if (typeof options.beforeCleanup === 'function') {
+      options.beforeCleanup({ dbPath, child });
+    }
+    cleanupTempDbFiles(dbPath);
   }
 }
 
@@ -401,6 +451,29 @@ test('influencer upload route imports a multipart CSV through the real server', 
   });
 });
 
+test('temp upload server cleanup removes sqlite sidecars and exits child', async () => {
+  let capturedDbPath = null;
+  let capturedPid = null;
+  await withTempServer(
+    async ({ dbPath, child }) => {
+      capturedDbPath = dbPath;
+      capturedPid = child.pid;
+    },
+    {
+      beforeCleanup: ({ dbPath }) => {
+        fs.writeFileSync(`${dbPath}-wal`, 'pending wal cleanup');
+        fs.writeFileSync(`${dbPath}-shm`, 'pending shm cleanup');
+      }
+    }
+  );
+
+  assert.ok(capturedDbPath, 'Temp DB path should be captured');
+  for (const filePath of tempDbPaths(capturedDbPath)) {
+    assert.equal(fs.existsSync(filePath), false, `Expected temp cleanup to remove ${filePath}`);
+  }
+  assert.equal(processExists(capturedPid), false, 'Temp server process should be fully exited after cleanup');
+});
+
 test('influencer list search covers ids, tags, links, contacts, resource fields, parent records, and numeric fields', async () => {
   const db = freshDb();
   const routes = mountRoutes(db);
@@ -546,8 +619,65 @@ test('influencer export uses approved headers and mirrors active list filtering 
   await assertFilteredExportMatchesList({ search: 'CRM-BETA' });
   await assertFilteredExportMatchesList({ search: 'beta-export@example.com' });
   await assertFilteredExportMatchesList({ search: '0.05' });
+  await assertFilteredExportMatchesList({ min_followers: '200000' });
+  await assertFilteredExportMatchesList({ max_followers: '130000' });
   assert.deepEqual(await exportedHandles({ mode: 'selected', ids: [betaId, inactiveId] }), ['@beta_export']);
+  assert.deepEqual(await exportedHandles({ mode: 'selected', ids: [] }), []);
+  assert.deepEqual(await exportedHandles({ mode: 'selected', ids: ['abc', null, 0, -7, '12.4'] }), []);
+  assert.deepEqual(
+    await exportedHandles({ mode: 'selected', ids: [String(betaId), 'not-a-number', inactiveId, 0, -4, `${alphaId}.5`] }),
+    ['@beta_export']
+  );
   assert.ok(alphaId);
+
+  db.close();
+});
+
+test('selected influencer export never falls back to all active rows for empty or invalid ids', async () => {
+  const db = freshDb();
+  const routes = mountRoutes(db);
+  const activeId = insertInfluencer(db, {
+    platform: 'YouTube',
+    kol_handle: '@selected_active_export',
+    profile_link: 'https://example.com/selected-active',
+    followers: 45000,
+    category: 'Selected',
+    region: 'US',
+    contact_email: 'selected-active@example.com',
+    data_source: 'test',
+    project_name: 'Selected Project',
+    product_name: 'Selected Product',
+    tags: 'selected-active',
+    parent_record: 'CRM-SELECTED'
+  });
+  const inactiveId = insertInfluencer(db, {
+    platform: 'TikTok',
+    kol_handle: '@selected_inactive_export',
+    profile_link: 'https://example.com/selected-inactive',
+    followers: 95000,
+    category: 'Selected',
+    region: 'US',
+    contact_email: 'selected-inactive@example.com',
+    data_source: 'test',
+    project_name: 'Selected Inactive Project',
+    product_name: 'Selected Inactive Product',
+    tags: 'selected-inactive',
+    parent_record: 'CRM-SELECTED-INACTIVE',
+    is_active: 0
+  });
+
+  async function selectedHandles(ids) {
+    const result = await invoke(routes, 'POST /api/influencers/export', {
+      body: { mode: 'selected', ids }
+    });
+    assert.equal(result.statusCode, 200);
+    assertApprovedCsvHeaders(result.body);
+    return parseCsvRows(result.body).slice(1).map(function(row) { return row[5]; });
+  }
+
+  assert.deepEqual(await selectedHandles([]), []);
+  assert.deepEqual(await selectedHandles(['abc', null, 0, -2, '12.8']), []);
+  assert.deepEqual(await selectedHandles([String(activeId), 'bad-id', inactiveId, 0, -3]), ['@selected_active_export']);
 
   db.close();
 });

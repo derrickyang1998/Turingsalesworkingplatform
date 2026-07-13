@@ -434,11 +434,12 @@ function collaborationWithInfluencer(fixture, body) {
   };
 }
 
-function apiResponseFor(request, fixture) {
+function apiResponseFor(request, fixture, recorder) {
   const url = new URL(request.url());
   const apiPath = url.pathname.replace(/^\/api/, '') || '/';
   const method = request.method().toUpperCase();
   const ok = (data) => jsonResponse(data);
+  const record = typeof recorder === 'function' ? recorder : function() {};
 
   if (method === 'GET' && apiPath === '/health') return ok({ status: 'ok', timestamp: fixture.frozenTime });
   if (method === 'GET' && apiPath === '/auth/me') {
@@ -481,9 +482,11 @@ function apiResponseFor(request, fixture) {
   if (method === 'POST' && apiPath === '/influencers/export') {
     const body = requestJson(request);
     let rows = activeInfluencers(fixture);
-    if (body.mode === 'selected' && Array.isArray(body.ids)) {
-      const selected = new Set(body.ids.map(Number));
-      rows = rows.filter((row) => selected.has(Number(row.id)));
+    if (body.mode === 'selected') {
+      const selected = new Set((Array.isArray(body.ids) ? body.ids : [])
+        .map(Number)
+        .filter((id) => Number.isInteger(id) && id > 0));
+      rows = selected.size ? rows.filter((row) => selected.has(Number(row.id))) : [];
     } else if (body.mode === 'filtered') {
       rows = queryInfluencersFixture(fixture, body.filters || {});
     } else {
@@ -518,6 +521,14 @@ function apiResponseFor(request, fixture) {
     let collaborations = fixture.collaborations.slice();
     const status = url.searchParams.get('status');
     if (status) collaborations = collaborations.filter((row) => row.status === status);
+    record({
+      type: 'collaboration-list',
+      collaborations: collaborations.map((row) => ({
+        id: Number(row.id),
+        status: row.status,
+        notes: row.notes || ''
+      }))
+    });
     return ok({ collaborations });
   }
   if (method === 'GET' && apiPath === '/collaborations/stats') return ok(collaborationStatsFromFixture(fixture));
@@ -536,6 +547,12 @@ function apiResponseFor(request, fixture) {
       if (body.cost_quoted !== undefined) collab.cost_quoted = body.cost_quoted;
       collab.updated_at = FROZEN_ISO;
     }
+    record({
+      type: 'collaboration-status-put',
+      id,
+      body,
+      status: collab && collab.status
+    });
     return ok({ success: true, id });
   }
 
@@ -594,6 +611,12 @@ async function installFixtureApi(page, { fixture }) {
   const port = Number(process.env.TM_BROWSER_FIXTURE_PORT || 43187);
   const expectedOrigin = `http://127.0.0.1:${port}`;
   const fixtureState = cloneFixtureApiState(fixture);
+  page.__tmTask9M4Calls = [];
+  let task9M4CallIndex = 0;
+  const recordTask9M4Call = (event) => {
+    task9M4CallIndex += 1;
+    page.__tmTask9M4Calls.push(Object.assign({ index: task9M4CallIndex }, event));
+  };
   await page.route('**/*', async (route) => {
     const request = route.request();
     const classification = classifyFixtureRequest(request.url(), expectedOrigin);
@@ -607,7 +630,7 @@ async function installFixtureApi(page, { fixture }) {
       await route.continue();
       return;
     }
-    const response = apiResponseFor(route.request(), fixtureState);
+    const response = apiResponseFor(route.request(), fixtureState, recordTask9M4Call);
     if (!response) {
       const url = new URL(request.url());
       page.__baselineUnhandledApiCalls.push(`${request.method()} ${url.pathname}${url.search}`);

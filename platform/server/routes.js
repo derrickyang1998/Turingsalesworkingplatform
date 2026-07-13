@@ -198,9 +198,16 @@ app.post('/api/influencers/export', authMiddleware, (req, res) => {
     const { mode, ids, filters } = req.body;
     let sql = 'SELECT * FROM influencers WHERE is_active = 1';
     const params = [];
-    if (mode === 'selected' && ids && ids.length) {
-      sql += ' AND id IN (' + ids.map(function() { return '?' }).join(',') + ')';
-      params.push.apply(params, ids);
+    if (mode === 'selected') {
+      const selectedIds = Array.isArray(ids)
+        ? ids.map(Number).filter(function(id) { return Number.isInteger(id) && id > 0; })
+        : [];
+      if (selectedIds.length) {
+        sql += ' AND id IN (' + selectedIds.map(function() { return '?' }).join(',') + ')';
+        params.push.apply(params, selectedIds);
+      } else {
+        sql += ' AND 1 = 0';
+      }
     } else if (mode === 'filtered' && filters) {
       if (filters.platform) { sql += ' AND platform = ?'; params.push(filters.platform); }
       if (filters.category) { sql += ' AND category = ?'; params.push(filters.category); }
@@ -234,6 +241,8 @@ app.post('/api/influencers/export', authMiddleware, (req, res) => {
         )`;
         for (let i = 0; i < 21; i++) params.push('%' + filters.search + '%');
       }
+      if (filters.min_followers) { sql += ' AND followers >= ?'; params.push(parseInt(filters.min_followers)); }
+      if (filters.max_followers) { sql += ' AND followers <= ?'; params.push(parseInt(filters.max_followers)); }
     }
     sql += ' ORDER BY followers DESC';
     const influencers = db.prepare(sql).all(...params);
