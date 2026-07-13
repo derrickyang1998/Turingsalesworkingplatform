@@ -32,9 +32,27 @@ if ((Split-Path -Leaf $REPO_DIR) -notmatch "github-sync$") {
 if (-not (Test-Path $SSH_KEY)) {
     throw "SSH key not found: $SSH_KEY"
 }
-if (-not (Select-String -LiteralPath "$LOCAL_DIR\client\shared\build_info.js" -Pattern $EXPECTED_APP_BUILD -Quiet)) {
-    throw "build_info.js does not contain expected app build $EXPECTED_APP_BUILD"
+$buildInfoPath = "$LOCAL_DIR\client\shared\build_info.js"
+$buildInfoContractCheck = @'
+const fs = require('node:fs');
+const vm = require('node:vm');
+const sourcePath = process.argv[1];
+const expected = { app: process.argv[2], ppt: process.argv[3] };
+const window = {};
+window.window = window;
+vm.runInNewContext(fs.readFileSync(sourcePath, 'utf8'), { window }, { filename: sourcePath });
+if (JSON.stringify(window.TMBuild) !== JSON.stringify(expected)) {
+  throw new Error(`TMBuild contract mismatch: ${JSON.stringify(window.TMBuild)}`);
 }
+if (window.tmAppBuild !== expected.app) {
+  throw new Error(`tmAppBuild compatibility marker mismatch: ${window.tmAppBuild}`);
+}
+'@
+node -e $buildInfoContractCheck $buildInfoPath $EXPECTED_APP_BUILD $EXPECTED_PPT_BUILD
+if ($LASTEXITCODE -ne 0) {
+    throw "Local build_info.js contract verification failed"
+}
+$EXPECTED_BUILD_INFO_SHA256 = (Get-FileHash -Algorithm SHA256 -LiteralPath "$LOCAL_DIR\client\shared\build_info.js").Hash.ToLowerInvariant()
 if (-not (Select-String -LiteralPath "$LOCAL_DIR\index.html" -Pattern $EXPECTED_APP_QUERY -Quiet)) {
     throw "index.html does not reference expected app.js cache key $EXPECTED_APP_QUERY"
 }
@@ -61,6 +79,7 @@ $FILES = @(
     "server\routes_customers.js",
     "server\routes_brands.js",
     "server\routes.js",
+    "server\scripts\generate_ui_baseline_manifest.js",
     "server\scripts\rotate_user_credentials.js",
     "server\services\latest_ui_compat_service.js",
     "server\services\credential_rotation_service.js",
@@ -79,6 +98,7 @@ $FILES = @(
     "server\tests\credential_rotation.test.js",
     "server\tests\influencer_workflow.test.js",
     "server\tests\file_ingest_service.test.js",
+    "server\tests\frontend_architecture_inventory.test.js",
     "server\tests\frontend_public_assets.test.js",
     "server\tests\public_static_security.test.js",
     "server\generate_ppt.py"
@@ -139,6 +159,7 @@ node --check app.js
 node --check ppt.js
 node --check client/shared/build_info.js
 node --check server/server.js
+node --check server/scripts/generate_ui_baseline_manifest.js
 node --check server/scripts/rotate_user_credentials.js
 node --check server/services/latest_ui_compat_service.js
 node --check server/services/credential_rotation_service.js
@@ -146,6 +167,23 @@ node --check server/services/file_ingest_service.js
 node --check server/services/influencer_workflow_service.js
 node --check server/services/public_assets_service.js
 node --check server/tests/credential_rotation.test.js
+node --check server/tests/frontend_architecture_inventory.test.js
+node <<'NODE'
+const fs = require('node:fs');
+const vm = require('node:vm');
+const sourcePath = 'client/shared/build_info.js';
+const expected = { app: "$EXPECTED_APP_BUILD", ppt: "$EXPECTED_PPT_BUILD" };
+const window = {};
+window.window = window;
+vm.runInNewContext(fs.readFileSync(sourcePath, 'utf8'), { window }, { filename: sourcePath });
+if (JSON.stringify(window.TMBuild) !== JSON.stringify(expected)) {
+  throw new Error('TMBuild contract mismatch: ' + JSON.stringify(window.TMBuild));
+}
+if (window.tmAppBuild !== expected.app) {
+  throw new Error('tmAppBuild compatibility marker mismatch: ' + window.tmAppBuild);
+}
+NODE
+echo "$EXPECTED_BUILD_INFO_SHA256  client/shared/build_info.js" | sha256sum --check --status
 install -m 0644 nginx/turingmarket.conf /etc/nginx/sites-available/turingmarket.candidate
 rm -f /etc/nginx/sites-enabled/turingmarket
 ln -s /etc/nginx/sites-available/turingmarket.candidate /etc/nginx/sites-enabled/turingmarket

@@ -379,10 +379,14 @@ function matchSingle(source, regex, label) {
   return match[1];
 }
 
-function collectBuildMarkers(indexHtml, appJs, pptJs) {
+function collectBuildMarkers(indexHtml, buildInfoJs, pptJs) {
   return {
     buildMarkers: {
-      app: matchSingle(appJs, /window\.tmAppBuild\s*=\s*['"]([^'"]+)['"]/, 'window.tmAppBuild'),
+      app: matchSingle(
+        buildInfoJs,
+        /window\.TMBuild\s*=\s*Object\.freeze\(\{\s*app:\s*['"]([^'"]+)['"]/,
+        'window.TMBuild.app'
+      ),
       ppt: matchSingle(pptJs, /window\.tmPPTBuild\s*=\s*['"]([^'"]+)['"]/, 'window.tmPPTBuild')
     },
     scriptCacheKeys: {
@@ -477,6 +481,7 @@ function generateManifest(options = {}) {
   );
   const indexPath = path.join(repoRoot, 'platform', 'index.html');
   const appPath = path.join(repoRoot, 'platform', 'app.js');
+  const buildInfoPath = path.join(repoRoot, 'platform', 'client', 'shared', 'build_info.js');
   const pptPath = path.join(repoRoot, 'platform', 'ppt.js');
   const routeContractPaths = ROUTE_CONTRACT_SOURCES.map((segments) => path.join(repoRoot, ...segments));
   const duplicateFixturePath = path.resolve(
@@ -488,8 +493,9 @@ function generateManifest(options = {}) {
 
   const indexHtml = fs.readFileSync(indexPath, 'utf8');
   const appJs = fs.readFileSync(appPath, 'utf8');
+  const buildInfoJs = fs.readFileSync(buildInfoPath, 'utf8');
   const pptJs = fs.readFileSync(pptPath, 'utf8');
-  const markerData = collectBuildMarkers(indexHtml, appJs, pptJs);
+  const markerData = collectBuildMarkers(indexHtml, buildInfoJs, pptJs);
   const scriptScan = scanClassicScripts([
     { path: appPath, loadOrder: 1 },
     { path: pptPath, loadOrder: 2 }

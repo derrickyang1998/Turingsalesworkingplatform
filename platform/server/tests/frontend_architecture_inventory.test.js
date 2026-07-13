@@ -250,6 +250,8 @@ test('generateManifest includes hashes, build/cache markers, routes, fixture met
     baselineVersion: 'v0.2.9',
     duplicateFixturePath: fixturePath
   });
+  const appJs = fs.readFileSync(path.join(platformRoot, 'app.js'), 'utf8');
+  const buildInfoJs = fs.readFileSync(path.join(platformRoot, 'client', 'shared', 'build_info.js'), 'utf8');
 
   assert.equal(manifest.schemaVersion, 1);
   assert.equal(manifest.baseline.version, 'v0.2.9');
@@ -261,8 +263,10 @@ test('generateManifest includes hashes, build/cache markers, routes, fixture met
     assert.match(file.sha256, /^[a-f0-9]{64}$/);
   }
 
+  assert.match(appJs, /window\.tmAppBuild\s*=\s*["']20260630-auth-upload-fix["']/);
+  assert.match(buildInfoJs, /app:\s*["']20260713-v030-baseline-consolidation["']/);
   assert.deepEqual(manifest.buildMarkers, {
-    app: '20260630-auth-upload-fix',
+    app: '20260713-v030-baseline-consolidation',
     ppt: '20260702-v916-kb-bridge-client-cn'
   });
   assert.deepEqual(manifest.scriptCacheKeys, {

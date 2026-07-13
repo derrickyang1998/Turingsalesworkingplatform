@@ -111,3 +111,31 @@ test('guarded deploy uploads, checks, verifies, and backs up public build metada
   assert.match(deploy, /grep -q "\$EXPECTED_PPT_QUERY" index\.html/);
   assert.match(deploy, /grep -q "\$EXPECTED_PPT_BUILD" ppt\.js/);
 });
+
+test('guarded deploy verifies the full build-info contract and exact remote SHA-256', () => {
+  const deploy = read(deployScriptPath);
+  const fullObjectChecks = deploy.match(
+    /JSON\.stringify\(window\.TMBuild\)\s*!==\s*JSON\.stringify\(expected\)/g
+  ) || [];
+  const compatibilityChecks = deploy.match(/window\.tmAppBuild\s*!==\s*expected\.app/g) || [];
+
+  assert.equal(fullObjectChecks.length, 2, 'TMBuild must be verified locally and remotely');
+  assert.equal(compatibilityChecks.length, 2, 'tmAppBuild must be verified locally and remotely');
+  assert.match(
+    deploy,
+    /\$EXPECTED_BUILD_INFO_SHA256\s*=\s*\(Get-FileHash\s+-Algorithm SHA256\s+-LiteralPath\s+"\$LOCAL_DIR\\client\\shared\\build_info\.js"\)\.Hash\.ToLowerInvariant\(\)/
+  );
+  assert.match(
+    deploy,
+    /echo "\$EXPECTED_BUILD_INFO_SHA256  client\/shared\/build_info\.js"\s*\|\s*sha256sum --check --status/
+  );
+});
+
+test('guarded deploy uploads and syntax-checks the baseline generator and architecture inventory test', () => {
+  const deploy = read(deployScriptPath);
+
+  assert.match(deploy, /"server\\scripts\\generate_ui_baseline_manifest\.js"/);
+  assert.match(deploy, /node --check server\/scripts\/generate_ui_baseline_manifest\.js/);
+  assert.match(deploy, /"server\\tests\\frontend_architecture_inventory\.test\.js"/);
+  assert.match(deploy, /node --check server\/tests\/frontend_architecture_inventory\.test\.js/);
+});
