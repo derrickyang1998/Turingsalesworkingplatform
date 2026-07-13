@@ -61,7 +61,7 @@ Remote Node verification includes / 远端 Node 验证包含：
 
 ```bash
 cd server
-NODE_ENV=test TM_DISABLE_DOTENV=1 DB_PATH=/root/turingmarket/releases/<release>/tmp/deploy-v030-gate-<timestamp>/test.db npm test -- --test-concurrency=1
+NODE_ENV=test TM_DISABLE_DOTENV=1 DB_PATH=/root/turingmarket/releases/<release>/tmp/deploy-v030-gate-<timestamp>/test.db node --test --test-concurrency=1 tests/*.test.js
 ```
 
 It also installs Chromium and runs the Linux-compatible deployment browser smoke before process cutover. After candidate approval, PM2 stops, `.env`, `server/db`, `uploads`, and `tmp` are synchronized, and Linux `renameat2(RENAME_EXCHANGE)` atomically swaps the candidate and active directories before Nginx/PM2 restart. / 同时安装 Chromium 并在切换前运行 Linux 兼容冒烟；候选通过后停止 PM2，同步生产可变状态，通过 Linux 原子目录交换切换版本，再重载 Nginx 与重启 PM2。

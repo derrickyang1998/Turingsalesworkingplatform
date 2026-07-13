@@ -138,7 +138,7 @@ test('Task 12 docs lock public assets, preview, build markers, backup, rollback,
   }
   assert.match(
     source,
-    /cd server\s*\r?\n\s*NODE_ENV=test TM_DISABLE_DOTENV=1 DB_PATH=\S+ npm test -- --test-concurrency=1/i,
+    /cd server\s*\r?\n\s*NODE_ENV=test TM_DISABLE_DOTENV=1 DB_PATH=\S+ node --test --test-concurrency=1 tests\/\*\.test\.js/i,
     'isolated remote full Node test must be documented'
   );
   assert.doesNotMatch(source, /(?:tvly|sk)-[A-Za-z0-9_-]{12,}|BEGIN (?:RSA |OPENSSH )?PRIVATE KEY/);
@@ -558,7 +558,8 @@ test('Task 12 remote deploy gate runs full tests and exact route/static smoke be
   assert.match(deploy, /npx playwright install chromium/);
   assert.match(deploy, /TM_DISABLE_DOTENV=1/);
   assert.match(deploy, /DB_PATH=/);
-  assert.match(deploy, /cd server[\s\S]*?npm test -- --test-concurrency=1/);
+  assert.match(deploy, /cd server[\s\S]*?node --test --test-concurrency=1 tests\/\*\.test\.js/);
+  assert.doesNotMatch(deploy, /npm test -- --test-concurrency=1/);
   assert.match(deploy, /npx playwright test -c server\/tests\/deployment-browser-smoke\.config\.js/);
   assert.doesNotMatch(deploy, /npx playwright test -c server\/tests\/browser-baseline\.config\.js/);
   assert.match(deploy, /pm2 start ecosystem\.config\.js --only turingmarket|pm2 restart ecosystem\.config\.js --only turingmarket/);

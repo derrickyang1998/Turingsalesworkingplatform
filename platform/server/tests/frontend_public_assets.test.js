@@ -173,6 +173,7 @@ test('guarded deploy uploads and syntax-checks the baseline generator and archit
   assert.match(deploy, /"server\\tests\\customer_workspace_ui\.test\.js"/);
   assert.match(deploy, /"server\\tests\\frontend_architecture_inventory\.test\.js"/);
   assert.match(deploy, /cd server\s*\r?\n+npm ci --ignore-scripts\s*\r?\n+npm rebuild better-sqlite3/);
-  assert.match(deploy, /npm test -- --test-concurrency=1/);
+  assert.match(deploy, /node --test --test-concurrency=1 tests\/\*\.test\.js/);
+  assert.doesNotMatch(deploy, /npm test -- --test-concurrency=1/);
   assert.match(deploy, /npx playwright test -c server\/tests\/deployment-browser-smoke\.config\.js/);
 });

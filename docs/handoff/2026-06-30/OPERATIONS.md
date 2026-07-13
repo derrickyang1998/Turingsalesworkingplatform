@@ -57,7 +57,7 @@ After backup, files are uploaded only to an isolated `/root/turingmarket/release
 
 ```bash
 cd server
-NODE_ENV=test TM_DISABLE_DOTENV=1 DB_PATH=/root/turingmarket/releases/<release>/tmp/deploy-v030-gate-<timestamp>/test.db npm test -- --test-concurrency=1
+NODE_ENV=test TM_DISABLE_DOTENV=1 DB_PATH=/root/turingmarket/releases/<release>/tmp/deploy-v030-gate-<timestamp>/test.db node --test --test-concurrency=1 tests/*.test.js
 ```
 
 The complete deterministic 102-test browser baseline runs locally on locked Windows browser/font revisions; the Linux server runs the deployment smoke. After all candidate gates pass, PM2 is stopped, live mutable state is copied into the candidate, and `renameat2(RENAME_EXCHANGE)` atomically swaps the candidate with `/root/turingmarket/platform`. Nginx and PM2 are restarted only after the exchange. / 完整 102 项确定性浏览器基线在锁定的 Windows 环境执行，Linux 服务器执行部署冒烟；候选门禁全部通过后停止 PM2，同步生产可变状态，并用原子目录交换切换活动版本，随后才重载 Nginx 和重启 PM2。

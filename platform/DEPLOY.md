@@ -67,7 +67,7 @@ The remote full Node gate is equivalent to / 远端完整 Node 门禁等价于�
 
 ```bash
 cd server
-NODE_ENV=test TM_DISABLE_DOTENV=1 DB_PATH=/root/turingmarket/releases/<release>/tmp/deploy-v030-gate-<timestamp>/test.db npm test -- --test-concurrency=1
+NODE_ENV=test TM_DISABLE_DOTENV=1 DB_PATH=/root/turingmarket/releases/<release>/tmp/deploy-v030-gate-<timestamp>/test.db node --test --test-concurrency=1 tests/*.test.js
 ```
 
 ## Rollback / 回滚
