@@ -107,6 +107,94 @@ async function expectActiveHeadingFocused(page, pageId) {
   });
 }
 
+async function exerciseBrandWorkspace(page) {
+  await page.evaluate(() => {
+    window.__tmTask8Opened = [];
+    window.open = (url, target) => {
+      window.__tmTask8Opened.push({ url, target });
+      return null;
+    };
+  });
+
+  await page.locator('#brandSearch').fill('Fixture Labs');
+  await page.evaluate(() => window.filterBrands());
+  await expect(page.locator('#brandResults .brand-result-item')).toHaveCount(1);
+  await expect.poll(() => page.evaluate(() => {
+    const history = JSON.parse(localStorage.getItem('tm_brand_search_history') || '[]');
+    return history[0] || null;
+  })).toBe('fixture labs');
+
+  await page.locator('#searchHistory button').first().click();
+  await expect(page.locator('#brandSearch')).toHaveValue('fixture labs');
+
+  const firstTreeParent = page.locator('.tree-parent').first();
+  await expect(firstTreeParent).toBeVisible();
+  await firstTreeParent.click();
+  const firstTreeTag = page.locator('.tree-child').first();
+  await expect(firstTreeTag).toBeVisible();
+  const selectedTag = await firstTreeTag.getAttribute('data-tag');
+  await firstTreeTag.click();
+  await expect(firstTreeTag).toHaveClass(/active/);
+  await expect.poll(() => page.evaluate(() => window.activeTag || null)).toBe(selectedTag);
+
+  await page.evaluate(() => {
+    window.activeTag = null;
+    document.querySelectorAll('.tree-child').forEach((node) => node.classList.remove('active'));
+    document.getElementById('brandSearch').value = 'Fixture Labs';
+    window.filterBrands();
+  });
+  await page.locator('#brandResults .brand-result-item').first().click();
+  await expect(page.locator('#brandDetailPanel')).toContainText('Fixture Labs');
+
+  await page.locator('#brandSocialSources button').first().click();
+  await expect.poll(() => page.evaluate(() => window.__tmTask8Opened.length)).toBeGreaterThan(0);
+
+  await page.locator('#brandDetailPanel button[onclick*="showRelatedBrands"]').click();
+  await expect(page.locator('#brandRelOverlay')).toBeVisible();
+  await page.locator('#brandRelOverlay .brel-tag').first().click();
+  await expect(page.locator('#brandRelOverlay')).toHaveCount(0);
+  await expect(page.locator('#brandSearch')).not.toHaveValue('');
+
+  await page.locator('#brandSearch').fill('Fixture Labs');
+  await page.evaluate(() => window.filterBrands());
+  await page.locator('#brandResults .brand-result-item').first().click();
+  await page.locator('#brandDetailPanel button[onclick*="copyBrandBriefToDemand"]').click();
+  await expect(page.locator('#page-m3')).toBeVisible();
+  await expect(page.locator('#d_brand')).toHaveValue('Fixture Labs');
+
+  await page.evaluate(() => window.switchPage('m1'));
+  const downloadPromise = page.waitForEvent('download');
+  await page.locator('.brand-workspace-actions button[onclick="exportBrandCSV()"]').click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toBe('brands.csv');
+
+  await page.evaluate(() => {
+    if (typeof closeBrandRelModal === 'function') closeBrandRelModal();
+    localStorage.removeItem('tm_brand_search_history');
+    window.brandSearchHistory = [];
+    window.activeTag = null;
+    window.selectedBrandName = '';
+    const search = document.getElementById('brandSearch');
+    if (search) search.value = '';
+    if (typeof renderIndustryTree === 'function') renderIndustryTree();
+    if (typeof filterBrands === 'function') filterBrands();
+    if (typeof renderSearchHistory === 'function') renderSearchHistory();
+    if (typeof selectBrand === 'function') selectBrand(0);
+    const toast = document.getElementById('toastContainer');
+    if (toast) toast.remove();
+    if (document.activeElement && typeof document.activeElement.blur === 'function') document.activeElement.blur();
+    document.querySelectorAll('.brand-tree-scroll, .brand-results-list, .brand-detail-panel').forEach((element) => {
+      element.scrollTop = 0;
+      element.scrollLeft = 0;
+    });
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+    window.scrollTo(0, 0);
+  });
+  await expect(page.locator('#page-m1')).toBeVisible();
+  await expect(page.locator('#searchHistory button')).toHaveCount(0);
+}
+
 test.describe('deterministic pre-edit browser baseline', () => {
   test.afterAll(() => {
     writeBaselineRunMetadata(runContext);
@@ -172,6 +260,17 @@ test.describe('deterministic pre-edit browser baseline', () => {
       });
     });
   }
+
+  test('admin brand workspace supports Task 8 interactions outside locked screenshot capture', async ({ page }) => {
+    await navigateBaselineJourney(page, {
+      role: 'admin',
+      journey: 'admin-brand',
+      pageId: 'm1',
+      substate: null
+    }, { fixture });
+    await waitForBaselineReady(page);
+    await exerciseBrandWorkspace(page);
+  });
 
   test('restores direct URL page and substate after confirmed session restore', async ({ page }) => {
     await installBaselineAuthState(page, fixture.auth.admin);

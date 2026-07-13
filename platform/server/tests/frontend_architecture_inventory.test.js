@@ -15,41 +15,29 @@ const reviewedDuplicateNames = Object.freeze([
   'downloadInfTemplate',
   'esc',
   'exportAll',
-  'exportBrandCSV',
   'exportFiltered',
   'exportInf',
   'exportSelected',
-  'filterBrands',
-  'filterByTag',
-  'filterByTreeTag',
   'generateHTMLPPT',
   'getSelectedInfIds',
   'handleUpload',
   'importInfluencers',
-  'initM1',
   'initM4',
   'loadCollaborations',
   'loadInfluencersFromAPI',
-  'loadSocialForBrand',
   'matchInfluencers',
   'pushToFeishu',
-  'renderBrands',
   'renderCollabTable',
-  'renderIndustryTree',
   'renderInfTable',
-  'renderSearchHistory',
   'showInfPreview',
   'startCollab',
-  'switchPlatformTab',
   'toggleAll',
-  'toggleBrandSocial',
   'updateCollabStatus'
 ]);
 
 const expectedActiveDefinitions = Object.freeze({
-  initM1: { source: 'platform/app.js', line: 2247, loadOrder: 1, occurrenceIndex: 2 },
-  initM4: { source: 'platform/app.js', line: 3077, loadOrder: 1, occurrenceIndex: 3 },
-  downloadInfTemplate: { source: 'platform/app.js', line: 3238, loadOrder: 1, occurrenceIndex: 3 },
+  initM4: { source: 'platform/app.js', line: 2967, loadOrder: 1, occurrenceIndex: 3 },
+  downloadInfTemplate: { source: 'platform/app.js', line: 3128, loadOrder: 1, occurrenceIndex: 3 },
   generateHTMLPPT: { source: 'platform/ppt.js', line: 40, loadOrder: 2, occurrenceIndex: 2 },
   esc: { source: 'platform/ppt.js', line: 864, loadOrder: 2, occurrenceIndex: 2 }
 });
@@ -104,6 +92,62 @@ const task7ConsolidatedDefinitionContracts = Object.freeze({
     "var el = document.getElementById('ad_inviteResult');",
     "if (el) el.textContent = 'Code: ' + d.code;",
     "toast('Invite: '+d.code);"
+  ]
+});
+
+const task8ConsolidatedDefinitionContracts = Object.freeze({
+  initM1: [
+    'buildBrandRelationCache();',
+    'currentBrandResults = BRANDS.slice();',
+    'renderBrandWorkspaceStats(currentBrandResults);',
+    'renderBrandDetail(getSelectedBrand());'
+  ],
+  renderIndustryTree: [
+    'var tagTotal = 0;',
+    'brandTags(b).some(function(t)',
+    "tagCount.textContent = tagTotal + ' tags';"
+  ],
+  filterBrands: [
+    "document.getElementById('brandSearch')?.value",
+    "[b.name, b.name_cn, b.company, b.market, b.description, brandTags(b).join(' ')]",
+    'archiveBrandSearch(q);',
+    'currentBrandResults = f;',
+    'renderBrandWorkspaceStats(f);',
+    "document.getElementById('brandActiveFilter')"
+  ],
+  filterByTag: [
+    'function filterByTag(t) { filterByTreeTag(t); }'
+  ],
+  filterByTreeTag: [
+    'activeTag = activeTag === tag ? null : tag;',
+    "document.querySelectorAll('.tree-child')",
+    'filterBrands();'
+  ],
+  renderSearchHistory: [
+    'brandSearchHistory.slice(0, 6)',
+    'inlineJsArg(s)',
+    ';filterBrands()'
+  ],
+  renderBrands: [
+    'currentBrandResults = brands.slice();',
+    "document.getElementById('brandResults') || document.getElementById('brandList')",
+    'brand-result-item',
+    'selectBrand('
+  ],
+  toggleBrandSocial: [
+    'if (selectedBrandName) renderBrandDetail(getSelectedBrand());'
+  ],
+  switchPlatformTab: [
+    "openBrandSocialSearch(selectedBrandName || '', el.getAttribute('data-plat') || 'youtube');"
+  ],
+  loadSocialForBrand: [
+    "openBrandSocialSearch(bn, pf || 'youtube');"
+  ],
+  exportBrandCSV: [
+    'currentBrandResults && currentBrandResults.length ? currentBrandResults : BRANDS',
+    'Name,Chinese Name,Industry Tags,Market,Revenue,User Base,Search Volume,YouTube,Instagram,TikTok,Top Platform,Website,Contacts',
+    'csvCell(b.name)',
+    "dlFile('brands.csv', '\\ufeff' + csv, 'text/csv');"
   ]
 });
 
@@ -287,11 +331,32 @@ test('Task 7 consolidated functions keep active behavior and one app.js definiti
   }
 });
 
-test('scanClassicScripts records the reviewed 32-name duplicate inventory and explicit active definitions', () => {
+test('Task 8 brand workspace functions keep active behavior and one app.js definition', () => {
+  const inventory = scanCurrentScripts();
+
+  for (const [name, expectedSnippets] of Object.entries(task8ConsolidatedDefinitionContracts)) {
+    const actual = inventory.activeDefinitions[name];
+    assert.ok(actual, `${name} must have an active definition`);
+    assert.equal(actual.source, 'platform/app.js', `${name} active source`);
+    assert.equal(actual.loadOrder, 1, `${name} active load order`);
+
+    const activeBody = readTopLevelFunctionBody(actual);
+    for (const snippet of expectedSnippets) {
+      assert.ok(activeBody.includes(snippet), `${name} active body must preserve: ${snippet}`);
+    }
+
+    const appJsDefinitions = inventory.declarations.filter((definition) => (
+      definition.name === name && definition.source === 'platform/app.js'
+    ));
+    assert.equal(appJsDefinitions.length, 1, `${name} must have exactly one app.js definition`);
+  }
+});
+
+test('scanClassicScripts records the reviewed 21-name duplicate inventory and explicit active definitions', () => {
   const inventory = scanCurrentScripts();
 
   assert.deepEqual(inventory.duplicates.map((entry) => entry.name), reviewedDuplicateNames);
-  assert.equal(inventory.duplicates.length, 32);
+  assert.equal(inventory.duplicates.length, 21);
 
   for (const [name, expected] of Object.entries(expectedActiveDefinitions)) {
     const actual = inventory.activeDefinitions[name];
@@ -315,7 +380,7 @@ test('frontend-active-definitions fixture mirrors the current duplicate inventor
   }
 
   assert.equal(fixture.metadata.schemaVersion, 1);
-  assert.equal(fixture.metadata.reviewedDuplicateCount, 32);
+  assert.equal(fixture.metadata.reviewedDuplicateCount, 21);
   assert.equal(fixture.metadata.activeDefinitionPolicy, 'last definition by app.js then ppt.js load order');
   assert.deepEqual(fixture.metadata.loadOrder, ['platform/app.js', 'platform/ppt.js']);
   assert.deepEqual(fixture.duplicates, reviewedDuplicateNames);
@@ -377,7 +442,7 @@ test('generateManifest includes hashes, build/cache markers, routes, fixture met
     assert.ok(slot.sha256 === null || /^[a-f0-9]{64}$/.test(slot.sha256));
   }
 
-  assert.equal(manifest.duplicateInventory.reviewedDuplicateCount, 32);
+  assert.equal(manifest.duplicateInventory.reviewedDuplicateCount, 21);
   assert.deepEqual(manifest.duplicateInventory.duplicates, reviewedDuplicateNames);
 
   const serialized = JSON.stringify(manifest);
