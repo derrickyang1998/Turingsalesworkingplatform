@@ -198,7 +198,10 @@ test('public files and admin APIs do not expose the legacy default password', ()
   const optionalFiles = [
     path.join(repoRoot, 'README.md'),
     path.join(repoRoot, 'TURINGMARKET_KEYS.md'),
-    path.join(repoRoot, 'CLAUDE_CODE_MIGRATION.md')
+    path.join(repoRoot, 'CLAUDE_CODE_MIGRATION.md'),
+    path.join(repoRoot, 'platform', 'install.sh'),
+    path.join(repoRoot, 'platform', 'server', 'server_full.js'),
+    path.join(repoRoot, 'platform', 'server', 'test_v8.js')
   ];
   const requiredFiles = [
     path.join(repoRoot, '.env.example'),
@@ -211,11 +214,8 @@ test('public files and admin APIs do not expose the legacy default password', ()
     path.join(repoRoot, 'platform', 'app.js'),
     path.join(repoRoot, 'platform', 'DEPLOY.md'),
     path.join(repoRoot, 'platform', 'deploy_v8.ps1'),
-    path.join(repoRoot, 'platform', 'install.sh'),
     path.join(repoRoot, 'platform', 'server', 'server.js'),
-    path.join(repoRoot, 'platform', 'server', 'db.js'),
-    path.join(repoRoot, 'platform', 'server', 'server_full.js'),
-    path.join(repoRoot, 'platform', 'server', 'test_v8.js')
+    path.join(repoRoot, 'platform', 'server', 'db.js')
   ];
   requiredFiles.forEach(function(file) {
     assert.equal(fs.existsSync(file), true, file + ' should exist for legacy password scanning');

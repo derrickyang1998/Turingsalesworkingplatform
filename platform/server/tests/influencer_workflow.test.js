@@ -8,16 +8,14 @@ const { spawn } = require('node:child_process');
 
 const repoRoot = path.resolve(__dirname, '..', '..', '..');
 const influencerWorkflow = require('../services/influencer_workflow_service');
-const task9HeaderContractPath = path.join(repoRoot, '.superpowers', 'sdd', 'task-9-upload-header-contract.md');
+const task9HeaderContractPath = path.join(__dirname, 'fixtures', 'task-9-upload-header-contract.json');
 
 function parseTask9HeaderContract() {
-  const contract = fs.readFileSync(task9HeaderContractPath, 'utf8');
-  return contract
-    .split(/\r?\n/)
-    .map(function(line) { return /^(\d+)\.\s+(.+)$/.exec(line); })
-    .filter(Boolean)
-    .sort(function(a, b) { return Number(a[1]) - Number(b[1]); })
-    .map(function(match) { return match[2]; });
+  const contract = JSON.parse(fs.readFileSync(task9HeaderContractPath, 'utf8'));
+  assert.equal(contract.version, 'task-9-upload-header-contract-1');
+  assert.equal(contract.range, 'A1:T1');
+  assert.equal(contract.headers.length, 20);
+  return contract.headers;
 }
 
 function stripBom(value) {

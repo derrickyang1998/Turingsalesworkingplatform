@@ -137,16 +137,17 @@ test('guarded deploy uploads, checks, verifies, and backs up public build metada
   assert.match(deploy, /\$EXPECTED_APP_QUERY\s*=\s*"20260713v030baselineconsolidation"/);
   assert.match(deploy, /"client\\shared\\build_info\.js"/);
   assert.match(deploy, /"client\\core\\navigation\.js"/);
-  assert.match(deploy, /mkdir -p server\/scripts server\/services server\/tests server\/tests\/fixtures client\/shared client\/core/);
-  assert.match(deploy, /mkdir -p \$backupDir\/nginx \$backupDir\/server\/scripts \$backupDir\/server\/services \$backupDir\/server\/tests \$backupDir\/client\/shared \$backupDir\/client\/core/);
-  assert.match(deploy, /if \[ -f client\/shared\/build_info\.js \]; then\s*cp client\/shared\/build_info\.js \$backupDir\/client\/shared\/build_info\.js;\s*fi/);
-  assert.match(deploy, /if \[ -f client\/core\/navigation\.js \]; then\s*cp client\/core\/navigation\.js \$backupDir\/client\/core\/navigation\.js;\s*fi/);
+  assert.match(deploy, /\$requiredPublicAssets\s*=\s*@\("client\/shared\/build_info\.js", "client\/core\/navigation\.js"\)/);
+  assert.match(deploy, /if \[ -f "\$file" \]; then[\s\S]*?cp -- "\$file" "\$BackupAbsolute\/platform\/\$file"/);
+  assert.match(deploy, /sha256sum --check --status \.deploy-v030-sha256/);
   assert.match(deploy, /node --check client\/shared\/build_info\.js/);
   assert.match(deploy, /node --check client\/core\/navigation\.js/);
-  assert.match(deploy, /grep -q "\$EXPECTED_APP_QUERY" index\.html/);
-  assert.match(deploy, /grep -q "\$EXPECTED_APP_BUILD" client\/shared\/build_info\.js/);
-  assert.match(deploy, /grep -q "\$EXPECTED_PPT_QUERY" index\.html/);
-  assert.match(deploy, /grep -q "\$EXPECTED_PPT_BUILD" ppt\.js/);
+  assert.match(deploy, /grep -Fq "__APP_QUERY__" index\.html/);
+  assert.match(deploy, /grep -Fq "__APP_BUILD__" client\/shared\/build_info\.js/);
+  assert.match(deploy, /grep -Fq "__PPT_QUERY__" index\.html/);
+  assert.match(deploy, /grep -Fq "__PPT_BUILD__" ppt\.js/);
+  assert.match(deploy, /\.Replace\('__APP_QUERY__', \$EXPECTED_APP_QUERY\)/);
+  assert.match(deploy, /\.Replace\('__PPT_BUILD__', \$EXPECTED_PPT_BUILD\)/);
 });
 
 test('guarded deploy verifies the full build-info contract and exact remote SHA-256', () => {
@@ -156,35 +157,22 @@ test('guarded deploy verifies the full build-info contract and exact remote SHA-
   ) || [];
   const compatibilityChecks = deploy.match(/window\.tmAppBuild\s*!==\s*expected\.app/g) || [];
 
-  assert.equal(fullObjectChecks.length, 2, 'TMBuild must be verified locally and remotely');
-  assert.equal(compatibilityChecks.length, 2, 'tmAppBuild must be verified locally and remotely');
-  assert.match(
-    deploy,
-    /\$EXPECTED_BUILD_INFO_SHA256\s*=\s*\(Get-FileHash\s+-Algorithm SHA256\s+-LiteralPath\s+"\$LOCAL_DIR\\client\\shared\\build_info\.js"\)\.Hash\.ToLowerInvariant\(\)/
-  );
-  assert.match(
-    deploy,
-    /\$EXPECTED_NAVIGATION_SHA256\s*=\s*\(Get-FileHash\s+-Algorithm SHA256\s+-LiteralPath\s+"\$LOCAL_DIR\\client\\core\\navigation\.js"\)\.Hash\.ToLowerInvariant\(\)/
-  );
-  assert.match(
-    deploy,
-    /echo "\$EXPECTED_BUILD_INFO_SHA256  client\/shared\/build_info\.js"\s*\|\s*sha256sum --check --status/
-  );
-  assert.match(
-    deploy,
-    /echo "\$EXPECTED_NAVIGATION_SHA256  client\/core\/navigation\.js"\s*\|\s*sha256sum --check --status/
-  );
+  assert.equal(fullObjectChecks.length, 1, 'TMBuild must be validated before upload');
+  assert.equal(compatibilityChecks.length, 1, 'tmAppBuild compatibility marker must be validated before upload');
+  assert.match(deploy, /foreach \(\$file in \$FILES\)[\s\S]*?Get-FileHash -Algorithm SHA256 -LiteralPath \$localPath/);
+  assert.match(deploy, /\$remoteRelative = "platform\/\$\(Convert-ToRemotePath \$file\)"/);
+  assert.match(deploy, /sha256sum --check --status \.deploy-v030-sha256/);
 });
 
 test('guarded deploy uploads and syntax-checks the baseline generator and architecture inventory test', () => {
   const deploy = read(deployScriptPath);
 
   assert.match(deploy, /"server\\scripts\\generate_ui_baseline_manifest\.js"/);
-  assert.match(deploy, /node --check server\/scripts\/generate_ui_baseline_manifest\.js/);
   assert.match(deploy, /"server\\tests\\fixtures\\frontend-active-definitions\.json"/);
   assert.doesNotMatch(deploy, /node --check server\/tests\/fixtures\/frontend-active-definitions\.json/);
   assert.match(deploy, /"server\\tests\\customer_workspace_ui\.test\.js"/);
-  assert.match(deploy, /node --check server\/tests\/customer_workspace_ui\.test\.js/);
   assert.match(deploy, /"server\\tests\\frontend_architecture_inventory\.test\.js"/);
-  assert.match(deploy, /node --check server\/tests\/frontend_architecture_inventory\.test\.js/);
+  assert.match(deploy, /cd server\s*\r?\n+npm ci --ignore-scripts\s*\r?\n+npm rebuild better-sqlite3/);
+  assert.match(deploy, /npm test -- --test-concurrency=1/);
+  assert.match(deploy, /npx playwright test -c server\/tests\/deployment-browser-smoke\.config\.js/);
 });

@@ -474,6 +474,35 @@ function buildScreenshotSlots(repoRoot, baselineVersion) {
   return slots;
 }
 
+const FROZEN_MANIFEST_KEYS = [
+  'baseline',
+  'files',
+  'buildMarkers',
+  'scriptCacheKeys',
+  'routeContracts',
+  'seedFixture',
+  'viewports',
+  'mask',
+  'screenshotSlots',
+  'duplicateInventory'
+];
+
+function manifestSnapshot(manifest) {
+  const snapshot = {};
+  for (const key of FROZEN_MANIFEST_KEYS) {
+    if (Object.hasOwn(manifest, key)) snapshot[key] = structuredClone(manifest[key]);
+  }
+  return snapshot;
+}
+
+function frozenPreEditEvidence(repoRoot, baselineVersion, currentManifest) {
+  const manifestPath = path.join(repoRoot, 'docs', 'baselines', baselineVersion, 'ui-ppt-manifest.json');
+  if (!fs.existsSync(manifestPath)) return manifestSnapshot(currentManifest);
+
+  const existing = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  return manifestSnapshot(existing.preEdit || existing);
+}
+
 function generateManifest(options = {}) {
   const repoRoot = path.resolve(options.repoRoot || DEFAULT_REPO_ROOT);
   const baselineVersion = validateBaselineVersion(
@@ -502,7 +531,7 @@ function generateManifest(options = {}) {
   ], { repoRoot });
   const duplicateFixture = readDuplicateFixture(repoRoot, duplicateFixturePath, scriptScan);
 
-  return {
+  const manifest = {
     schemaVersion: 1,
     baseline: {
       version: baselineVersion,
@@ -530,6 +559,8 @@ function generateManifest(options = {}) {
     screenshotSlots: buildScreenshotSlots(repoRoot, baselineVersion),
     duplicateInventory: duplicateFixture
   };
+  manifest.preEdit = frozenPreEditEvidence(repoRoot, baselineVersion, manifest);
+  return manifest;
 }
 
 function parseArgs(argv) {

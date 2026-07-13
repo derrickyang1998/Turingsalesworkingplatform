@@ -12,13 +12,13 @@
   "files": {
     "indexHtml": {
       "source": "platform/index.html",
-      "sha256": "2ae4b7713492cad85e7c08ae892d52c3ff575ef793f7394dfa093290812a1201",
-      "bytes": 90786
+      "sha256": "68924d9cb20f2abf964cb6fcbe4e6e6121cb068ef3ea7d54dd97ad17077a60a0",
+      "bytes": 90903
     },
     "appJs": {
       "source": "platform/app.js",
-      "sha256": "e8d2ee19f44e11c6441afe3535dde0ec7b24f3aaeb5693e152a6349ed6ef18fd",
-      "bytes": 226697
+      "sha256": "5bd88b695c96dec5a4e514c52bed494e8a9cc052d265ea10a7240184c0eb5e58",
+      "bytes": 196713
     },
     "pptJs": {
       "source": "platform/ppt.js",
@@ -27,11 +27,11 @@
     }
   },
   "buildMarkers": {
-    "app": "20260630-auth-upload-fix",
+    "app": "20260713-v030-baseline-consolidation",
     "ppt": "20260702-v916-kb-bridge-client-cn"
   },
   "scriptCacheKeys": {
-    "app": "20260630authupload",
+    "app": "20260713v030baselineconsolidation",
     "ppt": "20260702v916kbbridge"
   },
   "routeContracts": [
@@ -657,26 +657,32 @@
       "method": "GET",
       "path": "/index.html",
       "source": "platform/server/services/public_assets_service.js",
-      "line": 89
+      "line": 99
     },
     {
       "method": "GET",
       "path": "/app.js",
       "source": "platform/server/services/public_assets_service.js",
-      "line": 90
+      "line": 100
     },
     {
       "method": "GET",
       "path": "/ppt.js",
       "source": "platform/server/services/public_assets_service.js",
-      "line": 91
+      "line": 101
+    },
+    {
+      "method": "GET",
+      "path": "/client/shared/build_info.js",
+      "source": "platform/server/services/public_assets_service.js",
+      "line": 102
     }
   ],
   "seedFixture": {
     "source": "platform/server/tests/fixtures/browser-baseline-data.json",
     "version": "v0.2.9-ui-fixture-1",
     "exists": true,
-    "sha256": "3fdcbf224973568874498ae761836590b726206f257c74a20ff97fd379097c60"
+    "sha256": "988e419023b5a680c87f777a190200c9a1eb83ee9e191f9d98a97220ed8f376d"
   },
   "viewports": [
     {
@@ -1514,115 +1520,11 @@
   "duplicateInventory": {
     "source": "platform/server/tests/fixtures/frontend-active-definitions.json",
     "exists": true,
-    "reviewedDuplicateCount": 39,
+    "reviewedDuplicateCount": 1,
     "duplicates": [
-      "addChatMsg",
-      "adminCreateInvite",
-      "adminResetPw",
-      "clearChat",
-      "closeCustModal",
-      "downloadInfTemplate",
-      "esc",
-      "exportAll",
-      "exportBrandCSV",
-      "exportFiltered",
-      "exportInf",
-      "exportSelected",
-      "filterBrands",
-      "filterByTag",
-      "filterByTreeTag",
-      "generateHTMLPPT",
-      "getSelectedInfIds",
-      "handleUpload",
-      "importInfluencers",
-      "initM1",
-      "initM4",
-      "loadAdminDashboard",
-      "loadCollaborations",
-      "loadInfluencersFromAPI",
-      "loadSocialForBrand",
-      "matchInfluencers",
-      "pushToFeishu",
-      "renderBrands",
-      "renderCollabTable",
-      "renderIndustryTree",
-      "renderInfTable",
-      "renderSearchHistory",
-      "showInfPreview",
-      "startCollab",
-      "switchPlatformTab",
-      "toggleAll",
-      "toggleBrandSocial",
-      "trackTokenUsage",
-      "updateCollabStatus"
+      "esc"
     ],
     "activeDefinitions": {
-      "addChatMsg": {
-        "name": "addChatMsg",
-        "source": "platform/app.js",
-        "kind": "function",
-        "async": false,
-        "line": 3584,
-        "column": 1,
-        "loadOrder": 1,
-        "occurrenceIndex": 2,
-        "globalIndex": 266
-      },
-      "adminCreateInvite": {
-        "name": "adminCreateInvite",
-        "source": "platform/app.js",
-        "kind": "function",
-        "async": false,
-        "line": 3783,
-        "column": 1,
-        "loadOrder": 1,
-        "occurrenceIndex": 3,
-        "globalIndex": 285
-      },
-      "adminResetPw": {
-        "name": "adminResetPw",
-        "source": "platform/app.js",
-        "kind": "function",
-        "async": false,
-        "line": 3782,
-        "column": 1,
-        "loadOrder": 1,
-        "occurrenceIndex": 3,
-        "globalIndex": 284
-      },
-      "clearChat": {
-        "name": "clearChat",
-        "source": "platform/app.js",
-        "kind": "function",
-        "async": false,
-        "line": 3594,
-        "column": 1,
-        "loadOrder": 1,
-        "occurrenceIndex": 2,
-        "globalIndex": 267
-      },
-      "closeCustModal": {
-        "name": "closeCustModal",
-        "source": "platform/app.js",
-        "kind": "function",
-        "async": false,
-        "line": 373,
-        "column": 1,
-        "loadOrder": 1,
-        "occurrenceIndex": 2,
-        "globalIndex": 19
-      },
-      "downloadInfTemplate": {
-        "name": "downloadInfTemplate",
-        "source": "platform/app.js",
-        "kind": "function",
-        "async": true,
-        "line": 3352,
-        "column": 1,
-        "loadOrder": 1,
-        "occurrenceIndex": 3,
-        "globalIndex": 253
-      },
       "esc": {
         "name": "esc",
         "source": "platform/ppt.js",
@@ -1632,362 +1534,2001 @@
         "column": 1,
         "loadOrder": 2,
         "occurrenceIndex": 2,
-        "globalIndex": 341
-      },
-      "exportAll": {
-        "name": "exportAll",
-        "source": "platform/app.js",
-        "kind": "function",
-        "async": false,
-        "line": 3267,
-        "column": 1,
-        "loadOrder": 1,
-        "occurrenceIndex": 2,
-        "globalIndex": 242
-      },
-      "exportBrandCSV": {
-        "name": "exportBrandCSV",
-        "source": "platform/app.js",
-        "kind": "function",
-        "async": false,
-        "line": 2631,
-        "column": 1,
-        "loadOrder": 1,
-        "occurrenceIndex": 2,
-        "globalIndex": 182
-      },
-      "exportFiltered": {
-        "name": "exportFiltered",
-        "source": "platform/app.js",
-        "kind": "function",
-        "async": false,
-        "line": 3268,
-        "column": 1,
-        "loadOrder": 1,
-        "occurrenceIndex": 2,
-        "globalIndex": 243
-      },
-      "exportInf": {
-        "name": "exportInf",
-        "source": "platform/app.js",
-        "kind": "function",
-        "async": false,
-        "line": 3274,
-        "column": 1,
-        "loadOrder": 1,
-        "occurrenceIndex": 2,
-        "globalIndex": 245
-      },
-      "exportSelected": {
-        "name": "exportSelected",
-        "source": "platform/app.js",
-        "kind": "function",
-        "async": false,
-        "line": 3269,
-        "column": 1,
-        "loadOrder": 1,
-        "occurrenceIndex": 2,
-        "globalIndex": 244
-      },
-      "filterBrands": {
-        "name": "filterBrands",
-        "source": "platform/app.js",
-        "kind": "function",
-        "async": false,
-        "line": 2400,
-        "column": 1,
-        "loadOrder": 1,
-        "occurrenceIndex": 2,
-        "globalIndex": 161
-      },
-      "filterByTag": {
-        "name": "filterByTag",
-        "source": "platform/app.js",
-        "kind": "function",
-        "async": false,
-        "line": 2422,
-        "column": 1,
-        "loadOrder": 1,
-        "occurrenceIndex": 2,
-        "globalIndex": 162
-      },
-      "filterByTreeTag": {
-        "name": "filterByTreeTag",
-        "source": "platform/app.js",
-        "kind": "function",
-        "async": false,
-        "line": 2423,
-        "column": 1,
-        "loadOrder": 1,
-        "occurrenceIndex": 2,
-        "globalIndex": 163
-      },
-      "generateHTMLPPT": {
-        "name": "generateHTMLPPT",
-        "source": "platform/ppt.js",
-        "kind": "function",
-        "async": true,
-        "line": 40,
-        "column": 1,
-        "loadOrder": 2,
-        "occurrenceIndex": 2,
-        "globalIndex": 292
-      },
-      "getSelectedInfIds": {
-        "name": "getSelectedInfIds",
-        "source": "platform/app.js",
-        "kind": "function",
-        "async": false,
-        "line": 3259,
-        "column": 1,
-        "loadOrder": 1,
-        "occurrenceIndex": 2,
-        "globalIndex": 241
-      },
-      "handleUpload": {
-        "name": "handleUpload",
-        "source": "platform/app.js",
-        "kind": "function",
-        "async": false,
-        "line": 3310,
-        "column": 1,
-        "loadOrder": 1,
-        "occurrenceIndex": 2,
-        "globalIndex": 247
-      },
-      "importInfluencers": {
-        "name": "importInfluencers",
-        "source": "platform/app.js",
-        "kind": "function",
-        "async": false,
-        "line": 3328,
-        "column": 1,
-        "loadOrder": 1,
-        "occurrenceIndex": 2,
-        "globalIndex": 251
-      },
-      "initM1": {
-        "name": "initM1",
-        "source": "platform/app.js",
-        "kind": "function",
-        "async": false,
-        "line": 2361,
-        "column": 1,
-        "loadOrder": 1,
-        "occurrenceIndex": 2,
-        "globalIndex": 159
-      },
-      "initM4": {
-        "name": "initM4",
-        "source": "platform/app.js",
-        "kind": "function",
-        "async": false,
-        "line": 3191,
-        "column": 1,
-        "loadOrder": 1,
-        "occurrenceIndex": 3,
-        "globalIndex": 234
-      },
-      "loadAdminDashboard": {
-        "name": "loadAdminDashboard",
-        "source": "platform/app.js",
-        "kind": "function",
-        "async": false,
-        "line": 3604,
-        "column": 1,
-        "loadOrder": 1,
-        "occurrenceIndex": 3,
-        "globalIndex": 270
-      },
-      "loadCollaborations": {
-        "name": "loadCollaborations",
-        "source": "platform/app.js",
-        "kind": "function",
-        "async": true,
-        "line": 3455,
-        "column": 1,
-        "loadOrder": 1,
-        "occurrenceIndex": 2,
-        "globalIndex": 259
-      },
-      "loadInfluencersFromAPI": {
-        "name": "loadInfluencersFromAPI",
-        "source": "platform/app.js",
-        "kind": "function",
-        "async": false,
-        "line": 3205,
-        "column": 1,
-        "loadOrder": 1,
-        "occurrenceIndex": 3,
-        "globalIndex": 236
-      },
-      "loadSocialForBrand": {
-        "name": "loadSocialForBrand",
-        "source": "platform/app.js",
-        "kind": "function",
-        "async": false,
-        "line": 2606,
-        "column": 1,
-        "loadOrder": 1,
-        "occurrenceIndex": 2,
-        "globalIndex": 177
-      },
-      "matchInfluencers": {
-        "name": "matchInfluencers",
-        "source": "platform/app.js",
-        "kind": "function",
-        "async": false,
-        "line": 3224,
-        "column": 1,
-        "loadOrder": 1,
-        "occurrenceIndex": 3,
-        "globalIndex": 237
-      },
-      "pushToFeishu": {
-        "name": "pushToFeishu",
-        "source": "platform/app.js",
-        "kind": "function",
-        "async": true,
-        "line": 3363,
-        "column": 1,
-        "loadOrder": 1,
-        "occurrenceIndex": 2,
-        "globalIndex": 254
-      },
-      "renderBrands": {
-        "name": "renderBrands",
-        "source": "platform/app.js",
-        "kind": "function",
-        "async": false,
-        "line": 2439,
-        "column": 1,
-        "loadOrder": 1,
-        "occurrenceIndex": 2,
-        "globalIndex": 165
-      },
-      "renderCollabTable": {
-        "name": "renderCollabTable",
-        "source": "platform/app.js",
-        "kind": "function",
-        "async": false,
-        "line": 3481,
-        "column": 1,
-        "loadOrder": 1,
-        "occurrenceIndex": 2,
-        "globalIndex": 261
-      },
-      "renderIndustryTree": {
-        "name": "renderIndustryTree",
-        "source": "platform/app.js",
-        "kind": "function",
-        "async": false,
-        "line": 2372,
-        "column": 1,
-        "loadOrder": 1,
-        "occurrenceIndex": 2,
-        "globalIndex": 160
-      },
-      "renderInfTable": {
-        "name": "renderInfTable",
-        "source": "platform/app.js",
-        "kind": "function",
-        "async": false,
-        "line": 3231,
-        "column": 1,
-        "loadOrder": 1,
-        "occurrenceIndex": 3,
-        "globalIndex": 239
-      },
-      "renderSearchHistory": {
-        "name": "renderSearchHistory",
-        "source": "platform/app.js",
-        "kind": "function",
-        "async": false,
-        "line": 2430,
-        "column": 1,
-        "loadOrder": 1,
-        "occurrenceIndex": 2,
-        "globalIndex": 164
-      },
-      "showInfPreview": {
-        "name": "showInfPreview",
-        "source": "platform/app.js",
-        "kind": "function",
-        "async": false,
-        "line": 3336,
-        "column": 1,
-        "loadOrder": 1,
-        "occurrenceIndex": 2,
-        "globalIndex": 252
-      },
-      "startCollab": {
-        "name": "startCollab",
-        "source": "platform/app.js",
-        "kind": "function",
-        "async": false,
-        "line": 3394,
-        "column": 1,
-        "loadOrder": 1,
-        "occurrenceIndex": 2,
-        "globalIndex": 256
-      },
-      "switchPlatformTab": {
-        "name": "switchPlatformTab",
-        "source": "platform/app.js",
-        "kind": "function",
-        "async": false,
-        "line": 2607,
-        "column": 1,
-        "loadOrder": 1,
-        "occurrenceIndex": 2,
-        "globalIndex": 178
-      },
-      "toggleAll": {
-        "name": "toggleAll",
-        "source": "platform/app.js",
-        "kind": "function",
-        "async": false,
-        "line": 3256,
-        "column": 1,
-        "loadOrder": 1,
-        "occurrenceIndex": 2,
-        "globalIndex": 240
-      },
-      "toggleBrandSocial": {
-        "name": "toggleBrandSocial",
-        "source": "platform/app.js",
-        "kind": "function",
-        "async": false,
-        "line": 2608,
-        "column": 1,
-        "loadOrder": 1,
-        "occurrenceIndex": 2,
-        "globalIndex": 179
-      },
-      "trackTokenUsage": {
-        "name": "trackTokenUsage",
-        "source": "platform/app.js",
-        "kind": "function",
-        "async": true,
-        "line": 960,
-        "column": 1,
-        "loadOrder": 1,
-        "occurrenceIndex": 2,
-        "globalIndex": 64
-      },
-      "updateCollabStatus": {
-        "name": "updateCollabStatus",
-        "source": "platform/app.js",
-        "kind": "function",
-        "async": true,
-        "line": 3505,
-        "column": 1,
-        "loadOrder": 1,
-        "occurrenceIndex": 2,
-        "globalIndex": 262
+        "globalIndex": 297
       }
     },
-    "sha256": "00974e763a135b94ffabf83c74400eba09f9c02f02e7b1168ee74251739aac28"
+    "sha256": "5061543c3239bf3903ac15b1aac3d2a7f1221d3bbd6ba3d7adcb2bd082d85c75"
+  },
+  "preEdit": {
+    "baseline": {
+      "version": "v0.2.9",
+      "release": "v0.3.0-baseline-consolidation",
+      "baseCommit": "9a591aa92e039f53a12ad7d5f098a26d0818bf08",
+      "securityBase": {
+        "release": "v0.2.10-security-credential-rotation",
+        "baseCommit": "9a591aa92e039f53a12ad7d5f098a26d0818bf08"
+      }
+    },
+    "files": {
+      "indexHtml": {
+        "source": "platform/index.html",
+        "sha256": "2ae4b7713492cad85e7c08ae892d52c3ff575ef793f7394dfa093290812a1201",
+        "bytes": 90786
+      },
+      "appJs": {
+        "source": "platform/app.js",
+        "sha256": "e8d2ee19f44e11c6441afe3535dde0ec7b24f3aaeb5693e152a6349ed6ef18fd",
+        "bytes": 226697
+      },
+      "pptJs": {
+        "source": "platform/ppt.js",
+        "sha256": "f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e",
+        "bytes": 88188
+      }
+    },
+    "buildMarkers": {
+      "app": "20260630-auth-upload-fix",
+      "ppt": "20260702-v916-kb-bridge-client-cn"
+    },
+    "scriptCacheKeys": {
+      "app": "20260630authupload",
+      "ppt": "20260702v916kbbridge"
+    },
+    "routeContracts": [
+      {
+        "method": "POST",
+        "path": "/api/auth/login",
+        "source": "platform/server/server.js",
+        "line": 177
+      },
+      {
+        "method": "POST",
+        "path": "/api/auth/logout",
+        "source": "platform/server/server.js",
+        "line": 209
+      },
+      {
+        "method": "GET",
+        "path": "/api/auth/me",
+        "source": "platform/server/server.js",
+        "line": 216
+      },
+      {
+        "method": "POST",
+        "path": "/api/demands",
+        "source": "platform/server/server.js",
+        "line": 221
+      },
+      {
+        "method": "GET",
+        "path": "/api/demands",
+        "source": "platform/server/server.js",
+        "line": 246
+      },
+      {
+        "method": "POST",
+        "path": "/api/proposals",
+        "source": "platform/server/server.js",
+        "line": 254
+      },
+      {
+        "method": "GET",
+        "path": "/api/proposals",
+        "source": "platform/server/server.js",
+        "line": 278
+      },
+      {
+        "method": "POST",
+        "path": "/api/token-usage",
+        "source": "platform/server/server.js",
+        "line": 286
+      },
+      {
+        "method": "GET",
+        "path": "/api/token-usage",
+        "source": "platform/server/server.js",
+        "line": 294
+      },
+      {
+        "method": "GET",
+        "path": "/api/admin/overview",
+        "source": "platform/server/server.js",
+        "line": 311
+      },
+      {
+        "method": "GET",
+        "path": "/api/admin/users",
+        "source": "platform/server/server.js",
+        "line": 328
+      },
+      {
+        "method": "POST",
+        "path": "/api/admin/users",
+        "source": "platform/server/server.js",
+        "line": 333
+      },
+      {
+        "method": "PUT",
+        "path": "/api/admin/users/:id",
+        "source": "platform/server/server.js",
+        "line": 355
+      },
+      {
+        "method": "DELETE",
+        "path": "/api/admin/users/:id",
+        "source": "platform/server/server.js",
+        "line": 361
+      },
+      {
+        "method": "POST",
+        "path": "/api/admin/users/reset-password/:id",
+        "source": "platform/server/server.js",
+        "line": 366
+      },
+      {
+        "method": "POST",
+        "path": "/api/admin/invites",
+        "source": "platform/server/server.js",
+        "line": 414
+      },
+      {
+        "method": "POST",
+        "path": "/api/proposal/generate-ppt",
+        "source": "platform/server/server.js",
+        "line": 422
+      },
+      {
+        "method": "GET",
+        "path": "/api/knowledge",
+        "source": "platform/server/server.js",
+        "line": 470
+      },
+      {
+        "method": "POST",
+        "path": "/api/knowledge",
+        "source": "platform/server/server.js",
+        "line": 488
+      },
+      {
+        "method": "GET",
+        "path": "/api/knowledge/search",
+        "source": "platform/server/server.js",
+        "line": 495
+      },
+      {
+        "method": "POST",
+        "path": "/api/knowledge/ingest",
+        "source": "platform/server/server.js",
+        "line": 512
+      },
+      {
+        "method": "POST",
+        "path": "/api/knowledge/upload",
+        "source": "platform/server/server.js",
+        "line": 524
+      },
+      {
+        "method": "POST",
+        "path": "/api/influencers/upload",
+        "source": "platform/server/server.js",
+        "line": 578
+      },
+      {
+        "method": "POST",
+        "path": "/api/admin/knowledge/import/obsidian",
+        "source": "platform/server/server.js",
+        "line": 602
+      },
+      {
+        "method": "POST",
+        "path": "/api/admin/knowledge/vault/export",
+        "source": "platform/server/server.js",
+        "line": 618
+      },
+      {
+        "method": "GET",
+        "path": "/api/knowledge/similar",
+        "source": "platform/server/server.js",
+        "line": 636
+      },
+      {
+        "method": "POST",
+        "path": "/api/knowledge/:id/use",
+        "source": "platform/server/server.js",
+        "line": 645
+      },
+      {
+        "method": "POST",
+        "path": "/api/ai/chat",
+        "source": "platform/server/server.js",
+        "line": 651
+      },
+      {
+        "method": "GET",
+        "path": "/api/ai/conversations",
+        "source": "platform/server/server.js",
+        "line": 672
+      },
+      {
+        "method": "GET",
+        "path": "/api/ai/conversations/:id",
+        "source": "platform/server/server.js",
+        "line": 685
+      },
+      {
+        "method": "POST",
+        "path": "/api/ai/proposal-draft",
+        "source": "platform/server/server.js",
+        "line": 699
+      },
+      {
+        "method": "POST",
+        "path": "/api/demand/parse-file",
+        "source": "platform/server/server.js",
+        "line": 737
+      },
+      {
+        "method": "POST",
+        "path": "/api/ai/strategy",
+        "source": "platform/server/server.js",
+        "line": 788
+      },
+      {
+        "method": "POST",
+        "path": "/api/ai/demand-analysis",
+        "source": "platform/server/server.js",
+        "line": 797
+      },
+      {
+        "method": "POST",
+        "path": "/api/ai/ppt-outline",
+        "source": "platform/server/server.js",
+        "line": 827
+      },
+      {
+        "method": "GET",
+        "path": "/api/dashboard/sales",
+        "source": "platform/server/server.js",
+        "line": 837
+      },
+      {
+        "method": "GET",
+        "path": "/api/customers/stats",
+        "source": "platform/server/server.js",
+        "line": 854
+      },
+      {
+        "method": "POST",
+        "path": "/api/customers/:id/activity",
+        "source": "platform/server/server.js",
+        "line": 877
+      },
+      {
+        "method": "GET",
+        "path": "/api/dashboard/stats",
+        "source": "platform/server/server.js",
+        "line": 893
+      },
+      {
+        "method": "GET",
+        "path": "/api/knowledge/categories",
+        "source": "platform/server/server.js",
+        "line": 917
+      },
+      {
+        "method": "POST",
+        "path": "/api/auth/register",
+        "source": "platform/server/server.js",
+        "line": 927
+      },
+      {
+        "method": "GET",
+        "path": "/api/users",
+        "source": "platform/server/server.js",
+        "line": 950
+      },
+      {
+        "method": "GET",
+        "path": "/api/health",
+        "source": "platform/server/server.js",
+        "line": 959
+      },
+      {
+        "method": "GET",
+        "path": "/{*path}",
+        "source": "platform/server/server.js",
+        "line": 968
+      },
+      {
+        "method": "GET",
+        "path": "/api/influencers",
+        "source": "platform/server/routes.js",
+        "line": 7
+      },
+      {
+        "method": "POST",
+        "path": "/api/influencers",
+        "source": "platform/server/routes.js",
+        "line": 50
+      },
+      {
+        "method": "POST",
+        "path": "/api/influencers/match",
+        "source": "platform/server/routes.js",
+        "line": 59
+      },
+      {
+        "method": "POST",
+        "path": "/api/collaborations",
+        "source": "platform/server/routes.js",
+        "line": 85
+      },
+      {
+        "method": "GET",
+        "path": "/api/collaborations",
+        "source": "platform/server/routes.js",
+        "line": 101
+      },
+      {
+        "method": "PUT",
+        "path": "/api/collaborations/:id",
+        "source": "platform/server/routes.js",
+        "line": 114
+      },
+      {
+        "method": "GET",
+        "path": "/api/collaborations/stats",
+        "source": "platform/server/routes.js",
+        "line": 122
+      },
+      {
+        "method": "GET",
+        "path": "/api/influencers/template",
+        "source": "platform/server/routes.js",
+        "line": 133
+      },
+      {
+        "method": "POST",
+        "path": "/api/influencers/import",
+        "source": "platform/server/routes.js",
+        "line": 140
+      },
+      {
+        "method": "POST",
+        "path": "/api/influencers/feishu/sync",
+        "source": "platform/server/routes.js",
+        "line": 154
+      },
+      {
+        "method": "POST",
+        "path": "/api/influencers/export",
+        "source": "platform/server/routes.js",
+        "line": 196
+      },
+      {
+        "method": "GET",
+        "path": "/api/leads",
+        "source": "platform/server/routes_customers.js",
+        "line": 58
+      },
+      {
+        "method": "POST",
+        "path": "/api/leads",
+        "source": "platform/server/routes_customers.js",
+        "line": 73
+      },
+      {
+        "method": "PUT",
+        "path": "/api/leads/:id",
+        "source": "platform/server/routes_customers.js",
+        "line": 83
+      },
+      {
+        "method": "POST",
+        "path": "/api/leads/:id/convert",
+        "source": "platform/server/routes_customers.js",
+        "line": 97
+      },
+      {
+        "method": "GET",
+        "path": "/api/customers",
+        "source": "platform/server/routes_customers.js",
+        "line": 115
+      },
+      {
+        "method": "GET",
+        "path": "/api/customers/stats",
+        "source": "platform/server/routes_customers.js",
+        "line": 146
+      },
+      {
+        "method": "GET",
+        "path": "/api/customers/:id/detail",
+        "source": "platform/server/routes_customers.js",
+        "line": 164
+      },
+      {
+        "method": "POST",
+        "path": "/api/customers",
+        "source": "platform/server/routes_customers.js",
+        "line": 175
+      },
+      {
+        "method": "POST",
+        "path": "/api/customers/:id/archive-result",
+        "source": "platform/server/routes_customers.js",
+        "line": 187
+      },
+      {
+        "method": "PUT",
+        "path": "/api/customers/:id",
+        "source": "platform/server/routes_customers.js",
+        "line": 221
+      },
+      {
+        "method": "DELETE",
+        "path": "/api/customers/:id",
+        "source": "platform/server/routes_customers.js",
+        "line": 245
+      },
+      {
+        "method": "POST",
+        "path": "/api/customers/:id/assign",
+        "source": "platform/server/routes_customers.js",
+        "line": 255
+      },
+      {
+        "method": "POST",
+        "path": "/api/customers/:id/return-pool",
+        "source": "platform/server/routes_customers.js",
+        "line": 266
+      },
+      {
+        "method": "POST",
+        "path": "/api/customers/:id/return",
+        "source": "platform/server/routes_customers.js",
+        "line": 274
+      },
+      {
+        "method": "GET",
+        "path": "/api/opportunities",
+        "source": "platform/server/routes_customers.js",
+        "line": 287
+      },
+      {
+        "method": "POST",
+        "path": "/api/opportunities",
+        "source": "platform/server/routes_customers.js",
+        "line": 300
+      },
+      {
+        "method": "PUT",
+        "path": "/api/opportunities/:id",
+        "source": "platform/server/routes_customers.js",
+        "line": 313
+      },
+      {
+        "method": "DELETE",
+        "path": "/api/opportunities/:id",
+        "source": "platform/server/routes_customers.js",
+        "line": 326
+      },
+      {
+        "method": "GET",
+        "path": "/api/sales-targets",
+        "source": "platform/server/routes_customers.js",
+        "line": 340
+      },
+      {
+        "method": "POST",
+        "path": "/api/sales-targets",
+        "source": "platform/server/routes_customers.js",
+        "line": 349
+      },
+      {
+        "method": "GET",
+        "path": "/api/sales-performance",
+        "source": "platform/server/routes_customers.js",
+        "line": 363
+      },
+      {
+        "method": "GET",
+        "path": "/api/customers/sea-pool",
+        "source": "platform/server/routes_customers.js",
+        "line": 387
+      },
+      {
+        "method": "POST",
+        "path": "/api/customers/:id/claim",
+        "source": "platform/server/routes_customers.js",
+        "line": 395
+      },
+      {
+        "method": "GET",
+        "path": "/api/customers/dashboard",
+        "source": "platform/server/routes_customers.js",
+        "line": 408
+      },
+      {
+        "method": "POST",
+        "path": "/api/brands/enrich",
+        "source": "platform/server/routes_brands.js",
+        "line": 42
+      },
+      {
+        "method": "POST",
+        "path": "/api/brands",
+        "source": "platform/server/routes_brands.js",
+        "line": 94
+      },
+      {
+        "method": "GET",
+        "path": "/api/brands",
+        "source": "platform/server/routes_brands.js",
+        "line": 111
+      },
+      {
+        "method": "GET",
+        "path": "/api/brands/social-search",
+        "source": "platform/server/routes_brands.js",
+        "line": 139
+      },
+      {
+        "method": "GET",
+        "path": "/api/workflow/templates",
+        "source": "platform/server/routes_workflow.js",
+        "line": 10
+      },
+      {
+        "method": "GET",
+        "path": "/api/workflow/templates/:id",
+        "source": "platform/server/routes_workflow.js",
+        "line": 23
+      },
+      {
+        "method": "POST",
+        "path": "/api/workflow/templates",
+        "source": "platform/server/routes_workflow.js",
+        "line": 37
+      },
+      {
+        "method": "PUT",
+        "path": "/api/workflow/templates/:id",
+        "source": "platform/server/routes_workflow.js",
+        "line": 58
+      },
+      {
+        "method": "DELETE",
+        "path": "/api/workflow/templates/:id",
+        "source": "platform/server/routes_workflow.js",
+        "line": 89
+      },
+      {
+        "method": "POST",
+        "path": "/api/workflow/templates/:id/publish",
+        "source": "platform/server/routes_workflow.js",
+        "line": 100
+      },
+      {
+        "method": "POST",
+        "path": "/api/workflow/instances",
+        "source": "platform/server/routes_workflow.js",
+        "line": 116
+      },
+      {
+        "method": "GET",
+        "path": "/api/workflow/instances/by-business",
+        "source": "platform/server/routes_workflow.js",
+        "line": 132
+      },
+      {
+        "method": "GET",
+        "path": "/api/workflow/instances",
+        "source": "platform/server/routes_workflow.js",
+        "line": 152
+      },
+      {
+        "method": "GET",
+        "path": "/api/workflow/instances/:id",
+        "source": "platform/server/routes_workflow.js",
+        "line": 196
+      },
+      {
+        "method": "POST",
+        "path": "/api/workflow/instances/:id/pause",
+        "source": "platform/server/routes_workflow.js",
+        "line": 268
+      },
+      {
+        "method": "POST",
+        "path": "/api/workflow/instances/:id/resume",
+        "source": "platform/server/routes_workflow.js",
+        "line": 283
+      },
+      {
+        "method": "POST",
+        "path": "/api/workflow/instances/:id/cancel",
+        "source": "platform/server/routes_workflow.js",
+        "line": 298
+      },
+      {
+        "method": "GET",
+        "path": "/api/workflow/tasks",
+        "source": "platform/server/routes_workflow.js",
+        "line": 319
+      },
+      {
+        "method": "GET",
+        "path": "/api/workflow/tasks/:id",
+        "source": "platform/server/routes_workflow.js",
+        "line": 345
+      },
+      {
+        "method": "POST",
+        "path": "/api/workflow/tasks/:id/approve",
+        "source": "platform/server/routes_workflow.js",
+        "line": 393
+      },
+      {
+        "method": "POST",
+        "path": "/api/workflow/tasks/:id/reject",
+        "source": "platform/server/routes_workflow.js",
+        "line": 410
+      },
+      {
+        "method": "POST",
+        "path": "/api/workflow/tasks/:id/complete",
+        "source": "platform/server/routes_workflow.js",
+        "line": 427
+      },
+      {
+        "method": "POST",
+        "path": "/api/workflow/check-timers",
+        "source": "platform/server/routes_workflow.js",
+        "line": 456
+      },
+      {
+        "method": "GET",
+        "path": "/api/workflow/stats",
+        "source": "platform/server/routes_workflow.js",
+        "line": 466
+      },
+      {
+        "method": "GET",
+        "path": "/index.html",
+        "source": "platform/server/services/public_assets_service.js",
+        "line": 89
+      },
+      {
+        "method": "GET",
+        "path": "/app.js",
+        "source": "platform/server/services/public_assets_service.js",
+        "line": 90
+      },
+      {
+        "method": "GET",
+        "path": "/ppt.js",
+        "source": "platform/server/services/public_assets_service.js",
+        "line": 91
+      }
+    ],
+    "seedFixture": {
+      "source": "platform/server/tests/fixtures/browser-baseline-data.json",
+      "version": "v0.2.9-ui-fixture-1",
+      "exists": true,
+      "sha256": "3fdcbf224973568874498ae761836590b726206f257c74a20ff97fd379097c60"
+    },
+    "viewports": [
+      {
+        "name": "fixture-1440",
+        "width": 1440,
+        "height": 900,
+        "deviceScaleFactor": 1
+      },
+      {
+        "name": "fixture-1920",
+        "width": 1920,
+        "height": 1080,
+        "deviceScaleFactor": 1
+      },
+      {
+        "name": "fixture-mobile",
+        "width": 390,
+        "height": 844,
+        "deviceScaleFactor": 1
+      }
+    ],
+    "mask": {
+      "version": "v0.2.9-mask-1",
+      "selectors": [
+        "[data-baseline-mask]",
+        ".timestamp",
+        ".user-email",
+        ".customer-contact",
+        ".ai-response",
+        ".kb-reference",
+        ".workflow-runtime",
+        "a[href^=\"http\"]"
+      ]
+    },
+    "screenshotSlots": [
+      {
+        "role": "public",
+        "viewport": "fixture-1440",
+        "journey": "public-login",
+        "pageId": "login",
+        "substate": null,
+        "path": "docs/baselines/v0.2.9/screenshots/public/fixture-1440/public-login.png",
+        "exists": true,
+        "sha256": "e0ce774d46afd219f84060fa2d77e63fb568bf6b23c7a0a7441f8fe5ca05b7c4"
+      },
+      {
+        "role": "admin",
+        "viewport": "fixture-1440",
+        "journey": "admin-crm-board",
+        "pageId": "m0",
+        "substate": null,
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-crm-board.png",
+        "exists": true,
+        "sha256": "8fcf7c5e5a0e4e6555d17146b2ca4617e3fcbeeac6131e33c8384feac3727e16"
+      },
+      {
+        "role": "admin",
+        "viewport": "fixture-1440",
+        "journey": "admin-crm-detail-pipeline",
+        "pageId": "m0-detail",
+        "substate": {
+          "view": "pipeline"
+        },
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-crm-detail-pipeline.png",
+        "exists": true,
+        "sha256": "0aff37c8ef8a3f1352a577722531ceb4933fe92ebeddca29537ad39faa4e3085"
+      },
+      {
+        "role": "admin",
+        "viewport": "fixture-1440",
+        "journey": "admin-crm-detail-seapool",
+        "pageId": "m0-detail",
+        "substate": {
+          "view": "seapool"
+        },
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-crm-detail-seapool.png",
+        "exists": true,
+        "sha256": "1e8e0920a6affb7795304786453f67ec74737bcd15437e2a2c872682cde8f66b"
+      },
+      {
+        "role": "admin",
+        "viewport": "fixture-1440",
+        "journey": "admin-crm-detail-opportunities",
+        "pageId": "m0-detail",
+        "substate": {
+          "view": "opportunities"
+        },
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-crm-detail-opportunities.png",
+        "exists": true,
+        "sha256": "6cf97ceb6704ce12d53f3d5845a9a9e0ec3f65d0821857e1e63809ce1bbae3f1"
+      },
+      {
+        "role": "admin",
+        "viewport": "fixture-1440",
+        "journey": "admin-brand",
+        "pageId": "m1",
+        "substate": null,
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-brand.png",
+        "exists": true,
+        "sha256": "c82af836144fbaf1cf2534ee092226c3982ee77c2d21e174b67a3a03f65a2427"
+      },
+      {
+        "role": "admin",
+        "viewport": "fixture-1440",
+        "journey": "admin-strategy",
+        "pageId": "m2",
+        "substate": null,
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-strategy.png",
+        "exists": true,
+        "sha256": "abc6f47e47551cb6839b08663d400e6c19603c8294b33e2d9d6fc627d5a49113"
+      },
+      {
+        "role": "admin",
+        "viewport": "fixture-1440",
+        "journey": "admin-demand-ppt",
+        "pageId": "m3",
+        "substate": {
+          "surface": "ppt"
+        },
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-demand-ppt.png",
+        "exists": true,
+        "sha256": "00ce6579d36f90b4d404108afac608b060c59d16784092893dc850beeefa79b3"
+      },
+      {
+        "role": "admin",
+        "viewport": "fixture-1440",
+        "journey": "admin-m4-tab1",
+        "pageId": "m4",
+        "substate": {
+          "tab": "tab1"
+        },
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-m4-tab1.png",
+        "exists": true,
+        "sha256": "16c374099021de922968ae3764d825f6180c3c891c2372bf09d158e4e43af7c2"
+      },
+      {
+        "role": "admin",
+        "viewport": "fixture-1440",
+        "journey": "admin-m4-tab2",
+        "pageId": "m4",
+        "substate": {
+          "tab": "tab2"
+        },
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-m4-tab2.png",
+        "exists": true,
+        "sha256": "fdb3221e5c0c4dc896dda4720888e74ea8f5adbe5afe066fb687cb683a227051"
+      },
+      {
+        "role": "admin",
+        "viewport": "fixture-1440",
+        "journey": "admin-m4-tab3",
+        "pageId": "m4",
+        "substate": {
+          "tab": "tab3"
+        },
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-m4-tab3.png",
+        "exists": true,
+        "sha256": "51cfc189b0c72cc4e6dfcf41b34ec561bef01870c91cdf2e22cac71e15b35489"
+      },
+      {
+        "role": "admin",
+        "viewport": "fixture-1440",
+        "journey": "admin-ai",
+        "pageId": "m5",
+        "substate": null,
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-ai.png",
+        "exists": true,
+        "sha256": "8eb0321dbc351d71ec43d0c13a1c16d164abdab4966cfb35d0aedc20a7b5bf12"
+      },
+      {
+        "role": "admin",
+        "viewport": "fixture-1440",
+        "journey": "admin-workflow-designer",
+        "pageId": "workflow-designer",
+        "substate": null,
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-workflow-designer.png",
+        "exists": true,
+        "sha256": "1dde7d7612204ee17369b022f11f34021c87e3665041c5ee7ae23530e280b8e9"
+      },
+      {
+        "role": "admin",
+        "viewport": "fixture-1440",
+        "journey": "admin-workflow-templates",
+        "pageId": "workflow-templates",
+        "substate": null,
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-workflow-templates.png",
+        "exists": true,
+        "sha256": "012e73b492b4a0f60fedc70ea738b06a881479edb2058384e98e8071c787c8a5"
+      },
+      {
+        "role": "admin",
+        "viewport": "fixture-1440",
+        "journey": "admin-workflow-instances",
+        "pageId": "workflow-instances",
+        "substate": null,
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-workflow-instances.png",
+        "exists": true,
+        "sha256": "5180176d8713e38a93e8942b936eec669e7c981c5b5a7ad15ee8e4e69d46d19f"
+      },
+      {
+        "role": "admin",
+        "viewport": "fixture-1440",
+        "journey": "admin-workflow-tasks",
+        "pageId": "workflow-tasks",
+        "substate": null,
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-workflow-tasks.png",
+        "exists": true,
+        "sha256": "31fefa02213e2ed22ed3a50746e34ad6112c9a7f3c74d51098de65cbddb4f6bc"
+      },
+      {
+        "role": "admin",
+        "viewport": "fixture-1440",
+        "journey": "admin-admin-overview",
+        "pageId": "admin",
+        "substate": {
+          "tab": "overview"
+        },
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-admin-overview.png",
+        "exists": true,
+        "sha256": "511ee1ae9c3393c23f53603faa39ea4c9c5ec8594176e94a793598f0156cb131"
+      },
+      {
+        "role": "admin",
+        "viewport": "fixture-1440",
+        "journey": "admin-admin-users",
+        "pageId": "admin",
+        "substate": {
+          "tab": "users"
+        },
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-admin-users.png",
+        "exists": true,
+        "sha256": "44daa53cd34a0a1c838977fb01490158b046dfe5b621da52c0f536e7fc5ac7cc"
+      },
+      {
+        "role": "admin",
+        "viewport": "fixture-1440",
+        "journey": "admin-admin-knowledge",
+        "pageId": "admin",
+        "substate": {
+          "tab": "knowledge"
+        },
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-admin-knowledge.png",
+        "exists": true,
+        "sha256": "8a02a35d7a5d5c00a07795b5173fc3759eb3cc7f187bf994725c3f79c3bccf36"
+      },
+      {
+        "role": "admin",
+        "viewport": "fixture-1440",
+        "journey": "admin-admin-ai-audit",
+        "pageId": "admin",
+        "substate": {
+          "tab": "ai-audit"
+        },
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-admin-ai-audit.png",
+        "exists": true,
+        "sha256": "52844f70b1e4d35d95c7d93f9e4c59450c4f6b79faddc807e109e049c57c7f3b"
+      },
+      {
+        "role": "admin",
+        "viewport": "fixture-1440",
+        "journey": "admin-admin-tokens",
+        "pageId": "admin",
+        "substate": {
+          "tab": "tokens"
+        },
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-admin-tokens.png",
+        "exists": true,
+        "sha256": "e701d636a861265dcf9dba8a2aca91c367a731d96d1187c02e80f8680bb7ce82"
+      },
+      {
+        "role": "user",
+        "viewport": "fixture-1440",
+        "journey": "user-crm-board",
+        "pageId": "m0",
+        "substate": null,
+        "path": "docs/baselines/v0.2.9/screenshots/user/fixture-1440/user-crm-board.png",
+        "exists": true,
+        "sha256": "f24315e65ba0a5e1f78143a868ddea5f504d26de601693dd7e0172d86cceadf9"
+      },
+      {
+        "role": "user",
+        "viewport": "fixture-1440",
+        "journey": "user-crm-detail",
+        "pageId": "m0-detail",
+        "substate": {
+          "view": "pipeline"
+        },
+        "path": "docs/baselines/v0.2.9/screenshots/user/fixture-1440/user-crm-detail.png",
+        "exists": true,
+        "sha256": "5381403622fcb64cb867d94959af00d63c7003698fa5d64970c084f9a43cd070"
+      },
+      {
+        "role": "user",
+        "viewport": "fixture-1440",
+        "journey": "user-ai",
+        "pageId": "m5",
+        "substate": null,
+        "path": "docs/baselines/v0.2.9/screenshots/user/fixture-1440/user-ai.png",
+        "exists": true,
+        "sha256": "b85b4bdb9b2eb0b3c72b0e44005b530ffba05a7edec8220e56ce017849cc88d7"
+      },
+      {
+        "role": "public",
+        "viewport": "fixture-1920",
+        "journey": "public-login",
+        "pageId": "login",
+        "substate": null,
+        "path": "docs/baselines/v0.2.9/screenshots/public/fixture-1920/public-login.png",
+        "exists": true,
+        "sha256": "88cbd823e934871a2ded1279aa56aa5b5b118abcfbe97bd6d9057507b01a7b0e"
+      },
+      {
+        "role": "admin",
+        "viewport": "fixture-1920",
+        "journey": "admin-crm-board",
+        "pageId": "m0",
+        "substate": null,
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-crm-board.png",
+        "exists": true,
+        "sha256": "dd65f93035a72fb7df324d3d35add4dc9efe20b09a37c9994860f3a070eb796d"
+      },
+      {
+        "role": "admin",
+        "viewport": "fixture-1920",
+        "journey": "admin-crm-detail-pipeline",
+        "pageId": "m0-detail",
+        "substate": {
+          "view": "pipeline"
+        },
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-crm-detail-pipeline.png",
+        "exists": true,
+        "sha256": "434e87fcca3508f9cb11a4c589ea2eca76d028e67abcc23f4ec34a7e4d38867c"
+      },
+      {
+        "role": "admin",
+        "viewport": "fixture-1920",
+        "journey": "admin-crm-detail-seapool",
+        "pageId": "m0-detail",
+        "substate": {
+          "view": "seapool"
+        },
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-crm-detail-seapool.png",
+        "exists": true,
+        "sha256": "c5e5301f251d932331d8f3b6a59c08692d252a35be57149869808ecc6c890c34"
+      },
+      {
+        "role": "admin",
+        "viewport": "fixture-1920",
+        "journey": "admin-crm-detail-opportunities",
+        "pageId": "m0-detail",
+        "substate": {
+          "view": "opportunities"
+        },
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-crm-detail-opportunities.png",
+        "exists": true,
+        "sha256": "6ec067e42881df61c2638b306e1c440d1e944561500014137fff2bf3ec7d88e7"
+      },
+      {
+        "role": "admin",
+        "viewport": "fixture-1920",
+        "journey": "admin-brand",
+        "pageId": "m1",
+        "substate": null,
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-brand.png",
+        "exists": true,
+        "sha256": "8d87745a0a1b4c64f7493b5a37ba55ad6d11b6586d6c7b7bb9b9d1bba6db6c53"
+      },
+      {
+        "role": "admin",
+        "viewport": "fixture-1920",
+        "journey": "admin-strategy",
+        "pageId": "m2",
+        "substate": null,
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-strategy.png",
+        "exists": true,
+        "sha256": "9d7b02d05cb54ae83e602972e05849e76faa6570403f997aef84fd0c94c5ae5d"
+      },
+      {
+        "role": "admin",
+        "viewport": "fixture-1920",
+        "journey": "admin-demand-ppt",
+        "pageId": "m3",
+        "substate": {
+          "surface": "ppt"
+        },
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-demand-ppt.png",
+        "exists": true,
+        "sha256": "cb4f4ad3592398e30dbdb2050282e1e91e6fcd176972a2b3204dad264e8b58b3"
+      },
+      {
+        "role": "admin",
+        "viewport": "fixture-1920",
+        "journey": "admin-m4-tab1",
+        "pageId": "m4",
+        "substate": {
+          "tab": "tab1"
+        },
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-m4-tab1.png",
+        "exists": true,
+        "sha256": "ae8d10ee1ca78815599a1b8837fbd39ed55cda5bb0bfa7dfe1f8193317048d42"
+      },
+      {
+        "role": "admin",
+        "viewport": "fixture-1920",
+        "journey": "admin-m4-tab2",
+        "pageId": "m4",
+        "substate": {
+          "tab": "tab2"
+        },
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-m4-tab2.png",
+        "exists": true,
+        "sha256": "8a3d6285aa6c5719897905e923373f3da18ca7809e2feefe7a010f71c30e2575"
+      },
+      {
+        "role": "admin",
+        "viewport": "fixture-1920",
+        "journey": "admin-m4-tab3",
+        "pageId": "m4",
+        "substate": {
+          "tab": "tab3"
+        },
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-m4-tab3.png",
+        "exists": true,
+        "sha256": "ce7d66419c5c3686bfb37fd458b0ab2a3daceb5fa9b6eb1c5083fa381d9d0592"
+      },
+      {
+        "role": "admin",
+        "viewport": "fixture-1920",
+        "journey": "admin-ai",
+        "pageId": "m5",
+        "substate": null,
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-ai.png",
+        "exists": true,
+        "sha256": "792a9983236efe3400a04518e5ed8d12d1c9547e3b66644b8bf088342fddce15"
+      },
+      {
+        "role": "admin",
+        "viewport": "fixture-1920",
+        "journey": "admin-workflow-designer",
+        "pageId": "workflow-designer",
+        "substate": null,
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-workflow-designer.png",
+        "exists": true,
+        "sha256": "ffe948cbcdfc3bb49df8f9d5566e70e69eeba0169eb9691e16860098b720762c"
+      },
+      {
+        "role": "admin",
+        "viewport": "fixture-1920",
+        "journey": "admin-workflow-templates",
+        "pageId": "workflow-templates",
+        "substate": null,
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-workflow-templates.png",
+        "exists": true,
+        "sha256": "83327c1aadd4490f5d0c40fbbcf1b43095acfe4af0ab6a949b9a813f66469dc4"
+      },
+      {
+        "role": "admin",
+        "viewport": "fixture-1920",
+        "journey": "admin-workflow-instances",
+        "pageId": "workflow-instances",
+        "substate": null,
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-workflow-instances.png",
+        "exists": true,
+        "sha256": "29a0fc43b330ea6e7e13a1ddc4e7d5e355c5ae3124385f8dd0e902d875e3c4f0"
+      },
+      {
+        "role": "admin",
+        "viewport": "fixture-1920",
+        "journey": "admin-workflow-tasks",
+        "pageId": "workflow-tasks",
+        "substate": null,
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-workflow-tasks.png",
+        "exists": true,
+        "sha256": "a01a2f3ee47fc19c33fda0fefb40ab4a3af14a296f4aed660bfc6a369818bfdc"
+      },
+      {
+        "role": "admin",
+        "viewport": "fixture-1920",
+        "journey": "admin-admin-overview",
+        "pageId": "admin",
+        "substate": {
+          "tab": "overview"
+        },
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-admin-overview.png",
+        "exists": true,
+        "sha256": "a3d8fcd1f896c81d9094c3fd6fba5b53fca7713fe84651bd6f4585988d0b2b2d"
+      },
+      {
+        "role": "admin",
+        "viewport": "fixture-1920",
+        "journey": "admin-admin-users",
+        "pageId": "admin",
+        "substate": {
+          "tab": "users"
+        },
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-admin-users.png",
+        "exists": true,
+        "sha256": "156a70ac017f50a1ee3f34ecbedcd5b7347936ea8553476f22f1138120f5957b"
+      },
+      {
+        "role": "admin",
+        "viewport": "fixture-1920",
+        "journey": "admin-admin-knowledge",
+        "pageId": "admin",
+        "substate": {
+          "tab": "knowledge"
+        },
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-admin-knowledge.png",
+        "exists": true,
+        "sha256": "2c51a21dbd7220c2712642e1920e0b43031073f160b4d58b4d43a0a899d18dd1"
+      },
+      {
+        "role": "admin",
+        "viewport": "fixture-1920",
+        "journey": "admin-admin-ai-audit",
+        "pageId": "admin",
+        "substate": {
+          "tab": "ai-audit"
+        },
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-admin-ai-audit.png",
+        "exists": true,
+        "sha256": "b7a177cbe9418f25b183ad7b086f9d6ad230cced300c1a678a378280d09fb0f2"
+      },
+      {
+        "role": "admin",
+        "viewport": "fixture-1920",
+        "journey": "admin-admin-tokens",
+        "pageId": "admin",
+        "substate": {
+          "tab": "tokens"
+        },
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-admin-tokens.png",
+        "exists": true,
+        "sha256": "5bc1e2bc8203f6b69efce9a063bfab09c22a9a34571cf002c91672d731e03dff"
+      },
+      {
+        "role": "user",
+        "viewport": "fixture-1920",
+        "journey": "user-crm-board",
+        "pageId": "m0",
+        "substate": null,
+        "path": "docs/baselines/v0.2.9/screenshots/user/fixture-1920/user-crm-board.png",
+        "exists": true,
+        "sha256": "27846304ebe3ca13d7b79f4dd7a645ee0b462486152e53160d279588473c82d3"
+      },
+      {
+        "role": "user",
+        "viewport": "fixture-1920",
+        "journey": "user-crm-detail",
+        "pageId": "m0-detail",
+        "substate": {
+          "view": "pipeline"
+        },
+        "path": "docs/baselines/v0.2.9/screenshots/user/fixture-1920/user-crm-detail.png",
+        "exists": true,
+        "sha256": "c0452bf73953519498b56f8189560d87e51f73724b76caac6ce47649276b836f"
+      },
+      {
+        "role": "user",
+        "viewport": "fixture-1920",
+        "journey": "user-ai",
+        "pageId": "m5",
+        "substate": null,
+        "path": "docs/baselines/v0.2.9/screenshots/user/fixture-1920/user-ai.png",
+        "exists": true,
+        "sha256": "29312801e84c61f7d74908d2adc13fc1515f7fa9b0c08819dc9bbb73443bacc6"
+      },
+      {
+        "role": "public",
+        "viewport": "fixture-mobile",
+        "journey": "public-login",
+        "pageId": "login",
+        "substate": null,
+        "path": "docs/baselines/v0.2.9/screenshots/public/fixture-mobile/public-login.png",
+        "exists": true,
+        "sha256": "2267edcba066a78809dc1b0c207afe17e656b1b0a499bddecdab4da664d08d5c"
+      },
+      {
+        "role": "admin",
+        "viewport": "fixture-mobile",
+        "journey": "admin-crm-board",
+        "pageId": "m0",
+        "substate": null,
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-crm-board.png",
+        "exists": true,
+        "sha256": "9a242659744b867561b2a30968b393b4151cf2603674e916afc4441b1ed04465"
+      },
+      {
+        "role": "admin",
+        "viewport": "fixture-mobile",
+        "journey": "admin-crm-detail-pipeline",
+        "pageId": "m0-detail",
+        "substate": {
+          "view": "pipeline"
+        },
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-crm-detail-pipeline.png",
+        "exists": true,
+        "sha256": "26fdda92d9418aaad97220a325772bf419aee9667d5266c452adcb4c1653f039"
+      },
+      {
+        "role": "admin",
+        "viewport": "fixture-mobile",
+        "journey": "admin-crm-detail-seapool",
+        "pageId": "m0-detail",
+        "substate": {
+          "view": "seapool"
+        },
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-crm-detail-seapool.png",
+        "exists": true,
+        "sha256": "899194486569a4a93592eb0da88a64d0da30625e1cdde82b5d169e947f1880b7"
+      },
+      {
+        "role": "admin",
+        "viewport": "fixture-mobile",
+        "journey": "admin-crm-detail-opportunities",
+        "pageId": "m0-detail",
+        "substate": {
+          "view": "opportunities"
+        },
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-crm-detail-opportunities.png",
+        "exists": true,
+        "sha256": "dbe4fc61b59820ef388a2d9f2b4c6a645ac851d1b38dcb285375bff2901b8fb9"
+      },
+      {
+        "role": "admin",
+        "viewport": "fixture-mobile",
+        "journey": "admin-brand",
+        "pageId": "m1",
+        "substate": null,
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-brand.png",
+        "exists": true,
+        "sha256": "58744cdcc908f9f77c68a7ca996a54b826f9c8739233de5827bffb4a2035849a"
+      },
+      {
+        "role": "admin",
+        "viewport": "fixture-mobile",
+        "journey": "admin-strategy",
+        "pageId": "m2",
+        "substate": null,
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-strategy.png",
+        "exists": true,
+        "sha256": "ddcebd22a42421e31d41073fdd15cc343276de77dec6ce48d5908c03ae3915b1"
+      },
+      {
+        "role": "admin",
+        "viewport": "fixture-mobile",
+        "journey": "admin-demand-ppt",
+        "pageId": "m3",
+        "substate": {
+          "surface": "ppt"
+        },
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-demand-ppt.png",
+        "exists": true,
+        "sha256": "fce8f896fb8814ade7c710d58deb46ae64a65ee63b12dc3df880cc155a747081"
+      },
+      {
+        "role": "admin",
+        "viewport": "fixture-mobile",
+        "journey": "admin-m4-tab1",
+        "pageId": "m4",
+        "substate": {
+          "tab": "tab1"
+        },
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-m4-tab1.png",
+        "exists": true,
+        "sha256": "a0a824bcc20fb43dcc3f259761bcb0e3da13f69bb1a0704f273751d4a9875f9f"
+      },
+      {
+        "role": "admin",
+        "viewport": "fixture-mobile",
+        "journey": "admin-m4-tab2",
+        "pageId": "m4",
+        "substate": {
+          "tab": "tab2"
+        },
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-m4-tab2.png",
+        "exists": true,
+        "sha256": "8565a06cc9f6b577d353222caab7f0f24f431ec4e4034b34b55cdfded2955839"
+      },
+      {
+        "role": "admin",
+        "viewport": "fixture-mobile",
+        "journey": "admin-m4-tab3",
+        "pageId": "m4",
+        "substate": {
+          "tab": "tab3"
+        },
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-m4-tab3.png",
+        "exists": true,
+        "sha256": "68b1a6f21110dc536bcdfe81ae2d4a7b0c39de52329e9d02a051e6f48b7d87e5"
+      },
+      {
+        "role": "admin",
+        "viewport": "fixture-mobile",
+        "journey": "admin-ai",
+        "pageId": "m5",
+        "substate": null,
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-ai.png",
+        "exists": true,
+        "sha256": "1da46470e941fb00dd9814fe7736cbaf78582f6a6f02968a90c58e97e22974c3"
+      },
+      {
+        "role": "admin",
+        "viewport": "fixture-mobile",
+        "journey": "admin-workflow-designer",
+        "pageId": "workflow-designer",
+        "substate": null,
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-workflow-designer.png",
+        "exists": true,
+        "sha256": "8dcd2422b5fdfd972e30fd813965aeb550b59d699e43ae2db822b303d56b4b00"
+      },
+      {
+        "role": "admin",
+        "viewport": "fixture-mobile",
+        "journey": "admin-workflow-templates",
+        "pageId": "workflow-templates",
+        "substate": null,
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-workflow-templates.png",
+        "exists": true,
+        "sha256": "4e42f59bbc9e7bdf3ab708301c29886ec2b4445bfe2a1b670875146cf742239e"
+      },
+      {
+        "role": "admin",
+        "viewport": "fixture-mobile",
+        "journey": "admin-workflow-instances",
+        "pageId": "workflow-instances",
+        "substate": null,
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-workflow-instances.png",
+        "exists": true,
+        "sha256": "c768c6886cfeb340be766282eb71dd2c102d0f6f09bc1d4821e8dbc1ac480af0"
+      },
+      {
+        "role": "admin",
+        "viewport": "fixture-mobile",
+        "journey": "admin-workflow-tasks",
+        "pageId": "workflow-tasks",
+        "substate": null,
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-workflow-tasks.png",
+        "exists": true,
+        "sha256": "b29a7fe1434a24b123ba88674f6df7c571620eb9e58ecccb4340d8901f14b68c"
+      },
+      {
+        "role": "admin",
+        "viewport": "fixture-mobile",
+        "journey": "admin-admin-overview",
+        "pageId": "admin",
+        "substate": {
+          "tab": "overview"
+        },
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-admin-overview.png",
+        "exists": true,
+        "sha256": "c0be8647d14e011cb9a52a6d6b04a0ddc48e05960581fb43b0054c058b5becbd"
+      },
+      {
+        "role": "admin",
+        "viewport": "fixture-mobile",
+        "journey": "admin-admin-users",
+        "pageId": "admin",
+        "substate": {
+          "tab": "users"
+        },
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-admin-users.png",
+        "exists": true,
+        "sha256": "546b36325c57ae3aa8ad6023aae8c88871f00b9c7db312593c1b3ca53b0b54a9"
+      },
+      {
+        "role": "admin",
+        "viewport": "fixture-mobile",
+        "journey": "admin-admin-knowledge",
+        "pageId": "admin",
+        "substate": {
+          "tab": "knowledge"
+        },
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-admin-knowledge.png",
+        "exists": true,
+        "sha256": "490bef96884d5d22d4689393522aa0ad7dc076535009878ecde7d69ed1c0924b"
+      },
+      {
+        "role": "admin",
+        "viewport": "fixture-mobile",
+        "journey": "admin-admin-ai-audit",
+        "pageId": "admin",
+        "substate": {
+          "tab": "ai-audit"
+        },
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-admin-ai-audit.png",
+        "exists": true,
+        "sha256": "ac8e7d06f226f41387f1ac34011a6a0db268a44546d166006860953310026194"
+      },
+      {
+        "role": "admin",
+        "viewport": "fixture-mobile",
+        "journey": "admin-admin-tokens",
+        "pageId": "admin",
+        "substate": {
+          "tab": "tokens"
+        },
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-admin-tokens.png",
+        "exists": true,
+        "sha256": "e0e64094c0e06e15e8ad5b9e8b5961c92dcd48944dd8769a4e69f05363d43dbf"
+      },
+      {
+        "role": "user",
+        "viewport": "fixture-mobile",
+        "journey": "user-crm-board",
+        "pageId": "m0",
+        "substate": null,
+        "path": "docs/baselines/v0.2.9/screenshots/user/fixture-mobile/user-crm-board.png",
+        "exists": true,
+        "sha256": "6133e4b9c0c28db248d430ca943022f632012180958ad7c7b778e1c7e92cba10"
+      },
+      {
+        "role": "user",
+        "viewport": "fixture-mobile",
+        "journey": "user-crm-detail",
+        "pageId": "m0-detail",
+        "substate": {
+          "view": "pipeline"
+        },
+        "path": "docs/baselines/v0.2.9/screenshots/user/fixture-mobile/user-crm-detail.png",
+        "exists": true,
+        "sha256": "8d3d8112c14bae31a016a8c41274244816f233ab89ed7564e223a5f47de956fe"
+      },
+      {
+        "role": "user",
+        "viewport": "fixture-mobile",
+        "journey": "user-ai",
+        "pageId": "m5",
+        "substate": null,
+        "path": "docs/baselines/v0.2.9/screenshots/user/fixture-mobile/user-ai.png",
+        "exists": true,
+        "sha256": "e2415f0f427ae064045a9e3bb9e3bd22b5d3f3750f049ac61c1e364cb212ab53"
+      }
+    ],
+    "duplicateInventory": {
+      "source": "platform/server/tests/fixtures/frontend-active-definitions.json",
+      "exists": true,
+      "reviewedDuplicateCount": 39,
+      "duplicates": [
+        "addChatMsg",
+        "adminCreateInvite",
+        "adminResetPw",
+        "clearChat",
+        "closeCustModal",
+        "downloadInfTemplate",
+        "esc",
+        "exportAll",
+        "exportBrandCSV",
+        "exportFiltered",
+        "exportInf",
+        "exportSelected",
+        "filterBrands",
+        "filterByTag",
+        "filterByTreeTag",
+        "generateHTMLPPT",
+        "getSelectedInfIds",
+        "handleUpload",
+        "importInfluencers",
+        "initM1",
+        "initM4",
+        "loadAdminDashboard",
+        "loadCollaborations",
+        "loadInfluencersFromAPI",
+        "loadSocialForBrand",
+        "matchInfluencers",
+        "pushToFeishu",
+        "renderBrands",
+        "renderCollabTable",
+        "renderIndustryTree",
+        "renderInfTable",
+        "renderSearchHistory",
+        "showInfPreview",
+        "startCollab",
+        "switchPlatformTab",
+        "toggleAll",
+        "toggleBrandSocial",
+        "trackTokenUsage",
+        "updateCollabStatus"
+      ],
+      "activeDefinitions": {
+        "addChatMsg": {
+          "name": "addChatMsg",
+          "source": "platform/app.js",
+          "kind": "function",
+          "async": false,
+          "line": 3584,
+          "column": 1,
+          "loadOrder": 1,
+          "occurrenceIndex": 2,
+          "globalIndex": 266
+        },
+        "adminCreateInvite": {
+          "name": "adminCreateInvite",
+          "source": "platform/app.js",
+          "kind": "function",
+          "async": false,
+          "line": 3783,
+          "column": 1,
+          "loadOrder": 1,
+          "occurrenceIndex": 3,
+          "globalIndex": 285
+        },
+        "adminResetPw": {
+          "name": "adminResetPw",
+          "source": "platform/app.js",
+          "kind": "function",
+          "async": false,
+          "line": 3782,
+          "column": 1,
+          "loadOrder": 1,
+          "occurrenceIndex": 3,
+          "globalIndex": 284
+        },
+        "clearChat": {
+          "name": "clearChat",
+          "source": "platform/app.js",
+          "kind": "function",
+          "async": false,
+          "line": 3594,
+          "column": 1,
+          "loadOrder": 1,
+          "occurrenceIndex": 2,
+          "globalIndex": 267
+        },
+        "closeCustModal": {
+          "name": "closeCustModal",
+          "source": "platform/app.js",
+          "kind": "function",
+          "async": false,
+          "line": 373,
+          "column": 1,
+          "loadOrder": 1,
+          "occurrenceIndex": 2,
+          "globalIndex": 19
+        },
+        "downloadInfTemplate": {
+          "name": "downloadInfTemplate",
+          "source": "platform/app.js",
+          "kind": "function",
+          "async": true,
+          "line": 3352,
+          "column": 1,
+          "loadOrder": 1,
+          "occurrenceIndex": 3,
+          "globalIndex": 253
+        },
+        "esc": {
+          "name": "esc",
+          "source": "platform/ppt.js",
+          "kind": "function",
+          "async": false,
+          "line": 864,
+          "column": 1,
+          "loadOrder": 2,
+          "occurrenceIndex": 2,
+          "globalIndex": 341
+        },
+        "exportAll": {
+          "name": "exportAll",
+          "source": "platform/app.js",
+          "kind": "function",
+          "async": false,
+          "line": 3267,
+          "column": 1,
+          "loadOrder": 1,
+          "occurrenceIndex": 2,
+          "globalIndex": 242
+        },
+        "exportBrandCSV": {
+          "name": "exportBrandCSV",
+          "source": "platform/app.js",
+          "kind": "function",
+          "async": false,
+          "line": 2631,
+          "column": 1,
+          "loadOrder": 1,
+          "occurrenceIndex": 2,
+          "globalIndex": 182
+        },
+        "exportFiltered": {
+          "name": "exportFiltered",
+          "source": "platform/app.js",
+          "kind": "function",
+          "async": false,
+          "line": 3268,
+          "column": 1,
+          "loadOrder": 1,
+          "occurrenceIndex": 2,
+          "globalIndex": 243
+        },
+        "exportInf": {
+          "name": "exportInf",
+          "source": "platform/app.js",
+          "kind": "function",
+          "async": false,
+          "line": 3274,
+          "column": 1,
+          "loadOrder": 1,
+          "occurrenceIndex": 2,
+          "globalIndex": 245
+        },
+        "exportSelected": {
+          "name": "exportSelected",
+          "source": "platform/app.js",
+          "kind": "function",
+          "async": false,
+          "line": 3269,
+          "column": 1,
+          "loadOrder": 1,
+          "occurrenceIndex": 2,
+          "globalIndex": 244
+        },
+        "filterBrands": {
+          "name": "filterBrands",
+          "source": "platform/app.js",
+          "kind": "function",
+          "async": false,
+          "line": 2400,
+          "column": 1,
+          "loadOrder": 1,
+          "occurrenceIndex": 2,
+          "globalIndex": 161
+        },
+        "filterByTag": {
+          "name": "filterByTag",
+          "source": "platform/app.js",
+          "kind": "function",
+          "async": false,
+          "line": 2422,
+          "column": 1,
+          "loadOrder": 1,
+          "occurrenceIndex": 2,
+          "globalIndex": 162
+        },
+        "filterByTreeTag": {
+          "name": "filterByTreeTag",
+          "source": "platform/app.js",
+          "kind": "function",
+          "async": false,
+          "line": 2423,
+          "column": 1,
+          "loadOrder": 1,
+          "occurrenceIndex": 2,
+          "globalIndex": 163
+        },
+        "generateHTMLPPT": {
+          "name": "generateHTMLPPT",
+          "source": "platform/ppt.js",
+          "kind": "function",
+          "async": true,
+          "line": 40,
+          "column": 1,
+          "loadOrder": 2,
+          "occurrenceIndex": 2,
+          "globalIndex": 292
+        },
+        "getSelectedInfIds": {
+          "name": "getSelectedInfIds",
+          "source": "platform/app.js",
+          "kind": "function",
+          "async": false,
+          "line": 3259,
+          "column": 1,
+          "loadOrder": 1,
+          "occurrenceIndex": 2,
+          "globalIndex": 241
+        },
+        "handleUpload": {
+          "name": "handleUpload",
+          "source": "platform/app.js",
+          "kind": "function",
+          "async": false,
+          "line": 3310,
+          "column": 1,
+          "loadOrder": 1,
+          "occurrenceIndex": 2,
+          "globalIndex": 247
+        },
+        "importInfluencers": {
+          "name": "importInfluencers",
+          "source": "platform/app.js",
+          "kind": "function",
+          "async": false,
+          "line": 3328,
+          "column": 1,
+          "loadOrder": 1,
+          "occurrenceIndex": 2,
+          "globalIndex": 251
+        },
+        "initM1": {
+          "name": "initM1",
+          "source": "platform/app.js",
+          "kind": "function",
+          "async": false,
+          "line": 2361,
+          "column": 1,
+          "loadOrder": 1,
+          "occurrenceIndex": 2,
+          "globalIndex": 159
+        },
+        "initM4": {
+          "name": "initM4",
+          "source": "platform/app.js",
+          "kind": "function",
+          "async": false,
+          "line": 3191,
+          "column": 1,
+          "loadOrder": 1,
+          "occurrenceIndex": 3,
+          "globalIndex": 234
+        },
+        "loadAdminDashboard": {
+          "name": "loadAdminDashboard",
+          "source": "platform/app.js",
+          "kind": "function",
+          "async": false,
+          "line": 3604,
+          "column": 1,
+          "loadOrder": 1,
+          "occurrenceIndex": 3,
+          "globalIndex": 270
+        },
+        "loadCollaborations": {
+          "name": "loadCollaborations",
+          "source": "platform/app.js",
+          "kind": "function",
+          "async": true,
+          "line": 3455,
+          "column": 1,
+          "loadOrder": 1,
+          "occurrenceIndex": 2,
+          "globalIndex": 259
+        },
+        "loadInfluencersFromAPI": {
+          "name": "loadInfluencersFromAPI",
+          "source": "platform/app.js",
+          "kind": "function",
+          "async": false,
+          "line": 3205,
+          "column": 1,
+          "loadOrder": 1,
+          "occurrenceIndex": 3,
+          "globalIndex": 236
+        },
+        "loadSocialForBrand": {
+          "name": "loadSocialForBrand",
+          "source": "platform/app.js",
+          "kind": "function",
+          "async": false,
+          "line": 2606,
+          "column": 1,
+          "loadOrder": 1,
+          "occurrenceIndex": 2,
+          "globalIndex": 177
+        },
+        "matchInfluencers": {
+          "name": "matchInfluencers",
+          "source": "platform/app.js",
+          "kind": "function",
+          "async": false,
+          "line": 3224,
+          "column": 1,
+          "loadOrder": 1,
+          "occurrenceIndex": 3,
+          "globalIndex": 237
+        },
+        "pushToFeishu": {
+          "name": "pushToFeishu",
+          "source": "platform/app.js",
+          "kind": "function",
+          "async": true,
+          "line": 3363,
+          "column": 1,
+          "loadOrder": 1,
+          "occurrenceIndex": 2,
+          "globalIndex": 254
+        },
+        "renderBrands": {
+          "name": "renderBrands",
+          "source": "platform/app.js",
+          "kind": "function",
+          "async": false,
+          "line": 2439,
+          "column": 1,
+          "loadOrder": 1,
+          "occurrenceIndex": 2,
+          "globalIndex": 165
+        },
+        "renderCollabTable": {
+          "name": "renderCollabTable",
+          "source": "platform/app.js",
+          "kind": "function",
+          "async": false,
+          "line": 3481,
+          "column": 1,
+          "loadOrder": 1,
+          "occurrenceIndex": 2,
+          "globalIndex": 261
+        },
+        "renderIndustryTree": {
+          "name": "renderIndustryTree",
+          "source": "platform/app.js",
+          "kind": "function",
+          "async": false,
+          "line": 2372,
+          "column": 1,
+          "loadOrder": 1,
+          "occurrenceIndex": 2,
+          "globalIndex": 160
+        },
+        "renderInfTable": {
+          "name": "renderInfTable",
+          "source": "platform/app.js",
+          "kind": "function",
+          "async": false,
+          "line": 3231,
+          "column": 1,
+          "loadOrder": 1,
+          "occurrenceIndex": 3,
+          "globalIndex": 239
+        },
+        "renderSearchHistory": {
+          "name": "renderSearchHistory",
+          "source": "platform/app.js",
+          "kind": "function",
+          "async": false,
+          "line": 2430,
+          "column": 1,
+          "loadOrder": 1,
+          "occurrenceIndex": 2,
+          "globalIndex": 164
+        },
+        "showInfPreview": {
+          "name": "showInfPreview",
+          "source": "platform/app.js",
+          "kind": "function",
+          "async": false,
+          "line": 3336,
+          "column": 1,
+          "loadOrder": 1,
+          "occurrenceIndex": 2,
+          "globalIndex": 252
+        },
+        "startCollab": {
+          "name": "startCollab",
+          "source": "platform/app.js",
+          "kind": "function",
+          "async": false,
+          "line": 3394,
+          "column": 1,
+          "loadOrder": 1,
+          "occurrenceIndex": 2,
+          "globalIndex": 256
+        },
+        "switchPlatformTab": {
+          "name": "switchPlatformTab",
+          "source": "platform/app.js",
+          "kind": "function",
+          "async": false,
+          "line": 2607,
+          "column": 1,
+          "loadOrder": 1,
+          "occurrenceIndex": 2,
+          "globalIndex": 178
+        },
+        "toggleAll": {
+          "name": "toggleAll",
+          "source": "platform/app.js",
+          "kind": "function",
+          "async": false,
+          "line": 3256,
+          "column": 1,
+          "loadOrder": 1,
+          "occurrenceIndex": 2,
+          "globalIndex": 240
+        },
+        "toggleBrandSocial": {
+          "name": "toggleBrandSocial",
+          "source": "platform/app.js",
+          "kind": "function",
+          "async": false,
+          "line": 2608,
+          "column": 1,
+          "loadOrder": 1,
+          "occurrenceIndex": 2,
+          "globalIndex": 179
+        },
+        "trackTokenUsage": {
+          "name": "trackTokenUsage",
+          "source": "platform/app.js",
+          "kind": "function",
+          "async": true,
+          "line": 960,
+          "column": 1,
+          "loadOrder": 1,
+          "occurrenceIndex": 2,
+          "globalIndex": 64
+        },
+        "updateCollabStatus": {
+          "name": "updateCollabStatus",
+          "source": "platform/app.js",
+          "kind": "function",
+          "async": true,
+          "line": 3505,
+          "column": 1,
+          "loadOrder": 1,
+          "occurrenceIndex": 2,
+          "globalIndex": 262
+        }
+      },
+      "sha256": "00974e763a135b94ffabf83c74400eba09f9c02f02e7b1168ee74251739aac28"
+    }
   },
   "browserBaseline": {
     "schemaVersion": 1,
@@ -1996,7 +3537,7 @@
     "maxDiffPixelRatio": 0.005,
     "maxObservedDiffRatio": 0,
     "totalDiffPixels": 0,
-    "totalRawDiffPixels": 37,
+    "totalRawDiffPixels": 152,
     "fileCount": 72,
     "left": {
       "label": "baseline-run-a",
@@ -2182,8 +3723,8 @@
     "screenshots": [
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-admin-ai-audit.png",
-        "leftSha256": "52844f70b1e4d35d95c7d93f9e4c59450c4f6b79faddc807e109e049c57c7f3b",
-        "rightSha256": "52844f70b1e4d35d95c7d93f9e4c59450c4f6b79faddc807e109e049c57c7f3b",
+        "leftSha256": "af730ad48a0791b95dc410f646879bb9b1ec632de78cd489f00438c717147840",
+        "rightSha256": "af730ad48a0791b95dc410f646879bb9b1ec632de78cd489f00438c717147840",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -2191,12 +3732,12 @@
         "maxChannelDelta": 0,
         "width": 1440,
         "height": 900,
-        "bytes": 270486
+        "bytes": 304693
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-admin-knowledge.png",
-        "leftSha256": "8a02a35d7a5d5c00a07795b5173fc3759eb3cc7f187bf994725c3f79c3bccf36",
-        "rightSha256": "8a02a35d7a5d5c00a07795b5173fc3759eb3cc7f187bf994725c3f79c3bccf36",
+        "leftSha256": "309128404aa0d2657e17c4ac77521200b3491a048859379d51542fbe9bf98c3b",
+        "rightSha256": "309128404aa0d2657e17c4ac77521200b3491a048859379d51542fbe9bf98c3b",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -2204,12 +3745,12 @@
         "maxChannelDelta": 0,
         "width": 1440,
         "height": 900,
-        "bytes": 320861
+        "bytes": 344605
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-admin-overview.png",
-        "leftSha256": "511ee1ae9c3393c23f53603faa39ea4c9c5ec8594176e94a793598f0156cb131",
-        "rightSha256": "511ee1ae9c3393c23f53603faa39ea4c9c5ec8594176e94a793598f0156cb131",
+        "leftSha256": "c81368f67056ba577360ec33ef903e2bf3cb3e5f47a36da9422512f6c7b0325f",
+        "rightSha256": "c81368f67056ba577360ec33ef903e2bf3cb3e5f47a36da9422512f6c7b0325f",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -2217,12 +3758,12 @@
         "maxChannelDelta": 0,
         "width": 1440,
         "height": 900,
-        "bytes": 271639
+        "bytes": 303460
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-admin-tokens.png",
-        "leftSha256": "e701d636a861265dcf9dba8a2aca91c367a731d96d1187c02e80f8680bb7ce82",
-        "rightSha256": "e701d636a861265dcf9dba8a2aca91c367a731d96d1187c02e80f8680bb7ce82",
+        "leftSha256": "aa8f9e5c30552c5a8a2a7b5f609d3a1103ba74f21211ba092e90d8a2f06b4479",
+        "rightSha256": "aa8f9e5c30552c5a8a2a7b5f609d3a1103ba74f21211ba092e90d8a2f06b4479",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -2230,12 +3771,12 @@
         "maxChannelDelta": 0,
         "width": 1440,
         "height": 900,
-        "bytes": 312814
+        "bytes": 334594
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-admin-users.png",
-        "leftSha256": "44daa53cd34a0a1c838977fb01490158b046dfe5b621da52c0f536e7fc5ac7cc",
-        "rightSha256": "44daa53cd34a0a1c838977fb01490158b046dfe5b621da52c0f536e7fc5ac7cc",
+        "leftSha256": "a9a71538972e50cb671fe3d75b2e702fbf8e9c4303a577d3bf810ca8ff02cf0d",
+        "rightSha256": "a9a71538972e50cb671fe3d75b2e702fbf8e9c4303a577d3bf810ca8ff02cf0d",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -2243,7 +3784,7 @@
         "maxChannelDelta": 0,
         "width": 1440,
         "height": 900,
-        "bytes": 258446
+        "bytes": 292293
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-ai.png",
@@ -2286,21 +3827,21 @@
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-crm-detail-opportunities.png",
-        "leftSha256": "6cf97ceb6704ce12d53f3d5845a9a9e0ec3f65d0821857e1e63809ce1bbae3f1",
-        "rightSha256": "6cf97ceb6704ce12d53f3d5845a9a9e0ec3f65d0821857e1e63809ce1bbae3f1",
-        "identical": true,
+        "leftSha256": "7dc16d0329c1cc84a5f2cade0853dbe2071f9bc245db9612ca905b47669981a8",
+        "rightSha256": "728d037ff46aeb7e78820d6c2b6979522414bfe4143596b39eb38ddcb6d6baf6",
+        "identical": false,
         "diffPixels": 0,
         "diffPixelRatio": 0,
-        "rawDiffPixels": 0,
-        "maxChannelDelta": 0,
+        "rawDiffPixels": 34,
+        "maxChannelDelta": 6,
         "width": 1440,
         "height": 900,
-        "bytes": 358859
+        "bytes": 366477
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-crm-detail-pipeline.png",
-        "leftSha256": "0aff37c8ef8a3f1352a577722531ceb4933fe92ebeddca29537ad39faa4e3085",
-        "rightSha256": "0aff37c8ef8a3f1352a577722531ceb4933fe92ebeddca29537ad39faa4e3085",
+        "leftSha256": "e3bc11d52c6537cc81f26c7fa00bc6c50b3e6434a3ca7210b8d4ae40aeddf733",
+        "rightSha256": "e3bc11d52c6537cc81f26c7fa00bc6c50b3e6434a3ca7210b8d4ae40aeddf733",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -2308,7 +3849,7 @@
         "maxChannelDelta": 0,
         "width": 1440,
         "height": 900,
-        "bytes": 359274
+        "bytes": 368060
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-crm-detail-seapool.png",
@@ -2338,8 +3879,8 @@
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-m4-tab1.png",
-        "leftSha256": "16c374099021de922968ae3764d825f6180c3c891c2372bf09d158e4e43af7c2",
-        "rightSha256": "16c374099021de922968ae3764d825f6180c3c891c2372bf09d158e4e43af7c2",
+        "leftSha256": "6f2d0abeea670635fa6b8ebce9fcfcbdbc96370673b13d6fbc7b02e3f5eca2e4",
+        "rightSha256": "6f2d0abeea670635fa6b8ebce9fcfcbdbc96370673b13d6fbc7b02e3f5eca2e4",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -2347,12 +3888,12 @@
         "maxChannelDelta": 0,
         "width": 1440,
         "height": 900,
-        "bytes": 297758
+        "bytes": 318313
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-m4-tab2.png",
-        "leftSha256": "fdb3221e5c0c4dc896dda4720888e74ea8f5adbe5afe066fb687cb683a227051",
-        "rightSha256": "fdb3221e5c0c4dc896dda4720888e74ea8f5adbe5afe066fb687cb683a227051",
+        "leftSha256": "1d275e0566601d05ec9cd51b558e3fc2de521258a52703c488552ddf78bf3d63",
+        "rightSha256": "1d275e0566601d05ec9cd51b558e3fc2de521258a52703c488552ddf78bf3d63",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -2360,12 +3901,12 @@
         "maxChannelDelta": 0,
         "width": 1440,
         "height": 900,
-        "bytes": 319191
+        "bytes": 342693
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-m4-tab3.png",
-        "leftSha256": "51cfc189b0c72cc4e6dfcf41b34ec561bef01870c91cdf2e22cac71e15b35489",
-        "rightSha256": "51cfc189b0c72cc4e6dfcf41b34ec561bef01870c91cdf2e22cac71e15b35489",
+        "leftSha256": "afdfe0d52428925d79539c3f9c1b6aba0237f969633beb66002696c6932f0024",
+        "rightSha256": "afdfe0d52428925d79539c3f9c1b6aba0237f969633beb66002696c6932f0024",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -2373,7 +3914,7 @@
         "maxChannelDelta": 0,
         "width": 1440,
         "height": 900,
-        "bytes": 312507
+        "bytes": 345244
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-strategy.png",
@@ -2442,8 +3983,8 @@
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-admin-ai-audit.png",
-        "leftSha256": "b7a177cbe9418f25b183ad7b086f9d6ad230cced300c1a678a378280d09fb0f2",
-        "rightSha256": "b7a177cbe9418f25b183ad7b086f9d6ad230cced300c1a678a378280d09fb0f2",
+        "leftSha256": "82c2f1fd9b863be80ce15200d94439b4086680decd4451c8651da5ce1e420d93",
+        "rightSha256": "82c2f1fd9b863be80ce15200d94439b4086680decd4451c8651da5ce1e420d93",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -2451,12 +3992,12 @@
         "maxChannelDelta": 0,
         "width": 1920,
         "height": 1080,
-        "bytes": 404388
+        "bytes": 451275
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-admin-knowledge.png",
-        "leftSha256": "2c51a21dbd7220c2712642e1920e0b43031073f160b4d58b4d43a0a899d18dd1",
-        "rightSha256": "2c51a21dbd7220c2712642e1920e0b43031073f160b4d58b4d43a0a899d18dd1",
+        "leftSha256": "5ce472813705c4b972c5c743456b7e2054fd601625213e9e674424d1502a806c",
+        "rightSha256": "5ce472813705c4b972c5c743456b7e2054fd601625213e9e674424d1502a806c",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -2464,12 +4005,12 @@
         "maxChannelDelta": 0,
         "width": 1920,
         "height": 1080,
-        "bytes": 482947
+        "bytes": 510725
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-admin-overview.png",
-        "leftSha256": "a3d8fcd1f896c81d9094c3fd6fba5b53fca7713fe84651bd6f4585988d0b2b2d",
-        "rightSha256": "a3d8fcd1f896c81d9094c3fd6fba5b53fca7713fe84651bd6f4585988d0b2b2d",
+        "leftSha256": "8cea1d8ad5f57c38c9141c4ad08408cbb922975f3ef7c0023213f67d61623e73",
+        "rightSha256": "8cea1d8ad5f57c38c9141c4ad08408cbb922975f3ef7c0023213f67d61623e73",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -2477,12 +4018,12 @@
         "maxChannelDelta": 0,
         "width": 1920,
         "height": 1080,
-        "bytes": 370444
+        "bytes": 414217
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-admin-tokens.png",
-        "leftSha256": "5bc1e2bc8203f6b69efce9a063bfab09c22a9a34571cf002c91672d731e03dff",
-        "rightSha256": "5bc1e2bc8203f6b69efce9a063bfab09c22a9a34571cf002c91672d731e03dff",
+        "leftSha256": "d899cb29f6cf19d065f08849d06dd2f0d29e1f7281bc6c1bf6209baf74131e49",
+        "rightSha256": "d899cb29f6cf19d065f08849d06dd2f0d29e1f7281bc6c1bf6209baf74131e49",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -2490,20 +4031,20 @@
         "maxChannelDelta": 0,
         "width": 1920,
         "height": 1080,
-        "bytes": 472190
+        "bytes": 498304
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-admin-users.png",
-        "leftSha256": "90ef8029bd6ca1110fab7fb225ef47e0b8983d45dee71b075e583761008abfd1",
-        "rightSha256": "156a70ac017f50a1ee3f34ecbedcd5b7347936ea8553476f22f1138120f5957b",
-        "identical": false,
+        "leftSha256": "ff29f30c3885abc6939ade8d94be78d2164babfae40a4c6371bf893f920498c7",
+        "rightSha256": "ff29f30c3885abc6939ade8d94be78d2164babfae40a4c6371bf893f920498c7",
+        "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
-        "rawDiffPixels": 12,
-        "maxChannelDelta": 2,
+        "rawDiffPixels": 0,
+        "maxChannelDelta": 0,
         "width": 1920,
         "height": 1080,
-        "bytes": 367521
+        "bytes": 415207
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-ai.png",
@@ -2546,21 +4087,21 @@
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-crm-detail-opportunities.png",
-        "leftSha256": "6ec067e42881df61c2638b306e1c440d1e944561500014137fff2bf3ec7d88e7",
-        "rightSha256": "6ec067e42881df61c2638b306e1c440d1e944561500014137fff2bf3ec7d88e7",
-        "identical": true,
+        "leftSha256": "90a59ecfeb3f091aed7eaed5e5a69341596e9cec57a00402d7650adede0250dc",
+        "rightSha256": "8b76db5977ec0a0009da1d1f6f5c4015b05b192ef236878d7d9589185bdf90f2",
+        "identical": false,
         "diffPixels": 0,
         "diffPixelRatio": 0,
-        "rawDiffPixels": 0,
-        "maxChannelDelta": 0,
+        "rawDiffPixels": 19,
+        "maxChannelDelta": 7,
         "width": 1920,
         "height": 1080,
-        "bytes": 535971
+        "bytes": 544336
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-crm-detail-pipeline.png",
-        "leftSha256": "434e87fcca3508f9cb11a4c589ea2eca76d028e67abcc23f4ec34a7e4d38867c",
-        "rightSha256": "434e87fcca3508f9cb11a4c589ea2eca76d028e67abcc23f4ec34a7e4d38867c",
+        "leftSha256": "556e0e2ee35f764b1b027794621626a5527210ecfaec625e7be8d43181d8bb5f",
+        "rightSha256": "556e0e2ee35f764b1b027794621626a5527210ecfaec625e7be8d43181d8bb5f",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -2568,7 +4109,7 @@
         "maxChannelDelta": 0,
         "width": 1920,
         "height": 1080,
-        "bytes": 526786
+        "bytes": 536129
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-crm-detail-seapool.png",
@@ -2598,8 +4139,8 @@
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-m4-tab1.png",
-        "leftSha256": "ae8d10ee1ca78815599a1b8837fbd39ed55cda5bb0bfa7dfe1f8193317048d42",
-        "rightSha256": "ae8d10ee1ca78815599a1b8837fbd39ed55cda5bb0bfa7dfe1f8193317048d42",
+        "leftSha256": "ac784a5453704758eca73745a1808ea5b5a3968bc5e23940c23933a0ed07e287",
+        "rightSha256": "ac784a5453704758eca73745a1808ea5b5a3968bc5e23940c23933a0ed07e287",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -2607,12 +4148,12 @@
         "maxChannelDelta": 0,
         "width": 1920,
         "height": 1080,
-        "bytes": 449568
+        "bytes": 470067
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-m4-tab2.png",
-        "leftSha256": "8a3d6285aa6c5719897905e923373f3da18ca7809e2feefe7a010f71c30e2575",
-        "rightSha256": "8a3d6285aa6c5719897905e923373f3da18ca7809e2feefe7a010f71c30e2575",
+        "leftSha256": "bfe748fb3fe3b14c186a6e5746664b1950347c1f74269cb79be4fa76912918e9",
+        "rightSha256": "bfe748fb3fe3b14c186a6e5746664b1950347c1f74269cb79be4fa76912918e9",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -2620,12 +4161,12 @@
         "maxChannelDelta": 0,
         "width": 1920,
         "height": 1080,
-        "bytes": 459475
+        "bytes": 493184
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-m4-tab3.png",
-        "leftSha256": "ce7d66419c5c3686bfb37fd458b0ab2a3daceb5fa9b6eb1c5083fa381d9d0592",
-        "rightSha256": "ce7d66419c5c3686bfb37fd458b0ab2a3daceb5fa9b6eb1c5083fa381d9d0592",
+        "leftSha256": "7d62fc70d9ee28a04bd1481eee131e91d429ae7be1e91f2411df09d0b6fce275",
+        "rightSha256": "7d62fc70d9ee28a04bd1481eee131e91d429ae7be1e91f2411df09d0b6fce275",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -2633,7 +4174,7 @@
         "maxChannelDelta": 0,
         "width": 1920,
         "height": 1080,
-        "bytes": 436868
+        "bytes": 483601
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-strategy.png",
@@ -2650,8 +4191,8 @@
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-workflow-designer.png",
-        "leftSha256": "ffe948cbcdfc3bb49df8f9d5566e70e69eeba0169eb9691e16860098b720762c",
-        "rightSha256": "ffe948cbcdfc3bb49df8f9d5566e70e69eeba0169eb9691e16860098b720762c",
+        "leftSha256": "b22ab4d1e59c1fe14b19c4590342879249bc68537cbadbfbbaa5e56273745c78",
+        "rightSha256": "b22ab4d1e59c1fe14b19c4590342879249bc68537cbadbfbbaa5e56273745c78",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -2659,43 +4200,43 @@
         "maxChannelDelta": 0,
         "width": 1920,
         "height": 1080,
-        "bytes": 264835
+        "bytes": 264839
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-workflow-instances.png",
         "leftSha256": "29a0fc43b330ea6e7e13a1ddc4e7d5e355c5ae3124385f8dd0e902d875e3c4f0",
-        "rightSha256": "29a0fc43b330ea6e7e13a1ddc4e7d5e355c5ae3124385f8dd0e902d875e3c4f0",
-        "identical": true,
+        "rightSha256": "115c1c9c0b5eb3c43d26f8d1bbb54f21baaca787071e848090f082bedd832565",
+        "identical": false,
         "diffPixels": 0,
         "diffPixelRatio": 0,
-        "rawDiffPixels": 0,
-        "maxChannelDelta": 0,
+        "rawDiffPixels": 9,
+        "maxChannelDelta": 1,
         "width": 1920,
         "height": 1080,
-        "bytes": 517232
+        "bytes": 517237
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-workflow-tasks.png",
-        "leftSha256": "a01a2f3ee47fc19c33fda0fefb40ab4a3af14a296f4aed660bfc6a369818bfdc",
+        "leftSha256": "2d1ff51fa289999b982d8623f1fdf641cece77329fb18ea231fe6228be43ee67",
         "rightSha256": "a01a2f3ee47fc19c33fda0fefb40ab4a3af14a296f4aed660bfc6a369818bfdc",
-        "identical": true,
+        "identical": false,
         "diffPixels": 0,
         "diffPixelRatio": 0,
-        "rawDiffPixels": 0,
-        "maxChannelDelta": 0,
+        "rawDiffPixels": 9,
+        "maxChannelDelta": 1,
         "width": 1920,
         "height": 1080,
         "bytes": 420651
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-workflow-templates.png",
-        "leftSha256": "83327c1aadd4490f5d0c40fbbcf1b43095acfe4af0ab6a949b9a813f66469dc4",
+        "leftSha256": "07b522b457b7dce71417053a534f6c986dcbd727923560b1b81ecb7d08b27333",
         "rightSha256": "83327c1aadd4490f5d0c40fbbcf1b43095acfe4af0ab6a949b9a813f66469dc4",
-        "identical": true,
+        "identical": false,
         "diffPixels": 0,
         "diffPixelRatio": 0,
-        "rawDiffPixels": 0,
-        "maxChannelDelta": 0,
+        "rawDiffPixels": 9,
+        "maxChannelDelta": 1,
         "width": 1920,
         "height": 1080,
         "bytes": 520657
@@ -3014,8 +4555,8 @@
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/user/fixture-1440/user-crm-board.png",
-        "leftSha256": "1cfc9b2db0e245f0ca104d41c14cecf88918b6457cc99d6f27eb6ea83601220c",
-        "rightSha256": "f24315e65ba0a5e1f78143a868ddea5f504d26de601693dd7e0172d86cceadf9",
+        "leftSha256": "f24315e65ba0a5e1f78143a868ddea5f504d26de601693dd7e0172d86cceadf9",
+        "rightSha256": "1cfc9b2db0e245f0ca104d41c14cecf88918b6457cc99d6f27eb6ea83601220c",
         "identical": false,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -3027,8 +4568,8 @@
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/user/fixture-1440/user-crm-detail.png",
-        "leftSha256": "5381403622fcb64cb867d94959af00d63c7003698fa5d64970c084f9a43cd070",
-        "rightSha256": "5381403622fcb64cb867d94959af00d63c7003698fa5d64970c084f9a43cd070",
+        "leftSha256": "cce62152dfb4c360c2f61ba6ac8cde1ea88642d12caaf67c1d8561a483c6eb07",
+        "rightSha256": "cce62152dfb4c360c2f61ba6ac8cde1ea88642d12caaf67c1d8561a483c6eb07",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -3036,7 +4577,7 @@
         "maxChannelDelta": 0,
         "width": 1440,
         "height": 900,
-        "bytes": 363446
+        "bytes": 372182
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/user/fixture-1920/user-ai.png",
@@ -3053,8 +4594,957 @@
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/user/fixture-1920/user-crm-board.png",
-        "leftSha256": "27846304ebe3ca13d7b79f4dd7a645ee0b462486152e53160d279588473c82d3",
+        "leftSha256": "cb95c95f0ca2e42e942283c8802f1e467ba80427d042ba698eb58fecb3a30443",
         "rightSha256": "27846304ebe3ca13d7b79f4dd7a645ee0b462486152e53160d279588473c82d3",
+        "identical": false,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 2,
+        "maxChannelDelta": 3,
+        "width": 1920,
+        "height": 1080,
+        "bytes": 595246
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/user/fixture-1920/user-crm-detail.png",
+        "leftSha256": "faa8ee26ccc218cab79a8a7bb8747f479f0b45e862249c921a0902a827d89c01",
+        "rightSha256": "faa8ee26ccc218cab79a8a7bb8747f479f0b45e862249c921a0902a827d89c01",
+        "identical": true,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 0,
+        "maxChannelDelta": 0,
+        "width": 1920,
+        "height": 1080,
+        "bytes": 534136
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/user/fixture-mobile/user-ai.png",
+        "leftSha256": "4fcf488f14f38740e3afb308d8a8d40811c4823969987281c48f6cf0e215fcc7",
+        "rightSha256": "e2415f0f427ae064045a9e3bb9e3bd22b5d3f3750f049ac61c1e364cb212ab53",
+        "identical": false,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 33,
+        "maxChannelDelta": 2,
+        "width": 390,
+        "height": 844,
+        "bytes": 59244
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/user/fixture-mobile/user-crm-board.png",
+        "leftSha256": "6133e4b9c0c28db248d430ca943022f632012180958ad7c7b778e1c7e92cba10",
+        "rightSha256": "209006788a41987997c7e274d157d4cb27d2f82055d1513719cbbd6ed4b4c67e",
+        "identical": false,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 12,
+        "maxChannelDelta": 2,
+        "width": 390,
+        "height": 844,
+        "bytes": 61119
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/user/fixture-mobile/user-crm-detail.png",
+        "leftSha256": "8d3d8112c14bae31a016a8c41274244816f233ab89ed7564e223a5f47de956fe",
+        "rightSha256": "049c97c9199cf83ade9a1509530c36d74bc21824a86fd2f7d77162eaf17c3c64",
+        "identical": false,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 21,
+        "maxChannelDelta": 2,
+        "width": 390,
+        "height": 844,
+        "bytes": 62649
+      }
+    ]
+  },
+  "postEditComparison": {
+    "schemaVersion": 1,
+    "sourceCommit": "d0d4c62aeebfc806694788e28394bb58a6964ace",
+    "source": ".superpowers/sdd/browser-baseline-current",
+    "maxDiffPixelRatio": 0.005,
+    "maxObservedDiffRatio": 0,
+    "withinThreshold": true,
+    "totalDiffPixels": 0,
+    "totalRawDiffPixels": 1581408,
+    "fileCount": 72,
+    "screenshots": [
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-admin-ai-audit.png",
+        "preEditSha256": "52844f70b1e4d35d95c7d93f9e4c59450c4f6b79faddc807e109e049c57c7f3b",
+        "postEditSha256": "af730ad48a0791b95dc410f646879bb9b1ec632de78cd489f00438c717147840",
+        "identical": false,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 77947,
+        "maxChannelDelta": 1,
+        "width": 1440,
+        "height": 900,
+        "bytes": 304693
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-admin-knowledge.png",
+        "preEditSha256": "8a02a35d7a5d5c00a07795b5173fc3759eb3cc7f187bf994725c3f79c3bccf36",
+        "postEditSha256": "309128404aa0d2657e17c4ac77521200b3491a048859379d51542fbe9bf98c3b",
+        "identical": false,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 51999,
+        "maxChannelDelta": 1,
+        "width": 1440,
+        "height": 900,
+        "bytes": 344605
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-admin-overview.png",
+        "preEditSha256": "511ee1ae9c3393c23f53603faa39ea4c9c5ec8594176e94a793598f0156cb131",
+        "postEditSha256": "c81368f67056ba577360ec33ef903e2bf3cb3e5f47a36da9422512f6c7b0325f",
+        "identical": false,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 139165,
+        "maxChannelDelta": 1,
+        "width": 1440,
+        "height": 900,
+        "bytes": 303460
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-admin-tokens.png",
+        "preEditSha256": "e701d636a861265dcf9dba8a2aca91c367a731d96d1187c02e80f8680bb7ce82",
+        "postEditSha256": "aa8f9e5c30552c5a8a2a7b5f609d3a1103ba74f21211ba092e90d8a2f06b4479",
+        "identical": false,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 44838,
+        "maxChannelDelta": 1,
+        "width": 1440,
+        "height": 900,
+        "bytes": 334594
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-admin-users.png",
+        "preEditSha256": "44daa53cd34a0a1c838977fb01490158b046dfe5b621da52c0f536e7fc5ac7cc",
+        "postEditSha256": "a9a71538972e50cb671fe3d75b2e702fbf8e9c4303a577d3bf810ca8ff02cf0d",
+        "identical": false,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 80695,
+        "maxChannelDelta": 1,
+        "width": 1440,
+        "height": 900,
+        "bytes": 292293
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-ai.png",
+        "preEditSha256": "8eb0321dbc351d71ec43d0c13a1c16d164abdab4966cfb35d0aedc20a7b5bf12",
+        "postEditSha256": "8eb0321dbc351d71ec43d0c13a1c16d164abdab4966cfb35d0aedc20a7b5bf12",
+        "identical": true,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 0,
+        "maxChannelDelta": 0,
+        "width": 1440,
+        "height": 900,
+        "bytes": 246906
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-brand.png",
+        "preEditSha256": "c82af836144fbaf1cf2534ee092226c3982ee77c2d21e174b67a3a03f65a2427",
+        "postEditSha256": "c82af836144fbaf1cf2534ee092226c3982ee77c2d21e174b67a3a03f65a2427",
+        "identical": true,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 0,
+        "maxChannelDelta": 0,
+        "width": 1440,
+        "height": 900,
+        "bytes": 357603
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-crm-board.png",
+        "preEditSha256": "8fcf7c5e5a0e4e6555d17146b2ca4617e3fcbeeac6131e33c8384feac3727e16",
+        "postEditSha256": "1973778dbfdc1c8cd04be6f130bdeca3f0ab957eab15db670e1b9bea4de664a3",
+        "identical": false,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 2,
+        "maxChannelDelta": 3,
+        "width": 1440,
+        "height": 900,
+        "bytes": 425228
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-crm-detail-opportunities.png",
+        "preEditSha256": "6cf97ceb6704ce12d53f3d5845a9a9e0ec3f65d0821857e1e63809ce1bbae3f1",
+        "postEditSha256": "7dc16d0329c1cc84a5f2cade0853dbe2071f9bc245db9612ca905b47669981a8",
+        "identical": false,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 19275,
+        "maxChannelDelta": 1,
+        "width": 1440,
+        "height": 900,
+        "bytes": 366483
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-crm-detail-pipeline.png",
+        "preEditSha256": "0aff37c8ef8a3f1352a577722531ceb4933fe92ebeddca29537ad39faa4e3085",
+        "postEditSha256": "e3bc11d52c6537cc81f26c7fa00bc6c50b3e6434a3ca7210b8d4ae40aeddf733",
+        "identical": false,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 34148,
+        "maxChannelDelta": 1,
+        "width": 1440,
+        "height": 900,
+        "bytes": 368060
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-crm-detail-seapool.png",
+        "preEditSha256": "1e8e0920a6affb7795304786453f67ec74737bcd15437e2a2c872682cde8f66b",
+        "postEditSha256": "1e8e0920a6affb7795304786453f67ec74737bcd15437e2a2c872682cde8f66b",
+        "identical": true,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 0,
+        "maxChannelDelta": 0,
+        "width": 1440,
+        "height": 900,
+        "bytes": 391758
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-demand-ppt.png",
+        "preEditSha256": "00ce6579d36f90b4d404108afac608b060c59d16784092893dc850beeefa79b3",
+        "postEditSha256": "00ce6579d36f90b4d404108afac608b060c59d16784092893dc850beeefa79b3",
+        "identical": true,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 0,
+        "maxChannelDelta": 0,
+        "width": 1440,
+        "height": 900,
+        "bytes": 310536
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-m4-tab1.png",
+        "preEditSha256": "16c374099021de922968ae3764d825f6180c3c891c2372bf09d158e4e43af7c2",
+        "postEditSha256": "6f2d0abeea670635fa6b8ebce9fcfcbdbc96370673b13d6fbc7b02e3f5eca2e4",
+        "identical": false,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 40679,
+        "maxChannelDelta": 1,
+        "width": 1440,
+        "height": 900,
+        "bytes": 318313
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-m4-tab2.png",
+        "preEditSha256": "fdb3221e5c0c4dc896dda4720888e74ea8f5adbe5afe066fb687cb683a227051",
+        "postEditSha256": "1d275e0566601d05ec9cd51b558e3fc2de521258a52703c488552ddf78bf3d63",
+        "identical": false,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 56192,
+        "maxChannelDelta": 1,
+        "width": 1440,
+        "height": 900,
+        "bytes": 342693
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-m4-tab3.png",
+        "preEditSha256": "51cfc189b0c72cc4e6dfcf41b34ec561bef01870c91cdf2e22cac71e15b35489",
+        "postEditSha256": "afdfe0d52428925d79539c3f9c1b6aba0237f969633beb66002696c6932f0024",
+        "identical": false,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 77585,
+        "maxChannelDelta": 1,
+        "width": 1440,
+        "height": 900,
+        "bytes": 345244
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-strategy.png",
+        "preEditSha256": "abc6f47e47551cb6839b08663d400e6c19603c8294b33e2d9d6fc627d5a49113",
+        "postEditSha256": "abc6f47e47551cb6839b08663d400e6c19603c8294b33e2d9d6fc627d5a49113",
+        "identical": true,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 0,
+        "maxChannelDelta": 0,
+        "width": 1440,
+        "height": 900,
+        "bytes": 318257
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-workflow-designer.png",
+        "preEditSha256": "1dde7d7612204ee17369b022f11f34021c87e3665041c5ee7ae23530e280b8e9",
+        "postEditSha256": "1dde7d7612204ee17369b022f11f34021c87e3665041c5ee7ae23530e280b8e9",
+        "identical": true,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 0,
+        "maxChannelDelta": 0,
+        "width": 1440,
+        "height": 900,
+        "bytes": 189253
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-workflow-instances.png",
+        "preEditSha256": "5180176d8713e38a93e8942b936eec669e7c981c5b5a7ad15ee8e4e69d46d19f",
+        "postEditSha256": "5180176d8713e38a93e8942b936eec669e7c981c5b5a7ad15ee8e4e69d46d19f",
+        "identical": true,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 0,
+        "maxChannelDelta": 0,
+        "width": 1440,
+        "height": 900,
+        "bytes": 350161
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-workflow-tasks.png",
+        "preEditSha256": "31fefa02213e2ed22ed3a50746e34ad6112c9a7f3c74d51098de65cbddb4f6bc",
+        "postEditSha256": "31fefa02213e2ed22ed3a50746e34ad6112c9a7f3c74d51098de65cbddb4f6bc",
+        "identical": true,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 0,
+        "maxChannelDelta": 0,
+        "width": 1440,
+        "height": 900,
+        "bytes": 292039
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-workflow-templates.png",
+        "preEditSha256": "012e73b492b4a0f60fedc70ea738b06a881479edb2058384e98e8071c787c8a5",
+        "postEditSha256": "012e73b492b4a0f60fedc70ea738b06a881479edb2058384e98e8071c787c8a5",
+        "identical": true,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 0,
+        "maxChannelDelta": 0,
+        "width": 1440,
+        "height": 900,
+        "bytes": 352906
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-admin-ai-audit.png",
+        "preEditSha256": "b7a177cbe9418f25b183ad7b086f9d6ad230cced300c1a678a378280d09fb0f2",
+        "postEditSha256": "82c2f1fd9b863be80ce15200d94439b4086680decd4451c8651da5ce1e420d93",
+        "identical": false,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 113507,
+        "maxChannelDelta": 2,
+        "width": 1920,
+        "height": 1080,
+        "bytes": 451275
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-admin-knowledge.png",
+        "preEditSha256": "2c51a21dbd7220c2712642e1920e0b43031073f160b4d58b4d43a0a899d18dd1",
+        "postEditSha256": "5ce472813705c4b972c5c743456b7e2054fd601625213e9e674424d1502a806c",
+        "identical": false,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 70672,
+        "maxChannelDelta": 2,
+        "width": 1920,
+        "height": 1080,
+        "bytes": 510725
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-admin-overview.png",
+        "preEditSha256": "a3d8fcd1f896c81d9094c3fd6fba5b53fca7713fe84651bd6f4585988d0b2b2d",
+        "postEditSha256": "8cea1d8ad5f57c38c9141c4ad08408cbb922975f3ef7c0023213f67d61623e73",
+        "identical": false,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 219502,
+        "maxChannelDelta": 2,
+        "width": 1920,
+        "height": 1080,
+        "bytes": 414217
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-admin-tokens.png",
+        "preEditSha256": "5bc1e2bc8203f6b69efce9a063bfab09c22a9a34571cf002c91672d731e03dff",
+        "postEditSha256": "d899cb29f6cf19d065f08849d06dd2f0d29e1f7281bc6c1bf6209baf74131e49",
+        "identical": false,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 63639,
+        "maxChannelDelta": 2,
+        "width": 1920,
+        "height": 1080,
+        "bytes": 498304
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-admin-users.png",
+        "preEditSha256": "156a70ac017f50a1ee3f34ecbedcd5b7347936ea8553476f22f1138120f5957b",
+        "postEditSha256": "d1e828f0e3eb3c512f2adf2953204838fb843752e87e4a4f5d73cd2a790d6e41",
+        "identical": false,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 121492,
+        "maxChannelDelta": 1,
+        "width": 1920,
+        "height": 1080,
+        "bytes": 415201
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-ai.png",
+        "preEditSha256": "792a9983236efe3400a04518e5ed8d12d1c9547e3b66644b8bf088342fddce15",
+        "postEditSha256": "792a9983236efe3400a04518e5ed8d12d1c9547e3b66644b8bf088342fddce15",
+        "identical": true,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 0,
+        "maxChannelDelta": 0,
+        "width": 1920,
+        "height": 1080,
+        "bytes": 337882
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-brand.png",
+        "preEditSha256": "8d87745a0a1b4c64f7493b5a37ba55ad6d11b6586d6c7b7bb9b9d1bba6db6c53",
+        "postEditSha256": "8d87745a0a1b4c64f7493b5a37ba55ad6d11b6586d6c7b7bb9b9d1bba6db6c53",
+        "identical": true,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 0,
+        "maxChannelDelta": 0,
+        "width": 1920,
+        "height": 1080,
+        "bytes": 464457
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-crm-board.png",
+        "preEditSha256": "dd65f93035a72fb7df324d3d35add4dc9efe20b09a37c9994860f3a070eb796d",
+        "postEditSha256": "dd65f93035a72fb7df324d3d35add4dc9efe20b09a37c9994860f3a070eb796d",
+        "identical": true,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 0,
+        "maxChannelDelta": 0,
+        "width": 1920,
+        "height": 1080,
+        "bytes": 597465
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-crm-detail-opportunities.png",
+        "preEditSha256": "6ec067e42881df61c2638b306e1c440d1e944561500014137fff2bf3ec7d88e7",
+        "postEditSha256": "90a59ecfeb3f091aed7eaed5e5a69341596e9cec57a00402d7650adede0250dc",
+        "identical": false,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 24408,
+        "maxChannelDelta": 1,
+        "width": 1920,
+        "height": 1080,
+        "bytes": 544336
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-crm-detail-pipeline.png",
+        "preEditSha256": "434e87fcca3508f9cb11a4c589ea2eca76d028e67abcc23f4ec34a7e4d38867c",
+        "postEditSha256": "556e0e2ee35f764b1b027794621626a5527210ecfaec625e7be8d43181d8bb5f",
+        "identical": false,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 39478,
+        "maxChannelDelta": 1,
+        "width": 1920,
+        "height": 1080,
+        "bytes": 536129
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-crm-detail-seapool.png",
+        "preEditSha256": "c5e5301f251d932331d8f3b6a59c08692d252a35be57149869808ecc6c890c34",
+        "postEditSha256": "c5e5301f251d932331d8f3b6a59c08692d252a35be57149869808ecc6c890c34",
+        "identical": true,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 0,
+        "maxChannelDelta": 0,
+        "width": 1920,
+        "height": 1080,
+        "bytes": 564305
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-demand-ppt.png",
+        "preEditSha256": "cb4f4ad3592398e30dbdb2050282e1e91e6fcd176972a2b3204dad264e8b58b3",
+        "postEditSha256": "cb4f4ad3592398e30dbdb2050282e1e91e6fcd176972a2b3204dad264e8b58b3",
+        "identical": true,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 0,
+        "maxChannelDelta": 0,
+        "width": 1920,
+        "height": 1080,
+        "bytes": 437273
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-m4-tab1.png",
+        "preEditSha256": "ae8d10ee1ca78815599a1b8837fbd39ed55cda5bb0bfa7dfe1f8193317048d42",
+        "postEditSha256": "ac784a5453704758eca73745a1808ea5b5a3968bc5e23940c23933a0ed07e287",
+        "identical": false,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 39652,
+        "maxChannelDelta": 2,
+        "width": 1920,
+        "height": 1080,
+        "bytes": 470067
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-m4-tab2.png",
+        "preEditSha256": "8a3d6285aa6c5719897905e923373f3da18ca7809e2feefe7a010f71c30e2575",
+        "postEditSha256": "bfe748fb3fe3b14c186a6e5746664b1950347c1f74269cb79be4fa76912918e9",
+        "identical": false,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 81746,
+        "maxChannelDelta": 2,
+        "width": 1920,
+        "height": 1080,
+        "bytes": 493184
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-m4-tab3.png",
+        "preEditSha256": "ce7d66419c5c3686bfb37fd458b0ab2a3daceb5fa9b6eb1c5083fa381d9d0592",
+        "postEditSha256": "7d62fc70d9ee28a04bd1481eee131e91d429ae7be1e91f2411df09d0b6fce275",
+        "identical": false,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 111131,
+        "maxChannelDelta": 2,
+        "width": 1920,
+        "height": 1080,
+        "bytes": 483601
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-strategy.png",
+        "preEditSha256": "9d7b02d05cb54ae83e602972e05849e76faa6570403f997aef84fd0c94c5ae5d",
+        "postEditSha256": "9d7b02d05cb54ae83e602972e05849e76faa6570403f997aef84fd0c94c5ae5d",
+        "identical": true,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 0,
+        "maxChannelDelta": 0,
+        "width": 1920,
+        "height": 1080,
+        "bytes": 432861
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-workflow-designer.png",
+        "preEditSha256": "ffe948cbcdfc3bb49df8f9d5566e70e69eeba0169eb9691e16860098b720762c",
+        "postEditSha256": "ffe948cbcdfc3bb49df8f9d5566e70e69eeba0169eb9691e16860098b720762c",
+        "identical": true,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 0,
+        "maxChannelDelta": 0,
+        "width": 1920,
+        "height": 1080,
+        "bytes": 264835
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-workflow-instances.png",
+        "preEditSha256": "29a0fc43b330ea6e7e13a1ddc4e7d5e355c5ae3124385f8dd0e902d875e3c4f0",
+        "postEditSha256": "115c1c9c0b5eb3c43d26f8d1bbb54f21baaca787071e848090f082bedd832565",
+        "identical": false,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 9,
+        "maxChannelDelta": 1,
+        "width": 1920,
+        "height": 1080,
+        "bytes": 517237
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-workflow-tasks.png",
+        "preEditSha256": "a01a2f3ee47fc19c33fda0fefb40ab4a3af14a296f4aed660bfc6a369818bfdc",
+        "postEditSha256": "b767d9c99813fdb856e58f95d8d4c3158491f2539e1d0e1a0917f2d2d656cf59",
+        "identical": false,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 21,
+        "maxChannelDelta": 1,
+        "width": 1920,
+        "height": 1080,
+        "bytes": 420664
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-workflow-templates.png",
+        "preEditSha256": "83327c1aadd4490f5d0c40fbbcf1b43095acfe4af0ab6a949b9a813f66469dc4",
+        "postEditSha256": "83327c1aadd4490f5d0c40fbbcf1b43095acfe4af0ab6a949b9a813f66469dc4",
+        "identical": true,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 0,
+        "maxChannelDelta": 0,
+        "width": 1920,
+        "height": 1080,
+        "bytes": 520657
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-admin-ai-audit.png",
+        "preEditSha256": "ac8e7d06f226f41387f1ac34011a6a0db268a44546d166006860953310026194",
+        "postEditSha256": "ac8e7d06f226f41387f1ac34011a6a0db268a44546d166006860953310026194",
+        "identical": true,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 0,
+        "maxChannelDelta": 0,
+        "width": 390,
+        "height": 844,
+        "bytes": 54996
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-admin-knowledge.png",
+        "preEditSha256": "490bef96884d5d22d4689393522aa0ad7dc076535009878ecde7d69ed1c0924b",
+        "postEditSha256": "490bef96884d5d22d4689393522aa0ad7dc076535009878ecde7d69ed1c0924b",
+        "identical": true,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 0,
+        "maxChannelDelta": 0,
+        "width": 390,
+        "height": 844,
+        "bytes": 53276
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-admin-overview.png",
+        "preEditSha256": "c0be8647d14e011cb9a52a6d6b04a0ddc48e05960581fb43b0054c058b5becbd",
+        "postEditSha256": "c0be8647d14e011cb9a52a6d6b04a0ddc48e05960581fb43b0054c058b5becbd",
+        "identical": true,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 0,
+        "maxChannelDelta": 0,
+        "width": 390,
+        "height": 844,
+        "bytes": 59055
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-admin-tokens.png",
+        "preEditSha256": "e0e64094c0e06e15e8ad5b9e8b5961c92dcd48944dd8769a4e69f05363d43dbf",
+        "postEditSha256": "e0e64094c0e06e15e8ad5b9e8b5961c92dcd48944dd8769a4e69f05363d43dbf",
+        "identical": true,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 0,
+        "maxChannelDelta": 0,
+        "width": 390,
+        "height": 844,
+        "bytes": 53149
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-admin-users.png",
+        "preEditSha256": "546b36325c57ae3aa8ad6023aae8c88871f00b9c7db312593c1b3ca53b0b54a9",
+        "postEditSha256": "546b36325c57ae3aa8ad6023aae8c88871f00b9c7db312593c1b3ca53b0b54a9",
+        "identical": true,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 0,
+        "maxChannelDelta": 0,
+        "width": 390,
+        "height": 844,
+        "bytes": 56392
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-ai.png",
+        "preEditSha256": "1da46470e941fb00dd9814fe7736cbaf78582f6a6f02968a90c58e97e22974c3",
+        "postEditSha256": "1da46470e941fb00dd9814fe7736cbaf78582f6a6f02968a90c58e97e22974c3",
+        "identical": true,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 0,
+        "maxChannelDelta": 0,
+        "width": 390,
+        "height": 844,
+        "bytes": 59062
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-brand.png",
+        "preEditSha256": "58744cdcc908f9f77c68a7ca996a54b826f9c8739233de5827bffb4a2035849a",
+        "postEditSha256": "58744cdcc908f9f77c68a7ca996a54b826f9c8739233de5827bffb4a2035849a",
+        "identical": true,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 0,
+        "maxChannelDelta": 0,
+        "width": 390,
+        "height": 844,
+        "bytes": 38365
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-crm-board.png",
+        "preEditSha256": "9a242659744b867561b2a30968b393b4151cf2603674e916afc4441b1ed04465",
+        "postEditSha256": "9a242659744b867561b2a30968b393b4151cf2603674e916afc4441b1ed04465",
+        "identical": true,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 0,
+        "maxChannelDelta": 0,
+        "width": 390,
+        "height": 844,
+        "bytes": 60044
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-crm-detail-opportunities.png",
+        "preEditSha256": "dbe4fc61b59820ef388a2d9f2b4c6a645ac851d1b38dcb285375bff2901b8fb9",
+        "postEditSha256": "dbe4fc61b59820ef388a2d9f2b4c6a645ac851d1b38dcb285375bff2901b8fb9",
+        "identical": true,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 0,
+        "maxChannelDelta": 0,
+        "width": 390,
+        "height": 844,
+        "bytes": 59035
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-crm-detail-pipeline.png",
+        "preEditSha256": "26fdda92d9418aaad97220a325772bf419aee9667d5266c452adcb4c1653f039",
+        "postEditSha256": "26fdda92d9418aaad97220a325772bf419aee9667d5266c452adcb4c1653f039",
+        "identical": true,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 0,
+        "maxChannelDelta": 0,
+        "width": 390,
+        "height": 844,
+        "bytes": 61919
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-crm-detail-seapool.png",
+        "preEditSha256": "899194486569a4a93592eb0da88a64d0da30625e1cdde82b5d169e947f1880b7",
+        "postEditSha256": "899194486569a4a93592eb0da88a64d0da30625e1cdde82b5d169e947f1880b7",
+        "identical": true,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 0,
+        "maxChannelDelta": 0,
+        "width": 390,
+        "height": 844,
+        "bytes": 62017
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-demand-ppt.png",
+        "preEditSha256": "fce8f896fb8814ade7c710d58deb46ae64a65ee63b12dc3df880cc155a747081",
+        "postEditSha256": "fce8f896fb8814ade7c710d58deb46ae64a65ee63b12dc3df880cc155a747081",
+        "identical": true,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 0,
+        "maxChannelDelta": 0,
+        "width": 390,
+        "height": 844,
+        "bytes": 58540
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-m4-tab1.png",
+        "preEditSha256": "a0a824bcc20fb43dcc3f259761bcb0e3da13f69bb1a0704f273751d4a9875f9f",
+        "postEditSha256": "a0a824bcc20fb43dcc3f259761bcb0e3da13f69bb1a0704f273751d4a9875f9f",
+        "identical": true,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 0,
+        "maxChannelDelta": 0,
+        "width": 390,
+        "height": 844,
+        "bytes": 57942
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-m4-tab2.png",
+        "preEditSha256": "8565a06cc9f6b577d353222caab7f0f24f431ec4e4034b34b55cdfded2955839",
+        "postEditSha256": "8565a06cc9f6b577d353222caab7f0f24f431ec4e4034b34b55cdfded2955839",
+        "identical": true,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 0,
+        "maxChannelDelta": 0,
+        "width": 390,
+        "height": 844,
+        "bytes": 57796
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-m4-tab3.png",
+        "preEditSha256": "68b1a6f21110dc536bcdfe81ae2d4a7b0c39de52329e9d02a051e6f48b7d87e5",
+        "postEditSha256": "68b1a6f21110dc536bcdfe81ae2d4a7b0c39de52329e9d02a051e6f48b7d87e5",
+        "identical": true,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 0,
+        "maxChannelDelta": 0,
+        "width": 390,
+        "height": 844,
+        "bytes": 58870
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-strategy.png",
+        "preEditSha256": "ddcebd22a42421e31d41073fdd15cc343276de77dec6ce48d5908c03ae3915b1",
+        "postEditSha256": "ddcebd22a42421e31d41073fdd15cc343276de77dec6ce48d5908c03ae3915b1",
+        "identical": true,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 0,
+        "maxChannelDelta": 0,
+        "width": 390,
+        "height": 844,
+        "bytes": 58530
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-workflow-designer.png",
+        "preEditSha256": "8dcd2422b5fdfd972e30fd813965aeb550b59d699e43ae2db822b303d56b4b00",
+        "postEditSha256": "8dcd2422b5fdfd972e30fd813965aeb550b59d699e43ae2db822b303d56b4b00",
+        "identical": true,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 0,
+        "maxChannelDelta": 0,
+        "width": 390,
+        "height": 844,
+        "bytes": 60470
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-workflow-instances.png",
+        "preEditSha256": "c768c6886cfeb340be766282eb71dd2c102d0f6f09bc1d4821e8dbc1ac480af0",
+        "postEditSha256": "c768c6886cfeb340be766282eb71dd2c102d0f6f09bc1d4821e8dbc1ac480af0",
+        "identical": true,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 0,
+        "maxChannelDelta": 0,
+        "width": 390,
+        "height": 844,
+        "bytes": 56778
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-workflow-tasks.png",
+        "preEditSha256": "b29a7fe1434a24b123ba88674f6df7c571620eb9e58ecccb4340d8901f14b68c",
+        "postEditSha256": "b29a7fe1434a24b123ba88674f6df7c571620eb9e58ecccb4340d8901f14b68c",
+        "identical": true,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 0,
+        "maxChannelDelta": 0,
+        "width": 390,
+        "height": 844,
+        "bytes": 58940
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-workflow-templates.png",
+        "preEditSha256": "4e42f59bbc9e7bdf3ab708301c29886ec2b4445bfe2a1b670875146cf742239e",
+        "postEditSha256": "4e42f59bbc9e7bdf3ab708301c29886ec2b4445bfe2a1b670875146cf742239e",
+        "identical": true,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 0,
+        "maxChannelDelta": 0,
+        "width": 390,
+        "height": 844,
+        "bytes": 56677
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/public/fixture-1440/public-login.png",
+        "preEditSha256": "e0ce774d46afd219f84060fa2d77e63fb568bf6b23c7a0a7441f8fe5ca05b7c4",
+        "postEditSha256": "e0ce774d46afd219f84060fa2d77e63fb568bf6b23c7a0a7441f8fe5ca05b7c4",
+        "identical": true,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 0,
+        "maxChannelDelta": 0,
+        "width": 1440,
+        "height": 900,
+        "bytes": 423232
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/public/fixture-1920/public-login.png",
+        "preEditSha256": "88cbd823e934871a2ded1279aa56aa5b5b118abcfbe97bd6d9057507b01a7b0e",
+        "postEditSha256": "88cbd823e934871a2ded1279aa56aa5b5b118abcfbe97bd6d9057507b01a7b0e",
+        "identical": true,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 0,
+        "maxChannelDelta": 0,
+        "width": 1920,
+        "height": 1080,
+        "bytes": 656672
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/public/fixture-mobile/public-login.png",
+        "preEditSha256": "2267edcba066a78809dc1b0c207afe17e656b1b0a499bddecdab4da664d08d5c",
+        "postEditSha256": "2267edcba066a78809dc1b0c207afe17e656b1b0a499bddecdab4da664d08d5c",
+        "identical": true,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 0,
+        "maxChannelDelta": 0,
+        "width": 390,
+        "height": 844,
+        "bytes": 102368
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/user/fixture-1440/user-ai.png",
+        "preEditSha256": "b85b4bdb9b2eb0b3c72b0e44005b530ffba05a7edec8220e56ce017849cc88d7",
+        "postEditSha256": "b85b4bdb9b2eb0b3c72b0e44005b530ffba05a7edec8220e56ce017849cc88d7",
+        "identical": true,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 0,
+        "maxChannelDelta": 0,
+        "width": 1440,
+        "height": 900,
+        "bytes": 251531
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/user/fixture-1440/user-crm-board.png",
+        "preEditSha256": "f24315e65ba0a5e1f78143a868ddea5f504d26de601693dd7e0172d86cceadf9",
+        "postEditSha256": "f24315e65ba0a5e1f78143a868ddea5f504d26de601693dd7e0172d86cceadf9",
+        "identical": true,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 0,
+        "maxChannelDelta": 0,
+        "width": 1440,
+        "height": 900,
+        "bytes": 429513
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/user/fixture-1440/user-crm-detail.png",
+        "preEditSha256": "5381403622fcb64cb867d94959af00d63c7003698fa5d64970c084f9a43cd070",
+        "postEditSha256": "cce62152dfb4c360c2f61ba6ac8cde1ea88642d12caaf67c1d8561a483c6eb07",
+        "identical": false,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 34148,
+        "maxChannelDelta": 1,
+        "width": 1440,
+        "height": 900,
+        "bytes": 372182
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/user/fixture-1920/user-ai.png",
+        "preEditSha256": "29312801e84c61f7d74908d2adc13fc1515f7fa9b0c08819dc9bbb73443bacc6",
+        "postEditSha256": "29312801e84c61f7d74908d2adc13fc1515f7fa9b0c08819dc9bbb73443bacc6",
+        "identical": true,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 0,
+        "maxChannelDelta": 0,
+        "width": 1920,
+        "height": 1080,
+        "bytes": 335849
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/user/fixture-1920/user-crm-board.png",
+        "preEditSha256": "27846304ebe3ca13d7b79f4dd7a645ee0b462486152e53160d279588473c82d3",
+        "postEditSha256": "27846304ebe3ca13d7b79f4dd7a645ee0b462486152e53160d279588473c82d3",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -3066,21 +5556,21 @@
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/user/fixture-1920/user-crm-detail.png",
-        "leftSha256": "c0452bf73953519498b56f8189560d87e51f73724b76caac6ce47649276b836f",
-        "rightSha256": "c0452bf73953519498b56f8189560d87e51f73724b76caac6ce47649276b836f",
-        "identical": true,
+        "preEditSha256": "c0452bf73953519498b56f8189560d87e51f73724b76caac6ce47649276b836f",
+        "postEditSha256": "faa8ee26ccc218cab79a8a7bb8747f479f0b45e862249c921a0902a827d89c01",
+        "identical": false,
         "diffPixels": 0,
         "diffPixelRatio": 0,
-        "rawDiffPixels": 0,
-        "maxChannelDelta": 0,
+        "rawDiffPixels": 39478,
+        "maxChannelDelta": 1,
         "width": 1920,
         "height": 1080,
-        "bytes": 524858
+        "bytes": 534136
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/user/fixture-mobile/user-ai.png",
-        "leftSha256": "e2415f0f427ae064045a9e3bb9e3bd22b5d3f3750f049ac61c1e364cb212ab53",
-        "rightSha256": "e2415f0f427ae064045a9e3bb9e3bd22b5d3f3750f049ac61c1e364cb212ab53",
+        "preEditSha256": "e2415f0f427ae064045a9e3bb9e3bd22b5d3f3750f049ac61c1e364cb212ab53",
+        "postEditSha256": "e2415f0f427ae064045a9e3bb9e3bd22b5d3f3750f049ac61c1e364cb212ab53",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -3092,8 +5582,8 @@
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/user/fixture-mobile/user-crm-board.png",
-        "leftSha256": "6133e4b9c0c28db248d430ca943022f632012180958ad7c7b778e1c7e92cba10",
-        "rightSha256": "6133e4b9c0c28db248d430ca943022f632012180958ad7c7b778e1c7e92cba10",
+        "preEditSha256": "6133e4b9c0c28db248d430ca943022f632012180958ad7c7b778e1c7e92cba10",
+        "postEditSha256": "6133e4b9c0c28db248d430ca943022f632012180958ad7c7b778e1c7e92cba10",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -3105,13 +5595,13 @@
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/user/fixture-mobile/user-crm-detail.png",
-        "leftSha256": "049c97c9199cf83ade9a1509530c36d74bc21824a86fd2f7d77162eaf17c3c64",
-        "rightSha256": "8d3d8112c14bae31a016a8c41274244816f233ab89ed7564e223a5f47de956fe",
-        "identical": false,
+        "preEditSha256": "8d3d8112c14bae31a016a8c41274244816f233ab89ed7564e223a5f47de956fe",
+        "postEditSha256": "8d3d8112c14bae31a016a8c41274244816f233ab89ed7564e223a5f47de956fe",
+        "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
-        "rawDiffPixels": 21,
-        "maxChannelDelta": 2,
+        "rawDiffPixels": 0,
+        "maxChannelDelta": 0,
         "width": 390,
         "height": 844,
         "bytes": 62648

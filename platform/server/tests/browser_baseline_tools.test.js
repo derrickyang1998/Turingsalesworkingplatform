@@ -8,6 +8,7 @@ const { spawnSync } = require('node:child_process');
 const serverRoot = path.resolve(__dirname, '..');
 const compareScript = path.join(serverRoot, 'scripts', 'compare_ui_baseline_runs.js');
 const updateScript = path.join(serverRoot, 'scripts', 'update_ui_baseline.js');
+const generateScript = path.join(serverRoot, 'scripts', 'generate_ui_baseline_manifest.js');
 const browserSpec = path.join(serverRoot, 'tests', 'browser-baseline.spec.js');
 const browserFixture = path.join(serverRoot, 'tests', 'helpers', 'browser_fixture.js');
 const safeFixturePaths = path.join(serverRoot, 'tests', 'helpers', 'safe_fixture_paths.js');
@@ -36,6 +37,30 @@ test('browser baseline screenshots are viewport-bounded rather than full-page ca
   assert.match(compareSource, /validateComparisonDimensions/);
   assert.match(compareSource, /validateRunEnvironments/);
   assert.match(source, /environment\.os\)\.toBe\('Windows'\)/);
+});
+
+test('browser baseline loader separates the frozen pre-edit inventory from the current manifest', () => {
+  const { loadBaselineManifest } = require(browserFixture);
+  const manifest = loadBaselineManifest();
+
+  assert.equal(manifest.preEdit.routeContracts.length, 106);
+  assert.equal(manifest.preEdit.duplicateInventory.reviewedDuplicateCount, 39);
+  assert.equal(manifest.routeContracts.length, 107);
+  assert.equal(manifest.duplicateInventory.reviewedDuplicateCount, 1);
+  assert.deepEqual(manifest.duplicateInventory.duplicates, ['esc']);
+});
+
+test('browser baseline generator preserves the frozen pre-edit inventory required by capture', () => {
+  const { generateManifest } = require(generateScript);
+  const manifest = generateManifest({
+    repoRoot: path.resolve(serverRoot, '..', '..'),
+    baselineVersion: 'v0.2.9'
+  });
+
+  assert.equal(manifest.preEdit.routeContracts.length, 106);
+  assert.equal(manifest.preEdit.duplicateInventory.reviewedDuplicateCount, 39);
+  assert.equal(manifest.routeContracts.length, 107);
+  assert.deepEqual(manifest.duplicateInventory.duplicates, ['esc']);
 });
 
 test('browser baseline update orchestrator owns two clean runs and all viewport projects', () => {

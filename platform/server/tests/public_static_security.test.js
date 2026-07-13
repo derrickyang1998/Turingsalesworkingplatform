@@ -16,9 +16,10 @@ function readDeployScript() {
 }
 
 function extractRemoteBackupBlock(deploy) {
-  const match = deploy.match(/\$backupDir\s*=\s*"backups\/v0210-security-\$stamp"\r?\n(?<block>[\s\S]*?)\r?\nforeach \(\$file in \$FILES\)/);
-  assert.ok(match, 'deploy script must define a remote backup block before uploads begin');
-  return match.groups.block;
+  const start = deploy.indexOf('function Invoke-RemoteBackup');
+  const end = deploy.indexOf('function Invoke-RemoteRestore');
+  assert.ok(start !== -1 && end > start, 'deploy script must define backup before restore');
+  return deploy.slice(start, end);
 }
 
 function reservePort() {
@@ -144,82 +145,69 @@ test('guarded deploy validates and installs the versioned nginx config', () => {
   assert.match(deploy, /systemctl reload nginx/);
   assert.match(deploy, /sites-available\/turingmarket/);
   assert.match(deploy, /if \(!? nginx -t|if ! nginx -t/);
-  assert.match(deploy, /\$REMOTE_DIR\/\$backupDir\/nginx\/turingmarket\.conf/);
+  assert.match(deploy, /\$BackupAbsolute\/nginx\/turingmarket\.conf/);
 });
 
 test('guarded deploy keeps production host external and SSH host checking enabled', () => {
   const deploy = readDeployScript();
-  const commandLines = deploy.split(/\r?\n/).filter((line) => /^\s*(ssh|scp)\b/.test(line));
+  const commandLines = deploy.split(/\r?\n/).filter((line) => /\b(?:ssh|scp)\s+-i\b/.test(line));
 
   assert.match(deploy, /\$SERVER\s*=\s*\$env:TURINGMARKET_SERVER\b/);
   assert.match(deploy, /TURINGMARKET_SERVER/);
   assert.match(deploy, /throw\s+"[^"]*TURINGMARKET_SERVER/);
   assert.doesNotMatch(deploy, /\b(?:\d{1,3}\.){3}\d{1,3}\b/);
   assert.doesNotMatch(deploy, /^\s*Write-(?:Host|Output|Information|Warning|Verbose|Debug).*?(?:\$SERVER|\$\{SERVER\}|TURINGMARKET_SERVER|root@|https?:\/\/)/gmi);
-  assert.equal(commandLines.length >= 3, true, 'deploy script should keep ssh/scp commands explicit');
+  assert.equal(commandLines.length >= 1, true, 'deploy script should keep guarded scp invocation explicit');
   for (const line of commandLines) {
     assert.match(line, /-o\s+BatchMode=yes\b/, `${line} must force BatchMode`);
     assert.match(line, /-o\s+StrictHostKeyChecking=yes\b/, `${line} must fail closed on unknown SSH host keys`);
   }
+  assert.match(deploy, /Invoke-NativeWithUtf8Input -FileName 'ssh\.exe'/);
+  assert.match(deploy, /RedirectStandardInput\s*=\s*\$inputPath/);
+  assert.match(deploy, /\$normalizedInput\s*=\s*\$InputText\s+-replace\s+"`r`n\?",\s*"`n"/);
+  assert.match(deploy, /WriteAllText\(\$inputPath, \$normalizedInput, \(New-Object Text\.UTF8Encoding\(\$false\)\)\)/);
+  assert.match(deploy, /function Assert-Utf8StandardInputTransport/);
+  assert.match(deploy, /hasBom[\s\S]*?input\.toString\('utf8'\)/);
+  assert.doesNotMatch(deploy, /\$Script\s*\|\s*ssh\b/);
   assert.doesNotMatch(deploy, /StrictHostKeyChecking\s*=\s*no/i);
   assert.doesNotMatch(deploy, /UserKnownHostsFile\s*=\s*(?:NUL|\/dev\/null)/i);
 });
 
-test('guarded deploy creates v0210-security backups for security-critical files with tree structure', () => {
+test('guarded deploy creates complete v030 backups with client assets, SQLite, and checksums', () => {
   const deploy = readDeployScript();
   const backupBlock = extractRemoteBackupBlock(deploy);
 
-  assert.match(deploy, /\$backupDir\s*=\s*"backups\/v0210-security-\$stamp"/);
-  assert.match(backupBlock, /mkdir -p server\/scripts server\/services server\/tests/);
-  assert.match(backupBlock, /mkdir -p \$backupDir\/nginx \$backupDir\/server\/scripts \$backupDir\/server\/services \$backupDir\/server\/tests/);
-  assert.match(deploy, /cp server\/server\.js \$backupDir\/server\/server\.js/);
-  assert.match(deploy, /if \[ -f client\/core\/navigation\.js \]; then\s*cp client\/core\/navigation\.js \$backupDir\/client\/core\/navigation\.js;\s*fi/);
-  assert.match(deploy, /cp server\/services\/credential_rotation_service\.js \$backupDir\/server\/services\/credential_rotation_service\.js/);
-  assert.match(deploy, /cp server\/scripts\/rotate_user_credentials\.js \$backupDir\/server\/scripts\/rotate_user_credentials\.js/);
-  assert.match(deploy, /cp -L \/etc\/nginx\/sites-enabled\/turingmarket \$backupDir\/nginx\/turingmarket\.conf/);
-  assert.match(deploy, /\$REMOTE_DIR\/\$backupDir\/nginx\/turingmarket\.conf/);
+  assert.match(deploy, /\$backupDir\s*=\s*"backups\/v030-baseline-consolidation-\$stamp"/);
+  assert.match(backupBlock, /files\.present/);
+  assert.match(backupBlock, /files\.absent/);
+  assert.match(backupBlock, /client\/shared\/build_info\.js/);
+  assert.match(backupBlock, /client\/core\/navigation\.js/);
+  assert.match(backupBlock, /require\('better-sqlite3'\)/);
+  assert.match(backupBlock, /database\.backup\(/);
+  assert.match(backupBlock, /SHA256SUMS/);
+  assert.match(backupBlock, /cp -L \/etc\/nginx\/sites-enabled\/turingmarket "\$BackupAbsolute\/nginx\/turingmarket\.conf"/);
+  assert.match(deploy, /\$BackupAbsolute\/nginx\/turingmarket\.conf/);
 });
 
-test('guarded deploy fails closed if remote backup or final remote verification fails', () => {
+test('guarded deploy fails closed and automatically invokes the reviewed restore path', () => {
   const deploy = readDeployScript();
 
-  assert.match(
-    deploy,
-    /ssh[\s\S]*?\r?\nif \(\$LASTEXITCODE -ne 0\) \{\r?\n\s*throw "Remote backup failed/,
-    'remote backup ssh must be checked before uploads begin'
-  );
-  assert.match(
-    deploy,
-    /"@\r?\nif \(\$LASTEXITCODE -ne 0\) \{\r?\n\s*throw "Remote deploy verification failed/,
-    'final remote verification ssh must be checked before reporting completion'
-  );
+  assert.match(deploy, /Invoke-RemoteBackup\s+-BackupPath\s+\$backupDir/);
+  assert.match(deploy, /function Invoke-DeploymentFailureRecovery[\s\S]*?'mutation-started'[\s\S]*?Invoke-RemoteRestore\s+-BackupPath\s+\$BackupPath/);
+  assert.match(deploy, /catch\s*\{[\s\S]*?Invoke-DeploymentFailureRecovery\s+-BackupPath\s+\$backupDir[\s\S]*?throw/);
+  assert.equal((deploy.match(/Invoke-RemoteRestore\s+-BackupPath/g) || []).length >= 2, true);
   assert.match(deploy, /Write-Host "Deploy complete"/);
 });
 
-test('guarded deploy does not swallow required backup failures and guards optional backup files', () => {
+test('guarded deploy records present and absent files instead of swallowing backup failures', () => {
   const deploy = readDeployScript();
   const backupBlock = extractRemoteBackupBlock(deploy);
 
-  assert.doesNotMatch(
-    backupBlock,
-    /cp index\.html app\.js ppt\.js CHANGELOG\.md \$backupDir\/[^\n;]*(?:\|\|\s*true)/,
-    'required top-level backup files must not be hidden behind || true'
-  );
-  assert.doesNotMatch(
-    backupBlock,
-    /cp server\/server\.js \$backupDir\/server\/server\.js[^\n;]*(?:\|\|\s*true)/,
-    'required server backup files must not be hidden behind || true'
-  );
-  assert.match(backupBlock, /cp index\.html app\.js ppt\.js CHANGELOG\.md \$backupDir\//);
-  assert.match(backupBlock, /cp server\/server\.js \$backupDir\/server\/server\.js/);
-  assert.match(
-    backupBlock,
-    /if \[ -f server\/services\/credential_rotation_service\.js \]; then\s*cp server\/services\/credential_rotation_service\.js \$backupDir\/server\/services\/credential_rotation_service\.js;\s*fi/
-  );
-  assert.match(
-    backupBlock,
-    /if \[ -f server\/scripts\/rotate_user_credentials\.js \]; then\s*cp server\/scripts\/rotate_user_credentials\.js \$backupDir\/server\/scripts\/rotate_user_credentials\.js;\s*fi/
-  );
+  assert.doesNotMatch(backupBlock, /\|\|\s*true/);
+  assert.match(backupBlock, /if \[ -f "\$file" \]/);
+  assert.match(backupBlock, /printf '%s\\n' "\$file" >> "\$BackupAbsolute\/files\.present"/);
+  assert.match(backupBlock, /printf '%s\\n' "\$file" >> "\$BackupAbsolute\/files\.absent"/);
+  assert.match(backupBlock, /cp -- "\$file" "\$BackupAbsolute\/platform\/\$file"/);
 });
 
 test('guarded deploy can invalidate and verify all production sessions', () => {

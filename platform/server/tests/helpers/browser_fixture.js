@@ -11,6 +11,9 @@ const influencerWorkflow = require('../../services/influencer_workflow_service')
 
 const BASELINE_FIXTURE_VERSION = 'v0.2.9-ui-fixture-1';
 const MASK_VERSION = 'v0.2.9-mask-1';
+const FROZEN_ROUTE_COUNT = 106;
+const FROZEN_DUPLICATE_COUNT = 39;
+const CURRENT_ROUTE_COUNT = 107;
 const FROZEN_ISO = '2026-07-13T10:00:00.000+08:00';
 const RANDOM_VALUE = 0.3141592653589793;
 
@@ -52,11 +55,24 @@ function loadBaselineManifest(options = {}) {
   if (!Array.isArray(manifest.screenshotSlots) || manifest.screenshotSlots.length !== 72) {
     throw new Error(`Baseline manifest must define 72 screenshot slots; got ${manifest.screenshotSlots && manifest.screenshotSlots.length}`);
   }
-  if (!Array.isArray(manifest.routeContracts) || manifest.routeContracts.length !== 106) {
-    throw new Error(`Baseline manifest must define 106 route contracts; got ${manifest.routeContracts && manifest.routeContracts.length}`);
+  if (!manifest.preEdit || !Array.isArray(manifest.preEdit.routeContracts)) {
+    throw new Error('Baseline manifest must retain the frozen pre-edit route contracts');
   }
-  if (manifest.duplicateInventory.reviewedDuplicateCount !== 39) {
-    throw new Error(`Baseline manifest must preserve the 39 duplicate inventory; got ${manifest.duplicateInventory.reviewedDuplicateCount}`);
+  if (manifest.preEdit.routeContracts.length !== FROZEN_ROUTE_COUNT) {
+    throw new Error(`Pre-edit baseline must preserve ${FROZEN_ROUTE_COUNT} route contracts; got ${manifest.preEdit.routeContracts.length}`);
+  }
+  if (manifest.preEdit.duplicateInventory.reviewedDuplicateCount !== FROZEN_DUPLICATE_COUNT) {
+    throw new Error(`Pre-edit baseline must preserve the ${FROZEN_DUPLICATE_COUNT} duplicate inventory; got ${manifest.preEdit.duplicateInventory.reviewedDuplicateCount}`);
+  }
+  if (!Array.isArray(manifest.routeContracts) || manifest.routeContracts.length !== CURRENT_ROUTE_COUNT) {
+    throw new Error(`Current manifest must define ${CURRENT_ROUTE_COUNT} route contracts; got ${manifest.routeContracts && manifest.routeContracts.length}`);
+  }
+  if (
+    manifest.duplicateInventory.reviewedDuplicateCount !== 1
+    || manifest.duplicateInventory.duplicates.length !== 1
+    || manifest.duplicateInventory.duplicates[0] !== 'esc'
+  ) {
+    throw new Error('Current manifest must preserve only the reviewed esc duplicate');
   }
   return manifest;
 }
