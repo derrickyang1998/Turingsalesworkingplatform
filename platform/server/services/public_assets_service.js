@@ -16,6 +16,10 @@ const PUBLIC_ROOT_FILES = new Set([
   '/ppt.js'
 ]);
 
+const PUBLIC_CLIENT_FILES = new Set([
+  '/client/shared/build_info.js'
+]);
+
 const PUBLIC_SPA_PATHS = new Set([
   '/',
   '/m0',
@@ -33,8 +37,12 @@ const PUBLIC_SPA_PATHS = new Set([
   '/admin'
 ]);
 
+function rawRequestPath(requestPath) {
+  return String(requestPath || '/').split('?')[0];
+}
+
 function decodeRequestPath(requestPath) {
-  let decoded = String(requestPath || '/').split('?')[0];
+  let decoded = rawRequestPath(requestPath);
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       const next = decodeURIComponent(decoded);
@@ -49,6 +57,7 @@ function decodeRequestPath(requestPath) {
 }
 
 function isPrivateRequestPath(requestPath) {
+  if (PUBLIC_CLIENT_FILES.has(rawRequestPath(requestPath))) return false;
   const normalized = decodeRequestPath(requestPath);
   if (!normalized) return true;
   if (normalized === '/api' || normalized.startsWith('/api/')) return false;
@@ -89,6 +98,7 @@ function registerPublicAssets(app, express, publicRoot) {
   app.get('/index.html', sendPublicFile(publicRoot, 'index.html'));
   app.get('/app.js', sendPublicFile(publicRoot, 'app.js'));
   app.get('/ppt.js', sendPublicFile(publicRoot, 'ppt.js'));
+  app.get('/client/shared/build_info.js', sendPublicFile(publicRoot, 'client/shared/build_info.js'));
 
   app.use('/data', express.static(path.join(publicRoot, 'data'), {
     dotfiles: 'deny',

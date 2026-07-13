@@ -80,7 +80,7 @@ const expectedRouteCountsBySource = Object.freeze({
   'platform/server/routes_customers.js': 24,
   'platform/server/routes_brands.js': 4,
   'platform/server/routes_workflow.js': 20,
-  'platform/server/services/public_assets_service.js': 3
+  'platform/server/services/public_assets_service.js': 4
 });
 
 const expectedBaseCommit = '9a591aa92e039f53a12ad7d5f098a26d0818bf08';
@@ -266,7 +266,7 @@ test('generateManifest includes hashes, build/cache markers, routes, fixture met
     ppt: '20260702-v916-kb-bridge-client-cn'
   });
   assert.deepEqual(manifest.scriptCacheKeys, {
-    app: '20260630authupload',
+    app: '20260713v030baselineconsolidation',
     ppt: '20260702v916kbbridge'
   });
 
@@ -353,7 +353,7 @@ test('generateManifest records every registered route contract in deterministic 
     duplicateFixturePath: fixturePath
   });
 
-  assert.equal(manifest.routeContracts.length, 106);
+  assert.equal(manifest.routeContracts.length, 107);
   assert.deepEqual([...new Set(manifest.routeContracts.map((route) => route.source))], expectedRouteSources);
 
   const routeCountsBySource = Object.fromEntries(
@@ -384,6 +384,7 @@ test('generateManifest records every registered route contract in deterministic 
   assert.ok(routeContracts.has('POST /api/workflow/tasks/:id/complete platform/server/routes_workflow.js'));
   assert.ok(routeContracts.has('GET /index.html platform/server/services/public_assets_service.js'));
   assert.ok(routeContracts.has('GET /app.js platform/server/services/public_assets_service.js'));
+  assert.ok(routeContracts.has('GET /client/shared/build_info.js platform/server/services/public_assets_service.js'));
 });
 
 test('generateManifest records the approved 72-slot screenshot journey matrix', () => {
@@ -449,7 +450,7 @@ test('CLI writes the sanitized baseline manifest', () => {
     assert.equal(manifest.baseline.version, 'v0.2.9');
     assert.equal(manifest.files.indexHtml.source, 'platform/index.html');
     assert.deepEqual(manifest.scriptCacheKeys, {
-      app: '20260630authupload',
+      app: '20260713v030baselineconsolidation',
       ppt: '20260702v916kbbridge'
     });
     assert.doesNotMatch(JSON.stringify(manifest), /[A-Z]:\\\\|Users\\\\29272|TM_PRIVATE|TURINGMARKET_SERVER/);

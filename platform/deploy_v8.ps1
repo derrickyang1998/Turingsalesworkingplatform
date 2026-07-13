@@ -12,6 +12,8 @@ $SSH_KEY = "$env:USERPROFILE\.ssh\turingmarket_deploy"
 $REMOTE_DIR = "/root/turingmarket/platform"
 $LOCAL_DIR = Split-Path -Parent $MyInvocation.MyCommand.Path
 $REPO_DIR = Split-Path -Parent $LOCAL_DIR
+$EXPECTED_APP_BUILD = "20260713-v030-baseline-consolidation"
+$EXPECTED_APP_QUERY = "20260713v030baselineconsolidation"
 $EXPECTED_PPT_BUILD = "20260702-v916-kb-bridge-client-cn"
 $EXPECTED_PPT_QUERY = "20260702v916kbbridge"
 $invalidateSessionsFlag = if ($PreserveSessions) { "0" } else { "1" }
@@ -30,6 +32,12 @@ if ((Split-Path -Leaf $REPO_DIR) -notmatch "github-sync$") {
 if (-not (Test-Path $SSH_KEY)) {
     throw "SSH key not found: $SSH_KEY"
 }
+if (-not (Select-String -LiteralPath "$LOCAL_DIR\client\shared\build_info.js" -Pattern $EXPECTED_APP_BUILD -Quiet)) {
+    throw "build_info.js does not contain expected app build $EXPECTED_APP_BUILD"
+}
+if (-not (Select-String -LiteralPath "$LOCAL_DIR\index.html" -Pattern $EXPECTED_APP_QUERY -Quiet)) {
+    throw "index.html does not reference expected app.js cache key $EXPECTED_APP_QUERY"
+}
 if (-not (Select-String -LiteralPath "$LOCAL_DIR\ppt.js" -Pattern $EXPECTED_PPT_BUILD -Quiet)) {
     throw "ppt.js does not contain expected build $EXPECTED_PPT_BUILD"
 }
@@ -43,6 +51,7 @@ Write-Host "Source: $LOCAL_DIR" -ForegroundColor Yellow
 $FILES = @(
     "app.js",
     "index.html",
+    "client\shared\build_info.js",
     "ppt.js",
     "DEPLOY.md",
     "deploy_v8.ps1",
@@ -70,6 +79,7 @@ $FILES = @(
     "server\tests\credential_rotation.test.js",
     "server\tests\influencer_workflow.test.js",
     "server\tests\file_ingest_service.test.js",
+    "server\tests\frontend_public_assets.test.js",
     "server\tests\public_static_security.test.js",
     "server\generate_ppt.py"
 )
@@ -83,9 +93,10 @@ $backupDir = "backups/v0210-security-$stamp"
 ssh -i $SSH_KEY -o BatchMode=yes -o StrictHostKeyChecking=yes root@$SERVER @"
 set -e
 cd $REMOTE_DIR
-mkdir -p server/scripts server/services server/tests
-mkdir -p $backupDir/nginx $backupDir/server/scripts $backupDir/server/services $backupDir/server/tests
+mkdir -p server/scripts server/services server/tests client/shared
+mkdir -p $backupDir/nginx $backupDir/server/scripts $backupDir/server/services $backupDir/server/tests $backupDir/client/shared
 cp index.html app.js ppt.js CHANGELOG.md $backupDir/
+if [ -f client/shared/build_info.js ]; then cp client/shared/build_info.js $backupDir/client/shared/build_info.js; fi
 cp server/server.js $backupDir/server/server.js
 if [ -f server/services/credential_rotation_service.js ]; then cp server/services/credential_rotation_service.js $backupDir/server/services/credential_rotation_service.js; fi
 if [ -f server/scripts/rotate_user_credentials.js ]; then cp server/scripts/rotate_user_credentials.js $backupDir/server/scripts/rotate_user_credentials.js; fi
@@ -126,6 +137,7 @@ set -e
 cd $REMOTE_DIR
 node --check app.js
 node --check ppt.js
+node --check client/shared/build_info.js
 node --check server/server.js
 node --check server/scripts/rotate_user_credentials.js
 node --check server/services/latest_ui_compat_service.js
@@ -154,6 +166,8 @@ ln -s /etc/nginx/sites-available/turingmarket /etc/nginx/sites-enabled/turingmar
 nginx -t
 systemctl reload nginx
 pm2 restart turingmarket 2>/dev/null || pm2 start server/server.js --name turingmarket
+grep -q "$EXPECTED_APP_QUERY" index.html
+grep -q "$EXPECTED_APP_BUILD" client/shared/build_info.js
 grep -q "$EXPECTED_PPT_QUERY" index.html
 grep -q "$EXPECTED_PPT_BUILD" ppt.js
 for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
