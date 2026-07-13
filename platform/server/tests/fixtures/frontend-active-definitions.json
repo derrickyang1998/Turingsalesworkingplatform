@@ -2,7 +2,7 @@
   "metadata": {
     "schemaVersion": 1,
     "reviewedAt": "2026-07-13",
-    "reviewedDuplicateCount": 2,
+    "reviewedDuplicateCount": 1,
     "activeDefinitionPolicy": "last definition by app.js then ppt.js load order",
     "loadOrder": [
       "platform/app.js",
@@ -10,8 +10,7 @@
     ]
   },
   "duplicates": [
-    "esc",
-    "generateHTMLPPT"
+    "esc"
   ],
   "activeDefinitions": {
     "esc": {
@@ -23,18 +22,7 @@
       "column": 1,
       "loadOrder": 2,
       "occurrenceIndex": 2,
-      "globalIndex": 296
-    },
-    "generateHTMLPPT": {
-      "name": "generateHTMLPPT",
-      "source": "platform/ppt.js",
-      "kind": "function",
-      "async": true,
-      "line": 40,
-      "column": 1,
-      "loadOrder": 2,
-      "occurrenceIndex": 2,
-      "globalIndex": 247
+      "globalIndex": 295
     }
   }
 }

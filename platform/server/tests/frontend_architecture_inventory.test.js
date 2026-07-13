@@ -12,13 +12,18 @@ const generatorPath = path.join(serverRoot, 'scripts', 'generate_ui_baseline_man
 const fixturePath = path.join(__dirname, 'fixtures', 'frontend-active-definitions.json');
 
 const reviewedDuplicateNames = Object.freeze([
-  'esc',
-  'generateHTMLPPT'
+  'esc'
 ]);
 
 const expectedActiveDefinitions = Object.freeze({
-  generateHTMLPPT: { source: 'platform/ppt.js', line: 40, loadOrder: 2, occurrenceIndex: 2 },
   esc: { source: 'platform/ppt.js', line: 864, loadOrder: 2, occurrenceIndex: 2 }
+});
+
+const expectedPPTBridgeOwner = Object.freeze({
+  source: 'platform/ppt.js',
+  line: 40,
+  loadOrder: 2,
+  occurrenceIndex: 1
 });
 
 const task9M4DuplicateNames = Object.freeze([
@@ -459,11 +464,31 @@ test('Task 9 M4 workflow functions keep final active behavior and one app.js def
   }
 });
 
-test('scanClassicScripts records the reviewed 2-name duplicate inventory and explicit active definitions', () => {
+test('Task 10 keeps generateHTMLPPT owned only by locked ppt.js', () => {
+  const inventory = scanCurrentScripts();
+  const appDefinitions = inventory.declarations.filter((definition) => (
+    definition.name === 'generateHTMLPPT' && definition.source === 'platform/app.js'
+  ));
+  const pptDefinitions = inventory.declarations.filter((definition) => (
+    definition.name === 'generateHTMLPPT' && definition.source === 'platform/ppt.js'
+  ));
+  const actual = inventory.activeDefinitions.generateHTMLPPT;
+
+  assert.equal(appDefinitions.length, 0, 'platform/app.js must not declare generateHTMLPPT after Task 10');
+  assert.equal(pptDefinitions.length, 1, 'platform/ppt.js must keep exactly one generateHTMLPPT declaration');
+  assert.ok(actual, 'generateHTMLPPT must have an active definition');
+  assert.equal(actual.source, expectedPPTBridgeOwner.source, 'generateHTMLPPT active source');
+  assert.equal(actual.line, expectedPPTBridgeOwner.line, 'generateHTMLPPT active line');
+  assert.equal(actual.loadOrder, expectedPPTBridgeOwner.loadOrder, 'generateHTMLPPT active load order');
+  assert.equal(actual.occurrenceIndex, expectedPPTBridgeOwner.occurrenceIndex, 'generateHTMLPPT active occurrence');
+  assert.equal(actual.async, true, 'generateHTMLPPT active owner must remain async');
+});
+
+test('scanClassicScripts records the reviewed 1-name duplicate inventory and explicit active definitions', () => {
   const inventory = scanCurrentScripts();
 
   assert.deepEqual(inventory.duplicates.map((entry) => entry.name), reviewedDuplicateNames);
-  assert.equal(inventory.duplicates.length, 2);
+  assert.equal(inventory.duplicates.length, 1);
   for (const name of task9M4DuplicateNames) {
     assert.equal(
       inventory.duplicates.some((entry) => entry.name === name),
@@ -494,7 +519,7 @@ test('frontend-active-definitions fixture mirrors the current duplicate inventor
   }
 
   assert.equal(fixture.metadata.schemaVersion, 1);
-  assert.equal(fixture.metadata.reviewedDuplicateCount, 2);
+  assert.equal(fixture.metadata.reviewedDuplicateCount, 1);
   assert.equal(fixture.metadata.activeDefinitionPolicy, 'last definition by app.js then ppt.js load order');
   assert.deepEqual(fixture.metadata.loadOrder, ['platform/app.js', 'platform/ppt.js']);
   assert.deepEqual(fixture.duplicates, reviewedDuplicateNames);
@@ -556,7 +581,7 @@ test('generateManifest includes hashes, build/cache markers, routes, fixture met
     assert.ok(slot.sha256 === null || /^[a-f0-9]{64}$/.test(slot.sha256));
   }
 
-  assert.equal(manifest.duplicateInventory.reviewedDuplicateCount, 2);
+  assert.equal(manifest.duplicateInventory.reviewedDuplicateCount, 1);
   assert.deepEqual(manifest.duplicateInventory.duplicates, reviewedDuplicateNames);
 
   const serialized = JSON.stringify(manifest);

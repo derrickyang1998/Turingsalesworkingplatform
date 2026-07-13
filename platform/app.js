@@ -2657,20 +2657,6 @@ function resetDemand() {
   if (typeof clearPPTContext === 'function') clearPPTContext(true);
   updSteps(1);
 }
-function generateHTMLPPT() {
-  var demand = getEditedDemand();
-  var brand = demand.brand || 'Brand';
-  var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>' + esc(brand) + ' Proposal</title>';
-  html += '<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.3.1/reveal.min.css">';
-  html += '<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.3.1/theme/night.min.css">';
-  html += '<style>.reveal section{padding:40px}.reveal h2{color:#e94560}</style></head><body><div class="reveal"><div class="slides">';
-  html += '<section class="cover-slide"><h1>' + esc(brand) + '</h1><h3>Influencer Marketing Proposal</h3></section>';
-  var sections = lastProp ? lastProp.split('\n').filter(Boolean) : ['Strategy', 'Execution'];
-  sections.forEach(function(s) { html += '<section><h2>' + esc(s) + '</h2></section>'; });
-  html += '</div></div><script src="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.3.1/reveal.min.js"><\/script><script>Reveal.initialize({hash:true})<\/script></body></html>';
-  dlFile(brand + '_proposal.html', html, 'text/html');
-  toast('HTML proposal downloaded');
-}
 // ===== M4: INFLUENCER WORKFLOW FIX (final override) =====
 function dlFile(name, content, mime) {
   var blob = content instanceof Blob ? content : new Blob([content], { type: mime || 'text/plain;charset=utf-8' });
