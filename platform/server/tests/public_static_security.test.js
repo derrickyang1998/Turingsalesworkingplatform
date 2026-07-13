@@ -85,11 +85,14 @@ test('production server serves browser assets but denies private platform files'
       ['/app.js', 200],
       ['/ppt.js', 200],
       ['/client/shared/build_info.js', 200],
+      ['/client/core/navigation.js', 200],
       ['/data/influencer_schema.json', 200],
       ['/client/', 404],
       ['/client/core/', 404],
       ['/client/shared/', 404],
       ['/client/unknown.js', 404],
+      ['/client/core/navigation.js/extra', 404],
+      ['/client/core/%6eavigation.js', 404],
       ['/client/../server/server.js', 404],
       ['/client/%2e%2e/server/server.js', 404],
       ['/client/%252e%252e/server/server.js', 404],
@@ -170,6 +173,7 @@ test('guarded deploy creates v0210-security backups for security-critical files 
   assert.match(backupBlock, /mkdir -p server\/scripts server\/services server\/tests/);
   assert.match(backupBlock, /mkdir -p \$backupDir\/nginx \$backupDir\/server\/scripts \$backupDir\/server\/services \$backupDir\/server\/tests/);
   assert.match(deploy, /cp server\/server\.js \$backupDir\/server\/server\.js/);
+  assert.match(deploy, /if \[ -f client\/core\/navigation\.js \]; then\s*cp client\/core\/navigation\.js \$backupDir\/client\/core\/navigation\.js;\s*fi/);
   assert.match(deploy, /cp server\/services\/credential_rotation_service\.js \$backupDir\/server\/services\/credential_rotation_service\.js/);
   assert.match(deploy, /cp server\/scripts\/rotate_user_credentials\.js \$backupDir\/server\/scripts\/rotate_user_credentials\.js/);
   assert.match(deploy, /cp -L \/etc\/nginx\/sites-enabled\/turingmarket \$backupDir\/nginx\/turingmarket\.conf/);

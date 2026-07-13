@@ -33,6 +33,7 @@ if (-not (Test-Path $SSH_KEY)) {
     throw "SSH key not found: $SSH_KEY"
 }
 $buildInfoPath = "$LOCAL_DIR\client\shared\build_info.js"
+$navigationPath = "$LOCAL_DIR\client\core\navigation.js"
 $buildInfoContractCheck = @'
 const fs = require('node:fs');
 const vm = require('node:vm');
@@ -52,7 +53,12 @@ node -e $buildInfoContractCheck $buildInfoPath $EXPECTED_APP_BUILD $EXPECTED_PPT
 if ($LASTEXITCODE -ne 0) {
     throw "Local build_info.js contract verification failed"
 }
+node --check $navigationPath
+if ($LASTEXITCODE -ne 0) {
+    throw "Local navigation.js syntax verification failed"
+}
 $EXPECTED_BUILD_INFO_SHA256 = (Get-FileHash -Algorithm SHA256 -LiteralPath "$LOCAL_DIR\client\shared\build_info.js").Hash.ToLowerInvariant()
+$EXPECTED_NAVIGATION_SHA256 = (Get-FileHash -Algorithm SHA256 -LiteralPath "$LOCAL_DIR\client\core\navigation.js").Hash.ToLowerInvariant()
 if (-not (Select-String -LiteralPath "$LOCAL_DIR\index.html" -Pattern $EXPECTED_APP_QUERY -Quiet)) {
     throw "index.html does not reference expected app.js cache key $EXPECTED_APP_QUERY"
 }
@@ -70,6 +76,7 @@ $FILES = @(
     "app.js",
     "index.html",
     "client\shared\build_info.js",
+    "client\core\navigation.js",
     "ppt.js",
     "DEPLOY.md",
     "deploy_v8.ps1",
@@ -98,6 +105,7 @@ $FILES = @(
     "server\tests\credential_rotation.test.js",
     "server\tests\influencer_workflow.test.js",
     "server\tests\file_ingest_service.test.js",
+    "server\tests\fixtures\frontend-active-definitions.json",
     "server\tests\frontend_architecture_inventory.test.js",
     "server\tests\frontend_public_assets.test.js",
     "server\tests\public_static_security.test.js",
@@ -113,10 +121,11 @@ $backupDir = "backups/v0210-security-$stamp"
 ssh -i $SSH_KEY -o BatchMode=yes -o StrictHostKeyChecking=yes root@$SERVER @"
 set -e
 cd $REMOTE_DIR
-mkdir -p server/scripts server/services server/tests client/shared
-mkdir -p $backupDir/nginx $backupDir/server/scripts $backupDir/server/services $backupDir/server/tests $backupDir/client/shared
+mkdir -p server/scripts server/services server/tests server/tests/fixtures client/shared client/core
+mkdir -p $backupDir/nginx $backupDir/server/scripts $backupDir/server/services $backupDir/server/tests $backupDir/client/shared $backupDir/client/core
 cp index.html app.js ppt.js CHANGELOG.md $backupDir/
 if [ -f client/shared/build_info.js ]; then cp client/shared/build_info.js $backupDir/client/shared/build_info.js; fi
+if [ -f client/core/navigation.js ]; then cp client/core/navigation.js $backupDir/client/core/navigation.js; fi
 cp server/server.js $backupDir/server/server.js
 if [ -f server/services/credential_rotation_service.js ]; then cp server/services/credential_rotation_service.js $backupDir/server/services/credential_rotation_service.js; fi
 if [ -f server/scripts/rotate_user_credentials.js ]; then cp server/scripts/rotate_user_credentials.js $backupDir/server/scripts/rotate_user_credentials.js; fi
@@ -158,6 +167,7 @@ cd $REMOTE_DIR
 node --check app.js
 node --check ppt.js
 node --check client/shared/build_info.js
+node --check client/core/navigation.js
 node --check server/server.js
 node --check server/scripts/generate_ui_baseline_manifest.js
 node --check server/scripts/rotate_user_credentials.js
@@ -167,6 +177,7 @@ node --check server/services/file_ingest_service.js
 node --check server/services/influencer_workflow_service.js
 node --check server/services/public_assets_service.js
 node --check server/tests/credential_rotation.test.js
+node --check server/tests/customer_workspace_ui.test.js
 node --check server/tests/frontend_architecture_inventory.test.js
 node <<'NODE'
 const fs = require('node:fs');
@@ -184,6 +195,7 @@ if (window.tmAppBuild !== expected.app) {
 }
 NODE
 echo "$EXPECTED_BUILD_INFO_SHA256  client/shared/build_info.js" | sha256sum --check --status
+echo "$EXPECTED_NAVIGATION_SHA256  client/core/navigation.js" | sha256sum --check --status
 install -m 0644 nginx/turingmarket.conf /etc/nginx/sites-available/turingmarket.candidate
 rm -f /etc/nginx/sites-enabled/turingmarket
 ln -s /etc/nginx/sites-available/turingmarket.candidate /etc/nginx/sites-enabled/turingmarket

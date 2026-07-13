@@ -32,6 +32,81 @@ const journeys = manifest.screenshotSlots
     substate: slot.substate
   }));
 
+function expectedPathForJourney(journey) {
+  if (journey.pageId === 'login') return '/';
+  if (journey.pageId === 'm0-detail') {
+    return `/m0-detail?view=${(journey.substate && journey.substate.view) || 'pipeline'}`;
+  }
+  if (journey.pageId === 'm4') {
+    return `/m4?tab=${(journey.substate && journey.substate.tab) || 'tab1'}`;
+  }
+  if (journey.pageId === 'admin') {
+    return `/admin?tab=${(journey.substate && journey.substate.tab) || 'overview'}`;
+  }
+  const simplePaths = {
+    m0: '/m0',
+    m1: '/m1',
+    m2: '/m2',
+    m3: '/m3',
+    m5: '/m5',
+    'workflow-designer': '/workflow',
+    'workflow-templates': '/workflow-templates',
+    'workflow-instances': '/workflow-instances',
+    'workflow-tasks': '/tasks'
+  };
+  return simplePaths[journey.pageId] || '/m0';
+}
+
+async function expectM4Tab(page, tab) {
+  await expect.poll(() => page.evaluate((expected) => {
+    const active = document.querySelector('#tabBar .tab.active');
+    const panel = document.getElementById(`${expected}-content`);
+    return {
+      activeTab: active && active.getAttribute('data-tab'),
+      panelVisible: !!panel && !panel.classList.contains('hidden')
+    };
+  }, tab)).toEqual({ activeTab: tab, panelVisible: true });
+}
+
+async function expectAdminTab(page, tab) {
+  await expect.poll(() => page.evaluate((expected) => {
+    const panel = document.getElementById(`admin-tab-${expected}`);
+    return {
+      pageVisible: getComputedStyle(document.getElementById('page-admin')).display !== 'none',
+      panelVisible: !!panel && getComputedStyle(panel).display !== 'none'
+    };
+  }, tab)).toEqual({ pageVisible: true, panelVisible: true });
+}
+
+async function expectCrmView(page, view) {
+  const selectorByView = {
+    pipeline: '#crmPipelineView',
+    seapool: '#crmSeaPoolView',
+    opportunities: '#crmOpportunityView'
+  };
+  await expect.poll(() => page.evaluate((selector) => {
+    const panel = document.querySelector(selector);
+    return !!panel && getComputedStyle(panel).display !== 'none';
+  }, selectorByView[view])).toBe(true);
+}
+
+async function expectActiveHeadingFocused(page, pageId) {
+  await expect.poll(() => page.evaluate((id) => {
+    const heading = document.querySelector(`#page-${id} h2`);
+      return {
+        focused: document.activeElement === heading,
+        tagName: document.activeElement && document.activeElement.tagName,
+        tabindex: heading && heading.getAttribute('tabindex'),
+        outline: heading && (heading.style.outline || '')
+      };
+  }, pageId)).toEqual({
+    focused: true,
+    tagName: 'H2',
+    tabindex: '-1',
+    outline: 'none'
+  });
+}
+
 test.describe('deterministic pre-edit browser baseline', () => {
   test.afterAll(() => {
     writeBaselineRunMetadata(runContext);
@@ -73,6 +148,7 @@ test.describe('deterministic pre-edit browser baseline', () => {
       } else {
         await expect(page.locator('#app')).toBeVisible();
         await expect(page.locator(`#page-${journey.pageId}`)).toBeVisible();
+        await expect(page).toHaveURL(new RegExp(`${expectedPathForJourney(journey).replace(/[?]/g, '\\?')}$`));
       }
 
       if (journey.role === 'admin') {
@@ -82,7 +158,7 @@ test.describe('deterministic pre-edit browser baseline', () => {
         await expect(page.locator('.nav-item.admin-only')).toBeHidden();
       }
       if (journey.journey === 'admin-demand-ppt') {
-        await expect(page).toHaveURL(/\/$/);
+        await expect(page).toHaveURL(/\/m3$/);
         await expect(page.locator('script[src="ppt.js?v=20260702v916kbbridge"]')).toHaveCount(1);
         await expect.poll(() => page.evaluate(() => window.tmPPTBuild)).toBe('20260702-v916-kb-bridge-client-cn');
       }
@@ -97,68 +173,115 @@ test.describe('deterministic pre-edit browser baseline', () => {
     });
   }
 
-  test('records the pre-edit direct-path gap', async ({ page }) => {
+  test('restores direct URL page and substate after confirmed session restore', async ({ page }) => {
     await installBaselineAuthState(page, fixture.auth.admin);
-    await page.goto('/m4', { waitUntil: 'domcontentloaded' });
+    await page.goto('/m4?tab=tab2', { waitUntil: 'domcontentloaded' });
     await page.locator('#app').waitFor({ state: 'visible' });
     await page.waitForFunction(() => typeof window.switchPage === 'function');
     await waitForBaselineReady(page);
 
-    await expect(page).toHaveURL(/\/m4$/);
-    await expect(page.locator('#page-m0')).toBeVisible();
-    await expect(page.locator('#page-m4')).toBeHidden();
-    await recordKnownBaselineGaps(page, null, runContext);
+    await expect(page).toHaveURL(/\/m4\?tab=tab2$/);
+    await expect(page.locator('#page-m4')).toBeVisible();
+    await expect(page.locator('#page-m0')).toBeHidden();
+    await expectM4Tab(page, 'tab2');
+    await expectActiveHeadingFocused(page, 'm4');
   });
 
-  test('records the pre-edit refresh restoration gap', async ({ page }) => {
+  test('refresh preserves restored page and canonical substate', async ({ page }) => {
     await navigateBaselineJourney(page, {
       role: 'admin',
       pageId: 'm4',
-      substate: { tab: 2 }
+      substate: { tab: 'tab2' }
     }, { fixture });
     await expect(page.locator('#page-m4')).toBeVisible();
+    await expect(page).toHaveURL(/\/m4\?tab=tab2$/);
 
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.locator('#app').waitFor({ state: 'visible' });
     await page.waitForFunction(() => typeof window.switchPage === 'function');
     await waitForBaselineReady(page);
-    await expect(page.locator('#page-m0')).toBeVisible();
-    await expect(page.locator('#page-m4')).toBeHidden();
-    await recordKnownBaselineGaps(page, null, runContext);
+    await expect(page.locator('#page-m4')).toBeVisible();
+    await expect(page.locator('#page-m0')).toBeHidden();
+    await expectM4Tab(page, 'tab2');
   });
 
-  test('records the pre-edit back-forward restoration gap', async ({ page }) => {
-    await navigateBaselineJourney(page, { role: 'admin', pageId: 'm4' }, { fixture });
-    await page.evaluate(() => {
-      history.replaceState({ pageId: 'm4' }, '', '/m4');
-      history.pushState({ pageId: 'm0' }, '', '/m0');
-      window.switchPage('m0');
-    });
+  test('back and forward restore visible page and substate without manual app calls', async ({ page }) => {
+    await navigateBaselineJourney(page, { role: 'admin', pageId: 'm4', substate: { tab: 'tab3' } }, { fixture });
+    await expect(page).toHaveURL(/\/m4\?tab=tab3$/);
+    await page.evaluate(() => window.switchPage('m0'));
     await expect(page.locator('#page-m0')).toBeVisible();
+    await expect(page).toHaveURL(/\/m0$/);
 
     await page.goBack();
-    await expect(page).toHaveURL(/\/m4$/);
-    await expect(page.locator('#page-m0')).toBeVisible();
-    await expect(page.locator('#page-m4')).toBeHidden();
+    await expect(page).toHaveURL(/\/m4\?tab=tab3$/);
+    await expect(page.locator('#page-m4')).toBeVisible();
+    await expect(page.locator('#page-m0')).toBeHidden();
+    await expectM4Tab(page, 'tab3');
 
     await page.goForward();
     await expect(page).toHaveURL(/\/m0$/);
     await expect(page.locator('#page-m0')).toBeVisible();
     await waitForBaselineReady(page);
-    await recordKnownBaselineGaps(page, null, runContext);
   });
 
-  test('records the pre-edit heading-focus gap', async ({ page }) => {
+  test('page navigation focuses the active page first h2 at every viewport', async ({ page }) => {
     await navigateBaselineJourney(page, { role: 'admin', pageId: 'm4' }, { fixture });
-    const focusState = await page.evaluate(() => {
-      const heading = document.querySelector('#page-m4 h1, #page-m4 h2, #page-m4 h3');
-      return {
-        activeTag: document.activeElement && document.activeElement.tagName,
-        headingFocused: document.activeElement === heading
-      };
-    });
-    expect(focusState).toEqual({ activeTag: 'BODY', headingFocused: false });
+    await expectActiveHeadingFocused(page, 'm4');
     await waitForBaselineReady(page);
-    await recordKnownBaselineGaps(page, null, runContext);
+  });
+
+  test('URL restoration applies CRM, admin, and kb substates with role gates', async ({ page }) => {
+    await installBaselineAuthState(page, fixture.auth.admin);
+    await page.goto('/m0-detail?view=seapool', { waitUntil: 'domcontentloaded' });
+    await page.locator('#app').waitFor({ state: 'visible' });
+    await waitForBaselineReady(page);
+    await expect(page.locator('#page-m0-detail')).toBeVisible();
+    await expectCrmView(page, 'seapool');
+
+    await page.goto('/admin?tab=tokens&preview=v030', { waitUntil: 'domcontentloaded' });
+    await page.locator('#app').waitFor({ state: 'visible' });
+    await waitForBaselineReady(page);
+    await expectAdminTab(page, 'tokens');
+    await expect.poll(() => page.evaluate(() => document.documentElement.dataset.tmPreview)).toBe('v030');
+
+    await page.goto('/m4?tab=tab2&preview=v030', { waitUntil: 'domcontentloaded' });
+    await page.locator('#app').waitFor({ state: 'visible' });
+    await waitForBaselineReady(page);
+    await expect(page).toHaveURL(/\/m4\?tab=tab2&preview=v030$/);
+    await expect(page.locator('#page-m4')).toBeVisible();
+    await expectM4Tab(page, 'tab2');
+    await expect.poll(() => page.evaluate(() => document.documentElement.dataset.tmPreview)).toBe('v030');
+
+    await page.goto('/kb', { waitUntil: 'domcontentloaded' });
+    await page.locator('#app').waitFor({ state: 'visible' });
+    await waitForBaselineReady(page);
+    await expectAdminTab(page, 'knowledge');
+  });
+
+  test('non-admin direct admin, kb, and preview routes normalize to CRM board', async ({ page }) => {
+    await installBaselineAuthState(page, fixture.auth.user);
+    await page.goto('/admin?tab=users&preview=v030', { waitUntil: 'domcontentloaded' });
+    await page.locator('#app').waitFor({ state: 'visible' });
+    await waitForBaselineReady(page);
+    await expect(page).toHaveURL(/\/m0$/);
+    await expect(page.locator('#page-m0')).toBeVisible();
+    await expect(page.locator('#page-admin')).toBeHidden();
+    await expect(page.locator('.nav-item.admin-only')).toBeHidden();
+    await expect.poll(() => page.evaluate(() => document.documentElement.dataset.tmPreview || null)).toBeNull();
+
+    await page.goto('/kb', { waitUntil: 'domcontentloaded' });
+    await page.locator('#app').waitFor({ state: 'visible' });
+    await waitForBaselineReady(page);
+    await expect(page).toHaveURL(/\/m0$/);
+    await expect(page.locator('#page-m0')).toBeVisible();
+    await expect(page.locator('#page-admin')).toBeHidden();
+
+    await page.goto('/m4?tab=tab2&preview=v030', { waitUntil: 'domcontentloaded' });
+    await page.locator('#app').waitFor({ state: 'visible' });
+    await waitForBaselineReady(page);
+    await expect(page).toHaveURL(/\/m4\?tab=tab2$/);
+    await expect(page.locator('#page-m4')).toBeVisible();
+    await expectM4Tab(page, 'tab2');
+    await expect.poll(() => page.evaluate(() => document.documentElement.dataset.tmPreview || null)).toBeNull();
   });
 });

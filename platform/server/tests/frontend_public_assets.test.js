@@ -6,6 +6,8 @@ const vm = require('node:vm');
 
 const platformRoot = path.join(__dirname, '..', '..');
 const indexPath = path.join(platformRoot, 'index.html');
+const appPath = path.join(platformRoot, 'app.js');
+const navigationPath = path.join(platformRoot, 'client', 'core', 'navigation.js');
 const buildInfoPath = path.join(platformRoot, 'client', 'shared', 'build_info.js');
 const deployScriptPath = path.join(platformRoot, 'deploy_v8.ps1');
 const nginxConfigPath = path.join(platformRoot, 'nginx', 'turingmarket.conf');
@@ -25,13 +27,14 @@ function scriptSources(indexHtml) {
     .map((match) => match[1]);
 }
 
-test('index loads public build metadata before app.js and keeps approved PPT asset unchanged', () => {
+test('index loads public build metadata and navigation before app.js and keeps approved PPT asset unchanged', () => {
   const sources = scriptSources(read(indexPath));
 
   assert.deepEqual(
-    sources.slice(-3),
+    sources.slice(-4),
     [
       'client/shared/build_info.js',
+      'client/core/navigation.js',
       `app.js?v=${EXPECTED_APP_QUERY}`,
       `ppt.js?v=${EXPECTED_PPT_QUERY}`
     ]
@@ -40,6 +43,12 @@ test('index loads public build metadata before app.js and keeps approved PPT ass
     sources.indexOf('client/shared/build_info.js') < sources.indexOf(`app.js?v=${EXPECTED_APP_QUERY}`),
     true,
     'build_info.js must load before app.js'
+  );
+  assert.equal(
+    sources.indexOf('client/shared/build_info.js') < sources.indexOf('client/core/navigation.js')
+      && sources.indexOf('client/core/navigation.js') < sources.indexOf(`app.js?v=${EXPECTED_APP_QUERY}`),
+    true,
+    'navigation.js must load after build_info.js and before app.js'
   );
 });
 
@@ -62,15 +71,38 @@ test('build_info.js publishes the exact frozen public build metadata and compati
   );
 });
 
-test('Express public asset gate allows only the exact build-info client asset', () => {
+test('navigation registry is owned by navigation.js without legacy app anchors', () => {
+  const appJs = read(appPath);
+  const navigationJs = read(navigationPath);
+
+  assert.doesNotMatch(appJs, /navigation-line-anchor-/);
+  assert.doesNotMatch(appJs, /switchPage side-effect anchor/);
+  assert.doesNotMatch(appJs, /Legacy test anchors/);
+  assert.doesNotMatch(appJs, /function rebuildNav/);
+
+  [
+    ["m0", "客户看板"],
+    ["m0-detail", "客户明细"],
+    ["m4", "网红匹配 & 执行管理"],
+    ["admin", "管理控制室"]
+  ].forEach(([pageId, label]) => {
+    assert.match(navigationJs, new RegExp(`id:\\s*'${pageId}'[\\s\\S]*?label:\\s*'${label}'`));
+  });
+});
+
+test('Express public asset gate allows only the exact approved client assets', () => {
   assert.equal(publicAssets.isPrivateRequestPath('/client/shared/build_info.js'), false);
   assert.equal(publicAssets.isPrivateRequestPath('/client/shared/build_info.js?cache=1'), false);
+  assert.equal(publicAssets.isPrivateRequestPath('/client/core/navigation.js'), false);
+  assert.equal(publicAssets.isPrivateRequestPath('/client/core/navigation.js?cache=1'), false);
 
   [
     '/client/',
     '/client/core/',
     '/client/shared/',
     '/client/unknown.js',
+    '/client/core/navigation.js/extra',
+    '/client/core/%6eavigation.js',
     '/client/../server/server.js',
     '/client/%2e%2e/server/server.js',
     '/client/%252e%252e/server/server.js',
@@ -87,25 +119,30 @@ test('Express public asset gate allows only the exact build-info client asset', 
   });
 });
 
-test('Nginx config exposes only the exact build-info client asset and rejects every other client path', () => {
+test('Nginx config exposes only the exact approved client assets and rejects every other client path', () => {
   const config = read(nginxConfigPath);
 
   assert.match(config, /location = \/client\/shared\/build_info\.js\s*\{/);
   assert.match(config, /\$request_uri\s*!~\s*\^\/client\/shared\/build_info\\\.js\(\?:\\\?\|\$\)/);
+  assert.match(config, /location = \/client\/core\/navigation\.js\s*\{/);
+  assert.match(config, /\$request_uri\s*!~\s*\^\/client\/core\/navigation\\\.js\(\?:\\\?\|\$\)/);
   assert.match(config, /location \^~ \/client\/\s*\{\s*return 404;\s*\}/);
   assert.doesNotMatch(config, /alias\s+.*client/i);
 });
 
-test('guarded deploy uploads, checks, verifies, and backs up public build metadata', () => {
+test('guarded deploy uploads, checks, verifies, and backs up public build metadata and navigation', () => {
   const deploy = read(deployScriptPath);
 
   assert.match(deploy, /\$EXPECTED_APP_BUILD\s*=\s*"20260713-v030-baseline-consolidation"/);
   assert.match(deploy, /\$EXPECTED_APP_QUERY\s*=\s*"20260713v030baselineconsolidation"/);
   assert.match(deploy, /"client\\shared\\build_info\.js"/);
-  assert.match(deploy, /mkdir -p server\/scripts server\/services server\/tests client\/shared/);
-  assert.match(deploy, /mkdir -p \$backupDir\/nginx \$backupDir\/server\/scripts \$backupDir\/server\/services \$backupDir\/server\/tests \$backupDir\/client\/shared/);
+  assert.match(deploy, /"client\\core\\navigation\.js"/);
+  assert.match(deploy, /mkdir -p server\/scripts server\/services server\/tests server\/tests\/fixtures client\/shared client\/core/);
+  assert.match(deploy, /mkdir -p \$backupDir\/nginx \$backupDir\/server\/scripts \$backupDir\/server\/services \$backupDir\/server\/tests \$backupDir\/client\/shared \$backupDir\/client\/core/);
   assert.match(deploy, /if \[ -f client\/shared\/build_info\.js \]; then\s*cp client\/shared\/build_info\.js \$backupDir\/client\/shared\/build_info\.js;\s*fi/);
+  assert.match(deploy, /if \[ -f client\/core\/navigation\.js \]; then\s*cp client\/core\/navigation\.js \$backupDir\/client\/core\/navigation\.js;\s*fi/);
   assert.match(deploy, /node --check client\/shared\/build_info\.js/);
+  assert.match(deploy, /node --check client\/core\/navigation\.js/);
   assert.match(deploy, /grep -q "\$EXPECTED_APP_QUERY" index\.html/);
   assert.match(deploy, /grep -q "\$EXPECTED_APP_BUILD" client\/shared\/build_info\.js/);
   assert.match(deploy, /grep -q "\$EXPECTED_PPT_QUERY" index\.html/);
@@ -127,7 +164,15 @@ test('guarded deploy verifies the full build-info contract and exact remote SHA-
   );
   assert.match(
     deploy,
+    /\$EXPECTED_NAVIGATION_SHA256\s*=\s*\(Get-FileHash\s+-Algorithm SHA256\s+-LiteralPath\s+"\$LOCAL_DIR\\client\\core\\navigation\.js"\)\.Hash\.ToLowerInvariant\(\)/
+  );
+  assert.match(
+    deploy,
     /echo "\$EXPECTED_BUILD_INFO_SHA256  client\/shared\/build_info\.js"\s*\|\s*sha256sum --check --status/
+  );
+  assert.match(
+    deploy,
+    /echo "\$EXPECTED_NAVIGATION_SHA256  client\/core\/navigation\.js"\s*\|\s*sha256sum --check --status/
   );
 });
 
@@ -136,6 +181,10 @@ test('guarded deploy uploads and syntax-checks the baseline generator and archit
 
   assert.match(deploy, /"server\\scripts\\generate_ui_baseline_manifest\.js"/);
   assert.match(deploy, /node --check server\/scripts\/generate_ui_baseline_manifest\.js/);
+  assert.match(deploy, /"server\\tests\\fixtures\\frontend-active-definitions\.json"/);
+  assert.doesNotMatch(deploy, /node --check server\/tests\/fixtures\/frontend-active-definitions\.json/);
+  assert.match(deploy, /"server\\tests\\customer_workspace_ui\.test\.js"/);
+  assert.match(deploy, /node --check server\/tests\/customer_workspace_ui\.test\.js/);
   assert.match(deploy, /"server\\tests\\frontend_architecture_inventory\.test\.js"/);
   assert.match(deploy, /node --check server\/tests\/frontend_architecture_inventory\.test\.js/);
 });

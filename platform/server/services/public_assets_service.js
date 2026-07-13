@@ -17,7 +17,8 @@ const PUBLIC_ROOT_FILES = new Set([
 ]);
 
 const PUBLIC_CLIENT_FILES = new Set([
-  '/client/shared/build_info.js'
+  '/client/shared/build_info.js',
+  '/client/core/navigation.js'
 ]);
 
 const PUBLIC_SPA_PATHS = new Set([
@@ -99,6 +100,7 @@ function registerPublicAssets(app, express, publicRoot) {
   app.get('/app.js', sendPublicFile(publicRoot, 'app.js'));
   app.get('/ppt.js', sendPublicFile(publicRoot, 'ppt.js'));
   app.get('/client/shared/build_info.js', sendPublicFile(publicRoot, 'client/shared/build_info.js'));
+  app.get(/^\/client\/core\/navigation\.js$/, sendPublicFile(publicRoot, 'client/core/navigation.js'));
 
   app.use('/data', express.static(path.join(publicRoot, 'data'), {
     dotfiles: 'deny',

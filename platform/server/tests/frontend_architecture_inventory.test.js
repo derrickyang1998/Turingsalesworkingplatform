@@ -54,13 +54,13 @@ const reviewedDuplicateNames = Object.freeze([
 ]);
 
 const expectedActiveDefinitions = Object.freeze({
-  closeCustModal: { source: 'platform/app.js', line: 373, loadOrder: 1, occurrenceIndex: 2 },
-  trackTokenUsage: { source: 'platform/app.js', line: 960, loadOrder: 1, occurrenceIndex: 2 },
-  initM1: { source: 'platform/app.js', line: 2361, loadOrder: 1, occurrenceIndex: 2 },
-  initM4: { source: 'platform/app.js', line: 3191, loadOrder: 1, occurrenceIndex: 3 },
-  downloadInfTemplate: { source: 'platform/app.js', line: 3352, loadOrder: 1, occurrenceIndex: 3 },
-  addChatMsg: { source: 'platform/app.js', line: 3584, loadOrder: 1, occurrenceIndex: 2 },
-  loadAdminDashboard: { source: 'platform/app.js', line: 3604, loadOrder: 1, occurrenceIndex: 3 },
+  closeCustModal: { source: 'platform/app.js', line: 331, loadOrder: 1, occurrenceIndex: 2 },
+  trackTokenUsage: { source: 'platform/app.js', line: 918, loadOrder: 1, occurrenceIndex: 2 },
+  initM1: { source: 'platform/app.js', line: 2319, loadOrder: 1, occurrenceIndex: 2 },
+  initM4: { source: 'platform/app.js', line: 3149, loadOrder: 1, occurrenceIndex: 3 },
+  downloadInfTemplate: { source: 'platform/app.js', line: 3310, loadOrder: 1, occurrenceIndex: 3 },
+  addChatMsg: { source: 'platform/app.js', line: 3542, loadOrder: 1, occurrenceIndex: 2 },
+  loadAdminDashboard: { source: 'platform/app.js', line: 3562, loadOrder: 1, occurrenceIndex: 3 },
   generateHTMLPPT: { source: 'platform/ppt.js', line: 40, loadOrder: 2, occurrenceIndex: 2 },
   esc: { source: 'platform/ppt.js', line: 864, loadOrder: 2, occurrenceIndex: 2 }
 });

@@ -10,52 +10,7 @@ let uploadedFileContent = "";
 let lastAIStrategyRaw = "";
 let chatHistory = [{role: "system", content: "You are the TuringMarket AI assistant. Answer in Chinese, concise and professional."}];
 
-
-// ==== DYNAMIC NAV REBUILD ====
-(function rebuildNav() {
-  var sidebar = document.querySelector('.sidebar');
-  if (!sidebar) return;
-
-  var pages = [
-    { id: 'm0', icon: '看', label: '客户看板' },
-    { id: 'm0-detail', icon: '客', label: '客户明细' },
-    { id: 'm1', icon: '智', label: '行业品牌智库' },
-    { id: 'm2', icon: '策', label: '客户策略规划' },
-    { id: 'm3', icon: '需', label: '需求接入 & 方案生成' },
-    { id: 'm4', icon: '红', label: '网红匹配 & 执行管理' },
-    { id: 'm5', icon: '🤖', label: 'AI 助手' },
-    { id: 'workflow-designer', icon: '流', label: '流程设计' },
-    { id: 'workflow-templates', icon: '模', label: '流程模板' },
-    { id: 'workflow-instances', icon: '实', label: '流程实例' },
-    { id: 'workflow-tasks', icon: '待', label: '我的待办' },
-    { id: 'admin', icon: '管', label: '管理控制室', adminOnly: true }
-  ];
-
-  // Remove all existing nav items
-  var existing = sidebar.querySelectorAll('.nav-item');
-  for (var i = 0; i < existing.length; i++) { existing[i].remove(); }
-
-  // Create new nav items
-  for (var j = 0; j < pages.length; j++) {
-    (function(p) {
-      var el = document.createElement('div');
-      el.className = 'nav-item';
-      if (p.adminOnly) el.className += ' admin-only';
-      if (p.id === 'm0') el.className += ' active';
-      el.setAttribute('data-page', p.id);
-      el.onclick = function() { switchPage(p.id); };
-      el.style.cursor = 'pointer';
-      el.innerHTML = '<span class="nav-icon">' + p.icon + '</span> ' + p.label;
-      // Insert after sidebar-logo, before sidebar-footer
-      var footer = sidebar.querySelector('.sidebar-footer');
-      if (footer) {
-        sidebar.insertBefore(el, footer);
-      } else {
-        sidebar.appendChild(el);
-      }
-    })(pages[j]);
-  }
-})();
+// Navigation registry and page visibility are owned by client/core/navigation.js.
 // ==== FIX DOM NESTING: ensure all page-* divs are direct children of <main> ====
 (function fixPageParents() {
   var main = document.querySelector('main');
@@ -68,6 +23,9 @@ let chatHistory = [{role: "system", content: "You are the TuringMarket AI assist
         console.log('[TM] Fixing parent for: ' + allPages[i].id);
         main.appendChild(allPages[i]);
       }
+    }
+    if (window.TMNavigation && typeof document.dispatchEvent === 'function' && typeof CustomEvent === 'function') {
+      document.dispatchEvent(new CustomEvent('tm:navigation-pages-normalized'));
     }
   }, 100);
 })();
@@ -97,7 +55,7 @@ async function doLogin() {
     }
     curCustomerScope = CURRENT_USER.role === 'admin' ? 'all' : 'my';
     updateCustomerScopeTabs();
-    try { await initApp(); } catch(e2) { console.error(e2); }
+    try { await initApp(); if (window.TMNavigation) window.TMNavigation.restore(CURRENT_USER); } catch(e2) { console.error(e2); }
   } catch (e) { showLoginError('Network error: ' + e.message) }
 }
 
@@ -432,7 +390,7 @@ async function changeCustomerStage(id, newStage) {
 var currentOppCustomerId = null;
 var curCrmView = 'pipeline';
 
-function switchCrmView(view) {
+function switchCrmView(view, options) { options = options || {}; if (!options.skipHistory && window.TMNavigation) { window.TMNavigation.navigate('m0-detail', { substate: { view: view }, user: CURRENT_USER }); return; }
   curCrmView = view;
   var tabs = document.querySelectorAll('.crm-tab');
   for (var i = 0; i < tabs.length; i++) {
@@ -807,7 +765,7 @@ async function loadSeaPool() {
         }
         curCustomerScope = CURRENT_USER.role === 'admin' ? 'all' : 'my';
         updateCustomerScopeTabs();
-        await initApp();
+        await initApp(); if (window.TMNavigation) window.TMNavigation.restore(CURRENT_USER);
         return;
       }
     } catch (e) {}
@@ -1123,7 +1081,7 @@ function escapeHTML(s){return String(s||"").replace(/&/g,"&amp;").replace(/</g,"
 
 
 
-function switchTab(id) { document.querySelectorAll('#tabBar .tab').forEach(function (t) { t.classList.remove('active') }); var tabEl = document.querySelector('[data-tab="' + id + '"]'); if (tabEl) tabEl.classList.add('active'); var t1=document.getElementById('tab1-content');var t2=document.getElementById('tab2-content');var t3=document.getElementById('tab3-content');if(t1)t1.classList.toggle('hidden',id!=='tab1');if(t2)t2.classList.toggle('hidden',id!=='tab2');if(t3)t3.classList.toggle('hidden',id!=='tab3') }
+function switchTab(id, options) { options = options || {}; if (!options.skipHistory && window.TMNavigation) { window.TMNavigation.navigate('m4', { substate: { tab: id }, user: CURRENT_USER }); return; } document.querySelectorAll('#tabBar .tab').forEach(function (t) { t.classList.remove('active') }); var tabEl = document.querySelector('[data-tab="' + id + '"]'); if (tabEl) tabEl.classList.add('active'); var t1=document.getElementById('tab1-content');var t2=document.getElementById('tab2-content');var t3=document.getElementById('tab3-content');if(t1)t1.classList.toggle('hidden',id!=='tab1');if(t2)t2.classList.toggle('hidden',id!=='tab2');if(t3)t3.classList.toggle('hidden',id!=='tab3') }
 // ===== M4: INFLUENCER MATCHING (API-driven) =====
 lastMatch = []; var lastInfAPI = [];
 
@@ -3594,7 +3552,7 @@ function addChatMsg(role, text) {
 function clearChat() { document.getElementById('chatMessages').innerHTML = '<div class="chat-msg assistant"><div class="bubble">Chat cleared</div></div>'; chatHistory = [{role:'system', content:'You are TuringMarket AI assistant.'}]; currentAIConversationId = null; }
 function clearAIMemory() { if (!confirm('Clear memory?')) return; aiMemory = {}; saveAIMemory(); toast('Memory cleared'); }
 // ===== ADMIN (v8.0) =====
-function switchAdminTab(tab) {
+function switchAdminTab(tab, options) { options = options || {}; if (!options.skipHistory && window.TMNavigation) { window.TMNavigation.navigate('admin', { substate: { tab: tab }, user: CURRENT_USER }); return; }
   ['overview','users','knowledge','ai-audit','tokens'].forEach(function(t) { var el = document.getElementById('admin-tab-' + t); if (el) el.style.display = t === tab ? 'block' : 'none'; });
   if (tab === 'overview') loadAdminDashboard();
   if (tab === 'users') loadAdminUsers();
@@ -3872,7 +3830,63 @@ document.addEventListener("click", function(e) {
   }
 });
 // ===== PAGE NAVIGATION =====
-function switchPage(id) {
+const TM_NAVIGATION_APP = (function() {
+  function activeM4Tab() {
+    var active = document.querySelector('#tabBar .tab.active');
+    return active ? active.getAttribute('data-tab') || 'tab1' : 'tab1';
+  }
+
+  function visibleAdminTab() {
+    var tabs = ['overview','users','knowledge','ai-audit','tokens'];
+    for (var i = 0; i < tabs.length; i++) {
+      var el = document.getElementById('admin-tab-' + tabs[i]);
+      if (el && el.style.display !== 'none') return tabs[i];
+    }
+    return 'overview';
+  }
+
+  function substateForPage(id) {
+    if (id === 'm0-detail') return { view: curCrmView || 'pipeline' };
+    if (id === 'm4') return { tab: activeM4Tab() };
+    if (id === 'admin') return { tab: visibleAdminTab() };
+    return null;
+  }
+
+  function applyAppSideEffects(state) {
+    if (!state || !state.pageId) return;
+    var id = state.pageId;
+    var substate = state.substate || {};
+    if (id === 'm0') { loadCustomerStats(); renderCrmCommandCenter(); }
+    if (id === 'm0-detail') { switchCrmView(substate.view || curCrmView || 'pipeline', { skipHistory: true }); }
+    if (id === 'm4') { switchTab(substate.tab || activeM4Tab(), { skipHistory: true }); }
+    if (id === 'admin') { switchAdminTab(substate.tab || visibleAdminTab(), { skipHistory: true }); }
+    if (id === 'workflow-designer') { setTimeout(function() { if (typeof initWorkflowDesigner === 'function') initWorkflowDesigner(); }, 200); }
+    if (id === 'workflow-templates') { setTimeout(function() { if (typeof wfLoadTemplates === 'function') wfLoadTemplates(); }, 200); }
+    if (id === 'workflow-instances') { setTimeout(function() { if (typeof wfLoadInstances === 'function') wfLoadInstances(); }, 200); }
+    if (id === 'workflow-tasks') { setTimeout(function() { if (typeof wfLoadTasks === 'function') wfLoadTasks(); }, 200); }
+  }
+
+  document.addEventListener('tm:navigation-applied', function(event) {
+    applyAppSideEffects(event.detail && event.detail.state);
+  });
+
+  return {
+    substateForPage: substateForPage
+  };
+})();
+
+function switchPage(id, options) {
+  options = options || {};
+  if (window.TMNavigation) {
+    window.TMNavigation.navigate(id, {
+      substate: options.substate || TM_NAVIGATION_APP.substateForPage(id),
+      replace: options.replace,
+      fromPopState: options.fromPopState,
+      user: CURRENT_USER
+    });
+    return;
+  }
+
   var navs = document.querySelectorAll('.nav-item');
   for (var i = 0; i < navs.length; i++) { navs[i].classList.remove('active'); }
   var ni = document.querySelector('[data-page="' + id + '"]');
@@ -3882,7 +3896,7 @@ function switchPage(id) {
   var pg = document.getElementById('page-' + id);
   if (pg) { pg.classList.add('active'); pg.style.display = 'block'; }
   if (id === 'm0') { loadCustomerStats(); renderCrmCommandCenter(); }
-  if (id === 'm0-detail') { switchCrmView(curCrmView || 'pipeline'); }
+  if (id === 'm0-detail') { switchCrmView(curCrmView || 'pipeline', { skipHistory: true }); }
   if (id === 'admin') loadAdminDashboard();
   if (id === 'workflow-designer') { setTimeout(function() { if (typeof initWorkflowDesigner === 'function') initWorkflowDesigner(); }, 200); }
   if (id === 'workflow-templates') { setTimeout(function() { if (typeof wfLoadTemplates === 'function') wfLoadTemplates(); }, 200); }
