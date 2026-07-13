@@ -113,9 +113,14 @@ function removeRunRoot(runRoot) {
   assert.equal(fs.existsSync(target), false, 'Task 10 temporary run root must be removed');
 }
 
-function assertHtmlDownloadFilenameContract(requestedFilename, suggestedFilename, platform = process.platform) {
-  assert.match(requestedFilename, /\.html$/i, 'the application must request an HTML download filename');
-  if (/\.html$/i.test(suggestedFilename)) return;
+function assertDownloadFilenameContract(requestedFilename, suggestedFilename, extension, platform = process.platform) {
+  const expectedSuffix = `.${extension}`.toLowerCase();
+  assert.equal(
+    requestedFilename.toLowerCase().endsWith(expectedSuffix),
+    true,
+    `the application must request a ${expectedSuffix} download filename`
+  );
+  if (suggestedFilename.toLowerCase().endsWith(expectedSuffix)) return;
 
   const linuxUnicodeFallback = platform === 'linux'
     && suggestedFilename === 'download'
@@ -130,6 +135,7 @@ function assertHtmlDownloadFilenameContract(requestedFilename, suggestedFilename
 async function triggerDownloadWithRequestedFilename(page, globalFunctionName) {
   await page.evaluate(() => {
     const nativeClick = HTMLAnchorElement.prototype.click;
+    window.__tmNativeDownloadClick = nativeClick;
     window.__tmRequestedDownloadFilename = null;
     HTMLAnchorElement.prototype.click = function interceptedDownloadClick(...args) {
       window.__tmRequestedDownloadFilename = String(this.download || '');
@@ -141,20 +147,36 @@ async function triggerDownloadWithRequestedFilename(page, globalFunctionName) {
   const downloadPromise = page.waitForEvent('download');
   await page.evaluate((functionName) => window[functionName](), globalFunctionName);
   const download = await downloadPromise;
-  const requestedFilename = await page.evaluate(() => window.__tmRequestedDownloadFilename);
+  const capture = await page.evaluate(() => ({
+    requestedFilename: window.__tmRequestedDownloadFilename,
+    nativeClickRestored: HTMLAnchorElement.prototype.click === window.__tmNativeDownloadClick
+  }));
+  assert.equal(capture.nativeClickRestored, true, 'the download click interception must restore the native prototype');
+  const requestedFilename = capture.requestedFilename;
   assert.equal(typeof requestedFilename, 'string', 'the application download request must be observable');
   return { download, requestedFilename };
 }
 
-test('HTML download filename compatibility is limited to Linux Unicode requests', () => {
-  assert.doesNotThrow(() => assertHtmlDownloadFilenameContract('TuringMarket方案.html', 'download', 'linux'));
+test('browser download filename compatibility is limited to Linux Unicode requests', () => {
+  assert.doesNotThrow(() => assertDownloadFilenameContract('TuringMarket方案.html', 'download', 'html', 'linux'));
+  assert.doesNotThrow(() => assertDownloadFilenameContract('TuringMarket方案.pptx', 'download', 'pptx', 'linux'));
   assert.throws(
-    () => assertHtmlDownloadFilenameContract('TuringMarket.html', 'download', 'linux'),
+    () => assertDownloadFilenameContract('TuringMarket.pptx', 'download', 'pptx', 'linux'),
     /unexpected browser download filename/
   );
   assert.throws(
-    () => assertHtmlDownloadFilenameContract('TuringMarket方案.html', 'download', 'win32'),
+    () => assertDownloadFilenameContract('TuringMarket方案.pptx', 'download', 'pptx', 'win32'),
     /unexpected browser download filename/
+  );
+  for (const nearMiss of ['Download', 'download.tmp']) {
+    assert.throws(
+      () => assertDownloadFilenameContract('TuringMarket方案.pptx', nearMiss, 'pptx', 'linux'),
+      /unexpected browser download filename/
+    );
+  }
+  assert.throws(
+    () => assertDownloadFilenameContract('TuringMarket方案.html', 'download', 'pptx', 'linux'),
+    /application must request a \.pptx download filename/
   );
 });
 
@@ -448,9 +470,10 @@ test('Task 10 locked ppt.js owns and preserves the complete browser PPT workflow
         download: htmlDownload,
         requestedFilename: htmlRequestedFilename
       } = await triggerDownloadWithRequestedFilename(success.page, 'downloadHTMLPPT');
-      assertHtmlDownloadFilenameContract(
+      assertDownloadFilenameContract(
         htmlRequestedFilename,
-        htmlDownload.suggestedFilename()
+        htmlDownload.suggestedFilename(),
+        'html'
       );
       const htmlPath = path.join(server.runRoot, 'task-10-edited.html');
       await htmlDownload.saveAs(htmlPath);
@@ -460,10 +483,15 @@ test('Task 10 locked ppt.js owns and preserves the complete browser PPT workflow
       assert.doesNotMatch(html, /Task 10 Added Contract Slide 副本/);
       assert.match(html, /<!DOCTYPE html>/i);
 
-      const pptxDownloadPromise = success.page.waitForEvent('download');
-      await success.page.evaluate(() => window.downloadPPTX());
-      const pptxDownload = await pptxDownloadPromise;
-      assert.match(pptxDownload.suggestedFilename(), /\.pptx$/i);
+      const {
+        download: pptxDownload,
+        requestedFilename: pptxRequestedFilename
+      } = await triggerDownloadWithRequestedFilename(success.page, 'downloadPPTX');
+      assertDownloadFilenameContract(
+        pptxRequestedFilename,
+        pptxDownload.suggestedFilename(),
+        'pptx'
+      );
       const pptxPath = path.join(server.runRoot, 'task-10-edited.pptx');
       await pptxDownload.saveAs(pptxPath);
       assert.equal(fs.readFileSync(pptxPath, 'utf8'), 'TASK10-PPTX-FIXTURE');
@@ -518,20 +546,26 @@ test('Task 10 locked ppt.js owns and preserves the complete browser PPT workflow
       } = await triggerDownloadWithRequestedFilename(fallback.page, 'downloadHTMLPPT');
       const fallbackHtmlPath = path.join(server.runRoot, 'task-10-fallback.html');
       await fallbackHtmlDownload.saveAs(fallbackHtmlPath);
-      assertHtmlDownloadFilenameContract(
+      assertDownloadFilenameContract(
         fallbackHtmlRequestedFilename,
-        fallbackHtmlDownload.suggestedFilename()
+        fallbackHtmlDownload.suggestedFilename(),
+        'html'
       );
       const fallbackHtml = fs.readFileSync(fallbackHtmlPath, 'utf8');
       assert.match(fallbackHtml, /Task 10 Fallback Brand/);
       assert.match(fallbackHtml, /<!DOCTYPE html>/i);
 
-      const fallbackPptxPromise = fallback.page.waitForEvent('download');
-      await fallback.page.evaluate(() => window.downloadPPTX());
-      const fallbackPptxDownload = await fallbackPptxPromise;
+      const {
+        download: fallbackPptxDownload,
+        requestedFilename: fallbackPptxRequestedFilename
+      } = await triggerDownloadWithRequestedFilename(fallback.page, 'downloadPPTX');
       const fallbackPptxPath = path.join(server.runRoot, 'task-10-fallback.pptx');
       await fallbackPptxDownload.saveAs(fallbackPptxPath);
-      assert.match(fallbackPptxDownload.suggestedFilename(), /\.pptx$/i);
+      assertDownloadFilenameContract(
+        fallbackPptxRequestedFilename,
+        fallbackPptxDownload.suggestedFilename(),
+        'pptx'
+      );
       assert.equal(fs.readFileSync(fallbackPptxPath, 'utf8'), 'TASK10-PPTX-FIXTURE');
       assert.equal(fallback.state.pptxBodies.length, 1);
       assert.match(fallback.state.pptxBodies[0].outline.title, /Task 10 Fallback Brand/);
