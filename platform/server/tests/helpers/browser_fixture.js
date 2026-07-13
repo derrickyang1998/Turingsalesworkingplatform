@@ -7,6 +7,7 @@ const {
   ensureSafeFixtureDirectory,
   resolveSafeFixturePath
 } = require('./safe_fixture_paths');
+const influencerWorkflow = require('../../services/influencer_workflow_service');
 
 const BASELINE_FIXTURE_VERSION = 'v0.2.9-ui-fixture-1';
 const MASK_VERSION = 'v0.2.9-mask-1';
@@ -222,6 +223,217 @@ function userForAuthorization(request, fixture) {
   return null;
 }
 
+function cloneFixtureApiState(fixture) {
+  return JSON.parse(JSON.stringify(fixture));
+}
+
+function requestJson(request) {
+  try {
+    return request.postDataJSON() || {};
+  } catch (e) {
+    try { return JSON.parse(request.postData() || '{}'); } catch (e2) { return {}; }
+  }
+}
+
+function like(value, needle) {
+  if (!needle) return true;
+  return String(value === undefined || value === null ? '' : value).toLowerCase().includes(String(needle).toLowerCase());
+}
+
+function numberValue(value) {
+  const parsed = Number(String(value || '').replace(/[^0-9.\-]/g, ''));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function activeInfluencers(fixture) {
+  return fixture.influencers.filter((row) => row.is_active !== 0);
+}
+
+function influencerMatchesSearch(row, search) {
+  if (!search) return true;
+  return [
+    row.id,
+    row.kol_handle,
+    row.profile_link,
+    row.content_style,
+    row.brand_collab_history,
+    row.project_name,
+    row.product_name,
+    row.tags,
+    row.category,
+    row.platform,
+    row.region,
+    row.contact_email,
+    row.content_deliverable,
+    row.influencer_type,
+    row.parent_record,
+    row.followers,
+    row.avg_views_10,
+    row.cost_usd,
+    row.quoted_price,
+    row.cpm,
+    row.cpv
+  ].some((value) => like(value, search));
+}
+
+function queryInfluencersFixture(fixture, filters) {
+  filters = filters || {};
+  let rows = activeInfluencers(fixture);
+  if (filters.platform) rows = rows.filter((row) => row.platform === filters.platform);
+  if (filters.category) rows = rows.filter((row) => row.category === filters.category);
+  if (filters.region) rows = rows.filter((row) => row.region === filters.region);
+  if (filters.project_name) rows = rows.filter((row) => like(row.project_name, filters.project_name));
+  if (filters.product_name) rows = rows.filter((row) => like(row.product_name, filters.product_name));
+  if (filters.tags) rows = rows.filter((row) => like(row.tags, filters.tags) || like(row.category, filters.tags));
+  if (filters.search) rows = rows.filter((row) => influencerMatchesSearch(row, filters.search));
+  if (filters.min_followers) rows = rows.filter((row) => Number(row.followers || 0) >= Number(filters.min_followers));
+  if (filters.max_followers) rows = rows.filter((row) => Number(row.followers || 0) <= Number(filters.max_followers));
+  const sortBy = ['engagement', 'followers', 'cost_usd'].includes(filters.sort_by) ? filters.sort_by : 'followers';
+  rows = rows.slice().sort((a, b) => Number(b[sortBy] || 0) - Number(a[sortBy] || 0));
+  return rows.slice(0, 200);
+}
+
+function parseCsvLine(line) {
+  const values = [];
+  let cell = '';
+  let quoted = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i];
+    if (quoted) {
+      if (ch === '"' && line[i + 1] === '"') {
+        cell += '"';
+        i += 1;
+      } else if (ch === '"') {
+        quoted = false;
+      } else {
+        cell += ch;
+      }
+    } else if (ch === '"') {
+      quoted = true;
+    } else if (ch === ',') {
+      values.push(cell);
+      cell = '';
+    } else {
+      cell += ch;
+    }
+  }
+  values.push(cell);
+  if (values.length) values[0] = values[0].replace(/^\uFEFF/, '');
+  return values;
+}
+
+function parseCsvRows(csv) {
+  return String(csv || '')
+    .replace(/^\uFEFF/, '')
+    .trim()
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map(parseCsvLine);
+}
+
+function csvFromInfluencers(rows) {
+  return influencerWorkflow.buildInfluencerCsv(rows);
+}
+
+function templateCsvFromFixture() {
+  return influencerWorkflow.buildTemplateCsv();
+}
+
+function csvFromUploadRequest(request) {
+  const body = request.postDataBuffer();
+  if (!body) return '';
+  const text = body.toString('utf8');
+  const header = influencerWorkflow.TEMPLATE_HEADERS.join(',');
+  const start = text.indexOf(header);
+  if (start < 0) return '';
+  let csv = text.slice(start);
+  const boundaryMatch = /\r?\n--[-A-Za-z0-9]+/.exec(csv);
+  if (boundaryMatch) csv = csv.slice(0, boundaryMatch.index);
+  return csv.trim() + '\n';
+}
+
+function fixtureInfluencerFromTemplateRow(values, fixture) {
+  const nextId = Math.max(0, ...fixture.influencers.map((row) => Number(row.id) || 0)) + 1;
+  return {
+    id: nextId,
+    platform: values[8] || '',
+    kol_handle: values[5] || '',
+    profile_link: values[7] || '',
+    followers: numberValue(values[6]),
+    avg_views_10: numberValue(values[11]),
+    avg_engagement: 0,
+    category: values[10] || '',
+    sub_category: '',
+    region: values[9] || '',
+    language: '',
+    content_style: '',
+    collab_type: values[13] || '',
+    cost_usd: numberValue(values[12]),
+    quoted_price: numberValue(values[15]),
+    brand_collab_history: values[14] || '',
+    contact_email: values[16] || '',
+    project_name: values[2] || '',
+    product_name: values[3] || '',
+    reporter: values[1] || '',
+    tags: values[10] || '',
+    content_deliverable: values[13] || '',
+    influencer_type: values[10] || '',
+    cpm: numberValue(values[17]),
+    cpv: numberValue(values[18]),
+    parent_record: values[19] || '',
+    is_duplicate: /^(yes|true|1|是|重复)$/i.test(values[4] || '') ? 1 : 0,
+    is_active: 1
+  };
+}
+
+function importInfluencersFromCsv(fixture, csv) {
+  const rows = parseCsvRows(csv);
+  if (rows.length < 2) return [];
+  const imported = rows.slice(1).map((values) => fixtureInfluencerFromTemplateRow(values, fixture));
+  fixture.influencers.push(...imported);
+  return imported;
+}
+
+function collaborationStatsFromFixture(fixture) {
+  const counts = new Map();
+  for (const row of fixture.collaborations) counts.set(row.status, (counts.get(row.status) || 0) + 1);
+  const byStatus = Array.from(counts, ([status, count]) => ({ status, count }));
+  return {
+    stats: {
+      byStatus,
+      totalActive: fixture.collaborations.filter((row) => ['proposed', 'contacted', 'negotiating', 'confirmed', 'contract_sent', 'live', 'content_review'].includes(row.status)).length,
+      totalCompleted: fixture.collaborations.filter((row) => row.status === 'completed').length,
+      totalCost: fixture.collaborations.reduce((sum, row) => sum + Number(row.cost_actual || row.cost_quoted || 0), 0)
+    }
+  };
+}
+
+function collaborationWithInfluencer(fixture, body) {
+  const influencer = fixture.influencers.find((row) => Number(row.id) === Number(body.influencer_id)) || {};
+  const resource = body.resource && typeof body.resource === 'object' ? body.resource : {};
+  const nextId = Math.max(0, ...fixture.collaborations.map((row) => Number(row.id) || 0)) + 1;
+  return {
+    id: nextId,
+    influencer_id: Number(body.influencer_id),
+    kol_handle: influencer.kol_handle || '',
+    platform: influencer.platform || '',
+    followers: influencer.followers || 0,
+    category: influencer.category || '',
+    region: influencer.region || '',
+    project_name: influencer.project_name || '',
+    product_name: influencer.product_name || '',
+    content_deliverable: influencer.content_deliverable || '',
+    quoted_price: influencer.quoted_price || 0,
+    status: body.status || 'proposed',
+    cost_quoted: Number(body.cost_quoted || resource.quoted_price || 0),
+    timeline_start: body.timeline_start || '',
+    timeline_end: body.timeline_end || '',
+    notes: body.notes || '',
+    proposal_notes: body.proposal_notes || JSON.stringify(resource),
+    updated_at: FROZEN_ISO
+  };
+}
+
 function apiResponseFor(request, fixture) {
   const url = new URL(request.url());
   const apiPath = url.pathname.replace(/^\/api/, '') || '/';
@@ -260,17 +472,72 @@ function apiResponseFor(request, fixture) {
   if (method === 'GET' && apiPath === '/dashboard/sales') return ok(fixture.salesDashboard);
   if (method === 'GET' && apiPath === '/dashboard/stats') return ok(fixture.dashboardStats);
 
-  if (method === 'GET' && apiPath === '/influencers') return ok({ influencers: fixture.influencers, total: fixture.influencers.length });
-  if (method === 'POST' && apiPath === '/influencers/match') return ok({ matches: fixture.influencers });
-  if (method === 'GET' && apiPath === '/influencers/template') return textResponse(fixture.csv.influencerTemplate, 'text/csv; charset=utf-8');
-  if (method === 'POST' && apiPath === '/influencers/export') return textResponse(fixture.csv.influencerExport, 'text/csv; charset=utf-8');
-  if (method === 'POST' && apiPath === '/influencers/feishu/sync') return ok({ configured: false, records: fixture.influencers.length, csv: fixture.csv.influencerExport });
-  if (['POST', 'PUT'].includes(method) && /^\/influencers(?:\/\d+|\/import|\/upload)?$/.test(apiPath)) {
+  if (method === 'GET' && apiPath === '/influencers') {
+    const influencers = queryInfluencersFixture(fixture, Object.fromEntries(url.searchParams.entries()));
+    return ok({ influencers, total: influencers.length });
+  }
+  if (method === 'POST' && apiPath === '/influencers/match') return ok({ matches: queryInfluencersFixture(fixture, requestJson(request)) });
+  if (method === 'GET' && apiPath === '/influencers/template') return textResponse(fixture.csv.influencerTemplate || templateCsvFromFixture(), 'text/csv; charset=utf-8');
+  if (method === 'POST' && apiPath === '/influencers/export') {
+    const body = requestJson(request);
+    let rows = activeInfluencers(fixture);
+    if (body.mode === 'selected' && Array.isArray(body.ids)) {
+      const selected = new Set(body.ids.map(Number));
+      rows = rows.filter((row) => selected.has(Number(row.id)));
+    } else if (body.mode === 'filtered') {
+      rows = queryInfluencersFixture(fixture, body.filters || {});
+    } else {
+      rows = rows.slice().sort((a, b) => Number(b.followers || 0) - Number(a.followers || 0));
+    }
+    return textResponse(csvFromInfluencers(rows), 'text/csv; charset=utf-8');
+  }
+  if (method === 'POST' && apiPath === '/influencers/feishu/sync') {
+    const body = requestJson(request);
+    const selected = new Set((Array.isArray(body.ids) ? body.ids : []).map(Number));
+    const rows = activeInfluencers(fixture).filter((row) => selected.has(Number(row.id)));
+    return ok({
+      configured: false,
+      records: rows.length,
+      csv: csvFromInfluencers(rows),
+      message: 'FEISHU_WEBHOOK_URL is not configured. CSV fallback is ready for manual upload.'
+    });
+  }
+  if (method === 'POST' && apiPath === '/influencers/upload') {
+    const imported = importInfluencersFromCsv(fixture, csvFromUploadRequest(request));
+    return ok({ success: true, imported: imported.length, skipped: 0, sample: imported.slice(0, 5) });
+  }
+  if (method === 'POST' && apiPath === '/influencers/import') {
+    const body = requestJson(request);
+    const rows = Array.isArray(body.rows) ? body.rows : [];
+    return ok({ success: true, imported: rows.length, skipped: 0, sample: rows.slice(0, 5) });
+  }
+  if (['POST', 'PUT'].includes(method) && /^\/influencers(?:\/\d+)?$/.test(apiPath)) {
     return ok({ success: true, imported: fixture.influencers.length, skipped: 0, sample: fixture.influencers });
   }
-  if (method === 'GET' && apiPath === '/collaborations') return ok({ collaborations: fixture.collaborations });
-  if (method === 'GET' && apiPath === '/collaborations/stats') return ok(fixture.collaborationStats);
-  if (['POST', 'PUT'].includes(method) && /^\/collaborations(?:\/\d+)?$/.test(apiPath)) return ok({ success: true, id: fixture.collaborations[0].id });
+  if (method === 'GET' && apiPath === '/collaborations') {
+    let collaborations = fixture.collaborations.slice();
+    const status = url.searchParams.get('status');
+    if (status) collaborations = collaborations.filter((row) => row.status === status);
+    return ok({ collaborations });
+  }
+  if (method === 'GET' && apiPath === '/collaborations/stats') return ok(collaborationStatsFromFixture(fixture));
+  if (method === 'POST' && apiPath === '/collaborations') {
+    const collab = collaborationWithInfluencer(fixture, requestJson(request));
+    fixture.collaborations.unshift(collab);
+    return ok({ success: true, id: collab.id });
+  }
+  if (method === 'PUT' && /^\/collaborations\/\d+$/.test(apiPath)) {
+    const id = Number(apiPath.split('/').pop());
+    const body = requestJson(request);
+    const collab = fixture.collaborations.find((row) => Number(row.id) === id);
+    if (collab) {
+      if (body.status) collab.status = body.status;
+      if (body.notes !== undefined) collab.notes = body.notes;
+      if (body.cost_quoted !== undefined) collab.cost_quoted = body.cost_quoted;
+      collab.updated_at = FROZEN_ISO;
+    }
+    return ok({ success: true, id });
+  }
 
   if (method === 'GET' && apiPath === '/demands') return ok({ demands: fixture.demands });
   if (method === 'GET' && apiPath === '/proposals') return ok({ proposals: fixture.proposals });
@@ -326,6 +593,7 @@ function classifyFixtureRequest(requestUrl, expectedOrigin) {
 async function installFixtureApi(page, { fixture }) {
   const port = Number(process.env.TM_BROWSER_FIXTURE_PORT || 43187);
   const expectedOrigin = `http://127.0.0.1:${port}`;
+  const fixtureState = cloneFixtureApiState(fixture);
   await page.route('**/*', async (route) => {
     const request = route.request();
     const classification = classifyFixtureRequest(request.url(), expectedOrigin);
@@ -339,7 +607,7 @@ async function installFixtureApi(page, { fixture }) {
       await route.continue();
       return;
     }
-    const response = apiResponseFor(route.request(), fixture);
+    const response = apiResponseFor(route.request(), fixtureState);
     if (!response) {
       const url = new URL(request.url());
       page.__baselineUnhandledApiCalls.push(`${request.method()} ${url.pathname}${url.search}`);

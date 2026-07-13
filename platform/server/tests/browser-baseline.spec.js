@@ -1,5 +1,7 @@
 'use strict';
 
+const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { test, expect } = require('playwright/test');
 const {
@@ -17,6 +19,7 @@ const {
   waitForBaselineReady,
   writeBaselineRunMetadata
 } = require('./helpers/browser_fixture');
+const influencerWorkflow = require('../services/influencer_workflow_service');
 
 const repoRoot = path.resolve(__dirname, '..', '..', '..');
 const baselineVersion = 'v0.2.9';
@@ -55,6 +58,71 @@ function expectedPathForJourney(journey) {
     'workflow-tasks': '/tasks'
   };
   return simplePaths[journey.pageId] || '/m0';
+}
+
+function stripBom(value) {
+  return String(value || '').replace(/^\uFEFF/, '');
+}
+
+function parseCsvLine(line) {
+  const values = [];
+  let cell = '';
+  let quoted = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i];
+    if (quoted) {
+      if (ch === '"' && line[i + 1] === '"') {
+        cell += '"';
+        i += 1;
+      } else if (ch === '"') {
+        quoted = false;
+      } else {
+        cell += ch;
+      }
+    } else if (ch === '"') {
+      quoted = true;
+    } else if (ch === ',') {
+      values.push(cell);
+      cell = '';
+    } else {
+      cell += ch;
+    }
+  }
+  values.push(cell);
+  if (values.length) values[0] = stripBom(values[0]);
+  return values;
+}
+
+function parseCsvRows(csv) {
+  return stripBom(csv)
+    .trim()
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map(parseCsvLine);
+}
+
+async function readDownloadCsv(download, label) {
+  const target = path.join(os.tmpdir(), `tm-task9-${label}-${Date.now()}-${Math.random().toString(16).slice(2)}.csv`);
+  await download.saveAs(target);
+  try {
+    return fs.readFileSync(target, 'utf8');
+  } finally {
+    fs.rmSync(target, { force: true });
+  }
+}
+
+function expectApprovedCsv(csv) {
+  expect(parseCsvRows(csv)[0]).toEqual(influencerWorkflow.TEMPLATE_HEADERS);
+}
+
+async function openM4(page, tab) {
+  await installBaselineAuthState(page, fixture.auth.admin);
+  await page.goto(`/m4?tab=${tab || 'tab1'}`, { waitUntil: 'domcontentloaded' });
+  await page.locator('#app').waitFor({ state: 'visible' });
+  await page.waitForFunction(() => typeof window.switchPage === 'function');
+  await expect(page.locator('#page-m4')).toBeVisible();
+  await expectM4Tab(page, tab || 'tab1');
+  await waitForBaselineReady(page);
 }
 
 async function expectM4Tab(page, tab) {
@@ -430,5 +498,137 @@ test.describe('deterministic pre-edit browser baseline', () => {
     await expect(page.locator('#page-m4')).toBeVisible();
     await expectM4Tab(page, 'tab2');
     await expect.poll(() => page.evaluate(() => document.documentElement.dataset.tmPreview || null)).toBeNull();
+  });
+});
+
+test.describe('Task 9 M4 workflow', () => {
+  test.beforeEach(async ({ page }, testInfo) => {
+    await installBaselineBrowserControls(page, { fixture, testInfo });
+    await installFixtureApi(page, { fixture });
+  });
+
+  test('admin runs query-aware list, import, export, Feishu, order, and status flows', async ({ page }) => {
+    await openM4(page, 'tab1');
+
+    await expect(page.locator('#infTableContainer tbody tr')).toHaveCount(2);
+    await expect(page.locator('#infTableContainer')).toContainText('FixtureCreator');
+    await expect(page.locator('#infTableContainer')).toContainText('SampleCreator');
+    await expect.poll(() => page.locator('.m4-table thead th').first().evaluate((node) => getComputedStyle(node).position)).toBe('sticky');
+    await expect.poll(() => page.locator('.m4-table .infcb').first().evaluate((node) => {
+      const style = getComputedStyle(node);
+      return { width: style.width, minWidth: style.minWidth };
+    })).toEqual({ width: '16px', minWidth: '16px' });
+
+    for (const [term, expectedHandles] of [
+      ['401', ['FixtureCreator']],
+      ['smart-home', ['SampleCreator']],
+      ['sample-creator', ['SampleCreator']],
+      ['fixture-parent', ['FixtureCreator', 'SampleCreator']]
+    ]) {
+      await page.locator('#filt_search').fill(term);
+      await expect
+        .poll(() => page.locator('#infTableContainer tbody tr').evaluateAll((rows) => rows.map((row) => row.textContent || '')))
+        .toEqual(expectedHandles.map((handle) => expect.stringContaining(handle)));
+    }
+
+    await page.locator('#filt_search').fill('');
+    await expect(page.locator('#infTableContainer tbody tr')).toHaveCount(2);
+
+    const allDownloadPromise = page.waitForEvent('download');
+    await page.locator('button[onclick="exportAll()"]').click();
+    const allCsv = await readDownloadCsv(await allDownloadPromise, 'all');
+    expectApprovedCsv(allCsv);
+    expect(allCsv).toContain('FixtureCreator');
+    expect(allCsv).toContain('SampleCreator');
+
+    await page.locator('#filt_search').fill('401');
+    await expect(page.locator('#infTableContainer tbody tr')).toHaveCount(1);
+    const filteredDownloadPromise = page.waitForEvent('download');
+    await page.locator('button[onclick="exportFiltered()"]').click();
+    const filteredCsv = await readDownloadCsv(await filteredDownloadPromise, 'filtered');
+    expectApprovedCsv(filteredCsv);
+    expect(filteredCsv).toContain('FixtureCreator');
+    expect(filteredCsv).not.toContain('SampleCreator');
+
+    await page.locator('.m4-table .infcb').first().check();
+    const selectedDownloadPromise = page.waitForEvent('download');
+    await page.locator('button[onclick="exportSelected()"]').click();
+    const selectedCsv = await readDownloadCsv(await selectedDownloadPromise, 'selected');
+    expectApprovedCsv(selectedCsv);
+    expect(selectedCsv).toContain('FixtureCreator');
+    expect(selectedCsv).not.toContain('SampleCreator');
+
+    await page.evaluate(() => window.switchTab('tab3'));
+    await expectM4Tab(page, 'tab3');
+    const templateDownloadPromise = page.waitForEvent('download');
+    await page.locator('#tab3-content button[onclick="downloadInfTemplate()"]').click();
+    const templateCsv = await readDownloadCsv(await templateDownloadPromise, 'template');
+    expectApprovedCsv(templateCsv);
+
+    const feishuDownloadPromise = page.waitForEvent('download');
+    await page.locator('#tab3-content button[onclick="pushToFeishu()"]').click();
+    const feishuCsv = await readDownloadCsv(await feishuDownloadPromise, 'feishu');
+    expectApprovedCsv(feishuCsv);
+    expect(feishuCsv).toContain('FixtureCreator');
+    await expect(page.locator('#feishuStatus')).toContainText(/Fallback|CSV|未配置|manual/i);
+
+    await page.locator('#tab3-content button[onclick="openInfUploadModal()"]').click();
+    await expect(page.locator('#infUploadModal')).toBeVisible();
+    const uploadCsv = '\uFEFF' + influencerWorkflow.TEMPLATE_HEADERS.join(',') + '\n' + [
+      '2026-07-13',
+      'Browser Fixture',
+      'Browser Import Project',
+      'Browser Import Product',
+      'No',
+      '@browser_import',
+      '56000',
+      'https://fixture.invalid/browser-import',
+      'TikTok',
+      'US',
+      'Browser Tech',
+      '17000',
+      '800',
+      '1 browser video',
+      'Browser import note',
+      '1300',
+      'browser-import@example.invalid',
+      '40',
+      '0.08',
+      'BROWSER-PARENT'
+    ].join(',') + '\n';
+    await page.locator('#infFileModal').setInputFiles({
+      name: 'task9-browser-import.csv',
+      mimeType: 'text/csv',
+      buffer: Buffer.from(uploadCsv, 'utf8')
+    });
+    await expect(page.locator('#infModalStatus')).toContainText(/Imported|导入|uploaded/i);
+    await page.evaluate(() => {
+      const modal = document.getElementById('infUploadModal');
+      if (modal) modal.style.display = 'none';
+    });
+    await page.evaluate(() => window.switchTab('tab1'));
+    await expectM4Tab(page, 'tab1');
+    await page.locator('#filt_search').fill('browser-import');
+    await expect(page.locator('#infTableContainer')).toContainText('@browser_import');
+
+    await page.locator('#filt_search').fill('401');
+    await expect(page.locator('#infTableContainer tbody tr')).toHaveCount(1);
+    await page.locator('#infTableContainer tbody tr').first().getByRole('button', { name: '下单' }).click();
+    await expect(page.locator('#collabOrderModal')).toBeVisible();
+    await expect(page.locator('#orderProject')).toHaveValue('Fixture Launch');
+    await expect(page.locator('#orderProduct')).toHaveValue('Fixture Device');
+    await expect(page.locator('#orderDeliverable')).toHaveValue('1 dedicated video');
+    await expect(page.locator('#orderQuotedPrice')).toHaveValue('3000');
+    await page.locator('#orderTimelineStart').fill('2026-07-20');
+    await page.locator('#orderTimelineEnd').fill('2026-07-30');
+    await page.locator('#orderNotes').fill('Task 9 browser order');
+    await page.locator('#collabOrderModal button[onclick="submitCollabOrder()"]').click();
+    await expectM4Tab(page, 'tab2');
+    await expect(page.locator('#execTableContainer')).toContainText('FixtureCreator');
+    await expect(page.locator('#execTableContainer')).toContainText('Task 9 browser order');
+
+    const statusSelect = page.locator('#execTableContainer select').first();
+    await statusSelect.selectOption('completed');
+    await expect(statusSelect).toHaveValue('completed');
   });
 });

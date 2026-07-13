@@ -71,7 +71,11 @@
       "name_cn": "Fixture Labs",
       "company": "Fixture Labs Ltd.",
       "industry": "Consumer Electronics",
-      "industry_tags": ["electronics", "smart-home", "launch"],
+      "industry_tags": [
+        "electronics",
+        "smart-home",
+        "launch"
+      ],
       "relation_group": "Fixture Group",
       "estimated_annual_revenue": "$50M-$100M",
       "headquarter": "Singapore",
@@ -86,7 +90,11 @@
       "name_cn": "Sample Home",
       "company": "Sample Home Inc.",
       "industry": "Smart Home",
-      "industry_tags": ["smart-home", "iot", "appliance"],
+      "industry_tags": [
+        "smart-home",
+        "iot",
+        "appliance"
+      ],
       "relation_group": "Fixture Group",
       "estimated_annual_revenue": "$10M-$50M",
       "headquarter": "Berlin",
@@ -368,7 +376,11 @@
       "references": []
     },
     "pptOutline": {
-      "outline": ["Fixture overview", "Channel plan", "Execution cadence"]
+      "outline": [
+        "Fixture overview",
+        "Channel plan",
+        "Execution cadence"
+      ]
     },
     "proposalDraft": {
       "draft": "Synthetic proposal draft.",
@@ -634,7 +646,7 @@
     }
   },
   "csv": {
-    "influencerTemplate": "date,reporter,project,product,kol_handle,platform,followers,profile_link\n2026-07-13,fixture,Fixture Launch,Fixture Device,FixtureCreator,YouTube,125000,https://fixture.invalid/creator\n",
-    "influencerExport": "id,kol_handle,platform,followers\n401,FixtureCreator,YouTube,125000\n402,SampleCreator,Instagram,88000\n"
+    "influencerTemplate": "﻿日期,提报人,项目&客户,推广产品,是否重复,网红频道名称,网红粉丝量,网红频道链接,社媒平台,国家,网红类型,近10个视频均播,网红成本价格（折算美元）,网红交付物（植入-完播等信息）,Turing备注,对外商务报价（美元）,网红联系方式,CPM（自动计算）,CPV(自动计算),父记录\n2026-07-03,Derrick,Sample Launch / Sample Customer,Sample Product,No,@sample_creator,120000,https://example.com/@sample_creator,TikTok,US,Outdoor Tech,45000,1500,1 short video,TuringNote sample,2500,creator@example.com,33,0.05,CRM-001\n",
+    "influencerExport": "﻿日期,提报人,项目&客户,推广产品,是否重复,网红频道名称,网红粉丝量,网红频道链接,社媒平台,国家,网红类型,近10个视频均播,网红成本价格（折算美元）,网红交付物（植入-完播等信息）,Turing备注,对外商务报价（美元）,网红联系方式,CPM（自动计算）,CPV(自动计算),父记录\n,Fixture User,Fixture Launch,Fixture Device,No,FixtureCreator,125000,https://fixture.invalid/creator,YouTube,US,micro,42000,2500,1 dedicated video,fixture collaborations,3000,creator@example.invalid,0,0,fixture-parent\n,Fixture User,Sample Home,Fixture Sensor,No,SampleCreator,88000,https://fixture.invalid/sample-creator,Instagram,DE,micro,25000,1200,2 reels,fixture collaborations,1500,sample-creator@example.invalid,0,0,fixture-parent\n"
   }
 }

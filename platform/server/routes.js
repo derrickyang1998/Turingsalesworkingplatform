@@ -196,18 +196,44 @@ app.post('/api/influencers/feishu/sync', authMiddleware, async (req, res) => {
 app.post('/api/influencers/export', authMiddleware, (req, res) => {
   try {
     const { mode, ids, filters } = req.body;
-    let sql = 'SELECT * FROM influencers WHERE 1=1';
+    let sql = 'SELECT * FROM influencers WHERE is_active = 1';
     const params = [];
     if (mode === 'selected' && ids && ids.length) {
       sql += ' AND id IN (' + ids.map(function() { return '?' }).join(',') + ')';
       params.push.apply(params, ids);
     } else if (mode === 'filtered' && filters) {
       if (filters.platform) { sql += ' AND platform = ?'; params.push(filters.platform); }
+      if (filters.category) { sql += ' AND category = ?'; params.push(filters.category); }
       if (filters.region) { sql += ' AND region = ?'; params.push(filters.region); }
-      if (filters.project_name) { sql += ' AND project_name = ?'; params.push(filters.project_name); }
-      if (filters.product_name) { sql += ' AND product_name = ?'; params.push(filters.product_name); }
-      if (filters.tags) { sql += ' AND tags LIKE ?'; params.push('%' + filters.tags + '%'); }
-      if (filters.search) { sql += ' AND (kol_handle LIKE ? OR project_name LIKE ? OR product_name LIKE ?)'; params.push('%' + filters.search + '%', '%' + filters.search + '%', '%' + filters.search + '%'); }
+      if (filters.project_name) { sql += ' AND project_name LIKE ?'; params.push('%' + filters.project_name + '%'); }
+      if (filters.product_name) { sql += ' AND product_name LIKE ?'; params.push('%' + filters.product_name + '%'); }
+      if (filters.tags) { sql += ' AND (tags LIKE ? OR category LIKE ?)'; params.push('%' + filters.tags + '%', '%' + filters.tags + '%'); }
+      if (filters.search) {
+        sql += ` AND (
+          CAST(id AS TEXT) LIKE ? OR
+          kol_handle LIKE ? OR
+          profile_link LIKE ? OR
+          content_style LIKE ? OR
+          brand_collab_history LIKE ? OR
+          project_name LIKE ? OR
+          product_name LIKE ? OR
+          tags LIKE ? OR
+          category LIKE ? OR
+          platform LIKE ? OR
+          region LIKE ? OR
+          contact_email LIKE ? OR
+          content_deliverable LIKE ? OR
+          influencer_type LIKE ? OR
+          parent_record LIKE ? OR
+          CAST(followers AS TEXT) LIKE ? OR
+          CAST(avg_views_10 AS TEXT) LIKE ? OR
+          CAST(cost_usd AS TEXT) LIKE ? OR
+          CAST(quoted_price AS TEXT) LIKE ? OR
+          CAST(cpm AS TEXT) LIKE ? OR
+          CAST(cpv AS TEXT) LIKE ?
+        )`;
+        for (let i = 0; i < 21; i++) params.push('%' + filters.search + '%');
+      }
     }
     sql += ' ORDER BY followers DESC';
     const influencers = db.prepare(sql).all(...params);

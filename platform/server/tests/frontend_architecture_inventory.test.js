@@ -12,13 +12,21 @@ const generatorPath = path.join(serverRoot, 'scripts', 'generate_ui_baseline_man
 const fixturePath = path.join(__dirname, 'fixtures', 'frontend-active-definitions.json');
 
 const reviewedDuplicateNames = Object.freeze([
-  'downloadInfTemplate',
   'esc',
+  'generateHTMLPPT'
+]);
+
+const expectedActiveDefinitions = Object.freeze({
+  generateHTMLPPT: { source: 'platform/ppt.js', line: 40, loadOrder: 2, occurrenceIndex: 2 },
+  esc: { source: 'platform/ppt.js', line: 864, loadOrder: 2, occurrenceIndex: 2 }
+});
+
+const task9M4DuplicateNames = Object.freeze([
+  'downloadInfTemplate',
   'exportAll',
   'exportFiltered',
   'exportInf',
   'exportSelected',
-  'generateHTMLPPT',
   'getSelectedInfIds',
   'handleUpload',
   'importInfluencers',
@@ -35,11 +43,87 @@ const reviewedDuplicateNames = Object.freeze([
   'updateCollabStatus'
 ]);
 
-const expectedActiveDefinitions = Object.freeze({
-  initM4: { source: 'platform/app.js', line: 2967, loadOrder: 1, occurrenceIndex: 3 },
-  downloadInfTemplate: { source: 'platform/app.js', line: 3128, loadOrder: 1, occurrenceIndex: 3 },
-  generateHTMLPPT: { source: 'platform/ppt.js', line: 40, loadOrder: 2, occurrenceIndex: 2 },
-  esc: { source: 'platform/ppt.js', line: 864, loadOrder: 2, occurrenceIndex: 2 }
+const task9M4FinalDefinitionContracts = Object.freeze({
+  initM4: [
+    'ensureM4TableStyles();',
+    'loadInfluencersFromAPI().then(function() { loadCollaborations(); });'
+  ],
+  loadInfluencersFromAPI: [
+    "apiFetch('/influencers' + qs)",
+    'lastInfAPI = d.influencers || [];',
+    'renderInfTable(lastInfAPI);'
+  ],
+  matchInfluencers: [
+    'function matchInfluencers() { return loadInfluencersFromAPI(); }'
+  ],
+  renderInfTable: [
+    '<table class="m4-table">',
+    'toggleAll(this)',
+    'startCollab('
+  ],
+  toggleAll: [
+    "document.querySelectorAll('.infcb').forEach(function(item) { item.checked = cb.checked; });"
+  ],
+  getSelectedInfIds: [
+    "document.querySelectorAll('.infcb:checked')",
+    'ids.push(id);'
+  ],
+  exportAll: [
+    "function exportAll() { return exportInf('all'); }"
+  ],
+  exportFiltered: [
+    "function exportFiltered() { return exportInf('filtered'); }"
+  ],
+  exportSelected: [
+    "toast('Select influencers first', 'error');",
+    "return exportInf('selected', ids);"
+  ],
+  exportInf: [
+    "apiFetch('/influencers/export'",
+    "if (mode === 'filtered') body.filters = m4Filters();",
+    "dlFile('influencers_export.csv', blob, 'text/csv;charset=utf-8');"
+  ],
+  handleUpload: [
+    "importInfluencerFile(file, document.getElementById('uploadOK'));",
+    "if (e && e.target) e.target.value = '';"
+  ],
+  importInfluencers: [
+    "apiFetch('/influencers/import'",
+    'loadInfluencersFromAPI();'
+  ],
+  showInfPreview: [
+    "var c = document.getElementById('infPreview');",
+    'Object.keys(data[0] || {}).slice(0, 6)'
+  ],
+  downloadInfTemplate: [
+    "apiFetch('/influencers/template')",
+    "dlFile('influencer_import_template.csv'",
+    '\\uFEFF日期,提报人,项目&客户'
+  ],
+  pushToFeishu: [
+    "apiFetch('/influencers/feishu/sync'",
+    "dlFile('feishu_influencers_fallback.csv'",
+    'configured === false'
+  ],
+  startCollab: [
+    'pendingCollabInfId = Number(infId);',
+    "overlay.id = 'collabOrderModal';",
+    'id="orderProject"'
+  ],
+  loadCollaborations: [
+    "apiFetch('/collaborations' + qs)",
+    'var rows = d.collaborations || [];',
+    'renderCollabTable(rows);'
+  ],
+  renderCollabTable: [
+    'var resource = collabResource(collab);',
+    'updateCollabStatus(',
+    'STATUS_LABELS'
+  ],
+  updateCollabStatus: [
+    "apiFetch('/collaborations/' + collabId",
+    'loadCollaborations();'
+  ]
 });
 
 const task7ConsolidatedDefinitionContracts = Object.freeze({
@@ -352,11 +436,41 @@ test('Task 8 brand workspace functions keep active behavior and one app.js defin
   }
 });
 
-test('scanClassicScripts records the reviewed 21-name duplicate inventory and explicit active definitions', () => {
+test('Task 9 M4 workflow functions keep final active behavior and one app.js definition', () => {
+  const inventory = scanCurrentScripts();
+  const duplicateNames = new Set(inventory.duplicates.map((entry) => entry.name));
+
+  for (const [name, expectedSnippets] of Object.entries(task9M4FinalDefinitionContracts)) {
+    assert.equal(duplicateNames.has(name), false, `${name} must not remain in the reviewed duplicate inventory`);
+    const actual = inventory.activeDefinitions[name];
+    assert.ok(actual, `${name} must have an active definition`);
+    assert.equal(actual.source, 'platform/app.js', `${name} active source`);
+    assert.equal(actual.loadOrder, 1, `${name} active load order`);
+
+    const activeBody = readTopLevelFunctionBody(actual);
+    for (const snippet of expectedSnippets) {
+      assert.ok(activeBody.includes(snippet), `${name} active body must preserve: ${snippet}`);
+    }
+
+    const appJsDefinitions = inventory.declarations.filter((definition) => (
+      definition.name === name && definition.source === 'platform/app.js'
+    ));
+    assert.equal(appJsDefinitions.length, 1, `${name} must have exactly one app.js definition`);
+  }
+});
+
+test('scanClassicScripts records the reviewed 2-name duplicate inventory and explicit active definitions', () => {
   const inventory = scanCurrentScripts();
 
   assert.deepEqual(inventory.duplicates.map((entry) => entry.name), reviewedDuplicateNames);
-  assert.equal(inventory.duplicates.length, 21);
+  assert.equal(inventory.duplicates.length, 2);
+  for (const name of task9M4DuplicateNames) {
+    assert.equal(
+      inventory.duplicates.some((entry) => entry.name === name),
+      false,
+      `${name} must not remain duplicated after Task 9`
+    );
+  }
 
   for (const [name, expected] of Object.entries(expectedActiveDefinitions)) {
     const actual = inventory.activeDefinitions[name];
@@ -380,7 +494,7 @@ test('frontend-active-definitions fixture mirrors the current duplicate inventor
   }
 
   assert.equal(fixture.metadata.schemaVersion, 1);
-  assert.equal(fixture.metadata.reviewedDuplicateCount, 21);
+  assert.equal(fixture.metadata.reviewedDuplicateCount, 2);
   assert.equal(fixture.metadata.activeDefinitionPolicy, 'last definition by app.js then ppt.js load order');
   assert.deepEqual(fixture.metadata.loadOrder, ['platform/app.js', 'platform/ppt.js']);
   assert.deepEqual(fixture.duplicates, reviewedDuplicateNames);
@@ -442,7 +556,7 @@ test('generateManifest includes hashes, build/cache markers, routes, fixture met
     assert.ok(slot.sha256 === null || /^[a-f0-9]{64}$/.test(slot.sha256));
   }
 
-  assert.equal(manifest.duplicateInventory.reviewedDuplicateCount, 21);
+  assert.equal(manifest.duplicateInventory.reviewedDuplicateCount, 2);
   assert.deepEqual(manifest.duplicateInventory.duplicates, reviewedDuplicateNames);
 
   const serialized = JSON.stringify(manifest);

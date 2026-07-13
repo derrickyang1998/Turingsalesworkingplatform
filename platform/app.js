@@ -1071,40 +1071,6 @@ function switchTab(id, options) { options = options || {}; if (!options.skipHist
 // ===== M4: INFLUENCER MATCHING (API-driven) =====
 lastMatch = []; var lastInfAPI = [];
 
-async function initM4() {
-  await loadInfluencersFromAPI();
-  renderInfTable(lastMatch);
-  await loadCollaborations();
-  var cnt = document.getElementById('m4InfCount');
-  if (cnt) cnt.textContent = lastInfAPI.length + ' influencers in database · 智能匹配 · 合作追踪';
-}
-
-async function loadInfluencersFromAPI() {
-  var search = document.getElementById('filt_search')?.value || '';
-  var platform = document.getElementById('filt_platform')?.value || '';
-  var category = document.getElementById('filt_category')?.value || '';
-  var region = document.getElementById('filt_region')?.value || '';
-  var sort = document.getElementById('filt_sort')?.value || 'followers';
-  var qs = '?sort_by=' + sort;
-  if (search) qs += '&search=' + encodeURIComponent(search);
-  if (platform) qs += '&platform=' + encodeURIComponent(platform);
-  if (category) qs += '&category=' + encodeURIComponent(category);
-  if (region) qs += '&region=' + encodeURIComponent(region);
-  try {
-    var r = await apiFetch('/influencers' + qs);
-    var d = await r.json();
-    lastInfAPI = d.influencers || [];
-    lastMatch = lastInfAPI;
-    return lastInfAPI;
-  } catch (e) { console.error(e); lastInfAPI = []; lastMatch = []; return []; }
-}
-
-function matchInfluencers() {
-  var c = document.getElementById('infTableContainer');
-  c.innerHTML = '<p style=\"text-align:center;padding:30px;opacity:.5\">Loading...</p>';
-  loadInfluencersFromAPI().then(function (data) { renderInfTable(data); });
-}
-
 async function smartMatch() {
   var c = document.getElementById('infTableContainer');
   c.innerHTML = '<p style=\"text-align:center;padding:30px;opacity:.5\">智能匹配中...</p>';
@@ -1126,157 +1092,10 @@ async function smartMatch() {
   }
 }
 
-function renderInfTable(data, showScore) {
-  var c = document.getElementById('infTableContainer');
-  if (!data || !data.length) { c.innerHTML = '<p style=\"text-align:center;padding:30px;opacity:.5\">No influencers found</p>'; return; }
-  var h = '<table class=\"influencer-table\"><thead><tr><th><input type=\"checkbox\" onclick=\"toggleAll(this)\"></th><th>#</th><th>网红</th><th>Platform</th><th>Followers</th><th>Engagement</th><th>Region</th><th>Category</th><th>Cost(USD)</th><th>CPM</th>' + (showScore ? '<th>Match</th>' : '') + '<th>操作</th></tr></thead><tbody>';
-  data.forEach(function(inf, i) {
-    h += '<tr><td><input type=\"checkbox\" class=\"infcb\" data-idx=\"' + i + '\"></td><td>' + (i + 1) + '</td>';
-    h += '<td><strong>' + esc(inf.kol_handle || '') + '</strong><br><span style=\"font-size:10px;opacity:.6\">' + esc(inf.content_style || '') + '</span></td>';
-    h += '<td>' + esc(inf.platform || '-') + '</td>';
-    h += '<td>' + ((inf.followers || 0) >= 1000 ? ((inf.followers / 1000).toFixed(0) + 'K') : (inf.followers || 0)) + '</td>';
-    h += '<td>' + (inf.avg_engagement ? (inf.avg_engagement.toFixed(1) + '%') : '-') + '</td>';
-    h += '<td>' + esc(inf.region || '-') + '</td>';
-    h += '<td>' + esc(inf.category || '-') + '</td>';
-    h += '<td>\$' + (inf.cost_usd || 0) + '</td>';
-    h += '<td>' + (inf.cpm || '-') + '</td>';
-    if (showScore) h += '<td><span style=\"font-weight:700;color:var(--green)\">' + (inf.match_score || 0) + '</span></td>';
-    h += '<td><button class=\"btn btn-sm\" onclick=\"startCollab(' + inf.id + ')\">合作</button></td></tr>';
-  });
-  h += '</tbody></table>';
-  c.innerHTML = h;
-  var cnt = document.getElementById('m4InfCount');
-  if (cnt) cnt.textContent = data.length + ' results · 智能匹配 · 合作追踪';
-}
-
-// ===== COLLABORATION TRACKING =====
-async function loadCollaborations(status) {
-  var filterEl = document.getElementById('collabFilter');
-  var s = status || (filterEl ? filterEl.value : '');
-  try {
-    var qs = s ? '?status=' + encodeURIComponent(s) : '';
-    var r = await apiFetch('/collaborations' + qs);
-    var d = await r.json();
-    var cs = d.collaborations || [];
-    renderCollabTable(cs);
-    var st = document.getElementById('collabStatsBar');
-    if (st) {
-      var counts = {}; cs.forEach(function(c) { counts[c.status] = (counts[c.status] || 0) + 1; });
-      var labels = { proposed: '提案中', contacted: '已建联', negotiating: '谈判中', confirmed: '已确认', contract_sent: '合同已发', live: '合作中', content_review: '审核中', completed: '已完成', cancelled: '已取消' };
-      st.innerHTML = Object.keys(counts).map(function(k) { return '<span style=\"font-size:11px;background:var(--surface2);padding:4px 10px;border-radius:20px\">' + (labels[k] || k) + ': <strong>' + counts[k] + '</strong></span>'; }).join('');
-    }
-  } catch (e) {
-    document.getElementById('execTableContainer').innerHTML = '<p style=\"text-align:center;padding:30px;opacity:.5\">加载失败: ' + e.message + '</p>';
-  }
-}
-
-function renderCollabTable(data) {
-  var c = document.getElementById('execTableContainer');
-  c.innerHTML = '<div id=\"execTableArea\"></div>';
-  var area = document.getElementById('execTableArea');
-  if (!data || !data.length) { area.innerHTML = '<p style=\"text-align:center;padding:30px;opacity:.5\">暂无合作记录</p>'; return; }
-  var STATUS_LABELS = { proposed: '提案中', contacted: '已建联', negotiating: '谈判中', confirmed: '已确认', contract_sent: '合同已发', live: '合作中', content_review: '审核中', completed: '已完成', cancelled: '已取消' };
-  var h = '<table><thead><tr><th>网红</th><th>Platform</th><th>Followers</th><th>状态</th><th>报价</th><th>备注</th><th>更新</th><th>操作</th></tr></thead><tbody>';
-  data.forEach(function(collab) {
-    h += '<tr><td><strong>' + esc(collab.kol_handle || '') + '</strong></td>';
-    h += '<td>' + esc(collab.platform || '-') + '</td>';
-    h += '<td>' + ((collab.followers || 0) >= 1000 ? ((collab.followers / 1000).toFixed(0) + 'K') : (collab.followers || 0)) + '</td>';
-    h += '<td><select id=\"st_' + collab.id + '\" onchange=\"updateCollabStatus(' + collab.id + ')\" style=\"width:auto;font-size:11px\">';
-    Object.keys(STATUS_LABELS).forEach(function(k) { h += '<option value=\"' + k + '\"' + (collab.status === k ? ' selected' : '') + '>' + STATUS_LABELS[k] + '</option>'; });
-    h += '</select></td>';
-    h += '<td>\$' + (collab.cost_quoted || 0) + '</td>';
-    h += '<td style=\"max-width:120px;font-size:10px\">' + esc(collab.notes || '-') + '</td>';
-    h += '<td style=\"font-size:9px;opacity:.5\">' + (collab.updated_at ? collab.updated_at.substring(0, 16) : '-') + '</td>';
-    h += '<td><button class=\"btn btn-sm\" onclick=\"updateCollabStatus(' + collab.id + ')\">保存</button></td></tr>';
-  });
-  h += '</tbody></table>';
-  area.innerHTML = h;
-}
-
-async function startCollab(infId) {
-  var notes = prompt('合作备注（可选）：');
-  if (notes === null) return;
-  try {
-    var r = await apiFetch('/collaborations', { method: 'POST', body: JSON.stringify({ influencer_id: infId, notes: notes || '' }) });
-    if (!r.ok) throw new Error(await r.text());
-    var d = await r.json();
-    toast('Collaboration started: #' + d.id);
-    switchTab('tab2');
-    loadCollaborations();
-  } catch (e) { toast('Failed: ' + e.message, 'error'); }
-}
-
-async function updateCollabStatus(collabId) {
-  var sel = document.getElementById('st_' + collabId);
-  if (!sel) return;
-  var newStatus = sel.value;
-  try {
-    var r = await apiFetch('/collaborations/' + collabId, { method: 'PUT', body: JSON.stringify({ status: newStatus }) });
-    if (!r.ok) throw new Error(await r.text());
-    toast('Status updated to: ' + newStatus);
-    loadCollaborations(newStatus);
-  } catch (e) { toast('Failed: ' + e.message, 'error'); }
-}
-
-// ===== KEEP: legacy upload support =====
-function handleUpload(e) {
-  var f = e.target.files[0]; if (!f) return;
-  var s = document.getElementById('uploadOK');
-  var ext = f.name.split('.').pop().toLowerCase();
-  if (['csv', 'json', 'xls', 'xlsx'].indexOf(ext) === -1) {
-    s.innerHTML = '<span style=\"color:#d94641\">不支持 .' + ext + ' 格式，请上传 CSV/JSON/XLS/XLSX</span>';
-    return;
-  }
-  s.innerHTML = '<span>正在读取: ' + f.name + ' (' + (f.size / 1024).toFixed(1) + 'KB)...</span>';
-  var r = new FileReader();
-  if (ext === 'json') {
-    r.onload = function(ev) {
-      try {
-        var d = JSON.parse(ev.target.result);
-        var inf = Array.isArray(d) ? d : (d.influencers || d.data || []);
-        if (inf.length) { INFLUENCERS = inf; s.innerHTML = '<span style=\"color:#0f7b3c\">' + inf.length + ' 位网红已加载</span>'; matchInfluencers(); showInfPreview(inf); }
-        else { s.innerHTML = '<span style=\"color:#d94641\">未找到网红数据</span>'; }
-      } catch (err) { s.innerHTML = '<span style=\"color:#d94641\">JSON 解析失败: ' + err.message + '</span>'; }
-    };
-    r.readAsText(f);
-  } else {
-    r.onload = function(ev) {
-      var txt = ev.target.result || '';
-      if (!txt.trim()) { s.innerHTML = '<span style=\"color:#d94641\">文件为空</span>'; return; }
-      var rows = txt.split('\n').filter(function(l) { return l.trim(); });
-      var headers = rows[0].split(/[,\t;]/).map(function(h) { return h.trim().replace(/"/g, '').replace(/^\uFEFF/, ''); });
-      var inf = rows.slice(1).map(function(row) {
-        var vals = row.match(/(".*?"|[^',\t\s;]+)(?=\s*[,;\t]|\s*$)/g) || row.split(/[,\t;]/);
-        var o = {};
-        headers.forEach(function(h, i) { o[h] = vals[i] ? vals[i].trim().replace(/^'|'$/g, '') : ''; });
-        return o;
-      }).filter(function(o) { return o.kol_handle || o.name || o.Name || o['KOL Handle']; });
-      if (inf.length) { INFLUENCERS = inf; s.innerHTML = '<span style=\"color:#0f7b3c\">' + inf.length + ' 位网红已加载</span>'; matchInfluencers(); showInfPreview(inf); }
-      else { s.innerHTML = '<span style=\"color:#d94641\">未识别到网红数据，请检查格式</span>'; }
-    };
-    r.readAsText(f);
-  }
-}
-function showInfPreview(data) {
-  var c = document.getElementById('infPreview'); if (!c) return;
-  var h = '<table style=\"width:100%;font-size:10px;border-collapse:collapse\"><tr style=\"border-bottom:1px solid var(--border)\">';
-  var keys = Object.keys(data[0] || {}).slice(0, 6);
-  keys.forEach(function(k) { h += '<th style=\"text-align:left;padding:4px;opacity:.5\">' + esc(k) + '</th>'; });
-  h += '</tr>';
-  data.slice(0, 5).forEach(function(r) {
-    h += '<tr style=\"border-bottom:1px solid var(--border)\">';
-    keys.forEach(function(k) { h += '<td style=\"padding:4px;font-size:9px\">' + esc(String(r[k] || '')) + '</td>'; });
-    h += '</tr>';
-  });
-  if (data.length > 5) h += '<tr><td colspan=\"' + keys.length + '\" style=\"padding:4px;opacity:.4;text-align:center\">... 共 ' + data.length + ' 条</td></tr>';
-  h += '</table>'; c.innerHTML = h;
-}
 function downloadInfTemplateJSON() {
   var tpl = [{ kol_handle: '@example_kol', platform: 'YouTube', profile_link: 'https://youtube.com/@example', followers: 50000, region: 'US', category: '3C', avg_views_10: 25000, collab_type: 'Dedicated Video', cost_usd: 2500, cpm: 50 }];
   dlFile('influencer_template.json', JSON.stringify(tpl, null, 2), 'application/json');
 }
-function downloadInfTemplate() { dlFile('influencer_template.csv', '\uFEFF' + 'kol_handle,platform,profile_link,followers,avg_views_10,category,region,language,collab_type,cost_usd,cpm,content_style,brand_collab_history,contact_email\n@TechReviewPro,YouTube,https://youtube.com/@example,125000,45000,3C,US,EN,Dedicated,2500,55,Reviews,Anker;Ugreen,contact@example.com\n', 'text/csv'); }
-function toggleAll(cb) { document.querySelectorAll('.infcb').forEach(function(c) { c.checked = cb.checked; }); }
 function exportSubmissionCSV() {
   var chk = [], cbs = document.querySelectorAll('.infcb:checked');
   cbs.forEach(function(c) { chk.push(parseInt(c.dataset.idx)); });
@@ -1288,38 +1107,6 @@ function exportSubmissionCSV() {
   dlFile('influencer_' + getDate() + '.csv', '\uFEFF' + csv, 'text/csv'); toast('Exported ' + data.length);
 }
 async function sendChatLegacyUnused() { return sendChat(); }
-
-// ===== FEISHU =====
-async function pushToFeishu() {
-  var status=document.getElementById("feishuStatus");
-  status.innerHTML="<span>Connecting...</span>";
-  try {
-    var chk=[],cbs=document.querySelectorAll(".infcb:checked");
-    cbs.forEach(function(c){chk.push(parseInt(c.dataset.idx))});
-    chk=chk.filter(function(i){return !isNaN(i)});
-    var data=chk.length?chk.map(function(i){return lastMatch[i]}).filter(Boolean):lastMatch;
-    if(!data||!data.length){status.innerHTML="<span>No data selected</span>";return}
-    var csv="No.,KOL Handle,Platform,Followers,Category,Region,Collab Type,Cost(USD),CPM"+String.fromCharCode(10);
-    data.forEach(function(inf,i){
-      var row=[];
-      row.push(i+1);
-      row.push(inf.kol_handle||inf.name||"");
-      row.push(inf.platform||"");
-      row.push(inf.followers||0);
-      row.push(inf.category||"");
-      row.push(inf.region||"");
-      row.push(inf.collab_type||"");
-      row.push(inf.cost_usd||0);
-      row.push(inf.cpm||"-");
-      csv+=row.map(function(v){return typeof v=="string"?"\""+v.replace(/\"/g,"\"\"")+"\"":v}).join(",")+String.fromCharCode(10);
-    });
-    dlFile("KOL_"+getDate()+".csv","\uFEFF"+csv,"text/csv");
-    status.innerHTML="<span style=color:#0f7b3c>Exported "+data.length+" influencers to CSV</span>";
-    toast("CSV downloaded: "+data.length+" rows");
-  } catch(e) {
-    status.innerHTML="<span style=color:#d94641>Failed: "+e.message+"</span>";
-  }
-}
 
 async function adminAddUser(){var u=prompt("Username:");if(!u)return;var d=prompt("Display name:");if(!d)return;var p=prompt("Department:")||"General";try{var r=await apiFetch("/admin/users",{method:"POST",body:JSON.stringify({username:u,display_name:d,department:p})});var res=await r.json();loadAdminUsers();toast(res.temporary_password?"User "+u+" created. Temporary password: "+res.temporary_password:"User "+u+" created");}catch(e){toast("Failed","error")}}
 
@@ -2883,69 +2670,6 @@ function generateHTMLPPT() {
   html += '</div></div><script src="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.3.1/reveal.min.js"><\/script><script>Reveal.initialize({hash:true})<\/script></body></html>';
   dlFile(brand + '_proposal.html', html, 'text/html');
   toast('HTML proposal downloaded');
-}
-// ===== M4: INFLUENCER (v8.0) =====
-function initM4() { loadInfluencersFromAPI().then(function() { renderInfTable(lastInfAPI); loadCollaborations(); }); }
-function loadInfluencersFromAPI() {
-  var qs = '?sort_by=followers';
-  var search = document.getElementById('filt_search')?.value || document.getElementById('filt_project')?.value || document.getElementById('filt_product')?.value || document.getElementById('filt_tags')?.value || '';
-  var p = document.getElementById('filt_platform')?.value;
-  var r = document.getElementById('filt_region')?.value;
-  var project = document.getElementById('filt_project')?.value || '';
-  var product = document.getElementById('filt_product')?.value || '';
-  var tags = document.getElementById('filt_tags')?.value || '';
-  if (p) qs += '&platform=' + encodeURIComponent(p);
-  if (r) qs += '&region=' + encodeURIComponent(r);
-  if (project) qs += '&project_name=' + encodeURIComponent(project);
-  if (product) qs += '&product_name=' + encodeURIComponent(product);
-  if (tags) qs += '&tags=' + encodeURIComponent(tags);
-  if (search) qs += '&search=' + encodeURIComponent(search);
-  return apiFetch('/influencers' + qs).then(function(r) { return r.json(); }).then(function(d) { lastInfAPI = d.influencers || []; renderInfTable(lastInfAPI); }).catch(function() { lastInfAPI = []; });
-}
-function matchInfluencers() { loadInfluencersFromAPI(); }
-function renderInfTable(data) {
-  var c = document.getElementById('infTableContainer');
-  if (!c) return;
-  if (!data || !data.length) { c.innerHTML = '<p style="text-align:center;padding:30px;opacity:.5">No influencers</p>'; return; }
-  var h = '<table><thead><tr><th><input type="checkbox" id="selectAllInf" onchange="document.querySelectorAll(\'.infcb\').forEach(function(cb){cb.checked=this.checked})"></th><th>KOL</th><th>Platform</th><th>Followers</th><th>Project</th><th>Product</th><th>Region</th><th>Tags</th><th>Cost</th><th>CPM</th></tr></thead><tbody>';
-  data.forEach(function(inf) {
-    h += '<tr><td><input type="checkbox" class="infcb" value="' + inf.id + '"></td>';
-    h += '<td><strong>' + esc(inf.kol_handle||'') + '</strong></td>';
-    h += '<td>' + esc(inf.platform||'-') + '</td>';
-    h += '<td>' + ((inf.followers||0)>=1000?((inf.followers/1000).toFixed(0)+'K'):(inf.followers||0)) + '</td>';
-    h += '<td>' + esc(inf.project_name||'-') + '</td>';
-    h += '<td>' + esc(inf.product_name||'-') + '</td>';
-    h += '<td>' + esc(inf.region||'-') + '</td>';
-    h += '<td>' + esc(inf.tags||'-') + '</td>';
-    h += '<td>$' + (inf.cost_usd||0) + '</td>';
-    h += '<td>' + (inf.cpm||'-') + '</td></tr>';
-  });
-  h += '</tbody></table>';
-  c.innerHTML = h;
-}
-function getSelectedInfIds() { var ids = []; document.querySelectorAll('.infcb:checked').forEach(function(cb) { if (cb.value) ids.push(parseInt(cb.value)); }); return ids; }
-function exportAll() { return exportInf('all'); }
-function exportFiltered() { return exportInf('filtered'); }
-function exportSelected() { var ids = getSelectedInfIds(); if (!ids.length) { toast('Select influencers first', 'error'); return; } return exportInf('selected', ids); }
-function exportInf(mode, ids) {
-  var body = { mode: mode };
-  if (mode === 'selected' && ids) body.ids = ids;
-  if (mode === 'filtered') body.filters = { platform: document.getElementById('filt_platform')?.value||'', region: document.getElementById('filt_region')?.value||'',
-    project_name: document.getElementById('filt_project')?.value||'', product_name: document.getElementById('filt_product')?.value||'', tags: document.getElementById('filt_tags')?.value||'',
-    search: document.getElementById('filt_search')?.value || document.getElementById('filt_project')?.value || document.getElementById('filt_product')?.value || '' };
-  return apiFetch('/influencers/export', { method: 'POST', body: JSON.stringify(body) }).then(function(r) { if (!r.ok) throw new Error(); return r.blob(); }).then(function(blob) {
-    var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'influencers_export.csv'; a.click(); toast('Export done');
-  }).catch(function(e) { toast('Export failed', 'error'); });
-}
-function importInfluencers(rows) {
-  if (!rows || !rows.length) return;
-  apiFetch('/influencers/import', { method: 'POST', body: JSON.stringify({ rows: rows }) }).then(function(r) { return r.json(); }).then(function(d) {
-    if (d.imported) { toast('Imported ' + d.imported); loadInfluencersFromAPI(); }
-  }).catch(function(e) { toast('Import: ' + e.message, 'error'); });
-}
-function downloadInfTemplate() {
-  var csv = '日期,提报人,项目,推广产品,是否重复,网红频道名称,网红粉丝量,网红频道链接,社媒平台,国家,标签,近10个视频均播,成本价,网红交付物,Turing备注,对外商务报价,邮箱,cpm,cpv';
-  dlFile('influencer_template.csv', csv + '\n', 'text/csv');
 }
 // ===== M4: INFLUENCER WORKFLOW FIX (final override) =====
 function dlFile(name, content, mime) {
