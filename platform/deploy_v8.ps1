@@ -903,12 +903,12 @@ cleanup_test_gate() {
 trap cleanup_test_gate EXIT
 
 npm ci --ignore-scripts
+npx playwright install chromium
 cd server
 npm ci --ignore-scripts
 npm rebuild better-sqlite3
 NODE_ENV=test TM_DISABLE_DOTENV=1 DB_PATH="$TestDb" node --test --test-concurrency=1 tests/*.test.js
 cd ..
-npx playwright install chromium
 TM_DEPLOYMENT_SMOKE_PORT=43188 npx playwright test -c server/tests/deployment-browser-smoke.config.js
 
 cat > "$ReleaseRoot/nginx-test.conf" <<'TM_NGINX_TEST'

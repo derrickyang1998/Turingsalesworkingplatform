@@ -560,6 +560,11 @@ test('Task 12 remote deploy gate runs full tests and exact route/static smoke be
   assert.match(deploy, /DB_PATH=/);
   assert.match(deploy, /cd server[\s\S]*?node --test --test-concurrency=1 tests\/\*\.test\.js/);
   assert.doesNotMatch(deploy, /npm test -- --test-concurrency=1/);
+  assert.ok(
+    deploy.indexOf('npx playwright install chromium') <
+      deploy.indexOf('node --test --test-concurrency=1 tests/*.test.js'),
+    'Chromium must be installed before the full Node suite launches browser-backed tests'
+  );
   assert.match(deploy, /npx playwright test -c server\/tests\/deployment-browser-smoke\.config\.js/);
   assert.doesNotMatch(deploy, /npx playwright test -c server\/tests\/browser-baseline\.config\.js/);
   assert.match(deploy, /pm2 start ecosystem\.config\.js --only turingmarket|pm2 restart ecosystem\.config\.js --only turingmarket/);
