@@ -74,6 +74,8 @@ function generateVisualEvidence(sourceCommit, reviewStatus = 'pending') {
   if (!Array.isArray(manifest.screenshotSlots) || manifest.screenshotSlots.length !== 72) {
     throw new Error('Controlled manifest must define exactly 72 screenshot slots');
   }
+  const preEditSlots = new Map((manifest.preEdit && manifest.preEdit.screenshotSlots || []).map((slot) => [slot.path, slot]));
+  if (preEditSlots.size !== 72) throw new Error('Frozen pre-edit manifest must define exactly 72 screenshot slots');
 
   const captures = [];
   const comparisons = [];
@@ -81,13 +83,14 @@ function generateVisualEvidence(sourceCommit, reviewStatus = 'pending') {
     const relative = `${slot.role}/${slot.viewport}/${slot.journey}.png`;
     if (!/^[A-Za-z0-9._/-]+$/.test(relative) || relative.includes('..')) throw new Error(`Unsafe screenshot slot: ${relative}`);
     const rawPath = path.join(rawRoot, ...relative.split('/'));
-    const frozenPath = path.join(repoRoot, ...slot.path.split('/'));
     assertInside(rawRoot, rawPath, 'raw screenshot');
-    assertInside(repoRoot, frozenPath, 'frozen screenshot');
     const rawStat = assertRegularFile(rawPath, 'Raw screenshot');
-    assertRegularFile(frozenPath, 'Frozen screenshot');
     const rawBuffer = fs.readFileSync(rawPath);
-    const frozenBuffer = fs.readFileSync(frozenPath);
+    const frozenBuffer = readGitBlob(sourceCommit, slot.path);
+    const frozenSlot = preEditSlots.get(slot.path);
+    if (!frozenSlot || frozenSlot.sha256 !== sha256(frozenBuffer)) {
+      throw new Error(`Source commit does not retain the frozen pre-edit screenshot: ${slot.path}`);
+    }
     const pixel = comparePngBuffers(frozenBuffer, rawBuffer, 1);
     const capture = {
       path: relative,

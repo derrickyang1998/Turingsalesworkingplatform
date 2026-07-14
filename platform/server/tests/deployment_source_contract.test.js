@@ -633,6 +633,12 @@ test('Task 12 remote deploy gate runs full tests and exact route/static smoke be
   assert.match(deploy, /DEPLOY_OK/);
 });
 
+test('Phase 3 evidence compares current captures with frozen screenshot bytes from the source commit', () => {
+  const generatorSource = read(phase3EvidenceGeneratorPath);
+  assert.match(generatorSource, /const frozenBuffer = readGitBlob\(sourceCommit, slot\.path\)/);
+  assert.doesNotMatch(generatorSource, /const frozenBuffer = fs\.readFileSync\(frozenPath\)/);
+});
+
 test('Task 12 manifest retains pre-edit hashes and records current post-edit comparison', () => {
   const manifest = JSON.parse(read(manifestPath));
   assert.equal(manifest.schemaVersion, 1);
@@ -698,9 +704,13 @@ test('Task 12 manifest retains pre-edit hashes and records current post-edit com
   const expectedPaths = walkFiles(screenshotRoot).filter((file) => file.endsWith('.png'));
   const actualPaths = comparison.screenshots.map((entry) => entry.path.replace('docs/baselines/v0.2.9/screenshots/', '')).sort();
   assert.deepEqual(actualPaths, expectedPaths);
+  const preEditByPath = new Map(manifest.preEdit.screenshotSlots.map((entry) => [entry.path, entry]));
   for (const entry of comparison.screenshots) {
     const relative = entry.path.replace('docs/baselines/v0.2.9/screenshots/', '');
-    assert.equal(entry.preEditSha256, sha256(path.join(screenshotRoot, ...relative.split('/'))));
+    assert.equal(entry.preEditSha256, preEditByPath.get(entry.path).sha256);
+    if (hasGitObjects) {
+      assert.equal(sha256Buffer(gitBlob(comparison.sourceCommit, entry.path)), entry.preEditSha256);
+    }
     const raw = rawByPath.get(relative);
     assert.ok(raw, `${relative} must be mapped to a committed contact sheet`);
     assert.equal(entry.postEditSha256, raw.sha256);
