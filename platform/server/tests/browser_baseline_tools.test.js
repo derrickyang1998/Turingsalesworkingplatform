@@ -45,7 +45,7 @@ test('browser baseline loader separates the frozen pre-edit inventory from the c
 
   assert.equal(manifest.preEdit.routeContracts.length, 106);
   assert.equal(manifest.preEdit.duplicateInventory.reviewedDuplicateCount, 39);
-  assert.equal(manifest.routeContracts.length, 107);
+  assert.equal(manifest.routeContracts.length, 113);
   assert.equal(manifest.duplicateInventory.reviewedDuplicateCount, 1);
   assert.deepEqual(manifest.duplicateInventory.duplicates, ['esc']);
 });
@@ -59,7 +59,7 @@ test('browser baseline generator preserves the frozen pre-edit inventory require
 
   assert.equal(manifest.preEdit.routeContracts.length, 106);
   assert.equal(manifest.preEdit.duplicateInventory.reviewedDuplicateCount, 39);
-  assert.equal(manifest.routeContracts.length, 107);
+  assert.equal(manifest.routeContracts.length, 113);
   assert.deepEqual(manifest.duplicateInventory.duplicates, ['esc']);
 });
 
