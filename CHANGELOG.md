@@ -1,5 +1,31 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.4.0-product-shell-and-design-system (2026-07-14) - 产品壳层与设计系统
+
+### 产品壳层 / Product Shell
+- 在不改写 CRM、品牌、需求/PPT、网红、AI、流程、待办、管理和知识库业务契约的前提下，引入共享设计令牌、组件样式、响应式布局、导航与无障碍辅助层。
+- 桌面端保留高密度工作台；移动端改为顶部栏与可关闭抽屉，修复 `390x844` 下侧栏挤压主内容的问题，并覆盖 `320px`、`200%` 与 `400%` 等效回流。
+- 保持客户看板与客户明细分离、M4 搜索/固定表头/导入入口、AI 引用、管理员 AI 对话审计和既有 PPT 生成链路；冻结 PPT build `20260702-v916-kb-bridge-client-cn`、query `20260702v916kbbridge` 与 SHA-256 `f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e`。
+- 统一弹窗语义、焦点限制与恢复、跳转焦点、键盘标签页、减少动画、强制色彩和控件命名，不改变后端 API、数据库结构或业务数据。
+
+### 视觉与审查 / Visual Evidence And Review
+- 完成 102/102 条确定性基线旅程、90/90 条产品壳层浏览器矩阵、72/72 张三个视口截图和 9 张前后联系表；独立复采 72 张截图的感知像素变化为 0。
+- 有意设计改造的最大感知差异比率为 `0.14496597399441002`，九组联系表全部通过人工对照；零容忍业务区域无遗留回归。
+- 产品、前端、无障碍、应用安全、最小改动与代码审查六个角色均为 `APPROVE`，最终无开放 P0/P1/P2 发布问题。
+
+### 验证与生产发布 / Verification And Production Release
+- 本地完整 Node 门禁为 204 total、204 passed、0 skipped、0 failed；Linux 远端门禁为 204 total、199 passed、5 platform-conditional skipped、0 failed；Linux 部署浏览器冒烟 2/2 通过，依赖审计为 0 vulnerabilities。
+- 首次候选发布因部署浏览器版本与 AppArmor 路径契约不一致而在生产切换前安全拒绝；修复后增加 17/17 运行时加固回归，并通过低权限、断网、脱敏数据库和候选树复验。
+- 生产备份 `v040-product-shell-design-system-20260714-215530` 校验和有效；PM2 online、Nginx 配置有效、SQLite `quick_check` 通过、四个外置运行时链接精确、公开/私有路由边界正确。
+- 真实管理员通过 SSH loopback 完成登录、移动抽屉、CRM 看板/明细、M4 搜索/200 行表格/导入入口、AI 助手、管理员 AI 审计、注销和令牌吊销；三视口脱敏截图完成同屏复核，最终生产会话数为 0。
+- 生产 App build 为 `20260714-v040-product-shell-design-system`；PPT 继续锁定 build `20260702-v916-kb-bridge-client-cn`、query `20260702v916kbbridge` 与 SHA-256 `f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e`。
+
+### 剩余风险 / Residual Risks
+- 当前环境未执行 NVDA、VoiceOver 或浏览器原生缩放，不将其记录为通过，也不声明完整 WCAG 符合性。
+- 旧流程设计器的完整键盘连线创作继续由 Phase 4 负责；本阶段覆盖共享壳层和键盘创建/选择节点。
+
+---
+
 ## v0.3.0-baseline-consolidation (2026-07-13) - 最新界面基线整合与生产候选门禁
 
 ### 最新功能基线 / Latest Functional Baseline
