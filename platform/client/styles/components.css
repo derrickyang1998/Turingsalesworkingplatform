@@ -352,6 +352,11 @@ thead th {
     outline: 2px solid ButtonText;
     outline-offset: -4px;
   }
+
+  [role="tab"][aria-selected="true"]:focus-visible {
+    outline: 3px solid Highlight;
+    outline-offset: 2px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

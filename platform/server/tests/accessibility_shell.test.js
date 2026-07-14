@@ -302,7 +302,7 @@ test('opening a dynamically inserted dialog associates its form labels before fo
   });
 });
 
-test('navigation events refresh the document title and live status semantics', async () => {
+test('navigation events refresh the document title without nesting toast live regions', async () => {
   await withModulePage({
     modulePath: accessibilityPath,
     html: `
@@ -317,8 +317,8 @@ test('navigation events refresh the document title and live status semantics', a
       return { title: document.title, role: live.getAttribute('role'), live: live.getAttribute('aria-live') };
     });
     assert.match(result.title, /Customer board/);
-    assert.equal(result.role, 'status');
-    assert.equal(result.live, 'polite');
+    assert.equal(result.role, null);
+    assert.equal(result.live, null);
   });
 });
 

@@ -4,6 +4,7 @@
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 const { comparePngBuffers } = require('./compare_ui_baseline_runs');
 
 const repoRoot = path.resolve(__dirname, '..', '..', '..');
@@ -15,6 +16,21 @@ const viewportOrder = ['fixture-1440', 'fixture-1920', 'fixture-mobile'];
 
 function sha256(buffer) {
   return crypto.createHash('sha256').update(buffer).digest('hex');
+}
+
+function readGitBlob(sourceCommit, source) {
+  if (!/^[A-Za-z0-9._/-]+$/.test(source) || source.includes('..')) {
+    throw new Error(`Unsafe controlled source path: ${source}`);
+  }
+  const result = spawnSync('git', ['show', `${sourceCommit}:${source}`], {
+    cwd: repoRoot,
+    encoding: null,
+    maxBuffer: 64 * 1024 * 1024
+  });
+  if (result.error || result.status !== 0 || !Buffer.isBuffer(result.stdout)) {
+    throw new Error(`Unable to read controlled source from commit: ${source}`);
+  }
+  return result.stdout;
 }
 
 function assertRegularFile(filePath, label) {
@@ -145,9 +161,17 @@ function generateVisualEvidence(sourceCommit, reviewStatus = 'pending') {
 
   for (const file of Object.values(manifest.files || {})) {
     const sourcePath = path.join(repoRoot, ...file.source.split('/'));
-    const stat = assertRegularFile(sourcePath, 'Controlled source');
-    file.sha256 = sha256(fs.readFileSync(sourcePath));
-    file.bytes = stat.size;
+    assertRegularFile(sourcePath, 'Controlled source');
+    const workspaceBuffer = fs.readFileSync(sourcePath);
+    const commitBuffer = readGitBlob(sourceCommit, file.source);
+    if (!workspaceBuffer.equals(commitBuffer)) {
+      throw new Error(`Controlled source differs from source commit bytes: ${file.source}`);
+    }
+    file.sha256 = sha256(commitBuffer);
+    file.bytes = commitBuffer.length;
+    file.sourceCommit = sourceCommit;
+    file.sourceCommitSha256 = file.sha256;
+    file.sourceCommitBytes = file.bytes;
   }
 
   const provenance = {
@@ -183,4 +207,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { generateVisualEvidence, parseArgs };
+module.exports = { generateVisualEvidence, parseArgs, readGitBlob };

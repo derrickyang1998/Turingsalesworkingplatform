@@ -199,9 +199,9 @@
   function initializeLiveRegions() {
     var container = document.getElementById('toastContainer');
     if (container) {
-      container.setAttribute('role', 'status');
-      container.setAttribute('aria-live', 'polite');
-      container.setAttribute('aria-atomic', 'false');
+      container.removeAttribute('role');
+      container.removeAttribute('aria-live');
+      container.removeAttribute('aria-atomic');
     }
     var loading = document.querySelectorAll('.tm-state-loading');
     for (var index = 0; index < loading.length; index += 1) {

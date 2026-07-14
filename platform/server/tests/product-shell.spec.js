@@ -433,9 +433,16 @@ test('announces success and error status mutations without moving focus', async 
   await expect(successToast).toBeVisible();
   await successToast.getByRole('button', { name: '关闭通知' }).click();
   await expect(successToast).toHaveCount(0);
+  await page.evaluate(() => new Promise((resolve) => {
+    document.dispatchEvent(new CustomEvent('tm:navigation-applied'));
+    window.setTimeout(resolve, 0);
+  }));
   await page.evaluate(() => toast('Fixture failed', 'error'));
   const errorToast = page.locator('.toast').filter({ hasText: 'Fixture failed' });
+  await expect(page.locator('#toastContainer')).not.toHaveAttribute('role', /.+/);
+  await expect(page.locator('#toastContainer')).not.toHaveAttribute('aria-live', /.+/);
   await expect(errorToast.locator('[role="alert"]')).toContainText('Fixture failed');
+  await expect(errorToast.locator('[role="status"], [role="alert"]')).toHaveCount(1);
   await expect(errorToast.getByRole('button', { name: '关闭通知' })).toBeVisible();
   await expect(focusOwner).toBeFocused();
   await expectRuntimeClean(page);
@@ -665,6 +672,26 @@ test('exposes visible forced-color focus, control boundaries, current state, tab
   expect(parseFloat(selectedState.outlineWidth)).toBeGreaterThan(0);
   expect(unselectedState.outlineStyle).toBe('none');
   await expect(page.locator('#crmPipelineView thead th').first()).toBeVisible();
+
+  await page.goto('/m4?tab=tab2', { waitUntil: 'domcontentloaded' });
+  const selectedM4Tab = page.locator('#tabBar [role="tab"][aria-selected="true"]');
+  await expect(page.locator('#tabBar [data-tab="tab2"]')).toHaveAttribute('aria-selected', 'true');
+  await page.keyboard.press('Tab');
+  await selectedM4Tab.focus();
+  await expect(selectedM4Tab).toBeFocused();
+  const selectedM4Focus = await selectedM4Tab.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      outlineStyle: style.outlineStyle,
+      outlineWidth: style.outlineWidth,
+      outlineOffset: style.outlineOffset
+    };
+  });
+  expect(selectedM4Focus.outlineStyle).not.toBe('none');
+  expect(parseFloat(selectedM4Focus.outlineWidth)).toBeGreaterThanOrEqual(2);
+  expect(parseFloat(selectedM4Focus.outlineOffset)).toBeGreaterThan(0);
+
+  await page.goto('/m0-detail?view=pipeline', { waitUntil: 'domcontentloaded' });
 
   const opener = page.locator('#page-m0-detail button[onclick="openAddCustomer()"]').first();
   await opener.click();

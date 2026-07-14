@@ -15,6 +15,8 @@ const manifestPath = path.join(repoRoot, 'docs', 'baselines', 'v0.2.9', 'ui-ppt-
 const screenshotRoot = path.join(repoRoot, 'docs', 'baselines', 'v0.2.9', 'screenshots');
 const visualEvidenceRoot = path.join(repoRoot, 'docs', 'product', 'evidence', '2026-07-phase3-post');
 const visualProvenancePath = path.join(visualEvidenceRoot, 'raw-contact-sheet-manifest.json');
+const attributesPath = path.join(repoRoot, '.gitattributes');
+const phase3EvidenceGeneratorPath = path.join(platformRoot, 'server', 'scripts', 'generate_phase3_visual_evidence_manifest.js');
 const docs = [
   path.join(platformRoot, 'DEPLOY.md'),
   path.join(repoRoot, 'CLAUDE_CODE_MIGRATION.md'),
@@ -36,6 +38,20 @@ function read(filePath) {
 
 function sha256(filePath) {
   return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
+}
+
+function sha256Buffer(buffer) {
+  return crypto.createHash('sha256').update(buffer).digest('hex');
+}
+
+function gitBlob(commit, source) {
+  const result = spawnSync('git', ['show', `${commit}:${source}`], {
+    cwd: repoRoot,
+    encoding: null,
+    maxBuffer: 64 * 1024 * 1024
+  });
+  assert.equal(result.status, 0, `git blob must exist for ${source}`);
+  return result.stdout;
 }
 
 function posix(filePath) {
@@ -273,6 +289,7 @@ test('Task 12 deploy inventory includes every client asset and remote full-test 
 
   const rootFiles = new Set(powerShellArrayEntries(deploy, 'ROOT_RELATIVE_FILES'));
   for (const file of [
+    '.gitattributes',
     '.gitignore',
     '.env.example',
     'CHANGELOG.md',
@@ -626,6 +643,22 @@ test('Task 12 manifest retains pre-edit hashes and records current post-edit com
   assert.ok(comparison.totalDiffPixels > 0);
   assert.ok(comparison.maxObservedDiffRatio > 0 && comparison.maxObservedDiffRatio <= 1);
   assert.equal(comparison.screenshots.length, 72);
+
+  assert.match(read(attributesPath), /^platform\/app\.js text eol=lf$/m);
+  const generatorSource = read(phase3EvidenceGeneratorPath);
+  assert.match(generatorSource, /spawnSync\('git', \['show', `\$\{sourceCommit\}:\$\{source\}`\]/);
+  assert.match(generatorSource, /workspaceBuffer\.equals\(commitBuffer\)/);
+  const hasGitObjects = fs.existsSync(path.join(repoRoot, '.git'));
+  for (const file of Object.values(manifest.files)) {
+    assert.equal(file.sourceCommit, comparison.sourceCommit, `${file.source} must name its source commit`);
+    assert.equal(file.sourceCommitSha256, file.sha256, `${file.source} must retain its source-commit hash`);
+    assert.equal(file.sourceCommitBytes, file.bytes, `${file.source} must retain its source-commit byte count`);
+    if (hasGitObjects) {
+      const blob = gitBlob(comparison.sourceCommit, file.source);
+      assert.equal(sha256Buffer(blob), file.sha256, `${file.source} must match the recorded commit blob`);
+      assert.equal(blob.length, file.bytes, `${file.source} byte count must match the recorded commit blob`);
+    }
+  }
 
   const provenance = JSON.parse(read(visualProvenancePath));
   assert.equal(provenance.schemaVersion, 1);

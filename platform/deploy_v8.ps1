@@ -129,6 +129,7 @@ $FILES = @(
 )
 
 $ROOT_RELATIVE_FILES = @(
+    ".gitattributes",
     ".gitignore",
     ".env.example",
     "CHANGELOG.md",
