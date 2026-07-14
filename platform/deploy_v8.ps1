@@ -92,6 +92,7 @@ $FILES = @(
     "server\scripts\capture_production_browser_baseline.js",
     "server\scripts\compare_ui_baseline_runs.js",
     "server\scripts\generate_ui_baseline_manifest.js",
+    "server\scripts\generate_phase3_visual_evidence_manifest.js",
     "server\scripts\lib\production_browser_evidence.js",
     "server\scripts\rotate_user_credentials.js",
     "server\scripts\update_ui_baseline.js",
@@ -137,7 +138,17 @@ $ROOT_RELATIVE_FILES = @(
     "docs\handoff\2026-06-30\OPERATIONS.md",
     "docs\superpowers\plans\2026-07-12-phase-1-credential-rotation.md",
     "docs\superpowers\plans\2026-07-12-turingmarket-platform-roadmap.md",
-    "docs\baselines\v0.2.9\ui-ppt-manifest.json"
+    "docs\baselines\v0.2.9\ui-ppt-manifest.json",
+    "docs\product\evidence\2026-07-phase3-post\raw-contact-sheet-manifest.json",
+    "docs\product\evidence\2026-07-phase3-post\fixture-1440-1.png",
+    "docs\product\evidence\2026-07-phase3-post\fixture-1440-2.png",
+    "docs\product\evidence\2026-07-phase3-post\fixture-1440-3.png",
+    "docs\product\evidence\2026-07-phase3-post\fixture-1920-1.png",
+    "docs\product\evidence\2026-07-phase3-post\fixture-1920-2.png",
+    "docs\product\evidence\2026-07-phase3-post\fixture-1920-3.png",
+    "docs\product\evidence\2026-07-phase3-post\fixture-mobile-1.png",
+    "docs\product\evidence\2026-07-phase3-post\fixture-mobile-2.png",
+    "docs\product\evidence\2026-07-phase3-post\fixture-mobile-3.png"
 )
 
 function Convert-ToRemotePath {

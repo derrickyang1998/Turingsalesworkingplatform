@@ -866,8 +866,7 @@ async function recordKnownBaselineGaps(_page, _journey, context) {
     }
   ];
   writeMetadata(context, (metadata) => {
-    const currentContracts = new Set(gaps.map((gap) => gap.contract));
-    metadata.knownGaps = metadata.knownGaps.filter((gap) => currentContracts.has(gap.contract));
+    metadata.knownGaps = metadata.knownGaps.filter((gap) => gap.contract !== 'mobile-shell-content');
     const existing = new Set(metadata.knownGaps.map((gap) => gap.contract));
     for (const gap of gaps) {
       if (!existing.has(gap.contract)) metadata.knownGaps.push(gap);

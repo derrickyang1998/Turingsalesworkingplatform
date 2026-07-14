@@ -79,7 +79,6 @@ function showLoginError(msg, focusTarget) {
     target.setAttribute('aria-invalid', 'true');
     target.focus();
   }
-  toast(msg, 'error');
 }
 
 async function doLogout() {
@@ -258,7 +257,7 @@ function renderCrmCommandCenter(stats) {
       var height = Math.max(18, Math.round((g.count / max) * 100));
       var colors = ['#bfdfff', '#9cd0ff', '#7ebdff', '#4aa3ff', '#007aff'];
       return '<div class="tm-stage-bar">'
-        + '<div class="tm-stage-track"><div class="tm-stage-fill" style="height:' + height + '%;background:linear-gradient(180deg,' + colors[idx] + ',#007aff)"></div></div>'
+        + '<div class="tm-stage-track"><div class="tm-stage-fill" style="height:' + height + '%;background-color:' + colors[idx] + '"></div></div>'
         + '<div class="tm-stage-name">' + g.name + '</div>'
         + '<div class="tm-stage-count">' + g.count + '</div>'
         + '</div>';
@@ -878,21 +877,34 @@ function copyText(t) { try { navigator.clipboard.writeText(t); toast("已复制:
 
 function toast(m, ty) {
   ty = ty || 'success';
+  var focusBeforeToast = document.activeElement;
   var c = document.getElementById('toastContainer');
   if (!c) {
     c = document.createElement('div');
     c.id = 'toastContainer';
     c.className = 'toast-container';
-    c.setAttribute('role', 'status');
-    c.setAttribute('aria-live', 'polite');
     document.body.appendChild(c);
   }
   var e = document.createElement('div');
   e.className = 'toast toast-' + ty + ' ' + ty;
-  e.setAttribute('role', ty === 'error' ? 'alert' : 'status');
-  e.textContent = m;
+  var message = document.createElement('div');
+  message.className = 'tm-toast-message';
+  message.setAttribute('role', ty === 'error' ? 'alert' : 'status');
+  message.textContent = m;
+  var close = document.createElement('button');
+  close.type = 'button';
+  close.className = 'tm-toast-close';
+  close.setAttribute('aria-label', '关闭通知');
+  close.setAttribute('title', '关闭通知');
+  close.textContent = '\u00d7';
+  close.addEventListener('click', function () {
+    var restoreFocus = document.activeElement === close && focusBeforeToast && focusBeforeToast.isConnected;
+    e.remove();
+    if (restoreFocus && typeof focusBeforeToast.focus === 'function') focusBeforeToast.focus();
+  });
+  e.appendChild(message);
+  e.appendChild(close);
   c.appendChild(e);
-  setTimeout(function () { e.remove(); }, 3000);
 }
 function toggleBrandDetail(id){
   var el=document.getElementById(id);

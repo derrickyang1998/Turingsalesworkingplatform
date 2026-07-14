@@ -63,6 +63,38 @@ test('browser baseline generator preserves the frozen pre-edit inventory require
   assert.deepEqual(manifest.duplicateInventory.duplicates, ['esc']);
 });
 
+test('known-gap refresh retires only the completed mobile shell gap', async () => {
+  const outputRoot = path.join(sddRoot, `known-gap-refresh-${process.pid}-${Date.now()}`);
+  const previousOutput = process.env.TM_BASELINE_OUTPUT_DIR;
+  process.env.TM_BASELINE_OUTPUT_DIR = outputRoot;
+  try {
+    const { getBaselineRunContext, recordKnownBaselineGaps } = require(browserFixture);
+    const context = getBaselineRunContext();
+    fs.writeFileSync(context.metadataPath, `${JSON.stringify({
+      schemaVersion: 1,
+      baselineVersion: context.baselineVersion,
+      environments: {},
+      knownGaps: [
+        { contract: 'mobile-shell-content', ownerPhase: 3 },
+        { contract: 'future-independent-gap', ownerPhase: 9 }
+      ]
+    }, null, 2)}\n`, 'utf8');
+
+    await recordKnownBaselineGaps(null, null, context);
+    const metadata = JSON.parse(fs.readFileSync(context.metadataPath, 'utf8'));
+    const contracts = metadata.knownGaps.map((gap) => gap.contract);
+    assert.equal(contracts.includes('mobile-shell-content'), false);
+    assert.equal(contracts.includes('future-independent-gap'), true);
+    for (const expected of ['direct-path', 'refresh-restore', 'back-forward', 'heading-focus', 'admin-knowledge-loader']) {
+      assert.equal(contracts.includes(expected), true, `${expected} must remain registered`);
+    }
+  } finally {
+    if (previousOutput === undefined) delete process.env.TM_BASELINE_OUTPUT_DIR;
+    else process.env.TM_BASELINE_OUTPUT_DIR = previousOutput;
+    fs.rmSync(outputRoot, { recursive: true, force: true });
+  }
+});
+
 test('browser baseline update orchestrator owns two clean runs and all viewport projects', () => {
   const result = spawnSync(process.execPath, [updateScript, '--self-test'], {
     cwd: serverRoot,

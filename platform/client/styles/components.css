@@ -268,11 +268,36 @@ thead th {
 
 .toast {
   position: static;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--tm-space-3);
   max-width: min(420px, calc(100vw - 32px));
   border-radius: var(--tm-radius-control);
   background: var(--tm-color-text);
   box-shadow: var(--tm-shadow-drawer);
   animation: tm-toast-in 160ms ease both;
+}
+
+.tm-toast-message {
+  min-width: 0;
+  flex: 1;
+}
+
+.tm-toast-close {
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  min-height: 32px;
+  padding: 0;
+  border: 1px solid currentColor;
+  border-radius: var(--tm-radius-control);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
 }
 
 .toast-error,
@@ -320,6 +345,13 @@ thead th {
 #page-admin #ad_recentActivity [style*="opacity"] {
   color: var(--tm-color-text-muted) !important;
   opacity: 1 !important;
+}
+
+@media (forced-colors: active) {
+  [role="tab"][aria-selected="true"] {
+    outline: 2px solid ButtonText;
+    outline-offset: -4px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

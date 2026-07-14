@@ -131,8 +131,9 @@
         var ownerTabs = tabElements(owner);
         var current = ownerTabs.indexOf(this);
         var next = current;
-        if (event.key === 'ArrowRight' || event.key === 'ArrowDown') next = (current + 1) % ownerTabs.length;
-        if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') next = (current - 1 + ownerTabs.length) % ownerTabs.length;
+        var vertical = owner.getAttribute('aria-orientation') === 'vertical';
+        if (event.key === 'ArrowRight' || (vertical && event.key === 'ArrowDown')) next = (current + 1) % ownerTabs.length;
+        if (event.key === 'ArrowLeft' || (vertical && event.key === 'ArrowUp')) next = (current - 1 + ownerTabs.length) % ownerTabs.length;
         if (event.key === 'Home') next = 0;
         if (event.key === 'End') next = ownerTabs.length - 1;
         if (next !== current) {
@@ -145,6 +146,7 @@
           event.preventDefault();
           this.click();
           updateTabState(owner, this);
+          this.focus();
         }
       });
     }

@@ -240,21 +240,25 @@ test('implements APG manual-activation tabs for CRM and M4 with focus, selection
   const crmList = page.locator('.tm-crm-tabs');
   const crmTabs = crmList.locator('[role="tab"]');
   await expect(crmList).toHaveAttribute('role', 'tablist');
+  await expect(crmList).toHaveAccessibleName(/.+/);
   await expect(crmTabs).toHaveCount(3);
   await expect(crmTabs.nth(0)).toHaveAttribute('tabindex', '0');
   await expect(crmTabs.nth(0)).toHaveAttribute('aria-selected', 'true');
   await crmTabs.nth(0).focus();
+  await page.keyboard.press('ArrowDown');
+  await expect(crmTabs.nth(0)).toBeFocused();
   await page.keyboard.press('End');
   await expect(crmTabs.nth(2)).toBeFocused();
   await page.keyboard.press('Enter');
+  await expect(crmTabs.nth(2)).toBeFocused();
   await expect(crmTabs.nth(2)).toHaveAttribute('aria-selected', 'true');
   await expect(page).toHaveURL(/\/m0-detail\?view=opportunities$/);
   const crmPanelId = await crmTabs.nth(2).getAttribute('aria-controls');
   await expect(page.locator(`#${crmPanelId}`)).toBeVisible();
-  await crmTabs.nth(2).focus();
   await page.keyboard.press('Home');
   await expect(crmTabs.nth(0)).toBeFocused();
   await page.keyboard.press('Space');
+  await expect(crmTabs.nth(0)).toBeFocused();
   await expect(page).toHaveURL(/\/m0-detail\?view=pipeline$/);
 
   await page.evaluate(() => window.TMNavigation.navigate('m4', {
@@ -267,16 +271,20 @@ test('implements APG manual-activation tabs for CRM and M4 with focus, selection
   const m4List = page.locator('#tabBar');
   const m4Tabs = m4List.locator('[role="tab"]');
   await expect(m4List).toHaveAttribute('role', 'tablist');
+  await expect(m4List).toHaveAccessibleName(/.+/);
   await expect(m4Tabs).toHaveCount(3);
   await m4Tabs.nth(0).focus();
+  await page.keyboard.press('ArrowUp');
+  await expect(m4Tabs.nth(0)).toBeFocused();
   await page.keyboard.press('ArrowRight');
   await expect(m4Tabs.nth(1)).toBeFocused();
   await page.keyboard.press('Enter');
+  await expect(m4Tabs.nth(1)).toBeFocused();
   await expect(m4Tabs.nth(1)).toHaveAttribute('aria-selected', 'true');
   await expect(page).toHaveURL(/\/m4\?tab=tab2$/);
-  await m4Tabs.nth(1).focus();
   await page.keyboard.press('End');
   await page.keyboard.press('Space');
+  await expect(m4Tabs.nth(2)).toBeFocused();
   await expect(m4Tabs.nth(2)).toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('#tab3-content')).toBeVisible();
   await expect(page).toHaveURL(/\/m4\?tab=tab3$/);
@@ -305,6 +313,35 @@ test('opens the real demand and M4 file choosers exactly once for Enter and Spac
   await page.locator('#tab3-content').waitFor({ state: 'visible' });
   await activate('#infDropZone', '#infFile', 'Enter', 3);
   await activate('#infDropZone', '#infFile', 'Space', 4);
+  await expectRuntimeClean(page);
+});
+
+test('renders CRM funnel fills and active proposal templates with solid visible backgrounds', async ({ page }) => {
+  await boot(page, { path: '/m0' });
+  const funnelStyles = await page.locator('#m0StageBars .tm-stage-fill').evaluateAll((elements) => elements.map((element) => {
+    const style = getComputedStyle(element);
+    return { backgroundColor: style.backgroundColor, backgroundImage: style.backgroundImage };
+  }));
+  expect(funnelStyles).toHaveLength(5);
+  for (const style of funnelStyles) {
+    expect(style.backgroundImage).toBe('none');
+    expect(style.backgroundColor).not.toBe('rgba(0, 0, 0, 0)');
+  }
+
+  await page.evaluate(() => window.TMNavigation.navigate('m3', { user: CURRENT_USER }));
+  await page.locator('#page-m3').waitFor({ state: 'visible' });
+  await page.evaluate(() => goGenerate());
+  const firstTemplate = page.locator('#tmplSelect .tm-template-card').first();
+  await firstTemplate.click();
+  await expect(firstTemplate).toHaveClass(/active/);
+  const templateStyle = await firstTemplate.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { backgroundColor: style.backgroundColor, backgroundImage: style.backgroundImage };
+  });
+  expect(templateStyle.backgroundImage).toBe('none');
+  expect(templateStyle.backgroundColor).not.toBe('rgba(0, 0, 0, 0)');
+  const contrast = await new AxeBuilder({ page }).include('#tmplSelect').withRules(['color-contrast']).analyze();
+  expect(contrast.violations).toEqual([]);
   await expectRuntimeClean(page);
 });
 
@@ -363,7 +400,7 @@ test('reports empty and server login errors inline and moves focus to the correc
   await expect(page.locator('#loginError')).toContainText('Invalid fixture credentials');
   await expect(page.locator('#loginError')).toHaveAttribute('role', 'alert');
   await expect(username).toBeFocused();
-  await expect(page.locator('.toast[role="alert"]').filter({ hasText: 'Invalid fixture credentials' })).toHaveCount(1);
+  await expect(page.locator('.toast').filter({ hasText: 'Invalid fixture credentials' })).toHaveCount(0);
   consumeExpectedPageError(page, /Failed to load resource:.*401 \(Unauthorized\)/);
   await expectRuntimeClean(page);
 });
@@ -386,12 +423,20 @@ test('announces success and error status mutations without moving focus', async 
   const focusOwner = page.locator('#page-m0 button').first();
   await focusOwner.focus();
   await page.evaluate(() => toast('Fixture saved', 'success'));
-  await expect(page.locator('#toastContainer')).toHaveAttribute('role', 'status');
-  await expect(page.locator('#toastContainer')).toHaveAttribute('aria-live', 'polite');
-  await expect(page.locator('.toast[role="status"]')).toContainText('Fixture saved');
+  await expect(page.locator('#toastContainer')).not.toHaveAttribute('role', /.+/);
+  await expect(page.locator('#toastContainer')).not.toHaveAttribute('aria-live', /.+/);
+  const successToast = page.locator('.toast').filter({ hasText: 'Fixture saved' });
+  await expect(successToast.locator('[role="status"]')).toContainText('Fixture saved');
+  await expect(successToast.getByRole('button', { name: '关闭通知' })).toBeVisible();
   await expect(focusOwner).toBeFocused();
+  await page.waitForTimeout(3100);
+  await expect(successToast).toBeVisible();
+  await successToast.getByRole('button', { name: '关闭通知' }).click();
+  await expect(successToast).toHaveCount(0);
   await page.evaluate(() => toast('Fixture failed', 'error'));
-  await expect(page.locator('.toast[role="alert"]')).toContainText('Fixture failed');
+  const errorToast = page.locator('.toast').filter({ hasText: 'Fixture failed' });
+  await expect(errorToast.locator('[role="alert"]')).toContainText('Fixture failed');
+  await expect(errorToast.getByRole('button', { name: '关闭通知' })).toBeVisible();
   await expect(focusOwner).toBeFocused();
   await expectRuntimeClean(page);
 });
@@ -606,6 +651,19 @@ test('exposes visible forced-color focus, control boundaries, current state, tab
   expect(openStyle.border).not.toBe('none');
   expect(parseFloat(openStyle.borderWidth)).toBeGreaterThan(0);
   await expect(page.locator('#tmSidebar a[aria-current="page"]')).toHaveCount(1);
+  const selectedCrmTab = page.locator('.tm-crm-tabs [role="tab"][aria-selected="true"]');
+  const unselectedCrmTab = page.locator('.tm-crm-tabs [role="tab"][aria-selected="false"]').first();
+  const selectedState = await selectedCrmTab.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { outlineStyle: style.outlineStyle, outlineWidth: style.outlineWidth };
+  });
+  const unselectedState = await unselectedCrmTab.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { outlineStyle: style.outlineStyle, outlineWidth: style.outlineWidth };
+  });
+  expect(selectedState.outlineStyle).not.toBe('none');
+  expect(parseFloat(selectedState.outlineWidth)).toBeGreaterThan(0);
+  expect(unselectedState.outlineStyle).toBe('none');
   await expect(page.locator('#crmPipelineView thead th').first()).toBeVisible();
 
   const opener = page.locator('#page-m0-detail button[onclick="openAddCustomer()"]').first();

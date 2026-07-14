@@ -453,10 +453,16 @@ test('navigation source uses canonical anchors and never suppresses heading focu
 
 test('shared app hooks announce auth/status and name M4/workflow controls without changing data flow', () => {
   const app = read(appPath);
+  const loginErrorHook = sourceBetween(app, 'function showLoginError', 'async function doLogout');
+  const toastHook = sourceBetween(app, 'function toast', 'function toggleBrandDetail');
   assert.match(app, /loginError[\s\S]*?textContent\s*=\s*msg/);
   assert.match(app, /loginUser[\s\S]*?\.focus\s*\(/);
-  assert.match(app, /toastContainer[\s\S]*?aria-live/);
-  assert.match(app, /toast-[\s\S]*?role[\s\S]*?alert/);
+  assert.doesNotMatch(loginErrorHook, /toast\s*\(/);
+  assert.doesNotMatch(toastHook, /toastContainer[\s\S]*?aria-live/);
+  assert.match(toastHook, /tm-toast-message[\s\S]*?setAttribute\(['"]role['"]/);
+  assert.match(toastHook, /ty\s*===\s*['"]error['"]\s*\?\s*['"]alert['"]\s*:\s*['"]status['"]/);
+  assert.match(toastHook, /aria-label['"],\s*['"]关闭通知['"]/);
+  assert.doesNotMatch(toastHook, /setTimeout[\s\S]*?remove/);
   assert.match(app, /aria-label=["']全选网红["']/);
   assert.match(app, /aria-label=["']选择网红/);
   assert.match(app, /indeterminate/);

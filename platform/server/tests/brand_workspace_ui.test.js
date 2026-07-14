@@ -188,6 +188,7 @@ class TestElement {
     this.className = '';
     this.id = '';
     this.nextElementSibling = null;
+    this.listeners = {};
     this.classList = createClassList(this);
 
     for (const [name, value] of Object.entries(attributes)) {
@@ -236,7 +237,13 @@ class TestElement {
     this.ownerDocument.unregisterElement(this);
   }
 
+  addEventListener(type, handler) {
+    if (!this.listeners[type]) this.listeners[type] = [];
+    this.listeners[type].push(handler);
+  }
+
   click() {
+    for (const handler of this.listeners.click || []) handler({ currentTarget: this, target: this });
     this.ownerDocument.dispatchClick(this);
   }
 

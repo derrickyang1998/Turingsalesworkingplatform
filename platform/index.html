@@ -424,7 +424,7 @@ input:focus,select:focus,textarea:focus{border-color:rgba(0,122,255,.56);box-sha
 .tag.active{background:#0b1220;border-color:#0b1220;color:#fff}
 .tm-template-card{cursor:pointer;padding:16px;border:1px solid rgba(148,163,184,.18);transition:all .18s ease}
 .tm-template-card:hover{transform:translateY(-2px);border-color:rgba(0,122,255,.36);box-shadow:0 16px 34px rgba(15,23,42,.10)}
-.tm-template-card.active{background:linear-gradient(135deg,#0b1220,#0f2a4c);border-color:#0b1220;color:#fff;box-shadow:0 20px 42px rgba(15,23,42,.22)}
+.tm-template-card.active{background:#0b1220;border-color:#0b1220;color:#fff;box-shadow:0 20px 42px rgba(15,23,42,.22)}
 .tm-template-card.active p,.tm-template-card.active div{color:rgba(255,255,255,.72)!important;opacity:1!important}
 .tm-custom-template{display:none;margin-top:12px;padding:14px;border:1px dashed rgba(0,122,255,.32);border-radius:20px;background:rgba(239,246,255,.68)}
 .tm-custom-template.active{display:block}
@@ -653,7 +653,7 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
 </div>
 
 <!-- View Tabs -->
-<div class="tm-crm-tabs">
+<div class="tm-crm-tabs" aria-label="客户详情视图">
   <button type="button" class="crm-tab active" onclick="switchCrmView('pipeline')" style="padding:10px 16px;cursor:pointer;font-size:13px">客户列表</button>
   <button type="button" class="crm-tab" onclick="switchCrmView('seapool')" style="padding:10px 16px;cursor:pointer;font-size:13px;color:var(--text2)">公海池（<span id="m0_seapoolTabCount">0</span>）</button>
   <button type="button" class="crm-tab" onclick="switchCrmView('opportunities')" style="padding:10px 16px;cursor:pointer;font-size:13px;color:var(--text2)">商机看板</button>
@@ -986,7 +986,7 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
 <div class="page" id="page-m4">
 <h2>👥 网红匹配 & 执行管理</h2>
 <p class="subtitle">提报资源名单 · 下单合作追踪 · 飞书同步</p>
-<div class="tabs" id="tabBar">
+<div class="tabs" id="tabBar" aria-label="网红执行视图">
   <div class="tab active" data-tab="tab1" onclick="switchTab('tab1')">📋 提报资源名单</div>
   <div class="tab" data-tab="tab2" onclick="switchTab('tab2')">📊 下单合作资源</div>
   <div class="tab" data-tab="tab3" onclick="switchTab('tab3')">📤 导入 & 飞书</div>

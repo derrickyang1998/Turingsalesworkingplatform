@@ -13,6 +13,8 @@ const platformRoot = path.join(repoRoot, 'platform');
 const deployPath = path.join(platformRoot, 'deploy_v8.ps1');
 const manifestPath = path.join(repoRoot, 'docs', 'baselines', 'v0.2.9', 'ui-ppt-manifest.json');
 const screenshotRoot = path.join(repoRoot, 'docs', 'baselines', 'v0.2.9', 'screenshots');
+const visualEvidenceRoot = path.join(repoRoot, 'docs', 'product', 'evidence', '2026-07-phase3-post');
+const visualProvenancePath = path.join(visualEvidenceRoot, 'raw-contact-sheet-manifest.json');
 const docs = [
   path.join(platformRoot, 'DEPLOY.md'),
   path.join(repoRoot, 'CLAUDE_CODE_MIGRATION.md'),
@@ -622,13 +624,34 @@ test('Task 12 manifest retains pre-edit hashes and records current post-edit com
   assert.ok(comparison.maxObservedDiffRatio <= comparison.maxDiffPixelRatio);
   assert.equal(comparison.screenshots.length, 72);
 
+  const provenance = JSON.parse(read(visualProvenancePath));
+  assert.equal(provenance.schemaVersion, 1);
+  assert.equal(provenance.source, comparison.source);
+  assert.equal(provenance.rawCaptureCount, 72);
+  assert.equal(provenance.contactSheetCount, 9);
+  assert.equal(provenance.rawCaptures.length, 72);
+  assert.equal(provenance.contactSheets.length, 9);
+  const rawByPath = new Map(provenance.rawCaptures.map((entry) => [entry.path, entry]));
+  assert.equal(rawByPath.size, 72);
+  const sheetByName = new Map(provenance.contactSheets.map((entry) => [entry.name, entry]));
+  assert.equal(sheetByName.size, 9);
+  for (const sheet of provenance.contactSheets) {
+    const sheetPath = path.join(visualEvidenceRoot, sheet.name);
+    assert.equal(sheet.sha256, sha256(sheetPath), `${sheet.name} hash must match the committed contact sheet`);
+    assert.equal(sheet.rawCaptures.length, 8);
+  }
+
   const expectedPaths = walkFiles(screenshotRoot).filter((file) => file.endsWith('.png'));
   const actualPaths = comparison.screenshots.map((entry) => entry.path.replace('docs/baselines/v0.2.9/screenshots/', '')).sort();
   assert.deepEqual(actualPaths, expectedPaths);
   for (const entry of comparison.screenshots) {
     const relative = entry.path.replace('docs/baselines/v0.2.9/screenshots/', '');
     assert.equal(entry.preEditSha256, sha256(path.join(screenshotRoot, ...relative.split('/'))));
-    assert.match(entry.postEditSha256, /^[a-f0-9]{64}$/);
+    const raw = rawByPath.get(relative);
+    assert.ok(raw, `${relative} must be mapped to a committed contact sheet`);
+    assert.equal(entry.postEditSha256, raw.sha256);
+    assert.ok(sheetByName.has(raw.contactSheet));
+    assert.ok(sheetByName.get(raw.contactSheet).rawCaptures.includes(relative));
     assert.ok(entry.diffPixelRatio <= comparison.maxDiffPixelRatio);
   }
 });
