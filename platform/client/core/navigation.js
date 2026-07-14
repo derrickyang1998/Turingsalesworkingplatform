@@ -16,6 +16,13 @@
     { id: 'admin', icon: '管', label: '管理控制室', adminOnly: true }
   ];
 
+  var NAV_GROUP_BY_START_PAGE = {
+    m0: { label: '客户经营' },
+    m2: { label: '方案与执行' },
+    'workflow-designer': { label: '流程协作' },
+    admin: { label: '系统管理', adminOnly: true }
+  };
+
   var SIMPLE_PATH_BY_PAGE = {
     m0: '/m0',
     m1: '/m1',
@@ -168,23 +175,44 @@
     if (!sidebar) return;
     var existing = sidebar.querySelectorAll('.nav-item');
     for (var i = 0; i < existing.length; i += 1) existing[i].remove();
+    var existingGroups = sidebar.querySelectorAll('.nav-group-label');
+    for (var groupIndex = 0; groupIndex < existingGroups.length; groupIndex += 1) existingGroups[groupIndex].remove();
+
+    function insertBeforeFooter(element) {
+      var footer = sidebar.querySelector('.sidebar-footer');
+      if (footer) sidebar.insertBefore(element, footer);
+      else sidebar.appendChild(element);
+    }
 
     for (var j = 0; j < NAV_PAGES.length; j += 1) {
       (function (page) {
-        var el = document.createElement('div');
+        var group = NAV_GROUP_BY_START_PAGE[page.id];
+        if (group) {
+          var groupLabel = document.createElement('div');
+          groupLabel.className = 'nav-group-label';
+          if (group.adminOnly) groupLabel.className += ' admin-only';
+          groupLabel.textContent = group.label;
+          insertBeforeFooter(groupLabel);
+        }
+
+        var el = document.createElement('a');
         el.className = 'nav-item';
         if (page.adminOnly) el.className += ' admin-only';
-        if (page.id === 'm0') el.className += ' active';
+        if (page.id === 'm0') {
+          el.className += ' active';
+          el.setAttribute('aria-current', 'page');
+        }
         el.setAttribute('data-page', page.id);
-        el.onclick = function () {
+        el.setAttribute('data-label', page.label);
+        el.setAttribute('href', pathForState({ pageId: page.id }));
+        el.addEventListener('click', function (event) {
+          if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+          event.preventDefault();
           if (typeof window.switchPage === 'function') window.switchPage(page.id);
           else navigate(page.id);
-        };
-        el.style.cursor = 'pointer';
-        el.innerHTML = '<span class="nav-icon">' + page.icon + '</span> ' + page.label;
-        var footer = sidebar.querySelector('.sidebar-footer');
-        if (footer) sidebar.insertBefore(el, footer);
-        else sidebar.appendChild(el);
+        });
+        el.innerHTML = '<span class="nav-icon" aria-hidden="true">' + page.icon + '</span> ' + page.label;
+        insertBeforeFooter(el);
       })(NAV_PAGES[j]);
     }
   }
@@ -201,9 +229,15 @@
   function applyPageState(stateToApply) {
     var pageId = stateToApply.pageId;
     var navs = document.querySelectorAll('.nav-item');
-    for (var i = 0; i < navs.length; i += 1) navs[i].classList.remove('active');
+    for (var i = 0; i < navs.length; i += 1) {
+      navs[i].classList.remove('active');
+      navs[i].removeAttribute('aria-current');
+    }
     var nav = document.querySelector('[data-page="' + pageId + '"]');
-    if (nav) nav.classList.add('active');
+    if (nav) {
+      nav.classList.add('active');
+      nav.setAttribute('aria-current', 'page');
+    }
 
     var pages = document.querySelectorAll('.page');
     for (var j = 0; j < pages.length; j += 1) {
@@ -215,7 +249,7 @@
       page.classList.add('active');
       page.style.display = 'block';
     }
-    focusActiveHeading(page);
+    return page;
   }
 
   function focusActiveHeading(page) {
@@ -227,19 +261,16 @@
     }
     var hadTabindex = typeof heading.hasAttribute === 'function' ? heading.hasAttribute('tabindex') : heading.getAttribute('tabindex') !== null;
     var previousTabindex = heading.getAttribute('tabindex');
-    var previousOutline = heading.style.outline || '';
     function restoreFocusAttributes() {
       if (hadTabindex) {
         heading.setAttribute('tabindex', previousTabindex);
       } else if (typeof heading.removeAttribute === 'function') {
         heading.removeAttribute('tabindex');
       }
-      heading.style.outline = previousOutline;
       heading.__tmNavigationFocusRestore = null;
     }
     heading.__tmNavigationFocusRestore = restoreFocusAttributes;
     heading.setAttribute('tabindex', '-1');
-    heading.style.outline = 'none';
     try {
       heading.focus({ preventScroll: true });
     } catch (_error) {
@@ -280,9 +311,10 @@
 
   function applyState(stateToApply, options, user) {
     applyPreview(stateToApply, user);
-    applyPageState(stateToApply);
+    var page = applyPageState(stateToApply);
     writeHistory(stateToApply, options || {});
     dispatchApplied(stateToApply, options || {});
+    focusActiveHeading(page);
     return stateToApply;
   }
 

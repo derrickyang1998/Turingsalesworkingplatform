@@ -117,12 +117,13 @@ test('new shared CSS forbids decorative glass effects and preserves focus and re
   assert.match(css, /:focus-visible[\s\S]*?outline-offset\s*:\s*2px\b/i);
   assert.match(css, /@media\s*\(prefers-reduced-motion:\s*reduce\)/i);
   assert.match(css, /thead\s+th[\s\S]*?position\s*:\s*sticky/i);
+  assert.doesNotMatch(read(indexPath), /letter-spacing\s*:\s*-/i);
 });
 
 test('focus and reduced-motion preferences are observable on actual shell motion surfaces', async () => {
   const browser = await chromium.launch({ headless: true });
   try {
-    const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+    const page = await browser.newPage({ viewport: { width: 1024, height: 844 } });
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.setContent(`<!doctype html><html><body>
       <button id="probe">Probe</button>
@@ -213,6 +214,174 @@ test('mobile authentication remains hidden before login and after simulated sess
   }
 });
 
+test('actual index startup keeps authentication interactive and ignores closed off-canvas dialogs', async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+    await page.setContent(stripExternalAssets(read(indexPath)));
+    await addSharedStyles(page);
+    await page.addScriptTag({ path: accessibilityPath });
+    await page.waitForTimeout(30);
+
+    assert.equal(await page.locator('#authOverlay').evaluate((element) => element.inert), false);
+    assert.equal(await page.locator('#app').evaluate((element) => element.inert), false);
+    assert.equal(await page.locator('#customerDetailDialog').evaluate((element) => element.contains(document.activeElement)), false);
+  } finally {
+    await browser.close();
+  }
+});
+
+test('reduced motion preserves the mobile drawer closed and open state', async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.setContent(stripExternalAssets(read(indexPath)));
+    await addSharedStyles(page);
+    await page.evaluate(() => {
+      document.getElementById('authOverlay').style.display = 'none';
+      document.getElementById('app').style.display = 'flex';
+    });
+    await page.addScriptTag({ path: shellPath });
+
+    const closed = await page.locator('#tmSidebar').boundingBox();
+    assert.ok(closed.x + closed.width <= 1, 'closed drawer must remain outside the viewport');
+    assert.equal(await page.locator('#tmSidebar').evaluate((element) => element.inert), true);
+    await page.locator('#tmNavOpen').click();
+    await page.waitForFunction(() => getComputedStyle(document.getElementById('tmSidebar')).transform === 'none');
+    const opened = await page.locator('#tmSidebar').boundingBox();
+    const openState = await page.evaluate(() => ({
+      bodyClass: document.body.className,
+      expanded: document.getElementById('tmNavOpen').getAttribute('aria-expanded'),
+      transform: getComputedStyle(document.getElementById('tmSidebar')).transform
+    }));
+    assert.ok(opened.x >= -1, `open drawer must enter the viewport: ${JSON.stringify({ opened, openState })}`);
+    assert.equal(await page.locator('#tmSidebar').evaluate((element) => element.inert), false);
+  } finally {
+    await browser.close();
+  }
+});
+
+test('mobile route clicks close the drawer before focusing the destination heading', async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+    await page.setContent(stripExternalAssets(read(indexPath)));
+    await addSharedStyles(page);
+    await page.evaluate(() => {
+      document.getElementById('authOverlay').style.display = 'none';
+      document.getElementById('app').style.display = 'flex';
+      window.history.pushState = function () {};
+      window.history.replaceState = function () {};
+    });
+    await page.addScriptTag({ path: navigationPath });
+    await page.addScriptTag({ path: shellPath });
+    await page.locator('#tmNavOpen').click();
+    await page.locator('#tmSidebar [data-page="m1"]').click();
+
+    assert.equal(await page.locator('#tmNavOpen').getAttribute('aria-expanded'), 'false');
+    assert.equal(await page.locator('#mainContent').evaluate((element) => element.inert), false);
+    assert.equal(await page.evaluate(() => document.activeElement === document.querySelector('#page-m1 h2')), true);
+  } finally {
+    await browser.close();
+  }
+});
+
+test('production M4 tabs, upload surfaces, filters, and CRM view controls are keyboard named', async () => {
+  const switchTabSource = sourceBetween(read(appPath), 'function switchTab(id, options)', '// ===== M4: INFLUENCER MATCHING');
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+    await page.setContent(stripExternalAssets(read(indexPath)));
+    await page.evaluate(() => {
+      document.getElementById('authOverlay').style.display = 'none';
+      document.getElementById('app').style.display = 'flex';
+      document.querySelectorAll('.page').forEach((pageElement) => pageElement.classList.remove('active'));
+      document.getElementById('page-m4').classList.add('active');
+      window.uploadClicks = 0;
+      document.getElementById('infFile').click = () => { window.uploadClicks += 1; };
+    });
+    await addSharedStyles(page);
+    await page.addScriptTag({ content: switchTabSource });
+    await page.addScriptTag({ path: accessibilityPath });
+
+    const firstTab = page.locator('#tabBar [data-tab="tab1"]');
+    assert.equal(await firstTab.getAttribute('aria-controls'), 'tab1-content');
+    assert.equal(await page.locator('#tab1-content').getAttribute('role'), 'tabpanel');
+    await page.locator('#tabBar [data-tab="tab2"]').focus();
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(10);
+    assert.equal(await page.locator('#tabBar [data-tab="tab2"]').getAttribute('aria-selected'), 'true');
+    await page.locator('#tabBar [data-tab="tab3"]').focus();
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(10);
+
+    const upload = page.locator('#infDropZone');
+    assert.equal(await upload.getAttribute('role'), 'button');
+    assert.equal(await upload.getAttribute('tabindex'), '0');
+    assert.ok(await upload.getAttribute('aria-label'));
+    await upload.focus();
+    await page.keyboard.press('Enter');
+    await page.keyboard.press('Space');
+    assert.equal(await page.evaluate(() => window.uploadClicks), 2);
+    assert.ok(await page.locator('#infFile').getAttribute('aria-label'));
+    assert.ok(await page.locator('#demandFile').getAttribute('aria-label'));
+
+    await page.evaluate(() => window.switchTab('tab1', { skipHistory: true }));
+    assert.equal(await page.locator('#tabBar [data-tab="tab1"]').getAttribute('aria-selected'), 'true');
+    assert.equal(await page.locator('#tab1-content').evaluate((element) => element.hidden), false);
+    assert.equal(await page.locator('#tab3-content').evaluate((element) => element.hidden), true);
+
+    for (const id of ['filt_search', 'filt_project', 'filt_product', 'filt_platform', 'filt_region', 'filt_tags', 'collabFilter']) {
+      assert.ok(await page.locator(`#${id}`).getAttribute('aria-label'), `#${id} must have an accessible name`);
+    }
+    assert.equal(await page.locator('.tm-crm-tabs .crm-tab').first().evaluate((element) => element.tagName), 'BUTTON');
+  } finally {
+    await browser.close();
+  }
+});
+
+test('Direction A overrides legacy glass surfaces and implements checkbox target geometry', async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+    await page.setContent(stripExternalAssets(read(indexPath)));
+    await addSharedStyles(page);
+    const surfaces = await page.evaluate(() => {
+      const style = (selector) => getComputedStyle(document.querySelector(selector));
+      return {
+        panelBackdrop: style('.tm-glass-panel').backdropFilter,
+        panelImage: style('.tm-glass-panel').backgroundImage,
+        stageImage: style('.tm-stage-fill').backgroundImage,
+        aiImage: style('.tm-ai-panel').backgroundImage,
+        strategyCardImage: style('#page-m2 > .card').backgroundImage
+      };
+    });
+    assert.ok(!surfaces.panelBackdrop || surfaces.panelBackdrop === 'none');
+    assert.equal(surfaces.panelImage, 'none');
+    assert.equal(surfaces.stageImage, 'none');
+    assert.equal(surfaces.aiImage, 'none');
+    assert.equal(surfaces.strategyCardImage, 'none');
+
+    await page.evaluate(() => {
+      const target = document.createElement('label');
+      target.id = 'checkboxTarget';
+      target.className = 'tm-checkbox-target';
+      target.innerHTML = '<input id="checkboxGlyph" type="checkbox" aria-label="Select row">';
+      document.body.appendChild(target);
+    });
+    const desktopTarget = await page.locator('#checkboxTarget').boundingBox();
+    const glyph = await page.locator('#checkboxGlyph').boundingBox();
+    assert.ok(desktopTarget.width >= 24 && desktopTarget.height >= 24);
+    assert.deepEqual({ width: glyph.width, height: glyph.height }, { width: 16, height: 16 });
+    await page.setViewportSize({ width: 390, height: 844 });
+    const mobileTarget = await page.locator('#checkboxTarget').boundingBox();
+    assert.ok(mobileTarget.width >= 44 && mobileTarget.height >= 44);
+  } finally {
+    await browser.close();
+  }
+});
+
 test('login is a labelled form with announced inline errors and browser autofill contracts', () => {
   const indexHtml = read(indexPath);
   const form = openingTagById(indexHtml, 'loginForm');
@@ -233,6 +402,12 @@ test('login is a labelled form with announced inline errors and browser autofill
   assert.match(password, /aria-describedby=["']loginError["']/i);
   assert.match(error, /role=["']alert["']/i);
   assert.match(error, /aria-live=["']assertive["']/i);
+});
+
+test('off-screen native PPT upload input is named and removed from sequential focus', () => {
+  const input = openingTagById(read(indexPath), 'pptContextFile');
+  assert.match(input, /aria-label=["'][^"']+["']/i);
+  assert.match(input, /tabindex=["']-1["']/i);
 });
 
 test('static overlays expose labelled dialog or drawer contracts and named close controls', () => {
@@ -285,6 +460,10 @@ test('shared app hooks announce auth/status and name M4/workflow controls withou
   assert.match(app, /aria-label=["']全选网红["']/);
   assert.match(app, /aria-label=["']选择网红/);
   assert.match(app, /indeterminate/);
+  assert.match(app, /tm-checkbox-target/);
+  assert.match(app, /collabOrderDialog[\s\S]*?role=["']dialog["']/);
+  assert.match(app, /brandRelationDialog[\s\S]*?aria-modal["']?,?[\s\S]*?TMAccessibility\.openDialog/);
+  assert.match(app, /showConfirm[\s\S]*?TMAccessibility\.openDialog/);
 });
 
 test('workflow palette and rendered nodes execute keyboard alternatives exactly once', async () => {
@@ -295,6 +474,7 @@ test('workflow palette and rendered nodes execute keyboard alternatives exactly 
     '// ---- Node Management ----'
   );
   const renderWorkflowNode = sourceBetween(app, 'function wfRenderNode(node)', 'function wfRenderEdge(edge)');
+  assert.match(renderWorkflowNode, /requestAnimationFrame[\s\S]*?data-node-id[\s\S]*?focus\s*\(/);
   const browser = await chromium.launch({ headless: true });
   try {
     const page = await browser.newPage({ viewport: { width: 900, height: 700 } });

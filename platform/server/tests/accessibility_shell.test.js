@@ -77,8 +77,8 @@ test('tabs use roving focus and activate Enter and Space exactly once each', asy
         <div class="tab active" data-tab="tab1" onclick="activateTab('tab1')">First</div>
         <div class="tab" data-tab="tab2" onclick="activateTab('tab2')">Second</div>
       </div>
-      <section id="tab1" class="tab-content">First panel</section>
-      <section id="tab2" class="tab-content" hidden>Second panel</section>
+      <section id="tab1-content" class="tab-content">First panel</section>
+      <section id="tab2-content" class="tab-content" hidden>Second panel</section>
       <script>
         window.activations = [];
         window.activateTab = function (id) {
@@ -94,7 +94,7 @@ test('tabs use roving focus and activate Enter and Space exactly once each', asy
     const tabs = page.locator('.tab');
     assert.equal(await page.locator('#tabBar').getAttribute('role'), 'tablist');
     assert.equal(await tabs.nth(0).getAttribute('role'), 'tab');
-    assert.equal(await page.locator('#tab1').getAttribute('role'), 'tabpanel');
+    assert.equal(await page.locator('#tab1-content').getAttribute('role'), 'tabpanel');
     assert.equal(await tabs.nth(0).getAttribute('tabindex'), '0');
     assert.equal(await tabs.nth(1).getAttribute('tabindex'), '-1');
     assert.equal(await tabs.nth(0).getAttribute('aria-selected'), 'true');
@@ -107,18 +107,18 @@ test('tabs use roving focus and activate Enter and Space exactly once each', asy
         zeroTabStops: document.querySelectorAll('#tabBar [tabindex="0"]').length,
         firstControls: first.getAttribute('aria-controls'),
         secondControls: second.getAttribute('aria-controls'),
-        firstLabel: document.getElementById('tab1').getAttribute('aria-labelledby'),
-        secondLabel: document.getElementById('tab2').getAttribute('aria-labelledby'),
+        firstLabel: document.getElementById('tab1-content').getAttribute('aria-labelledby'),
+        secondLabel: document.getElementById('tab2-content').getAttribute('aria-labelledby'),
         firstId: first.id,
         secondId: second.id,
-        firstHidden: document.getElementById('tab1').hidden,
-        secondHidden: document.getElementById('tab2').hidden
+        firstHidden: document.getElementById('tab1-content').hidden,
+        secondHidden: document.getElementById('tab2-content').hidden
       };
     });
     assert.deepEqual(tabAssociations, {
       zeroTabStops: 1,
-      firstControls: 'tab1',
-      secondControls: 'tab2',
+      firstControls: 'tab1-content',
+      secondControls: 'tab2-content',
       firstLabel: tabAssociations.firstId,
       secondLabel: tabAssociations.secondId,
       firstId: tabAssociations.firstId,
@@ -136,8 +136,8 @@ test('tabs use roving focus and activate Enter and Space exactly once each', asy
     assert.deepEqual(await page.evaluate(() => window.activations), ['tab2']);
     assert.equal(await tabs.nth(0).getAttribute('aria-selected'), 'false');
     assert.equal(await tabs.nth(1).getAttribute('aria-selected'), 'true');
-    assert.equal(await page.locator('#tab1').evaluate((element) => element.hidden), true);
-    assert.equal(await page.locator('#tab2').evaluate((element) => element.hidden), false);
+    assert.equal(await page.locator('#tab1-content').evaluate((element) => element.hidden), true);
+    assert.equal(await page.locator('#tab2-content').evaluate((element) => element.hidden), false);
 
     await page.keyboard.press('Home');
     assert.equal(await page.evaluate(() => document.activeElement.dataset.tab), 'tab1');
@@ -148,15 +148,15 @@ test('tabs use roving focus and activate Enter and Space exactly once each', asy
     await page.keyboard.press('Space');
     assert.deepEqual(await page.evaluate(() => window.activations), ['tab2', 'tab1']);
     assert.equal(await tabs.nth(0).getAttribute('aria-selected'), 'true');
-    assert.equal(await page.locator('#tab1').evaluate((element) => element.hidden), false);
-    assert.equal(await page.locator('#tab2').evaluate((element) => element.hidden), true);
+    assert.equal(await page.locator('#tab1-content').evaluate((element) => element.hidden), false);
+    assert.equal(await page.locator('#tab2-content').evaluate((element) => element.hidden), true);
   });
 });
 
 test('upload surface activates its native file input exactly once per keyboard command', async () => {
   await withModulePage({
     modulePath: accessibilityPath,
-    html: '<label for="uploadInput">Choose influencer file</label><div class="file-upload" id="uploadSurface"><input id="uploadInput" type="file"></div>'
+    html: '<label for="uploadInput">Choose influencer file</label><div class="file-upload" id="uploadSurface" data-file-input="uploadInput"></div><input id="uploadInput" type="file">'
   }, async (page) => {
     await page.evaluate(() => {
       window.nativeFileClicks = 0;
@@ -185,13 +185,18 @@ test('dialogs trap focus, inert the background, close on Escape, and restore the
   await withModulePage({
     modulePath: accessibilityPath,
     html: `
-      <button id="opener">Open</button>
-      <main id="background"><button>Background action</button></main>
-      <div id="dialog" role="dialog" aria-modal="true" aria-labelledby="dialogTitle" hidden>
-        <h2 id="dialogTitle">Dialog title</h2>
-        <button id="firstAction">First</button>
-        <button id="lastAction">Last</button>
+      <div id="app">
+        <button id="opener">Open</button>
+        <main id="background"><button>Background action</button></main>
+        <div class="modal-overlay">
+          <div id="dialog" role="dialog" aria-modal="true" aria-labelledby="dialogTitle" hidden>
+            <h2 id="dialogTitle">Dialog title</h2>
+            <button id="firstAction">First</button>
+            <button id="lastAction">Last</button>
+          </div>
+        </div>
       </div>
+      <aside id="outsideApp">Outside application</aside>
     `
   }, async (page) => {
     await page.evaluate(() => {
@@ -204,6 +209,8 @@ test('dialogs trap focus, inert the background, close on Escape, and restore the
 
     assert.equal(await page.locator('#dialog').getAttribute('aria-modal'), 'true');
     assert.equal(await page.locator('#background').evaluate((element) => element.inert), true);
+    assert.equal(await page.locator('#outsideApp').evaluate((element) => element.inert), true);
+    assert.equal(await page.locator('#app').evaluate((element) => element.inert), false);
     assert.equal(await page.evaluate(() => document.activeElement.id), 'firstAction');
 
     await page.locator('#lastAction').focus();
@@ -214,8 +221,84 @@ test('dialogs trap focus, inert the background, close on Escape, and restore the
 
     await page.keyboard.press('Escape');
     assert.equal(await page.locator('#background').evaluate((element) => element.inert), false);
+    assert.equal(await page.locator('#outsideApp').evaluate((element) => element.inert), false);
     assert.equal(await page.evaluate(() => document.activeElement.id), 'opener');
     assert.equal(await page.locator('#dialog').evaluate((element) => element.hidden || getComputedStyle(element).display === 'none'), true);
+  });
+});
+
+test('stacked dialogs transfer focus and restore the underlying dialog before the page', async () => {
+  await withModulePage({
+    modulePath: accessibilityPath,
+    html: `
+      <div id="app">
+        <button id="pageOpener">Open detail</button>
+        <main id="pageBackground"><button>Page action</button></main>
+        <aside id="detailHost" class="detail-sidebar">
+          <div id="detailDialog" role="dialog" aria-modal="true" aria-labelledby="detailTitle">
+            <h2 id="detailTitle">Customer detail</h2>
+            <button id="detailAction">Delete customer</button>
+          </div>
+        </aside>
+        <div id="confirmHost" class="modal-overlay" style="display:none">
+          <div id="confirmDialog" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
+            <h2 id="confirmTitle">Confirm deletion</h2>
+            <button id="confirmCancel">Cancel</button>
+          </div>
+        </div>
+      </div>
+    `
+  }, async (page) => {
+    await page.evaluate(() => {
+      document.getElementById('detailHost').classList.add('open');
+      window.TMAccessibility.openDialog(
+        document.getElementById('detailDialog'),
+        document.getElementById('pageOpener')
+      );
+      document.getElementById('detailAction').focus();
+      document.getElementById('confirmHost').style.display = 'block';
+      window.TMAccessibility.openDialog(
+        document.getElementById('confirmDialog'),
+        document.getElementById('detailAction')
+      );
+    });
+
+    assert.equal(await page.evaluate(() => document.activeElement.id), 'confirmCancel');
+    assert.equal(await page.locator('#detailHost').evaluate((element) => element.inert), true);
+    await page.evaluate(() => {
+      document.getElementById('confirmHost').style.display = 'none';
+      window.TMAccessibility.closeDialog(document.getElementById('confirmDialog'));
+    });
+    assert.equal(await page.locator('#detailHost').evaluate((element) => element.inert), false);
+    assert.equal(await page.evaluate(() => document.activeElement.id), 'detailAction');
+    await page.evaluate(() => window.TMAccessibility.closeDialog(document.getElementById('detailDialog')));
+    assert.equal(await page.evaluate(() => document.activeElement.id), 'pageOpener');
+  });
+});
+
+test('opening a dynamically inserted dialog associates its form labels before focus moves', async () => {
+  await withModulePage({
+    modulePath: accessibilityPath,
+    html: '<button id="dynamicOpener">Open order</button>'
+  }, async (page) => {
+    const result = await page.evaluate(() => {
+      const dialog = document.createElement('div');
+      dialog.id = 'dynamicDialog';
+      dialog.innerHTML = '<div><label id="projectLabel">Project</label><input id="projectInput"></div>';
+      document.body.appendChild(dialog);
+      window.TMAccessibility.openDialog(dialog, document.getElementById('dynamicOpener'));
+      const input = document.getElementById('projectInput');
+      return {
+        labelFor: document.getElementById('projectLabel').htmlFor,
+        labelledText: input.labels && input.labels[0] ? input.labels[0].textContent : '',
+        focused: document.activeElement.id
+      };
+    });
+    assert.deepEqual(result, {
+      labelFor: 'projectInput',
+      labelledText: 'Project',
+      focused: 'projectInput'
+    });
   });
 });
 
@@ -258,14 +341,15 @@ test('mobile shell owns the complete idempotent drawer state machine without cha
     modulePath: shellPath,
     html: `
       <div id="app" style="display:flex">
-        <button id="tmNavOpen" aria-controls="tmSidebar" aria-expanded="false">Open</button>
+        <header id="shellHeader"><button id="tmNavOpen" aria-controls="tmSidebar" aria-expanded="false">Open</button></header>
         <span id="tmMobilePageTitle"></span>
         <nav id="tmSidebar" aria-hidden="true">
           <button id="tmNavClose">Close</button>
           <a id="activeNav" class="nav-item active" data-page="m0" href="/m0">Customers</a>
+          <a id="hiddenAdmin" class="nav-item admin-only" style="display:none" href="/admin">Admin</a>
         </nav>
         <button id="tmNavBackdrop" hidden>Dismiss</button>
-        <main>Content</main>
+        <main id="shellMain">Content</main>
       </div>
     `
   }, async (page) => {
@@ -281,10 +365,14 @@ test('mobile shell owns the complete idempotent drawer state machine without cha
     assert.equal(contract.frozen, true);
     assert.deepEqual(contract.keys, ['init', 'isNavigationOpen', 'setNavigationOpen']);
     assert.equal(contract.appDisplay, 'flex');
+    assert.equal(await page.locator('#tmSidebar').evaluate((element) => element.inert), true);
 
     await page.locator('#tmNavOpen').click();
     assert.equal(await page.locator('#tmNavOpen').getAttribute('aria-expanded'), 'true');
     assert.equal(await page.locator('#tmSidebar').getAttribute('aria-hidden'), 'false');
+    assert.equal(await page.locator('#tmSidebar').evaluate((element) => element.inert), false);
+    assert.equal(await page.locator('#shellHeader').evaluate((element) => element.inert), true);
+    assert.equal(await page.locator('#shellMain').evaluate((element) => element.inert), true);
     assert.equal(await page.evaluate(() => document.activeElement.id), 'tmNavClose');
 
     await page.locator('#activeNav').focus();
@@ -295,6 +383,9 @@ test('mobile shell owns the complete idempotent drawer state machine without cha
 
     await page.locator('#tmNavClose').click();
     assert.equal(await page.locator('#tmNavOpen').getAttribute('aria-expanded'), 'false');
+    assert.equal(await page.locator('#tmSidebar').evaluate((element) => element.inert), true);
+    assert.equal(await page.locator('#shellHeader').evaluate((element) => element.inert), false);
+    assert.equal(await page.locator('#shellMain').evaluate((element) => element.inert), false);
     assert.equal(await page.evaluate(() => document.activeElement.id), 'tmNavOpen');
 
     await page.locator('#tmNavOpen').click();
@@ -318,6 +409,9 @@ test('mobile shell owns the complete idempotent drawer state machine without cha
     await page.waitForTimeout(50);
     assert.equal(await page.locator('#tmNavOpen').getAttribute('aria-expanded'), 'false');
     assert.equal(await page.locator('#tmSidebar').getAttribute('aria-hidden'), 'false');
+    assert.equal(await page.locator('#tmSidebar').evaluate((element) => element.inert), false);
+    assert.equal(await page.locator('#shellHeader').evaluate((element) => element.inert), false);
+    assert.equal(await page.locator('#shellMain').evaluate((element) => element.inert), false);
     assert.equal(await page.locator('#app').evaluate((element) => getComputedStyle(element).display), 'flex');
   });
 });

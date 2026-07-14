@@ -28,7 +28,7 @@
   --transition: 200ms ease;
 }
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-body{font-family:var(--font);background:var(--bg);color:var(--text);letter-spacing:-0.01em;line-height:1.6}
+body{font-family:var(--font);background:var(--bg);color:var(--text);letter-spacing:0;line-height:1.6}
 #app{display:flex;height:100vh;overflow:hidden}
 .sidebar{width:220px;min-width:220px;border-right:1px solid var(--border);background:#fafaf9;display:flex;flex-direction:column;padding:20px 0;gap:4px}
 .sidebar-logo{padding:0 20px 16px;border-bottom:1px solid var(--border);margin-bottom:8px}
@@ -381,15 +381,15 @@ body{
 .sidebar{
   width:268px;min-width:268px;border:1px solid rgba(255,255,255,.74);
   border-right:1px solid rgba(255,255,255,.74);
-  background:rgba(255,255,255,.68);backdrop-filter:blur(28px);
+  background:rgba(255,255,255,.68);
   border-radius:34px;padding:24px 12px;box-shadow:var(--shadow);gap:8px;
 }
 .sidebar-logo{padding:8px 18px 22px;border-bottom:0;margin-bottom:6px}
-.sidebar-logo h1{font-size:24px;font-weight:800;letter-spacing:-.04em}
+.sidebar-logo h1{font-size:24px;font-weight:800;letter-spacing:0}
 .sidebar-logo::after{content:"图灵商务在线工作平台";display:block;margin-top:4px;font-size:12px;color:var(--text2)}
 .nav-item{
   margin:0;padding:13px 14px;border-radius:18px;font-size:14px;color:#334155;
-  opacity:1;gap:12px;letter-spacing:-.02em;
+  opacity:1;gap:12px;letter-spacing:0;
 }
 .nav-item:hover{background:rgba(255,255,255,.72);transform:translateX(2px)}
 .nav-item.active{background:#0b1220;color:#fff;box-shadow:0 16px 34px rgba(15,23,42,.18)}
@@ -409,14 +409,14 @@ main{padding:26px 26px 48px;scroll-behavior:smooth}
 @keyframes tmFadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
 .card{
   background:var(--surface);border:1px solid rgba(255,255,255,.78);
-  border-radius:28px;box-shadow:var(--shadow-soft);backdrop-filter:blur(22px);
+  border-radius:28px;box-shadow:var(--shadow-soft);
 }
 input,select,textarea{
   min-height:42px;border:1px solid rgba(148,163,184,.24);border-radius:16px;
   background:rgba(255,255,255,.82);box-shadow:inset 0 1px 0 rgba(255,255,255,.68);
 }
 input:focus,select:focus,textarea:focus{border-color:rgba(0,122,255,.56);box-shadow:0 0 0 4px rgba(0,122,255,.12)}
-.btn{border-radius:16px;min-height:40px;font-weight:700;letter-spacing:-.02em}
+.btn{border-radius:16px;min-height:40px;font-weight:700;letter-spacing:0}
 .btn-primary{background:#007aff;color:#fff;box-shadow:0 12px 26px rgba(0,122,255,.24)}
 .btn-primary:hover{background:#006ee6;box-shadow:0 16px 32px rgba(0,122,255,.30);transform:translateY(-1px)}
 .btn-outline,.btn:not(.btn-primary):not(.btn-danger){background:rgba(255,255,255,.72);border:1px solid rgba(148,163,184,.22)}
@@ -438,20 +438,20 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
 .tm-page-shell{max-width:1280px;margin:0 auto}
 .tm-page-hero{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;margin-bottom:24px}
 .tm-eyebrow{font-size:13px;color:var(--text2);font-weight:700;margin-bottom:8px}
-.tm-page-title{font-size:42px;line-height:1.08;font-weight:850;letter-spacing:-.055em;margin:0;color:var(--text)}
+.tm-page-title{font-size:42px;line-height:1.08;font-weight:850;letter-spacing:0;margin:0;color:var(--text)}
 .tm-page-subtitle{font-size:15px;color:var(--text2);margin-top:12px;max-width:620px}
 .tm-command-search{width:286px;padding:13px 18px;border-radius:999px;background:rgba(255,255,255,.78);box-shadow:var(--shadow-soft);color:#94a3b8;font-size:14px}
 .tm-metric-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin-bottom:22px}
 .tm-metric-card{background:rgba(255,255,255,.78);border:1px solid rgba(255,255,255,.82);border-radius:28px;padding:22px 24px;box-shadow:var(--shadow-soft)}
 .tm-metric-label{font-size:13px;color:#64748b;font-weight:700}
-.tm-metric-value{font-size:34px;line-height:1.1;font-weight:850;letter-spacing:-.05em;margin-top:7px}
+.tm-metric-value{font-size:34px;line-height:1.1;font-weight:850;letter-spacing:0;margin-top:7px}
 .tm-metric-note{display:inline-flex;margin-top:13px;padding:6px 11px;border-radius:999px;background:rgba(0,122,255,.10);color:#007aff;font-size:12px;font-weight:800}
 .tm-metric-note.green{background:rgba(52,199,89,.12);color:#199a42}
 .tm-metric-note.orange{background:rgba(255,149,0,.14);color:#b86b00}
 .tm-metric-note.red{background:rgba(255,59,48,.12);color:#d92d24}
 .tm-crm-grid{display:grid;grid-template-columns:minmax(0,1fr) 326px;gap:20px;align-items:start}
-.tm-glass-panel{background:rgba(255,255,255,.78);border:1px solid rgba(255,255,255,.82);border-radius:34px;padding:26px;box-shadow:var(--shadow);backdrop-filter:blur(24px)}
-.tm-panel-title{font-size:23px;font-weight:850;letter-spacing:-.04em;margin-bottom:18px}
+.tm-glass-panel{background:rgba(255,255,255,.78);border:1px solid rgba(255,255,255,.82);border-radius:34px;padding:26px;box-shadow:var(--shadow)}
+.tm-panel-title{font-size:23px;font-weight:850;letter-spacing:0;margin-bottom:18px}
 .tm-stage-bars{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:14px;align-items:end;min-height:270px}
 .tm-stage-bar{display:flex;flex-direction:column;justify-content:flex-end;gap:10px;min-height:250px}
 .tm-stage-track{height:190px;border-radius:999px;background:rgba(226,232,240,.72);position:relative;overflow:hidden}
@@ -460,7 +460,7 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
 .tm-stage-count{font-size:20px;font-weight:850;text-align:center;color:#0b1220}
 .tm-focus-card{background:#0b1220;color:#fff;border-radius:34px;padding:26px;box-shadow:0 26px 56px rgba(15,23,42,.22);margin-bottom:18px}
 .tm-focus-card .tm-kicker{font-size:13px;color:#cbd5e1;font-weight:800;margin-bottom:14px}
-.tm-focus-brand{font-size:29px;line-height:1.05;font-weight:850;letter-spacing:-.05em;margin-bottom:12px}
+.tm-focus-brand{font-size:29px;line-height:1.05;font-weight:850;letter-spacing:0;margin-bottom:12px}
 .tm-focus-body{font-size:14px;line-height:1.65;color:#cbd5e1}
 .tm-ai-panel{background:linear-gradient(145deg,rgba(255,255,255,.94),rgba(232,244,255,.88));border-radius:34px;padding:24px;box-shadow:var(--shadow-soft)}
 .tm-ai-chip{display:inline-flex;margin-top:18px;padding:8px 12px;border-radius:999px;background:rgba(0,122,255,.10);color:#007aff;font-size:12px;font-weight:800}
@@ -494,9 +494,9 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
 .auth-card{
   position:relative;z-index:1;width:464px;border-radius:38px;padding:56px 60px;
   background:rgba(255,255,255,.74);border:1px solid rgba(255,255,255,.82);
-  box-shadow:0 34px 90px rgba(15,23,42,.16);backdrop-filter:blur(28px);
+  box-shadow:0 34px 90px rgba(15,23,42,.16);
 }
-.auth-card h1{text-align:left;font-size:38px;line-height:1.05;font-weight:850;letter-spacing:-.055em;margin-bottom:10px}
+.auth-card h1{text-align:left;font-size:38px;line-height:1.05;font-weight:850;letter-spacing:0;margin-bottom:10px}
 .auth-card .auth-subtitle{text-align:left;font-size:16px;color:#64748b;margin-bottom:28px}
 .auth-card .auth-intro{font-size:16px;color:#475569;line-height:1.65;margin-bottom:30px}
 .auth-card input{height:56px;margin-bottom:14px;padding:0 18px;border-radius:18px}
@@ -509,7 +509,7 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
   .tm-crm-grid{grid-template-columns:1fr}
 }
 @media (max-width: 760px){
-  #app{display:block!important;overflow:auto;height:auto}
+  #app{overflow:auto;height:auto}
   .sidebar{width:auto;min-width:0;margin-bottom:14px}
   main{padding:12px}
   .tm-page-hero{display:block}
@@ -521,24 +521,37 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
   .auth-card{width:calc(100vw - 32px);padding:38px 28px}
 }
 </style>
+<link rel="stylesheet" href="client/styles/tokens.css?v=20260714v040productshelldesignsystem">
+<link rel="stylesheet" href="client/styles/components.css?v=20260714v040productshelldesignsystem">
+<link rel="stylesheet" href="client/styles/layout.css?v=20260714v040productshelldesignsystem">
 </head>
 <body>
 <!-- AUTH OVERLAY -->
 <div id="authOverlay" class="auth-overlay">
-  <div class="auth-card">
+  <form id="loginForm" class="auth-card" onsubmit="event.preventDefault();doLogin()">
     <h1>TuringMarket</h1>
     <p class="auth-subtitle">图灵商务在线工作平台</p>
     <p class="auth-intro">让客户资产、AI 策略、网红执行和团队管理在一个清晰工作台中流动。</p>
-    <input type="text" id="loginUser" placeholder="用户名">
-    <input type="password" id="loginPass" placeholder="密码" onkeydown="if(event.key==='Enter')doLogin()">
-    <button class="btn btn-primary" onclick="doLogin()">进入工作台</button>
+    <label for="loginUser">用户名</label>
+    <input type="text" id="loginUser" name="username" autocomplete="username" aria-describedby="loginError" placeholder="输入用户名">
+    <label for="loginPass">密码</label>
+    <input type="password" id="loginPass" name="password" autocomplete="current-password" aria-describedby="loginError" placeholder="输入密码">
+    <div id="loginError" role="alert" aria-live="assertive"></div>
+    <button type="submit" class="btn btn-primary">进入工作台</button>
     <p class="auth-footnote">商务团队专用入口 · AI 辅助生成需人工确认</p>
-  </div>
+  </form>
 </div>
 
 <!-- MAIN APP -->
 <div id="app" style="display:none">
-  <nav class="sidebar">
+  <a class="tm-skip-link" href="#mainContent">跳到主要内容</a>
+  <header class="tm-mobile-bar">
+    <button type="button" id="tmNavOpen" aria-label="打开主导航" aria-controls="tmSidebar" aria-expanded="false" title="打开主导航">菜单</button>
+    <span id="tmMobilePageTitle">客户看板</span>
+  </header>
+  <button type="button" id="tmNavBackdrop" aria-label="关闭主导航" title="关闭主导航" hidden></button>
+  <nav class="sidebar" id="tmSidebar" aria-label="主导航" aria-hidden="false">
+    <button type="button" id="tmNavClose" aria-label="关闭主导航" title="关闭主导航">关闭</button>
     <div class="sidebar-logo"><h1>TuringMarket</h1></div>
     <div class="nav-item active" data-page="m0" onclick="switchPage('m0')"><span class="nav-icon">看</span> 客户看板</div>
     <div class="nav-item" data-page="m0-detail" onclick="switchPage('m0-detail')"><span class="nav-icon">客</span> 客户明细</div>
@@ -554,7 +567,7 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
 	    <div class="nav-item admin-only" data-page="admin" onclick="switchPage('admin')"><span class="nav-icon">🛡️</span> 管理控制室</div>
     <div class="sidebar-footer" id="sidebarFooter"></div>
   </nav>
-  <main>
+  <main id="mainContent" tabindex="-1">
 
 
 
@@ -641,9 +654,9 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
 
 <!-- View Tabs -->
 <div class="tm-crm-tabs">
-  <div class="crm-tab active" onclick="switchCrmView('pipeline')" style="padding:10px 16px;cursor:pointer;font-size:13px">客户列表</div>
-  <div class="crm-tab" onclick="switchCrmView('seapool')" style="padding:10px 16px;cursor:pointer;font-size:13px;color:var(--text2)">公海池（<span id="m0_seapoolTabCount">0</span>）</div>
-  <div class="crm-tab" onclick="switchCrmView('opportunities')" style="padding:10px 16px;cursor:pointer;font-size:13px;color:var(--text2)">商机看板</div>
+  <button type="button" class="crm-tab active" onclick="switchCrmView('pipeline')" style="padding:10px 16px;cursor:pointer;font-size:13px">客户列表</button>
+  <button type="button" class="crm-tab" onclick="switchCrmView('seapool')" style="padding:10px 16px;cursor:pointer;font-size:13px;color:var(--text2)">公海池（<span id="m0_seapoolTabCount">0</span>）</button>
+  <button type="button" class="crm-tab" onclick="switchCrmView('opportunities')" style="padding:10px 16px;cursor:pointer;font-size:13px;color:var(--text2)">商机看板</button>
 </div>
 
 <!-- Search + Actions -->
@@ -747,7 +760,7 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
 
 <!-- Add/Edit Modal -->
 <div class="modal-overlay" id="custModal" style="display:none" onclick="if(event.target===this)closeCustModal()">
-<div class="modal">
+<div class="modal" id="customerDialog" role="dialog" aria-modal="true" aria-labelledby="custModalTitle">
 <h3 id="custModalTitle">新增客户</h3>
 <div class="grid grid-2" style="gap:10px;margin-bottom:16px">
 <div><label>品牌名称 *</label><input id="custBrand"></div>
@@ -771,10 +784,10 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
 
 <!-- Customer 360 Slide-out Panel -->
 <div id="customerDetailOverlay" class="detail-overlay" onclick="closeCustomerDetail()"></div>
-<div id="customerDetailPanel" class="detail-panel">
+<div id="customerDetailPanel" class="detail-panel" role="dialog" aria-modal="true" aria-labelledby="cdp-title">
   <div class="detail-panel-header">
     <h3 id="cdp-title">客户详情</h3>
-    <button onclick="closeCustomerDetail()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button>
+    <button type="button" aria-label="关闭客户详情" title="关闭客户详情" onclick="closeCustomerDetail()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button>
   </div>
   <div class="detail-panel-body" id="cdp-body">
     <div style="text-align:center;padding:40px;color:#999">加载中...</div>
@@ -847,7 +860,7 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
 <p class="subtitle">根据客户阶段制定差异化红人营销策略</p>
 
 
-<div class="card" style="margin-bottom:16px;background:linear-gradient(135deg,#667eea10,#764ba210)">
+<div class="card" style="margin-bottom:16px">
 <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
   <span style="font-size:20px">🤖</span>
   <strong>AI 智能策略分析 (DeepSeek V4 Flash)</strong>
@@ -891,7 +904,7 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
   <div class="card">
     <h3>📤 上传客户需求文件</h3>
     <p style="font-size:12px;opacity:.6;margin-bottom:8px">支持 PDF / DOCX / XLSX / XLSM / 图片格式；旧版 XLS 可上传但建议另存为 XLSX 以读取正文。AI 将自动识别品牌、产品、预算、目标市场等关键信息。</p>
-    <div class="file-upload" id="demandDropZone" onclick="document.getElementById('demandFile').click()"
+    <div class="file-upload" id="demandDropZone" data-file-input="demandFile" aria-label="上传客户需求文件" onclick="document.getElementById('demandFile').click()"
          ondragover="event.preventDefault();this.style.borderColor='#1a1a1a';this.style.background='#f5f5f4'"
          ondragleave="event.preventDefault();this.style.borderColor='';this.style.background=''"
          ondrop="event.preventDefault();this.style.borderColor='';this.style.background='';handleDemandDrop(event)">
@@ -899,7 +912,7 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
       <div class="upload-text">拖拽需求文件到此处，或点击上传</div>
       <div style="font-size:11px;opacity:.4;margin-top:4px">PDF · DOCX · PPTX · XLSX/XLSM · XLS(元数据兜底) · JPG · PNG</div>
     </div>
-    <input type="file" id="demandFile" accept=".pdf,.docx,.pptx,.xlsx,.xls,.xlsm,.txt,.csv,.md,.json,.jpg,.jpeg,.png,.webp,.bmp,.tif,.tiff" style="display:none" onchange="handleDemandFile(event)">
+    <input type="file" id="demandFile" aria-label="选择客户需求文件" accept=".pdf,.docx,.pptx,.xlsx,.xls,.xlsm,.txt,.csv,.md,.json,.jpg,.jpeg,.png,.webp,.bmp,.tif,.tiff" style="display:none" onchange="handleDemandFile(event)">
     <div id="demandFileStatus" style="font-size:11px;opacity:.5;margin-top:8px"></div>
     <div style="margin-top:16px;text-align:center">
       <button class="btn btn-primary" id="btnAnalyzeAI" onclick="analyzeDemandAI()" disabled>🤖 AI 分析需求</button>
@@ -956,7 +969,7 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         <button class="btn btn-primary btn-sm" onclick="addPPTInstruction()">提交要求</button>
         <button type="button" class="btn btn-outline btn-sm" id="btnUploadPPTContextFile" onclick="document.getElementById('pptContextFile').click()">上传补充文件</button>
-        <input type="file" id="pptContextFile" accept=".pdf,.docx,.pptx,.xlsx,.xlsm,.txt,.csv,.md,.json,.jpg,.jpeg,.png,.webp,.bmp,.tif,.tiff" onchange="handlePPTContextFile(event)" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0">
+        <input type="file" id="pptContextFile" accept=".pdf,.docx,.pptx,.xlsx,.xlsm,.txt,.csv,.md,.json,.jpg,.jpeg,.png,.webp,.bmp,.tif,.tiff" aria-label="选择 PPT 补充材料" tabindex="-1" onchange="handlePPTContextFile(event)" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0">
         <span id="pptContextStatus" style="font-size:12px;color:var(--text2)">生成 PPT 时会自动带入这些上下文。</span>
       </div>
     </div>
@@ -981,12 +994,12 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
 <div id="tab1-content">
   <div class="card">
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;align-items:center">
-      <input id="filt_search" placeholder="搜索ID / 网红 / 标签 / 链接 / 表头字段" oninput="matchInfluencers()" style="width:260px;font-size:12px">
-      <input id="filt_project" placeholder="项目" onchange="matchInfluencers()" style="width:80px;font-size:12px">
-      <input id="filt_product" placeholder="推广产品" onchange="matchInfluencers()" style="width:90px;font-size:12px">
-      <select id="filt_platform" style="width:auto;font-size:12px" onchange="matchInfluencers()"><option value="">全部平台</option><option>YouTube</option><option>TikTok</option><option>Instagram</option></select>
-      <select id="filt_region" style="width:auto;font-size:12px" onchange="matchInfluencers()"><option value="">全部国家</option><option>US</option><option>DE</option><option>JP</option><option>KR</option><option>UK</option><option>FR</option></select>
-      <input id="filt_tags" placeholder="标签" onchange="matchInfluencers()" style="width:80px;font-size:12px">
+      <input id="filt_search" aria-label="搜索网红 ID、名称、标签、链接或字段" placeholder="搜索ID / 网红 / 标签 / 链接 / 表头字段" oninput="matchInfluencers()" style="width:260px;font-size:12px">
+      <input id="filt_project" aria-label="按项目筛选网红" placeholder="项目" onchange="matchInfluencers()" style="width:80px;font-size:12px">
+      <input id="filt_product" aria-label="按推广产品筛选网红" placeholder="推广产品" onchange="matchInfluencers()" style="width:90px;font-size:12px">
+      <select id="filt_platform" aria-label="按平台筛选网红" style="width:auto;font-size:12px" onchange="matchInfluencers()"><option value="">全部平台</option><option>YouTube</option><option>TikTok</option><option>Instagram</option></select>
+      <select id="filt_region" aria-label="按国家或地区筛选网红" style="width:auto;font-size:12px" onchange="matchInfluencers()"><option value="">全部国家</option><option>US</option><option>DE</option><option>JP</option><option>KR</option><option>UK</option><option>FR</option></select>
+      <input id="filt_tags" aria-label="按标签筛选网红" placeholder="标签" onchange="matchInfluencers()" style="width:80px;font-size:12px">
       <button class="btn btn-sm" onclick="matchInfluencers()">🔍 筛选</button>
       <span style="flex:1"></span>
       <button class="btn btn-sm" onclick="exportAll()">📥 导出全部</button>
@@ -1004,7 +1017,7 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
         <div id="collabStatsBar" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px"></div>
       </div>
       <div style="display:flex;gap:8px;align-items:center">
-        <select id="collabFilter" onchange="loadCollaborations()" style="width:auto;font-size:12px">
+        <select id="collabFilter" aria-label="按合作状态筛选" onchange="loadCollaborations()" style="width:auto;font-size:12px">
           <option value="">全部状态</option>
           <option value="proposed">待提案</option>
           <option value="contacted">已建联</option>
@@ -1025,7 +1038,7 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
     <div class="card">
       <h3>📤 网红数据导入</h3>
       <p style="font-size:12px;opacity:.6;margin-bottom:16px">支持 CSV / JSON / XLSX（旧 XLS 请另存为 XLSX）格式，拖拽或点击上传</p>
-      <div class="file-upload" id="infDropZone" onclick="document.getElementById('infFile').click()"
+      <div class="file-upload" id="infDropZone" data-file-input="infFile" aria-label="上传网红数据文件" onclick="document.getElementById('infFile').click()"
            ondragover="event.preventDefault();this.style.borderColor='#1a1a1a';this.style.background='#f5f5f4'"
            ondragleave="event.preventDefault();this.style.borderColor='';this.style.background=''"
            ondrop="event.preventDefault();this.style.borderColor='';this.style.background='';handleDrop(event)">
@@ -1033,7 +1046,7 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
         <div class="upload-text">拖拽文件到此处或点击上传</div>
         <div style="font-size:11px;opacity:.4;margin-top:4px">CSV / JSON / XLSX</div>
       </div>
-      <input type="file" id="infFile" accept=".csv,.json,.xlsx,.xls" style="display:none" onchange="handleUpload(event)">
+      <input type="file" id="infFile" aria-label="选择网红数据文件" accept=".csv,.json,.xlsx,.xls" style="display:none" onchange="handleUpload(event)">
       <div style="display:flex;gap:6px;margin-top:8px">
         <button class="btn btn-outline btn-sm" onclick="downloadInfTemplate()">📋 下载模板</button>
         <button class="btn btn-outline btn-sm" onclick="openInfUploadModal()">📂 浏览文件上传</button>
@@ -1314,13 +1327,13 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
 
 <!-- Influencer Upload Modal -->
 <div class="modal-overlay" id="infUploadModal" style="display:none" onclick="if(event.target===this)this.style.display='none'">
-  <div class="modal" onclick="event.stopPropagation()">
-    <button class="modal-close" onclick="document.getElementById('infUploadModal').style.display='none'">&times;</button>
-    <h3>📤 网红数据上传</h3>
+  <div class="modal" id="influencerUploadDialog" role="dialog" aria-modal="true" aria-labelledby="influencerUploadDialogTitle" onclick="event.stopPropagation()">
+    <button type="button" class="modal-close" aria-label="关闭网红数据上传" title="关闭网红数据上传" onclick="document.getElementById('infUploadModal').style.display='none'">&times;</button>
+    <h3 id="influencerUploadDialogTitle">📤 网红数据上传</h3>
     <p style="font-size:12px;opacity:.6;margin-bottom:16px">选择文件上传，支持 CSV、JSON 格式。文件需包含网红基本信息。</p>
     <div style="border:2px dashed #e0e0dd;border-radius:8px;padding:40px;text-align:center;margin-bottom:16px;background:#fafaf9">
       <div style="font-size:40px;margin-bottom:12px">📂</div>
-      <input type="file" id="infFileModal" accept=".csv,.json,.xlsx" style="display:none" onchange="handleUploadModal(event)">
+      <input type="file" id="infFileModal" accept=".csv,.json,.xlsx" aria-label="选择网红数据文件" style="display:none" onchange="handleUploadModal(event)">
       <button class="btn btn-primary" onclick="document.getElementById('infFileModal').click()">📁 选择文件</button>
       <p style="font-size:11px;opacity:.4;margin-top:8px">或拖拽文件到此区域</p>
     </div>
@@ -1334,17 +1347,19 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
 <!-- Customer Detail Sidebar -->
 <div class="sidebar-overlay" id="custDetailOverlay" style="display:none" onclick="closeCustomerDetail()"></div>
 <div class="detail-sidebar" id="custDetailSidebar">
-  <div class="sidebar-header">
-    <h3 id="custDetailTitle">客户详情</h3>
-    <button class="modal-close" onclick="closeCustomerDetail()">&times;</button>
+  <div id="customerDetailDialog" role="dialog" aria-modal="true" aria-labelledby="custDetailTitle">
+    <div class="sidebar-header">
+      <h3 id="custDetailTitle">客户详情</h3>
+      <button type="button" class="modal-close" aria-label="关闭客户详情" title="关闭客户详情" onclick="closeCustomerDetail()">&times;</button>
+    </div>
+    <div class="sidebar-body" id="custDetailBody"></div>
   </div>
-  <div class="sidebar-body" id="custDetailBody"></div>
 </div>
 
 <!-- Workflow Detail Modal -->
 <div class="wf-modal" id="wf-instance-modal" style="display:none" onclick="if(event.target===this)this.style.display='none'">
-  <div class="wf-modal-content" style="width:760px;max-width:92vw">
-    <button class="wf-modal-close" onclick="document.getElementById('wf-instance-modal').style.display='none'">&times;</button>
+  <div class="wf-modal-content" id="workflowInstanceDialog" role="dialog" aria-modal="true" aria-labelledby="wf-instance-modal-title" style="width:760px;max-width:92vw">
+    <button type="button" class="wf-modal-close" aria-label="关闭流程详情" title="关闭流程详情" onclick="document.getElementById('wf-instance-modal').style.display='none'">&times;</button>
     <h3 id="wf-instance-modal-title">流程详情</h3>
     <div id="wf-instance-modal-body"></div>
   </div>
@@ -1352,8 +1367,8 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
 
 <!-- Opportunity Modal -->
 <div class="modal-overlay" id="oppModalOverlay" style="display:none" onclick="if(event.target===this)closeOppModal()">
-  <div class="modal">
-    <button class="modal-close" onclick="closeOppModal()">&times;</button>
+  <div class="modal" id="opportunityDialog" role="dialog" aria-modal="true" aria-labelledby="oppModalTitle">
+    <button type="button" class="modal-close" aria-label="关闭商机编辑" title="关闭商机编辑" onclick="closeOppModal()">&times;</button>
     <h3 id="oppModalTitle">新增商机</h3>
     <input type="hidden" id="oppEditId">
     <input type="hidden" id="oppCustomerId">
@@ -1380,19 +1395,21 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
 </div>
   <!-- Confirm Dialog (center of page) -->
   <div class="modal-overlay" id="confirmDialogOverlay" style="display:none">
-    <div class="modal" style="width:400px;text-align:center">
+    <div class="modal" id="confirmDialog" role="dialog" aria-modal="true" aria-labelledby="confirmDialogTitle" style="width:400px;text-align:center">
       <h3 id="confirmDialogTitle">确认</h3>
       <p id="confirmDialogMessage" style="margin:16px 0;font-size:14px;color:#555"></p>
       <div style="display:flex;gap:12px;justify-content:center">
         <button class="btn btn-primary" id="confirmDialogOk">确定</button>
-        <button class="btn btn-outline" id="confirmDialogCancel">取消</button>
+        <button class="btn btn-outline" id="confirmDialogCancel" data-dialog-close>取消</button>
       </div>
     </div>
   </div>
 
 <script src="client/shared/build_info.js"></script>
 <script src="client/core/navigation.js"></script>
-<script src="app.js?v=20260713v030baselineconsolidation"></script>
+<script src="client/core/accessibility.js"></script>
+<script src="client/core/shell.js"></script>
+<script src="app.js?v=20260714v040productshelldesignsystem"></script>
 <script src="ppt.js?v=20260702v916kbbridge"></script>
 </body>
 </html>

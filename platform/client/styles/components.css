@@ -1,0 +1,316 @@
+*,
+*::before,
+*::after {
+  letter-spacing: 0;
+}
+
+body {
+  font-family: var(--tm-font-ui);
+  color: var(--tm-color-text);
+  background: var(--tm-color-canvas);
+  line-height: 1.55;
+}
+
+:focus-visible {
+  outline: 2px solid var(--tm-color-focus);
+  outline-offset: 2px;
+}
+
+h1,
+h2,
+h3,
+h4,
+p {
+  color: inherit;
+}
+
+h2,
+.tm-page-title,
+.brand-workspace-header h2 {
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.subtitle,
+.tm-page-subtitle,
+.tm-metric-note {
+  color: var(--tm-color-text-muted);
+  opacity: 1;
+}
+
+.card,
+.toolbar-area,
+.tm-filter-card,
+.tm-metric-card,
+.tm-funnel-panel,
+.tm-side-card,
+.brand-rail,
+.brand-results-shell,
+.brand-detail-panel,
+.brand-stat-tile,
+.tm-glass-panel,
+.tm-ai-panel {
+  border: 1px solid var(--tm-color-border);
+  border-radius: var(--tm-radius-panel);
+  background: var(--tm-color-surface);
+  box-shadow: var(--tm-shadow-panel);
+}
+
+.card {
+  padding: var(--tm-space-5);
+}
+
+button,
+.btn {
+  min-height: 36px;
+  border-radius: var(--tm-radius-control);
+  font-family: var(--tm-font-ui);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0;
+  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease, box-shadow 120ms ease;
+}
+
+.btn-sm {
+  min-height: 32px;
+}
+
+.btn-primary {
+  border: 1px solid var(--tm-color-accent);
+  background: var(--tm-color-accent);
+  color: #ffffff;
+  box-shadow: none;
+}
+
+.btn-primary:hover {
+  border-color: var(--tm-color-accent-hover);
+  background: var(--tm-color-accent-hover);
+  box-shadow: none;
+  transform: none;
+}
+
+.btn-outline,
+.btn:not(.btn-primary):not(.btn-danger) {
+  border: 1px solid var(--tm-color-control-border);
+  background: var(--tm-color-surface);
+  color: var(--tm-color-text);
+}
+
+.btn-danger {
+  border: 1px solid var(--tm-color-danger);
+  background: var(--tm-color-danger);
+  color: #ffffff;
+}
+
+label {
+  margin-bottom: var(--tm-space-1);
+  color: var(--tm-color-text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0;
+  opacity: 1;
+  text-transform: none;
+}
+
+input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+select,
+textarea {
+  min-height: 38px;
+  border: 1px solid var(--tm-color-control-border);
+  border-radius: var(--tm-radius-control);
+  background: var(--tm-color-surface);
+  color: var(--tm-color-text);
+  box-shadow: none;
+  font-size: 13px;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):focus,
+select:focus,
+textarea:focus {
+  border-color: var(--tm-color-focus);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.18);
+}
+
+input[type="checkbox"],
+input[type="radio"] {
+  width: var(--tm-checkbox-size) !important;
+  min-width: var(--tm-checkbox-size) !important;
+  height: var(--tm-checkbox-size) !important;
+  min-height: var(--tm-checkbox-size) !important;
+  padding: 0;
+  border-radius: var(--tm-radius-compact);
+  accent-color: var(--tm-color-accent);
+}
+
+.tm-checkbox-target {
+  display: inline-flex;
+  width: var(--tm-checkbox-target);
+  min-width: var(--tm-checkbox-target);
+  height: var(--tm-checkbox-target);
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  cursor: pointer;
+}
+
+.tm-stage-fill,
+.tm-ai-panel,
+.tm-template-card.active {
+  background-image: none !important;
+}
+
+.tm-stage-fill {
+  background-color: var(--tm-color-accent);
+}
+
+th,
+td {
+  height: 40px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--tm-color-border);
+  font-variant-numeric: tabular-nums;
+}
+
+thead th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: var(--tm-color-surface);
+  color: var(--tm-color-text-muted);
+  font-size: 11px;
+  letter-spacing: 0;
+  opacity: 1;
+  text-transform: none;
+}
+
+.table-container {
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior: contain;
+}
+
+.tag,
+.brand-chip,
+.brand-tag,
+.crm-tab {
+  border-radius: 999px;
+}
+
+.tabs {
+  gap: 0;
+  border-bottom: 1px solid var(--tm-color-border);
+}
+
+.tab {
+  min-height: 40px;
+  padding: 9px 14px;
+  color: var(--tm-color-text-muted);
+  opacity: 1;
+  transition: color 120ms ease, border-color 120ms ease, background-color 120ms ease;
+}
+
+.tab.active {
+  border-bottom-color: var(--tm-color-accent);
+  color: var(--tm-color-text);
+}
+
+.file-upload {
+  border: 1px dashed var(--tm-color-control-border);
+  border-radius: var(--tm-radius-panel);
+  background: var(--tm-color-surface-subtle);
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+
+.file-upload:hover,
+.file-upload:focus-visible {
+  border-color: var(--tm-color-accent);
+  background: var(--tm-color-surface);
+}
+
+.modal-overlay,
+.wf-modal,
+.sidebar-overlay,
+.detail-overlay {
+  background: rgba(16, 24, 40, 0.48);
+}
+
+.modal,
+.wf-modal-content,
+.detail-sidebar,
+.detail-panel {
+  border: 1px solid var(--tm-color-border);
+  border-radius: var(--tm-radius-panel);
+  background: var(--tm-color-surface);
+  box-shadow: var(--tm-shadow-drawer);
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.modal-close,
+.wf-modal-close {
+  min-width: 36px;
+  min-height: 36px;
+  border-radius: var(--tm-radius-control);
+  color: var(--tm-color-text-muted);
+}
+
+.toast-container {
+  position: fixed;
+  right: var(--tm-space-5);
+  bottom: var(--tm-space-5);
+  z-index: 9999;
+  display: grid;
+  gap: var(--tm-space-2);
+}
+
+.toast {
+  position: static;
+  max-width: min(420px, calc(100vw - 32px));
+  border-radius: var(--tm-radius-control);
+  background: var(--tm-color-text);
+  box-shadow: var(--tm-shadow-drawer);
+  animation: tm-toast-in 160ms ease both;
+}
+
+.toast-error,
+.toast.error {
+  background: var(--tm-color-danger);
+}
+
+@keyframes tm-toast-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+.tm-state-loading,
+.tm-state-empty,
+.tm-state-error {
+  padding: var(--tm-space-4);
+  border: 1px solid var(--tm-color-border);
+  border-radius: var(--tm-radius-panel);
+  background: var(--tm-color-surface);
+}
+
+.tm-state-error {
+  border-color: var(--tm-color-danger);
+  color: var(--tm-color-danger);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  .page,
+  .toast {
+    transform: none !important;
+  }
+}

@@ -33,9 +33,13 @@ let chatHistory = [{role: "system", content: "You are the TuringMarket AI assist
 
 // ===== AUTH =====
 async function doLogin() {
-  const u = document.getElementById('loginUser').value.trim();
-  const p = document.getElementById('loginPass').value.trim();
-  if (!u || !p) return showLoginError('请输入用户名和密码');
+  const userInput = document.getElementById('loginUser');
+  const passwordInput = document.getElementById('loginPass');
+  const u = userInput.value.trim();
+  const p = passwordInput.value.trim();
+  clearLoginError();
+  if (!u) return showLoginError('请输入用户名', userInput);
+  if (!p) return showLoginError('请输入密码', passwordInput);
   try {
     const r = await fetch(API + '/auth/login', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -46,6 +50,7 @@ async function doLogin() {
     AUTH_TOKEN = d.token;
     CURRENT_USER = d.user;
     authExpiredNotified = false;
+    clearLoginError();
     localStorage.setItem('tm_token', AUTH_TOKEN);
     localStorage.setItem('tm_user', JSON.stringify(CURRENT_USER));
     document.getElementById('authOverlay').style.display = 'none';
@@ -59,7 +64,23 @@ async function doLogin() {
   } catch (e) { showLoginError('Network error: ' + e.message) }
 }
 
-function showLoginError(msg) { toast(msg, 'error'); }
+function clearLoginError() {
+  var error = document.getElementById('loginError');
+  if (error) error.textContent = '';
+  var inputs = [document.getElementById('loginUser'), document.getElementById('loginPass')];
+  inputs.forEach(function(input) { if (input) input.removeAttribute('aria-invalid'); });
+}
+
+function showLoginError(msg, focusTarget) {
+  var loginError = document.getElementById('loginError');
+  if (loginError) loginError.textContent = msg;
+  var target = focusTarget || document.getElementById('loginUser');
+  if (target) {
+    target.setAttribute('aria-invalid', 'true');
+    target.focus();
+  }
+  toast(msg, 'error');
+}
 
 async function doLogout() {
   try {
@@ -79,8 +100,10 @@ function handleAuthExpired(message) {
   localStorage.removeItem('tm_user');
   var app = document.getElementById('app');
   var auth = document.getElementById('authOverlay');
+  var loginUser = document.getElementById('loginUser');
   if (app) app.style.display = 'none';
   if (auth) auth.style.display = 'flex';
+  if (loginUser) loginUser.focus();
   if (!authExpiredNotified) {
     authExpiredNotified = true;
     toast(message || '登录已过期，请重新登录后再操作。', 'error');
@@ -419,10 +442,17 @@ function showConfirm(title, msg) {
   return new Promise(function(resolve) {
     var overlay = document.getElementById('confirmDialogOverlay');
     if (!overlay) { resolve(confirm(msg)); return; }
+    var dialog = document.getElementById('confirmDialog');
+    var opener = document.activeElement;
     document.getElementById('confirmDialogTitle').textContent = title;
     document.getElementById('confirmDialogMessage').textContent = msg;
     overlay.style.display = 'flex';
-    function cleanup(result) { overlay.style.display = 'none'; resolve(result); }
+    if (window.TMAccessibility) window.TMAccessibility.openDialog(dialog, opener);
+    function cleanup(result) {
+      overlay.style.display = 'none';
+      if (window.TMAccessibility) window.TMAccessibility.closeDialog(dialog);
+      resolve(result);
+    }
     document.getElementById('confirmDialogOk').onclick = function() { cleanup(true); };
     document.getElementById('confirmDialogCancel').onclick = function() { cleanup(false); };
     overlay.onclick = function(e) { if (e.target === overlay) cleanup(false); };
@@ -853,10 +883,13 @@ function toast(m, ty) {
     c = document.createElement('div');
     c.id = 'toastContainer';
     c.className = 'toast-container';
+    c.setAttribute('role', 'status');
+    c.setAttribute('aria-live', 'polite');
     document.body.appendChild(c);
   }
   var e = document.createElement('div');
   e.className = 'toast toast-' + ty + ' ' + ty;
+  e.setAttribute('role', ty === 'error' ? 'alert' : 'status');
   e.textContent = m;
   c.appendChild(e);
   setTimeout(function () { e.remove(); }, 3000);
@@ -1067,7 +1100,7 @@ function escapeHTML(s){return String(s||"").replace(/&/g,"&amp;").replace(/</g,"
 
 
 
-function switchTab(id, options) { options = options || {}; if (!options.skipHistory && window.TMNavigation) { window.TMNavigation.navigate('m4', { substate: { tab: id }, user: CURRENT_USER }); return; } document.querySelectorAll('#tabBar .tab').forEach(function (t) { t.classList.remove('active') }); var tabEl = document.querySelector('[data-tab="' + id + '"]'); if (tabEl) tabEl.classList.add('active'); var t1=document.getElementById('tab1-content');var t2=document.getElementById('tab2-content');var t3=document.getElementById('tab3-content');if(t1)t1.classList.toggle('hidden',id!=='tab1');if(t2)t2.classList.toggle('hidden',id!=='tab2');if(t3)t3.classList.toggle('hidden',id!=='tab3') }
+function switchTab(id, options) { options = options || {}; if (!options.skipHistory && window.TMNavigation) { window.TMNavigation.navigate('m4', { substate: { tab: id }, user: CURRENT_USER }); return; } document.querySelectorAll('#tabBar .tab').forEach(function (t) { t.classList.remove('active') }); var tabEl = document.querySelector('[data-tab="' + id + '"]'); if (tabEl) tabEl.classList.add('active'); var t1=document.getElementById('tab1-content');var t2=document.getElementById('tab2-content');var t3=document.getElementById('tab3-content');if(t1)t1.classList.toggle('hidden',id!=='tab1');if(t2)t2.classList.toggle('hidden',id!=='tab2');if(t3)t3.classList.toggle('hidden',id!=='tab3');if(window.TMAccessibility)window.TMAccessibility.refresh() }
 // ===== M4: INFLUENCER MATCHING (API-driven) =====
 lastMatch = []; var lastInfAPI = [];
 
@@ -1169,8 +1202,17 @@ function initWorkflowDesigner() {
   // Palette drag
   var palettes = document.querySelectorAll('.wf-node-palette');
   for (var p = 0; p < palettes.length; p++) {
+    palettes[p].setAttribute('tabindex', '0');
+    palettes[p].setAttribute('role', 'button');
+    palettes[p].setAttribute('aria-label', '添加流程节点：' + String(palettes[p].textContent || palettes[p].dataset.type || '').trim());
     palettes[p].addEventListener('dragstart', function(e) {
       e.dataTransfer.setData('text/plain', this.dataset.type);
+    });
+    palettes[p].addEventListener('keydown', function(e) {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      e.preventDefault();
+      var rect = canvas.getBoundingClientRect();
+      wfAddNode(this.dataset.type, rect.width / 2, rect.height / 2);
     });
   }
 
@@ -1248,6 +1290,9 @@ function wfRenderNode(node) {
   var g = document.createElementNS(ns, 'g');
   g.setAttribute('class', 'wf-node-svg' + (wfState.selectedNode === node.id ? ' wf-node-selected' : ''));
   g.dataset.nodeId = node.id;
+  g.setAttribute('tabindex', '0');
+  g.setAttribute('role', 'button');
+  g.setAttribute('aria-label', node.label + ' 流程节点');
 
   var isRounded = node.type === 'start' || node.type === 'end';
   var rx = isRounded ? 30 : 6;
@@ -1299,6 +1344,21 @@ function wfRenderNode(node) {
 
   // Click
   g.addEventListener('click', function(e) { e.stopPropagation(); wfSelectNode(this.dataset.nodeId); });
+  g.addEventListener('keydown', function(e) {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    e.preventDefault();
+    var selectedNodeId = this.dataset.nodeId;
+    wfSelectNode(selectedNodeId);
+    window.requestAnimationFrame(function() {
+      var nodes = document.querySelectorAll('.wf-node-svg[data-node-id]');
+      for (var nodeIndex = 0; nodeIndex < nodes.length; nodeIndex++) {
+        if (nodes[nodeIndex].dataset.nodeId === selectedNodeId) {
+          nodes[nodeIndex].focus();
+          break;
+        }
+      }
+    });
+  });
 
   // Drag handlers
   g.addEventListener('mousedown', function(e) {
@@ -2739,9 +2799,9 @@ function renderInfTable(data) {
   var c = document.getElementById('infTableContainer');
   if (!c) return;
   if (!data || !data.length) { c.innerHTML = '<p style="text-align:center;padding:30px;opacity:.5">No influencers</p>'; return; }
-  var h = '<table class="m4-table"><thead><tr><th><input type="checkbox" id="selectAllInf" onchange="toggleAll(this)"></th><th>ID</th><th>KOL</th><th>Platform</th><th>Followers</th><th>Project</th><th>Product</th><th>Region</th><th>Type</th><th>Parent</th><th>Link</th><th>Deliverable</th><th>Cost</th><th>Action</th></tr></thead><tbody>';
+  var h = '<table class="m4-table"><thead><tr><th><label class="tm-checkbox-target"><input type="checkbox" id="selectAllInf" aria-label="全选网红" onchange="toggleAll(this)"></label></th><th>ID</th><th>KOL</th><th>Platform</th><th>Followers</th><th>Project</th><th>Product</th><th>Region</th><th>Type</th><th>Parent</th><th>Link</th><th>Deliverable</th><th>Cost</th><th>Action</th></tr></thead><tbody>';
   data.forEach(function(inf) {
-    h += '<tr><td><input type="checkbox" class="infcb" value="' + esc(inf.id || '') + '"></td>';
+    h += '<tr><td><label class="tm-checkbox-target"><input type="checkbox" class="infcb" aria-label="选择网红 ' + esc(inf.kol_handle || inf.id || '') + '" value="' + esc(inf.id || '') + '" onchange="syncInfluencerSelectionState()"></label></td>';
     h += '<td>#' + esc(inf.id || '') + '</td>';
     h += '<td><strong>' + esc(inf.kol_handle || '') + '</strong></td>';
     h += '<td>' + esc(inf.platform || '-') + '</td>';
@@ -2758,9 +2818,20 @@ function renderInfTable(data) {
   });
   h += '</tbody></table>';
   c.innerHTML = h;
+  syncInfluencerSelectionState();
+  if (window.TMAccessibility) window.TMAccessibility.refresh();
 }
 function toggleAll(cb) {
   document.querySelectorAll('.infcb').forEach(function(item) { item.checked = cb.checked; });
+  syncInfluencerSelectionState();
+}
+function syncInfluencerSelectionState() {
+  var selectAll = document.getElementById('selectAllInf');
+  if (!selectAll) return;
+  var items = Array.prototype.slice.call(document.querySelectorAll('.infcb'));
+  var selected = items.filter(function(item) { return item.checked; }).length;
+  selectAll.checked = items.length > 0 && selected === items.length;
+  selectAll.indeterminate = selected > 0 && selected < items.length;
 }
 function getSelectedInfIds() {
   var ids = [];
@@ -2900,15 +2971,16 @@ function findInfluencerById(infId) {
 function startCollab(infId) {
   pendingCollabInfId = Number(infId);
   var inf = findInfluencerById(infId);
+  var opener = document.activeElement;
   var existing = document.getElementById('collabOrderModal');
   if (existing) existing.remove();
   var overlay = document.createElement('div');
   overlay.id = 'collabOrderModal';
   overlay.className = 'modal-overlay';
   overlay.onclick = function(e) { if (e.target === overlay) closeCollabOrderModal(); };
-  overlay.innerHTML = '<div class="modal" onclick="event.stopPropagation()">' +
-    '<button class="modal-close" onclick="closeCollabOrderModal()">&times;</button>' +
-    '<h3>下单合作资源</h3>' +
+  overlay.innerHTML = '<div class="modal" id="collabOrderDialog" role="dialog" aria-modal="true" aria-labelledby="collabOrderDialogTitle" onclick="event.stopPropagation()">' +
+    '<button type="button" class="modal-close" aria-label="关闭下单合作资源" title="关闭下单合作资源" onclick="closeCollabOrderModal()">&times;</button>' +
+    '<h3 id="collabOrderDialogTitle">下单合作资源</h3>' +
     '<p style="font-size:12px;opacity:.6;margin-bottom:12px">' + esc(inf.kol_handle || '') + ' / ' + esc(inf.platform || '') + '</p>' +
     '<div class="grid grid-2">' +
     '<div><label>项目</label><input id="orderProject" value="' + esc(inf.project_name || '') + '"></div>' +
@@ -2923,9 +2995,12 @@ function startCollab(infId) {
     '<div class="btn-group" style="justify-content:flex-end"><button class="btn btn-outline" onclick="closeCollabOrderModal()">取消</button><button class="btn btn-primary" onclick="submitCollabOrder()">确认下单</button></div>' +
     '</div>';
   document.body.appendChild(overlay);
+  if (window.TMAccessibility) window.TMAccessibility.openDialog(document.getElementById('collabOrderDialog'), opener);
 }
 function closeCollabOrderModal() {
   var overlay = document.getElementById('collabOrderModal');
+  var dialog = document.getElementById('collabOrderDialog');
+  if (dialog && window.TMAccessibility) window.TMAccessibility.closeDialog(dialog);
   if (overlay) overlay.remove();
 }
 async function submitCollabOrder() {
@@ -3323,9 +3398,10 @@ function findCompetitorBrands(brand) {
 function showRelatedBrands(brandName) {
   var brand = BRANDS.find(function(b) { return b.name === brandName; });
   if (!brand) { toast('品牌未找到', 'error'); return; }
+  var opener = document.activeElement;
   var related = findRelatedBrands(brand);
   var competitors = findCompetitorBrands(brand);
-  var html = '<div style="padding:4px"><h4 style="margin:0 0 12px 0">' + esc(brand.name) + ' - 品牌概览</h4>';
+  var html = '<div style="padding:4px"><h4 id="brandRelationTitle" style="margin:0 0 12px 0">' + esc(brand.name) + ' - 品牌概览</h4>';
   html += '<div style="font-size:12px;margin-bottom:12px;padding:10px;background:#f9f9f8;border-radius:8px">';
   if (brand.company) html += '<div><strong>公司:</strong> ' + esc(brand.company) + '</div>';
   if (brand.name_cn && brand.name_cn !== brand.name) html += '<div><strong>中文名:</strong> ' + esc(brand.name_cn) + '</div>';
@@ -3355,14 +3431,21 @@ function showRelatedBrands(brandName) {
   overlay.onclick = function(e) { if (e.target === overlay) closeBrandRelModal(); };
   var modal = document.createElement("div");
   modal.className = "modal";
+  modal.id = "brandRelationDialog";
+  modal.setAttribute("role", "dialog");
+  modal.setAttribute("aria-modal", "true");
+  modal.setAttribute("aria-labelledby", "brandRelationTitle");
   modal.style.cssText = "background:#fff;border-radius:12px;padding:24px;max-width:500px;width:90%;max-height:70vh;overflow-y:auto";
   modal.innerHTML = html;
-  modal.innerHTML += '<div style="margin-top:16px;text-align:center"><button class="btn btn-outline" onclick="closeBrandRelModal()">关闭</button></div>';
+  modal.innerHTML += '<div style="margin-top:16px;text-align:center"><button type="button" class="btn btn-outline" aria-label="关闭品牌关系" onclick="closeBrandRelModal()">关闭</button></div>';
   overlay.appendChild(modal);
   document.body.appendChild(overlay);
+  if (window.TMAccessibility) window.TMAccessibility.openDialog(modal, opener);
 }
 function closeBrandRelModal() {
   var el = document.getElementById("brandRelOverlay");
+  var dialog = document.getElementById("brandRelationDialog");
+  if (dialog && window.TMAccessibility) window.TMAccessibility.closeDialog(dialog);
   if (el) el.remove();
 }
 document.addEventListener("click", function(e) {
@@ -3463,7 +3546,7 @@ function switchPage(id, options) {
     'generateProposal', 'updateProposalDraftFromEditor', 'getCurrentProposalDraft', 'downloadProposal', 'copyProposal', 'openProposalToInfluencers',
     'getEditedDemand', 'syncCurDemandFromAnalysis', 'handleDemandFile', 'analyzeDemandAI',
     'switchTab', 'matchInfluencers', 'smartMatch', 'handleUpload', 'handleDrop', 'openInfUploadModal', 'handleUploadModal', 'downloadInfTemplate', 'exportAll', 'exportFiltered', 'exportSelected',
-    'toggleAll', 'startCollab', 'submitCollabOrder', 'closeCollabOrderModal', 'loadCollaborations', 'updateCollabStatus',
+    'toggleAll', 'syncInfluencerSelectionState', 'startCollab', 'submitCollabOrder', 'closeCollabOrderModal', 'loadCollaborations', 'updateCollabStatus',
     'sendChat', 'clearChat', 'clearAIMemory', 'pushToFeishu',
     'switchAdminTab', 'loadAdminDashboard', 'loadAdminUsers', 'adminAddUser', 'adminCreateInvite', 'adminResetPw',
     'wfUndo', 'wfRedo', 'wfClearCanvas', 'wfSaveTemplate', 'wfPublishTemplate', 'wfResetTaskFilters', 'wfLoadTasks', 'wfLoadInstances',
