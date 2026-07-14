@@ -87,6 +87,11 @@ test('production server serves browser assets but denies private platform files'
       ['/ppt.js', 200],
       ['/client/shared/build_info.js', 200],
       ['/client/core/navigation.js', 200],
+      ['/client/core/accessibility.js', 200],
+      ['/client/core/shell.js', 200],
+      ['/client/styles/tokens.css', 200],
+      ['/client/styles/components.css', 200],
+      ['/client/styles/layout.css', 200],
       ['/data/influencer_schema.json', 200],
       ['/client/', 404],
       ['/client/core/', 404],
@@ -94,6 +99,10 @@ test('production server serves browser assets but denies private platform files'
       ['/client/unknown.js', 404],
       ['/client/core/navigation.js/extra', 404],
       ['/client/core/%6eavigation.js', 404],
+      ['/client/core/accessibility.js/extra', 404],
+      ['/client/core/%61ccessibility.js', 404],
+      ['/client/styles/tokens.css/extra', 404],
+      ['/client/styles/%74okens.css', 404],
       ['/client/../server/server.js', 404],
       ['/client/%2e%2e/server/server.js', 404],
       ['/client/%252e%252e/server/server.js', 404],
@@ -173,15 +182,20 @@ test('guarded deploy keeps production host external and SSH host checking enable
   assert.doesNotMatch(deploy, /UserKnownHostsFile\s*=\s*(?:NUL|\/dev\/null)/i);
 });
 
-test('guarded deploy creates complete v030 backups with client assets, SQLite, and checksums', () => {
+test('guarded deploy creates complete v040 backups with all client assets, SQLite, and checksums', () => {
   const deploy = readDeployScript();
   const backupBlock = extractRemoteBackupBlock(deploy);
 
-  assert.match(deploy, /\$backupDir\s*=\s*"backups\/v030-baseline-consolidation-\$stamp"/);
+  assert.match(deploy, /\$backupDir\s*=\s*"backups\/v040-product-shell-design-system-\$stamp"/);
   assert.match(backupBlock, /files\.present/);
   assert.match(backupBlock, /files\.absent/);
   assert.match(backupBlock, /client\/shared\/build_info\.js/);
   assert.match(backupBlock, /client\/core\/navigation\.js/);
+  assert.match(backupBlock, /client\/core\/accessibility\.js/);
+  assert.match(backupBlock, /client\/core\/shell\.js/);
+  assert.match(backupBlock, /client\/styles\/tokens\.css/);
+  assert.match(backupBlock, /client\/styles\/components\.css/);
+  assert.match(backupBlock, /client\/styles\/layout\.css/);
   assert.match(backupBlock, /require\('better-sqlite3'\)/);
   assert.match(backupBlock, /database\.backup\(/);
   assert.match(backupBlock, /SHA256SUMS/);

@@ -255,7 +255,7 @@ const expectedRouteCountsBySource = Object.freeze({
   'platform/server/routes_customers.js': 24,
   'platform/server/routes_brands.js': 4,
   'platform/server/routes_workflow.js': 20,
-  'platform/server/services/public_assets_service.js': 4
+  'platform/server/services/public_assets_service.js': 10
 });
 
 const expectedBaseCommit = '9a591aa92e039f53a12ad7d5f098a26d0818bf08';
@@ -538,22 +538,29 @@ test('generateManifest includes hashes, build/cache markers, routes, fixture met
 
   assert.equal(manifest.schemaVersion, 1);
   assert.equal(manifest.baseline.version, 'v0.2.9');
-  assert.equal(manifest.baseline.release, 'v0.3.0-baseline-consolidation');
+  assert.equal(manifest.baseline.release, 'v0.4.0-product-shell-and-design-system');
   assert.equal(manifest.files.indexHtml.source, 'platform/index.html');
   assert.equal(manifest.files.appJs.source, 'platform/app.js');
   assert.equal(manifest.files.pptJs.source, 'platform/ppt.js');
+  assert.equal(manifest.files.buildInfoJs.source, 'platform/client/shared/build_info.js');
+  assert.equal(manifest.files.navigationJs.source, 'platform/client/core/navigation.js');
+  assert.equal(manifest.files.accessibilityJs.source, 'platform/client/core/accessibility.js');
+  assert.equal(manifest.files.shellJs.source, 'platform/client/core/shell.js');
+  assert.equal(manifest.files.tokensCss.source, 'platform/client/styles/tokens.css');
+  assert.equal(manifest.files.componentsCss.source, 'platform/client/styles/components.css');
+  assert.equal(manifest.files.layoutCss.source, 'platform/client/styles/layout.css');
   for (const file of Object.values(manifest.files)) {
     assert.match(file.sha256, /^[a-f0-9]{64}$/);
   }
 
   assert.match(appJs, /window\.tmAppBuild\s*=\s*["']20260630-auth-upload-fix["']/);
-  assert.match(buildInfoJs, /app:\s*["']20260713-v030-baseline-consolidation["']/);
+  assert.match(buildInfoJs, /app:\s*["']20260714-v040-product-shell-design-system["']/);
   assert.deepEqual(manifest.buildMarkers, {
-    app: '20260713-v030-baseline-consolidation',
+    app: '20260714-v040-product-shell-design-system',
     ppt: '20260702-v916-kb-bridge-client-cn'
   });
   assert.deepEqual(manifest.scriptCacheKeys, {
-    app: '20260713v030baselineconsolidation',
+    app: '20260714v040productshelldesignsystem',
     ppt: '20260702v916kbbridge'
   });
 
@@ -600,7 +607,7 @@ test('generateManifest records the approved base commit and security base releas
   });
 
   assert.equal(manifest.baseline.version, 'v0.2.9');
-  assert.equal(manifest.baseline.release, 'v0.3.0-baseline-consolidation');
+  assert.equal(manifest.baseline.release, 'v0.4.0-product-shell-and-design-system');
   assert.equal(manifest.baseline.baseCommit, expectedBaseCommit);
   assert.deepEqual(manifest.baseline.securityBase, {
     release: expectedSecurityBaseRelease,
@@ -640,7 +647,7 @@ test('generateManifest records every registered route contract in deterministic 
     duplicateFixturePath: fixturePath
   });
 
-  assert.equal(manifest.routeContracts.length, 107);
+  assert.equal(manifest.routeContracts.length, 113);
   assert.deepEqual([...new Set(manifest.routeContracts.map((route) => route.source))], expectedRouteSources);
 
   const routeCountsBySource = Object.fromEntries(
@@ -672,6 +679,12 @@ test('generateManifest records every registered route contract in deterministic 
   assert.ok(routeContracts.has('GET /index.html platform/server/services/public_assets_service.js'));
   assert.ok(routeContracts.has('GET /app.js platform/server/services/public_assets_service.js'));
   assert.ok(routeContracts.has('GET /client/shared/build_info.js platform/server/services/public_assets_service.js'));
+  assert.ok(routeContracts.has('GET /client/core/navigation.js platform/server/services/public_assets_service.js'));
+  assert.ok(routeContracts.has('GET /client/core/accessibility.js platform/server/services/public_assets_service.js'));
+  assert.ok(routeContracts.has('GET /client/core/shell.js platform/server/services/public_assets_service.js'));
+  assert.ok(routeContracts.has('GET /client/styles/tokens.css platform/server/services/public_assets_service.js'));
+  assert.ok(routeContracts.has('GET /client/styles/components.css platform/server/services/public_assets_service.js'));
+  assert.ok(routeContracts.has('GET /client/styles/layout.css platform/server/services/public_assets_service.js'));
 });
 
 test('generateManifest records the approved 72-slot screenshot journey matrix', () => {
@@ -737,7 +750,7 @@ test('CLI writes the sanitized baseline manifest', () => {
     assert.equal(manifest.baseline.version, 'v0.2.9');
     assert.equal(manifest.files.indexHtml.source, 'platform/index.html');
     assert.deepEqual(manifest.scriptCacheKeys, {
-      app: '20260713v030baselineconsolidation',
+      app: '20260714v040productshelldesignsystem',
       ppt: '20260702v916kbbridge'
     });
     assert.doesNotMatch(JSON.stringify(manifest), /[A-Z]:\\\\|Users\\\\29272|TM_PRIVATE|TURINGMARKET_SERVER/);

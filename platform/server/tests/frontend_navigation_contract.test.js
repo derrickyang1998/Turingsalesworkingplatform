@@ -342,30 +342,81 @@ test('TMNavigation exposes only the approved public browser methods', () => {
   ]);
 });
 
-test('navigation rebuild preserves the current sidebar registry and admin visibility hook', () => {
+test('navigation rebuild preserves the registry as canonical anchors with grouped admin visibility', () => {
   const { document } = loadNavigation();
   const navItems = document.querySelectorAll('.nav-item');
   const expected = [
-    ['m0', '<span class="nav-icon">看</span> 客户看板', false],
-    ['m0-detail', '<span class="nav-icon">客</span> 客户明细', false],
-    ['m1', '<span class="nav-icon">智</span> 行业品牌智库', false],
-    ['m2', '<span class="nav-icon">策</span> 客户策略规划', false],
-    ['m3', '<span class="nav-icon">需</span> 需求接入 & 方案生成', false],
-    ['m4', '<span class="nav-icon">红</span> 网红匹配 & 执行管理', false],
-    ['m5', '<span class="nav-icon">🤖</span> AI 助手', false],
-    ['workflow-designer', '<span class="nav-icon">流</span> 流程设计', false],
-    ['workflow-templates', '<span class="nav-icon">模</span> 流程模板', false],
-    ['workflow-instances', '<span class="nav-icon">实</span> 流程实例', false],
-    ['workflow-tasks', '<span class="nav-icon">待</span> 我的待办', false],
-    ['admin', '<span class="nav-icon">管</span> 管理控制室', true]
+    ['m0', '/m0', '<span class="nav-icon" aria-hidden="true">看</span> 客户看板', false],
+    ['m0-detail', '/m0-detail?view=pipeline', '<span class="nav-icon" aria-hidden="true">客</span> 客户明细', false],
+    ['m1', '/m1', '<span class="nav-icon" aria-hidden="true">智</span> 行业品牌智库', false],
+    ['m2', '/m2', '<span class="nav-icon" aria-hidden="true">策</span> 客户策略规划', false],
+    ['m3', '/m3', '<span class="nav-icon" aria-hidden="true">需</span> 需求接入 & 方案生成', false],
+    ['m4', '/m4?tab=tab1', '<span class="nav-icon" aria-hidden="true">红</span> 网红匹配 & 执行管理', false],
+    ['m5', '/m5', '<span class="nav-icon" aria-hidden="true">🤖</span> AI 助手', false],
+    ['workflow-designer', '/workflow', '<span class="nav-icon" aria-hidden="true">流</span> 流程设计', false],
+    ['workflow-templates', '/workflow-templates', '<span class="nav-icon" aria-hidden="true">模</span> 流程模板', false],
+    ['workflow-instances', '/workflow-instances', '<span class="nav-icon" aria-hidden="true">实</span> 流程实例', false],
+    ['workflow-tasks', '/tasks', '<span class="nav-icon" aria-hidden="true">待</span> 我的待办', false],
+    ['admin', '/admin?tab=overview', '<span class="nav-icon" aria-hidden="true">管</span> 管理控制室', true]
   ];
 
   assert.equal(navItems.length, expected.length);
-  expected.forEach(([pageId, html, adminOnly], index) => {
+  expected.forEach(([pageId, href, html, adminOnly], index) => {
+    assert.equal(navItems[index].tagName, 'A');
     assert.equal(navItems[index].getAttribute('data-page'), pageId);
+    assert.equal(navItems[index].getAttribute('href'), href);
     assert.equal(navItems[index].innerHTML, html);
     assert.equal(navItems[index].classList.contains('admin-only'), adminOnly);
   });
+  assert.deepEqual(
+    document.querySelectorAll('.nav-group-label').map((group) => group.textContent),
+    ['客户经营', '方案与执行', '流程协作', '系统管理']
+  );
+  assert.equal(document.querySelectorAll('.nav-group-label').at(-1).classList.contains('admin-only'), true);
+});
+
+test('navigation intercepts only unmodified primary clicks and preserves native new-context behavior', () => {
+  const context = loadNavigation('/m0');
+  context.nav.restore(adminUser);
+  context.historyCalls.length = 0;
+  const m4 = context.document.querySelector('[data-page="m4"]');
+
+  let prevented = false;
+  m4.dispatchEvent({
+    type: 'click',
+    button: 0,
+    metaKey: false,
+    ctrlKey: false,
+    shiftKey: false,
+    altKey: false,
+    preventDefault() { prevented = true; }
+  });
+  assert.equal(prevented, true);
+  assert.deepEqual(context.historyCalls.map((call) => [call.method, call.url]), [
+    ['pushState', '/m4?tab=tab1']
+  ]);
+
+  for (const variant of [
+    { button: 1 },
+    { button: 0, ctrlKey: true },
+    { button: 0, metaKey: true },
+    { button: 0, shiftKey: true },
+    { button: 0, altKey: true }
+  ]) {
+    context.historyCalls.length = 0;
+    let nativePrevented = false;
+    m4.dispatchEvent({
+      type: 'click',
+      button: variant.button,
+      metaKey: !!variant.metaKey,
+      ctrlKey: !!variant.ctrlKey,
+      shiftKey: !!variant.shiftKey,
+      altKey: !!variant.altKey,
+      preventDefault() { nativePrevented = true; }
+    });
+    assert.equal(nativePrevented, false, JSON.stringify(variant));
+    assert.deepEqual(context.historyCalls, [], JSON.stringify(variant));
+  }
 });
 
 test('stateFromLocation and pathForState use the canonical route and substate table', () => {
@@ -471,9 +522,12 @@ test('restore binds popstate once and popstate applies URL state without writing
 test('navigate uses push, replace, and fromPopState history rules', () => {
   const context = loadNavigation('/m0');
   context.nav.restore(adminUser);
+  assert.equal(context.document.querySelector('[data-page="m0"]').getAttribute('aria-current'), 'page');
   context.historyCalls.length = 0;
 
   context.nav.navigate('m4', { substate: { tab: 'tab2' }, user: adminUser });
+  assert.equal(context.document.querySelector('[data-page="m0"]').getAttribute('aria-current'), null);
+  assert.equal(context.document.querySelector('[data-page="m4"]').getAttribute('aria-current'), 'page');
   context.nav.navigate('m5', { replace: true, user: adminUser });
   context.nav.navigate('m1', { fromPopState: true, user: adminUser });
 
@@ -484,7 +538,7 @@ test('navigate uses push, replace, and fromPopState history rules', () => {
   assert.equal(context.document.getElementById('page-m1').style.display, 'block');
 });
 
-test('navigate focuses the active page first h2 without scrolling or visible outline', () => {
+test('navigate focuses the active page first h2 without scrolling or suppressing focus styling', () => {
   const context = loadNavigation('/m0');
   context.nav.restore(adminUser);
   context.historyCalls.length = 0;
@@ -494,7 +548,7 @@ test('navigate focuses the active page first h2 without scrolling or visible out
   const heading = context.document.getElementById('page-m4').querySelector('h2');
   assert.equal(context.document.activeElement, heading);
   assert.equal(heading.getAttribute('tabindex'), '-1');
-  assert.equal(heading.style.outline, 'none');
+  assert.equal(heading.style.outline || '', '');
   assert.deepEqual(plain(heading.lastFocusOptions), { preventScroll: true });
   assert.equal(context.document.getElementById('page-m4').style.display, 'block');
   assert.equal(context.document.getElementById('page-m0').style.display, 'none');

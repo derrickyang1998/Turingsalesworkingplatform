@@ -16,11 +16,19 @@ test('deployment browser smoke loads the public shell and enforces the static bo
   await page.goto('/');
   await expect(page.locator('#authOverlay')).toBeVisible();
   await expect.poll(() => page.evaluate(() => window.TMBuild)).toEqual({
-    app: '20260713-v030-baseline-consolidation',
+    app: '20260714-v040-product-shell-design-system',
     ppt: '20260702-v916-kb-bridge-client-cn'
   });
 
-  for (const asset of ['/client/shared/build_info.js', '/client/core/navigation.js']) {
+  for (const asset of [
+    '/client/shared/build_info.js',
+    '/client/core/navigation.js',
+    '/client/core/accessibility.js',
+    '/client/core/shell.js',
+    '/client/styles/tokens.css',
+    '/client/styles/components.css',
+    '/client/styles/layout.css'
+  ]) {
     expect((await request.get(asset)).status(), asset).toBe(200);
   }
   for (const denied of ['/client/unknown.js', '/server/server.js']) {

@@ -394,11 +394,11 @@ test('Task 10 locked ppt.js owns and preserves the complete browser PPT workflow
           exported: exportedNames.every((name) => typeof window[name] === 'function')
         };
       });
-      const appIndex = ownership.scripts.indexOf('app.js?v=20260713v030baselineconsolidation');
+      const appIndex = ownership.scripts.indexOf('app.js?v=20260714v040productshelldesignsystem');
       const pptIndex = ownership.scripts.indexOf('ppt.js?v=20260702v916kbbridge');
       assert.ok(appIndex >= 0 && pptIndex > appIndex, 'locked ppt.js must load after the current app.js');
       assert.equal(ownership.pptBuild, '20260702-v916-kb-bridge-client-cn');
-      assert.equal(ownership.appBuild, '20260713-v030-baseline-consolidation');
+      assert.equal(ownership.appBuild, '20260714-v040-product-shell-design-system');
       assert.equal(ownership.exported, true, 'ppt.js must expose the complete interaction surface');
       assert.match(ownership.source, /^async function generateHTMLPPT/);
       assert.match(ownership.source, /buildPPTDeckContext/);

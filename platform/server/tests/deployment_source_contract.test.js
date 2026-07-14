@@ -20,9 +20,9 @@ const docs = [
 ];
 
 const AUTHORITATIVE_CHECKOUT = String.raw`C:\Users\29272\Documents\在线商务平台-github-sync`;
-const AUTHORITATIVE_BRANCH = 'codex/v0.3.0-baseline-consolidation';
-const APP_BUILD = '20260713-v030-baseline-consolidation';
-const APP_QUERY = '20260713v030baselineconsolidation';
+const AUTHORITATIVE_BRANCH = 'codex/v0.4.0-product-shell-and-design-system';
+const APP_BUILD = '20260714-v040-product-shell-design-system';
+const APP_QUERY = '20260714v040productshelldesignsystem';
 const PPT_BUILD = '20260702-v916-kb-bridge-client-cn';
 const PPT_QUERY = '20260702v916kbbridge';
 const PPT_SHA256 = 'f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e';
@@ -120,14 +120,19 @@ test('Task 12 docs lock public assets, preview, build markers, backup, rollback,
   for (const marker of [
     '/client/shared/build_info.js',
     '/client/core/navigation.js',
+    '/client/core/accessibility.js',
+    '/client/core/shell.js',
+    '/client/styles/tokens.css',
+    '/client/styles/components.css',
+    '/client/styles/layout.css',
     '?preview=v030',
     APP_BUILD,
     APP_QUERY,
     PPT_BUILD,
     PPT_QUERY,
     PPT_SHA256,
-    'backups/v030-baseline-consolidation-<timestamp>',
-    '-RollbackBackup backups/v030-baseline-consolidation-<timestamp>',
+    'backups/v040-product-shell-design-system-<timestamp>',
+    '-RollbackBackup backups/v040-product-shell-design-system-<timestamp>',
     '/api/health',
     '/m0',
     '/m4',
@@ -147,7 +152,10 @@ test('Task 12 docs lock public assets, preview, build markers, backup, rollback,
 test('Task 12 deploy source guards the exact branch and locked build contract', () => {
   const deploy = read(deployPath);
   assert.match(deploy, /\[string\]\$RollbackBackup/);
-  assert.match(deploy, /\$EXPECTED_BRANCH\s*=\s*"codex\/v0\.3\.0-baseline-consolidation"/);
+  assert.ok(
+    deploy.includes(`$EXPECTED_BRANCH = "${AUTHORITATIVE_BRANCH}"`),
+    'deploy script must guard the authoritative v0.4 branch'
+  );
   assert.match(deploy, /git\s+-C\s+\$REPO_DIR\s+branch\s+--show-current/);
   assert.match(deploy, /git\s+-C\s+\$REPO_DIR\s+status\s+--porcelain/);
   assert.match(deploy, new RegExp(APP_BUILD));
@@ -209,7 +217,7 @@ test('Task 12 deployment mode routing rejects ambiguous or empty rollback reques
     env: safeEnvironment
   });
 
-  const combined = run(['-ValidateLocalOnly', '-RollbackBackup', 'backups/v030-baseline-consolidation-20260713-120000']);
+  const combined = run(['-ValidateLocalOnly', '-RollbackBackup', 'backups/v040-product-shell-design-system-20260714-120000']);
   assert.notEqual(combined.status, 0);
   assert.match(`${combined.stdout}\n${combined.stderr}`, /ValidateLocalOnly cannot be combined with RollbackBackup/);
   assert.doesNotMatch(`${combined.stdout}\n${combined.stderr}`, /TURINGMARKET_SERVER environment variable is required/);
@@ -280,9 +288,9 @@ test('Task 12 deploy inventory includes every client asset and remote full-test 
 
 test('Task 12 deploy backup and rollback are complete, checksummed, and share one restore path', () => {
   const deploy = read(deployPath);
-  assert.match(deploy, /\$backupDir\s*=\s*"backups\/v030-baseline-consolidation-\$stamp"/);
+  assert.match(deploy, /\$backupDir\s*=\s*"backups\/v040-product-shell-design-system-\$stamp"/);
   assert.match(deploy, /function Assert-RollbackBackupPath/);
-  assert.match(deploy, /\^backups\/v030-baseline-consolidation-\\d\{8\}-\\d\{6\}\$/);
+  assert.match(deploy, /\^backups\/v040-product-shell-design-system-\\d\{8\}-\\d\{6\}\$/);
   assert.match(deploy, /function Invoke-RemoteBackup/);
   assert.match(deploy, /function Invoke-RemoteRestore/);
   assert.match(deploy, /files\.present/);
@@ -469,12 +477,12 @@ function Assert-Actions {
 foreach ($phase in @('locked', 'candidate-ready', 'cutover-complete')) {
   Reset-Case
   $script:Phase = $phase
-  Invoke-DeploymentFailureRecovery -BackupPath 'backups/v030-baseline-consolidation-20260713-120000' -ReleaseRoot '/var/lib/turingmarket-gate/releases/test' -BackupCreated $true
+  Invoke-DeploymentFailureRecovery -BackupPath 'backups/v040-product-shell-design-system-20260714-120000' -ReleaseRoot '/var/lib/turingmarket-gate/releases/test' -BackupCreated $true
   Assert-Actions 'writer-enter,cleanup,exit'
 }
 Reset-Case
 $script:Phase = 'mutation-started'
-Invoke-DeploymentFailureRecovery -BackupPath 'backups/v030-baseline-consolidation-20260713-120000' -ReleaseRoot '/var/lib/turingmarket-gate/releases/test' -BackupCreated $true
+Invoke-DeploymentFailureRecovery -BackupPath 'backups/v040-product-shell-design-system-20260714-120000' -ReleaseRoot '/var/lib/turingmarket-gate/releases/test' -BackupCreated $true
 Assert-Actions 'writer-enter,restore,cleanup,exit'
 
 Reset-Case
@@ -541,10 +549,10 @@ function Exit-RemoteDeploymentLock {
   $script:Actions.Add('exit')
 }
 $threw = $false
-try { Invoke-ManualRollback -BackupPath 'backups/v030-baseline-consolidation-bad' } catch { $threw = $true }
+try { Invoke-ManualRollback -BackupPath 'backups/v040-product-shell-design-system-bad' } catch { $threw = $true }
 if (-not $threw) { throw 'Invalid backup path must be rejected' }
 if ($script:Actions.Count -ne 0) { throw "Invalid path performed actions: $($script:Actions -join ',')" }
-Invoke-ManualRollback -BackupPath 'backups/v030-baseline-consolidation-20260713-120000'
+Invoke-ManualRollback -BackupPath 'backups/v040-product-shell-design-system-20260714-120000'
 if (($script:Actions -join ',') -ne 'server,enter,writer-enter,restore,exit') { throw "Unexpected valid rollback actions: $($script:Actions -join ',')" }
 Write-Output 'MANUAL_ROLLBACK_PREFLIGHT_OK'
 `);
@@ -571,7 +579,15 @@ test('Task 12 remote deploy gate runs full tests and exact route/static smoke be
   for (const route of ['/api/health', '/m0', '/m0-detail', '/m4', '/admin']) {
     assert.ok(deploy.includes(route), `route smoke must include ${route}`);
   }
-  for (const asset of ['/client/shared/build_info.js', '/client/core/navigation.js']) {
+  for (const asset of [
+    '/client/shared/build_info.js',
+    '/client/core/navigation.js',
+    '/client/core/accessibility.js',
+    '/client/core/shell.js',
+    '/client/styles/tokens.css',
+    '/client/styles/components.css',
+    '/client/styles/layout.css'
+  ]) {
     assert.ok(deploy.includes(asset), `public allowlist smoke must include ${asset}`);
   }
   for (const denied of ['/client/unknown.js', '/server/server.js']) {
@@ -583,7 +599,7 @@ test('Task 12 remote deploy gate runs full tests and exact route/static smoke be
 test('Task 12 manifest retains pre-edit hashes and records current post-edit comparison', () => {
   const manifest = JSON.parse(read(manifestPath));
   assert.equal(manifest.schemaVersion, 1);
-  assert.equal(manifest.baseline.release, 'v0.3.0-baseline-consolidation');
+  assert.equal(manifest.baseline.release, 'v0.4.0-product-shell-and-design-system');
   assert.equal(manifest.preEdit.files.appJs.sha256, PRE_EDIT_APP_SHA256);
   assert.equal(manifest.preEdit.buildMarkers.app, '20260630-auth-upload-fix');
   assert.equal(manifest.files.appJs.sha256, sha256(path.join(platformRoot, 'app.js')));

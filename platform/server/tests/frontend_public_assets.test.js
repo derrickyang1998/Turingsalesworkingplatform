@@ -1,22 +1,35 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const vm = require('node:vm');
+const { spawnSync } = require('node:child_process');
 
 const platformRoot = path.join(__dirname, '..', '..');
 const indexPath = path.join(platformRoot, 'index.html');
 const appPath = path.join(platformRoot, 'app.js');
 const navigationPath = path.join(platformRoot, 'client', 'core', 'navigation.js');
+const accessibilityPath = path.join(platformRoot, 'client', 'core', 'accessibility.js');
+const shellPath = path.join(platformRoot, 'client', 'core', 'shell.js');
 const buildInfoPath = path.join(platformRoot, 'client', 'shared', 'build_info.js');
 const deployScriptPath = path.join(platformRoot, 'deploy_v8.ps1');
 const nginxConfigPath = path.join(platformRoot, 'nginx', 'turingmarket.conf');
 const publicAssets = require('../services/public_assets_service');
 
-const EXPECTED_APP_BUILD = '20260713-v030-baseline-consolidation';
-const EXPECTED_APP_QUERY = '20260713v030baselineconsolidation';
+const EXPECTED_APP_BUILD = '20260714-v040-product-shell-design-system';
+const EXPECTED_APP_QUERY = '20260714v040productshelldesignsystem';
 const EXPECTED_PPT_BUILD = '20260702-v916-kb-bridge-client-cn';
 const EXPECTED_PPT_QUERY = '20260702v916kbbridge';
+const APPROVED_PUBLIC_ASSETS = Object.freeze([
+  'client/shared/build_info.js',
+  'client/core/navigation.js',
+  'client/core/accessibility.js',
+  'client/core/shell.js',
+  'client/styles/tokens.css',
+  'client/styles/components.css',
+  'client/styles/layout.css'
+]);
 
 function read(filePath) {
   return fs.readFileSync(filePath, 'utf8');
@@ -27,14 +40,130 @@ function scriptSources(indexHtml) {
     .map((match) => match[1]);
 }
 
-test('index loads public build metadata and navigation before app.js and keeps approved PPT asset unchanged', () => {
+function exactNginxLocationBlock(config, requestPath) {
+  const marker = `location = ${requestPath} {`;
+  const start = config.indexOf(marker);
+  assert.notEqual(start, -1, `Nginx exact location for ${requestPath}`);
+
+  let depth = 0;
+  for (let index = start; index < config.length; index += 1) {
+    if (config[index] === '{') depth += 1;
+    if (config[index] === '}') {
+      depth -= 1;
+      if (depth === 0) return config.slice(start, index + 1);
+    }
+  }
+  assert.fail(`Nginx location block for ${requestPath} must close`);
+}
+
+function powerShellArrayEntries(source, variableName) {
+  const assignments = Array.from(source.matchAll(
+    new RegExp(`\\$${variableName}\\s*(?<operator>\\+=|-=|\\*=|/=|%=|=)`, 'gi')
+  ));
+  assert.equal(assignments.length, 1, `$${variableName} must have one assignment`);
+  assert.equal(assignments[0].groups.operator, '=', `$${variableName} must not be appended or reassigned`);
+
+  const assignmentEnd = assignments[0].index + assignments[0][0].length;
+  const arrayStart = source.slice(assignmentEnd).match(/^\s*@\(/);
+  assert.ok(arrayStart, `$${variableName} must use a static array expression`);
+  const bodyStart = assignmentEnd + arrayStart[0].length;
+  let depth = 1;
+  let quote = null;
+  let bodyEnd = -1;
+  for (let index = bodyStart; index < source.length; index += 1) {
+    const character = source[index];
+    const previous = index > bodyStart ? source[index - 1] : '';
+    if (quote) {
+      if (character === quote && previous !== '`') quote = null;
+      continue;
+    }
+    if (character === '"' || character === "'") {
+      quote = character;
+      continue;
+    }
+    if (character === '(') depth += 1;
+    if (character === ')') {
+      depth -= 1;
+      if (depth === 0) {
+        bodyEnd = index;
+        break;
+      }
+    }
+  }
+  assert.notEqual(bodyEnd, -1, `$${variableName} array must close`);
+  const body = source.slice(bodyStart, bodyEnd);
+  const entries = Array.from(body.matchAll(/["']([^"'\r\n]+)["']/g), (entry) => entry[1].replace(/\\/g, '/'));
+  const residue = body.replace(/["'][^"'\r\n]+["']/g, '').replace(/[\s,]/g, '');
+  assert.equal(residue, '', `$${variableName} must contain only static string entries`);
+  return entries;
+}
+
+function powerShellAstArrayEntries(scriptPath, variableName) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-public-assets-ast-'));
+  const harnessPath = path.join(root, 'inspect.ps1');
+  const harness = String.raw`
+param(
+  [Parameter(Mandatory = $true)][string]$TargetPath,
+  [Parameter(Mandatory = $true)][string]$TargetVariable
+)
+$ErrorActionPreference = 'Stop'
+$tokens = $null
+$errors = $null
+$ast = [Management.Automation.Language.Parser]::ParseFile($TargetPath, [ref]$tokens, [ref]$errors)
+if ($errors.Count -gt 0) { throw $errors[0].Message }
+$assignments = @($ast.FindAll({
+  param($node)
+  $node -is [Management.Automation.Language.AssignmentStatementAst] -and
+    $node.Left -is [Management.Automation.Language.VariableExpressionAst] -and
+    $node.Left.VariablePath.UserPath -eq $TargetVariable
+}, $true))
+if ($assignments.Count -ne 1) { throw "Expected exactly one assignment to $TargetVariable" }
+if ($assignments[0].Operator.ToString() -ne 'Equals') { throw "Expected a plain assignment to $TargetVariable" }
+$dynamicNodes = @($assignments[0].Right.FindAll({
+  param($node)
+  $node -is [Management.Automation.Language.VariableExpressionAst] -or
+    $node -is [Management.Automation.Language.CommandAst] -or
+    $node -is [Management.Automation.Language.SubExpressionAst] -or
+    $node -is [Management.Automation.Language.ScriptBlockExpressionAst]
+}, $true))
+if ($dynamicNodes.Count -ne 0) { throw "Expected static string entries in $TargetVariable" }
+@($assignments[0].Right.FindAll({
+  param($node)
+  $node -is [Management.Automation.Language.StringConstantExpressionAst]
+}, $true) | ForEach-Object { $_.Value }) | ConvertTo-Json -Compress
+`;
+  fs.writeFileSync(harnessPath, harness, 'utf8');
+  try {
+    const result = spawnSync('powershell.exe', [
+      '-NoLogo',
+      '-NoProfile',
+      '-NonInteractive',
+      '-ExecutionPolicy',
+      'Bypass',
+      '-File',
+      harnessPath,
+      '-TargetPath',
+      scriptPath,
+      '-TargetVariable',
+      variableName
+    ], { encoding: 'utf8', timeout: 30_000 });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    return JSON.parse(result.stdout.trim());
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+}
+
+test('index loads public metadata, navigation, accessibility, and shell before app.js and keeps PPT unchanged', () => {
   const sources = scriptSources(read(indexPath));
 
   assert.deepEqual(
-    sources.slice(-4),
+    sources.slice(-6),
     [
       'client/shared/build_info.js',
       'client/core/navigation.js',
+      'client/core/accessibility.js',
+      'client/core/shell.js',
       `app.js?v=${EXPECTED_APP_QUERY}`,
       `ppt.js?v=${EXPECTED_PPT_QUERY}`
     ]
@@ -46,9 +175,11 @@ test('index loads public build metadata and navigation before app.js and keeps a
   );
   assert.equal(
     sources.indexOf('client/shared/build_info.js') < sources.indexOf('client/core/navigation.js')
-      && sources.indexOf('client/core/navigation.js') < sources.indexOf(`app.js?v=${EXPECTED_APP_QUERY}`),
+      && sources.indexOf('client/core/navigation.js') < sources.indexOf('client/core/accessibility.js')
+      && sources.indexOf('client/core/accessibility.js') < sources.indexOf('client/core/shell.js')
+      && sources.indexOf('client/core/shell.js') < sources.indexOf(`app.js?v=${EXPECTED_APP_QUERY}`),
     true,
-    'navigation.js must load after build_info.js and before app.js'
+    'shared browser modules must load in the approved order before app.js'
   );
 });
 
@@ -91,10 +222,19 @@ test('navigation registry is owned by navigation.js without legacy app anchors',
 });
 
 test('Express public asset gate allows only the exact approved client assets', () => {
-  assert.equal(publicAssets.isPrivateRequestPath('/client/shared/build_info.js'), false);
-  assert.equal(publicAssets.isPrivateRequestPath('/client/shared/build_info.js?cache=1'), false);
-  assert.equal(publicAssets.isPrivateRequestPath('/client/core/navigation.js'), false);
-  assert.equal(publicAssets.isPrivateRequestPath('/client/core/navigation.js?cache=1'), false);
+  const approved = [
+    '/client/shared/build_info.js',
+    '/client/core/navigation.js',
+    '/client/core/accessibility.js',
+    '/client/core/shell.js',
+    '/client/styles/tokens.css',
+    '/client/styles/components.css',
+    '/client/styles/layout.css'
+  ];
+  for (const requestPath of approved) {
+    assert.equal(publicAssets.isPrivateRequestPath(requestPath), false, requestPath);
+    assert.equal(publicAssets.isPrivateRequestPath(`${requestPath}?cache=1`), false, `${requestPath}?cache=1`);
+  }
 
   [
     '/client/',
@@ -103,6 +243,10 @@ test('Express public asset gate allows only the exact approved client assets', (
     '/client/unknown.js',
     '/client/core/navigation.js/extra',
     '/client/core/%6eavigation.js',
+    '/client/core/accessibility.js/extra',
+    '/client/core/%61ccessibility.js',
+    '/client/styles/tokens.css/extra',
+    '/client/styles/%74okens.css',
     '/client/../server/server.js',
     '/client/%2e%2e/server/server.js',
     '/client/%252e%252e/server/server.js',
@@ -119,35 +263,77 @@ test('Express public asset gate allows only the exact approved client assets', (
   });
 });
 
-test('Nginx config exposes only the exact approved client assets and rejects every other client path', () => {
+test('Nginx config exposes only the seven exact approved client assets and rejects every other client path', () => {
   const config = read(nginxConfigPath);
+  const activeConfig = config
+    .split(/\r?\n/)
+    .filter((line) => !line.trimStart().startsWith('#'))
+    .join('\n');
 
-  assert.match(config, /location = \/client\/shared\/build_info\.js\s*\{/);
-  assert.match(config, /\$request_uri\s*!~\s*\^\/client\/shared\/build_info\\\.js\(\?:\\\?\|\$\)/);
-  assert.match(config, /location = \/client\/core\/navigation\.js\s*\{/);
-  assert.match(config, /\$request_uri\s*!~\s*\^\/client\/core\/navigation\\\.js\(\?:\\\?\|\$\)/);
-  assert.match(config, /location \^~ \/client\/\s*\{\s*return 404;\s*\}/);
-  assert.doesNotMatch(config, /alias\s+.*client/i);
+  for (const asset of [
+    'shared/build_info.js',
+    'core/navigation.js',
+    'core/accessibility.js',
+    'core/shell.js',
+    'styles/tokens.css',
+    'styles/components.css',
+    'styles/layout.css'
+  ]) {
+    const requestPath = `/client/${asset}`;
+    const locationBlock = exactNginxLocationBlock(activeConfig, requestPath);
+    const guardedAsset = asset.replaceAll('.', '\\.');
+    assert.ok(
+      locationBlock.includes(`$request_uri !~ ^/client/${guardedAsset}(?:\\?|$)`),
+      `Nginx raw URI guard for ${asset}`
+    );
+  }
+  assert.match(activeConfig, /location \^~ \/client\/\s*\{\s*return 404;\s*\}/);
+  assert.doesNotMatch(activeConfig, /alias\s+.*client/i);
 });
 
-test('guarded deploy uploads, checks, verifies, and backs up public build metadata and navigation', () => {
+test('guarded deploy uploads, checks, verifies, and backs up all seven client assets', () => {
   const deploy = read(deployScriptPath);
 
-  assert.match(deploy, /\$EXPECTED_APP_BUILD\s*=\s*"20260713-v030-baseline-consolidation"/);
-  assert.match(deploy, /\$EXPECTED_APP_QUERY\s*=\s*"20260713v030baselineconsolidation"/);
-  assert.match(deploy, /"client\\shared\\build_info\.js"/);
-  assert.match(deploy, /"client\\core\\navigation\.js"/);
-  assert.match(deploy, /\$requiredPublicAssets\s*=\s*@\("client\/shared\/build_info\.js", "client\/core\/navigation\.js"\)/);
+  assert.match(deploy, /\$EXPECTED_APP_BUILD\s*=\s*"20260714-v040-product-shell-design-system"/);
+  assert.match(deploy, /\$EXPECTED_APP_QUERY\s*=\s*"20260714v040productshelldesignsystem"/);
+  assert.deepEqual(powerShellArrayEntries(deploy, 'requiredPublicAssets'), APPROVED_PUBLIC_ASSETS);
+  for (const asset of APPROVED_PUBLIC_ASSETS) {
+    assert.ok(deploy.includes(`"${asset.replace(/\//g, '\\')}"`), `deploy manifest must include ${asset}`);
+  }
   assert.match(deploy, /if \[ -f "\$file" \]; then[\s\S]*?cp -- "\$file" "\$BackupAbsolute\/platform\/\$file"/);
   assert.match(deploy, /sha256sum --check --status "\$LockDir\/upload\.sha256"/);
   assert.match(deploy, /node --check client\/shared\/build_info\.js/);
   assert.match(deploy, /node --check client\/core\/navigation\.js/);
+  assert.match(deploy, /node --check client\/core\/accessibility\.js/);
+  assert.match(deploy, /node --check client\/core\/shell\.js/);
   assert.match(deploy, /grep -Fq "\$APP_QUERY" index\.html/);
   assert.match(deploy, /grep -Fq "\$APP_BUILD" client\/shared\/build_info\.js/);
   assert.match(deploy, /grep -Fq "\$PPT_QUERY" index\.html/);
   assert.match(deploy, /grep -Fq "\$PPT_BUILD" ppt\.js/);
   assert.match(deploy, /\.Replace\('__APP_QUERY__', \$EXPECTED_APP_QUERY\)/);
   assert.match(deploy, /\.Replace\('__PPT_BUILD__', \$EXPECTED_PPT_BUILD\)/);
+});
+
+test('PowerShell AST contains one immutable exact required-public-assets assignment', {
+  skip: process.platform !== 'win32'
+}, () => {
+  assert.deepEqual(powerShellAstArrayEntries(deployScriptPath, 'requiredPublicAssets'), APPROVED_PUBLIC_ASSETS);
+});
+
+test('portable PowerShell parser rejects scalar append and reassignment bypasses', () => {
+  const base = '$requiredPublicAssets = @("client/shared/build_info.js")';
+  assert.throws(
+    () => powerShellArrayEntries(`${base}\n$requiredPublicAssets += "client/extra.js"`, 'requiredPublicAssets'),
+    /must have one assignment/
+  );
+  assert.throws(
+    () => powerShellArrayEntries(`${base}\n$requiredPublicAssets = "client/extra.js"`, 'requiredPublicAssets'),
+    /must have one assignment/
+  );
+  assert.throws(
+    () => powerShellArrayEntries('$requiredPublicAssets = "client/extra.js"', 'requiredPublicAssets'),
+    /static array expression/
+  );
 });
 
 test('guarded deploy verifies the full build-info contract and exact remote SHA-256', () => {
