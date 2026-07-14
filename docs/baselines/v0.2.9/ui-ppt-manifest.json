@@ -17,8 +17,8 @@
     },
     "appJs": {
       "source": "platform/app.js",
-      "sha256": "f98d3cf6391ebb7d85355c54eb85da7a8e6544e1bb50fd642b821fcf95a9248f",
-      "bytes": 200992
+      "sha256": "544bb4798e866ee79a779f4cf47e6d286b7160377092e14d7a7c8dea9700f0ad",
+      "bytes": 200991
     },
     "pptJs": {
       "source": "platform/ppt.js",
@@ -37,13 +37,13 @@
     },
     "accessibilityJs": {
       "source": "platform/client/core/accessibility.js",
-      "sha256": "1dd5721daa677601b8e45e81ce45f1874bfc6bcf7eb239f8958251ace6a256a7",
-      "bytes": 13476
+      "sha256": "802fccfe9a1190e49d507e3f2d27e7b482296333ee35906f2dd57845b54f58ac",
+      "bytes": 15213
     },
     "shellJs": {
       "source": "platform/client/core/shell.js",
-      "sha256": "a0547224d275eabe21ea6e4f4661c672bd296249bf17a07094e1de8c29c6bbdf",
-      "bytes": 5593
+      "sha256": "51922ed3f65965b9281e8ef720a6cbb8cb0458f3d6886d63c8f3b1a0ef6ccbb9",
+      "bytes": 5592
     },
     "tokensCss": {
       "source": "platform/client/styles/tokens.css",
@@ -52,8 +52,8 @@
     },
     "componentsCss": {
       "source": "platform/client/styles/components.css",
-      "sha256": "6e1880c8cd63bf3c6d27019c68c689ddc85881b5de7333099ef6b738d1dc7cf5",
-      "bytes": 6317
+      "sha256": "0b189373009109c5c35e0553926cdb5e1a8e994e5c2423804bd06db34d897f34",
+      "bytes": 6890
     },
     "layoutCss": {
       "source": "platform/client/styles/layout.css",
