@@ -49,6 +49,8 @@ test('deployment browser stays separate from the frozen Playwright baseline', ()
 
 test('all production and deployment browser launches use the native sandboxed runtime', () => {
   const directLaunchFiles = [
+    'platform/server/tests/accessibility_shell.test.js',
+    'platform/server/tests/product_shell_contract.test.js',
     'platform/server/tests/ppt_bridge_browser_contract.test.js',
     'platform/server/tests/production_browser_evidence_tools.test.js',
     'platform/server/scripts/capture_production_browser_baseline.js'
@@ -107,8 +109,142 @@ test('runtime bootstrap is audited, reversible, and keeps mutable state outside 
   assert.match(source, /dpkg-query[\s\S]*apt-mark[\s\S]*SHA256SUMS/);
   assert.match(source, /ln -s[^\n]+\/etc\/turingmarket\/turingmarket\.env[^\n]+\.env/);
   assert.match(source, /ln -s[^\n]+\/var\/lib\/turingmarket\/db[^\n]+server\/db/);
+  assert.match(source, /deploy-v\*-gate-\*\/browser-cache\/chromium_headless_shell-\*/);
+  assert.doesNotMatch(source, /deploy-v030-gate-/);
+  assert.match(source, /apparmor_parser -Q "\$candidate"/);
+  assert.match(source, /install -o root -g root -m 0644 "\$candidate" "\$APPARMOR_PROFILE"/);
   assert.doesNotMatch(source, /PLAYWRIGHT_HOST_PLATFORM_OVERRIDE/);
   assert.doesNotMatch(source, /(?:tvly|sk)-[A-Za-z0-9_-]{12,}|BEGIN (?:RSA |OPENSSH )?PRIVATE KEY/);
+});
+
+test('AppArmor profile installation validates, backs up, and reruns idempotently', () => {
+  const source = `
+set -euo pipefail
+root="$(mktemp -d)"
+trap 'rm -rf "$root"' EXIT
+export TM_REMOTE_ROOT="$root/remote"
+export TM_APPARMOR_PROFILE="$root/etc/turingmarket-gate-chromium"
+export TM_BOOTSTRAP_LIBRARY_ONLY=1
+source ${shellQuote(bootstrapShellPath)}
+
+install() {
+  local source="\${@: -2:1}"
+  local target="\${@: -1}"
+  cp -- "$source" "$target"
+  chmod 0644 "$target"
+}
+apparmor_parser() {
+  printf '%s\n' "$*" >> "$root/parser.log"
+  if [ "$1" = "-Q" ]; then grep -Fq 'deploy-v*-gate-*' "$2"; fi
+}
+
+mkdir -p "$(dirname "$APPARMOR_PROFILE")"
+printf 'legacy-profile\n' > "$APPARMOR_PROFILE"
+BACKUP_DIR="$root/backup-one"
+mkdir -p "$BACKUP_DIR"
+install_apparmor_profile
+grep -Fq 'deploy-v*-gate-*' "$APPARMOR_PROFILE"
+test "$(cat "$BACKUP_DIR/turingmarket-gate-chromium.previous")" = legacy-profile
+first_hash="$(sha256sum "$APPARMOR_PROFILE" | awk '{print $1}')"
+
+BACKUP_DIR="$root/backup-two"
+mkdir -p "$BACKUP_DIR"
+install_apparmor_profile
+second_hash="$(sha256sum "$APPARMOR_PROFILE" | awk '{print $1}')"
+test "$first_hash" = "$second_hash"
+test "$(grep -c '^-Q ' "$root/parser.log")" = 2
+test "$(grep -c '^-r ' "$root/parser.log")" = 2
+`;
+  const result = runBash(source);
+
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+});
+
+test('AppArmor reload failure restores an existing profile and removes a first install', () => {
+  const source = `
+set -euo pipefail
+root="$(mktemp -d)"
+trap 'rm -rf "$root"' EXIT
+export TM_REMOTE_ROOT="$root/remote"
+export TM_APPARMOR_PROFILE="$root/etc/turingmarket-gate-chromium"
+export TM_BOOTSTRAP_LIBRARY_ONLY=1
+source ${shellQuote(bootstrapShellPath)}
+
+install() {
+  local source="\${@: -2:1}"
+  local target="\${@: -1}"
+  cp -- "$source" "$target"
+  chmod 0644 "$target"
+}
+reload_count=0
+apparmor_parser() {
+  if [ "$1" = "-Q" ]; then return 0; fi
+  reload_count=$((reload_count + 1))
+  if [ "$reload_count" = 1 ]; then return 1; fi
+}
+
+mkdir -p "$(dirname "$APPARMOR_PROFILE")"
+printf 'legacy-profile\n' > "$APPARMOR_PROFILE"
+BACKUP_DIR="$root/backup-existing"
+mkdir -p "$BACKUP_DIR"
+if install_apparmor_profile; then exit 90; fi
+test "$(cat "$APPARMOR_PROFILE")" = legacy-profile
+test "$reload_count" = 2
+
+rm -f "$APPARMOR_PROFILE"
+reload_count=0
+BACKUP_DIR="$root/backup-first"
+mkdir -p "$BACKUP_DIR"
+if install_apparmor_profile; then exit 91; fi
+test ! -e "$APPARMOR_PROFILE"
+test "$reload_count" = 1
+`;
+  const result = runBash(source);
+
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+});
+
+test('AppArmor syntax failure and unsafe profile paths leave existing state unchanged', () => {
+  const source = `
+set -euo pipefail
+root="$(mktemp -d)"
+trap 'rm -rf "$root"' EXIT
+export TM_REMOTE_ROOT="$root/remote"
+export TM_APPARMOR_PROFILE="$root/etc/turingmarket-gate-chromium"
+export TM_BOOTSTRAP_LIBRARY_ONLY=1
+source ${shellQuote(bootstrapShellPath)}
+
+install() {
+  local source="\${@: -2:1}"
+  local target="\${@: -1}"
+  cp -- "$source" "$target"
+  chmod 0644 "$target"
+}
+syntax_failure=1
+apparmor_parser() {
+  if [ "$1" = "-Q" ] && [ "$syntax_failure" = 1 ]; then return 1; fi
+}
+
+mkdir -p "$(dirname "$APPARMOR_PROFILE")"
+printf 'legacy-profile\n' > "$APPARMOR_PROFILE"
+BACKUP_DIR="$root/backup-syntax"
+mkdir -p "$BACKUP_DIR"
+if install_apparmor_profile; then exit 92; fi
+test "$(cat "$APPARMOR_PROFILE")" = legacy-profile
+
+syntax_failure=0
+rm -f "$APPARMOR_PROFILE"
+printf 'real-profile\n' > "$root/real-profile"
+ln -s "$root/real-profile" "$APPARMOR_PROFILE"
+BACKUP_DIR="$root/backup-symlink"
+mkdir -p "$BACKUP_DIR"
+if install_apparmor_profile; then exit 93; fi
+test -L "$APPARMOR_PROFILE"
+test "$(cat "$root/real-profile")" = real-profile
+`;
+  const result = runBash(source);
+
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
 });
 
 test('runtime bootstrap journals before stopping and snapshots only after the process is stopped', () => {

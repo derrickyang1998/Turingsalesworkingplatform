@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { chromium } = require('playwright');
+const { chromium } = require('playwright-deploy');
 
 const platformRoot = path.join(__dirname, '..', '..');
 const accessibilityPath = path.join(platformRoot, 'client', 'core', 'accessibility.js');
@@ -16,7 +16,7 @@ function read(filePath) {
 
 async function withModulePage({ html, modulePath, viewport = { width: 390, height: 844 } }, run) {
   assert.equal(fs.existsSync(modulePath), true, `${path.relative(platformRoot, modulePath)} must exist`);
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({ headless: true, chromiumSandbox: true });
   try {
     const page = await browser.newPage({ viewport });
     await page.setContent(`<!doctype html><html><body>${html}</body></html>`);

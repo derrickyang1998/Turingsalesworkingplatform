@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
-const { chromium } = require('playwright');
+const { chromium } = require('playwright-deploy');
 
 const platformRoot = path.join(__dirname, '..', '..');
 const indexPath = path.join(platformRoot, 'index.html');
@@ -126,7 +126,7 @@ test('new shared CSS forbids decorative glass effects and preserves focus and re
 });
 
 test('focus and reduced-motion preferences are observable on actual shell motion surfaces', async () => {
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({ headless: true, chromiumSandbox: true });
   try {
     const page = await browser.newPage({ viewport: { width: 1024, height: 844 } });
     await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -198,7 +198,7 @@ test('static shell keeps authentication authoritative and exposes mobile navigat
 });
 
 test('mobile authentication remains hidden before login and after simulated session expiry', async () => {
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({ headless: true, chromiumSandbox: true });
   try {
     const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
     await page.setContent(stripExternalAssets(read(indexPath)));
@@ -220,7 +220,7 @@ test('mobile authentication remains hidden before login and after simulated sess
 });
 
 test('actual index startup keeps authentication interactive and ignores closed off-canvas dialogs', async () => {
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({ headless: true, chromiumSandbox: true });
   try {
     const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
     await page.setContent(stripExternalAssets(read(indexPath)));
@@ -237,7 +237,7 @@ test('actual index startup keeps authentication interactive and ignores closed o
 });
 
 test('reduced motion preserves the mobile drawer closed and open state', async () => {
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({ headless: true, chromiumSandbox: true });
   try {
     const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
     await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -268,7 +268,7 @@ test('reduced motion preserves the mobile drawer closed and open state', async (
 });
 
 test('mobile route clicks close the drawer before focusing the destination heading', async () => {
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({ headless: true, chromiumSandbox: true });
   try {
     const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
     await page.setContent(stripExternalAssets(read(indexPath)));
@@ -294,7 +294,7 @@ test('mobile route clicks close the drawer before focusing the destination headi
 
 test('production M4 tabs, upload surfaces, filters, and CRM view controls are keyboard named', async () => {
   const switchTabSource = sourceBetween(read(appPath), 'function switchTab(id, options)', '// ===== M4: INFLUENCER MATCHING');
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({ headless: true, chromiumSandbox: true });
   try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
     await page.setContent(stripExternalAssets(read(indexPath)));
@@ -347,7 +347,7 @@ test('production M4 tabs, upload surfaces, filters, and CRM view controls are ke
 });
 
 test('Direction A overrides legacy glass surfaces and implements checkbox target geometry', async () => {
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({ headless: true, chromiumSandbox: true });
   try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
     await page.setContent(stripExternalAssets(read(indexPath)));
@@ -523,7 +523,7 @@ test('workflow palette and rendered nodes execute keyboard alternatives exactly 
   );
   const renderWorkflowNode = sourceBetween(app, 'function wfRenderNode(node)', 'function wfRenderEdge(edge)');
   assert.match(renderWorkflowNode, /requestAnimationFrame[\s\S]*?data-node-id[\s\S]*?focus\s*\(/);
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({ headless: true, chromiumSandbox: true });
   try {
     const page = await browser.newPage({ viewport: { width: 900, height: 700 } });
     await page.setContent(`<!doctype html><html><body>

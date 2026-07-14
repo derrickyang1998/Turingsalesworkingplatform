@@ -98,6 +98,67 @@ require_exact_host() {
   command -v passwd >/dev/null
 }
 
+install_apparmor_profile() {
+  local candidate="$BACKUP_DIR/turingmarket-gate-chromium.profile"
+  local previous="$BACKUP_DIR/turingmarket-gate-chromium.previous"
+  local previous_present=0
+
+  cat > "$candidate" <<'APPARMOR'
+abi <abi/4.0>,
+#include <tunables/global>
+
+profile turingmarket-gate-chromium /var/lib/turingmarket-gate/releases/*/tmp/deploy-v*-gate-*/browser-cache/chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell flags=(unconfined) {
+  userns,
+}
+APPARMOR
+  chmod 0600 "$candidate"
+  if ! apparmor_parser -Q "$candidate"; then
+    printf '%s\n' "AppArmor profile validation failed" >&2
+    return 1
+  fi
+
+  if [ -e "$APPARMOR_PROFILE" ] || [ -L "$APPARMOR_PROFILE" ]; then
+    if [ ! -f "$APPARMOR_PROFILE" ] || [ -L "$APPARMOR_PROFILE" ]; then
+      printf '%s\n' "AppArmor profile path is unsafe" >&2
+      return 1
+    fi
+    if ! cp -a -- "$APPARMOR_PROFILE" "$previous"; then
+      printf '%s\n' "AppArmor profile backup failed" >&2
+      return 1
+    fi
+    previous_present=1
+  fi
+
+  if ! install -o root -g root -m 0644 "$candidate" "$APPARMOR_PROFILE"; then
+    if [ "$previous_present" = "1" ]; then
+      install -o root -g root -m 0644 "$previous" "$APPARMOR_PROFILE" || true
+    else
+      rm -f -- "$APPARMOR_PROFILE" || true
+    fi
+    printf '%s\n' "AppArmor profile install failed" >&2
+    return 1
+  fi
+  if ! apparmor_parser -r "$APPARMOR_PROFILE"; then
+    if [ "$previous_present" = "1" ]; then
+      if ! install -o root -g root -m 0644 "$previous" "$APPARMOR_PROFILE"; then
+        printf '%s\n' "AppArmor profile restore failed" >&2
+        return 1
+      fi
+      if ! apparmor_parser -r "$APPARMOR_PROFILE"; then
+        printf '%s\n' "Previous AppArmor profile reload failed" >&2
+        return 1
+      fi
+    else
+      if ! rm -f -- "$APPARMOR_PROFILE"; then
+        printf '%s\n' "Rejected AppArmor profile cleanup failed" >&2
+        return 1
+      fi
+    fi
+    printf '%s\n' "AppArmor profile reload failed" >&2
+    return 1
+  fi
+}
+
 safe_pm2_snapshot() {
   node <<'NODE'
 const { execFileSync } = require('node:child_process');
@@ -422,17 +483,7 @@ fi
 validate_gate_identity || die "Gate identity validation failed"
 install -d -o root -g root -m 0755 "$GATE_ROOT" "$GATE_ROOT/releases"
 install -d -o root -g root -m 0700 "$ENV_DIR" "$STATE_ROOT"
-
-cat > "$APPARMOR_PROFILE" <<'APPARMOR'
-abi <abi/4.0>,
-#include <tunables/global>
-
-profile turingmarket-gate-chromium /var/lib/turingmarket-gate/releases/*/tmp/deploy-v030-gate-*/browser-cache/chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell flags=(unconfined) {
-  userns,
-}
-APPARMOR
-chmod 0644 "$APPARMOR_PROFILE"
-apparmor_parser -r "$APPARMOR_PROFILE"
+install_apparmor_profile
 
 if validate_exact_link "$LIVE_DIR/.env" "$ENV_FILE" && \
    validate_exact_link "$LIVE_DIR/server/db" "$DB_DIR" && \
