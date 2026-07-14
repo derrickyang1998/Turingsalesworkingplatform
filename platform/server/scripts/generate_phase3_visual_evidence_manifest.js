@@ -34,15 +34,21 @@ function writeJsonAtomically(filePath, value) {
   fs.renameSync(tempPath, filePath);
 }
 
-function sourceCommitFromArgs(argv) {
-  const index = argv.indexOf('--source-commit');
-  const value = index === -1 ? '' : String(argv[index + 1] || '').trim();
-  if (!/^[a-f0-9]{40}$/.test(value)) throw new Error('Usage: generate_phase3_visual_evidence_manifest.js --source-commit <40-hex-commit>');
-  if (argv.length !== 2 || index !== 0) throw new Error('Unexpected visual evidence generator arguments');
-  return value;
+function parseArgs(argv) {
+  const options = { sourceCommit: '', reviewStatus: 'pending' };
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index];
+    if (argument === '--source-commit') options.sourceCommit = String(argv[++index] || '').trim();
+    else if (argument === '--review-status') options.reviewStatus = String(argv[++index] || '').trim();
+    else throw new Error(`Unexpected visual evidence generator argument: ${argument}`);
+  }
+  if (!/^[a-f0-9]{40}$/.test(options.sourceCommit) || !['pending', 'approved'].includes(options.reviewStatus)) {
+    throw new Error('Usage: generate_phase3_visual_evidence_manifest.js --source-commit <40-hex-commit> [--review-status pending|approved]');
+  }
+  return options;
 }
 
-function generateVisualEvidence(sourceCommit) {
+function generateVisualEvidence(sourceCommit, reviewStatus = 'pending') {
   assertInside(path.join(repoRoot, '.superpowers', 'sdd'), rawRoot, 'raw evidence root');
   assertInside(path.join(repoRoot, 'docs', 'product', 'evidence'), evidenceRoot, 'tracked evidence root');
   if (!fs.statSync(rawRoot).isDirectory()) throw new Error(`Missing raw evidence root: ${rawRoot}`);
@@ -66,7 +72,7 @@ function generateVisualEvidence(sourceCommit) {
     assertRegularFile(frozenPath, 'Frozen screenshot');
     const rawBuffer = fs.readFileSync(rawPath);
     const frozenBuffer = fs.readFileSync(frozenPath);
-    const pixel = comparePngBuffers(frozenBuffer, rawBuffer);
+    const pixel = comparePngBuffers(frozenBuffer, rawBuffer, 1);
     const capture = {
       path: relative,
       sha256: sha256(rawBuffer),
@@ -125,9 +131,12 @@ function generateVisualEvidence(sourceCommit) {
     schemaVersion: 1,
     sourceCommit,
     source: '.superpowers/sdd/browser-baseline-current',
-    maxDiffPixelRatio: 0.005,
+    comparisonMode: 'reviewed-shared-shell-redesign',
+    approvalRecord: 'docs/product/2026-07-phase3-visual-change-record.md',
+    reviewStatus,
+    maxDiffPixelRatio: null,
     maxObservedDiffRatio,
-    withinThreshold: maxObservedDiffRatio <= 0.005,
+    withinThreshold: null,
     totalDiffPixels: comparisons.reduce((sum, entry) => sum + entry.diffPixels, 0),
     totalRawDiffPixels: comparisons.reduce((sum, entry) => sum + entry.rawDiffPixels, 0),
     fileCount: comparisons.length,
@@ -145,6 +154,9 @@ function generateVisualEvidence(sourceCommit) {
     schemaVersion: 1,
     sourceCommit,
     source: manifest.postEditComparison.source,
+    comparisonMode: manifest.postEditComparison.comparisonMode,
+    approvalRecord: manifest.postEditComparison.approvalRecord,
+    reviewStatus,
     rawCaptureCount: captures.length,
     contactSheetCount: contactSheets.length,
     rawCaptures: captures,
@@ -157,9 +169,11 @@ function generateVisualEvidence(sourceCommit) {
 
 if (require.main === module) {
   try {
-    const provenance = generateVisualEvidence(sourceCommitFromArgs(process.argv.slice(2)));
+    const options = parseArgs(process.argv.slice(2));
+    const provenance = generateVisualEvidence(options.sourceCommit, options.reviewStatus);
     console.log(JSON.stringify({
       sourceCommit: provenance.sourceCommit,
+      reviewStatus: provenance.reviewStatus,
       rawCaptureCount: provenance.rawCaptureCount,
       contactSheetCount: provenance.contactSheetCount
     }, null, 2));
@@ -169,4 +183,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { generateVisualEvidence, sourceCommitFromArgs };
+module.exports = { generateVisualEvidence, parseArgs };

@@ -411,7 +411,7 @@ test('handles a deterministic authenticated 401 by hiding the app and focusing u
   await expect(page.locator('#app')).toBeHidden();
   await expect(page.locator('#authOverlay')).toBeVisible();
   await expect(page.locator('#loginUser')).toBeFocused();
-  await expect(page.locator('.toast[role="alert"]')).toBeVisible();
+  await expect(page.locator('.toast [role="alert"]')).toBeVisible();
   expect(await page.evaluate(() => ({ token: localStorage.getItem('tm_token'), user: localStorage.getItem('tm_user') })))
     .toEqual({ token: null, user: null });
   consumeExpectedPageError(page, /Failed to load resource:.*401 \(Unauthorized\)/);

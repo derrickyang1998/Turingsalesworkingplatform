@@ -618,10 +618,13 @@ test('Task 12 manifest retains pre-edit hashes and records current post-edit com
 
   const comparison = manifest.postEditComparison;
   assert.equal(comparison.fileCount, 72);
-  assert.equal(comparison.maxDiffPixelRatio, 0.005);
-  assert.equal(comparison.withinThreshold, true);
-  assert.equal(comparison.totalDiffPixels, 0);
-  assert.ok(comparison.maxObservedDiffRatio <= comparison.maxDiffPixelRatio);
+  assert.equal(comparison.comparisonMode, 'reviewed-shared-shell-redesign');
+  assert.equal(comparison.approvalRecord, 'docs/product/2026-07-phase3-visual-change-record.md');
+  assert.equal(comparison.reviewStatus, 'approved');
+  assert.equal(comparison.maxDiffPixelRatio, null);
+  assert.equal(comparison.withinThreshold, null);
+  assert.ok(comparison.totalDiffPixels > 0);
+  assert.ok(comparison.maxObservedDiffRatio > 0 && comparison.maxObservedDiffRatio <= 1);
   assert.equal(comparison.screenshots.length, 72);
 
   const provenance = JSON.parse(read(visualProvenancePath));
@@ -652,6 +655,8 @@ test('Task 12 manifest retains pre-edit hashes and records current post-edit com
     assert.equal(entry.postEditSha256, raw.sha256);
     assert.ok(sheetByName.has(raw.contactSheet));
     assert.ok(sheetByName.get(raw.contactSheet).rawCaptures.includes(relative));
-    assert.ok(entry.diffPixelRatio <= comparison.maxDiffPixelRatio);
+    assert.ok(entry.diffPixelRatio >= 0 && entry.diffPixelRatio <= 1);
+    assert.ok(Number.isInteger(entry.diffPixels) && entry.diffPixels >= 0);
+    assert.ok(Number.isInteger(entry.rawDiffPixels) && entry.rawDiffPixels >= entry.diffPixels);
   }
 });

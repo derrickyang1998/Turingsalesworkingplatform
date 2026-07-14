@@ -1,9 +1,12 @@
 # Phase 3 Product Shell Visual Change Record
 
-Date: 2026-07-14  
-Pre-audit evidence: `docs/product/evidence/2026-07-phase3-pre/`  
-Post-change evidence: `docs/product/evidence/2026-07-phase3-post/`  
+Date: 2026-07-14
+Pre-audit evidence: `docs/product/evidence/2026-07-phase3-pre/`
+Post-change evidence: `docs/product/evidence/2026-07-phase3-post/`
 Private raw source: `.superpowers/sdd/browser-baseline-current/` (72 of 72 PNG slots)
+Tracked raw-to-sheet provenance: `docs/product/evidence/2026-07-phase3-post/raw-contact-sheet-manifest.json`
+
+The controlled evidence manifest maps all 72 raw captures to nine contact sheets with exact SHA-256 values. The Phase 2 repeat-capture gate remains `0.005`; this intentional Phase 3 redesign is recorded separately as a mandatory reviewed comparison with a maximum observed perceptual difference ratio of `0.14496597399441002` and review status `approved`.
 
 ## Review boundary
 
@@ -28,7 +31,6 @@ Fixture identities, counts, values, table rows, workflow states, role visibility
 ## Decision
 
 - Approved shared-shell regions: all nine sheets.
-- Unresolved zero-tolerance domain regressions: none.
+- Unresolved zero-tolerance domain regressions: none. The CRM funnel fills and active proposal-template state were restored to explicit solid backgrounds after independent review and recaptured before final approval.
 - `mobile-shell-content` gap: retired in the current-run producer after 390 px and 320 px integration checks passed; frozen pre-audit metadata was not changed.
 - Static visual review does not establish keyboard, screen-reader, motion, forced-colors, native zoom, or full WCAG conformance. Those claims remain bounded by the automated Task 5 gate and the residual risks in the Task 5 report.
-
