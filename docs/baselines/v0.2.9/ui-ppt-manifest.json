@@ -12,25 +12,25 @@
   "files": {
     "indexHtml": {
       "source": "platform/index.html",
-      "sha256": "4734237e1b481a7a21223c7d5c8c66a67d6a998c81d17d21f6fbb4ddb9f28bac",
-      "bytes": 93773,
-      "sourceCommit": "1db3ca113ea77f6d2f8821f92e4d23836a65744f",
-      "sourceCommitSha256": "4734237e1b481a7a21223c7d5c8c66a67d6a998c81d17d21f6fbb4ddb9f28bac",
-      "sourceCommitBytes": 93773
+      "sha256": "dd15bbfdcde720dd348c7fc432213a83b3caaeaad5fb70409312f73ec0eba285",
+      "bytes": 93851,
+      "sourceCommit": "11403765e940e5d0277d6abc0e4a6911a10d3f44",
+      "sourceCommitSha256": "dd15bbfdcde720dd348c7fc432213a83b3caaeaad5fb70409312f73ec0eba285",
+      "sourceCommitBytes": 93851
     },
     "appJs": {
       "source": "platform/app.js",
-      "sha256": "46751ea70ac05392400ccd996cec4c0101e176d504357ac284f790bed238930f",
-      "bytes": 198225,
-      "sourceCommit": "1db3ca113ea77f6d2f8821f92e4d23836a65744f",
-      "sourceCommitSha256": "46751ea70ac05392400ccd996cec4c0101e176d504357ac284f790bed238930f",
-      "sourceCommitBytes": 198225
+      "sha256": "f4e13a2943726d27a214c609a3f0ae5dd8c5f032e662f9d284c0526d5505b923",
+      "bytes": 200588,
+      "sourceCommit": "11403765e940e5d0277d6abc0e4a6911a10d3f44",
+      "sourceCommitSha256": "f4e13a2943726d27a214c609a3f0ae5dd8c5f032e662f9d284c0526d5505b923",
+      "sourceCommitBytes": 200588
     },
     "pptJs": {
       "source": "platform/ppt.js",
       "sha256": "f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e",
       "bytes": 88188,
-      "sourceCommit": "1db3ca113ea77f6d2f8821f92e4d23836a65744f",
+      "sourceCommit": "11403765e940e5d0277d6abc0e4a6911a10d3f44",
       "sourceCommitSha256": "f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e",
       "sourceCommitBytes": 88188
     },
@@ -38,7 +38,7 @@
       "source": "platform/client/shared/build_info.js",
       "sha256": "563b7f8750383dadc2e3edbd0d687ebfe11f5d0f2d165eac73855f9a89ca0be2",
       "bytes": 387,
-      "sourceCommit": "1db3ca113ea77f6d2f8821f92e4d23836a65744f",
+      "sourceCommit": "11403765e940e5d0277d6abc0e4a6911a10d3f44",
       "sourceCommitSha256": "563b7f8750383dadc2e3edbd0d687ebfe11f5d0f2d165eac73855f9a89ca0be2",
       "sourceCommitBytes": 387
     },
@@ -46,23 +46,23 @@
       "source": "platform/client/core/navigation.js",
       "sha256": "782df27c37263b6fa1dd20714c944151efd980a2dbf3634e3d715521dbfc2032",
       "bytes": 12671,
-      "sourceCommit": "1db3ca113ea77f6d2f8821f92e4d23836a65744f",
+      "sourceCommit": "11403765e940e5d0277d6abc0e4a6911a10d3f44",
       "sourceCommitSha256": "782df27c37263b6fa1dd20714c944151efd980a2dbf3634e3d715521dbfc2032",
       "sourceCommitBytes": 12671
     },
     "accessibilityJs": {
       "source": "platform/client/core/accessibility.js",
-      "sha256": "26c0340f91cbfeda9e375cc7b857b121fe0cd7aa0fb7e695f4f7b5ff49fa9b14",
-      "bytes": 15323,
-      "sourceCommit": "1db3ca113ea77f6d2f8821f92e4d23836a65744f",
-      "sourceCommitSha256": "26c0340f91cbfeda9e375cc7b857b121fe0cd7aa0fb7e695f4f7b5ff49fa9b14",
-      "sourceCommitBytes": 15323
+      "sha256": "17a1e06fe9022c6ca8fd0fab28d0fca9351cc082bc41f9431808588e53db3cdd",
+      "bytes": 17646,
+      "sourceCommit": "11403765e940e5d0277d6abc0e4a6911a10d3f44",
+      "sourceCommitSha256": "17a1e06fe9022c6ca8fd0fab28d0fca9351cc082bc41f9431808588e53db3cdd",
+      "sourceCommitBytes": 17646
     },
     "shellJs": {
       "source": "platform/client/core/shell.js",
       "sha256": "51922ed3f65965b9281e8ef720a6cbb8cb0458f3d6886d63c8f3b1a0ef6ccbb9",
       "bytes": 5592,
-      "sourceCommit": "1db3ca113ea77f6d2f8821f92e4d23836a65744f",
+      "sourceCommit": "11403765e940e5d0277d6abc0e4a6911a10d3f44",
       "sourceCommitSha256": "51922ed3f65965b9281e8ef720a6cbb8cb0458f3d6886d63c8f3b1a0ef6ccbb9",
       "sourceCommitBytes": 5592
     },
@@ -70,23 +70,23 @@
       "source": "platform/client/styles/tokens.css",
       "sha256": "f77dda23633b3b676c974cbba622085561d4de56cedd6c0e5d1e42a89015bb5f",
       "bytes": 1773,
-      "sourceCommit": "1db3ca113ea77f6d2f8821f92e4d23836a65744f",
+      "sourceCommit": "11403765e940e5d0277d6abc0e4a6911a10d3f44",
       "sourceCommitSha256": "f77dda23633b3b676c974cbba622085561d4de56cedd6c0e5d1e42a89015bb5f",
       "sourceCommitBytes": 1773
     },
     "componentsCss": {
       "source": "platform/client/styles/components.css",
-      "sha256": "d841536178e4f964ab4342fd30e5806f4833a32134c961ab64ad7d62d5bf567e",
-      "bytes": 7601,
-      "sourceCommit": "1db3ca113ea77f6d2f8821f92e4d23836a65744f",
-      "sourceCommitSha256": "d841536178e4f964ab4342fd30e5806f4833a32134c961ab64ad7d62d5bf567e",
-      "sourceCommitBytes": 7601
+      "sha256": "01e2fa2301d1fab3b1aeafacd9ef9fd66f70843ca30167eb99d49801f750c49c",
+      "bytes": 7647,
+      "sourceCommit": "11403765e940e5d0277d6abc0e4a6911a10d3f44",
+      "sourceCommitSha256": "01e2fa2301d1fab3b1aeafacd9ef9fd66f70843ca30167eb99d49801f750c49c",
+      "sourceCommitBytes": 7647
     },
     "layoutCss": {
       "source": "platform/client/styles/layout.css",
       "sha256": "eabebc46c96d38437515755d7e46bc0729065d2e0ffc5f367a3ea83b14865045",
       "bytes": 6610,
-      "sourceCommit": "1db3ca113ea77f6d2f8821f92e4d23836a65744f",
+      "sourceCommit": "11403765e940e5d0277d6abc0e4a6911a10d3f44",
       "sourceCommitSha256": "eabebc46c96d38437515755d7e46bc0729065d2e0ffc5f367a3ea83b14865045",
       "sourceCommitBytes": 6610
     }
@@ -827,7 +827,7 @@
       "substate": null,
       "path": "docs/baselines/v0.2.9/screenshots/public/fixture-1440/public-login.png",
       "exists": true,
-      "sha256": "e0ce774d46afd219f84060fa2d77e63fb568bf6b23c7a0a7441f8fe5ca05b7c4"
+      "sha256": "9519402c6bbb01c76a629e6c30f26b685fca00bc247103480789bbfae9b7f5a4"
     },
     {
       "role": "admin",
@@ -837,7 +837,7 @@
       "substate": null,
       "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-crm-board.png",
       "exists": true,
-      "sha256": "8fcf7c5e5a0e4e6555d17146b2ca4617e3fcbeeac6131e33c8384feac3727e16"
+      "sha256": "414383d557555bc5832de76a6b6dddf8a5c8529666af86cd2c859d8a860f20e5"
     },
     {
       "role": "admin",
@@ -849,7 +849,7 @@
       },
       "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-crm-detail-pipeline.png",
       "exists": true,
-      "sha256": "0aff37c8ef8a3f1352a577722531ceb4933fe92ebeddca29537ad39faa4e3085"
+      "sha256": "5367f88f2ac34d83029a4a0b8e4754d28b8d0341a14140b37c0aa9a87916052a"
     },
     {
       "role": "admin",
@@ -861,7 +861,7 @@
       },
       "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-crm-detail-seapool.png",
       "exists": true,
-      "sha256": "1e8e0920a6affb7795304786453f67ec74737bcd15437e2a2c872682cde8f66b"
+      "sha256": "682c9e6c242fa1640e798d498a53237a6e9104657d783b1ad87b281d5fb48152"
     },
     {
       "role": "admin",
@@ -873,7 +873,7 @@
       },
       "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-crm-detail-opportunities.png",
       "exists": true,
-      "sha256": "6cf97ceb6704ce12d53f3d5845a9a9e0ec3f65d0821857e1e63809ce1bbae3f1"
+      "sha256": "401543601c4753ffc36f50f33683d8c024a348e5fb59c41a841a4e208e2b4175"
     },
     {
       "role": "admin",
@@ -883,7 +883,7 @@
       "substate": null,
       "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-brand.png",
       "exists": true,
-      "sha256": "c82af836144fbaf1cf2534ee092226c3982ee77c2d21e174b67a3a03f65a2427"
+      "sha256": "dae2965aeb82e9ddf9655ff3334b3de5390ef87b1201540cf5151b5862c1b4a3"
     },
     {
       "role": "admin",
@@ -893,7 +893,7 @@
       "substate": null,
       "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-strategy.png",
       "exists": true,
-      "sha256": "abc6f47e47551cb6839b08663d400e6c19603c8294b33e2d9d6fc627d5a49113"
+      "sha256": "dbb0fe6fd261fe341301cc51d83cdd75b5d9f0ef29dea71d59691e366bd01b3c"
     },
     {
       "role": "admin",
@@ -905,7 +905,7 @@
       },
       "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-demand-ppt.png",
       "exists": true,
-      "sha256": "00ce6579d36f90b4d404108afac608b060c59d16784092893dc850beeefa79b3"
+      "sha256": "63883748e209704db3611c61c012c29b41d8959af4a859c3cec8fdd84edaf016"
     },
     {
       "role": "admin",
@@ -917,7 +917,7 @@
       },
       "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-m4-tab1.png",
       "exists": true,
-      "sha256": "16c374099021de922968ae3764d825f6180c3c891c2372bf09d158e4e43af7c2"
+      "sha256": "544d75daf73d88dbed8e99682052ecfc0c13571ba9dc963303914ff0b3ae9e3b"
     },
     {
       "role": "admin",
@@ -929,7 +929,7 @@
       },
       "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-m4-tab2.png",
       "exists": true,
-      "sha256": "fdb3221e5c0c4dc896dda4720888e74ea8f5adbe5afe066fb687cb683a227051"
+      "sha256": "8182f86ef4390dc0a564f8c2aa281cd89041b28941aed447b08f6a0b2a1ee538"
     },
     {
       "role": "admin",
@@ -941,7 +941,7 @@
       },
       "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-m4-tab3.png",
       "exists": true,
-      "sha256": "51cfc189b0c72cc4e6dfcf41b34ec561bef01870c91cdf2e22cac71e15b35489"
+      "sha256": "c9ee8b785300dbe45e2a411bef78b9d8f4b098b948d608300182f679355bab66"
     },
     {
       "role": "admin",
@@ -951,7 +951,7 @@
       "substate": null,
       "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-ai.png",
       "exists": true,
-      "sha256": "8eb0321dbc351d71ec43d0c13a1c16d164abdab4966cfb35d0aedc20a7b5bf12"
+      "sha256": "4f2f531a9acb30180e10f6cbe95a0e0f80a48c19b3cb08ee0eef9c60dfb59aa1"
     },
     {
       "role": "admin",
@@ -961,7 +961,7 @@
       "substate": null,
       "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-workflow-designer.png",
       "exists": true,
-      "sha256": "1dde7d7612204ee17369b022f11f34021c87e3665041c5ee7ae23530e280b8e9"
+      "sha256": "d56090f7fb36256b902e9bca49662d26ae454dd9fc0bff538b7a6cd59794152b"
     },
     {
       "role": "admin",
@@ -971,7 +971,7 @@
       "substate": null,
       "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-workflow-templates.png",
       "exists": true,
-      "sha256": "012e73b492b4a0f60fedc70ea738b06a881479edb2058384e98e8071c787c8a5"
+      "sha256": "fdfa8a0a6e93da88113e9073ba85d87074d9943a7c8b339389ca7c489d701c44"
     },
     {
       "role": "admin",
@@ -981,7 +981,7 @@
       "substate": null,
       "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-workflow-instances.png",
       "exists": true,
-      "sha256": "5180176d8713e38a93e8942b936eec669e7c981c5b5a7ad15ee8e4e69d46d19f"
+      "sha256": "df964f99b6e89af546c91940d90c0f4274852ec0b27a952d1e2ec6abbc5a86c7"
     },
     {
       "role": "admin",
@@ -991,7 +991,7 @@
       "substate": null,
       "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-workflow-tasks.png",
       "exists": true,
-      "sha256": "31fefa02213e2ed22ed3a50746e34ad6112c9a7f3c74d51098de65cbddb4f6bc"
+      "sha256": "cec9f82e15e07a73f0989add7b3bb69599232eae4d7bbbe9ff431267cd08585f"
     },
     {
       "role": "admin",
@@ -1003,7 +1003,7 @@
       },
       "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-admin-overview.png",
       "exists": true,
-      "sha256": "511ee1ae9c3393c23f53603faa39ea4c9c5ec8594176e94a793598f0156cb131"
+      "sha256": "c52a1a6c6f02fedd9ecd1a8f3503478a22df1cc65035dcf5dae0bc3b8b7b82cb"
     },
     {
       "role": "admin",
@@ -1015,7 +1015,7 @@
       },
       "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-admin-users.png",
       "exists": true,
-      "sha256": "44daa53cd34a0a1c838977fb01490158b046dfe5b621da52c0f536e7fc5ac7cc"
+      "sha256": "3fcfdf788d95e61934809205e85505484815e6edf5b65d205fc6df56d744760c"
     },
     {
       "role": "admin",
@@ -1027,7 +1027,7 @@
       },
       "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-admin-knowledge.png",
       "exists": true,
-      "sha256": "8a02a35d7a5d5c00a07795b5173fc3759eb3cc7f187bf994725c3f79c3bccf36"
+      "sha256": "ee34233d26008de2653388fb5685b37459574783409e2475467963c7de7c42f0"
     },
     {
       "role": "admin",
@@ -1039,7 +1039,7 @@
       },
       "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-admin-ai-audit.png",
       "exists": true,
-      "sha256": "52844f70b1e4d35d95c7d93f9e4c59450c4f6b79faddc807e109e049c57c7f3b"
+      "sha256": "47e9f8c805319dfc10c7e17224e7b4da583d167531282649e5c149a1ead0f1de"
     },
     {
       "role": "admin",
@@ -1051,7 +1051,7 @@
       },
       "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-admin-tokens.png",
       "exists": true,
-      "sha256": "e701d636a861265dcf9dba8a2aca91c367a731d96d1187c02e80f8680bb7ce82"
+      "sha256": "3067dfb1c3322173e136a5a998241933e2f4fb4e7cd7d9622fdfc10ca995803e"
     },
     {
       "role": "user",
@@ -1061,7 +1061,7 @@
       "substate": null,
       "path": "docs/baselines/v0.2.9/screenshots/user/fixture-1440/user-crm-board.png",
       "exists": true,
-      "sha256": "f24315e65ba0a5e1f78143a868ddea5f504d26de601693dd7e0172d86cceadf9"
+      "sha256": "2bed0e59386de76ebe9eaab5a73bb82786db88e56d04cb1cd28a7cc368cf6d80"
     },
     {
       "role": "user",
@@ -1073,7 +1073,7 @@
       },
       "path": "docs/baselines/v0.2.9/screenshots/user/fixture-1440/user-crm-detail.png",
       "exists": true,
-      "sha256": "5381403622fcb64cb867d94959af00d63c7003698fa5d64970c084f9a43cd070"
+      "sha256": "59e46ab7d804c7cd2b4e57f6b38fa9e8607bfd769703f20bd116c60c6ef04e81"
     },
     {
       "role": "user",
@@ -1083,7 +1083,7 @@
       "substate": null,
       "path": "docs/baselines/v0.2.9/screenshots/user/fixture-1440/user-ai.png",
       "exists": true,
-      "sha256": "b85b4bdb9b2eb0b3c72b0e44005b530ffba05a7edec8220e56ce017849cc88d7"
+      "sha256": "e6f4c6af0129d77f8a27cbe8f8f6189e6714c8eb26c271cbcb8fea920443f27c"
     },
     {
       "role": "public",
@@ -1093,7 +1093,7 @@
       "substate": null,
       "path": "docs/baselines/v0.2.9/screenshots/public/fixture-1920/public-login.png",
       "exists": true,
-      "sha256": "88cbd823e934871a2ded1279aa56aa5b5b118abcfbe97bd6d9057507b01a7b0e"
+      "sha256": "ea87d7f7fb7ad6b02a02663536bb4cdf226479b18ccf626920c39d01ae1ca30e"
     },
     {
       "role": "admin",
@@ -1103,7 +1103,7 @@
       "substate": null,
       "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-crm-board.png",
       "exists": true,
-      "sha256": "dd65f93035a72fb7df324d3d35add4dc9efe20b09a37c9994860f3a070eb796d"
+      "sha256": "37049bcf4d7cf57ac45a2dfaabc6ab59150417c6104652a8ac477020c0476560"
     },
     {
       "role": "admin",
@@ -1115,7 +1115,7 @@
       },
       "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-crm-detail-pipeline.png",
       "exists": true,
-      "sha256": "434e87fcca3508f9cb11a4c589ea2eca76d028e67abcc23f4ec34a7e4d38867c"
+      "sha256": "00aecdd156aeb8801538d5031bb13b4a2a0e971e84b7ff51d898e8438fe949d6"
     },
     {
       "role": "admin",
@@ -1127,7 +1127,7 @@
       },
       "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-crm-detail-seapool.png",
       "exists": true,
-      "sha256": "c5e5301f251d932331d8f3b6a59c08692d252a35be57149869808ecc6c890c34"
+      "sha256": "b97c1dfafc048fdb8ea74a9f6e2fb6cf5f2a72e7c26ddb74f728f9aeec85abd2"
     },
     {
       "role": "admin",
@@ -1139,7 +1139,7 @@
       },
       "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-crm-detail-opportunities.png",
       "exists": true,
-      "sha256": "6ec067e42881df61c2638b306e1c440d1e944561500014137fff2bf3ec7d88e7"
+      "sha256": "00bdb208f3867e264afb7684a4044cfff2561a07c2fbddf4553f3ed9544fc79d"
     },
     {
       "role": "admin",
@@ -1149,7 +1149,7 @@
       "substate": null,
       "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-brand.png",
       "exists": true,
-      "sha256": "8d87745a0a1b4c64f7493b5a37ba55ad6d11b6586d6c7b7bb9b9d1bba6db6c53"
+      "sha256": "5422324a5d16f22ad7ce8867e396a7290f1ec6b92575be59519be7c03af47cda"
     },
     {
       "role": "admin",
@@ -1159,7 +1159,7 @@
       "substate": null,
       "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-strategy.png",
       "exists": true,
-      "sha256": "9d7b02d05cb54ae83e602972e05849e76faa6570403f997aef84fd0c94c5ae5d"
+      "sha256": "17cec6a0870fd1a5da79ef0ffb623e859b1227bb8e6af1033e38e4f4dd2bfca3"
     },
     {
       "role": "admin",
@@ -1171,7 +1171,7 @@
       },
       "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-demand-ppt.png",
       "exists": true,
-      "sha256": "cb4f4ad3592398e30dbdb2050282e1e91e6fcd176972a2b3204dad264e8b58b3"
+      "sha256": "7f1a16003c1dd1eabb467d04b832e5604a79629b0ed4e7ff73b61e225d3f2a8f"
     },
     {
       "role": "admin",
@@ -1183,7 +1183,7 @@
       },
       "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-m4-tab1.png",
       "exists": true,
-      "sha256": "ae8d10ee1ca78815599a1b8837fbd39ed55cda5bb0bfa7dfe1f8193317048d42"
+      "sha256": "0f2ca4a5216eff6850b988d0a00f69da9a3256fcc2eee1fcd69239bfc68da125"
     },
     {
       "role": "admin",
@@ -1195,7 +1195,7 @@
       },
       "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-m4-tab2.png",
       "exists": true,
-      "sha256": "8a3d6285aa6c5719897905e923373f3da18ca7809e2feefe7a010f71c30e2575"
+      "sha256": "29f5b16f9ae5bce1c02148dab7e3c6788de85a2388611ed1d059a819a605d194"
     },
     {
       "role": "admin",
@@ -1207,7 +1207,7 @@
       },
       "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-m4-tab3.png",
       "exists": true,
-      "sha256": "ce7d66419c5c3686bfb37fd458b0ab2a3daceb5fa9b6eb1c5083fa381d9d0592"
+      "sha256": "324e42e7ead6885cfde72c8ebcc7f5de6c61034582af5e63ba96559c2163b014"
     },
     {
       "role": "admin",
@@ -1217,7 +1217,7 @@
       "substate": null,
       "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-ai.png",
       "exists": true,
-      "sha256": "792a9983236efe3400a04518e5ed8d12d1c9547e3b66644b8bf088342fddce15"
+      "sha256": "789632a60a2ba6e03443ff32660926b7a64c02f0de76366e698d9aaa414bf576"
     },
     {
       "role": "admin",
@@ -1227,7 +1227,7 @@
       "substate": null,
       "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-workflow-designer.png",
       "exists": true,
-      "sha256": "ffe948cbcdfc3bb49df8f9d5566e70e69eeba0169eb9691e16860098b720762c"
+      "sha256": "bf0685de9b82b3300a5f02f2b636b5b67ec8d52626558f16e72363e2f59dd906"
     },
     {
       "role": "admin",
@@ -1237,7 +1237,7 @@
       "substate": null,
       "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-workflow-templates.png",
       "exists": true,
-      "sha256": "83327c1aadd4490f5d0c40fbbcf1b43095acfe4af0ab6a949b9a813f66469dc4"
+      "sha256": "7f7f23bbdccf1835998664d4b95098796dfb37cdc13f46763035483b21f56fcc"
     },
     {
       "role": "admin",
@@ -1247,7 +1247,7 @@
       "substate": null,
       "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-workflow-instances.png",
       "exists": true,
-      "sha256": "29a0fc43b330ea6e7e13a1ddc4e7d5e355c5ae3124385f8dd0e902d875e3c4f0"
+      "sha256": "b752a285690c196979d163fa39c6cf4a8d1bed2cbda6bb284fb82761655c51d3"
     },
     {
       "role": "admin",
@@ -1257,7 +1257,7 @@
       "substate": null,
       "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-workflow-tasks.png",
       "exists": true,
-      "sha256": "a01a2f3ee47fc19c33fda0fefb40ab4a3af14a296f4aed660bfc6a369818bfdc"
+      "sha256": "4e23907c33c804fd1d01e4bf78ca2650f1770689df780d6fa302c4ccaede324e"
     },
     {
       "role": "admin",
@@ -1269,7 +1269,7 @@
       },
       "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-admin-overview.png",
       "exists": true,
-      "sha256": "a3d8fcd1f896c81d9094c3fd6fba5b53fca7713fe84651bd6f4585988d0b2b2d"
+      "sha256": "3c92f312c3526458daced0c38944746158ba2d516e4cce534ab596094f282d90"
     },
     {
       "role": "admin",
@@ -1281,7 +1281,7 @@
       },
       "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-admin-users.png",
       "exists": true,
-      "sha256": "156a70ac017f50a1ee3f34ecbedcd5b7347936ea8553476f22f1138120f5957b"
+      "sha256": "850cee98460699ecb9b8e3c815e3f292c62e7b785e43de2885fe5fefa83b1b4e"
     },
     {
       "role": "admin",
@@ -1293,7 +1293,7 @@
       },
       "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-admin-knowledge.png",
       "exists": true,
-      "sha256": "2c51a21dbd7220c2712642e1920e0b43031073f160b4d58b4d43a0a899d18dd1"
+      "sha256": "ac63b81e2586d2e687763622206b1a3c37b2e7b07710b95408ef3f4fe6abbaba"
     },
     {
       "role": "admin",
@@ -1305,7 +1305,7 @@
       },
       "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-admin-ai-audit.png",
       "exists": true,
-      "sha256": "b7a177cbe9418f25b183ad7b086f9d6ad230cced300c1a678a378280d09fb0f2"
+      "sha256": "0ad90d0261c2d6f73d3055e151f3b696d8e95202d25207f95e63ecf5ec295a40"
     },
     {
       "role": "admin",
@@ -1317,7 +1317,7 @@
       },
       "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-admin-tokens.png",
       "exists": true,
-      "sha256": "5bc1e2bc8203f6b69efce9a063bfab09c22a9a34571cf002c91672d731e03dff"
+      "sha256": "91844a99b5a978fed8bc082a1d91e1251cdef333fb00555d78a73d52a371bf66"
     },
     {
       "role": "user",
@@ -1327,7 +1327,7 @@
       "substate": null,
       "path": "docs/baselines/v0.2.9/screenshots/user/fixture-1920/user-crm-board.png",
       "exists": true,
-      "sha256": "27846304ebe3ca13d7b79f4dd7a645ee0b462486152e53160d279588473c82d3"
+      "sha256": "f4cb2188c31d83009fca3e55c972f144150a2331f6848c45500af25c5fc79172"
     },
     {
       "role": "user",
@@ -1339,7 +1339,7 @@
       },
       "path": "docs/baselines/v0.2.9/screenshots/user/fixture-1920/user-crm-detail.png",
       "exists": true,
-      "sha256": "c0452bf73953519498b56f8189560d87e51f73724b76caac6ce47649276b836f"
+      "sha256": "d086193bf760c363b53aae126bc8f2387ad806e0e2c5a5f657f2369505bbb241"
     },
     {
       "role": "user",
@@ -1349,7 +1349,7 @@
       "substate": null,
       "path": "docs/baselines/v0.2.9/screenshots/user/fixture-1920/user-ai.png",
       "exists": true,
-      "sha256": "29312801e84c61f7d74908d2adc13fc1515f7fa9b0c08819dc9bbb73443bacc6"
+      "sha256": "bf4d7c82236ab93fb1266043daa8ed79aa1565a8b2c03ae7bc0ad727019493ce"
     },
     {
       "role": "public",
@@ -1359,7 +1359,7 @@
       "substate": null,
       "path": "docs/baselines/v0.2.9/screenshots/public/fixture-mobile/public-login.png",
       "exists": true,
-      "sha256": "2267edcba066a78809dc1b0c207afe17e656b1b0a499bddecdab4da664d08d5c"
+      "sha256": "39fa6d83dd411958b4d757b005fb98873b204d27fa9985643fe448bc97374fec"
     },
     {
       "role": "admin",
@@ -1369,7 +1369,7 @@
       "substate": null,
       "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-crm-board.png",
       "exists": true,
-      "sha256": "9a242659744b867561b2a30968b393b4151cf2603674e916afc4441b1ed04465"
+      "sha256": "2a4570d0575bb570053bb88d4a66ccceaa6a99f3e1bc815c9fba912c1a13901f"
     },
     {
       "role": "admin",
@@ -1381,7 +1381,7 @@
       },
       "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-crm-detail-pipeline.png",
       "exists": true,
-      "sha256": "26fdda92d9418aaad97220a325772bf419aee9667d5266c452adcb4c1653f039"
+      "sha256": "a50dff248d3d91b45d7771dfd8b67ebb0b030a9bb53a241d5cd7a42482f0a02e"
     },
     {
       "role": "admin",
@@ -1393,7 +1393,7 @@
       },
       "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-crm-detail-seapool.png",
       "exists": true,
-      "sha256": "899194486569a4a93592eb0da88a64d0da30625e1cdde82b5d169e947f1880b7"
+      "sha256": "1e019da083db2308507e6338aa2b71a4fa43c9ff4c68f5bd0ef15c2939462135"
     },
     {
       "role": "admin",
@@ -1405,7 +1405,7 @@
       },
       "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-crm-detail-opportunities.png",
       "exists": true,
-      "sha256": "dbe4fc61b59820ef388a2d9f2b4c6a645ac851d1b38dcb285375bff2901b8fb9"
+      "sha256": "ad29cd431f2abed95ce4394015b942feda4584522f49e46f0407ad9fc294b5ef"
     },
     {
       "role": "admin",
@@ -1415,7 +1415,7 @@
       "substate": null,
       "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-brand.png",
       "exists": true,
-      "sha256": "58744cdcc908f9f77c68a7ca996a54b826f9c8739233de5827bffb4a2035849a"
+      "sha256": "1532f8d72526324867bd098da35552b1ef2355b2f5daccdd89cad290075fbee8"
     },
     {
       "role": "admin",
@@ -1425,7 +1425,7 @@
       "substate": null,
       "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-strategy.png",
       "exists": true,
-      "sha256": "ddcebd22a42421e31d41073fdd15cc343276de77dec6ce48d5908c03ae3915b1"
+      "sha256": "845fb5f32cd5894787f659c41c48a37a630e50b3b6c628734715557f5314a018"
     },
     {
       "role": "admin",
@@ -1437,7 +1437,7 @@
       },
       "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-demand-ppt.png",
       "exists": true,
-      "sha256": "fce8f896fb8814ade7c710d58deb46ae64a65ee63b12dc3df880cc155a747081"
+      "sha256": "9710f91437a5558dae1f472c2523db811d231535298c767bb2270757e6520e99"
     },
     {
       "role": "admin",
@@ -1449,7 +1449,7 @@
       },
       "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-m4-tab1.png",
       "exists": true,
-      "sha256": "a0a824bcc20fb43dcc3f259761bcb0e3da13f69bb1a0704f273751d4a9875f9f"
+      "sha256": "f52e5d7a489839c445aefbde736000149f99576098c0b3b4e728fbf0bf6cb121"
     },
     {
       "role": "admin",
@@ -1461,7 +1461,7 @@
       },
       "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-m4-tab2.png",
       "exists": true,
-      "sha256": "8565a06cc9f6b577d353222caab7f0f24f431ec4e4034b34b55cdfded2955839"
+      "sha256": "588cb1d08a764b9104e390e7474e0171e0ba2f260b9e8951fa344e5ffee22fc2"
     },
     {
       "role": "admin",
@@ -1473,7 +1473,7 @@
       },
       "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-m4-tab3.png",
       "exists": true,
-      "sha256": "68b1a6f21110dc536bcdfe81ae2d4a7b0c39de52329e9d02a051e6f48b7d87e5"
+      "sha256": "961acd979f41339c958e7f39282c278361e1fef4750bfdad290216a6156f38a5"
     },
     {
       "role": "admin",
@@ -1483,7 +1483,7 @@
       "substate": null,
       "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-ai.png",
       "exists": true,
-      "sha256": "1da46470e941fb00dd9814fe7736cbaf78582f6a6f02968a90c58e97e22974c3"
+      "sha256": "f357821486f1a9229317dda6ea25081742ae0519a08d30c28697340a4f7f720f"
     },
     {
       "role": "admin",
@@ -1493,7 +1493,7 @@
       "substate": null,
       "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-workflow-designer.png",
       "exists": true,
-      "sha256": "8dcd2422b5fdfd972e30fd813965aeb550b59d699e43ae2db822b303d56b4b00"
+      "sha256": "ef62e264ccd1b4b8b6b0afe8b6a2400eec18df03b8ac77b3dd8c7e7236e4b3d0"
     },
     {
       "role": "admin",
@@ -1503,7 +1503,7 @@
       "substate": null,
       "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-workflow-templates.png",
       "exists": true,
-      "sha256": "4e42f59bbc9e7bdf3ab708301c29886ec2b4445bfe2a1b670875146cf742239e"
+      "sha256": "7dbb9e17a122cb00e589605423d8c74a9b1683303b50e4aec00e404ffc24b9b1"
     },
     {
       "role": "admin",
@@ -1513,7 +1513,7 @@
       "substate": null,
       "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-workflow-instances.png",
       "exists": true,
-      "sha256": "c768c6886cfeb340be766282eb71dd2c102d0f6f09bc1d4821e8dbc1ac480af0"
+      "sha256": "4e683403b7d8a31063add09ecaccb6c9550e62f6593d96cce433a6be4147990f"
     },
     {
       "role": "admin",
@@ -1523,7 +1523,7 @@
       "substate": null,
       "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-workflow-tasks.png",
       "exists": true,
-      "sha256": "b29a7fe1434a24b123ba88674f6df7c571620eb9e58ecccb4340d8901f14b68c"
+      "sha256": "3f20860ecaaa559dea601dc118b517f769ca7a52efe100e88329e1dd51ab5d1a"
     },
     {
       "role": "admin",
@@ -1535,7 +1535,7 @@
       },
       "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-admin-overview.png",
       "exists": true,
-      "sha256": "c0be8647d14e011cb9a52a6d6b04a0ddc48e05960581fb43b0054c058b5becbd"
+      "sha256": "c248f1d82b3f438f793c356a79e8e290c90de976094126c99317ced455ac9fa2"
     },
     {
       "role": "admin",
@@ -1547,7 +1547,7 @@
       },
       "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-admin-users.png",
       "exists": true,
-      "sha256": "546b36325c57ae3aa8ad6023aae8c88871f00b9c7db312593c1b3ca53b0b54a9"
+      "sha256": "9997c61f89adb762e065bb2d29477ccb9b1a8e61ff9bc9f4948121982a1e4734"
     },
     {
       "role": "admin",
@@ -1559,7 +1559,7 @@
       },
       "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-admin-knowledge.png",
       "exists": true,
-      "sha256": "490bef96884d5d22d4689393522aa0ad7dc076535009878ecde7d69ed1c0924b"
+      "sha256": "e9d90862fd0c3ebdfb564413a50571ded874cf23cf8e7053ad7858cbdb58b267"
     },
     {
       "role": "admin",
@@ -1571,7 +1571,7 @@
       },
       "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-admin-ai-audit.png",
       "exists": true,
-      "sha256": "ac8e7d06f226f41387f1ac34011a6a0db268a44546d166006860953310026194"
+      "sha256": "4c7e5973e4df9b3e9cdb14c9af034ec4427745c58c2689790efe6d3ef7c19d84"
     },
     {
       "role": "admin",
@@ -1583,7 +1583,7 @@
       },
       "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-admin-tokens.png",
       "exists": true,
-      "sha256": "e0e64094c0e06e15e8ad5b9e8b5961c92dcd48944dd8769a4e69f05363d43dbf"
+      "sha256": "c9c05212f3ace16bf05e2dbed33d449ea1e6e30b352edd83210a9b25bbe04d2d"
     },
     {
       "role": "user",
@@ -1593,7 +1593,7 @@
       "substate": null,
       "path": "docs/baselines/v0.2.9/screenshots/user/fixture-mobile/user-crm-board.png",
       "exists": true,
-      "sha256": "6133e4b9c0c28db248d430ca943022f632012180958ad7c7b778e1c7e92cba10"
+      "sha256": "2a4570d0575bb570053bb88d4a66ccceaa6a99f3e1bc815c9fba912c1a13901f"
     },
     {
       "role": "user",
@@ -1605,7 +1605,7 @@
       },
       "path": "docs/baselines/v0.2.9/screenshots/user/fixture-mobile/user-crm-detail.png",
       "exists": true,
-      "sha256": "8d3d8112c14bae31a016a8c41274244816f233ab89ed7564e223a5f47de956fe"
+      "sha256": "375690ad72c6ad6a67d4a3d742eed95923513e771d497d654d22462926870d78"
     },
     {
       "role": "user",
@@ -1615,7 +1615,7 @@
       "substate": null,
       "path": "docs/baselines/v0.2.9/screenshots/user/fixture-mobile/user-ai.png",
       "exists": true,
-      "sha256": "e2415f0f427ae064045a9e3bb9e3bd22b5d3f3750f049ac61c1e364cb212ab53"
+      "sha256": "f357821486f1a9229317dda6ea25081742ae0519a08d30c28697340a4f7f720f"
     }
   ],
   "duplicateInventory": {
@@ -3638,7 +3638,7 @@
     "maxDiffPixelRatio": 0.005,
     "maxObservedDiffRatio": 0,
     "totalDiffPixels": 0,
-    "totalRawDiffPixels": 152,
+    "totalRawDiffPixels": 313,
     "fileCount": 72,
     "left": {
       "label": "baseline-run-a",
@@ -3809,12 +3809,6 @@
         "observed": "After switching to M4, document.body remains the active element."
       },
       {
-        "contract": "mobile-shell-content",
-        "status": "known-baseline-gap",
-        "ownerPhase": 3,
-        "reason": "The pre-edit fixed sidebar occupies the 390px viewport and leaves page content outside the first mobile viewport."
-      },
-      {
         "contract": "admin-knowledge-loader",
         "status": "known-baseline-gap",
         "ownerPhase": 6,
@@ -3824,8 +3818,8 @@
     "screenshots": [
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-admin-ai-audit.png",
-        "leftSha256": "af730ad48a0791b95dc410f646879bb9b1ec632de78cd489f00438c717147840",
-        "rightSha256": "af730ad48a0791b95dc410f646879bb9b1ec632de78cd489f00438c717147840",
+        "leftSha256": "47e9f8c805319dfc10c7e17224e7b4da583d167531282649e5c149a1ead0f1de",
+        "rightSha256": "47e9f8c805319dfc10c7e17224e7b4da583d167531282649e5c149a1ead0f1de",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -3833,12 +3827,12 @@
         "maxChannelDelta": 0,
         "width": 1440,
         "height": 900,
-        "bytes": 304693
+        "bytes": 51899
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-admin-knowledge.png",
-        "leftSha256": "309128404aa0d2657e17c4ac77521200b3491a048859379d51542fbe9bf98c3b",
-        "rightSha256": "309128404aa0d2657e17c4ac77521200b3491a048859379d51542fbe9bf98c3b",
+        "leftSha256": "ee34233d26008de2653388fb5685b37459574783409e2475467963c7de7c42f0",
+        "rightSha256": "ee34233d26008de2653388fb5685b37459574783409e2475467963c7de7c42f0",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -3846,12 +3840,12 @@
         "maxChannelDelta": 0,
         "width": 1440,
         "height": 900,
-        "bytes": 344605
+        "bytes": 44961
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-admin-overview.png",
-        "leftSha256": "c81368f67056ba577360ec33ef903e2bf3cb3e5f47a36da9422512f6c7b0325f",
-        "rightSha256": "c81368f67056ba577360ec33ef903e2bf3cb3e5f47a36da9422512f6c7b0325f",
+        "leftSha256": "c52a1a6c6f02fedd9ecd1a8f3503478a22df1cc65035dcf5dae0bc3b8b7b82cb",
+        "rightSha256": "c52a1a6c6f02fedd9ecd1a8f3503478a22df1cc65035dcf5dae0bc3b8b7b82cb",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -3859,12 +3853,12 @@
         "maxChannelDelta": 0,
         "width": 1440,
         "height": 900,
-        "bytes": 303460
+        "bytes": 87335
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-admin-tokens.png",
-        "leftSha256": "aa8f9e5c30552c5a8a2a7b5f609d3a1103ba74f21211ba092e90d8a2f06b4479",
-        "rightSha256": "aa8f9e5c30552c5a8a2a7b5f609d3a1103ba74f21211ba092e90d8a2f06b4479",
+        "leftSha256": "3067dfb1c3322173e136a5a998241933e2f4fb4e7cd7d9622fdfc10ca995803e",
+        "rightSha256": "3067dfb1c3322173e136a5a998241933e2f4fb4e7cd7d9622fdfc10ca995803e",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -3872,12 +3866,12 @@
         "maxChannelDelta": 0,
         "width": 1440,
         "height": 900,
-        "bytes": 334594
+        "bytes": 44632
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-admin-users.png",
-        "leftSha256": "a9a71538972e50cb671fe3d75b2e702fbf8e9c4303a577d3bf810ca8ff02cf0d",
-        "rightSha256": "a9a71538972e50cb671fe3d75b2e702fbf8e9c4303a577d3bf810ca8ff02cf0d",
+        "leftSha256": "3fcfdf788d95e61934809205e85505484815e6edf5b65d205fc6df56d744760c",
+        "rightSha256": "3fcfdf788d95e61934809205e85505484815e6edf5b65d205fc6df56d744760c",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -3885,12 +3879,12 @@
         "maxChannelDelta": 0,
         "width": 1440,
         "height": 900,
-        "bytes": 292293
+        "bytes": 59381
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-ai.png",
-        "leftSha256": "8eb0321dbc351d71ec43d0c13a1c16d164abdab4966cfb35d0aedc20a7b5bf12",
-        "rightSha256": "8eb0321dbc351d71ec43d0c13a1c16d164abdab4966cfb35d0aedc20a7b5bf12",
+        "leftSha256": "4f2f531a9acb30180e10f6cbe95a0e0f80a48c19b3cb08ee0eef9c60dfb59aa1",
+        "rightSha256": "4f2f531a9acb30180e10f6cbe95a0e0f80a48c19b3cb08ee0eef9c60dfb59aa1",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -3898,12 +3892,12 @@
         "maxChannelDelta": 0,
         "width": 1440,
         "height": 900,
-        "bytes": 246906
+        "bytes": 55166
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-brand.png",
-        "leftSha256": "c82af836144fbaf1cf2534ee092226c3982ee77c2d21e174b67a3a03f65a2427",
-        "rightSha256": "c82af836144fbaf1cf2534ee092226c3982ee77c2d21e174b67a3a03f65a2427",
+        "leftSha256": "dae2965aeb82e9ddf9655ff3334b3de5390ef87b1201540cf5151b5862c1b4a3",
+        "rightSha256": "dae2965aeb82e9ddf9655ff3334b3de5390ef87b1201540cf5151b5862c1b4a3",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -3911,12 +3905,12 @@
         "maxChannelDelta": 0,
         "width": 1440,
         "height": 900,
-        "bytes": 357603
+        "bytes": 124106
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-crm-board.png",
-        "leftSha256": "8fcf7c5e5a0e4e6555d17146b2ca4617e3fcbeeac6131e33c8384feac3727e16",
-        "rightSha256": "8fcf7c5e5a0e4e6555d17146b2ca4617e3fcbeeac6131e33c8384feac3727e16",
+        "leftSha256": "414383d557555bc5832de76a6b6dddf8a5c8529666af86cd2c859d8a860f20e5",
+        "rightSha256": "414383d557555bc5832de76a6b6dddf8a5c8529666af86cd2c859d8a860f20e5",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -3924,51 +3918,51 @@
         "maxChannelDelta": 0,
         "width": 1440,
         "height": 900,
-        "bytes": 425229
+        "bytes": 104230
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-crm-detail-opportunities.png",
-        "leftSha256": "7dc16d0329c1cc84a5f2cade0853dbe2071f9bc245db9612ca905b47669981a8",
-        "rightSha256": "728d037ff46aeb7e78820d6c2b6979522414bfe4143596b39eb38ddcb6d6baf6",
+        "leftSha256": "09f11fc119951d7edcd8a2511803c1f66f7e708a427964d9e869033f00046db1",
+        "rightSha256": "401543601c4753ffc36f50f33683d8c024a348e5fb59c41a841a4e208e2b4175",
         "identical": false,
         "diffPixels": 0,
         "diffPixelRatio": 0,
-        "rawDiffPixels": 34,
-        "maxChannelDelta": 6,
+        "rawDiffPixels": 70,
+        "maxChannelDelta": 4,
         "width": 1440,
         "height": 900,
-        "bytes": 366477
+        "bytes": 55586
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-crm-detail-pipeline.png",
-        "leftSha256": "e3bc11d52c6537cc81f26c7fa00bc6c50b3e6434a3ca7210b8d4ae40aeddf733",
-        "rightSha256": "e3bc11d52c6537cc81f26c7fa00bc6c50b3e6434a3ca7210b8d4ae40aeddf733",
-        "identical": true,
+        "leftSha256": "68d7f916c905a1d266990d9777edac446429be550cfffd8c218ff10c926d8204",
+        "rightSha256": "5367f88f2ac34d83029a4a0b8e4754d28b8d0341a14140b37c0aa9a87916052a",
+        "identical": false,
         "diffPixels": 0,
         "diffPixelRatio": 0,
-        "rawDiffPixels": 0,
-        "maxChannelDelta": 0,
+        "rawDiffPixels": 46,
+        "maxChannelDelta": 1,
         "width": 1440,
         "height": 900,
-        "bytes": 368060
+        "bytes": 89098
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-crm-detail-seapool.png",
-        "leftSha256": "1e8e0920a6affb7795304786453f67ec74737bcd15437e2a2c872682cde8f66b",
-        "rightSha256": "1e8e0920a6affb7795304786453f67ec74737bcd15437e2a2c872682cde8f66b",
-        "identical": true,
+        "leftSha256": "b1b5bbbe95e020c324a911cbe0b3f8ca5c31d172c7248f7b9045ae5f5582c2da",
+        "rightSha256": "682c9e6c242fa1640e798d498a53237a6e9104657d783b1ad87b281d5fb48152",
+        "identical": false,
         "diffPixels": 0,
         "diffPixelRatio": 0,
-        "rawDiffPixels": 0,
-        "maxChannelDelta": 0,
+        "rawDiffPixels": 69,
+        "maxChannelDelta": 9,
         "width": 1440,
         "height": 900,
-        "bytes": 391758
+        "bytes": 81854
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-demand-ppt.png",
-        "leftSha256": "00ce6579d36f90b4d404108afac608b060c59d16784092893dc850beeefa79b3",
-        "rightSha256": "00ce6579d36f90b4d404108afac608b060c59d16784092893dc850beeefa79b3",
+        "leftSha256": "63883748e209704db3611c61c012c29b41d8959af4a859c3cec8fdd84edaf016",
+        "rightSha256": "63883748e209704db3611c61c012c29b41d8959af4a859c3cec8fdd84edaf016",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -3976,12 +3970,12 @@
         "maxChannelDelta": 0,
         "width": 1440,
         "height": 900,
-        "bytes": 310536
+        "bytes": 68043
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-m4-tab1.png",
-        "leftSha256": "6f2d0abeea670635fa6b8ebce9fcfcbdbc96370673b13d6fbc7b02e3f5eca2e4",
-        "rightSha256": "6f2d0abeea670635fa6b8ebce9fcfcbdbc96370673b13d6fbc7b02e3f5eca2e4",
+        "leftSha256": "544d75daf73d88dbed8e99682052ecfc0c13571ba9dc963303914ff0b3ae9e3b",
+        "rightSha256": "544d75daf73d88dbed8e99682052ecfc0c13571ba9dc963303914ff0b3ae9e3b",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -3989,12 +3983,12 @@
         "maxChannelDelta": 0,
         "width": 1440,
         "height": 900,
-        "bytes": 318313
+        "bytes": 65060
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-m4-tab2.png",
-        "leftSha256": "1d275e0566601d05ec9cd51b558e3fc2de521258a52703c488552ddf78bf3d63",
-        "rightSha256": "1d275e0566601d05ec9cd51b558e3fc2de521258a52703c488552ddf78bf3d63",
+        "leftSha256": "8182f86ef4390dc0a564f8c2aa281cd89041b28941aed447b08f6a0b2a1ee538",
+        "rightSha256": "8182f86ef4390dc0a564f8c2aa281cd89041b28941aed447b08f6a0b2a1ee538",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -4002,12 +3996,12 @@
         "maxChannelDelta": 0,
         "width": 1440,
         "height": 900,
-        "bytes": 342693
+        "bytes": 59987
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-m4-tab3.png",
-        "leftSha256": "afdfe0d52428925d79539c3f9c1b6aba0237f969633beb66002696c6932f0024",
-        "rightSha256": "afdfe0d52428925d79539c3f9c1b6aba0237f969633beb66002696c6932f0024",
+        "leftSha256": "c9ee8b785300dbe45e2a411bef78b9d8f4b098b948d608300182f679355bab66",
+        "rightSha256": "c9ee8b785300dbe45e2a411bef78b9d8f4b098b948d608300182f679355bab66",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -4015,12 +4009,12 @@
         "maxChannelDelta": 0,
         "width": 1440,
         "height": 900,
-        "bytes": 345244
+        "bytes": 69055
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-strategy.png",
-        "leftSha256": "abc6f47e47551cb6839b08663d400e6c19603c8294b33e2d9d6fc627d5a49113",
-        "rightSha256": "abc6f47e47551cb6839b08663d400e6c19603c8294b33e2d9d6fc627d5a49113",
+        "leftSha256": "dbb0fe6fd261fe341301cc51d83cdd75b5d9f0ef29dea71d59691e366bd01b3c",
+        "rightSha256": "dbb0fe6fd261fe341301cc51d83cdd75b5d9f0ef29dea71d59691e366bd01b3c",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -4028,12 +4022,12 @@
         "maxChannelDelta": 0,
         "width": 1440,
         "height": 900,
-        "bytes": 318257
+        "bytes": 63230
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-workflow-designer.png",
-        "leftSha256": "1dde7d7612204ee17369b022f11f34021c87e3665041c5ee7ae23530e280b8e9",
-        "rightSha256": "1dde7d7612204ee17369b022f11f34021c87e3665041c5ee7ae23530e280b8e9",
+        "leftSha256": "d56090f7fb36256b902e9bca49662d26ae454dd9fc0bff538b7a6cd59794152b",
+        "rightSha256": "d56090f7fb36256b902e9bca49662d26ae454dd9fc0bff538b7a6cd59794152b",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -4041,12 +4035,12 @@
         "maxChannelDelta": 0,
         "width": 1440,
         "height": 900,
-        "bytes": 189253
+        "bytes": 44893
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-workflow-instances.png",
-        "leftSha256": "5180176d8713e38a93e8942b936eec669e7c981c5b5a7ad15ee8e4e69d46d19f",
-        "rightSha256": "5180176d8713e38a93e8942b936eec669e7c981c5b5a7ad15ee8e4e69d46d19f",
+        "leftSha256": "df964f99b6e89af546c91940d90c0f4274852ec0b27a952d1e2ec6abbc5a86c7",
+        "rightSha256": "df964f99b6e89af546c91940d90c0f4274852ec0b27a952d1e2ec6abbc5a86c7",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -4054,12 +4048,12 @@
         "maxChannelDelta": 0,
         "width": 1440,
         "height": 900,
-        "bytes": 350161
+        "bytes": 46655
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-workflow-tasks.png",
-        "leftSha256": "31fefa02213e2ed22ed3a50746e34ad6112c9a7f3c74d51098de65cbddb4f6bc",
-        "rightSha256": "31fefa02213e2ed22ed3a50746e34ad6112c9a7f3c74d51098de65cbddb4f6bc",
+        "leftSha256": "cec9f82e15e07a73f0989add7b3bb69599232eae4d7bbbe9ff431267cd08585f",
+        "rightSha256": "cec9f82e15e07a73f0989add7b3bb69599232eae4d7bbbe9ff431267cd08585f",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -4067,12 +4061,12 @@
         "maxChannelDelta": 0,
         "width": 1440,
         "height": 900,
-        "bytes": 292039
+        "bytes": 59424
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-workflow-templates.png",
-        "leftSha256": "012e73b492b4a0f60fedc70ea738b06a881479edb2058384e98e8071c787c8a5",
-        "rightSha256": "012e73b492b4a0f60fedc70ea738b06a881479edb2058384e98e8071c787c8a5",
+        "leftSha256": "fdfa8a0a6e93da88113e9073ba85d87074d9943a7c8b339389ca7c489d701c44",
+        "rightSha256": "fdfa8a0a6e93da88113e9073ba85d87074d9943a7c8b339389ca7c489d701c44",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -4080,12 +4074,12 @@
         "maxChannelDelta": 0,
         "width": 1440,
         "height": 900,
-        "bytes": 352906
+        "bytes": 46803
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-admin-ai-audit.png",
-        "leftSha256": "82c2f1fd9b863be80ce15200d94439b4086680decd4451c8651da5ce1e420d93",
-        "rightSha256": "82c2f1fd9b863be80ce15200d94439b4086680decd4451c8651da5ce1e420d93",
+        "leftSha256": "0ad90d0261c2d6f73d3055e151f3b696d8e95202d25207f95e63ecf5ec295a40",
+        "rightSha256": "0ad90d0261c2d6f73d3055e151f3b696d8e95202d25207f95e63ecf5ec295a40",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -4093,12 +4087,12 @@
         "maxChannelDelta": 0,
         "width": 1920,
         "height": 1080,
-        "bytes": 451275
+        "bytes": 55019
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-admin-knowledge.png",
-        "leftSha256": "5ce472813705c4b972c5c743456b7e2054fd601625213e9e674424d1502a806c",
-        "rightSha256": "5ce472813705c4b972c5c743456b7e2054fd601625213e9e674424d1502a806c",
+        "leftSha256": "ac63b81e2586d2e687763622206b1a3c37b2e7b07710b95408ef3f4fe6abbaba",
+        "rightSha256": "ac63b81e2586d2e687763622206b1a3c37b2e7b07710b95408ef3f4fe6abbaba",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -4106,12 +4100,12 @@
         "maxChannelDelta": 0,
         "width": 1920,
         "height": 1080,
-        "bytes": 510725
+        "bytes": 48002
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-admin-overview.png",
-        "leftSha256": "8cea1d8ad5f57c38c9141c4ad08408cbb922975f3ef7c0023213f67d61623e73",
-        "rightSha256": "8cea1d8ad5f57c38c9141c4ad08408cbb922975f3ef7c0023213f67d61623e73",
+        "leftSha256": "3c92f312c3526458daced0c38944746158ba2d516e4cce534ab596094f282d90",
+        "rightSha256": "3c92f312c3526458daced0c38944746158ba2d516e4cce534ab596094f282d90",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -4119,12 +4113,12 @@
         "maxChannelDelta": 0,
         "width": 1920,
         "height": 1080,
-        "bytes": 414217
+        "bytes": 91452
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-admin-tokens.png",
-        "leftSha256": "d899cb29f6cf19d065f08849d06dd2f0d29e1f7281bc6c1bf6209baf74131e49",
-        "rightSha256": "d899cb29f6cf19d065f08849d06dd2f0d29e1f7281bc6c1bf6209baf74131e49",
+        "leftSha256": "91844a99b5a978fed8bc082a1d91e1251cdef333fb00555d78a73d52a371bf66",
+        "rightSha256": "91844a99b5a978fed8bc082a1d91e1251cdef333fb00555d78a73d52a371bf66",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -4132,12 +4126,12 @@
         "maxChannelDelta": 0,
         "width": 1920,
         "height": 1080,
-        "bytes": 498304
+        "bytes": 47906
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-admin-users.png",
-        "leftSha256": "ff29f30c3885abc6939ade8d94be78d2164babfae40a4c6371bf893f920498c7",
-        "rightSha256": "ff29f30c3885abc6939ade8d94be78d2164babfae40a4c6371bf893f920498c7",
+        "leftSha256": "850cee98460699ecb9b8e3c815e3f292c62e7b785e43de2885fe5fefa83b1b4e",
+        "rightSha256": "850cee98460699ecb9b8e3c815e3f292c62e7b785e43de2885fe5fefa83b1b4e",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -4145,12 +4139,12 @@
         "maxChannelDelta": 0,
         "width": 1920,
         "height": 1080,
-        "bytes": 415207
+        "bytes": 62805
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-ai.png",
-        "leftSha256": "792a9983236efe3400a04518e5ed8d12d1c9547e3b66644b8bf088342fddce15",
-        "rightSha256": "792a9983236efe3400a04518e5ed8d12d1c9547e3b66644b8bf088342fddce15",
+        "leftSha256": "789632a60a2ba6e03443ff32660926b7a64c02f0de76366e698d9aaa414bf576",
+        "rightSha256": "789632a60a2ba6e03443ff32660926b7a64c02f0de76366e698d9aaa414bf576",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -4158,12 +4152,12 @@
         "maxChannelDelta": 0,
         "width": 1920,
         "height": 1080,
-        "bytes": 337882
+        "bytes": 58730
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-brand.png",
-        "leftSha256": "8d87745a0a1b4c64f7493b5a37ba55ad6d11b6586d6c7b7bb9b9d1bba6db6c53",
-        "rightSha256": "8d87745a0a1b4c64f7493b5a37ba55ad6d11b6586d6c7b7bb9b9d1bba6db6c53",
+        "leftSha256": "5422324a5d16f22ad7ce8867e396a7290f1ec6b92575be59519be7c03af47cda",
+        "rightSha256": "5422324a5d16f22ad7ce8867e396a7290f1ec6b92575be59519be7c03af47cda",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -4171,38 +4165,38 @@
         "maxChannelDelta": 0,
         "width": 1920,
         "height": 1080,
-        "bytes": 464457
+        "bytes": 148600
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-crm-board.png",
-        "leftSha256": "b5ff41ffc5e16c6cf1496f5fdc33d0d843024c4722f64fea42a4e20f730baa00",
-        "rightSha256": "dd65f93035a72fb7df324d3d35add4dc9efe20b09a37c9994860f3a070eb796d",
-        "identical": false,
+        "leftSha256": "37049bcf4d7cf57ac45a2dfaabc6ab59150417c6104652a8ac477020c0476560",
+        "rightSha256": "37049bcf4d7cf57ac45a2dfaabc6ab59150417c6104652a8ac477020c0476560",
+        "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
-        "rawDiffPixels": 2,
-        "maxChannelDelta": 3,
+        "rawDiffPixels": 0,
+        "maxChannelDelta": 0,
         "width": 1920,
         "height": 1080,
-        "bytes": 597465
+        "bytes": 111883
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-crm-detail-opportunities.png",
-        "leftSha256": "90a59ecfeb3f091aed7eaed5e5a69341596e9cec57a00402d7650adede0250dc",
-        "rightSha256": "8b76db5977ec0a0009da1d1f6f5c4015b05b192ef236878d7d9589185bdf90f2",
+        "leftSha256": "cb6f163da1469c23d239bd2c3821d42ae34ae5cd87e87b00a50c9ce711989798",
+        "rightSha256": "00bdb208f3867e264afb7684a4044cfff2561a07c2fbddf4553f3ed9544fc79d",
         "identical": false,
         "diffPixels": 0,
         "diffPixelRatio": 0,
-        "rawDiffPixels": 19,
-        "maxChannelDelta": 7,
+        "rawDiffPixels": 24,
+        "maxChannelDelta": 5,
         "width": 1920,
         "height": 1080,
-        "bytes": 544336
+        "bytes": 58835
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-crm-detail-pipeline.png",
-        "leftSha256": "556e0e2ee35f764b1b027794621626a5527210ecfaec625e7be8d43181d8bb5f",
-        "rightSha256": "556e0e2ee35f764b1b027794621626a5527210ecfaec625e7be8d43181d8bb5f",
+        "leftSha256": "00aecdd156aeb8801538d5031bb13b4a2a0e971e84b7ff51d898e8438fe949d6",
+        "rightSha256": "00aecdd156aeb8801538d5031bb13b4a2a0e971e84b7ff51d898e8438fe949d6",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -4210,25 +4204,25 @@
         "maxChannelDelta": 0,
         "width": 1920,
         "height": 1080,
-        "bytes": 536129
+        "bytes": 93726
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-crm-detail-seapool.png",
-        "leftSha256": "c5e5301f251d932331d8f3b6a59c08692d252a35be57149869808ecc6c890c34",
-        "rightSha256": "c5e5301f251d932331d8f3b6a59c08692d252a35be57149869808ecc6c890c34",
-        "identical": true,
+        "leftSha256": "30ce4cca3764a9cf811f97d2c26d74f833cacf2213d1cd5f14240b26f4c7e436",
+        "rightSha256": "b97c1dfafc048fdb8ea74a9f6e2fb6cf5f2a72e7c26ddb74f728f9aeec85abd2",
+        "identical": false,
         "diffPixels": 0,
         "diffPixelRatio": 0,
-        "rawDiffPixels": 0,
-        "maxChannelDelta": 0,
+        "rawDiffPixels": 1,
+        "maxChannelDelta": 1,
         "width": 1920,
         "height": 1080,
-        "bytes": 564305
+        "bytes": 85914
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-demand-ppt.png",
-        "leftSha256": "cb4f4ad3592398e30dbdb2050282e1e91e6fcd176972a2b3204dad264e8b58b3",
-        "rightSha256": "cb4f4ad3592398e30dbdb2050282e1e91e6fcd176972a2b3204dad264e8b58b3",
+        "leftSha256": "7f1a16003c1dd1eabb467d04b832e5604a79629b0ed4e7ff73b61e225d3f2a8f",
+        "rightSha256": "7f1a16003c1dd1eabb467d04b832e5604a79629b0ed4e7ff73b61e225d3f2a8f",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -4236,12 +4230,12 @@
         "maxChannelDelta": 0,
         "width": 1920,
         "height": 1080,
-        "bytes": 437273
+        "bytes": 74450
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-m4-tab1.png",
-        "leftSha256": "ac784a5453704758eca73745a1808ea5b5a3968bc5e23940c23933a0ed07e287",
-        "rightSha256": "ac784a5453704758eca73745a1808ea5b5a3968bc5e23940c23933a0ed07e287",
+        "leftSha256": "0f2ca4a5216eff6850b988d0a00f69da9a3256fcc2eee1fcd69239bfc68da125",
+        "rightSha256": "0f2ca4a5216eff6850b988d0a00f69da9a3256fcc2eee1fcd69239bfc68da125",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -4249,12 +4243,12 @@
         "maxChannelDelta": 0,
         "width": 1920,
         "height": 1080,
-        "bytes": 470067
+        "bytes": 70767
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-m4-tab2.png",
-        "leftSha256": "bfe748fb3fe3b14c186a6e5746664b1950347c1f74269cb79be4fa76912918e9",
-        "rightSha256": "bfe748fb3fe3b14c186a6e5746664b1950347c1f74269cb79be4fa76912918e9",
+        "leftSha256": "29f5b16f9ae5bce1c02148dab7e3c6788de85a2388611ed1d059a819a605d194",
+        "rightSha256": "29f5b16f9ae5bce1c02148dab7e3c6788de85a2388611ed1d059a819a605d194",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -4262,12 +4256,12 @@
         "maxChannelDelta": 0,
         "width": 1920,
         "height": 1080,
-        "bytes": 493184
+        "bytes": 63337
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-m4-tab3.png",
-        "leftSha256": "7d62fc70d9ee28a04bd1481eee131e91d429ae7be1e91f2411df09d0b6fce275",
-        "rightSha256": "7d62fc70d9ee28a04bd1481eee131e91d429ae7be1e91f2411df09d0b6fce275",
+        "leftSha256": "324e42e7ead6885cfde72c8ebcc7f5de6c61034582af5e63ba96559c2163b014",
+        "rightSha256": "324e42e7ead6885cfde72c8ebcc7f5de6c61034582af5e63ba96559c2163b014",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -4275,12 +4269,12 @@
         "maxChannelDelta": 0,
         "width": 1920,
         "height": 1080,
-        "bytes": 483601
+        "bytes": 71958
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-strategy.png",
-        "leftSha256": "9d7b02d05cb54ae83e602972e05849e76faa6570403f997aef84fd0c94c5ae5d",
-        "rightSha256": "9d7b02d05cb54ae83e602972e05849e76faa6570403f997aef84fd0c94c5ae5d",
+        "leftSha256": "17cec6a0870fd1a5da79ef0ffb623e859b1227bb8e6af1033e38e4f4dd2bfca3",
+        "rightSha256": "17cec6a0870fd1a5da79ef0ffb623e859b1227bb8e6af1033e38e4f4dd2bfca3",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -4288,12 +4282,12 @@
         "maxChannelDelta": 0,
         "width": 1920,
         "height": 1080,
-        "bytes": 432861
+        "bytes": 66619
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-workflow-designer.png",
-        "leftSha256": "b22ab4d1e59c1fe14b19c4590342879249bc68537cbadbfbbaa5e56273745c78",
-        "rightSha256": "b22ab4d1e59c1fe14b19c4590342879249bc68537cbadbfbbaa5e56273745c78",
+        "leftSha256": "bf0685de9b82b3300a5f02f2b636b5b67ec8d52626558f16e72363e2f59dd906",
+        "rightSha256": "bf0685de9b82b3300a5f02f2b636b5b67ec8d52626558f16e72363e2f59dd906",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -4301,51 +4295,51 @@
         "maxChannelDelta": 0,
         "width": 1920,
         "height": 1080,
-        "bytes": 264839
+        "bytes": 48325
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-workflow-instances.png",
-        "leftSha256": "29a0fc43b330ea6e7e13a1ddc4e7d5e355c5ae3124385f8dd0e902d875e3c4f0",
-        "rightSha256": "115c1c9c0b5eb3c43d26f8d1bbb54f21baaca787071e848090f082bedd832565",
+        "leftSha256": "45c0a713647b789390625eaef44788381fad1902052e5722513b27d01808b22b",
+        "rightSha256": "b752a285690c196979d163fa39c6cf4a8d1bed2cbda6bb284fb82761655c51d3",
         "identical": false,
         "diffPixels": 0,
         "diffPixelRatio": 0,
-        "rawDiffPixels": 9,
+        "rawDiffPixels": 37,
         "maxChannelDelta": 1,
         "width": 1920,
         "height": 1080,
-        "bytes": 517237
+        "bytes": 49898
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-workflow-tasks.png",
-        "leftSha256": "2d1ff51fa289999b982d8623f1fdf641cece77329fb18ea231fe6228be43ee67",
-        "rightSha256": "a01a2f3ee47fc19c33fda0fefb40ab4a3af14a296f4aed660bfc6a369818bfdc",
-        "identical": false,
+        "leftSha256": "4e23907c33c804fd1d01e4bf78ca2650f1770689df780d6fa302c4ccaede324e",
+        "rightSha256": "4e23907c33c804fd1d01e4bf78ca2650f1770689df780d6fa302c4ccaede324e",
+        "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
-        "rawDiffPixels": 9,
-        "maxChannelDelta": 1,
+        "rawDiffPixels": 0,
+        "maxChannelDelta": 0,
         "width": 1920,
         "height": 1080,
-        "bytes": 420651
+        "bytes": 62925
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-workflow-templates.png",
-        "leftSha256": "07b522b457b7dce71417053a534f6c986dcbd727923560b1b81ecb7d08b27333",
-        "rightSha256": "83327c1aadd4490f5d0c40fbbcf1b43095acfe4af0ab6a949b9a813f66469dc4",
-        "identical": false,
+        "leftSha256": "7f7f23bbdccf1835998664d4b95098796dfb37cdc13f46763035483b21f56fcc",
+        "rightSha256": "7f7f23bbdccf1835998664d4b95098796dfb37cdc13f46763035483b21f56fcc",
+        "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
-        "rawDiffPixels": 9,
-        "maxChannelDelta": 1,
+        "rawDiffPixels": 0,
+        "maxChannelDelta": 0,
         "width": 1920,
         "height": 1080,
-        "bytes": 520657
+        "bytes": 50262
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-admin-ai-audit.png",
-        "leftSha256": "ac8e7d06f226f41387f1ac34011a6a0db268a44546d166006860953310026194",
-        "rightSha256": "ac8e7d06f226f41387f1ac34011a6a0db268a44546d166006860953310026194",
+        "leftSha256": "4c7e5973e4df9b3e9cdb14c9af034ec4427745c58c2689790efe6d3ef7c19d84",
+        "rightSha256": "4c7e5973e4df9b3e9cdb14c9af034ec4427745c58c2689790efe6d3ef7c19d84",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -4353,12 +4347,12 @@
         "maxChannelDelta": 0,
         "width": 390,
         "height": 844,
-        "bytes": 54996
+        "bytes": 25459
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-admin-knowledge.png",
-        "leftSha256": "490bef96884d5d22d4689393522aa0ad7dc076535009878ecde7d69ed1c0924b",
-        "rightSha256": "490bef96884d5d22d4689393522aa0ad7dc076535009878ecde7d69ed1c0924b",
+        "leftSha256": "e9d90862fd0c3ebdfb564413a50571ded874cf23cf8e7053ad7858cbdb58b267",
+        "rightSha256": "e9d90862fd0c3ebdfb564413a50571ded874cf23cf8e7053ad7858cbdb58b267",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -4366,12 +4360,12 @@
         "maxChannelDelta": 0,
         "width": 390,
         "height": 844,
-        "bytes": 53276
+        "bytes": 21084
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-admin-overview.png",
-        "leftSha256": "c0be8647d14e011cb9a52a6d6b04a0ddc48e05960581fb43b0054c058b5becbd",
-        "rightSha256": "c0be8647d14e011cb9a52a6d6b04a0ddc48e05960581fb43b0054c058b5becbd",
+        "leftSha256": "c248f1d82b3f438f793c356a79e8e290c90de976094126c99317ced455ac9fa2",
+        "rightSha256": "c248f1d82b3f438f793c356a79e8e290c90de976094126c99317ced455ac9fa2",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -4379,12 +4373,12 @@
         "maxChannelDelta": 0,
         "width": 390,
         "height": 844,
-        "bytes": 59055
+        "bytes": 26674
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-admin-tokens.png",
-        "leftSha256": "e0e64094c0e06e15e8ad5b9e8b5961c92dcd48944dd8769a4e69f05363d43dbf",
-        "rightSha256": "e0e64094c0e06e15e8ad5b9e8b5961c92dcd48944dd8769a4e69f05363d43dbf",
+        "leftSha256": "c9c05212f3ace16bf05e2dbed33d449ea1e6e30b352edd83210a9b25bbe04d2d",
+        "rightSha256": "c9c05212f3ace16bf05e2dbed33d449ea1e6e30b352edd83210a9b25bbe04d2d",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -4392,12 +4386,12 @@
         "maxChannelDelta": 0,
         "width": 390,
         "height": 844,
-        "bytes": 53149
+        "bytes": 21060
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-admin-users.png",
-        "leftSha256": "546b36325c57ae3aa8ad6023aae8c88871f00b9c7db312593c1b3ca53b0b54a9",
-        "rightSha256": "546b36325c57ae3aa8ad6023aae8c88871f00b9c7db312593c1b3ca53b0b54a9",
+        "leftSha256": "9997c61f89adb762e065bb2d29477ccb9b1a8e61ff9bc9f4948121982a1e4734",
+        "rightSha256": "9997c61f89adb762e065bb2d29477ccb9b1a8e61ff9bc9f4948121982a1e4734",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -4405,12 +4399,12 @@
         "maxChannelDelta": 0,
         "width": 390,
         "height": 844,
-        "bytes": 56392
+        "bytes": 29869
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-ai.png",
-        "leftSha256": "1da46470e941fb00dd9814fe7736cbaf78582f6a6f02968a90c58e97e22974c3",
-        "rightSha256": "1da46470e941fb00dd9814fe7736cbaf78582f6a6f02968a90c58e97e22974c3",
+        "leftSha256": "f357821486f1a9229317dda6ea25081742ae0519a08d30c28697340a4f7f720f",
+        "rightSha256": "f357821486f1a9229317dda6ea25081742ae0519a08d30c28697340a4f7f720f",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -4418,12 +4412,12 @@
         "maxChannelDelta": 0,
         "width": 390,
         "height": 844,
-        "bytes": 59062
+        "bytes": 29593
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-brand.png",
-        "leftSha256": "58744cdcc908f9f77c68a7ca996a54b826f9c8739233de5827bffb4a2035849a",
-        "rightSha256": "58744cdcc908f9f77c68a7ca996a54b826f9c8739233de5827bffb4a2035849a",
+        "leftSha256": "1532f8d72526324867bd098da35552b1ef2355b2f5daccdd89cad290075fbee8",
+        "rightSha256": "1532f8d72526324867bd098da35552b1ef2355b2f5daccdd89cad290075fbee8",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -4431,12 +4425,12 @@
         "maxChannelDelta": 0,
         "width": 390,
         "height": 844,
-        "bytes": 38365
+        "bytes": 36194
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-crm-board.png",
-        "leftSha256": "9a242659744b867561b2a30968b393b4151cf2603674e916afc4441b1ed04465",
-        "rightSha256": "9a242659744b867561b2a30968b393b4151cf2603674e916afc4441b1ed04465",
+        "leftSha256": "2a4570d0575bb570053bb88d4a66ccceaa6a99f3e1bc815c9fba912c1a13901f",
+        "rightSha256": "2a4570d0575bb570053bb88d4a66ccceaa6a99f3e1bc815c9fba912c1a13901f",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -4444,25 +4438,25 @@
         "maxChannelDelta": 0,
         "width": 390,
         "height": 844,
-        "bytes": 60044
+        "bytes": 28980
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-crm-detail-opportunities.png",
-        "leftSha256": "dbe4fc61b59820ef388a2d9f2b4c6a645ac851d1b38dcb285375bff2901b8fb9",
-        "rightSha256": "dbe4fc61b59820ef388a2d9f2b4c6a645ac851d1b38dcb285375bff2901b8fb9",
-        "identical": true,
+        "leftSha256": "2ba3fce5d89b29026aa3a7f437ec7c3b30ebf0fce3af43e667771e022b8ff4a0",
+        "rightSha256": "ad29cd431f2abed95ce4394015b942feda4584522f49e46f0407ad9fc294b5ef",
+        "identical": false,
         "diffPixels": 0,
         "diffPixelRatio": 0,
-        "rawDiffPixels": 0,
-        "maxChannelDelta": 0,
+        "rawDiffPixels": 17,
+        "maxChannelDelta": 1,
         "width": 390,
         "height": 844,
-        "bytes": 59035
+        "bytes": 31924
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-crm-detail-pipeline.png",
-        "leftSha256": "26fdda92d9418aaad97220a325772bf419aee9667d5266c452adcb4c1653f039",
-        "rightSha256": "26fdda92d9418aaad97220a325772bf419aee9667d5266c452adcb4c1653f039",
+        "leftSha256": "a50dff248d3d91b45d7771dfd8b67ebb0b030a9bb53a241d5cd7a42482f0a02e",
+        "rightSha256": "a50dff248d3d91b45d7771dfd8b67ebb0b030a9bb53a241d5cd7a42482f0a02e",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -4470,25 +4464,25 @@
         "maxChannelDelta": 0,
         "width": 390,
         "height": 844,
-        "bytes": 61919
+        "bytes": 39529
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-crm-detail-seapool.png",
-        "leftSha256": "899194486569a4a93592eb0da88a64d0da30625e1cdde82b5d169e947f1880b7",
-        "rightSha256": "899194486569a4a93592eb0da88a64d0da30625e1cdde82b5d169e947f1880b7",
-        "identical": true,
+        "leftSha256": "e5f16acb5095068c2d61e2d2237375497740965cfc99475a80bb90ad3eeca0f5",
+        "rightSha256": "1e019da083db2308507e6338aa2b71a4fa43c9ff4c68f5bd0ef15c2939462135",
+        "identical": false,
         "diffPixels": 0,
         "diffPixelRatio": 0,
-        "rawDiffPixels": 0,
-        "maxChannelDelta": 0,
+        "rawDiffPixels": 49,
+        "maxChannelDelta": 3,
         "width": 390,
         "height": 844,
-        "bytes": 62017
+        "bytes": 39530
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-demand-ppt.png",
-        "leftSha256": "fce8f896fb8814ade7c710d58deb46ae64a65ee63b12dc3df880cc155a747081",
-        "rightSha256": "fce8f896fb8814ade7c710d58deb46ae64a65ee63b12dc3df880cc155a747081",
+        "leftSha256": "9710f91437a5558dae1f472c2523db811d231535298c767bb2270757e6520e99",
+        "rightSha256": "9710f91437a5558dae1f472c2523db811d231535298c767bb2270757e6520e99",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -4496,12 +4490,12 @@
         "maxChannelDelta": 0,
         "width": 390,
         "height": 844,
-        "bytes": 58540
+        "bytes": 42459
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-m4-tab1.png",
-        "leftSha256": "a0a824bcc20fb43dcc3f259761bcb0e3da13f69bb1a0704f273751d4a9875f9f",
-        "rightSha256": "a0a824bcc20fb43dcc3f259761bcb0e3da13f69bb1a0704f273751d4a9875f9f",
+        "leftSha256": "f52e5d7a489839c445aefbde736000149f99576098c0b3b4e728fbf0bf6cb121",
+        "rightSha256": "f52e5d7a489839c445aefbde736000149f99576098c0b3b4e728fbf0bf6cb121",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -4509,12 +4503,12 @@
         "maxChannelDelta": 0,
         "width": 390,
         "height": 844,
-        "bytes": 57942
+        "bytes": 34038
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-m4-tab2.png",
-        "leftSha256": "8565a06cc9f6b577d353222caab7f0f24f431ec4e4034b34b55cdfded2955839",
-        "rightSha256": "8565a06cc9f6b577d353222caab7f0f24f431ec4e4034b34b55cdfded2955839",
+        "leftSha256": "588cb1d08a764b9104e390e7474e0171e0ba2f260b9e8951fa344e5ffee22fc2",
+        "rightSha256": "588cb1d08a764b9104e390e7474e0171e0ba2f260b9e8951fa344e5ffee22fc2",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -4522,12 +4516,12 @@
         "maxChannelDelta": 0,
         "width": 390,
         "height": 844,
-        "bytes": 57796
+        "bytes": 32731
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-m4-tab3.png",
-        "leftSha256": "68b1a6f21110dc536bcdfe81ae2d4a7b0c39de52329e9d02a051e6f48b7d87e5",
-        "rightSha256": "68b1a6f21110dc536bcdfe81ae2d4a7b0c39de52329e9d02a051e6f48b7d87e5",
+        "leftSha256": "961acd979f41339c958e7f39282c278361e1fef4750bfdad290216a6156f38a5",
+        "rightSha256": "961acd979f41339c958e7f39282c278361e1fef4750bfdad290216a6156f38a5",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -4535,12 +4529,12 @@
         "maxChannelDelta": 0,
         "width": 390,
         "height": 844,
-        "bytes": 58870
+        "bytes": 41312
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-strategy.png",
-        "leftSha256": "ddcebd22a42421e31d41073fdd15cc343276de77dec6ce48d5908c03ae3915b1",
-        "rightSha256": "ddcebd22a42421e31d41073fdd15cc343276de77dec6ce48d5908c03ae3915b1",
+        "leftSha256": "845fb5f32cd5894787f659c41c48a37a630e50b3b6c628734715557f5314a018",
+        "rightSha256": "845fb5f32cd5894787f659c41c48a37a630e50b3b6c628734715557f5314a018",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -4548,12 +4542,12 @@
         "maxChannelDelta": 0,
         "width": 390,
         "height": 844,
-        "bytes": 58530
+        "bytes": 39710
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-workflow-designer.png",
-        "leftSha256": "8dcd2422b5fdfd972e30fd813965aeb550b59d699e43ae2db822b303d56b4b00",
-        "rightSha256": "8dcd2422b5fdfd972e30fd813965aeb550b59d699e43ae2db822b303d56b4b00",
+        "leftSha256": "ef62e264ccd1b4b8b6b0afe8b6a2400eec18df03b8ac77b3dd8c7e7236e4b3d0",
+        "rightSha256": "ef62e264ccd1b4b8b6b0afe8b6a2400eec18df03b8ac77b3dd8c7e7236e4b3d0",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -4561,12 +4555,12 @@
         "maxChannelDelta": 0,
         "width": 390,
         "height": 844,
-        "bytes": 60470
+        "bytes": 16556
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-workflow-instances.png",
-        "leftSha256": "c768c6886cfeb340be766282eb71dd2c102d0f6f09bc1d4821e8dbc1ac480af0",
-        "rightSha256": "c768c6886cfeb340be766282eb71dd2c102d0f6f09bc1d4821e8dbc1ac480af0",
+        "leftSha256": "4e683403b7d8a31063add09ecaccb6c9550e62f6593d96cce433a6be4147990f",
+        "rightSha256": "4e683403b7d8a31063add09ecaccb6c9550e62f6593d96cce433a6be4147990f",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -4574,12 +4568,12 @@
         "maxChannelDelta": 0,
         "width": 390,
         "height": 844,
-        "bytes": 56778
+        "bytes": 20218
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-workflow-tasks.png",
-        "leftSha256": "b29a7fe1434a24b123ba88674f6df7c571620eb9e58ecccb4340d8901f14b68c",
-        "rightSha256": "b29a7fe1434a24b123ba88674f6df7c571620eb9e58ecccb4340d8901f14b68c",
+        "leftSha256": "3f20860ecaaa559dea601dc118b517f769ca7a52efe100e88329e1dd51ab5d1a",
+        "rightSha256": "3f20860ecaaa559dea601dc118b517f769ca7a52efe100e88329e1dd51ab5d1a",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -4587,12 +4581,12 @@
         "maxChannelDelta": 0,
         "width": 390,
         "height": 844,
-        "bytes": 58940
+        "bytes": 34997
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-workflow-templates.png",
-        "leftSha256": "4e42f59bbc9e7bdf3ab708301c29886ec2b4445bfe2a1b670875146cf742239e",
-        "rightSha256": "4e42f59bbc9e7bdf3ab708301c29886ec2b4445bfe2a1b670875146cf742239e",
+        "leftSha256": "7dbb9e17a122cb00e589605423d8c74a9b1683303b50e4aec00e404ffc24b9b1",
+        "rightSha256": "7dbb9e17a122cb00e589605423d8c74a9b1683303b50e4aec00e404ffc24b9b1",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -4600,12 +4594,12 @@
         "maxChannelDelta": 0,
         "width": 390,
         "height": 844,
-        "bytes": 56677
+        "bytes": 21446
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/public/fixture-1440/public-login.png",
-        "leftSha256": "e0ce774d46afd219f84060fa2d77e63fb568bf6b23c7a0a7441f8fe5ca05b7c4",
-        "rightSha256": "e0ce774d46afd219f84060fa2d77e63fb568bf6b23c7a0a7441f8fe5ca05b7c4",
+        "leftSha256": "9519402c6bbb01c76a629e6c30f26b685fca00bc247103480789bbfae9b7f5a4",
+        "rightSha256": "9519402c6bbb01c76a629e6c30f26b685fca00bc247103480789bbfae9b7f5a4",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -4613,12 +4607,12 @@
         "maxChannelDelta": 0,
         "width": 1440,
         "height": 900,
-        "bytes": 423232
+        "bytes": 22726
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/public/fixture-1920/public-login.png",
-        "leftSha256": "88cbd823e934871a2ded1279aa56aa5b5b118abcfbe97bd6d9057507b01a7b0e",
-        "rightSha256": "88cbd823e934871a2ded1279aa56aa5b5b118abcfbe97bd6d9057507b01a7b0e",
+        "leftSha256": "ea87d7f7fb7ad6b02a02663536bb4cdf226479b18ccf626920c39d01ae1ca30e",
+        "rightSha256": "ea87d7f7fb7ad6b02a02663536bb4cdf226479b18ccf626920c39d01ae1ca30e",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -4626,12 +4620,12 @@
         "maxChannelDelta": 0,
         "width": 1920,
         "height": 1080,
-        "bytes": 656672
+        "bytes": 25522
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/public/fixture-mobile/public-login.png",
-        "leftSha256": "2267edcba066a78809dc1b0c207afe17e656b1b0a499bddecdab4da664d08d5c",
-        "rightSha256": "2267edcba066a78809dc1b0c207afe17e656b1b0a499bddecdab4da664d08d5c",
+        "leftSha256": "39fa6d83dd411958b4d757b005fb98873b204d27fa9985643fe448bc97374fec",
+        "rightSha256": "39fa6d83dd411958b4d757b005fb98873b204d27fa9985643fe448bc97374fec",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -4639,12 +4633,12 @@
         "maxChannelDelta": 0,
         "width": 390,
         "height": 844,
-        "bytes": 102368
+        "bytes": 18389
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/user/fixture-1440/user-ai.png",
-        "leftSha256": "b85b4bdb9b2eb0b3c72b0e44005b530ffba05a7edec8220e56ce017849cc88d7",
-        "rightSha256": "b85b4bdb9b2eb0b3c72b0e44005b530ffba05a7edec8220e56ce017849cc88d7",
+        "leftSha256": "e6f4c6af0129d77f8a27cbe8f8f6189e6714c8eb26c271cbcb8fea920443f27c",
+        "rightSha256": "e6f4c6af0129d77f8a27cbe8f8f6189e6714c8eb26c271cbcb8fea920443f27c",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -4652,25 +4646,25 @@
         "maxChannelDelta": 0,
         "width": 1440,
         "height": 900,
-        "bytes": 251531
+        "bytes": 53116
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/user/fixture-1440/user-crm-board.png",
-        "leftSha256": "f24315e65ba0a5e1f78143a868ddea5f504d26de601693dd7e0172d86cceadf9",
-        "rightSha256": "1cfc9b2db0e245f0ca104d41c14cecf88918b6457cc99d6f27eb6ea83601220c",
-        "identical": false,
+        "leftSha256": "2bed0e59386de76ebe9eaab5a73bb82786db88e56d04cb1cd28a7cc368cf6d80",
+        "rightSha256": "2bed0e59386de76ebe9eaab5a73bb82786db88e56d04cb1cd28a7cc368cf6d80",
+        "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
-        "rawDiffPixels": 2,
-        "maxChannelDelta": 3,
+        "rawDiffPixels": 0,
+        "maxChannelDelta": 0,
         "width": 1440,
         "height": 900,
-        "bytes": 429513
+        "bytes": 102089
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/user/fixture-1440/user-crm-detail.png",
-        "leftSha256": "cce62152dfb4c360c2f61ba6ac8cde1ea88642d12caaf67c1d8561a483c6eb07",
-        "rightSha256": "cce62152dfb4c360c2f61ba6ac8cde1ea88642d12caaf67c1d8561a483c6eb07",
+        "leftSha256": "59e46ab7d804c7cd2b4e57f6b38fa9e8607bfd769703f20bd116c60c6ef04e81",
+        "rightSha256": "59e46ab7d804c7cd2b4e57f6b38fa9e8607bfd769703f20bd116c60c6ef04e81",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -4678,12 +4672,12 @@
         "maxChannelDelta": 0,
         "width": 1440,
         "height": 900,
-        "bytes": 372182
+        "bytes": 86410
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/user/fixture-1920/user-ai.png",
-        "leftSha256": "29312801e84c61f7d74908d2adc13fc1515f7fa9b0c08819dc9bbb73443bacc6",
-        "rightSha256": "29312801e84c61f7d74908d2adc13fc1515f7fa9b0c08819dc9bbb73443bacc6",
+        "leftSha256": "bf4d7c82236ab93fb1266043daa8ed79aa1565a8b2c03ae7bc0ad727019493ce",
+        "rightSha256": "bf4d7c82236ab93fb1266043daa8ed79aa1565a8b2c03ae7bc0ad727019493ce",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -4691,25 +4685,12 @@
         "maxChannelDelta": 0,
         "width": 1920,
         "height": 1080,
-        "bytes": 335849
+        "bytes": 56655
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/user/fixture-1920/user-crm-board.png",
-        "leftSha256": "cb95c95f0ca2e42e942283c8802f1e467ba80427d042ba698eb58fecb3a30443",
-        "rightSha256": "27846304ebe3ca13d7b79f4dd7a645ee0b462486152e53160d279588473c82d3",
-        "identical": false,
-        "diffPixels": 0,
-        "diffPixelRatio": 0,
-        "rawDiffPixels": 2,
-        "maxChannelDelta": 3,
-        "width": 1920,
-        "height": 1080,
-        "bytes": 595246
-      },
-      {
-        "path": "docs/baselines/v0.2.9/screenshots/user/fixture-1920/user-crm-detail.png",
-        "leftSha256": "faa8ee26ccc218cab79a8a7bb8747f479f0b45e862249c921a0902a827d89c01",
-        "rightSha256": "faa8ee26ccc218cab79a8a7bb8747f479f0b45e862249c921a0902a827d89c01",
+        "leftSha256": "f4cb2188c31d83009fca3e55c972f144150a2331f6848c45500af25c5fc79172",
+        "rightSha256": "f4cb2188c31d83009fca3e55c972f144150a2331f6848c45500af25c5fc79172",
         "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
@@ -4717,52 +4698,65 @@
         "maxChannelDelta": 0,
         "width": 1920,
         "height": 1080,
-        "bytes": 534136
+        "bytes": 109667
+      },
+      {
+        "path": "docs/baselines/v0.2.9/screenshots/user/fixture-1920/user-crm-detail.png",
+        "leftSha256": "d086193bf760c363b53aae126bc8f2387ad806e0e2c5a5f657f2369505bbb241",
+        "rightSha256": "d086193bf760c363b53aae126bc8f2387ad806e0e2c5a5f657f2369505bbb241",
+        "identical": true,
+        "diffPixels": 0,
+        "diffPixelRatio": 0,
+        "rawDiffPixels": 0,
+        "maxChannelDelta": 0,
+        "width": 1920,
+        "height": 1080,
+        "bytes": 90695
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/user/fixture-mobile/user-ai.png",
-        "leftSha256": "4fcf488f14f38740e3afb308d8a8d40811c4823969987281c48f6cf0e215fcc7",
-        "rightSha256": "e2415f0f427ae064045a9e3bb9e3bd22b5d3f3750f049ac61c1e364cb212ab53",
-        "identical": false,
+        "leftSha256": "f357821486f1a9229317dda6ea25081742ae0519a08d30c28697340a4f7f720f",
+        "rightSha256": "f357821486f1a9229317dda6ea25081742ae0519a08d30c28697340a4f7f720f",
+        "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
-        "rawDiffPixels": 33,
-        "maxChannelDelta": 2,
+        "rawDiffPixels": 0,
+        "maxChannelDelta": 0,
         "width": 390,
         "height": 844,
-        "bytes": 59244
+        "bytes": 29593
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/user/fixture-mobile/user-crm-board.png",
-        "leftSha256": "6133e4b9c0c28db248d430ca943022f632012180958ad7c7b778e1c7e92cba10",
-        "rightSha256": "209006788a41987997c7e274d157d4cb27d2f82055d1513719cbbd6ed4b4c67e",
-        "identical": false,
+        "leftSha256": "2a4570d0575bb570053bb88d4a66ccceaa6a99f3e1bc815c9fba912c1a13901f",
+        "rightSha256": "2a4570d0575bb570053bb88d4a66ccceaa6a99f3e1bc815c9fba912c1a13901f",
+        "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
-        "rawDiffPixels": 12,
-        "maxChannelDelta": 2,
+        "rawDiffPixels": 0,
+        "maxChannelDelta": 0,
         "width": 390,
         "height": 844,
-        "bytes": 61119
+        "bytes": 28980
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/user/fixture-mobile/user-crm-detail.png",
-        "leftSha256": "8d3d8112c14bae31a016a8c41274244816f233ab89ed7564e223a5f47de956fe",
-        "rightSha256": "049c97c9199cf83ade9a1509530c36d74bc21824a86fd2f7d77162eaf17c3c64",
-        "identical": false,
+        "leftSha256": "375690ad72c6ad6a67d4a3d742eed95923513e771d497d654d22462926870d78",
+        "rightSha256": "375690ad72c6ad6a67d4a3d742eed95923513e771d497d654d22462926870d78",
+        "identical": true,
         "diffPixels": 0,
         "diffPixelRatio": 0,
-        "rawDiffPixels": 21,
-        "maxChannelDelta": 2,
+        "rawDiffPixels": 0,
+        "maxChannelDelta": 0,
         "width": 390,
         "height": 844,
-        "bytes": 62649
+        "bytes": 38090
       }
     ]
   },
   "postEditComparison": {
     "schemaVersion": 1,
-    "sourceCommit": "1db3ca113ea77f6d2f8821f92e4d23836a65744f",
+    "sourceCommit": "11403765e940e5d0277d6abc0e4a6911a10d3f44",
     "source": ".superpowers/sdd/browser-baseline-current",
     "comparisonMode": "reviewed-shared-shell-redesign",
     "approvalRecord": "docs/product/2026-07-phase3-visual-change-record.md",
@@ -4770,7 +4764,7 @@
     "maxDiffPixelRatio": null,
     "maxObservedDiffRatio": 0.14496597399441002,
     "withinThreshold": null,
-    "totalDiffPixels": 3481019,
+    "totalDiffPixels": 3480997,
     "totalRawDiffPixels": 83737072,
     "fileCount": 72,
     "screenshots": [
@@ -4790,7 +4784,7 @@
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-crm-board.png",
         "preEditSha256": "8fcf7c5e5a0e4e6555d17146b2ca4617e3fcbeeac6131e33c8384feac3727e16",
-        "postEditSha256": "4c3f2d92294e6662ca08e066bf1149c1f6cf8ca1242a2c0949081bc6cc77369a",
+        "postEditSha256": "414383d557555bc5832de76a6b6dddf8a5c8529666af86cd2c859d8a860f20e5",
         "identical": false,
         "diffPixels": 136951,
         "diffPixelRatio": 0.10567206790123457,
@@ -4798,64 +4792,64 @@
         "maxChannelDelta": 255,
         "width": 1440,
         "height": 900,
-        "bytes": 106631
+        "bytes": 104230
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-crm-detail-pipeline.png",
         "preEditSha256": "0aff37c8ef8a3f1352a577722531ceb4933fe92ebeddca29537ad39faa4e3085",
-        "postEditSha256": "e567ca6fcf4249b100540f48e4828b7bc86dd4e8b712056f3f7f11fb3fddbc32",
+        "postEditSha256": "68d7f916c905a1d266990d9777edac446429be550cfffd8c218ff10c926d8204",
         "identical": false,
-        "diffPixels": 74129,
-        "diffPixelRatio": 0.0571983024691358,
+        "diffPixels": 74128,
+        "diffPixelRatio": 0.05719753086419753,
         "rawDiffPixels": 1181542,
         "maxChannelDelta": 255,
         "width": 1440,
         "height": 900,
-        "bytes": 90865
+        "bytes": 89098
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-crm-detail-seapool.png",
         "preEditSha256": "1e8e0920a6affb7795304786453f67ec74737bcd15437e2a2c872682cde8f66b",
-        "postEditSha256": "c3c144b85ad5f125ac3e07816e0a96f90219da2c538a9fa650061738544cd0dc",
+        "postEditSha256": "682c9e6c242fa1640e798d498a53237a6e9104657d783b1ad87b281d5fb48152",
         "identical": false,
-        "diffPixels": 75212,
-        "diffPixelRatio": 0.058033950617283954,
+        "diffPixels": 75211,
+        "diffPixelRatio": 0.05803317901234568,
         "rawDiffPixels": 1272090,
         "maxChannelDelta": 255,
         "width": 1440,
         "height": 900,
-        "bytes": 83750
+        "bytes": 81854
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-crm-detail-opportunities.png",
         "preEditSha256": "6cf97ceb6704ce12d53f3d5845a9a9e0ec3f65d0821857e1e63809ce1bbae3f1",
-        "postEditSha256": "e922a9fcec6725bc2066bf12f4c06ea8a59d58a417d0b17a13236dd7a081a81a",
+        "postEditSha256": "401543601c4753ffc36f50f33683d8c024a348e5fb59c41a841a4e208e2b4175",
         "identical": false,
-        "diffPixels": 47566,
-        "diffPixelRatio": 0.03670216049382716,
+        "diffPixels": 47565,
+        "diffPixelRatio": 0.03670138888888889,
         "rawDiffPixels": 1282413,
         "maxChannelDelta": 255,
         "width": 1440,
         "height": 900,
-        "bytes": 57413
+        "bytes": 55586
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-brand.png",
         "preEditSha256": "c82af836144fbaf1cf2534ee092226c3982ee77c2d21e174b67a3a03f65a2427",
-        "postEditSha256": "e1036a547eb27e5da6f94f7fe0bb97aa8331fa6c614201cbf80dc356715f9400",
+        "postEditSha256": "dae2965aeb82e9ddf9655ff3334b3de5390ef87b1201540cf5151b5862c1b4a3",
         "identical": false,
-        "diffPixels": 84355,
-        "diffPixelRatio": 0.06508873456790124,
+        "diffPixels": 84356,
+        "diffPixelRatio": 0.06508950617283951,
         "rawDiffPixels": 1152054,
         "maxChannelDelta": 255,
         "width": 1440,
         "height": 900,
-        "bytes": 126136
+        "bytes": 124106
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-strategy.png",
         "preEditSha256": "abc6f47e47551cb6839b08663d400e6c19603c8294b33e2d9d6fc627d5a49113",
-        "postEditSha256": "365aefda829199cf1bb158e2e6fb774f19ff791958b782d5b5de0cc3d70dd62e",
+        "postEditSha256": "dbb0fe6fd261fe341301cc51d83cdd75b5d9f0ef29dea71d59691e366bd01b3c",
         "identical": false,
         "diffPixels": 55333,
         "diffPixelRatio": 0.042695216049382714,
@@ -4863,12 +4857,12 @@
         "maxChannelDelta": 255,
         "width": 1440,
         "height": 900,
-        "bytes": 65018
+        "bytes": 63230
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-demand-ppt.png",
         "preEditSha256": "00ce6579d36f90b4d404108afac608b060c59d16784092893dc850beeefa79b3",
-        "postEditSha256": "b1f3d8b72568c0ba54dd73f2ab60e0cf189c092200ad1589d1898a00e640a21d",
+        "postEditSha256": "63883748e209704db3611c61c012c29b41d8959af4a859c3cec8fdd84edaf016",
         "identical": false,
         "diffPixels": 52296,
         "diffPixelRatio": 0.040351851851851854,
@@ -4876,12 +4870,12 @@
         "maxChannelDelta": 255,
         "width": 1440,
         "height": 900,
-        "bytes": 69921
+        "bytes": 68043
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-m4-tab1.png",
         "preEditSha256": "16c374099021de922968ae3764d825f6180c3c891c2372bf09d158e4e43af7c2",
-        "postEditSha256": "14500137adb9cc24408cbebd42edb49823a2c86b1b93ac169b03d9f33959436b",
+        "postEditSha256": "544d75daf73d88dbed8e99682052ecfc0c13571ba9dc963303914ff0b3ae9e3b",
         "identical": false,
         "diffPixels": 45554,
         "diffPixelRatio": 0.03514969135802469,
@@ -4889,12 +4883,12 @@
         "maxChannelDelta": 255,
         "width": 1440,
         "height": 900,
-        "bytes": 66847
+        "bytes": 65060
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-m4-tab2.png",
         "preEditSha256": "fdb3221e5c0c4dc896dda4720888e74ea8f5adbe5afe066fb687cb683a227051",
-        "postEditSha256": "6ce4d927d46b08ad9ef21ce1fe92c6ae3fd5c9518716f640533166d099c8d455",
+        "postEditSha256": "8182f86ef4390dc0a564f8c2aa281cd89041b28941aed447b08f6a0b2a1ee538",
         "identical": false,
         "diffPixels": 39861,
         "diffPixelRatio": 0.030756944444444444,
@@ -4902,12 +4896,12 @@
         "maxChannelDelta": 255,
         "width": 1440,
         "height": 900,
-        "bytes": 61646
+        "bytes": 59987
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-m4-tab3.png",
         "preEditSha256": "51cfc189b0c72cc4e6dfcf41b34ec561bef01870c91cdf2e22cac71e15b35489",
-        "postEditSha256": "931bfd27856346fdc1134618dc34ab4c7bfae4320871c8593784d187d8a9860c",
+        "postEditSha256": "c9ee8b785300dbe45e2a411bef78b9d8f4b098b948d608300182f679355bab66",
         "identical": false,
         "diffPixels": 47291,
         "diffPixelRatio": 0.03648996913580247,
@@ -4915,12 +4909,12 @@
         "maxChannelDelta": 255,
         "width": 1440,
         "height": 900,
-        "bytes": 70989
+        "bytes": 69055
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-ai.png",
         "preEditSha256": "8eb0321dbc351d71ec43d0c13a1c16d164abdab4966cfb35d0aedc20a7b5bf12",
-        "postEditSha256": "e4e1e3292ee63f08248b193d099a1608aa5171632817cd8cfc578e549dad6764",
+        "postEditSha256": "4f2f531a9acb30180e10f6cbe95a0e0f80a48c19b3cb08ee0eef9c60dfb59aa1",
         "identical": false,
         "diffPixels": 42614,
         "diffPixelRatio": 0.03288117283950617,
@@ -4928,12 +4922,12 @@
         "maxChannelDelta": 255,
         "width": 1440,
         "height": 900,
-        "bytes": 56909
+        "bytes": 55166
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-workflow-designer.png",
         "preEditSha256": "1dde7d7612204ee17369b022f11f34021c87e3665041c5ee7ae23530e280b8e9",
-        "postEditSha256": "7038ec2900031fb71bcd4e62e65e3bbff6a4078e07015cb5124841654657b358",
+        "postEditSha256": "d56090f7fb36256b902e9bca49662d26ae454dd9fc0bff538b7a6cd59794152b",
         "identical": false,
         "diffPixels": 30986,
         "diffPixelRatio": 0.02390895061728395,
@@ -4941,25 +4935,25 @@
         "maxChannelDelta": 255,
         "width": 1440,
         "height": 900,
-        "bytes": 47033
+        "bytes": 44893
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-workflow-templates.png",
         "preEditSha256": "012e73b492b4a0f60fedc70ea738b06a881479edb2058384e98e8071c787c8a5",
-        "postEditSha256": "e15765f06402e3a572515bfb056ab8aca74144d12434d4cb22499d95460ec75c",
+        "postEditSha256": "fdfa8a0a6e93da88113e9073ba85d87074d9943a7c8b339389ca7c489d701c44",
         "identical": false,
-        "diffPixels": 36582,
-        "diffPixelRatio": 0.02822685185185185,
+        "diffPixels": 36581,
+        "diffPixelRatio": 0.02822608024691358,
         "rawDiffPixels": 1251637,
         "maxChannelDelta": 255,
         "width": 1440,
         "height": 900,
-        "bytes": 48566
+        "bytes": 46803
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-workflow-instances.png",
         "preEditSha256": "5180176d8713e38a93e8942b936eec669e7c981c5b5a7ad15ee8e4e69d46d19f",
-        "postEditSha256": "475205c13d09fc9bd48cd06e99fcbc04ac41b14fe525064b005b75f2cb10e0ed",
+        "postEditSha256": "df964f99b6e89af546c91940d90c0f4274852ec0b27a952d1e2ec6abbc5a86c7",
         "identical": false,
         "diffPixels": 33618,
         "diffPixelRatio": 0.025939814814814815,
@@ -4967,90 +4961,90 @@
         "maxChannelDelta": 255,
         "width": 1440,
         "height": 900,
-        "bytes": 48336
+        "bytes": 46655
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-workflow-tasks.png",
         "preEditSha256": "31fefa02213e2ed22ed3a50746e34ad6112c9a7f3c74d51098de65cbddb4f6bc",
-        "postEditSha256": "ad47f768e632da0e57482965229d2137739d04c6bf7e63299b064ccb9e7d8c76",
+        "postEditSha256": "cec9f82e15e07a73f0989add7b3bb69599232eae4d7bbbe9ff431267cd08585f",
         "identical": false,
-        "diffPixels": 48272,
-        "diffPixelRatio": 0.03724691358024691,
+        "diffPixels": 48269,
+        "diffPixelRatio": 0.037244598765432096,
         "rawDiffPixels": 1073489,
         "maxChannelDelta": 255,
         "width": 1440,
         "height": 900,
-        "bytes": 61234
+        "bytes": 59424
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-admin-overview.png",
         "preEditSha256": "511ee1ae9c3393c23f53603faa39ea4c9c5ec8594176e94a793598f0156cb131",
-        "postEditSha256": "c5668fa939adc4e3be1462277bd96011ee4e2e5378ed36b0ecdd6ad1b6eb6f46",
+        "postEditSha256": "c52a1a6c6f02fedd9ecd1a8f3503478a22df1cc65035dcf5dae0bc3b8b7b82cb",
         "identical": false,
-        "diffPixels": 76335,
-        "diffPixelRatio": 0.05890046296296296,
+        "diffPixels": 76333,
+        "diffPixelRatio": 0.05889891975308642,
         "rawDiffPixels": 1116934,
         "maxChannelDelta": 255,
         "width": 1440,
         "height": 900,
-        "bytes": 89500
+        "bytes": 87335
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-admin-users.png",
         "preEditSha256": "44daa53cd34a0a1c838977fb01490158b046dfe5b621da52c0f536e7fc5ac7cc",
-        "postEditSha256": "07c33306f0679c2429b750515179490c0c2c6e4a92786110f9f6d204a656f4d2",
+        "postEditSha256": "3fcfdf788d95e61934809205e85505484815e6edf5b65d205fc6df56d744760c",
         "identical": false,
-        "diffPixels": 47335,
-        "diffPixelRatio": 0.03652391975308642,
+        "diffPixels": 47333,
+        "diffPixelRatio": 0.036522376543209875,
         "rawDiffPixels": 1176887,
         "maxChannelDelta": 255,
         "width": 1440,
         "height": 900,
-        "bytes": 61155
+        "bytes": 59381
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-admin-knowledge.png",
         "preEditSha256": "8a02a35d7a5d5c00a07795b5173fc3759eb3cc7f187bf994725c3f79c3bccf36",
-        "postEditSha256": "67507a49b829db41b8b1b8600a9063277ec1dd6e03ac987db6a95b90d39dcc83",
+        "postEditSha256": "ee34233d26008de2653388fb5685b37459574783409e2475467963c7de7c42f0",
         "identical": false,
-        "diffPixels": 34079,
-        "diffPixelRatio": 0.026295524691358024,
+        "diffPixels": 34077,
+        "diffPixelRatio": 0.02629398148148148,
         "rawDiffPixels": 1285389,
         "maxChannelDelta": 255,
         "width": 1440,
         "height": 900,
-        "bytes": 46822
+        "bytes": 44961
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-admin-ai-audit.png",
         "preEditSha256": "52844f70b1e4d35d95c7d93f9e4c59450c4f6b79faddc807e109e049c57c7f3b",
-        "postEditSha256": "0ed4eeacf1ad973446d4e12dff657acb86a22ab675ddae2211f09a2d2e2020ca",
+        "postEditSha256": "47e9f8c805319dfc10c7e17224e7b4da583d167531282649e5c149a1ead0f1de",
         "identical": false,
-        "diffPixels": 37343,
-        "diffPixelRatio": 0.028814043209876544,
+        "diffPixels": 37341,
+        "diffPixelRatio": 0.0288125,
         "rawDiffPixels": 1248197,
         "maxChannelDelta": 255,
         "width": 1440,
         "height": 900,
-        "bytes": 53632
+        "bytes": 51899
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-admin-tokens.png",
         "preEditSha256": "e701d636a861265dcf9dba8a2aca91c367a731d96d1187c02e80f8680bb7ce82",
-        "postEditSha256": "aacbb4aa4cd6c6221ea960d9a4d39f5dfd7d70dc7650d38d5952c79300c4bc4f",
+        "postEditSha256": "3067dfb1c3322173e136a5a998241933e2f4fb4e7cd7d9622fdfc10ca995803e",
         "identical": false,
-        "diffPixels": 32812,
-        "diffPixelRatio": 0.0253179012345679,
+        "diffPixels": 32810,
+        "diffPixelRatio": 0.025316358024691357,
         "rawDiffPixels": 1275160,
         "maxChannelDelta": 255,
         "width": 1440,
         "height": 900,
-        "bytes": 46442
+        "bytes": 44632
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/user/fixture-1440/user-crm-board.png",
         "preEditSha256": "f24315e65ba0a5e1f78143a868ddea5f504d26de601693dd7e0172d86cceadf9",
-        "postEditSha256": "53071c1bbd83fa214df214df60f7a22fc33aaf9c7a6f5bf841fb5e6945594b56",
+        "postEditSha256": "2bed0e59386de76ebe9eaab5a73bb82786db88e56d04cb1cd28a7cc368cf6d80",
         "identical": false,
         "diffPixels": 136111,
         "diffPixelRatio": 0.10502391975308642,
@@ -5058,25 +5052,25 @@
         "maxChannelDelta": 255,
         "width": 1440,
         "height": 900,
-        "bytes": 104432
+        "bytes": 102089
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/user/fixture-1440/user-crm-detail.png",
         "preEditSha256": "5381403622fcb64cb867d94959af00d63c7003698fa5d64970c084f9a43cd070",
-        "postEditSha256": "751ab28bf689650129d61173de4c1e5546393585dfaa6f378bda90a773a35cab",
+        "postEditSha256": "59e46ab7d804c7cd2b4e57f6b38fa9e8607bfd769703f20bd116c60c6ef04e81",
         "identical": false,
-        "diffPixels": 72598,
-        "diffPixelRatio": 0.05601697530864198,
+        "diffPixels": 72597,
+        "diffPixelRatio": 0.05601620370370371,
         "rawDiffPixels": 1181519,
         "maxChannelDelta": 255,
         "width": 1440,
         "height": 900,
-        "bytes": 88152
+        "bytes": 86410
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/user/fixture-1440/user-ai.png",
         "preEditSha256": "b85b4bdb9b2eb0b3c72b0e44005b530ffba05a7edec8220e56ce017849cc88d7",
-        "postEditSha256": "2602a3118abf619d7a3540349574e8b7a68ef10cfdaa2b36bbf8e615a089575a",
+        "postEditSha256": "e6f4c6af0129d77f8a27cbe8f8f6189e6714c8eb26c271cbcb8fea920443f27c",
         "identical": false,
         "diffPixels": 41774,
         "diffPixelRatio": 0.032233024691358025,
@@ -5084,7 +5078,7 @@
         "maxChannelDelta": 255,
         "width": 1440,
         "height": 900,
-        "bytes": 54796
+        "bytes": 53116
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/public/fixture-1920/public-login.png",
@@ -5102,7 +5096,7 @@
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-crm-board.png",
         "preEditSha256": "dd65f93035a72fb7df324d3d35add4dc9efe20b09a37c9994860f3a070eb796d",
-        "postEditSha256": "d31bf9e5c9ee9651a35b7ed1e5c31bbf8411e523bfe2a80c88090d41c5b78463",
+        "postEditSha256": "37049bcf4d7cf57ac45a2dfaabc6ab59150417c6104652a8ac477020c0476560",
         "identical": false,
         "diffPixels": 153457,
         "diffPixelRatio": 0.07400511188271605,
@@ -5110,12 +5104,12 @@
         "maxChannelDelta": 255,
         "width": 1920,
         "height": 1080,
-        "bytes": 114081
+        "bytes": 111883
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-crm-detail-pipeline.png",
         "preEditSha256": "434e87fcca3508f9cb11a4c589ea2eca76d028e67abcc23f4ec34a7e4d38867c",
-        "postEditSha256": "da71b05a62228f1c8daec4719cb2d986c2b23460da94afd849658ee3cbadf54a",
+        "postEditSha256": "bddc6ff9055fd882202fb58fde4ca2f76c555c1364a59ca091972a0d96edea42",
         "identical": false,
         "diffPixels": 74959,
         "diffPixelRatio": 0.036149209104938275,
@@ -5123,12 +5117,12 @@
         "maxChannelDelta": 255,
         "width": 1920,
         "height": 1080,
-        "bytes": 95737
+        "bytes": 93639
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-crm-detail-seapool.png",
         "preEditSha256": "c5e5301f251d932331d8f3b6a59c08692d252a35be57149869808ecc6c890c34",
-        "postEditSha256": "08310152a12a4c9b998c44b2b6ec68f811c73bd1c95de79e085dd1db5b3ff48c",
+        "postEditSha256": "30ce4cca3764a9cf811f97d2c26d74f833cacf2213d1cd5f14240b26f4c7e436",
         "identical": false,
         "diffPixels": 76123,
         "diffPixelRatio": 0.03671055169753087,
@@ -5136,12 +5130,12 @@
         "maxChannelDelta": 255,
         "width": 1920,
         "height": 1080,
-        "bytes": 87875
+        "bytes": 85905
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-crm-detail-opportunities.png",
         "preEditSha256": "6ec067e42881df61c2638b306e1c440d1e944561500014137fff2bf3ec7d88e7",
-        "postEditSha256": "75dcb5f7147d3e23ed62a1d1507ece8cda25047b6714c475a11c1673dbe78024",
+        "postEditSha256": "cb6f163da1469c23d239bd2c3821d42ae34ae5cd87e87b00a50c9ce711989798",
         "identical": false,
         "diffPixels": 48445,
         "diffPixelRatio": 0.023362750771604938,
@@ -5149,25 +5143,25 @@
         "maxChannelDelta": 255,
         "width": 1920,
         "height": 1080,
-        "bytes": 60945
+        "bytes": 58878
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-brand.png",
         "preEditSha256": "8d87745a0a1b4c64f7493b5a37ba55ad6d11b6586d6c7b7bb9b9d1bba6db6c53",
-        "postEditSha256": "1f36473904bf31afff3f78c1999085071d5e13ec4675d98a0cd7cf403aa7cb86",
+        "postEditSha256": "de8ffceba8c7b9c1740ccd23ae53f6d017794d4481d0d0b8b8f36cb6dd6aef0b",
         "identical": false,
-        "diffPixels": 95864,
-        "diffPixelRatio": 0.04623070987654321,
+        "diffPixels": 95863,
+        "diffPixelRatio": 0.04623022762345679,
         "rawDiffPixels": 1763006,
         "maxChannelDelta": 255,
         "width": 1920,
         "height": 1080,
-        "bytes": 150640
+        "bytes": 148646
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-strategy.png",
         "preEditSha256": "9d7b02d05cb54ae83e602972e05849e76faa6570403f997aef84fd0c94c5ae5d",
-        "postEditSha256": "b0c7a2ed9a4bc9ee50947f744957e2ea34174cd1cdca4ee4ff624899562161ed",
+        "postEditSha256": "17cec6a0870fd1a5da79ef0ffb623e859b1227bb8e6af1033e38e4f4dd2bfca3",
         "identical": false,
         "diffPixels": 55206,
         "diffPixelRatio": 0.026623263888888887,
@@ -5175,12 +5169,12 @@
         "maxChannelDelta": 255,
         "width": 1920,
         "height": 1080,
-        "bytes": 68476
+        "bytes": 66619
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-demand-ppt.png",
         "preEditSha256": "cb4f4ad3592398e30dbdb2050282e1e91e6fcd176972a2b3204dad264e8b58b3",
-        "postEditSha256": "ca10607fba15fb8075499232d990230bfe468348af84bd85cf1384f17ba4041f",
+        "postEditSha256": "7f1a16003c1dd1eabb467d04b832e5604a79629b0ed4e7ff73b61e225d3f2a8f",
         "identical": false,
         "diffPixels": 51562,
         "diffPixelRatio": 0.02486593364197531,
@@ -5188,12 +5182,12 @@
         "maxChannelDelta": 255,
         "width": 1920,
         "height": 1080,
-        "bytes": 76423
+        "bytes": 74450
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-m4-tab1.png",
         "preEditSha256": "ae8d10ee1ca78815599a1b8837fbd39ed55cda5bb0bfa7dfe1f8193317048d42",
-        "postEditSha256": "cb2f9677a013265d0120daf204608b94099dc42e7add5f8315c7398a8bf071fe",
+        "postEditSha256": "0f2ca4a5216eff6850b988d0a00f69da9a3256fcc2eee1fcd69239bfc68da125",
         "identical": false,
         "diffPixels": 52096,
         "diffPixelRatio": 0.025123456790123455,
@@ -5201,12 +5195,12 @@
         "maxChannelDelta": 255,
         "width": 1920,
         "height": 1080,
-        "bytes": 72557
+        "bytes": 70767
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-m4-tab2.png",
         "preEditSha256": "8a3d6285aa6c5719897905e923373f3da18ca7809e2feefe7a010f71c30e2575",
-        "postEditSha256": "f843e4f502dd21a9e941e5a119286791292119976776f1e3f250e210d87ef78d",
+        "postEditSha256": "29f5b16f9ae5bce1c02148dab7e3c6788de85a2388611ed1d059a819a605d194",
         "identical": false,
         "diffPixels": 40115,
         "diffPixelRatio": 0.019345582561728396,
@@ -5214,12 +5208,12 @@
         "maxChannelDelta": 255,
         "width": 1920,
         "height": 1080,
-        "bytes": 65261
+        "bytes": 63337
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-m4-tab3.png",
         "preEditSha256": "ce7d66419c5c3686bfb37fd458b0ab2a3daceb5fa9b6eb1c5083fa381d9d0592",
-        "postEditSha256": "c1a49b1ef2a2ecf42a544f58880dbb1a57008d684c6908a13a8e0f5c0edd7817",
+        "postEditSha256": "324e42e7ead6885cfde72c8ebcc7f5de6c61034582af5e63ba96559c2163b014",
         "identical": false,
         "diffPixels": 47899,
         "diffPixelRatio": 0.023099440586419752,
@@ -5227,12 +5221,12 @@
         "maxChannelDelta": 255,
         "width": 1920,
         "height": 1080,
-        "bytes": 73770
+        "bytes": 71958
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-ai.png",
         "preEditSha256": "792a9983236efe3400a04518e5ed8d12d1c9547e3b66644b8bf088342fddce15",
-        "postEditSha256": "fda0c457b21575cf923b440082c63741c284eadd395af26b6240f6f638f5ea1d",
+        "postEditSha256": "789632a60a2ba6e03443ff32660926b7a64c02f0de76366e698d9aaa414bf576",
         "identical": false,
         "diffPixels": 43497,
         "diffPixelRatio": 0.0209765625,
@@ -5240,12 +5234,12 @@
         "maxChannelDelta": 255,
         "width": 1920,
         "height": 1080,
-        "bytes": 60643
+        "bytes": 58730
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-workflow-designer.png",
         "preEditSha256": "ffe948cbcdfc3bb49df8f9d5566e70e69eeba0169eb9691e16860098b720762c",
-        "postEditSha256": "3a2b50f0de138eb97f627dbe6042d421ded6018928b343dba72f4ec064a25d09",
+        "postEditSha256": "bf0685de9b82b3300a5f02f2b636b5b67ec8d52626558f16e72363e2f59dd906",
         "identical": false,
         "diffPixels": 31322,
         "diffPixelRatio": 0.015105131172839506,
@@ -5253,12 +5247,12 @@
         "maxChannelDelta": 255,
         "width": 1920,
         "height": 1080,
-        "bytes": 50737
+        "bytes": 48325
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-workflow-templates.png",
         "preEditSha256": "83327c1aadd4490f5d0c40fbbcf1b43095acfe4af0ab6a949b9a813f66469dc4",
-        "postEditSha256": "1124d6076ecebc0d19f398ad6bad602aef6d5cb62177025dc3394209c1219d00",
+        "postEditSha256": "7f7f23bbdccf1835998664d4b95098796dfb37cdc13f46763035483b21f56fcc",
         "identical": false,
         "diffPixels": 37766,
         "diffPixelRatio": 0.018212770061728396,
@@ -5266,12 +5260,12 @@
         "maxChannelDelta": 255,
         "width": 1920,
         "height": 1080,
-        "bytes": 51988
+        "bytes": 50262
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-workflow-instances.png",
         "preEditSha256": "29a0fc43b330ea6e7e13a1ddc4e7d5e355c5ae3124385f8dd0e902d875e3c4f0",
-        "postEditSha256": "063713bf75cdf0db70bda520420a47586b0f75ea03e75d3e53d1a81ddc5b04dc",
+        "postEditSha256": "b752a285690c196979d163fa39c6cf4a8d1bed2cbda6bb284fb82761655c51d3",
         "identical": false,
         "diffPixels": 34186,
         "diffPixelRatio": 0.01648630401234568,
@@ -5279,12 +5273,12 @@
         "maxChannelDelta": 255,
         "width": 1920,
         "height": 1080,
-        "bytes": 51693
+        "bytes": 49898
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-workflow-tasks.png",
         "preEditSha256": "a01a2f3ee47fc19c33fda0fefb40ab4a3af14a296f4aed660bfc6a369818bfdc",
-        "postEditSha256": "d05e1a221f81d2f7fb531f66ae644f50406b67bab88a88efb1186e3ecf3d2969",
+        "postEditSha256": "4e23907c33c804fd1d01e4bf78ca2650f1770689df780d6fa302c4ccaede324e",
         "identical": false,
         "diffPixels": 48358,
         "diffPixelRatio": 0.02332079475308642,
@@ -5292,12 +5286,12 @@
         "maxChannelDelta": 255,
         "width": 1920,
         "height": 1080,
-        "bytes": 64752
+        "bytes": 62925
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-admin-overview.png",
         "preEditSha256": "a3d8fcd1f896c81d9094c3fd6fba5b53fca7713fe84651bd6f4585988d0b2b2d",
-        "postEditSha256": "4e241f21c8a16379e85367c840be078d2e937d06b87a2d42fdad1e0b9264a034",
+        "postEditSha256": "3c92f312c3526458daced0c38944746158ba2d516e4cce534ab596094f282d90",
         "identical": false,
         "diffPixels": 86552,
         "diffPixelRatio": 0.04173996913580247,
@@ -5305,12 +5299,12 @@
         "maxChannelDelta": 255,
         "width": 1920,
         "height": 1080,
-        "bytes": 93605
+        "bytes": 91452
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-admin-users.png",
         "preEditSha256": "156a70ac017f50a1ee3f34ecbedcd5b7347936ea8553476f22f1138120f5957b",
-        "postEditSha256": "d09bc87b7e2fcf30632163afc4118f2514dc12bdff4f39164cd162f609d8ed38",
+        "postEditSha256": "850cee98460699ecb9b8e3c815e3f292c62e7b785e43de2885fe5fefa83b1b4e",
         "identical": false,
         "diffPixels": 48361,
         "diffPixelRatio": 0.02332224151234568,
@@ -5318,12 +5312,12 @@
         "maxChannelDelta": 255,
         "width": 1920,
         "height": 1080,
-        "bytes": 64565
+        "bytes": 62805
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-admin-knowledge.png",
         "preEditSha256": "2c51a21dbd7220c2712642e1920e0b43031073f160b4d58b4d43a0a899d18dd1",
-        "postEditSha256": "b332d0ef31e06c66f11fb39b033acd55aaa95b93b811d447e883d064ce853a37",
+        "postEditSha256": "ac63b81e2586d2e687763622206b1a3c37b2e7b07710b95408ef3f4fe6abbaba",
         "identical": false,
         "diffPixels": 34567,
         "diffPixelRatio": 0.016670042438271606,
@@ -5331,12 +5325,12 @@
         "maxChannelDelta": 255,
         "width": 1920,
         "height": 1080,
-        "bytes": 49848
+        "bytes": 48002
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-admin-ai-audit.png",
         "preEditSha256": "b7a177cbe9418f25b183ad7b086f9d6ad230cced300c1a678a378280d09fb0f2",
-        "postEditSha256": "61640eac3b7b761c5f0df1b2106b21401eccfb4958857b54d40e1ab00d954071",
+        "postEditSha256": "0ad90d0261c2d6f73d3055e151f3b696d8e95202d25207f95e63ecf5ec295a40",
         "identical": false,
         "diffPixels": 37828,
         "diffPixelRatio": 0.01824266975308642,
@@ -5344,12 +5338,12 @@
         "maxChannelDelta": 255,
         "width": 1920,
         "height": 1080,
-        "bytes": 56775
+        "bytes": 55019
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-admin-tokens.png",
         "preEditSha256": "5bc1e2bc8203f6b69efce9a063bfab09c22a9a34571cf002c91672d731e03dff",
-        "postEditSha256": "19daf9dbcdf6b37733997d0889c3d0ef3ff36e328b7878d1a0cad569c1d34cdf",
+        "postEditSha256": "91844a99b5a978fed8bc082a1d91e1251cdef333fb00555d78a73d52a371bf66",
         "identical": false,
         "diffPixels": 33261,
         "diffPixelRatio": 0.016040219907407408,
@@ -5357,12 +5351,12 @@
         "maxChannelDelta": 255,
         "width": 1920,
         "height": 1080,
-        "bytes": 49686
+        "bytes": 47906
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/user/fixture-1920/user-crm-board.png",
         "preEditSha256": "27846304ebe3ca13d7b79f4dd7a645ee0b462486152e53160d279588473c82d3",
-        "postEditSha256": "12cc859a44a5f3f69120e794d264634773e9935315315c6f97a51dc508425bfc",
+        "postEditSha256": "f4cb2188c31d83009fca3e55c972f144150a2331f6848c45500af25c5fc79172",
         "identical": false,
         "diffPixels": 152325,
         "diffPixelRatio": 0.0734592013888889,
@@ -5370,12 +5364,12 @@
         "maxChannelDelta": 255,
         "width": 1920,
         "height": 1080,
-        "bytes": 111738
+        "bytes": 109667
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/user/fixture-1920/user-crm-detail.png",
         "preEditSha256": "c0452bf73953519498b56f8189560d87e51f73724b76caac6ce47649276b836f",
-        "postEditSha256": "9f926db5166e14ed0c3b04723c17ad7a5beb7ce53f50c05becd8cbc56713ca70",
+        "postEditSha256": "d086193bf760c363b53aae126bc8f2387ad806e0e2c5a5f657f2369505bbb241",
         "identical": false,
         "diffPixels": 73212,
         "diffPixelRatio": 0.03530671296296296,
@@ -5383,12 +5377,12 @@
         "maxChannelDelta": 255,
         "width": 1920,
         "height": 1080,
-        "bytes": 92681
+        "bytes": 90695
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/user/fixture-1920/user-ai.png",
         "preEditSha256": "29312801e84c61f7d74908d2adc13fc1515f7fa9b0c08819dc9bbb73443bacc6",
-        "postEditSha256": "800ee877fc35b4ed0597eaff1d7953b41131f18f631ec0feae92a4fef2f2382f",
+        "postEditSha256": "bf4d7c82236ab93fb1266043daa8ed79aa1565a8b2c03ae7bc0ad727019493ce",
         "identical": false,
         "diffPixels": 42365,
         "diffPixelRatio": 0.02043065200617284,
@@ -5396,12 +5390,12 @@
         "maxChannelDelta": 255,
         "width": 1920,
         "height": 1080,
-        "bytes": 58433
+        "bytes": 56655
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/public/fixture-mobile/public-login.png",
         "preEditSha256": "2267edcba066a78809dc1b0c207afe17e656b1b0a499bddecdab4da664d08d5c",
-        "postEditSha256": "39fa6d83dd411958b4d757b005fb98873b204d27fa9985643fe448bc97374fec",
+        "postEditSha256": "50a57cb1e84260e467099dc6debe5c673ed74a794443d4d2292355955e4c8889",
         "identical": false,
         "diffPixels": 14758,
         "diffPixelRatio": 0.044835338437234175,
@@ -5409,7 +5403,7 @@
         "maxChannelDelta": 255,
         "width": 390,
         "height": 844,
-        "bytes": 18389
+        "bytes": 18381
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-crm-board.png",
@@ -5453,15 +5447,15 @@
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-crm-detail-opportunities.png",
         "preEditSha256": "dbe4fc61b59820ef388a2d9f2b4c6a645ac851d1b38dcb285375bff2901b8fb9",
-        "postEditSha256": "af4a7f6e8255a265f99d8e1ccda11642db4ce2b31c8d29457716d999152862f2",
+        "postEditSha256": "f4c4d5a4be84f96f9a3630ec0e69e0eb9cc1718c73db1f2d654b2ecc2fb54636",
         "identical": false,
-        "diffPixels": 33915,
-        "diffPixelRatio": 0.10303499817717827,
+        "diffPixels": 33911,
+        "diffPixelRatio": 0.1030228460323247,
         "rawDiffPixels": 329160,
         "maxChannelDelta": 255,
         "width": 390,
         "height": 844,
-        "bytes": 31937
+        "bytes": 31928
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-brand.png",
@@ -5557,7 +5551,7 @@
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-workflow-designer.png",
         "preEditSha256": "8dcd2422b5fdfd972e30fd813965aeb550b59d699e43ae2db822b303d56b4b00",
-        "postEditSha256": "b8d1cb752e9fce92005f6a2d79d83d71fa8a3f55a7978c03925e7fdfc7bb7bb2",
+        "postEditSha256": "ef62e264ccd1b4b8b6b0afe8b6a2400eec18df03b8ac77b3dd8c7e7236e4b3d0",
         "identical": false,
         "diffPixels": 26013,
         "diffPixelRatio": 0.07902843601895734,
@@ -5565,7 +5559,7 @@
         "maxChannelDelta": 255,
         "width": 390,
         "height": 844,
-        "bytes": 16563
+        "bytes": 16556
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-workflow-templates.png",
