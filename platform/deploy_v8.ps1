@@ -1,4 +1,4 @@
-# TuringMarket v0.3.0 guarded production deploy and rollback.
+# TuringMarket v0.4.0 guarded production deploy and rollback.
 
 param(
     [switch]$PreserveSessions,
@@ -19,9 +19,9 @@ $LOCAL_DIR = Split-Path -Parent $MyInvocation.MyCommand.Path
 $REPO_DIR = Split-Path -Parent $LOCAL_DIR
 $EXPECTED_REPO_DIR_B64 = "QzpcVXNlcnNcMjkyNzJcRG9jdW1lbnRzXOWcqOe6v+WVhuWKoeW5s+WPsC1naXRodWItc3luYw=="
 $EXPECTED_REPO_DIR = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($EXPECTED_REPO_DIR_B64))
-$EXPECTED_BRANCH = "codex/v0.3.0-baseline-consolidation"
-$EXPECTED_APP_BUILD = "20260713-v030-baseline-consolidation"
-$EXPECTED_APP_QUERY = "20260713v030baselineconsolidation"
+$EXPECTED_BRANCH = "codex/v0.4.0-product-shell-and-design-system"
+$EXPECTED_APP_BUILD = "20260714-v040-product-shell-design-system"
+$EXPECTED_APP_QUERY = "20260714v040productshelldesignsystem"
 $EXPECTED_PPT_BUILD = "20260702-v916-kb-bridge-client-cn"
 $EXPECTED_PPT_QUERY = "20260702v916kbbridge"
 $EXPECTED_PPT_SHA256 = "f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e"
@@ -41,6 +41,11 @@ $FILES = @(
     "nginx\turingmarket.conf",
     "client\shared\build_info.js",
     "client\core\navigation.js",
+    "client\core\accessibility.js",
+    "client\core\shell.js",
+    "client\styles\tokens.css",
+    "client\styles\components.css",
+    "client\styles\layout.css",
     "data\demand_form_schema.json",
     "data\industry_brands.json",
     "data\industry_brands_v2.json",
@@ -91,6 +96,7 @@ $FILES = @(
     "server\scripts\rotate_user_credentials.js",
     "server\scripts\update_ui_baseline.js",
     "server\tests\ai_knowledge_foundation.test.js",
+    "server\tests\accessibility_shell.test.js",
     "server\tests\brand_workspace_ui.test.js",
     "server\tests\browser_baseline_tools.test.js",
     "server\tests\credential_rotation.test.js",
@@ -106,6 +112,7 @@ $FILES = @(
     "server\tests\obsidian_and_business_knowledge.test.js",
     "server\tests\ppt_bridge_browser_contract.test.js",
     "server\tests\production_browser_evidence_tools.test.js",
+    "server\tests\product_shell_contract.test.js",
     "server\tests\public_static_security.test.js",
     "server\tests\security_and_crm_access.test.js",
     "server\tests\browser-baseline.config.js",
@@ -167,8 +174,8 @@ function Add-FrozenScreenshotFiles {
 
 function Assert-RollbackBackupPath {
     param([Parameter(Mandatory = $true)][AllowNull()][AllowEmptyString()][string]$BackupPath)
-    if ($BackupPath -notmatch '^backups/v030-baseline-consolidation-\d{8}-\d{6}$') {
-        throw "Rollback backup must match backups/v030-baseline-consolidation-YYYYMMDD-HHMMSS"
+    if ($BackupPath -notmatch '^backups/v040-product-shell-design-system-\d{8}-\d{6}$') {
+        throw "Rollback backup must match backups/v040-product-shell-design-system-YYYYMMDD-HHMMSS"
     }
 }
 
@@ -444,7 +451,15 @@ function Invoke-RemoteBackup {
     param([Parameter(Mandatory = $true)][string]$BackupPath)
 
     Assert-RollbackBackupPath -BackupPath $BackupPath
-    $requiredPublicAssets = @("client/shared/build_info.js", "client/core/navigation.js")
+    $requiredPublicAssets = @(
+        "client/shared/build_info.js",
+        "client/core/navigation.js",
+        "client/core/accessibility.js",
+        "client/core/shell.js",
+        "client/styles/tokens.css",
+        "client/styles/components.css",
+        "client/styles/layout.css"
+    )
     $platformManifest = (($FILES | ForEach-Object { Convert-ToRemotePath $_ }) -join "`n") + "`n"
     foreach ($asset in $requiredPublicAssets) {
         if (-not $platformManifest.Contains($asset)) {
@@ -738,6 +753,8 @@ function Assert-LocalReleaseSource {
 
     $buildInfoPath = Join-Path $LOCAL_DIR "client\shared\build_info.js"
     $navigationPath = Join-Path $LOCAL_DIR "client\core\navigation.js"
+    $accessibilityPath = Join-Path $LOCAL_DIR "client\core\accessibility.js"
+    $shellPath = Join-Path $LOCAL_DIR "client\core\shell.js"
     $pptPath = Join-Path $LOCAL_DIR "ppt.js"
     $buildInfoContractCheck = @'
 const fs = require('node:fs');
@@ -758,6 +775,10 @@ if (window.tmAppBuild !== expected.app) {
     Assert-LastExitCode -Message "Local build metadata contract failed"
     node --check $navigationPath
     Assert-LastExitCode -Message "Local navigation syntax check failed"
+    node --check $accessibilityPath
+    Assert-LastExitCode -Message "Local accessibility syntax check failed"
+    node --check $shellPath
+    Assert-LastExitCode -Message "Local shell syntax check failed"
     if (-not (Select-String -LiteralPath (Join-Path $LOCAL_DIR "index.html") -Pattern $EXPECTED_APP_QUERY -Quiet)) {
         throw "index.html does not contain the locked app cache key."
     }
@@ -817,8 +838,8 @@ foreach ($file in $ROOT_RELATIVE_FILES) {
 }
 
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
-$backupDir = "backups/v030-baseline-consolidation-$stamp"
-$releaseDir = "v030-baseline-consolidation-$stamp"
+$backupDir = "backups/v040-product-shell-design-system-$stamp"
+$releaseDir = "v040-product-shell-design-system-$stamp"
 $remoteReleaseRoot = "$CANDIDATE_ROOT/$releaseDir"
 $remoteCandidateDir = "$remoteReleaseRoot/platform"
 $backupCreated = $false
@@ -927,7 +948,7 @@ CandidateRoot="__CANDIDATE_ROOT__"
 GateUser="__GATE_USER__"
 LockDir="$RemoteRoot/.deploy-v030.lock"
 BackupAbsolute="$RemoteRoot/__BACKUP_PATH__"
-TestRoot="$ReleaseRoot/tmp/deploy-v030-gate-__STAMP__"
+  TestRoot="$ReleaseRoot/tmp/deploy-v040-gate-__STAMP__"
 TestDb="$TestRoot/test.db"
 SchemaDb="$TestRoot/schema.db"
 BrowserCache="$TestRoot/browser-cache"
@@ -1003,6 +1024,8 @@ node --check app.js
 node --check ppt.js
 node --check client/shared/build_info.js
 node --check client/core/navigation.js
+node --check client/core/accessibility.js
+node --check client/core/shell.js
 node --check server/server.js
 grep -Fq "$APP_QUERY" index.html
 grep -Fq "$APP_BUILD" client/shared/build_info.js
@@ -1396,6 +1419,11 @@ expect_status 200 /m4
 expect_status 200 /admin
 expect_status 200 /client/shared/build_info.js
 expect_status 200 /client/core/navigation.js
+expect_status 200 /client/core/accessibility.js
+expect_status 200 /client/core/shell.js
+expect_status 200 /client/styles/tokens.css
+expect_status 200 /client/styles/components.css
+expect_status 200 /client/styles/layout.css
 expect_status 404 /client/unknown.js
 expect_status 404 /server/server.js
 

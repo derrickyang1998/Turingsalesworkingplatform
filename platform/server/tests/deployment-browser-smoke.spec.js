@@ -20,16 +20,19 @@ test('deployment browser smoke loads the public shell and enforces the static bo
     ppt: '20260702-v916-kb-bridge-client-cn'
   });
 
-  for (const asset of [
-    '/client/shared/build_info.js',
-    '/client/core/navigation.js',
-    '/client/core/accessibility.js',
-    '/client/core/shell.js',
-    '/client/styles/tokens.css',
-    '/client/styles/components.css',
-    '/client/styles/layout.css'
-  ]) {
-    expect((await request.get(asset)).status(), asset).toBe(200);
+  const publicAssets = new Map([
+    ['/client/shared/build_info.js', '20260714-v040-product-shell-design-system'],
+    ['/client/core/navigation.js', 'window.TMNavigation = Object.freeze'],
+    ['/client/core/accessibility.js', 'window.TMAccessibility = Object.freeze'],
+    ['/client/core/shell.js', 'window.TMShell = Object.freeze'],
+    ['/client/styles/tokens.css', '--tm-color-control-border: #8a94a3;'],
+    ['/client/styles/components.css', '.tm-checkbox-target {'],
+    ['/client/styles/layout.css', '.tm-mobile-bar,']
+  ]);
+  for (const [asset, marker] of publicAssets) {
+    const response = await request.get(asset);
+    expect(response.status(), asset).toBe(200);
+    expect(await response.text(), `${asset} marker`).toContain(marker);
   }
   for (const denied of ['/client/unknown.js', '/server/server.js']) {
     expect((await request.get(denied)).status(), denied).toBe(404);

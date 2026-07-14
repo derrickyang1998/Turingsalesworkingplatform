@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "baseline": {
     "version": "v0.2.9",
-    "release": "v0.3.0-baseline-consolidation",
+    "release": "v0.4.0-product-shell-and-design-system",
     "baseCommit": "9a591aa92e039f53a12ad7d5f098a26d0818bf08",
     "securityBase": {
       "release": "v0.2.10-security-credential-rotation",
@@ -12,26 +12,61 @@
   "files": {
     "indexHtml": {
       "source": "platform/index.html",
-      "sha256": "68924d9cb20f2abf964cb6fcbe4e6e6121cb068ef3ea7d54dd97ad17077a60a0",
-      "bytes": 90903
+      "sha256": "9428019432a1c8a0dd410bf9b65f6765edd4f3dd412faec68e987431e82b4038",
+      "bytes": 93741
     },
     "appJs": {
       "source": "platform/app.js",
-      "sha256": "5bd88b695c96dec5a4e514c52bed494e8a9cc052d265ea10a7240184c0eb5e58",
-      "bytes": 196713
+      "sha256": "f98d3cf6391ebb7d85355c54eb85da7a8e6544e1bb50fd642b821fcf95a9248f",
+      "bytes": 200992
     },
     "pptJs": {
       "source": "platform/ppt.js",
       "sha256": "f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e",
       "bytes": 88188
+    },
+    "buildInfoJs": {
+      "source": "platform/client/shared/build_info.js",
+      "sha256": "563b7f8750383dadc2e3edbd0d687ebfe11f5d0f2d165eac73855f9a89ca0be2",
+      "bytes": 387
+    },
+    "navigationJs": {
+      "source": "platform/client/core/navigation.js",
+      "sha256": "782df27c37263b6fa1dd20714c944151efd980a2dbf3634e3d715521dbfc2032",
+      "bytes": 12671
+    },
+    "accessibilityJs": {
+      "source": "platform/client/core/accessibility.js",
+      "sha256": "1dd5721daa677601b8e45e81ce45f1874bfc6bcf7eb239f8958251ace6a256a7",
+      "bytes": 13476
+    },
+    "shellJs": {
+      "source": "platform/client/core/shell.js",
+      "sha256": "a0547224d275eabe21ea6e4f4661c672bd296249bf17a07094e1de8c29c6bbdf",
+      "bytes": 5593
+    },
+    "tokensCss": {
+      "source": "platform/client/styles/tokens.css",
+      "sha256": "f77dda23633b3b676c974cbba622085561d4de56cedd6c0e5d1e42a89015bb5f",
+      "bytes": 1773
+    },
+    "componentsCss": {
+      "source": "platform/client/styles/components.css",
+      "sha256": "6e1880c8cd63bf3c6d27019c68c689ddc85881b5de7333099ef6b738d1dc7cf5",
+      "bytes": 6317
+    },
+    "layoutCss": {
+      "source": "platform/client/styles/layout.css",
+      "sha256": "eabebc46c96d38437515755d7e46bc0729065d2e0ffc5f367a3ea83b14865045",
+      "bytes": 6610
     }
   },
   "buildMarkers": {
-    "app": "20260713-v030-baseline-consolidation",
+    "app": "20260714-v040-product-shell-design-system",
     "ppt": "20260702-v916-kb-bridge-client-cn"
   },
   "scriptCacheKeys": {
-    "app": "20260713v030baselineconsolidation",
+    "app": "20260714v040productshelldesignsystem",
     "ppt": "20260702v916kbbridge"
   },
   "routeContracts": [
@@ -39,265 +74,265 @@
       "method": "POST",
       "path": "/api/auth/login",
       "source": "platform/server/server.js",
-      "line": 177
+      "line": 178
     },
     {
       "method": "POST",
       "path": "/api/auth/logout",
       "source": "platform/server/server.js",
-      "line": 209
+      "line": 210
     },
     {
       "method": "GET",
       "path": "/api/auth/me",
       "source": "platform/server/server.js",
-      "line": 216
+      "line": 217
     },
     {
       "method": "POST",
       "path": "/api/demands",
       "source": "platform/server/server.js",
-      "line": 221
+      "line": 222
     },
     {
       "method": "GET",
       "path": "/api/demands",
       "source": "platform/server/server.js",
-      "line": 246
+      "line": 247
     },
     {
       "method": "POST",
       "path": "/api/proposals",
       "source": "platform/server/server.js",
-      "line": 254
+      "line": 255
     },
     {
       "method": "GET",
       "path": "/api/proposals",
       "source": "platform/server/server.js",
-      "line": 278
+      "line": 279
     },
     {
       "method": "POST",
       "path": "/api/token-usage",
       "source": "platform/server/server.js",
-      "line": 286
+      "line": 287
     },
     {
       "method": "GET",
       "path": "/api/token-usage",
       "source": "platform/server/server.js",
-      "line": 294
+      "line": 295
     },
     {
       "method": "GET",
       "path": "/api/admin/overview",
       "source": "platform/server/server.js",
-      "line": 311
+      "line": 312
     },
     {
       "method": "GET",
       "path": "/api/admin/users",
       "source": "platform/server/server.js",
-      "line": 328
+      "line": 329
     },
     {
       "method": "POST",
       "path": "/api/admin/users",
       "source": "platform/server/server.js",
-      "line": 333
+      "line": 334
     },
     {
       "method": "PUT",
       "path": "/api/admin/users/:id",
       "source": "platform/server/server.js",
-      "line": 355
+      "line": 356
     },
     {
       "method": "DELETE",
       "path": "/api/admin/users/:id",
       "source": "platform/server/server.js",
-      "line": 361
+      "line": 362
     },
     {
       "method": "POST",
       "path": "/api/admin/users/reset-password/:id",
       "source": "platform/server/server.js",
-      "line": 366
+      "line": 367
     },
     {
       "method": "POST",
       "path": "/api/admin/invites",
       "source": "platform/server/server.js",
-      "line": 414
+      "line": 415
     },
     {
       "method": "POST",
       "path": "/api/proposal/generate-ppt",
       "source": "platform/server/server.js",
-      "line": 422
+      "line": 423
     },
     {
       "method": "GET",
       "path": "/api/knowledge",
       "source": "platform/server/server.js",
-      "line": 470
+      "line": 471
     },
     {
       "method": "POST",
       "path": "/api/knowledge",
       "source": "platform/server/server.js",
-      "line": 488
+      "line": 489
     },
     {
       "method": "GET",
       "path": "/api/knowledge/search",
       "source": "platform/server/server.js",
-      "line": 495
+      "line": 496
     },
     {
       "method": "POST",
       "path": "/api/knowledge/ingest",
       "source": "platform/server/server.js",
-      "line": 512
+      "line": 513
     },
     {
       "method": "POST",
       "path": "/api/knowledge/upload",
       "source": "platform/server/server.js",
-      "line": 524
+      "line": 525
     },
     {
       "method": "POST",
       "path": "/api/influencers/upload",
       "source": "platform/server/server.js",
-      "line": 578
+      "line": 579
     },
     {
       "method": "POST",
       "path": "/api/admin/knowledge/import/obsidian",
       "source": "platform/server/server.js",
-      "line": 602
+      "line": 603
     },
     {
       "method": "POST",
       "path": "/api/admin/knowledge/vault/export",
       "source": "platform/server/server.js",
-      "line": 618
+      "line": 619
     },
     {
       "method": "GET",
       "path": "/api/knowledge/similar",
       "source": "platform/server/server.js",
-      "line": 636
+      "line": 637
     },
     {
       "method": "POST",
       "path": "/api/knowledge/:id/use",
       "source": "platform/server/server.js",
-      "line": 645
+      "line": 646
     },
     {
       "method": "POST",
       "path": "/api/ai/chat",
       "source": "platform/server/server.js",
-      "line": 651
+      "line": 652
     },
     {
       "method": "GET",
       "path": "/api/ai/conversations",
       "source": "platform/server/server.js",
-      "line": 672
+      "line": 673
     },
     {
       "method": "GET",
       "path": "/api/ai/conversations/:id",
       "source": "platform/server/server.js",
-      "line": 685
+      "line": 686
     },
     {
       "method": "POST",
       "path": "/api/ai/proposal-draft",
       "source": "platform/server/server.js",
-      "line": 699
+      "line": 700
     },
     {
       "method": "POST",
       "path": "/api/demand/parse-file",
       "source": "platform/server/server.js",
-      "line": 737
+      "line": 738
     },
     {
       "method": "POST",
       "path": "/api/ai/strategy",
       "source": "platform/server/server.js",
-      "line": 788
+      "line": 789
     },
     {
       "method": "POST",
       "path": "/api/ai/demand-analysis",
       "source": "platform/server/server.js",
-      "line": 797
+      "line": 798
     },
     {
       "method": "POST",
       "path": "/api/ai/ppt-outline",
       "source": "platform/server/server.js",
-      "line": 827
+      "line": 828
     },
     {
       "method": "GET",
       "path": "/api/dashboard/sales",
       "source": "platform/server/server.js",
-      "line": 837
+      "line": 838
     },
     {
       "method": "GET",
       "path": "/api/customers/stats",
       "source": "platform/server/server.js",
-      "line": 854
+      "line": 855
     },
     {
       "method": "POST",
       "path": "/api/customers/:id/activity",
       "source": "platform/server/server.js",
-      "line": 877
+      "line": 878
     },
     {
       "method": "GET",
       "path": "/api/dashboard/stats",
       "source": "platform/server/server.js",
-      "line": 893
+      "line": 894
     },
     {
       "method": "GET",
       "path": "/api/knowledge/categories",
       "source": "platform/server/server.js",
-      "line": 917
+      "line": 918
     },
     {
       "method": "POST",
       "path": "/api/auth/register",
       "source": "platform/server/server.js",
-      "line": 927
+      "line": 928
     },
     {
       "method": "GET",
       "path": "/api/users",
       "source": "platform/server/server.js",
-      "line": 950
+      "line": 951
     },
     {
       "method": "GET",
       "path": "/api/health",
       "source": "platform/server/server.js",
-      "line": 959
+      "line": 960
     },
     {
       "method": "GET",
       "path": "/{*path}",
       "source": "platform/server/server.js",
-      "line": 968
+      "line": 969
     },
     {
       "method": "GET",
@@ -657,25 +692,61 @@
       "method": "GET",
       "path": "/index.html",
       "source": "platform/server/services/public_assets_service.js",
-      "line": 99
+      "line": 104
     },
     {
       "method": "GET",
       "path": "/app.js",
       "source": "platform/server/services/public_assets_service.js",
-      "line": 100
+      "line": 105
     },
     {
       "method": "GET",
       "path": "/ppt.js",
       "source": "platform/server/services/public_assets_service.js",
-      "line": 101
+      "line": 106
     },
     {
       "method": "GET",
       "path": "/client/shared/build_info.js",
       "source": "platform/server/services/public_assets_service.js",
-      "line": 102
+      "line": 107
+    },
+    {
+      "method": "GET",
+      "path": "/client/core/navigation.js",
+      "source": "platform/server/services/public_assets_service.js",
+      "line": 108
+    },
+    {
+      "method": "GET",
+      "path": "/client/core/accessibility.js",
+      "source": "platform/server/services/public_assets_service.js",
+      "line": 109
+    },
+    {
+      "method": "GET",
+      "path": "/client/core/shell.js",
+      "source": "platform/server/services/public_assets_service.js",
+      "line": 110
+    },
+    {
+      "method": "GET",
+      "path": "/client/styles/tokens.css",
+      "source": "platform/server/services/public_assets_service.js",
+      "line": 111
+    },
+    {
+      "method": "GET",
+      "path": "/client/styles/components.css",
+      "source": "platform/server/services/public_assets_service.js",
+      "line": 112
+    },
+    {
+      "method": "GET",
+      "path": "/client/styles/layout.css",
+      "source": "platform/server/services/public_assets_service.js",
+      "line": 113
     }
   ],
   "seedFixture": {
@@ -1534,10 +1605,10 @@
         "column": 1,
         "loadOrder": 2,
         "occurrenceIndex": 2,
-        "globalIndex": 297
+        "globalIndex": 299
       }
     },
-    "sha256": "5061543c3239bf3903ac15b1aac3d2a7f1221d3bbd6ba3d7adcb2bd082d85c75"
+    "sha256": "89bb00126f397d192f9d277f36035a9fa475b69753fbbb5d9758e7ddc76c936e"
   },
   "preEdit": {
     "baseline": {

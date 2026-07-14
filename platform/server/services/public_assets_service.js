@@ -18,7 +18,12 @@ const PUBLIC_ROOT_FILES = new Set([
 
 const PUBLIC_CLIENT_FILES = new Set([
   '/client/shared/build_info.js',
-  '/client/core/navigation.js'
+  '/client/core/navigation.js',
+  '/client/core/accessibility.js',
+  '/client/core/shell.js',
+  '/client/styles/tokens.css',
+  '/client/styles/components.css',
+  '/client/styles/layout.css'
 ]);
 
 const PUBLIC_SPA_PATHS = new Set([
@@ -100,7 +105,12 @@ function registerPublicAssets(app, express, publicRoot) {
   app.get('/app.js', sendPublicFile(publicRoot, 'app.js'));
   app.get('/ppt.js', sendPublicFile(publicRoot, 'ppt.js'));
   app.get('/client/shared/build_info.js', sendPublicFile(publicRoot, 'client/shared/build_info.js'));
-  app.get(/^\/client\/core\/navigation\.js$/, sendPublicFile(publicRoot, 'client/core/navigation.js'));
+  app.get('/client/core/navigation.js', sendPublicFile(publicRoot, 'client/core/navigation.js'));
+  app.get('/client/core/accessibility.js', sendPublicFile(publicRoot, 'client/core/accessibility.js'));
+  app.get('/client/core/shell.js', sendPublicFile(publicRoot, 'client/core/shell.js'));
+  app.get('/client/styles/tokens.css', sendPublicFile(publicRoot, 'client/styles/tokens.css'));
+  app.get('/client/styles/components.css', sendPublicFile(publicRoot, 'client/styles/components.css'));
+  app.get('/client/styles/layout.css', sendPublicFile(publicRoot, 'client/styles/layout.css'));
 
   app.use('/data', express.static(path.join(publicRoot, 'data'), {
     dotfiles: 'deny',

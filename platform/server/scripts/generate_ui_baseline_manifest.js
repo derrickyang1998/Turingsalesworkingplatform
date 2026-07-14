@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const DEFAULT_BASELINE_VERSION = 'v0.2.9';
-const RELEASE_NAME = 'v0.3.0-baseline-consolidation';
+const RELEASE_NAME = 'v0.4.0-product-shell-and-design-system';
 const BASE_COMMIT = '9a591aa92e039f53a12ad7d5f098a26d0818bf08';
 const SECURITY_BASE_RELEASE = 'v0.2.10-security-credential-rotation';
 const SEED_FIXTURE_VERSION = 'v0.2.9-ui-fixture-1';
@@ -511,6 +511,12 @@ function generateManifest(options = {}) {
   const indexPath = path.join(repoRoot, 'platform', 'index.html');
   const appPath = path.join(repoRoot, 'platform', 'app.js');
   const buildInfoPath = path.join(repoRoot, 'platform', 'client', 'shared', 'build_info.js');
+  const navigationPath = path.join(repoRoot, 'platform', 'client', 'core', 'navigation.js');
+  const accessibilityPath = path.join(repoRoot, 'platform', 'client', 'core', 'accessibility.js');
+  const shellPath = path.join(repoRoot, 'platform', 'client', 'core', 'shell.js');
+  const tokensCssPath = path.join(repoRoot, 'platform', 'client', 'styles', 'tokens.css');
+  const componentsCssPath = path.join(repoRoot, 'platform', 'client', 'styles', 'components.css');
+  const layoutCssPath = path.join(repoRoot, 'platform', 'client', 'styles', 'layout.css');
   const pptPath = path.join(repoRoot, 'platform', 'ppt.js');
   const routeContractPaths = ROUTE_CONTRACT_SOURCES.map((segments) => path.join(repoRoot, ...segments));
   const duplicateFixturePath = path.resolve(
@@ -545,7 +551,14 @@ function generateManifest(options = {}) {
     files: {
       indexHtml: fileRecord(repoRoot, indexPath),
       appJs: fileRecord(repoRoot, appPath),
-      pptJs: fileRecord(repoRoot, pptPath)
+      pptJs: fileRecord(repoRoot, pptPath),
+      buildInfoJs: fileRecord(repoRoot, buildInfoPath),
+      navigationJs: fileRecord(repoRoot, navigationPath),
+      accessibilityJs: fileRecord(repoRoot, accessibilityPath),
+      shellJs: fileRecord(repoRoot, shellPath),
+      tokensCss: fileRecord(repoRoot, tokensCssPath),
+      componentsCss: fileRecord(repoRoot, componentsCssPath),
+      layoutCss: fileRecord(repoRoot, layoutCssPath)
     },
     buildMarkers: markerData.buildMarkers,
     scriptCacheKeys: markerData.scriptCacheKeys,

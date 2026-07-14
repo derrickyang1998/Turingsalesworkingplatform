@@ -3,7 +3,7 @@
 ## Source Contract / 发布源契约
 
 - Authoritative checkout / 唯一权威工作区：`C:\Users\29272\Documents\在线商务平台-github-sync`
-- Release branch / 发布分支：`codex/v0.3.0-baseline-consolidation`
+- Release branch / 发布分支：`codex/v0.4.0-product-shell-and-design-system`
 - Deployment entry / 部署入口：`platform/deploy_v8.ps1`
 - Runtime / 运行时：Node.js 20, Express 5 + SQLite (better-sqlite3)
 - PM2 contract / PM2 契约：`platform/ecosystem.config.js` starts `server/server.js` as `turingmarket`
@@ -14,11 +14,11 @@ The script is executable with the installed Windows PowerShell 5.1 and keeps its
 
 ## Frozen Client Contract / 冻结前端契约
 
-The v0.3.0 consolidation release keeps the current user interface and PPT implementation frozen. / v0.3.0 基线整合版本保持当前 UI 与 PPT 实现不变。
+The v0.4.0 product-shell release delivers the approved shared shell assets while keeping the PPT implementation frozen. / v0.4.0 产品壳层版本交付获批共享资源，并保持 PPT 实现冻结。
 
 ```text
-App build: 20260713-v030-baseline-consolidation
-App cache key: app.js?v=20260713v030baselineconsolidation
+App build: 20260714-v040-product-shell-design-system
+App cache key: app.js?v=20260714v040productshelldesignsystem
 PPT build: 20260702-v916-kb-bridge-client-cn
 PPT cache key: ppt.js?v=20260702v916kbbridge
 PPT SHA-256: f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e
@@ -30,6 +30,11 @@ Only these modular browser assets are public / 仅以下模块化前端资源允
 
 - `/client/shared/build_info.js`
 - `/client/core/navigation.js`
+- `/client/core/accessibility.js`
+- `/client/core/shell.js`
+- `/client/styles/tokens.css`
+- `/client/styles/components.css`
+- `/client/styles/layout.css`
 
 Every other `/client/*` path and private source path such as `/server/server.js` must return `404` through both Express and Nginx. / 其他 `/client/*` 以及 `/server/server.js` 等私有源码路径必须在 Express 与 Nginx 两层均返回 `404`。
 
@@ -65,8 +70,8 @@ The script performs these gates in order / 脚本按以下顺序执行：
 
 1. Verify checkout, branch, clean state, build markers, cache keys, and frozen PPT hash. / 校验工作区、分支、干净状态、构建标记、缓存键及冻结 PPT 哈希。
 2. Acquire the fail-closed lifecycle lock at `/root/turingmarket/.deploy-v030.lock`; deployment and manual rollback share it for their complete remote lifecycle, while production mutation additionally requires the stable global writer mutex. / 获取失败关闭的远端生命周期锁；正式发布与手工回滚在完整远端生命周期内共用该锁，生产变更还必须另外取得稳定的全局 writer 互斥。
-3. Create `/root/turingmarket/backups/v030-baseline-consolidation-<timestamp>` with present/absent manifests, both root and server `node_modules`, a consistent `better-sqlite3` backup, Nginx configuration, and SHA-256 checksums. The backup path must not already exist. / 在生产根目录外置建立版本化备份，记录存在/缺失文件、两层 Node 依赖、一致性数据库副本、Nginx 配置与校验和；同名备份存在时立即失败。
-4. Upload every runtime, browser, test, and evidence file only to `/var/lib/turingmarket-gate/releases/v030-baseline-consolidation-<timestamp>`; store the immutable upload manifest under the root-only lifecycle lock and verify it before and after candidate testing. The active `/root/turingmarket/platform` tree is not overwritten during validation. / 所有文件只上传到外置候选目录；不可变上传清单保存在仅 root 可读的生命周期锁内，并在候选测试前后各校验一次，验证期间绝不覆盖活动生产目录。
+3. Create `/root/turingmarket/backups/v040-product-shell-design-system-<timestamp>` with present/absent manifests, both root and server `node_modules`, a consistent `better-sqlite3` backup, Nginx configuration, and SHA-256 checksums. The backup path must not already exist. / 在生产根目录外置建立版本化备份，记录存在/缺失文件、两层 Node 依赖、一致性数据库副本、Nginx 配置与校验和；同名备份存在时立即失败。
+4. Upload every runtime, browser, test, and evidence file only to `/var/lib/turingmarket-gate/releases/v040-product-shell-design-system-<timestamp>`; store the immutable upload manifest under the root-only lifecycle lock and verify it before and after candidate testing. The active `/root/turingmarket/platform` tree is not overwritten during validation. / 所有文件只上传到外置候选目录；不可变上传清单保存在仅 root 可读的生命周期锁内，并在候选测试前后各校验一次，验证期间绝不覆盖活动生产目录。
 5. Run dependency installation, the complete Node suite, schema fingerprint and user/session count comparison, native Ubuntu 26 Playwright 1.61.1 browser smoke with Chromium sandboxing, and writable-prefix Nginx validation as the no-login `turingmarket-gate` user. The frozen Playwright 1.60.0 Windows baseline remains unchanged. / 依赖安装、完整 Node、数据库结构指纹与用户/会话计数对比、Ubuntu 26 原生 Playwright 1.61.1 沙箱浏览器冒烟和可写前缀 Nginx 校验全部以禁止登录的门禁用户执行；冻结的 Playwright 1.60.0 Windows 基线保持不变。
    Bootstrap and deploy independently validate the account's system UID, primary and supplementary groups, locked credentials, fixed home, and nologin shell before candidate code can run. / 引导和发布会分别核验门禁账号的系统 UID、主组、补充组、锁定凭据、固定 home 与 nologin shell，身份漂移时禁止运行候选代码。
 6. Kill and verify the absence of all gate-user processes, recheck uploaded sources, recreate only the four exact external-state symlinks, remove ACL/write escalation, and seal the complete candidate tree including `node_modules`. After acquiring the writer lock, recheck the same digest immediately before stopping PM2 and atomically exchange the sealed candidate with Linux `renameat2(RENAME_EXCHANGE)`. / 门禁结束后清理并确认该用户无残留进程，复验上传源码，仅重建四个精确外置状态链接，移除 ACL 与多余写权限，并封存包含 `node_modules` 的完整候选树；取得 writer 锁后、停止 PM2 前再次核对同一摘要，再执行 Linux 原子目录交换。
@@ -79,7 +84,7 @@ The remote full Node gate is equivalent to / 远端完整 Node 门禁等价于�
 
 ```bash
 cd server
-NODE_ENV=test TM_DISABLE_DOTENV=1 DB_PATH=/var/lib/turingmarket-gate/releases/<release>/tmp/deploy-v030-gate-<timestamp>/test.db node --test --test-concurrency=1 tests/*.test.js
+NODE_ENV=test TM_DISABLE_DOTENV=1 DB_PATH=/var/lib/turingmarket-gate/releases/<release>/tmp/deploy-v040-gate-<timestamp>/test.db node --test --test-concurrency=1 tests/*.test.js
 ```
 
 ## Rollback / 回滚
@@ -87,10 +92,10 @@ NODE_ENV=test TM_DISABLE_DOTENV=1 DB_PATH=/var/lib/turingmarket-gate/releases/<r
 Use only a backup created by this release / 只允许使用本版本生成的备份：
 
 ```powershell
-.\platform\deploy_v8.ps1 -RollbackBackup backups/v030-baseline-consolidation-<timestamp>
+.\platform\deploy_v8.ps1 -RollbackBackup backups/v040-product-shell-design-system-<timestamp>
 ```
 
-`-RollbackBackup backups/v030-baseline-consolidation-<timestamp>` needs only the authoritative script location plus external host/key configuration; it does not require the current branch or worktree to be deployable. Explicit empty, blank, or invalid identifiers are rejected before any server lookup or lock acquisition. It then acquires both lifecycle and writer ownership, verifies `SHA256SUMS`, stops PM2, restores files and both dependency trees, removes release-introduced files, restores Nginx, restarts `turingmarket`, and verifies `/api/health`. / 手工回滚不依赖当前分支或工作树可发布；显式空值、空白或非法备份编号会在查询服务器或获取远端锁之前拒绝。合法回滚随后同时取得生命周期锁和 writer 所有权，完成验签、停止 PM2、恢复文件与两层依赖、删除失败版本新增文件、恢复 Nginx，最后重启并验证健康状态。
+`-RollbackBackup backups/v040-product-shell-design-system-<timestamp>` needs only the authoritative script location plus external host/key configuration; it does not require the current branch or worktree to be deployable. Explicit empty, blank, or invalid identifiers are rejected before any server lookup or lock acquisition. It then acquires both lifecycle and writer ownership, verifies `SHA256SUMS`, stops PM2, restores files and both dependency trees, removes release-introduced files, restores Nginx, restarts `turingmarket`, and verifies `/api/health`. / 手工回滚不依赖当前分支或工作树可发布；显式空值、空白或非法备份编号会在查询服务器或获取远端锁之前拒绝。合法回滚随后同时取得生命周期锁和 writer 所有权，完成验签、停止 PM2、恢复文件与两层依赖、删除失败版本新增文件、恢复 Nginx，最后重启并验证健康状态。
 
 The SQLite copy is retained for disaster recovery evidence and is not automatically restored during a code rollback, so old password hashes, sessions, or secret state are never reintroduced. / SQLite 备份仅作为灾备证据保留，代码回滚不会自动覆盖生产数据库，避免恢复旧密码哈希、会话或密钥状态。
 
