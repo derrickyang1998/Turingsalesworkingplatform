@@ -299,6 +299,29 @@ thead th {
   color: var(--tm-color-danger);
 }
 
+#page-m5 h2 + span,
+#aiMemoryStatus {
+  color: var(--tm-color-text-muted) !important;
+  opacity: 1 !important;
+}
+
+#page-m5 button[onclick="clearAIMemory()"] {
+  border-color: var(--tm-color-danger) !important;
+  color: var(--tm-color-danger) !important;
+}
+
+#page-workflow-designer .wf-toolbar > span,
+#page-workflow-designer #wf-prop-content {
+  color: var(--tm-color-text-muted) !important;
+  opacity: 1 !important;
+}
+
+#page-admin .stat-label,
+#page-admin #ad_recentActivity [style*="opacity"] {
+  color: var(--tm-color-text-muted) !important;
+  opacity: 1 !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

@@ -144,7 +144,7 @@
     openButton.addEventListener('click', function () { setNavigationOpen(true); });
     closeButton.addEventListener('click', function () { setNavigationOpen(false); });
     backdrop.addEventListener('click', function () { setNavigationOpen(false); });
-    document.addEventListener('keydown', handleKeydown);
+    sidebar.addEventListener('keydown', handleKeydown);
     document.addEventListener('tm:navigation-applied', handleNavigationApplied);
     window.addEventListener('resize', handleBreakpoint);
     if (desktopMedia && typeof desktopMedia.addEventListener === 'function') {

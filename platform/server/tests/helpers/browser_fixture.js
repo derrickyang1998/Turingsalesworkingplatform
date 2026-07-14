@@ -117,7 +117,10 @@ function writeMetadata(context, patcher) {
   fs.writeFileSync(context.metadataPath, `${JSON.stringify(metadata, null, 2)}\n`, 'utf8');
 }
 
-async function installBaselineBrowserControls(page, { fixture }) {
+async function installBaselineBrowserControls(page, { fixture, motionProfile = 'baseline' }) {
+  if (!['baseline', 'native'].includes(motionProfile)) {
+    throw new Error(`Unsupported browser fixture motion profile: ${motionProfile}`);
+  }
   page.__baselineUnhandledApiCalls = [];
   page.__baselineUnhandledNetworkRequests = [];
   page.__baselinePageErrors = [];
@@ -128,7 +131,7 @@ async function installBaselineBrowserControls(page, { fixture }) {
     if (message.type() === 'error') page.__baselinePageErrors.push(message.text());
   });
 
-  await page.addInitScript(({ frozenIso, randomValue, maskSelectors }) => {
+  await page.addInitScript(({ frozenIso, randomValue, maskSelectors, motionProfile: profile }) => {
     const fixedMs = Date.parse(frozenIso);
     const NativeDate = Date;
     class FrozenDate extends NativeDate {
@@ -148,42 +151,52 @@ async function installBaselineBrowserControls(page, { fixture }) {
     Object.defineProperty(window, 'Date', { value: FrozenDate });
     Math.random = () => randomValue;
 
-    const nativeMatchMedia = window.matchMedia.bind(window);
-    window.matchMedia = (query) => {
-      const normalized = String(query || '').replace(/\s+/g, ' ').trim();
-      if (normalized === '(prefers-reduced-motion: reduce)') {
-        return {
-          matches: true,
-          media: query,
-          onchange: null,
-          addListener() {},
-          removeListener() {},
-          addEventListener() {},
-          removeEventListener() {},
-          dispatchEvent() { return false; }
-        };
-      }
-      if (normalized === '(prefers-reduced-motion: no-preference)') {
-        return {
-          matches: false,
-          media: query,
-          onchange: null,
-          addListener() {},
-          removeListener() {},
-          addEventListener() {},
-          removeEventListener() {},
-          dispatchEvent() { return false; }
-        };
-      }
-      return nativeMatchMedia(query);
-    };
+    if (profile === 'baseline') {
+      const nativeMatchMedia = window.matchMedia.bind(window);
+      window.matchMedia = (query) => {
+        const normalized = String(query || '').replace(/\s+/g, ' ').trim();
+        if (normalized === '(prefers-reduced-motion: reduce)') {
+          return {
+            matches: true,
+            media: query,
+            onchange: null,
+            addListener() {},
+            removeListener() {},
+            addEventListener() {},
+            removeEventListener() {},
+            dispatchEvent() { return false; }
+          };
+        }
+        if (normalized === '(prefers-reduced-motion: no-preference)') {
+          return {
+            matches: false,
+            media: query,
+            onchange: null,
+            addListener() {},
+            removeListener() {},
+            addEventListener() {},
+            removeEventListener() {},
+            dispatchEvent() { return false; }
+          };
+        }
+        return nativeMatchMedia(query);
+      };
+    }
 
     window.__tmBaseline = {
       frozenAt: frozenIso,
       randomValue,
       maskSelectors,
+      motionProfile: profile,
       ready: false
     };
+
+    if (profile === 'native') return;
+
+    document.addEventListener('tm:navigation-applied', () => {
+      const heading = document.querySelector('.page.active h2');
+      if (heading) heading.style.outline = 'none';
+    });
 
     const css = `
 *,*::before,*::after {
@@ -216,7 +229,8 @@ ${maskSelectors.join(',')}::after {
   }, {
     frozenIso: fixture.frozenTime,
     randomValue: RANDOM_VALUE,
-    maskSelectors: fixture.mask.selectors
+    maskSelectors: fixture.mask.selectors,
+    motionProfile
   });
 }
 
@@ -623,17 +637,52 @@ function classifyFixtureRequest(requestUrl, expectedOrigin) {
   return url.pathname.startsWith('/api/') ? 'api' : 'static';
 }
 
-async function installFixtureApi(page, { fixture }) {
+function fixtureScenarioResponse(request, scenario) {
+  const url = new URL(request.url());
+  const apiPath = url.pathname.replace(/^\/api/, '') || '/';
+  const method = request.method().toUpperCase();
+
+  if (scenario.loginFailure && method === 'POST' && apiPath === '/auth/login') {
+    const failure = scenario.loginFailure === true ? {} : scenario.loginFailure;
+    return jsonResponse(
+      { error: failure.error || 'Fixture invalid credentials' },
+      Number(failure.status || 401)
+    );
+  }
+
+  const expiry = scenario.expireNextApi;
+  if (!expiry || scenario.expiryConsumed) return null;
+  const expectedPath = typeof expiry === 'string' ? expiry : expiry.path;
+  const expectedMethod = typeof expiry === 'string' ? null : expiry.method;
+  const normalizedPath = expectedPath && String(expectedPath).replace(/^\/api/, '');
+  if (normalizedPath && normalizedPath !== apiPath) return null;
+  if (expectedMethod && String(expectedMethod).toUpperCase() !== method) return null;
+  scenario.expiryConsumed = true;
+  return jsonResponse({ error: 'Fixture session expired' }, 401);
+}
+
+async function installFixtureApi(page, {
+  fixture,
+  loginFailure = null,
+  expireNextApi = null,
+  routingScope = 'page'
+}) {
+  if (!['page', 'context'].includes(routingScope)) {
+    throw new Error(`Unsupported fixture routing scope: ${routingScope}`);
+  }
   const port = Number(process.env.TM_BROWSER_FIXTURE_PORT || 43187);
   const expectedOrigin = `http://127.0.0.1:${port}`;
   const fixtureState = cloneFixtureApiState(fixture);
+  const scenario = { loginFailure, expireNextApi, expiryConsumed: false };
   page.__tmTask9M4Calls = [];
   let task9M4CallIndex = 0;
   const recordTask9M4Call = (event) => {
     task9M4CallIndex += 1;
     page.__tmTask9M4Calls.push(Object.assign({ index: task9M4CallIndex }, event));
   };
-  await page.route('**/*', async (route) => {
+  page.__tmFixtureScenario = scenario;
+  const routeOwner = routingScope === 'context' ? page.context() : page;
+  await routeOwner.route('**/*', async (route) => {
     const request = route.request();
     const classification = classifyFixtureRequest(request.url(), expectedOrigin);
     if (classification === 'external') {
@@ -646,7 +695,8 @@ async function installFixtureApi(page, { fixture }) {
       await route.continue();
       return;
     }
-    const response = apiResponseFor(route.request(), fixtureState, recordTask9M4Call);
+    const response = fixtureScenarioResponse(route.request(), scenario)
+      || apiResponseFor(route.request(), fixtureState, recordTask9M4Call);
     if (!response) {
       const url = new URL(request.url());
       page.__baselineUnhandledApiCalls.push(`${request.method()} ${url.pathname}${url.search}`);
@@ -727,11 +777,11 @@ async function maskDynamicContent(page) {
   });
 }
 
-async function waitForBaselineReady(page) {
+async function waitForBaselineReady(page, { maskDynamicContent: shouldMaskDynamicContent = true } = {}) {
   await page.evaluate(() => document.fonts && document.fonts.ready ? document.fonts.ready.then(() => true) : true);
   await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => {});
   await page.waitForTimeout(100);
-  await maskDynamicContent(page);
+  if (shouldMaskDynamicContent) await maskDynamicContent(page);
   await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   if (page.__baselineUnhandledApiCalls.length) {
     throw new Error(`Unstubbed baseline API calls: ${page.__baselineUnhandledApiCalls.join(', ')}`);
@@ -809,12 +859,6 @@ async function recordKnownBaselineGaps(_page, _journey, context) {
       observed: 'After switching to M4, document.body remains the active element.'
     },
     {
-      contract: 'mobile-shell-content',
-      status: 'known-baseline-gap',
-      ownerPhase: 3,
-      reason: 'The pre-edit fixed sidebar occupies the 390px viewport and leaves page content outside the first mobile viewport.'
-    },
-    {
       contract: 'admin-knowledge-loader',
       status: 'known-baseline-gap',
       ownerPhase: 6,
@@ -822,6 +866,8 @@ async function recordKnownBaselineGaps(_page, _journey, context) {
     }
   ];
   writeMetadata(context, (metadata) => {
+    const currentContracts = new Set(gaps.map((gap) => gap.contract));
+    metadata.knownGaps = metadata.knownGaps.filter((gap) => currentContracts.has(gap.contract));
     const existing = new Set(metadata.knownGaps.map((gap) => gap.contract));
     for (const gap of gaps) {
       if (!existing.has(gap.contract)) metadata.knownGaps.push(gap);

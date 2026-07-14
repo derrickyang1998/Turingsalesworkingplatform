@@ -42,6 +42,16 @@
     }
   }
 
+  function nameCustomerStageControls() {
+    var controls = document.querySelectorAll('#custTableBody select[onchange*="changeCustomerStage"]');
+    for (var index = 0; index < controls.length; index += 1) {
+      if (controls[index].getAttribute('aria-label') || controls[index].getAttribute('aria-labelledby')) continue;
+      var row = controls[index].closest ? controls[index].closest('tr') : null;
+      var brand = row && row.cells && row.cells.length ? String(row.cells[0].textContent || '').trim() : '';
+      controls[index].setAttribute('aria-label', '更新客户阶段' + (brand ? '：' + brand : ''));
+    }
+  }
+
   function hideDecorativeIcons() {
     var icons = document.querySelectorAll('.nav-icon');
     for (var index = 0; index < icons.length; index += 1) {
@@ -50,13 +60,28 @@
   }
 
   function tabElements(tabList) {
-    return Array.prototype.slice.call(tabList.querySelectorAll('.tab[data-tab]'));
+    return Array.prototype.slice.call(tabList.querySelectorAll('.tab[data-tab],.crm-tab[data-tab]'));
   }
 
   function panelForTab(tab) {
+    var explicitPanelId = tab.getAttribute('data-panel');
+    if (explicitPanelId) return document.getElementById(explicitPanelId);
     var panelId = tab.getAttribute('data-tab');
     if (!panelId) return null;
     return document.getElementById(panelId) || document.getElementById(panelId + '-content');
+  }
+
+  function prepareCrmTabs(tabList) {
+    var tabs = tabList.querySelectorAll('.crm-tab');
+    var contracts = [
+      { tab: 'pipeline', panel: 'crmPipelineView' },
+      { tab: 'seapool', panel: 'crmSeaPoolView' },
+      { tab: 'opportunities', panel: 'crmOpportunityView' }
+    ];
+    for (var index = 0; index < tabs.length && index < contracts.length; index += 1) {
+      tabs[index].setAttribute('data-tab', contracts[index].tab);
+      tabs[index].setAttribute('data-panel', contracts[index].panel);
+    }
   }
 
   function updateTabState(tabList, focusTab) {
@@ -126,8 +151,11 @@
   }
 
   function enhanceTabs() {
-    var tabLists = document.querySelectorAll('.tabs');
-    for (var index = 0; index < tabLists.length; index += 1) bindTabList(tabLists[index]);
+    var tabLists = document.querySelectorAll('.tabs,.tm-crm-tabs');
+    for (var index = 0; index < tabLists.length; index += 1) {
+      if (tabLists[index].classList.contains('tm-crm-tabs')) prepareCrmTabs(tabLists[index]);
+      bindTabList(tabLists[index]);
+    }
   }
 
   function enhanceUploads() {
@@ -228,6 +256,12 @@
     dialog.removeAttribute('aria-hidden');
     dialog.setAttribute('role', 'dialog');
     dialog.setAttribute('aria-modal', 'true');
+    if (!dialog.__tmAccessibilityKeydownBound) {
+      dialog.__tmAccessibilityKeydownBound = true;
+      dialog.addEventListener('keydown', function (event) {
+        if (activeDialog === this) trapDialogKeydown(event);
+      });
+    }
     associateLabels();
     setBackgroundInert(dialog);
     var focusable = focusableElements(dialog);
@@ -339,6 +373,7 @@
 
   function refresh() {
     associateLabels();
+    nameCustomerStageControls();
     hideDecorativeIcons();
     enhanceTabs();
     enhanceUploads();
@@ -351,10 +386,13 @@
     refresh();
     if (initialized) return;
     initialized = true;
-    document.addEventListener('keydown', trapDialogKeydown);
-    document.addEventListener('tm:navigation-applied', refresh);
+    document.addEventListener('tm:navigation-applied', function () {
+      window.setTimeout(refresh, 0);
+    });
     if (window.MutationObserver && document.body) {
       observer = new MutationObserver(function () {
+        associateLabels();
+        nameCustomerStageControls();
         window.setTimeout(syncVisibleDialog, 0);
       });
       observer.observe(document.body, {
