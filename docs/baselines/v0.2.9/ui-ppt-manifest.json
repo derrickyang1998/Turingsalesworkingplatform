@@ -13,52 +13,82 @@
     "indexHtml": {
       "source": "platform/index.html",
       "sha256": "4734237e1b481a7a21223c7d5c8c66a67d6a998c81d17d21f6fbb4ddb9f28bac",
-      "bytes": 93773
+      "bytes": 93773,
+      "sourceCommit": "1db3ca113ea77f6d2f8821f92e4d23836a65744f",
+      "sourceCommitSha256": "4734237e1b481a7a21223c7d5c8c66a67d6a998c81d17d21f6fbb4ddb9f28bac",
+      "sourceCommitBytes": 93773
     },
     "appJs": {
       "source": "platform/app.js",
-      "sha256": "c8b037596329e4425ac046deab1f2453c9a59513a9e785b65918a358ecb97ae8",
-      "bytes": 201523
+      "sha256": "46751ea70ac05392400ccd996cec4c0101e176d504357ac284f790bed238930f",
+      "bytes": 198225,
+      "sourceCommit": "1db3ca113ea77f6d2f8821f92e4d23836a65744f",
+      "sourceCommitSha256": "46751ea70ac05392400ccd996cec4c0101e176d504357ac284f790bed238930f",
+      "sourceCommitBytes": 198225
     },
     "pptJs": {
       "source": "platform/ppt.js",
       "sha256": "f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e",
-      "bytes": 88188
+      "bytes": 88188,
+      "sourceCommit": "1db3ca113ea77f6d2f8821f92e4d23836a65744f",
+      "sourceCommitSha256": "f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e",
+      "sourceCommitBytes": 88188
     },
     "buildInfoJs": {
       "source": "platform/client/shared/build_info.js",
       "sha256": "563b7f8750383dadc2e3edbd0d687ebfe11f5d0f2d165eac73855f9a89ca0be2",
-      "bytes": 387
+      "bytes": 387,
+      "sourceCommit": "1db3ca113ea77f6d2f8821f92e4d23836a65744f",
+      "sourceCommitSha256": "563b7f8750383dadc2e3edbd0d687ebfe11f5d0f2d165eac73855f9a89ca0be2",
+      "sourceCommitBytes": 387
     },
     "navigationJs": {
       "source": "platform/client/core/navigation.js",
       "sha256": "782df27c37263b6fa1dd20714c944151efd980a2dbf3634e3d715521dbfc2032",
-      "bytes": 12671
+      "bytes": 12671,
+      "sourceCommit": "1db3ca113ea77f6d2f8821f92e4d23836a65744f",
+      "sourceCommitSha256": "782df27c37263b6fa1dd20714c944151efd980a2dbf3634e3d715521dbfc2032",
+      "sourceCommitBytes": 12671
     },
     "accessibilityJs": {
       "source": "platform/client/core/accessibility.js",
-      "sha256": "dd973fe01cd5606fe3eb58cd03f69184dd4f10f5ebfbab657149f8e51059ce1f",
-      "bytes": 15343
+      "sha256": "26c0340f91cbfeda9e375cc7b857b121fe0cd7aa0fb7e695f4f7b5ff49fa9b14",
+      "bytes": 15323,
+      "sourceCommit": "1db3ca113ea77f6d2f8821f92e4d23836a65744f",
+      "sourceCommitSha256": "26c0340f91cbfeda9e375cc7b857b121fe0cd7aa0fb7e695f4f7b5ff49fa9b14",
+      "sourceCommitBytes": 15323
     },
     "shellJs": {
       "source": "platform/client/core/shell.js",
       "sha256": "51922ed3f65965b9281e8ef720a6cbb8cb0458f3d6886d63c8f3b1a0ef6ccbb9",
-      "bytes": 5592
+      "bytes": 5592,
+      "sourceCommit": "1db3ca113ea77f6d2f8821f92e4d23836a65744f",
+      "sourceCommitSha256": "51922ed3f65965b9281e8ef720a6cbb8cb0458f3d6886d63c8f3b1a0ef6ccbb9",
+      "sourceCommitBytes": 5592
     },
     "tokensCss": {
       "source": "platform/client/styles/tokens.css",
       "sha256": "f77dda23633b3b676c974cbba622085561d4de56cedd6c0e5d1e42a89015bb5f",
-      "bytes": 1773
+      "bytes": 1773,
+      "sourceCommit": "1db3ca113ea77f6d2f8821f92e4d23836a65744f",
+      "sourceCommitSha256": "f77dda23633b3b676c974cbba622085561d4de56cedd6c0e5d1e42a89015bb5f",
+      "sourceCommitBytes": 1773
     },
     "componentsCss": {
       "source": "platform/client/styles/components.css",
-      "sha256": "6e7acc81bc8b8d354b116b362223a19e5622c6466cd1bcadaf31fcd5a0e2bfc3",
-      "bytes": 7484
+      "sha256": "d841536178e4f964ab4342fd30e5806f4833a32134c961ab64ad7d62d5bf567e",
+      "bytes": 7601,
+      "sourceCommit": "1db3ca113ea77f6d2f8821f92e4d23836a65744f",
+      "sourceCommitSha256": "d841536178e4f964ab4342fd30e5806f4833a32134c961ab64ad7d62d5bf567e",
+      "sourceCommitBytes": 7601
     },
     "layoutCss": {
       "source": "platform/client/styles/layout.css",
       "sha256": "eabebc46c96d38437515755d7e46bc0729065d2e0ffc5f367a3ea83b14865045",
-      "bytes": 6610
+      "bytes": 6610,
+      "sourceCommit": "1db3ca113ea77f6d2f8821f92e4d23836a65744f",
+      "sourceCommitSha256": "eabebc46c96d38437515755d7e46bc0729065d2e0ffc5f367a3ea83b14865045",
+      "sourceCommitBytes": 6610
     }
   },
   "buildMarkers": {
@@ -4732,7 +4762,7 @@
   },
   "postEditComparison": {
     "schemaVersion": 1,
-    "sourceCommit": "4bc4006a044fd05da99b36ea6f1014d5815175ca",
+    "sourceCommit": "1db3ca113ea77f6d2f8821f92e4d23836a65744f",
     "source": ".superpowers/sdd/browser-baseline-current",
     "comparisonMode": "reviewed-shared-shell-redesign",
     "approvalRecord": "docs/product/2026-07-phase3-visual-change-record.md",
@@ -4786,7 +4816,7 @@
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-crm-detail-seapool.png",
         "preEditSha256": "1e8e0920a6affb7795304786453f67ec74737bcd15437e2a2c872682cde8f66b",
-        "postEditSha256": "c94c04bf4c7605f7835080d2104add9f5d16b754c537cc86a63ca6eedd4ae5d7",
+        "postEditSha256": "c3c144b85ad5f125ac3e07816e0a96f90219da2c538a9fa650061738544cd0dc",
         "identical": false,
         "diffPixels": 75212,
         "diffPixelRatio": 0.058033950617283954,
@@ -4794,12 +4824,12 @@
         "maxChannelDelta": 255,
         "width": 1440,
         "height": 900,
-        "bytes": 83770
+        "bytes": 83750
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-crm-detail-opportunities.png",
         "preEditSha256": "6cf97ceb6704ce12d53f3d5845a9a9e0ec3f65d0821857e1e63809ce1bbae3f1",
-        "postEditSha256": "767920285fa8d9b0984cae5e7d3efe5924905959b2ffb761a89da23179f34d38",
+        "postEditSha256": "e922a9fcec6725bc2066bf12f4c06ea8a59d58a417d0b17a13236dd7a081a81a",
         "identical": false,
         "diffPixels": 47566,
         "diffPixelRatio": 0.03670216049382716,
@@ -4807,7 +4837,7 @@
         "maxChannelDelta": 255,
         "width": 1440,
         "height": 900,
-        "bytes": 57443
+        "bytes": 57413
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1440/admin-brand.png",
@@ -5033,7 +5063,7 @@
       {
         "path": "docs/baselines/v0.2.9/screenshots/user/fixture-1440/user-crm-detail.png",
         "preEditSha256": "5381403622fcb64cb867d94959af00d63c7003698fa5d64970c084f9a43cd070",
-        "postEditSha256": "cc9dd523f0972efef192be2ab63183d64d996d5039ebab9c64051173b81a63f0",
+        "postEditSha256": "751ab28bf689650129d61173de4c1e5546393585dfaa6f378bda90a773a35cab",
         "identical": false,
         "diffPixels": 72598,
         "diffPixelRatio": 0.05601697530864198,
@@ -5041,7 +5071,7 @@
         "maxChannelDelta": 255,
         "width": 1440,
         "height": 900,
-        "bytes": 88153
+        "bytes": 88152
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/user/fixture-1440/user-ai.png",
@@ -5059,7 +5089,7 @@
       {
         "path": "docs/baselines/v0.2.9/screenshots/public/fixture-1920/public-login.png",
         "preEditSha256": "88cbd823e934871a2ded1279aa56aa5b5b118abcfbe97bd6d9057507b01a7b0e",
-        "postEditSha256": "2e83bd1622a6eae893ff2dbdfd9a69a3514d5f6f361a142a5b09bc8105406098",
+        "postEditSha256": "ea87d7f7fb7ad6b02a02663536bb4cdf226479b18ccf626920c39d01ae1ca30e",
         "identical": false,
         "diffPixels": 16139,
         "diffPixelRatio": 0.007783082561728395,
@@ -5067,7 +5097,7 @@
         "maxChannelDelta": 255,
         "width": 1920,
         "height": 1080,
-        "bytes": 25511
+        "bytes": 25522
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-crm-board.png",
@@ -5098,7 +5128,7 @@
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-crm-detail-seapool.png",
         "preEditSha256": "c5e5301f251d932331d8f3b6a59c08692d252a35be57149869808ecc6c890c34",
-        "postEditSha256": "1ba49392becbf5005492db01afed2c2bf6cd282412cd7ceba4f4bf2bcff635ea",
+        "postEditSha256": "08310152a12a4c9b998c44b2b6ec68f811c73bd1c95de79e085dd1db5b3ff48c",
         "identical": false,
         "diffPixels": 76123,
         "diffPixelRatio": 0.03671055169753087,
@@ -5106,12 +5136,12 @@
         "maxChannelDelta": 255,
         "width": 1920,
         "height": 1080,
-        "bytes": 87866
+        "bytes": 87875
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-crm-detail-opportunities.png",
         "preEditSha256": "6ec067e42881df61c2638b306e1c440d1e944561500014137fff2bf3ec7d88e7",
-        "postEditSha256": "3771dd08036c29a0b00bd905bd5b4cc543ccd1298c98898316018987a31e4813",
+        "postEditSha256": "75dcb5f7147d3e23ed62a1d1507ece8cda25047b6714c475a11c1673dbe78024",
         "identical": false,
         "diffPixels": 48445,
         "diffPixelRatio": 0.023362750771604938,
@@ -5119,7 +5149,7 @@
         "maxChannelDelta": 255,
         "width": 1920,
         "height": 1080,
-        "bytes": 60950
+        "bytes": 60945
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-1920/admin-brand.png",
@@ -5371,7 +5401,7 @@
       {
         "path": "docs/baselines/v0.2.9/screenshots/public/fixture-mobile/public-login.png",
         "preEditSha256": "2267edcba066a78809dc1b0c207afe17e656b1b0a499bddecdab4da664d08d5c",
-        "postEditSha256": "50a57cb1e84260e467099dc6debe5c673ed74a794443d4d2292355955e4c8889",
+        "postEditSha256": "39fa6d83dd411958b4d757b005fb98873b204d27fa9985643fe448bc97374fec",
         "identical": false,
         "diffPixels": 14758,
         "diffPixelRatio": 0.044835338437234175,
@@ -5379,7 +5409,7 @@
         "maxChannelDelta": 255,
         "width": 390,
         "height": 844,
-        "bytes": 18381
+        "bytes": 18389
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-crm-board.png",
@@ -5527,7 +5557,7 @@
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-workflow-designer.png",
         "preEditSha256": "8dcd2422b5fdfd972e30fd813965aeb550b59d699e43ae2db822b303d56b4b00",
-        "postEditSha256": "ef62e264ccd1b4b8b6b0afe8b6a2400eec18df03b8ac77b3dd8c7e7236e4b3d0",
+        "postEditSha256": "b8d1cb752e9fce92005f6a2d79d83d71fa8a3f55a7978c03925e7fdfc7bb7bb2",
         "identical": false,
         "diffPixels": 26013,
         "diffPixelRatio": 0.07902843601895734,
@@ -5535,7 +5565,7 @@
         "maxChannelDelta": 255,
         "width": 390,
         "height": 844,
-        "bytes": 16556
+        "bytes": 16563
       },
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-workflow-templates.png",
@@ -5553,7 +5583,7 @@
       {
         "path": "docs/baselines/v0.2.9/screenshots/admin/fixture-mobile/admin-workflow-instances.png",
         "preEditSha256": "c768c6886cfeb340be766282eb71dd2c102d0f6f09bc1d4821e8dbc1ac480af0",
-        "postEditSha256": "8cdd6dc8324820679fd552af93cc2878ab4876fc942207b6e890f01dc8eacc17",
+        "postEditSha256": "4e683403b7d8a31063add09ecaccb6c9550e62f6593d96cce433a6be4147990f",
         "identical": false,
         "diffPixels": 26979,
         "diffPixelRatio": 0.08196317900109369,

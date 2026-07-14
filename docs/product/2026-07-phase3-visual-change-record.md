@@ -5,8 +5,9 @@ Pre-audit evidence: `docs/product/evidence/2026-07-phase3-pre/`
 Post-change evidence: `docs/product/evidence/2026-07-phase3-post/`
 Private raw source: `.superpowers/sdd/browser-baseline-current/` (72 of 72 PNG slots)
 Tracked raw-to-sheet provenance: `docs/product/evidence/2026-07-phase3-post/raw-contact-sheet-manifest.json`
+Controlled source commit: `1db3ca113ea77f6d2f8821f92e4d23836a65744f`
 
-The controlled evidence manifest maps all 72 raw captures to nine contact sheets with exact SHA-256 values. The Phase 2 repeat-capture gate remains `0.005`; this intentional Phase 3 redesign is recorded separately as a mandatory reviewed comparison with a maximum observed perceptual difference ratio of `0.14496597399441002` and review status `approved`.
+The controlled evidence manifest maps all 72 raw captures to nine contact sheets with exact SHA-256 values and commit-blob provenance. The Phase 2 repeat-capture gate remains `0.005`; this intentional Phase 3 redesign is recorded separately as a mandatory reviewed comparison with a maximum observed perceptual difference ratio of `0.14496597399441002` and review status `approved`. The post-review recapture changed zero perceptual pixels across all nine previously approved contact sheets.
 
 ## Review boundary
 

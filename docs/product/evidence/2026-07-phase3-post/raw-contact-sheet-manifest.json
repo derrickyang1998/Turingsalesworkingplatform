@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "sourceCommit": "4bc4006a044fd05da99b36ea6f1014d5815175ca",
+  "sourceCommit": "1db3ca113ea77f6d2f8821f92e4d23836a65744f",
   "source": ".superpowers/sdd/browser-baseline-current",
   "comparisonMode": "reviewed-shared-shell-redesign",
   "approvalRecord": "docs/product/2026-07-phase3-visual-change-record.md",
@@ -37,8 +37,8 @@
     },
     {
       "path": "admin/fixture-1440/admin-crm-detail-seapool.png",
-      "sha256": "c94c04bf4c7605f7835080d2104add9f5d16b754c537cc86a63ca6eedd4ae5d7",
-      "bytes": 83770,
+      "sha256": "c3c144b85ad5f125ac3e07816e0a96f90219da2c538a9fa650061738544cd0dc",
+      "bytes": 83750,
       "width": 1440,
       "height": 900,
       "contactSheet": "fixture-1440-2.png",
@@ -46,8 +46,8 @@
     },
     {
       "path": "admin/fixture-1440/admin-crm-detail-opportunities.png",
-      "sha256": "767920285fa8d9b0984cae5e7d3efe5924905959b2ffb761a89da23179f34d38",
-      "bytes": 57443,
+      "sha256": "e922a9fcec6725bc2066bf12f4c06ea8a59d58a417d0b17a13236dd7a081a81a",
+      "bytes": 57413,
       "width": 1440,
       "height": 900,
       "contactSheet": "fixture-1440-2.png",
@@ -208,8 +208,8 @@
     },
     {
       "path": "user/fixture-1440/user-crm-detail.png",
-      "sha256": "cc9dd523f0972efef192be2ab63183d64d996d5039ebab9c64051173b81a63f0",
-      "bytes": 88153,
+      "sha256": "751ab28bf689650129d61173de4c1e5546393585dfaa6f378bda90a773a35cab",
+      "bytes": 88152,
       "width": 1440,
       "height": 900,
       "contactSheet": "fixture-1440-3.png",
@@ -226,8 +226,8 @@
     },
     {
       "path": "public/fixture-1920/public-login.png",
-      "sha256": "2e83bd1622a6eae893ff2dbdfd9a69a3514d5f6f361a142a5b09bc8105406098",
-      "bytes": 25511,
+      "sha256": "ea87d7f7fb7ad6b02a02663536bb4cdf226479b18ccf626920c39d01ae1ca30e",
+      "bytes": 25522,
       "width": 1920,
       "height": 1080,
       "contactSheet": "fixture-1920-3.png",
@@ -253,8 +253,8 @@
     },
     {
       "path": "admin/fixture-1920/admin-crm-detail-seapool.png",
-      "sha256": "1ba49392becbf5005492db01afed2c2bf6cd282412cd7ceba4f4bf2bcff635ea",
-      "bytes": 87866,
+      "sha256": "08310152a12a4c9b998c44b2b6ec68f811c73bd1c95de79e085dd1db5b3ff48c",
+      "bytes": 87875,
       "width": 1920,
       "height": 1080,
       "contactSheet": "fixture-1920-2.png",
@@ -262,8 +262,8 @@
     },
     {
       "path": "admin/fixture-1920/admin-crm-detail-opportunities.png",
-      "sha256": "3771dd08036c29a0b00bd905bd5b4cc543ccd1298c98898316018987a31e4813",
-      "bytes": 60950,
+      "sha256": "75dcb5f7147d3e23ed62a1d1507ece8cda25047b6714c475a11c1673dbe78024",
+      "bytes": 60945,
       "width": 1920,
       "height": 1080,
       "contactSheet": "fixture-1920-2.png",
@@ -442,8 +442,8 @@
     },
     {
       "path": "public/fixture-mobile/public-login.png",
-      "sha256": "50a57cb1e84260e467099dc6debe5c673ed74a794443d4d2292355955e4c8889",
-      "bytes": 18381,
+      "sha256": "39fa6d83dd411958b4d757b005fb98873b204d27fa9985643fe448bc97374fec",
+      "bytes": 18389,
       "width": 390,
       "height": 844,
       "contactSheet": "fixture-mobile-3.png",
@@ -550,8 +550,8 @@
     },
     {
       "path": "admin/fixture-mobile/admin-workflow-designer.png",
-      "sha256": "ef62e264ccd1b4b8b6b0afe8b6a2400eec18df03b8ac77b3dd8c7e7236e4b3d0",
-      "bytes": 16556,
+      "sha256": "b8d1cb752e9fce92005f6a2d79d83d71fa8a3f55a7978c03925e7fdfc7bb7bb2",
+      "bytes": 16563,
       "width": 390,
       "height": 844,
       "contactSheet": "fixture-mobile-3.png",
@@ -568,7 +568,7 @@
     },
     {
       "path": "admin/fixture-mobile/admin-workflow-instances.png",
-      "sha256": "8cdd6dc8324820679fd552af93cc2878ab4876fc942207b6e890f01dc8eacc17",
+      "sha256": "4e683403b7d8a31063add09ecaccb6c9550e62f6593d96cce433a6be4147990f",
       "bytes": 20218,
       "width": 390,
       "height": 844,
@@ -675,7 +675,7 @@
     },
     {
       "name": "fixture-1440-2.png",
-      "sha256": "7ba89a121d30977c43cebf8377cabedb08fab350e8a4ba8321b5fc5c9c6ac2d8",
+      "sha256": "2455d18433499e8744ff5660560bf189c735c55ae497bd3f86b3ce30386ea40e",
       "bytes": 229282,
       "rawCaptures": [
         "admin/fixture-1440/admin-crm-detail-opportunities.png",
@@ -690,8 +690,8 @@
     },
     {
       "name": "fixture-1440-3.png",
-      "sha256": "40524434770632c27ae26f88913cca7f474819f8168db5dfd826d227499e5070",
-      "bytes": 213550,
+      "sha256": "9bb56b91f6eaed573763eaa78cacbbc2c769d74c3a1b323e394d574bcab9c7f7",
+      "bytes": 213549,
       "rawCaptures": [
         "admin/fixture-1440/admin-workflow-designer.png",
         "admin/fixture-1440/admin-workflow-instances.png",
@@ -720,8 +720,8 @@
     },
     {
       "name": "fixture-1920-2.png",
-      "sha256": "2dbcfaa7af5fc2b10179ba6065a4f3c143e3c1193b8ccae1ca1b65ecceeb51b5",
-      "bytes": 168249,
+      "sha256": "9bf958715cacd0e1aefc51b6e7a4b3276c45cef04f91618d5bdbf30883a361ba",
+      "bytes": 168227,
       "rawCaptures": [
         "admin/fixture-1920/admin-crm-detail-opportunities.png",
         "admin/fixture-1920/admin-crm-detail-pipeline.png",
@@ -735,7 +735,7 @@
     },
     {
       "name": "fixture-1920-3.png",
-      "sha256": "c2455aca584ae586a5beae4f27b64681b24607ec2d53cc2e06b87f4246732a20",
+      "sha256": "e7ee6b8bf9b1ba748c0e16dd4d1ac7059621484e23936f3b717dd9e76e88aad7",
       "bytes": 154863,
       "rawCaptures": [
         "admin/fixture-1920/admin-workflow-designer.png",
@@ -780,8 +780,8 @@
     },
     {
       "name": "fixture-mobile-3.png",
-      "sha256": "b2b62214e8f44ef59529de91420f16669bdfcc9c0ecbd3f42aa8aa95bd365878",
-      "bytes": 221951,
+      "sha256": "05ddcfeba8e8c58ddd69b848a07c5ca21f52ade0804faeb60f749db0d3046151",
+      "bytes": 221967,
       "rawCaptures": [
         "admin/fixture-mobile/admin-workflow-designer.png",
         "admin/fixture-mobile/admin-workflow-instances.png",
