@@ -418,6 +418,185 @@ test('handles a deterministic authenticated 401 by hiding the app and focusing u
   await expectRuntimeClean(page);
 });
 
+test('keeps closed customer detail drawers out of the accessibility tree and restores the opener', async ({ page }) => {
+  await boot(page, { path: '/m0-detail?view=pipeline' });
+  const legacyPanel = page.locator('#customerDetailPanel');
+  const sidebar = page.locator('#custDetailSidebar');
+  const opener = page.locator('#page-m0-detail button').first();
+
+  expect(await legacyPanel.evaluate((element) => ({
+    hidden: element.hidden,
+    inert: element.inert,
+    ariaHidden: element.getAttribute('aria-hidden')
+  }))).toEqual({ hidden: true, inert: true, ariaHidden: 'true' });
+  expect(await sidebar.evaluate((element) => ({
+    hidden: element.hidden,
+    inert: element.inert,
+    ariaHidden: element.getAttribute('aria-hidden')
+  }))).toEqual({ hidden: true, inert: true, ariaHidden: 'true' });
+  await expect(legacyPanel.locator('button')).toBeHidden();
+  await expect(sidebar.locator('.modal-close')).toBeHidden();
+
+  await opener.focus();
+  await page.evaluate(() => renderCustomerSidebar({
+    customer: { id: 901, brand_name: 'Fixture brand', stage: 'lead', is_public: 0 },
+    opportunities: [],
+    activity: []
+  }));
+  await expect(sidebar).toBeVisible();
+  expect(await sidebar.evaluate((element) => ({
+    hidden: element.hidden,
+    inert: element.inert,
+    ariaHidden: element.getAttribute('aria-hidden')
+  }))).toEqual({ hidden: false, inert: false, ariaHidden: null });
+  expect(await page.locator('#customerDetailDialog').evaluate((element) => element.contains(document.activeElement))).toBe(true);
+
+  await page.evaluate(() => closeCustomerDetail());
+  await expect(sidebar).toBeHidden();
+  expect(await sidebar.evaluate((element) => ({
+    hidden: element.hidden,
+    inert: element.inert,
+    ariaHidden: element.getAttribute('aria-hidden')
+  }))).toEqual({ hidden: true, inert: true, ariaHidden: 'true' });
+  await expect(opener).toBeFocused();
+  await expectRuntimeClean(page);
+});
+
+test('session expiry dismisses an active customer dialog before focusing interactive login', async ({ page }) => {
+  await boot(page, { path: '/m0-detail?view=pipeline', expireNextApi: { method: 'GET', path: '/health' } });
+  await page.locator('#page-m0-detail button').first().focus();
+  await page.evaluate(() => renderCustomerSidebar({
+    customer: { id: 902, brand_name: 'Expiring brand', stage: 'lead', is_public: 0 },
+    opportunities: [],
+    activity: []
+  }));
+  await expect.poll(() => page.locator('#authOverlay').evaluate((element) => element.inert)).toBe(true);
+
+  await page.evaluate(() => apiFetch('/health'));
+  await expect(page.locator('#custDetailSidebar')).toBeHidden();
+  await expect(page.locator('#custDetailOverlay')).toBeHidden();
+  await expect(page.locator('#authOverlay')).toBeVisible();
+  expect(await page.locator('#authOverlay').evaluate((element) => ({
+    inert: element.inert,
+    ariaHidden: element.getAttribute('aria-hidden')
+  }))).toEqual({ inert: false, ariaHidden: null });
+  await expect(page.locator('#loginUser')).toBeFocused();
+  expect(await page.locator('#customerDetailDialog').evaluate((element) => element.contains(document.activeElement))).toBe(false);
+  consumeExpectedPageError(page, /Failed to load resource:.*401 \(Unauthorized\)/);
+  await expectRuntimeClean(page);
+});
+
+test('reopens a style-driven modal after session expiry and fixture re-login', async ({ page }) => {
+  await boot(page, { path: '/m0-detail?view=pipeline', expireNextApi: { method: 'GET', path: '/health' } });
+  const modal = page.locator('#custModal');
+  const dialog = page.locator('#customerDialog');
+
+  await page.evaluate(() => openAddCustomer());
+  await expect(modal).toBeVisible();
+  await expect.poll(() => dialog.evaluate((element) => element.contains(document.activeElement))).toBe(true);
+
+  await page.evaluate(() => apiFetch('/health'));
+  await expect(modal).toBeHidden();
+  await expect(page.locator('#authOverlay')).toBeVisible();
+  await page.locator('#loginUser').fill(fixture.auth.admin.user.username);
+  await page.locator('#loginPass').fill('fixture-password');
+  await page.locator('#loginForm button[type="submit"]').click();
+  await expect(page.locator('#app')).toBeVisible();
+
+  await page.evaluate(() => openAddCustomer());
+  await expect(modal).toBeVisible();
+  expect(await modal.evaluate((element) => ({
+    hidden: element.hidden,
+    inert: element.inert,
+    ariaHidden: element.getAttribute('aria-hidden')
+  }))).toEqual({ hidden: false, inert: false, ariaHidden: null });
+  await expect.poll(() => dialog.evaluate((element) => element.contains(document.activeElement))).toBe(true);
+
+  consumeExpectedPageError(page, /Failed to load resource:.*401 \(Unauthorized\)/);
+  await expectRuntimeClean(page);
+});
+
+test('session expiry runs owner teardown for stacked dynamic and confirm dialogs', async ({ page }) => {
+  await boot(page, { path: '/m1', expireNextApi: { method: 'GET', path: '/health' } });
+  await page.evaluate(() => {
+    BRANDS = [{ name: 'Lifecycle Brand', industry_tags: [] }];
+    _brandRelationCache = null;
+    buildBrandRelationCache();
+    showRelatedBrands('Lifecycle Brand');
+    window.__tmConfirmResult = showConfirm('Confirm lifecycle', 'This promise must resolve during session expiry.');
+  });
+  await expect(page.locator('#brandRelOverlay')).toHaveCount(1);
+  await expect(page.locator('#confirmDialogOverlay')).toBeVisible();
+
+  await page.evaluate(() => apiFetch('/health'));
+  await expect(page.locator('#brandRelOverlay')).toHaveCount(0);
+  await expect(page.locator('#confirmDialogOverlay')).toBeHidden();
+  expect(await page.evaluate(() => Promise.race([
+    window.__tmConfirmResult,
+    new Promise((resolve) => setTimeout(() => resolve('pending'), 100))
+  ]))).toBe(false);
+
+  await page.evaluate(async ({ username }) => {
+    document.getElementById('loginUser').value = username;
+    document.getElementById('loginPass').value = 'fixture-password';
+    await doLogin();
+    BRANDS = [{ name: 'Lifecycle Brand', industry_tags: [] }];
+    _brandRelationCache = null;
+    buildBrandRelationCache();
+    showRelatedBrands('Lifecycle Brand');
+  }, { username: fixture.auth.admin.user.username });
+  await expect(page.locator('#brandRelOverlay')).toHaveCount(1);
+  await expect(page.locator('#brandRelOverlay')).toBeVisible();
+  await page.evaluate(() => closeBrandRelModal());
+  await expect(page.locator('#brandRelOverlay')).toHaveCount(0);
+
+  consumeExpectedPageError(page, /Failed to load resource:.*401 \(Unauthorized\)/);
+  await expectRuntimeClean(page);
+});
+
+test('ignores a delayed 401 from the previous authentication generation', async ({ page }) => {
+  await boot(page, { path: '/m0' });
+  await page.evaluate(() => {
+    const originalFetch = window.fetch.bind(window);
+    window.fetch = function (input, options) {
+      if (String(input).endsWith('/api/delayed-auth-expiry')) {
+        return new Promise((resolve) => {
+          window.__tmReleaseDelayed401 = function () {
+            resolve(new Response(JSON.stringify({ error: 'Expired old session' }), {
+              status: 401,
+              headers: { 'Content-Type': 'application/json' }
+            }));
+          };
+        });
+      }
+      return originalFetch(input, options);
+    };
+    window.__tmDelayedRequest = apiFetch('/delayed-auth-expiry');
+  });
+
+  await page.evaluate(async ({ username }) => {
+    document.getElementById('loginUser').value = username;
+    document.getElementById('loginPass').value = 'fixture-password';
+    await doLogin();
+  }, { username: fixture.auth.admin.user.username });
+  await page.evaluate(async () => {
+    window.__tmReleaseDelayed401();
+    await window.__tmDelayedRequest;
+  });
+
+  await expect(page.locator('#app')).toBeVisible();
+  await expect(page.locator('#authOverlay')).toBeHidden();
+  expect(await page.evaluate(() => ({
+    token: localStorage.getItem('tm_token'),
+    username: JSON.parse(localStorage.getItem('tm_user')).username
+  }))).toEqual({
+    token: fixture.auth.admin.token,
+    username: fixture.auth.admin.user.username
+  });
+  await expect(page.locator('.toast').filter({ hasText: /Expired old session|登录已过期/ })).toHaveCount(0);
+  await expectRuntimeClean(page);
+});
+
 test('announces success and error status mutations without moving focus', async ({ page }) => {
   await boot(page, { path: '/m0' });
   const focusOwner = page.locator('#page-m0 button').first();
@@ -444,6 +623,21 @@ test('announces success and error status mutations without moving focus', async 
   await expect(errorToast.locator('[role="alert"]')).toContainText('Fixture failed');
   await expect(errorToast.locator('[role="status"], [role="alert"]')).toHaveCount(1);
   await expect(errorToast.getByRole('button', { name: '关闭通知' })).toBeVisible();
+  await expect(focusOwner).toBeFocused();
+  await expectRuntimeClean(page);
+});
+
+test('bounds persistent toast announcements to the newest three without moving focus', async ({ page }) => {
+  await boot(page, { path: '/m0' });
+  const focusOwner = page.locator('#page-m0 button').first();
+  await focusOwner.focus();
+  await page.evaluate(() => {
+    for (let index = 1; index <= 5; index += 1) toast(`Queue ${index}`, index === 5 ? 'error' : 'success');
+  });
+
+  await expect(page.locator('#toastContainer > .toast')).toHaveCount(3);
+  expect(await page.locator('#toastContainer .tm-toast-message').allTextContents()).toEqual(['Queue 3', 'Queue 4', 'Queue 5']);
+  await expect(page.locator('#toastContainer [role="status"], #toastContainer [role="alert"]')).toHaveCount(3);
   await expect(focusOwner).toBeFocused();
   await expectRuntimeClean(page);
 });

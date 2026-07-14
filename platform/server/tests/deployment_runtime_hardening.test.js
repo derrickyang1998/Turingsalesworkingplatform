@@ -284,8 +284,10 @@ test('guarded deploy runs the full gate unprivileged and seals only external-sta
     'node_modules/playwright-deploy/cli.js install-deps --dry-run chromium',
     'node_modules/playwright-deploy/cli.js install chromium',
     'node_modules/playwright-deploy/cli.js test -c server/tests/deployment-browser-smoke.config.js',
-    'TM_SCHEMA_FINGERPRINT_BEFORE',
-    'TM_SCHEMA_FINGERPRINT_AFTER',
+    'ROOT_SCHEMA_FINGERPRINT',
+    'CANDIDATE_SCHEMA_FINGERPRINT',
+    'unshare --net --fork',
+    'ip link set lo up',
     'CANDIDATE_TREE_SHA256',
     'CANDIDATE_TREE_RECHECK_OK',
     'GateUid" -gt 0',
@@ -315,6 +317,41 @@ test('guarded deploy runs the full gate unprivileged and seals only external-sta
   assert.doesNotMatch(deploy, /for path in \.env server\/db uploads tmp/);
 });
 
+test('candidate verification cannot read production data and runs candidate code without external networking', () => {
+  const deploy = read('platform/deploy_v8.ps1');
+  const gateMatch = deploy.match(/<<'TM_UNPRIVILEGED_GATE'\r?\n([\s\S]*?)\r?\nTM_UNPRIVILEGED_GATE/);
+  const dependencyMatch = deploy.match(/<<'TM_DEPENDENCY_STAGE'\r?\n([\s\S]*?)\r?\nTM_DEPENDENCY_STAGE/);
+  assert.ok(gateMatch, 'offline unprivileged gate must exist');
+  assert.ok(dependencyMatch, 'network-enabled dependency staging must be separate');
+  const gate = gateMatch[1];
+  const dependencyStage = dependencyMatch[1];
+
+  assert.match(deploy, /ProductionBackupDb="\$BackupAbsolute\/database\/turingmarket\.db"/);
+  assert.match(deploy, /ProductionLiveDb="\/var\/lib\/turingmarket\/db\/turingmarket\.db"/);
+  assert.match(deploy, /chown root:root "\$ProductionBackupDb"[\s\S]*?chmod 0600 "\$ProductionBackupDb"/);
+  assert.match(deploy, /runuser -u "\$GateUser" -- test ! -r "\$ProductionBackupDb"/);
+  assert.match(deploy, /runuser -u "\$GateUser" -- test ! -r "\$ProductionLiveDb"/);
+  assert.match(deploy, /ROOT_SCHEMA_FINGERPRINT="\$\([\s\S]*?\$LiveDir\/server[\s\S]*?\$ProductionBackupDb/);
+  assert.doesNotMatch(deploy, /cp "\$BackupAbsolute\/database\/turingmarket\.db" "\$SchemaDb"/);
+  assert.match(deploy, /TM_PRODUCTION_SCHEMA_DB="\$ProductionBackupDb"[\s\S]*?TM_SANITIZED_SCHEMA_DB="\$SchemaDb"[\s\S]*?node <<'TM_BUILD_SANITIZED_SCHEMA_DB'/);
+  assert.match(deploy, /sourceFingerprint[\s\S]*?rebuiltFingerprint[\s\S]*?Sanitized schema fingerprint mismatch/);
+  assert.match(deploy, /__tm_gate_admin__[\s\S]*?__tm_gate_session__[\s\S]*?__tm_gate_customer__[\s\S]*?__tm_gate_influencer__[\s\S]*?__tm_gate_knowledge__[\s\S]*?__tm_gate_conversation__/);
+  assert.match(deploy, /SANITIZED_SCHEMA_REBUILD_OK/);
+  assert.doesNotMatch(gate, /BackupAbsolute|ProductionBackupDb|\/var\/lib\/turingmarket\/db|\/root\/turingmarket/);
+  assert.doesNotMatch(gate, /business_counts|TM_ROW_COUNTS/);
+  assert.match(gate, /CANDIDATE_SCHEMA_FINGERPRINT[\s\S]*?EXPECTED_SCHEMA_FINGERPRINT/);
+  assert.match(gate, /__tm_gate_admin__[\s\S]*?__tm_gate_session__[\s\S]*?__tm_gate_customer__[\s\S]*?__tm_gate_influencer__[\s\S]*?__tm_gate_knowledge__[\s\S]*?__tm_gate_conversation__/);
+  assert.match(gate, /TM_SYNTHETIC_SENTINELS_OK/);
+
+  assert.match(dependencyStage, /npm ci --ignore-scripts[\s\S]*?install chromium[\s\S]*?npm rebuild better-sqlite3/);
+  assert.doesNotMatch(dependencyStage, /node --test|deployment-browser-smoke|SCHEMA_DB|EXPECTED_SCHEMA_FINGERPRINT/);
+  assert.ok(deploy.indexOf("TM_DEPENDENCY_STAGE") < deploy.indexOf('unshare --net --fork'));
+  assert.ok(deploy.indexOf('unshare --net --fork') < deploy.indexOf('node --test --test-concurrency=1 tests/*.test.js'));
+  assert.match(deploy, /test -z "\$\(ip route show default\)"/);
+  assert.match(deploy, /printf "%s\\n" "OFFLINE_NETWORK_NAMESPACE_OK"/);
+  assert.doesNotMatch(deploy, /printf '%s\\n' "OFFLINE_NETWORK_NAMESPACE_OK"/);
+});
+
 test('unprivileged gate uses only variables explicitly passed through env -i', () => {
   const deploy = read('platform/deploy_v8.ps1');
   const match = deploy.match(/<<'TM_UNPRIVILEGED_GATE'\r?\n([\s\S]*?)\r?\nTM_UNPRIVILEGED_GATE/);
@@ -325,6 +362,26 @@ test('unprivileged gate uses only variables explicitly passed through env -i', (
   assert.match(envBoundary, /DB_PATH="\$TestDb"/);
   assert.doesNotMatch(gate, /\$TestDb\b/, 'parent-shell TestDb is unavailable after env -i');
   assert.match(gate, /DB_PATH="\$DB_PATH"/);
+});
+
+test('candidate lifecycle rejects directory substitution and clears network-stage processes before offline validation', () => {
+  const deploy = read('platform/deploy_v8.ps1');
+  const candidateMatch = deploy.match(/\$candidateGate = @'\r?\n([\s\S]*?)\r?\n'@/);
+  const cutoverMatch = deploy.match(/\$cutoverGate = @'\r?\n([\s\S]*?)\r?\n'@/);
+  assert.ok(candidateMatch, 'candidate gate here-string must exist');
+  assert.ok(cutoverMatch, 'cutover gate here-string must exist');
+  const candidateGate = candidateMatch[1];
+  const cutoverGate = cutoverMatch[1];
+
+  assert.match(candidateGate, /assert_canonical_candidate\(\)[\s\S]*?test ! -L "\$ReleaseRoot"[\s\S]*?test ! -L "\$CandidateDir"[\s\S]*?realpath -e "\$CandidateDir"/);
+  assert.ok((candidateGate.match(/assert_canonical_candidate/g) || []).length >= 5, 'candidate canonical path must be rechecked across trust transitions');
+  assert.match(cutoverGate, /assert_canonical_candidate\(\)[\s\S]*?test ! -L "\$ReleaseRoot"[\s\S]*?test ! -L "\$CandidateDir"[\s\S]*?realpath -e "\$CandidateDir"/);
+  assert.ok((cutoverGate.match(/assert_canonical_candidate/g) || []).length >= 4, 'cutover must recheck canonical candidate before digest and exchange');
+
+  assert.match(candidateGate, /kill_gate_processes\(\)[\s\S]*?pkill -KILL -u "\$GateUser"[\s\S]*?pgrep -u "\$GateUser"/);
+  assert.match(candidateGate, /DependencyStatus=\$\?[\s\S]*?kill_gate_processes "dependency staging"[\s\S]*?\[ "\$DependencyStatus" != "0" \]/);
+  assert.ok(candidateGate.indexOf('kill_gate_processes "dependency staging"') < candidateGate.indexOf('unshare --net --fork'));
+  assert.match(candidateGate, /GateStatus=\$\?[\s\S]*?kill_gate_processes "offline candidate validation"/);
 });
 
 test('unprivileged nginx gate derives a socket listener while root validates the original config', () => {
@@ -339,7 +396,8 @@ test('unprivileged nginx gate derives a socket listener while root validates the
   assert.match(gateSetup, /NginxGateDir="\$\(mktemp -d \/tmp\/tm-nginx-gate\.XXXXXX\)"/);
   assert.match(gateSetup, /trap cleanup_nginx_gate_dir EXIT/);
   assert.match(gateSetup, /chown "\$GateUser:\$GateUser" "\$NginxGateDir"/);
-  assert.match(envBoundary, /NGINX_GATE_DIR="\$NginxGateDir"/);
+  assert.match(envBoundary, /TM_GATE_NGINX_DIR="\$NginxGateDir"/);
+  assert.match(envBoundary, /NGINX_GATE_DIR="\$TM_GATE_NGINX_DIR"/);
   assert.doesNotMatch(gate, /mktemp -d \/tmp\/tm-nginx-gate/);
   assert.match(gate, /turingmarket-gate\.conf/);
   assert.ok(gate.includes("pattern = re.compile(r'(?m)^(\\s*listen\\s+)80(\\s*;\\s*(?:#.*)?)$')"));
@@ -349,7 +407,7 @@ test('unprivileged nginx gate derives a socket listener while root validates the
   assert.match(gate, /include \$TEST_ROOT\/turingmarket-gate\.conf;/);
   assert.doesNotMatch(gate, /include \$CANDIDATE_DIR\/nginx\/turingmarket\.conf;/);
 
-  assert.match(afterGate, /pkill -KILL -u "\$GateUser"[\s\S]*?cleanup_nginx_gate_dir[\s\S]*?trap - EXIT[\s\S]*?\[ "\$GateStatus" = "0" \]/);
+  assert.match(afterGate, /kill_gate_processes "offline candidate validation"[\s\S]*?cleanup_nginx_gate_dir[\s\S]*?trap - EXIT[\s\S]*?\[ "\$GateStatus" = "0" \]/);
   assert.match(afterGate, /\[ "\$GateStatus" = "0" \][\s\S]*?sha256sum --check --status "\$LockDir\/upload\.sha256"/);
   assert.match(
     afterGate,

@@ -34,4 +34,4 @@ Fixture identities, counts, values, table rows, workflow states, role visibility
 - Approved shared-shell regions: all nine sheets.
 - Unresolved zero-tolerance domain regressions: none. The CRM funnel fills and active proposal-template state were restored to explicit solid backgrounds after independent review and recaptured before final approval.
 - `mobile-shell-content` gap: retired in the current-run producer after 390 px and 320 px integration checks passed; frozen pre-audit metadata was not changed.
-- Static visual review does not establish keyboard, screen-reader, motion, forced-colors, native zoom, or full WCAG conformance. Those claims remain bounded by the automated Task 5 gate and the residual risks in the Task 5 report.
+- Static visual review does not establish keyboard, screen-reader, motion, forced-colors, native zoom, or full WCAG conformance. The exact evidence boundary and follow-up ownership are tracked in [Phase 3 accessibility residual risks](2026-07-phase3-accessibility-residual-risks.md).

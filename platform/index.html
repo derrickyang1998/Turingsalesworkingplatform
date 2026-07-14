@@ -783,8 +783,8 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
 </div>
 
 <!-- Customer 360 Slide-out Panel -->
-<div id="customerDetailOverlay" class="detail-overlay" onclick="closeCustomerDetail()"></div>
-<div id="customerDetailPanel" class="detail-panel" role="dialog" aria-modal="true" aria-labelledby="cdp-title">
+<div id="customerDetailOverlay" class="detail-overlay" onclick="closeCustomerDetail()" hidden></div>
+<div id="customerDetailPanel" class="detail-panel" role="dialog" aria-modal="true" aria-labelledby="cdp-title" hidden inert aria-hidden="true">
   <div class="detail-panel-header">
     <h3 id="cdp-title">客户详情</h3>
     <button type="button" aria-label="关闭客户详情" title="关闭客户详情" onclick="closeCustomerDetail()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button>
@@ -1345,8 +1345,8 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
 </div>
 
 <!-- Customer Detail Sidebar -->
-<div class="sidebar-overlay" id="custDetailOverlay" style="display:none" onclick="closeCustomerDetail()"></div>
-<div class="detail-sidebar" id="custDetailSidebar">
+<div class="sidebar-overlay" id="custDetailOverlay" style="display:none" onclick="closeCustomerDetail()" hidden></div>
+<div class="detail-sidebar" id="custDetailSidebar" hidden inert aria-hidden="true">
   <div id="customerDetailDialog" role="dialog" aria-modal="true" aria-labelledby="custDetailTitle">
     <div class="sidebar-header">
       <h3 id="custDetailTitle">客户详情</h3>

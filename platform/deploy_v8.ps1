@@ -129,7 +129,6 @@ $FILES = @(
 )
 
 $ROOT_RELATIVE_FILES = @(
-    ".gitattributes",
     ".gitignore",
     ".env.example",
     "CHANGELOG.md",
@@ -138,8 +137,15 @@ $ROOT_RELATIVE_FILES = @(
     "docs\handoff\2026-06-30\SECURITY.md",
     "docs\handoff\2026-06-30\OPERATIONS.md",
     "docs\superpowers\plans\2026-07-12-phase-1-credential-rotation.md",
-    "docs\superpowers\plans\2026-07-12-turingmarket-platform-roadmap.md",
+    "docs\superpowers\plans\2026-07-12-turingmarket-platform-roadmap.md"
+)
+
+$CANDIDATE_ONLY_FILES = @(
+    ".gitattributes",
     "docs\baselines\v0.2.9\ui-ppt-manifest.json",
+    "docs\product\turingmarket-design-system.md",
+    "docs\product\2026-07-phase3-visual-change-record.md",
+    "docs\product\2026-07-phase3-accessibility-residual-risks.md",
     "docs\product\evidence\2026-07-phase3-post\raw-contact-sheet-manifest.json",
     "docs\product\evidence\2026-07-phase3-post\fixture-1440-1.png",
     "docs\product\evidence\2026-07-phase3-post\fixture-1440-2.png",
@@ -181,7 +187,7 @@ function Add-FrozenScreenshotFiles {
         }
         $fullPath.Substring($repoPrefix.Length)
     }
-    $script:ROOT_RELATIVE_FILES += $screenshots | Sort-Object
+    $script:CANDIDATE_ONLY_FILES += $screenshots | Sort-Object
 }
 
 function Assert-RollbackBackupPath {
@@ -762,6 +768,29 @@ function Assert-LocalReleaseSource {
             throw "Local release evidence file is missing: $file"
         }
     }
+    foreach ($file in $CANDIDATE_ONLY_FILES) {
+        $localPath = Join-Path $REPO_DIR $file
+        if (-not (Test-Path -LiteralPath $localPath -PathType Leaf)) {
+            throw "Local candidate-only evidence file is missing: $file"
+        }
+    }
+
+    $trackedReleasePaths = New-Object 'Collections.Generic.List[string]'
+    foreach ($file in $FILES) {
+        $trackedReleasePaths.Add("platform/$(Convert-ToRemotePath $file)")
+    }
+    foreach ($file in $ROOT_RELATIVE_FILES) {
+        $trackedReleasePaths.Add((Convert-ToRemotePath $file))
+    }
+    foreach ($file in $CANDIDATE_ONLY_FILES) {
+        $trackedReleasePaths.Add((Convert-ToRemotePath $file))
+    }
+    foreach ($trackedPath in ($trackedReleasePaths | Sort-Object -Unique)) {
+        $trackedResult = & git -C $REPO_DIR ls-files --error-unmatch -- $trackedPath 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            throw "Release inventory file is not tracked by Git: $trackedPath"
+        }
+    }
 
     $buildInfoPath = Join-Path $LOCAL_DIR "client\shared\build_info.js"
     $navigationPath = Join-Path $LOCAL_DIR "client\core\navigation.js"
@@ -842,6 +871,13 @@ foreach ($file in $FILES) {
     $remoteRelativePaths.Add($remoteRelative)
 }
 foreach ($file in $ROOT_RELATIVE_FILES) {
+    $localPath = Join-Path $REPO_DIR $file
+    $remoteRelative = Convert-ToRemotePath $file
+    $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $localPath).Hash.ToLowerInvariant()
+    $uploadChecksumLines.Add("$hash  $remoteRelative")
+    $remoteRelativePaths.Add($remoteRelative)
+}
+foreach ($file in $CANDIDATE_ONLY_FILES) {
     $localPath = Join-Path $REPO_DIR $file
     $remoteRelative = Convert-ToRemotePath $file
     $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $localPath).Hash.ToLowerInvariant()
@@ -930,6 +966,11 @@ rm -f "$ReleaseRoot/.deploy-v030-paths"
         $remotePath = "$remoteReleaseRoot/$(Convert-ToRemotePath $file)"
         Invoke-SecureCopy -LocalPath $localPath -RemotePath $remotePath -FailureMessage "Candidate evidence upload failed: $file"
     }
+    foreach ($file in $CANDIDATE_ONLY_FILES) {
+        $localPath = Join-Path $REPO_DIR $file
+        $remotePath = "$remoteReleaseRoot/$(Convert-ToRemotePath $file)"
+        Invoke-SecureCopy -LocalPath $localPath -RemotePath $remotePath -FailureMessage "Candidate-only evidence upload failed: $file"
+    }
 
     $uploadChecksums = $uploadChecksumLines -join "`n"
     $verifyUploadScript = @'
@@ -960,7 +1001,9 @@ CandidateRoot="__CANDIDATE_ROOT__"
 GateUser="__GATE_USER__"
 LockDir="$RemoteRoot/.deploy-v030.lock"
 BackupAbsolute="$RemoteRoot/__BACKUP_PATH__"
-  TestRoot="$ReleaseRoot/tmp/deploy-v040-gate-__STAMP__"
+ProductionBackupDb="$BackupAbsolute/database/turingmarket.db"
+ProductionLiveDb="/var/lib/turingmarket/db/turingmarket.db"
+TestRoot="$ReleaseRoot/tmp/deploy-v040-gate-__STAMP__"
 TestDb="$TestRoot/test.db"
 SchemaDb="$TestRoot/schema.db"
 BrowserCache="$TestRoot/browser-cache"
@@ -983,15 +1026,256 @@ validate_gate_identity() {
   test "$(passwd -S "$GateUser" | awk '{print $2}')" = "L"
 }
 
+assert_canonical_candidate() {
+  local CandidateRootReal ExpectedRelease ExpectedCandidate
+  test -d "$CandidateRoot"
+  test ! -L "$CandidateRoot"
+  test -d "$ReleaseRoot"
+  test ! -L "$ReleaseRoot"
+  test -d "$CandidateDir"
+  test ! -L "$CandidateDir"
+  CandidateRootReal="$(realpath -e "$CandidateRoot")"
+  ExpectedRelease="$CandidateRootReal/$(basename "$ReleaseRoot")"
+  ExpectedCandidate="$ExpectedRelease/$(basename "$CandidateDir")"
+  test "$(realpath -e "$ReleaseRoot")" = "$ExpectedRelease"
+  test "$(realpath -e "$CandidateDir")" = "$ExpectedCandidate"
+}
+
+kill_gate_processes() {
+  local Stage="$1"
+  pkill -KILL -u "$GateUser" 2>/dev/null || true
+  for _attempt in $(seq 1 20); do
+    if ! pgrep -u "$GateUser" >/dev/null; then
+      printf 'GATE_USER_PROCESSES_CLEARED=%s\n' "$Stage"
+      return 0
+    fi
+    sleep 0.2
+  done
+  echo "Gate user processes survived $Stage" >&2
+  return 1
+}
+
+command -v realpath >/dev/null
+command -v pkill >/dev/null
+command -v pgrep >/dev/null
+kill_gate_processes "candidate preflight"
+assert_canonical_candidate
 test -f "$CandidateDir/server/scripts/bootstrap_production_runtime.sh"
 bash -n "$CandidateDir/server/scripts/bootstrap_production_runtime.sh"
-test -f "$BackupAbsolute/database/turingmarket.db"
+test -f "$ProductionBackupDb"
+test -f "$ProductionLiveDb"
 test -f "$LockDir/upload.sha256"
+chown root:root "$ProductionBackupDb"
+chmod 0600 "$ProductionBackupDb"
+runuser -u "$GateUser" -- test ! -r "$ProductionBackupDb"
+runuser -u "$GateUser" -- test ! -r "$ProductionLiveDb"
+
 rm -rf "$TestRoot"
 mkdir -p "$TestRoot/home" "$TestRoot/uploads" "$TestRoot/tmp" "$TestRoot/nginx-prefix"
-cp "$BackupAbsolute/database/turingmarket.db" "$SchemaDb"
+ROOT_SCHEMA_FINGERPRINT="$(
+  cd "$LiveDir/server"
+  TM_PRODUCTION_SCHEMA_DB="$ProductionBackupDb" \
+  TM_SANITIZED_SCHEMA_DB="$SchemaDb" \
+  node <<'TM_BUILD_SANITIZED_SCHEMA_DB'
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+const Database = require('better-sqlite3');
+
+const sourcePath = process.env.TM_PRODUCTION_SCHEMA_DB;
+const targetPath = process.env.TM_SANITIZED_SCHEMA_DB;
+const sentinels = Object.freeze({
+  admin: '__tm_gate_admin__',
+  session: '__tm_gate_session__',
+  customer: '__tm_gate_customer__',
+  influencer: '__tm_gate_influencer__',
+  knowledge: '__tm_gate_knowledge__',
+  conversation: '__tm_gate_conversation__',
+  message: '__tm_gate_message__'
+});
+const ids = Object.freeze({
+  user: 900000001,
+  session: 900000002,
+  customer: 900000003,
+  influencer: 900000004,
+  knowledge: 900000005,
+  conversation: 900000006,
+  message: 900000007
+});
+
+function fingerprint(database) {
+  const schema = database.prepare(`
+    SELECT type, name, tbl_name, COALESCE(sql, '') AS sql
+    FROM sqlite_master
+    WHERE name NOT LIKE 'sqlite_%'
+    ORDER BY type, name, tbl_name
+  `).all();
+  const userVersion = database.pragma('user_version', { simple: true });
+  return crypto.createHash('sha256').update(JSON.stringify({ userVersion, schema })).digest('hex');
+}
+
+function quoteIdentifier(value) {
+  return `"${String(value).replace(/"/g, '""')}"`;
+}
+
+const source = new Database(sourcePath, { readonly: true, fileMustExist: true });
+let target;
+try {
+  const sourceFingerprint = fingerprint(source);
+  const sourceUserVersion = source.pragma('user_version', { simple: true });
+  const sourceRows = source.prepare(`
+    SELECT type, name, tbl_name, sql
+    FROM sqlite_master
+    WHERE name NOT LIKE 'sqlite_%' AND sql IS NOT NULL
+  `).all();
+  const virtualTables = sourceRows.filter((row) => row.type === 'table' && /^CREATE\s+VIRTUAL\s+TABLE/i.test(row.sql));
+  const shadowTables = new Set();
+  for (const virtualTable of virtualTables) {
+    for (const row of sourceRows) {
+      if (row.type === 'table' && row.name.startsWith(`${virtualTable.name}_`)) shadowTables.add(row.name);
+    }
+  }
+  const requiredTables = ['users', 'sessions', 'customers', 'influencers', 'knowledge_entries', 'ai_conversations', 'ai_messages'];
+  for (const table of requiredTables) {
+    if (!sourceRows.some((row) => row.type === 'table' && row.name === table)) {
+      throw new Error(`Production schema is missing required table: ${table}`);
+    }
+  }
+
+  fs.rmSync(targetPath, { force: true });
+  target = new Database(targetPath);
+  target.pragma('journal_mode = DELETE');
+  target.pragma('foreign_keys = OFF');
+  const typeOrder = { table: 0, view: 1, index: 2, trigger: 3 };
+  const executableRows = sourceRows
+    .filter((row) => Object.prototype.hasOwnProperty.call(typeOrder, row.type))
+    .filter((row) => !shadowTables.has(row.name))
+    .sort((left, right) => {
+      const typeDifference = typeOrder[left.type] - typeOrder[right.type];
+      if (typeDifference) return typeDifference;
+      const leftVirtual = /^CREATE\s+VIRTUAL\s+TABLE/i.test(left.sql) ? 1 : 0;
+      const rightVirtual = /^CREATE\s+VIRTUAL\s+TABLE/i.test(right.sql) ? 1 : 0;
+      if (leftVirtual !== rightVirtual) return leftVirtual - rightVirtual;
+      return left.name.localeCompare(right.name);
+    });
+  for (const row of executableRows) target.exec(row.sql);
+  target.pragma(`user_version = ${Number(sourceUserVersion) || 0}`);
+
+  const rebuiltFingerprint = fingerprint(target);
+  if (rebuiltFingerprint !== sourceFingerprint) {
+    throw new Error(`Sanitized schema fingerprint mismatch: ${rebuiltFingerprint} != ${sourceFingerprint}`);
+  }
+
+  target.transaction(() => {
+    target.prepare(`
+      INSERT INTO users (id, username, password_hash, display_name, role, email, department, api_quota, is_active)
+      VALUES (?, ?, ?, ?, 'admin', 'gate-admin@example.invalid', 'deployment-gate', 1, 1)
+    `).run(ids.user, sentinels.admin, 'synthetic-not-a-real-password-hash', 'Synthetic deployment gate admin');
+    target.prepare(`
+      INSERT INTO sessions (id, user_id, token, ip_address, expires_at)
+      VALUES (?, ?, ?, NULL, '2099-01-01T00:00:00.000Z')
+    `).run(ids.session, ids.user, sentinels.session);
+    target.prepare(`
+      INSERT INTO customers (id, brand_name, company_name, source, notes, created_by, assigned_to)
+      VALUES (?, ?, 'Synthetic Gate Company', 'deployment_sentinel', 'Synthetic data only', ?, ?)
+    `).run(ids.customer, sentinels.customer, ids.user, ids.user);
+    target.prepare(`
+      INSERT INTO influencers (id, platform, kol_handle, profile_link, data_source)
+      VALUES (?, 'SyntheticGate', ?, 'https://example.invalid/deployment-gate', 'deployment_sentinel')
+    `).run(ids.influencer, sentinels.influencer);
+    target.prepare(`
+      INSERT INTO knowledge_entries (id, entry_type, source_type, source_id, key_terms, content, created_by, is_public)
+      VALUES (?, 'deployment_sentinel', 'deployment_sentinel', ?, ?, 'Synthetic knowledge only', ?, 0)
+    `).run(ids.knowledge, ids.customer, sentinels.knowledge, ids.user);
+    target.prepare(`
+      INSERT INTO ai_conversations (id, user_id, title, visibility, source_module)
+      VALUES (?, ?, ?, 'private', 'deployment_sentinel')
+    `).run(ids.conversation, ids.user, sentinels.conversation);
+    target.prepare(`
+      INSERT INTO ai_messages (id, conversation_id, user_id, role, content, model, total_tokens)
+      VALUES (?, ?, ?, 'user', ?, 'deployment_sentinel', 1)
+    `).run(ids.message, ids.conversation, ids.user, sentinels.message);
+  })();
+
+  const expectedCounts = new Map([
+    ['users', 1],
+    ['sessions', 1],
+    ['customers', 1],
+    ['influencers', 1],
+    ['knowledge_entries', 1],
+    ['ai_conversations', 1],
+    ['ai_messages', 1]
+  ]);
+  for (const row of sourceRows.filter((entry) => entry.type === 'table' && !shadowTables.has(entry.name))) {
+    const count = target.prepare(`SELECT COUNT(*) AS count FROM ${quoteIdentifier(row.name)}`).get().count;
+    const expected = expectedCounts.get(row.name) || 0;
+    if (count !== expected) throw new Error(`Sanitized table ${row.name} has ${count} rows; expected ${expected}`);
+  }
+  const exactChecks = [
+    ['users', 'username', sentinels.admin],
+    ['sessions', 'token', sentinels.session],
+    ['customers', 'brand_name', sentinels.customer],
+    ['influencers', 'kol_handle', sentinels.influencer],
+    ['knowledge_entries', 'key_terms', sentinels.knowledge],
+    ['ai_conversations', 'title', sentinels.conversation],
+    ['ai_messages', 'content', sentinels.message]
+  ];
+  for (const [table, column, value] of exactChecks) {
+    const row = target.prepare(`SELECT ${quoteIdentifier(column)} AS value FROM ${quoteIdentifier(table)}`).get();
+    if (!row || row.value !== value) throw new Error(`Synthetic sentinel mismatch in ${table}.${column}`);
+  }
+  const quickCheck = target.pragma('quick_check', { simple: true });
+  if (quickCheck !== 'ok') throw new Error(`Sanitized schema quick_check failed: ${quickCheck}`);
+  if (fingerprint(target) !== sourceFingerprint) throw new Error('Synthetic rows changed the rebuilt schema fingerprint');
+  process.stdout.write(sourceFingerprint);
+} finally {
+  if (target) target.close();
+  source.close();
+}
+TM_BUILD_SANITIZED_SCHEMA_DB
+)"
+test "${#ROOT_SCHEMA_FINGERPRINT}" = "64"
+printf 'ROOT_SCHEMA_FINGERPRINT=%s\n' "$ROOT_SCHEMA_FINGERPRINT"
+printf '%s\n' "SANITIZED_SCHEMA_REBUILD_OK"
+test -s "$SchemaDb"
+chown root:root "$SchemaDb"
+chmod 0600 "$SchemaDb"
+runuser -u "$GateUser" -- test ! -r "$SchemaDb"
 chown -R "$GateUser:$GateUser" "$ReleaseRoot"
 validate_gate_identity
+assert_canonical_candidate
+runuser -u "$GateUser" -- test ! -r "$ProductionBackupDb"
+runuser -u "$GateUser" -- test ! -r "$ProductionLiveDb"
+command -v unshare >/dev/null
+command -v ip >/dev/null
+
+set +e
+timeout --signal=KILL 20m runuser -u "$GateUser" -- env -i \
+  HOME="$TestRoot/home" \
+  PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+  PLAYWRIGHT_BROWSERS_PATH="$BrowserCache" \
+  npm_config_cache="$TestRoot/npm-cache" \
+  CANDIDATE_DIR="$CandidateDir" \
+  bash --noprofile --norc -s <<'TM_DEPENDENCY_STAGE'
+set -euo pipefail
+cd "$CANDIDATE_DIR"
+npm ci --ignore-scripts
+node node_modules/playwright-deploy/cli.js install-deps --dry-run chromium
+node node_modules/playwright-deploy/cli.js install chromium
+cd server
+npm ci --ignore-scripts
+npm rebuild better-sqlite3
+printf '%s\n' "DEPENDENCY_STAGE_OK"
+TM_DEPENDENCY_STAGE
+DependencyStatus=$?
+set -e
+kill_gate_processes "dependency staging"
+assert_canonical_candidate
+if [ "$DependencyStatus" != "0" ]; then
+  exit "$DependencyStatus"
+fi
+validate_gate_identity
+runuser -u "$GateUser" -- test ! -r "$ProductionBackupDb"
+runuser -u "$GateUser" -- test ! -r "$ProductionLiveDb"
 
 NginxGateDir=""
 cleanup_nginx_gate_dir() {
@@ -1008,28 +1292,53 @@ esac
 chown "$GateUser:$GateUser" "$NginxGateDir"
 
 set +e
-timeout --signal=KILL 30m runuser -u "$GateUser" -- env -i \
-  HOME="$TestRoot/home" \
+timeout --signal=KILL 30m env \
+  TM_GATE_USER="$GateUser" \
+  TM_GATE_HOME="$TestRoot/home" \
+  TM_GATE_DB_PATH="$TestDb" \
+  TM_GATE_SCHEMA_DB="$SchemaDb" \
+  TM_GATE_UPLOAD_DIR="$TestRoot/uploads" \
+  TM_GATE_TMP_DIR="$TestRoot/tmp" \
+  TM_GATE_BROWSER_CACHE="$BrowserCache" \
+  TM_GATE_CANDIDATE_DIR="$CandidateDir" \
+  TM_GATE_RELEASE_ROOT="$ReleaseRoot" \
+  TM_GATE_TEST_ROOT="$TestRoot" \
+  TM_GATE_NGINX_DIR="$NginxGateDir" \
+  TM_GATE_EXPECTED_SCHEMA_FINGERPRINT="$ROOT_SCHEMA_FINGERPRINT" \
+  TM_GATE_APP_QUERY="__APP_QUERY__" \
+  TM_GATE_APP_BUILD="__APP_BUILD__" \
+  TM_GATE_PPT_QUERY="__PPT_QUERY__" \
+  TM_GATE_PPT_BUILD="__PPT_BUILD__" \
+  TM_GATE_PPT_SHA256="__PPT_SHA256__" \
+  unshare --net --fork bash --noprofile --norc -c '
+set -euo pipefail
+ip link set lo up
+test -z "$(ip route show default)"
+test "$(ip -o link show | wc -l)" = "1"
+printf "%s\n" "OFFLINE_NETWORK_NAMESPACE_OK"
+exec runuser -u "$TM_GATE_USER" -- env -i \
+  HOME="$TM_GATE_HOME" \
   PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
   NODE_ENV="test" \
   TM_DISABLE_DOTENV="1" \
-  TM_ENV_FILE="$TestRoot/no-production.env" \
-  DB_PATH="$TestDb" \
-  UPLOAD_DIR="$TestRoot/uploads" \
-  TMP_DIR="$TestRoot/tmp" \
-  PLAYWRIGHT_BROWSERS_PATH="$BrowserCache" \
-  npm_config_cache="$TestRoot/npm-cache" \
-  CANDIDATE_DIR="$CandidateDir" \
-  RELEASE_ROOT="$ReleaseRoot" \
-  TEST_ROOT="$TestRoot" \
-  SCHEMA_DB="$SchemaDb" \
-  NGINX_GATE_DIR="$NginxGateDir" \
-  APP_QUERY="__APP_QUERY__" \
-  APP_BUILD="__APP_BUILD__" \
-  PPT_QUERY="__PPT_QUERY__" \
-  PPT_BUILD="__PPT_BUILD__" \
-  PPT_SHA256="__PPT_SHA256__" \
-  bash --noprofile --norc -s <<'TM_UNPRIVILEGED_GATE'
+  TM_ENV_FILE="$TM_GATE_TEST_ROOT/no-production.env" \
+  DB_PATH="$TM_GATE_DB_PATH" \
+  UPLOAD_DIR="$TM_GATE_UPLOAD_DIR" \
+  TMP_DIR="$TM_GATE_TMP_DIR" \
+  PLAYWRIGHT_BROWSERS_PATH="$TM_GATE_BROWSER_CACHE" \
+  CANDIDATE_DIR="$TM_GATE_CANDIDATE_DIR" \
+  RELEASE_ROOT="$TM_GATE_RELEASE_ROOT" \
+  TEST_ROOT="$TM_GATE_TEST_ROOT" \
+  SCHEMA_DB="$TM_GATE_SCHEMA_DB" \
+  NGINX_GATE_DIR="$TM_GATE_NGINX_DIR" \
+  EXPECTED_SCHEMA_FINGERPRINT="$TM_GATE_EXPECTED_SCHEMA_FINGERPRINT" \
+  APP_QUERY="$TM_GATE_APP_QUERY" \
+  APP_BUILD="$TM_GATE_APP_BUILD" \
+  PPT_QUERY="$TM_GATE_PPT_QUERY" \
+  PPT_BUILD="$TM_GATE_PPT_BUILD" \
+  PPT_SHA256="$TM_GATE_PPT_SHA256" \
+  bash --noprofile --norc -s
+' <<'TM_UNPRIVILEGED_GATE'
 set -euo pipefail
 cd "$CANDIDATE_DIR"
 node --check app.js
@@ -1045,12 +1354,7 @@ grep -Fq "$PPT_QUERY" index.html
 grep -Fq "$PPT_BUILD" ppt.js
 echo "$PPT_SHA256  ppt.js" | sha256sum --check --status
 
-npm ci --ignore-scripts
-node node_modules/playwright-deploy/cli.js install-deps --dry-run chromium
-node node_modules/playwright-deploy/cli.js install chromium
 cd server
-npm ci --ignore-scripts
-npm rebuild better-sqlite3
 
 fingerprint_db() {
   DB_FINGERPRINT_PATH="$1" node <<'NODE'
@@ -1069,33 +1373,38 @@ process.stdout.write(crypto.createHash('sha256').update(JSON.stringify({ userVer
 NODE
 }
 
-business_counts() {
-  DB_COUNT_PATH="$1" node <<'NODE'
-const Database = require('better-sqlite3');
-const database = new Database(process.env.DB_COUNT_PATH, { readonly: true, fileMustExist: true });
-const hasTable = (name) => Boolean(database.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name));
-const count = (name) => hasTable(name) ? database.prepare(`SELECT COUNT(*) AS count FROM ${name}`).get().count : null;
-const result = { users: count('users'), sessions: count('sessions') };
-database.close();
-process.stdout.write(JSON.stringify(result));
-NODE
-}
-
-TM_SCHEMA_FINGERPRINT_BEFORE="$(fingerprint_db "$SCHEMA_DB")"
-TM_ROW_COUNTS_BEFORE="$(business_counts "$SCHEMA_DB")"
-printf 'TM_SCHEMA_FINGERPRINT_BEFORE=%s\n' "$TM_SCHEMA_FINGERPRINT_BEFORE"
 NODE_ENV=test TM_DISABLE_DOTENV=1 DB_PATH="$SCHEMA_DB" node <<'NODE'
 const database = require('./db');
-const result = database.pragma('quick_check', { simple: true });
-database.close();
-if (result !== 'ok') throw new Error(`Candidate DB quick_check failed: ${result}`);
+const expected = [
+  ['users', 'username', '__tm_gate_admin__'],
+  ['sessions', 'token', '__tm_gate_session__'],
+  ['customers', 'brand_name', '__tm_gate_customer__'],
+  ['influencers', 'kol_handle', '__tm_gate_influencer__'],
+  ['knowledge_entries', 'key_terms', '__tm_gate_knowledge__'],
+  ['ai_conversations', 'title', '__tm_gate_conversation__'],
+  ['ai_messages', 'content', '__tm_gate_message__']
+];
+function quoteIdentifier(value) {
+  return `"${String(value).replace(/"/g, '""')}"`;
+}
+try {
+  for (const [table, column, value] of expected) {
+    const count = database.prepare(`SELECT COUNT(*) AS count FROM ${quoteIdentifier(table)}`).get().count;
+    if (count !== 1) throw new Error(`Candidate migration changed synthetic row count in ${table}: ${count}`);
+    const row = database.prepare(`SELECT ${quoteIdentifier(column)} AS value FROM ${quoteIdentifier(table)}`).get();
+    if (!row || row.value !== value) throw new Error(`Candidate migration changed synthetic sentinel in ${table}.${column}`);
+  }
+  const result = database.pragma('quick_check', { simple: true });
+  if (result !== 'ok') throw new Error(`Candidate DB quick_check failed: ${result}`);
+  console.log('TM_SYNTHETIC_SENTINELS_OK');
+} finally {
+  database.close();
+}
 NODE
-TM_SCHEMA_FINGERPRINT_AFTER="$(fingerprint_db "$SCHEMA_DB")"
-TM_ROW_COUNTS_AFTER="$(business_counts "$SCHEMA_DB")"
-printf 'TM_SCHEMA_FINGERPRINT_AFTER=%s\n' "$TM_SCHEMA_FINGERPRINT_AFTER"
-[ "$TM_SCHEMA_FINGERPRINT_BEFORE" = "$TM_SCHEMA_FINGERPRINT_AFTER" ]
-[ "$TM_ROW_COUNTS_BEFORE" = "$TM_ROW_COUNTS_AFTER" ]
-printf 'TM_SCHEMA_COMPATIBILITY_OK=%s\n' "$TM_ROW_COUNTS_AFTER"
+CANDIDATE_SCHEMA_FINGERPRINT="$(fingerprint_db "$SCHEMA_DB")"
+printf 'CANDIDATE_SCHEMA_FINGERPRINT=%s\n' "$CANDIDATE_SCHEMA_FINGERPRINT"
+[ "$CANDIDATE_SCHEMA_FINGERPRINT" = "$EXPECTED_SCHEMA_FINGERPRINT" ]
+printf '%s\n' "TM_SCHEMA_COMPATIBILITY_OK"
 
 NODE_ENV=test TM_DISABLE_DOTENV=1 DB_PATH="$DB_PATH" UPLOAD_DIR="$TEST_ROOT/uploads" TMP_DIR="$TEST_ROOT/tmp" \
   node --test --test-concurrency=1 tests/*.test.js
@@ -1142,17 +1451,8 @@ TM_UNPRIVILEGED_GATE
 GateStatus=$?
 set -e
 
-pkill -KILL -u "$GateUser" 2>/dev/null || true
-for _attempt in $(seq 1 20); do
-  if ! pgrep -u "$GateUser" >/dev/null; then
-    break
-  fi
-  sleep 0.2
-done
-if pgrep -u "$GateUser" >/dev/null; then
-  echo "Gate user processes survived candidate validation" >&2
-  exit 1
-fi
+kill_gate_processes "offline candidate validation"
+assert_canonical_candidate
 cleanup_nginx_gate_dir
 trap - EXIT
 [ "$GateStatus" = "0" ] || exit "$GateStatus"
@@ -1171,6 +1471,7 @@ setfacl -Rb "$ReleaseRoot"
 chown -hR root:root "$CandidateDir"
 chown -hR root:root "$ReleaseRoot"
 chmod -R go-w "$ReleaseRoot"
+assert_canonical_candidate
 if find "$CandidateDir" -xdev \( -type b -o -type c -o -type p -o -type s \) -print -quit | grep -q .; then
   echo "Candidate contains a special file" >&2
   exit 1
@@ -1279,6 +1580,7 @@ visit(root, '')
 print(digest.hexdigest())
 PY
 chmod 0600 "$LockDir/candidate_digest.py"
+assert_canonical_candidate
 CANDIDATE_TREE_SHA256="$(python3 "$LockDir/candidate_digest.py" "$CandidateDir")"
 printf '%s\n' "$CANDIDATE_TREE_SHA256" > "$LockDir/candidate-tree.sha256"
 chmod 0600 "$LockDir/candidate-tree.sha256"
@@ -1312,6 +1614,21 @@ LockDir="$RemoteRoot/.deploy-v030.lock"
 WriterDir="$RemoteRoot/.deploy-v030.writer"
 RetiredWriterDir="$WriterDir.released.__WRITER_TOKEN__"
 
+assert_canonical_candidate() {
+  local CandidateParentReal ExpectedRelease ExpectedCandidate
+  test -d "$ReleaseRoot"
+  test ! -L "$ReleaseRoot"
+  test -d "$CandidateDir"
+  test ! -L "$CandidateDir"
+  CandidateParentReal="$(realpath -e "$(dirname "$ReleaseRoot")")"
+  ExpectedRelease="$CandidateParentReal/$(basename "$ReleaseRoot")"
+  ExpectedCandidate="$ExpectedRelease/$(basename "$CandidateDir")"
+  test "$(realpath -e "$ReleaseRoot")" = "$ExpectedRelease"
+  test "$(realpath -e "$CandidateDir")" = "$ExpectedCandidate"
+  test "$(stat -c '%U:%G' "$ReleaseRoot")" = "root:root"
+  test "$(stat -c '%U:%G' "$CandidateDir")" = "root:root"
+}
+
 writer_acquired=0
 release_writer() {
   if [ "$writer_acquired" = "1" ] &&
@@ -1338,6 +1655,7 @@ if ! test -f "$LockDir/owner" ||
   exit 1
 fi
 
+assert_canonical_candidate
 ExpectedCandidateDigest="$(cat "$LockDir/candidate-tree.sha256")"
 CurrentCandidateDigest="$(python3 "$LockDir/candidate_digest.py" "$CandidateDir")"
 if [ "$CurrentCandidateDigest" != "$ExpectedCandidateDigest" ]; then
@@ -1345,6 +1663,7 @@ if [ "$CurrentCandidateDigest" != "$ExpectedCandidateDigest" ]; then
   exit 1
 fi
 echo "CANDIDATE_TREE_RECHECK_OK"
+assert_canonical_candidate
 
 assert_runtime_link() {
   link="$1"
@@ -1360,6 +1679,7 @@ assert_runtime_link "$CandidateDir/.env" /etc/turingmarket/turingmarket.env
 assert_runtime_link "$CandidateDir/server/db" /var/lib/turingmarket/db
 assert_runtime_link "$CandidateDir/uploads" /var/lib/turingmarket/uploads
 assert_runtime_link "$CandidateDir/tmp" /var/lib/turingmarket/tmp
+assert_canonical_candidate
 
 record_phase() {
   printf '%s\n' "$1" > "$LockDir/phase.next"
@@ -1381,6 +1701,7 @@ assert_runtime_link "$LiveDir/.env" /etc/turingmarket/turingmarket.env
 assert_runtime_link "$LiveDir/server/db" /var/lib/turingmarket/db
 assert_runtime_link "$LiveDir/uploads" /var/lib/turingmarket/uploads
 assert_runtime_link "$LiveDir/tmp" /var/lib/turingmarket/tmp
+assert_canonical_candidate
 
 python3 - "$LiveDir" "$CandidateDir" <<'PY'
 import ctypes

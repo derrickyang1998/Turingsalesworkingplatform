@@ -97,7 +97,7 @@ Direction A, Agency Operations Console, is the approved V1 visual foundation. It
 - `.tm-state-loading`: neutral live status with `aria-live="polite"`. / 中性实时加载状态。
 - `.tm-state-empty`: quiet empty state with one next action. / 克制空状态和单一下一步操作。
 - `.tm-state-error`: danger border/text plus a concrete recovery action. / 错误边框/文字及明确恢复操作。
-- Toast container uses `role="status"` and `aria-live="polite"`; error toast uses `role="alert"`. / Toast 使用实时区域，错误使用 alert。
+- Toast container is non-live. Each toast message owns exactly one live role: `role="status"` for success/information or `role="alert"` for errors. Toasts remain manually closeable and the persistent queue is bounded to the newest three messages. / Toast 容器本身不是实时区域；每条消息单独使用一个实时角色，成功/信息使用 `status`，错误使用 `alert`；通知可手动关闭，持久队列最多保留最新三条。
 - Login errors render inline, are connected with `aria-describedby`, and use an announced live region; invalid submission focuses the first invalid control and session expiry focuses username. / 登录错误行内显示，通过 `aria-describedby` 关联并由实时区域播报；无效提交聚焦首个错误控件，会话过期聚焦用户名。
 
 ### Workflow Keyboard Baseline / 流程键盘基线

@@ -249,6 +249,10 @@ thead th {
   overscroll-behavior: contain;
 }
 
+.detail-sidebar[hidden] {
+  display: none;
+}
+
 .modal-close,
 .wf-modal-close {
   min-width: 36px;

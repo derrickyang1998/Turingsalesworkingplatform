@@ -7,6 +7,7 @@
   var activeDialog = null;
   var dialogOpener = null;
   var dialogWasHidden = false;
+  var dialogDismiss = null;
   var inertRecords = [];
   var dialogStack = [];
   var FOCUSABLE = [
@@ -240,21 +241,64 @@
     inertRecords = [];
   }
 
-  function openDialog(dialog, opener) {
+  function dialogHost(dialog) {
+    if (!dialog || !dialog.closest) return dialog;
+    return dialog.closest('.modal-overlay,.wf-modal,.detail-sidebar,.detail-panel') || dialog;
+  }
+
+  function isStyleDrivenDialogHost(host) {
+    return !!(host && host.matches && host.matches('.modal-overlay,.wf-modal'));
+  }
+
+  function revealDialogSurface(dialog) {
+    var host = dialogHost(dialog);
+    if (!host) return;
+    if (isStyleDrivenDialogHost(host) && host.style.display === 'none') {
+      host.style.removeProperty('display');
+    }
+    host.hidden = false;
+    host.inert = false;
+    host.removeAttribute('aria-hidden');
+  }
+
+  function hideDialogSurface(dialog) {
+    var host = dialogHost(dialog);
+    if (!host) return;
+    host.classList.remove('open');
+    if (isStyleDrivenDialogHost(host)) {
+      host.style.display = 'none';
+      host.hidden = false;
+      host.inert = false;
+      host.removeAttribute('aria-hidden');
+      return;
+    }
+    host.hidden = true;
+    host.inert = true;
+    host.setAttribute('aria-hidden', 'true');
+  }
+
+  function openDialog(dialog, opener, dismiss) {
     if (!dialog) return false;
-    if (activeDialog === dialog) return true;
+    if (activeDialog === dialog) {
+      if (typeof dismiss === 'function') dialogDismiss = dismiss;
+      return true;
+    }
     if (activeDialog) {
       dialogStack.push({
         dialog: activeDialog,
         opener: dialogOpener,
-        wasHidden: dialogWasHidden
+        wasHidden: dialogWasHidden,
+        dismiss: dialogDismiss
       });
       restoreBackground();
     }
     activeDialog = dialog;
     dialogOpener = opener || document.activeElement;
     dialogWasHidden = dialog.hasAttribute('hidden');
+    dialogDismiss = typeof dismiss === 'function' ? dismiss : null;
+    revealDialogSurface(dialog);
     dialog.hidden = false;
+    dialog.inert = false;
     dialog.removeAttribute('aria-hidden');
     dialog.setAttribute('role', 'dialog');
     dialog.setAttribute('aria-modal', 'true');
@@ -286,11 +330,13 @@
       activeDialog = previous.dialog;
       dialogOpener = previous.opener;
       dialogWasHidden = previous.wasHidden;
+      dialogDismiss = previous.dismiss || null;
       setBackgroundInert(activeDialog);
     } else {
       activeDialog = null;
       dialogOpener = null;
       dialogWasHidden = false;
+      dialogDismiss = null;
       dialogStack = [];
     }
     if (opener && typeof opener.focus === 'function' && isVisible(opener)) opener.focus();
@@ -300,6 +346,28 @@
       else activeDialog.focus();
     }
     return true;
+  }
+
+  function dismissAllDialogs() {
+    var records = [];
+    if (activeDialog) records.push({ dialog: activeDialog, dismiss: dialogDismiss });
+    for (var index = dialogStack.length - 1; index >= 0; index -= 1) {
+      var stacked = dialogStack[index];
+      var alreadyRecorded = records.some(function (record) { return record.dialog === stacked.dialog; });
+      if (!alreadyRecorded) records.push({ dialog: stacked.dialog, dismiss: stacked.dismiss });
+    }
+    restoreBackground();
+    activeDialog = null;
+    dialogOpener = null;
+    dialogWasHidden = false;
+    dialogDismiss = null;
+    dialogStack = [];
+    for (var recordIndex = 0; recordIndex < records.length; recordIndex += 1) {
+      var record = records[recordIndex];
+      if (typeof record.dismiss === 'function') record.dismiss();
+      hideDialogSurface(record.dialog);
+    }
+    return records.length;
   }
 
   function requestDialogClose() {
@@ -410,7 +478,8 @@
     init: init,
     refresh: refresh,
     openDialog: openDialog,
-    closeDialog: closeDialog
+    closeDialog: closeDialog,
+    dismissAllDialogs: dismissAllDialogs
   });
 
   init();

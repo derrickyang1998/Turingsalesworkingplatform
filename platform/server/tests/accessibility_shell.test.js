@@ -49,9 +49,134 @@ test('accessibility module exposes the exact frozen interface and initializes id
     });
 
     assert.equal(result.frozen, true);
-    assert.deepEqual(result.keys, ['closeDialog', 'init', 'openDialog', 'refresh']);
+    assert.deepEqual(result.keys, ['closeDialog', 'dismissAllDialogs', 'init', 'openDialog', 'refresh']);
     assert.equal(result.firstId, result.secondId);
     assert.equal(result.inputCount, 1);
+  });
+});
+
+test('dismissAllDialogs hides every active dialog host and releases background inert state', async () => {
+  await withModulePage({
+    modulePath: accessibilityPath,
+    html: `
+      <main id="app"><button id="opener">Open</button></main>
+      <aside id="detailHost" class="detail-sidebar" hidden inert aria-hidden="true">
+        <div id="detailDialog" role="dialog" aria-modal="true" aria-labelledby="detailTitle">
+          <h2 id="detailTitle">Customer detail</h2><button id="detailClose">Close</button>
+        </div>
+      </aside>
+      <div id="confirmHost" class="modal-overlay" hidden inert aria-hidden="true">
+        <div id="confirmDialog" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
+          <h2 id="confirmTitle">Confirm</h2><button id="confirmClose">Close</button>
+        </div>
+      </div>
+    `
+  }, async (page) => {
+    const result = await page.evaluate(() => {
+      const detailHost = document.getElementById('detailHost');
+      detailHost.hidden = false;
+      detailHost.inert = false;
+      detailHost.removeAttribute('aria-hidden');
+      window.TMAccessibility.openDialog(document.getElementById('detailDialog'), document.getElementById('opener'));
+
+      const confirmHost = document.getElementById('confirmHost');
+      confirmHost.hidden = false;
+      confirmHost.inert = false;
+      confirmHost.removeAttribute('aria-hidden');
+      window.TMAccessibility.openDialog(document.getElementById('confirmDialog'), document.getElementById('detailClose'));
+      window.TMAccessibility.dismissAllDialogs();
+
+      return {
+        appInert: document.getElementById('app').inert,
+        detail: {
+          hidden: detailHost.hidden,
+          inert: detailHost.inert,
+          ariaHidden: detailHost.getAttribute('aria-hidden')
+        },
+        confirm: {
+          hidden: confirmHost.hidden,
+          inert: confirmHost.inert,
+          ariaHidden: confirmHost.getAttribute('aria-hidden'),
+          display: confirmHost.style.display
+        }
+      };
+    });
+
+    assert.equal(result.appInert, false);
+    assert.deepEqual(result.detail, { hidden: true, inert: true, ariaHidden: 'true' });
+    assert.deepEqual(result.confirm, { hidden: false, inert: false, ariaHidden: null, display: 'none' });
+
+    const reopened = await page.evaluate(() => {
+      const confirmHost = document.getElementById('confirmHost');
+      confirmHost.style.display = 'flex';
+      return {
+        hidden: confirmHost.hidden,
+        inert: confirmHost.inert,
+        ariaHidden: confirmHost.getAttribute('aria-hidden'),
+        visible: getComputedStyle(confirmHost).display !== 'none'
+      };
+    });
+    assert.deepEqual(reopened, { hidden: false, inert: false, ariaHidden: null, visible: true });
+  });
+});
+
+test('dismissAllDialogs invokes owner teardown for active and stacked dialogs exactly once', async () => {
+  await withModulePage({
+    modulePath: accessibilityPath,
+    html: `
+      <main id="app"><button id="opener">Open</button></main>
+      <div id="dynamicHost" class="modal-overlay">
+        <div id="dynamicDialog" role="dialog" aria-modal="true" aria-labelledby="dynamicTitle">
+          <h2 id="dynamicTitle">Dynamic dialog</h2><button id="dynamicAction">Continue</button>
+        </div>
+      </div>
+      <div id="confirmHost" class="modal-overlay">
+        <div id="confirmDialog" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
+          <h2 id="confirmTitle">Confirm</h2><button id="confirmAction">Confirm</button>
+        </div>
+      </div>
+    `
+  }, async (page) => {
+    const result = await page.evaluate(() => {
+      window.ownerDismissals = [];
+      const dynamicHost = document.getElementById('dynamicHost');
+      const confirmHost = document.getElementById('confirmHost');
+      window.TMAccessibility.openDialog(
+        document.getElementById('dynamicDialog'),
+        document.getElementById('opener'),
+        function () {
+          window.ownerDismissals.push('dynamic');
+          dynamicHost.remove();
+        }
+      );
+      window.TMAccessibility.openDialog(
+        document.getElementById('confirmDialog'),
+        document.getElementById('dynamicAction'),
+        function () {
+          window.ownerDismissals.push('confirm');
+          confirmHost.style.display = 'none';
+        }
+      );
+      const dismissed = window.TMAccessibility.dismissAllDialogs();
+      const dismissedAgain = window.TMAccessibility.dismissAllDialogs();
+      return {
+        dismissed,
+        dismissedAgain,
+        ownerDismissals: window.ownerDismissals,
+        dynamicPresent: Boolean(document.getElementById('dynamicHost')),
+        confirmDisplay: confirmHost.style.display,
+        appInert: document.getElementById('app').inert
+      };
+    });
+
+    assert.deepEqual(result, {
+      dismissed: 2,
+      dismissedAgain: 0,
+      ownerDismissals: ['confirm', 'dynamic'],
+      dynamicPresent: false,
+      confirmDisplay: 'none',
+      appInert: false
+    });
   });
 });
 

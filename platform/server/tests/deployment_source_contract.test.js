@@ -289,7 +289,6 @@ test('Task 12 deploy inventory includes every client asset and remote full-test 
 
   const rootFiles = new Set(powerShellArrayEntries(deploy, 'ROOT_RELATIVE_FILES'));
   for (const file of [
-    '.gitattributes',
     '.gitignore',
     '.env.example',
     'CHANGELOG.md',
@@ -298,11 +297,30 @@ test('Task 12 deploy inventory includes every client asset and remote full-test 
     'docs/handoff/2026-06-30/SECURITY.md',
     'docs/handoff/2026-06-30/OPERATIONS.md',
     'docs/superpowers/plans/2026-07-12-phase-1-credential-rotation.md',
-    'docs/superpowers/plans/2026-07-12-turingmarket-platform-roadmap.md',
-    'docs/baselines/v0.2.9/ui-ppt-manifest.json'
+    'docs/superpowers/plans/2026-07-12-turingmarket-platform-roadmap.md'
   ]) {
-    assert.equal(rootFiles.has(file), true, `${file} must support remote full tests`);
+    assert.equal(rootFiles.has(file), true, `${file} must be promoted as repository documentation`);
   }
+
+  const candidateOnlyFiles = new Set(powerShellArrayEntries(deploy, 'CANDIDATE_ONLY_FILES'));
+  for (const file of [
+    '.gitattributes',
+    'docs/baselines/v0.2.9/ui-ppt-manifest.json',
+    'docs/product/turingmarket-design-system.md',
+    'docs/product/2026-07-phase3-visual-change-record.md',
+    'docs/product/2026-07-phase3-accessibility-residual-risks.md',
+    'docs/product/evidence/2026-07-phase3-post/raw-contact-sheet-manifest.json',
+    'docs/product/evidence/2026-07-phase3-post/fixture-1440-1.png',
+    'docs/product/evidence/2026-07-phase3-post/fixture-1920-1.png',
+    'docs/product/evidence/2026-07-phase3-post/fixture-mobile-1.png'
+  ]) {
+    assert.equal(candidateOnlyFiles.has(file), true, `${file} must be uploaded only for candidate verification`);
+    assert.equal(rootFiles.has(file), false, `${file} must not be promoted or rollback-owned`);
+  }
+  assert.match(deploy, /\$script:CANDIDATE_ONLY_FILES\s*\+=\s*\$screenshots/);
+  assert.doesNotMatch(deploy, /\$script:ROOT_RELATIVE_FILES\s*\+=\s*\$screenshots/);
+  assert.match(deploy, /foreach \(\$file in \$CANDIDATE_ONLY_FILES\)[\s\S]*?Candidate-only evidence upload failed/);
+  assert.match(deploy, /git -C \$REPO_DIR ls-files --error-unmatch -- \$trackedPath/);
 });
 
 test('Task 12 deploy backup and rollback are complete, checksummed, and share one restore path', () => {

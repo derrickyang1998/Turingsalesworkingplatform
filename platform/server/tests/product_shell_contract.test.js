@@ -13,6 +13,11 @@ const buildInfoPath = path.join(platformRoot, 'client', 'shared', 'build_info.js
 const navigationPath = path.join(platformRoot, 'client', 'core', 'navigation.js');
 const accessibilityPath = path.join(platformRoot, 'client', 'core', 'accessibility.js');
 const shellPath = path.join(platformRoot, 'client', 'core', 'shell.js');
+const repoRoot = path.join(platformRoot, '..');
+const designSystemPath = path.join(repoRoot, 'docs', 'product', 'turingmarket-design-system.md');
+const migrationPath = path.join(repoRoot, 'CLAUDE_CODE_MIGRATION.md');
+const visualChangeRecordPath = path.join(repoRoot, 'docs', 'product', '2026-07-phase3-visual-change-record.md');
+const accessibilityResidualRiskPath = path.join(repoRoot, 'docs', 'product', '2026-07-phase3-accessibility-residual-risks.md');
 const stylePaths = [
   path.join(platformRoot, 'client', 'styles', 'tokens.css'),
   path.join(platformRoot, 'client', 'styles', 'components.css'),
@@ -433,6 +438,13 @@ test('static overlays expose labelled dialog or drawer contracts and named close
     assert.match(button, /aria-label=["'][^"']+["']/i);
     assert.match(button, /title=["'][^"']+["']/i);
   }
+
+  for (const id of ['customerDetailPanel', 'custDetailSidebar']) {
+    const closedDrawer = openingTagById(indexHtml, id);
+    assert.match(closedDrawer, /\shidden(?:\s|>|=)/i, `${id} must be initially hidden`);
+    assert.match(closedDrawer, /\sinert(?:\s|>|=)/i, `${id} must be initially inert`);
+    assert.match(closedDrawer, /aria-hidden=["']true["']/i, `${id} must be absent from the initial accessibility tree`);
+  }
 });
 
 test('navigation source uses canonical anchors and never suppresses heading focus', () => {
@@ -463,6 +475,7 @@ test('shared app hooks announce auth/status and name M4/workflow controls withou
   assert.match(toastHook, /ty\s*===\s*['"]error['"]\s*\?\s*['"]alert['"]\s*:\s*['"]status['"]/);
   assert.match(toastHook, /aria-label['"],\s*['"]关闭通知['"]/);
   assert.doesNotMatch(toastHook, /setTimeout[\s\S]*?remove/);
+  assert.match(toastHook, /TOAST_QUEUE_LIMIT\s*=\s*3/);
   assert.match(app, /aria-label=["']全选网红["']/);
   assert.match(app, /aria-label=["']选择网红/);
   assert.match(app, /indeterminate/);
@@ -470,6 +483,35 @@ test('shared app hooks announce auth/status and name M4/workflow controls withou
   assert.match(app, /collabOrderDialog[\s\S]*?role=["']dialog["']/);
   assert.match(app, /brandRelationDialog[\s\S]*?aria-modal["']?,?[\s\S]*?TMAccessibility\.openDialog/);
   assert.match(app, /showConfirm[\s\S]*?TMAccessibility\.openDialog/);
+});
+
+test('Phase 3 docs distinguish deterministic visual gates and record bounded accessibility evidence', () => {
+  const designSystem = read(designSystemPath);
+  const migration = read(migrationPath);
+  const visualChangeRecord = read(visualChangeRecordPath);
+
+  assert.match(designSystem, /Toast container[^\n]+non-live/i);
+  assert.match(designSystem, /each (?:toast )?message[^\n]+role="status"[^\n]+role="alert"/i);
+  assert.doesNotMatch(designSystem, /Toast container uses `role="status"`/i);
+
+  assert.match(migration, /0\.005[^\n]+repeat-capture|repeat-capture[^\n]+0\.005/i);
+  assert.match(migration, /0\.14496597399441002/);
+  assert.match(migration, /intentional[^\n]+reviewed/i);
+
+  assert.equal(fs.existsSync(accessibilityResidualRiskPath), true, 'tracked accessibility residual-risk report must exist');
+  const residual = read(accessibilityResidualRiskPath);
+  for (const required of [
+    'NVDA',
+    'VoiceOver',
+    'browser-native zoom',
+    'CSS viewport reflow equivalence',
+    'not a full WCAG conformance claim',
+    'Phase 4'
+  ]) {
+    assert.ok(residual.includes(required), `residual-risk report must state: ${required}`);
+  }
+  assert.match(visualChangeRecord, /2026-07-phase3-accessibility-residual-risks\.md/);
+  assert.doesNotMatch(visualChangeRecord, /Task 5 report/i);
 });
 
 test('workflow palette and rendered nodes execute keyboard alternatives exactly once', async () => {

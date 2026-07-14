@@ -3,6 +3,7 @@ const API = window.location.origin + '/api';
 let AUTH_TOKEN = localStorage.getItem('tm_token') || '';
 let CURRENT_USER = null;
 let authExpiredNotified = false;
+let AUTH_GENERATION = 0;
 let currentAIConversationId = null;
 let BRANDS = [], INFLUENCERS = [], TEMPLATES = [], CBLOCKS = {};
 let curDemand = null, selTpl = null, lastMatch = [], lastProp = "";
@@ -49,6 +50,7 @@ async function doLogin() {
     if (!r.ok) return showLoginError(d.error || '登录失败');
     AUTH_TOKEN = d.token;
     CURRENT_USER = d.user;
+    AUTH_GENERATION += 1;
     authExpiredNotified = false;
     clearLoginError();
     localStorage.setItem('tm_token', AUTH_TOKEN);
@@ -87,21 +89,31 @@ async function doLogout() {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + AUTH_TOKEN }
     });
   } catch (e) {}
-  AUTH_TOKEN = ''; CURRENT_USER = null;
+  AUTH_TOKEN = ''; CURRENT_USER = null; AUTH_GENERATION += 1;
   localStorage.removeItem('tm_token'); localStorage.removeItem('tm_user');
   location.reload();
 }
 
 function handleAuthExpired(message) {
+  if (window.TMAccessibility && window.TMAccessibility.dismissAllDialogs) {
+    window.TMAccessibility.dismissAllDialogs();
+  }
+  closeCustomerDetail();
   AUTH_TOKEN = '';
   CURRENT_USER = null;
+  AUTH_GENERATION += 1;
   localStorage.removeItem('tm_token');
   localStorage.removeItem('tm_user');
   var app = document.getElementById('app');
   var auth = document.getElementById('authOverlay');
   var loginUser = document.getElementById('loginUser');
   if (app) app.style.display = 'none';
-  if (auth) auth.style.display = 'flex';
+  if (auth) {
+    auth.hidden = false;
+    auth.inert = false;
+    auth.removeAttribute('aria-hidden');
+    auth.style.display = 'flex';
+  }
   if (loginUser) loginUser.focus();
   if (!authExpiredNotified) {
     authExpiredNotified = true;
@@ -113,11 +125,15 @@ async function apiFetch(url, opts) {
   opts = opts || {};
   var isFormData = typeof FormData !== 'undefined' && opts.body instanceof FormData;
   var headers = new Headers(opts.headers || {});
-  if (AUTH_TOKEN) headers.set('Authorization', 'Bearer ' + AUTH_TOKEN);
+  var requestToken = AUTH_TOKEN;
+  var requestAuthGeneration = AUTH_GENERATION;
+  if (requestToken) headers.set('Authorization', 'Bearer ' + requestToken);
   if (!isFormData && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
   opts.headers = headers;
   var resp = await fetch(API + url, opts);
-  if (resp.status === 401) handleAuthExpired();
+  if (resp.status === 401 && requestAuthGeneration === AUTH_GENERATION && requestToken === AUTH_TOKEN) {
+    handleAuthExpired();
+  }
   return resp;
 }
 
@@ -446,8 +462,10 @@ function showConfirm(title, msg) {
     document.getElementById('confirmDialogTitle').textContent = title;
     document.getElementById('confirmDialogMessage').textContent = msg;
     overlay.style.display = 'flex';
-    if (window.TMAccessibility) window.TMAccessibility.openDialog(dialog, opener);
+    var settled = false;
     function cleanup(result) {
+      if (settled) return;
+      settled = true;
       overlay.style.display = 'none';
       if (window.TMAccessibility) window.TMAccessibility.closeDialog(dialog);
       resolve(result);
@@ -455,6 +473,9 @@ function showConfirm(title, msg) {
     document.getElementById('confirmDialogOk').onclick = function() { cleanup(true); };
     document.getElementById('confirmDialogCancel').onclick = function() { cleanup(false); };
     overlay.onclick = function(e) { if (e.target === overlay) cleanup(false); };
+    if (window.TMAccessibility) {
+      window.TMAccessibility.openDialog(dialog, opener, function() { cleanup(false); });
+    }
   });
 }
 
@@ -465,7 +486,24 @@ async function openCustomerDetail(id) {
     renderCustomerSidebar(d);
   } catch(e) { toast('加载失败: ' + e.message, 'error'); }
 }
-function closeCustomerDetail() { var o=document.getElementById('custDetailOverlay'); if(o)o.style.display='none'; var s=document.getElementById('custDetailSidebar'); if(s)s.classList.remove('open'); }
+function closeCustomerDetail() {
+  var dialog = document.getElementById('customerDetailDialog');
+  if (dialog && window.TMAccessibility) window.TMAccessibility.closeDialog(dialog);
+  var overlays = [document.getElementById('custDetailOverlay'), document.getElementById('customerDetailOverlay')];
+  overlays.forEach(function (overlay) {
+    if (!overlay) return;
+    overlay.style.display = 'none';
+    overlay.hidden = true;
+  });
+  var surfaces = [document.getElementById('custDetailSidebar'), document.getElementById('customerDetailPanel')];
+  surfaces.forEach(function (surface) {
+    if (!surface) return;
+    surface.classList.remove('open');
+    surface.hidden = true;
+    surface.inert = true;
+    surface.setAttribute('aria-hidden', 'true');
+  });
+}
 var activeWorkflowContext = null;
 function mapCustomerStageToStrategyStage(stage) {
   if (stage === 'lead') return 'new';
@@ -702,8 +740,19 @@ function renderCustomerSidebar(d) {
   html += '<div class="sidebar-section"><h4>添加跟进</h4><div style="display:flex;gap:6px"><input id="activityText" placeholder="输入跟进内容..." style="flex:1;padding:6px 10px;font-size:12px"><button class="btn btn-primary btn-sm" onclick="addCustomerActivity(' + c.id + ')">记录</button></div></div>';
   document.getElementById('custDetailTitle').textContent = c.brand_name || '客户详情';
   document.getElementById('custDetailBody').innerHTML = html;
-  document.getElementById('custDetailOverlay').style.display = 'block';
-  document.getElementById('custDetailSidebar').classList.add('open');
+  var opener = document.activeElement;
+  var overlay = document.getElementById('custDetailOverlay');
+  var sidebar = document.getElementById('custDetailSidebar');
+  var dialog = document.getElementById('customerDetailDialog');
+  overlay.hidden = false;
+  overlay.style.display = 'block';
+  sidebar.hidden = false;
+  sidebar.inert = false;
+  sidebar.removeAttribute('aria-hidden');
+  sidebar.classList.add('open');
+  if (window.TMAccessibility) {
+    window.TMAccessibility.openDialog(dialog, opener, function() { closeCustomerDetail(); });
+  }
 }
 
 var _lastCustomerDetailData = null;
@@ -876,6 +925,7 @@ function copyText(t) { try { navigator.clipboard.writeText(t); toast("已复制:
 
 
 function toast(m, ty) {
+  var TOAST_QUEUE_LIMIT = 3;
   ty = ty || 'success';
   var focusBeforeToast = document.activeElement;
   var c = document.getElementById('toastContainer');
@@ -905,6 +955,18 @@ function toast(m, ty) {
   e.appendChild(message);
   e.appendChild(close);
   c.appendChild(e);
+  while (c.children.length > TOAST_QUEUE_LIMIT) {
+    var active = document.activeElement;
+    var removable = null;
+    for (var index = 0; index < c.children.length; index += 1) {
+      if (!c.children[index].contains(active)) {
+        removable = c.children[index];
+        break;
+      }
+    }
+    if (!removable) break;
+    removable.remove();
+  }
 }
 function toggleBrandDetail(id){
   var el=document.getElementById(id);
@@ -3007,11 +3069,15 @@ function startCollab(infId) {
     '<div class="btn-group" style="justify-content:flex-end"><button class="btn btn-outline" onclick="closeCollabOrderModal()">取消</button><button class="btn btn-primary" onclick="submitCollabOrder()">确认下单</button></div>' +
     '</div>';
   document.body.appendChild(overlay);
-  if (window.TMAccessibility) window.TMAccessibility.openDialog(document.getElementById('collabOrderDialog'), opener);
+  if (window.TMAccessibility) {
+    window.TMAccessibility.openDialog(document.getElementById('collabOrderDialog'), opener, function() {
+      closeCollabOrderModal(overlay);
+    });
+  }
 }
-function closeCollabOrderModal() {
-  var overlay = document.getElementById('collabOrderModal');
-  var dialog = document.getElementById('collabOrderDialog');
+function closeCollabOrderModal(targetOverlay) {
+  var overlay = targetOverlay && targetOverlay.nodeType === 1 ? targetOverlay : document.getElementById('collabOrderModal');
+  var dialog = overlay ? overlay.querySelector('#collabOrderDialog') : document.getElementById('collabOrderDialog');
   if (dialog && window.TMAccessibility) window.TMAccessibility.closeDialog(dialog);
   if (overlay) overlay.remove();
 }
@@ -3452,11 +3518,13 @@ function showRelatedBrands(brandName) {
   modal.innerHTML += '<div style="margin-top:16px;text-align:center"><button type="button" class="btn btn-outline" aria-label="关闭品牌关系" onclick="closeBrandRelModal()">关闭</button></div>';
   overlay.appendChild(modal);
   document.body.appendChild(overlay);
-  if (window.TMAccessibility) window.TMAccessibility.openDialog(modal, opener);
+  if (window.TMAccessibility) {
+    window.TMAccessibility.openDialog(modal, opener, function() { closeBrandRelModal(overlay); });
+  }
 }
-function closeBrandRelModal() {
-  var el = document.getElementById("brandRelOverlay");
-  var dialog = document.getElementById("brandRelationDialog");
+function closeBrandRelModal(targetOverlay) {
+  var el = targetOverlay && targetOverlay.nodeType === 1 ? targetOverlay : document.getElementById("brandRelOverlay");
+  var dialog = el ? el.querySelector('#brandRelationDialog') : document.getElementById("brandRelationDialog");
   if (dialog && window.TMAccessibility) window.TMAccessibility.closeDialog(dialog);
   if (el) el.remove();
 }
