@@ -1,3 +1,10 @@
 module.exports = {
-  name: 'failing_probe_migration_fixture'
+  version: 99,
+  name: 'failing_probe',
+  sourcePath: 'tests/fixtures/failing_probe_migration.js',
+  engineVersion: 1,
+  dependencies: [],
+  apply() {
+    throw new Error('injected migration failure');
+  }
 };

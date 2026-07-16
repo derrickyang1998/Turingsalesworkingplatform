@@ -10,12 +10,13 @@ const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'db', 'turingmarket.
 const db = new Database(DB_PATH);
 
 db.pragma('foreign_keys = ON');
-db.pragma('journal_mode = WAL');
 
 migrationService.runMigrations(db, {
   rootDir: __dirname,
   seedAdmissions: legacyBaseline.seedAdmissions
 });
+
+db.pragma('journal_mode = WAL');
 
 db.seedAdmissions = legacyBaseline.seedAdmissions;
 

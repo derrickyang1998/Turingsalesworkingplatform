@@ -22,6 +22,21 @@ function tmpDb(name) {
   return { db, dbPath };
 }
 
+function corruptFtsSegmentBytes(dbPath, shadowBlock) {
+  const bytes = require('node:fs').readFileSync(dbPath);
+  const index = bytes.indexOf(shadowBlock);
+  assert.notEqual(index, -1, 'shadow block must be present in database bytes');
+  const mutated = Buffer.from(shadowBlock);
+  for (let offset = 0; offset < mutated.length; offset += 1) {
+    if (mutated[offset] !== 0) {
+      mutated[offset] ^= 1;
+      break;
+    }
+  }
+  bytes.set(mutated, index);
+  require('node:fs').writeFileSync(dbPath, bytes);
+}
+
 test('primitive framing vectors match the immutable SQLite digest grammar', () => {
   const digest = require('../services/sqlite_digest_service');
   const item = digest.item(SQLITE_PRIMITIVES.item.label, Buffer.from(SQLITE_PRIMITIVES.item.payloadHex, 'hex'));
@@ -146,5 +161,42 @@ test('knowledge_chunks_fts projection is exact and rejects malformed tags, orpha
 
   db.prepare("UPDATE knowledge_entries SET tags_json = ? WHERE id = 1").run('{"bad":true}');
   assert.throws(() => digest.rebuildKnowledgeChunksFts(db), /tags_json/);
+  db.close();
+});
+
+test('knowledge_chunks_fts verifier rejects shadow posting corruption when projection digest is unchanged', () => {
+  const digest = require('../services/sqlite_digest_service');
+  const fixture = tmpDb('fts-shadow-corruption');
+  buildDigestFixture(fixture.db);
+  digest.rebuildKnowledgeChunksFts(fixture.db);
+  const base = digest.databaseDigest(fixture.db, DIGEST_FIXTURE_MANIFEST);
+  const shadow = fixture.db.prepare('SELECT block FROM knowledge_chunks_fts_data WHERE id = (SELECT MAX(id) FROM knowledge_chunks_fts_data)').get().block;
+  fixture.db.close();
+
+  corruptFtsSegmentBytes(fixture.dbPath, shadow);
+  const corrupted = new Database(fixture.dbPath, { readonly: true, fileMustExist: true });
+  const changed = digest.databaseDigest(corrupted, DIGEST_FIXTURE_MANIFEST);
+  assert.equal(changed.topologySha256, base.topologySha256);
+  assert.equal(changed.logicalSha256, base.logicalSha256);
+  assert.equal(changed.fts[0].sha256, base.fts[0].sha256);
+  assert.deepEqual(digest.matchKnowledgeChunksCanary(corrupted, 'alpha'), []);
+  assert.equal(typeof digest.verifyKnowledgeChunksFtsIntegrity, 'function');
+  assert.throws(() => digest.verifyKnowledgeChunksFtsIntegrity(corrupted, DIGEST_FIXTURE_MANIFEST), /FTS.*posting|integrity/i);
+  corrupted.close();
+  require('node:fs').rmSync(fixture.dbPath, { force: true });
+});
+
+test('FTS verifier compares semantic chunk postings with LEFT JOIN and fixed tokenizer', () => {
+  const source = require('node:fs').readFileSync(path.join(__dirname, '..', 'services', 'sqlite_digest_service.js'), 'utf8');
+  assert.match(source, /LEFT JOIN \$\{ftsSchema\}/);
+  assert.match(source, /tokenize\s*=\s*'unicode61'/);
+  const digest = require('../services/sqlite_digest_service');
+  const { db } = tmpDb('fts-tokenizer-contract');
+  buildDigestFixture(db);
+  digest.rebuildKnowledgeChunksFts(db);
+  assert.throws(
+    () => digest.verifyKnowledgeChunksFtsIntegrity(db, { fts: [{ ...DIGEST_FIXTURE_MANIFEST.fts[0], tokenizerOptions: 'porter' }] }),
+    /tokenizer/i
+  );
   db.close();
 });

@@ -1,11 +1,25 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const vm = require('vm');
+const { builtinModules } = require('module');
 const Database = require('better-sqlite3');
 
 const baseline = require('../migrations/baselines/legacy_v1');
-const migration001 = require('../migrations/001_legacy_compat_columns');
 const sqliteDigest = require('./sqlite_digest_service');
+
+const BUILTIN_MODULES = new Set([
+  ...builtinModules,
+  ...builtinModules.map((name) => `node:${name}`)
+]);
+
+const MIGRATION_001_DESCRIPTOR = Object.freeze({
+  version: 1,
+  name: '001_legacy_compat_columns',
+  sourcePath: 'migrations/001_legacy_compat_columns.js',
+  engineVersion: 1,
+  dependencies: []
+});
 
 const LEDGER_SQL = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -72,39 +86,89 @@ const REQUIRED_COLUMNS = {
   ai_references: ['id', 'message_id']
 };
 
-const SAFE_INTEGER_COLUMNS = {
-  users: ['id', 'api_quota', 'is_active'],
-  brands: ['id', 'youtube_followers', 'instagram_followers', 'tiktok_followers', 'search_volume_monthly', 'monthly_posts', 'avg_views'],
-  sessions: ['id', 'user_id'],
-  demands: ['id', 'user_id'],
-  proposals: ['id', 'user_id', 'demand_id'],
-  token_usage: ['id', 'user_id', 'prompt_tokens', 'completion_tokens', 'total_tokens'],
-  activity_log: ['id', 'user_id'],
-  team_invites: ['id', 'created_by', 'max_uses', 'uses', 'is_active'],
-  customers: ['id', 'created_by', 'assigned_to'],
-  customer_activity: ['id', 'customer_id', 'user_id'],
-  influencers: ['id', 'followers', 'avg_views_10', 'cost_usd', 'cost_range_min', 'cost_range_max', 'is_active'],
-  collaborations: ['id', 'demand_id', 'influencer_id', 'user_id', 'cost_quoted', 'cost_actual', 'row_version', 'cost_actual_confirmed'],
-  workflow_templates: ['id', 'version', 'is_active', 'created_by'],
-  workflow_instances: ['id', 'template_id', 'business_id', 'started_by'],
-  workflow_tasks: ['id', 'instance_id', 'assignee_id', 'completed_by'],
-  workflow_timers: ['id', 'instance_id', 'fired'],
-  workflow_node_logs: ['id', 'instance_id', 'user_id'],
-  leads: ['id', 'lead_score', 'assigned_to', 'converted_customer_id'],
-  opportunities: ['id', 'customer_id', 'win_probability', 'created_by'],
-  sales_targets: ['id', 'user_id'],
-  activity_log_ext: ['id', 'customer_id', 'user_id'],
-  knowledge_entries: ['id', 'source_id', 'created_by', 'is_public', 'usage_count'],
-  knowledge_chunks: ['id', 'entry_id', 'chunk_index', 'token_count'],
-  ai_conversations: ['id', 'user_id', 'archived_summary_id'],
-  ai_messages: ['id', 'conversation_id', 'user_id', 'prompt_tokens', 'completion_tokens', 'total_tokens'],
-  ai_references: ['id', 'message_id'],
-  web_search_cache: ['id']
+const INTEGER_RULES = {
+  users: { id: 'positive', api_quota: 'nonnegative', is_active: 'boolean' },
+  brands: { id: 'positive', youtube_followers: 'nonnegative', instagram_followers: 'nonnegative', tiktok_followers: 'nonnegative', search_volume_monthly: 'nonnegative', monthly_posts: 'nonnegative', avg_views: 'nonnegative' },
+  sessions: { id: 'positive', user_id: 'positive' },
+  demands: { id: 'positive', user_id: 'positive' },
+  proposals: { id: 'positive', user_id: 'positive', demand_id: 'positive' },
+  token_usage: { id: 'positive', user_id: 'positive', prompt_tokens: 'nonnegative', completion_tokens: 'nonnegative', total_tokens: 'nonnegative' },
+  activity_log: { id: 'positive', user_id: 'positive' },
+  team_invites: { id: 'positive', created_by: 'positive', max_uses: 'positive', uses: 'nonnegative', is_active: 'boolean' },
+  customers: { id: 'positive', created_by: 'positive', assigned_to: 'positive', lead_score: 'nonnegative', win_probability: 'probability', is_public: 'boolean' },
+  customer_activity: { id: 'positive', customer_id: 'positive', user_id: 'positive' },
+  influencers: { id: 'positive', followers: 'nonnegative', avg_views_10: 'nonnegative', cost_usd: 'nonnegative', cost_range_min: 'nonnegative', cost_range_max: 'nonnegative', is_active: 'boolean', quoted_price: 'nonnegative', is_duplicate: 'boolean' },
+  collaborations: { id: 'positive', demand_id: 'positive', influencer_id: 'positive', user_id: 'positive', cost_quoted: 'nonnegative', cost_actual: 'nonnegative', row_version: 'version', cost_actual_confirmed: 'boolean' },
+  workflow_templates: { id: 'positive', version: 'version', is_active: 'boolean', created_by: 'positive' },
+  workflow_instances: { id: 'positive', template_id: 'positive', business_id: 'positive', started_by: 'positive' },
+  workflow_tasks: { id: 'positive', instance_id: 'positive', assignee_id: 'positive', completed_by: 'positive' },
+  workflow_timers: { id: 'positive', instance_id: 'positive', fired: 'boolean' },
+  workflow_node_logs: { id: 'positive', instance_id: 'positive', user_id: 'positive' },
+  leads: { id: 'positive', lead_score: 'nonnegative', assigned_to: 'positive', converted_customer_id: 'positive' },
+  opportunities: { id: 'positive', customer_id: 'positive', win_probability: 'probability', created_by: 'positive' },
+  sales_targets: { id: 'positive', user_id: 'positive' },
+  activity_log_ext: { id: 'positive', customer_id: 'positive', user_id: 'positive' },
+  knowledge_entries: { id: 'positive', source_id: 'polymorphic_source_id', created_by: 'positive', is_public: 'boolean', usage_count: 'nonnegative' },
+  knowledge_chunks: { id: 'positive', entry_id: 'positive', chunk_index: 'nonnegative', token_count: 'nonnegative' },
+  ai_conversations: { id: 'positive', user_id: 'positive', archived_summary_id: 'positive' },
+  ai_messages: { id: 'positive', conversation_id: 'positive', user_id: 'positive', prompt_tokens: 'nonnegative', completion_tokens: 'nonnegative', total_tokens: 'nonnegative' },
+  ai_references: { id: 'positive', message_id: 'positive' },
+  web_search_cache: { id: 'positive' }
 };
 
+const LEGACY_RELATIONSHIPS = [
+  ['sessions', 'user_id', 'users', 'id', true],
+  ['demands', 'user_id', 'users', 'id', true],
+  ['proposals', 'user_id', 'users', 'id', true],
+  ['proposals', 'demand_id', 'demands', 'id', false],
+  ['token_usage', 'user_id', 'users', 'id', true],
+  ['activity_log', 'user_id', 'users', 'id', true],
+  ['team_invites', 'created_by', 'users', 'id', true],
+  ['customers', 'created_by', 'users', 'id', true],
+  ['customers', 'assigned_to', 'users', 'id', false],
+  ['customer_activity', 'customer_id', 'customers', 'id', true],
+  ['customer_activity', 'user_id', 'users', 'id', true],
+  ['collaborations', 'demand_id', 'demands', 'id', false],
+  ['collaborations', 'influencer_id', 'influencers', 'id', true],
+  ['collaborations', 'user_id', 'users', 'id', true],
+  ['workflow_templates', 'created_by', 'users', 'id', false],
+  ['workflow_instances', 'template_id', 'workflow_templates', 'id', true],
+  ['workflow_instances', 'started_by', 'users', 'id', false],
+  ['workflow_tasks', 'instance_id', 'workflow_instances', 'id', true],
+  ['workflow_tasks', 'assignee_id', 'users', 'id', false],
+  ['workflow_tasks', 'completed_by', 'users', 'id', false],
+  ['workflow_timers', 'instance_id', 'workflow_instances', 'id', true],
+  ['workflow_node_logs', 'instance_id', 'workflow_instances', 'id', true],
+  ['workflow_node_logs', 'user_id', 'users', 'id', false],
+  ['opportunities', 'customer_id', 'customers', 'id', true],
+  ['opportunities', 'created_by', 'users', 'id', false],
+  ['leads', 'assigned_to', 'users', 'id', false],
+  ['leads', 'converted_customer_id', 'customers', 'id', false],
+  ['sales_targets', 'user_id', 'users', 'id', false],
+  ['activity_log_ext', 'customer_id', 'customers', 'id', false],
+  ['activity_log_ext', 'user_id', 'users', 'id', false],
+  ['knowledge_entries', 'created_by', 'users', 'id', false],
+  ['knowledge_chunks', 'entry_id', 'knowledge_entries', 'id', true],
+  ['ai_conversations', 'user_id', 'users', 'id', true],
+  ['ai_conversations', 'archived_summary_id', 'knowledge_entries', 'id', false],
+  ['ai_messages', 'conversation_id', 'ai_conversations', 'id', true],
+  ['ai_messages', 'user_id', 'users', 'id', true],
+  ['ai_references', 'message_id', 'ai_messages', 'id', true]
+];
+
 const COMPAT_COLUMNS = {
-  row_version: { type: 'INTEGER', notnull: true, defaultValue: '1' },
-  cost_actual_confirmed: { type: 'INTEGER', notnull: true, defaultValue: '0' }
+  row_version: {
+    type: 'INTEGER',
+    notnull: true,
+    defaultValue: '1',
+    checkSql: "CHECK(typeof(row_version) = 'integer' AND row_version >= 1 AND row_version <= 9007199254740991)"
+  },
+  cost_actual_confirmed: {
+    type: 'INTEGER',
+    notnull: true,
+    defaultValue: '0',
+    checkSql: "CHECK(typeof(cost_actual_confirmed) = 'integer' AND cost_actual_confirmed IN (0,1))"
+  }
 };
 
 function sha256Hex(buffer) {
@@ -149,14 +213,18 @@ function computeMigrationChecksum(options) {
 }
 
 function defaultMigrations() {
-  return [migration001];
+  return [MIGRATION_001_DESCRIPTOR];
 }
 
-function migrationInputs(migration, rootDir) {
+function migrationInputPaths(migration) {
   const sourcePath = validateRepoPath(migration.sourcePath);
   const enginePath = `migrations/engines/v${migration.engineVersion}.js`;
   const baselinePath = 'migrations/baselines/legacy_v1.js';
-  const paths = [sourcePath, enginePath, baselinePath, ...(migration.dependencies || [])];
+  return [sourcePath, enginePath, baselinePath, ...(migration.dependencies || [])];
+}
+
+function migrationInputs(migration, rootDir) {
+  const paths = migrationInputPaths(migration);
   const seen = new Set();
   return paths.map((repoPath) => {
     const validPath = validateRepoPath(repoPath);
@@ -167,33 +235,93 @@ function migrationInputs(migration, rootDir) {
   });
 }
 
-function assertNoUndeclaredLocalImports(migration, rootDir) {
-  const absolute = path.join(rootDir, ...migration.sourcePath.split('/'));
-  const source = fs.readFileSync(absolute, 'utf8');
-  const allowed = new Set([
-    `./engines/v${migration.engineVersion}`,
-    './engines/v1',
-    '../migrations/engines/v1',
-    './baselines/legacy_v1'
-  ]);
-  const dependencySet = new Set((migration.dependencies || []).map((dependency) => './' + dependency.replace(/^migrations\//, '')));
+function normalizeRelativeRequest(parentPath, request) {
+  const parentDir = path.posix.dirname(parentPath);
+  const requested = request.endsWith('.js') ? request : `${request}.js`;
+  return validateRepoPath(path.posix.normalize(path.posix.join(parentDir, requested)));
+}
+
+function localImportRequests(source) {
   const pattern = /require\(\s*['"](\.{1,2}\/[^'"]+)['"]\s*\)/g;
+  const requests = [];
   let match;
   while ((match = pattern.exec(source)) !== null) {
-    const request = match[1].replace(/\.js$/, '');
-    if (!allowed.has(request) && !dependencySet.has(request) && !request.endsWith(`/engines/v${migration.engineVersion}`)) {
-      throw new Error(`undeclared local import in ${migration.sourcePath}: ${request}`);
+    requests.push(match[1]);
+  }
+  return requests;
+}
+
+function validatedMigrationBundle(migration, options) {
+  const rootDir = options && options.rootDir ? options.rootDir : path.resolve(__dirname, '..');
+  const inputs = migrationInputs(migration, rootDir);
+  const files = new Map(inputs.map((input) => [input.path, input.bytes]));
+  for (const input of inputs) {
+    const source = input.bytes.toString('utf8');
+    for (const request of localImportRequests(source)) {
+      const resolved = normalizeRelativeRequest(input.path, request);
+      if (!files.has(resolved)) {
+        throw new Error(`undeclared local import in ${input.path}: ${request} -> ${resolved}`);
+      }
     }
   }
+  return { files: inputs, fileMap: files, rootDir };
 }
 
 function computeRegisteredMigrationChecksum(migration, options) {
-  const rootDir = options && options.rootDir ? options.rootDir : path.resolve(__dirname, '..');
-  assertNoUndeclaredLocalImports(migration, rootDir);
+  const bundle = validatedMigrationBundle(migration, options || {});
   return computeMigrationChecksum({
     engineVersion: migration.engineVersion,
-    files: migrationInputs(migration, rootDir)
+    files: bundle.files
   });
+}
+
+function loadRegisteredMigration(migration, options) {
+  const bundle = validatedMigrationBundle(migration, options || {});
+  const checksum = computeMigrationChecksum({ engineVersion: migration.engineVersion, files: bundle.files });
+  const moduleCache = new Map();
+
+  function loadModule(repoPath) {
+    const normalized = validateRepoPath(repoPath);
+    if (moduleCache.has(normalized)) return moduleCache.get(normalized).exports;
+    const bytes = bundle.fileMap.get(normalized);
+    if (!bytes) throw new Error(`migration implementation attempted undeclared local load: ${normalized}`);
+    const module = { exports: {} };
+    moduleCache.set(normalized, module);
+    const dirname = path.posix.dirname(normalized);
+    const filename = path.join(bundle.rootDir, ...normalized.split('/'));
+    const localRequire = (request) => {
+      if (request.startsWith('./') || request.startsWith('../')) {
+        return loadModule(normalizeRelativeRequest(normalized, request));
+      }
+      if (BUILTIN_MODULES.has(request)) {
+        return require(request);
+      }
+      if (normalized === 'migrations/baselines/legacy_v1.js' && request === 'bcryptjs') {
+        return require(request);
+      }
+      throw new Error(`undeclared bare import in migration bundle ${normalized}: ${request}`);
+    };
+    const script = new vm.Script(`(function(exports, require, module, __filename, __dirname) {\n${bytes.toString('utf8')}\n})`, {
+      filename
+    });
+    const compiled = script.runInThisContext();
+    compiled(module.exports, localRequire, module, filename, dirname);
+    return module.exports;
+  }
+
+  const implementation = loadModule(validateRepoPath(migration.sourcePath));
+  const baselineImplementation = loadModule('migrations/baselines/legacy_v1.js');
+  const mismatches = [];
+  for (const key of ['version', 'name', 'sourcePath', 'engineVersion']) {
+    if (implementation[key] !== migration[key]) mismatches.push(key);
+  }
+  const expectedDeps = JSON.stringify(migration.dependencies || []);
+  const actualDeps = JSON.stringify(implementation.dependencies || []);
+  if (actualDeps !== expectedDeps) mismatches.push('dependencies');
+  if (mismatches.length) throw new Error(`migration descriptor mismatch for ${migration.name}: ${mismatches.join(', ')}`);
+  if (typeof implementation.apply !== 'function') throw new Error(`migration ${migration.name} does not export apply`);
+  if (typeof baselineImplementation.apply !== 'function') throw new Error(`migration ${migration.name} baseline bundle does not export apply`);
+  return { implementation, baseline: baselineImplementation, checksum };
 }
 
 function userObjects(db) {
@@ -204,14 +332,12 @@ function hasObject(db, name) {
   return db.prepare("SELECT 1 FROM sqlite_schema WHERE name = ?").get(name) != null;
 }
 
-function hasExactLedgerShape(db) {
-  if (!hasObject(db, 'schema_migrations')) return false;
-  const cols = db.prepare('PRAGMA table_info(schema_migrations)').all().map((column) => column.name);
-  return ['version', 'name', 'checksum', 'source_path', 'engine_version', 'applied_at'].every((column) => cols.includes(column));
-}
-
 function columnsFor(db, tableName) {
   return db.prepare(`PRAGMA table_info(${JSON.stringify(tableName)})`).all();
+}
+
+function quoteIdentifier(name) {
+  return `"${String(name).replace(/"/g, '""')}"`;
 }
 
 function baselineShapeProblem(db) {
@@ -230,12 +356,209 @@ function baselineShapeProblem(db) {
 function compatibilityColumnProblem(db) {
   if (!hasObject(db, 'collaborations')) return null;
   const columns = columnsFor(db, 'collaborations');
+  const sql = normalizeSql(tableSql(db, 'collaborations'));
+  for (const name of Object.keys(COMPAT_COLUMNS)) {
+    const column = columns.find((candidate) => candidate.name === name);
+    if (!column) continue;
+    const badValues = db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM collaborations
+      WHERE ${quoteIdentifier(name)} IS NOT NULL
+        AND (${invalidRuleSql(quoteIdentifier(name), integerRuleFor('collaborations', name))})
+    `).get().count;
+    if (badValues) return `unsafe compatibility column collaborations.${name} count=${badValues}`;
+  }
   for (const [name, expected] of Object.entries(COMPAT_COLUMNS)) {
     const column = columns.find((candidate) => candidate.name === name);
     if (!column) continue;
     if (String(column.type).toUpperCase() !== expected.type) return `incompatible compatibility column collaborations.${name}`;
     if (expected.notnull && column.notnull !== 1) return `incompatible nullable compatibility column collaborations.${name}`;
     if (String(column.dflt_value) !== expected.defaultValue) return `incompatible default compatibility column collaborations.${name}`;
+    if (expected.checkSql && !sql.includes(normalizeSql(expected.checkSql))) return `incompatible CHECK compatibility column collaborations.${name}`;
+  }
+  return null;
+}
+
+function normalizeSql(sql) {
+  return String(sql || '').replace(/\s+/g, ' ').trim();
+}
+
+function tableSql(db, tableName) {
+  const row = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?").get(tableName);
+  return row ? row.sql : '';
+}
+
+function schemaShadowNames() {
+  return new Set([
+    'knowledge_chunks_fts_data',
+    'knowledge_chunks_fts_idx',
+    'knowledge_chunks_fts_content',
+    'knowledge_chunks_fts_docsize',
+    'knowledge_chunks_fts_config'
+  ]);
+}
+
+function schemaObjects(db) {
+  const shadows = schemaShadowNames();
+  return db.prepare("SELECT type,name,tbl_name,sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name,tbl_name")
+    .all()
+    .filter((object) => !shadows.has(object.name));
+}
+
+function xinfoFor(db, object) {
+  if (!/^(table|view)$/i.test(object.type) && object.type !== 'virtual table') return [];
+  return db.prepare(`PRAGMA table_xinfo(${quoteIdentifier(object.name)})`).all().map((column) => ({
+    name: column.name,
+    type: column.type,
+    notnull: column.notnull,
+    dflt_value: column.dflt_value,
+    pk: column.pk,
+    hidden: column.hidden
+  }));
+}
+
+function schemaSnapshot(db) {
+  const objects = new Map();
+  const columns = new Map();
+  for (const object of schemaObjects(db)) {
+    objects.set(object.name, {
+      type: object.type,
+      name: object.name,
+      tbl_name: object.tbl_name,
+      sql: normalizeSql(object.sql)
+    });
+    columns.set(object.name, xinfoFor(db, object));
+  }
+  return { objects, columns };
+}
+
+function expectedLedgerSnapshot() {
+  const expected = new Database(':memory:');
+  try {
+    createLedger(expected);
+    return schemaSnapshot(expected);
+  } finally {
+    expected.close();
+  }
+}
+
+function ledgerShapeProblem(db) {
+  if (!hasObject(db, 'schema_migrations')) return 'missing schema_migrations ledger';
+  const expected = expectedLedgerSnapshot();
+  const actual = schemaSnapshot(db);
+  const expectedObject = expected.objects.get('schema_migrations');
+  const actualObject = actual.objects.get('schema_migrations');
+  if (!actualObject || JSON.stringify(actualObject) !== JSON.stringify(expectedObject)) return 'malformed schema_migrations ledger';
+  if (JSON.stringify(actual.columns.get('schema_migrations')) !== JSON.stringify(expected.columns.get('schema_migrations'))) {
+    return 'malformed schema_migrations ledger columns';
+  }
+  return null;
+}
+
+function optionalMigrationAllowances(migrations) {
+  const objects = new Map();
+  const columns = new Map();
+  for (const migration of migrations || []) {
+    const manifest = migration.schemaManifest || {};
+    for (const [table, tableColumns] of Object.entries(manifest.columns || {})) {
+      if (!columns.has(table)) columns.set(table, new Map());
+      for (const [name, column] of Object.entries(tableColumns)) {
+        columns.get(table).set(name, {
+          name,
+          type: column.type,
+          notnull: column.notnull,
+          dflt_value: column.defaultValue,
+          pk: 0,
+          hidden: 0
+        });
+      }
+    }
+    for (const [name, sql] of Object.entries(manifest.indexes || {})) {
+      objects.set(name, { type: 'index', name, tbl_name: name.replace(/^idx_([^_]+).*$/, '$1'), sql: normalizeSql(sql) });
+    }
+    for (const [name, sql] of Object.entries(manifest.triggers || {})) {
+      objects.set(name, { type: 'trigger', name, tbl_name: 'collaborations', sql: normalizeSql(sql) });
+    }
+  }
+  return { objects, columns };
+}
+
+function baselineSchemaProblem(db, baselineImplementation, allowedMigrations) {
+  const expectedDb = new Database(':memory:');
+  try {
+    baselineImplementation.apply(expectedDb);
+    const expected = schemaSnapshot(expectedDb);
+    const actual = schemaSnapshot(db);
+    const allowances = optionalMigrationAllowances(allowedMigrations);
+    for (const [name, expectedObject] of expected.objects.entries()) {
+      const actualObject = actual.objects.get(name);
+      if (!actualObject) return `missing baseline object ${name}`;
+      const allowedColumns = allowances.columns.get(name);
+      if (expectedObject.type === 'table' && allowedColumns && allowedColumns.size) {
+        if (actualObject.type !== expectedObject.type || actualObject.name !== expectedObject.name || actualObject.tbl_name !== expectedObject.tbl_name) {
+          return `incompatible baseline object ${name}`;
+        }
+      } else if (JSON.stringify(actualObject) !== JSON.stringify(expectedObject)) {
+        return `incompatible baseline object ${name}`;
+      }
+    }
+    for (const [name, actualObject] of actual.objects.entries()) {
+      if (name === 'schema_migrations') continue;
+      if (expected.objects.has(name)) continue;
+      const allowedObject = allowances.objects.get(name);
+      if (!allowedObject) return `unknown baseline object ${name}`;
+      if (actualObject.type !== allowedObject.type || normalizeSql(actualObject.sql) !== allowedObject.sql) return `incompatible migration object ${name}`;
+    }
+    for (const [table, expectedColumns] of expected.columns.entries()) {
+      const actualColumns = actual.columns.get(table);
+      if (!actualColumns) return `missing baseline columns ${table}`;
+      const allowedColumns = allowances.columns.get(table) || new Map();
+      const expectedByName = new Map(expectedColumns.map((column) => [column.name, column]));
+      for (const expectedColumn of expectedColumns) {
+        const actualColumn = actualColumns.find((column) => column.name === expectedColumn.name);
+        if (!actualColumn) return `missing baseline column ${table}.${expectedColumn.name}`;
+        if (JSON.stringify(actualColumn) !== JSON.stringify(expectedColumn)) return `incompatible baseline column ${table}.${expectedColumn.name}`;
+      }
+      for (const actualColumn of actualColumns) {
+        if (expectedByName.has(actualColumn.name)) continue;
+        const allowedColumn = allowedColumns.get(actualColumn.name);
+        if (!allowedColumn) return `unknown baseline column ${table}.${actualColumn.name}`;
+        if (JSON.stringify(actualColumn) !== JSON.stringify(allowedColumn)) return `incompatible migration column ${table}.${actualColumn.name}`;
+      }
+    }
+    return null;
+  } finally {
+    expectedDb.close();
+  }
+}
+
+function migrationManifestProblem(db, migrationName, manifest) {
+  if (!manifest || typeof manifest !== 'object') return `missing schema manifest for ${migrationName}`;
+  for (const [table, expectedColumns] of Object.entries(manifest.columns || {})) {
+    const actualColumns = columnsFor(db, table);
+    for (const [name, expected] of Object.entries(expectedColumns)) {
+      const column = actualColumns.find((candidate) => candidate.name === name);
+      if (!column) return `missing ${migrationName} column ${table}.${name}`;
+      if (String(column.type).toUpperCase() !== expected.type) return `incompatible ${migrationName} column type ${table}.${name}`;
+      if (column.notnull !== expected.notnull) return `incompatible ${migrationName} column notnull ${table}.${name}`;
+      if (String(column.dflt_value) !== String(expected.defaultValue)) return `incompatible ${migrationName} column default ${table}.${name}`;
+    }
+  }
+  for (const [name, expectedSql] of Object.entries(manifest.indexes || {})) {
+    const row = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'index' AND name = ?").get(name);
+    if (!row) return `missing ${migrationName} index ${name}`;
+    if (normalizeSql(row.sql) !== normalizeSql(expectedSql)) return `incompatible ${migrationName} index ${name}`;
+  }
+  for (const [name, expectedSql] of Object.entries(manifest.triggers || {})) {
+    const row = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'trigger' AND name = ?").get(name);
+    if (!row) return `missing ${migrationName} trigger ${name}`;
+    if (normalizeSql(row.sql) !== normalizeSql(expectedSql)) return `incompatible ${migrationName} trigger ${name}`;
+  }
+  for (const [table, checks] of Object.entries(manifest.tableChecks || {})) {
+    const actualSql = normalizeSql(tableSql(db, table));
+    for (const checkSql of checks) {
+      if (!actualSql.includes(normalizeSql(checkSql))) return `incompatible ${migrationName} CHECK ${table}`;
+    }
   }
   return null;
 }
@@ -254,17 +577,22 @@ function ensureNoDuplicateRegistered(migrations) {
 function classifyDatabase(db, options) {
   const migrations = (options && options.migrations) || defaultMigrations();
   const maxVersion = Math.max(...migrations.map((migration) => migration.version));
+  const loadedByVersion = new Map();
+  const loadedFor = (migration) => {
+    if (!loadedByVersion.has(migration.version)) loadedByVersion.set(migration.version, loadRegisteredMigration(migration, options || {}));
+    return loadedByVersion.get(migration.version);
+  };
   const objects = userObjects(db);
   const objectNames = objects.map((object) => object.name);
   const hasLedger = objectNames.includes('schema_migrations');
   if (!hasLedger && objectNames.length === 0) return { status: 'empty', currentVersion: 0 };
   if (!hasLedger) {
-    const shapeProblem = baselineShapeProblem(db) || compatibilityColumnProblem(db);
+    const optionalMigrations = migrations.map((migration) => loadedFor(migration).implementation);
+    const shapeProblem = baselineSchemaProblem(db, loadedFor(migrations[0]).baseline, optionalMigrations) || compatibilityColumnProblem(db);
     return shapeProblem ? { status: 'partial_or_malformed', reason: shapeProblem } : { status: 'legacy', currentVersion: 0 };
   }
-  if (!hasExactLedgerShape(db)) return { status: 'partial_or_malformed', reason: 'malformed schema_migrations ledger' };
-  const shapeProblem = baselineShapeProblem(db) || compatibilityColumnProblem(db);
-  if (shapeProblem) return { status: 'partial_or_malformed', reason: shapeProblem };
+  const ledgerProblem = ledgerShapeProblem(db);
+  if (ledgerProblem) return { status: 'partial_or_malformed', reason: ledgerProblem };
 
   let rows;
   try {
@@ -289,11 +617,18 @@ function classifyDatabase(db, options) {
   for (const row of rows) {
     const migration = migrations.find((candidate) => candidate.version === row.version);
     if (!migration || migration.name !== row.name) return { status: 'partial_or_malformed', reason: 'unknown ledger migration' };
-    const expected = computeRegisteredMigrationChecksum(migration, options || {});
-    if (expected !== row.checksum || migration.sourcePath !== row.source_path || migration.engineVersion !== row.engine_version) {
+    const loaded = loadedFor(migration);
+    if (loaded.checksum !== row.checksum || migration.sourcePath !== row.source_path || migration.engineVersion !== row.engine_version) {
       return { status: 'partial_or_malformed', reason: `checksum/schema mismatch for ${row.name}` };
     }
+    const manifestProblem = migrationManifestProblem(db, row.name, loaded.implementation.schemaManifest);
+    if (manifestProblem) {
+      return { status: 'partial_or_malformed', reason: manifestProblem };
+    }
   }
+  const appliedMigrations = rows.map((row) => loadedFor(migrations.find((candidate) => candidate.version === row.version)).implementation);
+  const shapeProblem = baselineSchemaProblem(db, loadedFor(migrations[0]).baseline, appliedMigrations) || compatibilityColumnProblem(db);
+  if (shapeProblem) return { status: 'partial_or_malformed', reason: shapeProblem };
   return { status: 'managed', currentVersion: rows.length ? rows[rows.length - 1].version : 0 };
 }
 
@@ -301,24 +636,102 @@ function createLedger(db) {
   db.exec(LEDGER_SQL);
 }
 
+function integerRuleFor(table, column) {
+  return INTEGER_RULES[table] ? INTEGER_RULES[table][column] : undefined;
+}
+
+function invalidRuleSql(identifier, rule) {
+  if (rule === 'positive' || rule === 'version') {
+    return `typeof(${identifier}) != 'integer' OR ${identifier} < 1 OR ${identifier} > 9007199254740991`;
+  }
+  if (rule === 'nonnegative') {
+    return `typeof(${identifier}) != 'integer' OR ${identifier} < 0 OR ${identifier} > 9007199254740991`;
+  }
+  if (rule === 'boolean') {
+    return `typeof(${identifier}) != 'integer' OR ${identifier} NOT IN (0,1)`;
+  }
+  if (rule === 'probability') {
+    return `typeof(${identifier}) != 'integer' OR ${identifier} < 0 OR ${identifier} > 100`;
+  }
+  if (rule === 'polymorphic_source_id') {
+    return `(typeof(${identifier}) = 'integer' AND (${identifier} < 1 OR ${identifier} > 9007199254740991))
+      OR (typeof(${identifier}) = 'text' AND length(${identifier}) > 4096)
+      OR typeof(${identifier}) NOT IN ('integer','text','null')`;
+  }
+  throw new Error(`unknown integer rule ${rule}`);
+}
+
 function validateSafeIntegers(db) {
-  for (const [table, columns] of Object.entries(SAFE_INTEGER_COLUMNS)) {
+  for (const [table, rules] of Object.entries(INTEGER_RULES)) {
     if (!hasObject(db, table)) continue;
     const existing = new Set(columnsFor(db, table).map((column) => column.name));
-    for (const column of columns) {
+    for (const [column, rule] of Object.entries(rules)) {
       if (!existing.has(column)) continue;
+      const tableSql = quoteIdentifier(table);
+      const columnSql = quoteIdentifier(column);
       const bad = db.prepare(`
         SELECT COUNT(*) AS count
-        FROM ${table}
-        WHERE ${column} IS NOT NULL
-          AND (typeof(${column}) != 'integer' OR ${column} < 0 OR ${column} > 9007199254740991)
+        FROM ${tableSql}
+        WHERE ${columnSql} IS NOT NULL
+          AND (${invalidRuleSql(columnSql, rule)})
       `).get().count;
-      if (bad) throw new Error(`unsafe integer storage ${table}.${column} count=${bad}`);
+      if (bad) throw new Error(`unsafe integer storage ${table}.${column} rule=${rule} count=${bad}`);
     }
   }
+}
+
+function autoincrementTables(db) {
+  const rows = db.prepare("SELECT name, sql FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").all();
+  return new Map(rows
+    .filter((row) => /\bINTEGER\s+PRIMARY\s+KEY\b/i.test(row.sql || '') && /\bAUTOINCREMENT\b/i.test(row.sql || ''))
+    .map((row) => [row.name, row.sql]));
+}
+
+function validateSqliteSequence(db) {
   if (hasObject(db, 'sqlite_sequence')) {
-    const badSequence = db.prepare("SELECT COUNT(*) AS count FROM sqlite_sequence WHERE typeof(seq) != 'integer' OR seq < 0 OR seq > 9007199254740991").get().count;
-    if (badSequence) throw new Error(`unsafe sqlite_sequence.seq count=${badSequence}`);
+    const duplicates = db.prepare('SELECT name, COUNT(*) AS count FROM sqlite_sequence GROUP BY name HAVING COUNT(*) > 1').all();
+    if (duplicates.length) throw new Error(`sqlite_sequence duplicate rows ${duplicates.map((row) => row.name).join(',')}`);
+    const autoincrements = autoincrementTables(db);
+    const rows = db.prepare('SELECT name, seq, typeof(seq) AS seq_type FROM sqlite_sequence ORDER BY name').all();
+    for (const row of rows) {
+      if (!autoincrements.has(row.name)) throw new Error(`ghost sqlite_sequence row ${row.name}`);
+      if (row.seq_type !== 'integer' || row.seq < 0 || row.seq > 9007199254740991) {
+        throw new Error(`unsafe sqlite_sequence.seq ${row.name}`);
+      }
+      if (row.seq >= 9007199254740991) throw new Error(`sqlite_sequence next id exhausted ${row.name}`);
+      const maxRow = db.prepare(`SELECT COALESCE(MAX(id), 0) AS max_id FROM ${quoteIdentifier(row.name)}`).get();
+      if (row.seq < maxRow.max_id) throw new Error(`sqlite_sequence ${row.name} seq below max id`);
+    }
+  }
+}
+
+function validateLegacyRelationships(db) {
+  for (const [childTable, childColumn, parentTable, parentColumn, required] of LEGACY_RELATIONSHIPS) {
+    if (!hasObject(db, childTable) || !hasObject(db, parentTable)) continue;
+    const childColumns = new Set(columnsFor(db, childTable).map((column) => column.name));
+    const parentColumns = new Set(columnsFor(db, parentTable).map((column) => column.name));
+    if (!childColumns.has(childColumn) || !parentColumns.has(parentColumn)) continue;
+    if (required) {
+      const missingRequired = db.prepare(`
+        SELECT COUNT(*) AS count
+        FROM ${quoteIdentifier(childTable)}
+        WHERE ${quoteIdentifier(childColumn)} IS NULL
+      `).get().count;
+      if (missingRequired) {
+        throw new Error(`null required relationship ${childTable}.${childColumn} -> ${parentTable}.${parentColumn} count=${missingRequired}`);
+      }
+    }
+    const orphans = db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM ${quoteIdentifier(childTable)} child
+      LEFT JOIN ${quoteIdentifier(parentTable)} parent
+        ON parent.${quoteIdentifier(parentColumn)} = child.${quoteIdentifier(childColumn)}
+      WHERE child.${quoteIdentifier(childColumn)} IS NOT NULL
+        AND parent.${quoteIdentifier(parentColumn)} IS NULL
+    `).get().count;
+    if (orphans) {
+      throw new Error(`orphan relationship ${childTable}.${childColumn} -> ${parentTable}.${parentColumn} count=${orphans}`);
+    }
   }
 }
 
@@ -343,6 +756,15 @@ function preflightDigest(db) {
   return sqliteDigest.databaseDigest(db, digestManifest(db));
 }
 
+function validateFtsIntegrity(db, options) {
+  const manifest = digestManifest(db);
+  if ((manifest.fts || []).length) {
+    sqliteDigest.verifyKnowledgeChunksFtsIntegrity(db, manifest, {
+      checkMainIntegrity: Boolean(options && options.checkMainFtsIntegrity)
+    });
+  }
+}
+
 function identityForDatabasePath(databasePath) {
   if (!databasePath || databasePath === ':memory:') return null;
   const stat = fs.statSync(databasePath);
@@ -360,7 +782,7 @@ function sameIdentity(left, right) {
   return left.path === right.path && left.dev === right.dev && left.ino === right.ino;
 }
 
-function preflight(db, classification) {
+function preflight(db, classification, options) {
   db.pragma('foreign_keys = ON');
   const shapeProblem = classification.status !== 'empty' ? baselineShapeProblem(db) : null;
   if (shapeProblem) throw new Error(shapeProblem);
@@ -369,14 +791,11 @@ function preflight(db, classification) {
   const fkRows = db.pragma('foreign_key_check');
   if (fkRows.length) throw new Error(`foreign_key_check failed: ${JSON.stringify(fkRows.map((row) => ({ table: row.table, rowid: row.rowid, parent: row.parent })))}`);
   validateSafeIntegers(db);
+  validateSqliteSequence(db);
   if (classification.status === 'legacy' || classification.status === 'managed') {
-    const demandOrphans = db.prepare('SELECT COUNT(*) AS count FROM demands d LEFT JOIN users u ON u.id = d.user_id WHERE u.id IS NULL').get().count;
-    if (demandOrphans) throw new Error(`orphan relationship demands.user_id -> users.id count=${demandOrphans}`);
-    const opportunityOrphans = hasObject(db, 'opportunities')
-      ? db.prepare('SELECT COUNT(*) AS count FROM opportunities o LEFT JOIN customers c ON c.id = o.customer_id WHERE c.id IS NULL').get().count
-      : 0;
-    if (opportunityOrphans) throw new Error(`orphan relationship opportunities.customer_id -> customers.id count=${opportunityOrphans}`);
+    validateLegacyRelationships(db);
   }
+  validateFtsIntegrity(db, options || {});
 }
 
 function collectReadOnlyPreflight(databasePath, options) {
@@ -389,7 +808,7 @@ function collectReadOnlyPreflight(databasePath, options) {
     if (classification.status === 'partial_or_malformed' || classification.status === 'future') {
       throw new Error(`migration classification failed: ${classification.status}${classification.reason ? ` ${classification.reason}` : ''}`);
     }
-    preflight(readonly, classification);
+    preflight(readonly, classification, { checkMainFtsIntegrity: false });
     return { identity, classification, digest: preflightDigest(readonly) };
   } finally {
     readonly.close();
@@ -404,6 +823,7 @@ function assertPreflightStillMatches(db, expected, options) {
   if (classification.status !== expected.classification.status || classification.currentVersion !== expected.classification.currentVersion) {
     throw new Error('preflight classification changed before write');
   }
+  preflight(db, classification, { checkMainFtsIntegrity: true });
   const currentDigest = preflightDigest(db);
   if (
     currentDigest.topologySha256 !== expected.digest.topologySha256 ||
@@ -430,8 +850,8 @@ function normalizeMigrations(options) {
   return migrations;
 }
 
-function applySeedAdmissions(db, seedAdmissions) {
-  const seeds = seedAdmissions || baseline.seedAdmissions;
+function applySeedAdmissions(db, seedAdmissions, baselineSeeds) {
+  const seeds = seedAdmissions || baselineSeeds || baseline.seedAdmissions;
   if (seeds && typeof seeds.admin === 'function') seeds.admin(db);
   if (seeds && typeof seeds.influencers === 'function') seeds.influencers(db);
 }
@@ -452,29 +872,37 @@ function runMigrations(db, options) {
   if (classification.status === 'partial_or_malformed' || classification.status === 'future') {
     throw new Error(`migration classification failed: ${classification.status}${classification.reason ? ` ${classification.reason}` : ''}`);
   }
-  if (!readonlyPreflight) preflight(db, classification);
+  if (!readonlyPreflight) preflight(db, classification, { checkMainFtsIntegrity: false });
 
   const transaction = db.transaction(() => {
+    const loadedMigrations = new Map();
+    const loadedFor = (migration) => {
+      if (!loadedMigrations.has(migration.version)) {
+        loadedMigrations.set(migration.version, loadRegisteredMigration(migration, normalizedOptions));
+      }
+      return loadedMigrations.get(migration.version);
+    };
     assertPreflightStillMatches(db, readonlyPreflight, normalizedOptions);
     const lockedClassification = classifyDatabase(db, normalizedOptions);
     if (lockedClassification.status !== classification.status || lockedClassification.currentVersion !== classification.currentVersion) {
       throw new Error('migration preflight identity changed before write');
     }
-    if (classification.status === 'empty') baseline.apply(db);
+    if (classification.status === 'empty') loadedFor(migrations[0]).baseline.apply(db);
     if (classification.status !== 'managed') createLedger(db);
 
     const startVersion = classification.currentVersion || 0;
     for (const migration of migrations) {
       if (migration.version <= startVersion) continue;
       if (migration.engineVersion !== 1) throw new Error(`unsupported migration engine version ${migration.engineVersion}`);
-      migration.apply(db);
-      const checksum = computeRegisteredMigrationChecksum(migration, normalizedOptions);
+      const loaded = loadedFor(migration);
+      loaded.implementation.apply(db);
+      const checksum = loaded.checksum;
       insertLedgerRow(db, migration, checksum);
       if (classification.status !== 'managed' && migration.version === 1) {
-        applySeedAdmissions(db, normalizedOptions.seedAdmissions);
+        applySeedAdmissions(db, normalizedOptions.seedAdmissions, loaded.baseline.seedAdmissions);
       }
     }
-    preflight(db, { status: 'managed' });
+    preflight(db, { status: 'managed' }, { checkMainFtsIntegrity: true });
   });
   transaction.exclusive();
   return classifyDatabase(db, normalizedOptions);
@@ -486,6 +914,7 @@ module.exports = {
   computeMigrationChecksum,
   computeRegisteredMigrationChecksum,
   defaultMigrations,
+  integerRuleFor,
   classifyDatabase,
   createLedger,
   runMigrations

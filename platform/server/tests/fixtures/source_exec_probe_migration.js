@@ -1,12 +1,12 @@
 module.exports = {
-  version: 99,
-  name: 'test_probe',
-  sourcePath: 'tests/fixtures/test_probe_migration.js',
+  version: 2,
+  name: 'inline_apply_must_not_run',
+  sourcePath: 'tests/fixtures/source_exec_probe_migration.js',
   engineVersion: 1,
   dependencies: [],
   schemaManifest: {
     columns: {
-      probe_table: {
+      source_apply_executed: {
         id: { type: 'INTEGER', notnull: 0, defaultValue: null }
       }
     },
@@ -14,6 +14,6 @@ module.exports = {
     triggers: {}
   },
   apply(db) {
-    db.exec('CREATE TABLE probe_table (id INTEGER PRIMARY KEY) STRICT;');
+    db.exec('CREATE TABLE source_apply_executed (id INTEGER PRIMARY KEY) STRICT;');
   }
 };

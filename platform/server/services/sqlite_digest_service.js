@@ -302,6 +302,66 @@ function rebuildKnowledgeChunksFts(db) {
   tx();
 }
 
+function semanticPostingRows(db, vocabSchema, vocabName, ftsSchema, ftsName) {
+  return sqlRows(db, `
+    SELECT v.term AS term,
+           CAST(f.chunk_id AS TEXT) AS chunk_id,
+           v.col AS col,
+           CAST(v.offset AS TEXT) AS offset
+    FROM ${vocabSchema}.${quoteIdent(vocabName)} v
+    LEFT JOIN ${ftsSchema}.${quoteIdent(ftsName)} f ON f.rowid = v.doc
+    ORDER BY v.term, CAST(f.chunk_id AS TEXT), v.col, CAST(v.offset AS INTEGER)
+  `);
+}
+
+function verifyKnowledgeChunksFtsIntegrity(db, manifest, options) {
+  const entries = (manifest && manifest.fts) || [];
+  const checkMainIntegrity = Boolean(options && options.checkMainIntegrity);
+  for (const entry of entries) {
+    if (entry.virtualName !== 'knowledge_chunks_fts') throw new Error(`unknown FTS table ${entry.virtualName}`);
+    if (entry.tokenizerOptions !== 'unicode61') throw new Error(`unsupported FTS tokenizer options: ${entry.tokenizerOptions}`);
+    const expectedName = 'expected_knowledge_chunks_fts';
+    const actualVocabName = 'actual_knowledge_chunks_fts_vocab';
+    const expectedVocabName = 'expected_knowledge_chunks_fts_vocab';
+    try {
+      db.exec(`
+        DROP TABLE IF EXISTS temp.${quoteIdent(actualVocabName)};
+        DROP TABLE IF EXISTS temp.${quoteIdent(expectedVocabName)};
+        DROP TABLE IF EXISTS temp.${quoteIdent(expectedName)};
+        CREATE VIRTUAL TABLE temp.${quoteIdent(expectedName)} USING fts5(
+          title,
+          content,
+          tags,
+          entry_id UNINDEXED,
+          chunk_id UNINDEXED,
+          tokenize = 'unicode61'
+        );
+      `);
+      const insert = db.prepare(`INSERT INTO temp.${quoteIdent(expectedName)} (title, content, tags, entry_id, chunk_id) VALUES (?, ?, ?, ?, ?)`);
+      for (const rowData of knowledgeRows(db)) insert.run(...rowData.insert);
+      db.prepare(`INSERT INTO temp.${quoteIdent(expectedName)}(${quoteIdent(expectedName)}) VALUES('integrity-check')`).run();
+      db.exec(`
+        CREATE VIRTUAL TABLE temp.${quoteIdent(actualVocabName)} USING fts5vocab(main, ${quoteIdent(entry.virtualName)}, 'instance');
+        CREATE VIRTUAL TABLE temp.${quoteIdent(expectedVocabName)} USING fts5vocab(temp, ${quoteIdent(expectedName)}, 'instance');
+      `);
+      const actual = semanticPostingRows(db, 'temp', actualVocabName, 'main', entry.virtualName);
+      const expected = semanticPostingRows(db, 'temp', expectedVocabName, 'temp', expectedName);
+      if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+        throw new Error(`FTS posting mismatch for ${entry.virtualName}`);
+      }
+      if (checkMainIntegrity) {
+        db.prepare(`INSERT INTO ${quoteIdent(entry.virtualName)}(${quoteIdent(entry.virtualName)}) VALUES('integrity-check')`).run();
+      }
+    } finally {
+      db.exec(`
+        DROP TABLE IF EXISTS temp.${quoteIdent(actualVocabName)};
+        DROP TABLE IF EXISTS temp.${quoteIdent(expectedVocabName)};
+        DROP TABLE IF EXISTS temp.${quoteIdent(expectedName)};
+      `);
+    }
+  }
+}
+
 function ftsDigest(db, manifestEntry) {
   if (manifestEntry.virtualName !== 'knowledge_chunks_fts') throw new Error(`unknown FTS table ${manifestEntry.virtualName}`);
   const rows = sqlRows(db, 'SELECT entry_id, chunk_id, title, content, tags FROM knowledge_chunks_fts ORDER BY chunk_id')
@@ -373,5 +433,6 @@ module.exports = {
   rebuildKnowledgeChunksFts,
   matchKnowledgeChunksCanary,
   verifyKnowledgeChunksFtsCanaries,
+  verifyKnowledgeChunksFtsIntegrity,
   databaseDigest
 };
