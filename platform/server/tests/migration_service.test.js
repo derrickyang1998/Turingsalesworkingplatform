@@ -198,6 +198,57 @@ module.exports = {
   }
 }
 
+function assertTransactionEscapeRejected(probeName, applyBody) {
+  const migrationService = require('../services/migration_service');
+  const root = tempMigrationRoot(probeName);
+  const sourcePath = `migrations/002_${probeName}.js`;
+  writeTempMigration(root, sourcePath, `
+module.exports = {
+  version: 2,
+  name: '${probeName}',
+  sourcePath: '${sourcePath}',
+  engineVersion: 1,
+  dependencies: ['${VENDORED_BCRYPT_PATH}'],
+  schemaManifest: {
+    columns: { ${probeName}: { id: { type: 'INTEGER', notnull: 0, defaultValue: null } } },
+    indexes: {},
+    triggers: {}
+  },
+  apply(db) {
+    ${applyBody}
+  }
+};
+`);
+  const { db } = tmpDb(probeName);
+  let migrationError = null;
+
+  try {
+    try {
+      migrationService.runMigrations(db, {
+        rootDir: root,
+        registeredMigrations: [{
+          version: 2,
+          name: probeName,
+          sourcePath,
+          engineVersion: 1,
+          dependencies: [VENDORED_BCRYPT_PATH]
+        }]
+      });
+    } catch (error) {
+      migrationError = error;
+    }
+
+    assert.ok(migrationError, 'transaction-control SQL must fail inside the migration transaction');
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM sqlite_schema WHERE name = ?').get(probeName).count, 0);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE name = 'schema_migrations'").get().count, 0);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE name = 'users'").get().count, 0);
+    assert.match(migrationError.message, /transaction|connection control|not allowed/i);
+  } finally {
+    db.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+}
+
 test('migration checksum framing matches the design vector and excludes orchestration files', () => {
   const migrationService = require('../services/migration_service');
   const actual = migrationService.computeMigrationChecksum({
@@ -1043,6 +1094,154 @@ module.exports = {
       registeredMigrations: [descriptor]
     }), { status: 'managed', currentVersion: 2 });
     assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE name = 'computed_async_capability_probe'").get().count, 1);
+  } finally {
+    db.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('migration db.exec cannot commit the outer migration transaction', () => {
+  assertTransactionEscapeRejected(
+    'exec_commit_escape_probe',
+    "db.exec('CREATE TABLE exec_commit_escape_probe (id INTEGER PRIMARY KEY) STRICT; /* boundary */ COMMIT;'); throw new Error('after inner commit');"
+  );
+});
+
+test('migration prepared statements cannot end the outer migration transaction', () => {
+  assertTransactionEscapeRejected(
+    'prepared_end_escape_probe',
+    "db.exec('CREATE TABLE prepared_end_escape_probe (id INTEGER PRIMARY KEY) STRICT;'); db.prepare('/* boundary */ END TRANSACTION').run(); throw new Error('after prepared end');"
+  );
+});
+
+test('migration db.exec cannot roll back and continue with autocommit writes', () => {
+  assertTransactionEscapeRejected(
+    'rollback_autocommit_escape_probe',
+    "db.exec('CREATE TABLE before_rollback_escape_probe (id INTEGER PRIMARY KEY) STRICT; ROLLBACK; CREATE TABLE rollback_autocommit_escape_probe (id INTEGER PRIMARY KEY) STRICT;');"
+  );
+});
+
+test('migration conflict rollback cannot be caught to continue with autocommit writes', () => {
+  assertTransactionEscapeRejected(
+    'conflict_rollback_escape_probe',
+    `try {
+      db.exec('CREATE TABLE rollback_conflict_guard (value INTEGER UNIQUE); INSERT INTO rollback_conflict_guard VALUES (1); INSERT OR ROLLBACK INTO rollback_conflict_guard VALUES (1);');
+    } catch (_error) {}
+    db.exec('CREATE TABLE conflict_rollback_escape_probe (id INTEGER PRIMARY KEY) STRICT;');
+    throw new Error('transaction boundary probe finished');`
+  );
+});
+
+test('migration database access is poisoned after SQLite implicitly rolls back the transaction', () => {
+  assertTransactionEscapeRejected(
+    'implicit_rollback_escape_probe',
+    `db.exec('CREATE TABLE implicit_rollback_guard (payload BLOB) STRICT;');
+    const pageCount = db.prepare('PRAGMA page_count').get().page_count;
+    db.exec('PRAGMA max_page_count=' + pageCount + ';');
+    try {
+      db.exec('INSERT INTO implicit_rollback_guard(payload) VALUES (zeroblob(2000000));');
+    } catch (_error) {}
+    db.exec('PRAGMA max_page_count=100000; CREATE TABLE implicit_rollback_escape_probe (id INTEGER PRIMARY KEY) STRICT;');
+    throw new Error('transaction boundary probe finished');`
+  );
+});
+
+test('migration SQL cannot retain an attached database after outer rollback', () => {
+  const migrationService = require('../services/migration_service');
+  const root = tempMigrationRoot('attach-database-escape');
+  const sourcePath = 'migrations/002_attach_database_escape_probe.js';
+  writeTempMigration(root, sourcePath, `
+module.exports = {
+  version: 2,
+  name: 'attach_database_escape_probe',
+  sourcePath: '${sourcePath}',
+  engineVersion: 1,
+  dependencies: ['${VENDORED_BCRYPT_PATH}'],
+  schemaManifest: { columns: {}, indexes: {}, triggers: {} },
+  apply(db) {
+    db.exec("ATTACH DATABASE ':memory:' AS attached_escape");
+    throw new Error('after attach');
+  }
+};
+`);
+  const { db } = tmpDb('attach-database-escape');
+  let migrationError = null;
+
+  try {
+    try {
+      migrationService.runMigrations(db, {
+        rootDir: root,
+        registeredMigrations: [{
+          version: 2,
+          name: 'attach_database_escape_probe',
+          sourcePath,
+          engineVersion: 1,
+          dependencies: [VENDORED_BCRYPT_PATH]
+        }]
+      });
+    } catch (error) {
+      migrationError = error;
+    }
+
+    assert.ok(migrationError);
+    assert.equal(db.prepare('PRAGMA database_list').all().some((row) => row.name === 'attached_escape'), false);
+    assert.match(migrationError.message, /transaction|connection control|not allowed/i);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE name = 'schema_migrations'").get().count, 0);
+  } finally {
+    db.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('expected-schema replay cannot write a host file with VACUUM INTO', () => {
+  const migrationService = require('../services/migration_service');
+  const root = tempMigrationRoot('vacuum-into-escape');
+  const outputPath = path.join(root, 'vacuum-escape.db');
+  const sqliteOutputPath = outputPath.replace(/\\/g, '/').replace(/'/g, "''");
+  const sourcePath = 'migrations/002_vacuum_into_escape_probe.js';
+  writeTempMigration(root, sourcePath, `
+module.exports = {
+  version: 2,
+  name: 'vacuum_into_escape_probe',
+  sourcePath: '${sourcePath}',
+  engineVersion: 1,
+  dependencies: ['${VENDORED_BCRYPT_PATH}'],
+  schemaManifest: {
+    columns: { vacuum_into_escape_probe: { id: { type: 'INTEGER', notnull: 0, defaultValue: null } } },
+    indexes: {},
+    triggers: {}
+  },
+  apply(db) {
+    const main = db.prepare('PRAGMA database_list').all().find((row) => row.name === 'main');
+    if (main && !main.file) db.exec("VACUUM INTO '${sqliteOutputPath}'");
+    db.exec('CREATE TABLE vacuum_into_escape_probe (id INTEGER PRIMARY KEY) STRICT;');
+  }
+};
+`);
+  const { db } = tmpDb('vacuum-into-escape');
+  let migrationError = null;
+
+  try {
+    try {
+      migrationService.runMigrations(db, {
+        rootDir: root,
+        registeredMigrations: [{
+          version: 2,
+          name: 'vacuum_into_escape_probe',
+          sourcePath,
+          engineVersion: 1,
+          dependencies: [VENDORED_BCRYPT_PATH]
+        }]
+      });
+    } catch (error) {
+      migrationError = error;
+    }
+
+    assert.ok(migrationError, 'VACUUM INTO must be rejected before expected-schema replay');
+    assert.match(migrationError.message, /transaction|connection control|not allowed/i);
+    assert.equal(fs.existsSync(outputPath), false);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE name = 'vacuum_into_escape_probe'").get().count, 0);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE name = 'schema_migrations'").get().count, 0);
   } finally {
     db.close();
     fs.rmSync(root, { recursive: true, force: true });

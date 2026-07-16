@@ -433,38 +433,181 @@ function migrationBuiltinFacades(runtime) {
   ]);
 }
 
+function migrationSqlLexemes(sql) {
+  if (typeof sql !== 'string') return [];
+  const tokens = [];
+  let index = 0;
+  const isIdentifierStart = (character) => /[A-Za-z_]/.test(character) || character.charCodeAt(0) >= 0x80;
+  const isIdentifierPart = (character) => /[A-Za-z0-9_$]/.test(character) || character.charCodeAt(0) >= 0x80;
+
+  while (index < sql.length) {
+    const character = sql[index];
+    const next = sql[index + 1];
+    if (/\s/.test(character)) {
+      index += 1;
+      continue;
+    }
+    if (character === '-' && next === '-') {
+      index += 2;
+      while (index < sql.length && sql[index] !== '\n' && sql[index] !== '\r') index += 1;
+      continue;
+    }
+    if (character === '/' && next === '*') {
+      index += 2;
+      while (index < sql.length && !(sql[index] === '*' && sql[index + 1] === '/')) index += 1;
+      if (index < sql.length) index += 2;
+      continue;
+    }
+    if (character === "'" || character === '"' || character === '`') {
+      const quote = character;
+      index += 1;
+      while (index < sql.length) {
+        if (sql[index] !== quote) {
+          index += 1;
+          continue;
+        }
+        if (sql[index + 1] === quote) {
+          index += 2;
+          continue;
+        }
+        index += 1;
+        break;
+      }
+      continue;
+    }
+    if (character === '[') {
+      index += 1;
+      while (index < sql.length && sql[index] !== ']') index += 1;
+      if (index < sql.length) index += 1;
+      continue;
+    }
+    if (character === ';') {
+      tokens.push(';');
+      index += 1;
+      continue;
+    }
+    if (isIdentifierStart(character)) {
+      const start = index;
+      index += 1;
+      while (index < sql.length && isIdentifierPart(sql[index])) index += 1;
+      tokens.push(sql.slice(start, index).toUpperCase());
+      continue;
+    }
+    index += 1;
+  }
+  return tokens;
+}
+
+function forbiddenMigrationSqlControl(sql) {
+  const forbiddenStatement = new Set(['COMMIT', 'END', 'ATTACH', 'DETACH', 'VACUUM']);
+  let statementStart = true;
+  let createPrefix = 0;
+  let inTrigger = false;
+  let triggerBody = false;
+  let triggerClosed = false;
+  let caseDepth = 0;
+
+  for (const token of migrationSqlLexemes(sql)) {
+    if (token === 'ROLLBACK') return token;
+    if (token === ';') {
+      if (!inTrigger || triggerClosed) {
+        statementStart = true;
+        createPrefix = 0;
+        inTrigger = false;
+        triggerBody = false;
+        triggerClosed = false;
+        caseDepth = 0;
+      }
+      continue;
+    }
+    if (inTrigger) {
+      if (!triggerBody) {
+        if (token === 'BEGIN') triggerBody = true;
+        continue;
+      }
+      if (!triggerClosed && token === 'CASE') {
+        caseDepth += 1;
+      } else if (!triggerClosed && token === 'END') {
+        if (caseDepth > 0) caseDepth -= 1;
+        else triggerClosed = true;
+      }
+      continue;
+    }
+    if (statementStart) {
+      if (forbiddenStatement.has(token)) return token;
+      statementStart = false;
+      createPrefix = token === 'CREATE' ? 1 : 0;
+      continue;
+    }
+    if (createPrefix === 1) {
+      if (token === 'TEMP' || token === 'TEMPORARY') createPrefix = 2;
+      else if (token === 'TRIGGER') inTrigger = true;
+      else createPrefix = 0;
+    } else if (createPrefix === 2) {
+      if (token === 'TRIGGER') inTrigger = true;
+      createPrefix = 0;
+    }
+  }
+  return null;
+}
+
+function assertMigrationSqlBoundary(sql) {
+  const control = forbiddenMigrationSqlControl(sql);
+  if (control) {
+    throw new Error(`migration SQL transaction or connection control is not allowed: ${control}`);
+  }
+}
+
 function migrationDatabaseAccess(db, runtime) {
   let active = true;
+  let transactionLost = false;
   const assertActive = () => {
+    if (transactionLost) throw new Error('migration database transaction boundary was lost');
     if (!active) throw new Error('migration database access has expired');
+  };
+  const guardedDatabaseOperation = (operation) => {
+    const transactionRequired = db.inTransaction;
+    try {
+      return operation();
+    } finally {
+      if (transactionRequired && !db.inTransaction) {
+        transactionLost = true;
+        active = false;
+      }
+    }
   };
   const statementFacade = (statement) => {
     const facade = Object.create(null);
     facade.run = isolatedHostFunction((...args) => hostBoundary(runtime, () => {
       assertActive();
-      return runtime.cloneValue(statement.run(...args));
+      return guardedDatabaseOperation(() => runtime.cloneValue(statement.run(...args)));
     }));
     facade.get = isolatedHostFunction((...args) => hostBoundary(runtime, () => {
       assertActive();
-      return runtime.cloneValue(statement.get(...args));
+      return guardedDatabaseOperation(() => runtime.cloneValue(statement.get(...args)));
     }));
     facade.all = isolatedHostFunction((...args) => hostBoundary(runtime, () => {
       assertActive();
-      return runtime.cloneValue(statement.all(...args));
+      return guardedDatabaseOperation(() => runtime.cloneValue(statement.all(...args)));
     }));
     return Object.freeze(facade);
   };
   const facade = Object.create(null);
   facade.exec = isolatedHostFunction((sql) => hostBoundary(runtime, () => {
     assertActive();
-    db.exec(sql);
+    assertMigrationSqlBoundary(sql);
+    guardedDatabaseOperation(() => db.exec(sql));
   }));
   facade.prepare = isolatedHostFunction((sql) => hostBoundary(runtime, () => {
     assertActive();
-    return statementFacade(db.prepare(sql));
+    assertMigrationSqlBoundary(sql);
+    return guardedDatabaseOperation(() => statementFacade(db.prepare(sql)));
   }));
   return {
     facade: Object.freeze(facade),
+    assertTransactionIntact() {
+      if (transactionLost) throw new Error('migration database transaction boundary was lost');
+    },
     revoke() {
       active = false;
     }
@@ -502,6 +645,7 @@ function executeMigrationFunction(loaded, operation, db, label) {
   const access = migrationDatabaseAccess(db, loaded.runtime);
   try {
     const result = operation(access.facade);
+    access.assertTransactionIntact();
     assertSynchronousMigrationResult(result, label);
     return result;
   } finally {
