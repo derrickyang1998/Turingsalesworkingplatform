@@ -332,6 +332,37 @@ test('knowledge_chunks_fts projection is exact and rejects malformed tags, orpha
   db.close();
 });
 
+test('knowledge projection rejects NULL tags_json instead of normalizing it to an empty array', () => {
+  const digest = require('../services/sqlite_digest_service');
+  const { db } = tmpDb('fts-null-tags');
+  db.exec(`
+    CREATE TABLE knowledge_entries (
+      id INTEGER PRIMARY KEY,
+      title TEXT NOT NULL,
+      tags_json TEXT
+    );
+    CREATE TABLE knowledge_chunks (
+      id INTEGER PRIMARY KEY,
+      entry_id INTEGER NOT NULL,
+      chunk_index INTEGER NOT NULL,
+      content TEXT NOT NULL,
+      FOREIGN KEY (entry_id) REFERENCES knowledge_entries(id)
+    );
+    CREATE VIRTUAL TABLE knowledge_chunks_fts USING fts5(
+      title,
+      content,
+      tags,
+      entry_id UNINDEXED,
+      chunk_id UNINDEXED
+    );
+    INSERT INTO knowledge_entries (id, title, tags_json) VALUES (1, 'Null tags', NULL);
+    INSERT INTO knowledge_chunks (id, entry_id, chunk_index, content) VALUES (1, 1, 0, 'content');
+  `);
+
+  assert.throws(() => digest.rebuildKnowledgeChunksFts(db), /tags_json|text|null/i);
+  db.close();
+});
+
 test('knowledge tag projection accepts only strings and preserves exact UTF-8 spellings while byte-sorting and deduplicating', () => {
   const digest = require('../services/sqlite_digest_service');
   const { db } = tmpDb('fts-exact-tags');

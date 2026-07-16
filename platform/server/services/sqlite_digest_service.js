@@ -523,7 +523,7 @@ function knowledgeRows(db) {
     const chunkIndex = safeNonnegativeInteger(values[2], 'knowledge_chunks.chunk_index');
     const title = requiredText(values[3], 'knowledge_entries.title');
     const content = requiredText(values[4], 'knowledge_chunks.content');
-    const tagsJson = values[5] === null ? '[]' : requiredText(values[5], 'knowledge_entries.tags_json');
+    const tagsJson = requiredText(values[5], 'knowledge_entries.tags_json');
     if (seen.has(String(chunkId))) throw new Error('duplicate chunk IDs in knowledge_chunks');
     seen.add(String(chunkId));
     const logicalSlot = `${entryId}:${chunkIndex}`;

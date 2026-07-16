@@ -499,7 +499,8 @@ function migrationSqlLexemes(sql) {
 }
 
 function forbiddenMigrationSqlControl(sql) {
-  const forbiddenStatement = new Set(['COMMIT', 'END', 'ATTACH', 'DETACH', 'VACUUM']);
+  if (typeof sql === 'string' && /\bsqlite_stat[0-9]*\b/i.test(sql)) return 'SQLITE_STAT';
+  const forbiddenStatement = new Set(['COMMIT', 'END', 'ATTACH', 'DETACH', 'VACUUM', 'ANALYZE']);
   const allowedPragmas = new Set([
     'DATABASE_LIST',
     'FOREIGN_KEY_LIST',

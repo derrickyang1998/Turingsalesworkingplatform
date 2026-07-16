@@ -1256,6 +1256,97 @@ module.exports = {
   }
 });
 
+test('migration SQL cannot create undigested SQLite planner statistics with ANALYZE', () => {
+  const migrationService = require('../services/migration_service');
+  const root = tempMigrationRoot('analyze-statistics-escape');
+  const sourcePath = 'migrations/002_analyze_statistics_escape_probe.js';
+  writeTempMigration(root, sourcePath, `
+module.exports = {
+  version: 2,
+  name: 'analyze_statistics_escape_probe',
+  sourcePath: '${sourcePath}',
+  engineVersion: 1,
+  dependencies: ['${VENDORED_BCRYPT_PATH}'],
+  schemaManifest: { columns: {}, indexes: {}, triggers: {} },
+  apply(db) {
+    db.exec("ANALYZE; UPDATE sqlite_stat1 SET stat = '999'");
+  }
+};
+`);
+  const { db } = tmpDb('analyze-statistics-escape');
+
+  try {
+    migrationService.runMigrations(db, { rootDir: serverRoot() });
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE name = 'sqlite_stat1'").get().count, 0);
+
+    assert.throws(() => migrationService.runMigrations(db, {
+      rootDir: root,
+      registeredMigrations: [{
+        version: 2,
+        name: 'analyze_statistics_escape_probe',
+        sourcePath,
+        engineVersion: 1,
+        dependencies: [VENDORED_BCRYPT_PATH]
+      }]
+    }), /ANALYZE|planner|statistics|not allowed/i);
+
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE name = 'sqlite_stat1'").get().count, 0);
+    assert.deepEqual(allRows(db, 'SELECT version,name FROM schema_migrations ORDER BY version'), [
+      { version: 1, name: '001_legacy_compat_columns' }
+    ]);
+  } finally {
+    db.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('migration SQL cannot mutate preexisting sqlite_stat tables through quoted identifiers', () => {
+  const migrationService = require('../services/migration_service');
+  const root = tempMigrationRoot('quoted-statistics-escape');
+  const sourcePath = 'migrations/002_quoted_statistics_escape_probe.js';
+  writeTempMigration(root, sourcePath, `
+module.exports = {
+  version: 2,
+  name: 'quoted_statistics_escape_probe',
+  sourcePath: '${sourcePath}',
+  engineVersion: 1,
+  dependencies: ['${VENDORED_BCRYPT_PATH}'],
+  schemaManifest: { columns: {}, indexes: {}, triggers: {} },
+  apply(db) {
+    const existing = db.prepare("SELECT 1 AS present FROM sqlite_schema WHERE name = 'sqlite_' || 'stat1'").get();
+    if (existing) db.prepare("UPDATE 'sqlite_stat1' SET stat = '999'").run();
+  }
+};
+`);
+  const { db } = tmpDb('quoted-statistics-escape');
+
+  try {
+    migrationService.runMigrations(db, { rootDir: serverRoot() });
+    db.exec('ANALYZE');
+    const beforeStatistics = allRows(db, 'SELECT tbl,idx,stat FROM sqlite_stat1 ORDER BY tbl,idx');
+    assert.ok(beforeStatistics.length > 0);
+
+    assert.throws(() => migrationService.runMigrations(db, {
+      rootDir: root,
+      registeredMigrations: [{
+        version: 2,
+        name: 'quoted_statistics_escape_probe',
+        sourcePath,
+        engineVersion: 1,
+        dependencies: [VENDORED_BCRYPT_PATH]
+      }]
+    }), /sqlite_stat|planner|statistics|not allowed/i);
+
+    assert.deepEqual(allRows(db, 'SELECT tbl,idx,stat FROM sqlite_stat1 ORDER BY tbl,idx'), beforeStatistics);
+    assert.deepEqual(allRows(db, 'SELECT version,name FROM schema_migrations ORDER BY version'), [
+      { version: 1, name: '001_legacy_compat_columns' }
+    ]);
+  } finally {
+    db.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('migration SQL cannot retain an attached database after outer rollback', () => {
   const migrationService = require('../services/migration_service');
   const root = tempMigrationRoot('attach-database-escape');
