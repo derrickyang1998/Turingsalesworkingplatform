@@ -500,8 +500,19 @@ function migrationSqlLexemes(sql) {
 
 function forbiddenMigrationSqlControl(sql) {
   const forbiddenStatement = new Set(['COMMIT', 'END', 'ATTACH', 'DETACH', 'VACUUM']);
+  const allowedPragmas = new Set([
+    'DATABASE_LIST',
+    'FOREIGN_KEY_LIST',
+    'INDEX_INFO',
+    'INDEX_LIST',
+    'INDEX_XINFO',
+    'TABLE_INFO',
+    'TABLE_LIST',
+    'TABLE_XINFO'
+  ]);
   let statementStart = true;
   let createPrefix = 0;
+  let pragmaNamePending = false;
   let inTrigger = false;
   let triggerBody = false;
   let triggerClosed = false;
@@ -510,14 +521,21 @@ function forbiddenMigrationSqlControl(sql) {
   for (const token of migrationSqlLexemes(sql)) {
     if (token === 'ROLLBACK') return token;
     if (token === ';') {
+      if (pragmaNamePending) return 'PRAGMA';
       if (!inTrigger || triggerClosed) {
         statementStart = true;
         createPrefix = 0;
+        pragmaNamePending = false;
         inTrigger = false;
         triggerBody = false;
         triggerClosed = false;
         caseDepth = 0;
       }
+      continue;
+    }
+    if (pragmaNamePending) {
+      if (!allowedPragmas.has(token)) return `PRAGMA_${token}`;
+      pragmaNamePending = false;
       continue;
     }
     if (inTrigger) {
@@ -536,6 +554,11 @@ function forbiddenMigrationSqlControl(sql) {
     if (statementStart) {
       if (forbiddenStatement.has(token)) return token;
       statementStart = false;
+      if (token === 'PRAGMA') {
+        pragmaNamePending = true;
+        createPrefix = 0;
+        continue;
+      }
       createPrefix = token === 'CREATE' ? 1 : 0;
       continue;
     }
@@ -548,6 +571,7 @@ function forbiddenMigrationSqlControl(sql) {
       createPrefix = 0;
     }
   }
+  if (pragmaNamePending) return 'PRAGMA';
   return null;
 }
 

@@ -1133,17 +1133,127 @@ test('migration conflict rollback cannot be caught to continue with autocommit w
 });
 
 test('migration database access is poisoned after SQLite implicitly rolls back the transaction', () => {
-  assertTransactionEscapeRejected(
-    'implicit_rollback_escape_probe',
-    `db.exec('CREATE TABLE implicit_rollback_guard (payload BLOB) STRICT;');
-    const pageCount = db.prepare('PRAGMA page_count').get().page_count;
-    db.exec('PRAGMA max_page_count=' + pageCount + ';');
+  const migrationService = require('../services/migration_service');
+  const root = tempMigrationRoot('implicit-rollback-escape');
+  const sourcePath = 'migrations/002_implicit_rollback_escape_probe.js';
+  writeTempMigration(root, sourcePath, `
+module.exports = {
+  version: 2,
+  name: 'implicit_rollback_escape_probe',
+  sourcePath: '${sourcePath}',
+  engineVersion: 1,
+  dependencies: ['${VENDORED_BCRYPT_PATH}'],
+  schemaManifest: {
+    columns: { implicit_rollback_escape_probe: { id: { type: 'INTEGER', notnull: 0, defaultValue: null } } },
+    indexes: {},
+    triggers: {}
+  },
+  apply(db) {
     try {
-      db.exec('INSERT INTO implicit_rollback_guard(payload) VALUES (zeroblob(2000000));');
+      db.exec('INSERT INTO knowledge_entries(content) VALUES (hex(zeroblob(2000000)));');
     } catch (_error) {}
-    db.exec('PRAGMA max_page_count=100000; CREATE TABLE implicit_rollback_escape_probe (id INTEGER PRIMARY KEY) STRICT;');
-    throw new Error('transaction boundary probe finished');`
-  );
+    db.exec('CREATE TABLE implicit_rollback_escape_probe (id INTEGER PRIMARY KEY) STRICT;');
+    throw new Error('transaction boundary probe finished');
+  }
+};
+`);
+  const { db } = tmpDb('implicit-rollback-escape');
+  let migrationError = null;
+
+  try {
+    migrationService.runMigrations(db, { rootDir: serverRoot() });
+    const pageCount = db.pragma('page_count', { simple: true });
+    db.pragma(`max_page_count = ${pageCount + 8}`);
+
+    try {
+      migrationService.runMigrations(db, {
+        rootDir: root,
+        registeredMigrations: [{
+          version: 2,
+          name: 'implicit_rollback_escape_probe',
+          sourcePath,
+          engineVersion: 1,
+          dependencies: [VENDORED_BCRYPT_PATH]
+        }]
+      });
+    } catch (error) {
+      migrationError = error;
+    }
+
+    assert.ok(migrationError);
+    assert.match(migrationError.message, /transaction|database.*lost|expired/i);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE name = 'implicit_rollback_escape_probe'").get().count, 0);
+    assert.deepEqual(allRows(db, 'SELECT version,name FROM schema_migrations ORDER BY version'), [
+      { version: 1, name: '001_legacy_compat_columns' }
+    ]);
+  } finally {
+    db.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('migration SQL cannot persist undigested connection PRAGMA state', () => {
+  const migrationService = require('../services/migration_service');
+  const root = tempMigrationRoot('pragma-state-escape');
+  const sourcePath = 'migrations/002_pragma_state_escape_probe.js';
+  writeTempMigration(root, sourcePath, `
+module.exports = {
+  version: 2,
+  name: 'pragma_state_escape_probe',
+  sourcePath: '${sourcePath}',
+  engineVersion: 1,
+  dependencies: ['${VENDORED_BCRYPT_PATH}'],
+  schemaManifest: {
+    columns: {
+      pragma_state_escape_probe: {
+        id: { type: 'INTEGER', notnull: 0, defaultValue: null },
+        value: { type: 'INTEGER', notnull: 0, defaultValue: null }
+      }
+    },
+    indexes: {},
+    triggers: {}
+  },
+  apply(db) {
+    db.exec(\`
+      PRAGMA ignore_check_constraints = ON;
+      CREATE TABLE pragma_state_escape_probe (
+        id INTEGER PRIMARY KEY,
+        value INTEGER CHECK(value = 1)
+      ) STRICT;
+      INSERT INTO pragma_state_escape_probe(value) VALUES (2);
+    \`);
+  }
+};
+`);
+  const { db } = tmpDb('pragma-state-escape');
+  let migrationError = null;
+
+  try {
+    assert.equal(db.pragma('ignore_check_constraints', { simple: true }), 0);
+    try {
+      migrationService.runMigrations(db, {
+        rootDir: root,
+        registeredMigrations: [{
+          version: 2,
+          name: 'pragma_state_escape_probe',
+          sourcePath,
+          engineVersion: 1,
+          dependencies: [VENDORED_BCRYPT_PATH]
+        }]
+      });
+    } catch (error) {
+      migrationError = error;
+    }
+
+    assert.ok(migrationError, 'mutable connection PRAGMA must fail the outer migration transaction');
+    assert.match(migrationError.message, /PRAGMA|connection|not allowed/i);
+    assert.equal(db.pragma('ignore_check_constraints', { simple: true }), 0);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE name = 'pragma_state_escape_probe'").get().count, 0);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE name = 'schema_migrations'").get().count, 0);
+  } finally {
+    db.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('migration SQL cannot retain an attached database after outer rollback', () => {
