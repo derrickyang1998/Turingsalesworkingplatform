@@ -10,6 +10,7 @@ const Database = require('better-sqlite3');
 const repoRoot = path.resolve(__dirname, '../../..');
 const platformRoot = path.resolve(__dirname, '../..');
 const { MIGRATION_SYNTHETIC } = require('./fixtures/canonical_hash_vectors');
+const VENDORED_BCRYPT_PATH = 'migrations/vendor/bcryptjs_v3_0_3.js';
 
 function tmpDb(name) {
   const dbPath = path.join(os.tmpdir(), `tm-${name}-${Date.now()}-${Math.random().toString(16).slice(2)}.db`);
@@ -59,7 +60,7 @@ function noOpProbeMigration(version, name, sourcePath) {
     name,
     sourcePath,
     engineVersion: 1,
-    dependencies: [],
+    dependencies: [VENDORED_BCRYPT_PATH],
     apply(database) {
       database.exec(`CREATE TABLE ${name} (id INTEGER PRIMARY KEY) STRICT;`);
     }
@@ -138,9 +139,13 @@ function tempMigrationRoot(name) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), `tm-${name}-root-`));
   fs.mkdirSync(path.join(root, 'migrations', 'baselines'), { recursive: true });
   fs.mkdirSync(path.join(root, 'migrations', 'engines'), { recursive: true });
+  fs.mkdirSync(path.join(root, 'migrations', 'vendor'), { recursive: true });
   fs.copyFileSync(path.join(serverRoot(), 'migrations', '001_legacy_compat_columns.js'), path.join(root, 'migrations', '001_legacy_compat_columns.js'));
   fs.copyFileSync(path.join(serverRoot(), 'migrations', 'engines', 'v1.js'), path.join(root, 'migrations', 'engines', 'v1.js'));
   fs.copyFileSync(path.join(serverRoot(), 'migrations', 'baselines', 'legacy_v1.js'), path.join(root, 'migrations', 'baselines', 'legacy_v1.js'));
+  const repositoryVendor = path.join(serverRoot(), ...VENDORED_BCRYPT_PATH.split('/'));
+  const installedVendor = path.join(serverRoot(), 'node_modules', 'bcryptjs', 'umd', 'index.js');
+  fs.copyFileSync(fs.existsSync(repositoryVendor) ? repositoryVendor : installedVendor, path.join(root, ...VENDORED_BCRYPT_PATH.split('/')));
   return root;
 }
 
@@ -167,7 +172,7 @@ test('registered migration checksums are always derived from file bytes and unde
     name: 'bad_import_probe',
     sourcePath: 'tests/fixtures/bad_import_probe.js',
     engineVersion: 1,
-    dependencies: [],
+    dependencies: [VENDORED_BCRYPT_PATH],
     checksum: 'f'.repeat(64),
     apply() {}
   };
@@ -194,7 +199,7 @@ test('registered migrations execute the same source bytes that are checksummed, 
       name: 'inline_apply_must_not_run',
       sourcePath: 'tests/fixtures/source_exec_probe_migration.js',
       engineVersion: 1,
-      dependencies: [],
+      dependencies: [VENDORED_BCRYPT_PATH],
       apply(database) {
         database.exec('CREATE TABLE inline_apply_executed (id INTEGER PRIMARY KEY) STRICT;');
       }
@@ -214,7 +219,7 @@ test('closed migration dependency graph rejects undeclared transitive imports an
       name: 'transitive_dependency_probe',
       sourcePath: 'tests/fixtures/transitive_dependency_migration.js',
       engineVersion: 1,
-      dependencies: ['tests/fixtures/declared_dependency.js']
+      dependencies: [VENDORED_BCRYPT_PATH, 'tests/fixtures/declared_dependency.js']
     }, { rootDir: serverRoot() }),
     /undeclared local import|dependency graph/
   );
@@ -224,7 +229,7 @@ test('closed migration dependency graph rejects undeclared transitive imports an
       name: 'fake_engine_probe',
       sourcePath: 'tests/fixtures/fake_engine_suffix_migration.js',
       engineVersion: 1,
-      dependencies: []
+      dependencies: [VENDORED_BCRYPT_PATH]
     }, { rootDir: serverRoot() }),
     /undeclared local import|engine/
   );
@@ -237,11 +242,11 @@ test('migration loader allows only builtins and rejects undeclared bare package 
       rootDir: serverRoot(),
       seedAdmissions: seedAdmissions(),
       registeredMigrations: [{
-        version: 5,
+        version: 2,
         name: 'bare_import_probe',
         sourcePath: 'tests/fixtures/bare_import_probe_migration.js',
         engineVersion: 1,
-        dependencies: []
+        dependencies: [VENDORED_BCRYPT_PATH]
       }]
     }),
     /bare import|undeclared package|better-sqlite3/
@@ -252,11 +257,11 @@ test('migration loader allows only builtins and rejects undeclared bare package 
     rootDir: serverRoot(),
     seedAdmissions: seedAdmissions(),
     registeredMigrations: [{
-      version: 6,
+      version: 2,
       name: 'builtin_import_probe',
       sourcePath: 'tests/fixtures/builtin_import_probe_migration.js',
       engineVersion: 1,
-      dependencies: []
+      dependencies: [VENDORED_BCRYPT_PATH]
     }]
   });
   assert.equal(db.prepare("SELECT name FROM sqlite_schema WHERE name = 'builtin_import_probe'").get().name, 'builtin_import_probe');
@@ -297,11 +302,47 @@ test('immutable baseline is self-contained for seed credentials and v1 checksum 
   const baselineSource = fs.readFileSync(path.join(serverRoot(), 'migrations/baselines/legacy_v1.js'), 'utf8');
   assert.doesNotMatch(baselineSource, /credential_rotation_service/);
   assert.doesNotMatch(baselineSource, /require\(['"]\.\.\/\.\.\/services\//);
+  assert.doesNotMatch(baselineSource, /require\(['"]bcryptjs['"]\)/);
 
   const v1 = migrationService.defaultMigrations()[0];
+  assert.ok(v1.dependencies.includes(VENDORED_BCRYPT_PATH));
   const before = migrationService.computeRegisteredMigrationChecksum(v1, { rootDir: serverRoot() });
   const after = migrationService.computeRegisteredMigrationChecksum(v1, { rootDir: serverRoot() });
   assert.equal(after, before);
+});
+
+test('v1 checksum changes when the vendored bcrypt implementation bytes change', () => {
+  const migrationService = require('../services/migration_service');
+  const root = tempMigrationRoot('bcrypt-checksum-closure');
+  const vendorPath = path.join(root, ...VENDORED_BCRYPT_PATH.split('/'));
+  const v1 = migrationService.defaultMigrations()[0];
+  const before = migrationService.computeRegisteredMigrationChecksum(v1, { rootDir: root });
+  fs.appendFileSync(vendorPath, '\n// checksum drift probe\n');
+  const after = migrationService.computeRegisteredMigrationChecksum(v1, { rootDir: root });
+  assert.notEqual(after, before);
+});
+
+test('caller-provided seed admissions cannot override checksum-bound baseline seeds', () => {
+  const migrationService = require('../services/migration_service');
+  const { db } = tmpDb('immutable-seed-admissions');
+  let callerSeedRan = false;
+
+  migrationService.runMigrations(db, {
+    rootDir: serverRoot(),
+    seedAdmissions: {
+      admin() {
+        callerSeedRan = true;
+      },
+      influencers() {
+        callerSeedRan = true;
+      }
+    }
+  });
+
+  assert.equal(callerSeedRan, false);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM users').get().count, 11);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM influencers').get().count, 15);
+  db.close();
 });
 
 test('empty database applies baseline, ledger, 001, both seed admissions, and a registered later probe in one transaction', () => {
@@ -314,11 +355,11 @@ test('empty database applies baseline, ledger, 001, both seed admissions, and a 
     seedAdmissions: seedAdmissions(),
     registeredMigrations: [
       {
-        version: 99,
+        version: 2,
         name: 'test_probe',
         sourcePath: 'tests/fixtures/test_probe_migration.js',
         engineVersion: 1,
-        dependencies: []
+        dependencies: [VENDORED_BCRYPT_PATH]
       }
     ]
   });
@@ -331,11 +372,64 @@ test('empty database applies baseline, ledger, 001, both seed admissions, and a 
     allRows(db, 'SELECT version,name FROM schema_migrations ORDER BY version'),
     [
       { version: 1, name: '001_legacy_compat_columns' },
-      { version: 99, name: 'test_probe' }
+      { version: 2, name: 'test_probe' }
     ]
   );
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE name = 'probe_table'").get().count, 1);
   assert.equal(db.pragma('foreign_keys', { simple: true }), 1);
+  db.close();
+
+  const reopened = new Database(db.name, { readonly: true, fileMustExist: true });
+  const classification = migrationService.classifyDatabase(reopened, {
+    rootDir: serverRoot(),
+    migrations: [...migrationService.defaultMigrations(), {
+      version: 2,
+      name: 'test_probe',
+      sourcePath: 'tests/fixtures/test_probe_migration.js',
+      engineVersion: 1,
+      dependencies: [VENDORED_BCRYPT_PATH]
+    }]
+  });
+  assert.deepEqual(classification, { status: 'managed', currentVersion: 2 });
+  reopened.close();
+});
+
+test('registered migrations must be a contiguous version sequence before any mutation', () => {
+  const migrationService = require('../services/migration_service');
+  const { db } = tmpDb('registered-version-gap');
+
+  assert.throws(() => migrationService.runMigrations(db, {
+    rootDir: serverRoot(),
+    registeredMigrations: [{
+      version: 3,
+      name: 'gap_probe',
+      sourcePath: 'tests/fixtures/gap_probe_migration.js',
+      engineVersion: 1,
+      dependencies: [VENDORED_BCRYPT_PATH]
+    }]
+  }), /contiguous|gap|missing migration version 2/i);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE name = 'schema_migrations'").get().count, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE name = 'users'").get().count, 0);
+  db.close();
+});
+
+test('final managed classification runs inside the exclusive transaction and rolls back invalid migration output', () => {
+  const migrationService = require('../services/migration_service');
+  const { db } = tmpDb('final-verification-rollback');
+
+  assert.throws(() => migrationService.runMigrations(db, {
+    rootDir: serverRoot(),
+    registeredMigrations: [{
+      version: 2,
+      name: 'final_verification_probe',
+      sourcePath: 'tests/fixtures/final_verification_probe_migration.js',
+      engineVersion: 1,
+      dependencies: [VENDORED_BCRYPT_PATH]
+    }]
+  }), /required_value|final|managed|manifest|classification/i);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE name = 'schema_migrations'").get().count, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE name = 'users'").get().count, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE name = 'final_verification_probe'").get().count, 0);
   db.close();
 });
 
@@ -362,6 +456,38 @@ test('db startup does not persist WAL or mutate malformed populated database bef
   assert.equal(String(after.pragma('journal_mode', { simple: true })).toLowerCase(), 'delete');
   after.close();
   assert.equal(fileSha256(dbPath), beforeHash);
+});
+
+test('runtime startup delegates path ownership to a read-only-first migration opener', () => {
+  const migrationService = require('../services/migration_service');
+  const dbSource = fs.readFileSync(path.join(serverRoot(), 'db.js'), 'utf8');
+  assert.equal(typeof migrationService.openMigratedDatabase, 'function');
+  assert.match(dbSource, /openMigratedDatabase\s*\(/);
+  assert.doesNotMatch(dbSource, /new\s+Database\s*\(/);
+  assert.doesNotMatch(dbSource, /migrations\/baselines\/legacy_v1/);
+});
+
+test('path-owning migration opener upgrades a closed legacy file and returns a managed connection', () => {
+  const migrationService = require('../services/migration_service');
+  const legacy = require('../migrations/baselines/legacy_v1');
+  const { db, dbPath } = tmpDb('path-owned-opener');
+  legacy.apply(db);
+  db.close();
+  let readOnlyPreflightSeen = false;
+
+  const opened = migrationService.openMigratedDatabase(dbPath, {
+    rootDir: serverRoot(),
+    afterReadOnlyPreflight(preflightPath, result) {
+      readOnlyPreflightSeen = true;
+      assert.equal(preflightPath, dbPath);
+      assert.equal(result.classification.status, 'legacy');
+    }
+  });
+
+  assert.equal(readOnlyPreflightSeen, true);
+  assert.deepEqual(migrationService.classifyDatabase(opened, { rootDir: serverRoot() }), { status: 'managed', currentVersion: 1 });
+  assert.equal(String(opened.pragma('journal_mode', { simple: true })).toLowerCase(), 'delete');
+  opened.close();
 });
 
 test('managed and legacy classification require immutable baseline object and column manifests', () => {
@@ -649,6 +775,28 @@ test('knowledge source hash unique predicate preserves duplicate empty legacy ha
   duplicateNonEmpty.db.close();
 });
 
+test('known legacy compatibility column order remains valid when a later migration adds exact new objects', () => {
+  const migrationService = require('../services/migration_service');
+  const legacy = require('../migrations/baselines/legacy_v1');
+  const { db } = tmpDb('legacy-order-with-later-migration');
+  legacy.apply(db);
+  db.exec('ALTER TABLE knowledge_entries ADD COLUMN source_hash TEXT;');
+  const probe = {
+    version: 2,
+    name: 'test_probe',
+    sourcePath: 'tests/fixtures/test_probe_migration.js',
+    engineVersion: 1,
+    dependencies: [VENDORED_BCRYPT_PATH]
+  };
+
+  migrationService.runMigrations(db, { rootDir: serverRoot(), registeredMigrations: [probe] });
+  assert.deepEqual(migrationService.classifyDatabase(db, {
+    rootDir: serverRoot(),
+    migrations: [...migrationService.defaultMigrations(), probe]
+  }), { status: 'managed', currentVersion: 2 });
+  db.close();
+});
+
 test('legacy shape accepts the v0.4 knowledge source hash partial index predicate as known compatibility state', () => {
   const migrationService = require('../services/migration_service');
   const legacy = require('../migrations/baselines/legacy_v1');
@@ -912,11 +1060,11 @@ test('malformed, future, orphaned, and failed migrations fail closed without led
     seedAdmissions: seedAdmissions(),
     registeredMigrations: [
       {
-        version: 99,
+        version: 2,
         name: 'failing_probe',
         sourcePath: 'tests/fixtures/failing_probe_migration.js',
         engineVersion: 1,
-        dependencies: [],
+        dependencies: [VENDORED_BCRYPT_PATH],
         apply() {
           throw new Error('injected migration failure');
         }
@@ -959,4 +1107,9 @@ test('obsolete standalone migrate entrypoint is removed and has no runtime/deplo
     const content = fs.readFileSync(path.join(repoRoot, relative), 'utf8');
     assert.doesNotMatch(content, /\bmigrate\.js\b/);
   }
+});
+
+test('production deploy inventory includes the checksum-bound bcrypt runtime', () => {
+  const deploySource = fs.readFileSync(path.join(platformRoot, 'deploy_v8.ps1'), 'utf8');
+  assert.match(deploySource, /server\\migrations\\vendor\\bcryptjs_v3_0_3\.js/);
 });

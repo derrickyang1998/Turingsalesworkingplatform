@@ -37,6 +37,61 @@ function corruptFtsSegmentBytes(dbPath, shadowBlock) {
   require('node:fs').writeFileSync(dbPath, bytes);
 }
 
+function readU64(buffer, offset) {
+  const value = buffer.readBigUInt64BE(offset);
+  assert.ok(value <= BigInt(Number.MAX_SAFE_INTEGER), 'test parser only accepts safe frame lengths');
+  return Number(value);
+}
+
+function parseItemAt(buffer, offset = 0) {
+  const labelLength = buffer.readUInt16BE(offset);
+  const labelStart = offset + 2;
+  const labelEnd = labelStart + labelLength;
+  const payloadLength = readU64(buffer, labelEnd);
+  const payloadStart = labelEnd + 8;
+  const end = payloadStart + payloadLength;
+  assert.ok(end <= buffer.length, 'ITEM payload must fit inside its parent frame');
+  return {
+    label: buffer.subarray(labelStart, labelEnd).toString('utf8'),
+    payload: buffer.subarray(payloadStart, end),
+    end
+  };
+}
+
+function parseItems(buffer) {
+  const items = [];
+  let offset = 0;
+  while (offset < buffer.length) {
+    const item = parseItemAt(buffer, offset);
+    items.push(item);
+    offset = item.end;
+  }
+  assert.equal(offset, buffer.length);
+  return items;
+}
+
+function parseListRecords(buffer) {
+  const count = readU64(buffer, 0);
+  const records = [];
+  let offset = 8;
+  for (let index = 0; index < count; index += 1) {
+    const length = readU64(buffer, offset);
+    const start = offset + 8;
+    const end = start + length;
+    assert.ok(end <= buffer.length, 'LIST record must fit inside the list payload');
+    records.push(buffer.subarray(start, end));
+    offset = end;
+  }
+  assert.equal(offset, buffer.length);
+  return records;
+}
+
+function recordEnd(buffer, offset = 0) {
+  const end = offset + 8 + readU64(buffer, offset);
+  assert.ok(end <= buffer.length, 'ROW record must fit inside its parent payload');
+  return end;
+}
+
 test('primitive framing vectors match the immutable SQLite digest grammar', () => {
   const digest = require('../services/sqlite_digest_service');
   const item = digest.item(SQLITE_PRIMITIVES.item.label, Buffer.from(SQLITE_PRIMITIVES.item.payloadHex, 'hex'));
@@ -53,6 +108,38 @@ test('primitive framing vectors match the immutable SQLite digest grammar', () =
     digest.sha256Hex(digest.item('format', Buffer.from('tm-sqlite-topology-v1', 'utf8'))),
     SQLITE_PRIMITIVES.topologyFormatOnlySha256
   );
+});
+
+test('topology OBJECT and logical TABLE records each contain one length-delimited outer ITEM', () => {
+  const digest = require('../services/sqlite_digest_service');
+  assert.equal(typeof digest._testing?.topologyStream, 'function');
+  assert.equal(typeof digest._testing?.tableRowsStream, 'function');
+  const { db } = tmpDb('outer-item-framing');
+  db.exec('CREATE TABLE framing_probe (id INTEGER PRIMARY KEY, value TEXT) STRICT; INSERT INTO framing_probe VALUES (1, \'value\');');
+
+  const topologyItems = parseItems(digest._testing.topologyStream(db, { fts: [] }));
+  const objectList = topologyItems.find((entry) => entry.label === 'objects');
+  assert.ok(objectList);
+  for (const objectRecord of parseListRecords(objectList.payload)) {
+    const outer = parseItemAt(objectRecord);
+    assert.equal(outer.label, 'object');
+    assert.equal(outer.end, objectRecord.length, 'the object ITEM length must cover its ROW and nested metadata ITEMs');
+    const nestedStart = recordEnd(outer.payload);
+    assert.deepEqual(parseItems(outer.payload.subarray(nestedStart)).map((entry) => entry.label), [
+      'table_list',
+      'table_xinfo',
+      'foreign_key_list',
+      'index_list'
+    ]);
+  }
+
+  const tableRecord = digest._testing.tableRowsStream(db, 'framing_probe');
+  const tableOuter = parseItemAt(tableRecord);
+  assert.equal(tableOuter.label, 'table');
+  assert.equal(tableOuter.end, tableRecord.length, 'the table ITEM length must cover its ROW, column CIDs, and rows');
+  const tableNestedStart = recordEnd(tableOuter.payload);
+  assert.deepEqual(parseItems(tableOuter.payload.subarray(tableNestedStart)).map((entry) => entry.label), ['column_cids', 'rows']);
+  db.close();
 });
 
 test('tm-request-v1 and tm-audit-v2 golden vectors are canonical and nonce-bound', () => {
@@ -180,6 +267,19 @@ test('SQLite logical digest rejects malformed TEXT bytes before hashing replacem
   db.close();
 });
 
+test('SQLite topology digest rejects malformed TEXT bytes in sqlite_schema metadata', () => {
+  const digest = require('../services/sqlite_digest_service');
+  const { db } = tmpDb('malformed-topology-text');
+  db.unsafeMode(true);
+  db.exec('CREATE TABLE malformed_topology (id INTEGER PRIMARY KEY); PRAGMA writable_schema = ON;');
+  db.exec("UPDATE sqlite_schema SET sql = CAST(x'80' AS TEXT) WHERE name = 'malformed_topology';");
+  db.exec('PRAGMA writable_schema = OFF;');
+  db.unsafeMode(false);
+
+  assert.throws(() => digest.databaseDigest(db, { fts: [] }), /UTF-8|well-formed|malformed SQLite TEXT/i);
+  db.close();
+});
+
 test('SQLite FTS digest rejects malformed stored TEXT and non-integral semantic IDs', () => {
   const digest = require('../services/sqlite_digest_service');
 
@@ -229,6 +329,32 @@ test('knowledge_chunks_fts projection is exact and rejects malformed tags, orpha
 
   db.prepare("UPDATE knowledge_entries SET tags_json = ? WHERE id = 1").run('{"bad":true}');
   assert.throws(() => digest.rebuildKnowledgeChunksFts(db), /tags_json/);
+  db.close();
+});
+
+test('knowledge tag projection accepts only strings and preserves exact UTF-8 spellings while byte-sorting and deduplicating', () => {
+  const digest = require('../services/sqlite_digest_service');
+  const { db } = tmpDb('fts-exact-tags');
+  buildDigestFixture(db);
+  db.prepare('UPDATE knowledge_entries SET tags_json = ? WHERE id = 1').run('["\u00e9","e\u0301","\u00e9"]');
+  digest.rebuildKnowledgeChunksFts(db);
+  assert.equal(db.prepare('SELECT tags FROM knowledge_chunks_fts WHERE chunk_id = 101').get().tags, 'e\u0301 \u00e9');
+
+  for (const malformed of ['[1]', '[true]', '[{}]', '[["nested"]]', '["\\ud800"]']) {
+    db.prepare('UPDATE knowledge_entries SET tags_json = ? WHERE id = 1').run(malformed);
+    assert.throws(() => digest.rebuildKnowledgeChunksFts(db), /tags_json|string/i);
+  }
+  db.close();
+});
+
+test('knowledge projection rejects duplicate entry_id and chunk_index pairs before mutating FTS', () => {
+  const digest = require('../services/sqlite_digest_service');
+  const { db } = tmpDb('fts-duplicate-chunk-index');
+  buildDigestFixture(db);
+  db.prepare('INSERT INTO knowledge_chunks (id, entry_id, chunk_index, content) VALUES (?, ?, ?, ?)').run(103, 1, 0, 'duplicate logical slot');
+
+  assert.throws(() => digest.rebuildKnowledgeChunksFts(db), /duplicate.*entry_id.*chunk_index|chunk_index.*duplicate/i);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM knowledge_chunks_fts').get().count, 0);
   db.close();
 });
 

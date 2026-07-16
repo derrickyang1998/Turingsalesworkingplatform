@@ -1,5 +1,5 @@
 const crypto = require('crypto');
-const bcrypt = require('bcryptjs');
+const bcrypt = require('../vendor/bcryptjs_v3_0_3');
 
 const UPPERCASE = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
 const LOWERCASE = 'abcdefghijkmnopqrstuvwxyz';

@@ -232,10 +232,10 @@ function allShadowNames(manifest) {
   return names;
 }
 
-function sqlRows(db, sql) {
+function sqlRows(db, sql, params = []) {
   const statement = db.prepare(sql);
   if (typeof statement.safeIntegers === 'function') statement.safeIntegers(true);
-  return statement.all();
+  return statement.all(...params);
 }
 
 function storedValue(storageType, value, context) {
@@ -259,7 +259,7 @@ function storedValue(storageType, value, context) {
   throw new Error(`unknown SQLite storage class at ${context}: ${storageType}`);
 }
 
-function storedRows(db, columns, fromClause) {
+function storedRows(db, columns, fromClause, params = []) {
   const projection = [];
   for (let index = 0; index < columns.length; index += 1) {
     const expression = columns[index].expression;
@@ -268,13 +268,20 @@ function storedRows(db, columns, fromClause) {
     projection.push(`typeof(${expression}) AS ${typeAlias}`);
     projection.push(`CASE WHEN typeof(${expression}) = 'text' THEN CAST(${expression} AS BLOB) ELSE ${expression} END AS ${valueAlias}`);
   }
-  return sqlRows(db, `SELECT ${projection.join(', ')} ${fromClause}`).map((dataRow) => columns.map((column, index) => (
+  return sqlRows(db, `SELECT ${projection.join(', ')} ${fromClause}`, params).map((dataRow) => columns.map((column, index) => (
     storedValue(dataRow[`__tm_storage_type_${index}`], dataRow[`__tm_storage_value_${index}`], column.context)
   )));
 }
 
 function safePositiveId(value, context) {
   if (typeof value !== 'bigint' || value < 1n || value > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new Error(`unsafe SQLite integer at ${context}`);
+  }
+  return value;
+}
+
+function safeNonnegativeInteger(value, context) {
+  if (typeof value !== 'bigint' || value < 0n || value > BigInt(Number.MAX_SAFE_INTEGER)) {
     throw new Error(`unsafe SQLite integer at ${context}`);
   }
   return value;
@@ -296,39 +303,176 @@ function requiredText(value, context) {
   return value.text;
 }
 
+function requiredInteger(value, context) {
+  if (typeof value !== 'bigint') throw new Error(`SQLite storage mismatch at ${context}: expected INTEGER`);
+  return value;
+}
+
+function optionalText(value, context) {
+  if (value === null) return null;
+  requiredText(value, context);
+  return value;
+}
+
+function singleStoredRow(db, columns, fromClause, params = []) {
+  const rows = storedRows(db, columns, fromClause, params);
+  if (rows.length !== 1) throw new Error(`unexpected SQLite metadata row count for ${fromClause}`);
+  return rows[0];
+}
+
+function tableListMetadata(db, objectName) {
+  return storedRows(db, [
+    { expression: 'schema', context: `table_list(${objectName}).schema` },
+    { expression: 'name', context: `table_list(${objectName}).name` },
+    { expression: 'type', context: `table_list(${objectName}).type` },
+    { expression: 'ncol', context: `table_list(${objectName}).ncol` },
+    { expression: 'wr', context: `table_list(${objectName}).wr` },
+    { expression: 'strict', context: `table_list(${objectName}).strict` }
+  ], 'FROM pragma_table_list(?) ORDER BY CAST(schema AS BLOB), CAST(name AS BLOB), CAST(type AS BLOB)', [objectName])
+    .map((values) => {
+      requiredText(values[0], `table_list(${objectName}).schema`);
+      requiredText(values[1], `table_list(${objectName}).name`);
+      requiredText(values[2], `table_list(${objectName}).type`);
+      requiredInteger(values[3], `table_list(${objectName}).ncol`);
+      requiredInteger(values[4], `table_list(${objectName}).wr`);
+      requiredInteger(values[5], `table_list(${objectName}).strict`);
+      return values;
+    });
+}
+
+function tableXinfoMetadata(db, objectName) {
+  return storedRows(db, [
+    { expression: 'cid', context: `table_xinfo(${objectName}).cid` },
+    { expression: 'name', context: `table_xinfo(${objectName}).name` },
+    { expression: 'type', context: `table_xinfo(${objectName}).type` },
+    { expression: '"notnull"', context: `table_xinfo(${objectName}).notnull` },
+    { expression: 'dflt_value', context: `table_xinfo(${objectName}).dflt_value` },
+    { expression: 'pk', context: `table_xinfo(${objectName}).pk` },
+    { expression: 'hidden', context: `table_xinfo(${objectName}).hidden` }
+  ], 'FROM pragma_table_xinfo(?) ORDER BY cid, CAST(name AS BLOB)', [objectName])
+    .map((values) => {
+      requiredInteger(values[0], `table_xinfo(${objectName}).cid`);
+      requiredText(values[1], `table_xinfo(${objectName}).name`);
+      requiredText(values[2], `table_xinfo(${objectName}).type`);
+      requiredInteger(values[3], `table_xinfo(${objectName}).notnull`);
+      optionalText(values[4], `table_xinfo(${objectName}).dflt_value`);
+      requiredInteger(values[5], `table_xinfo(${objectName}).pk`);
+      requiredInteger(values[6], `table_xinfo(${objectName}).hidden`);
+      return values;
+    });
+}
+
+function foreignKeyMetadata(db, objectName) {
+  return storedRows(db, [
+    { expression: 'id', context: `foreign_key_list(${objectName}).id` },
+    { expression: 'seq', context: `foreign_key_list(${objectName}).seq` },
+    { expression: '"table"', context: `foreign_key_list(${objectName}).table` },
+    { expression: '"from"', context: `foreign_key_list(${objectName}).from` },
+    { expression: '"to"', context: `foreign_key_list(${objectName}).to` },
+    { expression: 'on_update', context: `foreign_key_list(${objectName}).on_update` },
+    { expression: 'on_delete', context: `foreign_key_list(${objectName}).on_delete` },
+    { expression: '"match"', context: `foreign_key_list(${objectName}).match` }
+  ], 'FROM pragma_foreign_key_list(?) ORDER BY id, seq', [objectName])
+    .map((values) => {
+      requiredInteger(values[0], `foreign_key_list(${objectName}).id`);
+      requiredInteger(values[1], `foreign_key_list(${objectName}).seq`);
+      requiredText(values[2], `foreign_key_list(${objectName}).table`);
+      requiredText(values[3], `foreign_key_list(${objectName}).from`);
+      optionalText(values[4], `foreign_key_list(${objectName}).to`);
+      requiredText(values[5], `foreign_key_list(${objectName}).on_update`);
+      requiredText(values[6], `foreign_key_list(${objectName}).on_delete`);
+      requiredText(values[7], `foreign_key_list(${objectName}).match`);
+      return values;
+    });
+}
+
+function indexMetadata(db, objectName) {
+  return storedRows(db, [
+    { expression: 'seq', context: `index_list(${objectName}).seq` },
+    { expression: 'name', context: `index_list(${objectName}).name` },
+    { expression: '"unique"', context: `index_list(${objectName}).unique` },
+    { expression: 'origin', context: `index_list(${objectName}).origin` },
+    { expression: 'partial', context: `index_list(${objectName}).partial` }
+  ], 'FROM pragma_index_list(?) ORDER BY seq, CAST(name AS BLOB)', [objectName])
+    .map((values) => {
+      requiredInteger(values[0], `index_list(${objectName}).seq`);
+      const indexName = requiredText(values[1], `index_list(${objectName}).name`);
+      requiredInteger(values[2], `index_list(${objectName}).unique`);
+      requiredText(values[3], `index_list(${objectName}).origin`);
+      requiredInteger(values[4], `index_list(${objectName}).partial`);
+      const xinfo = storedRows(db, [
+        { expression: 'seqno', context: `index_xinfo(${indexName}).seqno` },
+        { expression: 'cid', context: `index_xinfo(${indexName}).cid` },
+        { expression: 'name', context: `index_xinfo(${indexName}).name` },
+        { expression: '"desc"', context: `index_xinfo(${indexName}).desc` },
+        { expression: 'coll', context: `index_xinfo(${indexName}).coll` },
+        { expression: '"key"', context: `index_xinfo(${indexName}).key` }
+      ], 'FROM pragma_index_xinfo(?) ORDER BY seqno, cid, CAST(name AS BLOB)', [indexName])
+        .map((indexValues) => {
+          requiredInteger(indexValues[0], `index_xinfo(${indexName}).seqno`);
+          requiredInteger(indexValues[1], `index_xinfo(${indexName}).cid`);
+          optionalText(indexValues[2], `index_xinfo(${indexName}).name`);
+          requiredInteger(indexValues[3], `index_xinfo(${indexName}).desc`);
+          optionalText(indexValues[4], `index_xinfo(${indexName}).coll`);
+          requiredInteger(indexValues[5], `index_xinfo(${indexName}).key`);
+          return row(indexValues).subarray(8);
+        });
+      return Buffer.concat([row(values).subarray(8), item('index_xinfo', list(xinfo))]);
+    });
+}
+
 function topologyStream(db, manifest) {
+  const applicationId = singleStoredRow(db, [
+    { expression: 'application_id', context: 'pragma.application_id' }
+  ], 'FROM pragma_application_id')[0];
+  const encoding = singleStoredRow(db, [
+    { expression: 'encoding', context: 'pragma.encoding' }
+  ], 'FROM pragma_encoding')[0];
+  const pageSize = singleStoredRow(db, [
+    { expression: 'page_size', context: 'pragma.page_size' }
+  ], 'FROM pragma_page_size')[0];
+  const userVersion = singleStoredRow(db, [
+    { expression: 'user_version', context: 'pragma.user_version' }
+  ], 'FROM pragma_user_version')[0];
   const pragmas = [
-    row(['application_id', BigInt(db.pragma('application_id', { simple: true }))]).subarray(8),
-    row(['encoding', String(db.pragma('encoding', { simple: true })).toUpperCase()]).subarray(8),
-    row(['page_size', BigInt(db.pragma('page_size', { simple: true }))]).subarray(8),
-    row(['user_version', BigInt(db.pragma('user_version', { simple: true }))]).subarray(8)
+    row(['application_id', requiredInteger(applicationId, 'pragma.application_id')]).subarray(8),
+    row(['encoding', requiredText(encoding, 'pragma.encoding').toUpperCase()]).subarray(8),
+    row(['page_size', requiredInteger(pageSize, 'pragma.page_size')]).subarray(8),
+    row(['user_version', requiredInteger(userVersion, 'pragma.user_version')]).subarray(8)
   ];
   const shadowNames = allShadowNames(manifest);
-  const objects = sqlRows(db, "SELECT type,name,tbl_name,sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' OR name = 'sqlite_sequence' ORDER BY type,name,tbl_name")
+  const objects = storedRows(db, [
+    { expression: 'type', context: 'sqlite_schema.type' },
+    { expression: 'name', context: 'sqlite_schema.name' },
+    { expression: 'tbl_name', context: 'sqlite_schema.tbl_name' },
+    { expression: 'sql', context: 'sqlite_schema.sql' }
+  ], "FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' OR name = 'sqlite_sequence' ORDER BY CAST(type AS BLOB), CAST(name AS BLOB), CAST(tbl_name AS BLOB)")
+    .map((values) => {
+      const type = requiredText(values[0], 'sqlite_schema.type');
+      const name = requiredText(values[1], 'sqlite_schema.name');
+      requiredText(values[2], 'sqlite_schema.tbl_name');
+      optionalText(values[3], 'sqlite_schema.sql');
+      return { values, type, name };
+    })
     .filter((object) => !shadowNames.has(object.name))
     .map((object) => {
-      const tableList = sqlRows(db, `PRAGMA table_list(${quoteIdent(object.name)})`).map((r) => row([r.schema, r.name, r.type, BigInt(r.ncol), BigInt(r.wr), BigInt(r.strict)]).subarray(8));
+      const tableList = tableListMetadata(db, object.name).map((values) => row(values).subarray(8));
       const xinfo = /^(table|view)$/i.test(object.type) || object.type === 'virtual table'
-        ? sqlRows(db, `PRAGMA table_xinfo(${quoteIdent(object.name)})`).map((r) => row([BigInt(r.cid), r.name, r.type, BigInt(r.notnull), r.dflt_value, BigInt(r.pk), BigInt(r.hidden)]).subarray(8))
+        ? tableXinfoMetadata(db, object.name).map((values) => row(values).subarray(8))
         : [];
       const fk = object.type === 'table'
-        ? sqlRows(db, `PRAGMA foreign_key_list(${quoteIdent(object.name)})`).map((r) => row([BigInt(r.id), BigInt(r.seq), r.table, r.from, r.to, r.on_update, r.on_delete, r.match]).subarray(8))
+        ? foreignKeyMetadata(db, object.name).map((values) => row(values).subarray(8))
         : [];
       const indexes = object.type === 'table'
-        ? sqlRows(db, `PRAGMA index_list(${quoteIdent(object.name)})`).map((idx) => {
-          const idxRows = sqlRows(db, `PRAGMA index_xinfo(${quoteIdent(idx.name)})`)
-            .sort((a, b) => Number(a.seqno) - Number(b.seqno) || String(a.name).localeCompare(String(b.name)))
-            .map((r) => row([BigInt(r.seqno), BigInt(r.cid), r.name, BigInt(r.desc), r.coll, BigInt(r.key)]).subarray(8));
-          return Buffer.concat([row([BigInt(idx.seq), idx.name, BigInt(idx.unique), idx.origin, BigInt(idx.partial)]).subarray(8), item('index_xinfo', list(idxRows))]);
-        })
+        ? indexMetadata(db, object.name)
         : [];
-      return Buffer.concat([
-        item('object', row([object.type, object.name, object.tbl_name, object.sql])),
+      return item('object', Buffer.concat([
+        row(object.values),
         item('table_list', list(tableList)),
         item('table_xinfo', list(xinfo)),
         item('foreign_key_list', list(fk)),
         item('index_list', list(indexes))
-      ]);
+      ]));
     });
   return Buffer.concat([
     item('format', Buffer.from('tm-sqlite-topology-v1', 'utf8')),
@@ -337,8 +481,12 @@ function topologyStream(db, manifest) {
   ]);
 }
 
-function tableRowsStream(db, tableName) {
-  const columns = sqlRows(db, `PRAGMA table_xinfo(${quoteIdent(tableName)})`).filter((column) => Number(column.hidden) === 0);
+function tableRowsStream(db, tableNameValue) {
+  const tableName = isSqliteTextValue(tableNameValue) ? requiredText(tableNameValue, 'sqlite_schema.name') : String(tableNameValue);
+  const encodedTableName = isSqliteTextValue(tableNameValue) ? tableNameValue : tableName;
+  const columns = tableXinfoMetadata(db, tableName)
+    .filter((values) => values[6] === 0n)
+    .map((values) => ({ cid: values[0], nameValue: values[1], name: requiredText(values[1], `table_xinfo(${tableName}).name`) }));
   const rows = storedRows(
     db,
     columns.map((column) => ({ expression: quoteIdent(column.name), context: `${tableName}.${column.name}` })),
@@ -346,18 +494,19 @@ function tableRowsStream(db, tableName) {
   )
     .map((values) => row(values).subarray(8))
     .sort(Buffer.compare);
-  const cids = columns.map((column) => row([BigInt(column.cid)]).subarray(8));
-  return Buffer.concat([
-    item('table', row([tableName])),
+  const cids = columns.map((column) => row([column.cid]).subarray(8));
+  return item('table', Buffer.concat([
+    row([encodedTableName]),
     item('column_cids', list(cids)),
     item('rows', list(rows))
-  ]);
+  ]));
 }
 
 function knowledgeRows(db) {
   const rows = storedRows(db, [
     { expression: 'c.id', context: 'knowledge_chunks.id' },
     { expression: 'c.entry_id', context: 'knowledge_chunks.entry_id' },
+    { expression: 'c.chunk_index', context: 'knowledge_chunks.chunk_index' },
     { expression: 'e.title', context: 'knowledge_entries.title' },
     { expression: 'c.content', context: 'knowledge_chunks.content' },
     { expression: 'e.tags_json', context: 'knowledge_entries.tags_json' }
@@ -367,14 +516,19 @@ function knowledgeRows(db) {
     ORDER BY c.id
   `);
   const seen = new Set();
+  const seenLogicalSlots = new Set();
   return rows.map((values) => {
     const chunkId = safePositiveId(values[0], 'knowledge_chunks.id');
     const entryId = safePositiveId(values[1], 'knowledge_chunks.entry_id');
-    const title = requiredText(values[2], 'knowledge_entries.title');
-    const content = requiredText(values[3], 'knowledge_chunks.content');
-    const tagsJson = values[4] === null ? '[]' : requiredText(values[4], 'knowledge_entries.tags_json');
+    const chunkIndex = safeNonnegativeInteger(values[2], 'knowledge_chunks.chunk_index');
+    const title = requiredText(values[3], 'knowledge_entries.title');
+    const content = requiredText(values[4], 'knowledge_chunks.content');
+    const tagsJson = values[5] === null ? '[]' : requiredText(values[5], 'knowledge_entries.tags_json');
     if (seen.has(String(chunkId))) throw new Error('duplicate chunk IDs in knowledge_chunks');
     seen.add(String(chunkId));
+    const logicalSlot = `${entryId}:${chunkIndex}`;
+    if (seenLogicalSlots.has(logicalSlot)) throw new Error('duplicate knowledge_chunks entry_id and chunk_index pair');
+    seenLogicalSlots.add(logicalSlot);
     let parsed;
     try {
       parsed = JSON.parse(tagsJson);
@@ -382,7 +536,11 @@ function knowledgeRows(db) {
       throw new Error(`malformed tags_json for knowledge entry ${entryId}`);
     }
     if (!Array.isArray(parsed)) throw new Error(`malformed tags_json for knowledge entry ${entryId}`);
-    const tags = [...new Set(parsed.map((tag) => String(tag).normalize('NFC')))].sort((a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b))).join(' ');
+    if (parsed.some((tag) => typeof tag !== 'string')) throw new Error(`malformed tags_json for knowledge entry ${entryId}: every tag must be a string`);
+    if (parsed.some((tag) => Buffer.from(tag, 'utf8').toString('utf8') !== tag)) {
+      throw new Error(`malformed tags_json for knowledge entry ${entryId}: tag is not a valid Unicode scalar string`);
+    }
+    const tags = [...new Set(parsed)].sort((a, b) => Buffer.compare(Buffer.from(a, 'utf8'), Buffer.from(b, 'utf8'))).join(' ');
     return {
       values: [entryId, chunkId, title, content, tags],
       insert: [title, content, tags, Number(entryId), Number(chunkId)]
@@ -486,10 +644,17 @@ function ftsDigest(db, manifestEntry) {
 function logicalStream(db, manifest, topologySha256) {
   const shadowNames = allShadowNames(manifest);
   const ftsNames = new Set((manifest.fts || []).map((entry) => entry.virtualName));
-  const tableNames = sqlRows(db, "SELECT name,type FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' OR name = 'sqlite_sequence' ORDER BY name")
-    .filter((object) => object.type === 'table' && !shadowNames.has(object.name) && !ftsNames.has(object.name))
-    .map((object) => object.name);
-  const tableStreams = tableNames.map((name) => tableRowsStream(db, name));
+  const tableNames = storedRows(db, [
+    { expression: 'name', context: 'sqlite_schema.name' },
+    { expression: 'type', context: 'sqlite_schema.type' }
+  ], "FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' OR name = 'sqlite_sequence' ORDER BY CAST(name AS BLOB)")
+    .map((values) => ({
+      nameValue: values[0],
+      name: requiredText(values[0], 'sqlite_schema.name'),
+      type: requiredText(values[1], 'sqlite_schema.type')
+    }))
+    .filter((object) => object.type === 'table' && !shadowNames.has(object.name) && !ftsNames.has(object.name));
+  const tableStreams = tableNames.map((object) => tableRowsStream(db, object.nameValue));
   const fts = (manifest.fts || []).map((entry) => ftsDigest(db, entry));
   const ftsSummaries = fts
     .sort((a, b) => a.virtualName.localeCompare(b.virtualName))
@@ -558,5 +723,6 @@ module.exports = {
   matchKnowledgeChunksCanary,
   verifyKnowledgeChunksFtsCanaries,
   verifyKnowledgeChunksFtsIntegrity,
-  databaseDigest
+  databaseDigest,
+  _testing: Object.freeze({ topologyStream, tableRowsStream })
 };

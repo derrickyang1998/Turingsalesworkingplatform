@@ -1,11 +1,11 @@
 const path = require('node:path');
 
 module.exports = {
-  version: 6,
+  version: 2,
   name: 'builtin_import_probe',
   sourcePath: 'tests/fixtures/builtin_import_probe_migration.js',
   engineVersion: 1,
-  dependencies: [],
+  dependencies: ['migrations/vendor/bcryptjs_v3_0_3.js'],
   schemaManifest: {
     columns: {
       builtin_import_probe: {

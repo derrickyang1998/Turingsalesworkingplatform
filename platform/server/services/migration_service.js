@@ -5,7 +5,6 @@ const vm = require('vm');
 const { builtinModules } = require('module');
 const Database = require('better-sqlite3');
 
-const baseline = require('../migrations/baselines/legacy_v1');
 const sqliteDigest = require('./sqlite_digest_service');
 
 const BUILTIN_MODULES = new Set([
@@ -18,7 +17,7 @@ const MIGRATION_001_DESCRIPTOR = Object.freeze({
   name: '001_legacy_compat_columns',
   sourcePath: 'migrations/001_legacy_compat_columns.js',
   engineVersion: 1,
-  dependencies: []
+  dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
 });
 
 const LEDGER_SQL = `
@@ -296,9 +295,6 @@ function loadRegisteredMigration(migration, options) {
       if (BUILTIN_MODULES.has(request)) {
         return require(request);
       }
-      if (normalized === 'migrations/baselines/legacy_v1.js' && request === 'bcryptjs') {
-        return require(request);
-      }
       throw new Error(`undeclared bare import in migration bundle ${normalized}: ${request}`);
     };
     const script = new vm.Script(`(function(exports, require, module, __filename, __dirname) {\n${bytes.toString('utf8')}\n})`, {
@@ -569,6 +565,76 @@ function exactSchemaProblem(actual, expected, label) {
   return null;
 }
 
+function columnsSortedByName(columns) {
+  return [...(columns || [])].sort((left, right) => Buffer.compare(Buffer.from(left.name, 'utf8'), Buffer.from(right.name, 'utf8')));
+}
+
+function indexesWithoutNamedColumnCid(indexes) {
+  return (indexes || []).map((index) => ({
+    ...index,
+    xinfo: index.xinfo.map((column) => ({
+      ...column,
+      cid: column.name === null ? column.cid : null
+    }))
+  }));
+}
+
+function compatibleManagedSchemaProblem(actual, expected, baselineSnapshot, appliedMigrations) {
+  const allowances = optionalMigrationAllowances(appliedMigrations);
+  const relaxedBaselineTables = new Set(
+    [...allowances.columns.keys()].filter((name) => baselineSnapshot.objects.get(name)?.type === 'table')
+  );
+
+  for (const [name, expectedObject] of expected.objects.entries()) {
+    const actualObject = actual.objects.get(name);
+    if (!actualObject) return `missing managed schema object ${name}`;
+    if (relaxedBaselineTables.has(name)) {
+      if (
+        actualObject.type !== expectedObject.type ||
+        actualObject.name !== expectedObject.name ||
+        actualObject.tbl_name !== expectedObject.tbl_name
+      ) {
+        return `incompatible managed schema object ${name}`;
+      }
+    } else if (!jsonEqual(actualObject, expectedObject)) {
+      return `incompatible managed schema object ${name}`;
+    }
+  }
+  for (const name of actual.objects.keys()) {
+    if (!expected.objects.has(name)) return `unknown managed schema object ${name}`;
+  }
+
+  for (const [name, expectedColumns] of expected.columns.entries()) {
+    const actualColumns = actual.columns.get(name);
+    if (!actualColumns) return `missing managed schema columns ${name}`;
+    if (relaxedBaselineTables.has(name)) {
+      if (!jsonEqual(columnsSortedByName(actualColumns), columnsSortedByName(expectedColumns))) {
+        return `incompatible managed schema columns ${name}`;
+      }
+    } else if (!jsonEqual(actualColumns, expectedColumns)) {
+      return `incompatible managed schema columns ${name}`;
+    }
+  }
+  for (const name of actual.columns.keys()) {
+    if (!expected.columns.has(name)) return `unknown managed schema columns ${name}`;
+  }
+
+  for (const [name, expectedTableList] of expected.tableList.entries()) {
+    if (!jsonEqual(actual.tableList.get(name), expectedTableList)) return `incompatible managed schema table metadata ${name}`;
+  }
+  for (const [name, expectedForeignKeys] of expected.foreignKeys.entries()) {
+    if (!jsonEqual(actual.foreignKeys.get(name), expectedForeignKeys)) return `incompatible managed schema foreign keys ${name}`;
+  }
+  for (const [name, expectedIndexes] of expected.indexes.entries()) {
+    const actualIndexes = actual.indexes.get(name);
+    const indexesMatch = relaxedBaselineTables.has(name)
+      ? jsonEqual(indexesWithoutNamedColumnCid(actualIndexes), indexesWithoutNamedColumnCid(expectedIndexes))
+      : jsonEqual(actualIndexes, expectedIndexes);
+    if (!indexesMatch) return `incompatible managed schema indexes ${name}`;
+  }
+  return null;
+}
+
 function baselineMetadataProblem(table, expected, actual, allowances) {
   const expectedTableList = expected.tableList.get(table) || [];
   const actualTableList = actual.tableList.get(table) || [];
@@ -655,9 +721,14 @@ function managedSchemaProblem(db, baselineImplementation, appliedMigrations) {
   const expectedDb = new Database(':memory:');
   try {
     baselineImplementation.apply(expectedDb);
+    const baselineSnapshot = schemaSnapshot(expectedDb);
     createLedger(expectedDb);
     for (const migration of appliedMigrations) migration.apply(expectedDb);
-    return exactSchemaProblem(schemaSnapshot(db), schemaSnapshot(expectedDb), 'managed schema');
+    const actual = schemaSnapshot(db);
+    const expected = schemaSnapshot(expectedDb);
+    const exactProblem = exactSchemaProblem(actual, expected, 'managed schema');
+    if (!exactProblem) return null;
+    return compatibleManagedSchemaProblem(actual, expected, baselineSnapshot, appliedMigrations);
   } finally {
     expectedDb.close();
   }
@@ -978,26 +1049,35 @@ function insertLedgerRow(db, migration, checksum) {
 function normalizeMigrations(options) {
   const migrations = [...defaultMigrations(), ...((options && options.registeredMigrations) || [])].sort((a, b) => a.version - b.version);
   ensureNoDuplicateRegistered(migrations);
+  for (let index = 0; index < migrations.length; index += 1) {
+    const migration = migrations[index];
+    const expectedVersion = index + 1;
+    if (!Number.isSafeInteger(migration.version) || migration.version !== expectedVersion) {
+      throw new Error(`registered migration versions must be contiguous; missing migration version ${expectedVersion}`);
+    }
+  }
   return migrations;
 }
 
-function applySeedAdmissions(db, seedAdmissions, baselineSeeds) {
-  const seeds = seedAdmissions || baselineSeeds || baseline.seedAdmissions;
-  if (seeds && typeof seeds.admin === 'function') seeds.admin(db);
-  if (seeds && typeof seeds.influencers === 'function') seeds.influencers(db);
+function applySeedAdmissions(db, baselineSeeds) {
+  if (!baselineSeeds || typeof baselineSeeds.admin !== 'function' || typeof baselineSeeds.influencers !== 'function') {
+    throw new Error('checksum-bound baseline seed admissions are unavailable');
+  }
+  baselineSeeds.admin(db);
+  baselineSeeds.influencers(db);
 }
 
-function runMigrations(db, options) {
+function normalizedMigrationOptions(options) {
   const normalizedOptions = { ...(options || {}) };
   const migrations = normalizeMigrations(normalizedOptions);
   normalizedOptions.migrations = migrations;
-  db.pragma('foreign_keys = ON');
+  delete normalizedOptions.seedAdmissions;
+  return normalizedOptions;
+}
 
-  const databasePath = db.name;
-  const readonlyPreflight = collectReadOnlyPreflight(databasePath, normalizedOptions);
-  if (readonlyPreflight && typeof normalizedOptions.afterReadOnlyPreflight === 'function') {
-    normalizedOptions.afterReadOnlyPreflight(databasePath, readonlyPreflight);
-  }
+function runMigrationTransaction(db, normalizedOptions, readonlyPreflight) {
+  const migrations = normalizedOptions.migrations;
+  db.pragma('foreign_keys = ON');
 
   const classification = readonlyPreflight ? readonlyPreflight.classification : classifyDatabase(db, normalizedOptions);
   if (classification.status === 'partial_or_malformed' || classification.status === 'future') {
@@ -1030,13 +1110,56 @@ function runMigrations(db, options) {
       const checksum = loaded.checksum;
       insertLedgerRow(db, migration, checksum);
       if (classification.status !== 'managed' && migration.version === 1) {
-        applySeedAdmissions(db, normalizedOptions.seedAdmissions, loaded.baseline.seedAdmissions);
+        applySeedAdmissions(db, loaded.baseline.seedAdmissions);
       }
     }
     preflight(db, { status: 'managed' }, { checkMainFtsIntegrity: true });
+    const finalClassification = classifyDatabase(db, normalizedOptions);
+    const expectedVersion = migrations[migrations.length - 1].version;
+    if (finalClassification.status !== 'managed' || finalClassification.currentVersion !== expectedVersion) {
+      throw new Error(
+        `final migration classification failed: ${finalClassification.status}` +
+        `${finalClassification.reason ? ` ${finalClassification.reason}` : ''}`
+      );
+    }
+    return finalClassification;
   });
-  transaction.exclusive();
-  return classifyDatabase(db, normalizedOptions);
+  return transaction.exclusive();
+}
+
+function runMigrations(db, options) {
+  const normalizedOptions = normalizedMigrationOptions(options);
+  const databasePath = db.name;
+  const readonlyPreflight = collectReadOnlyPreflight(databasePath, normalizedOptions);
+  if (readonlyPreflight && typeof normalizedOptions.afterReadOnlyPreflight === 'function') {
+    normalizedOptions.afterReadOnlyPreflight(databasePath, readonlyPreflight);
+  }
+  return runMigrationTransaction(db, normalizedOptions, readonlyPreflight);
+}
+
+function openMigratedDatabase(databasePath, options) {
+  if (typeof databasePath !== 'string' || !databasePath) throw new Error('database path is required');
+  const normalizedOptions = normalizedMigrationOptions(options);
+  const readonlyPreflight = collectReadOnlyPreflight(databasePath, normalizedOptions);
+  if (readonlyPreflight && typeof normalizedOptions.afterReadOnlyPreflight === 'function') {
+    normalizedOptions.afterReadOnlyPreflight(databasePath, readonlyPreflight);
+  }
+
+  let db;
+  try {
+    db = new Database(databasePath);
+    runMigrationTransaction(db, normalizedOptions, readonlyPreflight);
+    return db;
+  } catch (error) {
+    if (db) {
+      try {
+        db.close();
+      } catch (_closeError) {
+        // Preserve the migration failure; the connection is not returned to callers.
+      }
+    }
+    throw error;
+  }
 }
 
 module.exports = {
@@ -1048,5 +1171,6 @@ module.exports = {
   integerRuleFor,
   classifyDatabase,
   createLedger,
-  runMigrations
+  runMigrations,
+  openMigratedDatabase
 };

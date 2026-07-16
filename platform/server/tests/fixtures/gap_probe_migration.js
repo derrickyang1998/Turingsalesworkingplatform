@@ -1,12 +1,12 @@
 module.exports = {
-  version: 2,
-  name: 'inline_apply_must_not_run',
-  sourcePath: 'tests/fixtures/source_exec_probe_migration.js',
+  version: 3,
+  name: 'gap_probe',
+  sourcePath: 'tests/fixtures/gap_probe_migration.js',
   engineVersion: 1,
   dependencies: ['migrations/vendor/bcryptjs_v3_0_3.js'],
   schemaManifest: {
     columns: {
-      source_apply_executed: {
+      gap_probe: {
         id: { type: 'INTEGER', notnull: 0, defaultValue: null }
       }
     },
@@ -14,6 +14,6 @@ module.exports = {
     triggers: {}
   },
   apply(db) {
-    db.exec('CREATE TABLE source_apply_executed (id INTEGER PRIMARY KEY) STRICT;');
+    db.exec('CREATE TABLE gap_probe (id INTEGER PRIMARY KEY) STRICT;');
   }
 };

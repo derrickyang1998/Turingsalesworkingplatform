@@ -115,7 +115,7 @@ const migration = {
   name: '001_legacy_compat_columns',
   sourcePath: 'migrations/001_legacy_compat_columns.js',
   engineVersion: 1,
-  dependencies: [],
+  dependencies: ['migrations/vendor/bcryptjs_v3_0_3.js'],
   schemaManifest: schemaManifest(),
   apply(db) {
     for (const [table, tableColumns] of Object.entries(COLUMNS)) {
