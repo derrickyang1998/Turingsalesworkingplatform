@@ -786,7 +786,7 @@ function invalidRuleSql(identifier, rule) {
   }
   if (rule === 'polymorphic_source_id') {
     return `(typeof(${identifier}) = 'integer' AND (${identifier} < 1 OR ${identifier} > 9007199254740991))
-      OR (typeof(${identifier}) = 'text' AND length(${identifier}) > 4096)
+      OR (typeof(${identifier}) = 'text' AND length(CAST(${identifier} AS BLOB)) > 4096)
       OR typeof(${identifier}) NOT IN ('integer','text','null')`;
   }
   throw new Error(`unknown integer rule ${rule}`);

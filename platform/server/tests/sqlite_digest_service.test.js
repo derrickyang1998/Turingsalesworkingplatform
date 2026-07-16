@@ -130,6 +130,74 @@ test('SQLite digest changes for schema, value, type, duplicate, sequence, pragma
   fts.db.close();
 });
 
+test('SQLite logical text digest preserves exact UTF-8 bytes without canonical normalization', () => {
+  const digest = require('../services/sqlite_digest_service');
+  const makeTextDigest = (value) => {
+    const { db } = tmpDb('exact-text');
+    db.exec('CREATE TABLE exact_text (id INTEGER PRIMARY KEY, value TEXT) STRICT;');
+    db.prepare('INSERT INTO exact_text (id, value) VALUES (?, ?)').run(1, value);
+    const result = digest.databaseDigest(db, { fts: [] });
+    db.close();
+    return result.logicalSha256;
+  };
+
+  assert.notEqual(makeTextDigest('a\r\nb'), makeTextDigest('a\nb'));
+  assert.notEqual(makeTextDigest('\u00e9'), makeTextDigest('e\u0301'));
+  assert.notEqual(makeTextDigest('\ufeffA'), makeTextDigest('A'));
+});
+
+test('SQLite topology and FTS framing preserve exact text bytes without canonical normalization', () => {
+  const digest = require('../services/sqlite_digest_service');
+  const makeTopologyDigest = (newline) => {
+    const { db } = tmpDb('exact-topology');
+    db.exec(`CREATE TABLE exact_schema (${newline}id INTEGER PRIMARY KEY,${newline}value TEXT${newline}) STRICT;`);
+    const result = digest.databaseDigest(db, { fts: [] }).topologySha256;
+    db.close();
+    return result;
+  };
+  const ftsHash = (value) => digest.sha256Hex(digest.ftsStream({
+    virtualName: 'demo_fts',
+    projectionName: 'demo',
+    tokenizerOptions: 'unicode61',
+    keyColumnCsv: 'id',
+    indexedColumnCsv: 'content'
+  }, [[1n, value]]));
+
+  assert.notEqual(makeTopologyDigest('\r\n'), makeTopologyDigest('\n'));
+  assert.notEqual(ftsHash('a\r\nb'), ftsHash('a\nb'));
+  assert.notEqual(ftsHash('\u00e9'), ftsHash('e\u0301'));
+});
+
+test('SQLite logical digest rejects malformed TEXT bytes before hashing replacement strings', () => {
+  const digest = require('../services/sqlite_digest_service');
+  const { db } = tmpDb('malformed-text');
+  db.exec(`
+    CREATE TABLE malformed_text (id INTEGER PRIMARY KEY, value TEXT);
+    INSERT INTO malformed_text (id, value) VALUES (1, CAST(x'80' AS TEXT));
+  `);
+
+  assert.throws(() => digest.databaseDigest(db, { fts: [] }), /UTF-8|well-formed|malformed TEXT/i);
+  db.close();
+});
+
+test('SQLite FTS digest rejects malformed stored TEXT and non-integral semantic IDs', () => {
+  const digest = require('../services/sqlite_digest_service');
+
+  const malformed = tmpDb('malformed-fts-text');
+  buildDigestFixture(malformed.db);
+  digest.rebuildKnowledgeChunksFts(malformed.db);
+  malformed.db.exec("UPDATE knowledge_chunks_fts SET title=CAST(x'80' AS TEXT) WHERE rowid=(SELECT MIN(rowid) FROM knowledge_chunks_fts)");
+  assert.throws(() => digest.databaseDigest(malformed.db, DIGEST_FIXTURE_MANIFEST), /UTF-8|well-formed|malformed SQLite TEXT/i);
+  malformed.db.close();
+
+  const unsafeId = tmpDb('unsafe-fts-id');
+  buildDigestFixture(unsafeId.db);
+  digest.rebuildKnowledgeChunksFts(unsafeId.db);
+  unsafeId.db.exec('UPDATE knowledge_chunks_fts SET entry_id=1.5 WHERE rowid=(SELECT MIN(rowid) FROM knowledge_chunks_fts)');
+  assert.throws(() => digest.databaseDigest(unsafeId.db, DIGEST_FIXTURE_MANIFEST), /FTS semantic integer|unsafe SQLite integer/i);
+  unsafeId.db.close();
+});
+
 test('sqlite_sequence schema object and rows are included in topology and logical digests', () => {
   const digest = require('../services/sqlite_digest_service');
   const { db } = tmpDb('sqlite-sequence');

@@ -1,4 +1,8 @@
 const crypto = require('crypto');
+const { TextDecoder } = require('util');
+
+const SQLITE_TEXT_BYTES = Symbol('sqliteTextBytes');
+const sqliteTextDecoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 
 function sha256Hex(buffer) {
   return crypto.createHash('sha256').update(buffer).digest('hex');
@@ -32,6 +36,25 @@ function utf8(value) {
   return Buffer.from(String(value).normalize('NFC').replace(/\r\n?/g, '\n'), 'utf8');
 }
 
+function sqliteTextValue(bytes, context) {
+  if (!Buffer.isBuffer(bytes)) throw new Error(`malformed SQLite TEXT at ${context}: expected raw bytes`);
+  const raw = Buffer.from(bytes);
+  let text;
+  try {
+    text = sqliteTextDecoder.decode(raw);
+  } catch (_error) {
+    throw new Error(`malformed SQLite TEXT at ${context}: value is not well-formed UTF-8`);
+  }
+  if (!Buffer.from(text, 'utf8').equals(raw)) {
+    throw new Error(`malformed SQLite TEXT at ${context}: blob/text round trip mismatch`);
+  }
+  return Object.freeze({ [SQLITE_TEXT_BYTES]: raw, text });
+}
+
+function isSqliteTextValue(value) {
+  return Boolean(value && typeof value === 'object' && Buffer.isBuffer(value[SQLITE_TEXT_BYTES]));
+}
+
 function item(label, payload) {
   const labelBytes = Buffer.from(label, 'utf8');
   const payloadBytes = Buffer.isBuffer(payload) ? payload : Buffer.from(payload || '');
@@ -56,8 +79,12 @@ function valueBytes(value) {
     if (!Number.isFinite(value)) throw new Error('non-finite SQLite REAL');
     return Buffer.concat([Buffer.from('R'), encodeNumber(value)]);
   }
+  if (isSqliteTextValue(value)) {
+    const text = value[SQLITE_TEXT_BYTES];
+    return Buffer.concat([Buffer.from('T'), u64(text.length), text]);
+  }
   if (Buffer.isBuffer(value)) return Buffer.concat([Buffer.from('B'), u64(value.length), value]);
-  const text = utf8(value);
+  const text = Buffer.from(String(value), 'utf8');
   return Buffer.concat([Buffer.from('T'), u64(text.length), text]);
 }
 
@@ -211,6 +238,64 @@ function sqlRows(db, sql) {
   return statement.all();
 }
 
+function storedValue(storageType, value, context) {
+  if (storageType === 'null') {
+    if (value !== null) throw new Error(`SQLite storage mismatch at ${context}: expected NULL`);
+    return null;
+  }
+  if (storageType === 'integer') {
+    if (typeof value !== 'bigint') throw new Error(`SQLite storage mismatch at ${context}: expected INTEGER`);
+    return value;
+  }
+  if (storageType === 'real') {
+    if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error(`SQLite storage mismatch at ${context}: expected finite REAL`);
+    return value;
+  }
+  if (storageType === 'text') return sqliteTextValue(value, context);
+  if (storageType === 'blob') {
+    if (!Buffer.isBuffer(value)) throw new Error(`SQLite storage mismatch at ${context}: expected BLOB`);
+    return value;
+  }
+  throw new Error(`unknown SQLite storage class at ${context}: ${storageType}`);
+}
+
+function storedRows(db, columns, fromClause) {
+  const projection = [];
+  for (let index = 0; index < columns.length; index += 1) {
+    const expression = columns[index].expression;
+    const typeAlias = quoteIdent(`__tm_storage_type_${index}`);
+    const valueAlias = quoteIdent(`__tm_storage_value_${index}`);
+    projection.push(`typeof(${expression}) AS ${typeAlias}`);
+    projection.push(`CASE WHEN typeof(${expression}) = 'text' THEN CAST(${expression} AS BLOB) ELSE ${expression} END AS ${valueAlias}`);
+  }
+  return sqlRows(db, `SELECT ${projection.join(', ')} ${fromClause}`).map((dataRow) => columns.map((column, index) => (
+    storedValue(dataRow[`__tm_storage_type_${index}`], dataRow[`__tm_storage_value_${index}`], column.context)
+  )));
+}
+
+function safePositiveId(value, context) {
+  if (typeof value !== 'bigint' || value < 1n || value > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new Error(`unsafe SQLite integer at ${context}`);
+  }
+  return value;
+}
+
+function ftsSemanticId(value, context) {
+  if (typeof value === 'bigint') return safePositiveId(value, context);
+  if (typeof value === 'number' && Number.isSafeInteger(value) && !Object.is(value, -0)) {
+    return safePositiveId(BigInt(value), context);
+  }
+  if (!isSqliteTextValue(value) || !/^[1-9][0-9]*$/.test(value.text)) {
+    throw new Error(`unsafe FTS semantic integer at ${context}`);
+  }
+  return safePositiveId(BigInt(value.text), context);
+}
+
+function requiredText(value, context) {
+  if (!isSqliteTextValue(value)) throw new Error(`SQLite storage mismatch at ${context}: expected TEXT`);
+  return value.text;
+}
+
 function topologyStream(db, manifest) {
   const pragmas = [
     row(['application_id', BigInt(db.pragma('application_id', { simple: true }))]).subarray(8),
@@ -254,8 +339,12 @@ function topologyStream(db, manifest) {
 
 function tableRowsStream(db, tableName) {
   const columns = sqlRows(db, `PRAGMA table_xinfo(${quoteIdent(tableName)})`).filter((column) => Number(column.hidden) === 0);
-  const rows = sqlRows(db, `SELECT ${columns.map((column) => quoteIdent(column.name)).join(', ')} FROM ${quoteIdent(tableName)}`)
-    .map((dataRow) => row(columns.map((column) => dataRow[column.name])).subarray(8))
+  const rows = storedRows(
+    db,
+    columns.map((column) => ({ expression: quoteIdent(column.name), context: `${tableName}.${column.name}` })),
+    `FROM ${quoteIdent(tableName)}`
+  )
+    .map((values) => row(values).subarray(8))
     .sort(Buffer.compare);
   const cids = columns.map((column) => row([BigInt(column.cid)]).subarray(8));
   return Buffer.concat([
@@ -266,27 +355,37 @@ function tableRowsStream(db, tableName) {
 }
 
 function knowledgeRows(db) {
-  const rows = sqlRows(db, `
-    SELECT c.id AS chunk_id, c.entry_id AS entry_id, e.title AS title, c.content AS content, e.tags_json AS tags_json
+  const rows = storedRows(db, [
+    { expression: 'c.id', context: 'knowledge_chunks.id' },
+    { expression: 'c.entry_id', context: 'knowledge_chunks.entry_id' },
+    { expression: 'e.title', context: 'knowledge_entries.title' },
+    { expression: 'c.content', context: 'knowledge_chunks.content' },
+    { expression: 'e.tags_json', context: 'knowledge_entries.tags_json' }
+  ], `
     FROM knowledge_chunks c
     JOIN knowledge_entries e ON e.id = c.entry_id
     ORDER BY c.id
   `);
   const seen = new Set();
-  return rows.map((r) => {
-    if (seen.has(String(r.chunk_id))) throw new Error('duplicate chunk IDs in knowledge_chunks');
-    seen.add(String(r.chunk_id));
+  return rows.map((values) => {
+    const chunkId = safePositiveId(values[0], 'knowledge_chunks.id');
+    const entryId = safePositiveId(values[1], 'knowledge_chunks.entry_id');
+    const title = requiredText(values[2], 'knowledge_entries.title');
+    const content = requiredText(values[3], 'knowledge_chunks.content');
+    const tagsJson = values[4] === null ? '[]' : requiredText(values[4], 'knowledge_entries.tags_json');
+    if (seen.has(String(chunkId))) throw new Error('duplicate chunk IDs in knowledge_chunks');
+    seen.add(String(chunkId));
     let parsed;
     try {
-      parsed = JSON.parse(r.tags_json || '[]');
+      parsed = JSON.parse(tagsJson);
     } catch (error) {
-      throw new Error(`malformed tags_json for knowledge entry ${r.entry_id}`);
+      throw new Error(`malformed tags_json for knowledge entry ${entryId}`);
     }
-    if (!Array.isArray(parsed)) throw new Error(`malformed tags_json for knowledge entry ${r.entry_id}`);
+    if (!Array.isArray(parsed)) throw new Error(`malformed tags_json for knowledge entry ${entryId}`);
     const tags = [...new Set(parsed.map((tag) => String(tag).normalize('NFC')))].sort((a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b))).join(' ');
     return {
-      values: [BigInt(r.entry_id), BigInt(r.chunk_id), r.title, r.content, tags],
-      insert: [r.title, r.content, tags, Number(r.entry_id), Number(r.chunk_id)]
+      values: [entryId, chunkId, title, content, tags],
+      insert: [title, content, tags, Number(entryId), Number(chunkId)]
     };
   });
 }
@@ -365,8 +464,21 @@ function verifyKnowledgeChunksFtsIntegrity(db, manifest, options) {
 
 function ftsDigest(db, manifestEntry) {
   if (manifestEntry.virtualName !== 'knowledge_chunks_fts') throw new Error(`unknown FTS table ${manifestEntry.virtualName}`);
-  const rows = sqlRows(db, 'SELECT entry_id, chunk_id, title, content, tags FROM knowledge_chunks_fts ORDER BY chunk_id')
-    .map((r) => [BigInt(r.entry_id), BigInt(r.chunk_id), r.title, r.content, r.tags]);
+  const rows = storedRows(db, [
+    { expression: 'entry_id', context: 'knowledge_chunks_fts.entry_id' },
+    { expression: 'chunk_id', context: 'knowledge_chunks_fts.chunk_id' },
+    { expression: 'title', context: 'knowledge_chunks_fts.title' },
+    { expression: 'content', context: 'knowledge_chunks_fts.content' },
+    { expression: 'tags', context: 'knowledge_chunks_fts.tags' }
+  ], 'FROM knowledge_chunks_fts ORDER BY chunk_id')
+    .map((values) => {
+      const entryId = ftsSemanticId(values[0], 'knowledge_chunks_fts.entry_id');
+      const chunkId = ftsSemanticId(values[1], 'knowledge_chunks_fts.chunk_id');
+      requiredText(values[2], 'knowledge_chunks_fts.title');
+      requiredText(values[3], 'knowledge_chunks_fts.content');
+      requiredText(values[4], 'knowledge_chunks_fts.tags');
+      return [entryId, chunkId, values[2], values[3], values[4]];
+    });
   const stream = ftsStream(manifestEntry, rows);
   return { virtualName: manifestEntry.virtualName, rowCount: rows.length, sha256: sha256Hex(stream), stream };
 }
@@ -410,8 +522,19 @@ function matchKnowledgeChunksCanary(db, term) {
 
 function verifyKnowledgeChunksFtsCanaries(db, terms) {
   const projected = knowledgeRows(db).map((rowData) => rowData.values);
-  const actual = sqlRows(db, 'SELECT entry_id, chunk_id, title, content, tags FROM knowledge_chunks_fts ORDER BY chunk_id')
-    .map((r) => [BigInt(r.entry_id), BigInt(r.chunk_id), r.title, r.content, r.tags]);
+  const actual = storedRows(db, [
+    { expression: 'entry_id', context: 'knowledge_chunks_fts.entry_id' },
+    { expression: 'chunk_id', context: 'knowledge_chunks_fts.chunk_id' },
+    { expression: 'title', context: 'knowledge_chunks_fts.title' },
+    { expression: 'content', context: 'knowledge_chunks_fts.content' },
+    { expression: 'tags', context: 'knowledge_chunks_fts.tags' }
+  ], 'FROM knowledge_chunks_fts ORDER BY chunk_id').map((values) => [
+    ftsSemanticId(values[0], 'knowledge_chunks_fts.entry_id'),
+    ftsSemanticId(values[1], 'knowledge_chunks_fts.chunk_id'),
+    requiredText(values[2], 'knowledge_chunks_fts.title'),
+    requiredText(values[3], 'knowledge_chunks_fts.content'),
+    requiredText(values[4], 'knowledge_chunks_fts.tags')
+  ]);
   if (JSON.stringify(projected, (_key, value) => (typeof value === 'bigint' ? value.toString() : value)) !== JSON.stringify(actual, (_key, value) => (typeof value === 'bigint' ? value.toString() : value))) {
     throw new Error('FTS projection mismatch');
   }

@@ -761,6 +761,24 @@ test('safe integer preflight enforces field domains and knowledge source_id poly
   ok.db.prepare('INSERT INTO knowledge_entries (id, source_id) VALUES (?, ?)').run(1, 'brief.csv');
   assert.doesNotThrow(() => migrationService.classifyDatabase(ok.db, { rootDir: serverRoot() }));
   ok.db.close();
+
+  const byteBoundaryOk = tmpDb('source-id-byte-boundary-ok');
+  legacy.apply(byteBoundaryOk.db);
+  byteBoundaryOk.db.prepare('INSERT INTO knowledge_entries (id, source_id) VALUES (?, ?)').run(1, `${'界'.repeat(1365)}a`);
+  assert.doesNotThrow(() => migrationService.runMigrations(byteBoundaryOk.db, {
+    rootDir: serverRoot(),
+    seedAdmissions: seedAdmissions()
+  }));
+  byteBoundaryOk.db.close();
+
+  const byteBoundaryBad = tmpDb('source-id-byte-boundary-bad');
+  legacy.apply(byteBoundaryBad.db);
+  byteBoundaryBad.db.prepare('INSERT INTO knowledge_entries (id, source_id) VALUES (?, ?)').run(1, `${'界'.repeat(1365)}ab`);
+  assert.throws(() => migrationService.runMigrations(byteBoundaryBad.db, {
+    rootDir: serverRoot(),
+    seedAdmissions: seedAdmissions()
+  }), /knowledge_entries\.source_id/);
+  byteBoundaryBad.db.close();
 });
 
 test('legacy orphan preflight covers declared physical and logical relationships', () => {
