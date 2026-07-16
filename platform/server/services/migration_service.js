@@ -251,7 +251,7 @@ function localImportRequests(source) {
 }
 
 function forbiddenAsyncToken(source) {
-  const match = /\b(?:async|await)\b/.exec(source);
+  const match = /\b(?:async|await|import|Atomics|SharedArrayBuffer|WebAssembly|FinalizationRegistry|WeakRef|AsyncDisposableStack|fromAsync)\b/.exec(source);
   return match ? match[0] : null;
 }
 
@@ -263,7 +263,7 @@ function validatedMigrationBundle(migration, options) {
     const source = input.bytes.toString('utf8');
     const asyncToken = forbiddenAsyncToken(source);
     if (asyncToken) {
-      throw new Error(`asynchronous syntax is not allowed in migration bundle ${input.path}: ${asyncToken}`);
+      throw new Error(`asynchronous capability or syntax is not allowed in migration bundle ${input.path}: ${asyncToken}`);
     }
     for (const request of localImportRequests(source)) {
       const resolved = normalizeRelativeRequest(input.path, request);
@@ -288,6 +288,15 @@ function isolatedHostFunction(fn) {
   return Object.freeze(fn);
 }
 
+function defineSandboxValue(sandbox, name, value, enumerable) {
+  Object.defineProperty(sandbox, name, {
+    value,
+    writable: false,
+    enumerable: Boolean(enumerable),
+    configurable: false
+  });
+}
+
 function migrationExecutionContext() {
   const environment = Object.create(null);
   for (const [key, value] of Object.entries(process.env)) {
@@ -303,16 +312,30 @@ function migrationExecutionContext() {
   Object.freeze(sandboxProcess);
 
   const sandbox = Object.create(null);
-  sandbox.process = sandboxProcess;
-  sandbox.Promise = undefined;
-  sandbox.queueMicrotask = undefined;
-  sandbox.setInterval = undefined;
-  sandbox.setTimeout = undefined;
-  sandbox.setImmediate = undefined;
+  defineSandboxValue(sandbox, 'process', sandboxProcess, true);
+  for (const name of [
+    'Promise',
+    'Atomics',
+    'SharedArrayBuffer',
+    'WebAssembly',
+    'FinalizationRegistry',
+    'WeakRef',
+    'AsyncDisposableStack'
+  ]) {
+    defineSandboxValue(sandbox, name, undefined, false);
+  }
   const context = vm.createContext(sandbox, {
     name: 'turingmarket-migration-vm',
     codeGeneration: { strings: false, wasm: false }
   });
+  new vm.Script(`
+    Object.defineProperty(Array, 'fromAsync', {
+      value: undefined,
+      writable: false,
+      enumerable: false,
+      configurable: false
+    });
+  `).runInContext(context);
   const cloneValue = new vm.Script(`
     (function cloneMigrationValue(value) {
       if (value === null || typeof value !== 'object') return value;
@@ -355,10 +378,9 @@ function migrationExecutionContext() {
   const rejectAsyncWork = isolatedHostFunction(() => {
     throw contextError(null, 'asynchronous migration work is not allowed');
   });
-  sandbox.queueMicrotask = rejectAsyncWork;
-  sandbox.setInterval = rejectAsyncWork;
-  sandbox.setTimeout = rejectAsyncWork;
-  sandbox.setImmediate = rejectAsyncWork;
+  for (const name of ['queueMicrotask', 'setInterval', 'setTimeout', 'setImmediate']) {
+    defineSandboxValue(sandbox, name, rejectAsyncWork, false);
+  }
   return { context, cloneValue, contextError };
 }
 

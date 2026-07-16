@@ -155,6 +155,49 @@ function writeTempMigration(root, repoPath, source) {
   fs.writeFileSync(absolute, source, 'utf8');
 }
 
+function assertAsyncCapabilityRejected(probeName, applyBody) {
+  const migrationService = require('../services/migration_service');
+  const root = tempMigrationRoot(probeName);
+  const sourcePath = `migrations/002_${probeName}.js`;
+  writeTempMigration(root, sourcePath, `
+module.exports = {
+  version: 2,
+  name: '${probeName}',
+  sourcePath: '${sourcePath}',
+  engineVersion: 1,
+  dependencies: ['${VENDORED_BCRYPT_PATH}'],
+  schemaManifest: {
+    columns: { ${probeName}: { id: { type: 'INTEGER', notnull: 0, defaultValue: null } } },
+    indexes: {},
+    triggers: {}
+  },
+  apply(db) {
+    ${applyBody}
+    db.exec('CREATE TABLE ${probeName} (id INTEGER PRIMARY KEY) STRICT;');
+  }
+};
+`);
+  const { db } = tmpDb(probeName);
+
+  try {
+    assert.throws(() => migrationService.runMigrations(db, {
+      rootDir: root,
+      registeredMigrations: [{
+        version: 2,
+        name: probeName,
+        sourcePath,
+        engineVersion: 1,
+        dependencies: [VENDORED_BCRYPT_PATH]
+      }]
+    }), /asynchronous|dynamic import|Atomics|fromAsync|WebAssembly|FinalizationRegistry|not allowed|capability/i);
+    assert.equal(db.prepare(`SELECT COUNT(*) AS count FROM sqlite_schema WHERE name = ?`).get(probeName).count, 0);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE name = 'schema_migrations'").get().count, 0);
+  } finally {
+    db.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+}
+
 test('migration checksum framing matches the design vector and excludes orchestration files', () => {
   const migrationService = require('../services/migration_service');
   const actual = migrationService.computeMigrationChecksum({
@@ -917,6 +960,89 @@ module.exports = {
     assert.match(migrationError.message, /async|await|asynchronous|not allowed/i);
     assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE name = 'nested_async_escape_after_commit'").get().count, 0);
     assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE name = 'schema_migrations'").get().count, 0);
+  } finally {
+    db.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('migration bundle rejects dynamic import as a late microtask source', () => {
+  assertAsyncCapabilityRejected(
+    'dynamic_import_microtask_probe',
+    "import('node:module').catch(() => {});"
+  );
+});
+
+test('migration bundle rejects Atomics.waitAsync as a late microtask source', () => {
+  assertAsyncCapabilityRejected(
+    'atomics_wait_async_probe',
+    "Atomics.waitAsync(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10).value.then(() => {});"
+  );
+});
+
+test('migration bundle rejects Array.fromAsync as a late microtask source', () => {
+  assertAsyncCapabilityRejected(
+    'array_from_async_probe',
+    'Array.fromAsync([1]).then(() => {});'
+  );
+});
+
+test('migration bundle rejects AsyncDisposableStack as a late microtask source', () => {
+  assertAsyncCapabilityRejected(
+    'async_disposable_stack_probe',
+    'const stack = new AsyncDisposableStack(); stack.disposeAsync();'
+  );
+});
+
+test('migration VM hides intrinsic async capabilities from computed global access', () => {
+  const migrationService = require('../services/migration_service');
+  const root = tempMigrationRoot('computed_async_capability_probe');
+  const sourcePath = 'migrations/002_computed_async_capability_probe.js';
+  writeTempMigration(root, sourcePath, `
+module.exports = {
+  version: 2,
+  name: 'computed_async_capability_probe',
+  sourcePath: '${sourcePath}',
+  engineVersion: 1,
+  dependencies: ['${VENDORED_BCRYPT_PATH}'],
+  schemaManifest: {
+    columns: { computed_async_capability_probe: { id: { type: 'INTEGER', notnull: 0, defaultValue: null } } },
+    indexes: {},
+    triggers: {}
+  },
+  apply(db) {
+    const globalNames = [
+      'Ato' + 'mics',
+      'SharedArray' + 'Buffer',
+      'Web' + 'Assembly',
+      'Finalization' + 'Registry',
+      'Weak' + 'Ref',
+      'Async' + 'DisposableStack'
+    ];
+    for (const name of globalNames) {
+      if (globalThis[name] !== undefined) throw new Error('late capability remains visible: ' + name);
+      if (delete globalThis[name]) throw new Error('late capability shadow is configurable: ' + name);
+    }
+    if (Array['from' + 'Async'] !== undefined) throw new Error('Array late factory remains visible');
+    db.exec('CREATE TABLE computed_async_capability_probe (id INTEGER PRIMARY KEY) STRICT;');
+  }
+};
+`);
+  const descriptor = {
+    version: 2,
+    name: 'computed_async_capability_probe',
+    sourcePath,
+    engineVersion: 1,
+    dependencies: [VENDORED_BCRYPT_PATH]
+  };
+  const { db } = tmpDb('computed-async-capability-probe');
+
+  try {
+    assert.deepEqual(migrationService.runMigrations(db, {
+      rootDir: root,
+      registeredMigrations: [descriptor]
+    }), { status: 'managed', currentVersion: 2 });
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE name = 'computed_async_capability_probe'").get().count, 1);
   } finally {
     db.close();
     fs.rmSync(root, { recursive: true, force: true });
