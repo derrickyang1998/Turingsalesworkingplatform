@@ -149,6 +149,12 @@ function tempMigrationRoot(name) {
   return root;
 }
 
+function writeTempMigration(root, repoPath, source) {
+  const absolute = path.join(root, ...repoPath.split('/'));
+  fs.mkdirSync(path.dirname(absolute), { recursive: true });
+  fs.writeFileSync(absolute, source, 'utf8');
+}
+
 test('migration checksum framing matches the design vector and excludes orchestration files', () => {
   const migrationService = require('../services/migration_service');
   const actual = migrationService.computeMigrationChecksum({
@@ -273,6 +279,255 @@ test('migration loader allows only engine-approved builtins and rejects ambient 
   });
   assert.equal(db.prepare("SELECT name FROM sqlite_schema WHERE name = 'builtin_import_probe'").get().name, 'builtin_import_probe');
   db.close();
+});
+
+test('engine-approved builtin facade cannot expose host constructors or package loading', () => {
+  const migrationService = require('../services/migration_service');
+  const root = tempMigrationRoot('builtin-constructor-escape');
+  const sourcePath = 'migrations/002_builtin_constructor_escape.js';
+  writeTempMigration(root, sourcePath, `
+const crypto = require('crypto');
+const hostProcess = crypto.randomInt.constructor('return process')();
+const externalRequire = hostProcess.getBuiltinModule('node:module')
+  .createRequire(hostProcess.cwd() + '/server/server.js');
+const Database = externalRequire('better-sqlite3');
+module.exports = {
+  version: 2,
+  name: 'builtin_constructor_escape',
+  sourcePath: '${sourcePath}',
+  engineVersion: 1,
+  dependencies: ['${VENDORED_BCRYPT_PATH}'],
+  schemaManifest: {
+    columns: { builtin_constructor_escape: { id: { type: 'INTEGER', notnull: 0, defaultValue: null } } },
+    indexes: {},
+    triggers: {}
+  },
+  apply(db) {
+    if (!Database) throw new Error('external package did not load');
+    db.exec('CREATE TABLE builtin_constructor_escape (id INTEGER PRIMARY KEY) STRICT;');
+  }
+};
+`);
+  const { db } = tmpDb('builtin-constructor-escape');
+
+  try {
+    assert.throws(() => migrationService.runMigrations(db, {
+      rootDir: root,
+      registeredMigrations: [{
+        version: 2,
+        name: 'builtin_constructor_escape',
+        sourcePath,
+        engineVersion: 1,
+        dependencies: [VENDORED_BCRYPT_PATH]
+      }]
+    }), /constructor|package|builtin|not allowed|undefined/i);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE name = 'builtin_constructor_escape'").get().count, 0);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE name = 'schema_migrations'").get().count, 0);
+  } finally {
+    db.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('migration database facade cannot expose host constructors or package loading', () => {
+  const migrationService = require('../services/migration_service');
+  const root = tempMigrationRoot('database-constructor-escape');
+  const sourcePath = 'migrations/002_database_constructor_escape.js';
+  writeTempMigration(root, sourcePath, `
+module.exports = {
+  version: 2,
+  name: 'database_constructor_escape',
+  sourcePath: '${sourcePath}',
+  engineVersion: 1,
+  dependencies: ['${VENDORED_BCRYPT_PATH}'],
+  schemaManifest: {
+    columns: { database_constructor_escape: { id: { type: 'INTEGER', notnull: 0, defaultValue: null } } },
+    indexes: {},
+    triggers: {}
+  },
+  apply(db) {
+    const hostProcess = db.constructor.constructor('return process')();
+    const externalRequire = hostProcess.getBuiltinModule('node:module')
+      .createRequire(hostProcess.cwd() + '/server/server.js');
+    const Database = externalRequire('better-sqlite3');
+    if (!Database) throw new Error('external package did not load');
+    db.exec('CREATE TABLE database_constructor_escape (id INTEGER PRIMARY KEY) STRICT;');
+  }
+};
+`);
+  const { db } = tmpDb('database-constructor-escape');
+
+  try {
+    assert.throws(() => migrationService.runMigrations(db, {
+      rootDir: root,
+      registeredMigrations: [{
+        version: 2,
+        name: 'database_constructor_escape',
+        sourcePath,
+        engineVersion: 1,
+        dependencies: [VENDORED_BCRYPT_PATH]
+      }]
+    }), /constructor|package|database|not allowed|undefined/i);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE name = 'database_constructor_escape'").get().count, 0);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE name = 'schema_migrations'").get().count, 0);
+  } finally {
+    db.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('migration database rows cannot expose host constructors or package loading', () => {
+  const migrationService = require('../services/migration_service');
+  const root = tempMigrationRoot('database-row-constructor-escape');
+  const sourcePath = 'migrations/002_database_row_constructor_escape.js';
+  writeTempMigration(root, sourcePath, `
+module.exports = {
+  version: 2,
+  name: 'database_row_constructor_escape',
+  sourcePath: '${sourcePath}',
+  engineVersion: 1,
+  dependencies: ['${VENDORED_BCRYPT_PATH}'],
+  schemaManifest: {
+    columns: { database_row_constructor_escape: { id: { type: 'INTEGER', notnull: 0, defaultValue: null } } },
+    indexes: {},
+    triggers: {}
+  },
+  apply(db) {
+    const row = db.prepare('SELECT 1 AS value').get();
+    const hostProcess = row.constructor.constructor('return process')();
+    const externalRequire = hostProcess.getBuiltinModule('node:module')
+      .createRequire(hostProcess.cwd() + '/server/server.js');
+    const Database = externalRequire('better-sqlite3');
+    if (!Database) throw new Error('external package did not load');
+    db.exec('CREATE TABLE database_row_constructor_escape (id INTEGER PRIMARY KEY) STRICT;');
+  }
+};
+`);
+  const { db } = tmpDb('database-row-constructor-escape');
+
+  try {
+    assert.throws(() => migrationService.runMigrations(db, {
+      rootDir: root,
+      registeredMigrations: [{
+        version: 2,
+        name: 'database_row_constructor_escape',
+        sourcePath,
+        engineVersion: 1,
+        dependencies: [VENDORED_BCRYPT_PATH]
+      }]
+    }), /constructor|package|database|code generation|not allowed|undefined/i);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE name = 'database_row_constructor_escape'").get().count, 0);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE name = 'schema_migrations'").get().count, 0);
+  } finally {
+    db.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('denied import errors cannot expose host constructors or package loading', () => {
+  const migrationService = require('../services/migration_service');
+  const root = tempMigrationRoot('import-error-constructor-escape');
+  const sourcePath = 'migrations/002_import_error_constructor_escape.js';
+  writeTempMigration(root, sourcePath, `
+let importError;
+try {
+  require('better-sqlite3');
+} catch (error) {
+  importError = error;
+}
+const hostProcess = importError.constructor.constructor('return process')();
+const externalRequire = hostProcess.getBuiltinModule('node:module')
+  .createRequire(hostProcess.cwd() + '/server/server.js');
+const Database = externalRequire('better-sqlite3');
+module.exports = {
+  version: 2,
+  name: 'import_error_constructor_escape',
+  sourcePath: '${sourcePath}',
+  engineVersion: 1,
+  dependencies: ['${VENDORED_BCRYPT_PATH}'],
+  schemaManifest: {
+    columns: { import_error_constructor_escape: { id: { type: 'INTEGER', notnull: 0, defaultValue: null } } },
+    indexes: {},
+    triggers: {}
+  },
+  apply(db) {
+    if (!Database) throw new Error('external package did not load');
+    db.exec('CREATE TABLE import_error_constructor_escape (id INTEGER PRIMARY KEY) STRICT;');
+  }
+};
+`);
+  const { db } = tmpDb('import-error-constructor-escape');
+
+  try {
+    assert.throws(() => migrationService.runMigrations(db, {
+      rootDir: root,
+      registeredMigrations: [{
+        version: 2,
+        name: 'import_error_constructor_escape',
+        sourcePath,
+        engineVersion: 1,
+        dependencies: [VENDORED_BCRYPT_PATH]
+      }]
+    }), /constructor|package|import|code generation|not allowed|undefined/i);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE name = 'import_error_constructor_escape'").get().count, 0);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE name = 'schema_migrations'").get().count, 0);
+  } finally {
+    db.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('database errors cannot expose host constructors or package loading', () => {
+  const migrationService = require('../services/migration_service');
+  const root = tempMigrationRoot('database-error-constructor-escape');
+  const sourcePath = 'migrations/002_database_error_constructor_escape.js';
+  writeTempMigration(root, sourcePath, `
+module.exports = {
+  version: 2,
+  name: 'database_error_constructor_escape',
+  sourcePath: '${sourcePath}',
+  engineVersion: 1,
+  dependencies: ['${VENDORED_BCRYPT_PATH}'],
+  schemaManifest: {
+    columns: { database_error_constructor_escape: { id: { type: 'INTEGER', notnull: 0, defaultValue: null } } },
+    indexes: {},
+    triggers: {}
+  },
+  apply(db) {
+    let databaseError;
+    try {
+      db.prepare('SELECT FROM invalid_sql');
+    } catch (error) {
+      databaseError = error;
+    }
+    const hostProcess = databaseError.constructor.constructor('return process')();
+    const externalRequire = hostProcess.getBuiltinModule('node:module')
+      .createRequire(hostProcess.cwd() + '/server/server.js');
+    const Database = externalRequire('better-sqlite3');
+    if (!Database) throw new Error('external package did not load');
+    db.exec('CREATE TABLE database_error_constructor_escape (id INTEGER PRIMARY KEY) STRICT;');
+  }
+};
+`);
+  const { db } = tmpDb('database-error-constructor-escape');
+
+  try {
+    assert.throws(() => migrationService.runMigrations(db, {
+      rootDir: root,
+      registeredMigrations: [{
+        version: 2,
+        name: 'database_error_constructor_escape',
+        sourcePath,
+        engineVersion: 1,
+        dependencies: [VENDORED_BCRYPT_PATH]
+      }]
+    }), /constructor|package|database|code generation|not allowed|undefined/i);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE name = 'database_error_constructor_escape'").get().count, 0);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE name = 'schema_migrations'").get().count, 0);
+  } finally {
+    db.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('empty initialization applies the immutable baseline bytes from the first migration checksum bundle', () => {
@@ -438,6 +693,154 @@ test('final managed classification runs inside the exclusive transaction and rol
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE name = 'users'").get().count, 0);
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE name = 'final_verification_probe'").get().count, 0);
   db.close();
+});
+
+test('migration timers cannot schedule database work after the exclusive transaction returns', async () => {
+  const migrationService = require('../services/migration_service');
+  const root = tempMigrationRoot('async-timer');
+  const sourcePath = 'migrations/002_async_timer_probe.js';
+  writeTempMigration(root, sourcePath, `
+module.exports = {
+  version: 2,
+  name: 'async_timer_probe',
+  sourcePath: '${sourcePath}',
+  engineVersion: 1,
+  dependencies: ['${VENDORED_BCRYPT_PATH}'],
+  schemaManifest: { columns: {}, indexes: {}, triggers: {} },
+  apply(db) {
+    setImmediate(() => {
+      try {
+        db.exec('CREATE TABLE async_escape_after_commit (id INTEGER PRIMARY KEY) STRICT;');
+      } catch (_error) {
+        // The RED implementation can outlive the test transaction; keep the probe deterministic.
+      }
+    });
+  }
+};
+`);
+  const { db } = tmpDb('async-timer');
+  let migrationError = null;
+
+  try {
+    try {
+      migrationService.runMigrations(db, {
+        rootDir: root,
+        registeredMigrations: [{
+          version: 2,
+          name: 'async_timer_probe',
+          sourcePath,
+          engineVersion: 1,
+          dependencies: [VENDORED_BCRYPT_PATH]
+        }]
+      });
+    } catch (error) {
+      migrationError = error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    assert.ok(migrationError, 'timer scheduling must fail synchronously inside the migration transaction');
+    assert.match(migrationError.message, /asynchronous|timer|setImmediate|not allowed/i);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE name = 'async_escape_after_commit'").get().count, 0);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE name = 'schema_migrations'").get().count, 0);
+  } finally {
+    db.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('migration apply rejects returned thenables and rolls back every write', () => {
+  const migrationService = require('../services/migration_service');
+  const root = tempMigrationRoot('async-thenable');
+  const sourcePath = 'migrations/002_async_thenable_probe.js';
+  writeTempMigration(root, sourcePath, `
+module.exports = {
+  version: 2,
+  name: 'async_thenable_probe',
+  sourcePath: '${sourcePath}',
+  engineVersion: 1,
+  dependencies: ['${VENDORED_BCRYPT_PATH}'],
+  schemaManifest: {
+    columns: { async_thenable_probe: { id: { type: 'INTEGER', notnull: 0, defaultValue: null } } },
+    indexes: {},
+    triggers: {}
+  },
+  apply(db) {
+    db.exec('CREATE TABLE async_thenable_probe (id INTEGER PRIMARY KEY) STRICT;');
+    return { then() {} };
+  }
+};
+`);
+  const { db } = tmpDb('async-thenable');
+
+  try {
+    assert.throws(() => migrationService.runMigrations(db, {
+      rootDir: root,
+      registeredMigrations: [{
+        version: 2,
+        name: 'async_thenable_probe',
+        sourcePath,
+        engineVersion: 1,
+        dependencies: [VENDORED_BCRYPT_PATH]
+      }]
+    }), /asynchronous|thenable|Promise|not allowed/i);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE name = 'async_thenable_probe'").get().count, 0);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE name = 'schema_migrations'").get().count, 0);
+  } finally {
+    db.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('migration bundle rejects nested async syntax before it can capture the database', async () => {
+  const migrationService = require('../services/migration_service');
+  const root = tempMigrationRoot('nested-async');
+  const sourcePath = 'migrations/002_nested_async_probe.js';
+  writeTempMigration(root, sourcePath, `
+module.exports = {
+  version: 2,
+  name: 'nested_async_probe',
+  sourcePath: '${sourcePath}',
+  engineVersion: 1,
+  dependencies: ['${VENDORED_BCRYPT_PATH}'],
+  schemaManifest: { columns: {}, indexes: {}, triggers: {} },
+  apply(db) {
+    (async () => {
+      await 0;
+      try {
+        db.exec('CREATE TABLE nested_async_escape_after_commit (id INTEGER PRIMARY KEY) STRICT;');
+      } catch (_error) {}
+    })();
+  }
+};
+`);
+  const { db } = tmpDb('nested-async');
+  let migrationError = null;
+
+  try {
+    try {
+      migrationService.runMigrations(db, {
+        rootDir: root,
+        registeredMigrations: [{
+          version: 2,
+          name: 'nested_async_probe',
+          sourcePath,
+          engineVersion: 1,
+          dependencies: [VENDORED_BCRYPT_PATH]
+        }]
+      });
+    } catch (error) {
+      migrationError = error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    assert.ok(migrationError, 'async syntax must be rejected before migration execution');
+    assert.match(migrationError.message, /async|await|asynchronous|not allowed/i);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE name = 'nested_async_escape_after_commit'").get().count, 0);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE name = 'schema_migrations'").get().count, 0);
+  } finally {
+    db.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('db startup does not persist WAL or mutate malformed populated database before migration preflight succeeds', () => {
@@ -674,6 +1077,40 @@ test('legacy baseline metadata rejects index drift in addition to column and obj
   db.close();
 });
 
+test('v0.4 legacy compatibility indexes upgrade to the canonical 001 manifest', () => {
+  const migrationService = require('../services/migration_service');
+  const legacy = require('../migrations/baselines/legacy_v1');
+  const migration001 = require('../migrations/001_legacy_compat_columns');
+  const { db } = tmpDb('v04-compat-indexes');
+  legacy.apply(db);
+  db.exec(`
+    ALTER TABLE knowledge_entries ADD COLUMN title TEXT DEFAULT '';
+    ALTER TABLE knowledge_entries ADD COLUMN summary TEXT DEFAULT '';
+    ALTER TABLE knowledge_entries ADD COLUMN tags_json TEXT DEFAULT '[]';
+    ALTER TABLE knowledge_entries ADD COLUMN visibility TEXT DEFAULT 'team';
+    ALTER TABLE knowledge_entries ADD COLUMN source_hash TEXT;
+    CREATE UNIQUE INDEX idx_knowledge_source_hash ON knowledge_entries(source_hash)
+      WHERE source_hash IS NOT NULL AND source_hash != '';
+    CREATE INDEX idx_knowledge_visibility ON knowledge_entries(visibility, created_by);
+    CREATE INDEX idx_knowledge_source ON knowledge_entries(source_type, source_id);
+    CREATE INDEX idx_ai_conversations_user ON ai_conversations(user_id, updated_at);
+    CREATE INDEX idx_ai_messages_conversation ON ai_messages(conversation_id, created_at);
+    CREATE INDEX idx_ai_references_message ON ai_references(message_id);
+  `);
+  insertAdminOnly(db);
+  db.prepare('INSERT INTO influencers (id, platform, kol_handle) VALUES (1, ?, ?)').run('YouTube', '@existing');
+
+  assert.equal(migrationService.classifyDatabase(db, { rootDir: serverRoot() }).status, 'legacy');
+  migrationService.runMigrations(db, { rootDir: serverRoot() });
+  assert.deepEqual(migrationService.classifyDatabase(db, { rootDir: serverRoot() }), { status: 'managed', currentVersion: 1 });
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM users').get().count, 1);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM influencers').get().count, 1);
+  for (const [name, sql] of Object.entries(migration001.schemaManifest.indexes)) {
+    assert.equal(db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'index' AND name = ?").get(name).sql, sql);
+  }
+  db.close();
+});
+
 test('FTS preflight rejects stored projection drift that leaves postings unchanged before writes', () => {
   const migrationService = require('../services/migration_service');
   const digest = require('../services/sqlite_digest_service');
@@ -830,6 +1267,69 @@ test('known legacy compatibility column order remains valid when a later migrati
     migrations: [...migrationService.defaultMigrations(), probe]
   }), { status: 'managed', currentVersion: 2 });
   db.close();
+});
+
+test('registered future migration columns never relax no-ledger legacy classification', () => {
+  const migrationService = require('../services/migration_service');
+  const legacy = require('../migrations/baselines/legacy_v1');
+  const root = tempMigrationRoot('future-column-no-ledger');
+  const sourcePath = 'migrations/002_future_column_probe.js';
+  writeTempMigration(root, sourcePath, `
+const engine = require('./engines/v1');
+module.exports = {
+  version: 2,
+  name: 'future_column_probe',
+  sourcePath: '${sourcePath}',
+  engineVersion: 1,
+  dependencies: ['${VENDORED_BCRYPT_PATH}'],
+  schemaManifest: {
+    columns: { users: { phase4_probe: { type: 'TEXT', notnull: 0, defaultValue: null } } },
+    indexes: {},
+    triggers: {}
+  },
+  apply(db) {
+    engine.addColumnIfMissing(db, 'users', 'phase4_probe TEXT');
+  }
+};
+`);
+  const { db } = tmpDb('future-column-no-ledger');
+  legacy.apply(db);
+  db.exec('ALTER TABLE users ADD COLUMN phase4_probe TEXT;');
+  const options = {
+    rootDir: root,
+    registeredMigrations: [{
+      version: 2,
+      name: 'future_column_probe',
+      sourcePath,
+      engineVersion: 1,
+      dependencies: [VENDORED_BCRYPT_PATH]
+    }]
+  };
+  const classification = migrationService.classifyDatabase(db, {
+    rootDir: root,
+    migrations: [...migrationService.defaultMigrations(), options.registeredMigrations[0]]
+  });
+  let migrationError = null;
+
+  try {
+    migrationService.runMigrations(db, options);
+  } catch (error) {
+    migrationError = error;
+  }
+
+  assert.deepEqual({
+    classification: classification.status,
+    failed: Boolean(migrationError),
+    users: db.prepare('SELECT COUNT(*) AS count FROM users').get().count,
+    ledgerObjects: db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE name = 'schema_migrations'").get().count
+  }, {
+    classification: 'partial_or_malformed',
+    failed: true,
+    users: 0,
+    ledgerObjects: 0
+  });
+  db.close();
+  fs.rmSync(root, { recursive: true, force: true });
 });
 
 test('legacy shape accepts the v0.4 knowledge source hash partial index predicate as known compatibility state', () => {

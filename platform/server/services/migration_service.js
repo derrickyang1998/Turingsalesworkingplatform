@@ -250,12 +250,21 @@ function localImportRequests(source) {
   return requests;
 }
 
+function forbiddenAsyncToken(source) {
+  const match = /\b(?:async|await)\b/.exec(source);
+  return match ? match[0] : null;
+}
+
 function validatedMigrationBundle(migration, options) {
   const rootDir = options && options.rootDir ? options.rootDir : path.resolve(__dirname, '..');
   const inputs = migrationInputs(migration, rootDir);
   const files = new Map(inputs.map((input) => [input.path, input.bytes]));
   for (const input of inputs) {
     const source = input.bytes.toString('utf8');
+    const asyncToken = forbiddenAsyncToken(source);
+    if (asyncToken) {
+      throw new Error(`asynchronous syntax is not allowed in migration bundle ${input.path}: ${asyncToken}`);
+    }
     for (const request of localImportRequests(source)) {
       const resolved = normalizeRelativeRequest(input.path, request);
       if (!files.has(resolved)) {
@@ -274,6 +283,11 @@ function computeRegisteredMigrationChecksum(migration, options) {
   });
 }
 
+function isolatedHostFunction(fn) {
+  Object.setPrototypeOf(fn, null);
+  return Object.freeze(fn);
+}
+
 function migrationExecutionContext() {
   const environment = Object.create(null);
   for (const [key, value] of Object.entries(process.env)) {
@@ -288,19 +302,151 @@ function migrationExecutionContext() {
   });
   Object.freeze(sandboxProcess);
 
-  const safeSetTimeout = (...args) => setTimeout(...args);
-  const safeSetImmediate = (...args) => setImmediate(...args);
-  Object.setPrototypeOf(safeSetTimeout, null);
-  Object.setPrototypeOf(safeSetImmediate, null);
-
   const sandbox = Object.create(null);
   sandbox.process = sandboxProcess;
-  sandbox.setTimeout = safeSetTimeout;
-  sandbox.setImmediate = safeSetImmediate;
-  return vm.createContext(sandbox, {
+  sandbox.Promise = undefined;
+  sandbox.queueMicrotask = undefined;
+  sandbox.setInterval = undefined;
+  sandbox.setTimeout = undefined;
+  sandbox.setImmediate = undefined;
+  const context = vm.createContext(sandbox, {
     name: 'turingmarket-migration-vm',
     codeGeneration: { strings: false, wasm: false }
   });
+  const cloneValue = new vm.Script(`
+    (function cloneMigrationValue(value) {
+      if (value === null || typeof value !== 'object') return value;
+      if (ArrayBuffer.isView(value)) {
+        const output = new Uint8Array(value.length);
+        for (let index = 0; index < value.length; index += 1) output[index] = value[index];
+        return output;
+      }
+      if (Array.isArray(value)) {
+        const output = [];
+        for (let index = 0; index < value.length; index += 1) output.push(cloneMigrationValue(value[index]));
+        return output;
+      }
+      const output = Object.create(null);
+      for (const key of Object.keys(value)) output[key] = cloneMigrationValue(value[key]);
+      return output;
+    })
+  `).runInContext(context);
+  const createError = new vm.Script(`
+    (function createMigrationError(name, message, code) {
+      const error = new Error(message);
+      if (typeof name === 'string' && name) error.name = name;
+      if (typeof code === 'string' && code) error.code = code;
+      return error;
+    })
+  `).runInContext(context);
+  const contextError = (error, fallbackMessage) => {
+    let name = 'Error';
+    let message = fallbackMessage || 'migration host operation failed';
+    let code;
+    try {
+      if (error && typeof error.name === 'string' && error.name) name = error.name;
+      if (error && typeof error.message === 'string' && error.message) message = error.message;
+      if (error && typeof error.code === 'string' && error.code) code = error.code;
+    } catch (_error) {
+      // Use the closed fallback fields when an exotic thrown value cannot be inspected safely.
+    }
+    return createError(name, message, code);
+  };
+  const rejectAsyncWork = isolatedHostFunction(() => {
+    throw contextError(null, 'asynchronous migration work is not allowed');
+  });
+  sandbox.queueMicrotask = rejectAsyncWork;
+  sandbox.setInterval = rejectAsyncWork;
+  sandbox.setTimeout = rejectAsyncWork;
+  sandbox.setImmediate = rejectAsyncWork;
+  return { context, cloneValue, contextError };
+}
+
+function hostBoundary(runtime, operation) {
+  try {
+    return operation();
+  } catch (error) {
+    throw runtime.contextError(error);
+  }
+}
+
+function migrationCryptoFacade(runtime) {
+  const facade = Object.create(null);
+  facade.randomInt = isolatedHostFunction((...args) => hostBoundary(runtime, () => {
+    if (args.length === 1) return crypto.randomInt(args[0]);
+    if (args.length === 2) return crypto.randomInt(args[0], args[1]);
+    throw new TypeError('crypto.randomInt accepts one or two integer arguments in migrations');
+  }));
+  facade.randomBytes = isolatedHostFunction((...args) => hostBoundary(runtime, () => {
+    if (args.length !== 1) throw new TypeError('crypto.randomBytes accepts one length argument in migrations');
+    return runtime.cloneValue(crypto.randomBytes(args[0]));
+  }));
+  facade.createHash = isolatedHostFunction((...args) => hostBoundary(runtime, () => {
+    if (args.length !== 1 || args[0] !== 'sha256') {
+      throw new TypeError('migrations may create only sha256 hashes');
+    }
+    const hash = crypto.createHash('sha256');
+    const hashFacade = Object.create(null);
+    hashFacade.update = isolatedHostFunction((value, encoding) => hostBoundary(runtime, () => {
+      if (typeof value !== 'string' || (encoding !== undefined && encoding !== 'utf8')) {
+        throw new TypeError('migration sha256 input must be a UTF-8 string');
+      }
+      hash.update(value, 'utf8');
+      return hashFacade;
+    }));
+    hashFacade.digest = isolatedHostFunction((encoding) => hostBoundary(runtime, () => {
+      if (encoding !== 'hex') throw new TypeError('migration sha256 digest encoding must be hex');
+      return hash.digest('hex');
+    }));
+    return Object.freeze(hashFacade);
+  }));
+  return Object.freeze(facade);
+}
+
+function migrationBuiltinFacades(runtime) {
+  const cryptoFacade = migrationCryptoFacade(runtime);
+  return new Map([
+    ['crypto', cryptoFacade],
+    ['node:crypto', cryptoFacade]
+  ]);
+}
+
+function migrationDatabaseAccess(db, runtime) {
+  let active = true;
+  const assertActive = () => {
+    if (!active) throw new Error('migration database access has expired');
+  };
+  const statementFacade = (statement) => {
+    const facade = Object.create(null);
+    facade.run = isolatedHostFunction((...args) => hostBoundary(runtime, () => {
+      assertActive();
+      return runtime.cloneValue(statement.run(...args));
+    }));
+    facade.get = isolatedHostFunction((...args) => hostBoundary(runtime, () => {
+      assertActive();
+      return runtime.cloneValue(statement.get(...args));
+    }));
+    facade.all = isolatedHostFunction((...args) => hostBoundary(runtime, () => {
+      assertActive();
+      return runtime.cloneValue(statement.all(...args));
+    }));
+    return Object.freeze(facade);
+  };
+  const facade = Object.create(null);
+  facade.exec = isolatedHostFunction((sql) => hostBoundary(runtime, () => {
+    assertActive();
+    db.exec(sql);
+  }));
+  facade.prepare = isolatedHostFunction((sql) => hostBoundary(runtime, () => {
+    assertActive();
+    return statementFacade(db.prepare(sql));
+  }));
+  return {
+    facade: Object.freeze(facade),
+    revoke() {
+      active = false;
+    }
+  };
 }
 
 function engineBuiltinPolicy(engine, expectedVersion) {
@@ -320,11 +466,34 @@ function engineBuiltinPolicy(engine, expectedVersion) {
   return allowed;
 }
 
+function assertSynchronousMigrationResult(result, label) {
+  if (
+    result !== null &&
+    (typeof result === 'object' || typeof result === 'function') &&
+    typeof result.then === 'function'
+  ) {
+    throw new Error(`${label} returned an asynchronous thenable`);
+  }
+}
+
+function executeMigrationFunction(loaded, operation, db, label) {
+  const access = migrationDatabaseAccess(db, loaded.runtime);
+  try {
+    const result = operation(access.facade);
+    assertSynchronousMigrationResult(result, label);
+    return result;
+  } finally {
+    access.revoke();
+  }
+}
+
 function loadRegisteredMigration(migration, options) {
   const bundle = validatedMigrationBundle(migration, options || {});
   const checksum = computeMigrationChecksum({ engineVersion: migration.engineVersion, files: bundle.files });
   const moduleCache = new Map();
-  const context = migrationExecutionContext();
+  const runtime = migrationExecutionContext();
+  const context = runtime.context;
+  const builtinFacades = migrationBuiltinFacades(runtime);
   let allowedBuiltinModules = new Set();
 
   function loadModule(repoPath) {
@@ -337,19 +506,19 @@ function loadRegisteredMigration(migration, options) {
     moduleCache.set(normalized, module);
     const dirname = path.posix.dirname(normalized);
     const filename = path.join(bundle.rootDir, ...normalized.split('/'));
-    const localRequire = (request) => {
+    const localRequire = isolatedHostFunction((request) => hostBoundary(runtime, () => {
+      if (typeof request !== 'string') throw new TypeError('migration require path must be a string');
       if (request.startsWith('./') || request.startsWith('../')) {
         return loadModule(normalizeRelativeRequest(normalized, request));
       }
       if (BUILTIN_MODULES.has(request)) {
-        if (!allowedBuiltinModules.has(request)) {
+        if (!allowedBuiltinModules.has(request) || !builtinFacades.has(request)) {
           throw new Error(`builtin import is not allowed by migration engine v${migration.engineVersion}: ${request}`);
         }
-        return require(request);
+        return builtinFacades.get(request);
       }
       throw new Error(`undeclared bare import in migration bundle ${normalized}: ${request}`);
-    };
-    Object.setPrototypeOf(localRequire, null);
+    }));
     const script = new vm.Script(`(function(exports, require, module, __filename, __dirname) {\n${bytes.toString('utf8')}\n})`, {
       filename
     });
@@ -372,7 +541,7 @@ function loadRegisteredMigration(migration, options) {
   if (mismatches.length) throw new Error(`migration descriptor mismatch for ${migration.name}: ${mismatches.join(', ')}`);
   if (typeof implementation.apply !== 'function') throw new Error(`migration ${migration.name} does not export apply`);
   if (typeof baselineImplementation.apply !== 'function') throw new Error(`migration ${migration.name} baseline bundle does not export apply`);
-  return { implementation, baseline: baselineImplementation, checksum };
+  return { implementation, baseline: baselineImplementation, checksum, runtime };
 }
 
 function userObjects(db) {
@@ -844,8 +1013,16 @@ function classifyDatabase(db, options) {
   const hasLedger = objectNames.includes('schema_migrations');
   if (!hasLedger && objectNames.length === 0) return { status: 'empty', currentVersion: 0 };
   if (!hasLedger) {
-    const optionalMigrations = migrations.map((migration) => loadedFor(migration).implementation);
-    const shapeProblem = baselineSchemaProblem(db, loadedFor(migrations[0]).baseline, optionalMigrations) || compatibilityColumnProblem(db);
+    const legacyCompatibilityMigration = migrations.find((migration) => migration.version === 1);
+    if (!legacyCompatibilityMigration) {
+      return { status: 'partial_or_malformed', reason: 'missing migration version 1 for legacy classification' };
+    }
+    const loadedLegacyCompatibility = loadedFor(legacyCompatibilityMigration);
+    const shapeProblem = baselineSchemaProblem(
+      db,
+      loadedLegacyCompatibility.baseline,
+      [loadedLegacyCompatibility.implementation]
+    ) || compatibilityColumnProblem(db);
     return shapeProblem ? { status: 'partial_or_malformed', reason: shapeProblem } : { status: 'legacy', currentVersion: 0 };
   }
   const ledgerProblem = ledgerShapeProblem(db);
@@ -1117,12 +1294,13 @@ function normalizeMigrations(options) {
   return migrations;
 }
 
-function applySeedAdmissions(db, baselineSeeds) {
+function applySeedAdmissions(db, loaded) {
+  const baselineSeeds = loaded && loaded.baseline && loaded.baseline.seedAdmissions;
   if (!baselineSeeds || typeof baselineSeeds.admin !== 'function' || typeof baselineSeeds.influencers !== 'function') {
     throw new Error('checksum-bound baseline seed admissions are unavailable');
   }
-  baselineSeeds.admin(db);
-  baselineSeeds.influencers(db);
+  executeMigrationFunction(loaded, baselineSeeds.admin, db, 'admin seed admission');
+  executeMigrationFunction(loaded, baselineSeeds.influencers, db, 'influencer seed admission');
 }
 
 function normalizedMigrationOptions(options) {
@@ -1156,7 +1334,10 @@ function runMigrationTransaction(db, normalizedOptions, readonlyPreflight) {
     if (lockedClassification.status !== classification.status || lockedClassification.currentVersion !== classification.currentVersion) {
       throw new Error('migration preflight identity changed before write');
     }
-    if (classification.status === 'empty') loadedFor(migrations[0]).baseline.apply(db);
+    if (classification.status === 'empty') {
+      const loaded = loadedFor(migrations[0]);
+      executeMigrationFunction(loaded, loaded.baseline.apply, db, 'legacy baseline apply');
+    }
     if (classification.status !== 'managed') createLedger(db);
 
     const startVersion = classification.currentVersion || 0;
@@ -1164,11 +1345,11 @@ function runMigrationTransaction(db, normalizedOptions, readonlyPreflight) {
       if (migration.version <= startVersion) continue;
       if (migration.engineVersion !== 1) throw new Error(`unsupported migration engine version ${migration.engineVersion}`);
       const loaded = loadedFor(migration);
-      loaded.implementation.apply(db);
+      executeMigrationFunction(loaded, loaded.implementation.apply, db, `migration ${migration.name} apply`);
       const checksum = loaded.checksum;
       insertLedgerRow(db, migration, checksum);
       if (classification.status !== 'managed' && migration.version === 1) {
-        applySeedAdmissions(db, loaded.baseline.seedAdmissions);
+        applySeedAdmissions(db, loaded);
       }
     }
     preflight(db, { status: 'managed' }, { checkMainFtsIntegrity: true });

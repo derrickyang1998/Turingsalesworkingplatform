@@ -1,9 +1,7 @@
 const SAFE_MAX = Number.MAX_SAFE_INTEGER;
 const allowedBuiltinModules = Object.freeze([
   'crypto',
-  'node:crypto',
-  'path',
-  'node:path'
+  'node:crypto'
 ]);
 
 function assertSafePositiveInteger(value, label) {

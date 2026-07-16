@@ -53,6 +53,9 @@ const INDEX_DDL = {
   idx_ai_messages_conversation: 'CREATE INDEX idx_ai_messages_conversation ON ai_messages(conversation_id, created_at)',
   idx_ai_references_message: 'CREATE INDEX idx_ai_references_message ON ai_references(message_id)'
 };
+const INDEX_DROP_DDL = Object.keys(INDEX_DDL)
+  .map((name) => `DROP INDEX IF EXISTS ${name}`)
+  .join(';\n      ');
 
 const TRIGGER_DDL = {
   trg_collaborations_validate_insert: `CREATE TRIGGER trg_collaborations_validate_insert
@@ -132,7 +135,7 @@ const migration = {
       SET cost_actual_confirmed = 0
       WHERE cost_actual_confirmed IS NULL;
 
-      DROP INDEX IF EXISTS idx_knowledge_source_hash;
+      ${INDEX_DROP_DDL};
       ${Object.values(INDEX_DDL).join(';\n      ')};
       ${Object.values(TRIGGER_DDL).join(';\n      ')};
     `);

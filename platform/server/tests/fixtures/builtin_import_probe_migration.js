@@ -1,4 +1,4 @@
-const path = require('node:path');
+const crypto = require('node:crypto');
 
 module.exports = {
   version: 2,
@@ -16,7 +16,8 @@ module.exports = {
     triggers: {}
   },
   apply(db) {
-    const tableName = path.basename('builtin_import_probe');
-    db.exec(`CREATE TABLE ${tableName} (id INTEGER PRIMARY KEY) STRICT;`);
+    const digest = crypto.createHash('sha256').update('builtin_import_probe').digest('hex');
+    if (digest.length !== 64) throw new Error('sha256 facade returned an invalid digest');
+    db.exec('CREATE TABLE builtin_import_probe (id INTEGER PRIMARY KEY) STRICT;');
   }
 };
