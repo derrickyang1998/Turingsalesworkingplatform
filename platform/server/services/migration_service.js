@@ -23,8 +23,8 @@ const MIGRATION_001_DESCRIPTOR = Object.freeze({
 
 const LEDGER_SQL = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
-  version INTEGER PRIMARY KEY,
-  name TEXT NOT NULL UNIQUE,
+  version INTEGER PRIMARY KEY CHECK (version > 0),
+  name TEXT NOT NULL UNIQUE CHECK (length(trim(name)) BETWEEN 1 AND 120),
   checksum TEXT NOT NULL CHECK (
     length(checksum) = 64
     AND checksum = lower(checksum)
@@ -417,9 +417,65 @@ function xinfoFor(db, object) {
   }));
 }
 
+function tableListFor(db, object) {
+  if (!/^(table|view)$/i.test(object.type) && object.type !== 'virtual table') return [];
+  return db.prepare(`PRAGMA table_list(${quoteIdentifier(object.name)})`).all()
+    .filter((row) => row.schema === 'main' && row.name === object.name)
+    .map((row) => ({
+      schema: row.schema,
+      name: row.name,
+      type: row.type,
+      ncol: row.ncol,
+      wr: row.wr,
+      strict: row.strict
+    }))
+    .sort((left, right) => left.schema.localeCompare(right.schema) || left.name.localeCompare(right.name));
+}
+
+function foreignKeysFor(db, object) {
+  if (object.type !== 'table') return [];
+  return db.prepare(`PRAGMA foreign_key_list(${quoteIdentifier(object.name)})`).all()
+    .map((row) => ({
+      id: row.id,
+      seq: row.seq,
+      table: row.table,
+      from: row.from,
+      to: row.to,
+      on_update: row.on_update,
+      on_delete: row.on_delete,
+      match: row.match
+    }))
+    .sort((left, right) => left.id - right.id || left.seq - right.seq);
+}
+
+function indexesFor(db, object) {
+  if (object.type !== 'table') return [];
+  return db.prepare(`PRAGMA index_list(${quoteIdentifier(object.name)})`).all()
+    .map((index) => ({
+      name: index.name,
+      unique: index.unique,
+      origin: index.origin,
+      partial: index.partial,
+      xinfo: db.prepare(`PRAGMA index_xinfo(${quoteIdentifier(index.name)})`).all()
+        .map((row) => ({
+          seqno: row.seqno,
+          cid: row.cid,
+          name: row.name,
+          desc: row.desc,
+          coll: row.coll,
+          key: row.key
+        }))
+        .sort((left, right) => left.seqno - right.seqno || left.cid - right.cid || String(left.name).localeCompare(String(right.name)))
+    }))
+    .sort((left, right) => left.name.localeCompare(right.name));
+}
+
 function schemaSnapshot(db) {
   const objects = new Map();
   const columns = new Map();
+  const tableList = new Map();
+  const foreignKeys = new Map();
+  const indexes = new Map();
   for (const object of schemaObjects(db)) {
     objects.set(object.name, {
       type: object.type,
@@ -428,8 +484,11 @@ function schemaSnapshot(db) {
       sql: normalizeSql(object.sql)
     });
     columns.set(object.name, xinfoFor(db, object));
+    tableList.set(object.name, tableListFor(db, object));
+    foreignKeys.set(object.name, foreignKeysFor(db, object));
+    indexes.set(object.name, indexesFor(db, object));
   }
-  return { objects, columns };
+  return { objects, columns, tableList, foreignKeys, indexes };
 }
 
 function expectedLedgerSnapshot() {
@@ -483,6 +542,64 @@ function optionalMigrationAllowances(migrations) {
   return { objects, columns };
 }
 
+function jsonEqual(left, right) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function exactSchemaProblem(actual, expected, label) {
+  for (const [name, expectedObject] of expected.objects.entries()) {
+    if (!actual.objects.has(name)) return `missing ${label} object ${name}`;
+    if (!jsonEqual(actual.objects.get(name), expectedObject)) return `incompatible ${label} object ${name}`;
+  }
+  for (const name of actual.objects.keys()) {
+    if (!expected.objects.has(name)) return `unknown ${label} object ${name}`;
+  }
+  for (const [name, expectedColumns] of expected.columns.entries()) {
+    if (!jsonEqual(actual.columns.get(name), expectedColumns)) return `incompatible ${label} columns ${name}`;
+  }
+  for (const [name, expectedTableList] of expected.tableList.entries()) {
+    if (!jsonEqual(actual.tableList.get(name), expectedTableList)) return `incompatible ${label} table metadata ${name}`;
+  }
+  for (const [name, expectedForeignKeys] of expected.foreignKeys.entries()) {
+    if (!jsonEqual(actual.foreignKeys.get(name), expectedForeignKeys)) return `incompatible ${label} foreign keys ${name}`;
+  }
+  for (const [name, expectedIndexes] of expected.indexes.entries()) {
+    if (!jsonEqual(actual.indexes.get(name), expectedIndexes)) return `incompatible ${label} indexes ${name}`;
+  }
+  return null;
+}
+
+function baselineMetadataProblem(table, expected, actual, allowances) {
+  const expectedTableList = expected.tableList.get(table) || [];
+  const actualTableList = actual.tableList.get(table) || [];
+  const allowedColumns = allowances.columns.get(table) || new Map();
+  const expectedColumnNames = new Set((expected.columns.get(table) || []).map((column) => column.name));
+  const actualAllowedExtras = (actual.columns.get(table) || [])
+    .filter((column) => !expectedColumnNames.has(column.name) && allowedColumns.has(column.name)).length;
+  if (expectedTableList.length !== actualTableList.length) return `incompatible baseline table metadata ${table}`;
+  for (let index = 0; index < expectedTableList.length; index += 1) {
+    const expectedRow = expectedTableList[index];
+    const actualRow = actualTableList[index];
+    const adjustedExpected = { ...expectedRow, ncol: expectedRow.ncol + actualAllowedExtras };
+    if (!jsonEqual(actualRow, adjustedExpected)) return `incompatible baseline table metadata ${table}`;
+  }
+  if (!jsonEqual(actual.foreignKeys.get(table) || [], expected.foreignKeys.get(table) || [])) {
+    return `incompatible baseline foreign keys ${table}`;
+  }
+
+  const actualIndexes = new Map((actual.indexes.get(table) || []).map((index) => [index.name, index]));
+  for (const expectedIndex of expected.indexes.get(table) || []) {
+    if (!jsonEqual(actualIndexes.get(expectedIndex.name), expectedIndex)) {
+      return `incompatible baseline index metadata ${table}.${expectedIndex.name}`;
+    }
+    actualIndexes.delete(expectedIndex.name);
+  }
+  for (const [name] of actualIndexes.entries()) {
+    if (!allowances.objects.has(name)) return `unknown baseline index metadata ${table}.${name}`;
+  }
+  return null;
+}
+
 function baselineSchemaProblem(db, baselineImplementation, allowedMigrations) {
   const expectedDb = new Database(':memory:');
   try {
@@ -525,8 +642,22 @@ function baselineSchemaProblem(db, baselineImplementation, allowedMigrations) {
         if (!allowedColumn) return `unknown baseline column ${table}.${actualColumn.name}`;
         if (JSON.stringify(actualColumn) !== JSON.stringify(allowedColumn)) return `incompatible migration column ${table}.${actualColumn.name}`;
       }
+      const metadataProblem = baselineMetadataProblem(table, expected, actual, allowances);
+      if (metadataProblem) return metadataProblem;
     }
     return null;
+  } finally {
+    expectedDb.close();
+  }
+}
+
+function managedSchemaProblem(db, baselineImplementation, appliedMigrations) {
+  const expectedDb = new Database(':memory:');
+  try {
+    baselineImplementation.apply(expectedDb);
+    createLedger(expectedDb);
+    for (const migration of appliedMigrations) migration.apply(expectedDb);
+    return exactSchemaProblem(schemaSnapshot(db), schemaSnapshot(expectedDb), 'managed schema');
   } finally {
     expectedDb.close();
   }
@@ -627,7 +758,7 @@ function classifyDatabase(db, options) {
     }
   }
   const appliedMigrations = rows.map((row) => loadedFor(migrations.find((candidate) => candidate.version === row.version)).implementation);
-  const shapeProblem = baselineSchemaProblem(db, loadedFor(migrations[0]).baseline, appliedMigrations) || compatibilityColumnProblem(db);
+  const shapeProblem = managedSchemaProblem(db, loadedFor(migrations[0]).baseline, appliedMigrations) || compatibilityColumnProblem(db);
   if (shapeProblem) return { status: 'partial_or_malformed', reason: shapeProblem };
   return { status: 'managed', currentVersion: rows.length ? rows[rows.length - 1].version : 0 };
 }

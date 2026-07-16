@@ -32,6 +32,19 @@ function snapshot(db) {
   });
 }
 
+function migrationDigestSnapshot(db) {
+  const digest = require('../services/sqlite_digest_service');
+  return digest.databaseDigest(db, {
+    fts: [{
+      virtualName: 'knowledge_chunks_fts',
+      projectionName: 'knowledge_chunks_v1',
+      tokenizerOptions: 'unicode61',
+      keyColumnCsv: 'entry_id,chunk_id',
+      indexedColumnCsv: 'title,content,tags'
+    }]
+  });
+}
+
 function seedAdmissions() {
   return require('../migrations/baselines/legacy_v1').seedAdmissions;
 }
@@ -70,6 +83,55 @@ function setupRelationshipParents(db) {
   db.prepare('INSERT INTO customers (id, brand_name, created_by) VALUES (1, ?, 1)').run('Customer');
   db.prepare('INSERT INTO workflow_templates (id, name, nodes, edges, created_by) VALUES (1, ?, ?, ?, 1)').run('Template', '[]', '[]');
   db.prepare('INSERT INTO workflow_instances (id, template_id, business_type, business_id, started_by) VALUES (1, 1, ?, 1, 1)').run('customer');
+}
+
+function rebuildCollaborationsWithoutForeignKeys(db) {
+  const dependentObjects = db.prepare(`
+    SELECT type, name, sql
+    FROM sqlite_schema
+    WHERE tbl_name = 'collaborations'
+      AND name != 'collaborations'
+      AND sql IS NOT NULL
+    ORDER BY type, name
+  `).all();
+  db.exec(`
+    PRAGMA foreign_keys = OFF;
+    ALTER TABLE collaborations RENAME TO collaborations_with_fk;
+    CREATE TABLE collaborations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      demand_id INTEGER,
+      influencer_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      status TEXT DEFAULT 'proposed',
+      proposal_notes TEXT,
+      cost_quoted INTEGER DEFAULT 0,
+      cost_actual INTEGER DEFAULT 0,
+      content_url TEXT,
+      roi_data TEXT,
+      timeline_start DATE,
+      timeline_end DATE,
+      notes TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      row_version INTEGER NOT NULL DEFAULT 1 CHECK(typeof(row_version) = 'integer' AND row_version >= 1 AND row_version <= 9007199254740991),
+      cost_actual_confirmed INTEGER NOT NULL DEFAULT 0 CHECK(typeof(cost_actual_confirmed) = 'integer' AND cost_actual_confirmed IN (0,1))
+    );
+    INSERT INTO collaborations (
+      id, demand_id, influencer_id, user_id, status, proposal_notes, cost_quoted, cost_actual,
+      content_url, roi_data, timeline_start, timeline_end, notes, created_at, updated_at,
+      row_version, cost_actual_confirmed
+    )
+    SELECT
+      id, demand_id, influencer_id, user_id, status, proposal_notes, cost_quoted, cost_actual,
+      content_url, roi_data, timeline_start, timeline_end, notes, created_at, updated_at,
+      row_version, cost_actual_confirmed
+    FROM collaborations_with_fk;
+    DROP TABLE collaborations_with_fk;
+  `);
+  for (const object of dependentObjects) {
+    db.exec(object.sql);
+  }
+  db.pragma('foreign_keys = ON');
 }
 
 function tempMigrationRoot(name) {
@@ -386,6 +448,93 @@ test('baseline and ledger shape validation rejects column drift, extra objects, 
   `);
   assert.equal(migrationService.classifyDatabase(ledgerWeak.db, { rootDir: serverRoot() }).status, 'partial_or_malformed');
   ledgerWeak.db.close();
+});
+
+test('ledger DDL enforces version and name domain checks from the design contract', () => {
+  const migrationService = require('../services/migration_service');
+  const { db } = tmpDb('ledger-boundaries');
+  migrationService.createLedger(db);
+
+  const insert = db.prepare(`
+    INSERT INTO schema_migrations (version, name, checksum, source_path, engine_version)
+    VALUES (?, ?, ?, ?, ?)
+  `);
+  const checksum = 'a'.repeat(64);
+
+  assert.throws(() => insert.run(0, 'zero_version', checksum, 'migrations/zero.js', 1), /CHECK|version/);
+  assert.throws(() => insert.run(-1, 'negative_version', checksum, 'migrations/negative.js', 1), /CHECK|version/);
+  assert.throws(() => insert.run(1, '   ', checksum, 'migrations/blank.js', 1), /CHECK|name/);
+  assert.throws(() => insert.run(2, 'x'.repeat(121), checksum, 'migrations/long.js', 1), /CHECK|name/);
+
+  insert.run(1, 'x', checksum, 'migrations/one.js', 1);
+  insert.run(2, 'y'.repeat(120), checksum, 'migrations/two.js', 1);
+  assert.deepEqual(
+    allRows(db, 'SELECT version, length(name) AS name_length FROM schema_migrations ORDER BY version'),
+    [{ version: 1, name_length: 1 }, { version: 2, name_length: 120 }]
+  );
+  db.close();
+});
+
+test('managed baseline metadata rejects collaborations foreign key removal before writes', () => {
+  const migrationService = require('../services/migration_service');
+  const { db } = tmpDb('managed-collaborations-no-fk');
+  migrationService.runMigrations(db, {
+    rootDir: serverRoot(),
+    seedAdmissions: seedAdmissions()
+  });
+  assert.equal(db.prepare('PRAGMA foreign_key_list(collaborations)').all().length, 3);
+
+  rebuildCollaborationsWithoutForeignKeys(db);
+  assert.equal(db.prepare('PRAGMA foreign_key_list(collaborations)').all().length, 0);
+  const beforeSnapshot = snapshot(db);
+  const beforeDigest = migrationDigestSnapshot(db);
+
+  const classification = migrationService.classifyDatabase(db, { rootDir: serverRoot() });
+  assert.equal(classification.status, 'partial_or_malformed');
+  assert.match(classification.reason, /collaborations|foreign|schema|metadata/i);
+  assert.throws(() => migrationService.runMigrations(db, {
+    rootDir: serverRoot(),
+    seedAdmissions: seedAdmissions()
+  }), /collaborations|foreign|schema|metadata|migration classification failed/i);
+  assert.equal(snapshot(db), beforeSnapshot);
+  assert.deepEqual(migrationDigestSnapshot(db), beforeDigest);
+  db.close();
+});
+
+test('legacy baseline metadata rejects index drift in addition to column and object drift', () => {
+  const migrationService = require('../services/migration_service');
+  const legacy = require('../migrations/baselines/legacy_v1');
+  const { db } = tmpDb('legacy-index-drift');
+  legacy.apply(db);
+  db.exec('DROP INDEX idx_collaborations_demand; CREATE INDEX idx_collaborations_demand ON collaborations(user_id);');
+  const classification = migrationService.classifyDatabase(db, { rootDir: serverRoot() });
+  assert.equal(classification.status, 'partial_or_malformed');
+  assert.match(classification.reason, /idx_collaborations_demand|index|schema/i);
+  db.close();
+});
+
+test('FTS preflight rejects stored projection drift that leaves postings unchanged before writes', () => {
+  const migrationService = require('../services/migration_service');
+  const digest = require('../services/sqlite_digest_service');
+  const { db } = tmpDb('fts-stored-projection-drift');
+  migrationService.runMigrations(db, {
+    rootDir: serverRoot(),
+    seedAdmissions: seedAdmissions()
+  });
+  db.prepare('INSERT INTO knowledge_entries (id, title, tags_json, created_by) VALUES (?, ?, ?, ?)').run(500, 'Alpha Guide', '["tag"]', 1);
+  db.prepare('INSERT INTO knowledge_chunks (id, entry_id, chunk_index, content) VALUES (?, ?, ?, ?)').run(600, 500, 0, 'alpha beta content');
+  digest.rebuildKnowledgeChunksFts(db);
+  db.prepare('UPDATE knowledge_chunks_fts SET entry_id = ? WHERE chunk_id = ?').run(501, 600);
+  const beforeSnapshot = snapshot(db);
+  const beforeDigest = migrationDigestSnapshot(db);
+
+  assert.throws(() => migrationService.runMigrations(db, {
+    rootDir: serverRoot(),
+    seedAdmissions: seedAdmissions()
+  }), /FTS projection mismatch|migration classification failed/i);
+  assert.equal(snapshot(db), beforeSnapshot);
+  assert.deepEqual(migrationDigestSnapshot(db), beforeDigest);
+  db.close();
 });
 
 test('populated read-only preflight records identity and aborts if data changes before exclusive migration write', () => {

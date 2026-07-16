@@ -320,6 +320,7 @@ function verifyKnowledgeChunksFtsIntegrity(db, manifest, options) {
   for (const entry of entries) {
     if (entry.virtualName !== 'knowledge_chunks_fts') throw new Error(`unknown FTS table ${entry.virtualName}`);
     if (entry.tokenizerOptions !== 'unicode61') throw new Error(`unsupported FTS tokenizer options: ${entry.tokenizerOptions}`);
+    verifyKnowledgeChunksFtsCanaries(db, []);
     const expectedName = 'expected_knowledge_chunks_fts';
     const actualVocabName = 'actual_knowledge_chunks_fts_vocab';
     const expectedVocabName = 'expected_knowledge_chunks_fts_vocab';
