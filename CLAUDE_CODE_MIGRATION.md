@@ -1,11 +1,14 @@
 # TuringMarket Engineering Handoff / 图灵商务平台工程交接
 
-Updated / 更新日期：2026-07-14
+Updated / 更新日期：2026-07-16
 
 ## Authoritative Baseline / 权威基线
 
 - Checkout / 工作区：`C:\Users\29272\Documents\在线商务平台-github-sync`
-- Branch / 分支：`codex/v0.4.0-product-shell-and-design-system`
+- Current production delivery branch / 当前生产交付分支：`codex/v0.4.0-product-shell-and-design-system`
+- Undeployable development branch / 尚不可部署的开发分支：`codex/v0.5.0-campaign-business-spine`
+- Phase 4 development base / 第 4 阶段开发基线：`5960ade03e1bd605ee4bfbe877baa09bc6482083`
+- Current production source / 当前生产源码：`7511b6395a599a4f683cd60d6366e957c48ae302` (`v0.4.0-product-shell-and-design-system`)
 - Backend / 后端：Node.js 20 + Express 5
 - Database / 数据库：SQLite through `better-sqlite3`
 - PM2 / 进程：`platform/ecosystem.config.js` -> `server/server.js`, process name `turingmarket`
@@ -13,6 +16,17 @@ Updated / 更新日期：2026-07-14
 - Health route / 健康检查：`/api/health`
 
 This checkout consolidates the latest CRM, AI conversation, knowledge base, influencer workflow, Feishu, proposal, export, and PPT capabilities without reverting the latest interface. / 该工作区整合最新 CRM、AI 对话、知识库、网红执行、飞书、方案、导出与 PPT 能力，不回退最新界面。
+
+`v0.5.0-campaign-business-spine` is contract/development work only. It MUST NOT be deployed or described as the delivery baseline until the Phase 4 migration, static-boundary, populated-data privacy, DB-plus-PPT-cache backup/restore, resumable code/Nginx rollback, accessibility, full-test, and authenticated production release gates are implemented and accepted. / `v0.5.0-campaign-business-spine` 当前仅为契约与开发工作；在第 4 阶段迁移、静态边界、类生产数据隐私、数据库与 PPT 缓存整体备份恢复、可恢复代码/Nginx 回滚、无障碍、完整测试及生产登录态验收门禁全部实现并通过前，不得部署或称为交付基线。
+
+## Phase 4 Contract Checkpoint / 第 4 阶段契约检查点
+
+- Authoritative design / 权威设计：`docs/superpowers/specs/2026-07-14-phase-4-campaign-business-spine-design.md` (`sha256 1db5ce6e020909acff6d39726bdfe1d47d525ddc8cd16596e521040d229f4822`)
+- API contract / API 契约：`docs/api/campaign-business-spine.md` (`sha256 3cbc4ae483aa7d12b40f163de55b0dd84313e1f02408a19fd67b65819ce56d91`)
+- Implementation plan / 实施计划：`docs/superpowers/plans/2026-07-14-phase-4-campaign-business-spine.md` (`sha256 c750174dd83ff4edcc281bcfd1e846ace7c16557c94a5c2063fbfaf9272ce43c`)
+- Review status / 审查状态：all original Product Manager, Workflow Architect, Backend Architect, Security Architect, Data Engineer, and AI Engineer reviews are approved. The final cross-role review and the Backend Architect delta re-review are also `APPROVE`; all 47 raw findings consolidated into 33 categories plus the four final backend implementation blockers are closed. / Product Manager、Workflow Architect、Backend Architect、Security Architect、Data Engineer 与 AI Engineer 六个原始角色审查全部通过；最终跨角色审查及后端架构增量复审也均为 `APPROVE`，47 条原始意见归并的 33 类问题及最后 4 项后端实现阻塞均已关闭。
+- Current executable evidence / 当前可执行证据：all seven SQL blocks execute against a v0.4 database copy; ten new tables are `STRICT`; 47 triggers and ten explicit indexes compile; `integrity_check=ok`; `foreign_key_check=0`. Default-organization code mutation and deletion are rejected. Explicit-ID knowledge allocation advances and rolls back `sqlite_sequence` correctly; raw legacy hashes remain distinct before canonical persistence; creatorless knowledge charges the immutable default organization with no user bucket. Deterministic RAG selects 8 of 48 chunks within exactly 98,304 UTF-8 bytes and stops at the first overflow. The full Node suite is 203/204; its sole failure is the intentional v0.4 deploy-script branch lock rejecting this undeployable v0.5 branch. / 七个 SQL 块均可在 v0.4 数据库副本执行；十张新增表均为 `STRICT`，47 个触发器与 10 个显式索引可编译，完整性为 `ok`、外键违规为 0。默认组织代码改写及删除均被拒绝；知识显式 ID 分配可正确推进和回滚 `sqlite_sequence`；旧版原始哈希在规范化持久化前保持区分；无创建者知识归属默认组织且不计入用户桶。RAG 在 48 个分块中确定性选择 8 个，总计精确 98,304 UTF-8 字节，并在首个超限项停止。Node 全量测试为 203/204，唯一失败是 v0.4 发布脚本按设计拒绝当前尚不可部署的 v0.5 分支。
+- Product-source boundary / 产品源码边界：no Phase 4 product source has changed at this checkpoint; production remains on the verified v0.4 source and frozen PPT bytes. / 当前检查点尚未修改第 4 阶段产品源码；生产继续运行已验证的 v0.4 源码及冻结 PPT 字节。
 
 ## UI And PPT Lock / UI 与 PPT 锁定
 
@@ -34,6 +48,8 @@ Approved public modules / 获批公开模块：
 - `/client/styles/tokens.css`
 - `/client/styles/components.css`
 - `/client/styles/layout.css`
+
+Phase 4 plans five additional exact public files—`/client/features/campaign_context.js`, `/client/features/campaign_workspace.js`, `/client/features/campaign_ppt_bridge.js`, `/client/core/csp_compat.js`, and `/client/features/ppt_preview_runtime.js`—plus the `/campaigns` SPA path. They are not part of the current v0.4 production allowlist and become public only after matching Express, Nginx, build/deployment-manifest, source-boundary, CSP/frozen-PPT, and route-smoke gates land together. Wildcard `/client/features/*` and `/client/core/*` access remains forbidden. / 第 4 阶段计划增加五个精确公开文件及 `/campaigns` SPA 路径；它们当前不属于 v0.4 生产白名单，只有 Express、Nginx、构建/发布清单、源码边界、CSP/冻结 PPT 与路由冒烟门禁同步落地后方可公开，仍禁止通配公开 `/client/features/*` 与 `/client/core/*`。
 
 All other `/client/*` requests and private paths including `/server/server.js` remain denied. The `0.005` pixel-ratio threshold applies only to frozen repeat-capture determinism. The intentional shared-shell redesign uses a separate mandatory reviewed comparison; its approved maximum observed perceptual difference ratio is `0.14496597399441002`. / 其他 `/client/*` 与 `/server/server.js` 等私有路径继续拒绝访问；`0.005` 像素差异阈值仅用于冻结基线的重复截图确定性校验。经批准的共享壳层改版使用独立的强制人工审查对比，其最大感知差异比为 `0.14496597399441002`。
 
@@ -84,6 +100,10 @@ Manual rollback / 手工回滚：
 ```
 
 The same restore function is used by automatic and manual rollback. Manual rollback bypasses deploy-only branch and clean-worktree gates. It verifies checksums, stops PM2, restores code plus root/server dependency trees, restores Nginx, restarts `turingmarket` from `platform/ecosystem.config.js`, and verifies health. It does not automatically restore the database or credential state. / 自动与手工回滚共用同一恢复函数；手工回滚跳过正式发布专用的分支与干净工作树门禁，验签后先停止 PM2，再恢复代码、两层依赖与 Nginx，最后重启并验证健康；不会自动恢复数据库或凭据状态。
+
+Phase 4 design requires extending this real `platform/deploy_v8.ps1` path before any schema cutover: checksum-bound code, Nginx, pre-migration database, and private PPT cache restore as one maintenance-mode unit; newest matching-user password/active/role/department/quota state is reapplied from a root-only overlay; and every session is deleted before restart. This is a planned v0.5 gate, not a current v0.4 capability. / 第 4 阶段要求在 schema 切换前扩展当前真实的 `platform/deploy_v8.ps1` 回滚路径：在维护模式下一体验签恢复代码、Nginx、迁移前数据库与私有 PPT 缓存，再从仅 root 可读的安全覆盖层回填最新匹配用户的密码、启用状态、角色、部门与额度，并在重启前删除全部会话。该能力属于 v0.5 计划门禁，不代表当前 v0.4 已具备。
+
+The Phase 4 release gate also treats the SQLite database and `PPT_CACHE_DIR` as one checksummed backup/restore/prune unit; performs WAL-safe stop/checkpoint/atomic restore; carries `department` in the root-only security overlay; reconciles membership projection; and completes checksum-verified resumable code-tree and Nginx restoration before service restart. Until that exact path is implemented and tested, production remains on v0.4. / 第 4 阶段还必须把 SQLite 与 `PPT_CACHE_DIR` 作为同一验签备份/恢复/清理单元，执行 WAL 安全停写、检查点与原子恢复，在安全覆盖层中携带 `department` 并核对成员关系投影，且在服务重启前完成可恢复、验签的代码树与 Nginx 恢复；该路径实现并验证前生产继续保持 v0.4。
 
 ## Security And Secrets / 安全与密钥
 
