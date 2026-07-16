@@ -558,6 +558,13 @@ function assertMigrationSqlBoundary(sql) {
   }
 }
 
+function assertEmptyTemporarySchema(db) {
+  const count = db.prepare('SELECT COUNT(*) AS count FROM sqlite_temp_schema').get().count;
+  if (count !== 0) {
+    throw new Error(`temporary SQLite schema is not allowed during migrations: count=${count}`);
+  }
+}
+
 function migrationDatabaseAccess(db, runtime) {
   let active = true;
   let transactionLost = false;
@@ -646,6 +653,7 @@ function executeMigrationFunction(loaded, operation, db, label) {
   try {
     const result = operation(access.facade);
     access.assertTransactionIntact();
+    assertEmptyTemporarySchema(db);
     assertSynchronousMigrationResult(result, label);
     return result;
   } finally {
@@ -1504,6 +1512,7 @@ function runMigrationTransaction(db, normalizedOptions, readonlyPreflight) {
       }
       return loadedMigrations.get(migration.version);
     };
+    assertEmptyTemporarySchema(db);
     assertPreflightStillMatches(db, readonlyPreflight, normalizedOptions);
     const lockedClassification = classifyDatabase(db, normalizedOptions);
     if (lockedClassification.status !== classification.status || lockedClassification.currentVersion !== classification.currentVersion) {
@@ -1527,6 +1536,7 @@ function runMigrationTransaction(db, normalizedOptions, readonlyPreflight) {
         applySeedAdmissions(db, loaded);
       }
     }
+    assertEmptyTemporarySchema(db);
     preflight(db, { status: 'managed' }, { checkMainFtsIntegrity: true });
     const finalClassification = classifyDatabase(db, normalizedOptions);
     const expectedVersion = migrations[migrations.length - 1].version;

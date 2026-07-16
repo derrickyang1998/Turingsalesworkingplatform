@@ -1248,6 +1248,59 @@ module.exports = {
   }
 });
 
+test('migration TEMP trigger cannot survive a successful managed migration', () => {
+  const migrationService = require('../services/migration_service');
+  const root = tempMigrationRoot('temp-trigger-escape');
+  const sourcePath = 'migrations/002_temp_trigger_escape_probe.js';
+  writeTempMigration(root, sourcePath, `
+module.exports = {
+  version: 2,
+  name: 'temp_trigger_escape_probe',
+  sourcePath: '${sourcePath}',
+  engineVersion: 1,
+  dependencies: ['${VENDORED_BCRYPT_PATH}'],
+  schemaManifest: { columns: {}, indexes: {}, triggers: {} },
+  apply(db) {
+    db.exec(\`
+      CREATE TEMP TRIGGER temp_users_insert_block
+      BEFORE INSERT ON users
+      BEGIN
+        SELECT RAISE(ABORT, 'temporary trigger changed runtime behavior');
+      END;
+    \`);
+  }
+};
+`);
+  const { db } = tmpDb('temp-trigger-escape');
+  let migrationError = null;
+
+  try {
+    try {
+      migrationService.runMigrations(db, {
+        rootDir: root,
+        registeredMigrations: [{
+          version: 2,
+          name: 'temp_trigger_escape_probe',
+          sourcePath,
+          engineVersion: 1,
+          dependencies: [VENDORED_BCRYPT_PATH]
+        }]
+      });
+    } catch (error) {
+      migrationError = error;
+    }
+
+    assert.ok(migrationError, 'temporary schema state must fail the outer migration transaction');
+    assert.match(migrationError.message, /temporary|temp schema|not allowed/i);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_temp_schema WHERE name = 'temp_users_insert_block'").get().count, 0);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE name = 'schema_migrations'").get().count, 0);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE name = 'users'").get().count, 0);
+  } finally {
+    db.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('db startup does not persist WAL or mutate malformed populated database before migration preflight succeeds', () => {
   const { db, dbPath } = tmpDb('db-startup-no-wal-before-fail');
   db.pragma('journal_mode = DELETE');
