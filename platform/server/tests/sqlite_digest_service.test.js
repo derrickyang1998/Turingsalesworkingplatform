@@ -115,6 +115,28 @@ test('SQLite digest changes for schema, value, type, duplicate, sequence, pragma
   fts.db.close();
 });
 
+test('sqlite_sequence schema object and rows are included in topology and logical digests', () => {
+  const digest = require('../services/sqlite_digest_service');
+  const { db } = tmpDb('sqlite-sequence');
+  db.exec(`
+    CREATE TABLE sequence_owner (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      label TEXT NOT NULL
+    );
+    INSERT INTO sequence_owner (label) VALUES ('a');
+  `);
+  const base = digest.databaseDigest(db, { fts: [] });
+  db.prepare("UPDATE sqlite_sequence SET seq = 99 WHERE name = 'sequence_owner'").run();
+  const changed = digest.databaseDigest(db, { fts: [] });
+  assert.notEqual(changed.logicalSha256, base.logicalSha256);
+  assert.equal(changed.topologySha256, base.topologySha256);
+  db.exec('VACUUM');
+  const afterVacuum = digest.databaseDigest(db, { fts: [] });
+  assert.equal(afterVacuum.logicalSha256, changed.logicalSha256);
+  assert.equal(afterVacuum.topologySha256, changed.topologySha256);
+  db.close();
+});
+
 test('knowledge_chunks_fts projection is exact and rejects malformed tags, orphans, and swapped postings', () => {
   const digest = require('../services/sqlite_digest_service');
   const { db } = tmpDb('fts-projection');

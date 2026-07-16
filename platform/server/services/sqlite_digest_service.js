@@ -219,7 +219,7 @@ function topologyStream(db, manifest) {
     row(['user_version', BigInt(db.pragma('user_version', { simple: true }))]).subarray(8)
   ];
   const shadowNames = allShadowNames(manifest);
-  const objects = sqlRows(db, "SELECT type,name,tbl_name,sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name,tbl_name")
+  const objects = sqlRows(db, "SELECT type,name,tbl_name,sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' OR name = 'sqlite_sequence' ORDER BY type,name,tbl_name")
     .filter((object) => !shadowNames.has(object.name))
     .map((object) => {
       const tableList = sqlRows(db, `PRAGMA table_list(${quoteIdent(object.name)})`).map((r) => row([r.schema, r.name, r.type, BigInt(r.ncol), BigInt(r.wr), BigInt(r.strict)]).subarray(8));
@@ -313,7 +313,7 @@ function ftsDigest(db, manifestEntry) {
 function logicalStream(db, manifest, topologySha256) {
   const shadowNames = allShadowNames(manifest);
   const ftsNames = new Set((manifest.fts || []).map((entry) => entry.virtualName));
-  const tableNames = sqlRows(db, "SELECT name,type FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY name")
+  const tableNames = sqlRows(db, "SELECT name,type FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' OR name = 'sqlite_sequence' ORDER BY name")
     .filter((object) => object.type === 'table' && !shadowNames.has(object.name) && !ftsNames.has(object.name))
     .map((object) => object.name);
   const tableStreams = tableNames.map((name) => tableRowsStream(db, name));

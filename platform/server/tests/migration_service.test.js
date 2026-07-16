@@ -34,6 +34,23 @@ function seedAdmissions() {
   return require('../migrations/baselines/legacy_v1').seedAdmissions;
 }
 
+function serverRoot() {
+  return path.join(repoRoot, 'platform/server');
+}
+
+function noOpProbeMigration(version, name, sourcePath) {
+  return {
+    version,
+    name,
+    sourcePath,
+    engineVersion: 1,
+    dependencies: [],
+    apply(database) {
+      database.exec(`CREATE TABLE ${name} (id INTEGER PRIMARY KEY) STRICT;`);
+    }
+  };
+}
+
 test('migration checksum framing matches the design vector and excludes orchestration files', () => {
   const migrationService = require('../services/migration_service');
   const actual = migrationService.computeMigrationChecksum({
@@ -43,11 +60,46 @@ test('migration checksum framing matches the design vector and excludes orchestr
   assert.equal(actual, MIGRATION_SYNTHETIC.sha256);
 
   const v1 = migrationService.defaultMigrations()[0];
-  const checksumBefore = migrationService.computeRegisteredMigrationChecksum(v1, { rootDir: path.join(repoRoot, 'platform/server') });
-  const checksumAfterMutableBytes = migrationService.computeRegisteredMigrationChecksum(v1, { rootDir: path.join(repoRoot, 'platform/server') });
+  const checksumBefore = migrationService.computeRegisteredMigrationChecksum(v1, { rootDir: serverRoot() });
+  const checksumAfterMutableBytes = migrationService.computeRegisteredMigrationChecksum(v1, { rootDir: serverRoot() });
   assert.equal(checksumBefore, checksumAfterMutableBytes);
   assert.equal(v1.version, 1);
   assert.notEqual(v1.version, 2);
+});
+
+test('registered migration checksums are always derived from file bytes and undeclared imports are rejected', () => {
+  const migrationService = require('../services/migration_service');
+  const bypassAttempt = {
+    version: 7,
+    name: 'bad_import_probe',
+    sourcePath: 'tests/fixtures/bad_import_probe.js',
+    engineVersion: 1,
+    dependencies: [],
+    checksum: 'f'.repeat(64),
+    apply() {}
+  };
+
+  assert.throws(
+    () => migrationService.computeRegisteredMigrationChecksum(bypassAttempt, { rootDir: serverRoot() }),
+    /undeclared local import|declared dependency/
+  );
+  assert.notEqual(
+    migrationService.computeRegisteredMigrationChecksum(noOpProbeMigration(8, 'test_probe_table', 'tests/fixtures/test_probe_migration.js'), { rootDir: serverRoot() }),
+    'f'.repeat(64)
+  );
+});
+
+test('immutable baseline is self-contained for seed credentials and v1 checksum ignores mutable services', () => {
+  const fs = require('node:fs');
+  const migrationService = require('../services/migration_service');
+  const baselineSource = fs.readFileSync(path.join(serverRoot(), 'migrations/baselines/legacy_v1.js'), 'utf8');
+  assert.doesNotMatch(baselineSource, /credential_rotation_service/);
+  assert.doesNotMatch(baselineSource, /require\(['"]\.\.\/\.\.\/services\//);
+
+  const v1 = migrationService.defaultMigrations()[0];
+  const before = migrationService.computeRegisteredMigrationChecksum(v1, { rootDir: serverRoot() });
+  const after = migrationService.computeRegisteredMigrationChecksum(v1, { rootDir: serverRoot() });
+  assert.equal(after, before);
 });
 
 test('empty database applies baseline, ledger, 001, both seed admissions, and a registered later probe in one transaction', () => {
@@ -62,10 +114,9 @@ test('empty database applies baseline, ledger, 001, both seed admissions, and a 
       {
         version: 99,
         name: 'test_probe',
-        sourcePath: 'tests/fixtures/test_probe.js',
+        sourcePath: 'tests/fixtures/test_probe_migration.js',
         engineVersion: 1,
         dependencies: [],
-        checksum: 'f'.repeat(64),
         apply(database) {
           events.push(database.inTransaction);
           database.exec('CREATE TABLE probe_table (id INTEGER PRIMARY KEY) STRICT;');
@@ -91,6 +142,44 @@ test('empty database applies baseline, ledger, 001, both seed admissions, and a 
   db.close();
 });
 
+test('managed and legacy classification require immutable baseline object and column manifests', () => {
+  const migrationService = require('../services/migration_service');
+  const legacy = require('../migrations/baselines/legacy_v1');
+
+  const ledgerOnly = tmpDb('ledger-only');
+  migrationService.createLedger(ledgerOnly.db);
+  assert.equal(migrationService.classifyDatabase(ledgerOnly.db, { rootDir: serverRoot() }).status, 'partial_or_malformed');
+  ledgerOnly.db.close();
+
+  const malformedLegacy = tmpDb('malformed-legacy-shape');
+  legacy.apply(malformedLegacy.db);
+  malformedLegacy.db.exec('PRAGMA foreign_keys = OFF; DROP TABLE users; CREATE TABLE users (id TEXT);');
+  const classification = migrationService.classifyDatabase(malformedLegacy.db, { rootDir: serverRoot() });
+  assert.equal(classification.status, 'partial_or_malformed');
+  malformedLegacy.db.close();
+});
+
+test('populated read-only preflight records identity and aborts if data changes before exclusive migration write', () => {
+  const migrationService = require('../services/migration_service');
+  const legacy = require('../migrations/baselines/legacy_v1');
+  const { db, dbPath } = tmpDb('preflight-race');
+  legacy.apply(db);
+  db.prepare('INSERT INTO users (id, username, password_hash, display_name, role) VALUES (1, ?, ?, ?, ?)').run('admin', 'hash', 'Admin', 'admin');
+
+  assert.throws(() => migrationService.runMigrations(db, {
+    rootDir: serverRoot(),
+    seedAdmissions: seedAdmissions(),
+    afterReadOnlyPreflight(databasePath) {
+      assert.equal(databasePath, dbPath);
+      const other = new Database(databasePath);
+      other.prepare('INSERT INTO users (id, username, password_hash, display_name, role) VALUES (2, ?, ?, ?, ?)').run('race', 'hash', 'Race', 'user');
+      other.close();
+    }
+  }), /preflight.*changed|identity.*changed|digest.*changed/);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE name = 'schema_migrations'").get().count, 0);
+  db.close();
+});
+
 test('legacy upgrade preserves legacy values, adds compatibility columns, backfills versions, and is idempotent', () => {
   const migrationService = require('../services/migration_service');
   const legacy = require('../migrations/baselines/legacy_v1');
@@ -112,8 +201,15 @@ test('legacy upgrade preserves legacy values, adds compatibility columns, backfi
   assert.equal(db.prepare('SELECT cost_actual_confirmed FROM collaborations WHERE id = 40').get().cost_actual_confirmed, 0);
   db.prepare("UPDATE collaborations SET notes = 'changed' WHERE id = 40").run();
   assert.equal(db.prepare('SELECT row_version FROM collaborations WHERE id = 40').get().row_version, 2);
+  db.prepare('UPDATE collaborations SET row_version = ? WHERE id = 40').run(3);
+  assert.equal(db.prepare('SELECT row_version FROM collaborations WHERE id = 40').get().row_version, 3);
+  assert.throws(() => db.prepare('UPDATE collaborations SET row_version = ? WHERE id = 40').run(5), /row_version/);
+  assert.throws(() => db.prepare('UPDATE collaborations SET row_version = ? WHERE id = 40').run(2), /row_version/);
   assert.throws(() => db.prepare('UPDATE collaborations SET row_version = ? WHERE id = 40').run(0), /row_version/);
+  assert.throws(() => db.prepare('UPDATE collaborations SET row_version = ? WHERE id = 40').run(9007199254740992), /row_version/);
   assert.throws(() => db.prepare('UPDATE collaborations SET cost_actual_confirmed = ? WHERE id = 40').run(2), /cost_actual_confirmed/);
+  const legacyShape = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'index' AND name = 'idx_knowledge_source_hash'").get().sql;
+  assert.equal(legacyShape, 'CREATE UNIQUE INDEX idx_knowledge_source_hash ON knowledge_entries(source_hash) WHERE source_hash IS NOT NULL');
 
   const firstSnapshot = snapshot(db);
   migrationService.runMigrations(db, {
@@ -121,6 +217,20 @@ test('legacy upgrade preserves legacy values, adds compatibility columns, backfi
     seedAdmissions: seedAdmissions()
   });
   assert.equal(snapshot(db), firstSnapshot);
+  db.close();
+});
+
+test('pre-existing malformed collaboration compatibility columns and values fail before mutation', () => {
+  const migrationService = require('../services/migration_service');
+  const legacy = require('../migrations/baselines/legacy_v1');
+  const { db } = tmpDb('bad-compat-columns');
+  legacy.apply(db);
+  db.exec('ALTER TABLE collaborations ADD COLUMN row_version TEXT;');
+  assert.throws(() => migrationService.runMigrations(db, {
+    rootDir: serverRoot(),
+    seedAdmissions: seedAdmissions()
+  }), /row_version|compatibility column|partial_or_malformed/);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE name = 'schema_migrations'").get().count, 0);
   db.close();
 });
 
@@ -157,10 +267,9 @@ test('malformed, future, orphaned, and failed migrations fail closed without led
       {
         version: 99,
         name: 'failing_probe',
-        sourcePath: 'tests/fixtures/failing_probe.js',
+        sourcePath: 'tests/fixtures/failing_probe_migration.js',
         engineVersion: 1,
         dependencies: [],
-        checksum: 'e'.repeat(64),
         apply() {
           throw new Error('injected migration failure');
         }

@@ -1,5 +1,48 @@
+const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
-const credentialRotation = require('../../services/credential_rotation_service');
+
+const UPPERCASE = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+const LOWERCASE = 'abcdefghijkmnopqrstuvwxyz';
+const DIGITS = '23456789';
+const SYMBOLS = '!@#$%^&*()-_=+[]{};:,.?';
+const ALL_PASSWORD_CHARS = UPPERCASE + LOWERCASE + DIGITS + SYMBOLS;
+
+function passwordPolicyErrors(password) {
+  const value = String(password === undefined || password === null ? '' : password);
+  const errors = [];
+  if (value.length < 12) errors.push('Password must be at least 12 characters long.');
+  if (!/[A-Z]/.test(value)) errors.push('Password must include an uppercase letter.');
+  if (!/[a-z]/.test(value)) errors.push('Password must include a lowercase letter.');
+  if (!/[0-9]/.test(value)) errors.push('Password must include a digit.');
+  if (!/[^A-Za-z0-9]/.test(value)) errors.push('Password must include a symbol.');
+  return errors;
+}
+
+function randomCharacter(chars) {
+  return chars[crypto.randomInt(chars.length)];
+}
+
+function shuffle(chars) {
+  const output = chars.slice();
+  for (let index = output.length - 1; index > 0; index -= 1) {
+    const swapIndex = crypto.randomInt(index + 1);
+    const current = output[index];
+    output[index] = output[swapIndex];
+    output[swapIndex] = current;
+  }
+  return output;
+}
+
+function generateTemporaryPassword() {
+  const chars = [
+    randomCharacter(UPPERCASE),
+    randomCharacter(LOWERCASE),
+    randomCharacter(DIGITS),
+    randomCharacter(SYMBOLS)
+  ];
+  while (chars.length < 24) chars.push(randomCharacter(ALL_PASSWORD_CHARS));
+  return shuffle(chars).join('');
+}
 
 function apply(db) {
   db.exec(`
@@ -435,12 +478,12 @@ function resolveSeedPassword(envKey, options) {
     if (process.env.NODE_ENV === 'production' && options.requiredInProduction) {
       throw new Error(envKey + ' must be configured before seeding users in production');
     }
-    return credentialRotation.generateTemporaryPassword();
+    return generateTemporaryPassword();
   }
 
   const password = String(process.env[envKey] || '');
   if (process.env.NODE_ENV === 'production') {
-    const errors = credentialRotation.passwordPolicyErrors(password);
+    const errors = passwordPolicyErrors(password);
     if (errors.length) throw new Error(productionPasswordPolicyError(envKey, errors));
   }
   return password;
