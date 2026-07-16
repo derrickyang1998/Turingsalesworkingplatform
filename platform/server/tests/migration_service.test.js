@@ -235,22 +235,29 @@ test('closed migration dependency graph rejects undeclared transitive imports an
   );
 });
 
-test('migration loader allows only builtins and rejects undeclared bare package imports', () => {
+test('migration loader allows only engine-approved builtins and rejects ambient package imports', () => {
   const migrationService = require('../services/migration_service');
-  assert.throws(
-    () => migrationService.runMigrations(tmpDb('bare-import').db, {
-      rootDir: serverRoot(),
-      seedAdmissions: seedAdmissions(),
-      registeredMigrations: [{
-        version: 2,
-        name: 'bare_import_probe',
-        sourcePath: 'tests/fixtures/bare_import_probe_migration.js',
-        engineVersion: 1,
-        dependencies: [VENDORED_BCRYPT_PATH]
-      }]
-    }),
-    /bare import|undeclared package|better-sqlite3/
-  );
+  const previousGlobalRequire = global.require;
+  global.require = require;
+  try {
+    assert.throws(
+      () => migrationService.runMigrations(tmpDb('bare-import').db, {
+        rootDir: serverRoot(),
+        seedAdmissions: seedAdmissions(),
+        registeredMigrations: [{
+          version: 2,
+          name: 'bare_import_probe',
+          sourcePath: 'tests/fixtures/bare_import_probe_migration.js',
+          engineVersion: 1,
+          dependencies: [VENDORED_BCRYPT_PATH]
+        }]
+      }),
+      /builtin import is not allowed|ambient global require|bare import|undeclared package|better-sqlite3|require is not a function/
+    );
+  } finally {
+    if (previousGlobalRequire === undefined) delete global.require;
+    else global.require = previousGlobalRequire;
+  }
 
   const { db } = tmpDb('builtin-import');
   migrationService.runMigrations(db, {
@@ -505,6 +512,34 @@ test('managed and legacy classification require immutable baseline object and co
   const classification = migrationService.classifyDatabase(malformedLegacy.db, { rootDir: serverRoot() });
   assert.equal(classification.status, 'partial_or_malformed');
   malformedLegacy.db.close();
+});
+
+test('populated baseline with an empty migration ledger fails closed without mutation or seeds', () => {
+  const migrationService = require('../services/migration_service');
+  const legacy = require('../migrations/baselines/legacy_v1');
+  const { db } = tmpDb('populated-empty-ledger');
+  legacy.apply(db);
+  migrationService.createLedger(db);
+
+  const before = {
+    users: db.prepare('SELECT COUNT(*) AS count FROM users').get().count,
+    influencers: db.prepare('SELECT COUNT(*) AS count FROM influencers').get().count,
+    ledger: db.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get().count,
+    collaborationColumns: db.prepare("SELECT COUNT(*) AS count FROM pragma_table_info('collaborations') WHERE name IN ('row_version', 'cost_actual_confirmed')").get().count
+  };
+
+  assert.equal(migrationService.classifyDatabase(db, { rootDir: serverRoot() }).status, 'partial_or_malformed');
+  assert.throws(
+    () => migrationService.runMigrations(db, { rootDir: serverRoot() }),
+    /partial_or_malformed|empty migration ledger/
+  );
+  assert.deepEqual({
+    users: db.prepare('SELECT COUNT(*) AS count FROM users').get().count,
+    influencers: db.prepare('SELECT COUNT(*) AS count FROM influencers').get().count,
+    ledger: db.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get().count,
+    collaborationColumns: db.prepare("SELECT COUNT(*) AS count FROM pragma_table_info('collaborations') WHERE name IN ('row_version', 'cost_actual_confirmed')").get().count
+  }, before);
+  db.close();
 });
 
 test('baseline and ledger shape validation rejects column drift, extra objects, and weak ledgers', () => {

@@ -274,17 +274,66 @@ function computeRegisteredMigrationChecksum(migration, options) {
   });
 }
 
+function migrationExecutionContext() {
+  const environment = Object.create(null);
+  for (const [key, value] of Object.entries(process.env)) {
+    if (typeof value === 'string') environment[key] = value;
+  }
+  Object.freeze(environment);
+
+  const sandboxProcess = Object.create(null);
+  Object.defineProperty(sandboxProcess, 'env', {
+    value: environment,
+    enumerable: true
+  });
+  Object.freeze(sandboxProcess);
+
+  const safeSetTimeout = (...args) => setTimeout(...args);
+  const safeSetImmediate = (...args) => setImmediate(...args);
+  Object.setPrototypeOf(safeSetTimeout, null);
+  Object.setPrototypeOf(safeSetImmediate, null);
+
+  const sandbox = Object.create(null);
+  sandbox.process = sandboxProcess;
+  sandbox.setTimeout = safeSetTimeout;
+  sandbox.setImmediate = safeSetImmediate;
+  return vm.createContext(sandbox, {
+    name: 'turingmarket-migration-vm',
+    codeGeneration: { strings: false, wasm: false }
+  });
+}
+
+function engineBuiltinPolicy(engine, expectedVersion) {
+  if (!engine || engine.version !== expectedVersion) {
+    throw new Error(`migration engine version mismatch: expected ${expectedVersion}`);
+  }
+  if (!Array.isArray(engine.allowedBuiltinModules)) {
+    throw new Error(`migration engine v${expectedVersion} must declare allowedBuiltinModules`);
+  }
+  const allowed = new Set();
+  for (const request of engine.allowedBuiltinModules) {
+    if (typeof request !== 'string' || !BUILTIN_MODULES.has(request) || allowed.has(request)) {
+      throw new Error(`migration engine v${expectedVersion} has invalid builtin policy`);
+    }
+    allowed.add(request);
+  }
+  return allowed;
+}
+
 function loadRegisteredMigration(migration, options) {
   const bundle = validatedMigrationBundle(migration, options || {});
   const checksum = computeMigrationChecksum({ engineVersion: migration.engineVersion, files: bundle.files });
   const moduleCache = new Map();
+  const context = migrationExecutionContext();
+  let allowedBuiltinModules = new Set();
 
   function loadModule(repoPath) {
     const normalized = validateRepoPath(repoPath);
     if (moduleCache.has(normalized)) return moduleCache.get(normalized).exports;
     const bytes = bundle.fileMap.get(normalized);
     if (!bytes) throw new Error(`migration implementation attempted undeclared local load: ${normalized}`);
-    const module = { exports: {} };
+    const module = Object.create(null);
+    module.exports = Object.create(null);
     moduleCache.set(normalized, module);
     const dirname = path.posix.dirname(normalized);
     const filename = path.join(bundle.rootDir, ...normalized.split('/'));
@@ -293,18 +342,24 @@ function loadRegisteredMigration(migration, options) {
         return loadModule(normalizeRelativeRequest(normalized, request));
       }
       if (BUILTIN_MODULES.has(request)) {
+        if (!allowedBuiltinModules.has(request)) {
+          throw new Error(`builtin import is not allowed by migration engine v${migration.engineVersion}: ${request}`);
+        }
         return require(request);
       }
       throw new Error(`undeclared bare import in migration bundle ${normalized}: ${request}`);
     };
+    Object.setPrototypeOf(localRequire, null);
     const script = new vm.Script(`(function(exports, require, module, __filename, __dirname) {\n${bytes.toString('utf8')}\n})`, {
       filename
     });
-    const compiled = script.runInThisContext();
+    const compiled = script.runInContext(context);
     compiled(module.exports, localRequire, module, filename, dirname);
     return module.exports;
   }
 
+  const engineImplementation = loadModule(`migrations/engines/v${migration.engineVersion}.js`);
+  allowedBuiltinModules = engineBuiltinPolicy(engineImplementation, migration.engineVersion);
   const implementation = loadModule(validateRepoPath(migration.sourcePath));
   const baselineImplementation = loadModule('migrations/baselines/legacy_v1.js');
   const mismatches = [];
@@ -801,6 +856,9 @@ function classifyDatabase(db, options) {
     rows = db.prepare('SELECT version,name,checksum,source_path,engine_version FROM schema_migrations ORDER BY version').all();
   } catch (error) {
     return { status: 'partial_or_malformed', reason: error.message };
+  }
+  if (rows.length === 0) {
+    return { status: 'partial_or_malformed', reason: 'empty migration ledger' };
   }
   const seenVersions = new Set();
   const seenNames = new Set();

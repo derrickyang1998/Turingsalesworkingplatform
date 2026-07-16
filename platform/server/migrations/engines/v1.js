@@ -1,4 +1,10 @@
 const SAFE_MAX = Number.MAX_SAFE_INTEGER;
+const allowedBuiltinModules = Object.freeze([
+  'crypto',
+  'node:crypto',
+  'path',
+  'node:path'
+]);
 
 function assertSafePositiveInteger(value, label) {
   if (!Number.isSafeInteger(value) || value < 1 || value > SAFE_MAX) {
@@ -33,6 +39,7 @@ function createIndex(db, sql) {
 
 module.exports = {
   version: 1,
+  allowedBuiltinModules,
   SAFE_MAX,
   assertSafePositiveInteger,
   assertSafeNonNegativeInteger,
