@@ -890,12 +890,13 @@ function baselineMetadataProblem(table, expected, actual, allowances) {
   return null;
 }
 
-function baselineSchemaProblem(db, baselineImplementation, allowedMigrations) {
+function baselineSchemaProblem(db, baselineLoaded, allowedLoadedMigrations) {
   const expectedDb = new Database(':memory:');
   try {
-    baselineImplementation.apply(expectedDb);
+    executeMigrationFunction(baselineLoaded, baselineLoaded.baseline.apply, expectedDb, 'legacy baseline schema replay');
     const expected = schemaSnapshot(expectedDb);
     const actual = schemaSnapshot(db);
+    const allowedMigrations = allowedLoadedMigrations.map((loaded) => loaded.implementation);
     const allowances = optionalMigrationAllowances(allowedMigrations);
     for (const [name, expectedObject] of expected.objects.entries()) {
       const actualObject = actual.objects.get(name);
@@ -941,17 +942,25 @@ function baselineSchemaProblem(db, baselineImplementation, allowedMigrations) {
   }
 }
 
-function managedSchemaProblem(db, baselineImplementation, appliedMigrations) {
+function managedSchemaProblem(db, baselineLoaded, appliedLoadedMigrations) {
   const expectedDb = new Database(':memory:');
   try {
-    baselineImplementation.apply(expectedDb);
+    executeMigrationFunction(baselineLoaded, baselineLoaded.baseline.apply, expectedDb, 'managed baseline schema replay');
     const baselineSnapshot = schemaSnapshot(expectedDb);
     createLedger(expectedDb);
-    for (const migration of appliedMigrations) migration.apply(expectedDb);
+    for (const loaded of appliedLoadedMigrations) {
+      executeMigrationFunction(
+        loaded,
+        loaded.implementation.apply,
+        expectedDb,
+        `managed migration ${loaded.implementation.name} schema replay`
+      );
+    }
     const actual = schemaSnapshot(db);
     const expected = schemaSnapshot(expectedDb);
     const exactProblem = exactSchemaProblem(actual, expected, 'managed schema');
     if (!exactProblem) return null;
+    const appliedMigrations = appliedLoadedMigrations.map((loaded) => loaded.implementation);
     return compatibleManagedSchemaProblem(actual, expected, baselineSnapshot, appliedMigrations);
   } finally {
     expectedDb.close();
@@ -1020,8 +1029,8 @@ function classifyDatabase(db, options) {
     const loadedLegacyCompatibility = loadedFor(legacyCompatibilityMigration);
     const shapeProblem = baselineSchemaProblem(
       db,
-      loadedLegacyCompatibility.baseline,
-      [loadedLegacyCompatibility.implementation]
+      loadedLegacyCompatibility,
+      [loadedLegacyCompatibility]
     ) || compatibilityColumnProblem(db);
     return shapeProblem ? { status: 'partial_or_malformed', reason: shapeProblem } : { status: 'legacy', currentVersion: 0 };
   }
@@ -1063,8 +1072,8 @@ function classifyDatabase(db, options) {
       return { status: 'partial_or_malformed', reason: manifestProblem };
     }
   }
-  const appliedMigrations = rows.map((row) => loadedFor(migrations.find((candidate) => candidate.version === row.version)).implementation);
-  const shapeProblem = managedSchemaProblem(db, loadedFor(migrations[0]).baseline, appliedMigrations) || compatibilityColumnProblem(db);
+  const appliedMigrations = rows.map((row) => loadedFor(migrations.find((candidate) => candidate.version === row.version)));
+  const shapeProblem = managedSchemaProblem(db, loadedFor(migrations[0]), appliedMigrations) || compatibilityColumnProblem(db);
   if (shapeProblem) return { status: 'partial_or_malformed', reason: shapeProblem };
   return { status: 'managed', currentVersion: rows.length ? rows[rows.length - 1].version : 0 };
 }

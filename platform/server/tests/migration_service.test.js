@@ -530,6 +530,86 @@ module.exports = {
   }
 });
 
+test('legacy expected-schema replay never exposes a raw host database handle', () => {
+  const migrationService = require('../services/migration_service');
+  const legacy = require('../migrations/baselines/legacy_v1');
+  const root = tempMigrationRoot('legacy-expected-schema-facade');
+  const baselinePath = path.join(root, 'migrations', 'baselines', 'legacy_v1.js');
+  const escapeMarker = 'TM_LEGACY_EXPECTED_SCHEMA_RAW_DB_ESCAPE';
+  const source = fs.readFileSync(baselinePath, 'utf8');
+  fs.writeFileSync(baselinePath, source.replace(
+    'function apply(db) {',
+    `function apply(db) {
+  if (db.constructor) {
+    const hostProcess = db.constructor.constructor('return process')();
+    hostProcess.env.${escapeMarker} = 'escaped';
+  }`
+  ), 'utf8');
+  const { db } = tmpDb('legacy-expected-schema-facade');
+  legacy.apply(db);
+  delete process.env[escapeMarker];
+
+  try {
+    assert.equal(migrationService.classifyDatabase(db, { rootDir: root }).status, 'legacy');
+    assert.equal(process.env[escapeMarker], undefined);
+  } finally {
+    delete process.env[escapeMarker];
+    db.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('managed expected-schema replay never exposes a raw host database handle', () => {
+  const migrationService = require('../services/migration_service');
+  const root = tempMigrationRoot('managed-expected-schema-facade');
+  const sourcePath = 'migrations/002_managed_expected_schema_facade.js';
+  const escapeMarker = 'TM_MANAGED_EXPECTED_SCHEMA_RAW_DB_ESCAPE';
+  writeTempMigration(root, sourcePath, `
+module.exports = {
+  version: 2,
+  name: 'managed_expected_schema_facade',
+  sourcePath: '${sourcePath}',
+  engineVersion: 1,
+  dependencies: ['${VENDORED_BCRYPT_PATH}'],
+  schemaManifest: {
+    columns: { managed_expected_schema_facade: { id: { type: 'INTEGER', notnull: 0, defaultValue: null } } },
+    indexes: {},
+    triggers: {}
+  },
+  apply(db) {
+    if (db.constructor) {
+      const hostProcess = db.constructor.constructor('return process')();
+      hostProcess.env.${escapeMarker} = 'escaped';
+    }
+    db.exec('CREATE TABLE managed_expected_schema_facade (id INTEGER PRIMARY KEY) STRICT;');
+  }
+};
+`);
+  const descriptor = {
+    version: 2,
+    name: 'managed_expected_schema_facade',
+    sourcePath,
+    engineVersion: 1,
+    dependencies: [VENDORED_BCRYPT_PATH]
+  };
+  const { db } = tmpDb('managed-expected-schema-facade');
+  delete process.env[escapeMarker];
+
+  try {
+    const classification = migrationService.runMigrations(db, {
+      rootDir: root,
+      registeredMigrations: [descriptor]
+    });
+    assert.deepEqual(classification, { status: 'managed', currentVersion: 2 });
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE name = 'managed_expected_schema_facade'").get().count, 1);
+    assert.equal(process.env[escapeMarker], undefined);
+  } finally {
+    delete process.env[escapeMarker];
+    db.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('empty initialization applies the immutable baseline bytes from the first migration checksum bundle', () => {
   const migrationService = require('../services/migration_service');
   const root = tempMigrationRoot('baseline-bytes');
