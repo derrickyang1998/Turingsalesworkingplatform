@@ -874,14 +874,20 @@ function schemaSqlTokens(sql) {
   let index = 0;
   while (index < source.length) {
     const character = source[index];
-    if (/\s/.test(character)) {
+    if (
+      character === '\u0009' ||
+      character === '\u000a' ||
+      character === '\u000c' ||
+      character === '\u000d' ||
+      character === '\u0020'
+    ) {
       index += 1;
       continue;
     }
     if (character === '-' && source[index + 1] === '-') {
       const start = index;
       index += 2;
-      while (index < source.length && source[index] !== '\n' && source[index] !== '\r') index += 1;
+      while (index < source.length && source[index] !== '\n') index += 1;
       tokens.push({ kind: 'comment', value: source.slice(start, index) });
       continue;
     }

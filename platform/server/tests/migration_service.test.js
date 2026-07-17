@@ -2696,6 +2696,151 @@ module.exports = {
   }
 });
 
+test('schema SQL tokenizer ignores only SQLite whitespace characters', () => {
+  const migrationService = require('../services/migration_service');
+  const root = tempMigrationRoot('schema-sqlite-whitespace');
+  const sourcePath = 'migrations/002_schema_sqlite_whitespace.js';
+  const descriptor = {
+    version: 2,
+    name: 'schema_sqlite_whitespace',
+    sourcePath,
+    engineVersion: 1,
+    dependencies: [VENDORED_BCRYPT_PATH]
+  };
+  writeTempMigration(root, sourcePath, `
+module.exports = {
+  version: 2,
+  name: 'schema_sqlite_whitespace',
+  sourcePath: '${sourcePath}',
+  engineVersion: 1,
+  dependencies: ['${VENDORED_BCRYPT_PATH}'],
+  schemaManifest: {
+    columns: {
+      unicode_whitespace_probe: {
+        x: { type: 'INTEGER', notnull: 0, defaultValue: null },
+        '\\u00a0x': { type: 'INTEGER', notnull: 0, defaultValue: null },
+        '\\u2028x': { type: 'INTEGER', notnull: 0, defaultValue: null }
+      },
+      cr_comment_probe: {
+        x: { type: 'INTEGER', notnull: 0, defaultValue: null }
+      }
+    },
+    indexes: {},
+    triggers: {},
+    tableChecks: {
+      unicode_whitespace_probe: ['CHECK (x > 0)'],
+      cr_comment_probe: ['CHECK (x > 0)']
+    }
+  },
+  apply(db) {
+    db.exec('CREATE TABLE unicode_whitespace_probe (x INTEGER, "\\u00a0x" INTEGER, "\\u2028x" INTEGER, CHECK (x > 0)) STRICT;');
+    db.exec("CREATE TABLE cr_comment_probe (x INTEGER\\n  -- first\\r-- second\\n  , CHECK (x > 0)\\n) STRICT;");
+  }
+};
+`);
+  const options = {
+    rootDir: root,
+    registeredMigrations: [descriptor]
+  };
+  const classifyOptions = {
+    rootDir: root,
+    migrations: [...migrationService.defaultMigrations(), descriptor]
+  };
+  const cases = [
+    ['nbsp', '\u00a0'],
+    ['line-separator', '\u2028']
+  ];
+  const sqliteWhitespaceCases = [
+    ['tab', '\u0009'],
+    ['line-feed', '\u000a'],
+    ['form-feed', '\u000c'],
+    ['carriage-return', '\u000d'],
+    ['space', '\u0020']
+  ];
+
+  try {
+    for (const [name, character] of cases) {
+      const semantics = new Database(':memory:');
+      semantics.exec(
+        `CREATE TABLE expected_probe (x INTEGER, "${character}x" INTEGER, CHECK (x > 0)) STRICT`
+      );
+      assert.throws(
+        () => semantics.prepare(
+          `INSERT INTO expected_probe (x, "${character}x") VALUES (?, ?)`
+        ).run(-1, 1),
+        /CHECK/
+      );
+      semantics.exec(
+        `CREATE TABLE actual_probe (x INTEGER, "${character}x" INTEGER, CHECK (${character}x > 0)) STRICT`
+      );
+      semantics.prepare(
+        `INSERT INTO actual_probe (x, "${character}x") VALUES (?, ?)`
+      ).run(-1, 1);
+      assert.equal(semantics.prepare('SELECT COUNT(*) AS count FROM actual_probe').get().count, 1);
+      semantics.close();
+
+      const fixture = tmpDb(`schema-sqlite-whitespace-${name}`);
+      migrationService.runMigrations(fixture.db, options);
+      rewriteTableSchemaSql(
+        fixture.db,
+        'unicode_whitespace_probe',
+        (sql) => sql.replace('CHECK (x > 0)', `CHECK (${character}x > 0)`)
+      );
+
+      const classification = migrationService.classifyDatabase(fixture.db, classifyOptions);
+      assert.equal(classification.status, 'partial_or_malformed', name);
+      assert.match(classification.reason, /unicode_whitespace_probe|schema|object|check/i, name);
+      fixture.db.close();
+    }
+
+    for (const [name, character] of sqliteWhitespaceCases) {
+      const fixture = tmpDb(`schema-sqlite-whitespace-allowed-${name}`);
+      migrationService.runMigrations(fixture.db, options);
+      rewriteTableSchemaSql(
+        fixture.db,
+        'unicode_whitespace_probe',
+        (sql) => sql.replace('CHECK (x > 0)', `CHECK${character}${character}(x > 0)`)
+      );
+      assert.deepEqual(
+        migrationService.classifyDatabase(fixture.db, classifyOptions),
+        { status: 'managed', currentVersion: 2 },
+        name
+      );
+      fixture.db.close();
+    }
+
+    const expectedCommentSql = 'CREATE TABLE expected_comment_probe (x INTEGER\n  -- first\r-- second\n  , CHECK (x > 0)\n) STRICT';
+    const actualCommentSql = 'CREATE TABLE actual_comment_probe (x INTEGER\n  -- first\n-- second\r  , CHECK (x > 0)\n) STRICT';
+    const commentSemantics = new Database(':memory:');
+    commentSemantics.exec(expectedCommentSql);
+    assert.throws(
+      () => commentSemantics.prepare('INSERT INTO expected_comment_probe (x) VALUES (?)').run(-1),
+      /CHECK/
+    );
+    commentSemantics.exec(actualCommentSql);
+    commentSemantics.prepare('INSERT INTO actual_comment_probe (x) VALUES (?)').run(-1);
+    assert.equal(commentSemantics.prepare('SELECT COUNT(*) AS count FROM actual_comment_probe').get().count, 1);
+    commentSemantics.close();
+
+    const crComment = tmpDb('schema-sqlite-line-comment-cr');
+    migrationService.runMigrations(crComment.db, options);
+    rewriteTableSchemaSql(
+      crComment.db,
+      'cr_comment_probe',
+      (sql) => sql.replace(
+        '-- first\r-- second\n  , CHECK (x > 0)',
+        '-- first\n-- second\r  , CHECK (x > 0)\n'
+      )
+    );
+    const crClassification = migrationService.classifyDatabase(crComment.db, classifyOptions);
+    assert.equal(crClassification.status, 'partial_or_malformed');
+    assert.match(crClassification.reason, /cr_comment_probe|schema|object|check/i);
+    crComment.db.close();
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('pre-existing malformed collaboration compatibility columns and values fail before mutation', () => {
   const migrationService = require('../services/migration_service');
   const legacy = require('../migrations/baselines/legacy_v1');
