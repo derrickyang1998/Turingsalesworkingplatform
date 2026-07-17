@@ -620,9 +620,13 @@ function assertEmptyTemporarySchema(db) {
 function migrationDatabaseAccess(db, runtime) {
   let active = true;
   let transactionLost = false;
+  let expiredAccessAttempted = false;
   const assertActive = () => {
     if (transactionLost) throw new Error('migration database transaction boundary was lost');
-    if (!active) throw new Error('migration database access has expired');
+    if (!active) {
+      expiredAccessAttempted = true;
+      throw new Error('migration database access has expired');
+    }
   };
   const guardedDatabaseOperation = (operation) => {
     const transactionRequired = db.inTransaction;
@@ -667,6 +671,11 @@ function migrationDatabaseAccess(db, runtime) {
     assertTransactionIntact() {
       if (transactionLost) throw new Error('migration database transaction boundary was lost');
     },
+    assertNoExpiredAccess() {
+      if (expiredAccessAttempted) {
+        throw new Error('migration database access was attempted after function return');
+      }
+    },
     revoke() {
       active = false;
     }
@@ -706,7 +715,11 @@ function executeMigrationFunction(loaded, operation, db, label) {
     const result = operation(access.facade);
     access.assertTransactionIntact();
     assertEmptyTemporarySchema(db);
+    access.revoke();
     assertSynchronousMigrationResult(result, label);
+    access.assertNoExpiredAccess();
+    access.assertTransactionIntact();
+    assertEmptyTemporarySchema(db);
     return result;
   } finally {
     access.revoke();
@@ -1274,6 +1287,7 @@ function classifyDatabase(db, options) {
   }
   const seenVersions = new Set();
   const seenNames = new Set();
+  let hasFutureVersion = false;
   for (const row of rows) {
     if (!Number.isSafeInteger(row.version) || row.version < 1 || !row.name || !/^[0-9a-f]{64}$/.test(row.checksum || '') || !row.source_path || !Number.isSafeInteger(row.engine_version) || row.engine_version < 1) {
       return { status: 'partial_or_malformed', reason: 'malformed ledger row' };
@@ -1281,12 +1295,13 @@ function classifyDatabase(db, options) {
     if (seenVersions.has(row.version) || seenNames.has(row.name)) return { status: 'partial_or_malformed', reason: 'duplicate ledger row' };
     seenVersions.add(row.version);
     seenNames.add(row.name);
-    if (row.version > maxVersion) return { status: 'future', currentVersion: row.version };
+    if (row.version > maxVersion) hasFutureVersion = true;
   }
   for (let version = 1; version <= rows.length; version += 1) {
     if (rows[version - 1].version !== version) return { status: 'partial_or_malformed', reason: 'gapped ledger' };
   }
   for (const row of rows) {
+    if (row.version > maxVersion) continue;
     const migration = migrations.find((candidate) => candidate.version === row.version);
     if (!migration || migration.name !== row.name) return { status: 'partial_or_malformed', reason: 'unknown ledger migration' };
     const loaded = loadedFor(migration);
@@ -1297,6 +1312,9 @@ function classifyDatabase(db, options) {
     if (manifestProblem) {
       return { status: 'partial_or_malformed', reason: manifestProblem };
     }
+  }
+  if (hasFutureVersion) {
+    return { status: 'future', currentVersion: rows[rows.length - 1].version };
   }
   const appliedMigrations = rows.map((row) => loadedFor(migrations.find((candidate) => candidate.version === row.version)));
   const shapeProblem = managedSchemaProblem(db, loadedFor(migrations[0]), appliedMigrations) || compatibilityColumnProblem(db);

@@ -1125,6 +1125,64 @@ module.exports = {
   }
 });
 
+test('returned then getter cannot roll back the transaction before ledger insertion', () => {
+  const migrationService = require('../services/migration_service');
+  const root = tempMigrationRoot('returned-then-getter-rollback');
+  const sourcePath = 'migrations/002_returned_then_getter_rollback.js';
+  writeTempMigration(root, sourcePath, `
+module.exports = {
+  version: 2,
+  name: 'returned_then_getter_rollback',
+  sourcePath: '${sourcePath}',
+  engineVersion: 1,
+  dependencies: ['${VENDORED_BCRYPT_PATH}'],
+  schemaManifest: { columns: {}, indexes: {}, triggers: {} },
+  apply(db) {
+    return {
+      get then() {
+        try {
+          db.exec('INSERT INTO knowledge_entries(content) VALUES (hex(zeroblob(2000000)))');
+        } catch (_error) {}
+        return undefined;
+      }
+    };
+  }
+};
+`);
+  const { db } = tmpDb('returned-then-getter-rollback');
+  let migrationError = null;
+
+  try {
+    migrationService.runMigrations(db, { rootDir: serverRoot() });
+    const pageCount = db.pragma('page_count', { simple: true });
+    db.pragma(`max_page_count = ${pageCount + 8}`);
+
+    try {
+      migrationService.runMigrations(db, {
+        rootDir: root,
+        registeredMigrations: [{
+          version: 2,
+          name: 'returned_then_getter_rollback',
+          sourcePath,
+          engineVersion: 1,
+          dependencies: [VENDORED_BCRYPT_PATH]
+        }]
+      });
+    } catch (error) {
+      migrationError = error;
+    }
+
+    assert.ok(migrationError, 'post-return database access must fail the migration');
+    assert.match(migrationError.message, /transaction|database.*expired|function return|access/i);
+    assert.deepEqual(allRows(db, 'SELECT version,name FROM schema_migrations ORDER BY version'), [
+      { version: 1, name: '001_legacy_compat_columns' }
+    ]);
+  } finally {
+    db.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('migration bundle rejects nested async syntax before it can capture the database', async () => {
   const migrationService = require('../services/migration_service');
   const root = tempMigrationRoot('nested-async');
@@ -2383,6 +2441,33 @@ test('pre-existing malformed collaboration compatibility columns and values fail
   db.close();
 });
 
+test('future classification rejects a corrupt known migration prefix', () => {
+  const migrationService = require('../services/migration_service');
+  const { db } = tmpDb('future-corrupt-known-prefix');
+  migrationService.runMigrations(db, { rootDir: serverRoot() });
+  db.prepare('UPDATE schema_migrations SET checksum = ? WHERE version = 1').run('b'.repeat(64));
+  db.prepare('INSERT INTO schema_migrations (version,name,checksum,source_path,engine_version) VALUES (?,?,?,?,?)')
+    .run(2, '002_future_probe', 'a'.repeat(64), 'migrations/002_future_probe.js', 1);
+
+  const classification = migrationService.classifyDatabase(db, { rootDir: serverRoot() });
+  assert.equal(classification.status, 'partial_or_malformed');
+  assert.match(classification.reason, /checksum|schema|001_legacy_compat_columns/i);
+  db.close();
+});
+
+test('future classification rejects a gapped ledger before the executable maximum check', () => {
+  const migrationService = require('../services/migration_service');
+  const { db } = tmpDb('future-gapped-ledger');
+  migrationService.runMigrations(db, { rootDir: serverRoot() });
+  db.prepare('INSERT INTO schema_migrations (version,name,checksum,source_path,engine_version) VALUES (?,?,?,?,?)')
+    .run(3, '003_future_probe', 'a'.repeat(64), 'migrations/003_future_probe.js', 1);
+
+  const classification = migrationService.classifyDatabase(db, { rootDir: serverRoot() });
+  assert.equal(classification.status, 'partial_or_malformed');
+  assert.match(classification.reason, /gap|contiguous|version/i);
+  db.close();
+});
+
 test('malformed, future, orphaned, and failed migrations fail closed without ledger mutation', () => {
   const migrationService = require('../services/migration_service');
   const legacy = require('../migrations/baselines/legacy_v1');
@@ -2394,11 +2479,12 @@ test('malformed, future, orphaned, and failed migrations fail closed without led
   malformed.db.close();
 
   const future = tmpDb('future');
-  legacy.apply(future.db);
-  migrationService.createLedger(future.db);
-  future.db.prepare('INSERT INTO schema_migrations (version,name,checksum,source_path,engine_version) VALUES (?,?,?,?,?)').run(999, 'future', 'a'.repeat(64), 'future.js', 1);
+  migrationService.runMigrations(future.db, { rootDir: serverRoot() });
+  future.db.prepare('INSERT INTO schema_migrations (version,name,checksum,source_path,engine_version) VALUES (?,?,?,?,?)')
+    .run(2, '002_future', 'a'.repeat(64), 'migrations/002_future.js', 1);
+  assert.deepEqual(migrationService.classifyDatabase(future.db, { rootDir: serverRoot() }), { status: 'future', currentVersion: 2 });
   assert.throws(() => migrationService.runMigrations(future.db, { seedAdmissions: seedAdmissions() }), /future/);
-  assert.equal(future.db.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get().count, 1);
+  assert.equal(future.db.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get().count, 2);
   future.db.close();
 
   const orphan = tmpDb('orphan');
