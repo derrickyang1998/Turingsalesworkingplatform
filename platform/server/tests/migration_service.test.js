@@ -518,6 +518,166 @@ module.exports = {
   }
 });
 
+test('migration database row cloning resists VM intrinsic poisoning', () => {
+  const migrationService = require('../services/migration_service');
+  const root = tempMigrationRoot('database-row-intrinsic-poisoning');
+  const sourcePath = 'migrations/002_database_row_intrinsic_poisoning.js';
+  writeTempMigration(root, sourcePath, `
+module.exports = {
+  version: 2,
+  name: 'database_row_intrinsic_poisoning',
+  sourcePath: '${sourcePath}',
+  engineVersion: 1,
+  dependencies: ['${VENDORED_BCRYPT_PATH}'],
+  schemaManifest: {
+    columns: { database_row_intrinsic_poisoning: { id: { type: 'INTEGER', notnull: 0, defaultValue: null } } },
+    indexes: {},
+    triggers: {}
+  },
+  apply(db) {
+    Object.keys = () => ['constructor'];
+    const row = db.prepare('SELECT 1 AS value').get();
+    const hostProcess = row.constructor.constructor('return process')();
+    const externalRequire = hostProcess.getBuiltinModule('node:module')
+      .createRequire(hostProcess.cwd() + '/server/server.js');
+    const Database = externalRequire('better-sqlite3');
+    if (!Database) throw new Error('external package did not load');
+    db.exec('CREATE TABLE database_row_intrinsic_poisoning (id INTEGER PRIMARY KEY) STRICT;');
+  }
+};
+`);
+  const { db } = tmpDb('database-row-intrinsic-poisoning');
+
+  try {
+    assert.throws(() => migrationService.runMigrations(db, {
+      rootDir: root,
+      registeredMigrations: [{
+        version: 2,
+        name: 'database_row_intrinsic_poisoning',
+        sourcePath,
+        engineVersion: 1,
+        dependencies: [VENDORED_BCRYPT_PATH]
+      }]
+    }), /constructor|package|database|code generation|not allowed|undefined/i);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE name = 'database_row_intrinsic_poisoning'").get().count, 0);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE name = 'schema_migrations'").get().count, 0);
+  } finally {
+    db.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('migration database row cloning never passes host arrays to poisoned VM predicates', () => {
+  const migrationService = require('../services/migration_service');
+  const root = tempMigrationRoot('database-array-predicate-poisoning');
+  const sourcePath = 'migrations/002_database_array_predicate_poisoning.js';
+  writeTempMigration(root, sourcePath, `
+module.exports = {
+  version: 2,
+  name: 'database_array_predicate_poisoning',
+  sourcePath: '${sourcePath}',
+  engineVersion: 1,
+  dependencies: ['${VENDORED_BCRYPT_PATH}'],
+  schemaManifest: {
+    columns: { database_array_predicate_poisoning: { id: { type: 'INTEGER', notnull: 0, defaultValue: null } } },
+    indexes: {},
+    triggers: {}
+  },
+  apply(db) {
+    let hostRows;
+    Array.isArray = (value) => {
+      hostRows = value;
+      return false;
+    };
+    db.prepare('SELECT 1 AS value').all();
+    const hostProcess = hostRows.constructor.constructor('return process')();
+    const externalRequire = hostProcess.getBuiltinModule('node:module')
+      .createRequire(hostProcess.cwd() + '/server/server.js');
+    const Database = externalRequire('better-sqlite3');
+    if (!Database) throw new Error('external package did not load');
+    db.exec('CREATE TABLE database_array_predicate_poisoning (id INTEGER PRIMARY KEY) STRICT;');
+  }
+};
+`);
+  const { db } = tmpDb('database-array-predicate-poisoning');
+
+  try {
+    assert.throws(() => migrationService.runMigrations(db, {
+      rootDir: root,
+      registeredMigrations: [{
+        version: 2,
+        name: 'database_array_predicate_poisoning',
+        sourcePath,
+        engineVersion: 1,
+        dependencies: [VENDORED_BCRYPT_PATH]
+      }]
+    }), /constructor|package|database|code generation|not allowed|undefined/i);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE name = 'database_array_predicate_poisoning'").get().count, 0);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE name = 'schema_migrations'").get().count, 0);
+  } finally {
+    db.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('migration database row cloning ignores poisoned VM iteration protocols', () => {
+  const migrationService = require('../services/migration_service');
+  const root = tempMigrationRoot('database-row-iterator-poisoning');
+  const sourcePath = 'migrations/002_database_row_iterator_poisoning.js';
+  writeTempMigration(root, sourcePath, `
+module.exports = {
+  version: 2,
+  name: 'database_row_iterator_poisoning',
+  sourcePath: '${sourcePath}',
+  engineVersion: 1,
+  dependencies: ['${VENDORED_BCRYPT_PATH}'],
+  schemaManifest: {
+    columns: { database_row_iterator_poisoning: { id: { type: 'INTEGER', notnull: 0, defaultValue: null } } },
+    indexes: {},
+    triggers: {}
+  },
+  apply(db) {
+    Array.prototype[Symbol.iterator] = function poisonedIterator() {
+      let complete = false;
+      return {
+        next() {
+          if (complete) return { done: true };
+          complete = true;
+          return { done: false, value: 'constructor' };
+        }
+      };
+    };
+    const row = db.prepare('SELECT 1 AS value').get();
+    const hostProcess = row.constructor.constructor('return process')();
+    const externalRequire = hostProcess.getBuiltinModule('node:module')
+      .createRequire(hostProcess.cwd() + '/server/server.js');
+    const Database = externalRequire('better-sqlite3');
+    if (!Database) throw new Error('external package did not load');
+    db.exec('CREATE TABLE database_row_iterator_poisoning (id INTEGER PRIMARY KEY) STRICT;');
+  }
+};
+`);
+  const { db } = tmpDb('database-row-iterator-poisoning');
+
+  try {
+    assert.throws(() => migrationService.runMigrations(db, {
+      rootDir: root,
+      registeredMigrations: [{
+        version: 2,
+        name: 'database_row_iterator_poisoning',
+        sourcePath,
+        engineVersion: 1,
+        dependencies: [VENDORED_BCRYPT_PATH]
+      }]
+    }), /constructor|package|database|code generation|not allowed|undefined/i);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE name = 'database_row_iterator_poisoning'").get().count, 0);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE name = 'schema_migrations'").get().count, 0);
+  } finally {
+    db.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('denied import errors cannot expose host constructors or package loading', () => {
   const migrationService = require('../services/migration_service');
   const root = tempMigrationRoot('import-error-constructor-escape');

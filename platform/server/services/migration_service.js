@@ -337,22 +337,49 @@ function migrationExecutionContext() {
     });
   `).runInContext(context);
   const cloneValue = new vm.Script(`
-    (function cloneMigrationValue(value) {
-      if (value === null || typeof value !== 'object') return value;
-      if (ArrayBuffer.isView(value)) {
-        const output = new Uint8Array(value.length);
-        for (let index = 0; index < value.length; index += 1) output[index] = value[index];
+    (() => {
+      const SafeArray = Array;
+      const SafeUint8Array = Uint8Array;
+      const safeArrayBufferIsView = ArrayBuffer.isView;
+      const safeArrayIsArray = Array.isArray;
+      const safeObjectCreate = Object.create;
+      const safeObjectDefineProperty = Object.defineProperty;
+      const safeObjectKeys = Object.keys;
+
+      function defineClonedProperty(target, key, value) {
+        const descriptor = safeObjectCreate(null);
+        descriptor.value = value;
+        descriptor.writable = true;
+        descriptor.enumerable = true;
+        descriptor.configurable = true;
+        safeObjectDefineProperty(target, key, descriptor);
+      }
+
+      function cloneMigrationValue(value) {
+        if (value === null || typeof value !== 'object') return value;
+        if (safeArrayBufferIsView(value)) {
+          const output = new SafeUint8Array(value.length);
+          for (let index = 0; index < value.length; index += 1) output[index] = value[index];
+          return output;
+        }
+        if (safeArrayIsArray(value)) {
+          const output = new SafeArray(value.length);
+          for (let index = 0; index < value.length; index += 1) {
+            defineClonedProperty(output, index, cloneMigrationValue(value[index]));
+          }
+          return output;
+        }
+        const output = safeObjectCreate(null);
+        const keys = safeObjectKeys(value);
+        for (let index = 0; index < keys.length; index += 1) {
+          const key = keys[index];
+          defineClonedProperty(output, key, cloneMigrationValue(value[key]));
+        }
         return output;
       }
-      if (Array.isArray(value)) {
-        const output = [];
-        for (let index = 0; index < value.length; index += 1) output.push(cloneMigrationValue(value[index]));
-        return output;
-      }
-      const output = Object.create(null);
-      for (const key of Object.keys(value)) output[key] = cloneMigrationValue(value[key]);
-      return output;
-    })
+
+      return cloneMigrationValue;
+    })()
   `).runInContext(context);
   const createError = new vm.Script(`
     (function createMigrationError(name, message, code) {
