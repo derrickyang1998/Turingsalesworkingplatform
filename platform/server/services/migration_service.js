@@ -845,7 +845,7 @@ function baselineShapeProblem(db) {
 function compatibilityColumnProblem(db) {
   if (!hasObject(db, 'collaborations')) return null;
   const columns = columnsFor(db, 'collaborations');
-  const sql = normalizeSql(tableSql(db, 'collaborations'));
+  const sql = tableSql(db, 'collaborations');
   for (const name of Object.keys(COMPAT_COLUMNS)) {
     const column = columns.find((candidate) => candidate.name === name);
     if (!column) continue;
@@ -863,13 +863,9 @@ function compatibilityColumnProblem(db) {
     if (String(column.type).toUpperCase() !== expected.type) return `incompatible compatibility column collaborations.${name}`;
     if (expected.notnull && column.notnull !== 1) return `incompatible nullable compatibility column collaborations.${name}`;
     if (String(column.dflt_value) !== expected.defaultValue) return `incompatible default compatibility column collaborations.${name}`;
-    if (expected.checkSql && !sql.includes(normalizeSql(expected.checkSql))) return `incompatible CHECK compatibility column collaborations.${name}`;
+    if (expected.checkSql && !schemaSqlContains(sql, expected.checkSql)) return `incompatible CHECK compatibility column collaborations.${name}`;
   }
   return null;
-}
-
-function normalizeSql(sql) {
-  return String(sql || '').replace(/\s+/g, ' ').trim();
 }
 
 function schemaSqlTokens(sql) {
@@ -965,6 +961,40 @@ function schemaSqlTokens(sql) {
 
 function schemaTokenSignature(tokens) {
   return JSON.stringify(tokens.map((token) => [token.kind, token.value]));
+}
+
+function schemaSqlEqual(left, right) {
+  try {
+    return schemaTokenSignature(schemaSqlTokens(left)) === schemaTokenSignature(schemaSqlTokens(right));
+  } catch (_error) {
+    return false;
+  }
+}
+
+function schemaSqlContains(sql, expectedSql) {
+  try {
+    const actualTokens = schemaSqlTokens(sql);
+    const expectedTokens = schemaSqlTokens(expectedSql);
+    if (!expectedTokens.length || expectedTokens.length > actualTokens.length) return false;
+    const expectedSignature = schemaTokenSignature(expectedTokens);
+    for (let start = 0; start <= actualTokens.length - expectedTokens.length; start += 1) {
+      if (schemaTokenSignature(actualTokens.slice(start, start + expectedTokens.length)) === expectedSignature) return true;
+    }
+    return false;
+  } catch (_error) {
+    return false;
+  }
+}
+
+function schemaObjectEqual(left, right) {
+  return Boolean(
+    left &&
+    right &&
+    left.type === right.type &&
+    left.name === right.name &&
+    left.tbl_name === right.tbl_name &&
+    schemaSqlEqual(left.sql, right.sql)
+  );
 }
 
 function tableSqlShape(sql) {
@@ -1165,7 +1195,7 @@ function schemaSnapshot(db) {
       type: object.type,
       name: object.name,
       tbl_name: object.tbl_name,
-      sql: normalizeSql(object.sql)
+      sql: String(object.sql || '')
     });
     columns.set(object.name, xinfoFor(db, object));
     tableList.set(object.name, tableListFor(db, object));
@@ -1191,7 +1221,7 @@ function ledgerShapeProblem(db) {
   const actual = schemaSnapshot(db);
   const expectedObject = expected.objects.get('schema_migrations');
   const actualObject = actual.objects.get('schema_migrations');
-  if (!actualObject || JSON.stringify(actualObject) !== JSON.stringify(expectedObject)) return 'malformed schema_migrations ledger';
+  if (!schemaObjectEqual(actualObject, expectedObject)) return 'malformed schema_migrations ledger';
   if (JSON.stringify(actual.columns.get('schema_migrations')) !== JSON.stringify(expected.columns.get('schema_migrations'))) {
     return 'malformed schema_migrations ledger columns';
   }
@@ -1217,10 +1247,10 @@ function optionalMigrationAllowances(migrations) {
       }
     }
     for (const [name, sql] of Object.entries(manifest.indexes || {})) {
-      objects.set(name, { type: 'index', name, tbl_name: name.replace(/^idx_([^_]+).*$/, '$1'), sql: normalizeSql(sql) });
+      objects.set(name, { type: 'index', name, tbl_name: name.replace(/^idx_([^_]+).*$/, '$1'), sql: String(sql || '') });
     }
     for (const [name, sql] of Object.entries(manifest.triggers || {})) {
-      objects.set(name, { type: 'trigger', name, tbl_name: 'collaborations', sql: normalizeSql(sql) });
+      objects.set(name, { type: 'trigger', name, tbl_name: 'collaborations', sql: String(sql || '') });
     }
   }
   return { objects, columns };
@@ -1233,7 +1263,7 @@ function jsonEqual(left, right) {
 function exactSchemaProblem(actual, expected, label) {
   for (const [name, expectedObject] of expected.objects.entries()) {
     if (!actual.objects.has(name)) return `missing ${label} object ${name}`;
-    if (!jsonEqual(actual.objects.get(name), expectedObject)) return `incompatible ${label} object ${name}`;
+    if (!schemaObjectEqual(actual.objects.get(name), expectedObject)) return `incompatible ${label} object ${name}`;
   }
   for (const name of actual.objects.keys()) {
     if (!expected.objects.has(name)) return `unknown ${label} object ${name}`;
@@ -1294,7 +1324,7 @@ function compatibleManagedSchemaProblem(actual, expected, baselineSnapshot, appl
         `managed schema object ${name} compatibility columns ${[...allowedColumns.keys()].map((column) => `${name}.${column}`).join(',')}`
       );
       if (sqlProblem) return sqlProblem;
-    } else if (!jsonEqual(actualObject, expectedObject)) {
+    } else if (!schemaObjectEqual(actualObject, expectedObject)) {
       return `incompatible managed schema object ${name}`;
     }
   }
@@ -1398,7 +1428,7 @@ function baselineSchemaProblem(db, baselineLoaded, allowedLoadedMigrations) {
           `baseline object ${name} compatibility columns ${[...allowedColumns.keys()].map((column) => `${name}.${column}`).join(',')}`
         );
         if (sqlProblem) return sqlProblem;
-      } else if (JSON.stringify(actualObject) !== JSON.stringify(expectedObject)) {
+      } else if (!schemaObjectEqual(actualObject, expectedObject)) {
         return `incompatible baseline object ${name}`;
       }
     }
@@ -1407,7 +1437,7 @@ function baselineSchemaProblem(db, baselineLoaded, allowedLoadedMigrations) {
       if (expected.objects.has(name)) continue;
       const allowedObject = allowances.objects.get(name);
       if (!allowedObject) return `unknown baseline object ${name}`;
-      if (actualObject.type !== allowedObject.type || normalizeSql(actualObject.sql) !== allowedObject.sql) return `incompatible migration object ${name}`;
+      if (actualObject.type !== allowedObject.type || !schemaSqlEqual(actualObject.sql, allowedObject.sql)) return `incompatible migration object ${name}`;
     }
     for (const [table, expectedColumns] of expected.columns.entries()) {
       const actualColumns = actual.columns.get(table);
@@ -1474,17 +1504,17 @@ function migrationManifestProblem(db, migrationName, manifest) {
   for (const [name, expectedSql] of Object.entries(manifest.indexes || {})) {
     const row = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'index' AND name = ?").get(name);
     if (!row) return `missing ${migrationName} index ${name}`;
-    if (normalizeSql(row.sql) !== normalizeSql(expectedSql)) return `incompatible ${migrationName} index ${name}`;
+    if (!schemaSqlEqual(row.sql, expectedSql)) return `incompatible ${migrationName} index ${name}`;
   }
   for (const [name, expectedSql] of Object.entries(manifest.triggers || {})) {
     const row = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'trigger' AND name = ?").get(name);
     if (!row) return `missing ${migrationName} trigger ${name}`;
-    if (normalizeSql(row.sql) !== normalizeSql(expectedSql)) return `incompatible ${migrationName} trigger ${name}`;
+    if (!schemaSqlEqual(row.sql, expectedSql)) return `incompatible ${migrationName} trigger ${name}`;
   }
   for (const [table, checks] of Object.entries(manifest.tableChecks || {})) {
-    const actualSql = normalizeSql(tableSql(db, table));
+    const actualSql = tableSql(db, table);
     for (const checkSql of checks) {
-      if (!actualSql.includes(normalizeSql(checkSql))) return `incompatible ${migrationName} CHECK ${table}`;
+      if (!schemaSqlContains(actualSql, checkSql)) return `incompatible ${migrationName} CHECK ${table}`;
     }
   }
   return null;

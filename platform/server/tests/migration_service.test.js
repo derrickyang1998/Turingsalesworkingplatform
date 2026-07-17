@@ -2602,6 +2602,100 @@ test('legacy and managed schema validation reject SQL-only drift on compatibilit
   }
 });
 
+test('schema SQL comparison preserves quoted text and line-comment boundaries while ignoring external whitespace', () => {
+  const migrationService = require('../services/migration_service');
+  const root = tempMigrationRoot('schema-sql-token-fidelity');
+  const sourcePath = 'migrations/002_schema_sql_token_fidelity.js';
+  const descriptor = {
+    version: 2,
+    name: 'schema_sql_token_fidelity',
+    sourcePath,
+    engineVersion: 1,
+    dependencies: [VENDORED_BCRYPT_PATH]
+  };
+  writeTempMigration(root, sourcePath, `
+module.exports = {
+  version: 2,
+  name: 'schema_sql_token_fidelity',
+  sourcePath: '${sourcePath}',
+  engineVersion: 1,
+  dependencies: ['${VENDORED_BCRYPT_PATH}'],
+  schemaManifest: {
+    columns: {
+      knowledge_entries: {
+        fidelity_marker: { type: 'TEXT', notnull: 1, defaultValue: "'stable'" }
+      }
+    },
+    indexes: {},
+    triggers: {},
+    tableChecks: {
+      knowledge_entries: ["CHECK (fidelity_marker <> 'a b' AND fidelity_marker <> 'it''s a b')"]
+    }
+  },
+  apply(db) {
+    db.exec("ALTER TABLE knowledge_entries ADD COLUMN fidelity_marker TEXT NOT NULL DEFAULT 'stable'\\n  -- first\\n  -- second\\n  CHECK (fidelity_marker <> 'a b' AND fidelity_marker <> 'it''s a b');");
+  }
+};
+`);
+  const options = {
+    rootDir: root,
+    registeredMigrations: [descriptor]
+  };
+  const classifyOptions = {
+    rootDir: root,
+    migrations: [...migrationService.defaultMigrations(), descriptor]
+  };
+  const drifts = [
+    {
+      name: 'string-whitespace',
+      rewrite: (sql) => sql.replace("fidelity_marker <> 'a b'", "fidelity_marker <> 'a   b'")
+    },
+    {
+      name: 'escaped-quote-string-whitespace',
+      rewrite: (sql) => sql.replace("fidelity_marker <> 'it''s a b'", "fidelity_marker <> 'it''s a   b'")
+    },
+    {
+      name: 'line-comment-boundary',
+      rewrite: (sql) => sql.replace(/-- first\r?\n\s*-- second/, '-- first -- second\n')
+    },
+    {
+      name: 'suffix-comment',
+      rewrite: (sql) => sql.replace(/\)$/, ') /* unapproved suffix */')
+    }
+  ];
+
+  try {
+    for (const drift of drifts) {
+      const fixture = tmpDb(`schema-sql-token-${drift.name}`);
+      migrationService.runMigrations(fixture.db, options);
+      rewriteTableSchemaSql(fixture.db, 'knowledge_entries', drift.rewrite);
+
+      const classification = migrationService.classifyDatabase(fixture.db, classifyOptions);
+      assert.equal(classification.status, 'partial_or_malformed', drift.name);
+      assert.match(classification.reason, /knowledge_entries|schema|object|check/i, drift.name);
+      fixture.db.close();
+    }
+
+    const formattingOnly = tmpDb('schema-sql-token-formatting-only');
+    migrationService.runMigrations(formattingOnly.db, options);
+    rewriteTableSchemaSql(
+      formattingOnly.db,
+      'knowledge_entries',
+      (sql) => sql.replace(
+        "CHECK (fidelity_marker <> 'a b'",
+        "CHECK     (fidelity_marker <> 'a b'"
+      )
+    );
+    assert.deepEqual(
+      migrationService.classifyDatabase(formattingOnly.db, classifyOptions),
+      { status: 'managed', currentVersion: 2 }
+    );
+    formattingOnly.db.close();
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('pre-existing malformed collaboration compatibility columns and values fail before mutation', () => {
   const migrationService = require('../services/migration_service');
   const legacy = require('../migrations/baselines/legacy_v1');
