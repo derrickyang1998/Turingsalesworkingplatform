@@ -553,12 +553,13 @@ function knowledgeRows(db) {
     { expression: 'c.id', context: 'knowledge_chunks.id' },
     { expression: 'c.entry_id', context: 'knowledge_chunks.entry_id' },
     { expression: 'c.chunk_index', context: 'knowledge_chunks.chunk_index' },
+    { expression: 'e.id', context: 'knowledge_entries.id' },
     { expression: 'e.title', context: 'knowledge_entries.title' },
     { expression: 'c.content', context: 'knowledge_chunks.content' },
     { expression: 'e.tags_json', context: 'knowledge_entries.tags_json' }
   ], `
     FROM knowledge_chunks c
-    JOIN knowledge_entries e ON e.id = c.entry_id
+    LEFT JOIN knowledge_entries e ON e.id = c.entry_id
     ORDER BY c.id
   `);
   const seen = new Set();
@@ -567,9 +568,12 @@ function knowledgeRows(db) {
     const chunkId = safePositiveId(values[0], 'knowledge_chunks.id');
     const entryId = safePositiveId(values[1], 'knowledge_chunks.entry_id');
     const chunkIndex = safeNonnegativeInteger(values[2], 'knowledge_chunks.chunk_index');
-    const title = requiredText(values[3], 'knowledge_entries.title');
-    const content = requiredText(values[4], 'knowledge_chunks.content');
-    const tagsJson = requiredText(values[5], 'knowledge_entries.tags_json');
+    if (values[3] === null) throw new Error(`orphan knowledge_chunks entry_id ${entryId}`);
+    const parentEntryId = safePositiveId(values[3], 'knowledge_entries.id');
+    if (parentEntryId !== entryId) throw new Error(`mismatched knowledge_chunks entry_id ${entryId}`);
+    const title = requiredText(values[4], 'knowledge_entries.title');
+    const content = requiredText(values[5], 'knowledge_chunks.content');
+    const tagsJson = requiredText(values[6], 'knowledge_entries.tags_json');
     if (seen.has(String(chunkId))) throw new Error('duplicate chunk IDs in knowledge_chunks');
     seen.add(String(chunkId));
     const logicalSlot = `${entryId}:${chunkIndex}`;

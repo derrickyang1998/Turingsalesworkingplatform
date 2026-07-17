@@ -79,6 +79,23 @@ function insertAdminOnly(db) {
   db.prepare('INSERT INTO users (id, username, password_hash, display_name, role) VALUES (1, ?, ?, ?, ?)').run('admin', 'hash', 'Admin', 'admin');
 }
 
+function rewriteTableSchemaSql(db, tableName, rewrite) {
+  const row = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?").get(tableName);
+  assert.ok(row && row.sql, `table SQL must exist for ${tableName}`);
+  const rewritten = rewrite(row.sql);
+  assert.notEqual(rewritten, row.sql, `schema rewrite must change ${tableName}`);
+  db.unsafeMode(true);
+  try {
+    db.pragma('writable_schema = ON');
+    db.prepare("UPDATE sqlite_schema SET sql = ? WHERE type = 'table' AND name = ?").run(rewritten, tableName);
+  } finally {
+    db.pragma('writable_schema = OFF');
+    db.unsafeMode(false);
+  }
+  const schemaVersion = db.pragma('schema_version', { simple: true });
+  db.pragma(`schema_version = ${schemaVersion + 1}`);
+}
+
 function setupRelationshipParents(db) {
   insertAdminOnly(db);
   db.prepare('INSERT INTO customers (id, brand_name, created_by) VALUES (1, ?, 1)').run('Customer');
@@ -2426,6 +2443,41 @@ test('legacy orphan preflight covers declared physical and logical relationships
   }
 });
 
+test('foreign_key_check diagnostics aggregate by table and constraint without exposing row identifiers', () => {
+  const migrationService = require('../services/migration_service');
+  const legacy = require('../migrations/baselines/legacy_v1');
+  const { db } = tmpDb('foreign-key-diagnostics');
+  legacy.apply(db);
+  const userConstraint = db.pragma("foreign_key_list('ai_conversations')")
+    .find((row) => row.from === 'user_id');
+  assert.ok(userConstraint);
+  db.pragma('foreign_keys = OFF');
+  db.prepare("INSERT INTO ai_conversations (id, user_id, title) VALUES (77, 404, 'first orphan')").run();
+  db.prepare("INSERT INTO ai_conversations (id, user_id, title) VALUES (78, 405, 'second orphan')").run();
+
+  let failure;
+  try {
+    migrationService.runMigrations(db, {
+      rootDir: serverRoot(),
+      seedAdmissions: seedAdmissions()
+    });
+  } catch (error) {
+    failure = error;
+  }
+  assert.ok(failure, 'foreign-key preflight must fail');
+  assert.match(failure.message, /^foreign_key_check failed: /);
+  assert.doesNotMatch(failure.message, /rowid|"rowid"|:77\b|:78\b/);
+  const diagnostics = JSON.parse(failure.message.replace(/^foreign_key_check failed: /, ''));
+  assert.deepEqual(diagnostics, [{
+    table: 'ai_conversations',
+    parent: 'users',
+    constraint_id: userConstraint.id,
+    count: 2
+  }]);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE name = 'schema_migrations'").get().count, 0);
+  db.close();
+});
+
 test('sqlite_sequence preflight rejects ghost rows, duplicate names, seq below max id, unsafe values, and next id exhaustion', () => {
   const migrationService = require('../services/migration_service');
   const legacy = require('../migrations/baselines/legacy_v1');
@@ -2493,6 +2545,60 @@ test('managed schema manifest rejects missing or tampered 001 indexes and trigge
       seedAdmissions: seedAdmissions()
     }), pattern);
     fixture.db.close();
+  }
+});
+
+test('legacy and managed schema validation reject SQL-only drift on compatibility-enabled tables', () => {
+  const migrationService = require('../services/migration_service');
+  const legacy = require('../migrations/baselines/legacy_v1');
+  const drifts = [
+    {
+      name: 'collation',
+      table: 'knowledge_entries',
+      rewrite: (sql) => sql.replace(
+        /entry_type\s+TEXT\s+DEFAULT\s+'note'/,
+        "entry_type TEXT COLLATE NOCASE DEFAULT 'note'"
+      )
+    },
+    {
+      name: 'conflict-clause',
+      table: 'customers',
+      rewrite: (sql) => sql.replace(
+        /brand_name\s+TEXT\s+NOT\s+NULL/,
+        'brand_name TEXT NOT NULL ON CONFLICT IGNORE'
+      )
+    },
+    {
+      name: 'comment',
+      table: 'knowledge_entries',
+      rewrite: (sql) => sql.replace(
+        /entry_type\s+TEXT\s+DEFAULT\s+'note'/,
+        "entry_type TEXT /* unapproved schema text */ DEFAULT 'note'"
+      )
+    }
+  ];
+
+  for (const drift of drifts) {
+    for (const state of ['legacy', 'managed']) {
+      const fixture = tmpDb(`schema-sql-drift-${drift.name}-${state}`);
+      legacy.apply(fixture.db);
+      if (state === 'managed') {
+        migrationService.runMigrations(fixture.db, {
+          rootDir: serverRoot(),
+          seedAdmissions: seedAdmissions()
+        });
+      }
+      rewriteTableSchemaSql(fixture.db, drift.table, drift.rewrite);
+
+      const classification = migrationService.classifyDatabase(fixture.db, { rootDir: serverRoot() });
+      assert.equal(classification.status, 'partial_or_malformed');
+      assert.match(classification.reason, new RegExp(`${drift.table}|schema|object`, 'i'));
+      assert.throws(() => migrationService.runMigrations(fixture.db, {
+        rootDir: serverRoot(),
+        seedAdmissions: seedAdmissions()
+      }), new RegExp(`${drift.table}|schema|object|partial_or_malformed`, 'i'));
+      fixture.db.close();
+    }
   }
 });
 

@@ -872,6 +872,201 @@ function normalizeSql(sql) {
   return String(sql || '').replace(/\s+/g, ' ').trim();
 }
 
+function schemaSqlTokens(sql) {
+  const source = String(sql || '');
+  const tokens = [];
+  let index = 0;
+  while (index < source.length) {
+    const character = source[index];
+    if (/\s/.test(character)) {
+      index += 1;
+      continue;
+    }
+    if (character === '-' && source[index + 1] === '-') {
+      const start = index;
+      index += 2;
+      while (index < source.length && source[index] !== '\n' && source[index] !== '\r') index += 1;
+      tokens.push({ kind: 'comment', value: source.slice(start, index) });
+      continue;
+    }
+    if (character === '/' && source[index + 1] === '*') {
+      const start = index;
+      const end = source.indexOf('*/', index + 2);
+      if (end === -1) throw new Error('unterminated SQL comment');
+      index = end + 2;
+      tokens.push({ kind: 'comment', value: source.slice(start, index) });
+      continue;
+    }
+    if (character === "'" || character === '"' || character === '`' || character === '[') {
+      const start = index;
+      if (character === '[') {
+        index += 1;
+        while (index < source.length && source[index] !== ']') index += 1;
+        if (index >= source.length) throw new Error('unterminated bracketed SQL identifier');
+        index += 1;
+        tokens.push({ kind: 'quoted_identifier', value: source.slice(start, index) });
+        continue;
+      }
+      const delimiter = character;
+      let closed = false;
+      index += 1;
+      while (index < source.length) {
+        if (source[index] !== delimiter) {
+          index += 1;
+          continue;
+        }
+        if (source[index + 1] === delimiter) {
+          index += 2;
+          continue;
+        }
+        index += 1;
+        closed = true;
+        break;
+      }
+      if (!closed) throw new Error('unterminated quoted SQL token');
+      tokens.push({
+        kind: delimiter === "'" ? 'string' : 'quoted_identifier',
+        value: source.slice(start, index)
+      });
+      continue;
+    }
+    if (/[A-Za-z0-9_$]/.test(character) || character.codePointAt(0) > 0x7f) {
+      const start = index;
+      index += 1;
+      while (
+        index < source.length &&
+        (/[A-Za-z0-9_$]/.test(source[index]) || source[index].codePointAt(0) > 0x7f)
+      ) {
+        index += 1;
+      }
+      tokens.push({ kind: 'word', value: source.slice(start, index) });
+      continue;
+    }
+    const threeCharacterOperator = source.slice(index, index + 3);
+    const twoCharacterOperator = source.slice(index, index + 2);
+    if (threeCharacterOperator === '->>') {
+      tokens.push({ kind: 'operator', value: threeCharacterOperator });
+      index += 3;
+      continue;
+    }
+    if (['!=', '<=', '>=', '<>', '==', '||', '<<', '>>', '->'].includes(twoCharacterOperator)) {
+      tokens.push({ kind: 'operator', value: twoCharacterOperator });
+      index += 2;
+      continue;
+    }
+    tokens.push({
+      kind: 'punctuation',
+      value: character
+    });
+    index += 1;
+  }
+  return tokens;
+}
+
+function schemaTokenSignature(tokens) {
+  return JSON.stringify(tokens.map((token) => [token.kind, token.value]));
+}
+
+function tableSqlShape(sql) {
+  const tokens = schemaSqlTokens(sql);
+  const openingIndex = tokens.findIndex((token) => token.value === '(');
+  if (openingIndex < 0) throw new Error('missing CREATE TABLE body');
+  let depth = 0;
+  let closingIndex = -1;
+  for (let index = openingIndex; index < tokens.length; index += 1) {
+    if (tokens[index].value === '(') depth += 1;
+    if (tokens[index].value === ')') {
+      depth -= 1;
+      if (depth === 0) {
+        closingIndex = index;
+        break;
+      }
+      if (depth < 0) throw new Error('unbalanced CREATE TABLE body');
+    }
+  }
+  if (closingIndex < 0 || depth !== 0) throw new Error('unterminated CREATE TABLE body');
+
+  const definitions = [];
+  let definitionStart = openingIndex + 1;
+  depth = 0;
+  for (let index = definitionStart; index < closingIndex; index += 1) {
+    const token = tokens[index];
+    if (token.value === '(') depth += 1;
+    if (token.value === ')') depth -= 1;
+    if (depth < 0) throw new Error('unbalanced CREATE TABLE definition');
+    if (token.value === ',' && depth === 0) {
+      if (index === definitionStart) throw new Error('empty CREATE TABLE definition');
+      definitions.push(tokens.slice(definitionStart, index));
+      definitionStart = index + 1;
+    }
+  }
+  if (definitionStart >= closingIndex) throw new Error('empty CREATE TABLE definition');
+  definitions.push(tokens.slice(definitionStart, closingIndex));
+  return {
+    header: tokens.slice(0, openingIndex),
+    definitions,
+    suffix: tokens.slice(closingIndex + 1)
+  };
+}
+
+function decodedSchemaIdentifier(token) {
+  if (!token) return null;
+  if (token.kind === 'word') return token.value;
+  if (token.kind !== 'quoted_identifier') return null;
+  if (token.value.startsWith('[')) return token.value.slice(1, -1);
+  const delimiter = token.value[0];
+  return token.value.slice(1, -1).split(delimiter + delimiter).join(delimiter);
+}
+
+function partitionTableDefinitions(shape, allowedColumnNames) {
+  const ordered = [];
+  const allowed = new Map();
+  for (const definition of shape.definitions) {
+    const name = decodedSchemaIdentifier(definition[0]);
+    const signature = schemaTokenSignature(definition);
+    if (name !== null && allowedColumnNames.has(name)) {
+      if (allowed.has(name)) throw new Error(`duplicate compatibility column definition ${name}`);
+      allowed.set(name, signature);
+    } else {
+      ordered.push(signature);
+    }
+  }
+  return { ordered, allowed };
+}
+
+function compatibleTableSqlProblem(actualSql, expectedSql, baselineSql, allowedColumns, requireAllAllowed, label) {
+  try {
+    const allowedColumnNames = new Set(allowedColumns || []);
+    const actualShape = tableSqlShape(actualSql);
+    const expectedShape = tableSqlShape(expectedSql);
+    const baselineShape = tableSqlShape(baselineSql);
+    if (
+      schemaTokenSignature(actualShape.header) !== schemaTokenSignature(expectedShape.header) ||
+      schemaTokenSignature(actualShape.suffix) !== schemaTokenSignature(expectedShape.suffix)
+    ) {
+      return `incompatible ${label} SQL`;
+    }
+
+    const actualDefinitions = partitionTableDefinitions(actualShape, allowedColumnNames);
+    const expectedDefinitions = partitionTableDefinitions(expectedShape, allowedColumnNames);
+    const baselineDefinitions = partitionTableDefinitions(baselineShape, allowedColumnNames);
+    if (baselineDefinitions.allowed.size !== 0) return `incompatible ${label} SQL`;
+    if (!jsonEqual(expectedDefinitions.ordered, baselineDefinitions.ordered)) return `incompatible ${label} SQL`;
+    if (!jsonEqual(actualDefinitions.ordered, baselineDefinitions.ordered)) return `incompatible ${label} SQL`;
+    if (expectedDefinitions.allowed.size !== allowedColumnNames.size) return `incompatible ${label} SQL`;
+
+    for (const [name, actualDefinition] of actualDefinitions.allowed.entries()) {
+      if (expectedDefinitions.allowed.get(name) !== actualDefinition) return `incompatible ${label} SQL`;
+    }
+    if (requireAllAllowed && actualDefinitions.allowed.size !== expectedDefinitions.allowed.size) {
+      return `incompatible ${label} SQL`;
+    }
+    return null;
+  } catch (error) {
+    return `incompatible ${label} SQL`;
+  }
+}
+
 function tableSql(db, tableName) {
   const row = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?").get(tableName);
   return row ? row.sql : '';
@@ -1082,6 +1277,7 @@ function compatibleManagedSchemaProblem(actual, expected, baselineSnapshot, appl
     const actualObject = actual.objects.get(name);
     if (!actualObject) return `missing managed schema object ${name}`;
     if (relaxedBaselineTables.has(name)) {
+      const allowedColumns = allowances.columns.get(name) || new Map();
       if (
         actualObject.type !== expectedObject.type ||
         actualObject.name !== expectedObject.name ||
@@ -1089,6 +1285,15 @@ function compatibleManagedSchemaProblem(actual, expected, baselineSnapshot, appl
       ) {
         return `incompatible managed schema object ${name}`;
       }
+      const sqlProblem = compatibleTableSqlProblem(
+        actualObject.sql,
+        expectedObject.sql,
+        baselineSnapshot.objects.get(name).sql,
+        allowedColumns.keys(),
+        true,
+        `managed schema object ${name} compatibility columns ${[...allowedColumns.keys()].map((column) => `${name}.${column}`).join(',')}`
+      );
+      if (sqlProblem) return sqlProblem;
     } else if (!jsonEqual(actualObject, expectedObject)) {
       return `incompatible managed schema object ${name}`;
     }
@@ -1164,6 +1369,15 @@ function baselineSchemaProblem(db, baselineLoaded, allowedLoadedMigrations) {
   try {
     executeMigrationFunction(baselineLoaded, baselineLoaded.baseline.apply, expectedDb, 'legacy baseline schema replay');
     const expected = schemaSnapshot(expectedDb);
+    for (const loaded of allowedLoadedMigrations) {
+      executeMigrationFunction(
+        loaded,
+        loaded.implementation.apply,
+        expectedDb,
+        `legacy compatibility migration ${loaded.implementation.name} schema replay`
+      );
+    }
+    const compatibleExpected = schemaSnapshot(expectedDb);
     const actual = schemaSnapshot(db);
     const allowedMigrations = allowedLoadedMigrations.map((loaded) => loaded.implementation);
     const allowances = optionalMigrationAllowances(allowedMigrations);
@@ -1175,6 +1389,15 @@ function baselineSchemaProblem(db, baselineLoaded, allowedLoadedMigrations) {
         if (actualObject.type !== expectedObject.type || actualObject.name !== expectedObject.name || actualObject.tbl_name !== expectedObject.tbl_name) {
           return `incompatible baseline object ${name}`;
         }
+        const sqlProblem = compatibleTableSqlProblem(
+          actualObject.sql,
+          compatibleExpected.objects.get(name).sql,
+          expectedObject.sql,
+          allowedColumns.keys(),
+          false,
+          `baseline object ${name} compatibility columns ${[...allowedColumns.keys()].map((column) => `${name}.${column}`).join(',')}`
+        );
+        if (sqlProblem) return sqlProblem;
       } else if (JSON.stringify(actualObject) !== JSON.stringify(expectedObject)) {
         return `incompatible baseline object ${name}`;
       }
@@ -1519,7 +1742,32 @@ function preflight(db, classification, options) {
   const integrity = db.pragma('integrity_check', { simple: true });
   if (integrity !== 'ok') throw new Error(`integrity_check failed: ${integrity}`);
   const fkRows = db.pragma('foreign_key_check');
-  if (fkRows.length) throw new Error(`foreign_key_check failed: ${JSON.stringify(fkRows.map((row) => ({ table: row.table, rowid: row.rowid, parent: row.parent })))}`);
+  if (fkRows.length) {
+    const grouped = new Map();
+    for (const row of fkRows) {
+      const table = String(row.table);
+      const parent = String(row.parent);
+      const constraintId = typeof row.fkid === 'bigint' ? Number(row.fkid) : row.fkid;
+      if (!Number.isSafeInteger(constraintId) || constraintId < 0) {
+        throw new Error('foreign_key_check returned an invalid constraint identifier');
+      }
+      const key = JSON.stringify([table, parent, constraintId]);
+      const current = grouped.get(key) || {
+        table,
+        parent,
+        constraint_id: constraintId,
+        count: 0
+      };
+      current.count += 1;
+      grouped.set(key, current);
+    }
+    const diagnostics = [...grouped.values()].sort((left, right) => (
+      Buffer.compare(Buffer.from(left.table, 'utf8'), Buffer.from(right.table, 'utf8')) ||
+      Buffer.compare(Buffer.from(left.parent, 'utf8'), Buffer.from(right.parent, 'utf8')) ||
+      left.constraint_id - right.constraint_id
+    ));
+    throw new Error(`foreign_key_check failed: ${JSON.stringify(diagnostics)}`);
+  }
   validateSafeIntegers(db);
   validateSqliteSequence(db);
   if (classification.status === 'legacy' || classification.status === 'managed') {

@@ -366,6 +366,24 @@ test('knowledge_chunks_fts projection is exact and rejects malformed tags, orpha
   db.close();
 });
 
+test('knowledge projection rejects orphan chunks before FTS rebuild or verification', () => {
+  const digest = require('../services/sqlite_digest_service');
+  const { db } = tmpDb('fts-orphan-chunk');
+  buildDigestFixture(db);
+  digest.rebuildKnowledgeChunksFts(db);
+  const postingCount = db.prepare('SELECT COUNT(*) AS count FROM knowledge_chunks_fts').get().count;
+  db.pragma('foreign_keys = OFF');
+  db.prepare("INSERT INTO knowledge_chunks (id, entry_id, chunk_index, content) VALUES (999, 404, 0, 'orphan')").run();
+
+  assert.throws(() => digest.rebuildKnowledgeChunksFts(db), /orphan.*knowledge_chunks|knowledge_chunks.*orphan/i);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM knowledge_chunks_fts').get().count, postingCount);
+  assert.throws(
+    () => digest.verifyKnowledgeChunksFtsIntegrity(db, DIGEST_FIXTURE_MANIFEST),
+    /orphan.*knowledge_chunks|knowledge_chunks.*orphan/i
+  );
+  db.close();
+});
+
 test('knowledge projection rejects NULL tags_json instead of normalizing it to an empty array', () => {
   const digest = require('../services/sqlite_digest_service');
   const { db } = tmpDb('fts-null-tags');
