@@ -868,19 +868,148 @@ function compatibilityColumnProblem(db) {
   return null;
 }
 
+function isSqliteWhitespace(character) {
+  return (
+    character === '\u0009' ||
+    character === '\u000a' ||
+    character === '\u000c' ||
+    character === '\u000d' ||
+    character === '\u0020'
+  );
+}
+
+function isAsciiDigit(character) {
+  return character >= '0' && character <= '9';
+}
+
+function isAsciiHexDigit(character) {
+  return (
+    isAsciiDigit(character) ||
+    (character >= 'a' && character <= 'f') ||
+    (character >= 'A' && character <= 'F')
+  );
+}
+
+function sqliteIdentifierCharacterWidth(source, index) {
+  if (index >= source.length) return 0;
+  const codePoint = source.codePointAt(index);
+  const character = source[index];
+  if (
+    (character >= 'A' && character <= 'Z') ||
+    (character >= 'a' && character <= 'z') ||
+    isAsciiDigit(character) ||
+    character === '_' ||
+    character === '$' ||
+    codePoint > 0x7f
+  ) {
+    return codePoint > 0xffff ? 2 : 1;
+  }
+  return 0;
+}
+
+function sqliteIdentifierStartWidth(source, index) {
+  const width = sqliteIdentifierCharacterWidth(source, index);
+  if (!width || isAsciiDigit(source[index]) || source[index] === '$') return 0;
+  return width;
+}
+
+function consumeSqliteDigits(source, index, predicate) {
+  while (predicate(source[index])) {
+    index += 1;
+    if (source[index] === '_') {
+      if (!predicate(source[index + 1])) throw new Error('invalid SQLite numeric separator');
+      index += 1;
+    }
+  }
+  return index;
+}
+
+function consumeSqliteNumber(source, start) {
+  let index = start;
+  let kind = 'integer';
+  if (
+    source[index] === '0' &&
+    (source[index + 1] === 'x' || source[index + 1] === 'X') &&
+    isAsciiHexDigit(source[index + 2])
+  ) {
+    index = consumeSqliteDigits(source, index + 2, isAsciiHexDigit);
+  } else {
+    if (source[index] === '.') {
+      kind = 'float';
+    } else {
+      index = consumeSqliteDigits(source, index, isAsciiDigit);
+    }
+    if (source[index] === '.') {
+      kind = 'float';
+      index = consumeSqliteDigits(source, index + 1, isAsciiDigit);
+    }
+    if (
+      (source[index] === 'e' || source[index] === 'E') &&
+      (
+        isAsciiDigit(source[index + 1]) ||
+        (
+          (source[index + 1] === '+' || source[index + 1] === '-') &&
+          isAsciiDigit(source[index + 2])
+        )
+      )
+    ) {
+      kind = 'float';
+      index += source[index + 1] === '+' || source[index + 1] === '-' ? 2 : 1;
+      index = consumeSqliteDigits(source, index, isAsciiDigit);
+    }
+  }
+  if (sqliteIdentifierCharacterWidth(source, index)) {
+    throw new Error('invalid SQLite numeric token');
+  }
+  return { index, kind };
+}
+
+function consumeSqliteVariable(source, start) {
+  const marker = source[start];
+  if (marker === '?') {
+    let index = start + 1;
+    while (isAsciiDigit(source[index])) index += 1;
+    return index;
+  }
+
+  let index = start + 1;
+  let nameCharacters = 0;
+  while (index < source.length) {
+    const width = sqliteIdentifierCharacterWidth(source, index);
+    if (width) {
+      nameCharacters += 1;
+      index += width;
+      continue;
+    }
+    if (source[index] === ':' && source[index + 1] === ':') {
+      index += 2;
+      continue;
+    }
+    if (source[index] === '(' && nameCharacters > 0) {
+      index += 1;
+      while (
+        index < source.length &&
+        !isSqliteWhitespace(source[index]) &&
+        source[index] !== ')'
+      ) {
+        index += 1;
+      }
+      if (source[index] !== ')') throw new Error('invalid SQLite variable suffix');
+      return index + 1;
+    }
+    break;
+  }
+  if (!nameCharacters) throw new Error('invalid SQLite variable token');
+  return index;
+}
+
 function schemaSqlTokens(sql) {
   const source = String(sql || '');
   const tokens = [];
   let index = 0;
   while (index < source.length) {
     const character = source[index];
-    if (
-      character === '\u0009' ||
-      character === '\u000a' ||
-      character === '\u000c' ||
-      character === '\u000d' ||
-      character === '\u0020'
-    ) {
+    if (isSqliteWhitespace(character)) {
       index += 1;
       continue;
     }
@@ -897,6 +1026,21 @@ function schemaSqlTokens(sql) {
       if (end === -1) throw new Error('unterminated SQL comment');
       index = end + 2;
       tokens.push({ kind: 'comment', value: source.slice(start, index) });
+      continue;
+    }
+    if ((character === 'x' || character === 'X') && source[index + 1] === "'") {
+      const start = index;
+      index += 2;
+      let hexDigits = 0;
+      while (isAsciiHexDigit(source[index])) {
+        index += 1;
+        hexDigits += 1;
+      }
+      if (source[index] !== "'" || hexDigits % 2 !== 0) {
+        throw new Error('invalid SQLite BLOB token');
+      }
+      index += 1;
+      tokens.push({ kind: 'blob', value: source.slice(start, index) });
       continue;
     }
     if (character === "'" || character === '"' || character === '`' || character === '[') {
@@ -932,14 +1076,27 @@ function schemaSqlTokens(sql) {
       });
       continue;
     }
-    if (/[A-Za-z0-9_$]/.test(character) || character.codePointAt(0) > 0x7f) {
+    if (isAsciiDigit(character) || (character === '.' && isAsciiDigit(source[index + 1]))) {
       const start = index;
-      index += 1;
-      while (
-        index < source.length &&
-        (/[A-Za-z0-9_$]/.test(source[index]) || source[index].codePointAt(0) > 0x7f)
-      ) {
-        index += 1;
+      const number = consumeSqliteNumber(source, index);
+      index = number.index;
+      tokens.push({ kind: number.kind, value: source.slice(start, index) });
+      continue;
+    }
+    if (character === '?' || character === '$' || character === '@' || character === ':' || character === '#') {
+      const start = index;
+      index = consumeSqliteVariable(source, index);
+      tokens.push({ kind: 'variable', value: source.slice(start, index) });
+      continue;
+    }
+    const identifierWidth = sqliteIdentifierStartWidth(source, index);
+    if (identifierWidth) {
+      const start = index;
+      index += identifierWidth;
+      while (index < source.length) {
+        const width = sqliteIdentifierCharacterWidth(source, index);
+        if (!width) break;
+        index += width;
       }
       tokens.push({ kind: 'word', value: source.slice(start, index) });
       continue;
@@ -956,11 +1113,16 @@ function schemaSqlTokens(sql) {
       index += 2;
       continue;
     }
-    tokens.push({
-      kind: 'punctuation',
-      value: character
-    });
-    index += 1;
+    if ('-()+*/%=<>,&~|;.'.includes(character)) {
+      tokens.push({
+        kind: 'punctuation',
+        value: character
+      });
+      index += 1;
+      continue;
+    }
+    const codePoint = source.codePointAt(index);
+    throw new Error(`unsupported SQLite token U+${codePoint.toString(16).toUpperCase().padStart(4, '0')}`);
   }
   return tokens;
 }

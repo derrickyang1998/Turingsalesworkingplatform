@@ -2841,6 +2841,112 @@ module.exports = {
   }
 });
 
+test('schema SQL comparison preserves SQLite BLOB tokens across file reopen and public migration paths', () => {
+  const migrationService = require('../services/migration_service');
+  const root = tempMigrationRoot('schema-sqlite-blob-token');
+  const sourcePath = 'migrations/002_schema_sqlite_blob_token.js';
+  const descriptor = {
+    version: 2,
+    name: 'schema_sqlite_blob_token',
+    sourcePath,
+    engineVersion: 1,
+    dependencies: [VENDORED_BCRYPT_PATH]
+  };
+  const expectedTrigger = `
+CREATE TRIGGER blob_token_probe
+AFTER INSERT ON blob_token_source
+BEGIN
+  INSERT INTO blob_token_sink(value)
+  SELECT X'01' FROM blob_token_source ORDER BY rowid DESC LIMIT 1;
+END`;
+  writeTempMigration(root, sourcePath, `
+module.exports = {
+  version: 2,
+  name: 'schema_sqlite_blob_token',
+  sourcePath: '${sourcePath}',
+  engineVersion: 1,
+  dependencies: ['${VENDORED_BCRYPT_PATH}'],
+  schemaManifest: {
+    columns: {
+      blob_token_source: {
+        x: { type: 'REAL', notnull: 1, defaultValue: null }
+      },
+      blob_token_sink: {
+        value: { type: 'ANY', notnull: 0, defaultValue: null }
+      }
+    },
+    indexes: {},
+    triggers: {
+      blob_token_probe: ${JSON.stringify(expectedTrigger)}
+    }
+  },
+  apply(db) {
+    db.exec(\`
+      CREATE TABLE blob_token_source (x REAL NOT NULL) STRICT;
+      CREATE TABLE blob_token_sink (value ANY) STRICT;
+      \${${JSON.stringify(expectedTrigger)}};
+    \`);
+  }
+};
+`);
+  const runOptions = {
+    rootDir: root,
+    registeredMigrations: [descriptor]
+  };
+  const classifyOptions = {
+    rootDir: root,
+    migrations: [...migrationService.defaultMigrations(), descriptor]
+  };
+  const fixture = tmpDb('schema-sqlite-blob-token');
+  const dbPath = fixture.dbPath;
+  let tamper = null;
+  let reopened = null;
+
+  try {
+    migrationService.runMigrations(fixture.db, runOptions);
+    fixture.db.close();
+
+    tamper = new Database(dbPath);
+    tamper.exec(`
+      DROP TRIGGER blob_token_probe;
+      CREATE TRIGGER blob_token_probe
+      AFTER INSERT ON blob_token_source
+      BEGIN
+        INSERT INTO blob_token_sink(value)
+        SELECT X '01' FROM blob_token_source ORDER BY rowid DESC LIMIT 1;
+      END;
+      INSERT INTO blob_token_source(x) VALUES (42);
+    `);
+    assert.deepEqual(
+      tamper.prepare('SELECT typeof(value) AS type, value FROM blob_token_sink').get(),
+      { type: 'real', value: 42 },
+      'the whitespace drift must demonstrate behavior different from the expected BLOB token'
+    );
+    tamper.close();
+    tamper = null;
+
+    reopened = new Database(dbPath);
+    reopened.pragma('foreign_keys = ON');
+    const classification = migrationService.classifyDatabase(reopened, classifyOptions);
+    assert.equal(classification.status, 'partial_or_malformed');
+    assert.match(classification.reason, /blob_token_probe|schema|trigger/i);
+    assert.throws(
+      () => migrationService.runMigrations(reopened, runOptions),
+      /blob_token_probe|schema|trigger|partial_or_malformed/i
+    );
+    reopened.close();
+    reopened = null;
+  } finally {
+    if (tamper && tamper.open) tamper.close();
+    if (reopened && reopened.open) reopened.close();
+    if (fixture.db.open) fixture.db.close();
+    fs.rmSync(dbPath, { force: true });
+    fs.rmSync(`${dbPath}-wal`, { force: true });
+    fs.rmSync(`${dbPath}-shm`, { force: true });
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('pre-existing malformed collaboration compatibility columns and values fail before mutation', () => {
   const migrationService = require('../services/migration_service');
   const legacy = require('../migrations/baselines/legacy_v1');
