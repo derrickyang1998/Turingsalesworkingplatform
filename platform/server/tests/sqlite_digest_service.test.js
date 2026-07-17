@@ -177,6 +177,21 @@ test('full SQLite topology, logical, and FTS digests are stable across reorder, 
   db.close();
 });
 
+test('SQLite digest rejects undeclared virtual tables and shadow objects', () => {
+  const digest = require('../services/sqlite_digest_service');
+  const { db } = tmpDb('undeclared-virtual-table');
+  db.exec(`
+    CREATE VIRTUAL TABLE undeclared_fts USING fts5(content);
+    INSERT INTO undeclared_fts(content) VALUES ('alpha');
+  `);
+
+  assert.throws(
+    () => digest.databaseDigest(db, { fts: [] }),
+    /unknown|undeclared.*virtual|shadow/i
+  );
+  db.close();
+});
+
 test('SQLite digest changes for schema, value, type, duplicate, sequence, pragma, and FTS mutations', () => {
   const digest = require('../services/sqlite_digest_service');
   const make = () => {
@@ -215,6 +230,25 @@ test('SQLite digest changes for schema, value, type, duplicate, sequence, pragma
   assert.notEqual(digest.databaseDigest(fts.db, DIGEST_FIXTURE_MANIFEST).logicalSha256, baseDigest.logicalSha256);
   assert.throws(() => digest.verifyKnowledgeChunksFtsCanaries(fts.db, ['alpha', 'beta']), /FTS/);
   fts.db.close();
+});
+
+test('SQLite logical digest distinguishes integral REAL storage from INTEGER storage', () => {
+  const digest = require('../services/sqlite_digest_service');
+  const { db } = tmpDb('integral-real-storage');
+  db.exec(`
+    CREATE TABLE storage_probe (value ANY) STRICT;
+    INSERT INTO storage_probe(value) VALUES (CAST(1 AS INTEGER));
+  `);
+
+  const integerDigest = digest.databaseDigest(db, { fts: [] });
+  assert.equal(db.prepare('SELECT typeof(value) AS storage_type FROM storage_probe').get().storage_type, 'integer');
+  db.exec('UPDATE storage_probe SET value = CAST(1 AS REAL)');
+  assert.equal(db.prepare('SELECT typeof(value) AS storage_type FROM storage_probe').get().storage_type, 'real');
+
+  const realDigest = digest.databaseDigest(db, { fts: [] });
+  assert.equal(realDigest.topologySha256, integerDigest.topologySha256);
+  assert.notEqual(realDigest.logicalSha256, integerDigest.logicalSha256);
+  db.close();
 });
 
 test('SQLite logical text digest preserves exact UTF-8 bytes without canonical normalization', () => {

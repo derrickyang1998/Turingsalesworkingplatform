@@ -1518,6 +1518,55 @@ module.exports = {
   }
 });
 
+test('migration SQL cannot invoke mutable table-valued PRAGMAs', () => {
+  const migrationService = require('../services/migration_service');
+  const cases = [
+    ['plain', 'pragma_optimize'],
+    ['single-quoted', "'pragma_optimize'"]
+  ];
+  for (const [label, functionName] of cases) {
+    const migrationName = `table_valued_pragma_optimize_${label.replace('-', '_')}`;
+    const root = tempMigrationRoot(`table-valued-pragma-optimize-${label}`);
+    const sourcePath = `migrations/002_${migrationName}.js`;
+    writeTempMigration(root, sourcePath, `
+module.exports = {
+  version: 2,
+  name: '${migrationName}',
+  sourcePath: '${sourcePath}',
+  engineVersion: 1,
+  dependencies: ['${VENDORED_BCRYPT_PATH}'],
+  schemaManifest: { columns: {}, indexes: {}, triggers: {} },
+  apply(db) {
+    db.prepare("SELECT * FROM ${functionName}(65538)").all();
+  }
+};
+`);
+    const { db } = tmpDb(`table-valued-pragma-optimize-${label}`);
+
+    try {
+      migrationService.runMigrations(db, { rootDir: serverRoot() });
+      assert.throws(() => migrationService.runMigrations(db, {
+        rootDir: root,
+        registeredMigrations: [{
+          version: 2,
+          name: migrationName,
+          sourcePath,
+          engineVersion: 1,
+          dependencies: [VENDORED_BCRYPT_PATH]
+        }]
+      }), /PRAGMA_OPTIMIZE|PRAGMA|connection|not allowed/i);
+
+      assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE name LIKE 'sqlite_stat%'").get().count, 0);
+      assert.deepEqual(allRows(db, 'SELECT version,name FROM schema_migrations ORDER BY version'), [
+        { version: 1, name: '001_legacy_compat_columns' }
+      ]);
+    } finally {
+      db.close();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
 test('migration SQL cannot mutate preexisting sqlite_stat tables through quoted identifiers', () => {
   const migrationService = require('../services/migration_service');
   const root = tempMigrationRoot('quoted-statistics-escape');
@@ -2399,6 +2448,26 @@ test('sqlite_sequence preflight rejects ghost rows, duplicate names, seq below m
     }), pattern);
     fixture.db.close();
   }
+});
+
+test('sqlite_sequence preflight rejects a missing allocator row for a nonempty AUTOINCREMENT table', () => {
+  const migrationService = require('../services/migration_service');
+  const { db } = tmpDb('sequence-missing-nonempty');
+  migrationService.runMigrations(db, { rootDir: serverRoot() });
+  db.exec(`
+    INSERT INTO users (id, username, password_hash, display_name, role)
+    VALUES (9007199254740991, 'sequence-limit', 'hash', 'Sequence Limit', 'admin');
+    DELETE FROM sqlite_sequence WHERE name = 'users';
+  `);
+
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_sequence WHERE name = 'users'").get().count, 0);
+  assert.throws(() => migrationService.runMigrations(db, {
+    rootDir: serverRoot()
+  }), /sqlite_sequence.*users.*missing|missing.*sqlite_sequence.*users/i);
+  assert.deepEqual(allRows(db, 'SELECT version,name FROM schema_migrations ORDER BY version'), [
+    { version: 1, name: '001_legacy_compat_columns' }
+  ]);
+  db.close();
 });
 
 test('managed schema manifest rejects missing or tampered 001 indexes and triggers before restart', () => {

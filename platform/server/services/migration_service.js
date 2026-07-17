@@ -485,27 +485,56 @@ function migrationSqlLexemes(sql) {
       if (index < sql.length) index += 2;
       continue;
     }
-    if (character === "'" || character === '"' || character === '`') {
-      const quote = character;
+    if (character === "'") {
+      let literal = '';
       index += 1;
       while (index < sql.length) {
-        if (sql[index] !== quote) {
+        if (sql[index] !== character) {
+          literal += sql[index];
           index += 1;
           continue;
         }
-        if (sql[index + 1] === quote) {
+        if (sql[index + 1] === character) {
+          literal += character;
           index += 2;
           continue;
         }
         index += 1;
         break;
       }
+      if (/^PRAGMA_[A-Za-z0-9_]+$/i.test(literal)) tokens.push(literal.toUpperCase());
+      continue;
+    }
+    if (character === '"' || character === '`') {
+      const quote = character;
+      let identifier = '';
+      index += 1;
+      while (index < sql.length) {
+        if (sql[index] !== quote) {
+          identifier += sql[index];
+          index += 1;
+          continue;
+        }
+        if (sql[index + 1] === quote) {
+          identifier += quote;
+          index += 2;
+          continue;
+        }
+        index += 1;
+        break;
+      }
+      tokens.push(identifier.toUpperCase());
       continue;
     }
     if (character === '[') {
+      let identifier = '';
       index += 1;
-      while (index < sql.length && sql[index] !== ']') index += 1;
+      while (index < sql.length && sql[index] !== ']') {
+        identifier += sql[index];
+        index += 1;
+      }
       if (index < sql.length) index += 1;
+      tokens.push(identifier.toUpperCase());
       continue;
     }
     if (character === ';') {
@@ -547,6 +576,7 @@ function forbiddenMigrationSqlControl(sql) {
   let caseDepth = 0;
 
   for (const token of migrationSqlLexemes(sql)) {
+    if (token.startsWith('PRAGMA_') && !allowedPragmas.has(token.slice('PRAGMA_'.length))) return token;
     if (token === 'ROLLBACK') return token;
     if (token === ';') {
       if (pragmaNamePending) return 'PRAGMA';
@@ -1383,6 +1413,12 @@ function validateSqliteSequence(db) {
     if (duplicates.length) throw new Error(`sqlite_sequence duplicate rows ${duplicates.map((row) => row.name).join(',')}`);
     const autoincrements = autoincrementTables(db);
     const rows = db.prepare('SELECT name, seq, typeof(seq) AS seq_type FROM sqlite_sequence ORDER BY name').all();
+    const sequenceNames = new Set(rows.map((row) => row.name));
+    for (const tableName of autoincrements.keys()) {
+      if (sequenceNames.has(tableName)) continue;
+      const rowCount = db.prepare(`SELECT COUNT(*) AS count FROM ${quoteIdentifier(tableName)}`).get().count;
+      if (rowCount > 0) throw new Error(`sqlite_sequence ${tableName} missing for nonempty AUTOINCREMENT table`);
+    }
     for (const row of rows) {
       if (!autoincrements.has(row.name)) throw new Error(`ghost sqlite_sequence row ${row.name}`);
       if (row.seq_type !== 'integer' || row.seq < 0 || row.seq > 9007199254740991) {
@@ -1426,9 +1462,7 @@ function validateLegacyRelationships(db) {
 }
 
 function digestManifest(db) {
-  const knowledgeColumns = hasObject(db, 'knowledge_entries') ? new Set(columnsFor(db, 'knowledge_entries').map((column) => column.name)) : new Set();
-  const chunkColumns = hasObject(db, 'knowledge_chunks') ? new Set(columnsFor(db, 'knowledge_chunks').map((column) => column.name)) : new Set();
-  if (hasObject(db, 'knowledge_chunks_fts') && knowledgeColumns.has('title') && knowledgeColumns.has('tags_json') && chunkColumns.has('content')) {
+  if (hasObject(db, 'knowledge_chunks_fts')) {
     return {
       fts: [{
         virtualName: 'knowledge_chunks_fts',
@@ -1442,13 +1476,19 @@ function digestManifest(db) {
   return { fts: [] };
 }
 
+function hasKnowledgeFtsProjection(db) {
+  const knowledgeColumns = hasObject(db, 'knowledge_entries') ? new Set(columnsFor(db, 'knowledge_entries').map((column) => column.name)) : new Set();
+  const chunkColumns = hasObject(db, 'knowledge_chunks') ? new Set(columnsFor(db, 'knowledge_chunks').map((column) => column.name)) : new Set();
+  return knowledgeColumns.has('title') && knowledgeColumns.has('tags_json') && chunkColumns.has('content');
+}
+
 function preflightDigest(db) {
   return sqliteDigest.databaseDigest(db, digestManifest(db));
 }
 
 function validateFtsIntegrity(db, options) {
   const manifest = digestManifest(db);
-  if ((manifest.fts || []).length) {
+  if ((manifest.fts || []).length && hasKnowledgeFtsProjection(db)) {
     sqliteDigest.verifyKnowledgeChunksFtsIntegrity(db, manifest, {
       checkMainIntegrity: Boolean(options && options.checkMainFtsIntegrity)
     });

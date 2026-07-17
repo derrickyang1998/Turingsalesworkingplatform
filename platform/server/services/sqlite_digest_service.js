@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const { TextDecoder } = require('util');
 
 const SQLITE_TEXT_BYTES = Symbol('sqliteTextBytes');
+const SQLITE_REAL_VALUE = Symbol('sqliteRealValue');
 const sqliteTextDecoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 
 function sha256Hex(buffer) {
@@ -55,6 +56,14 @@ function isSqliteTextValue(value) {
   return Boolean(value && typeof value === 'object' && Buffer.isBuffer(value[SQLITE_TEXT_BYTES]));
 }
 
+function sqliteRealValue(value) {
+  return Object.freeze({ [SQLITE_REAL_VALUE]: value });
+}
+
+function isSqliteRealValue(value) {
+  return Boolean(value && typeof value === 'object' && typeof value[SQLITE_REAL_VALUE] === 'number');
+}
+
 function item(label, payload) {
   const labelBytes = Buffer.from(label, 'utf8');
   const payloadBytes = Buffer.isBuffer(payload) ? payload : Buffer.from(payload || '');
@@ -74,6 +83,7 @@ function encodeNumber(value) {
 function valueBytes(value) {
   if (value === null || value === undefined) return Buffer.from('N');
   if (typeof value === 'bigint') return Buffer.concat([Buffer.from('I'), i64(value)]);
+  if (isSqliteRealValue(value)) return Buffer.concat([Buffer.from('R'), encodeNumber(value[SQLITE_REAL_VALUE])]);
   if (typeof value === 'number') {
     if (Number.isInteger(value) && !Object.is(value, -0)) return Buffer.concat([Buffer.from('I'), i64(BigInt(value))]);
     if (!Number.isFinite(value)) throw new Error('non-finite SQLite REAL');
@@ -249,7 +259,7 @@ function storedValue(storageType, value, context) {
   }
   if (storageType === 'real') {
     if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error(`SQLite storage mismatch at ${context}: expected finite REAL`);
-    return value;
+    return sqliteRealValue(value);
   }
   if (storageType === 'text') return sqliteTextValue(value, context);
   if (storageType === 'blob') {
@@ -273,6 +283,41 @@ function storedRows(db, columns, fromClause, params = []) {
   )));
 }
 
+function declaredVirtualSchema(db, manifest) {
+  const virtualNames = new Set();
+  for (const entry of manifest.fts || []) {
+    if (virtualNames.has(entry.virtualName)) throw new Error(`duplicate virtual table manifest ${entry.virtualName}`);
+    virtualNames.add(entry.virtualName);
+  }
+  const allowedShadowNames = allShadowNames(manifest);
+  const discoveredShadowNames = new Set();
+  const discoveredTypes = new Map();
+  const rows = storedRows(db, [
+    { expression: 'name', context: 'pragma_table_list.name' },
+    { expression: 'type', context: 'pragma_table_list.type' }
+  ], "FROM pragma_table_list WHERE schema = 'main' ORDER BY CAST(name AS BLOB)");
+
+  for (const values of rows) {
+    const name = requiredText(values[0], 'pragma_table_list.name');
+    const type = requiredText(values[1], 'pragma_table_list.type');
+    discoveredTypes.set(name, type);
+    if (type === 'virtual' && !virtualNames.has(name)) throw new Error(`unknown virtual table ${name}`);
+    if (type === 'shadow') {
+      if (!allowedShadowNames.has(name)) throw new Error(`unknown virtual shadow table ${name}`);
+      discoveredShadowNames.add(name);
+    }
+  }
+  for (const name of virtualNames) {
+    if (discoveredTypes.get(name) !== 'virtual') throw new Error(`declared virtual table is missing or invalid: ${name}`);
+  }
+  for (const name of allowedShadowNames) {
+    if (discoveredTypes.has(name) && discoveredTypes.get(name) !== 'shadow') {
+      throw new Error(`declared virtual shadow object is invalid: ${name}`);
+    }
+  }
+  return discoveredShadowNames;
+}
+
 function safePositiveId(value, context) {
   if (typeof value !== 'bigint' || value < 1n || value > BigInt(Number.MAX_SAFE_INTEGER)) {
     throw new Error(`unsafe SQLite integer at ${context}`);
@@ -289,6 +334,7 @@ function safeNonnegativeInteger(value, context) {
 
 function ftsSemanticId(value, context) {
   if (typeof value === 'bigint') return safePositiveId(value, context);
+  if (isSqliteRealValue(value)) value = value[SQLITE_REAL_VALUE];
   if (typeof value === 'number' && Number.isSafeInteger(value) && !Object.is(value, -0)) {
     return safePositiveId(BigInt(value), context);
   }
@@ -440,7 +486,7 @@ function topologyStream(db, manifest) {
     row(['page_size', requiredInteger(pageSize, 'pragma.page_size')]).subarray(8),
     row(['user_version', requiredInteger(userVersion, 'pragma.user_version')]).subarray(8)
   ];
-  const shadowNames = allShadowNames(manifest);
+  const shadowNames = declaredVirtualSchema(db, manifest);
   const objects = storedRows(db, [
     { expression: 'type', context: 'sqlite_schema.type' },
     { expression: 'name', context: 'sqlite_schema.name' },
@@ -642,7 +688,7 @@ function ftsDigest(db, manifestEntry) {
 }
 
 function logicalStream(db, manifest, topologySha256) {
-  const shadowNames = allShadowNames(manifest);
+  const shadowNames = declaredVirtualSchema(db, manifest);
   const ftsNames = new Set((manifest.fts || []).map((entry) => entry.virtualName));
   const tableNames = storedRows(db, [
     { expression: 'name', context: 'sqlite_schema.name' },
