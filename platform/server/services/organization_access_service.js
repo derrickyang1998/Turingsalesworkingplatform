@@ -194,6 +194,24 @@ function projectIdentityState(db, userIdValue) {
   };
 }
 
+function projectGlobalMembershipState(db, userIdValue) {
+  const userId = canonicalId(userIdValue, 'subjectUserId');
+  return {
+    organizations: db.prepare(`
+      SELECT org_id,role_code,status
+      FROM organization_memberships
+      WHERE user_id=?
+      ORDER BY org_id
+    `).all(userId),
+    teams: db.prepare(`
+      SELECT org_id,team_id,role_code,status
+      FROM team_memberships
+      WHERE user_id=?
+      ORDER BY org_id,team_id
+    `).all(userId)
+  };
+}
+
 function canonicalTimestamp(db) {
   return db.prepare(
     "SELECT strftime('%Y-%m-%d %H:%M:%S','now') AS value"
@@ -338,7 +356,7 @@ function sameProjection(left, right) {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
-function changedFields(before, after) {
+function changedFields(before, after, globalBefore, globalAfter) {
   if (before === null) return [...IDENTITY_CHANGED_FIELDS];
   const changed = [];
   if (before.user.is_active !== after.user.is_active) changed.push('active');
@@ -355,29 +373,78 @@ function changedFields(before, after) {
   if (!sameProjection(before.team_memberships, after.team_memberships)) {
     changed.push('team_memberships');
   }
+  if (
+    globalBefore &&
+    globalAfter &&
+    !sameProjection(globalBefore.organizations, globalAfter.organizations) &&
+    !changed.includes('organization_membership')
+  ) {
+    changed.push('organization_membership');
+  }
+  if (
+    globalBefore &&
+    globalAfter &&
+    !sameProjection(globalBefore.teams, globalAfter.teams) &&
+    !changed.includes('team_memberships')
+  ) {
+    changed.push('team_memberships');
+  }
   return changed.sort();
 }
 
-function summarizedIdentityProjection(projection) {
+function summarizedMembershipRows(rows) {
+  return {
+    summary_version: 1,
+    total_count: rows.length,
+    active_count: rows.filter(
+      (membership) => membership.status === 'active'
+    ).length,
+    revoked_count: rows.filter(
+      (membership) => membership.status === 'revoked'
+    ).length,
+    sha256: createHash('sha256')
+      .update(JSON.stringify(rows))
+      .digest('hex')
+  };
+}
+
+function summarizedIdentityProjection(projection, globalMemberships = null) {
   if (projection === null) return null;
-  const memberships = projection.team_memberships;
+  if (globalMemberships) {
+    return {
+      user: projection.user,
+      organization_membership: {
+        default_membership: projection.organization_membership,
+        ...summarizedMembershipRows(globalMemberships.organizations)
+      },
+      team_memberships: summarizedMembershipRows(globalMemberships.teams)
+    };
+  }
   return {
     user: projection.user,
     organization_membership: projection.organization_membership,
-    team_memberships: {
-      summary_version: 1,
-      total_count: memberships.length,
-      active_count: memberships.filter(
-        (membership) => membership.status === 'active'
-      ).length,
-      revoked_count: memberships.filter(
-        (membership) => membership.status === 'revoked'
-      ).length,
-      sha256: createHash('sha256')
-        .update(JSON.stringify(memberships))
-        .digest('hex')
-    }
+    team_memberships: summarizedMembershipRows(projection.team_memberships)
   };
+}
+
+function hasHiddenGlobalMembershipChange({
+  organizationId,
+  globalBefore,
+  globalAfter
+}) {
+  const nonDefault = (memberships) => memberships.filter(
+    (membership) => membership.org_id !== organizationId
+  );
+  if (!sameProjection(
+    nonDefault(globalBefore.organizations),
+    nonDefault(globalAfter.organizations)
+  )) {
+    return true;
+  }
+  return !sameProjection(
+    nonDefault(globalBefore.teams),
+    nonDefault(globalAfter.teams)
+  );
 }
 
 function validateAuditInput({
@@ -387,7 +454,9 @@ function validateAuditInput({
   reason,
   requestId,
   before,
-  after
+  after,
+  globalBefore,
+  globalAfter
 }) {
   const actor = actorUserId === null
     ? null
@@ -403,7 +472,12 @@ function validateAuditInput({
   ) {
     throw new TypeError('requestId must be null or a bounded string');
   }
-  const fields = changedFields(before, after);
+  const fields = changedFields(before, after, globalBefore, globalAfter);
+  const requiresGlobalSummary = hasHiddenGlobalMembershipChange({
+    organizationId: organization,
+    globalBefore,
+    globalAfter
+  });
   let details = {
     schema_version: 1,
     actor_user_id: actor,
@@ -412,15 +486,23 @@ function validateAuditInput({
     reason,
     request_id: requestId,
     changed_fields: fields,
-    before,
-    after
+    before: requiresGlobalSummary
+      ? summarizedIdentityProjection(before, globalBefore)
+      : before,
+    after: requiresGlobalSummary
+      ? summarizedIdentityProjection(after, globalAfter)
+      : after
   };
   let detailsJson = JSON.stringify(details);
   if (Buffer.byteLength(detailsJson, 'utf8') > 4096) {
     details = {
       ...details,
-      before: summarizedIdentityProjection(before),
-      after: summarizedIdentityProjection(after)
+      before: requiresGlobalSummary
+        ? details.before
+        : summarizedIdentityProjection(before),
+      after: requiresGlobalSummary
+        ? details.after
+        : summarizedIdentityProjection(after)
     };
     detailsJson = JSON.stringify(details);
     if (Buffer.byteLength(detailsJson, 'utf8') > 4096) {
@@ -462,6 +544,7 @@ function runIdentityProjectionTransaction(db, options) {
   const operation = () => {
     const previousUser = readUser(db, subjectUserId);
     const before = projectIdentityState(db, subjectUserId);
+    const globalBefore = projectGlobalMembershipState(db, subjectUserId);
     const mutationResult = mutateUser();
     if (mutationResult !== undefined) {
       throw new TypeError('mutateUser must return undefined');
@@ -475,6 +558,7 @@ function runIdentityProjectionTransaction(db, options) {
       reason
     );
     const after = projectIdentityState(db, subjectUserId);
+    const globalAfter = projectGlobalMembershipState(db, subjectUserId);
     const auditInput = validateAuditInput({
       actorUserId,
       subjectUserId,
@@ -482,7 +566,9 @@ function runIdentityProjectionTransaction(db, options) {
       reason,
       requestId,
       before,
-      after
+      after,
+      globalBefore,
+      globalAfter
     });
     if (auditInput.fields.length === 0) {
       return {
@@ -637,7 +723,7 @@ function getAssignmentDecision(db, options) {
     'actorUserId',
     'ownerUserId',
     'teamId',
-    'currentOwnerUserId',
+    'campaignId',
     'mode'
   ]);
   if (input === null) return assignmentFailure();
@@ -645,7 +731,7 @@ function getAssignmentDecision(db, options) {
     actorUserId: rawActorUserId,
     ownerUserId: rawOwnerUserId,
     teamId: rawTeamId,
-    currentOwnerUserId: rawCurrentOwnerUserId = null,
+    campaignId: rawCampaignId,
     mode = 'create'
   } = input;
   if (mode !== 'create' && mode !== 'transfer') {
@@ -684,6 +770,31 @@ function getAssignmentDecision(db, options) {
   `).get(orgId, teamId, ownerUserId);
   if (!pair) return assignmentFailure();
 
+  let campaign = null;
+  if (mode === 'transfer') {
+    let campaignId;
+    try {
+      campaignId = canonicalId(rawCampaignId, 'campaignId');
+    } catch {
+      return assignmentFailure();
+    }
+    campaign = db.prepare(`
+      SELECT id,org_id,owner_user_id,team_id
+      FROM campaigns
+      WHERE id=? AND org_id=?
+    `).get(campaignId, orgId);
+    if (
+      !campaign ||
+      campaign.org_id !== orgId ||
+      !Number.isSafeInteger(campaign.owner_user_id) ||
+      campaign.owner_user_id < 1 ||
+      !Number.isSafeInteger(campaign.team_id) ||
+      campaign.team_id < 1
+    ) {
+      return assignmentFailure();
+    }
+  }
+
   const organizationRoleCode = scope.authContext.organization.role_code;
   if (organizationRoleCode === 'org_admin') {
     return {
@@ -698,16 +809,7 @@ function getAssignmentDecision(db, options) {
   if (!actorTeam) return assignmentFailure();
 
   if (mode === 'transfer') {
-    let currentOwnerUserId;
-    try {
-      currentOwnerUserId = canonicalId(
-        rawCurrentOwnerUserId,
-        'currentOwnerUserId'
-      );
-    } catch {
-      return assignmentFailure();
-    }
-    if (currentOwnerUserId !== actorUserId) {
+    if (campaign.owner_user_id !== actorUserId) {
       return assignmentFailure();
     }
     return {
@@ -743,15 +845,13 @@ function getCampaignCreationDecision(db, options) {
     'actorUserId',
     'opportunityId',
     'ownerUserId',
-    'teamId',
-    'currentOwnerUserId'
+    'teamId'
   ]);
   if (input === null) return assignmentFailure();
   const assignment = getAssignmentDecision(db, {
     actorUserId: input.actorUserId,
     ownerUserId: input.ownerUserId,
     teamId: input.teamId,
-    currentOwnerUserId: input.currentOwnerUserId,
     mode: 'create'
   });
   if (!assignment.allowed) return assignment;

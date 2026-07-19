@@ -632,39 +632,77 @@ describe('RED group 2: organization repair, assignment, and CRM manage', () => {
       allowed: false,
       code: 'CAMPAIGN_ASSIGNMENT_FORBIDDEN'
     });
+    assert.deepEqual(getAssignmentDecision(db, {
+      actorUserId: identity.teammateId,
+      currentOwnerUserId: identity.teammateId,
+      campaignId: 3001,
+      ownerUserId: identity.teammateId,
+      teamId: identity.ownerTeamId,
+      mode: 'transfer'
+    }), {
+      allowed: false,
+      code: 'CAMPAIGN_ASSIGNMENT_FORBIDDEN'
+    });
     assert.equal(getAssignmentDecision(db, {
       actorUserId: identity.ownerId,
-      currentOwnerUserId: identity.ownerId,
+      campaignId: 3001,
       ownerUserId: identity.ownerId,
       teamId: identity.ownerTeamId,
       mode: 'transfer'
     }).allowed, true);
     assert.equal(getAssignmentDecision(db, {
       actorUserId: identity.ownerId,
-      currentOwnerUserId: identity.ownerId,
+      campaignId: 3001,
+      ownerUserId: identity.teammateId,
+      teamId: identity.ownerTeamId,
+      mode: 'transfer'
+    }).allowed, true);
+    assert.equal(getAssignmentDecision(db, {
+      actorUserId: identity.adminId,
+      campaignId: 3001,
       ownerUserId: identity.teammateId,
       teamId: identity.ownerTeamId,
       mode: 'transfer'
     }).allowed, true);
     assert.equal(getAssignmentDecision(db, {
       actorUserId: identity.ownerId,
-      currentOwnerUserId: identity.ownerId,
+      campaignId: 3001,
       ownerUserId: identity.outsiderId,
       teamId: identity.ownerTeamId,
       mode: 'transfer'
     }).allowed, false);
     assert.equal(getAssignmentDecision(db, {
       actorUserId: identity.teammateId,
-      currentOwnerUserId: identity.ownerId,
+      campaignId: 3001,
       ownerUserId: identity.teammateId,
       teamId: identity.ownerTeamId,
       mode: 'transfer'
     }).allowed, false);
     assert.equal(getAssignmentDecision(db, {
       actorUserId: identity.ownerId,
-      currentOwnerUserId: identity.ownerId,
+      campaignId: 3001,
       ownerUserId: identity.outsiderId,
       teamId: identity.outsiderTeamId,
+      mode: 'transfer'
+    }).allowed, false);
+    assert.equal(getAssignmentDecision(db, {
+      actorUserId: identity.ownerId,
+      ownerUserId: identity.teammateId,
+      teamId: identity.ownerTeamId,
+      mode: 'transfer'
+    }).allowed, false);
+    assert.equal(getAssignmentDecision(db, {
+      actorUserId: identity.ownerId,
+      campaignId: 999999,
+      ownerUserId: identity.teammateId,
+      teamId: identity.ownerTeamId,
+      mode: 'transfer'
+    }).allowed, false);
+    assert.equal(getAssignmentDecision(db, {
+      actorUserId: identity.adminId,
+      campaignId: 3005,
+      ownerUserId: identity.teammateId,
+      teamId: identity.ownerTeamId,
       mode: 'transfer'
     }).allowed, false);
 
@@ -3581,7 +3619,7 @@ describe('RED group 9: exported option-container boundaries', () => {
           'actorUserId',
           'ownerUserId',
           'teamId',
-          'currentOwnerUserId',
+          'campaignId',
           'mode'
         ],
         invoke: (options) => getAssignmentDecision(db, options),
@@ -3610,8 +3648,7 @@ describe('RED group 9: exported option-container boundaries', () => {
           'actorUserId',
           'opportunityId',
           'ownerUserId',
-          'teamId',
-          'currentOwnerUserId'
+          'teamId'
         ],
         invoke: (options) => getCampaignCreationDecision(db, options),
         coerciveOptions: (value) => ({
@@ -5024,6 +5061,266 @@ describe('RED group 10: organization identity lifecycle hardening', () => {
           AND json_extract(details,'$.reason')='login_membership_repair'
       `).get(alreadyInactiveUserId).count,
       inactiveAuditBefore + 1
+    );
+  });
+
+  test('non-default-only inactive normalization is globally audited and atomic', (t) => {
+    const db = openCampaignDatabase(t);
+    const userId = 9;
+    const orgId = 17001;
+    const firstTeamId = 17100;
+    const teamCount = 101;
+    const fixedRevokedAt = '2026-07-20 00:00:00';
+
+    db.prepare('UPDATE users SET is_active=0 WHERE id=?').run(userId);
+    db.prepare(`
+      UPDATE organization_memberships
+      SET status='revoked',revoked_at=?
+      WHERE org_id=1 AND user_id=?
+    `).run(fixedRevokedAt, userId);
+    db.prepare(`
+      UPDATE team_memberships
+      SET status='revoked',revoked_at=?
+      WHERE org_id=1 AND user_id=?
+    `).run(fixedRevokedAt, userId);
+    db.prepare(`
+      INSERT INTO organizations (id,code,name)
+      VALUES (?,'hidden-membership-org','Hidden membership organization')
+    `).run(orgId);
+    db.prepare(`
+      INSERT INTO organization_memberships (
+        org_id,user_id,role_code,status,revoked_at
+      ) VALUES (?,?,'member','active',NULL)
+    `).run(orgId, userId);
+    const insertTeam = db.prepare(`
+      INSERT INTO teams (id,org_id,code,name)
+      VALUES (?,?,?,?)
+    `);
+    const insertMembership = db.prepare(`
+      INSERT INTO team_memberships (
+        org_id,team_id,user_id,role_code,status,revoked_at
+      ) VALUES (?,?,?,'member','active',NULL)
+    `);
+    db.transaction(() => {
+      for (let index = 0; index < teamCount; index += 1) {
+        const teamId = firstTeamId + index;
+        const suffix = String(index).padStart(3, '0');
+        insertTeam.run(
+          teamId,
+          orgId,
+          'hidden-membership-team-' + suffix,
+          'Hidden membership team ' + suffix
+        );
+        insertMembership.run(orgId, teamId, userId);
+      }
+    })();
+    insertSession(db, userId, 'hidden-membership-normalization');
+
+    const readOrganizations = () => db.prepare(`
+      SELECT org_id,role_code,status
+      FROM organization_memberships
+      WHERE user_id=?
+      ORDER BY org_id
+    `).all(userId);
+    const readTeams = () => db.prepare(`
+      SELECT org_id,team_id,role_code,status
+      FROM team_memberships
+      WHERE user_id=?
+      ORDER BY org_id,team_id
+    `).all(userId);
+    const snapshot = () => ({
+      user: db.prepare(`
+        SELECT role,is_active
+        FROM users
+        WHERE id=?
+      `).get(userId),
+      organizations: db.prepare(`
+        SELECT org_id,role_code,status,revoked_at
+        FROM organization_memberships
+        WHERE user_id=?
+        ORDER BY org_id
+      `).all(userId),
+      teams: db.prepare(`
+        SELECT org_id,team_id,role_code,status,revoked_at
+        FROM team_memberships
+        WHERE user_id=?
+        ORDER BY org_id,team_id
+      `).all(userId),
+      sessions: db.prepare(`
+        SELECT token
+        FROM sessions
+        WHERE user_id=?
+        ORDER BY id
+      `).all(userId),
+      activity: db.prepare(`
+        SELECT user_id,action,module,details
+        FROM activity_log
+        ORDER BY id
+      `).all()
+    });
+    const summarize = (rows) => ({
+      summary_version: 1,
+      total_count: rows.length,
+      active_count: rows.filter((row) => row.status === 'active').length,
+      revoked_count: rows.filter((row) => row.status === 'revoked').length,
+      sha256: sha256(JSON.stringify(rows))
+    });
+
+    const beforeRollback = snapshot();
+    assert.equal(
+      beforeRollback.organizations.filter(
+        (membership) => membership.status === 'active'
+      ).length,
+      1
+    );
+    assert.equal(
+      beforeRollback.teams.filter(
+        (membership) => (
+          membership.org_id === orgId &&
+          membership.status === 'active'
+        )
+      ).length,
+      teamCount
+    );
+    assert.throws(
+      () => runIdentityProjectionTransaction(db, {
+        actorUserId: 999999,
+        subjectUserId: userId,
+        reason: 'login_membership_repair',
+        requestId: 'request-hidden-membership-rollback',
+        mutateUser() {}
+      }),
+      /FOREIGN KEY constraint failed/
+    );
+    assert.deepEqual(snapshot(), beforeRollback);
+
+    const organizationsBefore = readOrganizations();
+    const teamsBefore = readTeams();
+    const projectedBefore = projectIdentityState(db, userId);
+    const auditCountBefore = db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM activity_log
+      WHERE module='identity'
+        AND json_extract(details,'$.subject_user_id')=?
+        AND json_extract(details,'$.reason')='login_membership_repair'
+    `).get(userId).count;
+    const result = runIdentityProjectionTransaction(db, {
+      actorUserId: 1,
+      subjectUserId: userId,
+      reason: 'login_membership_repair',
+      requestId: 'request-hidden-membership-success',
+      mutateUser() {}
+    });
+    const organizationsAfter = readOrganizations();
+    const teamsAfter = readTeams();
+
+    assert.equal(result.changed, true);
+    assert.deepEqual(result.before, projectedBefore);
+    assert.deepEqual(result.after, projectedBefore);
+    assert.equal(
+      organizationsAfter.filter(
+        (membership) => membership.status !== 'revoked'
+      ).length,
+      0
+    );
+    assert.equal(
+      teamsAfter.filter((membership) => membership.status !== 'revoked').length,
+      0
+    );
+    assert.deepEqual(
+      organizationsAfter.find((membership) => membership.org_id === orgId),
+      {
+        org_id: orgId,
+        role_code: 'member',
+        status: 'revoked'
+      }
+    );
+    assert.equal(
+      teamsAfter.filter(
+        (membership) => (
+          membership.org_id === orgId &&
+          membership.role_code === 'member'
+        )
+      ).length,
+      teamCount
+    );
+    assert.equal(
+      db.prepare(`
+        SELECT COUNT(*) AS count
+        FROM organization_memberships
+        WHERE org_id=1 AND user_id=? AND revoked_at=?
+      `).get(userId, fixedRevokedAt).count,
+      1
+    );
+    assert.equal(
+      db.prepare(`
+        SELECT COUNT(*) AS count
+        FROM team_memberships
+        WHERE org_id=1 AND user_id=? AND revoked_at=?
+      `).get(userId, fixedRevokedAt).count,
+      1
+    );
+    assert.equal(
+      db.prepare(
+        'SELECT COUNT(*) AS count FROM sessions WHERE user_id=?'
+      ).get(userId).count,
+      0
+    );
+
+    const storedAudit = db.prepare(`
+      SELECT details
+      FROM activity_log
+      WHERE module='identity'
+        AND json_extract(details,'$.subject_user_id')=?
+        AND json_extract(details,'$.reason')='login_membership_repair'
+      ORDER BY id DESC
+      LIMIT 1
+    `).get(userId);
+    assert.deepEqual(storedAudit, { details: result.audit.details });
+    assert.ok(Buffer.byteLength(storedAudit.details, 'utf8') <= 4096);
+    const audit = JSON.parse(storedAudit.details);
+    assert.deepEqual(Object.keys(audit), [
+      'schema_version',
+      'actor_user_id',
+      'subject_user_id',
+      'organization_id',
+      'reason',
+      'request_id',
+      'changed_fields',
+      'before',
+      'after'
+    ]);
+    assert.deepEqual(audit.changed_fields, [
+      'organization_membership',
+      'team_memberships'
+    ]);
+    assert.deepEqual(audit.before.organization_membership, {
+      default_membership: projectedBefore.organization_membership,
+      ...summarize(organizationsBefore)
+    });
+    assert.deepEqual(audit.after.organization_membership, {
+      default_membership: projectedBefore.organization_membership,
+      ...summarize(organizationsAfter)
+    });
+    assert.deepEqual(audit.before.team_memberships, summarize(teamsBefore));
+    assert.deepEqual(audit.after.team_memberships, summarize(teamsAfter));
+    assert.notEqual(
+      audit.before.organization_membership.sha256,
+      audit.after.organization_membership.sha256
+    );
+    assert.notEqual(
+      audit.before.team_memberships.sha256,
+      audit.after.team_memberships.sha256
+    );
+    assert.equal(
+      db.prepare(`
+        SELECT COUNT(*) AS count
+        FROM activity_log
+        WHERE module='identity'
+          AND json_extract(details,'$.subject_user_id')=?
+          AND json_extract(details,'$.reason')='login_membership_repair'
+      `).get(userId).count,
+      auditCountBefore + 1
     );
   });
 });
