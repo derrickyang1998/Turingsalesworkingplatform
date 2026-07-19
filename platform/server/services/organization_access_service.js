@@ -192,28 +192,47 @@ function canonicalTimestamp(db) {
   ).get().value;
 }
 
-function synchronizeMembershipRows(db, user, previousUser) {
+function synchronizeMembershipRows(db, user, previousUser, reason) {
   const organization = readDefaultOrganization(db);
   const now = canonicalTimestamp(db);
   const active = user.is_active === 1;
+  const previouslyActive = Boolean(
+    previousUser && previousUser.is_active === 1
+  );
   const orgRole = organizationRole(user);
   const memberRole = teamRole(user);
 
-  if (!active) {
-    db.prepare(`
-      UPDATE organization_memberships
-      SET role_code=?,
-        status='revoked',
-        revoked_at=CASE WHEN status='active' THEN ? ELSE revoked_at END
-      WHERE org_id=? AND user_id=?
-    `).run(orgRole, now, organization.id, user.id);
+  db.prepare(`
+    UPDATE organization_memberships
+    SET role_code=?
+    WHERE org_id=? AND user_id=?
+  `).run(orgRole, organization.id, user.id);
+  db.prepare(`
+    UPDATE team_memberships
+    SET role_code=?
+    WHERE org_id=? AND user_id=?
+  `).run(memberRole, organization.id, user.id);
+
+  if (
+    reason === 'soft_deactivate' &&
+    previouslyActive &&
+    !active
+  ) {
     db.prepare(`
       UPDATE team_memberships
-      SET role_code=?,
-        status='revoked',
+      SET status='revoked',
         revoked_at=CASE WHEN status='active' THEN ? ELSE revoked_at END
-      WHERE org_id=? AND user_id=?
-    `).run(memberRole, now, organization.id, user.id);
+      WHERE user_id=?
+    `).run(now, user.id);
+    db.prepare(`
+      UPDATE organization_memberships
+      SET status='revoked',
+        revoked_at=CASE WHEN status='active' THEN ? ELSE revoked_at END
+      WHERE user_id=?
+    `).run(now, user.id);
+    return organization;
+  }
+  if (!active) {
     return organization;
   }
 
@@ -222,25 +241,58 @@ function synchronizeMembershipRows(db, user, previousUser) {
     FROM organization_memberships
     WHERE org_id=? AND user_id=?
   `).get(organization.id, user.id);
-  if (membership) {
+  const creating = previousUser === undefined;
+  const repairing = reason === 'login_membership_repair';
+  const reactivating = (
+    reason === 'reactivate' &&
+    previousUser !== undefined &&
+    !previouslyActive
+  );
+  const shouldActivateExistingOrganization = creating || reactivating;
+  const shouldInsertOrganization = (
+    !membership &&
+    (creating || repairing || reactivating)
+  );
+  if (membership && shouldActivateExistingOrganization) {
     db.prepare(`
       UPDATE organization_memberships
       SET role_code=?,status='active',revoked_at=NULL
       WHERE org_id=? AND user_id=?
     `).run(orgRole, organization.id, user.id);
-  } else {
+  } else if (shouldInsertOrganization) {
     db.prepare(`
       INSERT INTO organization_memberships (
         org_id,user_id,role_code,status,revoked_at
       ) VALUES (?,? ,?,'active',NULL)
     `).run(organization.id, user.id, orgRole);
   }
+  const organizationActive = membership
+    ? (
+        membership.status === 'active' ||
+        shouldActivateExistingOrganization
+      )
+    : shouldInsertOrganization;
 
-  const team = ensureDepartmentTeam(db, organization.id, user.department);
   const previousDepartment = previousUser
     ? normalizedDepartment(previousUser.department)
     : null;
-  if (previousDepartment && previousDepartment.code !== team.code) {
+  const currentDepartment = normalizedDepartment(user.department);
+  const departmentChanged = Boolean(
+    previousDepartment &&
+    previousDepartment.code !== currentDepartment.code
+  );
+  const shouldProjectTeam = (
+    creating ||
+    repairing ||
+    reactivating ||
+    departmentChanged
+  );
+  if (!shouldProjectTeam || !organizationActive) {
+    return organization;
+  }
+
+  const team = ensureDepartmentTeam(db, organization.id, user.department);
+  if (departmentChanged) {
     db.prepare(`
       UPDATE team_memberships
       SET status='revoked',revoked_at=?
@@ -260,23 +312,18 @@ function synchronizeMembershipRows(db, user, previousUser) {
       previousDepartment.code
     );
   }
-  db.prepare(`
-    UPDATE team_memberships
-    SET role_code=?
-    WHERE org_id=? AND user_id=? AND status='active'
-  `).run(memberRole, organization.id, user.id);
   const teamMembership = db.prepare(`
     SELECT status
     FROM team_memberships
     WHERE org_id=? AND team_id=? AND user_id=?
   `).get(organization.id, team.id, user.id);
-  if (teamMembership) {
+  if (teamMembership && (creating || reactivating)) {
     db.prepare(`
       UPDATE team_memberships
       SET role_code=?,status='active',revoked_at=NULL
       WHERE org_id=? AND team_id=? AND user_id=?
     `).run(memberRole, organization.id, team.id, user.id);
-  } else {
+  } else if (!teamMembership) {
     db.prepare(`
       INSERT INTO team_memberships (
         org_id,team_id,user_id,role_code,status,revoked_at
@@ -310,6 +357,28 @@ function changedFields(before, after) {
   return changed.sort();
 }
 
+function summarizedIdentityProjection(projection) {
+  if (projection === null) return null;
+  const memberships = projection.team_memberships;
+  return {
+    user: projection.user,
+    organization_membership: projection.organization_membership,
+    team_memberships: {
+      summary_version: 1,
+      total_count: memberships.length,
+      active_count: memberships.filter(
+        (membership) => membership.status === 'active'
+      ).length,
+      revoked_count: memberships.filter(
+        (membership) => membership.status === 'revoked'
+      ).length,
+      sha256: createHash('sha256')
+        .update(JSON.stringify(memberships))
+        .digest('hex')
+    }
+  };
+}
+
 function validateAuditInput({
   actorUserId,
   subjectUserId,
@@ -334,7 +403,7 @@ function validateAuditInput({
     throw new TypeError('requestId must be null or a bounded string');
   }
   const fields = changedFields(before, after);
-  const details = {
+  let details = {
     schema_version: 1,
     actor_user_id: actor,
     subject_user_id: subject,
@@ -345,9 +414,17 @@ function validateAuditInput({
     before,
     after
   };
-  const detailsJson = JSON.stringify(details);
+  let detailsJson = JSON.stringify(details);
   if (Buffer.byteLength(detailsJson, 'utf8') > 4096) {
-    throw new Error('identity audit details exceed limit');
+    details = {
+      ...details,
+      before: summarizedIdentityProjection(before),
+      after: summarizedIdentityProjection(after)
+    };
+    detailsJson = JSON.stringify(details);
+    if (Buffer.byteLength(detailsJson, 'utf8') > 4096) {
+      throw new Error('identity audit details exceed limit');
+    }
   }
   return { actor, subject, details, detailsJson, fields };
 }
@@ -368,17 +445,31 @@ function runIdentityProjectionTransaction(db, options) {
     mutateUser
   } = input || {};
   const subjectUserId = canonicalId(rawSubjectUserId, 'subjectUserId');
-  if (typeof mutateUser !== 'function') {
+  if (
+    typeof mutateUser !== 'function' ||
+    utilTypes.isProxy(mutateUser)
+  ) {
     throw new TypeError('mutateUser must be a function');
+  }
+  if (utilTypes.isAsyncFunction(mutateUser)) {
+    throw new TypeError('mutateUser must be synchronous');
   }
 
   const operation = () => {
     const previousUser = readUser(db, subjectUserId);
     const before = projectIdentityState(db, subjectUserId);
-    mutateUser();
+    const mutationResult = mutateUser();
+    if (mutationResult !== undefined) {
+      throw new TypeError('mutateUser must return undefined');
+    }
     const user = readUser(db, subjectUserId);
     if (!user) throw new Error('identity subject was not created');
-    const organization = synchronizeMembershipRows(db, user, previousUser);
+    const organization = synchronizeMembershipRows(
+      db,
+      user,
+      previousUser,
+      reason
+    );
     const after = projectIdentityState(db, subjectUserId);
     const auditInput = validateAuditInput({
       actorUserId,
@@ -471,6 +562,9 @@ function resolveOrganizationScope(db, options) {
     actorUserId = rawUserId,
     requestId = null
   } = input || {};
+  if (typeof repairMissing !== 'boolean') {
+    throw new TypeError('repairMissing must be a boolean');
+  }
   const userId = canonicalId(rawUserId, 'userId');
   const user = readUser(db, userId);
   if (!user || user.is_active !== 1) {
