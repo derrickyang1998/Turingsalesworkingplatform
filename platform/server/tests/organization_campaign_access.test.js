@@ -939,6 +939,21 @@ describe('RED group 4: target access and immutable custody', () => {
       relationType: 'demand',
       intent: 'attach'
     }).code, 'INVALID_CAMPAIGN_LINK');
+    for (const recordType of ['__proto__', 'constructor', 'toString']) {
+      assert.deepEqual(getTargetAccess(db, {
+        userId: identity.ownerId,
+        campaignId: 3001,
+        recordType,
+        recordId: 4001,
+        relationType: 'demand',
+        intent: 'attach'
+      }), {
+        ok: false,
+        kind: 'invalid',
+        status: 400,
+        code: 'INVALID_CAMPAIGN_LINK'
+      });
+    }
     assert.equal(getTargetAccess(db, {
       userId: identity.ownerId,
       campaignId: 3001,
@@ -1253,6 +1268,29 @@ describe('RED group 5: bound collection predicates', () => {
 });
 
 describe('RED group 6: key-closed authorization serializers', () => {
+  function jsonRoundTrip(value) {
+    return JSON.parse(JSON.stringify(value));
+  }
+
+  function visibleFieldsOnly(fields) {
+    return new Proxy(fields, {
+      get(target, property, receiver) {
+        if (Object.hasOwn(target, property)) {
+          return Reflect.get(target, property, receiver);
+        }
+        throw new Error('inaccessible field was read: ' + String(property));
+      },
+      getOwnPropertyDescriptor(target, property) {
+        if (Object.hasOwn(target, property)) {
+          return Reflect.getOwnPropertyDescriptor(target, property);
+        }
+        throw new Error(
+          'inaccessible field descriptor was read: ' + String(property)
+        );
+      }
+    });
+  }
+
   function validEventMetadataFixtures() {
     return {
       campaign_created: {
@@ -1345,30 +1383,29 @@ describe('RED group 6: key-closed authorization serializers', () => {
       target: 'available',
       label: 'Proposal'
     });
-    assert.deepEqual(Object.keys(available), [
-      'link_id',
-      'relation_type',
-      'record_type',
-      'record_id',
-      'access_state',
-      'label',
-      'created_at',
-      'revoked_at'
-    ]);
-    assert.equal(available.access_state, 'available');
+    assert.deepEqual(jsonRoundTrip(available), {
+      link_id: 71,
+      relation_type: 'proposal',
+      record_type: 'proposal',
+      record_id: '4101',
+      access_state: 'available',
+      label: 'Proposal',
+      created_at: '2026-07-01 00:00:00',
+      revoked_at: null
+    });
     assert.equal(JSON.stringify(available).includes('must-not-leak'), false);
 
-    assert.deepEqual(serializeWorkspaceLink(link, {
+    assert.deepEqual(jsonRoundTrip(serializeWorkspaceLink(link, {
       target: 'restricted',
       restrictedCount: 2
-    }), {
+    })), {
       relation_type: 'proposal',
       access_state: 'restricted',
       restricted_count: 2
     });
-    assert.deepEqual(serializeWorkspaceLink(link, {
+    assert.deepEqual(jsonRoundTrip(serializeWorkspaceLink(link, {
       target: 'missing'
-    }), {
+    })), {
       link_id: 71,
       relation_type: 'proposal',
       access_state: 'missing',
@@ -1439,6 +1476,124 @@ describe('RED group 6: key-closed authorization serializers', () => {
     );
   });
 
+  test('workspace link variants validate every visible field and stay blind to redacted fields', () => {
+    const link = {
+      id: 71,
+      relation_type: 'proposal',
+      record_type: 'proposal',
+      record_id: '4101',
+      created_at: '2026-07-01 00:00:00',
+      revoked_at: null
+    };
+    const invalid = (candidate, authorization) => {
+      assert.throws(
+        () => serializeWorkspaceLink(candidate, authorization),
+        /invalid workspace link serialization/
+      );
+    };
+
+    const without = (key) => {
+      const candidate = { ...link };
+      delete candidate[key];
+      return candidate;
+    };
+    for (const candidate of [
+      without('id'),
+      { ...link, id: undefined },
+      { ...link, id: '71' },
+      { ...link, id: 0 },
+      without('relation_type'),
+      { ...link, relation_type: undefined },
+      { ...link, relation_type: 1 },
+      { ...link, relation_type: 'unknown' },
+      without('record_type'),
+      { ...link, record_type: undefined },
+      { ...link, record_type: 1 },
+      { ...link, record_type: 'collaboration' },
+      without('record_id'),
+      { ...link, record_id: undefined },
+      { ...link, record_id: 4101 },
+      { ...link, record_id: '04101' },
+      without('created_at'),
+      { ...link, created_at: undefined },
+      { ...link, created_at: null },
+      { ...link, created_at: '2026-02-30 00:00:00' },
+      without('revoked_at'),
+      { ...link, revoked_at: undefined },
+      { ...link, revoked_at: 1 },
+      { ...link, revoked_at: '2026-07-01T00:00:00Z' }
+    ]) {
+      invalid(candidate, { target: 'available', label: 'Proposal' });
+    }
+    for (const label of [
+      undefined,
+      1,
+      '',
+      '   ',
+      'x'.repeat(201),
+      '\ud800'
+    ]) {
+      invalid(link, { target: 'available', label });
+    }
+
+    const restrictedLink = visibleFieldsOnly({
+      relation_type: 'proposal'
+    });
+    assert.deepEqual(jsonRoundTrip(serializeWorkspaceLink(restrictedLink, {
+      target: 'restricted',
+      restrictedCount: 2
+    })), {
+      relation_type: 'proposal',
+      access_state: 'restricted',
+      restricted_count: 2
+    });
+    for (const candidate of [
+      {},
+      { relation_type: undefined },
+      { relation_type: 1 },
+      { relation_type: 'unknown' }
+    ]) {
+      invalid(candidate, { target: 'restricted', restrictedCount: 2 });
+    }
+    for (const restrictedCount of [undefined, '2', 0, Number.MAX_SAFE_INTEGER + 1]) {
+      invalid({ relation_type: 'proposal' }, {
+        target: 'restricted',
+        restrictedCount
+      });
+    }
+
+    const missingLink = visibleFieldsOnly({
+      id: 71,
+      relation_type: 'proposal',
+      created_at: '2026-07-01 00:00:00',
+      revoked_at: null
+    });
+    assert.deepEqual(jsonRoundTrip(serializeWorkspaceLink(missingLink, {
+      target: 'missing'
+    })), {
+      link_id: 71,
+      relation_type: 'proposal',
+      access_state: 'missing',
+      created_at: '2026-07-01 00:00:00',
+      revoked_at: null
+    });
+    for (const candidate of [
+      { relation_type: 'proposal', created_at: link.created_at, revoked_at: null },
+      { id: undefined, relation_type: 'proposal', created_at: link.created_at, revoked_at: null },
+      { id: '71', relation_type: 'proposal', created_at: link.created_at, revoked_at: null },
+      { id: 71, created_at: link.created_at, revoked_at: null },
+      { id: 71, relation_type: 'unknown', created_at: link.created_at, revoked_at: null },
+      { id: 71, relation_type: 'proposal', revoked_at: null },
+      { id: 71, relation_type: 'proposal', created_at: undefined, revoked_at: null },
+      { id: 71, relation_type: 'proposal', created_at: 'bad', revoked_at: null },
+      { id: 71, relation_type: 'proposal', created_at: link.created_at },
+      { id: 71, relation_type: 'proposal', created_at: link.created_at, revoked_at: undefined },
+      { id: 71, relation_type: 'proposal', created_at: link.created_at, revoked_at: 'bad' }
+    ]) {
+      invalid(candidate, { target: 'missing' });
+    }
+  });
+
   test('full event metadata accepts every exact documented variant', () => {
     const fixtures = validEventMetadataFixtures();
     for (const [eventType, metadata] of Object.entries(fixtures)) {
@@ -1450,6 +1605,25 @@ describe('RED group 6: key-closed authorization serializers', () => {
         ),
         metadata,
         eventType
+      );
+    }
+  });
+
+  test('event serializers reject inherited discriminator names deterministically', () => {
+    const fixture = validEventMetadataFixtures().link_attached;
+    for (const inheritedName of ['__proto__', 'constructor', 'toString']) {
+      assert.throws(
+        () => serializeEventMetadata(inheritedName, {}, undefined),
+        /unsupported campaign event type/
+      );
+      assert.throws(
+        () => serializeEventMetadata('link_attached', {
+          ...fixture,
+          record_type: inheritedName
+        }, {
+          target: 'available'
+        }),
+        /invalid campaign event metadata/
       );
     }
   });
@@ -1684,40 +1858,190 @@ describe('RED group 6: key-closed authorization serializers', () => {
     const full = serializeKnowledgeReference(reference, {
       target: 'available'
     });
-    assert.deepEqual(Object.keys(full), [
-      'citation_label',
-      'entry_id',
-      'chunk_id',
-      'chunk_index',
-      'title',
-      'entry_type',
-      'source',
-      'visibility',
-      'snippet',
-      'selected',
-      'rank',
-      'source_identity_sha256',
-      'entry_content_sha256',
-      'chunk_content_sha256'
-    ]);
-    assert.deepEqual(full.source, {
-      kind: 'upload',
-      label: 'Uploaded knowledge'
+    assert.deepEqual(jsonRoundTrip(full), {
+      citation_label: 'KB-1',
+      entry_id: 4201,
+      chunk_id: 4301,
+      chunk_index: 0,
+      title: 'Reference title',
+      entry_type: 'note',
+      source: {
+        kind: 'upload',
+        label: 'Uploaded knowledge'
+      },
+      visibility: 'team',
+      snippet: 'Bounded snippet',
+      selected: true,
+      rank: 1,
+      source_identity_sha256: sha256('reference-source'),
+      entry_content_sha256: sha256('reference-entry'),
+      chunk_content_sha256: sha256('reference-chunk')
     });
-    assert.equal(full.visibility, 'team');
     assert.equal(JSON.stringify(full).includes('secret'), false);
-    assert.deepEqual(serializeKnowledgeReference(reference, {
+    assert.deepEqual(jsonRoundTrip(serializeKnowledgeReference(reference, {
       target: 'restricted'
-    }), {
+    })), {
       citation_label: 'KB-1',
       access_state: 'restricted'
     });
-    assert.deepEqual(serializeKnowledgeReference(reference, {
+    assert.deepEqual(jsonRoundTrip(serializeKnowledgeReference(reference, {
       target: 'missing'
-    }), {
+    })), {
       citation_label: 'KB-1',
       access_state: 'missing'
     });
+  });
+
+  test('knowledge reference variants validate exact visible fields and stay blind after access loss', () => {
+    const reference = {
+      rank: 1,
+      entry_id: 4201,
+      chunk_id: 4301,
+      chunk_index: 0,
+      title: 'Reference title',
+      entry_type: 'note',
+      source_type: 'upload',
+      visibility: null,
+      is_public: 1,
+      snippet: 'Bounded snippet',
+      selection_origin: 'retrieved',
+      source_identity_sha256: sha256('reference-source'),
+      entry_content_sha256: sha256('reference-entry'),
+      chunk_content_sha256: sha256('reference-chunk')
+    };
+    assert.deepEqual(jsonRoundTrip(serializeKnowledgeReference(reference, {
+      target: 'available'
+    })), {
+      citation_label: 'KB-1',
+      entry_id: 4201,
+      chunk_id: 4301,
+      chunk_index: 0,
+      title: 'Reference title',
+      entry_type: 'note',
+      source: {
+        kind: 'upload',
+        label: 'Uploaded knowledge'
+      },
+      visibility: 'team',
+      snippet: 'Bounded snippet',
+      selected: false,
+      rank: 1,
+      source_identity_sha256: sha256('reference-source'),
+      entry_content_sha256: sha256('reference-entry'),
+      chunk_content_sha256: sha256('reference-chunk')
+    });
+    assert.equal(serializeKnowledgeReference({
+      ...reference,
+      visibility: 'unknown-legacy-visibility'
+    }, {
+      target: 'available'
+    }).visibility, 'private');
+    assert.equal(serializeKnowledgeReference({
+      ...reference,
+      visibility: 'x'.repeat(81)
+    }, {
+      target: 'available'
+    }).visibility, 'private');
+
+    const invalid = (candidate) => {
+      assert.throws(
+        () => serializeKnowledgeReference(candidate, {
+          target: 'available'
+        }),
+        /invalid knowledge reference serialization/
+      );
+    };
+    const without = (key) => {
+      const candidate = { ...reference };
+      delete candidate[key];
+      return candidate;
+    };
+    for (const candidate of [
+      without('rank'),
+      { ...reference, rank: undefined },
+      { ...reference, rank: '1' },
+      { ...reference, rank: 0 },
+      without('entry_id'),
+      { ...reference, entry_id: undefined },
+      { ...reference, entry_id: '4201' },
+      { ...reference, entry_id: 0 },
+      without('chunk_id'),
+      { ...reference, chunk_id: undefined },
+      { ...reference, chunk_id: '4301' },
+      { ...reference, chunk_id: 0 },
+      without('chunk_index'),
+      { ...reference, chunk_index: undefined },
+      { ...reference, chunk_index: '0' },
+      { ...reference, chunk_index: -1 },
+      without('title'),
+      { ...reference, title: undefined },
+      { ...reference, title: 1 },
+      { ...reference, title: 'x'.repeat(201) },
+      { ...reference, title: '\ud800' },
+      without('entry_type'),
+      { ...reference, entry_type: undefined },
+      { ...reference, entry_type: 1 },
+      { ...reference, entry_type: '' },
+      { ...reference, entry_type: 'x'.repeat(81) },
+      without('source_type'),
+      { ...reference, source_type: undefined },
+      { ...reference, source_type: 1 },
+      { ...reference, source_type: '' },
+      { ...reference, source_type: 'x'.repeat(81) },
+      without('visibility'),
+      { ...reference, visibility: undefined },
+      { ...reference, visibility: {} },
+      { ...reference, visibility: '\ud800' },
+      without('is_public'),
+      { ...reference, is_public: undefined },
+      { ...reference, is_public: '1' },
+      { ...reference, is_public: true },
+      without('snippet'),
+      { ...reference, snippet: undefined },
+      { ...reference, snippet: 1 },
+      { ...reference, snippet: 'x'.repeat(1201) },
+      { ...reference, snippet: '\ud800' },
+      without('selection_origin'),
+      { ...reference, selection_origin: undefined },
+      { ...reference, selection_origin: 1 },
+      { ...reference, selection_origin: 'manual' }
+    ]) {
+      invalid(candidate);
+    }
+    for (const digestKey of [
+      'source_identity_sha256',
+      'entry_content_sha256',
+      'chunk_content_sha256'
+    ]) {
+      invalid(without(digestKey));
+      invalid({ ...reference, [digestKey]: undefined });
+      invalid({ ...reference, [digestKey]: 1 });
+      invalid({ ...reference, [digestKey]: 'A'.repeat(64) });
+      invalid({ ...reference, [digestKey]: 'a'.repeat(63) });
+      invalid({ ...reference, [digestKey]: 'g'.repeat(64) });
+    }
+
+    const inaccessible = visibleFieldsOnly({ rank: 1 });
+    assert.deepEqual(jsonRoundTrip(serializeKnowledgeReference(inaccessible, {
+      target: 'restricted'
+    })), {
+      citation_label: 'KB-1',
+      access_state: 'restricted'
+    });
+    assert.deepEqual(jsonRoundTrip(serializeKnowledgeReference(inaccessible, {
+      target: 'missing'
+    })), {
+      citation_label: 'KB-1',
+      access_state: 'missing'
+    });
+    for (const state of ['restricted', 'missing']) {
+      for (const candidate of [{}, { rank: undefined }, { rank: '1' }, { rank: 0 }]) {
+        assert.throws(
+          () => serializeKnowledgeReference(candidate, { target: state }),
+          /invalid knowledge reference serialization/
+        );
+      }
+    }
   });
 });
 
@@ -1784,10 +2108,33 @@ describe('RED group 7: conversation, visibility, and source projections', () => 
       legacyVisibility: null,
       isPublic: 1
     }), 'team');
-    assert.equal(projectKnowledgeVisibility({
-      legacyVisibility: null,
-      isPublic: 0
-    }), 'private');
+    let coercionCalls = 0;
+    const coercivePublicFlag = {
+      valueOf() {
+        coercionCalls += 1;
+        return 1;
+      }
+    };
+    for (const isPublic of ['1', true, [1], coercivePublicFlag, 1n, 0, null, undefined]) {
+      assert.equal(projectKnowledgeVisibility({
+        legacyVisibility: null,
+        isPublic
+      }), 'private');
+    }
+    assert.equal(coercionCalls, 0);
+    for (const legacyVisibility of [
+      '',
+      'TEAM',
+      'legacy-secret-token',
+      false,
+      0,
+      { visibility: 'team' }
+    ]) {
+      assert.equal(projectKnowledgeVisibility({
+        legacyVisibility,
+        isPublic: 1
+      }), 'private');
+    }
     assert.deepEqual(projectKnowledgeSource('campaign_review'), {
       kind: 'review',
       label: 'Campaign review'
@@ -1796,6 +2143,12 @@ describe('RED group 7: conversation, visibility, and source projections', () => 
       kind: 'other',
       label: 'Other knowledge'
     });
+    for (const sourceType of ['__proto__', 'constructor', 'toString']) {
+      assert.deepEqual(projectKnowledgeSource(sourceType), {
+        kind: 'other',
+        label: 'Other knowledge'
+      });
+    }
     assert.equal(
       JSON.stringify(projectKnowledgeSource('C:\\secret\\provider-cache'))
         .includes('secret'),

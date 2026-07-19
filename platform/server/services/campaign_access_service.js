@@ -118,6 +118,75 @@ const EVENT_INTEGER_METADATA_KEYS = new Set([
 ]);
 const EVENT_STATUS_VALUES = new Set(['active', 'on_hold', 'cancelled']);
 const EVENT_BUNDLE_PATTERN = /^[0-9a-f]{64}$/;
+const WORKSPACE_RELATION_TYPES = new Set([
+  'demand',
+  'proposal',
+  'ppt',
+  'shortlist',
+  'order',
+  'execution',
+  'publication',
+  'settlement',
+  'ai_run',
+  'workflow',
+  'knowledge',
+  'review'
+]);
+const OWN_VALUE_MISSING = Symbol('own value missing');
+const WORKSPACE_LABEL_MAX = 200;
+const KNOWLEDGE_TITLE_MAX = 200;
+const KNOWLEDGE_TYPE_MAX = 80;
+const KNOWLEDGE_SNIPPET_MAX = 1200;
+const KNOWLEDGE_SOURCE_PROJECTIONS = Object.freeze({
+  upload: Object.freeze({
+    kind: 'upload',
+    label: 'Uploaded knowledge'
+  }),
+  knowledge_upload: Object.freeze({
+    kind: 'upload',
+    label: 'Uploaded knowledge'
+  }),
+  ai_chat: Object.freeze({
+    kind: 'ai_chat',
+    label: 'AI conversation'
+  }),
+  ai_conversation: Object.freeze({
+    kind: 'ai_chat',
+    label: 'AI conversation'
+  }),
+  demand: Object.freeze({
+    kind: 'demand',
+    label: 'Demand'
+  }),
+  proposal: Object.freeze({
+    kind: 'proposal',
+    label: 'Proposal'
+  }),
+  ppt: Object.freeze({
+    kind: 'ppt',
+    label: 'PPT proposal'
+  }),
+  collaboration: Object.freeze({
+    kind: 'collaboration',
+    label: 'Collaboration'
+  }),
+  workflow: Object.freeze({
+    kind: 'workflow',
+    label: 'Workflow'
+  }),
+  campaign_review: Object.freeze({
+    kind: 'review',
+    label: 'Campaign review'
+  }),
+  review: Object.freeze({
+    kind: 'review',
+    label: 'Campaign review'
+  }),
+  manual: Object.freeze({
+    kind: 'manual',
+    label: 'Manual knowledge'
+  })
+});
 
 function canonicalId(value) {
   if (Number.isSafeInteger(value) && value > 0) return value;
@@ -138,6 +207,105 @@ function canonicalId(value) {
 function canonicalRecordId(value) {
   const parsed = canonicalId(value);
   return parsed === null ? null : String(parsed);
+}
+
+function ownDataValue(object, key) {
+  if (object === null || typeof object !== 'object') return OWN_VALUE_MISSING;
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(object, key);
+    if (!descriptor || !Object.hasOwn(descriptor, 'value')) {
+      return OWN_VALUE_MISSING;
+    }
+    return descriptor.value;
+  } catch {
+    return OWN_VALUE_MISSING;
+  }
+}
+
+function closedMapValue(map, key) {
+  return typeof key === 'string' && Object.hasOwn(map, key)
+    ? map[key]
+    : null;
+}
+
+function isPositiveSafeInteger(value) {
+  return Number.isSafeInteger(value) && value > 0;
+}
+
+function isNonnegativeSafeInteger(value) {
+  return Number.isSafeInteger(value) && value >= 0;
+}
+
+function scalarLength(value) {
+  if (typeof value !== 'string') return null;
+  let length = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    const codeUnit = value.charCodeAt(index);
+    if (codeUnit >= 0xd800 && codeUnit <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) return null;
+      index += 1;
+    } else if (codeUnit >= 0xdc00 && codeUnit <= 0xdfff) {
+      return null;
+    }
+    length += 1;
+  }
+  return length;
+}
+
+function isBoundedScalarText(value, minimum, maximum) {
+  const length = scalarLength(value);
+  return length !== null && length >= minimum && length <= maximum;
+}
+
+function isSha256Digest(value) {
+  return typeof value === 'string' && EVENT_BUNDLE_PATTERN.test(value);
+}
+
+function isCanonicalTimestamp(value) {
+  if (typeof value !== 'string') return false;
+  const match = /^([0-9]{4})-([0-9]{2})-([0-9]{2}) ([0-9]{2}):([0-9]{2}):([0-9]{2})$/.exec(value);
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const hour = Number(match[4]);
+  const minute = Number(match[5]);
+  const second = Number(match[6]);
+  if (
+    year < 1 ||
+    month < 1 ||
+    month > 12 ||
+    hour > 23 ||
+    minute > 59 ||
+    second > 59
+  ) {
+    return false;
+  }
+  const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const monthLengths = [
+    31,
+    leapYear ? 29 : 28,
+    31,
+    30,
+    31,
+    30,
+    31,
+    31,
+    30,
+    31,
+    30,
+    31
+  ];
+  return day >= 1 && day <= monthLengths[month - 1];
+}
+
+function invalidWorkspaceLinkSerialization() {
+  throw new TypeError('invalid workspace link serialization');
+}
+
+function invalidKnowledgeReferenceSerialization() {
+  throw new TypeError('invalid knowledge reference serialization');
 }
 
 function invalidEventMetadata() {
@@ -239,9 +407,12 @@ function validateFullEventMetadata(eventType, metadata, keys) {
   ))) {
     return invalidEventMetadata();
   }
+  const recordRelations = closedMapValue(
+    RECORD_RELATIONS,
+    values.record_type
+  );
   if (
-    typeof values.record_type !== 'string' ||
-    !RECORD_RELATIONS[values.record_type] ||
+    !recordRelations ||
     typeof values.record_id !== 'string' ||
     canonicalRecordId(values.record_id) !== values.record_id
   ) {
@@ -251,7 +422,7 @@ function validateFullEventMetadata(eventType, metadata, keys) {
     values.relation_types,
     (relationType) => (
       typeof relationType === 'string' &&
-      RECORD_RELATIONS[values.record_type].includes(relationType)
+      recordRelations.includes(relationType)
     ),
     (left, right) => (left < right ? -1 : left > right ? 1 : 0)
   )) {
@@ -660,7 +831,7 @@ function getTargetAccess(db, options) {
   const userId = canonicalId(rawUserId);
   const campaignId = canonicalId(rawCampaignId);
   const recordId = canonicalId(rawRecordId);
-  const relations = RECORD_RELATIONS[recordType];
+  const relations = closedMapValue(RECORD_RELATIONS, recordType);
   if (
     userId === null ||
     campaignId === null ||
@@ -807,44 +978,82 @@ function buildCollectionAccessPredicate(scope, options) {
 }
 
 function serializeWorkspaceLink(link, authorization) {
-  const state = authorization && authorization.target;
+  const state = ownDataValue(authorization, 'target');
   if (state === 'restricted') {
-    const restrictedCount = canonicalId(authorization.restrictedCount);
-    if (restrictedCount === null) {
-      throw new TypeError('restrictedCount must be a positive safe integer');
+    const relationType = ownDataValue(link, 'relation_type');
+    const restrictedCount = ownDataValue(authorization, 'restrictedCount');
+    if (
+      !WORKSPACE_RELATION_TYPES.has(relationType) ||
+      !isPositiveSafeInteger(restrictedCount)
+    ) {
+      return invalidWorkspaceLinkSerialization();
     }
     return {
-      relation_type: link.relation_type,
+      relation_type: relationType,
       access_state: 'restricted',
       restricted_count: restrictedCount
     };
   }
   if (state === 'missing') {
+    const linkId = ownDataValue(link, 'id');
+    const relationType = ownDataValue(link, 'relation_type');
+    const createdAt = ownDataValue(link, 'created_at');
+    const revokedAt = ownDataValue(link, 'revoked_at');
+    if (
+      !isPositiveSafeInteger(linkId) ||
+      !WORKSPACE_RELATION_TYPES.has(relationType) ||
+      !isCanonicalTimestamp(createdAt) ||
+      !(revokedAt === null || isCanonicalTimestamp(revokedAt))
+    ) {
+      return invalidWorkspaceLinkSerialization();
+    }
     return {
-      link_id: link.id,
-      relation_type: link.relation_type,
+      link_id: linkId,
+      relation_type: relationType,
       access_state: 'missing',
-      created_at: link.created_at,
-      revoked_at: link.revoked_at
+      created_at: createdAt,
+      revoked_at: revokedAt
     };
   }
   if (state !== 'available') {
     throw new TypeError('explicit workspace target state is required');
   }
+  const linkId = ownDataValue(link, 'id');
+  const relationType = ownDataValue(link, 'relation_type');
+  const recordType = ownDataValue(link, 'record_type');
+  const recordId = ownDataValue(link, 'record_id');
+  const label = ownDataValue(authorization, 'label');
+  const createdAt = ownDataValue(link, 'created_at');
+  const revokedAt = ownDataValue(link, 'revoked_at');
+  const relations = closedMapValue(RECORD_RELATIONS, recordType);
+  if (
+    !isPositiveSafeInteger(linkId) ||
+    !WORKSPACE_RELATION_TYPES.has(relationType) ||
+    !relations ||
+    !relations.includes(relationType) ||
+    typeof recordId !== 'string' ||
+    canonicalRecordId(recordId) !== recordId ||
+    !isBoundedScalarText(label, 1, WORKSPACE_LABEL_MAX) ||
+    label.trim().length === 0 ||
+    !isCanonicalTimestamp(createdAt) ||
+    !(revokedAt === null || isCanonicalTimestamp(revokedAt))
+  ) {
+    return invalidWorkspaceLinkSerialization();
+  }
   return {
-    link_id: link.id,
-    relation_type: link.relation_type,
-    record_type: link.record_type,
-    record_id: String(link.record_id),
+    link_id: linkId,
+    relation_type: relationType,
+    record_type: recordType,
+    record_id: recordId,
     access_state: 'available',
-    label: authorization.label,
-    created_at: link.created_at,
-    revoked_at: link.revoked_at
+    label,
+    created_at: createdAt,
+    revoked_at: revokedAt
   };
 }
 
 function serializeEventMetadata(eventType, metadata, authorization) {
-  const keys = EVENT_METADATA_KEYS[eventType];
+  const keys = closedMapValue(EVENT_METADATA_KEYS, eventType);
   if (!keys) throw new TypeError('unsupported campaign event type');
   if (LINK_EVENTS.has(eventType)) {
     const allowedStates = new Set(['available', 'restricted', 'missing']);
@@ -896,40 +1105,29 @@ function projectKnowledgeVisibility({ legacyVisibility, isPublic }) {
   ) {
     return 'team';
   }
-  return legacyVisibility === null && Number(isPublic) === 1
+  return legacyVisibility === null && isPublic === 1
     ? 'team'
     : 'private';
 }
 
 function projectKnowledgeSource(sourceType) {
-  const sources = {
-    upload: { kind: 'upload', label: 'Uploaded knowledge' },
-    knowledge_upload: { kind: 'upload', label: 'Uploaded knowledge' },
-    ai_chat: { kind: 'ai_chat', label: 'AI conversation' },
-    ai_conversation: { kind: 'ai_chat', label: 'AI conversation' },
-    demand: { kind: 'demand', label: 'Demand' },
-    proposal: { kind: 'proposal', label: 'Proposal' },
-    ppt: { kind: 'ppt', label: 'PPT proposal' },
-    collaboration: { kind: 'collaboration', label: 'Collaboration' },
-    workflow: { kind: 'workflow', label: 'Workflow' },
-    campaign_review: { kind: 'review', label: 'Campaign review' },
-    review: { kind: 'review', label: 'Campaign review' },
-    manual: { kind: 'manual', label: 'Manual knowledge' }
-  };
-  return sources[sourceType]
-    ? { ...sources[sourceType] }
+  const projection = closedMapValue(KNOWLEDGE_SOURCE_PROJECTIONS, sourceType);
+  return projection
+    ? { ...projection }
     : { kind: 'other', label: 'Other knowledge' };
 }
 
-function citationLabel(reference) {
-  const rank = canonicalId(reference && reference.rank);
-  if (rank === null) throw new TypeError('reference rank is invalid');
+function citationLabel(rank) {
+  if (!isPositiveSafeInteger(rank)) {
+    return invalidKnowledgeReferenceSerialization();
+  }
   return 'KB-' + rank;
 }
 
 function serializeKnowledgeReference(reference, authorization) {
-  const label = citationLabel(reference);
-  const state = authorization && authorization.target;
+  const state = ownDataValue(authorization, 'target');
+  const rank = ownDataValue(reference, 'rank');
+  const label = citationLabel(rank);
   if (state === 'restricted' || state === 'missing') {
     return {
       citation_label: label,
@@ -939,24 +1137,62 @@ function serializeKnowledgeReference(reference, authorization) {
   if (state !== 'available') {
     throw new TypeError('explicit reference target state is required');
   }
+  const values = {
+    entryId: ownDataValue(reference, 'entry_id'),
+    chunkId: ownDataValue(reference, 'chunk_id'),
+    chunkIndex: ownDataValue(reference, 'chunk_index'),
+    title: ownDataValue(reference, 'title'),
+    entryType: ownDataValue(reference, 'entry_type'),
+    sourceType: ownDataValue(reference, 'source_type'),
+    visibility: ownDataValue(reference, 'visibility'),
+    isPublic: ownDataValue(reference, 'is_public'),
+    snippet: ownDataValue(reference, 'snippet'),
+    selectionOrigin: ownDataValue(reference, 'selection_origin'),
+    sourceIdentitySha256: ownDataValue(reference, 'source_identity_sha256'),
+    entryContentSha256: ownDataValue(reference, 'entry_content_sha256'),
+    chunkContentSha256: ownDataValue(reference, 'chunk_content_sha256')
+  };
+  if (
+    !isPositiveSafeInteger(values.entryId) ||
+    !isPositiveSafeInteger(values.chunkId) ||
+    !isNonnegativeSafeInteger(values.chunkIndex) ||
+    !isBoundedScalarText(values.title, 0, KNOWLEDGE_TITLE_MAX) ||
+    !isBoundedScalarText(values.entryType, 1, KNOWLEDGE_TYPE_MAX) ||
+    !isBoundedScalarText(values.sourceType, 1, KNOWLEDGE_TYPE_MAX) ||
+    !(
+      values.visibility === null ||
+      scalarLength(values.visibility) !== null
+    ) ||
+    !(values.isPublic === 0 || values.isPublic === 1) ||
+    !isBoundedScalarText(values.snippet, 0, KNOWLEDGE_SNIPPET_MAX) ||
+    !(
+      values.selectionOrigin === 'selected' ||
+      values.selectionOrigin === 'retrieved'
+    ) ||
+    !isSha256Digest(values.sourceIdentitySha256) ||
+    !isSha256Digest(values.entryContentSha256) ||
+    !isSha256Digest(values.chunkContentSha256)
+  ) {
+    return invalidKnowledgeReferenceSerialization();
+  }
   return {
     citation_label: label,
-    entry_id: reference.entry_id,
-    chunk_id: reference.chunk_id,
-    chunk_index: reference.chunk_index,
-    title: reference.title,
-    entry_type: reference.entry_type,
-    source: projectKnowledgeSource(reference.source_type),
+    entry_id: values.entryId,
+    chunk_id: values.chunkId,
+    chunk_index: values.chunkIndex,
+    title: values.title,
+    entry_type: values.entryType,
+    source: projectKnowledgeSource(values.sourceType),
     visibility: projectKnowledgeVisibility({
-      legacyVisibility: reference.visibility,
-      isPublic: reference.is_public
+      legacyVisibility: values.visibility,
+      isPublic: values.isPublic
     }),
-    snippet: reference.snippet,
-    selected: reference.selection_origin === 'selected',
-    rank: reference.rank,
-    source_identity_sha256: reference.source_identity_sha256,
-    entry_content_sha256: reference.entry_content_sha256,
-    chunk_content_sha256: reference.chunk_content_sha256
+    snippet: values.snippet,
+    selected: values.selectionOrigin === 'selected',
+    rank,
+    source_identity_sha256: values.sourceIdentitySha256,
+    entry_content_sha256: values.entryContentSha256,
+    chunk_content_sha256: values.chunkContentSha256
   };
 }
 
