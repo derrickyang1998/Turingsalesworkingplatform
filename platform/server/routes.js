@@ -100,7 +100,7 @@ app.post('/api/collaborations', authMiddleware, (req, res) => {
 
 app.get('/api/collaborations', authMiddleware, (req, res) => {
   const { status, demand_id } = req.query;
-  let sql = 'SELECT c.*, i.kol_handle, i.platform, i.followers, i.category, i.region, i.project_name, i.product_name, i.content_deliverable, i.quoted_price FROM collaborations c JOIN influencers i ON c.influencer_id = i.id';
+  let sql = 'SELECT c.id, c.demand_id, c.influencer_id, c.user_id, c.status, c.proposal_notes, c.cost_quoted, c.cost_actual, c.content_url, c.roi_data, c.timeline_start, c.timeline_end, c.notes, c.created_at, c.updated_at, i.kol_handle, i.platform, i.followers, i.category, i.region, i.project_name, i.product_name, i.content_deliverable, i.quoted_price FROM collaborations c JOIN influencers i ON c.influencer_id = i.id';
   const params = [];
   const conditions = [];
   if (status) { conditions.push('c.status = ?'); params.push(status); }

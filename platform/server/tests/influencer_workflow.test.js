@@ -808,6 +808,121 @@ test('collaboration order creation stores the selected resource definition', asy
   db.close();
 });
 
+test('GET /api/collaborations freezes the exact legacy public projection and envelope', async () => {
+  const db = freshDb();
+  const routes = mountRoutes(db);
+  const influencerId = insertInfluencer(db, {
+    platform: 'YouTube',
+    kol_handle: '@legacy_projection',
+    profile_link: 'https://example.com/legacy-projection',
+    followers: 123456,
+    category: 'Technology',
+    region: 'US',
+    data_source: 'test',
+    project_name: 'Legacy Joined Project',
+    product_name: 'Legacy Joined Product',
+    content_deliverable: '1 dedicated video',
+    quoted_price: 3000
+  });
+  const proposalNotes = JSON.stringify({
+    project_name: 'Legacy Proposal Project',
+    quoted_price: 2850
+  });
+  const roiData = JSON.stringify({ views: 12345 });
+  const collaborationId = db.prepare(`
+    INSERT INTO collaborations (
+      demand_id, influencer_id, user_id, status, proposal_notes, cost_quoted, cost_actual,
+      content_url, roi_data, timeline_start, timeline_end, notes, created_at, updated_at,
+      row_version, cost_actual_confirmed
+    )
+    VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    influencerId,
+    2,
+    'completed',
+    proposalNotes,
+    2850,
+    2500,
+    'https://example.com/published-content',
+    roiData,
+    '2026-08-01',
+    '2026-08-15',
+    'Legacy collaboration notes',
+    '2026-07-19 10:00:00',
+    '2026-07-20 10:00:00',
+    7,
+    1
+  ).lastInsertRowid;
+
+  const stored = db.prepare(
+    'SELECT row_version, cost_actual_confirmed FROM collaborations WHERE id = ?'
+  ).get(collaborationId);
+  assert.deepEqual(stored, { row_version: 7, cost_actual_confirmed: 1 });
+
+  const result = await invoke(routes, 'GET /api/collaborations');
+
+  assert.equal(result.statusCode, 200);
+  assert.deepEqual(Object.keys(result.payload), ['collaborations']);
+  assert.equal(result.payload.collaborations.length, 1);
+  const collaboration = result.payload.collaborations[0];
+  assert.deepEqual(Object.keys(collaboration), [
+    'id',
+    'demand_id',
+    'influencer_id',
+    'user_id',
+    'status',
+    'proposal_notes',
+    'cost_quoted',
+    'cost_actual',
+    'content_url',
+    'roi_data',
+    'timeline_start',
+    'timeline_end',
+    'notes',
+    'created_at',
+    'updated_at',
+    'kol_handle',
+    'platform',
+    'followers',
+    'category',
+    'region',
+    'project_name',
+    'product_name',
+    'content_deliverable',
+    'quoted_price'
+  ]);
+  assert.deepEqual(collaboration, {
+    id: collaborationId,
+    demand_id: null,
+    influencer_id: influencerId,
+    user_id: 2,
+    status: 'completed',
+    proposal_notes: proposalNotes,
+    cost_quoted: 2850,
+    cost_actual: 2500,
+    content_url: 'https://example.com/published-content',
+    roi_data: roiData,
+    timeline_start: '2026-08-01',
+    timeline_end: '2026-08-15',
+    notes: 'Legacy collaboration notes',
+    created_at: '2026-07-19 10:00:00',
+    updated_at: '2026-07-20 10:00:00',
+    kol_handle: '@legacy_projection',
+    platform: 'YouTube',
+    followers: 123456,
+    category: 'Technology',
+    region: 'US',
+    project_name: 'Legacy Joined Project',
+    product_name: 'Legacy Joined Product',
+    content_deliverable: '1 dedicated video',
+    quoted_price: 3000
+  });
+  assert.equal(Object.hasOwn(collaboration, 'row_version'), false);
+  assert.equal(Object.hasOwn(collaboration, 'cost_actual_confirmed'), false);
+
+  db.close();
+});
+
 test('collaboration list exposes resource fields and status updates persist', async () => {
   const db = freshDb();
   const routes = mountRoutes(db);
