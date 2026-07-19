@@ -337,6 +337,163 @@ describe('RED group 1: campaign access and operational status', () => {
     assert.equal(cancelledOwner.permissions.correct_evidence, true);
     assert.equal(cancelledOwner.permissions.write, false);
   });
+
+  test('stored activity flags require primitive SQLite integer booleans', (t) => {
+    const db = openCampaignDatabase(t);
+    const identity = seedCampaigns(db);
+    const campaigns = buildCollectionAccessPredicate('campaigns', {
+      userId: identity.ownerId
+    });
+    const bound = buildCollectionAccessPredicate('knowledge', {
+      userId: identity.ownerId
+    });
+    const malformedOutcomes = [];
+
+    for (const malformed of ["X'31'", "X'3120'"]) {
+      db.prepare(`UPDATE users SET is_active=${malformed} WHERE id=?`)
+        .run(identity.ownerId);
+      const scope = resolveOrganizationScope(db, {
+        userId: identity.ownerId,
+        repairMissing: false
+      });
+      const direct = getCampaignAccess(db, {
+        userId: identity.ownerId,
+        campaignId: 3001
+      });
+      malformedOutcomes.push({
+        storedType: db.prepare(
+          'SELECT typeof(is_active) AS type FROM users WHERE id=?'
+        ).get(identity.ownerId).type,
+        projectionActive: projectIdentityState(
+          db,
+          identity.ownerId
+        ).user.is_active,
+        scopeCode: scope.code || null,
+        directCode: direct.code || null,
+        campaignCount: db.prepare(`
+          SELECT COUNT(*) AS count
+          FROM campaigns campaign
+          WHERE ${campaigns.sql}
+        `).get(...campaigns.params).count,
+        boundCount: db.prepare(`
+          WITH campaign_scope(org_id,campaign_id) AS (VALUES (?,?))
+          SELECT COUNT(*) AS count
+          FROM campaign_scope
+          WHERE ${bound.sql}
+        `).get(identity.orgId, 3001, ...bound.params).count
+      });
+      db.prepare('UPDATE users SET is_active=1 WHERE id=?')
+        .run(identity.ownerId);
+    }
+
+    assert.deepEqual(malformedOutcomes, [
+      {
+        storedType: 'blob',
+        projectionActive: 0,
+        scopeCode: 'USER_INACTIVE',
+        directCode: 'CAMPAIGN_NOT_FOUND',
+        campaignCount: 0,
+        boundCount: 0
+      },
+      {
+        storedType: 'blob',
+        projectionActive: 0,
+        scopeCode: 'USER_INACTIVE',
+        directCode: 'CAMPAIGN_NOT_FOUND',
+        campaignCount: 0,
+        boundCount: 0
+      }
+    ]);
+    assert.equal(projectIdentityState(
+      db,
+      identity.ownerId
+    ).user.is_active, 1);
+    assert.equal(resolveOrganizationScope(db, {
+      userId: identity.ownerId,
+      repairMissing: false
+    }).ok, true);
+    assert.equal(getCampaignAccess(db, {
+      userId: identity.ownerId,
+      campaignId: 3001
+    }).ok, true);
+    assert.ok(db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM campaigns campaign
+      WHERE ${campaigns.sql}
+    `).get(...campaigns.params).count > 0);
+
+    db.prepare(`
+      INSERT INTO demands (
+        id,user_id,brand_name,company_name,product_name,status,data_json
+      ) VALUES (
+        4310,2,'Admin target','Admin target Co','Product','confirmed','{}'
+      )
+    `).run();
+    const actorRaceDb = {
+      prepare(sql) {
+        if (/SELECT\s+id,role,is_active\s+FROM users/u.test(sql)) {
+          db.prepare("UPDATE users SET is_active=X'31' WHERE id=?")
+            .run(identity.adminId);
+        }
+        return db.prepare(sql);
+      }
+    };
+    assert.equal(getTargetAccess(actorRaceDb, {
+      userId: identity.adminId,
+      campaignId: 3001,
+      recordType: 'demand',
+      recordId: 4310,
+      relationType: 'demand',
+      intent: 'read'
+    }).code, 'RECORD_NOT_FOUND');
+    assert.equal(
+      db.prepare(
+        'SELECT typeof(is_active) AS type FROM users WHERE id=?'
+      ).get(identity.adminId).type,
+      'blob'
+    );
+    db.prepare('UPDATE users SET is_active=1 WHERE id=?')
+      .run(identity.adminId);
+
+    const influencer = db.prepare(`
+      SELECT id
+      FROM influencers
+      WHERE typeof(is_active)='integer' AND is_active=1
+      ORDER BY id
+      LIMIT 1
+    `).get();
+    assert.ok(influencer);
+    db.prepare("UPDATE influencers SET is_active=X'31' WHERE id=?")
+      .run(influencer.id);
+    assert.equal(
+      db.prepare(`
+        SELECT typeof(is_active) AS type
+        FROM influencers
+        WHERE id=?
+      `).get(influencer.id).type,
+      'blob'
+    );
+    for (const intent of ['read', 'manage', 'attach']) {
+      assert.equal(getTargetAccess(db, {
+        userId: identity.ownerId,
+        campaignId: 3001,
+        recordType: 'influencer',
+        recordId: influencer.id,
+        relationType: 'shortlist',
+        intent
+      }).code, 'RECORD_NOT_FOUND');
+    }
+    db.prepare('UPDATE influencers SET is_active=1 WHERE id=?')
+      .run(influencer.id);
+    assert.equal(getTargetAccess(db, {
+      userId: identity.ownerId,
+      campaignId: 3001,
+      recordType: 'influencer',
+      recordId: influencer.id,
+      relationType: 'shortlist',
+      intent: 'read'
+    }).ok, true);
+  });
 });
 
 describe('RED group 2: organization repair, assignment, and CRM manage', () => {
@@ -1234,6 +1391,104 @@ describe('RED group 4: target access and immutable custody', () => {
     }).code, 'CAMPAIGN_ON_HOLD');
   });
 
+  test('classification conflicts are disclosed only after target manage authority', (t) => {
+    const db = openCampaignDatabase(t);
+    const identity = seedCampaigns(db);
+    db.prepare(`
+      INSERT INTO knowledge_entries (
+        id,entry_type,source_type,source_id,key_terms,content,created_by,is_public,
+        title,summary,tags_json,visibility,metadata_json,
+        source_identity_sha256,content_sha256
+      ) VALUES (
+        4210,'note','manual','4210','classified','Classified team content',
+        3,0,'Classified team knowledge','Access precedence','[]','team','{}',?,?
+      ),(
+        4211,'note','manual','4211','classified','Hidden-custody owner content',
+        2,0,'Hidden-custody owner knowledge','Access precedence','[]','private',
+        '{}',?,?
+      )
+    `).run(
+      sha256('knowledge-source-4210'),
+      sha256('knowledge-content-4210'),
+      sha256('knowledge-source-4211'),
+      sha256('knowledge-content-4211')
+    );
+    insertLink(db, {
+      label: 'classified-team-knowledge',
+      campaignId: 3001,
+      recordType: 'knowledge_entry',
+      recordId: 4210,
+      relationType: 'knowledge',
+      createdBy: identity.teammateId
+    });
+    insertLink(db, {
+      label: 'inaccessible-custody-owner-knowledge',
+      campaignId: 3004,
+      recordType: 'knowledge_entry',
+      recordId: 4211,
+      relationType: 'knowledge',
+      createdBy: identity.outsiderId
+    });
+
+    assert.equal(getTargetAccess(db, {
+      userId: identity.ownerId,
+      campaignId: 3001,
+      recordType: 'knowledge_entry',
+      recordId: 4210,
+      relationType: 'knowledge',
+      intent: 'read'
+    }).ok, true);
+    for (const intent of ['attach', 'manage']) {
+      assert.deepEqual(getTargetAccess(db, {
+        userId: identity.ownerId,
+        campaignId: 3001,
+        recordType: 'knowledge_entry',
+        recordId: 4210,
+        relationType: 'knowledge',
+        intent
+      }), {
+        ok: false,
+        kind: 'forbidden',
+        status: 403,
+        code: 'RECORD_FORBIDDEN'
+      });
+    }
+    assert.equal(getTargetAccess(db, {
+      userId: identity.adminId,
+      campaignId: 3001,
+      recordType: 'knowledge_entry',
+      recordId: 4210,
+      relationType: 'knowledge',
+      intent: 'attach'
+    }).code, 'RECORD_REQUIRES_LINK_CORRECTION');
+    assert.equal(getTargetAccess(db, {
+      userId: identity.adminId,
+      campaignId: 3004,
+      recordType: 'knowledge_entry',
+      recordId: 4210,
+      relationType: 'knowledge',
+      intent: 'attach'
+    }).code, 'RECORD_REQUIRES_LINK_CORRECTION');
+    for (const intent of ['read', 'manage']) {
+      assert.equal(getTargetAccess(db, {
+        userId: identity.adminId,
+        campaignId: 3004,
+        recordType: 'knowledge_entry',
+        recordId: 4210,
+        relationType: 'knowledge',
+        intent
+      }).code, 'KNOWLEDGE_ENTRY_NOT_FOUND');
+    }
+    assert.equal(getTargetAccess(db, {
+      userId: identity.ownerId,
+      campaignId: 3001,
+      recordType: 'knowledge_entry',
+      recordId: 4211,
+      relationType: 'knowledge',
+      intent: 'attach'
+    }).code, 'KNOWLEDGE_ENTRY_NOT_FOUND');
+  });
+
   test('a non-platform org admin manages private targets only for active same-org owners', (t) => {
     const db = openCampaignDatabase(t);
     const identity = seedCampaigns(db);
@@ -1545,22 +1800,37 @@ describe('RED group 6: key-closed authorization serializers', () => {
   }
 
   function visibleFieldsOnly(fields) {
-    return new Proxy(fields, {
-      get(target, property, receiver) {
-        if (Object.hasOwn(target, property)) {
-          return Reflect.get(target, property, receiver);
+    const value = { ...fields };
+    const inaccessibleFields = [
+      'id',
+      'record_type',
+      'record_id',
+      'created_at',
+      'revoked_at',
+      'entry_id',
+      'chunk_id',
+      'chunk_index',
+      'title',
+      'entry_type',
+      'source_type',
+      'visibility',
+      'is_public',
+      'snippet',
+      'selection_origin',
+      'source_identity_sha256',
+      'entry_content_sha256',
+      'chunk_content_sha256'
+    ];
+    for (const field of inaccessibleFields) {
+      if (Object.hasOwn(value, field)) continue;
+      Object.defineProperty(value, field, {
+        enumerable: true,
+        get() {
+          throw new Error('inaccessible field was read: ' + field);
         }
-        throw new Error('inaccessible field was read: ' + String(property));
-      },
-      getOwnPropertyDescriptor(target, property) {
-        if (Object.hasOwn(target, property)) {
-          return Reflect.getOwnPropertyDescriptor(target, property);
-        }
-        throw new Error(
-          'inaccessible field descriptor was read: ' + String(property)
-        );
-      }
-    });
+      });
+    }
+    return value;
   }
 
   function validEventMetadataFixtures() {
@@ -1993,6 +2263,221 @@ describe('RED group 6: key-closed authorization serializers', () => {
     });
   });
 
+  test('serializer and custody proxies are rejected without executing traps', (t) => {
+    const captureError = (operation) => {
+      try {
+        operation();
+        return null;
+      } catch (error) {
+        return error.message;
+      }
+    };
+    const fabricatedAuthorization = (fields) => {
+      let traps = 0;
+      const value = new Proxy({}, {
+        get() {
+          traps += 1;
+          throw new Error('authorization value trap executed');
+        },
+        getOwnPropertyDescriptor(target, property) {
+          traps += 1;
+          if (!Object.hasOwn(fields, property)) return undefined;
+          return {
+            configurable: true,
+            enumerable: true,
+            writable: true,
+            value: fields[property]
+          };
+        },
+        getPrototypeOf() {
+          traps += 1;
+          return Object.prototype;
+        },
+        ownKeys() {
+          traps += 1;
+          return Reflect.ownKeys(fields);
+        }
+      });
+      return { value, traps: () => traps };
+    };
+    const reflectingProxy = (target) => {
+      let traps = 0;
+      const value = new Proxy(target, {
+        get(proxyTarget, property, receiver) {
+          traps += 1;
+          return Reflect.get(proxyTarget, property, receiver);
+        },
+        getOwnPropertyDescriptor(proxyTarget, property) {
+          traps += 1;
+          return Reflect.getOwnPropertyDescriptor(proxyTarget, property);
+        },
+        getPrototypeOf(proxyTarget) {
+          traps += 1;
+          return Reflect.getPrototypeOf(proxyTarget);
+        },
+        ownKeys(proxyTarget) {
+          traps += 1;
+          return Reflect.ownKeys(proxyTarget);
+        }
+      });
+      return { value, traps: () => traps };
+    };
+    const fixture = validEventMetadataFixtures().link_attached;
+    const link = {
+      id: 71,
+      relation_type: 'proposal',
+      record_type: 'proposal',
+      record_id: '4101',
+      created_at: '2026-07-01 00:00:00',
+      revoked_at: null
+    };
+    const reference = {
+      rank: 1,
+      entry_id: 4201,
+      chunk_id: 4301,
+      chunk_index: 0,
+      title: 'Reference title',
+      entry_type: 'note',
+      source_type: 'upload',
+      visibility: 'team',
+      is_public: 0,
+      snippet: 'Bounded snippet',
+      selection_origin: 'selected',
+      source_identity_sha256: sha256('proxy-reference-source'),
+      entry_content_sha256: sha256('proxy-reference-entry'),
+      chunk_content_sha256: sha256('proxy-reference-chunk')
+    };
+
+    const eventAuthorization = fabricatedAuthorization({
+      target: 'available'
+    });
+    const workspaceAuthorization = fabricatedAuthorization({
+      target: 'available',
+      label: 'Proposal'
+    });
+    const referenceAuthorization = fabricatedAuthorization({
+      target: 'available'
+    });
+    const authorizationOutcomes = [
+      {
+        error: captureError(() => serializeEventMetadata(
+          'link_attached',
+          fixture,
+          eventAuthorization.value
+        )),
+        traps: eventAuthorization.traps()
+      },
+      {
+        error: captureError(() => serializeWorkspaceLink(
+          link,
+          workspaceAuthorization.value
+        )),
+        traps: workspaceAuthorization.traps()
+      },
+      {
+        error: captureError(() => serializeKnowledgeReference(
+          reference,
+          referenceAuthorization.value
+        )),
+        traps: referenceAuthorization.traps()
+      }
+    ];
+    assert.deepEqual(authorizationOutcomes, [
+      {
+        error: 'explicit event authorization states are required',
+        traps: 0
+      },
+      {
+        error: 'explicit workspace target state is required',
+        traps: 0
+      },
+      {
+        error: 'explicit reference target state is required',
+        traps: 0
+      }
+    ]);
+
+    const availableMetadata = reflectingProxy(fixture);
+    const restrictedMetadata = reflectingProxy(fixture);
+    const availableLink = reflectingProxy(link);
+    const restrictedLink = reflectingProxy(link);
+    const availableReference = reflectingProxy(reference);
+    const restrictedReference = reflectingProxy(reference);
+    const proxyOutcomes = [
+      {
+        error: captureError(() => serializeEventMetadata(
+          'link_attached',
+          availableMetadata.value,
+          { target: 'available' }
+        )),
+        traps: availableMetadata.traps()
+      },
+      {
+        error: captureError(() => serializeEventMetadata(
+          'link_attached',
+          restrictedMetadata.value,
+          { target: 'restricted' }
+        )),
+        traps: restrictedMetadata.traps()
+      },
+      {
+        error: captureError(() => serializeWorkspaceLink(
+          availableLink.value,
+          { target: 'available', label: 'Proposal' }
+        )),
+        traps: availableLink.traps()
+      },
+      {
+        error: captureError(() => serializeWorkspaceLink(
+          restrictedLink.value,
+          { target: 'restricted', restrictedCount: 1 }
+        )),
+        traps: restrictedLink.traps()
+      },
+      {
+        error: captureError(() => serializeKnowledgeReference(
+          availableReference.value,
+          { target: 'available' }
+        )),
+        traps: availableReference.traps()
+      },
+      {
+        error: captureError(() => serializeKnowledgeReference(
+          restrictedReference.value,
+          { target: 'restricted' }
+        )),
+        traps: restrictedReference.traps()
+      }
+    ];
+    assert.deepEqual(proxyOutcomes, [
+      { error: 'invalid campaign event metadata', traps: 0 },
+      { error: 'invalid campaign event metadata', traps: 0 },
+      { error: 'invalid workspace link serialization', traps: 0 },
+      { error: 'invalid workspace link serialization', traps: 0 },
+      { error: 'invalid knowledge reference serialization', traps: 0 },
+      { error: 'invalid knowledge reference serialization', traps: 0 }
+    ]);
+
+    const db = openCampaignDatabase(t);
+    seedCampaigns(db);
+    let recordTypeTraps = 0;
+    const recordType = new Proxy({
+      [Symbol.toPrimitive]() {
+        return 'demand';
+      }
+    }, {
+      get(target, property, receiver) {
+        recordTypeTraps += 1;
+        return Reflect.get(target, property, receiver);
+      }
+    });
+    assert.equal(captureError(() => resolveRecordCustody(db, {
+      recordType,
+      recordId: 4001
+    })), 'unsupported campaign record type');
+    assert.equal(recordTypeTraps, 0);
+  });
+
   test('event array elements are snapshotted from own data properties before validation', () => {
     const fixture = validEventMetadataFixtures().link_attached;
     const captureError = (operation) => {
@@ -2320,17 +2805,7 @@ describe('RED group 6: key-closed authorization serializers', () => {
   });
 
   test('restricted and missing event variants never inspect inaccessible metadata', () => {
-    const inaccessible = new Proxy({}, {
-      get() {
-        throw new Error('inaccessible metadata was read');
-      },
-      getPrototypeOf() {
-        throw new Error('inaccessible metadata prototype was read');
-      },
-      ownKeys() {
-        throw new Error('inaccessible metadata keys were read');
-      }
-    });
+    const inaccessible = visibleFieldsOnly({});
     for (const eventType of ['link_attached', 'link_revoked']) {
       assert.deepEqual(serializeEventMetadata(eventType, inaccessible, {
         target: 'restricted'

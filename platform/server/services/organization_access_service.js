@@ -150,7 +150,7 @@ function projectIdentityState(db, userIdValue) {
     user: {
       platform_role: platformRole(user),
       department_code: department.code,
-      is_active: Number(user.is_active) === 1 ? 1 : 0
+      is_active: user.is_active === 1 ? 1 : 0
     },
     organization_membership: membership
       ? {
@@ -175,7 +175,7 @@ function canonicalTimestamp(db) {
 function synchronizeMembershipRows(db, user, previousUser) {
   const organization = readDefaultOrganization(db);
   const now = canonicalTimestamp(db);
-  const active = Number(user.is_active) === 1;
+  const active = user.is_active === 1;
   const orgRole = organizationRole(user);
   const memberRole = teamRole(user);
 
@@ -440,7 +440,7 @@ function resolveOrganizationScope(db, options) {
   } = options || {};
   const userId = canonicalId(rawUserId, 'userId');
   const user = readUser(db, userId);
-  if (!user || Number(user.is_active) !== 1) {
+  if (!user || user.is_active !== 1) {
     return {
       ok: false,
       kind: 'inactive_user',
@@ -540,6 +540,7 @@ function getAssignmentDecision(db, options) {
       AND membership.user_id=?
       AND membership.status='active'
       AND organization_membership.status='active'
+      AND typeof(owner.is_active)='integer'
       AND owner.is_active=1
   `).get(orgId, teamId, ownerUserId);
   if (!pair) return assignmentFailure();
@@ -623,7 +624,9 @@ function getCampaignCreationDecision(db, options) {
   const actor = db.prepare(`
     SELECT id,role
     FROM users
-    WHERE id=? AND is_active=1
+    WHERE id=?
+      AND typeof(is_active)='integer'
+      AND is_active=1
   `).get(options.actorUserId);
   if (!actor || !crmAccess.canManageOpportunity(actor, opportunity)) {
     return {

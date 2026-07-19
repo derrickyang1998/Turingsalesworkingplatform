@@ -210,8 +210,22 @@ function canonicalRecordId(value) {
   return parsed === null ? null : String(parsed);
 }
 
+function isProxyValue(value) {
+  return (
+    value !== null &&
+    (typeof value === 'object' || typeof value === 'function') &&
+    utilTypes.isProxy(value)
+  );
+}
+
 function ownDataValue(object, key) {
-  if (object === null || typeof object !== 'object') return OWN_VALUE_MISSING;
+  if (
+    object === null ||
+    typeof object !== 'object' ||
+    isProxyValue(object)
+  ) {
+    return OWN_VALUE_MISSING;
+  }
   try {
     const descriptor = Object.getOwnPropertyDescriptor(object, key);
     if (!descriptor || !Object.hasOwn(descriptor, 'value')) {
@@ -318,8 +332,8 @@ function snapshotSortedUniqueArray(value, validateItem, compareItems) {
   let ownKeys;
   try {
     if (
+      isProxyValue(value) ||
       !Array.isArray(value) ||
-      utilTypes.isProxy(value) ||
       Object.getPrototypeOf(value) !== Array.prototype
     ) {
       return null;
@@ -378,6 +392,7 @@ function validateFullEventMetadata(eventType, metadata, keys) {
     if (
       metadata === null ||
       typeof metadata !== 'object' ||
+      isProxyValue(metadata) ||
       Object.getPrototypeOf(metadata) !== Object.prototype
     ) {
       return invalidEventMetadata();
@@ -598,9 +613,15 @@ function emptyCustody() {
 }
 
 function resolveRecordCustody(db, options) {
+  if (isProxyValue(options)) {
+    throw new TypeError('unsupported campaign record type');
+  }
   const recordType = options && options.recordType;
   const recordId = canonicalRecordId(options && options.recordId);
-  if (!Object.prototype.hasOwnProperty.call(RECORD_RELATIONS, recordType)) {
+  if (
+    typeof recordType !== 'string' ||
+    !Object.hasOwn(RECORD_RELATIONS, recordType)
+  ) {
     throw new TypeError('unsupported campaign record type');
   }
   if (recordId === null) {
@@ -779,6 +800,7 @@ function targetOwnerIsInOrganization(db, ownerUserId, orgId) {
     FROM organization_memberships membership
     JOIN users owner
       ON owner.id=membership.user_id
+      AND typeof(owner.is_active)='integer'
       AND owner.is_active=1
     WHERE membership.user_id=?
       AND membership.org_id=?
@@ -795,7 +817,7 @@ function targetPermissions(db, {
   const platformAdmin = (
     actor &&
     actor.role === 'admin' &&
-    Number(actor.is_active) === 1
+    actor.is_active === 1
   );
   const orgAdmin = (
     campaignAccess.role === 'org_admin' &&
@@ -819,8 +841,8 @@ function targetPermissions(db, {
       };
     case 'influencer':
       return {
-        visible: Number(target.is_active) === 1,
-        manageable: Number(target.is_active) === 1
+        visible: target.is_active === 1,
+        manageable: target.is_active === 1
       };
     case 'collaboration':
     case 'ai_conversation':
@@ -854,6 +876,7 @@ function targetPermissions(db, {
 }
 
 function getTargetAccess(db, options) {
+  if (isProxyValue(options)) return invalidLink();
   const {
     userId: rawUserId,
     campaignId: rawCampaignId,
@@ -898,17 +921,12 @@ function getTargetAccess(db, options) {
       campaignId: custody.campaignId
     });
     if (!custodyAccess.ok) return targetNotFound(recordType);
-    if (intent === 'attach') {
-      return {
-        ok: false,
-        kind: 'conflict',
-        status: 409,
-        code: 'RECORD_REQUIRES_LINK_CORRECTION'
-      };
-    }
     if (
-      custody.orgId !== campaignAccess.campaign.org_id ||
-      custody.campaignId !== campaignAccess.campaign.id
+      intent !== 'attach' &&
+      (
+        custody.orgId !== campaignAccess.campaign.org_id ||
+        custody.campaignId !== campaignAccess.campaign.id
+      )
     ) {
       return targetNotFound(recordType);
     }
@@ -918,6 +936,17 @@ function getTargetAccess(db, options) {
     !permissions.manageable
   ) {
     return targetForbidden();
+  }
+  if (
+    custody.classification === 'campaign_classified' &&
+    intent === 'attach'
+  ) {
+    return {
+      ok: false,
+      kind: 'conflict',
+      status: 409,
+      code: 'RECORD_REQUIRES_LINK_CORRECTION'
+    };
   }
   if (
     (intent === 'manage' || intent === 'attach') &&
@@ -945,6 +974,7 @@ function campaignPredicate(userAlias, campaignAlias) {
      AND access_membership.user_id=${userAlias}.id
      AND access_membership.status='active'
     WHERE ${userAlias}.id=?
+      AND typeof(${userAlias}.is_active)='integer'
       AND ${userAlias}.is_active=1
       AND access_organization.id=${campaignAlias}.org_id
       AND EXISTS (
@@ -981,7 +1011,8 @@ function boundPredicate() {
       ON access_membership.org_id=access_campaign.org_id
      AND access_membership.user_id=access_user.id
      AND access_membership.status='active'
-    WHERE access_user.is_active=1
+    WHERE typeof(access_user.is_active)='integer'
+      AND access_user.is_active=1
       AND access_campaign.org_id=campaign_scope.org_id
       AND access_campaign.id=campaign_scope.campaign_id
       AND EXISTS (
@@ -1026,7 +1057,11 @@ function buildCollectionAccessPredicate(scope, options) {
 }
 
 function serializeWorkspaceLink(link, authorization) {
+  if (isProxyValue(authorization)) {
+    throw new TypeError('explicit workspace target state is required');
+  }
   const state = ownDataValue(authorization, 'target');
+  if (isProxyValue(link)) return invalidWorkspaceLinkSerialization();
   if (state === 'restricted') {
     const relationType = ownDataValue(link, 'relation_type');
     const restrictedCount = ownDataValue(authorization, 'restrictedCount');
@@ -1103,7 +1138,11 @@ function serializeWorkspaceLink(link, authorization) {
 function serializeEventMetadata(eventType, metadata, authorization) {
   const keys = closedMapValue(EVENT_METADATA_KEYS, eventType);
   if (!keys) throw new TypeError('unsupported campaign event type');
+  if (isProxyValue(metadata)) return invalidEventMetadata();
   if (LINK_EVENTS.has(eventType)) {
+    if (isProxyValue(authorization)) {
+      throw new TypeError('explicit event authorization states are required');
+    }
     const allowedStates = new Set(['available', 'restricted', 'missing']);
     const targetState = ownDataValue(authorization, 'target');
     const sourceCampaignState = eventType === 'link_moved'
@@ -1180,7 +1219,13 @@ function citationLabel(rank) {
 }
 
 function serializeKnowledgeReference(reference, authorization) {
+  if (isProxyValue(authorization)) {
+    throw new TypeError('explicit reference target state is required');
+  }
   const state = ownDataValue(authorization, 'target');
+  if (isProxyValue(reference)) {
+    return invalidKnowledgeReferenceSerialization();
+  }
   const rank = ownDataValue(reference, 'rank');
   const label = citationLabel(rank);
   if (state === 'restricted' || state === 'missing') {
