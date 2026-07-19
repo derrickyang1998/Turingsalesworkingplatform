@@ -182,14 +182,18 @@ function synchronizeMembershipRows(db, user, previousUser) {
   if (!active) {
     db.prepare(`
       UPDATE organization_memberships
-      SET status='revoked',revoked_at=?
-      WHERE org_id=? AND user_id=? AND status='active'
-    `).run(now, organization.id, user.id);
+      SET role_code=?,
+        status='revoked',
+        revoked_at=CASE WHEN status='active' THEN ? ELSE revoked_at END
+      WHERE org_id=? AND user_id=?
+    `).run(orgRole, now, organization.id, user.id);
     db.prepare(`
       UPDATE team_memberships
-      SET status='revoked',revoked_at=?
-      WHERE org_id=? AND user_id=? AND status='active'
-    `).run(now, organization.id, user.id);
+      SET role_code=?,
+        status='revoked',
+        revoked_at=CASE WHEN status='active' THEN ? ELSE revoked_at END
+      WHERE org_id=? AND user_id=?
+    `).run(memberRole, now, organization.id, user.id);
     return organization;
   }
 

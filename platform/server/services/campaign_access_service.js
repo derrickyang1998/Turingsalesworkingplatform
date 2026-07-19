@@ -1,3 +1,4 @@
+const { types: utilTypes } = require('node:util');
 const {
   DEFAULT_ORGANIZATION_CODE,
   resolveOrganizationScope
@@ -312,33 +313,62 @@ function invalidEventMetadata() {
   throw new TypeError('invalid campaign event metadata');
 }
 
-function sortedUniqueArray(value, validateItem, compareItems) {
-  if (
-    !Array.isArray(value) ||
-    Object.getPrototypeOf(value) !== Array.prototype ||
-    value.length < 1
-  ) {
-    return false;
-  }
-  const ownKeys = Reflect.ownKeys(value);
-  if (ownKeys.length !== value.length + 1 || !ownKeys.includes('length')) {
-    return false;
-  }
-  for (let index = 0; index < value.length; index += 1) {
+function snapshotSortedUniqueArray(value, validateItem, compareItems) {
+  let descriptors;
+  let ownKeys;
+  try {
     if (
-      !Object.prototype.hasOwnProperty.call(value, index) ||
-      !validateItem(value[index])
+      !Array.isArray(value) ||
+      utilTypes.isProxy(value) ||
+      Object.getPrototypeOf(value) !== Array.prototype
     ) {
-      return false;
+      return null;
+    }
+    ownKeys = Reflect.ownKeys(value);
+    descriptors = Object.getOwnPropertyDescriptors(value);
+  } catch {
+    return null;
+  }
+  const lengthDescriptor = descriptors.length;
+  if (
+    !lengthDescriptor ||
+    lengthDescriptor.enumerable ||
+    !Object.hasOwn(lengthDescriptor, 'value') ||
+    !Number.isSafeInteger(lengthDescriptor.value) ||
+    lengthDescriptor.value < 1
+  ) {
+    return null;
+  }
+  const length = lengthDescriptor.value;
+  if (
+    ownKeys.length !== length + 1 ||
+    ownKeys[length] !== 'length'
+  ) {
+    return null;
+  }
+
+  const snapshot = [];
+  for (let index = 0; index < length; index += 1) {
+    if (ownKeys[index] !== String(index)) return null;
+    const descriptor = descriptors[index];
+    if (
+      !descriptor ||
+      !descriptor.enumerable ||
+      !Object.hasOwn(descriptor, 'value') ||
+      descriptor.value === undefined ||
+      !validateItem(descriptor.value)
+    ) {
+      return null;
     }
     if (
       index > 0 &&
-      compareItems(value[index - 1], value[index]) >= 0
+      compareItems(snapshot[index - 1], descriptor.value) >= 0
     ) {
-      return false;
+      return null;
     }
+    snapshot.push(descriptor.value);
   }
-  return true;
+  return snapshot;
 }
 
 function validateFullEventMetadata(eventType, metadata, keys) {
@@ -418,28 +448,32 @@ function validateFullEventMetadata(eventType, metadata, keys) {
   ) {
     return invalidEventMetadata();
   }
-  if (!sortedUniqueArray(
+  const relationTypes = snapshotSortedUniqueArray(
     values.relation_types,
     (relationType) => (
       typeof relationType === 'string' &&
       recordRelations.includes(relationType)
     ),
     (left, right) => (left < right ? -1 : left > right ? 1 : 0)
-  )) {
+  );
+  if (!relationTypes) {
     return invalidEventMetadata();
   }
+  values.relation_types = relationTypes;
 
   const idArrayKeys = eventType === 'link_attached'
     ? ['link_ids']
     : eventType === 'link_revoked'
       ? ['revoked_link_ids']
       : ['revoked_link_ids', 'replacement_link_ids'];
-  if (idArrayKeys.some((key) => !sortedUniqueArray(
-    values[key],
-    (id) => Number.isSafeInteger(id) && id > 0,
-    (left, right) => left - right
-  ))) {
-    return invalidEventMetadata();
+  for (const key of idArrayKeys) {
+    const ids = snapshotSortedUniqueArray(
+      values[key],
+      (id) => Number.isSafeInteger(id) && id > 0,
+      (left, right) => left - right
+    );
+    if (!ids) return invalidEventMetadata();
+    values[key] = ids;
   }
   if (
     eventType === 'link_moved' &&
@@ -913,6 +947,13 @@ function campaignPredicate(userAlias, campaignAlias) {
     WHERE ${userAlias}.id=?
       AND ${userAlias}.is_active=1
       AND access_organization.id=${campaignAlias}.org_id
+      AND EXISTS (
+        SELECT 1
+        FROM team_memberships access_identity_team
+        WHERE access_identity_team.org_id=access_organization.id
+          AND access_identity_team.user_id=${userAlias}.id
+          AND access_identity_team.status='active'
+      )
       AND (
         access_membership.role_code='org_admin'
         OR ${campaignAlias}.owner_user_id=${userAlias}.id
@@ -943,6 +984,13 @@ function boundPredicate() {
     WHERE access_user.is_active=1
       AND access_campaign.org_id=campaign_scope.org_id
       AND access_campaign.id=campaign_scope.campaign_id
+      AND EXISTS (
+        SELECT 1
+        FROM team_memberships access_identity_team
+        WHERE access_identity_team.org_id=access_campaign.org_id
+          AND access_identity_team.user_id=access_user.id
+          AND access_identity_team.status='active'
+      )
       AND (
         access_membership.role_code='org_admin'
         OR access_campaign.owner_user_id=access_user.id
@@ -1057,29 +1105,35 @@ function serializeEventMetadata(eventType, metadata, authorization) {
   if (!keys) throw new TypeError('unsupported campaign event type');
   if (LINK_EVENTS.has(eventType)) {
     const allowedStates = new Set(['available', 'restricted', 'missing']);
+    const targetState = ownDataValue(authorization, 'target');
+    const sourceCampaignState = eventType === 'link_moved'
+      ? ownDataValue(authorization, 'sourceCampaign')
+      : null;
+    const destinationCampaignState = eventType === 'link_moved'
+      ? ownDataValue(authorization, 'destinationCampaign')
+      : null;
     if (
-      !authorization ||
-      !allowedStates.has(authorization.target) ||
+      !allowedStates.has(targetState) ||
       (
         eventType === 'link_moved' &&
         (
-          !allowedStates.has(authorization.sourceCampaign) ||
-          !allowedStates.has(authorization.destinationCampaign)
+          !allowedStates.has(sourceCampaignState) ||
+          !allowedStates.has(destinationCampaignState)
         )
       )
     ) {
       throw new TypeError('explicit event authorization states are required');
     }
-    if (authorization.target === 'missing') {
+    if (targetState === 'missing') {
       return { access_state: 'missing' };
     }
     if (
-      authorization.target !== 'available' ||
+      targetState !== 'available' ||
       (
         eventType === 'link_moved' &&
         (
-          authorization.sourceCampaign !== 'available' ||
-          authorization.destinationCampaign !== 'available'
+          sourceCampaignState !== 'available' ||
+          destinationCampaignState !== 'available'
         )
       )
     ) {
@@ -1089,9 +1143,10 @@ function serializeEventMetadata(eventType, metadata, authorization) {
   const validated = validateFullEventMetadata(eventType, metadata, keys);
   const serialized = {};
   for (const key of keys) {
-    serialized[key] = Array.isArray(validated[key])
-      ? [...validated[key]]
-      : validated[key];
+    serialized[key] = validated[key];
+  }
+  if (Buffer.byteLength(JSON.stringify(serialized), 'utf8') > 4096) {
+    return invalidEventMetadata();
   }
   return serialized;
 }

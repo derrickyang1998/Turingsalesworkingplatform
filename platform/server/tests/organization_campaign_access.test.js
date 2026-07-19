@@ -720,6 +720,208 @@ describe('RED group 3: transactional identity projection', () => {
     assert.equal(db.inTransaction, false);
   });
 
+  test('combined role changes and deactivation keep revoked identity roles coherent', (t) => {
+    const db = openCampaignDatabase(t);
+    const cases = [
+      {
+        userId: 60,
+        username: 'combined-promote',
+        initialRole: 'user',
+        finalRole: 'admin',
+        expectedPlatformRole: 'platform_admin',
+        expectedOrganizationRole: 'org_admin',
+        expectedTeamRole: 'team_lead',
+        requestId: 'request-combined-promote-deactivate'
+      },
+      {
+        userId: 61,
+        username: 'combined-demote',
+        initialRole: 'admin',
+        finalRole: 'user',
+        expectedPlatformRole: 'member',
+        expectedOrganizationRole: 'member',
+        expectedTeamRole: 'member',
+        requestId: 'request-combined-demote-deactivate'
+      }
+    ];
+    const snapshot = (userId) => ({
+      projection: projectIdentityState(db, userId),
+      user: db.prepare(`
+        SELECT role,is_active
+        FROM users
+        WHERE id=?
+      `).get(userId),
+      organization: db.prepare(`
+        SELECT role_code,status,revoked_at
+        FROM organization_memberships
+        WHERE user_id=?
+        ORDER BY org_id
+      `).all(userId),
+      teams: db.prepare(`
+        SELECT team_id,role_code,status,revoked_at
+        FROM team_memberships
+        WHERE user_id=?
+        ORDER BY org_id,team_id
+      `).all(userId),
+      sessions: db.prepare(`
+        SELECT token
+        FROM sessions
+        WHERE user_id=?
+        ORDER BY id
+      `).all(userId),
+      activity: db.prepare(`
+        SELECT user_id,action,module,details
+        FROM activity_log
+        ORDER BY id
+      `).all()
+    });
+
+    for (const definition of cases) {
+      runIdentityProjectionTransaction(db, {
+        actorUserId: 1,
+        subjectUserId: definition.userId,
+        reason: 'user_create',
+        requestId: 'request-create-' + definition.username,
+        mutateUser() {
+          db.prepare(`
+            INSERT INTO users (
+              id,username,password_hash,display_name,role,email,department,is_active
+            ) VALUES (?,?,?,?,?,?,?,1)
+          `).run(
+            definition.userId,
+            definition.username,
+            'test-hash',
+            definition.username,
+            definition.initialRole,
+            definition.username + '@example.invalid',
+            definition.username + '-department'
+          );
+        }
+      });
+      insertSession(db, definition.userId, definition.username);
+
+      const beforeRollback = snapshot(definition.userId);
+      assert.throws(
+        () => runIdentityProjectionTransaction(db, {
+          actorUserId: 999999,
+          subjectUserId: definition.userId,
+          reason: 'soft_deactivate',
+          requestId: 'request-rollback-' + definition.username,
+          mutateUser() {
+            db.prepare(`
+              UPDATE users
+              SET role=?,is_active=0
+              WHERE id=?
+            `).run(definition.finalRole, definition.userId);
+          }
+        }),
+        /FOREIGN KEY constraint failed/
+      );
+      assert.deepEqual(snapshot(definition.userId), beforeRollback);
+
+      const result = runIdentityProjectionTransaction(db, {
+        actorUserId: 1,
+        subjectUserId: definition.userId,
+        reason: 'soft_deactivate',
+        requestId: definition.requestId,
+        mutateUser() {
+          db.prepare(`
+            UPDATE users
+            SET role=?,is_active=0
+            WHERE id=?
+          `).run(definition.finalRole, definition.userId);
+        }
+      });
+      const audit = JSON.parse(result.audit.details);
+      assert.deepEqual(audit, {
+        schema_version: 1,
+        actor_user_id: 1,
+        subject_user_id: definition.userId,
+        organization_id: 1,
+        reason: 'soft_deactivate',
+        request_id: definition.requestId,
+        changed_fields: [
+          'active',
+          'organization_membership',
+          'role',
+          'team_memberships'
+        ],
+        before: result.before,
+        after: result.after
+      });
+      assert.deepEqual(
+        db.prepare(`
+          SELECT details
+          FROM activity_log
+          WHERE json_extract(details,'$.subject_user_id')=?
+          ORDER BY id DESC
+          LIMIT 1
+        `).get(definition.userId),
+        { details: result.audit.details }
+      );
+      assert.deepEqual(
+        projectIdentityState(db, definition.userId),
+        result.after
+      );
+      assert.deepEqual(result.after.user, {
+        platform_role: definition.expectedPlatformRole,
+        department_code: result.before.user.department_code,
+        is_active: 0
+      });
+      assert.deepEqual(result.after.organization_membership, {
+        role_code: definition.expectedOrganizationRole,
+        status: 'revoked'
+      });
+      assert.equal(
+        result.after.team_memberships.every((membership) => (
+          membership.role_code === definition.expectedTeamRole &&
+          membership.status === 'revoked'
+        )),
+        true
+      );
+      assert.deepEqual(
+        db.prepare(`
+          SELECT role,is_active
+          FROM users
+          WHERE id=?
+        `).get(definition.userId),
+        { role: definition.finalRole, is_active: 0 }
+      );
+      assert.deepEqual(
+        db.prepare(`
+          SELECT role_code,status
+          FROM organization_memberships
+          WHERE user_id=?
+          ORDER BY org_id
+        `).all(definition.userId),
+        [{
+          role_code: definition.expectedOrganizationRole,
+          status: 'revoked'
+        }]
+      );
+      assert.equal(
+        db.prepare(`
+          SELECT COUNT(*) AS count
+          FROM team_memberships
+          WHERE user_id=?
+            AND (role_code<>? OR status<>'revoked')
+        `).get(
+          definition.userId,
+          definition.expectedTeamRole
+        ).count,
+        0
+      );
+      assert.equal(
+        db.prepare(`
+          SELECT COUNT(*) AS count
+          FROM sessions
+          WHERE user_id=?
+        `).get(definition.userId).count,
+        0
+      );
+    }
+  });
+
   test('a nested projection failure rolls back to its savepoint while the outer transaction commits', (t) => {
     const db = openCampaignDatabase(t);
     runIdentityProjectionTransaction(db, {
@@ -1189,6 +1391,76 @@ describe('RED group 4: target access and immutable custody', () => {
 });
 
 describe('RED group 5: bound collection predicates', () => {
+  test('collection predicates conceal owners and org admins without an active team', (t) => {
+    const db = openCampaignDatabase(t);
+    const identity = seedCampaigns(db);
+    const outcomes = [];
+
+    for (const userId of [identity.ownerId, identity.adminId]) {
+      db.prepare(`
+        UPDATE team_memberships
+        SET status='revoked',revoked_at='2026-07-03 00:00:00'
+        WHERE org_id=? AND user_id=? AND status='active'
+      `).run(identity.orgId, userId);
+
+      const scope = resolveOrganizationScope(db, {
+        userId,
+        repairMissing: false
+      });
+      const direct = getCampaignAccess(db, {
+        userId,
+        campaignId: 3001
+      });
+      const campaigns = buildCollectionAccessPredicate('campaigns', {
+        userId
+      });
+      const bound = buildCollectionAccessPredicate('knowledge', {
+        userId
+      });
+      outcomes.push({
+        userId,
+        scopeCode: scope.code,
+        directCode: direct.code,
+        campaignCount: db.prepare(`
+          SELECT COUNT(*) AS count
+          FROM campaigns campaign
+          WHERE ${campaigns.sql}
+        `).get(...campaigns.params).count,
+        boundCount: db.prepare(`
+          WITH campaign_scope(org_id,campaign_id) AS (
+            VALUES (?,?),(?,?)
+          )
+          SELECT COUNT(*) AS count
+          FROM campaign_scope
+          WHERE ${bound.sql}
+        `).get(
+          identity.orgId,
+          3001,
+          identity.orgId,
+          3004,
+          ...bound.params
+        ).count
+      });
+    }
+
+    assert.deepEqual(outcomes, [
+      {
+        userId: identity.ownerId,
+        scopeCode: 'ORGANIZATION_MEMBERSHIP_INACTIVE',
+        directCode: 'CAMPAIGN_NOT_FOUND',
+        campaignCount: 0,
+        boundCount: 0
+      },
+      {
+        userId: identity.adminId,
+        scopeCode: 'ORGANIZATION_MEMBERSHIP_INACTIVE',
+        directCode: 'CAMPAIGN_NOT_FOUND',
+        campaignCount: 0,
+        boundCount: 0
+      }
+    ]);
+  });
+
   test('service-owned predicates filter before count/page across every campaign-bound collection', (t) => {
     const db = openCampaignDatabase(t);
     const identity = seedCampaigns(db);
@@ -1623,6 +1895,249 @@ describe('RED group 6: key-closed authorization serializers', () => {
         }, {
           target: 'available'
         }),
+        /invalid campaign event metadata/
+      );
+    }
+  });
+
+  test('event authorization states are snapshotted once from own data properties', () => {
+    const fixtures = validEventMetadataFixtures();
+    const expectedError = 'explicit event authorization states are required';
+    const captureError = (operation) => {
+      try {
+        operation();
+        return null;
+      } catch (error) {
+        return error.message;
+      }
+    };
+    const statefulAuthorization = (keys) => {
+      const authorization = {};
+      const reads = Object.fromEntries(keys.map((key) => [key, 0]));
+      for (const key of keys) {
+        Object.defineProperty(authorization, key, {
+          enumerable: true,
+          get() {
+            reads[key] += 1;
+            return reads[key] === 1 ? 'restricted' : 'available';
+          }
+        });
+      }
+      return { authorization, reads };
+    };
+    const throwingAuthorization = new Proxy({}, {
+      get() {
+        throw new Error('authorization proxy value was read');
+      },
+      getOwnPropertyDescriptor() {
+        throw new Error('authorization proxy descriptor was read');
+      }
+    });
+
+    const attachedAccessor = statefulAuthorization(['target']);
+    const movedAccessor = statefulAuthorization([
+      'target',
+      'sourceCampaign',
+      'destinationCampaign'
+    ]);
+    const cases = [
+      () => serializeEventMetadata(
+        'link_attached',
+        fixtures.link_attached,
+        Object.create({ target: 'available' })
+      ),
+      () => serializeEventMetadata(
+        'link_attached',
+        fixtures.link_attached,
+        attachedAccessor.authorization
+      ),
+      () => serializeEventMetadata(
+        'link_attached',
+        fixtures.link_attached,
+        throwingAuthorization
+      ),
+      () => serializeEventMetadata(
+        'link_moved',
+        fixtures.link_moved,
+        Object.create({
+          target: 'available',
+          sourceCampaign: 'available',
+          destinationCampaign: 'available'
+        })
+      ),
+      () => serializeEventMetadata(
+        'link_moved',
+        fixtures.link_moved,
+        movedAccessor.authorization
+      ),
+      () => serializeEventMetadata(
+        'link_moved',
+        fixtures.link_moved,
+        throwingAuthorization
+      )
+    ];
+
+    assert.deepEqual(cases.map(captureError), [
+      expectedError,
+      expectedError,
+      expectedError,
+      expectedError,
+      expectedError,
+      expectedError
+    ]);
+    assert.deepEqual(attachedAccessor.reads, { target: 0 });
+    assert.deepEqual(movedAccessor.reads, {
+      target: 0,
+      sourceCampaign: 0,
+      destinationCampaign: 0
+    });
+  });
+
+  test('event array elements are snapshotted from own data properties before validation', () => {
+    const fixture = validEventMetadataFixtures().link_attached;
+    const captureError = (operation) => {
+      try {
+        operation();
+        return null;
+      } catch (error) {
+        return error.message;
+      }
+    };
+    const accessorArray = (first, later) => {
+      const value = [first];
+      let reads = 0;
+      Object.defineProperty(value, '0', {
+        configurable: true,
+        enumerable: true,
+        get() {
+          reads += 1;
+          return reads === 1 ? first : later;
+        }
+      });
+      return { value, reads: () => reads };
+    };
+    const mutatingProxyArray = (first, later) => {
+      const target = [first];
+      let reads = 0;
+      const value = new Proxy(target, {
+        get(proxyTarget, property, receiver) {
+          if (property === '0') {
+            reads += 1;
+            const current = Reflect.get(proxyTarget, property, receiver);
+            proxyTarget[0] = later;
+            return current;
+          }
+          return Reflect.get(proxyTarget, property, receiver);
+        }
+      });
+      return { value, reads: () => reads };
+    };
+    const throwingProxyArray = () => {
+      let traps = 0;
+      const value = new Proxy(['proposal'], {
+        getPrototypeOf() {
+          traps += 1;
+          throw new Error('event array proxy prototype was read');
+        },
+        ownKeys() {
+          traps += 1;
+          throw new Error('event array proxy keys were read');
+        },
+        getOwnPropertyDescriptor() {
+          traps += 1;
+          throw new Error('event array proxy descriptor was read');
+        }
+      });
+      return { value, traps: () => traps };
+    };
+
+    const relationAccessor = accessorArray('proposal', '__proto__');
+    const idAccessor = accessorArray(71, 0);
+    const relationMutation = mutatingProxyArray('proposal', '__proto__');
+    const idMutation = mutatingProxyArray(71, 0);
+    const relationThrowing = throwingProxyArray();
+    const idThrowing = throwingProxyArray();
+    const cases = [
+      () => serializeEventMetadata('link_attached', {
+        ...fixture,
+        relation_types: relationAccessor.value
+      }, { target: 'available' }),
+      () => serializeEventMetadata('link_attached', {
+        ...fixture,
+        link_ids: idAccessor.value
+      }, { target: 'available' }),
+      () => serializeEventMetadata('link_attached', {
+        ...fixture,
+        relation_types: relationMutation.value
+      }, { target: 'available' }),
+      () => serializeEventMetadata('link_attached', {
+        ...fixture,
+        link_ids: idMutation.value
+      }, { target: 'available' }),
+      () => serializeEventMetadata('link_attached', {
+        ...fixture,
+        relation_types: relationThrowing.value
+      }, { target: 'available' }),
+      () => serializeEventMetadata('link_attached', {
+        ...fixture,
+        link_ids: idThrowing.value
+      }, { target: 'available' })
+    ];
+
+    assert.deepEqual(
+      cases.map(captureError),
+      Array(cases.length).fill('invalid campaign event metadata')
+    );
+    assert.equal(relationAccessor.reads(), 0);
+    assert.equal(idAccessor.reads(), 0);
+    assert.equal(relationMutation.reads(), 0);
+    assert.equal(idMutation.reads(), 0);
+    assert.equal(relationThrowing.traps(), 0);
+    assert.equal(idThrowing.traps(), 0);
+  });
+
+  test('full event metadata enforces the frozen 4096-byte JSON boundary', () => {
+    const fixture = validEventMetadataFixtures().link_attached;
+    const withIds = (linkIds) => ({
+      ...fixture,
+      link_ids: linkIds
+    });
+    const jsonBytes = (metadata) => Buffer.byteLength(
+      JSON.stringify(metadata),
+      'utf8'
+    );
+    const boundaryIds = [];
+    let firstOversizedIds = null;
+    for (let id = 1; id <= 2000; id += 1) {
+      const candidate = [...boundaryIds, id];
+      if (jsonBytes(withIds(candidate)) > 4096) {
+        firstOversizedIds = candidate;
+        break;
+      }
+      boundaryIds.push(id);
+    }
+    assert.ok(boundaryIds.length > 0);
+    assert.ok(firstOversizedIds);
+    assert.ok(jsonBytes(withIds(boundaryIds)) <= 4096);
+    assert.ok(jsonBytes(withIds(firstOversizedIds)) > 4096);
+    assert.deepEqual(
+      serializeEventMetadata(
+        'link_attached',
+        withIds(boundaryIds),
+        { target: 'available' }
+      ).link_ids,
+      boundaryIds
+    );
+
+    const twoThousandIds = Array.from({ length: 2000 }, (_, index) => index + 1);
+    assert.ok(jsonBytes(withIds(twoThousandIds)) > 4096);
+    for (const linkIds of [firstOversizedIds, twoThousandIds]) {
+      assert.throws(
+        () => serializeEventMetadata(
+          'link_attached',
+          withIds(linkIds),
+          { target: 'available' }
+        ),
         /invalid campaign event metadata/
       );
     }
