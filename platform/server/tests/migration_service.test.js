@@ -392,6 +392,225 @@ test('migration loader allows only engine-approved builtins and rejects ambient 
   db.close();
 });
 
+test('migration sha256 facade hashes sandbox Uint8Array bytes without widening its binary contract', () => {
+  const migrationService = require('../services/migration_service');
+  const root = tempMigrationRoot('sha256-uint8array');
+  const sourcePath = 'migrations/002_sha256_uint8array.js';
+  const frameBacking = Uint8Array.from({ length: 132 }, (_value, index) => (index * 37 + 11) & 0xff);
+  const frameBytes = frameBacking.subarray(2, 130);
+  frameBytes[0] = 0x00;
+  frameBytes[64] = 0x80;
+  frameBytes[127] = 0xff;
+  const expectedFrameDigest = crypto.createHash('sha256').update(frameBytes).digest('hex');
+  const stringInput = 'string hash probe \u0000 \u4e2d\u6587';
+  const expectedStringDigest = crypto.createHash('sha256').update(stringInput, 'utf8').digest('hex');
+  const expectedSubclassDigest = crypto.createHash('sha256').update(Uint8Array.of(0x00, 0x80, 0xff)).digest('hex');
+  const expectedEmptyDigest = crypto.createHash('sha256').update(new Uint8Array(0)).digest('hex');
+
+  writeTempMigration(root, sourcePath, `
+const crypto = require('node:crypto');
+
+function expectHashUpdateRejected(operation, label) {
+  let rejection;
+  try {
+    operation();
+  } catch (error) {
+    rejection = error;
+  }
+  if (!rejection || rejection.name !== 'TypeError') {
+    throw new Error(label + ' must be rejected with TypeError');
+  }
+}
+
+module.exports = {
+  version: 2,
+  name: 'sha256_uint8array',
+  sourcePath: '${sourcePath}',
+  engineVersion: 1,
+  dependencies: ['${VENDORED_BCRYPT_PATH}'],
+  schemaManifest: {
+    columns: {
+      sha256_uint8array_probe: {
+        digest: { type: 'TEXT', notnull: 1, defaultValue: null }
+      }
+    },
+    indexes: {},
+    triggers: {},
+    tableChecks: {
+      sha256_uint8array_probe: ['CHECK (length(digest) = 64)']
+    }
+  },
+  apply(db) {
+    const frameBacking = new Uint8Array(${JSON.stringify([...frameBacking])});
+    const frameBytes = frameBacking.subarray(2, 130);
+    const digest = crypto.createHash('sha256').update(frameBytes).digest('hex');
+
+    if (typeof ArrayBuffer.prototype.transfer === 'function') {
+      const detached = new Uint8Array([0x00, 0x80, 0xff]);
+      detached.buffer.transfer();
+      expectHashUpdateRejected(
+        () => crypto.createHash('sha256').update(detached),
+        'detached Uint8Array'
+      );
+    }
+
+    const stringInput = ${JSON.stringify(stringInput)};
+    const expectedStringDigest = '${expectedStringDigest}';
+    if (crypto.createHash('sha256').update(stringInput).digest('hex') !== expectedStringDigest) {
+      throw new Error('omitted encoding must preserve host UTF-8 string hashing');
+    }
+    if (crypto.createHash('sha256').update(stringInput, undefined).digest('hex') !== expectedStringDigest) {
+      throw new Error('explicit undefined must preserve UTF-8 string hashing');
+    }
+    if (crypto.createHash('sha256').update(stringInput, 'utf8').digest('hex') !== expectedStringDigest) {
+      throw new Error('explicit utf8 must preserve UTF-8 string hashing');
+    }
+    if (crypto.createHash('sha256').update(stringInput, 'utf8', 'ignored').digest('hex') !== expectedStringDigest) {
+      throw new Error('UTF-8 string hashing must preserve ignored third-argument compatibility');
+    }
+
+    class SandboxUint8Array extends Uint8Array {}
+    const subclassDigest = crypto.createHash('sha256')
+      .update(new SandboxUint8Array([0x00, 0x80, 0xff]))
+      .digest('hex');
+    if (subclassDigest !== '${expectedSubclassDigest}') {
+      throw new Error('genuine Uint8Array subclass must hash against the host byte oracle');
+    }
+
+    const emptyDigest = crypto.createHash('sha256').update(new Uint8Array(0)).digest('hex');
+    if (emptyDigest !== '${expectedEmptyDigest}') {
+      throw new Error('genuine zero-length Uint8Array must hash as empty input');
+    }
+
+    expectHashUpdateRejected(
+      () => crypto.createHash('sha256').update(frameBytes, undefined),
+      'Uint8Array with explicit undefined encoding'
+    );
+    expectHashUpdateRejected(
+      () => crypto.createHash('sha256').update(frameBytes, 'utf8'),
+      'Uint8Array with utf8 encoding'
+    );
+    expectHashUpdateRejected(
+      () => crypto.createHash('sha256').update(new Uint16Array([0x0080, 0x00ff])),
+      'other TypedArray'
+    );
+    expectHashUpdateRejected(
+      () => crypto.createHash('sha256').update([0x00, 0x80, 0xff]),
+      'Array'
+    );
+    expectHashUpdateRejected(
+      () => crypto.createHash('sha256').update(new ArrayBuffer(3)),
+      'ArrayBuffer'
+    );
+    expectHashUpdateRejected(
+      () => crypto.createHash('sha256').update(new DataView(new ArrayBuffer(3))),
+      'DataView'
+    );
+    expectHashUpdateRejected(
+      () => crypto.createHash('sha256').update(stringInput, 'hex'),
+      'non-UTF-8 string encoding'
+    );
+
+    let getterAccessed = false;
+    const getterProbe = Object.create(null);
+    for (const key of ['length', 'byteLength', 'byteOffset', 'buffer', 'constructor']) {
+      Object.defineProperty(getterProbe, key, {
+        get() {
+          getterAccessed = true;
+          throw new Error('binary brand check accessed getter ' + key);
+        }
+      });
+    }
+    Object.defineProperty(getterProbe, Symbol.toStringTag, {
+      get() {
+        getterAccessed = true;
+        throw new Error('binary brand check accessed Symbol.toStringTag');
+      }
+    });
+    expectHashUpdateRejected(
+      () => crypto.createHash('sha256').update(getterProbe),
+      'getter-bearing object'
+    );
+    if (getterAccessed) throw new Error('binary brand check invoked an input getter');
+
+    let proxyTrapAccessed = false;
+    const proxiedBytes = new Proxy(new Uint8Array([0x00, 0x80, 0xff]), {
+      get() {
+        proxyTrapAccessed = true;
+        throw new Error('binary brand check invoked proxy get trap');
+      },
+      getPrototypeOf() {
+        proxyTrapAccessed = true;
+        throw new Error('binary brand check invoked proxy getPrototypeOf trap');
+      }
+    });
+    expectHashUpdateRejected(
+      () => crypto.createHash('sha256').update(proxiedBytes),
+      'proxied Uint8Array'
+    );
+    if (proxyTrapAccessed) throw new Error('binary brand check invoked a proxy trap');
+
+    let acceptedGetterAccessed = false;
+    const guardedBytes = new Uint8Array(frameBytes);
+    for (const key of ['length', 'byteLength', 'byteOffset', 'buffer', 'constructor']) {
+      Object.defineProperty(guardedBytes, key, {
+        get() {
+          acceptedGetterAccessed = true;
+          throw new Error('binary copy accessed getter ' + key);
+        }
+      });
+    }
+    Object.defineProperty(guardedBytes, Symbol.iterator, {
+      get() {
+        acceptedGetterAccessed = true;
+        throw new Error('binary copy accessed iterator getter');
+      }
+    });
+    const guardedHash = crypto.createHash('sha256');
+    if (guardedHash.update(guardedBytes) !== guardedHash) {
+      throw new Error('binary hash update exposed a host copy');
+    }
+    if (guardedHash.digest('hex') !== digest) {
+      throw new Error('binary hash copy changed raw bytes');
+    }
+    if (acceptedGetterAccessed) throw new Error('binary copy invoked an input getter');
+    if (typeof Buffer !== 'undefined') throw new Error('migration sandbox exposed Buffer');
+
+    db.exec('CREATE TABLE sha256_uint8array_probe (digest TEXT NOT NULL CHECK (length(digest) = 64)) STRICT;');
+    db.prepare('INSERT INTO sha256_uint8array_probe (digest) VALUES (?)').run(digest);
+  }
+};
+`);
+  const { db } = tmpDb('sha256-uint8array');
+
+  try {
+    assert.equal(frameBytes.byteLength, 128);
+    assert.equal(frameBytes.byteOffset, 2);
+    assert.deepEqual([frameBytes[0], frameBytes[64], frameBytes[127]], [0x00, 0x80, 0xff]);
+    migrationService.runMigrations(db, {
+      rootDir: root,
+      registeredMigrations: [{
+        version: 2,
+        name: 'sha256_uint8array',
+        sourcePath,
+        engineVersion: 1,
+        dependencies: [VENDORED_BCRYPT_PATH]
+      }]
+    });
+    assert.deepEqual(
+      db.prepare('SELECT digest FROM sha256_uint8array_probe').get(),
+      { digest: expectedFrameDigest }
+    );
+    assert.equal(
+      db.prepare("SELECT strict FROM pragma_table_list WHERE name = 'sha256_uint8array_probe'").get().strict,
+      1
+    );
+  } finally {
+    db.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('engine-approved builtin facade cannot expose host constructors or package loading', () => {
   const migrationService = require('../services/migration_service');
   const root = tempMigrationRoot('builtin-constructor-escape');

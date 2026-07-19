@@ -7,6 +7,14 @@ const Database = require('better-sqlite3');
 
 const sqliteDigest = require('./sqlite_digest_service');
 
+const HOST_UINT8_ARRAY = Uint8Array;
+const SAFE_ARRAY_BUFFER_IS_VIEW = ArrayBuffer.isView;
+const SAFE_REFLECT_APPLY = Reflect.apply;
+const TYPED_ARRAY_PROTOTYPE = Object.getPrototypeOf(Uint8Array.prototype);
+const TYPED_ARRAY_TAG_GETTER = Object.getOwnPropertyDescriptor(TYPED_ARRAY_PROTOTYPE, Symbol.toStringTag).get;
+const TYPED_ARRAY_LENGTH_GETTER = Object.getOwnPropertyDescriptor(TYPED_ARRAY_PROTOTYPE, 'length').get;
+const TYPED_ARRAY_VALUES_METHOD = Object.getOwnPropertyDescriptor(TYPED_ARRAY_PROTOTYPE, 'values').value;
+
 const BUILTIN_MODULES = new Set([
   ...builtinModules,
   ...builtinModules.map((name) => `node:${name}`)
@@ -419,6 +427,16 @@ function hostBoundary(runtime, operation) {
   }
 }
 
+function copyMigrationUint8Array(value) {
+  if (!SAFE_ARRAY_BUFFER_IS_VIEW(value)) return null;
+  if (SAFE_REFLECT_APPLY(TYPED_ARRAY_TAG_GETTER, value, []) !== 'Uint8Array') return null;
+  SAFE_REFLECT_APPLY(TYPED_ARRAY_VALUES_METHOD, value, []);
+  const length = SAFE_REFLECT_APPLY(TYPED_ARRAY_LENGTH_GETTER, value, []);
+  const copy = new HOST_UINT8_ARRAY(length);
+  for (let index = 0; index < length; index += 1) copy[index] = value[index];
+  return copy;
+}
+
 function migrationCryptoFacade(runtime) {
   const facade = Object.create(null);
   facade.randomInt = isolatedHostFunction((...args) => hostBoundary(runtime, () => {
@@ -436,11 +454,21 @@ function migrationCryptoFacade(runtime) {
     }
     const hash = crypto.createHash('sha256');
     const hashFacade = Object.create(null);
-    hashFacade.update = isolatedHostFunction((value, encoding) => hostBoundary(runtime, () => {
-      if (typeof value !== 'string' || (encoding !== undefined && encoding !== 'utf8')) {
+    hashFacade.update = isolatedHostFunction((...args) => hostBoundary(runtime, () => {
+      const value = args[0];
+      const encoding = args[1];
+      if (typeof value === 'string') {
+        if (encoding !== undefined && encoding !== 'utf8') {
+          throw new TypeError('migration sha256 input must be a UTF-8 string');
+        }
+        hash.update(value, 'utf8');
+        return hashFacade;
+      }
+      const bytes = args.length === 1 ? copyMigrationUint8Array(value) : null;
+      if (!bytes) {
         throw new TypeError('migration sha256 input must be a UTF-8 string');
       }
-      hash.update(value, 'utf8');
+      hash.update(bytes);
       return hashFacade;
     }));
     hashFacade.digest = isolatedHostFunction((encoding) => hostBoundary(runtime, () => {
