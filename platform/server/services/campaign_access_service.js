@@ -97,6 +97,27 @@ const EVENT_METADATA_KEYS = Object.freeze({
   ])
 });
 const LINK_EVENTS = new Set(['link_attached', 'link_revoked', 'link_moved']);
+const EVENT_INTEGER_METADATA_KEYS = new Set([
+  'customer_id',
+  'opportunity_id',
+  'owner_user_id',
+  'team_id',
+  'row_version',
+  'previous_version',
+  'next_version',
+  'previous_owner_user_id',
+  'next_owner_user_id',
+  'previous_team_id',
+  'next_team_id',
+  'source_campaign_id',
+  'destination_campaign_id',
+  'original_dispatch_id',
+  'replacement_dispatch_id',
+  'template_id',
+  'template_version'
+]);
+const EVENT_STATUS_VALUES = new Set(['active', 'on_hold', 'cancelled']);
+const EVENT_BUNDLE_PATTERN = /^[0-9a-f]{64}$/;
 
 function canonicalId(value) {
   if (Number.isSafeInteger(value) && value > 0) return value;
@@ -117,6 +138,148 @@ function canonicalId(value) {
 function canonicalRecordId(value) {
   const parsed = canonicalId(value);
   return parsed === null ? null : String(parsed);
+}
+
+function invalidEventMetadata() {
+  throw new TypeError('invalid campaign event metadata');
+}
+
+function sortedUniqueArray(value, validateItem, compareItems) {
+  if (
+    !Array.isArray(value) ||
+    Object.getPrototypeOf(value) !== Array.prototype ||
+    value.length < 1
+  ) {
+    return false;
+  }
+  const ownKeys = Reflect.ownKeys(value);
+  if (ownKeys.length !== value.length + 1 || !ownKeys.includes('length')) {
+    return false;
+  }
+  for (let index = 0; index < value.length; index += 1) {
+    if (
+      !Object.prototype.hasOwnProperty.call(value, index) ||
+      !validateItem(value[index])
+    ) {
+      return false;
+    }
+    if (
+      index > 0 &&
+      compareItems(value[index - 1], value[index]) >= 0
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function validateFullEventMetadata(eventType, metadata, keys) {
+  let descriptors;
+  let ownKeys;
+  try {
+    if (
+      metadata === null ||
+      typeof metadata !== 'object' ||
+      Object.getPrototypeOf(metadata) !== Object.prototype
+    ) {
+      return invalidEventMetadata();
+    }
+    ownKeys = Reflect.ownKeys(metadata);
+    descriptors = Object.getOwnPropertyDescriptors(metadata);
+  } catch {
+    return invalidEventMetadata();
+  }
+  if (
+    ownKeys.length !== keys.length ||
+    ownKeys.some((key) => typeof key !== 'string' || !keys.includes(key))
+  ) {
+    return invalidEventMetadata();
+  }
+
+  const values = {};
+  for (const key of keys) {
+    const descriptor = descriptors[key];
+    if (
+      !descriptor ||
+      !descriptor.enumerable ||
+      !Object.prototype.hasOwnProperty.call(descriptor, 'value') ||
+      descriptor.value === undefined
+    ) {
+      return invalidEventMetadata();
+    }
+    values[key] = descriptor.value;
+    if (
+      EVENT_INTEGER_METADATA_KEYS.has(key) &&
+      (
+        !Number.isSafeInteger(values[key]) ||
+        values[key] < 1
+      )
+    ) {
+      return invalidEventMetadata();
+    }
+  }
+
+  if (
+    eventType === 'operational_status_changed' &&
+    (
+      !EVENT_STATUS_VALUES.has(values.previous_status) ||
+      !EVENT_STATUS_VALUES.has(values.next_status)
+    )
+  ) {
+    return invalidEventMetadata();
+  }
+
+  if (!LINK_EVENTS.has(eventType)) return values;
+  const bundleKeys = eventType === 'link_moved'
+    ? ['source_bundle_id', 'destination_bundle_id']
+    : ['bundle_id'];
+  if (bundleKeys.some((key) => (
+    typeof values[key] !== 'string' ||
+    !EVENT_BUNDLE_PATTERN.test(values[key])
+  ))) {
+    return invalidEventMetadata();
+  }
+  if (
+    typeof values.record_type !== 'string' ||
+    !RECORD_RELATIONS[values.record_type] ||
+    typeof values.record_id !== 'string' ||
+    canonicalRecordId(values.record_id) !== values.record_id
+  ) {
+    return invalidEventMetadata();
+  }
+  if (!sortedUniqueArray(
+    values.relation_types,
+    (relationType) => (
+      typeof relationType === 'string' &&
+      RECORD_RELATIONS[values.record_type].includes(relationType)
+    ),
+    (left, right) => (left < right ? -1 : left > right ? 1 : 0)
+  )) {
+    return invalidEventMetadata();
+  }
+
+  const idArrayKeys = eventType === 'link_attached'
+    ? ['link_ids']
+    : eventType === 'link_revoked'
+      ? ['revoked_link_ids']
+      : ['revoked_link_ids', 'replacement_link_ids'];
+  if (idArrayKeys.some((key) => !sortedUniqueArray(
+    values[key],
+    (id) => Number.isSafeInteger(id) && id > 0,
+    (left, right) => left - right
+  ))) {
+    return invalidEventMetadata();
+  }
+  if (
+    eventType === 'link_moved' &&
+    (
+      values.source_campaign_id === values.destination_campaign_id ||
+      values.source_bundle_id === values.destination_bundle_id
+    )
+  ) {
+    return invalidEventMetadata();
+  }
+  return values;
 }
 
 function campaignNotFound() {
@@ -408,8 +571,13 @@ function targetOwnerIsInOrganization(db, ownerUserId, orgId) {
   if (!canonicalId(ownerUserId)) return false;
   return Boolean(db.prepare(`
     SELECT 1
-    FROM organization_memberships
-    WHERE user_id=? AND org_id=?
+    FROM organization_memberships membership
+    JOIN users owner
+      ON owner.id=membership.user_id
+      AND owner.is_active=1
+    WHERE membership.user_id=?
+      AND membership.org_id=?
+      AND membership.status='active'
   `).get(ownerUserId, orgId));
 }
 
@@ -670,7 +838,6 @@ function serializeWorkspaceLink(link, authorization) {
     record_id: String(link.record_id),
     access_state: 'available',
     label: authorization.label,
-    route: authorization.route,
     created_at: link.created_at,
     revoked_at: link.revoked_at
   };
@@ -710,8 +877,13 @@ function serializeEventMetadata(eventType, metadata, authorization) {
       return { access_state: 'restricted' };
     }
   }
+  const validated = validateFullEventMetadata(eventType, metadata, keys);
   const serialized = {};
-  for (const key of keys) serialized[key] = metadata[key];
+  for (const key of keys) {
+    serialized[key] = Array.isArray(validated[key])
+      ? [...validated[key]]
+      : validated[key];
+  }
   return serialized;
 }
 
@@ -724,7 +896,9 @@ function projectKnowledgeVisibility({ legacyVisibility, isPublic }) {
   ) {
     return 'team';
   }
-  return Number(isPublic) === 1 ? 'team' : 'private';
+  return legacyVisibility === null && Number(isPublic) === 1
+    ? 'team'
+    : 'private';
 }
 
 function projectKnowledgeSource(sourceType) {

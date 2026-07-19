@@ -488,6 +488,27 @@ describe('RED group 2: organization repair, assignment, and CRM manage', () => {
       ownerUserId: identity.teammateId,
       teamId: identity.ownerTeamId,
       mode: 'transfer'
+    }).allowed, true);
+    assert.equal(getAssignmentDecision(db, {
+      actorUserId: identity.ownerId,
+      currentOwnerUserId: identity.ownerId,
+      ownerUserId: identity.outsiderId,
+      teamId: identity.ownerTeamId,
+      mode: 'transfer'
+    }).allowed, false);
+    assert.equal(getAssignmentDecision(db, {
+      actorUserId: identity.teammateId,
+      currentOwnerUserId: identity.ownerId,
+      ownerUserId: identity.teammateId,
+      teamId: identity.ownerTeamId,
+      mode: 'transfer'
+    }).allowed, false);
+    assert.equal(getAssignmentDecision(db, {
+      actorUserId: identity.ownerId,
+      currentOwnerUserId: identity.ownerId,
+      ownerUserId: identity.outsiderId,
+      teamId: identity.outsiderTeamId,
+      mode: 'transfer'
     }).allowed, false);
 
     const teamLeadCreate = getCampaignCreationDecision(db, {
@@ -695,6 +716,87 @@ describe('RED group 3: transactional identity projection', () => {
     assert.equal(
       db.prepare('SELECT role FROM users WHERE id=50').get().role,
       'user'
+    );
+    assert.equal(db.inTransaction, false);
+  });
+
+  test('a nested projection failure rolls back to its savepoint while the outer transaction commits', (t) => {
+    const db = openCampaignDatabase(t);
+    runIdentityProjectionTransaction(db, {
+      actorUserId: 1,
+      subjectUserId: 50,
+      reason: 'user_create',
+      requestId: 'request-nested-create',
+      mutateUser() {
+        db.prepare(`
+          INSERT INTO users (
+            id,username,password_hash,display_name,role,email,department,is_active
+          ) VALUES (
+            50,'nested-user','test-hash','Nested User','user',
+            'nested@example.invalid','Nested Department',1
+          )
+        `).run();
+      }
+    });
+    insertSession(db, 50, 'nested-rollback');
+
+    const snapshot = () => ({
+      user: db.prepare(`
+        SELECT id,role,department,is_active
+        FROM users
+        WHERE id=50
+      `).get(),
+      organizations: db.prepare(`
+        SELECT org_id,user_id,role_code,status
+        FROM organization_memberships
+        WHERE user_id=50
+        ORDER BY org_id
+      `).all(),
+      teams: db.prepare(`
+        SELECT org_id,team_id,user_id,role_code,status
+        FROM team_memberships
+        WHERE user_id=50
+        ORDER BY org_id,team_id
+      `).all(),
+      sessions: db.prepare(`
+        SELECT user_id,token
+        FROM sessions
+        WHERE user_id=50
+        ORDER BY id
+      `).all(),
+      activity: db.prepare(`
+        SELECT user_id,action,module,details
+        FROM activity_log
+        ORDER BY id
+      `).all()
+    });
+    const before = snapshot();
+    const outerDisplayName = 'Outer transaction committed';
+    let nestedError = null;
+
+    db.transaction(() => {
+      try {
+        runIdentityProjectionTransaction(db, {
+          actorUserId: 999999,
+          subjectUserId: 50,
+          reason: 'admin_update',
+          requestId: 'request-nested-rollback',
+          mutateUser() {
+            db.prepare("UPDATE users SET role='admin' WHERE id=50").run();
+          }
+        });
+      } catch (error) {
+        nestedError = error;
+      }
+      db.prepare('UPDATE users SET display_name=? WHERE id=11')
+        .run(outerDisplayName);
+    })();
+
+    assert.match(nestedError && nestedError.message, /FOREIGN KEY constraint failed/);
+    assert.deepEqual(snapshot(), before);
+    assert.equal(
+      db.prepare('SELECT display_name FROM users WHERE id=11').get().display_name,
+      outerDisplayName
     );
     assert.equal(db.inTransaction, false);
   });
@@ -914,6 +1016,161 @@ describe('RED group 4: target access and immutable custody', () => {
       intent: 'manage'
     }).code, 'CAMPAIGN_ON_HOLD');
   });
+
+  test('a non-platform org admin manages private targets only for active same-org owners', (t) => {
+    const db = openCampaignDatabase(t);
+    const identity = seedCampaigns(db);
+    const orgAdminId = 11;
+    assert.equal(
+      db.prepare('SELECT role FROM users WHERE id=?').get(orgAdminId).role,
+      'user'
+    );
+    db.prepare(`
+      UPDATE organization_memberships
+      SET role_code='org_admin'
+      WHERE org_id=? AND user_id=?
+    `).run(identity.orgId, orgAdminId);
+
+    const revokedOwnerId = 10;
+    db.prepare(`
+      UPDATE organization_memberships
+      SET status='revoked',revoked_at='2026-07-03 00:00:00'
+      WHERE org_id=? AND user_id=?
+    `).run(identity.orgId, revokedOwnerId);
+
+    const deactivatedOwnerId = 9;
+    runIdentityProjectionTransaction(db, {
+      actorUserId: identity.adminId,
+      subjectUserId: deactivatedOwnerId,
+      reason: 'soft_deactivate',
+      requestId: 'request-target-owner-deactivate',
+      mutateUser() {
+        db.prepare('UPDATE users SET is_active=0 WHERE id=?')
+          .run(deactivatedOwnerId);
+      }
+    });
+
+    const otherOrganizationOwnerId = 60;
+    db.prepare(`
+      INSERT INTO users (
+        id,username,password_hash,display_name,role,email,department,is_active
+      ) VALUES (
+        60,'other-org-owner','test-hash','Other Org Owner','user',
+        'other-org-owner@example.invalid','Other Organization',1
+      )
+    `).run();
+    db.prepare(`
+      INSERT INTO organization_memberships (
+        org_id,user_id,role_code,status,created_at
+      ) VALUES (2,60,'member','active','2026-07-03 00:00:00')
+    `).run();
+    db.prepare(`
+      INSERT INTO team_memberships (
+        org_id,team_id,user_id,role_code,status,created_at
+      ) VALUES (2,201,60,'member','active','2026-07-03 00:00:00')
+    `).run();
+    assert.equal(
+      db.prepare(`
+        SELECT COUNT(*) AS count
+        FROM organization_memberships
+        WHERE org_id=? AND user_id=?
+      `).get(identity.orgId, otherOrganizationOwnerId).count,
+      0
+    );
+
+    const influencer = db.prepare(`
+      SELECT id
+      FROM influencers
+      WHERE is_active=1
+      ORDER BY id
+      LIMIT 1
+    `).get();
+    assert.ok(influencer);
+    const ownerCases = [
+      { label: 'active-same-org', ownerUserId: identity.ownerId, allowed: true },
+      { label: 'revoked', ownerUserId: revokedOwnerId, allowed: false },
+      { label: 'deactivated', ownerUserId: deactivatedOwnerId, allowed: false },
+      {
+        label: 'other-org-only',
+        ownerUserId: otherOrganizationOwnerId,
+        allowed: false
+      }
+    ];
+    const insertDemand = db.prepare(`
+      INSERT INTO demands (
+        id,user_id,brand_name,company_name,product_name,status,data_json
+      ) VALUES (?,?,?,'Owner Access Co','Product','confirmed','{}')
+    `);
+    const insertCollaboration = db.prepare(`
+      INSERT INTO collaborations (
+        id,demand_id,influencer_id,user_id,status
+      ) VALUES (?,?,?,?, 'proposed')
+    `);
+    const insertConversation = db.prepare(`
+      INSERT INTO ai_conversations (
+        id,user_id,title,visibility,source_module
+      ) VALUES (?,?,?,'private','assistant')
+    `);
+
+    ownerCases.forEach((ownerCase, index) => {
+      const demandId = 6201 + index;
+      const collaborationId = 6101 + index;
+      const conversationId = 6001 + index;
+      insertDemand.run(
+        demandId,
+        ownerCase.ownerUserId,
+        `${ownerCase.label} demand`
+      );
+      insertCollaboration.run(
+        collaborationId,
+        demandId,
+        influencer.id,
+        ownerCase.ownerUserId
+      );
+      insertConversation.run(
+        conversationId,
+        ownerCase.ownerUserId,
+        `${ownerCase.label} conversation`
+      );
+
+      for (const intent of ['read', 'manage']) {
+        for (const target of [
+          {
+            recordType: 'collaboration',
+            recordId: collaborationId,
+            relationType: 'order'
+          },
+          {
+            recordType: 'ai_conversation',
+            recordId: conversationId,
+            relationType: 'ai_run'
+          }
+        ]) {
+          const decision = getTargetAccess(db, {
+            userId: orgAdminId,
+            campaignId: 3001,
+            ...target,
+            intent
+          });
+          if (ownerCase.allowed) {
+            assert.equal(decision.ok, true, `${ownerCase.label} ${target.recordType} ${intent}`);
+          } else {
+            assert.equal(
+              decision.code,
+              'RECORD_NOT_FOUND',
+              `${ownerCase.label} ${target.recordType} ${intent}`
+            );
+          }
+          assert.equal(getTargetAccess(db, {
+            userId: identity.adminId,
+            campaignId: 3001,
+            ...target,
+            intent
+          }).ok, true, `platform admin ${ownerCase.label} ${target.recordType} ${intent}`);
+        }
+      }
+    });
+  });
 });
 
 describe('RED group 5: bound collection predicates', () => {
@@ -996,6 +1253,81 @@ describe('RED group 5: bound collection predicates', () => {
 });
 
 describe('RED group 6: key-closed authorization serializers', () => {
+  function validEventMetadataFixtures() {
+    return {
+      campaign_created: {
+        customer_id: 1001,
+        opportunity_id: 2001,
+        owner_user_id: 2,
+        team_id: 8,
+        row_version: 1
+      },
+      lifecycle_transition: {
+        previous_version: 1,
+        next_version: 2
+      },
+      operational_status_changed: {
+        previous_status: 'active',
+        next_status: 'on_hold',
+        previous_version: 2,
+        next_version: 3
+      },
+      campaign_transferred: {
+        previous_owner_user_id: 2,
+        next_owner_user_id: 3,
+        previous_team_id: 8,
+        next_team_id: 9,
+        previous_version: 3,
+        next_version: 4
+      },
+      link_attached: {
+        bundle_id: sha256('valid-attached-bundle'),
+        relation_types: ['ppt', 'proposal'],
+        record_type: 'proposal',
+        record_id: '4101',
+        link_ids: [71, 72]
+      },
+      link_revoked: {
+        bundle_id: sha256('valid-revoked-bundle'),
+        relation_types: ['execution', 'order', 'publication', 'settlement'],
+        record_type: 'collaboration',
+        record_id: '6101',
+        revoked_link_ids: [73, 74]
+      },
+      link_moved: {
+        source_bundle_id: sha256('valid-source-bundle'),
+        destination_bundle_id: sha256('valid-destination-bundle'),
+        relation_types: ['knowledge', 'review'],
+        record_type: 'knowledge_entry',
+        record_id: '4201',
+        source_campaign_id: 3001,
+        destination_campaign_id: 3006,
+        revoked_link_ids: [75, 76],
+        replacement_link_ids: [77, 78]
+      },
+      workflow_reconciliation: {
+        original_dispatch_id: 81,
+        replacement_dispatch_id: 82,
+        template_id: 91,
+        template_version: 3
+      }
+    };
+  }
+
+  function fullEventAuthorization(eventType) {
+    if (eventType === 'link_moved') {
+      return {
+        target: 'available',
+        sourceCampaign: 'available',
+        destinationCampaign: 'available'
+      };
+    }
+    if (eventType === 'link_attached' || eventType === 'link_revoked') {
+      return { target: 'available' };
+    }
+    return undefined;
+  }
+
   test('workspace links and move events emit only full, restricted, or missing variants', () => {
     const link = {
       id: 71,
@@ -1011,8 +1343,7 @@ describe('RED group 6: key-closed authorization serializers', () => {
     };
     const available = serializeWorkspaceLink(link, {
       target: 'available',
-      label: 'Proposal',
-      route: '/campaigns?campaign=3001&proposal=4101'
+      label: 'Proposal'
     });
     assert.deepEqual(Object.keys(available), [
       'link_id',
@@ -1021,7 +1352,6 @@ describe('RED group 6: key-closed authorization serializers', () => {
       'record_id',
       'access_state',
       'label',
-      'route',
       'created_at',
       'revoked_at'
     ]);
@@ -1055,8 +1385,7 @@ describe('RED group 6: key-closed authorization serializers', () => {
       source_campaign_id: 3001,
       destination_campaign_id: 3006,
       revoked_link_ids: [71],
-      replacement_link_ids: [72],
-      extra: 'drop-me'
+      replacement_link_ids: [72]
     };
     const fullMove = serializeEventMetadata('link_moved', moveMetadata, {
       target: 'available',
@@ -1108,6 +1437,229 @@ describe('RED group 6: key-closed authorization serializers', () => {
       () => serializeEventMetadata('link_moved', moveMetadata),
       /explicit event authorization states are required/
     );
+  });
+
+  test('full event metadata accepts every exact documented variant', () => {
+    const fixtures = validEventMetadataFixtures();
+    for (const [eventType, metadata] of Object.entries(fixtures)) {
+      assert.deepEqual(
+        serializeEventMetadata(
+          eventType,
+          metadata,
+          fullEventAuthorization(eventType)
+        ),
+        metadata,
+        eventType
+      );
+    }
+  });
+
+  test('full event metadata rejects malformed shapes, values, and incompatible arrays', () => {
+    const fixtures = validEventMetadataFixtures();
+    const invalid = (eventType, metadata) => {
+      assert.throws(
+        () => serializeEventMetadata(
+          eventType,
+          metadata,
+          fullEventAuthorization(eventType)
+        ),
+        /invalid campaign event metadata/,
+        eventType
+      );
+    };
+
+    for (const [eventType, metadata] of Object.entries(fixtures)) {
+      const keys = Object.keys(metadata);
+      const missing = { ...metadata };
+      delete missing[keys[0]];
+      invalid(eventType, missing);
+      invalid(eventType, { ...metadata, extra_key: 'not allowed' });
+      invalid(eventType, { ...metadata, [keys[0]]: undefined });
+      invalid(eventType, { ...metadata, [keys[0]]: null });
+      invalid(
+        eventType,
+        Object.assign(Object.create({ inherited: true }), metadata)
+      );
+    }
+
+    const integerKeys = {
+      campaign_created: [
+        'customer_id',
+        'opportunity_id',
+        'owner_user_id',
+        'team_id',
+        'row_version'
+      ],
+      lifecycle_transition: ['previous_version', 'next_version'],
+      operational_status_changed: ['previous_version', 'next_version'],
+      campaign_transferred: [
+        'previous_owner_user_id',
+        'next_owner_user_id',
+        'previous_team_id',
+        'next_team_id',
+        'previous_version',
+        'next_version'
+      ],
+      link_moved: ['source_campaign_id', 'destination_campaign_id'],
+      workflow_reconciliation: [
+        'original_dispatch_id',
+        'replacement_dispatch_id',
+        'template_id',
+        'template_version'
+      ]
+    };
+    for (const [eventType, keys] of Object.entries(integerKeys)) {
+      for (const key of keys) {
+        invalid(eventType, { ...fixtures[eventType], [key]: 0 });
+        invalid(eventType, { ...fixtures[eventType], [key]: '1' });
+        invalid(eventType, {
+          ...fixtures[eventType],
+          [key]: Number.MAX_SAFE_INTEGER + 1
+        });
+      }
+    }
+
+    for (const key of ['previous_status', 'next_status']) {
+      invalid('operational_status_changed', {
+        ...fixtures.operational_status_changed,
+        [key]: 'ACTIVE'
+      });
+      invalid('operational_status_changed', {
+        ...fixtures.operational_status_changed,
+        [key]: 'paused'
+      });
+    }
+
+    const bundleKeys = {
+      link_attached: ['bundle_id'],
+      link_revoked: ['bundle_id'],
+      link_moved: ['source_bundle_id', 'destination_bundle_id']
+    };
+    for (const [eventType, keys] of Object.entries(bundleKeys)) {
+      for (const key of keys) {
+        invalid(eventType, { ...fixtures[eventType], [key]: 'A'.repeat(64) });
+        invalid(eventType, { ...fixtures[eventType], [key]: 'g'.repeat(64) });
+        invalid(eventType, { ...fixtures[eventType], [key]: 'a'.repeat(63) });
+      }
+    }
+
+    for (const eventType of ['link_attached', 'link_revoked', 'link_moved']) {
+      for (const recordId of [
+        1,
+        '',
+        '01',
+        '1.0',
+        '9007199254740992',
+        '12345678901234567'
+      ]) {
+        invalid(eventType, { ...fixtures[eventType], record_id: recordId });
+      }
+      invalid(eventType, {
+        ...fixtures[eventType],
+        record_type: 'customer'
+      });
+      invalid(eventType, {
+        ...fixtures[eventType],
+        relation_types: {}
+      });
+      invalid(eventType, {
+        ...fixtures[eventType],
+        relation_types: []
+      });
+      invalid(eventType, {
+        ...fixtures[eventType],
+        relation_types: [
+          fixtures[eventType].relation_types[0],
+          fixtures[eventType].relation_types[0]
+        ]
+      });
+      invalid(eventType, {
+        ...fixtures[eventType],
+        relation_types: [...fixtures[eventType].relation_types].reverse()
+      });
+      invalid(eventType, {
+        ...fixtures[eventType],
+        relation_types: ['unknown']
+      });
+      invalid(eventType, {
+        ...fixtures[eventType],
+        relation_types: [1]
+      });
+    }
+    invalid('link_attached', {
+      ...fixtures.link_attached,
+      relation_types: ['demand']
+    });
+    invalid('link_revoked', {
+      ...fixtures.link_revoked,
+      relation_types: ['proposal']
+    });
+    invalid('link_moved', {
+      ...fixtures.link_moved,
+      relation_types: ['workflow']
+    });
+
+    const idArrayKeys = {
+      link_attached: ['link_ids'],
+      link_revoked: ['revoked_link_ids'],
+      link_moved: ['revoked_link_ids', 'replacement_link_ids']
+    };
+    for (const [eventType, keys] of Object.entries(idArrayKeys)) {
+      for (const key of keys) {
+        invalid(eventType, { ...fixtures[eventType], [key]: {} });
+        invalid(eventType, { ...fixtures[eventType], [key]: [] });
+        invalid(eventType, { ...fixtures[eventType], [key]: [1, 1] });
+        invalid(eventType, { ...fixtures[eventType], [key]: [2, 1] });
+        invalid(eventType, { ...fixtures[eventType], [key]: [0] });
+        invalid(eventType, { ...fixtures[eventType], [key]: ['1'] });
+        invalid(eventType, {
+          ...fixtures[eventType],
+          [key]: [Number.MAX_SAFE_INTEGER + 1]
+        });
+        invalid(eventType, { ...fixtures[eventType], [key]: [undefined] });
+      }
+    }
+
+    invalid('link_moved', {
+      ...fixtures.link_moved,
+      destination_campaign_id: fixtures.link_moved.source_campaign_id
+    });
+    invalid('link_moved', {
+      ...fixtures.link_moved,
+      destination_bundle_id: fixtures.link_moved.source_bundle_id
+    });
+  });
+
+  test('restricted and missing event variants never inspect inaccessible metadata', () => {
+    const inaccessible = new Proxy({}, {
+      get() {
+        throw new Error('inaccessible metadata was read');
+      },
+      getPrototypeOf() {
+        throw new Error('inaccessible metadata prototype was read');
+      },
+      ownKeys() {
+        throw new Error('inaccessible metadata keys were read');
+      }
+    });
+    for (const eventType of ['link_attached', 'link_revoked']) {
+      assert.deepEqual(serializeEventMetadata(eventType, inaccessible, {
+        target: 'restricted'
+      }), { access_state: 'restricted' });
+      assert.deepEqual(serializeEventMetadata(eventType, inaccessible, {
+        target: 'missing'
+      }), { access_state: 'missing' });
+    }
+    assert.deepEqual(serializeEventMetadata('link_moved', inaccessible, {
+      target: 'available',
+      sourceCampaign: 'restricted',
+      destinationCampaign: 'available'
+    }), { access_state: 'restricted' });
+    assert.deepEqual(serializeEventMetadata('link_moved', inaccessible, {
+      target: 'missing',
+      sourceCampaign: 'available',
+      destinationCampaign: 'available'
+    }), { access_state: 'missing' });
   });
 
   test('knowledge references are full only after explicit authorization', () => {
@@ -1227,7 +1779,15 @@ describe('RED group 7: conversation, visibility, and source projections', () => 
     assert.equal(projectKnowledgeVisibility({
       legacyVisibility: 'legacy-secret-token',
       isPublic: 1
+    }), 'private');
+    assert.equal(projectKnowledgeVisibility({
+      legacyVisibility: null,
+      isPublic: 1
     }), 'team');
+    assert.equal(projectKnowledgeVisibility({
+      legacyVisibility: null,
+      isPublic: 0
+    }), 'private');
     assert.deepEqual(projectKnowledgeSource('campaign_review'), {
       kind: 'review',
       label: 'Campaign review'

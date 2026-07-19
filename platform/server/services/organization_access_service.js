@@ -389,7 +389,6 @@ function runIdentityProjectionTransaction(db, options) {
     };
   };
 
-  if (db.inTransaction) return operation();
   return db.transaction(operation).immediate();
 }
 
@@ -564,10 +563,7 @@ function getAssignmentDecision(db, options) {
     } catch {
       return assignmentFailure();
     }
-    if (
-      currentOwnerUserId !== actorUserId ||
-      ownerUserId !== actorUserId
-    ) {
+    if (currentOwnerUserId !== actorUserId) {
       return assignmentFailure();
     }
     return {
