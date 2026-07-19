@@ -1,5 +1,150 @@
 const crypto = require('crypto');
 
+const MAX_SAFE_ID = 9007199254740991;
+const MAX_ALLOCATABLE_PREVIOUS_ID = 9007199254740990n;
+const PREVIOUS_ENTRY_ID_SQL = `
+  WITH bounds AS (
+    SELECT
+      COALESCE((SELECT seq FROM sqlite_sequence WHERE name='knowledge_entries'),0) AS seq,
+      COALESCE((SELECT MAX(id) FROM knowledge_entries),0) AS max_id
+  )
+  SELECT CASE WHEN seq>max_id THEN seq ELSE max_id END AS previous_id
+  FROM bounds
+`;
+
+function assertScalarText(value, label) {
+  const text = String(value);
+  for (const point of text) {
+    const codePoint = point.codePointAt(0);
+    if (codePoint >= 0xd800 && codePoint <= 0xdfff) {
+      throw new Error(`${label} contains an isolated Unicode surrogate`);
+    }
+  }
+  return text;
+}
+
+function canonicalKnowledgeText(value, label) {
+  return assertScalarText(value, label).replace(/\r\n?/g, '\n').normalize('NFC');
+}
+
+function compareUtf8(left, right) {
+  return Buffer.compare(Buffer.from(left, 'utf8'), Buffer.from(right, 'utf8'));
+}
+
+function canonicalKnowledgeTags(tags) {
+  const normalized = tags.map(function(tag) {
+    return canonicalKnowledgeText(tag, 'knowledge tag');
+  });
+  return Array.from(new Set(normalized)).sort(compareUtf8);
+}
+
+function sha256Hex(bytes) {
+  return crypto.createHash('sha256').update(bytes).digest('hex');
+}
+
+function frame32(bytes) {
+  const payload = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes);
+  if (payload.length > 0xffffffff) throw new Error('knowledge digest frame is too large');
+  const length = Buffer.alloc(4);
+  length.writeUInt32BE(payload.length);
+  return Buffer.concat([length, payload]);
+}
+
+function framedDigest(payloads) {
+  return sha256Hex(Buffer.concat(payloads.map(frame32)));
+}
+
+function assertPositiveSafeId(value, label) {
+  if (!Number.isSafeInteger(value) || value < 1 || value > MAX_SAFE_ID) {
+    throw new Error(`${label} must be a positive JavaScript-safe integer`);
+  }
+  return value;
+}
+
+function typedText(value, label) {
+  return Buffer.concat([
+    Buffer.from([2]),
+    Buffer.from(assertScalarText(value, label), 'utf8')
+  ]);
+}
+
+function typedInteger(value, label) {
+  return Buffer.concat([
+    Buffer.from([1]),
+    Buffer.from(String(assertPositiveSafeId(value, label)), 'utf8')
+  ]);
+}
+
+function typedNullableText(value, label) {
+  return value === null ? Buffer.from([0]) : typedText(value, label);
+}
+
+function typedNullableInteger(value, label) {
+  return value === null ? Buffer.from([0]) : typedInteger(value, label);
+}
+
+function sqliteIntegerAffinitySourceId(value) {
+  if (value === undefined || value === null) return null;
+  if (typeof value === 'bigint') {
+    if (value < 1n || value > BigInt(MAX_SAFE_ID)) {
+      throw new Error('knowledge source_id must be a positive JavaScript-safe integer');
+    }
+    return Number(value);
+  }
+  if (typeof value === 'number') {
+    return assertPositiveSafeId(value, 'knowledge source_id');
+  }
+  const text = assertScalarText(value, 'knowledge source_id');
+  if (Buffer.byteLength(text, 'utf8') > 4096) {
+    throw new Error('knowledge source_id exceeds 4096 UTF-8 bytes');
+  }
+  if (text.includes('\u0000')) {
+    throw new Error('knowledge source_id cannot contain NUL');
+  }
+  const numericLiteral = /^[\u0009-\u000d\u0020]*[+-]?(?:(?:[0-9]+(?:\.[0-9]*)?)|(?:\.[0-9]+))(?:[eE][+-]?[0-9]+)?[\u0009-\u000d\u0020]*$/;
+  if (!numericLiteral.test(text)) return text;
+  const numeric = Number(text);
+  if (!Number.isSafeInteger(numeric) || numeric < 1 || numeric > MAX_SAFE_ID) {
+    throw new Error('knowledge source_id would not retain safe INTEGER storage');
+  }
+  return numeric;
+}
+
+function legacySourceIdentityDigest(entry) {
+  let sourceId;
+  if (entry.source_id === null) sourceId = Buffer.from([0]);
+  else if (typeof entry.source_id === 'number') {
+    sourceId = typedInteger(entry.source_id, 'knowledge source_id');
+  } else {
+    sourceId = typedText(entry.source_id, 'knowledge source_id');
+  }
+  return framedDigest([
+    typedText('tm-knowledge-legacy-source-v1', 'knowledge source identity version'),
+    typedInteger(entry.id, 'knowledge entry id'),
+    typedNullableText(entry.entry_type, 'knowledge entry_type'),
+    typedNullableText(entry.source_type, 'knowledge source_type'),
+    sourceId,
+    typedNullableText(entry.source_hash, 'knowledge source_hash'),
+    typedNullableText(entry.business_type, 'knowledge business_type'),
+    typedNullableText(entry.business_id, 'knowledge business_id'),
+    typedNullableInteger(entry.created_by, 'knowledge created_by')
+  ]);
+}
+
+function knowledgeContentDigest(entry) {
+  return framedDigest([
+    'tm-knowledge-content-v1',
+    entry.entry_type,
+    entry.title,
+    entry.summary,
+    entry.content,
+    JSON.stringify(entry.tags),
+    entry.visibility
+  ].map(function(value, index) {
+    return Buffer.from(assertScalarText(value, `knowledge content frame ${index}`), 'utf8');
+  }));
+}
+
 function toJson(value, fallback) {
   if (value === undefined || value === null) return JSON.stringify(fallback);
   if (typeof value === 'string') return value;
@@ -47,33 +192,38 @@ function hashInput(input) {
 
 function compactText(value, maxLength) {
   const text = String(value || '').replace(/\s+/g, ' ').trim();
-  if (!maxLength || text.length <= maxLength) return text;
-  return text.slice(0, maxLength - 1) + '...';
+  const points = Array.from(text);
+  if (!maxLength || points.length <= maxLength) return text;
+  return points.slice(0, Math.max(0, maxLength - 3)).join('') + '...';
 }
 
 function makeChunks(content, chunkSize) {
-  const text = String(content || '').trim();
+  const text = assertScalarText(String(content || ''), 'knowledge chunk input').trim();
   if (!text) return [''];
-  const size = chunkSize || 1200;
+  const size = Number.isSafeInteger(chunkSize) && chunkSize > 0 ? chunkSize : 1200;
   const chunks = [];
   let current = '';
   text.split(/\n{2,}/).forEach(function(part) {
     const paragraph = part.trim();
     if (!paragraph) return;
-    if ((current + '\n\n' + paragraph).length <= size) {
-      current = current ? current + '\n\n' + paragraph : paragraph;
+    const candidate = current ? current + '\n\n' + paragraph : paragraph;
+    if (Array.from(candidate).length <= size) {
+      current = candidate;
       return;
     }
     if (current) chunks.push(current);
-    if (paragraph.length <= size) {
+    const points = Array.from(paragraph);
+    if (points.length <= size) {
       current = paragraph;
       return;
     }
-    for (let i = 0; i < paragraph.length; i += size) chunks.push(paragraph.slice(i, i + size));
+    for (let i = 0; i < points.length; i += size) {
+      chunks.push(points.slice(i, i + size).join(''));
+    }
     current = '';
   });
   if (current) chunks.push(current);
-  return chunks.length ? chunks : [text.slice(0, size)];
+  return chunks.length ? chunks : [''];
 }
 
 function normalizeEntry(row) {
@@ -104,106 +254,385 @@ function normalizeEntry(row) {
   };
 }
 
+function preparedChunks(entry) {
+  return makeChunks(entry.content).map(function(content, index) {
+    return {
+      index,
+      content,
+      contentSha256: sha256Hex(Buffer.from(content, 'utf8')),
+      metadataJson: toJson({ title: entry.title }, {}),
+      tokenCount: Math.ceil(Array.from(content).length / 4)
+    };
+  });
+}
+
 function rebuildChunks(db, entryId, entry) {
-  try { db.prepare('DELETE FROM knowledge_chunks_fts WHERE entry_id = ?').run(entryId); } catch (e) {}
+  const chunks = preparedChunks(entry);
+  db.prepare('DELETE FROM knowledge_chunks_fts WHERE entry_id = ?').run(entryId);
   db.prepare('DELETE FROM knowledge_chunks WHERE entry_id = ?').run(entryId);
-  const chunks = makeChunks(entry.content);
   const insertChunk = db.prepare(`
-    INSERT INTO knowledge_chunks (entry_id, chunk_index, content, metadata_json, token_count, embedding_json)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `);
+    INSERT INTO knowledge_chunks (
+      entry_id,chunk_index,content,metadata_json,token_count,embedding_json,content_sha256
+    )
+    VALUES (?,?,?,?,?,?,?)
+  `).safeIntegers(true);
   const insertFts = db.prepare(`
     INSERT INTO knowledge_chunks_fts (title, content, tags, entry_id, chunk_id)
     VALUES (?, ?, ?, ?, ?)
   `);
-  chunks.forEach(function(chunk, index) {
-    const result = insertChunk.run(entryId, index, chunk, toJson({ title: entry.title }, {}), Math.ceil(chunk.length / 4), null);
-    try {
-      insertFts.run(entry.title || '', chunk || '', (entry.tags || []).join(' '), entryId, result.lastInsertRowid);
-    } catch (e) {}
+  const expectedFts = [];
+  chunks.forEach(function(chunk) {
+    const result = insertChunk.run(
+      entryId,
+      chunk.index,
+      chunk.content,
+      chunk.metadataJson,
+      chunk.tokenCount,
+      null,
+      chunk.contentSha256
+    );
+    const chunkIdValue = result.lastInsertRowid;
+    if (
+      typeof chunkIdValue !== 'bigint' ||
+      chunkIdValue < 1n ||
+      chunkIdValue > BigInt(MAX_SAFE_ID)
+    ) {
+      throw new Error('knowledge chunk identifier is not JavaScript-safe');
+    }
+    const chunkId = Number(chunkIdValue);
+    insertFts.run(
+      entry.title,
+      chunk.content,
+      entry.tags.join(' '),
+      entryId,
+      chunkId
+    );
+    expectedFts.push({
+      title: entry.title,
+      content: chunk.content,
+      tags: entry.tags.join(' '),
+      entry_id: entryId,
+      chunk_id: chunkId
+    });
+  });
+
+  db.prepare(
+    "INSERT INTO knowledge_chunks_fts(knowledge_chunks_fts) VALUES('integrity-check')"
+  ).run();
+  const actualFts = db.prepare(`
+    SELECT title,content,tags,entry_id,chunk_id
+    FROM knowledge_chunks_fts
+    WHERE entry_id=?
+    ORDER BY CAST(chunk_id AS INTEGER),rowid
+  `).all(entryId);
+  if (JSON.stringify(actualFts) !== JSON.stringify(expectedFts)) {
+    throw new Error('knowledge FTS projection mismatch');
+  }
+}
+
+function rawCreatorId(input) {
+  if (Object.prototype.hasOwnProperty.call(input, 'created_by')) {
+    return input.created_by;
+  }
+  if (input.user && Object.prototype.hasOwnProperty.call(input.user, 'id')) {
+    return input.user.id;
+  }
+  return null;
+}
+
+function normalizedCreatorId(input) {
+  const raw = rawCreatorId(input);
+  if (raw === null || raw === undefined) return null;
+  if (typeof raw === 'bigint') {
+    if (raw < 1n || raw > BigInt(MAX_SAFE_ID)) {
+      throw new Error('knowledge created_by must be a positive JavaScript-safe integer');
+    }
+    return Number(raw);
+  }
+  if (typeof raw !== 'number' && typeof raw !== 'string') {
+    throw new Error('knowledge created_by must be a positive JavaScript-safe integer');
+  }
+  if (typeof raw === 'string' && raw.length === 0) {
+    throw new Error('knowledge created_by must be a positive JavaScript-safe integer');
+  }
+  const numeric = typeof raw === 'number' ? raw : Number(raw);
+  return assertPositiveSafeId(numeric, 'knowledge created_by');
+}
+
+function optionalStoredText(value, label) {
+  if (value === undefined || value === null || value === '') return null;
+  return assertScalarText(value, label);
+}
+
+function prepareLegacyEntry(input) {
+  const visibility = normalizeVisibility(
+    input.visibility ||
+    (input.is_public === 1 ? 'team' : input.is_public === 0 ? 'private' : 'private')
+  );
+  const rawCreator = rawCreatorId(input);
+  const createdBy = normalizedCreatorId(input);
+  const rawHashInput = {
+    entry_type: input.entry_type || input.type || 'note',
+    title: input.title || '',
+    content: input.content || '',
+    source_type: input.source_type || '',
+    source_id: input.source_id,
+    business_type: input.business_type,
+    business_id: input.business_id,
+    owner_id: visibility === 'private' && rawCreator !== null && rawCreator !== undefined
+      ? rawCreator
+      : ''
+  };
+  const rawSourceHash = (
+    input.allow_source_hash === true && input.source_hash
+      ? input.source_hash
+      : hashInput(rawHashInput)
+  );
+  const tags = canonicalKnowledgeTags(
+    normalizeTags(input.tags_json || input.tags || input.key_terms || [])
+  );
+  const entryType = assertScalarText(
+    input.entry_type || input.type || 'note',
+    'knowledge entry_type'
+  );
+  const title = canonicalKnowledgeText(
+    input.title || compactText(input.content || input.summary || 'Knowledge', 80),
+    'knowledge title'
+  );
+  const summary = canonicalKnowledgeText(
+    input.summary || compactText(input.content || '', 240),
+    'knowledge summary'
+  );
+  const content = canonicalKnowledgeText(
+    String(input.content || ''),
+    'knowledge content'
+  );
+  const entry = {
+    entry_type: entryType,
+    title,
+    summary,
+    content,
+    tags,
+    source_type: optionalStoredText(input.source_type, 'knowledge source_type'),
+    source_id: sqliteIntegerAffinitySourceId(input.source_id),
+    source_hash: assertScalarText(rawSourceHash, 'knowledge source_hash'),
+    business_type: optionalStoredText(input.business_type, 'knowledge business_type'),
+    business_id: input.business_id === undefined
+      ? null
+      : assertScalarText(String(input.business_id), 'knowledge business_id'),
+    metadata_json: toJson(input.metadata || input.metadata_json || {}, {}),
+    embedding_json: input.embedding_json ? toJson(input.embedding_json, null) : null,
+    created_by: createdBy,
+    is_public: isSharedVisibility(visibility) ? 1 : 0,
+    visibility
+  };
+  entry.content_sha256 = knowledgeContentDigest(entry);
+  return entry;
+}
+
+function findSourceHashEntry(db, sourceHash) {
+  if (!sourceHash) return null;
+  return db.prepare(`
+    SELECT
+      id,entry_type,source_type,source_id,source_hash,business_type,business_id,
+      created_by,visibility,is_public,source_identity_sha256
+    FROM knowledge_entries
+    WHERE source_hash=?
+  `).get(sourceHash) || null;
+}
+
+function isCampaignClassified(db, entryId) {
+  const hasCampaignLinks = db.prepare(`
+    SELECT 1 AS present
+    FROM sqlite_schema
+    WHERE type='table' AND name='campaign_record_links'
+  `).get();
+  if (!hasCampaignLinks) return false;
+  return Boolean(db.prepare(`
+    SELECT 1 AS present
+    FROM campaign_record_links
+    WHERE record_type='knowledge_entry' AND record_id=?
+    LIMIT 1
+  `).get(String(entryId)));
+}
+
+function assertStoredSourceIdentity(existing) {
+  if (
+    typeof existing.source_identity_sha256 !== 'string' ||
+    legacySourceIdentityDigest(existing) !== existing.source_identity_sha256
+  ) {
+    throw new Error('Knowledge source identity digest mismatch');
+  }
+}
+
+function preserveLegacyEmptyIdentity(existingValue, candidateValue, canonicalDefault) {
+  if (
+    (existingValue === null || existingValue === '') &&
+    candidateValue === canonicalDefault
+  ) {
+    return existingValue;
+  }
+  return candidateValue;
+}
+
+function refreshSourceIdentity(existing, entry) {
+  return Object.assign({}, entry, {
+    id: existing.id,
+    entry_type: preserveLegacyEmptyIdentity(
+      existing.entry_type,
+      entry.entry_type,
+      'note'
+    ),
+    source_type: preserveLegacyEmptyIdentity(
+      existing.source_type,
+      entry.source_type,
+      null
+    ),
+    business_type: preserveLegacyEmptyIdentity(
+      existing.business_type,
+      entry.business_type,
+      null
+    ),
+    created_by: existing.created_by
   });
 }
 
-function ingestKnowledge(db, input) {
-  const tags = normalizeTags(input.tags_json || input.tags || input.key_terms || []);
-  const visibility = normalizeVisibility(input.visibility || (input.is_public === 1 ? 'team' : input.is_public === 0 ? 'private' : 'private'));
-  const entry = {
-    entry_type: input.entry_type || input.type || 'note',
-    title: input.title || compactText(input.content || input.summary || 'Knowledge', 80),
-    summary: input.summary || compactText(input.content || '', 240),
-    content: String(input.content || ''),
-    tags: tags,
-    source_type: input.source_type || null,
-    source_id: input.source_id === undefined ? null : input.source_id,
-    source_hash: input.allow_source_hash === true && input.source_hash ? input.source_hash : hashInput({
-      entry_type: input.entry_type || input.type || 'note',
-      title: input.title || '',
-      content: input.content || '',
-      source_type: input.source_type || '',
-      source_id: input.source_id,
-      business_type: input.business_type,
-      business_id: input.business_id,
-      owner_id: visibility === 'private' ? (input.created_by || (input.user && input.user.id) || '') : ''
-    }),
-    business_type: input.business_type || null,
-    business_id: input.business_id === undefined ? null : String(input.business_id),
-    metadata_json: toJson(input.metadata || input.metadata_json || {}, {}),
-    embedding_json: input.embedding_json ? toJson(input.embedding_json, null) : null,
-    created_by: input.created_by || (input.user && input.user.id) || null,
-    is_public: isSharedVisibility(visibility) ? 1 : 0,
-    visibility: visibility
-  };
-
-  const existing = entry.source_hash
-    ? db.prepare('SELECT id, created_by, visibility, is_public FROM knowledge_entries WHERE source_hash = ?').get(entry.source_hash)
-    : null;
-
-  if (existing) {
-    const sameOwner = Number(existing.created_by || 0) === Number(entry.created_by || 0);
-    const actorIsAdmin = input.actor_role === 'admin' || (input.user && input.user.role === 'admin');
-    if (!sameOwner && !actorIsAdmin) {
-      if (normalizeVisibility(existing.visibility || (existing.is_public ? 'team' : 'private')) === 'private') {
-        throw new Error('Knowledge source hash is already owned by another user');
-      }
-      return normalizeEntry(db.prepare('SELECT * FROM knowledge_entries WHERE id = ?').get(existing.id));
-    }
+function existingWriteDecision(db, existing, entry, input) {
+  if (isCampaignClassified(db, existing.id)) {
+    throw new Error('Knowledge entry requires campaign-aware custody');
   }
+  assertStoredSourceIdentity(existing);
+  const sameOwner = existing.created_by === entry.created_by;
+  const actorIsAdmin = input.actor_role === 'admin' || (input.user && input.user.role === 'admin');
+  if (sameOwner || actorIsAdmin) {
+    if (
+      legacySourceIdentityDigest(refreshSourceIdentity(existing, entry)) !==
+      existing.source_identity_sha256
+    ) {
+      throw new Error('Knowledge source identity is immutable');
+    }
+    return 'update';
+  }
+  if (
+    normalizeVisibility(
+      existing.visibility || (existing.is_public ? 'team' : 'private')
+    ) === 'private'
+  ) {
+    throw new Error('Knowledge source hash is already owned by another user');
+  }
+  return 'reuse';
+}
+
+function allocateKnowledgeEntryId(db) {
+  const statement = db.prepare(PREVIOUS_ENTRY_ID_SQL).safeIntegers(true);
+  const row = statement.get();
+  if (!row || typeof row.previous_id !== 'bigint') {
+    throw new Error('knowledge previous_id must have INTEGER storage');
+  }
+  if (row.previous_id < 0n || row.previous_id > MAX_ALLOCATABLE_PREVIOUS_ID) {
+    throw new Error('knowledge entry identifier capacity is exhausted');
+  }
+  const nextId = Number(row.previous_id + 1n);
+  if (db.prepare('SELECT 1 AS present FROM knowledge_entries WHERE id=?').get(nextId)) {
+    throw new Error('knowledge entry identifier is already allocated');
+  }
+  return nextId;
+}
+
+function verifyKnowledgeEntrySequence(db, entryId) {
+  const row = db.prepare(`
+    SELECT seq,typeof(seq) AS seq_type
+    FROM sqlite_sequence
+    WHERE name='knowledge_entries'
+  `).safeIntegers(true).get();
+  if (
+    !row ||
+    row.seq_type !== 'integer' ||
+    typeof row.seq !== 'bigint' ||
+    row.seq !== BigInt(entryId)
+  ) {
+    throw new Error('knowledge_entries sqlite_sequence did not advance atomically');
+  }
+}
+
+function ingestKnowledge(db, input) {
+  const entry = prepareLegacyEntry(input);
+  const initialExisting = findSourceHashEntry(db, entry.source_hash);
+  if (initialExisting) existingWriteDecision(db, initialExisting, entry, input);
 
   let id;
   const tx = db.transaction(function() {
+    const existing = findSourceHashEntry(db, entry.source_hash);
     if (existing) {
+      const decision = existingWriteDecision(db, existing, entry, input);
       id = existing.id;
-      db.prepare(`
+      if (decision === 'reuse') return;
+      const refreshEntry = Object.assign({}, entry, {
+        entry_type: existing.entry_type === null ? 'note' : existing.entry_type
+      });
+      refreshEntry.content_sha256 = knowledgeContentDigest(refreshEntry);
+      const update = db.prepare(`
         UPDATE knowledge_entries
-        SET entry_type = ?, title = ?, summary = ?, source_type = ?, source_id = ?, key_terms = ?,
-            content = ?, is_public = ?, tags_json = ?, visibility = ?, business_type = ?, business_id = ?,
-            metadata_json = ?, embedding_json = ?, updated_at = datetime('now')
-        WHERE id = ?
+        SET
+          title=?,summary=?,key_terms=?,content=?,is_public=?,tags_json=?,visibility=?,
+          metadata_json=?,embedding_json=?,content_sha256=?,updated_at=datetime('now')
+        WHERE id=?
       `).run(
-        entry.entry_type, entry.title, entry.summary, entry.source_type, entry.source_id,
-        JSON.stringify(tags), entry.content, entry.is_public, JSON.stringify(tags), entry.visibility,
-        entry.business_type, entry.business_id, entry.metadata_json, entry.embedding_json, id
+        refreshEntry.title,
+        refreshEntry.summary,
+        JSON.stringify(refreshEntry.tags),
+        refreshEntry.content,
+        refreshEntry.is_public,
+        JSON.stringify(refreshEntry.tags),
+        refreshEntry.visibility,
+        refreshEntry.metadata_json,
+        refreshEntry.embedding_json,
+        refreshEntry.content_sha256,
+        id
       );
-    } else {
-      const result = db.prepare(`
-        INSERT INTO knowledge_entries (
-          entry_type, title, summary, source_type, source_id, key_terms, content, created_by, is_public,
-          tags_json, visibility, source_hash, business_type, business_id, metadata_json, embedding_json
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(
-        entry.entry_type, entry.title, entry.summary, entry.source_type, entry.source_id,
-        JSON.stringify(tags), entry.content, entry.created_by, entry.is_public, JSON.stringify(tags),
-        entry.visibility, entry.source_hash, entry.business_type, entry.business_id, entry.metadata_json,
-        entry.embedding_json
-      );
-      id = result.lastInsertRowid;
+      if (update.changes !== 1) throw new Error('knowledge refresh count mismatch');
+      rebuildChunks(db, id, refreshEntry);
+      return;
     }
+
+    id = allocateKnowledgeEntryId(db);
+    entry.id = id;
+    entry.source_identity_sha256 = legacySourceIdentityDigest(entry);
+    const insert = db.prepare(`
+      INSERT INTO knowledge_entries (
+        id,entry_type,title,summary,source_type,source_id,key_terms,content,created_by,
+        is_public,tags_json,visibility,source_hash,business_type,business_id,
+        metadata_json,embedding_json,source_identity_sha256,content_sha256
+      )
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    `).run(
+      id,
+      entry.entry_type,
+      entry.title,
+      entry.summary,
+      entry.source_type,
+      entry.source_id,
+      JSON.stringify(entry.tags),
+      entry.content,
+      entry.created_by,
+      entry.is_public,
+      JSON.stringify(entry.tags),
+      entry.visibility,
+      entry.source_hash,
+      entry.business_type,
+      entry.business_id,
+      entry.metadata_json,
+      entry.embedding_json,
+      entry.source_identity_sha256,
+      entry.content_sha256
+    );
+    if (insert.changes !== 1) throw new Error('knowledge insert count mismatch');
+    verifyKnowledgeEntrySequence(db, id);
     rebuildChunks(db, id, entry);
   });
-  tx();
+  tx.immediate();
 
-  return normalizeEntry(db.prepare('SELECT * FROM knowledge_entries WHERE id = ?').get(id));
+  return normalizeEntry(db.prepare('SELECT * FROM knowledge_entries WHERE id=?').get(id));
 }
 
 function buildWhere(opts) {

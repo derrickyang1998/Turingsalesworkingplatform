@@ -1209,6 +1209,7 @@ test('empty database applies baseline, ledger, 001, both seed admissions, and a 
   );
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE name = 'probe_table'").get().count, 1);
   assert.equal(db.pragma('foreign_keys', { simple: true }), 1);
+  assert.equal(db.pragma('recursive_triggers', { simple: true }), 1);
   db.close();
 
   const reopened = new Database(db.name, { readonly: true, fileMustExist: true });
@@ -2059,6 +2060,8 @@ test('path-owning migration opener upgrades a closed legacy file and returns a m
   assert.equal(readOnlyPreflightSeen, true);
   assert.deepEqual(migrationService.classifyDatabase(opened, { rootDir: serverRoot() }), { status: 'managed', currentVersion: 1 });
   assert.equal(String(opened.pragma('journal_mode', { simple: true })).toLowerCase(), 'delete');
+  assert.equal(opened.pragma('foreign_keys', { simple: true }), 1);
+  assert.equal(opened.pragma('recursive_triggers', { simple: true }), 1);
   opened.close();
 });
 

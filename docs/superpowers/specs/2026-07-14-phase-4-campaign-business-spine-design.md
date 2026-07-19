@@ -6,6 +6,19 @@ The user approved Scheme A and the bilingual V1 roadmap. Phase 4 delivers `v0.5.
 
 用户已批准方案 A 与 V1 中英双语路线图。本阶段交付 `v0.5.0-campaign-business-spine`：版本化迁移、组织与团队成员关系、统一活动实体、持久业务关联、后端权限、仅追加生命周期事件、可靠工作流派发和可操作的项目工作台。
 
+## Frozen Task 3 Schema Contract / Task 3 冻结数据库合同
+
+The independently frozen `002` schema inventory is `platform/server/tests/fixtures/campaign_schema_contract.js`; it does not import the migration implementation. It is the release gate for all executable index and trigger SQL. The final contract contains 9 STRICT domain tables, 23 compatibility columns, 10 named indexes, 51 named triggers, and 17 composite foreign-key contracts. Earlier inline DDL in this design explains individual invariants, but the complete ordered inventory and the following fingerprints are normative whenever an excerpt is incomplete:
+
+- index SQL SHA-256: `bdb5508e1a02c0cf88fd763e1d9b664e192660503d87dcd7afd39517cfedeb3c`
+- trigger SQL SHA-256: `d7fffc8dbb15f7e77de0b65038fc100f4b15e2b0cc3bd89b3672f7427ce570f6`
+- combined index/trigger SQL SHA-256: `5e8cd0a587b10899a676634e8c82aa841bf7e1e7201c5cb5aec863614ee38d00`
+- complete managed 26-index/54-trigger SQL SHA-256: `14e3dfa8d56070983336e62660f328cf3e274d66f1839c2a6d89d90b3d4d952e`
+
+The final 51-trigger inventory explicitly includes the four conflict-preservation guards added during independent review: `organizations_no_replace_insert`, `campaign_settled_collaboration_no_replace_insert`, `campaign_workflow_task_no_replace_insert`, and `knowledge_entries_no_replace_insert`. The frozen digest also covers every reviewed body expansion for idempotency, workflow, AI-reference, link, event, knowledge-entry, and knowledge-chunk conflict handling.
+
+`002` 的独立冻结结构清单位于 `platform/server/tests/fixtures/campaign_schema_contract.js`，该文件不导入迁移实现。最终合同精确包含 9 张 STRICT 业务表、23 个兼容列、10 个命名索引、51 个命名触发器和 17 组复合外键。上面的三组 SHA-256 与完整有序名称清单共同构成发布门禁；设计正文中的局部 DDL 用于解释约束，若摘录不完整，以独立冻结清单和指纹为准。
+
 ## Scope Contract / 范围契约
 
 Phase 4 is additive and owns only the business spine. It does not redesign CRM stages, AI prompt/retrieval meaning, provider selection, influencer ordering or settlement semantics, entitlements, or the frozen PPT renderer. It may add campaign custody, deterministic chunk/reference contracts, cancellation/deadline propagation, and atomic persistence around the existing AI providers without changing the unlinked v0.4 fallback behavior. Existing records keep their current behavior until a user explicitly links them to a campaign. Free text such as project, brand, or notes is never used to infer a campaign, customer, opportunity, team, or link.

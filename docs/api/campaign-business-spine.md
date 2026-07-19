@@ -2,6 +2,17 @@
 
 This is the implementation contract for Phase 4. The schema and authorization source of truth is `docs/superpowers/specs/2026-07-14-phase-4-campaign-business-spine-design.md`.
 
+## Frozen Database Contract / 冻结数据库合同
+
+Task 3 freezes the executable `002` inventory independently in `platform/server/tests/fixtures/campaign_schema_contract.js`: 9 STRICT tables, 23 compatibility columns, 10 indexes, 51 triggers, and 17 composite foreign keys. The release gate compares deployed SQL to fixed SHA-256 values instead of importing `002`'s own manifest:
+
+- indexes: `bdb5508e1a02c0cf88fd763e1d9b664e192660503d87dcd7afd39517cfedeb3c`
+- triggers: `d7fffc8dbb15f7e77de0b65038fc100f4b15e2b0cc3bd89b3672f7427ce570f6`
+- combined: `5e8cd0a587b10899a676634e8c82aa841bf7e1e7201c5cb5aec863614ee38d00`
+- complete managed 26-index/54-trigger set: `14e3dfa8d56070983336e62660f328cf3e274d66f1839c2a6d89d90b3d4d952e`
+
+The complete 51-trigger list includes `organizations_no_replace_insert`, `campaign_settled_collaboration_no_replace_insert`, `campaign_workflow_task_no_replace_insert`, and `knowledge_entries_no_replace_insert`. These guards preserve existing rows when a caller uses SQLite conflict-replacement syntax. / 完整的 51 个触发器清单包含上述四个防覆盖保护，确保冲突替换语法不会静默删除既有业务记录。
+
 ## Common Contract / 通用契约
 
 - Authentication: the existing `Authorization: Bearer <tm_token>` header. The client continues to load `tm_token` from local storage and removes it on logout or `401`; Phase 4 does not migrate authentication to cookies. Release nevertheless requires removal of all data-bearing `innerHTML` and inline script handlers plus the exact restrictive CSP in the design, because a stored-XSS path would expose this token.

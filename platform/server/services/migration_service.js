@@ -1401,9 +1401,24 @@ function schemaSnapshot(db) {
   return { objects, columns, tableList, foreignKeys, indexes };
 }
 
+function assertConnectionGuards(db) {
+  const foreignKeys = Number(db.pragma('foreign_keys', { simple: true }));
+  const recursiveTriggers = Number(db.pragma('recursive_triggers', { simple: true }));
+  if (foreignKeys !== 1 || recursiveTriggers !== 1) {
+    throw new Error('SQLite connection guards require foreign_keys and recursive_triggers');
+  }
+}
+
+function configureConnectionGuards(db) {
+  db.pragma('foreign_keys = ON');
+  db.pragma('recursive_triggers = ON');
+  assertConnectionGuards(db);
+}
+
 function expectedLedgerSnapshot() {
   const expected = new Database(':memory:');
   try {
+    configureConnectionGuards(expected);
     createLedger(expected);
     return schemaSnapshot(expected);
   } finally {
@@ -1593,6 +1608,7 @@ function baselineMetadataProblem(table, expected, actual, allowances) {
 function baselineSchemaProblem(db, baselineLoaded, allowedLoadedMigrations) {
   const expectedDb = new Database(':memory:');
   try {
+    configureConnectionGuards(expectedDb);
     executeMigrationFunction(baselineLoaded, baselineLoaded.baseline.apply, expectedDb, 'legacy baseline schema replay');
     const expected = schemaSnapshot(expectedDb);
     for (const loaded of allowedLoadedMigrations) {
@@ -1663,6 +1679,7 @@ function baselineSchemaProblem(db, baselineLoaded, allowedLoadedMigrations) {
 function managedSchemaProblem(db, baselineLoaded, appliedLoadedMigrations) {
   const expectedDb = new Database(':memory:');
   try {
+    configureConnectionGuards(expectedDb);
     executeMigrationFunction(baselineLoaded, baselineLoaded.baseline.apply, expectedDb, 'managed baseline schema replay');
     const baselineSnapshot = schemaSnapshot(expectedDb);
     createLedger(expectedDb);
@@ -1962,7 +1979,7 @@ function sameIdentity(left, right) {
 }
 
 function preflight(db, classification, options) {
-  db.pragma('foreign_keys = ON');
+  assertConnectionGuards(db);
   const shapeProblem = classification.status !== 'empty' ? baselineShapeProblem(db) : null;
   if (shapeProblem) throw new Error(shapeProblem);
   const integrity = db.pragma('integrity_check', { simple: true });
@@ -2007,7 +2024,7 @@ function collectReadOnlyPreflight(databasePath, options) {
   const identity = identityForDatabasePath(databasePath);
   const readonly = new Database(databasePath, { readonly: true, fileMustExist: true });
   try {
-    readonly.pragma('foreign_keys = ON');
+    configureConnectionGuards(readonly);
     const classification = classifyDatabase(readonly, options);
     if (classification.status === 'partial_or_malformed' || classification.status === 'future') {
       throw new Error(`migration classification failed: ${classification.status}${classification.reason ? ` ${classification.reason}` : ''}`);
@@ -2070,6 +2087,20 @@ function applySeedAdmissions(db, loaded) {
   executeMigrationFunction(loaded, baselineSeeds.influencers, db, 'influencer seed admission');
 }
 
+function prepareLegacyMigrationReplay(db, loaded) {
+  const triggers = (loaded.implementation.schemaManifest || {}).triggers || {};
+  for (const [name, expectedSql] of Object.entries(triggers)) {
+    const row = db.prepare(
+      "SELECT sql FROM sqlite_schema WHERE type='trigger' AND name=?"
+    ).get(name);
+    if (!row) continue;
+    if (!schemaSqlEqual(row.sql, expectedSql)) {
+      throw new Error(`incompatible legacy migration trigger ${name}`);
+    }
+    db.exec(`DROP TRIGGER ${quoteIdentifier(name)}`);
+  }
+}
+
 function normalizedMigrationOptions(options) {
   const normalizedOptions = { ...(options || {}) };
   const migrations = normalizeMigrations(normalizedOptions);
@@ -2080,7 +2111,7 @@ function normalizedMigrationOptions(options) {
 
 function runMigrationTransaction(db, normalizedOptions, readonlyPreflight) {
   const migrations = normalizedOptions.migrations;
-  db.pragma('foreign_keys = ON');
+  configureConnectionGuards(db);
 
   const classification = readonlyPreflight ? readonlyPreflight.classification : classifyDatabase(db, normalizedOptions);
   if (classification.status === 'partial_or_malformed' || classification.status === 'future') {
@@ -2113,6 +2144,9 @@ function runMigrationTransaction(db, normalizedOptions, readonlyPreflight) {
       if (migration.version <= startVersion) continue;
       if (migration.engineVersion !== 1) throw new Error(`unsupported migration engine version ${migration.engineVersion}`);
       const loaded = loadedFor(migration);
+      if (classification.status === 'legacy' && migration.version === 1) {
+        prepareLegacyMigrationReplay(db, loaded);
+      }
       executeMigrationFunction(loaded, loaded.implementation.apply, db, `migration ${migration.name} apply`);
       const checksum = loaded.checksum;
       insertLedgerRow(db, migration, checksum);
