@@ -1,4 +1,5 @@
 const { createHash } = require('node:crypto');
+const { types: utilTypes } = require('node:util');
 const crmAccess = require('./crm_access_service');
 
 const DEFAULT_ORGANIZATION_CODE = 'turingmarket-default';
@@ -18,6 +19,25 @@ const IDENTITY_CHANGED_FIELDS = Object.freeze([
   'role',
   'team_memberships'
 ]);
+
+function snapshotPlainOptions(value, recognizedKeys) {
+  if (utilTypes.isProxy(value)) return null;
+  if (value === null || value === undefined) return Object.freeze({});
+  if (typeof value !== 'object' || Array.isArray(value)) return null;
+  try {
+    if (Object.getPrototypeOf(value) !== Object.prototype) return null;
+    const snapshot = {};
+    for (const key of recognizedKeys) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (!descriptor) continue;
+      if (!Object.hasOwn(descriptor, 'value')) return null;
+      snapshot[key] = descriptor.value;
+    }
+    return Object.freeze(snapshot);
+  } catch {
+    return null;
+  }
+}
 
 function canonicalId(value, label) {
   if (Number.isSafeInteger(value) && value > 0) return value;
@@ -333,13 +353,20 @@ function validateAuditInput({
 }
 
 function runIdentityProjectionTransaction(db, options) {
+  const input = snapshotPlainOptions(options, [
+    'actorUserId',
+    'subjectUserId',
+    'reason',
+    'requestId',
+    'mutateUser'
+  ]);
   const {
     actorUserId,
     subjectUserId: rawSubjectUserId,
     reason,
     requestId = null,
     mutateUser
-  } = options || {};
+  } = input || {};
   const subjectUserId = canonicalId(rawSubjectUserId, 'subjectUserId');
   if (typeof mutateUser !== 'function') {
     throw new TypeError('mutateUser must be a function');
@@ -432,12 +459,18 @@ function authContextFor(db, organization, userId) {
 }
 
 function resolveOrganizationScope(db, options) {
+  const input = snapshotPlainOptions(options, [
+    'userId',
+    'repairMissing',
+    'actorUserId',
+    'requestId'
+  ]);
   const {
     userId: rawUserId,
     repairMissing = false,
     actorUserId = rawUserId,
     requestId = null
-  } = options || {};
+  } = input || {};
   const userId = canonicalId(rawUserId, 'userId');
   const user = readUser(db, userId);
   if (!user || user.is_active !== 1) {
@@ -502,13 +535,21 @@ function assignmentFailure() {
 }
 
 function getAssignmentDecision(db, options) {
+  const input = snapshotPlainOptions(options, [
+    'actorUserId',
+    'ownerUserId',
+    'teamId',
+    'currentOwnerUserId',
+    'mode'
+  ]);
+  if (input === null) return assignmentFailure();
   const {
     actorUserId: rawActorUserId,
     ownerUserId: rawOwnerUserId,
     teamId: rawTeamId,
     currentOwnerUserId: rawCurrentOwnerUserId = null,
     mode = 'create'
-  } = options || {};
+  } = input;
   if (mode !== 'create' && mode !== 'transfer') {
     throw new TypeError('unsupported assignment mode');
   }
@@ -600,14 +641,25 @@ function getAssignmentDecision(db, options) {
 }
 
 function getCampaignCreationDecision(db, options) {
+  const input = snapshotPlainOptions(options, [
+    'actorUserId',
+    'opportunityId',
+    'ownerUserId',
+    'teamId',
+    'currentOwnerUserId'
+  ]);
+  if (input === null) return assignmentFailure();
   const assignment = getAssignmentDecision(db, {
-    ...options,
+    actorUserId: input.actorUserId,
+    ownerUserId: input.ownerUserId,
+    teamId: input.teamId,
+    currentOwnerUserId: input.currentOwnerUserId,
     mode: 'create'
   });
   if (!assignment.allowed) return assignment;
   let opportunityId;
   try {
-    opportunityId = canonicalId(options && options.opportunityId, 'opportunityId');
+    opportunityId = canonicalId(input.opportunityId, 'opportunityId');
   } catch {
     return {
       allowed: false,
@@ -627,7 +679,7 @@ function getCampaignCreationDecision(db, options) {
     WHERE id=?
       AND typeof(is_active)='integer'
       AND is_active=1
-  `).get(options.actorUserId);
+  `).get(input.actorUserId);
   if (!actor || !crmAccess.canManageOpportunity(actor, opportunity)) {
     return {
       allowed: false,

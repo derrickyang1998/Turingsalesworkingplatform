@@ -3187,3 +3187,536 @@ describe('RED group 8: CRM dependency evidence', () => {
     );
   });
 });
+
+describe('RED group 9: exported option-container boundaries', () => {
+  test('all options-style exports reject hostile containers without traps', (t) => {
+    const db = openCampaignDatabase(t);
+    const identity = seedCampaigns(db);
+    db.prepare(`
+      INSERT INTO demands (
+        id,user_id,brand_name,company_name,product_name,status,data_json
+      ) VALUES (
+        4401,2,'Option boundary','Option Boundary Co','Product','confirmed','{}'
+      )
+    `).run();
+    db.prepare(`
+      INSERT INTO ai_conversations (
+        id,user_id,title,visibility,source_module
+      ) VALUES (5401,2,'Option boundary conversation','private','assistant')
+    `).run();
+
+    const capture = (operation) => {
+      try {
+        return {
+          kind: 'return',
+          value: operation()
+        };
+      } catch (error) {
+        return {
+          kind: 'throw',
+          name: error.name,
+          message: String(error.message)
+        };
+      }
+    };
+    const expectTypeError = (outcome, pattern) => {
+      assert.equal(outcome.kind, 'throw');
+      assert.equal(outcome.name, 'TypeError');
+      assert.match(outcome.message, pattern);
+      assert.doesNotMatch(outcome.message, /revoked/i);
+    };
+    const expectCode = (outcome, code) => {
+      assert.equal(outcome.kind, 'return');
+      assert.equal(outcome.value.code, code);
+    };
+    const expectAssignmentFailure = (outcome) => {
+      assert.deepEqual(outcome, {
+        kind: 'return',
+        value: {
+          allowed: false,
+          code: 'CAMPAIGN_ASSIGNMENT_FORBIDDEN'
+        }
+      });
+    };
+    const trackedProxy = () => {
+      let traps = 0;
+      const value = new Proxy({}, {
+        get(target, property, receiver) {
+          traps += 1;
+          return Reflect.get(target, property, receiver);
+        },
+        getOwnPropertyDescriptor(target, property) {
+          traps += 1;
+          return Reflect.getOwnPropertyDescriptor(target, property);
+        },
+        getPrototypeOf(target) {
+          traps += 1;
+          return Reflect.getPrototypeOf(target);
+        },
+        ownKeys(target) {
+          traps += 1;
+          return Reflect.ownKeys(target);
+        }
+      });
+      return { value, traps: () => traps };
+    };
+    const revokedProxy = () => {
+      const revocable = Proxy.revocable({}, {});
+      revocable.revoke();
+      return revocable.proxy;
+    };
+    const getterContainer = (keys, functionContainer) => {
+      let getters = 0;
+      const value = functionContainer ? function optionContainer() {} : {};
+      for (const key of keys) {
+        Object.defineProperty(value, key, {
+          configurable: true,
+          enumerable: true,
+          get() {
+            getters += 1;
+            return undefined;
+          }
+        });
+      }
+      return { value, getters: () => getters };
+    };
+    const arrayContainer = (keys) => {
+      let getters = 0;
+      const value = [];
+      for (const key of keys) {
+        Object.defineProperty(value, key, {
+          configurable: true,
+          enumerable: true,
+          get() {
+            getters += 1;
+            return undefined;
+          }
+        });
+      }
+      return { value, getters: () => getters };
+    };
+    const inheritedContainer = (keys) => {
+      let getters = 0;
+      const prototype = {};
+      for (const key of keys) {
+        Object.defineProperty(prototype, key, {
+          configurable: true,
+          enumerable: true,
+          get() {
+            getters += 1;
+            return undefined;
+          }
+        });
+      }
+      return {
+        value: Object.create(prototype),
+        getters: () => getters
+      };
+    };
+    const coerciveValue = () => {
+      let coercions = 0;
+      const value = {
+        [Symbol.toPrimitive]() {
+          coercions += 1;
+          return 2;
+        },
+        valueOf() {
+          coercions += 1;
+          return 2;
+        },
+        toString() {
+          coercions += 1;
+          return '2';
+        }
+      };
+      return { value, coercions: () => coercions };
+    };
+
+    const definitions = [
+      {
+        name: 'getCampaignAccess',
+        keys: ['userId', 'campaignId'],
+        invoke: (options) => getCampaignAccess(db, options),
+        coerciveOptions: (value) => ({ userId: value, campaignId: 3001 }),
+        assertInvalid: (outcome) => expectCode(outcome, 'CAMPAIGN_NOT_FOUND'),
+        assertNested: (outcome) => expectCode(outcome, 'CAMPAIGN_NOT_FOUND'),
+        assertValid: (outcome) => {
+          assert.equal(outcome.kind, 'return');
+          assert.equal(outcome.value.ok, true);
+        },
+        valid: { userId: identity.ownerId, campaignId: 3001 }
+      },
+      {
+        name: 'resolveRecordCustody',
+        keys: ['recordType', 'recordId'],
+        invoke: (options) => resolveRecordCustody(db, options),
+        coerciveOptions: (value) => ({
+          recordType: 'demand',
+          recordId: value
+        }),
+        assertInvalid: (outcome) => expectTypeError(
+          outcome,
+          /unsupported campaign record type/
+        ),
+        assertNested: (outcome) => expectTypeError(
+          outcome,
+          /recordId must be a positive canonical safe integer/
+        ),
+        assertValid: (outcome) => {
+          assert.equal(outcome.kind, 'return');
+          assert.equal(outcome.value.classification, 'unclassified');
+        },
+        valid: { recordType: 'demand', recordId: 4401 }
+      },
+      {
+        name: 'getTargetAccess',
+        keys: [
+          'userId',
+          'campaignId',
+          'recordType',
+          'recordId',
+          'relationType',
+          'intent'
+        ],
+        invoke: (options) => getTargetAccess(db, options),
+        coerciveOptions: (value) => ({
+          userId: value,
+          campaignId: 3001,
+          recordType: 'demand',
+          recordId: 4401,
+          relationType: 'demand',
+          intent: 'read'
+        }),
+        assertInvalid: (outcome) => expectCode(
+          outcome,
+          'INVALID_CAMPAIGN_LINK'
+        ),
+        assertNested: (outcome) => expectCode(
+          outcome,
+          'INVALID_CAMPAIGN_LINK'
+        ),
+        assertValid: (outcome) => {
+          assert.equal(outcome.kind, 'return');
+          assert.equal(outcome.value.ok, true);
+        },
+        valid: {
+          userId: identity.ownerId,
+          campaignId: 3001,
+          recordType: 'demand',
+          recordId: 4401,
+          relationType: 'demand',
+          intent: 'read'
+        }
+      },
+      {
+        name: 'buildCollectionAccessPredicate',
+        keys: ['userId'],
+        invoke: (options) => buildCollectionAccessPredicate(
+          'campaigns',
+          options
+        ),
+        coerciveOptions: (value) => ({ userId: value }),
+        assertInvalid: (outcome) => expectTypeError(
+          outcome,
+          /userId must be a positive safe integer/
+        ),
+        assertNested: (outcome) => expectTypeError(
+          outcome,
+          /userId must be a positive safe integer/
+        ),
+        assertValid: (outcome) => {
+          assert.equal(outcome.kind, 'return');
+          assert.equal(typeof outcome.value.sql, 'string');
+        },
+        valid: { userId: identity.ownerId }
+      },
+      {
+        name: 'projectKnowledgeVisibility',
+        keys: ['legacyVisibility', 'isPublic'],
+        invoke: (options) => projectKnowledgeVisibility(options),
+        coerciveOptions: (value) => ({
+          legacyVisibility: null,
+          isPublic: value
+        }),
+        assertInvalid: (outcome) => expectTypeError(
+          outcome,
+          /knowledge visibility options/
+        ),
+        assertNested: (outcome) => {
+          assert.deepEqual(outcome, {
+            kind: 'return',
+            value: 'private'
+          });
+        },
+        assertValid: (outcome) => {
+          assert.deepEqual(outcome, {
+            kind: 'return',
+            value: 'team'
+          });
+        },
+        valid: { legacyVisibility: null, isPublic: 1 },
+        omittedAllowed: false
+      },
+      {
+        name: 'resolveConversationCampaign',
+        keys: ['conversationId', 'requestedCampaignId'],
+        invoke: (options) => resolveConversationCampaign(db, options),
+        coerciveOptions: (value) => ({
+          conversationId: value,
+          requestedCampaignId: null
+        }),
+        assertInvalid: (outcome) => expectCode(
+          outcome,
+          'INVALID_CAMPAIGN_INPUT'
+        ),
+        assertNested: (outcome) => expectCode(
+          outcome,
+          'INVALID_CAMPAIGN_INPUT'
+        ),
+        assertValid: (outcome) => {
+          assert.deepEqual(outcome, {
+            kind: 'return',
+            value: {
+              ok: true,
+              campaignId: null,
+              derived: false
+            }
+          });
+        },
+        valid: {
+          conversationId: 5401,
+          requestedCampaignId: null
+        }
+      },
+      {
+        name: 'listCrmDependencies',
+        keys: ['targetType', 'targetId'],
+        invoke: (options) => listCrmDependencies(db, options),
+        coerciveOptions: (value) => ({
+          targetType: 'customer',
+          targetId: value
+        }),
+        assertInvalid: (outcome) => expectTypeError(
+          outcome,
+          /CRM dependency target id is invalid/
+        ),
+        assertNested: (outcome) => expectTypeError(
+          outcome,
+          /CRM dependency target id is invalid/
+        ),
+        assertValid: (outcome) => {
+          assert.equal(outcome.kind, 'return');
+          assert.deepEqual(
+            outcome.value.map((dependency) => dependency.type),
+            ['campaigns', 'opportunities']
+          );
+        },
+        valid: { targetType: 'customer', targetId: 1001 }
+      },
+      {
+        name: 'runIdentityProjectionTransaction',
+        keys: [
+          'actorUserId',
+          'subjectUserId',
+          'reason',
+          'requestId',
+          'mutateUser'
+        ],
+        invoke: (options) => runIdentityProjectionTransaction(db, options),
+        coerciveOptions: (value) => ({
+          actorUserId: identity.adminId,
+          subjectUserId: value,
+          reason: 'admin_update',
+          requestId: 'option-boundary-coercion',
+          mutateUser() {}
+        }),
+        assertInvalid: (outcome) => expectTypeError(
+          outcome,
+          /subjectUserId must be a positive canonical safe integer/
+        ),
+        assertNested: (outcome) => expectTypeError(
+          outcome,
+          /subjectUserId must be a positive canonical safe integer/
+        ),
+        assertValid: (outcome) => {
+          assert.equal(outcome.kind, 'return');
+          assert.equal(outcome.value.changed, false);
+        },
+        valid: {
+          actorUserId: identity.adminId,
+          subjectUserId: identity.teammateId,
+          reason: 'admin_update',
+          requestId: 'option-boundary-valid',
+          mutateUser() {}
+        }
+      },
+      {
+        name: 'resolveOrganizationScope',
+        keys: ['userId', 'repairMissing', 'actorUserId', 'requestId'],
+        invoke: (options) => resolveOrganizationScope(db, options),
+        coerciveOptions: (value) => ({
+          userId: value,
+          repairMissing: false
+        }),
+        assertInvalid: (outcome) => expectTypeError(
+          outcome,
+          /userId must be a positive canonical safe integer/
+        ),
+        assertNested: (outcome) => expectTypeError(
+          outcome,
+          /userId must be a positive canonical safe integer/
+        ),
+        assertValid: (outcome) => {
+          assert.equal(outcome.kind, 'return');
+          assert.equal(outcome.value.ok, true);
+        },
+        valid: {
+          userId: identity.ownerId,
+          repairMissing: false
+        }
+      },
+      {
+        name: 'getAssignmentDecision',
+        keys: [
+          'actorUserId',
+          'ownerUserId',
+          'teamId',
+          'currentOwnerUserId',
+          'mode'
+        ],
+        invoke: (options) => getAssignmentDecision(db, options),
+        coerciveOptions: (value) => ({
+          actorUserId: value,
+          ownerUserId: identity.ownerId,
+          teamId: identity.ownerTeamId,
+          mode: 'create'
+        }),
+        assertInvalid: expectAssignmentFailure,
+        assertNested: expectAssignmentFailure,
+        assertValid: (outcome) => {
+          assert.equal(outcome.kind, 'return');
+          assert.equal(outcome.value.allowed, true);
+        },
+        valid: {
+          actorUserId: identity.adminId,
+          ownerUserId: identity.ownerId,
+          teamId: identity.ownerTeamId,
+          mode: 'create'
+        }
+      },
+      {
+        name: 'getCampaignCreationDecision',
+        keys: [
+          'actorUserId',
+          'opportunityId',
+          'ownerUserId',
+          'teamId',
+          'currentOwnerUserId'
+        ],
+        invoke: (options) => getCampaignCreationDecision(db, options),
+        coerciveOptions: (value) => ({
+          actorUserId: value,
+          opportunityId: 2001,
+          ownerUserId: identity.ownerId,
+          teamId: identity.ownerTeamId
+        }),
+        assertInvalid: expectAssignmentFailure,
+        assertNested: expectAssignmentFailure,
+        assertValid: (outcome) => {
+          assert.equal(outcome.kind, 'return');
+          assert.equal(outcome.value.allowed, true);
+          assert.equal(outcome.value.opportunityId, 2001);
+        },
+        valid: {
+          actorUserId: identity.adminId,
+          opportunityId: 2001,
+          ownerUserId: identity.ownerId,
+          teamId: identity.ownerTeamId
+        }
+      }
+    ];
+
+    assert.deepEqual(definitions.map((definition) => definition.name), [
+      'getCampaignAccess',
+      'resolveRecordCustody',
+      'getTargetAccess',
+      'buildCollectionAccessPredicate',
+      'projectKnowledgeVisibility',
+      'resolveConversationCampaign',
+      'listCrmDependencies',
+      'runIdentityProjectionTransaction',
+      'resolveOrganizationScope',
+      'getAssignmentDecision',
+      'getCampaignCreationDecision'
+    ]);
+
+    const rows = [];
+    for (const definition of definitions) {
+      const proxy = trackedProxy();
+      const functionOptions = getterContainer(definition.keys, true);
+      const accessorOptions = getterContainer(definition.keys, false);
+      const arrayOptions = arrayContainer(definition.keys);
+      const inheritedOptions = inheritedContainer(definition.keys);
+      const coercive = coerciveValue();
+      const outcomes = {
+        proxy: capture(() => definition.invoke(proxy.value)),
+        revoked: capture(() => definition.invoke(revokedProxy())),
+        function: capture(() => definition.invoke(functionOptions.value)),
+        accessor: capture(() => definition.invoke(accessorOptions.value)),
+        array: capture(() => definition.invoke(arrayOptions.value)),
+        inherited: capture(() => definition.invoke(inheritedOptions.value)),
+        nested: capture(() => definition.invoke(
+          definition.coerciveOptions(coercive.value)
+        ))
+      };
+      rows.push({
+        api: definition.name,
+        proxyTraps: proxy.traps(),
+        functionGetters: functionOptions.getters(),
+        accessorGetters: accessorOptions.getters(),
+        arrayGetters: arrayOptions.getters(),
+        inheritedGetters: inheritedOptions.getters(),
+        nestedCoercions: coercive.coercions(),
+        revokedNativeError: (
+          outcomes.revoked.kind === 'throw' &&
+          /revoked/i.test(outcomes.revoked.message)
+        )
+      });
+      for (
+        const kind of [
+          'proxy',
+          'revoked',
+          'function',
+          'accessor',
+          'array',
+          'inherited'
+        ]
+      ) {
+        definition.assertInvalid(outcomes[kind]);
+      }
+      for (const primitive of [1, 'options', true, 1n, Symbol('options')]) {
+        definition.assertInvalid(capture(() => definition.invoke(primitive)));
+      }
+      definition.assertNested(outcomes.nested);
+      definition.assertValid(capture(() => definition.invoke(definition.valid)));
+      const omittedOutcomes = [
+        capture(() => definition.invoke(undefined)),
+        capture(() => definition.invoke(null))
+      ];
+      for (const outcome of omittedOutcomes) {
+        definition.assertInvalid(outcome);
+      }
+    }
+
+    assert.deepEqual(rows, definitions.map((definition) => ({
+      api: definition.name,
+      proxyTraps: 0,
+      functionGetters: 0,
+      accessorGetters: 0,
+      arrayGetters: 0,
+      inheritedGetters: 0,
+      nestedCoercions: 0,
+      revokedNativeError: false
+    })));
+  });
+});

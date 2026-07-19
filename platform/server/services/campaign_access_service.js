@@ -218,6 +218,27 @@ function isProxyValue(value) {
   );
 }
 
+function snapshotPlainOptions(value, recognizedKeys, allowOmitted = true) {
+  if (utilTypes.isProxy(value)) return null;
+  if (value === null || value === undefined) {
+    return allowOmitted ? Object.freeze({}) : null;
+  }
+  if (typeof value !== 'object' || Array.isArray(value)) return null;
+  try {
+    if (Object.getPrototypeOf(value) !== Object.prototype) return null;
+    const snapshot = {};
+    for (const key of recognizedKeys) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (!descriptor) continue;
+      if (!Object.hasOwn(descriptor, 'value')) return null;
+      snapshot[key] = descriptor.value;
+    }
+    return Object.freeze(snapshot);
+  } catch {
+    return null;
+  }
+}
+
 function ownDataValue(object, key) {
   if (
     object === null ||
@@ -558,8 +579,10 @@ function permissionMatrix(operationalStatus, privileged) {
 }
 
 function getCampaignAccess(db, options) {
-  const userId = canonicalId(options && options.userId);
-  const campaignId = canonicalId(options && options.campaignId);
+  const input = snapshotPlainOptions(options, ['userId', 'campaignId']);
+  if (input === null) return campaignNotFound();
+  const userId = canonicalId(input.userId);
+  const campaignId = canonicalId(input.campaignId);
   if (userId === null || campaignId === null) return campaignNotFound();
   const scope = resolveOrganizationScope(db, {
     userId,
@@ -613,11 +636,12 @@ function emptyCustody() {
 }
 
 function resolveRecordCustody(db, options) {
-  if (isProxyValue(options)) {
+  const input = snapshotPlainOptions(options, ['recordType', 'recordId']);
+  if (input === null) {
     throw new TypeError('unsupported campaign record type');
   }
-  const recordType = options && options.recordType;
-  const recordId = canonicalRecordId(options && options.recordId);
+  const recordType = input.recordType;
+  const recordId = canonicalRecordId(input.recordId);
   if (
     typeof recordType !== 'string' ||
     !Object.hasOwn(RECORD_RELATIONS, recordType)
@@ -876,7 +900,15 @@ function targetPermissions(db, {
 }
 
 function getTargetAccess(db, options) {
-  if (isProxyValue(options)) return invalidLink();
+  const input = snapshotPlainOptions(options, [
+    'userId',
+    'campaignId',
+    'recordType',
+    'recordId',
+    'relationType',
+    'intent'
+  ]);
+  if (input === null) return invalidLink();
   const {
     userId: rawUserId,
     campaignId: rawCampaignId,
@@ -884,7 +916,7 @@ function getTargetAccess(db, options) {
     recordId: rawRecordId,
     relationType,
     intent = 'read'
-  } = options || {};
+  } = input;
   const userId = canonicalId(rawUserId);
   const campaignId = canonicalId(rawCampaignId);
   const recordId = canonicalId(rawRecordId);
@@ -1038,7 +1070,8 @@ function boundPredicate() {
 }
 
 function buildCollectionAccessPredicate(scope, options) {
-  const userId = canonicalId(options && options.userId);
+  const input = snapshotPlainOptions(options, ['userId']);
+  const userId = input === null ? null : canonicalId(input.userId);
   if (userId === null) throw new TypeError('userId must be a positive safe integer');
   if (scope === 'influencer_library') return { sql: '1=1', params: [] };
   if (scope === 'campaigns') {
@@ -1190,7 +1223,16 @@ function serializeEventMetadata(eventType, metadata, authorization) {
   return serialized;
 }
 
-function projectKnowledgeVisibility({ legacyVisibility, isPublic }) {
+function projectKnowledgeVisibility(options) {
+  const input = snapshotPlainOptions(
+    options,
+    ['legacyVisibility', 'isPublic'],
+    false
+  );
+  if (input === null) {
+    throw new TypeError('knowledge visibility options must be a plain data object');
+  }
+  const { legacyVisibility, isPublic } = input;
   if (legacyVisibility === 'private') return 'private';
   if (
     legacyVisibility === 'team' ||
@@ -1297,8 +1339,14 @@ function serializeKnowledgeReference(reference, authorization) {
 }
 
 function resolveConversationCampaign(db, options) {
-  const conversationId = canonicalId(options && options.conversationId);
-  const requested = options && options.requestedCampaignId;
+  const input = snapshotPlainOptions(
+    options,
+    ['conversationId', 'requestedCampaignId']
+  );
+  const conversationId = input === null
+    ? null
+    : canonicalId(input.conversationId);
+  const requested = input === null ? undefined : input.requestedCampaignId;
   const requestedCampaignId = requested === null || requested === undefined
     ? null
     : canonicalId(requested);
@@ -1383,9 +1431,10 @@ function buildCrmDependencyQueries(targetType, targetIdValue) {
 }
 
 function listCrmDependencies(db, options) {
+  const input = snapshotPlainOptions(options, ['targetType', 'targetId']);
   return buildCrmDependencyQueries(
-    options && options.targetType,
-    options && options.targetId
+    input === null ? undefined : input.targetType,
+    input === null ? undefined : input.targetId
   ).map((query) => ({
     type: query.type,
     count: db.prepare(query.sql).get(...query.params).count
