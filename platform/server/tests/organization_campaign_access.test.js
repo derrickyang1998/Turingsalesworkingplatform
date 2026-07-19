@@ -4110,6 +4110,97 @@ describe('RED group 10: organization identity lifecycle hardening', () => {
     assert.equal(lateWrites, 0);
     assert.deepEqual(snapshot(11), asyncBefore);
 
+    let boundInvocations = 0;
+    let boundLateWrites = 0;
+    async function boundAsyncTarget() {
+      boundInvocations += 1;
+      await Promise.resolve();
+      db.prepare(`
+        UPDATE users
+        SET display_name='escaped bound async mutation'
+        WHERE id=10
+      `).run();
+      boundLateWrites += 1;
+    }
+    const boundAsyncMutator = boundAsyncTarget.bind(null);
+    const boundBefore = snapshot(10);
+    let boundError = null;
+    try {
+      runIdentityProjectionTransaction(db, {
+        actorUserId: 1,
+        subjectUserId: 10,
+        reason: 'admin_update',
+        requestId: 'request-reject-bound-async-mutator',
+        mutateUser: boundAsyncMutator
+      });
+    } catch (error) {
+      boundError = error;
+    }
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(boundError && boundError.name, 'TypeError');
+    assert.equal(
+      boundError && boundError.message,
+      'mutateUser must be synchronous'
+    );
+    assert.equal(boundInvocations, 0);
+    assert.equal(boundLateWrites, 0);
+    assert.deepEqual(snapshot(10), boundBefore);
+
+    for (const opaqueMutator of [
+      function boundOrdinaryTarget() {}.bind(null),
+      Math.max
+    ]) {
+      assert.throws(
+        () => runIdentityProjectionTransaction(db, {
+          actorUserId: 1,
+          subjectUserId: 11,
+          reason: 'admin_update',
+          requestId: 'request-reject-opaque-mutator',
+          mutateUser: opaqueMutator
+        }),
+        {
+          name: 'TypeError',
+          message: 'mutateUser must be synchronous'
+        }
+      );
+    }
+
+    let ordinaryInvocations = 0;
+    let callableGetterCalls = 0;
+    function declaredMutator() {
+      ordinaryInvocations += 1;
+    }
+    Object.defineProperty(declaredMutator, 'diagnostic', {
+      configurable: true,
+      get() {
+        callableGetterCalls += 1;
+        return 'not-read';
+      }
+    });
+    const methodHolder = {
+      methodMutator() {
+        ordinaryInvocations += 1;
+      }
+    };
+    const arrowMutator = () => {
+      ordinaryInvocations += 1;
+    };
+    for (const ordinaryMutator of [
+      declaredMutator,
+      methodHolder.methodMutator,
+      arrowMutator
+    ]) {
+      assert.equal(runIdentityProjectionTransaction(db, {
+        actorUserId: 1,
+        subjectUserId: 11,
+        reason: 'admin_update',
+        requestId: 'request-allow-ordinary-mutator',
+        mutateUser: ordinaryMutator
+      }).changed, false);
+    }
+    assert.equal(ordinaryInvocations, 3);
+    assert.equal(callableGetterCalls, 0);
+
     let thenGetterCalls = 0;
     const thenable = {};
     Object.defineProperty(thenable, 'then', {
@@ -4628,6 +4719,311 @@ describe('RED group 10: organization identity lifecycle hardening', () => {
         WHERE org_id=1 AND code=?
       `).get(revokedOrgDestinationCode).count,
       0
+    );
+  });
+
+  test('every final inactive identity globally revokes memberships regardless of reason', (t) => {
+    const db = openCampaignDatabase(t);
+    const fixedRevokedAt = '2026-07-20 00:00:00';
+    const insertOrganizationState = ({
+      userId,
+      orgId,
+      teamId,
+      suffix,
+      status,
+      revokedAt
+    }) => {
+      db.prepare(`
+        INSERT INTO organizations (id,code,name)
+        VALUES (?,?,?)
+      `).run(
+        orgId,
+        'inactive-invariant-org-' + suffix,
+        'Inactive invariant organization ' + suffix
+      );
+      db.prepare(`
+        INSERT INTO teams (id,org_id,code,name)
+        VALUES (?,?,?,?)
+      `).run(
+        teamId,
+        orgId,
+        'inactive-invariant-team-' + suffix,
+        'Inactive invariant team ' + suffix
+      );
+      db.prepare(`
+        INSERT INTO organization_memberships (
+          org_id,user_id,role_code,status,revoked_at
+        ) VALUES (?,?, 'member',?,?)
+      `).run(orgId, userId, status, revokedAt);
+      db.prepare(`
+        INSERT INTO team_memberships (
+          org_id,team_id,user_id,role_code,status,revoked_at
+        ) VALUES (?,?,?,'member',?,?)
+      `).run(orgId, teamId, userId, status, revokedAt);
+    };
+    const snapshot = (userId) => ({
+      user: db.prepare(`
+        SELECT role,is_active
+        FROM users
+        WHERE id=?
+      `).get(userId),
+      organizations: db.prepare(`
+        SELECT org_id,role_code,status,revoked_at
+        FROM organization_memberships
+        WHERE user_id=?
+        ORDER BY org_id
+      `).all(userId),
+      teams: db.prepare(`
+        SELECT org_id,team_id,role_code,status,revoked_at
+        FROM team_memberships
+        WHERE user_id=?
+        ORDER BY org_id,team_id
+      `).all(userId),
+      sessions: db.prepare(`
+        SELECT token
+        FROM sessions
+        WHERE user_id=?
+        ORDER BY id
+      `).all(userId),
+      activity: db.prepare(`
+        SELECT user_id,action,module,details
+        FROM activity_log
+        ORDER BY id
+      `).all()
+    });
+
+    const transitionUserId = 11;
+    insertOrganizationState({
+      userId: transitionUserId,
+      orgId: 16001,
+      teamId: 16002,
+      suffix: 'transition-active',
+      status: 'active',
+      revokedAt: null
+    });
+    insertOrganizationState({
+      userId: transitionUserId,
+      orgId: 16003,
+      teamId: 16004,
+      suffix: 'transition-revoked',
+      status: 'revoked',
+      revokedAt: fixedRevokedAt
+    });
+    insertSession(db, transitionUserId, 'admin-update-inactive');
+    const transitionBeforeRollback = snapshot(transitionUserId);
+    assert.throws(
+      () => runIdentityProjectionTransaction(db, {
+        actorUserId: 999999,
+        subjectUserId: transitionUserId,
+        reason: 'admin_update',
+        requestId: 'request-admin-inactive-rollback',
+        mutateUser() {
+          db.prepare(`
+            UPDATE users
+            SET role='admin',is_active=0
+            WHERE id=?
+          `).run(transitionUserId);
+        }
+      }),
+      /FOREIGN KEY constraint failed/
+    );
+    assert.deepEqual(snapshot(transitionUserId), transitionBeforeRollback);
+
+    const transitionAuditBefore = db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM activity_log
+      WHERE module='identity'
+        AND json_extract(details,'$.subject_user_id')=?
+        AND json_extract(details,'$.reason')='admin_update'
+    `).get(transitionUserId).count;
+    const transitioned = runIdentityProjectionTransaction(db, {
+      actorUserId: 1,
+      subjectUserId: transitionUserId,
+      reason: 'admin_update',
+      requestId: 'request-admin-update-inactive',
+      mutateUser() {
+        db.prepare(`
+          UPDATE users
+          SET role='admin',is_active=0
+          WHERE id=?
+        `).run(transitionUserId);
+      }
+    });
+    assert.equal(transitioned.changed, true);
+    assert.equal(transitioned.after.user.is_active, 0);
+    assert.equal(
+      db.prepare(`
+        SELECT COUNT(*) AS count
+        FROM organization_memberships
+        WHERE user_id=? AND status<>'revoked'
+      `).get(transitionUserId).count,
+      0
+    );
+    assert.equal(
+      db.prepare(`
+        SELECT COUNT(*) AS count
+        FROM team_memberships
+        WHERE user_id=? AND status<>'revoked'
+      `).get(transitionUserId).count,
+      0
+    );
+    assert.deepEqual(
+      db.prepare(`
+        SELECT role_code,status,revoked_at
+        FROM organization_memberships
+        WHERE org_id=16003 AND user_id=?
+      `).get(transitionUserId),
+      {
+        role_code: 'member',
+        status: 'revoked',
+        revoked_at: fixedRevokedAt
+      }
+    );
+    assert.deepEqual(
+      db.prepare(`
+        SELECT role_code,status,revoked_at
+        FROM team_memberships
+        WHERE org_id=16003 AND team_id=16004 AND user_id=?
+      `).get(transitionUserId),
+      {
+        role_code: 'member',
+        status: 'revoked',
+        revoked_at: fixedRevokedAt
+      }
+    );
+    assert.deepEqual(
+      db.prepare(`
+        SELECT role_code
+        FROM organization_memberships
+        WHERE org_id=16001 AND user_id=?
+      `).get(transitionUserId),
+      { role_code: 'member' }
+    );
+    assert.deepEqual(
+      db.prepare(`
+        SELECT role_code
+        FROM team_memberships
+        WHERE org_id=16001 AND team_id=16002 AND user_id=?
+      `).get(transitionUserId),
+      { role_code: 'member' }
+    );
+    assert.equal(
+      db.prepare(
+        'SELECT COUNT(*) AS count FROM sessions WHERE user_id=?'
+      ).get(transitionUserId).count,
+      0
+    );
+    assert.equal(
+      db.prepare(`
+        SELECT COUNT(*) AS count
+        FROM activity_log
+        WHERE module='identity'
+          AND json_extract(details,'$.subject_user_id')=?
+          AND json_extract(details,'$.reason')='admin_update'
+      `).get(transitionUserId).count,
+      transitionAuditBefore + 1
+    );
+
+    const alreadyInactiveUserId = 9;
+    db.prepare('UPDATE users SET is_active=0 WHERE id=?').run(alreadyInactiveUserId);
+    db.prepare(`
+      UPDATE organization_memberships
+      SET status='active',revoked_at=NULL
+      WHERE org_id=1 AND user_id=?
+    `).run(alreadyInactiveUserId);
+    db.prepare(`
+      UPDATE team_memberships
+      SET status='active',revoked_at=NULL
+      WHERE org_id=1 AND user_id=?
+    `).run(alreadyInactiveUserId);
+    insertOrganizationState({
+      userId: alreadyInactiveUserId,
+      orgId: 16005,
+      teamId: 16006,
+      suffix: 'already-inactive-active',
+      status: 'active',
+      revokedAt: null
+    });
+    insertOrganizationState({
+      userId: alreadyInactiveUserId,
+      orgId: 16007,
+      teamId: 16008,
+      suffix: 'already-inactive-revoked',
+      status: 'revoked',
+      revokedAt: fixedRevokedAt
+    });
+    insertSession(db, alreadyInactiveUserId, 'already-inactive-repair');
+    const inactiveAuditBefore = db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM activity_log
+      WHERE module='identity'
+        AND json_extract(details,'$.subject_user_id')=?
+        AND json_extract(details,'$.reason')='login_membership_repair'
+    `).get(alreadyInactiveUserId).count;
+    const normalized = runIdentityProjectionTransaction(db, {
+      actorUserId: 1,
+      subjectUserId: alreadyInactiveUserId,
+      reason: 'login_membership_repair',
+      requestId: 'request-normalize-inactive-repair',
+      mutateUser() {}
+    });
+    assert.equal(normalized.changed, true);
+    assert.equal(normalized.after.user.is_active, 0);
+    assert.equal(
+      db.prepare(`
+        SELECT COUNT(*) AS count
+        FROM organization_memberships
+        WHERE user_id=? AND status<>'revoked'
+      `).get(alreadyInactiveUserId).count,
+      0
+    );
+    assert.equal(
+      db.prepare(`
+        SELECT COUNT(*) AS count
+        FROM team_memberships
+        WHERE user_id=? AND status<>'revoked'
+      `).get(alreadyInactiveUserId).count,
+      0
+    );
+    assert.deepEqual(
+      db.prepare(`
+        SELECT role_code,status,revoked_at
+        FROM organization_memberships
+        WHERE org_id=16007 AND user_id=?
+      `).get(alreadyInactiveUserId),
+      {
+        role_code: 'member',
+        status: 'revoked',
+        revoked_at: fixedRevokedAt
+      }
+    );
+    assert.deepEqual(
+      db.prepare(`
+        SELECT role_code,status,revoked_at
+        FROM team_memberships
+        WHERE org_id=16007 AND team_id=16008 AND user_id=?
+      `).get(alreadyInactiveUserId),
+      {
+        role_code: 'member',
+        status: 'revoked',
+        revoked_at: fixedRevokedAt
+      }
+    );
+    assert.equal(
+      db.prepare(
+        'SELECT COUNT(*) AS count FROM sessions WHERE user_id=?'
+      ).get(alreadyInactiveUserId).count,
+      0
+    );
+    assert.equal(
+      db.prepare(`
+        SELECT COUNT(*) AS count
+        FROM activity_log
+        WHERE module='identity'
+          AND json_extract(details,'$.subject_user_id')=?
+          AND json_extract(details,'$.reason')='login_membership_repair'
+      `).get(alreadyInactiveUserId).count,
+      inactiveAuditBefore + 1
     );
   });
 });

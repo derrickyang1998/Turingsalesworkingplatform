@@ -39,6 +39,14 @@ function snapshotPlainOptions(value, recognizedKeys) {
   }
 }
 
+function isOpaqueCallable(value) {
+  try {
+    return Function.prototype.toString.call(value).includes('[native code]');
+  } catch {
+    return true;
+  }
+}
+
 function canonicalId(value, label) {
   if (Number.isSafeInteger(value) && value > 0) return value;
   if (
@@ -213,11 +221,7 @@ function synchronizeMembershipRows(db, user, previousUser, reason) {
     WHERE org_id=? AND user_id=?
   `).run(memberRole, organization.id, user.id);
 
-  if (
-    reason === 'soft_deactivate' &&
-    previouslyActive &&
-    !active
-  ) {
+  if (!active) {
     db.prepare(`
       UPDATE team_memberships
       SET status='revoked',
@@ -230,9 +234,6 @@ function synchronizeMembershipRows(db, user, previousUser, reason) {
         revoked_at=CASE WHEN status='active' THEN ? ELSE revoked_at END
       WHERE user_id=?
     `).run(now, user.id);
-    return organization;
-  }
-  if (!active) {
     return organization;
   }
 
@@ -451,7 +452,10 @@ function runIdentityProjectionTransaction(db, options) {
   ) {
     throw new TypeError('mutateUser must be a function');
   }
-  if (utilTypes.isAsyncFunction(mutateUser)) {
+  if (
+    utilTypes.isAsyncFunction(mutateUser) ||
+    isOpaqueCallable(mutateUser)
+  ) {
     throw new TypeError('mutateUser must be synchronous');
   }
 
