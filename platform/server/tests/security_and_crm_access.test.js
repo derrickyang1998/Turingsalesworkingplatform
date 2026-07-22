@@ -58,6 +58,7 @@ function invoke(routes, key, opts) {
     params: opts.params || {},
     query: opts.query || {},
     body: opts.body || {},
+    requestId: opts.requestId || 'crm-delete-test-request',
     ip: '127.0.0.1'
   };
   let statusCode = 200;
@@ -297,6 +298,326 @@ test('public-pool customer visibility does not allow opportunity mutation', () =
   assert.equal(invoke(routes, 'GET /api/customers/:id/detail', { user: other, params: { id: customerId } }).statusCode, 200);
   assert.equal(invoke(routes, 'PUT /api/opportunities/:id', { user: other, params: { id: opportunityId }, body: { stage: 'won' } }).statusCode, 403);
   assert.equal(invoke(routes, 'DELETE /api/opportunities/:id', { user: other, params: { id: opportunityId } }).statusCode, 403);
+
+  db.close();
+});
+
+test('customer and opportunity deletes reject campaign dependencies without partial mutation', () => {
+  const db = freshDb();
+  const routes = mountCustomerRoutes(db);
+  const owner = { id: 2, role: 'user' };
+  const customerId = Number(db.prepare(`
+    INSERT INTO customers (
+      brand_name,company_name,created_by,assigned_to,is_public,stage
+    ) VALUES (?,?,?, ?,0,?)
+  `).run(
+    'Campaign Customer',
+    'Campaign Customer Inc',
+    owner.id,
+    owner.id,
+    'proposal'
+  ).lastInsertRowid);
+  const opportunityId = Number(db.prepare(`
+    INSERT INTO opportunities (customer_id,name,stage,value,created_by)
+    VALUES (?,?,?,?,?)
+  `).run(
+    customerId,
+    'Campaign Opportunity',
+    'proposal',
+    5000,
+    owner.id
+  ).lastInsertRowid);
+  const organizationId = db.prepare(`
+    SELECT id FROM organizations WHERE code='turingmarket-default'
+  `).get().id;
+  const teamId = db.prepare(`
+    SELECT team_id
+    FROM team_memberships
+    WHERE org_id=? AND user_id=? AND status='active'
+    ORDER BY team_id
+    LIMIT 1
+  `).get(organizationId, owner.id).team_id;
+  db.prepare(`
+    INSERT INTO campaigns (
+      org_id,name,customer_id,opportunity_id,owner_user_id,team_id
+    ) VALUES (?,?,?,?,?,?)
+  `).run(
+    organizationId,
+    'Delete dependency campaign',
+    customerId,
+    opportunityId,
+    owner.id,
+    teamId
+  );
+  db.prepare(`
+    INSERT INTO customer_activity (
+      customer_id,user_id,action,stage_from,stage_to,notes
+    ) VALUES (?,?,'note','proposal','proposal','must survive')
+  `).run(customerId, owner.id);
+
+  const opportunityDelete = invoke(routes, 'DELETE /api/opportunities/:id', {
+    user: owner,
+    params: { id: String(opportunityId) }
+  });
+  assert.equal(opportunityDelete.statusCode, 409);
+  assert.deepEqual(opportunityDelete.payload, {
+    error: 'Opportunity has dependencies',
+    code: 'OPPORTUNITY_HAS_DEPENDENCIES',
+    request_id: 'crm-delete-test-request',
+    details: {
+      dependencies: [{ type: 'campaigns', count: 1 }]
+    }
+  });
+  assert.equal(
+    db.prepare('SELECT COUNT(*) AS count FROM opportunities WHERE id=?')
+      .get(opportunityId).count,
+    1
+  );
+
+  const customerDelete = invoke(routes, 'DELETE /api/customers/:id', {
+    user: owner,
+    params: { id: String(customerId) }
+  });
+  assert.equal(customerDelete.statusCode, 409);
+  assert.deepEqual(customerDelete.payload, {
+    error: 'Customer has dependencies',
+    code: 'CUSTOMER_HAS_DEPENDENCIES',
+    request_id: 'crm-delete-test-request',
+    details: {
+      dependencies: [
+        { type: 'campaigns', count: 1 },
+        { type: 'opportunities', count: 1 }
+      ]
+    }
+  });
+  assert.equal(
+    db.prepare('SELECT COUNT(*) AS count FROM customer_activity WHERE customer_id=?')
+      .get(customerId).count,
+    1
+  );
+  assert.equal(
+    db.prepare('SELECT COUNT(*) AS count FROM customers WHERE id=?')
+      .get(customerId).count,
+    1
+  );
+
+  db.close();
+});
+
+test('customer delete maps an unenumerated foreign key dependency and rolls back activity', () => {
+  const db = freshDb();
+  const routes = mountCustomerRoutes(db);
+  const owner = { id: 2, role: 'user' };
+  const customerId = Number(db.prepare(`
+    INSERT INTO customers (
+      brand_name,company_name,created_by,assigned_to,is_public,stage
+    ) VALUES (?,?,?, ?,0,?)
+  `).run(
+    'Hidden FK Customer',
+    'Hidden FK Inc',
+    owner.id,
+    owner.id,
+    'proposal'
+  ).lastInsertRowid);
+  db.exec(`
+    CREATE TABLE hidden_customer_dependency (
+      id INTEGER PRIMARY KEY,
+      customer_id INTEGER NOT NULL
+        REFERENCES customers(id) ON DELETE RESTRICT
+    );
+  `);
+  db.prepare(`
+    INSERT INTO hidden_customer_dependency (customer_id) VALUES (?)
+  `).run(customerId);
+  db.prepare(`
+    INSERT INTO customer_activity (
+      customer_id,user_id,action,stage_from,stage_to,notes
+    ) VALUES (?,?,'note','proposal','proposal','rollback evidence')
+  `).run(customerId, owner.id);
+
+  const result = invoke(routes, 'DELETE /api/customers/:id', {
+    user: owner,
+    params: { id: String(customerId) }
+  });
+  assert.equal(result.statusCode, 409);
+  assert.deepEqual(result.payload, {
+    error: 'Customer has dependencies',
+    code: 'CUSTOMER_HAS_DEPENDENCIES',
+    request_id: 'crm-delete-test-request',
+    details: {
+      dependencies: [{ type: 'unknown', count: null }]
+    }
+  });
+  assert.equal(
+    db.prepare('SELECT COUNT(*) AS count FROM customer_activity WHERE customer_id=?')
+      .get(customerId).count,
+    1
+  );
+  assert.equal(
+    db.prepare('SELECT COUNT(*) AS count FROM customers WHERE id=?')
+      .get(customerId).count,
+    1
+  );
+
+  db.close();
+});
+
+test('crm deletes reauthorize current actor and target state under the write transaction', () => {
+  const db = freshDb();
+  const routes = mountCustomerRoutes(db);
+  const staleAdminProjection = { id: 2, role: 'admin' };
+  const currentOwnerId = 3;
+  const customerId = Number(db.prepare(`
+    INSERT INTO customers (
+      brand_name,company_name,created_by,assigned_to,is_public,stage
+    ) VALUES (?,?,?,?,0,?)
+  `).run(
+    'Current Owner Customer',
+    'Current Owner Inc',
+    currentOwnerId,
+    currentOwnerId,
+    'proposal'
+  ).lastInsertRowid);
+  const opportunityId = Number(db.prepare(`
+    INSERT INTO opportunities (customer_id,name,stage,value,created_by)
+    VALUES (?,?,?,?,?)
+  `).run(
+    customerId,
+    'Current Owner Opportunity',
+    'proposal',
+    5000,
+    currentOwnerId
+  ).lastInsertRowid);
+
+  const customerForbidden = invoke(routes, 'DELETE /api/customers/:id', {
+    user: staleAdminProjection,
+    params: { id: String(customerId) }
+  });
+  assert.equal(customerForbidden.statusCode, 403);
+  assert.deepEqual(customerForbidden.payload, {
+    error: 'Forbidden',
+    code: 'RECORD_FORBIDDEN',
+    request_id: 'crm-delete-test-request'
+  });
+
+  const opportunityForbidden = invoke(routes, 'DELETE /api/opportunities/:id', {
+    user: staleAdminProjection,
+    params: { id: String(opportunityId) }
+  });
+  assert.equal(opportunityForbidden.statusCode, 403);
+  assert.deepEqual(opportunityForbidden.payload, {
+    error: 'Forbidden',
+    code: 'RECORD_FORBIDDEN',
+    request_id: 'crm-delete-test-request'
+  });
+
+  const noncanonicalCustomer = invoke(routes, 'DELETE /api/customers/:id', {
+    user: { id: currentOwnerId, role: 'user' },
+    params: { id: '0' + String(customerId) }
+  });
+  assert.equal(noncanonicalCustomer.statusCode, 404);
+  assert.deepEqual(noncanonicalCustomer.payload, {
+    error: 'Customer not found',
+    code: 'RECORD_NOT_FOUND',
+    request_id: 'crm-delete-test-request'
+  });
+
+  const noncanonicalOpportunity = invoke(routes, 'DELETE /api/opportunities/:id', {
+    user: { id: currentOwnerId, role: 'user' },
+    params: { id: '+' + String(opportunityId) }
+  });
+  assert.equal(noncanonicalOpportunity.statusCode, 404);
+  assert.deepEqual(noncanonicalOpportunity.payload, {
+    error: 'Opportunity not found',
+    code: 'RECORD_NOT_FOUND',
+    request_id: 'crm-delete-test-request'
+  });
+
+  db.prepare('UPDATE users SET is_active=0 WHERE id=?').run(currentOwnerId);
+  const inactiveActor = invoke(routes, 'DELETE /api/customers/:id', {
+    user: { id: currentOwnerId, role: 'user' },
+    params: { id: String(customerId) }
+  });
+  assert.equal(inactiveActor.statusCode, 403);
+  assert.deepEqual(inactiveActor.payload, {
+    error: 'Forbidden',
+    code: 'RECORD_FORBIDDEN',
+    request_id: 'crm-delete-test-request'
+  });
+
+  const missingCustomer = invoke(routes, 'DELETE /api/customers/:id', {
+    user: staleAdminProjection,
+    params: { id: '9007199254740991' }
+  });
+  assert.equal(missingCustomer.statusCode, 404);
+  assert.deepEqual(missingCustomer.payload, {
+    error: 'Customer not found',
+    code: 'RECORD_NOT_FOUND',
+    request_id: 'crm-delete-test-request'
+  });
+  assert.equal(
+    db.prepare('SELECT COUNT(*) AS count FROM customers WHERE id=?')
+      .get(customerId).count,
+    1
+  );
+  assert.equal(
+    db.prepare('SELECT COUNT(*) AS count FROM opportunities WHERE id=?')
+      .get(opportunityId).count,
+    1
+  );
+
+  db.close();
+});
+
+test('unexpected crm delete failures use a bounded error and roll back every mutation', () => {
+  const db = freshDb();
+  const routes = mountCustomerRoutes(db);
+  const owner = { id: 2, role: 'user' };
+  const customerId = Number(db.prepare(`
+    INSERT INTO customers (
+      brand_name,company_name,created_by,assigned_to,is_public,stage
+    ) VALUES (?,?,?,?,0,?)
+  `).run(
+    'Delete Failure Customer',
+    'Delete Failure Inc',
+    owner.id,
+    owner.id,
+    'proposal'
+  ).lastInsertRowid);
+  db.prepare(`
+    INSERT INTO customer_activity (
+      customer_id,user_id,action,stage_from,stage_to,notes
+    ) VALUES (?,?,'note','proposal','proposal','must roll back')
+  `).run(customerId, owner.id);
+  db.exec(`
+    CREATE TRIGGER fail_customer_delete
+    BEFORE DELETE ON customers
+    BEGIN
+      SELECT RAISE(ABORT,'sensitive-delete-detail');
+    END;
+  `);
+
+  const result = invoke(routes, 'DELETE /api/customers/:id', {
+    user: owner,
+    params: { id: String(customerId) }
+  });
+  assert.equal(result.statusCode, 500);
+  assert.deepEqual(result.payload, {
+    error: 'Customer deletion failed',
+    code: 'AUDIT_PERSISTENCE_FAILED',
+    request_id: 'crm-delete-test-request'
+  });
+  assert.equal(JSON.stringify(result.payload).includes('sensitive-delete-detail'), false);
+  assert.equal(
+    db.prepare('SELECT COUNT(*) AS count FROM customer_activity WHERE customer_id=?')
+      .get(customerId).count,
+    1
+  );
+  assert.equal(
+    db.prepare('SELECT COUNT(*) AS count FROM customers WHERE id=?')
+      .get(customerId).count,
+    1
+  );
 
   db.close();
 });

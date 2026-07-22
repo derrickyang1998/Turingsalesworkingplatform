@@ -285,7 +285,7 @@ test('request contract freezes the exact raw-byte and multipart limits', () => {
   }
 });
 
-test('owned-route matching is method and path exact and future policies stay inactive until registered', () => {
+test('owned-route matching covers every Express-dispatchable path shape while future policies stay inactive', () => {
   const { contract } = loadBoundary();
   const registry = contract.createRoutePolicyRegistry();
 
@@ -295,8 +295,9 @@ test('owned-route matching is method and path exact and future policies stay ina
   registry.register(contract.REQUEST_POLICIES.CAMPAIGN_CREATE);
   assert.equal(registry.match('POST', '/api/campaigns').id, 'campaign.create');
   assert.equal(registry.match('POST', '/api/campaigns?source=ui').id, 'campaign.create');
+  assert.equal(registry.match('POST', '/api/campaigns/').id, 'campaign.create');
+  assert.equal(registry.match('POST', '/API/CAMPAIGNS').id, 'campaign.create');
   assert.equal(registry.match('GET', '/api/campaigns'), null);
-  assert.equal(registry.match('POST', '/api/campaigns/'), null);
   assert.equal(registry.match('POST', '/api/campaigns-extra'), null);
   assert.equal(registry.match('POST', '/api/campaigns/7'), null);
   assert.equal(registry.match('POST', '/api/campaigns/7/reviews'), null);
@@ -304,11 +305,29 @@ test('owned-route matching is method and path exact and future policies stay ina
   registry.register(contract.REQUEST_POLICIES.CAMPAIGN_DETAIL);
   assert.equal(registry.match('GET', '/api/campaigns/7').id, 'campaign.detail');
   assert.equal(registry.match('HEAD', '/api/campaigns/7').id, 'campaign.detail');
-  assert.equal(registry.match('GET', '/api/campaigns/07'), null);
-  assert.equal(registry.match('GET', '/api/campaigns/0'), null);
-  assert.equal(registry.match('GET', '/api/campaigns/+7'), null);
-  assert.equal(registry.match('GET', '/api/campaigns/7.0'), null);
-  assert.equal(registry.match('GET', '/api/campaigns/9007199254740992'), null);
+  assert.equal(registry.match('GET', '/api/campaigns/7/').id, 'campaign.detail');
+  assert.equal(registry.match('GET', '/API/CAMPAIGNS/foo').id, 'campaign.detail');
+  assert.equal(registry.match('GET', '/api/campaigns/07').id, 'campaign.detail');
+  assert.equal(registry.match('GET', '/api/campaigns/0').id, 'campaign.detail');
+  assert.equal(registry.match('GET', '/api/campaigns/+7').id, 'campaign.detail');
+  assert.equal(registry.match('GET', '/api/campaigns/7.0').id, 'campaign.detail');
+  assert.equal(
+    registry.match('GET', '/api/campaigns/9007199254740992').id,
+    'campaign.detail'
+  );
+  assert.equal(registry.match('GET', '/api/campaigns/7/extra'), null);
+
+  registry.register(contract.REQUEST_POLICIES.CUSTOMER_DELETE);
+  registry.register(contract.REQUEST_POLICIES.OPPORTUNITY_DELETE);
+  assert.equal(
+    registry.match('DELETE', '/API/CUSTOMERS/not-an-id/').id,
+    'customer.delete'
+  );
+  assert.equal(
+    registry.match('DELETE', '/api/opportunities/07/').id,
+    'opportunity.delete'
+  );
+  assert.equal(registry.match('DELETE', '/api/customers/7/extra'), null);
 
   assert.throws(
     () => registry.register(contract.REQUEST_POLICIES.CAMPAIGN_CREATE),

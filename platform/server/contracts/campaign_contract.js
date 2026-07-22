@@ -313,15 +313,18 @@ function requestPath(requestTarget) {
 
 function pathTemplateMatches(pathTemplate, actualPath) {
   const expectedSegments = pathTemplate.split('/');
-  const actualSegments = actualPath.split('/');
+  const expressPath = actualPath.length > 1 && actualPath.endsWith('/')
+    ? actualPath.slice(0, -1)
+    : actualPath;
+  const actualSegments = expressPath.split('/');
   if (expectedSegments.length !== actualSegments.length) return false;
 
   for (let index = 0; index < expectedSegments.length; index += 1) {
     const expected = expectedSegments[index];
     const actual = actualSegments[index];
     if (expected.startsWith(':')) {
-      if (!isCanonicalSafeIntegerPathSegment(actual)) return false;
-    } else if (expected !== actual) {
+      if (actual.length === 0) return false;
+    } else if (expected.toLowerCase() !== actual.toLowerCase()) {
       return false;
     }
   }

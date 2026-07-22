@@ -291,6 +291,114 @@ function createReservationWorker(workerData) {
   return { worker, ready, result };
 }
 
+function createCampaignServiceWorker(workerData) {
+  const worker = new Worker(`
+    'use strict';
+    const { parentPort, workerData } = require('node:worker_threads');
+    const Database = require(workerData.databaseModulePath);
+    const { createCampaignService } = require(workerData.servicePath);
+    const db = new Database(workerData.dbPath);
+    db.pragma('busy_timeout = 10000');
+    const service = createCampaignService(db);
+    parentPort.postMessage({ type: 'ready' });
+    parentPort.once('message', (message) => {
+      if (!message || message.type !== 'start') {
+        parentPort.postMessage({
+          type: 'result',
+          outcome: {
+            ok: false,
+            error: {
+              name: 'WorkerProtocolError',
+              message: 'invalid campaign worker command'
+            }
+          }
+        });
+        db.close();
+        parentPort.close();
+        return;
+      }
+      try {
+        parentPort.postMessage({
+          type: 'result',
+          outcome: {
+            ok: true,
+            value: service.createCampaign(workerData.input)
+          }
+        });
+      } catch (error) {
+        parentPort.postMessage({
+          type: 'result',
+          outcome: {
+            ok: false,
+            error: {
+              name: error && error.name,
+              message: error && error.message,
+              code: error && error.code,
+              statusCode: error && error.statusCode
+            }
+          }
+        });
+      } finally {
+        db.close();
+        parentPort.close();
+      }
+    });
+  `, {
+    eval: true,
+    workerData
+  });
+  let readySettled = false;
+  let resultSettled = false;
+  let resolveReady;
+  let rejectReady;
+  let resolveResult;
+  let rejectResult;
+  const ready = new Promise((resolve, reject) => {
+    resolveReady = resolve;
+    rejectReady = reject;
+  });
+  const result = new Promise((resolve, reject) => {
+    resolveResult = resolve;
+    rejectResult = reject;
+  });
+  worker.on('message', (message) => {
+    if (message && message.type === 'ready' && !readySettled) {
+      readySettled = true;
+      resolveReady();
+    } else if (message && message.type === 'result' && !resultSettled) {
+      resultSettled = true;
+      resolveResult(message.outcome);
+    }
+  });
+  worker.once('error', (error) => {
+    if (!readySettled) {
+      readySettled = true;
+      rejectReady(error);
+    }
+    if (!resultSettled) {
+      resultSettled = true;
+      rejectResult(error);
+    }
+  });
+  worker.once('exit', (code) => {
+    if (code !== 0) {
+      const error = new Error(`campaign worker exited with code ${code}`);
+      if (!readySettled) {
+        readySettled = true;
+        rejectReady(error);
+      }
+      if (!resultSettled) {
+        resultSettled = true;
+        rejectResult(error);
+      }
+    } else if (!resultSettled) {
+      resultSettled = true;
+      rejectResult(new Error('campaign worker exited without a result'));
+    }
+  });
+  return { worker, ready, result };
+}
+
 function insertProcessingLedger(db, input, label, {
   createdModifier = '-2 minutes',
   leaseModifier = '-1 minute',
@@ -2935,6 +3043,148 @@ test('campaign-create inspection resolves the stored campaign for reauthorizatio
     code: 'IDEMPOTENCY_KEY_REUSED'
   });
   assert.equal(Object.hasOwn(conflict, 'campaignId'), false);
+});
+
+test('POST /api/campaigns serializes same-key workers into replay or changed-hash conflict', async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'campaign-create-race-'));
+  const dbPath = path.join(directory, 'campaign-create.sqlite');
+  const db = openCampaignDatabase(t, dbPath);
+  t.after(() => {
+    if (db.open) db.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  });
+  db.pragma('journal_mode = WAL');
+  const context = seedCampaign(db);
+  const databaseModulePath = require.resolve('better-sqlite3');
+  const servicePath = path.resolve(
+    __dirname,
+    '../services/campaign_service.js'
+  );
+
+  async function race(inputOne, inputTwo) {
+    const workers = [
+      createCampaignServiceWorker({
+        databaseModulePath,
+        servicePath,
+        dbPath,
+        input: inputOne
+      }),
+      createCampaignServiceWorker({
+        databaseModulePath,
+        servicePath,
+        dbPath,
+        input: inputTwo
+      })
+    ];
+    await Promise.all(workers.map((entry) => entry.ready));
+    workers.forEach((entry) => entry.worker.postMessage({ type: 'start' }));
+    return Promise.all(workers.map((entry) => entry.result));
+  }
+
+  const sameKey = 'campaign-create-worker-same-hash';
+  const sameBody = {
+    name: 'Concurrent same-hash campaign',
+    opportunity_id: context.opportunityId,
+    owner_user_id: context.actorUserId,
+    team_id: context.teamId
+  };
+  const sameOutcomes = await race(
+    {
+      userId: context.actorUserId,
+      requestId: 'campaign-worker-same-one',
+      idempotencyKey: sameKey,
+      body: sameBody
+    },
+    {
+      userId: context.actorUserId,
+      requestId: 'campaign-worker-same-two',
+      idempotencyKey: sameKey,
+      body: sameBody
+    }
+  );
+  assert.ok(sameOutcomes.every((outcome) => outcome.ok));
+  assert.ok(sameOutcomes.every((outcome) => outcome.value.status === 201));
+  assert.deepEqual(sameOutcomes[0].value.body, sameOutcomes[1].value.body);
+  assert.equal(
+    db.prepare('SELECT COUNT(*) AS count FROM campaigns WHERE name=?')
+      .get(sameBody.name).count,
+    1
+  );
+  assert.deepEqual(
+    db.prepare(`
+      SELECT
+        COUNT(*) AS ledgers,
+        (
+          SELECT COUNT(*)
+          FROM campaign_events event
+          WHERE event.audit_fingerprint=MAX(ledger.audit_fingerprint)
+        ) AS events
+      FROM request_idempotency ledger
+      WHERE ledger.scope='campaign.create' AND ledger.idempotency_key=?
+    `).get(sameKey),
+    { ledgers: 1, events: 1 }
+  );
+
+  const changedKey = 'campaign-create-worker-changed-hash';
+  const changedBodies = [
+    {
+      name: 'Concurrent changed-hash campaign A',
+      opportunity_id: context.opportunityId,
+      owner_user_id: context.actorUserId,
+      team_id: context.teamId
+    },
+    {
+      name: 'Concurrent changed-hash campaign B',
+      opportunity_id: context.opportunityId,
+      owner_user_id: context.actorUserId,
+      team_id: context.teamId
+    }
+  ];
+  const changedOutcomes = await race(
+    {
+      userId: context.actorUserId,
+      requestId: 'campaign-worker-changed-one',
+      idempotencyKey: changedKey,
+      body: changedBodies[0]
+    },
+    {
+      userId: context.actorUserId,
+      requestId: 'campaign-worker-changed-two',
+      idempotencyKey: changedKey,
+      body: changedBodies[1]
+    }
+  );
+  const changedSuccesses = changedOutcomes.filter((outcome) => outcome.ok);
+  const changedConflicts = changedOutcomes.filter((outcome) => (
+    !outcome.ok &&
+    outcome.error.statusCode === 409 &&
+    outcome.error.code === 'IDEMPOTENCY_KEY_REUSED'
+  ));
+  assert.equal(changedSuccesses.length, 1);
+  assert.equal(changedSuccesses[0].value.status, 201);
+  assert.equal(changedConflicts.length, 1);
+  assert.equal(
+    db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM campaigns
+      WHERE name IN (?,?)
+    `).get(changedBodies[0].name, changedBodies[1].name).count,
+    1
+  );
+  assert.deepEqual(
+    db.prepare(`
+      SELECT
+        COUNT(*) AS ledgers,
+        (
+          SELECT COUNT(*)
+          FROM campaign_events event
+          WHERE event.audit_fingerprint=MAX(ledger.audit_fingerprint)
+        ) AS events
+      FROM request_idempotency ledger
+      WHERE ledger.scope='campaign.create' AND ledger.idempotency_key=?
+    `).get(changedKey),
+    { ledgers: 1, events: 1 }
+  );
 });
 
 test('null-campaign admission and template lookup require an explicit null campaign identity', (t) => {

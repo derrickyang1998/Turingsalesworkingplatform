@@ -867,6 +867,89 @@ function preflightCampaignKnowledgeCapacity(db, prepared) {
   );
 }
 
+function preflightCampaignKnowledgeCustodyMoveInTransaction(db, options) {
+  if (!db || db.inTransaction !== true) {
+    throw new TypeError(
+      'preflightCampaignKnowledgeCustodyMoveInTransaction requires an existing transaction'
+    );
+  }
+  const entryId = options && options.entryId;
+  const destinationCampaignId = options && options.destinationCampaignId;
+  const organizationId = options && options.organizationId;
+  if (
+    !Number.isSafeInteger(entryId) ||
+    entryId < 1 ||
+    entryId > MAX_SAFE_ID ||
+    !Number.isSafeInteger(destinationCampaignId) ||
+    destinationCampaignId < 1 ||
+    destinationCampaignId > MAX_SAFE_ID ||
+    !Number.isSafeInteger(organizationId) ||
+    organizationId < 1 ||
+    organizationId > MAX_SAFE_ID
+  ) {
+    throw new TypeError('campaign knowledge custody move input is invalid');
+  }
+  const destination = db.prepare(`
+    SELECT org_id
+    FROM campaigns
+    WHERE id=?
+  `).get(destinationCampaignId);
+  if (!destination || destination.org_id !== organizationId) {
+    throw new TypeError(
+      'campaign knowledge custody destination does not match organization'
+    );
+  }
+  const delta = db.prepare(`
+    SELECT
+      1 AS entries,
+      COUNT(chunk.id) AS chunks,
+      ${entryPayloadSql('entry')} +
+        COALESCE(SUM(${chunkPayloadSql('chunk')}),0) AS payloadBytes,
+      0 AS "references"
+    FROM knowledge_entries entry
+    LEFT JOIN knowledge_chunks chunk ON chunk.entry_id=entry.id
+    WHERE entry.id=?
+    GROUP BY entry.id
+  `).get(entryId);
+  if (!delta) {
+    throw new TypeError('campaign knowledge custody entry does not exist');
+  }
+  const normalizedDelta = normalizedCapacityUsage(
+    delta,
+    'campaign custody move'
+  );
+  assertCapacity(
+    'campaign',
+    campaignKnowledgeUsage(db, destinationCampaignId),
+    normalizedDelta
+  );
+
+  const defaultOrganizations = db.prepare(`
+    SELECT id
+    FROM organizations
+    WHERE code='turingmarket-default'
+  `).all();
+  if (defaultOrganizations.length !== 1) {
+    throw new Error(
+      'default organization resolution failed during knowledge capacity preflight'
+    );
+  }
+  assertCapacity(
+    'organization',
+    organizationKnowledgeUsage(
+      db,
+      organizationId,
+      defaultOrganizations[0].id
+    ),
+    {
+      entries: 0,
+      chunks: 0,
+      payloadBytes: 0,
+      references: 0
+    }
+  );
+}
+
 function rebuildChunks(db, entryId, entry) {
   const chunks = preparedChunks(entry);
   db.prepare('DELETE FROM knowledge_chunks_fts WHERE entry_id = ?').run(entryId);
@@ -1703,6 +1786,7 @@ function markKnowledgeUsed(db, ids) {
 module.exports = {
   ingestKnowledge,
   writeCampaignKnowledgeInTransaction,
+  preflightCampaignKnowledgeCustodyMoveInTransaction,
   searchKnowledge,
   markKnowledgeUsed,
   normalizeEntry,

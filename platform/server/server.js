@@ -21,6 +21,11 @@ const latestUiCompat = require('./services/latest_ui_compat_service');
 const influencerWorkflow = require('./services/influencer_workflow_service');
 const publicAssets = require('./services/public_assets_service');
 const credentialRotation = require('./services/credential_rotation_service');
+const organizationAccess = require('./services/organization_access_service');
+const campaignContract = require('./contracts/campaign_contract');
+const {
+  createPhase4RequestPipeline
+} = require('./middleware/phase4_request_pipeline');
 const app = express();
 app.set('trust proxy', 'loopback');
 const PORT = process.env.PORT || 3002;
@@ -42,8 +47,57 @@ fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
 // Middleware
 app.use(cors());
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ extended: true }));
+const phase4PolicyNames = [
+  'CAMPAIGN_OPTIONS',
+  'CAMPAIGN_CREATE',
+  'CAMPAIGN_LIST',
+  'CAMPAIGN_DETAIL',
+  'CAMPAIGN_UPDATE',
+  'CAMPAIGN_TRANSITION',
+  'CAMPAIGN_OPERATIONAL_ACTION',
+  'CAMPAIGN_TRANSFER',
+  'CAMPAIGN_LINK_ATTACH',
+  'CAMPAIGN_LINK_CORRECT',
+  'CAMPAIGN_LINK_CANDIDATES',
+  'CAMPAIGN_WORKSPACE',
+  'CAMPAIGN_KNOWLEDGE_LIST',
+  'CAMPAIGN_KNOWLEDGE_DETAIL',
+  'CAMPAIGN_REVIEW_CREATE',
+  'CUSTOMER_DELETE',
+  'OPPORTUNITY_DELETE'
+];
+const phase4Registry = campaignContract.createRoutePolicyRegistry(
+  phase4PolicyNames.map((name) => campaignContract.REQUEST_POLICIES[name])
+);
+const phase4RequestPipeline = createPhase4RequestPipeline({
+  registry: phase4Registry,
+  authenticate: authenticatePhase4Request
+});
+
+function legacyJsonMediaType(req) {
+  const value = req.headers && req.headers['content-type'];
+  return (
+    !phase4RequestPipeline.shouldSkipGlobalBodyParser(req) &&
+    typeof value === 'string' &&
+    /^application\/json(?:\s*;|$)/i.test(value.trim())
+  );
+}
+
+function legacyUrlencodedMediaType(req) {
+  const value = req.headers && req.headers['content-type'];
+  return (
+    !phase4RequestPipeline.shouldSkipGlobalBodyParser(req) &&
+    typeof value === 'string' &&
+    /^application\/x-www-form-urlencoded(?:\s*;|$)/i.test(value.trim())
+  );
+}
+
+app.use(express.json({ limit: '50mb', type: legacyJsonMediaType }));
+app.use(express.urlencoded({
+  extended: true,
+  type: legacyUrlencodedMediaType
+}));
+app.use(phase4RequestPipeline.middleware);
 
 // Serve only the browser assets required by the platform UI.
 publicAssets.registerPublicAssets(app, express, path.join(__dirname, '..'));
@@ -88,21 +142,55 @@ function bearerTokenFromAuthorization(authorization) {
   return match ? match[1] : null;
 }
 
-function authMiddleware(req, res, next) {
+function authenticateRequest(req) {
+  if (req.user && req.authContext) {
+    return {
+      ok: true,
+      user: req.user,
+      authContext: req.authContext
+    };
+  }
   const token = bearerTokenFromAuthorization(req.headers.authorization);
-  if (!token) return res.status(401).json({ error: 'No token provided' });
+  if (!token) return { ok: false, error: 'No token provided' };
 
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
     const session = db.prepare(`SELECT * FROM sessions WHERE token = ? AND expires_at > datetime('now')`).get(token);
-    if (!session) return res.status(401).json({ error: 'Session expired' });
+    if (!session) return { ok: false, error: 'Session expired' };
 
     const user = db.prepare('SELECT id, username, display_name, role, department, api_quota FROM users WHERE id = ? AND is_active = 1').get(decoded.userId);
-    if (!user) return res.status(401).json({ error: 'User not found' });
+    if (!user) return { ok: false, error: 'User not found' };
+    const scope = organizationAccess.resolveOrganizationScope(db, {
+      userId: user.id,
+      repairMissing: false
+    });
+    if (!scope.ok) {
+      return { ok: false, error: 'Organization access unavailable' };
+    }
 
     req.user = user;
-    next();
-  } catch(e) { return res.status(401).json({ error: 'Invalid token' }); }
+    req.authContext = scope.authContext;
+    return {
+      ok: true,
+      user,
+      authContext: scope.authContext
+    };
+  } catch(e) {
+    return { ok: false, error: 'Invalid token' };
+  }
+}
+
+function authenticatePhase4Request(req) {
+  const authentication = authenticateRequest(req);
+  return authentication.ok ? authentication.user : null;
+}
+
+function authMiddleware(req, res, next) {
+  const authentication = authenticateRequest(req);
+  if (!authentication.ok) {
+    return res.status(401).json({ error: authentication.error });
+  }
+  next();
 }
 
 function adminOnly(req, res, next) {
@@ -118,6 +206,110 @@ function boolParam(value, defaultValue) {
 function hashPassword(password) {
   const salt = bcrypt.genSaltSync(10);
   return bcrypt.hashSync(password, salt);
+}
+
+function identityRequestId(req) {
+  const value = req.headers && req.headers['x-request-id'];
+  return campaignContract.isValidRequestId(value) ? value : null;
+}
+
+function nextUserIdInTransaction() {
+  const row = db.prepare(`
+    SELECT MAX(high_water)+1 AS id
+    FROM (
+      SELECT COALESCE(MAX(id),0) AS high_water
+      FROM users
+      UNION ALL
+      SELECT COALESCE((
+        SELECT seq
+        FROM sqlite_sequence
+        WHERE name='users'
+      ),0)
+    )
+  `).get();
+  if (!row || !Number.isSafeInteger(row.id) || row.id < 1) {
+    throw new Error('User identifier allocation failed');
+  }
+  return row.id;
+}
+
+function createUserWithIdentity(input) {
+  const create = db.transaction(() => {
+    const userId = nextUserIdInTransaction();
+    organizationAccess.runIdentityProjectionTransaction(db, {
+      actorUserId: input.actorUserId,
+      subjectUserId: userId,
+      reason: 'user_create',
+      requestId: input.requestId,
+      mutateUser() {
+        db.prepare(`
+          INSERT INTO users (
+            id,username,password_hash,display_name,role,email,department
+          ) VALUES (?,?,?,?,?,?,?)
+        `).run(
+          userId,
+          input.username,
+          input.passwordHash,
+          input.displayName,
+          input.role,
+          input.email,
+          input.department
+        );
+      }
+    });
+    return userId;
+  });
+  return create.immediate();
+}
+
+function updateUserWithIdentity(input) {
+  if (!campaignContract.isCanonicalSafeIntegerPathSegment(input.userId)) {
+    return { found: false, invalid: true };
+  }
+  const userId = Number(input.userId);
+  const update = db.transaction(() => {
+    const current = db.prepare(`
+      SELECT id,is_active
+      FROM users
+      WHERE id=?
+    `).get(userId);
+    if (!current) return { found: false };
+    const requestedActive = input.isActive === undefined || input.isActive === null
+      ? current.is_active
+      : Number(input.isActive);
+    const reason = current.is_active === 1 && requestedActive === 0
+      ? 'soft_deactivate'
+      : current.is_active !== 1 && requestedActive === 1
+        ? 'reactivate'
+        : 'admin_update';
+    const projection = organizationAccess.runIdentityProjectionTransaction(db, {
+      actorUserId: input.actorUserId,
+      subjectUserId: current.id,
+      reason,
+      requestId: input.requestId,
+      mutateUser() {
+        db.prepare(`
+          UPDATE users
+          SET
+            display_name=COALESCE(?,display_name),
+            department=COALESCE(?,department),
+            api_quota=COALESCE(?,api_quota),
+            is_active=COALESCE(?,is_active),
+            role=COALESCE(?,role)
+          WHERE id=?
+        `).run(
+          input.displayName,
+          input.department,
+          input.apiQuota,
+          input.isActive,
+          input.role,
+          current.id
+        );
+      }
+    });
+    return { found: true, projection };
+  });
+  return update.immediate();
 }
 
 function resolveUserCreationPassword(body) {
@@ -184,6 +376,15 @@ app.post('/api/auth/login', (req, res) => {
 
   const valid = bcrypt.compareSync(password, user.password_hash);
   if (!valid) return res.status(401).json({ error: 'Invalid credentials' });
+  const organizationScope = organizationAccess.resolveOrganizationScope(db, {
+    userId: user.id,
+    repairMissing: true,
+    actorUserId: user.id,
+    requestId: null
+  });
+  if (!organizationScope.ok) {
+    return res.status(401).json({ error: 'Organization access unavailable' });
+  }
 
   // Create session
   const token = jwt.sign({ userId: user.id, role: user.role, jti: crypto.randomUUID() }, JWT_SECRET, { expiresIn: TOKEN_EXPIRY });
@@ -203,7 +404,8 @@ app.post('/api/auth/login', (req, res) => {
       role: user.role,
       department: user.department,
       api_quota: user.api_quota
-    }
+    },
+    auth_context: organizationScope.authContext
   });
 });
 
@@ -215,7 +417,7 @@ app.post('/api/auth/logout', authMiddleware, (req, res) => {
 });
 
 app.get('/api/auth/me', authMiddleware, (req, res) => {
-  res.json({ user: req.user });
+  res.json({ user: req.user, auth_context: req.authContext });
 });
 
 // ===== DEMAND ROUTES =====
@@ -341,10 +543,18 @@ app.post('/api/admin/users', authMiddleware, adminOnly, (req, res) => {
   const temporaryPassword = passwordResult.password;
   const hash = hashPassword(temporaryPassword);
   try {
-    const result = db.prepare('INSERT INTO users (username, password_hash, display_name, role, email, department) VALUES (?, ?, ?, ?, ?, ?)')
-      .run(username, hash, display_name || username, role || 'user', email || '', department || '');
+    const userId = createUserWithIdentity({
+      actorUserId: req.user.id,
+      requestId: identityRequestId(req),
+      username,
+      passwordHash: hash,
+      displayName: display_name || username,
+      role: role || 'user',
+      email: email || '',
+      department: department || ''
+    });
     res.json({
-      id: result.lastInsertRowid,
+      id: userId,
       temporary_password: passwordResult.hasSuppliedPassword ? undefined : temporaryPassword,
       message: passwordResult.hasSuppliedPassword ? 'User created with provided password' : 'User created. Share the temporary password securely.'
     });
@@ -355,17 +565,49 @@ app.post('/api/admin/users', authMiddleware, adminOnly, (req, res) => {
 
 app.put('/api/admin/users/:id', authMiddleware, adminOnly, (req, res) => {
   const { display_name, department, api_quota, is_active, role } = req.body;
-  db.prepare('UPDATE users SET display_name = COALESCE(?, display_name), department = COALESCE(?, department), api_quota = COALESCE(?, api_quota), is_active = COALESCE(?, is_active), role = COALESCE(?, role) WHERE id = ?').run(display_name, department, api_quota, is_active, role, req.params.id);
-  res.json({ success: true });
+  try {
+    const result = updateUserWithIdentity({
+      actorUserId: req.user.id,
+      userId: req.params.id,
+      requestId: identityRequestId(req),
+      displayName: display_name,
+      department,
+      apiQuota: api_quota,
+      isActive: is_active,
+      role
+    });
+    if (result.invalid) return res.status(400).json({ error: 'Invalid user id' });
+    res.json({ success: true });
+  } catch (_error) {
+    res.status(500).json({ error: 'User update failed' });
+  }
 });
 
 app.delete('/api/admin/users/:id', authMiddleware, adminOnly, (req, res) => {
-  db.prepare("UPDATE users SET is_active = 0 WHERE id = ?").run(req.params.id);
-  res.json({ success: true });
+  try {
+    const result = updateUserWithIdentity({
+      actorUserId: req.user.id,
+      userId: req.params.id,
+      requestId: identityRequestId(req),
+      displayName: undefined,
+      department: undefined,
+      apiQuota: undefined,
+      isActive: 0,
+      role: undefined
+    });
+    if (result.invalid) return res.status(400).json({ error: 'Invalid user id' });
+    res.json({ success: true });
+  } catch (_error) {
+    res.status(500).json({ error: 'User deactivation failed' });
+  }
 });
 
 app.post('/api/admin/users/reset-password/:id', authMiddleware, adminOnly, (req, res) => {
-  const target = db.prepare('SELECT id, username FROM users WHERE id = ? AND is_active = 1').get(req.params.id);
+  if (!campaignContract.isCanonicalSafeIntegerPathSegment(req.params.id)) {
+    return res.status(400).json({ error: 'Invalid user id' });
+  }
+  const targetUserId = Number(req.params.id);
+  const target = db.prepare('SELECT id, username FROM users WHERE id = ? AND is_active = 1').get(targetUserId);
   if (!target) return res.status(404).json({ error: 'User not found' });
 
   const hasSuppliedPassword = Object.prototype.hasOwnProperty.call(req.body || {}, 'password');
@@ -461,6 +703,7 @@ app.post('/api/proposal/generate-ppt', authMiddleware, (req, res) => {
 // ===== INFLUENCER & COLLABORATION ROUTES =====
 require('./routes')(app, db, authMiddleware);
 require('./routes_customers')(app, db, authMiddleware);
+require('./routes_campaigns')(app, db);
 require('./routes_brands')(app, db, authMiddleware, aiLimiter, aiQuotaGuard);
 
 // ===== WORKFLOW ENGINE ROUTES =====
@@ -935,10 +1178,18 @@ app.post('/api/auth/register', authMiddleware, adminOnly, (req, res) => {
   const temporaryPassword = passwordResult.password;
   const hash = hashPassword(temporaryPassword);
   try {
-    const result = db.prepare('INSERT INTO users (username, password_hash, display_name, role, email, department) VALUES (?, ?, ?, ?, ?, ?)')
-      .run(username, hash, display_name || username, role || 'user', email || '', department || '');
+    const userId = createUserWithIdentity({
+      actorUserId: req.user.id,
+      requestId: identityRequestId(req),
+      username,
+      passwordHash: hash,
+      displayName: display_name || username,
+      role: role || 'user',
+      email: email || '',
+      department: department || ''
+    });
     res.json({
-      id: result.lastInsertRowid,
+      id: userId,
       temporary_password: passwordResult.hasSuppliedPassword ? undefined : temporaryPassword,
       message: passwordResult.hasSuppliedPassword ? 'User created with provided password' : 'User created. Share the temporary password securely.'
     });
@@ -948,7 +1199,7 @@ app.post('/api/auth/register', authMiddleware, adminOnly, (req, res) => {
 });
 
 // ===== USERS LIST (for frontend) =====
-app.get('/api/users', authMiddleware, (req, res) => {
+app.get('/api/users', authMiddleware, adminOnly, (req, res) => {
   const users = db.prepare('SELECT id, username, display_name, role, department, email, api_quota, created_at, last_login, is_active FROM users ORDER BY department, id').all();
   res.json({ users });
 });

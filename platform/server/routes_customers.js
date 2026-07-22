@@ -1,6 +1,8 @@
 module.exports = function(app, db, authMiddleware) {
   const businessKnowledge = require('./services/business_knowledge_service');
   const crmAccess = require('./services/crm_access_service');
+  const campaignAccess = require('./services/campaign_access_service');
+  const campaignContract = require('./contracts/campaign_contract');
   const knowledgeService = require('./services/knowledge_service');
 
   const STAGES = ['lead', 'info_confirmed', 'advantage_shared', 'needs_confirmed', 'analysis', 'proposal', 'kol_matching', 'cooperation'];
@@ -20,6 +22,44 @@ module.exports = function(app, db, authMiddleware) {
   };
 
   const ACTIVE_STAGES = STAGES.join("','");
+
+  function deleteErrorResponse(res, req, status, error, code, details) {
+    const body = {
+      error,
+      code,
+      request_id: req.requestId || 'crm-delete-request'
+    };
+    if (details !== undefined) body.details = details;
+    return res.status(status).json(body);
+  }
+
+  function dependencyResponse(res, req, target, code, dependencies) {
+    return deleteErrorResponse(
+      res,
+      req,
+      409,
+      target + ' has dependencies',
+      code,
+      { dependencies }
+    );
+  }
+
+  function isForeignKeyConstraint(error) {
+    return Boolean(
+      error &&
+      (
+        error.code === 'SQLITE_CONSTRAINT_FOREIGNKEY' ||
+        /foreign key constraint failed/i.test(String(error.message || ''))
+      )
+    );
+  }
+
+  function canonicalDeleteId(value) {
+    if (Number.isSafeInteger(value) && value > 0) return value;
+    return campaignContract.isCanonicalSafeIntegerPathSegment(value)
+      ? Number(value)
+      : null;
+  }
 
   function addCustomerScope(conditions, params, req, alias) {
     alias = alias || 'c';
@@ -243,12 +283,89 @@ module.exports = function(app, db, authMiddleware) {
   });
 
   app.delete('/api/customers/:id', authMiddleware, (req, res) => {
-    const customer = crmAccess.getCustomer(db, req.params.id);
-    if (!customer) return crmAccess.notFound(res, 'Customer');
-    if (!crmAccess.canManageCustomer(req.user, customer)) return crmAccess.forbidden(res);
-    db.prepare('DELETE FROM customer_activity WHERE customer_id = ?').run(req.params.id);
-    db.prepare('DELETE FROM customers WHERE id = ?').run(req.params.id);
-    res.json({ success: true });
+    const customerId = canonicalDeleteId(req.params.id);
+    if (customerId === null) {
+      return deleteErrorResponse(
+        res,
+        req,
+        404,
+        'Customer not found',
+        'RECORD_NOT_FOUND'
+      );
+    }
+    try {
+      const remove = db.transaction(() => {
+        const customer = crmAccess.getCustomer(db, customerId);
+        if (!customer) return { outcome: 'not_found' };
+        const actor = db.prepare(`
+          SELECT id,role
+          FROM users
+          WHERE id=? AND is_active=1
+        `).get(req.user.id);
+        if (!actor || !crmAccess.canManageCustomer(actor, customer)) {
+          return { outcome: 'forbidden' };
+        }
+        const dependencies = campaignAccess.listCrmDependencies(db, {
+          targetType: 'customer',
+          targetId: customerId
+        });
+        if (dependencies.length) {
+          return { outcome: 'dependencies', dependencies };
+        }
+        db.prepare('DELETE FROM customer_activity WHERE customer_id = ?').run(customerId);
+        const deleted = db.prepare('DELETE FROM customers WHERE id = ?').run(customerId);
+        if (deleted.changes !== 1) {
+          throw new Error('Customer delete lost its target');
+        }
+        return { outcome: 'deleted' };
+      });
+      const result = remove.immediate();
+      if (result.outcome === 'not_found') {
+        return deleteErrorResponse(
+          res,
+          req,
+          404,
+          'Customer not found',
+          'RECORD_NOT_FOUND'
+        );
+      }
+      if (result.outcome === 'forbidden') {
+        return deleteErrorResponse(
+          res,
+          req,
+          403,
+          'Forbidden',
+          'RECORD_FORBIDDEN'
+        );
+      }
+      if (result.outcome === 'dependencies') {
+        return dependencyResponse(
+          res,
+          req,
+          'Customer',
+          'CUSTOMER_HAS_DEPENDENCIES',
+          result.dependencies
+        );
+      }
+      return res.json({ success: true });
+    } catch (error) {
+      if (isForeignKeyConstraint(error)) {
+        return dependencyResponse(
+          res,
+          req,
+          'Customer',
+          'CUSTOMER_HAS_DEPENDENCIES',
+          [{ type: 'unknown', count: null }]
+        );
+      }
+      return deleteErrorResponse(
+        res,
+        req,
+        500,
+        'Customer deletion failed',
+        'AUDIT_PERSISTENCE_FAILED'
+      );
+    }
   });
 
   // Assign customer (admin only)
@@ -324,13 +441,88 @@ module.exports = function(app, db, authMiddleware) {
   });
 
   app.delete('/api/opportunities/:id', authMiddleware, (req, res) => {
+    const opportunityId = canonicalDeleteId(req.params.id);
+    if (opportunityId === null) {
+      return deleteErrorResponse(
+        res,
+        req,
+        404,
+        'Opportunity not found',
+        'RECORD_NOT_FOUND'
+      );
+    }
     try {
-      const opportunity = crmAccess.getOpportunityWithCustomer(db, req.params.id);
-      if (!opportunity) return crmAccess.notFound(res, 'Opportunity');
-      if (!crmAccess.canManageOpportunity(req.user, opportunity)) return crmAccess.forbidden(res);
-      db.prepare('DELETE FROM opportunities WHERE id=?').run(req.params.id);
-      res.json({ success: true });
-    } catch (e) { res.status(500).json({ error: e.message }); }
+      const remove = db.transaction(() => {
+        const opportunity = crmAccess.getOpportunityWithCustomer(db, opportunityId);
+        if (!opportunity) return { outcome: 'not_found' };
+        const actor = db.prepare(`
+          SELECT id,role
+          FROM users
+          WHERE id=? AND is_active=1
+        `).get(req.user.id);
+        if (!actor || !crmAccess.canManageOpportunity(actor, opportunity)) {
+          return { outcome: 'forbidden' };
+        }
+        const dependencies = campaignAccess.listCrmDependencies(db, {
+          targetType: 'opportunity',
+          targetId: opportunityId
+        });
+        if (dependencies.length) {
+          return { outcome: 'dependencies', dependencies };
+        }
+        const deleted = db.prepare('DELETE FROM opportunities WHERE id=?').run(opportunityId);
+        if (deleted.changes !== 1) {
+          throw new Error('Opportunity delete lost its target');
+        }
+        return { outcome: 'deleted' };
+      });
+      const result = remove.immediate();
+      if (result.outcome === 'not_found') {
+        return deleteErrorResponse(
+          res,
+          req,
+          404,
+          'Opportunity not found',
+          'RECORD_NOT_FOUND'
+        );
+      }
+      if (result.outcome === 'forbidden') {
+        return deleteErrorResponse(
+          res,
+          req,
+          403,
+          'Forbidden',
+          'RECORD_FORBIDDEN'
+        );
+      }
+      if (result.outcome === 'dependencies') {
+        return dependencyResponse(
+          res,
+          req,
+          'Opportunity',
+          'OPPORTUNITY_HAS_DEPENDENCIES',
+          result.dependencies
+        );
+      }
+      return res.json({ success: true });
+    } catch (error) {
+      if (isForeignKeyConstraint(error)) {
+        return dependencyResponse(
+          res,
+          req,
+          'Opportunity',
+          'OPPORTUNITY_HAS_DEPENDENCIES',
+          [{ type: 'unknown', count: null }]
+        );
+      }
+      return deleteErrorResponse(
+        res,
+        req,
+        500,
+        'Opportunity deletion failed',
+        'AUDIT_PERSISTENCE_FAILED'
+      );
+    }
   });
 
   // ============================================================
