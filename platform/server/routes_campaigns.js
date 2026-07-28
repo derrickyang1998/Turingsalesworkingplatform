@@ -4,6 +4,10 @@ const {
   CampaignServiceError,
   createCampaignService
 } = require('./services/campaign_service');
+const {
+  CampaignWorkflowServiceError,
+  createCampaignWorkflowService
+} = require('./services/campaign_workflow_service');
 
 function requestId(request) {
   return request.requestId ||
@@ -13,6 +17,7 @@ function requestId(request) {
 
 function sendError(request, response, error) {
   const known = error instanceof CampaignServiceError ||
+    error instanceof CampaignWorkflowServiceError ||
     error && error.name === 'IdempotencyServiceError';
   const status = known ? error.statusCode : 500;
   const body = {
@@ -39,6 +44,7 @@ function registerCampaignRoutes(app, db) {
     throw new TypeError('An Express application is required');
   }
   const service = createCampaignService(db);
+  const workflowService = createCampaignWorkflowService(db);
 
   app.get('/api/campaigns/options', (request, response) => {
     try {
@@ -233,6 +239,77 @@ function registerCampaignRoutes(app, db) {
       return sendError(request, response, error);
     }
   });
+
+  app.get(
+    '/api/campaigns/:id/workflow-reconciliation-options',
+    (request, response) => {
+      try {
+        return response.json(
+          workflowService.getWorkflowReconciliationOptions({
+            userId: request.user && request.user.id,
+            campaignId: request.params.id,
+            query: request.query
+          })
+        );
+      } catch (error) {
+        return sendError(request, response, error);
+      }
+    }
+  );
+
+  app.post(
+    '/api/campaigns/:id/workflow-dispatches/:dispatchId/retry',
+    (request, response) => {
+      try {
+        return sendResult(response, workflowService.retryWorkflowDispatch({
+          userId: request.user && request.user.id,
+          campaignId: request.params.id,
+          dispatchId: request.params.dispatchId,
+          requestId: requestId(request),
+          idempotencyKey: request.get('Idempotency-Key'),
+          body: request.body
+        }));
+      } catch (error) {
+        return sendError(request, response, error);
+      }
+    }
+  );
+
+  app.post(
+    '/api/campaigns/:id/workflow-dispatches/:dispatchId/reconcile',
+    (request, response) => {
+      try {
+        return sendResult(response, workflowService.reconcileWorkflowDispatch({
+          userId: request.user && request.user.id,
+          campaignId: request.params.id,
+          dispatchId: request.params.dispatchId,
+          requestId: requestId(request),
+          idempotencyKey: request.get('Idempotency-Key'),
+          body: request.body
+        }));
+      } catch (error) {
+        return sendError(request, response, error);
+      }
+    }
+  );
+
+  app.post(
+    '/api/campaigns/:id/workflow-tasks/:taskId/reassign',
+    (request, response) => {
+      try {
+        return sendResult(response, workflowService.reassignWorkflowTask({
+          userId: request.user && request.user.id,
+          campaignId: request.params.id,
+          taskId: request.params.taskId,
+          requestId: requestId(request),
+          idempotencyKey: request.get('Idempotency-Key'),
+          body: request.body
+        }));
+      } catch (error) {
+        return sendError(request, response, error);
+      }
+    }
+  );
 
   return service;
 }

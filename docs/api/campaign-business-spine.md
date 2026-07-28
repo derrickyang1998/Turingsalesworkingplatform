@@ -13,6 +13,8 @@ Task 3 freezes the executable `002` inventory independently in `platform/server/
 
 The complete 51-trigger list includes `organizations_no_replace_insert`, `campaign_settled_collaboration_no_replace_insert`, `campaign_workflow_task_no_replace_insert`, and `knowledge_entries_no_replace_insert`. These guards preserve existing rows when a caller uses SQLite conflict-replacement syntax. / 完整的 51 个触发器清单包含上述四个防覆盖保护，确保冲突替换语法不会静默删除既有业务记录。
 
+Migration `003_campaign_workflow_dispatch_evidence` is additive and leaves the checksum-pinned `002` source and inventory unchanged. It adds immutable `campaign_workflow_dispatches.template_label`, backfills existing v2 dispatches from their referenced template with a bounded fallback, and supports both fresh v0.4 upgrades and already-managed v2 databases.
+
 ## Common Contract / 通用契约
 
 - Authentication: the existing `Authorization: Bearer <tm_token>` header. The client continues to load `tm_token` from local storage and removes it on logout or `401`; Phase 4 does not migrate authentication to cookies. Release nevertheless requires removal of all data-bearing `innerHTML` and inline script handlers plus the exact restrictive CSP in the design, because a stored-XSS path would expose this token.
@@ -140,7 +142,7 @@ A link variant is emitted in full only when the target is currently visible and 
 }
 ```
 
-`instance`, when present, is exactly `{ "id": 12, "status": "active|paused|completed|cancelled|failed_validation", "initialization_status": "ready", "error": null }`; a terminal execution error uses the same sanitized error shape as the dispatch. `error`, when present, is exactly `{ "code": "SANITIZED_CODE", "message": "sanitized message" }`. Snapshot JSON, checksums, lease values/tokens, private cache keys, and raw provider errors are never returned.
+`template.label` is pinned on the dispatch when the lifecycle event is committed; later template renames cannot alter historical summaries. `instance`, when present, is exactly `{ "id": 12, "status": "active|paused|completed|cancelled|failed_validation", "initialization_status": "ready", "error": null }`; a terminal execution error uses the same sanitized error shape as the dispatch. `error`, when present, is exactly `{ "code": "SANITIZED_CODE", "message": "sanitized message" }`. Snapshot JSON, checksums, lease values/tokens, private cache keys, and raw provider errors are never returned.
 
 ## Campaign Endpoints / 活动接口
 
@@ -275,6 +277,8 @@ Owner or org admin only. A pre-initialization failure body is exactly `{ "expect
 
 Existing non-campaign template list/detail response fields remain unchanged. Campaign-template authoring is platform-admin-only, exactly an active legacy `users.role='admin'`; an organization administrator without that platform role cannot list private trigger configuration, create, edit, publish, or delete a campaign template. Creation through `POST /api/workflow/templates` when `module='campaign'` requires `Idempotency-Key`, uses scope `workflow.campaign-template.create`, and returns the existing exact `200 { "id": 9 }`, but always stores version 1 inactive. Same key/body replays the same ID; changed body conflicts. Existing campaign templates cannot change module; existing non-campaign templates cannot convert through PUT.
 
+The shared template create/update/publish paths use one auth-first dual-mode parser so truly non-campaign callers retain the legacy JSON, URL-encoded, and bodyless-publish behavior. After parsing, `module='campaign'`, a stored campaign template, or `expected_version` selects campaign semantics without depending on the idempotency header; that branch requires `application/json` and otherwise returns `415 UNSUPPORTED_MEDIA_TYPE` before template validation, authorization, or ledger lookup. Campaign-template name, description, and category are scalar-safe, LF/NFC-normalized, trimmed before hashing/storage, and reject C0 controls other than LF plus DEL.
+
 Campaign trigger configuration uses Bearer-authenticated platform-admin-only `GET|PUT /api/workflow/templates/:id/campaign-trigger`:
 
 ```json
@@ -290,7 +294,7 @@ Campaign trigger configuration uses Bearer-authenticated platform-admin-only `GE
 }
 ```
 
-GET returns that exact shape. PUT requires `Idempotency-Key`, scope `workflow.campaign-template.trigger`, and body `{ "expected_version": 4, "event_type": "lifecycle_transition", "previous_state": "qualified", "next_state": "demand_confirmed" }`; no other fields/wildcards are accepted. It conditionally increments version once, stores the trigger, sets inactive, and returns the same shape with version 5. Campaign graph updates through existing `PUT /api/workflow/templates/:id` likewise require admin, `Idempotency-Key`, scope `workflow.campaign-template.graph`, and exact `expected_version`, keep `module='campaign'`, increment once, set inactive, and return exact `200 { "success": true, "version": 5, "is_active": false }`. Both replay exact success for the same key/hash.
+GET returns that exact shape for a configured template; a newly created inactive draft returns the same keys with exact `"trigger":null`. PUT requires `Idempotency-Key`, scope `workflow.campaign-template.trigger`, and body `{ "expected_version": 4, "event_type": "lifecycle_transition", "previous_state": "qualified", "next_state": "demand_confirmed" }`; no other fields/wildcards are accepted. It conditionally increments version once, stores the trigger, sets inactive, and returns the same shape with version 5. Campaign graph updates through existing `PUT /api/workflow/templates/:id` likewise require admin, `Idempotency-Key`, scope `workflow.campaign-template.graph`, and exact `expected_version`, keep `module='campaign'`, increment once, set inactive, and return exact `200 { "success": true, "version": 5, "is_active": false }`. Both replay exact success for the same key/hash.
 
 Campaign publish uses existing `POST /api/workflow/templates/:id/publish` with required `Idempotency-Key`, scope `workflow.campaign-template.publish`, and body `{ "expected_version": 5 }`. It conditionally validates the design's closed node/config/edge/condition schemas and action-specific branch invariants, rejects unsupported or ambiguous graphs, and returns exact `200 { "success": true, "version": 5, "is_active": true, "published_checksum": "<lowercase sha256>" }`. The checksum uses the versioned canonical `tm-workflow-snapshot-v1` serializer and real approval/condition golden vector in the design. Stale version returns `409 STALE_WORKFLOW_TEMPLATE_VERSION`; invalid graph/trigger returns `409 INVALID_CAMPAIGN_WORKFLOW_TEMPLATE` with safe reason codes and no mutation; module changes return `409 CAMPAIGN_TEMPLATE_MODULE_IMMUTABLE|CAMPAIGN_TEMPLATE_CREATE_REQUIRED`; non-campaign target returns `409 CAMPAIGN_TEMPLATE_REQUIRED`; missing is `404 WORKFLOW_TEMPLATE_NOT_FOUND`. Each dispatch stores the published canonical snapshot and checksum, and every later campaign task advance reads that pinned snapshot rather than mutable template rows.
 

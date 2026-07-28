@@ -69,6 +69,7 @@ async function createHarness(options = {}) {
     authenticate,
     admit,
     parseMultipart,
+    shouldOwnRequest: options.shouldOwnRequest,
     generateRequestId: options.generateRequestId || (() => 'generated-request-0001'),
     bodyTimeoutMs: options.bodyTimeoutMs
   });
@@ -236,6 +237,70 @@ test('request-boundary modules expose the reusable contract and pipeline interfa
   assert.equal(typeof contract.isValidRequestId, 'function');
   assert.equal(typeof pipeline.createPhase4RequestPipeline, 'function');
   assert.equal(typeof pipeline.Phase4RequestError, 'function');
+});
+
+test('dynamic ownership is synchronous, cached per request and policy, and bypasses both parser skipping and middleware', async () => {
+  const decisions = [];
+  const requestDecisions = new WeakMap();
+  const harness = await createHarness({
+    policyNames: ['WORKFLOW_TASK_APPROVE'],
+    shouldOwnRequest(request, policy) {
+      assert.equal(policy.id, 'workflow.task.approve');
+      decisions.push({ request, policy });
+      const owned = /\/tasks\/9\/approve(?:\?|$)/i.test(request.originalUrl || request.url);
+      requestDecisions.set(request, owned);
+      return owned;
+    },
+    handle(request, response) {
+      return response.status(200).json({
+        owned: Boolean(request.phase4Request),
+        request_id: request.requestId || null,
+        body: request.body === undefined ? null : request.body,
+        classified_owned: requestDecisions.get(request)
+      });
+    }
+  });
+
+  try {
+    const bypassed = await requestJson(
+      harness.baseUrl,
+      '/api/workflow/tasks/8/approve',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ legacy: true })
+      }
+    );
+    assert.equal(bypassed.response.status, 200);
+    assert.deepEqual(bypassed.body, {
+      owned: false,
+      request_id: null,
+      body: { legacy: true },
+      classified_owned: false
+    });
+
+    const owned = await requestJson(
+      harness.baseUrl,
+      '/api/workflow/tasks/9/approve',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ linked: true })
+      }
+    );
+    assert.equal(owned.response.status, 200);
+    assert.deepEqual(owned.body, {
+      owned: true,
+      request_id: 'generated-request-0001',
+      body: { linked: true },
+      classified_owned: true
+    });
+    assert.equal(decisions.length, 2, 'global parser and pipeline must share one decision');
+    assert.notStrictEqual(decisions[0].request, decisions[1].request);
+    assert.strictEqual(decisions[0].policy, decisions[1].policy);
+  } finally {
+    await harness.close();
+  }
 });
 
 test('request contract freezes the exact raw-byte and multipart limits', () => {
@@ -615,6 +680,60 @@ test('media matrix accepts JSON parameters and exact empty-body compatibility wh
       assert.equal(invalidMultipart.response.status, 415);
       assert.equal(invalidMultipart.body.code, 'UNSUPPORTED_MEDIA_TYPE');
     }
+  } finally {
+    await harness.close();
+  }
+});
+
+test('dual-mode workflow template policies parse legacy forms and empty publish bodies after authentication', async () => {
+  const harness = await createHarness({
+    policyNames: [
+      'WORKFLOW_TEMPLATE_CREATE',
+      'WORKFLOW_TEMPLATE_UPDATE',
+      'WORKFLOW_TEMPLATE_PUBLISH'
+    ],
+    handle(request, response) {
+      return response.status(200).json({
+        media_kind: request.phase4Request.mediaKind,
+        body: request.body === undefined ? null : request.body
+      });
+    }
+  });
+
+  try {
+    const form = await requestJson(harness.baseUrl, '/api/workflow/templates', {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer accepted-by-test',
+        'Content-Type': 'application/x-www-form-urlencoded; charset=utf-8'
+      },
+      body: 'name=Legacy+approval&module=customer'
+    });
+    assert.deepEqual(form.body, {
+      media_kind: 'urlencoded',
+      body: { name: 'Legacy approval', module: 'customer' }
+    });
+
+    const emptyPublish = await requestJson(
+      harness.baseUrl,
+      '/api/workflow/templates/7/publish',
+      {
+        method: 'POST',
+        headers: { Authorization: 'Bearer accepted-by-test' }
+      }
+    );
+    assert.deepEqual(emptyPublish.body, { media_kind: 'empty', body: null });
+
+    const unsupported = await requestJson(harness.baseUrl, '/api/workflow/templates/7', {
+      method: 'PUT',
+      headers: {
+        Authorization: 'Bearer accepted-by-test',
+        'Content-Type': 'text/plain'
+      },
+      body: 'description=not-parsed'
+    });
+    assert.equal(unsupported.response.status, 415);
+    assert.equal(unsupported.body.code, 'UNSUPPORTED_MEDIA_TYPE');
   } finally {
     await harness.close();
   }

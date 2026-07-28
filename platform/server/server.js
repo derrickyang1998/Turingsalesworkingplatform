@@ -63,15 +63,86 @@ const phase4PolicyNames = [
   'CAMPAIGN_KNOWLEDGE_LIST',
   'CAMPAIGN_KNOWLEDGE_DETAIL',
   'CAMPAIGN_REVIEW_CREATE',
+  'CAMPAIGN_WORKFLOW_RECONCILIATION_OPTIONS',
+  'CAMPAIGN_WORKFLOW_RETRY',
+  'CAMPAIGN_WORKFLOW_RECONCILE',
+  'CAMPAIGN_WORKFLOW_TASK_REASSIGN',
+  'WORKFLOW_TEMPLATE_CREATE',
+  'WORKFLOW_TEMPLATE_UPDATE',
+  'WORKFLOW_TEMPLATE_TRIGGER_GET',
+  'WORKFLOW_TEMPLATE_TRIGGER_UPDATE',
+  'WORKFLOW_TEMPLATE_PUBLISH',
+  'WORKFLOW_TEMPLATE_DELETE',
+  'WORKFLOW_TASK_APPROVE',
+  'WORKFLOW_TASK_REJECT',
+  'WORKFLOW_TASK_COMPLETE',
+  'WORKFLOW_INSTANCE_PAUSE',
+  'WORKFLOW_INSTANCE_RESUME',
+  'WORKFLOW_INSTANCE_CANCEL',
   'CUSTOMER_DELETE',
   'OPPORTUNITY_DELETE'
 ];
 const phase4Registry = campaignContract.createRoutePolicyRegistry(
   phase4PolicyNames.map((name) => campaignContract.REQUEST_POLICIES[name])
 );
+const sharedWorkflowPolicyIds = new Set([
+  'workflow.task.approve',
+  'workflow.task.reject',
+  'workflow.task.complete',
+  'workflow.instance.pause',
+  'workflow.instance.resume',
+  'workflow.instance.cancel'
+]);
+
+function campaignLinkedSharedWorkflowOwner(request, policy) {
+  if (!sharedWorkflowPolicyIds.has(policy.id)) return true;
+  try {
+    const pathname = new URL(
+      request.originalUrl || request.url || request.path,
+      'http://phase4.local'
+    ).pathname;
+    const match = /^\/api\/workflow\/(tasks|instances)\/([^/]+)\/(approve|reject|complete|pause|resume|cancel)\/?$/i
+      .exec(pathname);
+    if (!match) return true;
+    const rawId = match[2];
+    if (!/^[1-9][0-9]*$/.test(rawId)) return true;
+    const id = Number(rawId);
+    if (!Number.isSafeInteger(id) || id < 1) return true;
+    const instance = match[1].toLowerCase() === 'tasks'
+      ? db.prepare(`
+          SELECT instance.*
+          FROM workflow_tasks task
+          JOIN workflow_instances instance ON instance.id=task.instance_id
+          WHERE task.id=?
+        `).get(id)
+      : db.prepare('SELECT * FROM workflow_instances WHERE id=?').get(id);
+    if (!instance) return false;
+    if (
+      instance.org_id !== null ||
+      instance.campaign_id !== null ||
+      instance.campaign_event_id !== null ||
+      instance.campaign_dispatch_id !== null ||
+      instance.business_type === 'campaign'
+    ) {
+      return true;
+    }
+    return Boolean(db.prepare(`
+      SELECT 1
+      FROM campaign_record_links
+      WHERE record_type='workflow_instance'
+        AND relation_type='workflow'
+        AND record_id=?
+        AND revoked_at IS NULL
+      LIMIT 1
+    `).get(String(instance.id)));
+  } catch (_error) {
+    return true;
+  }
+}
 const phase4RequestPipeline = createPhase4RequestPipeline({
   registry: phase4Registry,
-  authenticate: authenticatePhase4Request
+  authenticate: authenticatePhase4Request,
+  shouldOwnRequest: campaignLinkedSharedWorkflowOwner
 });
 
 function legacyJsonMediaType(req) {
@@ -1206,6 +1277,8 @@ app.get('/api/users', authMiddleware, adminOnly, (req, res) => {
 // ===== WORKFLOW ENGINE INIT =====
 const workflowEngine = require('./workflow_engine');
 workflowEngine.initEngine();
+const { startCampaignWorkflowDispatcher } = require('./services/campaign_workflow_service');
+startCampaignWorkflowDispatcher(db);
 
 // ===== HEALTH CHECK =====
 app.get('/api/health', (req, res) => {

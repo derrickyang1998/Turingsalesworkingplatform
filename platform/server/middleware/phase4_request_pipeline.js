@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('node:crypto');
+const qs = require('qs');
 const {
   MEDIA_KINDS,
   createOwnedRoutePredicate,
@@ -31,6 +32,15 @@ function applicationJson(contentType) {
     .trim()
     .toLowerCase();
   return mediaType === 'application/json';
+}
+
+function applicationUrlencoded(contentType) {
+  if (typeof contentType !== 'string') return false;
+  const separator = contentType.indexOf(';');
+  const mediaType = (separator === -1 ? contentType : contentType.slice(0, separator))
+    .trim()
+    .toLowerCase();
+  return mediaType === 'application/x-www-form-urlencoded';
 }
 
 function multipartBoundary(contentType) {
@@ -114,8 +124,22 @@ function validateMediaAndLength(request, policy) {
     );
   }
 
+  let parsedMediaKind = policy.mediaKind;
   if (policy.mediaKind === MEDIA_KINDS.JSON) {
     if (!applicationJson(contentType)) throw unsupportedMediaType();
+  } else if (policy.mediaKind === MEDIA_KINDS.DUAL) {
+    if (applicationJson(contentType)) {
+      parsedMediaKind = MEDIA_KINDS.JSON;
+    } else if (applicationUrlencoded(contentType)) {
+      parsedMediaKind = 'urlencoded';
+    } else if (
+      transferEncoding === undefined &&
+      (contentLength === null || contentLength === 0)
+    ) {
+      parsedMediaKind = MEDIA_KINDS.EMPTY;
+    } else {
+      throw unsupportedMediaType();
+    }
   } else if (policy.mediaKind === MEDIA_KINDS.MULTIPART) {
     if (!multipartBoundary(contentType)) throw unsupportedMediaType();
   } else if (
@@ -132,7 +156,8 @@ function validateMediaAndLength(request, policy) {
 
   return {
     contentLength,
-    bodyKnownEmpty: transferEncoding === undefined && (contentLength === null || contentLength === 0)
+    bodyKnownEmpty: transferEncoding === undefined && (contentLength === null || contentLength === 0),
+    parsedMediaKind
   };
 }
 
@@ -322,6 +347,7 @@ function createPhase4RequestPipeline(options = {}) {
     authenticate,
     admit = async () => true,
     parseMultipart = null,
+    shouldOwnRequest = () => true,
     generateRequestId = crypto.randomUUID
   } = options;
   const bodyTimeoutMs = options.bodyTimeoutMs === undefined
@@ -337,6 +363,9 @@ function createPhase4RequestPipeline(options = {}) {
   if (typeof admit !== 'function') {
     throw new TypeError('An admission function is required');
   }
+  if (typeof shouldOwnRequest !== 'function') {
+    throw new TypeError('shouldOwnRequest must be a function');
+  }
   if (typeof generateRequestId !== 'function') {
     throw new TypeError('A request ID generator is required');
   }
@@ -344,14 +373,35 @@ function createPhase4RequestPipeline(options = {}) {
     throw new TypeError('bodyTimeoutMs must be a positive safe integer');
   }
 
-  const ownedRoutePredicate = createOwnedRoutePredicate(registry);
+  const ownershipDecisions = new WeakMap();
 
-  async function middleware(request, response, next) {
-    const policy = registry.match(
+  function cachedOwnershipDecision(request, policy) {
+    let decisions = ownershipDecisions.get(request);
+    if (!decisions) {
+      decisions = new Map();
+      ownershipDecisions.set(request, decisions);
+    }
+    if (!decisions.has(policy)) {
+      decisions.set(policy, Boolean(shouldOwnRequest(request, policy)));
+    }
+    return decisions.get(policy);
+  }
+
+  function matchedPolicy(request) {
+    return registry.match(
       request.method,
       request.originalUrl || request.url || request.path
     );
-    if (!policy) return next();
+  }
+
+  function ownedRoutePredicate(request) {
+    const policy = matchedPolicy(request);
+    return Boolean(policy && cachedOwnershipDecision(request, policy));
+  }
+
+  async function middleware(request, response, next) {
+    const policy = matchedPolicy(request);
+    if (!policy || !cachedOwnershipDecision(request, policy)) return next();
 
     try {
       const requestId = attachRequestId(request, response, generateRequestId);
@@ -359,7 +409,8 @@ function createPhase4RequestPipeline(options = {}) {
         policy,
         requestId,
         rawBody: null,
-        multipart: null
+        multipart: null,
+        mediaKind: null
       };
 
       const authentication = await authenticate(request, {
@@ -388,8 +439,9 @@ function createPhase4RequestPipeline(options = {}) {
         ? Buffer.alloc(0)
         : await readBoundedBody(request, policy, bodyTimeoutMs);
       request.phase4Request.rawBody = rawBody;
+      request.phase4Request.mediaKind = headerAdmission.parsedMediaKind;
 
-      if (policy.mediaKind === MEDIA_KINDS.JSON) {
+      if (headerAdmission.parsedMediaKind === MEDIA_KINDS.JSON) {
         if (rawBody.length === 0) {
           request.body = undefined;
         } else {
@@ -402,6 +454,20 @@ function createPhase4RequestPipeline(options = {}) {
               'Invalid JSON body'
             );
           }
+        }
+      } else if (headerAdmission.parsedMediaKind === 'urlencoded') {
+        try {
+          request.body = qs.parse(rawBody.toString('utf8'), {
+            allowPrototypes: false,
+            depth: 32,
+            parameterLimit: 1000
+          });
+        } catch (_error) {
+          throw new Phase4RequestError(
+            400,
+            'INVALID_REQUEST_BODY',
+            'Invalid URL-encoded body'
+          );
         }
       } else if (policy.mediaKind === MEDIA_KINDS.MULTIPART) {
         if (typeof parseMultipart !== 'function') {

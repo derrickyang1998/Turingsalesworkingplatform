@@ -652,6 +652,131 @@ test('noncanonical campaign paths stay inside authentication and request admissi
   }
 });
 
+test('production registers all six shared workflow policies and classifies malformed, missing, and linked IDs before parsers', {
+  timeout: 30000
+}, async () => {
+  const server = await startTestServer('tm-phase4-workflow-owner-');
+  try {
+    const missing = await jsonRequest(
+      server.baseUrl,
+      '/api/workflow/tasks/880099/approve',
+      { method: 'POST', headers: { 'X-Request-Id': 'missing-workflow-task' } }
+    );
+    assert.equal(missing.response.status, 401, missing.text);
+    assert.deepEqual(missing.body, { error: 'No token provided' });
+    assert.equal(missing.response.headers.get('x-request-id'), null);
+
+    const malformed = await jsonRequest(
+      server.baseUrl,
+      '/api/workflow/tasks/01/approve',
+      { method: 'POST', headers: { 'X-Request-Id': 'malformed-workflow-task' } }
+    );
+    assert.equal(malformed.response.status, 401, malformed.text);
+    assert.equal(malformed.body.code, 'AUTHENTICATION_REQUIRED');
+    assert.equal(malformed.body.request_id, 'malformed-workflow-task');
+    assert.equal(
+      malformed.response.headers.get('x-request-id'),
+      'malformed-workflow-task'
+    );
+
+    const inspection = new Database(server.dbPath);
+    let linkedTaskId;
+    try {
+      inspection.pragma('busy_timeout = 5000');
+      const identity = inspection.prepare(`
+        SELECT user.id AS user_id,membership.org_id,team.team_id
+        FROM users user
+        JOIN organization_memberships membership
+          ON membership.user_id=user.id AND membership.status='active'
+        JOIN team_memberships team
+          ON team.user_id=user.id AND team.org_id=membership.org_id
+         AND team.status='active'
+        WHERE user.is_active=1
+        ORDER BY CASE WHEN membership.role_code='org_admin' THEN 0 ELSE 1 END,user.id
+        LIMIT 1
+      `).get();
+      assert.ok(identity);
+      inspection.prepare(`
+        INSERT INTO customers (id,brand_name,company_name,stage,source,created_by,assigned_to)
+        VALUES (880001,'Classifier brand','Classifier company','qualified','test',?,?)
+      `).run(identity.user_id, identity.user_id);
+      inspection.prepare(`
+        INSERT INTO opportunities (
+          id,customer_id,name,stage,value,win_probability,product_name,
+          channel_type,created_by
+        ) VALUES (880002,880001,'Classifier opportunity','proposal',1,50,'Test','influencer',?)
+      `).run(identity.user_id);
+      inspection.prepare(`
+        INSERT INTO campaigns (
+          id,org_id,name,customer_id,opportunity_id,owner_user_id,team_id,
+          lifecycle_state,operational_status,row_version
+        ) VALUES (880003,?,'Classifier campaign',880001,880002,?,?,'lead','active',1)
+      `).run(identity.org_id, identity.user_id, identity.team_id);
+      inspection.prepare(`
+        INSERT INTO workflow_templates (
+          id,name,description,module,category,nodes,edges,version,is_active,created_by
+        ) VALUES (880004,'Classifier workflow','','customer','approval','[]','[]',1,1,?)
+      `).run(identity.user_id);
+      const instanceId = Number(inspection.prepare(`
+        INSERT INTO workflow_instances (
+          template_id,business_type,business_id,current_node_id,status,node_data,started_by
+        ) VALUES (880004,'customer',880001,'legacy-node','active','{}',?)
+      `).run(identity.user_id).lastInsertRowid);
+      linkedTaskId = Number(inspection.prepare(`
+        INSERT INTO workflow_tasks (
+          instance_id,node_id,node_type,title,description,assignee_id,status
+        ) VALUES (?,'legacy-node','task','Classifier task','',?,'pending')
+      `).run(instanceId, identity.user_id).lastInsertRowid);
+      const linkId = Number(inspection.prepare(
+        'SELECT COALESCE(MAX(id),0)+1 AS id FROM campaign_record_links'
+      ).get().id);
+      inspection.prepare(`
+        INSERT INTO campaign_record_links (
+          id,org_id,campaign_id,record_type,bundle_id,record_id,relation_type,
+          created_by,metadata_json
+        ) VALUES (?,?,880003,'workflow_instance',?,?,'workflow',?,'{}')
+      `).run(
+        linkId,
+        identity.org_id,
+        '8'.repeat(64),
+        String(instanceId),
+        identity.user_id
+      );
+    } finally {
+      inspection.close();
+    }
+
+    const linked = await jsonRequest(
+      server.baseUrl,
+      `/api/workflow/tasks/${linkedTaskId}/approve`,
+      { method: 'POST', headers: { 'X-Request-Id': 'linked-workflow-task' } }
+    );
+    assert.equal(linked.response.status, 401, linked.text);
+    assert.equal(linked.body.code, 'AUTHENTICATION_REQUIRED');
+    assert.equal(linked.body.request_id, 'linked-workflow-task');
+    assert.equal(linked.response.headers.get('x-request-id'), 'linked-workflow-task');
+
+    for (const requestPath of [
+      '/api/workflow/tasks/nope/approve',
+      '/api/workflow/tasks/nope/reject',
+      '/api/workflow/tasks/nope/complete',
+      '/api/workflow/instances/nope/pause',
+      '/api/workflow/instances/nope/resume',
+      '/api/workflow/instances/nope/cancel'
+    ]) {
+      const response = await jsonRequest(server.baseUrl, requestPath, {
+        method: 'POST',
+        headers: { 'X-Request-Id': 'shared-workflow-policy' }
+      });
+      assert.equal(response.response.status, 401, `${requestPath}: ${response.text}`);
+      assert.equal(response.body.code, 'AUTHENTICATION_REQUIRED');
+      assert.equal(response.response.headers.get('x-request-id'), 'shared-workflow-policy');
+    }
+  } finally {
+    await server.close();
+  }
+});
+
 test('production server mounts the authenticated campaign route module', {
   timeout: 30000
 }, async () => {
@@ -678,6 +803,116 @@ test('production server mounts the authenticated campaign route module', {
     assert.equal(campaigns.body.limit, 1);
     assert.equal(campaigns.body.offset, 0);
     assert.equal(Array.isArray(campaigns.body.items), true);
+  } finally {
+    await server.close();
+  }
+});
+
+test('production registers reassignment policy and proves auth-first parser and campaign route ownership', {
+  timeout: 30000
+}, async () => {
+  const server = await startTestServer('tm-phase4-reassignment-policy-');
+  try {
+    const port = Number(new URL(server.baseUrl).port);
+    const startedAt = Date.now();
+    const unauthenticated = await rawExchange(port, [
+      'POST /api/campaigns/1/workflow-tasks/1/reassign HTTP/1.1',
+      'Host: 127.0.0.1',
+      'Content-Type: application/json',
+      'Content-Length: 65536',
+      'X-Request-Id: reassignment-auth-first',
+      'Idempotency-Key: reassignment-auth-first-key',
+      'Connection: close',
+      '',
+      ''
+    ].join('\r\n'));
+    assert.equal(Date.now() - startedAt < 1000, true);
+    assert.match(unauthenticated, /^HTTP\/1\.1 401\b/);
+    assert.match(unauthenticated, /\r\nX-Request-Id: reassignment-auth-first\r\n/i);
+    assert.match(unauthenticated, /"code":"AUTHENTICATION_REQUIRED"/);
+
+    const login = await jsonRequest(server.baseUrl, '/api/auth/login', {
+      method: 'POST',
+      body: { username: 'admin', password: 'AdminTest1!Secure' }
+    });
+    assert.equal(login.response.status, 200, login.text + '\n' + server.output());
+
+    const malformedPath = await jsonRequest(
+      server.baseUrl,
+      '/api/campaigns/01/workflow-tasks/1/reassign',
+      {
+        method: 'POST',
+        token: login.body.token,
+        headers: {
+          'X-Request-Id': 'reassignment-malformed-path',
+          'Idempotency-Key': 'reassignment-malformed-path-key'
+        },
+        body: {}
+      }
+    );
+    assert.equal(malformedPath.response.status, 400, malformedPath.text);
+    assert.equal(malformedPath.body.code, 'INVALID_CAMPAIGN_INPUT');
+    assert.equal(malformedPath.body.request_id, 'reassignment-malformed-path');
+
+    const wrongMediaResponse = await fetch(
+      `${server.baseUrl}/api/campaigns/1/workflow-tasks/1/reassign`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${login.body.token}`,
+          'Content-Type': 'text/plain',
+          'X-Request-Id': 'reassignment-wrong-media',
+          'Idempotency-Key': 'reassignment-wrong-media-key'
+        },
+        body: '{}'
+      }
+    );
+    const wrongMedia = await wrongMediaResponse.json();
+    assert.equal(wrongMediaResponse.status, 415);
+    assert.equal(wrongMedia.code, 'UNSUPPORTED_MEDIA_TYPE');
+    assert.equal(wrongMedia.request_id, 'reassignment-wrong-media');
+
+    const malformedJsonResponse = await fetch(
+      `${server.baseUrl}/api/campaigns/1/workflow-tasks/1/reassign`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${login.body.token}`,
+          'Content-Type': 'application/json',
+          'X-Request-Id': 'reassignment-malformed-json',
+          'Idempotency-Key': 'reassignment-malformed-json-key'
+        },
+        body: '{'
+      }
+    );
+    const malformedJson = await malformedJsonResponse.json();
+    assert.equal(malformedJsonResponse.status, 400);
+    assert.equal(malformedJson.code, 'INVALID_REQUEST_BODY');
+    assert.equal(malformedJson.request_id, 'reassignment-malformed-json');
+
+    const missing = await jsonRequest(
+      server.baseUrl,
+      '/api/campaigns/900719/workflow-tasks/900720/reassign',
+      {
+        method: 'POST',
+        token: login.body.token,
+        headers: {
+          'X-Request-Id': 'reassignment-route-proof',
+          'Idempotency-Key': 'reassignment-route-proof-key'
+        },
+        body: {
+          expected_task_status: 'pending',
+          expected_instance_status: 'active',
+          expected_assignment_version: 1,
+          assignee_id: login.body.user.id,
+          assignee_role: null,
+          reason: 'Route registration proof'
+        }
+      }
+    );
+    assert.equal(missing.response.status, 404, missing.text);
+    assert.equal(missing.body.code, 'CAMPAIGN_NOT_FOUND');
+    assert.equal(missing.body.request_id, 'reassignment-route-proof');
   } finally {
     await server.close();
   }

@@ -18,7 +18,8 @@ const MULTIPART_LIMITS = Object.freeze({
 const MEDIA_KINDS = Object.freeze({
   EMPTY: 'empty',
   JSON: 'json',
-  MULTIPART: 'multipart'
+  MULTIPART: 'multipart',
+  DUAL: 'dual'
 });
 
 function definePolicy(id, method, pathTemplate, mediaKind, maxRawBytes, options = {}) {
@@ -61,6 +62,13 @@ const existingJson = (id, method, pathTemplate) => definePolicy(
   method,
   pathTemplate,
   MEDIA_KINDS.JSON,
+  BODY_LIMITS.EXISTING_DUAL_MODE_JSON
+);
+const existingDual = (id, method, pathTemplate) => definePolicy(
+  id,
+  method,
+  pathTemplate,
+  MEDIA_KINDS.DUAL,
   BODY_LIMITS.EXISTING_DUAL_MODE_JSON
 );
 const empty = (id, method, pathTemplate) => definePolicy(
@@ -207,12 +215,12 @@ const REQUEST_POLICIES = Object.freeze({
   CUSTOMER_DELETE: empty('customer.delete', 'DELETE', '/api/customers/:id'),
   OPPORTUNITY_DELETE: empty('opportunity.delete', 'DELETE', '/api/opportunities/:id'),
 
-  WORKFLOW_TEMPLATE_CREATE: existingJson(
+  WORKFLOW_TEMPLATE_CREATE: existingDual(
     'workflow.template.create',
     'POST',
     '/api/workflow/templates'
   ),
-  WORKFLOW_TEMPLATE_UPDATE: existingJson(
+  WORKFLOW_TEMPLATE_UPDATE: existingDual(
     'workflow.template.update',
     'PUT',
     '/api/workflow/templates/:id'
@@ -227,7 +235,7 @@ const REQUEST_POLICIES = Object.freeze({
     'PUT',
     '/api/workflow/templates/:id/campaign-trigger'
   ),
-  WORKFLOW_TEMPLATE_PUBLISH: existingJson(
+  WORKFLOW_TEMPLATE_PUBLISH: existingDual(
     'workflow.template.publish',
     'POST',
     '/api/workflow/templates/:id/publish'

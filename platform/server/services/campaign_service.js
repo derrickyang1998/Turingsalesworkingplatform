@@ -4,6 +4,7 @@ const { randomBytes } = require('node:crypto');
 const crmAccess = require('./crm_access_service');
 const idempotency = require('./idempotency_service');
 const knowledgeService = require('./knowledge_service');
+const campaignWorkflowService = require('./campaign_workflow_service');
 const {
   requestHash
 } = require('./sqlite_digest_service');
@@ -1110,12 +1111,30 @@ function transitionCampaign(db, input) {
       correlationId: input.requestId,
       auditFingerprint
     });
+    let dispatches;
+    try {
+      dispatches = campaignWorkflowService.createLifecycleDispatchesInTransaction(db, {
+        organizationId: access.campaign.org_id,
+        campaignId,
+        eventId: event.id
+      });
+    } catch (error) {
+      if (error instanceof campaignWorkflowService.CampaignWorkflowValidationError) {
+        throw new CampaignServiceError(
+          409,
+          'INVALID_CAMPAIGN_WORKFLOW_TEMPLATE',
+          'Campaign workflow template is invalid.',
+          { reason: error.reason || campaignWorkflowService.validationReason(error.message) }
+        );
+      }
+      throw error;
+    }
     return {
       status: 200,
       body: {
         campaign: campaignProjection(db, campaignId),
         event,
-        dispatches: []
+        dispatches
       }
     };
   });

@@ -20,6 +20,7 @@
     "express-rate-limit": "^8.5.2",
     "jsonwebtoken": "^9.0.3",
     "multer": "^2.2.0",
+    "qs": "^6.15.2",
     "read-excel-file": "^9.2.0"
   }
 }
