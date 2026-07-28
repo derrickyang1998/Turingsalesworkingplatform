@@ -24,6 +24,10 @@ const credentialRotation = require('./services/credential_rotation_service');
 const organizationAccess = require('./services/organization_access_service');
 const campaignContract = require('./contracts/campaign_contract');
 const {
+  CampaignLinkServiceError,
+  createCampaignLinkService
+} = require('./services/campaign_link_service');
+const {
   createPhase4RequestPipeline
 } = require('./middleware/phase4_request_pipeline');
 const app = express();
@@ -63,6 +67,8 @@ const phase4PolicyNames = [
   'CAMPAIGN_KNOWLEDGE_LIST',
   'CAMPAIGN_KNOWLEDGE_DETAIL',
   'CAMPAIGN_REVIEW_CREATE',
+  'LEGACY_DEMAND_CREATE',
+  'LEGACY_PROPOSAL_CREATE',
   'CAMPAIGN_WORKFLOW_RECONCILIATION_OPTIONS',
   'CAMPAIGN_WORKFLOW_RETRY',
   'CAMPAIGN_WORKFLOW_RECONCILE',
@@ -492,7 +498,43 @@ app.get('/api/auth/me', authMiddleware, (req, res) => {
 });
 
 // ===== DEMAND ROUTES =====
-app.post('/api/demands', authMiddleware, (req, res) => {
+const campaignLinkService = createCampaignLinkService(db);
+
+function campaignLinkRequestId(req) {
+  return req.requestId ||
+    req.phase4Request && req.phase4Request.requestId ||
+    'campaign-link-request';
+}
+
+function sendCampaignLinkResult(res, result) {
+  for (const [name, value] of Object.entries(result.headers || {})) {
+    res.setHeader(name, value);
+  }
+  return res.status(result.status).json(result.body);
+}
+
+function sendCampaignLinkError(req, res, error) {
+  const known = error instanceof CampaignLinkServiceError ||
+    error && error.name === 'IdempotencyServiceError';
+  const body = {
+    error: known ? error.message : 'Campaign-linked record request failed.',
+    code: known ? error.code : 'AUDIT_PERSISTENCE_FAILED',
+    request_id: campaignLinkRequestId(req)
+  };
+  if (known && error.details !== undefined) body.details = error.details;
+  if (known && error.retryAfterSeconds) {
+    res.setHeader('Retry-After', String(error.retryAfterSeconds));
+  }
+  return res.status(known ? error.statusCode : 500).json(body);
+}
+
+function hasCampaignId(body) {
+  return body !== null && body !== undefined &&
+    (typeof body === 'object' || typeof body === 'function') &&
+    Object.hasOwn(body, 'campaign_id');
+}
+
+function createLegacyDemand(req, res) {
   const { brand_name, company_name, product_name, industry, budget, target_market, platform, data_json } = req.body;
   const result = db.prepare('INSERT INTO demands (user_id, brand_name, company_name, product_name, industry, budget, target_market, platform, data_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
     req.user.id, brand_name, company_name, product_name, industry, budget, target_market, platform, JSON.stringify(data_json)
@@ -515,6 +557,21 @@ app.post('/api/demands', authMiddleware, (req, res) => {
     });
   } catch(e) {}
   res.json({ id: result.lastInsertRowid });
+}
+
+app.post('/api/demands', authMiddleware, (req, res) => {
+  if (!hasCampaignId(req.body)) return createLegacyDemand(req, res);
+  try {
+    return sendCampaignLinkResult(res, campaignLinkService.createDemand({
+      userId: req.user.id,
+      requestId: campaignLinkRequestId(req),
+      idempotencyKey: req.get('Idempotency-Key'),
+      body: req.body,
+      ipAddress: req.ip
+    }));
+  } catch (error) {
+    return sendCampaignLinkError(req, res, error);
+  }
 });
 
 app.get('/api/demands', authMiddleware, (req, res) => {
@@ -525,7 +582,7 @@ app.get('/api/demands', authMiddleware, (req, res) => {
 });
 
 // ===== PROPOSAL ROUTES =====
-app.post('/api/proposals', authMiddleware, (req, res) => {
+function createLegacyProposal(req, res) {
   const { demand_id, template_id, content } = req.body;
   const result = db.prepare('INSERT INTO proposals (user_id, demand_id, template_id, content) VALUES (?, ?, ?, ?)').run(req.user.id, demand_id, template_id, content);
   db.prepare('INSERT INTO activity_log (user_id, action, module, details, ip_address) VALUES (?, ?, ?, ?, ?)').run(req.user.id, 'generate_proposal', 'proposal', `Generated proposal with template ${template_id}`, req.ip);
@@ -547,6 +604,21 @@ app.post('/api/proposals', authMiddleware, (req, res) => {
     });
   } catch(e) {}
   res.json({ id: result.lastInsertRowid });
+}
+
+app.post('/api/proposals', authMiddleware, (req, res) => {
+  if (!hasCampaignId(req.body)) return createLegacyProposal(req, res);
+  try {
+    return sendCampaignLinkResult(res, campaignLinkService.createProposal({
+      userId: req.user.id,
+      requestId: campaignLinkRequestId(req),
+      idempotencyKey: req.get('Idempotency-Key'),
+      body: req.body,
+      ipAddress: req.ip
+    }));
+  } catch (error) {
+    return sendCampaignLinkError(req, res, error);
+  }
 });
 
 app.get('/api/proposals', authMiddleware, (req, res) => {
