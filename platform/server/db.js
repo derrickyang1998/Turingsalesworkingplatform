@@ -21,6 +21,13 @@ const db = migrationService.openMigratedDatabase(DB_PATH, {
       sourcePath: 'migrations/003_campaign_workflow_dispatch_evidence.js',
       engineVersion: 1,
       dependencies: ['migrations/vendor/bcryptjs_v3_0_3.js']
+    },
+    {
+      version: 4,
+      name: '004_knowledge_capacity_observability',
+      sourcePath: 'migrations/004_knowledge_capacity_observability.js',
+      engineVersion: 1,
+      dependencies: ['migrations/vendor/bcryptjs_v3_0_3.js']
     }
   ]
 });

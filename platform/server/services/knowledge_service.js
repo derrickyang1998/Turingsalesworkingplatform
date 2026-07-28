@@ -795,6 +795,150 @@ function capacityMetricLabel(metric) {
   return metric === 'payloadBytes' ? 'payload_bytes' : metric;
 }
 
+function capacityThresholdPercent(usageValue, limitValue) {
+  if (!Number.isSafeInteger(usageValue) || usageValue < 0) {
+    throw new TypeError('capacity usage must be a nonnegative JavaScript-safe integer');
+  }
+  if (!Number.isSafeInteger(limitValue) || limitValue < 1) {
+    throw new TypeError('capacity limit must be a positive JavaScript-safe integer');
+  }
+  const usage = BigInt(usageValue);
+  const limit = BigInt(limitValue);
+  if (usage >= limit) return 100;
+  if (usage * 10n >= limit * 9n) return 90;
+  if (usage * 5n >= limit * 4n) return 80;
+  return 0;
+}
+
+function defaultKnowledgeOrganizationId(db) {
+  const organizations = db.prepare(`
+    SELECT id
+    FROM organizations
+    WHERE code='turingmarket-default'
+  `).all();
+  if (organizations.length !== 1) {
+    throw new Error('default organization resolution failed during knowledge capacity reconciliation');
+  }
+  return organizations[0].id;
+}
+
+function allKnowledgeCapacityScopes(db) {
+  return [
+    ...db.prepare('SELECT id FROM users ORDER BY id').all().map(function(row) {
+      return { scopeType: 'user', scopeId: row.id };
+    }),
+    ...db.prepare('SELECT id FROM campaigns ORDER BY id').all().map(function(row) {
+      return { scopeType: 'campaign', scopeId: row.id };
+    }),
+    ...db.prepare('SELECT id FROM organizations ORDER BY id').all().map(function(row) {
+      return { scopeType: 'organization', scopeId: row.id };
+    })
+  ];
+}
+
+function knowledgeCapacityUsage(db, scopeType, scopeId, defaultOrganizationId) {
+  if (scopeType === 'user') return userKnowledgeUsage(db, scopeId);
+  if (scopeType === 'campaign') return campaignKnowledgeUsage(db, scopeId);
+  if (scopeType === 'organization') {
+    return organizationKnowledgeUsage(db, scopeId, defaultOrganizationId);
+  }
+  throw new TypeError('knowledge capacity scope type is invalid');
+}
+
+function normalizeKnowledgeCapacityScopes(scopes) {
+  if (!Array.isArray(scopes)) {
+    throw new TypeError('knowledge capacity scopes must be an array');
+  }
+  const unique = new Map();
+  for (const scope of scopes) {
+    const scopeType = scope && scope.scopeType;
+    const scopeId = scope && scope.scopeId;
+    if (!Object.prototype.hasOwnProperty.call(CAMPAIGN_KNOWLEDGE_CAPACITY, scopeType)) {
+      throw new TypeError('knowledge capacity scope type is invalid');
+    }
+    if (!Number.isSafeInteger(scopeId) || scopeId < 1) {
+      throw new TypeError('knowledge capacity scope id must be a positive safe integer');
+    }
+    unique.set(`${scopeType}:${scopeId}`, { scopeType, scopeId });
+  }
+  return [...unique.values()];
+}
+
+function knowledgeCapacityScopeExists(db, scopeType, scopeId) {
+  const table = {
+    user: 'users',
+    campaign: 'campaigns',
+    organization: 'organizations'
+  }[scopeType];
+  return Boolean(db.prepare(`SELECT 1 AS present FROM ${table} WHERE id=?`).get(scopeId));
+}
+
+function refreshKnowledgeCapacityGaugesInTransaction(db, scopes) {
+  if (!db || db.inTransaction !== true) {
+    throw new TypeError(
+      'refreshKnowledgeCapacityGaugesInTransaction requires an existing transaction'
+    );
+  }
+  const normalizedScopes = normalizeKnowledgeCapacityScopes(scopes);
+  if (normalizedScopes.length === 0) return 0;
+  const defaultOrganizationId = defaultKnowledgeOrganizationId(db);
+  const upsert = db.prepare(`
+    INSERT INTO knowledge_capacity_gauges (
+      scope_type,scope_id,metric,usage_value,limit_value,threshold_percent,updated_at
+    ) VALUES (@scopeType,@scopeId,@metric,@usageValue,@limitValue,@thresholdPercent,CURRENT_TIMESTAMP)
+    ON CONFLICT(scope_type,scope_id,metric) DO UPDATE SET
+      usage_value=excluded.usage_value,
+      limit_value=excluded.limit_value,
+      threshold_percent=excluded.threshold_percent,
+      updated_at=excluded.updated_at
+  `);
+  for (const scope of normalizedScopes) {
+    if (!knowledgeCapacityScopeExists(db, scope.scopeType, scope.scopeId)) {
+      throw new TypeError('knowledge capacity scope does not exist');
+    }
+    const usage = knowledgeCapacityUsage(
+      db,
+      scope.scopeType,
+      scope.scopeId,
+      defaultOrganizationId
+    );
+    const limits = CAMPAIGN_KNOWLEDGE_CAPACITY[scope.scopeType];
+    for (const metric of CAPACITY_METRICS) {
+      const usageValue = usage[metric];
+      const limitValue = limits[metric];
+      upsert.run({
+        scopeType: scope.scopeType,
+        scopeId: scope.scopeId,
+        metric: capacityMetricLabel(metric),
+        usageValue,
+        limitValue,
+        thresholdPercent: capacityThresholdPercent(usageValue, limitValue)
+      });
+    }
+  }
+  return normalizedScopes.length * CAPACITY_METRICS.length;
+}
+
+function reconcileKnowledgeCapacityGaugesInTransaction(db) {
+  if (!db || db.inTransaction !== true) {
+    throw new TypeError(
+      'reconcileKnowledgeCapacityGaugesInTransaction requires an existing transaction'
+    );
+  }
+  const scopes = allKnowledgeCapacityScopes(db);
+  db.exec(`
+    DELETE FROM knowledge_capacity_gauges
+    WHERE (scope_type='user' AND NOT EXISTS (
+      SELECT 1 FROM users WHERE users.id=knowledge_capacity_gauges.scope_id
+    )) OR (scope_type='campaign' AND NOT EXISTS (
+      SELECT 1 FROM campaigns WHERE campaigns.id=knowledge_capacity_gauges.scope_id
+    )) OR (scope_type='organization' AND NOT EXISTS (
+      SELECT 1 FROM organizations WHERE organizations.id=knowledge_capacity_gauges.scope_id
+    ));
+  `);
+  return refreshKnowledgeCapacityGaugesInTransaction(db, scopes);
+}
+
 function assertCapacity(scope, usage, delta) {
   const limits = CAMPAIGN_KNOWLEDGE_CAPACITY[scope];
   CAPACITY_METRICS.forEach(function(metric) {
@@ -1787,6 +1931,12 @@ module.exports = {
   ingestKnowledge,
   writeCampaignKnowledgeInTransaction,
   preflightCampaignKnowledgeCustodyMoveInTransaction,
+  reconcileKnowledgeCapacityGaugesInTransaction,
+  refreshKnowledgeCapacityGaugesInTransaction,
+  userKnowledgeUsage,
+  campaignKnowledgeUsage,
+  organizationKnowledgeUsage,
+  capacityThresholdPercent,
   searchKnowledge,
   markKnowledgeUsed,
   normalizeEntry,
