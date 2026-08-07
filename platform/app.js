@@ -5,6 +5,7 @@ let CURRENT_USER = null;
 let authExpiredNotified = false;
 let AUTH_GENERATION = 0;
 let currentAIConversationId = null;
+let selectedKnowledgeEntryIds = [];
 let BRANDS = [], INFLUENCERS = [], TEMPLATES = [], CBLOCKS = {};
 let curDemand = null, selTpl = null, lastMatch = [], lastProp = "";
 let uploadedFileContent = "";
@@ -505,6 +506,45 @@ function closeCustomerDetail() {
   });
 }
 var activeWorkflowContext = null;
+function readPositiveInteger(value) {
+  if (typeof value === 'number') return Number.isSafeInteger(value) && value > 0 ? value : null;
+  if (typeof value !== 'string' || !/^\d+$/.test(value.trim())) return null;
+  var parsed = Number(value.trim());
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+}
+function readExplicitCampaignId(context) {
+  if (!context || typeof context !== 'object') return null;
+  var campaignId = readPositiveInteger(context.campaign_id);
+  if (campaignId === null) campaignId = readPositiveInteger(context.campaignId);
+  if (campaignId === null && context.campaign && typeof context.campaign === 'object') {
+    campaignId = readPositiveInteger(context.campaign.id);
+  }
+  return campaignId;
+}
+function getActiveCampaignId() {
+  var campaignId = readExplicitCampaignId(activeWorkflowContext);
+  if (campaignId === null) campaignId = readExplicitCampaignId(curDemand);
+  return campaignId;
+}
+function rememberKnowledgeEntryForChat(id) {
+  var entryId = readPositiveInteger(id);
+  if (entryId === null || selectedKnowledgeEntryIds.indexOf(entryId) >= 0) return;
+  selectedKnowledgeEntryIds.push(entryId);
+  if (selectedKnowledgeEntryIds.length > 20) selectedKnowledgeEntryIds.splice(0, selectedKnowledgeEntryIds.length - 20);
+}
+function getSelectedKnowledgeEntryIds() {
+  return selectedKnowledgeEntryIds.slice(0, 20);
+}
+function createAiChatIdempotencyKey() {
+  var prefix = 'ai-chat-';
+  if (window.crypto && typeof window.crypto.randomUUID === 'function') return prefix + window.crypto.randomUUID();
+  if (window.crypto && typeof window.crypto.getRandomValues === 'function') {
+    var randomValues = new Uint32Array(2);
+    window.crypto.getRandomValues(randomValues);
+    return prefix + Date.now().toString(36) + '-' + randomValues[0].toString(36) + randomValues[1].toString(36);
+  }
+  return prefix + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+}
 function mapCustomerStageToStrategyStage(stage) {
   if (stage === 'lead') return 'new';
   if (stage === 'proposal' || stage === 'negotiation') return 'growing';
@@ -514,7 +554,7 @@ function mapCustomerStageToStrategyStage(stage) {
 function buildWorkflowContext(customer, opportunity) {
   customer = customer || {};
   opportunity = opportunity || {};
-  return {
+  var context = {
     customer_id: customer.id || '',
     opportunity_id: opportunity.id || '',
     brand: customer.brand_name || '',
@@ -529,6 +569,10 @@ function buildWorkflowContext(customer, opportunity) {
     market: '',
     tags: customer.industry || ''
   };
+  var campaignId = readExplicitCampaignId(opportunity);
+  if (campaignId === null) campaignId = readExplicitCampaignId(customer);
+  if (campaignId !== null) context.campaign_id = campaignId;
+  return context;
 }
 function setWorkflowContext(context) {
   activeWorkflowContext = context || null;
@@ -685,6 +729,7 @@ function renderKnowledgeReuse(entries, title) {
 }
 
 function markKnowledgeUsed(id) {
+  rememberKnowledgeEntryForChat(id);
   apiFetch('/knowledge/' + id + '/use', { method: 'POST' }).then(function() {
     toast('已标记复用');
   }).catch(function(e) { toast('标记失败', 'error'); });
@@ -3214,18 +3259,24 @@ function sendChat() {
   msgs.appendChild(td);
   msgs.scrollTop = msgs.scrollHeight;
   var backendMessage = msg + '\n\n[Local UI context]\nLoaded brand records: ' + BRANDS.length + memContext;
-  apiFetch('/ai/chat', {
-    method: 'POST',
-    body: JSON.stringify({
-      message: backendMessage,
-      conversation_id: currentAIConversationId,
-      allow_web: true,
-      source_module: 'assistant',
-      summary_visibility: 'private',
-      knowledge_limit: 8,
-      max_tokens: 2048
-    })
-  })
+  var chatPayload = {
+    message: backendMessage,
+    conversation_id: currentAIConversationId,
+    allow_web: true,
+    source_module: 'assistant',
+    summary_visibility: 'private',
+    knowledge_limit: 8,
+    max_tokens: 2048
+  };
+  var chatOptions = { method: 'POST' };
+  var campaignId = getActiveCampaignId();
+  if (campaignId !== null) {
+    chatPayload.campaign_id = campaignId;
+    chatPayload.knowledge_entry_ids = getSelectedKnowledgeEntryIds();
+    chatOptions.headers = { 'Idempotency-Key': createAiChatIdempotencyKey() };
+  }
+  chatOptions.body = JSON.stringify(chatPayload);
+  apiFetch('/ai/chat', chatOptions)
     .then(function(r) {
       if (!r.ok) return r.json().then(function(err) { throw new Error(err.error || ('API:' + r.status)); });
       return r.json();

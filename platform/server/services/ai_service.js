@@ -2,6 +2,17 @@ const knowledge = require('./knowledge_service');
 const rag = require('./rag_service');
 const llm = require('./llm_service');
 const webSearch = require('./web_search_service');
+const crypto = require('node:crypto');
+const idempotency = require('./idempotency_service');
+const { requestHash } = require('./sqlite_digest_service');
+const {
+  buildCollectionAccessPredicate,
+  getCampaignAccess,
+  resolveConversationCampaign,
+  serializeKnowledgeReference
+} = require('./campaign_access_service');
+
+const LINKED_IDEMPOTENCY_KEY = /^[A-Za-z0-9._:-]{8,200}$/;
 
 function canAccessConversation(user, conversation) {
   return user && conversation && (user.role === 'admin' || Number(conversation.user_id) === Number(user.id));
@@ -123,7 +134,7 @@ function archiveChatSummary(db, opts) {
   });
 }
 
-async function handleChat(db, opts) {
+async function handleLegacyChat(db, opts) {
   opts = opts || {};
   if (!opts.user || !opts.user.id) throw new Error('User required');
   const message = String(opts.message || '').trim();
@@ -193,7 +204,11 @@ async function handleChat(db, opts) {
   });
 
   saveReferences(db, assistantMessageId, ragContext.references, searchResult.results);
-  knowledge.markKnowledgeUsed(db, ragContext.references.map(function(ref) { return ref.id; }));
+  knowledge.recordKnowledgeUsageTelemetry(
+    db,
+    ragContext.references.map(function(ref) { return ref.id; }),
+    opts.user
+  );
   db.prepare('UPDATE ai_conversations SET updated_at = datetime(\'now\') WHERE id = ?').run(conversation.id);
   if (usage.total_tokens || usage.prompt_tokens || usage.completion_tokens) {
     try {
@@ -235,75 +250,1106 @@ async function handleChat(db, opts) {
   };
 }
 
-function listConversations(db, opts) {
-  opts = opts || {};
-  const user = opts.user || {};
-  const limit = Math.min(parseInt(opts.limit || 100, 10) || 100, 300);
-  const where = [];
-  const params = [];
-  if (user.role !== 'admin') {
-    where.push('c.user_id = ?');
-    params.push(user.id || -1);
+function serviceError(statusCode, code, message) {
+  const error = new Error(message);
+  error.name = 'AIServiceError';
+  error.statusCode = statusCode;
+  error.status = statusCode;
+  error.code = code;
+  return error;
+}
+
+function providerUnavailableError() {
+  return serviceError(503, 'AI_PROVIDER_UNAVAILABLE', 'DeepSeek is unavailable for linked AI chat.');
+}
+
+function parseSqliteDeadline(value) {
+  if (typeof value !== 'string') return NaN;
+  return Date.parse(value.replace(' ', 'T') + 'Z');
+}
+
+function createLinkedProviderContext(reservation, externalSignal) {
+  const deadlineAt = parseSqliteDeadline(reservation && reservation.operationDeadline);
+  if (!Number.isFinite(deadlineAt)) {
+    throw serviceError(500, 'AUDIT_PERSISTENCE_FAILED', 'Linked AI deadline is invalid.');
   }
-  if (opts.user_id && user.role === 'admin') {
-    where.push('c.user_id = ?');
-    params.push(opts.user_id);
+  const controller = new AbortController();
+  const abort = (reason) => {
+    if (controller.signal.aborted) return;
+    controller.abort(reason instanceof Error ? reason : new Error('Linked AI operation aborted.'));
+  };
+  let detachExternal = null;
+  if (externalSignal && typeof externalSignal.addEventListener === 'function') {
+    if (externalSignal.aborted) {
+      abort(externalSignal.reason);
+    } else {
+      const onAbort = () => abort(externalSignal.reason);
+      externalSignal.addEventListener('abort', onAbort, { once: true });
+      detachExternal = () => externalSignal.removeEventListener('abort', onAbort);
+    }
+  }
+  const timer = setTimeout(
+    () => abort(new Error('Linked AI provider deadline exceeded.')),
+    Math.max(0, deadlineAt - Date.now())
+  );
+  if (typeof timer.unref === 'function') timer.unref();
+  return {
+    signal: controller.signal,
+    deadlineAt,
+    dispose() {
+      clearTimeout(timer);
+      if (detachExternal) detachExternal();
+    }
+  };
+}
+
+function assertProviderContextActive(context) {
+  if (!context || context.signal.aborted || Date.now() >= context.deadlineAt) {
+    throw providerUnavailableError();
+  }
+}
+
+function awaitWithAbort(value, signal) {
+  if (!signal || typeof signal.addEventListener !== 'function') return Promise.resolve(value);
+  if (signal.aborted) return Promise.reject(signal.reason || new Error('Operation aborted.'));
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (handler, result) => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener('abort', onAbort);
+      handler(result);
+    };
+    const onAbort = () => finish(reject, signal.reason || new Error('Operation aborted.'));
+    signal.addEventListener('abort', onAbort, { once: true });
+    Promise.resolve(value).then(
+      (result) => finish(resolve, result),
+      (error) => finish(reject, error)
+    );
+  });
+}
+
+function positiveId(value) {
+  if (Number.isSafeInteger(value) && value > 0) return value;
+  if (typeof value === 'string' && /^[1-9][0-9]{0,15}$/.test(value)) {
+    const parsed = Number(value);
+    return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+  }
+  return null;
+}
+
+function ownValue(object, key) {
+  return object && Object.prototype.hasOwnProperty.call(object, key)
+    ? object[key]
+    : undefined;
+}
+
+function requestedCampaignValue(opts) {
+  const snake = ownValue(opts, 'campaign_id');
+  return snake !== undefined ? snake : ownValue(opts, 'campaignId');
+}
+
+function requestedConversationValue(opts) {
+  const snake = ownValue(opts, 'conversation_id');
+  return snake !== undefined ? snake : ownValue(opts, 'conversationId');
+}
+
+function resolveLinkedContext(db, opts) {
+  const rawCampaignId = requestedCampaignValue(opts);
+  const rawConversationId = requestedConversationValue(opts);
+  const campaignRequested = rawCampaignId !== undefined && rawCampaignId !== null && rawCampaignId !== '';
+  const conversationRequested = rawConversationId !== undefined && rawConversationId !== null && rawConversationId !== '';
+  const requestedCampaignId = campaignRequested ? positiveId(rawCampaignId) : null;
+  const conversationId = conversationRequested ? positiveId(rawConversationId) : null;
+  if ((campaignRequested && requestedCampaignId === null) || (conversationRequested && conversationId === null)) {
+    throw serviceError(400, 'INVALID_CAMPAIGN_INPUT', 'Campaign and conversation identifiers must be positive integers.');
+  }
+  if (!conversationRequested) {
+    return requestedCampaignId === null
+      ? { linked: false, campaignId: null, conversationId: null, initialLink: false }
+      : { linked: true, campaignId: requestedCampaignId, conversationId: null, initialLink: true };
+  }
+  const resolution = resolveConversationCampaign(db, {
+    conversationId,
+    requestedCampaignId
+  });
+  if (!resolution.ok) {
+    throw serviceError(
+      resolution.status || 400,
+      resolution.code || 'INVALID_CAMPAIGN_INPUT',
+      resolution.code === 'CONVERSATION_CAMPAIGN_MISMATCH'
+        ? 'Conversation is already linked to another campaign.'
+        : 'Conversation campaign context is invalid.'
+    );
+  }
+  if (resolution.campaignId === null) {
+    return { linked: false, campaignId: null, conversationId, initialLink: false };
+  }
+  return {
+    linked: true,
+    campaignId: resolution.campaignId,
+    conversationId,
+    initialLink: !resolution.derived
+  };
+}
+
+function requireLinkedCampaignAccess(db, userId, campaignId) {
+  const access = getCampaignAccess(db, { userId, campaignId });
+  if (access.ok) return access;
+  throw serviceError(
+    access.status || access.statusCode || 403,
+    access.code || 'RECORD_FORBIDDEN',
+    'Campaign is unavailable for this AI conversation.'
+  );
+}
+
+function requireLinkedConversationAccess(db, user, conversationId) {
+  const conversation = db.prepare('SELECT * FROM ai_conversations WHERE id=?').get(conversationId);
+  if (!canAccessConversation(user, conversation)) {
+    throw serviceError(404, 'RECORD_NOT_FOUND', 'Conversation was not found.');
+  }
+  return conversation;
+}
+
+function requireLinkedIdempotencyKey(opts) {
+  const value = ownValue(opts, 'idempotencyKey') !== undefined
+    ? opts.idempotencyKey
+    : ownValue(opts, 'idempotency_key');
+  if (typeof value !== 'string' || !LINKED_IDEMPOTENCY_KEY.test(value)) {
+    throw serviceError(400, 'INVALID_CAMPAIGN_INPUT', 'A valid idempotency key is required for linked AI chat.');
+  }
+  return value;
+}
+
+function normalizeRequestId(opts, key) {
+  const raw = ownValue(opts, 'requestId') !== undefined ? opts.requestId : ownValue(opts, 'request_id');
+  if (typeof raw === 'string' && raw.trim()) return raw.trim().slice(0, 200);
+  return `ai-chat:${key.slice(0, 160)}`;
+}
+
+function linkedRequestHash(message, linked, ragContext, opts) {
+  return requestHash({
+    method: 'POST',
+    path: '/api/ai/chat',
+    campaignId: linked.campaignId,
+    kind: 'json',
+    payload: {
+      message,
+      campaign_id: linked.campaignId,
+      conversation_id: linked.conversationId,
+      source_module: String(opts.source_module || 'assistant'),
+      allow_web: opts.allowWeb !== false,
+      knowledge_entry_ids: ragContext.selectedEntryIds
+    }
+  });
+}
+
+function reservationDispositionError(disposition) {
+  if (disposition.state === 'conflict') {
+    return serviceError(disposition.statusCode || 409, disposition.code || 'IDEMPOTENCY_KEY_REUSED', 'Idempotency key conflicts with an earlier request.');
+  }
+  if (disposition.state === 'processing') {
+    return serviceError(409, 'IDEMPOTENCY_IN_PROGRESS', 'Linked AI chat is already in progress.');
+  }
+  return serviceError(500, 'AUDIT_PERSISTENCE_FAILED', 'Linked AI chat idempotency state is invalid.');
+}
+
+function reserveLinkedOperation(db, opts) {
+  const disposition = db.transaction(() => {
+    requireLinkedCampaignAccess(db, opts.user.id, opts.campaignId);
+    let result = idempotency.recoverExpiredInTransaction(db, opts.reservationInput);
+    if (result.state === 'absent') {
+      result = idempotency.reserveProcessingInTransaction(db, opts.reservationInput);
+    }
+    return result;
+  }).immediate();
+  if (disposition.state === 'reserved') return disposition;
+  if (disposition.state === 'replay') {
+    if (disposition.statusCode >= 400) {
+      const body = disposition.responseBody || {};
+      throw serviceError(
+        disposition.statusCode,
+        body.code || 'AI_PROVIDER_UNAVAILABLE',
+        body.error || 'Linked AI chat could not be completed.'
+      );
+    }
+    return disposition;
+  }
+  throw reservationDispositionError(disposition);
+}
+
+function completeLinkedFailure(db, reservation, requestHashValue, requestId, error) {
+  const statusCode = Number.isSafeInteger(error && error.statusCode)
+    ? error.statusCode
+    : 500;
+  const responseBody = {
+    error: error && error.message ? String(error.message).slice(0, 300) : 'Linked AI chat failed.',
+    code: error && error.code ? error.code : 'AI_PROVIDER_UNAVAILABLE',
+    request_id: requestId
+  };
+  db.transaction(() => {
+    idempotency.completeJsonInTransaction(db, {
+      ledgerId: reservation.ledgerId,
+      requestHash: requestHashValue,
+      leaseToken: reservation.leaseToken,
+      statusCode,
+      responseBody
+    });
+  }).immediate();
+}
+
+function normalizeWebSearchResult(result, provider) {
+  const source = result && typeof result === 'object' ? result : {};
+  const rows = Array.isArray(source.results) ? source.results : [];
+  return {
+    used: source.used === true,
+    provider: typeof source.provider === 'string' && source.provider ? source.provider : provider,
+    reason: typeof source.reason === 'string' ? source.reason.slice(0, 240) : '',
+    results: rows.slice(0, 10).map((row) => ({
+      title: String((row && row.title) || (row && row.url) || 'Web result').slice(0, 500),
+      url: String((row && row.url) || '').slice(0, 2000),
+      snippet: String((row && row.snippet) || '').slice(0, 4000),
+      provider: String((row && row.provider) || source.provider || provider).slice(0, 80)
+    }))
+  };
+}
+
+async function runOptionalWebSearch(db, message, opts, providerContext) {
+  const providerName = opts.webProvider || process.env.WEB_SEARCH_PROVIDER || 'tavily';
+  if (opts.allowWeb === false) {
+    return { used: false, provider: providerName, results: [], reason: 'disabled' };
+  }
+  try {
+    const operation = opts.webSearchProvider && typeof opts.webSearchProvider.search === 'function'
+      ? opts.webSearchProvider.search(message, providerContext)
+      : webSearch.searchWeb(message, {
+        provider: providerName,
+        maxResults: opts.webMaxResults || 5,
+        db,
+        signal: providerContext.signal,
+        deadlineAt: providerContext.deadlineAt
+      });
+    const result = await awaitWithAbort(operation, providerContext.signal);
+    return normalizeWebSearchResult(result, providerName);
+  } catch (error) {
+    if (providerContext.signal.aborted) throw error;
+    return { used: false, provider: providerName, results: [], reason: 'web search unavailable' };
+  }
+}
+
+function insertCampaignRecordLink(db, values) {
+  const bundleId = crypto.randomBytes(32).toString('hex');
+  const result = db.prepare(`
+    INSERT INTO campaign_record_links (
+      org_id,campaign_id,record_type,bundle_id,record_id,relation_type,
+      created_by,metadata_json
+    ) VALUES (?,?,?,?,?,?,?,?)
+  `).run(
+    values.organizationId,
+    values.campaignId,
+    values.recordType,
+    bundleId,
+    String(values.recordId),
+    values.relationType,
+    values.userId,
+    JSON.stringify(values.metadata || {})
+  );
+  return { id: Number(result.lastInsertRowid), bundleId };
+}
+
+function insertLinkedConversationEvent(db, values) {
+  db.prepare(`
+    INSERT INTO campaign_events (
+      org_id,campaign_id,event_type,previous_state,next_state,actor_user_id,
+      reason,source,metadata_json,correlation_id,audit_fingerprint
+    ) VALUES (?,?,'link_attached',NULL,NULL,?,?,?,?,?,?)
+  `).run(
+    values.organizationId,
+    values.campaignId,
+    values.userId,
+    'Linked ai_run',
+    'ai_link',
+    JSON.stringify({
+      record_type: 'ai_conversation',
+      record_id: String(values.conversationId),
+      relation_types: ['ai_run'],
+      link_ids: [values.link.id],
+      bundle_id: values.link.bundleId
+    }),
+    values.requestId,
+    values.auditFingerprint
+  );
+}
+
+function saveLinkedReferences(db, messageId, campaignId, references, webResults) {
+  const insertKnowledge = db.prepare(`
+    INSERT INTO ai_references (
+      message_id,reference_type,reference_id,title,url,snippet,provider,metadata_json,
+      reference_schema_version,knowledge_entry_id,knowledge_chunk_id,campaign_id,
+      source_identity_sha256,entry_content_sha256,chunk_content_sha256,reference_rank,
+      selection_origin
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+  `);
+  (references || []).forEach((reference) => {
+    insertKnowledge.run(
+      messageId,
+      'knowledge',
+      String(reference.entry_id),
+      reference.title || '',
+      '',
+      reference.snippet || '',
+      '',
+      JSON.stringify({ selected: !!reference.selected, rank: reference.rank }),
+      1,
+      reference.entry_id,
+      reference.chunk_id,
+      campaignId,
+      reference.source_identity_sha256,
+      reference.entry_content_sha256,
+      reference.chunk_content_sha256,
+      reference.rank,
+      reference.selection_origin
+    );
+  });
+  saveReferences(db, messageId, [], webResults);
+}
+
+function archiveLinkedChatSummary(db, opts) {
+  const answer = String(opts.answer || '');
+  const question = String(opts.message || '');
+  const content = `Question:\n${question}\n\nAnswer:\n${answer}`;
+  const written = knowledge.writeCampaignKnowledgeInTransaction(db, {
+    organizationId: opts.access.campaign.org_id,
+    campaignId: opts.campaignId,
+    createdBy: opts.user.id,
+    entryType: 'ai_chat_summary',
+    sourceType: 'campaign_ai_message',
+    sourceId: opts.assistantMessageId,
+    title: `AI conversation summary #${opts.conversationId}`,
+    summary: Array.from(answer).slice(0, 1000).join(''),
+    content,
+    tags: ['ai_chat', 'campaign', 'conversation'],
+    visibility: 'private',
+    metadata: {}
+  });
+  if (written.status !== 'created') {
+    throw serviceError(409, 'KNOWLEDGE_SOURCE_CONTENT_CONFLICT', 'AI conversation summary already exists.');
+  }
+  const link = insertCampaignRecordLink(db, {
+    organizationId: opts.access.campaign.org_id,
+    campaignId: opts.campaignId,
+    userId: opts.user.id,
+    recordType: 'knowledge_entry',
+    recordId: written.entry.id,
+    relationType: 'knowledge',
+    metadata: {}
+  });
+  knowledge.applyKnowledgeCapacityGaugePlanInTransaction(db, written.capacityGaugePlan);
+  db.prepare('UPDATE ai_conversations SET archived_summary_id=? WHERE id=?')
+    .run(written.entry.id, opts.conversationId);
+  return { id: written.entry.id, linkId: link.id };
+}
+
+function requireFinalConversationCampaign(db, conversationId, campaignId) {
+  const resolution = resolveConversationCampaign(db, {
+    conversationId,
+    requestedCampaignId: campaignId
+  });
+  if (!resolution.ok || resolution.campaignId !== campaignId || resolution.derived !== true) {
+    throw serviceError(
+      resolution.status || 409,
+      resolution.code || 'CONVERSATION_CAMPAIGN_MISMATCH',
+      'Conversation campaign custody changed during linked AI generation.'
+    );
+  }
+}
+
+function requireFinalKnowledgeAccess(db, user, campaignId, references) {
+  const entryIds = [...new Set((references || []).map((reference) => reference.entry_id))];
+  for (const entryId of entryIds) {
+    if (!knowledge.campaignKnowledgeEntryAllowsRead(db, { user, campaignId, entryId })) {
+      throw serviceError(404, 'KNOWLEDGE_ENTRY_NOT_FOUND', 'Knowledge access changed during linked AI generation.');
+    }
+  }
+}
+
+function projectLinkedReferences(references) {
+  return (references || []).map((reference) => (
+    serializeKnowledgeReference(reference, { target: 'available' })
+  ));
+}
+
+function persistLinkedChat(db, opts) {
+  return db.transaction(() => {
+    assertProviderContextActive(opts.providerContext);
+    const access = requireLinkedCampaignAccess(db, opts.user.id, opts.linked.campaignId);
+    let conversation;
+    let link = null;
+    if (opts.linked.conversationId !== null) {
+      conversation = requireLinkedConversationAccess(db, opts.user, opts.linked.conversationId);
+    } else {
+      const created = db.prepare(`
+        INSERT INTO ai_conversations (user_id,title,visibility,source_module)
+        VALUES (?,?,?,?)
+      `).run(
+        opts.user.id,
+        makeTitle(opts.message),
+        opts.visibility || 'private',
+        opts.source_module || 'assistant'
+      );
+      conversation = db.prepare('SELECT * FROM ai_conversations WHERE id=?').get(created.lastInsertRowid);
+    }
+    if (opts.linked.initialLink) {
+      link = insertCampaignRecordLink(db, {
+        organizationId: access.campaign.org_id,
+        campaignId: opts.linked.campaignId,
+        userId: opts.user.id,
+        recordType: 'ai_conversation',
+        recordId: conversation.id,
+        relationType: 'ai_run',
+        metadata: {}
+      });
+      insertLinkedConversationEvent(db, {
+        organizationId: access.campaign.org_id,
+        campaignId: opts.linked.campaignId,
+        userId: opts.user.id,
+        conversationId: conversation.id,
+        link,
+        requestId: opts.requestId,
+        auditFingerprint: opts.reservation.auditFingerprint
+      });
+    }
+    requireFinalConversationCampaign(db, conversation.id, opts.linked.campaignId);
+    requireFinalKnowledgeAccess(
+      db,
+      opts.user,
+      opts.linked.campaignId,
+      opts.ragContext.references
+    );
+    const userMessageId = insertMessage(db, {
+      conversation_id: conversation.id,
+      user_id: opts.user.id,
+      role: 'user',
+      content: opts.message,
+      metadata: { source_module: opts.source_module || conversation.source_module || 'assistant' }
+    });
+    const usage = opts.completion.usage || {};
+    const assistantMessageId = insertMessage(db, {
+      conversation_id: conversation.id,
+      user_id: opts.user.id,
+      role: 'assistant',
+      content: opts.completion.content || '',
+      model: opts.completion.model || opts.model || process.env.AI_MODEL || 'deepseek-chat',
+      prompt_tokens: usage.prompt_tokens || 0,
+      completion_tokens: usage.completion_tokens || 0,
+      total_tokens: usage.total_tokens || 0,
+      metadata: {
+        degraded: false,
+        rag_has_knowledge: opts.ragContext.hasKnowledge,
+        web_used: opts.searchResult.used,
+        user_message_id: userMessageId,
+        campaign_id: opts.linked.campaignId
+      }
+    });
+    saveLinkedReferences(
+      db,
+      assistantMessageId,
+      opts.linked.campaignId,
+      opts.ragContext.references,
+      opts.searchResult.results
+    );
+    knowledge.recordKnowledgeUsageTelemetry(
+      db,
+      opts.ragContext.references.map((reference) => reference.entry_id),
+      opts.user
+    );
+    db.prepare('UPDATE ai_conversations SET updated_at=datetime(\'now\') WHERE id=?').run(conversation.id);
+    if (usage.total_tokens || usage.prompt_tokens || usage.completion_tokens) {
+      db.prepare(`
+        INSERT INTO token_usage (
+          user_id,model,prompt_tokens,completion_tokens,total_tokens,endpoint
+        ) VALUES (?,?,?,?,?,?)
+      `).run(
+        opts.user.id,
+        opts.completion.model || opts.model || process.env.AI_MODEL || 'deepseek-chat',
+        usage.prompt_tokens || 0,
+        usage.completion_tokens || 0,
+        usage.total_tokens || 0,
+        'ai_chat_linked'
+      );
+    }
+    if (opts.searchResult.used) {
+      webSearch.cacheSearchResultInTransaction(db, opts.message, opts.searchResult);
+    }
+    const archived = archiveLinkedChatSummary(db, {
+      access,
+      campaignId: opts.linked.campaignId,
+      user: opts.user,
+      message: opts.message,
+      answer: opts.completion.content || '',
+      conversationId: conversation.id,
+      assistantMessageId,
+      summaryVisibility: opts.summaryVisibility
+    });
+    const response = {
+      conversation_id: conversation.id,
+      message_id: assistantMessageId,
+      answer: opts.completion.content || '',
+      model: opts.completion.model || opts.model || process.env.AI_MODEL || 'deepseek-chat',
+      usage,
+      knowledge_references: projectLinkedReferences(opts.ragContext.references),
+      web_results: opts.searchResult.results || [],
+      web_search: {
+        used: !!opts.searchResult.used,
+        provider: opts.searchResult.provider || 'tavily',
+        reason: opts.searchResult.reason || ''
+      },
+      archived_summary_id: archived && archived.id ? archived.id : null,
+      campaign_id: opts.linked.campaignId
+    };
+    if (link) response.link_id = link.id;
+    idempotency.completeJsonInTransaction(db, {
+      ledgerId: opts.reservation.ledgerId,
+      requestHash: opts.requestHashValue,
+      leaseToken: opts.reservation.leaseToken,
+      statusCode: 200,
+      responseBody: response
+    });
+    return response;
+  }).immediate();
+}
+
+async function handleLinkedChat(db, opts, linked) {
+  const message = String(opts.message || '').trim();
+  const user = opts.user;
+  requireLinkedCampaignAccess(db, user.id, linked.campaignId);
+  if (linked.conversationId !== null) {
+    requireLinkedConversationAccess(db, user, linked.conversationId);
+  }
+  const ragContext = rag.buildLinkedRagContext(db, {
+    query: message,
+    user,
+    campaignId: linked.campaignId,
+    knowledge_entry_ids: opts.knowledge_entry_ids === undefined
+      ? opts.knowledgeEntryIds
+      : opts.knowledge_entry_ids,
+    entry_type: opts.entry_type,
+    source_type: opts.source_type,
+    visibility: opts.visibility,
+    business_type: opts.business_type,
+    business_id: opts.business_id,
+    tags: opts.tags
+  });
+  const key = requireLinkedIdempotencyKey(opts);
+  const requestId = normalizeRequestId(opts, key);
+  const requestHashValue = linkedRequestHash(message, linked, ragContext, opts);
+  const reservationInput = {
+    organizationId: requireLinkedCampaignAccess(db, user.id, linked.campaignId).campaign.org_id,
+    actorUserId: user.id,
+    campaignId: linked.campaignId,
+    secondaryCampaignId: null,
+    resourceClaim: null,
+    scope: linked.initialLink
+      ? 'ai.conversation.create.linked'
+      : 'ai.conversation.continue.linked',
+    key,
+    requestHash: requestHashValue,
+    expectedEventCount: linked.initialLink ? 1 : 0,
+    operationTimeoutSeconds: 120
+  };
+  const reservation = reserveLinkedOperation(db, {
+    user,
+    campaignId: linked.campaignId,
+    reservationInput
+  });
+  if (reservation.state === 'replay') return reservation.responseBody;
+  const providerContext = createLinkedProviderContext(reservation, opts.signal);
+  try {
+    let searchResult;
+    let completion;
+    try {
+      searchResult = await runOptionalWebSearch(db, message, opts, providerContext);
+      assertProviderContextActive(providerContext);
+      const history = linked.conversationId === null
+        ? []
+        : recentMessages(db, linked.conversationId, 8);
+      const provider = opts.provider || llm.createDeepSeekProvider();
+      const systemPrompt = rag.buildSystemPrompt({
+        contextText: ragContext.contextText,
+        webContext: webSearch.formatWebContext(searchResult)
+      });
+      completion = await awaitWithAbort(provider.complete({
+        messages: [{ role: 'system', content: systemPrompt }]
+          .concat(history, [{ role: 'user', content: message }]),
+        temperature: opts.temperature,
+        max_tokens: clampMaxTokens(opts.max_tokens),
+        model: opts.model,
+        signal: providerContext.signal,
+        deadlineAt: providerContext.deadlineAt
+      }), providerContext.signal);
+      if (
+        !completion ||
+        completion.degraded ||
+        typeof completion.content !== 'string' ||
+        completion.content.length === 0
+      ) {
+        throw providerUnavailableError();
+      }
+      assertProviderContextActive(providerContext);
+    } catch (error) {
+      const providerError = error && error.code === 'AI_PROVIDER_UNAVAILABLE'
+        ? error
+        : providerUnavailableError();
+      completeLinkedFailure(db, reservation, requestHashValue, requestId, providerError);
+      throw providerError;
+    }
+
+    try {
+      return persistLinkedChat(db, {
+        ...opts,
+        user,
+        message,
+        linked,
+        requestId,
+        requestHashValue,
+        reservation,
+        providerContext,
+        ragContext,
+        searchResult,
+        completion
+      });
+    } catch (error) {
+      const terminalError = error && error.statusCode
+        ? error
+        : serviceError(500, 'AI_PERSISTENCE_FAILED', 'Linked AI chat could not be stored safely.');
+      completeLinkedFailure(db, reservation, requestHashValue, requestId, terminalError);
+      throw terminalError;
+    }
+  } finally {
+    providerContext.dispose();
+  }
+}
+
+async function handleChat(db, opts) {
+  opts = opts || {};
+  if (!opts.user || !opts.user.id) throw new Error('User required');
+  const message = String(opts.message || '').trim();
+  if (!message) throw new Error('Message required');
+  const linked = resolveLinkedContext(db, opts);
+  return linked.linked
+    ? handleLinkedChat(db, opts, linked)
+    : handleLegacyChat(db, opts);
+}
+
+function conversationReadLimit(value) {
+  const parsed = parseInt(value || 100, 10);
+  if (!Number.isSafeInteger(parsed) || parsed < 1) return 100;
+  return Math.min(parsed, 300);
+}
+
+function readRequestId(opts) {
+  const raw = ownValue(opts, 'requestId') !== undefined
+    ? opts.requestId
+    : ownValue(opts, 'request_id');
+  if (typeof raw !== 'string' || !raw.trim()) return null;
+  return raw.trim().slice(0, 200);
+}
+
+function readAuthOrganization(authContext) {
+  if (!authContext || typeof authContext !== 'object') return null;
+  try {
+    const organization = authContext.organization;
+    const id = positiveId(organization && organization.id);
+    if (id === null) return null;
+    return {
+      id,
+      roleCode: organization.role_code === 'org_admin' ? 'org_admin' : 'member'
+    };
+  } catch (error) {
+    return null;
+  }
+}
+
+function resolveConversationReadActor(db, opts) {
+  const userId = positiveId(opts && opts.user && opts.user.id);
+  if (userId === null) return null;
+  const user = db.prepare(`
+    SELECT id,role
+    FROM users
+    WHERE id=? AND typeof(is_active)='integer' AND is_active=1
+  `).get(userId);
+  if (!user) return null;
+  const suppliedAuthContext = ownValue(opts, 'authContext');
+  const authOrganization = readAuthOrganization(suppliedAuthContext);
+  let organizationAdmin = false;
+  if (authOrganization && authOrganization.roleCode === 'org_admin') {
+    organizationAdmin = Boolean(db.prepare(`
+      SELECT 1
+      FROM organization_memberships
+      WHERE org_id=? AND user_id=? AND role_code='org_admin' AND status='active'
+    `).get(authOrganization.id, userId));
+  }
+  return {
+    id: userId,
+    platformAdmin: user.role === 'admin',
+    organizationAdmin,
+    organizationId: organizationAdmin ? authOrganization.id : null,
+    authOrganizationId: authOrganization ? authOrganization.id : null,
+    privileged: user.role === 'admin' || organizationAdmin
+  };
+}
+
+function authorizedConversationProjection(actor) {
+  const collectionAccess = buildCollectionAccessPredicate('ai_conversations', {
+    userId: actor.id
+  });
+  const authOrganizationId = actor.authOrganizationId || -1;
+  const organizationId = actor.organizationId || -1;
+  const platformAdmin = actor.platformAdmin ? 1 : 0;
+  const organizationAdmin = actor.organizationAdmin ? 1 : 0;
+  return {
+    cte: `
+      WITH ranked_conversation_links AS MATERIALIZED (
+        SELECT
+          CAST(link.record_id AS INTEGER) AS conversation_id,
+          link.org_id,
+          link.campaign_id,
+          link.id,
+          link.revoked_at,
+          SUM(CASE WHEN link.revoked_at IS NULL THEN 1 ELSE 0 END) OVER (
+            PARTITION BY link.record_id
+          ) AS active_link_count,
+          ROW_NUMBER() OVER (
+            PARTITION BY link.record_id
+            ORDER BY
+              CASE WHEN link.revoked_at IS NULL THEN 0 ELSE 1 END,
+              CASE WHEN link.revoked_at IS NULL THEN link.id END DESC,
+              link.revoked_at DESC,
+              link.id DESC
+          ) AS custody_rank
+        FROM campaign_record_links link
+        WHERE link.record_type='ai_conversation'
+          AND link.relation_type='ai_run'
+      ),
+      conversation_link_stats AS MATERIALIZED (
+        SELECT conversation_id,COUNT(*) AS link_count
+        FROM ranked_conversation_links
+        GROUP BY conversation_id
+      ),
+      campaign_scope AS MATERIALIZED (
+        SELECT conversation_id,org_id,campaign_id
+        FROM ranked_conversation_links
+        WHERE custody_rank=1 AND active_link_count<=1
+      ),
+      conversation_owner_scope AS MATERIALIZED (
+        SELECT membership.user_id,MIN(membership.org_id) AS org_id
+        FROM organization_memberships membership
+        WHERE membership.status='active'
+        GROUP BY membership.user_id
+        HAVING COUNT(DISTINCT membership.org_id)=1
+      ),
+      conversation_access_scope AS MATERIALIZED (
+        SELECT
+          conversation.id AS conversation_id,
+          conversation.user_id AS conversation_user_id,
+          CASE
+            WHEN link_stats.conversation_id IS NULL THEN owner_scope.org_id
+            ELSE campaign_scope.org_id
+          END AS __organization_id,
+          campaign_scope.campaign_id AS __campaign_id,
+          CASE
+            WHEN link_stats.conversation_id IS NULL THEN 1
+            WHEN campaign_scope.campaign_id IS NOT NULL THEN 1
+            ELSE 0
+          END AS __custody_valid,
+          CASE
+            WHEN campaign_scope.campaign_id IS NULL THEN 1
+            WHEN (${collectionAccess.sql}) THEN 1
+            WHEN EXISTS (
+              SELECT 1
+              FROM campaigns context_campaign
+              JOIN organization_memberships context_membership
+                ON context_membership.org_id=context_campaign.org_id
+               AND context_membership.user_id=?
+               AND context_membership.status='active'
+              WHERE context_campaign.id=campaign_scope.campaign_id
+                AND context_campaign.org_id=campaign_scope.org_id
+                AND context_campaign.org_id=?
+                AND EXISTS (
+                  SELECT 1
+                  FROM team_memberships identity_team
+                  WHERE identity_team.org_id=context_campaign.org_id
+                    AND identity_team.user_id=context_membership.user_id
+                    AND identity_team.status='active'
+                )
+                AND (
+                  context_membership.role_code='org_admin'
+                  OR context_campaign.owner_user_id=context_membership.user_id
+                  OR EXISTS (
+                    SELECT 1
+                    FROM team_memberships assigned_team
+                    WHERE assigned_team.org_id=context_campaign.org_id
+                      AND assigned_team.team_id=context_campaign.team_id
+                      AND assigned_team.user_id=context_membership.user_id
+                      AND assigned_team.status='active'
+                  )
+                )
+            ) THEN 1
+            ELSE 0
+          END AS __campaign_allowed
+        FROM ai_conversations conversation
+        LEFT JOIN conversation_link_stats link_stats
+          ON link_stats.conversation_id=conversation.id
+        LEFT JOIN campaign_scope
+          ON campaign_scope.conversation_id=conversation.id
+        LEFT JOIN conversation_owner_scope owner_scope
+          ON owner_scope.user_id=conversation.user_id
+      ),
+      authorized_conversation_ids AS MATERIALIZED (
+        SELECT
+          access_scope.*,
+          CASE
+            WHEN ?=1 THEN 'platform_admin'
+            WHEN ?=1 AND access_scope.__organization_id=? THEN 'org_admin'
+            ELSE 'owner'
+          END AS __access_role
+        FROM conversation_access_scope access_scope
+        WHERE access_scope.__custody_valid=1
+          AND (
+            ?=1
+            OR (
+              access_scope.conversation_user_id=?
+              AND access_scope.__campaign_allowed=1
+            )
+            OR (
+              ?=1
+              AND access_scope.__organization_id=?
+              AND access_scope.__campaign_allowed=1
+            )
+          )
+      ),
+      authorized_conversations AS MATERIALIZED (
+        SELECT
+          conversation.*,
+          owner.username,
+          owner.display_name,
+          authorized.__organization_id,
+          authorized.__campaign_id,
+          authorized.__custody_valid,
+          authorized.__campaign_allowed,
+          authorized.__access_role
+        FROM authorized_conversation_ids authorized
+        JOIN ai_conversations conversation
+          ON conversation.id=authorized.conversation_id
+        JOIN users owner ON owner.id=conversation.user_id
+      )
+    `,
+    params: [
+      ...collectionAccess.params,
+      actor.id,
+      authOrganizationId,
+      platformAdmin,
+      organizationAdmin,
+      organizationId,
+      platformAdmin,
+      actor.id,
+      organizationAdmin,
+      organizationId
+    ]
+  };
+}
+
+function conversationListFilters(opts, actor) {
+  const conditions = [];
+  const params = [];
+  const filterNames = [];
+  if (opts.q) {
+    filterNames.push('q');
+  }
+  if (opts.user_id) {
+    filterNames.push('user_id');
   }
   if (opts.source_module) {
-    where.push('c.source_module = ?');
+    filterNames.push('source_module');
+  }
+  if (ownValue(opts, 'limit') !== undefined) {
+    filterNames.push('limit');
+  }
+  if (actor.privileged && opts.user_id) {
+    conditions.push('authorized.user_id=?');
+    params.push(positiveId(opts.user_id) || -1);
+  }
+  if (opts.source_module) {
+    conditions.push('authorized.source_module=?');
     params.push(opts.source_module);
   }
   if (opts.q) {
-    where.push(`EXISTS (
-      SELECT 1 FROM ai_messages m
-      WHERE m.conversation_id = c.id AND m.content LIKE ?
+    conditions.push(`EXISTS (
+      SELECT 1
+      FROM ai_messages matching_message
+      WHERE matching_message.conversation_id=authorized.id
+        AND matching_message.content LIKE ?
     )`);
     params.push('%' + opts.q + '%');
   }
-  const sql = `
-    SELECT c.*, u.username, u.display_name,
-      (SELECT COUNT(*) FROM ai_messages m WHERE m.conversation_id = c.id) AS message_count,
-      (SELECT content FROM ai_messages m WHERE m.conversation_id = c.id AND m.role = 'assistant' ORDER BY m.id DESC LIMIT 1) AS last_answer
-    FROM ai_conversations c
-    JOIN users u ON u.id = c.user_id
-    ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
-    ORDER BY c.updated_at DESC, c.id DESC
-    LIMIT ?
-  `;
-  params.push(limit);
-  return db.prepare(sql).all(...params);
+  return { conditions, params, filterNames };
+}
+
+function stripConversationReadMetadata(row) {
+  const projected = { ...row };
+  delete projected.__organization_id;
+  delete projected.__campaign_id;
+  delete projected.__custody_valid;
+  delete projected.__campaign_allowed;
+  delete projected.__access_role;
+  return projected;
+}
+
+function auditTargetForConversation(row) {
+  const conversationId = positiveId(row && row.id);
+  const userId = positiveId(row && row.user_id);
+  const organizationId = positiveId(row && row.__organization_id);
+  if (conversationId === null || userId === null || organizationId === null) {
+    throw new Error('AI read audit target identity is unavailable.');
+  }
+  const target = {
+    conversation_id: conversationId,
+    user_id: userId,
+    organization_id: organizationId
+  };
+  const campaignId = positiveId(row.__campaign_id);
+  if (campaignId !== null) target.campaign_id = campaignId;
+  return target;
+}
+
+function persistPrivilegedConversationReadAudit(db, actor, opts, values) {
+  if (!actor.privileged) return;
+  try {
+    const details = { actor_user_id: actor.id };
+    if (actor.organizationAdmin && !actor.platformAdmin) {
+      details.organization_id = actor.organizationId;
+    }
+    details.request_id = readRequestId(opts);
+    details.filter_names = values.filterNames;
+    details.targets = values.rows.map(auditTargetForConversation);
+    db.prepare(`
+      INSERT INTO activity_log (user_id,action,module,details,ip_address)
+      VALUES (?,?,'ai_audit',?,NULL)
+    `).run(actor.id, values.action, JSON.stringify(details));
+  } catch (error) {
+    throw serviceError(
+      500,
+      'AUDIT_PERSISTENCE_FAILED',
+      'AI conversation read audit could not be persisted.'
+    );
+  }
+}
+
+function readAuthorizedConversation(db, actor, conversationId) {
+  const projection = authorizedConversationProjection(actor);
+  return db.prepare(`
+    ${projection.cte}
+    SELECT *
+    FROM authorized_conversations authorized
+    WHERE authorized.id=?
+    LIMIT 1
+  `).get(...projection.params, conversationId) || null;
+}
+
+function listConversations(db, opts) {
+  opts = opts || {};
+  return db.transaction(() => {
+    const actor = resolveConversationReadActor(db, opts);
+    if (!actor) return [];
+    const projection = authorizedConversationProjection(actor);
+    const filters = conversationListFilters(opts, actor);
+    const rows = db.prepare(`
+      ${projection.cte},
+      filtered_conversations AS MATERIALIZED (
+        SELECT *
+        FROM authorized_conversations authorized
+        ${filters.conditions.length ? 'WHERE ' + filters.conditions.join(' AND ') : ''}
+      )
+      SELECT
+        filtered.*,
+        (
+          SELECT COUNT(*)
+          FROM ai_messages counted_message
+          WHERE counted_message.conversation_id=filtered.id
+        ) AS message_count,
+        (
+          SELECT latest_answer.content
+          FROM ai_messages latest_answer
+          WHERE latest_answer.conversation_id=filtered.id
+            AND latest_answer.role='assistant'
+          ORDER BY latest_answer.id DESC
+          LIMIT 1
+        ) AS last_answer
+      FROM filtered_conversations filtered
+      ORDER BY filtered.updated_at DESC,filtered.id DESC
+      LIMIT ?
+    `).all(
+      ...projection.params,
+      ...filters.params,
+      conversationReadLimit(opts.limit)
+    );
+    persistPrivilegedConversationReadAudit(db, actor, opts, {
+      action: 'admin_list_ai_conversations',
+      filterNames: filters.filterNames,
+      rows
+    });
+    return rows.map(stripConversationReadMetadata);
+  }).immediate();
 }
 
 function getConversation(db, opts) {
   opts = opts || {};
-  const conversation = db.prepare(`
-    SELECT c.*, u.username, u.display_name
-    FROM ai_conversations c
-    JOIN users u ON u.id = c.user_id
-    WHERE c.id = ?
-  `).get(opts.id);
-  if (!canAccessConversation(opts.user, conversation)) return null;
-  const messages = db.prepare('SELECT * FROM ai_messages WHERE conversation_id = ? ORDER BY created_at, id').all(opts.id);
-  const refs = db.prepare(`
-    SELECT r.*
-    FROM ai_references r
-    JOIN ai_messages m ON m.id = r.message_id
-    WHERE m.conversation_id = ?
-    ORDER BY r.id
-  `).all(opts.id);
-  const byMessage = {};
-  refs.forEach(function(ref) {
-    if (!byMessage[ref.message_id]) byMessage[ref.message_id] = [];
-    byMessage[ref.message_id].push(ref);
-  });
-  messages.forEach(function(message) {
-    message.metadata = (() => {
-      try { return JSON.parse(message.metadata_json || '{}'); } catch (e) { return {}; }
-    })();
-    message.references = byMessage[message.id] || [];
-  });
-  conversation.messages = messages;
-  return conversation;
+  const conversationId = positiveId(opts.id);
+  if (conversationId === null) return null;
+  return db.transaction(() => {
+    const actor = resolveConversationReadActor(db, opts);
+    if (!actor) return null;
+    const initial = readAuthorizedConversation(db, actor, conversationId);
+    if (!initial) return null;
+    const authorized = readAuthorizedConversation(db, actor, conversationId);
+    if (!authorized) return null;
+    const messages = db.prepare(`
+      SELECT *
+      FROM ai_messages
+      WHERE conversation_id=?
+      ORDER BY created_at,id
+    `).all(conversationId);
+    const refs = db.prepare(`
+      SELECT reference.*
+      FROM ai_references reference
+      JOIN ai_messages message ON message.id=reference.message_id
+      WHERE message.conversation_id=?
+      ORDER BY reference.id
+    `).all(conversationId);
+    const byMessage = {};
+    refs.forEach(function(ref) {
+      if (!byMessage[ref.message_id]) byMessage[ref.message_id] = [];
+      byMessage[ref.message_id].push(ref);
+    });
+    messages.forEach(function(message) {
+      message.metadata = (() => {
+        try { return JSON.parse(message.metadata_json || '{}'); } catch (e) { return {}; }
+      })();
+      message.references = knowledge.redactKnowledgeReferences(
+        db,
+        byMessage[message.id] || [],
+        opts.user
+      );
+    });
+    persistPrivilegedConversationReadAudit(db, actor, opts, {
+      action: 'admin_view_ai_conversation',
+      filterNames: ['id'],
+      rows: [authorized]
+    });
+    const conversation = stripConversationReadMetadata(authorized);
+    conversation.messages = messages;
+    return conversation;
+  }).immediate();
 }
 
 module.exports = {

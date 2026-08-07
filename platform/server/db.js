@@ -28,6 +28,13 @@ const db = migrationService.openMigratedDatabase(DB_PATH, {
       sourcePath: 'migrations/004_knowledge_capacity_observability.js',
       engineVersion: 1,
       dependencies: ['migrations/vendor/bcryptjs_v3_0_3.js']
+    },
+    {
+      version: 5,
+      name: '005_knowledge_custody_projection',
+      sourcePath: 'migrations/005_knowledge_custody_projection.js',
+      engineVersion: 1,
+      dependencies: ['migrations/vendor/bcryptjs_v3_0_3.js']
     }
   ]
 });

@@ -1,0 +1,102 @@
+{
+  "format": "tm-trusted-production-source-manifest-v1",
+  "entrypoints": {
+    "sanitizer": "server/scripts/sanitize_production_shape.js",
+    "sanitizationManifest": "server/scripts/sanitization_manifest.json",
+    "verifier": "server/scripts/verify_campaign_migration_gate.js"
+  },
+  "migrationContract": {
+    "sourceVersion": 1,
+    "targetVersion": 5,
+    "runs": 2,
+    "deterministicAppendTables": [
+      "activity_log"
+    ]
+  },
+  "files": [
+    {
+      "path": "server/migrations/001_legacy_compat_columns.js",
+      "sha256": "833b32414ae1a72d807b8ce989e736d2033a24f071ad71d6dc17a953efe0ae2d"
+    },
+    {
+      "path": "server/migrations/002_campaign_business_spine.js",
+      "sha256": "76ce9ecb4d0d62eee5b44b517cd252b082c37f2921bf7eedc8dd5a116afb75d1"
+    },
+    {
+      "path": "server/migrations/003_campaign_workflow_dispatch_evidence.js",
+      "sha256": "93608fa1276387b401ed3b4a278489769c88ac34f19df9a2de2436a1fa1aba8f"
+    },
+    {
+      "path": "server/migrations/004_knowledge_capacity_observability.js",
+      "sha256": "c180d2c2972be6554acb33ca7b43df0c739df4291bce2b7f9d275cc681a0e6c7"
+    },
+    {
+      "path": "server/migrations/005_knowledge_custody_projection.js",
+      "sha256": "f7610c653b748439b3aac6eba05edc651828e0713c1e6a066f2e65dba5003f6d"
+    },
+    {
+      "path": "server/migrations/baselines/legacy_v1.js",
+      "sha256": "13e631ca7e2aef57e39f7dbc38e6f03e2d5323a11f38c6ce31239d793911812c"
+    },
+    {
+      "path": "server/migrations/engines/v1.js",
+      "sha256": "8ae62027d6e55f961fb2d425ae438b7eb5163d0567514b2ebf194754f1084f05"
+    },
+    {
+      "path": "server/migrations/vendor/bcryptjs_v3_0_3.js",
+      "sha256": "ed01b52b436504d8bb7086d93fee4bd8edbb22d8ed88e1b456e0c604f30e79c4"
+    },
+    {
+      "path": "server/package-lock.json",
+      "sha256": "33ba7a73d32ef79bd1c9070f604a2c1313d94b3aff082d1f02bf5ecb7385810b"
+    },
+    {
+      "path": "server/package.json",
+      "sha256": "3880f0fb739aa9601cb28dbf01ae4e302aa918261493e8360d7a4615829bb573"
+    },
+    {
+      "path": "server/scripts/sanitization_manifest.json",
+      "sha256": "4872802123ed1587e71f1ad91d1278ac5c81b62bbd76ebb84af98fe4b8548e48"
+    },
+    {
+      "path": "server/scripts/sanitize_production_shape.js",
+      "sha256": "66176d5f27c9c334fcaee6e1ef088eace550063c7be30cf25ca6d0060e96dcf0"
+    },
+    {
+      "path": "server/scripts/verify_campaign_migration_gate.js",
+      "sha256": "23df91c4b07879f02b1848f745f9a852b1d2326766f13edfdb7e3e0b61df6227"
+    },
+    {
+      "path": "server/services/campaign_access_service.js",
+      "sha256": "49b76c97b8afd8d70034a3a3230f838677a6da6493d9852f5e7ef2dfe3b72481"
+    },
+    {
+      "path": "server/services/campaign_workflow_service.js",
+      "sha256": "ff67e787adfb649bef04b96842dc2209fb2dabcfd7df48b6bc2c8a0ee2d9bb57"
+    },
+    {
+      "path": "server/services/crm_access_service.js",
+      "sha256": "100f31b8bbd36d937b4cf8aa1730ffe980dcb03aa1eff9a8018913a7232f0218"
+    },
+    {
+      "path": "server/services/idempotency_service.js",
+      "sha256": "191bd5b55b3eb2565c7a8406e5e3921ef535b9859f1669652ba296f849c1e83d"
+    },
+    {
+      "path": "server/services/knowledge_service.js",
+      "sha256": "91891e1ceb6625632651f94a7348a9f7d2cbbac12f87af3bd29b91775a06adb2"
+    },
+    {
+      "path": "server/services/migration_service.js",
+      "sha256": "4c447505f16e6fab80683eefe9a5d30012d3ed725efee7db66ef5e2573f939af"
+    },
+    {
+      "path": "server/services/organization_access_service.js",
+      "sha256": "e7fb075e8f69ac34a932bf4d30d50e6a154fe603aec46bb3282d3f882fd85bcd"
+    },
+    {
+      "path": "server/services/sqlite_digest_service.js",
+      "sha256": "84f701b14e2e49f7f92a31c2b954996bc331dd564bbcf7a35c8005d04f17d301"
+    }
+  ]
+}

@@ -62,7 +62,7 @@ function createDeepSeekProvider(opts) {
 
       let response;
       try {
-        response = await fetchImpl(endpoint, {
+        const fetchOptions = {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -74,7 +74,9 @@ function createDeepSeekProvider(opts) {
             temperature: request.temperature === undefined ? 0.7 : request.temperature,
             max_tokens: request.max_tokens || request.maxTokens || 2000
           })
-        });
+        };
+        if (request.signal !== undefined) fetchOptions.signal = request.signal;
+        response = await fetchImpl(endpoint, fetchOptions);
       } catch (e) {
         return {
           content: fallbackContent(messages, 'deepseek network error: ' + e.message),

@@ -3,7 +3,9 @@
 const BODY_LIMITS = Object.freeze({
   CAMPAIGN_CONTROL_JSON: 65_536,
   CAMPAIGN_REVIEW_JSON: 1_048_576,
+  KNOWLEDGE_JSON: 1_048_576,
   EXISTING_DUAL_MODE_JSON: 52_428_800,
+  KNOWLEDGE_USE_COMPAT: 16_384,
   MULTIPART_ENVELOPE: 22_020_096
 });
 
@@ -46,7 +48,8 @@ function definePolicy(id, method, pathTemplate, mediaKind, maxRawBytes, options 
     mediaKind,
     maxRawBytes,
     multipartLimits: mediaKind === MEDIA_KINDS.MULTIPART ? MULTIPART_LIMITS : null,
-    admission: options.admission || null
+    admission: options.admission || null,
+    discardBody: options.discardBody === true
   });
 }
 
@@ -71,12 +74,27 @@ const existingDual = (id, method, pathTemplate) => definePolicy(
   MEDIA_KINDS.DUAL,
   BODY_LIMITS.EXISTING_DUAL_MODE_JSON
 );
+const knowledgeDual = (id, pathTemplate) => definePolicy(
+  id,
+  'POST',
+  pathTemplate,
+  MEDIA_KINDS.DUAL,
+  BODY_LIMITS.KNOWLEDGE_JSON
+);
 const empty = (id, method, pathTemplate) => definePolicy(
   id,
   method,
   pathTemplate,
   MEDIA_KINDS.EMPTY,
   0
+);
+const knowledgeUseCompatibility = (id, pathTemplate) => definePolicy(
+  id,
+  'POST',
+  pathTemplate,
+  MEDIA_KINDS.DUAL,
+  BODY_LIMITS.KNOWLEDGE_USE_COMPAT,
+  { discardBody: true }
 );
 const multipart = (id, pathTemplate, admission) => definePolicy(
   id,
@@ -85,6 +103,12 @@ const multipart = (id, pathTemplate, admission) => definePolicy(
   MEDIA_KINDS.MULTIPART,
   BODY_LIMITS.MULTIPART_ENVELOPE,
   { admission }
+);
+
+const LINKED_PPT_GENERATE = controlJson(
+  'legacy.proposal.ppt.generate',
+  'POST',
+  '/api/proposal/generate-ppt'
 );
 
 const REQUEST_POLICIES = Object.freeze({
@@ -145,6 +169,10 @@ const REQUEST_POLICIES = Object.freeze({
     MEDIA_KINDS.JSON,
     BODY_LIMITS.CAMPAIGN_REVIEW_JSON
   ),
+  // Compatibility export retained for server.js policy registration. The
+  // approved bridge owns the existing frozen generator endpoint, not a new
+  // campaign-scoped URL.
+  CAMPAIGN_PROPOSAL_PPT_GENERATE: LINKED_PPT_GENERATE,
   CAMPAIGN_WORKFLOW_RECONCILIATION_OPTIONS: empty(
     'campaign.workflow.reconciliation-options',
     'GET',
@@ -168,11 +196,7 @@ const REQUEST_POLICIES = Object.freeze({
 
   LEGACY_DEMAND_CREATE: existingJson('legacy.demand.create', 'POST', '/api/demands'),
   LEGACY_PROPOSAL_CREATE: existingJson('legacy.proposal.create', 'POST', '/api/proposals'),
-  LEGACY_PPT_GENERATE: existingJson(
-    'legacy.proposal.ppt.generate',
-    'POST',
-    '/api/proposal/generate-ppt'
-  ),
+  LEGACY_PPT_GENERATE: LINKED_PPT_GENERATE,
   LEGACY_COLLABORATION_CREATE: existingJson(
     'legacy.collaboration.create',
     'POST',
@@ -183,17 +207,15 @@ const REQUEST_POLICIES = Object.freeze({
     'PUT',
     '/api/collaborations/:id'
   ),
-  LEGACY_KNOWLEDGE_CREATE: existingJson(
+  LEGACY_KNOWLEDGE_CREATE: knowledgeDual(
     'legacy.knowledge.create',
-    'POST',
     '/api/knowledge'
   ),
-  LEGACY_KNOWLEDGE_INGEST: existingJson(
+  LEGACY_KNOWLEDGE_INGEST: knowledgeDual(
     'legacy.knowledge.ingest',
-    'POST',
     '/api/knowledge/ingest'
   ),
-  KNOWLEDGE_USE: empty('knowledge.use', 'POST', '/api/knowledge/:id/use'),
+  KNOWLEDGE_USE: knowledgeUseCompatibility('knowledge.use', '/api/knowledge/:id/use'),
   LEGACY_AI_CHAT: existingJson('legacy.ai.chat', 'POST', '/api/ai/chat'),
 
   SHARED_KNOWLEDGE_UPLOAD: multipart(

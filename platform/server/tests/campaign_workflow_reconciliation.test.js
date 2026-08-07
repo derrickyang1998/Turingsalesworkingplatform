@@ -38,6 +38,20 @@ const MIGRATIONS = Object.freeze([
     sourcePath: 'migrations/003_campaign_workflow_dispatch_evidence.js',
     engineVersion: 1,
     dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
+  }),
+  Object.freeze({
+    version: 4,
+    name: '004_knowledge_capacity_observability',
+    sourcePath: 'migrations/004_knowledge_capacity_observability.js',
+    engineVersion: 1,
+    dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
+  }),
+  Object.freeze({
+    version: 5,
+    name: '005_knowledge_custody_projection',
+    sourcePath: 'migrations/005_knowledge_custody_projection.js',
+    engineVersion: 1,
+    dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
   })
 ]);
 
@@ -1341,6 +1355,11 @@ test('injected SQL/archive/ledger failures and replacement ID exhaustion roll ba
       trigger: `CREATE TEMP TRIGGER task6c1_link_failure BEFORE INSERT ON main.campaign_record_links
         WHEN NEW.relation_type='knowledge'
         BEGIN SELECT RAISE(ABORT,'secret link sql'); END`
+    },
+    {
+      name: 'gauge',
+      trigger: `CREATE TEMP TRIGGER task6c1_gauge_failure BEFORE UPDATE ON main.knowledge_capacity_gauges
+        BEGIN SELECT RAISE(ABORT,'secret gauge sql'); END`
     },
     {
       name: 'ledger',

@@ -33,6 +33,27 @@ const COMPLETION_KEYS = Object.freeze([
   'responseBody',
   'responseHeaders'
 ]);
+const BINARY_COMPLETION_KEYS = Object.freeze([
+  'ledgerId',
+  'requestHash',
+  'leaseToken',
+  'statusCode',
+  'responseCacheKey',
+  'responseSha256',
+  'responseBytes',
+  'responseContentType',
+  'responseFilename',
+  'responseHeaders'
+]);
+const BINARY_EXPIRY_CLEANUP_KEYS = Object.freeze([
+  'ledgerId',
+  'requestHash',
+  'responseCacheKey',
+  'responseSha256',
+  'responseBytes',
+  'responseContentType',
+  'responseFilename'
+]);
 const OWNER_KEYS = Object.freeze([
   'ledgerId',
   'requestHash',
@@ -41,6 +62,7 @@ const OWNER_KEYS = Object.freeze([
 const DEFAULT_JSON_HEADERS = Object.freeze({
   'Content-Type': 'application/json; charset=utf-8'
 });
+const PPT_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
 const DEADLINE_RESPONSE = Object.freeze({
   error: 'Idempotent operation deadline expired.',
   code: 'IDEMPOTENCY_EXPIRED',
@@ -307,6 +329,93 @@ function canonicalResponseHeaders(value) {
     }
   }
   return canonicalJsonDocument(snapshot, 4096);
+}
+
+function canonicalBinaryFilename(value) {
+  if (
+    typeof value !== 'string' ||
+    value.trim().length === 0 ||
+    Buffer.byteLength(value, 'utf8') > 180 ||
+    /[\\/\u0000-\u001f\u007f]/.test(value) ||
+    value === '.' ||
+    value === '..'
+  ) {
+    throw invalidInput();
+  }
+  return value;
+}
+
+function normalizeBinaryExpiryCleanupInput(options) {
+  const input = snapshotPlainOptions(options, BINARY_EXPIRY_CLEANUP_KEYS);
+  if (!input) throw invalidInput();
+  const ledgerId = positiveSafeInteger(input.ledgerId);
+  if (
+    ledgerId === null ||
+    typeof input.requestHash !== 'string' ||
+    !HEX_64.test(input.requestHash) ||
+    typeof input.responseCacheKey !== 'string' ||
+    !HEX_64.test(input.responseCacheKey) ||
+    typeof input.responseSha256 !== 'string' ||
+    !HEX_64.test(input.responseSha256) ||
+    !Number.isSafeInteger(input.responseBytes) ||
+    input.responseBytes < 0 ||
+    input.responseBytes > 64 * 1024 * 1024 ||
+    input.responseContentType !== PPT_CONTENT_TYPE
+  ) {
+    throw invalidInput();
+  }
+  return Object.freeze({
+    ledgerId,
+    requestHash: input.requestHash,
+    responseCacheKey: input.responseCacheKey,
+    responseSha256: input.responseSha256,
+    responseBytes: input.responseBytes,
+    responseContentType: input.responseContentType,
+    responseFilename: canonicalBinaryFilename(input.responseFilename)
+  });
+}
+
+function storedBinaryArtifactMetadata(row) {
+  let headers;
+  let filename;
+  try {
+    headers = canonicalResponseHeaders(JSON.parse(row.response_headers_json));
+    filename = canonicalBinaryFilename(row.response_filename);
+  } catch {
+    throw serviceError(
+      500,
+      'AUDIT_PERSISTENCE_FAILED',
+      'Expired binary idempotency evidence was invalid.'
+    );
+  }
+  if (
+    typeof row.response_cache_key !== 'string' ||
+    !HEX_64.test(row.response_cache_key) ||
+    typeof row.response_sha256 !== 'string' ||
+    !HEX_64.test(row.response_sha256) ||
+    !Number.isSafeInteger(row.response_bytes) ||
+    row.response_bytes < 0 ||
+    row.response_bytes > 64 * 1024 * 1024 ||
+    row.response_content_type !== PPT_CONTENT_TYPE ||
+    headers.value['Content-Type'] !== row.response_content_type ||
+    headers.value['Content-Length'] !== String(row.response_bytes) ||
+    headers.value.ETag !== `"${row.response_sha256}"` ||
+    typeof headers.value['Content-Disposition'] !== 'string' ||
+    !headers.value['Content-Disposition'].includes(filename)
+  ) {
+    throw serviceError(
+      500,
+      'AUDIT_PERSISTENCE_FAILED',
+      'Expired binary idempotency evidence was invalid.'
+    );
+  }
+  return {
+    responseCacheKey: row.response_cache_key,
+    responseSha256: row.response_sha256,
+    responseBytes: row.response_bytes,
+    responseContentType: row.response_content_type,
+    responseFilename: filename
+  };
 }
 
 function assertJsonCompletionQuota(db, owner, projectedBytes) {
@@ -654,6 +763,45 @@ function assertPptReservationQuota(db, input) {
   }
 }
 
+function assertPptCompletionQuota(db, owner, projectedBytes) {
+  const counts = db.prepare(`
+    SELECT
+      SUM(CASE
+        WHEN user_id=@userId AND state IN ('completed','expiring') AND response_kind='binary'
+        THEN 1 ELSE 0
+      END) AS user_artifacts,
+      SUM(CASE
+        WHEN org_id=@organizationId AND state IN ('completed','expiring') AND response_kind='binary'
+        THEN 1 ELSE 0
+      END) AS organization_artifacts,
+      SUM(CASE
+        WHEN user_id=@userId AND state IN ('completed','expiring') AND response_kind='binary'
+        THEN response_bytes ELSE 0
+      END) AS user_artifact_bytes,
+      SUM(CASE
+        WHEN org_id=@organizationId AND state IN ('completed','expiring') AND response_kind='binary'
+        THEN response_bytes ELSE 0
+      END) AS organization_artifact_bytes
+    FROM request_idempotency
+    WHERE scope IN (
+      'proposal.ppt.generate.linked',
+      'proposal.ppt.generate.unlinked.admission'
+    )
+  `).get({ userId: owner.user_id, organizationId: owner.org_id });
+  if (
+    counts.user_artifacts >= 50 ||
+    counts.organization_artifacts >= 500 ||
+    counts.user_artifact_bytes + projectedBytes > 2 * 1024 * 1024 * 1024 ||
+    counts.organization_artifact_bytes + projectedBytes > 20 * 1024 * 1024 * 1024
+  ) {
+    throw serviceError(
+      507,
+      'PPT_STORAGE_CAPACITY_EXCEEDED',
+      'PPT retained-artifact capacity was reached.'
+    );
+  }
+}
+
 function assertParserReservationQuota(db, input) {
   const counts = db.prepare(`
     SELECT
@@ -877,6 +1025,32 @@ function expiredDisposition(row) {
   return null;
 }
 
+function readExpiredBinaryArtifact(db, options) {
+  const input = normalizeLookupInput(options);
+  const row = readRetainedRow(db, input);
+  if (!row) return { state: 'absent' };
+  if (retainedIdentityConflict(row, input) || row.request_hash !== input.requestHash) {
+    return {
+      state: 'conflict',
+      statusCode: 409,
+      code: 'IDEMPOTENCY_KEY_REUSED'
+    };
+  }
+  if (
+    row.state !== 'expiring' ||
+    row.response_kind !== 'binary' ||
+    row.retention_expired !== 1
+  ) {
+    return { state: 'not_ready' };
+  }
+  return {
+    state: 'ready',
+    ledgerId: row.id,
+    requestHash: row.request_hash,
+    ...storedBinaryArtifactMetadata(row)
+  };
+}
+
 function immutableReservationMetadata(row) {
   return {
     campaignId: row.campaign_id,
@@ -939,6 +1113,16 @@ function retainedTerminalDisposition(row, input) {
     };
   }
   if (row.response_kind === 'binary') {
+    let responseHeaders;
+    try {
+      responseHeaders = JSON.parse(row.response_headers_json);
+    } catch {
+      throw serviceError(
+        500,
+        'AUDIT_PERSISTENCE_FAILED',
+        'Retained binary idempotency evidence was invalid.'
+      );
+    }
     return {
       state: 'replay',
       ledgerId: row.id,
@@ -949,6 +1133,7 @@ function retainedTerminalDisposition(row, input) {
       responseBytes: row.response_bytes,
       responseContentType: row.response_content_type,
       responseFilename: row.response_filename,
+      responseHeaders,
       ...storedMetadataProjection(row, input)
     };
   }
@@ -1410,6 +1595,325 @@ function completeJsonInTransaction(db, options) {
   };
 }
 
+function completeAdmissionInTransaction(db, options) {
+  requireTransaction(db);
+  const input = snapshotPlainOptions(options, OWNER_KEYS);
+  if (!input) throw invalidInput();
+  const ledgerId = positiveSafeInteger(input.ledgerId);
+  if (
+    ledgerId === null ||
+    typeof input.requestHash !== 'string' ||
+    !HEX_64.test(input.requestHash) ||
+    typeof input.leaseToken !== 'string' ||
+    !HEX_64.test(input.leaseToken)
+  ) {
+    throw invalidInput();
+  }
+
+  const owner = db.prepare(`
+    SELECT
+      id,org_id,user_id,campaign_id,secondary_campaign_id,resource_claim,scope,
+      idempotency_key,reservation_nonce,request_hash,audit_fingerprint,
+      expected_event_count,lease_until,lease_token,operation_deadline
+    FROM request_idempotency
+    WHERE id=? AND request_hash=? AND state='processing' AND lease_token=?
+      AND datetime(lease_until)>CURRENT_TIMESTAMP
+      AND datetime(operation_deadline)>CURRENT_TIMESTAMP
+  `).get(ledgerId, input.requestHash, input.leaseToken);
+  if (!owner) {
+    throw serviceError(
+      409,
+      'IDEMPOTENCY_IN_PROGRESS',
+      'Idempotency lease is no longer owned by this operation.'
+    );
+  }
+  if (
+    !PARSER_SCOPES.has(owner.scope) ||
+    owner.campaign_id !== null ||
+    owner.secondary_campaign_id !== null ||
+    owner.resource_claim !== null ||
+    owner.expected_event_count !== 0 ||
+    typeof owner.reservation_nonce !== 'string' ||
+    !HEX_64.test(owner.reservation_nonce) ||
+    typeof owner.audit_fingerprint !== 'string' ||
+    !HEX_64.test(owner.audit_fingerprint)
+  ) {
+    throw serviceError(
+      500,
+      'AUDIT_PERSISTENCE_FAILED',
+      'Parser admission reservation evidence was invalid.'
+    );
+  }
+
+  let expectedFingerprint;
+  try {
+    expectedFingerprint = auditFingerprint({
+      organizationId: owner.org_id,
+      actorUserId: owner.user_id,
+      scope: owner.scope,
+      key: owner.idempotency_key,
+      requestHash: owner.request_hash,
+      reservationNonce: owner.reservation_nonce
+    });
+  } catch {
+    throw serviceError(
+      500,
+      'AUDIT_PERSISTENCE_FAILED',
+      'Parser admission reservation evidence was invalid.'
+    );
+  }
+  if (expectedFingerprint !== owner.audit_fingerprint) {
+    throw serviceError(
+      500,
+      'AUDIT_PERSISTENCE_FAILED',
+      'Parser admission reservation evidence was invalid.'
+    );
+  }
+
+  const eventCount = db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM campaign_events
+    WHERE org_id=? AND actor_user_id=? AND audit_fingerprint=?
+  `).get(
+    owner.org_id,
+    owner.user_id,
+    owner.audit_fingerprint
+  ).count;
+  if (eventCount !== 0) {
+    throw serviceError(
+      500,
+      'AUDIT_PERSISTENCE_FAILED',
+      'Parser admission completion cannot retain campaign events.'
+    );
+  }
+
+  let update;
+  try {
+    update = db.prepare(`
+      UPDATE request_idempotency
+      SET
+        state='completed',
+        lease_until=NULL,
+        lease_token=NULL,
+        status_code=200,
+        response_kind='admission',
+        updated_at=CURRENT_TIMESTAMP,
+        expires_at=datetime(CURRENT_TIMESTAMP,'+1 day')
+      WHERE id=@ledgerId
+        AND request_hash=@requestHash
+        AND state='processing'
+        AND scope=@scope
+        AND idempotency_key=@key
+        AND reservation_nonce=@reservationNonce
+        AND audit_fingerprint=@auditFingerprint
+        AND expected_event_count=0
+        AND campaign_id IS NULL
+        AND secondary_campaign_id IS NULL
+        AND resource_claim IS NULL
+        AND lease_token=@leaseToken
+        AND lease_until=@leaseUntil
+        AND operation_deadline=@operationDeadline
+        AND datetime(lease_until)>CURRENT_TIMESTAMP
+        AND datetime(operation_deadline)>CURRENT_TIMESTAMP
+    `).run({
+      ledgerId,
+      requestHash: input.requestHash,
+      scope: owner.scope,
+      key: owner.idempotency_key,
+      reservationNonce: owner.reservation_nonce,
+      auditFingerprint: owner.audit_fingerprint,
+      leaseToken: input.leaseToken,
+      leaseUntil: owner.lease_until,
+      operationDeadline: owner.operation_deadline
+    });
+  } catch {
+    throw serviceError(
+      500,
+      'AUDIT_PERSISTENCE_FAILED',
+      'Parser admission completion could not be persisted safely.'
+    );
+  }
+  if (update.changes !== 1) {
+    throw serviceError(
+      409,
+      'IDEMPOTENCY_IN_PROGRESS',
+      'Idempotency lease is no longer owned by this operation.'
+    );
+  }
+  return {
+    state: 'retained',
+    ledgerId,
+    responseKind: 'admission',
+    replayable: false
+  };
+}
+
+function completeBinaryInTransaction(db, options) {
+  requireTransaction(db);
+  const input = snapshotPlainOptions(options, BINARY_COMPLETION_KEYS);
+  if (!input) throw invalidInput();
+  const ledgerId = positiveSafeInteger(input.ledgerId);
+  if (
+    ledgerId === null ||
+    typeof input.requestHash !== 'string' ||
+    !HEX_64.test(input.requestHash) ||
+    typeof input.leaseToken !== 'string' ||
+    !HEX_64.test(input.leaseToken) ||
+    !Number.isSafeInteger(input.statusCode) ||
+    input.statusCode < 200 ||
+    input.statusCode > 299 ||
+    typeof input.responseCacheKey !== 'string' ||
+    !HEX_64.test(input.responseCacheKey) ||
+    typeof input.responseSha256 !== 'string' ||
+    !HEX_64.test(input.responseSha256) ||
+    !Number.isSafeInteger(input.responseBytes) ||
+    input.responseBytes < 0 ||
+    input.responseBytes > 64 * 1024 * 1024 ||
+    input.responseContentType !== PPT_CONTENT_TYPE ||
+    input.responseHeaders === undefined
+  ) {
+    throw invalidInput();
+  }
+  const filename = canonicalBinaryFilename(input.responseFilename);
+  const headers = canonicalResponseHeaders(input.responseHeaders);
+  if (
+    headers.value['Content-Type'] !== input.responseContentType ||
+    headers.value['Content-Length'] !== String(input.responseBytes) ||
+    headers.value.ETag !== `"${input.responseSha256}"` ||
+    typeof headers.value['Content-Disposition'] !== 'string' ||
+    !headers.value['Content-Disposition'].includes(filename)
+  ) {
+    throw invalidInput();
+  }
+  const owner = db.prepare(`
+    SELECT
+      id,org_id,user_id,campaign_id,secondary_campaign_id,audit_fingerprint,
+      expected_event_count,scope,lease_until,operation_deadline
+    FROM request_idempotency
+    WHERE id=? AND request_hash=? AND state='processing' AND lease_token=?
+      AND datetime(lease_until)>CURRENT_TIMESTAMP
+      AND datetime(operation_deadline)>CURRENT_TIMESTAMP
+  `).get(ledgerId, input.requestHash, input.leaseToken);
+  if (!owner) {
+    throw serviceError(
+      409,
+      'IDEMPOTENCY_IN_PROGRESS',
+      'Idempotency lease is no longer owned by this operation.'
+    );
+  }
+  if (!PPT_SCOPES.has(owner.scope)) {
+    throw serviceError(
+      500,
+      'AUDIT_PERSISTENCE_FAILED',
+      'Binary idempotency completion is reserved for PPT generation.'
+    );
+  }
+  assertPptCompletionQuota(db, owner, input.responseBytes);
+
+  const counts = db.prepare(`
+    SELECT
+      COUNT(*) AS total,
+      SUM(CASE WHEN campaign_id=? THEN 1 ELSE 0 END) AS primary_count,
+      SUM(CASE WHEN campaign_id=? THEN 1 ELSE 0 END) AS secondary_count
+    FROM campaign_events
+    WHERE org_id=? AND actor_user_id=? AND audit_fingerprint=?
+  `).get(
+    owner.campaign_id,
+    owner.secondary_campaign_id,
+    owner.org_id,
+    owner.user_id,
+    owner.audit_fingerprint
+  );
+  const cardinalityMatches =
+    counts.total === owner.expected_event_count &&
+    (
+      owner.expected_event_count === 0 ||
+      owner.expected_event_count === 1 &&
+        owner.secondary_campaign_id === null &&
+        counts.primary_count === 1 ||
+      owner.expected_event_count === 2 &&
+        owner.scope === 'campaign.link.correct' &&
+        owner.secondary_campaign_id !== null &&
+        counts.primary_count === 1 &&
+        counts.secondary_count === 1
+    );
+  if (!cardinalityMatches) {
+    throw serviceError(
+      500,
+      'AUDIT_PERSISTENCE_FAILED',
+      'Idempotency audit event cardinality did not match the reserved outcome.'
+    );
+  }
+
+  let update;
+  try {
+    update = db.prepare(`
+      UPDATE request_idempotency
+      SET
+        state='completed',
+        lease_until=NULL,
+        lease_token=NULL,
+        status_code=@statusCode,
+        response_kind='binary',
+        response_json=NULL,
+        response_headers_json=@responseHeadersJson,
+        response_cache_key=@responseCacheKey,
+        response_sha256=@responseSha256,
+        response_bytes=@responseBytes,
+        response_content_type=@responseContentType,
+        response_filename=@responseFilename,
+        updated_at=CURRENT_TIMESTAMP,
+        expires_at=datetime(CURRENT_TIMESTAMP,'+30 days')
+      WHERE id=@ledgerId
+        AND request_hash=@requestHash
+        AND state='processing'
+        AND lease_token=@leaseToken
+        AND lease_until=@leaseUntil
+        AND operation_deadline=@operationDeadline
+        AND datetime(lease_until)>CURRENT_TIMESTAMP
+        AND datetime(operation_deadline)>CURRENT_TIMESTAMP
+    `).run({
+      ledgerId,
+      requestHash: input.requestHash,
+      leaseToken: input.leaseToken,
+      leaseUntil: owner.lease_until,
+      operationDeadline: owner.operation_deadline,
+      statusCode: input.statusCode,
+      responseHeadersJson: headers.json,
+      responseCacheKey: input.responseCacheKey,
+      responseSha256: input.responseSha256,
+      responseBytes: input.responseBytes,
+      responseContentType: input.responseContentType,
+      responseFilename: filename
+    });
+  } catch {
+    throw serviceError(
+      500,
+      'AUDIT_PERSISTENCE_FAILED',
+      'Binary idempotency completion could not persist its audited outcome.'
+    );
+  }
+  if (update.changes !== 1) {
+    throw serviceError(
+      409,
+      'IDEMPOTENCY_IN_PROGRESS',
+      'Idempotency lease is no longer owned by this operation.'
+    );
+  }
+  return {
+    state: 'replay',
+    ledgerId,
+    statusCode: input.statusCode,
+    responseKind: 'binary',
+    responseCacheKey: input.responseCacheKey,
+    responseSha256: input.responseSha256,
+    responseBytes: input.responseBytes,
+    responseContentType: input.responseContentType,
+    responseFilename: filename,
+    responseHeaders: headers.value
+  };
+}
+
 function failInternalInTransaction(db, options) {
   requireTransaction(db);
   const input = snapshotPlainOptions(options, OWNER_KEYS);
@@ -1678,6 +2182,79 @@ function markBinaryExpiringInTransaction(db, row, disposition) {
   return disposition;
 }
 
+function discardExpiredBinaryInTransaction(db, options) {
+  requireTransaction(db);
+  const input = normalizeBinaryExpiryCleanupInput(options);
+  const row = db.prepare(`
+    SELECT
+      id,request_hash,state,response_kind,response_headers_json,response_cache_key,
+      response_sha256,response_bytes,response_content_type,response_filename,
+      expires_at,
+      CASE
+        WHEN datetime(expires_at)<=CURRENT_TIMESTAMP THEN 1 ELSE 0
+      END AS retention_expired
+    FROM request_idempotency
+    WHERE id=? AND request_hash=?
+  `).get(input.ledgerId, input.requestHash);
+  if (!row) {
+    return { state: 'absent', expired: true, deleted: false };
+  }
+  const artifact = storedBinaryArtifactMetadata(row);
+  if (
+    row.state !== 'expiring' ||
+    row.response_kind !== 'binary' ||
+    row.retention_expired !== 1 ||
+    artifact.responseCacheKey !== input.responseCacheKey ||
+    artifact.responseSha256 !== input.responseSha256 ||
+    artifact.responseBytes !== input.responseBytes ||
+    artifact.responseContentType !== input.responseContentType ||
+    artifact.responseFilename !== input.responseFilename
+  ) {
+    throw serviceError(
+      409,
+      'IDEMPOTENCY_IN_PROGRESS',
+      'Expired binary artifact cleanup lost its reservation race.'
+    );
+  }
+
+  let deletion;
+  try {
+    deletion = db.prepare(`
+      DELETE FROM request_idempotency
+      WHERE id=@ledgerId
+        AND request_hash=@requestHash
+        AND state='expiring'
+        AND response_kind='binary'
+        AND response_cache_key=@responseCacheKey
+        AND response_sha256=@responseSha256
+        AND response_bytes=@responseBytes
+        AND response_content_type=@responseContentType
+        AND response_filename=@responseFilename
+        AND datetime(expires_at)<=CURRENT_TIMESTAMP
+    `).run(input);
+  } catch {
+    throw serviceError(
+      500,
+      'AUDIT_PERSISTENCE_FAILED',
+      'Expired binary artifact cleanup could not be persisted safely.'
+    );
+  }
+  if (deletion.changes !== 1) {
+    const remaining = db.prepare(`
+      SELECT id FROM request_idempotency WHERE id=? AND request_hash=?
+    `).get(input.ledgerId, input.requestHash);
+    if (!remaining) {
+      return { state: 'absent', expired: true, deleted: false };
+    }
+    throw serviceError(
+      409,
+      'IDEMPOTENCY_IN_PROGRESS',
+      'Expired binary artifact cleanup lost its reservation race.'
+    );
+  }
+  return { state: 'absent', expired: true, deleted: true };
+}
+
 function recoverExpiredInTransaction(db, options) {
   requireTransaction(db);
   const input = normalizeLookupInput(options);
@@ -1912,11 +2489,80 @@ function recoverExpiredInTransaction(db, options) {
   );
 }
 
+function recoverParserAdmissionsInTransaction(db) {
+  requireTransaction(db);
+  const candidates = db.prepare(`
+    SELECT
+      org_id,user_id,campaign_id,secondary_campaign_id,resource_claim,scope,
+      idempotency_key,request_hash,expected_event_count
+    FROM request_idempotency
+    WHERE scope IN (
+      'parser.knowledge-upload.admission',
+      'parser.influencer-upload.admission',
+      'parser.demand-parse.admission'
+    )
+      AND (
+        state IN ('processing','failed')
+          AND datetime(operation_deadline)<=CURRENT_TIMESTAMP
+        OR state='failed'
+          AND datetime(expires_at)<=CURRENT_TIMESTAMP
+        OR state='completed'
+          AND response_kind IN ('json','admission')
+          AND datetime(expires_at)<=CURRENT_TIMESTAMP
+      )
+    ORDER BY id
+  `).all();
+  let terminalized = 0;
+  let deleted = 0;
+  for (const row of candidates) {
+    const outcome = recoverExpiredInTransaction(db, {
+      organizationId: row.org_id,
+      actorUserId: row.user_id,
+      campaignId: row.campaign_id,
+      secondaryCampaignId: row.secondary_campaign_id,
+      resourceClaim: row.resource_claim,
+      scope: row.scope,
+      key: row.idempotency_key,
+      requestHash: row.request_hash,
+      expectedEventCount: row.expected_event_count
+    });
+    if (
+      outcome.state === 'replay' &&
+      outcome.statusCode === 503 &&
+      outcome.responseKind === 'json'
+    ) {
+      terminalized += 1;
+    } else if (
+      outcome.state === 'absent' &&
+      outcome.expired === true &&
+      outcome.deleted === true
+    ) {
+      deleted += 1;
+    } else {
+      throw serviceError(
+        500,
+        'AUDIT_PERSISTENCE_FAILED',
+        'Parser admission startup recovery returned an invalid outcome.'
+      );
+    }
+  }
+  return {
+    scanned: candidates.length,
+    terminalized,
+    deleted
+  };
+}
+
 module.exports = {
   inspectRetained,
+  readExpiredBinaryArtifact,
   reserveProcessingInTransaction,
   renewLeaseInTransaction,
   completeJsonInTransaction,
+  completeAdmissionInTransaction,
+  completeBinaryInTransaction,
   failInternalInTransaction,
-  recoverExpiredInTransaction
+  discardExpiredBinaryInTransaction,
+  recoverExpiredInTransaction,
+  recoverParserAdmissionsInTransaction
 };

@@ -48,6 +48,10 @@ function parseJson(text) {
 }
 
 function unwrapXlsxRows(rawRows) {
+  // read-excel-file v9 returns a single worksheet as { sheet, data }.
+  if (rawRows && !Array.isArray(rawRows) && Array.isArray(rawRows.data)) {
+    return rawRows.data;
+  }
   if (!Array.isArray(rawRows)) return [];
   if (rawRows.length && rawRows[0] && !Array.isArray(rawRows[0]) && Array.isArray(rawRows[0].data)) {
     const sheet = rawRows.find(function(item) { return item && Array.isArray(item.data) && item.data.length; });
@@ -104,5 +108,6 @@ module.exports = {
   readUploadedFile,
   parseCsv,
   tableSummary,
+  unwrapXlsxRows,
   normalizeXlsxRows
 };

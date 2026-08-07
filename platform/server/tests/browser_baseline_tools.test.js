@@ -59,7 +59,7 @@ test('browser baseline generator preserves the frozen pre-edit inventory require
 
   assert.equal(manifest.preEdit.routeContracts.length, 106);
   assert.equal(manifest.preEdit.duplicateInventory.reviewedDuplicateCount, 39);
-  assert.equal(manifest.routeContracts.length, 113);
+  assert.equal(manifest.routeContracts.length, 117);
   assert.deepEqual(manifest.duplicateInventory.duplicates, ['esc']);
 });
 
@@ -196,6 +196,8 @@ test('fixture runtime skips platform dotenv and binds only to loopback', () => {
   const fixtureSource = fs.readFileSync(fixtureServerSourcePath, 'utf8');
   assert.match(fixtureSource, /TM_DISABLE_DOTENV:\s*'1'/);
   assert.match(fixtureSource, /SERVER_HOST:\s*'127\.0\.0\.1'/);
+  assert.match(fixtureSource, /TM_UPLOAD_SANDBOX_TEST_MODE:\s*'local-worker'/);
+  assert.match(fixtureSource, /UPLOAD_SANDBOX_SPOOL_ROOT:\s*path\.join\(runRoot,\s*'upload-spool'\)/);
   assert.match(fs.readFileSync(serverSourcePath, 'utf8'), /loadPlatformEnvironment/);
   assert.match(fs.readFileSync(dbSourcePath, 'utf8'), /loadPlatformEnvironment/);
 });

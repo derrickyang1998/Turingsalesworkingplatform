@@ -7,6 +7,7 @@ module.exports = {
     env: {
       NODE_ENV: "production",
       PORT: "3002",
+      SERVER_HOST: "127.0.0.1",
       TM_ENV_FILE: "/etc/turingmarket/turingmarket.env",
       DB_PATH: "/var/lib/turingmarket/db/turingmarket.db",
       UPLOAD_DIR: "/var/lib/turingmarket/uploads",

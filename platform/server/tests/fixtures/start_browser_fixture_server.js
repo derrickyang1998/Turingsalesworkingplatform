@@ -18,6 +18,7 @@ const runRoot = path.join(repoRoot, '.superpowers', 'sdd', 'browser-fixture-serv
 const dbPath = path.join(runRoot, 'fixture.db');
 const stdoutPath = path.join(runRoot, 'server.stdout.log');
 const stderrPath = path.join(runRoot, 'server.stderr.log');
+const TEST_JWT_SECRET = 'r5mvdP9IQlk87XKX7U5crz6K-4EEe9heCdEnXEpm-zg';
 const superpowersRoot = path.join(repoRoot, '.superpowers');
 const sddRoot = path.join(superpowersRoot, 'sdd');
 const browserFixtureRoot = path.join(sddRoot, 'browser-fixture-server');
@@ -60,8 +61,10 @@ function publicEnvironment() {
     PORT: String(port),
     SERVER_HOST: '127.0.0.1',
     TM_DISABLE_DOTENV: '1',
+    TM_UPLOAD_SANDBOX_TEST_MODE: 'local-worker',
+    UPLOAD_SANDBOX_SPOOL_ROOT: path.join(runRoot, 'upload-spool'),
     DB_PATH: dbPath,
-    JWT_SECRET: 'fixture-browser-baseline-jwt-secret',
+    JWT_SECRET: TEST_JWT_SECRET,
     OBISIDIAN_KB_ROOT: '',
     PLATFORM_KB_VAULT_ROOT: ''
   };

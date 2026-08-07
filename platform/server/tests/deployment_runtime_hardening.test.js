@@ -3,6 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
@@ -30,6 +31,42 @@ function runBash(source) {
     input: source,
     timeout: 20_000
   });
+}
+
+function fencedBlockAfter(source, heading, language = 'bash') {
+  const headingIndex = source.indexOf(heading);
+  assert.notEqual(headingIndex, -1, `missing runbook heading: ${heading}`);
+  const fence = '```' + language;
+  const fenceIndex = source.indexOf(fence, headingIndex + heading.length);
+  assert.notEqual(fenceIndex, -1, `missing ${language} block after: ${heading}`);
+  const contentStart = source.indexOf('\n', fenceIndex) + 1;
+  const contentEnd = source.indexOf('\n```', contentStart);
+  assert.ok(contentStart > 0 && contentEnd > contentStart, `unterminated block after: ${heading}`);
+  return source.slice(contentStart, contentEnd).replaceAll('\r\n', '\n');
+}
+
+function runRunbookOperatorBlock(t, block, fixture, extraEnvironment = {}) {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-terminal-docs-'));
+  const callLog = path.join(tempRoot, 'bootstrap-calls.log');
+  t.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
+  const assignments = Object.entries(extraEnvironment)
+    .map(([name, value]) => `${name}=${shellQuote(value)}`)
+    .join('\n');
+  const harness = `
+BOOTSTRAP_CALL_LOG=${shellQuote(shellPath(callLog))}
+BOOTSTRAP_FIXTURE=${shellQuote(fixture)}
+${assignments}
+bash() {
+  printf '%s\n' call >> "$BOOTSTRAP_CALL_LOG"
+  printf '%s\n' "$BOOTSTRAP_FIXTURE"
+}
+${block}
+`;
+  const result = runBash(harness);
+  const calls = fs.existsSync(callLog)
+    ? fs.readFileSync(callLog, 'utf8').trim().split(/\r?\n/).filter(Boolean).length
+    : 0;
+  return { calls, result };
 }
 
 const bootstrapPath = path.join(platformRoot, 'server', 'scripts', 'bootstrap_production_runtime.sh');
@@ -69,11 +106,13 @@ test('all production and deployment browser launches use the native sandboxed ru
 test('runtime configuration supports release-external environment, database, upload, and temp paths', () => {
   const runtimeConfig = read('platform/server/config/runtime_config.js');
   const server = read('platform/server/server.js');
+  const bootstrap = read('platform/server/scripts/bootstrap_production_runtime.sh');
   const ecosystem = read('platform/ecosystem.config.js');
 
   assert.match(runtimeConfig, /environment\.TM_ENV_FILE/);
-  assert.match(server, /process\.env\.UPLOAD_DIR/);
   assert.match(server, /process\.env\.TMP_DIR/);
+  assert.match(bootstrap, /UPLOAD_DIR="\$STATE_ROOT\/uploads"/);
+  assert.match(bootstrap, /validate_exact_link "\$LIVE_DIR\/uploads" "\$UPLOAD_DIR"/);
   for (const marker of [
     'TM_ENV_FILE: "/etc/turingmarket/turingmarket.env"',
     'DB_PATH: "/var/lib/turingmarket/db/turingmarket.db"',
@@ -82,6 +121,563 @@ test('runtime configuration supports release-external environment, database, upl
   ]) {
     assert.ok(ecosystem.includes(marker), marker);
   }
+});
+
+test('deployment runbook documents the explicit bootstrap terminal acknowledgement lifecycle', () => {
+  const runbook = read('platform/DEPLOY.md');
+
+  for (const marker of [
+    'Bootstrap Terminal Acknowledgement / 引导终态确认',
+    'BOOTSTRAP_OK',
+    'BOOTSTRAP_TERMINAL_ID=t1:<sha256>',
+    'BOOTSTRAP_JOURNAL_TERMINAL_OUTCOME=terminal-pending',
+    'bash /root/turingmarket/bootstrap_production_runtime.sh --ack-terminal "$TERMINAL_ID"',
+    'BOOTSTRAP_TERMINAL_ACKNOWLEDGED=<id>',
+    '普通 bootstrap 成功',
+    '同一 ID 重复 ACK 为幂等，错误或过期 ID 均失败关闭',
+    'pending 重跑不输出第二个 `BOOTSTRAP_OK`',
+    '离线维护或回滚'
+  ]) {
+    assert.ok(runbook.includes(marker), marker);
+  }
+
+  assert.match(runbook, /journal is not cleared automatically/i);
+  assert.match(runbook, /journal 不会自动清除/);
+  assert.doesNotMatch(runbook, /journal is cleared only after/i);
+  assert.match(runbook, /first-run output is captured exactly once/i);
+  assert.match(runbook, /terminal-pending rerun returns the same terminal ID and terminal-pending outcome before the checked-in prohibited-mutation boundary/i);
+  assert.match(runbook, /it does not emit BOOTSTRAP_OK/i);
+  assert.doesNotMatch(runbook, /without business or host mutation|不执行任何业务或主机 mutation/i);
+  assert.match(runbook, /verify runtime, exact links, SQLite, and marker evidence before ACK/i);
+  assert.match(runbook, /repeating ACK with the same ID is idempotent; a wrong or stale ID fails closed/i);
+  assert.match(runbook, /full capacity still allows the matching pending ACK in place/i);
+  assert.match(runbook, /existing-live[\s\S]{0,400}recover[\s\S]{0,400}must not start a new generation/i);
+  assert.match(runbook, /unknown, uncertain, or repair evidence[\s\S]{0,400}must not delete the journal[\s\S]{0,400}offline maintenance or rollback/i);
+
+  const extraction = fencedBlockAfter(
+    runbook,
+    '#### Safe terminal ID extraction / 安全提取终态 ID'
+  );
+  assert.match(extraction, /BOOTSTRAP_OK_COUNT/);
+  assert.match(extraction, /BOOTSTRAP_OUTCOME_COUNT/);
+  assert.match(extraction, /BOOTSTRAP_ID_COUNT/);
+  assert.ok(extraction.includes('^BOOTSTRAP_TERMINAL_ID=t1:[0-9a-f]{64}$'));
+  assert.doesNotMatch(extraction, /\beval\b|\btee\b|\blogger\b|set -x/);
+  assert.match(runbook, /do not write credentials to logs/i);
+});
+
+test('deployment runbook discloses bounded mount-guard housekeeping during marker evidence validation', () => {
+  const runbook = read('platform/DEPLOY.md');
+  const heading = '#### Evidence gate / 证据门禁';
+  const sectionStart = runbook.indexOf(heading);
+  const sectionEnd = runbook.indexOf(
+    '#### Pending rerun verification / pending 重跑核验',
+    sectionStart
+  );
+
+  assert.ok(sectionStart >= 0 && sectionEnd > sectionStart, 'evidence section is missing');
+  const evidenceSection = runbook.slice(sectionStart, sectionEnd);
+  assert.doesNotMatch(evidenceSection, /\bread-only gate\b|以下只读门禁/i);
+  assert.match(
+    evidenceSection,
+    /bounded[\s\S]{0,120}root-owned[\s\S]{0,160}\/root\/turingmarket\/\.external-runtime-root-mount-guard-v1\.<boot-id>/i
+  );
+  assert.match(
+    evidenceSection,
+    /current Linux boot[\s\S]{0,240}does not mutate business data or the runtime layout/i
+  );
+  assert.match(
+    evidenceSection,
+    /有界[\s\S]{0,120}root 所有[\s\S]{0,160}\/root\/turingmarket\/\.external-runtime-root-mount-guard-v1\.<boot-id>/
+  );
+  assert.match(
+    evidenceSection,
+    /当前 Linux 启动[\s\S]{0,240}不会修改业务数据或运行时布局/
+  );
+  assert.match(
+    evidenceSection,
+    /`validate_external_layout_marker`[\s\S]{0,240}`bind_external_layout_root`/
+  );
+
+  const evidenceBlock = fencedBlockAfter(runbook, heading);
+  assert.match(evidenceBlock, /^validate_external_layout_marker$/m);
+});
+
+test('deployment runbook captures the first bootstrap once and makes every parser fail closed', () => {
+  const runbook = read('platform/DEPLOY.md');
+  const ackHeading = '### Bootstrap Terminal Acknowledgement / 引导终态确认';
+  const ackIndex = runbook.indexOf(ackHeading);
+  assert.notEqual(ackIndex, -1);
+  const transferStart = runbook.lastIndexOf('```powershell', ackIndex);
+  assert.notEqual(transferStart, -1);
+  const transfer = runbook.slice(transferStart, ackIndex);
+  assert.match(transfer, /\bscp\b/);
+  assert.doesNotMatch(
+    transfer,
+    /\bssh\b[^\n]*bash \/root\/turingmarket\/bootstrap_production_runtime\.sh/
+  );
+
+  const firstRun = fencedBlockAfter(
+    runbook,
+    '#### Safe terminal ID extraction / 安全提取终态 ID'
+  );
+  const evidence = fencedBlockAfter(
+    runbook,
+    '#### Evidence gate / 证据门禁'
+  );
+  const pendingRerun = fencedBlockAfter(
+    runbook,
+    '#### Pending rerun verification / pending 重跑核验'
+  );
+  const explicitAck = fencedBlockAfter(
+    runbook,
+    '#### Explicit ACK / 显式 ACK'
+  );
+  for (const block of [firstRun, evidence, pendingRerun, explicitAck]) {
+    assert.match(block, /^set -euo pipefail\n/);
+  }
+
+  assert.equal((firstRun.match(/bash "\$BOOTSTRAP_SCRIPT"/g) || []).length, 1);
+  assert.equal((pendingRerun.match(/bash "\$BOOTSTRAP_SCRIPT"/g) || []).length, 1);
+  assert.match(explicitAck, /--ack-terminal "\$TERMINAL_ID"/);
+
+  const ackSectionEnd = runbook.indexOf('The resulting mutable paths', ackIndex);
+  const ackSection = runbook.slice(ackIndex, ackSectionEnd);
+  const parserBlocks = [...ackSection.matchAll(/```bash\r?\n([\s\S]*?)\r?\n```/g)]
+    .map((match) => match[1].replaceAll('\r\n', '\n'))
+    .filter((block) => /\b(?:grep|sed|awk|mapfile)\b|while IFS=/.test(block));
+  assert.ok(parserBlocks.length >= 2, 'first-run and pending-rerun parsers must be present');
+  for (const block of parserBlocks) {
+    assert.match(block, /^set -euo pipefail\n/, 'parser or grep runs without fail-closed shell mode');
+  }
+
+  const parseIndex = firstRun.indexOf(
+    'TERMINAL_ID="${BOOTSTRAP_ID_RECORD#BOOTSTRAP_TERMINAL_ID=}"'
+  );
+  assert.ok(parseIndex > 0, 'terminal ID parsing must be explicit');
+  for (const guard of [
+    'if [ "$BOOTSTRAP_OK_COUNT" -ne 1 ]',
+    'if [ "$BOOTSTRAP_OUTCOME_COUNT" -ne 1 ]',
+    'if [ "$BOOTSTRAP_ID_COUNT" -ne 1 ]'
+  ]) {
+    const guardIndex = firstRun.indexOf(guard);
+    assert.ok(guardIndex >= 0 && guardIndex < parseIndex, `missing pre-parse guard: ${guard}`);
+  }
+});
+
+test('deployment runbook first-run validator rejects every incomplete or ambiguous terminal record set', async (t) => {
+  const runbook = read('platform/DEPLOY.md');
+  const block = fencedBlockAfter(
+    runbook,
+    '#### Safe terminal ID extraction / 安全提取终态 ID'
+  );
+  const terminalId = `t1:${'a'.repeat(64)}`;
+  const ok = 'BOOTSTRAP_OK';
+  const id = `BOOTSTRAP_TERMINAL_ID=${terminalId}`;
+  const outcome = 'BOOTSTRAP_JOURNAL_TERMINAL_OUTCOME=terminal-pending';
+  const valid = [ok, id, outcome].join('\n');
+  const validRun = runRunbookOperatorBlock(t, block, valid);
+
+  assert.equal(validRun.result.status, 0, `${validRun.result.stdout}\n${validRun.result.stderr}`);
+  assert.equal(validRun.calls, 1);
+  assert.match(validRun.result.stdout, new RegExp(`^TERMINAL_ID=${terminalId}$`, 'm'));
+
+  const invalidCases = [
+    ['missing BOOTSTRAP_OK', [id, outcome]],
+    ['duplicate BOOTSTRAP_OK', [ok, ok, id, outcome]],
+    ['malformed BOOTSTRAP_OK', ['BOOTSTRAP_OK=yes', id, outcome]],
+    ['missing terminal outcome', [ok, id]],
+    ['duplicate terminal outcome', [ok, id, outcome, outcome]],
+    ['malformed terminal outcome', [ok, id, 'BOOTSTRAP_JOURNAL_TERMINAL_OUTCOME=commit-complete']],
+    ['missing terminal ID', [ok, outcome]],
+    ['duplicate terminal ID', [ok, id, id, outcome]],
+    ['malformed terminal ID', [ok, `BOOTSTRAP_TERMINAL_ID=t1:${'g'.repeat(64)}`, outcome]]
+  ];
+  for (const [name, lines] of invalidCases) {
+    await t.test(name, (subtest) => {
+      const execution = runRunbookOperatorBlock(subtest, block, lines.join('\n'));
+      assert.notEqual(
+        execution.result.status,
+        0,
+        `${name} was accepted\n${execution.result.stdout}\n${execution.result.stderr}`
+      );
+      assert.equal(execution.calls, 1, `${name} invoked bootstrap more than once`);
+      assert.doesNotMatch(execution.result.stdout, /^TERMINAL_ID=/m);
+    });
+  }
+});
+
+test('deployment runbook pending rerun requires the same pending ID and rejects BOOTSTRAP_OK', async (t) => {
+  const runbook = read('platform/DEPLOY.md');
+  const block = fencedBlockAfter(
+    runbook,
+    '#### Pending rerun verification / pending 重跑核验'
+  );
+  const terminalId = `t1:${'b'.repeat(64)}`;
+  const id = `BOOTSTRAP_TERMINAL_ID=${terminalId}`;
+  const outcome = 'BOOTSTRAP_JOURNAL_TERMINAL_OUTCOME=terminal-pending';
+  const environment = {
+    BOOTSTRAP_SCRIPT: '/root/turingmarket/bootstrap_production_runtime.sh',
+    TERMINAL_ID: terminalId
+  };
+  const validRun = runRunbookOperatorBlock(t, block, [id, outcome].join('\n'), environment);
+
+  assert.equal(validRun.result.status, 0, `${validRun.result.stdout}\n${validRun.result.stderr}`);
+  assert.equal(validRun.calls, 1);
+  assert.doesNotMatch(validRun.result.stdout, /^BOOTSTRAP_OK$/m);
+
+  const invalidCases = [
+    ['unexpected BOOTSTRAP_OK', ['BOOTSTRAP_OK', id, outcome]],
+    ['missing terminal ID', [outcome]],
+    ['different terminal ID', [`BOOTSTRAP_TERMINAL_ID=t1:${'c'.repeat(64)}`, outcome]],
+    ['duplicate terminal ID', [id, id, outcome]],
+    ['missing terminal outcome', [id]],
+    ['duplicate terminal outcome', [id, outcome, outcome]],
+    ['malformed terminal outcome', [id, 'BOOTSTRAP_JOURNAL_TERMINAL_OUTCOME=commit-complete']]
+  ];
+  for (const [name, lines] of invalidCases) {
+    await t.test(name, (subtest) => {
+      const execution = runRunbookOperatorBlock(
+        subtest,
+        block,
+        lines.join('\n'),
+        environment
+      );
+      assert.notEqual(
+        execution.result.status,
+        0,
+        `${name} was accepted\n${execution.result.stdout}\n${execution.result.stderr}`
+      );
+      assert.equal(execution.calls, 1);
+    });
+  }
+});
+
+test('PM2 production runtime binds the application listener to IPv4 loopback', () => {
+  const ecosystemPath = path.join(platformRoot, 'ecosystem.config.js');
+  delete require.cache[require.resolve(ecosystemPath)];
+  const ecosystem = require(ecosystemPath);
+
+  assert.equal(ecosystem.apps.length, 1);
+  assert.equal(ecosystem.apps[0].name, 'turingmarket');
+  assert.equal(ecosystem.apps[0].env.PORT, '3002');
+  assert.equal(ecosystem.apps[0].env.SERVER_HOST, '127.0.0.1');
+});
+
+test('loopback firewall installation is persistent, exact, and a no-op on rerun', () => {
+  const source = `
+set -euo pipefail
+root="$(mktemp -d)"
+trap 'rm -rf "$root"' EXIT
+export TM_REMOTE_ROOT="$root/remote"
+export TM_ENV_DIR="$root/etc-turingmarket"
+export TM_SYSTEMD_UNIT_DIR="$root/systemd"
+export TM_LOCAL_SBIN_DIR="$root/sbin"
+export TM_NFT_BIN="$root/bin/nft"
+export TM_BOOTSTRAP_LIBRARY_ONLY=1
+export FAKE_NFT_STATE="$root/nft-state.json"
+export FAKE_NFT_LOG="$root/nft.log"
+mkdir -p "$root/bin"
+cat > "$TM_NFT_BIN" <<'NFT'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> "$FAKE_NFT_LOG"
+if [ "$1" = "--check" ] && [ "$2" = "-f" ]; then
+  grep -Fxq 'destroy table inet turingmarket_loopback' "$3"
+  test "$(grep -c 'tcp dport 3002' "$3")" = 1
+  exit 0
+fi
+if [ "$1" = "-f" ]; then
+  cat > "$FAKE_NFT_STATE" <<'JSON'
+{"nftables":[{"metainfo":{"json_schema_version":1}},{"table":{"family":"inet","name":"turingmarket_loopback","handle":7}},{"chain":{"family":"inet","table":"turingmarket_loopback","name":"input","handle":8,"type":"filter","hook":"input","prio":-10,"policy":"accept"}},{"rule":{"family":"inet","table":"turingmarket_loopback","chain":"input","handle":9,"expr":[{"match":{"op":"!=","left":{"meta":{"key":"iifname"}},"right":"lo"}},{"match":{"op":"==","left":{"payload":{"protocol":"tcp","field":"dport"}},"right":3002}},{"reject":{"type":"tcp reset"}}],"comment":"turingmarket-loopback-only-3002"}}]}
+JSON
+  exit 0
+fi
+if [ "$1" = "-j" ] && [ "$2" = "list" ]; then
+  test -f "$FAKE_NFT_STATE"
+  cat "$FAKE_NFT_STATE"
+  exit 0
+fi
+if [ "$1" = "list" ]; then
+  test -f "$FAKE_NFT_STATE"
+  exit 0
+fi
+if [ "$1" = "delete" ]; then
+  rm -f "$FAKE_NFT_STATE"
+  exit 0
+fi
+exit 64
+NFT
+chmod 0755 "$TM_NFT_BIN"
+
+export TM_LIVE_DIR="$root/live"
+mkdir -p "$TM_LIVE_DIR"
+export TM_BOOTSTRAP_LIBRARY_ONLY=1
+source ${shellQuote(bootstrapShellPath)}
+
+systemctl() {
+  printf '%s\n' "$*" >> "$root/systemctl.log"
+  case "$1" in
+    daemon-reload) return 0 ;;
+    is-enabled) test -f "$root/enabled" ;;
+    is-active) test -f "$root/active" ;;
+    enable) : > "$root/enabled" ;;
+    disable) rm -f "$root/enabled" ;;
+    start|restart) : > "$root/active" ;;
+    stop) rm -f "$root/active" ;;
+    *) return 65 ;;
+  esac
+}
+
+BACKUP_DIR="$root/backup-one"
+mkdir -p "$BACKUP_DIR"
+install_loopback_firewall
+validate_loopback_firewall
+cp "$FAKE_NFT_STATE" "$root/valid-nft-state.json"
+sed -i 's/"right":"lo"/"right":"eth0"/' "$FAKE_NFT_STATE"
+if validate_loopback_firewall; then exit 91; fi
+cp "$root/valid-nft-state.json" "$FAKE_NFT_STATE"
+sed -i 's/"right":3002/"right":3003/' "$FAKE_NFT_STATE"
+if validate_loopback_firewall; then exit 92; fi
+cp "$root/valid-nft-state.json" "$FAKE_NFT_STATE"
+test -f "$root/enabled"
+test -f "$root/active"
+test "$(stat -c '%a' "$FIREWALL_RULE_FILE")" = 600
+test "$(stat -c '%a' "$FIREWALL_HELPER")" = 700
+test "$(stat -c '%a' "$FIREWALL_SERVICE_FILE")" = 644
+test "$(stat -c '%a' "$PM2_FIREWALL_DROPIN_FILE")" = 644
+grep -Fxq 'destroy table inet turingmarket_loopback' "$FIREWALL_RULE_FILE"
+test "$(grep -c 'tcp dport 3002' "$FIREWALL_RULE_FILE")" = 1
+grep -Fxq "ExecStart=$FIREWALL_HELPER apply" "$FIREWALL_SERVICE_FILE"
+grep -Fxq 'Before=pm2-root.service' "$FIREWALL_SERVICE_FILE"
+grep -Fxq 'Requires=turingmarket-loopback-firewall.service' "$PM2_FIREWALL_DROPIN_FILE"
+grep -Fxq 'After=turingmarket-loopback-firewall.service' "$PM2_FIREWALL_DROPIN_FILE"
+first_digest="$(sha256sum "$FIREWALL_RULE_FILE" "$FIREWALL_HELPER" "$FIREWALL_SERVICE_FILE" "$PM2_FIREWALL_DROPIN_FILE")"
+first_apply_count="$(grep -c '^-f ' "$FAKE_NFT_LOG")"
+
+BACKUP_DIR="$root/backup-two"
+mkdir -p "$BACKUP_DIR"
+install_loopback_firewall
+validate_loopback_firewall
+second_digest="$(sha256sum "$FIREWALL_RULE_FILE" "$FIREWALL_HELPER" "$FIREWALL_SERVICE_FILE" "$PM2_FIREWALL_DROPIN_FILE")"
+second_apply_count="$(grep -c '^-f ' "$FAKE_NFT_LOG")"
+test "$first_digest" = "$second_digest"
+test "$first_apply_count" = 1
+test "$second_apply_count" = 1
+`;
+  const result = runBash(source);
+
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+});
+
+test('failed loopback firewall installation restores every prior artifact and rule state', () => {
+  const source = `
+set -euo pipefail
+root="$(mktemp -d)"
+trap 'rm -rf "$root"' EXIT
+export TM_REMOTE_ROOT="$root/remote"
+export TM_ENV_DIR="$root/etc-turingmarket"
+export TM_SYSTEMD_UNIT_DIR="$root/systemd"
+export TM_LOCAL_SBIN_DIR="$root/sbin"
+export TM_NFT_BIN="$root/bin/nft"
+export TM_BOOTSTRAP_LIBRARY_ONLY=1
+export FAKE_NFT_STATE="$root/nft-state.json"
+mkdir -p "$root/bin"
+cat > "$TM_NFT_BIN" <<'NFT'
+#!/usr/bin/env bash
+set -euo pipefail
+if [ "$1" = "--check" ]; then exit 0; fi
+if [ "$1" = "-f" ]; then printf 'managed\n' > "$FAKE_NFT_STATE"; exit 0; fi
+if [ "$1" = "-j" ]; then test -f "$FAKE_NFT_STATE"; printf '{malformed'; exit 0; fi
+if [ "$1" = "list" ]; then test -f "$FAKE_NFT_STATE"; exit 0; fi
+if [ "$1" = "delete" ]; then rm -f "$FAKE_NFT_STATE"; exit 0; fi
+exit 64
+NFT
+chmod 0755 "$TM_NFT_BIN"
+export TM_LIVE_DIR="$root/live"
+mkdir -p "$TM_LIVE_DIR"
+source ${shellQuote(bootstrapShellPath)}
+
+mkdir -p "$(dirname "$FIREWALL_RULE_FILE")" "$(dirname "$FIREWALL_HELPER")" "$(dirname "$FIREWALL_SERVICE_FILE")" "$(dirname "$PM2_FIREWALL_DROPIN_FILE")"
+printf 'legacy-rule\n' > "$FIREWALL_RULE_FILE"
+printf 'legacy-helper\n' > "$FIREWALL_HELPER"
+printf 'legacy-service\n' > "$FIREWALL_SERVICE_FILE"
+printf 'legacy-dropin\n' > "$PM2_FIREWALL_DROPIN_FILE"
+
+systemctl() {
+  case "$1" in
+    daemon-reload|disable|stop) return 0 ;;
+    is-enabled|is-active) return 1 ;;
+    enable) return 0 ;;
+    start) return 73 ;;
+    *) return 65 ;;
+  esac
+}
+
+BACKUP_DIR="$root/backup"
+mkdir -p "$BACKUP_DIR"
+if install_loopback_firewall; then exit 90; fi
+test "$(cat "$FIREWALL_RULE_FILE")" = legacy-rule
+test "$(cat "$FIREWALL_HELPER")" = legacy-helper
+test "$(cat "$FIREWALL_SERVICE_FILE")" = legacy-service
+test "$(cat "$PM2_FIREWALL_DROPIN_FILE")" = legacy-dropin
+test ! -e "$FAKE_NFT_STATE"
+`;
+  const result = runBash(source);
+
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+});
+
+test('firewall installation aborts before mutation when the prior-state snapshot cannot be copied', () => {
+  const source = `
+set -euo pipefail
+root="$(mktemp -d)"
+trap 'rm -rf "$root"' EXIT
+export TM_BOOTSTRAP_LIBRARY_ONLY=1
+source ${shellQuote(bootstrapShellPath)}
+
+NFT_BIN=/bin/false
+copy_existing_path() { printf 'copy\n' >> "$root/calls"; return 55; }
+systemctl() {
+  case "$1" in
+    is-enabled|is-active) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+if snapshot_loopback_firewall_installation "$root/prior"; then exit 90; fi
+test "$(wc -l < "$root/calls")" = 1
+test ! -e "$root/prior/unit.enabled"
+test ! -e "$root/prior/unit.disabled"
+`;
+  const result = runBash(source);
+
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+});
+
+test('listener validation accepts exactly one IPv4 loopback socket and rejects every broader binding', () => {
+  const source = `
+set -euo pipefail
+export TM_BOOTSTRAP_LIBRARY_ONLY=1
+source ${shellQuote(bootstrapShellPath)}
+validate_loopback_listener_output $'LISTEN 0 511 127.0.0.1:3002 0.0.0.0:*'
+! validate_loopback_listener_output ''
+! validate_loopback_listener_output $'LISTEN 0 511 0.0.0.0:3002 0.0.0.0:*'
+! validate_loopback_listener_output $'LISTEN 0 511 [::1]:3002 [::]:*'
+! validate_loopback_listener_output $'LISTEN 0 511 127.0.0.1:3002 0.0.0.0:*\nLISTEN 0 511 127.0.0.1:3002 0.0.0.0:*'
+`;
+  const result = runBash(source);
+
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+});
+
+test('runtime restart fails closed before start on firewall drift and stops a broad listener', () => {
+  const source = `
+set -euo pipefail
+root="$(mktemp -d)"
+trap 'rm -rf "$root"' EXIT
+export TM_LIVE_DIR="$root/live"
+export TM_BOOTSTRAP_LIBRARY_ONLY=1
+mkdir -p "$TM_LIVE_DIR"
+source ${shellQuote(bootstrapShellPath)}
+
+pm2() { printf '%s\n' "$*" >> "$root/pm2.log"; return 0; }
+curl() { return 0; }
+sleep() { :; }
+validate_loopback_firewall() { return 1; }
+if restart_current_release; then exit 90; fi
+test "$(cat "$root/pm2.log")" = 'stop turingmarket'
+
+: > "$root/pm2.log"
+validate_loopback_firewall() { return 0; }
+validate_loopback_listener() { return 1; }
+if restart_current_release; then exit 91; fi
+grep -Fxq 'restart ecosystem.config.js --only turingmarket --update-env' "$root/pm2.log"
+test "$(tail -n 1 "$root/pm2.log")" = 'stop turingmarket'
+`;
+  const result = runBash(source);
+
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+});
+
+test('runtime health snapshots admit only a healthy app or a fully stopped port 3002', () => {
+  const source = `
+set -euo pipefail
+root="$(mktemp -d)"
+trap 'rm -rf "$root"' EXIT
+export TM_BOOTSTRAP_LIBRARY_ONLY=1
+source ${shellQuote(bootstrapShellPath)}
+
+mode=healthy
+curl() {
+  if [ "$mode" = healthy ]; then printf '{"ok":true}\n'; return 0; fi
+  return 22
+}
+ss() {
+  case "$mode" in
+    stopped) return 0 ;;
+    broad) printf 'LISTEN 0 511 0.0.0.0:3002 0.0.0.0:*\n' ;;
+    *) return 70 ;;
+  esac
+}
+
+snapshot_runtime_health "$root/healthy.json" 0
+test "$(cat "$root/healthy.json")" = '{"ok":true}'
+mode=stopped
+snapshot_runtime_health "$root/stopped.json" 1
+test "$(cat "$root/stopped.json")" = '{"status":"stopped","isolation":"no-port-3002-listener"}'
+if snapshot_runtime_health "$root/stopped-after.json" 0; then exit 91; fi
+test ! -e "$root/stopped-after.json"
+mode=broad
+if snapshot_runtime_health "$root/broad.json" 1; then exit 90; fi
+test ! -e "$root/broad.json"
+`;
+  const result = runBash(source);
+
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+});
+
+test('firewall recovery retries in a separate audit directory without mutating the migration backup', () => {
+  const source = `
+set -euo pipefail
+root="$(mktemp -d)"
+trap 'rm -rf "$root"' EXIT
+export TM_REMOTE_ROOT="$root/remote"
+export TM_BOOTSTRAP_LIBRARY_ONLY=1
+source ${shellQuote(bootstrapShellPath)}
+
+migration_backup="$BACKUP_ROOT/v030-runtime-bootstrap-source"
+mkdir -p "$migration_backup"
+printf 'sealed\n' > "$migration_backup/SHA256SUMS"
+original_backup="$root/original-backup"
+BACKUP_DIR="$original_backup"
+install_loopback_firewall() { printf '%s\n' "$BACKUP_DIR" > "$root/recovery-path"; }
+install_loopback_firewall_for_recovery "$migration_backup"
+
+test "$BACKUP_DIR" = "$original_backup"
+test "$(cat "$migration_backup/SHA256SUMS")" = sealed
+test "$(cat "$root/recovery-path")" = "$BACKUP_ROOT/v030-runtime-firewall-recovery-$STAMP"
+test ! -e "$migration_backup/loopback-firewall-recovery-$STAMP"
+`;
+  const result = runBash(source);
+
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+});
+
+test('bootstrap installs isolation while PM2 is stopped and validates it before every restart', () => {
+  const source = fs.readFileSync(bootstrapPath, 'utf8');
+  const migrationStart = source.indexOf('\nbootstrap_run_new_migration() {');
+  const mainStart = source.indexOf('\nbootstrap_production_main() {');
+  assert.ok(migrationStart !== -1 && mainStart > migrationStart, 'migration function must precede main');
+  const migration = source.slice(migrationStart, mainStart);
+
+  assert.match(source, /BROWSER_PACKAGES=\([\s\S]*?\bnftables\b[\s\S]*?\)/);
+  assert.match(migration, /apt-get install[\s\S]*?"\$\{BROWSER_PACKAGES\[@\]\}"/);
+  assert.match(migration, /stop_current_release[\s\S]*?install_loopback_firewall[\s\S]*?restart_current_release/);
+  assert.match(source, /snapshot_host\(\)[\s\S]*?snapshot_runtime_health/);
+  assert.match(source, /restart_current_release\(\)[\s\S]*?validate_loopback_firewall[\s\S]*?pm2 (?:restart|start)/);
+  assert.match(source, /restart_current_release\(\)[\s\S]*?validate_current_release_health[\s\S]*?pm2 stop turingmarket/);
+  assert.match(source, /validate_current_release_health\(\)[\s\S]*?validate_loopback_listener/);
 });
 
 test('runtime bootstrap is audited, reversible, and keeps mutable state outside releases', () => {
@@ -249,13 +845,24 @@ test "$(cat "$root/real-profile")" = real-profile
 
 test('runtime bootstrap journals before stopping and snapshots only after the process is stopped', () => {
   const source = fs.readFileSync(bootstrapPath, 'utf8');
-  const beginIndex = source.lastIndexOf('begin_migration_journal');
-  const stopIndex = source.lastIndexOf('\nstop_current_release\n');
-  const snapshotIndex = source.lastIndexOf('snapshot_runtime_state');
-  const preparedIndex = source.lastIndexOf('set_migration_phase prepared');
+  const migrationStart = source.indexOf('\nbootstrap_run_new_migration() {');
+  const mainStart = source.indexOf('\nbootstrap_production_main() {');
+  const launchStart = source.indexOf('\nif [ "${TM_BOOTSTRAP_LIBRARY_ONLY:-0}" = "1" ]; then', mainStart);
+  assert.ok(
+    migrationStart !== -1 && mainStart > migrationStart && launchStart > mainStart,
+    'bootstrap migration and main function boundaries must exist'
+  );
+  const migration = source.slice(migrationStart, mainStart);
+  const main = source.slice(mainStart, launchStart);
+  const beginIndex = main.indexOf('begin_migration_journal');
+  const runMigrationIndex = main.indexOf('bootstrap_run_new_migration');
+  const stopIndex = migration.indexOf('\nstop_current_release');
+  const snapshotIndex = migration.indexOf('snapshot_runtime_state');
+  const preparedIndex = migration.indexOf('set_migration_phase prepared');
 
   assert.ok(beginIndex > 0, 'persistent migration journal must start before downtime');
-  assert.ok(stopIndex > beginIndex, 'PM2 must stop after the journal is durable');
+  assert.ok(runMigrationIndex > beginIndex, 'new migration must run only after the journal is durable');
+  assert.ok(stopIndex > 0, 'new migration must stop PM2 before snapshotting');
   assert.ok(snapshotIndex > stopIndex, 'rollback snapshot must be captured after writers stop');
   assert.ok(preparedIndex > snapshotIndex, 'state mutation must wait for a complete snapshot');
   assert.match(source, /trap ['"]bootstrap_abort 130['"] INT/);
@@ -316,6 +923,7 @@ printf '%s\n' "$backup" > "$JOURNAL_DIR/backup-dir"
 
 database_quick_check() { printf 'quickcheck:%s\n' "$1" >> "$root/order"; test "$(cat "$1")" = good-db; }
 stop_current_release() { :; }
+install_loopback_firewall_for_recovery() { printf 'firewall\n' >> "$root/order"; }
 restart_current_release() { printf 'restart\n' >> "$root/order"; }
 recover_interrupted_migration
 
@@ -326,7 +934,8 @@ test ! -e "$ENV_FILE"
 test ! -e "$DB_DIR"
 test ! -e "$JOURNAL_DIR"
 test "$(sed -n '1p' "$root/order")" = "quickcheck:$root/live/server/db/turingmarket.db"
-test "$(sed -n '2p' "$root/order")" = restart
+test "$(sed -n '2p' "$root/order")" = firewall
+test "$(sed -n '3p' "$root/order")" = restart
 `;
   const result = runBash(source);
 
@@ -355,11 +964,14 @@ printf '%s\n' snapshotting > "$JOURNAL_DIR/phase"
 printf '%s\n' "$root/remote/backups/v030-runtime-bootstrap-test" > "$JOURNAL_DIR/backup-dir"
 database_quick_check() { return 88; }
 stop_current_release() { :; }
-restart_current_release() { : > "$root/restarted"; }
+install_loopback_firewall_for_recovery() { printf 'firewall\n' >> "$root/order"; }
+restart_current_release() { printf 'restart\n' >> "$root/order"; : > "$root/restarted"; }
 recover_interrupted_migration
 test "$(cat "$root/live/server/db/turingmarket.db")" = untouched
 test -f "$root/restarted"
 test ! -e "$JOURNAL_DIR"
+test "$(sed -n '1p' "$root/order")" = firewall
+test "$(sed -n '2p' "$root/order")" = restart
 `;
   const result = runBash(source);
 
@@ -420,8 +1032,8 @@ test('guarded deploy runs the full gate unprivileged and seals only external-sta
     'node_modules/playwright-deploy/cli.js install-deps --dry-run chromium',
     'node_modules/playwright-deploy/cli.js install chromium',
     'node_modules/playwright-deploy/cli.js test -c server/tests/deployment-browser-smoke.config.js',
-    'ROOT_SCHEMA_FINGERPRINT',
-    'CANDIDATE_SCHEMA_FINGERPRINT',
+    'TRUSTED_PRODUCTION_SOURCE_GATE_INSTALLED',
+    'TM_SANITIZED_MIGRATION_COMPATIBILITY_OK',
     'unshare --net --fork',
     'ip link set lo up',
     'CANDIDATE_TREE_SHA256',
@@ -455,32 +1067,41 @@ test('guarded deploy runs the full gate unprivileged and seals only external-sta
 
 test('candidate verification cannot read production data and runs candidate code without external networking', () => {
   const deploy = read('platform/deploy_v8.ps1');
+  const trustedGate = read('platform/server/scripts/trusted_production_source_gate.js');
+  const trustedVerifier = read('platform/server/scripts/verify_campaign_migration_gate.js');
   const gateMatch = deploy.match(/<<'TM_UNPRIVILEGED_GATE'\r?\n([\s\S]*?)\r?\nTM_UNPRIVILEGED_GATE/);
   const dependencyMatch = deploy.match(/<<'TM_DEPENDENCY_STAGE'\r?\n([\s\S]*?)\r?\nTM_DEPENDENCY_STAGE/);
+  const candidateMatch = deploy.match(/\$candidateGate\s*=\s*@'\r?\n([\s\S]*?)\r?\n'@/);
   assert.ok(gateMatch, 'offline unprivileged gate must exist');
   assert.ok(dependencyMatch, 'network-enabled dependency staging must be separate');
+  assert.ok(candidateMatch, 'candidate-only gate must exist');
   const gate = gateMatch[1];
   const dependencyStage = dependencyMatch[1];
+  const candidateGate = candidateMatch[1];
 
   assert.match(deploy, /ProductionBackupDb="\$BackupAbsolute\/database\/turingmarket\.db"/);
   assert.match(deploy, /ProductionLiveDb="\/var\/lib\/turingmarket\/db\/turingmarket\.db"/);
   assert.match(deploy, /chown root:root "\$ProductionBackupDb"[\s\S]*?chmod 0600 "\$ProductionBackupDb"/);
   assert.match(deploy, /runuser -u "\$GateUser" -- test ! -r "\$ProductionBackupDb"/);
   assert.match(deploy, /runuser -u "\$GateUser" -- test ! -r "\$ProductionLiveDb"/);
-  assert.match(deploy, /ROOT_SCHEMA_FINGERPRINT="\$\([\s\S]*?\$LiveDir\/server[\s\S]*?\$ProductionBackupDb/);
   assert.doesNotMatch(deploy, /cp "\$BackupAbsolute\/database\/turingmarket\.db" "\$SchemaDb"/);
-  assert.match(deploy, /TM_PRODUCTION_SCHEMA_DB="\$ProductionBackupDb"[\s\S]*?TM_SANITIZED_SCHEMA_DB="\$SchemaDb"[\s\S]*?node <<'TM_BUILD_SANITIZED_SCHEMA_DB'/);
-  assert.match(deploy, /sourceFingerprint[\s\S]*?rebuiltFingerprint[\s\S]*?Sanitized schema fingerprint mismatch/);
-  assert.match(deploy, /__tm_gate_admin__[\s\S]*?__tm_gate_session__[\s\S]*?__tm_gate_customer__[\s\S]*?__tm_gate_influencer__[\s\S]*?__tm_gate_knowledge__[\s\S]*?__tm_gate_conversation__/);
-  assert.match(deploy, /SANITIZED_SCHEMA_REBUILD_OK/);
+  assert.doesNotMatch(deploy, /node "\$CandidateDir\/server\/scripts\/sanitize_production_shape\.js"/);
+  assert.match(deploy, /\/usr\/bin\/node "\$TrustedSourceGate" sanitize-and-verify[\s\S]*?--source "\$TrustedSourceCopy"[\s\S]*?--sanitized-source "\$SchemaDb"/);
+  assert.match(deploy, /--manifest "\$TrustedSourceManifest"/);
+  assert.match(trustedGate, /sanitization\.format !== sanitizer\.REPORT_VERSION/);
+  assert.match(trustedGate, /format:\s*VERDICT_FORMAT/);
+  assert.doesNotMatch(deploy, /TM_BUILD_SANITIZED_SCHEMA_DB/);
   assert.doesNotMatch(gate, /BackupAbsolute|ProductionBackupDb|\/var\/lib\/turingmarket\/db|\/root\/turingmarket/);
   assert.doesNotMatch(gate, /business_counts|TM_ROW_COUNTS/);
-  assert.match(gate, /CANDIDATE_SCHEMA_FINGERPRINT[\s\S]*?EXPECTED_SCHEMA_FINGERPRINT/);
-  assert.match(gate, /__tm_gate_admin__[\s\S]*?__tm_gate_session__[\s\S]*?__tm_gate_customer__[\s\S]*?__tm_gate_influencer__[\s\S]*?__tm_gate_knowledge__[\s\S]*?__tm_gate_conversation__/);
-  assert.match(gate, /TM_SYNTHETIC_SENTINELS_OK/);
+  assert.match(trustedGate, /verifier:\s*'server\/scripts\/verify_campaign_migration_gate\.js'/);
+  assert.match(trustedVerifier, /REGISTERED_MIGRATIONS\.at\(-1\)/);
+  assert.match(trustedVerifier, /verifyDeterministicFtsCanaries/);
+  assert.match(gate, /TM_SANITIZED_MIGRATION_COMPATIBILITY_OK/);
+  assert.doesNotMatch(gate, /TM_SYNTHETIC_SENTINELS_OK|EXPECTED_SCHEMA_FINGERPRINT/);
 
   assert.match(dependencyStage, /npm ci --ignore-scripts[\s\S]*?install chromium[\s\S]*?npm rebuild better-sqlite3/);
   assert.doesNotMatch(dependencyStage, /node --test|deployment-browser-smoke|SCHEMA_DB|EXPECTED_SCHEMA_FINGERPRINT/);
+  assert.ok(candidateGate.indexOf('TM_DEPENDENCY_STAGE') < candidateGate.indexOf('/usr/bin/node "$TrustedSourceGate" sanitize-and-verify'));
   assert.ok(deploy.indexOf("TM_DEPENDENCY_STAGE") < deploy.indexOf('unshare --net --fork'));
   assert.ok(deploy.indexOf('unshare --net --fork') < deploy.indexOf('node --test --test-concurrency=1 tests/*.test.js'));
   assert.match(deploy, /test -z "\$\(ip route show default\)"/);

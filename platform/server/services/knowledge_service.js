@@ -1,4 +1,9 @@
 const crypto = require('crypto');
+const {
+  buildCollectionAccessPredicate,
+  projectKnowledgeVisibility,
+  serializeKnowledgeReference
+} = require('./campaign_access_service');
 
 const MAX_SAFE_ID = 9007199254740991;
 const MAX_ALLOCATABLE_PREVIOUS_ID = 9007199254740990n;
@@ -95,6 +100,16 @@ class CampaignKnowledgeCapacityError extends Error {
     this.status = 507;
     this.statusCode = 507;
     this.details = details;
+  }
+}
+
+class CampaignKnowledgeInputError extends Error {
+  constructor(message) {
+    super(message || 'Campaign knowledge input is invalid');
+    this.name = 'CampaignKnowledgeInputError';
+    this.code = 'INVALID_CAMPAIGN_INPUT';
+    this.status = 400;
+    this.statusCode = 400;
   }
 }
 
@@ -515,9 +530,21 @@ function prepareCampaignKnowledge(options) {
   );
   const campaignId = canonicalCampaignId(options.campaignId, 'campaignId');
   const createdBy = canonicalCampaignId(options.createdBy, 'createdBy');
-  const visibility = options.visibility;
+  if (
+    Object.prototype.hasOwnProperty.call(options, 'is_public') ||
+    Object.prototype.hasOwnProperty.call(options, 'isPublic')
+  ) {
+    throw new CampaignKnowledgeInputError(
+      'campaign knowledge is_public is not accepted'
+    );
+  }
+  const visibility = Object.prototype.hasOwnProperty.call(options, 'visibility')
+    ? options.visibility
+    : 'private';
   if (visibility !== 'private' && visibility !== 'team') {
-    throw new TypeError('campaign knowledge visibility must be private or team');
+    throw new CampaignKnowledgeInputError(
+      'campaign knowledge visibility must be private or team'
+    );
   }
   if (!Array.isArray(options.tags)) {
     throw new TypeError('campaign knowledge tags must be an array');
@@ -791,6 +818,258 @@ function organizationKnowledgeUsage(db, organizationId, defaultOrganizationId) {
   }), 'organization');
 }
 
+function campaignOrganizationKnowledgeUsage(
+  db,
+  campaignIds,
+  organizationIds,
+  defaultOrganizationId
+) {
+  const requested = [];
+  const seen = new Set();
+  for (const [scopeType, ids] of [
+    ['campaign', campaignIds],
+    ['organization', organizationIds]
+  ]) {
+    if (!Array.isArray(ids)) throw new TypeError('knowledge capacity scope ids must be arrays');
+    for (const scopeId of ids) {
+      if (!Number.isSafeInteger(scopeId) || scopeId < 1 || scopeId > MAX_SAFE_ID) {
+        throw new TypeError('knowledge capacity scope id is invalid');
+      }
+      const key = `${scopeType}:${scopeId}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      requested.push({ scopeType, scopeId });
+    }
+  }
+  if (
+    !Number.isSafeInteger(defaultOrganizationId) ||
+    defaultOrganizationId < 1 ||
+    defaultOrganizationId > MAX_SAFE_ID
+  ) {
+    throw new TypeError('default knowledge organization id is invalid');
+  }
+  if (requested.length === 0) return new Map();
+
+  const valuesSql = requested.map(function() { return '(?,?)'; }).join(',');
+  const params = requested.flatMap(function(scope) {
+    return [scope.scopeType, scope.scopeId];
+  });
+  params.push(defaultOrganizationId);
+  const rows = db.prepare(`
+    WITH
+    requested_scopes(scope_type,scope_id) AS (VALUES ${valuesSql}),
+    requested_campaigns AS MATERIALIZED (
+      SELECT
+        request.scope_type,
+        request.scope_id,
+        request.scope_id AS campaign_id
+      FROM requested_scopes request
+      WHERE request.scope_type='campaign'
+
+      UNION ALL
+
+      SELECT
+        request.scope_type,
+        request.scope_id,
+        campaign.id AS campaign_id
+      FROM requested_scopes request
+      JOIN campaigns campaign ON campaign.org_id=request.scope_id
+      WHERE request.scope_type='organization'
+    ),
+    active_scope_custody AS MATERIALIZED (
+      SELECT
+        requested.scope_type,
+        requested.scope_id,
+        CAST(active_link.record_id AS INTEGER) AS entry_id
+      FROM requested_campaigns requested
+      JOIN campaign_record_links active_link
+        ON active_link.campaign_id=requested.campaign_id
+      WHERE active_link.record_type='knowledge_entry'
+        AND active_link.relation_type<>'shortlist'
+        AND active_link.revoked_at IS NULL
+        AND NOT EXISTS (
+          SELECT 1
+          FROM campaign_record_links newer_active_link
+          WHERE newer_active_link.record_type='knowledge_entry'
+            AND newer_active_link.relation_type<>'shortlist'
+            AND newer_active_link.record_id=active_link.record_id
+            AND newer_active_link.revoked_at IS NULL
+            AND newer_active_link.id>active_link.id
+        )
+    ),
+    historical_scope_custody AS MATERIALIZED (
+      SELECT
+        requested.scope_type,
+        requested.scope_id,
+        CAST(historical_link.record_id AS INTEGER) AS entry_id
+      FROM requested_campaigns requested
+      JOIN campaign_record_links historical_link
+        ON historical_link.campaign_id=requested.campaign_id
+      WHERE historical_link.record_type='knowledge_entry'
+        AND historical_link.relation_type<>'shortlist'
+        AND historical_link.revoked_at IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1
+          FROM campaign_record_links current_link
+          WHERE current_link.record_type='knowledge_entry'
+            AND current_link.relation_type<>'shortlist'
+            AND current_link.record_id=historical_link.record_id
+            AND current_link.revoked_at IS NULL
+        )
+        AND NOT EXISTS (
+          SELECT 1
+          FROM campaign_record_links newer_link
+          WHERE newer_link.record_type='knowledge_entry'
+            AND newer_link.relation_type<>'shortlist'
+            AND newer_link.record_id=historical_link.record_id
+            AND newer_link.revoked_at IS NOT NULL
+            AND (
+              newer_link.revoked_at>historical_link.revoked_at
+              OR (
+                newer_link.revoked_at=historical_link.revoked_at
+                AND newer_link.id>historical_link.id
+              )
+            )
+        )
+    ),
+    knowledge_custody AS MATERIALIZED (
+      SELECT scope_type,scope_id,entry_id FROM active_scope_custody
+      UNION ALL
+      SELECT scope_type,scope_id,entry_id FROM historical_scope_custody
+    ),
+    scope_members AS MATERIALIZED (
+      SELECT request.scope_id AS org_id,membership.user_id
+      FROM requested_scopes request
+      JOIN organization_memberships membership
+        ON membership.org_id=request.scope_id
+      WHERE request.scope_type='organization'
+    ),
+    capacity_entries AS MATERIALIZED (
+      SELECT custody.scope_type,custody.scope_id,entry.*
+      FROM knowledge_custody custody
+      CROSS JOIN knowledge_entries entry
+      WHERE entry.id=custody.entry_id
+
+      UNION ALL
+
+      SELECT 'organization',member.org_id,member_entry.*
+      FROM scope_members member
+      CROSS JOIN knowledge_entries member_entry
+      WHERE member_entry.created_by=member.user_id
+        AND NOT EXISTS (
+        SELECT 1
+        FROM campaign_record_links entry_link
+        WHERE entry_link.record_type='knowledge_entry'
+          AND entry_link.relation_type<>'shortlist'
+          AND entry_link.record_id=CAST(member_entry.id AS TEXT)
+      )
+
+      UNION ALL
+
+      SELECT 'organization',request.scope_id,default_entry.*
+      FROM requested_scopes request
+      JOIN knowledge_entries default_entry ON default_entry.created_by IS NULL
+      WHERE request.scope_type='organization'
+        AND request.scope_id=?
+        AND NOT EXISTS (
+          SELECT 1
+          FROM campaign_record_links entry_link
+          WHERE entry_link.record_type='knowledge_entry'
+            AND entry_link.relation_type<>'shortlist'
+            AND entry_link.record_id=CAST(default_entry.id AS TEXT)
+        )
+    ),
+    capacity_references AS MATERIALIZED (
+      SELECT
+        'campaign' AS scope_type,
+        request.scope_id AS scope_id,
+        campaign_reference.id
+      FROM requested_scopes request
+      JOIN ai_references campaign_reference
+        ON campaign_reference.campaign_id=request.scope_id
+      WHERE request.scope_type='campaign'
+
+      UNION ALL
+
+      SELECT 'organization',request.scope_id,organization_reference.id
+      FROM requested_scopes request
+      CROSS JOIN campaigns organization_campaign
+      CROSS JOIN ai_references organization_reference
+      WHERE request.scope_type='organization'
+        AND organization_campaign.org_id=request.scope_id
+        AND organization_reference.campaign_id=organization_campaign.id
+
+      UNION ALL
+
+      SELECT 'organization',member.org_id,member_reference.id
+      FROM scope_members member
+      CROSS JOIN ai_conversations conversation
+      CROSS JOIN ai_messages message
+      CROSS JOIN ai_references member_reference
+      WHERE conversation.user_id=member.user_id
+        AND message.conversation_id=conversation.id
+        AND member_reference.message_id=message.id
+        AND member_reference.campaign_id IS NULL
+    ),
+    entry_usage AS MATERIALIZED (
+      SELECT
+        entry.scope_type,
+        entry.scope_id,
+        COUNT(*) AS entries,
+        COALESCE(SUM(${entryPayloadSql('entry')}),0) AS entry_payload_bytes
+      FROM capacity_entries entry
+      GROUP BY entry.scope_type,entry.scope_id
+    ),
+    chunk_usage AS MATERIALIZED (
+      SELECT
+        entry.scope_type,
+        entry.scope_id,
+        COUNT(*) AS chunks,
+        COALESCE(SUM(${chunkPayloadSql('chunk')}),0) AS chunk_payload_bytes
+      FROM capacity_entries entry
+      JOIN knowledge_chunks chunk ON chunk.entry_id=entry.id
+      GROUP BY entry.scope_type,entry.scope_id
+    ),
+    reference_usage AS MATERIALIZED (
+      SELECT
+        reference.scope_type,
+        reference.scope_id,
+        COUNT(*) AS "references"
+      FROM capacity_references reference
+      GROUP BY reference.scope_type,reference.scope_id
+    )
+    SELECT
+      request.scope_type,
+      request.scope_id,
+      COALESCE(entry_usage.entries,0) AS entries,
+      COALESCE(chunk_usage.chunks,0) AS chunks,
+      COALESCE(entry_usage.entry_payload_bytes,0) +
+        COALESCE(chunk_usage.chunk_payload_bytes,0) AS payloadBytes,
+      COALESCE(reference_usage."references",0) AS "references"
+    FROM requested_scopes request
+    LEFT JOIN entry_usage
+      ON entry_usage.scope_type=request.scope_type
+     AND entry_usage.scope_id=request.scope_id
+    LEFT JOIN chunk_usage
+      ON chunk_usage.scope_type=request.scope_type
+     AND chunk_usage.scope_id=request.scope_id
+    LEFT JOIN reference_usage
+      ON reference_usage.scope_type=request.scope_type
+     AND reference_usage.scope_id=request.scope_id
+  `).all(...params);
+  const usage = new Map();
+  rows.forEach(function(row) {
+    usage.set(
+      `${row.scope_type}:${row.scope_id}`,
+      normalizedCapacityUsage(row, row.scope_type)
+    );
+  });
+  if (usage.size !== requested.length) {
+    throw new Error('knowledge capacity scope usage is incomplete');
+  }
+  return usage;
+}
+
 function capacityMetricLabel(metric) {
   return metric === 'payloadBytes' ? 'payload_bytes' : metric;
 }
@@ -873,15 +1152,108 @@ function knowledgeCapacityScopeExists(db, scopeType, scopeId) {
   return Boolean(db.prepare(`SELECT 1 AS present FROM ${table} WHERE id=?`).get(scopeId));
 }
 
-function refreshKnowledgeCapacityGaugesInTransaction(db, scopes) {
-  if (!db || db.inTransaction !== true) {
-    throw new TypeError(
-      'refreshKnowledgeCapacityGaugesInTransaction requires an existing transaction'
-    );
-  }
+function knowledgeCapacityGaugeTableExists(db) {
+  return Boolean(db.prepare(`
+    SELECT 1 AS present
+    FROM sqlite_schema
+    WHERE type='table' AND name='knowledge_capacity_gauges'
+  `).get());
+}
+
+function knowledgeCapacityAuthorityExists(db) {
+  const rows = db.prepare(`
+    SELECT name
+    FROM sqlite_schema
+    WHERE type='table' AND name IN (
+      'knowledge_current_custody',
+      'knowledge_entry_footprints',
+      'knowledge_unlinked_user_usage'
+    )
+  `).all();
+  return rows.length === 3;
+}
+
+function authoritativeKnowledgeCapacityUsage(db, scopes) {
   const normalizedScopes = normalizeKnowledgeCapacityScopes(scopes);
-  if (normalizedScopes.length === 0) return 0;
-  const defaultOrganizationId = defaultKnowledgeOrganizationId(db);
+  if (normalizedScopes.length === 0) return new Map();
+  if (!knowledgeCapacityAuthorityExists(db)) {
+    throw new Error('knowledge capacity authority is unavailable');
+  }
+  const predicate = normalizedScopes.map(function() {
+    return '(scope_type=? AND scope_id=?)';
+  }).join(' OR ');
+  const params = normalizedScopes.flatMap(function(scope) {
+    return [scope.scopeType, scope.scopeId];
+  });
+  const rows = db.prepare(`
+    SELECT scope_type,scope_id,metric,usage_value,limit_value
+    FROM knowledge_capacity_gauges
+    WHERE ${predicate}
+    ORDER BY scope_type,scope_id,metric
+  `).all(...params);
+  const usage = new Map(normalizedScopes.map(function(scope) {
+    return [`${scope.scopeType}:${scope.scopeId}`, {
+      entries: null,
+      chunks: null,
+      payloadBytes: null,
+      references: null
+    }];
+  }));
+  for (const row of rows) {
+    const key = `${row.scope_type}:${row.scope_id}`;
+    const target = usage.get(key);
+    const field = row.metric === 'payload_bytes' ? 'payloadBytes' : row.metric;
+    const limits = CAMPAIGN_KNOWLEDGE_CAPACITY[row.scope_type];
+    if (
+      !target ||
+      !Object.prototype.hasOwnProperty.call(target, field) ||
+      row.limit_value !== limits[field] ||
+      target[field] !== null
+    ) {
+      throw new Error('knowledge capacity authority is malformed');
+    }
+    if (!Number.isSafeInteger(row.usage_value) || row.usage_value < 0) {
+      throw new Error('knowledge capacity authority usage is invalid');
+    }
+    target[field] = row.usage_value;
+  }
+  for (const target of usage.values()) {
+    if (CAPACITY_METRICS.some(function(metric) { return target[metric] === null; })) {
+      throw new Error('knowledge capacity authority is incomplete');
+    }
+  }
+  return usage;
+}
+
+function normalizeKnowledgeCapacityGaugePlan(plan) {
+  if (!Array.isArray(plan)) {
+    throw new TypeError('knowledge capacity gauge plan must be an array');
+  }
+  const unique = new Map();
+  for (const item of plan) {
+    const scopeType = item && item.scopeType;
+    const scopeId = item && item.scopeId;
+    if (!Object.prototype.hasOwnProperty.call(CAMPAIGN_KNOWLEDGE_CAPACITY, scopeType)) {
+      throw new TypeError('knowledge capacity gauge scope type is invalid');
+    }
+    if (!Number.isSafeInteger(scopeId) || scopeId < 1) {
+      throw new TypeError('knowledge capacity gauge scope id is invalid');
+    }
+    const usage = normalizedCapacityUsage(
+      item.usage,
+      `${scopeType} gauge plan`
+    );
+    const key = `${scopeType}:${scopeId}`;
+    const existing = unique.get(key);
+    if (existing && JSON.stringify(existing.usage) !== JSON.stringify(usage)) {
+      throw new Error('knowledge capacity gauge plan is inconsistent');
+    }
+    unique.set(key, { scopeType, scopeId, usage });
+  }
+  return [...unique.values()];
+}
+
+function writeKnowledgeCapacityGaugePlanInTransaction(db, normalizedPlan) {
   const upsert = db.prepare(`
     INSERT INTO knowledge_capacity_gauges (
       scope_type,scope_id,metric,usage_value,limit_value,threshold_percent,updated_at
@@ -892,19 +1264,13 @@ function refreshKnowledgeCapacityGaugesInTransaction(db, scopes) {
       threshold_percent=excluded.threshold_percent,
       updated_at=excluded.updated_at
   `);
-  for (const scope of normalizedScopes) {
+  for (const scope of normalizedPlan) {
     if (!knowledgeCapacityScopeExists(db, scope.scopeType, scope.scopeId)) {
       throw new TypeError('knowledge capacity scope does not exist');
     }
-    const usage = knowledgeCapacityUsage(
-      db,
-      scope.scopeType,
-      scope.scopeId,
-      defaultOrganizationId
-    );
     const limits = CAMPAIGN_KNOWLEDGE_CAPACITY[scope.scopeType];
     for (const metric of CAPACITY_METRICS) {
-      const usageValue = usage[metric];
+      const usageValue = scope.usage[metric];
       const limitValue = limits[metric];
       upsert.run({
         scopeType: scope.scopeType,
@@ -916,7 +1282,55 @@ function refreshKnowledgeCapacityGaugesInTransaction(db, scopes) {
       });
     }
   }
-  return normalizedScopes.length * CAPACITY_METRICS.length;
+  return normalizedPlan.length * CAPACITY_METRICS.length;
+}
+
+function applyKnowledgeCapacityGaugePlanInTransaction(db, plan) {
+  if (!db || db.inTransaction !== true) {
+    throw new TypeError(
+      'applyKnowledgeCapacityGaugePlanInTransaction requires an existing transaction'
+    );
+  }
+  const normalizedPlan = normalizeKnowledgeCapacityGaugePlan(plan);
+  if (normalizedPlan.length === 0 || !knowledgeCapacityGaugeTableExists(db)) {
+    return 0;
+  }
+  if (!knowledgeCapacityAuthorityExists(db)) {
+    return writeKnowledgeCapacityGaugePlanInTransaction(db, normalizedPlan);
+  }
+  const actual = authoritativeKnowledgeCapacityUsage(db, normalizedPlan);
+  for (const scope of normalizedPlan) {
+    const current = actual.get(`${scope.scopeType}:${scope.scopeId}`);
+    if (JSON.stringify(current) !== JSON.stringify(scope.usage)) {
+      throw new Error('knowledge capacity authority mutation mismatch');
+    }
+  }
+  return normalizedPlan.length * CAPACITY_METRICS.length;
+}
+
+function refreshKnowledgeCapacityGaugesInTransaction(db, scopes) {
+  if (!db || db.inTransaction !== true) {
+    throw new TypeError(
+      'refreshKnowledgeCapacityGaugesInTransaction requires an existing transaction'
+    );
+  }
+  const normalizedScopes = normalizeKnowledgeCapacityScopes(scopes);
+  if (normalizedScopes.length === 0 || !knowledgeCapacityGaugeTableExists(db)) return 0;
+  const defaultOrganizationId = defaultKnowledgeOrganizationId(db);
+  return writeKnowledgeCapacityGaugePlanInTransaction(
+    db,
+    normalizeKnowledgeCapacityGaugePlan(normalizedScopes.map(function(scope) {
+      return {
+        ...scope,
+        usage: knowledgeCapacityUsage(
+          db,
+          scope.scopeType,
+          scope.scopeId,
+          defaultOrganizationId
+        )
+      };
+    }))
+  );
 }
 
 function reconcileKnowledgeCapacityGaugesInTransaction(db) {
@@ -939,11 +1353,18 @@ function reconcileKnowledgeCapacityGaugesInTransaction(db) {
   return refreshKnowledgeCapacityGaugesInTransaction(db, scopes);
 }
 
-function assertCapacity(scope, usage, delta) {
+function capacityUsageAfterDelta(scope, usage, delta, direction) {
+  if (direction !== 1 && direction !== -1) {
+    throw new TypeError('knowledge capacity delta direction is invalid');
+  }
   const limits = CAMPAIGN_KNOWLEDGE_CAPACITY[scope];
+  const projectedUsage = {};
   CAPACITY_METRICS.forEach(function(metric) {
-    const projected = usage[metric] + delta[metric];
-    if (!Number.isSafeInteger(projected) || projected > limits[metric]) {
+    const projected = usage[metric] + (direction * delta[metric]);
+    if (!Number.isSafeInteger(projected) || projected < 0) {
+      throw new Error('knowledge capacity projection is invalid');
+    }
+    if (projected > limits[metric]) {
       throw new CampaignKnowledgeCapacityError({
         scope,
         metric: capacityMetricLabel(metric),
@@ -951,7 +1372,13 @@ function assertCapacity(scope, usage, delta) {
         projected
       });
     }
+    projectedUsage[metric] = projected;
   });
+  return projectedUsage;
+}
+
+function assertCapacity(scope, usage, delta) {
+  return capacityUsageAfterDelta(scope, usage, delta, 1);
 }
 
 function preflightCampaignKnowledgeCapacity(db, prepared) {
@@ -990,25 +1417,46 @@ function preflightCampaignKnowledgeCapacity(db, prepared) {
       knowledgeChunkPayloadBytes(prepared.chunks),
     references: 0
   };
-  assertCapacity(
-    'user',
-    userKnowledgeUsage(db, prepared.entry.created_by),
-    delta
-  );
-  assertCapacity(
-    'campaign',
-    campaignKnowledgeUsage(db, prepared.campaignId),
-    delta
-  );
-  assertCapacity(
-    'organization',
-    organizationKnowledgeUsage(
+  let userUsage;
+  let campaignUsage;
+  let organizationUsage;
+  if (knowledgeCapacityAuthorityExists(db)) {
+    const authoritativeUsage = authoritativeKnowledgeCapacityUsage(db, [
+      { scopeType: 'user', scopeId: prepared.entry.created_by },
+      { scopeType: 'campaign', scopeId: prepared.campaignId },
+      { scopeType: 'organization', scopeId: prepared.organizationId }
+    ]);
+    userUsage = authoritativeUsage.get(`user:${prepared.entry.created_by}`);
+    campaignUsage = authoritativeUsage.get(`campaign:${prepared.campaignId}`);
+    organizationUsage = authoritativeUsage.get(`organization:${prepared.organizationId}`);
+  } else {
+    userUsage = userKnowledgeUsage(db, prepared.entry.created_by);
+    const combinedUsage = campaignOrganizationKnowledgeUsage(
       db,
-      prepared.organizationId,
+      [prepared.campaignId],
+      [prepared.organizationId],
       defaultOrganizations[0].id
-    ),
-    delta
-  );
+    );
+    campaignUsage = combinedUsage.get(`campaign:${prepared.campaignId}`);
+    organizationUsage = combinedUsage.get(`organization:${prepared.organizationId}`);
+  }
+  return [
+    {
+      scopeType: 'user',
+      scopeId: prepared.entry.created_by,
+      usage: assertCapacity('user', userUsage, delta)
+    },
+    {
+      scopeType: 'campaign',
+      scopeId: prepared.campaignId,
+      usage: assertCapacity('campaign', campaignUsage, delta)
+    },
+    {
+      scopeType: 'organization',
+      scopeId: prepared.organizationId,
+      usage: assertCapacity('organization', organizationUsage, delta)
+    }
+  ];
 }
 
 function preflightCampaignKnowledgeCustodyMoveInTransaction(db, options) {
@@ -1043,18 +1491,28 @@ function preflightCampaignKnowledgeCustodyMoveInTransaction(db, options) {
       'campaign knowledge custody destination does not match organization'
     );
   }
-  const delta = db.prepare(`
-    SELECT
-      1 AS entries,
-      COUNT(chunk.id) AS chunks,
-      ${entryPayloadSql('entry')} +
-        COALESCE(SUM(${chunkPayloadSql('chunk')}),0) AS payloadBytes,
-      0 AS "references"
-    FROM knowledge_entries entry
-    LEFT JOIN knowledge_chunks chunk ON chunk.entry_id=entry.id
-    WHERE entry.id=?
-    GROUP BY entry.id
-  `).get(entryId);
+  const delta = knowledgeCapacityAuthorityExists(db)
+    ? db.prepare(`
+        SELECT
+          1 AS entries,
+          chunk_count AS chunks,
+          entry_payload_bytes + chunk_payload_bytes AS payloadBytes,
+          0 AS "references"
+        FROM knowledge_entry_footprints
+        WHERE knowledge_entry_id=?
+      `).get(entryId)
+    : db.prepare(`
+        SELECT
+          1 AS entries,
+          COUNT(chunk.id) AS chunks,
+          ${entryPayloadSql('entry')} +
+            COALESCE(SUM(${chunkPayloadSql('chunk')}),0) AS payloadBytes,
+          0 AS "references"
+        FROM knowledge_entries entry
+        LEFT JOIN knowledge_chunks chunk ON chunk.entry_id=entry.id
+        WHERE entry.id=?
+        GROUP BY entry.id
+      `).get(entryId);
   if (!delta) {
     throw new TypeError('campaign knowledge custody entry does not exist');
   }
@@ -1062,12 +1520,6 @@ function preflightCampaignKnowledgeCustodyMoveInTransaction(db, options) {
     delta,
     'campaign custody move'
   );
-  assertCapacity(
-    'campaign',
-    campaignKnowledgeUsage(db, destinationCampaignId),
-    normalizedDelta
-  );
-
   const defaultOrganizations = db.prepare(`
     SELECT id
     FROM organizations
@@ -1078,20 +1530,98 @@ function preflightCampaignKnowledgeCustodyMoveInTransaction(db, options) {
       'default organization resolution failed during knowledge capacity preflight'
     );
   }
-  assertCapacity(
-    'organization',
-    organizationKnowledgeUsage(
-      db,
-      organizationId,
-      defaultOrganizations[0].id
-    ),
-    {
-      entries: 0,
-      chunks: 0,
-      payloadBytes: 0,
-      references: 0
+  const defaultOrganizationId = defaultOrganizations[0].id;
+  const custody = currentKnowledgeCustody(db, entryId);
+  const sourceOrganizationIds = new Set();
+  if (custody) {
+    sourceOrganizationIds.add(custody.org_id);
+  } else {
+    const entry = db.prepare(`
+      SELECT created_by
+      FROM knowledge_entries
+      WHERE id=?
+    `).get(entryId);
+    if (entry.created_by === null) {
+      sourceOrganizationIds.add(defaultOrganizationId);
+    } else {
+      db.prepare(`
+        SELECT org_id
+        FROM organization_memberships
+        WHERE user_id=?
+      `).all(entry.created_by).forEach(function(row) {
+        sourceOrganizationIds.add(row.org_id);
+      });
     }
+  }
+  const campaignIds = [destinationCampaignId];
+  if (custody && custody.campaign_id !== destinationCampaignId) {
+    campaignIds.push(custody.campaign_id);
+  }
+  const organizationIds = [organizationId, ...sourceOrganizationIds];
+  const requestedScopes = [
+    ...campaignIds.map(function(scopeId) { return { scopeType: 'campaign', scopeId }; }),
+    ...organizationIds.map(function(scopeId) { return { scopeType: 'organization', scopeId }; })
+  ];
+  const combinedUsage = knowledgeCapacityAuthorityExists(db)
+    ? authoritativeKnowledgeCapacityUsage(db, requestedScopes)
+    : campaignOrganizationKnowledgeUsage(
+      db,
+      campaignIds,
+      organizationIds,
+      defaultOrganizationId
+    );
+  const plans = [];
+  const destinationCampaignUsage = combinedUsage.get(
+    `campaign:${destinationCampaignId}`
   );
+  plans.push({
+    scopeType: 'campaign',
+    scopeId: destinationCampaignId,
+    usage: custody && custody.campaign_id === destinationCampaignId
+      ? destinationCampaignUsage
+      : assertCapacity('campaign', destinationCampaignUsage, normalizedDelta)
+  });
+  if (custody && custody.campaign_id !== destinationCampaignId) {
+    plans.push({
+      scopeType: 'campaign',
+      scopeId: custody.campaign_id,
+      usage: capacityUsageAfterDelta(
+        'campaign',
+        combinedUsage.get(`campaign:${custody.campaign_id}`),
+        normalizedDelta,
+        -1
+      )
+    });
+  }
+
+  const destinationOrganizationUsage = combinedUsage.get(
+    `organization:${organizationId}`
+  );
+  plans.push({
+    scopeType: 'organization',
+    scopeId: organizationId,
+    usage: sourceOrganizationIds.has(organizationId)
+      ? destinationOrganizationUsage
+      : assertCapacity(
+        'organization',
+        destinationOrganizationUsage,
+        normalizedDelta
+      )
+  });
+  for (const sourceOrganizationId of sourceOrganizationIds) {
+    if (sourceOrganizationId === organizationId) continue;
+    plans.push({
+      scopeType: 'organization',
+      scopeId: sourceOrganizationId,
+      usage: capacityUsageAfterDelta(
+        'organization',
+        combinedUsage.get(`organization:${sourceOrganizationId}`),
+        normalizedDelta,
+        -1
+      )
+    });
+  }
+  return normalizeKnowledgeCapacityGaugePlan(plans);
 }
 
 function rebuildChunks(db, entryId, entry) {
@@ -1467,12 +1997,19 @@ function normalizeCampaignKnowledgeChunk(row) {
   };
 }
 
-function campaignKnowledgeResult(status, graph) {
-  return {
+function campaignKnowledgeResult(status, graph, capacityGaugePlan = []) {
+  const result = {
     status,
     entry: normalizeCampaignKnowledgeEntry(graph.entry),
     chunks: graph.chunks.map(normalizeCampaignKnowledgeChunk)
   };
+  Object.defineProperty(result, 'capacityGaugePlan', {
+    configurable: false,
+    enumerable: false,
+    value: normalizeKnowledgeCapacityGaugePlan(capacityGaugePlan),
+    writable: false
+  });
+  return result;
 }
 
 function currentKnowledgeCustody(db, entryId) {
@@ -1712,7 +2249,7 @@ function writeCampaignKnowledgeInTransaction(db, options) {
     );
   }
   assertNoConflictingCampaignReview(db, prepared);
-  preflightCampaignKnowledgeCapacity(db, prepared);
+  const capacityGaugePlan = preflightCampaignKnowledgeCapacity(db, prepared);
 
   const entryId = allocateKnowledgeEntryId(db);
   const chunkIds = allocateKnowledgeChunkIds(db, prepared.chunks.length);
@@ -1734,7 +2271,7 @@ function writeCampaignKnowledgeInTransaction(db, options) {
   if (!graph || graph.chunks.length !== prepared.chunks.length) {
     throw new Error('campaign knowledge graph verification failed');
   }
-  return campaignKnowledgeResult('created', graph);
+  return campaignKnowledgeResult('created', graph, capacityGaugePlan);
 }
 
 function ingestKnowledge(db, input) {
@@ -1817,20 +2354,323 @@ function ingestKnowledge(db, input) {
   return normalizeEntry(db.prepare('SELECT * FROM knowledge_entries WHERE id=?').get(id));
 }
 
-function buildWhere(opts) {
+function hasCampaignKnowledgeCustody(db) {
+  return Boolean(db.prepare(`
+    SELECT 1 AS present
+    FROM sqlite_schema
+    WHERE type='table' AND name='campaign_record_links'
+  `).get());
+}
+
+function hasKnowledgeCurrentCustody(db) {
+  return Boolean(db.prepare(`
+    SELECT 1 AS present
+    FROM sqlite_schema
+    WHERE type='table' AND name='knowledge_current_custody'
+  `).get());
+}
+
+function sharedKnowledgePredicate(entryAlias) {
+  return `(
+    ${entryAlias}.visibility IN ('team','public','shared')
+    OR ${entryAlias}.is_public=1
+  )`;
+}
+
+function projectedKnowledgeVisibilitySql(entryAlias) {
+  return `CASE
+    WHEN ${entryAlias}.visibility='private' THEN 'private'
+    WHEN ${entryAlias}.visibility IN ('team','public','shared') THEN 'team'
+    WHEN ${entryAlias}.visibility IS NULL AND ${entryAlias}.is_public=1 THEN 'team'
+    ELSE 'private'
+  END`;
+}
+
+function latestKnowledgeCustodyJoin(db, entryAlias) {
+  if (hasKnowledgeCurrentCustody(db)) {
+    return {
+      sql: `LEFT JOIN knowledge_current_custody campaign_scope
+        ON campaign_scope.knowledge_entry_id=${entryAlias}.id`,
+      presence: 'campaign_scope.link_id'
+    };
+  }
+  return {
+    sql: `LEFT JOIN campaign_record_links campaign_scope
+    ON campaign_scope.id=COALESCE(
+      (
+        SELECT active_link.id
+        FROM campaign_record_links active_link
+        WHERE active_link.record_type='knowledge_entry'
+          AND active_link.relation_type<>'shortlist'
+          AND active_link.record_id=CAST(${entryAlias}.id AS TEXT)
+          AND active_link.revoked_at IS NULL
+        ORDER BY active_link.id DESC
+        LIMIT 1
+      ),
+      (
+        SELECT historical_link.id
+        FROM campaign_record_links historical_link
+        WHERE historical_link.record_type='knowledge_entry'
+          AND historical_link.relation_type<>'shortlist'
+          AND historical_link.record_id=CAST(${entryAlias}.id AS TEXT)
+          AND historical_link.revoked_at IS NOT NULL
+        ORDER BY historical_link.revoked_at DESC,historical_link.id DESC
+        LIMIT 1
+      )
+    )`,
+    presence: 'campaign_scope.id'
+  };
+}
+
+function knowledgeAccessParts(db, user, scope, options) {
+  const entryAlias = 'entry';
+  const shared = sharedKnowledgePredicate(entryAlias);
+  const hasCustody = hasCampaignKnowledgeCustody(db);
+  const allowPrivateUnlinked = Boolean(options && options.allowPrivateUnlinked);
+  const isPlatformAdmin = Boolean(user && user.role === 'admin');
+  const numericUserId = Number(user && user.id);
+  const hasUserId = Number.isSafeInteger(numericUserId) && numericUserId > 0;
+  const legacyAccess = allowPrivateUnlinked
+    ? '1=1'
+    : `(${entryAlias}.created_by=? OR ${shared})`;
+  const legacyParams = allowPrivateUnlinked ? [] : [hasUserId ? numericUserId : -1];
+
+  if (!hasCustody) {
+    return {
+      withClause: '',
+      fromClause: `knowledge_entries ${entryAlias}`,
+      hasCustody: false,
+      clause: isPlatformAdmin ? '1=1' : legacyAccess,
+      params: isPlatformAdmin ? [] : legacyParams
+    };
+  }
+
+  const custodyJoin = latestKnowledgeCustodyJoin(db, entryAlias);
+  const result = {
+    withClause: '',
+    fromClause: `knowledge_entries ${entryAlias}
+      ${custodyJoin.sql}`,
+    hasCustody: true,
+    custodyPresence: custodyJoin.presence
+  };
+  const requestedCampaignId = Number(options && options.campaignId);
+  const campaignScoped = Number.isSafeInteger(requestedCampaignId) && requestedCampaignId > 0;
+  if (campaignScoped) {
+    const unlinkedAccess = isPlatformAdmin ? '1=1' : legacyAccess;
+    const params = isPlatformAdmin ? [] : [...legacyParams];
+    let linkedAccess = '0=1';
+    let campaignAccessSql = '1=1';
+    if (isPlatformAdmin) {
+      linkedAccess = '1=1';
+    } else if (hasUserId) {
+      linkedAccess = `(
+        ${entryAlias}.created_by=?
+        OR ${projectedKnowledgeVisibilitySql(entryAlias)}='team'
+      )`;
+      params.push(requestedCampaignId, numericUserId);
+      const campaignAccess = buildCollectionAccessPredicate(scope, {
+        userId: numericUserId
+      });
+      campaignAccessSql = campaignAccess.sql;
+      params.push(...campaignAccess.params);
+    } else {
+      params.push(requestedCampaignId);
+    }
+    if (isPlatformAdmin) params.push(requestedCampaignId);
+    return {
+      ...result,
+      clause: `(
+        (${custodyJoin.presence} IS NULL AND ${unlinkedAccess})
+        OR (
+          ${custodyJoin.presence} IS NOT NULL
+          AND campaign_scope.campaign_id=?
+          AND ${linkedAccess}
+          AND (${campaignAccessSql})
+        )
+      )`,
+      params
+    };
+  }
+  if (isPlatformAdmin) {
+    return { ...result, clause: '1=1', params: [] };
+  }
+  if (!hasUserId) {
+    return {
+      ...result,
+      clause: `(${custodyJoin.presence} IS NULL AND ${legacyAccess})`,
+      params: legacyParams
+    };
+  }
+
+  const campaignAccess = buildCollectionAccessPredicate(scope, {
+    userId: numericUserId
+  });
+  return {
+    ...result,
+    clause: `(
+      (${custodyJoin.presence} IS NULL AND ${legacyAccess})
+      OR (
+        ${custodyJoin.presence} IS NOT NULL
+        AND (
+          ${entryAlias}.created_by=?
+          OR ${projectedKnowledgeVisibilitySql(entryAlias)}='team'
+        )
+        AND (${campaignAccess.sql})
+      )
+    )`,
+    params: [
+      ...legacyParams,
+      numericUserId,
+      ...campaignAccess.params
+    ]
+  };
+}
+
+function buildWhere(db, opts, scope, accessOptions) {
   const where = ['1=1'];
   const params = [];
   const user = opts.user || {};
-  if (opts.entry_type || opts.type) { where.push('entry_type = ?'); params.push(opts.entry_type || opts.type); }
-  if (opts.source_type) { where.push('source_type = ?'); params.push(opts.source_type); }
-  if (opts.visibility) { where.push('visibility = ?'); params.push(opts.visibility); }
-  if (opts.business_type) { where.push('business_type = ?'); params.push(opts.business_type); }
-  if (opts.business_id) { where.push('business_id = ?'); params.push(String(opts.business_id)); }
-  if (user.role !== 'admin') {
-    where.push('(created_by = ? OR visibility IN (\'team\', \'public\', \'shared\') OR is_public = 1)');
-    params.push(user.id || -1);
+  const access = knowledgeAccessParts(db, user, scope, accessOptions);
+  if (opts.entry_type || opts.type) { where.push('entry.entry_type = ?'); params.push(opts.entry_type || opts.type); }
+  if (opts.source_type) { where.push('entry.source_type = ?'); params.push(opts.source_type); }
+  const visibilitySql = access.hasCustody
+    ? `CASE
+        WHEN ${access.custodyPresence} IS NULL THEN entry.visibility
+        ELSE ${projectedKnowledgeVisibilitySql('entry')}
+      END`
+    : 'entry.visibility';
+  if (opts.visibility) { where.push(`${visibilitySql} = ?`); params.push(opts.visibility); }
+  if (opts.business_type) { where.push('entry.business_type = ?'); params.push(opts.business_type); }
+  if (opts.business_id) { where.push('entry.business_id = ?'); params.push(String(opts.business_id)); }
+  where.push(access.clause);
+  params.push(...access.params);
+  return {
+    withClause: access.withClause,
+    fromClause: access.fromClause,
+    hasCustody: access.hasCustody,
+    custodyPresence: access.custodyPresence || null,
+    clause: where.join(' AND '),
+    params
+  };
+}
+
+function versionedKnowledgeReferenceProjection(db, reference) {
+  const entryId = reference && reference.knowledge_entry_id;
+  const chunkId = reference && reference.knowledge_chunk_id;
+  const rank = reference && reference.reference_rank;
+  if (
+    !reference ||
+    typeof reference !== 'object' ||
+    Array.isArray(reference) ||
+    reference.reference_schema_version !== 1 ||
+    reference.reference_type !== 'knowledge' ||
+    !Number.isSafeInteger(entryId) ||
+    entryId < 1 ||
+    !Number.isSafeInteger(chunkId) ||
+    chunkId < 1 ||
+    !Number.isSafeInteger(rank) ||
+    rank < 1
+  ) {
+    return null;
   }
-  return { clause: where.join(' AND '), params: params };
+  return db.prepare(`
+    SELECT
+      entry.id AS entry_id,
+      chunk.id AS chunk_id,
+      chunk.chunk_index,
+      entry.title,
+      entry.entry_type,
+      entry.source_type,
+      entry.visibility,
+      entry.is_public,
+      @snippet AS snippet,
+      @selectionOrigin AS selection_origin,
+      @sourceIdentitySha256 AS source_identity_sha256,
+      @entryContentSha256 AS entry_content_sha256,
+      @chunkContentSha256 AS chunk_content_sha256,
+      @rank AS rank
+    FROM knowledge_entries entry
+    JOIN knowledge_chunks chunk
+      ON chunk.entry_id=entry.id AND chunk.id=@chunkId
+    WHERE entry.id=@entryId
+      AND entry.source_identity_sha256=@sourceIdentitySha256
+      AND entry.content_sha256=@entryContentSha256
+      AND chunk.content_sha256=@chunkContentSha256
+  `).get({
+    entryId,
+    chunkId,
+    rank,
+    snippet: typeof reference.snippet === 'string' ? reference.snippet : '',
+    selectionOrigin: reference.selection_origin,
+    sourceIdentitySha256: reference.source_identity_sha256,
+    entryContentSha256: reference.entry_content_sha256,
+    chunkContentSha256: reference.chunk_content_sha256
+  }) || null;
+}
+
+function historicalKnowledgeCustodyAllowsRead(db, entryId, user) {
+  const where = buildWhere(
+    db,
+    { user: user || {} },
+    'knowledge_references'
+  );
+  return Boolean(db.prepare(`
+    ${where.withClause}
+    SELECT 1 AS present
+    FROM ${where.fromClause}
+    WHERE ${where.clause} AND entry.id=?
+    LIMIT 1
+  `).get(...where.params, entryId));
+}
+
+function redactKnowledgeReferences(db, references, user) {
+  if (!Array.isArray(references)) {
+    throw new TypeError('knowledge references must be an array');
+  }
+  return references.map(function(reference) {
+    if (
+      !reference ||
+      typeof reference !== 'object' ||
+      Array.isArray(reference) ||
+      reference.reference_schema_version !== 1
+    ) {
+      return reference;
+    }
+    const rank = reference.reference_rank;
+    if (!Number.isSafeInteger(rank) || rank < 1) {
+      throw new Error('versioned knowledge reference rank is invalid');
+    }
+    const projection = versionedKnowledgeReferenceProjection(db, reference);
+    if (!projection) {
+      return serializeKnowledgeReference({ rank }, { target: 'missing' });
+    }
+    if (!historicalKnowledgeCustodyAllowsRead(db, projection.entry_id, user)) {
+      return serializeKnowledgeReference({ rank }, { target: 'restricted' });
+    }
+    return serializeKnowledgeReference(projection, { target: 'available' });
+  });
+}
+
+function adminKnowledgeBaseWhere(opts) {
+  const where = ['1=1'];
+  const params = [];
+  if (opts.entry_type || opts.type) {
+    where.push('entry.entry_type = ?');
+    params.push(opts.entry_type || opts.type);
+  }
+  if (opts.source_type) {
+    where.push('entry.source_type = ?');
+    params.push(opts.source_type);
+  }
+  if (opts.business_type) {
+    where.push('entry.business_type = ?');
+    params.push(opts.business_type);
+  }
+  if (opts.business_id) {
+    where.push('entry.business_id = ?');
+    params.push(String(opts.business_id));
+  }
+  return { clause: where.join(' AND '), params };
 }
 
 function extractSearchTerms(query) {
@@ -1861,6 +2701,106 @@ function extractSearchTerms(query) {
   return terms.slice(0, 80);
 }
 
+function campaignKnowledgeEntryAllowsRead(db, options) {
+  const input = options || {};
+  const entryId = Number(input.entryId);
+  const campaignId = Number(input.campaignId);
+  if (
+    !Number.isSafeInteger(entryId) || entryId < 1 ||
+    !Number.isSafeInteger(campaignId) || campaignId < 1
+  ) return false;
+  const where = buildWhere(
+    db,
+    { user: input.user || {} },
+    'knowledge_rag',
+    { campaignId }
+  );
+  return Boolean(db.prepare(`
+    ${where.withClause || ''}
+    SELECT 1 AS present
+    FROM ${where.fromClause}
+    WHERE ${where.clause} AND entry.id=?
+    LIMIT 1
+  `).get(...where.params, entryId));
+}
+
+function searchCampaignKnowledgeChunks(db, opts) {
+  opts = opts || {};
+  const campaignId = Number(opts.campaignId || opts.campaign_id);
+  if (!Number.isSafeInteger(campaignId) || campaignId < 1) {
+    throw new CampaignKnowledgeInputError('campaign knowledge search requires a campaign');
+  }
+  const terms = extractSearchTerms(opts.query || opts.q || '');
+  if (!terms.length) return [];
+  const ftsQuery = terms.map(function(term) {
+    return `"${term.replace(/"/g, '""')}"`;
+  }).join(' OR ');
+  const limit = Math.min(Math.max(parseInt(opts.limit || 100, 10) || 100, 1), 100);
+  const where = buildWhere(
+    db,
+    opts,
+    'knowledge_rag',
+    { campaignId }
+  );
+  const rows = db.prepare(`
+    ${where.withClause || ''}
+    SELECT
+      entry.id AS entry_id,
+      entry.title,
+      entry.entry_type,
+      entry.source_type,
+      entry.visibility,
+      entry.is_public,
+      entry.source_identity_sha256,
+      entry.content_sha256 AS entry_content_sha256,
+      entry.updated_at,
+      chunk.id AS chunk_id,
+      chunk.chunk_index,
+      chunk.content AS chunk_content,
+      chunk.content_sha256 AS chunk_content_sha256,
+      bm25(knowledge_chunks_fts) AS fts_rank
+    FROM ${where.fromClause}
+    JOIN knowledge_chunks chunk ON chunk.entry_id=entry.id
+    JOIN knowledge_chunks_fts
+      ON CAST(knowledge_chunks_fts.entry_id AS INTEGER)=entry.id
+     AND CAST(knowledge_chunks_fts.chunk_id AS INTEGER)=chunk.id
+    WHERE knowledge_chunks_fts MATCH ?
+      AND ${where.clause}
+    ORDER BY
+      fts_rank ASC,
+      entry.updated_at DESC,
+      entry.id ASC,
+      chunk.chunk_index ASC,
+      chunk.id ASC
+    LIMIT ?
+  `).all(ftsQuery, ...where.params, limit);
+  return rows.map(function(row) {
+    return {
+      record: {
+        entry: {
+          id: row.entry_id,
+          title: row.title,
+          entry_type: row.entry_type,
+          source_type: row.source_type,
+          visibility: row.visibility,
+          is_public: row.is_public,
+          source_identity_sha256: row.source_identity_sha256,
+          content_sha256: row.entry_content_sha256,
+          updated_at: row.updated_at
+        }
+      },
+      chunk: {
+        id: row.chunk_id,
+        entry_id: row.entry_id,
+        chunk_index: row.chunk_index,
+        content: row.chunk_content,
+        content_sha256: row.chunk_content_sha256
+      },
+      ftsRank: row.fts_rank
+    };
+  });
+}
+
 function scoreEntry(entry, terms, rawQuery) {
   if (!terms.length && !rawQuery) return 1;
   const title = String(entry.title || '').toLowerCase();
@@ -1885,15 +2825,81 @@ function searchKnowledge(db, opts) {
   const query = String(opts.q || opts.query || opts.search || '').trim();
   const limit = Math.min(parseInt(opts.limit || 20, 10) || 20, 100);
   const tags = normalizeTags(opts.tags || opts.tag || []);
-  const where = buildWhere(opts);
-  let rows = db.prepare(`
-    SELECT * FROM knowledge_entries
-    WHERE ${where.clause}
-    ORDER BY usage_count DESC, updated_at DESC, id DESC
-    LIMIT 500
-  `).all(...where.params);
+  const adminCandidateFirst = Boolean(
+    opts.user && opts.user.role === 'admin' && !opts.visibility
+  );
+  const where = adminCandidateFirst
+    ? adminKnowledgeBaseWhere(opts)
+    : buildWhere(db, opts, 'knowledge');
+  const hasCustody = adminCandidateFirst
+    ? hasCampaignKnowledgeCustody(db)
+    : where.hasCustody;
+  let rows;
+  if (adminCandidateFirst && hasCustody) {
+    const custodyJoin = latestKnowledgeCustodyJoin(db, 'entry');
+    rows = db.prepare(`
+      WITH admin_candidates AS MATERIALIZED (
+        SELECT entry.*
+        FROM knowledge_entries entry
+        WHERE ${where.clause}
+        ORDER BY entry.usage_count DESC, entry.updated_at DESC, entry.id DESC
+        LIMIT 500
+      )
+      SELECT entry.*,${custodyJoin.presence} AS campaign_custody_entry_id
+      FROM admin_candidates entry
+      ${custodyJoin.sql}
+      ORDER BY entry.usage_count DESC, entry.updated_at DESC, entry.id DESC
+    `).all(...where.params);
+  } else {
+    const boundedCandidates = Boolean(
+      !adminCandidateFirst &&
+      hasCustody &&
+      hasKnowledgeCurrentCustody(db)
+    );
+    if (boundedCandidates) {
+      rows = db.prepare(`
+        WITH knowledge_candidates AS MATERIALIZED (
+          SELECT
+            entry.id,
+            entry.usage_count,
+            entry.updated_at,
+            ${where.custodyPresence} AS campaign_custody_entry_id
+          FROM ${where.fromClause}
+          WHERE ${where.clause}
+          ORDER BY entry.usage_count DESC,entry.updated_at DESC,entry.id DESC
+          LIMIT 500
+        )
+        SELECT entry.*,candidate.campaign_custody_entry_id
+        FROM knowledge_candidates candidate
+        JOIN knowledge_entries entry ON entry.id=candidate.id
+        ORDER BY candidate.usage_count DESC,candidate.updated_at DESC,candidate.id DESC
+      `).all(...where.params);
+    } else {
+      rows = db.prepare(`
+        ${where.withClause || ''}
+        SELECT
+          entry.*,
+          ${hasCustody ? where.custodyPresence : 'NULL'}
+            AS campaign_custody_entry_id
+        FROM ${adminCandidateFirst ? 'knowledge_entries entry' : where.fromClause}
+        WHERE ${where.clause}
+        ORDER BY entry.usage_count DESC, entry.updated_at DESC, entry.id DESC
+        LIMIT 500
+      `).all(...where.params);
+    }
+  }
 
-  let entries = rows.map(normalizeEntry);
+  let entries = rows.map(function(row) {
+    const entry = normalizeEntry(row);
+    if (row.campaign_custody_entry_id !== null) {
+      entry.visibility = projectKnowledgeVisibility({
+        legacyVisibility: row.visibility,
+        isPublic: row.is_public
+      });
+      entry.is_public = entry.visibility === 'team' ? 1 : 0;
+    }
+    return entry;
+  });
   if (tags.length) {
     const wanted = tags.map(function(tag) { return tag.toLowerCase(); });
     entries = entries.filter(function(entry) {
@@ -1916,33 +2922,99 @@ function searchKnowledge(db, opts) {
   return entries.slice(0, limit);
 }
 
-function markKnowledgeUsed(db, ids) {
-  const uniqueIds = Array.from(new Set((ids || []).map(function(id) { return parseInt(id, 10); }).filter(Boolean)));
+function listKnowledgeCategories(db, opts) {
+  opts = opts || {};
+  if (opts.user && opts.user.role === 'admin' && !opts.visibility) {
+    const where = adminKnowledgeBaseWhere(opts);
+    return db.prepare(`
+      SELECT entry.entry_type,COUNT(*) AS count
+      FROM knowledge_entries entry
+      WHERE ${where.clause}
+      GROUP BY entry.entry_type
+      ORDER BY entry.entry_type
+    `).all(...where.params);
+  }
+  const where = buildWhere(db, opts, 'knowledge_categories');
+  return db.prepare(`
+    ${where.withClause}
+    SELECT entry.entry_type,COUNT(*) AS count
+    FROM ${where.fromClause}
+    WHERE ${where.clause}
+    GROUP BY entry.entry_type
+    ORDER BY entry.entry_type
+  `).all(...where.params);
+}
+
+function updateKnowledgeUsage(db, ids, user, options) {
+  const uniqueIds = Array.from(new Set((ids || []).map(function(id) {
+    const numericId = Number(id);
+    return Number.isSafeInteger(numericId) && numericId > 0 ? numericId : null;
+  }).filter(function(id) { return id !== null; })));
   if (!uniqueIds.length) return 0;
-  const update = db.prepare('UPDATE knowledge_entries SET usage_count = usage_count + 1, updated_at = datetime(\'now\') WHERE id = ?');
-  const tx = db.transaction(function() {
-    uniqueIds.forEach(function(id) { update.run(id); });
-  });
-  tx();
-  return uniqueIds.length;
+  const telemetry = Boolean(options && options.telemetry);
+  const applyUpdates = function() {
+    const where = buildWhere(
+      db,
+      { user: user || {} },
+      'knowledge',
+      { allowPrivateUnlinked: !user }
+    );
+    const placeholders = uniqueIds.map(function() { return '?'; }).join(',');
+    const authorizedIds = db.prepare(`
+      ${where.withClause}
+      SELECT entry.id
+      FROM ${where.fromClause}
+      WHERE ${where.clause}
+        ${where.hasCustody && !telemetry ? `AND ${where.custodyPresence} IS NULL` : ''}
+        AND entry.id IN (${placeholders})
+      ORDER BY entry.id
+    `).all(...where.params, ...uniqueIds).map(function(row) { return row.id; });
+    if (!authorizedIds.length) return 0;
+    const updatePlaceholders = authorizedIds.map(function() { return '?'; }).join(',');
+    const updateSql = telemetry
+      ? `UPDATE knowledge_entries SET usage_count = usage_count + 1
+        WHERE id IN (${updatePlaceholders})`
+      : `UPDATE knowledge_entries SET usage_count = usage_count + 1,
+          updated_at = datetime('now')
+        WHERE id IN (${updatePlaceholders})`;
+    return db.prepare(updateSql).run(...authorizedIds).changes;
+  };
+  if (db.inTransaction) return applyUpdates();
+  return db.transaction(applyUpdates).immediate();
+}
+
+function markKnowledgeUsed(db, ids, user) {
+  return updateKnowledgeUsage(db, ids, user, { telemetry: false });
+}
+
+function recordKnowledgeUsageTelemetry(db, ids, user) {
+  return updateKnowledgeUsage(db, ids, user, { telemetry: true });
 }
 
 module.exports = {
   ingestKnowledge,
   writeCampaignKnowledgeInTransaction,
   preflightCampaignKnowledgeCustodyMoveInTransaction,
+  applyKnowledgeCapacityGaugePlanInTransaction,
   reconcileKnowledgeCapacityGaugesInTransaction,
   refreshKnowledgeCapacityGaugesInTransaction,
   userKnowledgeUsage,
   campaignKnowledgeUsage,
   organizationKnowledgeUsage,
+  campaignOrganizationKnowledgeUsage,
   capacityThresholdPercent,
   searchKnowledge,
+  searchCampaignKnowledgeChunks,
+  campaignKnowledgeEntryAllowsRead,
+  listKnowledgeCategories,
   markKnowledgeUsed,
+  recordKnowledgeUsageTelemetry,
+  redactKnowledgeReferences,
   normalizeEntry,
   normalizeTags,
   hashInput,
   makeChunks,
   CampaignKnowledgeConflictError,
-  CampaignKnowledgeCapacityError
+  CampaignKnowledgeCapacityError,
+  CampaignKnowledgeInputError
 };

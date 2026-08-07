@@ -1,5 +1,8 @@
 const path = require('path');
 
+// Candidate only: enforcement stays parked until index.html and app.js no longer depend on inline execution.
+const CONTENT_SECURITY_POLICY = "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; script-src 'self'; connect-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; form-action 'self'";
+
 const PRIVATE_DIRECTORY_NAMES = new Set([
   'server',
   'uploads',
@@ -21,6 +24,8 @@ const PUBLIC_CLIENT_FILES = new Set([
   '/client/core/navigation.js',
   '/client/core/accessibility.js',
   '/client/core/shell.js',
+  '/client/core/csp_compat.js',
+  '/client/features/ppt_preview_runtime.js',
   '/client/styles/tokens.css',
   '/client/styles/components.css',
   '/client/styles/layout.css'
@@ -108,6 +113,8 @@ function registerPublicAssets(app, express, publicRoot) {
   app.get('/client/core/navigation.js', sendPublicFile(publicRoot, 'client/core/navigation.js'));
   app.get('/client/core/accessibility.js', sendPublicFile(publicRoot, 'client/core/accessibility.js'));
   app.get('/client/core/shell.js', sendPublicFile(publicRoot, 'client/core/shell.js'));
+  app.get('/client/core/csp_compat.js', sendPublicFile(publicRoot, 'client/core/csp_compat.js'));
+  app.get('/client/features/ppt_preview_runtime.js', sendPublicFile(publicRoot, 'client/features/ppt_preview_runtime.js'));
   app.get('/client/styles/tokens.css', sendPublicFile(publicRoot, 'client/styles/tokens.css'));
   app.get('/client/styles/components.css', sendPublicFile(publicRoot, 'client/styles/components.css'));
   app.get('/client/styles/layout.css', sendPublicFile(publicRoot, 'client/styles/layout.css'));
@@ -127,6 +134,7 @@ function registerPublicAssets(app, express, publicRoot) {
 }
 
 module.exports = {
+  CONTENT_SECURITY_POLICY,
   isPrivateRequestPath,
   registerPublicAssets
 };

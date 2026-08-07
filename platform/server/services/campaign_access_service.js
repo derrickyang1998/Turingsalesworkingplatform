@@ -39,6 +39,28 @@ const BOUND_COLLECTION_SCOPES = new Set([
   'knowledge_categories',
   'collaboration_stats'
 ]);
+const DEMAND_PROPOSAL_COLLECTIONS = Object.freeze({
+  demand: Object.freeze({
+    table: 'demands',
+    adminProjection: ', owner.display_name, owner.department',
+    searchColumns: Object.freeze([
+      'brand_name',
+      'company_name',
+      'product_name',
+      'industry',
+      'budget',
+      'target_market',
+      'platform',
+      'status'
+    ])
+  }),
+  proposal: Object.freeze({
+    table: 'proposals',
+    adminProjection: ', owner.display_name',
+    searchColumns: Object.freeze(['template_id', 'content'])
+  })
+});
+const DEMAND_PROPOSAL_COLLECTION_LIMIT = 200;
 const EVENT_METADATA_KEYS = Object.freeze({
   campaign_created: Object.freeze([
     'customer_id',
@@ -635,6 +657,74 @@ function emptyCustody() {
   };
 }
 
+function resolveKnowledgeRecordCustody(db, recordId) {
+  const active = db.prepare(`
+    SELECT id,org_id,campaign_id,bundle_id
+    FROM campaign_record_links
+    WHERE record_type='knowledge_entry'
+      AND relation_type<>'shortlist'
+      AND record_id=?
+      AND revoked_at IS NULL
+    ORDER BY id
+  `).all(String(recordId));
+  if (active.length > 0) {
+    const identities = new Set(active.map((row) => (
+      `${row.org_id}:${row.campaign_id}:${row.bundle_id}`
+    )));
+    if (identities.size !== 1) throw new Error('campaign custody is ambiguous');
+    const representative = active[0];
+    const moved = Boolean(db.prepare(`
+      SELECT 1 AS present
+      FROM campaign_record_links
+      WHERE record_type='knowledge_entry'
+        AND relation_type<>'shortlist'
+        AND record_id=?
+        AND revoked_at IS NOT NULL
+        AND (org_id<>? OR campaign_id<>?)
+      LIMIT 1
+    `).get(String(recordId), representative.org_id, representative.campaign_id));
+    return {
+      classification: 'campaign_classified',
+      state: moved ? 'moved' : 'active',
+      orgId: representative.org_id,
+      campaignId: representative.campaign_id,
+      bundleId: representative.bundle_id,
+      linkIds: active.map((row) => row.id)
+    };
+  }
+
+  const historical = db.prepare(`
+    SELECT id,org_id,campaign_id,bundle_id
+    FROM campaign_record_links
+    WHERE record_type='knowledge_entry'
+      AND relation_type<>'shortlist'
+      AND record_id=?
+      AND revoked_at IS NOT NULL
+    ORDER BY revoked_at DESC,id DESC
+    LIMIT 1
+  `).get(String(recordId));
+  if (historical) {
+    return {
+      classification: 'campaign_classified',
+      state: 'revoke_only',
+      orgId: historical.org_id,
+      campaignId: historical.campaign_id,
+      bundleId: historical.bundle_id,
+      linkIds: db.prepare(`
+        SELECT id
+        FROM campaign_record_links
+        WHERE record_type='knowledge_entry'
+          AND relation_type<>'shortlist'
+          AND record_id=?
+          AND bundle_id=?
+        ORDER BY id
+      `).all(String(recordId), historical.bundle_id).map((row) => row.id)
+    };
+  }
+
+  return emptyCustody();
+}
+
 function resolveRecordCustody(db, options) {
   const input = snapshotPlainOptions(options, ['recordType', 'recordId']);
   if (input === null) {
@@ -650,6 +740,9 @@ function resolveRecordCustody(db, options) {
   }
   if (recordId === null) {
     throw new TypeError('recordId must be a positive canonical safe integer');
+  }
+  if (recordType === 'knowledge_entry') {
+    return resolveKnowledgeRecordCustody(db, recordId);
   }
   const rows = db.prepare(`
     SELECT
@@ -927,7 +1020,7 @@ function getTargetAccess(db, options) {
     recordId === null ||
     !relations ||
     !relations.includes(relationType) ||
-    !['read', 'manage', 'attach'].includes(intent) ||
+    !['read', 'manage', 'manage_authority', 'attach'].includes(intent) ||
     (intent === 'attach' && TRUSTED_ONLY_RELATIONS.has(relationType))
   ) {
     return invalidLink();
@@ -964,7 +1057,7 @@ function getTargetAccess(db, options) {
     }
   }
   if (
-    (intent === 'manage' || intent === 'attach') &&
+    (intent === 'manage' || intent === 'manage_authority' || intent === 'attach') &&
     !permissions.manageable
   ) {
     return targetForbidden();
@@ -1087,6 +1180,147 @@ function buildCollectionAccessPredicate(scope, options) {
     };
   }
   throw new TypeError('unsupported collection scope');
+}
+
+function normalizeDemandProposalSearch(value) {
+  if (value === undefined || value === null) return null;
+  const length = scalarLength(value);
+  if (length === null || length > 200) {
+    throw new TypeError('search must be at most 200 Unicode scalar values');
+  }
+  const normalized = value.trim();
+  return normalized === '' ? null : normalized;
+}
+
+function readDemandProposalCollection(db, options) {
+  const input = snapshotPlainOptions(
+    options,
+    ['userId', 'recordType', 'search'],
+    false
+  );
+  if (input === null) throw new TypeError('collection options are required');
+  const userId = canonicalId(input.userId);
+  if (userId === null) {
+    throw new TypeError('userId must be a positive canonical safe integer');
+  }
+  const collection = closedMapValue(
+    DEMAND_PROPOSAL_COLLECTIONS,
+    input.recordType
+  );
+  if (!collection) {
+    throw new TypeError('recordType must be demand or proposal');
+  }
+  const search = normalizeDemandProposalSearch(input.search);
+  const actor = actorRow(db, userId);
+  if (!actor || actor.is_active !== 1) return [];
+
+  const platformAdmin = actor.role === 'admin';
+  const legacyPredicate = platformAdmin ? '1=1' : 'record.user_id=?';
+  const campaignAccessPredicate = boundPredicate();
+  const searchPredicate = search === null
+    ? ''
+    : `WHERE (${collection.searchColumns.map((column) => (
+        `instr(lower(COALESCE(record.${column},'')),lower(?))>0`
+      )).join(' OR ')})`;
+  const ownerJoin = platformAdmin
+    ? 'JOIN users owner ON owner.id=record.user_id'
+    : '';
+  const projection = platformAdmin ? collection.adminProjection : '';
+  const params = [input.recordType];
+  if (!platformAdmin) params.push(userId);
+  params.push(userId, DEFAULT_ORGANIZATION_CODE);
+  if (search !== null) {
+    params.push(...collection.searchColumns.map(() => search));
+  }
+  params.push(DEMAND_PROPOSAL_COLLECTION_LIMIT);
+
+  return db.prepare(`
+    WITH classified_links AS (
+      SELECT
+        id,record_id,org_id,campaign_id,bundle_id,revoked_at
+      FROM campaign_record_links
+      WHERE record_type=?
+        AND relation_type<>'shortlist'
+    ),
+    classified_records AS (
+      SELECT record_id
+      FROM classified_links
+      GROUP BY record_id
+    ),
+    active_identities AS (
+      SELECT record_id,org_id,campaign_id,bundle_id
+      FROM classified_links
+      WHERE revoked_at IS NULL
+      GROUP BY record_id,org_id,campaign_id,bundle_id
+    ),
+    active_custody AS (
+      SELECT
+        record_id,
+        MIN(org_id) AS org_id,
+        MIN(campaign_id) AS campaign_id
+      FROM active_identities
+      GROUP BY record_id
+      HAVING COUNT(*)=1
+    ),
+    latest_revoked_custody AS (
+      SELECT
+        link.record_id,
+        link.org_id,
+        link.campaign_id
+      FROM classified_links link
+      WHERE link.revoked_at IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1
+          FROM active_identities active
+          WHERE active.record_id=link.record_id
+        )
+        AND NOT EXISTS (
+          SELECT 1
+          FROM classified_links newer
+          WHERE newer.record_id=link.record_id
+            AND newer.revoked_at IS NOT NULL
+            AND (
+              newer.revoked_at>link.revoked_at
+              OR (newer.revoked_at=link.revoked_at AND newer.id>link.id)
+            )
+        )
+    ),
+    campaign_scope AS (
+      SELECT record_id,org_id,campaign_id
+      FROM active_custody
+      UNION ALL
+      SELECT record_id,org_id,campaign_id
+      FROM latest_revoked_custody
+    ),
+    authorized_record_ids AS (
+      SELECT record.id
+      FROM ${collection.table} record
+      LEFT JOIN classified_records classification
+        ON classification.record_id=CAST(record.id AS TEXT)
+      LEFT JOIN campaign_scope
+        ON campaign_scope.record_id=CAST(record.id AS TEXT)
+      WHERE ${legacyPredicate}
+        AND (
+          classification.record_id IS NULL
+          OR (
+            campaign_scope.record_id IS NOT NULL
+            AND ${campaignAccessPredicate}
+          )
+        )
+    ),
+    matched_record_ids AS (
+      SELECT record.id
+      FROM ${collection.table} record
+      JOIN authorized_record_ids authorized ON authorized.id=record.id
+      ${searchPredicate}
+    )
+    SELECT record.*${projection}
+    FROM ${collection.table} record
+    JOIN matched_record_ids matched ON matched.id=record.id
+    ${ownerJoin}
+    ORDER BY record.created_at DESC,record.id DESC
+    LIMIT ?
+  `).all(...params);
 }
 
 function serializeWorkspaceLink(link, authorization) {
@@ -1446,6 +1680,7 @@ module.exports = {
   resolveRecordCustody,
   getTargetAccess,
   buildCollectionAccessPredicate,
+  readDemandProposalCollection,
   serializeWorkspaceLink,
   serializeEventMetadata,
   serializeKnowledgeReference,

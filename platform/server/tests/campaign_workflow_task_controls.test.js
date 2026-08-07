@@ -37,6 +37,20 @@ const MIGRATIONS = Object.freeze([
     sourcePath: 'migrations/003_campaign_workflow_dispatch_evidence.js',
     engineVersion: 1,
     dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
+  }),
+  Object.freeze({
+    version: 4,
+    name: '004_knowledge_capacity_observability',
+    sourcePath: 'migrations/004_knowledge_capacity_observability.js',
+    engineVersion: 1,
+    dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
+  }),
+  Object.freeze({
+    version: 5,
+    name: '005_knowledge_custody_projection',
+    sourcePath: 'migrations/005_knowledge_custody_projection.js',
+    engineVersion: 1,
+    dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
   })
 ]);
 const SHARED_POLICIES = Object.freeze([
@@ -1450,6 +1464,7 @@ test('log, activity, archive, link, and ledger failures roll back business state
     ['workflow_node_logs', 'log'],
     ['activity_log', 'activity'],
     ['campaign_record_links', 'link'],
+    ['knowledge_capacity_gauges', 'gauge'],
     ['request_idempotency', 'ledger']
   ];
   for (let index = 0; index < injections.length; index += 1) {
@@ -1467,7 +1482,9 @@ test('log, activity, archive, link, and ledger failures roll back business state
       const triggerName = `task6c2_injected_${label}_failure`;
       const when = table === 'request_idempotency'
         ? "BEFORE UPDATE ON request_idempotency WHEN OLD.scope='workflow.campaign-task.complete'"
-        : `BEFORE INSERT ON ${table}`;
+        : table === 'knowledge_capacity_gauges'
+          ? 'BEFORE UPDATE ON knowledge_capacity_gauges'
+          : `BEFORE INSERT ON ${table}`;
       db.exec(`
         CREATE TEMP TRIGGER ${triggerName}
         ${when}
@@ -1538,6 +1555,7 @@ test('instance-control persistence and capacity failures roll back every field a
     ['activity_log', 'activity'],
     ['knowledge_entries', 'archive'],
     ['campaign_record_links', 'link'],
+    ['knowledge_capacity_gauges', 'gauge'],
     ['request_idempotency', 'ledger']
   ];
   for (let index = 0; index < injections.length; index += 1) {
@@ -1560,7 +1578,9 @@ test('instance-control persistence and capacity failures roll back every field a
       const triggerName = `task6c2_control_injected_${label}_failure`;
       const timing = table === 'request_idempotency'
         ? "BEFORE UPDATE ON request_idempotency WHEN OLD.scope='workflow.campaign-instance.pause'"
-        : `BEFORE INSERT ON ${table}`;
+        : table === 'knowledge_capacity_gauges'
+          ? 'BEFORE UPDATE ON knowledge_capacity_gauges'
+          : `BEFORE INSERT ON ${table}`;
       db.exec(`
         CREATE TEMP TRIGGER ${triggerName}
         ${timing}

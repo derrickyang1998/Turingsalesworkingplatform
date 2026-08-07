@@ -22,7 +22,9 @@ const MUTATING_PRIMITIVES = Object.freeze([
   'reserveProcessingInTransaction',
   'renewLeaseInTransaction',
   'completeJsonInTransaction',
+  'completeBinaryInTransaction',
   'failInternalInTransaction',
+  'discardExpiredBinaryInTransaction',
   'recoverExpiredInTransaction'
 ]);
 const DEADLINE_RESPONSE = Object.freeze({
@@ -1192,6 +1194,7 @@ test('linked PPT lost response replays before resource claim derivation', (t) =>
     responseBytes: binary.responseBytes,
     responseContentType: binary.responseContentType,
     responseFilename: binary.responseFilename,
+    responseHeaders: JSON.parse(binary.responseHeadersJson),
     campaignId: context.campaignId,
     secondaryCampaignId: null,
     resourceClaim: original.resourceClaim,
@@ -2640,6 +2643,73 @@ test('binary expiry transition maps trigger aborts to 500 and zero-change CAS to
   );
 });
 
+test('expired binary artifact cleanup requires expiring evidence and exact metadata', (t) => {
+  const idempotency = require('../services/idempotency_service');
+  const db = openCampaignDatabase(t);
+  const context = seedCampaign(db, ' binary artifact cleanup');
+  const input = requestInput(context, {
+    scope: 'proposal.ppt.generate.linked',
+    key: 'task5c-binary-artifact-cleanup',
+    requestHash: deterministicHex('task5c-binary-artifact-cleanup-request'),
+    resourceClaim: deterministicHex('task5c-binary-artifact-cleanup-claim'),
+    expectedEventCount: 1
+  });
+  const binary = insertCompletedBinaryLedger(
+    db,
+    input,
+    'task5c-binary-artifact-cleanup'
+  );
+  const expired = db.transaction(() => (
+    idempotency.recoverExpiredInTransaction(db, input)
+  )).immediate();
+  assert.deepEqual(expired, {
+    state: 'expired',
+    ledgerId: binary.ledgerId,
+    statusCode: 410,
+    code: 'IDEMPOTENCY_EXPIRED',
+    cleanup: 'binary'
+  });
+
+  const artifact = idempotency.readExpiredBinaryArtifact(db, input);
+  assert.deepEqual(artifact, {
+    state: 'ready',
+    ledgerId: binary.ledgerId,
+    requestHash: input.requestHash,
+    responseCacheKey: binary.responseCacheKey,
+    responseSha256: binary.responseSha256,
+    responseBytes: binary.responseBytes,
+    responseContentType: binary.responseContentType,
+    responseFilename: binary.responseFilename
+  });
+  const { state: artifactState, ...cleanupInput } = artifact;
+  assert.equal(artifactState, 'ready');
+  assert.throws(
+    () => db.transaction(() => (
+      idempotency.discardExpiredBinaryInTransaction(db, {
+        ...cleanupInput,
+        responseCacheKey: deterministicHex('task5c-binary-artifact-cleanup-wrong')
+      })
+    )).immediate(),
+    (error) => (
+      error.name === 'IdempotencyServiceError' &&
+      error.statusCode === 409 &&
+      error.code === 'IDEMPOTENCY_IN_PROGRESS'
+    )
+  );
+  assert.equal(
+    db.prepare('SELECT state FROM request_idempotency WHERE id=?')
+      .get(binary.ledgerId).state,
+    'expiring'
+  );
+  assert.deepEqual(
+    db.transaction(() => (
+      idempotency.discardExpiredBinaryInTransaction(db, cleanupInput)
+    )).immediate(),
+    { state: 'absent', expired: true, deleted: true }
+  );
+  assert.deepEqual(idempotency.inspectRetained(db, input), { state: 'absent' });
+});
+
 test('retained binary replays typed artifact metadata while admission remains accounting-only', (t) => {
   const idempotency = require('../services/idempotency_service');
   const db = openCampaignDatabase(t);
@@ -2671,7 +2741,8 @@ test('retained binary replays typed artifact metadata while admission remains ac
     responseSha256: binary.responseSha256,
     responseBytes: binary.responseBytes,
     responseContentType: binary.responseContentType,
-    responseFilename: binary.responseFilename
+    responseFilename: binary.responseFilename,
+    responseHeaders: JSON.parse(binary.responseHeadersJson)
   };
   assert.deepEqual(idempotency.inspectRetained(db, binaryInput), binaryReplay);
   assert.deepEqual(
@@ -2719,6 +2790,112 @@ test('retained binary replays typed artifact metadata while admission remains ac
       idempotency.recoverExpiredInTransaction(db, admissionInput)
     )).immediate(),
     accountingOnly
+  );
+});
+
+test('binary completion persists a verified PPT replay only after the reserved link event exists', (t) => {
+  const idempotency = require('../services/idempotency_service');
+  const db = openCampaignDatabase(t);
+  const context = seedCampaign(db);
+  const input = requestInput(context, {
+    scope: 'proposal.ppt.generate.linked',
+    key: 'task5c-binary-completion',
+    requestHash: deterministicHex('task5c-binary-completion-request'),
+    resourceClaim: deterministicHex('task5c-binary-completion-claim'),
+    expectedEventCount: 1
+  });
+  const reservation = db.transaction(() => (
+    idempotency.reserveProcessingInTransaction(db, input)
+  )).immediate();
+  const response = Buffer.from('task5c-pptx-binary-completion', 'utf8');
+  const artifact = {
+    responseCacheKey: deterministicHex('task5c-binary-completion-cache'),
+    responseSha256: sqliteDigest.sha256Hex(response),
+    responseBytes: response.length,
+    responseContentType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    responseFilename: 'proposal-4201.pptx'
+  };
+  artifact.responseHeaders = {
+    'Content-Type': artifact.responseContentType,
+    'Content-Disposition': 'attachment; filename="proposal-4201.pptx"',
+    'Content-Length': String(artifact.responseBytes),
+    ETag: `"${artifact.responseSha256}"`,
+    'Cache-Control': 'private, max-age=0, no-store'
+  };
+
+  const completed = db.transaction(() => {
+    const bundleId = deterministicHex('task5c-binary-completion-bundle');
+    const link = db.prepare(`
+      INSERT INTO campaign_record_links (
+        org_id,campaign_id,record_type,bundle_id,record_id,relation_type,
+        created_by,metadata_json
+      ) VALUES (?,?,?,?,?,?,?,?)
+    `).run(
+      context.organizationId,
+      context.campaignId,
+      'proposal',
+      bundleId,
+      '4201',
+      'ppt',
+      context.actorUserId,
+      '{}'
+    );
+    const linkId = Number(link.lastInsertRowid);
+    db.prepare(`
+      INSERT INTO campaign_events (
+        org_id,campaign_id,event_type,previous_state,next_state,actor_user_id,
+        reason,source,metadata_json,correlation_id,audit_fingerprint
+      ) VALUES (?,?, 'link_attached',NULL,NULL,?,?,?,?,?,?)
+    `).run(
+      context.organizationId,
+      context.campaignId,
+      context.actorUserId,
+      'Linked ppt',
+      'ppt_link',
+      JSON.stringify({
+        bundle_id: bundleId,
+        relation_types: ['ppt'],
+        record_type: 'proposal',
+        record_id: '4201',
+        link_ids: [linkId]
+      }),
+      'task5c-binary-completion-request-id',
+      reservation.auditFingerprint
+    );
+    return idempotency.completeBinaryInTransaction(db, {
+      ledgerId: reservation.ledgerId,
+      requestHash: input.requestHash,
+      leaseToken: reservation.leaseToken,
+      statusCode: 200,
+      ...artifact
+    });
+  }).immediate();
+
+  assert.deepEqual(completed, {
+    state: 'replay',
+    ledgerId: reservation.ledgerId,
+    statusCode: 200,
+    responseKind: 'binary',
+    ...artifact
+  });
+  assert.deepEqual(idempotency.inspectRetained(db, input), completed);
+  assert.deepEqual(
+    db.prepare(`
+      SELECT state,status_code,response_kind,response_json,response_cache_key,
+        response_sha256,response_bytes,response_content_type,response_filename
+      FROM request_idempotency WHERE id=?
+    `).get(reservation.ledgerId),
+    {
+      state: 'completed',
+      status_code: 200,
+      response_kind: 'binary',
+      response_json: null,
+      response_cache_key: artifact.responseCacheKey,
+      response_sha256: artifact.responseSha256,
+      response_bytes: artifact.responseBytes,
+      response_content_type: artifact.responseContentType,
+      response_filename: artifact.responseFilename
+    }
   );
 });
 

@@ -28,6 +28,12 @@ const MIGRATION_001_DESCRIPTOR = Object.freeze({
   dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
 });
 
+const MANIFEST_SCHEMA_OBJECT_TYPES = Object.freeze([
+  Object.freeze({ key: 'indexes', type: 'index' }),
+  Object.freeze({ key: 'triggers', type: 'trigger' }),
+  Object.freeze({ key: 'views', type: 'view' })
+]);
+
 const LEDGER_SQL = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
   version INTEGER PRIMARY KEY CHECK (version > 0),
@@ -1439,6 +1445,150 @@ function ledgerShapeProblem(db) {
   return null;
 }
 
+function manifestSchemaObjects(manifest) {
+  const objects = [];
+  for (const descriptor of MANIFEST_SCHEMA_OBJECT_TYPES) {
+    for (const [name, sql] of Object.entries((manifest && manifest[descriptor.key]) || {})) {
+      objects.push({ name, sql, type: descriptor.type });
+    }
+  }
+  return objects;
+}
+
+function manifestTableNames(manifest) {
+  return new Set([
+    ...Object.keys((manifest && manifest.columns) || {}),
+    ...Object.keys((manifest && manifest.tableChecks) || {})
+  ]);
+}
+
+function checksumBoundBaselineSchemaObjects(baselineLoaded) {
+  const expectedDb = new Database(':memory:');
+  try {
+    configureConnectionGuards(expectedDb);
+    executeMigrationFunction(
+      baselineLoaded,
+      baselineLoaded.baseline.apply,
+      expectedDb,
+      'schema object ownership baseline replay'
+    );
+    return expectedDb.prepare(`
+      SELECT type,name,sql
+      FROM sqlite_schema
+      WHERE name NOT LIKE 'sqlite_%'
+      ORDER BY name,type
+    `).all().map((object) => ({
+      type: object.type,
+      name: object.name,
+      sql: String(object.sql || '')
+    }));
+  } finally {
+    expectedDb.close();
+  }
+}
+
+function migrationSchemaObjectOwnership(baselineObjects, appliedMigrations) {
+  const owners = new Map();
+  const tables = new Map();
+  for (const object of baselineObjects) {
+    if (tables.has(object.name) || owners.has(object.name)) {
+      return {
+        owners,
+        tables,
+        problem: `duplicate checksum-bound baseline schema object ${object.name}`
+      };
+    }
+    const owner = {
+      migrationName: 'checksum-bound baseline',
+      sql: object.sql,
+      type: object.type,
+      version: 0
+    };
+    if (object.type === 'table') tables.set(object.name, owner);
+    else owners.set(object.name, owner);
+  }
+  for (const migration of appliedMigrations) {
+    const manifest = migration.schemaManifest;
+    if (!manifest || typeof manifest !== 'object') {
+      return {
+        owners,
+        tables,
+        problem: `missing schema manifest for ${migration.name}`
+      };
+    }
+    for (const table of manifestTableNames(manifest)) {
+      const objectOwner = owners.get(table);
+      if (objectOwner) {
+        return {
+          owners,
+          tables,
+          problem: `migration schema object ownership cannot replace ${objectOwner.type} ${table} ` +
+            `from ${objectOwner.migrationName} with table from ${migration.name}`
+        };
+      }
+      if (!tables.has(table)) {
+        tables.set(table, {
+          migrationName: migration.name,
+          sql: null,
+          type: 'table',
+          version: migration.version
+        });
+      }
+    }
+    for (const object of manifestSchemaObjects(manifest)) {
+      const tableOwner = tables.get(object.name);
+      if (tableOwner) {
+        return {
+          owners,
+          tables,
+          problem: `migration schema object ownership cannot replace table ${object.name} ` +
+            `from ${tableOwner.migrationName} with ${object.type} from ${migration.name}`
+        };
+      }
+      const previous = owners.get(object.name);
+      if (previous && previous.type !== object.type) {
+        return {
+          owners,
+          tables,
+          problem: `migration schema object ownership type mismatch for ${object.name}: ` +
+            `${previous.type} from ${previous.migrationName} cannot be replaced by ` +
+            `${object.type} from ${migration.name}`
+        };
+      }
+      owners.set(object.name, {
+        migrationName: migration.name,
+        sql: String(object.sql || ''),
+        type: object.type,
+        version: migration.version
+      });
+    }
+  }
+  return { owners, tables, problem: null };
+}
+
+function schemaObjectOwnershipProblem(db, ownership) {
+  const rowsForName = db.prepare(`
+    SELECT type,sql FROM sqlite_schema WHERE name=? ORDER BY type
+  `);
+  for (const [name, owner] of ownership.tables.entries()) {
+    const rows = rowsForName.all(name);
+    if (rows.length !== 1 || rows[0].type !== 'table') {
+      return `incompatible ${owner.migrationName} table type ${name}`;
+    }
+  }
+  for (const [name, owner] of ownership.owners.entries()) {
+    const rows = rowsForName.all(name);
+    if (rows.length === 0) return `missing ${owner.migrationName} ${owner.type} ${name}`;
+    if (rows.length !== 1 || rows[0].type !== owner.type) {
+      return `incompatible ${owner.migrationName} ${owner.type} type ${name}`;
+    }
+    if (!schemaSqlEqual(rows[0].sql, owner.sql)) {
+      return `incompatible ${owner.migrationName} ${owner.type} ${name}`;
+    }
+  }
+  return null;
+}
+
 function optionalMigrationAllowances(migrations) {
   const objects = new Map();
   const columns = new Map();
@@ -1457,11 +1607,13 @@ function optionalMigrationAllowances(migrations) {
         });
       }
     }
-    for (const [name, sql] of Object.entries(manifest.indexes || {})) {
-      objects.set(name, { type: 'index', name, tbl_name: name.replace(/^idx_([^_]+).*$/, '$1'), sql: String(sql || '') });
-    }
-    for (const [name, sql] of Object.entries(manifest.triggers || {})) {
-      objects.set(name, { type: 'trigger', name, tbl_name: 'collaborations', sql: String(sql || '') });
+    for (const object of manifestSchemaObjects(manifest)) {
+      objects.set(object.name, {
+        type: object.type,
+        name: object.name,
+        tbl_name: object.name,
+        sql: String(object.sql || '')
+      });
     }
   }
   return { objects, columns };
@@ -1714,16 +1866,6 @@ function migrationManifestProblem(db, migrationName, manifest) {
       if (String(column.dflt_value) !== String(expected.defaultValue)) return `incompatible ${migrationName} column default ${table}.${name}`;
     }
   }
-  for (const [name, expectedSql] of Object.entries(manifest.indexes || {})) {
-    const row = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'index' AND name = ?").get(name);
-    if (!row) return `missing ${migrationName} index ${name}`;
-    if (!schemaSqlEqual(row.sql, expectedSql)) return `incompatible ${migrationName} index ${name}`;
-  }
-  for (const [name, expectedSql] of Object.entries(manifest.triggers || {})) {
-    const row = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'trigger' AND name = ?").get(name);
-    if (!row) return `missing ${migrationName} trigger ${name}`;
-    if (!schemaSqlEqual(row.sql, expectedSql)) return `incompatible ${migrationName} trigger ${name}`;
-  }
   for (const [table, checks] of Object.entries(manifest.tableChecks || {})) {
     const actualSql = tableSql(db, table);
     for (const checkSql of checks) {
@@ -1796,6 +1938,7 @@ function classifyDatabase(db, options) {
   for (let version = 1; version <= rows.length; version += 1) {
     if (rows[version - 1].version !== version) return { status: 'partial_or_malformed', reason: 'gapped ledger' };
   }
+  const applied = [];
   for (const row of rows) {
     if (row.version > maxVersion) continue;
     const migration = migrations.find((candidate) => candidate.version === row.version);
@@ -1804,7 +1947,30 @@ function classifyDatabase(db, options) {
     if (loaded.checksum !== row.checksum || migration.sourcePath !== row.source_path || migration.engineVersion !== row.engine_version) {
       return { status: 'partial_or_malformed', reason: `checksum/schema mismatch for ${row.name}` };
     }
-    const manifestProblem = migrationManifestProblem(db, row.name, loaded.implementation.schemaManifest);
+    applied.push({ loaded, row });
+  }
+  const baselineLoaded = applied[0].loaded;
+  const ownership = migrationSchemaObjectOwnership(
+    checksumBoundBaselineSchemaObjects(baselineLoaded),
+    applied.map(({ loaded, row }) => ({
+      name: row.name,
+      version: row.version,
+      schemaManifest: loaded.implementation.schemaManifest
+    }))
+  );
+  if (ownership.problem) {
+    return { status: 'partial_or_malformed', reason: ownership.problem };
+  }
+  const ownershipProblem = schemaObjectOwnershipProblem(db, ownership);
+  if (ownershipProblem) {
+    return { status: 'partial_or_malformed', reason: ownershipProblem };
+  }
+  for (const { loaded, row } of applied) {
+    const manifestProblem = migrationManifestProblem(
+      db,
+      row.name,
+      loaded.implementation.schemaManifest
+    );
     if (manifestProblem) {
       return { status: 'partial_or_malformed', reason: manifestProblem };
     }
@@ -1812,8 +1978,8 @@ function classifyDatabase(db, options) {
   if (hasFutureVersion) {
     return { status: 'future', currentVersion: rows[rows.length - 1].version };
   }
-  const appliedMigrations = rows.map((row) => loadedFor(migrations.find((candidate) => candidate.version === row.version)));
-  const shapeProblem = managedSchemaProblem(db, loadedFor(migrations[0]), appliedMigrations) || compatibilityColumnProblem(db);
+  const appliedMigrations = applied.map(({ loaded }) => loaded);
+  const shapeProblem = managedSchemaProblem(db, baselineLoaded, appliedMigrations) || compatibilityColumnProblem(db);
   if (shapeProblem) return { status: 'partial_or_malformed', reason: shapeProblem };
   return { status: 'managed', currentVersion: rows.length ? rows[rows.length - 1].version : 0 };
 }

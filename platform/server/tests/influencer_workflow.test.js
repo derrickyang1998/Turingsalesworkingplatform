@@ -8,7 +8,39 @@ const { spawn } = require('node:child_process');
 
 const repoRoot = path.resolve(__dirname, '..', '..', '..');
 const influencerWorkflow = require('../services/influencer_workflow_service');
+const {
+  createCampaignCollaborationService
+} = require('../services/campaign_collaboration_service');
 const task9HeaderContractPath = path.join(__dirname, 'fixtures', 'task-9-upload-header-contract.json');
+const TEST_JWT_SECRET = 'kGoVXFMo4jD81r9d8FIGM6HbN7xQ9pM74x1un3PVF48';
+const CHILD_ENV_ALLOWLIST = Object.freeze([
+  'PATH', 'Path', 'SystemRoot', 'SYSTEMROOT', 'WINDIR', 'windir',
+  'TEMP', 'TMP', 'ComSpec', 'COMSPEC', 'PATHEXT', 'HOME', 'USERPROFILE',
+  'PROCESSOR_ARCHITECTURE', 'SystemDrive'
+]);
+
+function isolatedChildEnvironment(overrides, sourceEnvironment = process.env) {
+  const environment = {};
+  for (const key of CHILD_ENV_ALLOWLIST) {
+    if (Object.prototype.hasOwnProperty.call(sourceEnvironment, key)) {
+      environment[key] = sourceEnvironment[key];
+    }
+  }
+  return Object.assign(environment, overrides);
+}
+
+test('influencer server child environment excludes inherited secrets and application configuration', () => {
+  const environment = isolatedChildEnvironment({}, {
+    PATH: '/test/bin',
+    NODE_OPTIONS: '--require inherited-hook.js',
+    DEEPSEEK_API_KEY: 'inherited-deepseek-key',
+    TAVILY_API_KEY: 'inherited-tavily-key',
+    TM_ENV_FILE: '/untrusted.env',
+    DB_PATH: '/production.db'
+  });
+
+  assert.deepEqual(environment, { PATH: '/test/bin' });
+});
 
 function parseTask9HeaderContract() {
   const contract = JSON.parse(fs.readFileSync(task9HeaderContractPath, 'utf8'));
@@ -126,6 +158,11 @@ function cleanupTempDbFiles(dbPath) {
   }
 }
 
+function cleanupTempUploadDir(uploadDir) {
+  fs.rmSync(uploadDir, { recursive: true, force: true });
+  assert.equal(fs.existsSync(uploadDir), false, `Expected temp cleanup to remove ${uploadDir}`);
+}
+
 async function reservePort() {
   const server = net.createServer();
   await new Promise((resolve, reject) => {
@@ -155,18 +192,24 @@ async function waitForServer(baseUrl, child, output) {
 async function withTempServer(callback, options) {
   options = options || {};
   const dbPath = path.join(os.tmpdir(), `tm-influencer-upload-${Date.now()}-${Math.random().toString(16).slice(2)}.db`);
+  const uploadDir = path.join(os.tmpdir(), `tm-influencer-files-${Date.now()}-${Math.random().toString(16).slice(2)}`);
   const port = await reservePort();
   const baseUrl = `http://127.0.0.1:${port}`;
   const output = [];
   const child = spawn(process.execPath, ['server.js'], {
     cwd: path.join(repoRoot, 'platform', 'server'),
-    env: Object.assign({}, process.env, {
+    env: isolatedChildEnvironment({
       NODE_ENV: 'test',
+      TM_DISABLE_DOTENV: '1',
+      SERVER_HOST: '127.0.0.1',
       PORT: String(port),
       DB_PATH: dbPath,
       DEFAULT_ADMIN_USERNAME: 'admin',
       DEFAULT_ADMIN_PASSWORD: 'test-only-admin-password',
-      JWT_SECRET: 'test-only-jwt-secret-for-task-9',
+      JWT_SECRET: TEST_JWT_SECRET,
+      UPLOAD_DIR: uploadDir,
+      UPLOAD_SANDBOX_SPOOL_ROOT: uploadDir,
+      TM_UPLOAD_SANDBOX_TEST_MODE: 'local-worker',
       FEISHU_WEBHOOK_URL: '',
       FEISHU_WEBHOOK: ''
     }),
@@ -185,13 +228,14 @@ async function withTempServer(callback, options) {
     const loginText = await login.text();
     assert.equal(login.status, 200, loginText);
     const auth = JSON.parse(loginText);
-    await callback({ baseUrl, token: auth.token, dbPath, child });
+    await callback({ baseUrl, token: auth.token, dbPath, uploadDir, child });
   } finally {
     await terminateTempServer(child, output);
     if (typeof options.beforeCleanup === 'function') {
       options.beforeCleanup({ dbPath, child });
     }
     cleanupTempDbFiles(dbPath);
+    cleanupTempUploadDir(uploadDir);
   }
 }
 
@@ -213,9 +257,10 @@ function mountRoutes(db) {
     };
   });
   const authMiddleware = function(req, res, next) { next(); };
+  const campaignCollaborationService = createCampaignCollaborationService(db);
   const routesModule = path.resolve(__dirname, '../routes.js');
   delete require.cache[routesModule];
-  require(routesModule)(app, db, authMiddleware);
+  require(routesModule)(app, db, authMiddleware, { campaignCollaborationService });
   return routes;
 }
 
@@ -446,6 +491,24 @@ test('influencer upload route imports a multipart CSV through the real server', 
     assert.equal(inf.cpv, 0.07);
     assert.equal(inf.parent_record, 'UPLOAD-PARENT');
     db.close();
+  });
+});
+
+test('influencer upload removes temporary files when the table has no data rows', async () => {
+  await withTempServer(async ({ baseUrl, token, uploadDir }) => {
+    const form = new FormData();
+    form.append('file', new Blob(['KOL Handle,Platform\n'], { type: 'text/csv;charset=utf-8' }), 'headers-only.csv');
+
+    const response = await fetch(baseUrl + '/api/influencers/upload', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + token },
+      body: form
+    });
+    const responseText = await response.text();
+
+    assert.equal(response.status, 400, responseText);
+    assert.match(responseText, /No table rows found/i);
+    assert.deepEqual(fs.readdirSync(uploadDir), []);
   });
 });
 
@@ -920,6 +983,72 @@ test('GET /api/collaborations freezes the exact legacy public projection and env
   assert.equal(Object.hasOwn(collaboration, 'row_version'), false);
   assert.equal(Object.hasOwn(collaboration, 'cost_actual_confirmed'), false);
 
+  db.close();
+});
+
+test('global collaboration list and stats conceal another owner before materializing legacy rows', async () => {
+  const db = freshDb();
+  const routes = mountRoutes(db);
+  const influencerId = insertInfluencer(db, {
+    platform: 'TikTok',
+    kol_handle: '@collaboration_idor',
+    profile_link: 'https://example.com/collaboration-idor',
+    followers: 1000,
+    category: 'Technology',
+    region: 'US',
+    data_source: 'test'
+  });
+  db.prepare(`
+    INSERT INTO collaborations (influencer_id,user_id,status,cost_quoted,cost_actual)
+    VALUES (?,2,'confirmed',100,100),(?,3,'completed',200,200)
+  `).run(influencerId, influencerId);
+
+  const actor = { id: 3, role: 'user', username: 'teammate' };
+  const list = await invoke(routes, 'GET /api/collaborations', { user: actor });
+  assert.equal(list.statusCode, 200);
+  assert.deepEqual(list.payload.collaborations.map((row) => row.user_id), [3]);
+
+  const stats = await invoke(routes, 'GET /api/collaborations/stats', { user: actor });
+  assert.deepEqual(stats.payload.stats, {
+    byStatus: [{ status: 'completed', count: 1 }],
+    totalActive: 0,
+    totalCompleted: 1,
+    totalCost: 200
+  });
+
+  db.close();
+});
+
+test('global collaboration update conceals another owner and leaves the row unchanged', async () => {
+  const db = freshDb();
+  const routes = mountRoutes(db);
+  const influencerId = insertInfluencer(db, {
+    platform: 'TikTok',
+    kol_handle: '@collaboration_update_idor',
+    profile_link: 'https://example.com/collaboration-update-idor',
+    followers: 1000,
+    category: 'Technology',
+    region: 'US',
+    data_source: 'test'
+  });
+  const collaborationId = db.prepare(`
+    INSERT INTO collaborations (influencer_id,user_id,status,cost_quoted)
+    VALUES (?,2,'confirmed',100)
+  `).run(influencerId).lastInsertRowid;
+  const before = db.prepare('SELECT status,row_version FROM collaborations WHERE id=?')
+    .get(collaborationId);
+
+  const result = await invoke(routes, 'PUT /api/collaborations/:id', {
+    user: { id: 3, role: 'user', username: 'teammate' },
+    params: { id: collaborationId },
+    body: { status: 'completed' }
+  });
+  assert.equal(result.statusCode, 404);
+  assert.equal(result.payload.code, 'RECORD_NOT_FOUND');
+  assert.deepEqual(
+    db.prepare('SELECT status,row_version FROM collaborations WHERE id=?').get(collaborationId),
+    before
+  );
   db.close();
 });
 

@@ -32,7 +32,7 @@ async function searchWeb(query, opts) {
 
   let response;
   try {
-    response = await fetchImpl(opts.url || DEFAULT_TAVILY_URL, {
+    const fetchOptions = {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -45,7 +45,9 @@ async function searchWeb(query, opts) {
         include_answer: false,
         include_raw_content: false
       })
-    });
+    };
+    if (opts.signal !== undefined) fetchOptions.signal = opts.signal;
+    response = await fetchImpl(opts.url || DEFAULT_TAVILY_URL, fetchOptions);
   } catch (e) {
     const cached = getCachedSearchResult(opts.db, query, provider);
     if (cached) return cached;
@@ -87,9 +89,20 @@ function formatWebContext(searchResult) {
 function cacheSearchResult(db, query, result) {
   if (!db || !result || !result.used) return;
   try {
-    db.prepare('INSERT INTO web_search_cache (provider, query, response_json) VALUES (?, ?, ?)')
-      .run(result.provider || 'tavily', query, JSON.stringify(result));
+    const write = () => cacheSearchResultInTransaction(db, query, result);
+    if (db.inTransaction) write();
+    else db.transaction(write).immediate();
   } catch (e) {}
+}
+
+function cacheSearchResultInTransaction(db, query, result) {
+  if (!db || !db.inTransaction) {
+    throw new Error('cacheSearchResultInTransaction requires an existing transaction');
+  }
+  if (!result || !result.used) return null;
+  return db.prepare(
+    'INSERT INTO web_search_cache (provider, query, response_json) VALUES (?, ?, ?)'
+  ).run(result.provider || 'tavily', query, JSON.stringify(result));
 }
 
 function getCachedSearchResult(db, query, provider) {
@@ -115,5 +128,6 @@ module.exports = {
   searchWeb,
   formatWebContext,
   cacheSearchResult,
+  cacheSearchResultInTransaction,
   getCachedSearchResult
 };

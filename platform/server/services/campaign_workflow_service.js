@@ -1562,6 +1562,15 @@ function insertWorkflowReconciliationDispatch(
   return row;
 }
 
+function applyWorkflowArchiveGaugePlan(db, archive) {
+  return knowledgeService.applyKnowledgeCapacityGaugePlanInTransaction(
+    db,
+    archive && Array.isArray(archive.capacityGaugePlan)
+      ? archive.capacityGaugePlan
+      : []
+  );
+}
+
 function archiveWorkflowReconciliation(db, input) {
   const summary = Array.from(input.metadataJson).slice(0, 1000).join('');
   const archive = knowledgeService.writeCampaignKnowledgeInTransaction(db, {
@@ -1590,6 +1599,7 @@ function archiveWorkflowReconciliation(db, input) {
     createdBy: input.userId,
     metadata: {}
   });
+  applyWorkflowArchiveGaugePlan(db, archive);
 }
 
 function workflowReconciliationErrorBody(error, requestId) {
@@ -2956,6 +2966,7 @@ function writeActionArchive(db, runtime, input) {
     createdBy: input.userId,
     metadata: {}
   });
+  applyWorkflowArchiveGaugePlan(db, archive);
   return archive.entry.id;
 }
 
@@ -4726,6 +4737,7 @@ function archiveTerminalInitialization(db, row, instanceId, nodeId, logId) {
     createdBy: row.root_actor_user_id,
     metadata: {}
   });
+  applyWorkflowArchiveGaugePlan(db, archive);
   return archive.entry.id;
 }
 

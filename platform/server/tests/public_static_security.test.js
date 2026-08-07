@@ -10,6 +10,22 @@ const { spawn } = require('node:child_process');
 const platformRoot = path.join(__dirname, '..', '..');
 const serverEntry = path.join(platformRoot, 'server', 'server.js');
 const deployScriptPath = path.join(platformRoot, 'deploy_v8.ps1');
+const TEST_JWT_SECRET = 'aonMA-R-MHsTFr-HNF7JwPd3da1Vo8hXV2wmeb4y4m0';
+const CHILD_ENV_ALLOWLIST = Object.freeze([
+  'PATH', 'Path', 'SystemRoot', 'SYSTEMROOT', 'WINDIR', 'windir',
+  'TEMP', 'TMP', 'ComSpec', 'COMSPEC', 'PATHEXT', 'HOME', 'USERPROFILE',
+  'PROCESSOR_ARCHITECTURE', 'SystemDrive'
+]);
+
+function isolatedChildEnvironment(overrides, sourceEnvironment = process.env) {
+  const environment = {};
+  for (const key of CHILD_ENV_ALLOWLIST) {
+    if (Object.prototype.hasOwnProperty.call(sourceEnvironment, key)) {
+      environment[key] = sourceEnvironment[key];
+    }
+  }
+  return Object.assign(environment, overrides);
+}
 
 function readDeployScript() {
   return fs.readFileSync(deployScriptPath, 'utf8');
@@ -60,19 +76,50 @@ async function stopChild(child) {
   if (child.exitCode === null) child.kill('SIGKILL');
 }
 
+test('network child OS environment excludes inherited secrets and application configuration', () => {
+  const environment = isolatedChildEnvironment({}, {
+    Path: 'C:\\Windows\\System32',
+    SystemRoot: 'C:\\Windows',
+    TEMP: 'C:\\Temp',
+    NODE_OPTIONS: '--require inherited-hook.js',
+    DEEPSEEK_API_KEY: 'inherited-deepseek-key',
+    TAVILY_API_KEY: 'inherited-tavily-key',
+    TM_ENV_FILE: 'C:\\untrusted.env',
+    DB_PATH: 'C:\\production.db'
+  });
+
+  assert.deepEqual(environment, {
+    Path: 'C:\\Windows\\System32',
+    SystemRoot: 'C:\\Windows',
+    TEMP: 'C:\\Temp'
+  });
+  for (const key of [
+    'NODE_OPTIONS',
+    'DEEPSEEK_API_KEY',
+    'TAVILY_API_KEY',
+    'TM_ENV_FILE',
+    'DB_PATH'
+  ]) {
+    assert.equal(Object.hasOwn(environment, key), false, `${key} was inherited`);
+  }
+});
+
 test('production server serves browser assets but denies private platform files', { timeout: 30000 }, async () => {
   const port = await reservePort();
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-public-static-'));
   const outputChunks = [];
   const child = spawn(process.execPath, [serverEntry], {
     cwd: platformRoot,
-    env: {
-      ...process.env,
+    env: isolatedChildEnvironment({
       NODE_ENV: 'test',
+      TM_DISABLE_DOTENV: '1',
+      SERVER_HOST: '127.0.0.1',
       PORT: String(port),
       DB_PATH: path.join(tempDir, 'test.db'),
-      JWT_SECRET: 'public-static-security-test-secret'
-    },
+      UPLOAD_SANDBOX_SPOOL_ROOT: path.join(tempDir, 'upload-sandbox'),
+      TM_UPLOAD_SANDBOX_TEST_MODE: 'local-worker',
+      JWT_SECRET: TEST_JWT_SECRET
+    }),
     stdio: ['ignore', 'pipe', 'pipe']
   });
   child.stdout.on('data', (chunk) => outputChunks.push(chunk.toString()));
@@ -159,18 +206,21 @@ test('guarded deploy validates and installs the versioned nginx config', () => {
 
 test('guarded deploy keeps production host external and SSH host checking enabled', () => {
   const deploy = readDeployScript();
-  const commandLines = deploy.split(/\r?\n/).filter((line) => /\b(?:ssh|scp)\s+-i\b/.test(line));
+  const deployWithoutLoopback = deploy.replace(/\b127\.0\.0\.1\b/g, '');
+  const uploadStart = deploy.indexOf('function Invoke-PinnedDeploymentUpload');
+  const uploadEnd = deploy.indexOf('function Assert-TrustedProductionSourceArtifacts');
+  assert.ok(uploadStart !== -1 && uploadEnd > uploadStart, 'pinned upload helper must exist');
+  const pinnedUpload = deploy.slice(uploadStart, uploadEnd);
 
   assert.match(deploy, /\$SERVER\s*=\s*\$env:TURINGMARKET_SERVER\b/);
   assert.match(deploy, /TURINGMARKET_SERVER/);
   assert.match(deploy, /throw\s+"[^"]*TURINGMARKET_SERVER/);
-  assert.doesNotMatch(deploy, /\b(?:\d{1,3}\.){3}\d{1,3}\b/);
+  assert.doesNotMatch(deployWithoutLoopback, /\b(?:\d{1,3}\.){3}\d{1,3}\b/);
   assert.doesNotMatch(deploy, /^\s*Write-(?:Host|Output|Information|Warning|Verbose|Debug).*?(?:\$SERVER|\$\{SERVER\}|TURINGMARKET_SERVER|root@|https?:\/\/)/gmi);
-  assert.equal(commandLines.length >= 1, true, 'deploy script should keep guarded scp invocation explicit');
-  for (const line of commandLines) {
-    assert.match(line, /-o\s+BatchMode=yes\b/, `${line} must force BatchMode`);
-    assert.match(line, /-o\s+StrictHostKeyChecking=yes\b/, `${line} must fail closed on unknown SSH host keys`);
-  }
+  assert.match(pinnedUpload, /-FileName 'ssh'/);
+  assert.match(pinnedUpload, /'-o', 'BatchMode=yes'/);
+  assert.match(pinnedUpload, /'-o', 'StrictHostKeyChecking=yes'/);
+  assert.doesNotMatch(deploy, /\bscp(?:\.exe)?\b/i);
   assert.match(deploy, /Invoke-NativeWithUtf8Input -FileName 'ssh\.exe'/);
   assert.match(deploy, /RedirectStandardInput\s*=\s*\$inputPath/);
   assert.match(deploy, /\$normalizedInput\s*=\s*\$InputText\s+-replace\s+"`r`n\?",\s*"`n"/);
@@ -182,22 +232,36 @@ test('guarded deploy keeps production host external and SSH host checking enable
   assert.doesNotMatch(deploy, /UserKnownHostsFile\s*=\s*(?:NUL|\/dev\/null)/i);
 });
 
-test('guarded deploy creates complete v040 backups with all client assets, SQLite, and checksums', () => {
+test('guarded deploy creates complete v050 backups with client assets, SQLite, PPT cache, and checksums', () => {
   const deploy = readDeployScript();
   const backupBlock = extractRemoteBackupBlock(deploy);
+  const assetsStart = deploy.indexOf('$requiredPublicAssets = @(');
+  const assetsEnd = deploy.indexOf('function Invoke-RemoteBackup');
+  assert.ok(assetsStart !== -1 && assetsEnd > assetsStart, 'required public asset inventory must precede backup');
+  const requiredAssets = deploy.slice(assetsStart, assetsEnd);
 
-  assert.match(deploy, /\$backupDir\s*=\s*"backups\/v040-product-shell-design-system-\$stamp"/);
+  assert.match(deploy, /\$backupDir\s*=\s*"backups\/v050-campaign-business-spine-\$stamp"/);
   assert.match(backupBlock, /files\.present/);
   assert.match(backupBlock, /files\.absent/);
-  assert.match(backupBlock, /client\/shared\/build_info\.js/);
-  assert.match(backupBlock, /client\/core\/navigation\.js/);
-  assert.match(backupBlock, /client\/core\/accessibility\.js/);
-  assert.match(backupBlock, /client\/core\/shell\.js/);
-  assert.match(backupBlock, /client\/styles\/tokens\.css/);
-  assert.match(backupBlock, /client\/styles\/components\.css/);
-  assert.match(backupBlock, /client\/styles\/layout\.css/);
+  for (const asset of [
+    'client/shared/build_info.js',
+    'client/core/navigation.js',
+    'client/core/accessibility.js',
+    'client/core/shell.js',
+    'client/styles/tokens.css',
+    'client/styles/components.css',
+    'client/styles/layout.css'
+  ]) {
+    assert.ok(requiredAssets.includes(`"${asset}"`), `${asset} must remain in the required public asset inventory`);
+  }
+  assert.match(backupBlock, /foreach \(\$record in \$DeploymentPlan\.Records\)/);
+  assert.match(backupBlock, /\$record\.RequiredPublicAsset/);
+  assert.match(backupBlock, /\$record\.IncludedInBackup/);
+  assert.match(backupBlock, /__PLATFORM_MANIFEST__/);
   assert.match(backupBlock, /require\('better-sqlite3'\)/);
   assert.match(backupBlock, /database\.backup\(/);
+  assert.match(backupBlock, /PptCacheDir="\/var\/lib\/turingmarket\/ppt-cache"/);
+  assert.match(backupBlock, /ppt-cache\.sha256/);
   assert.match(backupBlock, /SHA256SUMS/);
   assert.match(backupBlock, /cp -L \/etc\/nginx\/sites-enabled\/turingmarket "\$BackupAbsolute\/nginx\/turingmarket\.conf"/);
   assert.match(deploy, /\$BackupAbsolute\/nginx\/turingmarket\.conf/);
@@ -224,11 +288,21 @@ test('guarded deploy records present and absent files instead of swallowing back
   assert.match(backupBlock, /cp -- "\$file" "\$BackupAbsolute\/platform\/\$file"/);
 });
 
-test('guarded deploy can invalidate and verify all production sessions', () => {
+test('guarded deploy always invalidates and verifies all production sessions before restart', () => {
   const deploy = readDeployScript();
   assert.doesNotMatch(deploy, /\[switch\]\$InvalidateSessions/);
   assert.match(deploy, /\[switch\]\$PreserveSessions/);
-  assert.match(deploy, /if \(\$PreserveSessions\) \{ "0" \} else \{ "1" \}/);
+  assert.match(deploy, /if \(\$PreserveSessions\) \{[\s\S]*?throw "Phase 4 deployment rejects session preservation\."/);
+  assert.doesNotMatch(deploy, /if \(\$PreserveSessions\) \{ "0" \} else \{ "1" \}/);
   assert.match(deploy, /DELETE FROM sessions/);
   assert.match(deploy, /SESSIONS_REMAINING=0/);
+  const restore = deploy.match(/function Invoke-RemoteRestore[\s\S]*?(?=function Invoke-RemotePreMutationResume)/);
+  const cutover = deploy.match(/\$cutoverGate\s*=\s*@'\r?\n([\s\S]*?)\r?\n'@/);
+  assert.ok(restore, 'rollback gate must exist');
+  assert.ok(cutover, 'cutover gate must exist');
+  for (const source of [restore[0], cutover[1]]) {
+    assert.equal((source.match(/DELETE FROM sessions(?! WHERE)/g) || []).length, 1);
+    assert.ok(source.indexOf('DELETE FROM sessions') < source.indexOf('pm2 restart ecosystem.config.js'));
+    assert.ok(source.indexOf('SESSIONS_REMAINING=0') < source.indexOf('pm2 restart ecosystem.config.js'));
+  }
 });

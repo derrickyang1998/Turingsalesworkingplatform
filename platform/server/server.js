@@ -1,18 +1,47 @@
+const runtimeConfig = require('./config/runtime_config');
+const LOCAL_UPLOAD_WORKER_MODE = explicitLocalUploadWorkerMode();
+runtimeConfig.loadPlatformEnvironment();
+const { jwtSecret: JWT_SECRET } = runtimeConfig.validateNetworkRuntimeConfig();
+const PORT = process.env.PORT || 3002;
+const SERVER_LISTEN_ARGS = runtimeConfig.serverListenArgs(PORT);
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
-const runtimeConfig = require('./config/runtime_config');
-runtimeConfig.loadPlatformEnvironment();
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const multer = require('multer');
 const rateLimit = require('express-rate-limit');
 const fs = require('fs');
 const crypto = require('crypto');
+const childProcess = require('child_process');
 const db = require('./db');
 const knowledgeService = require('./services/knowledge_service');
 const aiService = require('./services/ai_service');
-const fileIngestService = require('./services/file_ingest_service');
+const idempotency = require('./services/idempotency_service');
+const uploadAdmissionIdempotency = Object.freeze({
+  reserveProcessingInTransaction(database, input) {
+    return idempotency.reserveProcessingInTransaction(database, {
+      organizationId: input.organizationId,
+      actorUserId: input.actorUserId,
+      campaignId: input.campaignId,
+      secondaryCampaignId: null,
+      resourceClaim: null,
+      scope: input.scope,
+      key: input.key,
+      requestHash: input.requestHash,
+      expectedEventCount: input.expectedEventCount,
+      operationTimeoutSeconds: input.operationTimeoutSeconds
+    });
+  },
+  completeAdmissionInTransaction: idempotency.completeAdmissionInTransaction,
+  failInternalInTransaction: idempotency.failInternalInTransaction
+});
+const {
+  assertUploadSandboxStartupReady,
+  createUploadSandboxService,
+  loadRuntimeManifest,
+  runCommandNoDisclosure,
+  workerMain
+} = require('./services/upload_sandbox_service');
 const obsidianIngestService = require('./services/obsidian_ingest_service');
 const businessKnowledge = require('./services/business_knowledge_service');
 const vaultExportService = require('./services/vault_export_service');
@@ -22,32 +51,97 @@ const influencerWorkflow = require('./services/influencer_workflow_service');
 const publicAssets = require('./services/public_assets_service');
 const credentialRotation = require('./services/credential_rotation_service');
 const organizationAccess = require('./services/organization_access_service');
+const {
+  getCampaignAccess,
+  readDemandProposalCollection
+} = require('./services/campaign_access_service');
 const campaignContract = require('./contracts/campaign_contract');
+const { createPptArtifactStore } = require('./services/ppt_artifact_store');
+const { createCampaignPptService } = require('./services/campaign_ppt_service');
+const {
+  createCampaignCollaborationService
+} = require('./services/campaign_collaboration_service');
+const registerCampaignRoutes = require('./routes_campaigns');
+const {
+  createCampaignPptBridgeHandler
+} = registerCampaignRoutes;
 const {
   CampaignLinkServiceError,
-  createCampaignLinkService
+  createCampaignLinkService,
+  validateLegacyKnowledgeBody
 } = require('./services/campaign_link_service');
 const {
+  Phase4RequestError,
   createPhase4RequestPipeline
 } = require('./middleware/phase4_request_pipeline');
 const app = express();
 app.set('trust proxy', 'loopback');
-const PORT = process.env.PORT || 3002;
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'db', 'turingmarket.db');
-const DEFAULT_DEV_JWT_SECRET = 'turingmarket-platform-jwt-secret-2026';
-if (process.env.NODE_ENV === 'production' && (!process.env.JWT_SECRET || process.env.JWT_SECRET === DEFAULT_DEV_JWT_SECRET || /please-change/i.test(process.env.JWT_SECRET))) {
-  throw new Error('JWT_SECRET must be configured to a strong private value in production');
-}
-const JWT_SECRET = process.env.JWT_SECRET || DEFAULT_DEV_JWT_SECRET;
 const TOKEN_EXPIRY = '24h';
-const UPLOAD_DIR = path.resolve(process.env.UPLOAD_DIR || path.join(__dirname, '..', 'uploads'));
 const TMP_DIR = path.resolve(process.env.TMP_DIR || path.join(__dirname, '..', 'tmp'));
-const ALLOWED_UPLOAD_EXTS = new Set([
-  '.txt', '.md', '.csv', '.json', '.xlsx', '.xlsm', '.xls',
-  '.pdf', '.docx', '.pptx',
-  '.jpg', '.jpeg', '.png', '.webp', '.bmp', '.tif', '.tiff'
+const PPT_CACHE_DIR = path.resolve(
+  process.env.PPT_CACHE_DIR || path.join(__dirname, '..', 'ppt-cache')
+);
+const UPLOAD_SANDBOX_SPOOL_ROOT = path.resolve(
+  process.env.UPLOAD_SANDBOX_SPOOL_ROOT || '/var/lib/turingmarket-parser/jobs'
+);
+const RELEASE_PINNED_UPLOAD_MANIFEST_SHA256 =
+  'f9edbea9c9123681b1f3be56964535271f1a3dc7c20fe04e3caaf65e86cc5162';
+const UPLOAD_SANDBOX_SELF_TEST_RUNNER =
+  '/usr/local/libexec/turingmarket/upload_sandbox_self_test';
+const REQUIRED_UPLOAD_SANDBOX_SELF_TESTS = Object.freeze([
+  'identity',
+  'mount_isolation',
+  'syscall_denial',
+  'network_denial',
+  'socket_creation_denial',
+  'host_log_socket_denial',
+  'aio_socket_bypass_denial',
+  'pid_namespace_sibling_fd_denial',
+  'result_inode_metadata_denial',
+  'write_escape_denial',
+  'aggregate_memory_pressure',
+  'aggregate_cpu_pressure',
+  'aggregate_task_pressure',
+  'scratch_pressure',
+  'private_temp_write_denial',
+  'dev_submount_write_denial',
+  'writable_filesystem_inventory',
+  'output_pressure'
 ]);
-fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+const campaignPptService = createCampaignPptService(db, {
+  artifactStore: createPptArtifactStore({ rootDir: PPT_CACHE_DIR }),
+  tempDir: TMP_DIR,
+  runPptGenerator({ payload, outputPath }) {
+    const workDir = path.dirname(outputPath);
+    const dataPath = path.join(workDir, 'ppt-payload.json');
+    fs.writeFileSync(dataPath, JSON.stringify(payload), {
+      encoding: 'utf8',
+      mode: 0o600,
+      flag: 'wx'
+    });
+    try {
+      const python = process.env.PYTHON_BIN || (process.platform === 'win32' ? 'python' : 'python3');
+      childProcess.execFileSync(
+        python,
+        [path.join(__dirname, 'generate_ppt.py'), dataPath, outputPath],
+        {
+          timeout: 60_000,
+          cwd: __dirname,
+          stdio: 'pipe',
+          env: runtimeConfig.pythonChildEnvironment()
+        }
+      );
+    } finally {
+      fs.rmSync(dataPath, { force: true });
+    }
+  }
+});
+const campaignCollaborationService = createCampaignCollaborationService(db);
+const campaignPptBridgeHandler = createCampaignPptBridgeHandler(campaignPptService);
+let campaignPptJanitor = null;
+let uploadSandboxService = null;
+let phase4RequestPipeline = null;
 
 // Middleware
 app.use(cors());
@@ -67,8 +161,18 @@ const phase4PolicyNames = [
   'CAMPAIGN_KNOWLEDGE_LIST',
   'CAMPAIGN_KNOWLEDGE_DETAIL',
   'CAMPAIGN_REVIEW_CREATE',
+  'CAMPAIGN_PROPOSAL_PPT_GENERATE',
+  'LEGACY_COLLABORATION_CREATE',
+  'LEGACY_COLLABORATION_UPDATE',
   'LEGACY_DEMAND_CREATE',
   'LEGACY_PROPOSAL_CREATE',
+  'LEGACY_KNOWLEDGE_CREATE',
+  'LEGACY_KNOWLEDGE_INGEST',
+  'KNOWLEDGE_USE',
+  'LEGACY_AI_CHAT',
+  'SHARED_KNOWLEDGE_UPLOAD',
+  'SHARED_INFLUENCER_UPLOAD',
+  'SHARED_DEMAND_PARSE_FILE',
   'CAMPAIGN_WORKFLOW_RECONCILIATION_OPTIONS',
   'CAMPAIGN_WORKFLOW_RETRY',
   'CAMPAIGN_WORKFLOW_RECONCILE',
@@ -145,16 +249,10 @@ function campaignLinkedSharedWorkflowOwner(request, policy) {
     return true;
   }
 }
-const phase4RequestPipeline = createPhase4RequestPipeline({
-  registry: phase4Registry,
-  authenticate: authenticatePhase4Request,
-  shouldOwnRequest: campaignLinkedSharedWorkflowOwner
-});
-
 function legacyJsonMediaType(req) {
   const value = req.headers && req.headers['content-type'];
   return (
-    !phase4RequestPipeline.shouldSkipGlobalBodyParser(req) &&
+    (!phase4RequestPipeline || !phase4RequestPipeline.shouldSkipGlobalBodyParser(req)) &&
     typeof value === 'string' &&
     /^application\/json(?:\s*;|$)/i.test(value.trim())
   );
@@ -163,7 +261,7 @@ function legacyJsonMediaType(req) {
 function legacyUrlencodedMediaType(req) {
   const value = req.headers && req.headers['content-type'];
   return (
-    !phase4RequestPipeline.shouldSkipGlobalBodyParser(req) &&
+    (!phase4RequestPipeline || !phase4RequestPipeline.shouldSkipGlobalBodyParser(req)) &&
     typeof value === 'string' &&
     /^application\/x-www-form-urlencoded(?:\s*;|$)/i.test(value.trim())
   );
@@ -174,40 +272,23 @@ app.use(express.urlencoded({
   extended: true,
   type: legacyUrlencodedMediaType
 }));
-app.use(phase4RequestPipeline.middleware);
+app.use((req, res, next) => {
+  if (!phase4RequestPipeline) {
+    return res.status(503).json({
+      error: 'Upload sandbox readiness has not completed.',
+      code: 'UPLOAD_SANDBOX_NOT_READY',
+      request_id: identityRequestId(req) || 'phase4-request'
+    });
+  }
+  return phase4RequestPipeline.middleware(req, res, next);
+});
 
 // Serve only the browser assets required by the platform UI.
 publicAssets.registerPublicAssets(app, express, path.join(__dirname, '..'));
 
-// File upload config
-const upload = multer({
-  dest: UPLOAD_DIR,
-  limits: {
-    fileSize: 15 * 1024 * 1024,
-    files: 1,
-    fields: 20,
-    parts: 25,
-    fieldSize: 256 * 1024
-  },
-  fileFilter: function(req, file, cb) {
-    const ext = path.extname(file.originalname || '').toLowerCase();
-    if (!ALLOWED_UPLOAD_EXTS.has(ext)) {
-      return cb(new Error('Unsupported file type. Supported: TXT, MD, CSV, JSON, XLSX/XLSM/XLS, PDF, DOCX, PPTX, images.'));
-    }
-    cb(null, true);
-  }
-});
-
 const aiLimiter = rateLimit({
   windowMs: 60 * 1000,
   limit: 20,
-  standardHeaders: true,
-  legacyHeaders: false
-});
-
-const uploadLimiter = rateLimit({
-  windowMs: 10 * 60 * 1000,
-  limit: 10,
   standardHeaders: true,
   legacyHeaders: false
 });
@@ -288,6 +369,332 @@ function hashPassword(password) {
 function identityRequestId(req) {
   const value = req.headers && req.headers['x-request-id'];
   return campaignContract.isValidRequestId(value) ? value : null;
+}
+
+function explicitLocalUploadWorkerMode() {
+  const mode = process.env.TM_UPLOAD_SANDBOX_TEST_MODE;
+  if (mode === undefined || mode === '') return false;
+  const portText = process.env.PORT;
+  const port = typeof portText === 'string' && /^[1-9][0-9]{0,4}$/.test(portText)
+    ? Number(portText)
+    : null;
+  if (
+    mode !== 'local-worker' ||
+    process.env.NODE_ENV !== 'test' ||
+    process.env.TM_DISABLE_DOTENV !== '1' ||
+    process.env.SERVER_HOST !== '127.0.0.1' ||
+    port === null ||
+    port > 65535 ||
+    port === 3002
+  ) {
+    throw new Error('Invalid upload sandbox test adapter configuration');
+  }
+  return true;
+}
+
+function uploadSelfTestResult(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Upload sandbox self-test result is invalid');
+  }
+  return Object.freeze(Object.fromEntries(
+    REQUIRED_UPLOAD_SANDBOX_SELF_TESTS.map((name) => [name, value[name] === true])
+  ));
+}
+
+async function runProductionUploadSandboxSelfTests() {
+  if (process.platform !== 'linux') {
+    throw new Error('Production upload sandbox self-tests require Linux');
+  }
+  const result = await runCommandNoDisclosure(
+    UPLOAD_SANDBOX_SELF_TEST_RUNNER,
+    ['--json'],
+    {
+      captureStdout: true,
+      timeoutMs: 120_000,
+      env: Object.freeze({
+        PATH: '/usr/sbin:/usr/bin:/sbin:/bin',
+        LANG: 'C.UTF-8',
+        LC_ALL: 'C.UTF-8'
+      })
+    }
+  );
+  return uploadSelfTestResult(JSON.parse(result.stdout));
+}
+
+function localUploadReadinessAdapters() {
+  return {
+    verifyIdentity: async () => ({
+      user: 'turingmarket-parser',
+      group: 'turingmarket-parser',
+      home: '/nonexistent',
+      shell: '/usr/sbin/nologin',
+      locked: true,
+      supplementary_groups: [],
+      uid: 64123,
+      gid: 64123
+    }),
+    verifyInstalledArtifacts: async () => {},
+    systemdVersion: async () => loadRuntimeManifest().manifest.minimum_systemd_version,
+    systemctlShow: async (_unitName, expected) => expected,
+    staleUnitController: Object.freeze({
+      async kill() {},
+      async stop() {},
+      async resetFailed() {},
+      async assertCollected() {}
+    }),
+    runSelfTests: async () => uploadSelfTestResult(
+      Object.fromEntries(REQUIRED_UPLOAD_SANDBOX_SELF_TESTS.map((name) => [name, true]))
+    )
+  };
+}
+
+function recoverUploadAdmissions() {
+  return db.transaction(() => (
+    idempotency.recoverParserAdmissionsInTransaction(db)
+  )).immediate();
+}
+
+function resolveUploadPrincipal(req) {
+  const organizationId = req.authContext && req.authContext.organization &&
+    req.authContext.organization.id;
+  if (
+    !req.user || !Number.isSafeInteger(req.user.id) || req.user.id < 1 ||
+    !Number.isSafeInteger(organizationId) || organizationId < 1
+  ) {
+    throw uploadAuthorityError(401, 'AUTHORITY_REVOKED', 'Current upload authority could not be verified.');
+  }
+  return Object.freeze({ userId: req.user.id, organizationId });
+}
+
+function uploadAuthorityError(statusCode, code, message) {
+  const error = new Error(message);
+  error.name = 'UploadAuthorityError';
+  error.statusCode = statusCode;
+  error.status = statusCode;
+  error.code = code;
+  return error;
+}
+
+function currentUploadAuthority(database, state) {
+  let decoded;
+  try {
+    decoded = jwt.verify(state.token, JWT_SECRET);
+  } catch (_error) {
+    throw uploadAuthorityError(401, 'AUTHORITY_REVOKED', 'Current upload authority could not be verified.');
+  }
+  if (!decoded || Number(decoded.userId) !== state.userId) {
+    throw uploadAuthorityError(401, 'AUTHORITY_REVOKED', 'Current upload authority no longer matches the admitted request.');
+  }
+  const session = database.prepare(`
+    SELECT user_id
+    FROM sessions
+    WHERE token=? AND user_id=? AND expires_at>datetime('now')
+  `).get(state.token, state.userId);
+  const user = database.prepare(`
+    SELECT id,username,display_name,role,department,api_quota
+    FROM users
+    WHERE id=? AND is_active=1
+  `).get(state.userId);
+  if (!session || !user || session.user_id !== state.userId) {
+    throw uploadAuthorityError(401, 'AUTHORITY_REVOKED', 'Current upload authority could not be verified.');
+  }
+  const scope = organizationAccess.resolveOrganizationScope(database, {
+    userId: state.userId,
+    repairMissing: false
+  });
+  if (
+    !scope.ok || !scope.authContext || !scope.authContext.organization ||
+    scope.authContext.organization.id !== state.organizationId
+  ) {
+    throw uploadAuthorityError(401, 'AUTHORITY_REVOKED', 'Current organization authority could not be verified.');
+  }
+  if (state.campaignId !== null) {
+    const access = getCampaignAccess(database, {
+      userId: state.userId,
+      campaignId: state.campaignId
+    });
+    if (!access.ok || access.campaign.org_id !== state.organizationId) {
+      throw uploadAuthorityError(
+        access.status || 403,
+        access.code || 'CAMPAIGN_FORBIDDEN',
+        access.kind === 'not_found' ? 'Campaign not found.' : 'Campaign access is forbidden.'
+      );
+    }
+  }
+  return {
+    identity: Object.freeze({
+      userId: state.userId,
+      organizationId: state.organizationId,
+      campaignId: state.campaignId
+    }),
+    user
+  };
+}
+
+function createUploadAuthority(req, campaignId) {
+  const admission = req.phase4Request && req.phase4Request.admission;
+  const principal = resolveUploadPrincipal(req);
+  const token = bearerTokenFromAuthorization(req.headers && req.headers.authorization);
+  if (
+    !admission || !token ||
+    admission.userId !== principal.userId ||
+    admission.organizationId !== principal.organizationId
+  ) {
+    throw uploadAuthorityError(401, 'AUTHORITY_REVOKED', 'Current upload authority does not match parser admission.');
+  }
+  const state = Object.freeze({
+    token,
+    userId: admission.userId,
+    organizationId: admission.organizationId,
+    campaignId
+  });
+  return Object.freeze({
+    userId: state.userId,
+    organizationId: state.organizationId,
+    campaignId,
+    assertFresh(input) {
+      if (
+        !input || input.userId !== state.userId ||
+        input.organizationId !== state.organizationId ||
+        input.campaignId !== state.campaignId ||
+        typeof input.phase !== 'string' || input.phase.length === 0
+      ) {
+        throw uploadAuthorityError(401, 'AUTHORITY_REVOKED', 'Current upload authority request is invalid.');
+      }
+      const database = input.db;
+      return currentUploadAuthority(database, state).identity;
+    },
+    readFresh(database) {
+      return currentUploadAuthority(database, state);
+    }
+  });
+}
+
+function assertUploadAuthorityFresh(authority) {
+  return authority.assertFresh({
+    db,
+    phase: 'sandbox_authorization',
+    userId: authority.userId,
+    organizationId: authority.organizationId,
+    campaignId: authority.campaignId
+  });
+}
+
+function renewUploadAdmissionLease(admission) {
+  return db.transaction(() => idempotency.renewLeaseInTransaction(db, {
+    ledgerId: admission.ledgerId,
+    requestHash: admission.requestHash,
+    leaseToken: admission.leaseToken
+  })).immediate();
+}
+
+function requestUploadSignal(req) {
+  const controller = new AbortController();
+  const abort = () => controller.abort(new Error('Upload request was disconnected'));
+  req.once('aborted', abort);
+  return Object.freeze({
+    signal: controller.signal,
+    dispose() { req.removeListener('aborted', abort); }
+  });
+}
+
+function multipartTags(value) {
+  if (Array.isArray(value)) return value;
+  if (typeof value !== 'string' || value.trim() === '') return [];
+  try {
+    const parsed = JSON.parse(value);
+    if (Array.isArray(parsed)) return parsed;
+  } catch (_error) {}
+  return value.split(/[,;\n|]/).map((tag) => tag.trim()).filter(Boolean);
+}
+
+function sandboxWarning(data) {
+  if (Array.isArray(data.warnings) && data.warnings.length) {
+    return data.warnings.join(' | ');
+  }
+  return data.warning || undefined;
+}
+
+function projectKnowledgeUpload(req, parsed, actor) {
+  const data = parsed && parsed.data ? parsed.data : {};
+  const rows = Array.isArray(data.rows) ? data.rows : [];
+  const kind = data.kind || (rows.length ? 'table' : 'document');
+  const content = typeof data.content === 'string' ? data.content : String(data.text || '');
+  const metadata = {
+    originalname: req.file.originalname,
+    mimetype: req.file.mimetype,
+    size: req.file.size,
+    kind,
+    row_count: rows.length
+  };
+  for (const [name, value] of Object.entries({
+    parser: data.parser,
+    fallback: data.fallback,
+    warning: sandboxWarning(data)
+  })) {
+    if (value !== undefined) metadata[name] = value;
+  }
+  return {
+    rows: rows.length,
+    body: {
+      title: req.body.title || req.file.originalname,
+      summary: req.body.summary || '',
+      content,
+      entry_type: req.body.entry_type || (kind === 'table' ? 'uploaded_table' : 'uploaded_document'),
+      source_type: req.body.source_type || 'knowledge_upload',
+      source_id: req.body.source_id || req.file.originalname,
+      visibility: req.body.visibility || 'private',
+      tags: multipartTags(req.body.tags),
+      business_type: req.body.business_type,
+      business_id: req.body.business_id,
+      created_by: actor.id,
+      actor_role: actor.role,
+      metadata
+    }
+  };
+}
+
+function linkedKnowledgeBody(campaignId, projected) {
+  return {
+    campaign_id: campaignId,
+    entry_type: projected.body.entry_type,
+    title: projected.body.title,
+    summary: projected.body.summary,
+    content: projected.body.content,
+    tags: projected.body.tags,
+    source_type: projected.body.source_type,
+    source_id: projected.body.source_id,
+    visibility: projected.body.visibility,
+    metadata: projected.body.metadata
+  };
+}
+
+function legacyUploadError(res, error) {
+  const status = Number.isSafeInteger(error && error.statusCode)
+    ? error.statusCode
+    : Number.isSafeInteger(error && error.status)
+      ? error.status
+      : 500;
+  return res.status(status).json({
+    error: error && error.message ? error.message : 'Upload request failed.'
+  });
+}
+
+function phase4UploadHookError(error) {
+  if (
+    error &&
+    (error.name === 'UploadSandboxError' || error.name === 'IdempotencyServiceError') &&
+    Number.isSafeInteger(error.statusCode || error.status) &&
+    typeof error.code === 'string'
+  ) {
+    return new Phase4RequestError(
+      error.statusCode || error.status,
+      error.code,
+      error.message,
+      error.details
+    );
+  }
+  return error;
 }
 
 function nextUserIdInTransaction() {
@@ -503,6 +910,7 @@ const campaignLinkService = createCampaignLinkService(db);
 function campaignLinkRequestId(req) {
   return req.requestId ||
     req.phase4Request && req.phase4Request.requestId ||
+    identityRequestId(req) ||
     'campaign-link-request';
 }
 
@@ -515,7 +923,11 @@ function sendCampaignLinkResult(res, result) {
 
 function sendCampaignLinkError(req, res, error) {
   const known = error instanceof CampaignLinkServiceError ||
-    error && error.name === 'IdempotencyServiceError';
+    error && (
+      error.name === 'IdempotencyServiceError' ||
+      error.name === 'UploadSandboxError' ||
+      error.name === 'UploadAuthorityError'
+    );
   const body = {
     error: known ? error.message : 'Campaign-linked record request failed.',
     code: known ? error.code : 'AUDIT_PERSISTENCE_FAILED',
@@ -528,10 +940,57 @@ function sendCampaignLinkError(req, res, error) {
   return res.status(known ? error.statusCode : 500).json(body);
 }
 
+function sendAiChatError(req, res, error) {
+  const linkedError = error && (
+    error.name === 'AIServiceError' ||
+    error.name === 'IdempotencyServiceError'
+  );
+  if (!linkedError) {
+    const message = error && error.message ? error.message : 'AI chat request failed.';
+    const status = /forbidden|not found/i.test(message) ? 403 : 400;
+    return res.status(status).json({ error: message });
+  }
+
+  const body = {
+    error: error.message,
+    code: error.code || 'AI_CHAT_FAILED',
+    request_id: campaignLinkRequestId(req)
+  };
+  if (error.details !== undefined) body.details = error.details;
+  if (error.retryAfterSeconds) {
+    res.setHeader('Retry-After', String(error.retryAfterSeconds));
+  }
+  return res.status(error.statusCode || 500).json(body);
+}
+
+function sendAiReadError(req, res, error) {
+  const knownAuditFailure = error &&
+    error.name === 'AIServiceError' &&
+    error.code === 'AUDIT_PERSISTENCE_FAILED';
+  return res.status(500).json({
+    error: knownAuditFailure ? error.message : 'AI conversation read failed.',
+    code: 'AUDIT_PERSISTENCE_FAILED',
+    request_id: campaignLinkRequestId(req)
+  });
+}
+
 function hasCampaignId(body) {
   return body !== null && body !== undefined &&
     (typeof body === 'object' || typeof body === 'function') &&
     Object.hasOwn(body, 'campaign_id');
+}
+
+function requireCampaignLinkedJson(req) {
+  if (
+    !req.phase4Request ||
+    req.phase4Request.mediaKind !== campaignContract.MEDIA_KINDS.JSON
+  ) {
+    throw new CampaignLinkServiceError(
+      415,
+      'UNSUPPORTED_MEDIA_TYPE',
+      'Campaign-linked knowledge requests require application/json.'
+    );
+  }
 }
 
 function createLegacyDemand(req, res) {
@@ -575,9 +1034,11 @@ app.post('/api/demands', authMiddleware, (req, res) => {
 });
 
 app.get('/api/demands', authMiddleware, (req, res) => {
-  const demands = req.user.role === 'admin'
-    ? db.prepare('SELECT d.*, u.display_name, u.department FROM demands d JOIN users u ON d.user_id = u.id ORDER BY d.created_at DESC LIMIT 200').all()
-    : db.prepare('SELECT * FROM demands WHERE user_id = ? ORDER BY created_at DESC LIMIT 200').all(req.user.id);
+  const demands = readDemandProposalCollection(db, {
+    userId: req.user.id,
+    recordType: 'demand',
+    search: req.query.search
+  });
   res.json({ demands });
 });
 
@@ -622,9 +1083,11 @@ app.post('/api/proposals', authMiddleware, (req, res) => {
 });
 
 app.get('/api/proposals', authMiddleware, (req, res) => {
-  const proposals = req.user.role === 'admin'
-    ? db.prepare('SELECT p.*, u.display_name FROM proposals p JOIN users u ON p.user_id = u.id ORDER BY p.created_at DESC LIMIT 200').all()
-    : db.prepare('SELECT * FROM proposals WHERE user_id = ? ORDER BY created_at DESC LIMIT 200').all(req.user.id);
+  const proposals = readDemandProposalCollection(db, {
+    userId: req.user.id,
+    recordType: 'proposal',
+    search: req.query.search
+  });
   res.json({ proposals });
 });
 
@@ -805,7 +1268,7 @@ app.post('/api/admin/invites', authMiddleware, adminOnly, (req, res) => {
 });
 
 // ===== PPT GENERATION =====
-app.post('/api/proposal/generate-ppt', authMiddleware, (req, res) => {
+function createLegacyPpt(req, res) {
   const path = require('path');
   const fs = require('fs');
   const cp = require('child_process');
@@ -833,20 +1296,29 @@ app.post('/api/proposal/generate-ppt', authMiddleware, (req, res) => {
       });
     } catch (archiveErr) {}
     const python = process.env.PYTHON_BIN || (process.platform === 'win32' ? 'python' : 'python3');
-    cp.execFileSync(python, [path.join(__dirname, 'generate_ppt.py'), dataPath, outPath], { timeout: 30000, cwd: __dirname });
+    cp.execFileSync(python, [path.join(__dirname, 'generate_ppt.py'), dataPath, outPath], {
+      timeout: 30000,
+      cwd: __dirname,
+      env: runtimeConfig.pythonChildEnvironment()
+    });
     fs.unlinkSync(dataPath);
     res.download(outPath, 'proposal.pptx', function() { try { fs.unlinkSync(outPath); } catch(e) {} });
   } catch (e) {
     try { fs.unlinkSync(dataPath); } catch(e2) {}
     res.status(500).json({ error: 'PPT generation failed: ' + e.message });
   }
+}
+
+app.post('/api/proposal/generate-ppt', authMiddleware, (req, res) => {
+  if (hasCampaignId(req.body)) return campaignPptBridgeHandler(req, res);
+  return createLegacyPpt(req, res);
 });
 
 
 // ===== INFLUENCER & COLLABORATION ROUTES =====
-require('./routes')(app, db, authMiddleware);
+require('./routes')(app, db, authMiddleware, { campaignCollaborationService });
 require('./routes_customers')(app, db, authMiddleware);
-require('./routes_campaigns')(app, db);
+registerCampaignRoutes(app, db);
 require('./routes_brands')(app, db, authMiddleware, aiLimiter, aiQuotaGuard);
 
 // ===== WORKFLOW ENGINE ROUTES =====
@@ -873,10 +1345,27 @@ app.get('/api/knowledge', authMiddleware, (req, res) => {
 });
 
 app.post('/api/knowledge', authMiddleware, (req, res) => {
+  if (hasCampaignId(req.body)) {
+    try {
+      requireCampaignLinkedJson(req);
+      return sendCampaignLinkResult(res, campaignLinkService.createKnowledge({
+        userId: req.user.id,
+        requestId: campaignLinkRequestId(req),
+        idempotencyKey: req.get('Idempotency-Key'),
+        body: req.body
+      }));
+    } catch (error) {
+      return sendCampaignLinkError(req, res, error);
+    }
+  }
   try {
+    validateLegacyKnowledgeBody(req.body);
     const entry = knowledgeService.ingestKnowledge(db, Object.assign({}, req.body, { created_by: req.user.id, actor_role: req.user.role }));
     res.json({ entry, id: entry.id });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) {
+    if (e instanceof CampaignLinkServiceError) return sendCampaignLinkError(req, res, e);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 app.get('/api/knowledge/search', authMiddleware, (req, res) => {
@@ -897,7 +1386,21 @@ app.get('/api/knowledge/search', authMiddleware, (req, res) => {
 });
 
 app.post('/api/knowledge/ingest', authMiddleware, (req, res) => {
+  if (hasCampaignId(req.body)) {
+    try {
+      requireCampaignLinkedJson(req);
+      return sendCampaignLinkResult(res, campaignLinkService.ingestKnowledge({
+        userId: req.user.id,
+        requestId: campaignLinkRequestId(req),
+        idempotencyKey: req.get('Idempotency-Key'),
+        body: req.body
+      }));
+    } catch (error) {
+      return sendCampaignLinkError(req, res, error);
+    }
+  }
   try {
+    validateLegacyKnowledgeBody(req.body);
     const entry = knowledgeService.ingestKnowledge(db, Object.assign({}, req.body, {
       created_by: req.user.id,
       actor_role: req.user.role
@@ -905,84 +1408,106 @@ app.post('/api/knowledge/ingest', authMiddleware, (req, res) => {
     db.prepare('INSERT INTO activity_log (user_id, action, module, details, ip_address) VALUES (?, ?, ?, ?, ?)')
       .run(req.user.id, 'knowledge_ingest', 'knowledge', 'Ingested knowledge entry ' + entry.id, req.ip);
     res.json({ entry, id: entry.id });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-app.post('/api/knowledge/upload', authMiddleware, uploadLimiter, function(req, res, next) {
-  upload.single('file')(req, res, function(err) {
-    if (err) return res.status(400).json({ error: err.message });
-    next();
-  });
-}, async (req, res) => {
-  try {
-    if (!req.file) return res.status(400).json({ error: 'File required' });
-    let parsed;
-    try {
-      parsed = await fileIngestService.readUploadedFile(req.file);
-    } catch (parseError) {
-      const demandParsed = await latestUiCompat.parseDemandFile(req.file);
-      parsed = {
-        content: demandParsed.text,
-        kind: 'document',
-        rows: [],
-        parser: demandParsed.parser,
-        fallback: demandParsed.fallback,
-        warning: demandParsed.warnings && demandParsed.warnings.length ? demandParsed.warnings.join(' | ') : parseError.message
-      };
-    }
-    const entry = knowledgeService.ingestKnowledge(db, {
-      title: req.body.title || req.file.originalname,
-      summary: req.body.summary || '',
-      content: parsed.content,
-      entry_type: req.body.entry_type || (parsed.kind === 'table' ? 'uploaded_table' : 'uploaded_document'),
-      source_type: req.body.source_type || 'knowledge_upload',
-      source_id: req.body.source_id || req.file.originalname,
-      visibility: req.body.visibility || 'private',
-      tags: req.body.tags || [],
-      business_type: req.body.business_type,
-      business_id: req.body.business_id,
-      created_by: req.user.id,
-      actor_role: req.user.role,
-      metadata: {
-        originalname: req.file.originalname,
-        mimetype: req.file.mimetype,
-        size: req.file.size,
-        kind: parsed.kind,
-        row_count: parsed.rows ? parsed.rows.length : 0,
-        parser: parsed.parser,
-        fallback: parsed.fallback,
-        warning: parsed.warning
-      }
-    });
-    try { fs.unlinkSync(req.file.path); } catch (e2) {}
-    res.json({ entry, rows: parsed.rows ? parsed.rows.length : 0 });
   } catch (e) {
-    try { if (req.file && req.file.path) fs.unlinkSync(req.file.path); } catch (e2) {}
-    res.status(e.code === 'XLSX_NOT_INSTALLED' ? 501 : 500).json({ error: e.message });
+    if (e instanceof CampaignLinkServiceError) return sendCampaignLinkError(req, res, e);
+    res.status(500).json({ error: e.message });
   }
 });
 
-app.post('/api/influencers/upload', authMiddleware, uploadLimiter, function(req, res, next) {
-  upload.single('file')(req, res, function(err) {
-    if (err) return res.status(400).json({ error: err.message });
-    next();
-  });
-}, async (req, res) => {
+app.post('/api/knowledge/upload', authMiddleware, async (req, res) => {
+  const linked = Object.prototype.hasOwnProperty.call(req.body || {}, 'campaign_id');
+  const campaignId = linked ? Number(req.body.campaign_id) : null;
+  const requestSignal = requestUploadSignal(req);
   try {
-    if (!req.file) return res.status(400).json({ error: 'File required' });
-    const parsed = await fileIngestService.readUploadedFile(req.file);
-    if (!parsed.rows || !parsed.rows.length) return res.status(400).json({ error: 'No table rows found in uploaded file' });
-    const result = influencerWorkflow.importInfluencerRows(db, parsed.rows, {
-      batch_id: req.body.batch_id || req.file.originalname,
-      user: req.user,
-      data_source: 'upload'
+    const authority = createUploadAuthority(req, campaignId);
+    const admission = req.phase4Request.admission;
+    const multipart = req.phase4Request.multipart;
+    const finalizeLinked = linked
+      ? campaignLinkService.createMultipartKnowledgeFinalizer({
+          campaignId,
+          idempotencyKey: req.get('Idempotency-Key'),
+          canonicalRequestHash: multipart.canonicalRequestHash,
+          requestId: campaignLinkRequestId(req),
+          admission,
+          authority: {
+            userId: authority.userId,
+            organizationId: authority.organizationId,
+            assertFresh: authority.assertFresh
+          }
+        })
+      : null;
+    const result = await uploadSandboxService.processUpload({
+      multipart: multipart.sandboxMultipart,
+      admission,
+      signal: requestSignal.signal,
+      assertLeaseOwned: () => renewUploadAdmissionLease(admission),
+      assertAuthorized: () => assertUploadAuthorityFresh(authority),
+      finalize(parsed, lifecycle) {
+        if (finalizeLinked) {
+          const projected = projectKnowledgeUpload(req, parsed, authority.readFresh(db).user);
+          return finalizeLinked({
+            body: linkedKnowledgeBody(campaignId, projected),
+            rows: projected.rows,
+            lifecycle
+          });
+        }
+        return db.transaction(() => {
+          const current = authority.readFresh(db);
+          const projected = projectKnowledgeUpload(req, parsed, current.user);
+          const entry = knowledgeService.ingestKnowledge(db, projected.body);
+          lifecycle.completeAdmissionInTransaction(db);
+          return { entry, rows: projected.rows };
+        }).immediate();
+      }
     });
-    try { fs.unlinkSync(req.file.path); } catch (e2) {}
-    res.json(Object.assign({ parser: parsed.parser, warning: parsed.warning }, result));
-  } catch (e) {
-    try { if (req.file && req.file.path) fs.unlinkSync(req.file.path); } catch (e2) {}
-    const status = e.code === 'UNSUPPORTED_FILE_TYPE' ? 415 : e.code === 'XLSX_NOT_INSTALLED' ? 501 : (e.statusCode || 500);
-    res.status(status).json({ error: e.message });
+    if (linked) return sendCampaignLinkResult(res, result);
+    return res.json(result);
+  } catch (error) {
+    if (linked) return sendCampaignLinkError(req, res, error);
+    return legacyUploadError(res, error);
+  } finally {
+    requestSignal.dispose();
+  }
+});
+
+app.post('/api/influencers/upload', authMiddleware, async (req, res) => {
+  const requestSignal = requestUploadSignal(req);
+  try {
+    const authority = createUploadAuthority(req, null);
+    const admission = req.phase4Request.admission;
+    const result = await uploadSandboxService.processUpload({
+      multipart: req.phase4Request.multipart.sandboxMultipart,
+      admission,
+      signal: requestSignal.signal,
+      assertLeaseOwned: () => renewUploadAdmissionLease(admission),
+      assertAuthorized: () => assertUploadAuthorityFresh(authority),
+      finalize(parsed, lifecycle) {
+        return db.transaction(() => {
+          const current = authority.readFresh(db);
+          const data = parsed && parsed.data ? parsed.data : {};
+          if (!Array.isArray(data.rows) || data.rows.length === 0) {
+            const error = new Error('No table rows found in uploaded file');
+            error.statusCode = 400;
+            throw error;
+          }
+          const imported = influencerWorkflow.importInfluencerRows(db, data.rows, {
+            batch_id: req.body.batch_id || req.file.originalname,
+            user: current.user,
+            data_source: 'upload'
+          });
+          lifecycle.completeAdmissionInTransaction(db);
+          return Object.assign({
+            parser: data.parser,
+            warning: sandboxWarning(data)
+          }, imported);
+        }).immediate();
+      }
+    });
+    return res.json(result);
+  } catch (error) {
+    return legacyUploadError(res, error);
+  } finally {
+    requestSignal.dispose();
   }
 });
 
@@ -1030,29 +1555,58 @@ app.get('/api/knowledge/similar', authMiddleware, (req, res) => {
 });
 
 app.post('/api/knowledge/:id/use', authMiddleware, (req, res) => {
-  knowledgeService.markKnowledgeUsed(db, [req.params.id]);
-  res.json({ success: true });
+  try {
+    if (!campaignContract.isCanonicalSafeIntegerPathSegment(req.params.id)) {
+      throw new CampaignLinkServiceError(
+        400,
+        'INVALID_CAMPAIGN_INPUT',
+        'knowledge_entry_id is invalid.'
+      );
+    }
+    const linked = campaignLinkService.useKnowledge({
+      userId: req.user.id,
+      requestId: campaignLinkRequestId(req),
+      idempotencyKey: req.get('Idempotency-Key'),
+      entryId: Number(req.params.id),
+      bodyIsEmpty: Boolean(
+        req.phase4Request &&
+        Buffer.isBuffer(req.phase4Request.rawBody) &&
+        req.phase4Request.rawBody.length === 0
+      )
+    });
+    if (linked) return sendCampaignLinkResult(res, linked);
+    knowledgeService.markKnowledgeUsed(db, [req.params.id], req.user);
+    return res.json({ success: true });
+  } catch (error) {
+    return sendCampaignLinkError(req, res, error);
+  }
 });
 
 // ===== AI CONVERSATION + RAG ROUTES =====
 app.post('/api/ai/chat', authMiddleware, aiLimiter, aiQuotaGuard, async (req, res) => {
   try {
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
     const result = await aiService.handleChat(db, {
       user: req.user,
-      message: req.body.message,
-      conversation_id: req.body.conversation_id,
-      allowWeb: boolParam(req.body.allow_web, false),
-      source_module: req.body.source_module || 'assistant',
-      business_type: req.body.business_type,
-      business_id: req.body.business_id,
-      summaryVisibility: req.body.summary_visibility || 'private',
-      knowledgeLimit: req.body.knowledge_limit || 8,
-      max_tokens: req.body.max_tokens
+      message: body.message,
+      campaign_id: body.campaign_id === undefined ? body.campaignId : body.campaign_id,
+      conversation_id: body.conversation_id === undefined ? body.conversationId : body.conversation_id,
+      knowledge_entry_ids: body.knowledge_entry_ids === undefined
+        ? body.knowledgeEntryIds
+        : body.knowledge_entry_ids,
+      idempotencyKey: req.get('Idempotency-Key'),
+      requestId: campaignLinkRequestId(req),
+      allowWeb: boolParam(body.allow_web, false),
+      source_module: body.source_module || 'assistant',
+      business_type: body.business_type,
+      business_id: body.business_id,
+      summaryVisibility: body.summary_visibility || 'private',
+      knowledgeLimit: body.knowledge_limit || 8,
+      max_tokens: body.max_tokens
     });
     res.json(result);
   } catch (e) {
-    const status = /forbidden|not found/i.test(e.message) ? 403 : 400;
-    res.status(status).json({ error: e.message });
+    sendAiChatError(req, res, e);
   }
 });
 
@@ -1060,27 +1614,32 @@ app.get('/api/ai/conversations', authMiddleware, (req, res) => {
   try {
     const conversations = aiService.listConversations(db, {
       user: req.user,
+      authContext: req.authContext,
+      requestId: campaignLinkRequestId(req),
       q: req.query.q || '',
       user_id: req.query.user_id,
       source_module: req.query.source_module,
       limit: req.query.limit || 100
     });
     res.json({ conversations });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (error) {
+    sendAiReadError(req, res, error);
+  }
 });
 
 app.get('/api/ai/conversations/:id', authMiddleware, (req, res) => {
   try {
-    const conversation = aiService.getConversation(db, { id: req.params.id, user: req.user });
+    const conversation = aiService.getConversation(db, {
+      id: req.params.id,
+      user: req.user,
+      authContext: req.authContext,
+      requestId: campaignLinkRequestId(req)
+    });
     if (!conversation) return res.status(404).json({ error: 'Conversation not found' });
-    if (req.user.role === 'admin' && Number(conversation.user_id) !== Number(req.user.id)) {
-      try {
-        db.prepare('INSERT INTO activity_log (user_id, action, module, details, ip_address) VALUES (?, ?, ?, ?, ?)')
-          .run(req.user.id, 'admin_view_ai_conversation', 'ai_audit', 'Viewed AI conversation ' + req.params.id + ' owned by user ' + conversation.user_id, req.ip);
-      } catch (e2) {}
-    }
     res.json({ conversation });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (error) {
+    sendAiReadError(req, res, error);
+  }
 });
 
 app.post('/api/ai/proposal-draft', authMiddleware, aiLimiter, aiQuotaGuard, async (req, res) => {
@@ -1121,54 +1680,45 @@ app.post('/api/ai/proposal-draft', authMiddleware, aiLimiter, aiQuotaGuard, asyn
 });
 
 // ===== LATEST UI COMPATIBILITY ROUTES =====
-app.post('/api/demand/parse-file', authMiddleware, uploadLimiter, upload.single('file'), async (req, res) => {
-  if (!req.file) return res.status(400).json({ error: 'File required' });
+app.post('/api/demand/parse-file', authMiddleware, async (req, res) => {
+  const requestSignal = requestUploadSignal(req);
   try {
-    const parsed = await latestUiCompat.parseDemandFile(req.file);
-    const inferred = latestUiCompat.inferDemandAnalysis(parsed.text, parsed.warning || '', req.file.originalname);
-    const archiveContent = parsed.fallback ? '' : parsed.text;
-    const archiveSummary = parsed.fallback
-      ? 'File parsed without readable business text; parser details kept in metadata and excluded from RAG content.'
-      : String(parsed.text || '').replace(/\s+/g, ' ').trim().slice(0, 240);
-    try {
-      knowledgeService.ingestKnowledge(db, {
-        title: 'Demand upload: ' + (req.file.originalname || 'uploaded file'),
-        summary: archiveSummary,
-        content: archiveContent,
-        entry_type: parsed.fallback ? 'demand_upload_parse_failure' : 'demand_upload',
-        source_type: 'demand_parse_file',
-        source_id: req.file.originalname || req.file.filename,
-        visibility: 'private',
-        tags: ['demand', 'upload', path.extname(req.file.originalname || '').replace('.', ''), parsed.fallback ? 'parse_failure' : 'parsed'].filter(Boolean),
-        business_type: 'demand',
-        business_id: '',
-        created_by: req.user.id,
-        actor_role: req.user.role,
-        metadata: {
-          parser: parsed.parser,
-          fallback: parsed.fallback,
-          parse_failure: !!parsed.fallback,
-          parser_text: parsed.fallback ? parsed.text : '',
-          needsOcr: parsed.needsOcr,
-          ocrUsed: parsed.ocrUsed,
-          fileName: req.file.originalname
-        }
-      });
-    } catch (e2) {}
-    res.json({
-      fileName: req.file.originalname,
-      extractedText: parsed.text,
-      analysisHint: inferred,
-      fallback: parsed.fallback,
-      warning: parsed.warnings && parsed.warnings.length ? parsed.warnings.join(' | ') : undefined,
-      parser: parsed.parser,
-      needsOcr: parsed.needsOcr,
-      ocrUsed: parsed.ocrUsed
+    const authority = createUploadAuthority(req, null);
+    const admission = req.phase4Request.admission;
+    const result = await uploadSandboxService.processUpload({
+      multipart: req.phase4Request.multipart.sandboxMultipart,
+      admission,
+      signal: requestSignal.signal,
+      assertLeaseOwned: () => renewUploadAdmissionLease(admission),
+      assertAuthorized: () => assertUploadAuthorityFresh(authority),
+      finalize(parsed, lifecycle) {
+        const data = parsed && parsed.data ? parsed.data : {};
+        const response = {
+          fileName: req.file.originalname,
+          extractedText: data.text,
+          analysisHint: latestUiCompat.inferDemandAnalysis(
+            data.text,
+            data.warning || '',
+            req.file.originalname
+          ),
+          fallback: data.fallback,
+          warning: sandboxWarning(data),
+          parser: data.parser,
+          needsOcr: data.needsOcr,
+          ocrUsed: data.ocrUsed
+        };
+        db.transaction(() => {
+          authority.readFresh(db);
+          lifecycle.completeAdmissionInTransaction(db);
+        }).immediate();
+        return response;
+      }
     });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
+    return res.json(result);
+  } catch (error) {
+    return legacyUploadError(res, error);
   } finally {
-    latestUiCompat.safeUnlink(req.file.path);
+    requestSignal.dispose();
   }
 });
 
@@ -1303,9 +1853,9 @@ app.get('/api/dashboard/stats', authMiddleware, (req, res) => {
 // ===== KNOWLEDGE CATEGORIES =====
 app.get('/api/knowledge/categories', authMiddleware, (req, res) => {
   try {
-    const categories = req.user.role === 'admin'
-      ? db.prepare("SELECT entry_type, COUNT(*) as count FROM knowledge_entries GROUP BY entry_type").all()
-      : db.prepare("SELECT entry_type, COUNT(*) as count FROM knowledge_entries WHERE created_by = ? OR visibility IN ('team','public','shared') OR is_public = 1 GROUP BY entry_type").all(req.user.id);
+    const categories = knowledgeService.listKnowledgeCategories(db, {
+      user: req.user
+    });
     res.json({ categories });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -1346,12 +1896,6 @@ app.get('/api/users', authMiddleware, adminOnly, (req, res) => {
   const users = db.prepare('SELECT id, username, display_name, role, department, email, api_quota, created_at, last_login, is_active FROM users ORDER BY department, id').all();
   res.json({ users });
 });
-// ===== WORKFLOW ENGINE INIT =====
-const workflowEngine = require('./workflow_engine');
-workflowEngine.initEngine();
-const { startCampaignWorkflowDispatcher } = require('./services/campaign_workflow_service');
-startCampaignWorkflowDispatcher(db);
-
 // ===== HEALTH CHECK =====
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
@@ -1368,6 +1912,125 @@ app.get('/{*path}', (req, res) => {
   });
 });
 
-app.listen(...runtimeConfig.serverListenArgs(PORT), () => {
-  console.log(`🚀 TuringMarket server running on http://localhost:${PORT}`);
+let campaignPptJanitorStopped = false;
+function stopCampaignPptJanitor() {
+  if (campaignPptJanitorStopped) return;
+  campaignPptJanitorStopped = true;
+  if (campaignPptJanitor) clearInterval(campaignPptJanitor);
+}
+
+let httpServer = null;
+let shutdownStarted = false;
+function shutdownServer(signal) {
+  if (shutdownStarted) return;
+  shutdownStarted = true;
+  stopCampaignPptJanitor();
+  if (!httpServer) {
+    process.exit(1);
+    return;
+  }
+  httpServer.close((error) => {
+    if (error) {
+      console.error(`Server shutdown failed after ${signal}`, error);
+      process.exit(1);
+    }
+    process.exit(0);
+  });
+}
+
+async function bootstrapServer() {
+  const localWorker = LOCAL_UPLOAD_WORKER_MODE;
+  if (localWorker) {
+    await fs.promises.mkdir(UPLOAD_SANDBOX_SPOOL_ROOT, {
+      recursive: true,
+      mode: 0o700
+    });
+    await fs.promises.chmod(UPLOAD_SANDBOX_SPOOL_ROOT, 0o700);
+  }
+  const readiness = await assertUploadSandboxStartupReady({
+    expectedManifestSha256: localWorker
+      ? loadRuntimeManifest().manifestSha256
+      : RELEASE_PINNED_UPLOAD_MANIFEST_SHA256,
+    idempotency: uploadAdmissionIdempotency,
+    spoolRoot: UPLOAD_SANDBOX_SPOOL_ROOT,
+    recoverAdmissions: recoverUploadAdmissions,
+    runSelfTests: runProductionUploadSandboxSelfTests,
+    ...(localWorker ? localUploadReadinessAdapters() : {})
+  });
+  const sandboxOptions = {
+    db,
+    idempotency: uploadAdmissionIdempotency,
+    spoolRoot: UPLOAD_SANDBOX_SPOOL_ROOT,
+    parserIdentity: readiness.parserIdentity
+  };
+  if (localWorker) {
+    sandboxOptions.executeJob = async (job, options) => {
+      await options.assertLeaseOwned(job.admission);
+      await workerMain([
+        'worker',
+        '--job-id', job.id,
+        '--request', job.requestPath,
+        '--input', job.inputPath,
+        '--output-root', job.outputRoot
+      ]);
+      await options.assertLeaseOwned(job.admission);
+    };
+    sandboxOptions.killJob = async () => {};
+  }
+  uploadSandboxService = createUploadSandboxService(sandboxOptions);
+  const uploadHooks = uploadSandboxService.createPipelineHooks({
+    resolvePrincipal: resolveUploadPrincipal
+  });
+  phase4RequestPipeline = createPhase4RequestPipeline({
+    registry: phase4Registry,
+    authenticate: authenticatePhase4Request,
+    async admit(request, context) {
+      if (!(context && context.policy && context.policy.admission)) return true;
+      try {
+        return await uploadHooks.admit(request, context);
+      } catch (error) {
+        throw phase4UploadHookError(error);
+      }
+    },
+    async parseMultipart(request, rawBody, policy) {
+      try {
+        return await uploadHooks.parseMultipart(request, rawBody, policy);
+      } catch (error) {
+        throw phase4UploadHookError(error);
+      }
+    },
+    onAdmissionFailure: uploadHooks.onAdmissionFailure,
+    requireDurableAdmission: true,
+    shouldOwnRequest: campaignLinkedSharedWorkflowOwner
+  });
+
+  campaignPptService.runArtifactJanitor();
+  campaignPptJanitor = setInterval(() => {
+    try {
+      campaignPptService.runArtifactJanitor();
+    } catch (error) {
+      console.error('Campaign PPT artifact janitor tick failed', error);
+    }
+  }, 60 * 60 * 1000);
+  if (campaignPptJanitor && typeof campaignPptJanitor.unref === 'function') {
+    campaignPptJanitor.unref();
+  }
+
+  const workflowEngine = require('./workflow_engine');
+  workflowEngine.initEngine();
+  const { startCampaignWorkflowDispatcher } = require('./services/campaign_workflow_service');
+  startCampaignWorkflowDispatcher(db);
+
+  httpServer = app.listen(...SERVER_LISTEN_ARGS, () => {
+    console.log(`TuringMarket server running on http://localhost:${PORT}`);
+  });
+  httpServer.once('close', stopCampaignPptJanitor);
+  process.once('SIGTERM', () => shutdownServer('SIGTERM'));
+  process.once('SIGINT', () => shutdownServer('SIGINT'));
+}
+
+bootstrapServer().catch((error) => {
+  stopCampaignPptJanitor();
+  console.error('Server startup failed', error);
+  process.exitCode = 1;
 });

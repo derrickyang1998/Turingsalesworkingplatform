@@ -172,6 +172,22 @@ function writeTempMigration(root, repoPath, source) {
   fs.writeFileSync(absolute, source, 'utf8');
 }
 
+function writeSchemaManifestMigration(root, descriptor, schemaManifest, applySql) {
+  writeTempMigration(root, descriptor.sourcePath, `
+module.exports = {
+  version: ${descriptor.version},
+  name: ${JSON.stringify(descriptor.name)},
+  sourcePath: ${JSON.stringify(descriptor.sourcePath)},
+  engineVersion: 1,
+  dependencies: ['${VENDORED_BCRYPT_PATH}'],
+  schemaManifest: ${JSON.stringify(schemaManifest)},
+  apply(db) {
+    db.exec(${JSON.stringify(applySql)});
+  }
+};
+`);
+}
+
 function assertAsyncCapabilityRejected(probeName, applyBody) {
   const migrationService = require('../services/migration_service');
   const root = tempMigrationRoot(probeName);
@@ -3274,6 +3290,401 @@ test('admin and influencer seed predicates remain independently frozen', () => {
   assert.deepEqual(allRows(db, 'SELECT username FROM users ORDER BY id'), [{ username: 'root' }]);
   assert.deepEqual(allRows(db, 'SELECT kol_handle FROM influencers ORDER BY id'), [{ kol_handle: '@one-existing' }]);
   db.close();
+});
+
+test('highest applied migration manifest owns same-type index trigger and view SQL', () => {
+  const migrationService = require('../services/migration_service');
+  const root = tempMigrationRoot('schema-object-final-owner');
+  const descriptors = [
+    {
+      version: 2,
+      name: 'schema_object_owner_v2',
+      sourcePath: 'migrations/002_schema_object_owner_v2.js',
+      engineVersion: 1,
+      dependencies: [VENDORED_BCRYPT_PATH]
+    },
+    {
+      version: 3,
+      name: 'schema_object_owner_v3',
+      sourcePath: 'migrations/003_schema_object_owner_v3.js',
+      engineVersion: 1,
+      dependencies: [VENDORED_BCRYPT_PATH]
+    }
+  ];
+  const v2 = {
+    index: 'CREATE INDEX manifest_owner_index ON manifest_owner_source(value)',
+    trigger: `CREATE TRIGGER manifest_owner_trigger
+AFTER INSERT ON manifest_owner_source
+BEGIN UPDATE manifest_owner_source SET value='v2' WHERE id=NEW.id; END`,
+    view: `CREATE VIEW manifest_owner_view AS
+SELECT id,value FROM manifest_owner_source WHERE value='v2'`
+  };
+  const v3 = {
+    index: 'CREATE INDEX manifest_owner_index ON manifest_owner_source(value DESC)',
+    trigger: `CREATE TRIGGER manifest_owner_trigger
+AFTER INSERT ON manifest_owner_source
+BEGIN UPDATE manifest_owner_source SET value='v3' WHERE id=NEW.id; END`,
+    view: `CREATE VIEW manifest_owner_view AS
+SELECT id,value FROM manifest_owner_source WHERE value='v3'`
+  };
+  writeSchemaManifestMigration(root, descriptors[0], {
+    columns: {
+      manifest_owner_source: {
+        id: { type: 'INTEGER', notnull: 0, defaultValue: null },
+        value: { type: 'TEXT', notnull: 1, defaultValue: null }
+      }
+    },
+    indexes: { manifest_owner_index: v2.index },
+    triggers: { manifest_owner_trigger: v2.trigger },
+    views: { manifest_owner_view: v2.view },
+    tableChecks: {}
+  }, `
+    CREATE TABLE manifest_owner_source (id INTEGER PRIMARY KEY,value TEXT NOT NULL) STRICT;
+    ${v2.index};
+    ${v2.trigger};
+    ${v2.view};
+  `);
+  writeSchemaManifestMigration(root, descriptors[1], {
+    columns: {},
+    indexes: { manifest_owner_index: v3.index },
+    triggers: { manifest_owner_trigger: v3.trigger },
+    views: { manifest_owner_view: v3.view },
+    tableChecks: {}
+  }, `
+    DROP INDEX manifest_owner_index;
+    DROP TRIGGER manifest_owner_trigger;
+    DROP VIEW manifest_owner_view;
+    ${v3.index};
+    ${v3.trigger};
+    ${v3.view};
+  `);
+  const fixture = tmpDb('schema-object-final-owner');
+  const classifyOptions = {
+    rootDir: root,
+    migrations: [...migrationService.defaultMigrations(), ...descriptors]
+  };
+
+  try {
+    assert.deepEqual(migrationService.runMigrations(fixture.db, {
+      rootDir: root,
+      registeredMigrations: descriptors
+    }), { status: 'managed', currentVersion: 3 });
+    fixture.db.prepare(`
+      INSERT INTO manifest_owner_source (id,value) VALUES (1,'initial')
+    `).run();
+    assert.deepEqual(
+      fixture.db.prepare('SELECT id,value FROM manifest_owner_view').all(),
+      [{ id: 1, value: 'v3' }]
+    );
+    assert.deepEqual(
+      migrationService.classifyDatabase(fixture.db, classifyOptions),
+      { status: 'managed', currentVersion: 3 }
+    );
+
+    fixture.db.exec(`
+      CREATE VIEW manifest_owner_unknown AS SELECT id FROM manifest_owner_source
+    `);
+    const unknown = migrationService.classifyDatabase(fixture.db, classifyOptions);
+    assert.equal(unknown.status, 'partial_or_malformed');
+    assert.match(unknown.reason, /unknown.*manifest_owner_unknown|manifest_owner_unknown.*unknown/i);
+  } finally {
+    fixture.db.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('checksum-bound baseline table ownership rejects a same-name view replacement', () => {
+  const migrationService = require('../services/migration_service');
+  const root = tempMigrationRoot('baseline-table-view-replacement');
+  const descriptor = {
+    version: 2,
+    name: 'baseline_table_view_replacement',
+    sourcePath: 'migrations/002_baseline_table_view_replacement.js',
+    engineVersion: 1,
+    dependencies: [VENDORED_BCRYPT_PATH]
+  };
+  const viewSql = `CREATE VIEW sales_targets AS
+SELECT id,user_id FROM token_usage`;
+  writeSchemaManifestMigration(root, descriptor, {
+    columns: {},
+    indexes: {},
+    triggers: {},
+    views: { sales_targets: viewSql },
+    tableChecks: {}
+  }, `
+    DROP TABLE sales_targets;
+    ${viewSql};
+  `);
+  const fixture = tmpDb('baseline-table-view-replacement');
+
+  try {
+    assert.throws(() => migrationService.runMigrations(fixture.db, {
+      rootDir: root,
+      registeredMigrations: [descriptor]
+    }), /baseline|ownership|sales_targets|table|view/i);
+  } finally {
+    fixture.db.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('columns and tableChecks manifest targets require real table objects', () => {
+  const migrationService = require('../services/migration_service');
+  const scenarios = [
+    {
+      name: 'columns_target_view',
+      manifest(target) {
+        return {
+          columns: {
+            [target]: {
+              id: { type: 'INTEGER', notnull: 0, defaultValue: null }
+            }
+          },
+          indexes: {},
+          triggers: {},
+          views: {},
+          tableChecks: {}
+        };
+      }
+    },
+    {
+      name: 'table_checks_target_view',
+      manifest(target) {
+        return {
+          columns: {},
+          indexes: {},
+          triggers: {},
+          views: {},
+          tableChecks: { [target]: [] }
+        };
+      }
+    }
+  ];
+
+  for (const scenario of scenarios) {
+    const root = tempMigrationRoot(scenario.name);
+    const target = `manifest_${scenario.name}`;
+    const descriptor = {
+      version: 2,
+      name: scenario.name,
+      sourcePath: `migrations/002_${scenario.name}.js`,
+      engineVersion: 1,
+      dependencies: [VENDORED_BCRYPT_PATH]
+    };
+    writeSchemaManifestMigration(
+      root,
+      descriptor,
+      scenario.manifest(target),
+      `CREATE VIEW ${target} AS SELECT id FROM users;`
+    );
+    const fixture = tmpDb(scenario.name);
+    try {
+      assert.throws(() => migrationService.runMigrations(fixture.db, {
+        rootDir: root,
+        registeredMigrations: [descriptor]
+      }), /manifest|table|type|view/i, scenario.name);
+    } finally {
+      fixture.db.close();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test('schema object final ownership rejects type changes omissions partial objects and table shadowing', () => {
+  const migrationService = require('../services/migration_service');
+  const scenarios = [
+    {
+      name: 'declaration-type-change',
+      v2Manifest(source, object, oldSql) {
+        return {
+          columns: { [source]: {
+            id: { type: 'INTEGER', notnull: 0, defaultValue: null },
+            value: { type: 'TEXT', notnull: 1, defaultValue: null }
+          } },
+          indexes: {},
+          triggers: { [object]: oldSql },
+          views: {},
+          tableChecks: {}
+        };
+      },
+      v3Manifest(_source, object, _oldSql, newSql) {
+        return { columns: {}, indexes: { [object]: newSql }, triggers: {}, views: {}, tableChecks: {} };
+      },
+      v3Sql(_source, object, newSql) {
+        return `DROP TRIGGER ${object}; ${newSql};`;
+      },
+      expected: /ownership|type|trigger|index/i
+    },
+    {
+      name: 'wrong-final-type',
+      v3Manifest(_source, object, _oldSql, newSql) {
+        return { columns: {}, indexes: {}, triggers: { [object]: newSql }, views: {}, tableChecks: {} };
+      },
+      v3Sql(source, object) {
+        return `DROP TRIGGER ${object}; CREATE VIEW ${object} AS SELECT id FROM ${source};`;
+      },
+      expected: /type|trigger|missing|incompatible/i
+    },
+    {
+      name: 'replacement-not-declared',
+      v3Manifest() {
+        return { columns: {}, indexes: {}, triggers: {}, views: {}, tableChecks: {} };
+      },
+      v3Sql(_source, object, newSql) {
+        return `DROP TRIGGER ${object}; ${newSql};`;
+      },
+      expected: /trigger|incompatible/i
+    },
+    {
+      name: 'replacement-missing',
+      v3Manifest(_source, object, _oldSql, newSql) {
+        return { columns: {}, indexes: {}, triggers: { [object]: newSql }, views: {}, tableChecks: {} };
+      },
+      v3Sql(_source, object) {
+        return `DROP TRIGGER ${object};`;
+      },
+      expected: /trigger|missing|partial/i
+    }
+  ];
+
+  for (const scenario of scenarios) {
+    const root = tempMigrationRoot(`schema-object-${scenario.name}`);
+    const source = `manifest_${scenario.name.replaceAll('-', '_')}_source`;
+    const object = `manifest_${scenario.name.replaceAll('-', '_')}_object`;
+    const descriptors = [2, 3].map((version) => ({
+      version,
+      name: `schema_object_${scenario.name.replaceAll('-', '_')}_v${version}`,
+      sourcePath: `migrations/00${version}_schema_object_${scenario.name.replaceAll('-', '_')}.js`,
+      engineVersion: 1,
+      dependencies: [VENDORED_BCRYPT_PATH]
+    }));
+    const oldSql = `CREATE TRIGGER ${object} AFTER INSERT ON ${source} BEGIN SELECT NEW.id; END`;
+    const replacementTrigger = `CREATE TRIGGER ${object} AFTER INSERT ON ${source} BEGIN SELECT NEW.value; END`;
+    const replacementIndex = `CREATE INDEX ${object} ON ${source}(value DESC)`;
+    const v2Manifest = scenario.v2Manifest
+      ? scenario.v2Manifest(source, object, oldSql)
+      : {
+          columns: { [source]: {
+            id: { type: 'INTEGER', notnull: 0, defaultValue: null },
+            value: { type: 'TEXT', notnull: 1, defaultValue: null }
+          } },
+          indexes: {},
+          triggers: { [object]: oldSql },
+          views: {},
+          tableChecks: {}
+        };
+    const newSql = scenario.name === 'declaration-type-change'
+      ? replacementIndex
+      : replacementTrigger;
+    writeSchemaManifestMigration(root, descriptors[0], v2Manifest, `
+      CREATE TABLE ${source} (id INTEGER PRIMARY KEY,value TEXT NOT NULL) STRICT;
+      ${oldSql};
+    `);
+    writeSchemaManifestMigration(
+      root,
+      descriptors[1],
+      scenario.v3Manifest(source, object, oldSql, newSql),
+      scenario.v3Sql(source, object, newSql)
+    );
+    const fixture = tmpDb(`schema-object-${scenario.name}`);
+    try {
+      assert.throws(() => migrationService.runMigrations(fixture.db, {
+        rootDir: root,
+        registeredMigrations: descriptors
+      }), scenario.expected, scenario.name);
+    } finally {
+      fixture.db.close();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+
+  const tableRoot = tempMigrationRoot('schema-object-table-shadow');
+  const tableDescriptors = [2, 3].map((version) => ({
+    version,
+    name: `schema_object_table_shadow_v${version}`,
+    sourcePath: `migrations/00${version}_schema_object_table_shadow.js`,
+    engineVersion: 1,
+    dependencies: [VENDORED_BCRYPT_PATH]
+  }));
+  writeSchemaManifestMigration(tableRoot, tableDescriptors[0], {
+    columns: {
+      manifest_table_shadow: {
+        id: { type: 'INTEGER', notnull: 0, defaultValue: null }
+      }
+    },
+    indexes: {},
+    triggers: {},
+    views: {},
+    tableChecks: {}
+  }, 'CREATE TABLE manifest_table_shadow (id INTEGER PRIMARY KEY) STRICT;');
+  writeSchemaManifestMigration(tableRoot, tableDescriptors[1], {
+    columns: {},
+    indexes: {},
+    triggers: {},
+    views: {
+      manifest_table_shadow: 'CREATE VIEW manifest_table_shadow AS SELECT id FROM users'
+    },
+    tableChecks: {}
+  }, `
+    DROP TABLE manifest_table_shadow;
+    CREATE VIEW manifest_table_shadow AS SELECT id FROM users;
+  `);
+  const tableFixture = tmpDb('schema-object-table-shadow');
+  try {
+    assert.throws(() => migrationService.runMigrations(tableFixture.db, {
+      rootDir: tableRoot,
+      registeredMigrations: tableDescriptors
+    }), /table|view|ownership|type/i);
+  } finally {
+    tableFixture.db.close();
+    fs.rmSync(tableRoot, { recursive: true, force: true });
+  }
+
+  const columnRoot = tempMigrationRoot('schema-object-column-shadow');
+  const columnDescriptors = [2, 3].map((version) => ({
+    version,
+    name: `schema_object_column_shadow_v${version}`,
+    sourcePath: `migrations/00${version}_schema_object_column_shadow.js`,
+    engineVersion: 1,
+    dependencies: [VENDORED_BCRYPT_PATH]
+  }));
+  writeSchemaManifestMigration(columnRoot, columnDescriptors[0], {
+    columns: {
+      manifest_column_shadow: {
+        id: { type: 'INTEGER', notnull: 0, defaultValue: null },
+        marker: { type: 'TEXT', notnull: 1, defaultValue: "'v2'" }
+      }
+    },
+    indexes: {},
+    triggers: {},
+    views: {},
+    tableChecks: {}
+  }, `
+    CREATE TABLE manifest_column_shadow (
+      id INTEGER PRIMARY KEY,marker TEXT NOT NULL DEFAULT 'v2'
+    ) STRICT;
+  `);
+  writeSchemaManifestMigration(columnRoot, columnDescriptors[1], {
+    columns: {
+      manifest_column_shadow: {
+        marker: { type: 'TEXT', notnull: 1, defaultValue: "'v3'" }
+      }
+    },
+    indexes: {},
+    triggers: {},
+    views: {},
+    tableChecks: {}
+  }, 'SELECT 1;');
+  const columnFixture = tmpDb('schema-object-column-shadow');
+  try {
+    assert.throws(() => migrationService.runMigrations(columnFixture.db, {
+      rootDir: columnRoot,
+      registeredMigrations: columnDescriptors
+    }), /column|default|incompatible/i);
+  } finally {
+    columnFixture.db.close();
+    fs.rmSync(columnRoot, { recursive: true, force: true });
+  }
 });
 
 test('obsolete standalone migrate entrypoint is removed and has no runtime/deploy references', () => {

@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const crypto = require('node:crypto');
 const net = require('node:net');
 const os = require('node:os');
 const path = require('node:path');
@@ -20,6 +21,22 @@ const platformRoot = path.join(__dirname, '..', '..');
 const serverEntry = path.join(platformRoot, 'server', 'server.js');
 const dbEntry = path.join(platformRoot, 'server', 'db.js');
 const cliEntry = path.join(platformRoot, 'server', 'scripts', 'rotate_user_credentials.js');
+const TEST_JWT_SECRET = crypto
+  .createHash('sha256')
+  .update('turingmarket credential route test fixture', 'utf8')
+  .digest('base64url');
+const CHILD_ENV_ALLOWLIST = Object.freeze([
+  'PATH',
+  'Path',
+  'SystemRoot',
+  'SYSTEMROOT',
+  'WINDIR',
+  'TEMP',
+  'TMP',
+  'ComSpec',
+  'COMSPEC',
+  'PATHEXT'
+]);
 
 function freshDb() {
   const dbPath = path.join(os.tmpdir(), `tm-credential-rotation-${Date.now()}-${Math.random().toString(16).slice(2)}.db`);
@@ -196,12 +213,7 @@ function createCliFixture() {
 function runCredentialCli(fixture, input) {
   const options = {
     cwd: platformRoot,
-    env: Object.assign({}, process.env, {
-      NODE_ENV: 'test',
-      DB_PATH: fixture.dbPath,
-      DEFAULT_ADMIN_USERNAME: 'admin',
-      DEFAULT_ADMIN_PASSWORD: 'AdminTest1!Secure'
-    }),
+    env: credentialCliEnv(fixture),
     encoding: 'utf8',
     maxBuffer: 1024 * 1024
   };
@@ -221,15 +233,45 @@ function cleanupDbFiles(dbPath) {
   });
 }
 
-function isolatedServerEnv(overrides) {
-  const env = Object.assign({}, process.env);
-  ['DB_PATH', 'NODE_ENV', 'DEFAULT_ADMIN_USERNAME', 'DEFAULT_ADMIN_PASSWORD'].forEach(function(key) {
-    delete env[key];
+function allowlistedChildEnv(environment = process.env) {
+  return Object.fromEntries(
+    CHILD_ENV_ALLOWLIST
+      .filter((key) => Object.prototype.hasOwnProperty.call(environment, key))
+      .map((key) => [key, environment[key]])
+  );
+}
+
+function credentialCliEnv(fixture, parentEnvironment = process.env) {
+  return Object.assign(allowlistedChildEnv(parentEnvironment), {
+    NODE_ENV: 'test',
+    DB_PATH: fixture.dbPath,
+    DEFAULT_ADMIN_USERNAME: 'admin',
+    DEFAULT_ADMIN_PASSWORD: 'AdminTest1!Secure'
   });
-  Object.keys(env).forEach(function(key) {
-    if (/^USER_PASSWORD_/i.test(key)) delete env[key];
+}
+
+function credentialServerEnv(tempDir, overrides, parentEnvironment = process.env) {
+  return Object.assign(allowlistedChildEnv(parentEnvironment), {
+    NODE_ENV: 'test',
+    TM_DISABLE_DOTENV: '1',
+    SERVER_HOST: '127.0.0.1',
+    UPLOAD_SANDBOX_SPOOL_ROOT: path.join(tempDir, 'upload-sandbox'),
+    TM_UPLOAD_SANDBOX_TEST_MODE: 'local-worker'
+  }, overrides);
+}
+
+function applyEnvironmentCase(environment, changes) {
+  const result = Object.assign({}, environment);
+  Object.entries(changes).forEach(function(entry) {
+    const [key, value] = entry;
+    if (value === null) delete result[key];
+    else result[key] = value;
   });
-  return Object.assign(env, overrides || {});
+  return result;
+}
+
+function isolatedServerEnv(overrides, parentEnvironment = process.env) {
+  return Object.assign(allowlistedChildEnv(parentEnvironment), overrides || {});
 }
 
 function requireDbInChild(env) {
@@ -287,6 +329,155 @@ function assertCliFailurePreservedSnapshot(fixture, result, secrets) {
     db.close();
   }
 }
+
+test('credential server child environment excludes inherited secrets and application configuration', () => {
+  const parentEnvironment = {
+    Path: 'C:\\Windows\\System32',
+    SystemRoot: 'C:\\Windows',
+    TEMP: 'C:\\Temp',
+    JWT_SECRET: 'inherited-parent-secret',
+    NODE_OPTIONS: '--require inherited-hook.js',
+    TM_ENV_FILE: 'C:\\untrusted.env',
+    TM_DISABLE_DOTENV: '0',
+    SERVER_HOST: '0.0.0.0',
+    DB_PATH: 'C:\\production.db',
+    PORT: '3002',
+    DEEPSEEK_API_KEY: 'inherited-deepseek-key',
+    TAVILY_API_KEY: 'inherited-tavily-key'
+  };
+  const environment = credentialServerEnv('C:\\isolated-test', {
+    PORT: '41002',
+    DB_PATH: 'C:\\isolated-test\\test.db',
+    JWT_SECRET: TEST_JWT_SECRET
+  }, parentEnvironment);
+
+  assert.deepEqual(
+    Object.fromEntries(Object.entries(environment).filter(([key]) => CHILD_ENV_ALLOWLIST.includes(key))),
+    {
+      Path: 'C:\\Windows\\System32',
+      SystemRoot: 'C:\\Windows',
+      TEMP: 'C:\\Temp'
+    }
+  );
+  assert.equal(environment.NODE_ENV, 'test');
+  assert.equal(environment.TM_DISABLE_DOTENV, '1');
+  assert.equal(environment.SERVER_HOST, '127.0.0.1');
+  assert.equal(environment.TM_UPLOAD_SANDBOX_TEST_MODE, 'local-worker');
+  assert.equal(environment.JWT_SECRET, TEST_JWT_SECRET);
+  assert.equal(environment.PORT, '41002');
+  assert.equal(environment.DB_PATH, 'C:\\isolated-test\\test.db');
+  ['NODE_OPTIONS', 'TM_ENV_FILE', 'DEEPSEEK_API_KEY', 'TAVILY_API_KEY'].forEach(function(key) {
+    assert.equal(Object.prototype.hasOwnProperty.call(environment, key), false, `${key} was inherited`);
+  });
+});
+
+test('credential CLI and database child environments exclude inherited preload and secrets', () => {
+  const parentEnvironment = {
+    Path: 'C:\\Windows\\System32',
+    SystemRoot: 'C:\\Windows',
+    TEMP: 'C:\\Temp',
+    NODE_OPTIONS: '--require inherited-hook.js',
+    JWT_SECRET: 'inherited-parent-secret',
+    TM_ENV_FILE: 'C:\\untrusted.env',
+    DB_PATH: 'C:\\production.db',
+    DEFAULT_ADMIN_PASSWORD: 'inherited-admin-password',
+    USER_PASSWORD_1: 'inherited-user-password',
+    DEEPSEEK_API_KEY: 'inherited-deepseek-key',
+    TAVILY_API_KEY: 'inherited-tavily-key'
+  };
+  const fixture = { dbPath: 'C:\\isolated-test\\test.db' };
+  const cliEnvironment = credentialCliEnv(fixture, parentEnvironment);
+  const dbEnvironment = isolatedServerEnv({ TM_DB_ENTRY: dbEntry }, parentEnvironment);
+
+  for (const environment of [cliEnvironment, dbEnvironment]) {
+    for (const key of [
+      'NODE_OPTIONS', 'JWT_SECRET', 'TM_ENV_FILE', 'USER_PASSWORD_1',
+      'DEEPSEEK_API_KEY', 'TAVILY_API_KEY'
+    ]) {
+      assert.equal(Object.prototype.hasOwnProperty.call(environment, key), false, `${key} was inherited`);
+    }
+  }
+  assert.equal(cliEnvironment.DB_PATH, fixture.dbPath);
+  assert.equal(cliEnvironment.DEFAULT_ADMIN_PASSWORD, 'AdminTest1!Secure');
+  assert.equal(dbEnvironment.TM_DB_ENTRY, dbEntry);
+  assert.equal(Object.prototype.hasOwnProperty.call(dbEnvironment, 'DB_PATH'), false);
+});
+
+test('local upload worker startup requires exact test-only loopback isolation before readiness or listen', { timeout: 120000 }, () => {
+  const cases = [
+    { label: 'NODE_ENV absent', changes: { NODE_ENV: null } },
+    { label: 'NODE_ENV wrong', changes: { NODE_ENV: 'development' } },
+    { label: 'NODE_ENV mis-cased', changes: { NODE_ENV: 'Test' } },
+    { label: 'dotenv disable absent', changes: { TM_DISABLE_DOTENV: null } },
+    { label: 'dotenv disable wrong', changes: { TM_DISABLE_DOTENV: '0' } },
+    { label: 'dotenv disable mis-cased', changes: { TM_DISABLE_DOTENV: 'TRUE' } },
+    {
+      label: 'dotenv cannot bootstrap missing isolation',
+      changes: { TM_DISABLE_DOTENV: null, SERVER_HOST: null },
+      envFileContents: 'TM_DISABLE_DOTENV=1\nSERVER_HOST=127.0.0.1\n'
+    },
+    { label: 'server host absent', changes: { SERVER_HOST: null } },
+    { label: 'server host empty', changes: { SERVER_HOST: '' } },
+    { label: 'server host name', changes: { SERVER_HOST: 'localhost' } },
+    { label: 'server host IPv6 loopback', changes: { SERVER_HOST: '::1' } },
+    { label: 'server host wildcard IPv4', changes: { SERVER_HOST: '0.0.0.0' } },
+    { label: 'server host wildcard IPv6', changes: { SERVER_HOST: '::' } },
+    { label: 'server host other loopback', changes: { SERVER_HOST: '127.0.0.2' } },
+    { label: 'server port absent', changes: { PORT: null } },
+    { label: 'server port empty', changes: { PORT: '' } },
+    { label: 'server port zero', changes: { PORT: '0' } },
+    { label: 'server port malformed', changes: { PORT: 'not-a-port' } },
+    { label: 'server port has leading zeroes', changes: { PORT: '03003' } },
+    { label: 'server port has surrounding whitespace', changes: { PORT: ' 3003 ' } },
+    { label: 'server port exceeds the TCP range', changes: { PORT: '65536' } },
+    { label: 'server port is the nginx production upstream', changes: { PORT: '3002' } },
+    { label: 'adapter mode wrong', changes: { TM_UPLOAD_SANDBOX_TEST_MODE: 'worker' } },
+    { label: 'adapter mode mis-cased', changes: { TM_UPLOAD_SANDBOX_TEST_MODE: 'Local-Worker' } }
+  ];
+
+  assert.equal(TEST_JWT_SECRET.length, 43);
+
+  cases.forEach(function(startupCase) {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-local-worker-startup-'));
+    const spoolRoot = path.join(tempDir, 'upload-sandbox');
+    const dbPath = path.join(tempDir, 'test.db');
+    const emptyEnvPath = path.join(tempDir, 'empty.env');
+    fs.writeFileSync(emptyEnvPath, startupCase.envFileContents || '');
+    const environment = applyEnvironmentCase(credentialServerEnv(tempDir, {
+      PORT: '41002',
+      DB_PATH: dbPath,
+      JWT_SECRET: TEST_JWT_SECRET,
+      TM_ENV_FILE: emptyEnvPath
+    }), startupCase.changes);
+
+    try {
+      const result = spawnSync(process.execPath, [serverEntry], {
+        cwd: platformRoot,
+        env: environment,
+        encoding: 'utf8',
+        maxBuffer: 1024 * 1024,
+        timeout: 10000
+      });
+      const output = `${result.stdout || ''}\n${result.stderr || ''}`;
+
+      assert.equal(result.error, undefined, `${startupCase.label} did not fail closed:\n${output}`);
+      assert.notEqual(result.status, 0, `${startupCase.label} unexpectedly started the server`);
+      assert.match(
+        output,
+        /Invalid (?:upload sandbox test adapter configuration|runtime configuration: NODE_ENV)/,
+        `${startupCase.label} failed for an unrelated reason:\n${output}`
+      );
+      assert.doesNotMatch(output, /TuringMarket server running/);
+      assert.equal(
+        fs.existsSync(spoolRoot),
+        false,
+        `${startupCase.label} reached local-worker readiness setup`
+      );
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+});
 
 test('stdin-only credential rotation CLI rejects invalid inputs without partial mutation or secret output', () => {
   const cases = [
@@ -398,11 +589,11 @@ test('two same-user logins within one JWT second return distinct session tokens'
   const memberPassword = 'SameSecond1!Secure';
   const child = spawn(process.execPath, [serverEntry], {
     cwd: platformRoot,
-    env: Object.assign({}, process.env, {
+    env: credentialServerEnv(tempDir, {
       NODE_ENV: 'test',
       PORT: String(port),
       DB_PATH: dbPath,
-      JWT_SECRET: 'same-second-login-test-secret',
+      JWT_SECRET: TEST_JWT_SECRET,
       USER_PASSWORD_ZHANGWEI: memberPassword
     }),
     stdio: ['ignore', 'pipe', 'pipe']
@@ -447,11 +638,11 @@ test('admin reset route rejects weak passwords, revokes the old token, supports 
   const forwardedIp = '198.51.100.42';
   const child = spawn(process.execPath, [serverEntry], {
     cwd: platformRoot,
-    env: Object.assign({}, process.env, {
+    env: credentialServerEnv(tempDir, {
       NODE_ENV: 'test',
       PORT: String(port),
       DB_PATH: dbPath,
-      JWT_SECRET: 'credential-route-test-secret',
+      JWT_SECRET: TEST_JWT_SECRET,
       DEFAULT_ADMIN_USERNAME: 'admin',
       DEFAULT_ADMIN_PASSWORD: 'AdminTest1!Secure',
       USER_PASSWORD_ZHANGWEI: oldPassword
@@ -564,11 +755,11 @@ test('admin reset route redacts caller password when it collides with the audite
   const collidingSecret = 'CollisionRoute3!Secure';
   const child = spawn(process.execPath, [serverEntry], {
     cwd: platformRoot,
-    env: Object.assign({}, process.env, {
+    env: credentialServerEnv(tempDir, {
       NODE_ENV: 'test',
       PORT: String(port),
       DB_PATH: dbPath,
-      JWT_SECRET: 'credential-route-redaction-test-secret',
+      JWT_SECRET: TEST_JWT_SECRET,
       DEFAULT_ADMIN_USERNAME: 'admin',
       DEFAULT_ADMIN_PASSWORD: 'AdminTest1!Secure'
     }),
@@ -630,11 +821,11 @@ test('admin reset route rejects a weak password equal to the target username wit
   const oldPassword = 'CollisionOld1!Secure';
   const child = spawn(process.execPath, [serverEntry], {
     cwd: platformRoot,
-    env: Object.assign({}, process.env, {
+    env: credentialServerEnv(tempDir, {
       NODE_ENV: 'test',
       PORT: String(port),
       DB_PATH: dbPath,
-      JWT_SECRET: 'credential-route-weak-collision-test-secret',
+      JWT_SECRET: TEST_JWT_SECRET,
       DEFAULT_ADMIN_USERNAME: 'admin',
       DEFAULT_ADMIN_PASSWORD: 'AdminTest1!Secure',
       USER_PASSWORD_ZHANGWEI: oldPassword
@@ -688,11 +879,11 @@ test('admin user creation routes reject weak supplied passwords and generate pol
   const outputChunks = [];
   const child = spawn(process.execPath, [serverEntry], {
     cwd: platformRoot,
-    env: Object.assign({}, process.env, {
+    env: credentialServerEnv(tempDir, {
       NODE_ENV: 'test',
       PORT: String(port),
       DB_PATH: dbPath,
-      JWT_SECRET: 'user-create-policy-route-test-secret',
+      JWT_SECRET: TEST_JWT_SECRET,
       DEFAULT_ADMIN_USERNAME: 'admin',
       DEFAULT_ADMIN_PASSWORD: 'AdminTest1!Secure'
     }),
@@ -843,11 +1034,11 @@ test('auth me accepts valid tokens only through Authorization Bearer headers', {
   const outputChunks = [];
   const child = spawn(process.execPath, [serverEntry], {
     cwd: platformRoot,
-    env: Object.assign({}, process.env, {
+    env: credentialServerEnv(tempDir, {
       NODE_ENV: 'test',
       PORT: String(port),
       DB_PATH: dbPath,
-      JWT_SECRET: 'auth-me-bearer-only-test-secret',
+      JWT_SECRET: TEST_JWT_SECRET,
       DEFAULT_ADMIN_USERNAME: 'admin',
       DEFAULT_ADMIN_PASSWORD: 'AdminTest1!Secure'
     }),

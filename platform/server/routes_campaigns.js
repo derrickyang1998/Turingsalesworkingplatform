@@ -8,6 +8,7 @@ const {
   CampaignWorkflowServiceError,
   createCampaignWorkflowService
 } = require('./services/campaign_workflow_service');
+const { CampaignPptServiceError } = require('./services/campaign_ppt_service');
 
 function requestId(request) {
   return request.requestId ||
@@ -18,6 +19,7 @@ function requestId(request) {
 function sendError(request, response, error) {
   const known = error instanceof CampaignServiceError ||
     error instanceof CampaignWorkflowServiceError ||
+    error instanceof CampaignPptServiceError ||
     error && error.name === 'IdempotencyServiceError';
   const status = known ? error.statusCode : 500;
   const body = {
@@ -37,6 +39,48 @@ function sendResult(response, result) {
     response.setHeader(name, value);
   }
   return response.status(result.status).json(result.body);
+}
+
+function sendPptResult(request, response, result) {
+  for (const [name, value] of Object.entries(result.headers || {})) {
+    response.setHeader(name, value);
+  }
+  return response.status(result.status).sendFile(result.filePath, (error) => {
+    if (!error) return;
+    if (response.headersSent) {
+      response.destroy(error);
+      return;
+    }
+    sendError(request, response, new CampaignPptServiceError(
+      503,
+      'PPT_ARTIFACT_UNAVAILABLE',
+      'The retained PPT artifact could not be delivered safely.'
+    ));
+  });
+}
+
+function createCampaignPptBridgeHandler(pptService) {
+  if (!pptService || typeof pptService.generate !== 'function') {
+    throw new TypeError('A campaign PPT service is required');
+  }
+  return (request, response) => {
+    try {
+      const body = request.body && typeof request.body === 'object' && !Array.isArray(request.body)
+        ? request.body
+        : {};
+      return sendPptResult(request, response, pptService.generate({
+        userId: request.user && request.user.id,
+        campaignId: body.campaign_id,
+        proposalId: body.proposal_id,
+        requestId: requestId(request),
+        idempotencyKey: request.get('Idempotency-Key'),
+        proposalContentSha256: body.proposal_content_sha256,
+        outline: body.outline
+      }));
+    } catch (error) {
+      return sendError(request, response, error);
+    }
+  };
 }
 
 function registerCampaignRoutes(app, db) {
@@ -316,3 +360,4 @@ function registerCampaignRoutes(app, db) {
 
 module.exports = registerCampaignRoutes;
 module.exports.registerCampaignRoutes = registerCampaignRoutes;
+module.exports.createCampaignPptBridgeHandler = createCampaignPptBridgeHandler;

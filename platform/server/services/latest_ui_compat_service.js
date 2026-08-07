@@ -284,7 +284,11 @@ async function generatePptOutline(db, user, body) {
   const generated = await generateJsonWithDeepSeek(prompt, fallback, { db, user, temperature: 0.25, max_tokens: 3200, endpoint: 'ppt_outline' });
   const outline = normalizePptOutline(generated.value, fallback, research);
   outline.knowledge_references = ragContext.references;
-  knowledgeService.markKnowledgeUsed(db, ragContext.references.map(function(ref) { return ref.id; }));
+  knowledgeService.recordKnowledgeUsageTelemetry(
+    db,
+    ragContext.references.map(function(ref) { return ref.id; }),
+    user
+  );
   try {
     knowledgeService.ingestKnowledge(db, {
       title: 'PPT outline: ' + (outline.title || demand.brand || 'campaign'),

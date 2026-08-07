@@ -254,8 +254,8 @@ const expectedRouteCountsBySource = Object.freeze({
   'platform/server/routes.js': 11,
   'platform/server/routes_customers.js': 24,
   'platform/server/routes_brands.js': 4,
-  'platform/server/routes_workflow.js': 20,
-  'platform/server/services/public_assets_service.js': 10
+  'platform/server/routes_workflow.js': 22,
+  'platform/server/services/public_assets_service.js': 12
 });
 
 const expectedBaseCommit = '9a591aa92e039f53a12ad7d5f098a26d0818bf08';
@@ -647,7 +647,7 @@ test('generateManifest records every registered route contract in deterministic 
     duplicateFixturePath: fixturePath
   });
 
-  assert.equal(manifest.routeContracts.length, 113);
+  assert.equal(manifest.routeContracts.length, 117);
   assert.deepEqual([...new Set(manifest.routeContracts.map((route) => route.source))], expectedRouteSources);
 
   const routeCountsBySource = Object.fromEntries(
@@ -676,12 +676,16 @@ test('generateManifest records every registered route contract in deterministic 
   assert.ok(routeContracts.has('GET /api/brands/social-search platform/server/routes_brands.js'));
   assert.ok(routeContracts.has('GET /api/workflow/templates platform/server/routes_workflow.js'));
   assert.ok(routeContracts.has('POST /api/workflow/tasks/:id/complete platform/server/routes_workflow.js'));
+  assert.ok(routeContracts.has('POST /api/workflow/check-timers platform/server/routes_workflow.js'));
+  assert.ok(routeContracts.has('GET /api/workflow/stats platform/server/routes_workflow.js'));
   assert.ok(routeContracts.has('GET /index.html platform/server/services/public_assets_service.js'));
   assert.ok(routeContracts.has('GET /app.js platform/server/services/public_assets_service.js'));
   assert.ok(routeContracts.has('GET /client/shared/build_info.js platform/server/services/public_assets_service.js'));
   assert.ok(routeContracts.has('GET /client/core/navigation.js platform/server/services/public_assets_service.js'));
   assert.ok(routeContracts.has('GET /client/core/accessibility.js platform/server/services/public_assets_service.js'));
   assert.ok(routeContracts.has('GET /client/core/shell.js platform/server/services/public_assets_service.js'));
+  assert.ok(routeContracts.has('GET /client/core/csp_compat.js platform/server/services/public_assets_service.js'));
+  assert.ok(routeContracts.has('GET /client/features/ppt_preview_runtime.js platform/server/services/public_assets_service.js'));
   assert.ok(routeContracts.has('GET /client/styles/tokens.css platform/server/services/public_assets_service.js'));
   assert.ok(routeContracts.has('GET /client/styles/components.css platform/server/services/public_assets_service.js'));
   assert.ok(routeContracts.has('GET /client/styles/layout.css platform/server/services/public_assets_service.js'));

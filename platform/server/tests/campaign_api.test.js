@@ -25,11 +25,25 @@ const USER_ENTRY_LIMIT = 50000;
 const CAMPAIGN_ENTRY_LIMIT = 100000;
 const LINKED_CUSTODY_VOLUME = 2000;
 const UNLINKED_MEMBER_VOLUME = 1000;
-const LOOSE_VOLUME_RUNTIME_LIMIT_MS = 30000;
+const VOLUME_RUNTIME_LIMIT_MS = 1000;
 const CAMPAIGN_MIGRATION_DESCRIPTOR = Object.freeze({
   version: 2,
   name: '002_campaign_business_spine',
   sourcePath: 'migrations/002_campaign_business_spine.js',
+  engineVersion: 1,
+  dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
+});
+const WORKFLOW_MIGRATION_DESCRIPTOR = Object.freeze({
+  version: 3,
+  name: '003_campaign_workflow_dispatch_evidence',
+  sourcePath: 'migrations/003_campaign_workflow_dispatch_evidence.js',
+  engineVersion: 1,
+  dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
+});
+const CAPACITY_MIGRATION_DESCRIPTOR = Object.freeze({
+  version: 4,
+  name: '004_knowledge_capacity_observability',
+  sourcePath: 'migrations/004_knowledge_capacity_observability.js',
   engineVersion: 1,
   dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
 });
@@ -39,6 +53,26 @@ function openV2Database(databaseOptions = {}) {
   migrationService.runMigrations(db, {
     rootDir: SERVER_ROOT,
     registeredMigrations: [CAMPAIGN_MIGRATION_DESCRIPTOR]
+  });
+  return db;
+}
+
+function openV4Database(databaseOptions = {}) {
+  const db = new Database(':memory:', databaseOptions);
+  migrationService.runMigrations(db, {
+    rootDir: SERVER_ROOT,
+    registeredMigrations: [
+      CAMPAIGN_MIGRATION_DESCRIPTOR,
+      WORKFLOW_MIGRATION_DESCRIPTOR,
+      CAPACITY_MIGRATION_DESCRIPTOR,
+      Object.freeze({
+        version: 5,
+        name: '005_knowledge_custody_projection',
+        sourcePath: 'migrations/005_knowledge_custody_projection.js',
+        engineVersion: 1,
+        dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
+      })
+    ]
   });
   return db;
 }
@@ -1603,15 +1637,15 @@ test('campaign review writer rejects the same review source identity for a diffe
   }
 });
 
-test('campaign knowledge capacity preflight uses set-based custody and organization attribution at volume', (t) => {
+test('campaign knowledge capacity preflight uses bounded authoritative gauges at volume', (t) => {
   const capacitySql = [];
   let captureCapacitySql = false;
-  const db = openV2Database({
+  const db = openV4Database({
     verbose(sql) {
       if (
         captureCapacitySql &&
-        sql.includes('knowledge_custody') &&
-        sql.includes('capacity_entries AS')
+        sql.includes('SELECT scope_type,scope_id,metric,usage_value,limit_value') &&
+        sql.includes('FROM knowledge_capacity_gauges')
       ) {
         capacitySql.push(sql);
       }
@@ -1691,40 +1725,29 @@ test('campaign knowledge capacity preflight uses set-based custody and organizat
 
     assert.equal(created.status, 'created');
     assert.equal(db.inTransaction, true);
-    assert.equal(capacitySql.length, 2);
-    const campaignSql = capacitySql.find(
-      (sql) => (
-        sql.includes('JOIN knowledge_custody custody') &&
-        !sql.includes('LEFT JOIN knowledge_custody custody')
-      )
+    assert.equal(capacitySql.length, 1);
+    const authoritySql = capacitySql[0];
+    assert.doesNotMatch(
+      authoritySql,
+      /knowledge_entries|knowledge_chunks|ai_references|campaign_record_links/
     );
-    const organizationSql = capacitySql.find(
-      (sql) => sql.includes('LEFT JOIN knowledge_custody custody')
-    );
-    assert.ok(campaignSql);
-    assert.ok(organizationSql);
-    const campaignUsage = db.prepare(campaignSql).get();
-    assert.equal(campaignUsage.entries, LINKED_CUSTODY_VOLUME);
-    assert.equal(campaignUsage.chunks, LINKED_CUSTODY_VOLUME);
-    assert.equal(campaignUsage.references, 0);
-    const organizationUsage = db.prepare(organizationSql).get();
+    const planByScope = new Map(created.capacityGaugePlan.map((scope) => (
+      [`${scope.scopeType}:${scope.scopeId}`, scope.usage]
+    )));
     assert.equal(
-      organizationUsage.entries,
+      planByScope.get(`campaign:${context.campaignId}`).entries,
+      LINKED_CUSTODY_VOLUME + 1
+    );
+    assert.equal(
+      planByScope.get(`organization:${context.orgId}`).entries,
       LINKED_CUSTODY_VOLUME + UNLINKED_MEMBER_VOLUME + 1
     );
     assert.equal(
-      organizationUsage.chunks,
-      LINKED_CUSTODY_VOLUME + UNLINKED_MEMBER_VOLUME + created.chunks.length
+      planByScope.get(`organization:${context.orgId}`).references,
+      UNLINKED_MEMBER_VOLUME
     );
-    assert.equal(organizationUsage.references, UNLINKED_MEMBER_VOLUME);
 
-    const plans = [
-      { scope: 'campaign', details: capacityPlanDetails(db, campaignSql) },
-      {
-        scope: 'organization',
-        details: capacityPlanDetails(db, organizationSql)
-      }
-    ];
+    const plans = [{ scope: 'authority', details: capacityPlanDetails(db, authoritySql) }];
     t.diagnostic(
       `linked custody rows=${LINKED_CUSTODY_VOLUME}, ` +
       `active=${fixture.activeCount}, historical=${fixture.historicalCount}, ` +
@@ -1738,50 +1761,15 @@ test('campaign knowledge capacity preflight uses set-based custody and organizat
       )).join('\n')
     );
     assert.ok(
-      elapsedMs < LOOSE_VOLUME_RUNTIME_LIMIT_MS,
-      `linked custody writer exceeded loose ${LOOSE_VOLUME_RUNTIME_LIMIT_MS}ms guard: ` +
+      elapsedMs < Math.min(VOLUME_RUNTIME_LIMIT_MS, 500),
+      'linked custody writer exceeded 500ms authority guard: ' +
         `${elapsedMs.toFixed(3)}ms`
     );
-    const correlatedSubqueries = plans.flatMap((plan) => (
-      plan.details
-        .filter((detail) => /CORRELATED SCALAR SUBQUERY/i.test(detail))
-        .map((detail) => `${plan.scope}: ${detail}`)
-    ));
-    assert.deepEqual(
-      correlatedSubqueries,
-      [],
-      'campaign and organization capacity plans must have no correlated scalar subqueries'
-    );
-    const correlatedCustodyScans = plans.flatMap((plan) => (
-      plan.details
-        .filter((detail) => /\b(?:SCAN|SEARCH) (?:active|historical)\b/i.test(detail))
-        .map((detail) => `${plan.scope}: ${detail}`)
-    ));
-    assert.deepEqual(
-      correlatedCustodyScans,
-      [],
-      'capacity plans must not execute per-record active/historical custody scans'
-    );
-    plans.forEach((plan) => {
-      assert.ok(
-        plan.details.some(
-          (detail) => /MATERIALIZE knowledge_custody_ranked/i.test(detail)
-        ),
-        `${plan.scope} capacity plan must materialize the window-ranked custody scan`
-      );
-    });
-    const organizationPlan = plans.find((plan) => plan.scope === 'organization');
     assert.ok(
-      organizationPlan.details.some(
-        (detail) => /MATERIALIZE scope_members/i.test(detail)
+      plans[0].details.some(
+        (detail) => /SEARCH knowledge_capacity_gauges USING PRIMARY KEY/i.test(detail)
       ),
-      'organization capacity plan must materialize organization membership once'
-    );
-    assert.ok(
-      organizationPlan.details.some(
-        (detail) => /MATERIALIZE capacity_entries/i.test(detail)
-      ),
-      'organization capacity plan must materialize reusable entry attribution'
+      plans[0].details.join('\n')
     );
   } finally {
     captureCapacitySql = false;
@@ -1790,7 +1778,7 @@ test('campaign knowledge capacity preflight uses set-based custody and organizat
 });
 
 test('campaign knowledge writer admits the exact user entry limit and rejects limit plus one before mutation', () => {
-  const db = openV2Database();
+  const db = openV4Database();
   try {
     const context = createCampaignContext(db);
     db.exec('BEGIN IMMEDIATE');
@@ -3179,7 +3167,7 @@ test('POST link correction atomically moves one bundle with reciprocal events', 
 });
 
 test('knowledge custody move enforces the destination campaign capacity at exact limit', async (t) => {
-  const db = openV2Database();
+  const db = openV4Database();
   const source = createCampaignContext(db);
   const destination = createSiblingCampaign(db, source);
   let exactEntry;

@@ -33,6 +33,20 @@ const MIGRATIONS = Object.freeze([
     sourcePath: 'migrations/003_campaign_workflow_dispatch_evidence.js',
     engineVersion: 1,
     dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
+  }),
+  Object.freeze({
+    version: 4,
+    name: '004_knowledge_capacity_observability',
+    sourcePath: 'migrations/004_knowledge_capacity_observability.js',
+    engineVersion: 1,
+    dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
+  }),
+  Object.freeze({
+    version: 5,
+    name: '005_knowledge_custody_projection',
+    sourcePath: 'migrations/005_knowledge_custody_projection.js',
+    engineVersion: 1,
+    dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
   })
 ]);
 
@@ -707,6 +721,35 @@ test('empty assignment and injected database failures roll back artifacts with e
     assert.equal(failed.last_error, 'Workflow initialization failed');
     assert.equal(`${failed.last_error_code} ${failed.last_error}`.includes('sqlite secret'), false);
     assert.deepEqual(artifactCounts(db, secondContext.campaignId), {
+      instances: 0,
+      tasks: 0,
+      logs: 0,
+      links: 0,
+      archives: 0
+    });
+
+    db.prepare('UPDATE workflow_templates SET is_active=0 WHERE id=983101').run();
+    const gaugeContext = createCampaignFixture(db, identity, 973201);
+    insertCampaignTemplate(db, identity, 983201, terminalGraph());
+    transitionCampaign(db, gaugeContext);
+    db.exec(`
+      CREATE TEMP TRIGGER task6b_injected_workflow_gauge_failure
+      BEFORE UPDATE ON main.knowledge_capacity_gauges
+      BEGIN SELECT RAISE(ABORT,'injected gauge sqlite secret'); END
+    `);
+    const gaugeFailureResult = worker.drain();
+    db.exec('DROP TRIGGER task6b_injected_workflow_gauge_failure');
+    assert.equal(gaugeFailureResult.claimed, 1);
+    const gaugeFailed = dispatchRows(db, gaugeContext.campaignId)[0];
+    assert.equal(gaugeFailed.status, 'failed_initialization');
+    assert.equal(gaugeFailed.attempt_count, 1);
+    assert.equal(gaugeFailed.last_error_code, 'WORKFLOW_INITIALIZATION_FAILED');
+    assert.equal(gaugeFailed.last_error, 'Workflow initialization failed');
+    assert.equal(
+      `${gaugeFailed.last_error_code} ${gaugeFailed.last_error}`.includes('sqlite secret'),
+      false
+    );
+    assert.deepEqual(artifactCounts(db, gaugeContext.campaignId), {
       instances: 0,
       tasks: 0,
       logs: 0,

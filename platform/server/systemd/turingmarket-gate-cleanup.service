@@ -1,0 +1,33 @@
+[Unit]
+Description=TuringMarket stale migration gate cleanup
+After=local-fs.target
+Before=turingmarket-gate.service
+ConditionPathIsDirectory=/var/lib/turingmarket/migration-gate
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateMounts=no
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_KILL CAP_SETGID CAP_SETUID CAP_SYS_ADMIN
+ReadWritePaths=-/run/turingmarket-gate -/var/lib/turingmarket/migration-gate -/var/lib/turingmarket/gate -/mnt/turingmarket-gate -/etc/passwd -/etc/passwd- -/etc/shadow -/etc/shadow- -/etc/group -/etc/group- -/etc/gshadow -/etc/gshadow- -/etc/.pwd.lock
+ExecStart=/usr/bin/env bash /usr/local/libexec/turingmarket/cleanup_stale_migration_gate.sh --all
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target

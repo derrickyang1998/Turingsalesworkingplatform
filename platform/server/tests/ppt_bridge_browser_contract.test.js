@@ -19,6 +19,7 @@ const platformRoot = path.join(repoRoot, 'platform');
 const serverRoot = path.join(platformRoot, 'server');
 const privateRunRoot = path.join(repoRoot, '.superpowers', 'sdd', 'task-10-ppt-contract');
 const fixture = loadBaselineFixture();
+const TEST_JWT_SECRET = 'Gq4ciweEvyDk7NmUz9vWUTYtYKlE63fJYMmApVa39nU';
 
 function once(emitter, event) {
   return new Promise((resolve) => emitter.once(event, resolve));
@@ -50,7 +51,9 @@ function publicTestEnvironment(port, dbPath) {
     SERVER_HOST: '127.0.0.1',
     TM_DISABLE_DOTENV: '1',
     DB_PATH: dbPath,
-    JWT_SECRET: 'task-10-browser-contract-test-secret',
+    UPLOAD_SANDBOX_SPOOL_ROOT: path.join(path.dirname(dbPath), 'upload-sandbox'),
+    TM_UPLOAD_SANDBOX_TEST_MODE: 'local-worker',
+    JWT_SECRET: TEST_JWT_SECRET,
     DEFAULT_ADMIN_USERNAME: 'task10-admin',
     DEFAULT_ADMIN_PASSWORD: 'task-10-browser-contract-password',
     OBISIDIAN_KB_ROOT: '',
@@ -532,9 +535,13 @@ test('Task 10 locked ppt.js owns and preserves the complete browser PPT workflow
     try {
       await fillDemandAndOpenPPTStep(fallback.page, 'Task 10 Fallback Brand');
       await fallback.page.locator('#btnGenPPT').click();
-      await fallback.page.waitForFunction(() => (
-        document.getElementById('proposalOutput').textContent.includes('Task 10 forced outline failure')
-      ));
+      await fallback.page.waitForFunction(() => {
+        const output = document.getElementById('proposalOutput');
+        return output &&
+          output.textContent.includes('Task 10 forced outline failure') &&
+          output.querySelector('button[onclick="downloadHTMLPPT()"]') &&
+          output.querySelector('button[onclick="downloadPPTX()"]');
+      });
       assert.equal(fallback.state.outlineBodies.length, 1, 'fallback must follow a real failed outline request');
       assert.equal(await fallback.page.locator('#proposalOutput button[onclick="downloadHTMLPPT()"]') .count(), 1);
       assert.equal(await fallback.page.locator('#proposalOutput button[onclick="downloadPPTX()"]') .count(), 1);

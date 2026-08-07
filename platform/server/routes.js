@@ -1,7 +1,14 @@
-﻿module.exports = function(app, db, authMiddleware) {
+﻿function collaborationRequestId(request) {
+  return request.requestId ||
+    request.phase4Request && request.phase4Request.requestId ||
+    'campaign-link-request';
+}
+
+module.exports = function(app, db, authMiddleware, options = {}) {
 
 const businessKnowledge = require('./services/business_knowledge_service');
 const influencerWorkflow = require('./services/influencer_workflow_service');
+const campaignCollaboration = options.campaignCollaborationService;
 
 // ===== INFLUENCER ROUTES =====
 app.get('/api/influencers', authMiddleware, (req, res) => {
@@ -83,6 +90,22 @@ app.post('/api/influencers/match', authMiddleware, (req, res) => {
 
 // ===== COLLABORATION ROUTES =====
 app.post('/api/collaborations', authMiddleware, (req, res) => {
+  if (req.body && Object.hasOwn(req.body, 'campaign_id')) {
+    try {
+      const result = campaignCollaboration.createLinked({
+        userId: req.user.id,
+        requestId: collaborationRequestId(req),
+        idempotencyKey: req.get ? req.get('Idempotency-Key') : req.headers && req.headers['idempotency-key'],
+        body: req.body
+      });
+      return res.status(result.status).json(result.body);
+    } catch (error) {
+      const status = error.statusCode || error.status || 500;
+      const body = { error: error.message || 'Collaboration create failed.', code: error.code || 'INTERNAL_ERROR' };
+      if (error.details !== undefined) body.details = error.details;
+      return res.status(status).json(body);
+    }
+  }
   const { demand_id, influencer_id, status, proposal_notes, cost_quoted, notes, resource, timeline_start, timeline_end } = req.body;
   const resourcePayload = resource && typeof resource === 'object' ? resource : {};
   const hasResource = Object.keys(resourcePayload).length > 0;
@@ -100,33 +123,40 @@ app.post('/api/collaborations', authMiddleware, (req, res) => {
 
 app.get('/api/collaborations', authMiddleware, (req, res) => {
   const { status, demand_id } = req.query;
-  let sql = 'SELECT c.id, c.demand_id, c.influencer_id, c.user_id, c.status, c.proposal_notes, c.cost_quoted, c.cost_actual, c.content_url, c.roi_data, c.timeline_start, c.timeline_end, c.notes, c.created_at, c.updated_at, i.kol_handle, i.platform, i.followers, i.category, i.region, i.project_name, i.product_name, i.content_deliverable, i.quoted_price FROM collaborations c JOIN influencers i ON c.influencer_id = i.id';
-  const params = [];
-  const conditions = [];
-  if (status) { conditions.push('c.status = ?'); params.push(status); }
-  if (demand_id) { conditions.push('c.demand_id = ?'); params.push(parseInt(demand_id)); }
-  if (conditions.length) sql += ' WHERE ' + conditions.join(' AND ');
-  sql += ' ORDER BY c.updated_at DESC LIMIT 200';
-  const collabs = db.prepare(sql).all(...params);
-  res.json({ collaborations: collabs });
+  res.json(campaignCollaboration.list({
+    userId: req.user.id,
+    status,
+    demandId: demand_id
+  }));
 });
 
 app.put('/api/collaborations/:id', authMiddleware, (req, res) => {
-  const { status, cost_quoted, cost_actual, content_url, notes, timeline_start, timeline_end } = req.body;
-  db.prepare('UPDATE collaborations SET status = COALESCE(?, status), cost_quoted = COALESCE(?, cost_quoted), cost_actual = COALESCE(?, cost_actual), content_url = COALESCE(?, content_url), notes = COALESCE(?, notes), timeline_start = COALESCE(?, timeline_start), timeline_end = COALESCE(?, timeline_end), updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(status, cost_quoted, cost_actual, content_url, notes, timeline_start, timeline_end, req.params.id);
-  db.prepare('INSERT INTO activity_log (user_id, action, module, details, ip_address) VALUES (?, ?, ?, ?, ?)').run(req.user.id, 'update_collab', 'collaboration', 'Updated collaboration ' + req.params.id + ' to ' + (status || 'no_status_change'), req.ip);
-  businessKnowledge.archiveCollaboration(db, db.prepare('SELECT * FROM collaborations WHERE id = ?').get(req.params.id), req.user);
-  res.json({ success: true });
+  try {
+    const request = {
+      userId: req.user.id,
+      collaborationId: Number(req.params.id),
+      requestId: collaborationRequestId(req),
+      idempotencyKey: req.get ? req.get('Idempotency-Key') : req.headers && req.headers['idempotency-key'],
+      body: req.body
+    };
+    const result = req.body && Object.hasOwn(req.body, 'campaign_id')
+      ? campaignCollaboration.updateLinked(request)
+      : campaignCollaboration.updateLegacy(request);
+    if (!Object.hasOwn(req.body || {}, 'campaign_id')) {
+      db.prepare('INSERT INTO activity_log (user_id, action, module, details, ip_address) VALUES (?, ?, ?, ?, ?)').run(req.user.id, 'update_collab', 'collaboration', 'Updated collaboration ' + req.params.id + ' to ' + (req.body.status || 'no_status_change'), req.ip);
+      businessKnowledge.archiveCollaboration(db, db.prepare('SELECT * FROM collaborations WHERE id = ?').get(req.params.id), req.user);
+    }
+    res.status(result.status || 200).json(result.body || { success: true });
+  } catch (error) {
+    const status = error.statusCode || error.status || 500;
+    const body = { error: error.message || 'Collaboration update failed.', code: error.code || 'INTERNAL_ERROR' };
+    if (error.details !== undefined) body.details = error.details;
+    res.status(status).json(body);
+  }
 });
 
 app.get('/api/collaborations/stats', authMiddleware, (req, res) => {
-  const stats = {
-    byStatus: db.prepare('SELECT status, COUNT(*) as count FROM collaborations GROUP BY status').all(),
-    totalActive: db.prepare(`SELECT COUNT(*) as count FROM collaborations WHERE status IN ('proposed', 'contacted', 'negotiating', 'confirmed', 'contract_sent', 'live', 'content_review')`).get().count,
-    totalCompleted: db.prepare(`SELECT COUNT(*) as count FROM collaborations WHERE status = 'completed'`).get().count,
-    totalCost: db.prepare('SELECT COALESCE(SUM(COALESCE(cost_actual, cost_quoted)), 0) as total FROM collaborations').get().total,
-  };
-  res.json({ stats });
+  res.json(campaignCollaboration.stats({ userId: req.user.id }));
 });
 
 // ===== V8.1: INFLUENCER IMPORT/EXPORT =====

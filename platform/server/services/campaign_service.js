@@ -1728,6 +1728,17 @@ function attachCampaignLink(db, input) {
       relationType: body.relation_type,
       intent: 'attach'
     });
+    let knowledgeGaugePlan = [];
+    if (body.record_type === 'knowledge_entry') {
+      knowledgeGaugePlan = knowledgeService.preflightCampaignKnowledgeCustodyMoveInTransaction(
+        db,
+        {
+          entryId: Number(body.record_id),
+          destinationCampaignId: campaignId,
+          organizationId: access.campaign.org_id
+        }
+      );
+    }
     const bundleId = randomBytes(32).toString('hex');
     const insert = db.prepare(`
       INSERT INTO campaign_record_links (
@@ -1747,6 +1758,12 @@ function attachCampaignLink(db, input) {
     const linkRow = db.prepare(`
       SELECT * FROM campaign_record_links WHERE id=?
     `).get(linkId);
+    if (body.record_type === 'knowledge_entry') {
+      knowledgeService.applyKnowledgeCapacityGaugePlanInTransaction(
+        db,
+        knowledgeGaugePlan
+      );
+    }
     const event = insertCampaignEvent(db, {
       orgId: access.campaign.org_id,
       campaignId,
@@ -1994,11 +2011,12 @@ function correctCampaignLink(db, input) {
     if (!bundle.active && targetCampaignId === undefined) {
       throw invalidLink('A revoked link bundle requires same-campaign reactivation.');
     }
+    let knowledgeGaugePlan = [];
     if (
       crossCampaign &&
       bundle.selected.record_type === 'knowledge_entry'
     ) {
-      knowledgeService.preflightCampaignKnowledgeCustodyMoveInTransaction(
+      knowledgeGaugePlan = knowledgeService.preflightCampaignKnowledgeCustodyMoveInTransaction(
         db,
         {
           entryId: Number(bundle.selected.record_id),
@@ -2142,6 +2160,12 @@ function correctCampaignLink(db, input) {
       revoked_link_ids: revokedIds,
       replacement_link_ids: replacementIds
     };
+    if (bundle.selected.record_type === 'knowledge_entry') {
+      knowledgeService.applyKnowledgeCapacityGaugePlanInTransaction(
+        db,
+        knowledgeGaugePlan
+      );
+    }
     const sourceEvent = insertCampaignEvent(db, {
       orgId: access.campaign.org_id,
       campaignId,
@@ -3582,6 +3606,10 @@ function createCampaignReview(db, input) {
       Number(knowledgeLink.lastInsertRowid),
       Number(reviewLink.lastInsertRowid)
     ].sort((left, right) => left - right);
+    knowledgeService.applyKnowledgeCapacityGaugePlanInTransaction(
+      db,
+      written.capacityGaugePlan
+    );
     const nextVersion = body.expected_version + 1;
     const update = db.prepare(`
       UPDATE campaigns

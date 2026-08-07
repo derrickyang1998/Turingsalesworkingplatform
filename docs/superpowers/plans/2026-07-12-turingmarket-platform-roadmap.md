@@ -70,11 +70,13 @@ flowchart LR
     P4 --> P5["P5 CRM upgrade<br/>阶段5 CRM升级"]
     P4 --> P6["P6 AI, knowledge, proposal, PPT<br/>阶段6 AI知识方案与PPT"]
     P4 --> P7["P7 Influencer, Feishu, execution<br/>阶段7 网红飞书与执行"]
+    P7 --> P7B["P7B Content performance foundation<br/>阶段7B 内容效果数据底座"]
     P5 --> P8["P8 Admin and multi-tenant<br/>阶段8 管理与多租户"]
     P6 --> P8
     P7 --> P8
     P8 --> P9["P9 Approved growth features<br/>阶段9 已批准增长功能"]
     P9 --> P10["P10 V1 production hardening<br/>阶段10 V1生产加固"]
+    P7B -. independent release evidence / 独立发布证据 .-> P10
 ```
 
 | Phase / 阶段 | Target release / 目标版本 | Indicative effort / 参考工期 | Production outcome / 生产结果 |
@@ -86,6 +88,7 @@ flowchart LR
 | 5 | `v0.6.0` | 5-8 days / 天 | CRM supports disciplined sales and opportunity execution / CRM 支撑规范化销售与商机执行 |
 | 6 | `v0.7.0` | 6-10 days / 天 | AI, knowledge, proposal, and PPT form an auditable learning loop / AI、知识、方案和 PPT 形成可审计学习闭环 |
 | 7 | `v0.8.0` | 6-10 days / 天 | Influencer sourcing through execution and settlement is operational / 网红提报至执行结算全链路可运营 |
+| 7B | `v0.8.1` -> `v0.8.3` | 10-14 + 14-22 + 14-20 person-days / 人日 | Manual foundation ships first; provider/Feishu adds a 14-day observation gate; AI/client review follows as an independent release / 先交付人工数据底座；服务商/飞书另加 14 天观察门禁；AI/客户复盘独立发布 |
 | 8 | `v0.9.0` | 5-8 days / 天 | Backend-enforced organization, role, entitlement, and audit controls / 后端强制执行组织、角色、权益和审计控制 |
 | 9 | `v0.10.x` | 3-7 days per approved feature / 每项获批功能 3-7 天 | Approved sales-growth capabilities are added independently / 独立交付已批准的销售增长能力 |
 | 10 | `v1.0.0` | 3-5 days / 天 | Full production, performance, security, migration, and recovery sign-off / 完成生产、性能、安全、迁移和恢复验收 |
@@ -325,6 +328,41 @@ flowchart LR
 
 ---
 
+### Phase 7B: Content Performance Data Foundation / 阶段 7B：内容效果数据底座
+
+**Releases / 版本：** `v0.8.1-performance-manual-foundation`, `v0.8.2-performance-collection-feishu`, `v0.8.3-performance-ai-review`
+
+**Scheduling rule / 排期规则：**
+
+- **EN:** This is an independent release after `v0.8.0`; it must not delay the active Phase 4 campaign spine or the Phase 7 influencer execution loop.<br>**中文：** 本阶段在 `v0.8.0` 后独立发布，不得拖慢当前阶段 4 活动主干或阶段 7 网红执行闭环。
+- **EN:** Recommended automatic-provider scope is TikTok, Instagram, and YouTube, pending explicit product confirmation; every platform must retain manual, CSV/XLSX, and Feishu fallback ingestion.<br>**中文：** 建议第一期自动数据源覆盖 TikTok、Instagram 和 YouTube，等待产品明确确认；每个平台必须永久保留手工、CSV/XLSX 和飞书补录通道。
+
+**Detailed product specification / 详细产品规格：** [`2026-07-30-phase-7b-content-performance-intelligence.md`](./2026-07-30-phase-7b-content-performance-intelligence.md)
+
+**Accelerated delivery sequence / 加速交付顺序：** `7B.1` reliable manual foundation / 可靠人工数据底座 -> `7B.2` one approved provider plus scheduled collection and Feishu / 一个获批服务商加定时采集与飞书 -> `7B.3` AI review and customer deliverables / AI 复盘与客户交付。Each slice has its own owners, entry gate, exit gate, version, test evidence, deployment, and rollback; additional providers ship as separately reviewed patch releases. / 每个切片均有独立责任人、进入门禁、退出门禁、版本、测试证据、部署和回滚；新增服务商以单独审查的补丁版本发布。
+
+**Work items / 工作项：**
+
+- [ ] **EN:** Register campaign publications from individual links or bulk import, normalize platform/content/creator identity, and preserve the original URL and provider payload for audit.<br>**中文：** 支持单条链接和批量导入项目内容，标准化平台、内容和达人身份，并保留原始链接与服务商响应以供审计。
+- [ ] **EN:** Store append-only metric observations for views, impressions, likes, comments, saves, shares, clicks, orders, installs, revenue, and custom metrics; every value records source mode, provider, collection time, freshness, confidence, and availability.<br>**中文：** 以只追加快照保存播放、曝光、点赞、评论、收藏、转发、点击、订单、安装、收入和自定义指标；每个值必须记录来源模式、服务商、采集时间、新鲜度、置信度和可用性。
+- [ ] **EN:** Implement pluggable provider adapters and scheduled collection with per-content retry/backoff, rate-limit handling, collection-run history, and explicit degraded/manual states when authorization or APIs are unavailable.<br>**中文：** 实现可插拔平台适配器和定时采集，具备逐内容重试/退避、限流处理、采集运行历史，以及授权或 API 不可用时的明确降级/人工状态。
+- [ ] **EN:** Add campaign-controlled manual inputs for spend, client charge, clicks, conversions, orders, attributed revenue, and currency with version history and audit ownership.<br>**中文：** 增加活动范围内的花费、客户报价、点击、转化、订单、归因收入和币种手工输入，并保留版本历史与操作人审计。
+- [ ] **EN:** Treat the linked Phase 7B detailed specification as the normative KPI contract. It defines Core/Extended/Impression ER comparability, visible cost bases, total campaign cost, ROI as `(attributed revenue - total campaign cost) / total campaign cost`, ROAS as `attributed revenue / paid-media spend`, gross margin as `(client charge - total campaign cost) / client charge`, approval/FX/attribution requirements, and unknown handling. No alternate formula may be implemented from this summary.<br>**中文：** 以关联的阶段 7B 详细规格作为唯一权威 KPI 契约，包含核心/扩展/曝光互动率可比规则、可见成本口径、项目总成本、ROI“归因收入减项目总成本后除以项目总成本”、ROAS“归因收入除以付费媒体花费”、毛利率“客户报价减项目总成本后除以客户报价”，以及批准/汇率/归因和未知值规则；不得依据本摘要实现另一套公式。
+- [ ] **EN:** Implement an idempotent Feishu Bitable outbox with project/table mapping, batch upsert, retry, dead-letter status, last-success watermark, and platform-visible failure recovery.<br>**中文：** 实现幂等飞书多维表格 Outbox，支持项目/表格映射、批量更新或新增、重试、死信状态、最近成功水位和平台内可见的失败恢复。
+- [ ] **EN:** Keep normalized snapshots and confirmed manual inputs as structured campaign lineage, not general methodology results; only human-approved conclusions become retrievable campaign knowledge, and organization-wide promotion requires a second approval, dedupe, and supersession handling.<br>**中文：** 将标准化快照和已确认人工输入保留为结构化项目血缘而非通用方法论结果；只有人工确认结论才进入可检索项目知识，晋升组织方法论还需二次批准、去重和替代处理。
+- [ ] **EN:** Deliver two distinct routes: Content Monitor for link, collection, manual-input, and exception operations; Performance Dashboard for KPI overview, Top-content ranking, trends, creator/platform/product contribution, data quality, and customer review.<br>**中文：** 交付两个独立路由：内容监控负责链接、采集、人工字段和异常操作；数据看板负责 KPI 总览、Top 内容排行、趋势、达人/平台/产品贡献、数据质量和客户复盘。
+- [ ] **EN:** Add evidence-backed AI best/weak content analysis, human approval, reusable methodology, improvement actions, immutable report snapshots, and customer-safe report/PPT generation.<br>**中文：** 增加有证据的 AI 最佳/较弱内容分析、人工批准、可复用方法论、改进动作、不可变报告快照和面向客户的报告/PPT 生成。
+
+**Slice exit criteria / 切片退出标准：**
+
+- **`7B.1`:** **EN:** A project can register ten links, manually supply or import supported metrics, preserve historical snapshots, and show source/freshness/unknown states without overwriting prior observations.<br>**中文：** 一个项目可登记 10 条链接，人工补录或导入支持的指标，保留历史快照，并正确展示来源、新鲜度和未知状态，且不得覆盖旧快照。
+- **`7B.1`:** **EN:** KPI golden tests cover missing denominators, currency boundaries, cumulative-versus-delta snapshots, approved manual corrections, and the normative cost/ROI/ROAS/margin formulas.<br>**中文：** KPI 黄金测试覆盖分母缺失、币种边界、累计值与增量快照、已批准人工更正及权威成本、ROI、ROAS、毛利率公式。
+- **`7B.2`:** **EN:** One approved provider and Feishu receive idempotent updates, retry safely after partial failure, expose freshness/coverage, and reconcile the same records without duplicates through the required observation window.<br>**中文：** 一个获批服务商和飞书可幂等更新，在部分失败后安全重试，展示新鲜度/覆盖率，并在规定观察期内无重复地对账同一批记录。
+- **`7B.3`:** **EN:** Evidence-backed AI review, human approval, knowledge promotion, immutable customer report snapshots, redaction, and frozen-PPT regression all pass independently.<br>**中文：** 有证据的 AI 复盘、人工批准、知识晋升、不可变客户报告快照、脱敏和冻结 PPT 回归均独立通过。
+- **Each shipped slice / 每个已发布切片：** **EN:** Content Monitor and Performance Dashboard reconcile for the flows delivered by that slice; product, engineering, data/AI/workflow where applicable, security, and code reviewers approve that slice independently.<br>**中文：** 内容监控与数据看板仅对该切片已交付流程完成对账；产品、工程、适用的数据/AI/工作流、安全和代码审查者分别独立批准该切片。
+
+---
+
 ### Phase 8: Admin Control Room, Entitlements, And Multi-Tenant Governance / 阶段 8：管理控制室、权益与多租户治理
 
 **Release / 版本：** `v0.9.0-admin-tenant-governance`
@@ -368,6 +406,8 @@ flowchart LR
 3. **Margin And Quote Approval Center / 毛利与报价审批中心**: cost/quote/margin rules, discount thresholds, manager approval, and quote history. / 覆盖成本、报价、毛利规则、折扣阈值、经理审批和报价历史。
 4. **Creator Freshness And Negotiation Intelligence / 红人资源新鲜度与谈判智能**: data freshness, response reliability, historical pricing, delivery risk, and negotiation recommendations. / 覆盖数据新鲜度、回复可靠性、历史报价、交付风险和谈判建议。
 5. **Lead Enrichment And Signal Radar / 线索增强与商机信号雷达**: account signals, competitor activity, influencer fit, opportunity scoring, and suggested outreach. / 覆盖客户信号、竞品动态、红人匹配度、商机评分和建议触达动作。
+
+**Moved scope / 已迁移范围：** Content Performance Intelligence And Client Review is not a Phase 9 approval candidate; it is governed by the three independently gated Phase 7B releases above. / 内容效果智能与客户复盘不属于阶段 9 待批准候选项，统一由上方三个独立门禁的阶段 7B 版本管理。
 
 **Recommended order after explicit approval / 明确批准后的建议顺序：** Client Proposal Room / 客户方案协作室；Execution And Settlement Cockpit / 执行与结算驾驶舱；Margin And Quote Approval Center / 毛利与报价审批中心；Creator Intelligence / 红人智能；Lead Signal Radar / 线索信号雷达。
 

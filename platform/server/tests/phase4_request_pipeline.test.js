@@ -309,7 +309,9 @@ test('request contract freezes the exact raw-byte and multipart limits', () => {
   assert.deepEqual(contract.BODY_LIMITS, {
     CAMPAIGN_CONTROL_JSON: 65_536,
     CAMPAIGN_REVIEW_JSON: 1_048_576,
+    KNOWLEDGE_JSON: 1_048_576,
     EXISTING_DUAL_MODE_JSON: 52_428_800,
+    KNOWLEDGE_USE_COMPAT: 16_384,
     MULTIPART_ENVELOPE: 22_020_096
   });
   assert.deepEqual(contract.MULTIPART_LIMITS, {
@@ -334,6 +336,17 @@ test('request contract freezes the exact raw-byte and multipart limits', () => {
     contract.REQUEST_POLICIES.LEGACY_DEMAND_CREATE.maxRawBytes,
     contract.BODY_LIMITS.EXISTING_DUAL_MODE_JSON
   );
+  for (const policyName of ['LEGACY_KNOWLEDGE_CREATE', 'LEGACY_KNOWLEDGE_INGEST']) {
+    assert.equal(
+      contract.REQUEST_POLICIES[policyName].maxRawBytes,
+      contract.BODY_LIMITS.KNOWLEDGE_JSON
+    );
+  }
+  assert.equal(
+    contract.REQUEST_POLICIES.KNOWLEDGE_USE.maxRawBytes,
+    contract.BODY_LIMITS.KNOWLEDGE_USE_COMPAT
+  );
+  assert.equal(contract.REQUEST_POLICIES.KNOWLEDGE_USE.discardBody, true);
   for (const policyName of [
     'SHARED_KNOWLEDGE_UPLOAD',
     'SHARED_INFLUENCER_UPLOAD',
@@ -640,8 +653,9 @@ test('media matrix accepts JSON parameters and exact empty-body compatibility wh
       },
       body: '{}'
     });
-    assert.equal(nonEmptyUse.response.status, 400);
-    assert.equal(nonEmptyUse.body.code, 'INVALID_REQUEST_BODY');
+    assert.equal(nonEmptyUse.response.status, 200);
+    assert.equal(nonEmptyUse.body.raw_bytes, 2);
+    assert.equal(nonEmptyUse.body.body, null);
 
     const nonEmptyWrongMedia = await requestJson(harness.baseUrl, '/api/knowledge/7/use', {
       method: 'POST',
@@ -651,8 +665,8 @@ test('media matrix accepts JSON parameters and exact empty-body compatibility wh
       },
       body: 'x'
     });
-    assert.equal(nonEmptyWrongMedia.response.status, 400);
-    assert.equal(nonEmptyWrongMedia.body.code, 'INVALID_REQUEST_BODY');
+    assert.equal(nonEmptyWrongMedia.response.status, 415);
+    assert.equal(nonEmptyWrongMedia.body.code, 'UNSUPPORTED_MEDIA_TYPE');
 
     const validMultipart = await requestJson(harness.baseUrl, '/api/knowledge/upload', {
       method: 'POST',
@@ -680,6 +694,112 @@ test('media matrix accepts JSON parameters and exact empty-body compatibility wh
       assert.equal(invalidMultipart.response.status, 415);
       assert.equal(invalidMultipart.body.code, 'UNSUPPORTED_MEDIA_TYPE');
     }
+  } finally {
+    await harness.close();
+  }
+});
+
+test('knowledge use rejects fixed and chunked bodies above its compatibility limit before dispatch', async () => {
+  const harness = await createHarness({ policyNames: ['KNOWLEDGE_USE'] });
+  const limit = harness.contract.BODY_LIMITS.KNOWLEDGE_USE_COMPAT;
+
+  try {
+    const oversizedHeader = fixedRequest(
+      '/api/knowledge/7/use',
+      [
+        'Authorization: Bearer accepted-by-test',
+        'Content-Type: application/json',
+        'X-Request-Id: knowledge-use-fixed-limit-01'
+      ],
+      Buffer.alloc(limit + 1, 0x20)
+    );
+    const fixedRejected = parseRawResponse(await rawExchange(harness.port, oversizedHeader));
+    assert.equal(fixedRejected.status, 413);
+    assert.equal(JSON.parse(fixedRejected.body).code, 'INVALID_REQUEST_BODY');
+    assert.equal(harness.observations.handled, 0);
+
+    const chunkedRejected = parseRawResponse(await rawExchange(
+      harness.port,
+      chunkedRequest(
+        '/api/knowledge/7/use',
+        [
+          'Authorization: Bearer accepted-by-test',
+          'Content-Type: application/json',
+          'X-Request-Id: knowledge-use-chunked-limit-01'
+        ],
+        [Buffer.alloc(limit, 0x20), Buffer.from('x')]
+      )
+    ));
+    assert.equal(chunkedRejected.status, 413);
+    assert.equal(JSON.parse(chunkedRejected.body).code, 'INVALID_REQUEST_BODY');
+    assert.equal(harness.observations.handled, 0);
+  } finally {
+    await harness.close();
+  }
+});
+
+test('knowledge JSON writes reject pre-buffer overflow while multipart upload keeps its envelope', async () => {
+  const harness = await createHarness({
+    policyNames: [
+      'LEGACY_KNOWLEDGE_CREATE',
+      'LEGACY_KNOWLEDGE_INGEST',
+      'SHARED_KNOWLEDGE_UPLOAD'
+    ]
+  });
+  const jsonLimit = 1_048_576;
+
+  try {
+    assert.equal(harness.contract.BODY_LIMITS.KNOWLEDGE_JSON, jsonLimit);
+    assert.equal(
+      harness.contract.REQUEST_POLICIES.SHARED_KNOWLEDGE_UPLOAD.maxRawBytes,
+      harness.contract.BODY_LIMITS.MULTIPART_ENVELOPE
+    );
+
+    const fixedRejected = parseRawResponse(await rawExchange(
+      harness.port,
+      fixedRequest(
+        '/api/knowledge',
+        [
+          'Authorization: Bearer accepted-by-test',
+          'Content-Type: application/json',
+          'X-Request-Id: knowledge-json-fixed-limit-01'
+        ],
+        Buffer.alloc(jsonLimit + 1, 0x20)
+      ),
+      { timeoutMs: 5000 }
+    ));
+    assert.equal(fixedRejected.status, 413);
+    assert.equal(JSON.parse(fixedRejected.body).code, 'INVALID_REQUEST_BODY');
+
+    const chunkedRejected = parseRawResponse(await rawExchange(
+      harness.port,
+      chunkedRequest(
+        '/api/knowledge/ingest',
+        [
+          'Authorization: Bearer accepted-by-test',
+          'Content-Type: application/json',
+          'X-Request-Id: knowledge-json-chunked-limit-01'
+        ],
+        [Buffer.alloc(jsonLimit, 0x20), Buffer.from('xx')]
+      ),
+      { timeoutMs: 5000 }
+    ));
+    assert.equal(chunkedRejected.status, 413);
+    assert.equal(JSON.parse(chunkedRejected.body).code, 'INVALID_REQUEST_BODY');
+    assert.equal(harness.observations.handled, 0);
+
+    const uploadPayload = Buffer.alloc(jsonLimit + 1, 0x61);
+    const upload = await requestJson(harness.baseUrl, '/api/knowledge/upload', {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer accepted-by-test',
+        'Content-Type': 'multipart/form-data; boundary=knowledge-upload-limit-canary'
+      },
+      body: uploadPayload
+    });
+    assert.equal(upload.response.status, 200);
+    assert.equal(upload.body.raw_bytes, uploadPayload.length);
+    assert.equal(upload.body.body.multipart_bytes, uploadPayload.length);
   } finally {
     await harness.close();
   }
@@ -734,6 +854,43 @@ test('dual-mode workflow template policies parse legacy forms and empty publish 
     });
     assert.equal(unsupported.response.status, 415);
     assert.equal(unsupported.body.code, 'UNSUPPORTED_MEDIA_TYPE');
+  } finally {
+    await harness.close();
+  }
+});
+
+test('URL-encoded parsing admits the exact parameter limit and rejects overflow without truncation', async () => {
+  const harness = await createHarness({ policyNames: ['LEGACY_KNOWLEDGE_CREATE'] });
+  const parameter = (index) => `padding_${index}=x`;
+  const exact = Array.from({ length: 999 }, (_value, index) => parameter(index));
+  exact.push('campaign_id=42');
+  const overflow = Array.from({ length: 1000 }, (_value, index) => parameter(index));
+  overflow.push('campaign_id=42');
+
+  try {
+    const accepted = await requestJson(harness.baseUrl, '/api/knowledge', {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer accepted-by-test',
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: exact.join('&')
+    });
+    assert.equal(accepted.response.status, 200);
+    assert.equal(accepted.body.body.campaign_id, '42');
+    assert.equal(Object.keys(accepted.body.body).length, 1000);
+
+    const rejected = await requestJson(harness.baseUrl, '/api/knowledge', {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer accepted-by-test',
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: overflow.join('&')
+    });
+    assert.equal(rejected.response.status, 400);
+    assert.equal(rejected.body.code, 'INVALID_REQUEST_BODY');
+    assert.equal(harness.observations.handled, 1);
   } finally {
     await harness.close();
   }

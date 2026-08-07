@@ -1,0 +1,12 @@
+[Unit]
+Description=TuringMarket aggregate upload parser limits
+
+[Slice]
+MemoryAccounting=yes
+CPUAccounting=yes
+TasksAccounting=yes
+IOAccounting=yes
+MemoryHigh=1536M
+MemoryMax=2G
+CPUQuota=400%
+TasksMax=128

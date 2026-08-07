@@ -347,12 +347,16 @@ function createPhase4RequestPipeline(options = {}) {
     authenticate,
     admit = async () => true,
     parseMultipart = null,
+    onAdmissionFailure = async () => {},
     shouldOwnRequest = () => true,
     generateRequestId = crypto.randomUUID
   } = options;
   const bodyTimeoutMs = options.bodyTimeoutMs === undefined
     ? DEFAULT_BODY_TIMEOUT_MS
     : options.bodyTimeoutMs;
+  const requireDurableAdmission = options.requireDurableAdmission === undefined
+    ? admit.requiresDurableAdmission === true
+    : options.requireDurableAdmission;
 
   if (!registry || typeof registry.match !== 'function') {
     throw new TypeError('A route policy registry is required');
@@ -363,11 +367,17 @@ function createPhase4RequestPipeline(options = {}) {
   if (typeof admit !== 'function') {
     throw new TypeError('An admission function is required');
   }
+  if (typeof onAdmissionFailure !== 'function') {
+    throw new TypeError('onAdmissionFailure must be a function');
+  }
   if (typeof shouldOwnRequest !== 'function') {
     throw new TypeError('shouldOwnRequest must be a function');
   }
   if (typeof generateRequestId !== 'function') {
     throw new TypeError('A request ID generator is required');
+  }
+  if (typeof requireDurableAdmission !== 'boolean') {
+    throw new TypeError('requireDurableAdmission must be a boolean');
   }
   if (!Number.isSafeInteger(bodyTimeoutMs) || bodyTimeoutMs <= 0) {
     throw new TypeError('bodyTimeoutMs must be a positive safe integer');
@@ -410,7 +420,9 @@ function createPhase4RequestPipeline(options = {}) {
         requestId,
         rawBody: null,
         multipart: null,
-        mediaKind: null
+        mediaKind: null,
+        admission: null,
+        admissionFailed: false
       };
 
       const authentication = await authenticate(request, {
@@ -429,11 +441,24 @@ function createPhase4RequestPipeline(options = {}) {
       }
 
       const headerAdmission = validateMediaAndLength(request, policy);
-      await admit(request, {
+      const admission = await admit(request, {
         requestId,
         policy,
         contentLength: headerAdmission.contentLength
       });
+      if (
+        requireDurableAdmission && policy.admission &&
+        (!admission || typeof admission !== 'object' || Array.isArray(admission))
+      ) {
+        throw new Phase4RequestError(
+          500,
+          'UPLOAD_SANDBOX_NOT_READY',
+          'Durable upload admission was not established'
+        );
+      }
+      if (admission !== true && admission !== undefined && admission !== null) {
+        request.phase4Request.admission = admission;
+      }
 
       const rawBody = headerAdmission.bodyKnownEmpty
         ? Buffer.alloc(0)
@@ -441,7 +466,9 @@ function createPhase4RequestPipeline(options = {}) {
       request.phase4Request.rawBody = rawBody;
       request.phase4Request.mediaKind = headerAdmission.parsedMediaKind;
 
-      if (headerAdmission.parsedMediaKind === MEDIA_KINDS.JSON) {
+      if (policy.discardBody) {
+        request.body = undefined;
+      } else if (headerAdmission.parsedMediaKind === MEDIA_KINDS.JSON) {
         if (rawBody.length === 0) {
           request.body = undefined;
         } else {
@@ -454,13 +481,21 @@ function createPhase4RequestPipeline(options = {}) {
               'Invalid JSON body'
             );
           }
+          if (request.body === null || typeof request.body !== 'object') {
+            throw new Phase4RequestError(
+              400,
+              'INVALID_REQUEST_BODY',
+              'JSON body must be an object or array'
+            );
+          }
         }
       } else if (headerAdmission.parsedMediaKind === 'urlencoded') {
         try {
           request.body = qs.parse(rawBody.toString('utf8'), {
             allowPrototypes: false,
             depth: 32,
-            parameterLimit: 1000
+            parameterLimit: 1000,
+            throwOnLimitExceeded: true
           });
         } catch (_error) {
           throw new Phase4RequestError(
@@ -481,6 +516,23 @@ function createPhase4RequestPipeline(options = {}) {
 
       return next();
     } catch (error) {
+      const phase4Request = request.phase4Request;
+      if (
+        phase4Request &&
+        phase4Request.admission &&
+        phase4Request.admissionFailed !== true
+      ) {
+        phase4Request.admissionFailed = true;
+        try {
+          await onAdmissionFailure(request, phase4Request.admission, error);
+        } catch (_admissionError) {
+          return sendJsonError(request, response, new Phase4RequestError(
+            500,
+            'AUDIT_PERSISTENCE_FAILED',
+            'Parser admission failure could not be fenced'
+          ));
+        }
+      }
       return sendJsonError(request, response, error);
     }
   }
