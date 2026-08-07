@@ -1,4 +1,5 @@
 platform/app.js text eol=lf
+platform/install.sh text eol=lf
 platform/server/migrations/001_legacy_compat_columns.js text eol=lf
 platform/server/migrations/002_campaign_business_spine.js text eol=lf
 platform/server/migrations/003_campaign_workflow_dispatch_evidence.js text eol=lf
@@ -11,6 +12,9 @@ platform/server/package-lock.json text eol=lf
 platform/server/package.json text eol=lf
 platform/server/scripts/sanitization_manifest.json text eol=lf
 platform/server/scripts/sanitize_production_shape.js text eol=lf
+platform/server/scripts/bootstrap_production_runtime.sh text eol=lf
+platform/server/scripts/cleanup_stale_migration_gate.sh text eol=lf
+platform/server/scripts/parse_upload_sandbox.sh text eol=lf
 platform/server/scripts/trusted_production_source_gate.js text eol=lf
 platform/server/scripts/trusted_production_source_manifest.json text eol=lf
 platform/server/scripts/verify_campaign_migration_gate.js text eol=lf

@@ -79,12 +79,18 @@ function safeGitEnvironment(overrides = {}) {
   };
 }
 
-test('Task 12 trusted production source closure is checked out with LF line endings', () => {
+test('Task 12 trusted production source and deployed shell scripts use LF line endings', () => {
   const trustedManifest = JSON.parse(read(trustedSourceManifestPath));
+  const deployedShellPaths = [
+    'platform/server/scripts/bootstrap_production_runtime.sh',
+    'platform/server/scripts/cleanup_stale_migration_gate.sh',
+    'platform/server/scripts/parse_upload_sandbox.sh'
+  ];
   const trustedPaths = [
     'platform/server/scripts/trusted_production_source_gate.js',
     'platform/server/scripts/trusted_production_source_manifest.json',
-    ...trustedManifest.files.map((entry) => `platform/${entry.path}`)
+    ...trustedManifest.files.map((entry) => `platform/${entry.path}`),
+    ...deployedShellPaths
   ];
   const attributeLines = new Set(read(attributesPath).split(/\r?\n/).filter(Boolean));
   const manifestHashes = new Map(
