@@ -149,6 +149,7 @@ test('deployment runbook documents the explicit bootstrap terminal acknowledgeme
   assert.match(runbook, /it does not emit BOOTSTRAP_OK/i);
   assert.doesNotMatch(runbook, /without business or host mutation|不执行任何业务或主机 mutation/i);
   assert.match(runbook, /verify runtime, exact links, SQLite, and marker evidence before ACK/i);
+  assert.match(runbook, /if \(health\.status !== ['"]ok['"]\) process\.exit\(1\)/);
   assert.match(runbook, /repeating ACK with the same ID is idempotent; a wrong or stale ID fails closed/i);
   assert.match(runbook, /full capacity still allows the matching pending ACK in place/i);
   assert.match(runbook, /existing-live[\s\S]{0,400}recover[\s\S]{0,400}must not start a new generation/i);
@@ -560,11 +561,14 @@ test('listener validation accepts exactly one IPv4 loopback socket and rejects e
 set -euo pipefail
 export TM_BOOTSTRAP_LIBRARY_ONLY=1
 source ${shellQuote(bootstrapShellPath)}
-validate_loopback_listener_output $'LISTEN 0 511 127.0.0.1:3002 0.0.0.0:*'
-! validate_loopback_listener_output ''
-! validate_loopback_listener_output $'LISTEN 0 511 0.0.0.0:3002 0.0.0.0:*'
-! validate_loopback_listener_output $'LISTEN 0 511 [::1]:3002 [::]:*'
-! validate_loopback_listener_output $'LISTEN 0 511 127.0.0.1:3002 0.0.0.0:*\nLISTEN 0 511 127.0.0.1:3002 0.0.0.0:*'
+listener=$'LISTEN 0 511 127.0.0.1:3002 0.0.0.0:* users:(("node",pid=4321,fd=20))'
+validate_loopback_listener_output "$listener" 4321
+! validate_loopback_listener_output '' 4321
+! validate_loopback_listener_output $'LISTEN 0 511 0.0.0.0:3002 0.0.0.0:* users:(("node",pid=4321,fd=20))' 4321
+! validate_loopback_listener_output $'LISTEN 0 511 [::1]:3002 [::]:* users:(("node",pid=4321,fd=20))' 4321
+! validate_loopback_listener_output "$listener" 9876
+! validate_loopback_listener_output $'LISTEN 0 511 127.0.0.1:3002 0.0.0.0:*' 4321
+! validate_loopback_listener_output "$listener\n$listener" 4321
 `;
   const result = runBash(source);
 
@@ -903,6 +907,18 @@ source ${shellQuote(bootstrapShellPath)}
 
 backup="$root/remote/backups/v030-runtime-bootstrap-test"
 stateBackup="$backup/state"
+validate_sanitizer_gate_idle_state() { :; }
+discover_migration_journal() { JOURNAL_PRESENT=1; }
+read_journal() {
+  JOURNAL_PHASE=prepared
+  JOURNAL_BACKUP_DIR="$backup"
+  JOURNAL_OWNER_TOKEN=11111111111111111111111111111111
+}
+adopt_migration_journal() { :; }
+claim_migration_journal() { :; }
+validate_active_migration_journal_directory() { :; }
+validate_committed_runtime_layout_provenance() { return 1; }
+clear_migration_journal() { rm -rf -- "$JOURNAL_DIR"; }
 mkdir -p "$root/live/server" "$stateBackup/live-db" "$stateBackup/live-uploads" "$stateBackup/live-tmp" "$JOURNAL_DIR"
 printf 'original-env' > "$stateBackup/live-env"
 : > "$stateBackup/live-env.present"
@@ -958,6 +974,19 @@ export TM_APPARMOR_PROFILE="$root/apparmor-profile"
 export TM_BOOTSTRAP_LIBRARY_ONLY=1
 source ${shellQuote(bootstrapShellPath)}
 
+validate_sanitizer_gate_idle_state() { :; }
+discover_migration_journal() { JOURNAL_PRESENT=1; }
+read_journal() {
+  JOURNAL_PHASE=snapshotting
+  JOURNAL_BACKUP_DIR="$root/remote/backups/v030-runtime-bootstrap-test"
+  JOURNAL_OWNER_TOKEN=11111111111111111111111111111111
+}
+adopt_migration_journal() { :; }
+claim_migration_journal() { :; }
+validate_active_migration_journal_directory() { :; }
+validate_committed_runtime_layout_provenance() { return 1; }
+cleanup_stages() { :; }
+clear_migration_journal() { rm -rf -- "$JOURNAL_DIR"; }
 mkdir -p "$root/live/server/db" "$root/live/uploads" "$root/live/tmp" "$JOURNAL_DIR"
 printf 'untouched' > "$root/live/server/db/turingmarket.db"
 printf '%s\n' snapshotting > "$JOURNAL_DIR/phase"

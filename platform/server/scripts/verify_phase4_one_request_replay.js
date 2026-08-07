@@ -107,6 +107,8 @@ function fixtureEnvironment({ dbPath, fault, port, tempDir }) {
     JWT_SECRET,
     UPLOAD_DIR: path.join(tempDir, 'uploads'),
     TMP_DIR: path.join(tempDir, 'runtime-tmp'),
+    TM_UPLOAD_SANDBOX_TEST_MODE: 'local-worker',
+    UPLOAD_SANDBOX_SPOOL_ROOT: path.join(tempDir, 'upload-spool'),
     TM_PHASE4_ONE_REQUEST_REPLAY_FAULT: fault,
     TM_PHASE4_ONE_REQUEST_REPLAY_USER_ID: '1',
     TZ: 'UTC'

@@ -6777,7 +6777,13 @@ test('Linux stale cleanup kills only an exact run-bound process identity', async
     }
     assert.equal(fs.existsSync(descendantPidPath), true, 'fixture descendant must start in the detached process group');
     const descendantPid = Number(fs.readFileSync(descendantPidPath, 'utf8'));
-    writeCleanupJournal(root, exactRunId, linuxProcessIdentity(exactChild.pid), exactStage);
+    writeCleanupJournal(
+      root,
+      exactRunId,
+      linuxProcessIdentity(exactChild.pid),
+      exactStage,
+      exactDeadCleanupIdentity()
+    );
     const killed = spawnSync(BASH, [scriptPath, '--all'], { env, encoding: 'utf8' });
     assert.equal(killed.status, 0, killed.stderr);
     await new Promise((resolve) => setTimeout(resolve, 100));
@@ -6822,7 +6828,7 @@ test('Linux stale cleanup kills only an exact run-bound process identity', async
       await new Promise((resolve) => setTimeout(resolve, 100));
       const reusedIdentity = linuxProcessIdentity(reusedChild.pid);
       reusedIdentity.startTimeTicks = String(BigInt(reusedIdentity.startTimeTicks) + 1n);
-      writeCleanupJournal(root, reusedRunId, reusedIdentity, reusedStage);
+      writeCleanupJournal(root, reusedRunId, reusedIdentity, reusedStage, exactDeadCleanupIdentity());
       const reconciled = spawnSync(BASH, [scriptPath, '--all'], { env, encoding: 'utf8' });
       assert.notEqual(reconciled.status, 0, 'identity uncertainty must fail closed');
       assert.doesNotThrow(() => process.kill(reusedChild.pid, 0), 'PID reuse mismatch must not be signaled');
@@ -6849,7 +6855,7 @@ test('stale cleanup reconciles centralized v3 journals and removes them', { skip
   const nested = path.join(stage, 'child', 'grandchild');
   fs.mkdirSync(nested, { recursive: true, mode: 0o700 });
   fs.writeFileSync(path.join(nested, 'regular'), 'synthetic', { mode: 0o600 });
-  const journal = writeCleanupJournal(root, '9'.repeat(32), null, stage);
+  const journal = writeCleanupJournal(root, '9'.repeat(32), null, stage, exactDeadCleanupIdentity());
   const env = { ...process.env, TM_GATE_TEST_MODE: '1', TM_GATE_JOURNAL_ROOT: root, TM_GATE_ALLOWED_ROOTS: root };
   const cleanup = spawnSync(BASH, [scriptPath, '--all'], { env, encoding: 'utf8' });
   assert.equal(cleanup.status, 0, cleanup.stderr);
@@ -6864,7 +6870,7 @@ test('stale cleanup reconciles centralized v3 journals and removes them', { skip
     uncertainRunId,
     null,
     uncertainStage,
-    undefined,
+    exactDeadCleanupIdentity(),
     'worker-launch-intent'
   );
   const uncertain = spawnSync(BASH, [scriptPath, '--all'], { env, encoding: 'utf8' });
@@ -6891,7 +6897,13 @@ test('stale cleanup rejects special nodes and hardlinks without traversing the t
     if (kind === 'hardlink') fs.linkSync(outside, path.join(stage, 'linked'));
     if (kind === 'fifo') assert.equal(spawnSync('mkfifo', [path.join(stage, 'pipe')]).status, 0);
     if (kind === 'symlink') fs.symlinkSync(outside, path.join(stage, 'link'));
-    writeCleanupJournal(root, String(index + 2).repeat(32), null, stage);
+    writeCleanupJournal(
+      root,
+      String(index + 2).repeat(32),
+      null,
+      stage,
+      exactDeadCleanupIdentity()
+    );
     const env = { ...process.env, TM_GATE_TEST_MODE: '1', TM_GATE_JOURNAL_ROOT: root, TM_GATE_ALLOWED_ROOTS: root };
     const cleanup = spawnSync(BASH, [scriptPath, '--all'], { env, encoding: 'utf8' });
     assert.notEqual(cleanup.status, 0, `${kind} cleanup must fail closed`);

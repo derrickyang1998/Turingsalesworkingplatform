@@ -85,7 +85,7 @@ test('Phase 4 lifecycle metadata is atomic, durable, root-only, and complete bef
   assert.match(enter, /chown root:root/);
   assert.match(enter, /mv .*run\.json\.next.*run\.json/);
   assert.ok(main.indexOf('Enter-RemoteDeploymentLock') < main.indexOf('Invoke-RemoteBackup'));
-  assert.ok(main.indexOf('Enter-RemoteDeploymentLock') < main.indexOf('Invoke-SecureCopy'));
+  assert.ok(main.indexOf('Enter-RemoteDeploymentLock') < main.indexOf('Invoke-PinnedDeploymentUpload'));
 });
 
 test('Phase 4 serializes lifecycle and production operations with a non-inherited flock fence', () => {
@@ -178,9 +178,12 @@ test('Phase 4 deploy and rollback fail closed on the independent loopback isolat
   const main = deploy.slice(deploy.indexOf('Write-Host "TuringMarket guarded deploy starting"'));
   assert.ok(main.indexOf('Assert-RemoteLoopbackIsolationPreflight') < main.indexOf('Invoke-RemoteBackup'));
   const rollback = functionSource(deploy, 'Invoke-ManualRollback', 'Assert-AuthoritativeCheckout');
-  assert.match(rollback, /\[scriptblock\]\$LoopbackPreflight/);
-  assert.ok(rollback.indexOf('& $LoopbackPreflight') < rollback.indexOf('Invoke-RemoteRestore'));
-  assert.match(deploy, /Invoke-ManualRollback[^\r\n]*-LoopbackPreflight \$\{function:Assert-RemoteLoopbackIsolationPreflight\}/);
+  assert.doesNotMatch(rollback, /\[scriptblock\]/i);
+  assert.doesNotMatch(rollback, /&\s*\$[A-Za-z_][A-Za-z0-9_]*/);
+  assert.ok(
+    rollback.indexOf('Assert-RemoteLoopbackIsolationPreflight') < rollback.indexOf('Invoke-RemoteRestore')
+  );
+  assert.match(deploy, /Invoke-ManualRollback -BackupPath \$RollbackBackup -RestoreDatabase -ConfirmDataLoss/);
 });
 
 test('Phase 4 deploy and rollback require the committed external-runtime ownership marker', () => {
@@ -271,7 +274,7 @@ test('Phase 4 installs and proves the stale migration-gate sanitizer before cand
   const main = deploy.slice(deploy.indexOf('Write-Host "TuringMarket guarded deploy starting"'));
   const installIndex = main.indexOf('Install-RemoteMigrationGateCleanup');
   const prepareIndex = main.indexOf('$prepareScript');
-  const copyIndex = main.indexOf('Invoke-SecureCopy');
+  const copyIndex = main.indexOf('Invoke-PinnedDeploymentUpload');
   assert.ok(installIndex >= 0 && installIndex < prepareIndex && installIndex < copyIndex);
 });
 
