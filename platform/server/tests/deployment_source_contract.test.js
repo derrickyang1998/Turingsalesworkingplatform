@@ -17,6 +17,7 @@ const screenshotRoot = path.join(repoRoot, 'docs', 'baselines', 'v0.2.9', 'scree
 const visualEvidenceRoot = path.join(repoRoot, 'docs', 'product', 'evidence', '2026-07-phase3-post');
 const visualProvenancePath = path.join(visualEvidenceRoot, 'raw-contact-sheet-manifest.json');
 const attributesPath = path.join(repoRoot, '.gitattributes');
+const trustedSourceManifestPath = path.join(platformRoot, 'server', 'scripts', 'trusted_production_source_manifest.json');
 const phase3EvidenceGeneratorPath = path.join(platformRoot, 'server', 'scripts', 'generate_phase3_visual_evidence_manifest.js');
 const docs = [
   path.join(platformRoot, 'DEPLOY.md'),
@@ -77,6 +78,32 @@ function safeGitEnvironment(overrides = {}) {
     ...overrides
   };
 }
+
+test('Task 12 trusted production source closure is checked out with LF line endings', () => {
+  const trustedManifest = JSON.parse(read(trustedSourceManifestPath));
+  const trustedPaths = [
+    'platform/server/scripts/trusted_production_source_gate.js',
+    'platform/server/scripts/trusted_production_source_manifest.json',
+    ...trustedManifest.files.map((entry) => `platform/${entry.path}`)
+  ];
+  const attributeLines = new Set(read(attributesPath).split(/\r?\n/).filter(Boolean));
+  const manifestHashes = new Map(
+    trustedManifest.files.map((entry) => [`platform/${entry.path}`, entry.sha256])
+  );
+  for (const trustedPath of trustedPaths) {
+    assert.equal(
+      attributeLines.has(`${trustedPath} text eol=lf`),
+      true,
+      `${trustedPath} must have an exact eol=lf rule`
+    );
+    const bytes = fs.readFileSync(path.join(repoRoot, ...trustedPath.split('/')));
+    assert.equal(bytes.includes(13), false, `${trustedPath} must contain LF bytes only`);
+    const expectedHash = manifestHashes.get(trustedPath);
+    if (expectedHash) {
+      assert.equal(sha256Buffer(bytes), expectedHash, `${trustedPath} must match its trusted manifest hash`);
+    }
+  }
+});
 
 function gitBlob(commit, source) {
   const result = spawnSync('git', ['show', `${commit}:${source}`], {
