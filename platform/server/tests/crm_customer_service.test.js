@@ -7,6 +7,7 @@ const Database = require('better-sqlite3');
 
 const migrationService = require('../services/migration_service');
 const service = require('../services/crm_customer_service');
+const { buildCustomerIdentity } = require('../services/crm_contract');
 
 const SERVER_ROOT = path.resolve(__dirname, '..');
 const FIXED_AT = '2026-08-09 00:00:00';
@@ -196,6 +197,24 @@ function customerUpdate(actorUserId, customerId, overrides = {}) {
   };
 }
 
+function customerCreate(actorUserId, brandName, overrides = {}) {
+  return {
+    actorUserId,
+    organizationId: IDS.orgA,
+    requestId: `create-${brandName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+    correlationId: 'customer-identity-flow',
+    command: {
+      mode: 'create',
+      values: {
+        brand_name: brandName,
+        assigned_to: actorUserId,
+        team_id: IDS.teamA1
+      }
+    },
+    ...overrides
+  };
+}
+
 function publicError(error) {
   return JSON.parse(JSON.stringify(error));
 }
@@ -278,12 +297,13 @@ test('envelope: request and correlation identifiers enforce exact bounds and saf
   const db = openFixture(t);
   const validRequest = 'r'.repeat(120);
   const validCorrelation = 'c'.repeat(128);
-  const allowed = captureError(() => service.createOrUpdateCustomer(db, customerUpdate(
+  const allowed = service.createOrUpdateCustomer(db, customerUpdate(
     IDS.ownerA,
     IDS.ownedA,
     { requestId: validRequest, correlationId: validCorrelation }
-  )));
-  assert.equal(allowed.code, 'CRM_MUTATION_INVALID');
+  ));
+  assert.equal(allowed.ok, true);
+  assert.equal(allowed.action, 'updated');
 
   for (const [field, value] of [
     ['requestId', 'r'.repeat(121)],
@@ -349,15 +369,15 @@ test('authorization: same-organization profile denial commits one bounded audit 
   }]);
 });
 
-test('authorization: owner and organization admin reach the bounded Task 1 command stub', (t) => {
+test('authorization: owner and organization admin reach customer profile mutation', (t) => {
   const db = openFixture(t);
   for (const actorUserId of [IDS.ownerA, IDS.orgAdminA]) {
-    const error = captureError(() => service.createOrUpdateCustomer(
+    const result = service.createOrUpdateCustomer(
       db,
       customerUpdate(actorUserId, IDS.ownedA)
-    ));
-    assert.equal(error.code, 'CRM_MUTATION_INVALID');
-    assert.equal(error.status, 400);
+    );
+    assert.equal(result.ok, true);
+    assert.equal(result.action, 'updated');
   }
   assert.equal(db.inTransaction, false);
 });
@@ -437,15 +457,15 @@ test('authorization: inactive owner custody matches the read-model quarantine po
 
 test('authorization: create authority is self-owned for members and delegated for organization admins', (t) => {
   const db = openFixture(t);
-  const selfCreate = captureError(() => service.createOrUpdateCustomer(db, {
+  const selfCreate = service.createOrUpdateCustomer(db, {
     actorUserId: IDS.ownerA,
     organizationId: IDS.orgA,
     command: {
       mode: 'create',
       values: { brand_name: 'Self Create', assigned_to: IDS.ownerA, team_id: IDS.teamA1 }
     }
-  }));
-  assert.equal(selfCreate.code, 'CRM_MUTATION_INVALID');
+  });
+  assert.equal(selfCreate.action, 'created');
 
   const delegatedMember = captureError(() => service.createOrUpdateCustomer(db, {
     actorUserId: IDS.ownerA,
@@ -467,15 +487,15 @@ test('authorization: create authority is self-owned for members and delegated fo
   }));
   assert.equal(delegatedUnknownTarget.code, 'CRM_CUSTOMER_FORBIDDEN');
 
-  const delegatedAdmin = captureError(() => service.createOrUpdateCustomer(db, {
+  const delegatedAdmin = service.createOrUpdateCustomer(db, {
     actorUserId: IDS.orgAdminA,
     organizationId: IDS.orgA,
     command: {
       mode: 'create',
       values: { brand_name: 'Delegated Admin', assigned_to: IDS.teammateA, team_id: IDS.teamA1 }
     }
-  }));
-  assert.equal(delegatedAdmin.code, 'CRM_MUTATION_INVALID');
+  });
+  assert.equal(delegatedAdmin.action, 'created');
 });
 
 test('authorization: target assignment must be active and in the selected organization', (t) => {
@@ -566,4 +586,332 @@ test('transaction: sqlite busy and unexpected failures serialize to bounded publ
     details: null
   });
   assert.equal(JSON.stringify(publicError(failed)).includes('secret'), false);
+});
+
+test('customer identity: self-owned create derives identity defaults evidence and a frozen result', (t) => {
+  const db = openFixture(t);
+  const options = customerCreate(IDS.ownerA, '  New Brand  ');
+  Object.assign(options.command.values, {
+    company_name: 'New Company',
+    country: 'US',
+    tags: 'fitness,home',
+    priority: 'high'
+  });
+
+  const result = service.createOrUpdateCustomer(db, options);
+  assert.equal(Object.isFrozen(result), true);
+  assert.equal(Object.isFrozen(result.record), true);
+  assert.equal(Object.isFrozen(result.meta), true);
+  assert.deepEqual(Object.keys(result), ['ok', 'entity', 'action', 'record', 'meta']);
+  assert.equal(result.ok, true);
+  assert.equal(result.entity, 'customer');
+  assert.equal(result.action, 'created');
+  assert.deepEqual(result.meta, {
+    request_id: options.requestId,
+    correlation_id: options.correlationId
+  });
+
+  const row = db.prepare('SELECT * FROM customers WHERE id=?').get(result.record.id);
+  assert.equal(row.brand_name, 'New Brand');
+  assert.equal(row.company_name, 'New Company');
+  assert.equal(row.stage, 'lead');
+  assert.equal(row.priority, 'high');
+  assert.equal(row.created_by, IDS.ownerA);
+  assert.equal(row.assigned_to, IDS.ownerA);
+  assert.equal(row.team_id, IDS.teamA1);
+  assert.equal(row.org_id, IDS.orgA);
+  assert.equal(row.is_public, 0);
+  assert.equal(row.duplicate_enforced, 1);
+  assert.equal(row.normalized_identity_key, buildCustomerIdentity({
+    brand_name: 'New Brand',
+    company_name: 'New Company'
+  }).key);
+
+  const activity = db.prepare('SELECT action,stage_from,stage_to,notes FROM customer_activity WHERE customer_id=?').get(row.id);
+  assert.deepEqual(activity, {
+    action: 'created',
+    stage_from: null,
+    stage_to: 'lead',
+    notes: 'customer_created'
+  });
+  const audit = db.prepare("SELECT metadata_json FROM crm_audit_events WHERE customer_id=? AND event_type='customer_created'").get(row.id);
+  assert.ok(audit);
+  assert.equal(audit.metadata_json.includes('New Brand'), false);
+});
+
+test('customer identity: organization admin creates for a validated delegated assignment', (t) => {
+  const db = openFixture(t);
+  const options = customerCreate(IDS.orgAdminA, 'Delegated Brand');
+  options.command.values.assigned_to = IDS.teammateA;
+  options.command.values.team_id = IDS.teamA1;
+
+  const result = service.createOrUpdateCustomer(db, options);
+  assert.equal(result.action, 'created');
+  assert.equal(result.record.assigned_to, IDS.teammateA);
+  assert.equal(result.record.team_id, IDS.teamA1);
+  assert.equal(db.prepare('SELECT created_by FROM customers WHERE id=?').get(result.record.id).created_by, IDS.orgAdminA);
+});
+
+test('customer identity: update merges the final identity and rejects client custody changes', (t) => {
+  const db = openFixture(t);
+  const before = db.prepare('SELECT * FROM customers WHERE id=?').get(IDS.ownedA);
+  const result = service.createOrUpdateCustomer(db, {
+    actorUserId: IDS.ownerA,
+    organizationId: IDS.orgA,
+    requestId: 'identity-update',
+    correlationId: 'identity-flow',
+    command: {
+      mode: 'update',
+      customerId: IDS.ownedA,
+      values: { company_name: 'Merged Company', notes: 'Follow up next week' }
+    }
+  });
+  assert.equal(result.action, 'updated');
+
+  const updated = db.prepare('SELECT * FROM customers WHERE id=?').get(IDS.ownedA);
+  assert.equal(updated.brand_name, before.brand_name);
+  assert.equal(updated.company_name, 'Merged Company');
+  assert.equal(updated.assigned_to, before.assigned_to);
+  assert.equal(updated.team_id, before.team_id);
+  assert.equal(updated.normalized_identity_key, buildCustomerIdentity({
+    brand_name: before.brand_name,
+    company_name: 'Merged Company'
+  }).key);
+  assert.equal(updated.duplicate_enforced, 1);
+  assert.deepEqual(db.prepare('SELECT action,notes FROM customer_activity WHERE customer_id=? ORDER BY id DESC LIMIT 1').get(IDS.ownedA), {
+    action: 'updated',
+    notes: 'customer_profile_updated'
+  });
+
+  const custodyError = captureError(() => service.createOrUpdateCustomer(db, {
+    actorUserId: IDS.ownerA,
+    organizationId: IDS.orgA,
+    command: {
+      mode: 'update',
+      customerId: IDS.ownedA,
+      values: { assigned_to: IDS.teammateA, team_id: IDS.teamA1 }
+    }
+  }));
+  assert.equal(custodyError.code, 'CRM_MUTATION_INVALID');
+  assert.equal(db.prepare('SELECT assigned_to FROM customers WHERE id=?').get(IDS.ownedA).assigned_to, IDS.ownerA);
+});
+
+test('customer identity: another organization is neither a conflict nor an oracle', (t) => {
+  const db = openFixture(t);
+  const identity = buildCustomerIdentity({ brand_name: 'Cross Org Brand', company_name: 'Cross Org Company' }).key;
+  db.prepare(`
+    UPDATE customers
+    SET brand_name='Cross Org Brand',company_name='Cross Org Company',
+        normalized_identity_key=?,duplicate_enforced=1
+    WHERE id=?
+  `).run(identity, IDS.ownedB);
+
+  const options = customerCreate(IDS.ownerA, 'Cross Org Brand');
+  options.command.values.company_name = 'Cross Org Company';
+  const result = service.createOrUpdateCustomer(db, options);
+  assert.equal(result.action, 'created');
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM customers WHERE org_id=? AND normalized_identity_key=?').get(IDS.orgA, identity).count, 1);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM customers WHERE org_id=? AND normalized_identity_key=?').get(IDS.orgB, identity).count, 1);
+});
+
+test('customer identity: duplicate disclosure precedence is readable then public pool then restricted', (t) => {
+  const db = openFixture(t);
+  const identity = buildCustomerIdentity({ brand_name: 'Collision Brand', company_name: 'Collision Company' }).key;
+  db.prepare(`
+    UPDATE customers
+    SET brand_name='Collision Brand',company_name='Collision Company',
+        normalized_identity_key=?,duplicate_enforced=0,stage='legacy_unknown'
+    WHERE id IN (?,?,?)
+  `).run(identity, IDS.ownedA, IDS.publicA, IDS.quarantinedA);
+
+  const options = customerCreate(IDS.ownerA, 'Collision Brand');
+  options.command.values.company_name = 'Collision Company';
+  const readable = captureError(() => service.createOrUpdateCustomer(db, options));
+  assert.deepEqual(publicError(readable), {
+    code: 'CRM_CUSTOMER_DUPLICATE',
+    status: 409,
+    title: 'Customer identity conflicts with an existing record',
+    details: {
+      conflict: {
+        visibility: 'readable',
+        customer: { id: IDS.ownedA, display_name: 'Collision Brand', stage: 'legacy_unknown' }
+      }
+    }
+  });
+  assert.equal(JSON.stringify(publicError(readable)).includes(identity), false);
+
+  db.prepare('UPDATE customers SET normalized_identity_key=NULL WHERE id=?').run(IDS.ownedA);
+  const publicPool = captureError(() => service.createOrUpdateCustomer(db, options));
+  assert.deepEqual(publicError(publicPool).details, {
+    conflict: { visibility: 'public_pool', action: 'review_public_pool' }
+  });
+
+  db.prepare('UPDATE customers SET normalized_identity_key=NULL WHERE id=?').run(IDS.publicA);
+  const restricted = captureError(() => service.createOrUpdateCustomer(db, options));
+  assert.deepEqual(publicError(restricted).details, {
+    conflict: { visibility: 'restricted' }
+  });
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM crm_audit_events WHERE event_type='duplicate_detected'").get().count, 3);
+});
+
+test('customer identity: failed rename commits duplicate evidence and rolls back customer activity', (t) => {
+  const db = openFixture(t);
+  const identity = buildCustomerIdentity({ brand_name: 'Rename Collision', company_name: 'Rename Company' }).key;
+  db.prepare(`
+    UPDATE customers
+    SET brand_name='Rename Collision',company_name='Rename Company',
+        normalized_identity_key=?,duplicate_enforced=0,stage='legacy_unknown'
+    WHERE id=?
+  `).run(identity, IDS.teammateOwnedA);
+  const before = db.prepare('SELECT brand_name,company_name,normalized_identity_key FROM customers WHERE id=?').get(IDS.ownedA);
+  const beforeActivity = db.prepare('SELECT COUNT(*) AS count FROM customer_activity WHERE customer_id=?').get(IDS.ownedA).count;
+
+  const error = captureError(() => service.createOrUpdateCustomer(db, {
+    actorUserId: IDS.ownerA,
+    organizationId: IDS.orgA,
+    requestId: 'rename-collision',
+    command: {
+      mode: 'update',
+      customerId: IDS.ownedA,
+      values: { brand_name: 'Rename Collision', company_name: 'Rename Company' }
+    }
+  }));
+  assert.equal(error.code, 'CRM_CUSTOMER_DUPLICATE');
+  assert.deepEqual(db.prepare('SELECT brand_name,company_name,normalized_identity_key FROM customers WHERE id=?').get(IDS.ownedA), before);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM customer_activity WHERE customer_id=?').get(IDS.ownedA).count, beforeActivity);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM crm_audit_events WHERE customer_id=? AND event_type='duplicate_detected'").get(IDS.ownedA).count, 1);
+});
+
+test('customer identity: omitted legacy profile values stay byte-stable and empty company is equivalent', (t) => {
+  const db = openFixture(t);
+  db.prepare(`
+    UPDATE customers
+    SET company_name='',contact_info='  legacy spacing  ',priority=NULL,
+        normalized_identity_key=NULL,duplicate_enforced=0
+    WHERE id=?
+  `).run(IDS.ownedA);
+
+  const updated = service.createOrUpdateCustomer(db, {
+    actorUserId: IDS.ownerA,
+    organizationId: IDS.orgA,
+    command: {
+      mode: 'update',
+      customerId: IDS.ownedA,
+      values: { notes: 'Only this field changes' }
+    }
+  });
+  assert.equal(updated.action, 'updated');
+  assert.deepEqual(db.prepare('SELECT company_name,contact_info,priority FROM customers WHERE id=?').get(IDS.ownedA), {
+    company_name: '',
+    contact_info: '  legacy spacing  ',
+    priority: null
+  });
+
+  const first = customerCreate(IDS.ownerA, 'Empty Company Brand');
+  service.createOrUpdateCustomer(db, first);
+  const second = customerCreate(IDS.ownerA, 'Empty Company Brand');
+  second.requestId = 'empty-company-duplicate';
+  second.command.values.company_name = '';
+  const duplicate = captureError(() => service.createOrUpdateCustomer(db, second));
+  assert.equal(duplicate.code, 'CRM_CUSTOMER_DUPLICATE');
+});
+
+test('customer identity: terminal profile update remains unenforced beside an active duplicate', (t) => {
+  const db = openFixture(t);
+  const identity = buildCustomerIdentity({ brand_name: 'Shared Terminal Brand', company_name: 'Shared Company' }).key;
+  db.prepare(`
+    UPDATE customers
+    SET brand_name='Shared Terminal Brand',company_name='Shared Company',
+        normalized_identity_key=?,duplicate_enforced=1,stage='lead'
+    WHERE id=?
+  `).run(identity, IDS.teammateOwnedA);
+  db.prepare("UPDATE customers SET stage='lost',duplicate_enforced=0 WHERE id=?").run(IDS.ownedA);
+
+  const result = service.createOrUpdateCustomer(db, {
+    actorUserId: IDS.ownerA,
+    organizationId: IDS.orgA,
+    command: {
+      mode: 'update',
+      customerId: IDS.ownedA,
+      values: { brand_name: 'Shared Terminal Brand', company_name: 'Shared Company' }
+    }
+  });
+  assert.equal(result.action, 'updated');
+  assert.equal(result.record.stage, 'lost');
+  assert.equal(db.prepare('SELECT duplicate_enforced FROM customers WHERE id=?').get(IDS.ownedA).duplicate_enforced, 0);
+});
+
+test('customer identity: audit failures roll back create and update without storage leakage', (t) => {
+  const db = openFixture(t);
+  const customerCount = db.prepare('SELECT COUNT(*) AS count FROM customers').get().count;
+  const activityCount = db.prepare('SELECT COUNT(*) AS count FROM customer_activity').get().count;
+  db.exec(`
+    CREATE TRIGGER reject_customer_created_audit
+    BEFORE INSERT ON crm_audit_events
+    WHEN NEW.event_type='customer_created'
+    BEGIN
+      SELECT RAISE(ABORT,'secret audit create failure');
+    END
+  `);
+
+  const createError = captureError(() => service.createOrUpdateCustomer(
+    db,
+    customerCreate(IDS.ownerA, 'Rollback Create Brand')
+  ));
+  assert.equal(createError.code, 'CRM_MUTATION_FAILED');
+  assert.equal(JSON.stringify(publicError(createError)).includes('secret'), false);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM customers').get().count, customerCount);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM customer_activity').get().count, activityCount);
+
+  db.exec('DROP TRIGGER reject_customer_created_audit');
+  db.exec(`
+    CREATE TRIGGER reject_customer_updated_audit
+    BEFORE INSERT ON crm_audit_events
+    WHEN NEW.event_type='customer_updated'
+    BEGIN
+      SELECT RAISE(ABORT,'secret audit update failure');
+    END
+  `);
+  const before = db.prepare('SELECT brand_name,normalized_identity_key,updated_at FROM customers WHERE id=?').get(IDS.ownedA);
+  const beforeActivity = db.prepare('SELECT COUNT(*) AS count FROM customer_activity WHERE customer_id=?').get(IDS.ownedA).count;
+  const updateError = captureError(() => service.createOrUpdateCustomer(db, {
+    actorUserId: IDS.ownerA,
+    organizationId: IDS.orgA,
+    command: {
+      mode: 'update',
+      customerId: IDS.ownedA,
+      values: { brand_name: 'Rollback Update Brand' }
+    }
+  }));
+  assert.equal(updateError.code, 'CRM_MUTATION_FAILED');
+  assert.equal(JSON.stringify(publicError(updateError)).includes('secret'), false);
+  assert.deepEqual(db.prepare('SELECT brand_name,normalized_identity_key,updated_at FROM customers WHERE id=?').get(IDS.ownedA), before);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM customer_activity WHERE customer_id=?').get(IDS.ownedA).count, beforeActivity);
+});
+
+test('customer identity: client provenance identity stage and timestamp fields never reach SQL', () => {
+  let transactionHits = 0;
+  const db = {
+    transaction() {
+      transactionHits += 1;
+      throw new Error('database must not be reached');
+    }
+  };
+  const forbidden = {
+    created_by: IDS.ownerA,
+    org_id: IDS.orgA,
+    is_public: 0,
+    normalized_identity_key: 'a'.repeat(64),
+    duplicate_enforced: 1,
+    stage: 'lead',
+    updated_at: FIXED_AT
+  };
+
+  for (const [field, value] of Object.entries(forbidden)) {
+    const options = customerCreate(IDS.ownerA, `Forbidden ${field}`);
+    options.command.values[field] = value;
+    const error = captureError(() => service.createOrUpdateCustomer(db, options));
+    assert.equal(error.code, 'CRM_MUTATION_INVALID');
+  }
+  assert.equal(transactionHits, 0);
 });

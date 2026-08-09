@@ -4,10 +4,44 @@ const { types } = require('node:util');
 
 const {
   CrmScopeError,
-  resolveCrmAccessContext
+  resolveCrmAccessContext,
+  CUSTOMER_CUSTODY_CASE_SQL
 } = require('./crm_scope_service');
+const {
+  CrmContractError,
+  assertCustomerPriority,
+  buildCustomerIdentity
+} = require('./crm_contract');
 
 const SAFE_IDENTIFIER = /^[A-Za-z0-9._:/-]+$/;
+const SQLITE_TIMESTAMP = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
+const TERMINAL_CUSTOMER_STAGES = new Set(['paused', 'won', 'lost']);
+const CUSTOMER_PROFILE_FIELDS = Object.freeze([
+  'brand_name',
+  'company_name',
+  'contact_person',
+  'contact_info',
+  'industry',
+  'country',
+  'source',
+  'budget_estimate',
+  'notes',
+  'tags',
+  'priority',
+  'next_action_at'
+]);
+const CUSTOMER_TEXT_LIMITS = Object.freeze({
+  brand_name: 1000,
+  company_name: 1000,
+  contact_person: 1000,
+  contact_info: 4000,
+  industry: 1000,
+  country: 120,
+  source: 1000,
+  budget_estimate: 1000,
+  notes: 4000,
+  tags: 4000
+});
 const OUTER_KEYS = Object.freeze([
   'actorUserId',
   'organizationId',
@@ -121,17 +155,71 @@ class CrmMutationError extends Error {
 
 function mutationError(code, details) {
   const definition = ERROR_DEFINITIONS[code] || ERROR_DEFINITIONS.CRM_MUTATION_FAILED;
+  const safeDetails = details === undefined ? null : deepFreeze(details);
   return new CrmMutationError(
     code,
     definition.status,
     definition.title,
-    details === undefined ? null : details,
+    safeDetails,
     definition.retryable === true
   );
 }
 
 function invalidMutation() {
   return mutationError('CRM_MUTATION_INVALID');
+}
+
+function deepFreeze(value) {
+  if (!value || typeof value !== 'object' || Object.isFrozen(value)) return value;
+  for (const child of Object.values(value)) deepFreeze(child);
+  return Object.freeze(value);
+}
+
+function canonicalText(value, field, required = false) {
+  if (value === null) {
+    if (required) throw invalidMutation();
+    return null;
+  }
+  if (typeof value !== 'string') throw invalidMutation();
+  const normalized = value.trim();
+  if (!normalized) {
+    if (required) throw invalidMutation();
+    return null;
+  }
+  if (normalized.length > CUSTOMER_TEXT_LIMITS[field]) throw invalidMutation();
+  return normalized;
+}
+
+function canonicalTimestamp(value) {
+  if (value === null) return null;
+  if (typeof value !== 'string' || !SQLITE_TIMESTAMP.test(value)) throw invalidMutation();
+  const parsed = new Date(`${value.replace(' ', 'T')}Z`);
+  if (
+    Number.isNaN(parsed.getTime()) ||
+    parsed.toISOString().slice(0, 19).replace('T', ' ') !== value
+  ) throw invalidMutation();
+  return value;
+}
+
+function canonicalPriority(value) {
+  try {
+    return assertCustomerPriority(value);
+  } catch (error) {
+    if (error instanceof CrmContractError) throw invalidMutation();
+    throw error;
+  }
+}
+
+function customerIdentity(brandName, companyName) {
+  try {
+    return buildCustomerIdentity({
+      brand_name: brandName,
+      company_name: companyName
+    }).key;
+  } catch (error) {
+    if (error instanceof CrmContractError) throw invalidMutation();
+    throw error;
+  }
 }
 
 function positiveSafeInteger(value) {
@@ -296,6 +384,8 @@ function readCustomer(db, organizationId, customerId) {
   return db.prepare(`
     SELECT
       id,org_id,team_id,assigned_to,created_by,is_public,stage,
+      brand_name,company_name,contact_person,contact_info,industry,country,
+      source,budget_estimate,notes,tags,priority,next_action_at,
       normalized_identity_key,duplicate_enforced,updated_at
     FROM customers
     WHERE id=? AND org_id=?
@@ -317,18 +407,347 @@ function classifyCustody(db, customer) {
   return 'quarantined';
 }
 
-function writeDeniedAudit(db, context, input, operation) {
+function writeAuditEvent(db, context, input, eventType, customerId, metadata) {
+  const metadataJson = JSON.stringify(metadata);
+  if (Buffer.byteLength(metadataJson, 'utf8') > 8192) throw mutationError('CRM_MUTATION_FAILED');
   db.prepare(`
     INSERT INTO crm_audit_events (
-      org_id,actor_user_id,event_type,request_id,correlation_id,metadata_json
-    ) VALUES (?,?,'mutation_denied',?,?,?)
+      org_id,customer_id,actor_user_id,event_type,request_id,correlation_id,metadata_json
+    ) VALUES (?,?,?,?,?,?,?)
   `).run(
     context.organization.id,
+    customerId,
     input.actorUserId,
+    eventType,
     input.requestId,
     input.correlationId,
-    JSON.stringify({ operation, outcome: 'forbidden' })
+    metadataJson
   );
+}
+
+function customerFinalState(command, currentCustomer) {
+  const creating = command.mode === 'create';
+  if (!command.values) throw invalidMutation();
+  if (creating) {
+    if (
+      Object.hasOwn(command, 'customerId') ||
+      Object.hasOwn(command, 'sourceLeadId') ||
+      Object.hasOwn(command, 'transition')
+    ) throw invalidMutation();
+  } else {
+    if (
+      Object.hasOwn(command, 'sourceLeadId') ||
+      Object.hasOwn(command, 'transition') ||
+      Object.hasOwn(command.values, 'assigned_to') ||
+      Object.hasOwn(command.values, 'team_id')
+    ) throw invalidMutation();
+  }
+
+  const changedFields = Object.keys(command.values).sort();
+  const profileFields = changedFields.filter((field) => CUSTOMER_PROFILE_FIELDS.includes(field));
+  if (!creating && profileFields.length === 0) throw invalidMutation();
+
+  function mergedText(field, required = false) {
+    if (Object.hasOwn(command.values, field)) {
+      return canonicalText(command.values[field], field, required);
+    }
+    if (currentCustomer) return currentCustomer[field];
+    return canonicalText(null, field, required);
+  }
+
+  const final = {
+    brand_name: mergedText('brand_name', true),
+    company_name: mergedText('company_name'),
+    contact_person: mergedText('contact_person'),
+    contact_info: mergedText('contact_info'),
+    industry: mergedText('industry'),
+    country: mergedText('country'),
+    source: mergedText('source'),
+    budget_estimate: mergedText('budget_estimate'),
+    notes: mergedText('notes'),
+    tags: mergedText('tags'),
+    priority: Object.hasOwn(command.values, 'priority')
+      ? canonicalPriority(command.values.priority)
+      : (currentCustomer ? currentCustomer.priority : 'medium'),
+    next_action_at: Object.hasOwn(command.values, 'next_action_at')
+      ? canonicalTimestamp(command.values.next_action_at)
+      : (currentCustomer ? currentCustomer.next_action_at : null)
+  };
+  final.normalized_identity_key = customerIdentity(final.brand_name, final.company_name);
+  final.duplicate_enforced = TERMINAL_CUSTOMER_STAGES.has(currentCustomer ? currentCustomer.stage : 'lead') ? 0 : 1;
+  return Object.freeze({
+    values: Object.freeze(final),
+    changed_fields: Object.freeze(changedFields)
+  });
+}
+
+function readDuplicateCandidates(db, context, identityKey, excludedCustomerId) {
+  return db.prepare(`
+    SELECT
+      c.id,c.brand_name,c.stage,c.assigned_to,c.created_by,c.team_id,
+      (${CUSTOMER_CUSTODY_CASE_SQL}) AS custody
+    FROM customers c
+    WHERE c.org_id=?
+      AND c.normalized_identity_key=?
+      AND (? IS NULL OR c.id<>?)
+      AND (c.stage IS NULL OR c.stage NOT IN ('paused','won','lost'))
+    ORDER BY c.id ASC
+  `).all(
+    context.organization.id,
+    identityKey,
+    excludedCustomerId,
+    excludedCustomerId
+  );
+}
+
+function duplicateVisibility(context, candidate) {
+  if (context.is_org_admin === true) return 'readable';
+  if (candidate.custody === 'public') return 'public_pool';
+  if (
+    candidate.custody === 'owned' &&
+    (
+      candidate.assigned_to === context.actor_user_id ||
+      candidate.created_by === context.actor_user_id ||
+      context.team_ids.includes(candidate.team_id)
+    )
+  ) return 'readable';
+  return 'restricted';
+}
+
+function duplicateConflict(db, context, identityKey, excludedCustomerId) {
+  const candidates = readDuplicateCandidates(db, context, identityKey, excludedCustomerId);
+  if (candidates.length === 0) return null;
+
+  const classified = candidates.map((candidate) => ({
+    candidate,
+    visibility: duplicateVisibility(context, candidate)
+  }));
+  const readable = classified.find((item) => item.visibility === 'readable');
+  if (readable) {
+    return deepFreeze({
+      conflict: {
+        visibility: 'readable',
+        customer: {
+          id: readable.candidate.id,
+          display_name: readable.candidate.brand_name,
+          stage: readable.candidate.stage
+        }
+      }
+    });
+  }
+  if (classified.some((item) => item.visibility === 'public_pool')) {
+    return deepFreeze({
+      conflict: { visibility: 'public_pool', action: 'review_public_pool' }
+    });
+  }
+  return deepFreeze({ conflict: { visibility: 'restricted' } });
+}
+
+function duplicateDecision(db, context, input, identityKey, excludedCustomerId) {
+  const details = duplicateConflict(db, context, identityKey, excludedCustomerId);
+  if (!details) return null;
+  writeAuditEvent(
+    db,
+    context,
+    input,
+    'duplicate_detected',
+    excludedCustomerId,
+    {
+      identity_hash: identityKey,
+      visibility: details.conflict.visibility
+    }
+  );
+  return { error: mutationError('CRM_CUSTOMER_DUPLICATE', details) };
+}
+
+function customerSuccessResult(customer, action, input) {
+  return deepFreeze({
+    ok: true,
+    entity: 'customer',
+    action,
+    record: {
+      id: customer.id,
+      org_id: customer.org_id,
+      team_id: customer.team_id,
+      assigned_to: customer.assigned_to,
+      is_public: customer.is_public,
+      stage: customer.stage,
+      priority: customer.priority,
+      updated_at: customer.updated_at
+    },
+    meta: {
+      request_id: input.requestId,
+      correlation_id: input.correlationId
+    }
+  });
+}
+
+function writeCustomerActivity(db, customerId, actorUserId, action, stage, notes) {
+  db.prepare(`
+    INSERT INTO customer_activity (
+      customer_id,user_id,action,stage_from,stage_to,notes
+    ) VALUES (?,?,?,?,?,?)
+  `).run(
+    customerId,
+    actorUserId,
+    action,
+    action === 'created' ? null : stage,
+    stage,
+    notes
+  );
+}
+
+function isIdentityUniqueFailure(error) {
+  return Boolean(
+    error &&
+    typeof error.code === 'string' &&
+    error.code === 'SQLITE_CONSTRAINT_UNIQUE'
+  );
+}
+
+function createCustomer(db, context, input) {
+  const final = customerFinalState(input.command, null);
+  const duplicate = duplicateDecision(
+    db,
+    context,
+    input,
+    final.values.normalized_identity_key,
+    null
+  );
+  if (duplicate) return duplicate;
+
+  let inserted;
+  try {
+    inserted = db.prepare(`
+      INSERT INTO customers (
+        brand_name,company_name,contact_person,contact_info,industry,country,
+        source,budget_estimate,notes,tags,priority,next_action_at,stage,
+        created_by,assigned_to,is_public,org_id,team_id,
+        normalized_identity_key,duplicate_enforced
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    `).run(
+      final.values.brand_name,
+      final.values.company_name,
+      final.values.contact_person,
+      final.values.contact_info,
+      final.values.industry,
+      final.values.country,
+      final.values.source,
+      final.values.budget_estimate,
+      final.values.notes,
+      final.values.tags,
+      final.values.priority,
+      final.values.next_action_at,
+      'lead',
+      input.actorUserId,
+      input.command.values.assigned_to,
+      0,
+      context.organization.id,
+      input.command.values.team_id,
+      final.values.normalized_identity_key,
+      1
+    );
+  } catch (error) {
+    if (!isIdentityUniqueFailure(error)) throw error;
+    const racedDuplicate = duplicateDecision(
+      db,
+      context,
+      input,
+      final.values.normalized_identity_key,
+      null
+    );
+    if (racedDuplicate) return racedDuplicate;
+    throw error;
+  }
+
+  const customerId = Number(inserted.lastInsertRowid);
+  if (!positiveSafeInteger(customerId)) throw mutationError('CRM_MUTATION_FAILED');
+  writeCustomerActivity(db, customerId, input.actorUserId, 'created', 'lead', 'customer_created');
+  writeAuditEvent(db, context, input, 'customer_created', customerId, {
+    changed_fields: final.changed_fields
+  });
+  return customerSuccessResult(
+    readCustomer(db, context.organization.id, customerId),
+    'created',
+    input
+  );
+}
+
+function updateCustomer(db, context, input, customer) {
+  const final = customerFinalState(input.command, customer);
+  const duplicate = final.values.duplicate_enforced === 1
+    ? duplicateDecision(
+      db,
+      context,
+      input,
+      final.values.normalized_identity_key,
+      customer.id
+    )
+    : null;
+  if (duplicate) return duplicate;
+
+  try {
+    db.prepare(`
+      UPDATE customers
+      SET brand_name=?,company_name=?,contact_person=?,contact_info=?,industry=?,
+          country=?,source=?,budget_estimate=?,notes=?,tags=?,priority=?,
+          next_action_at=?,normalized_identity_key=?,duplicate_enforced=?,
+          updated_at=CURRENT_TIMESTAMP
+      WHERE id=? AND org_id=?
+    `).run(
+      final.values.brand_name,
+      final.values.company_name,
+      final.values.contact_person,
+      final.values.contact_info,
+      final.values.industry,
+      final.values.country,
+      final.values.source,
+      final.values.budget_estimate,
+      final.values.notes,
+      final.values.tags,
+      final.values.priority,
+      final.values.next_action_at,
+      final.values.normalized_identity_key,
+      final.values.duplicate_enforced,
+      customer.id,
+      context.organization.id
+    );
+  } catch (error) {
+    if (!isIdentityUniqueFailure(error)) throw error;
+    const racedDuplicate = duplicateDecision(
+      db,
+      context,
+      input,
+      final.values.normalized_identity_key,
+      customer.id
+    );
+    if (racedDuplicate) return racedDuplicate;
+    throw error;
+  }
+
+  writeCustomerActivity(
+    db,
+    customer.id,
+    input.actorUserId,
+    'updated',
+    customer.stage,
+    'customer_profile_updated'
+  );
+  writeAuditEvent(db, context, input, 'customer_updated', customer.id, {
+    changed_fields: final.changed_fields
+  });
+  return customerSuccessResult(
+    readCustomer(db, context.organization.id, customer.id),
+    'updated',
+    input
+  );
+}
+
+function writeDeniedAudit(db, context, input, operation) {
+  writeAuditEvent(db, context, input, 'mutation_denied', null, {
+    operation,
+    outcome: 'forbidden'
+  });
 }
 
 function forbiddenDecision(db, context, input, operation) {
@@ -384,7 +803,7 @@ function authorizeCreate(db, context, input) {
     )
   ) return forbiddenDecision(db, context, input, 'customer_create');
   validateTargetAssignment(db, context, command.values.assigned_to, command.values.team_id);
-  return unsupportedDecision();
+  return null;
 }
 
 function authorizeCustomerCommand(db, context, input, operation) {
@@ -392,7 +811,8 @@ function authorizeCustomerCommand(db, context, input, operation) {
   const label = operationLabel(operation, command);
 
   if (operation === 'customer' && command.mode === 'create') {
-    return authorizeCreate(db, context, input);
+    const denied = authorizeCreate(db, context, input);
+    return denied || createCustomer(db, context, input);
   }
   if (operation === 'customer' && command.mode !== 'update') throw invalidMutation();
 
@@ -432,6 +852,7 @@ function authorizeCustomerCommand(db, context, input, operation) {
     ? canWriteTeamActivity(context, customer, custody)
     : canManageProfile(context, customer, custody);
   if (!allowed) return forbiddenDecision(db, context, input, label);
+  if (operation === 'customer') return updateCustomer(db, context, input, customer);
   return unsupportedDecision();
 }
 
