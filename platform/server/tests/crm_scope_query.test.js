@@ -12,6 +12,7 @@ const {
   compileCustomerScope,
   CUSTOMER_CUSTODY_CASE_SQL
 } = require('../services/crm_scope_service');
+const { listCustomers } = require('../services/crm_query_service');
 
 const SERVER_ROOT = path.resolve(__dirname, '..');
 const FIXED_AT = '2026-08-09 00:00:00';
@@ -100,25 +101,103 @@ function insertCustomer(db, {
   createdBy,
   assignedTo,
   isPublic,
-  brandName
+  brandName,
+  companyName = `${brandName} Company`,
+  industry = null,
+  stage = 'lead',
+  source = 'fixture',
+  priority = 'medium',
+  country = null,
+  tags = null,
+  nextActionAt = null,
+  stalledAt = null,
+  updatedAt = FIXED_AT
 }) {
   db.prepare(`
     INSERT INTO customers (
-      id,brand_name,company_name,stage,source,created_by,assigned_to,
-      created_at,updated_at,is_public,org_id,team_id,duplicate_enforced
-    ) VALUES (?,?,?,'lead','fixture',?,?, ?,?,?, ?,?,0)
+      id,brand_name,company_name,industry,stage,source,created_by,assigned_to,
+      created_at,updated_at,is_public,priority,tags,org_id,team_id,country,
+      next_action_at,stalled_at,duplicate_enforced
+    ) VALUES (?,?,?,?,?,?,?, ?,?,?,?, ?,?,?,?, ?,?,?,0)
   `).run(
     id,
     brandName,
-    `${brandName} Company`,
+    companyName,
+    industry,
+    stage,
+    source,
     createdBy,
     assignedTo,
     FIXED_AT,
-    FIXED_AT,
+    updatedAt,
     isPublic,
+    priority,
+    tags,
     orgId,
-    teamId
+    teamId,
+    country,
+    nextActionAt,
+    stalledAt
   );
+}
+
+function insertOpportunity(db, {
+  id,
+  customerId,
+  orgId = IDS.orgA,
+  teamId = IDS.teamA1,
+  ownerUserId = IDS.ownerA,
+  stage = 'negotiation',
+  name = `Opportunity ${id}`,
+  value = 100,
+  winProbability = 50,
+  updatedAt = FIXED_AT,
+  nextActionAt = null
+}) {
+  db.prepare(`
+    INSERT INTO opportunities (
+      id,customer_id,name,stage,value,win_probability,created_by,
+      created_at,updated_at,org_id,team_id,owner_user_id,next_action_at
+    ) VALUES (?,?,?,?,?,?,?, ?,?,?, ?,?,?)
+  `).run(
+    id,
+    customerId,
+    name,
+    stage,
+    value,
+    winProbability,
+    ownerUserId,
+    FIXED_AT,
+    updatedAt,
+    orgId,
+    teamId,
+    ownerUserId,
+    nextActionAt
+  );
+}
+
+function insertFilterCustomer(db, id, overrides = {}) {
+  const values = {
+    id,
+    orgId: IDS.orgA,
+    teamId: IDS.teamA1,
+    createdBy: IDS.ownerA,
+    assignedTo: IDS.ownerA,
+    isPublic: 0,
+    brandName: `Conjunction Marker ${id}`,
+    companyName: 'Conjunction Marker Company',
+    industry: 'fitness',
+    stage: 'proposal',
+    source: 'referral',
+    priority: 'high',
+    country: 'us',
+    tags: 'launch, vip ,retained',
+    nextActionAt: '2026-08-09 10:00:00',
+    stalledAt: '2026-08-09 02:30:00',
+    ...overrides
+  };
+  insertCustomer(db, values);
+  return values;
 }
 
 function openFixture(t) {
@@ -351,4 +430,244 @@ test('explicit outside organization states and bare platform admin are concealed
       }
     );
   }
+});
+
+test('customer filters are all conjunctive', (t) => {
+  const db = openFixture(t);
+  insertTeamMembership(db, IDS.orgA, IDS.teamA2, IDS.ownerA);
+  const targetId = 30000;
+  const variants = [
+    {},
+    { assignedTo: IDS.teammateA, createdBy: IDS.teammateA },
+    { teamId: IDS.teamA2 },
+    { stage: 'lead' },
+    { priority: 'medium' },
+    { industry: 'software' },
+    { country: 'ca' },
+    { tags: 'vip-plus, launch' },
+    { source: 'outbound' },
+    { nextActionAt: '2026-08-16 16:00:00' },
+    { stalledAt: '2026-08-09 02:30:01' },
+    { brandName: 'No Match', companyName: 'No Match Company' }
+  ];
+
+  for (let index = 0; index < variants.length; index += 1) {
+    const id = targetId + index;
+    insertFilterCustomer(db, id, variants[index]);
+    insertOpportunity(db, {
+      id: 40000 + index,
+      customerId: id,
+      teamId: variants[index].teamId || IDS.teamA1,
+      ownerUserId: variants[index].assignedTo || IDS.ownerA,
+      stage: 'negotiation'
+    });
+  }
+  const opportunityStageDecoy = targetId + variants.length;
+  insertFilterCustomer(db, opportunityStageDecoy);
+  insertOpportunity(db, {
+    id: 40000 + variants.length,
+    customerId: opportunityStageDecoy,
+    stage: 'discovery'
+  });
+
+  const result = listCustomers(db, {
+    actorUserId: IDS.orgAdminA,
+    organizationId: IDS.orgA,
+    filter: {
+      scope: 'organization',
+      owner_id: IDS.ownerA,
+      team_id: IDS.teamA1,
+      customer_stage: ['proposal'],
+      opportunity_stage: ['negotiation'],
+      priority: ['high'],
+      industry: 'FITNESS',
+      country: 'US',
+      tag: 'vip',
+      source: 'Referral',
+      next_action_due: 'today',
+      stalled: true,
+      keyword: 'Conjunction Marker',
+      as_of: '2026-08-09T02:30:00.000Z',
+      limit: 100
+    }
+  });
+
+  assert.equal(result.total, 1);
+  assert.deepEqual(result.items.map((item) => item.id), [targetId]);
+  assert.equal(result.meta.applied_filters.owner_id, IDS.ownerA);
+  assert.equal(result.meta.applied_filters.team_id, IDS.teamA1);
+});
+
+test('opportunity stage uses exists without duplicating customer totals', (t) => {
+  const db = openFixture(t);
+  const customerId = 31000;
+  insertFilterCustomer(db, customerId, {
+    brandName: 'Exists Marker',
+    companyName: 'Exists Marker Company',
+    source: 'exists-test'
+  });
+  insertOpportunity(db, { id: 41000, customerId, stage: 'negotiation' });
+  insertOpportunity(db, { id: 41001, customerId, stage: 'negotiation' });
+
+  const result = listCustomers(db, {
+    actorUserId: IDS.orgAdminA,
+    organizationId: IDS.orgA,
+    filter: {
+      scope: 'organization',
+      source: 'exists-test',
+      keyword: 'exists marker',
+      opportunity_stage: ['negotiation'],
+      as_of: '2026-08-09T02:30:00.000Z'
+    }
+  });
+
+  assert.equal(result.total, 1);
+  assert.deepEqual(result.items.map((item) => item.id), [customerId]);
+});
+
+test('tag and keyword matching are exact and wildcard safe', (t) => {
+  const db = openFixture(t);
+  insertFilterCustomer(db, 32000, {
+    brandName: 'Tag Marker Exact',
+    companyName: 'Tag Marker Company',
+    source: 'tag-test',
+    tags: 'other, vip ,last'
+  });
+  insertFilterCustomer(db, 32001, {
+    brandName: 'Tag Marker Prefix',
+    companyName: 'Tag Marker Company',
+    source: 'tag-test',
+    tags: 'other,vip-plus,last'
+  });
+
+  const tagged = listCustomers(db, {
+    actorUserId: IDS.orgAdminA,
+    organizationId: IDS.orgA,
+    filter: {
+      scope: 'organization',
+      source: 'tag-test',
+      keyword: 'tag marker',
+      tag: 'VIP',
+      as_of: '2026-08-09T02:30:00.000Z'
+    }
+  });
+  assert.deepEqual(tagged.items.map((item) => item.id), [32000]);
+
+  const wildcardRows = [
+    [32100, 'Literal 100%', 'Percent Company'],
+    [32101, 'Literal under_score', 'Underscore Company'],
+    [32102, 'Literal back\\slash', 'Backslash Company'],
+    [32103, 'Literal plain', 'Plain Company']
+  ];
+  for (const [id, brandName, companyName] of wildcardRows) {
+    insertFilterCustomer(db, id, { brandName, companyName, source: 'wildcard-test' });
+  }
+  for (const [keyword, expectedId] of [['%', 32100], ['_', 32101], ['\\', 32102]]) {
+    const result = listCustomers(db, {
+      actorUserId: IDS.orgAdminA,
+      organizationId: IDS.orgA,
+      filter: {
+        scope: 'organization',
+        source: 'wildcard-test',
+        keyword,
+        as_of: '2026-08-09T02:30:00.000Z'
+      }
+    });
+    assert.deepEqual(result.items.map((item) => item.id), [expectedId]);
+  }
+});
+
+test('next action windows honor approved Asia Shanghai half-open boundaries', (t) => {
+  const db = openFixture(t);
+  const timestamps = [
+    '2026-08-09 02:29:59',
+    '2026-08-09 02:30:00',
+    '2026-08-09 15:59:59',
+    '2026-08-09 16:00:00',
+    '2026-08-16 15:59:59',
+    '2026-08-16 16:00:00',
+    null
+  ];
+  for (let index = 0; index < timestamps.length; index += 1) {
+    insertFilterCustomer(db, 33000 + index, {
+      brandName: `Due Vector ${index}`,
+      companyName: 'Due Vector Company',
+      source: 'due-test',
+      nextActionAt: timestamps[index]
+    });
+  }
+  const expected = {
+    overdue: [33000],
+    today: [33002, 33001],
+    next_7_days: [33004, 33003],
+    later: [33005],
+    none: [33006]
+  };
+  for (const [nextActionDue, expectedIds] of Object.entries(expected)) {
+    const result = listCustomers(db, {
+      actorUserId: IDS.orgAdminA,
+      organizationId: IDS.orgA,
+      filter: {
+        scope: 'organization',
+        source: 'due-test',
+        keyword: 'due vector',
+        next_action_due: nextActionDue,
+        as_of: '2026-08-09T02:30:00.000Z',
+        limit: 100
+      }
+    });
+    assert.deepEqual(result.items.map((item) => item.id), expectedIds, nextActionDue);
+  }
+});
+
+test('stalled true and false partition the authorized filtered set at as of', (t) => {
+  const db = openFixture(t);
+  const stalledValues = [
+    '2026-08-09 02:29:59',
+    '2026-08-09 02:30:00',
+    null,
+    '2026-08-09 02:30:01'
+  ];
+  for (let index = 0; index < stalledValues.length; index += 1) {
+    insertFilterCustomer(db, 34000 + index, {
+      brandName: `Stalled Vector ${index}`,
+      companyName: 'Stalled Vector Company',
+      source: 'stalled-test',
+      stalledAt: stalledValues[index]
+    });
+  }
+  const beforeChanges = db.prepare('SELECT total_changes() AS count').get().count;
+  const beforeRows = db.prepare(`
+    SELECT id,updated_at,stalled_at FROM customers ORDER BY id
+  `).all();
+  const common = {
+    scope: 'organization',
+    source: 'stalled-test',
+    keyword: 'stalled vector',
+    as_of: '2026-08-09T02:30:00.000Z',
+    limit: 100
+  };
+
+  const stalled = listCustomers(db, {
+    actorUserId: IDS.orgAdminA,
+    organizationId: IDS.orgA,
+    filter: { ...common, stalled: true }
+  });
+  const active = listCustomers(db, {
+    actorUserId: IDS.orgAdminA,
+    organizationId: IDS.orgA,
+    filter: { ...common, stalled: false }
+  });
+
+  assert.deepEqual(stalled.items.map((item) => item.id), [34001, 34000]);
+  assert.deepEqual(active.items.map((item) => item.id), [34003, 34002]);
+  assert.deepEqual(
+    [...stalled.items, ...active.items].map((item) => item.id).sort((a, b) => a - b),
+    [34000, 34001, 34002, 34003]
+  );
+  assert.deepEqual(db.prepare(`
+    SELECT id,updated_at,stalled_at FROM customers ORDER BY id
+  `).all(), beforeRows);
+  assert.equal(db.prepare('SELECT total_changes() AS count').get().count, beforeChanges);
+  assert.equal(db.inTransaction, false);
 });
