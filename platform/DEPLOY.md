@@ -73,7 +73,7 @@ The journal is not cleared automatically. A terminal-pending rerun returns the s
 
 #### Safe terminal ID extraction / 安全提取终态 ID
 
-Run this once in the dedicated root Bash session. It keeps stdout only in shell memory and fails closed before parsing unless there is exactly one well-formed `BOOTSTRAP_OK`, terminal-pending outcome, and terminal ID. It never interprets output as shell code. Do not use `eval`, do not enable shell tracing, and do not write credentials to logs; credentials remain external and must never be pasted into this output. / 在专用 root Bash 会话中只运行一次。stdout 仅保存在 shell 内存中；除非 `BOOTSTRAP_OK`、terminal-pending outcome 与 terminal ID 都各有且仅有一条并且格式正确，否则会在解析 ID 前失败关闭。输出绝不会被解释为 shell 代码。禁止使用 `eval`、禁止开启 shell tracing，也不得把凭据写入日志；凭据必须保持外置，绝不能粘贴到该输出中。
+Run this once in the dedicated root Bash session. It keeps stdout only in shell memory and accepts exactly one of two closed success contracts: a normal `BOOTSTRAP_OK` plus terminal-pending outcome, or an interrupted-layout recovery `BOOTSTRAP_RECOVERY_COMMIT_OK` plus committed-recovered outcome. Both contracts require exactly one well-formed terminal ID. It never interprets output as shell code. Do not use `eval`, do not enable shell tracing, and do not write credentials to logs; credentials remain external and must never be pasted into this output. / 在专用 root Bash 会话中只运行一次。stdout 仅保存在 shell 内存中，并且只接受两种封闭成功契约之一：普通 `BOOTSTRAP_OK` 加 terminal-pending outcome，或中断布局恢复的 `BOOTSTRAP_RECOVERY_COMMIT_OK` 加 committed-recovered outcome；两种契约都必须恰好包含一个格式正确的 terminal ID。输出绝不会被解释为 shell 代码。禁止使用 `eval`、禁止开启 shell tracing，也不得把凭据写入日志；凭据必须保持外置，绝不能粘贴到该输出中。
 
 ```bash
 set -euo pipefail
@@ -88,7 +88,10 @@ else
 fi
 
 BOOTSTRAP_OK_COUNT=0
+BOOTSTRAP_RECOVERY_OK_COUNT=0
 BOOTSTRAP_OUTCOME_COUNT=0
+BOOTSTRAP_PENDING_OUTCOME_COUNT=0
+BOOTSTRAP_RECOVERY_OUTCOME_COUNT=0
 BOOTSTRAP_ID_COUNT=0
 BOOTSTRAP_ID_RECORD=
 while IFS= read -r BOOTSTRAP_RECORD; do
@@ -100,12 +103,24 @@ while IFS= read -r BOOTSTRAP_RECORD; do
       printf '%s\n' 'Malformed BOOTSTRAP_OK record' >&2
       exit 1
       ;;
-    BOOTSTRAP_JOURNAL_TERMINAL_OUTCOME*)
+    BOOTSTRAP_RECOVERY_COMMIT_OK)
+      BOOTSTRAP_RECOVERY_OK_COUNT=$((BOOTSTRAP_RECOVERY_OK_COUNT + 1))
+      ;;
+    BOOTSTRAP_RECOVERY_COMMIT_OK*)
+      printf '%s\n' 'Malformed BOOTSTRAP_RECOVERY_COMMIT_OK record' >&2
+      exit 1
+      ;;
+    BOOTSTRAP_JOURNAL_TERMINAL_OUTCOME=terminal-pending)
       BOOTSTRAP_OUTCOME_COUNT=$((BOOTSTRAP_OUTCOME_COUNT + 1))
-      if [ "$BOOTSTRAP_RECORD" != 'BOOTSTRAP_JOURNAL_TERMINAL_OUTCOME=terminal-pending' ]; then
-        printf '%s\n' 'Malformed bootstrap terminal outcome record' >&2
-        exit 1
-      fi
+      BOOTSTRAP_PENDING_OUTCOME_COUNT=$((BOOTSTRAP_PENDING_OUTCOME_COUNT + 1))
+      ;;
+    BOOTSTRAP_JOURNAL_TERMINAL_OUTCOME=committed-recovered)
+      BOOTSTRAP_OUTCOME_COUNT=$((BOOTSTRAP_OUTCOME_COUNT + 1))
+      BOOTSTRAP_RECOVERY_OUTCOME_COUNT=$((BOOTSTRAP_RECOVERY_OUTCOME_COUNT + 1))
+      ;;
+    BOOTSTRAP_JOURNAL_TERMINAL_OUTCOME*)
+      printf '%s\n' 'Malformed bootstrap terminal outcome record' >&2
+      exit 1
       ;;
     BOOTSTRAP_TERMINAL_ID*)
       BOOTSTRAP_ID_COUNT=$((BOOTSTRAP_ID_COUNT + 1))
@@ -118,12 +133,8 @@ while IFS= read -r BOOTSTRAP_RECORD; do
   esac
 done <<<"$BOOTSTRAP_OUTPUT"
 
-if [ "$BOOTSTRAP_OK_COUNT" -ne 1 ]; then
-  printf '%s\n' 'Expected exactly one BOOTSTRAP_OK record' >&2
-  exit 1
-fi
 if [ "$BOOTSTRAP_OUTCOME_COUNT" -ne 1 ]; then
-  printf '%s\n' 'Expected exactly one terminal-pending outcome record' >&2
+  printf '%s\n' 'Expected exactly one supported bootstrap terminal outcome record' >&2
   exit 1
 fi
 if [ "$BOOTSTRAP_ID_COUNT" -ne 1 ]; then
@@ -131,8 +142,25 @@ if [ "$BOOTSTRAP_ID_COUNT" -ne 1 ]; then
   exit 1
 fi
 
+BOOTSTRAP_PROTOCOL=
+if [ "$BOOTSTRAP_OK_COUNT" -eq 1 ] && \
+   [ "$BOOTSTRAP_RECOVERY_OK_COUNT" -eq 0 ] && \
+   [ "$BOOTSTRAP_PENDING_OUTCOME_COUNT" -eq 1 ] && \
+   [ "$BOOTSTRAP_RECOVERY_OUTCOME_COUNT" -eq 0 ]; then
+  BOOTSTRAP_PROTOCOL=normal
+elif [ "$BOOTSTRAP_OK_COUNT" -eq 0 ] && \
+     [ "$BOOTSTRAP_RECOVERY_OK_COUNT" -eq 1 ] && \
+     [ "$BOOTSTRAP_PENDING_OUTCOME_COUNT" -eq 0 ] && \
+     [ "$BOOTSTRAP_RECOVERY_OUTCOME_COUNT" -eq 1 ]; then
+  BOOTSTRAP_PROTOCOL=committed-recovery
+else
+  printf '%s\n' 'Bootstrap output mixed or omitted normal and recovery success records' >&2
+  exit 1
+fi
+
 TERMINAL_ID="${BOOTSTRAP_ID_RECORD#BOOTSTRAP_TERMINAL_ID=}"
 printf '%s\n' "$BOOTSTRAP_OUTPUT"
+printf 'BOOTSTRAP_PROTOCOL=%s\n' "$BOOTSTRAP_PROTOCOL"
 printf 'TERMINAL_ID=%s\n' "$TERMINAL_ID"
 unset BOOTSTRAP_OUTPUT BOOTSTRAP_ID_RECORD
 ```
@@ -141,7 +169,7 @@ unset BOOTSTRAP_OUTPUT BOOTSTRAP_ID_RECORD
 
 Verify runtime, exact links, SQLite, and marker evidence before ACK. The gate checks the PM2 PID and loopback health response, all four exact external-state links and their targets, external runtime ownership and shape, SQLite `quick_check`, and the permanent marker proof. / ACK 前必须校验 runtime、精确 links、SQLite 与 marker 证据。门禁会检查 PM2 PID 与回环健康响应、四个外置状态软链接及其精确目标、外置运行时的所有权与结构、SQLite `quick_check` 以及永久 marker 证明。
 
-`validate_external_layout_marker` is the bounded, root-owned guard-file housekeeping exception. If the shell has not bound the external-layout root, it calls `bind_external_layout_root` and may create `/root/turingmarket/.external-runtime-root-mount-guard-v1.<boot-id>` with root:root ownership and mode `0600`. The file binds the trusted root token to the mount chain for the current Linux boot so mount drift fails closed. This housekeeping does not mutate business data or the runtime layout: it does not change SQLite, uploads, external-state links, or the permanent layout marker. It creates at most one guard file for the current boot when absent and otherwise validates the existing exact file in place. / `validate_external_layout_marker` 是一个有界的 root 所有 guard-file housekeeping 例外。如果当前 shell 尚未绑定外置布局根，它会调用 `bind_external_layout_root`，并可能创建 root:root、模式为 `0600` 的 `/root/turingmarket/.external-runtime-root-mount-guard-v1.<boot-id>`。该文件把可信 root token 绑定到当前 Linux 启动的 mount chain，使挂载漂移失败关闭。此 housekeeping 不会修改业务数据或运行时布局：不会更改 SQLite、uploads、外置状态 links 或永久布局 marker。当前启动期间，文件不存在时最多创建一个；已存在时只原位校验精确文件。
+`validate_external_layout_marker` is the bounded, root-owned guard-file housekeeping exception. If the shell has not bound the external-layout root, it calls `bind_external_layout_root` and may create `/root/turingmarket/.external-runtime-root-mount-guard-v1.<boot-id>` with root:root ownership and mode `0600`. The file binds the trusted root token to the mount chain for the current Linux boot so mount drift fails closed. This housekeeping does not mutate business data or the runtime layout: it does not change SQLite, uploads, external-state links, or the permanent layout marker. It creates at most one guard file for the current boot when absent and otherwise validates the existing exact file in place. The evidence gate also acquires the transient journal protocol reservation for the captured terminal ID and explicitly releases it after all checks. / `validate_external_layout_marker` 是一个有界的 root 所有 guard-file housekeeping 例外。如果当前 shell 尚未绑定外置布局根，它会调用 `bind_external_layout_root`，并可能创建 root:root、模式为 `0600` 的 `/root/turingmarket/.external-runtime-root-mount-guard-v1.<boot-id>`。该文件把可信 root token 绑定到当前 Linux 启动的 mount chain，使挂载漂移失败关闭。此 housekeeping 不会修改业务数据或运行时布局：不会更改 SQLite、uploads、外置状态 links 或永久布局 marker。当前启动期间，文件不存在时最多创建一个；已存在时只原位校验精确文件。证据门禁还会为捕获的 terminal ID 获取临时 journal 协议预留，并在全部检查完成后显式释放。
 
 Every command must succeed before ACK; any missing, conflicting, or ambiguous result is a stop condition. / 所有命令均成功后才可 ACK；任何缺失、冲突或歧义结果都必须立即停止。
 
@@ -161,9 +189,22 @@ process.stdin.on("end", () => {
 });
 '
 
-TM_BOOTSTRAP_LIBRARY_ONLY=1 bash --noprofile --norc <<'BASH'
+TERMINAL_ID="$TERMINAL_ID" TM_BOOTSTRAP_LIBRARY_ONLY=1 bash --noprofile --norc <<'BASH'
 set -Eeuo pipefail
 source /root/turingmarket/bootstrap_production_runtime.sh
+: "${TERMINAL_ID:?Run the first-run capture block in this shell}"
+reserve_migration_journal_capacity "$TERMINAL_ID"
+discover_migration_journal "$TERMINAL_ID"
+[ "$JOURNAL_PRESENT" = 1 ]
+[ "$JOURNAL_TERMINAL_STATE" = terminal-pending ]
+[ "$JOURNAL_TERMINAL_ID" = "$TERMINAL_ID" ]
+validate_terminal_journal_marker_provenance
+printf '%s\n' 'BOOTSTRAP_OPERATOR_JOURNAL_OK'
+validate_loopback_firewall
+validate_current_release_health
+systemctl is-enabled --quiet "$FIREWALL_UNIT"
+systemctl is-active --quiet "$FIREWALL_UNIT"
+printf '%s\n' 'BOOTSTRAP_OPERATOR_ISOLATION_OK'
 validate_exact_link /root/turingmarket/platform/.env /etc/turingmarket/turingmarket.env
 validate_exact_link /root/turingmarket/platform/server/db /var/lib/turingmarket/db
 validate_exact_link /root/turingmarket/platform/uploads /var/lib/turingmarket/uploads
@@ -173,10 +214,11 @@ printf '%s\n' 'BOOTSTRAP_OPERATOR_LINKS_OK'
 database_quick_check /var/lib/turingmarket/db/turingmarket.db
 validate_external_layout_marker
 printf '%s\n' 'BOOTSTRAP_OPERATOR_MARKER_OK'
+release_migration_journal_capacity_reservation
 BASH
 ```
 
-The evidence gate must print `BOOTSTRAP_OPERATOR_RUNTIME_OK`, `BOOTSTRAP_OPERATOR_LINKS_OK`, `DB_QUICK_CHECK=ok`, and `BOOTSTRAP_OPERATOR_MARKER_OK`. Any failed or ambiguous check stops the flow before the pending rerun and ACK. / 证据门禁必须输出 `BOOTSTRAP_OPERATOR_RUNTIME_OK`、`BOOTSTRAP_OPERATOR_LINKS_OK`、`DB_QUICK_CHECK=ok` 与 `BOOTSTRAP_OPERATOR_MARKER_OK`。任何失败或歧义检查都会在 pending 重跑与 ACK 之前停止流程。
+The evidence gate must print `BOOTSTRAP_OPERATOR_RUNTIME_OK`, `BOOTSTRAP_OPERATOR_JOURNAL_OK`, `BOOTSTRAP_OPERATOR_ISOLATION_OK`, `BOOTSTRAP_OPERATOR_LINKS_OK`, `DB_QUICK_CHECK=ok`, and `BOOTSTRAP_OPERATOR_MARKER_OK`. Any failed or ambiguous check stops the flow before the pending rerun and ACK. / 证据门禁必须输出 `BOOTSTRAP_OPERATOR_RUNTIME_OK`、`BOOTSTRAP_OPERATOR_JOURNAL_OK`、`BOOTSTRAP_OPERATOR_ISOLATION_OK`、`BOOTSTRAP_OPERATOR_LINKS_OK`、`DB_QUICK_CHECK=ok` 与 `BOOTSTRAP_OPERATOR_MARKER_OK`。任何失败或歧义检查都会在 pending 重跑与 ACK 之前停止流程。
 
 #### Pending rerun verification / pending 重跑核验
 
@@ -202,6 +244,10 @@ while IFS= read -r RERUN_RECORD; do
   case "$RERUN_RECORD" in
     BOOTSTRAP_OK*)
       RERUN_OK_COUNT=$((RERUN_OK_COUNT + 1))
+      ;;
+    BOOTSTRAP_RECOVERY_*)
+      printf '%s\n' 'Pending rerun must not emit a bootstrap recovery record' >&2
+      exit 1
       ;;
     BOOTSTRAP_JOURNAL_TERMINAL_OUTCOME*)
       RERUN_OUTCOME_COUNT=$((RERUN_OUTCOME_COUNT + 1))

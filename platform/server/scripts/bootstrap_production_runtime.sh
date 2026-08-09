@@ -5524,7 +5524,7 @@ NODE
 
 validate_loopback_listener_output() {
   local output="$1"
-  local expected_pid="${2:-}" line state recv_q send_q endpoint peer process_info extra
+  local expected_pid="${2:-}" line state recv_q send_q endpoint peer process_info
   local process_pattern='^users:\(\("[^"]+",pid=([1-9][0-9]*),fd=[0-9]+\)\)$'
   local count=0
 
@@ -5532,14 +5532,13 @@ validate_loopback_listener_output() {
 
   while IFS= read -r line; do
     [ -n "$line" ] || continue
-    state=""; recv_q=""; send_q=""; endpoint=""; peer=""; process_info=""; extra=""
-    read -r state recv_q send_q endpoint peer process_info extra <<< "$line" || return 1
+    state=""; recv_q=""; send_q=""; endpoint=""; peer=""; process_info=""
+    read -r state recv_q send_q endpoint peer process_info <<< "$line" || return 1
     [ "$state" = "LISTEN" ] || return 1
     [ "$endpoint" = "127.0.0.1:3002" ] || return 1
     [ "$peer" = "0.0.0.0:*" ] || return 1
     [[ "$process_info" =~ $process_pattern ]] || return 1
     [ "${BASH_REMATCH[1]}" = "$expected_pid" ] || return 1
-    [ -z "$extra" ] || return 1
     count=$((count + 1))
   done <<< "$output"
 

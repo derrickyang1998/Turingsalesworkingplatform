@@ -201,6 +201,14 @@ test('deployment runbook discloses bounded mount-guard housekeeping during marke
   );
 
   const evidenceBlock = fencedBlockAfter(runbook, heading);
+  assert.match(evidenceBlock, /^validate_current_release_health$/m);
+  assert.match(evidenceBlock, /^validate_loopback_firewall$/m);
+  assert.match(evidenceBlock, /reserve_migration_journal_capacity "\$TERMINAL_ID"/);
+  assert.match(evidenceBlock, /discover_migration_journal "\$TERMINAL_ID"/);
+  assert.match(evidenceBlock, /\[ "\$JOURNAL_TERMINAL_STATE" = terminal-pending \]/);
+  assert.match(evidenceBlock, /\[ "\$JOURNAL_TERMINAL_ID" = "\$TERMINAL_ID" \]/);
+  assert.match(evidenceBlock, /^validate_terminal_journal_marker_provenance$/m);
+  assert.match(evidenceBlock, /^release_migration_journal_capacity_reservation$/m);
   assert.match(evidenceBlock, /^validate_external_layout_marker$/m);
 });
 
@@ -257,13 +265,16 @@ test('deployment runbook captures the first bootstrap once and makes every parse
   );
   assert.ok(parseIndex > 0, 'terminal ID parsing must be explicit');
   for (const guard of [
-    'if [ "$BOOTSTRAP_OK_COUNT" -ne 1 ]',
     'if [ "$BOOTSTRAP_OUTCOME_COUNT" -ne 1 ]',
     'if [ "$BOOTSTRAP_ID_COUNT" -ne 1 ]'
   ]) {
     const guardIndex = firstRun.indexOf(guard);
     assert.ok(guardIndex >= 0 && guardIndex < parseIndex, `missing pre-parse guard: ${guard}`);
   }
+  const protocolIndex = firstRun.indexOf('BOOTSTRAP_PROTOCOL=');
+  assert.ok(protocolIndex >= 0 && protocolIndex < parseIndex, 'success protocol must be selected before ID parsing');
+  assert.match(firstRun, /BOOTSTRAP_PROTOCOL=normal/);
+  assert.match(firstRun, /BOOTSTRAP_PROTOCOL=committed-recovery/);
 });
 
 test('deployment runbook first-run validator rejects every incomplete or ambiguous terminal record set', async (t) => {
@@ -283,6 +294,18 @@ test('deployment runbook first-run validator rejects every incomplete or ambiguo
   assert.equal(validRun.calls, 1);
   assert.match(validRun.result.stdout, new RegExp(`^TERMINAL_ID=${terminalId}$`, 'm'));
 
+  const recoveryOk = 'BOOTSTRAP_RECOVERY_COMMIT_OK';
+  const recoveryOutcome = 'BOOTSTRAP_JOURNAL_TERMINAL_OUTCOME=committed-recovered';
+  const recoveryValid = [id, recoveryOk, recoveryOutcome].join('\n');
+  const recoveryRun = runRunbookOperatorBlock(t, block, recoveryValid);
+  assert.equal(
+    recoveryRun.result.status,
+    0,
+    `${recoveryRun.result.stdout}\n${recoveryRun.result.stderr}`
+  );
+  assert.equal(recoveryRun.calls, 1);
+  assert.match(recoveryRun.result.stdout, new RegExp(`^TERMINAL_ID=${terminalId}$`, 'm'));
+
   const invalidCases = [
     ['missing BOOTSTRAP_OK', [id, outcome]],
     ['duplicate BOOTSTRAP_OK', [ok, ok, id, outcome]],
@@ -295,6 +318,25 @@ test('deployment runbook first-run validator rejects every incomplete or ambiguo
     ['malformed terminal ID', [ok, `BOOTSTRAP_TERMINAL_ID=t1:${'g'.repeat(64)}`, outcome]]
   ];
   for (const [name, lines] of invalidCases) {
+    await t.test(name, (subtest) => {
+      const execution = runRunbookOperatorBlock(subtest, block, lines.join('\n'));
+      assert.notEqual(
+        execution.result.status,
+        0,
+        `${name} was accepted\n${execution.result.stdout}\n${execution.result.stderr}`
+      );
+      assert.equal(execution.calls, 1, `${name} invoked bootstrap more than once`);
+      assert.doesNotMatch(execution.result.stdout, /^TERMINAL_ID=/m);
+    });
+  }
+
+  const invalidRecoveryCases = [
+    ['recovery missing recovery record', [id, recoveryOutcome]],
+    ['recovery mixed with normal outcome', [recoveryOk, id, outcome]],
+    ['recovery mixed with BOOTSTRAP_OK', [ok, recoveryOk, id, recoveryOutcome]],
+    ['duplicate recovery record', [recoveryOk, recoveryOk, id, recoveryOutcome]]
+  ];
+  for (const [name, lines] of invalidRecoveryCases) {
     await t.test(name, (subtest) => {
       const execution = runRunbookOperatorBlock(subtest, block, lines.join('\n'));
       assert.notEqual(
@@ -329,6 +371,7 @@ test('deployment runbook pending rerun requires the same pending ID and rejects 
 
   const invalidCases = [
     ['unexpected BOOTSTRAP_OK', ['BOOTSTRAP_OK', id, outcome]],
+    ['unexpected recovery success', ['BOOTSTRAP_RECOVERY_COMMIT_OK', id, outcome]],
     ['missing terminal ID', [outcome]],
     ['different terminal ID', [`BOOTSTRAP_TERMINAL_ID=t1:${'c'.repeat(64)}`, outcome]],
     ['duplicate terminal ID', [id, id, outcome]],
@@ -562,13 +605,17 @@ set -euo pipefail
 export TM_BOOTSTRAP_LIBRARY_ONLY=1
 source ${shellQuote(bootstrapShellPath)}
 listener=$'LISTEN 0 511 127.0.0.1:3002 0.0.0.0:* users:(("node",pid=4321,fd=20))'
+listener_with_spaced_process=$'LISTEN 0 511 127.0.0.1:3002 0.0.0.0:* users:(("node /root/turi",pid=4321,fd=20))'
+duplicate_listeners="$listener"$'\n'"$listener"
 validate_loopback_listener_output "$listener" 4321
+validate_loopback_listener_output "$listener_with_spaced_process" 4321
 ! validate_loopback_listener_output '' 4321
 ! validate_loopback_listener_output $'LISTEN 0 511 0.0.0.0:3002 0.0.0.0:* users:(("node",pid=4321,fd=20))' 4321
 ! validate_loopback_listener_output $'LISTEN 0 511 [::1]:3002 [::]:* users:(("node",pid=4321,fd=20))' 4321
 ! validate_loopback_listener_output "$listener" 9876
 ! validate_loopback_listener_output $'LISTEN 0 511 127.0.0.1:3002 0.0.0.0:*' 4321
-! validate_loopback_listener_output "$listener\n$listener" 4321
+! validate_loopback_listener_output $'LISTEN 0 511 127.0.0.1:3002 0.0.0.0:* users:(("node /root/turi",pid=4321,fd=20)) EXTRA' 4321
+! validate_loopback_listener_output "$duplicate_listeners" 4321
 `;
   const result = runBash(source);
 
