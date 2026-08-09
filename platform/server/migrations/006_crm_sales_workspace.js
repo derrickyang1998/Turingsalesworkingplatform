@@ -917,7 +917,11 @@ function createSchema(db) {
   db.exec(INDEX_SQL.ux_opportunities_crm_org_customer_id);
   for (const sql of Object.values(TABLE_SQL)) db.exec(sql);
   for (const [name, sql] of Object.entries(INDEX_SQL)) {
-    if (name === 'ux_customers_crm_org_id' || name === 'ux_opportunities_crm_org_customer_id') continue;
+    if (
+      name === 'ux_customers_crm_org_id' ||
+      name === 'ux_opportunities_crm_org_customer_id' ||
+      name === 'ux_customers_crm_active_identity'
+    ) continue;
     db.exec(sql);
   }
   for (const sql of Object.values(TRIGGER_SQL)) db.exec(sql);
@@ -1043,6 +1047,7 @@ const migration = {
     }
     createSchema(db);
     applyBackfill(db, organizationId, backfillPlan);
+    db.exec(INDEX_SQL.ux_customers_crm_active_identity);
     validateBackfill(db, organizationId, backfillPlan);
     validateMigrationEvents(db, organizationId, backfillPlan, true);
     const legacyAfter = legacyProjectionReport(db, legacyBefore.columns);
