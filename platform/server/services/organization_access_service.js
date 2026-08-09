@@ -66,6 +66,18 @@ function canonicalId(value, label) {
   throw new TypeError((label || 'id') + ' must be a positive canonical safe integer');
 }
 
+function canonicalOrganizationCode(value) {
+  if (
+    typeof value !== 'string' ||
+    value !== value.trim() ||
+    Array.from(value).length < 1 ||
+    Array.from(value).length > 80
+  ) {
+    throw new TypeError('organizationCode must be an exact string of 1 to 80 characters');
+  }
+  return value;
+}
+
 function readDefaultOrganization(db) {
   const rows = db.prepare(`
     SELECT id,code,name
@@ -642,6 +654,8 @@ function authContextFor(db, organization, userId) {
 function resolveOrganizationScope(db, options) {
   const input = snapshotPlainOptions(options, [
     'userId',
+    'organizationId',
+    'organizationCode',
     'repairMissing',
     'actorUserId',
     'requestId'
@@ -655,6 +669,21 @@ function resolveOrganizationScope(db, options) {
   if (typeof repairMissing !== 'boolean') {
     throw new TypeError('repairMissing must be a boolean');
   }
+  const hasOrganizationId = input !== null && Object.hasOwn(input, 'organizationId');
+  const hasOrganizationCode = input !== null && Object.hasOwn(input, 'organizationCode');
+  if (hasOrganizationId && hasOrganizationCode) {
+    throw new TypeError('organizationId and organizationCode are mutually exclusive');
+  }
+  const explicitOrganization = hasOrganizationId || hasOrganizationCode;
+  const organizationId = hasOrganizationId
+    ? canonicalId(input.organizationId, 'organizationId')
+    : null;
+  const organizationCode = hasOrganizationCode
+    ? canonicalOrganizationCode(input.organizationCode)
+    : null;
+  if (explicitOrganization && repairMissing) {
+    throw new TypeError('repairMissing is only supported for the implicit default organization');
+  }
   const userId = canonicalId(rawUserId, 'userId');
   const user = readUser(db, userId);
   if (!user || user.is_active !== 1) {
@@ -664,22 +693,43 @@ function resolveOrganizationScope(db, options) {
       code: 'USER_INACTIVE'
     };
   }
-  const organization = readDefaultOrganization(db);
+  const organization = explicitOrganization
+    ? (hasOrganizationId
+        ? db.prepare(`
+            SELECT id,code,name
+            FROM organizations
+            WHERE id=?
+          `).get(organizationId)
+        : db.prepare(`
+            SELECT id,code,name
+            FROM organizations
+            WHERE code=?
+          `).get(organizationCode))
+    : readDefaultOrganization(db);
+  const unavailable = {
+    ok: false,
+    kind: 'organization_unavailable',
+    code: 'ORGANIZATION_CONTEXT_UNAVAILABLE'
+  };
+  if (explicitOrganization && !organization) return unavailable;
   const membership = db.prepare(`
     SELECT role_code,status
     FROM organization_memberships
     WHERE org_id=? AND user_id=?
   `).get(organization.id, userId);
   if (membership && membership.status !== 'active') {
-    return {
-      ok: false,
-      kind: 'inactive_membership',
-      code: 'ORGANIZATION_MEMBERSHIP_INACTIVE'
-    };
+    return explicitOrganization
+      ? unavailable
+      : {
+          ok: false,
+          kind: 'inactive_membership',
+          code: 'ORGANIZATION_MEMBERSHIP_INACTIVE'
+        };
   }
 
   let repaired = false;
   if (!membership) {
+    if (explicitOrganization) return unavailable;
     if (!repairMissing) {
       return {
         ok: false,
@@ -698,11 +748,13 @@ function resolveOrganizationScope(db, options) {
   }
   const authContext = authContextFor(db, organization, userId);
   if (!authContext) {
-    return {
-      ok: false,
-      kind: 'inactive_membership',
-      code: 'ORGANIZATION_MEMBERSHIP_INACTIVE'
-    };
+    return explicitOrganization
+      ? unavailable
+      : {
+          ok: false,
+          kind: 'inactive_membership',
+          code: 'ORGANIZATION_MEMBERSHIP_INACTIVE'
+        };
   }
   return {
     ok: true,
