@@ -127,6 +127,26 @@ function normalizeComparisonText(value) {
     .toLowerCase();
 }
 
+function normalizeIdentityText(value, field) {
+  for (let index = 0; index < value.length; index += 1) {
+    const point = value.charCodeAt(index);
+    if (point >= 0xd800 && point <= 0xdbff) {
+      if (index + 1 >= value.length) throw identityError(field, 'invalid_format');
+      const low = value.charCodeAt(index + 1);
+      if (low < 0xdc00 || low > 0xdfff) throw identityError(field, 'invalid_format');
+      index += 1;
+    } else if (point >= 0xdc00 && point <= 0xdfff) {
+      throw identityError(field, 'invalid_format');
+    }
+  }
+  return value
+    .normalize('NFKC')
+    .replace(/[\u0000-\u001f\u007f-\u009f]/g, '')
+    .replace(/[\p{White_Space}\uFEFF]+/gu, ' ')
+    .replace(/^ +| +$/g, '')
+    .toLowerCase();
+}
+
 function lengthFrame(byteLength) {
   const frame = Buffer.allocUnsafe(4);
   frame.writeUInt32BE(byteLength, 0);
@@ -140,14 +160,14 @@ function buildCustomerIdentity(input) {
 
   const brandValue = ownDataValue(input, 'brand_name', true);
   if (typeof brandValue !== 'string') throw identityError('brand_name', 'invalid_type');
-  const brand = normalizeComparisonText(brandValue);
+  const brand = normalizeIdentityText(brandValue, 'brand_name');
   if (!brand) throw identityError('brand_name', 'invalid_format');
 
   const companyValue = ownDataValue(input, 'company_name', false);
   if (companyValue !== undefined && companyValue !== null && typeof companyValue !== 'string') {
     throw identityError('company_name', 'invalid_type');
   }
-  const company = normalizeComparisonText(companyValue == null ? '' : companyValue);
+  const company = normalizeIdentityText(companyValue == null ? '' : companyValue, 'company_name');
   const brandBytes = Buffer.from(brand, 'utf8');
   const companyBytes = Buffer.from(company, 'utf8');
   if (brandBytes.length > 0xffffffff || companyBytes.length > 0xffffffff) {

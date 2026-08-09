@@ -128,6 +128,30 @@ test('identity treats missing, null, and empty company as equivalent without exp
   assert.equal(JSON.stringify(missing).includes('acme'), false);
 });
 
+test('identity treats BOM as whitespace and rejects isolated UTF-16 surrogates', () => {
+  const canonical = buildCustomerIdentity({ brand_name: 'Acme', company_name: '' });
+  assert.equal(
+    buildCustomerIdentity({ brand_name: '\uFEFFAcme\uFEFF', company_name: '' }).key,
+    canonical.key
+  );
+  assert.equal(
+    buildCustomerIdentity({ brand_name: 'Acme\uFEFFMarket', company_name: '' }).key,
+    buildCustomerIdentity({ brand_name: 'Acme Market', company_name: '' }).key
+  );
+
+  for (const input of [
+    { brand_name: 'Acme\uD800', company_name: '' },
+    { brand_name: 'Acme', company_name: '\uDC00Market' }
+  ]) {
+    assert.throws(() => buildCustomerIdentity(input), (error) => {
+      assert.equal(error instanceof CrmContractError, true);
+      assert.equal(error.code, 'CRM_IDENTITY_INVALID');
+      assert.equal(error.reason, 'invalid_format');
+      return true;
+    });
+  }
+});
+
 test('identity does not mutate input or include contact, country, and tags in key material', () => {
   const input = {
     brand_name: ' ACME ',

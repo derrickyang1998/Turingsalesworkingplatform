@@ -11,6 +11,7 @@ const Database = require('better-sqlite3');
 
 const legacyBaseline = require('../migrations/baselines/legacy_v1');
 const migrationService = require('../services/migration_service');
+const { buildCustomerIdentity, CrmContractError } = require('../services/crm_contract');
 
 const SERVER_ROOT = path.resolve(__dirname, '..');
 
@@ -692,6 +693,64 @@ test('identity migration matches G1-G8 and keeps unclassified matching rows unen
     `).get().count, 1);
   } finally {
     db.close();
+  }
+});
+
+test('migration and runtime identity agree on BOM and isolated surrogate edges', (t) => {
+  const bomFixture = buildPopulatedVersion5Fixture(t, 'identity-bom-equivalence');
+  const version5 = new Database(bomFixture.databasePath);
+  version5.pragma('foreign_keys = ON');
+  version5.prepare(`
+    INSERT INTO customers (
+      id,brand_name,company_name,stage,source,created_by,assigned_to,
+      created_at,updated_at,is_public
+    ) VALUES (1501,?,'','lead','identity-edge',101,101,
+      '2026-02-02 00:00:00','2026-02-02 00:00:00',0)
+  `).run('\uFEFFAcme\uFEFF');
+  version5.close();
+
+  const runtimeBomKey = buildCustomerIdentity({
+    brand_name: '\uFEFFAcme\uFEFF',
+    company_name: ''
+  }).key;
+  const migrated = migrationService.openMigratedDatabase(bomFixture.databasePath, migrationOptions());
+  try {
+    assert.equal(
+      migrated.prepare('SELECT normalized_identity_key FROM customers WHERE id=1501').get().normalized_identity_key,
+      runtimeBomKey
+    );
+  } finally {
+    migrated.close();
+  }
+
+  const surrogateFixture = buildPopulatedVersion5Fixture(t, 'identity-surrogate-equivalence');
+  const malformed = new Database(surrogateFixture.databasePath);
+  malformed.pragma('foreign_keys = ON');
+  malformed.prepare(`
+    INSERT INTO customers (
+      id,brand_name,company_name,stage,source,created_by,assigned_to,
+      created_at,updated_at,is_public
+    ) VALUES (1502,?,'','lead','identity-edge',101,101,
+      '2026-02-02 00:00:00','2026-02-02 00:00:00',0)
+  `).run('Acme\uD800');
+  const persistedBrand = malformed.prepare('SELECT brand_name FROM customers WHERE id=1502').get().brand_name;
+  assert.equal(persistedBrand, 'Acme\uFFFD');
+
+  assert.throws(
+    () => buildCustomerIdentity({ brand_name: 'Acme\uD800', company_name: '' }),
+    CrmContractError
+  );
+  const persistedRuntimeKey = buildCustomerIdentity({ brand_name: persistedBrand, company_name: '' }).key;
+  malformed.close();
+
+  const surrogateMigrated = migrationService.openMigratedDatabase(surrogateFixture.databasePath, migrationOptions());
+  try {
+    assert.equal(
+      surrogateMigrated.prepare('SELECT normalized_identity_key FROM customers WHERE id=1502').get().normalized_identity_key,
+      persistedRuntimeKey
+    );
+  } finally {
+    surrogateMigrated.close();
   }
 });
 

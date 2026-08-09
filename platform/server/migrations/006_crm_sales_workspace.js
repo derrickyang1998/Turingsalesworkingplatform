@@ -331,7 +331,7 @@ function normalizeIdentityText(value, label) {
   const normalized = value
     .normalize('NFKC')
     .replace(/[\u0000-\u001f\u007f-\u009f]/g, '')
-    .replace(/\p{White_Space}+/gu, ' ')
+    .replace(/[\p{White_Space}\uFEFF]+/gu, ' ')
     .replace(/^ +| +$/g, '')
     .toLowerCase();
   utf8Bytes(normalized, label);
