@@ -138,6 +138,31 @@ async function apiFetch(url, opts) {
   return resp;
 }
 
+async function requireSuccessfulCustomerMutation(response, fallbackMessage) {
+  if (response && response.ok) return response;
+
+  var status = response && Number.isFinite(Number(response.status)) ? Number(response.status) : 0;
+  var payload = null;
+  if (response && typeof response.json === 'function') {
+    try { payload = await response.json(); } catch (e) {}
+  }
+
+  var message = '';
+  if (payload && typeof payload === 'object') {
+    var messageKeys = ['error', 'message', 'title', 'code'];
+    for (var i = 0; i < messageKeys.length; i++) {
+      var candidate = payload[messageKeys[i]];
+      if (typeof candidate === 'string' && candidate.trim()) {
+        message = candidate.trim().slice(0, 300);
+        break;
+      }
+    }
+  }
+  if (!message) message = String(fallbackMessage || '请求失败').slice(0, 300);
+  if (status) message += ' (HTTP ' + status + ')';
+  throw new Error(message);
+}
+
 // ===== APP INIT =====
 async function initApp() { console.log("[TM] initApp starting");
   // Hide all non-M1 pages (they start visible for text metrics)
@@ -337,7 +362,7 @@ function renderCustomerTable(data) {
     h += '<tr style="cursor:pointer" onclick="openCustomerDetail(' + c.id + ')"><td><strong>' + esc(c.brand_name || '-') + '</strong></td>';
     h += '<td>' + esc(c.company_name || '-') + '</td>';
     h += '<td>' + esc(c.industry || '-') + '</td>';
-    h += '<td><select onclick="event.stopPropagation()" onchange="changeCustomerStage(' + c.id + ', this.value)" style="width:auto;font-size:11px">';
+    h += '<td><select onclick="event.stopPropagation()" data-previous-value="' + esc(c.stage || 'lead') + '" onchange="changeCustomerStage(' + c.id + ', this.value, this)" style="width:auto;font-size:11px">';
     Object.keys(CUST_STAGES).forEach(function(k) { h += '<option value="' + k + '"' + (c.stage === k ? ' selected' : '') + '>' + CUST_STAGES[k] + '</option>'; });
     h += '</select></td>';
     h += '<td>' + esc(c.contact_person || '-') + '</td>';
@@ -401,24 +426,41 @@ async function saveCustomer() {
     stage: document.getElementById('custStage').value
   };
   try {
+    var response;
+    var successMessage;
+    var fallbackMessage;
     if (editId) {
-      await apiFetch('/customers/' + editId, { method: 'PUT', body: JSON.stringify(body) });
-      toast('客户已更新');
+      response = await apiFetch('/customers/' + editId, { method: 'PUT', body: JSON.stringify(body) });
+      successMessage = '客户已更新';
+      fallbackMessage = '客户更新失败';
     } else {
-      await apiFetch('/customers', { method: 'POST', body: JSON.stringify(body) });
-      toast('客户已创建');
+      response = await apiFetch('/customers', { method: 'POST', body: JSON.stringify(body) });
+      successMessage = '客户已创建';
+      fallbackMessage = '客户创建失败';
     }
+    await requireSuccessfulCustomerMutation(response, fallbackMessage);
+    toast(successMessage);
     closeCustModal();
     await loadCustomers();
   } catch (e) { toast('保存失败: ' + e.message, 'error'); }
 }
 
-async function changeCustomerStage(id, newStage) {
+async function changeCustomerStage(id, newStage, selectEl) {
+  var previousStage = selectEl && typeof selectEl.getAttribute === 'function'
+    ? selectEl.getAttribute('data-previous-value')
+    : null;
   try {
-    await apiFetch('/customers/' + id, { method: 'PUT', body: JSON.stringify({ stage: newStage }) });
+    var response = await apiFetch('/customers/' + id, { method: 'PUT', body: JSON.stringify({ stage: newStage }) });
+    await requireSuccessfulCustomerMutation(response, '客户阶段更新失败');
+    if (selectEl && typeof selectEl.setAttribute === 'function') {
+      selectEl.setAttribute('data-previous-value', newStage);
+    }
     toast('阶段已更新: ' + (CUST_STAGES[newStage] || newStage));
     loadCustomerStats();
-  } catch (e) { toast('更新失败: ' + e.message, 'error'); }
+  } catch (e) {
+    if (selectEl && previousStage !== null) selectEl.value = previousStage;
+    toast('更新失败: ' + e.message, 'error');
+  }
 }
 
 // ===== MISSING M0 FUNCTIONS (v8.2 restored) =====
@@ -757,8 +799,8 @@ function renderCustomerSidebar(d) {
   html += '<div class="field"><span class="field-label">预算</span><span class="field-value">' + esc(c.budget_estimate || '-') + '</span></div>';
   html += '<div class="field"><span class="field-label">备注</span><span class="field-value">' + esc(c.notes || '-') + '</span></div></div>';
   html += '<div class="sidebar-section" style="display:flex;gap:8px;flex-wrap:wrap">';
-  if (c.is_public == 1) html += '<button class="btn btn-primary btn-sm" onclick="claimCustomer(' + c.id + ');closeCustomerDetail()">📥 认领客户</button>';
-  else html += '<button class="btn btn-outline btn-sm" onclick="returnToPool(' + c.id + ');closeCustomerDetail()">🌊 释放到公海</button>';
+  if (c.is_public == 1) html += '<button class="btn btn-primary btn-sm" onclick="claimCustomer(' + c.id + ', true)">📥 认领客户</button>';
+  else html += '<button class="btn btn-outline btn-sm" onclick="returnToPool(' + c.id + ', true)">🌊 释放到公海</button>';
   html += '<button class="btn btn-outline btn-sm" onclick="editCustomer(' + c.id + ');closeCustomerDetail()">✏️ 编辑</button>';
   html += '<button class="btn btn-sm btn-primary" onclick="showOppModal(' + c.id + ')">💼 新增商机</button>';
   html += '<button class="btn btn-sm btn-danger" onclick="deleteCustomer(' + c.id + ')">🗑️ 删除</button></div>';
@@ -813,8 +855,8 @@ function showOpportunityDetail(id) {
   document.getElementById('custDetailBody').innerHTML = html;
 }
 
-async function claimCustomer(id) { try { await apiFetch('/customers/'+id+'/claim',{method:'POST'}); toast('已认领客户'); loadCustomers(); } catch(e){toast('认领失败: '+e.message,'error')} }
-async function returnToPool(id) { try { await apiFetch('/customers/'+id+'/return',{method:'POST'}); toast('已释放到公海'); loadCustomers(); } catch(e){toast('释放失败: '+e.message,'error')} }
+async function claimCustomer(id, closeDetailOnSuccess) { try { var response = await apiFetch('/customers/'+id+'/claim',{method:'POST'}); await requireSuccessfulCustomerMutation(response, '认领客户失败'); toast('已认领客户'); if (closeDetailOnSuccess) closeCustomerDetail(); loadCustomers(); } catch(e){toast('认领失败: '+e.message,'error')} }
+async function returnToPool(id, closeDetailOnSuccess) { try { var response = await apiFetch('/customers/'+id+'/return',{method:'POST'}); await requireSuccessfulCustomerMutation(response, '释放客户失败'); toast('已释放到公海'); if (closeDetailOnSuccess) closeCustomerDetail(); loadCustomers(); } catch(e){toast('释放失败: '+e.message,'error')} }
 async function deleteCustomer(id) { var ok = await showConfirm('确认删除','确定要删除此客户吗？此操作不可恢复。'); if (!ok) return; try { var resp = await apiFetch('/customers/'+id,{method:'DELETE'}); if (!resp.ok) throw new Error('删除失败'); closeCustomerDetail(); toast('客户已删除'); try{await loadCustomers()}catch(e){} } catch(e){toast('删除失败: '+e.message,'error')} }
 
 async function loadOpportunities() {
