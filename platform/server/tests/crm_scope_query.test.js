@@ -1218,3 +1218,76 @@ test('public service errors expose only fixed fields', (t) => {
     }
   );
 });
+
+test('public pool opportunity stage filters cannot reveal hidden opportunities', (t) => {
+  const db = openFixture(t);
+  insertOpportunity(db, {
+    id: 47000,
+    customerId: IDS.publicA,
+    orgId: IDS.orgA,
+    teamId: null,
+    ownerUserId: null,
+    stage: 'negotiation'
+  });
+  const options = {
+    actorUserId: IDS.ownerA,
+    organizationId: IDS.orgA
+  };
+  const visible = listCustomers(db, {
+    ...options,
+    filter: {
+      scope: 'public_pool',
+      as_of: '2026-08-09T02:30:00.000Z'
+    }
+  });
+  assert.deepEqual(visible.items.map((item) => item.id), [IDS.publicA]);
+
+  for (const opportunityStage of [['negotiation'], ['discovery']]) {
+    const filter = {
+      scope: 'public_pool',
+      opportunity_stage: opportunityStage,
+      as_of: '2026-08-09T02:30:00.000Z'
+    };
+    const list = listCustomers(db, { ...options, filter });
+    const dashboard = getCrmDashboard(db, { ...options, filter });
+    assert.deepEqual(list.items, [], opportunityStage[0]);
+    assert.equal(list.total, 0, opportunityStage[0]);
+    assert.equal(dashboard.customers.total, 0, opportunityStage[0]);
+    assert.deepEqual(dashboard.opportunities, {
+      open_count: 0,
+      open_amount: 0,
+      weighted_forecast: 0
+    });
+  }
+});
+
+test('as of milliseconds remain exact at due boundaries', (t) => {
+  const db = openFixture(t);
+  const customerId = 37100;
+  insertFilterCustomer(db, customerId, {
+    brandName: 'Millisecond Boundary',
+    companyName: 'Millisecond Boundary Company',
+    source: 'millisecond-test',
+    nextActionAt: '2026-08-09 02:30:00'
+  });
+  const common = {
+    scope: 'organization',
+    source: 'millisecond-test',
+    keyword: 'millisecond boundary',
+    as_of: '2026-08-09T02:30:00.500Z'
+  };
+  const overdue = listCustomers(db, {
+    actorUserId: IDS.orgAdminA,
+    organizationId: IDS.orgA,
+    filter: { ...common, next_action_due: 'overdue' }
+  });
+  const today = listCustomers(db, {
+    actorUserId: IDS.orgAdminA,
+    organizationId: IDS.orgA,
+    filter: { ...common, next_action_due: 'today' }
+  });
+
+  assert.deepEqual(overdue.items.map((item) => item.id), [customerId]);
+  assert.deepEqual(today.items, []);
+  assert.equal(overdue.meta.as_of, '2026-08-09T02:30:00.500Z');
+});

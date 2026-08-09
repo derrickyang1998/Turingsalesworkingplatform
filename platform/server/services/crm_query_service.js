@@ -84,7 +84,9 @@ function nowMarker() {
 }
 
 function sqliteTimestampFromIso(value) {
-  return value.slice(0, 19).replace('T', ' ');
+  const wholeSeconds = value.slice(0, 19).replace('T', ' ');
+  const milliseconds = value.slice(19, 23);
+  return milliseconds === '.000' ? wholeSeconds : `${wholeSeconds}${milliseconds}`;
 }
 
 function localDateParts(date, timeZone) {
@@ -252,14 +254,18 @@ function buildCustomerPlan(state) {
     params.push(...filter.customer_stage);
   }
   if (filter.opportunity_stage.length > 0) {
-    clauses.push(`EXISTS (
-      SELECT 1
-      FROM opportunities crm_filter_opportunity
-      WHERE crm_filter_opportunity.customer_id=c.id
-        AND crm_filter_opportunity.org_id=c.org_id
-        AND crm_filter_opportunity.stage IN (${placeholders(filter.opportunity_stage)})
-    )`);
-    params.push(...filter.opportunity_stage);
+    if (filter.scope === 'public_pool') {
+      clauses.push('1=0');
+    } else {
+      clauses.push(`EXISTS (
+        SELECT 1
+        FROM opportunities crm_filter_opportunity
+        WHERE crm_filter_opportunity.customer_id=c.id
+          AND crm_filter_opportunity.org_id=c.org_id
+          AND crm_filter_opportunity.stage IN (${placeholders(filter.opportunity_stage)})
+      )`);
+      params.push(...filter.opportunity_stage);
+    }
   }
   if (filter.priority.length > 0) {
     clauses.push(`c.priority IN (${placeholders(filter.priority)})`);
