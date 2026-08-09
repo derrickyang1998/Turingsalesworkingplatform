@@ -1,6 +1,6 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
-## v0.5.0-campaign-business-spine (Unreleased, updated 2026-07-28) - 活动业务主链开发候选
+## v0.5.0-campaign-business-spine (Unreleased, updated 2026-08-09) - 活动业务主链开发候选
 
 ### 数据、权限与活动主链 / Data, Access, And Campaign Spine
 - 增加受校验和约束的增量迁移、SQLite 结构/逻辑/FTS 摘要、组织与团队身份投影、活动访问决策、知识托管和容量边界，为客户、商机、方案、网红、AI、知识与流程记录提供一致的活动归属基础。
@@ -12,6 +12,12 @@
 - 增加任务动作、实例控制、故障调和、替换实例、任务重分配、幂等重放与原子审计证据；对账 JSON ID 只接受安全正整数 number，不接受数字字符串。
 - 实例列表、按业务读取、任务读取与统计使用集合化活动访问过滤；真正未关联的历史记录维持旧兼容语义，关联但缺失模板或互惠链路的记录不会进入读取或统计结果。
 - Task 6 最终独立审查为 `SPEC APPROVE`、`QUALITY APPROVE`、`OVERALL APPROVE`，Critical、Important、Minor 均为 0。
+
+### 生产 Bootstrap 恢复加固 / Production Bootstrap Recovery Hardening
+- 生产外置运行时 bootstrap 首次执行时，真实 `ss` 进程标签包含空格，旧解析器把合法的单一 loopback socket 误判为额外字段并停止 PM2；v0.4 随即按版本化备份恢复，并在最近一次远端验收中保持单一 `127.0.0.1:3002` 监听、健康接口、SQLite、nftables 与 systemd 持久化均通过。
+- 提交 `7b418fd` 以最小改动让最后一个 shell 变量吸收完整进程字段，同时继续严格校验精确 endpoint、唯一 listener、PM2 PID 绑定和尾随字段拒绝；真实生产形态 fixture 与双监听负例均已固化。
+- 操作手册现在只接受互斥的 normal 或 committed-recovery 首跑成功契约，并在 ACK 前验证精确 terminal ID、journal provenance、PM2/监听、nftables、systemd、四个外置链接、SQLite 与永久 marker；pending 重跑显式拒绝全部 recovery 成功记录。
+- 最终 runtime/source-contract/source-trust 门禁为 100/100，bootstrap 生命周期、边界和 sanitizer 重型门禁为 305 项零失败；独立 Code Review 与 AppSec 均为 `APPROVE`。本修复尚未触发 v0.5 生产切换。
 
 ### 验证与发布状态 / Verification And Release State
 - 最终父级复验：读取 20/20、对账 15/15、工作流/请求管线/生产集成 106/106、相关 Phase 4 265/265、迁移框架 82/82、环境无关服务器矩阵 475/475。
