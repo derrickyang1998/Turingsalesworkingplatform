@@ -271,6 +271,8 @@ function isActiveAssignment(db, organizationId, ownerUserId, teamId) {
   return Boolean(db.prepare(`
     SELECT 1 AS allowed
     FROM organization_memberships om
+    JOIN users u
+      ON u.id=om.user_id
     JOIN team_memberships tm
       ON tm.org_id=om.org_id
      AND tm.user_id=om.user_id
@@ -279,6 +281,7 @@ function isActiveAssignment(db, organizationId, ownerUserId, teamId) {
      AND t.id=tm.team_id
     WHERE om.org_id=?
       AND om.user_id=?
+      AND u.is_active=1
       AND om.status='active'
       AND om.revoked_at IS NULL
       AND tm.team_id=?

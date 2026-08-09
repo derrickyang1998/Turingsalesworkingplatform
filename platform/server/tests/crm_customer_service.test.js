@@ -24,11 +24,13 @@ const IDS = Object.freeze({
   outsiderB: 106,
   revokedA: 107,
   noTeamA: 108,
+  inactiveOwnerA: 109,
   ownedA: 10001,
   transferredA: 10002,
   teammateOwnedA: 10003,
   publicA: 10004,
   quarantinedA: 10005,
+  inactiveOwnedA: 10006,
   ownedB: 20001
 });
 
@@ -140,15 +142,18 @@ function openFixture(t) {
     [IDS.barePlatformAdmin, 'mutation-bare-platform-admin', 'admin'],
     [IDS.outsiderB, 'mutation-outsider-b', 'user'],
     [IDS.revokedA, 'mutation-revoked-a', 'user'],
-    [IDS.noTeamA, 'mutation-no-team-a', 'user']
+    [IDS.noTeamA, 'mutation-no-team-a', 'user'],
+    [IDS.inactiveOwnerA, 'mutation-inactive-owner-a', 'user']
   ]) insertUser(db, id, username, role);
+  db.prepare('UPDATE users SET is_active=0 WHERE id=?').run(IDS.inactiveOwnerA);
 
   for (const [userId, roleCode] of [
     [IDS.ownerA, 'member'],
     [IDS.teammateA, 'member'],
     [IDS.orgAdminA, 'org_admin'],
     [IDS.originatorA, 'member'],
-    [IDS.noTeamA, 'member']
+    [IDS.noTeamA, 'member'],
+    [IDS.inactiveOwnerA, 'member']
   ]) insertOrganizationMembership(db, IDS.orgA, userId, roleCode);
   insertOrganizationMembership(db, IDS.orgA, IDS.revokedA, 'member', 'revoked');
   insertOrganizationMembership(db, IDS.orgB, IDS.outsiderB);
@@ -157,6 +162,7 @@ function openFixture(t) {
     [IDS.orgA, IDS.teamA1, IDS.ownerA],
     [IDS.orgA, IDS.teamA1, IDS.teammateA],
     [IDS.orgA, IDS.teamA1, IDS.orgAdminA],
+    [IDS.orgA, IDS.teamA1, IDS.inactiveOwnerA],
     [IDS.orgA, IDS.teamA2, IDS.originatorA],
     [IDS.orgB, IDS.teamB1, IDS.outsiderB]
   ]) insertTeamMembership(db, orgId, teamId, userId);
@@ -168,6 +174,7 @@ function openFixture(t) {
     { id: IDS.teammateOwnedA, orgId: IDS.orgA, teamId: IDS.teamA1, createdBy: IDS.teammateA, assignedTo: IDS.teammateA, isPublic: 0, brandName: 'Teammate A' },
     { id: IDS.publicA, orgId: IDS.orgA, teamId: null, createdBy: IDS.ownerA, assignedTo: null, isPublic: 1, brandName: 'Public A' },
     { id: IDS.quarantinedA, orgId: IDS.orgA, teamId: null, createdBy: IDS.ownerA, assignedTo: IDS.ownerA, isPublic: 0, brandName: 'Quarantined A' },
+    { id: IDS.inactiveOwnedA, orgId: IDS.orgA, teamId: IDS.teamA1, createdBy: IDS.inactiveOwnerA, assignedTo: IDS.inactiveOwnerA, isPublic: 0, brandName: 'Inactive Owned A' },
     { id: IDS.ownedB, orgId: IDS.orgB, teamId: IDS.teamB1, createdBy: IDS.outsiderB, assignedTo: IDS.outsiderB, isPublic: 0, brandName: 'Owned B' }
   ]) insertCustomer(db, customer);
 
@@ -404,6 +411,28 @@ test('authorization: public and quarantined custody expose only their approved c
     }
   }));
   assert.equal(adminRepair.code, 'CRM_MUTATION_INVALID');
+});
+
+test('authorization: inactive owner custody matches the read-model quarantine policy', (t) => {
+  const db = openFixture(t);
+  const profile = captureError(() => service.createOrUpdateCustomer(
+    db,
+    customerUpdate(IDS.orgAdminA, IDS.inactiveOwnedA)
+  ));
+  assert.equal(profile.code, 'CRM_CUSTOMER_FORBIDDEN');
+
+  const repair = captureError(() => service.mutateCustomerCustody(db, {
+    actorUserId: IDS.orgAdminA,
+    organizationId: IDS.orgA,
+    command: {
+      action: 'repair',
+      customerId: IDS.inactiveOwnedA,
+      assigned_to: IDS.ownerA,
+      team_id: IDS.teamA1,
+      reason_code: 'legacy_custody_repair'
+    }
+  }));
+  assert.equal(repair.code, 'CRM_MUTATION_INVALID');
 });
 
 test('authorization: create authority is self-owned for members and delegated for organization admins', (t) => {
