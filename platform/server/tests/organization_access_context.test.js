@@ -118,14 +118,15 @@ function seedExplicitContext(db, options = {}) {
 
 function mutationSnapshot(db) {
   return {
-    organizationMemberships: db.prepare(
-      'SELECT COUNT(*) AS count FROM organization_memberships'
-    ).get().count,
-    teamMemberships: db.prepare(
-      'SELECT COUNT(*) AS count FROM team_memberships'
-    ).get().count,
-    sessions: db.prepare('SELECT COUNT(*) AS count FROM sessions').get().count,
-    activity: db.prepare('SELECT COUNT(*) AS count FROM activity_log').get().count
+    totalChanges: db.prepare('SELECT total_changes() AS count').get().count,
+    organizationMemberships: db.prepare(`
+      SELECT * FROM organization_memberships ORDER BY org_id,user_id
+    `).all(),
+    teamMemberships: db.prepare(`
+      SELECT * FROM team_memberships ORDER BY org_id,team_id,user_id
+    `).all(),
+    sessions: db.prepare('SELECT * FROM sessions ORDER BY id').all(),
+    activity: db.prepare('SELECT * FROM activity_log ORDER BY id').all()
   };
 }
 
@@ -206,7 +207,7 @@ test('implicit default organization behavior remains compatible', async (t) => {
     const db = openDatabase(t);
     db.prepare('DELETE FROM team_memberships WHERE org_id=1 AND user_id=2').run();
     db.prepare('DELETE FROM organization_memberships WHERE org_id=1 AND user_id=2').run();
-    const beforeActivity = mutationSnapshot(db).activity;
+    const beforeActivity = mutationSnapshot(db).activity.length;
     const result = resolveOrganizationScope(db, {
       userId: 2,
       repairMissing: true,
@@ -216,7 +217,7 @@ test('implicit default organization behavior remains compatible', async (t) => {
     assert.equal(result.ok, true);
     assert.equal(result.repaired, true);
     assert.equal(result.authContext.organization.code, DEFAULT_ORGANIZATION_CODE);
-    assert.equal(mutationSnapshot(db).activity, beforeActivity + 1);
+    assert.equal(mutationSnapshot(db).activity.length, beforeActivity + 1);
   });
 });
 
@@ -354,10 +355,20 @@ test('explicit context conceals every unavailable organization state without wri
 test('explicit context cannot request membership repair', (t) => {
   const db = openDatabase(t);
   const before = mutationSnapshot(db);
+  let selectorTrapCalls = 0;
+  const hostileSelector = new Proxy({}, {
+    get() {
+      selectorTrapCalls += 1;
+      return 1;
+    }
+  });
   for (const selector of [
     { organizationId: 1 },
     { organizationCode: DEFAULT_ORGANIZATION_CODE },
-    { organizationId: 999 }
+    { organizationId: 999 },
+    { organizationId: undefined },
+    { organizationCode: null },
+    { organizationId: hostileSelector }
   ]) {
     assert.throws(
       () => resolveOrganizationScope(db, {
@@ -374,6 +385,24 @@ test('explicit context cannot request membership repair', (t) => {
     );
     assert.deepEqual(mutationSnapshot(db), before);
   }
+  assert.equal(selectorTrapCalls, 0);
+
+  const noDatabaseAccess = {
+    prepare() {
+      throw new Error('database access must not occur');
+    }
+  };
+  assert.throws(
+    () => resolveOrganizationScope(noDatabaseAccess, {
+      userId: 2,
+      organizationId: undefined,
+      repairMissing: true
+    }),
+    {
+      name: 'TypeError',
+      message: 'repairMissing is only supported for the implicit default organization'
+    }
+  );
 });
 
 test('bare platform admin has no cross-organization bypass', (t) => {
@@ -432,6 +461,61 @@ test('new selector options preserve hostile-container defenses', (t) => {
     /userId must be a positive canonical safe integer/
   );
   assert.equal(trapCalls, 0);
+
+  let inheritedGetterCalls = 0;
+  const prototype = {};
+  Object.defineProperty(prototype, 'organizationId', {
+    get() {
+      inheritedGetterCalls += 1;
+      return 2;
+    }
+  });
+  const inheritedOptions = Object.create(prototype);
+  Object.defineProperty(inheritedOptions, 'userId', {
+    enumerable: true,
+    value: 2
+  });
+  assert.throws(
+    () => resolveOrganizationScope(db, inheritedOptions),
+    /userId must be a positive canonical safe integer/
+  );
+  assert.equal(inheritedGetterCalls, 0);
+
+  const revoked = Proxy.revocable({ userId: 2, organizationId: 2 }, {});
+  revoked.revoke();
+  assert.throws(
+    () => resolveOrganizationScope(db, revoked.proxy),
+    /userId must be a positive canonical safe integer/
+  );
+
+  let nestedTrapCalls = 0;
+  const nestedSelector = new Proxy({}, {
+    get() {
+      nestedTrapCalls += 1;
+      return 2;
+    },
+    getPrototypeOf() {
+      nestedTrapCalls += 1;
+      return Object.prototype;
+    }
+  });
+  assert.throws(
+    () => resolveOrganizationScope(db, {
+      userId: 2,
+      organizationId: nestedSelector
+    }),
+    /organizationId must be a positive canonical safe integer/
+  );
+  assert.equal(nestedTrapCalls, 0);
+
+  assert.throws(
+    () => resolveOrganizationScope(db, []),
+    /userId must be a positive canonical safe integer/
+  );
+  assert.throws(
+    () => resolveOrganizationScope(db, function hostileOptions() {}),
+    /userId must be a positive canonical safe integer/
+  );
 });
 
 test('ordinary explicit resolution never writes a support audit', (t) => {

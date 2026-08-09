@@ -675,15 +675,15 @@ function resolveOrganizationScope(db, options) {
     throw new TypeError('organizationId and organizationCode are mutually exclusive');
   }
   const explicitOrganization = hasOrganizationId || hasOrganizationCode;
+  if (explicitOrganization && repairMissing) {
+    throw new TypeError('repairMissing is only supported for the implicit default organization');
+  }
   const organizationId = hasOrganizationId
     ? canonicalId(input.organizationId, 'organizationId')
     : null;
   const organizationCode = hasOrganizationCode
     ? canonicalOrganizationCode(input.organizationCode)
     : null;
-  if (explicitOrganization && repairMissing) {
-    throw new TypeError('repairMissing is only supported for the implicit default organization');
-  }
   const userId = canonicalId(rawUserId, 'userId');
   const user = readUser(db, userId);
   if (!user || user.is_active !== 1) {
