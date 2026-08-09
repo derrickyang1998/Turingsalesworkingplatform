@@ -3,6 +3,8 @@
 const { types: utilTypes } = require('node:util');
 const {
   CUSTOMER_LIFECYCLE_REGISTRY,
+  OPPORTUNITY_STAGE_REGISTRY,
+  CrmContractError,
   canonicalizeCrmFilter,
   fingerprintCrmFilter,
   encodeCrmCursor,
@@ -32,6 +34,19 @@ const APPLIED_FILTER_KEYS = Object.freeze([
   'keyword',
   'as_of'
 ]);
+
+class CrmQueryError extends Error {
+  constructor(cause) {
+    super('CRM query failed');
+    Object.defineProperties(this, {
+      name: { value: 'CrmQueryError', enumerable: true },
+      code: { value: 'CRM_QUERY_FAILED', enumerable: true },
+      status: { value: 500, enumerable: true },
+      reason: { value: 'query_failed', enumerable: true },
+      cause: { value: cause, enumerable: false }
+    });
+  }
+}
 
 function deepFreeze(value, seen = new Set()) {
   if (!value || typeof value !== 'object' || seen.has(value)) return value;
@@ -147,7 +162,7 @@ function dueBoundaries(asOf, timeZone) {
   });
 }
 
-function prepareQueryState(db, rawOptions) {
+function prepareQueryState(db, rawOptions, { decodeCursor = true } = {}) {
   const options = snapshotPlainOptions(rawOptions, [
     'actorUserId',
     'organizationId',
@@ -171,7 +186,7 @@ function prepareQueryState(db, rawOptions) {
     as_of: asOf
   });
   const queryFingerprint = fingerprintCrmFilter(effectiveFilter);
-  const cursorKeys = effectiveFilter.cursor === null
+  const cursorKeys = !decodeCursor || effectiveFilter.cursor === null
     ? null
     : decodeCrmCursor(effectiveFilter.cursor, queryFingerprint);
   const appliedFilters = {};
@@ -513,8 +528,31 @@ function responseMeta(state) {
   };
 }
 
+function isSqliteFailure(error) {
+  return Boolean(error) && (
+    error.name === 'SqliteError' ||
+    (typeof error.code === 'string' && /^SQLITE_[A-Z0-9_]+$/.test(error.code))
+  );
+}
+
+function runReadTransaction(db, callback) {
+  try {
+    return db.transaction(callback).deferred();
+  } catch (error) {
+    if (
+      error instanceof CrmContractError ||
+      error instanceof CrmScopeError ||
+      error instanceof CrmQueryError
+    ) {
+      throw error;
+    }
+    if (isSqliteFailure(error)) throw new CrmQueryError(error);
+    throw error;
+  }
+}
+
 function listCustomers(db, options) {
-  return db.transaction(() => {
+  return runReadTransaction(db, () => {
     const state = prepareQueryState(db, options);
     const plan = buildCustomerPlan(state);
     const total = db.prepare(`
@@ -538,11 +576,11 @@ function listCustomers(db, options) {
       page: paged.page,
       meta: responseMeta(state)
     });
-  }).deferred();
+  });
 }
 
 function listOpportunities(db, options) {
-  return db.transaction(() => {
+  return runReadTransaction(db, () => {
     const state = prepareQueryState(db, options);
     const plan = buildOpportunityPlan(state);
     const total = db.prepare(`
@@ -568,10 +606,131 @@ function listOpportunities(db, options) {
       page: paged.page,
       meta: responseMeta(state)
     });
-  }).deferred();
+  });
+}
+
+function initialCustomerStageCounts() {
+  const byStage = {};
+  const byGroup = {};
+  for (const entry of Object.values(CUSTOMER_LIFECYCLE_REGISTRY)) {
+    byStage[entry.code] = 0;
+    if (!Object.hasOwn(byGroup, entry.dashboard_group)) byGroup[entry.dashboard_group] = 0;
+  }
+  byStage.unclassified = 0;
+  byGroup.unclassified = 0;
+  return { byStage, byGroup };
+}
+
+function customerDashboard(db, state, plan) {
+  const summary = db.prepare(`
+    SELECT
+      COUNT(*) AS total,
+      COALESCE(SUM(CASE
+        WHEN c.next_action_at IS NOT NULL AND c.next_action_at < ? THEN 1 ELSE 0
+      END),0) AS overdue_next_action,
+      COALESCE(SUM(CASE WHEN c.next_action_at IS NULL THEN 1 ELSE 0 END),0) AS no_next_action,
+      COALESCE(SUM(CASE
+        WHEN c.stalled_at IS NOT NULL AND c.stalled_at <= ? THEN 1 ELSE 0
+      END),0) AS stalled,
+      COALESCE(SUM(CASE
+        WHEN (${CUSTOMER_CUSTODY_CASE_SQL})='quarantined' THEN 1 ELSE 0
+      END),0) AS quarantined
+    FROM customers c
+    WHERE ${plan.whereSql}
+  `).get(state.due.asOf, state.due.asOf, ...plan.params);
+  const stageRows = db.prepare(`
+    SELECT c.stage,COUNT(*) AS count
+    FROM customers c
+    WHERE ${plan.whereSql}
+    GROUP BY c.stage
+  `).all(...plan.params);
+  const counts = initialCustomerStageCounts();
+  for (const row of stageRows) {
+    const count = Number(row.count);
+    const entry = typeof row.stage === 'string'
+      ? CUSTOMER_LIFECYCLE_REGISTRY[row.stage]
+      : null;
+    if (!entry) {
+      counts.byStage.unclassified += count;
+      counts.byGroup.unclassified += count;
+      continue;
+    }
+    counts.byStage[entry.code] += count;
+    counts.byGroup[entry.dashboard_group] += count;
+  }
+
+  return {
+    total: Number(summary.total),
+    by_stage: counts.byStage,
+    by_group: counts.byGroup,
+    overdue_next_action: Number(summary.overdue_next_action),
+    no_next_action: Number(summary.no_next_action),
+    stalled: Number(summary.stalled),
+    quarantined: Number(summary.quarantined)
+  };
+}
+
+function opportunityDashboard(db, plan) {
+  const openStages = Object.values(OPPORTUNITY_STAGE_REGISTRY)
+    .filter((entry) => entry.class === 'open')
+    .map((entry) => entry.code);
+  const openPlaceholders = placeholders(openStages);
+  const values = db.prepare(`
+    WITH crm_matching_opportunities AS (
+      SELECT o.id,o.stage,o.value,o.win_probability
+      FROM opportunities o
+      JOIN customers c ON c.id=o.customer_id
+      WHERE ${plan.whereSql}
+    ), crm_classified_opportunities AS (
+      SELECT
+        id,stage,value,win_probability,
+        CASE WHEN stage IN (${openPlaceholders}) THEN 1 ELSE 0 END AS is_open
+      FROM crm_matching_opportunities
+    )
+    SELECT
+      COALESCE(SUM(is_open),0) AS open_count,
+      COALESCE(SUM(CASE
+        WHEN is_open=1
+          AND typeof(value) IN ('integer','real')
+          AND value >= 0
+          AND value <= 1.7976931348623157e308
+        THEN value ELSE 0
+      END),0) AS open_amount,
+      COALESCE(SUM(CASE
+        WHEN is_open=1
+          AND typeof(value) IN ('integer','real')
+          AND value >= 0
+          AND value <= 1.7976931348623157e308
+          AND typeof(win_probability) IN ('integer','real')
+          AND win_probability >= 0
+          AND win_probability <= 100
+        THEN (value / 100.0) * win_probability ELSE 0
+      END),0) AS weighted_forecast
+    FROM crm_classified_opportunities
+  `).get(...plan.params, ...openStages);
+  return {
+    open_count: Number(values.open_count),
+    open_amount: Number(values.open_amount),
+    weighted_forecast: Number(values.weighted_forecast)
+  };
+}
+
+function getCrmDashboard(db, options) {
+  return runReadTransaction(db, () => {
+    const state = prepareQueryState(db, options, { decodeCursor: false });
+    const customerPlan = buildCustomerPlan(state);
+    const opportunityPlan = buildOpportunityPlan(state);
+    return deepFreeze({
+      customers: customerDashboard(db, state, customerPlan),
+      opportunities: opportunityDashboard(db, opportunityPlan),
+      meta: responseMeta(state)
+    });
+  });
 }
 
 module.exports = {
+  CrmQueryError,
   listCustomers,
-  listOpportunities
+  listOpportunities,
+  getCrmDashboard
 };

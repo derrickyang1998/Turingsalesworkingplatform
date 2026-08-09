@@ -13,8 +13,10 @@ const {
   CUSTOMER_CUSTODY_CASE_SQL
 } = require('../services/crm_scope_service');
 const {
+  CrmQueryError,
   listCustomers,
-  listOpportunities
+  listOpportunities,
+  getCrmDashboard
 } = require('../services/crm_query_service');
 
 const SERVER_ROOT = path.resolve(__dirname, '..');
@@ -308,6 +310,81 @@ function customerIdsFor(db, context, requestedScope) {
 
 function publicError(error) {
   return JSON.parse(JSON.stringify(error));
+}
+
+function seedDashboardFixture(db, {
+  customerId = 36000,
+  source = 'dashboard-test',
+  brandName = 'Dashboard Target'
+} = {}) {
+  insertFilterCustomer(db, customerId, {
+    brandName,
+    companyName: `${brandName} Company`,
+    source,
+    stage: 'proposal',
+    nextActionAt: null,
+    stalledAt: '2026-08-09 02:30:00'
+  });
+  db.prepare('UPDATE customers SET opportunity_value=9999 WHERE id=?').run(customerId);
+  insertOpportunity(db, {
+    id: customerId + 10000,
+    customerId,
+    stage: 'discovery',
+    value: 100,
+    winProbability: 50
+  });
+  insertOpportunity(db, {
+    id: customerId + 10001,
+    customerId,
+    stage: 'proposal',
+    value: 200,
+    winProbability: 25
+  });
+  insertOpportunity(db, {
+    id: customerId + 10002,
+    customerId,
+    stage: 'won',
+    value: 500,
+    winProbability: 100
+  });
+  insertOpportunity(db, {
+    id: customerId + 10003,
+    customerId,
+    stage: 'legacy-unknown',
+    value: 1000,
+    winProbability: 100
+  });
+  return customerId;
+}
+
+function injectSqliteFailure(db, callback) {
+  const originalPrepare = db.prepare;
+  db.prepare = function prepareWithFailure(sql) {
+    if (String(sql).includes('SELECT COUNT(*) AS count')) {
+      const error = new Error('sensitive sqlite fixture message');
+      error.name = 'SqliteError';
+      error.code = 'SQLITE_ERROR';
+      throw error;
+    }
+    return originalPrepare.call(this, sql);
+  };
+  try {
+    return callback();
+  } finally {
+    db.prepare = originalPrepare;
+  }
+}
+
+function queryMutationSnapshot(db) {
+  return {
+    total_changes: db.prepare('SELECT total_changes() AS count').get().count,
+    customers: db.prepare(`
+      SELECT id,updated_at,stalled_at,next_action_at FROM customers ORDER BY id
+    `).all(),
+    opportunities: db.prepare(`
+      SELECT id,customer_id,updated_at,value,win_probability FROM opportunities ORDER BY id
+    `).all()
+  };
 }
 
 test('scope context defaults members to my and org admins to organization', (t) => {
@@ -896,4 +973,248 @@ test('cursor validation is bounded and tied to the effective filter fingerprint'
   });
   assert.equal(second.meta.query_fingerprint, first.meta.query_fingerprint);
   assert.deepEqual(second.items.map((item) => item.id), [35301, 35302, 35303]);
+});
+
+test('customer list and dashboard reconcile on total filters fingerprint and as of', (t) => {
+  const db = openFixture(t);
+  const customerId = seedDashboardFixture(db);
+  const filter = {
+    scope: 'organization',
+    source: 'dashboard-test',
+    keyword: 'dashboard target',
+    as_of: '2026-08-09T02:30:00.000Z',
+    limit: 10
+  };
+  const list = listCustomers(db, {
+    actorUserId: IDS.orgAdminA,
+    organizationId: IDS.orgA,
+    filter
+  });
+  const dashboard = getCrmDashboard(db, {
+    actorUserId: IDS.orgAdminA,
+    organizationId: IDS.orgA,
+    filter
+  });
+
+  assert.deepEqual(list.items.map((item) => item.id), [customerId]);
+  assert.equal(list.total, dashboard.customers.total);
+  assert.deepEqual(list.meta.applied_filters, dashboard.meta.applied_filters);
+  assert.equal(list.meta.query_fingerprint, dashboard.meta.query_fingerprint);
+  assert.equal(list.meta.scope, dashboard.meta.scope);
+  assert.equal(list.meta.as_of, dashboard.meta.as_of);
+});
+
+test('dashboard counts customers once and open opportunities once each', (t) => {
+  const db = openFixture(t);
+  seedDashboardFixture(db);
+  const dashboard = getCrmDashboard(db, {
+    actorUserId: IDS.orgAdminA,
+    organizationId: IDS.orgA,
+    filter: {
+      scope: 'organization',
+      source: 'dashboard-test',
+      keyword: 'dashboard target',
+      as_of: '2026-08-09T02:30:00.000Z'
+    }
+  });
+
+  assert.equal(dashboard.customers.total, 1);
+  assert.equal(dashboard.customers.by_stage.proposal, 1);
+  assert.equal(dashboard.customers.by_group.proposal_negotiation, 1);
+  assert.equal(dashboard.customers.no_next_action, 1);
+  assert.equal(dashboard.customers.stalled, 1);
+  assert.equal(dashboard.customers.quarantined, 0);
+  assert.deepEqual(dashboard.opportunities, {
+    open_count: 2,
+    open_amount: 300,
+    weighted_forecast: 100
+  });
+});
+
+test('dashboard never falls back to customer opportunity value', (t) => {
+  const db = openFixture(t);
+  const customerId = seedDashboardFixture(db);
+  const options = {
+    actorUserId: IDS.orgAdminA,
+    organizationId: IDS.orgA,
+    filter: {
+      scope: 'organization',
+      source: 'dashboard-test',
+      keyword: 'dashboard target',
+      as_of: '2026-08-09T02:30:00.000Z'
+    }
+  };
+  const before = getCrmDashboard(db, options).opportunities;
+  db.prepare('UPDATE customers SET opportunity_value=123456789 WHERE id=?').run(customerId);
+  const after = getCrmDashboard(db, options).opportunities;
+
+  assert.deepEqual(before, {
+    open_count: 2,
+    open_amount: 300,
+    weighted_forecast: 100
+  });
+  assert.deepEqual(after, before);
+});
+
+test('terminal unknown and malformed numeric opportunities do not inflate forecast', (t) => {
+  const db = openFixture(t);
+  const customerId = 36100;
+  insertFilterCustomer(db, customerId, {
+    brandName: 'Numeric Guard Target',
+    companyName: 'Numeric Guard Company',
+    source: 'numeric-test'
+  });
+  const rows = [
+    [46100, 'discovery', 100, 50],
+    [46101, 'won', 1000, 100],
+    [46102, 'lost', 1000, 100],
+    [46103, 'legacy-unknown', 1000, 100],
+    [46104, 'proposal', null, 50],
+    [46105, 'proposal', -10, 50],
+    [46106, 'proposal', 'not-a-number', 50],
+    [46107, 'proposal', 200, -1],
+    [46108, 'proposal', 200, 101],
+    [46109, 'proposal', 200, 'bad-probability']
+  ];
+  for (const [id, stage, value, winProbability] of rows) {
+    insertOpportunity(db, { id, customerId, stage, value, winProbability });
+  }
+  const dashboard = getCrmDashboard(db, {
+    actorUserId: IDS.orgAdminA,
+    organizationId: IDS.orgA,
+    filter: {
+      scope: 'organization',
+      source: 'numeric-test',
+      keyword: 'numeric guard',
+      as_of: '2026-08-09T02:30:00.000Z'
+    }
+  });
+
+  assert.deepEqual(dashboard.opportunities, {
+    open_count: 7,
+    open_amount: 700,
+    weighted_forecast: 50
+  });
+});
+
+test('query success and rejection are read only and close their transaction', (t) => {
+  const db = openFixture(t);
+  for (const [id, updatedAt] of [
+    [36200, '2026-08-09 05:00:00'],
+    [36201, '2026-08-09 04:00:00']
+  ]) {
+    insertFilterCustomer(db, id, {
+      brandName: `Read Only ${id}`,
+      companyName: 'Read Only Company',
+      source: 'read-only-test',
+      updatedAt
+    });
+  }
+  const filter = {
+    scope: 'organization',
+    source: 'read-only-test',
+    as_of: '2026-08-09T02:30:00.000Z',
+    limit: 1
+  };
+  const first = listCustomers(db, {
+    actorUserId: IDS.orgAdminA,
+    organizationId: IDS.orgA,
+    filter
+  });
+  const before = queryMutationSnapshot(db);
+
+  listCustomers(db, {
+    actorUserId: IDS.orgAdminA,
+    organizationId: IDS.orgA,
+    filter
+  });
+  assert.equal(db.inTransaction, false);
+  assert.throws(
+    () => listCustomers(db, {
+      actorUserId: IDS.ownerA,
+      organizationId: IDS.orgA,
+      filter
+    }),
+    (error) => error.code === 'CRM_SCOPE_FORBIDDEN'
+  );
+  assert.equal(db.inTransaction, false);
+  assert.throws(
+    () => listCustomers(db, {
+      actorUserId: IDS.orgAdminA,
+      organizationId: IDS.orgA,
+      filter: {
+        ...filter,
+        as_of: '2026-08-09T02:30:01.000Z',
+        cursor: first.page.next_cursor
+      }
+    }),
+    (error) => error.code === 'CRM_CURSOR_FILTER_MISMATCH'
+  );
+  assert.equal(db.inTransaction, false);
+  assert.throws(
+    () => injectSqliteFailure(db, () => listCustomers(db, {
+      actorUserId: IDS.orgAdminA,
+      organizationId: IDS.orgA,
+      filter
+    })),
+    (error) => error instanceof CrmQueryError && error.code === 'CRM_QUERY_FAILED'
+  );
+  assert.equal(db.inTransaction, false);
+  assert.deepEqual(queryMutationSnapshot(db), before);
+});
+
+test('public service errors expose only fixed fields', (t) => {
+  const db = openFixture(t);
+  const hostile = 'organization=fixture-org-a actor=101 SELECT secret';
+  assert.throws(
+    () => listCustomers(db, {
+      actorUserId: IDS.orgAdminA,
+      organizationId: IDS.orgA,
+      filter: { hostile_filter: hostile }
+    }),
+    (error) => {
+      assert.deepEqual(publicError(error), {
+        name: 'CrmContractError',
+        code: 'CRM_CONTRACT_INVALID',
+        field: 'filter',
+        reason: 'unknown_field',
+        status: 400
+      });
+      assert.equal(JSON.stringify(error).includes(hostile), false);
+      return true;
+    }
+  );
+  assert.throws(
+    () => listCustomers(db, {
+      actorUserId: IDS.ownerA,
+      organizationId: IDS.orgA,
+      filter: { scope: 'organization' }
+    }),
+    (error) => {
+      assert.deepEqual(publicError(error), {
+        name: 'CrmScopeError',
+        code: 'CRM_SCOPE_FORBIDDEN',
+        status: 403,
+        reason: 'insufficient_scope'
+      });
+      return true;
+    }
+  );
+  assert.throws(
+    () => injectSqliteFailure(db, () => listCustomers(db, {
+      actorUserId: IDS.orgAdminA,
+      organizationId: IDS.orgA,
+      filter: { scope: 'organization' }
+    })),
+    (error) => {
+      assert.deepEqual(publicError(error), {
+        name: 'CrmQueryError',
+        code: 'CRM_QUERY_FAILED',
+        status: 500,
+        reason: 'query_failed'
+      });
+      assert.equal(JSON.stringify(error).includes('sensitive sqlite fixture message'), false);
+      return true;
+    }
+  );
 });
