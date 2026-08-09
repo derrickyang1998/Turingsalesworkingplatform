@@ -1787,29 +1787,6 @@ app.get('/api/dashboard/sales', authMiddleware, (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ===== ENHANCED CUSTOMER STATS (for new frontend) =====
-app.get('/api/customers/stats', authMiddleware, (req, res) => {
-  try {
-    const userFilter = req.user.role !== 'admin' ? ' WHERE assigned_to = ' + req.user.id : '';
-    const total = db.prepare('SELECT COUNT(*) as count FROM customers' + userFilter).get().count;
-    const publicPool = db.prepare("SELECT COUNT(*) as count FROM customers WHERE is_public = 1" + (req.user.role !== 'admin' ? '' : '')).get().count;
-    const assigned = db.prepare('SELECT COUNT(*) as count FROM customers WHERE assigned_to IS NOT NULL AND assigned_to = ?').get(req.user.id).count;
-    const won = db.prepare("SELECT COUNT(*) as count FROM customers WHERE stage='won'" + userFilter).get().count;
-    const byStageRows = db.prepare('SELECT stage, COUNT(*) as count FROM customers' + userFilter + ' GROUP BY stage').all();
-    const byStage = {}; byStageRows.forEach(function(r) { byStage[r.stage] = r.count; });
-    const totalOppValue = db.prepare("SELECT COALESCE(SUM(COALESCE(opportunity_value,0)),0) as total FROM customers WHERE opportunity_value > 0" + userFilter).get().total;
-    const weeklyNew = db.prepare("SELECT COUNT(*) as count FROM customers WHERE created_at >= datetime('now', '-7 days')" + userFilter).get().count;
-    const winRateRows = db.prepare("SELECT COUNT(*) as total FROM customers WHERE stage IN ('won','lost')" + userFilter).get().total;
-    const winRate = winRateRows > 0 ? Math.round((won / winRateRows) * 100) : 0;
-
-    res.json({
-      total, weeklyNew, publicPool, assigned, won,
-      totalOppValue, winRate, avgCycle: '-',
-      byStage: byStage
-    });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
 // ===== CUSTOMER ACTIVITY ROUTES =====
 app.post('/api/customers/:id/activity', authMiddleware, (req, res) => {
   try {

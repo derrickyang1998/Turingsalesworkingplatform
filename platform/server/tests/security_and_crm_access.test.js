@@ -668,3 +668,85 @@ test('crm knowledge archives use the business owner for private visibility', () 
 
   db.close();
 });
+
+test('crm customer stats aggregate opportunity value within caller scope', () => {
+  const db = freshDb();
+  const routes = mountCustomerRoutes(db);
+
+  const insertUser = db.prepare(`
+    INSERT INTO users (username, password_hash, display_name, role, department, is_active)
+    VALUES (?, ?, ?, 'user', ?, 1)
+  `);
+  const ownerA = Number(insertUser.run('stats-owner-a', 'test-hash', 'Stats Owner A', 'sales-a').lastInsertRowid);
+  const teammateB = Number(insertUser.run('stats-teammate-b', 'test-hash', 'Stats Teammate B', 'sales-a').lastInsertRowid);
+  const outsiderC = Number(insertUser.run('stats-outsider-c', 'test-hash', 'Stats Outsider C', 'sales-b').lastInsertRowid);
+  const emptyD = Number(insertUser.run('stats-empty-d', 'test-hash', 'Stats Empty D', 'sales-c').lastInsertRowid);
+  const admin = db.prepare("SELECT id FROM users WHERE role = 'admin' ORDER BY id LIMIT 1").get();
+
+  const insertCustomer = db.prepare(`
+    INSERT INTO customers (brand_name, company_name, created_by, assigned_to, is_public, stage, opportunity_value)
+    VALUES (?, ?, ?, ?, 0, ?, ?)
+  `);
+  insertCustomer.run('Scoped One', 'Scoped One Inc', ownerA, ownerA, 'proposal', 1250);
+  insertCustomer.run('Scoped Two', 'Scoped Two Inc', teammateB, teammateB, 'analysis', 2750);
+  insertCustomer.run('Outside Scope', 'Outside Scope Inc', outsiderC, outsiderC, 'proposal', 9000);
+
+  const ownerStats = invoke(routes, 'GET /api/customers/stats', {
+    user: { id: ownerA, role: 'user', department: 'sales-a' },
+    query: { scope: 'my' }
+  });
+  assert.equal(ownerStats.statusCode, 200);
+  assert.equal(ownerStats.payload.total, 1);
+  assert.equal(typeof ownerStats.payload.totalOppValue, 'number');
+  assert.equal(ownerStats.payload.totalOppValue, 1250);
+
+  const teamStats = invoke(routes, 'GET /api/customers/stats', {
+    user: { id: ownerA, role: 'user', department: 'sales-a' },
+    query: { scope: 'team' }
+  });
+  assert.equal(teamStats.statusCode, 200);
+  assert.equal(teamStats.payload.total, 2);
+  assert.equal(typeof teamStats.payload.totalOppValue, 'number');
+  assert.equal(teamStats.payload.totalOppValue, 4000);
+
+  const adminAllStats = invoke(routes, 'GET /api/customers/stats', {
+    user: { id: Number(admin.id), role: 'admin', department: '管理' },
+    query: { scope: 'all' }
+  });
+  assert.equal(adminAllStats.statusCode, 200);
+  assert.equal(adminAllStats.payload.total, 3);
+  assert.equal(typeof adminAllStats.payload.totalOppValue, 'number');
+  assert.equal(adminAllStats.payload.totalOppValue, 13000);
+
+  const adminMyStats = invoke(routes, 'GET /api/customers/stats', {
+    user: { id: Number(admin.id), role: 'admin', department: '管理' },
+    query: { scope: 'my' }
+  });
+  assert.equal(adminMyStats.statusCode, 200);
+  assert.equal(adminMyStats.payload.total, 0);
+  assert.equal(typeof adminMyStats.payload.totalOppValue, 'number');
+  assert.equal(adminMyStats.payload.totalOppValue, 0);
+
+  const emptyStats = invoke(routes, 'GET /api/customers/stats', {
+    user: { id: emptyD, role: 'user', department: 'sales-c' },
+    query: { scope: 'my' }
+  });
+  assert.equal(emptyStats.statusCode, 200);
+  assert.equal(emptyStats.payload.total, 0);
+  assert.equal(typeof emptyStats.payload.totalOppValue, 'number');
+  assert.equal(emptyStats.payload.totalOppValue, 0);
+
+  db.close();
+});
+
+test('crm customer stats has one runtime route owner', () => {
+  const repoRoot = path.resolve(__dirname, '../../..');
+  const customerRoutesSource = readRepoFile(repoRoot, 'platform/server/routes_customers.js');
+  const serverSource = readRepoFile(repoRoot, 'platform/server/server.js');
+  function countCustomerStatsRoutes(source) {
+    return (source.match(/app\.get\('\/api\/customers\/stats'/g) || []).length;
+  }
+
+  assert.equal(countCustomerStatsRoutes(customerRoutesSource), 1);
+  assert.equal(countCustomerStatsRoutes(serverSource), 0);
+});

@@ -191,13 +191,16 @@ module.exports = function(app, db, authMiddleware) {
     const active = db.prepare("SELECT COUNT(*) as count FROM customers" + prefix + "stage IN ('" + ACTIVE_STAGES + "')").get(...scoped.params).count;
     const paused = db.prepare("SELECT COUNT(*) as count FROM customers" + prefix + "stage = 'paused'").get(...scoped.params).count;
     const byIndustry = db.prepare('SELECT industry, COUNT(*) as count FROM customers' + scoped.where + ' GROUP BY industry ORDER BY count DESC LIMIT 10').all(...scoped.params);
+    const totalOppValue = db.prepare(
+      'SELECT COALESCE(SUM(COALESCE(opportunity_value, 0)), 0) AS total FROM customers' + scoped.where
+    ).get(...scoped.params).total;
     // Convert byStage array to object for frontend compatibility
     var byStage = {}; byStageArr.forEach(function(s) { byStage[s.stage] = s.count; });
     var won = byStage['won'] || 0;
     var publicPool = db.prepare("SELECT COUNT(*) as count FROM customers WHERE is_public = 1" + (req.user.role !== 'admin' ? ' AND (assigned_to IS NULL OR assigned_to = ' + req.user.id + ')' : '')).get().count;
     var assigned = db.prepare('SELECT COUNT(*) as count FROM customers WHERE assigned_to = ?').get(req.user.id).count;
     var weeklyNew = db.prepare("SELECT COUNT(*) as count FROM customers" + prefix + "created_at >= datetime('now', '-7 days')").get(...scoped.params).count;
-    res.json({ byStage, total, active, paused, byIndustry, stages: STAGE_LABELS, won, publicPool, assigned, weeklyNew });
+    res.json({ byStage, total, active, paused, byIndustry, stages: STAGE_LABELS, won, publicPool, assigned, weeklyNew, totalOppValue });
   });
 
   // Customer detail with opportunities and activity
