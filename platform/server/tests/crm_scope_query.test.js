@@ -12,7 +12,10 @@ const {
   compileCustomerScope,
   CUSTOMER_CUSTODY_CASE_SQL
 } = require('../services/crm_scope_service');
-const { listCustomers } = require('../services/crm_query_service');
+const {
+  listCustomers,
+  listOpportunities
+} = require('../services/crm_query_service');
 
 const SERVER_ROOT = path.resolve(__dirname, '..');
 const FIXED_AT = '2026-08-09 00:00:00';
@@ -670,4 +673,227 @@ test('stalled true and false partition the authorized filtered set at as of', (t
   `).all(), beforeRows);
   assert.equal(db.prepare('SELECT total_changes() AS count').get().count, beforeChanges);
   assert.equal(db.inTransaction, false);
+});
+
+test('opportunity reads require customer custody and both organization predicates', (t) => {
+  const db = openFixture(t);
+  const opportunities = [
+    [50001, IDS.ownedA, IDS.orgA, IDS.teamA1, IDS.ownerA],
+    [50002, IDS.teammateOwnedA, IDS.orgA, IDS.teamA1, IDS.teammateA],
+    [50003, IDS.ownedA2, IDS.orgA, IDS.teamA2, IDS.ownerA2],
+    [50004, IDS.publicA, IDS.orgA, null, null],
+    [50005, IDS.nullTeamA, IDS.orgA, null, IDS.ownerA],
+    [50006, IDS.ownedB, IDS.orgB, IDS.teamB1, IDS.outsiderB],
+    [50007, IDS.ownedA, IDS.orgB, IDS.teamB1, IDS.outsiderB],
+    [50008, IDS.transferredA, IDS.orgA, IDS.teamA1, IDS.ownerA]
+  ];
+  for (const [id, customerId, orgId, teamId, ownerUserId] of opportunities) {
+    insertOpportunity(db, { id, customerId, orgId, teamId, ownerUserId });
+  }
+  const query = (actorUserId, scope, organizationId = IDS.orgA) => listOpportunities(db, {
+    actorUserId,
+    organizationId,
+    filter: { scope, as_of: '2026-08-09T02:30:00.000Z', limit: 100 }
+  }).items.map((item) => item.id);
+
+  assert.deepEqual(query(IDS.ownerA, 'my'), [50008, 50001]);
+  assert.deepEqual(query(IDS.teammateA, 'team'), [50008, 50002, 50001]);
+  assert.deepEqual(query(IDS.ownerA2, 'team'), [50003]);
+  assert.deepEqual(query(IDS.ownerA, 'public_pool'), []);
+  assert.deepEqual(query(IDS.orgAdminA, 'organization'), [
+    50008,
+    50005,
+    50004,
+    50003,
+    50002,
+    50001
+  ]);
+  assert.deepEqual(query(IDS.outsiderB, 'team', IDS.orgB), [50006]);
+});
+
+test('customer keyset pagination is stable across timestamp ties', (t) => {
+  const db = openFixture(t);
+  const rows = [
+    [35000, '2026-08-09 05:00:00'],
+    [35001, '2026-08-09 05:00:00'],
+    [35002, '2026-08-09 04:00:00'],
+    [35003, '2026-08-09 04:00:00'],
+    [35004, '2026-08-09 03:00:00']
+  ];
+  for (const [id, updatedAt] of rows) {
+    insertFilterCustomer(db, id, {
+      brandName: `Customer Page ${id}`,
+      companyName: 'Customer Page Company',
+      source: 'customer-page',
+      updatedAt
+    });
+  }
+  const found = [];
+  let cursor = null;
+  let pageCount = 0;
+  do {
+    const result = listCustomers(db, {
+      actorUserId: IDS.orgAdminA,
+      organizationId: IDS.orgA,
+      filter: {
+        scope: 'organization',
+        source: 'customer-page',
+        as_of: '2026-08-09T02:30:00.000Z',
+        limit: 2,
+        cursor
+      }
+    });
+    found.push(...result.items.map((item) => item.id));
+    cursor = result.page.next_cursor;
+    pageCount += 1;
+    if (!result.page.has_more) assert.equal(cursor, null);
+  } while (cursor !== null && pageCount < 10);
+
+  assert.deepEqual(found, [35001, 35000, 35003, 35002, 35004]);
+  assert.equal(new Set(found).size, found.length);
+  assert.equal(pageCount, 3);
+});
+
+test('newer inserts between keyset pages do not repeat prior rows', (t) => {
+  const db = openFixture(t);
+  for (const [id, updatedAt] of [
+    [35100, '2026-08-09 05:00:00'],
+    [35101, '2026-08-09 04:00:00'],
+    [35102, '2026-08-09 03:00:00'],
+    [35103, '2026-08-09 02:00:00']
+  ]) {
+    insertFilterCustomer(db, id, {
+      brandName: `Newer Page ${id}`,
+      companyName: 'Newer Page Company',
+      source: 'newer-page',
+      updatedAt
+    });
+  }
+  const baseFilter = {
+    scope: 'organization',
+    source: 'newer-page',
+    as_of: '2026-08-09T02:30:00.000Z',
+    limit: 2
+  };
+  const first = listCustomers(db, {
+    actorUserId: IDS.orgAdminA,
+    organizationId: IDS.orgA,
+    filter: baseFilter
+  });
+  assert.deepEqual(first.items.map((item) => item.id), [35100, 35101]);
+  assert.equal(first.page.has_more, true);
+  insertFilterCustomer(db, 35104, {
+    brandName: 'Newer Page Insert',
+    companyName: 'Newer Page Company',
+    source: 'newer-page',
+    updatedAt: '2026-08-10 00:00:00'
+  });
+
+  const second = listCustomers(db, {
+    actorUserId: IDS.orgAdminA,
+    organizationId: IDS.orgA,
+    filter: { ...baseFilter, cursor: first.page.next_cursor }
+  });
+  assert.deepEqual(second.items.map((item) => item.id), [35102, 35103]);
+  assert.equal(second.items.some((item) => first.items.some((prior) => prior.id === item.id)), false);
+  assert.equal(second.items.some((item) => item.id === 35104), false);
+});
+
+test('opportunity keyset pagination uses updated time then id descending', (t) => {
+  const db = openFixture(t);
+  const customerId = 35200;
+  insertFilterCustomer(db, customerId, {
+    brandName: 'Opportunity Page Parent',
+    companyName: 'Opportunity Page Company',
+    source: 'opportunity-page'
+  });
+  for (const [id, updatedAt] of [
+    [52000, '2026-08-09 05:00:00'],
+    [52001, '2026-08-09 05:00:00'],
+    [52002, '2026-08-09 04:00:00'],
+    [52003, '2026-08-09 04:00:00'],
+    [52004, '2026-08-09 03:00:00']
+  ]) {
+    insertOpportunity(db, { id, customerId, updatedAt });
+  }
+  const found = [];
+  let cursor = null;
+  do {
+    const result = listOpportunities(db, {
+      actorUserId: IDS.orgAdminA,
+      organizationId: IDS.orgA,
+      filter: {
+        scope: 'organization',
+        source: 'opportunity-page',
+        as_of: '2026-08-09T02:30:00.000Z',
+        limit: 2,
+        cursor
+      }
+    });
+    found.push(...result.items.map((item) => item.id));
+    cursor = result.page.next_cursor;
+  } while (cursor !== null);
+
+  assert.deepEqual(found, [52001, 52000, 52003, 52002, 52004]);
+  assert.equal(new Set(found).size, found.length);
+});
+
+test('cursor validation is bounded and tied to the effective filter fingerprint', (t) => {
+  const db = openFixture(t);
+  for (const [id, updatedAt] of [
+    [35300, '2026-08-09 05:00:00'],
+    [35301, '2026-08-09 04:00:00'],
+    [35302, '2026-08-09 03:00:00'],
+    [35303, '2026-08-09 02:00:00']
+  ]) {
+    insertFilterCustomer(db, id, {
+      brandName: `Cursor Marker ${id}`,
+      companyName: 'Cursor Marker Company',
+      source: 'cursor-test',
+      updatedAt
+    });
+  }
+  const base = {
+    scope: 'organization',
+    source: 'cursor-test',
+    as_of: '2026-08-09T02:30:00.000Z',
+    limit: 1
+  };
+  const first = listCustomers(db, {
+    actorUserId: IDS.orgAdminA,
+    organizationId: IDS.orgA,
+    filter: base
+  });
+  assert.equal(first.page.has_more, true);
+
+  assert.throws(
+    () => listCustomers(db, {
+      actorUserId: IDS.orgAdminA,
+      organizationId: IDS.orgA,
+      filter: { ...base, cursor: 'abc' }
+    }),
+    (error) => error.code === 'CRM_CURSOR_INVALID' && error.field === 'cursor'
+  );
+  for (const changed of [
+    { scope: 'team' },
+    { keyword: 'cursor marker' },
+    { as_of: '2026-08-09T02:30:01.000Z' }
+  ]) {
+    assert.throws(
+      () => listCustomers(db, {
+        actorUserId: IDS.orgAdminA,
+        organizationId: IDS.orgA,
+        filter: { ...base, ...changed, cursor: first.page.next_cursor }
+      }),
+      (error) => error.code === 'CRM_CURSOR_FILTER_MISMATCH' && error.reason === 'fingerprint_mismatch'
+    );
+  }
+
+  const second = listCustomers(db, {
+    actorUserId: IDS.orgAdminA,
+    organizationId: IDS.orgA,
+    filter: { ...base, limit: 3, cursor: first.page.next_cursor }
+  });
+  assert.equal(second.meta.query_fingerprint, first.meta.query_fingerprint);
+  assert.deepEqual(second.items.map((item) => item.id), [35301, 35302, 35303]);
 });

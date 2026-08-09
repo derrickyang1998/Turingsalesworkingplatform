@@ -4,12 +4,15 @@ const { types: utilTypes } = require('node:util');
 const {
   CUSTOMER_LIFECYCLE_REGISTRY,
   canonicalizeCrmFilter,
-  fingerprintCrmFilter
+  fingerprintCrmFilter,
+  encodeCrmCursor,
+  decodeCrmCursor
 } = require('./crm_contract');
 const {
   CrmScopeError,
   resolveCrmAccessContext,
   compileCustomerScope,
+  compileOpportunityScope,
   CUSTOMER_CUSTODY_CASE_SQL
 } = require('./crm_scope_service');
 
@@ -168,6 +171,9 @@ function prepareQueryState(db, rawOptions) {
     as_of: asOf
   });
   const queryFingerprint = fingerprintCrmFilter(effectiveFilter);
+  const cursorKeys = effectiveFilter.cursor === null
+    ? null
+    : decodeCrmCursor(effectiveFilter.cursor, queryFingerprint);
   const appliedFilters = {};
   for (const key of APPLIED_FILTER_KEYS) appliedFilters[key] = effectiveFilter[key];
 
@@ -175,7 +181,9 @@ function prepareQueryState(db, rawOptions) {
     context,
     filter: effectiveFilter,
     scopeCompilation,
+    opportunityScopeCompilation: compileOpportunityScope(context, effectiveFilter.scope),
     queryFingerprint,
+    cursorKeys,
     appliedFilters: deepFreeze(appliedFilters),
     due: dueBoundaries(asOf, context.time_zone)
   };
@@ -292,6 +300,105 @@ function buildCustomerPlan(state) {
   };
 }
 
+function buildOpportunityPlan(state) {
+  const filter = state.filter;
+  const clauses = [state.opportunityScopeCompilation.where_sql];
+  const params = [...state.opportunityScopeCompilation.params];
+
+  if (filter.owner_id !== null) {
+    clauses.push('o.owner_user_id=?');
+    params.push(filter.owner_id);
+  }
+  if (filter.team_id !== null) {
+    clauses.push('o.team_id=?');
+    params.push(filter.team_id);
+  }
+  if (filter.customer_stage.length > 0) {
+    clauses.push(`c.stage IN (${placeholders(filter.customer_stage)})`);
+    params.push(...filter.customer_stage);
+  }
+  if (filter.opportunity_stage.length > 0) {
+    clauses.push(`o.stage IN (${placeholders(filter.opportunity_stage)})`);
+    params.push(...filter.opportunity_stage);
+  }
+  if (filter.priority.length > 0) {
+    clauses.push(`c.priority IN (${placeholders(filter.priority)})`);
+    params.push(...filter.priority);
+  }
+  for (const [key, column] of [
+    ['industry', 'c.industry'],
+    ['country', 'c.country'],
+    ['source', 'c.source']
+  ]) {
+    if (filter[key] !== null) {
+      clauses.push(`LOWER(TRIM(${column}))=?`);
+      params.push(filter[key]);
+    }
+  }
+  if (filter.tag !== null) {
+    clauses.push(`EXISTS (
+      WITH RECURSIVE crm_tag_tokens(rest,token) AS (
+        SELECT COALESCE(c.tags,'') || ',', ''
+        UNION ALL
+        SELECT
+          SUBSTR(rest,INSTR(rest,',') + 1),
+          SUBSTR(rest,1,INSTR(rest,',') - 1)
+        FROM crm_tag_tokens
+        WHERE rest <> ''
+      )
+      SELECT 1
+      FROM crm_tag_tokens
+      WHERE LOWER(TRIM(token))=?
+    )`);
+    params.push(filter.tag);
+  }
+  appendDuePredicate(clauses, params, 'o.next_action_at', filter.next_action_due, state.due);
+  if (filter.stalled === true) {
+    clauses.push('c.stalled_at IS NOT NULL AND c.stalled_at <= ?');
+    params.push(state.due.asOf);
+  } else if (filter.stalled === false) {
+    clauses.push('(c.stalled_at IS NULL OR c.stalled_at > ?)');
+    params.push(state.due.asOf);
+  }
+  if (filter.keyword !== null) {
+    const keyword = `%${escapeLike(filter.keyword)}%`;
+    clauses.push(`(
+      LOWER(TRIM(COALESCE(c.brand_name,''))) LIKE ? ESCAPE '\\'
+      OR LOWER(TRIM(COALESCE(c.company_name,''))) LIKE ? ESCAPE '\\'
+    )`);
+    params.push(keyword, keyword);
+  }
+
+  return {
+    whereSql: clauses.map((clause) => `(${clause})`).join(' AND '),
+    params
+  };
+}
+
+function paginatedPlan(plan, alias, cursorKeys) {
+  if (cursorKeys === null) return { whereSql: plan.whereSql, params: [...plan.params] };
+  return {
+    whereSql: `${plan.whereSql} AND (${alias}.updated_at < ? OR (${alias}.updated_at = ? AND ${alias}.id < ?))`,
+    params: [...plan.params, cursorKeys.updated_at, cursorKeys.updated_at, cursorKeys.id]
+  };
+}
+
+function pageFor(rows, limit, queryFingerprint) {
+  const hasMore = rows.length > limit;
+  const items = rows.slice(0, limit);
+  const last = hasMore ? items[items.length - 1] : null;
+  return {
+    rows: items,
+    page: {
+      limit,
+      next_cursor: hasMore
+        ? encodeCrmCursor({ updated_at: last.updated_at, id: last.id }, queryFingerprint)
+        : null,
+      has_more: hasMore
+    }
+  };
+}
+
 function customerProjection() {
   return `
     c.id,
@@ -343,6 +450,60 @@ function mapCustomerRow(row) {
   };
 }
 
+function opportunityProjection() {
+  return `
+    o.id,
+    o.customer_id,
+    o.name,
+    o.stage,
+    o.value,
+    o.win_probability,
+    o.product_name,
+    o.channel_type,
+    o.expected_close_date,
+    o.owner_user_id,
+    o.team_id,
+    o.next_action_at,
+    o.loss_reason,
+    o.closed_at,
+    o.campaign_id,
+    o.created_at,
+    o.updated_at,
+    c.brand_name AS customer_brand_name,
+    c.company_name AS customer_company_name,
+    c.stage AS customer_stage,
+    c.priority AS customer_priority,
+    ${CUSTOMER_CUSTODY_CASE_SQL} AS customer_custody
+  `;
+}
+
+function mapOpportunityRow(row) {
+  return {
+    id: row.id,
+    customer_id: row.customer_id,
+    name: row.name,
+    stage: row.stage,
+    value: row.value,
+    win_probability: row.win_probability,
+    product_name: row.product_name,
+    channel_type: row.channel_type,
+    expected_close_date: row.expected_close_date,
+    owner_user_id: row.owner_user_id,
+    team_id: row.team_id,
+    next_action_at: row.next_action_at,
+    loss_reason: row.loss_reason,
+    closed_at: row.closed_at,
+    campaign_id: row.campaign_id,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    customer_brand_name: row.customer_brand_name,
+    customer_company_name: row.customer_company_name,
+    customer_stage: row.customer_stage,
+    customer_priority: row.customer_priority,
+    customer_custody: row.customer_custody
+  };
+}
+
 function responseMeta(state) {
   return {
     applied_filters: state.appliedFilters,
@@ -361,28 +522,56 @@ function listCustomers(db, options) {
       FROM customers c
       WHERE ${plan.whereSql}
     `).get(...plan.params).count;
+    const itemPlan = paginatedPlan(plan, 'c', state.cursorKeys);
     const rows = db.prepare(`
       SELECT ${customerProjection()}
       FROM customers c
-      WHERE ${plan.whereSql}
+      WHERE ${itemPlan.whereSql}
       ORDER BY c.updated_at DESC,c.id DESC
       LIMIT ?
-    `).all(...plan.params, state.filter.limit + 1);
-    const items = rows.slice(0, state.filter.limit).map(mapCustomerRow);
+    `).all(...itemPlan.params, state.filter.limit + 1);
+    const paged = pageFor(rows, state.filter.limit, state.queryFingerprint);
 
     return deepFreeze({
-      items,
+      items: paged.rows.map(mapCustomerRow),
       total,
-      page: {
-        limit: state.filter.limit,
-        next_cursor: null,
-        has_more: rows.length > state.filter.limit
-      },
+      page: paged.page,
+      meta: responseMeta(state)
+    });
+  }).deferred();
+}
+
+function listOpportunities(db, options) {
+  return db.transaction(() => {
+    const state = prepareQueryState(db, options);
+    const plan = buildOpportunityPlan(state);
+    const total = db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM opportunities o
+      JOIN customers c ON c.id=o.customer_id
+      WHERE ${plan.whereSql}
+    `).get(...plan.params).count;
+    const itemPlan = paginatedPlan(plan, 'o', state.cursorKeys);
+    const rows = db.prepare(`
+      SELECT ${opportunityProjection()}
+      FROM opportunities o
+      JOIN customers c ON c.id=o.customer_id
+      WHERE ${itemPlan.whereSql}
+      ORDER BY o.updated_at DESC,o.id DESC
+      LIMIT ?
+    `).all(...itemPlan.params, state.filter.limit + 1);
+    const paged = pageFor(rows, state.filter.limit, state.queryFingerprint);
+
+    return deepFreeze({
+      items: paged.rows.map(mapOpportunityRow),
+      total,
+      page: paged.page,
       meta: responseMeta(state)
     });
   }).deferred();
 }
 
 module.exports = {
-  listCustomers
+  listCustomers,
+  listOpportunities
 };
