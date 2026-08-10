@@ -1,6 +1,7 @@
 'use strict';
 
 const { types } = require('node:util');
+const knowledgeService = require('./knowledge_service');
 
 const {
   CrmScopeError,
@@ -9,8 +10,10 @@ const {
 } = require('./crm_scope_service');
 const {
   CUSTOMER_LIFECYCLE_REGISTRY,
+  OPPORTUNITY_STAGE_REGISTRY,
   CrmContractError,
   assertCustomerLifecycle,
+  assertOpportunityStage,
   assertCustomerPriority,
   buildCustomerIdentity
 } = require('./crm_contract');
@@ -34,6 +37,35 @@ const CUSTOMER_CUSTODY_REASONS = Object.freeze([
   'legacy_custody_repair',
   'data_correction'
 ]);
+const OPPORTUNITY_REASONS = Object.freeze([
+  'requirements_changed',
+  'budget_changed',
+  'timeline_changed',
+  'stakeholder_changed',
+  'data_correction',
+  'competitive_loss',
+  'no_response'
+]);
+const CAMPAIGN_DISPOSITIONS = Object.freeze(['continue', 'close', 'none']);
+const OPPORTUNITY_TEXT_LIMITS = Object.freeze({
+  name: 240,
+  product_name: 240,
+  channel_type: 160,
+  competitor_info: 4000,
+  decision_chain: 4000,
+  notes: 4000,
+  loss_reason: 1000
+});
+const CONTACT_TEXT_LIMITS = Object.freeze({
+  name: 200,
+  role: 200,
+  email: 320,
+  phone: 80
+});
+const TASK_SOURCES = Object.freeze(['manual', 'stage_transition', 'reminder']);
+const CUSTOMER_ARTIFACT_TYPES = Object.freeze(['strategy', 'proposal', 'note']);
+const CUSTOMER_ACTIVITY_ACTIONS = Object.freeze(['followup_recorded', 'note_recorded']);
+const CUSTOMER_ACTIVITY_REFERENCE_TYPES = Object.freeze(['task', 'opportunity']);
 const CUSTOMER_CUSTODY_KEYS = Object.freeze({
   release: Object.freeze(['action', 'customerId', 'reason_code']),
   claim: Object.freeze(['action', 'customerId', 'team_id']),
@@ -227,6 +259,21 @@ function canonicalText(value, field, required = false) {
   return normalized;
 }
 
+function canonicalBoundedText(value, maximum, required = false) {
+  if (value === null) {
+    if (required) throw invalidMutation();
+    return null;
+  }
+  if (typeof value !== 'string') throw invalidMutation();
+  const normalized = value.trim();
+  if (!normalized) {
+    if (required) throw invalidMutation();
+    return null;
+  }
+  if (normalized.length > maximum) throw invalidMutation();
+  return normalized;
+}
+
 function canonicalTimestamp(value) {
   if (value === null) return null;
   if (typeof value !== 'string' || !SQLITE_TIMESTAMP.test(value)) throw invalidMutation();
@@ -273,6 +320,7 @@ function snapshotValue(value, depth) {
   if (valueType !== 'object') throw invalidMutation();
 
   if (Array.isArray(value)) {
+    if (value.length > 256) throw invalidMutation();
     const keys = Reflect.ownKeys(value);
     for (const key of keys) {
       if (typeof key !== 'string') throw invalidMutation();
@@ -444,16 +492,20 @@ function classifyCustody(db, customer) {
   return 'quarantined';
 }
 
-function writeAuditEvent(db, context, input, eventType, customerId, metadata) {
+function writeAuditEvent(db, context, input, eventType, customerId, metadata, references = {}) {
   const metadataJson = JSON.stringify(metadata);
   if (Buffer.byteLength(metadataJson, 'utf8') > 8192) throw mutationError('CRM_MUTATION_FAILED');
   db.prepare(`
     INSERT INTO crm_audit_events (
-      org_id,customer_id,actor_user_id,event_type,request_id,correlation_id,metadata_json
-    ) VALUES (?,?,?,?,?,?,?)
+      org_id,customer_id,opportunity_id,task_id,contact_id,actor_user_id,
+      event_type,request_id,correlation_id,metadata_json
+    ) VALUES (?,?,?,?,?,?,?,?,?,?)
   `).run(
     context.organization.id,
     customerId,
+    references.opportunity_id || null,
+    references.task_id || null,
+    references.contact_id || null,
     input.actorUserId,
     eventType,
     input.requestId,
@@ -1030,6 +1082,851 @@ function updateCustomer(db, context, input, customer, profileCommand = input.com
   );
 }
 
+function readOpportunity(db, organizationId, customerId, opportunityId) {
+  return db.prepare(`
+    SELECT
+      id,customer_id,name,stage,value,win_probability,product_name,channel_type,
+      expected_close_date,competitor_info,decision_chain,notes,created_by,
+      created_at,updated_at,org_id,team_id,owner_user_id,next_action_at,
+      loss_reason,closed_at,campaign_id
+    FROM opportunities
+    WHERE id=? AND org_id=? AND customer_id=?
+  `).get(opportunityId, organizationId, customerId) || null;
+}
+
+function canonicalOpportunityStage(value) {
+  try {
+    return assertOpportunityStage(value);
+  } catch (error) {
+    if (error instanceof CrmContractError) throw invalidTransition();
+    throw error;
+  }
+}
+
+function canonicalOpportunityReason(transition) {
+  if (!Object.hasOwn(transition, 'reason_code')) return null;
+  if (
+    typeof transition.reason_code !== 'string' ||
+    !OPPORTUNITY_REASONS.includes(transition.reason_code)
+  ) throw invalidTransition();
+  return transition.reason_code;
+}
+
+function canonicalCampaignDisposition(transition) {
+  if (!Object.hasOwn(transition, 'campaign_disposition')) return null;
+  if (
+    typeof transition.campaign_disposition !== 'string' ||
+    !CAMPAIGN_DISPOSITIONS.includes(transition.campaign_disposition)
+  ) throw invalidTransition();
+  return transition.campaign_disposition;
+}
+
+function canonicalOpportunityNumber(value, field) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) throw invalidMutation();
+  if (field === 'value' && value < 0) throw invalidMutation();
+  if (
+    field === 'win_probability' &&
+    (!Number.isSafeInteger(value) || value < 0 || value > 100)
+  ) throw invalidMutation();
+  return value;
+}
+
+function validateOpportunityCampaign(db, context, campaignId) {
+  if (campaignId === null) return;
+  const campaign = db.prepare(`
+    SELECT 1 AS present FROM campaigns WHERE id=? AND org_id=?
+  `).get(campaignId, context.organization.id);
+  if (!campaign) throw invalidMutation();
+}
+
+function opportunityTransitionState(db, currentOpportunity, transition, final) {
+  if (!transition || !Object.hasOwn(transition, 'to_stage')) throw invalidTransition();
+  const source = Object.hasOwn(OPPORTUNITY_STAGE_REGISTRY, currentOpportunity.stage)
+    ? OPPORTUNITY_STAGE_REGISTRY[currentOpportunity.stage]
+    : null;
+  if (!source) throw invalidTransition();
+  const toStage = canonicalOpportunityStage(transition.to_stage);
+  const target = OPPORTUNITY_STAGE_REGISTRY[toStage];
+  if (source.code === target.code) throw invalidTransition();
+
+  const reasonCode = canonicalOpportunityReason(transition);
+  const campaignDisposition = canonicalCampaignDisposition(transition);
+  const sourceTerminal = source.class === 'terminal';
+  const targetTerminal = target.class === 'terminal';
+  if (sourceTerminal && targetTerminal) throw invalidTransition();
+  if ((sourceTerminal || target.order < source.order) && !reasonCode) throw invalidTransition();
+
+  if (toStage === 'won') {
+    if (
+      !(final.value > 0) ||
+      !Number.isSafeInteger(final.win_probability) ||
+      final.win_probability < 0 ||
+      final.win_probability > 100 ||
+      !final.expected_close_date ||
+      !final.decision_chain ||
+      !campaignDisposition
+    ) throw invalidTransition();
+  }
+  if (toStage === 'lost' && (!final.loss_reason || !campaignDisposition)) {
+    throw invalidTransition();
+  }
+
+  const closedAt = targetTerminal
+    ? db.prepare('SELECT CURRENT_TIMESTAMP AS value').get().value
+    : (sourceTerminal ? null : currentOpportunity.closed_at);
+  return Object.freeze({
+    from_stage: source.code,
+    to_stage: target.code,
+    reason_code: reasonCode,
+    campaign_disposition: campaignDisposition,
+    closed_at: closedAt,
+    clear_loss_reason: sourceTerminal || toStage === 'won'
+  });
+}
+
+function opportunityFinalState(db, context, customer, command, currentOpportunity) {
+  const creating = command.mode === 'create';
+  const transitioningOnly = command.mode === 'transition';
+  if (!creating && command.mode !== 'update' && !transitioningOnly) throw invalidMutation();
+  if (creating) {
+    if (
+      Object.hasOwn(command, 'opportunityId') ||
+      Object.hasOwn(command, 'transition') ||
+      !command.values
+    ) throw invalidMutation();
+  } else if (!positiveSafeInteger(command.opportunityId)) {
+    throw invalidMutation();
+  }
+  if (transitioningOnly) {
+    if (!command.transition || Object.hasOwn(command, 'values')) throw invalidMutation();
+  }
+
+  const values = command.values || Object.freeze({});
+  const changedFields = Object.keys(values).sort();
+  if (!creating && changedFields.length === 0 && !command.transition) throw invalidMutation();
+
+  function mergedText(field, required = false) {
+    if (Object.hasOwn(values, field)) {
+      return canonicalBoundedText(values[field], OPPORTUNITY_TEXT_LIMITS[field], required);
+    }
+    if (currentOpportunity) return currentOpportunity[field];
+    return canonicalBoundedText(null, OPPORTUNITY_TEXT_LIMITS[field], required);
+  }
+
+  function mergedNumber(field, defaultValue) {
+    if (Object.hasOwn(values, field)) return canonicalOpportunityNumber(values[field], field);
+    return currentOpportunity ? currentOpportunity[field] : defaultValue;
+  }
+
+  function mergedTimestamp(field) {
+    if (Object.hasOwn(values, field)) return canonicalTimestamp(values[field]);
+    return currentOpportunity ? currentOpportunity[field] : null;
+  }
+
+  const final = {
+    name: mergedText('name', true),
+    value: mergedNumber('value', 0),
+    win_probability: mergedNumber('win_probability', 50),
+    product_name: mergedText('product_name'),
+    channel_type: mergedText('channel_type'),
+    expected_close_date: mergedTimestamp('expected_close_date'),
+    competitor_info: mergedText('competitor_info'),
+    decision_chain: mergedText('decision_chain'),
+    notes: mergedText('notes'),
+    next_action_at: mergedTimestamp('next_action_at'),
+    loss_reason: mergedText('loss_reason'),
+    campaign_id: Object.hasOwn(values, 'campaign_id')
+      ? values.campaign_id
+      : (currentOpportunity ? currentOpportunity.campaign_id : null),
+    stage: currentOpportunity ? currentOpportunity.stage : 'discovery',
+    closed_at: currentOpportunity ? currentOpportunity.closed_at : null
+  };
+  validateOpportunityCampaign(db, context, final.campaign_id);
+
+  const transition = command.transition
+    ? opportunityTransitionState(db, currentOpportunity, command.transition, final)
+    : null;
+  if (transition) {
+    final.stage = transition.to_stage;
+    final.closed_at = transition.closed_at;
+    if (transition.clear_loss_reason) final.loss_reason = null;
+  }
+  if (creating && final.loss_reason !== null) throw invalidMutation();
+  if (
+    final.stage === 'won' &&
+    (
+      !(final.value > 0) ||
+      !Number.isSafeInteger(final.win_probability) ||
+      final.win_probability < 0 ||
+      final.win_probability > 100 ||
+      !final.expected_close_date ||
+      !final.decision_chain
+    )
+  ) throw invalidTransition();
+  if (final.stage === 'lost' && !final.loss_reason) throw invalidTransition();
+
+  return Object.freeze({
+    values: Object.freeze(final),
+    changed_fields: Object.freeze(changedFields),
+    transition
+  });
+}
+
+function opportunitySuccessResult(opportunity, action, input) {
+  return deepFreeze({
+    ok: true,
+    entity: 'opportunity',
+    action,
+    record: {
+      id: opportunity.id,
+      customer_id: opportunity.customer_id,
+      stage: opportunity.stage,
+      updated_at: opportunity.updated_at
+    },
+    meta: {
+      request_id: input.requestId,
+      correlation_id: input.correlationId
+    }
+  });
+}
+
+function writeOpportunityActivity(db, input, customerId, eventType, transition = null) {
+  db.prepare(`
+    INSERT INTO customer_activity (
+      customer_id,user_id,action,stage_from,stage_to,notes
+    ) VALUES (?,?,?,?,?,?)
+  `).run(
+    customerId,
+    input.actorUserId,
+    eventType,
+    transition ? transition.from_stage : null,
+    transition ? transition.to_stage : null,
+    eventType
+  );
+}
+
+function writeOpportunityEvidence(db, context, input, customer, opportunity, final, eventType) {
+  writeOpportunityActivity(db, input, customer.id, eventType, final.transition);
+  const metadata = final.transition
+    ? {
+        from_stage: final.transition.from_stage,
+        to_stage: final.transition.to_stage,
+        reason_code: final.transition.reason_code,
+        campaign_disposition: final.transition.campaign_disposition,
+        changed_fields: final.changed_fields
+      }
+    : {
+        changed_fields: final.changed_fields,
+        ...(eventType === 'opportunity_created' ? { stage: opportunity.stage } : {})
+      };
+  writeAuditEvent(
+    db,
+    context,
+    input,
+    eventType,
+    customer.id,
+    metadata,
+    { opportunity_id: opportunity.id }
+  );
+}
+
+function createOpportunity(db, context, input, customer) {
+  const final = opportunityFinalState(db, context, customer, input.command, null);
+  const inserted = db.prepare(`
+    INSERT INTO opportunities (
+      customer_id,name,stage,value,win_probability,product_name,channel_type,
+      expected_close_date,competitor_info,decision_chain,notes,created_by,
+      org_id,team_id,owner_user_id,next_action_at,loss_reason,closed_at,campaign_id
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+  `).run(
+    customer.id,
+    final.values.name,
+    final.values.stage,
+    final.values.value,
+    final.values.win_probability,
+    final.values.product_name,
+    final.values.channel_type,
+    final.values.expected_close_date,
+    final.values.competitor_info,
+    final.values.decision_chain,
+    final.values.notes,
+    input.actorUserId,
+    context.organization.id,
+    customer.team_id,
+    customer.assigned_to,
+    final.values.next_action_at,
+    final.values.loss_reason,
+    final.values.closed_at,
+    final.values.campaign_id
+  );
+  const opportunityId = Number(inserted.lastInsertRowid);
+  if (!positiveSafeInteger(opportunityId)) throw mutationError('CRM_MUTATION_FAILED');
+  const opportunity = readOpportunity(db, context.organization.id, customer.id, opportunityId);
+  writeOpportunityEvidence(db, context, input, customer, opportunity, final, 'opportunity_created');
+  return opportunitySuccessResult(opportunity, 'created', input);
+}
+
+function updateOpportunity(db, context, input, customer, opportunity) {
+  const final = opportunityFinalState(db, context, customer, input.command, opportunity);
+  const updated = db.prepare(`
+    UPDATE opportunities
+    SET name=?,stage=?,value=?,win_probability=?,product_name=?,channel_type=?,
+        expected_close_date=?,competitor_info=?,decision_chain=?,notes=?,
+        next_action_at=?,loss_reason=?,closed_at=?,campaign_id=?,updated_at=CURRENT_TIMESTAMP
+    WHERE id=? AND org_id=? AND customer_id=? AND stage IS ? AND updated_at IS ?
+  `).run(
+    final.values.name,
+    final.values.stage,
+    final.values.value,
+    final.values.win_probability,
+    final.values.product_name,
+    final.values.channel_type,
+    final.values.expected_close_date,
+    final.values.competitor_info,
+    final.values.decision_chain,
+    final.values.notes,
+    final.values.next_action_at,
+    final.values.loss_reason,
+    final.values.closed_at,
+    final.values.campaign_id,
+    opportunity.id,
+    context.organization.id,
+    customer.id,
+    opportunity.stage,
+    opportunity.updated_at
+  );
+  if (updated.changes !== 1) {
+    throw final.transition ? invalidTransition() : mutationError('CRM_MUTATION_FAILED');
+  }
+  const stored = readOpportunity(db, context.organization.id, customer.id, opportunity.id);
+  const eventType = final.transition ? 'opportunity_stage_changed' : 'opportunity_updated';
+  writeOpportunityEvidence(db, context, input, customer, stored, final, eventType);
+  return opportunitySuccessResult(stored, final.transition ? 'stage_changed' : 'updated', input);
+}
+
+function mutateOpportunity(db, context, input, customer) {
+  if (input.command.mode === 'create') return createOpportunity(db, context, input, customer);
+  if (input.command.mode !== 'update' && input.command.mode !== 'transition') throw invalidMutation();
+  const opportunity = readOpportunity(
+    db,
+    context.organization.id,
+    customer.id,
+    input.command.opportunityId
+  );
+  if (!opportunity) return { error: mutationError('CRM_CHILD_NOT_FOUND') };
+  return updateOpportunity(db, context, input, customer, opportunity);
+}
+
+function readContact(db, organizationId, customerId, contactId) {
+  return db.prepare(`
+    SELECT id,org_id,customer_id,name,role,email,phone,is_preferred,
+           created_by,created_at,updated_at,archived_at
+    FROM customer_contacts
+    WHERE id=? AND org_id=? AND customer_id=?
+  `).get(contactId, organizationId, customerId) || null;
+}
+
+function canonicalPreferred(value) {
+  if (value === true || value === 1) return 1;
+  if (value === false || value === 0) return 0;
+  throw invalidMutation();
+}
+
+function contactFinalState(command, currentContact) {
+  const creating = command.action === 'create';
+  if (!creating && command.action !== 'update') throw invalidMutation();
+  if (creating) {
+    if (Object.hasOwn(command, 'contactId') || !command.values) throw invalidMutation();
+  } else if (!positiveSafeInteger(command.contactId) || !command.values) {
+    throw invalidMutation();
+  }
+  const values = command.values;
+  const changedFields = Object.keys(values).sort();
+  if (!creating && changedFields.length === 0) throw invalidMutation();
+
+  function mergedText(field, required = false) {
+    if (Object.hasOwn(values, field)) {
+      return canonicalBoundedText(values[field], CONTACT_TEXT_LIMITS[field], required);
+    }
+    if (currentContact) return currentContact[field];
+    return canonicalBoundedText(null, CONTACT_TEXT_LIMITS[field], required);
+  }
+
+  const email = mergedText('email');
+  if (email !== null && email.length < 3) throw invalidMutation();
+
+  return Object.freeze({
+    values: Object.freeze({
+      name: mergedText('name', true),
+      role: mergedText('role'),
+      email,
+      phone: mergedText('phone'),
+      is_preferred: Object.hasOwn(values, 'is_preferred')
+        ? canonicalPreferred(values.is_preferred)
+        : (currentContact ? currentContact.is_preferred : 0)
+    }),
+    changed_fields: Object.freeze(changedFields)
+  });
+}
+
+function isPreferredContactConflict(error) {
+  return Boolean(
+    error &&
+    typeof error.code === 'string' &&
+    error.code.startsWith('SQLITE_CONSTRAINT') &&
+    typeof error.message === 'string' &&
+    (
+      error.message.includes('ux_customer_contacts_preferred_active') ||
+      error.message.includes('customer_contacts.org_id, customer_contacts.customer_id')
+    )
+  );
+}
+
+function contactSuccessResult(contact, action, input) {
+  return deepFreeze({
+    ok: true,
+    entity: 'contact',
+    action,
+    record: {
+      id: contact.id,
+      customer_id: contact.customer_id,
+      archived_at: contact.archived_at,
+      updated_at: contact.updated_at
+    },
+    meta: { request_id: input.requestId, correlation_id: input.correlationId }
+  });
+}
+
+function writeContactEvidence(db, context, input, customer, contact, eventType, changedFields) {
+  writeOpportunityActivity(db, input, customer.id, eventType);
+  writeAuditEvent(
+    db,
+    context,
+    input,
+    eventType,
+    customer.id,
+    { changed_fields: changedFields },
+    { contact_id: contact.id }
+  );
+}
+
+function createContact(db, context, input, customer) {
+  const final = contactFinalState(input.command, null);
+  let inserted;
+  try {
+    inserted = db.prepare(`
+      INSERT INTO customer_contacts (
+        org_id,customer_id,name,role,email,phone,is_preferred,created_by
+      ) VALUES (?,?,?,?,?,?,?,?)
+    `).run(
+      context.organization.id,
+      customer.id,
+      final.values.name,
+      final.values.role,
+      final.values.email,
+      final.values.phone,
+      final.values.is_preferred,
+      input.actorUserId
+    );
+  } catch (error) {
+    if (isPreferredContactConflict(error)) throw invalidMutation();
+    throw error;
+  }
+  const contactId = Number(inserted.lastInsertRowid);
+  if (!positiveSafeInteger(contactId)) throw mutationError('CRM_MUTATION_FAILED');
+  const contact = readContact(db, context.organization.id, customer.id, contactId);
+  writeContactEvidence(db, context, input, customer, contact, 'contact_created', final.changed_fields);
+  return contactSuccessResult(contact, 'created', input);
+}
+
+function updateContact(db, context, input, customer, contact) {
+  if (contact.archived_at !== null) throw invalidTransition();
+  const final = contactFinalState(input.command, contact);
+  let updated;
+  try {
+    updated = db.prepare(`
+      UPDATE customer_contacts
+      SET name=?,role=?,email=?,phone=?,is_preferred=?,updated_at=CURRENT_TIMESTAMP
+      WHERE id=? AND org_id=? AND customer_id=?
+        AND archived_at IS NULL AND updated_at IS ?
+    `).run(
+      final.values.name,
+      final.values.role,
+      final.values.email,
+      final.values.phone,
+      final.values.is_preferred,
+      contact.id,
+      context.organization.id,
+      customer.id,
+      contact.updated_at
+    );
+  } catch (error) {
+    if (isPreferredContactConflict(error)) throw invalidMutation();
+    throw error;
+  }
+  if (updated.changes !== 1) throw mutationError('CRM_MUTATION_FAILED');
+  const stored = readContact(db, context.organization.id, customer.id, contact.id);
+  writeContactEvidence(db, context, input, customer, stored, 'contact_updated', final.changed_fields);
+  return contactSuccessResult(stored, 'updated', input);
+}
+
+function archiveContact(db, context, input, customer, contact) {
+  if (Object.hasOwn(input.command, 'values')) throw invalidMutation();
+  if (contact.archived_at !== null) throw invalidTransition();
+  const updated = db.prepare(`
+    UPDATE customer_contacts
+    SET archived_at=CURRENT_TIMESTAMP,is_preferred=0,updated_at=CURRENT_TIMESTAMP
+    WHERE id=? AND org_id=? AND customer_id=?
+      AND archived_at IS NULL AND updated_at IS ?
+  `).run(
+    contact.id,
+    context.organization.id,
+    customer.id,
+    contact.updated_at
+  );
+  if (updated.changes !== 1) throw invalidTransition();
+  const stored = readContact(db, context.organization.id, customer.id, contact.id);
+  writeContactEvidence(db, context, input, customer, stored, 'contact_archived', Object.freeze([]));
+  return contactSuccessResult(stored, 'archived', input);
+}
+
+function mutateContact(db, context, input, customer) {
+  if (input.command.action === 'create') return createContact(db, context, input, customer);
+  if (input.command.action !== 'update' && input.command.action !== 'archive') throw invalidMutation();
+  if (!positiveSafeInteger(input.command.contactId)) throw invalidMutation();
+  const contact = readContact(
+    db,
+    context.organization.id,
+    customer.id,
+    input.command.contactId
+  );
+  if (!contact) return { error: mutationError('CRM_CHILD_NOT_FOUND') };
+  return input.command.action === 'update'
+    ? updateContact(db, context, input, customer, contact)
+    : archiveContact(db, context, input, customer, contact);
+}
+
+function readTask(db, organizationId, customerId, taskId) {
+  return db.prepare(`
+    SELECT id,org_id,team_id,customer_id,opportunity_id,owner_user_id,
+           title,description,due_at,status,source,completed_at,completed_by,
+           completion_note,created_by,created_at,updated_at
+    FROM crm_tasks
+    WHERE id=? AND org_id=? AND customer_id=?
+  `).get(taskId, organizationId, customerId) || null;
+}
+
+function validateTaskOpportunity(db, context, customerId, opportunityId) {
+  if (opportunityId === null) return;
+  const opportunity = readOpportunity(db, context.organization.id, customerId, opportunityId);
+  if (!opportunity) throw mutationError('CRM_CHILD_NOT_FOUND');
+}
+
+function taskSuccessResult(task, action, input) {
+  return deepFreeze({
+    ok: true,
+    entity: 'task',
+    action,
+    record: {
+      id: task.id,
+      customer_id: task.customer_id,
+      status: task.status,
+      updated_at: task.updated_at
+    },
+    meta: { request_id: input.requestId, correlation_id: input.correlationId }
+  });
+}
+
+function writeTaskEvidence(db, context, input, customer, task, eventType, metadata) {
+  writeOpportunityActivity(db, input, customer.id, eventType);
+  writeAuditEvent(
+    db,
+    context,
+    input,
+    eventType,
+    customer.id,
+    metadata,
+    { task_id: task.id }
+  );
+}
+
+function canonicalTaskCreate(command) {
+  if (Object.hasOwn(command, 'taskId') || !command.values) throw invalidMutation();
+  const values = command.values;
+  if (Object.hasOwn(values, 'completion_note')) throw invalidMutation();
+  if (!positiveSafeInteger(values.owner_user_id) || !positiveSafeInteger(values.team_id)) {
+    throw invalidMutation();
+  }
+  const source = Object.hasOwn(values, 'source') ? values.source : 'manual';
+  if (typeof source !== 'string' || !TASK_SOURCES.includes(source)) throw invalidMutation();
+  return Object.freeze({
+    opportunity_id: Object.hasOwn(values, 'opportunity_id') ? values.opportunity_id : null,
+    owner_user_id: values.owner_user_id,
+    team_id: values.team_id,
+    title: canonicalBoundedText(values.title, 240, true),
+    description: Object.hasOwn(values, 'description')
+      ? canonicalBoundedText(values.description, 4000)
+      : null,
+    due_at: canonicalTimestamp(values.due_at),
+    source
+  });
+}
+
+function createTask(db, context, input, customer) {
+  const values = canonicalTaskCreate(input.command);
+  validateTargetAssignment(db, context, values.owner_user_id, values.team_id);
+  validateTaskOpportunity(db, context, customer.id, values.opportunity_id);
+  const inserted = db.prepare(`
+    INSERT INTO crm_tasks (
+      org_id,team_id,customer_id,opportunity_id,owner_user_id,title,
+      description,due_at,status,source,created_by
+    ) VALUES (?,?,?,?,?,?,?,?,'open',?,?)
+  `).run(
+    context.organization.id,
+    values.team_id,
+    customer.id,
+    values.opportunity_id,
+    values.owner_user_id,
+    values.title,
+    values.description,
+    values.due_at,
+    values.source,
+    input.actorUserId
+  );
+  const taskId = Number(inserted.lastInsertRowid);
+  if (!positiveSafeInteger(taskId)) throw mutationError('CRM_MUTATION_FAILED');
+  const task = readTask(db, context.organization.id, customer.id, taskId);
+  writeTaskEvidence(db, context, input, customer, task, 'task_created', {
+    opportunity_id: task.opportunity_id,
+    owner_user_id: task.owner_user_id,
+    team_id: task.team_id
+  });
+  return taskSuccessResult(task, 'created', input);
+}
+
+function canCloseTask(context, customer, task) {
+  return (
+    context.is_org_admin === true ||
+    customer.assigned_to === context.actor_user_id ||
+    task.owner_user_id === context.actor_user_id
+  );
+}
+
+function closeTask(db, context, input, customer, task) {
+  if (!canCloseTask(context, customer, task)) {
+    return forbiddenDecision(db, context, input, `customer_task_${input.command.action}`);
+  }
+  if (task.status !== 'open') throw invalidTransition();
+  const values = input.command.values || Object.freeze({});
+  const changedFields = Object.keys(values);
+  const completing = input.command.action === 'complete';
+  if (
+    (!completing && changedFields.length > 0) ||
+    changedFields.some((field) => field !== 'completion_note')
+  ) throw invalidMutation();
+  const completionNote = completing && Object.hasOwn(values, 'completion_note')
+    ? canonicalBoundedText(values.completion_note, 2000)
+    : null;
+  const status = completing ? 'completed' : 'cancelled';
+  const updated = db.prepare(`
+    UPDATE crm_tasks
+    SET status=?,completed_at=?,completed_by=?,completion_note=?,updated_at=CURRENT_TIMESTAMP
+    WHERE id=? AND org_id=? AND customer_id=? AND status='open' AND updated_at IS ?
+  `).run(
+    status,
+    completing ? db.prepare('SELECT CURRENT_TIMESTAMP AS value').get().value : null,
+    completing ? input.actorUserId : null,
+    completionNote,
+    task.id,
+    context.organization.id,
+    customer.id,
+    task.updated_at
+  );
+  if (updated.changes !== 1) throw invalidTransition();
+  const stored = readTask(db, context.organization.id, customer.id, task.id);
+  const eventType = completing ? 'task_completed' : 'task_cancelled';
+  writeTaskEvidence(db, context, input, customer, stored, eventType, {
+    from_status: 'open',
+    to_status: status
+  });
+  return taskSuccessResult(stored, status, input);
+}
+
+function mutateTask(db, context, input, customer) {
+  if (input.command.action === 'create') return createTask(db, context, input, customer);
+  if (input.command.action !== 'complete' && input.command.action !== 'cancel') throw invalidMutation();
+  if (!positiveSafeInteger(input.command.taskId)) throw invalidMutation();
+  const task = readTask(db, context.organization.id, customer.id, input.command.taskId);
+  if (!task) return { error: mutationError('CRM_CHILD_NOT_FOUND') };
+  return closeTask(db, context, input, customer, task);
+}
+
+function canonicalArchiveCommand(command) {
+  if (
+    typeof command.artifact_type !== 'string' ||
+    !CUSTOMER_ARTIFACT_TYPES.includes(command.artifact_type)
+  ) throw invalidMutation();
+  const sourceCode = Object.hasOwn(command, 'source_type')
+    ? canonicalBoundedText(command.source_type, 120, true)
+    : 'customer';
+  const acceptedSourceCodes = [
+    'customer',
+    `ai_${command.artifact_type}`,
+    `manual_${command.artifact_type}`
+  ];
+  if (!SAFE_IDENTIFIER.test(sourceCode) || !acceptedSourceCodes.includes(sourceCode)) {
+    throw invalidMutation();
+  }
+  let tags = Object.freeze([]);
+  if (Object.hasOwn(command, 'tags')) {
+    if (!Array.isArray(command.tags) || command.tags.length > 50) throw invalidMutation();
+    tags = Object.freeze(command.tags.map((tag) => canonicalBoundedText(tag, 120, true)));
+  }
+  return Object.freeze({
+    artifact_type: command.artifact_type,
+    title: canonicalBoundedText(command.title, 1000, true),
+    content: canonicalBoundedText(command.content, 1000000, true),
+    tags,
+    source_code: sourceCode
+  });
+}
+
+function writeArchiveActivity(db, input, customer, artifactType) {
+  const inserted = db.prepare(`
+    INSERT INTO customer_activity (
+      customer_id,user_id,action,stage_from,stage_to,notes
+    ) VALUES (?,?,?,?,?,?)
+  `).run(
+    customer.id,
+    input.actorUserId,
+    `archive_${artifactType}`,
+    publicCustomerStage(customer.stage),
+    publicCustomerStage(customer.stage),
+    'customer_result_archived'
+  );
+  const activityId = Number(inserted.lastInsertRowid);
+  if (!positiveSafeInteger(activityId)) throw mutationError('CRM_MUTATION_FAILED');
+  return activityId;
+}
+
+function archiveCustomerKnowledge(db, context, input, customer) {
+  const archive = canonicalArchiveCommand(input.command);
+  const sourceId = [
+    'org',
+    context.organization.id,
+    'customer',
+    customer.id,
+    archive.artifact_type
+  ].join(':');
+  const knowledgeEntry = knowledgeService.ingestKnowledge(db, {
+    entry_type: archive.artifact_type,
+    title: archive.title,
+    content: archive.content,
+    tags: archive.tags,
+    source_type: 'crm_customer_archive',
+    source_id: sourceId,
+    business_type: 'customer',
+    business_id: String(customer.id),
+    created_by: customer.assigned_to,
+    visibility: 'private',
+    metadata: {
+      organization_id: context.organization.id,
+      customer_id: customer.id,
+      artifact_type: archive.artifact_type,
+      source_code: archive.source_code
+    },
+    actor_role: context.is_org_admin === true ? 'admin' : 'user'
+  });
+  if (!knowledgeEntry || !positiveSafeInteger(knowledgeEntry.id)) {
+    throw mutationError('CRM_MUTATION_FAILED');
+  }
+  const activityId = writeArchiveActivity(db, input, customer, archive.artifact_type);
+  writeAuditEvent(db, context, input, 'customer_result_archived', customer.id, {
+    knowledge_entry_id: knowledgeEntry.id,
+    artifact_type: archive.artifact_type,
+    source_code: archive.source_code
+  });
+  return deepFreeze({
+    ok: true,
+    entity: 'customer_archive',
+    action: 'archived',
+    record: {
+      customer_id: customer.id,
+      knowledge_entry_id: knowledgeEntry.id,
+      activity_id: activityId,
+      artifact_type: archive.artifact_type
+    },
+    meta: { request_id: input.requestId, correlation_id: input.correlationId }
+  });
+}
+
+function canonicalActivityCommand(command) {
+  if (
+    typeof command.action !== 'string' ||
+    !CUSTOMER_ACTIVITY_ACTIONS.includes(command.action) ||
+    typeof command.reference_type !== 'string' ||
+    !CUSTOMER_ACTIVITY_REFERENCE_TYPES.includes(command.reference_type) ||
+    !positiveSafeInteger(command.reference_id)
+  ) throw invalidMutation();
+  return Object.freeze({
+    action: command.action,
+    reference_type: command.reference_type,
+    reference_id: command.reference_id
+  });
+}
+
+function validateActivityReference(db, context, customer, activity) {
+  const reference = activity.reference_type === 'task'
+    ? readTask(db, context.organization.id, customer.id, activity.reference_id)
+    : readOpportunity(db, context.organization.id, customer.id, activity.reference_id);
+  if (!reference) throw mutationError('CRM_CHILD_NOT_FOUND');
+}
+
+function recordCompatibilityActivity(db, context, input, customer) {
+  const activity = canonicalActivityCommand(input.command);
+  validateActivityReference(db, context, customer, activity);
+  const inserted = db.prepare(`
+    INSERT INTO customer_activity (
+      customer_id,user_id,action,stage_from,stage_to,notes
+    ) VALUES (?,?,?,?,?,?)
+  `).run(
+    customer.id,
+    input.actorUserId,
+    activity.action,
+    publicCustomerStage(customer.stage),
+    publicCustomerStage(customer.stage),
+    `${activity.reference_type}_reference`
+  );
+  const activityId = Number(inserted.lastInsertRowid);
+  if (!positiveSafeInteger(activityId)) throw mutationError('CRM_MUTATION_FAILED');
+  writeAuditEvent(
+    db,
+    context,
+    input,
+    'customer_activity_recorded',
+    customer.id,
+    {
+      action: activity.action,
+      reference_type: activity.reference_type,
+      reference_id: activity.reference_id
+    },
+    activity.reference_type === 'task'
+      ? { task_id: activity.reference_id }
+      : { opportunity_id: activity.reference_id }
+  );
+  const stored = db.prepare(`
+    SELECT id,customer_id,action,created_at
+    FROM customer_activity WHERE id=?
+  `).get(activityId);
+  return deepFreeze({
+    ok: true,
+    entity: 'customer_activity',
+    action: 'recorded',
+    record: stored,
+    meta: { request_id: input.requestId, correlation_id: input.correlationId }
+  });
+}
+
 function writeDeniedAudit(db, context, input, operation) {
   writeAuditEvent(db, context, input, 'mutation_denied', null, {
     operation,
@@ -1324,11 +2221,33 @@ function authorizeCustomerCommand(db, context, input, operation) {
     throw invalidMutation();
   }
 
+  const closingTask = operation === 'task' && (
+    command.action === 'complete' || command.action === 'cancel'
+  );
+  if (closingTask) {
+    if (custody !== 'owned') return forbiddenDecision(db, context, input, label);
+    return mutateTask(db, context, input, customer);
+  }
   const teamActivity = operation === 'task' || operation === 'activity';
   const allowed = teamActivity
     ? canWriteTeamActivity(context, customer, custody)
     : canManageProfile(context, customer, custody);
   if (!allowed) return forbiddenDecision(db, context, input, label);
+  if (operation === 'opportunity') {
+    return mutateOpportunity(db, context, input, customer);
+  }
+  if (operation === 'contact') {
+    return mutateContact(db, context, input, customer);
+  }
+  if (operation === 'task') {
+    return mutateTask(db, context, input, customer);
+  }
+  if (operation === 'archive') {
+    return archiveCustomerKnowledge(db, context, input, customer);
+  }
+  if (operation === 'activity') {
+    return recordCompatibilityActivity(db, context, input, customer);
+  }
   const lifecyclePayload = operation === 'lifecycle'
     ? command
     : (
