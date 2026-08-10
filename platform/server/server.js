@@ -1770,63 +1770,6 @@ app.post('/api/ai/ppt-outline', authMiddleware, aiLimiter, aiQuotaGuard, async (
   }
 });
 
-// ===== SALES DASHBOARD =====
-app.get('/api/dashboard/sales', authMiddleware, (req, res) => {
-  try {
-    const userFilter = req.user.role !== 'admin' ? ' WHERE assigned_to = ' + req.user.id : '';
-    const stats = {
-      totalCustomers: db.prepare('SELECT COUNT(*) as count FROM customers' + userFilter).get().count,
-      activeDeals: db.prepare("SELECT COUNT(*) as count FROM customers WHERE stage IN ('lead','info_confirmed','advantage_shared','needs_confirmed','analysis','proposal','kol_matching','cooperation')" + userFilter).get().count,
-      wonDeals: db.prepare("SELECT COUNT(*) as count FROM customers WHERE stage='won'" + userFilter).get().count,
-      totalPipeline: db.prepare("SELECT COALESCE(SUM(COALESCE(opportunity_value,0)),0) as total FROM customers WHERE stage IN ('lead','info_confirmed','advantage_shared','needs_confirmed','analysis','proposal','kol_matching','cooperation')" + userFilter).get().total,
-      stageDistribution: db.prepare('SELECT stage, COUNT(*) as count, COALESCE(SUM(COALESCE(opportunity_value,0)),0) as value FROM customers' + userFilter + ' GROUP BY stage').all(),
-      monthlyTrend: db.prepare("SELECT strftime('%Y-%m', created_at) as month, COUNT(*) as count FROM customers" + userFilter + " GROUP BY month ORDER BY month DESC LIMIT 12").all(),
-      topUsers: db.prepare("SELECT u.display_name, u.department, COUNT(c.id) as deals FROM users u LEFT JOIN customers c ON c.assigned_to = u.id AND c.stage='won' GROUP BY u.id ORDER BY deals DESC LIMIT 10").all()
-    };
-    res.json({ stats });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// ===== CUSTOMER ACTIVITY ROUTES =====
-app.post('/api/customers/:id/activity', authMiddleware, (req, res) => {
-  try {
-    const { action, notes } = req.body;
-    const customer = crmAccess.getCustomer(db, req.params.id);
-    if (!customer) return crmAccess.notFound(res, 'Customer');
-    if (!crmAccess.canManageCustomer(req.user, customer)) return crmAccess.forbidden(res);
-    db.prepare('INSERT INTO customer_activity (customer_id, user_id, action, stage_from, stage_to, notes) VALUES (?, ?, ?, ?, ?, ?)')
-      .run(req.params.id, req.user.id, action || 'note', customer.stage, customer.stage, notes || '');
-    businessKnowledge.archiveCustomer(db, Object.assign({}, customer, {
-      latest_activity: { action: action || 'note', notes: notes || '' }
-    }), req.user);
-    res.json({ success: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// ===== DASHBOARD STATS =====
-app.get('/api/dashboard/stats', authMiddleware, (req, res) => {
-  try {
-    const userFilter = req.user.role !== 'admin' ? ' WHERE assigned_to = ' + req.user.id : '';
-    const totalCustomers = db.prepare('SELECT COUNT(*) as count FROM customers' + userFilter).get().count;
-    const totalOppValue = db.prepare("SELECT COALESCE(SUM(COALESCE(opportunity_value,0)),0) as total FROM customers" + userFilter).get().total;
-    const wonDeals = db.prepare("SELECT COUNT(*) as count FROM customers WHERE stage='won'" + userFilter).get().count;
-    const lostDeals = db.prepare("SELECT COUNT(*) as count FROM customers WHERE stage='lost'" + userFilter).get().count;
-    const stageRows = db.prepare('SELECT stage, COUNT(*) as count FROM customers' + userFilter + ' GROUP BY stage').all();
-    const recentActivity = req.user.role === 'admin'
-      ? db.prepare('SELECT ca.*, u.display_name FROM customer_activity ca JOIN users u ON ca.user_id = u.id ORDER BY ca.created_at DESC LIMIT 20').all()
-      : db.prepare(`
-          SELECT ca.*, u.display_name
-          FROM customer_activity ca
-          JOIN users u ON ca.user_id = u.id
-          JOIN customers c ON c.id = ca.customer_id
-          WHERE ca.user_id = ? OR c.assigned_to = ? OR c.created_by = ?
-          ORDER BY ca.created_at DESC
-          LIMIT 20
-        `).all(req.user.id, req.user.id, req.user.id);
-    res.json({ totalCustomers, totalOppValue, wonDeals, lostDeals, stageRows, recentActivity });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
 // ===== KNOWLEDGE CATEGORIES =====
 app.get('/api/knowledge/categories', authMiddleware, (req, res) => {
   try {

@@ -1,123 +1,612 @@
-module.exports = function(app, db, authMiddleware) {
+'use strict';
+
+module.exports = function registerCustomerRoutes(app, db, authMiddleware, dependencies) {
+  const { randomUUID } = require('node:crypto');
+  const options = dependencies || {};
+  const crmQueryService = options.crmQueryService || require('./services/crm_query_service');
+  const crmCustomerService = options.crmCustomerService || require('./services/crm_customer_service');
   const businessKnowledge = require('./services/business_knowledge_service');
   const crmAccess = require('./services/crm_access_service');
-  const campaignAccess = require('./services/campaign_access_service');
-  const campaignContract = require('./contracts/campaign_contract');
-  const knowledgeService = require('./services/knowledge_service');
+  const { CUSTOMER_LIFECYCLE_REGISTRY } = require('./services/crm_contract');
 
-  const STAGES = ['lead', 'info_confirmed', 'advantage_shared', 'needs_confirmed', 'analysis', 'proposal', 'kol_matching', 'cooperation'];
-  const TERMINAL_STAGES = ['paused', 'won', 'lost'];
-  const STAGE_LABELS = {
-    lead: '1.客户获取/客户开发',
-    info_confirmed: '2.客户信息确认',
-    advantage_shared: '3.企业优势同步',
-    needs_confirmed: '4.海外营销需求确认',
-    analysis: '5.行业/竞品数据分析',
-    proposal: '6.红人营销方案生成',
-    kol_matching: '7.网红匹配提报',
-    cooperation: '8.合作落地跟踪',
-    paused: '暂停/延后',
-    won: '成交',
-    lost: '丢失'
-  };
+  const SAFE_IDENTIFIER = /^[A-Za-z0-9._:/-]+$/;
+  const CUSTOMER_PROFILE_FIELDS = Object.freeze([
+    'brand_name',
+    'company_name',
+    'contact_person',
+    'contact_info',
+    'industry',
+    'country',
+    'source',
+    'budget_estimate',
+    'notes',
+    'tags',
+    'priority',
+    'next_action_at'
+  ]);
+  const OPPORTUNITY_VALUE_FIELDS = Object.freeze([
+    'name',
+    'value',
+    'win_probability',
+    'product_name',
+    'channel_type',
+    'expected_close_date',
+    'competitor_info',
+    'decision_chain',
+    'notes',
+    'next_action_at',
+    'loss_reason',
+    'campaign_id'
+  ]);
+  const CONTACT_VALUE_FIELDS = Object.freeze(['name', 'role', 'email', 'phone', 'is_preferred']);
+  const TASK_VALUE_FIELDS = Object.freeze([
+    'opportunity_id',
+    'owner_user_id',
+    'team_id',
+    'title',
+    'description',
+    'due_at',
+    'source',
+    'completion_note'
+  ]);
+  const CANONICAL_FILTER_FIELDS = Object.freeze([
+    'scope',
+    'owner_id',
+    'team_id',
+    'customer_stage',
+    'opportunity_stage',
+    'priority',
+    'industry',
+    'country',
+    'tag',
+    'source',
+    'next_action_due',
+    'stalled',
+    'keyword',
+    'as_of',
+    'limit',
+    'cursor'
+  ]);
+  const ACTIVE_CUSTOMER_STAGES = Object.values(CUSTOMER_LIFECYCLE_REGISTRY)
+    .filter((entry) => entry.class === 'active')
+    .map((entry) => entry.code);
+  const TERMINAL_CUSTOMER_STAGES = Object.values(CUSTOMER_LIFECYCLE_REGISTRY)
+    .filter((entry) => entry.class === 'terminal')
+    .map((entry) => entry.code);
+  const STAGE_LABELS = Object.freeze(Object.fromEntries(
+    Object.values(CUSTOMER_LIFECYCLE_REGISTRY).map((entry) => [entry.code, entry.label_detail])
+  ));
+  const KNOWN_ERROR_CODES = new Set([
+    'CRM_HTTP_INVALID',
+    'CRM_CONTRACT_INVALID',
+    'CRM_FILTER_INVALID',
+    'CRM_CURSOR_INVALID',
+    'CRM_IDENTITY_INVALID',
+    'CRM_SCOPE_INVALID',
+    'CRM_SCOPE_FORBIDDEN',
+    'CRM_SCOPE_NOT_FOUND',
+    'CRM_MUTATION_INVALID',
+    'CRM_CUSTOMER_NOT_FOUND',
+    'CRM_CHILD_NOT_FOUND',
+    'CRM_CUSTOMER_FORBIDDEN',
+    'CRM_CUSTOMER_DUPLICATE',
+    'CRM_PUBLIC_POOL_UNAVAILABLE',
+    'CRM_CUSTODY_CONFLICT',
+    'CRM_TRANSITION_INVALID',
+    'CRM_STORAGE_BUSY',
+    'CRM_MUTATION_FAILED',
+    'CRM_QUERY_FAILED',
+    'CRM_HARD_DELETE_UNAVAILABLE',
+    'CRM_SALES_SCOPE_UNAVAILABLE'
+  ]);
+  const ERROR_TITLES = Object.freeze({
+    CRM_HTTP_INVALID: 'CRM request is not valid',
+    CRM_CONTRACT_INVALID: 'CRM request contract is not valid',
+    CRM_FILTER_INVALID: 'CRM filter is not valid',
+    CRM_CURSOR_INVALID: 'CRM cursor is not valid',
+    CRM_IDENTITY_INVALID: 'CRM customer identity is not valid',
+    CRM_SCOPE_INVALID: 'CRM organization context is not valid',
+    CRM_SCOPE_FORBIDDEN: 'CRM scope is not allowed',
+    CRM_SCOPE_NOT_FOUND: 'CRM organization context was not found',
+    CRM_MUTATION_INVALID: 'CRM mutation command is not valid',
+    CRM_CUSTOMER_NOT_FOUND: 'CRM customer was not found',
+    CRM_CHILD_NOT_FOUND: 'CRM child record was not found',
+    CRM_CUSTOMER_FORBIDDEN: 'CRM customer mutation is not allowed',
+    CRM_CUSTOMER_DUPLICATE: 'Customer identity conflicts with an existing record',
+    CRM_PUBLIC_POOL_UNAVAILABLE: 'CRM public-pool customer is unavailable',
+    CRM_CUSTODY_CONFLICT: 'CRM customer custody changed',
+    CRM_TRANSITION_INVALID: 'CRM transition is not allowed',
+    CRM_STORAGE_BUSY: 'CRM storage is temporarily unavailable',
+    CRM_MUTATION_FAILED: 'CRM mutation failed',
+    CRM_QUERY_FAILED: 'CRM query failed',
+    CRM_HARD_DELETE_UNAVAILABLE: 'CRM hard delete is unavailable',
+    CRM_SALES_SCOPE_UNAVAILABLE: 'CRM sales reporting requires organization-scoped data',
+    CRM_HTTP_FAILED: 'CRM request failed'
+  });
 
-  const ACTIVE_STAGES = STAGES.join("','");
-
-  function deleteErrorResponse(res, req, status, error, code, details) {
-    const body = {
-      error,
-      code,
-      request_id: req.requestId || 'crm-delete-request'
-    };
-    if (details !== undefined) body.details = details;
-    return res.status(status).json(body);
+  class CrmHttpError extends Error {
+    constructor(code, status) {
+      super(ERROR_TITLES[code] || ERROR_TITLES.CRM_HTTP_FAILED);
+      this.name = 'CrmHttpError';
+      this.code = code;
+      this.status = status;
+      this.title = ERROR_TITLES[code] || ERROR_TITLES.CRM_HTTP_FAILED;
+    }
   }
 
-  function dependencyResponse(res, req, target, code, dependencies) {
-    return deleteErrorResponse(
-      res,
-      req,
-      409,
-      target + ' has dependencies',
-      code,
-      { dependencies }
-    );
+  function invalidHttp() {
+    return new CrmHttpError('CRM_HTTP_INVALID', 400);
   }
 
-  function isForeignKeyConstraint(error) {
-    return Boolean(
-      error &&
-      (
-        error.code === 'SQLITE_CONSTRAINT_FOREIGNKEY' ||
-        /foreign key constraint failed/i.test(String(error.message || ''))
-      )
-    );
-  }
-
-  function canonicalDeleteId(value) {
+  function positiveInteger(value) {
     if (Number.isSafeInteger(value) && value > 0) return value;
-    return campaignContract.isCanonicalSafeIntegerPathSegment(value)
-      ? Number(value)
+    if (typeof value !== 'string' || !/^[1-9]\d*$/.test(value)) throw invalidHttp();
+    const parsed = Number(value);
+    if (!Number.isSafeInteger(parsed) || parsed < 1) throw invalidHttp();
+    return parsed;
+  }
+
+  function plainRecord(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw invalidHttp();
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) throw invalidHttp();
+    return value;
+  }
+
+  function ownValue(record, key) {
+    if (!Object.prototype.hasOwnProperty.call(record, key)) return { present: false };
+    const descriptor = Object.getOwnPropertyDescriptor(record, key);
+    if (!descriptor || !Object.prototype.hasOwnProperty.call(descriptor, 'value')) throw invalidHttp();
+    return { present: true, value: descriptor.value };
+  }
+
+  function projectValues(record, fields, transforms) {
+    const result = {};
+    for (const field of fields) {
+      const property = ownValue(record, field);
+      if (!property.present) continue;
+      const transform = transforms && transforms[field];
+      result[field] = transform ? transform(property.value) : property.value;
+    }
+    return result;
+  }
+
+  function compatibleTimestamp(value) {
+    if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      return `${value} 00:00:00`;
+    }
+    return value;
+  }
+
+  function safeRequestIdentifier(value, maximum) {
+    return typeof value === 'string' && value.length > 0 && value.length <= maximum && SAFE_IDENTIFIER.test(value)
+      ? value
       : null;
   }
 
-  function addCustomerScope(conditions, params, req, alias) {
-    alias = alias || 'c';
-    const scope = String(req.query.scope || (req.user.role === 'admin' ? 'all' : 'my'));
-    if (req.user.role === 'admin') {
-      if (scope === 'my') {
-        conditions.push(alias + '.assigned_to = ?'); params.push(req.user.id);
-      } else if (scope === 'team') {
-        conditions.push('(' + alias + '.assigned_to IN (SELECT id FROM users WHERE department = ?) OR ' + alias + '.created_by IN (SELECT id FROM users WHERE department = ?))');
-        params.push(req.user.department || '', req.user.department || '');
-      }
-      return;
-    }
-    if (scope === 'team') {
-      conditions.push('(' + alias + '.assigned_to IN (SELECT id FROM users WHERE department = ?) OR ' + alias + '.created_by IN (SELECT id FROM users WHERE department = ?))');
-      params.push(req.user.department || '', req.user.department || '');
-      return;
-    }
-    conditions.push(alias + '.assigned_to = ?'); params.push(req.user.id);
+  function requestId(req) {
+    return safeRequestIdentifier(req.requestId, 120) ||
+      safeRequestIdentifier(req.phase4Request && req.phase4Request.requestId, 120) ||
+      `crm-${randomUUID()}`;
   }
 
-  function scopedCustomerWhere(req) {
-    const conditions = [];
-    const params = [];
-    addCustomerScope(conditions, params, req, 'customers');
+  function serviceContext(req) {
+    const actorUserId = positiveInteger(req.user && req.user.id);
+    const authContext = plainRecord(req.authContext);
+    const organization = plainRecord(authContext.organization);
+    const organizationId = positiveInteger(organization.id);
+    const currentRequestId = requestId(req);
+    const headerCorrelationId = safeRequestIdentifier(
+      req.headers && req.headers['x-correlation-id'],
+      128
+    );
     return {
-      where: conditions.length ? ' WHERE ' + conditions.join(' AND ') : '',
-      params
+      actorUserId,
+      organizationId,
+      requestId: currentRequestId,
+      correlationId: headerCorrelationId || currentRequestId
     };
   }
 
-  // ============================================================
-  // LEAD ROUTES (线索管理)
-  // ============================================================
+  function teamIds(req) {
+    const authContext = plainRecord(req.authContext);
+    if (!Array.isArray(authContext.teams) || authContext.teams.length === 0) throw invalidHttp();
+    const result = [];
+    for (const team of authContext.teams) {
+      const id = positiveInteger(plainRecord(team).id);
+      if (result.includes(id)) throw invalidHttp();
+      result.push(id);
+    }
+    return result;
+  }
 
+  function selectedTeamId(req, requested) {
+    const available = teamIds(req);
+    if (requested !== undefined && requested !== null && requested !== '') {
+      const requestedId = positiveInteger(requested);
+      if (!available.includes(requestedId)) throw invalidHttp();
+      return requestedId;
+    }
+    if (available.length !== 1) throw invalidHttp();
+    return available[0];
+  }
+
+  function isOrganizationAdmin(req) {
+    const context = plainRecord(req.authContext);
+    const organization = plainRecord(context.organization);
+    return organization.role_code === 'org_admin';
+  }
+
+  function normalizeTextAlias(value) {
+    if (typeof value !== 'string') throw invalidHttp();
+    const normalized = value.trim();
+    if (!normalized) throw invalidHttp();
+    return normalized;
+  }
+
+  function normalizeArray(value) {
+    const input = Array.isArray(value) ? value : [value];
+    const result = [];
+    for (const item of input) {
+      if (typeof item !== 'string') throw invalidHttp();
+      for (const part of item.split(',')) {
+        const normalized = part.trim();
+        if (!normalized) throw invalidHttp();
+        if (!result.includes(normalized)) result.push(normalized);
+      }
+    }
+    return result;
+  }
+
+  function booleanQuery(value) {
+    if (value === true || value === 'true') return true;
+    if (value === false || value === 'false') return false;
+    throw invalidHttp();
+  }
+
+  function normalizeScope(value) {
+    if (value === 'all') return 'organization';
+    return value;
+  }
+
+  function readCanonicalFilter(query, kind) {
+    const source = plainRecord(query || {});
+    const filter = {};
+    for (const field of CANONICAL_FILTER_FIELDS) {
+      const property = ownValue(source, field);
+      if (!property.present) continue;
+      if (field === 'scope') filter.scope = normalizeScope(property.value);
+      else if (field === 'owner_id' || field === 'team_id' || field === 'limit') {
+        filter[field] = positiveInteger(property.value);
+      } else if (field === 'stalled') filter.stalled = booleanQuery(property.value);
+      else if (field === 'customer_stage' || field === 'opportunity_stage' || field === 'priority') {
+        filter[field] = normalizeArray(property.value);
+      } else filter[field] = property.value;
+    }
+
+    const pageSize = ownValue(source, 'pageSize');
+    if (pageSize.present) {
+      if (Object.prototype.hasOwnProperty.call(filter, 'limit')) throw invalidHttp();
+      filter.limit = Math.min(positiveInteger(pageSize.value), 100);
+    }
+    const search = ownValue(source, 'search');
+    if (search.present) {
+      if (Object.prototype.hasOwnProperty.call(filter, 'keyword')) throw invalidHttp();
+      filter.keyword = normalizeTextAlias(search.value);
+    }
+    const stage = ownValue(source, 'stage');
+    if (stage.present) {
+      const target = kind === 'opportunity' ? 'opportunity_stage' : 'customer_stage';
+      if (Object.prototype.hasOwnProperty.call(filter, target)) throw invalidHttp();
+      filter[target] = normalizeArray(stage.value);
+    }
+    const status = ownValue(source, 'status');
+    if (status.present) {
+      if (kind !== 'customer' || Object.prototype.hasOwnProperty.call(filter, 'customer_stage')) {
+        throw invalidHttp();
+      }
+      if (status.value === 'active') filter.customer_stage = ACTIVE_CUSTOMER_STAGES.slice();
+      else if (status.value === 'terminal') filter.customer_stage = TERMINAL_CUSTOMER_STAGES.slice();
+      else throw invalidHttp();
+    }
+    const isPublic = ownValue(source, 'is_public');
+    if (isPublic.present) {
+      if (isPublic.value !== '1' && isPublic.value !== 1 && isPublic.value !== true) throw invalidHttp();
+      if (Object.prototype.hasOwnProperty.call(filter, 'scope') && filter.scope !== 'public_pool') {
+        throw invalidHttp();
+      }
+      filter.scope = 'public_pool';
+    }
+    if (kind === 'opportunity' && ownValue(source, 'customer_id').present) throw invalidHttp();
+    return filter;
+  }
+
+  function customerTransition(body) {
+    const nested = ownValue(body, 'transition');
+    const stage = ownValue(body, 'stage');
+    if (nested.present && stage.present) throw invalidHttp();
+    if (nested.present) {
+      const source = plainRecord(nested.value);
+      return projectValues(source, [
+        'to_stage', 'reason_code', 'next_action_at', 'no_opportunity_exception'
+      ], { next_action_at: compatibleTimestamp });
+    }
+    if (!stage.present) {
+      for (const field of ['reason_code', 'no_opportunity_exception']) {
+        if (ownValue(body, field).present) throw invalidHttp();
+      }
+      return null;
+    }
+    const transition = { to_stage: stage.value };
+    for (const field of ['reason_code', 'next_action_at', 'no_opportunity_exception']) {
+      const property = ownValue(body, field);
+      if (property.present) {
+        transition[field] = field === 'next_action_at'
+          ? compatibleTimestamp(property.value)
+          : property.value;
+      }
+    }
+    return transition;
+  }
+
+  function opportunityTransition(body) {
+    const nested = ownValue(body, 'transition');
+    const stage = ownValue(body, 'stage');
+    if (nested.present && stage.present) throw invalidHttp();
+    if (nested.present) {
+      return projectValues(plainRecord(nested.value), [
+        'to_stage', 'reason_code', 'campaign_disposition'
+      ]);
+    }
+    if (!stage.present) {
+      for (const field of ['reason_code', 'campaign_disposition']) {
+        if (ownValue(body, field).present) throw invalidHttp();
+      }
+      return null;
+    }
+    const transition = { to_stage: stage.value };
+    for (const field of ['reason_code', 'campaign_disposition']) {
+      const property = ownValue(body, field);
+      if (property.present) transition[field] = property.value;
+    }
+    return transition;
+  }
+
+  function problemStatus(code) {
+    if (code === 'CRM_HTTP_INVALID' || code === 'CRM_CONTRACT_INVALID' ||
+        code === 'CRM_FILTER_INVALID' || code === 'CRM_CURSOR_INVALID' ||
+        code === 'CRM_IDENTITY_INVALID' || code === 'CRM_SCOPE_INVALID' ||
+        code === 'CRM_MUTATION_INVALID') return 400;
+    if (code === 'CRM_SCOPE_FORBIDDEN' || code === 'CRM_CUSTOMER_FORBIDDEN') return 403;
+    if (code === 'CRM_SCOPE_NOT_FOUND' || code === 'CRM_CUSTOMER_NOT_FOUND' ||
+        code === 'CRM_CHILD_NOT_FOUND') return 404;
+    if (code === 'CRM_CUSTOMER_DUPLICATE' || code === 'CRM_PUBLIC_POOL_UNAVAILABLE' ||
+        code === 'CRM_CUSTODY_CONFLICT' || code === 'CRM_TRANSITION_INVALID' ||
+        code === 'CRM_HARD_DELETE_UNAVAILABLE' || code === 'CRM_SALES_SCOPE_UNAVAILABLE') return 409;
+    if (code === 'CRM_STORAGE_BUSY') return 503;
+    if (code === 'CRM_MUTATION_FAILED' || code === 'CRM_QUERY_FAILED') return 500;
+    return 500;
+  }
+
+  function safeConflict(error) {
+    const details = error && error.details;
+    if (!details || typeof details !== 'object' || Array.isArray(details)) return null;
+    const conflict = details.conflict;
+    if (!conflict || typeof conflict !== 'object' || Array.isArray(conflict)) return null;
+    const result = {};
+    if (['readable', 'public_pool', 'restricted'].includes(conflict.visibility)) {
+      result.visibility = conflict.visibility;
+    }
+    if (conflict.action === 'review_public_pool') result.action = conflict.action;
+    if (
+      result.visibility === 'readable' &&
+      conflict.customer && typeof conflict.customer === 'object' && !Array.isArray(conflict.customer)
+    ) {
+      const customer = {};
+      if (Number.isSafeInteger(conflict.customer.id) && conflict.customer.id > 0) customer.id = conflict.customer.id;
+      if (typeof conflict.customer.display_name === 'string' && conflict.customer.display_name.length <= 1000) {
+        customer.display_name = conflict.customer.display_name;
+      }
+      if (typeof conflict.customer.stage === 'string' && conflict.customer.stage.length <= 120) {
+        customer.stage = conflict.customer.stage;
+      }
+      result.customer = customer;
+    }
+    return Object.keys(result).length ? result : null;
+  }
+
+  function sendProblem(res, req, error) {
+    const candidateCode = error && typeof error.code === 'string' ? error.code : 'CRM_HTTP_FAILED';
+    const code = KNOWN_ERROR_CODES.has(candidateCode) ? candidateCode : 'CRM_HTTP_FAILED';
+    const status = problemStatus(code);
+    const currentRequestId = requestId(req);
+    const title = ERROR_TITLES[code] || ERROR_TITLES.CRM_HTTP_FAILED;
+    const body = {
+      type: `https://api.turingmarket.example/problems/${code.toLowerCase().replace(/_/g, '-')}`,
+      title,
+      status,
+      code,
+      request_id: currentRequestId,
+      instance: `urn:turingmarket:request:${currentRequestId}`
+    };
+    const conflict = code === 'CRM_CUSTOMER_DUPLICATE' ? safeConflict(error) : null;
+    if (conflict) body.conflict = conflict;
+    if (code === 'CRM_STORAGE_BUSY' && error && error.retryable === true) body.retryable = true;
+    if (typeof res.type === 'function') res.type('application/problem+json');
+    return res.status(status).json(body);
+  }
+
+  function crmHandler(handler) {
+    return function boundedCrmHandler(req, res) {
+      try {
+        return handler(req, res);
+      } catch (error) {
+        return sendProblem(res, req, error);
+      }
+    };
+  }
+
+  function callMutation(serviceMethod, req, command) {
+    return crmCustomerService[serviceMethod](db, {
+      ...serviceContext(req),
+      command
+    });
+  }
+
+  function callQuery(serviceMethod, req, filter) {
+    const context = serviceContext(req);
+    delete context.correlationId;
+    return crmQueryService[serviceMethod](db, { ...context, filter });
+  }
+
+  function customerCreateCommand(req) {
+    const body = plainRecord(req.body || {});
+    const stage = ownValue(body, 'stage');
+    if (stage.present && stage.value !== 'lead') throw invalidHttp();
+    const values = projectValues(body, CUSTOMER_PROFILE_FIELDS, {
+      next_action_at: compatibleTimestamp
+    });
+    const requestedOwner = ownValue(body, 'assigned_to');
+    const requestedTeam = ownValue(body, 'team_id');
+    values.assigned_to = isOrganizationAdmin(req) && requestedOwner.present
+      ? positiveInteger(requestedOwner.value)
+      : positiveInteger(req.user.id);
+    values.team_id = selectedTeamId(req, requestedTeam.present ? requestedTeam.value : undefined);
+    return { mode: 'create', values };
+  }
+
+  function customerUpdateCommand(req) {
+    const body = plainRecord(req.body || {});
+    if (ownValue(body, 'assigned_to').present || ownValue(body, 'team_id').present ||
+        ownValue(body, 'opportunity_value').present || ownValue(body, 'win_probability').present) {
+      throw invalidHttp();
+    }
+    const command = {
+      mode: 'update',
+      customerId: positiveInteger(req.params.id),
+      values: projectValues(body, CUSTOMER_PROFILE_FIELDS, {
+        next_action_at: compatibleTimestamp
+      })
+    };
+    const transition = customerTransition(body);
+    if (transition) {
+      command.transition = transition;
+      if (ownValue(body, 'stage').present && ownValue(body, 'next_action_at').present) {
+        delete command.values.next_action_at;
+      }
+    }
+    return command;
+  }
+
+  function opportunityCreateCommand(req) {
+    const body = plainRecord(req.body || {});
+    const stage = ownValue(body, 'stage');
+    if (stage.present && stage.value !== 'discovery') throw invalidHttp();
+    if (ownValue(body, 'transition').present || ownValue(body, 'reason_code').present ||
+        ownValue(body, 'campaign_disposition').present) throw invalidHttp();
+    return {
+      mode: 'create',
+      customerId: positiveInteger(ownValue(body, 'customer_id').value),
+      values: projectValues(body, OPPORTUNITY_VALUE_FIELDS, {
+        expected_close_date: compatibleTimestamp,
+        next_action_at: compatibleTimestamp
+      })
+    };
+  }
+
+  function opportunityUpdateCommand(req) {
+    const body = plainRecord(req.body || {});
+    const command = {
+      mode: 'update',
+      customerId: positiveInteger(ownValue(body, 'customer_id').value),
+      opportunityId: positiveInteger(req.params.id),
+      values: projectValues(body, OPPORTUNITY_VALUE_FIELDS, {
+        expected_close_date: compatibleTimestamp,
+        next_action_at: compatibleTimestamp
+      })
+    };
+    const transition = opportunityTransition(body);
+    if (transition) command.transition = transition;
+    return command;
+  }
+
+  function releaseCommand(req) {
+    const body = plainRecord(req.body || {});
+    const command = { action: 'release', customerId: positiveInteger(req.params.id) };
+    const reason = ownValue(body, 'reason_code');
+    if (reason.present) command.reason_code = reason.value;
+    return command;
+  }
+
+  function statsResponse(req, filter) {
+    const dashboard = callQuery('getCrmDashboard', req, filter);
+    const poolFilter = { scope: 'public_pool', limit: 1 };
+    if (Object.prototype.hasOwnProperty.call(filter, 'as_of')) poolFilter.as_of = filter.as_of;
+    const pool = callQuery('listCustomers', req, poolFilter);
+    const byStage = dashboard.customers.by_stage;
+    const active = ACTIVE_CUSTOMER_STAGES.reduce((total, stage) => total + Number(byStage[stage] || 0), 0);
+    return {
+      ...dashboard,
+      byStage,
+      total: dashboard.customers.total,
+      active,
+      paused: Number(byStage.paused || 0),
+      won: Number(byStage.won || 0),
+      publicPool: Number(pool.total || 0),
+      totalOppValue: Number(dashboard.opportunities.open_amount || 0),
+      stages: STAGE_LABELS
+    };
+  }
+
+  // Lead management remains a legacy compatibility surface; conversion is routed through S4 below.
   app.get('/api/leads', authMiddleware, (req, res) => {
     try {
       const { status, search } = req.query;
       let sql = 'SELECT * FROM leads';
-      let params = [];
-      const conds = [];
-      if (status) { conds.push('status = ?'); params.push(status); }
-      if (search) { conds.push('(brand_name LIKE ? OR company_name LIKE ?)'); params.push('%' + search + '%', '%' + search + '%'); }
-      if (req.user.role !== 'admin') { conds.push('assigned_to = ?'); params.push(req.user.id); }
-      if (conds.length) sql += ' WHERE ' + conds.join(' AND ');
+      const params = [];
+      const conditions = [];
+      if (status) { conditions.push('status = ?'); params.push(status); }
+      if (search) {
+        conditions.push('(brand_name LIKE ? OR company_name LIKE ?)');
+        params.push(`%${search}%`, `%${search}%`);
+      }
+      if (req.user.role !== 'admin') { conditions.push('assigned_to = ?'); params.push(req.user.id); }
+      if (conditions.length) sql += ` WHERE ${conditions.join(' AND ')}`;
       sql += ' ORDER BY created_at DESC LIMIT 200';
-      res.json({ leads: db.prepare(sql).all(...params) });
-    } catch (e) { res.status(500).json({ error: e.message }); }
+      return res.json({ leads: db.prepare(sql).all(...params) });
+    } catch (_error) {
+      return res.status(500).json({ error: 'Lead query failed' });
+    }
   });
 
   app.post('/api/leads', authMiddleware, (req, res) => {
     try {
-      const { brand_name, company_name, contact_person, contact_info, source, industry, notes } = req.body;
-      const result = db.prepare(`INSERT INTO leads (brand_name, company_name, contact_person, contact_info, source, industry, notes, assigned_to, lead_score) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-        .run(brand_name, company_name, contact_person, contact_info, source || 'manual', industry, notes, req.user.id, 10);
-      businessKnowledge.archiveLead(db, db.prepare('SELECT * FROM leads WHERE id = ?').get(result.lastInsertRowid), req.user);
-      res.json({ id: result.lastInsertRowid });
-    } catch (e) { res.status(500).json({ error: e.message }); }
+      const body = req.body || {};
+      const result = db.prepare(`
+        INSERT INTO leads (
+          brand_name,company_name,contact_person,contact_info,source,
+          industry,notes,assigned_to,lead_score
+        ) VALUES (?,?,?,?,?,?,?,?,?)
+      `).run(
+        body.brand_name,
+        body.company_name,
+        body.contact_person,
+        body.contact_info,
+        body.source || 'manual',
+        body.industry,
+        body.notes,
+        req.user.id,
+        10
+      );
+      businessKnowledge.archiveLead(
+        db,
+        db.prepare('SELECT * FROM leads WHERE id = ?').get(result.lastInsertRowid),
+        req.user
+      );
+      return res.json({ id: result.lastInsertRowid });
+    } catch (_error) {
+      return res.status(500).json({ error: 'Lead creation failed' });
+    }
   });
 
   app.put('/api/leads/:id', authMiddleware, (req, res) => {
@@ -125,491 +614,266 @@ module.exports = function(app, db, authMiddleware) {
       const lead = crmAccess.getLead(db, req.params.id);
       if (!lead) return crmAccess.notFound(res, 'Lead');
       if (!crmAccess.canAccessLead(req.user, lead)) return crmAccess.forbidden(res);
-      const { brand_name, company_name, contact_person, contact_info, source, industry, notes, status, lead_score } = req.body;
-      db.prepare(`UPDATE leads SET brand_name=COALESCE(?,brand_name), company_name=COALESCE(?,company_name), contact_person=COALESCE(?,contact_person), contact_info=COALESCE(?,contact_info), source=COALESCE(?,source), industry=COALESCE(?,industry), notes=COALESCE(?,notes), status=COALESCE(?,status), lead_score=COALESCE(?,lead_score), updated_at=datetime('now') WHERE id=?`)
-        .run(brand_name, company_name, contact_person, contact_info, source, industry, notes, status, lead_score, req.params.id);
+      const body = req.body || {};
+      db.prepare(`
+        UPDATE leads SET
+          brand_name=COALESCE(?,brand_name),company_name=COALESCE(?,company_name),
+          contact_person=COALESCE(?,contact_person),contact_info=COALESCE(?,contact_info),
+          source=COALESCE(?,source),industry=COALESCE(?,industry),notes=COALESCE(?,notes),
+          status=COALESCE(?,status),lead_score=COALESCE(?,lead_score),updated_at=datetime('now')
+        WHERE id=?
+      `).run(
+        body.brand_name,
+        body.company_name,
+        body.contact_person,
+        body.contact_info,
+        body.source,
+        body.industry,
+        body.notes,
+        body.status,
+        body.lead_score,
+        req.params.id
+      );
       businessKnowledge.archiveLead(db, db.prepare('SELECT * FROM leads WHERE id = ?').get(req.params.id), req.user);
-      res.json({ success: true });
-    } catch (e) { res.status(500).json({ error: e.message }); }
-  });
-
-  // Convert lead to customer
-  app.post('/api/leads/:id/convert', authMiddleware, (req, res) => {
-    try {
-      const lead = crmAccess.getLead(db, req.params.id);
-      if (!lead) return crmAccess.notFound(res, 'Lead');
-      if (!crmAccess.canAccessLead(req.user, lead)) return crmAccess.forbidden(res);
-      const result = db.prepare(`INSERT INTO customers (brand_name, company_name, industry, contact_person, contact_info, source, stage, assigned_to, lead_source, created_by) VALUES (?, ?, ?, ?, ?, ?, 'lead', ?, ?, ?)`)
-        .run(lead.brand_name, lead.company_name, lead.industry, lead.contact_person, lead.contact_info, lead.source, req.user.id, 'lead_conversion', req.user.id);
-      db.prepare("UPDATE leads SET status='converted', converted_customer_id=?, updated_at=datetime('now') WHERE id=?").run(result.lastInsertRowid, req.params.id);
-      businessKnowledge.archiveLead(db, db.prepare('SELECT * FROM leads WHERE id = ?').get(req.params.id), req.user);
-      businessKnowledge.archiveCustomer(db, db.prepare('SELECT * FROM customers WHERE id = ?').get(result.lastInsertRowid), req.user);
-      res.json({ customer_id: result.lastInsertRowid });
-    } catch (e) { res.status(500).json({ error: e.message }); }
-  });
-
-  // ============================================================
-  // ENHANCED CUSTOMER ROUTES
-  // ============================================================
-
-  app.get('/api/customers', authMiddleware, (req, res) => {
-    const { stage, industry, search, status, is_public } = req.query;
-    let sql = 'SELECT c.*, u.display_name as created_by_name, u2.display_name as assigned_to_name FROM customers c LEFT JOIN users u ON c.created_by = u.id LEFT JOIN users u2 ON c.assigned_to = u2.id';
-    const params = [];
-    const conditions = [];
-
-    if (status === 'active') {
-      conditions.push("c.stage IN ('" + ACTIVE_STAGES + "')");
-    } else if (status === 'terminal') {
-      conditions.push("c.stage IN ('" + TERMINAL_STAGES.join("','") + "')");
-    } else if (stage) {
-      conditions.push('c.stage = ?'); params.push(stage);
+      return res.json({ success: true });
+    } catch (_error) {
+      return res.status(500).json({ error: 'Lead update failed' });
     }
-
-    if (industry) { conditions.push('c.industry LIKE ?'); params.push('%' + industry + '%'); }
-    if (search) { conditions.push('(c.brand_name LIKE ? OR c.company_name LIKE ? OR c.contact_person LIKE ?)'); params.push('%' + search + '%', '%' + search + '%', '%' + search + '%'); }
-    if (is_public !== undefined) { conditions.push('c.is_public = ?'); params.push(is_public); }
-
-    // Non-admin users see their own or team-scoped customers; public-pool queries can also show unassigned public customers.
-    if (String(is_public) === '1' && req.user.role !== 'admin') {
-      conditions.push('(c.assigned_to = ? OR c.assigned_to IS NULL)'); params.push(req.user.id);
-    } else {
-      addCustomerScope(conditions, params, req, 'c');
-    }
-
-    if (conditions.length) sql += ' WHERE ' + conditions.join(' AND ');
-    sql += ' ORDER BY c.updated_at DESC LIMIT 200';
-    const customers = db.prepare(sql).all(...params);
-    res.json({ customers, total: customers.length, stages: STAGE_LABELS });
   });
 
-  app.get('/api/customers/stats', authMiddleware, (req, res) => {
-    const scoped = scopedCustomerWhere(req);
-    const prefix = scoped.where ? scoped.where + ' AND ' : ' WHERE ';
-    const byStageArr = db.prepare('SELECT stage, COUNT(*) as count FROM customers' + scoped.where + ' GROUP BY stage').all(...scoped.params);
-    const total = db.prepare('SELECT COUNT(*) as count FROM customers' + scoped.where).get(...scoped.params).count;
-    const active = db.prepare("SELECT COUNT(*) as count FROM customers" + prefix + "stage IN ('" + ACTIVE_STAGES + "')").get(...scoped.params).count;
-    const paused = db.prepare("SELECT COUNT(*) as count FROM customers" + prefix + "stage = 'paused'").get(...scoped.params).count;
-    const byIndustry = db.prepare('SELECT industry, COUNT(*) as count FROM customers' + scoped.where + ' GROUP BY industry ORDER BY count DESC LIMIT 10').all(...scoped.params);
-    const totalOppValue = db.prepare(
-      'SELECT COALESCE(SUM(COALESCE(opportunity_value, 0)), 0) AS total FROM customers' + scoped.where
-    ).get(...scoped.params).total;
-    // Convert byStage array to object for frontend compatibility
-    var byStage = {}; byStageArr.forEach(function(s) { byStage[s.stage] = s.count; });
-    var won = byStage['won'] || 0;
-    var publicPool = db.prepare("SELECT COUNT(*) as count FROM customers WHERE is_public = 1" + (req.user.role !== 'admin' ? ' AND (assigned_to IS NULL OR assigned_to = ' + req.user.id + ')' : '')).get().count;
-    var assigned = db.prepare('SELECT COUNT(*) as count FROM customers WHERE assigned_to = ?').get(req.user.id).count;
-    var weeklyNew = db.prepare("SELECT COUNT(*) as count FROM customers" + prefix + "created_at >= datetime('now', '-7 days')").get(...scoped.params).count;
-    res.json({ byStage, total, active, paused, byIndustry, stages: STAGE_LABELS, won, publicPool, assigned, weeklyNew, totalOppValue });
-  });
+  app.post('/api/leads/:id/convert', authMiddleware, crmHandler((req, res) => {
+    const body = plainRecord(req.body || {});
+    const requestedOwner = ownValue(body, 'assigned_to');
+    const requestedTeam = ownValue(body, 'team_id');
+    const command = {
+      mode: 'create',
+      sourceLeadId: positiveInteger(req.params.id),
+      values: {
+        assigned_to: isOrganizationAdmin(req) && requestedOwner.present
+          ? positiveInteger(requestedOwner.value)
+          : positiveInteger(req.user.id),
+        team_id: selectedTeamId(req, requestedTeam.present ? requestedTeam.value : undefined)
+      }
+    };
+    return res.json(callMutation('createOrUpdateCustomer', req, command));
+  }));
 
-  // Customer detail with opportunities and activity
+  app.get('/api/customers', authMiddleware, crmHandler((req, res) => {
+    const result = callQuery('listCustomers', req, readCanonicalFilter(req.query, 'customer'));
+    return res.json({ ...result, customers: result.items, stages: STAGE_LABELS });
+  }));
+
+  app.get('/api/customers/stats', authMiddleware, crmHandler((req, res) => {
+    return res.json(statsResponse(req, readCanonicalFilter(req.query, 'customer')));
+  }));
+
   app.get('/api/customers/:id/detail', authMiddleware, (req, res) => {
     try {
       const customer = crmAccess.getCustomer(db, req.params.id);
       if (!customer) return crmAccess.notFound(res, 'Customer');
       if (!crmAccess.canAccessCustomer(req.user, customer)) return crmAccess.forbidden(res);
-      const opportunities = db.prepare('SELECT * FROM opportunities WHERE customer_id = ? ORDER BY created_at DESC').all(req.params.id);
-      const activity = db.prepare('SELECT a.*, u.display_name FROM customer_activity a LEFT JOIN users u ON a.user_id = u.id WHERE a.customer_id = ? ORDER BY a.created_at DESC LIMIT 50').all(req.params.id);
-      res.json({ customer, opportunities, activity });
-    } catch (e) { res.status(500).json({ error: e.message }); }
-  });
-
-  app.post('/api/customers', authMiddleware, (req, res) => {
-    const { brand_name, company_name, contact_person, contact_info, industry, stage, source, budget_estimate, notes, assigned_to } = req.body;
-    const assignedUserId = req.user.role === 'admin' ? (assigned_to || req.user.id) : req.user.id;
-    const result = db.prepare('INSERT INTO customers (brand_name, company_name, contact_person, contact_info, industry, stage, source, budget_estimate, notes, created_by, assigned_to, is_public) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)').run(
-      brand_name, company_name, contact_person, contact_info, industry, stage || 'lead', source, budget_estimate, notes, req.user.id, assignedUserId
-    );
-    db.prepare('INSERT INTO activity_log (user_id, action, module, details, ip_address) VALUES (?, ?, ?, ?, ?)').run(req.user.id, 'create_customer', 'customer', 'Created customer: ' + brand_name, req.ip);
-    businessKnowledge.archiveCustomer(db, db.prepare('SELECT * FROM customers WHERE id = ?').get(result.lastInsertRowid), req.user);
-    db.prepare('INSERT INTO customer_activity (customer_id, user_id, action, stage_to, notes) VALUES (?, ?, ?, ?, ?)').run(result.lastInsertRowid, req.user.id, 'created', stage || 'lead', '客户创建');
-    res.json({ id: result.lastInsertRowid });
-  });
-
-  app.post('/api/customers/:id/archive-result', authMiddleware, (req, res) => {
-    try {
-      const customer = crmAccess.getCustomer(db, req.params.id);
-      if (!customer) return crmAccess.notFound(res, 'Customer');
-      if (!crmAccess.canManageCustomer(req.user, customer)) return crmAccess.forbidden(res);
-      const { artifact_type, title, content, tags, source_type } = req.body || {};
-      if (!content || !String(content).trim()) return res.status(400).json({ error: 'Content required' });
-      const type = artifact_type || 'note';
-      const safeTitle = title || ((customer.brand_name || customer.company_name || 'Customer') + ' ' + type);
-      const tagList = Array.isArray(tags) ? tags : [customer.brand_name, customer.company_name, customer.industry, type].filter(Boolean);
-      const entry = knowledgeService.ingestKnowledge(db, {
-        title: safeTitle,
-        summary: String(content).replace(/\s+/g, ' ').trim().slice(0, 240),
-        content: content,
-        entry_type: type,
-        source_type: source_type || 'customer',
-        source_id: req.params.id + ':' + type + ':' + safeTitle,
-        visibility: 'team',
-        tags: tagList,
-        business_type: 'customer',
-        business_id: req.params.id,
-        created_by: crmAccess.customerOwnerId(customer, req.user),
-        actor_role: req.user.role,
-        metadata: { customer_id: req.params.id, archived_by: req.user.id }
-      });
-      const activityAction = type === 'strategy' ? 'archive_strategy' : type === 'proposal' ? 'archive_proposal' : 'archive_note';
-      db.prepare('INSERT INTO customer_activity (customer_id, user_id, action, stage_from, stage_to, notes) VALUES (?, ?, ?, ?, ?, ?)')
-        .run(req.params.id, req.user.id, activityAction, customer.stage, customer.stage, safeTitle);
-      db.prepare('INSERT INTO activity_log (user_id, action, module, details, ip_address) VALUES (?, ?, ?, ?, ?)')
-        .run(req.user.id, activityAction, 'customer', 'Archived ' + type + ' for customer #' + req.params.id, req.ip);
-      res.json({ id: entry.id, success: true });
-    } catch (e) { res.status(500).json({ error: e.message }); }
-  });
-
-  app.put('/api/customers/:id', authMiddleware, (req, res) => {
-    const { brand_name, company_name, contact_person, contact_info, industry, stage, source, budget_estimate, notes, assigned_to, opportunity_value, win_probability } = req.body;
-    const old = crmAccess.getCustomer(db, req.params.id);
-    if (!old) return crmAccess.notFound(res, 'Customer');
-    if (!crmAccess.canManageCustomer(req.user, old)) return crmAccess.forbidden(res);
-    const nextAssignedTo = req.user.role === 'admin' ? assigned_to : null;
-    db.prepare('UPDATE customers SET brand_name = COALESCE(?, brand_name), company_name = COALESCE(?, company_name), contact_person = COALESCE(?, contact_person), contact_info = COALESCE(?, contact_info), industry = COALESCE(?, industry), stage = COALESCE(?, stage), source = COALESCE(?, source), budget_estimate = COALESCE(?, budget_estimate), notes = COALESCE(?, notes), assigned_to = COALESCE(?, assigned_to), opportunity_value = COALESCE(?, opportunity_value), win_probability = COALESCE(?, win_probability), updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(
-      brand_name, company_name, contact_person, contact_info, industry, stage, source, budget_estimate, notes, nextAssignedTo, opportunity_value, win_probability, req.params.id
-    );
-    if (stage && old && old.stage !== stage) {
-      db.prepare('INSERT INTO customer_activity (customer_id, user_id, action, stage_from, stage_to, notes) VALUES (?, ?, ?, ?, ?, ?)').run(req.params.id, req.user.id, 'stage_change', old.stage, stage, '阶段变更: ' + (STAGE_LABELS[old.stage] || old.stage) + ' -> ' + (STAGE_LABELS[stage] || stage));
-      try {
-        const tpls = db.prepare("SELECT id FROM workflow_templates WHERE module = 'customer' AND is_active = 1").all();
-        const wfEngine = require('./workflow_engine');
-        for (const t of tpls) {
-          try { wfEngine.startWorkflow(t.id, 'customer', parseInt(req.params.id), { stage, previous_stage: old.stage, customer_id: parseInt(req.params.id) }, req.user.id); } catch(ew) {}
-        }
-      } catch(ew) {}
+      const opportunities = db.prepare(
+        'SELECT * FROM opportunities WHERE customer_id = ? ORDER BY created_at DESC'
+      ).all(req.params.id);
+      const activity = db.prepare(`
+        SELECT a.*,u.display_name
+        FROM customer_activity a
+        LEFT JOIN users u ON a.user_id=u.id
+        WHERE a.customer_id=?
+        ORDER BY a.created_at DESC
+        LIMIT 50
+      `).all(req.params.id);
+      return res.json({ customer, opportunities, activity });
+    } catch (_error) {
+      return res.status(500).json({ error: 'Customer detail query failed' });
     }
-    db.prepare('INSERT INTO activity_log (user_id, action, module, details, ip_address) VALUES (?, ?, ?, ?, ?)').run(req.user.id, 'update_customer', 'customer', 'Updated customer #' + req.params.id, req.ip);
-    businessKnowledge.archiveCustomer(db, db.prepare('SELECT * FROM customers WHERE id = ?').get(req.params.id), req.user);
-    res.json({ success: true });
   });
+
+  app.post('/api/customers', authMiddleware, crmHandler((req, res) => {
+    return res.json(callMutation('createOrUpdateCustomer', req, customerCreateCommand(req)));
+  }));
+
+  app.post('/api/customers/:id/archive-result', authMiddleware, crmHandler((req, res) => {
+    const body = plainRecord(req.body || {});
+    const command = {
+      customerId: positiveInteger(req.params.id),
+      ...projectValues(body, ['artifact_type', 'title', 'content', 'tags', 'source_type'])
+    };
+    return res.json(callMutation('archiveCustomerResult', req, command));
+  }));
+
+  app.put('/api/customers/:id', authMiddleware, crmHandler((req, res) => {
+    return res.json(callMutation('createOrUpdateCustomer', req, customerUpdateCommand(req)));
+  }));
 
   app.delete('/api/customers/:id', authMiddleware, (req, res) => {
-    const customerId = canonicalDeleteId(req.params.id);
-    if (customerId === null) {
-      return deleteErrorResponse(
-        res,
-        req,
-        404,
-        'Customer not found',
-        'RECORD_NOT_FOUND'
-      );
+    return sendProblem(res, req, new CrmHttpError('CRM_HARD_DELETE_UNAVAILABLE', 409));
+  });
+
+  app.post('/api/customers/:id/assign', authMiddleware, crmHandler((req, res) => {
+    const body = plainRecord(req.body || {});
+    const action = ownValue(body, 'action');
+    if (action.present && action.value === 'claim') {
+      const requestedTeam = ownValue(body, 'team_id');
+      return res.json(callMutation('mutateCustomerCustody', req, {
+        action: 'claim',
+        customerId: positiveInteger(req.params.id),
+        team_id: selectedTeamId(req, requestedTeam.present ? requestedTeam.value : undefined)
+      }));
     }
-    try {
-      const remove = db.transaction(() => {
-        const customer = crmAccess.getCustomer(db, customerId);
-        if (!customer) return { outcome: 'not_found' };
-        const actor = db.prepare(`
-          SELECT id,role
-          FROM users
-          WHERE id=? AND is_active=1
-        `).get(req.user.id);
-        if (!actor || !crmAccess.canManageCustomer(actor, customer)) {
-          return { outcome: 'forbidden' };
-        }
-        const dependencies = campaignAccess.listCrmDependencies(db, {
-          targetType: 'customer',
-          targetId: customerId
-        });
-        if (dependencies.length) {
-          return { outcome: 'dependencies', dependencies };
-        }
-        db.prepare('DELETE FROM customer_activity WHERE customer_id = ?').run(customerId);
-        const deleted = db.prepare('DELETE FROM customers WHERE id = ?').run(customerId);
-        if (deleted.changes !== 1) {
-          throw new Error('Customer delete lost its target');
-        }
-        return { outcome: 'deleted' };
-      });
-      const result = remove.immediate();
-      if (result.outcome === 'not_found') {
-        return deleteErrorResponse(
-          res,
-          req,
-          404,
-          'Customer not found',
-          'RECORD_NOT_FOUND'
-        );
-      }
-      if (result.outcome === 'forbidden') {
-        return deleteErrorResponse(
-          res,
-          req,
-          403,
-          'Forbidden',
-          'RECORD_FORBIDDEN'
-        );
-      }
-      if (result.outcome === 'dependencies') {
-        return dependencyResponse(
-          res,
-          req,
-          'Customer',
-          'CUSTOMER_HAS_DEPENDENCIES',
-          result.dependencies
-        );
-      }
-      return res.json({ success: true });
-    } catch (error) {
-      if (isForeignKeyConstraint(error)) {
-        return dependencyResponse(
-          res,
-          req,
-          'Customer',
-          'CUSTOMER_HAS_DEPENDENCIES',
-          [{ type: 'unknown', count: null }]
-        );
-      }
-      return deleteErrorResponse(
-        res,
-        req,
-        500,
-        'Customer deletion failed',
-        'AUDIT_PERSISTENCE_FAILED'
-      );
-    }
-  });
+    if (action.present && action.value !== 'transfer') throw invalidHttp();
+    const assignedTo = ownValue(body, 'assigned_to');
+    const legacyUserId = ownValue(body, 'user_id');
+    if (assignedTo.present && legacyUserId.present) throw invalidHttp();
+    const ownerValue = assignedTo.present ? assignedTo.value : legacyUserId.value;
+    const requestedTeam = ownValue(body, 'team_id');
+    const command = {
+      action: 'transfer',
+      customerId: positiveInteger(req.params.id),
+      assigned_to: positiveInteger(ownerValue),
+      team_id: selectedTeamId(req, requestedTeam.present ? requestedTeam.value : undefined)
+    };
+    const reason = ownValue(body, 'reason_code');
+    if (reason.present) command.reason_code = reason.value;
+    return res.json(callMutation('mutateCustomerCustody', req, command));
+  }));
 
-  // Assign customer (admin only)
-  app.post('/api/customers/:id/assign', authMiddleware, (req, res) => {
-    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
-    const { user_id } = req.body;
-    const customer = crmAccess.getCustomer(db, req.params.id);
-    if (!customer) return crmAccess.notFound(res, 'Customer');
-    db.prepare('UPDATE customers SET assigned_to=?, is_public=0, assigned_at=datetime(\'now\') WHERE id=?').run(user_id, req.params.id);
-    businessKnowledge.archiveCustomer(db, db.prepare('SELECT * FROM customers WHERE id = ?').get(req.params.id), req.user);
-    res.json({ success: true });
-  });
+  app.post('/api/customers/:id/return-pool', authMiddleware, crmHandler((req, res) => {
+    return res.json(callMutation('mutateCustomerCustody', req, releaseCommand(req)));
+  }));
 
-  // Return to public pool
-  app.post('/api/customers/:id/return-pool', authMiddleware, (req, res) => {
-    const customer = crmAccess.getCustomer(db, req.params.id);
-    if (!customer) return crmAccess.notFound(res, 'Customer');
-    if (!crmAccess.canManageCustomer(req.user, customer)) return crmAccess.forbidden(res);
-    db.prepare("UPDATE customers SET assigned_to=NULL, is_public=1, updated_at=datetime('now') WHERE id=?").run(req.params.id);
-    businessKnowledge.archiveCustomer(db, db.prepare('SELECT * FROM customers WHERE id = ?').get(req.params.id), req.user);
-    res.json({ success: true });
-  });
-  app.post('/api/customers/:id/return', authMiddleware, (req, res) => {
-    const customer = crmAccess.getCustomer(db, req.params.id);
-    if (!customer) return crmAccess.notFound(res, 'Customer');
-    if (!crmAccess.canManageCustomer(req.user, customer)) return crmAccess.forbidden(res);
-    db.prepare("UPDATE customers SET assigned_to=NULL, is_public=1, updated_at=datetime('now') WHERE id=?").run(req.params.id);
-    businessKnowledge.archiveCustomer(db, db.prepare('SELECT * FROM customers WHERE id = ?').get(req.params.id), req.user);
-    res.json({ success: true });
-  });
+  app.post('/api/customers/:id/return', authMiddleware, crmHandler((req, res) => {
+    return res.json(callMutation('mutateCustomerCustody', req, releaseCommand(req)));
+  }));
 
-  // ============================================================
-  // OPPORTUNITY ROUTES (商机管理)
-  // ============================================================
+  app.get('/api/opportunities', authMiddleware, crmHandler((req, res) => {
+    const result = callQuery('listOpportunities', req, readCanonicalFilter(req.query, 'opportunity'));
+    const rows = result.items.map((item) => ({ ...item, brand_name: item.customer_brand_name }));
+    return res.json({ ...result, opportunities: rows, rows });
+  }));
 
-  app.get('/api/opportunities', authMiddleware, (req, res) => {
-    try {
-      const { customer_id, stage } = req.query;
-      let query = 'SELECT o.*, c.brand_name FROM opportunities o JOIN customers c ON o.customer_id = c.id WHERE 1=1';
-      let params = [];
-      if (customer_id) { query += ' AND o.customer_id = ?'; params.push(customer_id); }
-      if (stage) { query += ' AND o.stage = ?'; params.push(stage); }
-      if (req.user.role !== 'admin') { query += ' AND (o.created_by = ? OR c.assigned_to = ?)'; params.push(req.user.id, req.user.id); }
-      query += ' ORDER BY o.created_at DESC';
-      res.json({ opportunities: db.prepare(query).all(...params) });
-    } catch (e) { res.status(500).json({ error: e.message }); }
-  });
+  app.post('/api/opportunities', authMiddleware, crmHandler((req, res) => {
+    return res.json(callMutation('createOrUpdateOpportunity', req, opportunityCreateCommand(req)));
+  }));
 
-  app.post('/api/opportunities', authMiddleware, (req, res) => {
-    try {
-      const { customer_id, name, stage, value, win_probability, product_name, channel_type, expected_close_date, notes } = req.body;
-      const customer = crmAccess.getCustomer(db, customer_id);
-      if (!customer) return crmAccess.notFound(res, 'Customer');
-      if (!crmAccess.canManageCustomer(req.user, customer)) return crmAccess.forbidden(res);
-      const result = db.prepare(`INSERT INTO opportunities (customer_id, name, stage, value, win_probability, product_name, channel_type, expected_close_date, notes, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-        .run(customer_id, name, stage || 'discovery', value || 0, win_probability || 50, product_name, channel_type, expected_close_date, notes, req.user.id);
-      businessKnowledge.archiveOpportunity(db, db.prepare('SELECT * FROM opportunities WHERE id = ?').get(result.lastInsertRowid), req.user);
-      res.json({ id: result.lastInsertRowid });
-    } catch (e) { res.status(500).json({ error: e.message }); }
-  });
-
-  app.put('/api/opportunities/:id', authMiddleware, (req, res) => {
-    try {
-      const opportunity = crmAccess.getOpportunityWithCustomer(db, req.params.id);
-      if (!opportunity) return crmAccess.notFound(res, 'Opportunity');
-      if (!crmAccess.canManageOpportunity(req.user, opportunity)) return crmAccess.forbidden(res);
-      const { name, stage, value, win_probability, product_name, channel_type, expected_close_date, notes } = req.body;
-      db.prepare(`UPDATE opportunities SET name=COALESCE(?,name), stage=COALESCE(?,stage), value=COALESCE(?,value), win_probability=COALESCE(?,win_probability), product_name=COALESCE(?,product_name), channel_type=COALESCE(?,channel_type), expected_close_date=COALESCE(?,expected_close_date), notes=COALESCE(?,notes), updated_at=datetime('now') WHERE id=?`)
-        .run(name, stage, value, win_probability, product_name, channel_type, expected_close_date, notes, req.params.id);
-      businessKnowledge.archiveOpportunity(db, db.prepare('SELECT * FROM opportunities WHERE id = ?').get(req.params.id), req.user);
-      res.json({ success: true });
-    } catch (e) { res.status(500).json({ error: e.message }); }
-  });
+  app.put('/api/opportunities/:id', authMiddleware, crmHandler((req, res) => {
+    return res.json(callMutation('createOrUpdateOpportunity', req, opportunityUpdateCommand(req)));
+  }));
 
   app.delete('/api/opportunities/:id', authMiddleware, (req, res) => {
-    const opportunityId = canonicalDeleteId(req.params.id);
-    if (opportunityId === null) {
-      return deleteErrorResponse(
-        res,
-        req,
-        404,
-        'Opportunity not found',
-        'RECORD_NOT_FOUND'
-      );
+    return sendProblem(res, req, new CrmHttpError('CRM_HARD_DELETE_UNAVAILABLE', 409));
+  });
+
+  function unavailableSalesScope(req, res) {
+    return sendProblem(res, req, new CrmHttpError('CRM_SALES_SCOPE_UNAVAILABLE', 409));
+  }
+
+  app.get('/api/sales-targets', authMiddleware, unavailableSalesScope);
+  app.post('/api/sales-targets', authMiddleware, unavailableSalesScope);
+  app.get('/api/sales-performance', authMiddleware, unavailableSalesScope);
+
+  app.get('/api/customers/sea-pool', authMiddleware, crmHandler((req, res) => {
+    const filter = readCanonicalFilter(req.query, 'customer');
+    if (Object.prototype.hasOwnProperty.call(filter, 'scope') && filter.scope !== 'public_pool') {
+      throw invalidHttp();
     }
-    try {
-      const remove = db.transaction(() => {
-        const opportunity = crmAccess.getOpportunityWithCustomer(db, opportunityId);
-        if (!opportunity) return { outcome: 'not_found' };
-        const actor = db.prepare(`
-          SELECT id,role
-          FROM users
-          WHERE id=? AND is_active=1
-        `).get(req.user.id);
-        if (!actor || !crmAccess.canManageOpportunity(actor, opportunity)) {
-          return { outcome: 'forbidden' };
-        }
-        const dependencies = campaignAccess.listCrmDependencies(db, {
-          targetType: 'opportunity',
-          targetId: opportunityId
-        });
-        if (dependencies.length) {
-          return { outcome: 'dependencies', dependencies };
-        }
-        const deleted = db.prepare('DELETE FROM opportunities WHERE id=?').run(opportunityId);
-        if (deleted.changes !== 1) {
-          throw new Error('Opportunity delete lost its target');
-        }
-        return { outcome: 'deleted' };
-      });
-      const result = remove.immediate();
-      if (result.outcome === 'not_found') {
-        return deleteErrorResponse(
-          res,
-          req,
-          404,
-          'Opportunity not found',
-          'RECORD_NOT_FOUND'
-        );
-      }
-      if (result.outcome === 'forbidden') {
-        return deleteErrorResponse(
-          res,
-          req,
-          403,
-          'Forbidden',
-          'RECORD_FORBIDDEN'
-        );
-      }
-      if (result.outcome === 'dependencies') {
-        return dependencyResponse(
-          res,
-          req,
-          'Opportunity',
-          'OPPORTUNITY_HAS_DEPENDENCIES',
-          result.dependencies
-        );
-      }
-      return res.json({ success: true });
-    } catch (error) {
-      if (isForeignKeyConstraint(error)) {
-        return dependencyResponse(
-          res,
-          req,
-          'Opportunity',
-          'OPPORTUNITY_HAS_DEPENDENCIES',
-          [{ type: 'unknown', count: null }]
-        );
-      }
-      return deleteErrorResponse(
-        res,
-        req,
-        500,
-        'Opportunity deletion failed',
-        'AUDIT_PERSISTENCE_FAILED'
-      );
-    }
-  });
+    filter.scope = 'public_pool';
+    const result = callQuery('listCustomers', req, filter);
+    return res.json({ ...result, customers: result.items });
+  }));
 
-  // ============================================================
-  // SALES TARGETS (业绩管理)
-  // ============================================================
+  app.post('/api/customers/:id/claim', authMiddleware, crmHandler((req, res) => {
+    const body = plainRecord(req.body || {});
+    const requestedTeam = ownValue(body, 'team_id');
+    const command = {
+      action: 'claim',
+      customerId: positiveInteger(req.params.id),
+      team_id: selectedTeamId(req, requestedTeam.present ? requestedTeam.value : undefined)
+    };
+    return res.json(callMutation('mutateCustomerCustody', req, command));
+  }));
 
-  app.get('/api/sales-targets', authMiddleware, (req, res) => {
-    try {
-      const targets = req.user.role === 'admin'
-        ? db.prepare('SELECT st.*, u.display_name FROM sales_targets st LEFT JOIN users u ON st.user_id = u.id ORDER BY st.period_start DESC').all()
-        : db.prepare('SELECT * FROM sales_targets WHERE user_id = ? OR team_name = (SELECT department FROM users WHERE id = ?) ORDER BY period_start DESC').all(req.user.id, req.user.id);
-      res.json({ targets });
-    } catch (e) { res.status(500).json({ error: e.message }); }
-  });
+  app.get('/api/customers/dashboard', authMiddleware, crmHandler((req, res) => {
+    const result = callQuery('getCrmDashboard', req, readCanonicalFilter(req.query, 'customer'));
+    return res.json({ ...result, stages: STAGE_LABELS });
+  }));
 
-  app.post('/api/sales-targets', authMiddleware, (req, res) => {
-    try {
-      if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
-      const { user_id, team_name, target_type, target_value, period, period_start, period_end } = req.body;
-      const result = db.prepare('INSERT INTO sales_targets (user_id, team_name, target_type, target_value, period, period_start, period_end) VALUES (?, ?, ?, ?, ?, ?, ?)')
-        .run(user_id || null, team_name || null, target_type, target_value, period, period_start, period_end);
-      res.json({ id: result.lastInsertRowid });
-    } catch (e) { res.status(500).json({ error: e.message }); }
-  });
+  function legacyDashboardAlias(req, res) {
+    const result = callQuery('getCrmDashboard', req, readCanonicalFilter(req.query, 'customer'));
+    return res.json(result);
+  }
 
-  // ============================================================
-  // SALES PERFORMANCE (销售业绩)
-  // ============================================================
+  app.get('/api/dashboard/sales', authMiddleware, crmHandler(legacyDashboardAlias));
+  app.get('/api/dashboard/stats', authMiddleware, crmHandler(legacyDashboardAlias));
 
-  app.get('/api/sales-performance', authMiddleware, (req, res) => {
-    try {
-      const { period_start, period_end } = req.query;
-      const start = period_start || new Date(Date.now() - 30 * 86400000).toISOString().substring(0, 10);
-      const end = period_end || new Date().toISOString().substring(0, 10);
-      const performance = db.prepare(`
-        SELECT u.id, u.display_name, u.department,
-          COUNT(DISTINCT c.id) as new_customers,
-          COUNT(DISTINCT CASE WHEN c.stage='won' THEN c.id END) as won_deals,
-          COALESCE(SUM(CASE WHEN c.stage='won' THEN COALESCE(c.opportunity_value,0) END), 0) as revenue,
-          COALESCE(SUM(o.value), 0) as pipeline_value
-        FROM users u
-        LEFT JOIN customers c ON c.assigned_to = u.id AND c.created_at BETWEEN ? AND ?
-        LEFT JOIN opportunities o ON o.created_by = u.id AND o.stage NOT IN ('lost')
-        GROUP BY u.id ORDER BY revenue DESC
-      `).all(start, end);
-      res.json({ performance, period: { start, end } });
-    } catch (e) { res.status(500).json({ error: e.message }); }
-  });
+  app.post('/api/customers/:customerId/contacts', authMiddleware, crmHandler((req, res) => {
+    const body = plainRecord(req.body || {});
+    const command = {
+      action: 'create',
+      customerId: positiveInteger(req.params.customerId),
+      values: projectValues(body, CONTACT_VALUE_FIELDS)
+    };
+    return res.json(callMutation('mutateCustomerContact', req, command));
+  }));
 
-  // ============================================================
-  // PUBLIC POOL (公海池)
-  // ============================================================
+  app.put('/api/customers/:customerId/contacts/:contactId', authMiddleware, crmHandler((req, res) => {
+    const body = plainRecord(req.body || {});
+    const command = {
+      action: 'update',
+      customerId: positiveInteger(req.params.customerId),
+      contactId: positiveInteger(req.params.contactId),
+      values: projectValues(body, CONTACT_VALUE_FIELDS)
+    };
+    return res.json(callMutation('mutateCustomerContact', req, command));
+  }));
 
-  app.get('/api/customers/sea-pool', authMiddleware, (req, res) => {
-    try {
-      const customers = db.prepare("SELECT * FROM customers WHERE is_public = 1 AND assigned_to IS NULL ORDER BY updated_at DESC").all();
-      res.json({ customers });
-    } catch (e) { res.status(500).json({ error: e.message }); }
-  });
+  app.post('/api/customers/:customerId/contacts/:contactId/archive', authMiddleware, crmHandler((req, res) => {
+    const command = {
+      action: 'archive',
+      customerId: positiveInteger(req.params.customerId),
+      contactId: positiveInteger(req.params.contactId)
+    };
+    return res.json(callMutation('mutateCustomerContact', req, command));
+  }));
 
-  // Claim customer from public pool
-  app.post('/api/customers/:id/claim', authMiddleware, (req, res) => {
-    try {
-      const result = db.prepare("UPDATE customers SET assigned_to=?, is_public=0, assigned_at=datetime('now'), updated_at=datetime('now') WHERE id=? AND is_public=1 AND assigned_to IS NULL").run(req.user.id, req.params.id);
-      if (!result.changes) return res.status(409).json({ error: 'Customer is not available in public pool' });
-      businessKnowledge.archiveCustomer(db, db.prepare('SELECT * FROM customers WHERE id = ?').get(req.params.id), req.user);
-      res.json({ success: true });
-    } catch (e) { res.status(500).json({ error: e.message }); }
-  });
+  app.post('/api/customers/:customerId/tasks', authMiddleware, crmHandler((req, res) => {
+    const body = plainRecord(req.body || {});
+    const command = {
+      action: 'create',
+      customerId: positiveInteger(req.params.customerId),
+      values: projectValues(body, TASK_VALUE_FIELDS, { due_at: compatibleTimestamp })
+    };
+    return res.json(callMutation('mutateCrmTask', req, command));
+  }));
 
-  // ============================================================
-  // DASHBOARD (仪表盘)
-  // ============================================================
+  function taskCloseCommand(req, action) {
+    const body = plainRecord(req.body || {});
+    const values = projectValues(body, ['completion_note']);
+    const command = {
+      action,
+      customerId: positiveInteger(req.params.customerId),
+      taskId: positiveInteger(req.params.taskId)
+    };
+    if (Object.keys(values).length) command.values = values;
+    return command;
+  }
 
-  app.get('/api/customers/dashboard', authMiddleware, (req, res) => {
-    try {
-      const userFilter = req.user.role !== 'admin' ? ' WHERE assigned_to = ' + req.user.id : '';
+  app.post('/api/customers/:customerId/tasks/:taskId/complete', authMiddleware, crmHandler((req, res) => {
+    return res.json(callMutation('mutateCrmTask', req, taskCloseCommand(req, 'complete')));
+  }));
 
-      const pipeline = db.prepare("SELECT stage, COUNT(*) as count, SUM(COALESCE(opportunity_value,0)) as total_value FROM customers" + userFilter + " GROUP BY stage").all();
-      const recentWon = db.prepare("SELECT * FROM customers WHERE stage='won'" + userFilter + " ORDER BY updated_at DESC LIMIT 5").all();
-      const upcoming = db.prepare("SELECT * FROM customers WHERE stage IN ('" + ACTIVE_STAGES + "')" + userFilter + " ORDER BY updated_at DESC LIMIT 5").all();
+  app.post('/api/customers/:customerId/tasks/:taskId/cancel', authMiddleware, crmHandler((req, res) => {
+    return res.json(callMutation('mutateCrmTask', req, taskCloseCommand(req, 'cancel')));
+  }));
 
-      res.json({ pipeline, recentWon, upcoming, stages: STAGE_LABELS });
-    } catch (e) { res.status(500).json({ error: e.message }); }
-  });
-
+  app.post('/api/customers/:id/activity', authMiddleware, crmHandler((req, res) => {
+    const body = plainRecord(req.body || {});
+    const command = {
+      customerId: positiveInteger(req.params.id),
+      ...projectValues(body, ['action', 'reference_type'])
+    };
+    const reference = ownValue(body, 'reference_id');
+    if (reference.present) command.reference_id = positiveInteger(reference.value);
+    return res.json(callMutation('recordCustomerActivity', req, command));
+  }));
 };

@@ -250,9 +250,9 @@ const expectedRouteSources = Object.freeze([
 ]);
 
 const expectedRouteCountsBySource = Object.freeze({
-  'platform/server/server.js': 44,
+  'platform/server/server.js': 40,
   'platform/server/routes.js': 11,
-  'platform/server/routes_customers.js': 24,
+  'platform/server/routes_customers.js': 33,
   'platform/server/routes_brands.js': 4,
   'platform/server/routes_workflow.js': 22,
   'platform/server/services/public_assets_service.js': 12
@@ -647,7 +647,7 @@ test('generateManifest records every registered route contract in deterministic 
     duplicateFixturePath: fixturePath
   });
 
-  assert.equal(manifest.routeContracts.length, 117);
+  assert.equal(manifest.routeContracts.length, 122);
   assert.deepEqual([...new Set(manifest.routeContracts.map((route) => route.source))], expectedRouteSources);
 
   const routeCountsBySource = Object.fromEntries(
@@ -672,6 +672,11 @@ test('generateManifest records every registered route contract in deterministic 
   assert.ok(routeContracts.has('POST /api/influencers/export platform/server/routes.js'));
   assert.ok(routeContracts.has('GET /api/customers platform/server/routes_customers.js'));
   assert.ok(routeContracts.has('POST /api/customers/:id/claim platform/server/routes_customers.js'));
+  assert.ok(routeContracts.has('POST /api/customers/:id/activity platform/server/routes_customers.js'));
+  assert.ok(routeContracts.has('GET /api/dashboard/sales platform/server/routes_customers.js'));
+  assert.ok(routeContracts.has('GET /api/dashboard/stats platform/server/routes_customers.js'));
+  assert.ok(routeContracts.has('POST /api/customers/:customerId/contacts platform/server/routes_customers.js'));
+  assert.ok(routeContracts.has('POST /api/customers/:customerId/tasks platform/server/routes_customers.js'));
   assert.ok(routeContracts.has('POST /api/brands/enrich platform/server/routes_brands.js'));
   assert.ok(routeContracts.has('GET /api/brands/social-search platform/server/routes_brands.js'));
   assert.ok(routeContracts.has('GET /api/workflow/templates platform/server/routes_workflow.js'));
