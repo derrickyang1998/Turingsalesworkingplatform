@@ -41,7 +41,12 @@ const IDS = Object.freeze({
   leadA: 30001,
   leadB: 30002,
   leadDuplicate: 30003,
-  leadRollback: 30004
+  leadRollback: 30004,
+  taskDirect: 50001,
+  taskLinked: 50002,
+  taskCompleted: 50003,
+  taskCancelled: 50004,
+  taskUnrelated: 50005
 });
 
 const REGISTERED_MIGRATIONS = Object.freeze([
@@ -246,9 +251,10 @@ const MUTATION_WORKER_SOURCE = String.raw`
   parentPort.postMessage({ type: 'ready' });
   parentPort.once('message', () => {
     try {
+      const operation = workerData.operation || 'createOrUpdateCustomer';
       parentPort.postMessage({
         type: 'result',
-        value: customerService.createOrUpdateCustomer(db, workerData.options)
+        value: customerService[operation](db, workerData.options)
       });
     } catch (error) {
       parentPort.postMessage({
@@ -261,14 +267,15 @@ const MUTATION_WORKER_SOURCE = String.raw`
   });
 `;
 
-function createMutationWorker(databasePath, options) {
+function createMutationWorker(databasePath, options, operation = 'createOrUpdateCustomer') {
   const worker = new Worker(MUTATION_WORKER_SOURCE, {
     eval: true,
     workerData: {
       databaseModulePath: require.resolve('better-sqlite3'),
       servicePath: path.resolve(__dirname, '../services/crm_customer_service.js'),
       databasePath,
-      options
+      options,
+      operation
     }
   });
   let readyResolve;
@@ -308,6 +315,17 @@ function createMutationWorker(databasePath, options) {
 async function runConcurrentCreates(databasePath, leftOptions, rightOptions) {
   const left = createMutationWorker(databasePath, leftOptions);
   const right = createMutationWorker(databasePath, rightOptions);
+  await Promise.all([left.ready, right.ready]);
+  left.worker.postMessage('go');
+  right.worker.postMessage('go');
+  const values = await Promise.all([left.result, right.result]);
+  await Promise.all([left.exited, right.exited]);
+  return values;
+}
+
+async function runConcurrentCustody(databasePath, leftOptions, rightOptions) {
+  const left = createMutationWorker(databasePath, leftOptions, 'mutateCustomerCustody');
+  const right = createMutationWorker(databasePath, rightOptions, 'mutateCustomerCustody');
   await Promise.all([left.ready, right.ready]);
   left.worker.postMessage('go');
   right.worker.postMessage('go');
@@ -388,6 +406,51 @@ function insertOpportunity(db, {
     teamId,
     ownerUserId
   );
+}
+
+function insertCrmTask(db, {
+  id,
+  customerId,
+  opportunityId = null,
+  ownerUserId = IDS.ownerA,
+  teamId = IDS.teamA1,
+  status = 'open'
+}) {
+  const completed = status === 'completed';
+  db.prepare(`
+    INSERT INTO crm_tasks (
+      id,org_id,team_id,customer_id,opportunity_id,owner_user_id,
+      title,description,due_at,status,source,completed_at,completed_by,
+      completion_note,created_by,created_at,updated_at
+    ) VALUES (?,?,?,?,?,?,?,NULL,?,?,?,?,?,NULL,?,?,?)
+  `).run(
+    id,
+    IDS.orgA,
+    teamId,
+    customerId,
+    opportunityId,
+    ownerUserId,
+    `Task ${id}`,
+    FUTURE_AT,
+    status,
+    'manual',
+    completed ? FIXED_AT : null,
+    completed ? ownerUserId : null,
+    ownerUserId,
+    FIXED_AT,
+    FIXED_AT
+  );
+}
+
+function customerCustody(actorUserId, command, overrides = {}) {
+  return {
+    actorUserId,
+    organizationId: IDS.orgA,
+    requestId: `custody-${command.action}-${command.customerId}-${actorUserId}`,
+    correlationId: 'customer-custody-flow',
+    command,
+    ...overrides
+  };
 }
 
 function publicError(error) {
@@ -574,12 +637,12 @@ test('authorization: public and quarantined custody expose only their approved c
   ));
   assert.equal(publicProfile.code, 'CRM_CUSTOMER_FORBIDDEN');
 
-  const claim = captureError(() => service.mutateCustomerCustody(db, {
+  const claim = service.mutateCustomerCustody(db, {
     actorUserId: IDS.teammateA,
     organizationId: IDS.orgA,
     command: { action: 'claim', customerId: IDS.publicA, team_id: IDS.teamA1 }
-  }));
-  assert.equal(claim.code, 'CRM_MUTATION_INVALID');
+  });
+  assert.equal(claim.action, 'claimed');
 
   const ordinaryRepair = captureError(() => service.mutateCustomerCustody(db, {
     actorUserId: IDS.ownerA,
@@ -594,7 +657,7 @@ test('authorization: public and quarantined custody expose only their approved c
   }));
   assert.equal(ordinaryRepair.code, 'CRM_CUSTOMER_FORBIDDEN');
 
-  const adminRepair = captureError(() => service.mutateCustomerCustody(db, {
+  const adminRepair = service.mutateCustomerCustody(db, {
     actorUserId: IDS.orgAdminA,
     organizationId: IDS.orgA,
     command: {
@@ -604,8 +667,8 @@ test('authorization: public and quarantined custody expose only their approved c
       team_id: IDS.teamA1,
       reason_code: 'legacy_custody_repair'
     }
-  }));
-  assert.equal(adminRepair.code, 'CRM_MUTATION_INVALID');
+  });
+  assert.equal(adminRepair.action, 'repaired');
 });
 
 test('authorization: inactive owner custody matches the read-model quarantine policy', (t) => {
@@ -616,7 +679,7 @@ test('authorization: inactive owner custody matches the read-model quarantine po
   ));
   assert.equal(profile.code, 'CRM_CUSTOMER_FORBIDDEN');
 
-  const repair = captureError(() => service.mutateCustomerCustody(db, {
+  const repair = service.mutateCustomerCustody(db, {
     actorUserId: IDS.orgAdminA,
     organizationId: IDS.orgA,
     command: {
@@ -626,8 +689,8 @@ test('authorization: inactive owner custody matches the read-model quarantine po
       team_id: IDS.teamA1,
       reason_code: 'legacy_custody_repair'
     }
-  }));
-  assert.equal(repair.code, 'CRM_MUTATION_INVALID');
+  });
+  assert.equal(repair.action, 'repaired');
 });
 
 test('authorization: create authority is self-owned for members and delegated for organization admins', (t) => {
@@ -675,7 +738,7 @@ test('authorization: create authority is self-owned for members and delegated fo
 
 test('authorization: target assignment must be active and in the selected organization', (t) => {
   const db = openFixture(t);
-  const valid = captureError(() => service.mutateCustomerCustody(db, {
+  const valid = service.mutateCustomerCustody(db, {
     actorUserId: IDS.orgAdminA,
     organizationId: IDS.orgA,
     command: {
@@ -685,8 +748,8 @@ test('authorization: target assignment must be active and in the selected organi
       team_id: IDS.teamA1,
       reason_code: 'manager_assignment'
     }
-  }));
-  assert.equal(valid.code, 'CRM_MUTATION_INVALID');
+  });
+  assert.equal(valid.action, 'transferred');
 
   const crossOrganization = captureError(() => service.mutateCustomerCustody(db, {
     actorUserId: IDS.orgAdminA,
@@ -1814,4 +1877,336 @@ test('customer lifecycle: ignored stage compare-and-set cannot report false succ
   assert.equal(db.prepare('SELECT stage FROM customers WHERE id=?').get(IDS.ownedA).stage, 'lead');
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM customer_activity WHERE customer_id=?').get(IDS.ownedA).count, beforeActivity);
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM crm_audit_events WHERE request_id=?").get(options.requestId).count, 0);
+});
+
+test('customer custody: owner and organization admin release only with a closed reason', (t) => {
+  const db = openFixture(t);
+  const before = db.prepare('SELECT assigned_to,team_id,is_public FROM customers WHERE id=?').get(IDS.ownedA);
+  for (const command of [
+    { action: 'release', customerId: IDS.ownedA },
+    { action: 'release', customerId: IDS.ownedA, reason_code: 'free-form-reason' }
+  ]) {
+    const error = captureError(() => service.mutateCustomerCustody(
+      db,
+      customerCustody(IDS.ownerA, command)
+    ));
+    assert.equal(error.code, 'CRM_MUTATION_INVALID');
+  }
+  assert.deepEqual(db.prepare('SELECT assigned_to,team_id,is_public FROM customers WHERE id=?').get(IDS.ownedA), before);
+
+  const ownerOptions = customerCustody(IDS.ownerA, {
+    action: 'release',
+    customerId: IDS.ownedA,
+    reason_code: 'capacity_rebalance'
+  }, { requestId: 'custody-owner-release' });
+  const ownerRelease = service.mutateCustomerCustody(db, ownerOptions);
+  assert.equal(ownerRelease.action, 'released');
+  assert.deepEqual(ownerRelease.record, {
+    ...ownerRelease.record,
+    team_id: null,
+    assigned_to: null,
+    is_public: 1
+  });
+
+  const adminOptions = customerCustody(IDS.orgAdminA, {
+    action: 'release',
+    customerId: IDS.teammateOwnedA,
+    reason_code: 'territory_change'
+  }, { requestId: 'custody-admin-release' });
+  assert.equal(service.mutateCustomerCustody(db, adminOptions).action, 'released');
+
+  assert.equal(db.prepare(`
+    SELECT COUNT(*) AS count FROM customers
+    WHERE id IN (?,?) AND assigned_to IS NULL AND team_id IS NULL AND is_public=1
+  `).get(IDS.ownedA, IDS.teammateOwnedA).count, 2);
+  assert.deepEqual(JSON.parse(db.prepare(`
+    SELECT metadata_json FROM crm_audit_events
+    WHERE request_id=? AND event_type='customer_released_to_pool'
+  `).get(ownerOptions.requestId).metadata_json), {
+    reason_code: 'capacity_rebalance',
+    from_assigned_to: IDS.ownerA,
+    from_team_id: IDS.teamA1,
+    to_assigned_to: null,
+    to_team_id: null
+  });
+  assert.equal(db.prepare(`
+    SELECT COUNT(*) AS count FROM customer_activity
+    WHERE notes='customer_released_to_pool' AND customer_id IN (?,?)
+  `).get(IDS.ownedA, IDS.teammateOwnedA).count, 2);
+});
+
+test('customer custody: action-specific shapes and assignment pairs reject without mutation', (t) => {
+  const db = openFixture(t);
+  const before = db.prepare('SELECT * FROM customers WHERE id=?').get(IDS.ownedA);
+  for (const command of [
+    { action: 'release', customerId: IDS.ownedA, team_id: IDS.teamA1, reason_code: 'capacity_rebalance' },
+    { action: 'claim', customerId: IDS.publicA, team_id: IDS.teamA1, reason_code: 'manager_assignment' },
+    { action: 'transfer', customerId: IDS.ownedA, assigned_to: IDS.teammateA, team_id: IDS.teamA1 },
+    { action: 'transfer', customerId: IDS.ownedA, assigned_to: IDS.inactiveOwnerA, team_id: IDS.teamA1, reason_code: 'manager_assignment' },
+    { action: 'transfer', customerId: IDS.ownedA, assigned_to: IDS.teammateA, team_id: IDS.teamA2, reason_code: 'manager_assignment' },
+    { action: 'transfer', customerId: IDS.ownedA, assigned_to: IDS.outsiderB, team_id: IDS.teamB1, reason_code: 'manager_assignment' }
+  ]) {
+    const error = captureError(() => service.mutateCustomerCustody(
+      db,
+      customerCustody(IDS.orgAdminA, command)
+    ));
+    assert.equal(error.code, 'CRM_MUTATION_INVALID');
+  }
+  assert.deepEqual(db.prepare('SELECT * FROM customers WHERE id=?').get(IDS.ownedA), before);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM crm_audit_events WHERE event_type LIKE 'customer_%'").get().count, 0);
+});
+
+test('customer custody: former owner denial commits one bounded decision and no custody write', (t) => {
+  const db = openFixture(t);
+  const options = customerCustody(IDS.originatorA, {
+    action: 'release',
+    customerId: IDS.transferredA,
+    reason_code: 'capacity_rebalance'
+  }, { requestId: 'custody-former-owner-denied' });
+  const error = captureError(() => service.mutateCustomerCustody(db, options));
+  assert.equal(error.code, 'CRM_CUSTOMER_FORBIDDEN');
+  assert.deepEqual(db.prepare('SELECT assigned_to,team_id,is_public FROM customers WHERE id=?').get(IDS.transferredA), {
+    assigned_to: IDS.ownerA,
+    team_id: IDS.teamA1,
+    is_public: 0
+  });
+  assert.deepEqual(db.prepare(`
+    SELECT customer_id,event_type,metadata_json FROM crm_audit_events WHERE request_id=?
+  `).get(options.requestId), {
+    customer_id: null,
+    event_type: 'mutation_denied',
+    metadata_json: '{"operation":"customer_release","outcome":"forbidden"}'
+  });
+});
+
+test('customer custody: two real connections produce one claim and one generic conflict', async (t) => {
+  const databasePath = createFileFixture(t);
+  const left = customerCustody(IDS.ownerA, {
+    action: 'claim',
+    customerId: IDS.publicA,
+    team_id: IDS.teamA1
+  }, { requestId: 'custody-claim-left' });
+  const right = customerCustody(IDS.teammateA, {
+    action: 'claim',
+    customerId: IDS.publicA,
+    team_id: IDS.teamA1
+  }, { requestId: 'custody-claim-right' });
+
+  const results = await runConcurrentCustody(databasePath, left, right);
+  const successes = results.filter((result) => result && result.ok === true);
+  const failures = results.filter((result) => result && result.code);
+  assert.equal(successes.length, 1);
+  assert.equal(successes[0].action, 'claimed');
+  assert.deepEqual(failures.map((failure) => failure.code), ['CRM_PUBLIC_POOL_UNAVAILABLE']);
+  assert.equal(Object.hasOwn(failures[0], 'retryable'), false);
+
+  const db = new Database(databasePath);
+  db.pragma('foreign_keys = ON');
+  try {
+    const customer = db.prepare('SELECT assigned_to,team_id,is_public FROM customers WHERE id=?').get(IDS.publicA);
+    assert.ok([IDS.ownerA, IDS.teammateA].includes(customer.assigned_to));
+    assert.equal(customer.team_id, IDS.teamA1);
+    assert.equal(customer.is_public, 0);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM customer_activity WHERE customer_id=? AND notes='customer_claimed'").get(IDS.publicA).count, 1);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM crm_audit_events WHERE customer_id=? AND event_type='customer_claimed'").get(IDS.publicA).count, 1);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM crm_audit_events WHERE event_type='mutation_denied'").get().count, 0);
+  } finally {
+    db.close();
+  }
+});
+
+test('customer custody: an owned row is indistinguishable from a losing public-pool claim', (t) => {
+  const db = openFixture(t);
+  const options = customerCustody(IDS.teammateA, {
+    action: 'claim',
+    customerId: IDS.ownedA,
+    team_id: IDS.teamA1
+  }, { requestId: 'custody-owned-claim' });
+  const error = captureError(() => service.mutateCustomerCustody(db, options));
+  assert.deepEqual(publicError(error), {
+    code: 'CRM_PUBLIC_POOL_UNAVAILABLE',
+    status: 409,
+    title: 'CRM public-pool customer is unavailable',
+    details: null
+  });
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM crm_audit_events WHERE request_id=?').get(options.requestId).count, 0);
+});
+
+test('customer custody: transfer reassigns only open direct and opportunity tasks', (t) => {
+  const db = openFixture(t);
+  insertOpportunity(db, { id: 40010, customerId: IDS.ownedA, stage: 'proposal' });
+  for (const task of [
+    { id: IDS.taskDirect, customerId: IDS.ownedA },
+    { id: IDS.taskLinked, customerId: IDS.ownedA, opportunityId: 40010 },
+    { id: IDS.taskCompleted, customerId: IDS.ownedA, status: 'completed' },
+    { id: IDS.taskCancelled, customerId: IDS.ownedA, status: 'cancelled' },
+    { id: IDS.taskUnrelated, customerId: IDS.transferredA }
+  ]) insertCrmTask(db, task);
+  const options = customerCustody(IDS.ownerA, {
+    action: 'transfer',
+    customerId: IDS.ownedA,
+    assigned_to: IDS.teammateA,
+    team_id: IDS.teamA1,
+    reason_code: 'manager_assignment'
+  }, { requestId: 'custody-transfer-open-tasks' });
+
+  const result = service.mutateCustomerCustody(db, options);
+  assert.equal(result.action, 'transferred');
+  assert.equal(result.record.assigned_to, IDS.teammateA);
+  assert.deepEqual(db.prepare('SELECT assigned_to,team_id,is_public FROM customers WHERE id=?').get(IDS.ownedA), {
+    assigned_to: IDS.teammateA,
+    team_id: IDS.teamA1,
+    is_public: 0
+  });
+  assert.deepEqual(db.prepare('SELECT id,owner_user_id,team_id,status FROM crm_tasks ORDER BY id').all(), [
+    { id: IDS.taskDirect, owner_user_id: IDS.teammateA, team_id: IDS.teamA1, status: 'open' },
+    { id: IDS.taskLinked, owner_user_id: IDS.teammateA, team_id: IDS.teamA1, status: 'open' },
+    { id: IDS.taskCompleted, owner_user_id: IDS.ownerA, team_id: IDS.teamA1, status: 'completed' },
+    { id: IDS.taskCancelled, owner_user_id: IDS.ownerA, team_id: IDS.teamA1, status: 'cancelled' },
+    { id: IDS.taskUnrelated, owner_user_id: IDS.ownerA, team_id: IDS.teamA1, status: 'open' }
+  ]);
+  assert.deepEqual(JSON.parse(db.prepare(`
+    SELECT metadata_json FROM crm_audit_events
+    WHERE request_id=? AND event_type='customer_transferred'
+  `).get(options.requestId).metadata_json), {
+    reason_code: 'manager_assignment',
+    from_assigned_to: IDS.ownerA,
+    from_team_id: IDS.teamA1,
+    to_assigned_to: IDS.teammateA,
+    to_team_id: IDS.teamA1
+  });
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM customer_activity WHERE customer_id=? AND notes='customer_transferred'").get(IDS.ownedA).count, 1);
+});
+
+test('customer custody: transfer and repair compare-and-set misses roll back without evidence', (t) => {
+  const db = openFixture(t);
+  db.exec(`
+    CREATE TRIGGER ignore_customer_transfer
+    BEFORE UPDATE OF assigned_to,team_id,is_public ON customers
+    WHEN OLD.id=${IDS.ownedA} AND NEW.assigned_to=${IDS.teammateA}
+    BEGIN SELECT RAISE(IGNORE); END;
+    CREATE TRIGGER ignore_customer_repair
+    BEFORE UPDATE OF assigned_to,team_id,is_public ON customers
+    WHEN OLD.id=${IDS.quarantinedA} AND NEW.assigned_to=${IDS.ownerA}
+    BEGIN SELECT RAISE(IGNORE); END;
+  `);
+  const beforeTransfer = db.prepare('SELECT * FROM customers WHERE id=?').get(IDS.ownedA);
+  const beforeRepair = db.prepare('SELECT * FROM customers WHERE id=?').get(IDS.quarantinedA);
+  const transfer = captureError(() => service.mutateCustomerCustody(db, customerCustody(IDS.ownerA, {
+    action: 'transfer',
+    customerId: IDS.ownedA,
+    assigned_to: IDS.teammateA,
+    team_id: IDS.teamA1,
+    reason_code: 'manager_assignment'
+  }, { requestId: 'custody-transfer-cas-miss' })));
+  const repair = captureError(() => service.mutateCustomerCustody(db, customerCustody(IDS.orgAdminA, {
+    action: 'repair',
+    customerId: IDS.quarantinedA,
+    assigned_to: IDS.ownerA,
+    team_id: IDS.teamA1,
+    reason_code: 'legacy_custody_repair'
+  }, { requestId: 'custody-repair-cas-miss' })));
+  assert.equal(transfer.code, 'CRM_CUSTODY_CONFLICT');
+  assert.equal(repair.code, 'CRM_CUSTODY_CONFLICT');
+  assert.deepEqual(db.prepare('SELECT * FROM customers WHERE id=?').get(IDS.ownedA), beforeTransfer);
+  assert.deepEqual(db.prepare('SELECT * FROM customers WHERE id=?').get(IDS.quarantinedA), beforeRepair);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM crm_audit_events WHERE request_id LIKE 'custody-%-cas-miss'").get().count, 0);
+});
+
+test('customer custody: only an organization admin repairs multiple quarantine shapes', (t) => {
+  const db = openFixture(t);
+  db.prepare('UPDATE customers SET assigned_to=NULL,team_id=?,is_public=1 WHERE id=?')
+    .run(IDS.teamA1, IDS.inactiveOwnedA);
+  const deniedOptions = customerCustody(IDS.ownerA, {
+    action: 'repair',
+    customerId: IDS.quarantinedA,
+    assigned_to: IDS.ownerA,
+    team_id: IDS.teamA1,
+    reason_code: 'legacy_custody_repair'
+  }, { requestId: 'custody-repair-denied' });
+  const denied = captureError(() => service.mutateCustomerCustody(db, deniedOptions));
+  assert.equal(denied.code, 'CRM_CUSTOMER_FORBIDDEN');
+  assert.deepEqual(JSON.parse(db.prepare('SELECT metadata_json FROM crm_audit_events WHERE request_id=?').get(deniedOptions.requestId).metadata_json), {
+    operation: 'customer_repair',
+    outcome: 'forbidden'
+  });
+
+  for (const [customerId, targetOwner] of [
+    [IDS.quarantinedA, IDS.ownerA],
+    [IDS.inactiveOwnedA, IDS.teammateA]
+  ]) {
+    const result = service.mutateCustomerCustody(db, customerCustody(IDS.orgAdminA, {
+      action: 'repair',
+      customerId,
+      assigned_to: targetOwner,
+      team_id: IDS.teamA1,
+      reason_code: 'legacy_custody_repair'
+    }));
+    assert.equal(result.action, 'repaired');
+    assert.deepEqual(db.prepare('SELECT assigned_to,team_id,is_public FROM customers WHERE id=?').get(customerId), {
+      assigned_to: targetOwner,
+      team_id: IDS.teamA1,
+      is_public: 0
+    });
+  }
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM crm_audit_events WHERE event_type='customer_custody_repaired'").get().count, 2);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM customer_activity WHERE notes='customer_custody_repaired'").get().count, 2);
+});
+
+test('customer custody: task activity and audit failures roll every custody effect back', (t) => {
+  const cases = [
+    {
+      name: 'task',
+      setup(db) {
+        insertCrmTask(db, { id: IDS.taskDirect, customerId: IDS.ownedA });
+        db.exec(`CREATE TRIGGER fail_custody_task BEFORE UPDATE ON crm_tasks
+          WHEN OLD.customer_id=${IDS.ownedA} AND OLD.status='open'
+          BEGIN SELECT RAISE(ABORT,'fixture task failure'); END`);
+      },
+      command: {
+        action: 'transfer',
+        customerId: IDS.ownedA,
+        assigned_to: IDS.teammateA,
+        team_id: IDS.teamA1,
+        reason_code: 'manager_assignment'
+      }
+    },
+    {
+      name: 'activity',
+      setup(db) {
+        db.exec(`CREATE TRIGGER fail_custody_activity BEFORE INSERT ON customer_activity
+          WHEN NEW.notes='customer_released_to_pool'
+          BEGIN SELECT RAISE(ABORT,'fixture activity failure'); END`);
+      },
+      command: { action: 'release', customerId: IDS.ownedA, reason_code: 'capacity_rebalance' }
+    },
+    {
+      name: 'audit',
+      setup(db) {
+        db.exec(`CREATE TRIGGER fail_custody_audit BEFORE INSERT ON crm_audit_events
+          WHEN NEW.event_type='customer_released_to_pool'
+          BEGIN SELECT RAISE(ABORT,'fixture audit failure'); END`);
+      },
+      command: { action: 'release', customerId: IDS.ownedA, reason_code: 'capacity_rebalance' }
+    }
+  ];
+
+  for (const failureCase of cases) {
+    const db = openFixture(t);
+    failureCase.setup(db);
+    const beforeCustomer = db.prepare('SELECT * FROM customers WHERE id=?').get(IDS.ownedA);
+    const beforeTasks = db.prepare('SELECT * FROM crm_tasks ORDER BY id').all();
+    const beforeActivity = db.prepare('SELECT COUNT(*) AS count FROM customer_activity').get().count;
+    const beforeAudit = db.prepare('SELECT COUNT(*) AS count FROM crm_audit_events').get().count;
+    const error = captureError(() => service.mutateCustomerCustody(db, customerCustody(
+      IDS.ownerA,
+      failureCase.command,
+      { requestId: `custody-rollback-${failureCase.name}` }
+    )));
+    assert.equal(error.code, 'CRM_MUTATION_FAILED');
+    assert.deepEqual(db.prepare('SELECT * FROM customers WHERE id=?').get(IDS.ownedA), beforeCustomer);
+    assert.deepEqual(db.prepare('SELECT * FROM crm_tasks ORDER BY id').all(), beforeTasks);
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM customer_activity').get().count, beforeActivity);
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM crm_audit_events').get().count, beforeAudit);
+  }
 });

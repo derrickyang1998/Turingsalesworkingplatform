@@ -27,6 +27,19 @@ const CUSTOMER_LIFECYCLE_REASONS = Object.freeze([
   'competitive_loss',
   'no_opportunity_exception'
 ]);
+const CUSTOMER_CUSTODY_REASONS = Object.freeze([
+  'capacity_rebalance',
+  'territory_change',
+  'manager_assignment',
+  'legacy_custody_repair',
+  'data_correction'
+]);
+const CUSTOMER_CUSTODY_KEYS = Object.freeze({
+  release: Object.freeze(['action', 'customerId', 'reason_code']),
+  claim: Object.freeze(['action', 'customerId', 'team_id']),
+  transfer: Object.freeze(['action', 'assigned_to', 'customerId', 'reason_code', 'team_id']),
+  repair: Object.freeze(['action', 'assigned_to', 'customerId', 'reason_code', 'team_id'])
+});
 const CUSTOMER_PROFILE_FIELDS = Object.freeze([
   'brand_name',
   'company_name',
@@ -1064,6 +1077,184 @@ function validateTargetAssignment(db, context, ownerUserId, teamId) {
   if (!isActiveAssignment(db, context.organization.id, ownerUserId, teamId)) throw invalidMutation();
 }
 
+function canonicalCustodyCommand(command, action) {
+  const expectedKeys = CUSTOMER_CUSTODY_KEYS[action];
+  if (!expectedKeys) throw invalidMutation();
+  const actualKeys = Object.keys(command).sort();
+  if (
+    actualKeys.length !== expectedKeys.length ||
+    actualKeys.some((key, index) => key !== expectedKeys[index])
+  ) throw invalidMutation();
+
+  if (action === 'claim') {
+    return Object.freeze({ action, customer_id: command.customerId, team_id: command.team_id });
+  }
+  if (
+    typeof command.reason_code !== 'string' ||
+    !CUSTOMER_CUSTODY_REASONS.includes(command.reason_code)
+  ) throw invalidMutation();
+  return Object.freeze({
+    action,
+    customer_id: command.customerId,
+    reason_code: command.reason_code,
+    ...(action === 'transfer' || action === 'repair'
+      ? { assigned_to: command.assigned_to, team_id: command.team_id }
+      : {})
+  });
+}
+
+function custodyMetadata(customer, assignedTo, teamId, reasonCode) {
+  return {
+    ...(reasonCode ? { reason_code: reasonCode } : {}),
+    from_assigned_to: customer.assigned_to,
+    from_team_id: customer.team_id,
+    to_assigned_to: assignedTo,
+    to_team_id: teamId
+  };
+}
+
+function writeCustodyEvidence(db, context, input, customer, eventType, activityAction, metadata) {
+  writeCustomerActivity(
+    db,
+    customer.id,
+    input.actorUserId,
+    activityAction,
+    publicCustomerStage(customer.stage),
+    eventType
+  );
+  writeAuditEvent(db, context, input, eventType, customer.id, metadata);
+}
+
+function custodySuccess(db, context, input, customerId, action) {
+  return customerSuccessResult(
+    readCustomer(db, context.organization.id, customerId),
+    action,
+    input
+  );
+}
+
+function releaseCustomerCustody(db, context, input, customer, command) {
+  const updated = db.prepare(`
+    UPDATE customers
+    SET assigned_to=NULL,team_id=NULL,is_public=1,updated_at=CURRENT_TIMESTAMP
+    WHERE id=? AND org_id=? AND is_public=0 AND assigned_to=? AND team_id=?
+  `).run(
+    customer.id,
+    context.organization.id,
+    customer.assigned_to,
+    customer.team_id
+  );
+  if (updated.changes !== 1) throw mutationError('CRM_CUSTODY_CONFLICT');
+  writeCustodyEvidence(
+    db,
+    context,
+    input,
+    customer,
+    'customer_released_to_pool',
+    'returned_to_pool',
+    custodyMetadata(customer, null, null, command.reason_code)
+  );
+  return custodySuccess(db, context, input, customer.id, 'released');
+}
+
+function claimCustomerCustody(db, context, input, customer, command) {
+  const updated = db.prepare(`
+    UPDATE customers
+    SET assigned_to=?,team_id=?,is_public=0,updated_at=CURRENT_TIMESTAMP
+    WHERE id=? AND org_id=? AND is_public=1 AND assigned_to IS NULL AND team_id IS NULL
+  `).run(
+    context.actor_user_id,
+    command.team_id,
+    customer.id,
+    context.organization.id
+  );
+  if (updated.changes !== 1) throw mutationError('CRM_PUBLIC_POOL_UNAVAILABLE');
+  writeCustodyEvidence(
+    db,
+    context,
+    input,
+    customer,
+    'customer_claimed',
+    'claimed',
+    custodyMetadata(customer, context.actor_user_id, command.team_id, null)
+  );
+  return custodySuccess(db, context, input, customer.id, 'claimed');
+}
+
+function transferCustomerCustody(db, context, input, customer, command) {
+  if (customer.assigned_to === command.assigned_to && customer.team_id === command.team_id) {
+    throw invalidMutation();
+  }
+  const updated = db.prepare(`
+    UPDATE customers
+    SET assigned_to=?,team_id=?,is_public=0,updated_at=CURRENT_TIMESTAMP
+    WHERE id=? AND org_id=? AND is_public=0 AND assigned_to=? AND team_id=?
+  `).run(
+    command.assigned_to,
+    command.team_id,
+    customer.id,
+    context.organization.id,
+    customer.assigned_to,
+    customer.team_id
+  );
+  if (updated.changes !== 1) throw mutationError('CRM_CUSTODY_CONFLICT');
+
+  const openTaskCount = db.prepare(`
+    SELECT COUNT(*) AS count FROM crm_tasks
+    WHERE org_id=? AND customer_id=? AND status='open'
+  `).get(context.organization.id, customer.id).count;
+  const tasks = db.prepare(`
+    UPDATE crm_tasks
+    SET owner_user_id=?,team_id=?,updated_at=CURRENT_TIMESTAMP
+    WHERE org_id=? AND customer_id=? AND status='open'
+  `).run(
+    command.assigned_to,
+    command.team_id,
+    context.organization.id,
+    customer.id
+  );
+  if (tasks.changes !== openTaskCount) throw mutationError('CRM_CUSTODY_CONFLICT');
+
+  writeCustodyEvidence(
+    db,
+    context,
+    input,
+    customer,
+    'customer_transferred',
+    'assigned',
+    custodyMetadata(customer, command.assigned_to, command.team_id, command.reason_code)
+  );
+  return custodySuccess(db, context, input, customer.id, 'transferred');
+}
+
+function repairCustomerCustody(db, context, input, customer, command) {
+  const updated = db.prepare(`
+    UPDATE customers
+    SET assigned_to=?,team_id=?,is_public=0,updated_at=CURRENT_TIMESTAMP
+    WHERE id=? AND org_id=?
+      AND assigned_to IS ? AND team_id IS ? AND is_public IS ?
+  `).run(
+    command.assigned_to,
+    command.team_id,
+    customer.id,
+    context.organization.id,
+    customer.assigned_to,
+    customer.team_id,
+    customer.is_public
+  );
+  if (updated.changes !== 1) throw mutationError('CRM_CUSTODY_CONFLICT');
+  writeCustodyEvidence(
+    db,
+    context,
+    input,
+    customer,
+    'customer_custody_repaired',
+    'custody_repaired',
+    custodyMetadata(customer, command.assigned_to, command.team_id, command.reason_code)
+  );
+  return custodySuccess(db, context, input, customer.id, 'repaired');
+}
+
 function authorizeCreate(db, context, input) {
   const command = input.command;
   if (!command.values || !positiveSafeInteger(command.values.assigned_to) || !positiveSafeInteger(command.values.team_id)) {
@@ -1104,26 +1295,31 @@ function authorizeCustomerCommand(db, context, input, operation) {
   if (operation === 'custody') {
     const action = command.action;
     if (action === 'claim') {
-      if (custody !== 'public') return forbiddenDecision(db, context, input, label);
-      validateTargetAssignment(db, context, context.actor_user_id, command.team_id);
-      if (!context.team_ids.includes(command.team_id)) return forbiddenDecision(db, context, input, label);
-      return unsupportedDecision();
+      if (custody !== 'public') {
+        return { error: mutationError('CRM_PUBLIC_POOL_UNAVAILABLE') };
+      }
+      const canonical = canonicalCustodyCommand(command, action);
+      validateTargetAssignment(db, context, context.actor_user_id, canonical.team_id);
+      return claimCustomerCustody(db, context, input, customer, canonical);
     }
     if (action === 'repair') {
       if (custody !== 'quarantined' || context.is_org_admin !== true) {
         return forbiddenDecision(db, context, input, label);
       }
-      validateTargetAssignment(db, context, command.assigned_to, command.team_id);
-      return unsupportedDecision();
+      const canonical = canonicalCustodyCommand(command, action);
+      validateTargetAssignment(db, context, canonical.assigned_to, canonical.team_id);
+      return repairCustomerCustody(db, context, input, customer, canonical);
     }
     if (action === 'release' || action === 'transfer') {
       if (!canManageProfile(context, customer, custody)) {
         return forbiddenDecision(db, context, input, label);
       }
+      const canonical = canonicalCustodyCommand(command, action);
       if (action === 'transfer') {
-        validateTargetAssignment(db, context, command.assigned_to, command.team_id);
+        validateTargetAssignment(db, context, canonical.assigned_to, canonical.team_id);
+        return transferCustomerCustody(db, context, input, customer, canonical);
       }
-      return unsupportedDecision();
+      return releaseCustomerCustody(db, context, input, customer, canonical);
     }
     throw invalidMutation();
   }
