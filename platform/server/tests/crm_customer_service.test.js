@@ -14,6 +14,8 @@ const { buildCustomerIdentity } = require('../services/crm_contract');
 
 const SERVER_ROOT = path.resolve(__dirname, '..');
 const FIXED_AT = '2026-08-09 00:00:00';
+const FUTURE_AT = '2099-01-01 09:00:00';
+const PAST_AT = '2000-01-01 09:00:00';
 const IDS = Object.freeze({
   orgA: 101,
   orgB: 102,
@@ -345,6 +347,47 @@ function customerCreate(actorUserId, brandName, overrides = {}) {
     },
     ...overrides
   };
+}
+
+function customerLifecycle(actorUserId, customerId, toStage, commandOverrides = {}) {
+  return {
+    actorUserId,
+    organizationId: IDS.orgA,
+    requestId: `lifecycle-${customerId}-${toStage}`,
+    correlationId: 'customer-lifecycle-flow',
+    command: {
+      customerId,
+      to_stage: toStage,
+      ...commandOverrides
+    }
+  };
+}
+
+function insertOpportunity(db, {
+  id,
+  customerId,
+  stage,
+  orgId = IDS.orgA,
+  teamId = IDS.teamA1,
+  ownerUserId = IDS.ownerA
+}) {
+  db.prepare(`
+    INSERT INTO opportunities (
+      id,customer_id,name,stage,value,win_probability,created_by,
+      created_at,updated_at,org_id,team_id,owner_user_id
+    ) VALUES (?,?,?,?,1000,100,?,?,?,?,?,?)
+  `).run(
+    id,
+    customerId,
+    `Opportunity ${id}`,
+    stage,
+    ownerUserId,
+    FIXED_AT,
+    FIXED_AT,
+    orgId,
+    teamId,
+    ownerUserId
+  );
 }
 
 function publicError(error) {
@@ -849,12 +892,13 @@ test('customer identity: another organization is neither a conflict nor an oracl
 test('customer identity: duplicate disclosure precedence is readable then public pool then restricted', (t) => {
   const db = openFixture(t);
   const identity = buildCustomerIdentity({ brand_name: 'Collision Brand', company_name: 'Collision Company' }).key;
+  const legacyStage = `legacy-private-stage-marker-${'x'.repeat(4096)}`;
   db.prepare(`
     UPDATE customers
     SET brand_name='Collision Brand',company_name='Collision Company',
-        normalized_identity_key=?,duplicate_enforced=0,stage='legacy_unknown'
+        normalized_identity_key=?,duplicate_enforced=0,stage=?
     WHERE id IN (?,?,?)
-  `).run(identity, IDS.ownedA, IDS.publicA, IDS.quarantinedA);
+  `).run(identity, legacyStage, IDS.ownedA, IDS.publicA, IDS.quarantinedA);
 
   const options = customerCreate(IDS.ownerA, 'Collision Brand');
   options.command.values.company_name = 'Collision Company';
@@ -870,7 +914,10 @@ test('customer identity: duplicate disclosure precedence is readable then public
       }
     }
   });
-  assert.equal(JSON.stringify(publicError(readable)).includes(identity), false);
+  const readablePayload = JSON.stringify(publicError(readable));
+  assert.equal(readablePayload.includes(identity), false);
+  assert.equal(readablePayload.includes('legacy-private-stage-marker'), false);
+  assert.ok(readablePayload.length < 1024);
 
   db.prepare('UPDATE customers SET normalized_identity_key=NULL WHERE id=?').run(IDS.ownedA);
   const publicPool = captureError(() => service.createOrUpdateCustomer(db, options));
@@ -1297,4 +1344,474 @@ test('customer identity: lead conversion audit failure rolls customer activity a
     status: 'new',
     converted_customer_id: null
   });
+});
+
+test('customer lifecycle: active forward and reasoned backward transitions share exact evidence', (t) => {
+  const db = openFixture(t);
+  const forward = service.transitionCustomerLifecycle(
+    db,
+    customerLifecycle(IDS.ownerA, IDS.ownedA, 'info_confirmed')
+  );
+  assert.equal(forward.action, 'stage_changed');
+  assert.equal(forward.record.stage, 'info_confirmed');
+  assert.equal(forward.record.duplicate_enforced, undefined);
+  assert.equal(Object.isFrozen(forward), true);
+
+  db.prepare("UPDATE customers SET stage='proposal',duplicate_enforced=1 WHERE id=?").run(IDS.ownedA);
+  const beforeActivity = db.prepare('SELECT COUNT(*) AS count FROM customer_activity WHERE customer_id=?').get(IDS.ownedA).count;
+  const missingReason = captureError(() => service.transitionCustomerLifecycle(
+    db,
+    customerLifecycle(IDS.ownerA, IDS.ownedA, 'analysis')
+  ));
+  assert.equal(missingReason.code, 'CRM_TRANSITION_INVALID');
+  assert.equal(db.prepare('SELECT stage FROM customers WHERE id=?').get(IDS.ownedA).stage, 'proposal');
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM customer_activity WHERE customer_id=?').get(IDS.ownedA).count, beforeActivity);
+
+  const options = customerLifecycle(IDS.ownerA, IDS.ownedA, 'analysis', {
+    reason_code: 'requirements_changed'
+  });
+  options.requestId = 'lifecycle-backward-success';
+  const backward = service.transitionCustomerLifecycle(db, options);
+  assert.equal(backward.action, 'stage_changed');
+  assert.deepEqual(db.prepare(`
+    SELECT action,stage_from,stage_to,notes
+    FROM customer_activity WHERE customer_id=? ORDER BY id DESC LIMIT 1
+  `).get(IDS.ownedA), {
+    action: 'stage_change',
+    stage_from: 'proposal',
+    stage_to: 'analysis',
+    notes: 'customer_stage_changed'
+  });
+  const audit = db.prepare(`
+    SELECT metadata_json FROM crm_audit_events
+    WHERE request_id=? AND event_type='customer_stage_changed'
+  `).get(options.requestId);
+  assert.deepEqual(JSON.parse(audit.metadata_json), {
+    from_stage: 'proposal',
+    to_stage: 'analysis',
+    reason_code: 'requirements_changed',
+    no_opportunity_exception: false,
+    changed_fields: []
+  });
+});
+
+test('customer lifecycle: pause requires a closed reason and an explicit future next action', (t) => {
+  const db = openFixture(t);
+  for (const commandOverrides of [
+    { reason_code: 'timeline_changed' },
+    { reason_code: 'timeline_changed', next_action_at: null },
+    { reason_code: 'timeline_changed', next_action_at: PAST_AT },
+    { reason_code: 'free_form_reason', next_action_at: FUTURE_AT }
+  ]) {
+    const error = captureError(() => service.transitionCustomerLifecycle(
+      db,
+      customerLifecycle(IDS.ownerA, IDS.ownedA, 'paused', commandOverrides)
+    ));
+    assert.equal(error.code, 'CRM_TRANSITION_INVALID');
+  }
+  assert.equal(db.prepare('SELECT stage FROM customers WHERE id=?').get(IDS.ownedA).stage, 'lead');
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM customer_activity WHERE customer_id=?').get(IDS.ownedA).count, 0);
+
+  const result = service.transitionCustomerLifecycle(db, customerLifecycle(
+    IDS.ownerA,
+    IDS.ownedA,
+    'paused',
+    { reason_code: 'timeline_changed', next_action_at: FUTURE_AT }
+  ));
+  assert.equal(result.record.stage, 'paused');
+  assert.deepEqual(db.prepare('SELECT stage,next_action_at,duplicate_enforced FROM customers WHERE id=?').get(IDS.ownedA), {
+    stage: 'paused',
+    next_action_at: FUTURE_AT,
+    duplicate_enforced: 0
+  });
+});
+
+test('customer lifecycle: won requires a same-organization won opportunity or the exact admin exception', (t) => {
+  const db = openFixture(t);
+  const noOpportunity = captureError(() => service.transitionCustomerLifecycle(
+    db,
+    customerLifecycle(IDS.ownerA, IDS.ownedA, 'won')
+  ));
+  assert.equal(noOpportunity.code, 'CRM_TRANSITION_INVALID');
+
+  const ordinaryException = captureError(() => service.transitionCustomerLifecycle(
+    db,
+    customerLifecycle(IDS.ownerA, IDS.ownedA, 'won', {
+      reason_code: 'no_opportunity_exception',
+      no_opportunity_exception: true
+    })
+  ));
+  assert.equal(ordinaryException.code, 'CRM_TRANSITION_INVALID');
+
+  insertOpportunity(db, {
+    id: 40002,
+    customerId: IDS.teammateOwnedA,
+    stage: 'won',
+    ownerUserId: IDS.teammateA
+  });
+  insertOpportunity(db, {
+    id: 40003,
+    customerId: IDS.ownedB,
+    stage: 'won',
+    orgId: IDS.orgB,
+    teamId: IDS.teamB1,
+    ownerUserId: IDS.outsiderB
+  });
+  const wrongAggregateEvidence = captureError(() => service.transitionCustomerLifecycle(
+    db,
+    customerLifecycle(IDS.ownerA, IDS.ownedA, 'won')
+  ));
+  assert.equal(wrongAggregateEvidence.code, 'CRM_TRANSITION_INVALID');
+
+  insertOpportunity(db, {
+    id: 40001,
+    customerId: IDS.ownedA,
+    stage: 'won'
+  });
+  const won = service.transitionCustomerLifecycle(
+    db,
+    customerLifecycle(IDS.ownerA, IDS.ownedA, 'won')
+  );
+  assert.equal(won.record.stage, 'won');
+  assert.equal(db.prepare('SELECT duplicate_enforced FROM customers WHERE id=?').get(IDS.ownedA).duplicate_enforced, 0);
+
+  const adminException = service.transitionCustomerLifecycle(db, customerLifecycle(
+    IDS.orgAdminA,
+    IDS.teammateOwnedA,
+    'won',
+    { reason_code: 'no_opportunity_exception', no_opportunity_exception: true }
+  ));
+  assert.equal(adminException.record.stage, 'won');
+});
+
+test('customer lifecycle: active and paused customers require a reason to become lost', (t) => {
+  const db = openFixture(t);
+  db.prepare("UPDATE customers SET stage='paused',duplicate_enforced=0 WHERE id=?").run(IDS.transferredA);
+  for (const customerId of [IDS.ownedA, IDS.transferredA]) {
+    const missingReason = captureError(() => service.transitionCustomerLifecycle(
+      db,
+      customerLifecycle(IDS.ownerA, customerId, 'lost')
+    ));
+    assert.equal(missingReason.code, 'CRM_TRANSITION_INVALID');
+    const result = service.transitionCustomerLifecycle(db, customerLifecycle(
+      IDS.ownerA,
+      customerId,
+      'lost',
+      { reason_code: 'competitive_loss' }
+    ));
+    assert.equal(result.record.stage, 'lost');
+  }
+});
+
+test('customer lifecycle: paused and lost reactivation require reason future action and duplicate enforcement', (t) => {
+  const db = openFixture(t);
+  db.prepare("UPDATE customers SET stage='paused',duplicate_enforced=0 WHERE id=?").run(IDS.ownedA);
+  db.prepare("UPDATE customers SET stage='lost',duplicate_enforced=0 WHERE id=?").run(IDS.transferredA);
+
+  for (const commandOverrides of [
+    { next_action_at: FUTURE_AT },
+    { reason_code: 'requirements_changed' },
+    { reason_code: 'requirements_changed', next_action_at: PAST_AT }
+  ]) {
+    const error = captureError(() => service.transitionCustomerLifecycle(
+      db,
+      customerLifecycle(IDS.ownerA, IDS.ownedA, 'proposal', commandOverrides)
+    ));
+    assert.equal(error.code, 'CRM_TRANSITION_INVALID');
+  }
+
+  const resumedPaused = service.transitionCustomerLifecycle(db, customerLifecycle(
+    IDS.ownerA,
+    IDS.ownedA,
+    'proposal',
+    { reason_code: 'requirements_changed', next_action_at: FUTURE_AT }
+  ));
+  assert.equal(resumedPaused.record.stage, 'proposal');
+  assert.deepEqual(db.prepare('SELECT next_action_at,duplicate_enforced FROM customers WHERE id=?').get(IDS.ownedA), {
+    next_action_at: FUTURE_AT,
+    duplicate_enforced: 1
+  });
+
+  const resumedLost = service.transitionCustomerLifecycle(db, customerLifecycle(
+    IDS.ownerA,
+    IDS.transferredA,
+    'lead',
+    { reason_code: 'data_correction', next_action_at: FUTURE_AT }
+  ));
+  assert.equal(resumedLost.record.stage, 'lead');
+  assert.equal(db.prepare('SELECT duplicate_enforced FROM customers WHERE id=?').get(IDS.transferredA).duplicate_enforced, 1);
+});
+
+test('customer lifecycle: same-state changes and won reopen are rejected without writes', (t) => {
+  const db = openFixture(t);
+  const noOp = captureError(() => service.transitionCustomerLifecycle(
+    db,
+    customerLifecycle(IDS.ownerA, IDS.ownedA, 'lead')
+  ));
+  assert.equal(noOp.code, 'CRM_TRANSITION_INVALID');
+
+  db.prepare("UPDATE customers SET stage='won',duplicate_enforced=0 WHERE id=?").run(IDS.ownedA);
+  const beforeActivity = db.prepare('SELECT COUNT(*) AS count FROM customer_activity WHERE customer_id=?').get(IDS.ownedA).count;
+  const reopen = captureError(() => service.transitionCustomerLifecycle(
+    db,
+    customerLifecycle(IDS.ownerA, IDS.ownedA, 'proposal', {
+      reason_code: 'data_correction',
+      next_action_at: FUTURE_AT
+    })
+  ));
+  assert.equal(reopen.code, 'CRM_TRANSITION_INVALID');
+  assert.equal(db.prepare('SELECT stage FROM customers WHERE id=?').get(IDS.ownedA).stage, 'won');
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM customer_activity WHERE customer_id=?').get(IDS.ownedA).count, beforeActivity);
+});
+
+test('customer lifecycle: unknown and null historical stages require organization-admin remediation', (t) => {
+  const db = openFixture(t);
+  const legacyStage = 'legacy-private-stage-marker';
+  db.prepare('UPDATE customers SET stage=?,duplicate_enforced=0 WHERE id=?').run(legacyStage, IDS.ownedA);
+  db.prepare('UPDATE customers SET stage=NULL,duplicate_enforced=0 WHERE id=?').run(IDS.transferredA);
+  const deniedOptions = customerLifecycle(IDS.ownerA, IDS.ownedA, 'lead', {
+    reason_code: 'data_correction',
+    next_action_at: FUTURE_AT
+  });
+  deniedOptions.requestId = 'legacy-stage-owner-denied';
+  const denied = captureError(() => service.transitionCustomerLifecycle(db, deniedOptions));
+  assert.equal(denied.code, 'CRM_CUSTOMER_FORBIDDEN');
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM crm_audit_events WHERE request_id=? AND event_type='mutation_denied'").get(deniedOptions.requestId).count, 1);
+  assert.equal(db.prepare('SELECT stage FROM customers WHERE id=?').get(IDS.ownedA).stage, legacyStage);
+
+  for (const customerId of [IDS.ownedA, IDS.transferredA]) {
+    const result = service.transitionCustomerLifecycle(db, customerLifecycle(
+      IDS.orgAdminA,
+      customerId,
+      'lead',
+      { reason_code: 'data_correction', next_action_at: FUTURE_AT }
+    ));
+    assert.equal(result.record.stage, 'lead');
+    assert.equal(db.prepare('SELECT duplicate_enforced FROM customers WHERE id=?').get(customerId).duplicate_enforced, 1);
+    assert.equal(db.prepare(`
+      SELECT stage_from FROM customer_activity
+      WHERE customer_id=? ORDER BY id DESC LIMIT 1
+    `).get(customerId).stage_from, 'legacy_unknown');
+    const audit = db.prepare(`
+      SELECT metadata_json FROM crm_audit_events
+      WHERE customer_id=? AND event_type='customer_stage_changed'
+      ORDER BY id DESC LIMIT 1
+    `).get(customerId);
+    assert.equal(JSON.parse(audit.metadata_json).from_stage, 'legacy_unknown');
+    assert.equal(audit.metadata_json.includes('private-stage-marker'), false);
+  }
+});
+
+test('customer lifecycle: profile updates preserve unknown-stage duplicate quarantine', (t) => {
+  const db = openFixture(t);
+  const legacyStage = 'legacy-private-stage-marker';
+  db.prepare(`
+    UPDATE customers
+    SET stage=?,normalized_identity_key=?,duplicate_enforced=0
+    WHERE id=?
+  `).run(legacyStage, buildCustomerIdentity({
+    brand_name: 'Owned A',
+    company_name: 'Owned A Company'
+  }).key, IDS.ownedA);
+
+  const result = service.createOrUpdateCustomer(db, {
+    actorUserId: IDS.ownerA,
+    organizationId: IDS.orgA,
+    command: {
+      mode: 'update',
+      customerId: IDS.ownedA,
+      values: { notes: 'Profile-only legacy update' }
+    }
+  });
+  assert.equal(result.action, 'updated');
+  assert.equal(result.record.stage, 'legacy_unknown');
+  assert.equal(JSON.stringify(result).includes(legacyStage), false);
+  assert.deepEqual(db.prepare('SELECT stage,duplicate_enforced FROM customers WHERE id=?').get(IDS.ownedA), {
+    stage: legacyStage,
+    duplicate_enforced: 0
+  });
+});
+
+test('customer lifecycle: reactivation duplicate commits evidence without stage or activity mutation', (t) => {
+  const db = openFixture(t);
+  const identity = buildCustomerIdentity({
+    brand_name: 'Reactivation Collision',
+    company_name: 'Collision Company'
+  }).key;
+  db.prepare(`
+    UPDATE customers
+    SET brand_name='Reactivation Collision',company_name='Collision Company',
+        stage='lost',normalized_identity_key=?,duplicate_enforced=0
+    WHERE id=?
+  `).run(identity, IDS.ownedA);
+  db.prepare(`
+    UPDATE customers
+    SET brand_name='Reactivation Collision',company_name='Collision Company',
+        stage='lead',normalized_identity_key=?,duplicate_enforced=1
+    WHERE id=?
+  `).run(identity, IDS.teammateOwnedA);
+  const beforeActivity = db.prepare('SELECT COUNT(*) AS count FROM customer_activity WHERE customer_id=?').get(IDS.ownedA).count;
+  const options = customerLifecycle(IDS.ownerA, IDS.ownedA, 'proposal', {
+    reason_code: 'requirements_changed',
+    next_action_at: FUTURE_AT
+  });
+  options.requestId = 'reactivation-duplicate';
+
+  const error = captureError(() => service.transitionCustomerLifecycle(db, options));
+  assert.equal(error.code, 'CRM_CUSTOMER_DUPLICATE');
+  assert.deepEqual(db.prepare('SELECT stage,duplicate_enforced FROM customers WHERE id=?').get(IDS.ownedA), {
+    stage: 'lost',
+    duplicate_enforced: 0
+  });
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM customer_activity WHERE customer_id=?').get(IDS.ownedA).count, beforeActivity);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM crm_audit_events WHERE request_id=? AND event_type='duplicate_detected'").get(options.requestId).count, 1);
+});
+
+test('customer lifecycle: mixed profile and transition commits one evidence set or rolls back together', (t) => {
+  const db = openFixture(t);
+  const success = service.createOrUpdateCustomer(db, {
+    actorUserId: IDS.ownerA,
+    organizationId: IDS.orgA,
+    requestId: 'mixed-lifecycle-success',
+    correlationId: 'mixed-lifecycle-flow',
+    command: {
+      mode: 'update',
+      customerId: IDS.ownedA,
+      values: { company_name: 'Mixed Lifecycle Company' },
+      transition: { to_stage: 'info_confirmed' }
+    }
+  });
+  assert.equal(success.action, 'stage_changed');
+  assert.deepEqual(db.prepare('SELECT company_name,stage FROM customers WHERE id=?').get(IDS.ownedA), {
+    company_name: 'Mixed Lifecycle Company',
+    stage: 'info_confirmed'
+  });
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM crm_audit_events WHERE request_id='mixed-lifecycle-success' AND event_type='customer_stage_changed'").get().count, 1);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM crm_audit_events WHERE request_id='mixed-lifecycle-success' AND event_type='customer_updated'").get().count, 0);
+
+  const before = db.prepare('SELECT brand_name,stage,normalized_identity_key FROM customers WHERE id=?').get(IDS.transferredA);
+  const beforeActivity = db.prepare('SELECT COUNT(*) AS count FROM customer_activity WHERE customer_id=?').get(IDS.transferredA).count;
+  db.exec(`
+    CREATE TRIGGER reject_mixed_lifecycle_audit
+    BEFORE INSERT ON crm_audit_events
+    WHEN NEW.event_type='customer_stage_changed'
+    BEGIN
+      SELECT RAISE(ABORT,'secret mixed lifecycle failure');
+    END
+  `);
+  const failed = captureError(() => service.createOrUpdateCustomer(db, {
+    actorUserId: IDS.ownerA,
+    organizationId: IDS.orgA,
+    requestId: 'mixed-lifecycle-rollback',
+    command: {
+      mode: 'update',
+      customerId: IDS.transferredA,
+      values: { brand_name: 'Must Roll Back' },
+      transition: { to_stage: 'info_confirmed' }
+    }
+  }));
+  assert.equal(failed.code, 'CRM_MUTATION_FAILED');
+  assert.equal(JSON.stringify(publicError(failed)).includes('secret'), false);
+  assert.deepEqual(db.prepare('SELECT brand_name,stage,normalized_identity_key FROM customers WHERE id=?').get(IDS.transferredA), before);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM customer_activity WHERE customer_id=?').get(IDS.transferredA).count, beforeActivity);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM crm_audit_events WHERE request_id='mixed-lifecycle-rollback'").get().count, 0);
+});
+
+test('customer lifecycle: nested transition permits omitted values and rejects conflicting next-action sources', (t) => {
+  const db = openFixture(t);
+  const transitionOnly = service.createOrUpdateCustomer(db, {
+    actorUserId: IDS.ownerA,
+    organizationId: IDS.orgA,
+    requestId: 'nested-transition-only',
+    command: {
+      mode: 'update',
+      customerId: IDS.ownedA,
+      transition: { to_stage: 'info_confirmed' }
+    }
+  });
+  assert.equal(transitionOnly.action, 'stage_changed');
+  assert.equal(transitionOnly.record.stage, 'info_confirmed');
+
+  const before = db.prepare('SELECT * FROM customers WHERE id=?').get(IDS.transferredA);
+  const conflicting = captureError(() => service.createOrUpdateCustomer(db, {
+    actorUserId: IDS.ownerA,
+    organizationId: IDS.orgA,
+    requestId: 'nested-next-action-conflict',
+    command: {
+      mode: 'update',
+      customerId: IDS.transferredA,
+      values: { next_action_at: FUTURE_AT },
+      transition: {
+        to_stage: 'paused',
+        reason_code: 'timeline_changed',
+        next_action_at: '2099-02-01 09:00:00'
+      }
+    }
+  }));
+  assert.equal(conflicting.code, 'CRM_MUTATION_INVALID');
+  assert.deepEqual(db.prepare('SELECT * FROM customers WHERE id=?').get(IDS.transferredA), before);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM crm_audit_events WHERE request_id='nested-next-action-conflict'").get().count, 0);
+});
+
+test('customer lifecycle: mixed duplicate rejection preserves every customer column', (t) => {
+  const db = openFixture(t);
+  const identity = buildCustomerIdentity({
+    brand_name: 'Mixed Duplicate Brand',
+    company_name: 'Mixed Duplicate Company'
+  }).key;
+  db.prepare(`
+    UPDATE customers
+    SET brand_name='Mixed Duplicate Brand',company_name='Mixed Duplicate Company',
+        normalized_identity_key=?,duplicate_enforced=1,stage='lead'
+    WHERE id=?
+  `).run(identity, IDS.teammateOwnedA);
+  db.prepare("UPDATE customers SET stage='lost',duplicate_enforced=0 WHERE id=?").run(IDS.ownedA);
+  const before = db.prepare('SELECT * FROM customers WHERE id=?').get(IDS.ownedA);
+  const beforeActivity = db.prepare('SELECT COUNT(*) AS count FROM customer_activity WHERE customer_id=?').get(IDS.ownedA).count;
+  const options = {
+    actorUserId: IDS.ownerA,
+    organizationId: IDS.orgA,
+    requestId: 'mixed-reactivation-duplicate',
+    command: {
+      mode: 'update',
+      customerId: IDS.ownedA,
+      values: {
+        brand_name: 'Mixed Duplicate Brand',
+        company_name: 'Mixed Duplicate Company',
+        notes: 'Must not persist'
+      },
+      transition: {
+        to_stage: 'proposal',
+        reason_code: 'requirements_changed',
+        next_action_at: FUTURE_AT
+      }
+    }
+  };
+
+  const error = captureError(() => service.createOrUpdateCustomer(db, options));
+  assert.equal(error.code, 'CRM_CUSTOMER_DUPLICATE');
+  assert.deepEqual(db.prepare('SELECT * FROM customers WHERE id=?').get(IDS.ownedA), before);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM customer_activity WHERE customer_id=?').get(IDS.ownedA).count, beforeActivity);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM crm_audit_events WHERE request_id=? AND event_type='duplicate_detected'").get(options.requestId).count, 1);
+});
+
+test('customer lifecycle: ignored stage compare-and-set cannot report false success or write evidence', (t) => {
+  const db = openFixture(t);
+  db.exec(`
+    CREATE TRIGGER ignore_customer_stage_update
+    BEFORE UPDATE OF stage ON customers
+    WHEN OLD.id=${IDS.ownedA}
+    BEGIN
+      SELECT RAISE(IGNORE);
+    END
+  `);
+  const beforeActivity = db.prepare('SELECT COUNT(*) AS count FROM customer_activity WHERE customer_id=?').get(IDS.ownedA).count;
+  const options = customerLifecycle(IDS.ownerA, IDS.ownedA, 'info_confirmed');
+  options.requestId = 'lifecycle-cas-ignored';
+
+  const error = captureError(() => service.transitionCustomerLifecycle(db, options));
+  assert.equal(error.code, 'CRM_TRANSITION_INVALID');
+  assert.equal(db.prepare('SELECT stage FROM customers WHERE id=?').get(IDS.ownedA).stage, 'lead');
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM customer_activity WHERE customer_id=?').get(IDS.ownedA).count, beforeActivity);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM crm_audit_events WHERE request_id=?").get(options.requestId).count, 0);
 });

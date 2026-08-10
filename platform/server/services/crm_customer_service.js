@@ -8,14 +8,25 @@ const {
   CUSTOMER_CUSTODY_CASE_SQL
 } = require('./crm_scope_service');
 const {
+  CUSTOMER_LIFECYCLE_REGISTRY,
   CrmContractError,
+  assertCustomerLifecycle,
   assertCustomerPriority,
   buildCustomerIdentity
 } = require('./crm_contract');
 
 const SAFE_IDENTIFIER = /^[A-Za-z0-9._:/-]+$/;
 const SQLITE_TIMESTAMP = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
-const TERMINAL_CUSTOMER_STAGES = new Set(['paused', 'won', 'lost']);
+const CUSTOMER_LIFECYCLE_REASONS = Object.freeze([
+  'requirements_changed',
+  'budget_changed',
+  'timeline_changed',
+  'stakeholder_changed',
+  'data_correction',
+  'no_response',
+  'competitive_loss',
+  'no_opportunity_exception'
+]);
 const CUSTOMER_PROFILE_FIELDS = Object.freeze([
   'brand_name',
   'company_name',
@@ -176,6 +187,10 @@ function mutationError(code, details) {
 
 function invalidMutation() {
   return mutationError('CRM_MUTATION_INVALID');
+}
+
+function invalidTransition() {
+  return mutationError('CRM_TRANSITION_INVALID');
 }
 
 function deepFreeze(value) {
@@ -434,9 +449,10 @@ function writeAuditEvent(db, context, input, eventType, customerId, metadata) {
   );
 }
 
-function customerFinalState(command, currentCustomer) {
+function customerFinalState(command, currentCustomer, lifecycle = null) {
   const creating = command.mode === 'create';
-  if (!command.values) throw invalidMutation();
+  const values = command.values || Object.freeze({});
+  if (creating && !command.values) throw invalidMutation();
   if (creating) {
     if (
       Object.hasOwn(command, 'customerId') ||
@@ -445,19 +461,19 @@ function customerFinalState(command, currentCustomer) {
   } else {
     if (
       Object.hasOwn(command, 'sourceLeadId') ||
-      Object.hasOwn(command, 'transition') ||
-      Object.hasOwn(command.values, 'assigned_to') ||
-      Object.hasOwn(command.values, 'team_id')
+      (Object.hasOwn(command, 'transition') && !lifecycle) ||
+      Object.hasOwn(values, 'assigned_to') ||
+      Object.hasOwn(values, 'team_id')
     ) throw invalidMutation();
   }
 
-  const changedFields = Object.keys(command.values).sort();
+  const changedFields = Object.keys(values).sort();
   const profileFields = changedFields.filter((field) => CUSTOMER_PROFILE_FIELDS.includes(field));
-  if (!creating && profileFields.length === 0) throw invalidMutation();
+  if (!creating && profileFields.length === 0 && !lifecycle) throw invalidMutation();
 
   function mergedText(field, required = false) {
-    if (Object.hasOwn(command.values, field)) {
-      return canonicalText(command.values[field], field, required);
+    if (Object.hasOwn(values, field)) {
+      return canonicalText(values[field], field, required);
     }
     if (currentCustomer) return currentCustomer[field];
     return canonicalText(null, field, required);
@@ -474,15 +490,26 @@ function customerFinalState(command, currentCustomer) {
     budget_estimate: mergedText('budget_estimate'),
     notes: mergedText('notes'),
     tags: mergedText('tags'),
-    priority: Object.hasOwn(command.values, 'priority')
-      ? canonicalPriority(command.values.priority)
+    priority: Object.hasOwn(values, 'priority')
+      ? canonicalPriority(values.priority)
       : (currentCustomer ? currentCustomer.priority : 'medium'),
-    next_action_at: Object.hasOwn(command.values, 'next_action_at')
-      ? canonicalTimestamp(command.values.next_action_at)
+    next_action_at: Object.hasOwn(values, 'next_action_at')
+      ? canonicalTimestamp(values.next_action_at)
       : (currentCustomer ? currentCustomer.next_action_at : null)
   };
+  if (lifecycle && lifecycle.has_next_action) {
+    if (
+      Object.hasOwn(values, 'next_action_at') &&
+      final.next_action_at !== lifecycle.next_action_at
+    ) throw invalidMutation();
+    final.next_action_at = lifecycle.next_action_at;
+  }
   final.normalized_identity_key = customerIdentity(final.brand_name, final.company_name);
-  final.duplicate_enforced = TERMINAL_CUSTOMER_STAGES.has(currentCustomer ? currentCustomer.stage : 'lead') ? 0 : 1;
+  const finalStage = lifecycle
+    ? lifecycle.to_stage
+    : (currentCustomer ? currentCustomer.stage : 'lead');
+  const finalLifecycle = lifecycleDefinition(finalStage);
+  final.duplicate_enforced = finalLifecycle && finalLifecycle.class === 'active' ? 1 : 0;
   return Object.freeze({
     values: Object.freeze(final),
     changed_fields: Object.freeze(changedFields)
@@ -538,7 +565,7 @@ function duplicateConflict(db, context, identityKey, excludedCustomerId) {
         customer: {
           id: readable.candidate.id,
           display_name: readable.candidate.brand_name,
-          stage: readable.candidate.stage
+          stage: publicCustomerStage(readable.candidate.stage)
         }
       }
     });
@@ -582,7 +609,7 @@ function customerSuccessResult(customer, action, input) {
       team_id: customer.team_id,
       assigned_to: customer.assigned_to,
       is_public: customer.is_public,
-      stage: customer.stage,
+      stage: publicCustomerStage(customer.stage),
       priority: customer.priority,
       updated_at: customer.updated_at
     },
@@ -609,6 +636,145 @@ function writeCustomerActivity(db, customerId, actorUserId, action, stage, notes
     stage,
     notes
   );
+}
+
+function writeCustomerStageActivity(db, customerId, actorUserId, fromStage, toStage) {
+  db.prepare(`
+    INSERT INTO customer_activity (
+      customer_id,user_id,action,stage_from,stage_to,notes
+    ) VALUES (?,?,?,?,?,?)
+  `).run(
+    customerId,
+    actorUserId,
+    'stage_change',
+    fromStage,
+    toStage,
+    'customer_stage_changed'
+  );
+}
+
+function lifecycleDefinition(stage) {
+  if (typeof stage !== 'string') return null;
+  return Object.hasOwn(CUSTOMER_LIFECYCLE_REGISTRY, stage)
+    ? CUSTOMER_LIFECYCLE_REGISTRY[stage]
+    : null;
+}
+
+function publicCustomerStage(stage) {
+  return lifecycleDefinition(stage)?.code || 'legacy_unknown';
+}
+
+function canonicalLifecycleStage(value) {
+  try {
+    return assertCustomerLifecycle(value);
+  } catch (error) {
+    if (error instanceof CrmContractError) throw invalidTransition();
+    throw error;
+  }
+}
+
+function canonicalLifecycleReason(transition) {
+  if (!Object.hasOwn(transition, 'reason_code')) return null;
+  if (
+    typeof transition.reason_code !== 'string' ||
+    !CUSTOMER_LIFECYCLE_REASONS.includes(transition.reason_code)
+  ) throw invalidTransition();
+  return transition.reason_code;
+}
+
+function isFutureTimestamp(db, value) {
+  if (value === null) return false;
+  return db.prepare('SELECT CASE WHEN ?>CURRENT_TIMESTAMP THEN 1 ELSE 0 END AS is_future')
+    .get(value).is_future === 1;
+}
+
+function hasWonOpportunity(db, context, customerId) {
+  return Boolean(db.prepare(`
+    SELECT 1 AS present
+    FROM opportunities
+    WHERE org_id=? AND customer_id=? AND stage='won'
+    LIMIT 1
+  `).get(context.organization.id, customerId));
+}
+
+function canonicalCustomerLifecycle(db, context, customer, transition) {
+  const source = lifecycleDefinition(customer.stage);
+  const toStage = canonicalLifecycleStage(transition.to_stage);
+  const target = CUSTOMER_LIFECYCLE_REGISTRY[toStage];
+  const reasonCode = canonicalLifecycleReason(transition);
+  const hasNextAction = Object.hasOwn(transition, 'next_action_at');
+  const nextActionAt = hasNextAction
+    ? canonicalTimestamp(transition.next_action_at)
+    : null;
+  const hasException = Object.hasOwn(transition, 'no_opportunity_exception');
+  if (hasException && typeof transition.no_opportunity_exception !== 'boolean') {
+    throw invalidMutation();
+  }
+  const noOpportunityException = transition.no_opportunity_exception === true;
+
+  if (customer.stage === toStage || (source && source.code === 'won')) throw invalidTransition();
+  if (reasonCode === 'no_opportunity_exception' && !noOpportunityException) throw invalidTransition();
+  if (noOpportunityException && toStage !== 'won') throw invalidTransition();
+
+  const requireReason = () => {
+    if (!reasonCode) throw invalidTransition();
+  };
+  const requireFutureAction = () => {
+    if (!hasNextAction || !isFutureTimestamp(db, nextActionAt)) throw invalidTransition();
+  };
+  const requireWonEvidence = () => {
+    if (noOpportunityException) {
+      if (context.is_org_admin !== true || reasonCode !== 'no_opportunity_exception') {
+        throw invalidTransition();
+      }
+      return;
+    }
+    if (!hasWonOpportunity(db, context, customer.id)) throw invalidTransition();
+  };
+
+  if (!source) {
+    requireReason();
+    if (target.class === 'active') requireFutureAction();
+    if (toStage === 'paused') requireFutureAction();
+    if (toStage === 'won') requireWonEvidence();
+  } else if (source.class === 'active') {
+    if (target.class === 'active') {
+      if (target.order < source.order) requireReason();
+    } else if (toStage === 'paused') {
+      requireReason();
+      requireFutureAction();
+    } else if (toStage === 'won') {
+      requireWonEvidence();
+    } else if (toStage === 'lost') {
+      requireReason();
+    } else {
+      throw invalidTransition();
+    }
+  } else if (source.code === 'paused') {
+    if (target.class === 'active') {
+      requireReason();
+      requireFutureAction();
+    } else if (toStage === 'lost') {
+      requireReason();
+    } else {
+      throw invalidTransition();
+    }
+  } else if (source.code === 'lost') {
+    if (target.class !== 'active') throw invalidTransition();
+    requireReason();
+    requireFutureAction();
+  } else {
+    throw invalidTransition();
+  }
+
+  return Object.freeze({
+    from_stage: source ? source.code : 'legacy_unknown',
+    to_stage: toStage,
+    reason_code: reasonCode,
+    no_opportunity_exception: noOpportunityException,
+    has_next_action: hasNextAction,
+    next_action_at: nextActionAt
+  });
 }
 
 function isIdentityUniqueFailure(error) {
@@ -740,8 +906,8 @@ function createCustomer(db, context, input) {
   );
 }
 
-function updateCustomer(db, context, input, customer) {
-  const final = customerFinalState(input.command, customer);
+function updateCustomer(db, context, input, customer, profileCommand = input.command, lifecycle = null) {
+  const final = customerFinalState(profileCommand, customer, lifecycle);
   const duplicate = final.values.duplicate_enforced === 1
     ? duplicateDecision(
       db,
@@ -753,32 +919,53 @@ function updateCustomer(db, context, input, customer) {
     : null;
   if (duplicate) return duplicate;
 
+  const profileValues = [
+    final.values.brand_name,
+    final.values.company_name,
+    final.values.contact_person,
+    final.values.contact_info,
+    final.values.industry,
+    final.values.country,
+    final.values.source,
+    final.values.budget_estimate,
+    final.values.notes,
+    final.values.tags,
+    final.values.priority,
+    final.values.next_action_at
+  ];
+  let updated;
   try {
-    db.prepare(`
-      UPDATE customers
-      SET brand_name=?,company_name=?,contact_person=?,contact_info=?,industry=?,
-          country=?,source=?,budget_estimate=?,notes=?,tags=?,priority=?,
-          next_action_at=?,normalized_identity_key=?,duplicate_enforced=?,
-          updated_at=CURRENT_TIMESTAMP
-      WHERE id=? AND org_id=?
-    `).run(
-      final.values.brand_name,
-      final.values.company_name,
-      final.values.contact_person,
-      final.values.contact_info,
-      final.values.industry,
-      final.values.country,
-      final.values.source,
-      final.values.budget_estimate,
-      final.values.notes,
-      final.values.tags,
-      final.values.priority,
-      final.values.next_action_at,
-      final.values.normalized_identity_key,
-      final.values.duplicate_enforced,
-      customer.id,
-      context.organization.id
-    );
+    updated = lifecycle
+      ? db.prepare(`
+          UPDATE customers
+          SET brand_name=?,company_name=?,contact_person=?,contact_info=?,industry=?,
+              country=?,source=?,budget_estimate=?,notes=?,tags=?,priority=?,
+              next_action_at=?,stage=?,normalized_identity_key=?,duplicate_enforced=?,
+              updated_at=CURRENT_TIMESTAMP
+          WHERE id=? AND org_id=? AND stage IS ?
+        `).run(
+          ...profileValues,
+          lifecycle.to_stage,
+          final.values.normalized_identity_key,
+          final.values.duplicate_enforced,
+          customer.id,
+          context.organization.id,
+          customer.stage
+        )
+      : db.prepare(`
+          UPDATE customers
+          SET brand_name=?,company_name=?,contact_person=?,contact_info=?,industry=?,
+              country=?,source=?,budget_estimate=?,notes=?,tags=?,priority=?,
+              next_action_at=?,normalized_identity_key=?,duplicate_enforced=?,
+              updated_at=CURRENT_TIMESTAMP
+          WHERE id=? AND org_id=?
+        `).run(
+          ...profileValues,
+          final.values.normalized_identity_key,
+          final.values.duplicate_enforced,
+          customer.id,
+          context.organization.id
+        );
   } catch (error) {
     if (!isIdentityUniqueFailure(error)) throw error;
     const racedDuplicate = duplicateDecision(
@@ -791,21 +978,41 @@ function updateCustomer(db, context, input, customer) {
     if (racedDuplicate) return racedDuplicate;
     throw error;
   }
+  if (updated.changes !== 1) {
+    throw lifecycle ? invalidTransition() : mutationError('CRM_MUTATION_FAILED');
+  }
 
-  writeCustomerActivity(
-    db,
-    customer.id,
-    input.actorUserId,
-    'updated',
-    customer.stage,
-    'customer_profile_updated'
-  );
-  writeAuditEvent(db, context, input, 'customer_updated', customer.id, {
-    changed_fields: final.changed_fields
-  });
+  if (lifecycle) {
+    writeCustomerStageActivity(
+      db,
+      customer.id,
+      input.actorUserId,
+      lifecycle.from_stage,
+      lifecycle.to_stage
+    );
+    writeAuditEvent(db, context, input, 'customer_stage_changed', customer.id, {
+      from_stage: lifecycle.from_stage,
+      to_stage: lifecycle.to_stage,
+      reason_code: lifecycle.reason_code,
+      no_opportunity_exception: lifecycle.no_opportunity_exception,
+      changed_fields: final.changed_fields
+    });
+  } else {
+    writeCustomerActivity(
+      db,
+      customer.id,
+      input.actorUserId,
+      'updated',
+      customer.stage,
+      'customer_profile_updated'
+    );
+    writeAuditEvent(db, context, input, 'customer_updated', customer.id, {
+      changed_fields: final.changed_fields
+    });
+  }
   return customerSuccessResult(
     readCustomer(db, context.organization.id, customer.id),
-    'updated',
+    lifecycle ? 'stage_changed' : 'updated',
     input
   );
 }
@@ -926,7 +1133,38 @@ function authorizeCustomerCommand(db, context, input, operation) {
     ? canWriteTeamActivity(context, customer, custody)
     : canManageProfile(context, customer, custody);
   if (!allowed) return forbiddenDecision(db, context, input, label);
-  if (operation === 'customer') return updateCustomer(db, context, input, customer);
+  const lifecyclePayload = operation === 'lifecycle'
+    ? command
+    : (
+      operation === 'customer' && Object.hasOwn(command, 'transition')
+        ? command.transition
+        : null
+    );
+  if (
+    lifecyclePayload &&
+    !lifecycleDefinition(customer.stage) &&
+    context.is_org_admin !== true
+  ) return forbiddenDecision(db, context, input, label);
+  const lifecycle = lifecyclePayload
+    ? canonicalCustomerLifecycle(db, context, customer, lifecyclePayload)
+    : null;
+  if (operation === 'customer') {
+    return updateCustomer(db, context, input, customer, input.command, lifecycle);
+  }
+  if (operation === 'lifecycle') {
+    return updateCustomer(
+      db,
+      context,
+      input,
+      customer,
+      Object.freeze({
+        mode: 'update',
+        customerId: customer.id,
+        values: Object.freeze({})
+      }),
+      lifecycle
+    );
+  }
   return unsupportedDecision();
 }
 
