@@ -177,6 +177,68 @@ const VALUE_KEYS = Object.freeze({
   ])
 });
 
+const AUDIT_METADATA_KEYS = Object.freeze({
+  duplicate_detected: Object.freeze(['identity_hash', 'visibility', 'source_lead_id']),
+  customer_created: Object.freeze(['changed_fields', 'source_lead_id']),
+  customer_updated: Object.freeze(['changed_fields']),
+  customer_stage_changed: Object.freeze([
+    'from_stage',
+    'to_stage',
+    'reason_code',
+    'no_opportunity_exception',
+    'changed_fields'
+  ]),
+  opportunity_created: Object.freeze(['changed_fields', 'stage']),
+  opportunity_updated: Object.freeze(['changed_fields']),
+  opportunity_stage_changed: Object.freeze([
+    'from_stage',
+    'to_stage',
+    'reason_code',
+    'campaign_disposition',
+    'changed_fields'
+  ]),
+  contact_created: Object.freeze(['changed_fields']),
+  contact_updated: Object.freeze(['changed_fields']),
+  contact_archived: Object.freeze(['changed_fields']),
+  task_created: Object.freeze(['opportunity_id', 'owner_user_id', 'team_id']),
+  task_completed: Object.freeze(['from_status', 'to_status']),
+  task_cancelled: Object.freeze(['from_status', 'to_status']),
+  customer_result_archived: Object.freeze([
+    'knowledge_entry_id',
+    'artifact_type',
+    'source_code'
+  ]),
+  customer_activity_recorded: Object.freeze(['action', 'reference_type', 'reference_id']),
+  mutation_denied: Object.freeze(['operation', 'outcome']),
+  customer_released_to_pool: Object.freeze([
+    'reason_code',
+    'from_assigned_to',
+    'from_team_id',
+    'to_assigned_to',
+    'to_team_id'
+  ]),
+  customer_claimed: Object.freeze([
+    'from_assigned_to',
+    'from_team_id',
+    'to_assigned_to',
+    'to_team_id'
+  ]),
+  customer_transferred: Object.freeze([
+    'reason_code',
+    'from_assigned_to',
+    'from_team_id',
+    'to_assigned_to',
+    'to_team_id'
+  ]),
+  customer_custody_repaired: Object.freeze([
+    'reason_code',
+    'from_assigned_to',
+    'from_team_id',
+    'to_assigned_to',
+    'to_team_id'
+  ])
+});
+
 const TRANSITION_KEYS = Object.freeze({
   customer: Object.freeze(['to_stage', 'reason_code', 'next_action_at', 'no_opportunity_exception']),
   opportunity: Object.freeze(['to_stage', 'reason_code', 'campaign_disposition'])
@@ -492,8 +554,64 @@ function classifyCustody(db, customer) {
   return 'quarantined';
 }
 
+function canonicalAuditMetadataValue(value) {
+  if (value === null || typeof value === 'boolean') return value;
+  if (typeof value === 'number') {
+    if (!positiveSafeInteger(value)) throw mutationError('CRM_MUTATION_FAILED');
+    return value;
+  }
+  if (typeof value === 'string') {
+    if (value.length < 1 || value.length > 120 || !SAFE_IDENTIFIER.test(value)) {
+      throw mutationError('CRM_MUTATION_FAILED');
+    }
+    return value;
+  }
+  if (!Array.isArray(value) || value.length > 50) {
+    throw mutationError('CRM_MUTATION_FAILED');
+  }
+  const copy = value.map((item) => {
+    if (
+      typeof item !== 'string' ||
+      item.length < 1 ||
+      item.length > 120 ||
+      !SAFE_IDENTIFIER.test(item)
+    ) throw mutationError('CRM_MUTATION_FAILED');
+    return item;
+  });
+  Object.setPrototypeOf(copy, null);
+  return Object.freeze(copy);
+}
+
+function canonicalAuditMetadata(eventType, metadata) {
+  const allowedKeys = AUDIT_METADATA_KEYS[eventType];
+  if (
+    !allowedKeys ||
+    !metadata ||
+    typeof metadata !== 'object' ||
+    Array.isArray(metadata) ||
+    types.isProxy(metadata)
+  ) throw mutationError('CRM_MUTATION_FAILED');
+  const prototype = Object.getPrototypeOf(metadata);
+  if (prototype !== Object.prototype && prototype !== null) {
+    throw mutationError('CRM_MUTATION_FAILED');
+  }
+
+  const canonical = Object.create(null);
+  for (const key of Reflect.ownKeys(metadata)) {
+    if (typeof key !== 'string' || !allowedKeys.includes(key)) {
+      throw mutationError('CRM_MUTATION_FAILED');
+    }
+    const descriptor = Object.getOwnPropertyDescriptor(metadata, key);
+    if (!descriptor || !Object.hasOwn(descriptor, 'value')) {
+      throw mutationError('CRM_MUTATION_FAILED');
+    }
+    canonical[key] = canonicalAuditMetadataValue(descriptor.value);
+  }
+  return Object.freeze(canonical);
+}
+
 function writeAuditEvent(db, context, input, eventType, customerId, metadata, references = {}) {
-  const metadataJson = JSON.stringify(metadata);
+  const metadataJson = JSON.stringify(canonicalAuditMetadata(eventType, metadata));
   if (Buffer.byteLength(metadataJson, 'utf8') > 8192) throw mutationError('CRM_MUTATION_FAILED');
   db.prepare(`
     INSERT INTO crm_audit_events (
@@ -2291,7 +2409,13 @@ function isScopeFailure(error) {
 
 function mapFailure(error) {
   if (error instanceof CrmMutationError) return error;
-  if (error && (error.code === 'SQLITE_BUSY' || error.code === 'SQLITE_LOCKED')) {
+  const code = error && typeof error.code === 'string' ? error.code : '';
+  if (
+    code === 'SQLITE_BUSY' ||
+    code.startsWith('SQLITE_BUSY_') ||
+    code === 'SQLITE_LOCKED' ||
+    code.startsWith('SQLITE_LOCKED_')
+  ) {
     return mutationError('CRM_STORAGE_BUSY');
   }
   return mutationError('CRM_MUTATION_FAILED');

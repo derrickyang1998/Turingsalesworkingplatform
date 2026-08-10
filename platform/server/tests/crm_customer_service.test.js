@@ -3155,3 +3155,245 @@ test('aggregate child: non-archive activity validates exact task and opportunity
   }, { requestId: 'activity-public-denied' })));
   assert.equal(publicRoot.code, 'CRM_CUSTOMER_FORBIDDEN');
 });
+
+test('mutation hardening: SQLite failure families are fixed bounded and never replayed', () => {
+  function failingDb(code, message) {
+    let attempts = 0;
+    return {
+      db: {
+        transaction() {
+          const transaction = () => undefined;
+          transaction.immediate = () => {
+            attempts += 1;
+            const error = new Error(message);
+            error.name = 'SqliteError';
+            error.code = code;
+            throw error;
+          };
+          return transaction;
+        }
+      },
+      attempts: () => attempts
+    };
+  }
+
+  const options = customerCreate(IDS.ownerA, 'Hardening Failure');
+  for (const [code, expected] of [
+    ['SQLITE_BUSY', 'CRM_STORAGE_BUSY'],
+    ['SQLITE_BUSY_SNAPSHOT', 'CRM_STORAGE_BUSY'],
+    ['SQLITE_LOCKED', 'CRM_STORAGE_BUSY'],
+    ['SQLITE_LOCKED_SHAREDCACHE', 'CRM_STORAGE_BUSY'],
+    ['SQLITE_CONSTRAINT_UNIQUE', 'CRM_MUTATION_FAILED'],
+    ['SQLITE_CONSTRAINT_FOREIGNKEY', 'CRM_MUTATION_FAILED'],
+    ['SQLITE_CONSTRAINT_TRIGGER', 'CRM_MUTATION_FAILED'],
+    ['SQLITE_ERROR', 'CRM_MUTATION_FAILED']
+  ]) {
+    const fixture = failingDb(code, `secret SQL and database path for ${code}`);
+    const error = captureError(() => service.createOrUpdateCustomer(fixture.db, options));
+    assert.equal(error.code, expected, code);
+    assert.equal(fixture.attempts(), 1, `${code} must not be replayed`);
+    assert.equal(JSON.stringify(publicError(error)).includes('secret'), false, code);
+    assert.deepEqual(publicError(error), expected === 'CRM_STORAGE_BUSY'
+      ? {
+          code: 'CRM_STORAGE_BUSY',
+          status: 503,
+          title: 'CRM storage is temporarily unavailable',
+          details: null,
+          retryable: true
+        }
+      : {
+          code: 'CRM_MUTATION_FAILED',
+          status: 500,
+          title: 'CRM mutation failed',
+          details: null
+        });
+  }
+});
+
+test('mutation hardening: post-read and post-task evidence failures roll back and release transactions', (t) => {
+  {
+    const db = openFixture(t);
+    const beforeCustomer = db.prepare('SELECT * FROM customers WHERE id=?').get(IDS.ownedA);
+    const beforeAudit = db.prepare('SELECT COUNT(*) AS count FROM crm_audit_events').get().count;
+    db.exec(`CREATE TRIGGER fail_denial_audit BEFORE INSERT ON crm_audit_events
+      WHEN NEW.event_type='mutation_denied'
+      BEGIN SELECT RAISE(ABORT,'fixture denial audit failure'); END`);
+
+    const error = captureError(() => service.createOrUpdateCustomer(
+      db,
+      customerUpdate(IDS.teammateA, IDS.ownedA, { requestId: 'hardening-denial-audit-failure' })
+    ));
+    assert.deepEqual(publicError(error), {
+      code: 'CRM_MUTATION_FAILED',
+      status: 500,
+      title: 'CRM mutation failed',
+      details: null
+    });
+    assert.deepEqual(db.prepare('SELECT * FROM customers WHERE id=?').get(IDS.ownedA), beforeCustomer);
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM crm_audit_events').get().count, beforeAudit);
+    assert.equal(db.inTransaction, false);
+
+    db.exec('DROP TRIGGER fail_denial_audit');
+    const subsequent = service.createOrUpdateCustomer(
+      db,
+      customerUpdate(IDS.ownerA, IDS.ownedA, { requestId: 'hardening-after-denial-failure' })
+    );
+    assert.equal(subsequent.action, 'updated');
+    assert.equal(db.inTransaction, false);
+  }
+
+  {
+    const db = openFixture(t);
+    insertCrmTask(db, { id: IDS.taskDirect, customerId: IDS.ownedA });
+    const beforeCustomer = db.prepare('SELECT * FROM customers WHERE id=?').get(IDS.ownedA);
+    const beforeTask = db.prepare('SELECT * FROM crm_tasks WHERE id=?').get(IDS.taskDirect);
+    const beforeActivity = db.prepare('SELECT COUNT(*) AS count FROM customer_activity').get().count;
+    const beforeAudit = db.prepare('SELECT COUNT(*) AS count FROM crm_audit_events').get().count;
+    db.exec(`CREATE TRIGGER fail_transfer_audit_after_tasks BEFORE INSERT ON crm_audit_events
+      WHEN NEW.event_type='customer_transferred'
+      BEGIN SELECT RAISE(ABORT,'fixture post-task audit failure'); END`);
+
+    const command = {
+      action: 'transfer',
+      customerId: IDS.ownedA,
+      assigned_to: IDS.teammateA,
+      team_id: IDS.teamA1,
+      reason_code: 'manager_assignment'
+    };
+    const error = captureError(() => service.mutateCustomerCustody(
+      db,
+      customerCustody(IDS.ownerA, command, { requestId: 'hardening-post-task-audit-failure' })
+    ));
+    assert.equal(error.code, 'CRM_MUTATION_FAILED');
+    assert.deepEqual(db.prepare('SELECT * FROM customers WHERE id=?').get(IDS.ownedA), beforeCustomer);
+    assert.deepEqual(db.prepare('SELECT * FROM crm_tasks WHERE id=?').get(IDS.taskDirect), beforeTask);
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM customer_activity').get().count, beforeActivity);
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM crm_audit_events').get().count, beforeAudit);
+    assert.equal(db.inTransaction, false);
+
+    db.exec('DROP TRIGGER fail_transfer_audit_after_tasks');
+    const subsequent = service.mutateCustomerCustody(
+      db,
+      customerCustody(IDS.ownerA, command, { requestId: 'hardening-after-post-task-failure' })
+    );
+    assert.equal(subsequent.action, 'transferred');
+    assert.equal(db.inTransaction, false);
+  }
+});
+
+test('mutation hardening: audit metadata is event allowlisted and immune to inherited toJSON', (t) => {
+  const db = openFixture(t);
+  const previousToJson = Object.getOwnPropertyDescriptor(Object.prototype, 'toJSON');
+  Object.defineProperty(Object.prototype, 'toJSON', {
+    configurable: true,
+    value() {
+      return {
+        contact_info: 'secret@example.invalid',
+        sql: 'DROP TABLE customers',
+        database_message: 'C:/private/crm.sqlite'
+      };
+    }
+  });
+  try {
+    const updated = service.createOrUpdateCustomer(db, customerUpdate(
+      IDS.ownerA,
+      IDS.ownedA,
+      { requestId: 'hardening-prototype-to-json' }
+    ));
+    assert.equal(updated.action, 'updated');
+  } finally {
+    if (previousToJson) {
+      Object.defineProperty(Object.prototype, 'toJSON', previousToJson);
+    } else {
+      delete Object.prototype.toJSON;
+    }
+  }
+
+  assert.deepEqual(JSON.parse(db.prepare(`
+    SELECT metadata_json FROM crm_audit_events WHERE request_id=?
+  `).get('hardening-prototype-to-json').metadata_json), {
+    changed_fields: ['brand_name']
+  });
+
+  captureError(() => service.createOrUpdateCustomer(
+    db,
+    customerUpdate(IDS.teammateA, IDS.ownedA, { requestId: 'hardening-audit-denied' })
+  ));
+  const opportunity = service.createOrUpdateOpportunity(db, opportunityMutation(IDS.ownerA, {
+    mode: 'create',
+    customerId: IDS.ownedA,
+    values: { name: 'Sensitive hardening opportunity' }
+  }, { requestId: 'hardening-audit-opportunity' }));
+  const contact = service.mutateCustomerContact(db, contactMutation(IDS.ownerA, {
+    action: 'create',
+    customerId: IDS.ownedA,
+    values: { name: 'Sensitive Person', email: 'person@example.invalid' }
+  }, { requestId: 'hardening-audit-contact' }));
+  const task = service.mutateCrmTask(db, taskMutation(IDS.ownerA, {
+    action: 'create',
+    customerId: IDS.ownedA,
+    values: {
+      opportunity_id: opportunity.record.id,
+      owner_user_id: IDS.ownerA,
+      team_id: IDS.teamA1,
+      title: 'Sensitive task title',
+      due_at: FUTURE_AT
+    }
+  }, { requestId: 'hardening-audit-task' }));
+  service.recordCustomerActivity(db, activityMutation(IDS.ownerA, {
+    customerId: IDS.ownedA,
+    action: 'followup_recorded',
+    reference_type: 'task',
+    reference_id: task.record.id
+  }, { requestId: 'hardening-audit-activity' }));
+  service.archiveCustomerResult(db, archiveMutation(IDS.ownerA, {
+    customerId: IDS.ownedA,
+    artifact_type: 'note',
+    title: 'Sensitive archive title',
+    content: 'Sensitive archive body',
+    tags: ['hardening'],
+    source_type: 'manual_note'
+  }, { requestId: 'hardening-audit-archive' }));
+  service.mutateCustomerCustody(db, customerCustody(IDS.ownerA, {
+    action: 'claim',
+    customerId: IDS.publicA,
+    team_id: IDS.teamA1
+  }, { requestId: 'hardening-audit-custody' }));
+
+  const allowedKeys = Object.freeze({
+    customer_updated: Object.freeze(['changed_fields']),
+    mutation_denied: Object.freeze(['operation', 'outcome']),
+    opportunity_created: Object.freeze(['changed_fields', 'stage']),
+    contact_created: Object.freeze(['changed_fields']),
+    task_created: Object.freeze(['opportunity_id', 'owner_user_id', 'team_id']),
+    customer_activity_recorded: Object.freeze(['action', 'reference_type', 'reference_id']),
+    customer_result_archived: Object.freeze(['knowledge_entry_id', 'artifact_type', 'source_code']),
+    customer_claimed: Object.freeze([
+      'from_assigned_to',
+      'from_team_id',
+      'to_assigned_to',
+      'to_team_id'
+    ])
+  });
+  const events = db.prepare(`
+    SELECT event_type,metadata_json FROM crm_audit_events
+    WHERE request_id LIKE 'hardening-%'
+    ORDER BY id
+  `).all();
+  assert.equal(events.length, 8);
+  for (const event of events) {
+    assert.ok(allowedKeys[event.event_type], event.event_type);
+    const metadata = JSON.parse(event.metadata_json);
+    assert.equal(
+      Object.keys(metadata).every((key) => allowedKeys[event.event_type].includes(key)),
+      true,
+      event.event_type
+    );
+    assert.doesNotMatch(
+      event.metadata_json,
+      /secret|example\.invalid|drop table|crm\.sqlite|sensitive/i,
+      event.event_type
+    );
+  }
+  assert.equal(contact.record.id > 0, true);
+});
