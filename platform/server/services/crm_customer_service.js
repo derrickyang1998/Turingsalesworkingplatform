@@ -30,6 +30,15 @@ const CUSTOMER_PROFILE_FIELDS = Object.freeze([
   'priority',
   'next_action_at'
 ]);
+const LEAD_CUSTOMER_FIELDS = Object.freeze([
+  'brand_name',
+  'company_name',
+  'contact_person',
+  'contact_info',
+  'source',
+  'industry',
+  'notes'
+]);
 const CUSTOMER_TEXT_LIMITS = Object.freeze({
   brand_name: 1000,
   company_name: 1000,
@@ -431,7 +440,6 @@ function customerFinalState(command, currentCustomer) {
   if (creating) {
     if (
       Object.hasOwn(command, 'customerId') ||
-      Object.hasOwn(command, 'sourceLeadId') ||
       Object.hasOwn(command, 'transition')
     ) throw invalidMutation();
   } else {
@@ -554,7 +562,10 @@ function duplicateDecision(db, context, input, identityKey, excludedCustomerId) 
     excludedCustomerId,
     {
       identity_hash: identityKey,
-      visibility: details.conflict.visibility
+      visibility: details.conflict.visibility,
+      ...(Object.hasOwn(input.command, 'sourceLeadId')
+        ? { source_lead_id: input.command.sourceLeadId }
+        : {})
     }
   );
   return { error: mutationError('CRM_CUSTOMER_DUPLICATE', details) };
@@ -577,7 +588,10 @@ function customerSuccessResult(customer, action, input) {
     },
     meta: {
       request_id: input.requestId,
-      correlation_id: input.correlationId
+      correlation_id: input.correlationId,
+      ...(Object.hasOwn(input.command, 'sourceLeadId')
+        ? { source_lead_id: input.command.sourceLeadId }
+        : {})
     }
   });
 }
@@ -603,6 +617,55 @@ function isIdentityUniqueFailure(error) {
     typeof error.code === 'string' &&
     error.code === 'SQLITE_CONSTRAINT_UNIQUE'
   );
+}
+
+function readLeadForConversion(db, context, input) {
+  if (!Object.hasOwn(input.command, 'sourceLeadId')) return null;
+  const lead = db.prepare(`
+    SELECT
+      id,brand_name,company_name,contact_person,contact_info,source,industry,
+      status,assigned_to,notes,converted_customer_id
+    FROM leads
+    WHERE id=?
+  `).get(input.command.sourceLeadId);
+  if (
+    !lead ||
+    !positiveSafeInteger(lead.assigned_to) ||
+    lead.assigned_to !== input.command.values.assigned_to ||
+    lead.converted_customer_id !== null ||
+    String(lead.status || '').toLowerCase() === 'converted' ||
+    (context.is_org_admin !== true && lead.assigned_to !== context.actor_user_id)
+  ) return { error: mutationError('CRM_CUSTOMER_NOT_FOUND') };
+  return { lead };
+}
+
+function inputWithLeadDefaults(input, lead) {
+  const mappedValues = {};
+  for (const field of LEAD_CUSTOMER_FIELDS) mappedValues[field] = lead[field];
+  return Object.freeze({
+    ...input,
+    command: Object.freeze({
+      ...input.command,
+      values: Object.freeze({ ...mappedValues, ...input.command.values })
+    })
+  });
+}
+
+function markLeadConverted(db, input, customerId) {
+  if (!Object.hasOwn(input.command, 'sourceLeadId')) return;
+  const updated = db.prepare(`
+    UPDATE leads
+    SET status='converted',converted_customer_id=?,updated_at=CURRENT_TIMESTAMP
+    WHERE id=?
+      AND assigned_to=?
+      AND converted_customer_id IS NULL
+      AND (status IS NULL OR lower(status)<>'converted')
+  `).run(
+    customerId,
+    input.command.sourceLeadId,
+    input.command.values.assigned_to
+  );
+  if (updated.changes !== 1) throw mutationError('CRM_CUSTOMER_NOT_FOUND');
 }
 
 function createCustomer(db, context, input) {
@@ -662,9 +725,13 @@ function createCustomer(db, context, input) {
 
   const customerId = Number(inserted.lastInsertRowid);
   if (!positiveSafeInteger(customerId)) throw mutationError('CRM_MUTATION_FAILED');
+  markLeadConverted(db, input, customerId);
   writeCustomerActivity(db, customerId, input.actorUserId, 'created', 'lead', 'customer_created');
   writeAuditEvent(db, context, input, 'customer_created', customerId, {
-    changed_fields: final.changed_fields
+    changed_fields: final.changed_fields,
+    ...(Object.hasOwn(input.command, 'sourceLeadId')
+      ? { source_lead_id: input.command.sourceLeadId }
+      : {})
   });
   return customerSuccessResult(
     readCustomer(db, context.organization.id, customerId),
@@ -812,7 +879,14 @@ function authorizeCustomerCommand(db, context, input, operation) {
 
   if (operation === 'customer' && command.mode === 'create') {
     const denied = authorizeCreate(db, context, input);
-    return denied || createCustomer(db, context, input);
+    if (denied) return denied;
+    const conversion = readLeadForConversion(db, context, input);
+    if (conversion && conversion.error) return conversion;
+    return createCustomer(
+      db,
+      context,
+      conversion ? inputWithLeadDefaults(input, conversion.lead) : input
+    );
   }
   if (operation === 'customer' && command.mode !== 'update') throw invalidMutation();
 

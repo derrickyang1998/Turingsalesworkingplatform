@@ -1,8 +1,11 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const { Worker } = require('node:worker_threads');
 const Database = require('better-sqlite3');
 
 const migrationService = require('../services/migration_service');
@@ -32,7 +35,11 @@ const IDS = Object.freeze({
   publicA: 10004,
   quarantinedA: 10005,
   inactiveOwnedA: 10006,
-  ownedB: 20001
+  ownedB: 20001,
+  leadA: 30001,
+  leadB: 30002,
+  leadDuplicate: 30003,
+  leadRollback: 30004
 });
 
 const REGISTERED_MIGRATIONS = Object.freeze([
@@ -112,13 +119,8 @@ function insertCustomer(db, {
   );
 }
 
-function openFixture(t) {
-  const db = new Database(':memory:');
+function seedFixture(db) {
   db.pragma('foreign_keys = ON');
-  t.after(() => {
-    if (db.open) db.close();
-  });
-
   assert.deepEqual(migrationService.runMigrations(db, {
     rootDir: SERVER_ROOT,
     registeredMigrations: REGISTERED_MIGRATIONS
@@ -179,7 +181,137 @@ function openFixture(t) {
     { id: IDS.ownedB, orgId: IDS.orgB, teamId: IDS.teamB1, createdBy: IDS.outsiderB, assignedTo: IDS.outsiderB, isPublic: 0, brandName: 'Owned B' }
   ]) insertCustomer(db, customer);
 
+}
+
+function openFixture(t) {
+  const db = new Database(':memory:');
+  t.after(() => {
+    if (db.open) db.close();
+  });
+  seedFixture(db);
   return db;
+}
+
+function insertLead(db, {
+  id,
+  assignedTo,
+  brandName,
+  companyName = null,
+  status = 'new',
+  convertedCustomerId = null
+}) {
+  db.prepare(`
+    INSERT INTO leads (
+      id,brand_name,company_name,contact_person,contact_info,source,
+      industry,status,assigned_to,notes,converted_customer_id,
+      created_at,updated_at
+    ) VALUES (?,?,?,?,?,'manual','consumer',?,?,?, ?,?,?)
+  `).run(
+    id,
+    brandName,
+    companyName,
+    'Lead Contact',
+    'lead@example.invalid',
+    status,
+    assignedTo,
+    'Lead notes',
+    convertedCustomerId,
+    FIXED_AT,
+    FIXED_AT
+  );
+}
+
+function createFileFixture(t) {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'turingmarket-crm-s4-'));
+  const databasePath = path.join(directory, 'crm.sqlite');
+  const db = new Database(databasePath);
+  db.pragma('journal_mode = WAL');
+  db.pragma('busy_timeout = 10000');
+  seedFixture(db);
+  db.close();
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  return databasePath;
+}
+
+const MUTATION_WORKER_SOURCE = String.raw`
+  'use strict';
+  const { parentPort, workerData } = require('node:worker_threads');
+  const Database = require(workerData.databaseModulePath);
+  const customerService = require(workerData.servicePath);
+  const db = new Database(workerData.databasePath);
+  db.pragma('foreign_keys = ON');
+  db.pragma('busy_timeout = 10000');
+  parentPort.postMessage({ type: 'ready' });
+  parentPort.once('message', () => {
+    try {
+      parentPort.postMessage({
+        type: 'result',
+        value: customerService.createOrUpdateCustomer(db, workerData.options)
+      });
+    } catch (error) {
+      parentPort.postMessage({
+        type: 'result',
+        value: typeof error.toJSON === 'function' ? error.toJSON() : { code: 'WORKER_FAILURE' }
+      });
+    } finally {
+      db.close();
+    }
+  });
+`;
+
+function createMutationWorker(databasePath, options) {
+  const worker = new Worker(MUTATION_WORKER_SOURCE, {
+    eval: true,
+    workerData: {
+      databaseModulePath: require.resolve('better-sqlite3'),
+      servicePath: path.resolve(__dirname, '../services/crm_customer_service.js'),
+      databasePath,
+      options
+    }
+  });
+  let readyResolve;
+  let readyReject;
+  let resultResolve;
+  let resultReject;
+  let exitResolve;
+  let exitReject;
+  const ready = new Promise((resolve, reject) => {
+    readyResolve = resolve;
+    readyReject = reject;
+  });
+  const result = new Promise((resolve, reject) => {
+    resultResolve = resolve;
+    resultReject = reject;
+  });
+  const exited = new Promise((resolve, reject) => {
+    exitResolve = resolve;
+    exitReject = reject;
+  });
+  worker.on('message', (message) => {
+    if (message && message.type === 'ready') readyResolve();
+    if (message && message.type === 'result') resultResolve(message.value);
+  });
+  worker.on('error', (error) => {
+    readyReject(error);
+    resultReject(error);
+    exitReject(error);
+  });
+  worker.on('exit', (code) => {
+    if (code === 0) exitResolve();
+    else exitReject(new Error(`mutation worker exited with code ${code}`));
+  });
+  return { worker, ready, result, exited };
+}
+
+async function runConcurrentCreates(databasePath, leftOptions, rightOptions) {
+  const left = createMutationWorker(databasePath, leftOptions);
+  const right = createMutationWorker(databasePath, rightOptions);
+  await Promise.all([left.ready, right.ready]);
+  left.worker.postMessage('go');
+  right.worker.postMessage('go');
+  const values = await Promise.all([left.result, right.result]);
+  await Promise.all([left.exited, right.exited]);
+  return values;
 }
 
 function customerUpdate(actorUserId, customerId, overrides = {}) {
@@ -914,4 +1046,255 @@ test('customer identity: client provenance identity stage and timestamp fields n
     assert.equal(error.code, 'CRM_MUTATION_INVALID');
   }
   assert.equal(transactionHits, 0);
+});
+
+test('customer identity: concurrent equal creates produce one customer and one bounded conflict', async (t) => {
+  const databasePath = createFileFixture(t);
+  const left = customerCreate(IDS.ownerA, 'Concurrent Brand');
+  left.requestId = 'concurrent-left';
+  left.command.values.company_name = 'Concurrent Company';
+  const right = customerCreate(IDS.ownerA, 'Concurrent Brand');
+  right.requestId = 'concurrent-right';
+  right.command.values.company_name = 'Concurrent Company';
+
+  const outcomes = await runConcurrentCreates(databasePath, left, right);
+  assert.deepEqual(
+    outcomes.map((outcome) => outcome.action || outcome.code).sort(),
+    ['CRM_CUSTOMER_DUPLICATE', 'created']
+  );
+  const duplicate = outcomes.find((outcome) => outcome.code === 'CRM_CUSTOMER_DUPLICATE');
+  assert.deepEqual(Object.keys(duplicate).sort(), ['code', 'details', 'status', 'title']);
+  assert.equal(duplicate.status, 409);
+
+  const db = new Database(databasePath, { readonly: true });
+  try {
+    const identity = buildCustomerIdentity({
+      brand_name: 'Concurrent Brand',
+      company_name: 'Concurrent Company'
+    }).key;
+    assert.equal(db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM customers
+      WHERE org_id=? AND normalized_identity_key=?
+    `).get(IDS.orgA, identity).count, 1);
+    assert.equal(db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM customer_activity ca
+      JOIN customers c ON c.id=ca.customer_id
+      WHERE c.org_id=? AND c.normalized_identity_key=? AND ca.action='created'
+    `).get(IDS.orgA, identity).count, 1);
+    assert.equal(db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM crm_audit_events
+      WHERE request_id IN ('concurrent-left','concurrent-right')
+        AND event_type='customer_created'
+    `).get().count, 1);
+    assert.equal(db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM crm_audit_events
+      WHERE request_id IN ('concurrent-left','concurrent-right')
+        AND event_type='duplicate_detected'
+    `).get().count, 1);
+  } finally {
+    db.close();
+  }
+});
+
+test('customer identity: owned lead conversion maps defaults and commits lead evidence atomically', (t) => {
+  const db = openFixture(t);
+  insertLead(db, {
+    id: IDS.leadA,
+    assignedTo: IDS.ownerA,
+    brandName: 'Lead Brand',
+    companyName: 'Lead Company'
+  });
+  const options = customerCreate(IDS.ownerA, 'unused');
+  options.requestId = 'lead-conversion-success';
+  options.command = {
+    mode: 'create',
+    sourceLeadId: IDS.leadA,
+    values: {
+      assigned_to: IDS.ownerA,
+      team_id: IDS.teamA1,
+      country: 'US',
+      notes: 'Caller notes override the lead default'
+    }
+  };
+
+  const result = service.createOrUpdateCustomer(db, options);
+  assert.equal(result.action, 'created');
+  assert.deepEqual(result.meta, {
+    request_id: options.requestId,
+    correlation_id: options.correlationId,
+    source_lead_id: IDS.leadA
+  });
+  assert.equal(Object.isFrozen(result.meta), true);
+
+  const customer = db.prepare(`
+    SELECT brand_name,company_name,contact_person,contact_info,source,industry,
+           notes,country,assigned_to,team_id
+    FROM customers WHERE id=?
+  `).get(result.record.id);
+  assert.deepEqual(customer, {
+    brand_name: 'Lead Brand',
+    company_name: 'Lead Company',
+    contact_person: 'Lead Contact',
+    contact_info: 'lead@example.invalid',
+    source: 'manual',
+    industry: 'consumer',
+    notes: 'Caller notes override the lead default',
+    country: 'US',
+    assigned_to: IDS.ownerA,
+    team_id: IDS.teamA1
+  });
+  assert.deepEqual(db.prepare('SELECT status,converted_customer_id FROM leads WHERE id=?').get(IDS.leadA), {
+    status: 'converted',
+    converted_customer_id: result.record.id
+  });
+  const audit = db.prepare(`
+    SELECT metadata_json FROM crm_audit_events
+    WHERE request_id=? AND event_type='customer_created'
+  `).get(options.requestId);
+  assert.equal(JSON.parse(audit.metadata_json).source_lead_id, IDS.leadA);
+});
+
+test('customer identity: organization admin may convert an assigned same-organization lead', (t) => {
+  const db = openFixture(t);
+  insertLead(db, {
+    id: IDS.leadB,
+    assignedTo: IDS.teammateA,
+    brandName: 'Delegated Lead',
+    companyName: 'Delegated Company'
+  });
+  const options = customerCreate(IDS.orgAdminA, 'unused');
+  options.requestId = 'lead-conversion-admin';
+  options.command = {
+    mode: 'create',
+    sourceLeadId: IDS.leadB,
+    values: { assigned_to: IDS.teammateA, team_id: IDS.teamA1 }
+  };
+
+  const result = service.createOrUpdateCustomer(db, options);
+  assert.equal(result.action, 'created');
+  assert.equal(result.record.assigned_to, IDS.teammateA);
+  assert.equal(db.prepare('SELECT converted_customer_id FROM leads WHERE id=?').get(IDS.leadB).converted_customer_id, result.record.id);
+});
+
+test('customer identity: inaccessible unassigned and converted leads share the same concealed 404', (t) => {
+  const db = openFixture(t);
+  insertLead(db, {
+    id: IDS.leadA,
+    assignedTo: IDS.outsiderB,
+    brandName: 'Foreign Lead'
+  });
+  insertLead(db, {
+    id: IDS.leadB,
+    assignedTo: null,
+    brandName: 'Unassigned Lead'
+  });
+  insertLead(db, {
+    id: IDS.leadDuplicate,
+    assignedTo: IDS.ownerA,
+    brandName: 'Converted Lead',
+    status: 'converted',
+    convertedCustomerId: IDS.ownedA
+  });
+
+  for (const sourceLeadId of [IDS.leadA, IDS.leadB, IDS.leadDuplicate]) {
+    const options = customerCreate(IDS.ownerA, 'unused');
+    options.requestId = `concealed-lead-${sourceLeadId}`;
+    options.command = {
+      mode: 'create',
+      sourceLeadId,
+      values: { assigned_to: IDS.ownerA, team_id: IDS.teamA1 }
+    };
+    const error = captureError(() => service.createOrUpdateCustomer(db, options));
+    assert.deepEqual(publicError(error), {
+      code: 'CRM_CUSTOMER_NOT_FOUND',
+      status: 404,
+      title: 'CRM customer was not found',
+      details: null
+    });
+  }
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM crm_audit_events WHERE request_id LIKE 'concealed-lead-%'").get().count, 0);
+});
+
+test('customer identity: duplicate lead conversion commits conflict evidence and leaves the lead open', (t) => {
+  const db = openFixture(t);
+  db.prepare(`
+    UPDATE customers
+    SET normalized_identity_key=?,duplicate_enforced=1
+    WHERE id=?
+  `).run(buildCustomerIdentity({
+    brand_name: 'Owned A',
+    company_name: 'Owned A Company'
+  }).key, IDS.ownedA);
+  insertLead(db, {
+    id: IDS.leadDuplicate,
+    assignedTo: IDS.ownerA,
+    brandName: 'Owned A',
+    companyName: 'Owned A Company'
+  });
+  const beforeCustomers = db.prepare('SELECT COUNT(*) AS count FROM customers').get().count;
+  const beforeActivity = db.prepare('SELECT COUNT(*) AS count FROM customer_activity').get().count;
+  const options = customerCreate(IDS.ownerA, 'unused');
+  options.requestId = 'lead-conversion-duplicate';
+  options.command = {
+    mode: 'create',
+    sourceLeadId: IDS.leadDuplicate,
+    values: { assigned_to: IDS.ownerA, team_id: IDS.teamA1 }
+  };
+
+  const error = captureError(() => service.createOrUpdateCustomer(db, options));
+  assert.equal(error.code, 'CRM_CUSTOMER_DUPLICATE');
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM customers').get().count, beforeCustomers);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM customer_activity').get().count, beforeActivity);
+  assert.deepEqual(db.prepare('SELECT status,converted_customer_id FROM leads WHERE id=?').get(IDS.leadDuplicate), {
+    status: 'new',
+    converted_customer_id: null
+  });
+  const audit = db.prepare(`
+    SELECT metadata_json FROM crm_audit_events
+    WHERE request_id=? AND event_type='duplicate_detected'
+  `).get(options.requestId);
+  assert.equal(JSON.parse(audit.metadata_json).source_lead_id, IDS.leadDuplicate);
+});
+
+test('customer identity: lead conversion audit failure rolls customer activity and lead state back', (t) => {
+  const db = openFixture(t);
+  insertLead(db, {
+    id: IDS.leadRollback,
+    assignedTo: IDS.ownerA,
+    brandName: 'Rollback Lead',
+    companyName: 'Rollback Lead Company'
+  });
+  const beforeCustomers = db.prepare('SELECT COUNT(*) AS count FROM customers').get().count;
+  const beforeActivity = db.prepare('SELECT COUNT(*) AS count FROM customer_activity').get().count;
+  const beforeAudit = db.prepare('SELECT COUNT(*) AS count FROM crm_audit_events').get().count;
+  db.exec(`
+    CREATE TRIGGER reject_lead_conversion_audit
+    BEFORE INSERT ON crm_audit_events
+    WHEN NEW.event_type='customer_created'
+    BEGIN
+      SELECT RAISE(ABORT,'secret lead audit failure');
+    END
+  `);
+  const options = customerCreate(IDS.ownerA, 'unused');
+  options.requestId = 'lead-conversion-rollback';
+  options.command = {
+    mode: 'create',
+    sourceLeadId: IDS.leadRollback,
+    values: { assigned_to: IDS.ownerA, team_id: IDS.teamA1 }
+  };
+
+  const error = captureError(() => service.createOrUpdateCustomer(db, options));
+  assert.equal(error.code, 'CRM_MUTATION_FAILED');
+  assert.equal(JSON.stringify(publicError(error)).includes('secret'), false);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM customers').get().count, beforeCustomers);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM customer_activity').get().count, beforeActivity);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM crm_audit_events').get().count, beforeAudit);
+  assert.deepEqual(db.prepare('SELECT status,converted_customer_id FROM leads WHERE id=?').get(IDS.leadRollback), {
+    status: 'new',
+    converted_customer_id: null
+  });
 });
