@@ -3032,6 +3032,151 @@ test('aggregate child: customer result archive atomically refreshes one determin
   assert.equal(db.prepare('SELECT content FROM knowledge_entries WHERE id=?').get(entry.id).content, 'Updated private strategy body for the customer.');
 });
 
+test('aggregate child: active teammate may archive a follow-up for the customer owner', (t) => {
+  const db = openFixture(t);
+  const input = archiveMutation(IDS.teammateA, {
+    customerId: IDS.ownedA,
+    artifact_type: 'note',
+    title: 'Team follow-up',
+    content: 'The active teammate recorded a customer follow-up.',
+    tags: ['follow-up'],
+    source_type: 'manual_note'
+  }, { requestId: 'archive-team-follow-up' });
+
+  const result = service.archiveCustomerResult(db, input);
+  const entry = db.prepare(`
+    SELECT created_by,visibility,business_type,business_id
+    FROM knowledge_entries WHERE id=?
+  `).get(result.record.knowledge_entry_id);
+  assert.deepEqual(entry, {
+    created_by: IDS.ownerA,
+    visibility: 'private',
+    business_type: 'customer',
+    business_id: String(IDS.ownedA)
+  });
+  assert.deepEqual(db.prepare(`
+    SELECT customer_id,user_id,action FROM customer_activity WHERE id=?
+  `).get(result.record.activity_id), {
+    customer_id: IDS.ownedA,
+    user_id: IDS.teammateA,
+    action: 'archive_note'
+  });
+  assert.deepEqual(db.prepare(`
+    SELECT actor_user_id,event_type FROM crm_audit_events WHERE request_id=?
+  `).get(input.requestId), {
+    actor_user_id: IDS.teammateA,
+    event_type: 'customer_result_archived'
+  });
+});
+
+test('aggregate child: sequential customer follow-up notes preserve append-only knowledge graphs', (t) => {
+  const db = openFixture(t);
+  const first = service.archiveCustomerResult(db, archiveMutation(IDS.teammateA, {
+    customerId: IDS.ownedA,
+    artifact_type: 'note',
+    title: 'First team follow-up',
+    content: 'FIRST_FOLLOW_UP_MARKER customer context.',
+    tags: ['follow-up'],
+    source_type: 'manual_note'
+  }, { requestId: 'archive-follow-up-first' }));
+  const second = service.archiveCustomerResult(db, archiveMutation(IDS.teammateA, {
+    customerId: IDS.ownedA,
+    artifact_type: 'note',
+    title: 'Second team follow-up',
+    content: 'SECOND_FOLLOW_UP_MARKER customer context.',
+    tags: ['follow-up'],
+    source_type: 'manual_note'
+  }, { requestId: 'archive-follow-up-second' }));
+
+  assert.notEqual(first.record.knowledge_entry_id, second.record.knowledge_entry_id);
+  assert.notEqual(first.record.activity_id, second.record.activity_id);
+  const entries = db.prepare(`
+    SELECT id,content,source_id,created_by,visibility
+    FROM knowledge_entries
+    WHERE business_type='customer' AND business_id=? AND entry_type='note'
+    ORDER BY id
+  `).all(String(IDS.ownedA));
+  assert.deepEqual(entries.map((entry) => entry.content), [
+    'FIRST_FOLLOW_UP_MARKER customer context.',
+    'SECOND_FOLLOW_UP_MARKER customer context.'
+  ]);
+  assert.equal(entries.every((entry) => entry.created_by === IDS.ownerA), true);
+  assert.equal(entries.every((entry) => entry.visibility === 'private'), true);
+  assert.equal(entries.every((entry) => /:note:activity:\d+$/.test(entry.source_id)), true);
+  assert.equal(new Set(entries.map((entry) => entry.source_id)).size, 2);
+
+  const chunkBodies = db.prepare(`
+    SELECT content FROM knowledge_chunks
+    WHERE entry_id IN (?,?)
+    ORDER BY entry_id,id
+  `).all(first.record.knowledge_entry_id, second.record.knowledge_entry_id)
+    .map((chunk) => chunk.content).join('\n');
+  assert.match(chunkBodies, /FIRST_FOLLOW_UP_MARKER/);
+  assert.match(chunkBodies, /SECOND_FOLLOW_UP_MARKER/);
+});
+
+test('aggregate child: active teammate cannot replace owner strategy or proposal artifacts', (t) => {
+  const db = openFixture(t);
+  for (const artifact of [
+    { type: 'strategy', source: 'ai_strategy' },
+    { type: 'proposal', source: 'ai_proposal' }
+  ]) {
+    const ownerContent = `Owner ${artifact.type} content`;
+    const ownerResult = service.archiveCustomerResult(db, archiveMutation(IDS.ownerA, {
+      customerId: IDS.ownedA,
+      artifact_type: artifact.type,
+      title: `Owner ${artifact.type}`,
+      content: ownerContent,
+      tags: [artifact.type],
+      source_type: artifact.source
+    }, { requestId: `archive-owner-${artifact.type}` }));
+    const teammateInput = archiveMutation(IDS.teammateA, {
+      customerId: IDS.ownedA,
+      artifact_type: artifact.type,
+      title: `Teammate ${artifact.type}`,
+      content: `Teammate replacement ${artifact.type} content`,
+      tags: [artifact.type],
+      source_type: artifact.source
+    }, { requestId: `archive-team-${artifact.type}-denied` });
+
+    const error = captureError(() => service.archiveCustomerResult(db, teammateInput));
+    assert.equal(error.code, 'CRM_CUSTOMER_FORBIDDEN');
+    assert.equal(
+      db.prepare('SELECT content FROM knowledge_entries WHERE id=?')
+        .get(ownerResult.record.knowledge_entry_id).content,
+      ownerContent
+    );
+    assert.deepEqual(db.prepare(`
+      SELECT event_type,metadata_json FROM crm_audit_events WHERE request_id=?
+    `).get(teammateInput.requestId), {
+      event_type: 'mutation_denied',
+      metadata_json: '{"operation":"customer_archive","outcome":"forbidden"}'
+    });
+  }
+});
+
+test('aggregate child: transferred originator cannot archive outside active teams', (t) => {
+  const db = openFixture(t);
+  const input = archiveMutation(IDS.originatorA, {
+    customerId: IDS.transferredA,
+    artifact_type: 'note',
+    title: 'Rejected former-owner note',
+    content: 'This note must not be archived.',
+    tags: ['follow-up'],
+    source_type: 'manual_note'
+  }, { requestId: 'archive-transferred-originator-denied' });
+
+  const error = captureError(() => service.archiveCustomerResult(db, input));
+  assert.equal(error.code, 'CRM_CUSTOMER_FORBIDDEN');
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM knowledge_entries').get().count, 0);
+  assert.deepEqual(db.prepare(`
+    SELECT event_type,metadata_json FROM crm_audit_events WHERE request_id=?
+  `).get(input.requestId), {
+    event_type: 'mutation_denied',
+    metadata_json: '{"operation":"customer_archive","outcome":"forbidden"}'
+  });
+});
+
 test('aggregate child: customer result archive accepts only server-known source codes', (t) => {
   const db = openFixture(t);
   const error = captureError(() => service.archiveCustomerResult(db, archiveMutation(IDS.ownerA, {

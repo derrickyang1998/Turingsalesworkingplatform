@@ -4,6 +4,26 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const Database = require('better-sqlite3');
+
+const migrationService = require('../services/migration_service');
+const realCrmQueryService = require('../services/crm_query_service');
+
+const SERVER_ROOT = path.resolve(__dirname, '..');
+const FIXED_AT = '2026-08-10 00:00:00';
+const REGISTERED_MIGRATIONS = Object.freeze([
+  ['002_campaign_business_spine', 'campaign_business_spine'],
+  ['003_campaign_workflow_dispatch_evidence', 'campaign_workflow_dispatch_evidence'],
+  ['004_knowledge_capacity_observability', 'knowledge_capacity_observability'],
+  ['005_knowledge_custody_projection', 'knowledge_custody_projection'],
+  ['006_crm_sales_workspace', 'crm_sales_workspace']
+].map(([name, fileName], index) => Object.freeze({
+  version: index + 2,
+  name,
+  sourcePath: `migrations/00${index + 2}_${fileName}.js`,
+  engineVersion: 1,
+  dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
+})));
 
 const DEFAULT_CONTEXT = Object.freeze({
   organization: Object.freeze({ id: 501, code: 'http-org', role_code: 'member' }),
@@ -65,6 +85,33 @@ function canonicalOpportunityList() {
   };
 }
 
+function canonicalCustomerDetail() {
+  return {
+    customer: { id: 41, brand_name: 'Acme', stage: 'lead', custody: 'owned' },
+    opportunities: [{ id: 71, customer_id: 41, name: 'Launch' }],
+    activity: [{ id: 81, customer_id: 41, action: 'follow_up' }],
+    meta: {
+      request_id: 'http-request',
+      scope: 'team',
+      opportunities: { limit: 100, has_more: false }
+    }
+  };
+}
+
+function canonicalOpportunityDetail() {
+  return {
+    opportunity: {
+      id: 71,
+      customer_id: 41,
+      name: 'Launch',
+      expected_close_date: '2099-02-01 00:00:00',
+      decision_chain: 'CMO > Procurement',
+      notes: 'Preserve detail fields'
+    },
+    meta: { request_id: 'http-request', scope: 'team' }
+  };
+}
+
 function success(entity, action, id) {
   return {
     ok: true,
@@ -98,6 +145,14 @@ function makeHarness(options) {
     getCrmDashboard(_db, input) {
       calls.push({ method: 'getCrmDashboard', input });
       return canonicalDashboard();
+    },
+    getCustomerDetail(_db, input) {
+      calls.push({ method: 'getCustomerDetail', input });
+      return canonicalCustomerDetail();
+    },
+    getOpportunityDetail(_db, input) {
+      calls.push({ method: 'getOpportunityDetail', input });
+      return canonicalOpportunityDetail();
     }
   }, settings.crmQueryService || {});
 
@@ -132,7 +187,7 @@ function makeHarness(options) {
     }
   }, settings.crmCustomerService || {});
 
-  const db = new Proxy({}, {
+  const db = settings.db || new Proxy({}, {
     get(_target, property) {
       if (property === 'open') return true;
       throw new Error(`CRM_SQL_BYPASS:${String(property)}`);
@@ -180,6 +235,117 @@ function makeHarness(options) {
   return { calls, invoke, routes };
 }
 
+function openDetailHttpFixture(t) {
+  const db = new Database(':memory:');
+  db.pragma('foreign_keys = ON');
+  t.after(() => {
+    if (db.open) db.close();
+  });
+  assert.deepEqual(migrationService.runMigrations(db, {
+    rootDir: SERVER_ROOT,
+    registeredMigrations: REGISTERED_MIGRATIONS
+  }), { status: 'managed', currentVersion: 6 });
+
+  for (const [id, code] of [[501, 'detail-http-a'], [502, 'detail-http-b']]) {
+    db.prepare('INSERT INTO organizations (id,code,name,created_at) VALUES (?,?,?,?)')
+      .run(id, code, code, FIXED_AT);
+  }
+  for (const [id, orgId, code] of [
+    [601, 501, 'detail-http-a1'],
+    [602, 501, 'detail-http-a2'],
+    [701, 502, 'detail-http-b1']
+  ]) {
+    db.prepare('INSERT INTO teams (id,org_id,code,name,created_at) VALUES (?,?,?,?,?)')
+      .run(id, orgId, code, code, FIXED_AT);
+  }
+
+  for (const [id, username] of [
+    [101, 'detail-owner'],
+    [102, 'detail-teammate'],
+    [103, 'detail-other-team'],
+    [104, 'detail-org-admin'],
+    [105, 'detail-revoked'],
+    [201, 'detail-outsider']
+  ]) {
+    db.prepare(`
+      INSERT INTO users (
+        id,username,password_hash,display_name,role,email,department,
+        api_quota,created_at,is_active
+      ) VALUES (?,?,?,?,?,?,?,?,?,1)
+    `).run(
+      id,
+      username,
+      'not-used-by-tests',
+      username,
+      'user',
+      `${username}@example.invalid`,
+      'sales',
+      50000,
+      FIXED_AT
+    );
+  }
+
+  for (const [orgId, userId, roleCode, status] of [
+    [501, 101, 'member', 'active'],
+    [501, 102, 'member', 'active'],
+    [501, 103, 'member', 'active'],
+    [501, 104, 'org_admin', 'active'],
+    [501, 105, 'member', 'revoked'],
+    [502, 201, 'member', 'active']
+  ]) {
+    db.prepare(`
+      INSERT INTO organization_memberships (
+        org_id,user_id,role_code,status,created_at,revoked_at
+      ) VALUES (?,?,?,?,?,?)
+    `).run(orgId, userId, roleCode, status, FIXED_AT, status === 'active' ? null : FIXED_AT);
+  }
+  for (const [orgId, teamId, userId, status] of [
+    [501, 601, 101, 'active'],
+    [501, 601, 102, 'active'],
+    [501, 602, 103, 'active'],
+    [501, 601, 104, 'active'],
+    [501, 601, 105, 'revoked'],
+    [502, 701, 201, 'active']
+  ]) {
+    db.prepare(`
+      INSERT INTO team_memberships (
+        org_id,team_id,user_id,role_code,status,created_at,revoked_at
+      ) VALUES (?,?,?,?,?,?,?)
+    `).run(orgId, teamId, userId, 'member', status, FIXED_AT, status === 'active' ? null : FIXED_AT);
+  }
+
+  for (const fixture of [
+    [41, 'Owned A', 501, 601, 101, 101, 0],
+    [42, 'Public A', 501, null, 101, null, 1],
+    [43, 'Quarantine A', 501, null, 101, 101, 0],
+    [44, 'Other Team A', 501, 602, 103, 103, 0],
+    [45, 'Owned B', 502, 701, 201, 201, 0]
+  ]) {
+    const [id, brandName, orgId, teamId, createdBy, assignedTo, isPublic] = fixture;
+    db.prepare(`
+      INSERT INTO customers (
+        id,brand_name,company_name,stage,source,created_by,assigned_to,
+        created_at,updated_at,is_public,priority,org_id,team_id,duplicate_enforced
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,0)
+    `).run(
+      id,
+      brandName,
+      `${brandName} Company`,
+      'lead',
+      'fixture',
+      createdBy,
+      assignedTo,
+      FIXED_AT,
+      FIXED_AT,
+      isPublic,
+      'medium',
+      orgId,
+      teamId
+    );
+  }
+  return db;
+}
+
 function lastCall(harness, method) {
   const matching = harness.calls.filter((call) => call.method === method);
   assert.ok(matching.length, `expected ${method} call`);
@@ -214,6 +380,125 @@ test('crm http: customer list normalizes aliases and preserves canonical metadat
     keyword: 'ACME',
     limit: 100
   });
+});
+
+test('crm http: customer detail uses the scoped query service without direct SQL', async () => {
+  const harness = makeHarness();
+  const response = await harness.invoke('GET /api/customers/:id/detail', {
+    params: { id: '41' }
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.payload, canonicalCustomerDetail());
+  assert.deepEqual(lastCall(harness, 'getCustomerDetail').input, {
+    actorUserId: 101,
+    organizationId: 501,
+    requestId: 'http-request',
+    customerId: 41
+  });
+});
+
+test('crm http: customer detail serializes concealed records as bounded problem details', async () => {
+  const harness = makeHarness({
+    crmQueryService: {
+      getCustomerDetail() {
+        const error = new Error('customer=other-org sql=select secret');
+        error.code = 'CRM_CUSTOMER_NOT_FOUND';
+        error.status = 404;
+        throw error;
+      }
+    }
+  });
+  const response = await harness.invoke('GET /api/customers/:id/detail', {
+    params: { id: '41' }
+  });
+
+  assert.equal(response.statusCode, 404);
+  assert.equal(response.contentType, 'application/problem+json');
+  assert.equal(response.payload.code, 'CRM_CUSTOMER_NOT_FOUND');
+  assert.equal(response.payload.title, 'CRM customer was not found');
+  assert.equal(JSON.stringify(response.payload).includes('other-org'), false);
+  assert.equal(JSON.stringify(response.payload).includes('select secret'), false);
+});
+
+test('crm http: opportunity detail uses one scoped target lookup', async () => {
+  const harness = makeHarness();
+  const response = await harness.invoke('GET /api/opportunities/:id/detail', {
+    params: { id: '71' }
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.payload, canonicalOpportunityDetail());
+  assert.deepEqual(lastCall(harness, 'getOpportunityDetail').input, {
+    actorUserId: 101,
+    organizationId: 501,
+    requestId: 'http-request',
+    opportunityId: 71
+  });
+});
+
+test('crm http: real scoped detail integration conceals inaccessible records and revoked actors', async (t) => {
+  const db = openDetailHttpFixture(t);
+  const harness = makeHarness({
+    db,
+    crmQueryService: {
+      getCustomerDetail: realCrmQueryService.getCustomerDetail
+    }
+  });
+
+  const teammate = await harness.invoke('GET /api/customers/:id/detail', {
+    user: { id: 102, role: 'user' },
+    params: { id: '41' },
+    requestId: 'detail-http-read'
+  });
+  assert.equal(teammate.statusCode, 200);
+  assert.equal(teammate.payload.customer.id, 41);
+  assert.equal(teammate.payload.meta.scope, 'team');
+
+  const orgAdmin = await harness.invoke('GET /api/customers/:id/detail', {
+    user: { id: 104, role: 'user' },
+    authContext: {
+      organization: { id: 501, code: 'detail-http-a', role_code: 'org_admin' },
+      teams: [{ id: 601, role_code: 'member' }]
+    },
+    params: { id: '43' },
+    requestId: 'detail-http-admin'
+  });
+  assert.equal(orgAdmin.statusCode, 200);
+  assert.equal(orgAdmin.payload.customer.id, 43);
+  assert.equal(orgAdmin.payload.customer.custody, 'quarantined');
+  assert.equal(orgAdmin.payload.meta.scope, 'organization');
+
+  const concealed = [];
+  for (const customerId of [42, 43, 44, 45, 999]) {
+    concealed.push(await harness.invoke('GET /api/customers/:id/detail', {
+      user: { id: 101, role: 'user' },
+      params: { id: String(customerId) },
+      requestId: 'detail-http-conceal'
+    }));
+  }
+  for (const response of concealed) {
+    assert.equal(response.statusCode, 404);
+    assert.equal(response.contentType, 'application/problem+json');
+    assert.equal(response.payload.code, 'CRM_CUSTOMER_NOT_FOUND');
+    assert.deepEqual(response.payload, concealed[0].payload);
+    assert.doesNotMatch(JSON.stringify(response.payload), /Public A|Quarantine A|Other Team A|Owned B|customer_id/i);
+  }
+
+  const revokedExisting = await harness.invoke('GET /api/customers/:id/detail', {
+    user: { id: 105, role: 'user' },
+    params: { id: '41' },
+    requestId: 'detail-http-revoked'
+  });
+  const revokedMissing = await harness.invoke('GET /api/customers/:id/detail', {
+    user: { id: 105, role: 'user' },
+    params: { id: '999' },
+    requestId: 'detail-http-revoked'
+  });
+  assert.equal(revokedExisting.statusCode, 404);
+  assert.equal(revokedExisting.contentType, 'application/problem+json');
+  assert.deepEqual(revokedExisting.payload, revokedMissing.payload);
+  assert.doesNotMatch(JSON.stringify(revokedExisting.payload), /Owned A|customer_id/i);
 });
 
 test('crm http: sea pool and stats use canonical query services and keep UI aliases', async () => {

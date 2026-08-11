@@ -1929,13 +1929,18 @@ function writeArchiveActivity(db, input, customer, artifactType) {
 
 function archiveCustomerKnowledge(db, context, input, customer) {
   const archive = canonicalArchiveCommand(input.command);
-  const sourceId = [
+  const activityId = writeArchiveActivity(db, input, customer, archive.artifact_type);
+  const sourceIdParts = [
     'org',
     context.organization.id,
     'customer',
     customer.id,
     archive.artifact_type
-  ].join(':');
+  ];
+  if (archive.artifact_type === 'note') {
+    sourceIdParts.push('activity', activityId);
+  }
+  const sourceId = sourceIdParts.join(':');
   const knowledgeEntry = knowledgeService.ingestKnowledge(db, {
     entry_type: archive.artifact_type,
     title: archive.title,
@@ -1958,7 +1963,6 @@ function archiveCustomerKnowledge(db, context, input, customer) {
   if (!knowledgeEntry || !positiveSafeInteger(knowledgeEntry.id)) {
     throw mutationError('CRM_MUTATION_FAILED');
   }
-  const activityId = writeArchiveActivity(db, input, customer, archive.artifact_type);
   writeAuditEvent(db, context, input, 'customer_result_archived', customer.id, {
     knowledge_entry_id: knowledgeEntry.id,
     artifact_type: archive.artifact_type,
@@ -2346,8 +2350,12 @@ function authorizeCustomerCommand(db, context, input, operation) {
     if (custody !== 'owned') return forbiddenDecision(db, context, input, label);
     return mutateTask(db, context, input, customer);
   }
-  const teamActivity = operation === 'task' || operation === 'activity';
-  const allowed = teamActivity
+  const teamCollaboration = (
+    operation === 'task' ||
+    operation === 'activity' ||
+    (operation === 'archive' && command.artifact_type === 'note')
+  );
+  const allowed = teamCollaboration
     ? canWriteTeamActivity(context, customer, custody)
     : canManageProfile(context, customer, custody);
   if (!allowed) return forbiddenDecision(db, context, input, label);

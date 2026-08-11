@@ -60,6 +60,13 @@ const controlJson = (id, method, pathTemplate) => definePolicy(
   MEDIA_KINDS.JSON,
   BODY_LIMITS.CAMPAIGN_CONTROL_JSON
 );
+const knowledgeJson = (id, method, pathTemplate) => definePolicy(
+  id,
+  method,
+  pathTemplate,
+  MEDIA_KINDS.JSON,
+  BODY_LIMITS.KNOWLEDGE_JSON
+);
 const existingJson = (id, method, pathTemplate) => definePolicy(
   id,
   method,
@@ -232,6 +239,75 @@ const REQUEST_POLICIES = Object.freeze({
     'parser.demand-parse',
     '/api/demand/parse-file',
     'parser.demand-parse.admission'
+  ),
+
+  CRM_LEAD_CREATE: controlJson('crm.lead.create', 'POST', '/api/leads'),
+  CRM_LEAD_UPDATE: controlJson('crm.lead.update', 'PUT', '/api/leads/:id'),
+  CRM_LEAD_CONVERT: controlJson('crm.lead.convert', 'POST', '/api/leads/:id/convert'),
+  CRM_CUSTOMER_CREATE: controlJson('crm.customer.create', 'POST', '/api/customers'),
+  CRM_CUSTOMER_UPDATE: controlJson('crm.customer.update', 'PUT', '/api/customers/:id'),
+  CRM_CUSTOMER_ASSIGN: controlJson('crm.customer.assign', 'POST', '/api/customers/:id/assign'),
+  CRM_CUSTOMER_RETURN_POOL: controlJson(
+    'crm.customer.return-pool',
+    'POST',
+    '/api/customers/:id/return-pool'
+  ),
+  CRM_CUSTOMER_RETURN: controlJson('crm.customer.return', 'POST', '/api/customers/:id/return'),
+  CRM_CUSTOMER_CLAIM: controlJson('crm.customer.claim', 'POST', '/api/customers/:id/claim'),
+  CRM_CUSTOMER_ARCHIVE_RESULT: knowledgeJson(
+    'crm.customer.archive-result',
+    'POST',
+    '/api/customers/:id/archive-result'
+  ),
+  CRM_CUSTOMER_ACTIVITY: controlJson(
+    'crm.customer.activity',
+    'POST',
+    '/api/customers/:id/activity'
+  ),
+  CRM_OPPORTUNITY_CREATE: controlJson(
+    'crm.opportunity.create',
+    'POST',
+    '/api/opportunities'
+  ),
+  CRM_OPPORTUNITY_UPDATE: controlJson(
+    'crm.opportunity.update',
+    'PUT',
+    '/api/opportunities/:id'
+  ),
+  CRM_SALES_TARGET_CREATE: controlJson(
+    'crm.sales-target.create',
+    'POST',
+    '/api/sales-targets'
+  ),
+  CRM_CONTACT_CREATE: controlJson(
+    'crm.contact.create',
+    'POST',
+    '/api/customers/:customerId/contacts'
+  ),
+  CRM_CONTACT_UPDATE: controlJson(
+    'crm.contact.update',
+    'PUT',
+    '/api/customers/:customerId/contacts/:contactId'
+  ),
+  CRM_CONTACT_ARCHIVE: controlJson(
+    'crm.contact.archive',
+    'POST',
+    '/api/customers/:customerId/contacts/:contactId/archive'
+  ),
+  CRM_TASK_CREATE: controlJson(
+    'crm.task.create',
+    'POST',
+    '/api/customers/:customerId/tasks'
+  ),
+  CRM_TASK_COMPLETE: controlJson(
+    'crm.task.complete',
+    'POST',
+    '/api/customers/:customerId/tasks/:taskId/complete'
+  ),
+  CRM_TASK_CANCEL: controlJson(
+    'crm.task.cancel',
+    'POST',
+    '/api/customers/:customerId/tasks/:taskId/cancel'
   ),
 
   CUSTOMER_DELETE: empty('customer.delete', 'DELETE', '/api/customers/:id'),

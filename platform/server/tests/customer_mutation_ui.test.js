@@ -124,7 +124,7 @@ function createHarness(response) {
   };
   const context = {
     console,
-    CUST_STAGES: { lead: 'Lead', negotiation: 'Negotiation' },
+    CUST_STAGES: { lead: 'Lead', info_confirmed: 'Information confirmed' },
     document: {
       getElementById(id) {
         if (!elements.has(id)) elements.set(id, createElement());
@@ -149,7 +149,12 @@ function createHarness(response) {
     },
     loadCustomerStats() {
       state.statsLoads += 1;
-    }
+    },
+    getSelectedCrmTeamId() { return 601; },
+    async collectCustomerTransitionEvidence() {
+      return { reason_code: 'requirements_changed' };
+    },
+    async collectCustomerReleaseReason() { return 'capacity_rebalance'; }
   };
 
   const functionNames = [
@@ -257,10 +262,10 @@ for (const scenario of [
 test('failed stage update restores the previous select value and skips stats refresh', async () => {
   const response = responseFixture({ ok: false, status: 500, payload: { message: 'stage rejected' } });
   const { context, state } = createHarness(response);
-  const select = createElement('negotiation');
+  const select = createElement('info_confirmed');
   select.setAttribute('data-previous-value', 'lead');
 
-  await context.changeCustomerStage(7, 'negotiation', select);
+  await context.changeCustomerStage(7, 'info_confirmed', select);
 
   assert.equal(select.value, 'lead');
   assert.equal(select.getAttribute('data-previous-value'), 'lead');
@@ -315,13 +320,13 @@ test('successful create and update keep the existing close and reload behavior',
 test('successful stage update records the new rollback point and reloads stats once', async () => {
   const response = responseFixture({ ok: true, status: 200 });
   const { context, state } = createHarness(response);
-  const select = createElement('negotiation');
+  const select = createElement('info_confirmed');
   select.setAttribute('data-previous-value', 'lead');
 
-  await context.changeCustomerStage(7, 'negotiation', select);
+  await context.changeCustomerStage(7, 'info_confirmed', select);
 
-  assert.equal(select.value, 'negotiation');
-  assert.equal(select.getAttribute('data-previous-value'), 'negotiation');
+  assert.equal(select.value, 'info_confirmed');
+  assert.equal(select.getAttribute('data-previous-value'), 'info_confirmed');
   assert.equal(state.statsLoads, 1);
   assert.equal(successToasts(state).length, 1);
   assert.equal(errorToasts(state).length, 0);

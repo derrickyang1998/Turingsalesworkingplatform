@@ -13,6 +13,35 @@ const express = require('express');
 
 const contractPath = path.join(__dirname, '..', 'contracts', 'campaign_contract.js');
 const pipelinePath = path.join(__dirname, '..', 'middleware', 'phase4_request_pipeline.js');
+const serverPath = path.join(__dirname, '..', 'server.js');
+const customerRoutesPath = path.join(__dirname, '..', 'routes_customers.js');
+const CRM_CONTROL_POLICIES = Object.freeze([
+  ['CRM_LEAD_CREATE', 'crm.lead.create', 'POST', '/api/leads'],
+  ['CRM_LEAD_UPDATE', 'crm.lead.update', 'PUT', '/api/leads/:id'],
+  ['CRM_LEAD_CONVERT', 'crm.lead.convert', 'POST', '/api/leads/:id/convert'],
+  ['CRM_CUSTOMER_CREATE', 'crm.customer.create', 'POST', '/api/customers'],
+  ['CRM_CUSTOMER_UPDATE', 'crm.customer.update', 'PUT', '/api/customers/:id'],
+  ['CRM_CUSTOMER_ASSIGN', 'crm.customer.assign', 'POST', '/api/customers/:id/assign'],
+  ['CRM_CUSTOMER_RETURN_POOL', 'crm.customer.return-pool', 'POST', '/api/customers/:id/return-pool'],
+  ['CRM_CUSTOMER_RETURN', 'crm.customer.return', 'POST', '/api/customers/:id/return'],
+  ['CRM_CUSTOMER_CLAIM', 'crm.customer.claim', 'POST', '/api/customers/:id/claim'],
+  ['CRM_OPPORTUNITY_CREATE', 'crm.opportunity.create', 'POST', '/api/opportunities'],
+  ['CRM_OPPORTUNITY_UPDATE', 'crm.opportunity.update', 'PUT', '/api/opportunities/:id'],
+  ['CRM_SALES_TARGET_CREATE', 'crm.sales-target.create', 'POST', '/api/sales-targets'],
+  ['CRM_CONTACT_CREATE', 'crm.contact.create', 'POST', '/api/customers/:customerId/contacts'],
+  ['CRM_CONTACT_UPDATE', 'crm.contact.update', 'PUT', '/api/customers/:customerId/contacts/:contactId'],
+  ['CRM_CONTACT_ARCHIVE', 'crm.contact.archive', 'POST', '/api/customers/:customerId/contacts/:contactId/archive'],
+  ['CRM_TASK_CREATE', 'crm.task.create', 'POST', '/api/customers/:customerId/tasks'],
+  ['CRM_TASK_COMPLETE', 'crm.task.complete', 'POST', '/api/customers/:customerId/tasks/:taskId/complete'],
+  ['CRM_TASK_CANCEL', 'crm.task.cancel', 'POST', '/api/customers/:customerId/tasks/:taskId/cancel'],
+  ['CRM_CUSTOMER_ACTIVITY', 'crm.customer.activity', 'POST', '/api/customers/:id/activity']
+]);
+const CRM_ARCHIVE_POLICY = Object.freeze([
+  'CRM_CUSTOMER_ARCHIVE_RESULT',
+  'crm.customer.archive-result',
+  'POST',
+  '/api/customers/:id/archive-result'
+]);
 
 function loadBoundary() {
   return {
@@ -411,6 +440,57 @@ test('owned-route matching covers every Express-dispatchable path shape while fu
     () => registry.register(contract.REQUEST_POLICIES.CAMPAIGN_CREATE),
     /already registered/i
   );
+});
+
+test('request contract owns every CRM JSON mutation with bounded registered policies', () => {
+  const { contract } = loadBoundary();
+  const registry = contract.createRoutePolicyRegistry();
+  const expected = CRM_CONTROL_POLICIES.concat([CRM_ARCHIVE_POLICY]);
+
+  for (const [name, id, method, pathTemplate] of expected) {
+    const policy = contract.REQUEST_POLICIES[name];
+    assert.ok(policy, `missing CRM request policy ${name}`);
+    assert.equal(policy.id, id);
+    assert.equal(policy.method, method);
+    assert.equal(policy.pathTemplate, pathTemplate);
+    assert.equal(policy.mediaKind, contract.MEDIA_KINDS.JSON);
+    assert.equal(
+      policy.maxRawBytes,
+      name === CRM_ARCHIVE_POLICY[0]
+        ? contract.BODY_LIMITS.KNOWLEDGE_JSON
+        : contract.BODY_LIMITS.CAMPAIGN_CONTROL_JSON
+    );
+    registry.register(policy);
+    assert.equal(registry.match(method, pathTemplate.replace(/:[^/]+/g, '41')).id, id);
+  }
+
+  const serverSource = fs.readFileSync(serverPath, 'utf8');
+  const policyNamesMatch = /const phase4PolicyNames = (\[[\s\S]*?\]);\r?\nconst phase4Registry/u.exec(serverSource);
+  assert.ok(policyNamesMatch, 'server phase4PolicyNames registry was not found');
+  const registeredNames = Array.from(policyNamesMatch[1].matchAll(/'([^']+)'/g), (match) => match[1]);
+  for (const [name] of expected) {
+    assert.equal(registeredNames.includes(name), true, `${name} is not registered in server.js`);
+  }
+
+  const routeSource = fs.readFileSync(customerRoutesPath, 'utf8');
+  const actualMutationRoutes = Array.from(
+    routeSource.matchAll(/app\.(post|put|patch)\('([^']+)'/g),
+    (match) => `${match[1].toUpperCase()} ${match[2]}`
+  ).filter((route) => /^\w+ \/api\/(?:leads|customers|opportunities|sales-targets)(?:\/|$)/.test(route));
+  const policyMutationRoutes = expected.map(([, , method, pathTemplate]) => (
+    `${method} ${pathTemplate}`
+  ));
+  assert.deepEqual(
+    actualMutationRoutes.slice().sort(),
+    policyMutationRoutes.slice().sort(),
+    'CRM JSON mutation routes and request policies must remain a bidirectional inventory'
+  );
+
+  const crmPolicyRoutes = Object.entries(contract.REQUEST_POLICIES)
+    .filter(([name, policy]) => name.startsWith('CRM_') && policy.mediaKind === contract.MEDIA_KINDS.JSON)
+    .map(([, policy]) => `${policy.method} ${policy.pathTemplate}`)
+    .sort();
+  assert.deepEqual(crmPolicyRoutes, policyMutationRoutes.slice().sort());
 });
 
 test('request IDs accept exact printable ASCII bounds, echo valid input, and generate deterministic fallbacks', async () => {
@@ -967,6 +1047,81 @@ test('fixed and chunked JSON enforce the exact inclusive campaign-control byte b
     assert.equal(chunkedRejected.status, 413);
     assert.equal(chunkedRejected.headers.connection.toLowerCase(), 'close');
     assert.equal(JSON.parse(chunkedRejected.body).code, 'INVALID_REQUEST_BODY');
+  } finally {
+    await harness.close();
+  }
+});
+
+test('CRM control and archive JSON policies enforce their exact raw-byte boundaries', async () => {
+  const harness = await createHarness({
+    policyNames: ['CRM_CUSTOMER_CREATE', 'CRM_CUSTOMER_ARCHIVE_RESULT']
+  });
+
+  function exactJsonBody(limit) {
+    const prefix = '{"value":"';
+    const suffix = '"}';
+    return prefix + 'x'.repeat(limit - Buffer.byteLength(prefix) - Buffer.byteLength(suffix)) + suffix;
+  }
+
+  try {
+    const controlLimit = harness.contract.BODY_LIMITS.CAMPAIGN_CONTROL_JSON;
+    const controlBody = exactJsonBody(controlLimit);
+    const control = await requestJson(harness.baseUrl, '/api/customers', {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer accepted-by-test',
+        'Content-Type': 'application/json'
+      },
+      body: controlBody
+    });
+    assert.equal(control.response.status, 200);
+    assert.equal(control.body.policy_id, 'crm.customer.create');
+    assert.equal(control.body.raw_bytes, controlLimit);
+
+    const controlOverflow = parseRawResponse(await rawExchange(
+      harness.port,
+      chunkedRequest(
+        '/api/customers',
+        [
+          'Authorization: Bearer accepted-by-test',
+          'Content-Type: application/json',
+          'X-Request-Id: crm-control-overflow-01'
+        ],
+        [Buffer.alloc(controlLimit, 0x20), Buffer.from('xx')]
+      ),
+      { timeoutMs: 5000 }
+    ));
+    assert.equal(controlOverflow.status, 413);
+    assert.equal(JSON.parse(controlOverflow.body).code, 'INVALID_REQUEST_BODY');
+
+    const archiveLimit = harness.contract.BODY_LIMITS.KNOWLEDGE_JSON;
+    const archiveBody = exactJsonBody(archiveLimit);
+    const archive = await requestJson(harness.baseUrl, '/api/customers/41/archive-result', {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer accepted-by-test',
+        'Content-Type': 'application/json'
+      },
+      body: archiveBody
+    });
+    assert.equal(archive.response.status, 200);
+    assert.equal(archive.body.policy_id, 'crm.customer.archive-result');
+    assert.equal(archive.body.raw_bytes, archiveLimit);
+
+    const archiveOverflowHeader = [
+      'POST /api/customers/41/archive-result HTTP/1.1',
+      'Host: 127.0.0.1',
+      'Connection: close',
+      'Authorization: Bearer accepted-by-test',
+      'Content-Type: application/json',
+      'X-Request-Id: crm-archive-overflow-1',
+      `Content-Length: ${archiveLimit + 1}`,
+      '',
+      ''
+    ].join('\r\n');
+    const archiveOverflow = parseRawResponse(await rawExchange(harness.port, archiveOverflowHeader));
+    assert.equal(archiveOverflow.status, 413);
+    assert.equal(JSON.parse(archiveOverflow.body).code, 'INVALID_REQUEST_BODY');
   } finally {
     await harness.close();
   }

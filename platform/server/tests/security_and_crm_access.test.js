@@ -5,6 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const bcrypt = require('bcryptjs');
+const { resolveOrganizationScope } = require('../services/organization_access_service');
 
 const LEGACY_CREDENTIAL_LENGTH = 10;
 const LEGACY_CREDENTIAL_SHA256 = '0f92bb29dad79e922a92eba3deb0e6be044632fa5aca97a748adb7659d382c6a';
@@ -46,7 +47,45 @@ function mountCustomerRoutes(db) {
   });
   const authMiddleware = function(req, res, next) { next(); };
   require('../routes_customers')(app, db, authMiddleware);
+  Object.defineProperty(routes, 'db', { value: db });
   return routes;
+}
+
+function activeAuthContext(db, userId) {
+  const result = resolveOrganizationScope(db, {
+    userId,
+    repairMissing: false,
+    actorUserId: userId,
+    requestId: 'crm-security-context'
+  });
+  return result && result.ok === true ? result.authContext : {};
+}
+
+function activeOrgTeam(db, userId) {
+  const row = db.prepare(`
+    SELECT om.org_id,tm.team_id
+    FROM organization_memberships om
+    JOIN team_memberships tm
+      ON tm.org_id=om.org_id
+     AND tm.user_id=om.user_id
+     AND tm.status='active'
+    WHERE om.user_id=? AND om.status='active'
+    ORDER BY om.org_id,tm.team_id
+    LIMIT 1
+  `).get(userId);
+  assert.ok(row, `active organization/team required for user ${userId}`);
+  return { orgId: Number(row.org_id), teamId: Number(row.team_id) };
+}
+
+function hardDeleteProblem(requestId = 'crm-delete-test-request') {
+  return {
+    type: 'https://api.turingmarket.example/problems/crm-hard-delete-unavailable',
+    title: 'CRM hard delete is unavailable',
+    status: 409,
+    code: 'CRM_HARD_DELETE_UNAVAILABLE',
+    request_id: requestId,
+    instance: `urn:turingmarket:request:${requestId}`
+  };
 }
 
 function invoke(routes, key, opts) {
@@ -55,9 +94,11 @@ function invoke(routes, key, opts) {
   assert.ok(handlers, 'route not found: ' + key);
   const req = {
     user: opts.user || { id: 2, role: 'user' },
+    authContext: opts.authContext || activeAuthContext(routes.db, (opts.user || { id: 2 }).id),
     params: opts.params || {},
     query: opts.query || {},
     body: opts.body || {},
+    headers: opts.headers || {},
     requestId: opts.requestId || 'crm-delete-test-request',
     ip: '127.0.0.1'
   };
@@ -231,32 +272,70 @@ test('public files and admin APIs do not expose the legacy default password', ()
   });
 });
 
-test('crm customer and opportunity routes reject cross-user access by id', () => {
+test('crm customer detail is team-readable while mutations remain owner-scoped', () => {
   const db = freshDb();
   const routes = mountCustomerRoutes(db);
   const owner = { id: 2, role: 'user' };
   const other = { id: 3, role: 'user' };
+  const scope = activeOrgTeam(db, owner.id);
+  db.prepare(`
+    INSERT OR IGNORE INTO team_memberships (
+      org_id,team_id,user_id,role_code,status,created_at
+    ) VALUES (?,?,?,'member','active',CURRENT_TIMESTAMP)
+  `).run(scope.orgId, scope.teamId, other.id);
 
   const customerId = db.prepare(`
-    INSERT INTO customers (brand_name, company_name, created_by, assigned_to, is_public, stage)
-    VALUES (?, ?, ?, ?, 0, ?)
-  `).run('Aurora Beauty', 'Aurora Inc', owner.id, owner.id, 'proposal').lastInsertRowid;
+    INSERT INTO customers (
+      brand_name,company_name,created_by,assigned_to,is_public,stage,
+      org_id,team_id,duplicate_enforced
+    ) VALUES (?,?,?,?,0,?,?,?,0)
+  `).run(
+    'Aurora Beauty',
+    'Aurora Inc',
+    owner.id,
+    owner.id,
+    'proposal',
+    scope.orgId,
+    scope.teamId
+  ).lastInsertRowid;
   const opportunityId = db.prepare(`
-    INSERT INTO opportunities (customer_id, name, stage, value, created_by)
-    VALUES (?, ?, ?, ?, ?)
-  `).run(customerId, 'Aurora Launch', 'proposal', 5000, owner.id).lastInsertRowid;
+    INSERT INTO opportunities (
+      customer_id,name,stage,value,created_by,org_id,team_id,owner_user_id
+    ) VALUES (?,?,?,?,?,?,?,?)
+  `).run(
+    customerId,
+    'Aurora Launch',
+    'proposal',
+    5000,
+    owner.id,
+    scope.orgId,
+    scope.teamId,
+    owner.id
+  ).lastInsertRowid;
 
-  assert.equal(invoke(routes, 'GET /api/customers/:id/detail', { user: other, params: { id: customerId } }).statusCode, 403);
-  assert.equal(invoke(routes, 'PUT /api/customers/:id', { user: other, params: { id: customerId }, body: { stage: 'won' } }).statusCode, 403);
-  const leakedPrivateList = invoke(routes, 'GET /api/customers', { user: other, query: { is_public: 0 } });
+  assert.equal(invoke(routes, 'GET /api/customers/:id/detail', { user: other, params: { id: customerId } }).statusCode, 200);
+  assert.equal(invoke(routes, 'PUT /api/customers/:id', { user: other, params: { id: customerId }, body: { notes: 'unauthorized' } }).statusCode, 403);
+  const leakedPrivateList = invoke(routes, 'GET /api/customers', { user: other, query: { scope: 'my' } });
   assert.equal(leakedPrivateList.statusCode, 200);
   assert.equal(leakedPrivateList.payload.customers.some(function(customer) { return Number(customer.id) === Number(customerId); }), false);
-  assert.equal(invoke(routes, 'POST /api/customers/:id/return-pool', { user: other, params: { id: customerId } }).statusCode, 403);
+  assert.equal(invoke(routes, 'POST /api/customers/:id/return-pool', {
+    user: other,
+    params: { id: customerId },
+    body: { reason_code: 'capacity_rebalance' }
+  }).statusCode, 403);
   assert.equal(invoke(routes, 'POST /api/opportunities', { user: other, body: { customer_id: customerId, name: 'Unauthorized' } }).statusCode, 403);
-  assert.equal(invoke(routes, 'PUT /api/opportunities/:id', { user: other, params: { id: opportunityId }, body: { stage: 'won' } }).statusCode, 403);
+  assert.equal(invoke(routes, 'PUT /api/opportunities/:id', {
+    user: other,
+    params: { id: opportunityId },
+    body: { customer_id: customerId, name: 'Unauthorized edit' }
+  }).statusCode, 403);
 
   assert.equal(invoke(routes, 'GET /api/customers/:id/detail', { user: owner, params: { id: customerId } }).statusCode, 200);
-  assert.equal(invoke(routes, 'PUT /api/opportunities/:id', { user: owner, params: { id: opportunityId }, body: { stage: 'won' } }).statusCode, 200);
+  assert.equal(invoke(routes, 'PUT /api/opportunities/:id', {
+    user: owner,
+    params: { id: opportunityId },
+    body: { customer_id: customerId, name: 'Aurora Launch Updated' }
+  }).statusCode, 200);
 
   db.close();
 });
@@ -266,12 +345,27 @@ test('assigned customers cannot be claimed from the public pool', () => {
   const routes = mountCustomerRoutes(db);
   const owner = { id: 2, role: 'user' };
   const other = { id: 3, role: 'user' };
+  const scope = activeOrgTeam(db, owner.id);
   const customerId = db.prepare(`
-    INSERT INTO customers (brand_name, company_name, created_by, assigned_to, is_public, stage)
-    VALUES (?, ?, ?, ?, 1, ?)
-  `).run('Assigned Public Flag Brand', 'Assigned Public Flag Inc', owner.id, owner.id, 'proposal').lastInsertRowid;
+    INSERT INTO customers (
+      brand_name,company_name,created_by,assigned_to,is_public,stage,
+      org_id,team_id,duplicate_enforced
+    ) VALUES (?,?,?,?,1,?,?,?,0)
+  `).run(
+    'Assigned Public Flag Brand',
+    'Assigned Public Flag Inc',
+    owner.id,
+    owner.id,
+    'proposal',
+    scope.orgId,
+    scope.teamId
+  ).lastInsertRowid;
 
-  const claim = invoke(routes, 'POST /api/customers/:id/claim', { user: other, params: { id: customerId } });
+  const claim = invoke(routes, 'POST /api/customers/:id/claim', {
+    user: other,
+    params: { id: customerId },
+    body: { team_id: activeOrgTeam(db, other.id).teamId }
+  });
 
   assert.equal(claim.statusCode, 409);
   const customer = db.prepare('SELECT assigned_to, is_public FROM customers WHERE id = ?').get(customerId);
@@ -286,23 +380,39 @@ test('public-pool customer visibility does not allow opportunity mutation', () =
   const routes = mountCustomerRoutes(db);
   const owner = { id: 2, role: 'user' };
   const other = { id: 3, role: 'user' };
+  const scope = activeOrgTeam(db, owner.id);
   const customerId = db.prepare(`
-    INSERT INTO customers (brand_name, company_name, created_by, assigned_to, is_public, stage)
-    VALUES (?, ?, ?, NULL, 1, ?)
-  `).run('Public Pool Brand', 'Public Pool Inc', owner.id, 'proposal').lastInsertRowid;
+    INSERT INTO customers (
+      brand_name,company_name,created_by,assigned_to,is_public,stage,
+      org_id,team_id,duplicate_enforced
+    ) VALUES (?,?,?,NULL,1,?,?,NULL,0)
+  `).run('Public Pool Brand', 'Public Pool Inc', owner.id, 'proposal', scope.orgId).lastInsertRowid;
   const opportunityId = db.prepare(`
-    INSERT INTO opportunities (customer_id, name, stage, value, created_by)
-    VALUES (?, ?, ?, ?, ?)
-  `).run(customerId, 'Public Pool Opportunity', 'proposal', 5000, owner.id).lastInsertRowid;
+    INSERT INTO opportunities (
+      customer_id,name,stage,value,created_by,org_id,team_id,owner_user_id
+    ) VALUES (?,?,?,?,?,?,NULL,?)
+  `).run(
+    customerId,
+    'Public Pool Opportunity',
+    'proposal',
+    5000,
+    owner.id,
+    scope.orgId,
+    owner.id
+  ).lastInsertRowid;
 
-  assert.equal(invoke(routes, 'GET /api/customers/:id/detail', { user: other, params: { id: customerId } }).statusCode, 200);
-  assert.equal(invoke(routes, 'PUT /api/opportunities/:id', { user: other, params: { id: opportunityId }, body: { stage: 'won' } }).statusCode, 403);
-  assert.equal(invoke(routes, 'DELETE /api/opportunities/:id', { user: other, params: { id: opportunityId } }).statusCode, 403);
+  assert.equal(invoke(routes, 'GET /api/customers/:id/detail', { user: other, params: { id: customerId } }).statusCode, 404);
+  assert.equal(invoke(routes, 'PUT /api/opportunities/:id', {
+    user: other,
+    params: { id: opportunityId },
+    body: { customer_id: customerId, name: 'Hidden edit' }
+  }).statusCode, 403);
+  assert.equal(invoke(routes, 'DELETE /api/opportunities/:id', { user: other, params: { id: opportunityId } }).statusCode, 409);
 
   db.close();
 });
 
-test('customer and opportunity deletes reject campaign dependencies without partial mutation', () => {
+test('customer and opportunity hard deletes are uniformly unavailable and preserve rows', () => {
   const db = freshDb();
   const routes = mountCustomerRoutes(db);
   const owner = { id: 2, role: 'user' };
@@ -360,14 +470,7 @@ test('customer and opportunity deletes reject campaign dependencies without part
     params: { id: String(opportunityId) }
   });
   assert.equal(opportunityDelete.statusCode, 409);
-  assert.deepEqual(opportunityDelete.payload, {
-    error: 'Opportunity has dependencies',
-    code: 'OPPORTUNITY_HAS_DEPENDENCIES',
-    request_id: 'crm-delete-test-request',
-    details: {
-      dependencies: [{ type: 'campaigns', count: 1 }]
-    }
-  });
+  assert.deepEqual(opportunityDelete.payload, hardDeleteProblem());
   assert.equal(
     db.prepare('SELECT COUNT(*) AS count FROM opportunities WHERE id=?')
       .get(opportunityId).count,
@@ -379,17 +482,7 @@ test('customer and opportunity deletes reject campaign dependencies without part
     params: { id: String(customerId) }
   });
   assert.equal(customerDelete.statusCode, 409);
-  assert.deepEqual(customerDelete.payload, {
-    error: 'Customer has dependencies',
-    code: 'CUSTOMER_HAS_DEPENDENCIES',
-    request_id: 'crm-delete-test-request',
-    details: {
-      dependencies: [
-        { type: 'campaigns', count: 1 },
-        { type: 'opportunities', count: 1 }
-      ]
-    }
-  });
+  assert.deepEqual(customerDelete.payload, hardDeleteProblem());
   assert.equal(
     db.prepare('SELECT COUNT(*) AS count FROM customer_activity WHERE customer_id=?')
       .get(customerId).count,
@@ -404,7 +497,7 @@ test('customer and opportunity deletes reject campaign dependencies without part
   db.close();
 });
 
-test('customer delete maps an unenumerated foreign key dependency and rolls back activity', () => {
+test('customer hard-delete refusal does not touch unenumerated dependencies or activity', () => {
   const db = freshDb();
   const routes = mountCustomerRoutes(db);
   const owner = { id: 2, role: 'user' };
@@ -440,14 +533,7 @@ test('customer delete maps an unenumerated foreign key dependency and rolls back
     params: { id: String(customerId) }
   });
   assert.equal(result.statusCode, 409);
-  assert.deepEqual(result.payload, {
-    error: 'Customer has dependencies',
-    code: 'CUSTOMER_HAS_DEPENDENCIES',
-    request_id: 'crm-delete-test-request',
-    details: {
-      dependencies: [{ type: 'unknown', count: null }]
-    }
-  });
+  assert.deepEqual(result.payload, hardDeleteProblem());
   assert.equal(
     db.prepare('SELECT COUNT(*) AS count FROM customer_activity WHERE customer_id=?')
       .get(customerId).count,
@@ -462,7 +548,7 @@ test('customer delete maps an unenumerated foreign key dependency and rolls back
   db.close();
 });
 
-test('crm deletes reauthorize current actor and target state under the write transaction', () => {
+test('hard-delete refusal is independent of stale roles identifiers and record existence', () => {
   const db = freshDb();
   const routes = mountCustomerRoutes(db);
   const staleAdminProjection = { id: 2, role: 'admin' };
@@ -493,68 +579,44 @@ test('crm deletes reauthorize current actor and target state under the write tra
     user: staleAdminProjection,
     params: { id: String(customerId) }
   });
-  assert.equal(customerForbidden.statusCode, 403);
-  assert.deepEqual(customerForbidden.payload, {
-    error: 'Forbidden',
-    code: 'RECORD_FORBIDDEN',
-    request_id: 'crm-delete-test-request'
-  });
+  assert.equal(customerForbidden.statusCode, 409);
+  assert.deepEqual(customerForbidden.payload, hardDeleteProblem());
 
   const opportunityForbidden = invoke(routes, 'DELETE /api/opportunities/:id', {
     user: staleAdminProjection,
     params: { id: String(opportunityId) }
   });
-  assert.equal(opportunityForbidden.statusCode, 403);
-  assert.deepEqual(opportunityForbidden.payload, {
-    error: 'Forbidden',
-    code: 'RECORD_FORBIDDEN',
-    request_id: 'crm-delete-test-request'
-  });
+  assert.equal(opportunityForbidden.statusCode, 409);
+  assert.deepEqual(opportunityForbidden.payload, hardDeleteProblem());
 
   const noncanonicalCustomer = invoke(routes, 'DELETE /api/customers/:id', {
     user: { id: currentOwnerId, role: 'user' },
     params: { id: '0' + String(customerId) }
   });
-  assert.equal(noncanonicalCustomer.statusCode, 404);
-  assert.deepEqual(noncanonicalCustomer.payload, {
-    error: 'Customer not found',
-    code: 'RECORD_NOT_FOUND',
-    request_id: 'crm-delete-test-request'
-  });
+  assert.equal(noncanonicalCustomer.statusCode, 409);
+  assert.deepEqual(noncanonicalCustomer.payload, hardDeleteProblem());
 
   const noncanonicalOpportunity = invoke(routes, 'DELETE /api/opportunities/:id', {
     user: { id: currentOwnerId, role: 'user' },
     params: { id: '+' + String(opportunityId) }
   });
-  assert.equal(noncanonicalOpportunity.statusCode, 404);
-  assert.deepEqual(noncanonicalOpportunity.payload, {
-    error: 'Opportunity not found',
-    code: 'RECORD_NOT_FOUND',
-    request_id: 'crm-delete-test-request'
-  });
+  assert.equal(noncanonicalOpportunity.statusCode, 409);
+  assert.deepEqual(noncanonicalOpportunity.payload, hardDeleteProblem());
 
   db.prepare('UPDATE users SET is_active=0 WHERE id=?').run(currentOwnerId);
   const inactiveActor = invoke(routes, 'DELETE /api/customers/:id', {
     user: { id: currentOwnerId, role: 'user' },
     params: { id: String(customerId) }
   });
-  assert.equal(inactiveActor.statusCode, 403);
-  assert.deepEqual(inactiveActor.payload, {
-    error: 'Forbidden',
-    code: 'RECORD_FORBIDDEN',
-    request_id: 'crm-delete-test-request'
-  });
+  assert.equal(inactiveActor.statusCode, 409);
+  assert.deepEqual(inactiveActor.payload, hardDeleteProblem());
 
   const missingCustomer = invoke(routes, 'DELETE /api/customers/:id', {
     user: staleAdminProjection,
     params: { id: '9007199254740991' }
   });
-  assert.equal(missingCustomer.statusCode, 404);
-  assert.deepEqual(missingCustomer.payload, {
-    error: 'Customer not found',
-    code: 'RECORD_NOT_FOUND',
-    request_id: 'crm-delete-test-request'
-  });
+  assert.equal(missingCustomer.statusCode, 409);
+  assert.deepEqual(missingCustomer.payload, hardDeleteProblem());
   assert.equal(
     db.prepare('SELECT COUNT(*) AS count FROM customers WHERE id=?')
       .get(customerId).count,
@@ -569,7 +631,7 @@ test('crm deletes reauthorize current actor and target state under the write tra
   db.close();
 });
 
-test('unexpected crm delete failures use a bounded error and roll back every mutation', () => {
+test('hard-delete refusal does not execute destructive database triggers', () => {
   const db = freshDb();
   const routes = mountCustomerRoutes(db);
   const owner = { id: 2, role: 'user' };
@@ -601,12 +663,8 @@ test('unexpected crm delete failures use a bounded error and roll back every mut
     user: owner,
     params: { id: String(customerId) }
   });
-  assert.equal(result.statusCode, 500);
-  assert.deepEqual(result.payload, {
-    error: 'Customer deletion failed',
-    code: 'AUDIT_PERSISTENCE_FAILED',
-    request_id: 'crm-delete-test-request'
-  });
+  assert.equal(result.statusCode, 409);
+  assert.deepEqual(result.payload, hardDeleteProblem());
   assert.equal(JSON.stringify(result.payload).includes('sensitive-delete-detail'), false);
   assert.equal(
     db.prepare('SELECT COUNT(*) AS count FROM customer_activity WHERE customer_id=?')
@@ -682,14 +740,70 @@ test('crm customer stats aggregate opportunity value within caller scope', () =>
   const outsiderC = Number(insertUser.run('stats-outsider-c', 'test-hash', 'Stats Outsider C', 'sales-b').lastInsertRowid);
   const emptyD = Number(insertUser.run('stats-empty-d', 'test-hash', 'Stats Empty D', 'sales-c').lastInsertRowid);
   const admin = db.prepare("SELECT id FROM users WHERE role = 'admin' ORDER BY id LIMIT 1").get();
+  const defaultScope = activeOrgTeam(db, Number(admin.id));
+  const outsiderTeamId = Number(db.prepare(`
+    INSERT INTO teams (org_id,code,name,created_at)
+    VALUES (?,?,?,CURRENT_TIMESTAMP)
+  `).run(
+    defaultScope.orgId,
+    `stats-outsider-${Date.now()}`,
+    'Stats Outsider Team'
+  ).lastInsertRowid);
+
+  const insertOrgMembership = db.prepare(`
+    INSERT INTO organization_memberships (
+      org_id,user_id,role_code,status,created_at
+    ) VALUES (?,?,'member','active',CURRENT_TIMESTAMP)
+  `);
+  const insertTeamMembership = db.prepare(`
+    INSERT INTO team_memberships (
+      org_id,team_id,user_id,role_code,status,created_at
+    ) VALUES (?,?,?,'member','active',CURRENT_TIMESTAMP)
+  `);
+  for (const userId of [ownerA, teammateB, outsiderC, emptyD]) {
+    insertOrgMembership.run(defaultScope.orgId, userId);
+  }
+  for (const userId of [ownerA, teammateB, emptyD]) {
+    insertTeamMembership.run(defaultScope.orgId, defaultScope.teamId, userId);
+  }
+  insertTeamMembership.run(defaultScope.orgId, outsiderTeamId, outsiderC);
 
   const insertCustomer = db.prepare(`
-    INSERT INTO customers (brand_name, company_name, created_by, assigned_to, is_public, stage, opportunity_value)
-    VALUES (?, ?, ?, ?, 0, ?, ?)
+    INSERT INTO customers (
+      brand_name,company_name,created_by,assigned_to,is_public,stage,
+      opportunity_value,org_id,team_id,duplicate_enforced
+    ) VALUES (?,?,?,?,0,?,?,?,?,0)
   `);
-  insertCustomer.run('Scoped One', 'Scoped One Inc', ownerA, ownerA, 'proposal', 1250);
-  insertCustomer.run('Scoped Two', 'Scoped Two Inc', teammateB, teammateB, 'analysis', 2750);
-  insertCustomer.run('Outside Scope', 'Outside Scope Inc', outsiderC, outsiderC, 'proposal', 9000);
+  const customerOne = Number(insertCustomer.run(
+    'Scoped One', 'Scoped One Inc', ownerA, ownerA, 'proposal', 1250,
+    defaultScope.orgId, defaultScope.teamId
+  ).lastInsertRowid);
+  const customerTwo = Number(insertCustomer.run(
+    'Scoped Two', 'Scoped Two Inc', teammateB, teammateB, 'analysis', 2750,
+    defaultScope.orgId, defaultScope.teamId
+  ).lastInsertRowid);
+  const customerOutside = Number(insertCustomer.run(
+    'Outside Scope', 'Outside Scope Inc', outsiderC, outsiderC, 'proposal', 9000,
+    defaultScope.orgId, outsiderTeamId
+  ).lastInsertRowid);
+  const insertOpportunity = db.prepare(`
+    INSERT INTO opportunities (
+      customer_id,name,stage,value,win_probability,created_by,
+      org_id,team_id,owner_user_id
+    ) VALUES (?,?,?, ?,50,?, ?,?,?)
+  `);
+  insertOpportunity.run(
+    customerOne, 'Scoped One Opportunity', 'proposal', 1250, ownerA,
+    defaultScope.orgId, defaultScope.teamId, ownerA
+  );
+  insertOpportunity.run(
+    customerTwo, 'Scoped Two Opportunity', 'qualification', 2750, teammateB,
+    defaultScope.orgId, defaultScope.teamId, teammateB
+  );
+  insertOpportunity.run(
+    customerOutside, 'Outside Opportunity', 'proposal', 9000, outsiderC,
+    defaultScope.orgId, outsiderTeamId, outsiderC
+  );
 
   const ownerStats = invoke(routes, 'GET /api/customers/stats', {
     user: { id: ownerA, role: 'user', department: 'sales-a' },

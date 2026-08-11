@@ -34,6 +34,7 @@ const APPLIED_FILTER_KEYS = Object.freeze([
   'keyword',
   'as_of'
 ]);
+const CUSTOMER_DETAIL_OPPORTUNITY_LIMIT = 100;
 
 class CrmQueryError extends Error {
   constructor(cause) {
@@ -76,6 +77,18 @@ function snapshotPlainOptions(value, recognizedKeys) {
 
 function invalidContext() {
   return new CrmScopeError('CRM_SCOPE_INVALID', 400, 'invalid_context');
+}
+
+function customerNotFound() {
+  return new CrmScopeError('CRM_CUSTOMER_NOT_FOUND', 404, 'not_found');
+}
+
+function opportunityNotFound() {
+  return new CrmScopeError('CRM_CHILD_NOT_FOUND', 404, 'not_found');
+}
+
+function positiveSafeInteger(value) {
+  return Number.isSafeInteger(value) && value > 0;
 }
 
 function nowMarker() {
@@ -471,6 +484,23 @@ function mapCustomerRow(row) {
   };
 }
 
+function customerDetailProjection() {
+  return `
+    ${customerProjection()},
+    c.notes,
+    c.is_public
+  `;
+}
+
+function mapCustomerDetailRow(row) {
+  return {
+    ...mapCustomerRow(row),
+    assigned_to: row.owner_user_id,
+    notes: row.notes,
+    is_public: row.is_public
+  };
+}
+
 function opportunityProjection() {
   return `
     o.id,
@@ -522,6 +552,38 @@ function mapOpportunityRow(row) {
     customer_stage: row.customer_stage,
     customer_priority: row.customer_priority,
     customer_custody: row.customer_custody
+  };
+}
+
+function opportunityDetailProjection() {
+  return `
+    ${opportunityProjection()},
+    o.competitor_info,
+    o.decision_chain,
+    o.notes
+  `;
+}
+
+function mapOpportunityDetailRow(row) {
+  return {
+    ...mapOpportunityRow(row),
+    competitor_info: row.competitor_info,
+    decision_chain: row.decision_chain,
+    notes: row.notes
+  };
+}
+
+function mapActivityRow(row) {
+  return {
+    id: row.id,
+    customer_id: row.customer_id,
+    user_id: row.user_id,
+    action: row.action,
+    stage_from: row.stage_from,
+    stage_to: row.stage_to,
+    notes: row.notes,
+    created_at: row.created_at,
+    display_name: row.display_name
   };
 }
 
@@ -611,6 +673,147 @@ function listOpportunities(db, options) {
       total,
       page: paged.page,
       meta: responseMeta(state)
+    });
+  });
+}
+
+function getCustomerDetail(db, rawOptions) {
+  return runReadTransaction(db, () => {
+    const options = snapshotPlainOptions(rawOptions, [
+      'actorUserId',
+      'organizationId',
+      'organizationCode',
+      'requestId',
+      'customerId'
+    ]);
+    if (!options || !positiveSafeInteger(options.customerId)) throw invalidContext();
+
+    const queryOptions = { actorUserId: options.actorUserId, filter: {} };
+    for (const key of ['organizationId', 'organizationCode', 'requestId']) {
+      if (Object.hasOwn(options, key)) queryOptions[key] = options[key];
+    }
+    const state = prepareQueryState(db, queryOptions, { decodeCursor: false });
+    const detailScopes = state.context.is_org_admin ? ['organization'] : ['team', 'my'];
+    let scope = null;
+    let customerRow = null;
+    for (const candidateScope of detailScopes) {
+      const scopeCompilation = compileCustomerScope(state.context, candidateScope);
+      customerRow = db.prepare(`
+        SELECT ${customerDetailProjection()}
+        FROM customers c
+        WHERE (${scopeCompilation.where_sql}) AND c.id=?
+        LIMIT 1
+      `).get(...scopeCompilation.params, options.customerId);
+      if (customerRow) {
+        scope = candidateScope;
+        break;
+      }
+    }
+    if (!customerRow) throw customerNotFound();
+
+    const opportunityRows = db.prepare(`
+      SELECT ${opportunityDetailProjection()}
+      FROM opportunities o
+      JOIN customers c
+        ON c.org_id=o.org_id
+       AND c.id=o.customer_id
+      WHERE o.org_id=? AND o.customer_id=?
+      ORDER BY o.created_at DESC,o.id DESC
+      LIMIT ?
+    `).all(
+      state.context.organization.id,
+      options.customerId,
+      CUSTOMER_DETAIL_OPPORTUNITY_LIMIT + 1
+    );
+    const opportunitiesHaveMore = opportunityRows.length > CUSTOMER_DETAIL_OPPORTUNITY_LIMIT;
+    const opportunities = opportunityRows.slice(0, CUSTOMER_DETAIL_OPPORTUNITY_LIMIT);
+    const activity = db.prepare(`
+      SELECT
+        a.id,
+        a.customer_id,
+        a.user_id,
+        a.action,
+        a.stage_from,
+        a.stage_to,
+        a.notes,
+        a.created_at,
+        u.display_name
+      FROM customer_activity a
+      LEFT JOIN organization_memberships membership
+        ON membership.org_id=?
+       AND membership.user_id=a.user_id
+       AND membership.status='active'
+      LEFT JOIN users u ON u.id=membership.user_id
+      WHERE a.customer_id=?
+      ORDER BY a.created_at DESC,a.id DESC
+      LIMIT 50
+    `).all(state.context.organization.id, options.customerId);
+
+    return deepFreeze({
+      customer: mapCustomerDetailRow(customerRow),
+      opportunities: opportunities.map(mapOpportunityDetailRow),
+      activity: activity.map(mapActivityRow),
+      meta: {
+        request_id: Object.hasOwn(options, 'requestId') ? options.requestId : null,
+        scope,
+        opportunities: {
+          limit: CUSTOMER_DETAIL_OPPORTUNITY_LIMIT,
+          has_more: opportunitiesHaveMore
+        }
+      }
+    });
+  });
+}
+
+function getOpportunityDetail(db, rawOptions) {
+  return runReadTransaction(db, () => {
+    const options = snapshotPlainOptions(rawOptions, [
+      'actorUserId',
+      'organizationId',
+      'organizationCode',
+      'requestId',
+      'opportunityId'
+    ]);
+    if (!options || !positiveSafeInteger(options.opportunityId)) throw invalidContext();
+
+    const queryOptions = { actorUserId: options.actorUserId, filter: {} };
+    for (const key of ['organizationId', 'organizationCode', 'requestId']) {
+      if (Object.hasOwn(options, key)) queryOptions[key] = options[key];
+    }
+    const state = prepareQueryState(db, queryOptions, { decodeCursor: false });
+    const detailScopes = state.context.is_org_admin ? ['organization'] : ['team', 'my'];
+    let scope = null;
+    let opportunityRow = null;
+    for (const candidateScope of detailScopes) {
+      const scopeCompilation = compileCustomerScope(state.context, candidateScope);
+      opportunityRow = db.prepare(`
+        SELECT ${opportunityDetailProjection()}
+        FROM opportunities o
+        JOIN customers c
+          ON c.org_id=o.org_id
+         AND c.id=o.customer_id
+        WHERE (${scopeCompilation.where_sql})
+          AND o.org_id=?
+          AND o.id=?
+        LIMIT 1
+      `).get(
+        ...scopeCompilation.params,
+        state.context.organization.id,
+        options.opportunityId
+      );
+      if (opportunityRow) {
+        scope = candidateScope;
+        break;
+      }
+    }
+    if (!opportunityRow) throw opportunityNotFound();
+
+    return deepFreeze({
+      opportunity: mapOpportunityDetailRow(opportunityRow),
+      meta: {
+        request_id: Object.hasOwn(options, 'requestId') ? options.requestId : null,
+        scope
+      }
     });
   });
 }
@@ -738,5 +941,7 @@ module.exports = {
   CrmQueryError,
   listCustomers,
   listOpportunities,
-  getCrmDashboard
+  getCrmDashboard,
+  getCustomerDetail,
+  getOpportunityDetail
 };

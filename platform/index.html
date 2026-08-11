@@ -473,6 +473,14 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
 .tm-scope-tabs{display:inline-flex;gap:6px;padding:5px;border:1px solid rgba(148,163,184,.20);border-radius:22px;background:rgba(248,250,252,.82)}
 .tm-scope-tabs .btn{min-height:38px;border-radius:17px!important;padding:7px 16px;background:transparent;border:0;color:#64748b;box-shadow:none}
 .tm-scope-tabs .btn.active{background:#0b1220;color:#fff;box-shadow:0 12px 24px rgba(15,23,42,.16)}
+.tm-team-selector{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;color:var(--text2)}
+.tm-team-selector select{min-width:150px;max-width:240px;height:38px;border:1px solid var(--border);border-radius:6px;background:#fff;padding:0 10px}
+.legacy-stage-readonly{font-size:12px;color:var(--text2)}
+.crm-control-unavailable{font-size:12px;color:var(--text2);cursor:help;border-bottom:1px dotted currentColor}
+.crm-evidence-form{display:grid;gap:12px;margin:16px 0}
+.crm-evidence-form label{display:grid;gap:6px;font-size:12px;font-weight:600;color:var(--text2)}
+.crm-evidence-check{display:flex!important;align-items:center;gap:8px!important;font-weight:500!important}
+.crm-evidence-check input{width:16px;height:16px;margin:0}
 .tm-filter-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .tm-filter-main{display:grid;grid-template-columns:minmax(320px,1fr) 180px 180px;gap:12px;align-items:end}
 .tm-filter-field{display:grid;gap:7px}
@@ -662,11 +670,16 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
 <!-- Search + Actions -->
 <div class="toolbar-area tm-filter-card">
   <div class="tm-filter-top">
-    <div class="tm-scope-tabs" id="customerScopeTabs">
-      <button class="btn btn-sm cust-scope-btn active" data-scope="my" onclick="setCustomerScope('my')">我的客户</button>
-      <button class="btn btn-sm cust-scope-btn" data-scope="team" onclick="setCustomerScope('team')">团队客户</button>
-      <button class="btn btn-sm cust-scope-btn admin-only" data-scope="all" onclick="setCustomerScope('all')">全部客户</button>
-    </div>
+     <div class="tm-scope-tabs" id="customerScopeTabs">
+       <button class="btn btn-sm cust-scope-btn active" data-scope="my" onclick="setCustomerScope('my')">我的客户</button>
+       <button class="btn btn-sm cust-scope-btn" data-scope="team" onclick="setCustomerScope('team')">团队客户</button>
+       <button class="btn btn-sm cust-scope-btn admin-only" data-scope="all" onclick="setCustomerScope('all')">全部客户</button>
+     </div>
+     <label class="tm-team-selector" for="crmTeamSelect">当前团队
+       <select id="crmTeamSelect" onchange="selectCrmTeam(this.value)" aria-label="选择当前 CRM 团队">
+         <option value="">无可用团队</option>
+       </select>
+     </label>
     <div class="tm-filter-actions">
       <button class="btn btn-primary btn-sm" onclick="openAddCustomer()">+ 新增客户</button>
       <button class="btn btn-sm" onclick="switchCrmView('seapool')">公海池</button>
@@ -679,7 +692,7 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
     </div>
     <div class="tm-filter-field">
       <label>阶段筛选</label>
-      <select id="custStageFilter" onchange="filterCustomers(this.value)"><option value="">全部阶段</option><option value="lead">开发中</option><option value="proposal">方案</option><option value="negotiation">谈判</option><option value="won">成交</option><option value="maintenance">维护</option></select>
+       <select id="custStageFilter" onchange="filterCustomers(this.value)"><option value="">全部阶段</option><option value="lead">开发中</option><option value="info_confirmed">信息确认</option><option value="advantage_shared">优势同步</option><option value="needs_confirmed">需求确认</option><option value="analysis">数据分析</option><option value="proposal">方案中</option><option value="kol_matching">红人匹配</option><option value="cooperation">合作落地</option><option value="paused">暂停</option><option value="won">成交</option><option value="lost">丢失</option></select>
     </div>
     <div class="tm-filter-field">
       <label>优先级</label>
@@ -692,10 +705,16 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
 <div class="tm-stage-filter-strip" id="m0StageFilter">
   <span class="tag active" data-stage="" data-label="全部" onclick="filterCustomers('')">全部</span>
   <span class="tag" data-stage="lead" data-label="🔍 开发中" onclick="filterCustomers('lead')">🔍 开发中</span>
-  <span class="tag" data-stage="proposal" data-label="📝 方案" onclick="filterCustomers('proposal')">📝 方案</span>
-  <span class="tag" data-stage="negotiation" data-label="🤝 谈判" onclick="filterCustomers('negotiation')">🤝 谈判</span>
-  <span class="tag" data-stage="won" data-label="✅ 成交" onclick="filterCustomers('won')">✅ 成交</span>
-  <span class="tag" data-stage="maintenance" data-label="🔄 维护" onclick="filterCustomers('maintenance')">🔄 维护</span>
+   <span class="tag" data-stage="info_confirmed" data-label="ℹ️ 信息确认" onclick="filterCustomers('info_confirmed')">ℹ️ 信息确认</span>
+   <span class="tag" data-stage="advantage_shared" data-label="💡 优势同步" onclick="filterCustomers('advantage_shared')">💡 优势同步</span>
+   <span class="tag" data-stage="needs_confirmed" data-label="📌 需求确认" onclick="filterCustomers('needs_confirmed')">📌 需求确认</span>
+   <span class="tag" data-stage="analysis" data-label="📊 数据分析" onclick="filterCustomers('analysis')">📊 数据分析</span>
+   <span class="tag" data-stage="proposal" data-label="📝 方案中" onclick="filterCustomers('proposal')">📝 方案中</span>
+   <span class="tag" data-stage="kol_matching" data-label="🎯 红人匹配" onclick="filterCustomers('kol_matching')">🎯 红人匹配</span>
+   <span class="tag" data-stage="cooperation" data-label="🤝 合作落地" onclick="filterCustomers('cooperation')">🤝 合作落地</span>
+   <span class="tag" data-stage="paused" data-label="⏸️ 暂停" onclick="filterCustomers('paused')">⏸️ 暂停</span>
+   <span class="tag" data-stage="won" data-label="✅ 成交" onclick="filterCustomers('won')">✅ 成交</span>
+   <span class="tag" data-stage="lost" data-label="❌ 丢失" onclick="filterCustomers('lost')">❌ 丢失</span>
 </div>
 
 <!-- Pipeline Table View -->
@@ -769,7 +788,7 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
 <div><label>联系方式</label><input id="custContactInfo"></div>
 <div><label>行业</label><select id="custIndustry"><option value="">请选择</option><option>3C</option><option>储能</option><option>智能家居</option><option>美妆</option><option>户外</option><option>宠物</option><option>医疗</option><option>出行</option><option>其他</option></select></div>
 <div><label>来源</label><select id="custSource"><option value="自主开发">自主开发</option><option value="展会">展会</option><option value="转介绍">转介绍</option><option value="平台询盘">平台询盘</option></select></div>
-<div><label>阶段</label><select id="custStage"><option value="lead">开发中</option><option value="proposal">方案</option><option value="negotiation">谈判</option><option value="won">成交</option><option value="maintenance">维护</option></select></div>
+ <div><label>阶段</label><select id="custStage"><option value="lead">开发中</option><option value="info_confirmed">信息确认</option><option value="advantage_shared">优势同步</option><option value="needs_confirmed">需求确认</option><option value="analysis">数据分析</option><option value="proposal">方案中</option><option value="kol_matching">红人匹配</option><option value="cooperation">合作落地</option><option value="paused">暂停</option><option value="won">成交</option><option value="lost">丢失</option></select></div>
 <div><label>优先级</label><select id="custPriority"><option value="medium">中</option><option value="high">高</option><option value="low">低</option></select></div>
 <div><label>商机价值(USD)</label><input id="custOppValue" type="number" placeholder="预估金额"></div>
 <div><label>预计成交时间</label><input id="custCloseDate" type="date"></div>
@@ -1383,16 +1402,51 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
       <option value="lost">已输单</option>
     </select>
     <label>赢单概率 (%)</label><input id="oppProbability" type="number" value="50">
-    <label>产品</label><input id="oppProduct">
-    <label>渠道类型</label><input id="oppChannel">
-    <label>预计成交日期</label><input id="oppCloseDate" type="date">
-    <label>备注</label><textarea id="oppNotes"></textarea>
+   <label>产品</label><input id="oppProduct">
+   <label>渠道类型</label><input id="oppChannel">
+   <label>预计成交日期</label><input id="oppCloseDate" type="date">
+   <label>决策链</label><textarea id="oppDecisionChain" placeholder="决策人 / 采购 / 法务等关键节点"></textarea>
+   <label>丢失原因</label><textarea id="oppLossReason" placeholder="仅在商机关闭或丢失时填写"></textarea>
+   <label>备注</label><textarea id="oppNotes"></textarea>
     <div class="btn-group" style="margin-top:12px">
       <button class="btn btn-primary" onclick="saveOpportunity()">保存</button>
       <button class="btn btn-outline" onclick="closeOppModal()">取消</button>
     </div>
   </div>
 </div>
+
+<!-- CRM transition evidence -->
+<div class="modal-overlay" id="crmEvidenceOverlay" style="display:none" hidden inert aria-hidden="true" onclick="if(event.target===this)cancelCrmEvidenceDialog()">
+  <div class="modal" id="crmEvidenceDialog" role="dialog" aria-modal="true" aria-labelledby="crmEvidenceTitle" style="width:460px;max-width:92vw">
+    <button type="button" class="modal-close" aria-label="关闭变更依据" title="关闭" onclick="cancelCrmEvidenceDialog()">&times;</button>
+    <h3 id="crmEvidenceTitle">补充变更依据</h3>
+    <div class="crm-evidence-form">
+      <label>变更原因
+        <select id="crmEvidenceReason"></select>
+      </label>
+      <label id="crmEvidenceNextActionRow">下一步跟进时间
+        <input id="crmEvidenceNextAction" type="datetime-local">
+      </label>
+      <label id="crmEvidenceDispositionRow">项目处理方式
+        <select id="crmEvidenceDisposition">
+          <option value="">请选择</option>
+          <option value="continue">继续推进</option>
+          <option value="close">关闭关联项目</option>
+          <option value="none">不调整关联项目</option>
+        </select>
+      </label>
+      <label class="crm-evidence-check" id="crmEvidenceExceptionRow">
+        <input id="crmEvidenceException" type="checkbox">
+        <span>管理员无商机例外</span>
+      </label>
+    </div>
+    <div class="btn-group">
+      <button class="btn btn-primary" type="button" onclick="submitCrmEvidenceDialog()">确认</button>
+      <button class="btn btn-outline" type="button" onclick="cancelCrmEvidenceDialog()">取消</button>
+    </div>
+  </div>
+</div>
+
   <!-- Confirm Dialog (center of page) -->
   <div class="modal-overlay" id="confirmDialogOverlay" style="display:none">
     <div class="modal" id="confirmDialog" role="dialog" aria-modal="true" aria-labelledby="confirmDialogTitle" style="width:400px;text-align:center">

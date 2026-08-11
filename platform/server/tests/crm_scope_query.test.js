@@ -16,7 +16,9 @@ const {
   CrmQueryError,
   listCustomers,
   listOpportunities,
-  getCrmDashboard
+  getCrmDashboard,
+  getCustomerDetail,
+  getOpportunityDetail
 } = require('../services/crm_query_service');
 
 const SERVER_ROOT = path.resolve(__dirname, '..');
@@ -434,7 +436,277 @@ test('owner team organization public and quarantine visibility is fail closed', 
   ]);
 });
 
-test('originator keeps read-only my visibility after transfer without becoming owner', (t) => {
+test('customer detail is team-readable and returns one bounded immutable aggregate', (t) => {
+  const db = openFixture(t);
+  db.prepare(`
+    UPDATE customers
+    SET contact_person=?,contact_info=?,notes=?
+    WHERE id=?
+  `).run('Owner Contact', 'owner@example.invalid', 'Detail notes', IDS.ownedA);
+  insertOpportunity(db, {
+    id: 41001,
+    customerId: IDS.ownedA,
+    name: 'Detail opportunity',
+    stage: 'proposal',
+    value: 12500,
+    winProbability: 60
+  });
+  db.prepare('UPDATE opportunities SET notes=? WHERE id=?')
+    .run('Opportunity detail notes', 41001);
+  db.prepare(`
+    INSERT INTO customer_activity (
+      customer_id,user_id,action,stage_from,stage_to,notes,created_at
+    ) VALUES (?,?,?,?,?,?,?)
+  `).run(
+    IDS.ownedA,
+    IDS.ownerA,
+    'follow_up',
+    'lead',
+    'proposal',
+    'Customer activity notes',
+    FIXED_AT
+  );
+  db.prepare(`
+    INSERT INTO customer_activity (
+      customer_id,user_id,action,stage_from,stage_to,notes,created_at
+    ) VALUES (?,?,?,?,?,?,?)
+  `).run(
+    IDS.ownedA,
+    IDS.outsiderB,
+    'imported_history',
+    null,
+    null,
+    'Historical activity remains visible without a cross-org actor name',
+    FIXED_AT
+  );
+  db.prepare(`
+    INSERT INTO customer_activity (
+      customer_id,user_id,action,stage_from,stage_to,notes,created_at
+    ) VALUES (?,?,?,?,?,?,?)
+  `).run(
+    IDS.ownedA,
+    IDS.revokedMemberA,
+    'revoked_author_history',
+    null,
+    null,
+    'Revoked author history remains visible without the former member name',
+    FIXED_AT
+  );
+
+  const detail = getCustomerDetail(db, {
+    actorUserId: IDS.teammateA,
+    organizationId: IDS.orgA,
+    customerId: IDS.ownedA,
+    requestId: 'detail-teammate'
+  });
+
+  assert.equal(detail.customer.id, IDS.ownedA);
+  assert.equal(detail.customer.custody, 'owned');
+  assert.equal(detail.customer.contact_person, 'Owner Contact');
+  assert.equal(detail.customer.notes, 'Detail notes');
+  assert.deepEqual(detail.opportunities.map((row) => row.id), [41001]);
+  assert.equal(detail.opportunities[0].notes, 'Opportunity detail notes');
+  assert.equal(detail.activity.length, 3);
+  assert.equal(detail.activity[0].display_name, null);
+  assert.equal(
+    detail.activity[0].notes,
+    'Revoked author history remains visible without the former member name'
+  );
+  assert.equal(detail.activity[1].display_name, null);
+  assert.equal(
+    detail.activity[1].notes,
+    'Historical activity remains visible without a cross-org actor name'
+  );
+  assert.equal(detail.activity[2].display_name, 'scope-owner-a');
+  assert.equal(detail.activity[2].notes, 'Customer activity notes');
+  assert.deepEqual(detail.meta, {
+    request_id: 'detail-teammate',
+    scope: 'team',
+    opportunities: { limit: 100, has_more: false }
+  });
+  assert.equal(Object.isFrozen(detail), true);
+  assert.equal(Object.isFrozen(detail.customer), true);
+  assert.equal(Object.isFrozen(detail.opportunities), true);
+  assert.equal(Object.isFrozen(detail.activity), true);
+  assert.equal(Object.isFrozen(detail.meta), true);
+  assert.equal(Object.isFrozen(detail.opportunities[0]), true);
+  assert.equal(Object.isFrozen(detail.activity[0]), true);
+  assert.throws(() => { detail.opportunities[0].name = 'mutated'; }, TypeError);
+  assert.throws(() => { detail.activity[0].notes = 'mutated'; }, TypeError);
+});
+
+test('customer detail conceals public quarantine other-team other-org and absent records', (t) => {
+  const db = openFixture(t);
+  const expected = {
+    name: 'CrmScopeError',
+    code: 'CRM_CUSTOMER_NOT_FOUND',
+    status: 404,
+    reason: 'not_found'
+  };
+
+  for (const customerId of [
+    IDS.publicA,
+    IDS.nullTeamA,
+    IDS.ownedA2,
+    IDS.ownedB,
+    899999
+  ]) {
+    assert.throws(
+      () => getCustomerDetail(db, {
+        actorUserId: IDS.ownerA,
+        organizationId: IDS.orgA,
+        customerId,
+        requestId: 'detail-concealment'
+      }),
+      (error) => {
+        assert.deepEqual(publicError(error), expected);
+        assert.equal(JSON.stringify(error).includes(String(customerId)), false);
+        return true;
+      }
+    );
+  }
+});
+
+test('organization admin may inspect a same-organization quarantined customer detail', (t) => {
+  const db = openFixture(t);
+  const detail = getCustomerDetail(db, {
+    actorUserId: IDS.orgAdminA,
+    organizationId: IDS.orgA,
+    customerId: IDS.nullTeamA,
+    requestId: 'detail-org-admin'
+  });
+
+  assert.equal(detail.customer.id, IDS.nullTeamA);
+  assert.equal(detail.customer.custody, 'quarantined');
+  assert.deepEqual(detail.opportunities, []);
+  assert.deepEqual(detail.activity, []);
+  assert.deepEqual(detail.meta, {
+    request_id: 'detail-org-admin',
+    scope: 'organization',
+    opportunities: { limit: 100, has_more: false }
+  });
+});
+
+test('customer detail bounds high-cardinality opportunity collections', (t) => {
+  const db = openFixture(t);
+  for (let index = 0; index < 101; index += 1) {
+    insertOpportunity(db, {
+      id: 50000 + index,
+      customerId: IDS.ownedA,
+      name: `Bounded detail opportunity ${index}`
+    });
+  }
+
+  const detail = getCustomerDetail(db, {
+    actorUserId: IDS.teammateA,
+    organizationId: IDS.orgA,
+    customerId: IDS.ownedA,
+    requestId: 'detail-bounded-opportunities'
+  });
+
+  assert.equal(detail.opportunities.length, 100);
+  assert.deepEqual(detail.meta.opportunities, { limit: 100, has_more: true });
+  assert.equal(detail.opportunities[0].id, 50100);
+  assert.equal(detail.opportunities[99].id, 50001);
+});
+
+test('opportunity detail resolves a recently updated target outside the bounded customer aggregate', (t) => {
+  const db = openFixture(t);
+  for (let index = 0; index < 101; index += 1) {
+    insertOpportunity(db, {
+      id: 51000 + index,
+      customerId: IDS.ownedA,
+      name: `Targeted opportunity ${index}`,
+      updatedAt: index === 0 ? '2026-08-10 12:00:00' : FIXED_AT
+    });
+  }
+  db.prepare('UPDATE opportunities SET decision_chain=?,notes=? WHERE id=?')
+    .run('CMO > Procurement', 'Preserved targeted detail', 51000);
+
+  const listed = listOpportunities(db, {
+    actorUserId: IDS.teammateA,
+    organizationId: IDS.orgA,
+    filter: { scope: 'team', limit: 100 }
+  });
+  assert.equal(listed.items[0].id, 51000);
+
+  const aggregate = getCustomerDetail(db, {
+    actorUserId: IDS.teammateA,
+    organizationId: IDS.orgA,
+    customerId: IDS.ownedA,
+    requestId: 'bounded-customer-detail'
+  });
+  assert.equal(aggregate.opportunities.some((row) => row.id === 51000), false);
+
+  const detail = getOpportunityDetail(db, {
+    actorUserId: IDS.teammateA,
+    organizationId: IDS.orgA,
+    opportunityId: 51000,
+    requestId: 'targeted-opportunity-detail'
+  });
+  assert.equal(detail.opportunity.id, 51000);
+  assert.equal(detail.opportunity.decision_chain, 'CMO > Procurement');
+  assert.equal(detail.opportunity.notes, 'Preserved targeted detail');
+  assert.deepEqual(detail.meta, {
+    request_id: 'targeted-opportunity-detail',
+    scope: 'team'
+  });
+  assert.equal(Object.isFrozen(detail), true);
+  assert.equal(Object.isFrozen(detail.opportunity), true);
+  assert.equal(Object.isFrozen(detail.meta), true);
+});
+
+test('opportunity detail uniformly conceals inaccessible and absent targets', (t) => {
+  const db = openFixture(t);
+  insertOpportunity(db, { id: 52001, customerId: IDS.publicA });
+  insertOpportunity(db, {
+    id: 52002,
+    customerId: IDS.ownedA2,
+    teamId: IDS.teamA2,
+    ownerUserId: IDS.ownerA2
+  });
+  insertOpportunity(db, {
+    id: 52003,
+    customerId: IDS.ownedB,
+    orgId: IDS.orgB,
+    teamId: IDS.teamB1,
+    ownerUserId: IDS.outsiderB
+  });
+  insertOpportunity(db, { id: 52004, customerId: IDS.nullTeamA, teamId: null });
+  const expected = {
+    name: 'CrmScopeError',
+    code: 'CRM_CHILD_NOT_FOUND',
+    status: 404,
+    reason: 'not_found'
+  };
+
+  for (const opportunityId of [52001, 52002, 52003, 899999]) {
+    assert.throws(
+      () => getOpportunityDetail(db, {
+        actorUserId: IDS.ownerA,
+        organizationId: IDS.orgA,
+        opportunityId,
+        requestId: 'opportunity-detail-concealment'
+      }),
+      (error) => {
+        assert.deepEqual(publicError(error), expected);
+        assert.equal(JSON.stringify(error).includes(String(opportunityId)), false);
+        return true;
+      }
+    );
+  }
+
+  const adminDetail = getOpportunityDetail(db, {
+    actorUserId: IDS.orgAdminA,
+    organizationId: IDS.orgA,
+    opportunityId: 52004,
+    requestId: 'opportunity-detail-admin'
+  });
+  assert.equal(adminDetail.opportunity.id, 52004);
+  assert.equal(adminDetail.meta.scope, 'organization');
+});
+
+test('originator keeps read-only my visibility and customer detail after transfer', (t) => {
   const db = openFixture(t);
   const rows = customerRowsFor(db, contextFor(db, IDS.originatorA2), 'my');
 
@@ -443,6 +715,33 @@ test('originator keeps read-only my visibility after transfer without becoming o
     owner_user_id: IDS.ownerA,
     custody: 'owned'
   }]);
+
+  const detail = getCustomerDetail(db, {
+    actorUserId: IDS.originatorA2,
+    organizationId: IDS.orgA,
+    customerId: IDS.transferredA,
+    requestId: 'originator-transferred-customer-detail'
+  });
+  assert.equal(detail.customer.id, IDS.transferredA);
+  assert.equal(detail.meta.scope, 'my');
+});
+
+test('originator may open an opportunity attached to a transferred visible customer', (t) => {
+  const db = openFixture(t);
+  insertOpportunity(db, {
+    id: 53001,
+    customerId: IDS.transferredA,
+    name: 'Transferred customer opportunity'
+  });
+
+  const detail = getOpportunityDetail(db, {
+    actorUserId: IDS.originatorA2,
+    organizationId: IDS.orgA,
+    opportunityId: 53001,
+    requestId: 'originator-transferred-opportunity-detail'
+  });
+  assert.equal(detail.opportunity.id, 53001);
+  assert.equal(detail.meta.scope, 'my');
 });
 
 test('organization scope rejects ordinary members with one bounded error', (t) => {

@@ -2,6 +2,8 @@
 const API = window.location.origin + '/api';
 let AUTH_TOKEN = localStorage.getItem('tm_token') || '';
 let CURRENT_USER = null;
+let CURRENT_AUTH_CONTEXT = null;
+let CURRENT_CRM_TEAM_ID = null;
 let authExpiredNotified = false;
 let AUTH_GENERATION = 0;
 let currentAIConversationId = null;
@@ -34,6 +36,53 @@ let chatHistory = [{role: "system", content: "You are the TuringMarket AI assist
 
 
 // ===== AUTH =====
+function rememberAuthContext(authContext) {
+  var source = authContext && authContext.auth_context ? authContext.auth_context : (authContext || {});
+  var organization = source.organization && typeof source.organization === 'object' ? source.organization : null;
+  var teams = Array.isArray(source.teams) ? source.teams.filter(function(team) {
+    if (!team || !Number.isSafeInteger(Number(team.id)) || Number(team.id) < 1) return false;
+    if (team.status === 'inactive' || team.status === 'revoked' || team.status === 'disabled') return false;
+    if (team.is_active === false || team.is_active === 0 || team.active === false) return false;
+    return true;
+  }).map(function(team) { return Object.assign({}, team, { id: Number(team.id) }); }) : [];
+  CURRENT_AUTH_CONTEXT = { organization: organization, teams: teams };
+  var currentTeam = teams.find(function(team) { return team.id === Number(CURRENT_CRM_TEAM_ID); });
+  CURRENT_CRM_TEAM_ID = currentTeam ? currentTeam.id : (teams[0] ? teams[0].id : null);
+  syncCrmTeamSelector();
+  try { localStorage.setItem('tm_auth_context', JSON.stringify(CURRENT_AUTH_CONTEXT)); } catch (e) {}
+  return CURRENT_AUTH_CONTEXT;
+}
+
+function syncCrmTeamSelector() {
+  var selector = document.getElementById('crmTeamSelect');
+  if (!selector) return;
+  var teams = CURRENT_AUTH_CONTEXT && Array.isArray(CURRENT_AUTH_CONTEXT.teams) ? CURRENT_AUTH_CONTEXT.teams : [];
+  selector.innerHTML = teams.length ? teams.map(function(team) {
+    return '<option value="' + Number(team.id) + '">' + esc(team.name || team.code || ('Team ' + team.id)) + '</option>';
+  }).join('') : '<option value="">无可用团队</option>';
+  selector.value = CURRENT_CRM_TEAM_ID ? String(CURRENT_CRM_TEAM_ID) : '';
+}
+
+function getSelectedCrmTeamId() {
+  var selector = document.getElementById('crmTeamSelect');
+  var candidate = selector && selector.value ? Number(selector.value) : Number(CURRENT_CRM_TEAM_ID);
+  var teams = CURRENT_AUTH_CONTEXT && Array.isArray(CURRENT_AUTH_CONTEXT.teams) ? CURRENT_AUTH_CONTEXT.teams : [];
+  var selected = teams.find(function(team) { return team.id === candidate; });
+  return selected ? selected.id : null;
+}
+
+function selectCrmTeam(value) {
+  var candidate = Number(value);
+  var teams = CURRENT_AUTH_CONTEXT && Array.isArray(CURRENT_AUTH_CONTEXT.teams) ? CURRENT_AUTH_CONTEXT.teams : [];
+  if (teams.some(function(team) { return team.id === candidate; })) {
+    CURRENT_CRM_TEAM_ID = candidate;
+    var selector = document.getElementById('crmTeamSelect');
+    if (selector) selector.value = String(candidate);
+  } else {
+    syncCrmTeamSelector();
+  }
+}
+
 async function doLogin() {
   const userInput = document.getElementById('loginUser');
   const passwordInput = document.getElementById('loginPass');
@@ -51,6 +100,7 @@ async function doLogin() {
     if (!r.ok) return showLoginError(d.error || '登录失败');
     AUTH_TOKEN = d.token;
     CURRENT_USER = d.user;
+    rememberAuthContext(d.auth_context || d.authContext || (d.user && d.user.auth_context));
     AUTH_GENERATION += 1;
     authExpiredNotified = false;
     clearLoginError();
@@ -90,8 +140,8 @@ async function doLogout() {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + AUTH_TOKEN }
     });
   } catch (e) {}
-  AUTH_TOKEN = ''; CURRENT_USER = null; AUTH_GENERATION += 1;
-  localStorage.removeItem('tm_token'); localStorage.removeItem('tm_user');
+  AUTH_TOKEN = ''; CURRENT_USER = null; CURRENT_AUTH_CONTEXT = null; CURRENT_CRM_TEAM_ID = null; AUTH_GENERATION += 1;
+  localStorage.removeItem('tm_token'); localStorage.removeItem('tm_user'); localStorage.removeItem('tm_auth_context');
   location.reload();
 }
 
@@ -102,9 +152,12 @@ function handleAuthExpired(message) {
   closeCustomerDetail();
   AUTH_TOKEN = '';
   CURRENT_USER = null;
+  CURRENT_AUTH_CONTEXT = null;
+  CURRENT_CRM_TEAM_ID = null;
   AUTH_GENERATION += 1;
   localStorage.removeItem('tm_token');
   localStorage.removeItem('tm_user');
+  localStorage.removeItem('tm_auth_context');
   var app = document.getElementById('app');
   var auth = document.getElementById('authOverlay');
   var loginUser = document.getElementById('loginUser');
@@ -202,9 +255,7 @@ const CUST_STAGES = {
   proposal: '方案中',
   kol_matching: '红人匹配',
   cooperation: '合作落地',
-  negotiation: '谈判中',
   won: '成交',
-  maintenance: '维护中',
   paused: '暂停',
   lost: '丢失'
 };
@@ -278,7 +329,7 @@ function renderCrmCommandCenter(stats) {
     });
   }
 
-  var highIntent = countByStageGroup(stageCounts, ['needs_confirmed', 'analysis', 'proposal', 'kol_matching', 'negotiation']);
+  var highIntent = countByStageGroup(stageCounts, ['needs_confirmed', 'analysis', 'proposal', 'kol_matching']);
   var highIntentEl = document.getElementById('m0_highIntentCount');
   if (highIntentEl) highIntentEl.textContent = highIntent;
 
@@ -289,8 +340,8 @@ function renderCrmCommandCenter(stats) {
     { name: '公海池', count: Number((stats && stats.publicPool) || 0) },
     { name: '开发中', count: countByStageGroup(stageCounts, ['lead', 'info_confirmed', 'advantage_shared']) },
     { name: '需求确认', count: countByStageGroup(stageCounts, ['needs_confirmed', 'analysis']) },
-    { name: '方案/谈判', count: countByStageGroup(stageCounts, ['proposal', 'kol_matching', 'cooperation', 'negotiation']) },
-    { name: '成交/维护', count: countByStageGroup(stageCounts, ['won', 'maintenance']) }
+    { name: '方案/合作', count: countByStageGroup(stageCounts, ['proposal', 'kol_matching', 'cooperation']) },
+    { name: '成交/暂停', count: countByStageGroup(stageCounts, ['won', 'paused']) }
   ];
   var max = Math.max.apply(null, groups.map(function(g) { return g.count; }).concat([1]));
   var bars = document.getElementById('m0StageBars');
@@ -307,7 +358,7 @@ function renderCrmCommandCenter(stats) {
   }
 
   var focus = data.slice().sort(function(a, b) {
-    var stageWeight = { negotiation: 5, proposal: 4, kol_matching: 4, needs_confirmed: 3, analysis: 3, cooperation: 3, won: 2, maintenance: 1 };
+    var stageWeight = { proposal: 4, kol_matching: 4, needs_confirmed: 3, analysis: 3, cooperation: 3, won: 2, paused: 1 };
     var av = Number(a.opportunity_value || 0) + (stageWeight[a.stage] || 0) * 100000;
     var bv = Number(b.opportunity_value || 0) + (stageWeight[b.stage] || 0) * 100000;
     return bv - av;
@@ -328,7 +379,7 @@ function renderCrmCommandCenter(stats) {
 
   var aiEl = document.getElementById('m0AiInsightText');
   if (aiEl) {
-    var activeCount = data.filter(function(c) { return ['lead', 'needs_confirmed', 'analysis', 'proposal', 'negotiation'].indexOf(c.stage) >= 0; }).length;
+    var activeCount = data.filter(function(c) { return ['lead', 'needs_confirmed', 'analysis', 'proposal'].indexOf(c.stage) >= 0; }).length;
     aiEl.textContent = activeCount
       ? '检测到 ' + activeCount + ' 个客户仍在推进中。建议为高意向客户生成跟进任务，并把成功策略归档到知识库。'
       : '当前没有明显推进风险。可继续从公海池认领客户或新增线索。';
@@ -362,9 +413,15 @@ function renderCustomerTable(data) {
     h += '<tr style="cursor:pointer" onclick="openCustomerDetail(' + c.id + ')"><td><strong>' + esc(c.brand_name || '-') + '</strong></td>';
     h += '<td>' + esc(c.company_name || '-') + '</td>';
     h += '<td>' + esc(c.industry || '-') + '</td>';
-    h += '<td><select onclick="event.stopPropagation()" data-previous-value="' + esc(c.stage || 'lead') + '" onchange="changeCustomerStage(' + c.id + ', this.value, this)" style="width:auto;font-size:11px">';
-    Object.keys(CUST_STAGES).forEach(function(k) { h += '<option value="' + k + '"' + (c.stage === k ? ' selected' : '') + '>' + CUST_STAGES[k] + '</option>'; });
-    h += '</select></td>';
+    h += '<td>';
+    if (Object.prototype.hasOwnProperty.call(CUST_STAGES, c.stage)) {
+      h += '<select onclick="event.stopPropagation()" data-previous-value="' + esc(c.stage || 'lead') + '" onchange="changeCustomerStage(' + c.id + ', this.value, this)" style="width:auto;font-size:11px">';
+      Object.keys(CUST_STAGES).forEach(function(k) { h += '<option value="' + k + '"' + (c.stage === k ? ' selected' : '') + '>' + CUST_STAGES[k] + '</option>'; });
+      h += '</select>';
+    } else {
+      h += '<span class="legacy-stage-readonly" title="历史阶段只读">' + esc(c.stage || '历史阶段') + '</span>';
+    }
+    h += '</td>';
     h += '<td>' + esc(c.contact_person || '-') + '</td>';
     h += '<td style="font-size:11px">' + (c.opportunity_value ? '¥' + Number(c.opportunity_value).toLocaleString() : esc(c.budget_estimate || '-')) + '</td>';
     h += '<td style="font-size:10px;opacity:.6">' + esc(c.assigned_to_name || c.created_by_name || c.source || '-') + '</td>';
@@ -386,6 +443,11 @@ function openAddCustomer() {
   document.getElementById('custEditId').value = '';
   ['custBrand','custCompany','custContact','custContactInfo','custIndustry','custSource','custBudget','custNotes'].forEach(function(id) { var el = document.getElementById(id); if (el) el.value = ''; });
   document.getElementById('custStage').value = 'lead';
+  var addStage = document.getElementById('custStage');
+  if (addStage) {
+    addStage.disabled = true;
+    if (addStage.dataset) addStage.dataset.originalStage = 'lead';
+  }
   document.getElementById('custModal').style.display = 'flex';
 }
 function closeCustModal() { document.getElementById('custModal').style.display = 'none'; }
@@ -405,7 +467,11 @@ function editCustomer(id) {
   document.getElementById('custBudget').value = c.budget_estimate || '';
   document.getElementById('custNotes').value = c.notes || '';
   var stage = document.getElementById('custStage');
-  if (stage) stage.value = c.stage || 'lead';
+  if (stage) {
+    stage.disabled = !Object.prototype.hasOwnProperty.call(CUST_STAGES, c.stage);
+    stage.value = c.stage || 'lead';
+    if (stage.dataset) stage.dataset.originalStage = c.stage || 'lead';
+  }
   var modal = document.getElementById('custModal');
   if (modal) modal.style.display = 'flex';
 }
@@ -422,18 +488,30 @@ async function saveCustomer() {
     contact_info: document.getElementById('custContactInfo').value.trim(),
     source: document.getElementById('custSource').value.trim(),
     budget_estimate: document.getElementById('custBudget').value.trim(),
-    notes: document.getElementById('custNotes').value.trim(),
-    stage: document.getElementById('custStage').value
+    notes: document.getElementById('custNotes').value.trim()
   };
   try {
     var response;
     var successMessage;
     var fallbackMessage;
     if (editId) {
+      var stageEl = document.getElementById('custStage');
+      var currentStage = stageEl && stageEl.value;
+      var originalStage = stageEl && stageEl.dataset && stageEl.dataset.originalStage;
+      if (currentStage && originalStage && currentStage !== originalStage) {
+        var evidence = typeof collectCustomerTransitionEvidence === 'function'
+          ? await collectCustomerTransitionEvidence(editId, originalStage, currentStage)
+          : null;
+        if (!evidence) return;
+        body.transition = Object.assign({}, evidence, { to_stage: currentStage });
+      }
       response = await apiFetch('/customers/' + editId, { method: 'PUT', body: JSON.stringify(body) });
       successMessage = '客户已更新';
       fallbackMessage = '客户更新失败';
     } else {
+      var teamId = typeof getSelectedCrmTeamId === 'function' ? getSelectedCrmTeamId() : null;
+      if (!teamId) throw new Error('请选择可用团队');
+      body.team_id = teamId;
       response = await apiFetch('/customers', { method: 'POST', body: JSON.stringify(body) });
       successMessage = '客户已创建';
       fallbackMessage = '客户创建失败';
@@ -450,7 +528,18 @@ async function changeCustomerStage(id, newStage, selectEl) {
     ? selectEl.getAttribute('data-previous-value')
     : null;
   try {
-    var response = await apiFetch('/customers/' + id, { method: 'PUT', body: JSON.stringify({ stage: newStage }) });
+    var body;
+    if (typeof collectCustomerTransitionEvidence === 'function') {
+      var evidence = await collectCustomerTransitionEvidence(id, previousStage, newStage);
+      if (!evidence) {
+        if (selectEl && previousStage !== null) selectEl.value = previousStage;
+        return;
+      }
+      body = { transition: Object.assign({}, evidence, { to_stage: newStage }) };
+    } else {
+      body = { stage: newStage };
+    }
+    var response = await apiFetch('/customers/' + id, { method: 'PUT', body: JSON.stringify(body) });
     await requireSuccessfulCustomerMutation(response, '客户阶段更新失败');
     if (selectEl && typeof selectEl.setAttribute === 'function') {
       selectEl.setAttribute('data-previous-value', newStage);
@@ -463,8 +552,166 @@ async function changeCustomerStage(id, newStage, selectEl) {
   }
 }
 
+var pendingCrmEvidenceResolver = null;
+var pendingCrmEvidenceConfig = null;
+
+function crmEvidenceDateTimeValue(date) {
+  var local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 16);
+}
+
+function crmEvidenceSqliteTimestamp(value) {
+  if (!value) return null;
+  var parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toISOString().slice(0, 19).replace('T', ' ');
+}
+
+function finishCrmEvidenceDialog(result) {
+  var overlay = document.getElementById('crmEvidenceOverlay');
+  var dialog = document.getElementById('crmEvidenceDialog');
+  if (dialog && window.TMAccessibility && window.TMAccessibility.closeDialog) {
+    window.TMAccessibility.closeDialog(dialog);
+  }
+  if (overlay) {
+    overlay.style.display = 'none';
+    overlay.hidden = true;
+    overlay.inert = true;
+    overlay.setAttribute('aria-hidden', 'true');
+  }
+  var resolve = pendingCrmEvidenceResolver;
+  pendingCrmEvidenceResolver = null;
+  pendingCrmEvidenceConfig = null;
+  if (resolve) resolve(result || null);
+}
+
+function cancelCrmEvidenceDialog() {
+  finishCrmEvidenceDialog(null);
+}
+
+function submitCrmEvidenceDialog() {
+  var config = pendingCrmEvidenceConfig || {};
+  var reasonEl = document.getElementById('crmEvidenceReason');
+  var nextActionEl = document.getElementById('crmEvidenceNextAction');
+  var dispositionEl = document.getElementById('crmEvidenceDisposition');
+  var exceptionEl = document.getElementById('crmEvidenceException');
+  var reasonCode = reasonEl && reasonEl.value ? reasonEl.value : '';
+  if (!reasonCode) { toast('请选择变更原因', 'error'); return; }
+
+  var result = { reason_code: reasonCode };
+  if (config.showNextAction) {
+    var nextActionAt = crmEvidenceSqliteTimestamp(nextActionEl && nextActionEl.value);
+    if (config.requireNextAction && !nextActionAt) {
+      toast('请选择下一步跟进时间', 'error');
+      return;
+    }
+    if (nextActionAt) result.next_action_at = nextActionAt;
+  }
+  if (config.showDisposition) {
+    var disposition = dispositionEl && dispositionEl.value ? dispositionEl.value : '';
+    if (config.requireDisposition && !disposition) {
+      toast('请选择项目处理方式', 'error');
+      return;
+    }
+    if (disposition) result.campaign_disposition = disposition;
+  }
+  if (config.allowNoOpportunityException && exceptionEl && exceptionEl.checked) {
+    result.reason_code = 'no_opportunity_exception';
+    result.no_opportunity_exception = true;
+  }
+  finishCrmEvidenceDialog(result);
+}
+
+function openCrmEvidenceDialog(config) {
+  if (pendingCrmEvidenceResolver) finishCrmEvidenceDialog(null);
+  var overlay = document.getElementById('crmEvidenceOverlay');
+  var dialog = document.getElementById('crmEvidenceDialog');
+  var opener = document.activeElement;
+  var title = document.getElementById('crmEvidenceTitle');
+  var reason = document.getElementById('crmEvidenceReason');
+  var nextRow = document.getElementById('crmEvidenceNextActionRow');
+  var nextAction = document.getElementById('crmEvidenceNextAction');
+  var dispositionRow = document.getElementById('crmEvidenceDispositionRow');
+  var disposition = document.getElementById('crmEvidenceDisposition');
+  var exceptionRow = document.getElementById('crmEvidenceExceptionRow');
+  var exception = document.getElementById('crmEvidenceException');
+  if (!overlay || !reason) return Promise.resolve(null);
+
+  pendingCrmEvidenceConfig = config || {};
+  title.textContent = config.title || '补充变更依据';
+  reason.innerHTML = (config.reasons || []).map(function(option) {
+    return '<option value="' + esc(option.value) + '">' + esc(option.label) + '</option>';
+  }).join('');
+  if (nextRow) nextRow.style.display = config.showNextAction ? '' : 'none';
+  if (nextAction) {
+    nextAction.value = config.requireNextAction
+      ? crmEvidenceDateTimeValue(new Date(Date.now() + 24 * 60 * 60 * 1000))
+      : '';
+  }
+  if (dispositionRow) dispositionRow.style.display = config.showDisposition ? '' : 'none';
+  if (disposition) disposition.value = config.defaultDisposition || '';
+  if (exceptionRow) exceptionRow.style.display = config.allowNoOpportunityException ? '' : 'none';
+  if (exception) exception.checked = false;
+  overlay.hidden = false;
+  overlay.inert = false;
+  overlay.removeAttribute('aria-hidden');
+  overlay.style.display = 'flex';
+  if (dialog && window.TMAccessibility && window.TMAccessibility.openDialog) {
+    window.TMAccessibility.openDialog(dialog, opener, cancelCrmEvidenceDialog);
+  }
+  setTimeout(function() { reason.focus(); }, 0);
+  return new Promise(function(resolve) { pendingCrmEvidenceResolver = resolve; });
+}
+
+async function collectCustomerTransitionEvidence(customerId, fromStage, toStage) {
+  var activeStages = ['lead','info_confirmed','advantage_shared','needs_confirmed','analysis','proposal','kol_matching','cooperation'];
+  var requireNextAction = toStage === 'paused' ||
+    ((fromStage === 'paused' || fromStage === 'lost' || activeStages.indexOf(fromStage) === -1) && activeStages.indexOf(toStage) >= 0);
+  var isOrgAdmin = typeof CURRENT_AUTH_CONTEXT !== 'undefined' && CURRENT_AUTH_CONTEXT &&
+    CURRENT_AUTH_CONTEXT.organization && CURRENT_AUTH_CONTEXT.organization.role_code === 'org_admin';
+  return openCrmEvidenceDialog({
+    kind: 'customer_transition',
+    customerId: customerId,
+    fromStage: fromStage,
+    toStage: toStage,
+    title: '客户阶段变更依据',
+    reasons: [
+      { value: 'requirements_changed', label: '客户需求变化' },
+      { value: 'budget_changed', label: '预算变化' },
+      { value: 'timeline_changed', label: '项目时间变化' },
+      { value: 'stakeholder_changed', label: '关键决策人变化' },
+      { value: 'data_correction', label: '数据更正' },
+      { value: 'no_response', label: '客户暂无回复' },
+      { value: 'competitive_loss', label: '竞争原因' }
+    ],
+    showNextAction: true,
+    requireNextAction: requireNextAction,
+    showDisposition: false,
+    allowNoOpportunityException: toStage === 'won' && isOrgAdmin
+  });
+}
+
+async function collectCustomerReleaseReason(customerId) {
+  var evidence = await openCrmEvidenceDialog({
+    kind: 'customer_release',
+    customerId: customerId,
+    title: '释放客户到公海',
+    reasons: [
+      { value: 'capacity_rebalance', label: '跟进容量调整' },
+      { value: 'territory_change', label: '负责区域调整' },
+      { value: 'manager_assignment', label: '管理者重新分配' },
+      { value: 'data_correction', label: '数据更正' }
+    ],
+    showNextAction: false,
+    showDisposition: false,
+    allowNoOpportunityException: false
+  });
+  return evidence && evidence.reason_code ? evidence.reason_code : null;
+}
+
 // ===== MISSING M0 FUNCTIONS (v8.2 restored) =====
 var currentOppCustomerId = null;
+var currentOppOriginalStage = null;
 var curCrmView = 'pipeline';
 
 function switchCrmView(view, options) { options = options || {}; if (!options.skipHistory && window.TMNavigation) { window.TMNavigation.navigate('m0-detail', { substate: { view: view }, user: CURRENT_USER }); return; }
@@ -589,8 +836,8 @@ function createAiChatIdempotencyKey() {
 }
 function mapCustomerStageToStrategyStage(stage) {
   if (stage === 'lead') return 'new';
-  if (stage === 'proposal' || stage === 'negotiation') return 'growing';
-  if (stage === 'won' || stage === 'maintenance') return 'established';
+  if (stage === 'proposal') return 'growing';
+  if (stage === 'won') return 'established';
   return '';
 }
 function buildWorkflowContext(customer, opportunity) {
@@ -803,7 +1050,7 @@ function renderCustomerSidebar(d) {
   else html += '<button class="btn btn-outline btn-sm" onclick="returnToPool(' + c.id + ', true)">🌊 释放到公海</button>';
   html += '<button class="btn btn-outline btn-sm" onclick="editCustomer(' + c.id + ');closeCustomerDetail()">✏️ 编辑</button>';
   html += '<button class="btn btn-sm btn-primary" onclick="showOppModal(' + c.id + ')">💼 新增商机</button>';
-  html += '<button class="btn btn-sm btn-danger" onclick="deleteCustomer(' + c.id + ')">🗑️ 删除</button></div>';
+  html += '<span class="crm-control-unavailable" title="硬删除已禁用">客户硬删除不可用</span></div>';
   html += '<div class="sidebar-section"><h4>下一步动作</h4><div style="display:flex;gap:8px;flex-wrap:wrap">';
   html += '<button class="btn btn-sm btn-outline" onclick="openWorkflowFromCustomer(\'m1\')">🔎 品牌洞察</button>';
   html += '<button class="btn btn-sm btn-outline" onclick="openWorkflowFromCustomer(\'m2\')">🎯 生成策略</button>';
@@ -847,17 +1094,38 @@ function showOpportunityDetail(id) {
   var opp = null;
   if (_lastCustomerDetailData && _lastCustomerDetailData.opportunities) opp = _lastCustomerDetailData.opportunities.find(function(o){return o.id==id});
   if (!opp) { toast('商机数据未找到','error'); return; }
-  var stageLabels={discovery:'需求分析',qualification:'资格确认',proposal:'方案报价',negotiation:'谈判中',won:'已赢单',lost:'已输单'};
+  var stageLabels={discovery:'需求分析',qualification:'资格确认',proposal:'方案报价','negotiation':'谈判中',won:'已赢单',lost:'已输单'};
   var html='<div class="sidebar-section"><div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><span style="cursor:pointer;font-size:16px" onclick="renderCustomerSidebar(_lastCustomerDetailData)" title="返回客户详情">←</span><h4 style="margin:0;flex:1">'+esc(opp.name)+'</h4></div></div>';
   html+='<div class="sidebar-section"><div class="field"><span class="field-label">金额</span><span class="field-value">¥'+(opp.value||0).toLocaleString()+'</span></div><div class="field"><span class="field-label">阶段</span><span class="field-value">'+(stageLabels[opp.stage]||opp.stage)+'</span></div><div class="field"><span class="field-label">赢单概率</span><span class="field-value">'+(opp.win_probability||0)+'%</span></div><div class="field"><span class="field-label">产品</span><span class="field-value">'+esc(opp.product_name||'-')+'</span></div><div class="field"><span class="field-label">渠道类型</span><span class="field-value">'+esc(opp.channel_type||'-')+'</span></div><div class="field"><span class="field-label">预计成交</span><span class="field-value">'+(opp.expected_close_date||'-')+'</span></div><div class="field"><span class="field-label">备注</span><span class="field-value">'+esc(opp.notes||'-')+'</span></div></div>';
-  html+='<div class="sidebar-section" style="display:flex;gap:8px"><button class="btn btn-sm btn-outline" onclick="renderCustomerSidebar(_lastCustomerDetailData)">← 返回客户</button><button class="btn btn-sm btn-danger" onclick="closeCustomerDetail();deleteOpportunity('+opp.id+')">🗑️ 删除</button></div>';
+  html+='<div class="sidebar-section" style="display:flex;gap:8px"><button class="btn btn-sm btn-outline" onclick="renderCustomerSidebar(_lastCustomerDetailData)">← 返回客户</button><span class="crm-control-unavailable" title="硬删除已禁用">商机硬删除不可用</span></div>';
   document.getElementById('custDetailTitle').textContent = '商机: '+opp.name;
   document.getElementById('custDetailBody').innerHTML = html;
 }
 
-async function claimCustomer(id, closeDetailOnSuccess) { try { var response = await apiFetch('/customers/'+id+'/claim',{method:'POST'}); await requireSuccessfulCustomerMutation(response, '认领客户失败'); toast('已认领客户'); if (closeDetailOnSuccess) closeCustomerDetail(); loadCustomers(); } catch(e){toast('认领失败: '+e.message,'error')} }
-async function returnToPool(id, closeDetailOnSuccess) { try { var response = await apiFetch('/customers/'+id+'/return',{method:'POST'}); await requireSuccessfulCustomerMutation(response, '释放客户失败'); toast('已释放到公海'); if (closeDetailOnSuccess) closeCustomerDetail(); loadCustomers(); } catch(e){toast('释放失败: '+e.message,'error')} }
-async function deleteCustomer(id) { var ok = await showConfirm('确认删除','确定要删除此客户吗？此操作不可恢复。'); if (!ok) return; try { var resp = await apiFetch('/customers/'+id,{method:'DELETE'}); if (!resp.ok) throw new Error('删除失败'); closeCustomerDetail(); toast('客户已删除'); try{await loadCustomers()}catch(e){} } catch(e){toast('删除失败: '+e.message,'error')} }
+async function claimCustomer(id, closeDetailOnSuccess) {
+  try {
+    var teamId = typeof getSelectedCrmTeamId === 'function' ? getSelectedCrmTeamId() : null;
+    if (!teamId) { toast('请选择可用团队', 'error'); return; }
+    var options = { method: 'POST', body: JSON.stringify({ team_id: teamId }) };
+    var response = await apiFetch('/customers/' + id + '/claim', options);
+    await requireSuccessfulCustomerMutation(response, '认领客户失败');
+    toast('已认领客户');
+    if (closeDetailOnSuccess) closeCustomerDetail();
+    loadCustomers();
+  } catch (e) { toast('认领失败: ' + e.message, 'error'); }
+}
+async function returnToPool(id, closeDetailOnSuccess) {
+  try {
+    var reason = typeof collectCustomerReleaseReason === 'function' ? await collectCustomerReleaseReason(id) : null;
+    if (!reason) return;
+    var options = { method: 'POST', body: JSON.stringify({ reason_code: reason }) };
+    var response = await apiFetch('/customers/' + id + '/return', options);
+    await requireSuccessfulCustomerMutation(response, '释放客户失败');
+    toast('已释放到公海');
+    if (closeDetailOnSuccess) closeCustomerDetail();
+    loadCustomers();
+  } catch (e) { toast('释放失败: ' + e.message, 'error'); }
+}
 
 async function loadOpportunities() {
   try { var url='/opportunities?pageSize=1000'; var sf2=document.getElementById('oppStageFilter'); var cf2=document.getElementById('oppCustomerFilter');
@@ -866,33 +1134,115 @@ async function loadOpportunities() {
     var resp=await apiFetch(url); var data=await resp.json(); var rows=data.opportunities||data.rows||[];
     var tbody=document.getElementById('oppTableBody'); if(!tbody) return;
     if(!rows.length){tbody.innerHTML='<tr><td colspan="7" style="text-align:center;padding:30px;opacity:.5">暂无商机</td></tr>';return}
-    var sl={discovery:'需求分析',qualification:'资格确认',proposal:'方案报价',negotiation:'谈判中',won:'已赢单',lost:'已输单'};
-    var h=''; for(var i=0;i<rows.length;i++){var o=rows[i]; h+='<tr data-opp-id="'+o.id+'" style="cursor:pointer" onclick="editOpportunity('+o.id+')"><td><strong>'+esc(o.name)+'</strong></td><td>'+(o.brand_name||'-')+'</td><td>¥'+(o.value||0).toLocaleString()+'</td><td><span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;background:'+(o.stage==='won'?'#e8f5e9':o.stage==='lost'?'#fbe9e7':'#fff3e0')+'">'+(sl[o.stage]||o.stage)+'</span></td><td>'+(o.win_probability||0)+'%</td><td style="font-size:11px">'+(o.expected_close_date||'-')+'</td><td><button class="btn btn-sm btn-outline" onclick="event.stopPropagation();deleteOpportunity('+o.id+')">删除</button></td></tr>'; }
+    var sl={discovery:'需求分析',qualification:'资格确认',proposal:'方案报价','negotiation':'谈判中',won:'已赢单',lost:'已输单'};
+    var h=''; for(var i=0;i<rows.length;i++){var o=rows[i]; h+='<tr data-opp-id="'+o.id+'" style="cursor:pointer" onclick="editOpportunity('+o.id+')"><td><strong>'+esc(o.name)+'</strong></td><td>'+(o.brand_name||'-')+'</td><td>¥'+(o.value||0).toLocaleString()+'</td><td><span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;background:'+(o.stage==='won'?'#e8f5e9':o.stage==='lost'?'#fbe9e7':'#fff3e0')+'">'+(sl[o.stage]||o.stage)+'</span></td><td>'+(o.win_probability||0)+'%</td><td style="font-size:11px">'+(o.expected_close_date||'-')+'</td><td><span class="crm-control-unavailable" title="硬删除已禁用">硬删除不可用</span></td></tr>'; }
     tbody.innerHTML=h; var cnt=document.getElementById('oppCount'); if(cnt)cnt.textContent=rows.length+' 条商机';
   } catch(e){ var tbe=document.getElementById('oppTableBody'); if(tbe)tbe.innerHTML='<tr><td colspan="7" style="text-align:center;padding:30px;color:#d94641">加载失败: '+esc(e.message)+'</td></tr>'; }
 }
-function showOppModal(cid) { currentOppCustomerId=cid; document.getElementById('oppEditId').value=''; document.getElementById('oppCustomerId').value=cid||''; document.getElementById('oppName').value=''; document.getElementById('oppValue').value=''; document.getElementById('oppStage').value='discovery'; document.getElementById('oppProbability').value='50'; ['oppProduct','oppChannel','oppCloseDate','oppNotes'].forEach(function(id){var el=document.getElementById(id);if(el)el.value=''}); document.getElementById('oppModalTitle').textContent='新增商机'; document.getElementById('oppModalOverlay').style.display='flex'; }
+function showOppModal(cid) {
+  currentOppCustomerId = cid;
+  currentOppOriginalStage = null;
+  document.getElementById('oppEditId').value = '';
+  document.getElementById('oppCustomerId').value = cid || '';
+  document.getElementById('oppName').value = '';
+  document.getElementById('oppValue').value = '';
+  var stage = document.getElementById('oppStage');
+  stage.value = 'discovery';
+  stage.disabled = true;
+  document.getElementById('oppProbability').value = '50';
+  ['oppProduct','oppChannel','oppCloseDate','oppNotes','oppDecisionChain','oppLossReason'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  document.getElementById('oppModalTitle').textContent = '新增商机';
+  document.getElementById('oppModalOverlay').style.display = 'flex';
+}
 function closeOppModal() { document.getElementById('oppModalOverlay').style.display='none'; }
 async function saveOpportunity() {
   var name=document.getElementById('oppName').value.trim(); if(!name){toast('请输入商机名称','error');return}
   var customerId=currentOppCustomerId||document.getElementById('oppCustomerId').value; if(!customerId){toast('未指定客户，请从客户详情页创建商机','error');return}
-  var body={customer_id:parseInt(customerId)||customerId,name:name,value:Number(document.getElementById('oppValue').value)||0,stage:document.getElementById('oppStage').value,win_probability:Number(document.getElementById('oppProbability').value)||50,product_name:document.getElementById('oppProduct').value.trim(),channel_type:document.getElementById('oppChannel').value.trim(),expected_close_date:document.getElementById('oppCloseDate').value||null,notes:document.getElementById('oppNotes').value.trim()};
+  var stage = document.getElementById('oppStage').value;
+  var probabilityInput = document.getElementById('oppProbability').value;
+  var probability = probabilityInput === '' ? 50 : Number(probabilityInput);
+  if (!Number.isFinite(probability)) probability = 50;
+  var body={customer_id:parseInt(customerId)||customerId,name:name,value:Number(document.getElementById('oppValue').value)||0,win_probability:probability,product_name:document.getElementById('oppProduct').value.trim(),channel_type:document.getElementById('oppChannel').value.trim(),expected_close_date:document.getElementById('oppCloseDate').value||null,decision_chain:document.getElementById('oppDecisionChain')?.value.trim()||'',loss_reason:document.getElementById('oppLossReason')?.value.trim()||'',notes:document.getElementById('oppNotes').value.trim()};
   var editId=document.getElementById('oppEditId')?.value;
+  if (editId && currentOppOriginalStage && stage !== currentOppOriginalStage) {
+    var transitionEvidence = typeof collectOpportunityTransitionEvidence === 'function'
+      ? await collectOpportunityTransitionEvidence(editId, currentOppOriginalStage, stage)
+      : null;
+    if (!transitionEvidence) { toast('请补充商机阶段变更依据', 'error'); return; }
+    body.transition = Object.assign({}, transitionEvidence, { to_stage: stage });
+  }
   var btn=document.querySelector('#oppModalOverlay .btn-primary'); if(btn){btn.textContent='保存中...';btn.style.opacity='0.6'}
-  try { if(editId) await apiFetch('/opportunities/'+editId,{method:'PUT',body:JSON.stringify(body)}); else await apiFetch('/opportunities',{method:'POST',body:JSON.stringify(body)});
+  try { var response = editId ? await apiFetch('/opportunities/'+editId,{method:'PUT',body:JSON.stringify(body)}) : await apiFetch('/opportunities',{method:'POST',body:JSON.stringify(body)});
+    await requireSuccessfulCustomerMutation(response, '商机保存失败');
     toast(editId?'商机已更新':'商机已创建'); closeOppModal();
     if(document.getElementById('custDetailSidebar')&&document.getElementById('custDetailSidebar').classList.contains('open')){ try{openCustomerDetail(parseInt(customerId))}catch(e2){} }
     try{loadOpportunities()}catch(e2){}
   } catch(e) { toast('保存失败: '+e.message,'error'); }
   finally { var btn2=document.querySelector('#oppModalOverlay .btn-primary'); if(btn2){btn2.textContent='保存';btn2.style.opacity='1'} }
 }
-async function deleteOpportunity(id) { var ok=await showConfirm('确认删除','确定要删除此商机吗？'); if(!ok)return; try{var resp=await apiFetch('/opportunities/'+id,{method:'DELETE'}); if(!resp.ok)throw new Error('删除失败');toast('已删除');try{loadOpportunities()}catch(e){}}catch(e){toast('删除失败: '+e.message,'error')} }
-function editOpportunity(id) {
-  apiFetch('/opportunities?pageSize=1000').then(function(r){return r.json()}).then(function(d){var rows=d.rows||d.opportunities||[]; var opp=rows.find(function(o){return o.id==id}); if(!opp){toast('商机未找到','error');return}
-    currentOppCustomerId=opp.customer_id; document.getElementById('oppEditId').value=opp.id||''; document.getElementById('oppCustomerId').value=opp.customer_id||''; document.getElementById('oppName').value=opp.name||''; document.getElementById('oppValue').value=opp.value||''; document.getElementById('oppStage').value=opp.stage||'discovery'; document.getElementById('oppProbability').value=opp.win_probability||50; document.getElementById('oppProduct').value=opp.product_name||''; document.getElementById('oppChannel').value=opp.channel_type||''; document.getElementById('oppCloseDate').value=opp.expected_close_date||''; document.getElementById('oppNotes').value=opp.notes||''; document.getElementById('oppModalTitle').textContent='编辑商机: '+opp.name; document.getElementById('oppModalOverlay').style.display='flex';
-  }).catch(function(e){toast('加载失败: '+e.message,'error')});
+async function collectOpportunityTransitionEvidence(opportunityId, fromStage, toStage) {
+  var terminal = toStage === 'won' || toStage === 'lost';
+  return openCrmEvidenceDialog({
+    kind: 'opportunity_transition',
+    opportunityId: opportunityId,
+    fromStage: fromStage,
+    toStage: toStage,
+    title: '商机阶段变更依据',
+    reasons: [
+      { value: 'requirements_changed', label: '客户需求变化' },
+      { value: 'budget_changed', label: '预算变化' },
+      { value: 'timeline_changed', label: '项目时间变化' },
+      { value: 'stakeholder_changed', label: '关键决策人变化' },
+      { value: 'data_correction', label: '数据更正' },
+      { value: 'competitive_loss', label: '竞争原因' },
+      { value: 'no_response', label: '客户暂无回复' }
+    ],
+    showNextAction: false,
+    showDisposition: true,
+    requireDisposition: terminal,
+    defaultDisposition: terminal ? 'close' : 'continue',
+    allowNoOpportunityException: false
+  });
 }
-async function addCustomerActivity(cid) { var text=document.getElementById('activityText')?.value;if(!text){toast('请输入跟进内容','error');return} try{await apiFetch('/customers/'+cid+'/activity',{method:'POST',body:JSON.stringify({action:'跟进',notes:text})});toast('已记录');openCustomerDetail(cid)} catch(e){toast('记录失败: '+e.message,'error')} }
+async function editOpportunity(id) {
+  try {
+    var detailResponse = await apiFetch('/opportunities/' + encodeURIComponent(id) + '/detail');
+    await requireSuccessfulCustomerMutation(detailResponse, '商机详情加载失败');
+    var detailData = await detailResponse.json();
+    var opp = detailData && detailData.opportunity;
+    if (opp && opp.id != id) opp = null;
+    if (!opp) { toast('商机详情未找到', 'error'); return; }
+
+    currentOppCustomerId = opp.customer_id;
+    currentOppOriginalStage = opp.stage || 'discovery';
+    document.getElementById('oppEditId').value = opp.id || '';
+    document.getElementById('oppCustomerId').value = opp.customer_id || '';
+    document.getElementById('oppName').value = opp.name || '';
+    document.getElementById('oppValue').value = opp.value || '';
+    var stage = document.getElementById('oppStage');
+    stage.value = opp.stage || 'discovery';
+    stage.disabled = false;
+    document.getElementById('oppProbability').value = opp.win_probability === null || opp.win_probability === undefined || opp.win_probability === ''
+      ? 50
+      : opp.win_probability;
+    document.getElementById('oppProduct').value = opp.product_name || '';
+    document.getElementById('oppChannel').value = opp.channel_type || '';
+    document.getElementById('oppCloseDate').value = typeof opp.expected_close_date === 'string' && /^\d{4}-\d{2}-\d{2}/.test(opp.expected_close_date)
+      ? opp.expected_close_date.slice(0, 10)
+      : '';
+    document.getElementById('oppDecisionChain').value = opp.decision_chain || '';
+    document.getElementById('oppLossReason').value = opp.loss_reason || '';
+    document.getElementById('oppNotes').value = opp.notes || '';
+    document.getElementById('oppModalTitle').textContent = '编辑商机: ' + opp.name;
+    document.getElementById('oppModalOverlay').style.display = 'flex';
+  } catch (e) {
+    toast('加载失败: ' + e.message, 'error');
+  }
+}
+async function addCustomerActivity(cid) { var text=document.getElementById('activityText')?.value;if(!text){toast('请输入跟进内容','error');return} try{var response=await apiFetch('/customers/'+cid+'/archive-result',{method:'POST',body:JSON.stringify({artifact_type:'note',title:'客户跟进记录',content:text,tags:['crm','follow-up'],source_type:'manual_note'})});await requireSuccessfulCustomerMutation(response,'记录跟进失败');toast('已记录');await openCustomerDetail(cid)} catch(e){toast('记录失败: '+e.message,'error')} }
 
 async function loadSeaPool() {
   try { var r=await apiFetch('/customers/sea-pool'); var d=await r.json(); var customers=d.customers||[];
@@ -918,6 +1268,7 @@ async function loadSeaPool() {
         const d = await r.json();
         AUTH_TOKEN = saved;
         CURRENT_USER = d.user;
+        rememberAuthContext(d.auth_context || d.authContext || (d.user && d.user.auth_context));
         document.getElementById('authOverlay').style.display = 'none';
         document.getElementById('app').style.display = 'flex';
         if (CURRENT_USER.role === 'admin') {
@@ -3366,7 +3717,7 @@ function loadAdminDashboard() {
     setText('ad_totalTokens', ((s.totalTokens || 0) / 1000).toFixed(0) + 'K');
     renderAdminStageChart('ad_customerStageChart', s.customerStages || [], CUST_STAGES);
     renderAdminStageChart('ad_opportunityStageChart', s.opportunityStages || [], {
-      discovery: '需求分析', qualification: '资格确认', proposal: '方案报价', negotiation: '谈判中', won: '已赢单', lost: '已输单'
+      discovery: '需求分析', qualification: '资格确认', proposal: '方案报价', 'negotiation': '谈判中', won: '已赢单', lost: '已输单'
     });
     renderAdminTaskHealth(s);
     renderAdminKnowledgeHealth(s);

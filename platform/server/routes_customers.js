@@ -459,6 +459,24 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
     return crmQueryService[serviceMethod](db, { ...context, filter });
   }
 
+  function callCustomerDetail(req) {
+    const context = serviceContext(req);
+    delete context.correlationId;
+    return crmQueryService.getCustomerDetail(db, {
+      ...context,
+      customerId: positiveInteger(req.params.id)
+    });
+  }
+
+  function callOpportunityDetail(req) {
+    const context = serviceContext(req);
+    delete context.correlationId;
+    return crmQueryService.getOpportunityDetail(db, {
+      ...context,
+      opportunityId: positiveInteger(req.params.id)
+    });
+  }
+
   function customerCreateCommand(req) {
     const body = plainRecord(req.body || {});
     const stage = ownValue(body, 'stage');
@@ -667,27 +685,9 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
     return res.json(statsResponse(req, readCanonicalFilter(req.query, 'customer')));
   }));
 
-  app.get('/api/customers/:id/detail', authMiddleware, (req, res) => {
-    try {
-      const customer = crmAccess.getCustomer(db, req.params.id);
-      if (!customer) return crmAccess.notFound(res, 'Customer');
-      if (!crmAccess.canAccessCustomer(req.user, customer)) return crmAccess.forbidden(res);
-      const opportunities = db.prepare(
-        'SELECT * FROM opportunities WHERE customer_id = ? ORDER BY created_at DESC'
-      ).all(req.params.id);
-      const activity = db.prepare(`
-        SELECT a.*,u.display_name
-        FROM customer_activity a
-        LEFT JOIN users u ON a.user_id=u.id
-        WHERE a.customer_id=?
-        ORDER BY a.created_at DESC
-        LIMIT 50
-      `).all(req.params.id);
-      return res.json({ customer, opportunities, activity });
-    } catch (_error) {
-      return res.status(500).json({ error: 'Customer detail query failed' });
-    }
-  });
+  app.get('/api/customers/:id/detail', authMiddleware, crmHandler((req, res) => {
+    return res.json(callCustomerDetail(req));
+  }));
 
   app.post('/api/customers', authMiddleware, crmHandler((req, res) => {
     return res.json(callMutation('createOrUpdateCustomer', req, customerCreateCommand(req)));
@@ -750,6 +750,10 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
     const result = callQuery('listOpportunities', req, readCanonicalFilter(req.query, 'opportunity'));
     const rows = result.items.map((item) => ({ ...item, brand_name: item.customer_brand_name }));
     return res.json({ ...result, opportunities: rows, rows });
+  }));
+
+  app.get('/api/opportunities/:id/detail', authMiddleware, crmHandler((req, res) => {
+    return res.json(callOpportunityDetail(req));
   }));
 
   app.post('/api/opportunities', authMiddleware, crmHandler((req, res) => {
