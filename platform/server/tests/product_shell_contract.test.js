@@ -27,8 +27,8 @@ const stylePaths = [
   path.join(platformRoot, 'client', 'styles', 'layout.css')
 ];
 
-const APP_BUILD = '20260714-v040-product-shell-design-system';
-const APP_QUERY = '20260714v040productshelldesignsystem';
+const APP_BUILD = '20260811-v060-crm-sales-workspace';
+const APP_QUERY = '20260811v060crmsalesworkspace';
 const PPT_BUILD = '20260702-v916-kb-bridge-client-cn';
 const PPT_QUERY = '20260702v916kbbridge';
 const SECURITY_QUERY = '20260714v050campaignbusinessspine';

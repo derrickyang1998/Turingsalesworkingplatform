@@ -1,5 +1,5 @@
 (function () {
-  window.TMBuild = Object.freeze({ app: "20260714-v040-product-shell-design-system", ppt: "20260702-v916-kb-bridge-client-cn" });
+  window.TMBuild = Object.freeze({ app: "20260811-v060-crm-sales-workspace", ppt: "20260702-v916-kb-bridge-client-cn" });
   window.tmAppBuild = window.TMBuild.app;
   try {
     Object.defineProperty(window, 'tmAppBuild', {

@@ -16,12 +16,12 @@ test('deployment browser smoke loads the public shell and enforces the static bo
   await page.goto('/');
   await expect(page.locator('#authOverlay')).toBeVisible();
   await expect.poll(() => page.evaluate(() => window.TMBuild)).toEqual({
-    app: '20260714-v040-product-shell-design-system',
+    app: '20260811-v060-crm-sales-workspace',
     ppt: '20260702-v916-kb-bridge-client-cn'
   });
 
   const publicAssets = new Map([
-    ['/client/shared/build_info.js', '20260714-v040-product-shell-design-system'],
+    ['/client/shared/build_info.js', '20260811-v060-crm-sales-workspace'],
     ['/client/core/navigation.js', 'window.TMNavigation = Object.freeze'],
     ['/client/core/accessibility.js', 'window.TMAccessibility = Object.freeze'],
     ['/client/core/shell.js', 'window.TMShell = Object.freeze'],

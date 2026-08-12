@@ -1,0 +1,4630 @@
+{
+  "schemaVersion": 1,
+  "release": "v0.6.0-crm-sales-workspace",
+  "generatedFrom": "platform/server/scripts/generate_ui_baseline_manifest.js",
+  "files": {
+    "indexHtml": {
+      "source": "platform/index.html",
+      "sha256": "72e73124beb2ddfc8ffd79b3b1753cdefed8f5cbc87c241ca522898cf3e03d43",
+      "bytes": 99741
+    },
+    "appJs": {
+      "source": "platform/app.js",
+      "sha256": "1cb8340e6ddf3f3ecb078c76fd14d6ea821b5c2dc688adf389bf5719741ca798",
+      "bytes": 219246
+    },
+    "pptJs": {
+      "source": "platform/ppt.js",
+      "sha256": "f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e",
+      "bytes": 88188
+    },
+    "buildInfoJs": {
+      "source": "platform/client/shared/build_info.js",
+      "sha256": "7e09dcc4f0ef1c21933dfca8afde51f8516abf5fc3e0c9fa5c8fbf532b1cf54d",
+      "bytes": 390
+    },
+    "navigationJs": {
+      "source": "platform/client/core/navigation.js",
+      "sha256": "24893d23e33627102afb745261abd67fe29585670f79232ddc954526e91b24e7",
+      "bytes": 13032
+    },
+    "accessibilityJs": {
+      "source": "platform/client/core/accessibility.js",
+      "sha256": "54b1de514bc85b772e3141276a2516a9a1d4961d410a9c6d3704c9b9ed34dc05",
+      "bytes": 18132
+    },
+    "shellJs": {
+      "source": "platform/client/core/shell.js",
+      "sha256": "ed4e4a03e125c9eafb0d249c72d41535f29dd11c108075ef9247e9b8bbd8b125",
+      "bytes": 5756
+    },
+    "tokensCss": {
+      "source": "platform/client/styles/tokens.css",
+      "sha256": "8087ec554ad1209f0e881ddbe227afb13861b5f322ded7ab87e39c4b51ff70b5",
+      "bytes": 1828
+    },
+    "componentsCss": {
+      "source": "platform/client/styles/components.css",
+      "sha256": "d5159ad0771a28c142bed22c0e0e7cca3d0093b91ce8e531a35516413f044c6e",
+      "bytes": 8027
+    },
+    "layoutCss": {
+      "source": "platform/client/styles/layout.css",
+      "sha256": "37e6fb0c93e2cef6acb3abb62871c5d58978f80db28395d2e6836bac344e05ba",
+      "bytes": 6964
+    }
+  },
+  "buildMarkers": {
+    "app": "20260811-v060-crm-sales-workspace",
+    "ppt": "20260702-v916-kb-bridge-client-cn"
+  },
+  "scriptCacheKeys": {
+    "app": "20260811v060crmsalesworkspace",
+    "ppt": "20260702v916kbbridge"
+  },
+  "routeCount": 123,
+  "routeContracts": [
+    {
+      "method": "POST",
+      "path": "/api/auth/login",
+      "source": "platform/server/server.js",
+      "line": 874
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/logout",
+      "source": "platform/server/server.js",
+      "line": 916
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/me",
+      "source": "platform/server/server.js",
+      "line": 923
+    },
+    {
+      "method": "POST",
+      "path": "/api/demands",
+      "source": "platform/server/server.js",
+      "line": 1041
+    },
+    {
+      "method": "GET",
+      "path": "/api/demands",
+      "source": "platform/server/server.js",
+      "line": 1056
+    },
+    {
+      "method": "POST",
+      "path": "/api/proposals",
+      "source": "platform/server/server.js",
+      "line": 1090
+    },
+    {
+      "method": "GET",
+      "path": "/api/proposals",
+      "source": "platform/server/server.js",
+      "line": 1105
+    },
+    {
+      "method": "POST",
+      "path": "/api/token-usage",
+      "source": "platform/server/server.js",
+      "line": 1115
+    },
+    {
+      "method": "GET",
+      "path": "/api/token-usage",
+      "source": "platform/server/server.js",
+      "line": 1123
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/overview",
+      "source": "platform/server/server.js",
+      "line": 1140
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/users",
+      "source": "platform/server/server.js",
+      "line": 1157
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/users",
+      "source": "platform/server/server.js",
+      "line": 1162
+    },
+    {
+      "method": "PUT",
+      "path": "/api/admin/users/:id",
+      "source": "platform/server/server.js",
+      "line": 1192
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/admin/users/:id",
+      "source": "platform/server/server.js",
+      "line": 1212
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/users/reset-password/:id",
+      "source": "platform/server/server.js",
+      "line": 1231
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/invites",
+      "source": "platform/server/server.js",
+      "line": 1283
+    },
+    {
+      "method": "POST",
+      "path": "/api/proposal/generate-ppt",
+      "source": "platform/server/server.js",
+      "line": 1332
+    },
+    {
+      "method": "GET",
+      "path": "/api/knowledge",
+      "source": "platform/server/server.js",
+      "line": 1349
+    },
+    {
+      "method": "POST",
+      "path": "/api/knowledge",
+      "source": "platform/server/server.js",
+      "line": 1367
+    },
+    {
+      "method": "GET",
+      "path": "/api/knowledge/search",
+      "source": "platform/server/server.js",
+      "line": 1391
+    },
+    {
+      "method": "POST",
+      "path": "/api/knowledge/ingest",
+      "source": "platform/server/server.js",
+      "line": 1408
+    },
+    {
+      "method": "POST",
+      "path": "/api/knowledge/upload",
+      "source": "platform/server/server.js",
+      "line": 1437
+    },
+    {
+      "method": "POST",
+      "path": "/api/influencers/upload",
+      "source": "platform/server/server.js",
+      "line": 1493
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/knowledge/import/obsidian",
+      "source": "platform/server/server.js",
+      "line": 1534
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/knowledge/vault/export",
+      "source": "platform/server/server.js",
+      "line": 1550
+    },
+    {
+      "method": "GET",
+      "path": "/api/knowledge/similar",
+      "source": "platform/server/server.js",
+      "line": 1568
+    },
+    {
+      "method": "POST",
+      "path": "/api/knowledge/:id/use",
+      "source": "platform/server/server.js",
+      "line": 1577
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/chat",
+      "source": "platform/server/server.js",
+      "line": 1606
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/conversations",
+      "source": "platform/server/server.js",
+      "line": 1633
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/conversations/:id",
+      "source": "platform/server/server.js",
+      "line": 1650
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/proposal-draft",
+      "source": "platform/server/server.js",
+      "line": 1665
+    },
+    {
+      "method": "POST",
+      "path": "/api/demand/parse-file",
+      "source": "platform/server/server.js",
+      "line": 1703
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/strategy",
+      "source": "platform/server/server.js",
+      "line": 1745
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/demand-analysis",
+      "source": "platform/server/server.js",
+      "line": 1754
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/ppt-outline",
+      "source": "platform/server/server.js",
+      "line": 1784
+    },
+    {
+      "method": "GET",
+      "path": "/api/knowledge/categories",
+      "source": "platform/server/server.js",
+      "line": 1794
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/register",
+      "source": "platform/server/server.js",
+      "line": 1804
+    },
+    {
+      "method": "GET",
+      "path": "/api/users",
+      "source": "platform/server/server.js",
+      "line": 1835
+    },
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "source": "platform/server/server.js",
+      "line": 1840
+    },
+    {
+      "method": "GET",
+      "path": "/{*path}",
+      "source": "platform/server/server.js",
+      "line": 1849
+    },
+    {
+      "method": "GET",
+      "path": "/api/influencers",
+      "source": "platform/server/routes.js",
+      "line": 14
+    },
+    {
+      "method": "POST",
+      "path": "/api/influencers",
+      "source": "platform/server/routes.js",
+      "line": 57
+    },
+    {
+      "method": "POST",
+      "path": "/api/influencers/match",
+      "source": "platform/server/routes.js",
+      "line": 66
+    },
+    {
+      "method": "POST",
+      "path": "/api/collaborations",
+      "source": "platform/server/routes.js",
+      "line": 92
+    },
+    {
+      "method": "GET",
+      "path": "/api/collaborations",
+      "source": "platform/server/routes.js",
+      "line": 124
+    },
+    {
+      "method": "PUT",
+      "path": "/api/collaborations/:id",
+      "source": "platform/server/routes.js",
+      "line": 133
+    },
+    {
+      "method": "GET",
+      "path": "/api/collaborations/stats",
+      "source": "platform/server/routes.js",
+      "line": 158
+    },
+    {
+      "method": "GET",
+      "path": "/api/influencers/template",
+      "source": "platform/server/routes.js",
+      "line": 163
+    },
+    {
+      "method": "POST",
+      "path": "/api/influencers/import",
+      "source": "platform/server/routes.js",
+      "line": 170
+    },
+    {
+      "method": "POST",
+      "path": "/api/influencers/feishu/sync",
+      "source": "platform/server/routes.js",
+      "line": 184
+    },
+    {
+      "method": "POST",
+      "path": "/api/influencers/export",
+      "source": "platform/server/routes.js",
+      "line": 226
+    },
+    {
+      "method": "GET",
+      "path": "/api/leads",
+      "source": "platform/server/routes_customers.js",
+      "line": 580
+    },
+    {
+      "method": "POST",
+      "path": "/api/leads",
+      "source": "platform/server/routes_customers.js",
+      "line": 600
+    },
+    {
+      "method": "PUT",
+      "path": "/api/leads/:id",
+      "source": "platform/server/routes_customers.js",
+      "line": 630
+    },
+    {
+      "method": "POST",
+      "path": "/api/leads/:id/convert",
+      "source": "platform/server/routes_customers.js",
+      "line": 662
+    },
+    {
+      "method": "GET",
+      "path": "/api/customers",
+      "source": "platform/server/routes_customers.js",
+      "line": 679
+    },
+    {
+      "method": "GET",
+      "path": "/api/customers/stats",
+      "source": "platform/server/routes_customers.js",
+      "line": 684
+    },
+    {
+      "method": "GET",
+      "path": "/api/customers/:id/detail",
+      "source": "platform/server/routes_customers.js",
+      "line": 688
+    },
+    {
+      "method": "POST",
+      "path": "/api/customers",
+      "source": "platform/server/routes_customers.js",
+      "line": 692
+    },
+    {
+      "method": "POST",
+      "path": "/api/customers/:id/archive-result",
+      "source": "platform/server/routes_customers.js",
+      "line": 696
+    },
+    {
+      "method": "PUT",
+      "path": "/api/customers/:id",
+      "source": "platform/server/routes_customers.js",
+      "line": 705
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/customers/:id",
+      "source": "platform/server/routes_customers.js",
+      "line": 709
+    },
+    {
+      "method": "POST",
+      "path": "/api/customers/:id/assign",
+      "source": "platform/server/routes_customers.js",
+      "line": 713
+    },
+    {
+      "method": "POST",
+      "path": "/api/customers/:id/return-pool",
+      "source": "platform/server/routes_customers.js",
+      "line": 741
+    },
+    {
+      "method": "POST",
+      "path": "/api/customers/:id/return",
+      "source": "platform/server/routes_customers.js",
+      "line": 745
+    },
+    {
+      "method": "GET",
+      "path": "/api/opportunities",
+      "source": "platform/server/routes_customers.js",
+      "line": 749
+    },
+    {
+      "method": "GET",
+      "path": "/api/opportunities/:id/detail",
+      "source": "platform/server/routes_customers.js",
+      "line": 755
+    },
+    {
+      "method": "POST",
+      "path": "/api/opportunities",
+      "source": "platform/server/routes_customers.js",
+      "line": 759
+    },
+    {
+      "method": "PUT",
+      "path": "/api/opportunities/:id",
+      "source": "platform/server/routes_customers.js",
+      "line": 763
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/opportunities/:id",
+      "source": "platform/server/routes_customers.js",
+      "line": 767
+    },
+    {
+      "method": "GET",
+      "path": "/api/sales-targets",
+      "source": "platform/server/routes_customers.js",
+      "line": 775
+    },
+    {
+      "method": "POST",
+      "path": "/api/sales-targets",
+      "source": "platform/server/routes_customers.js",
+      "line": 776
+    },
+    {
+      "method": "GET",
+      "path": "/api/sales-performance",
+      "source": "platform/server/routes_customers.js",
+      "line": 777
+    },
+    {
+      "method": "GET",
+      "path": "/api/customers/sea-pool",
+      "source": "platform/server/routes_customers.js",
+      "line": 779
+    },
+    {
+      "method": "POST",
+      "path": "/api/customers/:id/claim",
+      "source": "platform/server/routes_customers.js",
+      "line": 789
+    },
+    {
+      "method": "GET",
+      "path": "/api/customers/dashboard",
+      "source": "platform/server/routes_customers.js",
+      "line": 800
+    },
+    {
+      "method": "GET",
+      "path": "/api/dashboard/sales",
+      "source": "platform/server/routes_customers.js",
+      "line": 810
+    },
+    {
+      "method": "GET",
+      "path": "/api/dashboard/stats",
+      "source": "platform/server/routes_customers.js",
+      "line": 811
+    },
+    {
+      "method": "POST",
+      "path": "/api/customers/:customerId/contacts",
+      "source": "platform/server/routes_customers.js",
+      "line": 813
+    },
+    {
+      "method": "PUT",
+      "path": "/api/customers/:customerId/contacts/:contactId",
+      "source": "platform/server/routes_customers.js",
+      "line": 823
+    },
+    {
+      "method": "POST",
+      "path": "/api/customers/:customerId/contacts/:contactId/archive",
+      "source": "platform/server/routes_customers.js",
+      "line": 834
+    },
+    {
+      "method": "POST",
+      "path": "/api/customers/:customerId/tasks",
+      "source": "platform/server/routes_customers.js",
+      "line": 843
+    },
+    {
+      "method": "POST",
+      "path": "/api/customers/:customerId/tasks/:taskId/complete",
+      "source": "platform/server/routes_customers.js",
+      "line": 865
+    },
+    {
+      "method": "POST",
+      "path": "/api/customers/:customerId/tasks/:taskId/cancel",
+      "source": "platform/server/routes_customers.js",
+      "line": 869
+    },
+    {
+      "method": "POST",
+      "path": "/api/customers/:id/activity",
+      "source": "platform/server/routes_customers.js",
+      "line": 873
+    },
+    {
+      "method": "POST",
+      "path": "/api/brands/enrich",
+      "source": "platform/server/routes_brands.js",
+      "line": 42
+    },
+    {
+      "method": "POST",
+      "path": "/api/brands",
+      "source": "platform/server/routes_brands.js",
+      "line": 94
+    },
+    {
+      "method": "GET",
+      "path": "/api/brands",
+      "source": "platform/server/routes_brands.js",
+      "line": 111
+    },
+    {
+      "method": "GET",
+      "path": "/api/brands/social-search",
+      "source": "platform/server/routes_brands.js",
+      "line": 139
+    },
+    {
+      "method": "GET",
+      "path": "/api/workflow/templates",
+      "source": "platform/server/routes_workflow.js",
+      "line": 362
+    },
+    {
+      "method": "GET",
+      "path": "/api/workflow/templates/:id/campaign-trigger",
+      "source": "platform/server/routes_workflow.js",
+      "line": 374
+    },
+    {
+      "method": "GET",
+      "path": "/api/workflow/templates/:id",
+      "source": "platform/server/routes_workflow.js",
+      "line": 386
+    },
+    {
+      "method": "POST",
+      "path": "/api/workflow/templates",
+      "source": "platform/server/routes_workflow.js",
+      "line": 406
+    },
+    {
+      "method": "PUT",
+      "path": "/api/workflow/templates/:id",
+      "source": "platform/server/routes_workflow.js",
+      "line": 443
+    },
+    {
+      "method": "PUT",
+      "path": "/api/workflow/templates/:id/campaign-trigger",
+      "source": "platform/server/routes_workflow.js",
+      "line": 499
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/workflow/templates/:id",
+      "source": "platform/server/routes_workflow.js",
+      "line": 514
+    },
+    {
+      "method": "POST",
+      "path": "/api/workflow/templates/:id/publish",
+      "source": "platform/server/routes_workflow.js",
+      "line": 526
+    },
+    {
+      "method": "POST",
+      "path": "/api/workflow/instances",
+      "source": "platform/server/routes_workflow.js",
+      "line": 568
+    },
+    {
+      "method": "GET",
+      "path": "/api/workflow/instances/by-business",
+      "source": "platform/server/routes_workflow.js",
+      "line": 596
+    },
+    {
+      "method": "GET",
+      "path": "/api/workflow/instances",
+      "source": "platform/server/routes_workflow.js",
+      "line": 617
+    },
+    {
+      "method": "GET",
+      "path": "/api/workflow/instances/:id",
+      "source": "platform/server/routes_workflow.js",
+      "line": 658
+    },
+    {
+      "method": "POST",
+      "path": "/api/workflow/instances/:id/pause",
+      "source": "platform/server/routes_workflow.js",
+      "line": 766
+    },
+    {
+      "method": "POST",
+      "path": "/api/workflow/instances/:id/resume",
+      "source": "platform/server/routes_workflow.js",
+      "line": 790
+    },
+    {
+      "method": "POST",
+      "path": "/api/workflow/instances/:id/cancel",
+      "source": "platform/server/routes_workflow.js",
+      "line": 814
+    },
+    {
+      "method": "GET",
+      "path": "/api/workflow/tasks",
+      "source": "platform/server/routes_workflow.js",
+      "line": 844
+    },
+    {
+      "method": "GET",
+      "path": "/api/workflow/tasks/:id",
+      "source": "platform/server/routes_workflow.js",
+      "line": 967
+    },
+    {
+      "method": "POST",
+      "path": "/api/workflow/tasks/:id/approve",
+      "source": "platform/server/routes_workflow.js",
+      "line": 1038
+    },
+    {
+      "method": "POST",
+      "path": "/api/workflow/tasks/:id/reject",
+      "source": "platform/server/routes_workflow.js",
+      "line": 1066
+    },
+    {
+      "method": "POST",
+      "path": "/api/workflow/tasks/:id/complete",
+      "source": "platform/server/routes_workflow.js",
+      "line": 1094
+    },
+    {
+      "method": "POST",
+      "path": "/api/workflow/check-timers",
+      "source": "platform/server/routes_workflow.js",
+      "line": 1134
+    },
+    {
+      "method": "GET",
+      "path": "/api/workflow/stats",
+      "source": "platform/server/routes_workflow.js",
+      "line": 1144
+    },
+    {
+      "method": "GET",
+      "path": "/index.html",
+      "source": "platform/server/services/public_assets_service.js",
+      "line": 109
+    },
+    {
+      "method": "GET",
+      "path": "/app.js",
+      "source": "platform/server/services/public_assets_service.js",
+      "line": 110
+    },
+    {
+      "method": "GET",
+      "path": "/ppt.js",
+      "source": "platform/server/services/public_assets_service.js",
+      "line": 111
+    },
+    {
+      "method": "GET",
+      "path": "/client/shared/build_info.js",
+      "source": "platform/server/services/public_assets_service.js",
+      "line": 112
+    },
+    {
+      "method": "GET",
+      "path": "/client/core/navigation.js",
+      "source": "platform/server/services/public_assets_service.js",
+      "line": 113
+    },
+    {
+      "method": "GET",
+      "path": "/client/core/accessibility.js",
+      "source": "platform/server/services/public_assets_service.js",
+      "line": 114
+    },
+    {
+      "method": "GET",
+      "path": "/client/core/shell.js",
+      "source": "platform/server/services/public_assets_service.js",
+      "line": 115
+    },
+    {
+      "method": "GET",
+      "path": "/client/core/csp_compat.js",
+      "source": "platform/server/services/public_assets_service.js",
+      "line": 116
+    },
+    {
+      "method": "GET",
+      "path": "/client/features/ppt_preview_runtime.js",
+      "source": "platform/server/services/public_assets_service.js",
+      "line": 117
+    },
+    {
+      "method": "GET",
+      "path": "/client/styles/tokens.css",
+      "source": "platform/server/services/public_assets_service.js",
+      "line": 118
+    },
+    {
+      "method": "GET",
+      "path": "/client/styles/components.css",
+      "source": "platform/server/services/public_assets_service.js",
+      "line": 119
+    },
+    {
+      "method": "GET",
+      "path": "/client/styles/layout.css",
+      "source": "platform/server/services/public_assets_service.js",
+      "line": 120
+    }
+  ],
+  "duplicateInventory": {
+    "source": "platform/server/tests/fixtures/frontend-active-definitions.json",
+    "exists": true,
+    "reviewedDuplicateCount": 1,
+    "duplicates": [
+      "esc"
+    ],
+    "activeDefinitions": {
+      "esc": {
+        "name": "esc",
+        "source": "platform/ppt.js",
+        "kind": "function",
+        "async": false,
+        "line": 864,
+        "column": 1,
+        "loadOrder": 2,
+        "occurrenceIndex": 2,
+        "globalIndex": 306
+      }
+    },
+    "sha256": "9b38a6a525956a398015680274ee2f16dfdf48baf1ad7c82f45d2e72fa90454e"
+  },
+  "activeDefinitions": {
+    "rememberAuthContext": {
+      "name": "rememberAuthContext",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 39,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 1
+    },
+    "syncCrmTeamSelector": {
+      "name": "syncCrmTeamSelector",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 56,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 2
+    },
+    "getSelectedCrmTeamId": {
+      "name": "getSelectedCrmTeamId",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 66,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 3
+    },
+    "selectCrmTeam": {
+      "name": "selectCrmTeam",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 74,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 4
+    },
+    "doLogin": {
+      "name": "doLogin",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": true,
+      "line": 86,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 5
+    },
+    "clearLoginError": {
+      "name": "clearLoginError",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 120,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 6
+    },
+    "showLoginError": {
+      "name": "showLoginError",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 127,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 7
+    },
+    "doLogout": {
+      "name": "doLogout",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": true,
+      "line": 137,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 8
+    },
+    "handleAuthExpired": {
+      "name": "handleAuthExpired",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 148,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 9
+    },
+    "apiFetch": {
+      "name": "apiFetch",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": true,
+      "line": 178,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 10
+    },
+    "requireSuccessfulCustomerMutation": {
+      "name": "requireSuccessfulCustomerMutation",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": true,
+      "line": 194,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 11
+    },
+    "initApp": {
+      "name": "initApp",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": true,
+      "line": 220,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 12
+    },
+    "syncCustomerStageFilterUI": {
+      "name": "syncCustomerStageFilterUI",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 267,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 13
+    },
+    "loadCustomers": {
+      "name": "loadCustomers",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": true,
+      "line": 276,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 14
+    },
+    "loadCustomerStats": {
+      "name": "loadCustomerStats",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": true,
+      "line": 294,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 15
+    },
+    "countByStageGroup": {
+      "name": "countByStageGroup",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 318,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 16
+    },
+    "renderCrmCommandCenter": {
+      "name": "renderCrmCommandCenter",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 322,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 17
+    },
+    "filterCustomers": {
+      "name": "filterCustomers",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 389,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 18
+    },
+    "setCustomerScope": {
+      "name": "setCustomerScope",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 395,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 19
+    },
+    "updateCustomerScopeTabs": {
+      "name": "updateCustomerScopeTabs",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 402,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 20
+    },
+    "renderCustomerTable": {
+      "name": "renderCustomerTable",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 408,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 21
+    },
+    "showAddCustomer": {
+      "name": "showAddCustomer",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 434,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 22
+    },
+    "openAddCustomer": {
+      "name": "openAddCustomer",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 441,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 23
+    },
+    "closeCustModal": {
+      "name": "closeCustModal",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 453,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 24
+    },
+    "dismissDup": {
+      "name": "dismissDup",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 454,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 25
+    },
+    "editCustomer": {
+      "name": "editCustomer",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 455,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 26
+    },
+    "saveCustomer": {
+      "name": "saveCustomer",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": true,
+      "line": 479,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 27
+    },
+    "changeCustomerStage": {
+      "name": "changeCustomerStage",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": true,
+      "line": 526,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 28
+    },
+    "crmEvidenceDateTimeValue": {
+      "name": "crmEvidenceDateTimeValue",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 558,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 29
+    },
+    "crmEvidenceSqliteTimestamp": {
+      "name": "crmEvidenceSqliteTimestamp",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 563,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 30
+    },
+    "finishCrmEvidenceDialog": {
+      "name": "finishCrmEvidenceDialog",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 570,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 31
+    },
+    "cancelCrmEvidenceDialog": {
+      "name": "cancelCrmEvidenceDialog",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 588,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 32
+    },
+    "submitCrmEvidenceDialog": {
+      "name": "submitCrmEvidenceDialog",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 592,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 33
+    },
+    "openCrmEvidenceDialog": {
+      "name": "openCrmEvidenceDialog",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 625,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 34
+    },
+    "collectCustomerTransitionEvidence": {
+      "name": "collectCustomerTransitionEvidence",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": true,
+      "line": 666,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 35
+    },
+    "collectCustomerReleaseReason": {
+      "name": "collectCustomerReleaseReason",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": true,
+      "line": 694,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 36
+    },
+    "switchCrmView": {
+      "name": "switchCrmView",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 717,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 37
+    },
+    "showConfirm": {
+      "name": "showConfirm",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 746,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 38
+    },
+    "openCustomerDetail": {
+      "name": "openCustomerDetail",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": true,
+      "line": 772,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 39
+    },
+    "closeCustomerDetail": {
+      "name": "closeCustomerDetail",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 779,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 40
+    },
+    "readPositiveInteger": {
+      "name": "readPositiveInteger",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 798,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 41
+    },
+    "readExplicitCampaignId": {
+      "name": "readExplicitCampaignId",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 804,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 42
+    },
+    "getActiveCampaignId": {
+      "name": "getActiveCampaignId",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 813,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 43
+    },
+    "rememberKnowledgeEntryForChat": {
+      "name": "rememberKnowledgeEntryForChat",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 818,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 44
+    },
+    "getSelectedKnowledgeEntryIds": {
+      "name": "getSelectedKnowledgeEntryIds",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 824,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 45
+    },
+    "createAiChatIdempotencyKey": {
+      "name": "createAiChatIdempotencyKey",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 827,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 46
+    },
+    "mapCustomerStageToStrategyStage": {
+      "name": "mapCustomerStageToStrategyStage",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 837,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 47
+    },
+    "buildWorkflowContext": {
+      "name": "buildWorkflowContext",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 843,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 48
+    },
+    "setWorkflowContext": {
+      "name": "setWorkflowContext",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 866,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 49
+    },
+    "fillWorkflowBrandSearch": {
+      "name": "fillWorkflowBrandSearch",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 869,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 50
+    },
+    "fillWorkflowStrategy": {
+      "name": "fillWorkflowStrategy",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 875,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 51
+    },
+    "fillWorkflowDemand": {
+      "name": "fillWorkflowDemand",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 898,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 52
+    },
+    "fillWorkflowInfluencers": {
+      "name": "fillWorkflowInfluencers",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 923,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 53
+    },
+    "openWorkflowFromCustomer": {
+      "name": "openWorkflowFromCustomer",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 939,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 54
+    },
+    "archiveCustomerArtifact": {
+      "name": "archiveCustomerArtifact",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": true,
+      "line": 956,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 55
+    },
+    "fetchSimilarKnowledge": {
+      "name": "fetchSimilarKnowledge",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": true,
+      "line": 987,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 56
+    },
+    "renderKnowledgeReuse": {
+      "name": "renderKnowledgeReuse",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 1002,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 57
+    },
+    "markKnowledgeUsed": {
+      "name": "markKnowledgeUsed",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 1020,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 58
+    },
+    "saveCurrentStrategy": {
+      "name": "saveCurrentStrategy",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": true,
+      "line": 1027,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 59
+    },
+    "saveCurrentProposal": {
+      "name": "saveCurrentProposal",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": true,
+      "line": 1032,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 60
+    },
+    "renderCustomerSidebar": {
+      "name": "renderCustomerSidebar",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 1037,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 61
+    },
+    "showOpportunityDetail": {
+      "name": "showOpportunityDetail",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 1093,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 62
+    },
+    "claimCustomer": {
+      "name": "claimCustomer",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": true,
+      "line": 1105,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 63
+    },
+    "returnToPool": {
+      "name": "returnToPool",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": true,
+      "line": 1117,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 64
+    },
+    "loadOpportunities": {
+      "name": "loadOpportunities",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": true,
+      "line": 1130,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 65
+    },
+    "showOppModal": {
+      "name": "showOppModal",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 1142,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 66
+    },
+    "closeOppModal": {
+      "name": "closeOppModal",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 1160,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 67
+    },
+    "saveOpportunity": {
+      "name": "saveOpportunity",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": true,
+      "line": 1161,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 68
+    },
+    "collectOpportunityTransitionEvidence": {
+      "name": "collectOpportunityTransitionEvidence",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": true,
+      "line": 1186,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 69
+    },
+    "editOpportunity": {
+      "name": "editOpportunity",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": true,
+      "line": 1210,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 70
+    },
+    "addCustomerActivity": {
+      "name": "addCustomerActivity",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": true,
+      "line": 1245,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 71
+    },
+    "loadSeaPool": {
+      "name": "loadSeaPool",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": true,
+      "line": 1247,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 72
+    },
+    "generateAIStrategy": {
+      "name": "generateAIStrategy",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": true,
+      "line": 1289,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 73
+    },
+    "esc": {
+      "name": "esc",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 864,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 2,
+      "globalIndex": 317
+    },
+    "renderSafeMarkdown": {
+      "name": "renderSafeMarkdown",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 1352,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 75
+    },
+    "copyText": {
+      "name": "copyText",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 1360,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 76
+    },
+    "toast": {
+      "name": "toast",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 1365,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 77
+    },
+    "toggleBrandDetail": {
+      "name": "toggleBrandDetail",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 1409,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 78
+    },
+    "copyEmail": {
+      "name": "copyEmail",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 1414,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 79
+    },
+    "searchNewBrand": {
+      "name": "searchNewBrand",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": true,
+      "line": 1419,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 80
+    },
+    "trackTokenUsage": {
+      "name": "trackTokenUsage",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": true,
+      "line": 1449,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 81
+    },
+    "updateStrategy": {
+      "name": "updateStrategy",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 1456,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 82
+    },
+    "initM3": {
+      "name": "initM3",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 1488,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 83
+    },
+    "goAnalyze": {
+      "name": "goAnalyze",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 1513,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 84
+    },
+    "goGenerate": {
+      "name": "goGenerate",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 1522,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 85
+    },
+    "updSteps": {
+      "name": "updSteps",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 1523,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 86
+    },
+    "selTmpl": {
+      "name": "selTmpl",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 1524,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 87
+    },
+    "updateTemplateSelectionUI": {
+      "name": "updateTemplateSelectionUI",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 1528,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 88
+    },
+    "getSelectedProposalTemplate": {
+      "name": "getSelectedProposalTemplate",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 1535,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 89
+    },
+    "generateProposal": {
+      "name": "generateProposal",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": true,
+      "line": 1550,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 90
+    },
+    "updateProposalDraftFromEditor": {
+      "name": "updateProposalDraftFromEditor",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 1575,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 91
+    },
+    "getCurrentProposalDraft": {
+      "name": "getCurrentProposalDraft",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 1582,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 92
+    },
+    "downloadProposal": {
+      "name": "downloadProposal",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 1586,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 93
+    },
+    "copyProposal": {
+      "name": "copyProposal",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 1587,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 94
+    },
+    "openProposalToInfluencers": {
+      "name": "openProposalToInfluencers",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 1588,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 95
+    },
+    "escapeHTML": {
+      "name": "escapeHTML",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 1611,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 96
+    },
+    "switchTab": {
+      "name": "switchTab",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 1615,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 97
+    },
+    "smartMatch": {
+      "name": "smartMatch",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": true,
+      "line": 1619,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 98
+    },
+    "downloadInfTemplateJSON": {
+      "name": "downloadInfTemplateJSON",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 1640,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 99
+    },
+    "exportSubmissionCSV": {
+      "name": "exportSubmissionCSV",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 1644,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 100
+    },
+    "sendChatLegacyUnused": {
+      "name": "sendChatLegacyUnused",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": true,
+      "line": 1654,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 101
+    },
+    "adminAddUser": {
+      "name": "adminAddUser",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": true,
+      "line": 1656,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 102
+    },
+    "wfApi": {
+      "name": "wfApi",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 1674,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 103
+    },
+    "initWorkflowDesigner": {
+      "name": "initWorkflowDesigner",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 1698,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 104
+    },
+    "wfAddNode": {
+      "name": "wfAddNode",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 1755,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 105
+    },
+    "wfDefaultConfig": {
+      "name": "wfDefaultConfig",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 1773,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 106
+    },
+    "wfRenderAll": {
+      "name": "wfRenderAll",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 1788,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 107
+    },
+    "wfRenderNode": {
+      "name": "wfRenderNode",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 1800,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 108
+    },
+    "wfRenderEdge": {
+      "name": "wfRenderEdge",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 1908,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 109
+    },
+    "wfHandleWorkflowPointerMove": {
+      "name": "wfHandleWorkflowPointerMove",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 1951,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 110
+    },
+    "wfHandleWorkflowPointerUp": {
+      "name": "wfHandleWorkflowPointerUp",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 1978,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 111
+    },
+    "wfSelectNode": {
+      "name": "wfSelectNode",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2007,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 112
+    },
+    "wfSelectEdge": {
+      "name": "wfSelectEdge",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2008,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 113
+    },
+    "wfDeselectAll": {
+      "name": "wfDeselectAll",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2010,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 114
+    },
+    "wfDeleteSelected": {
+      "name": "wfDeleteSelected",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2016,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 115
+    },
+    "wfShowNodeProperties": {
+      "name": "wfShowNodeProperties",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2035,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 116
+    },
+    "wfShowEdgeProperties": {
+      "name": "wfShowEdgeProperties",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2084,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 117
+    },
+    "wfUpdateNodeProp": {
+      "name": "wfUpdateNodeProp",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2100,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 118
+    },
+    "wfUpdateNodeConfig": {
+      "name": "wfUpdateNodeConfig",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2107,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 119
+    },
+    "wfUpdateEdgeProp": {
+      "name": "wfUpdateEdgeProp",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2114,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 120
+    },
+    "wfUpdateCondition": {
+      "name": "wfUpdateCondition",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2121,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 121
+    },
+    "wfUpdateEdgeCondition": {
+      "name": "wfUpdateEdgeCondition",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2130,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 122
+    },
+    "wfSaveState": {
+      "name": "wfSaveState",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2140,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 123
+    },
+    "wfUndo": {
+      "name": "wfUndo",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2150,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 124
+    },
+    "wfRedo": {
+      "name": "wfRedo",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2160,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 125
+    },
+    "wfClearCanvas": {
+      "name": "wfClearCanvas",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2170,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 126
+    },
+    "wfSaveTemplate": {
+      "name": "wfSaveTemplate",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2182,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 127
+    },
+    "wfPublishTemplate": {
+      "name": "wfPublishTemplate",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2202,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 128
+    },
+    "wfLoadTemplate": {
+      "name": "wfLoadTemplate",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2210,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 129
+    },
+    "wfLoadTemplates": {
+      "name": "wfLoadTemplates",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2227,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 130
+    },
+    "wfDeleteTemplate": {
+      "name": "wfDeleteTemplate",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2245,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 131
+    },
+    "wfLoadInstances": {
+      "name": "wfLoadInstances",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2253,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 132
+    },
+    "wfShowInstanceDetail": {
+      "name": "wfShowInstanceDetail",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2276,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 133
+    },
+    "wfCancelInstance": {
+      "name": "wfCancelInstance",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2338,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 134
+    },
+    "wfTaskIsOverdue": {
+      "name": "wfTaskIsOverdue",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2346,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 135
+    },
+    "wfTaskStatusLabel": {
+      "name": "wfTaskStatusLabel",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2350,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 136
+    },
+    "wfTaskBusinessLabel": {
+      "name": "wfTaskBusinessLabel",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2355,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 137
+    },
+    "wfResetTaskFilters": {
+      "name": "wfResetTaskFilters",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2360,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 138
+    },
+    "wfUpdateTaskSummary": {
+      "name": "wfUpdateTaskSummary",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2369,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 139
+    },
+    "wfLoadTasks": {
+      "name": "wfLoadTasks",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2386,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 140
+    },
+    "wfHandleTask": {
+      "name": "wfHandleTask",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2435,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 141
+    },
+    "wfOpenBusiness": {
+      "name": "wfOpenBusiness",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2446,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 142
+    },
+    "wfShowTaskDetail": {
+      "name": "wfShowTaskDetail",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2459,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 143
+    },
+    "toggleTreeNode": {
+      "name": "toggleTreeNode",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2509,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 144
+    },
+    "archiveBrandSearch": {
+      "name": "archiveBrandSearch",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2510,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 145
+    },
+    "initM1": {
+      "name": "initM1",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2516,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 146
+    },
+    "renderIndustryTree": {
+      "name": "renderIndustryTree",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2527,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 147
+    },
+    "filterBrands": {
+      "name": "filterBrands",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2555,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 148
+    },
+    "filterByTag": {
+      "name": "filterByTag",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2577,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 149
+    },
+    "filterByTreeTag": {
+      "name": "filterByTreeTag",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2578,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 150
+    },
+    "renderSearchHistory": {
+      "name": "renderSearchHistory",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2585,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 151
+    },
+    "renderBrands": {
+      "name": "renderBrands",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2594,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 152
+    },
+    "selectBrand": {
+      "name": "selectBrand",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2624,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 153
+    },
+    "selectBrandByName": {
+      "name": "selectBrandByName",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2632,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 154
+    },
+    "getSelectedBrand": {
+      "name": "getSelectedBrand",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2643,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 155
+    },
+    "renderBrandWorkspaceStats": {
+      "name": "renderBrandWorkspaceStats",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2648,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 156
+    },
+    "renderBrandDetail": {
+      "name": "renderBrandDetail",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2663,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 157
+    },
+    "renderBrandKnowledgeStatus": {
+      "name": "renderBrandKnowledgeStatus",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2695,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 158
+    },
+    "renderBrandOpportunityPanel": {
+      "name": "renderBrandOpportunityPanel",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2702,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 159
+    },
+    "renderBrandSocialSources": {
+      "name": "renderBrandSocialSources",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2714,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 160
+    },
+    "renderBrandRelations": {
+      "name": "renderBrandRelations",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2736,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 161
+    },
+    "brandKpi": {
+      "name": "brandKpi",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2750,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 162
+    },
+    "openBrandSocialSearch": {
+      "name": "openBrandSocialSearch",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2754,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 163
+    },
+    "loadSocialForBrand": {
+      "name": "loadSocialForBrand",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2761,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 164
+    },
+    "switchPlatformTab": {
+      "name": "switchPlatformTab",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2762,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 165
+    },
+    "toggleBrandSocial": {
+      "name": "toggleBrandSocial",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2763,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 166
+    },
+    "copyBrandBriefToDemand": {
+      "name": "copyBrandBriefToDemand",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2765,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 167
+    },
+    "setValueIfPresent": {
+      "name": "setValueIfPresent",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2784,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 168
+    },
+    "exportBrandCSV": {
+      "name": "exportBrandCSV",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2786,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 169
+    },
+    "normalizeEnrichedBrand": {
+      "name": "normalizeEnrichedBrand",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2813,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 170
+    },
+    "upsertBrandRecord": {
+      "name": "upsertBrandRecord",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2847,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 171
+    },
+    "brandToApiPayload": {
+      "name": "brandToApiPayload",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2853,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 172
+    },
+    "brandTags": {
+      "name": "brandTags",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2878,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 173
+    },
+    "brandFollowers": {
+      "name": "brandFollowers",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2879,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 174
+    },
+    "brandContent": {
+      "name": "brandContent",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2880,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 175
+    },
+    "brandContacts": {
+      "name": "brandContacts",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2881,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 176
+    },
+    "isBrandKnowledgeReady": {
+      "name": "isBrandKnowledgeReady",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2882,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 177
+    },
+    "normalizeList": {
+      "name": "normalizeList",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2884,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 178
+    },
+    "sortBrandResults": {
+      "name": "sortBrandResults",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2889,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 179
+    },
+    "brandRevenueScore": {
+      "name": "brandRevenueScore",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2897,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 180
+    },
+    "brandSocialScore": {
+      "name": "brandSocialScore",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2905,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 181
+    },
+    "brandSearchScore": {
+      "name": "brandSearchScore",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2906,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 182
+    },
+    "formatCompactNumber": {
+      "name": "formatCompactNumber",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2908,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 183
+    },
+    "inlineJsArg": {
+      "name": "inlineJsArg",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2916,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 184
+    },
+    "csvCell": {
+      "name": "csvCell",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2917,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 185
+    },
+    "buildBrandSearchUrl": {
+      "name": "buildBrandSearchUrl",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2918,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 186
+    },
+    "handleDemandFile": {
+      "name": "handleDemandFile",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2927,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 187
+    },
+    "handleDemandDrop": {
+      "name": "handleDemandDrop",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2932,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 188
+    },
+    "processDemandFile": {
+      "name": "processDemandFile",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 2938,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 189
+    },
+    "parseDemandFileOnServer": {
+      "name": "parseDemandFileOnServer",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": true,
+      "line": 2969,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 190
+    },
+    "renderDemandUploadState": {
+      "name": "renderDemandUploadState",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3007,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 191
+    },
+    "formatDemandFileSize": {
+      "name": "formatDemandFileSize",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3023,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 192
+    },
+    "resetDemandUploadState": {
+      "name": "resetDemandUploadState",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3029,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 193
+    },
+    "getDemandFileExtension": {
+      "name": "getDemandFileExtension",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3038,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 194
+    },
+    "isTextLikeDemandFile": {
+      "name": "isTextLikeDemandFile",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3043,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 195
+    },
+    "buildDemandFileMetadata": {
+      "name": "buildDemandFileMetadata",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3048,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 196
+    },
+    "normalizeDemandArray": {
+      "name": "normalizeDemandArray",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3057,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 197
+    },
+    "inferDemandFromText": {
+      "name": "inferDemandFromText",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3061,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 198
+    },
+    "normalizeDemandAnalysis": {
+      "name": "normalizeDemandAnalysis",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3113,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 199
+    },
+    "hasDemandAnalysisValue": {
+      "name": "hasDemandAnalysisValue",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3120,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 200
+    },
+    "mergeDemandAnalysis": {
+      "name": "mergeDemandAnalysis",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3123,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 201
+    },
+    "analyzeDemandAI": {
+      "name": "analyzeDemandAI",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": true,
+      "line": 3134,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 202
+    },
+    "getEditedDemand": {
+      "name": "getEditedDemand",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3197,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 203
+    },
+    "syncCurDemandFromAnalysis": {
+      "name": "syncCurDemandFromAnalysis",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3209,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 204
+    },
+    "goStep3": {
+      "name": "goStep3",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3228,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 205
+    },
+    "resetDemand": {
+      "name": "resetDemand",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3235,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 206
+    },
+    "dlFile": {
+      "name": "dlFile",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3253,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 207
+    },
+    "ensureM4TableStyles": {
+      "name": "ensureM4TableStyles",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3262,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 208
+    },
+    "initM4": {
+      "name": "initM4",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3269,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 209
+    },
+    "m4Filters": {
+      "name": "m4Filters",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3273,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 210
+    },
+    "loadInfluencersFromAPI": {
+      "name": "loadInfluencersFromAPI",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3283,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 211
+    },
+    "matchInfluencers": {
+      "name": "matchInfluencers",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3302,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 212
+    },
+    "fmtCount": {
+      "name": "fmtCount",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3303,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 213
+    },
+    "renderInfTable": {
+      "name": "renderInfTable",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3309,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 214
+    },
+    "toggleAll": {
+      "name": "toggleAll",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3336,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 215
+    },
+    "syncInfluencerSelectionState": {
+      "name": "syncInfluencerSelectionState",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3340,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 216
+    },
+    "getSelectedInfIds": {
+      "name": "getSelectedInfIds",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3348,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 217
+    },
+    "exportAll": {
+      "name": "exportAll",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3356,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 218
+    },
+    "exportFiltered": {
+      "name": "exportFiltered",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3357,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 219
+    },
+    "exportSelected": {
+      "name": "exportSelected",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3358,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 220
+    },
+    "exportInf": {
+      "name": "exportInf",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3363,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 221
+    },
+    "importInfluencerFile": {
+      "name": "importInfluencerFile",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": true,
+      "line": 3375,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 222
+    },
+    "handleUpload": {
+      "name": "handleUpload",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3399,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 223
+    },
+    "handleDrop": {
+      "name": "handleDrop",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3404,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 224
+    },
+    "openInfUploadModal": {
+      "name": "openInfUploadModal",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3408,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 225
+    },
+    "handleUploadModal": {
+      "name": "handleUploadModal",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3412,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 226
+    },
+    "importInfluencers": {
+      "name": "importInfluencers",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3417,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 227
+    },
+    "showInfPreview": {
+      "name": "showInfPreview",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3425,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 228
+    },
+    "downloadInfTemplate": {
+      "name": "downloadInfTemplate",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": true,
+      "line": 3441,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 229
+    },
+    "pushToFeishu": {
+      "name": "pushToFeishu",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": true,
+      "line": 3452,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 230
+    },
+    "findInfluencerById": {
+      "name": "findInfluencerById",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3479,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 231
+    },
+    "startCollab": {
+      "name": "startCollab",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3483,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 232
+    },
+    "closeCollabOrderModal": {
+      "name": "closeCollabOrderModal",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3516,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 233
+    },
+    "submitCollabOrder": {
+      "name": "submitCollabOrder",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": true,
+      "line": 3522,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 234
+    },
+    "loadCollaborations": {
+      "name": "loadCollaborations",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": true,
+      "line": 3552,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 235
+    },
+    "collabResource": {
+      "name": "collabResource",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3575,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 236
+    },
+    "renderCollabTable": {
+      "name": "renderCollabTable",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3578,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 237
+    },
+    "updateCollabStatus": {
+      "name": "updateCollabStatus",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": true,
+      "line": 3602,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 238
+    },
+    "saveAIMemory": {
+      "name": "saveAIMemory",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3618,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 239
+    },
+    "renderAIReferenceText": {
+      "name": "renderAIReferenceText",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3619,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 240
+    },
+    "sendChat": {
+      "name": "sendChat",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3637,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 241
+    },
+    "addChatMsg": {
+      "name": "addChatMsg",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3687,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 242
+    },
+    "clearChat": {
+      "name": "clearChat",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3697,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 243
+    },
+    "clearAIMemory": {
+      "name": "clearAIMemory",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3698,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 244
+    },
+    "switchAdminTab": {
+      "name": "switchAdminTab",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3700,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 245
+    },
+    "loadAdminDashboard": {
+      "name": "loadAdminDashboard",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3707,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 246
+    },
+    "setText": {
+      "name": "setText",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3729,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 247
+    },
+    "formatMoney": {
+      "name": "formatMoney",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3734,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 248
+    },
+    "renderAdminStageChart": {
+      "name": "renderAdminStageChart",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3741,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 249
+    },
+    "renderAdminTaskHealth": {
+      "name": "renderAdminTaskHealth",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3755,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 250
+    },
+    "renderAdminKnowledgeHealth": {
+      "name": "renderAdminKnowledgeHealth",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3769,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 251
+    },
+    "renderAdminTeamPerformance": {
+      "name": "renderAdminTeamPerformance",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3782,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 252
+    },
+    "renderAdminRecentActivity": {
+      "name": "renderAdminRecentActivity",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3792,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 253
+    },
+    "loadAdminUsers": {
+      "name": "loadAdminUsers",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3800,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 254
+    },
+    "renderAdminUserTable": {
+      "name": "renderAdminUserTable",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3803,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 255
+    },
+    "loadAdminTokens": {
+      "name": "loadAdminTokens",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3810,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 256
+    },
+    "loadAdminAIAudit": {
+      "name": "loadAdminAIAudit",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3821,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 257
+    },
+    "loadAdminAIConversation": {
+      "name": "loadAdminAIConversation",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3855,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 258
+    },
+    "toggleUserActive": {
+      "name": "toggleUserActive",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3884,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 259
+    },
+    "adminResetPw": {
+      "name": "adminResetPw",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3885,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 260
+    },
+    "adminCreateInvite": {
+      "name": "adminCreateInvite",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3886,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 261
+    },
+    "buildBrandRelationCache": {
+      "name": "buildBrandRelationCache",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3891,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 262
+    },
+    "findRelatedBrands": {
+      "name": "findRelatedBrands",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3910,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 263
+    },
+    "findCompetitorBrands": {
+      "name": "findCompetitorBrands",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3915,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 264
+    },
+    "showRelatedBrands": {
+      "name": "showRelatedBrands",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3920,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 265
+    },
+    "closeBrandRelModal": {
+      "name": "closeBrandRelModal",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 3969,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 266
+    },
+    "switchPage": {
+      "name": "switchPage",
+      "source": "platform/app.js",
+      "kind": "function",
+      "async": false,
+      "line": 4033,
+      "column": 1,
+      "loadOrder": 1,
+      "occurrenceIndex": 1,
+      "globalIndex": 267
+    },
+    "generateHTMLPPT": {
+      "name": "generateHTMLPPT",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": true,
+      "line": 40,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 268
+    },
+    "addPPTInstruction": {
+      "name": "addPPTInstruction",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 128,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 269
+    },
+    "handlePPTContextFile": {
+      "name": "handlePPTContextFile",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": true,
+      "line": 145,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 270
+    },
+    "parsePPTContextFileOnServer": {
+      "name": "parsePPTContextFileOnServer",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": true,
+      "line": 185,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 271
+    },
+    "hasReadableExtractedText": {
+      "name": "hasReadableExtractedText",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 213,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 272
+    },
+    "hasInternalMaterialPattern": {
+      "name": "hasInternalMaterialPattern",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 220,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 273
+    },
+    "sanitizeClientMaterialText": {
+      "name": "sanitizeClientMaterialText",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 224,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 274
+    },
+    "isClientVisibleMaterial": {
+      "name": "isClientVisibleMaterial",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 235,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 275
+    },
+    "hasShortReadableTextMaterial": {
+      "name": "hasShortReadableTextMaterial",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 241,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 276
+    },
+    "isTextLikePPTContextFile": {
+      "name": "isTextLikePPTContextFile",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 250,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 277
+    },
+    "readPPTContextTextFile": {
+      "name": "readPPTContextTextFile",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 257,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 278
+    },
+    "buildPPTContextFileFallback": {
+      "name": "buildPPTContextFileFallback",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": true,
+      "line": 267,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 279
+    },
+    "renderPPTContextThread": {
+      "name": "renderPPTContextThread",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 281,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 280
+    },
+    "buildPPTDeckContext": {
+      "name": "buildPPTDeckContext",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 301,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 281
+    },
+    "buildPPTMaterialReferences": {
+      "name": "buildPPTMaterialReferences",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 320,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 282
+    },
+    "clearPPTContext": {
+      "name": "clearPPTContext",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 336,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 283
+    },
+    "buildClientPPTFallback": {
+      "name": "buildClientPPTFallback",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 345,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 284
+    },
+    "summarizeDeckContext": {
+      "name": "summarizeDeckContext",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 383,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 285
+    },
+    "extractContextBullets": {
+      "name": "extractContextBullets",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 389,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 286
+    },
+    "inferDeckAudience": {
+      "name": "inferDeckAudience",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 407,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 287
+    },
+    "normalizePPTData": {
+      "name": "normalizePPTData",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 416,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 288
+    },
+    "normalizePPTPoints": {
+      "name": "normalizePPTPoints",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 453,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 289
+    },
+    "renderPPTResult": {
+      "name": "renderPPTResult",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 459,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 290
+    },
+    "buildPPTResearchNotice": {
+      "name": "buildPPTResearchNotice",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 498,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 291
+    },
+    "buildRevealHTML": {
+      "name": "buildRevealHTML",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 513,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 292
+    },
+    "buildFrontendSlidesDeckHTML": {
+      "name": "buildFrontendSlidesDeckHTML",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 517,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 293
+    },
+    "buildPPTResearchPoints": {
+      "name": "buildPPTResearchPoints",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 567,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 294
+    },
+    "selectPPTVisualTheme": {
+      "name": "selectPPTVisualTheme",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 579,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 295
+    },
+    "frontendSlidesCSS": {
+      "name": "frontendSlidesCSS",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 596,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 296
+    },
+    "renderFrontendCoverSlide": {
+      "name": "renderFrontendCoverSlide",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 612,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 297
+    },
+    "renderFrontendSlide": {
+      "name": "renderFrontendSlide",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 620,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 298
+    },
+    "renderFrontendResearch": {
+      "name": "renderFrontendResearch",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 634,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 299
+    },
+    "renderFrontendSources": {
+      "name": "renderFrontendSources",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 650,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 300
+    },
+    "renderFrontendCards": {
+      "name": "renderFrontendCards",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 657,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 301
+    },
+    "renderFrontendMetrics": {
+      "name": "renderFrontendMetrics",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 665,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 302
+    },
+    "renderFrontendTimeline": {
+      "name": "renderFrontendTimeline",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 673,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 303
+    },
+    "frontendSlidesScript": {
+      "name": "frontendSlidesScript",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 680,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 304
+    },
+    "buildCampaignReportHTML": {
+      "name": "buildCampaignReportHTML",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 684,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 305
+    },
+    "prepareCampaignReportData": {
+      "name": "prepareCampaignReportData",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 716,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 306
+    },
+    "campaignReportCSS": {
+      "name": "campaignReportCSS",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 744,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 307
+    },
+    "renderCampaignSection": {
+      "name": "renderCampaignSection",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 765,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 308
+    },
+    "renderContentCards": {
+      "name": "renderContentCards",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 783,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 309
+    },
+    "renderStats": {
+      "name": "renderStats",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 794,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 310
+    },
+    "renderTimeline": {
+      "name": "renderTimeline",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 810,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 311
+    },
+    "renderKPI": {
+      "name": "renderKPI",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 824,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 312
+    },
+    "renderNextSteps": {
+      "name": "renderNextSteps",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 834,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 313
+    },
+    "renderMaterialsSection": {
+      "name": "renderMaterialsSection",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 844,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 314
+    },
+    "renderClosingSection": {
+      "name": "renderClosingSection",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 856,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 315
+    },
+    "campaignReportScript": {
+      "name": "campaignReportScript",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 860,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 316
+    },
+    "pad2": {
+      "name": "pad2",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 873,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 318
+    },
+    "inferBrandFromTitle": {
+      "name": "inferBrandFromTitle",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 877,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 319
+    },
+    "trimDeckTitle": {
+      "name": "trimDeckTitle",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 882,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 320
+    },
+    "escapeRegExp": {
+      "name": "escapeRegExp",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 890,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 321
+    },
+    "coverChips": {
+      "name": "coverChips",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 894,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 322
+    },
+    "sectionEnglishLabel": {
+      "name": "sectionEnglishLabel",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 906,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 323
+    },
+    "splitPoint": {
+      "name": "splitPoint",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 920,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 324
+    },
+    "metricLead": {
+      "name": "metricLead",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 932,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 325
+    },
+    "inferPercent": {
+      "name": "inferPercent",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 938,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 326
+    },
+    "safeDeckFileName": {
+      "name": "safeDeckFileName",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 944,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 327
+    },
+    "downloadHTMLPPT": {
+      "name": "downloadHTMLPPT",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 948,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 328
+    },
+    "downloadTextFile": {
+      "name": "downloadTextFile",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 957,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 329
+    },
+    "downloadPPTX": {
+      "name": "downloadPPTX",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": true,
+      "line": 972,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 330
+    },
+    "previewPPT": {
+      "name": "previewPPT",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 1004,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 331
+    },
+    "copyPPTSource": {
+      "name": "copyPPTSource",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 1018,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 332
+    },
+    "ensurePPTEditorShell": {
+      "name": "ensurePPTEditorShell",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 1032,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 333
+    },
+    "getEditablePPTOutline": {
+      "name": "getEditablePPTOutline",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 1087,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 334
+    },
+    "openPPTEditor": {
+      "name": "openPPTEditor",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 1096,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 335
+    },
+    "closePPTEditor": {
+      "name": "closePPTEditor",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 1109,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 336
+    },
+    "renderPPTEditor": {
+      "name": "renderPPTEditor",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 1114,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 337
+    },
+    "applyPPTEditorForm": {
+      "name": "applyPPTEditorForm",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 1142,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 338
+    },
+    "rebuildPPTFromEditor": {
+      "name": "rebuildPPTFromEditor",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 1165,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 339
+    },
+    "savePPTEditorAndRender": {
+      "name": "savePPTEditorAndRender",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 1179,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 340
+    },
+    "previewEditedPPT": {
+      "name": "previewEditedPPT",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 1185,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 341
+    },
+    "selectPPTEditorSlide": {
+      "name": "selectPPTEditorSlide",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 1191,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 342
+    },
+    "addPPTEditorSlide": {
+      "name": "addPPTEditorSlide",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 1199,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 343
+    },
+    "duplicatePPTEditorSlide": {
+      "name": "duplicatePPTEditorSlide",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 1214,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 344
+    },
+    "deletePPTEditorSlide": {
+      "name": "deletePPTEditorSlide",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 1226,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 345
+    },
+    "movePPTEditorSlide": {
+      "name": "movePPTEditorSlide",
+      "source": "platform/ppt.js",
+      "kind": "function",
+      "async": false,
+      "line": 1238,
+      "column": 1,
+      "loadOrder": 2,
+      "occurrenceIndex": 1,
+      "globalIndex": 346
+    }
+  },
+  "frozenVisualBaseline": {
+    "version": "v0.2.9",
+    "path": "docs/baselines/v0.2.9/ui-ppt-manifest.json",
+    "sha256": "2b34c1704aa6c844f9b7606350ff8bfb7cce2d9fa2ce3f48f38b6b6d24d86558"
+  }
+}

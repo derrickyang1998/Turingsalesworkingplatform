@@ -3,7 +3,7 @@
 ## Source Contract / 发布源契约
 
 - Authoritative checkout / 唯一权威工作区：`C:\Users\29272\Documents\在线商务平台-github-sync`
-- Release branch / 发布分支：`codex/v0.5.0-campaign-business-spine`
+- Release branch / 发布分支：`codex/v0.6.0-crm-sales-workspace`
 - Deployment entry / 部署入口：`platform/deploy_v8.ps1`
 - Runtime / 运行时：Node.js 20, Express 5 + SQLite (better-sqlite3)
 - PM2 contract / PM2 契约：`platform/ecosystem.config.js` starts `server/server.js` as `turingmarket`
@@ -14,11 +14,11 @@ The script is executable with the installed Windows PowerShell 5.1 and keeps its
 
 ## Frozen Client Contract / 冻结前端契约
 
-The v0.5.0 guarded release keeps the approved v0.4.0 client build and frozen PPT bytes locked until the remaining Phase 4 static-boundary gates land. / v0.5.0 受控发布在剩余第 4 阶段静态边界门禁落地前，继续锁定已批准的 v0.4.0 前端构建与冻结 PPT 字节。
+The v0.6.0 guarded release publishes the accepted CRM sales workspace on top of the approved product shell while keeping the frozen PPT bytes exact. Production remains on v0.4 until every local, independent, backup, deployment, and remote acceptance gate passes. / v0.6.0 受控发布在已批准产品壳层上交付 CRM 销售工作台，并保持冻结 PPT 字节完全不变；所有本地、独立审查、备份、部署和远端验收门禁通过前，生产继续运行 v0.4。
 
 ```text
-App build: 20260714-v040-product-shell-design-system
-App cache key: app.js?v=20260714v040productshelldesignsystem
+App build: 20260811-v060-crm-sales-workspace
+App cache key: app.js?v=20260811v060crmsalesworkspace
 PPT build: 20260702-v916-kb-bridge-client-cn
 PPT cache key: ppt.js?v=20260702v916kbbridge
 PPT SHA-256: f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e
@@ -31,7 +31,9 @@ Only these modular browser assets are public / 仅以下模块化前端资源允
 - `/client/shared/build_info.js`
 - `/client/core/navigation.js`
 - `/client/core/accessibility.js`
+- `/client/core/csp_compat.js`
 - `/client/core/shell.js`
+- `/client/features/ppt_preview_runtime.js`
 - `/client/styles/tokens.css`
 - `/client/styles/components.css`
 - `/client/styles/layout.css`
@@ -320,8 +322,8 @@ The script performs these gates in order / 脚本按以下顺序执行：
 
 1. Verify checkout, branch, clean state, build markers, cache keys, and frozen PPT hash. / 校验工作区、分支、干净状态、构建标记、缓存键及冻结 PPT 哈希。
 2. Acquire the fail-closed lifecycle lock at `/root/turingmarket/.deploy-v030.lock`; deployment and manual rollback share it for their complete remote lifecycle, while production mutation additionally requires the stable global writer mutex. / 获取失败关闭的远端生命周期锁；正式发布与手工回滚在完整远端生命周期内共用该锁，生产变更还必须另外取得稳定的全局 writer 互斥。
-3. Create `/root/turingmarket/backups/v050-campaign-business-spine-<timestamp>` with present/absent manifests, both dependency trees, a consistent `better-sqlite3` database copy, the private root-owned `PPT_CACHE_DIR=/var/lib/turingmarket/ppt-cache` tree, Nginx configuration, and nested plus aggregate SHA-256 manifests. The backup path must not already exist. / 建立 v0.5.0 外置版本化备份，将数据库与私有 PPT 缓存作为同一验签单元；同名备份存在时立即失败。
-4. Upload every runtime, browser, test, and evidence file only to `/var/lib/turingmarket-gate/releases/v050-campaign-business-spine-<timestamp>`; store the immutable upload manifest under the root-only lifecycle lock and verify it before and after candidate testing. The active `/root/turingmarket/platform` tree is not overwritten during validation. / 所有文件只上传到 v0.5.0 外置候选目录；不可变上传清单保存在仅 root 可读的生命周期锁内，并在候选测试前后各校验一次，验证期间不覆盖活动生产目录。
+3. Create `/root/turingmarket/backups/v060-crm-sales-workspace-<timestamp>` with present/absent manifests, both dependency trees, a consistent `better-sqlite3` database copy, the private root-owned `PPT_CACHE_DIR=/var/lib/turingmarket/ppt-cache` tree, Nginx configuration, and nested plus aggregate SHA-256 manifests. The backup path must not already exist. / 建立 v0.6.0 外置版本化备份，将数据库与私有 PPT 缓存作为同一验签单元；同名备份存在时立即失败。
+4. Upload every runtime, browser, test, and evidence file only to `/var/lib/turingmarket-gate/releases/v060-crm-sales-workspace-<timestamp>`; store the immutable upload manifest under the root-only lifecycle lock and verify it before and after candidate testing. The active `/root/turingmarket/platform` tree is not overwritten during validation. / 所有文件只上传到 v0.6.0 外置候选目录；不可变上传清单保存在仅 root 可读的生命周期锁内，并在候选测试前后各校验一次，验证期间不覆盖活动生产目录。
 5. Rebuild a non-secret fixture from the checksummed production schema with synthetic users, security fields, organizations, memberships, teams, campaigns, knowledge, and AI rows, while copying only the non-secret migration ledger. Candidate migration code runs twice as the no-login `turingmarket-gate` UID inside a bounded systemd service with private network, PID, and mount namespaces, a read-only filesystem, explicit inaccessible production paths, and root-only stdout/stderr. After the whole cgroup is empty, trusted code from the active production runtime verifies preserved-table digests, exact user security fields, organization/team/campaign rows, migration idempotence, and unchanged production-backup and PPT-manifest hashes. The complete Node, browser, and Nginx checks then run under the existing unprivileged gate. / 从已验签生产结构重建不含真实数据的合成副本，覆盖用户安全字段、组织、成员、团队、项目、知识与 AI 数据，并且只复制非敏感迁移账本。候选迁移代码以禁止登录的门禁 UID 在受限 systemd 服务中执行两次，使用独立网络、PID 与挂载命名空间、只读文件系统、显式不可访问生产路径及仅 root 可读输出。确认整个 cgroup 清空后，再由活动生产运行时的可信代码核对保留表摘要、用户安全字段、组织/团队/项目记录、迁移幂等性，以及生产备份和 PPT 清单哈希不变；随后执行完整 Node、浏览器及 Nginx 门禁。
    Bootstrap and deploy independently validate the account's system UID, primary and supplementary groups, locked credentials, fixed home, and nologin shell before candidate code can run. / 引导和发布会分别核验门禁账号的系统 UID、主组、补充组、锁定凭据、固定 home 与 nologin shell，身份漂移时禁止运行候选代码。
 6. Kill and verify the absence of all gate-user processes, recheck uploaded sources, recreate only the four exact external-state symlinks, remove ACL/write escalation, and seal the complete candidate tree including `node_modules`. After acquiring the writer lock, recheck the same digest immediately before stopping PM2 and atomically exchange the sealed candidate with Linux `renameat2(RENAME_EXCHANGE)`. / 门禁结束后清理并确认该用户无残留进程，复验上传源码，仅重建四个精确外置状态链接，移除 ACL 与多余写权限，并封存包含 `node_modules` 的完整候选树；取得 writer 锁后、停止 PM2 前再次核对同一摘要，再执行 Linux 原子目录交换。
@@ -336,7 +338,7 @@ Production route smoke covers `/api/health`, `/m0`, `/m0-detail`, `/m4`, and `/a
 
 ```bash
 cd server
-NODE_ENV=test TM_DISABLE_DOTENV=1 DB_PATH=/var/lib/turingmarket-gate/releases/<release>/tmp/deploy-v050-gate-<timestamp>/test.db node --test --test-concurrency=1 tests/*.test.js
+NODE_ENV=test TM_DISABLE_DOTENV=1 DB_PATH=/var/lib/turingmarket-gate/releases/<release>/tmp/deploy-v060-gate-<timestamp>/test.db node --test --test-concurrency=1 tests/*.test.js
 ```
 
 ## Rollback / 回滚
@@ -344,16 +346,16 @@ NODE_ENV=test TM_DISABLE_DOTENV=1 DB_PATH=/var/lib/turingmarket-gate/releases/<r
 Use only a backup created by this release / 只允许使用本版本生成的备份：
 
 ```powershell
-.\platform\deploy_v8.ps1 -RollbackBackup backups/v050-campaign-business-spine-<timestamp> -RestoreDatabase -ConfirmDataLoss
+.\platform\deploy_v8.ps1 -RollbackBackup backups/v060-crm-sales-workspace-<timestamp> -RestoreDatabase -ConfirmDataLoss
 ```
 
 `-RollbackBackup` requires both `-RestoreDatabase` and `-ConfirmDataLoss`; code-only Phase 4 rollback, omitted consent, and every use of `-PreserveSessions` are rejected before server lookup or lock acquisition. A valid request acquires lifecycle and writer ownership, verifies every manifest, stops PM2, restores code, dependencies, repository evidence, Nginx, SQLite, and `PPT_CACHE_DIR`, invalidates all sessions, then restarts `turingmarket` with `SERVER_HOST=127.0.0.1` and verifies `/api/health`. `-MaintenanceTimeoutSeconds` is bounded to 15-300 seconds and defaults to 60. / 手工回滚必须同时显式提供数据库恢复与数据丢失确认；禁止仅回滚代码、缺少确认或保留会话。合法请求完成整体验签恢复并撤销全部会话后才重启。
 
 The destructive restore explicitly accepts loss of writes after the selected backup. The restored database and PPT cache are one backup unit, and restored sessions are always deleted before restart. / 破坏性恢复明确接受所选备份之后的业务写入丢失；数据库与 PPT 缓存必须作为同一备份单元恢复，且恢复出的会话始终在重启前删除。
 
-## Remaining Phase 4 Gates / 第 4 阶段剩余门禁
+## Remaining v0.6 Release Gates / v0.6 剩余发布门禁
 
-This acceleration slice does not make production cutover acceptable by itself. Deployment remains blocked until the exhaustive sanitizer and stale-run cleanup, all-API maintenance plus accepted-marker boundary, persistent loopback firewall proof, checked-in one-request replay gate, resumable rollback/security-overlay journal, DB/cache ledger parity, retention policy, and authenticated browser/accessibility evidence are implemented and independently accepted. / 本次加速切片本身不代表可生产切换；完整脱敏与残留清理、全 API 维护及 accepted marker 边界、持久化回环防火墙、单次 replay 门禁、可恢复回滚与安全覆盖 journal、数据库/缓存账本一致性、保留策略及登录态浏览器/无障碍证据仍为阻塞项。
+The Phase 4 controls are implemented. Production cutover remains blocked until the current v0.6 candidate completes full non-browser regression, independent code/security/QA review, clean authoritative-checkout preflight, verified backup, GitHub synchronization, guarded deployment, and remote runtime/API/UI/access/rollback acceptance. / 第 4 阶段控制项已实现；当前 v0.6 候选仍须完成全量非浏览器回归、独立代码/安全/QA 复审、权威干净工作区预检、可校验备份、GitHub 同步、受控部署，以及远端运行时/API/UI/权限/回滚验收后，才允许生产切换。
 
 ## Release Evidence / 发布证据
 

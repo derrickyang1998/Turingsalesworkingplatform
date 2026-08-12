@@ -10,6 +10,7 @@ const migrationService = require('../services/migration_service');
 const sqliteDigest = require('../services/sqlite_digest_service');
 const knowledgeService = require('../services/knowledge_service');
 const campaignWorkflowService = require('../services/campaign_workflow_service');
+const { CUSTOMER_LIFECYCLE_REGISTRY, buildCustomerIdentity } = require('../services/crm_contract');
 
 const MANIFEST_VERSION = 'tm-sanitization-manifest-v1';
 const REPORT_VERSION = 'tm-sanitization-report-v1';
@@ -44,6 +45,13 @@ const EXACT_PROFILE_MIGRATIONS = Object.freeze([
     version: 5,
     name: '005_knowledge_custody_projection',
     sourcePath: 'migrations/005_knowledge_custody_projection.js',
+    engineVersion: 1,
+    dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
+  }),
+  Object.freeze({
+    version: 6,
+    name: '006_crm_sales_workspace',
+    sourcePath: 'migrations/006_crm_sales_workspace.js',
     engineVersion: 1,
     dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
   })
@@ -167,6 +175,8 @@ const DERIVED_REBUILDS = Object.freeze([
   'knowledge_current_custody',
   'knowledge_unlinked_user_usage',
   'knowledge_capacity_gauges',
+  'customers.normalized_identity_key',
+  'customers.duplicate_enforced',
   'knowledge_chunks_fts'
 ]);
 const V1_DERIVED_REBUILDS = Object.freeze([
@@ -213,7 +223,7 @@ function freezeStructuralColumnPolicy(definition) {
 
 const CUSTOMER_STAGES = Object.freeze([
   'lead', 'qualified', 'info_confirmed', 'advantage_shared', 'needs_confirmed', 'analysis',
-  'proposal', 'kol_matching', 'cooperation', 'paused', 'won', 'lost'
+  'proposal', 'kol_matching', 'cooperation', 'negotiation', 'maintenance', 'paused', 'won', 'lost'
 ]);
 const CAMPAIGN_LIFECYCLE_STATES = Object.freeze([
   'lead', 'qualified', 'demand_confirmed', 'proposal_draft', 'proposal_confirmed',
@@ -261,15 +271,21 @@ const STRUCTURAL_COLUMN_POLICY = freezeStructuralColumnPolicy({
     'campaign_workflow_dispatches.reconciles_dispatch_id', 'campaigns.id', 'campaigns.org_id', 'campaigns.customer_id',
     'campaigns.opportunity_id', 'campaigns.owner_user_id', 'campaigns.team_id', 'campaigns.row_version',
     'collaborations.id', 'collaborations.demand_id', 'collaborations.influencer_id', 'collaborations.user_id',
-    'collaborations.row_version', 'collaborations.cost_actual_confirmed', 'customer_activity.id', 'customer_activity.customer_id',
-    'customer_activity.user_id', 'customers.id', 'customers.created_by', 'customers.assigned_to',
+    'collaborations.row_version', 'collaborations.cost_actual_confirmed', 'crm_audit_events.id', 'crm_audit_events.org_id',
+    'crm_audit_events.customer_id', 'crm_audit_events.opportunity_id', 'crm_audit_events.task_id', 'crm_audit_events.contact_id',
+    'crm_audit_events.actor_user_id', 'crm_tasks.id', 'crm_tasks.org_id', 'crm_tasks.team_id',
+    'crm_tasks.customer_id', 'crm_tasks.opportunity_id', 'crm_tasks.owner_user_id', 'crm_tasks.completed_by', 'crm_tasks.created_by',
+    'customer_activity.id', 'customer_activity.customer_id', 'customer_activity.user_id', 'customer_contacts.id',
+    'customer_contacts.org_id', 'customer_contacts.customer_id', 'customer_contacts.is_preferred', 'customer_contacts.created_by',
+    'customers.id', 'customers.created_by', 'customers.assigned_to', 'customers.org_id', 'customers.team_id',
     'customers.is_public', 'demands.id', 'demands.user_id', 'influencers.id',
     'influencers.is_active', 'influencers.is_duplicate', 'knowledge_capacity_gauges.scope_id', 'knowledge_chunks.id',
     'knowledge_chunks.entry_id', 'knowledge_chunks.chunk_index', 'knowledge_current_custody.knowledge_entry_id', 'knowledge_current_custody.link_id',
     'knowledge_current_custody.org_id', 'knowledge_current_custody.campaign_id', 'knowledge_entries.id', 'knowledge_entries.created_by',
     'knowledge_entries.is_public', 'knowledge_entry_footprints.knowledge_entry_id', 'knowledge_entry_footprints.created_by', 'knowledge_unlinked_user_usage.user_id',
     'leads.id', 'leads.assigned_to', 'leads.converted_customer_id', 'opportunities.id',
-    'opportunities.customer_id', 'opportunities.created_by', 'organization_memberships.org_id', 'organization_memberships.user_id',
+    'opportunities.customer_id', 'opportunities.created_by', 'opportunities.org_id', 'opportunities.team_id',
+    'opportunities.owner_user_id', 'opportunities.campaign_id', 'organization_memberships.org_id', 'organization_memberships.user_id',
     'organizations.id', 'proposals.id', 'proposals.user_id', 'proposals.demand_id',
     'request_idempotency.id', 'request_idempotency.org_id', 'request_idempotency.user_id', 'request_idempotency.campaign_id',
     'request_idempotency.secondary_campaign_id', 'request_idempotency.expected_event_count', 'request_idempotency.status_code', 'sales_targets.id',
@@ -289,12 +305,16 @@ const STRUCTURAL_COLUMN_POLICY = freezeStructuralColumnPolicy({
     'ai_messages.created_at', 'ai_references.created_at', 'brands.created_at', 'campaign_events.created_at',
     'campaign_record_links.created_at', 'campaign_record_links.revoked_at', 'campaign_workflow_dispatches.lease_until', 'campaign_workflow_dispatches.next_attempt_at',
     'campaign_workflow_dispatches.created_at', 'campaign_workflow_dispatches.updated_at', 'campaigns.created_at', 'campaigns.updated_at',
-    'collaborations.created_at', 'collaborations.updated_at', 'customer_activity.created_at', 'customers.created_at',
+    'collaborations.created_at', 'collaborations.updated_at', 'crm_audit_events.occurred_at', 'crm_tasks.due_at',
+    'crm_tasks.completed_at', 'crm_tasks.created_at', 'crm_tasks.updated_at', 'customer_activity.created_at',
+    'customer_contacts.created_at', 'customer_contacts.updated_at', 'customer_contacts.archived_at', 'customers.created_at',
     'customers.updated_at', 'customers.assigned_at', 'customers.last_followup', 'customers.claim_deadline',
+    'customers.next_action_at', 'customers.stalled_at',
     'demands.created_at', 'demands.updated_at', 'influencers.created_at', 'influencers.updated_at',
     'knowledge_capacity_gauges.updated_at', 'knowledge_chunks.created_at', 'knowledge_current_custody.updated_at', 'knowledge_entries.created_at',
     'knowledge_entries.updated_at', 'knowledge_entry_footprints.updated_at', 'knowledge_unlinked_user_usage.updated_at', 'leads.created_at',
     'leads.updated_at', 'opportunities.expected_close_date', 'opportunities.created_at', 'opportunities.updated_at',
+    'opportunities.next_action_at', 'opportunities.closed_at',
     'organization_memberships.created_at', 'organization_memberships.revoked_at', 'organizations.created_at', 'proposals.created_at',
     'request_idempotency.lease_until', 'request_idempotency.created_at', 'request_idempotency.updated_at', 'request_idempotency.operation_deadline',
     'request_idempotency.expires_at', 'sales_targets.created_at', 'schema_migrations.applied_at', 'sessions.created_at',
@@ -343,6 +363,18 @@ const STRUCTURAL_COLUMN_POLICY = freezeStructuralColumnPolicy({
       'proposed', 'contacted', 'negotiating', 'confirmed', 'contract_sent',
       'live', 'content_review', 'completed', 'cancelled'
     ]),
+    'crm_audit_events.event_type': Object.freeze([
+      'crm_backfill_quarantined', 'crm_legacy_stage_unclassified', 'crm_legacy_duplicate_collision',
+      'duplicate_detected', 'customer_created', 'customer_updated', 'customer_stage_changed',
+      'opportunity_created', 'opportunity_updated', 'opportunity_stage_changed',
+      'contact_created', 'contact_updated', 'contact_archived',
+      'task_created', 'task_completed', 'task_cancelled',
+      'customer_result_archived', 'customer_activity_recorded', 'mutation_denied',
+      'customer_released_to_pool', 'customer_claimed', 'customer_transferred',
+      'customer_custody_repaired'
+    ]),
+    'crm_tasks.status': Object.freeze(['open', 'completed', 'cancelled']),
+    'crm_tasks.source': Object.freeze(['manual', 'stage_transition', 'reminder']),
     'customer_activity.stage_from': CUSTOMER_STAGES,
     'customer_activity.stage_to': CUSTOMER_STAGES,
     'customers.stage': CUSTOMER_STAGES,
@@ -352,7 +384,7 @@ const STRUCTURAL_COLUMN_POLICY = freezeStructuralColumnPolicy({
     'knowledge_current_custody.custody_state': Object.freeze(['active', 'revoke_only']),
     'knowledge_entries.visibility': Object.freeze(['private', 'team', 'public', 'shared']),
     'leads.status': Object.freeze(['new', 'contacted', 'qualified', 'converted', 'lost']),
-    'opportunities.stage': Object.freeze(['discovery', 'proposal', 'negotiation', 'won', 'lost']),
+    'opportunities.stage': Object.freeze(['discovery', 'qualification', 'proposal', 'negotiation', 'won', 'lost']),
     'organization_memberships.role_code': Object.freeze(['org_admin', 'member']),
     'organization_memberships.status': Object.freeze(['active', 'revoked']),
     'request_idempotency.scope': REQUEST_IDEMPOTENCY_SCOPES,
@@ -380,21 +412,24 @@ const STRUCTURAL_COLUMN_POLICY = freezeStructuralColumnPolicy({
       '002_campaign_business_spine',
       '003_campaign_workflow_dispatch_evidence',
       '004_knowledge_capacity_observability',
-      '005_knowledge_custody_projection'
+      '005_knowledge_custody_projection',
+      '006_crm_sales_workspace'
     ]),
     'schema_migrations.checksum': Object.freeze([
       'c2df6a8da2554f871dc07370f5409f58d2bc1874597928c3bbd273ecb6cb0741',
       '60c6d3cf2b06666eb6325ad2c7902bda9a2ed1756a84586a4ee0100e39f40c88',
       '534a5eab8fd9581c3584128d9d69564cf85bd802cd24038a5ef8c5aea3d3ba56',
       '8beda613d3a8b8ea2604bd4a1b5ae72df2db56ec813987c05de9de18fc0b6e92',
-      '2c8978c77a56cd068d9fc7b7eaa1ae986402900f5d5e9d2d883288c3421342b2'
+      '2c8978c77a56cd068d9fc7b7eaa1ae986402900f5d5e9d2d883288c3421342b2',
+      'f51697d1af1b5d49b793b34ab9c67b6b4823a826cbdcad7dd606063519a13418'
     ]),
     'schema_migrations.source_path': Object.freeze([
       'migrations/001_legacy_compat_columns.js',
       'migrations/002_campaign_business_spine.js',
       'migrations/003_campaign_workflow_dispatch_evidence.js',
       'migrations/004_knowledge_capacity_observability.js',
-      'migrations/005_knowledge_custody_projection.js'
+      'migrations/005_knowledge_custody_projection.js',
+      'migrations/006_crm_sales_workspace.js'
     ])
   })
 });
@@ -499,7 +534,8 @@ const DIGEST_NAMES = new Set([
 const DERIVED_NAMES = new Set([
   'usage_count', 'uses', 'attempt_count', 'chunk_count', 'entry_payload_bytes',
   'chunk_payload_bytes', 'entries', 'chunks', 'payload_bytes', 'unscoped_references',
-  'usage_value', 'limit_value', 'threshold_percent', 'token_count'
+  'usage_value', 'limit_value', 'threshold_percent', 'token_count',
+  'normalized_identity_key', 'duplicate_enforced'
 ]);
 
 const SENSITIVE_NUMERIC = /(?:budget|cost|price|value|revenue|followers|views|engagement|rating|volume|posts|score|probability|quota|tokens|cpm|cpv|max_uses)$/;
@@ -709,6 +745,10 @@ function createReplacementDomain(db, manifest) {
   const booleanReplacements = new Map();
   return Object.freeze({
     sourceKeys,
+    isUnavailable(value, storageType) {
+      const key = logicalValueKey(value, storageType);
+      return sourceKeys.has(key) || assignedKeys.has(key);
+    },
     reserveBoolean(original, context) {
       const mappingKey = original ? 'true' : 'false';
       if (booleanReplacements.has(mappingKey)) return booleanReplacements.get(mappingKey);
@@ -835,7 +875,7 @@ function profileContractForVersion(schemaVersion) {
       preservedAccounting: V1_PRESERVED_ACCOUNTING
     });
   }
-  if (schemaVersion === 5) {
+  if (schemaVersion === 6) {
     return Object.freeze({
       semanticPolicies: SEMANTIC_POLICIES,
       equalityGroups: EQUALITY_GROUPS,
@@ -864,7 +904,7 @@ function assertManifestDocumentShape(manifest) {
     throw new Error('malformed sanitization manifest header');
   }
   if (!Array.isArray(manifest.exactProfiles) || manifest.exactProfiles.length !== 1) {
-    throw new Error('sanitization manifest must contain one isolated exact v5 profile');
+    throw new Error('sanitization manifest must contain one isolated exact v6 profile');
   }
   const compatibilityProfile = manifest.exactProfiles[0];
   const profileKeys = [
@@ -873,7 +913,7 @@ function assertManifestDocumentShape(manifest) {
   ];
   if (
     !exactObjectKeys(compatibilityProfile, profileKeys)
-    || compatibilityProfile.schemaVersion !== 5
+    || compatibilityProfile.schemaVersion !== 6
   ) {
     throw new Error('malformed isolated exact sanitization manifest profile');
   }
@@ -907,12 +947,12 @@ function exactProfileClassification(db) {
   });
   if (
     classification.status !== 'managed'
-    || ![1, 5].includes(classification.currentVersion)
+    || ![1, 6].includes(classification.currentVersion)
   ) {
     const observed = classification.currentVersion === undefined || classification.currentVersion === null
       ? classification.status
       : classification.currentVersion;
-    throw new Error(`sanitization source must be an exact managed version 1 or version 5 profile; got ${observed}`);
+    throw new Error(`sanitization source must be an exact managed version 1 or version 6 profile; got ${observed}`);
   }
   return classification;
 }
@@ -3707,7 +3747,22 @@ function rankMapFor(db, table, column, replacementDomain) {
   for (const [storageType, values] of byType) {
     const sourceKeys = new Set(values.map((row) => valueStorageKey(storageType, row.value)));
     const replacementKeys = new Set();
-    let integerCandidate = replacementDomain ? 8_000_000_000_000_000 : 1;
+    const probabilityDomain = column === 'win_probability'
+      && (table === 'customers' || table === 'opportunities');
+    if (probabilityDomain && storageType !== 'integer') {
+      throw new Error(`${table}.${column} probability values must use integer storage`);
+    }
+    const availableProbabilityValues = probabilityDomain && replacementDomain
+      ? Array.from({ length: 101 }, (_value, index) => index)
+        .filter((value) => !replacementDomain.isUnavailable(value, 'integer'))
+      : null;
+    if (probabilityDomain && (
+      values.length > 101
+      || (availableProbabilityValues && availableProbabilityValues.length < values.length)
+    )) {
+      throw new Error(`${table}.${column} probability replacement domain is exhausted`);
+    }
+    let integerCandidate = probabilityDomain ? 0 : replacementDomain ? 8_000_000_000_000_000 : 1;
     let realNumerator = 1;
     const realDenominator = Math.max(1_000_003, values.length + 1);
     values.forEach((row, index) => {
@@ -3722,6 +3777,13 @@ function rankMapFor(db, table, column, replacementDomain) {
             (attempt) => (realNumerator + attempt) / realDenominator
           );
           realNumerator = Math.round(replacement * realDenominator) + 1;
+        } else if (probabilityDomain) {
+          replacement = reserveTypedReplacement(
+            replacementDomain,
+            mappingKey,
+            'integer',
+            (attempt) => availableProbabilityValues[attempt]
+          );
         } else {
           replacement = reserveTypedReplacement(
             replacementDomain,
@@ -4013,8 +4075,63 @@ function rebuildManagedV1DerivedData(db) {
   `);
 }
 
+function rebuildCrmDerivedData(db) {
+  const rebuild = db.transaction(() => {
+    const customers = db.prepare(`
+      SELECT id,org_id,brand_name,company_name,stage,normalized_identity_key
+      FROM customers ORDER BY id
+    `).all().map((row) => {
+      const identityKey = row.normalized_identity_key === null
+        ? null
+        : buildCustomerIdentity({
+            brand_name: row.brand_name,
+            company_name: row.company_name
+          }).key;
+      const lifecycle = CUSTOMER_LIFECYCLE_REGISTRY[row.stage];
+      const enforceable = identityKey !== null
+        && lifecycle?.class === 'active'
+        && Number.isSafeInteger(row.org_id)
+        && row.org_id > 0;
+      return {
+        id: row.id,
+        identityKey,
+        enforceable,
+        scopeKey: enforceable ? `${row.org_id}\0${identityKey}` : null
+      };
+    });
+    const activeIdentityCounts = new Map();
+    for (const customer of customers) {
+      if (!customer.enforceable) continue;
+      activeIdentityCounts.set(
+        customer.scopeKey,
+        (activeIdentityCounts.get(customer.scopeKey) || 0) + 1
+      );
+    }
+
+    db.prepare('UPDATE customers SET duplicate_enforced=0').run();
+    const updateIdentity = db.prepare(`
+      UPDATE customers SET normalized_identity_key=? WHERE id=?
+    `);
+    for (const customer of customers) {
+      if (updateIdentity.run(customer.identityKey, customer.id).changes !== 1) {
+        throw new Error(`CRM identity rebuild missed customer ${customer.id}`);
+      }
+    }
+    const enableDuplicateEnforcement = db.prepare(`
+      UPDATE customers SET duplicate_enforced=1 WHERE id=?
+    `);
+    for (const customer of customers) {
+      if (!customer.enforceable || activeIdentityCounts.get(customer.scopeKey) !== 1) continue;
+      if (enableDuplicateEnforcement.run(customer.id).changes !== 1) {
+        throw new Error(`CRM duplicate enforcement rebuild missed customer ${customer.id}`);
+      }
+    }
+  });
+  rebuild.immediate();
+}
+
 function rebuildDerivedData(db, manifest) {
-  if (![1, 5].includes(manifest.schemaVersion)) {
+  if (![1, 6].includes(manifest.schemaVersion)) {
     throw new Error(`unsupported derived rebuild profile ${manifest.schemaVersion}`);
   }
   const hasKnowledge = db.prepare("SELECT 1 AS present FROM sqlite_schema WHERE type='table' AND name='knowledge_entries'").get();
@@ -4082,6 +4199,7 @@ function rebuildDerivedData(db, manifest) {
     const rebuild = db.transaction(() => rebuildKnowledgeProjections(db));
     rebuild.immediate();
   }
+  if (manifest.schemaVersion === 6) rebuildCrmDerivedData(db);
   rebuildCampaignWorkflowDispatchEvidence(db);
   sqliteDigest.rebuildKnowledgeChunksFts(db);
   sqliteDigest.verifyKnowledgeChunksFtsIntegrity(db, FTS_MANIFEST, { checkMainIntegrity: true });
@@ -4206,7 +4324,7 @@ function collectForbiddenValues(db, manifest, options = {}) {
     for (const column of object.columns) {
       if (column.classification === 'secret-null') continue;
       const secretColumn = column.classification === 'secret-synthetic';
-      const semanticAuthorization = manifest.schemaVersion === 5
+      const semanticAuthorization = manifest.schemaVersion === 6
         && object.name === 'ai_references' && column.name === 'reference_id'
         ? `CASE WHEN (
           reference_schema_version=1

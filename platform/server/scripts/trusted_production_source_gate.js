@@ -19,6 +19,7 @@ const REQUIRED_BUNDLE_FILES = Object.freeze([
   'server/migrations/003_campaign_workflow_dispatch_evidence.js',
   'server/migrations/004_knowledge_capacity_observability.js',
   'server/migrations/005_knowledge_custody_projection.js',
+  'server/migrations/006_crm_sales_workspace.js',
   'server/migrations/baselines/legacy_v1.js',
   'server/migrations/engines/v1.js',
   'server/migrations/vendor/bcryptjs_v3_0_3.js',
@@ -30,6 +31,10 @@ const REQUIRED_BUNDLE_FILES = Object.freeze([
   'server/services/campaign_access_service.js',
   'server/services/campaign_workflow_service.js',
   'server/services/crm_access_service.js',
+  'server/services/crm_contract.js',
+  'server/services/crm_customer_service.js',
+  'server/services/crm_query_service.js',
+  'server/services/crm_scope_service.js',
   'server/services/idempotency_service.js',
   'server/services/knowledge_service.js',
   'server/services/migration_service.js',
@@ -45,7 +50,7 @@ const EXPECTED_ENTRYPOINTS = Object.freeze({
 
 const EXPECTED_MIGRATION_CONTRACT = Object.freeze({
   sourceVersion: 1,
-  targetVersion: 5,
+  targetVersion: 6,
   runs: 2,
   deterministicAppendTables: Object.freeze(['activity_log'])
 });
@@ -121,7 +126,7 @@ function loadTrustedManifest(manifestPath) {
   assertPlainObject(document.migrationContract, 'trusted migration contract');
   assertExactKeys(document.migrationContract, Object.keys(EXPECTED_MIGRATION_CONTRACT), 'trusted migration contract');
   if (JSON.stringify(document.migrationContract) !== JSON.stringify(EXPECTED_MIGRATION_CONTRACT)) {
-    throw new Error('trusted v1-to-v5 migration contract is not exact');
+    throw new Error('trusted v1-to-v6 migration contract is not exact');
   }
 
   if (!Array.isArray(document.files)) throw new Error('trusted production source files must be an array');
@@ -823,7 +828,7 @@ function runTrustedMigrationVerification({ manifest, verified, sanitizedPath, wo
     !Number.isSafeInteger(report.legacyTableCount) || report.legacyTableCount < 1 ||
     !Number.isSafeInteger(report.legacyRowCount) || report.legacyRowCount < 1
   ) {
-    throw new Error('trusted v1-to-v5 migration preservation verdict is incomplete');
+    throw new Error('trusted v1-to-v6 migration preservation verdict is incomplete');
   }
   assertDigestReport(report.preMigration, 'pre-migration');
   assertDigestReport(report.postMigration, 'post-migration');

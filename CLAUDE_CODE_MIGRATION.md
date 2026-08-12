@@ -1,12 +1,12 @@
 # TuringMarket Engineering Handoff / 图灵商务平台工程交接
 
-Updated / 更新日期：2026-07-29
+Updated / 更新日期：2026-08-11
 
 ## Authoritative Baseline / 权威基线
 
 - Checkout / 工作区：`C:\Users\29272\Documents\在线商务平台-github-sync`
 - Current production delivery branch / 当前生产交付分支：`codex/v0.4.0-product-shell-and-design-system`
-- Guarded Phase 4 release branch / 第 4 阶段受控发布分支：`codex/v0.5.0-campaign-business-spine`
+- Guarded Phase 5 release branch / 第 5 阶段受控发布分支：`codex/v0.6.0-crm-sales-workspace`
 - Phase 4 development base / 第 4 阶段开发基线：`5960ade03e1bd605ee4bfbe877baa09bc6482083`
 - Current production source / 当前生产源码：`7511b6395a599a4f683cd60d6366e957c48ae302` (`v0.4.0-product-shell-and-design-system`)
 - Backend / 后端：Node.js 20 + Express 5
@@ -17,7 +17,15 @@ Updated / 更新日期：2026-07-29
 
 This checkout consolidates the latest CRM, AI conversation, knowledge base, influencer workflow, Feishu, proposal, export, and PPT capabilities without reverting the latest interface. / 该工作区整合最新 CRM、AI 对话、知识库、网红执行、飞书、方案、导出与 PPT 能力，不回退最新界面。
 
-`v0.5.0-campaign-business-spine` is now wired into the guarded deployment source and destructive-restore contract, but it MUST NOT be cut over or described as the production baseline until every remaining Task 9 and Task 10 gate below is implemented and independently accepted. / `v0.5.0-campaign-business-spine` 已接入受控发布源与破坏性恢复契约，但在下列 Task 9 与 Task 10 剩余门禁全部实现并独立验收前，仍不得切换或称为生产基线。
+`v0.6.0-crm-sales-workspace` contains the accepted Phase 5 CRM implementation and the upgraded schema-6 release contract. It MUST NOT be described as production until independent release review, GitHub push, verified backup, guarded deployment, remote runtime/API/UI/access acceptance, and rollback evidence all pass. / `v0.6.0-crm-sales-workspace` 已包含通过验收的第 5 阶段 CRM 实现及 schema-6 发布合同；独立发布复审、GitHub 推送、可校验备份、受控部署、远端运行时/API/UI/权限验收与回滚证据全部通过前，不得称为生产版本。
+
+## Phase 5 CRM Checkpoint / 第 5 阶段 CRM 检查点
+
+- Accepted implementation / 已验收实现：commit `90713b23f417602045d144ca24e80555ff1580b2`, Code Review `APPROVE`, QA `GO`.
+- Verification / 验证：342/342 final review matrix, 373/373 fresh pre-commit matrix, six critical JavaScript syntax checks, secret and hard-delete addition audits clean.
+- Recovery / 恢复：`phase5-v060-90713b23f417-full-source.bundle`, SHA-256 `fd4b925d82056d1eb53a5c65cc67461bc3eadd9ba88f47020ed37343d5dae887`, complete history verified.
+- Data contract / 数据契约：migration `006_crm_sales_workspace`; trusted migration flow is exact v1-to-v6 with two restored runs; trusted source pins migration 006 and the CRM contract, command, query, and scope services.
+- Product boundary / 产品边界：customer dashboard and customer detail stay separate; the latest shell, M4, AI/knowledge, proposal, export, Feishu, and frozen PPT paths are retained.
 
 ## Phase 4 Contract Checkpoint / 第 4 阶段契约检查点
 
@@ -31,8 +39,8 @@ This checkout consolidates the latest CRM, AI conversation, knowledge base, infl
 ## UI And PPT Lock / UI 与 PPT 锁定
 
 ```text
-App build: 20260714-v040-product-shell-design-system
-App query: 20260714v040productshelldesignsystem
+App build: 20260811-v060-crm-sales-workspace
+App query: 20260811v060crmsalesworkspace
 PPT build: 20260702-v916-kb-bridge-client-cn
 PPT query: 20260702v916kbbridge
 PPT SHA-256: f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e
@@ -44,12 +52,14 @@ Approved public modules / 获批公开模块：
 - `/client/shared/build_info.js`
 - `/client/core/navigation.js`
 - `/client/core/accessibility.js`
+- `/client/core/csp_compat.js`
 - `/client/core/shell.js`
+- `/client/features/ppt_preview_runtime.js`
 - `/client/styles/tokens.css`
 - `/client/styles/components.css`
 - `/client/styles/layout.css`
 
-Phase 4 plans five additional exact public files—`/client/features/campaign_context.js`, `/client/features/campaign_workspace.js`, `/client/features/campaign_ppt_bridge.js`, `/client/core/csp_compat.js`, and `/client/features/ppt_preview_runtime.js`—plus the `/campaigns` SPA path. They are not part of the current v0.4 production allowlist and become public only after matching Express, Nginx, build/deployment-manifest, source-boundary, CSP/frozen-PPT, and route-smoke gates land together. Wildcard `/client/features/*` and `/client/core/*` access remains forbidden. / 第 4 阶段计划增加五个精确公开文件及 `/campaigns` SPA 路径；它们当前不属于 v0.4 生产白名单，只有 Express、Nginx、构建/发布清单、源码边界、CSP/冻结 PPT 与路由冒烟门禁同步落地后方可公开，仍禁止通配公开 `/client/features/*` 与 `/client/core/*`。
+The v0.6 candidate additionally publishes the exact campaign modules `/client/features/campaign_context.js`, `/client/features/campaign_workspace.js`, and `/client/features/campaign_ppt_bridge.js`, plus the `/campaigns` SPA path. The current production-v0.4 allowlist remains unchanged until guarded cutover; wildcard `/client/features/*` and `/client/core/*` access remains forbidden in both versions. / v0.6 候选还精确公开三个活动模块及 `/campaigns` SPA 路径；受控切换前，当前生产 v0.4 白名单保持不变，两个版本均禁止通配公开 `/client/features/*` 与 `/client/core/*`。
 
 All other `/client/*` requests and private paths including `/server/server.js` remain denied. The `0.005` pixel-ratio threshold applies only to frozen repeat-capture determinism. The intentional shared-shell redesign uses a separate mandatory reviewed comparison; its approved maximum observed perceptual difference ratio is `0.14496597399441002`. / 其他 `/client/*` 与 `/server/server.js` 等私有路径继续拒绝访问；`0.005` 像素差异阈值仅用于冻结基线的重复截图确定性校验。经批准的共享壳层改版使用独立的强制人工审查对比，其最大感知差异比为 `0.14496597399441002`。
 
@@ -80,13 +90,13 @@ Before the first v0.3.0 deployment, run `platform/server/scripts/bootstrap_produ
 
 The bootstrap persists its migration phase under `/var/lib/turingmarket-bootstrap/active` before stopping PM2. It captures the rollback database through the SQLite Backup API only after writers stop, handles `ERR`, `INT`, `TERM`, and `HUP`, and on a later rerun first restores or finalizes an interrupted migration. A restored database must pass `quick_check` before PM2 can restart. The bootstrap and every guarded deploy independently reject gate-account UID, primary/supplementary-group, credential-lock, home, or shell drift. / 引导脚本会在停止 PM2 前把迁移阶段持久化到 root-only journal；停服后才通过 SQLite Backup API 生成回滚数据库。脚本处理错误与常见终止信号，进程或主机中断后再次执行时会先恢复或完成已提交迁移；恢复数据库必须通过 `quick_check` 才能重启。引导和每次发布都会独立拒绝门禁账号的 UID、主组、补充组、凭据锁定、home 或 shell 漂移。
 
-The ASCII-safe script runs under Windows PowerShell 5.1 and normalizes CRLF/CR to LF before no-BOM UTF-8 transport to remote Bash; local preflight executes that exact conversion check. Production deployment still requires the exact authoritative checkout, the exact v0.5 branch, and a clean tracked worktree. It creates `backups/v050-campaign-business-spine-<timestamp>`, binds the `better-sqlite3` copy and private `PPT_CACHE_DIR=/var/lib/turingmarket/ppt-cache` tree into nested plus aggregate checksum manifests, and uploads only into an isolated release candidate. / ASCII 安全脚本兼容 Windows PowerShell 5.1；正式发布继续要求精确权威工作区、精确 v0.5 分支及干净工作树，并把数据库与私有 PPT 缓存绑定为同一验签备份单元。
+The ASCII-safe script runs under Windows PowerShell 5.1 and normalizes CRLF/CR to LF before no-BOM UTF-8 transport to remote Bash; local preflight executes that exact conversion check. Production deployment requires the exact authoritative checkout, the exact v0.6 branch, and a clean tracked worktree. It creates `backups/v060-crm-sales-workspace-<timestamp>`, binds the `better-sqlite3` copy and private `PPT_CACHE_DIR=/var/lib/turingmarket/ppt-cache` tree into nested plus aggregate checksum manifests, and uploads only into an isolated release candidate. / ASCII 安全脚本兼容 Windows PowerShell 5.1；正式发布要求精确权威工作区、精确 v0.6 分支及干净工作树，并把数据库与私有 PPT 缓存绑定为同一验签备份单元。
 
 Remote Node verification includes / 远端 Node 验证包含：
 
 ```bash
 cd server
-NODE_ENV=test TM_DISABLE_DOTENV=1 DB_PATH=/var/lib/turingmarket-gate/releases/<release>/tmp/deploy-v050-gate-<timestamp>/test.db node --test --test-concurrency=1 tests/*.test.js
+NODE_ENV=test TM_DISABLE_DOTENV=1 DB_PATH=/var/lib/turingmarket-gate/releases/<release>/tmp/deploy-v060-gate-<timestamp>/test.db node --test --test-concurrency=1 tests/*.test.js
 ```
 
 The candidate lives under `/var/lib/turingmarket-gate/releases`. Trusted active-runtime code first rebuilds a non-secret v4 fixture from the checksummed production schema and copies only the migration ledger. Candidate migration code never runs as root and never receives the production database: it runs as `turingmarket-gate` in a bounded systemd cgroup with private network/PID/mount namespaces, read-only paths, production-state denial, resource limits, and root-only output. Trusted active-runtime code then verifies preserved business tables, exact user security fields, organization/team/campaign rows, rerun idempotence, and unchanged production-backup plus PPT-manifest hashes before the existing Node, Playwright, and Nginx gates. / 可信活动运行时先根据已验签生产结构重建不含真实数据的 v4 合成副本，并且只复制迁移账本。候选迁移代码不再以 root 运行，也不会取得生产数据库；它以门禁用户在受限 systemd cgroup 中运行，使用独立网络、PID 与挂载命名空间、只读路径、生产状态拒绝、资源上限及仅 root 可读输出。随后由可信活动运行时核对保留业务表、用户安全字段、组织/团队/项目数据、重复迁移幂等性，以及生产备份与 PPT 清单哈希不变，再进入 Node、Playwright 与 Nginx 门禁。
@@ -96,12 +106,12 @@ A rejected candidate is deleted without stopping active PM2. The current lifecyc
 Manual rollback / 手工回滚：
 
 ```powershell
-.\platform\deploy_v8.ps1 -RollbackBackup backups/v050-campaign-business-spine-<timestamp> -RestoreDatabase -ConfirmDataLoss
+.\platform\deploy_v8.ps1 -RollbackBackup backups/v060-crm-sales-workspace-<timestamp> -RestoreDatabase -ConfirmDataLoss
 ```
 
 The same restore function is used by automatic and manual rollback. Phase 4 rejects code-only rollback: manual restore requires `-RollbackBackup`, `-RestoreDatabase`, and `-ConfirmDataLoss`; automatic post-mutation recovery always selects the same database/cache path. Every manifest is verified, SQLite and `PPT_CACHE_DIR` are restored as one unit, stale SQLite sidecars are removed, and every session is deleted before PM2 starts with `SERVER_HOST=127.0.0.1`. `-PreserveSessions` is always rejected. / 自动与手工回滚共用同一数据库与缓存恢复函数；手工恢复必须显式提供备份、恢复数据库及确认数据丢失，且始终在 PM2 启动前撤销全部会话。
 
-This acceleration slice does not close Task 9. Remaining blockers are the exhaustive sanitizer and stale-run cleanup; all-API maintenance and the accepted-marker irreversible boundary; persistent loopback firewall/listener proof; the one-request replay helper and bypass-removal proof; the resumable rollback journal and matching-user security overlay including `department`; WAL-quiesced DB/cache ledger parity; retention cleanup; and authenticated browser/accessibility acceptance. Production therefore remains on the verified v0.4 source. / 本次加速切片未关闭 Task 9；完整脱敏与残留清理、维护与 accepted marker 边界、回环防火墙、单次 replay、可恢复 journal 与安全覆盖、WAL 停写及数据库/缓存账本一致性、保留清理和登录态浏览器/无障碍验收仍为阻塞项，生产继续保持已验证的 v0.4。
+The v0.6 candidate is not production yet. Remaining serial gates are the complete local release matrix, independent Code Review/AppSec/QA, GitHub synchronization, verified production backup, guarded cutover, remote runtime/API/UI/access acceptance, rollback rehearsal, and final version/Obsidian evidence sync. Production therefore remains on the verified v0.4 source. / v0.6 当前仍是候选；剩余串行门禁包括完整本地发布矩阵、独立 Code Review/AppSec/QA、GitHub 同步、生产可校验备份、受控切换、远端运行时/API/UI/权限验收、回滚演练及最终版本/Obsidian 证据同步，因此生产继续保持已验证的 v0.4。
 
 ## Security And Secrets / 安全与密钥
 

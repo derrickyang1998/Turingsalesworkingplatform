@@ -1,4 +1,4 @@
-# TuringMarket v0.5.0 guarded production deploy and rollback.
+# TuringMarket v0.6.0 guarded production deploy and rollback.
 
 param(
     [switch]$PreserveSessions,
@@ -23,17 +23,17 @@ $LOCAL_DIR = Split-Path -Parent $MyInvocation.MyCommand.Path
 $REPO_DIR = Split-Path -Parent $LOCAL_DIR
 $EXPECTED_REPO_DIR_B64 = "QzpcVXNlcnNcMjkyNzJcRG9jdW1lbnRzXOWcqOe6v+WVhuWKoeW5s+WPsC1naXRodWItc3luYw=="
 $EXPECTED_REPO_DIR = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($EXPECTED_REPO_DIR_B64))
-$EXPECTED_BRANCH = "codex/v0.5.0-campaign-business-spine"
-$EXPECTED_APP_BUILD = "20260714-v040-product-shell-design-system"
-$EXPECTED_APP_QUERY = "20260714v040productshelldesignsystem"
+$EXPECTED_BRANCH = "codex/v0.6.0-crm-sales-workspace"
+$EXPECTED_APP_BUILD = "20260811-v060-crm-sales-workspace"
+$EXPECTED_APP_QUERY = "20260811v060crmsalesworkspace"
 $EXPECTED_PPT_BUILD = "20260702-v916-kb-bridge-client-cn"
 $EXPECTED_PPT_QUERY = "20260702v916kbbridge"
 $EXPECTED_PPT_SHA256 = "f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e"
 $TRUSTED_SOURCE_GATE_RELATIVE_PATH = "server\scripts\trusted_production_source_gate.js"
 $TRUSTED_SOURCE_MANIFEST_RELATIVE_PATH = "server\scripts\trusted_production_source_manifest.json"
-$EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "4428922015dc20add3bf733ffecd40cc97904042e8229cc7b54defb6272a1749"
-$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "761b594fc924450b209a40e782b2c9969a348d23229da2366416ef3ed8e25770"
-$EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256 = "23df91c4b07879f02b1848f745f9a852b1d2326766f13edfdb7e3e0b61df6227"
+$EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "95f48c6afcf931a75d2086e6aefdbc782f5b108f711d3e052c319e2fe53df24e"
+$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "afd683d0a34361a62305540eb2f16cc0197cb98a269f55ce9c46c3502b5ac8dc"
+$EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256 = "bdc60e6a9da601c8c65cd2a374d8cb69eeea629fa6cd5af514dd995eddfe74dc"
 $TRUSTED_SOURCE_INSTALL_ROOT = "/usr/local/libexec/turingmarket/production-source-trust/$EXPECTED_TRUSTED_SOURCE_GATE_SHA256/$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256"
 $TRUSTED_SOURCE_GATE_REMOTE_PATH = "$TRUSTED_SOURCE_INSTALL_ROOT/trusted_production_source_gate.js"
 $TRUSTED_SOURCE_MANIFEST_REMOTE_PATH = "$TRUSTED_SOURCE_INSTALL_ROOT/trusted_production_source_manifest.json"
@@ -87,6 +87,7 @@ $FILES = @(
     "server\migrations\003_campaign_workflow_dispatch_evidence.js",
     "server\migrations\004_knowledge_capacity_observability.js",
     "server\migrations\005_knowledge_custody_projection.js",
+    "server\migrations\006_crm_sales_workspace.js",
     "server\migrations\baselines\legacy_v1.js",
     "server\migrations\engines\v1.js",
     "server\migrations\vendor\bcryptjs_v3_0_3.js",
@@ -119,6 +120,10 @@ $FILES = @(
     "server\services\campaign_workflow_service.js",
     "server\services\credential_rotation_service.js",
     "server\services\crm_access_service.js",
+    "server\services\crm_contract.js",
+    "server\services\crm_customer_service.js",
+    "server\services\crm_query_service.js",
+    "server\services\crm_scope_service.js",
     "server\services\file_ingest_service.js",
     "server\services\idempotency_service.js",
     "server\services\influencer_workflow_service.js",
@@ -186,6 +191,13 @@ $FILES = @(
     "server\tests\campaign_workflow_reconciliation.test.js",
     "server\tests\campaign_workflow_task_controls.test.js",
     "server\tests\credential_rotation.test.js",
+    "server\tests\crm_contract.test.js",
+    "server\tests\crm_customer_service.test.js",
+    "server\tests\crm_phase5_http.test.js",
+    "server\tests\crm_phase5_migration.test.js",
+    "server\tests\crm_s6_ui.test.js",
+    "server\tests\crm_scope_query.test.js",
+    "server\tests\customer_mutation_ui.test.js",
     "server\tests\customer_workspace_ui.test.js",
     "server\tests\deployment_source_contract.test.js",
     "server\tests\deployment_source_trust.test.js",
@@ -204,6 +216,7 @@ $FILES = @(
     "server\tests\migration_gate_exactness.test.js",
     "server\tests\migration_service.test.js",
     "server\tests\obsidian_and_business_knowledge.test.js",
+    "server\tests\organization_access_context.test.js",
     "server\tests\organization_campaign_access.test.js",
     "server\tests\parser_admission_ledger.test.js",
     "server\tests\performance_content_import_service.test.js",
@@ -218,6 +231,7 @@ $FILES = @(
     "server\tests\public_static_security.test.js",
     "server\tests\publication_identity_service.test.js",
     "server\tests\release_replay_gate.test.js",
+    "server\tests\release_v060_contract.test.js",
     "server\tests\sanitized_migration_gate.test.js",
     "server\tests\sanitizer_structural_policy.test.js",
     "server\tests\security_and_crm_access.test.js",
@@ -263,12 +277,15 @@ $ROOT_RELATIVE_FILES = @(
     "docs\handoff\2026-06-30\SECURITY.md",
     "docs\handoff\2026-06-30\OPERATIONS.md",
     "docs\superpowers\plans\2026-07-12-phase-1-credential-rotation.md",
-    "docs\superpowers\plans\2026-07-12-turingmarket-platform-roadmap.md"
+    "docs\superpowers\plans\2026-07-12-turingmarket-platform-roadmap.md",
+    "docs\version-records\2026-08-11-v0.6.0-crm-sales-workspace.md",
+    "archive\versions\2026-08-11-v0.6.0-crm-sales-workspace.md"
 )
 
 $CANDIDATE_ONLY_FILES = @(
     ".gitattributes",
     "docs\baselines\v0.2.9\ui-ppt-manifest.json",
+    "docs\baselines\v0.6.0\ui-runtime-manifest.json",
     "docs\product\turingmarket-design-system.md",
     "docs\product\2026-07-phase3-visual-change-record.md",
     "docs\product\2026-07-phase3-accessibility-residual-risks.md",
@@ -354,8 +371,8 @@ function Add-FrozenScreenshotFiles {
 
 function Assert-RollbackBackupPath {
     param([Parameter(Mandatory = $true)][AllowNull()][AllowEmptyString()][string]$BackupPath)
-    if ($BackupPath -notmatch '^backups/v050-campaign-business-spine-\d{8}-\d{6}$') {
-        throw "Rollback backup must match backups/v050-campaign-business-spine-YYYYMMDD-HHMMSS"
+    if ($BackupPath -notmatch '^backups/v060-crm-sales-workspace-\d{8}-\d{6}$') {
+        throw "Rollback backup must match backups/v060-crm-sales-workspace-YYYYMMDD-HHMMSS"
     }
 }
 
@@ -1223,12 +1240,12 @@ if not re.fullmatch(r'[0-9a-f]{32}', runId):
     raise SystemExit('Invalid deployment run id')
 if not re.fullmatch(r'[0-9a-f]{32}', ownerToken):
     raise SystemExit('Invalid deployment owner token')
-if not re.fullmatch(r'backups/v050-campaign-business-spine-[0-9]{8}-[0-9]{6}', backupPath):
+if not re.fullmatch(r'backups/v060-crm-sales-workspace-[0-9]{8}-[0-9]{6}', backupPath):
     raise SystemExit('Invalid deployment backup path')
 if not re.fullmatch(r'[0-9a-f]{64}', sourceSha256):
     raise SystemExit('Invalid deployment source SHA-256')
 if operation == 'deploy':
-    if not re.fullmatch(r'/var/lib/turingmarket-gate/releases/v050-campaign-business-spine-[0-9]{8}-[0-9]{6}', releaseRoot):
+    if not re.fullmatch(r'/var/lib/turingmarket-gate/releases/v060-crm-sales-workspace-[0-9]{8}-[0-9]{6}', releaseRoot):
         raise SystemExit('Invalid deployment release root')
     if candidatePath != releaseRoot + '/platform':
         raise SystemExit('Invalid deployment candidate path')
@@ -1539,7 +1556,7 @@ PY
 
 if [ "$LifecycleResidue" = "migration-rehearsal" ]; then
   RunStamp="$(basename "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["releaseRoot"])' "$LockDir/run.json")")"
-  RunStamp="${RunStamp##v050-campaign-business-spine-}"
+  RunStamp="${RunStamp##v060-crm-sales-workspace-}"
   CandidatePathForUnit="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["candidatePath"])' "$LockDir/run.json")"
   MigrationUnit="turingmarket-migration-gate-$RunStamp.service"
   UnitLoadState="$(systemctl show "$MigrationUnit" --property=LoadState --value 2>/dev/null || printf not-found)"
@@ -1610,12 +1627,12 @@ if not re.fullmatch(r'[0-9a-f]{32}', metadata['runId']) or not re.fullmatch(r'[0
     raise SystemExit('Invalid interrupted deployment identity')
 if not re.fullmatch(r'[0-9a-f]{64}', metadata['sourceSha256']) or not isinstance(metadata['sourceIdentity'], str) or not metadata['sourceIdentity']:
     raise SystemExit('Invalid deployment source identity')
-if not re.fullmatch(r'backups/v050-campaign-business-spine-[0-9]{8}-[0-9]{6}', metadata['backupPath']):
+if not re.fullmatch(r'backups/v060-crm-sales-workspace-[0-9]{8}-[0-9]{6}', metadata['backupPath']):
     raise SystemExit('Invalid interrupted backup path')
 backupAbsolute = os.path.abspath(os.path.join(remoteRoot, metadata['backupPath']))
 if os.path.commonpath([os.path.abspath(remoteRoot), backupAbsolute]) != os.path.abspath(remoteRoot):
     raise SystemExit('Interrupted backup escaped the remote root')
-releasePattern = re.compile(re.escape(os.path.abspath(candidateRoot)) + r'/v050-campaign-business-spine-[0-9]{8}-[0-9]{6}')
+releasePattern = re.compile(re.escape(os.path.abspath(candidateRoot)) + r'/v060-crm-sales-workspace-[0-9]{8}-[0-9]{6}')
 if not releasePattern.fullmatch(metadata['releaseRoot']) or metadata['candidatePath'] != metadata['releaseRoot'] + '/platform':
     raise SystemExit('Invalid interrupted candidate paths')
 if os.path.dirname(metadata['releaseRoot']) != os.path.abspath(candidateRoot):
@@ -1729,7 +1746,7 @@ sync -f "$LockDir"
 
 # A replay gate from the old owner can no longer proxy after the CAS above.
 ReplayStamp="${ReleaseRoot##*/}"
-ReplayStamp="${ReplayStamp##v050-campaign-business-spine-}"
+ReplayStamp="${ReplayStamp##v060-crm-sales-workspace-}"
 ReplayUnit="turingmarket-release-replay-gate-$ReplayStamp.service"
 ReplayRuntime="/run/turingmarket-release-replay-$RunId"
 ReplaySocket="$ReplayRuntime/replay.sock"
@@ -2796,7 +2813,7 @@ with open(runPath, encoding='utf-8') as handle:
     run = json.load(handle)
 backupPath = run.get('backupPath')
 runId = run.get('runId')
-if not isinstance(backupPath, str) or not re.fullmatch(r'backups/v050-campaign-business-spine-[0-9]{8}-[0-9]{6}', backupPath):
+if not isinstance(backupPath, str) or not re.fullmatch(r'backups/v060-crm-sales-workspace-[0-9]{8}-[0-9]{6}', backupPath):
     raise SystemExit('Acceptance state rejected invalid backup path')
 if not isinstance(runId, str) or not re.fullmatch(r'[0-9a-f]{32}', runId):
     raise SystemExit('Acceptance state rejected invalid run id')
@@ -3077,7 +3094,7 @@ PY
 test -f "$LockDir/candidate_digest.py"
 test "$(python3 "$LockDir/candidate_digest.py" "$LiveDir")" = "$ExpectedDigest"
 case "$ReleaseRoot" in
-  /var/lib/turingmarket-gate/releases/v050-campaign-business-spine-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]) ;;
+  /var/lib/turingmarket-gate/releases/v060-crm-sales-workspace-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]) ;;
   *) echo "Accepted cleanup path is invalid" >&2; exit 1 ;;
 esac
 
@@ -3129,7 +3146,7 @@ set -euo pipefail
 ReleaseRoot="__RELEASE_ROOT__"
 CandidateRoot="__CANDIDATE_ROOT__"
 case "$ReleaseRoot" in
-  "$CandidateRoot"/v050-campaign-business-spine-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]) ;;
+  "$CandidateRoot"/v060-crm-sales-workspace-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]) ;;
   "$CandidateRoot"/.quarantine-*)
     python3 - "$(basename "$ReleaseRoot")" <<'PY'
 import re
@@ -3201,8 +3218,8 @@ gateUid = int(gateUidRaw)
 backupKeepCount = 10
 backupMaxAgeSeconds = 30 * 24 * 60 * 60
 candidateMaxAgeSeconds = 24 * 60 * 60
-backupName = re.compile(r'^v050-campaign-business-spine-[0-9]{8}-[0-9]{6}$')
-candidateName = re.compile(r'^v050-campaign-business-spine-[0-9]{8}-[0-9]{6}$')
+backupName = re.compile(r'^v060-crm-sales-workspace-[0-9]{8}-[0-9]{6}$')
+candidateName = re.compile(r'^v060-crm-sales-workspace-[0-9]{8}-[0-9]{6}$')
 quarantineCandidateName = re.compile(r'^\.quarantine-[0-9a-f]{32}-[1-9][0-9]*$')
 now = time.time()
 
@@ -4408,8 +4425,8 @@ $uploadChecksums = Get-DeploymentPlanChecksumManifest -DeploymentPlan $deploymen
 $remotePathManifest = Get-DeploymentPlanRemotePathManifest -DeploymentPlan $deploymentActionPlan
 
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
-$backupDir = "backups/v050-campaign-business-spine-$stamp"
-$releaseDir = "v050-campaign-business-spine-$stamp"
+$backupDir = "backups/v060-crm-sales-workspace-$stamp"
+$releaseDir = "v060-crm-sales-workspace-$stamp"
 $remoteReleaseRoot = "$CANDIDATE_ROOT/$releaseDir"
 $remoteCandidateDir = "$remoteReleaseRoot/platform"
 $deploymentRunId = [Guid]::NewGuid().ToString('N')
@@ -4526,7 +4543,7 @@ LockDir="$RemoteRoot/.deploy-v030.lock"
 BackupAbsolute="$RemoteRoot/__BACKUP_PATH__"
 ProductionBackupDb="$BackupAbsolute/database/turingmarket.db"
 ProductionLiveDb="/var/lib/turingmarket/db/turingmarket.db"
-TestRoot="$ReleaseRoot/tmp/deploy-v040-gate-__STAMP__"
+TestRoot="$ReleaseRoot/tmp/deploy-v060-gate-__STAMP__"
 TestDb="$TestRoot/test.db"
 SchemaDb="$TestRoot/schema.db"
 BrowserCache="$TestRoot/browser-cache"
@@ -4952,7 +4969,7 @@ try {
   if (database.pragma('integrity_check', { simple: true }) !== 'ok') throw new Error('Candidate DB integrity_check failed');
   if (database.pragma('foreign_key_check').length !== 0) throw new Error('Candidate DB foreign_key_check failed');
   const version = database.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version;
-  if (Number(version) !== 5) throw new Error('Candidate migration target version mismatch');
+  if (Number(version) !== 6) throw new Error('Candidate migration target version mismatch');
   console.log('TM_SANITIZED_MIGRATION_COMPATIBILITY_OK');
 } finally {
   database.close();

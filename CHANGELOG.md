@@ -1,5 +1,25 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.6.0-crm-sales-workspace (Release Candidate, 2026-08-11) - CRM 销售工作台
+
+### CRM 销售工作台 / CRM Sales Workspace
+- 将客户看板与客户明细保持为两个独立界面，并把客户、联系人、商机、任务、跟进记录、阶段流转、领取/释放、公海、团队与个人作用域接入统一的组织权限模型。
+- 增加组织安全的客户与商机详情读取、受治理的阶段/结案原因、无硬删除的生命周期、失败写入草稿保留、精确商机详情编辑，以及管理员组织级与普通用户团队级可见性。
+- 跟进结果通过知识库归档；团队成员只能追加 `note`，正式 `strategy`/`proposal` 仍由业务负责人控制。连续跟进采用活动 ID 作为来源身份，保证知识条目和分块不可覆盖。
+
+### Schema 6 与发布底座 / Schema 6 And Release Foundation
+- 新增迁移 `006_crm_sales_workspace`、CRM 查询/命令/作用域/合同服务，并将发布迁移链升级为精确的 `v1 -> v6` 两次恢复验证。
+- trusted-source 清单扩展为 26 个 SHA-256 固定文件，覆盖迁移 006 与 4 个 CRM 服务；sanitization manifest 重建为主 v1 + 隔离 v6 精确配置。
+- 发布分支、构建标识、缓存键、候选/备份路径和远端文件清单升级为 `codex/v0.6.0-crm-sales-workspace` / `v060-crm-sales-workspace`，冻结 PPT build、query 与 SHA-256 保持不变。
+
+### 审查与状态 / Review And Status
+- S6 已验收检查点的独立 Code Review 为 `APPROVE`，独立 QA 为 `GO`；该检查点最终审查矩阵 342/342、提交前扩展矩阵 373/373，6 个关键 JavaScript 文件语法通过。
+- 完整历史 bundle `phase5-v060-90713b23f417-full-source.bundle` 已验签，SHA-256 为 `fd4b925d82056d1eb53a5c65cc67461bc3eadd9ba88f47020ed37343d5dae887`。
+- 当前 v0.6 发布候选在 S6 后又补充了跨平台可信哈希、schema 6 已填充 CRM 脱敏回归、概率字段域约束和发布清单修复，因此 S6 结论不替代当前候选的全量复审。
+- 本条目当前是发布候选，不代表线上已切换。生产仍运行最近验收通过的 v0.4；当前候选必须重新完成发布合同、全量非浏览器回归、独立代码/安全/QA 复审、GitHub 推送、可校验备份、生产部署和远端 API/UI/权限/回滚验收后才能标记发布。
+
+---
+
 ## v0.5.0-campaign-business-spine (Unreleased, updated 2026-08-09) - 活动业务主链开发候选
 
 ### 数据、权限与活动主链 / Data, Access, And Campaign Spine

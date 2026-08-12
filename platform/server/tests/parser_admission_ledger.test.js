@@ -19,6 +19,7 @@ const IDEMPOTENCY_SERVICE_PATH = path.join(
   'services',
   'idempotency_service.js'
 );
+const DATABASE_MODULE_PATH = require.resolve('better-sqlite3');
 const CAMPAIGN_MIGRATIONS = Object.freeze([Object.freeze({
   version: 2,
   name: '002_campaign_business_spine',
@@ -299,7 +300,7 @@ function runCompletionWorker(filename, options, barrier) {
   const source = String.raw`
     'use strict';
     const { parentPort, workerData } = require('node:worker_threads');
-    const Database = require('better-sqlite3');
+    const Database = require(workerData.databaseModulePath);
     const idempotency = require(workerData.servicePath);
     const db = new Database(workerData.filename);
     db.pragma('busy_timeout = 5000');
@@ -333,6 +334,7 @@ function runCompletionWorker(filename, options, barrier) {
         filename,
         options,
         barrier,
+        databaseModulePath: DATABASE_MODULE_PATH,
         servicePath: IDEMPOTENCY_SERVICE_PATH
       }
     });

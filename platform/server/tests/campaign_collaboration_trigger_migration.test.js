@@ -10,7 +10,9 @@ const migrationService = require('../services/migration_service');
 const migrationGate = require('../scripts/verify_campaign_migration_gate');
 
 const SERVER_ROOT = path.resolve(__dirname, '..');
-const V5_MIGRATIONS = migrationGate.REGISTERED_MIGRATIONS;
+const V5_MIGRATIONS = Object.freeze(
+  migrationGate.REGISTERED_MIGRATIONS.filter((migration) => migration.version <= 5)
+);
 const V4_MIGRATIONS = Object.freeze(
   V5_MIGRATIONS.filter((migration) => migration.version <= 4)
 );

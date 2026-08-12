@@ -44,7 +44,7 @@ test('populated migration gate proves legacy preservation before migration and a
   assert.equal(report.format, 'tm-campaign-migration-preservation-v1');
   assert.equal(report.runs, 2);
   assert.equal(report.sourceVersion, 1);
-  assert.equal(report.targetVersion, 5);
+  assert.equal(report.targetVersion, 6);
   assert.ok(report.legacyTableCount > 20);
   assert.ok(report.legacyRowCount > 0);
   for (const stage of [report.preMigration, report.postMigration]) {

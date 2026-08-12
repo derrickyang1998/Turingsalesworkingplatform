@@ -252,7 +252,7 @@ const expectedRouteSources = Object.freeze([
 const expectedRouteCountsBySource = Object.freeze({
   'platform/server/server.js': 40,
   'platform/server/routes.js': 11,
-  'platform/server/routes_customers.js': 33,
+  'platform/server/routes_customers.js': 34,
   'platform/server/routes_brands.js': 4,
   'platform/server/routes_workflow.js': 22,
   'platform/server/services/public_assets_service.js': 12
@@ -554,13 +554,13 @@ test('generateManifest includes hashes, build/cache markers, routes, fixture met
   }
 
   assert.match(appJs, /window\.tmAppBuild\s*=\s*["']20260630-auth-upload-fix["']/);
-  assert.match(buildInfoJs, /app:\s*["']20260714-v040-product-shell-design-system["']/);
+  assert.match(buildInfoJs, /app:\s*["']20260811-v060-crm-sales-workspace["']/);
   assert.deepEqual(manifest.buildMarkers, {
-    app: '20260714-v040-product-shell-design-system',
+    app: '20260811-v060-crm-sales-workspace',
     ppt: '20260702-v916-kb-bridge-client-cn'
   });
   assert.deepEqual(manifest.scriptCacheKeys, {
-    app: '20260714v040productshelldesignsystem',
+    app: '20260811v060crmsalesworkspace',
     ppt: '20260702v916kbbridge'
   });
 
@@ -647,7 +647,7 @@ test('generateManifest records every registered route contract in deterministic 
     duplicateFixturePath: fixturePath
   });
 
-  assert.equal(manifest.routeContracts.length, 122);
+  assert.equal(manifest.routeContracts.length, 123);
   assert.deepEqual([...new Set(manifest.routeContracts.map((route) => route.source))], expectedRouteSources);
 
   const routeCountsBySource = Object.fromEntries(
@@ -759,7 +759,7 @@ test('CLI writes the sanitized baseline manifest', () => {
     assert.equal(manifest.baseline.version, 'v0.2.9');
     assert.equal(manifest.files.indexHtml.source, 'platform/index.html');
     assert.deepEqual(manifest.scriptCacheKeys, {
-      app: '20260714v040productshelldesignsystem',
+      app: '20260811v060crmsalesworkspace',
       ppt: '20260702v916kbbridge'
     });
     assert.doesNotMatch(JSON.stringify(manifest), /[A-Z]:\\\\|Users\\\\29272|TM_PRIVATE|TURINGMARKET_SERVER/);

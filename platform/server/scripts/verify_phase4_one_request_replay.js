@@ -214,7 +214,7 @@ function seedFixture(dbPath) {
     `).all().map((row) => row.version);
     assert.deepEqual(
       migrationVersions,
-      [1, 2, 3, 4, 5],
+      [1, 2, 3, 4, 5, 6],
       'isolated fixture must use the current production migration chain'
     );
 
@@ -621,7 +621,7 @@ function verifyIntegrity(state) {
   if (
     state.quickCheck !== 'ok' ||
     state.foreignKeyViolations !== 0 ||
-    JSON.stringify(state.migrationVersions) !== JSON.stringify([1, 2, 3, 4, 5])
+    JSON.stringify(state.migrationVersions) !== JSON.stringify([1, 2, 3, 4, 5, 6])
   ) {
     fail(
       'PHASE4_FIXTURE_INTEGRITY_FAILED',

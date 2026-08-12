@@ -22,7 +22,7 @@ function createFixture(t, name, targetVersion = 1) {
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const databasePath = path.join(root, `source-v${targetVersion}.db`);
   const options = { rootDir: SERVER_ROOT };
-  if (targetVersion === 5) options.registeredMigrations = migrationGate.REGISTERED_MIGRATIONS;
+  if (targetVersion === 6) options.registeredMigrations = migrationGate.REGISTERED_MIGRATIONS;
   const db = migrationService.openMigratedDatabase(databasePath, options);
   db.prepare('UPDATE users SET display_name=?,department=? WHERE id=(SELECT MIN(id) FROM users)')
     .run('synthetic-exactness-user', 'synthetic-exactness-department');
@@ -59,8 +59,8 @@ function rewriteSchemaSql(db, objectType, objectName, rewrite) {
   db.pragma(`schema_version = ${schemaVersion + 1}`);
 }
 
-test('migration verifier rejects a sanitized source that is already at version 5', (t) => {
-  const fixture = createFixture(t, 'reject-v5', 5);
+test('migration verifier rejects a sanitized source that is already at version 6', (t) => {
+  const fixture = createFixture(t, 'reject-v6', 6);
 
   assert.throws(
     () => migrationGate.verifySanitizedMigrationCopy({
@@ -71,8 +71,8 @@ test('migration verifier rejects a sanitized source that is already at version 5
   );
 });
 
-test('migration verifier accepts a populated sanitized version 1 source and reaches version 5', (t) => {
-  const fixture = createFixture(t, 'v1-to-v5', 1);
+test('migration verifier accepts a populated sanitized version 1 source and reaches version 6', (t) => {
+  const fixture = createFixture(t, 'v1-to-v6', 1);
   const sourceSha256 = sha256File(fixture.databasePath);
 
   const report = migrationGate.verifySanitizedMigrationCopy({
@@ -81,7 +81,7 @@ test('migration verifier accepts a populated sanitized version 1 source and reac
   });
 
   assert.equal(report.sourceVersion, 1);
-  assert.equal(report.targetVersion, 5);
+  assert.equal(report.targetVersion, 6);
   assert.equal(report.runs, 2);
   assert.equal(report.preMigrationRestoreVerified, true);
   assert.equal(report.legacyPreservationVerified, true);
@@ -103,7 +103,7 @@ test('migration verifier preserves an existing activity_log allocator across det
   });
 
   assert.equal(report.sourceVersion, 1);
-  assert.equal(report.targetVersion, 5);
+  assert.equal(report.targetVersion, 6);
   assert.equal(report.legacyPreservationVerified, true);
 });
 

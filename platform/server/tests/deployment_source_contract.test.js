@@ -25,10 +25,10 @@ const docs = [
 ];
 
 const AUTHORITATIVE_CHECKOUT = String.raw`C:\Users\29272\Documents\在线商务平台-github-sync`;
-const AUTHORITATIVE_BRANCH = 'codex/v0.5.0-campaign-business-spine';
-const RELEASE_SLUG = 'v050-campaign-business-spine';
-const APP_BUILD = '20260714-v040-product-shell-design-system';
-const APP_QUERY = '20260714v040productshelldesignsystem';
+const AUTHORITATIVE_BRANCH = 'codex/v0.6.0-crm-sales-workspace';
+const RELEASE_SLUG = 'v060-crm-sales-workspace';
+const APP_BUILD = '20260811-v060-crm-sales-workspace';
+const APP_QUERY = '20260811v060crmsalesworkspace';
 const PPT_BUILD = '20260702-v916-kb-bridge-client-cn';
 const PPT_QUERY = '20260702v916kbbridge';
 const PPT_SHA256 = 'f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e';
@@ -271,7 +271,7 @@ test('Phase 4 deploy source guards the exact branch and locked build contract', 
   assert.match(deploy, /\[string\]\$RollbackBackup/);
   assert.ok(
     deploy.includes(`$EXPECTED_BRANCH = "${AUTHORITATIVE_BRANCH}"`),
-    'deploy script must guard the authoritative v0.5 branch'
+    'deploy script must guard the authoritative v0.6 branch'
   );
   assert.match(deploy, /git\s+-C\s+\$REPO_DIR\s+branch\s+--show-current/);
   assert.match(deploy, /git\s+-C\s+\$REPO_DIR\s+status\s+--porcelain/);
@@ -1332,33 +1332,33 @@ function Assert-Actions {
 foreach ($phase in @('locked', 'candidate-ready')) {
   Reset-Case
   $script:Phase = $phase
-  Invoke-DeploymentFailureRecovery -BackupPath 'backups/v050-campaign-business-spine-20260714-120000' -ReleaseRoot '/var/lib/turingmarket-gate/releases/test' -BackupCreated $true
+  Invoke-DeploymentFailureRecovery -BackupPath 'backups/v060-crm-sales-workspace-20260714-120000' -ReleaseRoot '/var/lib/turingmarket-gate/releases/test' -BackupCreated $true
   Assert-Actions 'source-sweep,writer-enter,cleanup,exit'
 }
 Reset-Case
 $script:Phase = 'cutover-complete'
-Invoke-DeploymentFailureRecovery -BackupPath 'backups/v050-campaign-business-spine-20260714-120000' -ReleaseRoot '/var/lib/turingmarket-gate/releases/test' -BackupCreated $true
+Invoke-DeploymentFailureRecovery -BackupPath 'backups/v060-crm-sales-workspace-20260714-120000' -ReleaseRoot '/var/lib/turingmarket-gate/releases/test' -BackupCreated $true
 Assert-Actions 'source-sweep,writer-enter,retention,cleanup,exit'
 foreach ($phase in @('mutation-intent', 'maintenance-entered', 'writers-stopped', 'snapshot-ready')) {
   Reset-Case
   $script:Phase = $phase
-  Invoke-DeploymentFailureRecovery -BackupPath 'backups/v050-campaign-business-spine-20260714-120000' -ReleaseRoot '/var/lib/turingmarket-gate/releases/test' -BackupCreated $true
+  Invoke-DeploymentFailureRecovery -BackupPath 'backups/v060-crm-sales-workspace-20260714-120000' -ReleaseRoot '/var/lib/turingmarket-gate/releases/test' -BackupCreated $true
   Assert-Actions 'source-sweep,writer-enter,resume-old,cleanup,exit'
 }
 Reset-Case
 $script:Phase = 'mutation-started'
-Invoke-DeploymentFailureRecovery -BackupPath 'backups/v050-campaign-business-spine-20260714-120000' -ReleaseRoot '/var/lib/turingmarket-gate/releases/test' -BackupCreated $true
+Invoke-DeploymentFailureRecovery -BackupPath 'backups/v060-crm-sales-workspace-20260714-120000' -ReleaseRoot '/var/lib/turingmarket-gate/releases/test' -BackupCreated $true
 Assert-Actions 'source-sweep,writer-enter,restore,cleanup,exit'
 
 Reset-Case
 $script:Phase = 'mutation-started'
 $script:RestoreFailuresRemaining = 1
-Invoke-DeploymentFailureRecovery -BackupPath 'backups/v050-campaign-business-spine-20260714-120000' -ReleaseRoot '/var/lib/turingmarket-gate/releases/test' -BackupCreated $true
+Invoke-DeploymentFailureRecovery -BackupPath 'backups/v060-crm-sales-workspace-20260714-120000' -ReleaseRoot '/var/lib/turingmarket-gate/releases/test' -BackupCreated $true
 Assert-Actions 'source-sweep,writer-enter,restore,sleep,restore,cleanup,exit'
 
 Reset-Case
 $script:Phase = 'accepted'
-Invoke-DeploymentFailureRecovery -BackupPath 'backups/v050-campaign-business-spine-20260714-120000' -ReleaseRoot '/var/lib/turingmarket-gate/releases/test' -BackupCreated $true
+Invoke-DeploymentFailureRecovery -BackupPath 'backups/v060-crm-sales-workspace-20260714-120000' -ReleaseRoot '/var/lib/turingmarket-gate/releases/test' -BackupCreated $true
 Assert-Actions 'source-sweep,writer-enter,finalize-new,retention,exit'
 
 Reset-Case
@@ -1436,7 +1436,7 @@ test('Phase 4 retention cleanup keeps a rollback floor and removes only validate
   const now = Date.now();
   const backupNames = [];
   for (let index = 0; index < 12; index += 1) {
-    const name = `v050-campaign-business-spine-202601${String(index + 1).padStart(2, '0')}-120000`;
+    const name = `v060-crm-sales-workspace-202601${String(index + 1).padStart(2, '0')}-120000`;
     const target = path.join(backupRoot, name);
     fs.mkdirSync(target);
     fs.writeFileSync(path.join(target, 'evidence.txt'), name);
@@ -1445,8 +1445,8 @@ test('Phase 4 retention cleanup keeps a rollback floor and removes only validate
     backupNames.push(name);
   }
   const currentBackup = path.join(backupRoot, backupNames[0]);
-  const freshCandidate = path.join(candidateRoot, 'v050-campaign-business-spine-20260729-120000');
-  const staleCandidate = path.join(candidateRoot, 'v050-campaign-business-spine-20260701-120000');
+  const freshCandidate = path.join(candidateRoot, 'v060-crm-sales-workspace-20260729-120000');
+  const staleCandidate = path.join(candidateRoot, 'v060-crm-sales-workspace-20260701-120000');
   fs.mkdirSync(freshCandidate);
   fs.mkdirSync(staleCandidate);
   fs.writeFileSync(path.join(staleCandidate, 'candidate.txt'), 'stale');
@@ -1461,7 +1461,7 @@ test('Phase 4 retention cleanup keeps a rollback floor and removes only validate
     backupRoot,
     candidateRoot,
     currentBackup,
-    path.join(candidateRoot, 'v050-campaign-business-spine-20260729-130000'),
+    path.join(candidateRoot, 'v060-crm-sales-workspace-20260729-130000'),
     String(ownerUid),
     String(ownerUid)
   ], {
@@ -1474,7 +1474,7 @@ test('Phase 4 retention cleanup keeps a rollback floor and removes only validate
   assert.equal(fs.existsSync(freshCandidate), true);
   assert.equal(fs.existsSync(staleCandidate), false);
   const remainingBackups = fs.readdirSync(backupRoot)
-    .filter((name) => /^v050-campaign-business-spine-/.test(name));
+    .filter((name) => /^v060-crm-sales-workspace-/.test(name));
   assert.equal(remainingBackups.length, 10);
   const report = JSON.parse(fs.readFileSync(path.join(currentBackup, 'retention-report.json'), 'utf8'));
   assert.equal(report.schemaVersion, 1);
@@ -1508,21 +1508,21 @@ function Exit-RemoteDeploymentLock {
   $script:Actions.Add('exit')
 }
 $threw = $false
-try { Invoke-ManualRollback -BackupPath 'backups/v050-campaign-business-spine-bad' -RestoreDatabase -ConfirmDataLoss } catch { $threw = $true }
+try { Invoke-ManualRollback -BackupPath 'backups/v060-crm-sales-workspace-bad' -RestoreDatabase -ConfirmDataLoss } catch { $threw = $true }
 if (-not $threw) { throw 'Invalid backup path must be rejected' }
 if ($script:Actions.Count -ne 0) { throw "Invalid path performed actions: $($script:Actions -join ',')" }
 
 $threw = $false
-try { Invoke-ManualRollback -BackupPath 'backups/v050-campaign-business-spine-20260714-120000' } catch { $threw = $true }
+try { Invoke-ManualRollback -BackupPath 'backups/v060-crm-sales-workspace-20260714-120000' } catch { $threw = $true }
 if (-not $threw) { throw 'Code-only Phase 4 rollback must be rejected' }
 if ($script:Actions.Count -ne 0) { throw "Code-only rollback performed actions: $($script:Actions -join ',')" }
 
 $threw = $false
-try { Invoke-ManualRollback -BackupPath 'backups/v050-campaign-business-spine-20260714-120000' -RestoreDatabase } catch { $threw = $true }
+try { Invoke-ManualRollback -BackupPath 'backups/v060-crm-sales-workspace-20260714-120000' -RestoreDatabase } catch { $threw = $true }
 if (-not $threw) { throw 'Unconfirmed database restore must be rejected' }
 if ($script:Actions.Count -ne 0) { throw "Unconfirmed restore performed actions: $($script:Actions -join ',')" }
 
-Invoke-ManualRollback -BackupPath 'backups/v050-campaign-business-spine-20260714-120000' -RestoreDatabase -ConfirmDataLoss
+Invoke-ManualRollback -BackupPath 'backups/v060-crm-sales-workspace-20260714-120000' -RestoreDatabase -ConfirmDataLoss
 if (($script:Actions -join ',') -ne 'server,enter,boundary,loopback,writer-enter,restore,exit') { throw "Unexpected valid rollback actions: $($script:Actions -join ',')" }
 Write-Output 'MANUAL_ROLLBACK_PREFLIGHT_OK'
 `);
@@ -1572,17 +1572,17 @@ test('Phase 3 evidence compares current captures with frozen screenshot bytes fr
   assert.doesNotMatch(generatorSource, /const frozenBuffer = fs\.readFileSync\(frozenPath\)/);
 });
 
-test('Task 12 manifest retains pre-edit hashes and records current post-edit comparison', () => {
+test('Task 12 frozen manifest retains approved v0.4 visual and PPT evidence', () => {
   const manifest = JSON.parse(read(manifestPath));
   assert.equal(manifest.schemaVersion, 1);
   assert.equal(manifest.baseline.release, 'v0.4.0-product-shell-and-design-system');
   assert.equal(manifest.preEdit.files.appJs.sha256, PRE_EDIT_APP_SHA256);
   assert.equal(manifest.preEdit.buildMarkers.app, '20260630-auth-upload-fix');
-  assert.equal(manifest.files.appJs.sha256, sha256(path.join(platformRoot, 'app.js')));
+  assert.equal(manifest.files.appJs.sha256, 'a54d6d632363a615ea809b4c1307c724cc18d14ad0643f5caa40ae8171d74837');
   assert.equal(manifest.files.pptJs.sha256, PPT_SHA256);
-  assert.equal(manifest.buildMarkers.app, APP_BUILD);
+  assert.equal(manifest.buildMarkers.app, '20260714-v040-product-shell-design-system');
   assert.equal(manifest.buildMarkers.ppt, PPT_BUILD);
-  assert.equal(manifest.scriptCacheKeys.app, APP_QUERY);
+  assert.equal(manifest.scriptCacheKeys.app, '20260714v040productshelldesignsystem');
   assert.equal(manifest.scriptCacheKeys.ppt, PPT_QUERY);
   assert.deepEqual(manifest.duplicateInventory.duplicates, ['esc']);
   assert.equal(manifest.screenshotSlots.length, 72);

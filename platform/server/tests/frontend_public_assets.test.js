@@ -23,8 +23,8 @@ const publicAssets = require('../services/public_assets_service');
 const gitBash = process.env.GIT_BASH_PATH || 'C:\\Program Files\\Git\\bin\\bash.exe';
 const hasBash = process.platform !== 'win32' || fs.existsSync(gitBash);
 
-const EXPECTED_APP_BUILD = '20260714-v040-product-shell-design-system';
-const EXPECTED_APP_QUERY = '20260714v040productshelldesignsystem';
+const EXPECTED_APP_BUILD = '20260811-v060-crm-sales-workspace';
+const EXPECTED_APP_QUERY = '20260811v060crmsalesworkspace';
 const EXPECTED_PPT_BUILD = '20260702-v916-kb-bridge-client-cn';
 const EXPECTED_PPT_QUERY = '20260702v916kbbridge';
 const EXPECTED_SECURITY_QUERY = '20260714v050campaignbusinessspine';
@@ -1925,10 +1925,16 @@ test('registerPublicAssets binds exactly the canonical client routes to their ex
     assert.equal(typeof matching[0].handler, 'function', `${requestPath} must register a handler`);
 
     let sentFile = null;
+    let sentOptions = null;
     matching[0].handler({}, {
-      sendFile(filePath) { sentFile = filePath; }
+      sendFile(filePath, options) {
+        sentFile = filePath;
+        sentOptions = options;
+      }
     });
-    assert.equal(sentFile, path.join(platformRoot, asset), `${requestPath} handler must send ${asset}`);
+    assert.equal(sentFile, asset, `${requestPath} handler must send ${asset}`);
+    assert.equal(sentOptions.root, platformRoot, `${requestPath} handler must constrain the public root`);
+    assert.equal(sentOptions.dotfiles, 'deny', `${requestPath} handler must deny dotfiles`);
   }
 });
 
@@ -2004,8 +2010,8 @@ test('exact CSP candidate stays byte-equivalent but inactive until legacy execut
 test('guarded deploy uploads, checks, verifies, and backs up all nine Wave 1 client assets', () => {
   const deploy = read(deployScriptPath);
 
-  assert.match(deploy, /\$EXPECTED_APP_BUILD\s*=\s*"20260714-v040-product-shell-design-system"/);
-  assert.match(deploy, /\$EXPECTED_APP_QUERY\s*=\s*"20260714v040productshelldesignsystem"/);
+  assert.match(deploy, /\$EXPECTED_APP_BUILD\s*=\s*"20260811-v060-crm-sales-workspace"/);
+  assert.match(deploy, /\$EXPECTED_APP_QUERY\s*=\s*"20260811v060crmsalesworkspace"/);
   assert.deepEqual(powerShellArrayEntries(deploy, 'requiredPublicAssets'), CANONICAL_CLIENT_ASSETS);
   for (const asset of CANONICAL_CLIENT_ASSETS) {
     assert.ok(deploy.includes(`"${asset.replace(/\//g, '\\')}"`), `deploy manifest must include ${asset}`);

@@ -195,7 +195,7 @@ function metricsFor(db, scopeType, scopeId) {
   `).all(scopeType, scopeId).map((row) => [row.metric, row]));
 }
 
-test('runtime registration upgrades an empty database to v5 with capacity gauges and custody projection', (t) => {
+test('runtime registration upgrades an empty database to v6 while preserving capacity gauges and custody projection', (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-capacity-v5-'));
   const databasePath = path.join(directory, 'empty.db');
   const previousDatabasePath = process.env.DB_PATH;
@@ -211,7 +211,7 @@ test('runtime registration upgrades an empty database to v5 with capacity gauges
 
   assert.equal(
     db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version,
-    5
+    6
   );
   assert.deepEqual(
     db.pragma('table_list').find((row) => row.name === 'knowledge_capacity_gauges'),

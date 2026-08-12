@@ -232,7 +232,7 @@ test('guarded deploy keeps production host external and SSH host checking enable
   assert.doesNotMatch(deploy, /UserKnownHostsFile\s*=\s*(?:NUL|\/dev\/null)/i);
 });
 
-test('guarded deploy creates complete v050 backups with client assets, SQLite, PPT cache, and checksums', () => {
+test('guarded deploy creates complete v060 backups with client assets, SQLite, PPT cache, and checksums', () => {
   const deploy = readDeployScript();
   const backupBlock = extractRemoteBackupBlock(deploy);
   const assetsStart = deploy.indexOf('$requiredPublicAssets = @(');
@@ -240,7 +240,7 @@ test('guarded deploy creates complete v050 backups with client assets, SQLite, P
   assert.ok(assetsStart !== -1 && assetsEnd > assetsStart, 'required public asset inventory must precede backup');
   const requiredAssets = deploy.slice(assetsStart, assetsEnd);
 
-  assert.match(deploy, /\$backupDir\s*=\s*"backups\/v050-campaign-business-spine-\$stamp"/);
+  assert.match(deploy, /\$backupDir\s*=\s*"backups\/v060-crm-sales-workspace-\$stamp"/);
   assert.match(backupBlock, /files\.present/);
   assert.match(backupBlock, /files\.absent/);
   for (const asset of [

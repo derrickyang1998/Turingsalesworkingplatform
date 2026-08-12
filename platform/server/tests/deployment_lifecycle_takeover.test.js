@@ -549,7 +549,7 @@ test('Phase 4 retention resumes a quarantined deletion and preserves every durab
   const now = Date.now();
   const backups = [];
   for (let index = 0; index < 14; index += 1) {
-    const name = `v050-campaign-business-spine-202601${String(index + 1).padStart(2, '0')}-120000`;
+    const name = `v060-crm-sales-workspace-202601${String(index + 1).padStart(2, '0')}-120000`;
     const target = path.join(backupRoot, name);
     fs.mkdirSync(target);
     fs.writeFileSync(path.join(target, 'evidence.txt'), name);
@@ -567,8 +567,8 @@ test('Phase 4 retention resumes a quarantined deletion and preserves every durab
     backupPath: relativeBackup(backups[12])
   }));
 
-  const liveCandidate = path.join(candidateRoot, 'v050-campaign-business-spine-20260729-120000');
-  const staleCandidate = path.join(candidateRoot, 'v050-campaign-business-spine-20260701-120000');
+  const liveCandidate = path.join(candidateRoot, 'v060-crm-sales-workspace-20260729-120000');
+  const staleCandidate = path.join(candidateRoot, 'v060-crm-sales-workspace-20260701-120000');
   fs.mkdirSync(liveCandidate);
   fs.mkdirSync(staleCandidate);
   fs.writeFileSync(path.join(staleCandidate, 'candidate.txt'), 'stale');
@@ -589,7 +589,7 @@ test('Phase 4 retention resumes a quarantined deletion and preserves every durab
     backupRoot,
     candidateRoot,
     backups[0],
-    path.join(candidateRoot, 'v050-campaign-business-spine-20260729-130000'),
+    path.join(candidateRoot, 'v060-crm-sales-workspace-20260729-130000'),
     String(ownerUid),
     String(ownerUid),
     markerRoot,
@@ -655,8 +655,8 @@ chmod 0700 "$LockDir"
 chmod 0600 "$OperationFence"
 Owner=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 RunId=11111111111111111111111111111111
-BackupPath=backups/v050-campaign-business-spine-20260729-120000
-ReleaseRoot="$CandidateRoot/v050-campaign-business-spine-20260729-120000"
+BackupPath=backups/v060-crm-sales-workspace-20260729-120000
+ReleaseRoot="$CandidateRoot/v060-crm-sales-workspace-20260729-120000"
 CandidatePath="$ReleaseRoot/platform"
 mkdir -p "$Root/$BackupPath" "$CandidatePath"
 printf 'fixture\\n' > "$Root/$BackupPath/evidence.txt"

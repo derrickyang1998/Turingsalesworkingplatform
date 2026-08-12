@@ -7,7 +7,7 @@
   },
   "migrationContract": {
     "sourceVersion": 1,
-    "targetVersion": 5,
+    "targetVersion": 6,
     "runs": 2,
     "deterministicAppendTables": [
       "activity_log"
@@ -35,6 +35,10 @@
       "sha256": "f7610c653b748439b3aac6eba05edc651828e0713c1e6a066f2e65dba5003f6d"
     },
     {
+      "path": "server/migrations/006_crm_sales_workspace.js",
+      "sha256": "b4d387bd57cc86db268a045cb0262c11dbe5aa7a276b464aac50784b41c1f5af"
+    },
+    {
       "path": "server/migrations/baselines/legacy_v1.js",
       "sha256": "13e631ca7e2aef57e39f7dbc38e6f03e2d5323a11f38c6ce31239d793911812c"
     },
@@ -56,15 +60,15 @@
     },
     {
       "path": "server/scripts/sanitization_manifest.json",
-      "sha256": "4872802123ed1587e71f1ad91d1278ac5c81b62bbd76ebb84af98fe4b8548e48"
+      "sha256": "546aaf19fac844c8ab253b3f9bd5e618b978ea293824c8a6b150fbc5e6f71dc7"
     },
     {
       "path": "server/scripts/sanitize_production_shape.js",
-      "sha256": "66176d5f27c9c334fcaee6e1ef088eace550063c7be30cf25ca6d0060e96dcf0"
+      "sha256": "04768f6feb85ff7292ac52f8d048f5af464ad470d11fcae50cb17ecd0cf75beb"
     },
     {
       "path": "server/scripts/verify_campaign_migration_gate.js",
-      "sha256": "23df91c4b07879f02b1848f745f9a852b1d2326766f13edfdb7e3e0b61df6227"
+      "sha256": "bdc60e6a9da601c8c65cd2a374d8cb69eeea629fa6cd5af514dd995eddfe74dc"
     },
     {
       "path": "server/services/campaign_access_service.js",
@@ -77,6 +81,22 @@
     {
       "path": "server/services/crm_access_service.js",
       "sha256": "100f31b8bbd36d937b4cf8aa1730ffe980dcb03aa1eff9a8018913a7232f0218"
+    },
+    {
+      "path": "server/services/crm_contract.js",
+      "sha256": "b48a8f68b5ab589e9a1c118e2cd7cf760947e4139c3fc3695ce7f5a0b9b8326a"
+    },
+    {
+      "path": "server/services/crm_customer_service.js",
+      "sha256": "83fff3df9bb051305dea95261e45193b5de17e27c5811cbbb12944871909058c"
+    },
+    {
+      "path": "server/services/crm_query_service.js",
+      "sha256": "783f97a0d6df9f93c73debb106a8700e4b02d635b36b99cbf856aff4a0f7248b"
+    },
+    {
+      "path": "server/services/crm_scope_service.js",
+      "sha256": "311ddd96949bbc11474a185b6346f5d0f91c0f5e6ba163facd2aa7b3825854f6"
     },
     {
       "path": "server/services/idempotency_service.js",
@@ -92,7 +112,7 @@
     },
     {
       "path": "server/services/organization_access_service.js",
-      "sha256": "e7fb075e8f69ac34a932bf4d30d50e6a154fe603aec46bb3282d3f882fd85bcd"
+      "sha256": "a6a4b7d681e7da163bcf026c5fae9f93a125ef9f6604307f4c51c3bfe8a91505"
     },
     {
       "path": "server/services/sqlite_digest_service.js",

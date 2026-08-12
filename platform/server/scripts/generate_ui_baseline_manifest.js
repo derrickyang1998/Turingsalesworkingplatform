@@ -576,6 +576,56 @@ function generateManifest(options = {}) {
   return manifest;
 }
 
+function generateRuntimeManifest(options = {}) {
+  const repoRoot = path.resolve(options.repoRoot || DEFAULT_REPO_ROOT);
+  const release = String(options.release || '').trim();
+  if (!/^v\d+\.\d+\.\d+-[a-z0-9-]+$/.test(release)) {
+    throw new Error('Runtime manifest release must be a versioned release slug');
+  }
+  const current = generateManifest({
+    repoRoot,
+    baselineVersion: options.baselineVersion || DEFAULT_BASELINE_VERSION,
+    duplicateFixturePath: options.duplicateFixturePath
+  });
+  const frozenManifestPath = path.join(
+    repoRoot, 'docs', 'baselines', options.frozenBaselineVersion || DEFAULT_BASELINE_VERSION,
+    'ui-ppt-manifest.json'
+  );
+  const activeDefinitions = Object.fromEntries(Object.entries(
+    scanClassicScripts([
+      { path: path.join(repoRoot, 'platform', 'app.js'), loadOrder: 1 },
+      { path: path.join(repoRoot, 'platform', 'ppt.js'), loadOrder: 2 }
+    ], { repoRoot }).activeDefinitions
+  ).map(([name, definition]) => [name, {
+    name: definition.name,
+    source: definition.source,
+    kind: definition.kind,
+    async: definition.async,
+    line: definition.line,
+    column: definition.column,
+    loadOrder: definition.loadOrder,
+    occurrenceIndex: definition.occurrenceIndex,
+    globalIndex: definition.globalIndex
+  }]));
+  return {
+    schemaVersion: 1,
+    release,
+    generatedFrom: 'platform/server/scripts/generate_ui_baseline_manifest.js',
+    files: current.files,
+    buildMarkers: current.buildMarkers,
+    scriptCacheKeys: current.scriptCacheKeys,
+    routeCount: current.routeContracts.length,
+    routeContracts: current.routeContracts,
+    duplicateInventory: current.duplicateInventory,
+    activeDefinitions,
+    frozenVisualBaseline: {
+      version: options.frozenBaselineVersion || DEFAULT_BASELINE_VERSION,
+      path: repoRelative(repoRoot, frozenManifestPath),
+      sha256: hashFile(frozenManifestPath)
+    }
+  };
+}
+
 function parseArgs(argv) {
   const args = {
     baselineVersion: DEFAULT_BASELINE_VERSION,
@@ -631,5 +681,6 @@ module.exports = {
   scanClassicScripts,
   collectRouteContracts,
   generateManifest,
+  generateRuntimeManifest,
   maskSource
 };

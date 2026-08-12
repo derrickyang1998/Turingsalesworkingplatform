@@ -11,17 +11,18 @@ const migrationService = require('../services/migration_service');
 const sqliteDigest = require('../services/sqlite_digest_service');
 const knowledgeService = require('../services/knowledge_service');
 const { createCampaignService } = require('../services/campaign_service');
+const { buildCustomerIdentity } = require('../services/crm_contract');
 const sanitizer = require('../scripts/sanitize_production_shape');
 const migrationGate = require('../scripts/verify_campaign_migration_gate');
 const manifest = require('../scripts/sanitization_manifest.json');
-const v5Manifest = sanitizer._testing.manifestProfileForVersion(manifest, 5);
+const v6Manifest = sanitizer._testing.manifestProfileForVersion(manifest, 6);
 const {
   buildCampaignWorkflowSnapshot,
   checksumCampaignWorkflowSnapshot
 } = require('../services/campaign_workflow_service');
 
 const REGISTERED_MIGRATIONS = migrationGate.REGISTERED_MIGRATIONS;
-const EXPECTED_STRUCTURAL_POLICY_SHA256 = '00d9c96d0f06165c1c9a21211eca0de4bc00937b1a4c4dbfc65c941cc728400a';
+const EXPECTED_STRUCTURAL_POLICY_SHA256 = '3c1ca1b4f927a4c7f6a4b3be9d06d192b2ae9e5b0243d886019476fc634fa9b1';
 const BASH = process.platform === 'win32' ? 'C:\\Program Files\\Git\\bin\\bash.exe' : 'bash';
 const HAS_BASH = process.platform !== 'win32' || fs.existsSync(BASH);
 const HAS_NATIVE_FLOCK = process.platform === 'linux'
@@ -247,11 +248,11 @@ function runLinuxTestThroughWsl(t, testName, timeout = 90_000) {
   return true;
 }
 
-function migratedFixture(name, targetVersion = 5) {
+function migratedFixture(name, targetVersion = 6) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), `tm-sanitize-${name}-`));
   const dbPath = path.join(root, 'source.db');
   const migrationOptions = { rootDir: path.resolve(__dirname, '..') };
-  if (targetVersion === 5) migrationOptions.registeredMigrations = REGISTERED_MIGRATIONS;
+  if (targetVersion === 6) migrationOptions.registeredMigrations = REGISTERED_MIGRATIONS;
   const db = migrationService.openMigratedDatabase(dbPath, migrationOptions);
   return { root, dbPath, db };
 }
@@ -285,6 +286,22 @@ function populateSensitiveFixture(fixture, options = {}) {
 function populateManagedV1GateFixture(fixture) {
   const probes = populateSensitiveFixture(fixture, { protectionTrigger: false });
   const userId = fixture.db.prepare('SELECT MIN(id) AS id FROM users').get().id;
+  const insertCustomer = fixture.db.prepare(`
+    INSERT INTO customers (brand_name,company_name,stage,source,created_by,assigned_to)
+    VALUES (?,?,?,?,?,?)
+  `);
+  const negotiationCustomerId = Number(insertCustomer.run(
+    'Legacy negotiation customer', 'Legacy negotiation company', 'negotiation',
+    'managed-v1-stage-fixture', userId, userId
+  ).lastInsertRowid);
+  const maintenanceCustomerId = Number(insertCustomer.run(
+    'Legacy maintenance customer', 'Legacy maintenance company', 'maintenance',
+    'managed-v1-stage-fixture', userId, userId
+  ).lastInsertRowid);
+  fixture.db.prepare(`
+    INSERT INTO customer_activity (customer_id,user_id,action,stage_from,stage_to,notes)
+    VALUES (?,?, 'stage_change', 'negotiation', 'maintenance', 'Legacy stage transition')
+  `).run(negotiationCustomerId, userId);
   const ftsProbe = `legacyfts${crypto.randomBytes(12).toString('hex')}`;
   const entryId = Number(fixture.db.prepare(`
     INSERT INTO knowledge_entries (
@@ -297,8 +314,75 @@ function populateManagedV1GateFixture(fixture) {
   `).run(entryId, `Private managed v1 chunk ${ftsProbe}`).lastInsertRowid);
   sqliteDigest.rebuildKnowledgeChunksFts(fixture.db);
   assert.deepEqual(sqliteDigest.matchKnowledgeChunksCanary(fixture.db, ftsProbe), [chunkId]);
-  return { ...probes, ftsProbe, entryId, chunkId };
+  return {
+    ...probes,
+    ftsProbe,
+    entryId,
+    chunkId,
+    negotiationCustomerId,
+    maintenanceCustomerId
+  };
 }
+
+test('sanitizer keeps migrated probability fields inside the production 0-100 domain', () => {
+  const fixture = migratedFixture('probability-domain', 1);
+  try {
+    const userId = fixture.db.prepare('SELECT MIN(id) AS id FROM users').get().id;
+    fixture.db.prepare(`
+      INSERT INTO customers (brand_name,company_name,stage,source,created_by,assigned_to,win_probability)
+      VALUES ('Probability 20','Probability 20 company','negotiation','probability-fixture',?,?,20)
+    `).run(userId, userId);
+    fixture.db.prepare(`
+      INSERT INTO customers (brand_name,company_name,stage,source,created_by,assigned_to,win_probability)
+      VALUES ('Probability 80','Probability 80 company','maintenance','probability-fixture',?,?,80)
+    `).run(userId, userId);
+    fixture.db.close();
+
+    const outputPath = path.join(fixture.root, 'sanitized.db');
+    sanitizer.sanitizeProductionShape({ sourcePath: fixture.dbPath, outputPath });
+    const output = new Database(outputPath, { readonly: true, fileMustExist: true });
+    try {
+      const values = output.prepare(`
+        SELECT win_probability FROM customers
+        WHERE source LIKE 'tmtext-%' AND win_probability IS NOT NULL
+        ORDER BY win_probability
+      `).all().map((row) => row.win_probability);
+      assert.equal(values.length >= 2, true);
+      assert.equal(values.every((value) => Number.isSafeInteger(value) && value >= 0 && value <= 100), true);
+      assert.equal(new Set(values).size, values.length, 'distinct source probabilities retain distinct ranks');
+    } finally {
+      output.close();
+    }
+  } finally {
+    closeAndRemove(fixture);
+  }
+});
+
+test('sanitizer fails closed with a bounded error when the probability replacement domain is exhausted', () => {
+  const fixture = migratedFixture('probability-domain-exhausted', 1);
+  try {
+    const userId = fixture.db.prepare('SELECT MIN(id) AS id FROM users').get().id;
+    const insert = fixture.db.prepare(`
+      INSERT INTO customers (
+        brand_name,company_name,stage,source,created_by,assigned_to,win_probability
+      ) VALUES (?,?,'negotiation','probability-exhaustion-fixture',?,?,?)
+    `);
+    fixture.db.transaction(() => {
+      for (let value = 0; value <= 100; value += 1) {
+        insert.run(`Probability ${value}`, `Probability company ${value}`, userId, userId, value);
+      }
+    })();
+    fixture.db.close();
+
+    const outputPath = path.join(fixture.root, 'sanitized.db');
+    assert.throws(
+      () => sanitizer.sanitizeProductionShape({ sourcePath: fixture.dbPath, outputPath }),
+      /customers\.win_probability probability replacement domain is exhausted/i
+    );
+  } finally {
+    closeAndRemove(fixture);
+  }
+});
 
 function sha256Text(value) {
   return crypto.createHash('sha256').update(Buffer.from(value, 'utf8')).digest('hex');
@@ -340,7 +424,13 @@ function populateCriticalReviewFixture(fixture, options = {}) {
     referenceId: 881012,
     brandId: 881013,
     eventId: 881014,
-    dispatchId: 881015
+    dispatchId: 881015,
+    collisionCustomerId: 881016,
+    singletonCustomerId: 881017,
+    nullIdentityCustomerId: 881018,
+    contactId: 881019,
+    crmTaskId: 881020,
+    crmAuditId: 881021
   };
   const graph = {
     nodes: [
@@ -385,17 +475,90 @@ function populateCriticalReviewFixture(fixture, options = {}) {
   const chunkDigest = sha256Text(chunkContent);
   const bundleId = sha256Text('private campaign knowledge bundle');
   const blobValue = Buffer.from([0x00, 0x80, 0xff, 0x41, 0x00, 0x7f]);
+  const customerIdentity = buildCustomerIdentity({
+    brand_name: 'Private customer',
+    company_name: 'Private customer company'
+  }).key;
+  const singletonIdentity = buildCustomerIdentity({
+    brand_name: 'Private singleton',
+    company_name: 'Private singleton company'
+  }).key;
 
   fixture.db.transaction(() => {
     fixture.db.prepare(`
-      INSERT INTO customers (id,brand_name,company_name,stage,source,created_by,assigned_to)
-      VALUES (?,?,?,'qualified','sanitizer-review',?,?)
-    `).run(ids.customerId, 'Private customer', 'Private customer company', identity.userId, identity.userId);
+      INSERT INTO customers (
+        id,brand_name,company_name,stage,source,created_by,assigned_to,is_public,
+        org_id,team_id,normalized_identity_key,duplicate_enforced
+      ) VALUES (?,?,?,'proposal','sanitizer-review',?,?,0,?,?,?,0)
+    `).run(
+      ids.customerId, 'Private customer', 'Private customer company',
+      identity.userId, identity.userId, identity.orgId, identity.teamId, customerIdentity
+    );
+    fixture.db.prepare(`
+      INSERT INTO customers (
+        id,brand_name,company_name,stage,source,created_by,assigned_to,is_public,
+        org_id,team_id,normalized_identity_key,duplicate_enforced
+      ) VALUES (?,?,?,'proposal','sanitizer-review',?,?,0,?,?,?,0)
+    `).run(
+      ids.collisionCustomerId, 'Private customer', 'Private customer company',
+      identity.userId, identity.userId, identity.orgId, identity.teamId, customerIdentity
+    );
+    fixture.db.prepare(`
+      INSERT INTO customers (
+        id,brand_name,company_name,stage,source,created_by,assigned_to,is_public,
+        org_id,team_id,normalized_identity_key,duplicate_enforced
+      ) VALUES (?,?,?,'proposal','sanitizer-review',?,?,0,?,?,?,1)
+    `).run(
+      ids.singletonCustomerId, 'Private singleton', 'Private singleton company',
+      identity.userId, identity.userId, identity.orgId, identity.teamId, singletonIdentity
+    );
+    fixture.db.prepare(`
+      INSERT INTO customers (
+        id,brand_name,company_name,stage,source,created_by,assigned_to,is_public,
+        org_id,team_id,normalized_identity_key,duplicate_enforced
+      ) VALUES (?,?,?,'proposal','sanitizer-review',?,?,0,?,?,NULL,0)
+    `).run(
+      ids.nullIdentityCustomerId, 'Private null identity', 'Private null identity company',
+      identity.userId, identity.userId, identity.orgId, identity.teamId
+    );
     fixture.db.prepare(`
       INSERT INTO opportunities (
-        id,customer_id,name,stage,value,win_probability,product_name,channel_type,created_by
-      ) VALUES (?,?,'Private opportunity','proposal',12345,67,'Private product','influencer',?)
-    `).run(ids.opportunityId, ids.customerId, identity.userId);
+        id,customer_id,name,stage,value,win_probability,product_name,channel_type,created_by,
+        org_id,team_id,owner_user_id
+      ) VALUES (?,?,'Private opportunity','proposal',12345,67,'Private product','influencer',?,?,?,?)
+    `).run(
+      ids.opportunityId, ids.customerId, identity.userId,
+      identity.orgId, identity.teamId, identity.userId
+    );
+    fixture.db.prepare(`
+      INSERT INTO customer_contacts (
+        id,org_id,customer_id,name,role,email,phone,is_preferred,created_by,
+        created_at,updated_at
+      ) VALUES (?,?,?,?,?,?,?,1,?,'2026-08-01 09:00:00','2026-08-01 09:00:00')
+    `).run(
+      ids.contactId, identity.orgId, ids.customerId, 'Private buyer', 'CMO',
+      'private-buyer@example.invalid', '+1 555 0100', identity.userId
+    );
+    fixture.db.prepare(`
+      INSERT INTO crm_tasks (
+        id,org_id,team_id,customer_id,opportunity_id,owner_user_id,title,description,
+        due_at,status,source,created_by,created_at,updated_at
+      ) VALUES (?,?,?,?,?,?,'Private follow-up','Private task details',
+        '2026-08-15 09:00:00','open','manual',?,'2026-08-01 09:05:00','2026-08-01 09:05:00')
+    `).run(
+      ids.crmTaskId, identity.orgId, identity.teamId, ids.customerId,
+      ids.opportunityId, identity.userId, identity.userId
+    );
+    fixture.db.prepare(`
+      INSERT INTO crm_audit_events (
+        id,org_id,customer_id,opportunity_id,task_id,contact_id,actor_user_id,
+        event_type,request_id,correlation_id,occurred_at,metadata_json
+      ) VALUES (?,?,?,?,?,?,?,'task_created','private-request','private-correlation',
+        '2026-08-01 09:06:00','{"private_audit":"private value"}')
+    `).run(
+      ids.crmAuditId, identity.orgId, ids.customerId, ids.opportunityId,
+      ids.crmTaskId, ids.contactId, identity.userId
+    );
     fixture.db.prepare(`
       INSERT INTO campaigns (
         id,org_id,name,customer_id,opportunity_id,owner_user_id,team_id,
@@ -504,10 +667,81 @@ function populateCriticalReviewFixture(fixture, options = {}) {
   fixture.db.prepare('DELETE FROM request_idempotency WHERE campaign_id=?').run(ids.campaignId);
 
   sqliteDigest.rebuildKnowledgeChunksFts(fixture.db);
-  return { ...ids, ...identity, graph, sourceIdentity, sourceHash, entryDigest, chunkDigest, bundleId, blobValue };
+  return {
+    ...ids, ...identity, graph, sourceIdentity, sourceHash, entryDigest, chunkDigest,
+    bundleId, blobValue, customerIdentity, singletonIdentity
+  };
 }
 
 function assertCriticalFixtureInvariants(db, fixture, options = {}) {
+  const crmCustomers = db.prepare(`
+    SELECT id,brand_name,company_name,normalized_identity_key,duplicate_enforced
+    FROM customers WHERE id IN (?,?,?,?) ORDER BY id
+  `).all(
+    fixture.customerId, fixture.collisionCustomerId,
+    fixture.singletonCustomerId, fixture.nullIdentityCustomerId
+  );
+  assert.equal(crmCustomers.length, 4, 'populated v6 CRM customer rows must survive');
+  const [primaryCustomer, collisionCustomer, singletonCustomer, nullIdentityCustomer] = crmCustomers;
+  assert.equal(primaryCustomer.normalized_identity_key, buildCustomerIdentity(primaryCustomer).key);
+  assert.equal(collisionCustomer.normalized_identity_key, primaryCustomer.normalized_identity_key);
+  assert.equal(primaryCustomer.duplicate_enforced, 0);
+  assert.equal(collisionCustomer.duplicate_enforced, 0);
+  assert.equal(singletonCustomer.normalized_identity_key, buildCustomerIdentity(singletonCustomer).key);
+  assert.equal(singletonCustomer.duplicate_enforced, 1);
+  assert.equal(nullIdentityCustomer.normalized_identity_key, null);
+  assert.equal(nullIdentityCustomer.duplicate_enforced, 0);
+
+  assert.deepEqual(
+    db.prepare(`
+      SELECT org_id,customer_id,is_preferred,created_by,archived_at
+      FROM customer_contacts WHERE id=?
+    `).get(fixture.contactId),
+    {
+      org_id: fixture.orgId,
+      customer_id: fixture.customerId,
+      is_preferred: 1,
+      created_by: fixture.userId,
+      archived_at: null
+    }
+  );
+  assert.deepEqual(
+    db.prepare(`
+      SELECT org_id,team_id,customer_id,opportunity_id,owner_user_id,status,source,
+        completed_at,completed_by,created_by
+      FROM crm_tasks WHERE id=?
+    `).get(fixture.crmTaskId),
+    {
+      org_id: fixture.orgId,
+      team_id: fixture.teamId,
+      customer_id: fixture.customerId,
+      opportunity_id: fixture.opportunityId,
+      owner_user_id: fixture.userId,
+      status: 'open',
+      source: 'manual',
+      completed_at: null,
+      completed_by: null,
+      created_by: fixture.userId
+    }
+  );
+  assert.deepEqual(
+    db.prepare(`
+      SELECT org_id,customer_id,opportunity_id,task_id,contact_id,actor_user_id,event_type
+      FROM crm_audit_events WHERE id=?
+    `).get(fixture.crmAuditId),
+    {
+      org_id: fixture.orgId,
+      customer_id: fixture.customerId,
+      opportunity_id: fixture.opportunityId,
+      task_id: fixture.crmTaskId,
+      contact_id: fixture.contactId,
+      actor_user_id: fixture.userId,
+      event_type: 'task_created'
+    }
+  );
+  assert.equal(db.pragma('quick_check', { simple: true }), 'ok');
+  assert.deepEqual(db.pragma('foreign_key_check'), []);
+
   const link = db.prepare(`
     SELECT record_id,typeof(record_id) AS record_type,bundle_id
     FROM campaign_record_links WHERE id=?
@@ -724,20 +958,20 @@ function compactSqliteClone(sourcePath, outputPath, mutate, options = {}) {
   return outputPath;
 }
 
-test('manifest declares exact managed v1 as primary and keeps v5 in one isolated exact profile', () => {
+test('manifest declares exact managed v1 as primary and keeps v6 in one isolated exact profile', () => {
   const v1Fixture = migratedFixture('manifest-v1-primary', 1);
-  const v5Fixture = migratedFixture('manifest-v5-isolated', 5);
+  const v6Fixture = migratedFixture('manifest-v6-isolated', 6);
   try {
     assert.equal(manifest.schemaVersion, 1);
-    assert.deepEqual(manifest.exactProfiles.map((profile) => profile.schemaVersion), [5]);
+    assert.deepEqual(manifest.exactProfiles.map((profile) => profile.schemaVersion), [6]);
 
     const v1Profile = sanitizer._testing.manifestProfileForVersion(manifest, 1);
-    const v5Profile = sanitizer._testing.manifestProfileForVersion(manifest, 5);
+    const v6Profile = sanitizer._testing.manifestProfileForVersion(manifest, 6);
     assert.equal(v1Profile.schemaVersion, 1);
-    assert.equal(v5Profile.schemaVersion, 5);
+    assert.equal(v6Profile.schemaVersion, 6);
     assert.equal(v1Profile.objects.length, sanitizer.actualInventory(v1Fixture.db).length);
-    assert.equal(v5Profile.objects.length, sanitizer.actualInventory(v5Fixture.db).length);
-    for (const profile of [v1Profile, v5Profile]) {
+    assert.equal(v6Profile.objects.length, sanitizer.actualInventory(v6Fixture.db).length);
+    for (const profile of [v1Profile, v6Profile]) {
       assert.equal(profile.jsonPolicy.preserveLeafTypes, true);
       assert.equal(
         profile.jsonPolicy.booleanReplacement,
@@ -754,26 +988,26 @@ test('manifest declares exact managed v1 as primary and keeps v5 in one isolated
     }
     assert.equal(sanitizer.STRUCTURAL_POLICY_SHA256, EXPECTED_STRUCTURAL_POLICY_SHA256);
     assert.doesNotThrow(() => sanitizer.validateManifest(manifest, v1Fixture.db));
-    assert.doesNotThrow(() => sanitizer.validateManifest(manifest, v5Fixture.db));
+    assert.doesNotThrow(() => sanitizer.validateManifest(manifest, v6Fixture.db));
   } finally {
     closeAndRemove(v1Fixture);
-    closeAndRemove(v5Fixture);
+    closeAndRemove(v6Fixture);
   }
 });
 
 test('exact sanitizer profiles reject primary, compatibility, version, and cross-profile drift', () => {
   const v1Fixture = migratedFixture('manifest-v1-profile-drift', 1);
-  const v5Fixture = migratedFixture('manifest-v5-profile-drift', 5);
+  const v6Fixture = migratedFixture('manifest-v6-profile-drift', 6);
   try {
     const cases = [
       ['primary inventory', v1Fixture.db, (candidate) => {
         candidate.objects[0].columns[0].name = 'drifted_primary_column';
       }],
-      ['compatibility inventory', v5Fixture.db, (candidate) => {
-        candidate.exactProfiles[0].objects[0].columns[0].name = 'drifted_v5_column';
+      ['compatibility inventory', v6Fixture.db, (candidate) => {
+        candidate.exactProfiles[0].objects[0].columns[0].name = 'drifted_v6_column';
       }],
       ['primary version', v1Fixture.db, (candidate) => { candidate.schemaVersion = 2; }],
-      ['compatibility version', v5Fixture.db, (candidate) => {
+      ['compatibility version', v6Fixture.db, (candidate) => {
         candidate.exactProfiles[0].schemaVersion = 1;
       }],
       ['JSON boolean replacement policy', v1Fixture.db, (candidate) => {
@@ -796,7 +1030,7 @@ test('exact sanitizer profiles reject primary, compatibility, version, and cross
     }
   } finally {
     closeAndRemove(v1Fixture);
-    closeAndRemove(v5Fixture);
+    closeAndRemove(v6Fixture);
   }
 });
 
@@ -808,11 +1042,11 @@ test('sanitizer rejects unknown, partial, and future managed source shapes witho
     ['partial', 1, (db) => {
       db.exec('DROP TABLE web_search_cache');
     }],
-    ['future', 5, (db) => {
+    ['future', 6, (db) => {
       db.prepare(`
         INSERT INTO schema_migrations (
           version,name,checksum,source_path,engine_version,applied_at
-        ) VALUES (6,'006_future_fixture',?,'migrations/006_future_fixture.js',1,'2026-01-02 03:04:05')
+        ) VALUES (7,'007_future_fixture',?,'migrations/007_future_fixture.js',1,'2026-01-02 03:04:05')
       `).run('f'.repeat(64));
     }]
   ];
@@ -834,14 +1068,14 @@ test('sanitizer rejects unknown, partial, and future managed source shapes witho
   }
 });
 
-test('manifest exhaustively classifies v5 base, virtual, shadow, storage, and closed JSON paths', () => {
+test('manifest exhaustively classifies v6 base, virtual, shadow, storage, and closed JSON paths', () => {
   const fixture = migratedFixture('manifest');
-  const v5Manifest = sanitizer._testing.manifestProfileForVersion(manifest, 5);
+  const v6Manifest = sanitizer._testing.manifestProfileForVersion(manifest, 6);
   assert.doesNotThrow(() => sanitizer.validateManifest(manifest, fixture.db));
-  assert.equal(v5Manifest.objects.length, sanitizer.actualInventory(fixture.db).length);
-  assert.equal(v5Manifest.objects.filter((object) => object.type === 'virtual').length, 1);
-  assert.equal(v5Manifest.objects.filter((object) => object.type === 'shadow').length, 5);
-  assert.ok(v5Manifest.objects.flatMap((object) => object.columns).every((column) => column.classification));
+  assert.equal(v6Manifest.objects.length, sanitizer.actualInventory(fixture.db).length);
+  assert.equal(v6Manifest.objects.filter((object) => object.type === 'virtual').length, 1);
+  assert.equal(v6Manifest.objects.filter((object) => object.type === 'shadow').length, 5);
+  assert.ok(v6Manifest.objects.flatMap((object) => object.columns).every((column) => column.classification));
   assert.ok(manifest.categories['secret-null']);
   assert.ok(manifest.categories['preserved-accounting']);
 
@@ -1054,12 +1288,12 @@ test('template checksum is rebuilt while response_bytes remains preserved non-re
   const fixture = migratedFixture('explicit-derived-evidence');
   const populated = populateCriticalReviewFixture(fixture);
   const binary = insertBinaryIdempotencyFixture(fixture.db, populated);
-  const responseBytesColumn = v5Manifest.objects
+  const responseBytesColumn = v6Manifest.objects
     .find((object) => object.name === 'request_idempotency').columns
     .find((column) => column.name === 'response_bytes');
   assert.equal(responseBytesColumn.classification, 'preserved-accounting');
-  assert.deepEqual(v5Manifest.semanticPolicies.preservedAccounting, ['request_idempotency.response_bytes']);
-  assert.equal(v5Manifest.derivedRebuilds.includes('request_idempotency.response_bytes'), false);
+  assert.deepEqual(v6Manifest.semanticPolicies.preservedAccounting, ['request_idempotency.response_bytes']);
+  assert.equal(v6Manifest.derivedRebuilds.includes('request_idempotency.response_bytes'), false);
   assert.equal(sanitizer._testing.captureRequestIdempotencyResponseEvidence, undefined);
   assert.equal(sanitizer._testing.rebuildRequestIdempotencyResponseEvidence, undefined);
 
@@ -1444,7 +1678,7 @@ test('secret-null fails closed for non-null data and malformed or partial output
   assert.throws(
     () => sanitizer._testing.transformedValue(
       'secret-null', 'users', 'password_hash', 'non-null-secret', 'text',
-      new Map(), v5Manifest.jsonPolicy, undefined, null
+      new Map(), v6Manifest.jsonPolicy, undefined, null
     ),
     /secret-null column contains data/i
   );
@@ -1465,7 +1699,7 @@ test('secret-null fails closed for non-null data and malformed or partial output
   closeAndRemove(fixture);
 });
 
-test('campaign migration gate sanitizes populated managed v1 and verifies two exact restores through v5', () => {
+test('campaign migration gate sanitizes populated managed v1 and verifies two exact restores through v6', () => {
   const fixture = migratedFixture('twice', 1);
   const populated = populateManagedV1GateFixture(fixture);
   const sourceClassification = migrationService.classifyDatabase(fixture.db, {
@@ -1482,9 +1716,33 @@ test('campaign migration gate sanitizes populated managed v1 and verifies two ex
   assert.equal(report.format, 'tm-campaign-migration-gate-v1');
   assert.equal(report.runs, 2);
   assert.equal(report.sourceVersion, 1);
-  assert.equal(report.targetVersion, 5);
+  assert.equal(report.targetVersion, 6);
   assert.equal(report.preMigrationRestoreVerified, true);
   assert.equal(report.legacyPreservationVerified, true);
+  const sanitizedPath = path.join(fixture.root, 'stage-preservation-sanitized.db');
+  sanitizer.sanitizeProductionShape({ sourcePath: fixture.dbPath, outputPath: sanitizedPath });
+  const sanitized = new Database(sanitizedPath, { readonly: true, fileMustExist: true });
+  try {
+    assert.deepEqual(
+      sanitized.prepare(`
+        SELECT id,stage FROM customers
+        WHERE id IN (?,?) ORDER BY id
+      `).all(populated.negotiationCustomerId, populated.maintenanceCustomerId),
+      [
+        { id: populated.negotiationCustomerId, stage: 'negotiation' },
+        { id: populated.maintenanceCustomerId, stage: 'maintenance' }
+      ]
+    );
+    assert.deepEqual(
+      sanitized.prepare(`
+        SELECT stage_from,stage_to FROM customer_activity
+        WHERE customer_id=? ORDER BY id DESC LIMIT 1
+      `).get(populated.negotiationCustomerId),
+      { stage_from: 'negotiation', stage_to: 'maintenance' }
+    );
+  } finally {
+    sanitized.close();
+  }
   assert.ok(report.legacyTableCount > 20);
   assert.ok(report.legacyRowCount > 0);
   assert.match(report.preMigration.topologySha256, /^[0-9a-f]{64}$/);
@@ -1510,14 +1768,14 @@ test('campaign migration gate sanitizes populated managed v1 and verifies two ex
   closeAndRemove(fixture);
 });
 
-test('campaign migration gate rejects an exact sanitized v5 no-op source at the verifier boundary', () => {
-  const fixture = migratedFixture('reject-v5-noop', 5);
+test('campaign migration gate rejects an exact sanitized v6 no-op source at the verifier boundary', () => {
+  const fixture = migratedFixture('reject-v6-noop', 6);
   populateSensitiveFixture(fixture, { protectionTrigger: false });
   fixture.db.close();
   const sourceSha256 = sha256File(fixture.dbPath);
   assert.throws(
     () => migrationGate.verifyCampaignMigrationGate({ sourcePath: fixture.dbPath }),
-    /pre-Phase-4 sanitized source version must be exactly 1; got 5/i
+    /pre-Phase-4 sanitized source version must be exactly 1; got 6/i
   );
   assert.equal(sha256File(fixture.dbPath), sourceSha256);
   closeAndRemove(fixture);
@@ -5449,7 +5707,7 @@ test('privileged preparation checkpoints and compacts a secret-free readonly sou
     fixture.db.prepare('SELECT 1 AS present FROM activity_log WHERE instr(details,?)>0 LIMIT 1').get(shortSecret),
     'fixture must carry a short secret into a non-secret audit detail'
   );
-  const sourceSecretProbes = sanitizer._testing.collectSecretOnlySourceProbes(fixture.db, v5Manifest);
+  const sourceSecretProbes = sanitizer._testing.collectSecretOnlySourceProbes(fixture.db, v6Manifest);
   assert.ok(sourceSecretProbes.rawProbes.every((probe) => probe.category === 'secret-synthetic'));
   assert.ok(
     sourceSecretProbes.authorizedEntries.some((entry) => (
@@ -5499,8 +5757,8 @@ test('privileged preparation checkpoints and compacts a secret-free readonly sou
     assert.equal(preparedBytes.includes(Buffer.from(representation, 'utf8')), false, 'prepared SQLite must not retain a secret representation');
     assert.equal(JSON.stringify(prepared).includes(representation), false, 'preparation result must not persist raw secret material');
   }
-  assert.doesNotThrow(() => sanitizer._testing.assertNoForbiddenValues(preparedPath, sourceSecretProbes, v5Manifest));
-  assert.doesNotThrow(() => sanitizer._testing.assertNoSecretCopies(preparedPath, sourceSecretProbes, v5Manifest));
+  assert.doesNotThrow(() => sanitizer._testing.assertNoForbiddenValues(preparedPath, sourceSecretProbes, v6Manifest));
+  assert.doesNotThrow(() => sanitizer._testing.assertNoSecretCopies(preparedPath, sourceSecretProbes, v6Manifest));
   const copiedShortSecretPath = compactSqliteClone(
     preparedPath,
     path.join(fixture.root, 'prepared-short-secret-copy.db'),
@@ -5519,7 +5777,7 @@ test('privileged preparation checkpoints and compacts a secret-free readonly sou
     }
   );
   assert.throws(
-    () => sanitizer._testing.assertNoSecretCopies(copiedShortSecretPath, sourceSecretProbes, v5Manifest),
+    () => sanitizer._testing.assertNoSecretCopies(copiedShortSecretPath, sourceSecretProbes, v6Manifest),
     (error) => {
       assert.match(error.message, /users\.password_hash/i);
       assert.match(error.message, /activity_log\.details/i);
@@ -7001,7 +7259,7 @@ test('forbidden collection covers short secrets, numerics, every JSON leaf, FTS 
   const populated = populateCriticalReviewFixture(fixture);
   const shortSecret = 'x7';
   fixture.db.prepare('UPDATE users SET password_hash=? WHERE id=(SELECT MIN(id) FROM users)').run(shortSecret);
-  const forbidden = sanitizer._testing.collectForbiddenValues(fixture.db, v5Manifest);
+  const forbidden = sanitizer._testing.collectForbiddenValues(fixture.db, v6Manifest);
 
   const requiredContexts = [
     ['cell', 'users.password_hash', (entry) => entry.value === shortSecret],
@@ -7038,7 +7296,7 @@ test('forbidden collection covers short secrets, numerics, every JSON leaf, FTS 
   fixture.db.close();
   fs.copyFileSync(fixture.dbPath, leakyPath);
   assert.throws(
-    () => sanitizer._testing.assertNoForbiddenValues(leakyPath, forbidden, v5Manifest),
+    () => sanitizer._testing.assertNoForbiddenValues(leakyPath, forbidden, v6Manifest),
     (error) => {
       assert.equal(error.name, 'SanitizerTypedSourceDomainIntersectionError');
       assert.equal(error.code, 'TM_SANITIZER_TYPED_SOURCE_DOMAIN_INTERSECTION');
@@ -7061,7 +7319,7 @@ test('forbidden collection authorizes JSON keys only through their closed path p
     const populated = populateCriticalReviewFixture(fixture, {
       knowledgeEntryMetadata: { previous_version: 7, source: 'private-dynamic-metadata-source' }
     });
-    const forbidden = sanitizer._testing.collectForbiddenValues(fixture.db, v5Manifest);
+    const forbidden = sanitizer._testing.collectForbiddenValues(fixture.db, v6Manifest);
 
     for (const [key, value] of [['previous_version', 7], ['source', 'private-dynamic-metadata-source']]) {
       const keyContext = `knowledge_entries.metadata_json#/${key}@key`;
@@ -7101,7 +7359,7 @@ test('forbidden collection authorizes JSON keys only through their closed path p
       for (const trigger of triggers) db.exec(trigger.sql);
     });
     assert.throws(
-      () => sanitizer._testing.assertNoForbiddenValues(leakPath, forbidden, v5Manifest),
+      () => sanitizer._testing.assertNoForbiddenValues(leakPath, forbidden, v6Manifest),
       /knowledge_entries\.metadata_json.*previous_version|previous_version.*knowledge_entries\.metadata_json/i,
       'dynamic JSON keys must remain record-level forbidden even when physical schema text shares their name'
     );
@@ -7137,7 +7395,7 @@ test('raw leak scanning rejects short raw, UTF, hex, and base64 probes without a
 });
 
 test('replacement sentinels are confined to manifest-authorized cells and JSON positions', () => {
-  assert.deepEqual(v5Manifest.semanticPolicies.replacementSentinels.allowedClassifications, {
+  assert.deepEqual(v6Manifest.semanticPolicies.replacementSentinels.allowedClassifications, {
     'tmtext-': ['synthetic-text'],
     'tmjson-': ['json-leaves'],
     'tmkey-': ['json-leaves'],
@@ -7152,14 +7410,14 @@ test('replacement sentinels are confined to manifest-authorized cells and JSON p
   sanitizer.sanitizeProductionShape({ sourcePath: fixture.dbPath, outputPath });
   const output = new Database(outputPath);
   try {
-    assert.doesNotThrow(() => sanitizer._testing.assertReplacementSentinelsConfined(output, v5Manifest));
+    assert.doesNotThrow(() => sanitizer._testing.assertReplacementSentinelsConfined(output, v6Manifest));
     output.prepare("UPDATE schema_migrations SET source_path='tmtext-illegal-structural-cell' WHERE version=(SELECT MIN(version) FROM schema_migrations)").run();
     assert.throws(
-      () => sanitizer._testing.assertReplacementSentinelsConfined(output, v5Manifest),
+      () => sanitizer._testing.assertReplacementSentinelsConfined(output, v6Manifest),
       /sentinel.*schema_migrations\.source_path|classified/i
     );
     output.prepare("UPDATE schema_migrations SET source_path='migrations/fixture.js' WHERE version=(SELECT MIN(version) FROM schema_migrations)").run();
-    const metadataColumn = v5Manifest.objects
+    const metadataColumn = v6Manifest.objects
       .find((object) => object.name === 'knowledge_entries').columns
       .find((column) => column.name === 'metadata_json');
     assert.throws(
@@ -7167,7 +7425,7 @@ test('replacement sentinels are confined to manifest-authorized cells and JSON p
         { leak: 'tm-node-illegal-json-position' },
         'knowledge_entries.metadata_json',
         metadataColumn.classification,
-        v5Manifest.semanticPolicies.replacementSentinels,
+        v6Manifest.semanticPolicies.replacementSentinels,
         metadataColumn.jsonPolicy
       ),
       /sentinel.*knowledge_entries\.metadata_json.*\/leak|authorized JSON position/i
@@ -7214,13 +7472,13 @@ test('per-PK semantic shape preserves exact NULLs, storage classes, and equality
   for (const [id, rating, followers, angle] of rows) {
     insert.run(id, `shape-${id}`, `shape-cn-${id}`, rating, followers, angle);
   }
-  const before = sanitizer._testing.captureSemanticShape(fixture.db, v5Manifest);
+  const before = sanitizer._testing.captureSemanticShape(fixture.db, v6Manifest);
   fixture.db.close();
   const outputPath = path.join(fixture.root, 'sanitized.db');
   sanitizer.sanitizeProductionShape({ sourcePath: fixture.dbPath, outputPath });
   const output = new Database(outputPath);
   try {
-    const after = sanitizer._testing.captureSemanticShape(output, v5Manifest);
+    const after = sanitizer._testing.captureSemanticShape(output, v6Manifest);
     assert.doesNotThrow(() => sanitizer._testing.assertSemanticShapePreserved(before, after));
     assert.equal(output.prepare('SELECT typeof(creative_angles) AS type FROM brands WHERE id=882105').get().type, 'blob');
     assert.equal(output.prepare('SELECT typeof(amazon_rating) AS type FROM brands WHERE id=882101').get().type, 'real');
@@ -7229,7 +7487,7 @@ test('per-PK semantic shape preserves exact NULLs, storage classes, and equality
     output.prepare('UPDATE brands SET creative_angles=? WHERE id=882106').run(textValue);
     output.prepare('UPDATE brands SET creative_angles=NULL WHERE id=882104').run();
     assert.throws(
-      () => sanitizer._testing.assertSemanticShapePreserved(after, sanitizer._testing.captureSemanticShape(output, v5Manifest)),
+      () => sanitizer._testing.assertSemanticShapePreserved(after, sanitizer._testing.captureSemanticShape(output, v6Manifest)),
       /NULL.*brands\.creative_angles|row-level NULL/i
     );
     output.prepare('UPDATE brands SET creative_angles=? WHERE id=882104').run(textValue);
@@ -7239,7 +7497,7 @@ test('per-PK semantic shape preserves exact NULLs, storage classes, and equality
     output.prepare('UPDATE brands SET creative_angles=? WHERE id=882105').run(textValue);
     output.prepare('UPDATE brands SET creative_angles=? WHERE id=882104').run(blobValue);
     assert.throws(
-      () => sanitizer._testing.assertSemanticShapePreserved(after, sanitizer._testing.captureSemanticShape(output, v5Manifest)),
+      () => sanitizer._testing.assertSemanticShapePreserved(after, sanitizer._testing.captureSemanticShape(output, v6Manifest)),
       /storage class.*brands\.creative_angles/i
     );
     output.prepare('UPDATE brands SET creative_angles=? WHERE id=882105').run(blobValue);
@@ -7250,7 +7508,7 @@ test('per-PK semantic shape preserves exact NULLs, storage classes, and equality
     output.prepare('UPDATE brands SET creative_angles=? WHERE id=882102').run(second);
     output.prepare('UPDATE brands SET creative_angles=? WHERE id=882103').run(first);
     assert.throws(
-      () => sanitizer._testing.assertSemanticShapePreserved(after, sanitizer._testing.captureSemanticShape(output, v5Manifest)),
+      () => sanitizer._testing.assertSemanticShapePreserved(after, sanitizer._testing.captureSemanticShape(output, v6Manifest)),
       /equality partition.*brands\.creative_angles/i
     );
   } finally {
@@ -7276,7 +7534,7 @@ test('record-level scan authorizes only declared structural contexts and rejects
     INSERT INTO brands (name,name_cn,creative_angles,created_at)
     VALUES ('record-context-target','record-context-target','source-safe',CURRENT_TIMESTAMP)
   `).run().lastInsertRowid);
-  const forbidden = sanitizer._testing.collectForbiddenValues(fixture.db, v5Manifest);
+  const forbidden = sanitizer._testing.collectForbiddenValues(fixture.db, v6Manifest);
   assert.ok(forbidden.rawProbes.some((probe) => (
     probe.context === 'teams.code'
       && probe.encoding === 'utf8'
@@ -7287,13 +7545,13 @@ test('record-level scan authorizes only declared structural contexts and rejects
   const cleanPath = path.join(fixture.root, 'clean.db');
   sanitizer.sanitizeProductionShape({ sourcePath: fixture.dbPath, outputPath: cleanPath });
   assert.ok(fs.readFileSync(cleanPath).includes(Buffer.from('code')), 'fixture must contain the schema/structural collision');
-  assert.doesNotThrow(() => sanitizer._testing.assertNoForbiddenValues(cleanPath, forbidden, v5Manifest));
+  assert.doesNotThrow(() => sanitizer._testing.assertNoForbiddenValues(cleanPath, forbidden, v6Manifest));
 
   const leakPath = compactSqliteClone(cleanPath, path.join(fixture.root, 'context-leak.db'), (db) => {
     db.prepare('UPDATE brands SET creative_angles=? WHERE id=?').run('prefix:code:suffix', targetBrandId);
   });
   assert.throws(
-    () => sanitizer._testing.assertNoForbiddenValues(leakPath, forbidden, v5Manifest),
+    () => sanitizer._testing.assertNoForbiddenValues(leakPath, forbidden, v6Manifest),
     (error) => {
       assert.match(error.message, /teams\.code/i);
       assert.match(error.message, /brands\.creative_angles/i);
@@ -7305,7 +7563,7 @@ test('record-level scan authorizes only declared structural contexts and rejects
     db.prepare('UPDATE brands SET creative_angles=? WHERE id=?').run('prefixcodesuffix', targetBrandId);
   });
   assert.throws(
-    () => sanitizer._testing.assertNoForbiddenValues(containerPath, forbidden, v5Manifest),
+    () => sanitizer._testing.assertNoForbiddenValues(containerPath, forbidden, v6Manifest),
     (error) => {
       assert.match(error.message, /teams\.code/i);
       assert.match(error.message, /brands\.creative_angles/i);
@@ -7324,7 +7582,7 @@ test('record-level scan authorizes only declared structural contexts and rejects
   }, { vacuum: false });
   assert.ok(fs.readFileSync(freeSpacePath).includes(Buffer.from(freeSpaceMarker)), 'fixture must retain a non-live page coincidence');
   assert.throws(
-    () => sanitizer._testing.assertNoForbiddenValues(freeSpacePath, forbidden, v5Manifest),
+    () => sanitizer._testing.assertNoForbiddenValues(freeSpacePath, forbidden, v6Manifest),
     /teams\.code|classified source leak/i,
     'physical scanning must reject a complete short secret in non-live page bytes'
   );
@@ -7338,7 +7596,7 @@ test('record-level scan rejects live UTF, hex, base64, aligned UTF-16, and short
     INSERT INTO brands (name,name_cn,youtube_followers,creative_angles,created_at)
     VALUES ('record-encoding-target','record-encoding-target',731927,'source-safe',CURRENT_TIMESTAMP)
   `).run().lastInsertRowid);
-  const forbidden = sanitizer._testing.collectForbiddenValues(fixture.db, v5Manifest);
+  const forbidden = sanitizer._testing.collectForbiddenValues(fixture.db, v6Manifest);
   fixture.db.close();
   const cleanPath = path.join(fixture.root, 'clean.db');
   sanitizer.sanitizeProductionShape({ sourcePath: fixture.dbPath, outputPath: cleanPath });
@@ -7358,7 +7616,7 @@ test('record-level scan rejects live UTF, hex, base64, aligned UTF-16, and short
         db.prepare('UPDATE brands SET creative_angles=? WHERE id=?').run(value, targetBrandId);
       });
       assert.throws(
-        () => sanitizer._testing.assertNoForbiddenValues(candidatePath, forbidden, v5Manifest),
+        () => sanitizer._testing.assertNoForbiddenValues(candidatePath, forbidden, v6Manifest),
         (error) => {
           assert.match(error.message, /forbidden|leak/i);
           assert.match(error.message, /brands\.creative_angles/i);
@@ -7372,7 +7630,7 @@ test('record-level scan rejects live UTF, hex, base64, aligned UTF-16, and short
       db.prepare('UPDATE brands SET amazon_rating=? WHERE id=?').run(731927, targetBrandId);
     });
     assert.throws(
-      () => sanitizer._testing.assertNoForbiddenValues(crossNumericPath, forbidden, v5Manifest),
+      () => sanitizer._testing.assertNoForbiddenValues(crossNumericPath, forbidden, v6Manifest),
       (error) => {
         assert.match(error.message, /brands\.youtube_followers/i);
         assert.match(error.message, /brands\.amazon_rating/i);
@@ -7390,7 +7648,7 @@ test('record-level scan rejects live UTF, hex, base64, aligned UTF-16, and short
     }, { vacuum: false });
     assert.ok(fs.readFileSync(physicalShortPath).includes(Buffer.from('prefixx7suffix')));
     assert.throws(
-      () => sanitizer._testing.assertNoForbiddenValues(physicalShortPath, forbidden, v5Manifest),
+      () => sanitizer._testing.assertNoForbiddenValues(physicalShortPath, forbidden, v6Manifest),
       /users\.password_hash|classified source leak/i,
       'physical scanning must not exempt a complete short sensitive value'
     );

@@ -332,13 +332,13 @@ test('deployment source verdict rejects a same-name verifier supplied by the can
   );
 });
 
-test('trusted source manifest pins the sanitizer closure, policy, baseline, and exact v1-to-v5 bundle', () => {
+test('trusted source manifest pins the sanitizer closure, policy, baseline, and exact v1-to-v6 bundle', () => {
   const manifest = loadTrustedManifest();
   const paths = new Set(manifest.files.map((entry) => entry.path));
   assert.equal(manifest.format, 'tm-trusted-production-source-manifest-v1');
   assert.deepEqual(manifest.migrationContract, {
     sourceVersion: 1,
-    targetVersion: 5,
+    targetVersion: 6,
     runs: 2,
     deterministicAppendTables: ['activity_log']
   });
@@ -349,6 +349,10 @@ test('trusted source manifest pins the sanitizer closure, policy, baseline, and 
     'server/services/campaign_access_service.js',
     'server/services/campaign_workflow_service.js',
     'server/services/crm_access_service.js',
+    'server/services/crm_contract.js',
+    'server/services/crm_customer_service.js',
+    'server/services/crm_query_service.js',
+    'server/services/crm_scope_service.js',
     'server/services/idempotency_service.js',
     'server/services/knowledge_service.js',
     'server/services/migration_service.js',
@@ -361,6 +365,7 @@ test('trusted source manifest pins the sanitizer closure, policy, baseline, and 
     'server/migrations/003_campaign_workflow_dispatch_evidence.js',
     'server/migrations/004_knowledge_capacity_observability.js',
     'server/migrations/005_knowledge_custody_projection.js',
+    'server/migrations/006_crm_sales_workspace.js',
     'server/migrations/vendor/bcryptjs_v3_0_3.js',
     'server/package.json',
     'server/package-lock.json'
@@ -454,7 +459,7 @@ test('trusted bundle staging rejects a candidate sanitizer that would substitute
   assert.equal(fs.existsSync(bundleRoot), false, 'a forged sanitizer must not publish executable trusted bytes');
 });
 
-test('trusted deployment-side verifier independently admits exact populated v1 through two preserved v1-to-v5 runs', (t) => {
+test('trusted deployment-side verifier independently admits exact populated v1 through two preserved v1-to-v6 runs', (t) => {
   const gate = loadTrustedGate();
   const fixture = createV1Fixture(t, 'two-runs');
   const sanitizedPath = path.join(fixture.root, 'trusted-sanitized-v1.db');
@@ -499,7 +504,7 @@ test('trusted deployment-side verifier independently admits exact populated v1 t
   }, {
     format: 'tm-trusted-production-source-verdict-v1',
     sourceVersion: 1,
-    targetVersion: 5,
+    targetVersion: 6,
     runs: 2,
     preMigrationRestoreVerified: true,
     legacyPreservationVerified: true
@@ -549,7 +554,7 @@ test('trusted verifier rejects a malicious sanitizer that substitutes an unrelat
   assert.notEqual(
     result.status,
     0,
-    'an unrelated minimal v1 output must be rejected even when it independently migrates to v5'
+    'an unrelated minimal v1 output must be rejected even when it independently migrates to v6'
   );
   assert.match(result.stderr, /trusted sanitizer output must not exist/i);
 });

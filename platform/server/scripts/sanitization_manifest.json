@@ -1,48 +1,6 @@
 {
   "format": "tm-sanitization-manifest-v1",
   "schemaVersion": 1,
-  "categories": {
-    "structural": "exact table/column relationship, closed enum, validated time, identifier, or schema value",
-    "synthetic-text": "deterministic non-production text preserving equality partitions",
-    "synthetic-contact": "deterministic inert contact value",
-    "synthetic-email": "deterministic example.invalid address",
-    "synthetic-url": "deterministic example.invalid URL",
-    "reference-synthetic": "deterministic non-production identifier shared by an explicit reference group",
-    "secret-synthetic": "disjoint inert credential sentinel preserving nullness",
-    "secret-null": "NULL only; source column must be entirely NULL",
-    "json-leaves": "closed per-column paths or explicitly sanitized dynamic keys and leaves",
-    "sensitive-number": "deterministic rank bucket preserving null/equality/cardinality",
-    "blob-digest": "deterministic digest bytes preserving byte length",
-    "dependent-digest": "deterministic SHA-256 replacement derived from sanitized ownership row",
-    "derived": "recomputed or allowlisted aggregate",
-    "preserved-accounting": "source accounting retained because the external binary body is absent",
-    "virtual-derived": "never copied; rebuilt from sanitized base tables",
-    "shadow-derived": "never copied; rebuilt by SQLite FTS5",
-    "system-derived": "SQLite-owned schema or sequence object"
-  },
-  "jsonPolicy": {
-    "allowedLeafTypes": [
-      "null",
-      "boolean",
-      "number",
-      "string"
-    ],
-    "preserveLeafTypes": true,
-    "booleanReplacement": "type-preserving-source-disjoint-or-reject",
-    "rejectPrototypeKeys": true,
-    "rejectNonFiniteNumbers": true,
-    "maxDepth": 64,
-    "maxLeaves": 100000
-  },
-  "fts": [
-    {
-      "virtualName": "knowledge_chunks_fts",
-      "projectionName": "knowledge_chunks_v1",
-      "tokenizerOptions": "unicode61",
-      "keyColumnCsv": "entry_id,chunk_id",
-      "indexedColumnCsv": "title,content,tags"
-    }
-  ],
   "semanticPolicies": {
     "storage": {
       "preservePerCellStorageClass": true,
@@ -113,7 +71,7 @@
       "mode": "frozen-exact-table-column-policy",
       "unknownText": "transform-or-reject",
       "validatorVersion": "tm-structural-policy-v2-calendar-exact",
-      "policySha256": "00d9c96d0f06165c1c9a21211eca0de4bc00937b1a4c4dbfc65c941cc728400a"
+      "policySha256": "3c1ca1b4f927a4c7f6a4b3be9d06d192b2ae9e5b0243d886019476fc634fa9b1"
     }
   },
   "equalityGroups": [],
@@ -140,6 +98,48 @@
     "knowledge_chunks.token_count",
     "ai_messages.total_tokens",
     "knowledge_chunks_fts"
+  ],
+  "categories": {
+    "structural": "exact table/column relationship, closed enum, validated time, identifier, or schema value",
+    "synthetic-text": "deterministic non-production text preserving equality partitions",
+    "synthetic-contact": "deterministic inert contact value",
+    "synthetic-email": "deterministic example.invalid address",
+    "synthetic-url": "deterministic example.invalid URL",
+    "reference-synthetic": "deterministic non-production identifier shared by an explicit reference group",
+    "secret-synthetic": "disjoint inert credential sentinel preserving nullness",
+    "secret-null": "NULL only; source column must be entirely NULL",
+    "json-leaves": "every JSON leaf at /** is replaced by type-preserving deterministic data",
+    "sensitive-number": "deterministic rank bucket preserving null/equality/cardinality",
+    "blob-digest": "deterministic digest bytes preserving byte length",
+    "dependent-digest": "deterministic SHA-256 replacement derived from sanitized ownership row",
+    "derived": "recomputed or allowlisted aggregate",
+    "preserved-accounting": "source accounting retained because the external binary body is absent",
+    "virtual-derived": "never copied; rebuilt from sanitized base tables",
+    "shadow-derived": "never copied; rebuilt by SQLite FTS5",
+    "system-derived": "SQLite-owned schema or sequence object"
+  },
+  "jsonPolicy": {
+    "allowedLeafTypes": [
+      "null",
+      "boolean",
+      "number",
+      "string"
+    ],
+    "preserveLeafTypes": true,
+    "booleanReplacement": "type-preserving-source-disjoint-or-reject",
+    "rejectPrototypeKeys": true,
+    "rejectNonFiniteNumbers": true,
+    "maxDepth": 64,
+    "maxLeaves": 100000
+  },
+  "fts": [
+    {
+      "virtualName": "knowledge_chunks_fts",
+      "projectionName": "knowledge_chunks_v1",
+      "tokenizerOptions": "unicode61",
+      "keyColumnCsv": "entry_id,chunk_id",
+      "indexedColumnCsv": "title,content,tags"
+    }
   ],
   "objects": [
     {
@@ -3759,7 +3759,7 @@
   ],
   "exactProfiles": [
     {
-      "schemaVersion": 5,
+      "schemaVersion": 6,
       "semanticPolicies": {
         "storage": {
           "preservePerCellStorageClass": true,
@@ -3832,7 +3832,7 @@
           "mode": "frozen-exact-table-column-policy",
           "unknownText": "transform-or-reject",
           "validatorVersion": "tm-structural-policy-v2-calendar-exact",
-          "policySha256": "00d9c96d0f06165c1c9a21211eca0de4bc00937b1a4c4dbfc65c941cc728400a"
+          "policySha256": "3c1ca1b4f927a4c7f6a4b3be9d06d192b2ae9e5b0243d886019476fc634fa9b1"
         }
       },
       "equalityGroups": [
@@ -3917,6 +3917,8 @@
         "knowledge_current_custody",
         "knowledge_unlinked_user_usage",
         "knowledge_capacity_gauges",
+        "customers.normalized_identity_key",
+        "customers.duplicate_enforced",
         "knowledge_chunks_fts"
       ],
       "objects": [
@@ -5496,6 +5498,290 @@
           ]
         },
         {
+          "name": "crm_audit_events",
+          "type": "table",
+          "classification": "base-table",
+          "columns": [
+            {
+              "name": "id",
+              "declaredType": "INTEGER",
+              "notnull": 0,
+              "pk": 1,
+              "hidden": 0,
+              "classification": "structural",
+              "foreignKey": false
+            },
+            {
+              "name": "org_id",
+              "declaredType": "INTEGER",
+              "notnull": 1,
+              "pk": 0,
+              "hidden": 0,
+              "classification": "structural",
+              "foreignKey": true
+            },
+            {
+              "name": "customer_id",
+              "declaredType": "INTEGER",
+              "notnull": 0,
+              "pk": 0,
+              "hidden": 0,
+              "classification": "structural",
+              "foreignKey": true
+            },
+            {
+              "name": "opportunity_id",
+              "declaredType": "INTEGER",
+              "notnull": 0,
+              "pk": 0,
+              "hidden": 0,
+              "classification": "structural",
+              "foreignKey": true
+            },
+            {
+              "name": "task_id",
+              "declaredType": "INTEGER",
+              "notnull": 0,
+              "pk": 0,
+              "hidden": 0,
+              "classification": "structural",
+              "foreignKey": true
+            },
+            {
+              "name": "contact_id",
+              "declaredType": "INTEGER",
+              "notnull": 0,
+              "pk": 0,
+              "hidden": 0,
+              "classification": "structural",
+              "foreignKey": true
+            },
+            {
+              "name": "actor_user_id",
+              "declaredType": "INTEGER",
+              "notnull": 0,
+              "pk": 0,
+              "hidden": 0,
+              "classification": "structural",
+              "foreignKey": true
+            },
+            {
+              "name": "event_type",
+              "declaredType": "TEXT",
+              "notnull": 1,
+              "pk": 0,
+              "hidden": 0,
+              "classification": "structural",
+              "foreignKey": false
+            },
+            {
+              "name": "request_id",
+              "declaredType": "TEXT",
+              "notnull": 0,
+              "pk": 0,
+              "hidden": 0,
+              "classification": "synthetic-text",
+              "foreignKey": false
+            },
+            {
+              "name": "correlation_id",
+              "declaredType": "TEXT",
+              "notnull": 0,
+              "pk": 0,
+              "hidden": 0,
+              "classification": "synthetic-text",
+              "foreignKey": false
+            },
+            {
+              "name": "occurred_at",
+              "declaredType": "TEXT",
+              "notnull": 1,
+              "pk": 0,
+              "hidden": 0,
+              "classification": "structural",
+              "foreignKey": false
+            },
+            {
+              "name": "metadata_json",
+              "declaredType": "TEXT",
+              "notnull": 1,
+              "pk": 0,
+              "hidden": 0,
+              "classification": "json-leaves",
+              "foreignKey": false,
+              "jsonPolicy": {
+                "mode": "dynamic-sanitized",
+                "allowedPaths": [
+                  "/"
+                ],
+                "extraKeyPolicy": "sanitize-key-and-value",
+                "leafPolicy": "type-preserving-synthetic",
+                "owner": "crm_audit_events.metadata_json"
+              }
+            }
+          ]
+        },
+        {
+          "name": "crm_tasks",
+          "type": "table",
+          "classification": "base-table",
+          "columns": [
+            {
+              "name": "id",
+              "declaredType": "INTEGER",
+              "notnull": 0,
+              "pk": 1,
+              "hidden": 0,
+              "classification": "structural",
+              "foreignKey": false
+            },
+            {
+              "name": "org_id",
+              "declaredType": "INTEGER",
+              "notnull": 1,
+              "pk": 0,
+              "hidden": 0,
+              "classification": "structural",
+              "foreignKey": true
+            },
+            {
+              "name": "team_id",
+              "declaredType": "INTEGER",
+              "notnull": 0,
+              "pk": 0,
+              "hidden": 0,
+              "classification": "structural",
+              "foreignKey": true
+            },
+            {
+              "name": "customer_id",
+              "declaredType": "INTEGER",
+              "notnull": 1,
+              "pk": 0,
+              "hidden": 0,
+              "classification": "structural",
+              "foreignKey": true
+            },
+            {
+              "name": "opportunity_id",
+              "declaredType": "INTEGER",
+              "notnull": 0,
+              "pk": 0,
+              "hidden": 0,
+              "classification": "structural",
+              "foreignKey": true
+            },
+            {
+              "name": "owner_user_id",
+              "declaredType": "INTEGER",
+              "notnull": 1,
+              "pk": 0,
+              "hidden": 0,
+              "classification": "structural",
+              "foreignKey": true
+            },
+            {
+              "name": "title",
+              "declaredType": "TEXT",
+              "notnull": 1,
+              "pk": 0,
+              "hidden": 0,
+              "classification": "synthetic-text",
+              "foreignKey": false
+            },
+            {
+              "name": "description",
+              "declaredType": "TEXT",
+              "notnull": 0,
+              "pk": 0,
+              "hidden": 0,
+              "classification": "synthetic-text",
+              "foreignKey": false
+            },
+            {
+              "name": "due_at",
+              "declaredType": "TEXT",
+              "notnull": 1,
+              "pk": 0,
+              "hidden": 0,
+              "classification": "structural",
+              "foreignKey": false
+            },
+            {
+              "name": "status",
+              "declaredType": "TEXT",
+              "notnull": 1,
+              "pk": 0,
+              "hidden": 0,
+              "classification": "structural",
+              "foreignKey": false
+            },
+            {
+              "name": "source",
+              "declaredType": "TEXT",
+              "notnull": 1,
+              "pk": 0,
+              "hidden": 0,
+              "classification": "structural",
+              "foreignKey": false
+            },
+            {
+              "name": "completed_at",
+              "declaredType": "TEXT",
+              "notnull": 0,
+              "pk": 0,
+              "hidden": 0,
+              "classification": "structural",
+              "foreignKey": false
+            },
+            {
+              "name": "completed_by",
+              "declaredType": "INTEGER",
+              "notnull": 0,
+              "pk": 0,
+              "hidden": 0,
+              "classification": "structural",
+              "foreignKey": true
+            },
+            {
+              "name": "completion_note",
+              "declaredType": "TEXT",
+              "notnull": 0,
+              "pk": 0,
+              "hidden": 0,
+              "classification": "synthetic-text",
+              "foreignKey": false
+            },
+            {
+              "name": "created_by",
+              "declaredType": "INTEGER",
+              "notnull": 1,
+              "pk": 0,
+              "hidden": 0,
+              "classification": "structural",
+              "foreignKey": true
+            },
+            {
+              "name": "created_at",
+              "declaredType": "TEXT",
+              "notnull": 1,
+              "pk": 0,
+              "hidden": 0,
+              "classification": "structural",
+              "foreignKey": false
+            },
+            {
+              "name": "updated_at",
+              "declaredType": "TEXT",
+              "notnull": 1,
+              "pk": 0,
+              "hidden": 0,
+              "classification": "structural",
+              "foreignKey": false
+            }
+          ]
+        },
+        {
           "name": "customer_activity",
           "type": "table",
           "classification": "base-table",
@@ -5566,6 +5852,121 @@
             {
               "name": "created_at",
               "declaredType": "DATETIME",
+              "notnull": 0,
+              "pk": 0,
+              "hidden": 0,
+              "classification": "structural",
+              "foreignKey": false
+            }
+          ]
+        },
+        {
+          "name": "customer_contacts",
+          "type": "table",
+          "classification": "base-table",
+          "columns": [
+            {
+              "name": "id",
+              "declaredType": "INTEGER",
+              "notnull": 0,
+              "pk": 1,
+              "hidden": 0,
+              "classification": "structural",
+              "foreignKey": false
+            },
+            {
+              "name": "org_id",
+              "declaredType": "INTEGER",
+              "notnull": 1,
+              "pk": 0,
+              "hidden": 0,
+              "classification": "structural",
+              "foreignKey": true
+            },
+            {
+              "name": "customer_id",
+              "declaredType": "INTEGER",
+              "notnull": 1,
+              "pk": 0,
+              "hidden": 0,
+              "classification": "structural",
+              "foreignKey": true
+            },
+            {
+              "name": "name",
+              "declaredType": "TEXT",
+              "notnull": 1,
+              "pk": 0,
+              "hidden": 0,
+              "classification": "synthetic-text",
+              "foreignKey": false
+            },
+            {
+              "name": "role",
+              "declaredType": "TEXT",
+              "notnull": 0,
+              "pk": 0,
+              "hidden": 0,
+              "classification": "synthetic-text",
+              "foreignKey": false
+            },
+            {
+              "name": "email",
+              "declaredType": "TEXT",
+              "notnull": 0,
+              "pk": 0,
+              "hidden": 0,
+              "classification": "synthetic-email",
+              "foreignKey": false
+            },
+            {
+              "name": "phone",
+              "declaredType": "TEXT",
+              "notnull": 0,
+              "pk": 0,
+              "hidden": 0,
+              "classification": "synthetic-text",
+              "foreignKey": false
+            },
+            {
+              "name": "is_preferred",
+              "declaredType": "INTEGER",
+              "notnull": 1,
+              "pk": 0,
+              "hidden": 0,
+              "classification": "structural",
+              "foreignKey": false
+            },
+            {
+              "name": "created_by",
+              "declaredType": "INTEGER",
+              "notnull": 1,
+              "pk": 0,
+              "hidden": 0,
+              "classification": "structural",
+              "foreignKey": true
+            },
+            {
+              "name": "created_at",
+              "declaredType": "TEXT",
+              "notnull": 1,
+              "pk": 0,
+              "hidden": 0,
+              "classification": "structural",
+              "foreignKey": false
+            },
+            {
+              "name": "updated_at",
+              "declaredType": "TEXT",
+              "notnull": 1,
+              "pk": 0,
+              "hidden": 0,
+              "classification": "structural",
+              "foreignKey": false
+            },
+            {
+              "name": "archived_at",
+              "declaredType": "TEXT",
               "notnull": 0,
               "pk": 0,
               "hidden": 0,
@@ -5811,6 +6212,69 @@
               "pk": 0,
               "hidden": 0,
               "classification": "synthetic-text",
+              "foreignKey": false
+            },
+            {
+              "name": "org_id",
+              "declaredType": "INTEGER",
+              "notnull": 0,
+              "pk": 0,
+              "hidden": 0,
+              "classification": "structural",
+              "foreignKey": true
+            },
+            {
+              "name": "team_id",
+              "declaredType": "INTEGER",
+              "notnull": 0,
+              "pk": 0,
+              "hidden": 0,
+              "classification": "structural",
+              "foreignKey": true
+            },
+            {
+              "name": "country",
+              "declaredType": "TEXT",
+              "notnull": 0,
+              "pk": 0,
+              "hidden": 0,
+              "classification": "synthetic-text",
+              "foreignKey": false
+            },
+            {
+              "name": "next_action_at",
+              "declaredType": "TEXT",
+              "notnull": 0,
+              "pk": 0,
+              "hidden": 0,
+              "classification": "structural",
+              "foreignKey": false
+            },
+            {
+              "name": "stalled_at",
+              "declaredType": "TEXT",
+              "notnull": 0,
+              "pk": 0,
+              "hidden": 0,
+              "classification": "structural",
+              "foreignKey": false
+            },
+            {
+              "name": "normalized_identity_key",
+              "declaredType": "TEXT",
+              "notnull": 0,
+              "pk": 0,
+              "hidden": 0,
+              "classification": "derived",
+              "foreignKey": false
+            },
+            {
+              "name": "duplicate_enforced",
+              "declaredType": "INTEGER",
+              "notnull": 1,
+              "pk": 0,
+              "hidden": 0,
+              "classification": "derived",
               "foreignKey": false
             }
           ]
@@ -7388,6 +7852,69 @@
               "hidden": 0,
               "classification": "structural",
               "foreignKey": false
+            },
+            {
+              "name": "org_id",
+              "declaredType": "INTEGER",
+              "notnull": 0,
+              "pk": 0,
+              "hidden": 0,
+              "classification": "structural",
+              "foreignKey": true
+            },
+            {
+              "name": "team_id",
+              "declaredType": "INTEGER",
+              "notnull": 0,
+              "pk": 0,
+              "hidden": 0,
+              "classification": "structural",
+              "foreignKey": true
+            },
+            {
+              "name": "owner_user_id",
+              "declaredType": "INTEGER",
+              "notnull": 0,
+              "pk": 0,
+              "hidden": 0,
+              "classification": "structural",
+              "foreignKey": true
+            },
+            {
+              "name": "next_action_at",
+              "declaredType": "TEXT",
+              "notnull": 0,
+              "pk": 0,
+              "hidden": 0,
+              "classification": "structural",
+              "foreignKey": false
+            },
+            {
+              "name": "loss_reason",
+              "declaredType": "TEXT",
+              "notnull": 0,
+              "pk": 0,
+              "hidden": 0,
+              "classification": "synthetic-text",
+              "foreignKey": false
+            },
+            {
+              "name": "closed_at",
+              "declaredType": "TEXT",
+              "notnull": 0,
+              "pk": 0,
+              "hidden": 0,
+              "classification": "structural",
+              "foreignKey": false
+            },
+            {
+              "name": "campaign_id",
+              "declaredType": "INTEGER",
+              "notnull": 0,
+              "pk": 0,
+              "hidden": 0,
+              "classification": "structural",
+              "foreignKey": true
             }
           ]
         },

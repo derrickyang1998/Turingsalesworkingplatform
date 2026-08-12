@@ -15,15 +15,15 @@ const migrationService = require('../services/migration_service');
 const migrationGate = require('../scripts/verify_campaign_migration_gate');
 const sanitizer = require('../scripts/sanitize_production_shape');
 const manifestDocument = require('../scripts/sanitization_manifest.json');
-const manifest = sanitizer._testing.manifestProfileForVersion(manifestDocument, 5);
+const manifest = sanitizer._testing.manifestProfileForVersion(manifestDocument, 6);
 const BASH = process.platform === 'win32' ? 'C:\\Program Files\\Git\\bin\\bash.exe' : 'bash';
 const HAS_BASH = process.platform !== 'win32' || fs.existsSync(BASH);
 
-function openMigratedFixture(label, targetVersion = 5) {
+function openMigratedFixture(label, targetVersion = 6) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), `tm-sanitizer-policy-${label}-`));
   const dbPath = path.join(root, 'source.db');
   const migrationOptions = { rootDir: path.resolve(__dirname, '..') };
-  if (targetVersion === 5) migrationOptions.registeredMigrations = migrationGate.REGISTERED_MIGRATIONS;
+  if (targetVersion === 6) migrationOptions.registeredMigrations = migrationGate.REGISTERED_MIGRATIONS;
   const db = migrationService.openMigratedDatabase(dbPath, migrationOptions);
   return { root, dbPath, db };
 }
@@ -114,6 +114,34 @@ test('arbitrary model, source, industry, platform, market, region, module, and c
   for (const context of sensitiveContexts) {
     assert.notEqual(classifications.get(context), 'structural', `${context} must be transformed or rejected`);
     assert.equal(sanitizer.STRUCTURAL_COLUMN_POLICY[context], undefined, `${context} must not be allowlisted`);
+  }
+});
+
+test('schema 6 CRM structure is preserved while customer identity fields are rebuilt', () => {
+  const classifications = new Map(manifest.objects.flatMap((object) => (
+    object.columns.map((column) => [`${object.name}.${column.name}`, column.classification])
+  )));
+  const structuralContexts = [
+    'customers.org_id', 'customers.team_id', 'customers.next_action_at', 'customers.stalled_at',
+    'opportunities.org_id', 'opportunities.team_id', 'opportunities.owner_user_id',
+    'opportunities.campaign_id', 'opportunities.next_action_at', 'opportunities.closed_at',
+    'customer_contacts.id', 'customer_contacts.org_id', 'customer_contacts.customer_id',
+    'customer_contacts.is_preferred', 'customer_contacts.created_by',
+    'customer_contacts.created_at', 'customer_contacts.updated_at', 'customer_contacts.archived_at',
+    'crm_tasks.id', 'crm_tasks.org_id', 'crm_tasks.team_id', 'crm_tasks.customer_id',
+    'crm_tasks.opportunity_id', 'crm_tasks.owner_user_id', 'crm_tasks.completed_by',
+    'crm_tasks.created_by', 'crm_tasks.due_at', 'crm_tasks.completed_at',
+    'crm_tasks.created_at', 'crm_tasks.updated_at', 'crm_tasks.status', 'crm_tasks.source',
+    'crm_audit_events.id', 'crm_audit_events.org_id', 'crm_audit_events.customer_id',
+    'crm_audit_events.opportunity_id', 'crm_audit_events.task_id', 'crm_audit_events.contact_id',
+    'crm_audit_events.actor_user_id', 'crm_audit_events.event_type', 'crm_audit_events.occurred_at'
+  ];
+  for (const context of structuralContexts) {
+    assert.equal(classifications.get(context), 'structural', `${context} must preserve relational semantics`);
+    assert.ok(sanitizer.STRUCTURAL_COLUMN_POLICY[context], `${context} must have a frozen validator`);
+  }
+  for (const context of ['customers.normalized_identity_key', 'customers.duplicate_enforced']) {
+    assert.equal(classifications.get(context), 'derived', `${context} must be rebuilt from sanitized customer data`);
   }
 });
 

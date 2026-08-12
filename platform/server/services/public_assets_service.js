@@ -89,7 +89,9 @@ function noStoreHeaders(res) {
 
 function sendPublicFile(publicRoot, filename) {
   return function sendFile(_req, res) {
-    res.sendFile(path.join(publicRoot, filename), {
+    res.sendFile(filename, {
+      root: publicRoot,
+      dotfiles: 'deny',
       headers: {
         'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
         Pragma: 'no-cache',
