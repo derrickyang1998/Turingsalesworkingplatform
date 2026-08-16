@@ -2069,6 +2069,53 @@ test('trusted source stale sweep validates the complete inventory before deletin
   assert.equal(fs.existsSync(path.join(invalidRoot, 'unexpected.txt')), true);
 });
 
+test('recovery reads the pre-writer phase under the lifecycle lock and keeps later probes writer-protected', {
+  skip: process.platform !== 'win32'
+}, () => {
+  const recovery = functionSource(
+    read(deployPath),
+    'Invoke-DeploymentFailureRecovery',
+    'Invoke-InterruptedDeploymentRecovery'
+  );
+  assert.match(recovery, /\$preWriterPhase\s*=\s*Get-RemoteDeploymentPhase\s+-DeploymentLockOnly/);
+
+  const result = runPowerShellFunctionHarness(['Get-RemoteDeploymentPhase'], String.raw`
+$script:deploymentLockToken = 'lifecycle-owner'
+$script:deploymentWriterToken = $null
+$script:Calls = New-Object 'Collections.Generic.List[string]'
+function Invoke-RemoteBash {
+  param(
+    [string]$Script,
+    [string]$FailureMessage,
+    [switch]$RequireDeploymentLock,
+    [switch]$RequireWriterLock,
+    [switch]$CaptureOutput
+  )
+  if (-not $RequireDeploymentLock -or -not $CaptureOutput) {
+    throw 'Phase probes must remain lifecycle-locked and captured'
+  }
+  if ($RequireWriterLock) {
+    if ([string]::IsNullOrWhiteSpace($script:deploymentWriterToken)) {
+      throw 'Writer-protected phase probe ran without a writer token'
+    }
+    $script:Calls.Add('writer-protected')
+  }
+  else {
+    $script:Calls.Add('lifecycle-only')
+  }
+  return 'locked'
+}
+if ((Get-RemoteDeploymentPhase -DeploymentLockOnly) -ne 'locked') { throw 'Unexpected lifecycle-only phase' }
+$script:deploymentWriterToken = 'writer-owner'
+if ((Get-RemoteDeploymentPhase) -ne 'locked') { throw 'Unexpected writer-protected phase' }
+$actual = $script:Calls -join ','
+if ($actual -ne 'lifecycle-only,writer-protected') { throw "Unexpected phase probe guards: $actual" }
+Write-Output 'RECOVERY_PHASE_GUARDS_OK'
+`);
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /RECOVERY_PHASE_GUARDS_OK/);
+});
+
 test('Task 12 executable recovery state machine resumes pre-mutation phases and never rolls back an accepted release', {
   skip: process.platform !== 'win32'
 }, () => {

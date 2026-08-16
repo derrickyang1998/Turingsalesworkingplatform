@@ -2513,6 +2513,8 @@ cat "$LockDir/run.json"
 }
 
 function Get-RemoteDeploymentPhase {
+    param([switch]$DeploymentLockOnly)
+
     $remoteScript = @'
 set -euo pipefail
 LockDir="__REMOTE_ROOT__/.deploy-v030.lock"
@@ -2520,7 +2522,12 @@ test -f "$LockDir/phase"
 cat "$LockDir/phase"
 '@
     $remoteScript = $remoteScript.Replace('__REMOTE_ROOT__', $REMOTE_ROOT)
-    $phase = Invoke-RemoteBash -Script $remoteScript -FailureMessage "Unable to determine the remote deployment phase" -RequireDeploymentLock -RequireWriterLock -CaptureOutput
+    if ($DeploymentLockOnly) {
+        $phase = Invoke-RemoteBash -Script $remoteScript -FailureMessage "Unable to determine the remote deployment phase" -RequireDeploymentLock -CaptureOutput
+    }
+    else {
+        $phase = Invoke-RemoteBash -Script $remoteScript -FailureMessage "Unable to determine the remote deployment phase" -RequireDeploymentLock -RequireWriterLock -CaptureOutput
+    }
     $allowed = @(
         'locked',
         'candidate-ready',
@@ -6592,7 +6599,7 @@ function Invoke-DeploymentFailureRecovery {
     )
 
     Invoke-RemoteTrustedSourceInputSweep
-    $preWriterPhase = Get-RemoteDeploymentPhase
+    $preWriterPhase = Get-RemoteDeploymentPhase -DeploymentLockOnly
     if ($preWriterPhase -in @('mutation-started', 'release-replay-complete')) {
         if (-not $BackupCreated) {
             throw "Production mutation started without a completed rollback backup."
