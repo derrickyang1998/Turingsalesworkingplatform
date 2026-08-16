@@ -32,7 +32,7 @@ $EXPECTED_PPT_QUERY = "20260702v916kbbridge"
 $EXPECTED_PPT_SHA256 = "f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e"
 $TRUSTED_SOURCE_GATE_RELATIVE_PATH = "server\scripts\trusted_production_source_gate.js"
 $TRUSTED_SOURCE_MANIFEST_RELATIVE_PATH = "server\scripts\trusted_production_source_manifest.json"
-$EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "51e23c84566db15a78dd416727b64aba6bf31a6cef615e88036d4f853db19869"
+$EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "4a3a417f30aa581f94b9554c2b8811e0881c45ff0a7842c19beaa5ab5649e6c3"
 $EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "a82ff29e22e3aa9bf60a3759b807530019e508c2694fd7495a150610789bbd2e"
 $EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256 = "bdc60e6a9da601c8c65cd2a374d8cb69eeea629fa6cd5af514dd995eddfe74dc"
 $EXPECTED_TRUSTED_PARSER_VERIFIER_SHA256 = "93973d83379c1b22a779751be135f59c992d0784957519b3fdb1abebaad2d2f6"
@@ -8198,6 +8198,98 @@ assert_canonical_candidate
 if [ "$DependencyBuildStatus" != "0" ]; then
   exit "$DependencyBuildStatus"
 fi
+
+/usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin \
+  /usr/bin/node - "$DependencyServerRoot" <<'TM_PRUNE_BETTER_SQLITE_BUILD'
+'use strict';
+
+const fs = require('node:fs');
+const path = require('node:path');
+
+const serverRoot = path.resolve(process.argv[2]);
+const releaseRoot = path.join(
+  serverRoot,
+  'node_modules',
+  'better-sqlite3',
+  'build',
+  'Release'
+);
+const objectRoot = path.join(releaseRoot, 'obj.target');
+
+function canonicalDirectory(directoryPath, label) {
+  const metadata = fs.lstatSync(directoryPath);
+  const absolute = path.resolve(directoryPath);
+  const real = fs.realpathSync.native(directoryPath);
+  if (metadata.isSymbolicLink() || !metadata.isDirectory() || real !== absolute) {
+    throw new Error(`${label} must be a canonical real directory`);
+  }
+  return real;
+}
+
+canonicalDirectory(serverRoot, 'candidate dependency server root');
+canonicalDirectory(releaseRoot, 'better-sqlite3 release root');
+canonicalDirectory(objectRoot, 'better-sqlite3 object root');
+const relativeObjectRoot = path.relative(releaseRoot, objectRoot);
+if (!relativeObjectRoot || relativeObjectRoot.startsWith('..') || path.isAbsolute(relativeObjectRoot)) {
+  throw new Error('better-sqlite3 object root escaped its release root');
+}
+
+const pairs = [
+  ['sqlite3.a', path.join('deps', 'sqlite3.a')],
+  ['better_sqlite3.node', 'better_sqlite3.node'],
+  ['test_extension.node', 'test_extension.node']
+].map(([releaseName, objectName]) => ({
+  releasePath: path.join(releaseRoot, releaseName),
+  objectPath: path.join(objectRoot, objectName)
+}));
+const allowedHardlinks = new Set(pairs.map(({ objectPath }) => objectPath));
+
+for (const { releasePath, objectPath } of pairs) {
+  const releaseMetadata = fs.lstatSync(releasePath);
+  const objectMetadata = fs.lstatSync(objectPath);
+  if (
+    releaseMetadata.isSymbolicLink() || objectMetadata.isSymbolicLink() ||
+    !releaseMetadata.isFile() || !objectMetadata.isFile() ||
+    releaseMetadata.nlink !== 2 || objectMetadata.nlink !== 2 ||
+    releaseMetadata.dev !== objectMetadata.dev || releaseMetadata.ino !== objectMetadata.ino ||
+    fs.realpathSync.native(releasePath) !== releasePath ||
+    fs.realpathSync.native(objectPath) !== objectPath
+  ) {
+    throw new Error('better-sqlite3 build artifact hardlink contract mismatch');
+  }
+}
+
+function validateObjectTree(current) {
+  for (const name of fs.readdirSync(current)) {
+    const entryPath = path.join(current, name);
+    const metadata = fs.lstatSync(entryPath);
+    if (metadata.isSymbolicLink()) throw new Error('better-sqlite3 object tree contains a symlink');
+    if (metadata.isDirectory()) {
+      if (fs.realpathSync.native(entryPath) !== entryPath) {
+        throw new Error('better-sqlite3 object directory path is not canonical');
+      }
+      validateObjectTree(entryPath);
+    } else if (metadata.isFile()) {
+      if (metadata.nlink !== 1 && !(metadata.nlink === 2 && allowedHardlinks.has(entryPath))) {
+        throw new Error('better-sqlite3 object tree contains an unexpected hard-linked file');
+      }
+    } else {
+      throw new Error('better-sqlite3 object tree contains an unsafe entry');
+    }
+  }
+}
+validateObjectTree(objectRoot);
+
+fs.rmSync(objectRoot, { recursive: true, force: false });
+fs.unlinkSync(path.join(releaseRoot, 'sqlite3.a'));
+fs.unlinkSync(path.join(releaseRoot, 'test_extension.node'));
+const runtimeBinary = path.join(releaseRoot, 'better_sqlite3.node');
+const runtimeMetadata = fs.lstatSync(runtimeBinary);
+if (runtimeMetadata.isSymbolicLink() || !runtimeMetadata.isFile() || runtimeMetadata.nlink !== 1) {
+  throw new Error('better-sqlite3 runtime binary did not converge to a single-link regular file');
+}
+TM_PRUNE_BETTER_SQLITE_BUILD
+printf '%s\n' "DEPENDENCY_PRUNE_OK"
 
 test -d "$DependencyRoot/node_modules"
 test ! -L "$DependencyRoot/node_modules"

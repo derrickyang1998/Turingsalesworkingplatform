@@ -654,6 +654,83 @@ function hashRuntimeTree(root) {
   return digest.digest('hex');
 }
 
+function pruneBetterSqliteBuildArtifacts(serverRoot) {
+  const releaseRoot = assertDirectoryNoSymlink(
+    path.join(serverRoot, 'node_modules', 'better-sqlite3', 'build', 'Release'),
+    'better-sqlite3 release root'
+  );
+  const objectRoot = assertDirectoryNoSymlink(
+    path.join(releaseRoot, 'obj.target'),
+    'better-sqlite3 object root'
+  );
+  if (!isWithin(releaseRoot, objectRoot) || pathsEqual(releaseRoot, objectRoot)) {
+    throw new Error('better-sqlite3 object root escaped its release root');
+  }
+
+  const pairs = [
+    ['sqlite3.a', path.join('deps', 'sqlite3.a')],
+    ['better_sqlite3.node', 'better_sqlite3.node'],
+    ['test_extension.node', 'test_extension.node']
+  ].map(([releaseName, objectName]) => ({
+    releasePath: path.join(releaseRoot, releaseName),
+    objectPath: path.join(objectRoot, objectName)
+  }));
+  const allowedHardlinks = new Set(pairs.map(({ objectPath }) => pathKey(objectPath)));
+
+  for (const { releasePath, objectPath } of pairs) {
+    const releaseMetadata = fs.lstatSync(releasePath);
+    const objectMetadata = fs.lstatSync(objectPath);
+    if (
+      releaseMetadata.isSymbolicLink() || objectMetadata.isSymbolicLink() ||
+      !releaseMetadata.isFile() || !objectMetadata.isFile() ||
+      releaseMetadata.nlink !== 2 || objectMetadata.nlink !== 2 ||
+      releaseMetadata.dev !== objectMetadata.dev || releaseMetadata.ino !== objectMetadata.ino
+    ) {
+      throw new Error('better-sqlite3 build artifact hardlink contract mismatch');
+    }
+    if (
+      !pathsEqual(fs.realpathSync.native(releasePath), normalizedAbsolute(releasePath)) ||
+      !pathsEqual(fs.realpathSync.native(objectPath), normalizedAbsolute(objectPath))
+    ) {
+      throw new Error('better-sqlite3 build artifact path is not canonical');
+    }
+  }
+
+  function validateObjectTree(current) {
+    for (const name of fs.readdirSync(current)) {
+      const entryPath = path.join(current, name);
+      const metadata = fs.lstatSync(entryPath);
+      if (metadata.isSymbolicLink()) {
+        throw new Error('better-sqlite3 object tree contains a symlink');
+      }
+      if (metadata.isDirectory()) {
+        if (!pathsEqual(fs.realpathSync.native(entryPath), normalizedAbsolute(entryPath))) {
+          throw new Error('better-sqlite3 object directory path is not canonical');
+        }
+        validateObjectTree(entryPath);
+      } else if (metadata.isFile()) {
+        if (metadata.nlink !== 1 && !(metadata.nlink === 2 && allowedHardlinks.has(pathKey(entryPath)))) {
+          throw new Error('better-sqlite3 object tree contains an unexpected hard-linked file');
+        }
+      } else {
+        throw new Error('better-sqlite3 object tree contains an unsafe entry');
+      }
+    }
+  }
+  validateObjectTree(objectRoot);
+
+  fs.rmSync(objectRoot, { recursive: true, force: false });
+  fs.unlinkSync(path.join(releaseRoot, 'sqlite3.a'));
+  fs.unlinkSync(path.join(releaseRoot, 'test_extension.node'));
+  const runtimeBinary = path.join(releaseRoot, 'better_sqlite3.node');
+  const runtimeMetadata = fs.lstatSync(runtimeBinary);
+  if (runtimeMetadata.isSymbolicLink() || !runtimeMetadata.isFile() || runtimeMetadata.nlink !== 1) {
+    throw new Error('better-sqlite3 runtime binary did not converge to a single-link regular file');
+  }
+  syncDirectory(releaseRoot);
+  return runtimeBinary;
+}
+
 function runtimeMarker(manifest, expectedManifestSha256, dependencyTreeSha256) {
   const packageLock = manifest.files.find((entry) => entry.path === 'server/package-lock.json');
   if (!packageLock) throw new Error('trusted package lock is missing');
@@ -1069,6 +1146,7 @@ function prepareTrustedRuntime(options) {
       buildIdentity,
       'build'
     );
+    pruneBetterSqliteBuildArtifacts(serverRoot);
     const dependencyTreeSha256 = hashRuntimeTree(path.join(serverRoot, 'node_modules'));
     fs.writeFileSync(
       path.join(stageRoot, 'runtime-contract.json'),
@@ -1449,6 +1527,7 @@ module.exports = {
   VERDICT_FORMAT,
   assertPinnedFile,
   loadTrustedManifest,
+  pruneBetterSqliteBuildArtifacts,
   prepareTrustedRuntime,
   stageTrustedBundle,
   sanitizeAndVerifyTrustedSource,

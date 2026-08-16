@@ -841,6 +841,7 @@ test('trusted runtime dependency scripts are cgroup-contained, egress-bounded, a
   assert.match(trustedGate, /npm[\s\S]*?\['ci', '--omit=dev', '--ignore-scripts'\][\s\S]*?'fetch'/);
   assert.match(trustedGate, /npm[\s\S]*?\['rebuild', 'better-sqlite3'\][\s\S]*?'build'/);
   assert.match(trustedGate, /npm_config_nodedir:\s*'\/usr'/);
+  assert.match(trustedGate, /pruneBetterSqliteBuildArtifacts/);
   assert.doesNotMatch(
     trustedGate,
     /spawnSync\(npm, [\s\S]*?\['rebuild', 'better-sqlite3'\]/,
@@ -858,6 +859,47 @@ test('trusted runtime dependency scripts are cgroup-contained, egress-bounded, a
   assert.match(candidateGate, /--build-uid "\$TrustedRuntimeBuildUid"/);
   assert.match(candidateGate, /--build-gid "\$TrustedRuntimeBuildGid"/);
   assert.match(candidateGate, /npm_config_nodedir=\/usr/);
+  assert.match(candidateGate, /TM_PRUNE_BETTER_SQLITE_BUILD/);
+  const candidateBuildTail = candidateGate.slice(candidateGate.indexOf('npm rebuild better-sqlite3'));
+  const drainIndex = candidateBuildTail.indexOf('drain_gate_unit "$DependencyBuildUnit"');
+  const killIndex = candidateBuildTail.indexOf('kill_gate_processes "dependency build"');
+  const pruneIndex = candidateBuildTail.indexOf('TM_PRUNE_BETTER_SQLITE_BUILD');
+  const finalHardlinkIndex = candidateBuildTail.indexOf('DependencyHardlink=');
+  assert.ok(drainIndex > 0, 'candidate dependency build unit must be drained after npm rebuild');
+  assert.ok(killIndex > drainIndex, 'candidate gate processes must be cleared after the build unit drains');
+  assert.ok(pruneIndex > killIndex, 'better-sqlite pruning must run only after build processes are gone');
+  assert.ok(finalHardlinkIndex > pruneIndex, 'the global hardlink rejection must remain after pruning');
+});
+
+test('trusted runtime removes only verified better-sqlite build hardlink intermediates', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-better-sqlite-prune-'));
+  const release = path.join(root, 'server', 'node_modules', 'better-sqlite3', 'build', 'Release');
+  const objectRoot = path.join(release, 'obj.target');
+  fs.mkdirSync(path.join(objectRoot, 'deps'), { recursive: true });
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  const pairs = [
+    ['sqlite3.a', path.join('deps', 'sqlite3.a')],
+    ['better_sqlite3.node', 'better_sqlite3.node'],
+    ['test_extension.node', 'test_extension.node']
+  ];
+  for (const [runtimeName, objectName] of pairs) {
+    const runtimePath = path.join(release, runtimeName);
+    const objectPath = path.join(objectRoot, objectName);
+    fs.writeFileSync(runtimePath, `fixture:${runtimeName}`);
+    fs.linkSync(runtimePath, objectPath);
+    assert.equal(fs.lstatSync(runtimePath).nlink, 2);
+  }
+
+  loadTrustedGate().pruneBetterSqliteBuildArtifacts(path.join(root, 'server'));
+
+  assert.equal(fs.existsSync(objectRoot), false);
+  assert.equal(fs.existsSync(path.join(release, 'sqlite3.a')), false);
+  assert.equal(fs.existsSync(path.join(release, 'test_extension.node')), false);
+  const runtimeBinary = path.join(release, 'better_sqlite3.node');
+  assert.equal(fs.existsSync(runtimeBinary), true);
+  assert.equal(fs.lstatSync(runtimeBinary).nlink, 1);
+  assert.equal(fs.readFileSync(runtimeBinary, 'utf8'), 'fixture:better_sqlite3.node');
 });
 
 test('trusted runtime sealing is descriptor-bound and records a complete dependency tree digest', () => {
