@@ -549,6 +549,30 @@ test('Phase 4 deploy backup and rollback are complete, checksummed, and share on
   assert.match(deploy, /pm2 describe turingmarket[\s\S]*?execFileSync\('pm2', \['jlist'\][\s\S]*?status !== 'stopped'[\s\S]*?# RESTORE_CODE/);
 });
 
+test('cleanup control replay tolerates operational atime drift without weakening file integrity', () => {
+  const deploy = read(deployPath);
+  const restore = functionSource(
+    deploy,
+    'Get-MigrationGateCleanupControlRestoreScript',
+    'Get-Pm2PersistenceVerifier'
+  );
+  const verifyFile = restore.match(/def verify_file\([\s\S]*?(?=def verify_convergence)/);
+  assert.ok(verifyFile, 'cleanup control replay must define a final file verifier');
+  assert.match(restore, /os\.utime\(temporary, ns=\(record\['atimeNs'\], record\['mtimeNs'\]\)/,
+    'replay should initially restore the captured timestamps');
+  assert.doesNotMatch(verifyFile[0], /st_atime_ns/,
+    'systemd and cleanup execution may legitimately advance access time after restoration');
+  for (const immutableCheck of [
+    /metadata\.st_uid != record\['uid'\]/,
+    /metadata\.st_gid != record\['gid'\]/,
+    /metadata\.st_size != record\['size'\]/,
+    /metadata\.st_mtime_ns != record\['mtimeNs'\]/,
+    /hashlib\.sha256\(payload\)\.hexdigest\(\) != record\['sha256'\]/
+  ]) {
+    assert.match(verifyFile[0], immutableCheck);
+  }
+});
+
 test('migration cleanup restore replay converges canonical topologies after every durable interruption', {
   skip: !rootLinuxAvailable()
 }, () => {

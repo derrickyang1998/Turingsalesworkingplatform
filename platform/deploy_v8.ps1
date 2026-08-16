@@ -4287,7 +4287,7 @@ def verify_file(label, target, record):
         return
     metadata, payload = read_regular(target, record['mode'], f'restored cleanup control {label}')
     if (metadata.st_uid != record['uid'] or metadata.st_gid != record['gid'] or
-            metadata.st_size != record['size'] or metadata.st_atime_ns != record['atimeNs'] or
+            metadata.st_size != record['size'] or
             metadata.st_mtime_ns != record['mtimeNs'] or
             hashlib.sha256(payload).hexdigest() != record['sha256']):
         raise SystemExit(f'Cleanup control {label} did not converge exactly')
