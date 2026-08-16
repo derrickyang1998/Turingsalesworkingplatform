@@ -895,7 +895,7 @@ table inet turingmarket_loopback {
 }
 NFT_RULES
 cat > "$ExpectedDir/helper" <<'FIREWALL_HELPER'
-#!/usr/bin/env bash
+#!/bin/bash -p
 set -Eeuo pipefail
 umask 077
 NFT_BIN=/usr/sbin/nft

@@ -204,6 +204,8 @@ test('Phase 4 deploy and rollback fail closed on the independent loopback isolat
   assert.match(preflight, /\/etc\/turingmarket\/turingmarket-loopback-firewall\.nft/);
   assert.match(preflight, /\/usr\/local\/sbin\/turingmarket-loopback-firewall/);
   assert.match(preflight, /\/etc\/systemd\/system\/pm2-root\.service\.d\/turingmarket-loopback-firewall\.conf/);
+  assert.match(preflight, /#!\/bin\/bash -p/);
+  assert.doesNotMatch(preflight, /#!\/usr\/bin\/env bash/);
   assert.match(preflight, /ss -H -ltn/);
   assert.match(preflight, /ss -H -tn/);
   assert.match(preflight, /LOOPBACK_ISOLATION_PREFLIGHT_OK/);
