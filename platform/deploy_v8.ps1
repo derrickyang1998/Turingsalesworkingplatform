@@ -8055,7 +8055,7 @@ mount -t tmpfs -o "nodev,nosuid,size=$TestRootMaxBytes,nr_inodes=$TestRootMaxIno
 TestRootMounted=1
 test "$(findmnt -n -o FSTYPE --target "$TestRoot")" = "tmpfs"
 ActualTestRootBytes="$(df -B1 --output=size "$TestRoot" | tail -n 1 | tr -d ' ')"
-ActualTestRootInodes="$(df -i --output=itotal "$TestRoot" | tail -n 1 | tr -d ' ')"
+ActualTestRootInodes="$(df --output=itotal "$TestRoot" | tail -n 1 | tr -d ' ')"
 [[ "$ActualTestRootBytes" =~ ^[1-9][0-9]*$ ]]
 [[ "$ActualTestRootInodes" =~ ^[1-9][0-9]*$ ]]
 test "$ActualTestRootBytes" -le "$TestRootMaxBytes"
@@ -8371,7 +8371,7 @@ fi
 DependencyCopyRequiredBytes=$(( DependencyCopyByteBase + DependencyCopyByteMargin ))
 DependencyCopyRequiredInodes=$(( DependencyCopyInodeBase + DependencyCopyInodeMargin ))
 TargetAvailableBytes="$(df -B1 --output=avail "$CandidateDir" | tail -n 1 | tr -d ' ')"
-TargetAvailableInodes="$(df -i --output=iavail "$CandidateDir" | tail -n 1 | tr -d ' ')"
+TargetAvailableInodes="$(df --output=iavail "$CandidateDir" | tail -n 1 | tr -d ' ')"
 [[ "$TargetAvailableBytes" =~ ^[1-9][0-9]*$ ]]
 [[ "$TargetAvailableInodes" =~ ^[1-9][0-9]*$ ]]
 test "$TargetAvailableBytes" -ge "$DependencyCopyRequiredBytes"

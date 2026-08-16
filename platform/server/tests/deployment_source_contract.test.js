@@ -1696,7 +1696,8 @@ test('candidate dependency and test writes are confined to a verified aggregate 
   assert.match(gate, /mount -t tmpfs -o "nodev,nosuid,size=\$TestRootMaxBytes,nr_inodes=\$TestRootMaxInodes/);
   assert.match(gate, /findmnt -n -o FSTYPE --target "\$TestRoot"/);
   assert.match(gate, /df -B1 --output=size "\$TestRoot"/);
-  assert.match(gate, /df -i --output=itotal "\$TestRoot"/);
+  assert.match(gate, /df --output=itotal "\$TestRoot"/);
+  assert.doesNotMatch(gate, /df -i --output=itotal/);
   assert.match(gate, /test "\$ActualTestRootBytes" -le "\$TestRootMaxBytes"/);
   assert.match(gate, /test "\$ActualTestRootInodes" -le "\$TestRootMaxInodes"/);
   assert.match(gate, /DependencyCopyByteReserveFloor="536870912"/);
@@ -1713,7 +1714,8 @@ test('candidate dependency and test writes are confined to a verified aggregate 
   assert.match(gate, /DependencyCopyInodeBase="\$DependencyCopyInodes"/);
   assert.match(gate, /if \[ "\$DependencyCopyInodeBase" -lt "\$TestRootMaxInodes" \]; then[\s\S]*?DependencyCopyInodeBase="\$TestRootMaxInodes"/);
   assert.match(gate, /df -B1 --output=avail "\$CandidateDir"/);
-  assert.match(gate, /df -i --output=iavail "\$CandidateDir"/);
+  assert.match(gate, /df --output=iavail "\$CandidateDir"/);
+  assert.doesNotMatch(gate, /df -i --output=iavail/);
   assert.match(gate, /test "\$TargetAvailableBytes" -ge "\$DependencyCopyRequiredBytes"/);
   assert.match(gate, /test "\$TargetAvailableInodes" -ge "\$DependencyCopyRequiredInodes"/);
   assert.match(gate, /cleanup_candidate_dependency_copy\(\)/);
