@@ -1,6 +1,6 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
-## v0.6.0-crm-sales-workspace (Release Candidate, 2026-08-11; updated 2026-08-16) - CRM 销售工作台
+## v0.6.0-crm-sales-workspace (Release Candidate, 2026-08-11; updated 2026-08-17) - CRM 销售工作台
 
 ### CRM 销售工作台 / CRM Sales Workspace
 - 将客户看板与客户明细保持为两个独立界面，并把客户、联系人、商机、任务、跟进记录、阶段流转、领取/释放、公海、团队与个人作用域接入统一的组织权限模型。
@@ -33,6 +33,8 @@
 - 当前 v0.6 发布候选在 S6 后又补充了跨平台可信哈希、schema 6 已填充 CRM 脱敏回归、概率字段域约束、发布清单修复和上述解析器/切换加固，因此 S6 结论不替代当前功能切片的定向复审；完整回归改在阶段收口、计划发布窗口或跨模块高风险变更时执行。
 - 本轮 AppSec 首轮 4 项及终审追加 2 项 HIGH 已完成 RED/GREEN 整改：`0444` 公网守护器只经固定 `/bin/bash --noprofile --norc` 调用；`ss`、状态 `fsync` 或嵌套条件调用失败均不能持久化 `closed`；候选依赖按目标文件系统块大小逐 inode 核算分配上界、拒绝 xattr/特殊文件/硬链接，并以完整 tmpfs 字节与 inode 上限作为最低容量基线；中断接管和候选清理仅卸载经过精确路径与 `tmpfs` 类型校验的残留挂载。历史 AppSec 聚焦证据为公网守护器 `9/9`、发布源合同 `40/40`、生命周期接管 `22/22`、可信源与 v0.6 合同 `47/47`，`-ValidateLocalOnly` 与 `git diff --check` 通过；该历史结果不替代当前保留证据。
 - DevOps 第 5-10 轮进一步封闭公网守护接管：只允许 exact no-follow、root:root、`0600`、单链接、regular、空文件且无 xattr 的 transaction lock；可信 helper 增加 transaction-locked `read-record`；四类 transient unit 按生命周期阶段与 RunId 精确绑定并排空；lock-only 缺失状态只能按显式 `absent` 收敛；disarm 在 watchdog 退出后重新锁读 `verified`，维护配置、链接和父目录均执行持久化；inventory 使用不可变 `rootGid`/`wwwDataGid`，不受扫描顺序影响；`cutover-complete` 接受态恢复会在任何 PM2 变更前先通过可信 helper 关闭公网并启动 watchdog，直到公网与 PM2 精确事实收敛后才解除守卫。接受态 finalization 另设 7,200 秒有界 watchdog deadline，覆盖 PM2 命令、完整 180 秒解析器启动窗口及最终公网/事实验证，避免沿用 120 秒切换窗口造成合法慢启动误关断。
+- 首次正式候选构建在生产切换前因离线 `better-sqlite3` 编译尝试下载 Node 头文件而拒绝；生产继续运行 v0.4。可信运行时与候选依赖的断网构建现固定使用服务器已安装的 `/usr/include/node`（`npm_config_nodedir=/usr`），不放宽构建网络边界。
+- 候选远端命令返回后新增持久化阶段后置条件：只有生命周期日志精确提交为 `candidate-ready` 才能进入解析器准备与切换。相关部署状态机、可信源码及隔离运行时门禁 `119 total / 116 pass / 0 fail / 3 platform skips`，独立复审无剩余发现。
 - 当前功能切片父级定向证据：生命周期接管 `31/31`、发布源合同 `44/44`、公网守护关键并发/读取/超时用例 `4/4`，PowerShell AST、守护脚本 Bash 语法、可信哈希一致性、`git diff --check` 与聚焦敏感信息扫描均通过。2026-08-16 Windows 71 文件非浏览器汇总 `1875/1784/0/91` 及早期公网守护结果仅作为历史/阶段收口证据保留；生产匹配 Linux/root 验证在受控部署中执行。
 - 开发节奏调整为“单功能实现 -> 定向测试 -> 独立审查 -> 备份 -> 上线 -> 线上健康/登录/核心路径冒烟”。完整非浏览器回归、Playwright 和多角色复审仅在阶段收口、计划发布窗口或改动跨越认证、权限、迁移、共享基础设施等高风险边界时执行；HIGH/CRITICAL、备份/回滚、迁移安全和生产冒烟继续作为硬阻断项。
 - 本条目仍是发布候选，不代表线上已切换。生产 v0.4 保持原样且未触碰；当前功能切片须完成最终定向证据、独立审查、干净权威工作区、GitHub 同步、可校验备份、容量门禁、受控部署和远端运行时/API/权限/回滚验收后才能标记发布。

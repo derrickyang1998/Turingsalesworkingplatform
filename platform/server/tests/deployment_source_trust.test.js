@@ -840,6 +840,7 @@ test('trusted runtime dependency scripts are cgroup-contained, egress-bounded, a
   assert.match(trustedGate, /readRuntimeUnitProperty\(unitName, 'MainPID'\)/);
   assert.match(trustedGate, /npm[\s\S]*?\['ci', '--omit=dev', '--ignore-scripts'\][\s\S]*?'fetch'/);
   assert.match(trustedGate, /npm[\s\S]*?\['rebuild', 'better-sqlite3'\][\s\S]*?'build'/);
+  assert.match(trustedGate, /npm_config_nodedir:\s*'\/usr'/);
   assert.doesNotMatch(
     trustedGate,
     /spawnSync\(npm, [\s\S]*?\['rebuild', 'better-sqlite3'\]/,
@@ -856,6 +857,7 @@ test('trusted runtime dependency scripts are cgroup-contained, egress-bounded, a
   assert.match(candidateGate, /TrustedRuntimeBuildGid="\$\(id -g "\$GateUser"\)"/);
   assert.match(candidateGate, /--build-uid "\$TrustedRuntimeBuildUid"/);
   assert.match(candidateGate, /--build-gid "\$TrustedRuntimeBuildGid"/);
+  assert.match(candidateGate, /npm_config_nodedir=\/usr/);
 });
 
 test('trusted runtime sealing is descriptor-bound and records a complete dependency tree digest', () => {

@@ -1057,7 +1057,11 @@ function prepareTrustedRuntime(options) {
       ['rebuild', 'better-sqlite3'],
       {
         cwd: serverRoot,
-        env: { ...environment, npm_config_offline: 'true' },
+        env: {
+          ...environment,
+          npm_config_offline: 'true',
+          npm_config_nodedir: '/usr'
+        },
         stageRoot,
         cacheRoot,
         candidateRoot: options.candidateRoot

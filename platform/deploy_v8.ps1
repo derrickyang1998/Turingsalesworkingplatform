@@ -32,7 +32,7 @@ $EXPECTED_PPT_QUERY = "20260702v916kbbridge"
 $EXPECTED_PPT_SHA256 = "f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e"
 $TRUSTED_SOURCE_GATE_RELATIVE_PATH = "server\scripts\trusted_production_source_gate.js"
 $TRUSTED_SOURCE_MANIFEST_RELATIVE_PATH = "server\scripts\trusted_production_source_manifest.json"
-$EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "63cfc3f896d092c32aa68316fe6f4386271c07e0c29b3cbcc6b191ac9cf564d5"
+$EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "51e23c84566db15a78dd416727b64aba6bf31a6cef615e88036d4f853db19869"
 $EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "a82ff29e22e3aa9bf60a3759b807530019e508c2694fd7495a150610789bbd2e"
 $EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256 = "bdc60e6a9da601c8c65cd2a374d8cb69eeea629fa6cd5af514dd995eddfe74dc"
 $EXPECTED_TRUSTED_PARSER_VERIFIER_SHA256 = "93973d83379c1b22a779751be135f59c992d0784957519b3fdb1abebaad2d2f6"
@@ -2714,6 +2714,13 @@ cat "$LockDir/phase"
         throw "Remote deployment phase is missing or invalid."
     }
     return $phase
+}
+
+function Assert-RemoteCandidateReady {
+    $phase = Get-RemoteDeploymentPhase -DeploymentLockOnly
+    if ($phase -ne 'candidate-ready') {
+        throw "Remote candidate validation did not durably commit candidate-ready."
+    }
 }
 
 $requiredPublicAssets = @(
@@ -8175,6 +8182,7 @@ timeout --signal=KILL 20m systemd-run --quiet --wait --pipe --unit="$DependencyB
     PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
     npm_config_cache="$TestRoot/npm-cache" \
     npm_config_offline=true \
+    npm_config_nodedir=/usr \
     DEPENDENCY_SERVER_ROOT="$DependencyServerRoot" \
     /bin/bash --noprofile --norc -s <<'TM_DEPENDENCY_BUILD'
 set -euo pipefail
@@ -8858,6 +8866,7 @@ echo "CANDIDATE_OK"
     $candidateGate = $candidateGate.Replace('__TRUSTED_MIGRATION_VERIFIER_SHA256__', $EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256)
     $candidateGate = $candidateGate.Replace('__STAMP__', $stamp)
     Invoke-RemoteBash -Script $candidateGate -FailureMessage "Remote candidate validation failed" -TimeoutSeconds $CANDIDATE_GATE_TIMEOUT_SECONDS -RequireDeploymentLock
+    Assert-RemoteCandidateReady
 
     Invoke-RemoteParserCandidatePreparation `
         -ReleaseRoot $remoteReleaseRoot `

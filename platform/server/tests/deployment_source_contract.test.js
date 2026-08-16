@@ -1719,6 +1719,38 @@ test('Phase 4 candidate gate remains valid Bash after isolation hardening', {
   assert.equal(result.status, 0, result.stderr || result.stdout);
 });
 
+test('Phase 4 refuses to continue unless candidate validation durably commits candidate-ready', () => {
+  const deploy = read(deployPath);
+  const main = deploy.slice(deploy.indexOf('Write-Host "TuringMarket guarded deploy starting"'));
+  const candidate = main.indexOf('Invoke-RemoteBash -Script $candidateGate');
+  const assertion = main.indexOf('Assert-RemoteCandidateReady', candidate);
+  const parser = main.indexOf('Invoke-RemoteParserCandidatePreparation', candidate);
+  assert.ok(candidate >= 0, 'candidate validation invocation must exist');
+  assert.ok(assertion > candidate, 'candidate-ready must be asserted after candidate validation');
+  assert.ok(parser > assertion, 'parser preparation must remain blocked behind candidate-ready');
+});
+
+test('Phase 4 candidate-ready postcondition rejects an uncommitted remote phase', {
+  skip: process.platform !== 'win32'
+}, () => {
+  const result = runPowerShellFunctionHarness(['Assert-RemoteCandidateReady'], String.raw`
+$script:ObservedPhase = 'locked'
+function Get-RemoteDeploymentPhase {
+  param([switch]$DeploymentLockOnly)
+  if (-not $DeploymentLockOnly) { throw 'Candidate readiness must use the lifecycle lock only' }
+  return $script:ObservedPhase
+}
+$rejected = $false
+try { Assert-RemoteCandidateReady } catch { $rejected = $true }
+if (-not $rejected) { throw 'A non-ready candidate phase was accepted' }
+$script:ObservedPhase = 'candidate-ready'
+Assert-RemoteCandidateReady
+Write-Output 'CANDIDATE_READY_POSTCONDITION_OK'
+`);
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /CANDIDATE_READY_POSTCONDITION_OK/);
+});
+
 test('Task 12 deploy validates an isolated candidate and atomically exchanges it while PM2 is stopped', () => {
   const deploy = read(deployPath);
   assert.match(deploy, /\$remoteCandidateDir\s*=\s*"\$remoteReleaseRoot\/platform"/);
