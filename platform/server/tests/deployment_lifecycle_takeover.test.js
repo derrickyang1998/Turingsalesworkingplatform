@@ -1402,12 +1402,14 @@ run_takeover() {
 }
 printf '%s\n' unsafe > "$WriterDir/unexpected"
 chmod 0600 "$WriterDir/unexpected"
+RunJsonBefore="$(sha256sum "$LockDir/run.json" | awk '{print $1}')"
 set +e
 run_takeover "$Owner" bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb >/dev/null 2>&1
 UnsafeWriterStatus=$?
 set -e
 test "$UnsafeWriterStatus" -ne 0
 test "$(cat "$LockDir/owner")" = "$Owner"
+test "$(sha256sum "$LockDir/run.json" | awk '{print $1}')" = "$RunJsonBefore"
 test -d "$ReleaseRoot"
 test -d "$WriterDir"
 rm -f -- "$WriterDir/unexpected"
