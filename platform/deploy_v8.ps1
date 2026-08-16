@@ -707,6 +707,63 @@ printf '%s\n' 'TRUSTED_PRODUCTION_SOURCE_GATE_INSTALLED'
     Invoke-RemoteBash -Script $installScript -FailureMessage "Trusted production source gate installation failed" -RequireDeploymentLock
 }
 
+function Stage-RemoteTrustedProductionSourceBundle {
+    param(
+        [Parameter(Mandatory = $true)][string]$ReleaseRoot,
+        [Parameter(Mandatory = $true)][string]$CandidateDir
+    )
+
+    $stageScript = @'
+set -euo pipefail
+CandidateRoot="__CANDIDATE_ROOT__"
+ReleaseRoot="__RELEASE_ROOT__"
+CandidateDir="__CANDIDATE_DIR__"
+TrustedSourceGate="__TRUSTED_SOURCE_GATE__"
+TrustedSourceManifest="__TRUSTED_SOURCE_MANIFEST__"
+TrustedSourceBundle="__TRUSTED_SOURCE_BUNDLE__"
+ExpectedGateSha256="__TRUSTED_SOURCE_GATE_SHA256__"
+ExpectedManifestSha256="__TRUSTED_SOURCE_MANIFEST_SHA256__"
+ExpectedVerifierSha256="__TRUSTED_MIGRATION_VERIFIER_SHA256__"
+
+case "$ReleaseRoot" in
+  "$CandidateRoot"/v060-crm-sales-workspace-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]) ;;
+  *) echo "Trusted source release path is invalid" >&2; exit 1 ;;
+esac
+test "$CandidateDir" = "$ReleaseRoot/platform"
+test -d "$CandidateDir"
+test ! -L "$CandidateDir"
+for trusted_file in "$TrustedSourceGate" "$TrustedSourceManifest"; do
+  test -f "$trusted_file"
+  test ! -L "$trusted_file"
+  test "$(stat -c '%U:%G:%a:%h' "$trusted_file")" = "root:root:444:1"
+done
+test "$(sha256sum "$TrustedSourceGate" | awk '{print $1}')" = "$ExpectedGateSha256"
+test "$(sha256sum "$TrustedSourceManifest" | awk '{print $1}')" = "$ExpectedManifestSha256"
+/usr/bin/node "$TrustedSourceGate" stage \
+  --candidate-root "$CandidateDir" \
+  --bundle-root "$TrustedSourceBundle" \
+  --manifest "$TrustedSourceManifest" \
+  --expected-self-sha256 "$ExpectedGateSha256" \
+  --expected-manifest-sha256 "$ExpectedManifestSha256" \
+  --expected-verifier-sha256 "$ExpectedVerifierSha256" >/dev/null
+test -d "$TrustedSourceBundle"
+test ! -L "$TrustedSourceBundle"
+test "$(realpath -e "$TrustedSourceBundle")" = "$TrustedSourceBundle"
+test "$(stat -c '%U:%G:%a' "$TrustedSourceBundle")" = "root:root:555"
+printf '%s\n' 'TRUSTED_PRODUCTION_SOURCE_BUNDLE_STAGED'
+'@
+    $stageScript = $stageScript.Replace('__CANDIDATE_ROOT__', $CANDIDATE_ROOT)
+    $stageScript = $stageScript.Replace('__RELEASE_ROOT__', $ReleaseRoot)
+    $stageScript = $stageScript.Replace('__CANDIDATE_DIR__', $CandidateDir)
+    $stageScript = $stageScript.Replace('__TRUSTED_SOURCE_GATE__', $TRUSTED_SOURCE_GATE_REMOTE_PATH)
+    $stageScript = $stageScript.Replace('__TRUSTED_SOURCE_MANIFEST__', $TRUSTED_SOURCE_MANIFEST_REMOTE_PATH)
+    $stageScript = $stageScript.Replace('__TRUSTED_SOURCE_BUNDLE__', $TRUSTED_SOURCE_BUNDLE_REMOTE_PATH)
+    $stageScript = $stageScript.Replace('__TRUSTED_SOURCE_GATE_SHA256__', $EXPECTED_TRUSTED_SOURCE_GATE_SHA256)
+    $stageScript = $stageScript.Replace('__TRUSTED_SOURCE_MANIFEST_SHA256__', $EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256)
+    $stageScript = $stageScript.Replace('__TRUSTED_MIGRATION_VERIFIER_SHA256__', $EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256)
+    Invoke-RemoteBash -Script $stageScript -FailureMessage "Trusted production source bundle staging failed" -RequireDeploymentLock
+}
+
 function Invoke-RemoteTrustedSourceInputSweep {
     $sweepScript = @'
 set -euo pipefail
@@ -3830,7 +3887,7 @@ def verify_effective_unit(allow_barrier):
     unit_exists = os.path.lexists(unit_path)
     expected_fragment = unit_path if unit_exists else ''
     expected_load_state = 'loaded' if unit_exists else 'not-found'
-    expected_dropins = barrier_path if allow_barrier else ''
+    expected_dropins = barrier_path if allow_barrier and unit_exists else ''
     expected = {
         'Id': unit_name,
         'Names': unit_name,
@@ -7616,6 +7673,7 @@ sha256sum --check --status "$LockDir/upload.sha256"
     $verifyUploadScript = $verifyUploadScript.Replace('__UPLOAD_CHECKSUMS__', $uploadChecksums)
     Invoke-RemoteBash -Script $verifyUploadScript -FailureMessage "Candidate upload checksum verification failed" -RequireDeploymentLock
 
+    Stage-RemoteTrustedProductionSourceBundle -ReleaseRoot $remoteReleaseRoot -CandidateDir $remoteCandidateDir
     Invoke-RemoteBackup -BackupPath $backupDir -DeploymentPlan $deploymentActionPlan
     $backupCreated = $true
     Install-RemoteMigrationGateCleanup

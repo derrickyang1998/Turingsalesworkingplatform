@@ -295,6 +295,19 @@ test('Phase 4 installs the trusted migration sanitizer only after upload verific
     'Install-RemoteMigrationGateCleanup',
     'Enter-RemoteDeploymentLock'
   );
+  const trustedBundleStage = functionSource(
+    deploy,
+    'Stage-RemoteTrustedProductionSourceBundle',
+    'Invoke-RemoteTrustedSourceInputSweep'
+  );
+  assert.match(trustedBundleStage, /\/usr\/bin\/node "\$TrustedSourceGate" stage/);
+  assert.match(trustedBundleStage, /--candidate-root "\$CandidateDir"/);
+  assert.match(trustedBundleStage, /--bundle-root "\$TrustedSourceBundle"/);
+  assert.match(trustedBundleStage, /ExpectedGateSha256/);
+  assert.match(trustedBundleStage, /ExpectedManifestSha256/);
+  assert.match(trustedBundleStage, /ExpectedVerifierSha256/);
+  assert.match(trustedBundleStage, /root:root:555/);
+  assert.match(trustedBundleStage, /RequireDeploymentLock/);
   assert.doesNotMatch(install, /DeploymentPlan|cleanupBase64|unitBase64/);
   assert.match(install, /TrustedSourceBundle="__TRUSTED_SOURCE_BUNDLE__"/);
   assert.match(install, /\$TrustedSourceBundle\/server\/scripts\/cleanup_stale_migration_gate\.sh/);
@@ -313,11 +326,13 @@ test('Phase 4 installs the trusted migration sanitizer only after upload verific
   const main = deploy.slice(deploy.indexOf('Write-Host "TuringMarket guarded deploy starting"'));
   const installIndex = main.indexOf('Install-RemoteMigrationGateCleanup');
   const verifyIndex = main.indexOf('Candidate upload checksum verification failed');
+  const trustedBundleIndex = main.indexOf('Stage-RemoteTrustedProductionSourceBundle');
   const backupIndex = main.indexOf('Invoke-RemoteBackup');
   const candidateGateIndex = main.indexOf('$candidateGate');
   assert.ok(
-    verifyIndex >= 0 && backupIndex > verifyIndex && installIndex > backupIndex && candidateGateIndex > installIndex,
-    'upload checksum and recoverable backup must precede trusted cleanup installation and candidate execution'
+    verifyIndex >= 0 && trustedBundleIndex > verifyIndex && backupIndex > trustedBundleIndex &&
+      installIndex > backupIndex && candidateGateIndex > installIndex,
+    'upload checksum, trusted bundle staging, and recoverable backup must precede cleanup installation and candidate execution'
   );
 });
 

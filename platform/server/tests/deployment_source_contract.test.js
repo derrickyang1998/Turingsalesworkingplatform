@@ -595,7 +595,7 @@ case "$1" in
       DropInPaths)
         if test -n "\${TM_FIXTURE_DROPIN_PATHS+x}"; then
           printf '%s\\n' "$TM_FIXTURE_DROPIN_PATHS"
-        elif test -f "$TM_FIXTURE_BARRIER"; then
+        elif test -f "$Unit" && test -f "$TM_FIXTURE_BARRIER"; then
           printf '%s\\n' "$TM_FIXTURE_BARRIER"
         else
           printf '\\n'
