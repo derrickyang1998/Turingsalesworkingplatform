@@ -1142,6 +1142,12 @@ test('Phase 4 backup and restore bind one verified SQLite and private PPT cache 
   assert.match(backup, /if \[ -e "\$PptCacheDir" \] \|\| \[ -L "\$PptCacheDir" \]/);
   assert.match(backup, /cp -a -- "\$PptCacheDir\/\." "\$BackupAbsolute\/ppt-cache\/"/);
   assert.match(backup, /find "\$BackupAbsolute\/ppt-cache"[\s\S]*?-type f[\s\S]*?sha256sum/);
+  assert.match(backup, /const backup = new Database\(destination, \{ fileMustExist: true \}\)/);
+  assert.match(backup, /backup\.pragma\('journal_mode = DELETE', \{ simple: true \}\)/);
+  assert.ok(
+    backup.indexOf("backup.pragma('journal_mode = DELETE'") < backup.indexOf("backup.pragma('quick_check'"),
+    'backup must normalize WAL mode before opening a single-file rollback contract'
+  );
 
   assert.match(restore, /\[switch\]\$RestoreDatabase/);
   assert.match(restore, /if \(-not \$RestoreDatabase\)/);

@@ -3376,8 +3376,10 @@ const destination = process.argv[2];
 const database = new Database('db/turingmarket.db', { readonly: true, fileMustExist: true });
 database.backup(destination).then(() => {
   database.close();
-  const backup = new Database(destination, { readonly: true, fileMustExist: true });
+  const backup = new Database(destination, { fileMustExist: true });
   try {
+    const backupJournalMode = backup.pragma('journal_mode = DELETE', { simple: true });
+    if (backupJournalMode !== 'delete') throw new Error(`Backup journal mode normalization failed: ${backupJournalMode}`);
     const quickCheck = backup.pragma('quick_check', { simple: true });
     if (quickCheck !== 'ok') throw new Error(`Backup quick_check failed: ${quickCheck}`);
     const foreignKeys = backup.pragma('foreign_key_check');
