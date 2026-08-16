@@ -376,7 +376,7 @@ printf '%s\n' "$ACK_OUTPUT"
 unset ACK_OUTPUT
 ```
 
-The expected acknowledgement is `BOOTSTRAP_TERMINAL_ACKNOWLEDGED=<id>`, where `<id>` exactly equals `TERMINAL_ID`. Repeating ACK with the same ID is idempotent; a wrong or stale ID fails closed. Never edit or delete journal files to bypass a rejected ACK. / 期望输出为 `BOOTSTRAP_TERMINAL_ACKNOWLEDGED=<id>`，其中 `<id>` 必须与 `TERMINAL_ID` 完全一致。同一 ID 重复 ACK 为幂等，错误或过期 ID 均失败关闭。ACK 被拒绝时绝不允许通过编辑或删除 journal 文件绕过校验。
+The expected acknowledgement is `BOOTSTRAP_TERMINAL_ACKNOWLEDGED=<id>`, where `<id>` exactly equals `TERMINAL_ID`. A successful ACK atomically archives `active` as `.terminal-consumed.<sha256>`, so `/var/lib/turingmarket-bootstrap/active` is absent before deployment while the immutable evidence remains discoverable by terminal ID. Repeating ACK with the same ID is idempotent; a wrong or stale ID fails closed. Never edit or delete journal files to bypass a rejected ACK. / 期望输出为 `BOOTSTRAP_TERMINAL_ACKNOWLEDGED=<id>`，其中 `<id>` 必须与 `TERMINAL_ID` 完全一致。ACK 成功后会把 `active` 原子归档为 `.terminal-consumed.<sha256>`，因此部署前 `/var/lib/turingmarket-bootstrap/active` 必须不存在，同时不可变证据仍可通过 terminal ID 查询。同一 ID 重复 ACK 为幂等，错误或过期 ID 均失败关闭。ACK 被拒绝时绝不允许通过编辑或删除 journal 文件绕过校验。
 
 #### Capacity and recovery rules / 容量与恢复规则
 

@@ -220,6 +220,83 @@ test('main locks before terminal preflight and still recovers artifacts before c
   assert.match(main, /bootstrap_run_new_migration[\s\S]*bootstrap_emit_normal_success_contract/);
 });
 
+test('terminal acknowledgement archives active evidence and committed validation reserves its backup first', () => {
+  const ackStart = bootstrap.indexOf('bootstrap_ack_terminal_generation() {');
+  const ackEnd = bootstrap.indexOf('\n}\n\nbootstrap_ack_terminal_command()', ackStart);
+  assert.ok(ackStart > 0 && ackEnd > ackStart);
+  const acknowledgement = bootstrap.slice(ackStart, ackEnd);
+  const consume = acknowledgement.indexOf('bootstrap_journal_dirfd_helper ack-terminal');
+  const archive = acknowledgement.indexOf('bootstrap_journal_dirfd_helper archive-consumed');
+  assert.ok(consume >= 0 && consume < archive);
+  assert.match(acknowledgement, /JOURNAL_ENTRY_NAME="\$\{values\[0\]\}"/);
+  assert.match(bootstrap, /elif action == 'archive-consumed':[\s\S]*terminal-consumed/);
+  assert.match(bootstrap, /archive_name = f"\.terminal-consumed\.\{argument_one\[3:\]\}"/);
+  assert.match(bootstrap, /rename_noreplace\(root_fd, 'active', root_fd, archive_name\)/);
+  const archiveStart = bootstrap.indexOf("elif action == 'archive-consumed':");
+  const archiveEnd = bootstrap.indexOf("elif action in ('retire', 'consume-terminal'):", archiveStart);
+  const archiveAction = bootstrap.slice(archiveStart, archiveEnd);
+  assert.match(archiveAction, /\n            os\.fsync\(root_fd\)\n            print\(archive_name\)/);
+
+  const backupStart = bootstrap.indexOf('bootstrap_prepare_committed_validation_backup() {');
+  const backupEnd = bootstrap.indexOf('\n}\n\nbootstrap_production_main()', backupStart);
+  const backupPreparation = bootstrap.slice(backupStart, backupEnd);
+  const backupDirectorySync = backupPreparation.indexOf('sync_directory "$BACKUP_DIR"');
+  const backupRootSync = backupPreparation.indexOf('sync_directory "$BACKUP_ROOT"');
+  assert.ok(backupDirectorySync >= 0 && backupDirectorySync < backupRootSync);
+
+  const mainStart = bootstrap.indexOf('bootstrap_production_main() {');
+  const mainEnd = bootstrap.indexOf('\n}\n\nif [ "${TM_BOOTSTRAP_LIBRARY_ONLY', mainStart);
+  const main = bootstrap.slice(mainStart, mainEnd);
+  const prepareBackup = main.indexOf('bootstrap_prepare_committed_validation_backup');
+  const beginJournal = main.indexOf('begin_migration_journal');
+  assert.ok(prepareBackup >= 0 && prepareBackup < beginJournal);
+});
+
+test('acknowledgement updates the bound journal to its exact consumed archive', {
+  skip: hasGitBash ? false : 'Git Bash is unavailable'
+}, () => {
+  const terminalId = `t1:${'a'.repeat(64)}`;
+  const initialIdentity = `j2:${'b'.repeat(64)}:1:2:3`;
+  const pendingHead = 'c'.repeat(64);
+  const consumedHead = 'd'.repeat(64);
+  const result = runBash(libraryHarness(`
+JOURNAL_ENTRY_NAME=active
+JOURNAL_DIR_IDENTITY='${initialIdentity}'
+JOURNAL_HEAD_DIGEST='${pendingHead}'
+JOURNAL_MARKER_PROOF=absent
+calls="$root/calls"
+bootstrap_journal_dirfd_helper() {
+  printf '%s\n' "$1" >> "$calls"
+  case "$1" in
+    ack-terminal)
+      test "$2" = active
+      test "$3" = '${initialIdentity}'
+      test "$4" = '${terminalId}'
+      test "$5" = '${pendingHead}'
+      printf '%s\n%s\n%s\n' '${initialIdentity}' '${consumedHead}' '${terminalId}'
+      ;;
+    archive-consumed)
+      test "$2" = active
+      test "$3" = '${initialIdentity}'
+      test "$4" = '${terminalId}'
+      test "$5" = '${consumedHead}'
+      printf '%s\n%s\n%s\n%s\n' '.terminal-consumed.${'a'.repeat(64)}' '${initialIdentity}' '${consumedHead}' '${terminalId}'
+      ;;
+    *) return 91 ;;
+  esac
+}
+bootstrap_ack_terminal_generation '${terminalId}'
+test "$(cat "$calls")" = "ack-terminal
+archive-consumed"
+test "$JOURNAL_ENTRY_NAME" = '.terminal-consumed.${'a'.repeat(64)}'
+test "$JOURNAL_DIR_IDENTITY" = '${initialIdentity}'
+test "$JOURNAL_HEAD_DIGEST" = '${consumedHead}'
+test "$JOURNAL_TERMINAL_STATE" = terminal-consumed
+`));
+
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+});
+
 test('external-layout marker is exact and permanently disables the bootstrap restore path', {
   skip: nativeLinuxOnly
 }, () => {
@@ -2754,11 +2831,17 @@ ln -s "$ENV_FILE" "$LIVE_DIR/.env"
 bootstrap_ack_terminal_command "$terminal_id"
 validate_external_layout_marker
 test -n "$EXTERNAL_LAYOUT_MARKER_PROOF"
+test ! -e "$JOURNAL_ROOT/active"
 discover_migration_journal "$terminal_id"
 read_journal
 test "$JOURNAL_TERMINAL_STATE" = terminal-consumed
-test -f "$JOURNAL_DIR/terminal-explicit-ack-v1"
+case "$JOURNAL_ENTRY_NAME" in
+  .terminal-consumed.*) ;;
+  *) exit 96 ;;
+esac
+test -f "$JOURNAL_ROOT/$JOURNAL_ENTRY_NAME/terminal-explicit-ack-v1"
 bootstrap_ack_terminal_generation "$terminal_id"
+test ! -e "$JOURNAL_ROOT/active"
 bootstrap_terminal_journal_gate
 test -z "$BOOTSTRAP_TERMINAL_JOURNAL_OUTCOME"
 `), 60_000);

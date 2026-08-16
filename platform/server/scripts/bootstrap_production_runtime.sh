@@ -5352,6 +5352,32 @@ try:
             print(identity_text(journal_status, journal_fd))
             print(after_digest)
             print(current['terminal']['id'])
+        elif action == 'archive-consumed':
+            legacy, current, _names, _identities, head_digest = read_generation_snapshot(
+                journal_fd, journal_status, root_mount_id,
+            )
+            archive_name = f".terminal-consumed.{argument_one[3:]}"
+            if (
+                current['state'] != 'terminal-consumed'
+                or current['terminal']['id'] != argument_one
+                or argument_two != head_digest
+                or argument_three
+                or entry_name not in ('active', archive_name)
+            ):
+                reject('Migration journal consumed archive arguments are invalid')
+            assert_entry_matches(
+                root_fd, root_status, root_mount_id, entry_name, journal_fd, expected_identity,
+            )
+            if entry_name == 'active':
+                rename_noreplace(root_fd, 'active', root_fd, archive_name)
+                assert_entry_matches(
+                    root_fd, root_status, root_mount_id, archive_name, journal_fd, expected_identity,
+                )
+            os.fsync(root_fd)
+            print(archive_name)
+            print(identity_text(journal_status, journal_fd))
+            print(head_digest)
+            print(current['terminal']['id'])
         elif action in ('retire', 'consume-terminal'):
             reject('Migration journal legacy terminal mutation is forbidden')
         else:
@@ -6592,7 +6618,7 @@ bootstrap_terminal_journal_gate() {
 }
 
 bootstrap_ack_terminal_generation() {
-  local terminal_id="$1" result
+  local terminal_id="$1" expected_archive result
   local -a values
   result="$(bootstrap_journal_dirfd_helper ack-terminal \
     "$JOURNAL_ENTRY_NAME" "$JOURNAL_DIR_IDENTITY" \
@@ -6603,6 +6629,20 @@ bootstrap_ack_terminal_generation() {
   [ "${values[2]}" = "$terminal_id" ] || return 1
   JOURNAL_HEAD_DIGEST="${values[1]}"
   JOURNAL_TERMINAL_STATE=terminal-consumed
+  expected_archive=".terminal-consumed.${terminal_id#t1:}"
+  result="$(bootstrap_journal_dirfd_helper archive-consumed \
+    "$JOURNAL_ENTRY_NAME" "$JOURNAL_DIR_IDENTITY" \
+    "$terminal_id" "$JOURNAL_HEAD_DIGEST")" || return 1
+  mapfile -t values <<< "$result"
+  [ "${#values[@]}" = 4 ] || return 1
+  [ "${values[0]}" = "$expected_archive" ] || return 1
+  [ "${values[1]}" = "$JOURNAL_DIR_IDENTITY" ] || return 1
+  [ "${values[2]}" = "$JOURNAL_HEAD_DIGEST" ] || return 1
+  [ "${values[3]}" = "$terminal_id" ] || return 1
+  JOURNAL_ENTRY_NAME="${values[0]}"
+  JOURNAL_DIR_IDENTITY="${values[1]}"
+  JOURNAL_HEAD_DIGEST="${values[2]}"
+  JOURNAL_TERMINAL_ID="${values[3]}"
 }
 
 bootstrap_ack_terminal_command() {
@@ -7205,6 +7245,42 @@ chmod -R go-rwx "$BACKUP_DIR" || return $?
   trap - ERR INT TERM HUP
 }
 
+bootstrap_prepare_committed_validation_backup() {
+  local expected_owner parent_mode
+  [ "$BACKUP_DIR" = "$BACKUP_ROOT/v030-runtime-bootstrap-$STAMP" ] || {
+    printf '%s\n' "Committed validation backup path is invalid" >&2
+    return 1
+  }
+  [ -d "$BACKUP_ROOT" ] && [ ! -L "$BACKUP_ROOT" ] || {
+    printf '%s\n' "Committed validation backup root is missing or unsafe" >&2
+    return 1
+  }
+  [ "$(bootstrap_trusted_realpath -e "$BACKUP_ROOT")" = "$BACKUP_ROOT" ] || {
+    printf '%s\n' "Committed validation backup root is not canonical" >&2
+    return 1
+  }
+  expected_owner="$(expected_bootstrap_owner)" || return 1
+  [ "$(bootstrap_trusted_stat -c '%U:%G' "$BACKUP_ROOT")" = "$expected_owner" ] || {
+    printf '%s\n' "Committed validation backup root ownership drift" >&2
+    return 1
+  }
+  parent_mode="$(bootstrap_trusted_stat -c '%a' "$BACKUP_ROOT")" || return 1
+  case "$parent_mode" in
+    700|750|755) ;;
+    *) printf '%s\n' "Committed validation backup root mode is unsafe" >&2; return 1 ;;
+  esac
+  if path_entry_present_no_follow "$BACKUP_DIR"; then
+    printf '%s\n' "Committed validation backup path already exists" >&2
+    return 1
+  fi
+  mkdir -m 0700 -- "$BACKUP_DIR" || return 1
+  [ -d "$BACKUP_DIR" ] && [ ! -L "$BACKUP_DIR" ] || return 1
+  [ "$(bootstrap_trusted_realpath -e "$BACKUP_DIR")" = "$BACKUP_DIR" ] || return 1
+  [ "$(bootstrap_trusted_stat -c '%U:%G:%a' "$BACKUP_DIR")" = "$expected_owner:700" ] || return 1
+  sync_directory "$BACKUP_DIR" || return 1
+  sync_directory "$BACKUP_ROOT" || return 1
+}
+
 bootstrap_production_main() {
   local marker_state initial_phase journal_started=0 allow_top_level_mutation=1
   local phase4_journal_policy=none
@@ -7245,6 +7321,7 @@ bootstrap_production_main() {
     bootstrap_prepare_journal_run_identity || return $?
     if [ "$marker_state" = valid ]; then
       initial_phase=committed
+      bootstrap_prepare_committed_validation_backup || return $?
     else
       initial_phase=stopping
     fi
