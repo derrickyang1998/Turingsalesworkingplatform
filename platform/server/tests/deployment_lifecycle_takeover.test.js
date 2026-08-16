@@ -112,7 +112,7 @@ test('Phase 4 serializes lifecycle and production operations with a non-inherite
   }
 });
 
-test('Phase 4 takeover validates remote state, CAS-rotates owner, and quarantines only pre-mutation candidates', () => {
+test('Phase 4 takeover validates remote state, CAS-rotates owner, and reclaims only a canonical stale writer', () => {
   const deploy = read(deployPath);
   const takeover = functionSource(deploy, 'Enter-RemoteInterruptedDeploymentRecovery', 'Get-RemoteDeploymentRunMetadata');
   assert.match(takeover, /ExpectedOwner/);
@@ -128,6 +128,13 @@ test('Phase 4 takeover validates remote state, CAS-rotates owner, and quarantine
   assert.match(takeover, /realpath/);
   assert.match(takeover, /test ! -L/);
   assert.match(takeover, /\$RootUid:600:1/);
+  assert.match(takeover, /WriterDir="\$RemoteRoot\/\.deploy-v030\.writer"/);
+  assert.match(takeover, /WriterQuarantine/);
+  assert.match(takeover, /Unexpected stale writer lock inventory/);
+  assert.ok(
+    takeover.indexOf("metadata['ownerToken'] = newOwner") < takeover.indexOf('mv -T "$WriterDir" "$WriterQuarantine"'),
+    'the owner CAS must invalidate the prior controller before stale writer reclamation'
+  );
 });
 
 test('Phase 4 observes every durable cutover phase before interrupted recovery takeover', () => {
@@ -1348,9 +1355,14 @@ trap 'rm -rf "$Root"' EXIT
 CandidateRoot="$Root/releases"
 BackupRoot="$Root/backups"
 LockDir="$Root/.deploy-v030.lock"
+WriterDir="$Root/.deploy-v030.writer"
 OperationFence="$Root/.deploy-v030.operation.lock"
 mkdir -p "$CandidateRoot" "$BackupRoot" "$LockDir"
 chmod 0700 "$LockDir"
+mkdir "$WriterDir"
+chmod 0700 "$WriterDir"
+printf '%s\n' eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee > "$WriterDir/owner"
+chmod 0600 "$WriterDir/owner"
 : > "$OperationFence"
 chmod 0600 "$OperationFence"
 Owner=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
@@ -1388,10 +1400,22 @@ run_takeover() {
     sed "s#__REMOTE_ROOT__#$Root#g; s#__CANDIDATE_ROOT__#$CandidateRoot#g; s#__EXPECTED_OWNER__#$expected#g; s#__NEW_LOCK_TOKEN__#$next#g; s#__ROOT_UID__#$Uid#g" |
     bash -se
 }
+printf '%s\n' unsafe > "$WriterDir/unexpected"
+chmod 0600 "$WriterDir/unexpected"
+set +e
+run_takeover "$Owner" bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb >/dev/null 2>&1
+UnsafeWriterStatus=$?
+set -e
+test "$UnsafeWriterStatus" -ne 0
+test "$(cat "$LockDir/owner")" = "$Owner"
+test -d "$ReleaseRoot"
+test -d "$WriterDir"
+rm -f -- "$WriterDir/unexpected"
 run_takeover "$Owner" cccccccccccccccccccccccccccccccc
 test "$(cat "$LockDir/owner")" = cccccccccccccccccccccccccccccccc
 test ! -e "$ReleaseRoot"
 test -d "$CandidateRoot/.quarantine-$RunId-1"
+test ! -e "$WriterDir"
 set +e
 run_takeover "$Owner" dddddddddddddddddddddddddddddddd >/dev/null 2>&1
 StaleStatus=$?

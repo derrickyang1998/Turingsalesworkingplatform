@@ -1784,6 +1784,8 @@ set -euo pipefail
 RemoteRoot="__REMOTE_ROOT__"
 CandidateRoot="__CANDIDATE_ROOT__"
 LockDir="$RemoteRoot/.deploy-v030.lock"
+WriterDir="$RemoteRoot/.deploy-v030.writer"
+WriterQuarantine="$WriterDir.recovery-stale"
 ParserRollbackFailure="$LockDir/parser-rollback.failed"
 ParserRollbackFailureNext="$ParserRollbackFailure.next"
 TrustedSourceBundle="__TRUSTED_SOURCE_BUNDLE__"
@@ -1806,6 +1808,58 @@ case "$Phase" in
   mutation-started|release-replay-complete|accepted|accepted-public-enabled|cutover-complete) ;;
   *) echo "Unknown interrupted deployment phase" >&2; exit 1 ;;
 esac
+
+WriterState="$(python3 - "$WriterDir" "$WriterQuarantine" "$RootUid" <<'PY'
+import os
+import re
+import stat
+import sys
+
+writer_path, quarantine_path, expected_uid_raw = sys.argv[1:]
+expected_uid = int(expected_uid_raw)
+
+def validate_writer(path, allow_empty):
+    descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        metadata = os.fstat(descriptor)
+        if (not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != expected_uid or
+                metadata.st_gid != expected_uid or stat.S_IMODE(metadata.st_mode) != 0o700 or
+                os.listxattr(descriptor)):
+            raise SystemExit('Unsafe stale writer lock directory')
+        entries = sorted(os.listdir(descriptor))
+        allowed = [[], ['owner']] if allow_empty else [['owner']]
+        if entries not in allowed:
+            raise SystemExit('Unexpected stale writer lock inventory')
+        if not entries:
+            return 'empty'
+        owner = os.open('owner', os.O_RDONLY | os.O_NOFOLLOW, dir_fd=descriptor)
+        try:
+            owner_metadata = os.fstat(owner)
+            payload = os.read(owner, 64)
+            if (not stat.S_ISREG(owner_metadata.st_mode) or owner_metadata.st_uid != expected_uid or
+                    owner_metadata.st_gid != expected_uid or stat.S_IMODE(owner_metadata.st_mode) != 0o600 or
+                    owner_metadata.st_nlink != 1 or os.listxattr(owner) or
+                    re.fullmatch(rb'[0-9a-f]{32}\n', payload) is None):
+                raise SystemExit('Unsafe stale writer lock owner')
+        finally:
+            os.close(owner)
+        return 'owner'
+    finally:
+        os.close(descriptor)
+
+writer_present = os.path.lexists(writer_path)
+quarantine_present = os.path.lexists(quarantine_path)
+if writer_present and quarantine_present:
+    raise SystemExit('Ambiguous stale writer lock recovery state')
+if writer_present:
+    validate_writer(writer_path, False)
+    print('live')
+elif quarantine_present:
+    print('quarantined-' + validate_writer(quarantine_path, True))
+else:
+    print('absent')
+PY
+)"
 
 LifecycleResidue="$(python3 - "$LockDir" "$RootUid" <<'PY'
 import grp
@@ -2351,6 +2405,62 @@ sync -f "$LockDir/owner.next"
 mv -f "$LockDir/owner.next" "$LockDir/owner"
 sync -f "$LockDir/owner"
 sync -f "$LockDir"
+
+# The lifecycle CAS above prevents the prior controller from crossing another
+# guarded remote boundary before its stale writer marker is retired.
+if [ "$WriterState" = "live" ]; then
+  test ! -e "$WriterQuarantine"
+  mv -T "$WriterDir" "$WriterQuarantine"
+  sync -f "$RemoteRoot"
+fi
+if [ "$WriterState" != "absent" ]; then
+  python3 - "$RemoteRoot" "$WriterDir" "$WriterQuarantine" "$RootUid" <<'PY'
+import os
+import re
+import stat
+import sys
+
+remote_root, writer_path, quarantine_path, expected_uid_raw = sys.argv[1:]
+expected_uid = int(expected_uid_raw)
+if os.path.lexists(writer_path):
+    raise SystemExit('Stale writer lock remained live after lifecycle takeover')
+parent = os.open(remote_root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+try:
+    descriptor = os.open(os.path.basename(quarantine_path), os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                         dir_fd=parent)
+    try:
+        metadata = os.fstat(descriptor)
+        if (not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != expected_uid or
+                metadata.st_gid != expected_uid or stat.S_IMODE(metadata.st_mode) != 0o700 or
+                os.listxattr(descriptor)):
+            raise SystemExit('Unsafe quarantined writer lock directory')
+        entries = sorted(os.listdir(descriptor))
+        if entries not in ([], ['owner']):
+            raise SystemExit('Unexpected quarantined writer lock inventory')
+        if entries:
+            owner = os.open('owner', os.O_RDONLY | os.O_NOFOLLOW, dir_fd=descriptor)
+            try:
+                owner_metadata = os.fstat(owner)
+                payload = os.read(owner, 64)
+                if (not stat.S_ISREG(owner_metadata.st_mode) or owner_metadata.st_uid != expected_uid or
+                        owner_metadata.st_gid != expected_uid or stat.S_IMODE(owner_metadata.st_mode) != 0o600 or
+                        owner_metadata.st_nlink != 1 or os.listxattr(owner) or
+                        re.fullmatch(rb'[0-9a-f]{32}\n', payload) is None):
+                    raise SystemExit('Unsafe quarantined writer lock owner')
+            finally:
+                os.close(owner)
+            os.unlink('owner', dir_fd=descriptor)
+            os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+    os.rmdir(os.path.basename(quarantine_path), dir_fd=parent)
+    os.fsync(parent)
+finally:
+    os.close(parent)
+if os.path.lexists(writer_path) or os.path.lexists(quarantine_path):
+    raise SystemExit('Stale writer lock reclamation did not converge')
+PY
+fi
 
 # A replay gate from the old owner can no longer proxy after the CAS above.
 ReplayStamp="${ReleaseRoot##*/}"
