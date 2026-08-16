@@ -218,6 +218,8 @@ function runAcceptedFinalizeRecoveryHarness(mode) {
   const acceptedMarker = path.join(root, 'accepted-published');
   const finalizationMarker = path.join(root, 'finalization-published');
   const recoveryLog = path.join(root, 'recovery.log');
+  const guardState = path.join(root, 'public-gate-guard');
+  const recoveryLink = path.join(root, 'public-gate.link');
   fs.writeFileSync(apiGate, 'CLOSED_API_GATE\n', 'utf8');
   fs.writeFileSync(publicConfig, 'FAILING_PUBLIC_CONFIG\n', 'utf8');
 
@@ -225,6 +227,9 @@ function runAcceptedFinalizeRecoveryHarness(mode) {
   const source = `
 set -eEuo pipefail
 ApiGateConfig=${shellQuote(bashPath(apiGate))}
+MaintenanceConfig=${shellQuote(bashPath(publicConfig))}
+PublicGuardState=${shellQuote(bashPath(guardState))}
+PublicGuardRecoveryLink=${shellQuote(bashPath(recoveryLink))}
 PublicNginxConfig=${shellQuote(bashPath(publicConfig))}
 RunId=0123456789abcdef0123456789abcdef
 RecoveryLog=${shellQuote(bashPath(recoveryLog))}
@@ -237,10 +242,28 @@ install() {
 }
 nginx() { printf 'nginx:%s\\n' "$*" >> "$RecoveryLog"; }
 systemctl() { printf 'systemctl:%s\\n' "$*" >> "$RecoveryLog"; }
+public_release_guard() {
+  local mode="$1"
+  shift
+  local source_path=""
+  local target_path=""
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --maintenance-source) source_path="$2"; shift 2 ;;
+      --maintenance-config) target_path="$2"; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+  printf 'guard:%s\\n' "$mode" >> "$RecoveryLog"
+  command cp -- "$source_path" "$target_path"
+  nginx -t
+  systemctl reload nginx
+}
 ${recovery[0]}
-trap recover_accepted_finalize_public_failure ERR EXIT
+finalize_public_gate_armed=1
+trap 'recover_accepted_finalize_public_failure $?' ERR EXIT
 false
-trap - ERR EXIT
+trap - ERR EXIT HUP INT TERM
 printf accepted > "$AcceptedPublication"
 printf finalized > "$FinalizationPublication"
 `;
@@ -2134,12 +2157,13 @@ test('accepted-finalize verifier failures restore the closed API gate before pub
   }
 
   const finalize = acceptedFinalizeSource();
-  const arm = finalize.indexOf('trap recover_accepted_finalize_public_failure ERR EXIT');
+  const arm = finalize.indexOf("trap 'recover_accepted_finalize_public_failure $?' ERR EXIT");
   const publicActivation = finalize.indexOf('install -m 0644 "$StagedPublicNginx" "$PublicNginxConfig"');
   const exactVerifier = finalize.indexOf('run_exact_public_nginx_gate - 80', publicActivation);
-  const disarm = finalize.indexOf('trap - ERR EXIT', exactVerifier);
+  const trustedDisarm = finalize.indexOf('public_release_guard disarm', exactVerifier);
+  const disarm = finalize.indexOf('trap - ERR EXIT HUP INT TERM', trustedDisarm);
   assert.ok(arm >= 0 && arm < publicActivation, 'recovery must be armed before public activation');
-  assert.ok(publicActivation < exactVerifier && exactVerifier < disarm, 'recovery must stay armed through exact verification');
+  assert.ok(publicActivation < exactVerifier && exactVerifier < trustedDisarm && trustedDisarm < disarm, 'recovery must stay armed through exact verification');
 });
 
 test('review12 remediation captures the recovered deployment acceptance state', {
@@ -2162,6 +2186,8 @@ function Invoke-RemoteBash {
   return @('remote diagnostic', 'current-marker-prior')
 }
 $REMOTE_ROOT = '/root/turingmarket'
+$TRUSTED_SOURCE_BUNDLE_REMOTE_PATH = '/trusted/source/bundle'
+$EXPECTED_TRUSTED_PARSER_VERIFIER_SHA256 = ('a' * 64)
 $state = Get-RemoteDeploymentAcceptanceState
 if (-not $script:captureOutputObserved) { throw 'ACCEPTANCE_CAPTURE_NOT_REQUESTED' }
 if ($state -ne 'current-marker-prior') { throw "ACCEPTANCE_STATE_NOT_CAPTURED:$state" }
@@ -2198,8 +2224,8 @@ test('the exact staged Nginx gate precedes acceptance and is reused after public
   assert.match(finalize, /systemctl reload nginx\s+run_exact_public_nginx_gate - 80/);
   assert.equal(
     (deploy.match(/\.Replace\('__EXACT_PUBLIC_NGINX_VERIFIER__', \$exactPublicNginxVerifier\)/g) || []).length,
-    2,
-    'cutover and accepted finalization must receive the same verifier source'
+    3,
+    'cutover, accepted finalization, and rollback recovery must receive the same verifier source'
   );
   for (const asset of CANONICAL_CLIENT_ASSETS) {
     assert.match(exactVerifier, new RegExp(`['"]/${asset.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['"]`));
@@ -3385,7 +3411,8 @@ test('guarded deploy uploads and syntax-checks the baseline generator and archit
   assert.doesNotMatch(deploy, /node --check server\/tests\/fixtures\/frontend-active-definitions\.json/);
   assert.match(deploy, /"server\\tests\\customer_workspace_ui\.test\.js"/);
   assert.match(deploy, /"server\\tests\\frontend_architecture_inventory\.test\.js"/);
-  assert.match(deploy, /cd server\s*\r?\n+npm ci --ignore-scripts\s*\r?\n+npm rebuild better-sqlite3/);
+  assert.match(deploy, /<<'TM_DEPENDENCY_STAGE'[\s\S]*?cd "\$DEPENDENCY_SERVER_ROOT"[\s\S]*?npm ci --ignore-scripts[\s\S]*?TM_DEPENDENCY_STAGE/);
+  assert.match(deploy, /npm_config_offline=true[\s\S]*?<<'TM_DEPENDENCY_BUILD'[\s\S]*?npm rebuild better-sqlite3[\s\S]*?TM_DEPENDENCY_BUILD/);
   assert.match(deploy, /node --test --test-concurrency=1 tests\/\*\.test\.js/);
   assert.doesNotMatch(deploy, /npm test -- --test-concurrency=1/);
   assert.match(deploy, /node node_modules\/playwright-deploy\/cli\.js test -c server\/tests\/deployment-browser-smoke\.config\.js/);

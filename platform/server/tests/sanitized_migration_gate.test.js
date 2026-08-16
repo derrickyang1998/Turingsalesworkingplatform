@@ -33,13 +33,22 @@ function shellQuote(value) {
 }
 
 function gitBashPath(filePath) {
-  const normalized = path.resolve(filePath).replaceAll('\\', '/');
+  const resolved = path.resolve(filePath);
+  if (process.platform === 'win32') {
+    const relativeToTemp = path.relative(path.resolve(os.tmpdir()), resolved);
+    if (relativeToTemp === '' || (!relativeToTemp.startsWith('..') && !path.isAbsolute(relativeToTemp))) {
+      const normalizedRelative = relativeToTemp.replaceAll('\\', '/');
+      return normalizedRelative ? `/tmp/${normalizedRelative}` : '/tmp';
+    }
+  }
+  const normalized = resolved.replaceAll('\\', '/');
   const match = /^([A-Za-z]):\/(.*)$/.exec(normalized);
   return match ? `/${match[1].toLowerCase()}/${match[2]}` : normalized;
 }
 
 function bootstrapLibraryHarness(root, body) {
   const bootstrapPath = path.join(__dirname, '..', 'scripts', 'bootstrap_production_runtime.sh');
+  const configuredPython = process.env.PYTHON3 || process.env.PYTHON_BIN;
   const values = {
     TM_REMOTE_ROOT: path.join(root, 'remote'),
     TM_LIVE_DIR: path.join(root, 'live'),
@@ -52,6 +61,12 @@ function bootstrapLibraryHarness(root, body) {
   };
   return [
     'set -Eeuo pipefail',
+    process.env.TM_DEBUG_SANITIZER_BASH === '1' ? 'set -x' : '',
+    'PATH=/usr/bin:/bin:$PATH',
+    'export PATH',
+    process.platform === 'win32' && configuredPython
+      ? `python3() { ${shellQuote(gitBashPath(configuredPython))} "$@"; }`
+      : '',
     ...Object.entries(values).map(([name, value]) => `export ${name}=${shellQuote(gitBashPath(value))}`),
     'export TM_BOOTSTRAP_LIBRARY_ONLY=1',
     'export TM_TEST_GATE_MOUNTS=',
@@ -2007,9 +2022,11 @@ test('bootstrap validates real sanitizer journals, resources, identities, proces
   const runRoot = path.join(root, 'run-gate');
   fs.mkdirSync(journalRoot, { mode: 0o700 });
   fs.mkdirSync(runRoot, { mode: 0o711 });
-  const bashPath = (value) => value.replaceAll('\\', '/');
+  const bashPath = gitBashPath;
   const baseCommand = [
     'set -euo pipefail',
+    'PATH=/usr/bin:/bin:$PATH',
+    'export PATH',
     'export TM_BOOTSTRAP_LIBRARY_ONLY=1',
     `export TM_SANITIZER_JOURNAL_ROOT=${shellQuote(bashPath(journalRoot))}`,
     `export TM_SANITIZER_RUN_ROOT=${shellQuote(bashPath(runRoot))}`,
@@ -2017,12 +2034,12 @@ test('bootstrap validates real sanitizer journals, resources, identities, proces
     'validate_sanitizer_gate_idle_state'
   ].join('; ');
   try {
-    const clean = spawnSync(BASH, ['-lc', baseCommand], { encoding: 'utf8' });
+    const clean = spawnSync(BASH, ['--noprofile', '--norc', '-c', baseCommand], { encoding: 'utf8' });
     assert.equal(clean.status, 0, clean.stderr);
 
     const activeJournal = path.join(journalRoot, `${'a'.repeat(32)}.run.json`);
     fs.writeFileSync(activeJournal, '{}', { mode: 0o600 });
-    const journalBusy = spawnSync(BASH, ['-lc', baseCommand], { encoding: 'utf8' });
+    const journalBusy = spawnSync(BASH, ['--noprofile', '--norc', '-c', baseCommand], { encoding: 'utf8' });
     assert.notEqual(journalBusy.status, 0, 'real migration-gate journals must block bootstrap');
     fs.unlinkSync(activeJournal);
 
@@ -2031,12 +2048,12 @@ test('bootstrap validates real sanitizer journals, resources, identities, proces
       ['TM_TEST_SANITIZER_PROCESSES', '42001:tm-gate-aaaaaaaaaaaa'],
       ['TM_TEST_SANITIZER_MOUNTS', `${bashPath(runRoot)}/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`]
     ]) {
-      const busy = spawnSync(BASH, ['-lc', `export ${name}=${shellQuote(value)}; ${baseCommand}`], { encoding: 'utf8' });
+      const busy = spawnSync(BASH, ['--noprofile', '--norc', '-c', `export ${name}=${shellQuote(value)}; ${baseCommand}`], { encoding: 'utf8' });
       assert.notEqual(busy.status, 0, `${name} must fail closed`);
     }
 
     fs.mkdirSync(path.join(runRoot, 'b'.repeat(32)), { mode: 0o700 });
-    const resourceBusy = spawnSync(BASH, ['-lc', baseCommand], { encoding: 'utf8' });
+    const resourceBusy = spawnSync(BASH, ['--noprofile', '--norc', '-c', baseCommand], { encoding: 'utf8' });
     assert.notEqual(resourceBusy.status, 0, 'real /run sanitizer resources must block bootstrap');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -2052,7 +2069,7 @@ test('bootstrap active migration journal is no-follow, fail-closed, and strict n
     fs.mkdirSync(path.join(root, 'journal'), { recursive: true });
     return root;
   };
-  const run = (root, body) => spawnSync(BASH, ['-lc', bootstrapLibraryHarness(root, body)], {
+  const run = (root, body) => spawnSync(BASH, ['--noprofile', '--norc', '-c', bootstrapLibraryHarness(root, body)], {
     encoding: 'utf8',
     timeout: 20_000
   });
@@ -2362,7 +2379,7 @@ test('bootstrap journal rejects post-bind replacement and ABA without side effec
     fs.mkdirSync(path.join(root, 'journal'), { recursive: true });
     return root;
   };
-  const run = (root, body) => spawnSync(BASH, ['-lc', bootstrapLibraryHarness(root, body)], {
+  const run = (root, body) => spawnSync(BASH, ['--noprofile', '--norc', '-c', bootstrapLibraryHarness(root, body)], {
     encoding: 'utf8',
     timeout: 20_000
   });
@@ -2719,7 +2736,7 @@ test('bootstrap rejects every test hook in production mode', {
     for (const hookName of hookNames) {
       const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-bootstrap-production-hook-'));
       try {
-        const result = spawnSync(BASH, ['-lc', bootstrapLibraryHarness(root, `
+        const result = spawnSync(BASH, ['--noprofile', '--norc', '-c', bootstrapLibraryHarness(root, `
 export TM_BOOTSTRAP_LIBRARY_ONLY=0
 export ${hookName}=''
 getent() { :; }
@@ -2785,7 +2802,7 @@ exit "$hook_status"
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-bootstrap-hook-sinks-'));
     const actions = gitBashPath(path.join(root, 'actions'));
     try {
-      const result = spawnSync(BASH, ['-lc', bootstrapLibraryHarness(root, `
+      const result = spawnSync(BASH, ['--noprofile', '--norc', '-c', bootstrapLibraryHarness(root, `
 actions=${shellQuote(actions)}
 record_action() { printf '%s\n' "$1" >> "$actions"; }
 python3() { record_action python; return 0; }
@@ -2846,7 +2863,7 @@ test('bootstrap terminal handshake is explicit, repeatable, and side-effect free
   const terminalId = `t1:${'a'.repeat(64)}`;
   fs.writeFileSync(statePath, `terminal-pending ${terminalId}\n`);
   try {
-    const result = spawnSync(BASH, ['-lc', bootstrapLibraryHarness(root, `
+    const result = spawnSync(BASH, ['--noprofile', '--norc', '-c', bootstrapLibraryHarness(root, `
 BOOTSTRAP_OWNER_TOKEN=0123456789abcdef0123456789abcdef
 discover_migration_journal() {
   read -r JOURNAL_TERMINAL_STATE JOURNAL_TERMINAL_ID < ${shellQuote(state)}
@@ -2993,7 +3010,7 @@ test('committed recovery publishes and validates the permanent marker before ret
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-bootstrap-committed-order-'));
   const actions = gitBashPath(path.join(root, 'actions'));
   try {
-    const result = spawnSync(BASH, ['-lc', bootstrapLibraryHarness(root, `
+    const result = spawnSync(BASH, ['--noprofile', '--norc', '-c', bootstrapLibraryHarness(root, `
 actions=${shellQuote(actions)}
 record_action() { printf '%s\n' "$1" >> "$actions"; }
 validate_sanitizer_gate_idle_state() { :; }
@@ -3045,7 +3062,7 @@ test('production entrypoint terminates two retiring reruns before prohibited mut
           fs.mkdirSync(path.dirname(marker), { recursive: true });
           fs.writeFileSync(marker, 'marker\n');
         }
-        const result = spawnSync(BASH, ['-lc', bootstrapLibraryHarness(root, `
+        const result = spawnSync(BASH, ['--noprofile', '--norc', '-c', bootstrapLibraryHarness(root, `
 record_prohibited() { printf '%s\n' "$1" >> ${shellQuote(prohibited)}; }
 require_root() { :; }
 require_exact_host() { :; }
@@ -3084,7 +3101,7 @@ test('production capacity reservation fails before host mutation and permits slo
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-bootstrap-capacity-preflight-'));
   const actions = gitBashPath(path.join(root, 'actions'));
   try {
-    const result = spawnSync(BASH, ['-lc', bootstrapLibraryHarness(root, `
+    const result = spawnSync(BASH, ['--noprofile', '--norc', '-c', bootstrapLibraryHarness(root, `
 actions=${shellQuote(actions)}
 record_action() { printf '%s\n' "$1" >> "$actions"; }
 require_root() { :; }
@@ -3153,7 +3170,7 @@ test('bootstrap journal v4 three-state protocol closes fresh-process and publica
     const terminalId = `t1:${'a'.repeat(64)}`;
     fs.writeFileSync(path.join(root, 'terminal-state'), `terminal-pending ${terminalId}\n`);
     try {
-      const result = spawnSync(BASH, ['-lc', bootstrapLibraryHarness(root, `
+      const result = spawnSync(BASH, ['--noprofile', '--norc', '-c', bootstrapLibraryHarness(root, `
 require_root() { :; }
 require_exact_host() { :; }
 reserve_migration_journal_capacity() { JOURNAL_RESERVATION_MODE=general; }
@@ -3240,7 +3257,7 @@ test "$(cat ${shellQuote(actions)})" = migration
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-bootstrap-terminal-consume-failure-'));
     const actions = gitBashPath(path.join(root, 'actions'));
     try {
-      const result = spawnSync(BASH, ['-lc', bootstrapLibraryHarness(root, `
+      const result = spawnSync(BASH, ['--noprofile', '--norc', '-c', bootstrapLibraryHarness(root, `
 require_root() { :; }
 require_exact_host() { :; }
 reserve_migration_journal_capacity() { JOURNAL_RESERVATION_MODE=general; }
@@ -3273,7 +3290,7 @@ test ! -e ${shellQuote(actions)}
     const actions = gitBashPath(path.join(root, 'actions'));
     const terminalId = `t1:${'9'.repeat(64)}`;
     try {
-      const result = spawnSync(BASH, ['-lc', bootstrapLibraryHarness(root, `
+      const result = spawnSync(BASH, ['--noprofile', '--norc', '-c', bootstrapLibraryHarness(root, `
 marker_present=0
 require_root() { :; }
 require_exact_host() { :; }
@@ -3343,7 +3360,7 @@ ack"
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-bootstrap-completed-committed-'));
     const actions = gitBashPath(path.join(root, 'actions'));
     try {
-      const result = spawnSync(BASH, ['-lc', bootstrapLibraryHarness(root, `
+      const result = spawnSync(BASH, ['--noprofile', '--norc', '-c', bootstrapLibraryHarness(root, `
 record_action() { printf '%s\n' "$1" >> ${shellQuote(actions)}; }
 read_journal() {
   JOURNAL_PRESENT=1
@@ -3394,7 +3411,7 @@ test "$JOURNAL_MARKER_PROOF" = 'm1:11:12:13:${'a'.repeat(64)}'
     fs.mkdirSync(path.dirname(marker), { recursive: true });
     fs.writeFileSync(marker, 'substituted-marker\n');
     try {
-      const result = spawnSync(BASH, ['-lc', bootstrapLibraryHarness(root, `
+      const result = spawnSync(BASH, ['--noprofile', '--norc', '-c', bootstrapLibraryHarness(root, `
 validate_sanitizer_gate_idle_state() { :; }
 discover_migration_journal() {
   JOURNAL_PRESENT=1
@@ -3524,7 +3541,7 @@ test ! -e ${shellQuote(actions)}
         const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-bootstrap-precontrol-claim-'));
         const actions = gitBashPath(path.join(root, 'actions'));
         try {
-          const result = spawnSync(BASH, ['-lc', bootstrapLibraryHarness(root, `
+          const result = spawnSync(BASH, ['--noprofile', '--norc', '-c', bootstrapLibraryHarness(root, `
 record_action() { printf '%s\n' "$1" >> ${shellQuote(actions)}; }
 require_root() { :; }
 require_exact_host() { :; }
@@ -3584,7 +3601,7 @@ ${existing
     fs.mkdirSync(journalRoot, { mode: 0o700 });
     fs.writeFileSync(path.join(journalRoot, '.journal-protocol.lock'), 'journal-protocol-lock-v1\n');
     try {
-      const result = spawnSync(BASH, ['-lc', bootstrapLibraryHarness(root, `
+      const result = spawnSync(BASH, ['--noprofile', '--norc', '-c', bootstrapLibraryHarness(root, `
 JOURNAL_ROOT=${shellQuote(gitBashPath(journalRoot))}
 JOURNAL_DIR="$JOURNAL_ROOT/active"
 bootstrap_trusted_realpath() { if [ "\${1:-}" = -e ]; then printf '%s\n' "$2"; else command realpath "$@"; fi; }
@@ -3629,7 +3646,7 @@ fi
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-bootstrap-capacity-repeat-'));
     const lockPath = gitBashPath(path.join(root, 'reservation.lock'));
     try {
-      const result = spawnSync(BASH, ['-lc', bootstrapLibraryHarness(root, `
+      const result = spawnSync(BASH, ['--noprofile', '--norc', '-c', bootstrapLibraryHarness(root, `
 exec 7>${shellQuote(lockPath)}
 JOURNAL_CAPACITY_RESERVED=1
 JOURNAL_ROOT_TOKEN='r2:${'a'.repeat(64)}'
@@ -3681,7 +3698,7 @@ fi
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-bootstrap-capacity-reservation-'));
     const actions = gitBashPath(path.join(root, 'actions'));
     try {
-      const result = spawnSync(BASH, ['-lc', bootstrapLibraryHarness(root, `
+      const result = spawnSync(BASH, ['--noprofile', '--norc', '-c', bootstrapLibraryHarness(root, `
 require_root() { :; }
 require_exact_host() { :; }
 reserve_migration_journal_capacity() { return 73; }
@@ -3704,7 +3721,7 @@ test ! -e ${shellQuote(actions)}
   await t.test('shell journal helper forwards expanded arguments to the native reducer', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-bootstrap-journal-forwarding-'));
     try {
-      const result = spawnSync(BASH, ['-lc', bootstrapLibraryHarness(root, `
+      const result = spawnSync(BASH, ['--noprofile', '--norc', '-c', bootstrapLibraryHarness(root, `
 JOURNAL_ROOT_TOKEN='r2:${'a'.repeat(64)}'
 python3() {
   [ "$1" = - ] || return 81
@@ -3743,7 +3760,7 @@ bootstrap_journal_dirfd_helper read active \
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-bootstrap-existing-live-capacity-'));
     const actions = gitBashPath(path.join(root, 'actions'));
     try {
-      const result = spawnSync(BASH, ['-lc', bootstrapLibraryHarness(root, `
+      const result = spawnSync(BASH, ['--noprofile', '--norc', '-c', bootstrapLibraryHarness(root, `
 record_action() { printf '%s\n' "$1" >> ${shellQuote(actions)}; }
 require_root() { :; }
 require_exact_host() { :; }
@@ -3812,7 +3829,7 @@ test('Lane A: post-marker setup reaches repair and terminal progression through 
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-bootstrap-post-marker-main-'));
   const actions = gitBashPath(path.join(root, 'actions'));
   try {
-    const result = spawnSync(BASH, ['-lc', bootstrapLibraryHarness(root, `
+    const result = spawnSync(BASH, ['--noprofile', '--norc', '-c', bootstrapLibraryHarness(root, `
 record_action() { printf '%s\n' "$1" >> ${shellQuote(actions)}; }
 require_root() { :; }
 require_exact_host() { :; }
@@ -3882,7 +3899,7 @@ test('Lane A: conditional bootstrap failures remain terminal and recovery is arm
   await t.test('the real control-plane function rejects an invalid operation-fence link count under ||', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-bootstrap-fence-owner-failure-'));
     try {
-      const result = spawnSync(BASH, ['-lc', bootstrapLibraryHarness(root, `
+      const result = spawnSync(BASH, ['--noprofile', '--norc', '-c', bootstrapLibraryHarness(root, `
 SANITIZER_LIFECYCLE_FENCE="$TM_REMOTE_ROOT/sanitizer.lock"
 OPERATION_FENCE="$TM_REMOTE_ROOT/.deploy-v030.operation.lock"
 mkdir -p "$TM_REMOTE_ROOT"
@@ -3907,7 +3924,7 @@ test "$owner_status" -ne 0
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-bootstrap-snapshot-failure-'));
     const snapshots = gitBashPath(path.join(root, 'snapshots'));
     try {
-      const result = spawnSync(BASH, ['-lc', bootstrapLibraryHarness(root, `
+      const result = spawnSync(BASH, ['--noprofile', '--norc', '-c', bootstrapLibraryHarness(root, `
 require_root() { :; }
 require_exact_host() { :; }
 bootstrap_terminal_journal_preflight() {
@@ -3977,7 +3994,7 @@ test "$(cat ${shellQuote(snapshots)})" = before
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-bootstrap-early-recovery-traps-'));
     const actions = gitBashPath(path.join(root, 'actions'));
     try {
-      const result = spawnSync(BASH, ['-lc', bootstrapLibraryHarness(root, `
+      const result = spawnSync(BASH, ['--noprofile', '--norc', '-c', bootstrapLibraryHarness(root, `
 record_action() { printf '%s\n' "$1" >> ${shellQuote(actions)}; }
 require_root() { :; }
 require_exact_host() { :; }
@@ -4018,7 +4035,7 @@ test('Lane A: database and AppArmor helpers reject every command failure under c
       const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-bootstrap-database-conditional-'));
       const actions = gitBashPath(path.join(root, 'actions'));
       try {
-        const result = spawnSync(BASH, ['-lc', bootstrapLibraryHarness(root, `
+        const result = spawnSync(BASH, ['--noprofile', '--norc', '-c', bootstrapLibraryHarness(root, `
 root="\${TM_REMOTE_ROOT%/remote}"
 fault=${shellQuote(fixture.fault)}
 [ "$fault" != node ] || mkdir -p "$LIVE_DIR/server"
@@ -4067,7 +4084,7 @@ test "$(command cat ${shellQuote(actions)})" = ${shellQuote(
       const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-bootstrap-apparmor-conditional-'));
       const actions = gitBashPath(path.join(root, 'actions'));
       try {
-        const result = spawnSync(BASH, ['-lc', bootstrapLibraryHarness(root, `
+        const result = spawnSync(BASH, ['--noprofile', '--norc', '-c', bootstrapLibraryHarness(root, `
 root="\${TM_REMOTE_ROOT%/remote}"
 BACKUP_DIR="$root/backup"
 APPARMOR_PROFILE="$root/apparmor/profile"
@@ -4286,7 +4303,7 @@ test('Lane A: restart helper guards release identity and PM2 outcomes under cond
           throw new Error(`unknown PM2 fixture shape: ${fixture.pm2Shape}`);
       }
       try {
-        const result = spawnSync(BASH, ['-lc', bootstrapLibraryHarness(root, `
+        const result = spawnSync(BASH, ['--noprofile', '--norc', '-c', bootstrapLibraryHarness(root, `
 ${fixture.createLive ? 'mkdir -p "$LIVE_DIR/server"; builtin printf \'server-entrypoint\\n\' > "$LIVE_DIR/server/server.js"' : ':'}
 restart_status=${fixture.restartStatus}
 start_status=${fixture.startStatus}
@@ -4355,7 +4372,7 @@ test('Lane A: full-capacity existing-live recovery advances in place but cannot 
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-bootstrap-existing-live-main-'));
   const actions = gitBashPath(path.join(root, 'actions'));
   try {
-    const result = spawnSync(BASH, ['-lc', bootstrapLibraryHarness(root, `
+    const result = spawnSync(BASH, ['--noprofile', '--norc', '-c', bootstrapLibraryHarness(root, `
 record_action() { printf '%s\n' "$1" >> ${shellQuote(actions)}; }
 require_root() { :; }
 require_exact_host() { :; }
@@ -4415,7 +4432,7 @@ test('Lane A: stale artifact repair is recovered before capacity reservation and
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-bootstrap-artifact-preflight-'));
   const actions = gitBashPath(path.join(root, 'actions'));
   try {
-    const recovered = spawnSync(BASH, ['-lc', bootstrapLibraryHarness(root, `
+    const recovered = spawnSync(BASH, ['--noprofile', '--norc', '-c', bootstrapLibraryHarness(root, `
 record_action() { printf '%s\n' "$1" >> ${shellQuote(actions)}; }
 artifact_state=stale
 require_root() { :; }
@@ -4448,7 +4465,7 @@ reserve"
     assert.equal(recovered.status, 0, recovered.stderr || recovered.stdout);
 
     fs.rmSync(path.join(root, 'actions'), { force: true });
-    const unknown = spawnSync(BASH, ['-lc', bootstrapLibraryHarness(root, `
+    const unknown = spawnSync(BASH, ['--noprofile', '--norc', '-c', bootstrapLibraryHarness(root, `
 record_action() { printf '%s\n' "$1" >> ${shellQuote(actions)}; }
 require_root() { :; }
 require_exact_host() { :; }
@@ -4485,7 +4502,7 @@ test('Lane A AppSec: failed findmnt blocks reservation, release mutation, metada
   const reservationPath = path.join(root, 'journal', '.reservation-proof');
   const metadataTarget = path.join(root, 'remote', 'metadata-target');
   try {
-    const result = spawnSync(BASH, ['-lc', bootstrapLibraryHarness(root, `
+    const result = spawnSync(BASH, ['--noprofile', '--norc', '-c', bootstrapLibraryHarness(root, `
 unset TM_TEST_GATE_MOUNTS
 export TM_TEST_GATE_PROCESSES=
 release_dir="$TM_REMOTE_ROOT/current-release"
@@ -4593,7 +4610,7 @@ test('Lane A AppSec: ACK with missing findmnt cannot reserve or mutate the termi
   const stdoutPath = gitBashPath(path.join(root, 'ack.out'));
   const stderrPath = gitBashPath(path.join(root, 'ack.err'));
   try {
-    const result = spawnSync(BASH, ['-lc', bootstrapLibraryHarness(root, `
+    const result = spawnSync(BASH, ['--noprofile', '--norc', '-c', bootstrapLibraryHarness(root, `
 unset TM_TEST_GATE_MOUNTS
 record_action() { printf '%s\n' "$1" >> ${shellQuote(actions)}; }
 require_root() { :; }
@@ -4643,7 +4660,7 @@ test('Lane A AppSec: ACK with failing findmnt redacts output and cannot reserve 
   const stdoutPath = gitBashPath(path.join(root, 'ack.out'));
   const stderrPath = gitBashPath(path.join(root, 'ack.err'));
   try {
-    const result = spawnSync(BASH, ['-lc', bootstrapLibraryHarness(root, `
+    const result = spawnSync(BASH, ['--noprofile', '--norc', '-c', bootstrapLibraryHarness(root, `
 unset TM_TEST_GATE_MOUNTS
 findmnt() {
   printf 'called\n' >> ${shellQuote(findmntCalls)}
@@ -4697,7 +4714,7 @@ test('Lane A AppSec: mount introduced before the shared lock is rejected by the 
   const stdoutPath = gitBashPath(path.join(root, 'main.out'));
   const stderrPath = gitBashPath(path.join(root, 'main.err'));
   try {
-    const result = spawnSync(BASH, ['-lc', bootstrapLibraryHarness(root, `
+    const result = spawnSync(BASH, ['--noprofile', '--norc', '-c', bootstrapLibraryHarness(root, `
 unset TM_TEST_GATE_MOUNTS
 findmnt() {
   if [ -e ${shellQuote(firstInspection)} ]; then
@@ -4811,7 +4828,7 @@ test('Lane A AppSec: stale repair phases complete missing hardening and health b
     const root = fs.mkdtempSync(path.join(os.tmpdir(), `tm-bootstrap-repair-${fixture.phase}-`));
     const actions = gitBashPath(path.join(root, 'actions'));
     try {
-      const result = spawnSync(BASH, ['-lc', bootstrapLibraryHarness(root, `
+      const result = spawnSync(BASH, ['--noprofile', '--norc', '-c', bootstrapLibraryHarness(root, `
 old_owner=11111111111111111111111111111111
 new_owner=22222222222222222222222222222222
 repair="$JOURNAL_ROOT/artifact-repair-$old_owner"
@@ -4924,7 +4941,7 @@ test('Lane A AppSec: failed stale repair retains phase evidence before reservati
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-bootstrap-repair-failure-'));
   const actions = gitBashPath(path.join(root, 'actions'));
   try {
-    const result = spawnSync(BASH, ['-lc', bootstrapLibraryHarness(root, `
+    const result = spawnSync(BASH, ['--noprofile', '--norc', '-c', bootstrapLibraryHarness(root, `
 old_owner=44444444444444444444444444444444
 new_owner=55555555555555555555555555555555
 repair="$JOURNAL_ROOT/artifact-repair-$old_owner"
@@ -4993,7 +5010,7 @@ test('Lane A AppSec: hidden artifact builds block identity and reservation while
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-bootstrap-hidden-repair-'));
     const actions = gitBashPath(path.join(root, 'actions'));
     try {
-      const result = spawnSync(BASH, ['-lc', bootstrapLibraryHarness(root, `
+      const result = spawnSync(BASH, ['--noprofile', '--norc', '-c', bootstrapLibraryHarness(root, `
 stage="$JOURNAL_ROOT/${fixture.name}"
 mkdir -m 0700 -p "$TM_REMOTE_ROOT" "$JOURNAL_ROOT"
 mkdir -m 0700 -p "$stage/work"
@@ -5031,7 +5048,7 @@ test('Lane A: legacy committed ACK rejects unproven layout and approves only ful
     const actions = gitBashPath(path.join(root, 'actions'));
     const exactTerminalId = `t1:${(layoutReady ? '7' : '6').repeat(64)}`;
     try {
-      const result = spawnSync(BASH, ['-lc', bootstrapLibraryHarness(root, `
+      const result = spawnSync(BASH, ['--noprofile', '--norc', '-c', bootstrapLibraryHarness(root, `
 record_action() { printf '%s\n' "$1" >> ${shellQuote(actions)}; }
 layout_ready=${layoutReady ? 1 : 0}
 marker_present=0
@@ -5103,7 +5120,7 @@ test('Lane A AppSec: firewall cleanup delegates both trees to fixed no-follow de
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-bootstrap-firewall-cleanup-'));
   const actions = gitBashPath(path.join(root, 'actions'));
   try {
-    const result = spawnSync(BASH, ['-lc', bootstrapLibraryHarness(root, `
+    const result = spawnSync(BASH, ['--noprofile', '--norc', '-c', bootstrapLibraryHarness(root, `
 record_action() { printf '%s\n' "$1" >> ${shellQuote(actions)}; }
 rm() { record_action unsafe-rm; return 78; }
 bootstrap_remove_anchored_fixed_tree() {
@@ -5154,7 +5171,7 @@ for (const lockRace of [
   }, () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), `tm-bootstrap-lock-${lockRace.hook}-`));
     try {
-      const result = spawnSync(BASH, ['-lc', bootstrapLibraryHarness(root, `
+      const result = spawnSync(BASH, ['--noprofile', '--norc', '-c', bootstrapLibraryHarness(root, `
 test_root="\${TM_REMOTE_ROOT%/remote}"
 mkdir -m 0700 -p "$TM_REMOTE_ROOT" "$test_root/run"
 SANITIZER_LIFECYCLE_FENCE="$test_root/run/sanitizer.lock"
@@ -5218,7 +5235,7 @@ test('Lane A AppSec: subshell lock acquisition binds descriptors to BASHPID', {
 }, () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-bootstrap-lock-bashpid-'));
   try {
-    const result = spawnSync(BASH, ['-lc', bootstrapLibraryHarness(root, `
+    const result = spawnSync(BASH, ['--noprofile', '--norc', '-c', bootstrapLibraryHarness(root, `
 test_root="\${TM_REMOTE_ROOT%/remote}"
 mkdir -m 0700 -p "$TM_REMOTE_ROOT" "$test_root/run"
 SANITIZER_LIFECYCLE_FENCE="$test_root/run/sanitizer.lock"
@@ -5246,7 +5263,7 @@ test('Lane A AppSec: control-lock parents must have trusted ownership and mode',
 }, () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-bootstrap-lock-parent-'));
   try {
-    const result = spawnSync(BASH, ['-lc', bootstrapLibraryHarness(root, `
+    const result = spawnSync(BASH, ['--noprofile', '--norc', '-c', bootstrapLibraryHarness(root, `
 test_root="\${TM_REMOTE_ROOT%/remote}"
 mkdir -m 0700 -p "$TM_REMOTE_ROOT" "$test_root/run"
 SANITIZER_LIFECYCLE_FENCE="$test_root/run/sanitizer.lock"
@@ -5367,18 +5384,20 @@ test('sanitizer and bootstrap retain verified lifecycle lock descriptors and rej
 
   if (HAS_BASH) {
     const probeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-bootstrap-runtime-fd-probe-'));
-    const probeFence = path.join(probeRoot, 'probe.lock').replaceAll('\\', '/');
+    const probeFence = gitBashPath(path.join(probeRoot, 'probe.lock'));
     try {
-      const result = spawnSync(BASH, ['-lc', [
+      const result = spawnSync(BASH, ['--noprofile', '--norc', '-c', [
         'set -euo pipefail',
+        'PATH=/usr/bin:/bin:$PATH',
+        'export PATH',
         'export TM_BOOTSTRAP_LIBRARY_ONLY=1',
-        `source ${shellQuote(path.join(__dirname, '..', 'scripts', 'bootstrap_production_runtime.sh').replaceAll('\\', '/'))}`,
+        `source ${shellQuote(gitBashPath(path.join(__dirname, '..', 'scripts', 'bootstrap_production_runtime.sh')))}`,
         `exec 5<>${shellQuote(`${probeFence}.5`)}`,
         `exec 6<>${shellQuote(`${probeFence}.6`)}`,
         `exec 7<>${shellQuote(`${probeFence}.7`)}`,
         `exec 8<>${shellQuote(`${probeFence}.8`)}`,
         `exec 9<>${shellQuote(`${probeFence}.9`)}`,
-        `run_persistent_runtime_command ${shellQuote(process.execPath.replaceAll('\\', '/'))} -e ${shellQuote("const fs=require('node:fs');for(const fd of [5,6,7,8,9]){try{fs.fstatSync(fd);process.exit(90+fd)}catch(e){if(e.code!=='EBADF')process.exit(100+fd)}}")}`
+        `run_persistent_runtime_command ${shellQuote(gitBashPath(process.execPath))} -e ${shellQuote("const fs=require('node:fs');for(const fd of [5,6,7,8,9]){try{fs.fstatSync(fd);process.exit(90+fd)}catch(e){if(e.code!=='EBADF')process.exit(100+fd)}}")}`
       ].join('; ')], { encoding: 'utf8' });
       assert.equal(result.status, 0, result.stderr || result.stdout);
     } finally {

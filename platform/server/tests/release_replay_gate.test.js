@@ -11,6 +11,11 @@ const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
 
 const gate = require('../scripts/release_replay_gate');
+const linuxReplayProofAvailable = process.platform === 'linux'
+  || (process.platform === 'win32' && process.env.TM_RUN_WSL_REPLAY_TESTS === '1');
+const linuxReplayProofSkip = linuxReplayProofAvailable
+  ? false
+  : 'requires native Linux or an explicitly enabled WSL replay environment';
 
 const requestPolicy = Object.freeze({
   method: 'POST',
@@ -389,7 +394,7 @@ test('gate state rejects hard-linked private files before a claim transition', (
   }
 });
 
-test('private reads fail closed when a validated file is swapped to a symlink', () => {
+test('private reads fail closed when a validated file is swapped to a symlink', { skip: linuxReplayProofSkip }, () => {
   if (process.platform === 'win32') {
     runLinuxTestThroughWsl(
       '^private reads fail closed when a validated file is swapped to a symlink$'
@@ -413,7 +418,7 @@ test('private reads fail closed when a validated file is swapped to a symlink', 
   }
 });
 
-test('private reads fail closed when a validated file is replaced by another regular inode', () => {
+test('private reads fail closed when a validated file is replaced by another regular inode', { skip: linuxReplayProofSkip }, () => {
   if (process.platform === 'win32') {
     runLinuxTestThroughWsl(
       '^private reads fail closed when a validated file is replaced by another regular inode$'
@@ -440,7 +445,7 @@ test('private reads fail closed when a validated file is replaced by another reg
   }
 });
 
-test('root validation rejects a same-device mount identity substitution', () => {
+test('root validation rejects a same-device mount identity substitution', { skip: linuxReplayProofSkip }, () => {
   if (process.platform === 'win32') {
     runLinuxTestThroughWsl('^root validation rejects a same-device mount identity substitution$');
     return;
@@ -779,7 +784,7 @@ function collectChildResult(child, timeout = 5000) {
   });
 }
 
-test('cleanup requires the transient unit to stop a live serving helper and never signals it', async () => {
+test('cleanup requires the transient unit to stop a live serving helper and never signals it', { skip: linuxReplayProofSkip }, async () => {
   if (process.platform === 'win32') {
     runLinuxTestThroughWsl(
       '^cleanup requires the transient unit to stop a live serving helper and never signals it$'
@@ -812,7 +817,7 @@ test('cleanup requires the transient unit to stop a live serving helper and neve
   }
 });
 
-test('cleanup rejects a live unowned PID without signalling that process', async () => {
+test('cleanup rejects a live unowned PID without signalling that process', { skip: linuxReplayProofSkip }, async () => {
   if (process.platform === 'win32') {
     runLinuxTestThroughWsl('^cleanup rejects a live unowned PID without signalling that process$');
     return;
@@ -860,7 +865,7 @@ test('cleanup rejects a live unowned PID without signalling that process', async
   }
 });
 
-test('abrupt helper crash during an in-flight candidate response remains claimed after restart', async () => {
+test('abrupt helper crash during an in-flight candidate response remains claimed after restart', { skip: linuxReplayProofSkip }, async () => {
   if (process.platform === 'win32') {
     runLinuxTestThroughWsl(
       '^abrupt helper crash during an in-flight candidate response remains claimed after restart$',
@@ -929,7 +934,7 @@ test('abrupt helper crash during an in-flight candidate response remains claimed
   }
 });
 
-test('Unix socket gate permits one concurrent claimant and a second request never reaches candidate', async () => {
+test('Unix socket gate permits one concurrent claimant and a second request never reaches candidate', { skip: linuxReplayProofSkip }, async () => {
   if (process.platform === 'win32') {
     runLinuxTestThroughWsl(
       '^Unix socket gate permits one concurrent claimant and a second request never reaches candidate$'

@@ -24,7 +24,7 @@ def result(text="", parser="local-rapidocr", warnings=None, meta=None):
 
 
 def load_engine():
-    from rapidocr_onnxruntime import RapidOCR
+    from rapidocr import RapidOCR
     return RapidOCR()
 
 
@@ -32,17 +32,32 @@ def normalize_line(text):
     return re.sub(r"\s+", " ", text or "").strip()
 
 
-def ocr_image(engine, image_path, min_score):
-    output, _ = engine(str(image_path))
-    if not output:
-        return ""
-    lines = []
-    for item in output:
+def iter_recognized_lines(output):
+    if hasattr(output, "txts") and hasattr(output, "scores"):
+        texts = output.txts
+        scores = output.scores
+        if texts is None or scores is None:
+            return
+        for text, score in zip(texts, scores):
+            yield text, score
+        return
+
+    legacy_output = output[0] if isinstance(output, tuple) else output
+    if legacy_output is None:
+        return
+    for item in legacy_output:
         if not item or len(item) < 3:
             continue
-        text = normalize_line(item[1])
+        yield item[1], item[2]
+
+
+def ocr_image(engine, image_path, min_score):
+    output = engine(str(image_path))
+    lines = []
+    for raw_text, raw_score in iter_recognized_lines(output):
+        text = normalize_line(raw_text)
         try:
-            score = float(item[2])
+            score = float(raw_score)
         except Exception:
             score = 0.0
         if text and score >= min_score:
@@ -100,10 +115,39 @@ def ocr_file(path):
     )
 
 
+def self_test_image(path, expected_text):
+    path = str(path or "").strip()
+    expected_text = normalize_line(expected_text)
+    ext = os.path.splitext(path)[1].lower()
+    if ext not in IMAGE_EXTS:
+        raise ValueError("OCR self-test requires an image file")
+    if not os.path.isfile(path):
+        raise ValueError("OCR self-test image does not exist")
+    if not expected_text:
+        raise ValueError("OCR self-test expected text is required")
+
+    min_score = float(os.environ.get("LOCAL_OCR_MIN_SCORE", "0.45"))
+    text = ocr_image(load_engine(), path, min_score)
+    if expected_text.casefold() not in normalize_line(text).casefold():
+        raise RuntimeError("OCR self-test did not recognize expected text")
+    return result(
+        text=text,
+        meta={"image": True, "self_test": True, "expected_text": expected_text},
+    )
+
+
 if __name__ == "__main__":
-    file_path = sys.argv[1].strip()
     try:
-        print(json.dumps(ocr_file(file_path), ensure_ascii=True))
+        if len(sys.argv) == 4 and sys.argv[1] == "--self-test-image":
+            payload = self_test_image(sys.argv[2], sys.argv[3])
+        elif len(sys.argv) == 2:
+            payload = ocr_file(sys.argv[1])
+        else:
+            raise ValueError(
+                "Usage: ocr_document_text.py <file> or "
+                "ocr_document_text.py --self-test-image <image> <expected-text>"
+            )
+        print(json.dumps(payload, ensure_ascii=True))
     except Exception as exc:
         print(json.dumps(result(text="", warnings=["Local OCR failed: %s" % exc]), ensure_ascii=True))
         sys.exit(2)

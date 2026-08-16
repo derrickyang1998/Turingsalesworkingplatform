@@ -28,10 +28,24 @@ function shellQuote(value) {
 
 function runBash(source, timeout = 20_000) {
   const command = process.platform === 'win32' ? gitBash : 'bash';
+  const configuredPython = process.env.PYTHON3 || process.env.PYTHON_BIN;
+  const prelude = process.platform === 'win32' && configuredPython
+    ? `python3() { ${shellQuote(shellPath(configuredPython))} "$@"; }\n`
+    : '';
   return spawnSync(command, ['--noprofile', '--norc', '-s'], {
-    input: source,
+    input: prelude + source,
     encoding: 'utf8',
     timeout
+  });
+}
+
+function runPython(source, args) {
+  const configuredPython = process.env.PYTHON3 || process.env.PYTHON_BIN;
+  const command = configuredPython || (process.platform === 'win32' ? 'py' : 'python3');
+  const versionArgs = process.platform === 'win32' && !configuredPython ? ['-3.14'] : [];
+  return spawnSync(command, [...versionArgs, ...args], {
+    input: source,
+    encoding: 'utf8'
   });
 }
 
@@ -3951,12 +3965,7 @@ result = namespace['publish_exact_file'](
 assert result == (17, 23), result
 assert b''.join(writes) == payload
 `;
-  const result = spawnSync(process.platform === 'win32' ? gitBash : 'bash', [
-    '--noprofile', '--norc', '-c', `python3 -c ${shellQuote(driver)}`
-  ], {
-    input: markerPython,
-    encoding: 'utf8'
-  });
+  const result = runPython(markerPython, ['-c', driver]);
   assert.equal(result.status, 0, result.stderr || result.stdout);
 });
 
@@ -3983,13 +3992,8 @@ test('every embedded Python block in the bootstrap compiles', { skip: !hasGitBas
   }
   assert.equal(blocks.length, 10, 'all bootstrap Python heredocs must remain compile-gated');
   for (const [index, block] of blocks.entries()) {
-    const command = `python3 -c ${shellQuote(`import sys; compile(sys.stdin.read(), "<bootstrap-${block.tag}-${index + 1}>", "exec")`)}`;
-    const result = spawnSync(process.platform === 'win32' ? gitBash : 'bash', [
-      '--noprofile', '--norc', '-c', command
-    ], {
-      input: block.source,
-      encoding: 'utf8'
-    });
+    const compiler = `import sys; compile(sys.stdin.read(), "<bootstrap-${block.tag}-${index + 1}>", "exec")`;
+    const result = runPython(block.source, ['-c', compiler]);
     assert.equal(result.status, 0, `embedded Python ${index + 1}: ${result.stderr || result.stdout}`);
   }
 });

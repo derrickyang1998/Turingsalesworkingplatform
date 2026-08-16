@@ -1,6 +1,6 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
-## v0.6.0-crm-sales-workspace (Release Candidate, 2026-08-11) - CRM 销售工作台
+## v0.6.0-crm-sales-workspace (Release Candidate, 2026-08-11; updated 2026-08-16) - CRM 销售工作台
 
 ### CRM 销售工作台 / CRM Sales Workspace
 - 将客户看板与客户明细保持为两个独立界面，并把客户、联系人、商机、任务、跟进记录、阶段流转、领取/释放、公海、团队与个人作用域接入统一的组织权限模型。
@@ -9,14 +9,33 @@
 
 ### Schema 6 与发布底座 / Schema 6 And Release Foundation
 - 新增迁移 `006_crm_sales_workspace`、CRM 查询/命令/作用域/合同服务，并将发布迁移链升级为精确的 `v1 -> v6` 两次恢复验证。
-- trusted-source 清单扩展为 26 个 SHA-256 固定文件，覆盖迁移 006 与 4 个 CRM 服务；sanitization manifest 重建为主 v1 + 隔离 v6 精确配置。
+- trusted-source 清单扩展为 46 个 SHA-256 固定文件，覆盖迁移 006、CRM 服务、当前受信任运行时、独立公网发布守护器及迁移清理 helper/unit；sanitization manifest 重建为主 v1 + 隔离 v6 精确配置。
 - 发布分支、构建标识、缓存键、候选/备份路径和远端文件清单升级为 `codex/v0.6.0-crm-sales-workspace` / `v060-crm-sales-workspace`，冻结 PPT build、query 与 SHA-256 保持不变。
+
+### 解析器运行时设备 / Parser Runtime Appliance
+- 为知识库、网红和需求文件上传增加独立解析器设备。生产构建固定为 Linux `x86_64`、Node.js `v20.20.2` 与 Python `3.14.4`；密封运行时树固定为 4,213 个文件、491 个目录、716,157,800 字节，SHA-256 为 `30fbfca170772f23071d6216eea8a83b86d27aad18c2b22b1a1e0e9ae773d7cd`。
+- Node 依赖闭包精确锁定为 `read-excel-file@9.2.0`、`@xmldom/xmldom@0.9.11`、`fflate@0.8.3`、`unzipper-esm@0.13.3`、`graceful-fs@4.2.11` 与 `node-int64@0.4.0`；`package-lock.json` SHA-256 为 `e1d6e5ababef1fb6f0aa69363be328e4da42283c96e268378c2f83076722fc46`。
+- Python 闭包精确锁定为 `certifi==2026.7.22`、`charset-normalizer==3.5.0`、`colorlog==6.12.0`、`flatbuffers==25.12.19`、`idna==3.18`、`numpy==2.5.2`、`omegaconf==2.4.0.dev13`、`onnxruntime==1.28.0`、`opencv-python==5.0.0.93`、`packaging==26.3`、`pillow==12.3.0`、`protobuf==7.35.1`、`pyclipper==1.4.0`、`PyMuPDF==1.27.2.3`、`pypdf==6.14.2`、`PyYAML==6.0.3`、`rapidocr==3.9.2`、`requests==2.34.2`、`shapely==2.1.2`、`six==1.17.0`、`tqdm==4.70.0`、`typing_extensions==4.16.0` 与 `urllib3==2.7.0`；逐包验签的 `requirements.lock` SHA-256 为 `22f72070ee7c62b428261b64435fbb0b24d87f0aaa7a4d0ac0d8e7a45bfb44df`。
+- 构建、安装、快照和回滚只允许在 root 所有的生命周期目录内执行。解析任务以禁止登录的 `turingmarket-parser` 身份运行于 systemd 257+ 的 `RootDirectory` chroot，并启用私有网络、PID、IPC、用户和挂载命名空间、只读系统、空 capability 与资源上限。
+- 非特权构建单元在密封并哈希运行时前，针对暂存依赖树初始化真实 RapidOCR 引擎；发布测试同时覆盖 RapidOCR 3 对象结果与旧 tuple 兼容路径，安装与验收门禁在 `RootDirectory` 内执行 XLSX、PPTX、OCR 推理及隔离边界在内的 21 项自检。
+
+### 切换安全与可观测性 / Cutover Safety And Observability
+- 迁移清理控制面的 enabled topology replay 现在可接管精确 `.restore.next` residue，并在任何控制面写入前验证 root-only 父链；install、backup、replay、start 与 convergence 均通过固定 `/usr/bin/systemctl show` 绑定 PID 1 的精确 fragment、无 alias 及精确 drop-in 集合，同时扫描全部 systemd 搜索根。
+- 公网发布 watchdog 不再受旧 5 分钟 runtime cap 截断；armed 状态绑定 transient unit、controller start ticks 与操作专属 deadline：初始切换为 120 秒，接受态 finalization 与回滚/恢复为 7,200 秒。每次公网 link swap 及 disarm 前均重新验证精确 active/running transient identity。
+- `/var/lib/turingmarket/ppt-cache` 现作为第五个外置状态目标，由 `PPT_CACHE_DIR` 直接引用，不是候选树软链接。备份记录其 `present`/`absent` 起源；首次安装只在停写后创建空的 `root:root 0700` 目录，预变更恢复仅在目录仍为空时删除它。
+- 生产变更前按实际文件系统设备计算数据库、PPT 缓存、既有/待装解析器运行时与 `node_modules` 增量的备份、安装和回滚空间，并要求每个设备满足计算值加 `max(10%, 512 MiB)` 余量及最终 `CUTOVER_CAPACITY_OK`。
+- 切换顺序固定为：全流量维护、首次解析器 admission/spool/unit/cgroup 排空、停止并静默 PM2 与 SQLite、再次排空解析器、准备 PPT 缓存、建立同一验签快照、交换代码、安装解析器、启动候选与执行验收。
+- `/api/health` 现在返回 `parser.ready` 与 `parser.manifest_sha256`。候选必须同时满足 `status=ok`、解析器 ready 和 manifest SHA-256 `970b6111a433faae77bd07efbcdcdc608d6c923c563e708c70dd8b62006d6970`；安装后自检、接受事实与运行时树哈希写入 schema 3 验收标记，公开流量恢复前会重新绑定核验。
 
 ### 审查与状态 / Review And Status
 - S6 已验收检查点的独立 Code Review 为 `APPROVE`，独立 QA 为 `GO`；该检查点最终审查矩阵 342/342、提交前扩展矩阵 373/373，6 个关键 JavaScript 文件语法通过。
 - 完整历史 bundle `phase5-v060-90713b23f417-full-source.bundle` 已验签，SHA-256 为 `fd4b925d82056d1eb53a5c65cc67461bc3eadd9ba88f47020ed37343d5dae887`。
-- 当前 v0.6 发布候选在 S6 后又补充了跨平台可信哈希、schema 6 已填充 CRM 脱敏回归、概率字段域约束和发布清单修复，因此 S6 结论不替代当前候选的全量复审。
-- 本条目当前是发布候选，不代表线上已切换。生产仍运行最近验收通过的 v0.4；当前候选必须重新完成发布合同、全量非浏览器回归、独立代码/安全/QA 复审、GitHub 推送、可校验备份、生产部署和远端 API/UI/权限/回滚验收后才能标记发布。
+- 当前 v0.6 发布候选在 S6 后又补充了跨平台可信哈希、schema 6 已填充 CRM 脱敏回归、概率字段域约束、发布清单修复和上述解析器/切换加固，因此 S6 结论不替代当前功能切片的定向复审；完整回归改在阶段收口、计划发布窗口或跨模块高风险变更时执行。
+- 本轮 AppSec 首轮 4 项及终审追加 2 项 HIGH 已完成 RED/GREEN 整改：`0444` 公网守护器只经固定 `/bin/bash --noprofile --norc` 调用；`ss`、状态 `fsync` 或嵌套条件调用失败均不能持久化 `closed`；候选依赖按目标文件系统块大小逐 inode 核算分配上界、拒绝 xattr/特殊文件/硬链接，并以完整 tmpfs 字节与 inode 上限作为最低容量基线；中断接管和候选清理仅卸载经过精确路径与 `tmpfs` 类型校验的残留挂载。历史 AppSec 聚焦证据为公网守护器 `9/9`、发布源合同 `40/40`、生命周期接管 `22/22`、可信源与 v0.6 合同 `47/47`，`-ValidateLocalOnly` 与 `git diff --check` 通过；该历史结果不替代当前保留证据。
+- DevOps 第 5-10 轮进一步封闭公网守护接管：只允许 exact no-follow、root:root、`0600`、单链接、regular、空文件且无 xattr 的 transaction lock；可信 helper 增加 transaction-locked `read-record`；四类 transient unit 按生命周期阶段与 RunId 精确绑定并排空；lock-only 缺失状态只能按显式 `absent` 收敛；disarm 在 watchdog 退出后重新锁读 `verified`，维护配置、链接和父目录均执行持久化；inventory 使用不可变 `rootGid`/`wwwDataGid`，不受扫描顺序影响；`cutover-complete` 接受态恢复会在任何 PM2 变更前先通过可信 helper 关闭公网并启动 watchdog，直到公网与 PM2 精确事实收敛后才解除守卫。接受态 finalization 另设 7,200 秒有界 watchdog deadline，覆盖 PM2 命令、完整 180 秒解析器启动窗口及最终公网/事实验证，避免沿用 120 秒切换窗口造成合法慢启动误关断。
+- 当前功能切片父级定向证据：生命周期接管 `31/31`、发布源合同 `44/44`、公网守护关键并发/读取/超时用例 `4/4`，PowerShell AST、守护脚本 Bash 语法、可信哈希一致性、`git diff --check` 与聚焦敏感信息扫描均通过。2026-08-16 Windows 71 文件非浏览器汇总 `1875/1784/0/91` 及早期公网守护结果仅作为历史/阶段收口证据保留；生产匹配 Linux/root 验证在受控部署中执行。
+- 开发节奏调整为“单功能实现 -> 定向测试 -> 独立审查 -> 备份 -> 上线 -> 线上健康/登录/核心路径冒烟”。完整非浏览器回归、Playwright 和多角色复审仅在阶段收口、计划发布窗口或改动跨越认证、权限、迁移、共享基础设施等高风险边界时执行；HIGH/CRITICAL、备份/回滚、迁移安全和生产冒烟继续作为硬阻断项。
+- 本条目仍是发布候选，不代表线上已切换。生产 v0.4 保持原样且未触碰；当前功能切片须完成最终定向证据、独立审查、干净权威工作区、GitHub 同步、可校验备份、容量门禁、受控部署和远端运行时/API/权限/回滚验收后才能标记发布。
 
 ---
 

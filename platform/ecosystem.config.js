@@ -11,7 +11,8 @@ module.exports = {
       TM_ENV_FILE: "/etc/turingmarket/turingmarket.env",
       DB_PATH: "/var/lib/turingmarket/db/turingmarket.db",
       UPLOAD_DIR: "/var/lib/turingmarket/uploads",
-      TMP_DIR: "/var/lib/turingmarket/tmp"
+      TMP_DIR: "/var/lib/turingmarket/tmp",
+      PPT_CACHE_DIR: "/var/lib/turingmarket/ppt-cache"
     },
     instances: 1,
     exec_mode: "fork",

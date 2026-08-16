@@ -14,6 +14,12 @@ const Database = require('better-sqlite3');
 
 const platformRoot = path.join(__dirname, '..', '..');
 const serverEntry = path.join(platformRoot, 'server', 'server.js');
+const parserManifestPath = path.join(
+  platformRoot,
+  'server',
+  'systemd',
+  'turingmarket-parser.manifest.json'
+);
 const TEST_JWT_SECRET = crypto
   .createHash('sha256')
   .update('phase4-server-integration-jwt-v1')
@@ -34,7 +40,15 @@ function isolatedChildEnvironment(overrides, sourceEnvironment = process.env) {
   return Object.assign(environment, overrides);
 }
 const RELEASE_PINNED_UPLOAD_MANIFEST_SHA256 =
-  'f9edbea9c9123681b1f3be56964535271f1a3dc7c20fe04e3caaf65e86cc5162';
+  '970b6111a433faae77bd07efbcdcdc608d6c923c563e708c70dd8b62006d6970';
+
+test('production parser manifest pin matches the exact checked-in manifest bytes', () => {
+  const observed = crypto
+    .createHash('sha256')
+    .update(fs.readFileSync(parserManifestPath))
+    .digest('hex');
+  assert.equal(observed, RELEASE_PINNED_UPLOAD_MANIFEST_SHA256);
+});
 const REQUIRED_UPLOAD_SANDBOX_SELF_TESTS = Object.freeze([
   'identity',
   'mount_isolation',
@@ -53,8 +67,18 @@ const REQUIRED_UPLOAD_SANDBOX_SELF_TESTS = Object.freeze([
   'private_temp_write_denial',
   'dev_submount_write_denial',
   'writable_filesystem_inventory',
-  'output_pressure'
+  'output_pressure',
+  'xlsx_parsing',
+  'pptx_parsing',
+  'ocr_inference'
 ]);
+const LEGACY_EIGHTEEN_UPLOAD_SANDBOX_SELF_TESTS = Object.freeze(
+  REQUIRED_UPLOAD_SANDBOX_SELF_TESTS.filter((name) => ![
+    'xlsx_parsing',
+    'pptx_parsing',
+    'ocr_inference'
+  ].includes(name))
+);
 const LEGACY_FIFTEEN_UPLOAD_SANDBOX_SELF_TESTS = Object.freeze(
   REQUIRED_UPLOAD_SANDBOX_SELF_TESTS.filter((name) => (
     name !== 'aio_socket_bypass_denial' &&
@@ -245,6 +269,7 @@ const Module = require('node:module');
 const eventPath = ${JSON.stringify(eventPath)};
 const failJanitorStartup = ${options.failJanitorStartup === true};
 const failUploadReadiness = ${options.failUploadReadiness === true};
+const legacyEighteenSelfTests = ${options.legacyEighteenSelfTests === true};
 const legacyFifteenSelfTests = ${options.legacyFifteenSelfTests === true};
 const legacyElevenSelfTests = ${options.legacyElevenSelfTests === true};
 const legacyThirteenSelfTests = ${options.legacyThirteenSelfTests === true};
@@ -307,6 +332,11 @@ Module._load = function(request, parent, isMain) {
         }
         const selfTests = await options.runSelfTests();
         const projectedSelfTests = { ...selfTests };
+        if (legacyEighteenSelfTests) {
+          delete projectedSelfTests.xlsx_parsing;
+          delete projectedSelfTests.pptx_parsing;
+          delete projectedSelfTests.ocr_inference;
+        }
         if (legacyFifteenSelfTests || legacyThirteenSelfTests || legacyElevenSelfTests) {
           delete projectedSelfTests.aio_socket_bypass_denial;
           delete projectedSelfTests.pid_namespace_sibling_fd_denial;
@@ -1865,6 +1895,24 @@ test('influencer upload commits its legacy envelope and parser admission in one 
     const spoolRoot = path.join(server.tempDir, 'upload-sandbox');
     assert.equal(fs.existsSync(spoolRoot), true);
     assert.deepEqual(fs.readdirSync(spoolRoot), []);
+    const controllerEvents = server.output().split(/\r?\n/)
+      .filter((line) => line.startsWith('{'))
+      .map((line) => JSON.parse(line))
+      .filter((entry) => entry.event === 'parser_job_completed');
+    assert.deepEqual(controllerEvents, [{
+      event: 'parser_job_completed',
+      route: 'parser.influencer-upload',
+      duration_ms: controllerEvents[0] && controllerEvents[0].duration_ms,
+      result_category: 'success',
+      systemd: {
+        Result: 'unavailable',
+        ExecMainStatus: null,
+        OOMKilled: false
+      }
+    }]);
+    assert.ok(Number.isSafeInteger(controllerEvents[0].duration_ms));
+    assert.equal(server.output().includes('influencers.csv'), false);
+    assert.equal(server.output().includes('@sandbox_route_kol'), false);
   } finally {
     await server.close();
   }
@@ -2491,6 +2539,23 @@ test('production owns one collaboration singleton, one PPT route, and the janito
   }
 });
 
+test('health exposes the startup-pinned parser readiness without reading mutable request-time state', {
+  timeout: 30000
+}, async () => {
+  const server = await startTestServer('tm-phase4-health-parser-readiness-');
+  try {
+    const response = await fetch(`${server.baseUrl}/api/health`);
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.deepEqual(body.parser, {
+      ready: true,
+      manifest_sha256: RELEASE_PINNED_UPLOAD_MANIFEST_SHA256
+    });
+  } finally {
+    await server.close();
+  }
+});
+
 test('production readiness uses the release manifest pin before any listener starts', {
   timeout: 30000
 }, async () => {
@@ -2515,6 +2580,35 @@ test('production readiness uses the release manifest pin before any listener sta
     );
     assert.equal(events.some((entry) => entry.name === 'upload_self_tests_projected'), false);
     assert.equal(events.some((entry) => entry.name === 'upload_sandbox_constructed'), false);
+    assert.equal(events.some((entry) => entry.name === 'server_listen_called'), false);
+  } finally {
+    fs.rmSync(probeRoot, { recursive: true, force: true });
+  }
+});
+
+test('upload readiness rejects a legacy eighteen-result self-test runner', {
+  timeout: 30000
+}, async () => {
+  const probeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-phase4-eighteen-self-tests-'));
+  try {
+    const probe = writeCompositionProbePreload(probeRoot, {
+      legacyEighteenSelfTests: true
+    });
+    const result = await runTestServerToExit('tm-phase4-eighteen-self-tests-server-', {
+      NODE_OPTIONS: nodeOptionsWithPreload(probe.preloadPath)
+    });
+    const events = readProbeEvents(probe.eventPath);
+    assert.notEqual(result.code, 0);
+    assert.match(result.output, /UPLOAD_SANDBOX_NOT_READY/);
+    assert.deepEqual(
+      events.filter((entry) => entry.name === 'upload_self_tests_projected'),
+      [{
+        name: 'upload_self_tests_projected',
+        names: [...LEGACY_EIGHTEEN_UPLOAD_SANDBOX_SELF_TESTS],
+        allTrue: true
+      }]
+    );
+    assert.equal(events.some((entry) => entry.name === 'upload_readiness_completed'), false);
     assert.equal(events.some((entry) => entry.name === 'server_listen_called'), false);
   } finally {
     fs.rmSync(probeRoot, { recursive: true, force: true });

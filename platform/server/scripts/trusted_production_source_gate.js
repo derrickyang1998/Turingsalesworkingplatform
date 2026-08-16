@@ -12,6 +12,38 @@ const VERDICT_FORMAT = 'tm-trusted-production-source-verdict-v1';
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const RUNTIME_COMMAND_TIMEOUT_MS = 20 * 60 * 1000;
 const MAX_CHILD_OUTPUT_BYTES = 1024 * 1024;
+const RUNTIME_UNIT_DRAIN_ATTEMPTS = 100;
+const RUNTIME_UNIT_DRAIN_INTERVAL_MS = 100;
+const RUNTIME_FETCH_UNIT_PREFIX = 'turingmarket-trusted-runtime-fetch-';
+const RUNTIME_BUILD_UNIT_PREFIX = 'turingmarket-trusted-runtime-build-';
+const PUBLIC_FETCH_DENY_CIDRS = Object.freeze([
+  '0.0.0.0/8',
+  '10.0.0.0/8',
+  '100.64.0.0/10',
+  '127.0.0.0/8',
+  '169.254.0.0/16',
+  '172.16.0.0/12',
+  '192.0.0.0/24',
+  '192.0.2.0/24',
+  '192.88.99.0/24',
+  '192.168.0.0/16',
+  '198.18.0.0/15',
+  '198.51.100.0/24',
+  '203.0.113.0/24',
+  '224.0.0.0/4',
+  '240.0.0.0/4',
+  '::/128',
+  '::1/128',
+  '::ffff:0:0/96',
+  '2001:db8::/32',
+  'fc00::/7',
+  'fe80::/10',
+  'ff00::/8'
+]);
+const PUBLIC_FETCH_ALLOW_CIDRS = Object.freeze([
+  '127.0.0.53/32',
+  '127.0.0.54/32'
+]);
 
 const REQUIRED_BUNDLE_FILES = Object.freeze([
   'server/migrations/001_legacy_compat_columns.js',
@@ -25,8 +57,22 @@ const REQUIRED_BUNDLE_FILES = Object.freeze([
   'server/migrations/vendor/bcryptjs_v3_0_3.js',
   'server/package-lock.json',
   'server/package.json',
+  'server/parser-runtime/package-lock.json',
+  'server/parser-runtime/package.json',
+  'server/parser-runtime/requirements.lock',
+  'server/extract_document_text.py',
+  'server/extract_xlsx_text.py',
+  'server/ocr_document_text.py',
+  'server/scripts/build_upload_sandbox_runtime.sh',
+  'server/scripts/check_cutover_capacity.py',
+  'server/scripts/cleanup_stale_migration_gate.sh',
+  'server/scripts/parse_upload_sandbox.sh',
+  'server/scripts/provision_upload_sandbox_runtime.sh',
+  'server/scripts/public_release_guard.sh',
   'server/scripts/sanitization_manifest.json',
   'server/scripts/sanitize_production_shape.js',
+  'server/scripts/trusted_parser_runtime_verifier.js',
+  'server/scripts/upload_sandbox_self_test.js',
   'server/scripts/verify_campaign_migration_gate.js',
   'server/services/campaign_access_service.js',
   'server/services/campaign_workflow_service.js',
@@ -36,16 +82,33 @@ const REQUIRED_BUNDLE_FILES = Object.freeze([
   'server/services/crm_query_service.js',
   'server/services/crm_scope_service.js',
   'server/services/idempotency_service.js',
+  'server/services/file_ingest_service.js',
   'server/services/knowledge_service.js',
   'server/services/migration_service.js',
   'server/services/organization_access_service.js',
-  'server/services/sqlite_digest_service.js'
+  'server/services/sqlite_digest_service.js',
+  'server/services/upload_sandbox_service.js',
+  'server/systemd/turingmarket-gate-cleanup.service',
+  'server/systemd/turingmarket-parser.manifest.json',
+  'server/systemd/turingmarket-parser.slice',
+  'server/systemd/turingmarket-parser@.service'
 ]);
 
 const EXPECTED_ENTRYPOINTS = Object.freeze({
   sanitizer: 'server/scripts/sanitize_production_shape.js',
   sanitizationManifest: 'server/scripts/sanitization_manifest.json',
-  verifier: 'server/scripts/verify_campaign_migration_gate.js'
+  verifier: 'server/scripts/verify_campaign_migration_gate.js',
+  migrationCleanupHelper: 'server/scripts/cleanup_stale_migration_gate.sh',
+  migrationCleanupUnit: 'server/systemd/turingmarket-gate-cleanup.service',
+  parserBuilder: 'server/scripts/build_upload_sandbox_runtime.sh',
+  parserProvisioner: 'server/scripts/provision_upload_sandbox_runtime.sh',
+  parserCapacityPlanner: 'server/scripts/check_cutover_capacity.py',
+  publicGuard: 'server/scripts/public_release_guard.sh',
+  parserSelfTest: 'server/scripts/upload_sandbox_self_test.js',
+  parserVerifier: 'server/scripts/trusted_parser_runtime_verifier.js',
+  parserManifest: 'server/systemd/turingmarket-parser.manifest.json',
+  parserServiceUnit: 'server/systemd/turingmarket-parser@.service',
+  parserSliceUnit: 'server/systemd/turingmarket-parser.slice'
 });
 
 const EXPECTED_MIGRATION_CONTRACT = Object.freeze({
@@ -505,16 +568,27 @@ function assertDependencyRoot(dependencyRoot, bundleRoot, candidateRoot) {
 function assertRuntimeTree(root) {
   const rootReal = assertDirectoryNoSymlink(root, 'trusted runtime root');
   function visit(current) {
-    for (const name of fs.readdirSync(current)) {
+    for (const name of fs.readdirSync(current).sort()) {
       const entryPath = path.join(current, name);
       const metadata = fs.lstatSync(entryPath);
       if (metadata.isSymbolicLink()) {
+        if (metadata.nlink !== 1) throw new Error('trusted runtime contains a hard-linked symlink');
+        const target = fs.readlinkSync(entryPath);
+        if (path.isAbsolute(target) || !isWithin(rootReal, path.resolve(current, target))) {
+          throw new Error('trusted runtime symlink escaped its root');
+        }
         const resolved = fs.realpathSync.native(entryPath);
         if (!isWithin(rootReal, resolved)) throw new Error('trusted runtime symlink escaped its root');
+        if (process.platform !== 'win32' && (metadata.uid !== 0 || metadata.gid !== 0)) {
+          throw new Error('trusted runtime contains a non-root-owned symlink');
+        }
         continue;
       }
       if (!metadata.isDirectory() && !metadata.isFile()) {
         throw new Error('trusted runtime contains an unsafe entry');
+      }
+      if (metadata.isFile() && metadata.nlink !== 1) {
+        throw new Error('trusted runtime contains a hard-linked file');
       }
       if (process.platform !== 'win32' && (
         metadata.uid !== 0 || metadata.gid !== 0 || (metadata.mode & 0o022) !== 0
@@ -534,13 +608,63 @@ function assertRuntimeTree(root) {
   return rootReal;
 }
 
-function runtimeMarker(manifest, expectedManifestSha256) {
+function hashRuntimeTree(root) {
+  const rootReal = assertDirectoryNoSymlink(root, 'runtime digest root');
+  const digest = crypto.createHash('sha256');
+  function writeField(value) {
+    const bytes = Buffer.from(String(value), 'utf8');
+    const length = Buffer.allocUnsafe(8);
+    length.writeBigUInt64BE(BigInt(bytes.length));
+    digest.update(length);
+    digest.update(bytes);
+  }
+  function visit(current, relative) {
+    const names = fs.readdirSync(current).sort();
+    for (const name of names) {
+      const entryPath = path.join(current, name);
+      const entryRelative = relative ? `${relative}/${name}` : name;
+      const metadata = fs.lstatSync(entryPath);
+      if (metadata.isSymbolicLink()) {
+        if (metadata.nlink !== 1) throw new Error('runtime digest found a hard-linked symlink');
+        const target = fs.readlinkSync(entryPath);
+        if (path.isAbsolute(target) || !isWithin(rootReal, path.resolve(current, target))) {
+          throw new Error('runtime digest symlink escaped its root');
+        }
+        const resolved = fs.realpathSync.native(entryPath);
+        if (!isWithin(rootReal, resolved)) throw new Error('runtime digest symlink escaped its root');
+        writeField('L');
+        writeField(entryRelative);
+        writeField(target);
+      } else if (metadata.isDirectory()) {
+        writeField('D');
+        writeField(entryRelative);
+        visit(entryPath, entryRelative);
+      } else if (metadata.isFile()) {
+        if (metadata.nlink !== 1) throw new Error('runtime digest found a hard-linked file');
+        writeField('F');
+        writeField(entryRelative);
+        writeField(metadata.size);
+        writeField(sha256File(entryPath));
+      } else {
+        throw new Error('runtime digest found an unsafe entry');
+      }
+    }
+  }
+  visit(rootReal, '');
+  return digest.digest('hex');
+}
+
+function runtimeMarker(manifest, expectedManifestSha256, dependencyTreeSha256) {
   const packageLock = manifest.files.find((entry) => entry.path === 'server/package-lock.json');
   if (!packageLock) throw new Error('trusted package lock is missing');
+  if (!SHA256_PATTERN.test(dependencyTreeSha256 || '')) {
+    throw new Error('trusted runtime dependency tree digest is invalid');
+  }
   return Object.freeze({
     format: RUNTIME_FORMAT,
     manifestSha256: expectedManifestSha256,
-    packageLockSha256: packageLock.sha256
+    packageLockSha256: packageLock.sha256,
+    dependencyTreeSha256
   });
 }
 
@@ -556,28 +680,210 @@ function assertTrustedRuntime(options) {
   }
   const markerPath = path.join(runtimeRoot, 'runtime-contract.json');
   const actualMarker = JSON.parse(fs.readFileSync(markerPath, 'utf8'));
-  const expectedMarker = runtimeMarker(verified.manifest, options.expectedManifestSha256);
+  const dependencyRoot = path.join(runtimeRoot, 'server', 'node_modules');
+  const dependencyTreeSha256 = hashRuntimeTree(dependencyRoot);
+  const expectedMarker = runtimeMarker(
+    verified.manifest,
+    options.expectedManifestSha256,
+    dependencyTreeSha256
+  );
   if (JSON.stringify(actualMarker) !== JSON.stringify(expectedMarker)) {
-    throw new Error('trusted runtime contract marker mismatch');
+    throw new Error('trusted runtime dependency tree digest mismatch');
   }
   for (const relativePath of ['server/package.json', 'server/package-lock.json']) {
     const expected = verified.manifest.files.find((entry) => entry.path === relativePath);
     assertPinnedFile(path.join(runtimeRoot, ...relativePath.split('/')), expected.sha256, `trusted runtime ${relativePath}`);
   }
-  const dependencyRoot = path.join(runtimeRoot, 'server', 'node_modules');
   assertDependencyRoot(dependencyRoot, verified.bundleRoot, options.candidateRoot);
   return Object.freeze({ runtimeRoot, dependencyRoot });
 }
 
-function runRuntimeCommand(command, args, options) {
-  const result = spawnSync(command, args, {
-    cwd: options.cwd,
+function assertUnprivilegedBuildIdentity(buildUid, buildGid) {
+  const parseIdentity = (value, label) => {
+    if (typeof value !== 'string' || !/^[1-9][0-9]*$/.test(value)) {
+      throw new Error(`${label} must be a non-root decimal identity`);
+    }
+    const parsed = Number.parseInt(value, 10);
+    if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+      throw new Error(`${label} must be a non-root decimal identity`);
+    }
+    return parsed;
+  };
+  return Object.freeze({
+    uid: parseIdentity(buildUid, 'build UID'),
+    gid: parseIdentity(buildGid, 'build GID')
+  });
+}
+
+function sleepSync(milliseconds) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
+}
+
+function runSystemctl(args, allowFailure = false) {
+  const result = spawnSync('/usr/bin/systemctl', args, {
     encoding: 'utf8',
-    env: options.env,
-    timeout: RUNTIME_COMMAND_TIMEOUT_MS,
+    timeout: 30 * 1000,
     killSignal: 'SIGKILL',
     maxBuffer: MAX_CHILD_OUTPUT_BYTES
   });
+  if (result.error) throw result.error;
+  if (!allowFailure && result.status !== 0) {
+    throw new Error(`systemctl failed for trusted runtime unit: ${(result.stderr || '').trim() || `exit ${result.status}`}`);
+  }
+  return result;
+}
+
+function readRuntimeUnitProperty(unitName, property) {
+  const result = runSystemctl(
+    ['show', `${unitName}.service`, `--property=${property}`, '--value'],
+    true
+  );
+  return result.status === 0 ? (result.stdout || '').trim() : '';
+}
+
+function drainRuntimeUnit(unitName) {
+  if (!/^turingmarket-trusted-runtime-(?:fetch|build)-[0-9]+-[0-9a-f]{16}$/.test(unitName)) {
+    throw new Error('trusted runtime unit name is invalid');
+  }
+  const controlGroup = readRuntimeUnitProperty(unitName, 'ControlGroup');
+  runSystemctl(['kill', '--kill-who=all', '--signal=KILL', `${unitName}.service`], true);
+  runSystemctl(['stop', `${unitName}.service`], true);
+  if (controlGroup) {
+    if (!/^\/(?:[A-Za-z0-9_.:@-]+\/)*[A-Za-z0-9_.:@-]+$/.test(controlGroup)) {
+      throw new Error('trusted runtime control group path is invalid');
+    }
+    const processesPath = path.join('/sys/fs/cgroup', controlGroup.slice(1), 'cgroup.procs');
+    let drained = false;
+    for (let attempt = 0; attempt < RUNTIME_UNIT_DRAIN_ATTEMPTS; attempt += 1) {
+      try {
+        drained = fs.readFileSync(processesPath, 'utf8').trim() === '';
+      } catch (error) {
+        if (error.code === 'ENOENT') drained = true;
+        else throw error;
+      }
+      if (drained) break;
+      sleepSync(RUNTIME_UNIT_DRAIN_INTERVAL_MS);
+    }
+    if (!drained) throw new Error('trusted runtime control group did not drain');
+  }
+  const mainPid = readRuntimeUnitProperty(unitName, 'MainPID');
+  if (mainPid && mainPid !== '0') throw new Error('trusted runtime unit retained a main process');
+  runSystemctl(['reset-failed', `${unitName}.service`], true);
+}
+
+function assertRuntimeUnitPath(value, label) {
+  const absolute = normalizedAbsolute(value);
+  if (/\s/.test(absolute) || absolute.includes('\0')) {
+    throw new Error(`${label} cannot be represented in a transient unit property`);
+  }
+  return absolute;
+}
+
+function isolatedRuntimeProperties(options, phase) {
+  const stageRoot = assertRuntimeUnitPath(options.stageRoot, 'trusted runtime stage root');
+  const cacheRoot = assertRuntimeUnitPath(options.cacheRoot, 'trusted runtime cache root');
+  const candidateRoot = assertRuntimeUnitPath(options.candidateRoot, 'candidate root');
+  const properties = [
+    `WorkingDirectory=${assertRuntimeUnitPath(options.cwd, 'trusted runtime working directory')}`,
+    'PrivatePIDs=yes',
+    'PrivateMounts=yes',
+    'PrivateTmp=yes',
+    'PrivateDevices=yes',
+    'PrivateIPC=yes',
+    'ProtectHome=yes',
+    'ProtectSystem=strict',
+    'ProtectProc=invisible',
+    'ProtectHostname=yes',
+    'ProtectKernelTunables=yes',
+    'ProtectKernelModules=yes',
+    'ProtectKernelLogs=yes',
+    'ProtectControlGroups=yes',
+    'ProtectClock=yes',
+    'NoNewPrivileges=yes',
+    'CapabilityBoundingSet=',
+    'SystemCallArchitectures=native',
+    'RestrictSUIDSGID=yes',
+    'RestrictRealtime=yes',
+    'RestrictNamespaces=yes',
+    'LockPersonality=yes',
+    'KillMode=control-group',
+    'TimeoutStopSec=5s',
+    'RuntimeMaxSec=19m',
+    'TasksMax=512',
+    'MemoryMax=3G',
+    'LimitFSIZE=1073741824',
+    'UMask=0077',
+    `ReadWritePaths=${stageRoot} ${cacheRoot}`,
+    `InaccessiblePaths=${candidateRoot} /root /etc/turingmarket /var/lib/turingmarket`
+  ];
+  if (phase === 'build') {
+    properties.push('PrivateNetwork=yes', 'RestrictAddressFamilies=AF_UNIX');
+  } else if (phase === 'fetch') {
+    properties.push(
+      'RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6',
+      `IPAddressDeny=${PUBLIC_FETCH_DENY_CIDRS.join(' ')}`,
+      `IPAddressAllow=${PUBLIC_FETCH_ALLOW_CIDRS.join(' ')}`
+    );
+  } else {
+    throw new Error('trusted runtime unit phase is invalid');
+  }
+  return properties;
+}
+
+function runIsolatedRuntimeCommand(command, args, options, buildIdentity, phase) {
+  if (process.platform === 'win32') {
+    const result = spawnSync(command, args, {
+      cwd: options.cwd,
+      encoding: 'utf8',
+      env: options.env,
+      timeout: RUNTIME_COMMAND_TIMEOUT_MS,
+      killSignal: 'SIGKILL',
+      maxBuffer: MAX_CHILD_OUTPUT_BYTES
+    });
+    if (result.error) throw result.error;
+    if (result.status !== 0) {
+      throw new Error(`trusted runtime preparation failed: ${(result.stderr || '').trim() || `exit ${result.status}`}`);
+    }
+    return;
+  }
+  if (typeof process.getuid !== 'function' || process.getuid() !== 0) {
+    throw new Error('trusted runtime preparation requires the root controller');
+  }
+  const unitPrefix = phase === 'fetch' ? RUNTIME_FETCH_UNIT_PREFIX : RUNTIME_BUILD_UNIT_PREFIX;
+  const unitName = `${unitPrefix}${process.pid}-${crypto.randomBytes(8).toString('hex')}`;
+  const environment = Object.entries(options.env).flatMap(([key, value]) => {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key) || String(value).includes('\0')) {
+      throw new Error('trusted runtime environment is invalid');
+    }
+    return [`${key}=${value}`];
+  });
+  const commandArguments = [
+    '--quiet',
+    '--wait',
+    '--pipe',
+    `--unit=${unitName}`,
+    `--uid=${buildIdentity.uid}`,
+    `--gid=${buildIdentity.gid}`,
+    '--service-type=exec',
+    ...isolatedRuntimeProperties(options, phase).map((property) => `--property=${property}`),
+    '--',
+    '/usr/bin/env',
+    '-i',
+    ...environment,
+    command,
+    ...args
+  ];
+  let result;
+  try {
+    result = spawnSync('/usr/bin/systemd-run', commandArguments, {
+      encoding: 'utf8',
+      timeout: RUNTIME_COMMAND_TIMEOUT_MS,
+      killSignal: 'SIGKILL',
+      maxBuffer: MAX_CHILD_OUTPUT_BYTES
+    });
+  } finally {
+    drainRuntimeUnit(unitName);
+  }
   if (result.error) {
     if (result.error.code === 'ETIMEDOUT') throw new Error('trusted runtime preparation exceeded its hard timeout');
     throw result.error;
@@ -587,31 +893,110 @@ function runRuntimeCommand(command, args, options) {
   }
 }
 
-function sealRuntimeTree(root) {
+function sameNodeIdentity(left, right) {
+  return String(left.dev) === String(right.dev) && String(left.ino) === String(right.ino);
+}
+
+function openVerifiedRuntimeNode(entryPath, metadata, flags, label) {
+  const descriptor = fs.openSync(entryPath, flags | (fs.constants.O_NOFOLLOW || 0));
+  try {
+    const opened = fs.fstatSync(descriptor);
+    if (!sameNodeIdentity(metadata, opened)) throw new Error(`${label} identity changed before sealing`);
+    return { descriptor, opened };
+  } catch (error) {
+    fs.closeSync(descriptor);
+    throw error;
+  }
+}
+
+function assertRuntimeNodeStillBound(entryPath, metadata, label) {
+  const current = fs.lstatSync(entryPath);
+  if (!sameNodeIdentity(metadata, current)) throw new Error(`${label} identity changed during sealing`);
+  return current;
+}
+
+function sealRuntimeTree(root, expectedRootIdentity) {
+  const rootMetadata = fs.lstatSync(root);
+  if (!rootMetadata.isDirectory() || rootMetadata.isSymbolicLink() || !sameNodeIdentity(rootMetadata, expectedRootIdentity)) {
+    throw new Error('trusted runtime stage root identity changed before sealing');
+  }
+  const rootNode = openVerifiedRuntimeNode(
+    root,
+    rootMetadata,
+    fs.constants.O_RDONLY | (fs.constants.O_DIRECTORY || 0),
+    'trusted runtime root'
+  );
+  if (process.platform !== 'win32') fs.fchownSync(rootNode.descriptor, 0, 0);
+  fs.fchmodSync(rootNode.descriptor, 0o700);
+  assertRuntimeNodeStillBound(root, rootMetadata, 'trusted runtime root');
+
   function visit(current) {
-    for (const name of fs.readdirSync(current)) {
+    for (const name of fs.readdirSync(current).sort()) {
       const entryPath = path.join(current, name);
       const metadata = fs.lstatSync(entryPath);
-      if (metadata.isSymbolicLink()) continue;
-      if (metadata.isDirectory()) {
-        visit(entryPath);
-        if (process.platform !== 'win32') fs.chownSync(entryPath, 0, 0);
-        fs.chmodSync(entryPath, 0o555);
+      if (metadata.isSymbolicLink()) {
+        if (metadata.nlink !== 1) throw new Error('trusted runtime preparation produced a hard-linked symlink');
+        const target = fs.readlinkSync(entryPath);
+        if (path.isAbsolute(target) || !isWithin(root, path.resolve(current, target))) {
+          throw new Error('trusted runtime preparation produced an escaping symlink');
+        }
+        const resolved = fs.realpathSync.native(entryPath);
+        if (!isWithin(root, resolved)) throw new Error('trusted runtime preparation produced an escaping symlink');
+        if (process.platform !== 'win32') fs.lchownSync(entryPath, 0, 0);
+        const sealedLink = assertRuntimeNodeStillBound(entryPath, metadata, 'trusted runtime symlink');
+        if (process.platform !== 'win32' && (sealedLink.uid !== 0 || sealedLink.gid !== 0)) {
+          throw new Error('trusted runtime symlink ownership was not sealed');
+        }
+      } else if (metadata.isDirectory()) {
+        const node = openVerifiedRuntimeNode(
+          entryPath,
+          metadata,
+          fs.constants.O_RDONLY | (fs.constants.O_DIRECTORY || 0),
+          'trusted runtime directory'
+        );
+        try {
+          if (process.platform !== 'win32') fs.fchownSync(node.descriptor, 0, 0);
+          fs.fchmodSync(node.descriptor, 0o700);
+          assertRuntimeNodeStillBound(entryPath, metadata, 'trusted runtime directory');
+          visit(entryPath);
+          fs.fchmodSync(node.descriptor, 0o555);
+          fs.fsyncSync(node.descriptor);
+          assertRuntimeNodeStillBound(entryPath, metadata, 'trusted runtime directory');
+        } finally {
+          fs.closeSync(node.descriptor);
+        }
       } else if (metadata.isFile()) {
-        if (process.platform !== 'win32') fs.chownSync(entryPath, 0, 0);
-        fs.chmodSync(entryPath, 0o444);
+        if (metadata.nlink !== 1) throw new Error('trusted runtime preparation produced a hard-linked file');
+        const node = openVerifiedRuntimeNode(entryPath, metadata, fs.constants.O_RDONLY, 'trusted runtime file');
+        try {
+          if (!node.opened.isFile() || node.opened.nlink !== 1) {
+            throw new Error('trusted runtime file descriptor is unsafe');
+          }
+          if (process.platform !== 'win32') fs.fchownSync(node.descriptor, 0, 0);
+          fs.fchmodSync(node.descriptor, 0o444);
+          assertRuntimeNodeStillBound(entryPath, metadata, 'trusted runtime file');
+        } finally {
+          fs.closeSync(node.descriptor);
+        }
       } else {
         throw new Error('trusted runtime preparation produced an unsafe entry');
       }
     }
   }
-  visit(root);
-  if (process.platform !== 'win32') fs.chownSync(root, 0, 0);
-  fs.chmodSync(root, 0o555);
+
+  try {
+    visit(root);
+    fs.fchmodSync(rootNode.descriptor, 0o555);
+    fs.fsyncSync(rootNode.descriptor);
+    assertRuntimeNodeStillBound(root, rootMetadata, 'trusted runtime root');
+  } finally {
+    fs.closeSync(rootNode.descriptor);
+  }
 }
 
 function prepareTrustedRuntime(options) {
   assertPinnedRuntime(options);
+  const buildIdentity = assertUnprivilegedBuildIdentity(options.buildUid, options.buildGid);
   const verified = verifyTrustedBundle(options);
   const runtimeAbsolute = normalizedAbsolute(options.runtimeRoot);
   assertBundleOutsideCandidate(options.candidateRoot, runtimeAbsolute);
@@ -631,12 +1016,17 @@ function prepareTrustedRuntime(options) {
   const cacheRoot = path.join(parentReal, `.npm-cache-${process.pid}-${crypto.randomBytes(8).toString('hex')}`);
   fs.mkdirSync(path.join(stageRoot, 'server'), { recursive: true, mode: 0o700 });
   fs.mkdirSync(cacheRoot, { mode: 0o700 });
+  const stageRootIdentity = fs.lstatSync(stageRoot);
+  if (process.platform !== 'win32') {
+    fs.chownSync(stageRoot, buildIdentity.uid, buildIdentity.gid);
+    fs.chownSync(path.join(stageRoot, 'server'), buildIdentity.uid, buildIdentity.gid);
+    fs.chownSync(cacheRoot, buildIdentity.uid, buildIdentity.gid);
+  }
   try {
     for (const relativePath of ['server/package.json', 'server/package-lock.json']) {
-      fs.copyFileSync(
-        path.join(verified.bundleRoot, ...relativePath.split('/')),
-        path.join(stageRoot, ...relativePath.split('/'))
-      );
+      const target = path.join(stageRoot, ...relativePath.split('/'));
+      fs.copyFileSync(path.join(verified.bundleRoot, ...relativePath.split('/')), target);
+      if (process.platform !== 'win32') fs.chownSync(target, buildIdentity.uid, buildIdentity.gid);
     }
     const environment = {
       PATH: process.env.PATH || '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
@@ -644,18 +1034,51 @@ function prepareTrustedRuntime(options) {
       npm_config_cache: cacheRoot,
       npm_config_audit: 'false',
       npm_config_fund: 'false',
-      npm_config_update_notifier: 'false'
+      npm_config_update_notifier: 'false',
+      npm_config_progress: 'false'
     };
     const npm = process.platform === 'win32' ? 'npm.cmd' : '/usr/bin/npm';
     const serverRoot = path.join(stageRoot, 'server');
-    runRuntimeCommand(npm, ['ci', '--omit=dev', '--ignore-scripts'], { cwd: serverRoot, env: environment });
-    runRuntimeCommand(npm, ['rebuild', 'better-sqlite3'], { cwd: serverRoot, env: environment });
+    runIsolatedRuntimeCommand(
+      npm,
+      ['ci', '--omit=dev', '--ignore-scripts'],
+      {
+        cwd: serverRoot,
+        env: environment,
+        stageRoot,
+        cacheRoot,
+        candidateRoot: options.candidateRoot
+      },
+      buildIdentity,
+      'fetch'
+    );
+    runIsolatedRuntimeCommand(
+      npm,
+      ['rebuild', 'better-sqlite3'],
+      {
+        cwd: serverRoot,
+        env: { ...environment, npm_config_offline: 'true' },
+        stageRoot,
+        cacheRoot,
+        candidateRoot: options.candidateRoot
+      },
+      buildIdentity,
+      'build'
+    );
+    const dependencyTreeSha256 = hashRuntimeTree(path.join(serverRoot, 'node_modules'));
     fs.writeFileSync(
       path.join(stageRoot, 'runtime-contract.json'),
-      `${JSON.stringify(runtimeMarker(verified.manifest, options.expectedManifestSha256))}\n`,
+      `${JSON.stringify(runtimeMarker(
+        verified.manifest,
+        options.expectedManifestSha256,
+        dependencyTreeSha256
+      ))}\n`,
       { encoding: 'utf8', flag: 'wx', mode: 0o400 }
     );
-    sealRuntimeTree(stageRoot);
+    sealRuntimeTree(stageRoot, stageRootIdentity);
+    if (hashRuntimeTree(path.join(serverRoot, 'node_modules')) !== dependencyTreeSha256) {
+      throw new Error('trusted runtime dependency tree digest mismatch after sealing');
+    }
     fs.renameSync(stageRoot, runtimeAbsolute);
     syncDirectory(parentReal);
   } catch (error) {
@@ -983,7 +1406,9 @@ function main(argv) {
   } else if (parsed.command === 'prepare-runtime') {
     const runtime = prepareTrustedRuntime({
       ...common,
-      runtimeRoot: required(parsed.options, 'runtimeRoot')
+      runtimeRoot: required(parsed.options, 'runtimeRoot'),
+      buildUid: required(parsed.options, 'buildUid'),
+      buildGid: required(parsed.options, 'buildGid')
     });
     report = {
       format: RUNTIME_FORMAT,

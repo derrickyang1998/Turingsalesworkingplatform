@@ -13,6 +13,11 @@ const serverRoot = path.join(platformRoot, 'server');
 const deployPath = path.join(platformRoot, 'deploy_v8.ps1');
 const trustedGatePath = path.join(serverRoot, 'scripts', 'trusted_production_source_gate.js');
 const trustedManifestPath = path.join(serverRoot, 'scripts', 'trusted_production_source_manifest.json');
+const trustedParserVerifierPath = path.join(
+  serverRoot,
+  'scripts',
+  'trusted_parser_runtime_verifier.js'
+);
 const dependencyRoot = fs.realpathSync(path.join(serverRoot, 'node_modules'));
 const migrationService = require('../services/migration_service');
 
@@ -375,7 +380,18 @@ test('trusted source manifest pins the sanitizer closure, policy, baseline, and 
   assert.deepEqual(manifest.entrypoints, {
     sanitizer: 'server/scripts/sanitize_production_shape.js',
     sanitizationManifest: 'server/scripts/sanitization_manifest.json',
-    verifier: 'server/scripts/verify_campaign_migration_gate.js'
+    verifier: 'server/scripts/verify_campaign_migration_gate.js',
+    migrationCleanupHelper: 'server/scripts/cleanup_stale_migration_gate.sh',
+    migrationCleanupUnit: 'server/systemd/turingmarket-gate-cleanup.service',
+    parserBuilder: 'server/scripts/build_upload_sandbox_runtime.sh',
+    parserProvisioner: 'server/scripts/provision_upload_sandbox_runtime.sh',
+    parserCapacityPlanner: 'server/scripts/check_cutover_capacity.py',
+    publicGuard: 'server/scripts/public_release_guard.sh',
+    parserSelfTest: 'server/scripts/upload_sandbox_self_test.js',
+    parserVerifier: 'server/scripts/trusted_parser_runtime_verifier.js',
+    parserManifest: 'server/systemd/turingmarket-parser.manifest.json',
+    parserServiceUnit: 'server/systemd/turingmarket-parser@.service',
+    parserSliceUnit: 'server/systemd/turingmarket-parser.slice'
   });
   assert.equal(
     Object.hasOwn(manifest.files.find((entry) => entry.path === manifest.entrypoints.sanitizer), 'sourcePath'),
@@ -396,6 +412,70 @@ test('trusted source manifest pins the sanitizer closure, policy, baseline, and 
     assert.match(entry.sha256, /^[0-9a-f]{64}$/, `${entry.path} must have a fixed SHA-256`);
     const sourcePath = entry.sourcePath || entry.path;
     assert.equal(sha256(path.join(platformRoot, ...sourcePath.split('/'))), entry.sha256, sourcePath);
+  }
+});
+
+test('trusted source manifest pins the complete parser control plane and deploy identities', () => {
+  const manifest = loadTrustedManifest();
+  const deploy = read(deployPath);
+  const expectedEntrypoints = {
+    sanitizer: 'server/scripts/sanitize_production_shape.js',
+    sanitizationManifest: 'server/scripts/sanitization_manifest.json',
+    verifier: 'server/scripts/verify_campaign_migration_gate.js',
+    migrationCleanupHelper: 'server/scripts/cleanup_stale_migration_gate.sh',
+    migrationCleanupUnit: 'server/systemd/turingmarket-gate-cleanup.service',
+    parserBuilder: 'server/scripts/build_upload_sandbox_runtime.sh',
+    parserProvisioner: 'server/scripts/provision_upload_sandbox_runtime.sh',
+    parserCapacityPlanner: 'server/scripts/check_cutover_capacity.py',
+    publicGuard: 'server/scripts/public_release_guard.sh',
+    parserSelfTest: 'server/scripts/upload_sandbox_self_test.js',
+    parserVerifier: 'server/scripts/trusted_parser_runtime_verifier.js',
+    parserManifest: 'server/systemd/turingmarket-parser.manifest.json',
+    parserServiceUnit: 'server/systemd/turingmarket-parser@.service',
+    parserSliceUnit: 'server/systemd/turingmarket-parser.slice'
+  };
+  assert.deepEqual(manifest.entrypoints, expectedEntrypoints);
+
+  const records = new Map(manifest.files.map((entry) => [entry.path, entry.sha256]));
+  for (const relativePath of [
+    ...Object.values(expectedEntrypoints),
+    'server/parser-runtime/package.json',
+    'server/parser-runtime/package-lock.json',
+    'server/parser-runtime/requirements.lock',
+    'server/extract_document_text.py',
+    'server/extract_xlsx_text.py',
+    'server/ocr_document_text.py',
+    'server/services/file_ingest_service.js',
+    'server/services/upload_sandbox_service.js',
+    'server/scripts/parse_upload_sandbox.sh'
+  ]) {
+    assert.equal(records.get(relativePath), sha256(path.join(platformRoot, ...relativePath.split('/'))));
+  }
+
+  const verifierSha = sha256(trustedParserVerifierPath);
+  assert.match(deploy, new RegExp(`\\$EXPECTED_TRUSTED_PARSER_VERIFIER_SHA256\\s*=\\s*"${verifierSha}"`));
+  const publicGuardSha = sha256(path.join(platformRoot, 'server', 'scripts', 'public_release_guard.sh'));
+  assert.match(deploy, new RegExp(`\\$EXPECTED_TRUSTED_PUBLIC_GUARD_SHA256\\s*=\\s*"${publicGuardSha}"`));
+  assert.match(deploy, new RegExp(`\\$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256\\s*=\\s*"${sha256(trustedManifestPath)}"`));
+});
+
+test('trusted source manifest independently pins the migration cleanup control plane', () => {
+  const manifest = loadTrustedManifest();
+  const deploy = read(deployPath);
+  const expected = {
+    migrationCleanupHelper: 'server/scripts/cleanup_stale_migration_gate.sh',
+    migrationCleanupUnit: 'server/systemd/turingmarket-gate-cleanup.service'
+  };
+  const records = new Map(manifest.files.map((entry) => [entry.path, entry.sha256]));
+
+  for (const [entrypoint, relativePath] of Object.entries(expected)) {
+    assert.equal(manifest.entrypoints[entrypoint], relativePath);
+    const expectedSha256 = sha256(path.join(platformRoot, ...relativePath.split('/')));
+    assert.equal(records.get(relativePath), expectedSha256);
+    const constant = entrypoint === 'migrationCleanupHelper'
+      ? 'EXPECTED_TRUSTED_MIGRATION_CLEANUP_HELPER_SHA256'
+      : 'EXPECTED_TRUSTED_MIGRATION_CLEANUP_UNIT_SHA256';
+    assert.match(deploy, new RegExp(`\\$${constant}\\s*=\\s*"${expectedSha256}"`));
   }
 });
 
@@ -723,6 +803,75 @@ test('deploy pins trusted sanitizer closure and never executes candidate sanitiz
   assert.ok(deploy.indexOf('pm2 restart ecosystem.config.js', deploy.indexOf(gateCall[0])) > deploy.indexOf(gateCall[0]));
 });
 
+test('trusted runtime dependency scripts are cgroup-contained, egress-bounded, and drained before sealing', () => {
+  const deploy = read(deployPath);
+  const trustedGate = read(trustedGatePath);
+  const candidateMatch = deploy.match(/\$candidateGate\s*=\s*@'\r?\n([\s\S]*?)\r?\n'@/);
+  assert.ok(candidateMatch, 'candidate gate must exist');
+  const candidateGate = candidateMatch[1];
+
+  assert.match(trustedGate, /function assertUnprivilegedBuildIdentity/);
+  assert.match(trustedGate, /parseIdentity\(buildUid, 'build UID'\)/);
+  assert.match(trustedGate, /parseIdentity\(buildGid, 'build GID'\)/);
+  assert.match(trustedGate, /must be a non-root decimal identity/);
+  assert.match(trustedGate, /\/usr\/bin\/systemd-run/);
+  assert.match(trustedGate, /\/usr\/bin\/systemctl/);
+  assert.match(trustedGate, /turingmarket-trusted-runtime-fetch-/);
+  assert.match(trustedGate, /turingmarket-trusted-runtime-build-/);
+  assert.match(trustedGate, /--uid=/);
+  assert.match(trustedGate, /--gid=/);
+  assert.match(trustedGate, /PrivatePIDs=yes/);
+  assert.match(trustedGate, /KillMode=control-group/);
+  assert.match(trustedGate, /NoNewPrivileges=yes/);
+  assert.match(trustedGate, /CapabilityBoundingSet=/);
+  assert.match(trustedGate, /ProtectSystem=strict/);
+  assert.match(trustedGate, /ReadWritePaths=/);
+  assert.match(trustedGate, /InaccessiblePaths=/);
+  assert.match(trustedGate, /IPAddressDeny=/);
+  assert.match(trustedGate, /169\.254\.0\.0\/16/);
+  assert.match(trustedGate, /10\.0\.0\.0\/8/);
+  assert.match(trustedGate, /172\.16\.0\.0\/12/);
+  assert.match(trustedGate, /192\.168\.0\.0\/16/);
+  assert.match(trustedGate, /fc00::\/7/);
+  assert.match(trustedGate, /PrivateNetwork=yes/);
+  assert.match(trustedGate, /RestrictAddressFamilies=AF_UNIX/);
+  assert.match(trustedGate, /function drainRuntimeUnit/);
+  assert.match(trustedGate, /cgroup\.procs/);
+  assert.match(trustedGate, /readRuntimeUnitProperty\(unitName, 'MainPID'\)/);
+  assert.match(trustedGate, /npm[\s\S]*?\['ci', '--omit=dev', '--ignore-scripts'\][\s\S]*?'fetch'/);
+  assert.match(trustedGate, /npm[\s\S]*?\['rebuild', 'better-sqlite3'\][\s\S]*?'build'/);
+  assert.doesNotMatch(
+    trustedGate,
+    /spawnSync\(npm, [\s\S]*?\['rebuild', 'better-sqlite3'\]/,
+    'package lifecycle scripts must never be spawned directly by the root controller'
+  );
+  const buildCall = trustedGate.indexOf("['rebuild', 'better-sqlite3']");
+  const sealCall = trustedGate.indexOf('sealRuntimeTree(stageRoot', buildCall);
+  assert.ok(buildCall >= 0 && sealCall > buildCall, 'runtime sealing must follow the drained offline build unit');
+
+  assert.doesNotMatch(candidateGate, /command -v setpriv/);
+  assert.match(candidateGate, /command -v systemd-run/);
+  assert.match(candidateGate, /command -v systemctl/);
+  assert.match(candidateGate, /TrustedRuntimeBuildUid="\$\(id -u "\$GateUser"\)"/);
+  assert.match(candidateGate, /TrustedRuntimeBuildGid="\$\(id -g "\$GateUser"\)"/);
+  assert.match(candidateGate, /--build-uid "\$TrustedRuntimeBuildUid"/);
+  assert.match(candidateGate, /--build-gid "\$TrustedRuntimeBuildGid"/);
+});
+
+test('trusted runtime sealing is descriptor-bound and records a complete dependency tree digest', () => {
+  const trustedGate = read(trustedGatePath);
+  assert.match(trustedGate, /O_NOFOLLOW/);
+  assert.match(trustedGate, /O_DIRECTORY/);
+  assert.match(trustedGate, /fs\.fstatSync/);
+  assert.match(trustedGate, /fs\.fchownSync/);
+  assert.match(trustedGate, /fs\.fchmodSync/);
+  assert.match(trustedGate, /metadata\.nlink !== 1/);
+  assert.match(trustedGate, /fs\.readlinkSync/);
+  assert.match(trustedGate, /dependencyTreeSha256/);
+  assert.match(trustedGate, /hashRuntimeTree/);
+  assert.match(trustedGate, /runtime dependency tree digest mismatch/);
+});
+
 test('Windows local preflight verifies every checksum-pinned trusted sanitizer input', {
   skip: process.platform !== 'win32'
 }, () => {
@@ -744,6 +893,7 @@ $TRUSTED_SOURCE_MANIFEST_RELATIVE_PATH = 'server\\scripts\\trusted_production_so
 $EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = '${sha256(trustedGatePath)}'
 $EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = '${sha256(trustedManifestPath)}'
 $EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256 = '${verifierSha256(loadTrustedManifest())}'
+$EXPECTED_TRUSTED_PARSER_VERIFIER_SHA256 = '${sha256(trustedParserVerifierPath)}'
 $trustedManifest = Get-Content -Raw -LiteralPath (Join-Path $LOCAL_DIR $TRUSTED_SOURCE_MANIFEST_RELATIVE_PATH) | ConvertFrom-Json
 $platformEntries = @(
   $TRUSTED_SOURCE_GATE_RELATIVE_PATH

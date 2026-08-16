@@ -206,7 +206,9 @@ test('guarded deploy validates and installs the versioned nginx config', () => {
 
 test('guarded deploy keeps production host external and SSH host checking enabled', () => {
   const deploy = readDeployScript();
-  const deployWithoutLoopback = deploy.replace(/\b127\.0\.0\.1\b/g, '');
+  const deployWithoutLoopback = deploy
+    .replace(/--property="IPAddress(?:Deny|Allow)=[^"]*"/g, '')
+    .replace(/\b127\.0\.0\.1\b/g, '');
   const uploadStart = deploy.indexOf('function Invoke-PinnedDeploymentUpload');
   const uploadEnd = deploy.indexOf('function Assert-TrustedProductionSourceArtifacts');
   assert.ok(uploadStart !== -1 && uploadEnd > uploadStart, 'pinned upload helper must exist');

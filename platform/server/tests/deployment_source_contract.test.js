@@ -18,6 +18,7 @@ const visualEvidenceRoot = path.join(repoRoot, 'docs', 'product', 'evidence', '2
 const visualProvenancePath = path.join(visualEvidenceRoot, 'raw-contact-sheet-manifest.json');
 const attributesPath = path.join(repoRoot, '.gitattributes');
 const trustedSourceManifestPath = path.join(platformRoot, 'server', 'scripts', 'trusted_production_source_manifest.json');
+const publicReleaseGuardPath = path.join(platformRoot, 'server', 'scripts', 'public_release_guard.sh');
 const phase3EvidenceGeneratorPath = path.join(platformRoot, 'server', 'scripts', 'generate_phase3_visual_evidence_manifest.js');
 const docs = [
   path.join(platformRoot, 'DEPLOY.md'),
@@ -59,6 +60,13 @@ function shellHereDocBody(source, marker) {
   return match[1];
 }
 
+function functionSource(source, name, nextName) {
+  const start = source.indexOf(`function ${name}`);
+  const end = source.indexOf(`function ${nextName}`, start + 1);
+  assert.ok(start >= 0 && end > start, `${name} source must exist before ${nextName}`);
+  return source.slice(start, end);
+}
+
 function pythonFileMetadata(python, targets) {
   const result = spawnSync(python, [
     '-c',
@@ -67,6 +75,29 @@ function pythonFileMetadata(python, targets) {
   ], { encoding: 'utf8', timeout: 30_000 });
   assert.equal(result.status, 0, result.stderr || result.stdout);
   return JSON.parse(result.stdout);
+}
+
+function rootLinuxAvailable() {
+  const command = process.platform === 'win32'
+    ? ['wsl.exe', ['-u', 'root', '-e', 'bash', '-lc', 'test "$(id -u)" = 0 && command -v python3 >/dev/null']]
+    : ['bash', ['-lc', 'test "$(id -u)" = 0 && command -v python3 >/dev/null']];
+  return spawnSync(command[0], command[1], { encoding: 'utf8', timeout: 10_000 }).status === 0;
+}
+
+function nativeSystemdRootAvailable() {
+  const probe = 'test "$(id -u)" = 0 && test -d /run/systemd/system && systemctl show --property=Version >/dev/null 2>&1';
+  const command = process.platform === 'win32'
+    ? ['wsl.exe', ['-u', 'root', '-e', 'bash', '-lc', probe]]
+    : ['bash', ['-lc', probe]];
+  return spawnSync(command[0], command[1], { encoding: 'utf8', timeout: 10_000 }).status === 0;
+}
+
+function runRootLinuxScript(script) {
+  return process.platform === 'win32'
+    ? spawnSync('wsl.exe', ['-u', 'root', '-e', 'bash', '-s'], {
+      encoding: 'utf8', input: script, timeout: 30_000
+    })
+    : spawnSync('bash', ['-s'], { encoding: 'utf8', input: script, timeout: 30_000 });
 }
 
 function safeGitEnvironment(overrides = {}) {
@@ -492,14 +523,19 @@ test('Phase 4 deploy backup and rollback are complete, checksummed, and share on
   assert.match(deploy, /# RESTORE_CODE/);
   assert.match(deploy, /# RESTORE_DATABASE_AND_PPT_CACHE/);
   assert.match(deploy, /# INVALIDATE_SESSIONS/);
+  assert.match(deploy, /# RESTORE_MAINTENANCE/);
   assert.match(deploy, /# RESTORE_NGINX/);
   assert.match(deploy, /# RESTORE_PROCESS/);
   assert.match(deploy, /# RESTORE_HEALTH/);
+  assert.match(deploy, /# RESTORE_PUBLIC_GATE/);
+  assert.ok(deploy.indexOf('# RESTORE_MAINTENANCE') < deploy.indexOf('pm2 stop turingmarket'));
   assert.ok(deploy.indexOf('# RESTORE_CODE') < deploy.indexOf('# RESTORE_DATABASE_AND_PPT_CACHE'));
   assert.ok(deploy.indexOf('# RESTORE_DATABASE_AND_PPT_CACHE') < deploy.indexOf('# INVALIDATE_SESSIONS'));
-  assert.ok(deploy.indexOf('# INVALIDATE_SESSIONS') < deploy.indexOf('# RESTORE_NGINX'));
-  assert.ok(deploy.indexOf('# RESTORE_NGINX') < deploy.indexOf('# RESTORE_PROCESS'));
+  assert.ok(deploy.indexOf('# INVALIDATE_SESSIONS') < deploy.indexOf('# RESTORE_PROCESS'));
   assert.ok(deploy.indexOf('# RESTORE_PROCESS') < deploy.indexOf('# RESTORE_HEALTH'));
+  assert.ok(deploy.indexOf('# RESTORE_HEALTH') < deploy.indexOf('# RESTORE_NGINX'));
+  assert.ok(deploy.indexOf('# RESTORE_NGINX') < deploy.indexOf('# RESTORE_PUBLIC_GATE'));
+  assert.match(deploy, /# RESTORE_PUBLIC_GATE[\s\S]*?run_exact_public_nginx_gate - 80/);
   assert.equal((deploy.match(/Invoke-RemoteRestore\s+-BackupPath/g) || []).length >= 2, true, 'manual and automatic rollback use the same function');
   assert.match(deploy, /function Invoke-DeploymentFailureRecovery[\s\S]*?'mutation-started'[\s\S]*?Invoke-RemoteRestore\s+-BackupPath\s+\$BackupPath\s+-RestoreDatabase/);
   assert.match(deploy, /catch\s*\{[\s\S]*?Invoke-DeploymentFailureRecovery\s+-BackupPath\s+\$backupDir[\s\S]*?throw/);
@@ -511,6 +547,576 @@ test('Phase 4 deploy backup and rollback are complete, checksummed, and share on
   assert.match(deploy, /pm2 stop turingmarket[\s\S]*?# RESTORE_CODE/);
   assert.doesNotMatch(deploy, /pm2 stop turingmarket\s*\|\|\s*true/);
   assert.match(deploy, /pm2 describe turingmarket[\s\S]*?execFileSync\('pm2', \['jlist'\][\s\S]*?status !== 'stopped'[\s\S]*?# RESTORE_CODE/);
+});
+
+test('migration cleanup restore replay converges canonical topologies after every durable interruption', {
+  skip: !rootLinuxAvailable()
+}, () => {
+  const deploy = read(deployPath);
+  const restoreBody = shellHereDocBody(deploy, 'TM_MIGRATION_CLEANUP_CONTROL_REPLAY');
+  const backupBody = shellHereDocBody(deploy, 'TM_MIGRATION_CLEANUP_CONTROL_BACKUP');
+  const result = runRootLinuxScript(`
+set -euo pipefail
+umask 077
+Root="$(mktemp -d /root/tm-cleanup-control-replay-XXXXXX)"
+trap 'rm -rf -- "$Root"' EXIT
+cat > "$Root/restore.py" <<'TM_RESTORE_REPLAY_FIXTURE_BODY'
+${restoreBody}
+TM_RESTORE_REPLAY_FIXTURE_BODY
+cat > "$Root/backup.py" <<'TM_BACKUP_TOPOLOGY_FIXTURE_BODY'
+${backupBody}
+TM_BACKUP_TOPOLOGY_FIXTURE_BODY
+cat > "$Root/systemctl" <<'TM_SYSTEMCTL_FIXTURE'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "$*" >> "$TM_FIXTURE_SYSTEMCTL_LOG"
+case "$1" in
+  daemon-reload|stop) exit 0 ;;
+  is-active) exit 3 ;;
+  is-enabled)
+    Unit="$TM_FIXTURE_SYSTEMD_ROOT/turingmarket-gate-cleanup.service"
+    Link="$TM_FIXTURE_SYSTEMD_ROOT/multi-user.target.wants/turingmarket-gate-cleanup.service"
+    if [ -f "$Unit" ] && [ -L "$Link" ] && [ "$(readlink "$Link")" = "$Unit" ]; then
+      printf '%s\\n' enabled
+      exit 0
+    fi
+    printf '%s\\n' not-found
+    exit 1
+    ;;
+  show)
+    Unit="$TM_FIXTURE_SYSTEMD_ROOT/turingmarket-gate-cleanup.service"
+    Property=''
+    for Argument in "$@"; do case "$Argument" in --property=*) Property="\${Argument#--property=}" ;; esac; done
+    case "$Property" in
+      Id) printf '%s\\n' turingmarket-gate-cleanup.service ;;
+      Names) printf '%s\\n' "\${TM_FIXTURE_NAMES:-turingmarket-gate-cleanup.service}" ;;
+      LoadState) if test -f "$Unit"; then printf '%s\\n' loaded; else printf '%s\\n' not-found; fi ;;
+      FragmentPath) if test -f "$Unit"; then printf '%s\\n' "\${TM_FIXTURE_FRAGMENT_PATH:-$Unit}"; else printf '\\n'; fi ;;
+      DropInPaths)
+        if test -n "\${TM_FIXTURE_DROPIN_PATHS+x}"; then
+          printf '%s\\n' "$TM_FIXTURE_DROPIN_PATHS"
+        elif test -f "$TM_FIXTURE_BARRIER"; then
+          printf '%s\\n' "$TM_FIXTURE_BARRIER"
+        else
+          printf '\\n'
+        fi
+        if test -n "\${TM_FIXTURE_SUBSTITUTE_PARENT:-}" && test ! -e "$TM_FIXTURE_SUBSTITUTE_PARENT.done"; then
+          mv "$TM_FIXTURE_SUBSTITUTE_PARENT" "$TM_FIXTURE_SUBSTITUTE_PARENT.original"
+          ln -s "$TM_FIXTURE_SUBSTITUTE_TARGET" "$TM_FIXTURE_SUBSTITUTE_PARENT"
+          : > "$TM_FIXTURE_SUBSTITUTE_PARENT.done"
+        fi
+        ;;
+      *) exit 64 ;;
+    esac
+    ;;
+  *) exit 64 ;;
+esac
+TM_SYSTEMCTL_FIXTURE
+chmod 0700 "$Root/systemctl"
+
+make_case() {
+  local CaseRoot="$1"
+  local Kind="$2"
+  local Backup="$CaseRoot/backup"
+  local Live="$CaseRoot/live"
+  local Systemd="$CaseRoot/systemd"
+  local Helper="$Live/cleanup.sh"
+  local Unit="$Systemd/turingmarket-gate-cleanup.service"
+  local Link="$Systemd/multi-user.target.wants/turingmarket-gate-cleanup.service"
+  mkdir -p "$Backup" "$Live" "$Systemd/multi-user.target.wants" "$CaseRoot/journal"
+  chmod 0700 "$Backup" "$CaseRoot/journal"
+  chmod 0755 "$Live" "$Systemd" "$Systemd/multi-user.target.wants"
+  printf 'candidate-helper\\n' > "$Helper"
+  printf 'candidate-unit\\n' > "$Unit"
+  chmod 0555 "$Helper"
+  chmod 0444 "$Unit"
+  ln -s "$Unit" "$Link"
+  python3 - "$Backup" "$Kind" <<'PY'
+import hashlib
+import json
+import os
+import sys
+
+root, kind = sys.argv[1:]
+timestamp = 1700000000000000000
+def record(name, mode, payload):
+    with open(os.path.join(root, name + '.bytes'), 'wb') as handle:
+        handle.write(payload)
+    os.chmod(os.path.join(root, name + '.bytes'), 0o600)
+    return {'present': True, 'uid': 0, 'gid': 0, 'mode': mode, 'size': len(payload),
+            'sha256': hashlib.sha256(payload).hexdigest(), 'atimeNs': timestamp, 'mtimeNs': timestamp}
+unit_name = 'turingmarket-gate-cleanup.service'
+if kind == 'canonical-absent-v1':
+    topology = {'kind': kind, 'unitName': unit_name, 'enablement': 'not-found',
+                'relatedLinks': [], 'dropIns': []}
+    helper = {'present': False}
+    unit = {'present': False}
+else:
+    topology = {'kind': kind, 'unitName': unit_name, 'enablement': 'enabled',
+                'relatedLinks': [{'path': 'multi-user.target.wants/' + unit_name,
+                                  'target': os.path.join(os.path.dirname(root), 'systemd', unit_name)}],
+                'dropIns': []}
+    helper = record('helper', 0o555, b'prior-helper\\n')
+    unit = record('unit', 0o444, b'prior-unit\\n')
+state = {'schemaVersion': 2, 'topology': topology,
+         'topologySha256': hashlib.sha256(json.dumps(topology, sort_keys=True, separators=(',', ':')).encode()).hexdigest(),
+         'helper': helper, 'unit': unit}
+with open(os.path.join(root, 'state.json'), 'w', encoding='utf-8') as handle:
+    json.dump(state, handle, sort_keys=True, separators=(',', ':'))
+    handle.write('\\n')
+PY
+}
+
+run_restore() {
+  local Script="$1"
+  local CaseRoot="$2"
+  local Backup="$CaseRoot/backup"
+  local Helper="$CaseRoot/live/cleanup.sh"
+  local Unit="$CaseRoot/systemd/turingmarket-gate-cleanup.service"
+  local State="$Backup/state.json"
+  local HelperSha UnitSha
+  HelperSha="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["helper"].get("sha256", "0" * 64))' "$State")"
+  UnitSha="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["unit"].get("sha256", "0" * 64))' "$State")"
+  export TM_FIXTURE_SYSTEMD_ROOT="$CaseRoot/systemd"
+  export TM_FIXTURE_SYSTEMCTL_LOG="$CaseRoot/systemctl.log"
+  export TM_FIXTURE_BARRIER="$CaseRoot/systemd/turingmarket-gate-cleanup.service.d/00-turingmarket-restore-barrier.conf"
+  export TM_CLEANUP_TEST_SYSTEMD_SEARCH_ROOTS="$CaseRoot/systemd:$CaseRoot/run/systemd/system:$CaseRoot/usr/local/lib/systemd/system:$CaseRoot/usr/lib/systemd/system:$CaseRoot/lib/systemd/system"
+  python3 "$Script" "$State" "$Backup" "$Helper" "$Unit" "$CaseRoot/systemd" \
+    "$CaseRoot/systemd/turingmarket-gate-cleanup.service.d/00-turingmarket-restore-barrier.conf" \
+    "$CaseRoot/journal" "$CaseRoot/journal/restore.json" "$CaseRoot/journal/release" \
+    "$Root/systemctl" turingmarket-gate-cleanup.service "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" "$HelperSha" "$UnitSha"
+}
+
+for Kind in canonical-absent-v1 canonical-trusted-enabled-v1; do
+  for Phase in barrier-armed quiesced helper-restored unit-restored topology-restored converged barrier-cleared; do
+    CaseRoot="$Root/$Kind-$Phase"
+    make_case "$CaseRoot" "$Kind"
+    sed "s/persist_phase('$Phase')/persist_phase('$Phase'); raise SystemExit(86)/" "$Root/restore.py" > "$CaseRoot/interrupted.py"
+    if run_restore "$CaseRoot/interrupted.py" "$CaseRoot"; then
+      echo "Interruption fixture unexpectedly converged at $Phase" >&2
+      exit 1
+    fi
+    test -f "$CaseRoot/journal/restore.json"
+    run_restore "$Root/restore.py" "$CaseRoot"
+    test ! -e "$CaseRoot/journal/restore.json"
+    test ! -e "$CaseRoot/systemd/turingmarket-gate-cleanup.service.d"
+    if [ "$Kind" = canonical-absent-v1 ]; then
+      test ! -e "$CaseRoot/live/cleanup.sh"
+      test ! -e "$CaseRoot/systemd/turingmarket-gate-cleanup.service"
+      test ! -e "$CaseRoot/systemd/multi-user.target.wants/turingmarket-gate-cleanup.service"
+    else
+      test "$(cat "$CaseRoot/live/cleanup.sh")" = prior-helper
+      test "$(cat "$CaseRoot/systemd/turingmarket-gate-cleanup.service")" = prior-unit
+      test "$(readlink "$CaseRoot/systemd/multi-user.target.wants/turingmarket-gate-cleanup.service")" = "$CaseRoot/systemd/turingmarket-gate-cleanup.service"
+    fi
+  done
+done
+
+for CrashPoint in link-created link-replaced before-link-directory-fsync; do
+  CaseRoot="$Root/intra-phase-$CrashPoint"
+  make_case "$CaseRoot" canonical-trusted-enabled-v1
+  rm -f -- "$CaseRoot/systemd/multi-user.target.wants/turingmarket-gate-cleanup.service"
+  python3 - "$Root/restore.py" "$CaseRoot/interrupted.py" "$CrashPoint" <<'PY'
+import sys
+
+source_path, destination_path, crash_point = sys.argv[1:]
+source = open(source_path, encoding='utf-8').read()
+needles = {
+    'link-created': "                os.symlink(canonical_link_target, temporary_name, dir_fd=link_parent_descriptor)\\n",
+    'link-replaced': "                os.replace(temporary_name, canonical_name, src_dir_fd=link_parent_descriptor, dst_dir_fd=link_parent_descriptor)\\n",
+    'before-link-directory-fsync': (
+        "                os.replace(temporary_name, canonical_name, src_dir_fd=link_parent_descriptor, dst_dir_fd=link_parent_descriptor)\\n"
+        "            os.fsync(link_parent_descriptor)\\n"
+    ),
+}
+needle = needles[crash_point]
+if source.count(needle) != 1:
+    raise SystemExit(f'Expected one replay crash injection point for {crash_point}')
+replacement = needle + "                raise SystemExit(86)\\n"
+if crash_point == 'before-link-directory-fsync':
+    replacement = needle.replace(
+        "            os.fsync(link_parent_descriptor)\\n",
+        "            raise SystemExit(86)\\n            os.fsync(link_parent_descriptor)\\n",
+    )
+open(destination_path, 'w', encoding='utf-8', newline='\\n').write(source.replace(needle, replacement))
+PY
+  if run_restore "$CaseRoot/interrupted.py" "$CaseRoot"; then
+    echo "Intra-phase interruption unexpectedly converged at $CrashPoint" >&2
+    exit 1
+  fi
+  test -f "$CaseRoot/journal/restore.json"
+  run_restore "$Root/restore.py" "$CaseRoot"
+  test ! -e "$CaseRoot/journal/restore.json"
+  test ! -e "$CaseRoot/systemd/multi-user.target.wants/turingmarket-gate-cleanup.service.restore.next"
+  test "$(readlink "$CaseRoot/systemd/multi-user.target.wants/turingmarket-gate-cleanup.service")" = "$CaseRoot/systemd/turingmarket-gate-cleanup.service"
+done
+
+WrongResidue="$Root/wrong-residue"
+make_case "$WrongResidue" canonical-trusted-enabled-v1
+rm -f -- "$WrongResidue/systemd/multi-user.target.wants/turingmarket-gate-cleanup.service"
+ln -s /tmp/not-the-cleanup-unit "$WrongResidue/systemd/multi-user.target.wants/turingmarket-gate-cleanup.service.restore.next"
+if run_restore "$Root/restore.py" "$WrongResidue"; then
+  echo 'Wrong-target cleanup topology residue was accepted' >&2
+  exit 1
+fi
+
+EffectiveFragment="$Root/effective-fragment"
+make_case "$EffectiveFragment" canonical-trusted-enabled-v1
+export TM_FIXTURE_FRAGMENT_PATH="$EffectiveFragment/run/systemd/system/turingmarket-gate-cleanup.service"
+if run_restore "$Root/restore.py" "$EffectiveFragment"; then
+  echo 'Effective fragment substitution was accepted' >&2
+  exit 1
+fi
+unset TM_FIXTURE_FRAGMENT_PATH
+test ! -e "$EffectiveFragment/journal/restore.json"
+test ! -e "$EffectiveFragment/systemd/turingmarket-gate-cleanup.service.d"
+
+EffectiveDropIn="$Root/effective-dropin"
+make_case "$EffectiveDropIn" canonical-trusted-enabled-v1
+export TM_FIXTURE_DROPIN_PATHS="$EffectiveDropIn/run/systemd/system/service.d/99-evil.conf"
+if run_restore "$Root/restore.py" "$EffectiveDropIn"; then
+  echo 'Effective drop-in substitution was accepted' >&2
+  exit 1
+fi
+unset TM_FIXTURE_DROPIN_PATHS
+test ! -e "$EffectiveDropIn/journal/restore.json"
+
+EffectiveAlias="$Root/effective-alias"
+make_case "$EffectiveAlias" canonical-trusted-enabled-v1
+export TM_FIXTURE_NAMES='turingmarket-gate-cleanup.service cleanup-alias.service'
+if run_restore "$Root/restore.py" "$EffectiveAlias"; then
+  echo 'Effective unit alias was accepted' >&2
+  exit 1
+fi
+unset TM_FIXTURE_NAMES
+test ! -e "$EffectiveAlias/journal/restore.json"
+
+GlobalDropIn="$Root/global-dropin"
+make_case "$GlobalDropIn" canonical-trusted-enabled-v1
+mkdir -p "$GlobalDropIn/run/systemd/system/service.d"
+printf '[Service]\\nEnvironment=UNTRUSTED=1\\n' > "$GlobalDropIn/run/systemd/system/service.d/99-evil.conf"
+if run_restore "$Root/restore.py" "$GlobalDropIn"; then
+  echo 'Global service drop-in outside /etc was accepted' >&2
+  exit 1
+fi
+test ! -e "$GlobalDropIn/journal/restore.json"
+
+WritableParent="$Root/writable-parent"
+make_case "$WritableParent" canonical-trusted-enabled-v1
+chmod 0777 "$WritableParent/live"
+if run_restore "$Root/restore.py" "$WritableParent"; then
+  echo 'Writable cleanup parent was accepted' >&2
+  exit 1
+fi
+test ! -e "$WritableParent/journal/restore.json"
+test ! -e "$WritableParent/systemd/turingmarket-gate-cleanup.service.d"
+
+SymlinkParent="$Root/symlink-parent"
+make_case "$SymlinkParent" canonical-trusted-enabled-v1
+mv "$SymlinkParent/live" "$SymlinkParent/live-real"
+ln -s "$SymlinkParent/live-real" "$SymlinkParent/live"
+if run_restore "$Root/restore.py" "$SymlinkParent"; then
+  echo 'Symlinked cleanup parent was accepted' >&2
+  exit 1
+fi
+test ! -e "$SymlinkParent/journal/restore.json"
+test ! -e "$SymlinkParent/systemd/turingmarket-gate-cleanup.service.d"
+
+Substitution="$Root/substitution"
+make_case "$Substitution" canonical-trusted-enabled-v1
+mkdir -p "$Substitution/attacker"
+chmod 0755 "$Substitution/attacker"
+export TM_FIXTURE_SUBSTITUTE_PARENT="$Substitution/live"
+export TM_FIXTURE_SUBSTITUTE_TARGET="$Substitution/attacker"
+if run_restore "$Root/restore.py" "$Substitution"; then
+  echo 'Cleanup parent substitution was accepted' >&2
+  exit 1
+fi
+unset TM_FIXTURE_SUBSTITUTE_PARENT TM_FIXTURE_SUBSTITUTE_TARGET
+test ! -e "$Substitution/journal/restore.json"
+test ! -e "$Substitution/systemd/turingmarket-gate-cleanup.service.d"
+
+Unsupported="$Root/unsupported"
+mkdir -p "$Unsupported/backup" "$Unsupported/live" "$Unsupported/systemd/multi-user.target.wants"
+chmod 0700 "$Unsupported/backup"
+chmod 0755 "$Unsupported/live" "$Unsupported/systemd" "$Unsupported/systemd/multi-user.target.wants"
+printf 'trusted-helper\\n' > "$Unsupported/live/cleanup.sh"
+printf 'trusted-unit\\n' > "$Unsupported/systemd/turingmarket-gate-cleanup.service"
+chmod 0555 "$Unsupported/live/cleanup.sh"
+chmod 0444 "$Unsupported/systemd/turingmarket-gate-cleanup.service"
+if python3 "$Root/backup.py" "$Unsupported/backup" "$Unsupported/live/cleanup.sh" \
+  "$Unsupported/systemd/turingmarket-gate-cleanup.service" disabled "$Unsupported/systemd" \
+  turingmarket-gate-cleanup.service "$(sha256sum "$Unsupported/live/cleanup.sh" | awk '{print $1}')" \
+  "$(sha256sum "$Unsupported/systemd/turingmarket-gate-cleanup.service" | awk '{print $1}')"; then
+  echo 'Unsupported disabled topology was accepted' >&2
+  exit 1
+fi
+printf '%s\\n' 'MIGRATION_CLEANUP_REPLAY_FIXTURE_OK'
+`);
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /MIGRATION_CLEANUP_REPLAY_FIXTURE_OK/);
+});
+
+test('native systemd fixture exposes exact absent and single-link enabled topologies', {
+  skip: !nativeSystemdRootAvailable()
+}, () => {
+  const result = runRootLinuxScript(`
+set -euo pipefail
+UnitName="turingmarket-cleanup-contract-fixture-$$.service"
+Unit="/etc/systemd/system/$UnitName"
+Link="/etc/systemd/system/multi-user.target.wants/$UnitName"
+RunDropInDir="/run/systemd/system/$UnitName.d"
+RunDropIn="$RunDropInDir/99-adversarial.conf"
+AliasName="turingmarket-cleanup-contract-alias-$$.service"
+Alias="/run/systemd/system/$AliasName"
+cleanup() {
+  systemctl disable --now "$UnitName" >/dev/null 2>&1 || true
+  rm -f -- "$Link" "$Unit" "$Alias" "$RunDropIn"
+  rmdir "$RunDropInDir" >/dev/null 2>&1 || true
+  rm -rf -- "/etc/systemd/system/$UnitName.d"
+  systemctl daemon-reload >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
+cleanup
+test "$(systemctl is-enabled "$UnitName" 2>/dev/null || true)" = not-found
+test ! -e "$Unit"
+test ! -e "$Link"
+cat > "$Unit" <<'TM_SYSTEMD_TOPOLOGY_UNIT'
+[Unit]
+Description=TuringMarket cleanup topology contract fixture
+
+[Service]
+Type=oneshot
+ExecStart=/bin/true
+
+[Install]
+WantedBy=multi-user.target
+TM_SYSTEMD_TOPOLOGY_UNIT
+chmod 0444 "$Unit"
+systemctl daemon-reload
+systemctl enable "$UnitName" >/dev/null
+test "$(systemctl is-enabled "$UnitName")" = enabled
+test "$(systemctl is-active "$UnitName" 2>/dev/null || true)" != active
+test -L "$Link"
+test "$(readlink "$Link")" = "$Unit"
+test "$(find /etc/systemd/system -type l -name "$UnitName" -printf '%p\\n' | wc -l)" = 1
+test ! -e "/etc/systemd/system/$UnitName.d"
+test "$(systemctl show "$UnitName" --property=FragmentPath --value)" = "$Unit"
+test -z "$(systemctl show "$UnitName" --property=DropInPaths --value)"
+test "$(systemctl show "$UnitName" --property=Names --value)" = "$UnitName"
+mkdir -p "$RunDropInDir"
+cat > "$RunDropIn" <<'TM_ADVERSARIAL_DROPIN'
+[Service]
+Environment=UNTRUSTED_EFFECTIVE_DROPIN=1
+TM_ADVERSARIAL_DROPIN
+systemctl daemon-reload
+test "$(systemctl show "$UnitName" --property=DropInPaths --value)" = "$RunDropIn"
+rm -f -- "$RunDropIn"
+rmdir "$RunDropInDir"
+ln -s "$Unit" "$Alias"
+systemctl daemon-reload
+Names="$(systemctl show "$UnitName" --property=Names --value)"
+case " $Names " in *" $UnitName "*) ;; *) exit 1 ;; esac
+case " $Names " in *" $AliasName "*) ;; *) exit 1 ;; esac
+rm -f -- "$Alias"
+systemctl daemon-reload
+test "$(systemctl show "$UnitName" --property=Names --value)" = "$UnitName"
+printf '%s\\n' 'NATIVE_SYSTEMD_CANONICAL_TOPOLOGY_OK'
+`);
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /NATIVE_SYSTEMD_CANONICAL_TOPOLOGY_OK/);
+});
+
+test('migration cleanup control contract rejects non-canonical topology and replays every durable restore phase', () => {
+  const deploy = read(deployPath);
+  const backupMatch = deploy.match(/function Invoke-RemoteBackup[\s\S]*?(?=function Restore-RemoteMigrationGateCleanupControl)/);
+  const restoreMatch = deploy.match(/function Restore-RemoteMigrationGateCleanupControl[\s\S]*?(?=function Get-Pm2PersistenceVerifier)/);
+  assert.ok(backupMatch, 'remote backup function must exist');
+  assert.ok(restoreMatch, 'cleanup control restore function must exist');
+  const backup = backupMatch[0];
+  const restore = restoreMatch[0];
+
+  assert.match(backup, /canonical-absent-v1/);
+  assert.match(backup, /canonical-trusted-enabled-v1/);
+  assert.match(backup, /Unsupported cleanup control topology/);
+  assert.match(backup, /topologySha256/);
+  assert.match(backup, /relatedLinks/);
+  assert.match(backup, /dropIns/);
+  assert.match(backup, /is-enabled.*not-found|not-found.*is-enabled/s);
+  assert.match(backup, /is-enabled.*enabled|enabled.*is-enabled/s);
+
+  assert.match(restore, /restore\.json/);
+  assert.match(restore, /schemaVersion/);
+  assert.match(restore, /restoreIdentity/);
+  assert.match(restore, /backupTopologySha256/);
+  assert.match(restore, /phase/);
+  assert.match(restore, /os\.fsync/);
+  assert.match(restore, /daemon-reload/);
+  assert.match(restore, /is-active/);
+  assert.match(restore, /is-enabled/);
+  assert.match(restore, /relatedLinks/);
+  assert.match(restore, /dropIns/);
+  assert.match(restore, /phase_rank/);
+  assert.match(restore, /barrier-cleared/);
+  assert.match(restore, /os\.unlink\(journal_path\)/);
+});
+
+test('cleanup control validates PID 1 effective identity and trusted parent chains before first mutation', () => {
+  const deploy = read(deployPath);
+  const install = functionSource(deploy, 'Install-RemoteMigrationGateCleanup', 'Enter-RemoteDeploymentLock');
+  const backup = functionSource(deploy, 'Invoke-RemoteBackup', 'Restore-RemoteMigrationGateCleanupControl');
+  const restore = functionSource(deploy, 'Get-MigrationGateCleanupControlRestoreScript', 'Get-Pm2PersistenceVerifier');
+
+  for (const [label, source] of [['install', install], ['backup', backup], ['restore', restore]]) {
+    assert.match(source, /\/usr\/bin\/systemctl/,
+      `${label} must use the fixed systemctl path for effective-unit verification`);
+    assert.match(source, /FragmentPath/,
+      `${label} must verify PID 1's effective fragment`);
+    assert.match(source, /DropInPaths/,
+      `${label} must verify PID 1's effective drop-ins`);
+    assert.match(source, /Names/,
+      `${label} must reject effective aliases`);
+  }
+  for (const root of [
+    '/etc/systemd/system',
+    '/run/systemd/system',
+    '/usr/local/lib/systemd/system',
+    '/usr/lib/systemd/system',
+    '/lib/systemd/system',
+  ]) {
+    assert.match(restore, new RegExp(root.replaceAll('/', '\\/')),
+      `restore must inspect systemd search root ${root}`);
+  }
+  assert.match(restore, /preflight_parent_identities/);
+  assert.match(restore, /O_NOFOLLOW/);
+  assert.match(restore, /dir_fd/);
+  assert.match(restore, /st_dev[\s\S]*?st_ino/);
+  const preflightIndex = restore.indexOf('preflight_parent_identities');
+  const journalMutationIndex = restore.indexOf("persist_phase('barrier-armed')");
+  assert.ok(preflightIndex >= 0 && journalMutationIndex > preflightIndex,
+    'all cleanup-control parent chains must be captured before journal/barrier mutation');
+});
+
+test('rollback public enablement fails closed for errors, exits, and termination signals', () => {
+  const deploy = read(deployPath);
+  const restoreMatch = deploy.match(/function Invoke-RemoteRestore[\s\S]*?(?=function Invoke-RemotePreMutationResume)/);
+  assert.ok(restoreMatch, 'remote restore function must exist');
+  const restore = restoreMatch[0];
+
+  assert.match(restore, /recover_restore_public_failure\(\)/);
+  assert.match(restore, /trap 'recover_restore_public_failure \$\?' ERR EXIT/);
+  assert.match(restore, /trap 'recover_restore_public_failure 129' HUP/);
+  assert.match(restore, /trap 'recover_restore_public_failure 130' INT/);
+  assert.match(restore, /trap 'recover_restore_public_failure 143' TERM/);
+  assert.match(restore, /trap - ERR EXIT HUP INT TERM/);
+  assert.match(restore, /PublicGuardHelper="\$TrustedSourceBundle\/server\/scripts\/public_release_guard\.sh"/);
+  assert.match(restore, /public_release_guard arm[\s\S]*?--controller-pid "\$\$"/);
+  assert.match(restore, /public_release_guard close/);
+  assert.match(restore, /public_release_guard disarm/);
+
+  const armed = restore.indexOf("trap 'recover_restore_public_failure $?'");
+  const publicSwap = restore.indexOf('mv -Tf "$RestorePublicLink" /etc/nginx/sites-enabled/turingmarket');
+  const verified = restore.indexOf('record_restore_step public-verified');
+  const disarmed = restore.indexOf('trap - ERR EXIT HUP INT TERM', verified);
+  assert.ok(armed >= 0 && publicSwap > armed, 'rollback guard must be armed before the public symlink swap');
+  assert.ok(verified > publicSwap && disarmed > verified, 'rollback guard must remain armed through durable public verification');
+});
+
+test('initial cutover keeps a durable fail-closed public guard through final acceptance checks', () => {
+  const deploy = read(deployPath);
+  const cutoverMatch = deploy.match(/\$cutoverGate\s*=\s*@'\r?\n([\s\S]*?)\r?\n'@/);
+  assert.ok(cutoverMatch, 'production cutover gate must exist');
+  const cutover = cutoverMatch[1];
+
+  assert.match(cutover, /PublicGateGuard="\$LockDir\/public-gate-guard"/);
+  assert.match(cutover, /cutover_exit_guard\(\)/);
+  assert.match(cutover, /trap 'cutover_exit_guard \$\?' ERR EXIT/);
+  assert.match(cutover, /trap 'cutover_exit_guard 129' HUP/);
+  assert.match(cutover, /trap 'cutover_exit_guard 130' INT/);
+  assert.match(cutover, /trap 'cutover_exit_guard 143' TERM/);
+  assert.match(cutover, /PublicGuardHelper="\$TrustedSourceBundle\/server\/scripts\/public_release_guard\.sh"/);
+  assert.match(cutover, /public_release_guard arm[\s\S]*?--controller-pid "\$\$"/);
+  assert.match(cutover, /public_release_guard close/);
+  assert.match(cutover, /public_release_guard disarm/);
+
+  const armedFlag = cutover.indexOf('public_gate_armed=1');
+  const armedGuard = cutover.indexOf('public_release_guard arm', armedFlag);
+  const publicActivation = cutover.indexOf('activate_public_candidate', armedGuard);
+  const exactGate = cutover.lastIndexOf('run_exact_public_nginx_gate - 80');
+  const finalFacts = cutover.indexOf('assert_final_acceptance_facts', exactGate);
+  const disarmedGuard = cutover.indexOf('public_release_guard disarm', finalFacts);
+  const disarmedFlag = cutover.indexOf('public_gate_armed=0', disarmedGuard);
+  assert.ok(armedFlag >= 0 && armedGuard > armedFlag && publicActivation > armedGuard, 'cutover guard must be durable before public activation');
+  assert.ok(exactGate > publicActivation && finalFacts > exactGate, 'public checks must precede guard completion');
+  assert.ok(disarmedGuard > finalFacts && disarmedFlag > disarmedGuard, 'cutover guard may disarm only after durable final verification');
+});
+
+test('all public activation paths use the trusted independent watchdog and persistent Nginx start barrier', () => {
+  const deploy = read(deployPath);
+  const guard = read(publicReleaseGuardPath);
+  assert.equal(
+    (deploy.match(/PublicGuardHelper="\$TrustedSourceBundle\/server\/scripts\/public_release_guard\.sh"/g) || []).length,
+    5,
+    'cutover, accepted finalization, rollback, pre-mutation resume, and interrupted takeover must use the same trusted guard'
+  );
+  assert.equal((deploy.match(/public_release_guard arm/g) || []).length, 4);
+  assert.equal((deploy.match(/public_release_guard verify-armed/g) || []).length, 4,
+    'each public link swap must be immediately preceded by an active identity check');
+  assert.equal((deploy.match(/public_release_guard disarm/g) || []).length, 4);
+  for (const link of ['RestorePublicLink', 'ResumePublicLink', 'LockDir/nginx-finalize-new.link', 'LockDir/nginx-public.link']) {
+    const escaped = link.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    assert.match(
+      deploy,
+      new RegExp(`public_release_guard verify-armed[\\s\\S]{0,500}?mv -Tf "\\$${escaped}" /etc/nginx/sites-enabled/turingmarket`),
+      `public link ${link} must swap only after exact active watchdog verification`
+    );
+  }
+  assert.equal(
+    (deploy.match(/\/usr\/bin\/env -i PATH=\/usr\/sbin:\/usr\/bin:\/sbin:\/bin \/bin\/bash --noprofile --norc "\$PublicGuardHelper" "\$@"/g) || []).length,
+    5,
+    'all 0444 trusted guard wrappers must invoke the helper through Bash'
+  );
+  assert.equal((deploy.match(/90-turingmarket-public-guard\.conf/g) || []).length >= 1, true);
+  assert.match(guard, /Restart=on-failure/);
+  assert.match(guard, /--property="User=root"/,
+    'the transient public watchdog must expose an exact root User property for takeover validation');
+  assert.doesNotMatch(guard, /RuntimeMaxSec=5m/);
+  assert.match(guard, /verify_armed_guard\(\)/);
+  assert.match(guard, /armed\|\$GuardUnit\|\$ControllerPid\|\$ControllerStartTicks\|\$DeadlineEpoch/);
+  for (const property of ['Id', 'Names', 'LoadState', 'ActiveState', 'SubState', 'FragmentPath', 'RuntimeMaxUSec']) {
+    assert.match(guard, new RegExp(`show_unit_property ${property}`));
+  }
+  assert.match(
+    guard,
+    /ReconciledRecord="\$\(run_state_transaction reconcile verified "\$BoundArmedPayload"\)"/
+  );
+  assert.match(
+    guard,
+    /"\$BoundArmedPayload"\) verify_armed_guard \|\| return 1 ;;/,
+    'disarm must revalidate the exact active watchdog unless a verified residue already converged'
+  );
+  assert.match(guard, /esac\s*\n\s*write_guard_state verified/);
+  assert.match(
+    guard,
+    /"\$INSTALL"[^\r\n]*"\$MaintenanceConfig"[\s\S]*?"\$SYNC" -f "\$MaintenanceConfig"[\s\S]*?"\$SYNC" -f "\$\(dirname "\$MaintenanceConfig"\)"/
+  );
+  assert.match(
+    guard,
+    /"\$MV" -Tf "\$RecoveryLink" "\$SiteLink"[\s\S]*?"\$SYNC" -f "\$\(dirname "\$RecoveryLink"\)"[\s\S]*?"\$SYNC" -f "\$\(dirname "\$SiteLink"\)"/
+  );
+  const watchdogInactive = guard.indexOf('Public release watchdog did not stop after verification');
+  const postWatchdogState = guard.indexOf('PostWatchdogState="$(read_guard_state)"');
+  const removeDropIn = guard.indexOf('"$RM" -f -- "$DropIn"', postWatchdogState);
+  assert.ok(
+    watchdogInactive >= 0 && postWatchdogState > watchdogInactive && removeDropIn > postWatchdogState,
+    'disarm must lock-read verified after watchdog exit and before removing the start barrier'
+  );
+  assert.match(guard, /test "\$PostWatchdogState" = verified[\s\S]*?Public guard state changed after watchdog exit/);
+  assert.match(guard, /ExecStartPre=\/bin\/bash --noprofile --norc [^\r\n]*assert-start-allowed/);
+  assert.match(guard, /\/bin\/bash --noprofile --norc[\s\S]*?"\$SelfPath" watch/);
+  assert.match(guard, /nginx-resume-maintenance\.conf\.next/);
+  assert.match(guard, /turingmarket-\(cutover\|restore\|resume\|finalize\)-public-guard/);
 });
 
 test('Phase 4 backup and restore bind one verified SQLite and private PPT cache unit', () => {
@@ -531,6 +1137,9 @@ test('Phase 4 backup and restore bind one verified SQLite and private PPT cache 
   }
   assert.match(backup, /test ! -L "\$PptCacheDir"/);
   assert.match(backup, /stat -c '%U:%G:%a' "\$PptCacheDir"/);
+  assert.match(backup, /ppt-cache\.present/);
+  assert.match(backup, /ppt-cache\.absent/);
+  assert.match(backup, /if \[ -e "\$PptCacheDir" \] \|\| \[ -L "\$PptCacheDir" \]/);
   assert.match(backup, /cp -a -- "\$PptCacheDir\/\." "\$BackupAbsolute\/ppt-cache\/"/);
   assert.match(backup, /find "\$BackupAbsolute\/ppt-cache"[\s\S]*?-type f[\s\S]*?sha256sum/);
 
@@ -541,7 +1150,105 @@ test('Phase 4 backup and restore bind one verified SQLite and private PPT cache 
   assert.match(restore, /rm -f -- "\$DatabasePath-journal" "\$DatabasePath-wal" "\$DatabasePath-shm"/);
   assert.match(restore, /DELETE FROM sessions/);
   assert.match(restore, /SESSIONS_REMAINING=0/);
+  assert.match(restore, /ppt-cache\.absent/);
+  assert.match(restore, /ppt-cache\.present/);
+  assert.match(restore, /record_restore_step cache-origin-restored/);
+  assert.match(restore, /rmdir -- "\$PptCacheDir"/);
+  assert.match(
+    restore,
+    /if \[ "\$PptCacheOrigin" = absent \] && \[ ! -e "\$PptCacheDir" \]; then[\s\S]*?install -d -o root -g root -m 0700 "\$PptCacheDir"/
+  );
+  assert.ok(
+    restore.indexOf('install -d -o root -g root -m 0700 "$PptCacheDir"') <
+      restore.indexOf('record_restore_step preflight-verified'),
+    'rollback replay must recreate the absent-origin exchange peer before mutation steps resume'
+  );
   assert.ok(restore.indexOf('DELETE FROM sessions') < restore.indexOf('# RESTORE_PROCESS'));
+});
+
+test('Phase 4 restore capacity is proven from the immutable snapshot before a writer lock is acquired', () => {
+  const deploy = read(deployPath);
+  const capacityMatch = deploy.match(
+    /function Assert-RemoteRestoreCapacity \{[\s\S]*?(?=function Invoke-RemoteRestore)/
+  );
+  assert.ok(capacityMatch, 'remote restore capacity preflight must exist');
+  const capacity = capacityMatch[0];
+
+  assert.match(capacity, /TrustedSourceBundle="__TRUSTED_SOURCE_BUNDLE__"/);
+  assert.match(capacity, /server\/scripts\/check_cutover_capacity\.py/);
+  assert.match(capacity, /sha256sum --check --status SHA256SUMS/);
+  assert.match(capacity, /--mode restore/);
+  assert.match(capacity, /--restore-snapshot "\$RestoreUnit"/);
+  assert.match(capacity, /RESTORE_CAPACITY_OK/);
+  assert.match(capacity, /report\.get\('mode'\) != 'restore'/);
+  assert.match(capacity, /Invoke-RemoteBash[\s\S]*?-RequireDeploymentLock/);
+  assert.doesNotMatch(capacity, /-RequireWriterLock/);
+
+  const manualMatch = deploy.match(/function Invoke-ManualRollback \{[\s\S]*?(?=function Assert-AuthoritativeCheckout)/);
+  assert.ok(manualMatch, 'manual rollback function must exist');
+  const manual = manualMatch[0];
+  assert.ok(
+    manual.indexOf('Assert-RemoteRestoreCapacity -BackupPath $BackupPath') <
+      manual.indexOf('Enter-RemoteWriterLock'),
+    'restore capacity must be accepted before manual rollback closes the writer gate'
+  );
+});
+
+test('Phase 4 persists the verified PM2 projection before any recovery or cutover reopens public traffic', () => {
+  const deploy = read(deployPath);
+  const verifierMatch = deploy.match(
+    /function Get-Pm2PersistenceVerifier \{[\s\S]*?(?=function Assert-RemoteRestoreCapacity)/
+  );
+  assert.ok(verifierMatch, 'PM2 persistence verifier must exist');
+  assert.match(verifierMatch[0], /persist_pm2_dump\(\)/);
+  assert.match(verifierMatch[0], /pm2 save/);
+  assert.match(verifierMatch[0], /\/root\/\.pm2\/dump\.pm2/);
+  assert.match(verifierMatch[0], /PM2_DUMP_PERSISTED/);
+  const extractFunction = (name, nextName) => {
+    const match = deploy.match(new RegExp(`function ${name} \\{[\\s\\S]*?(?=function ${nextName})`));
+    assert.ok(match, `${name} function must exist`);
+    return match[0];
+  };
+  const restore = extractFunction('Invoke-RemoteRestore', 'Invoke-RemotePreMutationResume');
+  const resume = extractFunction('Invoke-RemotePreMutationResume', 'Get-RemoteDeploymentAcceptanceState');
+  const finalize = extractFunction('Invoke-RemoteAcceptedFinalize', 'Invoke-RemoteCandidateCleanup');
+  const cutoverMatch = deploy.match(/\$cutoverGate\s*=\s*@'\r?\n([\s\S]*?)\r?\n'@/);
+  assert.ok(cutoverMatch, 'production cutover gate must exist');
+  const cutover = cutoverMatch[1];
+
+  for (const [name, source] of [
+    ['rollback', restore],
+    ['pre-mutation resume', resume],
+    ['accepted finalize', finalize],
+    ['cutover', cutover]
+  ]) {
+    assert.match(source, /__PM2_PERSISTENCE_VERIFIER__/);
+    assert.match(source, /\npersist_pm2_dump\r?\n/);
+  }
+
+  const callIndex = (source) => source.lastIndexOf('\npersist_pm2_dump\n');
+  assert.ok(restore.indexOf('record_restore_step health-verified') < callIndex(restore));
+  assert.ok(callIndex(restore) < restore.indexOf('# RESTORE_NGINX'));
+  assert.ok(callIndex(resume) < resume.indexOf('mv -Tf "$ResumePublicLink" /etc/nginx/sites-enabled/turingmarket'));
+  assert.ok(callIndex(finalize) < finalize.indexOf('nginx-finalize-new.link'));
+  assert.ok(cutover.indexOf('LOOPBACK_CANDIDATE_HEALTH_OK') < callIndex(cutover));
+  assert.ok(callIndex(cutover) < cutover.lastIndexOf('\nrecord_acceptance_facts\n'));
+  assert.equal((deploy.match(/\.Replace\('__PM2_PERSISTENCE_VERIFIER__', \$pm2PersistenceVerifier\)/g) || []).length, 4);
+});
+
+test('Phase 4 pre-mutation recovery removes a first-install PPT cache before restarting the prior release', () => {
+  const deploy = read(deployPath);
+  const resumeMatch = deploy.match(/function Invoke-RemotePreMutationResume[\s\S]*?(?=function Get-RemoteDeploymentAcceptanceState)/);
+  assert.ok(resumeMatch, 'pre-mutation recovery function must exist');
+  const resume = resumeMatch[0];
+  assert.match(resume, /ppt-cache\.absent/);
+  assert.match(resume, /ppt-cache\.present/);
+  assert.match(resume, /find "\$PptCacheDir" -mindepth 1 -print -quit/);
+  assert.match(resume, /rmdir -- "\$PptCacheDir"/);
+  assert.ok(
+    resume.indexOf('rmdir -- "$PptCacheDir"') < resume.indexOf('pm2 restart ecosystem.config.js'),
+    'the prior release must not restart until first-install cache state is restored'
+  );
 });
 
 test('Phase 4 rollback restores only the quiesced cutover snapshot and reapplies its security overlay', () => {
@@ -664,16 +1371,19 @@ test('Phase 4 rollback persists a source-bound replay journal across every mutat
 
   const steps = [
     'preflight-verified',
+    'maintenance-entered',
     'service-stopped',
     'code-restored',
     'data-staged',
     'database-restored',
     'cache-restored',
+    'cache-origin-restored',
     'security-reapplied',
     'sessions-invalidated',
-    'nginx-restored',
     'process-restored',
-    'health-verified'
+    'health-verified',
+    'nginx-restored',
+    'public-verified'
   ];
   let previous = -1;
   for (const step of steps) {
@@ -719,7 +1429,9 @@ test('Phase 4 cutover binds the SQLite binary ledger to the exact PPT cache tree
   const cacheKey = crypto.createHash('sha256').update('cache-key').digest('hex');
   const bytes = Buffer.from('ppt-cache-contract', 'utf8');
   const responseSha256 = sha256Buffer(bytes);
-  fs.writeFileSync(path.join(cacheRoot, `${cacheKey}.pptx`), bytes, { mode: 0o600 });
+  const cacheShard = path.join(cacheRoot, cacheKey.slice(0, 2));
+  fs.mkdirSync(cacheShard, { mode: 0o700 });
+  fs.writeFileSync(path.join(cacheShard, `${cacheKey}.pptx`), bytes, { mode: 0o600 });
   const database = new Database(databasePath);
   database.exec(`
     CREATE TABLE request_idempotency (
@@ -765,10 +1477,10 @@ test('Phase 4 cutover binds the SQLite binary ledger to the exact PPT cache tree
   const ledger = JSON.parse(fs.readFileSync(ledgerPath, 'utf8'));
   assert.deepEqual(ledger, {
     schemaVersion: 1,
-    naming: '<response_cache_key>.pptx',
+    naming: '<first-2>/<response_cache_key>.pptx',
     artifacts: [{
       cacheKey,
-      fileName: `${cacheKey}.pptx`,
+      fileName: `${cacheKey.slice(0, 2)}/${cacheKey}.pptx`,
       sha256: responseSha256,
       bytes: bytes.length,
       contentType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
@@ -790,7 +1502,57 @@ test('Phase 4 cutover binds the SQLite binary ledger to the exact PPT cache tree
     env: { ...baseEnvironment, TM_PPT_LEDGER_MODE: 'verify' }
   });
   assert.notEqual(orphan.status, 0);
-  assert.match(orphan.stderr, /PPT cache file is not represented by SQLite/);
+  assert.match(orphan.stderr, /PPT cache (?:file|entry) is not represented by SQLite/);
+
+  const legacyRoot = path.join(directory, 'legacy');
+  const legacyDatabasePath = path.join(legacyRoot, 'legacy.db');
+  const legacyCacheRoot = path.join(legacyRoot, 'ppt-cache');
+  const legacyLedgerPath = path.join(legacyRoot, 'ppt-ledger.json');
+  fs.mkdirSync(legacyCacheRoot, { recursive: true, mode: 0o700 });
+  const legacyDatabase = new Database(legacyDatabasePath);
+  legacyDatabase.exec('CREATE TABLE users (id INTEGER PRIMARY KEY)');
+  legacyDatabase.close();
+  const legacyBuild = spawnSync(process.execPath, [toolPath], {
+    encoding: 'utf8',
+    timeout: 30_000,
+    env: {
+      ...baseEnvironment,
+      TM_PPT_LEDGER_MODE: 'build',
+      TM_PPT_LEDGER_DB: legacyDatabasePath,
+      TM_PPT_CACHE_ROOT: legacyCacheRoot,
+      TM_PPT_LEDGER_PATH: legacyLedgerPath
+    }
+  });
+  assert.equal(legacyBuild.status, 0, legacyBuild.stderr || legacyBuild.stdout);
+  assert.deepEqual(JSON.parse(fs.readFileSync(legacyLedgerPath, 'utf8')), {
+    schemaVersion: 1,
+    naming: '<first-2>/<response_cache_key>.pptx',
+    artifacts: []
+  });
+
+  const partialDatabasePath = path.join(legacyRoot, 'partial.db');
+  const partialLedgerPath = path.join(legacyRoot, 'partial-ledger.json');
+  const partialDatabase = new Database(partialDatabasePath);
+  partialDatabase.exec(`
+    CREATE TABLE request_idempotency (
+      id INTEGER PRIMARY KEY,
+      state TEXT NOT NULL
+    )
+  `);
+  partialDatabase.close();
+  const partialBuild = spawnSync(process.execPath, [toolPath], {
+    encoding: 'utf8',
+    timeout: 30_000,
+    env: {
+      ...baseEnvironment,
+      TM_PPT_LEDGER_MODE: 'build',
+      TM_PPT_LEDGER_DB: partialDatabasePath,
+      TM_PPT_CACHE_ROOT: legacyCacheRoot,
+      TM_PPT_LEDGER_PATH: partialLedgerPath
+    }
+  });
+  assert.equal(partialBuild.status, 0, partialBuild.stderr || partialBuild.stdout);
+  assert.deepEqual(JSON.parse(fs.readFileSync(partialLedgerPath, 'utf8')).artifacts, []);
 });
 
 test('Phase 4 source gate runs checksum-pinned sanitization before two migration rehearsals outside the candidate', () => {
@@ -803,7 +1565,10 @@ test('Phase 4 source gate runs checksum-pinned sanitization before two migration
   assert.match(gate, /install -d -o root -g root -m 0700 "\$MigrationRehearsalRoot"/);
   assert.match(gate, /command -v systemd-run/);
   assert.match(gate, /MigrationUnit="turingmarket-migration-gate-/);
-  assert.match(gate, /--uid="\$GateUser"/);
+  const migrationMatch = gate.match(/timeout --signal=KILL 41m systemd-run([\s\S]*?)RehearsalStatus=\$\?/);
+  assert.ok(migrationMatch, 'trusted migration transient unit must exist');
+  const migration = migrationMatch[0];
+  assert.match(migration, /--uid="\$GateUser"/);
   for (const property of [
     'PrivateNetwork=yes',
     'PrivatePIDs=yes',
@@ -814,12 +1579,12 @@ test('Phase 4 source gate runs checksum-pinned sanitization before two migration
     'RestrictNamespaces=yes',
     'KillMode=control-group'
   ]) {
-    assert.ok(gate.includes(property), `migration sandbox must enforce ${property}`);
+    assert.ok(migration.includes(property), `migration sandbox must enforce ${property}`);
   }
-  assert.match(gate, /InaccessiblePaths=\/root \/etc\/turingmarket \/var\/lib\/turingmarket\/db \/var\/lib\/turingmarket\/ppt-cache/);
-  assert.match(gate, /StandardOutput=file:\$RehearsalStdout/);
-  assert.match(gate, /StandardError=file:\$RehearsalStderr/);
-  assert.doesNotMatch(gate, /systemd-run[^\n]*(?:--pipe|-P)/);
+  assert.match(migration, /InaccessiblePaths=\/root \/etc\/turingmarket \/var\/lib\/turingmarket\/db \/var\/lib\/turingmarket\/ppt-cache/);
+  assert.match(migration, /StandardOutput=file:\$RehearsalStdout/);
+  assert.match(migration, /StandardError=file:\$RehearsalStderr/);
+  assert.doesNotMatch(migration, /systemd-run[^\n]*(?:--pipe|-P)/);
   assert.doesNotMatch(gate, /HOME="\/root"/);
   assert.doesNotMatch(gate, /TM_REHEARSAL_SOURCE_DB="\$ProductionBackupDb"/);
   assert.match(gate, /TrustedSourceGate="__TRUSTED_SOURCE_GATE__"/);
@@ -890,6 +1655,51 @@ test('Phase 4 deployment removes candidate sanitizer and report from the trusted
   assert.doesNotMatch(gate, /TM_BUILD_SANITIZED_SCHEMA_DB/);
 });
 
+test('candidate dependency and test writes are confined to a verified aggregate byte and inode bounded tmpfs', () => {
+  const deploy = read(deployPath);
+  const candidateMatch = deploy.match(/\$candidateGate\s*=\s*@'\r?\n([\s\S]*?)\r?\n'@/);
+  assert.ok(candidateMatch, 'candidate-only gate must exist');
+  const gate = candidateMatch[1];
+
+  assert.match(gate, /TestRootMaxBytes="6442450944"/);
+  assert.match(gate, /TestRootMaxInodes="262144"/);
+  assert.match(gate, /mount -t tmpfs -o "nodev,nosuid,size=\$TestRootMaxBytes,nr_inodes=\$TestRootMaxInodes/);
+  assert.match(gate, /findmnt -n -o FSTYPE --target "\$TestRoot"/);
+  assert.match(gate, /df -B1 --output=size "\$TestRoot"/);
+  assert.match(gate, /df -i --output=itotal "\$TestRoot"/);
+  assert.match(gate, /test "\$ActualTestRootBytes" -le "\$TestRootMaxBytes"/);
+  assert.match(gate, /test "\$ActualTestRootInodes" -le "\$TestRootMaxInodes"/);
+  assert.match(gate, /DependencyCopyByteReserveFloor="536870912"/);
+  assert.match(gate, /DependencyCopyInodeReserveFloor="16384"/);
+  assert.match(gate, /du -sb --apparent-size -- "\$DependencyRoot\/node_modules" "\$DependencyServerRoot\/node_modules"/);
+  assert.match(gate, /find "\$DependencyRoot\/node_modules" "\$DependencyServerRoot\/node_modules" -xdev -printf '\.'/);
+  assert.match(gate, /find "\$DependencyRoot\/node_modules" "\$DependencyServerRoot\/node_modules" -xdev -type f -links \+1 -print -quit/);
+  assert.match(gate, /TargetBlockSize="\$\(stat -f -c '%S' "\$CandidateDir"\)"/);
+  assert.match(gate, /os\.listxattr\(path, follow_symlinks=False\)/);
+  assert.match(gate, /allocated_bytes \+= max\(block_size, \(\(status\.st_size \+ block_size - 1\) \/\/ block_size\) \* block_size\)/);
+  assert.match(gate, /test "\$DependencyCopyMeasuredInodes" = "\$DependencyCopyInodes"/);
+  assert.match(gate, /DependencyCopyByteBase="\$DependencyCopyAllocatedBytes"/);
+  assert.match(gate, /if \[ "\$DependencyCopyByteBase" -lt "\$TestRootMaxBytes" \]; then[\s\S]*?DependencyCopyByteBase="\$TestRootMaxBytes"/);
+  assert.match(gate, /DependencyCopyInodeBase="\$DependencyCopyInodes"/);
+  assert.match(gate, /if \[ "\$DependencyCopyInodeBase" -lt "\$TestRootMaxInodes" \]; then[\s\S]*?DependencyCopyInodeBase="\$TestRootMaxInodes"/);
+  assert.match(gate, /df -B1 --output=avail "\$CandidateDir"/);
+  assert.match(gate, /df -i --output=iavail "\$CandidateDir"/);
+  assert.match(gate, /test "\$TargetAvailableBytes" -ge "\$DependencyCopyRequiredBytes"/);
+  assert.match(gate, /test "\$TargetAvailableInodes" -ge "\$DependencyCopyRequiredInodes"/);
+  assert.match(gate, /cleanup_candidate_dependency_copy\(\)/);
+  assert.match(gate, /if \[ "\$CleanupStatus" = "0" \]; then DependencyCopyCleanupArmed=0; fi/);
+  assert.match(gate, /DependencyCopyCleanupArmed=1[\s\S]*?cp -a -- "\$DependencyRoot\/node_modules"/);
+  assert.match(gate, /cleanup_test_root\(\) \{[\s\S]*?PreserveCandidateDependencies="\$\{1:-0\}"/);
+  assert.match(gate, /if \[ "\$PreserveCandidateDependencies" != "1" \]; then[\s\S]*?cleanup_candidate_dependency_copy/);
+  assert.match(gate, /if ! cleanup_test_root 1; then[\s\S]*?cleanup_candidate_dependency_copy \|\| true[\s\S]*?exit 1[\s\S]*?fi[\s\S]*?DependencyCopyCleanupArmed=0/);
+  assert.match(gate, /trap 'cleanup_candidate_gate \$\?' EXIT/);
+  assert.match(gate, /umount -- "\$TestRoot"/);
+  assert.match(gate, /mountpoint -q "\$TestRoot"/);
+  assert.ok(gate.indexOf('mount -t tmpfs') < gate.indexOf('npm ci --ignore-scripts'));
+  assert.ok(gate.indexOf('test "$TargetAvailableBytes" -ge "$DependencyCopyRequiredBytes"') < gate.indexOf('cp -a -- "$DependencyRoot/node_modules"'));
+  assert.ok(gate.lastIndexOf('\nif ! cleanup_test_root 1; then\n') > gate.indexOf('TM_UNPRIVILEGED_GATE'));
+});
+
 test('Phase 4 candidate gate remains valid Bash after isolation hardening', {
   skip: spawnSync('bash', ['--version'], { encoding: 'utf8' }).status !== 0
 }, () => {
@@ -913,7 +1723,7 @@ test('Task 12 deploy validates an isolated candidate and atomically exchanges it
   assert.ok(uploadMatch, 'pinned deployment upload function must exist');
   const upload = uploadMatch[0];
   assert.match(upload, /\$Record -isnot \[PinnedDeploymentActionRecord\]/);
-  assert.ok(upload.includes("if ($Record.RemoteRelativePath -notmatch '^[A-Za-z0-9._/-]+$' -or $Record.RemoteRelativePath -match '(^|/)\\.\\.?(/|$)') {"));
+  assert.ok(upload.includes("if ($Record.RemoteRelativePath -notmatch '^[A-Za-z0-9._/@-]+$' -or $Record.RemoteRelativePath -match '(^|/)\\.\\.?(/|$)') {"));
   assert.ok(upload.includes("if ($Record.ExpectedSha256 -notmatch '^[0-9a-f]{64}$') {"));
   assert.ok(upload.includes(`$remotePath = "$($RemoteRoot.TrimEnd('/'))/$($Record.RemoteRelativePath)"`));
   assert.match(upload, /Invoke-NativeWithPinnedInput\s+`\r?\n\s*-Record \$Record\s+`/);
@@ -992,7 +1802,8 @@ test('Task 12 candidate rejection cannot stop production and all remote mutation
   assert.match(cutoverMatch[1], /pm2 stop turingmarket/);
   assert.match(cutoverMatch[1], /RENAME_EXCHANGE/);
   assert.ok(cutoverMatch[1].indexOf('mkdir "$WriterDir"') < cutoverMatch[1].indexOf('mutation-intent'), 'cutover owns the writer lock before recording mutation intent');
-  assert.match(cutoverMatch[1], /trap release_writer EXIT/);
+  assert.match(cutoverMatch[1], /trap 'cutover_exit_guard \$\?' ERR EXIT/);
+  assert.match(cutoverMatch[1], /cutover_exit_guard\(\)[\s\S]*?release_writer/);
   assert.ok(cutoverMatch[1].indexOf('mutation-intent') < cutoverMatch[1].indexOf('cp --'), 'uncertain phase precedes the first production mutation');
   assert.ok(cutoverMatch[1].indexOf('mutation-started') > cutoverMatch[1].indexOf('CUTOVER_SNAPSHOT_OK'), 'started phase follows the quiesced rollback snapshot');
   assert.ok(cutoverMatch[1].indexOf('mutation-started') > cutoverMatch[1].indexOf('pm2 stop turingmarket'), 'started phase follows verified PM2 shutdown');
@@ -1092,6 +1903,9 @@ test('Phase 4 rollback and recovery gates remain valid Bash', {
 }, () => {
   const deploy = read(deployPath);
   for (const [name, nextName] of [
+    ['Install-RemoteMigrationGateCleanup', 'Enter-RemoteDeploymentLock'],
+    ['Invoke-RemoteBackup', 'Restore-RemoteMigrationGateCleanupControl'],
+    ['Restore-RemoteMigrationGateCleanupControl', 'Get-Pm2PersistenceVerifier'],
     ['Invoke-RemoteRestore', 'Invoke-RemotePreMutationResume'],
     ['Invoke-RemotePreMutationResume', 'Invoke-RemoteAcceptedFinalize'],
     ['Invoke-RemoteAcceptedFinalize', 'Invoke-RemoteCandidateCleanup'],
@@ -1294,6 +2108,10 @@ function Invoke-RemotePreMutationResume {
   param([string]$BackupPath)
   $script:Actions.Add('resume-old')
 }
+function Restore-RemoteMigrationGateCleanupControl {
+  param([string]$BackupPath)
+  $script:Actions.Add('control-restore')
+}
 function Invoke-RemoteAcceptedFinalize {
   param([string]$ReleaseRoot)
   $script:Actions.Add('finalize-new')
@@ -1305,6 +2123,10 @@ function Invoke-RemoteRetentionCleanup {
 function Invoke-RemoteTrustedSourceInputSweep {
   $script:Actions.Add('source-sweep')
   if ($script:SweepFails) { throw 'trusted source sweep failed' }
+}
+function Assert-RemoteRestoreCapacity {
+  param([string]$BackupPath)
+  $script:Actions.Add('capacity')
 }
 function Enter-RemoteWriterLock {
   $script:Actions.Add('writer-enter')
@@ -1333,12 +2155,12 @@ foreach ($phase in @('locked', 'candidate-ready')) {
   Reset-Case
   $script:Phase = $phase
   Invoke-DeploymentFailureRecovery -BackupPath 'backups/v060-crm-sales-workspace-20260714-120000' -ReleaseRoot '/var/lib/turingmarket-gate/releases/test' -BackupCreated $true
-  Assert-Actions 'source-sweep,writer-enter,cleanup,exit'
+  Assert-Actions 'source-sweep,writer-enter,control-restore,cleanup,exit'
 }
 Reset-Case
 $script:Phase = 'cutover-complete'
 Invoke-DeploymentFailureRecovery -BackupPath 'backups/v060-crm-sales-workspace-20260714-120000' -ReleaseRoot '/var/lib/turingmarket-gate/releases/test' -BackupCreated $true
-Assert-Actions 'source-sweep,writer-enter,retention,cleanup,exit'
+Assert-Actions 'source-sweep,writer-enter,finalize-new,retention,cleanup,exit'
 foreach ($phase in @('mutation-intent', 'maintenance-entered', 'writers-stopped', 'snapshot-ready')) {
   Reset-Case
   $script:Phase = $phase
@@ -1348,13 +2170,13 @@ foreach ($phase in @('mutation-intent', 'maintenance-entered', 'writers-stopped'
 Reset-Case
 $script:Phase = 'mutation-started'
 Invoke-DeploymentFailureRecovery -BackupPath 'backups/v060-crm-sales-workspace-20260714-120000' -ReleaseRoot '/var/lib/turingmarket-gate/releases/test' -BackupCreated $true
-Assert-Actions 'source-sweep,writer-enter,restore,cleanup,exit'
+Assert-Actions 'source-sweep,capacity,writer-enter,restore,cleanup,exit'
 
 Reset-Case
 $script:Phase = 'mutation-started'
 $script:RestoreFailuresRemaining = 1
 Invoke-DeploymentFailureRecovery -BackupPath 'backups/v060-crm-sales-workspace-20260714-120000' -ReleaseRoot '/var/lib/turingmarket-gate/releases/test' -BackupCreated $true
-Assert-Actions 'source-sweep,writer-enter,restore,sleep,restore,cleanup,exit'
+Assert-Actions 'source-sweep,capacity,writer-enter,restore,sleep,restore,cleanup,exit'
 
 Reset-Case
 $script:Phase = 'accepted'
@@ -1366,14 +2188,14 @@ $script:Phase = 'mutation-started'
 $threw = $false
 try { Invoke-DeploymentFailureRecovery -BackupPath 'x' -ReleaseRoot 'y' -BackupCreated $false } catch { $threw = $true }
 if (-not $threw) { throw 'Missing backup must fail closed' }
-Assert-Actions 'source-sweep,writer-enter'
+Assert-Actions 'source-sweep'
 
 Reset-Case
 $script:ProbeFails = $true
 $threw = $false
 try { Invoke-DeploymentFailureRecovery -BackupPath 'x' -ReleaseRoot 'y' -BackupCreated $true } catch { $threw = $true }
 if (-not $threw) { throw 'Unknown remote phase must fail closed' }
-Assert-Actions 'source-sweep,writer-enter'
+Assert-Actions 'source-sweep'
 
 Reset-Case
 $script:Phase = 'mutation-started'
@@ -1381,7 +2203,7 @@ $script:RestoreFails = $true
 $threw = $false
 try { Invoke-DeploymentFailureRecovery -BackupPath 'x' -ReleaseRoot 'y' -BackupCreated $true } catch { $threw = $true }
 if (-not $threw) { throw 'Restore failure must fail closed' }
-Assert-Actions 'source-sweep,writer-enter,restore,sleep,restore,sleep,restore'
+Assert-Actions 'source-sweep,capacity,writer-enter,restore,sleep,restore,sleep,restore'
 
 Reset-Case
 $script:Phase = 'candidate-ready'
@@ -1389,7 +2211,7 @@ $script:CleanupFails = $true
 $threw = $false
 try { Invoke-DeploymentFailureRecovery -BackupPath 'x' -ReleaseRoot 'y' -BackupCreated $true } catch { $threw = $true }
 if (-not $threw) { throw 'Cleanup failure must fail closed' }
-Assert-Actions 'source-sweep,writer-enter,cleanup'
+Assert-Actions 'source-sweep,writer-enter,control-restore,cleanup'
 
 Reset-Case
 $script:SweepFails = $true
@@ -1496,11 +2318,16 @@ function Get-RemoteServer { $script:Actions.Add('server'); return 'example.test'
 function Enter-RemoteDeploymentLock { $script:Actions.Add('enter') }
 function Assert-RemoteExternalRuntimeBoundary { $script:Actions.Add('boundary') }
 function Assert-RemoteLoopbackIsolationPreflight { $script:Actions.Add('loopback') }
+function Assert-RemoteRestoreCapacity { $script:Actions.Add('capacity') }
 function Enter-RemoteWriterLock { $script:Actions.Add('writer-enter') }
 function Invoke-RemoteRestore {
   param([string]$BackupPath, [switch]$RestoreDatabase)
   if (-not $RestoreDatabase) { throw 'database restore required' }
   $script:Actions.Add('restore')
+}
+function Restore-RemoteMigrationGateCleanupControl {
+  param([string]$BackupPath)
+  $script:Actions.Add('control-restore')
 }
 function Exit-RemoteDeploymentLock {
   param([switch]$ReleaseWriterLock)
@@ -1523,7 +2350,7 @@ if (-not $threw) { throw 'Unconfirmed database restore must be rejected' }
 if ($script:Actions.Count -ne 0) { throw "Unconfirmed restore performed actions: $($script:Actions -join ',')" }
 
 Invoke-ManualRollback -BackupPath 'backups/v060-crm-sales-workspace-20260714-120000' -RestoreDatabase -ConfirmDataLoss
-if (($script:Actions -join ',') -ne 'server,enter,boundary,loopback,writer-enter,restore,exit') { throw "Unexpected valid rollback actions: $($script:Actions -join ',')" }
+  if (($script:Actions -join ',') -ne 'server,enter,boundary,loopback,capacity,writer-enter,restore,exit') { throw "Unexpected valid rollback actions: $($script:Actions -join ',')" }
 Write-Output 'MANUAL_ROLLBACK_PREFLIGHT_OK'
 `);
   assert.equal(result.status, 0, result.stderr || result.stdout);

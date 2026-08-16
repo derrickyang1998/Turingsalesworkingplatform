@@ -14,6 +14,8 @@ const PARSER_RUNTIME_ROOT = '/var/lib/turingmarket-parser/runtime-root';
 const WRITABLE_FILESYSTEM_CONTRACT = 'tm-parser-writable-filesystem-v1';
 const WRITABLE_FILESYSTEM_SELF_TEST = 'writable-filesystem-v1';
 const PID_NAMESPACE_PEER_SELF_TEST = 'pid-namespace-peer-v1';
+const SCRATCH_PRESSURE_SELF_TEST = 'scratch-pressure-v1';
+const OUTPUT_PRESSURE_SELF_TEST = 'output-pressure-v1';
 const PID_NAMESPACE_PEER_CONTRACT = 'tm-parser-sibling-proc-fd-denial-v1';
 const SOCKET_ISOLATION_CONTRACT = 'tm-parser-no-sockets-v1';
 const PID_NAMESPACE_CONTRACT = 'tm-parser-private-pids-v1';
@@ -29,8 +31,73 @@ const DENIED_WRITE_PATHS = Object.freeze([
   '/tmp',
   '/var/tmp'
 ]);
-const EXPECTED_INACCESSIBLE_PATHS =
-  '/tmp /var/tmp /dev/shm -/dev/mqueue -/dev/hugepages /dev/pts';
+const PRESSURE_PROBE_SOURCE = [
+  "'use strict';",
+  "const fs = require('node:fs');",
+  "const path = require('node:path');",
+  "const mode = process.argv[1];",
+  "const target = process.argv[2];",
+  "const bytes = Number(process.argv[3]);",
+  "if (!['scratch', 'output'].includes(mode) || !Number.isSafeInteger(bytes) || bytes < 1) process.exit(64);",
+  "const block = Buffer.alloc(1024 * 1024, 0x61);",
+  "function fill(file, amount, flags) {",
+  "  const fd = fs.openSync(file, flags, 0o600);",
+  "  try {",
+  "    let written = 0;",
+  "    while (written < amount) {",
+  "      const length = Math.min(block.length, amount - written);",
+  "      fs.writeSync(fd, block, 0, length, null);",
+  "      written += length;",
+  "    }",
+  "    fs.fsyncSync(fd);",
+  "  } finally { fs.closeSync(fd); }",
+  "}",
+  "try {",
+  "  if (mode === 'output') {",
+  "    fill(target, bytes, 'w');",
+  "  } else {",
+  "    fs.mkdirSync(target, { mode: 0o700 });",
+  "    const fileBytes = 8 * 1024 * 1024;",
+  "    for (let index = 0, written = 0; written < bytes; index += 1, written += fileBytes) {",
+  "      fill(path.join(target, String(index)), Math.min(fileBytes, bytes - written), 'wx');",
+  "    }",
+  "  }",
+  "  process.exit(70);",
+  "} catch (error) {",
+  "  const exits = { EFBIG: 73, ENOSPC: 74, EDQUOT: 75 };",
+  "  process.exit(exits[error && error.code] || 76);",
+  "}"
+].join('\n');
+const EXPECTED_INACCESSIBLE_PATHS = '/tmp /var/tmp';
+const DENIED_NETWORK_SYSCALLS = [
+  'accept',
+  'accept4',
+  'bind',
+  'connect',
+  'getpeername',
+  'getsockname',
+  'getsockopt',
+  'listen',
+  'recv',
+  'recvfrom',
+  'recvmmsg',
+  'recvmmsg_time64',
+  'recvmsg',
+  'send',
+  'sendmmsg',
+  'sendmsg',
+  'sendto',
+  'setsockopt',
+  'socket',
+  'socketcall'
+].join(' ');
+const TEMPORARY_FILE_SYSTEMS = [
+  '/scratch:rw,nosuid,nodev,noexec,size=128M,mode=1777',
+  '/dev/shm:ro,nosuid,nodev,noexec,size=1,mode=000',
+  '/dev/mqueue:ro,nosuid,nodev,noexec,size=1,mode=000',
+  '/dev/hugepages:ro,nosuid,nodev,noexec,size=1,mode=000',
+  '/dev/pts:ro,nosuid,nodev,noexec,size=1,mode=000'
+].join(' ');
 const HOST_LOG_SOCKET_PATHS = Object.freeze([
   '/dev/log',
   '/run/systemd/journal/dev-log',
@@ -270,8 +337,9 @@ const RUNTIME_MANIFEST_PATH = path.join(
   'turingmarket-parser.manifest.json'
 );
 const RUNTIME_ARTIFACTS = Object.freeze([
-  'package.json',
-  'package-lock.json',
+  'parser-runtime/package.json',
+  'parser-runtime/package-lock.json',
+  'parser-runtime/requirements.lock',
   'extract_document_text.py',
   'extract_xlsx_text.py',
   'ocr_document_text.py',
@@ -309,7 +377,10 @@ const REQUIRED_SELF_TESTS = Object.freeze([
   'private_temp_write_denial',
   'dev_submount_write_denial',
   'writable_filesystem_inventory',
-  'output_pressure'
+  'output_pressure',
+  'xlsx_parsing',
+  'pptx_parsing',
+  'ocr_inference'
 ]);
 const EXPECTED_IDENTITY = Object.freeze({
   user: 'turingmarket-parser',
@@ -356,19 +427,19 @@ const EXPECTED_SERVICE_PROPERTIES = Object.freeze({
   RestrictSUIDSGID: 'yes',
   LockPersonality: 'yes',
   SystemCallArchitectures: 'native',
-  SystemCallFilter: '@system-service ~@mount @network-io @aio io_uring_setup io_uring_enter io_uring_register @chown @privileged @raw-io @reboot @swap @resources @obsolete @debug @clock chmod fchmod fchmodat fchmodat2 setxattr lsetxattr fsetxattr removexattr lremovexattr fremovexattr utime utimes futimesat utimensat',
+  SystemCallFilter: `@system-service ~@mount ${DENIED_NETWORK_SYSCALLS} @aio io_uring_setup io_uring_enter io_uring_register @chown @privileged @raw-io @reboot @swap @resources @obsolete @debug @clock chmod fchmod fchmodat fchmodat2 setxattr lsetxattr fsetxattr removexattr lremovexattr fremovexattr utime utimes futimesat utimensat`,
   SystemCallErrorNumber: 'EPERM',
   TasksMax: '32',
   LimitNOFILE: '64',
   LimitFSIZE: String(SANDBOX_LIMITS.outputBytes),
   MemoryMax: '536870912',
   CPUQuotaPerSecUSec: '1s',
-  RuntimeMaxUSec: '20s',
+  TimeoutStartUSec: '20s',
   TimeoutStopUSec: '5s',
   SendSIGKILL: 'yes',
   LimitCORE: '0',
   OOMPolicy: 'kill',
-  TemporaryFileSystem: '/scratch:rw,nosuid,nodev,noexec,size=128M',
+  TemporaryFileSystem: TEMPORARY_FILE_SYSTEMS,
   InaccessiblePaths: EXPECTED_INACCESSIBLE_PATHS,
   BindReadOnlyPaths: '/var/lib/turingmarket-parser/jobs/%i/input.bin:/input/input.bin /var/lib/turingmarket-parser/jobs/%i/request.json:/runtime/request.json /var/lib/turingmarket-parser/jobs/%i/output:/output',
   BindPaths: '/var/lib/turingmarket-parser/jobs/%i/output/result.json:/output/result.json',
@@ -1801,6 +1872,65 @@ async function runWorkerPython(scriptName, inputPath, timeoutMs) {
   return parsed;
 }
 
+async function runPressureProbe(contract, target, limitBytes, attemptedBytes, options = {}) {
+  if (
+    ![SCRATCH_PRESSURE_SELF_TEST, OUTPUT_PRESSURE_SELF_TEST].includes(contract) ||
+    typeof target !== 'string' || !path.posix.isAbsolute(target) ||
+    !Number.isSafeInteger(limitBytes) || limitBytes < 1 ||
+    !Number.isSafeInteger(attemptedBytes) || attemptedBytes <= limitBytes
+  ) {
+    throw uploadError(500, 'UPLOAD_SANDBOX_NOT_READY', 'Parser pressure probe is invalid');
+  }
+  const mode = contract === SCRATCH_PRESSURE_SELF_TEST ? 'scratch' : 'output';
+  const spawn = options.spawn || childProcess.spawn;
+  const result = await new Promise((resolve, reject) => {
+    let child;
+    try {
+      child = spawn('/usr/bin/node', [
+        '-e', PRESSURE_PROBE_SOURCE, mode, target, String(attemptedBytes)
+      ], {
+        shell: false,
+        windowsHide: true,
+        stdio: 'ignore',
+        env: {
+          LANG: 'C.UTF-8',
+          LC_ALL: 'C.UTF-8',
+          TMPDIR: '/scratch',
+          TMP: '/scratch',
+          TEMP: '/scratch'
+        }
+      });
+    } catch {
+      reject(commandError('COMMAND_FAILED', 'Parser pressure probe could not start'));
+      return;
+    }
+    const timer = setTimeout(() => {
+      try { child.kill('SIGKILL'); } catch {}
+      reject(commandError('COMMAND_TIMEOUT', 'Parser pressure probe timed out'));
+    }, 15_000);
+    child.once('error', () => {
+      clearTimeout(timer);
+      reject(commandError('COMMAND_FAILED', 'Parser pressure probe failed'));
+    });
+    child.once('close', (code, signal) => {
+      clearTimeout(timer);
+      resolve({ code, signal });
+    });
+  });
+  const errno = ({ 73: 'EFBIG', 74: 'ENOSPC', 75: 'EDQUOT' })[result.code] ||
+    (result.signal === 'SIGXFSZ' ? 'SIGXFSZ' : 'ALLOWED');
+  if (!['EFBIG', 'ENOSPC', 'EDQUOT', 'SIGXFSZ'].includes(errno)) {
+    throw uploadError(500, 'UPLOAD_SANDBOX_NOT_READY', 'Parser pressure limit was not enforced');
+  }
+  return Object.freeze({
+    contract,
+    denied: true,
+    errno,
+    limit_bytes: limitBytes,
+    attempted_bytes: attemptedBytes
+  });
+}
+
 async function parseDemandWorkerFile(filePath, file) {
   const extension = path.extname(file.basename).toLowerCase();
   if (['.txt', '.md', '.csv', '.json'].includes(extension)) {
@@ -1985,6 +2115,50 @@ async function workerMain(argv) {
     return { bytes: resultBytes.length, sha256: resultSha256 };
   }
   if (
+    exactObject(request, ['version', 'job_id', 'self_test']) &&
+    request.version === 1 &&
+    request.job_id === input.jobId &&
+    [SCRATCH_PRESSURE_SELF_TEST, OUTPUT_PRESSURE_SELF_TEST].includes(request.self_test)
+  ) {
+    if (!realUnitMounts || !writableFilesystemProof) {
+      throw uploadError(400, 'UPLOAD_INVALID_CONTENT', 'Invalid parser self-test request');
+    }
+    const scratchProbe = request.self_test === SCRATCH_PRESSURE_SELF_TEST;
+    const limitBytes = scratchProbe
+      ? SANDBOX_LIMITS.reservationBytes
+      : SANDBOX_LIMITS.outputBytes;
+    const attemptedBytes = limitBytes + 1024 * 1024;
+    const target = scratchProbe
+      ? `/scratch/.tm-parser-pressure-${input.jobId}`
+      : path.join(input.outputRoot, 'result.json');
+    try {
+      const evidence = await runPressureProbe(
+        request.self_test,
+        target,
+        limitBytes,
+        attemptedBytes
+      );
+      if (!scratchProbe) await fsp.truncate(target, 0);
+      if (!scratchProbe) {
+        const resetStat = await fsp.lstat(target);
+        if (!resetStat.isFile() || resetStat.nlink !== 1 || resetStat.size !== 0) {
+          throw uploadError(500, 'UPLOAD_SANDBOX_NOT_READY', 'Parser pressure target reset failed');
+        }
+      }
+      const resultBytes = jsonBytes({
+        version: 1,
+        route: 'parser.sandbox-self-test',
+        data: evidence
+      });
+      const resultSha256 = crypto.createHash('sha256').update(resultBytes).digest('hex');
+      await writeStagedResultFile(path.join(input.outputRoot, 'result.json'), resultBytes);
+      await fsyncDirectory(input.outputRoot);
+      return { bytes: resultBytes.length, sha256: resultSha256 };
+    } finally {
+      if (scratchProbe) await fsp.rm(target, { recursive: true, force: true }).catch(() => {});
+    }
+  }
+  if (
     !exactObject(request, ['version', 'job_id', 'route', 'fields', 'file']) ||
     request.version !== 1 ||
     request.job_id !== input.jobId ||
@@ -2150,6 +2324,28 @@ function createSystemdController(options = {}) {
     },
     resetFailed(unitName) {
       return run(['reset-failed', unitName], { timeoutMs: 5_000 });
+    },
+    async inspectOutcome(unitName) {
+      const result = await run([
+        'show',
+        unitName,
+        '--no-pager',
+        '--property=Result,ExecMainStatus,OOMKilled'
+      ], { timeoutMs: 5_000, captureStdout: true });
+      const state = Object.fromEntries(result.stdout.trim().split(/\r?\n/).map((line) => {
+        const separator = line.indexOf('=');
+        return separator < 1 ? ['', ''] : [line.slice(0, separator), line.slice(separator + 1)];
+      }).filter(([name]) => name));
+      const status = /^(?:0|[1-9][0-9]{0,9})$/.test(state.ExecMainStatus || '')
+        ? Number(state.ExecMainStatus)
+        : null;
+      return Object.freeze({
+        Result: typeof state.Result === 'string' && /^[a-z-]{1,32}$/.test(state.Result)
+          ? state.Result
+          : 'unavailable',
+        ExecMainStatus: status,
+        OOMKilled: state.OOMKilled === 'yes'
+      });
     },
     async assertCollected(unitName) {
       const result = await run([
@@ -2422,6 +2618,7 @@ function loadRuntimeManifest(options = {}) {
 function assertRuntimeManifest(manifest) {
   const expectedTopLevel = [
     'version',
+    'build',
     'minimum_systemd_version',
     'identity',
     'route_registry_sha256',
@@ -2432,17 +2629,37 @@ function assertRuntimeManifest(manifest) {
   ];
   if (
     !exactObject(manifest, expectedTopLevel) ||
-    manifest.version !== 2 ||
+    manifest.version !== 3 ||
+    !exactObject(manifest.build, [
+      'format',
+      'architecture',
+      'node_version',
+      'python_version'
+    ]) ||
+    manifest.build.format !== 'tm-parser-runtime-build-v1' ||
+    manifest.build.architecture !== 'x86_64' ||
+    manifest.build.node_version !== 'v20.20.2' ||
+    manifest.build.python_version !== '3.14.4' ||
     manifest.minimum_systemd_version !== MINIMUM_SYSTEMD_VERSION ||
     !sameValue(manifest.identity, EXPECTED_IDENTITY) ||
     !HEX_64.test(manifest.route_registry_sha256) ||
     manifest.route_registry_sha256 !== routeRegistrySha256() ||
     !exactObject(manifest.artifacts, RUNTIME_ARTIFACTS) ||
     !RUNTIME_ARTIFACTS.every((name) => HEX_64.test(manifest.artifacts[name])) ||
-    !exactObject(manifest.runtime_tree, ['format', 'root', 'sha256']) ||
+    !exactObject(manifest.runtime_tree, [
+      'format',
+      'root',
+      'sha256',
+      'files',
+      'directories',
+      'bytes'
+    ]) ||
     manifest.runtime_tree.format !== PARSER_RUNTIME_TREE_FORMAT ||
     manifest.runtime_tree.root !== PARSER_RUNTIME_ROOT ||
     !HEX_64.test(manifest.runtime_tree.sha256) ||
+    !Number.isSafeInteger(manifest.runtime_tree.files) || manifest.runtime_tree.files < 1 ||
+    !Number.isSafeInteger(manifest.runtime_tree.directories) || manifest.runtime_tree.directories < 1 ||
+    !Number.isSafeInteger(manifest.runtime_tree.bytes) || manifest.runtime_tree.bytes < 1 ||
     !exactObject(manifest.effective_properties, [
       'turingmarket-parser@.service',
       'turingmarket-parser.slice'
@@ -2589,11 +2806,125 @@ async function verifyInstalledParserArtifacts(manifest) {
   });
 }
 
+async function verifyRuntimeSourceArtifacts(manifest, options = {}) {
+  if (process.platform !== 'linux') throw new Error('Linux parser runtime is required');
+  const runtimeAppRoot = path.resolve(options.runtimeAppRoot || path.join(
+    PARSER_RUNTIME_ROOT,
+    'opt',
+    'turingmarket-parser',
+    'app'
+  ));
+  const runtimeScriptRoot = path.resolve(options.runtimeScriptRoot || path.join(
+    PARSER_RUNTIME_ROOT,
+    'usr',
+    'local',
+    'libexec',
+    'turingmarket'
+  ));
+  const projections = Object.freeze({
+    'parser-runtime/package.json': path.join(runtimeAppRoot, 'package.json'),
+    'parser-runtime/package-lock.json': path.join(runtimeAppRoot, 'package-lock.json'),
+    'parser-runtime/requirements.lock': path.join(runtimeAppRoot, 'parser-runtime', 'requirements.lock'),
+    'extract_document_text.py': path.join(runtimeAppRoot, 'extract_document_text.py'),
+    'extract_xlsx_text.py': path.join(runtimeAppRoot, 'extract_xlsx_text.py'),
+    'ocr_document_text.py': path.join(runtimeAppRoot, 'ocr_document_text.py'),
+    'services/file_ingest_service.js': path.join(runtimeAppRoot, 'services', 'file_ingest_service.js'),
+    'services/upload_sandbox_service.js': path.join(runtimeAppRoot, 'services', 'upload_sandbox_service.js'),
+    'scripts/parse_upload_sandbox.sh': path.join(runtimeScriptRoot, 'parse_upload_sandbox.sh')
+  });
+  for (const [relativePath, installedPath] of Object.entries(projections)) {
+    const artifact = await readRegularNoFollow(installedPath, 4 * 1024 * 1024);
+    if (
+      artifact.sha256 !== manifest.artifacts[relativePath] ||
+      artifact.stat.uid !== 0 ||
+      artifact.stat.gid !== 0 ||
+      (artifact.stat.mode & 0o022) !== 0
+    ) {
+      throw new Error('runtime parser source artifact drift');
+    }
+  }
+  return true;
+}
+
+function systemdInspectionUnitName(unitName) {
+  if (unitName === 'turingmarket-parser@.service') {
+    return 'turingmarket-parser@test_instance.service';
+  }
+  if (unitName === 'turingmarket-parser.slice') return unitName;
+  throw new TypeError('invalid parser systemd unit');
+}
+
+function systemdExpandedPath(value, expected, unitName) {
+  if (typeof value !== 'string' || typeof expected !== 'string') return false;
+  const expanded = expected
+    .replaceAll('%i', 'test_instance')
+    .split(' ')
+    .map((entry) => `${entry}:rbind`)
+    .join(' ');
+  return unitName === 'turingmarket-parser@.service' && value === expanded;
+}
+
+function normalizedSystemCallFilter(value, expected) {
+  if (typeof value !== 'string' || value.length === 0 || typeof expected !== 'string') return false;
+  const allowed = new Set(value.split(/\s+/).filter(Boolean));
+  for (const syscall of [...DENIED_NETWORK_SYSCALLS.split(' '), 'io_uring_setup']) {
+    if (allowed.has(syscall)) return false;
+  }
+  for (const syscall of [
+    'read',
+    'write',
+    'close',
+    'execve',
+    'exit',
+    'exit_group',
+    'shutdown',
+    'socketpair'
+  ]) {
+    if (!allowed.has(syscall)) return false;
+  }
+  return expected.includes(`~@mount ${DENIED_NETWORK_SYSCALLS} @aio`) &&
+    !expected.split(/\s+/).includes('shutdown') &&
+    !expected.split(/\s+/).includes('socketpair') &&
+    expected.includes('io_uring_setup');
+}
+
+function normalizeSystemdEffectiveProperties(unitName, observed, expected) {
+  if (!exactObject(observed, Object.keys(expected))) {
+    if (
+      unitName !== 'turingmarket-parser.slice' ||
+      !exactObject(observed, Object.keys(expected).filter((key) => key !== 'CPUAccounting'))
+    ) {
+      throw new Error('parser effective property drift');
+    }
+  }
+  const normalized = { ...observed };
+  if (unitName === 'turingmarket-parser.slice' && normalized.CPUAccounting === undefined) {
+    normalized.CPUAccounting = expected.CPUAccounting;
+  }
+  const expansions = Object.freeze({
+    IPAddressDeny: (value, wanted) => wanted === 'any' && value === '0.0.0.0/0 ::/0',
+    RestrictAddressFamilies: (value, wanted) => wanted === 'none' && value === '',
+    SystemCallFilter: normalizedSystemCallFilter,
+    SystemCallErrorNumber: (value, wanted) => wanted === 'EPERM' && value === '1',
+    BindReadOnlyPaths: (value, wanted) => systemdExpandedPath(value, wanted, unitName),
+    BindPaths: (value, wanted) => systemdExpandedPath(value, wanted, unitName)
+  });
+  for (const [key, wanted] of Object.entries(expected)) {
+    if (normalized[key] === wanted) continue;
+    if (expansions[key] && expansions[key](normalized[key], wanted)) {
+      normalized[key] = wanted;
+      continue;
+    }
+    throw new Error('parser effective property drift');
+  }
+  return normalized;
+}
+
 async function readSystemdProperties(unitName, expectedProperties) {
   const names = Object.keys(expectedProperties);
   const output = await captureSystemCommand('/usr/bin/systemctl', [
     'show',
-    unitName,
+    systemdInspectionUnitName(unitName),
     '--no-pager',
     `--property=${names.join(',')}`
   ]);
@@ -2603,7 +2934,7 @@ async function readSystemdProperties(unitName, expectedProperties) {
     if (separator < 1) continue;
     result[line.slice(0, separator)] = line.slice(separator + 1);
   }
-  return result;
+  return normalizeSystemdEffectiveProperties(unitName, result, expectedProperties);
 }
 
 function readinessError() {
@@ -2806,6 +3137,9 @@ function createUploadSandboxService(options = {}) {
   const spoolRoot = path.resolve(options.spoolRoot || '/var/lib/turingmarket-parser/jobs');
   const randomBytes = options.randomBytes || crypto.randomBytes;
   const now = options.now || Date.now;
+  const monotonicNow = options.monotonicNow || (() => (
+    Number(process.hrtime.bigint() / 1_000_000n)
+  ));
   const parserIdentity = options.parserIdentity || null;
   const admissionByRequest = new WeakMap();
   const dependencies = {
@@ -2816,6 +3150,79 @@ function createUploadSandboxService(options = {}) {
     inspectSpoolBytes: options.inspectSpoolBytes || defaultInspectSpoolBytes
   };
   const systemd = options.systemd || createSystemdController(options.systemdOptions);
+
+  async function inspectJobOutcome(job) {
+    const inspect = typeof dependencies.inspectJobOutcome === 'function'
+      ? dependencies.inspectJobOutcome
+      : typeof systemd.inspectOutcome === 'function'
+        ? (target) => systemd.inspectOutcome(target.unitName)
+        : null;
+    if (!inspect) {
+      return Object.freeze({ Result: 'unavailable', ExecMainStatus: null, OOMKilled: false });
+    }
+    try {
+      const observed = await inspect(job);
+      return Object.freeze({
+        Result: observed && typeof observed.Result === 'string' &&
+          /^[a-z-]{1,32}$/.test(observed.Result)
+          ? observed.Result
+          : 'unavailable',
+        ExecMainStatus: observed && Number.isSafeInteger(Number(observed.ExecMainStatus)) &&
+          String(observed.ExecMainStatus).trim() !== ''
+          ? Number(observed.ExecMainStatus)
+          : null,
+        OOMKilled: observed && (observed.OOMKilled === true || observed.OOMKilled === 'yes')
+      });
+    } catch {
+      return Object.freeze({ Result: 'unavailable', ExecMainStatus: null, OOMKilled: false });
+    }
+  }
+
+  function parserResultCategory(error, outcome) {
+    if (!error) return 'success';
+    if (error.code === 'UPLOAD_PARSE_TIMEOUT' || ['timeout', 'watchdog'].includes(outcome.Result)) {
+      return 'timeout';
+    }
+    if (outcome.OOMKilled || outcome.Result === 'oom-kill') return 'oom';
+    if (
+      error.code === 'IDEMPOTENCY_STORAGE_CAPACITY_EXCEEDED' ||
+      error.code === 'UPLOAD_LIMIT_EXCEEDED' ||
+      [73, 74, 75].includes(outcome.ExecMainStatus) ||
+      outcome.Result === 'resources'
+    ) {
+      return 'capacity';
+    }
+    if (error.code === 'UPLOAD_SANDBOX_NOT_READY') return 'runtime-drift';
+    if (
+      typeof error.code === 'string' && error.code.startsWith('COMMAND_') ||
+      outcome.Result === 'unavailable'
+    ) {
+      return 'systemd';
+    }
+    return 'general';
+  }
+
+  function emitParserCompletion(route, startedMs, error, outcome) {
+    if (typeof dependencies.emitControllerEvent !== 'function') return;
+    const endedMs = monotonicNow();
+    const durationMs = Number.isFinite(startedMs) && Number.isFinite(endedMs)
+      ? Math.max(0, Math.round(endedMs - startedMs))
+      : 0;
+    const event = Object.freeze({
+      event: 'parser_job_completed',
+      route,
+      duration_ms: durationMs,
+      result_category: parserResultCategory(error, outcome),
+      systemd: Object.freeze({
+        Result: outcome.Result,
+        ExecMainStatus: outcome.ExecMainStatus,
+        OOMKilled: outcome.OOMKilled
+      })
+    });
+    try {
+      dependencies.emitControllerEvent(event);
+    } catch {}
+  }
 
   async function admitRequest(request, context) {
     if (!request || (typeof request !== 'object' && typeof request !== 'function')) {
@@ -3154,6 +3561,13 @@ function createUploadSandboxService(options = {}) {
     let job = null;
     let cleaned = false;
     let executionCollected = false;
+    let completionError = null;
+    let executionOutcome = Object.freeze({
+      Result: 'unavailable',
+      ExecMainStatus: null,
+      OOMKilled: false
+    });
+    const completionStartedMs = monotonicNow();
     try {
       await input.assertAuthorized();
       job = await stageJob(input.multipart, input.admission);
@@ -3178,8 +3592,10 @@ function createUploadSandboxService(options = {}) {
             assertLeaseOwned: input.assertLeaseOwned
           });
         }
+        executionOutcome = await inspectJobOutcome(job);
         executionCollected = true;
       } catch (error) {
+        executionOutcome = await inspectJobOutcome(job);
         if (error instanceof UploadSandboxError) throw error;
         if (error && error.code === 'UPLOAD_PARSE_TIMEOUT') {
           throw uploadError(408, 'UPLOAD_PARSE_TIMEOUT', 'Upload parsing timed out');
@@ -3211,6 +3627,7 @@ function createUploadSandboxService(options = {}) {
       }
       return value;
     } catch (error) {
+      completionError = error;
       if (error && error.code === 'UPLOAD_SANDBOX_CLEANUP_FAILED') throw error;
       if (job && !cleaned) {
         try {
@@ -3233,6 +3650,15 @@ function createUploadSandboxService(options = {}) {
         }
       }
       throw error;
+    } finally {
+      if (job) {
+        emitParserCompletion(
+          input.multipart.route.id,
+          completionStartedMs,
+          completionError,
+          executionOutcome
+        );
+      }
     }
   }
 
@@ -3349,11 +3775,15 @@ module.exports = {
   inspectParserRuntimeTree,
   loadRuntimeManifest,
   matchUploadRoute,
+  normalizeSystemdEffectiveProperties,
   readSystemdProperties,
   runCommandNoDisclosure,
   validateParserOutput,
   verifyInstalledParserArtifacts,
+  verifyRuntimeSourceArtifacts,
   verifyParserRuntimeTree,
   verifyCheckedInArtifacts,
+  runPressureProbe,
+  systemdInspectionUnitName,
   workerMain
 };

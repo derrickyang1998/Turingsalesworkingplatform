@@ -1,0 +1,9 @@
+{
+  "name": "turingmarket-upload-parser-runtime",
+  "version": "1.0.0",
+  "private": true,
+  "type": "commonjs",
+  "dependencies": {
+    "read-excel-file": "9.2.0"
+  }
+}

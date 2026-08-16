@@ -86,7 +86,7 @@ const UPLOAD_SANDBOX_SPOOL_ROOT = path.resolve(
   process.env.UPLOAD_SANDBOX_SPOOL_ROOT || '/var/lib/turingmarket-parser/jobs'
 );
 const RELEASE_PINNED_UPLOAD_MANIFEST_SHA256 =
-  'f9edbea9c9123681b1f3be56964535271f1a3dc7c20fe04e3caaf65e86cc5162';
+  '970b6111a433faae77bd07efbcdcdc608d6c923c563e708c70dd8b62006d6970';
 const UPLOAD_SANDBOX_SELF_TEST_RUNNER =
   '/usr/local/libexec/turingmarket/upload_sandbox_self_test';
 const REQUIRED_UPLOAD_SANDBOX_SELF_TESTS = Object.freeze([
@@ -107,7 +107,10 @@ const REQUIRED_UPLOAD_SANDBOX_SELF_TESTS = Object.freeze([
   'private_temp_write_denial',
   'dev_submount_write_denial',
   'writable_filesystem_inventory',
-  'output_pressure'
+  'output_pressure',
+  'xlsx_parsing',
+  'pptx_parsing',
+  'ocr_inference'
 ]);
 const campaignPptService = createCampaignPptService(db, {
   artifactStore: createPptArtifactStore({ rootDir: PPT_CACHE_DIR }),
@@ -142,6 +145,7 @@ const campaignPptBridgeHandler = createCampaignPptBridgeHandler(campaignPptServi
 let campaignPptJanitor = null;
 let uploadSandboxService = null;
 let phase4RequestPipeline = null;
+let uploadSandboxReadiness = null;
 
 // Middleware
 app.use(cors());
@@ -416,9 +420,19 @@ function uploadSelfTestResult(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('Upload sandbox self-test result is invalid');
   }
+  const result = value.format === 'tm-parser-self-test-observations-v1'
+    ? value.self_tests
+    : value;
+  if (!result || typeof result !== 'object' || Array.isArray(result)) {
+    throw new Error('Upload sandbox self-test result is invalid');
+  }
   return Object.freeze(Object.fromEntries(
-    REQUIRED_UPLOAD_SANDBOX_SELF_TESTS.map((name) => [name, value[name] === true])
+    REQUIRED_UPLOAD_SANDBOX_SELF_TESTS.map((name) => [name, result[name] === true])
   ));
+}
+
+function emitUploadSandboxControllerEvent(event) {
+  process.stdout.write(`${JSON.stringify(event)}\n`);
 }
 
 async function runProductionUploadSandboxSelfTests() {
@@ -1838,7 +1852,16 @@ app.get('/api/users', authMiddleware, adminOnly, (req, res) => {
 });
 // ===== HEALTH CHECK =====
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    parser: {
+      ready: uploadSandboxReadiness && uploadSandboxReadiness.ready === true,
+      manifest_sha256: uploadSandboxReadiness
+        ? uploadSandboxReadiness.manifestSha256
+        : RELEASE_PINNED_UPLOAD_MANIFEST_SHA256
+    }
+  });
 });
 
 app.use('/api', (_req, res) => {
@@ -1897,11 +1920,16 @@ async function bootstrapServer() {
     runSelfTests: runProductionUploadSandboxSelfTests,
     ...(localWorker ? localUploadReadinessAdapters() : {})
   });
+  uploadSandboxReadiness = Object.freeze({
+    ready: readiness.ready === true,
+    manifestSha256: readiness.manifestSha256
+  });
   const sandboxOptions = {
     db,
     idempotency: uploadAdmissionIdempotency,
     spoolRoot: UPLOAD_SANDBOX_SPOOL_ROOT,
-    parserIdentity: readiness.parserIdentity
+    parserIdentity: readiness.parserIdentity,
+    emitControllerEvent: emitUploadSandboxControllerEvent
   };
   if (localWorker) {
     sandboxOptions.executeJob = async (job, options) => {

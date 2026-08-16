@@ -10,6 +10,7 @@ const test = require('node:test');
 
 const {
   SANDBOX_LIMITS,
+  UploadSandboxError,
   auditWritableFilesystem,
   assertUploadSandboxStartupReady,
   createUploadSandboxService,
@@ -19,14 +20,20 @@ const {
   inspectParserRuntimeTree,
   loadRuntimeManifest,
   matchUploadRoute,
+  normalizeSystemdEffectiveProperties,
   readSystemdProperties,
+  systemdInspectionUnitName,
   runCommandNoDisclosure,
+  runPressureProbe,
   validateParserOutput,
   verifyInstalledParserArtifacts,
   verifyParserRuntimeTree,
   verifyCheckedInArtifacts,
   workerMain
 } = require('../services/upload_sandbox_service');
+const {
+  createParserAcceptanceFixtures
+} = require('../scripts/upload_sandbox_self_test');
 const {
   createPhase4RequestPipeline
 } = require('../middleware/phase4_request_pipeline');
@@ -968,6 +975,235 @@ async function decodedCsv(routePath = '/api/knowledge/upload') {
   });
 }
 
+test('trusted parser completion events classify outcomes without disclosing upload data', async () => {
+  const route = matchUploadRoute('POST', '/api/knowledge/upload');
+  const boundary = 'tm-parser-observability';
+  const multipart = await decodeMultipartBody({
+    route,
+    contentType: `multipart/form-data; boundary=${boundary}`,
+    rawBody: multipartBody(boundary, [{
+      file: true,
+      name: 'file',
+      filename: 'confidential-customer-list.csv',
+      mime: 'text/csv',
+      value: 'private-customer-name,private-customer-value\nsecret,42\n'
+    }])
+  });
+  const cases = [
+    {
+      name: 'timeout',
+      error: () => Object.assign(new Error('private parser stderr timeout'), {
+        code: 'UPLOAD_PARSE_TIMEOUT'
+      }),
+      outcome: { Result: 'timeout', ExecMainStatus: '15', OOMKilled: 'no' },
+      category: 'timeout'
+    },
+    {
+      name: 'oom',
+      error: () => new Error('private parser stderr oom'),
+      outcome: { Result: 'oom-kill', ExecMainStatus: '9', OOMKilled: 'yes' },
+      category: 'oom'
+    },
+    {
+      name: 'capacity',
+      error: () => new UploadSandboxError(
+        413,
+        'UPLOAD_LIMIT_EXCEEDED',
+        'private parser capacity detail'
+      ),
+      outcome: { Result: 'exit-code', ExecMainStatus: '75', OOMKilled: 'no' },
+      category: 'capacity'
+    },
+    {
+      name: 'systemd',
+      error: () => Object.assign(new Error('private systemd stderr'), {
+        code: 'COMMAND_FAILED'
+      }),
+      outcome: { Result: 'unavailable', ExecMainStatus: '', OOMKilled: 'no' },
+      category: 'systemd'
+    },
+    {
+      name: 'runtime-drift',
+      error: () => new UploadSandboxError(
+        500,
+        'UPLOAD_SANDBOX_NOT_READY',
+        'private runtime path drift'
+      ),
+      outcome: { Result: 'success', ExecMainStatus: '0', OOMKilled: 'no' },
+      category: 'runtime-drift'
+    },
+    {
+      name: 'general',
+      error: () => new Error('private parser stderr general'),
+      outcome: { Result: 'exit-code', ExecMainStatus: '1', OOMKilled: 'no' },
+      category: 'general'
+    }
+  ];
+
+  for (const item of cases) {
+    const spoolRoot = fs.mkdtempSync(path.join(os.tmpdir(), `tm-parser-event-${item.name}-`));
+    const events = [];
+    const ticks = [1_000, 1_025];
+    const service = createUploadSandboxService({
+      parserIdentity: TEST_PARSER_IDENTITY,
+      spoolRoot,
+      monotonicNow: () => ticks.shift(),
+      executeJob: async () => { throw item.error(); },
+      inspectJobOutcome: async () => item.outcome,
+      killJob: async () => {},
+      failAdmission: async () => {},
+      emitControllerEvent(event) {
+        assert.deepEqual(fs.readdirSync(spoolRoot), []);
+        events.push(event);
+      }
+    });
+    try {
+      await assert.rejects(service.processUpload({
+        multipart,
+        admission: {
+          ledgerId: 91,
+          requestHash: 'a'.repeat(64),
+          leaseToken: 'b'.repeat(64),
+          route: route.id
+        },
+        assertAuthorized: async () => {},
+        assertLeaseOwned: async () => {},
+        finalize: async () => ({ ok: true })
+      }));
+      assert.deepEqual(events, [{
+        event: 'parser_job_completed',
+        route: route.id,
+        duration_ms: 25,
+        result_category: item.category,
+        systemd: {
+          Result: item.outcome.Result,
+          ExecMainStatus: item.outcome.ExecMainStatus === ''
+            ? null
+            : Number(item.outcome.ExecMainStatus),
+          OOMKilled: item.outcome.OOMKilled === 'yes'
+        }
+      }], item.name);
+      const serialized = JSON.stringify(events);
+      for (const secret of [
+        'confidential-customer-list.csv',
+        'private-customer-name',
+        'private-customer-value',
+        'private parser',
+        'private systemd',
+        'private runtime'
+      ]) {
+        assert.equal(serialized.includes(secret), false, `${item.name}: ${secret}`);
+      }
+    } finally {
+      fs.rmSync(spoolRoot, { recursive: true, force: true });
+    }
+  }
+});
+
+test('worker parses the generated minimal XLSX and PPTX payload markers through production parsers', async () => {
+  const spoolRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-upload-ooxml-'));
+  const service = createUploadSandboxService({ parserIdentity: TEST_PARSER_IDENTITY, spoolRoot });
+  const fixtures = createParserAcceptanceFixtures().filter(({ format }) => format !== 'bmp');
+  let index = 0;
+  try {
+    for (const fixture of fixtures) {
+      index += 1;
+      const route = matchUploadRoute('POST', '/api/demand/parse-file');
+      const multipart = {
+        route,
+        fields: [],
+        files: [{
+          buffer: fixture.buffer,
+          basename: fixture.filename,
+          mime: fixture.mime,
+          length: fixture.buffer.length,
+          sha256: require('node:crypto').createHash('sha256').update(fixture.buffer).digest('hex')
+        }]
+      };
+      const job = await service.stageJob(multipart, {
+        ledgerId: 200 + index,
+        requestHash: String(index).repeat(64),
+        leaseToken: String(index + 2).repeat(64),
+        route: route.id
+      });
+      try {
+        await workerMain([
+          'worker', '--job-id', job.id, '--request', job.requestPath,
+          '--input', job.inputPath, '--output-root', job.outputRoot
+        ]);
+        const parsed = await validateParserOutput(job.outputRoot);
+        assert.match(parsed.data.text, new RegExp(fixture.marker));
+        assert.equal(parsed.data.parser, fixture.parser);
+        assert.equal(parsed.data.fallback, false);
+      } finally {
+        await service.cleanupJob(job);
+      }
+    }
+  } finally {
+    fs.rmSync(spoolRoot, { recursive: true, force: true });
+  }
+});
+
+test('trusted parser completion event records a successful job exactly once', async () => {
+  const spoolRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-parser-event-success-'));
+  const events = [];
+  const ticks = [2_000, 2_040];
+  const service = createUploadSandboxService({
+    parserIdentity: TEST_PARSER_IDENTITY,
+    spoolRoot,
+    monotonicNow: () => ticks.shift(),
+    executeJob: async (job) => workerMain([
+      'worker',
+      '--job-id', job.id,
+      '--request', job.requestPath,
+      '--input', job.inputPath,
+      '--output-root', job.outputRoot
+    ]),
+    inspectJobOutcome: async () => ({
+      Result: 'success',
+      ExecMainStatus: '0',
+      OOMKilled: 'no'
+    }),
+    emitControllerEvent(event) {
+      assert.deepEqual(fs.readdirSync(spoolRoot), []);
+      events.push(event);
+    },
+    idempotency: {
+      completeAdmissionInTransaction() {}
+    }
+  });
+  try {
+    await service.processUpload({
+      multipart: await decodedCsv(),
+      admission: {
+        ledgerId: 91,
+        requestHash: 'a'.repeat(64),
+        leaseToken: 'b'.repeat(64),
+        route: 'parser.knowledge-upload'
+      },
+      assertAuthorized: async () => {},
+      assertLeaseOwned: async () => {},
+      finalize: async (_parsed, lifecycle) => {
+        lifecycle.completeAdmissionInTransaction({ inTransaction: true });
+        return { ok: true };
+      }
+    });
+    assert.deepEqual(events, [{
+      event: 'parser_job_completed',
+      route: 'parser.knowledge-upload',
+      duration_ms: 40,
+      result_category: 'success',
+      systemd: {
+        Result: 'success',
+        ExecMainStatus: 0,
+        OOMKilled: false
+      }
+    }]);
+  } finally {
+    fs.rmSync(spoolRoot, { recursive: true, force: true });
+  }
+});
+
 test('timeout, crash, revocation, and final conflict kill and clean before admission failure', async () => {
   const cases = ['timeout', 'crash', 'revocation', 'final-conflict'];
   for (const name of cases) {
@@ -1184,6 +1420,9 @@ test('checked-in parser artifacts verify and effective-property drift is startup
     64
   );
   assert.deepEqual(Object.keys(runtime.manifest.runtime_tree).sort(), [
+    'bytes',
+    'directories',
+    'files',
     'format',
     'root',
     'sha256'
@@ -1314,7 +1553,10 @@ test('private temp and writable /dev submounts are inaccessible and output is ca
   assert.equal(serviceProperties.PrivatePIDs, 'yes');
   assert.equal(serviceProperties.BindLogSockets, 'no');
   assert.equal(serviceProperties.RestrictAddressFamilies, 'none');
-  assert.match(serviceProperties.SystemCallFilter, /~@mount @network-io @aio(?: |$)/);
+  assert.match(serviceProperties.SystemCallFilter, /~@mount accept accept4 bind connect /);
+  assert.match(serviceProperties.SystemCallFilter, / socket socketcall @aio(?: |$)/);
+  assert.doesNotMatch(serviceProperties.SystemCallFilter, /(?:^| )socketpair(?: |$)/);
+  assert.doesNotMatch(serviceProperties.SystemCallFilter, /(?:^| )shutdown(?: |$)/);
   assert.match(serviceProperties.SystemCallFilter, /(?:^| )@chown(?: |$)/);
   for (const syscall of [
     'chmod',
@@ -1339,7 +1581,7 @@ test('private temp and writable /dev submounts are inaccessible and output is ca
   }
   assert.equal(
     serviceProperties.InaccessiblePaths,
-    '/tmp /var/tmp /dev/shm -/dev/mqueue -/dev/hugepages /dev/pts'
+    '/tmp /var/tmp'
   );
   assert.equal((unitText.match(/^PrivateIPC=yes$/gm) || []).length, 1);
   assert.equal((unitText.match(/^PrivatePIDs=yes$/gm) || []).length, 1);
@@ -1347,19 +1589,27 @@ test('private temp and writable /dev submounts are inaccessible and output is ca
   assert.equal((unitText.match(/^RestrictAddressFamilies=none$/gm) || []).length, 1);
   assert.doesNotMatch(unitText, /^RestrictAddressFamilies=.*AF_UNIX.*$/gm);
   assert.equal(
-    (unitText.match(/^SystemCallFilter=~@mount @network-io @aio .*$/gm) || []).length,
+    (unitText.match(/^SystemCallFilter=~@mount accept accept4 bind connect .* socket socketcall @aio .*$/gm) || []).length,
     1
   );
   assert.equal(
     (unitText.match(
-      /^InaccessiblePaths=\/tmp \/var\/tmp \/dev\/shm -\/dev\/mqueue -\/dev\/hugepages \/dev\/pts$/gm
+      /^InaccessiblePaths=\/tmp \/var\/tmp$/gm
     ) || []).length,
     1
   );
   assert.equal(
     serviceProperties.TemporaryFileSystem,
-    '/scratch:rw,nosuid,nodev,noexec,size=128M'
+    [
+      '/scratch:rw,nosuid,nodev,noexec,size=128M,mode=1777',
+      '/dev/shm:ro,nosuid,nodev,noexec,size=1,mode=000',
+      '/dev/mqueue:ro,nosuid,nodev,noexec,size=1,mode=000',
+      '/dev/hugepages:ro,nosuid,nodev,noexec,size=1,mode=000',
+      '/dev/pts:ro,nosuid,nodev,noexec,size=1,mode=000'
+    ].join(' ')
   );
+  assert.equal(serviceProperties.TimeoutStartUSec, '20s');
+  assert.equal(Object.hasOwn(serviceProperties, 'RuntimeMaxUSec'), false);
   assert.equal(serviceProperties.LimitFSIZE, String(SANDBOX_LIMITS.outputBytes));
   assert.match(serviceProperties.Environment, /(?:^| )TMPDIR=\/scratch(?: |$)/);
   assert.match(serviceProperties.Environment, /(?:^| )TMP=\/scratch(?: |$)/);
@@ -1388,7 +1638,10 @@ test('private temp and writable /dev submounts are inaccessible and output is ca
   assert.ok(runtime.manifest.required_self_tests.includes('pid_namespace_sibling_fd_denial'));
   assert.ok(runtime.manifest.required_self_tests.includes('result_inode_metadata_denial'));
   assert.ok(runtime.manifest.required_self_tests.includes('output_pressure'));
-  assert.equal(runtime.manifest.required_self_tests.length, 18);
+  assert.ok(runtime.manifest.required_self_tests.includes('xlsx_parsing'));
+  assert.ok(runtime.manifest.required_self_tests.includes('pptx_parsing'));
+  assert.ok(runtime.manifest.required_self_tests.includes('ocr_inference'));
+  assert.equal(runtime.manifest.required_self_tests.length, 21);
 
   const spoolRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-upload-output-cap-'));
   const service = createUploadSandboxService({
@@ -1573,6 +1826,88 @@ test('deterministic parser runtime tree rejects transitive dependency byte drift
   }
 });
 
+test('parser pressure self-test protocol rejects unmounted or unknown probes', async () => {
+  const scratchRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-parser-pressure-'));
+  const outputRoot = path.join(scratchRoot, 'output');
+  const requestPath = path.join(scratchRoot, 'request.json');
+  const inputPath = path.join(scratchRoot, 'input.bin');
+  const jobId = 'f'.repeat(32);
+  const manifest = {
+    version: 2,
+    files: [{ path: 'result.json', mime: 'application/json', max_bytes: SANDBOX_LIMITS.outputBytes }],
+    total_writable_bytes: SANDBOX_LIMITS.outputBytes
+  };
+  fs.mkdirSync(outputRoot, { mode: 0o550 });
+  fs.writeFileSync(inputPath, 'x');
+  fs.writeFileSync(path.join(outputRoot, 'manifest.json'), JSON.stringify(manifest));
+  fs.writeFileSync(path.join(outputRoot, 'result.json'), '', { mode: 0o600 });
+  const args = [
+    'worker', '--job-id', jobId, '--request', requestPath,
+    '--input', inputPath, '--output-root', outputRoot
+  ];
+  try {
+    fs.writeFileSync(requestPath, JSON.stringify({
+      version: 1,
+      job_id: jobId,
+      self_test: 'unknown-pressure-v1'
+    }));
+    await assert.rejects(workerMain(args), (error) => error && error.code === 'UPLOAD_INVALID_CONTENT');
+
+    for (const probe of ['scratch-pressure-v1', 'output-pressure-v1']) {
+      fs.writeFileSync(requestPath, JSON.stringify({
+        version: 1,
+        job_id: jobId,
+        self_test: probe
+      }));
+      fs.truncateSync(path.join(outputRoot, 'result.json'), 0);
+      await assert.rejects(
+        workerMain(args),
+        (error) => error && error.code === 'UPLOAD_INVALID_CONTENT',
+        probe
+      );
+    }
+  } finally {
+    fs.rmSync(scratchRoot, { recursive: true, force: true });
+  }
+});
+
+test('pressure proof accepts only kernel limit outcomes', async () => {
+  function fakeSpawn(code, signal = null) {
+    return () => {
+      const child = new EventEmitter();
+      child.kill = () => {};
+      process.nextTick(() => child.emit('close', code, signal));
+      return child;
+    };
+  }
+  for (const [code, errno] of [[73, 'EFBIG'], [74, 'ENOSPC'], [75, 'EDQUOT']]) {
+    const proof = await runPressureProbe(
+      'output-pressure-v1',
+      '/output/result.json',
+      1024,
+      2048,
+      { spawn: fakeSpawn(code) }
+    );
+    assert.deepEqual(proof, {
+      contract: 'output-pressure-v1',
+      denied: true,
+      errno,
+      limit_bytes: 1024,
+      attempted_bytes: 2048
+    });
+  }
+  await assert.rejects(
+    runPressureProbe(
+      'scratch-pressure-v1',
+      '/scratch/probe',
+      1024,
+      2048,
+      { spawn: fakeSpawn(70) }
+    ),
+    (error) => error && error.code === 'UPLOAD_SANDBOX_NOT_READY'
+  );
+});
+
 test('startup recovery runs before stale cgroup cleanup and leaves no job residue', async () => {
   const runtime = loadRuntimeManifest();
   const spoolRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-upload-restart-'));
@@ -1737,6 +2072,88 @@ test('provisioned Linux parser units pass systemd verification', {
   ], { timeoutMs: 30_000 });
 });
 
+test('systemd template properties are inspected through a non-running instance', () => {
+  assert.equal(
+    systemdInspectionUnitName('turingmarket-parser@.service'),
+    'turingmarket-parser@test_instance.service'
+  );
+  assert.equal(
+    systemdInspectionUnitName('turingmarket-parser.slice'),
+    'turingmarket-parser.slice'
+  );
+  assert.throws(
+    () => systemdInspectionUnitName('other-parser@.service'),
+    /invalid parser systemd unit/
+  );
+});
+
+test('systemd effective properties normalize only proven systemd expansions', () => {
+  const runtime = loadRuntimeManifest();
+  const expectedService = runtime.manifest.effective_properties[
+    'turingmarket-parser@.service'
+  ];
+  const observedService = {
+    ...expectedService,
+    IPAddressDeny: '0.0.0.0/0 ::/0',
+    RestrictAddressFamilies: '',
+    SystemCallFilter: [
+      'brk', 'close', 'execve', 'exit', 'exit_group', 'fstat',
+      'mmap', 'mprotect', 'openat', 'read', 'shutdown', 'socketpair', 'write'
+    ].join(' '),
+    SystemCallErrorNumber: '1',
+    BindReadOnlyPaths: [
+      '/var/lib/turingmarket-parser/jobs/test_instance/input.bin:/input/input.bin:rbind',
+      '/var/lib/turingmarket-parser/jobs/test_instance/request.json:/runtime/request.json:rbind',
+      '/var/lib/turingmarket-parser/jobs/test_instance/output:/output:rbind'
+    ].join(' '),
+    BindPaths: '/var/lib/turingmarket-parser/jobs/test_instance/output/result.json:/output/result.json:rbind'
+  };
+  assert.deepEqual(
+    normalizeSystemdEffectiveProperties(
+      'turingmarket-parser@.service',
+      observedService,
+      expectedService
+    ),
+    expectedService
+  );
+  assert.throws(
+    () => normalizeSystemdEffectiveProperties(
+      'turingmarket-parser@.service',
+      { ...observedService, SystemCallFilter: `${observedService.SystemCallFilter} socket` },
+      expectedService
+    ),
+    /effective property drift/
+  );
+  assert.throws(
+    () => normalizeSystemdEffectiveProperties(
+      'turingmarket-parser@.service',
+      { ...observedService, IPAddressDeny: '0.0.0.0/0' },
+      expectedService
+    ),
+    /effective property drift/
+  );
+
+  const expectedSlice = runtime.manifest.effective_properties['turingmarket-parser.slice'];
+  const observedSlice = { ...expectedSlice };
+  delete observedSlice.CPUAccounting;
+  assert.deepEqual(
+    normalizeSystemdEffectiveProperties(
+      'turingmarket-parser.slice',
+      observedSlice,
+      expectedSlice
+    ),
+    expectedSlice
+  );
+  assert.throws(
+    () => normalizeSystemdEffectiveProperties(
+      'turingmarket-parser.slice',
+      { ...observedSlice, MemoryMax: '1073741824' },
+      expectedSlice
+    ),
+    /effective property drift/
+  );
+});
+
 test('real root parser unit exposes only scratch and the exact result inode', {
   skip: process.platform !== 'linux' ||
     process.env.TM_UPLOAD_SANDBOX_LINUX_E2E !== '1' ||
@@ -1751,7 +2168,8 @@ test('real root parser unit exposes only scratch and the exact result inode', {
   assert.equal(expectedService.BindLogSockets, 'no');
   assert.equal(expectedService.RestrictAddressFamilies, 'none');
   assert.equal(expectedService.PrivatePIDs, 'yes');
-  assert.match(expectedService.SystemCallFilter, /~@mount @network-io @aio(?: |$)/);
+  assert.match(expectedService.SystemCallFilter, /~@mount accept accept4 bind connect /);
+  assert.match(expectedService.SystemCallFilter, / socket socketcall @aio(?: |$)/);
   for (const [unitName, expected] of Object.entries(runtime.manifest.effective_properties)) {
     assert.deepEqual(await readSystemdProperties(unitName, expected), expected);
   }

@@ -9,6 +9,10 @@ const { spawnSync } = require('node:child_process');
 
 const repoRoot = path.resolve(__dirname, '..', '..', '..');
 const platformRoot = path.join(repoRoot, 'platform');
+const gitBash = process.env.GIT_BASH_PATH || 'C:\\Program Files\\Git\\bin\\bash.exe';
+const nativeLinuxOnly = process.platform === 'linux'
+  ? false
+  : 'requires native Linux filesystem and syscall semantics';
 
 function read(relativePath) {
   return fs.readFileSync(path.join(repoRoot, relativePath), 'utf8');
@@ -18,7 +22,7 @@ function shellPath(filePath) {
   if (process.platform !== 'win32') return filePath;
   const match = /^([A-Za-z]):[\\/](.*)$/.exec(filePath);
   if (!match) return filePath.replaceAll('\\', '/');
-  return `/mnt/${match[1].toLowerCase()}/${match[2].replaceAll('\\', '/')}`;
+  return `/${match[1].toLowerCase()}/${match[2].replaceAll('\\', '/')}`;
 }
 
 function shellQuote(value) {
@@ -26,9 +30,23 @@ function shellQuote(value) {
 }
 
 function runBash(source) {
-  return spawnSync('bash', ['--noprofile', '--norc', '-s'], {
+  const command = process.platform === 'win32' ? gitBash : 'bash';
+  const args = ['--noprofile', '--norc'];
+  if (process.env.TM_DEBUG_TEST_BASH === '1') args.push('-x');
+  args.push('-s');
+  const configuredPython = process.env.PYTHON3 || process.env.PYTHON_BIN;
+  const prelude = process.platform === 'win32'
+    ? [
+      'PATH=/usr/bin:/bin:$PATH',
+      'export PATH',
+      configuredPython
+        ? `python3() { ${shellQuote(shellPath(configuredPython))} "$@"; }`
+        : ''
+    ].filter(Boolean).join('\n') + '\n'
+    : '';
+  return spawnSync(command, args, {
     encoding: 'utf8',
-    input: source,
+    input: prelude + source,
     timeout: 20_000
   });
 }
@@ -85,11 +103,23 @@ test('deployment browser stays separate from the frozen Playwright baseline', ()
 });
 
 test('all production and deployment browser launches use the native sandboxed runtime', () => {
-  const directLaunchFiles = [
+  const expectedTopLevelTestLaunchers = [
     'platform/server/tests/accessibility_shell.test.js',
-    'platform/server/tests/product_shell_contract.test.js',
     'platform/server/tests/ppt_bridge_browser_contract.test.js',
+    'platform/server/tests/product_shell_contract.test.js',
     'platform/server/tests/production_browser_evidence_tools.test.js',
+  ];
+  const testsRoot = path.join(platformRoot, 'server', 'tests');
+  const directLaunchMarker = ['chromium', 'launch('].join('.');
+  const discoveredTopLevelTestLaunchers = fs.readdirSync(testsRoot)
+    .filter((name) => name.endsWith('.test.js'))
+    .filter((name) => fs.readFileSync(path.join(testsRoot, name), 'utf8').includes(directLaunchMarker))
+    .map((name) => `platform/server/tests/${name}`)
+    .sort();
+  assert.deepEqual(discoveredTopLevelTestLaunchers, expectedTopLevelTestLaunchers);
+
+  const directLaunchFiles = [
+    ...expectedTopLevelTestLaunchers,
     'platform/server/scripts/capture_production_browser_baseline.js'
   ];
   for (const relativePath of directLaunchFiles) {
@@ -117,7 +147,8 @@ test('runtime configuration supports release-external environment, database, upl
     'TM_ENV_FILE: "/etc/turingmarket/turingmarket.env"',
     'DB_PATH: "/var/lib/turingmarket/db/turingmarket.db"',
     'UPLOAD_DIR: "/var/lib/turingmarket/uploads"',
-    'TMP_DIR: "/var/lib/turingmarket/tmp"'
+    'TMP_DIR: "/var/lib/turingmarket/tmp"',
+    'PPT_CACHE_DIR: "/var/lib/turingmarket/ppt-cache"'
   ]) {
     assert.ok(ecosystem.includes(marker), marker);
   }
@@ -408,7 +439,7 @@ test('PM2 production runtime binds the application listener to IPv4 loopback', (
   assert.equal(ecosystem.apps[0].env.SERVER_HOST, '127.0.0.1');
 });
 
-test('loopback firewall installation is persistent, exact, and a no-op on rerun', () => {
+test('loopback firewall installation is persistent, exact, and a no-op on rerun', { skip: nativeLinuxOnly }, () => {
   const source = `
 set -euo pipefail
 root="$(mktemp -d)"
@@ -472,6 +503,8 @@ systemctl() {
     *) return 65 ;;
   esac
 }
+
+ss() { :; }
 
 BACKUP_DIR="$root/backup-one"
 mkdir -p "$BACKUP_DIR"
@@ -851,7 +884,7 @@ test "$reload_count" = 1
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
 });
 
-test('AppArmor syntax failure and unsafe profile paths leave existing state unchanged', () => {
+test('AppArmor syntax failure leaves existing state unchanged', () => {
   const source = `
 set -euo pipefail
 root="$(mktemp -d)"
@@ -878,9 +911,31 @@ BACKUP_DIR="$root/backup-syntax"
 mkdir -p "$BACKUP_DIR"
 if install_apparmor_profile; then exit 92; fi
 test "$(cat "$APPARMOR_PROFILE")" = legacy-profile
+`;
+  const result = runBash(source);
 
-syntax_failure=0
-rm -f "$APPARMOR_PROFILE"
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+});
+
+test('AppArmor rejects an unsafe profile symlink without mutating its target', { skip: nativeLinuxOnly }, () => {
+  const source = `
+set -euo pipefail
+root="$(mktemp -d)"
+trap 'rm -rf "$root"' EXIT
+export TM_REMOTE_ROOT="$root/remote"
+export TM_APPARMOR_PROFILE="$root/etc/turingmarket-gate-chromium"
+export TM_BOOTSTRAP_LIBRARY_ONLY=1
+source ${shellQuote(bootstrapShellPath)}
+
+install() {
+  local source="\${@: -2:1}"
+  local target="\${@: -1}"
+  cp -- "$source" "$target"
+  chmod 0644 "$target"
+}
+apparmor_parser() { :; }
+
+mkdir -p "$(dirname "$APPARMOR_PROFILE")"
 printf 'real-profile\n' > "$root/real-profile"
 ln -s "$root/real-profile" "$APPARMOR_PROFILE"
 BACKUP_DIR="$root/backup-symlink"
@@ -937,7 +992,7 @@ test('gate identity validation rejects root, group drift, supplementary groups, 
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
 });
 
-test('interrupted prepared migration restores its durable snapshot and validates DB before restart', () => {
+test('interrupted prepared migration restores its durable snapshot and validates DB before restart', { skip: nativeLinuxOnly }, () => {
   const source = `
 set -euo pipefail
 root="$(mktemp -d)"
@@ -1110,8 +1165,8 @@ test('guarded deploy runs the full gate unprivileged and seals only external-sta
     'node_modules/playwright-deploy/cli.js test -c server/tests/deployment-browser-smoke.config.js',
     'TRUSTED_PRODUCTION_SOURCE_GATE_INSTALLED',
     'TM_SANITIZED_MIGRATION_COMPATIBILITY_OK',
-    'unshare --net --fork',
-    'ip link set lo up',
+    'systemd-run --quiet --wait --pipe --unit="$OfflineGateUnit"',
+    '--property="PrivateNetwork=yes"',
     'CANDIDATE_TREE_SHA256',
     'CANDIDATE_TREE_RECHECK_OK',
     'GateUid" -gt 0',
@@ -1147,12 +1202,15 @@ test('candidate verification cannot read production data and runs candidate code
   const trustedVerifier = read('platform/server/scripts/verify_campaign_migration_gate.js');
   const gateMatch = deploy.match(/<<'TM_UNPRIVILEGED_GATE'\r?\n([\s\S]*?)\r?\nTM_UNPRIVILEGED_GATE/);
   const dependencyMatch = deploy.match(/<<'TM_DEPENDENCY_STAGE'\r?\n([\s\S]*?)\r?\nTM_DEPENDENCY_STAGE/);
+  const dependencyBuildMatch = deploy.match(/<<'TM_DEPENDENCY_BUILD'\r?\n([\s\S]*?)\r?\nTM_DEPENDENCY_BUILD/);
   const candidateMatch = deploy.match(/\$candidateGate\s*=\s*@'\r?\n([\s\S]*?)\r?\n'@/);
   assert.ok(gateMatch, 'offline unprivileged gate must exist');
   assert.ok(dependencyMatch, 'network-enabled dependency staging must be separate');
+  assert.ok(dependencyBuildMatch, 'native dependency lifecycle must have a separate offline unit');
   assert.ok(candidateMatch, 'candidate-only gate must exist');
   const gate = gateMatch[1];
   const dependencyStage = dependencyMatch[1];
+  const dependencyBuild = dependencyBuildMatch[1];
   const candidateGate = candidateMatch[1];
 
   assert.match(deploy, /ProductionBackupDb="\$BackupAbsolute\/database\/turingmarket\.db"/);
@@ -1175,14 +1233,88 @@ test('candidate verification cannot read production data and runs candidate code
   assert.match(gate, /TM_SANITIZED_MIGRATION_COMPATIBILITY_OK/);
   assert.doesNotMatch(gate, /TM_SYNTHETIC_SENTINELS_OK|EXPECTED_SCHEMA_FINGERPRINT/);
 
-  assert.match(dependencyStage, /npm ci --ignore-scripts[\s\S]*?install chromium[\s\S]*?npm rebuild better-sqlite3/);
+  assert.match(dependencyStage, /npm ci --ignore-scripts[\s\S]*?install chromium[\s\S]*?npm ci --ignore-scripts/);
+  assert.doesNotMatch(dependencyStage, /npm rebuild|preinstall|postinstall/);
+  assert.match(deploy, /npm_config_offline=true[\s\S]*?TM_DEPENDENCY_BUILD/);
+  assert.match(dependencyBuild, /npm rebuild better-sqlite3/);
   assert.doesNotMatch(dependencyStage, /node --test|deployment-browser-smoke|SCHEMA_DB|EXPECTED_SCHEMA_FINGERPRINT/);
+  assert.doesNotMatch(dependencyBuild, /node --test|deployment-browser-smoke|SCHEMA_DB|EXPECTED_SCHEMA_FINGERPRINT/);
   assert.ok(candidateGate.indexOf('TM_DEPENDENCY_STAGE') < candidateGate.indexOf('/usr/bin/node "$TrustedSourceGate" sanitize-and-verify'));
-  assert.ok(deploy.indexOf("TM_DEPENDENCY_STAGE") < deploy.indexOf('unshare --net --fork'));
-  assert.ok(deploy.indexOf('unshare --net --fork') < deploy.indexOf('node --test --test-concurrency=1 tests/*.test.js'));
+  assert.ok(deploy.indexOf('systemd-run --quiet --wait --pipe --unit="$DependencyUnit"') < deploy.indexOf("TM_DEPENDENCY_STAGE"));
+  assert.ok(deploy.indexOf('systemd-run --quiet --wait --pipe --unit="$DependencyBuildUnit"') < deploy.indexOf("TM_DEPENDENCY_BUILD"));
+  assert.ok(deploy.indexOf("TM_DEPENDENCY_STAGE") < deploy.indexOf('systemd-run --quiet --wait --pipe --unit="$DependencyBuildUnit"'));
+  assert.ok(deploy.indexOf('systemd-run --quiet --wait --pipe --unit="$OfflineGateUnit"') < deploy.indexOf("TM_UNPRIVILEGED_GATE"));
+  assert.ok(deploy.indexOf("TM_DEPENDENCY_BUILD") < deploy.indexOf('systemd-run --quiet --wait --pipe --unit="$OfflineGateUnit"'));
+  assert.ok(deploy.indexOf('systemd-run --quiet --wait --pipe --unit="$OfflineGateUnit"') < deploy.indexOf('node --test --test-concurrency=1 tests/*.test.js'));
+  assert.doesNotMatch(deploy, /unshare --net --fork/);
   assert.match(deploy, /test -z "\$\(ip route show default\)"/);
   assert.match(deploy, /printf "%s\\n" "OFFLINE_NETWORK_NAMESPACE_OK"/);
   assert.doesNotMatch(deploy, /printf '%s\\n' "OFFLINE_NETWORK_NAMESPACE_OK"/);
+});
+
+test('candidate dependency and offline gates are filesystem-confined transient services', () => {
+  const deploy = read('platform/deploy_v8.ps1');
+  const dependencyMatch = deploy.match(/set \+e\r?\ntimeout --signal=KILL 20m systemd-run --quiet --wait --pipe --unit="\$DependencyUnit"([\s\S]*?)<<'TM_DEPENDENCY_STAGE'/);
+  const dependencyBuildMatch = deploy.match(/set \+e\r?\ntimeout --signal=KILL 20m systemd-run --quiet --wait --pipe --unit="\$DependencyBuildUnit"([\s\S]*?)<<'TM_DEPENDENCY_BUILD'/);
+  const offlineMatch = deploy.match(/set \+e\r?\ntimeout --signal=KILL 30m systemd-run --quiet --wait --pipe --unit="\$OfflineGateUnit"([\s\S]*?)<<'TM_UNPRIVILEGED_GATE'/);
+  assert.ok(dependencyMatch, 'dependency installation must execute inside its transient service');
+  assert.ok(dependencyBuildMatch, 'dependency lifecycle must execute inside its offline transient service');
+  assert.ok(offlineMatch, 'offline verification must execute inside its transient service');
+
+  const dependency = dependencyMatch[1];
+  const dependencyBuild = dependencyBuildMatch[1];
+  const offline = offlineMatch[1];
+  const productionPaths = [
+    '\\$RemoteRoot',
+    '/etc/turingmarket',
+    '/var/lib/turingmarket',
+  ];
+
+  for (const unit of [dependency, dependencyBuild, offline]) {
+    assert.match(unit, /--uid="\$GateUser" --gid="\$GateUser" --service-type=exec/);
+    assert.match(unit, /--property="PrivatePIDs=yes"/);
+    assert.match(unit, /--property="PrivateMounts=yes"/);
+    assert.match(unit, /--property="PrivateTmp=yes"/);
+    assert.match(unit, /--property="PrivateDevices=yes"/);
+    assert.match(unit, /--property="PrivateIPC=yes"/);
+    assert.match(unit, /--property="ProtectHome=yes"/);
+    assert.match(unit, /--property="ProtectSystem=strict"/);
+    assert.match(unit, /--property="ProtectProc=invisible"/);
+    assert.match(unit, /--property="NoNewPrivileges=yes"/);
+    assert.match(unit, /--property="CapabilityBoundingSet="/);
+    assert.match(unit, /--property="SystemCallArchitectures=native"/);
+    assert.match(unit, /--property="InaccessiblePaths=\$RemoteRoot \/etc\/turingmarket \/var\/lib\/turingmarket"/);
+    for (const productionPath of productionPaths) {
+      assert.match(unit, new RegExp(productionPath.replaceAll('/', '\\/')));
+    }
+  }
+
+  assert.doesNotMatch(dependency, /PrivateNetwork=yes/, 'dependency installation needs outbound package access');
+  assert.match(dependency, /RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6/);
+  assert.match(dependency, /IPAddressDeny=[^"\r\n]*169\.254\.0\.0\/16/);
+  assert.match(dependency, /IPAddressDeny=[^"\r\n]*10\.0\.0\.0\/8/);
+  assert.match(dependency, /IPAddressDeny=[^"\r\n]*172\.16\.0\.0\/12/);
+  assert.match(dependency, /IPAddressDeny=[^"\r\n]*192\.168\.0\.0\/16/);
+  assert.match(dependency, /IPAddressDeny=[^"\r\n]*fc00::\/7/);
+  assert.match(dependency, /IPAddressAllow=127\.0\.0\.53\/32 127\.0\.0\.54\/32/);
+  assert.match(dependency, /--property="ReadWritePaths=\$TestRoot"/);
+  assert.doesNotMatch(dependency, /ReadWritePaths=\$ReleaseRoot|WorkingDirectory=\$CandidateDir/);
+  assert.match(dependencyBuild, /--property="PrivateNetwork=yes"/);
+  assert.match(dependencyBuild, /RestrictAddressFamilies=AF_UNIX/);
+  assert.match(dependencyBuild, /--property="ReadWritePaths=\$TestRoot"/);
+  assert.doesNotMatch(dependencyBuild, /ReadWritePaths=\$ReleaseRoot|WorkingDirectory=\$CandidateDir/);
+  assert.match(offline, /--property="PrivateNetwork=yes"/);
+  assert.match(offline, /RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6/);
+  assert.match(offline, /--property="ReadOnlyPaths=\$CandidateDir"/);
+  assert.match(offline, /--property="ReadWritePaths=\$TestRoot"/);
+  assert.doesNotMatch(offline, /ReadWritePaths=\$ReleaseRoot/);
+  assert.doesNotMatch(dependency, /runuser|unshare/);
+  assert.doesNotMatch(dependencyBuild, /runuser|unshare/);
+  assert.doesNotMatch(offline, /runuser|unshare/);
+  assert.match(deploy, /DependencyStatus=\$\?[\s\S]*?drain_gate_unit "\$DependencyUnit"[\s\S]*?kill_gate_processes "dependency staging"/);
+  assert.match(deploy, /DependencyBuildStatus=\$\?[\s\S]*?drain_gate_unit "\$DependencyBuildUnit"[\s\S]*?kill_gate_processes "dependency build"/);
+  assert.match(deploy, /GateStatus=\$\?[\s\S]*?drain_gate_unit "\$OfflineGateUnit"[\s\S]*?kill_gate_processes "offline candidate validation"/);
+  assert.match(deploy, /CANDIDATE_VALIDATION_SHA256_BEFORE[\s\S]*?CANDIDATE_VALIDATION_SHA256_AFTER[\s\S]*?CANDIDATE_READONLY_RECHECK_OK/);
 });
 
 test('unprivileged gate uses only variables explicitly passed through env -i', () => {
@@ -1213,7 +1345,8 @@ test('candidate lifecycle rejects directory substitution and clears network-stag
 
   assert.match(candidateGate, /kill_gate_processes\(\)[\s\S]*?pkill -KILL -u "\$GateUser"[\s\S]*?pgrep -u "\$GateUser"/);
   assert.match(candidateGate, /DependencyStatus=\$\?[\s\S]*?kill_gate_processes "dependency staging"[\s\S]*?\[ "\$DependencyStatus" != "0" \]/);
-  assert.ok(candidateGate.indexOf('kill_gate_processes "dependency staging"') < candidateGate.indexOf('unshare --net --fork'));
+  assert.match(candidateGate, /DependencyBuildStatus=\$\?[\s\S]*?kill_gate_processes "dependency build"[\s\S]*?\[ "\$DependencyBuildStatus" != "0" \]/);
+  assert.ok(candidateGate.indexOf('kill_gate_processes "dependency build"') < candidateGate.indexOf('systemd-run --quiet --wait --pipe --unit="$OfflineGateUnit"'));
   assert.match(candidateGate, /GateStatus=\$\?[\s\S]*?kill_gate_processes "offline candidate validation"/);
 });
 
@@ -1226,11 +1359,11 @@ test('unprivileged nginx gate derives a socket listener while root validates the
   const envBoundary = deploy.slice(deploy.lastIndexOf('set +e', match.index), match.index);
   const afterGate = deploy.slice(match.index + match[0].length);
 
-  assert.match(gateSetup, /NginxGateDir="\$\(mktemp -d \/tmp\/tm-nginx-gate\.XXXXXX\)"/);
-  assert.match(gateSetup, /trap cleanup_nginx_gate_dir EXIT/);
-  assert.match(gateSetup, /chown "\$GateUser:\$GateUser" "\$NginxGateDir"/);
-  assert.match(envBoundary, /TM_GATE_NGINX_DIR="\$NginxGateDir"/);
-  assert.match(envBoundary, /NGINX_GATE_DIR="\$TM_GATE_NGINX_DIR"/);
+  assert.match(gateSetup, /NginxGateDir="\$TestRoot\/nginx-gate"/);
+  assert.match(gateSetup, /install -d -o "\$GateUser" -g "\$GateUser" -m 0700 "\$NginxGateDir"/);
+  assert.match(deploy, /trap 'cleanup_candidate_gate \$\?' EXIT/);
+  assert.match(deploy, /cleanup_test_root\(\)[\s\S]*?declare -F cleanup_nginx_gate_dir[\s\S]*?cleanup_nginx_gate_dir/);
+  assert.match(envBoundary, /NGINX_GATE_DIR="\$NginxGateDir"/);
   assert.doesNotMatch(gate, /mktemp -d \/tmp\/tm-nginx-gate/);
   assert.match(gate, /turingmarket-gate\.conf/);
   assert.ok(gate.includes("pattern = re.compile(r'(?m)^(\\s*listen\\s+)80(\\s*;\\s*(?:#.*)?)$')"));
@@ -1240,8 +1373,9 @@ test('unprivileged nginx gate derives a socket listener while root validates the
   assert.match(gate, /include \$TEST_ROOT\/turingmarket-gate\.conf;/);
   assert.doesNotMatch(gate, /include \$CANDIDATE_DIR\/nginx\/turingmarket\.conf;/);
 
-  assert.match(afterGate, /kill_gate_processes "offline candidate validation"[\s\S]*?cleanup_nginx_gate_dir[\s\S]*?trap - EXIT[\s\S]*?\[ "\$GateStatus" = "0" \]/);
+  assert.match(afterGate, /kill_gate_processes "offline candidate validation"[\s\S]*?cleanup_nginx_gate_dir[\s\S]*?\[ "\$GateStatus" = "0" \]/);
   assert.match(afterGate, /\[ "\$GateStatus" = "0" \][\s\S]*?sha256sum --check --status "\$LockDir\/upload\.sha256"/);
+  assert.match(afterGate, /sha256sum --check --status "\$LockDir\/upload\.sha256"[\s\S]*?cleanup_test_root[\s\S]*?trap - EXIT HUP INT TERM/);
   assert.match(
     afterGate,
     /install -m 0644 "\$LiveDir\/nginx\/turingmarket\.conf" \/etc\/nginx\/sites-available\/turingmarket[\s\S]*?nginx -t\s*\r?\n\s*systemctl reload nginx/

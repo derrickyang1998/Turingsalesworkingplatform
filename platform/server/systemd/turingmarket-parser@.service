@@ -46,21 +46,25 @@ RestrictSUIDSGID=yes
 LockPersonality=yes
 SystemCallArchitectures=native
 SystemCallFilter=@system-service
-SystemCallFilter=~@mount @network-io @aio io_uring_setup io_uring_enter io_uring_register @chown @privileged @raw-io @reboot @swap @resources @obsolete @debug @clock chmod fchmod fchmodat fchmodat2 setxattr lsetxattr fsetxattr removexattr lremovexattr fremovexattr utime utimes futimesat utimensat
+SystemCallFilter=~@mount accept accept4 bind connect getpeername getsockname getsockopt listen recv recvfrom recvmmsg recvmmsg_time64 recvmsg send sendmmsg sendmsg sendto setsockopt socket socketcall @aio io_uring_setup io_uring_enter io_uring_register @chown @privileged @raw-io @reboot @swap @resources @obsolete @debug @clock chmod fchmod fchmodat fchmodat2 setxattr lsetxattr fsetxattr removexattr lremovexattr fremovexattr utime utimes futimesat utimensat
 SystemCallErrorNumber=EPERM
 TasksMax=32
 LimitNOFILE=64
 LimitFSIZE=10485760
 MemoryMax=512M
 CPUQuota=100%
-RuntimeMaxSec=20
+TimeoutStartSec=20
 TimeoutStopSec=5
 KillMode=control-group
 SendSIGKILL=yes
 LimitCORE=0
 OOMPolicy=kill
-TemporaryFileSystem=/scratch:rw,nosuid,nodev,noexec,size=128M
-InaccessiblePaths=/tmp /var/tmp /dev/shm -/dev/mqueue -/dev/hugepages /dev/pts
+TemporaryFileSystem=/scratch:rw,nosuid,nodev,noexec,size=128M,mode=1777
+TemporaryFileSystem=/dev/shm:ro,nosuid,nodev,noexec,size=1,mode=000
+TemporaryFileSystem=/dev/mqueue:ro,nosuid,nodev,noexec,size=1,mode=000
+TemporaryFileSystem=/dev/hugepages:ro,nosuid,nodev,noexec,size=1,mode=000
+TemporaryFileSystem=/dev/pts:ro,nosuid,nodev,noexec,size=1,mode=000
+InaccessiblePaths=/tmp /var/tmp
 BindReadOnlyPaths=/var/lib/turingmarket-parser/jobs/%i/input.bin:/input/input.bin
 BindReadOnlyPaths=/var/lib/turingmarket-parser/jobs/%i/request.json:/runtime/request.json
 BindReadOnlyPaths=/var/lib/turingmarket-parser/jobs/%i/output:/output

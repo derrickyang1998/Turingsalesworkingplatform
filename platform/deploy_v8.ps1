@@ -6,6 +6,7 @@ param(
     [switch]$RestoreDatabase,
     [switch]$ConfirmDataLoss,
     [ValidateRange(15, 300)][int]$MaintenanceTimeoutSeconds = 60,
+    [ValidateRange(1, 30)][int]$HttpDrainStableSeconds = 3,
     [switch]$ValidateLocalOnly,
     [switch]$RecoverInterruptedDeployment
 )
@@ -31,15 +32,24 @@ $EXPECTED_PPT_QUERY = "20260702v916kbbridge"
 $EXPECTED_PPT_SHA256 = "f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e"
 $TRUSTED_SOURCE_GATE_RELATIVE_PATH = "server\scripts\trusted_production_source_gate.js"
 $TRUSTED_SOURCE_MANIFEST_RELATIVE_PATH = "server\scripts\trusted_production_source_manifest.json"
-$EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "95f48c6afcf931a75d2086e6aefdbc782f5b108f711d3e052c319e2fe53df24e"
-$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "afd683d0a34361a62305540eb2f16cc0197cb98a269f55ce9c46c3502b5ac8dc"
+$EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "63cfc3f896d092c32aa68316fe6f4386271c07e0c29b3cbcc6b191ac9cf564d5"
+$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "a82ff29e22e3aa9bf60a3759b807530019e508c2694fd7495a150610789bbd2e"
 $EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256 = "bdc60e6a9da601c8c65cd2a374d8cb69eeea629fa6cd5af514dd995eddfe74dc"
+$EXPECTED_TRUSTED_PARSER_VERIFIER_SHA256 = "93973d83379c1b22a779751be135f59c992d0784957519b3fdb1abebaad2d2f6"
+$EXPECTED_TRUSTED_PUBLIC_GUARD_SHA256 = "d45fe8fcc01587aaa0e73eccfb9714c27801e232cb6c0effd6daedb703316d66"
+$EXPECTED_TRUSTED_MIGRATION_CLEANUP_HELPER_SHA256 = "d5f2befa902522dd9de3e9dd2397a99ee5e78ab1a1c6e526a27f14bb2829e1fa"
+$EXPECTED_TRUSTED_MIGRATION_CLEANUP_UNIT_SHA256 = "acc42c90010eca793d22b6ee517231872aed5c17b36f0222052351b97cfdb7c6"
 $TRUSTED_SOURCE_INSTALL_ROOT = "/usr/local/libexec/turingmarket/production-source-trust/$EXPECTED_TRUSTED_SOURCE_GATE_SHA256/$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256"
 $TRUSTED_SOURCE_GATE_REMOTE_PATH = "$TRUSTED_SOURCE_INSTALL_ROOT/trusted_production_source_gate.js"
 $TRUSTED_SOURCE_MANIFEST_REMOTE_PATH = "$TRUSTED_SOURCE_INSTALL_ROOT/trusted_production_source_manifest.json"
 $TRUSTED_SOURCE_BUNDLE_REMOTE_PATH = "$TRUSTED_SOURCE_INSTALL_ROOT/bundles/$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256"
 $TRUSTED_SOURCE_RUNTIME_REMOTE_PATH = "$TRUSTED_SOURCE_INSTALL_ROOT/runtime/$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256"
 $CANDIDATE_GATE_TIMEOUT_SECONDS = 7200
+$PARSER_RUNTIME_BYTES = 716157800
+$PARSER_STARTUP_TIMEOUT_SECONDS = 180
+$PUBLIC_GUARD_TIMEOUT_SECONDS = 120
+$ACCEPTED_FINALIZE_PUBLIC_GUARD_TIMEOUT_SECONDS = 7200
+$ROLLBACK_PUBLIC_GUARD_TIMEOUT_SECONDS = 7200
 New-Variable -Scope Script -Name EXPECTED_REQUIRED_PUBLIC_ASSETS_IDENTITY -Option Constant -Value "9:ab5966490f4c000ddca07dfcb9e1c8304e5b474248a295f7d2d81439dcc8bda2"
 $deploymentLockToken = $null
 $deploymentWriterToken = $null
@@ -98,6 +108,9 @@ $FILES = @(
     "server\feishu_client.js",
     "server\generate_ppt.py",
     "server\ocr_document_text.py",
+    "server\parser-runtime\package.json",
+    "server\parser-runtime\package-lock.json",
+    "server\parser-runtime\requirements.lock",
     "server\ppt_generator.js",
     "server\requirements.txt",
     "server\requirements-ocr.txt",
@@ -146,6 +159,8 @@ $FILES = @(
     "server\services\web_search_service.js",
     "server\scripts\bootstrap_production_browser_state.js",
     "server\scripts\bootstrap_production_runtime.sh",
+    "server\scripts\build_upload_sandbox_runtime.sh",
+    "server\scripts\check_cutover_capacity.py",
     "server\scripts\capture_production_browser_baseline.js",
     "server\scripts\cleanup_stale_migration_gate.sh",
     "server\scripts\compare_ui_baseline_runs.js",
@@ -153,13 +168,17 @@ $FILES = @(
     "server\scripts\generate_phase3_visual_evidence_manifest.js",
     "server\scripts\lib\production_browser_evidence.js",
     "server\scripts\parse_upload_sandbox.sh",
+    "server\scripts\provision_upload_sandbox_runtime.sh",
+    "server\scripts\public_release_guard.sh",
     "server\scripts\rotate_user_credentials.js",
     "server\scripts\update_ui_baseline.js",
     "server\scripts\release_replay_gate.js",
     "server\scripts\sanitization_manifest.json",
     "server\scripts\sanitize_production_shape.js",
+    "server\scripts\trusted_parser_runtime_verifier.js",
     "server\scripts\trusted_production_source_gate.js",
     "server\scripts\trusted_production_source_manifest.json",
+    "server\scripts\upload_sandbox_self_test.js",
     "server\scripts\verify_phase4_one_request_replay.js",
     "server\scripts\verify_phase4_one_request_replay_probe.js",
     "server\scripts\verify_campaign_migration_gate.js",
@@ -190,6 +209,7 @@ $FILES = @(
     "server\tests\campaign_workflow_reassignment_and_reads.test.js",
     "server\tests\campaign_workflow_reconciliation.test.js",
     "server\tests\campaign_workflow_task_controls.test.js",
+    "server\tests\cutover_capacity.test.js",
     "server\tests\credential_rotation.test.js",
     "server\tests\crm_contract.test.js",
     "server\tests\crm_customer_service.test.js",
@@ -228,8 +248,10 @@ $FILES = @(
     "server\tests\ppt_bridge_browser_contract.test.js",
     "server\tests\production_browser_evidence_tools.test.js",
     "server\tests\product_shell_contract.test.js",
+    "server\tests\public_release_guard.test.js",
     "server\tests\public_static_security.test.js",
     "server\tests\publication_identity_service.test.js",
+    "server\tests\parser_runtime_release.test.js",
     "server\tests\release_replay_gate.test.js",
     "server\tests\release_v060_contract.test.js",
     "server\tests\sanitized_migration_gate.test.js",
@@ -237,6 +259,7 @@ $FILES = @(
     "server\tests\security_and_crm_access.test.js",
     "server\tests\sqlite_digest_service.test.js",
     "server\tests\upload_sandbox.test.js",
+    "server\tests\upload_sandbox_self_test.test.js",
     "server\tests\verify_campaign_migration_gate.test.js",
     "server\tests\verify_phase4_one_request_replay.test.js",
     "server\tests\browser-baseline.config.js",
@@ -1008,32 +1031,173 @@ printf '%s\n' 'LOOPBACK_ISOLATION_PREFLIGHT_OK'
 }
 
 function Install-RemoteMigrationGateCleanup {
-    param([Parameter(Mandatory = $true)][object]$DeploymentPlan)
-
-    Initialize-PinnedDeploymentTypes
-    if ($DeploymentPlan -isnot [ImmutableDeploymentActionPlan]) {
-        throw 'Migration gate cleanup installation requires the immutable deployment action plan.'
-    }
-    $cleanupRecord = $DeploymentPlan.GetByRemoteRelativePath('platform/server/scripts/cleanup_stale_migration_gate.sh')
-    $unitRecord = $DeploymentPlan.GetByRemoteRelativePath('platform/server/systemd/turingmarket-gate-cleanup.service')
-    $cleanupBase64 = $cleanupRecord.ToBase64()
-    $unitBase64 = $unitRecord.ToBase64()
-    $cleanupSha256 = $cleanupRecord.ExpectedSha256
-    $unitSha256 = $unitRecord.ExpectedSha256
-
     $remoteScript = @'
 set -euo pipefail
 RemoteRoot="__REMOTE_ROOT__"
 RunId="__RUN_ID__"
 Stage="$RemoteRoot/.migration-gate-cleanup-stage-$RunId"
+TrustedSourceBundle="__TRUSTED_SOURCE_BUNDLE__"
+TrustedHelper="$TrustedSourceBundle/server/scripts/cleanup_stale_migration_gate.sh"
+TrustedUnit="$TrustedSourceBundle/server/systemd/turingmarket-gate-cleanup.service"
 Helper="/usr/local/libexec/turingmarket/cleanup_stale_migration_gate.sh"
 HelperRoot="$(dirname "$Helper")"
 Unit="/etc/systemd/system/turingmarket-gate-cleanup.service"
+UnitName="turingmarket-gate-cleanup.service"
+CanonicalLink="/etc/systemd/system/multi-user.target.wants/$UnitName"
+RestoreBarrier="/etc/systemd/system/$UnitName.d/00-turingmarket-restore-barrier.conf"
 JournalRoot="/var/lib/turingmarket/migration-gate"
+for trusted_file in "$TrustedHelper" "$TrustedUnit"; do
+  test -f "$trusted_file"
+  test ! -L "$trusted_file"
+  test "$(stat -c '%U:%G:%a:%h' "$trusted_file")" = "root:root:444:1"
+  case "$(realpath -e "$trusted_file")" in "$TrustedSourceBundle"/*) ;; *) exit 1 ;; esac
+done
+test "$(sha256sum "$TrustedHelper" | awk '{print $1}')" = "__CLEANUP_SHA256__"
+test "$(sha256sum "$TrustedUnit" | awk '{print $1}')" = "__UNIT_SHA256__"
+/usr/bin/python3 - "$Helper" "$Unit" "$CanonicalLink" "$RestoreBarrier" "$JournalRoot" "$UnitName" <<'TM_CLEANUP_INSTALL_BOUNDARY'
+import os
+import stat
+import subprocess
+import sys
+
+helper_path, unit_path, canonical_link, barrier_path, journal_root, unit_name = sys.argv[1:]
+systemd_roots = [
+    '/etc/systemd/system',
+    '/run/systemd/system',
+    '/usr/local/lib/systemd/system',
+    '/usr/lib/systemd/system',
+    '/lib/systemd/system',
+]
+
+def safe_directory(metadata):
+    return (stat.S_ISDIR(metadata.st_mode) and not stat.S_ISLNK(metadata.st_mode) and
+            metadata.st_uid == 0 and metadata.st_gid == 0 and
+            not (stat.S_IMODE(metadata.st_mode) & 0o022))
+
+def capture_parent(target):
+    parent = os.path.abspath(os.path.dirname(target))
+    descriptor = os.open('/', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    identities = {'/': (os.fstat(descriptor).st_dev, os.fstat(descriptor).st_ino)}
+    current = '/'
+    try:
+        for component in (part for part in parent.split('/') if part):
+            try:
+                child = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=descriptor)
+            except FileNotFoundError:
+                break
+            metadata = os.fstat(child)
+            if not safe_directory(metadata):
+                os.close(child)
+                raise SystemExit(f'Cleanup install parent is unsafe: {os.path.join(current, component)}')
+            os.close(descriptor)
+            descriptor = child
+            current = os.path.join(current, component)
+            identities[current] = (metadata.st_dev, metadata.st_ino)
+    finally:
+        os.close(descriptor)
+    return identities
+
+def revalidate(identities):
+    for path, identity in identities.items():
+        metadata = os.lstat(path)
+        if not safe_directory(metadata) or (metadata.st_dev, metadata.st_ino) != identity:
+            raise SystemExit(f'Cleanup install parent changed: {path}')
+
+def ensure_directory(path, mode):
+    descriptor = os.open('/', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        components = [part for part in os.path.abspath(path).split('/') if part]
+        for index, component in enumerate(components):
+            final = index == len(components) - 1
+            try:
+                child = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=descriptor)
+            except FileNotFoundError:
+                os.mkdir(component, mode if final else 0o755, dir_fd=descriptor)
+                child = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=descriptor)
+                os.fchown(child, 0, 0)
+                os.fchmod(child, mode if final else 0o755)
+                os.fsync(descriptor)
+            metadata = os.fstat(child)
+            if not safe_directory(metadata) or (final and stat.S_IMODE(metadata.st_mode) != mode):
+                os.close(child)
+                raise SystemExit(f'Cleanup install directory is unsafe: {path}')
+            named = os.stat(component, dir_fd=descriptor, follow_symlinks=False)
+            if (named.st_dev, named.st_ino) != (metadata.st_dev, metadata.st_ino):
+                os.close(child)
+                raise SystemExit(f'Cleanup install directory was substituted: {path}')
+            os.close(descriptor)
+            descriptor = child
+    finally:
+        os.close(descriptor)
+
+def dropin_names():
+    names = {unit_name + '.d', 'service.d'}
+    parts = unit_name[:-len('.service')].split('-')
+    for length in range(1, len(parts)):
+        names.add('-'.join(parts[:length]) + '-.service.d')
+    return names
+
+identities = {}
+targets = [helper_path, unit_path, canonical_link, barrier_path, os.path.join(journal_root, '.control')]
+for target in targets:
+    for path, identity in capture_parent(target).items():
+        if path in identities and identities[path] != identity:
+            raise SystemExit(f'Cleanup install parent identity is inconsistent: {path}')
+        identities[path] = identity
+
+subprocess.run(['/usr/bin/systemctl', 'daemon-reload'], check=True)
+properties = {}
+for name in ['Id', 'Names', 'LoadState', 'FragmentPath', 'DropInPaths']:
+    result = subprocess.run(
+        ['/usr/bin/systemctl', 'show', unit_name, f'--property={name}', '--value'],
+        check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    if result.returncode != 0:
+        raise SystemExit(f'Cleanup install systemctl property is unavailable: {name}')
+    properties[name] = result.stdout.rstrip('\n')
+unit_exists = os.path.lexists(unit_path)
+expected = {
+    'Id': unit_name,
+    'Names': unit_name,
+    'LoadState': 'loaded' if unit_exists else 'not-found',
+    'FragmentPath': unit_path if unit_exists else '',
+    'DropInPaths': '',
+}
+if properties != expected:
+    raise SystemExit(f'Cleanup install effective unit is unsafe: {properties!r}')
+
+allowed_links = {canonical_link: unit_path}
+for root in systemd_roots:
+    if not os.path.lexists(root):
+        continue
+    root_status = os.lstat(root)
+    if not safe_directory(root_status):
+        raise SystemExit(f'Cleanup install systemd root is unsafe: {root}')
+    for name in dropin_names():
+        if os.path.lexists(os.path.join(root, name)):
+            raise SystemExit(f'Cleanup install found an unsupported drop-in directory: {os.path.join(root, name)}')
+    for current, directories, files in os.walk(root, topdown=True, followlinks=False):
+        for name in directories + files:
+            candidate = os.path.join(current, name)
+            if name == unit_name and candidate != unit_path and candidate not in allowed_links:
+                raise SystemExit(f'Cleanup install found an alternate fragment or alias: {candidate}')
+            if not os.path.islink(candidate):
+                continue
+            target = os.readlink(candidate)
+            resolved = os.path.realpath(os.path.join(current, target)) if not os.path.isabs(target) else os.path.realpath(target)
+            if name == unit_name or resolved == unit_path:
+                if candidate not in allowed_links or target != allowed_links[candidate]:
+                    raise SystemExit(f'Cleanup install found an unsupported alias: {candidate}')
+
+revalidate(identities)
+ensure_directory(os.path.dirname(helper_path), 0o755)
+ensure_directory(journal_root, 0o700)
+revalidate(identities)
+TM_CLEANUP_INSTALL_BOUNDARY
 test ! -e "$Stage"
 install -d -o root -g root -m 0700 "$Stage"
-printf '%s' '__CLEANUP_BASE64__' | base64 --decode > "$Stage/cleanup.sh"
-printf '%s' '__UNIT_BASE64__' | base64 --decode > "$Stage/cleanup.service"
+install -o root -g root -m 0500 "$TrustedHelper" "$Stage/cleanup.sh"
+install -o root -g root -m 0500 "$TrustedUnit" "$Stage/cleanup.service"
 chown root:root "$Stage/cleanup.sh" "$Stage/cleanup.service"
 chmod 0500 "$Stage/cleanup.sh" "$Stage/cleanup.service"
 test "$(sha256sum "$Stage/cleanup.sh" | awk '{print $1}')" = "__CLEANUP_SHA256__"
@@ -1042,10 +1206,15 @@ sync -f "$Stage/cleanup.sh"
 sync -f "$Stage/cleanup.service"
 sync -f "$Stage"
 
-install -d -o root -g root -m 0755 "$HelperRoot"
-install -d -o root -g root -m 0700 "$JournalRoot"
-test ! -L "$Helper"
-test ! -L "$Unit"
+test "$(stat -c '%U:%G:%a' "$HelperRoot")" = "root:root:755"
+test "$(stat -c '%U:%G:%a' "$JournalRoot")" = "root:root:700"
+for live_file in "$Helper" "$Unit"; do
+  if [ -e "$live_file" ] || [ -L "$live_file" ]; then
+    test -f "$live_file"
+    test ! -L "$live_file"
+    test "$(stat -c '%U:%G:%h' "$live_file")" = "root:root:1"
+  fi
+done
 HelperNext="$HelperRoot/.cleanup_stale_migration_gate.sh.next.$RunId"
 UnitNext="/etc/systemd/system/.turingmarket-gate-cleanup.service.next.$RunId"
 test ! -e "$HelperNext"
@@ -1065,18 +1234,105 @@ test "$(stat -c '%U:%G:%a:%h' "$Unit")" = "root:root:444:1"
 test "$(sha256sum "$Helper" | awk '{print $1}')" = "__CLEANUP_SHA256__"
 test "$(sha256sum "$Unit" | awk '{print $1}')" = "__UNIT_SHA256__"
 
-systemctl daemon-reload
-systemctl enable turingmarket-gate-cleanup.service >/dev/null
-systemctl start turingmarket-gate-cleanup.service
-test "$(systemctl is-enabled turingmarket-gate-cleanup.service)" = "enabled"
-test "$(systemctl show turingmarket-gate-cleanup.service --property=ConditionResult --value)" = "yes"
-test "$(systemctl show turingmarket-gate-cleanup.service --property=Result --value)" = "success"
-test "$(systemctl show turingmarket-gate-cleanup.service --property=ExecMainStatus --value)" = "0"
+/usr/bin/systemctl daemon-reload
+/usr/bin/systemctl enable turingmarket-gate-cleanup.service >/dev/null
+test -L /etc/systemd/system/multi-user.target.wants/turingmarket-gate-cleanup.service
+test "$(readlink /etc/systemd/system/multi-user.target.wants/turingmarket-gate-cleanup.service)" = "/etc/systemd/system/turingmarket-gate-cleanup.service"
+test ! -e /etc/systemd/system/turingmarket-gate-cleanup.service.d
+test ! -e /var/lib/turingmarket/migration-gate-cleanup-control/restore.json
+python3 - <<'TM_CLEANUP_INSTALL_TOPOLOGY'
+import os
+import stat
+import subprocess
+
+systemd_root = '/etc/systemd/system'
+unit_name = 'turingmarket-gate-cleanup.service'
+unit_path = os.path.join(systemd_root, unit_name)
+canonical_link_path = os.path.join(systemd_root, 'multi-user.target.wants', unit_name)
+expected = [{
+    'path': os.path.join('multi-user.target.wants', unit_name),
+    'target': unit_path,
+}]
+observed = []
+for current, directories, files in os.walk(systemd_root, topdown=True, followlinks=False):
+    for name in directories + files:
+        candidate = os.path.join(current, name)
+        if not os.path.islink(candidate):
+            continue
+        target = os.readlink(candidate)
+        resolved = os.path.realpath(os.path.join(current, target)) if not os.path.isabs(target) else os.path.realpath(target)
+        if name == unit_name or resolved == unit_path:
+            observed.append({'path': os.path.relpath(candidate, systemd_root), 'target': target})
+if sorted(observed, key=lambda entry: (entry['path'], entry['target'])) != expected:
+    raise SystemExit(f'Cleanup install topology is not canonical: {observed!r}')
+
+systemd_roots = [
+    '/etc/systemd/system',
+    '/run/systemd/system',
+    '/usr/local/lib/systemd/system',
+    '/usr/lib/systemd/system',
+    '/lib/systemd/system',
+]
+dropin_names = {unit_name + '.d', 'service.d'}
+parts = unit_name[:-len('.service')].split('-')
+for length in range(1, len(parts)):
+    dropin_names.add('-'.join(parts[:length]) + '-.service.d')
+for root in systemd_roots:
+    if not os.path.lexists(root):
+        continue
+    metadata = os.lstat(root)
+    if (not stat.S_ISDIR(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode) or
+            metadata.st_uid != 0 or metadata.st_gid != 0 or stat.S_IMODE(metadata.st_mode) & 0o022):
+        raise SystemExit(f'Cleanup install systemd root is unsafe: {root}')
+    for name in dropin_names:
+        candidate = os.path.join(root, name)
+        if os.path.lexists(candidate):
+            raise SystemExit(f'Cleanup install found an unsupported drop-in directory: {candidate}')
+    for current, directories, files in os.walk(root, topdown=True, followlinks=False):
+        for name in directories + files:
+            candidate = os.path.join(current, name)
+            if name == unit_name and candidate not in (unit_path, canonical_link_path):
+                raise SystemExit(f'Cleanup install found an alternate fragment or alias: {candidate}')
+            if not os.path.islink(candidate):
+                continue
+            target = os.readlink(candidate)
+            resolved = os.path.realpath(os.path.join(current, target)) if not os.path.isabs(target) else os.path.realpath(target)
+            if (name == unit_name or resolved == unit_path) and candidate != canonical_link_path:
+                raise SystemExit(f'Cleanup install found an unsupported alias: {candidate}')
+
+properties = {}
+for name in ['Id', 'Names', 'LoadState', 'FragmentPath', 'DropInPaths']:
+    result = subprocess.run(
+        ['/usr/bin/systemctl', 'show', unit_name, f'--property={name}', '--value'],
+        check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    if result.returncode != 0:
+        raise SystemExit(f'Cleanup install systemctl property is unavailable: {name}')
+    properties[name] = result.stdout.rstrip('\n')
+expected_properties = {
+    'Id': unit_name,
+    'Names': unit_name,
+    'LoadState': 'loaded',
+    'FragmentPath': unit_path,
+    'DropInPaths': '',
+}
+if properties != expected_properties:
+    raise SystemExit(f'Cleanup install effective unit did not converge: {properties!r}')
+TM_CLEANUP_INSTALL_TOPOLOGY
+/usr/bin/systemctl start turingmarket-gate-cleanup.service
+test "$(/usr/bin/systemctl is-enabled turingmarket-gate-cleanup.service)" = "enabled"
+test "$(/usr/bin/systemctl show turingmarket-gate-cleanup.service --property=Id --value)" = "turingmarket-gate-cleanup.service"
+test "$(/usr/bin/systemctl show turingmarket-gate-cleanup.service --property=Names --value)" = "turingmarket-gate-cleanup.service"
+test "$(/usr/bin/systemctl show turingmarket-gate-cleanup.service --property=FragmentPath --value)" = "/etc/systemd/system/turingmarket-gate-cleanup.service"
+test -z "$(/usr/bin/systemctl show turingmarket-gate-cleanup.service --property=DropInPaths --value)"
+test "$(/usr/bin/systemctl show turingmarket-gate-cleanup.service --property=ConditionResult --value)" = "yes"
+test "$(/usr/bin/systemctl show turingmarket-gate-cleanup.service --property=Result --value)" = "success"
+test "$(/usr/bin/systemctl show turingmarket-gate-cleanup.service --property=ExecMainStatus --value)" = "0"
 if find "$JournalRoot" -mindepth 1 -maxdepth 1 -name '*.run.json' -print -quit | grep -q .; then
   echo "Migration gate cleanup left a journal" >&2
   exit 1
 fi
-if systemctl list-units --type=service --state=running --no-legend 'turingmarket-migration-gate-*.service' | grep -q .; then
+if /usr/bin/systemctl list-units --type=service --state=running --no-legend 'turingmarket-migration-gate-*.service' | grep -q .; then
   echo "A stale migration gate unit remains active" >&2
   exit 1
 fi
@@ -1087,10 +1343,9 @@ printf '%s\n' 'MIGRATION_GATE_SANITIZER_PREFLIGHT_OK'
 '@
     $remoteScript = $remoteScript.Replace('__REMOTE_ROOT__', $REMOTE_ROOT)
     $remoteScript = $remoteScript.Replace('__RUN_ID__', $deploymentRunId)
-    $remoteScript = $remoteScript.Replace('__CLEANUP_BASE64__', $cleanupBase64)
-    $remoteScript = $remoteScript.Replace('__UNIT_BASE64__', $unitBase64)
-    $remoteScript = $remoteScript.Replace('__CLEANUP_SHA256__', $cleanupSha256)
-    $remoteScript = $remoteScript.Replace('__UNIT_SHA256__', $unitSha256)
+    $remoteScript = $remoteScript.Replace('__TRUSTED_SOURCE_BUNDLE__', $TRUSTED_SOURCE_BUNDLE_REMOTE_PATH)
+    $remoteScript = $remoteScript.Replace('__CLEANUP_SHA256__', $EXPECTED_TRUSTED_MIGRATION_CLEANUP_HELPER_SHA256)
+    $remoteScript = $remoteScript.Replace('__UNIT_SHA256__', $EXPECTED_TRUSTED_MIGRATION_CLEANUP_UNIT_SHA256)
     Invoke-RemoteBash -Script $remoteScript -FailureMessage "Migration gate sanitizer installation or preflight failed" -RequireDeploymentLock
 }
 
@@ -1393,6 +1648,8 @@ function Get-RemoteInterruptedDeploymentObservation {
 set -euo pipefail
 RemoteRoot="__REMOTE_ROOT__"
 LockDir="$RemoteRoot/.deploy-v030.lock"
+ParserRollbackFailure="$LockDir/parser-rollback.failed"
+ParserRollbackFailureNext="$ParserRollbackFailure.next"
 OperationFence="$RemoteRoot/.deploy-v030.operation.lock"
 command -v flock >/dev/null
 test -f "$OperationFence"
@@ -1428,7 +1685,7 @@ if not re.fullmatch(r'[0-9a-f]{32}', metadata.get('ownerToken', '')):
     raise SystemExit('Invalid interrupted deployment owner token')
 if not re.fullmatch(r'[0-9a-f]{32}', owner):
     raise SystemExit('Invalid lifecycle owner mirror')
-allowed = {'locked', 'candidate-ready', 'mutation-intent', 'maintenance-entered', 'writers-stopped', 'snapshot-ready', 'prior-marker-archived', 'nginx-candidate-staged', 'mutation-started', 'accepted', 'accepted-public-enabled', 'cutover-complete'}
+allowed = {'locked', 'candidate-ready', 'mutation-intent', 'maintenance-entered', 'writers-stopped', 'snapshot-ready', 'prior-marker-archived', 'nginx-candidate-staged', 'mutation-started', 'release-replay-complete', 'accepted', 'accepted-public-enabled', 'cutover-complete'}
 if phase not in allowed:
     raise SystemExit('Unknown interrupted deployment phase')
 print(json.dumps({'runId': metadata['runId'], 'ownerToken': metadata['ownerToken'], 'phase': phase}, separators=(',', ':')))
@@ -1470,9 +1727,13 @@ set -euo pipefail
 RemoteRoot="__REMOTE_ROOT__"
 CandidateRoot="__CANDIDATE_ROOT__"
 LockDir="$RemoteRoot/.deploy-v030.lock"
+ParserRollbackFailure="$LockDir/parser-rollback.failed"
+ParserRollbackFailureNext="$ParserRollbackFailure.next"
+TrustedSourceBundle="__TRUSTED_SOURCE_BUNDLE__"
 ExpectedOwner="__EXPECTED_OWNER__"
 NewOwner="__NEW_LOCK_TOKEN__"
 RootUid="__ROOT_UID__"
+GateUser="__GATE_USER__"
 test -d "$LockDir"
 test ! -L "$LockDir"
 test "$(stat -c '%u:%a' "$LockDir")" = "$RootUid:700"
@@ -1498,7 +1759,7 @@ import sys
 root, expectedUidRaw = sys.argv[1:]
 expectedUid = int(expectedUidRaw)
 allowedFiles = {
-    'run.json', 'owner', 'phase', 'upload.sha256', 'candidate_digest.py',
+    'run.json', 'owner', 'phase', 'upload.sha256', 'candidate_digest.py', 'candidate_digest.py.next',
     'candidate-tree.sha256', 'accepted', 'nginx-maintenance.conf.next',
     'nginx-candidate-public.conf', 'nginx-candidate-public.sha256',
     'nginx-api-gate.conf', 'nginx-release-replay.conf',
@@ -1506,18 +1767,64 @@ allowedFiles = {
     'release-replay-claim', 'release-replay.stdout.log',
     'release-replay.stderr.log', 'release-replay-probe.json',
     'release-replay-request.json', 'release-replay-request.headers',
-    'release-replay-retry.body', 'release-replay-retry.headers'
+    'release-replay-retry.body', 'release-replay-retry.headers',
+    'parser-rollback.failed', 'public-gate-guard', 'public-gate-guard.next',
+    'public-gate-guard.transaction-lock'
 }
-allowedDirectories = {'migration-rehearsal', 'restore-v050'}
+allowedDirectories = {'migration-rehearsal', 'restore-v050', 'parser-appliance'}
 allowedLinks = {
     'nginx-maintenance.link': '/etc/nginx/sites-available/turingmarket-maintenance',
     'nginx-public.link': '/etc/nginx/sites-available/turingmarket',
     'nginx-resume-old.link': '/etc/nginx/sites-available/turingmarket',
     'nginx-finalize-new.link': '/etc/nginx/sites-available/turingmarket',
+    'nginx-public-guard.link': '/etc/nginx/sites-available/turingmarket-maintenance',
 }
 rehearsal = False
+rootGid = grp.getgrnam('root').gr_gid
+wwwDataGid = grp.getgrnam('www-data').gr_gid
+
+def validateRootOnlyTree(rootPath, expectedUid):
+    rootStatus = os.lstat(rootPath)
+    if not stat.S_ISDIR(rootStatus.st_mode) or rootStatus.st_uid != expectedUid:
+        raise SystemExit('Unsafe root-only lifecycle directory')
+    if stat.S_IMODE(rootStatus.st_mode) & 0o022:
+        raise SystemExit('Writable root-only lifecycle directory')
+    for current, directories, files in os.walk(rootPath, topdown=True, followlinks=False):
+        for name in directories:
+            path = os.path.join(current, name)
+            status = os.lstat(path)
+            if not stat.S_ISDIR(status.st_mode) or status.st_uid != expectedUid:
+                raise SystemExit('Unsafe root-only lifecycle directory entry')
+            if stat.S_IMODE(status.st_mode) & 0o022:
+                raise SystemExit('Writable root-only lifecycle directory entry')
+        for name in files:
+            path = os.path.join(current, name)
+            status = os.lstat(path)
+            if not stat.S_ISREG(status.st_mode) or status.st_uid != expectedUid or status.st_nlink != 1:
+                raise SystemExit('Unsafe root-only lifecycle file entry')
+            if stat.S_IMODE(status.st_mode) & 0o022:
+                raise SystemExit('Writable root-only lifecycle file entry')
+
+rootDescriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
 for entry in os.scandir(root):
     metadata = entry.stat(follow_symlinks=False)
+    if entry.name.startswith('public-gate-guard.transaction-lock'):
+        if entry.name != 'public-gate-guard.transaction-lock':
+            raise SystemExit(f'Unknown lifecycle lock entry: {entry.name}')
+        descriptor = os.open(entry.name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=rootDescriptor)
+        try:
+            lockStatus = os.fstat(descriptor)
+            if not stat.S_ISREG(lockStatus.st_mode):
+                raise SystemExit(f'Unsafe lifecycle lock file: {entry.name}')
+            if lockStatus.st_uid != expectedUid or lockStatus.st_gid != rootGid:
+                raise SystemExit(f'Unsafe lifecycle lock file: {entry.name}')
+            if stat.S_IMODE(lockStatus.st_mode) != 0o600 or lockStatus.st_nlink != 1 or lockStatus.st_size != 0:
+                raise SystemExit(f'Unsafe lifecycle lock file: {entry.name}')
+            if os.listxattr(descriptor):
+                raise SystemExit(f'Unsafe lifecycle lock file: {entry.name}')
+        finally:
+            os.close(descriptor)
+        continue
     if entry.is_symlink():
         if entry.name not in allowedLinks or os.readlink(entry.path) != allowedLinks[entry.name]:
             raise SystemExit(f'Unknown lifecycle lock entry: {entry.name}')
@@ -1528,8 +1835,7 @@ for entry in os.scandir(root):
         if entry.name not in allowedFiles and not entry.name.endswith('.next'):
             raise SystemExit(f'Unknown lifecycle lock entry: {entry.name}')
         if entry.name == 'nginx-release-replay.conf':
-            expectedGid = grp.getgrnam('www-data').gr_gid
-            if metadata.st_gid != expectedGid or stat.S_IMODE(metadata.st_mode) != 0o640 or metadata.st_nlink != 1:
+            if metadata.st_gid != wwwDataGid or stat.S_IMODE(metadata.st_mode) != 0o640 or metadata.st_nlink != 1:
                 raise SystemExit(f'Unsafe lifecycle lock file: {entry.name}')
         elif stat.S_IMODE(metadata.st_mode) != 0o600 or metadata.st_nlink != 1:
             raise SystemExit(f'Unsafe lifecycle lock file: {entry.name}')
@@ -1537,6 +1843,8 @@ for entry in os.scandir(root):
     if entry.is_dir(follow_symlinks=False):
         if entry.name not in allowedDirectories or stat.S_IMODE(metadata.st_mode) != 0o700:
             raise SystemExit(f'Unknown lifecycle lock entry: {entry.name}')
+        if entry.name == 'parser-appliance':
+            validateRootOnlyTree(entry.path, expectedUid)
         if entry.name == 'migration-rehearsal':
             rehearsal = True
             children = list(os.scandir(entry.path))
@@ -1550,19 +1858,227 @@ for entry in os.scandir(root):
                     raise SystemExit('Unsafe migration-rehearsal journal metadata')
         continue
     raise SystemExit(f'Unknown lifecycle lock entry: {entry.name}')
+os.close(rootDescriptor)
 print('migration-rehearsal' if rehearsal else 'clean')
 PY
 )"
 
+discover_candidate_test_mount() {
+  local CandidateRelease="$1" ExpectedCandidateTestMount="${2:-}"
+  python3 - "$CandidateRelease" "$ExpectedCandidateTestMount" <<'PY'
+import os
+import re
+import sys
+
+release, expected = sys.argv[1:]
+release = os.path.realpath(release)
+expected = os.path.realpath(expected) if expected else ''
+
+def decode_mount_path(value):
+    return re.sub(r'\\([0-7]{3})', lambda match: chr(int(match.group(1), 8)), value)
+
+mounts = []
+with open('/proc/self/mountinfo', encoding='ascii') as handle:
+    for line in handle:
+        fields = line.split(' - ', 1)[0].split()
+        if len(fields) < 5:
+            raise SystemExit('Malformed mountinfo entry')
+        mount_path = os.path.realpath(decode_mount_path(fields[4]))
+        try:
+            inside_release = os.path.commonpath([release, mount_path]) == release
+        except ValueError:
+            inside_release = False
+        if mount_path == release:
+            raise SystemExit('Unexpected candidate release mount')
+        if inside_release:
+            mounts.append(mount_path)
+
+mounts = sorted(set(mounts))
+if len(mounts) > 1:
+    raise SystemExit('Unexpected nested candidate mount')
+if not mounts:
+    print('-')
+    raise SystemExit(0)
+
+candidate_mount = mounts[0]
+pattern = re.compile(re.escape(release) + r'/tmp/deploy-v060-gate-[0-9]{8}-[0-9]{6}')
+if not pattern.fullmatch(candidate_mount):
+    raise SystemExit('Unexpected nested candidate mount')
+if expected and candidate_mount != expected:
+    raise SystemExit('Unexpected nested candidate mount')
+print(candidate_mount)
+PY
+}
+
+unmount_candidate_test_tmpfs() {
+  local CandidateRelease="$1" ExpectedCandidateTestMount="${2:-}"
+  local CandidateTestMount CandidateTestFsType RemainingCandidateMount
+  CandidateTestMount="$(discover_candidate_test_mount "$CandidateRelease" "$ExpectedCandidateTestMount")"
+  if [ "$CandidateTestMount" = "-" ]; then return 0; fi
+  CandidateTestFsType="$(findmnt -n -o FSTYPE --mountpoint "$CandidateTestMount")"
+  test "$CandidateTestFsType" = "tmpfs"
+  umount -- "$CandidateTestMount"
+  ! mountpoint -q "$CandidateTestMount"
+  RemainingCandidateMount="$(discover_candidate_test_mount "$CandidateRelease" "$ExpectedCandidateTestMount")"
+  test "$RemainingCandidateMount" = "-"
+}
+
+command -v findmnt >/dev/null
+command -v mountpoint >/dev/null
+command -v umount >/dev/null
+command -v pkill >/dev/null
+command -v pgrep >/dev/null
+RunStamp="$(basename "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["releaseRoot"])' "$LockDir/run.json")")"
+RunStamp="${RunStamp##v060-crm-sales-workspace-}"
+[[ "$RunStamp" =~ ^[0-9]{8}-[0-9]{6}$ ]]
+RunId="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["runId"])' "$LockDir/run.json")"
+[[ "$RunId" =~ ^[0-9a-f]{32}$ ]]
+CandidatePathForUnit="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["candidatePath"])' "$LockDir/run.json")"
+test "$CandidatePathForUnit" = "$CandidateRoot/v060-crm-sales-workspace-$RunStamp/platform"
+ReleaseRootForUnit="${CandidatePathForUnit%/platform}"
+TestRootForUnit="$ReleaseRootForUnit/tmp/deploy-v060-gate-$RunStamp"
+
+validate_public_guard_unit_for_phase() {
+  local LifecyclePhase="$1" Unit="$2" Family Token
+  if [[ ! "$Unit" =~ ^turingmarket-(cutover|restore|resume|finalize)-public-guard-([0-9a-f]{32})\.service$ ]]; then
+    echo "Unexpected public guard unit name" >&2
+    return 1
+  fi
+  Family="${BASH_REMATCH[1]}"
+  Token="${BASH_REMATCH[2]}"
+  test -n "$Token"
+  case "$Family" in
+    cutover|finalize)
+      if [ "$Token" != "$RunId" ]; then
+        echo "Public guard unit generation does not match lifecycle run" >&2
+        return 1
+      fi
+      ;;
+  esac
+  case "$Family:$LifecyclePhase" in
+    resume:locked|resume:candidate-ready|resume:mutation-intent|resume:maintenance-entered|resume:writers-stopped|resume:snapshot-ready|resume:prior-marker-archived|resume:nginx-candidate-staged) ;;
+    restore:mutation-started|restore:release-replay-complete) ;;
+    cutover:accepted|cutover:accepted-public-enabled) ;;
+    finalize:accepted|finalize:accepted-public-enabled|finalize:cutover-complete) ;;
+    *) echo "Public guard unit family is invalid for lifecycle phase" >&2; return 1 ;;
+  esac
+}
+
+drain_public_guard_unit() {
+  local PublicGuardUnit="$1" PublicGuardLoadState PublicGuardUser PublicGuardFragmentPath PublicGuardControlGroup
+  validate_public_guard_unit_for_phase "$Phase" "$PublicGuardUnit"
+  PublicGuardLoadState="$(systemctl show "$PublicGuardUnit" --property=LoadState --value 2>/dev/null || true)"
+  case "$PublicGuardLoadState" in
+    not-found) return 0 ;;
+    loaded) ;;
+    *) echo "Unexpected public guard LoadState" >&2; return 1 ;;
+  esac
+  PublicGuardUser="$(systemctl show "$PublicGuardUnit" --property=User --value)"
+  PublicGuardFragmentPath="$(systemctl show "$PublicGuardUnit" --property=FragmentPath --value)"
+  PublicGuardControlGroup="$(systemctl show "$PublicGuardUnit" --property=ControlGroup --value)"
+  test "$PublicGuardUser" = "root"
+  test "$PublicGuardFragmentPath" = "/run/systemd/transient/$PublicGuardUnit"
+  test "$PublicGuardControlGroup" = "/system.slice/$PublicGuardUnit"
+  systemctl stop "$PublicGuardUnit" >/dev/null 2>&1 || true
+  systemctl kill --kill-who=all --signal=KILL "$PublicGuardUnit" >/dev/null 2>&1 || true
+  if [ -f "/sys/fs/cgroup$PublicGuardControlGroup/cgroup.procs" ]; then
+    for _attempt in $(seq 1 50); do
+      [ ! -s "/sys/fs/cgroup$PublicGuardControlGroup/cgroup.procs" ] && break
+      sleep 0.1
+    done
+    test ! -s "/sys/fs/cgroup$PublicGuardControlGroup/cgroup.procs"
+  fi
+  test "$(systemctl show "$PublicGuardUnit" --property=MainPID --value)" = "0"
+  systemctl reset-failed "$PublicGuardUnit" >/dev/null 2>&1 || true
+}
+
+if [ -e "$LockDir/public-gate-guard.transaction-lock" ]; then
+  PublicGuardHelper="$TrustedSourceBundle/server/scripts/public_release_guard.sh"
+  ExpectedPublicGuardSha256="__TRUSTED_PUBLIC_GUARD_SHA256__"
+  test -f "$PublicGuardHelper"
+  test ! -L "$PublicGuardHelper"
+  test "$(stat -c '%U:%G:%a:%h' "$PublicGuardHelper")" = "root:root:444:1"
+  test "$(sha256sum "$PublicGuardHelper" | awk '{print $1}')" = "$ExpectedPublicGuardSha256"
+  public_release_guard() {
+    /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin /bin/bash --noprofile --norc "$PublicGuardHelper" "$@"
+  }
+  PublicGuardStateFile="$LockDir/public-gate-guard"
+  if [ -e "$PublicGuardStateFile" ] || [ -L "$PublicGuardStateFile" ]; then
+    PublicGuardRecord="$(public_release_guard read-record --state-file "$PublicGuardStateFile")"
+  else
+    PublicGuardRecord="absent"
+  fi
+  CapturedPublicGuardUnit=""
+  case "$PublicGuardRecord" in
+    armed\|*)
+      IFS='|' read -r PublicGuardState CapturedPublicGuardUnit PublicGuardPid PublicGuardStartTicks PublicGuardDeadline <<< "$PublicGuardRecord"
+      validate_public_guard_unit_for_phase "$Phase" "$CapturedPublicGuardUnit"
+      ;;
+    absent|closed|verified) ;;
+    *) echo "Unexpected trusted public guard record" >&2; exit 1 ;;
+  esac
+  public_release_guard close \
+    --state-file "$LockDir/public-gate-guard" \
+    --maintenance-source "$LockDir/nginx-api-gate.conf" \
+    --maintenance-config /etc/nginx/sites-available/turingmarket-maintenance \
+    --recovery-link "$LockDir/nginx-public-guard.link" \
+    --site-link /etc/nginx/sites-enabled/turingmarket
+  PublicGuardUnits=()
+  if [ -n "$CapturedPublicGuardUnit" ]; then PublicGuardUnits+=("$CapturedPublicGuardUnit"); fi
+  PublicGuardUnitInventory="$(systemctl list-units --all --type=service --no-legend --plain --no-pager)"
+  while read -r PublicGuardUnit _; do
+    [ -z "$PublicGuardUnit" ] && continue
+    case "$PublicGuardUnit" in
+      *public-guard*) validate_public_guard_unit_for_phase "$Phase" "$PublicGuardUnit" ;;
+      *) continue ;;
+    esac
+    AlreadyQueued=0
+    for QueuedPublicGuardUnit in "${PublicGuardUnits[@]}"; do
+      if [ "$QueuedPublicGuardUnit" = "$PublicGuardUnit" ]; then AlreadyQueued=1; break; fi
+    done
+    if [ "$AlreadyQueued" = "0" ]; then PublicGuardUnits+=("$PublicGuardUnit"); fi
+  done <<< "$PublicGuardUnitInventory"
+  for PublicGuardUnit in "${PublicGuardUnits[@]}"; do
+    drain_public_guard_unit "$PublicGuardUnit"
+  done
+fi
+
+for CandidateUnitKind in candidate-dependency candidate-dependency-build candidate-offline; do
+  CandidateUnit="turingmarket-$CandidateUnitKind-$RunStamp.service"
+  case "$CandidateUnitKind" in
+    candidate-dependency) ExpectedWorkingDirectory="$TestRootForUnit/dependency-stage" ;;
+    candidate-dependency-build) ExpectedWorkingDirectory="$TestRootForUnit/dependency-stage/server" ;;
+    candidate-offline) ExpectedWorkingDirectory="$CandidatePathForUnit" ;;
+  esac
+  CandidateLoadState="$(systemctl show "$CandidateUnit" --property=LoadState --value 2>/dev/null || true)"
+  if [ -n "$CandidateLoadState" ] && [ "$CandidateLoadState" != "not-found" ]; then
+    test "$(systemctl show "$CandidateUnit" --property=User --value)" = "turingmarket-gate"
+    test "$(systemctl show "$CandidateUnit" --property=WorkingDirectory --value)" = "$ExpectedWorkingDirectory"
+    CandidateControlGroup="$(systemctl show "$CandidateUnit" --property=ControlGroup --value)"
+    case "$CandidateControlGroup" in
+      "/system.slice/$CandidateUnit") ;;
+      *) echo "Unexpected candidate gate ControlGroup" >&2; exit 1 ;;
+    esac
+    systemctl kill --kill-who=all --signal=KILL "$CandidateUnit" >/dev/null 2>&1 || true
+    systemctl stop "$CandidateUnit" >/dev/null 2>&1 || true
+    if [ -f "/sys/fs/cgroup$CandidateControlGroup/cgroup.procs" ]; then
+      for _attempt in $(seq 1 50); do
+        [ ! -s "/sys/fs/cgroup$CandidateControlGroup/cgroup.procs" ] && break
+        sleep 0.1
+      done
+      test ! -s "/sys/fs/cgroup$CandidateControlGroup/cgroup.procs"
+    fi
+    test "$(systemctl show "$CandidateUnit" --property=MainPID --value 2>/dev/null || printf 0)" = "0"
+    systemctl reset-failed "$CandidateUnit" >/dev/null 2>&1 || true
+  fi
+done
+
 if [ "$LifecycleResidue" = "migration-rehearsal" ]; then
-  RunStamp="$(basename "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["releaseRoot"])' "$LockDir/run.json")")"
-  RunStamp="${RunStamp##v060-crm-sales-workspace-}"
-  CandidatePathForUnit="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["candidatePath"])' "$LockDir/run.json")"
   MigrationUnit="turingmarket-migration-gate-$RunStamp.service"
   UnitLoadState="$(systemctl show "$MigrationUnit" --property=LoadState --value 2>/dev/null || printf not-found)"
   if [ "$UnitLoadState" != "not-found" ]; then
     test "$(systemctl show "$MigrationUnit" --property=User --value)" = "turingmarket-gate"
-    test "$(systemctl show "$MigrationUnit" --property=WorkingDirectory --value)" = "$CandidatePathForUnit/server"
+    test "$(systemctl show "$MigrationUnit" --property=WorkingDirectory --value)" = "$TrustedSourceBundle/server"
     MigrationControlGroup="$(systemctl show "$MigrationUnit" --property=ControlGroup --value)"
     case "$MigrationControlGroup" in
       /system.slice/turingmarket-migration-gate-*.service) ;;
@@ -1591,6 +2107,17 @@ if [ "$LifecycleResidue" = "migration-rehearsal" ]; then
   rmdir "$RehearsalQuarantine"
   sync -f "$LockDir"
 fi
+
+pkill -KILL -u "$GateUser" 2>/dev/null || true
+for _attempt in $(seq 1 50); do
+  if ! pgrep -u "$GateUser" >/dev/null; then break; fi
+  sleep 0.1
+done
+if pgrep -u "$GateUser" >/dev/null; then
+  echo "Gate user processes survived interrupted deployment takeover" >&2
+  exit 1
+fi
+unmount_candidate_test_tmpfs "$ReleaseRootForUnit" "$TestRootForUnit"
 
 for link in nginx-maintenance.link nginx-public.link nginx-resume-old.link nginx-finalize-new.link; do
   if [ -L "$LockDir/$link" ]; then rm -f -- "$LockDir/$link"; fi
@@ -1676,6 +2203,29 @@ if [ "$BackupReady" = "1" ]; then
   (cd "$BackupAbsolute" && sha256sum --check --status SHA256SUMS)
 fi
 
+if [ -e "$ParserRollbackFailure" ] || [ -L "$ParserRollbackFailure" ] ||
+   [ -e "$ParserRollbackFailureNext" ] || [ -L "$ParserRollbackFailureNext" ]; then
+  case "$Phase" in
+    mutation-started|release-replay-complete) ;;
+    *) echo "Parser rollback failure marker exists outside a rollback phase" >&2; exit 1 ;;
+  esac
+  ExpectedRestoreIdentity="$(
+    printf '%s\n%s\n' \
+      "$BackupPath" \
+      "$(sha256sum "$BackupAbsolute/cutover-snapshot/SHA256SUMS" | awk '{print $1}')" |
+      sha256sum | awk '{print $1}'
+  )"
+  ExpectedParserRollbackFailure="PARSER_ROLLBACK_FAILED backup=$BackupPath restore=$ExpectedRestoreIdentity"
+  for marker in "$ParserRollbackFailure" "$ParserRollbackFailureNext"; do
+    if [ -e "$marker" ] || [ -L "$marker" ]; then
+      test -f "$marker"
+      test ! -L "$marker"
+      test "$(stat -c '%u:%g:%a:%h' "$marker")" = "$RootUid:$RootUid:600:1"
+      test "$(cat "$marker")" = "$ExpectedParserRollbackFailure"
+    fi
+  done
+fi
+
 NextGeneration=$((RecoveryGeneration + 1))
 QuarantinePath=""
 case "$Phase" in
@@ -1710,6 +2260,7 @@ python3 - \
   "$NewOwner" \
   "$NextGeneration" \
   "$QuarantinePath" <<'PY'
+import hashlib
 import json
 import os
 import sys
@@ -1928,9 +2479,12 @@ TM_LIFECYCLE_TAKEOVER
 '@
     $remoteScript = $remoteScript.Replace('__REMOTE_ROOT__', $REMOTE_ROOT)
     $remoteScript = $remoteScript.Replace('__CANDIDATE_ROOT__', $CANDIDATE_ROOT)
+    $remoteScript = $remoteScript.Replace('__TRUSTED_SOURCE_BUNDLE__', $TRUSTED_SOURCE_BUNDLE_REMOTE_PATH)
+    $remoteScript = $remoteScript.Replace('__TRUSTED_PUBLIC_GUARD_SHA256__', $EXPECTED_TRUSTED_PUBLIC_GUARD_SHA256)
     $remoteScript = $remoteScript.Replace('__EXPECTED_OWNER__', $expectedOwner)
     $remoteScript = $remoteScript.Replace('__NEW_LOCK_TOKEN__', $newOwner)
     $remoteScript = $remoteScript.Replace('__ROOT_UID__', '0')
+    $remoteScript = $remoteScript.Replace('__GATE_USER__', $GATE_USER)
     Invoke-RemoteBash -Script $remoteScript -FailureMessage "Interrupted deployment takeover failed"
     $script:deploymentLockToken = $newOwner
 }
@@ -2000,6 +2554,369 @@ $requiredPublicAssets = @(
     "client/features/ppt_preview_runtime.js"
 )
 
+function Invoke-RemoteParserCandidatePreparation {
+    param(
+        [Parameter(Mandatory = $true)][string]$ReleaseRoot,
+        [Parameter(Mandatory = $true)][string]$CandidateDir,
+        [Parameter(Mandatory = $true)][string]$BackupPath
+    )
+
+    Assert-RollbackBackupPath -BackupPath $BackupPath
+    $remoteScript = @'
+set -euo pipefail
+RemoteRoot="__REMOTE_ROOT__"
+CandidateRoot="__CANDIDATE_ROOT__"
+ReleaseRoot="__RELEASE_ROOT__"
+CandidateDir="__CANDIDATE_DIR__"
+GateUser="__GATE_USER__"
+BackupParent="$RemoteRoot/backups"
+LockDir="$RemoteRoot/.deploy-v030.lock"
+TrustedSourceGate="__TRUSTED_SOURCE_GATE__"
+TrustedSourceManifest="__TRUSTED_SOURCE_MANIFEST__"
+TrustedSourceBundle="__TRUSTED_SOURCE_BUNDLE__"
+ExpectedTrustedSourceGateSha256="__TRUSTED_SOURCE_GATE_SHA256__"
+ExpectedTrustedSourceManifestSha256="__TRUSTED_SOURCE_MANIFEST_SHA256__"
+ExpectedTrustedMigrationVerifierSha256="__TRUSTED_MIGRATION_VERIFIER_SHA256__"
+ExpectedTrustedParserVerifierSha256="__TRUSTED_PARSER_VERIFIER_SHA256__"
+ParserApplianceRoot="$LockDir/parser-appliance"
+ParserSourceRoot="$ParserApplianceRoot/source"
+ParserDependencyCache="$ParserApplianceRoot/dependency-cache"
+ParserDependencyCacheStage="$ParserApplianceRoot/dependency-cache.stage"
+ParserRuntimeStage="$ParserApplianceRoot/runtime.stage"
+ParserEvidence="$ParserApplianceRoot/runtime.evidence.json"
+ParserChecksums="$ParserApplianceRoot/runtime.sha256"
+ParserProvisioner="$ParserApplianceRoot/provisioner"
+ParserBuild="$ParserApplianceRoot/build-runtime"
+ParserCapacityPlanner="$ParserApplianceRoot/check-cutover-capacity"
+ParserTrustedVerifier="$TrustedSourceBundle/server/scripts/trusted_parser_runtime_verifier.js"
+ParserTrustedManifest="$TrustedSourceBundle/server/systemd/turingmarket-parser.manifest.json"
+ParserRuntimeBytes=__PARSER_RUNTIME_BYTES__
+ParserRequiredBytes=$((ParserRuntimeBytes * 4 + 536870912))
+
+case "$ReleaseRoot" in
+  "$CandidateRoot"/v060-crm-sales-workspace-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]) ;;
+  *) echo "Parser candidate release path is invalid" >&2; exit 1 ;;
+esac
+test -d "$ReleaseRoot"
+test ! -L "$ReleaseRoot"
+test -d "$CandidateDir/server"
+test ! -L "$CandidateDir"
+test "$(realpath -e "$(dirname "$ReleaseRoot")")" = "$CandidateRoot"
+test "$(realpath -e "$ReleaseRoot")" = "$CandidateRoot/$(basename "$ReleaseRoot")"
+test -d "$BackupParent"
+test ! -L "$BackupParent"
+test -f "$LockDir/upload.sha256"
+test ! -L "$LockDir/upload.sha256"
+test "$(stat -c '%U:%G:%a:%h' "$LockDir/upload.sha256")" = "root:root:600:1"
+(cd "$ReleaseRoot" && sha256sum --check --status "$LockDir/upload.sha256")
+test -f "$LockDir/candidate-tree.sha256"
+test ! -L "$LockDir/candidate-tree.sha256"
+test "$(stat -c '%U:%G:%a:%h' "$LockDir/candidate-tree.sha256")" = "root:root:600:1"
+CandidateTreeSha256="$(cat "$LockDir/candidate-tree.sha256")"
+[[ "$CandidateTreeSha256" =~ ^[0-9a-f]{64}$ ]]
+test "$(python3 "$LockDir/candidate_digest.py" "$CandidateDir")" = "$CandidateTreeSha256"
+
+test -f "$TrustedSourceGate"
+test ! -L "$TrustedSourceGate"
+test "$(stat -c '%U:%G:%a:%h' "$TrustedSourceGate")" = "root:root:444:1"
+test "$(sha256sum "$TrustedSourceGate" | awk '{print $1}')" = "$ExpectedTrustedSourceGateSha256"
+test -f "$TrustedSourceManifest"
+test ! -L "$TrustedSourceManifest"
+test "$(stat -c '%U:%G:%a:%h' "$TrustedSourceManifest")" = "root:root:444:1"
+test "$(sha256sum "$TrustedSourceManifest" | awk '{print $1}')" = "$ExpectedTrustedSourceManifestSha256"
+/usr/bin/node "$TrustedSourceGate" stage \
+  --candidate-root "$CandidateDir" \
+  --bundle-root "$TrustedSourceBundle" \
+  --manifest "$TrustedSourceManifest" \
+  --expected-self-sha256 "$ExpectedTrustedSourceGateSha256" \
+  --expected-manifest-sha256 "$ExpectedTrustedSourceManifestSha256" \
+  --expected-verifier-sha256 "$ExpectedTrustedMigrationVerifierSha256" >/dev/null
+
+test ! -e "$ParserApplianceRoot"
+install -d -o root -g root -m 0700 "$ParserApplianceRoot" "$ParserSourceRoot"
+test ! -e "$ParserDependencyCache"
+test ! -e "$ParserDependencyCacheStage"
+test ! -e "$ParserRuntimeStage"
+test ! -e "$ParserEvidence"
+test ! -e "$ParserChecksums"
+
+copy_trusted_parser_source() {
+  local RelativePath="$1" ServerRelativePath TrustedSource TargetSource
+  local ExpectedSourceSha256 TrustedSha256 TargetSha256 TrustedMetadata TrustedMode
+  ServerRelativePath="${RelativePath#server/}"
+  test "$ServerRelativePath" != "$RelativePath"
+  TrustedSource="$TrustedSourceBundle/$RelativePath"
+  TargetSource="$ParserSourceRoot/$ServerRelativePath"
+  test -f "$TrustedSource"
+  test ! -L "$TrustedSource"
+  test "$(realpath -e "$TrustedSource")" = "$TrustedSource"
+  TrustedMetadata="$(stat -c '%U:%G:%a:%h' "$TrustedSource")"
+  [[ "$TrustedMetadata" =~ ^root:root:[0-7]+:1$ ]]
+  TrustedMode="$(stat -c '%a' "$TrustedSource")"
+  (( (8#$TrustedMode & 0022) == 0 ))
+  ExpectedSourceSha256="$(python3 - "$TrustedSourceManifest" "$RelativePath" <<'PY'
+import json
+import re
+import sys
+manifest_path, relative_path = sys.argv[1:]
+manifest = json.load(open(manifest_path, encoding='utf-8'))
+matches = [entry.get('sha256') for entry in manifest.get('files', []) if entry.get('path') == relative_path]
+if len(matches) != 1 or not re.fullmatch(r'[0-9a-f]{64}', matches[0] or ''):
+    raise SystemExit('trusted parser source is not uniquely pinned')
+print(matches[0])
+PY
+)"
+  TrustedSha256="$(sha256sum "$TrustedSource" | awk '{print $1}')"
+  test "$TrustedSha256" = "$ExpectedSourceSha256"
+  test ! -e "$TargetSource"
+  install -D -o root -g root -m 0444 "$TrustedSource" "$TargetSource"
+  test -f "$TargetSource"
+  test ! -L "$TargetSource"
+  test "$(stat -c '%U:%G:%a:%h' "$TargetSource")" = "root:root:444:1"
+  TargetSha256="$(sha256sum "$TargetSource" | awk '{print $1}')"
+  test "$TargetSha256" = "$ExpectedSourceSha256"
+}
+
+copy_trusted_parser_source server/parser-runtime/package.json
+copy_trusted_parser_source server/parser-runtime/package-lock.json
+copy_trusted_parser_source server/parser-runtime/requirements.lock
+copy_trusted_parser_source server/extract_document_text.py
+copy_trusted_parser_source server/extract_xlsx_text.py
+copy_trusted_parser_source server/ocr_document_text.py
+copy_trusted_parser_source server/services/file_ingest_service.js
+copy_trusted_parser_source server/services/upload_sandbox_service.js
+copy_trusted_parser_source server/scripts/parse_upload_sandbox.sh
+copy_trusted_parser_source server/scripts/build_upload_sandbox_runtime.sh
+copy_trusted_parser_source server/scripts/check_cutover_capacity.py
+copy_trusted_parser_source server/scripts/provision_upload_sandbox_runtime.sh
+copy_trusted_parser_source server/scripts/upload_sandbox_self_test.js
+copy_trusted_parser_source server/systemd/turingmarket-parser@.service
+copy_trusted_parser_source server/systemd/turingmarket-parser.slice
+copy_trusted_parser_source server/systemd/turingmarket-parser.manifest.json
+find "$ParserSourceRoot" -xdev -type d -exec chmod 0555 {} +
+
+install -o root -g root -m 0500 "$ParserSourceRoot/scripts/provision_upload_sandbox_runtime.sh" "$ParserProvisioner"
+install -o root -g root -m 0500 "$ParserSourceRoot/scripts/build_upload_sandbox_runtime.sh" "$ParserBuild"
+install -o root -g root -m 0500 "$ParserSourceRoot/scripts/check_cutover_capacity.py" "$ParserCapacityPlanner"
+test "$(sha256sum "$ParserProvisioner" | awk '{print $1}')" = "$(sha256sum "$ParserSourceRoot/scripts/provision_upload_sandbox_runtime.sh" | awk '{print $1}')"
+test "$(sha256sum "$ParserBuild" | awk '{print $1}')" = "$(sha256sum "$ParserSourceRoot/scripts/build_upload_sandbox_runtime.sh" | awk '{print $1}')"
+test "$(sha256sum "$ParserCapacityPlanner" | awk '{print $1}')" = "$(sha256sum "$ParserSourceRoot/scripts/check_cutover_capacity.py" | awk '{print $1}')"
+test -f "$ParserTrustedVerifier"
+test ! -L "$ParserTrustedVerifier"
+test "$(stat -c '%U:%G:%a:%h' "$ParserTrustedVerifier")" = "root:root:444:1"
+test "$(sha256sum "$ParserTrustedVerifier" | awk '{print $1}')" = "$ExpectedTrustedParserVerifierSha256"
+test -f "$ParserTrustedManifest"
+test ! -L "$ParserTrustedManifest"
+test "$(stat -c '%U:%G:%a:%h' "$ParserTrustedManifest")" = "root:root:444:1"
+ExpectedParserManifestSha256="$(sha256sum "$ParserTrustedManifest" | awk '{print $1}')"
+test "$(sha256sum "$ParserSourceRoot/systemd/turingmarket-parser.manifest.json" | awk '{print $1}')" = "$ExpectedParserManifestSha256"
+
+assert_root_only_parser_appliance() {
+  python3 - "$ParserApplianceRoot" <<'PY'
+import os
+import stat
+import sys
+
+root = sys.argv[1]
+root_status = os.lstat(root)
+if not stat.S_ISDIR(root_status.st_mode) or root_status.st_uid != 0 or stat.S_IMODE(root_status.st_mode) != 0o700:
+    raise SystemExit('unsafe parser appliance root')
+for current, directories, files in os.walk(root, topdown=True, followlinks=False):
+    for name in directories:
+        path = os.path.join(current, name)
+        status = os.lstat(path)
+        if not stat.S_ISDIR(status.st_mode) or status.st_uid != 0 or stat.S_IMODE(status.st_mode) & 0o022:
+            raise SystemExit('unsafe parser appliance directory')
+    for name in files:
+        path = os.path.join(current, name)
+        status = os.lstat(path)
+        if not stat.S_ISREG(status.st_mode) or status.st_uid != 0 or status.st_nlink != 1:
+            raise SystemExit('unsafe parser appliance file')
+        if stat.S_IMODE(status.st_mode) & 0o022:
+            raise SystemExit('writable parser appliance file')
+PY
+}
+assert_root_only_parser_appliance
+
+CandidateAvailableBytes="$(df --output=avail -B1 "$CandidateRoot" | awk 'NR == 2 { print $1 }')"
+BackupAvailableBytes="$(df --output=avail -B1 "$BackupParent" | awk 'NR == 2 { print $1 }')"
+test "$CandidateAvailableBytes" -ge "$ParserRequiredBytes"
+test "$BackupAvailableBytes" -ge "$ParserRequiredBytes"
+
+install -d -o "$GateUser" -g "$GateUser" -m 0700 \
+  "$ParserDependencyCacheStage" \
+  "$ParserDependencyCacheStage/npm" \
+  "$ParserDependencyCacheStage/python"
+ParserCacheUnit="turingmarket-parser-cache-$(basename "$ReleaseRoot").service"
+cleanup_parser_cache_unit() {
+  systemctl kill --kill-who=all --signal=KILL "$ParserCacheUnit" >/dev/null 2>&1 || true
+  systemctl stop "$ParserCacheUnit" >/dev/null 2>&1 || true
+  systemctl reset-failed "$ParserCacheUnit" >/dev/null 2>&1 || true
+}
+trap cleanup_parser_cache_unit EXIT
+systemd-run --quiet --wait --collect \
+  --unit="$ParserCacheUnit" \
+  --service-type=exec \
+  --property="User=$GateUser" \
+  --property="Group=$GateUser" \
+  --property="SupplementaryGroups=" \
+  --property="PrivateNetwork=no" \
+  --property="PrivateMounts=yes" \
+  --property="PrivateDevices=yes" \
+  --property="PrivateTmp=yes" \
+  --property="ProtectSystem=strict" \
+  --property="ProtectHome=yes" \
+  --property="ProtectProc=invisible" \
+  --property="ProcSubset=pid" \
+  --property="NoNewPrivileges=yes" \
+  --property="CapabilityBoundingSet=" \
+  --property="AmbientCapabilities=" \
+  --property="RestrictNamespaces=yes" \
+  --property="RestrictSUIDSGID=yes" \
+  --property="LockPersonality=yes" \
+  --property="RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6" \
+  --property="IPAddressDeny=0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 127.0.0.0/8 169.254.0.0/16 172.16.0.0/12 192.0.0.0/24 192.0.2.0/24 192.88.99.0/24 192.168.0.0/16 198.18.0.0/15 198.51.100.0/24 203.0.113.0/24 224.0.0.0/4 240.0.0.0/4 ::/128 ::1/128 ::ffff:0:0/96 2001:db8::/32 fc00::/7 fe80::/10 ff00::/8" \
+  --property="IPAddressAllow=127.0.0.53/32 127.0.0.54/32" \
+  --property="UMask=0077" \
+  --property="KeyringMode=private" \
+  --property="InaccessiblePaths=-/root -/etc/turingmarket -/etc/credstore -/etc/credstore.encrypted -/run/credentials -/run/secrets -/var/lib/turingmarket" \
+  --property="BindReadOnlyPaths=$ParserSourceRoot:/parser-source" \
+  --property="BindPaths=$ParserDependencyCacheStage:/parser-cache" \
+  --property="ReadWritePaths=/parser-cache" \
+  --property="RuntimeMaxSec=20m" \
+  --property="TimeoutStopSec=5" \
+  -- /usr/bin/env -i \
+    HOME=/tmp \
+    PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    PIP_CONFIG_FILE=/dev/null \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_INPUT=1 \
+    npm_config_userconfig=/dev/null \
+    npm_config_globalconfig=/dev/null \
+    npm_config_update_notifier=false \
+    npm_config_audit=false \
+    npm_config_fund=false \
+    bash --noprofile --norc -c '
+set -euo pipefail
+install -d -m 0700 /parser-cache/npm /parser-cache/python /tmp/parser-npm
+cp /parser-source/parser-runtime/package.json /tmp/parser-npm/package.json
+cp /parser-source/parser-runtime/package-lock.json /tmp/parser-npm/package-lock.json
+cd /tmp/parser-npm
+npm ci --ignore-scripts --cache /parser-cache/npm
+rm -rf node_modules
+rm -rf /parser-cache/npm/_logs
+rm -f /parser-cache/npm/_update-notifier-last-checked
+python3 -m pip download --require-hashes --only-binary=:all: --no-deps \
+  --dest /parser-cache/python -r /parser-source/parser-runtime/requirements.lock
+'
+cleanup_parser_cache_unit
+trap - EXIT
+chown -R root:root "$ParserDependencyCacheStage"
+find "$ParserDependencyCacheStage" -xdev -type d -exec chmod 0555 {} +
+find "$ParserDependencyCacheStage" -xdev -type f -exec chmod 0444 {} +
+mv -T -- "$ParserDependencyCacheStage" "$ParserDependencyCache"
+sync -f "$ParserDependencyCache"
+sync -f "$ParserApplianceRoot"
+
+ExpectedRuntimeSha256="$(python3 - "$ParserSourceRoot/systemd/turingmarket-parser.manifest.json" <<'PY'
+import json
+import re
+import sys
+with open(sys.argv[1], encoding='utf-8') as handle:
+    manifest = json.load(handle)
+runtime = manifest.get('runtime_tree', {})
+if runtime.get('bytes') != 716157800 or not re.fullmatch(r'[0-9a-f]{64}', runtime.get('sha256', '')):
+    raise SystemExit('parser runtime manifest identity is invalid')
+print(runtime['sha256'])
+PY
+)"
+BuildEvidence="$(
+  "$ParserBuild" \
+    --source-root "$ParserSourceRoot" \
+    --output-root "$ParserRuntimeStage" \
+    --dependency-cache-root "$ParserDependencyCache" \
+    --trusted-verifier "$ParserTrustedVerifier" \
+    --expected-verifier-sha256 "$ExpectedTrustedParserVerifierSha256" \
+    --expected-manifest-sha256 "$ExpectedParserManifestSha256" \
+    --expected-sha256 "$ExpectedRuntimeSha256" \
+    --json
+)"
+TM_PARSER_BUILD_EVIDENCE="$BuildEvidence" python3 - "$ParserSourceRoot/systemd/turingmarket-parser.manifest.json" <<'PY'
+import hashlib
+import json
+import os
+import sys
+with open(sys.argv[1], encoding='utf-8') as handle:
+    manifest = json.load(handle)
+observed = json.loads(os.environ['TM_PARSER_BUILD_EVIDENCE'])
+expected = manifest['runtime_tree']
+projection = {key: expected[key] for key in ('format', 'sha256', 'files', 'directories', 'bytes')}
+required = {'format', 'manifest_sha256', 'verifier_sha256', 'runtime_tree', 'build_boundary'}
+boundary_required = {
+    'format', 'source_artifacts_sha256', 'build_unit', 'build_unit_properties',
+    'build_unit_properties_sha256',
+    'build_unit_stopped', 'build_unit_collected', 'network_isolation', 'mount_isolation',
+    'credential_isolation', 'build_parent_inaccessible'
+}
+boundary = observed.get('build_boundary', {})
+properties = boundary.get('build_unit_properties')
+properties_digest = hashlib.sha256(
+    json.dumps(properties, sort_keys=True, separators=(',', ':')).encode('ascii')
+).hexdigest() if isinstance(properties, dict) else ''
+if (set(observed) != required or observed.get('format') != 'tm-parser-runtime-build-evidence-v2' or
+        observed.get('runtime_tree') != projection or set(boundary) != boundary_required or
+        properties_digest != boundary.get('build_unit_properties_sha256') or
+        any(boundary.get(name) is not True for name in (
+            'build_unit_stopped', 'build_unit_collected', 'network_isolation', 'mount_isolation',
+            'credential_isolation', 'build_parent_inaccessible'
+        ))):
+    raise SystemExit('parser build evidence does not match the release manifest: build unit properties SHA-256 mismatch')
+PY
+
+RootInspection="$(/usr/bin/node "$ParserTrustedVerifier" measure-runtime --root "$ParserRuntimeStage" --require-root-ownership true)"
+TM_ROOT_INSPECTION="$RootInspection" TM_PARSER_BUILD_EVIDENCE="$BuildEvidence" python3 - <<'PY'
+import hashlib
+import json
+import os
+if json.loads(os.environ['TM_ROOT_INSPECTION']) != json.loads(os.environ['TM_PARSER_BUILD_EVIDENCE'])['runtime_tree']:
+    raise SystemExit('sealed parser runtime differs from trusted build evidence')
+PY
+
+printf '%s\n' "$BuildEvidence" > "$ParserEvidence.next"
+chmod 0444 "$ParserEvidence.next"
+mv "$ParserEvidence.next" "$ParserEvidence"
+(
+  cd "$ParserRuntimeStage"
+  find . -xdev -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum
+) > "$ParserChecksums.next"
+chmod 0444 "$ParserChecksums.next"
+mv "$ParserChecksums.next" "$ParserChecksums"
+(cd "$ParserRuntimeStage" && sha256sum --check --status "$ParserChecksums")
+test "$(stat -c '%U:%G:%a:%h' "$ParserEvidence")" = "root:root:444:1"
+test "$(stat -c '%U:%G:%a:%h' "$ParserChecksums")" = "root:root:444:1"
+assert_root_only_parser_appliance
+sync -f "$ParserEvidence"
+sync -f "$ParserChecksums"
+sync -f "$ParserRuntimeStage"
+sync -f "$ParserApplianceRoot"
+printf '%s\n' 'PARSER_RUNTIME_CANDIDATE_READY'
+'@
+    $remoteScript = $remoteScript.Replace('__REMOTE_ROOT__', $REMOTE_ROOT)
+    $remoteScript = $remoteScript.Replace('__CANDIDATE_ROOT__', $CANDIDATE_ROOT)
+    $remoteScript = $remoteScript.Replace('__RELEASE_ROOT__', $ReleaseRoot)
+    $remoteScript = $remoteScript.Replace('__CANDIDATE_DIR__', $CandidateDir)
+    $remoteScript = $remoteScript.Replace('__GATE_USER__', $GATE_USER)
+    $remoteScript = $remoteScript.Replace('__TRUSTED_SOURCE_GATE__', $TRUSTED_SOURCE_GATE_REMOTE_PATH)
+    $remoteScript = $remoteScript.Replace('__TRUSTED_SOURCE_MANIFEST__', $TRUSTED_SOURCE_MANIFEST_REMOTE_PATH)
+    $remoteScript = $remoteScript.Replace('__TRUSTED_SOURCE_BUNDLE__', $TRUSTED_SOURCE_BUNDLE_REMOTE_PATH)
+    $remoteScript = $remoteScript.Replace('__TRUSTED_SOURCE_GATE_SHA256__', $EXPECTED_TRUSTED_SOURCE_GATE_SHA256)
+    $remoteScript = $remoteScript.Replace('__TRUSTED_SOURCE_MANIFEST_SHA256__', $EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256)
+    $remoteScript = $remoteScript.Replace('__TRUSTED_MIGRATION_VERIFIER_SHA256__', $EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256)
+    $remoteScript = $remoteScript.Replace('__TRUSTED_PARSER_VERIFIER_SHA256__', $EXPECTED_TRUSTED_PARSER_VERIFIER_SHA256)
+    $remoteScript = $remoteScript.Replace('__PARSER_RUNTIME_BYTES__', $PARSER_RUNTIME_BYTES.ToString())
+    Invoke-RemoteBash -Script $remoteScript -FailureMessage "Remote parser candidate preparation failed" -TimeoutSeconds $CANDIDATE_GATE_TIMEOUT_SECONDS -RequireDeploymentLock
+}
+
 function Invoke-RemoteBackup {
     param(
         [Parameter(Mandatory = $true)][string]$BackupPath,
@@ -2035,6 +2952,7 @@ function Invoke-RemoteBackup {
 set -euo pipefail
 LiveDir="__REMOTE_DIR__"
 RemoteRoot="__REMOTE_ROOT__"
+TrustedSourceBundle="__TRUSTED_SOURCE_BUNDLE__"
 BackupPath="__BACKUP_PATH__"
 BackupAbsolute="$RemoteRoot/$BackupPath"
 PptCacheDir="/var/lib/turingmarket/ppt-cache"
@@ -2045,20 +2963,311 @@ umask 077
 test -d "$LiveDir"
 test ! -L "$LiveDir"
 test ! -e "$BackupAbsolute"
-test -d "$PptCacheDir"
-test ! -L "$PptCacheDir"
-test "$(stat -c '%U:%G:%a' "$PptCacheDir")" = "root:root:700"
-if find "$PptCacheDir" -xdev ! -type d ! -type f -print -quit | grep -q .; then
-  echo "PPT cache contains a non-regular entry" >&2
+ControlBackup="$BackupAbsolute/control-plane/migration-gate-cleanup"
+CleanupHelper="/usr/local/libexec/turingmarket/cleanup_stale_migration_gate.sh"
+CleanupUnit="/etc/systemd/system/turingmarket-gate-cleanup.service"
+CleanupUnitName="turingmarket-gate-cleanup.service"
+SystemdRoot="/etc/systemd/system"
+CleanupCanonicalLink="$SystemdRoot/multi-user.target.wants/$CleanupUnitName"
+CleanupBarrier="$SystemdRoot/$CleanupUnitName.d/00-turingmarket-restore-barrier.conf"
+/usr/bin/python3 - "$CleanupHelper" "$CleanupUnit" "$CleanupCanonicalLink" "$CleanupBarrier" "$CleanupUnitName" <<'TM_CLEANUP_BACKUP_BOUNDARY'
+import os
+import stat
+import subprocess
+import sys
+
+helper_path, unit_path, canonical_link, barrier_path, unit_name = sys.argv[1:]
+systemd_roots = [
+    '/etc/systemd/system',
+    '/run/systemd/system',
+    '/usr/local/lib/systemd/system',
+    '/usr/lib/systemd/system',
+    '/lib/systemd/system',
+]
+
+def safe_directory(metadata):
+    return (stat.S_ISDIR(metadata.st_mode) and not stat.S_ISLNK(metadata.st_mode) and
+            metadata.st_uid == 0 and metadata.st_gid == 0 and
+            not (stat.S_IMODE(metadata.st_mode) & 0o022))
+
+identities = {}
+targets = [helper_path, unit_path, canonical_link, barrier_path,
+           '/var/lib/turingmarket/migration-gate-cleanup-control/restore.json']
+for target in targets:
+    parent = os.path.abspath(os.path.dirname(target))
+    descriptor = os.open('/', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    current = '/'
+    try:
+        for component in (part for part in parent.split('/') if part):
+            try:
+                child = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=descriptor)
+            except FileNotFoundError:
+                break
+            metadata = os.fstat(child)
+            if not safe_directory(metadata):
+                os.close(child)
+                raise SystemExit(f'Cleanup backup parent is unsafe: {os.path.join(current, component)}')
+            os.close(descriptor)
+            descriptor = child
+            current = os.path.join(current, component)
+            identity = (metadata.st_dev, metadata.st_ino)
+            if current in identities and identities[current] != identity:
+                raise SystemExit(f'Cleanup backup parent identity is inconsistent: {current}')
+            identities[current] = identity
+    finally:
+        os.close(descriptor)
+
+subprocess.run(['/usr/bin/systemctl', 'daemon-reload'], check=True)
+properties = {}
+for name in ['Id', 'Names', 'LoadState', 'FragmentPath', 'DropInPaths']:
+    result = subprocess.run(
+        ['/usr/bin/systemctl', 'show', unit_name, f'--property={name}', '--value'],
+        check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    if result.returncode != 0:
+        raise SystemExit(f'Cleanup backup systemctl property is unavailable: {name}')
+    properties[name] = result.stdout.rstrip('\n')
+unit_exists = os.path.lexists(unit_path)
+expected = {
+    'Id': unit_name,
+    'Names': unit_name,
+    'LoadState': 'loaded' if unit_exists else 'not-found',
+    'FragmentPath': unit_path if unit_exists else '',
+    'DropInPaths': '',
+}
+if properties != expected:
+    raise SystemExit(f'Cleanup backup effective unit is unsafe: {properties!r}')
+
+dropin_names = {unit_name + '.d', 'service.d'}
+parts = unit_name[:-len('.service')].split('-')
+for length in range(1, len(parts)):
+    dropin_names.add('-'.join(parts[:length]) + '-.service.d')
+allowed_links = {canonical_link: unit_path}
+for root in systemd_roots:
+    if not os.path.lexists(root):
+        continue
+    metadata = os.lstat(root)
+    if not safe_directory(metadata):
+        raise SystemExit(f'Cleanup backup systemd root is unsafe: {root}')
+    for name in dropin_names:
+        candidate = os.path.join(root, name)
+        if os.path.lexists(candidate):
+            raise SystemExit(f'Cleanup backup found an unsupported drop-in directory: {candidate}')
+    for current, directories, files in os.walk(root, topdown=True, followlinks=False):
+        for name in directories + files:
+            candidate = os.path.join(current, name)
+            if name == unit_name and candidate != unit_path and candidate not in allowed_links:
+                raise SystemExit(f'Cleanup backup found an alternate fragment or alias: {candidate}')
+            if not os.path.islink(candidate):
+                continue
+            target = os.readlink(candidate)
+            resolved = os.path.realpath(os.path.join(current, target)) if not os.path.isabs(target) else os.path.realpath(target)
+            if name == unit_name or resolved == unit_path:
+                if candidate not in allowed_links or target != allowed_links[candidate]:
+                    raise SystemExit(f'Cleanup backup found an unsupported alias: {candidate}')
+
+for path, identity in identities.items():
+    metadata = os.lstat(path)
+    if not safe_directory(metadata) or (metadata.st_dev, metadata.st_ino) != identity:
+        raise SystemExit(f'Cleanup backup parent changed before snapshot mutation: {path}')
+TM_CLEANUP_BACKUP_BOUNDARY
+install -d -m 0700 "$BackupAbsolute/platform" "$BackupAbsolute/nginx" "$BackupAbsolute/database" "$BackupAbsolute/repository" "$BackupAbsolute/ppt-cache" "$BackupAbsolute/accepted-marker"
+install -d -o root -g root -m 0700 "$BackupAbsolute/control-plane" "$ControlBackup"
+if /usr/bin/systemctl is-active --quiet "$CleanupUnitName"; then
+  echo "Cleanup unit must be inactive before its control-plane snapshot" >&2
   exit 1
 fi
-while IFS= read -r -d '' directory; do
-  test "$(stat -c '%U:%G:%a' "$directory")" = "root:root:700"
-done < <(find "$PptCacheDir" -xdev -type d -print0)
-while IFS= read -r -d '' artifact; do
-  test "$(stat -c '%U:%G:%a:%h' "$artifact")" = "root:root:600:1"
-done < <(find "$PptCacheDir" -xdev -type f -print0)
-install -d -m 0700 "$BackupAbsolute/platform" "$BackupAbsolute/nginx" "$BackupAbsolute/database" "$BackupAbsolute/repository" "$BackupAbsolute/ppt-cache" "$BackupAbsolute/accepted-marker"
+CleanupEnablement="$(/usr/bin/systemctl is-enabled "$CleanupUnitName" 2>/dev/null || true)"
+python3 - "$ControlBackup" "$CleanupHelper" "$CleanupUnit" "$CleanupEnablement" "$SystemdRoot" "$CleanupUnitName" "__CLEANUP_SHA256__" "__UNIT_SHA256__" <<'TM_MIGRATION_CLEANUP_CONTROL_BACKUP'
+import hashlib
+import json
+import os
+import stat
+import subprocess
+import sys
+
+backup_root, helper_path, unit_path, enablement, systemd_root, unit_name, expected_helper_sha256, expected_unit_sha256 = sys.argv[1:]
+canonical_link_path = os.path.join(systemd_root, 'multi-user.target.wants', unit_name)
+canonical_link_target = unit_path
+dropin_path = os.path.join(systemd_root, unit_name + '.d')
+
+def fsync_directory(directory):
+    descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+def validate_parent_chain(target):
+    current = os.path.abspath(os.path.dirname(target))
+    while True:
+        if os.path.lexists(current):
+            metadata = os.lstat(current)
+            if not stat.S_ISDIR(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode):
+                raise SystemExit(f'Cleanup control parent is unsafe: {current}')
+            if metadata.st_uid != 0 or metadata.st_gid != 0 or stat.S_IMODE(metadata.st_mode) & 0o022:
+                raise SystemExit(f'Cleanup control parent is not root-controlled: {current}')
+        parent = os.path.dirname(current)
+        if parent == current:
+            break
+        current = parent
+
+def snapshot(label, source, expected_mode, expected_sha256):
+    validate_parent_chain(source)
+    if not os.path.lexists(source):
+        return {'present': False}
+    metadata = os.lstat(source)
+    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+        raise SystemExit(f'Cleanup control {label} is not a single-link regular file')
+    if (metadata.st_uid != 0 or metadata.st_gid != 0 or
+            stat.S_IMODE(metadata.st_mode) != expected_mode):
+        raise SystemExit(f'Cleanup control {label} metadata is unsafe')
+    if os.listxattr(source, follow_symlinks=False):
+        raise SystemExit(f'Cleanup control {label} has unsupported extended metadata')
+    descriptor = os.open(source, os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        before = os.fstat(descriptor)
+        chunks = []
+        while True:
+            chunk = os.read(descriptor, 1024 * 1024)
+            if not chunk:
+                break
+            chunks.append(chunk)
+        after = os.fstat(descriptor)
+    finally:
+        os.close(descriptor)
+    if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns):
+        raise SystemExit(f'Cleanup control {label} changed while backing up')
+    payload = b''.join(chunks)
+    if len(payload) != before.st_size:
+        raise SystemExit(f'Cleanup control {label} size changed while backing up')
+    payload_sha256 = hashlib.sha256(payload).hexdigest()
+    if payload_sha256 != expected_sha256:
+        raise SystemExit(f'Cleanup control {label} is not the independently trusted artifact')
+    destination = os.path.join(backup_root, f'{label}.bytes')
+    output = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        offset = 0
+        while offset < len(payload):
+            offset += os.write(output, payload[offset:])
+        os.fsync(output)
+    finally:
+        os.close(output)
+    os.utime(source, ns=(before.st_atime_ns, before.st_mtime_ns), follow_symlinks=False)
+    return {
+        'present': True,
+        'uid': before.st_uid,
+        'gid': before.st_gid,
+        'mode': stat.S_IMODE(before.st_mode),
+        'size': before.st_size,
+        'sha256': payload_sha256,
+        'atimeNs': before.st_atime_ns,
+        'mtimeNs': before.st_mtime_ns,
+    }
+
+def related_links():
+    observed = []
+    for current, directories, files in os.walk(systemd_root, topdown=True, followlinks=False):
+        for name in directories + files:
+            candidate = os.path.join(current, name)
+            if not os.path.islink(candidate):
+                continue
+            target = os.readlink(candidate)
+            resolved = os.path.realpath(os.path.join(current, target)) if not os.path.isabs(target) else os.path.realpath(target)
+            if name == unit_name or resolved == unit_path:
+                observed.append({
+                    'path': os.path.relpath(candidate, systemd_root),
+                    'target': target,
+                })
+    return sorted(observed, key=lambda entry: (entry['path'], entry['target']))
+
+helper_present = os.path.lexists(helper_path)
+unit_present = os.path.lexists(unit_path)
+links = related_links()
+dropins = []
+if os.path.lexists(dropin_path):
+    dropins.append(os.path.relpath(dropin_path, systemd_root))
+
+effective = {}
+for property_name in ['Id', 'Names', 'LoadState', 'FragmentPath', 'DropInPaths']:
+    result = subprocess.run(
+        ['/usr/bin/systemctl', 'show', unit_name, f'--property={property_name}', '--value'],
+        check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    if result.returncode != 0:
+        raise SystemExit(f'Cleanup backup systemctl property is unavailable: {property_name}')
+    effective[property_name] = result.stdout.rstrip('\n')
+expected_effective = {
+    'Id': unit_name,
+    'Names': unit_name,
+    'LoadState': 'loaded' if unit_present else 'not-found',
+    'FragmentPath': unit_path if unit_present else '',
+    'DropInPaths': '',
+}
+if effective != expected_effective:
+    raise SystemExit(f'Cleanup backup effective unit changed during snapshot: {effective!r}')
+
+if (not helper_present and not unit_present and enablement == 'not-found' and
+        links == [] and dropins == []):
+    topology_kind = 'canonical-absent-v1'
+    helper = {'present': False}
+    unit = {'present': False}
+elif (helper_present and unit_present and enablement == 'enabled' and dropins == [] and
+        links == [{'path': os.path.relpath(canonical_link_path, systemd_root),
+                   'target': canonical_link_target}]):
+    topology_kind = 'canonical-trusted-enabled-v1'
+    helper = snapshot('helper', helper_path, 0o555, expected_helper_sha256)
+    unit = snapshot('unit', unit_path, 0o444, expected_unit_sha256)
+else:
+    raise SystemExit(
+        'Unsupported cleanup control topology: '
+        f'enablement={enablement!r} helper={helper_present} unit={unit_present} '
+        f'relatedLinks={links!r} dropIns={dropins!r}'
+    )
+
+topology = {
+    'kind': topology_kind,
+    'unitName': unit_name,
+    'enablement': enablement,
+    'relatedLinks': links,
+    'dropIns': dropins,
+}
+topology_bytes = json.dumps(topology, sort_keys=True, separators=(',', ':')).encode('utf-8')
+state = {
+    'schemaVersion': 2,
+    'topology': topology,
+    'topologySha256': hashlib.sha256(topology_bytes).hexdigest(),
+    'helper': helper,
+    'unit': unit,
+}
+state_path = os.path.join(backup_root, 'state.json')
+descriptor = os.open(state_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+try:
+    os.write(descriptor, (json.dumps(state, sort_keys=True, separators=(',', ':')) + '\n').encode('utf-8'))
+    os.fsync(descriptor)
+finally:
+    os.close(descriptor)
+fsync_directory(backup_root)
+TM_MIGRATION_CLEANUP_CONTROL_BACKUP
+if [ -e "$PptCacheDir" ] || [ -L "$PptCacheDir" ]; then
+  test -d "$PptCacheDir"
+  test ! -L "$PptCacheDir"
+  test "$(stat -c '%U:%G:%a' "$PptCacheDir")" = "root:root:700"
+  if find "$PptCacheDir" -xdev ! -type d ! -type f -print -quit | grep -q .; then
+    echo "PPT cache contains a non-regular entry" >&2
+    exit 1
+  fi
+  while IFS= read -r -d '' directory; do
+    test "$(stat -c '%U:%G:%a' "$directory")" = "root:root:700"
+  done < <(find "$PptCacheDir" -xdev -type d -print0)
+  while IFS= read -r -d '' artifact; do
+    test "$(stat -c '%U:%G:%a:%h' "$artifact")" = "root:root:600:1"
+  done < <(find "$PptCacheDir" -xdev -type f -print0)
+  : > "$BackupAbsolute/ppt-cache.present"
+  cp -a -- "$PptCacheDir/." "$BackupAbsolute/ppt-cache/"
+else
+  : > "$BackupAbsolute/ppt-cache.absent"
+fi
 if [ -e "$CurrentMarker" ]; then
   test -f "$CurrentMarker"
   test ! -L "$CurrentMarker"
@@ -2107,13 +3316,51 @@ while IFS= read -r file; do
 done < "$BackupAbsolute/root-files.requested"
 test -f /etc/nginx/sites-enabled/turingmarket
 cp -L /etc/nginx/sites-enabled/turingmarket "$BackupAbsolute/nginx/turingmarket.conf"
+measure_restore_tree() {
+  python3 - "$1" "$2" <<'PY'
+import os
+import stat
+import sys
+
+root, target = sys.argv[1:]
+total_bytes = 0
+total_inodes = 0
+if os.path.lexists(root):
+    root_status = os.lstat(root)
+    if not stat.S_ISDIR(root_status.st_mode) or stat.S_ISLNK(root_status.st_mode):
+        raise SystemExit('Restore measurement root is unsafe')
+    total_inodes = 1
+    for current, directories, files in os.walk(root, topdown=True, followlinks=False):
+        for name in directories + files:
+            path = os.path.join(current, name)
+            status = os.lstat(path)
+            if stat.S_ISDIR(status.st_mode):
+                total_inodes += 1
+            elif stat.S_ISREG(status.st_mode):
+                total_bytes += status.st_size
+                total_inodes += 1
+            elif stat.S_ISLNK(status.st_mode):
+                total_inodes += 1
+            else:
+                raise SystemExit('Restore measurement tree contains an unsupported entry')
+descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+try:
+    os.write(descriptor, f'{total_bytes}:{total_inodes}\n'.encode('ascii'))
+    os.fsync(descriptor)
+finally:
+    os.close(descriptor)
+PY
+}
 if [ -d "$LiveDir/node_modules" ]; then
+  measure_restore_tree "$LiveDir/node_modules" "$BackupAbsolute/root-node-modules.measurement"
   tar -czf "$BackupAbsolute/root-node_modules.tgz" -C "$LiveDir" node_modules
   : > "$BackupAbsolute/root-node-modules.present"
 else
+  printf '%s\n' '0:0' > "$BackupAbsolute/root-node-modules.measurement"
   : > "$BackupAbsolute/root-node-modules.absent"
 fi
 test -d "$LiveDir/server/node_modules"
+measure_restore_tree "$LiveDir/server/node_modules" "$BackupAbsolute/server-node-modules.measurement"
 tar -czf "$BackupAbsolute/server-node_modules.tgz" -C "$LiveDir" server/node_modules
 cd "__REMOTE_DIR__/server"
 node - "$BackupAbsolute/database/turingmarket.db" <<'NODE'
@@ -2144,7 +3391,6 @@ test ! -e "$BackupAbsolute/database/turingmarket.db-wal"
 test ! -e "$BackupAbsolute/database/turingmarket.db-shm"
 chown root:root "$BackupAbsolute/database/turingmarket.db"
 chmod 0600 "$BackupAbsolute/database/turingmarket.db"
-cp -a -- "$PptCacheDir/." "$BackupAbsolute/ppt-cache/"
 cd "$BackupAbsolute"
 sha256sum database/turingmarket.db > database.sha256
 sha256sum --check --status database.sha256
@@ -2189,10 +3435,884 @@ PY
     $remoteScript = $remoteScript.Replace('__REMOTE_ROOT__', $REMOTE_ROOT)
     $remoteScript = $remoteScript.Replace('__BACKUP_PATH__', $BackupPath)
     $remoteScript = $remoteScript.Replace('__LOCK_TOKEN__', $deploymentLockToken)
+    $remoteScript = $remoteScript.Replace('__CLEANUP_SHA256__', $EXPECTED_TRUSTED_MIGRATION_CLEANUP_HELPER_SHA256)
+    $remoteScript = $remoteScript.Replace('__UNIT_SHA256__', $EXPECTED_TRUSTED_MIGRATION_CLEANUP_UNIT_SHA256)
     $remoteScript = $remoteScript.Replace('__PLATFORM_MANIFEST__', $platformManifest.TrimEnd())
     $remoteScript = $remoteScript.Replace('__ROOT_MANIFEST__', $rootManifest.TrimEnd())
 
     Invoke-RemoteBash -Script $remoteScript -FailureMessage "Remote backup failed" -RequireDeploymentLock
+}
+
+function Restore-RemoteMigrationGateCleanupControl {
+    param([Parameter(Mandatory = $true)][string]$BackupPath)
+
+    Assert-RollbackBackupPath -BackupPath $BackupPath
+    $restorePrimitive = Get-MigrationGateCleanupControlRestoreScript
+    $remoteScript = @'
+set -euo pipefail
+RemoteRoot="__REMOTE_ROOT__"
+BackupAbsolute="$RemoteRoot/__BACKUP_PATH__"
+__MIGRATION_CLEANUP_CONTROL_RESTORE_SCRIPT__
+restore_migration_gate_cleanup_control
+printf '%s\n' 'CONTROL_PLANE_RESTORED'
+'@
+    $remoteScript = $remoteScript.Replace('__REMOTE_ROOT__', $REMOTE_ROOT)
+    $remoteScript = $remoteScript.Replace('__BACKUP_PATH__', $BackupPath)
+    $remoteScript = $remoteScript.Replace('__MIGRATION_CLEANUP_CONTROL_RESTORE_SCRIPT__', $restorePrimitive)
+    $remoteScript = $remoteScript.Replace('__CLEANUP_SHA256__', $EXPECTED_TRUSTED_MIGRATION_CLEANUP_HELPER_SHA256)
+    $remoteScript = $remoteScript.Replace('__UNIT_SHA256__', $EXPECTED_TRUSTED_MIGRATION_CLEANUP_UNIT_SHA256)
+    Invoke-RemoteBash -Script $remoteScript -FailureMessage "Migration gate cleanup control restoration failed" -RequireDeploymentLock -RequireWriterLock
+}
+
+function Get-MigrationGateCleanupControlRestoreScript {
+    return @'
+restore_migration_gate_cleanup_control() {
+  local ControlBackup="$BackupAbsolute/control-plane/migration-gate-cleanup"
+  local State="$ControlBackup/state.json"
+  local Helper="/usr/local/libexec/turingmarket/cleanup_stale_migration_gate.sh"
+  local Unit="/etc/systemd/system/turingmarket-gate-cleanup.service"
+  local UnitName="turingmarket-gate-cleanup.service"
+  local SystemdRoot="/etc/systemd/system"
+  local Barrier="$SystemdRoot/$UnitName.d/00-turingmarket-restore-barrier.conf"
+  local JournalRoot="/var/lib/turingmarket/migration-gate-cleanup-control"
+  local Journal="$JournalRoot/restore.json"
+  local ReleaseBarrier="$JournalRoot/release"
+  local Systemctl="/usr/bin/systemctl"
+  test -d "$ControlBackup"
+  test ! -L "$ControlBackup"
+  test "$(stat -c '%U:%G:%a' "$ControlBackup")" = "root:root:700"
+  test -f "$State"
+  test ! -L "$State"
+  test "$(stat -c '%U:%G:%a:%h' "$State")" = "root:root:600:1"
+  test -f "$BackupAbsolute/SHA256SUMS"
+  test ! -L "$BackupAbsolute/SHA256SUMS"
+  (
+    cd "$BackupAbsolute"
+    sha256sum --check --status SHA256SUMS
+  )
+  local AggregateSha256
+  AggregateSha256="$(sha256sum "$BackupAbsolute/SHA256SUMS" | awk '{print $1}')"
+  /usr/bin/python3 - "$State" "$ControlBackup" "$Helper" "$Unit" "$SystemdRoot" "$Barrier" "$JournalRoot" "$Journal" "$ReleaseBarrier" "$Systemctl" "$UnitName" "$AggregateSha256" "__CLEANUP_SHA256__" "__UNIT_SHA256__" <<'TM_MIGRATION_CLEANUP_CONTROL_REPLAY'
+import hashlib
+import json
+import os
+import stat
+import subprocess
+import sys
+
+(state_path, backup_root, helper_path, unit_path, systemd_root, barrier_path,
+ journal_root, journal_path, release_barrier, systemctl_path, unit_name,
+ aggregate_sha256, expected_helper_sha256, expected_unit_sha256) = sys.argv[1:]
+canonical_link_path = os.path.join(systemd_root, 'multi-user.target.wants', unit_name)
+canonical_link_target = unit_path
+temporary_link_path = canonical_link_path + '.restore.next'
+dropin_path = os.path.join(systemd_root, unit_name + '.d')
+barrier_bytes = (
+    '[Unit]\n'
+    'ConditionPathExists=/var/lib/turingmarket/migration-gate-cleanup-control/release\n'
+).encode('ascii')
+phases = [
+    'barrier-armed',
+    'quiesced',
+    'helper-restored',
+    'unit-restored',
+    'topology-restored',
+    'converged',
+    'barrier-cleared',
+]
+
+def exact_keys(value, expected, label):
+    if not isinstance(value, dict) or set(value) != set(expected):
+        raise SystemExit(f'{label} keys are not exact')
+
+def canonical_json(value):
+    return json.dumps(value, sort_keys=True, separators=(',', ':')).encode('utf-8')
+
+def fsync_directory(directory):
+    descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+def validate_directory(directory, mode=None):
+    metadata = os.lstat(directory)
+    if (not stat.S_ISDIR(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode) or
+            metadata.st_uid != 0 or metadata.st_gid != 0 or
+            stat.S_IMODE(metadata.st_mode) & 0o022):
+        raise SystemExit(f'Cleanup restore directory is unsafe: {directory}')
+    if mode is not None and stat.S_IMODE(metadata.st_mode) != mode:
+        raise SystemExit(f'Cleanup restore directory mode is invalid: {directory}')
+
+def validate_parent_chain(target, require_immediate):
+    current = os.path.abspath(os.path.dirname(target))
+    immediate = True
+    while True:
+        if os.path.lexists(current):
+            validate_directory(current)
+        elif require_immediate and immediate:
+            raise SystemExit(f'Cleanup restore parent is missing: {current}')
+        parent = os.path.dirname(current)
+        if parent == current:
+            break
+        current = parent
+        immediate = False
+
+def directory_status_is_safe(metadata):
+    return (stat.S_ISDIR(metadata.st_mode) and not stat.S_ISLNK(metadata.st_mode) and
+            metadata.st_uid == 0 and metadata.st_gid == 0 and
+            not (stat.S_IMODE(metadata.st_mode) & 0o022))
+
+def capture_parent_chain(target):
+    parent = os.path.abspath(os.path.dirname(target))
+    components = [part for part in parent.split(os.sep) if part]
+    identities = {}
+    descriptor = os.open(os.sep, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    current = os.sep
+    try:
+        root_status = os.fstat(descriptor)
+        if not directory_status_is_safe(root_status):
+            raise SystemExit('Cleanup restore root directory is unsafe')
+        identities[current] = (root_status.st_dev, root_status.st_ino)
+        for component in components:
+            try:
+                child = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=descriptor)
+            except FileNotFoundError:
+                break
+            child_status = os.fstat(child)
+            if not directory_status_is_safe(child_status):
+                os.close(child)
+                raise SystemExit(f'Cleanup restore parent is unsafe: {os.path.join(current, component)}')
+            os.close(descriptor)
+            descriptor = child
+            current = os.path.join(current, component)
+            identities[current] = (child_status.st_dev, child_status.st_ino)
+    finally:
+        os.close(descriptor)
+    return identities
+
+def revalidate_parent_identities(identities):
+    for directory, expected_identity in sorted(identities.items(), key=lambda entry: entry[0].count(os.sep)):
+        metadata = os.lstat(directory)
+        if (not directory_status_is_safe(metadata) or
+                (metadata.st_dev, metadata.st_ino) != expected_identity):
+            raise SystemExit(f'Cleanup restore parent identity changed: {directory}')
+
+def ensure_directory_tree(directory, final_mode):
+    absolute = os.path.abspath(directory)
+    components = [part for part in absolute.split(os.sep) if part]
+    descriptor = os.open(os.sep, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    current = os.sep
+    try:
+        for index, component in enumerate(components):
+            expected_mode = final_mode if index == len(components) - 1 else None
+            try:
+                child = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=descriptor)
+            except FileNotFoundError:
+                os.mkdir(component, final_mode if expected_mode is not None else 0o755, dir_fd=descriptor)
+                child = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=descriptor)
+                os.fchown(child, 0, 0)
+                os.fchmod(child, final_mode if expected_mode is not None else 0o755)
+                os.fsync(descriptor)
+            child_status = os.fstat(child)
+            if not directory_status_is_safe(child_status):
+                os.close(child)
+                raise SystemExit(f'Cleanup restore directory is unsafe: {os.path.join(current, component)}')
+            if expected_mode is not None and stat.S_IMODE(child_status.st_mode) != final_mode:
+                os.close(child)
+                raise SystemExit(f'Cleanup restore directory mode is invalid: {absolute}')
+            path_status = os.stat(component, dir_fd=descriptor, follow_symlinks=False)
+            if (path_status.st_dev, path_status.st_ino) != (child_status.st_dev, child_status.st_ino):
+                os.close(child)
+                raise SystemExit(f'Cleanup restore directory was substituted: {os.path.join(current, component)}')
+            os.close(descriptor)
+            descriptor = child
+            current = os.path.join(current, component)
+        final_status = os.fstat(descriptor)
+        path_status = os.lstat(absolute)
+        if (path_status.st_dev, path_status.st_ino) != (final_status.st_dev, final_status.st_ino):
+            raise SystemExit(f'Cleanup restore directory identity did not converge: {absolute}')
+    finally:
+        os.close(descriptor)
+
+def atomic_write(path, payload, mode):
+    parent = os.path.dirname(path)
+    name = os.path.basename(path)
+    temporary_name = name + '.next'
+    parent_descriptor = os.open(parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    parent_status = os.fstat(parent_descriptor)
+    if not directory_status_is_safe(parent_status):
+        os.close(parent_descriptor)
+        raise SystemExit(f'Cleanup restore write parent is unsafe: {parent}')
+    try:
+        try:
+            residue = os.stat(temporary_name, dir_fd=parent_descriptor, follow_symlinks=False)
+        except FileNotFoundError:
+            residue = None
+        if residue is not None:
+            if (not stat.S_ISREG(residue.st_mode) or stat.S_ISLNK(residue.st_mode) or
+                    residue.st_uid != 0 or residue.st_gid != 0 or residue.st_nlink != 1):
+                raise SystemExit(f'Unsafe cleanup restore residue: {os.path.join(parent, temporary_name)}')
+            os.unlink(temporary_name, dir_fd=parent_descriptor)
+            os.fsync(parent_descriptor)
+        descriptor = os.open(
+            temporary_name,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+            mode,
+            dir_fd=parent_descriptor,
+        )
+        try:
+            offset = 0
+            while offset < len(payload):
+                offset += os.write(descriptor, payload[offset:])
+            os.fchown(descriptor, 0, 0)
+            os.fchmod(descriptor, mode)
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+        os.replace(temporary_name, name, src_dir_fd=parent_descriptor, dst_dir_fd=parent_descriptor)
+        os.fsync(parent_descriptor)
+        current_parent = os.lstat(parent)
+        if (current_parent.st_dev, current_parent.st_ino) != (parent_status.st_dev, parent_status.st_ino):
+            raise SystemExit(f'Cleanup restore write parent was substituted: {parent}')
+    finally:
+        os.close(parent_descriptor)
+
+def read_regular(path, mode, label):
+    metadata = os.lstat(path)
+    if (not stat.S_ISREG(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode) or
+            metadata.st_uid != 0 or metadata.st_gid != 0 or metadata.st_nlink != 1 or
+            stat.S_IMODE(metadata.st_mode) != mode or os.listxattr(path, follow_symlinks=False)):
+        raise SystemExit(f'{label} metadata is unsafe')
+    flags = os.O_RDONLY | os.O_NOFOLLOW
+    if hasattr(os, 'O_NOATIME'):
+        flags |= os.O_NOATIME
+    descriptor = os.open(path, flags)
+    try:
+        chunks = []
+        while True:
+            chunk = os.read(descriptor, 1024 * 1024)
+            if not chunk:
+                break
+            chunks.append(chunk)
+    finally:
+        os.close(descriptor)
+    return metadata, b''.join(chunks)
+
+def related_links():
+    observed = []
+    for current, directories, files in os.walk(systemd_root, topdown=True, followlinks=False):
+        for name in directories + files:
+            candidate = os.path.join(current, name)
+            if not os.path.islink(candidate):
+                continue
+            target = os.readlink(candidate)
+            resolved = os.path.realpath(os.path.join(current, target)) if not os.path.isabs(target) else os.path.realpath(target)
+            if name == unit_name or resolved == unit_path:
+                observed.append({'path': os.path.relpath(candidate, systemd_root), 'target': target})
+    return sorted(observed, key=lambda entry: (entry['path'], entry['target']))
+
+def observed_dropins():
+    if not os.path.lexists(dropin_path):
+        return []
+    validate_directory(dropin_path)
+    entries = sorted(os.listdir(dropin_path))
+    for entry in entries:
+        candidate = os.path.join(dropin_path, entry)
+        if candidate != barrier_path:
+            raise SystemExit(f'Unsupported cleanup control drop-in: {candidate}')
+    return [os.path.relpath(os.path.join(dropin_path, entry), systemd_root) for entry in entries]
+
+def run_systemctl(*arguments, check=True):
+    result = subprocess.run(
+        [systemctl_path, *arguments],
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if check and result.returncode != 0:
+        raise SystemExit(f'systemctl {" ".join(arguments)} failed: {result.stderr.strip()}')
+    return result
+
+def is_inactive():
+    return run_systemctl('is-active', '--quiet', unit_name, check=False).returncode != 0
+
+def enablement():
+    result = run_systemctl('is-enabled', unit_name, check=False)
+    return result.stdout.strip()
+
+def systemd_search_roots():
+    if systemctl_path == '/usr/bin/systemctl':
+        if systemd_root != '/etc/systemd/system':
+            raise SystemExit('Cleanup restore production systemd root is invalid')
+        return [
+            '/etc/systemd/system',
+            '/run/systemd/system',
+            '/usr/local/lib/systemd/system',
+            '/usr/lib/systemd/system',
+            '/lib/systemd/system',
+        ]
+    fixture_roots = os.environ.get('TM_CLEANUP_TEST_SYSTEMD_SEARCH_ROOTS', '')
+    if not fixture_roots:
+        raise SystemExit('Cleanup restore fixture systemd roots are missing')
+    roots = fixture_roots.split(':')
+    if roots[0] != systemd_root or any(not os.path.isabs(root) for root in roots):
+        raise SystemExit('Cleanup restore fixture systemd roots are invalid')
+    return roots
+
+def dropin_directory_names():
+    names = {unit_name + '.d', 'service.d'}
+    stem = unit_name[:-len('.service')]
+    parts = stem.split('-')
+    for length in range(1, len(parts)):
+        names.add('-'.join(parts[:length]) + '-.service.d')
+    return names
+
+def validate_topology_residue_shape():
+    if not os.path.lexists(temporary_link_path):
+        return
+    metadata = os.lstat(temporary_link_path)
+    if (kind != 'canonical-trusted-enabled-v1' or not stat.S_ISLNK(metadata.st_mode) or
+            metadata.st_uid != 0 or metadata.st_gid != 0 or
+            os.readlink(temporary_link_path) != canonical_link_target or
+            os.listxattr(temporary_link_path, follow_symlinks=False)):
+        raise SystemExit('Unsafe cleanup control link residue')
+
+def scan_systemd_configuration(allow_barrier):
+    allowed_links = {canonical_link_path: canonical_link_target}
+    if os.path.lexists(temporary_link_path):
+        allowed_links[temporary_link_path] = canonical_link_target
+    for root in systemd_search_roots():
+        if not os.path.lexists(root):
+            continue
+        validate_directory(root)
+        for dropin_name in dropin_directory_names():
+            candidate_directory = os.path.join(root, dropin_name)
+            if not os.path.lexists(candidate_directory):
+                continue
+            validate_directory(candidate_directory)
+            entries = sorted(os.listdir(candidate_directory))
+            if candidate_directory == dropin_path and allow_barrier:
+                if entries != [os.path.basename(barrier_path)]:
+                    raise SystemExit(f'Unsupported cleanup control drop-in entries: {candidate_directory}')
+            else:
+                raise SystemExit(f'Unsupported cleanup control drop-in directory: {candidate_directory}')
+        for current, directories, files in os.walk(root, topdown=True, followlinks=False):
+            for name in directories + files:
+                candidate = os.path.join(current, name)
+                if name == unit_name and candidate != unit_path and candidate not in allowed_links:
+                    raise SystemExit(f'Cleanup control alternate fragment or alias exists: {candidate}')
+                if not os.path.islink(candidate):
+                    continue
+                target = os.readlink(candidate)
+                resolved = os.path.realpath(os.path.join(current, target)) if not os.path.isabs(target) else os.path.realpath(target)
+                if name == unit_name or resolved == unit_path:
+                    if candidate not in allowed_links or target != allowed_links[candidate]:
+                        raise SystemExit(f'Cleanup control alias or related link is unsupported: {candidate}')
+
+def show_unit_property(property_name):
+    result = run_systemctl('show', unit_name, f'--property={property_name}', '--value', check=False)
+    if result.returncode != 0:
+        raise SystemExit(f'systemctl show property is unavailable: {property_name}')
+    return result.stdout.rstrip('\n')
+
+def verify_effective_unit(allow_barrier):
+    unit_exists = os.path.lexists(unit_path)
+    expected_fragment = unit_path if unit_exists else ''
+    expected_load_state = 'loaded' if unit_exists else 'not-found'
+    expected_dropins = barrier_path if allow_barrier else ''
+    expected = {
+        'Id': unit_name,
+        'Names': unit_name,
+        'LoadState': expected_load_state,
+        'FragmentPath': expected_fragment,
+        'DropInPaths': expected_dropins,
+    }
+    observed = {name: show_unit_property(name) for name in expected}
+    if observed != expected:
+        raise SystemExit(f'Cleanup control effective systemd identity is unsafe: {observed!r}')
+    scan_systemd_configuration(allow_barrier)
+
+def reconcile_topology_residue():
+    if not os.path.lexists(temporary_link_path):
+        return
+    validate_topology_residue_shape()
+    parent = os.path.dirname(canonical_link_path)
+    parent_descriptor = os.open(parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        parent_status = os.fstat(parent_descriptor)
+        if not directory_status_is_safe(parent_status):
+            raise SystemExit('Cleanup control link parent is unsafe')
+        temporary_name = os.path.basename(temporary_link_path)
+        canonical_name = os.path.basename(canonical_link_path)
+        if os.path.lexists(canonical_link_path):
+            if not os.path.islink(canonical_link_path) or os.readlink(canonical_link_path) != canonical_link_target:
+                raise SystemExit('Cleanup control canonical link is unsafe beside residue')
+            os.unlink(temporary_name, dir_fd=parent_descriptor)
+        else:
+            os.replace(temporary_name, canonical_name, src_dir_fd=parent_descriptor, dst_dir_fd=parent_descriptor)
+        os.fsync(parent_descriptor)
+        current_parent = os.lstat(parent)
+        if (current_parent.st_dev, current_parent.st_ino) != (parent_status.st_dev, parent_status.st_ino):
+            raise SystemExit('Cleanup control link parent was substituted')
+    finally:
+        os.close(parent_descriptor)
+
+with open(state_path, encoding='utf-8') as handle:
+    state = json.load(handle)
+exact_keys(state, ['schemaVersion', 'topology', 'topologySha256', 'helper', 'unit'], 'cleanup control state')
+exact_keys(state['topology'], ['kind', 'unitName', 'enablement', 'relatedLinks', 'dropIns'], 'cleanup control topology')
+if state['schemaVersion'] != 2 or state['topology']['unitName'] != unit_name:
+    raise SystemExit('Cleanup control state contract is invalid')
+if hashlib.sha256(canonical_json(state['topology'])).hexdigest() != state['topologySha256']:
+    raise SystemExit('Cleanup control topology SHA-256 mismatch')
+kind = state['topology']['kind']
+expected_absent = {
+    'kind': 'canonical-absent-v1',
+    'unitName': unit_name,
+    'enablement': 'not-found',
+    'relatedLinks': [],
+    'dropIns': [],
+}
+expected_enabled = {
+    'kind': 'canonical-trusted-enabled-v1',
+    'unitName': unit_name,
+    'enablement': 'enabled',
+    'relatedLinks': [{
+        'path': os.path.relpath(canonical_link_path, systemd_root),
+        'target': canonical_link_target,
+    }],
+    'dropIns': [],
+}
+if state['topology'] not in (expected_absent, expected_enabled):
+    raise SystemExit('Unsupported cleanup control topology in backup')
+restore_identity = hashlib.sha256(
+    (aggregate_sha256 + ':' + state['topologySha256']).encode('ascii')
+).hexdigest()
+
+def validate_record(label, record, expected_mode, expected_sha256):
+    if kind == 'canonical-absent-v1':
+        exact_keys(record, ['present'], f'cleanup control {label}')
+        if record['present'] is not False:
+            raise SystemExit(f'Absent topology contains {label}')
+        return
+    exact_keys(record, ['present', 'uid', 'gid', 'mode', 'size', 'sha256', 'atimeNs', 'mtimeNs'], f'cleanup control {label}')
+    if (record['present'] is not True or record['uid'] != 0 or record['gid'] != 0 or
+            record['mode'] != expected_mode or record['sha256'] != expected_sha256 or
+            type(record['size']) is not int or record['size'] < 0 or
+            type(record['atimeNs']) is not int or record['atimeNs'] < 0 or
+            type(record['mtimeNs']) is not int or record['mtimeNs'] < 0):
+        raise SystemExit(f'Cleanup control {label} record is not canonical')
+    metadata, payload = read_regular(os.path.join(backup_root, f'{label}.bytes'), 0o600, f'cleanup control {label} backup')
+    if metadata.st_size != record['size'] or hashlib.sha256(payload).hexdigest() != record['sha256']:
+        raise SystemExit(f'Cleanup control {label} backup identity mismatch')
+
+validate_record('helper', state['helper'], 0o555, expected_helper_sha256)
+validate_record('unit', state['unit'], 0o444, expected_unit_sha256)
+
+preflight_parent_identities = {}
+parent_targets = [
+    journal_path,
+    barrier_path,
+    helper_path,
+    unit_path,
+    canonical_link_path,
+    temporary_link_path,
+]
+for target in parent_targets:
+    for directory, identity in capture_parent_chain(target).items():
+        previous = preflight_parent_identities.setdefault(directory, identity)
+        if previous != identity:
+            raise SystemExit(f'Cleanup restore parent identity is inconsistent: {directory}')
+validate_topology_residue_shape()
+scan_systemd_configuration(os.path.lexists(barrier_path))
+run_systemctl('daemon-reload')
+verify_effective_unit(os.path.lexists(barrier_path))
+revalidate_parent_identities(preflight_parent_identities)
+reconcile_topology_residue()
+revalidate_parent_identities(preflight_parent_identities)
+
+if os.path.lexists(release_barrier):
+    raise SystemExit('Cleanup control release barrier must remain absent during replay')
+if os.path.lexists(journal_root):
+    validate_directory(journal_root, 0o700)
+else:
+    ensure_directory_tree(journal_root, 0o700)
+validate_directory(journal_root, 0o700)
+revalidate_parent_identities(preflight_parent_identities)
+
+journal = None
+if os.path.lexists(journal_path):
+    _, journal_bytes = read_regular(journal_path, 0o600, 'cleanup control replay journal')
+    journal = json.loads(journal_bytes.decode('utf-8'))
+    exact_keys(journal, ['schemaVersion', 'restoreIdentity', 'backupTopologySha256', 'phase'], 'cleanup control replay journal')
+    if (journal['schemaVersion'] != 1 or journal['restoreIdentity'] != restore_identity or
+            journal['backupTopologySha256'] != state['topologySha256'] or journal['phase'] not in phases):
+        raise SystemExit('Cleanup control replay journal does not match this backup')
+
+def phase_rank(name):
+    return phases.index(name) if name is not None else -1
+
+current_phase = journal['phase'] if journal else None
+
+def persist_phase(name):
+    global current_phase
+    if phase_rank(name) < phase_rank(current_phase):
+        raise SystemExit('Cleanup control replay phase regression')
+    payload = canonical_json({
+        'schemaVersion': 1,
+        'restoreIdentity': restore_identity,
+        'backupTopologySha256': state['topologySha256'],
+        'phase': name,
+    }) + b'\n'
+    atomic_write(journal_path, payload, 0o600)
+    current_phase = name
+
+def ensure_barrier():
+    if os.path.lexists(dropin_path):
+        validate_directory(dropin_path, 0o755)
+    else:
+        ensure_directory_tree(dropin_path, 0o755)
+    validate_directory(dropin_path, 0o755)
+    if os.path.lexists(barrier_path):
+        _, payload = read_regular(barrier_path, 0o444, 'cleanup control restore barrier')
+        if payload != barrier_bytes:
+            raise SystemExit('Cleanup control restore barrier bytes are invalid')
+    else:
+        atomic_write(barrier_path, barrier_bytes, 0o444)
+    fsync_directory(systemd_root)
+
+if phase_rank(current_phase) < phase_rank('converged'):
+    ensure_barrier()
+if current_phase is None:
+    persist_phase('barrier-armed')
+
+if phase_rank(current_phase) < phase_rank('quiesced'):
+    run_systemctl('daemon-reload')
+    verify_effective_unit(True)
+    stop_result = run_systemctl('stop', unit_name, check=False)
+    if stop_result.returncode != 0 and not (kind == 'canonical-absent-v1' and enablement() == 'not-found'):
+        raise SystemExit(f'systemctl stop failed: {stop_result.stderr.strip()}')
+    if not is_inactive():
+        raise SystemExit('Cleanup control service remained active behind the restore barrier')
+    persist_phase('quiesced')
+
+def validate_live_file_shape(label, target):
+    validate_parent_chain(target, False)
+    if not os.path.lexists(target):
+        return
+    metadata = os.lstat(target)
+    if (not stat.S_ISREG(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode) or
+            metadata.st_uid != 0 or metadata.st_gid != 0 or metadata.st_nlink != 1 or
+            os.listxattr(target, follow_symlinks=False)):
+        raise SystemExit(f'Unsafe live cleanup control {label} before replay mutation')
+
+def validate_related_links_are_replay_safe():
+    links = related_links()
+    allowed = []
+    if os.path.lexists(canonical_link_path):
+        if not os.path.islink(canonical_link_path) or os.readlink(canonical_link_path) != canonical_link_target:
+            raise SystemExit('Cleanup control canonical link is unsafe')
+        allowed = [{'path': os.path.relpath(canonical_link_path, systemd_root), 'target': canonical_link_target}]
+    if links != allowed:
+        raise SystemExit(f'Unsupported cleanup control related links during replay: {links!r}')
+
+validate_live_file_shape('helper', helper_path)
+validate_live_file_shape('unit', unit_path)
+validate_related_links_are_replay_safe()
+allowed_replay_dropins = [os.path.relpath(barrier_path, systemd_root)] if os.path.lexists(barrier_path) else []
+if observed_dropins() != allowed_replay_dropins or (
+        phase_rank(current_phase) < phase_rank('converged') and not allowed_replay_dropins):
+    raise SystemExit('Cleanup control replay barrier is not the only live drop-in')
+
+def restore_file(label, target, record):
+    validate_parent_chain(target, record['present'])
+    if not record['present']:
+        if os.path.lexists(target):
+            current = os.lstat(target)
+            if (not stat.S_ISREG(current.st_mode) or stat.S_ISLNK(current.st_mode) or
+                    current.st_uid != 0 or current.st_gid != 0 or current.st_nlink != 1 or
+                    os.listxattr(target, follow_symlinks=False)):
+                raise SystemExit(f'Unsafe live cleanup control {label} during absent restore')
+            os.unlink(target)
+            fsync_directory(os.path.dirname(target))
+        return
+    source = os.path.join(backup_root, f'{label}.bytes')
+    _, payload = read_regular(source, 0o600, f'cleanup control {label} backup')
+    if os.path.lexists(target):
+        current = os.lstat(target)
+        if (not stat.S_ISREG(current.st_mode) or stat.S_ISLNK(current.st_mode) or
+                current.st_uid != 0 or current.st_gid != 0 or current.st_nlink != 1 or
+                os.listxattr(target, follow_symlinks=False)):
+            raise SystemExit(f'Unsafe live cleanup control {label} during restore')
+    temporary = target + '.restore.next'
+    atomic_write(temporary, payload, 0o600)
+    os.chown(temporary, record['uid'], record['gid'], follow_symlinks=False)
+    os.chmod(temporary, record['mode'], follow_symlinks=False)
+    os.utime(temporary, ns=(record['atimeNs'], record['mtimeNs']), follow_symlinks=False)
+    descriptor = os.open(temporary, os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+    os.replace(temporary, target)
+    fsync_directory(os.path.dirname(target))
+
+if phase_rank(current_phase) < phase_rank('helper-restored'):
+    restore_file('helper', helper_path, state['helper'])
+    persist_phase('helper-restored')
+if phase_rank(current_phase) < phase_rank('unit-restored'):
+    restore_file('unit', unit_path, state['unit'])
+    persist_phase('unit-restored')
+
+if phase_rank(current_phase) < phase_rank('topology-restored'):
+    validate_related_links_are_replay_safe()
+    link_parent = os.path.dirname(canonical_link_path)
+    ensure_directory_tree(link_parent, 0o755)
+    link_parent_descriptor = os.open(link_parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    link_parent_status = os.fstat(link_parent_descriptor)
+    canonical_name = os.path.basename(canonical_link_path)
+    temporary_name = os.path.basename(temporary_link_path)
+    if kind == 'canonical-absent-v1':
+        try:
+            if os.path.lexists(canonical_link_path):
+                os.unlink(canonical_name, dir_fd=link_parent_descriptor)
+            os.fsync(link_parent_descriptor)
+        finally:
+            os.close(link_parent_descriptor)
+    else:
+        try:
+            if not os.path.lexists(canonical_link_path):
+                if os.path.lexists(temporary_link_path):
+                    raise SystemExit('Unexpected cleanup control link residue after preflight')
+                os.symlink(canonical_link_target, temporary_name, dir_fd=link_parent_descriptor)
+                os.replace(temporary_name, canonical_name, src_dir_fd=link_parent_descriptor, dst_dir_fd=link_parent_descriptor)
+            os.fsync(link_parent_descriptor)
+            current_parent = os.lstat(link_parent)
+            if (current_parent.st_dev, current_parent.st_ino) != (link_parent_status.st_dev, link_parent_status.st_ino):
+                raise SystemExit('Cleanup control link parent changed during topology restore')
+        finally:
+            os.close(link_parent_descriptor)
+    revalidate_parent_identities(preflight_parent_identities)
+    persist_phase('topology-restored')
+
+def verify_file(label, target, record):
+    if not record['present']:
+        if os.path.lexists(target):
+            raise SystemExit(f'Cleanup control {label} should be absent')
+        return
+    metadata, payload = read_regular(target, record['mode'], f'restored cleanup control {label}')
+    if (metadata.st_uid != record['uid'] or metadata.st_gid != record['gid'] or
+            metadata.st_size != record['size'] or metadata.st_atime_ns != record['atimeNs'] or
+            metadata.st_mtime_ns != record['mtimeNs'] or
+            hashlib.sha256(payload).hexdigest() != record['sha256']):
+        raise SystemExit(f'Cleanup control {label} did not converge exactly')
+
+def verify_convergence(expect_barrier):
+    verify_file('helper', helper_path, state['helper'])
+    verify_file('unit', unit_path, state['unit'])
+    expected_links = state['topology']['relatedLinks']
+    if related_links() != expected_links:
+        raise SystemExit('Cleanup control link graph did not converge exactly')
+    dropins = observed_dropins()
+    expected_dropins = [os.path.relpath(barrier_path, systemd_root)] if expect_barrier else []
+    if dropins != expected_dropins:
+        raise SystemExit('Cleanup control drop-in graph did not converge exactly')
+    if enablement() != state['topology']['enablement']:
+        raise SystemExit('Cleanup control is-enabled result did not converge exactly')
+    if not is_inactive():
+        raise SystemExit('Cleanup control service is active after restoration')
+    verify_effective_unit(expect_barrier)
+
+if phase_rank(current_phase) < phase_rank('converged'):
+    run_systemctl('daemon-reload')
+    verify_convergence(True)
+    persist_phase('converged')
+else:
+    verify_convergence(os.path.lexists(barrier_path))
+
+if phase_rank(current_phase) < phase_rank('barrier-cleared'):
+    if os.path.lexists(barrier_path):
+        os.unlink(barrier_path)
+        fsync_directory(dropin_path)
+    if os.path.lexists(dropin_path) and not os.listdir(dropin_path):
+        os.rmdir(dropin_path)
+        fsync_directory(systemd_root)
+    run_systemctl('daemon-reload')
+    verify_convergence(False)
+    persist_phase('barrier-cleared')
+else:
+    verify_convergence(False)
+
+os.unlink(journal_path)
+fsync_directory(journal_root)
+TM_MIGRATION_CLEANUP_CONTROL_REPLAY
+}
+'@
+}
+
+function Get-Pm2PersistenceVerifier {
+    return @'
+persist_pm2_dump() {
+  local DumpPath="/root/.pm2/dump.pm2"
+  pm2 save
+  test -f "$DumpPath"
+  test ! -L "$DumpPath"
+  TM_LIVE_DIR="$LiveDir" TM_PM2_JLIST="$(pm2 jlist)" TM_PM2_DUMP_PATH="$DumpPath" node <<'NODE'
+const fs = require('node:fs');
+const path = require('node:path');
+
+const liveDir = path.resolve(process.env.TM_LIVE_DIR);
+const dumpPath = process.env.TM_PM2_DUMP_PATH;
+const metadata = fs.lstatSync(dumpPath);
+if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.nlink !== 1 ||
+    metadata.uid !== 0 || metadata.gid !== 0 || (metadata.mode & 0o022) !== 0) {
+  throw new Error('PM2 dump metadata is not root-only');
+}
+const configuration = require(path.join(liveDir, 'ecosystem.config.js'));
+const configured = configuration && Array.isArray(configuration.apps)
+  ? configuration.apps.filter((entry) => entry && entry.name === 'turingmarket')
+  : [];
+const running = JSON.parse(process.env.TM_PM2_JLIST || '[]')
+  .filter((entry) => entry && entry.name === 'turingmarket');
+const persisted = JSON.parse(fs.readFileSync(dumpPath, 'utf8'))
+  .filter((entry) => entry && (entry.name === 'turingmarket' || entry.pm2_env?.name === 'turingmarket'));
+if (configured.length !== 1 || running.length !== 1 || persisted.length !== 1) {
+  throw new Error('PM2 persistence requires one configured, running, and persisted turingmarket process');
+}
+const environmentKeys = [
+  'NODE_ENV', 'PORT', 'SERVER_HOST', 'TM_ENV_FILE', 'DB_PATH',
+  'UPLOAD_DIR', 'TMP_DIR', 'PPT_CACHE_DIR',
+];
+const application = configured[0];
+const expected = {
+  name: application.name,
+  pmExecPath: path.resolve(application.cwd || liveDir, application.script),
+  pmCwd: path.resolve(application.cwd || liveDir),
+  execMode: application.exec_mode === 'fork' ? 'fork_mode' : String(application.exec_mode),
+  instances: Number(application.instances || 1),
+  env: Object.fromEntries(environmentKeys.map((key) => [key, String(application.env[key])])),
+};
+function project(entry) {
+  const runtime = entry.pm2_env || entry;
+  const nestedEnvironment = runtime.env && typeof runtime.env === 'object' ? runtime.env : {};
+  return {
+    name: String(entry.name || runtime.name || ''),
+    pmExecPath: path.resolve(String(runtime.pm_exec_path || '')),
+    pmCwd: path.resolve(String(runtime.pm_cwd || runtime.cwd || '')),
+    execMode: String(runtime.exec_mode || ''),
+    instances: 1,
+    env: Object.fromEntries(environmentKeys.map((key) => [
+      key,
+      String(runtime[key] ?? nestedEnvironment[key]),
+    ])),
+  };
+}
+if (running[0].pm2_env?.status !== 'online' ||
+    JSON.stringify(project(running[0])) !== JSON.stringify(expected) ||
+    JSON.stringify(project(persisted[0])) !== JSON.stringify(expected)) {
+  throw new Error('PM2 persisted projection differs from the healthy release configuration');
+}
+process.stdout.write('PM2_DUMP_PROJECTION_OK\n');
+NODE
+  sync -f "$DumpPath"
+  sync -f "$(dirname "$DumpPath")"
+  printf '%s\n' 'PM2_DUMP_PERSISTED'
+}
+'@
+}
+
+function Assert-RemoteRestoreCapacity {
+    param([Parameter(Mandatory = $true)][string]$BackupPath)
+
+    Assert-RollbackBackupPath -BackupPath $BackupPath
+    $remoteScript = @'
+set -euo pipefail
+RemoteRoot="__REMOTE_ROOT__"
+LiveDir="__REMOTE_DIR__"
+BackupAbsolute="$RemoteRoot/__BACKUP_PATH__"
+RestoreUnit="$BackupAbsolute/cutover-snapshot"
+TrustedSourceBundle="__TRUSTED_SOURCE_BUNDLE__"
+TrustedSourceManifest="__TRUSTED_SOURCE_MANIFEST__"
+PlannerRelative="server/scripts/check_cutover_capacity.py"
+Planner="$TrustedSourceBundle/$PlannerRelative"
+
+test -d "$BackupAbsolute"
+test ! -L "$BackupAbsolute"
+test "$(realpath -e "$BackupAbsolute")" = "$RemoteRoot/__BACKUP_PATH__"
+test -d "$RestoreUnit"
+test ! -L "$RestoreUnit"
+test "$(realpath -e "$RestoreUnit")" = "$(realpath -e "$BackupAbsolute")/cutover-snapshot"
+for manifest in "$BackupAbsolute/SHA256SUMS" "$RestoreUnit/SHA256SUMS"; do
+  test -f "$manifest"
+  test ! -L "$manifest"
+  test "$(stat -c '%U:%G:%a:%h' "$manifest")" = "root:root:600:1"
+done
+(cd "$BackupAbsolute" && sha256sum --check --status SHA256SUMS)
+(cd "$RestoreUnit" && sha256sum --check --status SHA256SUMS)
+
+test -f "$TrustedSourceManifest"
+test ! -L "$TrustedSourceManifest"
+test "$(stat -c '%U:%G:%a:%h' "$TrustedSourceManifest")" = "root:root:444:1"
+test -f "$Planner"
+test ! -L "$Planner"
+test "$(stat -c '%U:%G:%a:%h' "$Planner")" = "root:root:444:1"
+ExpectedPlannerSha256="$(python3 - "$TrustedSourceManifest" "$PlannerRelative" <<'PY'
+import json
+import re
+import sys
+
+manifest_path, relative_path = sys.argv[1:]
+with open(manifest_path, encoding='utf-8') as handle:
+    manifest = json.load(handle)
+matches = [
+    entry.get('sha256')
+    for entry in manifest.get('files', [])
+    if entry.get('path') == relative_path
+]
+if len(matches) != 1 or not re.fullmatch(r'[0-9a-f]{64}', str(matches[0] or '')):
+    raise SystemExit('restore capacity planner is not uniquely pinned')
+print(matches[0])
+PY
+)"
+test "$(sha256sum "$Planner" | awk '{print $1}')" = "$ExpectedPlannerSha256"
+
+CapacityReport="$(
+  python3 "$Planner" \
+    --mode restore \
+    --backup-root "$BackupAbsolute" \
+    --parser-state-root /var/lib/turingmarket-parser \
+    --database-path /var/lib/turingmarket/db/turingmarket.db \
+    --ppt-cache-root /var/lib/turingmarket/ppt-cache \
+    --live-dir "$LiveDir" \
+    --restore-snapshot "$RestoreUnit"
+)"
+printf '%s\n' "$CapacityReport"
+test "$(printf '%s\n' "$CapacityReport" | tail -n 1)" = "RESTORE_CAPACITY_OK"
+TM_RESTORE_CAPACITY_REPORT="$CapacityReport" python3 - <<'PY'
+import json
+import os
+
+lines = os.environ['TM_RESTORE_CAPACITY_REPORT'].splitlines()
+if len(lines) != 2 or lines[1] != 'RESTORE_CAPACITY_OK':
+    raise SystemExit('restore capacity output is invalid')
+report = json.loads(lines[0])
+if (report.get('contract') != 'tm-cutover-capacity-v1' or
+        report.get('mode') != 'restore' or report.get('ok') is not True):
+    raise SystemExit('restore capacity report is not accepting')
+canonical = json.dumps(report, sort_keys=True, separators=(',', ':'))
+if lines[0] != canonical:
+    raise SystemExit('restore capacity report is not canonical')
+print('RESTORE_CAPACITY_PREFLIGHT_OK')
+PY
+'@
+    $remoteScript = $remoteScript.Replace('__REMOTE_ROOT__', $REMOTE_ROOT)
+    $remoteScript = $remoteScript.Replace('__REMOTE_DIR__', $REMOTE_DIR)
+    $remoteScript = $remoteScript.Replace('__BACKUP_PATH__', $BackupPath)
+    $remoteScript = $remoteScript.Replace('__TRUSTED_SOURCE_BUNDLE__', $TRUSTED_SOURCE_BUNDLE_REMOTE_PATH)
+    $remoteScript = $remoteScript.Replace('__TRUSTED_SOURCE_MANIFEST__', $TRUSTED_SOURCE_MANIFEST_REMOTE_PATH)
+    Invoke-RemoteBash -Script $remoteScript -FailureMessage "Remote restore capacity preflight failed" -RequireDeploymentLock
 }
 
 function Invoke-RemoteRestore {
@@ -2205,14 +4325,22 @@ function Invoke-RemoteRestore {
     if (-not $RestoreDatabase) {
         throw "Phase 4 rollback cannot restore code without its database and PPT cache."
     }
+    $pm2PersistenceVerifier = Get-Pm2PersistenceVerifier
+    $exactPublicNginxVerifier = Get-ExactPublicNginxBehaviorVerifier
+    $restoreControlPrimitive = Get-MigrationGateCleanupControlRestoreScript
     $remoteScript = @'
-set -euo pipefail
+set -eEuo pipefail
 LiveDir="__REMOTE_DIR__"
 RemoteRoot="__REMOTE_ROOT__"
+TrustedSourceBundle="__TRUSTED_SOURCE_BUNDLE__"
 BackupPath="__BACKUP_PATH__"
 BackupAbsolute="$RemoteRoot/$BackupPath"
 RestoreUnit="$BackupAbsolute/cutover-snapshot"
+ParserSnapshot="$RestoreUnit/parser-appliance"
+ParserRollbackProvisioner="$ParserSnapshot/provisioner.file"
 LockDir="$RemoteRoot/.deploy-v030.lock"
+ParserRollbackFailure="$LockDir/parser-rollback.failed"
+ParserRollbackFailureNext="$ParserRollbackFailure.next"
 RestoreStateDir="$LockDir/restore-v050"
 RestoreIdentity="$RestoreStateDir/identity"
 RestoreStep="$RestoreStateDir/step"
@@ -2225,7 +4353,34 @@ PptCacheStage="$PptCacheParent/.ppt-cache.restore.__RESTORE_TOKEN__"
 RestoreStateStage="$LockDir/.restore-v050.__RESTORE_TOKEN__"
 MarkerRoot="$RemoteRoot/deployment-evidence"
 CurrentMarker="$MarkerRoot/current-accepted.json"
+MaintenanceConfig="/etc/nginx/sites-available/turingmarket-maintenance"
+PublicNginxConfig="/etc/nginx/sites-available/turingmarket"
+RestoreMaintenanceStage="$LockDir/nginx-restore-maintenance.conf.next"
+RestoreMaintenanceLink="$LockDir/nginx-restore-maintenance.link"
+RestorePublicLink="$LockDir/nginx-restore-public.link"
+PublicGuardHelper="$TrustedSourceBundle/server/scripts/public_release_guard.sh"
+ExpectedPublicGuardSha256="__TRUSTED_PUBLIC_GUARD_SHA256__"
+PublicGuardState="$LockDir/public-gate-guard"
+PublicGuardRecoveryLink="$LockDir/nginx-public-guard.link"
+PublicGuardDropIn="/etc/systemd/system/nginx.service.d/90-turingmarket-public-guard.conf"
+PublicGuardUnit="turingmarket-restore-public-guard-__RESTORE_TOKEN__.service"
+public_release_guard() {
+  /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin /bin/bash --noprofile --norc "$PublicGuardHelper" "$@"
+}
+run_exact_public_nginx_gate() {
+  local socket_path="$1"
+  local port="$2"
+  node - "$socket_path" "$port" <<'TM_EXACT_PUBLIC_NGINX_VERIFIER'
+__EXACT_PUBLIC_NGINX_VERIFIER__
+TM_EXACT_PUBLIC_NGINX_VERIFIER
+}
+__PM2_PERSISTENCE_VERIFIER__
+__MIGRATION_CLEANUP_CONTROL_RESTORE_SCRIPT__
 umask 077
+test -f "$PublicGuardHelper"
+test ! -L "$PublicGuardHelper"
+test "$(stat -c '%U:%G:%a:%h' "$PublicGuardHelper")" = "root:root:444:1"
+test "$(sha256sum "$PublicGuardHelper" | awk '{print $1}')" = "$ExpectedPublicGuardSha256"
 test -f "$BackupAbsolute/SHA256SUMS"
 test -d "$RestoreUnit"
 test ! -L "$RestoreUnit"
@@ -2237,6 +4392,8 @@ test "$(stat -c '%U:%G:%a' "$RestoreUnit/database")" = "root:root:700"
 test -d "$RestoreUnit/ppt-cache"
 test ! -L "$RestoreUnit/ppt-cache"
 test "$(stat -c '%U:%G:%a' "$RestoreUnit/ppt-cache")" = "root:root:700"
+test -d "$ParserSnapshot"
+test ! -L "$ParserSnapshot"
 for artifact in \
   "$RestoreUnit/SHA256SUMS" \
   "$RestoreUnit/database.sha256" \
@@ -2253,10 +4410,28 @@ for artifact in \
 done
 test -d "$DatabaseDir"
 test ! -L "$DatabaseDir"
-test -d "$PptCacheDir"
-test ! -L "$PptCacheDir"
 test "$DatabasePath" = "/var/lib/turingmarket/db/turingmarket.db"
 test "$PptCacheDir" = "/var/lib/turingmarket/ppt-cache"
+if [ -e "$PptCacheDir" ] || [ -L "$PptCacheDir" ]; then
+  test -d "$PptCacheDir"
+  test ! -L "$PptCacheDir"
+fi
+if [ -f "$BackupAbsolute/ppt-cache.present" ] && [ ! -e "$BackupAbsolute/ppt-cache.absent" ]; then
+  PptCacheOrigin=present
+elif [ -f "$BackupAbsolute/ppt-cache.absent" ] && [ ! -e "$BackupAbsolute/ppt-cache.present" ]; then
+  PptCacheOrigin=absent
+else
+  echo "Backup PPT cache origin state is ambiguous" >&2
+  exit 1
+fi
+if [ "$PptCacheOrigin" = absent ] && [ ! -e "$PptCacheDir" ]; then
+  test ! -L "$PptCacheDir"
+  install -d -o root -g root -m 0700 "$PptCacheDir"
+  sync -f "$PptCacheDir"
+  sync -f "$PptCacheParent"
+fi
+test -d "$PptCacheDir"
+test ! -L "$PptCacheDir"
 cd "$BackupAbsolute"
 sha256sum --check --status SHA256SUMS
 cd "$RestoreUnit"
@@ -2267,6 +4442,10 @@ sha256sum --check --status ppt-ledger.sha256
 if [ -s ppt-cache.sha256 ]; then
   sha256sum --check --status ppt-cache.sha256
 fi
+(cd "$ParserSnapshot" && sha256sum --check --status SHA256SUMS)
+test -f "$ParserRollbackProvisioner"
+test ! -L "$ParserRollbackProvisioner"
+test "$(stat -c '%U:%G:%a:%h' "$ParserRollbackProvisioner")" = "root:root:500:1"
 
 ExpectedRestoreIdentity="$(
   printf '%s\n%s\n' \
@@ -2275,6 +4454,26 @@ ExpectedRestoreIdentity="$(
     sha256sum | awk '{print $1}'
 )"
 test "${#ExpectedRestoreIdentity}" = "64"
+ExpectedParserRollbackFailure="PARSER_ROLLBACK_FAILED backup=$BackupPath restore=$ExpectedRestoreIdentity"
+validate_parser_rollback_failure() {
+  local marker="$1"
+  test -f "$marker"
+  test ! -L "$marker"
+  test "$(stat -c '%U:%G:%a:%h' "$marker")" = "root:root:600:1"
+  test "$(cat "$marker")" = "$ExpectedParserRollbackFailure"
+}
+if [ -e "$ParserRollbackFailure" ] || [ -L "$ParserRollbackFailure" ]; then
+  validate_parser_rollback_failure "$ParserRollbackFailure"
+fi
+if [ -e "$ParserRollbackFailureNext" ] || [ -L "$ParserRollbackFailureNext" ]; then
+  validate_parser_rollback_failure "$ParserRollbackFailureNext"
+  if [ -e "$ParserRollbackFailure" ]; then
+    rm -f -- "$ParserRollbackFailureNext"
+  else
+    mv "$ParserRollbackFailureNext" "$ParserRollbackFailure"
+  fi
+  sync -f "$LockDir"
+fi
 if [ ! -e "$RestoreStateDir" ]; then
   test ! -e "$RestoreStateStage"
   install -d -o root -g root -m 0700 "$RestoreStateStage"
@@ -2302,7 +4501,7 @@ record_restore_step() {
   local step="$1"
   local next="$RestoreStep.next.__RESTORE_TOKEN__"
   case "$step" in
-    preflight-verified|service-stopped|code-restored|data-staged|database-restored|cache-restored|security-reapplied|sessions-invalidated|marker-restored|nginx-restored|process-restored|health-verified) ;;
+    preflight-verified|maintenance-entered|service-stopped|parser-restored|code-restored|data-staged|database-restored|cache-restored|cache-origin-restored|security-reapplied|sessions-invalidated|marker-restored|process-restored|health-verified|control-restored|nginx-restored|public-verified) ;;
     *) echo "Unknown restore journal step: $step" >&2; exit 1 ;;
   esac
   test ! -e "$next"
@@ -2325,6 +4524,79 @@ cleanup_restore_stages() {
 trap cleanup_restore_stages EXIT
 record_restore_step preflight-verified
 
+# RESTORE_MAINTENANCE
+rm -f -- "$RestoreMaintenanceStage" "$RestoreMaintenanceLink"
+cat > "$RestoreMaintenanceStage" <<'TM_RESTORE_MAINTENANCE_NGINX'
+server {
+    listen 80;
+    server_name _;
+    default_type application/json;
+    add_header Retry-After 60 always;
+    add_header Cache-Control "no-store" always;
+    location / {
+        return 503 '{"error":"MAINTENANCE","message":"Rollback in progress"}';
+    }
+}
+TM_RESTORE_MAINTENANCE_NGINX
+# PUBLIC_GUARD_DURABLE_MAINTENANCE
+public_release_guard close \
+  --state-file "$PublicGuardState" \
+  --maintenance-source "$RestoreMaintenanceStage" \
+  --maintenance-config "$MaintenanceConfig" \
+  --recovery-link "$PublicGuardRecoveryLink" \
+  --site-link /etc/nginx/sites-enabled/turingmarket
+expect_restore_maintenance() {
+  local request_path="$1"
+  test "$(curl -sS -o /dev/null -w '%{http_code}' "http://localhost$request_path")" = "503"
+}
+expect_restore_maintenance /api/health
+expect_restore_maintenance /api/auth/login
+expect_restore_maintenance /m0
+printf '%s\n' 'RESTORE_ALL_TRAFFIC_MAINTENANCE_OK'
+record_restore_step maintenance-entered
+
+restore_public_gate_armed=0
+recover_restore_public_failure() {
+  local RestoreStatus="${1:-1}"
+  local FailClosedStatus=0
+  trap - ERR EXIT HUP INT TERM
+  trap '' HUP INT TERM
+  set +e
+  if [ "$restore_public_gate_armed" = "1" ]; then
+    public_release_guard close \
+      --state-file "$PublicGuardState" \
+      --maintenance-source "$RestoreMaintenanceStage" \
+      --maintenance-config "$MaintenanceConfig" \
+      --recovery-link "$PublicGuardRecoveryLink" \
+      --site-link /etc/nginx/sites-enabled/turingmarket || FailClosedStatus=1
+  fi
+  cleanup_restore_stages || FailClosedStatus=1
+  if [ "$FailClosedStatus" != "0" ]; then
+    echo "Rollback public failure handler could not restore maintenance" >&2
+    exit 125
+  fi
+  if [ "$RestoreStatus" = "0" ]; then RestoreStatus=1; fi
+  exit "$RestoreStatus"
+}
+RestoreControllerStartTicks="$(awk '{print $22}' "/proc/$$/stat")"
+RestoreGuardDeadline="$(( $(date +%s) + __ROLLBACK_PUBLIC_GUARD_TIMEOUT_SECONDS__ ))"
+restore_public_gate_armed=1
+trap 'recover_restore_public_failure $?' ERR EXIT
+trap 'recover_restore_public_failure 129' HUP
+trap 'recover_restore_public_failure 130' INT
+trap 'recover_restore_public_failure 143' TERM
+public_release_guard arm \
+  --state-file "$PublicGuardState" \
+  --maintenance-source "$RestoreMaintenanceStage" \
+  --maintenance-config "$MaintenanceConfig" \
+  --recovery-link "$PublicGuardRecoveryLink" \
+  --site-link /etc/nginx/sites-enabled/turingmarket \
+  --unit "$PublicGuardUnit" \
+  --controller-pid "$$" \
+  --controller-start-ticks "$RestoreControllerStartTicks" \
+  --deadline-epoch "$RestoreGuardDeadline" \
+  --drop-in "$PublicGuardDropIn"
+
 if pm2 describe turingmarket >/dev/null 2>&1; then
   pm2 stop turingmarket
 fi
@@ -2339,6 +4611,23 @@ if (application && status !== 'stopped') {
 console.log(`ROLLBACK_PM2_STATE=${status || 'missing'}`);
 NODE
 record_restore_step service-stopped
+
+if ! TM_UPLOAD_SANDBOX_PROVISION_DIAGNOSTIC=0 "$ParserRollbackProvisioner" rollback \
+  --snapshot-root "$ParserSnapshot"; then
+  test ! -e "$ParserRollbackFailureNext"
+  printf '%s\n' "$ExpectedParserRollbackFailure" > "$ParserRollbackFailureNext"
+  chown root:root "$ParserRollbackFailureNext"
+  chmod 0600 "$ParserRollbackFailureNext"
+  sync -f "$ParserRollbackFailureNext"
+  mv -f "$ParserRollbackFailureNext" "$ParserRollbackFailure"
+  sync -f "$ParserRollbackFailure"
+  sync -f "$LockDir"
+  echo "PARSER_ROLLBACK_FAILED" >&2
+  exit 70
+fi
+rm -f -- "$ParserRollbackFailure"
+sync -f "$LockDir"
+record_restore_step parser-restored
 
 # RESTORE_CODE
 cd "$LiveDir"
@@ -2476,6 +4765,18 @@ sync -f "$DatabaseDir"
 sync -f "$PptCacheDir"
 sync -f "$PptCacheParent"
 record_restore_step cache-restored
+if [ "$PptCacheOrigin" = absent ]; then
+  if find "$PptCacheDir" -mindepth 1 -print -quit | grep -q .; then
+    echo "Cannot restore absent PPT cache origin because restored cache is not empty" >&2
+    exit 1
+  fi
+  rmdir -- "$PptCacheDir"
+  sync -f "$PptCacheParent"
+else
+  test -d "$PptCacheDir"
+  test ! -L "$PptCacheDir"
+fi
+record_restore_step cache-origin-restored
 rm -f -- "$DatabasePath-journal" "$DatabasePath-wal" "$DatabasePath-shm"
 
 # REAPPLY_CUTOVER_SECURITY
@@ -2661,15 +4962,6 @@ if [ -e "$CurrentMarker" ]; then
 fi
 record_restore_step marker-restored
 
-# RESTORE_NGINX
-test -f "$BackupAbsolute/nginx/turingmarket.conf"
-install -m 0644 "$BackupAbsolute/nginx/turingmarket.conf" /etc/nginx/sites-available/turingmarket
-rm -f /etc/nginx/sites-enabled/turingmarket
-ln -s /etc/nginx/sites-available/turingmarket /etc/nginx/sites-enabled/turingmarket
-nginx -t
-systemctl reload nginx
-record_restore_step nginx-restored
-
 # RESTORE_PROCESS
 cd "$LiveDir"
 export SERVER_HOST=127.0.0.1
@@ -2677,22 +4969,73 @@ pm2 restart ecosystem.config.js --only turingmarket --update-env || pm2 start ec
 record_restore_step process-restored
 
 # RESTORE_HEALTH
-for attempt in $(seq 1 __MAINTENANCE_TIMEOUT_SECONDS__); do
+for attempt in $(seq 1 __PARSER_STARTUP_TIMEOUT_SECONDS__); do
   if curl -fsS http://localhost:3002/api/health >/dev/null; then
     record_restore_step health-verified
-    echo "ROLLBACK_OK"
-    exit 0
+    break
+  fi
+  if [ "$attempt" = "__PARSER_STARTUP_TIMEOUT_SECONDS__" ]; then
+    echo "Rollback health verification failed" >&2
+    exit 1
   fi
   sleep 1
 done
-echo "Rollback health verification failed" >&2
-exit 1
+persist_pm2_dump
+
+# RESTORE_CLEANUP_CONTROL
+restore_migration_gate_cleanup_control
+record_restore_step control-restored
+
+# RESTORE_NGINX
+test -f "$BackupAbsolute/nginx/turingmarket.conf"
+test ! -L "$BackupAbsolute/nginx/turingmarket.conf"
+install -o root -g root -m 0644 "$BackupAbsolute/nginx/turingmarket.conf" "$PublicNginxConfig"
+
+rm -f -- "$RestorePublicLink"
+ln -s "$PublicNginxConfig" "$RestorePublicLink"
+public_release_guard verify-armed \
+  --state-file "$PublicGuardState" \
+  --unit "$PublicGuardUnit" \
+  --controller-pid "$$" \
+  --controller-start-ticks "$RestoreControllerStartTicks" \
+  --deadline-epoch "$RestoreGuardDeadline" \
+  --drop-in "$PublicGuardDropIn"
+mv -Tf "$RestorePublicLink" /etc/nginx/sites-enabled/turingmarket
+nginx -t
+systemctl reload nginx
+record_restore_step nginx-restored
+
+# RESTORE_PUBLIC_GATE
+run_exact_public_nginx_gate - 80
+record_restore_step public-verified
+public_release_guard disarm \
+  --state-file "$PublicGuardState" \
+  --unit "$PublicGuardUnit" \
+  --controller-pid "$$" \
+  --controller-start-ticks "$RestoreControllerStartTicks" \
+  --deadline-epoch "$RestoreGuardDeadline" \
+  --drop-in "$PublicGuardDropIn"
+restore_public_gate_armed=0
+trap - ERR EXIT HUP INT TERM
+trap cleanup_restore_stages EXIT
+rm -f -- "$MaintenanceConfig" "$RestoreMaintenanceStage"
+sync -f /etc/nginx/sites-available
+printf '%s\n' 'ROLLBACK_OK'
 '@
     $remoteScript = $remoteScript.Replace('__REMOTE_DIR__', $REMOTE_DIR)
     $remoteScript = $remoteScript.Replace('__REMOTE_ROOT__', $REMOTE_ROOT)
     $remoteScript = $remoteScript.Replace('__BACKUP_PATH__', $BackupPath)
     $remoteScript = $remoteScript.Replace('__RESTORE_TOKEN__', ([Guid]::NewGuid().ToString('N')))
+    $remoteScript = $remoteScript.Replace('__TRUSTED_SOURCE_BUNDLE__', $TRUSTED_SOURCE_BUNDLE_REMOTE_PATH)
+    $remoteScript = $remoteScript.Replace('__TRUSTED_PUBLIC_GUARD_SHA256__', $EXPECTED_TRUSTED_PUBLIC_GUARD_SHA256)
     $remoteScript = $remoteScript.Replace('__MAINTENANCE_TIMEOUT_SECONDS__', $MaintenanceTimeoutSeconds.ToString())
+    $remoteScript = $remoteScript.Replace('__PARSER_STARTUP_TIMEOUT_SECONDS__', $PARSER_STARTUP_TIMEOUT_SECONDS.ToString())
+    $remoteScript = $remoteScript.Replace('__ROLLBACK_PUBLIC_GUARD_TIMEOUT_SECONDS__', $ROLLBACK_PUBLIC_GUARD_TIMEOUT_SECONDS.ToString())
+    $remoteScript = $remoteScript.Replace('__PM2_PERSISTENCE_VERIFIER__', $pm2PersistenceVerifier)
+    $remoteScript = $remoteScript.Replace('__EXACT_PUBLIC_NGINX_VERIFIER__', $exactPublicNginxVerifier)
+    $remoteScript = $remoteScript.Replace('__MIGRATION_CLEANUP_CONTROL_RESTORE_SCRIPT__', $restoreControlPrimitive)
+    $remoteScript = $remoteScript.Replace('__CLEANUP_SHA256__', $EXPECTED_TRUSTED_MIGRATION_CLEANUP_HELPER_SHA256)
+    $remoteScript = $remoteScript.Replace('__UNIT_SHA256__', $EXPECTED_TRUSTED_MIGRATION_CLEANUP_UNIT_SHA256)
 
     Invoke-RemoteBash -Script $remoteScript -FailureMessage "Remote rollback failed" -RequireDeploymentLock -RequireWriterLock
 }
@@ -2701,38 +5044,163 @@ function Invoke-RemotePreMutationResume {
     param([Parameter(Mandatory = $true)][string]$BackupPath)
 
     Assert-RollbackBackupPath -BackupPath $BackupPath
+    $pm2PersistenceVerifier = Get-Pm2PersistenceVerifier
+    $exactPublicNginxVerifier = Get-ExactPublicNginxBehaviorVerifier
+    $restoreControlPrimitive = Get-MigrationGateCleanupControlRestoreScript
     $remoteScript = @'
-set -euo pipefail
+set -eEuo pipefail
 LiveDir="__REMOTE_DIR__"
 RemoteRoot="__REMOTE_ROOT__"
+TrustedSourceBundle="__TRUSTED_SOURCE_BUNDLE__"
 BackupAbsolute="$RemoteRoot/__BACKUP_PATH__"
 LockDir="$RemoteRoot/.deploy-v030.lock"
 MaintenanceConfig="/etc/nginx/sites-available/turingmarket-maintenance"
+PublicNginxConfig="/etc/nginx/sites-available/turingmarket"
+ResumeMaintenanceStage="$LockDir/nginx-resume-maintenance.conf.next"
+ResumeMaintenanceLink="$LockDir/nginx-resume-maintenance.link"
+ResumePublicLink="$LockDir/nginx-resume-public.link"
 MarkerRoot="$RemoteRoot/deployment-evidence"
 CurrentMarker="$MarkerRoot/current-accepted.json"
+PptCacheDir="/var/lib/turingmarket/ppt-cache"
+PptCacheParent="$(dirname "$PptCacheDir")"
+PublicGuardHelper="$TrustedSourceBundle/server/scripts/public_release_guard.sh"
+ExpectedPublicGuardSha256="__TRUSTED_PUBLIC_GUARD_SHA256__"
+PublicGuardState="$LockDir/public-gate-guard"
+PublicGuardRecoveryLink="$LockDir/nginx-public-guard.link"
+PublicGuardDropIn="/etc/systemd/system/nginx.service.d/90-turingmarket-public-guard.conf"
+PublicGuardUnit="turingmarket-resume-public-guard-__RESUME_TOKEN__.service"
+public_release_guard() {
+  /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin /bin/bash --noprofile --norc "$PublicGuardHelper" "$@"
+}
+run_exact_public_nginx_gate() {
+  local socket_path="$1"
+  local port="$2"
+  node - "$socket_path" "$port" <<'TM_EXACT_PUBLIC_NGINX_VERIFIER'
+__EXACT_PUBLIC_NGINX_VERIFIER__
+TM_EXACT_PUBLIC_NGINX_VERIFIER
+}
+__PM2_PERSISTENCE_VERIFIER__
+__MIGRATION_CLEANUP_CONTROL_RESTORE_SCRIPT__
+test -f "$PublicGuardHelper"
+test ! -L "$PublicGuardHelper"
+test "$(stat -c '%U:%G:%a:%h' "$PublicGuardHelper")" = "root:root:444:1"
+test "$(sha256sum "$PublicGuardHelper" | awk '{print $1}')" = "$ExpectedPublicGuardSha256"
 Phase="$(cat "$LockDir/phase")"
 case "$Phase" in
   mutation-intent|maintenance-entered|writers-stopped|snapshot-ready|prior-marker-archived|nginx-candidate-staged) ;;
   *) echo "Pre-mutation resume rejected phase: $Phase" >&2; exit 1 ;;
 esac
+rm -f -- "$ResumeMaintenanceStage" "$ResumeMaintenanceLink"
+cat > "$ResumeMaintenanceStage" <<'TM_RESUME_MAINTENANCE_NGINX'
+server {
+    listen 80;
+    server_name _;
+    default_type application/json;
+    add_header Retry-After 60 always;
+    add_header Cache-Control "no-store" always;
+    location / {
+        return 503 '{"error":"MAINTENANCE","message":"Rollback resume in progress"}';
+    }
+}
+TM_RESUME_MAINTENANCE_NGINX
+# PUBLIC_GUARD_DURABLE_MAINTENANCE
+public_release_guard close \
+  --state-file "$PublicGuardState" \
+  --maintenance-source "$ResumeMaintenanceStage" \
+  --maintenance-config "$MaintenanceConfig" \
+  --recovery-link "$PublicGuardRecoveryLink" \
+  --site-link /etc/nginx/sites-enabled/turingmarket
+for request_path in /api/health /api/auth/login /m0; do
+  test "$(curl -sS -o /dev/null -w '%{http_code}' "http://localhost$request_path")" = "503"
+done
+
+resume_public_gate_armed=0
+recover_resume_public_failure() {
+  local ResumeStatus="${1:-1}"
+  local FailClosedStatus=0
+  trap - ERR EXIT HUP INT TERM
+  trap '' HUP INT TERM
+  set +e
+  if [ "$resume_public_gate_armed" = "1" ]; then
+    public_release_guard close \
+      --state-file "$PublicGuardState" \
+      --maintenance-source "$ResumeMaintenanceStage" \
+      --maintenance-config "$MaintenanceConfig" \
+      --recovery-link "$PublicGuardRecoveryLink" \
+      --site-link /etc/nginx/sites-enabled/turingmarket || FailClosedStatus=1
+  fi
+  if [ "$FailClosedStatus" != "0" ]; then
+    echo "Pre-mutation resume failure handler could not restore maintenance" >&2
+    exit 125
+  fi
+  if [ "$ResumeStatus" = "0" ]; then ResumeStatus=1; fi
+  exit "$ResumeStatus"
+}
+ResumeControllerStartTicks="$(awk '{print $22}' "/proc/$$/stat")"
+ResumeGuardDeadline="$(( $(date +%s) + __ROLLBACK_PUBLIC_GUARD_TIMEOUT_SECONDS__ ))"
+resume_public_gate_armed=1
+trap 'recover_resume_public_failure $?' ERR EXIT
+trap 'recover_resume_public_failure 129' HUP
+trap 'recover_resume_public_failure 130' INT
+trap 'recover_resume_public_failure 143' TERM
+public_release_guard arm \
+  --state-file "$PublicGuardState" \
+  --maintenance-source "$ResumeMaintenanceStage" \
+  --maintenance-config "$MaintenanceConfig" \
+  --recovery-link "$PublicGuardRecoveryLink" \
+  --site-link /etc/nginx/sites-enabled/turingmarket \
+  --unit "$PublicGuardUnit" \
+  --controller-pid "$$" \
+  --controller-start-ticks "$ResumeControllerStartTicks" \
+  --deadline-epoch "$ResumeGuardDeadline" \
+  --drop-in "$PublicGuardDropIn"
+
 test ! -e "$LockDir/accepted"
 test -f "$BackupAbsolute/SHA256SUMS"
 test -f "$BackupAbsolute/nginx/turingmarket.conf"
 cd "$BackupAbsolute"
 sha256sum --check --status SHA256SUMS
 
+if [ -f "$BackupAbsolute/ppt-cache.absent" ] && [ ! -e "$BackupAbsolute/ppt-cache.present" ]; then
+  if [ -e "$PptCacheDir" ] || [ -L "$PptCacheDir" ]; then
+    test -d "$PptCacheDir"
+    test ! -L "$PptCacheDir"
+    if find "$PptCacheDir" -mindepth 1 -print -quit | grep -q .; then
+      echo "First-install PPT cache changed before pre-mutation recovery" >&2
+      exit 1
+    fi
+    rmdir -- "$PptCacheDir"
+    sync -f "$PptCacheParent"
+  fi
+elif [ -f "$BackupAbsolute/ppt-cache.present" ] && [ ! -e "$BackupAbsolute/ppt-cache.absent" ]; then
+  test -d "$PptCacheDir"
+  test ! -L "$PptCacheDir"
+else
+  echo "Backup PPT cache origin state is ambiguous" >&2
+  exit 1
+fi
+
 # Keep public maintenance in place until the previous process is healthy.
 cd "$LiveDir"
 export SERVER_HOST=127.0.0.1
-pm2 restart ecosystem.config.js --only turingmarket --update-env || pm2 start ecosystem.config.js --only turingmarket --update-env
-for attempt in $(seq 1 __MAINTENANCE_TIMEOUT_SECONDS__); do
+if [ "$Phase" = mutation-intent ] || [ "$Phase" = maintenance-entered ]; then
+  if ! curl -fsS http://localhost:3002/api/health >/dev/null; then
+    echo "Previous release is not healthy while admitted connections may remain" >&2
+    exit 1
+  fi
+else
+  pm2 restart ecosystem.config.js --only turingmarket --update-env || pm2 start ecosystem.config.js --only turingmarket --update-env
+fi
+for attempt in $(seq 1 __PARSER_STARTUP_TIMEOUT_SECONDS__); do
   if curl -fsS http://localhost:3002/api/health >/dev/null; then break; fi
-  if [ "$attempt" = "__MAINTENANCE_TIMEOUT_SECONDS__" ]; then
+  if [ "$attempt" = "__PARSER_STARTUP_TIMEOUT_SECONDS__" ]; then
     echo "Previous release did not recover on loopback" >&2
     exit 1
   fi
   sleep 1
 done
+persist_pm2_dump
+restore_migration_gate_cleanup_control
 
 install -d -o root -g root -m 0700 "$MarkerRoot"
 python3 - "$BackupAbsolute/accepted-marker" "$CurrentMarker" <<'PY'
@@ -2771,26 +5239,46 @@ PY
 if [ -e "$CurrentMarker" ]; then
   test "$(stat -c '%U:%G:%a:%h' "$CurrentMarker")" = "root:root:600:1"
 fi
-install -m 0644 "$BackupAbsolute/nginx/turingmarket.conf" /etc/nginx/sites-available/turingmarket
-ln -s /etc/nginx/sites-available/turingmarket "$LockDir/nginx-resume-old.link"
-mv -Tf "$LockDir/nginx-resume-old.link" /etc/nginx/sites-enabled/turingmarket
+install -m 0644 "$BackupAbsolute/nginx/turingmarket.conf" "$PublicNginxConfig"
+rm -f -- "$ResumePublicLink"
+ln -s "$PublicNginxConfig" "$ResumePublicLink"
+public_release_guard verify-armed \
+  --state-file "$PublicGuardState" \
+  --unit "$PublicGuardUnit" \
+  --controller-pid "$$" \
+  --controller-start-ticks "$ResumeControllerStartTicks" \
+  --deadline-epoch "$ResumeGuardDeadline" \
+  --drop-in "$PublicGuardDropIn"
+mv -Tf "$ResumePublicLink" /etc/nginx/sites-enabled/turingmarket
 nginx -t
 systemctl reload nginx
-for attempt in $(seq 1 __MAINTENANCE_TIMEOUT_SECONDS__); do
-  if curl -fsS http://localhost/api/health >/dev/null; then break; fi
-  if [ "$attempt" = "__MAINTENANCE_TIMEOUT_SECONDS__" ]; then
-    echo "Previous release did not recover through Nginx" >&2
-    exit 1
-  fi
-  sleep 1
-done
-rm -f -- "$MaintenanceConfig"
+run_exact_public_nginx_gate - 80
+public_release_guard disarm \
+  --state-file "$PublicGuardState" \
+  --unit "$PublicGuardUnit" \
+  --controller-pid "$$" \
+  --controller-start-ticks "$ResumeControllerStartTicks" \
+  --deadline-epoch "$ResumeGuardDeadline" \
+  --drop-in "$PublicGuardDropIn"
+resume_public_gate_armed=0
+trap - ERR EXIT HUP INT TERM
+rm -f -- "$MaintenanceConfig" "$ResumeMaintenanceStage"
+sync -f /etc/nginx/sites-available
 printf '%s\n' 'PRE_MUTATION_RESUME_OK'
 '@
     $remoteScript = $remoteScript.Replace('__REMOTE_DIR__', $REMOTE_DIR)
     $remoteScript = $remoteScript.Replace('__REMOTE_ROOT__', $REMOTE_ROOT)
     $remoteScript = $remoteScript.Replace('__BACKUP_PATH__', $BackupPath)
-    $remoteScript = $remoteScript.Replace('__MAINTENANCE_TIMEOUT_SECONDS__', $MaintenanceTimeoutSeconds.ToString())
+    $remoteScript = $remoteScript.Replace('__RESUME_TOKEN__', ([Guid]::NewGuid().ToString('N')))
+    $remoteScript = $remoteScript.Replace('__TRUSTED_SOURCE_BUNDLE__', $TRUSTED_SOURCE_BUNDLE_REMOTE_PATH)
+    $remoteScript = $remoteScript.Replace('__TRUSTED_PUBLIC_GUARD_SHA256__', $EXPECTED_TRUSTED_PUBLIC_GUARD_SHA256)
+    $remoteScript = $remoteScript.Replace('__PARSER_STARTUP_TIMEOUT_SECONDS__', $PARSER_STARTUP_TIMEOUT_SECONDS.ToString())
+    $remoteScript = $remoteScript.Replace('__ROLLBACK_PUBLIC_GUARD_TIMEOUT_SECONDS__', $ROLLBACK_PUBLIC_GUARD_TIMEOUT_SECONDS.ToString())
+    $remoteScript = $remoteScript.Replace('__PM2_PERSISTENCE_VERIFIER__', $pm2PersistenceVerifier)
+    $remoteScript = $remoteScript.Replace('__EXACT_PUBLIC_NGINX_VERIFIER__', $exactPublicNginxVerifier)
+    $remoteScript = $remoteScript.Replace('__MIGRATION_CLEANUP_CONTROL_RESTORE_SCRIPT__', $restoreControlPrimitive)
+    $remoteScript = $remoteScript.Replace('__CLEANUP_SHA256__', $EXPECTED_TRUSTED_MIGRATION_CLEANUP_HELPER_SHA256)
+    $remoteScript = $remoteScript.Replace('__UNIT_SHA256__', $EXPECTED_TRUSTED_MIGRATION_CLEANUP_UNIT_SHA256)
     Invoke-RemoteBash -Script $remoteScript -FailureMessage "Pre-mutation production resume failed" -RequireDeploymentLock -RequireWriterLock
 }
 
@@ -2800,15 +5288,19 @@ set -euo pipefail
 RemoteRoot="__REMOTE_ROOT__"
 LockDir="$RemoteRoot/.deploy-v030.lock"
 CurrentMarker="$RemoteRoot/deployment-evidence/current-accepted.json"
-python3 - "$LockDir/run.json" "$LockDir/accepted" "$CurrentMarker" "$RemoteRoot" <<'PY'
+TrustedSourceBundle="__TRUSTED_SOURCE_BUNDLE__"
+ParserTrustedVerifier="$TrustedSourceBundle/server/scripts/trusted_parser_runtime_verifier.js"
+ParserTrustedManifest="$TrustedSourceBundle/server/systemd/turingmarket-parser.manifest.json"
+python3 - "$LockDir/run.json" "$LockDir/accepted" "$CurrentMarker" "$RemoteRoot" "$LockDir" "__TRUSTED_PARSER_VERIFIER_SHA256__" "$ParserTrustedVerifier" "$ParserTrustedManifest" <<'PY'
 import hashlib
 import json
 import os
 import re
 import stat
+import subprocess
 import sys
 
-runPath, acceptedPath, currentPath, remoteRoot = sys.argv[1:]
+runPath, acceptedPath, currentPath, remoteRoot, lockDir, expectedParserVerifierSha256, verifier, trustedManifest = sys.argv[1:]
 with open(runPath, encoding='utf-8') as handle:
     run = json.load(handle)
 backupPath = run.get('backupPath')
@@ -2831,15 +5323,33 @@ def strictFile(path):
         raise SystemExit(f'Acceptance state rejected file metadata: {path}')
     return metadata
 
+def strictTrustedArtifact(path):
+    metadata = os.lstat(path)
+    if (not stat.S_ISREG(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode) or
+            metadata.st_uid != 0 or stat.S_IMODE(metadata.st_mode) != 0o444 or metadata.st_nlink != 1):
+        raise SystemExit('Trusted parser artifact metadata is invalid')
+
+def strictTrustedVerifier(path):
+    strictTrustedArtifact(path)
+    with open(path, 'rb') as handle:
+        if hashlib.sha256(handle.read()).hexdigest() != expectedParserVerifierSha256:
+            raise SystemExit('Trusted parser verifier SHA-256 is invalid')
+
 if os.path.lexists(currentPath):
     strictFile(currentPath)
     with open(currentPath, encoding='utf-8') as handle:
         marker = json.load(handle)
-    required = {
+    legacyRequired = {
         'schemaVersion', 'runId', 'backupPath', 'sourceIdentity', 'sourceSha256',
         'candidateSha256', 'nginxSha256', 'acceptedAt'
     }
-    if set(marker) != required or marker.get('schemaVersion') != 1:
+    parserRequired = legacyRequired | {'parserEvidenceSha256', 'parserRuntimeSha256'}
+    required = parserRequired | {'acceptanceFactsSha256'}
+    replayRequired = required | {'replayEvidenceSha256'}
+    if not ((marker.get('schemaVersion') == 1 and set(marker) == legacyRequired) or
+            (marker.get('schemaVersion') == 2 and set(marker) == parserRequired) or
+            (marker.get('schemaVersion') == 3 and set(marker) == required) or
+            (marker.get('schemaVersion') == 4 and set(marker) == replayRequired)):
         raise SystemExit('Current accepted marker schema is invalid')
     if not run.get('backupReady'):
         if marker.get('runId') == runId:
@@ -2849,13 +5359,165 @@ if os.path.lexists(currentPath):
     if (marker.get('runId') == runId and marker.get('backupPath') == backupPath and
             marker.get('sourceIdentity') == run.get('sourceIdentity') and
             marker.get('sourceSha256') == run.get('sourceSha256')):
+        if marker.get('schemaVersion') != 4:
+            raise SystemExit('Legacy current marker cannot authorize this generation')
         strictFile(acceptedPath)
         with open(acceptedPath, encoding='utf-8') as handle:
-            acceptedDigest = handle.read().strip()
-        if not re.fullmatch(r'[0-9a-f]{64}', acceptedDigest) or marker.get('candidateSha256') != acceptedDigest:
+            accepted = json.load(handle)
+        acceptedRequired = {
+            'schemaVersion', 'runId', 'candidateSha256',
+            'replayEvidenceSha256', 'parserEvidenceSha256',
+            'parserRuntimeSha256', 'acceptanceFactsSha256'
+        }
+        if set(accepted) != acceptedRequired or accepted.get('schemaVersion') != 4 or accepted.get('runId') != runId:
+            raise SystemExit('Accepted lifecycle marker schema is invalid')
+        acceptedDigest = accepted.get('candidateSha256')
+        if not re.fullmatch(r'[0-9a-f]{64}', str(acceptedDigest or '')) or marker.get('candidateSha256') != acceptedDigest:
             raise SystemExit('Current accepted marker candidate digest is invalid')
         if not re.fullmatch(r'[0-9a-f]{64}', str(marker.get('nginxSha256', ''))):
             raise SystemExit('Current accepted marker Nginx digest is invalid')
+        parserEvidenceSha256 = marker.get('parserEvidenceSha256')
+        parserRuntimeSha256 = marker.get('parserRuntimeSha256')
+        acceptanceFactsSha256 = marker.get('acceptanceFactsSha256')
+        replayEvidenceSha256 = marker.get('replayEvidenceSha256')
+        if (not re.fullmatch(r'[0-9a-f]{64}', str(replayEvidenceSha256 or '')) or
+                accepted.get('replayEvidenceSha256') != replayEvidenceSha256):
+            raise SystemExit('Replay evidence SHA-256 is invalid')
+        if (not re.fullmatch(r'[0-9a-f]{64}', str(parserEvidenceSha256 or '')) or
+                accepted.get('parserEvidenceSha256') != parserEvidenceSha256):
+            raise SystemExit('Parser accepted evidence SHA-256 is invalid')
+        if (not re.fullmatch(r'[0-9a-f]{64}', str(parserRuntimeSha256 or '')) or
+                accepted.get('parserRuntimeSha256') != parserRuntimeSha256):
+            raise SystemExit('Installed parser runtime SHA-256 is invalid')
+        if (not re.fullmatch(r'[0-9a-f]{64}', str(acceptanceFactsSha256 or '')) or
+                accepted.get('acceptanceFactsSha256') != acceptanceFactsSha256):
+            raise SystemExit('Acceptance facts SHA-256 is invalid')
+        acceptedEvidencePath = os.path.join(remoteRoot, 'deployment-evidence', f'accepted-{runId}.json')
+        strictFile(acceptedEvidencePath)
+        with open(acceptedEvidencePath, encoding='utf-8') as handle:
+            acceptedEvidence = json.load(handle)
+        acceptedEvidenceRequired = {
+            'schemaVersion', 'runId', 'sourceIdentity', 'sourceSha256',
+            'candidateSha256', 'replayEvidenceSha256', 'parserEvidenceSha256',
+            'parserRuntimeSha256', 'acceptanceFactsSha256', 'acceptedAt'
+        }
+        if (set(acceptedEvidence) != acceptedEvidenceRequired or
+                acceptedEvidence.get('schemaVersion') != 3 or
+                acceptedEvidence.get('runId') != runId or
+                acceptedEvidence.get('sourceIdentity') != run.get('sourceIdentity') or
+                acceptedEvidence.get('sourceSha256') != run.get('sourceSha256') or
+                acceptedEvidence.get('candidateSha256') != acceptedDigest or
+                acceptedEvidence.get('replayEvidenceSha256') != replayEvidenceSha256 or
+                acceptedEvidence.get('parserEvidenceSha256') != parserEvidenceSha256 or
+                acceptedEvidence.get('parserRuntimeSha256') != parserRuntimeSha256 or
+                acceptedEvidence.get('acceptanceFactsSha256') != acceptanceFactsSha256 or
+                not re.fullmatch(r'[0-9a-f]{64}', str(acceptedEvidence.get('replayEvidenceSha256', '')))):
+            raise SystemExit('Accepted deployment evidence does not bind parser acceptance')
+        replayEvidencePath = os.path.join(remoteRoot, 'deployment-evidence', f'replay-{runId}.json')
+        strictFile(replayEvidencePath)
+        with open(replayEvidencePath, 'rb') as handle:
+            replayEvidenceBytes = handle.read()
+        if hashlib.sha256(replayEvidenceBytes).hexdigest() != replayEvidenceSha256:
+            raise SystemExit('Replay evidence SHA-256 is invalid')
+        try:
+            replayEvidence = json.loads(replayEvidenceBytes.decode('utf-8'))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            raise SystemExit('Replay evidence schema is invalid')
+        canonicalReplay = (json.dumps(replayEvidence, sort_keys=True, separators=(',', ':')) + '\n').encode('utf-8')
+        replayRequiredFields = {
+            'schemaVersion', 'runId', 'sourceSha256', 'claim', 'result',
+            'productionProjection', 'archivedAt'
+        }
+        if (replayEvidenceBytes != canonicalReplay or set(replayEvidence) != replayRequiredFields or
+                replayEvidence.get('schemaVersion') != 1 or replayEvidence.get('runId') != runId or
+                replayEvidence.get('sourceSha256') != run.get('sourceSha256')):
+            raise SystemExit('Replay evidence schema is invalid')
+        acceptanceFactsPath = os.path.join(remoteRoot, 'deployment-evidence', f'acceptance-facts-{runId}.json')
+        strictFile(acceptanceFactsPath)
+        with open(acceptanceFactsPath, 'rb') as handle:
+            acceptanceFactsBytes = handle.read()
+        if hashlib.sha256(acceptanceFactsBytes).hexdigest() != acceptanceFactsSha256:
+            raise SystemExit('Acceptance facts SHA-256 is invalid')
+        try:
+            acceptanceFacts = json.loads(acceptanceFactsBytes.decode('ascii'))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            raise SystemExit('Acceptance facts schema is invalid')
+        canonicalFacts = (json.dumps(acceptanceFacts, sort_keys=True, separators=(',', ':')) + '\n').encode('ascii')
+        factsRequired = {
+            'schemaVersion', 'runId', 'cutoverCapacity', 'candidateHealth',
+            'cutoverSnapshotSha256SumsSha256', 'pm2', 'nginx'
+        }
+        health = acceptanceFacts.get('candidateHealth', {})
+        parserHealth = health.get('parser', {}) if isinstance(health, dict) else {}
+        capacity = acceptanceFacts.get('cutoverCapacity', {})
+        pm2Projection = acceptanceFacts.get('pm2', {})
+        nginxProjection = acceptanceFacts.get('nginx', {})
+        snapshotSha256 = acceptanceFacts.get('cutoverSnapshotSha256SumsSha256')
+        if (acceptanceFactsBytes != canonicalFacts or set(acceptanceFacts) != factsRequired or
+                acceptanceFacts.get('schemaVersion') != 1 or acceptanceFacts.get('runId') != runId or
+                not isinstance(capacity, dict) or capacity.get('contract') != 'tm-cutover-capacity-v1' or
+                capacity.get('ok') is not True or set(health) != {'status', 'parser'} or
+                health.get('status') != 'ok' or set(parserHealth) != {'ready', 'manifest_sha256'} or
+                parserHealth.get('ready') is not True or
+                not re.fullmatch(r'[0-9a-f]{64}', str(parserHealth.get('manifest_sha256', ''))) or
+                not re.fullmatch(r'[0-9a-f]{64}', str(snapshotSha256 or '')) or
+                set(pm2Projection) != {'expected', 'final'} or pm2Projection.get('expected') != pm2Projection.get('final') or
+                set(nginxProjection) != {'expected', 'final'} or nginxProjection.get('expected') != nginxProjection.get('final')):
+            raise SystemExit('Acceptance facts schema is invalid')
+        expectedPm2Fields = {'name', 'status', 'pmExecPath', 'pmCwd', 'execMode', 'instances', 'env'}
+        expectedNginxFields = {'behaviorContract', 'configSha256', 'enabledTarget'}
+        if (set(pm2Projection['expected']) != expectedPm2Fields or
+                pm2Projection['expected'].get('status') != 'online' or
+                set(nginxProjection['expected']) != expectedNginxFields or
+                nginxProjection['expected'].get('behaviorContract') != 'tm-exact-public-nginx-v1' or
+                nginxProjection['expected'].get('configSha256') != marker.get('nginxSha256')):
+            raise SystemExit('Acceptance facts schema is invalid')
+        forbiddenFields = {'pid', 'pm_uptime', 'uptime'}
+        def rejectVolatile(value):
+            if isinstance(value, dict):
+                if forbiddenFields.intersection(value):
+                    raise SystemExit('Acceptance facts schema is invalid')
+                for child in value.values():
+                    rejectVolatile(child)
+            elif isinstance(value, list):
+                for child in value:
+                    rejectVolatile(child)
+        rejectVolatile(acceptanceFacts)
+        snapshotManifestPath = os.path.join(backupAbsolute, 'cutover-snapshot', 'SHA256SUMS')
+        strictFile(snapshotManifestPath)
+        with open(snapshotManifestPath, 'rb') as handle:
+            if hashlib.sha256(handle.read()).hexdigest() != snapshotSha256:
+                raise SystemExit('Acceptance facts SHA-256 is invalid')
+        parserEvidencePath = os.path.join(remoteRoot, 'deployment-evidence', f'parser-{runId}.json')
+        strictFile(parserEvidencePath)
+        with open(parserEvidencePath, 'rb') as handle:
+            parserEvidenceBytes = handle.read()
+            if hashlib.sha256(parserEvidenceBytes).hexdigest() != parserEvidenceSha256:
+                raise SystemExit('Parser accepted evidence SHA-256 is invalid')
+        strictTrustedVerifier(verifier)
+        strictTrustedArtifact(trustedManifest)
+        with open(trustedManifest, 'rb') as handle:
+            expectedManifestSha256 = hashlib.sha256(handle.read()).hexdigest()
+        parserAppliance = os.path.join(lockDir, 'parser-appliance')
+        sourceRoot = os.path.join(parserAppliance, 'source')
+        provisioner = os.path.join(parserAppliance, 'provisioner')
+        buildEvidence = os.path.join(parserAppliance, 'runtime.evidence.json')
+        provisionerMetadata = os.lstat(provisioner)
+        if (not stat.S_ISREG(provisionerMetadata.st_mode) or stat.S_ISLNK(provisionerMetadata.st_mode) or
+                provisionerMetadata.st_uid != 0 or stat.S_IMODE(provisionerMetadata.st_mode) != 0o500 or
+                provisionerMetadata.st_nlink != 1):
+            raise SystemExit('Trusted parser provisioner metadata is invalid')
+        rebound = subprocess.run(
+            [provisioner, 'verify', '--source-root', sourceRoot,
+             '--trusted-verifier', verifier,
+             '--expected-verifier-sha256', expectedParserVerifierSha256,
+             '--expected-manifest-sha256', expectedManifestSha256,
+             '--build-evidence', buildEvidence,
+             '--expected-sha256', parserRuntimeSha256],
+            check=True, capture_output=True, text=True
+        )
+        if rebound.stdout.encode('ascii') != parserEvidenceBytes:
+            raise SystemExit('Installed parser acceptance binding is invalid')
         print('current-marker-new')
         raise SystemExit(0)
     if os.path.isfile(priorPath):
@@ -2879,6 +5541,8 @@ print('current-marker-absent')
 PY
 '@
     $remoteScript = $remoteScript.Replace('__REMOTE_ROOT__', $REMOTE_ROOT)
+    $remoteScript = $remoteScript.Replace('__TRUSTED_SOURCE_BUNDLE__', $TRUSTED_SOURCE_BUNDLE_REMOTE_PATH)
+    $remoteScript = $remoteScript.Replace('__TRUSTED_PARSER_VERIFIER_SHA256__', $EXPECTED_TRUSTED_PARSER_VERIFIER_SHA256)
     $result = Invoke-RemoteBash -Script $remoteScript -FailureMessage "Authoritative accepted marker validation failed" -RequireDeploymentLock -RequireWriterLock -CaptureOutput
     return (($result | Select-Object -Last 1).Trim())
 }
@@ -3029,19 +5693,37 @@ function Invoke-RemoteAcceptedFinalize {
     param([Parameter(Mandatory = $true)][string]$ReleaseRoot)
 
     $exactPublicNginxVerifier = Get-ExactPublicNginxBehaviorVerifier
+    $pm2PersistenceVerifier = Get-Pm2PersistenceVerifier
     $remoteScript = @'
 set -eEuo pipefail
 LiveDir="__REMOTE_DIR__"
 RemoteRoot="__REMOTE_ROOT__"
 ReleaseRoot="__RELEASE_ROOT__"
 LockDir="$RemoteRoot/.deploy-v030.lock"
+TrustedSourceBundle="__TRUSTED_SOURCE_BUNDLE__"
 AcceptedMarker="$LockDir/accepted"
+ParserRuntimeRoot="/var/lib/turingmarket-parser/runtime-root"
+ParserApplianceRoot="$LockDir/parser-appliance"
+ParserSourceRoot="$ParserApplianceRoot/source"
+ParserRuntimeEvidence="$ParserApplianceRoot/runtime.evidence.json"
+ParserLifecycleProvisioner="$ParserApplianceRoot/provisioner"
+ParserTrustedVerifier="$TrustedSourceBundle/server/scripts/trusted_parser_runtime_verifier.js"
+ParserTrustedManifest="$TrustedSourceBundle/server/systemd/turingmarket-parser.manifest.json"
+ExpectedTrustedParserVerifierSha256="__TRUSTED_PARSER_VERIFIER_SHA256__"
 MaintenanceConfig="/etc/nginx/sites-available/turingmarket-maintenance"
 PublicNginxConfig="/etc/nginx/sites-available/turingmarket"
 CurrentMarker="$RemoteRoot/deployment-evidence/current-accepted.json"
 StagedPublicNginx="$LockDir/nginx-candidate-public.conf"
 StagedPublicNginxSha="$LockDir/nginx-candidate-public.sha256"
 ApiGateConfig="$LockDir/nginx-api-gate.conf"
+PublicGuardHelper="$TrustedSourceBundle/server/scripts/public_release_guard.sh"
+ExpectedPublicGuardSha256="__TRUSTED_PUBLIC_GUARD_SHA256__"
+PublicGuardState="$LockDir/public-gate-guard"
+PublicGuardRecoveryLink="$LockDir/nginx-public-guard.link"
+PublicGuardDropIn="/etc/systemd/system/nginx.service.d/90-turingmarket-public-guard.conf"
+public_release_guard() {
+  /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin /bin/bash --noprofile --norc "$PublicGuardHelper" "$@"
+}
 run_exact_public_nginx_gate() {
   local socket_path="$1"
   local port="$2"
@@ -3049,31 +5731,160 @@ run_exact_public_nginx_gate() {
 __EXACT_PUBLIC_NGINX_VERIFIER__
 TM_EXACT_PUBLIC_NGINX_VERIFIER
 }
+__PM2_PERSISTENCE_VERIFIER__
+test -f "$PublicGuardHelper"
+test ! -L "$PublicGuardHelper"
+test "$(stat -c '%U:%G:%a:%h' "$PublicGuardHelper")" = "root:root:444:1"
+test "$(sha256sum "$PublicGuardHelper" | awk '{print $1}')" = "$ExpectedPublicGuardSha256"
+project_pm2_acceptance() {
+  TM_LIVE_DIR="$LiveDir" TM_PM2_JLIST="$(pm2 jlist)" node <<'NODE'
+const path = require('node:path');
+const liveDir = path.resolve(process.env.TM_LIVE_DIR);
+const configuration = require(path.join(liveDir, 'ecosystem.config.js'));
+const configured = configuration && Array.isArray(configuration.apps)
+  ? configuration.apps.filter((entry) => entry && entry.name === 'turingmarket')
+  : [];
+const running = JSON.parse(process.env.TM_PM2_JLIST || '[]')
+  .filter((entry) => entry && entry.name === 'turingmarket');
+if (configured.length !== 1 || running.length !== 1) {
+  throw new Error('PM2 acceptance requires exactly one turingmarket definition');
+}
+const environmentKeys = [
+  'NODE_ENV', 'PORT', 'SERVER_HOST', 'TM_ENV_FILE', 'DB_PATH',
+  'UPLOAD_DIR', 'TMP_DIR', 'PPT_CACHE_DIR',
+];
+const application = configured[0];
+const runtime = running[0].pm2_env || {};
+const expected = {
+  name: application.name,
+  status: 'online',
+  pmExecPath: path.resolve(application.cwd || liveDir, application.script),
+  pmCwd: path.resolve(application.cwd || liveDir),
+  execMode: application.exec_mode === 'fork' ? 'fork_mode' : String(application.exec_mode),
+  instances: Number(application.instances || 1),
+  env: Object.fromEntries(environmentKeys.map((key) => [key, String(application.env[key])])),
+};
+const final = {
+  name: running[0].name,
+  status: runtime.status,
+  pmExecPath: path.resolve(String(runtime.pm_exec_path || '')),
+  pmCwd: path.resolve(String(runtime.pm_cwd || '')),
+  execMode: String(runtime.exec_mode || ''),
+  instances: running.length,
+  env: Object.fromEntries(environmentKeys.map((key) => [key, String(runtime[key])])),
+};
+if (JSON.stringify(final) !== JSON.stringify(expected)) {
+  throw new Error('PM2 final projection differs from the release configuration');
+}
+process.stdout.write(JSON.stringify({ expected, final }));
+NODE
+}
+finalize_public_gate_armed=0
 recover_accepted_finalize_public_failure() {
-  local FinalizeStatus=$?
-  local ClosedGateNext="$PublicNginxConfig.api-gate-$RunId.next"
-  trap - ERR EXIT
-  rm -f -- "$ClosedGateNext"
-  install -o root -g root -m 0644 "$ApiGateConfig" "$ClosedGateNext"
-  mv -Tf "$ClosedGateNext" "$PublicNginxConfig"
-  nginx -t
-  systemctl reload nginx
+  local FinalizeStatus="${1:-1}"
+  local FailClosedStatus=0
+  trap - ERR EXIT HUP INT TERM
+  trap '' HUP INT TERM
+  set +e
+  if [ "$finalize_public_gate_armed" = "1" ]; then
+    public_release_guard close \
+      --state-file "$PublicGuardState" \
+      --maintenance-source "$ApiGateConfig" \
+      --maintenance-config "$MaintenanceConfig" \
+      --recovery-link "$PublicGuardRecoveryLink" \
+      --site-link /etc/nginx/sites-enabled/turingmarket || FailClosedStatus=1
+  fi
+  if [ "$FailClosedStatus" != "0" ]; then exit 125; fi
+  if [ "$FinalizeStatus" = "0" ]; then FinalizeStatus=1; fi
   exit "$FinalizeStatus"
 }
 case "$(cat "$LockDir/phase")" in
-  mutation-started|release-replay-complete|accepted|accepted-public-enabled) ;;
+  mutation-started|release-replay-complete|accepted|accepted-public-enabled|cutover-complete) ;;
   *) echo "Accepted finalization rejected lifecycle phase" >&2; exit 1 ;;
 esac
 RunId="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["runId"])' "$LockDir/run.json")"
+[[ "$RunId" =~ ^[0-9a-f]{32}$ ]]
+PublicGuardUnit="turingmarket-finalize-public-guard-$RunId.service"
 AcceptedEvidence="$RemoteRoot/deployment-evidence/accepted-$RunId.json"
+ReplayEvidence="$RemoteRoot/deployment-evidence/replay-$RunId.json"
+ParserAcceptedEvidence="$RemoteRoot/deployment-evidence/parser-$RunId.json"
+AcceptanceFacts="$RemoteRoot/deployment-evidence/acceptance-facts-$RunId.json"
 test -f "$AcceptedEvidence"
 test ! -L "$AcceptedEvidence"
 test "$(stat -c '%U:%G:%a:%h' "$AcceptedEvidence")" = "root:root:600:1"
+test -f "$ReplayEvidence"
+test ! -L "$ReplayEvidence"
+test "$(stat -c '%U:%G:%a:%h' "$ReplayEvidence")" = "root:root:600:1"
 test -f "$AcceptedMarker"
 test ! -L "$AcceptedMarker"
 test "$(stat -c '%U:%G:%a:%h' "$AcceptedMarker")" = "root:root:600:1"
-ExpectedDigest="$(cat "$AcceptedMarker")"
-test "${#ExpectedDigest}" = "64"
+test -f "$ParserAcceptedEvidence"
+test ! -L "$ParserAcceptedEvidence"
+test "$(stat -c '%U:%G:%a:%h' "$ParserAcceptedEvidence")" = "root:root:600:1"
+test -f "$AcceptanceFacts"
+test ! -L "$AcceptanceFacts"
+test "$(stat -c '%U:%G:%a:%h' "$AcceptanceFacts")" = "root:root:600:1"
+AcceptanceBinding="$(python3 - "$AcceptedMarker" <<'PY'
+import json
+import re
+import sys
+with open(sys.argv[1], encoding='utf-8') as handle:
+    marker = json.load(handle)
+required = {
+    'schemaVersion', 'runId', 'candidateSha256', 'replayEvidenceSha256',
+    'parserEvidenceSha256', 'parserRuntimeSha256', 'acceptanceFactsSha256'
+}
+if set(marker) != required or marker.get('schemaVersion') != 4:
+    raise SystemExit('Accepted lifecycle marker schema is invalid')
+for name in ('candidateSha256', 'replayEvidenceSha256', 'parserEvidenceSha256', 'parserRuntimeSha256', 'acceptanceFactsSha256'):
+    if not re.fullmatch(r'[0-9a-f]{64}', str(marker.get(name, ''))):
+        raise SystemExit('Accepted lifecycle marker digest is invalid')
+print('\t'.join(marker[name] for name in ('candidateSha256', 'replayEvidenceSha256', 'parserEvidenceSha256', 'parserRuntimeSha256', 'acceptanceFactsSha256')))
+PY
+)"
+IFS=$'\t' read -r ExpectedDigest ExpectedReplayEvidenceSha256 ExpectedParserEvidenceSha256 ExpectedParserRuntimeSha256 ExpectedAcceptanceFactsSha256 <<< "$AcceptanceBinding"
+test "$(sha256sum "$ReplayEvidence" | awk '{print $1}')" = "$ExpectedReplayEvidenceSha256"
+test "$(sha256sum "$ParserAcceptedEvidence" | awk '{print $1}')" = "$ExpectedParserEvidenceSha256"
+if [ "$(sha256sum "$AcceptanceFacts" | awk '{print $1}')" != "$ExpectedAcceptanceFactsSha256" ]; then
+  echo 'Acceptance facts SHA-256 is invalid' >&2
+  exit 1
+fi
+python3 - "$AcceptedEvidence" "$ReplayEvidence" "$RunId" "$ExpectedDigest" "$ExpectedReplayEvidenceSha256" "$ExpectedParserEvidenceSha256" "$ExpectedParserRuntimeSha256" "$ExpectedAcceptanceFactsSha256" <<'PY'
+import json
+import re
+import sys
+path, replayPath, runId, candidateSha256, replayEvidenceSha256, parserEvidenceSha256, parserRuntimeSha256, acceptanceFactsSha256 = sys.argv[1:]
+with open(path, encoding='utf-8') as handle:
+    evidence = json.load(handle)
+required = {
+    'schemaVersion', 'runId', 'sourceIdentity', 'sourceSha256', 'candidateSha256',
+    'replayEvidenceSha256', 'parserEvidenceSha256', 'parserRuntimeSha256',
+    'acceptanceFactsSha256', 'acceptedAt'
+}
+if (set(evidence) != required or evidence.get('schemaVersion') != 3 or evidence.get('runId') != runId or
+        evidence.get('candidateSha256') != candidateSha256 or
+        evidence.get('replayEvidenceSha256') != replayEvidenceSha256 or
+        evidence.get('parserEvidenceSha256') != parserEvidenceSha256 or
+        evidence.get('parserRuntimeSha256') != parserRuntimeSha256 or
+        evidence.get('acceptanceFactsSha256') != acceptanceFactsSha256 or
+        not re.fullmatch(r'[0-9a-f]{64}', str(evidence.get('replayEvidenceSha256', '')))):
+    raise SystemExit('Accepted deployment evidence does not bind parser acceptance')
+with open(replayPath, 'rb') as handle:
+    replayBytes = handle.read()
+try:
+    replay = json.loads(replayBytes.decode('utf-8'))
+except (UnicodeDecodeError, json.JSONDecodeError):
+    raise SystemExit('Replay evidence schema is invalid')
+canonicalReplay = (json.dumps(replay, sort_keys=True, separators=(',', ':')) + '\n').encode('utf-8')
+requiredReplay = {
+    'schemaVersion', 'runId', 'sourceSha256', 'claim', 'result',
+    'productionProjection', 'archivedAt'
+}
+if (replayBytes != canonicalReplay or set(replay) != requiredReplay or
+        replay.get('schemaVersion') != 1 or replay.get('runId') != runId or
+        replay.get('sourceSha256') != evidence.get('sourceSha256')):
+    raise SystemExit('Replay evidence schema is invalid')
+PY
 test -f "$CurrentMarker"
 test ! -L "$CurrentMarker"
 test "$(stat -c '%U:%G:%a:%h' "$CurrentMarker")" = "root:root:600:1"
@@ -3082,15 +5893,106 @@ test -f "$StagedPublicNginxSha"
 test ! -L "$StagedPublicNginx"
 test ! -L "$StagedPublicNginxSha"
 test "$(sha256sum "$StagedPublicNginx" | awk '{print $1}')" = "$(awk 'NR == 1 {print $1}' "$StagedPublicNginxSha")"
-python3 - "$CurrentMarker" "$RunId" "$ExpectedDigest" "$(awk 'NR == 1 {print $1}' "$StagedPublicNginxSha")" <<'PY'
+test -f "$ParserTrustedVerifier"
+test ! -L "$ParserTrustedVerifier"
+test "$(stat -c '%U:%G:%a:%h' "$ParserTrustedVerifier")" = "root:root:444:1"
+test "$(sha256sum "$ParserTrustedVerifier" | awk '{print $1}')" = "$ExpectedTrustedParserVerifierSha256"
+test -f "$ParserTrustedManifest"
+test ! -L "$ParserTrustedManifest"
+test "$(stat -c '%U:%G:%a:%h' "$ParserTrustedManifest")" = "root:root:444:1"
+ExpectedParserManifestSha256="$(sha256sum "$ParserTrustedManifest" | awk '{print $1}')"
+test "$(sha256sum "$ParserSourceRoot/systemd/turingmarket-parser.manifest.json" | awk '{print $1}')" = "$ExpectedParserManifestSha256"
+CurrentParserAcceptanceBinding="$(
+TM_UPLOAD_SANDBOX_PROVISION_DIAGNOSTIC=0 "$ParserLifecycleProvisioner" verify \
+    --source-root "$ParserSourceRoot" \
+    --trusted-verifier "$ParserTrustedVerifier" \
+    --expected-verifier-sha256 "$ExpectedTrustedParserVerifierSha256" \
+    --expected-manifest-sha256 "$ExpectedParserManifestSha256" \
+    --build-evidence "$ParserRuntimeEvidence" \
+    --expected-sha256 "$ExpectedParserRuntimeSha256"
+)"
+test "$(cat "$ParserAcceptedEvidence")" = "$CurrentParserAcceptanceBinding" || {
+  echo 'Installed parser runtime acceptance binding is invalid' >&2
+  exit 1
+}
+AcceptanceFactsBinding="$(python3 - "$CurrentMarker" "$AcceptanceFacts" "$RunId" "$ExpectedDigest" "$(awk 'NR == 1 {print $1}' "$StagedPublicNginxSha")" "$ExpectedReplayEvidenceSha256" "$ExpectedParserEvidenceSha256" "$ExpectedParserRuntimeSha256" "$ExpectedAcceptanceFactsSha256" <<'PY'
+import hashlib
 import json
+import re
 import sys
-markerPath, runId, candidateSha256, nginxSha256 = sys.argv[1:]
+markerPath, factsPath, runId, candidateSha256, nginxSha256, replayEvidenceSha256, parserEvidenceSha256, parserRuntimeSha256, acceptanceFactsSha256 = sys.argv[1:]
 with open(markerPath, encoding='utf-8') as handle:
     marker = json.load(handle)
 if marker.get('runId') != runId or marker.get('candidateSha256') != candidateSha256 or marker.get('nginxSha256') != nginxSha256:
     raise SystemExit('Current accepted marker does not authorize finalization')
+requiredMarker = {
+    'schemaVersion', 'runId', 'backupPath', 'sourceIdentity', 'sourceSha256',
+    'candidateSha256', 'nginxSha256', 'replayEvidenceSha256', 'parserEvidenceSha256',
+    'parserRuntimeSha256', 'acceptanceFactsSha256', 'acceptedAt'
+}
+if (set(marker) != requiredMarker or marker.get('schemaVersion') != 4 or
+        marker.get('replayEvidenceSha256') != replayEvidenceSha256 or
+        marker.get('parserEvidenceSha256') != parserEvidenceSha256 or
+        marker.get('parserRuntimeSha256') != parserRuntimeSha256):
+    raise SystemExit('Current accepted marker does not bind parser acceptance')
+if marker.get('acceptanceFactsSha256') != acceptanceFactsSha256:
+    raise SystemExit('Acceptance facts SHA-256 is invalid')
+with open(factsPath, 'rb') as handle:
+    factsBytes = handle.read()
+if hashlib.sha256(factsBytes).hexdigest() != acceptanceFactsSha256:
+    raise SystemExit('Acceptance facts SHA-256 is invalid')
+try:
+    facts = json.loads(factsBytes.decode('ascii'))
+except (UnicodeDecodeError, json.JSONDecodeError):
+    raise SystemExit('Acceptance facts schema is invalid')
+canonical = (json.dumps(facts, sort_keys=True, separators=(',', ':')) + '\n').encode('ascii')
+requiredFacts = {
+    'schemaVersion', 'runId', 'cutoverCapacity', 'candidateHealth',
+    'cutoverSnapshotSha256SumsSha256', 'pm2', 'nginx'
+}
+capacity = facts.get('cutoverCapacity', {})
+health = facts.get('candidateHealth', {})
+parserHealth = health.get('parser', {}) if isinstance(health, dict) else {}
+pm2Projection = facts.get('pm2', {})
+nginxProjection = facts.get('nginx', {})
+snapshotSha256 = facts.get('cutoverSnapshotSha256SumsSha256')
+if (factsBytes != canonical or set(facts) != requiredFacts or facts.get('schemaVersion') != 1 or
+        facts.get('runId') != runId or not isinstance(capacity, dict) or
+        capacity.get('contract') != 'tm-cutover-capacity-v1' or capacity.get('ok') is not True or
+        set(health) != {'status', 'parser'} or health.get('status') != 'ok' or
+        set(parserHealth) != {'ready', 'manifest_sha256'} or parserHealth.get('ready') is not True or
+        not re.fullmatch(r'[0-9a-f]{64}', str(parserHealth.get('manifest_sha256', ''))) or
+        not re.fullmatch(r'[0-9a-f]{64}', str(snapshotSha256 or '')) or
+        set(pm2Projection) != {'expected', 'final'} or pm2Projection.get('expected') != pm2Projection.get('final') or
+        set(nginxProjection) != {'expected', 'final'} or nginxProjection.get('expected') != nginxProjection.get('final') or
+        nginxProjection.get('expected', {}).get('configSha256') != nginxSha256):
+    raise SystemExit('Acceptance facts schema is invalid')
+forbiddenFields = {'pid', 'pm_uptime', 'uptime'}
+def rejectVolatile(value):
+    if isinstance(value, dict):
+        if forbiddenFields.intersection(value):
+            raise SystemExit('Acceptance facts schema is invalid')
+        for child in value.values():
+            rejectVolatile(child)
+    elif isinstance(value, list):
+        for child in value:
+            rejectVolatile(child)
+rejectVolatile(facts)
+backupPath = marker.get('backupPath')
+if not isinstance(backupPath, str) or not re.fullmatch(r'backups/v060-crm-sales-workspace-[0-9]{8}-[0-9]{6}', backupPath):
+    raise SystemExit('Current accepted marker backup path is invalid')
+print(f'{backupPath}\t{snapshotSha256}')
 PY
+)"
+IFS=$'\t' read -r AcceptedBackupPath ExpectedSnapshotSha256 <<< "$AcceptanceFactsBinding"
+SnapshotManifest="$RemoteRoot/$AcceptedBackupPath/cutover-snapshot/SHA256SUMS"
+test -f "$SnapshotManifest"
+test ! -L "$SnapshotManifest"
+test "$(stat -c '%U:%G:%a:%h' "$SnapshotManifest")" = "root:root:600:1"
+if [ "$(sha256sum "$SnapshotManifest" | awk '{print $1}')" != "$ExpectedSnapshotSha256" ]; then
+  echo 'Acceptance facts SHA-256 is invalid' >&2
+  exit 1
+fi
 test -f "$LockDir/candidate_digest.py"
 test "$(python3 "$LockDir/candidate_digest.py" "$LiveDir")" = "$ExpectedDigest"
 case "$ReleaseRoot" in
@@ -3098,34 +6000,97 @@ case "$ReleaseRoot" in
   *) echo "Accepted cleanup path is invalid" >&2; exit 1 ;;
 esac
 
-# A post-marker recovery must first close every public route, then roll forward.
+# A post-marker recovery must enter durable guarded maintenance before process mutation.
 test -f "$ApiGateConfig"
 test ! -L "$ApiGateConfig"
-install -o root -g root -m 0644 "$ApiGateConfig" "$MaintenanceConfig"
-nginx -t
-systemctl reload nginx
-test "$(curl -sS -o /dev/null -w '%{http_code}' http://localhost/api/health)" = "503"
+FinalizeControllerStartTicks="$(awk '{print $22}' "/proc/$$/stat")"
+FinalizeGuardDeadline="$(( $(date +%s) + __ACCEPTED_FINALIZE_PUBLIC_GUARD_TIMEOUT_SECONDS__ ))"
+finalize_public_gate_armed=1
+trap 'recover_accepted_finalize_public_failure $?' ERR EXIT
+trap 'recover_accepted_finalize_public_failure 129' HUP
+trap 'recover_accepted_finalize_public_failure 130' INT
+trap 'recover_accepted_finalize_public_failure 143' TERM
+public_release_guard close \
+  --state-file "$PublicGuardState" \
+  --maintenance-source "$ApiGateConfig" \
+  --maintenance-config "$MaintenanceConfig" \
+  --recovery-link "$PublicGuardRecoveryLink" \
+  --site-link /etc/nginx/sites-enabled/turingmarket
+public_release_guard arm \
+  --state-file "$PublicGuardState" \
+  --maintenance-source "$ApiGateConfig" \
+  --maintenance-config "$MaintenanceConfig" \
+  --recovery-link "$PublicGuardRecoveryLink" \
+  --site-link /etc/nginx/sites-enabled/turingmarket \
+  --unit "$PublicGuardUnit" \
+  --controller-pid "$$" \
+  --controller-start-ticks "$FinalizeControllerStartTicks" \
+  --deadline-epoch "$FinalizeGuardDeadline" \
+  --drop-in "$PublicGuardDropIn"
 
 cd "$LiveDir"
 export SERVER_HOST=127.0.0.1
 pm2 restart ecosystem.config.js --only turingmarket --update-env || pm2 start ecosystem.config.js --only turingmarket --update-env
-for attempt in $(seq 1 __MAINTENANCE_TIMEOUT_SECONDS__); do
+for attempt in $(seq 1 __PARSER_STARTUP_TIMEOUT_SECONDS__); do
   if curl -fsS http://localhost:3002/api/health >/dev/null; then break; fi
-  if [ "$attempt" = "__MAINTENANCE_TIMEOUT_SECONDS__" ]; then
+  if [ "$attempt" = "__PARSER_STARTUP_TIMEOUT_SECONDS__" ]; then
     echo "Accepted release did not recover on loopback" >&2
     exit 1
   fi
   sleep 1
 done
+persist_pm2_dump
 
-trap recover_accepted_finalize_public_failure ERR EXIT
 install -m 0644 "$StagedPublicNginx" "$PublicNginxConfig"
 ln -s "$PublicNginxConfig" "$LockDir/nginx-finalize-new.link"
+public_release_guard verify-armed \
+  --state-file "$PublicGuardState" \
+  --unit "$PublicGuardUnit" \
+  --controller-pid "$$" \
+  --controller-start-ticks "$FinalizeControllerStartTicks" \
+  --deadline-epoch "$FinalizeGuardDeadline" \
+  --drop-in "$PublicGuardDropIn"
 mv -Tf "$LockDir/nginx-finalize-new.link" /etc/nginx/sites-enabled/turingmarket
 nginx -t
 systemctl reload nginx
 run_exact_public_nginx_gate - 80
-trap - ERR EXIT
+FinalPm2Projection="$(project_pm2_acceptance)"
+FinalNginxSha="$(sha256sum "$PublicNginxConfig" | awk '{print $1}')"
+FinalNginxTarget="$(readlink -f /etc/nginx/sites-enabled/turingmarket)"
+if [ "$(sha256sum "$AcceptanceFacts" | awk '{print $1}')" != "$ExpectedAcceptanceFactsSha256" ]; then
+  echo 'Acceptance facts SHA-256 is invalid' >&2
+  exit 1
+fi
+TM_PM2_FINAL_PROJECTION="$FinalPm2Projection" \
+python3 - "$AcceptanceFacts" "$FinalNginxSha" "$FinalNginxTarget" <<'PY'
+import json
+import os
+import sys
+
+factsPath, nginxSha256, nginxTarget = sys.argv[1:]
+with open(factsPath, encoding='utf-8') as handle:
+    facts = json.load(handle)
+pm2Projection = json.loads(os.environ['TM_PM2_FINAL_PROJECTION'])
+nginxFinal = {
+    'behaviorContract': 'tm-exact-public-nginx-v1',
+    'configSha256': nginxSha256,
+    'enabledTarget': nginxTarget,
+}
+if (facts.get('pm2', {}).get('expected') != pm2Projection.get('expected') or
+        facts.get('pm2', {}).get('final') != pm2Projection.get('final') or
+        facts.get('nginx', {}).get('expected') != nginxFinal or
+        facts.get('nginx', {}).get('final') != nginxFinal):
+    raise SystemExit('Acceptance facts final projection mismatch')
+PY
+public_release_guard disarm \
+  --state-file "$PublicGuardState" \
+  --unit "$PublicGuardUnit" \
+  --controller-pid "$$" \
+  --controller-start-ticks "$FinalizeControllerStartTicks" \
+  --deadline-epoch "$FinalizeGuardDeadline" \
+  --drop-in "$PublicGuardDropIn"
+finalize_public_gate_armed=0
+trap - ERR EXIT HUP INT TERM
 rm -f -- "$MaintenanceConfig"
 rm -rf -- "$ReleaseRoot"
 printf '%s\n' 'ACCEPTED_RELEASE_FINALIZED'
@@ -3134,7 +6099,13 @@ printf '%s\n' 'ACCEPTED_RELEASE_FINALIZED'
     $remoteScript = $remoteScript.Replace('__REMOTE_ROOT__', $REMOTE_ROOT)
     $remoteScript = $remoteScript.Replace('__RELEASE_ROOT__', $ReleaseRoot)
     $remoteScript = $remoteScript.Replace('__MAINTENANCE_TIMEOUT_SECONDS__', $MaintenanceTimeoutSeconds.ToString())
+    $remoteScript = $remoteScript.Replace('__PARSER_STARTUP_TIMEOUT_SECONDS__', $PARSER_STARTUP_TIMEOUT_SECONDS.ToString())
+    $remoteScript = $remoteScript.Replace('__ACCEPTED_FINALIZE_PUBLIC_GUARD_TIMEOUT_SECONDS__', $ACCEPTED_FINALIZE_PUBLIC_GUARD_TIMEOUT_SECONDS.ToString())
+    $remoteScript = $remoteScript.Replace('__TRUSTED_SOURCE_BUNDLE__', $TRUSTED_SOURCE_BUNDLE_REMOTE_PATH)
+    $remoteScript = $remoteScript.Replace('__TRUSTED_PARSER_VERIFIER_SHA256__', $EXPECTED_TRUSTED_PARSER_VERIFIER_SHA256)
+    $remoteScript = $remoteScript.Replace('__TRUSTED_PUBLIC_GUARD_SHA256__', $EXPECTED_TRUSTED_PUBLIC_GUARD_SHA256)
     $remoteScript = $remoteScript.Replace('__EXACT_PUBLIC_NGINX_VERIFIER__', $exactPublicNginxVerifier)
+    $remoteScript = $remoteScript.Replace('__PM2_PERSISTENCE_VERIFIER__', $pm2PersistenceVerifier)
     Invoke-RemoteBash -Script $remoteScript -FailureMessage "Accepted release finalization failed" -RequireDeploymentLock -RequireWriterLock
 }
 
@@ -3145,6 +6116,7 @@ function Invoke-RemoteCandidateCleanup {
 set -euo pipefail
 ReleaseRoot="__RELEASE_ROOT__"
 CandidateRoot="__CANDIDATE_ROOT__"
+GateUser="__GATE_USER__"
 case "$ReleaseRoot" in
   "$CandidateRoot"/v060-crm-sales-workspace-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]) ;;
   "$CandidateRoot"/.quarantine-*)
@@ -3157,17 +6129,94 @@ PY
     ;;
   *) echo "Candidate cleanup path is invalid" >&2; exit 1 ;;
 esac
+
+discover_candidate_test_mount() {
+  local CandidateRelease="$1" ExpectedCandidateTestMount="${2:-}"
+  python3 - "$CandidateRelease" "$ExpectedCandidateTestMount" <<'PY'
+import os
+import re
+import sys
+
+release, expected = sys.argv[1:]
+release = os.path.realpath(release)
+expected = os.path.realpath(expected) if expected else ''
+
+def decode_mount_path(value):
+    return re.sub(r'\\([0-7]{3})', lambda match: chr(int(match.group(1), 8)), value)
+
+mounts = []
+with open('/proc/self/mountinfo', encoding='ascii') as handle:
+    for line in handle:
+        fields = line.split(' - ', 1)[0].split()
+        if len(fields) < 5:
+            raise SystemExit('Malformed mountinfo entry')
+        mount_path = os.path.realpath(decode_mount_path(fields[4]))
+        try:
+            inside_release = os.path.commonpath([release, mount_path]) == release
+        except ValueError:
+            inside_release = False
+        if mount_path == release:
+            raise SystemExit('Unexpected candidate release mount')
+        if inside_release:
+            mounts.append(mount_path)
+
+mounts = sorted(set(mounts))
+if len(mounts) > 1:
+    raise SystemExit('Unexpected nested candidate mount')
+if not mounts:
+    print('-')
+    raise SystemExit(0)
+
+candidate_mount = mounts[0]
+pattern = re.compile(re.escape(release) + r'/tmp/deploy-v060-gate-[0-9]{8}-[0-9]{6}')
+if not pattern.fullmatch(candidate_mount):
+    raise SystemExit('Unexpected nested candidate mount')
+if expected and candidate_mount != expected:
+    raise SystemExit('Unexpected nested candidate mount')
+print(candidate_mount)
+PY
+}
+
+unmount_candidate_test_tmpfs() {
+  local CandidateRelease="$1" ExpectedCandidateTestMount="${2:-}"
+  local CandidateTestMount CandidateTestFsType RemainingCandidateMount
+  CandidateTestMount="$(discover_candidate_test_mount "$CandidateRelease" "$ExpectedCandidateTestMount")"
+  if [ "$CandidateTestMount" = "-" ]; then return 0; fi
+  CandidateTestFsType="$(findmnt -n -o FSTYPE --mountpoint "$CandidateTestMount")"
+  test "$CandidateTestFsType" = "tmpfs"
+  umount -- "$CandidateTestMount"
+  ! mountpoint -q "$CandidateTestMount"
+  RemainingCandidateMount="$(discover_candidate_test_mount "$CandidateRelease" "$ExpectedCandidateTestMount")"
+  test "$RemainingCandidateMount" = "-"
+}
+
+command -v findmnt >/dev/null
+command -v mountpoint >/dev/null
+command -v umount >/dev/null
+command -v pkill >/dev/null
+command -v pgrep >/dev/null
 if [ -e "$ReleaseRoot" ]; then
   test -d "$ReleaseRoot"
   test ! -L "$ReleaseRoot"
   test "$(realpath -e "$(dirname "$ReleaseRoot")")" = "$CandidateRoot"
   test "$(realpath -e "$ReleaseRoot")" = "$CandidateRoot/$(basename "$ReleaseRoot")"
-  rm -rf -- "$ReleaseRoot"
+  pkill -KILL -u "$GateUser" 2>/dev/null || true
+  for _attempt in $(seq 1 50); do
+    if ! pgrep -u "$GateUser" >/dev/null; then break; fi
+    sleep 0.1
+  done
+  if pgrep -u "$GateUser" >/dev/null; then
+    echo "Gate user processes survived candidate cleanup" >&2
+    exit 1
+  fi
+  unmount_candidate_test_tmpfs "$ReleaseRoot"
+  rm -rf --one-file-system -- "$ReleaseRoot"
   sync -f "$CandidateRoot"
 fi
 '@
     $remoteScript = $remoteScript.Replace('__RELEASE_ROOT__', $ReleaseRoot)
     $remoteScript = $remoteScript.Replace('__CANDIDATE_ROOT__', $CANDIDATE_ROOT)
+    $remoteScript = $remoteScript.Replace('__GATE_USER__', $GATE_USER)
     Invoke-RemoteBash -Script $remoteScript -FailureMessage "Deployment recovery candidate cleanup failed" -RequireDeploymentLock -RequireWriterLock
 }
 
@@ -3543,6 +6592,13 @@ function Invoke-DeploymentFailureRecovery {
     )
 
     Invoke-RemoteTrustedSourceInputSweep
+    $preWriterPhase = Get-RemoteDeploymentPhase
+    if ($preWriterPhase -in @('mutation-started', 'release-replay-complete')) {
+        if (-not $BackupCreated) {
+            throw "Production mutation started without a completed rollback backup."
+        }
+        Assert-RemoteRestoreCapacity -BackupPath $BackupPath
+    }
     $script:deploymentWriterToken = [Guid]::NewGuid().ToString('N')
     Enter-RemoteWriterLock
 
@@ -3596,14 +6652,22 @@ function Invoke-DeploymentFailureRecovery {
         }
         'locked' {
             Write-Host "Production was not mutated; candidate cleanup only." -ForegroundColor Yellow
+            if ($BackupCreated) {
+                Restore-RemoteMigrationGateCleanupControl -BackupPath $BackupPath
+            }
             Invoke-RemoteCandidateCleanup -ReleaseRoot $ReleaseRoot
         }
         'candidate-ready' {
             Write-Host "Candidate validation or cutover transport failed before production mutation; candidate cleanup only." -ForegroundColor Yellow
+            if (-not $BackupCreated) {
+                throw "Candidate-ready recovery requires the completed deployment backup."
+            }
+            Restore-RemoteMigrationGateCleanupControl -BackupPath $BackupPath
             Invoke-RemoteCandidateCleanup -ReleaseRoot $ReleaseRoot
         }
         'cutover-complete' {
             Write-Warning "Remote cutover completed but local confirmation failed; keep the deployed release and clean transient candidate state."
+            Invoke-RemoteAcceptedFinalize -ReleaseRoot $ReleaseRoot
             Invoke-RemoteRetentionCleanup -BackupPath $BackupPath -ReleaseRoot $ReleaseRoot
             Invoke-RemoteCandidateCleanup -ReleaseRoot $ReleaseRoot
         }
@@ -3677,6 +6741,7 @@ function Invoke-ManualRollback {
         $manualLockAcquired = $true
         Assert-RemoteExternalRuntimeBoundary
         Assert-RemoteLoopbackIsolationPreflight
+        Assert-RemoteRestoreCapacity -BackupPath $BackupPath
         Enter-RemoteWriterLock
         Invoke-RemoteRestore -BackupPath $BackupPath -RestoreDatabase
         Exit-RemoteDeploymentLock -ReleaseWriterLock
@@ -4175,7 +7240,7 @@ function Invoke-PinnedDeploymentUpload {
     if ($Record -isnot [PinnedDeploymentActionRecord]) {
         throw 'Candidate upload requires a pinned deployment action record.'
     }
-    if ($Record.RemoteRelativePath -notmatch '^[A-Za-z0-9._/-]+$' -or $Record.RemoteRelativePath -match '(^|/)\.\.?(/|$)') {
+    if ($Record.RemoteRelativePath -notmatch '^[A-Za-z0-9._/@-]+$' -or $Record.RemoteRelativePath -match '(^|/)\.\.?(/|$)') {
         throw "Candidate upload record has an invalid remote path: $($Record.RemoteRelativePath)"
     }
     if ($Record.ExpectedSha256 -notmatch '^[0-9a-f]{64}$') {
@@ -4235,7 +7300,15 @@ function Assert-TrustedProductionSourceArtifacts {
     if (
         [string]$trustedManifest.entrypoints.sanitizer -ne 'server/scripts/sanitize_production_shape.js' -or
         [string]$trustedManifest.entrypoints.sanitizationManifest -ne 'server/scripts/sanitization_manifest.json' -or
-        [string]$trustedManifest.entrypoints.verifier -ne 'server/scripts/verify_campaign_migration_gate.js'
+        [string]$trustedManifest.entrypoints.verifier -ne 'server/scripts/verify_campaign_migration_gate.js' -or
+        [string]$trustedManifest.entrypoints.parserBuilder -ne 'server/scripts/build_upload_sandbox_runtime.sh' -or
+        [string]$trustedManifest.entrypoints.parserProvisioner -ne 'server/scripts/provision_upload_sandbox_runtime.sh' -or
+        [string]$trustedManifest.entrypoints.parserCapacityPlanner -ne 'server/scripts/check_cutover_capacity.py' -or
+        [string]$trustedManifest.entrypoints.parserSelfTest -ne 'server/scripts/upload_sandbox_self_test.js' -or
+        [string]$trustedManifest.entrypoints.parserVerifier -ne 'server/scripts/trusted_parser_runtime_verifier.js' -or
+        [string]$trustedManifest.entrypoints.parserManifest -ne 'server/systemd/turingmarket-parser.manifest.json' -or
+        [string]$trustedManifest.entrypoints.parserServiceUnit -ne 'server/systemd/turingmarket-parser@.service' -or
+        [string]$trustedManifest.entrypoints.parserSliceUnit -ne 'server/systemd/turingmarket-parser.slice'
     ) {
         throw "Trusted production source entrypoints do not match the deploy contract."
     }
@@ -4245,7 +7318,7 @@ function Assert-TrustedProductionSourceArtifacts {
         $expectedSha256 = [string]$entry.sha256
         if (
             [string]::IsNullOrWhiteSpace($relativePath) -or
-            $relativePath -notmatch '^server/[A-Za-z0-9._/-]+$' -or
+    $relativePath -notmatch '^server/[A-Za-z0-9._/@-]+$' -or
             $relativePath -match '(^|/)\.\.?(/|$)' -or
             $trustedManifestPaths.ContainsKey($relativePath) -or
             $expectedSha256 -notmatch '^[0-9a-f]{64}$' -or
@@ -4269,6 +7342,12 @@ function Assert-TrustedProductionSourceArtifacts {
     })
     if ($verifierEntries.Count -ne 1 -or [string]$verifierEntries[0].sha256 -ne $EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256) {
         throw "Trusted migration verifier SHA-256 does not match the deploy-pinned contract."
+    }
+    $parserVerifierEntries = @($trustedManifest.files | Where-Object {
+        $_.path -eq 'server/scripts/trusted_parser_runtime_verifier.js'
+    })
+    if ($parserVerifierEntries.Count -ne 1 -or [string]$parserVerifierEntries[0].sha256 -ne $EXPECTED_TRUSTED_PARSER_VERIFIER_SHA256) {
+        throw "Trusted parser verifier SHA-256 does not match the deploy-pinned contract."
     }
 }
 
@@ -4447,9 +7526,6 @@ try {
     Install-RemoteTrustedProductionSourceGate -DeploymentPlan $deploymentActionPlan
     Assert-RemoteExternalRuntimeBoundary
     Assert-RemoteLoopbackIsolationPreflight
-    Invoke-RemoteBackup -BackupPath $backupDir -DeploymentPlan $deploymentActionPlan
-    $backupCreated = $true
-    Install-RemoteMigrationGateCleanup -DeploymentPlan $deploymentActionPlan
 
     $prepareScript = @'
 set -euo pipefail
@@ -4531,8 +7607,13 @@ sha256sum --check --status "$LockDir/upload.sha256"
     $verifyUploadScript = $verifyUploadScript.Replace('__UPLOAD_CHECKSUMS__', $uploadChecksums)
     Invoke-RemoteBash -Script $verifyUploadScript -FailureMessage "Candidate upload checksum verification failed" -RequireDeploymentLock
 
-    $candidateGate = @'
+    Invoke-RemoteBackup -BackupPath $backupDir -DeploymentPlan $deploymentActionPlan
+    $backupCreated = $true
+    Install-RemoteMigrationGateCleanup
+
+$candidateGate = @'
 set -euo pipefail
+umask 077
 LiveDir="__REMOTE_DIR__"
 RemoteRoot="__REMOTE_ROOT__"
 ReleaseRoot="__RELEASE_ROOT__"
@@ -4540,13 +7621,23 @@ CandidateDir="__CANDIDATE_DIR__"
 CandidateRoot="__CANDIDATE_ROOT__"
 GateUser="__GATE_USER__"
 LockDir="$RemoteRoot/.deploy-v030.lock"
+ParserApplianceRoot="$LockDir/parser-appliance"
 BackupAbsolute="$RemoteRoot/__BACKUP_PATH__"
 ProductionBackupDb="$BackupAbsolute/database/turingmarket.db"
 ProductionLiveDb="/var/lib/turingmarket/db/turingmarket.db"
 TestRoot="$ReleaseRoot/tmp/deploy-v060-gate-__STAMP__"
+TestRootMaxBytes="6442450944"
+TestRootMaxInodes="262144"
+TestRootMounted=0
+DependencyCopyByteReserveFloor="536870912"
+DependencyCopyInodeReserveFloor="16384"
+DependencyCopyCleanupArmed=0
 TestDb="$TestRoot/test.db"
 SchemaDb="$TestRoot/schema.db"
 BrowserCache="$TestRoot/browser-cache"
+DependencyStageRoot="$TestRoot/dependency-stage"
+DependencyRoot="$DependencyStageRoot/root"
+DependencyServerRoot="$DependencyStageRoot/server"
 TrustedSourceGate="__TRUSTED_SOURCE_GATE__"
 TrustedSourceManifest="__TRUSTED_SOURCE_MANIFEST__"
 TrustedSourceBundle="__TRUSTED_SOURCE_BUNDLE__"
@@ -4622,12 +7713,129 @@ kill_gate_processes() {
   return 1
 }
 
+drain_gate_unit() {
+  local Unit="$1" ControlGroup MainPid
+  case "$Unit" in
+    "$DependencyUnit"|"$DependencyBuildUnit"|"$OfflineGateUnit") ;;
+    *) echo "Unexpected candidate gate unit: $Unit" >&2; return 1 ;;
+  esac
+  ControlGroup="$(systemctl show "$Unit.service" --property=ControlGroup --value 2>/dev/null || true)"
+  systemctl kill --kill-who=all --signal=KILL "$Unit.service" >/dev/null 2>&1 || true
+  systemctl stop "$Unit.service" >/dev/null 2>&1 || true
+  if [ -n "$ControlGroup" ] && [ -f "/sys/fs/cgroup$ControlGroup/cgroup.procs" ]; then
+    for _attempt in $(seq 1 50); do
+      if [ ! -s "/sys/fs/cgroup$ControlGroup/cgroup.procs" ]; then
+        break
+      fi
+      sleep 0.1
+    done
+    test ! -s "/sys/fs/cgroup$ControlGroup/cgroup.procs"
+  fi
+  MainPid="$(systemctl show "$Unit.service" --property=MainPID --value 2>/dev/null || true)"
+  test "${MainPid:-0}" = "0"
+  systemctl reset-failed "$Unit.service" >/dev/null 2>&1 || true
+}
+
 command -v realpath >/dev/null
 command -v pkill >/dev/null
 command -v pgrep >/dev/null
+command -v systemd-run >/dev/null
+command -v systemctl >/dev/null
+command -v mount >/dev/null
+command -v umount >/dev/null
+command -v mountpoint >/dev/null
+command -v findmnt >/dev/null
+command -v df >/dev/null
+command -v du >/dev/null
+command -v find >/dev/null
+command -v stat >/dev/null
+command -v wc >/dev/null
+command -v awk >/dev/null
+command -v tail >/dev/null
+command -v tr >/dev/null
+command -v python3 >/dev/null
+DependencyUnit="turingmarket-candidate-dependency-__STAMP__"
+DependencyBuildUnit="turingmarket-candidate-dependency-build-__STAMP__"
+OfflineGateUnit="turingmarket-candidate-offline-__STAMP__"
+NginxGateDir=""
+MigrationCleanupArmed=0
+
+cleanup_candidate_dependency_copy() {
+  local CandidateDependencyPath CleanupStatus=0
+  if [ "$DependencyCopyCleanupArmed" != "1" ]; then return 0; fi
+  for CandidateDependencyPath in "$CandidateDir/node_modules" "$CandidateDir/server/node_modules"; do
+    case "$CandidateDependencyPath" in
+      "$CandidateDir/node_modules"|"$CandidateDir/server/node_modules") ;;
+      *) echo "Unexpected candidate dependency cleanup path" >&2; return 1 ;;
+    esac
+    rm -rf --one-file-system -- "$CandidateDependencyPath" || CleanupStatus=1
+  done
+  if [ "$CleanupStatus" = "0" ]; then DependencyCopyCleanupArmed=0; fi
+  return "$CleanupStatus"
+}
+
+cleanup_test_root() {
+  local PreserveCandidateDependencies="${1:-0}" CleanupStatus=0
+  case "$PreserveCandidateDependencies" in 0|1) ;;
+    *) echo "Invalid candidate dependency preservation mode" >&2; return 1 ;;
+  esac
+  case "$TestRoot" in
+    "$ReleaseRoot"/tmp/deploy-v060-gate-*) ;;
+    *) echo "Unexpected candidate test root: $TestRoot" >&2; return 1 ;;
+  esac
+  if [ "$MigrationCleanupArmed" = "1" ] && declare -F cleanup_migration_rehearsal >/dev/null; then
+    cleanup_migration_rehearsal || CleanupStatus=1
+    MigrationCleanupArmed=0
+  fi
+  if declare -F cleanup_nginx_gate_dir >/dev/null; then
+    cleanup_nginx_gate_dir || CleanupStatus=1
+  fi
+  if [ "$PreserveCandidateDependencies" != "1" ]; then
+    cleanup_candidate_dependency_copy || CleanupStatus=1
+  fi
+  drain_gate_unit "$DependencyUnit" || CleanupStatus=1
+  drain_gate_unit "$DependencyBuildUnit" || CleanupStatus=1
+  drain_gate_unit "$OfflineGateUnit" || CleanupStatus=1
+  kill_gate_processes "candidate cleanup" || CleanupStatus=1
+  if mountpoint -q "$TestRoot"; then
+    umount -- "$TestRoot" || CleanupStatus=1
+  fi
+  if mountpoint -q "$TestRoot"; then
+    echo "Candidate test tmpfs remained mounted" >&2
+    CleanupStatus=1
+  else
+    TestRootMounted=0
+    rm -rf -- "$TestRoot" || CleanupStatus=1
+  fi
+  return "$CleanupStatus"
+}
+
+cleanup_candidate_gate() {
+  local Status="${1:-1}" CleanupStatus=0
+  trap - EXIT HUP INT TERM
+  set +e
+  cleanup_test_root || CleanupStatus=1
+  if [ "$Status" = "0" ] && [ "$CleanupStatus" != "0" ]; then
+    Status=125
+  fi
+  exit "$Status"
+}
+
+trap 'cleanup_candidate_gate $?' EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+drain_gate_unit "$DependencyUnit"
+drain_gate_unit "$DependencyBuildUnit"
+drain_gate_unit "$OfflineGateUnit"
 kill_gate_processes "candidate preflight"
 assert_canonical_candidate
 assert_trusted_source_gate
+TrustedRuntimeBuildUid="$(id -u "$GateUser")"
+TrustedRuntimeBuildGid="$(id -g "$GateUser")"
+[[ "$TrustedRuntimeBuildUid" =~ ^[1-9][0-9]*$ ]]
+[[ "$TrustedRuntimeBuildGid" =~ ^[1-9][0-9]*$ ]]
+test ! -e "$ParserApplianceRoot"
 test -f "$CandidateDir/server/scripts/bootstrap_production_runtime.sh"
 bash -n "$CandidateDir/server/scripts/bootstrap_production_runtime.sh"
 test -f "$ProductionBackupDb"
@@ -4650,57 +7858,293 @@ runuser -u "$GateUser" -- test ! -r "$ProductionLiveDb"
   --bundle-root "$TrustedSourceBundle" \
   --manifest "$TrustedSourceManifest" \
   --runtime-root "$TrustedSourceRuntime" \
+  --build-uid "$TrustedRuntimeBuildUid" \
+  --build-gid "$TrustedRuntimeBuildGid" \
   --expected-self-sha256 "$ExpectedTrustedSourceGateSha256" \
   --expected-manifest-sha256 "$ExpectedTrustedSourceManifestSha256" \
   --expected-verifier-sha256 "$ExpectedTrustedMigrationVerifierSha256" >/dev/null
 test -d "$TrustedDependencyRoot"
 
-rm -rf "$TestRoot"
+rm -rf -- "$TestRoot"
+install -d -o root -g root -m 0700 "$TestRoot"
+mount -t tmpfs -o "nodev,nosuid,size=$TestRootMaxBytes,nr_inodes=$TestRootMaxInodes,mode=0700,uid=$TrustedRuntimeBuildUid,gid=$TrustedRuntimeBuildGid" tmpfs "$TestRoot"
+TestRootMounted=1
+test "$(findmnt -n -o FSTYPE --target "$TestRoot")" = "tmpfs"
+ActualTestRootBytes="$(df -B1 --output=size "$TestRoot" | tail -n 1 | tr -d ' ')"
+ActualTestRootInodes="$(df -i --output=itotal "$TestRoot" | tail -n 1 | tr -d ' ')"
+[[ "$ActualTestRootBytes" =~ ^[1-9][0-9]*$ ]]
+[[ "$ActualTestRootInodes" =~ ^[1-9][0-9]*$ ]]
+test "$ActualTestRootBytes" -le "$TestRootMaxBytes"
+test "$ActualTestRootInodes" -le "$TestRootMaxInodes"
 install -d -o "$GateUser" -g "$GateUser" -m 0700 \
-  "$TestRoot" "$TestRoot/home" "$TestRoot/uploads" "$TestRoot/tmp" "$TestRoot/nginx-prefix"
+  "$TestRoot/home" "$TestRoot/uploads" "$TestRoot/tmp" "$TestRoot/nginx-prefix" \
+  "$DependencyStageRoot" "$DependencyRoot" "$DependencyServerRoot"
+install -o "$GateUser" -g "$GateUser" -m 0600 "$CandidateDir/package.json" "$DependencyRoot/package.json"
+install -o "$GateUser" -g "$GateUser" -m 0600 "$CandidateDir/package-lock.json" "$DependencyRoot/package-lock.json"
+install -o "$GateUser" -g "$GateUser" -m 0600 "$CandidateDir/server/package.json" "$DependencyServerRoot/package.json"
+install -o "$GateUser" -g "$GateUser" -m 0600 "$CandidateDir/server/package-lock.json" "$DependencyServerRoot/package-lock.json"
 SOURCE_BACKUP_SHA256_BEFORE="$(sha256sum "$ProductionBackupDb" | awk '{print $1}')"
 PPT_MANIFEST_SHA256_BEFORE="$(sha256sum "$BackupAbsolute/ppt-cache.sha256" | awk '{print $1}')"
-chown -R "$GateUser:$GateUser" "$ReleaseRoot"
+test ! -e "$ParserApplianceRoot"
 validate_gate_identity
 assert_canonical_candidate
 runuser -u "$GateUser" -- test ! -r "$ProductionBackupDb"
 runuser -u "$GateUser" -- test ! -r "$ProductionLiveDb"
-command -v unshare >/dev/null
 command -v ip >/dev/null
 
 set +e
-timeout --signal=KILL 20m runuser -u "$GateUser" -- env -i \
-  HOME="$TestRoot/home" \
-  PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
-  PLAYWRIGHT_BROWSERS_PATH="$BrowserCache" \
-  npm_config_cache="$TestRoot/npm-cache" \
-  CANDIDATE_DIR="$CandidateDir" \
-  bash --noprofile --norc -s <<'TM_DEPENDENCY_STAGE'
+timeout --signal=KILL 20m systemd-run --quiet --wait --pipe --unit="$DependencyUnit" \
+  --uid="$GateUser" --gid="$GateUser" --service-type=exec \
+  --property="WorkingDirectory=$DependencyStageRoot" \
+  --property="PrivatePIDs=yes" \
+  --property="PrivateMounts=yes" \
+  --property="PrivateTmp=yes" \
+  --property="PrivateDevices=yes" \
+  --property="PrivateIPC=yes" \
+  --property="ProtectHome=yes" \
+  --property="ProtectSystem=strict" \
+  --property="ProtectProc=invisible" \
+  --property="ProtectHostname=yes" \
+  --property="ProtectKernelTunables=yes" \
+  --property="ProtectKernelModules=yes" \
+  --property="ProtectKernelLogs=yes" \
+  --property="ProtectControlGroups=yes" \
+  --property="ProtectClock=yes" \
+  --property="NoNewPrivileges=yes" \
+  --property="CapabilityBoundingSet=" \
+  --property="SystemCallArchitectures=native" \
+  --property="RestrictSUIDSGID=yes" \
+  --property="RestrictRealtime=yes" \
+  --property="RestrictNamespaces=yes" \
+  --property="LockPersonality=yes" \
+  --property="RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6" \
+  --property="IPAddressDeny=0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 127.0.0.0/8 169.254.0.0/16 172.16.0.0/12 192.0.0.0/24 192.0.2.0/24 192.88.99.0/24 192.168.0.0/16 198.18.0.0/15 198.51.100.0/24 203.0.113.0/24 224.0.0.0/4 240.0.0.0/4 ::/128 ::1/128 ::ffff:0:0/96 2001:db8::/32 fc00::/7 fe80::/10 ff00::/8" \
+  --property="IPAddressAllow=127.0.0.53/32 127.0.0.54/32" \
+  --property="KillMode=control-group" \
+  --property="TimeoutStopSec=5s" \
+  --property="RuntimeMaxSec=19m" \
+  --property="TasksMax=512" \
+  --property="MemoryMax=3G" \
+  --property="LimitFSIZE=1073741824" \
+  --property="UMask=0077" \
+  --property="ReadOnlyPaths=$CandidateDir" \
+  --property="ReadWritePaths=$TestRoot" \
+  --property="InaccessiblePaths=$RemoteRoot /etc/turingmarket /var/lib/turingmarket" \
+  -- /usr/bin/env -i \
+    HOME="$TestRoot/home" \
+    PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+    PLAYWRIGHT_BROWSERS_PATH="$BrowserCache" \
+    npm_config_cache="$TestRoot/npm-cache" \
+    DEPENDENCY_ROOT="$DependencyRoot" \
+    DEPENDENCY_SERVER_ROOT="$DependencyServerRoot" \
+    /bin/bash --noprofile --norc -s <<'TM_DEPENDENCY_STAGE'
 set -euo pipefail
-cd "$CANDIDATE_DIR"
+cd "$DEPENDENCY_ROOT"
 npm ci --ignore-scripts
 node node_modules/playwright-deploy/cli.js install-deps --dry-run chromium
 node node_modules/playwright-deploy/cli.js install chromium
-cd server
+cd "$DEPENDENCY_SERVER_ROOT"
 npm ci --ignore-scripts
-npm rebuild better-sqlite3
 printf '%s\n' "DEPENDENCY_STAGE_OK"
 TM_DEPENDENCY_STAGE
 DependencyStatus=$?
 set -e
+drain_gate_unit "$DependencyUnit"
 kill_gate_processes "dependency staging"
 assert_canonical_candidate
 if [ "$DependencyStatus" != "0" ]; then
   exit "$DependencyStatus"
 fi
+
+set +e
+timeout --signal=KILL 20m systemd-run --quiet --wait --pipe --unit="$DependencyBuildUnit" \
+  --uid="$GateUser" --gid="$GateUser" --service-type=exec \
+  --property="WorkingDirectory=$DependencyServerRoot" \
+  --property="PrivateNetwork=yes" \
+  --property="PrivatePIDs=yes" \
+  --property="PrivateMounts=yes" \
+  --property="PrivateTmp=yes" \
+  --property="PrivateDevices=yes" \
+  --property="PrivateIPC=yes" \
+  --property="ProtectHome=yes" \
+  --property="ProtectSystem=strict" \
+  --property="ProtectProc=invisible" \
+  --property="ProtectHostname=yes" \
+  --property="ProtectKernelTunables=yes" \
+  --property="ProtectKernelModules=yes" \
+  --property="ProtectKernelLogs=yes" \
+  --property="ProtectControlGroups=yes" \
+  --property="ProtectClock=yes" \
+  --property="NoNewPrivileges=yes" \
+  --property="CapabilityBoundingSet=" \
+  --property="SystemCallArchitectures=native" \
+  --property="RestrictSUIDSGID=yes" \
+  --property="RestrictRealtime=yes" \
+  --property="RestrictNamespaces=yes" \
+  --property="LockPersonality=yes" \
+  --property="RestrictAddressFamilies=AF_UNIX" \
+  --property="KillMode=control-group" \
+  --property="TimeoutStopSec=5s" \
+  --property="RuntimeMaxSec=19m" \
+  --property="TasksMax=512" \
+  --property="MemoryMax=3G" \
+  --property="LimitFSIZE=1073741824" \
+  --property="UMask=0077" \
+  --property="ReadOnlyPaths=$CandidateDir" \
+  --property="ReadWritePaths=$TestRoot" \
+  --property="InaccessiblePaths=$RemoteRoot /etc/turingmarket /var/lib/turingmarket" \
+  -- /usr/bin/env -i \
+    HOME="$TestRoot/home" \
+    PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+    npm_config_cache="$TestRoot/npm-cache" \
+    npm_config_offline=true \
+    DEPENDENCY_SERVER_ROOT="$DependencyServerRoot" \
+    /bin/bash --noprofile --norc -s <<'TM_DEPENDENCY_BUILD'
+set -euo pipefail
+cd "$DEPENDENCY_SERVER_ROOT"
+npm rebuild better-sqlite3
+printf '%s\n' "DEPENDENCY_BUILD_OK"
+TM_DEPENDENCY_BUILD
+DependencyBuildStatus=$?
+set -e
+drain_gate_unit "$DependencyBuildUnit"
+kill_gate_processes "dependency build"
+assert_canonical_candidate
+if [ "$DependencyBuildStatus" != "0" ]; then
+  exit "$DependencyBuildStatus"
+fi
+
+test -d "$DependencyRoot/node_modules"
+test ! -L "$DependencyRoot/node_modules"
+test -d "$DependencyServerRoot/node_modules"
+test ! -L "$DependencyServerRoot/node_modules"
+DependencyHardlink="$(find "$DependencyRoot/node_modules" "$DependencyServerRoot/node_modules" -xdev -type f -links +1 -print -quit)"
+if [ -n "$DependencyHardlink" ]; then
+  echo "Candidate dependency staging produced a hard-linked file" >&2
+  exit 1
+fi
+TargetBlockSize="$(stat -f -c '%S' "$CandidateDir")"
+[[ "$TargetBlockSize" =~ ^[1-9][0-9]*$ ]]
+test "$TargetBlockSize" -ge 512
+test "$TargetBlockSize" -le 1048576
+read -r DependencyCopyAllocatedBytes DependencyCopyMeasuredInodes < <(
+  python3 - "$DependencyRoot/node_modules" "$DependencyServerRoot/node_modules" "$TargetBlockSize" <<'PY'
+import os
+import stat
+import sys
+
+roots = sys.argv[1:3]
+block_size = int(sys.argv[3])
+max_shell_integer = 8_000_000_000_000_000_000
+if block_size < 512 or block_size > 1_048_576:
+    raise SystemExit('Invalid candidate target block size')
+
+allocated_bytes = 0
+inode_count = 0
+stack = list(reversed(roots))
+while stack:
+    path = stack.pop()
+    status = os.lstat(path)
+    if os.listxattr(path, follow_symlinks=False):
+        raise SystemExit('Candidate dependency staging produced an extended attribute')
+    mode = status.st_mode
+    if not (stat.S_ISREG(mode) or stat.S_ISDIR(mode) or stat.S_ISLNK(mode)):
+        raise SystemExit('Candidate dependency staging produced a special file')
+    inode_count += 1
+    allocated_bytes += max(block_size, ((status.st_size + block_size - 1) // block_size) * block_size)
+    if allocated_bytes > max_shell_integer:
+        raise SystemExit('Candidate dependency allocation exceeds shell integer range')
+    if stat.S_ISDIR(mode):
+        with os.scandir(path) as entries:
+            children = sorted((entry.path for entry in entries), reverse=True)
+        stack.extend(children)
+
+print(allocated_bytes, inode_count)
+PY
+)
+DependencyCopyBytes="$(du -sb --apparent-size -- "$DependencyRoot/node_modules" "$DependencyServerRoot/node_modules" | awk '{ total += $1 } END { print total + 0 }')"
+DependencyCopyInodes="$(find "$DependencyRoot/node_modules" "$DependencyServerRoot/node_modules" -xdev -printf '.' | wc -c | tr -d ' ')"
+[[ "$DependencyCopyAllocatedBytes" =~ ^[1-9][0-9]*$ ]]
+[[ "$DependencyCopyMeasuredInodes" =~ ^[1-9][0-9]*$ ]]
+[[ "$DependencyCopyBytes" =~ ^[1-9][0-9]*$ ]]
+[[ "$DependencyCopyInodes" =~ ^[1-9][0-9]*$ ]]
+test "$DependencyCopyAllocatedBytes" -le 8000000000000000000
+test "$DependencyCopyBytes" -le 8000000000000000000
+test "$DependencyCopyMeasuredInodes" = "$DependencyCopyInodes"
+test "$DependencyCopyBytes" -le "$DependencyCopyAllocatedBytes"
+DependencyCopyByteBase="$DependencyCopyAllocatedBytes"
+if [ "$DependencyCopyByteBase" -lt "$DependencyCopyBytes" ]; then
+  DependencyCopyByteBase="$DependencyCopyBytes"
+fi
+if [ "$DependencyCopyByteBase" -lt "$TestRootMaxBytes" ]; then
+  DependencyCopyByteBase="$TestRootMaxBytes"
+fi
+DependencyCopyInodeBase="$DependencyCopyInodes"
+if [ "$DependencyCopyInodeBase" -lt "$TestRootMaxInodes" ]; then
+  DependencyCopyInodeBase="$TestRootMaxInodes"
+fi
+DependencyCopyByteMargin=$(( (DependencyCopyByteBase + 9) / 10 ))
+DependencyCopyInodeMargin=$(( (DependencyCopyInodeBase + 9) / 10 ))
+if [ "$DependencyCopyByteMargin" -lt "$DependencyCopyByteReserveFloor" ]; then
+  DependencyCopyByteMargin="$DependencyCopyByteReserveFloor"
+fi
+if [ "$DependencyCopyInodeMargin" -lt "$DependencyCopyInodeReserveFloor" ]; then
+  DependencyCopyInodeMargin="$DependencyCopyInodeReserveFloor"
+fi
+DependencyCopyRequiredBytes=$(( DependencyCopyByteBase + DependencyCopyByteMargin ))
+DependencyCopyRequiredInodes=$(( DependencyCopyInodeBase + DependencyCopyInodeMargin ))
+TargetAvailableBytes="$(df -B1 --output=avail "$CandidateDir" | tail -n 1 | tr -d ' ')"
+TargetAvailableInodes="$(df -i --output=iavail "$CandidateDir" | tail -n 1 | tr -d ' ')"
+[[ "$TargetAvailableBytes" =~ ^[1-9][0-9]*$ ]]
+[[ "$TargetAvailableInodes" =~ ^[1-9][0-9]*$ ]]
+test "$TargetAvailableBytes" -ge "$DependencyCopyRequiredBytes"
+test "$TargetAvailableInodes" -ge "$DependencyCopyRequiredInodes"
+printf 'CANDIDATE_DEPENDENCY_CAPACITY_OK=bytes:%s/%s,inodes:%s/%s\n' \
+  "$TargetAvailableBytes" "$DependencyCopyRequiredBytes" \
+  "$TargetAvailableInodes" "$DependencyCopyRequiredInodes"
+test ! -e "$CandidateDir/node_modules"
+test ! -e "$CandidateDir/server/node_modules"
+DependencyCopyCleanupArmed=1
+cp -a -- "$DependencyRoot/node_modules" "$CandidateDir/node_modules"
+cp -a -- "$DependencyServerRoot/node_modules" "$CandidateDir/server/node_modules"
+setfacl -Rb "$CandidateDir"
+chown -hR root:root "$CandidateDir"
+chown root:root "$ReleaseRoot"
+chmod -R a+rX "$CandidateDir"
+chmod -R go-w "$CandidateDir"
+if find "$CandidateDir" -xdev \( -type b -o -type c -o -type p -o -type s \) -print -quit | grep -q .; then
+  echo "Candidate dependency staging produced a special file" >&2
+  exit 1
+fi
+if find "$CandidateDir" -xdev -type f -perm /6000 -print -quit | grep -q .; then
+  echo "Candidate dependency staging produced a setuid or setgid file" >&2
+  exit 1
+fi
+if [ -n "$(getcap -r "$CandidateDir" 2>/dev/null)" ]; then
+  echo "Candidate dependency staging produced a file capability" >&2
+  exit 1
+fi
+python3 - "$CandidateDir" <<'PY'
+import os
+import sys
+
+root = os.path.abspath(sys.argv[1])
+for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+    for name in dirnames + filenames:
+        entry = os.path.join(dirpath, name)
+        if not os.path.islink(entry):
+            continue
+        resolved = os.path.realpath(entry)
+        if os.path.commonpath([root, resolved]) != root:
+            raise SystemExit(f'Candidate dependency symlink escaped its root: {os.path.relpath(entry, root)}')
+PY
+
 validate_gate_identity
 ExpectedTrustedSourceGid="$(id -g "$GateUser")"
 [[ "$ExpectedTrustedSourceGid" =~ ^[0-9]+$ ]]
 runuser -u "$GateUser" -- test ! -r "$ProductionBackupDb"
 runuser -u "$GateUser" -- test ! -r "$ProductionLiveDb"
 
-command -v systemd-run >/dev/null
-command -v systemctl >/dev/null
 TrustedSourceInputBase="/run/turingmarket-production-source-trust"
 TrustedSourceInputRoot="$TrustedSourceInputBase/deployment-__STAMP__"
 TrustedSourceCopy="$TrustedSourceInputRoot/source.db"
@@ -4731,7 +8175,7 @@ cleanup_migration_rehearsal() {
   sync -f "$LockDir"
 }
 
-trap cleanup_migration_rehearsal EXIT
+MigrationCleanupArmed=1
 test ! -e "$TrustedSourceInputRoot"
 test ! -e "$MigrationRehearsalRoot"
 test ! -e "$MigrationWork"
@@ -4782,8 +8226,10 @@ timeout --signal=KILL 41m systemd-run --quiet --wait --unit="$MigrationUnit" \
   --property="PrivateMounts=yes" \
   --property="PrivateTmp=yes" \
   --property="PrivateDevices=yes" \
+  --property="PrivateIPC=yes" \
   --property="ProtectHome=yes" \
   --property="ProtectSystem=strict" \
+  --property="ProtectProc=invisible" \
   --property="ProtectKernelTunables=yes" \
   --property="ProtectKernelModules=yes" \
   --property="ProtectKernelLogs=yes" \
@@ -4791,6 +8237,7 @@ timeout --signal=KILL 41m systemd-run --quiet --wait --unit="$MigrationUnit" \
   --property="ProtectClock=yes" \
   --property="NoNewPrivileges=yes" \
   --property="CapabilityBoundingSet=" \
+  --property="SystemCallArchitectures=native" \
   --property="RestrictSUIDSGID=yes" \
   --property="RestrictRealtime=yes" \
   --property="RestrictNamespaces=yes" \
@@ -4879,72 +8326,133 @@ test "$SOURCE_BACKUP_SHA256_BEFORE" = "$SOURCE_BACKUP_SHA256_AFTER"
 test "$SANITIZED_SOURCE_SHA256_BEFORE" = "$SANITIZED_SOURCE_SHA256_AFTER"
 test "$PPT_MANIFEST_SHA256_BEFORE" = "$PPT_MANIFEST_SHA256_AFTER"
 cleanup_migration_rehearsal
-trap - EXIT
+MigrationCleanupArmed=0
 test ! -e "$TrustedSourceInputRoot"
 runuser -u "$GateUser" -- test -r "$SchemaDb"
 runuser -u "$GateUser" -- test ! -r "$ProductionBackupDb"
 
-NginxGateDir=""
+CandidateDigestNext="$LockDir/candidate_digest.py.next"
+test ! -e "$CandidateDigestNext"
+test ! -e "$LockDir/candidate_digest.py"
+cat > "$CandidateDigestNext" <<'PY'
+import hashlib
+import os
+import stat
+import sys
+
+root = os.path.abspath(sys.argv[1])
+digest = hashlib.sha256()
+
+def emit(value):
+    data = value if isinstance(value, bytes) else value.encode('utf-8', 'surrogateescape')
+    digest.update(len(data).to_bytes(8, 'big'))
+    digest.update(data)
+
+def visit(path, relative):
+    metadata = os.lstat(path)
+    emit(relative)
+    emit(f'{stat.S_IFMT(metadata.st_mode)}:{stat.S_IMODE(metadata.st_mode)}:{metadata.st_uid}:{metadata.st_gid}')
+    if stat.S_ISLNK(metadata.st_mode):
+        emit(os.fsencode(os.readlink(path)))
+    elif stat.S_ISREG(metadata.st_mode):
+        if metadata.st_nlink != 1:
+            raise SystemExit(f'Hard-linked candidate file: {relative}')
+        file_hash = hashlib.sha256()
+        with open(path, 'rb') as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b''):
+                file_hash.update(chunk)
+        emit(file_hash.hexdigest())
+    elif stat.S_ISDIR(metadata.st_mode):
+        for name in sorted(os.listdir(path), key=os.fsencode):
+            visit(os.path.join(path, name), f'{relative}/{name}' if relative else name)
+    else:
+        raise SystemExit(f'Unsupported candidate entry: {relative}')
+
+visit(root, '')
+print(digest.hexdigest())
+PY
+chmod 0600 "$CandidateDigestNext"
+sync -f "$CandidateDigestNext"
+mv -T "$CandidateDigestNext" "$LockDir/candidate_digest.py"
+sync -f "$LockDir/candidate_digest.py"
+sync -f "$LockDir"
+assert_canonical_candidate
+CANDIDATE_VALIDATION_SHA256_BEFORE="$(python3 "$LockDir/candidate_digest.py" "$CandidateDir")"
+[[ "$CANDIDATE_VALIDATION_SHA256_BEFORE" =~ ^[0-9a-f]{64}$ ]]
+
 cleanup_nginx_gate_dir() {
   if [ -n "$NginxGateDir" ]; then
-    rm -rf -- "$NginxGateDir"
+    case "$NginxGateDir" in
+      "$TestRoot"/nginx-gate) rm -rf -- "$NginxGateDir" ;;
+      *) echo "Unexpected Nginx gate cleanup path" >&2; return 1 ;;
+    esac
   fi
 }
-trap cleanup_nginx_gate_dir EXIT
-NginxGateDir="$(mktemp -d /tmp/tm-nginx-gate.XXXXXX)"
-case "$NginxGateDir" in
-  /tmp/tm-nginx-gate.*) ;;
-  *) echo "Unexpected Nginx gate path" >&2; exit 1 ;;
-esac
-chown "$GateUser:$GateUser" "$NginxGateDir"
+NginxGateDir="$TestRoot/nginx-gate"
+test ! -e "$NginxGateDir"
+install -d -o "$GateUser" -g "$GateUser" -m 0700 "$NginxGateDir"
 
 set +e
-timeout --signal=KILL 30m env \
-  TM_GATE_USER="$GateUser" \
-  TM_GATE_HOME="$TestRoot/home" \
-  TM_GATE_DB_PATH="$TestDb" \
-  TM_GATE_SCHEMA_DB="$SchemaDb" \
-  TM_GATE_UPLOAD_DIR="$TestRoot/uploads" \
-  TM_GATE_TMP_DIR="$TestRoot/tmp" \
-  TM_GATE_BROWSER_CACHE="$BrowserCache" \
-  TM_GATE_CANDIDATE_DIR="$CandidateDir" \
-  TM_GATE_RELEASE_ROOT="$ReleaseRoot" \
-  TM_GATE_TEST_ROOT="$TestRoot" \
-  TM_GATE_NGINX_DIR="$NginxGateDir" \
-  TM_GATE_APP_QUERY="__APP_QUERY__" \
-  TM_GATE_APP_BUILD="__APP_BUILD__" \
-  TM_GATE_PPT_QUERY="__PPT_QUERY__" \
-  TM_GATE_PPT_BUILD="__PPT_BUILD__" \
-  TM_GATE_PPT_SHA256="__PPT_SHA256__" \
-  unshare --net --fork bash --noprofile --norc -c '
+timeout --signal=KILL 30m systemd-run --quiet --wait --pipe --unit="$OfflineGateUnit" \
+  --uid="$GateUser" --gid="$GateUser" --service-type=exec \
+  --property="WorkingDirectory=$CandidateDir" \
+  --property="PrivateNetwork=yes" \
+  --property="PrivatePIDs=yes" \
+  --property="PrivateMounts=yes" \
+  --property="PrivateTmp=yes" \
+  --property="PrivateDevices=yes" \
+  --property="PrivateIPC=yes" \
+  --property="ProtectHome=yes" \
+  --property="ProtectSystem=strict" \
+  --property="ProtectProc=invisible" \
+  --property="ProtectHostname=yes" \
+  --property="ProtectKernelTunables=yes" \
+  --property="ProtectKernelModules=yes" \
+  --property="ProtectKernelLogs=yes" \
+  --property="ProtectControlGroups=yes" \
+  --property="ProtectClock=yes" \
+  --property="NoNewPrivileges=yes" \
+  --property="CapabilityBoundingSet=" \
+  --property="SystemCallArchitectures=native" \
+  --property="RestrictSUIDSGID=yes" \
+  --property="RestrictRealtime=yes" \
+  --property="LockPersonality=yes" \
+  --property="RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6" \
+  --property="KillMode=control-group" \
+  --property="TimeoutStopSec=5s" \
+  --property="RuntimeMaxSec=29m" \
+  --property="TasksMax=1024" \
+  --property="MemoryMax=4G" \
+  --property="LimitFSIZE=1073741824" \
+  --property="UMask=0077" \
+  --property="ReadOnlyPaths=$CandidateDir" \
+  --property="ReadWritePaths=$TestRoot" \
+  --property="InaccessiblePaths=$RemoteRoot /etc/turingmarket /var/lib/turingmarket" \
+  -- /usr/bin/env -i \
+    HOME="$TestRoot/home" \
+    PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+    NODE_ENV="test" \
+    TM_DISABLE_DOTENV="1" \
+    TM_ENV_FILE="$TestRoot/no-production.env" \
+    DB_PATH="$TestDb" \
+    UPLOAD_DIR="$TestRoot/uploads" \
+    TMP_DIR="$TestRoot/tmp" \
+    PLAYWRIGHT_BROWSERS_PATH="$BrowserCache" \
+    CANDIDATE_DIR="$CandidateDir" \
+    RELEASE_ROOT="$ReleaseRoot" \
+    TEST_ROOT="$TestRoot" \
+    SCHEMA_DB="$SchemaDb" \
+    NGINX_GATE_DIR="$NginxGateDir" \
+    APP_QUERY="__APP_QUERY__" \
+    APP_BUILD="__APP_BUILD__" \
+    PPT_QUERY="__PPT_QUERY__" \
+    PPT_BUILD="__PPT_BUILD__" \
+    PPT_SHA256="__PPT_SHA256__" \
+    /bin/bash --noprofile --norc -s <<'TM_UNPRIVILEGED_GATE'
 set -euo pipefail
-ip link set lo up
 test -z "$(ip route show default)"
 test "$(ip -o link show | wc -l)" = "1"
 printf "%s\n" "OFFLINE_NETWORK_NAMESPACE_OK"
-exec runuser -u "$TM_GATE_USER" -- env -i \
-  HOME="$TM_GATE_HOME" \
-  PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
-  NODE_ENV="test" \
-  TM_DISABLE_DOTENV="1" \
-  TM_ENV_FILE="$TM_GATE_TEST_ROOT/no-production.env" \
-  DB_PATH="$TM_GATE_DB_PATH" \
-  UPLOAD_DIR="$TM_GATE_UPLOAD_DIR" \
-  TMP_DIR="$TM_GATE_TMP_DIR" \
-  PLAYWRIGHT_BROWSERS_PATH="$TM_GATE_BROWSER_CACHE" \
-  CANDIDATE_DIR="$TM_GATE_CANDIDATE_DIR" \
-  RELEASE_ROOT="$TM_GATE_RELEASE_ROOT" \
-  TEST_ROOT="$TM_GATE_TEST_ROOT" \
-  SCHEMA_DB="$TM_GATE_SCHEMA_DB" \
-  NGINX_GATE_DIR="$TM_GATE_NGINX_DIR" \
-  APP_QUERY="$TM_GATE_APP_QUERY" \
-  APP_BUILD="$TM_GATE_APP_BUILD" \
-  PPT_QUERY="$TM_GATE_PPT_QUERY" \
-  PPT_BUILD="$TM_GATE_PPT_BUILD" \
-  PPT_SHA256="$TM_GATE_PPT_SHA256" \
-  bash --noprofile --norc -s
-' <<'TM_UNPRIVILEGED_GATE'
-set -euo pipefail
 cd "$CANDIDATE_DIR"
 node --check app.js
 node --check ppt.js
@@ -5028,11 +8536,14 @@ TM_UNPRIVILEGED_GATE
 GateStatus=$?
 set -e
 
+drain_gate_unit "$OfflineGateUnit"
 kill_gate_processes "offline candidate validation"
 assert_canonical_candidate
 cleanup_nginx_gate_dir
-trap - EXIT
 [ "$GateStatus" = "0" ] || exit "$GateStatus"
+CANDIDATE_VALIDATION_SHA256_AFTER="$(python3 "$LockDir/candidate_digest.py" "$CandidateDir")"
+test "$CANDIDATE_VALIDATION_SHA256_AFTER" = "$CANDIDATE_VALIDATION_SHA256_BEFORE"
+printf 'CANDIDATE_READONLY_RECHECK_OK=%s\n' "$CANDIDATE_VALIDATION_SHA256_AFTER"
 
 assert_trusted_source_gate
 /usr/bin/node "$TrustedSourceGate" stage \
@@ -5044,7 +8555,14 @@ assert_trusted_source_gate
   --expected-verifier-sha256 "$ExpectedTrustedMigrationVerifierSha256" >/dev/null
 cd "$ReleaseRoot"
 sha256sum --check --status "$LockDir/upload.sha256"
-rm -rf "$TestRoot" "$ReleaseRoot/.superpowers"
+if ! cleanup_test_root 1; then
+  cleanup_candidate_dependency_copy || true
+  exit 1
+fi
+DependencyCopyCleanupArmed=0
+trap - EXIT HUP INT TERM
+test "$TestRootMounted" = "0"
+rm -rf "$ReleaseRoot/.superpowers"
 
 rm -rf "$CandidateDir/.env" "$CandidateDir/server/db" "$CandidateDir/uploads" "$CandidateDir/tmp"
 ln -s /etc/turingmarket/turingmarket.env "$CandidateDir/.env"
@@ -5129,42 +8647,6 @@ finally:
     shutil.rmtree(probe)
 PY
 
-cat > "$LockDir/candidate_digest.py" <<'PY'
-import hashlib
-import os
-import stat
-import sys
-
-root = os.path.abspath(sys.argv[1])
-digest = hashlib.sha256()
-
-def emit(value):
-    data = value if isinstance(value, bytes) else value.encode('utf-8', 'surrogateescape')
-    digest.update(len(data).to_bytes(8, 'big'))
-    digest.update(data)
-
-def visit(path, relative):
-    metadata = os.lstat(path)
-    emit(relative)
-    emit(f'{stat.S_IFMT(metadata.st_mode)}:{stat.S_IMODE(metadata.st_mode)}:{metadata.st_uid}:{metadata.st_gid}')
-    if stat.S_ISLNK(metadata.st_mode):
-        emit(os.fsencode(os.readlink(path)))
-    elif stat.S_ISREG(metadata.st_mode):
-        file_hash = hashlib.sha256()
-        with open(path, 'rb') as handle:
-            for chunk in iter(lambda: handle.read(1024 * 1024), b''):
-                file_hash.update(chunk)
-        emit(file_hash.hexdigest())
-    elif stat.S_ISDIR(metadata.st_mode):
-        for name in sorted(os.listdir(path), key=os.fsencode):
-            visit(os.path.join(path, name), f'{relative}/{name}' if relative else name)
-    else:
-        raise SystemExit(f'Unsupported candidate entry: {relative}')
-
-visit(root, '')
-print(digest.hexdigest())
-PY
-chmod 0600 "$LockDir/candidate_digest.py"
 assert_canonical_candidate
 CANDIDATE_TREE_SHA256="$(python3 "$LockDir/candidate_digest.py" "$CandidateDir")"
 printf '%s\n' "$CANDIDATE_TREE_SHA256" > "$LockDir/candidate-tree.sha256"
@@ -5200,8 +8682,14 @@ echo "CANDIDATE_OK"
     $candidateGate = $candidateGate.Replace('__STAMP__', $stamp)
     Invoke-RemoteBash -Script $candidateGate -FailureMessage "Remote candidate validation failed" -TimeoutSeconds $CANDIDATE_GATE_TIMEOUT_SECONDS -RequireDeploymentLock
 
+    Invoke-RemoteParserCandidatePreparation `
+        -ReleaseRoot $remoteReleaseRoot `
+        -CandidateDir $remoteCandidateDir `
+        -BackupPath $backupDir
+
     $deploymentWriterToken = [Guid]::NewGuid().ToString('N')
     $exactPublicNginxVerifier = Get-ExactPublicNginxBehaviorVerifier
+    $pm2PersistenceVerifier = Get-Pm2PersistenceVerifier
     $cutoverGate = @'
 set -euo pipefail
 LiveDir="__REMOTE_DIR__"
@@ -5210,21 +8698,47 @@ ReleaseRoot="__RELEASE_ROOT__"
 CandidateDir="__CANDIDATE_DIR__"
 BackupAbsolute="$RemoteRoot/__BACKUP_PATH__"
 LockDir="$RemoteRoot/.deploy-v030.lock"
+TrustedSourceBundle="__TRUSTED_SOURCE_BUNDLE__"
+ParserApplianceRoot="$LockDir/parser-appliance"
+ParserSourceRoot="$ParserApplianceRoot/source"
+ParserRuntimeStage="$ParserApplianceRoot/runtime.stage"
+ParserRuntimeEvidence="$ParserApplianceRoot/runtime.evidence.json"
+ParserRuntimeChecksums="$ParserApplianceRoot/runtime.sha256"
+ParserLifecycleProvisioner="$ParserApplianceRoot/provisioner"
+ParserCapacityPlanner="$ParserApplianceRoot/check-cutover-capacity"
+ParserTrustedVerifier="$TrustedSourceBundle/server/scripts/trusted_parser_runtime_verifier.js"
+ParserTrustedManifest="$TrustedSourceBundle/server/systemd/turingmarket-parser.manifest.json"
+ExpectedTrustedParserVerifierSha256="__TRUSTED_PARSER_VERIFIER_SHA256__"
+ParserRuntimeRoot="/var/lib/turingmarket-parser/runtime-root"
+ParserSpoolRoot="/var/lib/turingmarket-parser/jobs"
+ParserSelfTest="/usr/local/libexec/turingmarket/upload_sandbox_self_test"
 WriterDir="$RemoteRoot/.deploy-v030.writer"
 RetiredWriterDir="$WriterDir.released.__WRITER_TOKEN__"
 DatabasePath="/var/lib/turingmarket/db/turingmarket.db"
 DatabaseDir="$(dirname "$DatabasePath")"
 PptCacheDir="/var/lib/turingmarket/ppt-cache"
 CutoverSnapshot="$BackupAbsolute/cutover-snapshot"
+ParserSnapshot="$CutoverSnapshot/parser-appliance"
 AcceptedMarker="$LockDir/accepted"
 AcceptedEvidenceRoot="$RemoteRoot/deployment-evidence"
 AcceptedEvidence="$AcceptedEvidenceRoot/accepted-__RUN_ID__.json"
+ParserAcceptedEvidence="$AcceptedEvidenceRoot/parser-__RUN_ID__.json"
+AcceptanceFacts="$AcceptedEvidenceRoot/acceptance-facts-__RUN_ID__.json"
 CurrentAcceptedMarker="$AcceptedEvidenceRoot/current-accepted.json"
 LastGoodMarker="$AcceptedEvidenceRoot/last-good.json"
 StagedPublicNginx="$LockDir/nginx-candidate-public.conf"
 StagedPublicNginxSha="$LockDir/nginx-candidate-public.sha256"
 ApiGateConfig="$LockDir/nginx-api-gate.conf"
 MaintenanceConfig="/etc/nginx/sites-available/turingmarket-maintenance"
+PublicGateGuard="$LockDir/public-gate-guard"
+PublicGateRecoveryLink="$LockDir/nginx-public-guard.link"
+PublicGuardHelper="$TrustedSourceBundle/server/scripts/public_release_guard.sh"
+ExpectedPublicGuardSha256="__TRUSTED_PUBLIC_GUARD_SHA256__"
+PublicGuardDropIn="/etc/systemd/system/nginx.service.d/90-turingmarket-public-guard.conf"
+PublicGuardUnit="turingmarket-cutover-public-guard-__RUN_ID__.service"
+public_release_guard() {
+  /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin /bin/bash --noprofile --norc "$PublicGuardHelper" "$@"
+}
 ReplayRuntime="/run/turingmarket-release-replay-__RUN_ID__"
 ReplaySocket="$ReplayRuntime/replay.sock"
 ReplayHelper="$LiveDir/server/scripts/release_replay_gate.js"
@@ -5241,6 +8755,20 @@ ReplayRetryBody="$LockDir/release-replay-retry.body"
 ReplayRetryHeaders="$LockDir/release-replay-retry.headers"
 ReplayUnit="turingmarket-release-replay-gate-__STAMP__.service"
 
+test -f "$ParserTrustedVerifier"
+test ! -L "$ParserTrustedVerifier"
+test "$(stat -c '%U:%G:%a:%h' "$ParserTrustedVerifier")" = "root:root:444:1"
+test "$(sha256sum "$ParserTrustedVerifier" | awk '{print $1}')" = "$ExpectedTrustedParserVerifierSha256"
+test -f "$ParserTrustedManifest"
+test ! -L "$ParserTrustedManifest"
+test "$(stat -c '%U:%G:%a:%h' "$ParserTrustedManifest")" = "root:root:444:1"
+ExpectedParserManifestSha256="$(sha256sum "$ParserTrustedManifest" | awk '{print $1}')"
+test "$(sha256sum "$ParserSourceRoot/systemd/turingmarket-parser.manifest.json" | awk '{print $1}')" = "$ExpectedParserManifestSha256"
+test -f "$PublicGuardHelper"
+test ! -L "$PublicGuardHelper"
+test "$(stat -c '%U:%G:%a:%h' "$PublicGuardHelper")" = "root:root:444:1"
+test "$(sha256sum "$PublicGuardHelper" | awk '{print $1}')" = "$ExpectedPublicGuardSha256"
+
 run_exact_public_nginx_gate() {
   local socket_path="$1"
   local port="$2"
@@ -5248,6 +8776,7 @@ run_exact_public_nginx_gate() {
 __EXACT_PUBLIC_NGINX_VERIFIER__
 TM_EXACT_PUBLIC_NGINX_VERIFIER
 }
+__PM2_PERSISTENCE_VERIFIER__
 
 assert_canonical_candidate() {
   local CandidateParentReal ExpectedRelease ExpectedCandidate
@@ -5264,7 +8793,101 @@ assert_canonical_candidate() {
   test "$(stat -c '%U:%G' "$CandidateDir")" = "root:root"
 }
 
+assert_parser_candidate() {
+  test -f "$ParserTrustedVerifier"
+  test ! -L "$ParserTrustedVerifier"
+  test "$(stat -c '%U:%G:%a:%h' "$ParserTrustedVerifier")" = "root:root:444:1"
+  test "$(sha256sum "$ParserTrustedVerifier" | awk '{print $1}')" = "$ExpectedTrustedParserVerifierSha256"
+  test -d "$ParserRuntimeStage"
+  test ! -L "$ParserRuntimeStage"
+  test -f "$ParserRuntimeEvidence"
+  test ! -L "$ParserRuntimeEvidence"
+  test -f "$ParserRuntimeChecksums"
+  test ! -L "$ParserRuntimeChecksums"
+  (cd "$ParserRuntimeStage" && sha256sum --check --status "$ParserRuntimeChecksums")
+  TM_PARSER_RUNTIME_EVIDENCE="$(cat "$ParserRuntimeEvidence")" python3 - \
+    "$ParserTrustedManifest" "$ExpectedParserManifestSha256" "$ExpectedTrustedParserVerifierSha256" <<'PY'
+import hashlib
+import json
+import os
+import re
+import sys
+with open(sys.argv[1], encoding='utf-8') as handle:
+    manifest = json.load(handle)
+evidence = json.loads(os.environ['TM_PARSER_RUNTIME_EVIDENCE'])
+expected = manifest['runtime_tree']
+projection = {key: expected[key] for key in ('format', 'sha256', 'files', 'directories', 'bytes')}
+expected_top = {'format', 'manifest_sha256', 'verifier_sha256', 'runtime_tree', 'build_boundary'}
+expected_boundary = {
+    'format', 'source_artifacts_sha256', 'build_unit', 'build_unit_properties',
+    'build_unit_properties_sha256',
+    'build_unit_stopped', 'build_unit_collected', 'network_isolation', 'mount_isolation',
+    'credential_isolation', 'build_parent_inaccessible'
+}
+boundary = evidence.get('build_boundary', {})
+properties = boundary.get('build_unit_properties')
+properties_digest = hashlib.sha256(
+    json.dumps(properties, sort_keys=True, separators=(',', ':')).encode('ascii')
+).hexdigest() if isinstance(properties, dict) else ''
+if (set(evidence) != expected_top or
+        evidence.get('format') != 'tm-parser-runtime-build-evidence-v2' or
+        evidence.get('manifest_sha256') != sys.argv[2] or
+        evidence.get('verifier_sha256') != sys.argv[3] or
+        evidence.get('runtime_tree') != projection or
+        set(boundary) != expected_boundary or
+        properties_digest != boundary.get('build_unit_properties_sha256') or
+        boundary.get('format') != 'tm-parser-build-boundary-v1' or
+        boundary.get('build_unit') != 'turingmarket-parser-build.service'):
+    raise SystemExit('parser candidate evidence is invalid: build unit properties SHA-256 mismatch')
+for name in ('source_artifacts_sha256', 'build_unit_properties_sha256'):
+    if not re.fullmatch(r'[0-9a-f]{64}', boundary.get(name, '')):
+        raise SystemExit('parser candidate build digest is invalid')
+for name in (
+    'build_unit_stopped', 'build_unit_collected', 'network_isolation', 'mount_isolation',
+    'credential_isolation', 'build_parent_inaccessible'
+):
+    if boundary.get(name) is not True:
+        raise SystemExit('parser candidate build boundary is incomplete')
+PY
+}
+
+assert_cutover_capacity() {
+  local CapacityReport
+  test -f "$ParserCapacityPlanner"
+  test ! -L "$ParserCapacityPlanner"
+  test "$(stat -c '%U:%G:%a:%h' "$ParserCapacityPlanner")" = "root:root:500:1"
+  CapacityReport="$(
+    "$ParserCapacityPlanner" \
+      --backup-root "$BackupAbsolute" \
+      --parser-state-root /var/lib/turingmarket-parser \
+      --database-path "$DatabasePath" \
+      --ppt-cache-root "$PptCacheDir" \
+      --live-dir "$LiveDir" \
+      --candidate-dir "$CandidateDir" \
+      --parser-stage "$ParserRuntimeStage"
+  )"
+  printf '%s\n' "$CapacityReport"
+  test "$(printf '%s\n' "$CapacityReport" | tail -n 1)" = "CUTOVER_CAPACITY_OK"
+  CutoverCapacityJson="$(TM_CAPACITY_REPORT="$CapacityReport" python3 - <<'PY'
+import json
+import os
+
+lines = os.environ['TM_CAPACITY_REPORT'].splitlines()
+if len(lines) != 2 or lines[1] != 'CUTOVER_CAPACITY_OK':
+    raise SystemExit('cutover capacity output is invalid')
+report = json.loads(lines[0])
+if report.get('contract') != 'tm-cutover-capacity-v1' or report.get('ok') is not True:
+    raise SystemExit('cutover capacity report is not accepting')
+canonical = json.dumps(report, sort_keys=True, separators=(',', ':'))
+if lines[0] != canonical:
+    raise SystemExit('cutover capacity report is not canonical')
+print(canonical)
+PY
+)"
+}
+
 writer_acquired=0
+public_gate_armed=0
 release_writer() {
   if [ "$writer_acquired" = "1" ] &&
      [ -f "$WriterDir/owner" ] &&
@@ -5275,7 +8898,34 @@ release_writer() {
     rm -rf "$RetiredWriterDir"
   fi
 }
-trap release_writer EXIT
+
+cutover_exit_guard() {
+  local CutoverStatus="${1:-1}"
+  local FailClosedStatus=0
+  trap - ERR EXIT HUP INT TERM
+  trap '' HUP INT TERM
+  set +e
+  if [ "$public_gate_armed" = "1" ]; then
+    public_release_guard close \
+      --state-file "$PublicGateGuard" \
+      --maintenance-source "$ApiGateConfig" \
+      --maintenance-config "$MaintenanceConfig" \
+      --recovery-link "$PublicGateRecoveryLink" \
+      --site-link /etc/nginx/sites-enabled/turingmarket || FailClosedStatus=1
+  fi
+  if [ "$FailClosedStatus" = "0" ]; then
+    release_writer
+  else
+    echo "Cutover public failure handler could not restore the API gate; writer lock retained" >&2
+    CutoverStatus=125
+  fi
+  if [ "$CutoverStatus" = "0" ] && [ "$public_gate_armed" = "1" ]; then CutoverStatus=1; fi
+  exit "$CutoverStatus"
+}
+trap 'cutover_exit_guard $?' ERR EXIT
+trap 'cutover_exit_guard 129' HUP
+trap 'cutover_exit_guard 130' INT
+trap 'cutover_exit_guard 143' TERM
 
 umask 077
 if ! mkdir "$WriterDir" 2>/dev/null; then
@@ -5299,6 +8949,8 @@ if [ "$CurrentCandidateDigest" != "$ExpectedCandidateDigest" ]; then
 fi
 echo "CANDIDATE_TREE_RECHECK_OK"
 assert_canonical_candidate
+assert_parser_candidate
+assert_cutover_capacity
 
 assert_runtime_link() {
   link="$1"
@@ -5340,7 +8992,7 @@ TM_MAINTENANCE_NGINX
   ln -s "$MaintenanceConfig" "$LockDir/nginx-maintenance.link"
   mv -Tf "$LockDir/nginx-maintenance.link" /etc/nginx/sites-enabled/turingmarket
   nginx -t
-  systemctl reload nginx
+  systemctl reload nginx || systemctl start nginx
 
   expect_maintenance() {
     expected="$1"
@@ -5352,6 +9004,229 @@ TM_MAINTENANCE_NGINX
   expect_maintenance 503 /api/auth/login
   expect_maintenance 503 /m0
   printf '%s\n' 'ALL_TRAFFIC_MAINTENANCE_OK'
+}
+
+drain_admitted_http_connections() {
+  command -v ss >/dev/null
+  DrainDeadline=$((SECONDS + __MAINTENANCE_TIMEOUT_SECONDS__))
+  StableZeroSince=""
+  while [ "$SECONDS" -lt "$DrainDeadline" ]; do
+    ActiveConnections="$(ss -H -tn state established '( sport = :3002 )' | wc -l)"
+    if [ "$ActiveConnections" = "0" ]; then
+      if [ -z "$StableZeroSince" ]; then StableZeroSince="$SECONDS"; fi
+      if [ $((SECONDS - StableZeroSince)) -ge __HTTP_DRAIN_STABLE_SECONDS__ ]; then
+        printf '%s\n' 'HTTP_CONNECTIONS_DRAINED'
+        return 0
+      fi
+    else
+      StableZeroSince=""
+    fi
+    sleep 1
+  done
+  echo "HTTP connection drain timed out; leaving Node running" >&2
+  return 1
+}
+
+drain_parser_appliance() {
+  for attempt in $(seq 1 __MAINTENANCE_TIMEOUT_SECONDS__); do
+    ParserAdmissions="$(
+      cd "$LiveDir/server"
+      TM_PARSER_DRAIN_DB="$DatabasePath" node <<'NODE'
+const Database = require('better-sqlite3');
+const database = new Database(process.env.TM_PARSER_DRAIN_DB, { readonly: true, fileMustExist: true });
+try {
+  const object = database.prepare(`
+    SELECT type FROM sqlite_master WHERE name='request_idempotency'
+  `).get();
+  if (!object) {
+    process.stdout.write('0');
+  } else {
+    const expectedColumns = [
+      'id', 'org_id', 'user_id', 'campaign_id', 'secondary_campaign_id', 'resource_claim',
+      'scope', 'idempotency_key', 'reservation_nonce', 'request_hash', 'audit_fingerprint',
+      'expected_event_count', 'state', 'lease_until', 'lease_token', 'status_code',
+      'response_kind', 'response_json', 'response_headers_json', 'response_cache_key',
+      'response_sha256', 'response_bytes', 'response_content_type', 'response_filename',
+      'created_at', 'updated_at', 'operation_deadline', 'expires_at'
+    ];
+    const actualColumns = object.type === 'table'
+      ? database.prepare('PRAGMA table_info(request_idempotency)').all().map((column) => column.name)
+      : [];
+    if (object.type !== 'table' || actualColumns.length !== expectedColumns.length ||
+        actualColumns.some((column, index) => column !== expectedColumns[index])) {
+      throw new Error('Parser admission ledger schema is invalid');
+    }
+    const row = database.prepare(`
+      SELECT COUNT(*) AS count
+      FROM request_idempotency
+      WHERE state='processing'
+        AND scope IN (
+          'parser.knowledge-upload.admission',
+          'parser.influencer-upload.admission',
+          'parser.demand-parse.admission'
+        )
+    `).get();
+    process.stdout.write(String(row.count));
+  }
+} finally {
+  database.close();
+}
+NODE
+    )"
+    ParserSpoolEmpty=1
+    if [ -e "$ParserSpoolRoot" ]; then
+      test -d "$ParserSpoolRoot"
+      test ! -L "$ParserSpoolRoot"
+      if find "$ParserSpoolRoot" -mindepth 1 -print -quit | grep -q .; then
+        ParserSpoolEmpty=0
+      fi
+    fi
+    if [ "$ParserAdmissions" = "0" ] && [ "$ParserSpoolEmpty" = "1" ] &&
+       ! systemctl list-units --type=service --state=running --no-legend 'turingmarket-parser@*.service' | grep -q .; then
+      break
+    fi
+    if [ "$attempt" = "__MAINTENANCE_TIMEOUT_SECONDS__" ]; then
+      echo "Parser admission drain timed out" >&2
+      exit 1
+    fi
+    sleep 1
+  done
+
+  systemctl kill --kill-who=all --signal=KILL 'turingmarket-parser@*.service' >/dev/null 2>&1 || true
+  systemctl stop 'turingmarket-parser@*.service' >/dev/null 2>&1 || true
+  systemctl reset-failed 'turingmarket-parser@*.service' >/dev/null 2>&1 || true
+  if systemctl list-units --type=service --state=running --no-legend 'turingmarket-parser@*.service' | grep -q .; then
+    echo "A parser unit survived the deployment drain" >&2
+    exit 1
+  fi
+  if [ -e "$ParserSpoolRoot" ] && find "$ParserSpoolRoot" -mindepth 1 -print -quit | grep -q .; then
+    echo "Parser spool is not empty after deployment drain" >&2
+    exit 1
+  fi
+  ParserSliceLoadState="$(systemctl show turingmarket-parser.slice --property=LoadState --value 2>/dev/null || printf not-found)"
+  if [ "$ParserSliceLoadState" != "not-found" ]; then
+    test "$ParserSliceLoadState" = loaded
+    ParserSliceControlGroup="$(systemctl show turingmarket-parser.slice --property=ControlGroup --value)"
+    if [ -n "$ParserSliceControlGroup" ] && [ -d "/sys/fs/cgroup$ParserSliceControlGroup" ]; then
+      while IFS= read -r ParserCgroupProcs; do
+        if read -r _ < "$ParserCgroupProcs"; then
+          echo "Parser cgroup is not empty after deployment drain" >&2
+          exit 1
+        fi
+      done < <(find "/sys/fs/cgroup$ParserSliceControlGroup" -name cgroup.procs -type f -print)
+    fi
+  fi
+  printf '%s\n' 'PARSER_ADMISSION_DRAINED'
+}
+
+install_parser_appliance() {
+  test -d "$ParserSnapshot"
+  test ! -L "$ParserSnapshot"
+  (cd "$ParserSnapshot" && sha256sum --check --status SHA256SUMS)
+  ExpectedParserRuntimeSha256="$(python3 - "$ParserSourceRoot/systemd/turingmarket-parser.manifest.json" <<'PY'
+import json
+import re
+import sys
+with open(sys.argv[1], encoding='utf-8') as handle:
+    value = json.load(handle)['runtime_tree']['sha256']
+if not re.fullmatch(r'[0-9a-f]{64}', value):
+    raise SystemExit('invalid expected parser runtime SHA-256')
+print(value)
+PY
+)"
+  TM_UPLOAD_SANDBOX_PROVISION_DIAGNOSTIC=0 "$ParserLifecycleProvisioner" install \
+    --snapshot-root "$ParserSnapshot" \
+    --staged-runtime "$ParserRuntimeStage" \
+    --source-root "$ParserSourceRoot" \
+    --trusted-verifier "$ParserTrustedVerifier" \
+    --expected-verifier-sha256 "__TRUSTED_PARSER_VERIFIER_SHA256__" \
+    --expected-manifest-sha256 "$ExpectedParserManifestSha256" \
+    --build-evidence "$ParserRuntimeEvidence" \
+    --expected-sha256 "$ExpectedParserRuntimeSha256"
+  printf '%s\n' 'PARSER_APPLIANCE_INSTALLED'
+}
+
+verify_candidate_health() {
+  local ExpectedManifestSha256 HealthPayload
+  ExpectedManifestSha256="$(sha256sum "$ParserSourceRoot/systemd/turingmarket-parser.manifest.json" | awk '{print $1}')"
+  HealthPayload="$(curl -fsS http://localhost:3002/api/health)"
+  CandidateHealthProjection="$(TM_EXPECTED_PARSER_MANIFEST_SHA256="$ExpectedManifestSha256" \
+  TM_CANDIDATE_HEALTH_PAYLOAD="$HealthPayload" node <<'NODE'
+const health = JSON.parse(process.env.TM_CANDIDATE_HEALTH_PAYLOAD);
+const expectedManifestSha256 = process.env.TM_EXPECTED_PARSER_MANIFEST_SHA256;
+if (health.status !== 'ok') {
+  throw new Error('candidate health status is not ok');
+}
+if (!health.parser || typeof health.parser !== 'object') {
+  throw new Error('candidate health is missing parser readiness');
+}
+if (health.parser.ready !== true) {
+  throw new Error('candidate parser is not ready');
+}
+if (health.parser.manifest_sha256 !== expectedManifestSha256) {
+  throw new Error('candidate parser manifest does not match the accepted release');
+}
+const projection = {
+  status: health.status,
+  parser: {
+    ready: health.parser.ready,
+    manifest_sha256: health.parser.manifest_sha256,
+  },
+};
+process.stdout.write(JSON.stringify(projection));
+NODE
+)"
+  printf '%s\n' 'CANDIDATE_PARSER_HEALTH_OK'
+}
+
+record_parser_acceptance_evidence() {
+  install -d -o root -g root -m 0700 "$AcceptedEvidenceRoot"
+  test ! -e "$ParserAcceptedEvidence"
+  ParserRuntimeSha256="$(python3 - "$ParserSourceRoot/systemd/turingmarket-parser.manifest.json" <<'PY'
+import json
+import re
+import sys
+with open(sys.argv[1], encoding='utf-8') as handle:
+    value = json.load(handle)['runtime_tree']['sha256']
+if not re.fullmatch(r'[0-9a-f]{64}', value):
+    raise SystemExit('invalid accepted parser runtime SHA-256')
+print(value)
+PY
+)"
+  generate_installed_parser_acceptance_binding() {
+  TM_UPLOAD_SANDBOX_PROVISION_DIAGNOSTIC=0 "$ParserLifecycleProvisioner" verify \
+      --source-root "$ParserSourceRoot" \
+      --trusted-verifier "$ParserTrustedVerifier" \
+      --expected-verifier-sha256 "$ExpectedTrustedParserVerifierSha256" \
+      --expected-manifest-sha256 "$ExpectedParserManifestSha256" \
+      --build-evidence "$ParserRuntimeEvidence" \
+      --expected-sha256 "$ParserRuntimeSha256"
+  }
+  ParserAcceptanceBinding="$(generate_installed_parser_acceptance_binding)"
+  [[ "$ParserAcceptanceBinding" = *'"format":"tm-parser-acceptance-binding-v1"'* ]] || {
+    echo 'Installed parser self-test envelope did not produce a trusted binding' >&2
+    return 1
+  }
+  printf '%s\n' "$ParserAcceptanceBinding" > "$ParserAcceptedEvidence.next"
+  chown root:root "$ParserAcceptedEvidence.next"
+  chmod 0600 "$ParserAcceptedEvidence.next"
+  sync -f "$ParserAcceptedEvidence.next"
+  mv "$ParserAcceptedEvidence.next" "$ParserAcceptedEvidence"
+  sync -f "$ParserAcceptedEvidence"
+  sync -f "$AcceptedEvidenceRoot"
+  test "$(stat -c '%U:%G:%a:%h' "$ParserAcceptedEvidence")" = "root:root:600:1"
+  ParserEvidenceSha256="$(sha256sum "$ParserAcceptedEvidence" | awk '{print $1}')"
+  assert_installed_parser_acceptance_binding() {
+    local CurrentParserAcceptanceBinding
+    test "$(sha256sum "$ParserAcceptedEvidence" | awk '{print $1}')" = "$ParserEvidenceSha256"
+    CurrentParserAcceptanceBinding="$(generate_installed_parser_acceptance_binding)"
+    test "$(cat "$ParserAcceptedEvidence")" = "$CurrentParserAcceptanceBinding" || {
+      echo 'Installed parser self-test envelope binding changed' >&2
+      return 1
+    }
+  }
+  assert_installed_parser_acceptance_binding
+  printf '%s\n' 'PARSER_ACCEPTANCE_EVIDENCE_DURABLE'
 }
 
 stop_and_quiesce_writers() {
@@ -5401,6 +9276,24 @@ try {
 NODE
   test ! -s "$DatabasePath-wal"
   printf '%s\n' 'PM2_WRITERS_STOPPED'
+}
+
+prepare_ppt_cache_for_cutover() {
+  if [ -f "$BackupAbsolute/ppt-cache.present" ] && [ ! -e "$BackupAbsolute/ppt-cache.absent" ]; then
+    test -d "$PptCacheDir"
+    test ! -L "$PptCacheDir"
+    test "$(stat -c '%U:%G:%a' "$PptCacheDir")" = "root:root:700"
+  elif [ -f "$BackupAbsolute/ppt-cache.absent" ] && [ ! -e "$BackupAbsolute/ppt-cache.present" ]; then
+    test ! -e "$PptCacheDir"
+    test ! -L "$PptCacheDir"
+    install -d -o root -g root -m 0700 "$PptCacheDir"
+    sync -f "$PptCacheDir"
+    sync -f "$(dirname "$PptCacheDir")"
+  else
+    echo "Backup PPT cache origin state is ambiguous" >&2
+    exit 1
+  fi
+  printf '%s\n' 'PPT_CACHE_CUTOVER_READY'
 }
 
 create_cutover_snapshot() {
@@ -5477,7 +9370,7 @@ function sha256(filePath) {
 }
 
 function artifactFile(cacheKey) {
-  return `${cacheKey}.pptx`;
+  return `${cacheKey.slice(0, 2)}/${cacheKey}.pptx`;
 }
 
 function buildLedger() {
@@ -5490,14 +9383,30 @@ function buildLedger() {
     if (database.pragma('foreign_key_check').length !== 0) {
       throw new Error('PPT ledger database foreign_key_check failed');
     }
-    rows = database.prepare(`
-      SELECT
-        id,state,response_cache_key,response_sha256,response_bytes,
-        response_content_type,response_filename
-      FROM request_idempotency
-      WHERE state IN ('completed','expiring') AND response_kind='binary'
-      ORDER BY response_cache_key,id
-    `).all();
+    const ledgerTable = database.prepare(`
+      SELECT COUNT(*) AS count
+      FROM sqlite_master
+      WHERE type='table' AND name='request_idempotency'
+    `).get().count;
+    const requiredColumns = new Set([
+      'id', 'state', 'response_kind', 'response_cache_key', 'response_sha256',
+      'response_bytes', 'response_content_type', 'response_filename'
+    ]);
+    const ledgerColumns = ledgerTable
+      ? new Set(database.prepare('PRAGMA table_info(request_idempotency)').all().map((column) => column.name))
+      : new Set();
+    if (!ledgerTable || Array.from(requiredColumns).some((column) => !ledgerColumns.has(column))) {
+      rows = [];
+    } else {
+      rows = database.prepare(`
+        SELECT
+          id,state,response_cache_key,response_sha256,response_bytes,
+          response_content_type,response_filename
+        FROM request_idempotency
+        WHERE state IN ('completed','expiring') AND response_kind='binary'
+        ORDER BY response_cache_key,id
+      `).all();
+    }
   } finally {
     database.close();
   }
@@ -5553,17 +9462,30 @@ function buildLedger() {
   }
 
   const expectedFiles = new Set(Array.from(artifacts.values(), (artifact) => artifact.fileName));
-  for (const entry of fs.readdirSync(cacheRoot, { withFileTypes: true })) {
-    if (!entry.isFile() || entry.isSymbolicLink() || !expectedFiles.has(entry.name)) {
-      throw new Error(`PPT cache file is not represented by SQLite: ${entry.name}`);
+  const actualFiles = [];
+  for (const shard of fs.readdirSync(cacheRoot, { withFileTypes: true })) {
+    if (!shard.isDirectory() || shard.isSymbolicLink() || !/^[0-9a-f]{2}$/.test(shard.name)) {
+      throw new Error(`PPT cache entry is not represented by SQLite: ${shard.name}`);
+    }
+    const shardPath = path.join(cacheRoot, shard.name);
+    const shardStat = fs.lstatSync(shardPath);
+    if (process.platform !== 'win32' && (shardStat.mode & 0o777) !== 0o700) {
+      throw new Error(`PPT cache shard mode is not 0700: ${shard.name}`);
+    }
+    for (const entry of fs.readdirSync(shardPath, { withFileTypes: true })) {
+      const relative = `${shard.name}/${entry.name}`;
+      if (!entry.isFile() || entry.isSymbolicLink() || !expectedFiles.has(relative)) {
+        throw new Error(`PPT cache file is not represented by SQLite: ${relative}`);
+      }
+      actualFiles.push(relative);
     }
   }
-  if (fs.readdirSync(cacheRoot).length !== expectedFiles.size) {
+  if (actualFiles.length !== expectedFiles.size) {
     throw new Error('PPT cache tree does not have one file per SQLite artifact');
   }
   return {
     schemaVersion: 1,
-    naming: '<response_cache_key>.pptx',
+    naming: '<first-2>/<response_cache_key>.pptx',
     artifacts: Array.from(artifacts.values())
   };
 }
@@ -5599,6 +9521,12 @@ TM_PPT_LEDGER_TOOL
   test "$DatabaseSourceShaBefore" = "$DatabaseSourceShaAfter"
   test "$CacheSourceManifestBefore" = "$CacheSourceManifestAfter"
 
+  TM_UPLOAD_SANDBOX_PROVISION_DIAGNOSTIC=0 "$ParserLifecycleProvisioner" snapshot \
+    --snapshot-root "$SnapshotStage/parser-appliance"
+  test -d "$SnapshotStage/parser-appliance"
+  test ! -L "$SnapshotStage/parser-appliance"
+  (cd "$SnapshotStage/parser-appliance" && sha256sum --check --status SHA256SUMS)
+
   cd "$SnapshotStage"
   sha256sum database/turingmarket.db > database.sha256
   sha256sum security-overlay.json > security-overlay.sha256
@@ -5625,11 +9553,13 @@ try {
 NODE
   find "$SnapshotStage" -type f -exec chown root:root {} + -exec chmod 0600 {} +
   find "$SnapshotStage" -type d -exec chown root:root {} + -exec chmod 0700 {} +
+  chmod 0500 "$SnapshotStage/parser-appliance/provisioner.file"
   while IFS= read -r -d '' artifact; do sync -f "$artifact"; done < <(find "$SnapshotStage" -type f -print0)
   sync -f "$SnapshotStage"
   mv "$SnapshotStage" "$CutoverSnapshot"
   sync -f "$CutoverSnapshot"
   sync -f "$BackupAbsolute"
+  CutoverSnapshotSha256SumsSha256="$(sha256sum "$CutoverSnapshot/SHA256SUMS" | awk '{print $1}')"
   printf '%s\n' 'CUTOVER_SNAPSHOT_OK'
 }
 
@@ -6482,13 +10412,7 @@ try:
     os.fsync(descriptor)
 finally:
     os.close(descriptor)
-os.link(temporary, target)
-directory = os.open(os.path.dirname(target), os.O_RDONLY | os.O_DIRECTORY)
-try:
-    os.fsync(directory)
-finally:
-    os.close(directory)
-os.unlink(temporary)
+os.replace(temporary, target)
 directory = os.open(os.path.dirname(target), os.O_RDONLY | os.O_DIRECTORY)
 try:
     os.fsync(directory)
@@ -6518,6 +10442,140 @@ PY
   printf '%s\n' 'RELEASE_REPLAY_EXACTLY_ONE_OK'
 }
 
+project_pm2_acceptance() {
+  TM_LIVE_DIR="$LiveDir" TM_PM2_JLIST="$(pm2 jlist)" node <<'NODE'
+const path = require('node:path');
+const liveDir = path.resolve(process.env.TM_LIVE_DIR);
+const configuration = require(path.join(liveDir, 'ecosystem.config.js'));
+if (!configuration || !Array.isArray(configuration.apps)) {
+  throw new Error('PM2 acceptance configuration is invalid');
+}
+const configured = configuration.apps.filter((entry) => entry && entry.name === 'turingmarket');
+const running = JSON.parse(process.env.TM_PM2_JLIST || '[]')
+  .filter((entry) => entry && entry.name === 'turingmarket');
+if (configured.length !== 1 || running.length !== 1) {
+  throw new Error('PM2 acceptance requires exactly one turingmarket definition');
+}
+const environmentKeys = [
+  'NODE_ENV', 'PORT', 'SERVER_HOST', 'TM_ENV_FILE', 'DB_PATH',
+  'UPLOAD_DIR', 'TMP_DIR', 'PPT_CACHE_DIR',
+];
+const application = configured[0];
+const runtime = running[0].pm2_env || {};
+const expected = {
+  name: application.name,
+  status: 'online',
+  pmExecPath: path.resolve(application.cwd || liveDir, application.script),
+  pmCwd: path.resolve(application.cwd || liveDir),
+  execMode: application.exec_mode === 'fork' ? 'fork_mode' : String(application.exec_mode),
+  instances: Number(application.instances || 1),
+  env: Object.fromEntries(environmentKeys.map((key) => [key, String(application.env[key])])),
+};
+const final = {
+  name: running[0].name,
+  status: runtime.status,
+  pmExecPath: path.resolve(String(runtime.pm_exec_path || '')),
+  pmCwd: path.resolve(String(runtime.pm_cwd || '')),
+  execMode: String(runtime.exec_mode || ''),
+  instances: running.length,
+  env: Object.fromEntries(environmentKeys.map((key) => [key, String(runtime[key])])),
+};
+if (JSON.stringify(final) !== JSON.stringify(expected)) {
+  throw new Error('PM2 final projection differs from the release configuration');
+}
+process.stdout.write(JSON.stringify({ expected, final }));
+NODE
+}
+
+record_acceptance_facts() {
+  test ! -e "$AcceptanceFacts"
+  test ! -e "$AcceptanceFacts.next"
+  test "$(sha256sum "$CutoverSnapshot/SHA256SUMS" | awk '{print $1}')" = "$CutoverSnapshotSha256SumsSha256"
+  Pm2Projection="$(project_pm2_acceptance)"
+  NginxSha="$(awk 'NR == 1 {print $1}' "$StagedPublicNginxSha")"
+  test "$(sha256sum "$StagedPublicNginx" | awk '{print $1}')" = "$NginxSha"
+  test "$StagedNginxBehaviorContract" = "tm-exact-public-nginx-v1"
+  NginxProjection="$(python3 - "$NginxSha" "$StagedNginxBehaviorContract" <<'PY'
+import json
+import sys
+
+configSha256, behaviorContract = sys.argv[1:]
+projection = {
+    'behaviorContract': behaviorContract,
+    'configSha256': configSha256,
+    'enabledTarget': '/etc/nginx/sites-available/turingmarket',
+}
+print(json.dumps({'expected': projection, 'final': projection}, sort_keys=True, separators=(',', ':')))
+PY
+)"
+  TM_CUTOVER_CAPACITY_JSON="$CutoverCapacityJson" \
+  TM_CANDIDATE_HEALTH_PROJECTION="$CandidateHealthProjection" \
+  TM_PM2_FINAL_PROJECTION="$Pm2Projection" \
+  TM_NGINX_FINAL_PROJECTION="$NginxProjection" \
+  python3 - "$AcceptanceFacts.next" "__RUN_ID__" "$CutoverSnapshotSha256SumsSha256" <<'PY'
+import json
+import os
+import re
+import sys
+
+target, runId, snapshotSha256 = sys.argv[1:]
+capacity = json.loads(os.environ['TM_CUTOVER_CAPACITY_JSON'])
+health = json.loads(os.environ['TM_CANDIDATE_HEALTH_PROJECTION'])
+pm2Projection = json.loads(os.environ['TM_PM2_FINAL_PROJECTION'])
+nginxProjection = json.loads(os.environ['TM_NGINX_FINAL_PROJECTION'])
+if capacity.get('contract') != 'tm-cutover-capacity-v1' or capacity.get('ok') is not True:
+    raise SystemExit('Acceptance facts cutover capacity is invalid')
+if (set(health) != {'status', 'parser'} or health.get('status') != 'ok' or
+        set(health.get('parser', {})) != {'ready', 'manifest_sha256'} or
+        health['parser'].get('ready') is not True or
+        not re.fullmatch(r'[0-9a-f]{64}', str(health['parser'].get('manifest_sha256', '')))):
+    raise SystemExit('Acceptance facts candidate health is invalid')
+if not re.fullmatch(r'[0-9a-f]{64}', snapshotSha256):
+    raise SystemExit('Acceptance facts cutover snapshot digest is invalid')
+if set(pm2Projection) != {'expected', 'final'} or pm2Projection['expected'] != pm2Projection['final']:
+    raise SystemExit('Acceptance facts PM2 projection is invalid')
+if set(nginxProjection) != {'expected', 'final'} or nginxProjection['expected'] != nginxProjection['final']:
+    raise SystemExit('Acceptance facts Nginx projection is invalid')
+forbiddenFields = {'pid', 'pm_uptime', 'uptime'}
+def rejectVolatile(value):
+    if isinstance(value, dict):
+        if forbiddenFields.intersection(value):
+            raise SystemExit('Acceptance facts contain volatile process fields')
+        for child in value.values():
+            rejectVolatile(child)
+    elif isinstance(value, list):
+        for child in value:
+            rejectVolatile(child)
+rejectVolatile(pm2Projection)
+pm2Expected, pm2Final = pm2Projection['expected'], pm2Projection['final']
+nginxExpected, nginxFinal = nginxProjection['expected'], nginxProjection['final']
+payload = {
+    'schemaVersion': 1,
+    'runId': runId,
+    'cutoverCapacity': capacity,
+    'candidateHealth': health,
+    'cutoverSnapshotSha256SumsSha256': snapshotSha256,
+    'pm2': {'expected': pm2Expected, 'final': pm2Final},
+    'nginx': {'expected': nginxExpected, 'final': nginxFinal},
+}
+descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+try:
+    os.write(descriptor, (json.dumps(payload, sort_keys=True, separators=(',', ':')) + '\n').encode('ascii'))
+    os.fsync(descriptor)
+finally:
+    os.close(descriptor)
+PY
+  chown root:root "$AcceptanceFacts.next"
+  chmod 0600 "$AcceptanceFacts.next"
+  sync -f "$AcceptanceFacts.next"
+  mv "$AcceptanceFacts.next" "$AcceptanceFacts"
+  sync -f "$AcceptanceFacts"
+  sync -f "$AcceptedEvidenceRoot"
+  test "$(stat -c '%U:%G:%a:%h' "$AcceptanceFacts")" = "root:root:600:1"
+  AcceptanceFactsSha256="$(sha256sum "$AcceptanceFacts" | awk '{print $1}')"
+  printf '%s\n' 'ACCEPTANCE_FACTS_DURABLE'
+}
+
 install_current_accepted_marker() {
   NginxSha="$(awk 'NR == 1 {print $1}' "$StagedPublicNginxSha")"
   test "$(sha256sum "$StagedPublicNginx" | awk '{print $1}')" = "$NginxSha"
@@ -6532,21 +10590,29 @@ install_current_accepted_marker() {
     "__SOURCE_IDENTITY__" \
     "__SOURCE_SHA256__" \
     "$ExpectedCandidateDigest" \
-    "$NginxSha" <<'PY'
+    "$NginxSha" \
+    "$ReplayEvidenceSha" \
+    "$ParserEvidenceSha256" \
+    "$ParserRuntimeSha256" \
+    "$AcceptanceFactsSha256" <<'PY'
 import datetime
 import json
 import os
 import sys
 
-temporary, current, runId, backupPath, sourceIdentity, sourceSha256, candidateSha256, nginxSha256 = sys.argv[1:]
+temporary, current, runId, backupPath, sourceIdentity, sourceSha256, candidateSha256, nginxSha256, replayEvidenceSha256, parserEvidenceSha256, parserRuntimeSha256, acceptanceFactsSha256 = sys.argv[1:]
 payload = {
-    'schemaVersion': 1,
+    'schemaVersion': 4,
     'runId': runId,
     'backupPath': backupPath,
     'sourceIdentity': sourceIdentity,
     'sourceSha256': sourceSha256,
     'candidateSha256': candidateSha256,
     'nginxSha256': nginxSha256,
+    'replayEvidenceSha256': replayEvidenceSha256,
+    'parserEvidenceSha256': parserEvidenceSha256,
+    'parserRuntimeSha256': parserRuntimeSha256,
+    'acceptanceFactsSha256': acceptanceFactsSha256,
     'acceptedAt': datetime.datetime.now(datetime.timezone.utc).isoformat(),
 }
 descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -6555,9 +10621,7 @@ try:
     os.fsync(descriptor)
 finally:
     os.close(descriptor)
-# Hard-link publication is atomic and no-replace; unlinking the staging name restores nlink=1.
-os.link(temporary, current)
-os.unlink(temporary)
+os.replace(temporary, current)
 directory = os.open(os.path.dirname(current), os.O_RDONLY | os.O_DIRECTORY)
 try:
     os.fsync(directory)
@@ -6572,23 +10636,73 @@ PY
   printf '%s\n' 'CURRENT_MARKER_DURABLE'
 }
 
+assert_final_acceptance_facts() {
+  test -f "$AcceptanceFacts"
+  test ! -L "$AcceptanceFacts"
+  test "$(stat -c '%U:%G:%a:%h' "$AcceptanceFacts")" = "root:root:600:1"
+  test "$(sha256sum "$AcceptanceFacts" | awk '{print $1}')" = "$AcceptanceFactsSha256"
+  if [ "$(sha256sum "$CutoverSnapshot/SHA256SUMS" | awk '{print $1}')" != "$CutoverSnapshotSha256SumsSha256" ]; then
+    echo "Cutover snapshot SHA256SUMS digest changed after acceptance" >&2
+    return 1
+  fi
+  Pm2Projection="$(project_pm2_acceptance)"
+  run_exact_public_nginx_gate - 80
+  LiveNginxSha="$(sha256sum /etc/nginx/sites-available/turingmarket | awk '{print $1}')"
+  LiveNginxTarget="$(readlink -f /etc/nginx/sites-enabled/turingmarket)"
+  TM_PM2_FINAL_PROJECTION="$Pm2Projection" \
+  python3 - "$AcceptanceFacts" "$LiveNginxSha" "$LiveNginxTarget" <<'PY'
+import json
+import sys
+
+factsPath, nginxSha256, nginxTarget = sys.argv[1:]
+with open(factsPath, encoding='utf-8') as handle:
+    facts = json.load(handle)
+pm2Projection = json.loads(__import__('os').environ['TM_PM2_FINAL_PROJECTION'])
+nginxFinal = {
+    'behaviorContract': 'tm-exact-public-nginx-v1',
+    'configSha256': nginxSha256,
+    'enabledTarget': nginxTarget,
+}
+if (facts.get('schemaVersion') != 1 or
+        facts.get('pm2', {}).get('expected') != pm2Projection.get('expected') or
+        facts.get('pm2', {}).get('final') != pm2Projection.get('final') or
+        facts.get('nginx', {}).get('expected') != nginxFinal or
+        facts.get('nginx', {}).get('final') != nginxFinal):
+    raise SystemExit('Acceptance facts final projection mismatch')
+PY
+  printf '%s\n' 'FINAL_ACCEPTANCE_FACTS_OK'
+}
+
 activate_public_candidate() {
   test -f "$CurrentAcceptedMarker"
   test ! -L "$CurrentAcceptedMarker"
   test "$(stat -c '%U:%G:%a:%h' "$CurrentAcceptedMarker")" = "root:root:600:1"
-  python3 - "$CurrentAcceptedMarker" "__RUN_ID__" "$ExpectedCandidateDigest" <<'PY'
+  assert_installed_parser_acceptance_binding
+  python3 - "$CurrentAcceptedMarker" "__RUN_ID__" "$ExpectedCandidateDigest" "$ReplayEvidenceSha" "$ParserEvidenceSha256" "$ParserRuntimeSha256" "$AcceptanceFactsSha256" <<'PY'
 import json
 import sys
-markerPath, runId, candidateSha256 = sys.argv[1:]
+markerPath, runId, candidateSha256, replayEvidenceSha256, parserEvidenceSha256, parserRuntimeSha256, acceptanceFactsSha256 = sys.argv[1:]
 with open(markerPath, encoding='utf-8') as handle:
     marker = json.load(handle)
 if marker.get('runId') != runId or marker.get('candidateSha256') != candidateSha256:
     raise SystemExit('Current accepted marker does not authorize this release')
+if (marker.get('schemaVersion') != 4 or marker.get('replayEvidenceSha256') != replayEvidenceSha256 or
+        marker.get('parserEvidenceSha256') != parserEvidenceSha256 or
+        marker.get('parserRuntimeSha256') != parserRuntimeSha256 or
+        marker.get('acceptanceFactsSha256') != acceptanceFactsSha256):
+    raise SystemExit('Current accepted marker does not bind parser acceptance')
 PY
   test "$(sha256sum "$StagedPublicNginx" | awk '{print $1}')" = "$(awk 'NR == 1 {print $1}' "$StagedPublicNginxSha")"
   cmp -s "$StagedPublicNginx" "$LiveDir/nginx/turingmarket.conf"
   install -m 0644 "$LiveDir/nginx/turingmarket.conf" /etc/nginx/sites-available/turingmarket
   ln -s /etc/nginx/sites-available/turingmarket "$LockDir/nginx-public.link"
+  public_release_guard verify-armed \
+    --state-file "$PublicGateGuard" \
+    --unit "$PublicGuardUnit" \
+    --controller-pid "$$" \
+    --controller-start-ticks "$CutoverControllerStartTicks" \
+    --deadline-epoch "$CutoverGuardDeadline" \
+    --drop-in "$PublicGuardDropIn"
   mv -Tf "$LockDir/nginx-public.link" /etc/nginx/sites-enabled/turingmarket
   nginx -t
   systemctl reload nginx
@@ -6598,8 +10712,12 @@ PY
 record_phase mutation-intent
 enter_all_traffic_maintenance
 record_phase maintenance-entered
+drain_admitted_http_connections
+drain_parser_appliance
 stop_and_quiesce_writers
+drain_parser_appliance
 record_phase writers-stopped
+prepare_ppt_cache_for_cutover
 create_cutover_snapshot
 record_phase snapshot-ready
 archive_prior_current_marker
@@ -6635,6 +10753,8 @@ if renameat2(-100, os.fsencode(live), -100, os.fsencode(candidate), RENAME_EXCHA
     raise OSError(ctypes.get_errno(), 'atomic release exchange failed')
 PY
 
+install_parser_appliance
+
 # INVALIDATE_SESSIONS
 cd "$LiveDir/server"
 node <<'NODE'
@@ -6655,17 +10775,19 @@ cd "$LiveDir"
 export SERVER_HOST=127.0.0.1
 pm2 restart ecosystem.config.js --only turingmarket --update-env || pm2 start ecosystem.config.js --only turingmarket --update-env
 
-for attempt in $(seq 1 __MAINTENANCE_TIMEOUT_SECONDS__); do
+for attempt in $(seq 1 __PARSER_STARTUP_TIMEOUT_SECONDS__); do
   if curl -fsS http://localhost:3002/api/health >/dev/null; then
     break
   fi
-  if [ "$attempt" = "__MAINTENANCE_TIMEOUT_SECONDS__" ]; then
+  if [ "$attempt" = "__PARSER_STARTUP_TIMEOUT_SECONDS__" ]; then
     echo "Health check failed after process restart" >&2
     exit 1
   fi
   sleep 1
 done
+verify_candidate_health
 printf '%s\n' 'LOOPBACK_CANDIDATE_HEALTH_OK'
+persist_pm2_dump
 
 expect_loopback_status() {
   expected="$1"
@@ -6727,9 +10849,12 @@ expect_loopback_stylesheet /client/styles/layout.css
 expect_loopback_status 404 /client/unknown.js
 expect_loopback_status 404 /server/server.js
 assert_staged_nginx_candidate_behavior
+StagedNginxBehaviorContract="tm-exact-public-nginx-v1"
 
 arm_one_request_release_replay
 record_phase release-replay-complete
+record_parser_acceptance_evidence
+record_acceptance_facts
 
 install -d -o root -g root -m 0700 "$AcceptedEvidenceRoot"
 test ! -e "$AcceptedEvidence"
@@ -6739,20 +10864,26 @@ python3 - \
   "__SOURCE_IDENTITY__" \
   "__SOURCE_SHA256__" \
   "$ExpectedCandidateDigest" \
-  "$ReplayEvidenceSha" <<'PY'
+  "$ReplayEvidenceSha" \
+  "$ParserEvidenceSha256" \
+  "$ParserRuntimeSha256" \
+  "$AcceptanceFactsSha256" <<'PY'
 import datetime
 import json
 import os
 import sys
 
-target, runId, sourceIdentity, sourceSha256, candidateSha256, replayEvidenceSha256 = sys.argv[1:]
+target, runId, sourceIdentity, sourceSha256, candidateSha256, replayEvidenceSha256, parserEvidenceSha256, parserRuntimeSha256, acceptanceFactsSha256 = sys.argv[1:]
 payload = {
-    'schemaVersion': 1,
+    'schemaVersion': 3,
     'runId': runId,
     'sourceIdentity': sourceIdentity,
     'sourceSha256': sourceSha256,
     'candidateSha256': candidateSha256,
     'replayEvidenceSha256': replayEvidenceSha256,
+    'parserEvidenceSha256': parserEvidenceSha256,
+    'parserRuntimeSha256': parserRuntimeSha256,
+    'acceptanceFactsSha256': acceptanceFactsSha256,
     'acceptedAt': datetime.datetime.now(datetime.timezone.utc).isoformat(),
 }
 descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -6770,7 +10901,35 @@ sync -f "$AcceptedEvidenceRoot"
 test "$(stat -c '%U:%G:%a:%h' "$AcceptedEvidence")" = "root:root:600:1"
 printf '%s\n' 'ACCEPTED_EVIDENCE_DURABLE'
 
-printf '%s\n' "$ExpectedCandidateDigest" > "$LockDir/accepted.next"
+python3 - \
+  "$LockDir/accepted.next" \
+  "__RUN_ID__" \
+  "$ExpectedCandidateDigest" \
+  "$ReplayEvidenceSha" \
+  "$ParserEvidenceSha256" \
+  "$ParserRuntimeSha256" \
+  "$AcceptanceFactsSha256" <<'PY'
+import json
+import os
+import sys
+
+target, runId, candidateSha256, replayEvidenceSha256, parserEvidenceSha256, parserRuntimeSha256, acceptanceFactsSha256 = sys.argv[1:]
+payload = {
+    'schemaVersion': 4,
+    'runId': runId,
+    'candidateSha256': candidateSha256,
+    'replayEvidenceSha256': replayEvidenceSha256,
+    'parserEvidenceSha256': parserEvidenceSha256,
+    'parserRuntimeSha256': parserRuntimeSha256,
+    'acceptanceFactsSha256': acceptanceFactsSha256,
+}
+descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+try:
+    os.write(descriptor, (json.dumps(payload, sort_keys=True, separators=(',', ':')) + '\n').encode('ascii'))
+    os.fsync(descriptor)
+finally:
+    os.close(descriptor)
+PY
 sync -f "$LockDir/accepted.next"
 mv -f "$LockDir/accepted.next" "$AcceptedMarker"
 sync -f "$AcceptedMarker"
@@ -6779,6 +10938,20 @@ record_phase accepted
 printf '%s\n' 'CURRENT_ACCEPTED_MARKER_DURABLE'
 sync -f "$LockDir"
 printf '%s\n' 'ACCEPTED_MARKER_DURABLE'
+CutoverControllerStartTicks="$(awk '{print $22}' "/proc/$$/stat")"
+CutoverGuardDeadline="$(( $(date +%s) + __PUBLIC_GUARD_TIMEOUT_SECONDS__ ))"
+public_gate_armed=1
+public_release_guard arm \
+  --state-file "$PublicGateGuard" \
+  --maintenance-source "$ApiGateConfig" \
+  --maintenance-config "$MaintenanceConfig" \
+  --recovery-link "$PublicGateRecoveryLink" \
+  --site-link /etc/nginx/sites-enabled/turingmarket \
+  --unit "$PublicGuardUnit" \
+  --controller-pid "$$" \
+  --controller-start-ticks "$CutoverControllerStartTicks" \
+  --deadline-epoch "$CutoverGuardDeadline" \
+  --drop-in "$PublicGuardDropIn"
 activate_public_candidate
 record_phase accepted-public-enabled
 expect_status() {
@@ -6841,6 +11014,15 @@ expect_stylesheet /client/styles/layout.css
 expect_status 404 /client/unknown.js
 expect_status 404 /server/server.js
 run_exact_public_nginx_gate - 80
+assert_final_acceptance_facts
+public_release_guard disarm \
+  --state-file "$PublicGateGuard" \
+  --unit "$PublicGuardUnit" \
+  --controller-pid "$$" \
+  --controller-start-ticks "$CutoverControllerStartTicks" \
+  --deadline-epoch "$CutoverGuardDeadline" \
+  --drop-in "$PublicGuardDropIn"
+public_gate_armed=0
 
 rm -f -- "$MaintenanceConfig"
 
@@ -6856,12 +11038,19 @@ echo "DEPLOY_OK"
     $cutoverGate = $cutoverGate.Replace('__CANDIDATE_DIR__', $remoteCandidateDir)
     $cutoverGate = $cutoverGate.Replace('__BACKUP_PATH__', $backupDir)
     $cutoverGate = $cutoverGate.Replace('__MAINTENANCE_TIMEOUT_SECONDS__', $MaintenanceTimeoutSeconds.ToString())
+    $cutoverGate = $cutoverGate.Replace('__PARSER_STARTUP_TIMEOUT_SECONDS__', $PARSER_STARTUP_TIMEOUT_SECONDS.ToString())
+    $cutoverGate = $cutoverGate.Replace('__PUBLIC_GUARD_TIMEOUT_SECONDS__', $PUBLIC_GUARD_TIMEOUT_SECONDS.ToString())
+    $cutoverGate = $cutoverGate.Replace('__HTTP_DRAIN_STABLE_SECONDS__', $HttpDrainStableSeconds.ToString())
     $cutoverGate = $cutoverGate.Replace('__LOCK_TOKEN__', $deploymentLockToken)
     $cutoverGate = $cutoverGate.Replace('__WRITER_TOKEN__', $deploymentWriterToken)
     $cutoverGate = $cutoverGate.Replace('__RUN_ID__', $deploymentRunId)
     $cutoverGate = $cutoverGate.Replace('__SOURCE_IDENTITY__', $deploymentSourceIdentity)
     $cutoverGate = $cutoverGate.Replace('__SOURCE_SHA256__', $deploymentSourceSha256)
+    $cutoverGate = $cutoverGate.Replace('__TRUSTED_SOURCE_BUNDLE__', $TRUSTED_SOURCE_BUNDLE_REMOTE_PATH)
+    $cutoverGate = $cutoverGate.Replace('__TRUSTED_PARSER_VERIFIER_SHA256__', $EXPECTED_TRUSTED_PARSER_VERIFIER_SHA256)
+    $cutoverGate = $cutoverGate.Replace('__TRUSTED_PUBLIC_GUARD_SHA256__', $EXPECTED_TRUSTED_PUBLIC_GUARD_SHA256)
     $cutoverGate = $cutoverGate.Replace('__EXACT_PUBLIC_NGINX_VERIFIER__', $exactPublicNginxVerifier)
+    $cutoverGate = $cutoverGate.Replace('__PM2_PERSISTENCE_VERIFIER__', $pm2PersistenceVerifier)
     Invoke-RemoteBash -Script $cutoverGate -FailureMessage "Remote atomic release failed" -RequireDeploymentLock
     Invoke-RemoteRetentionCleanup -BackupPath $backupDir -ReleaseRoot $remoteReleaseRoot
 
