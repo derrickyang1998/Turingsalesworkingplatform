@@ -5,8 +5,8 @@
   "files": {
     "indexHtml": {
       "source": "platform/index.html",
-      "sha256": "72e73124beb2ddfc8ffd79b3b1753cdefed8f5cbc87c241ca522898cf3e03d43",
-      "bytes": 99741
+      "sha256": "196c3f168916ba7465086b3a37b9f0d9e5ff9a99ce4331ec338cd83d8769f3b3",
+      "bytes": 98275
     },
     "appJs": {
       "source": "platform/app.js",
@@ -20,8 +20,8 @@
     },
     "buildInfoJs": {
       "source": "platform/client/shared/build_info.js",
-      "sha256": "7e09dcc4f0ef1c21933dfca8afde51f8516abf5fc3e0c9fa5c8fbf532b1cf54d",
-      "bytes": 390
+      "sha256": "6cf29222b1fd3e4eeba868ab2be17df4ea17fce73c7a030969d0f35df853d810",
+      "bytes": 379
     },
     "navigationJs": {
       "source": "platform/client/core/navigation.js",
@@ -68,241 +68,241 @@
       "method": "POST",
       "path": "/api/auth/login",
       "source": "platform/server/server.js",
-      "line": 874
+      "line": 888
     },
     {
       "method": "POST",
       "path": "/api/auth/logout",
       "source": "platform/server/server.js",
-      "line": 916
+      "line": 930
     },
     {
       "method": "GET",
       "path": "/api/auth/me",
       "source": "platform/server/server.js",
-      "line": 923
+      "line": 937
     },
     {
       "method": "POST",
       "path": "/api/demands",
       "source": "platform/server/server.js",
-      "line": 1041
+      "line": 1055
     },
     {
       "method": "GET",
       "path": "/api/demands",
       "source": "platform/server/server.js",
-      "line": 1056
+      "line": 1070
     },
     {
       "method": "POST",
       "path": "/api/proposals",
       "source": "platform/server/server.js",
-      "line": 1090
+      "line": 1104
     },
     {
       "method": "GET",
       "path": "/api/proposals",
       "source": "platform/server/server.js",
-      "line": 1105
+      "line": 1119
     },
     {
       "method": "POST",
       "path": "/api/token-usage",
       "source": "platform/server/server.js",
-      "line": 1115
+      "line": 1129
     },
     {
       "method": "GET",
       "path": "/api/token-usage",
       "source": "platform/server/server.js",
-      "line": 1123
+      "line": 1137
     },
     {
       "method": "GET",
       "path": "/api/admin/overview",
       "source": "platform/server/server.js",
-      "line": 1140
+      "line": 1154
     },
     {
       "method": "GET",
       "path": "/api/admin/users",
       "source": "platform/server/server.js",
-      "line": 1157
+      "line": 1171
     },
     {
       "method": "POST",
       "path": "/api/admin/users",
       "source": "platform/server/server.js",
-      "line": 1162
+      "line": 1176
     },
     {
       "method": "PUT",
       "path": "/api/admin/users/:id",
       "source": "platform/server/server.js",
-      "line": 1192
+      "line": 1206
     },
     {
       "method": "DELETE",
       "path": "/api/admin/users/:id",
       "source": "platform/server/server.js",
-      "line": 1212
+      "line": 1226
     },
     {
       "method": "POST",
       "path": "/api/admin/users/reset-password/:id",
       "source": "platform/server/server.js",
-      "line": 1231
+      "line": 1245
     },
     {
       "method": "POST",
       "path": "/api/admin/invites",
       "source": "platform/server/server.js",
-      "line": 1283
+      "line": 1297
     },
     {
       "method": "POST",
       "path": "/api/proposal/generate-ppt",
       "source": "platform/server/server.js",
-      "line": 1332
+      "line": 1346
     },
     {
       "method": "GET",
       "path": "/api/knowledge",
       "source": "platform/server/server.js",
-      "line": 1349
+      "line": 1363
     },
     {
       "method": "POST",
       "path": "/api/knowledge",
       "source": "platform/server/server.js",
-      "line": 1367
+      "line": 1381
     },
     {
       "method": "GET",
       "path": "/api/knowledge/search",
       "source": "platform/server/server.js",
-      "line": 1391
+      "line": 1405
     },
     {
       "method": "POST",
       "path": "/api/knowledge/ingest",
       "source": "platform/server/server.js",
-      "line": 1408
+      "line": 1422
     },
     {
       "method": "POST",
       "path": "/api/knowledge/upload",
       "source": "platform/server/server.js",
-      "line": 1437
+      "line": 1451
     },
     {
       "method": "POST",
       "path": "/api/influencers/upload",
       "source": "platform/server/server.js",
-      "line": 1493
+      "line": 1507
     },
     {
       "method": "POST",
       "path": "/api/admin/knowledge/import/obsidian",
       "source": "platform/server/server.js",
-      "line": 1534
+      "line": 1548
     },
     {
       "method": "POST",
       "path": "/api/admin/knowledge/vault/export",
       "source": "platform/server/server.js",
-      "line": 1550
+      "line": 1564
     },
     {
       "method": "GET",
       "path": "/api/knowledge/similar",
       "source": "platform/server/server.js",
-      "line": 1568
+      "line": 1582
     },
     {
       "method": "POST",
       "path": "/api/knowledge/:id/use",
       "source": "platform/server/server.js",
-      "line": 1577
+      "line": 1591
     },
     {
       "method": "POST",
       "path": "/api/ai/chat",
       "source": "platform/server/server.js",
-      "line": 1606
+      "line": 1620
     },
     {
       "method": "GET",
       "path": "/api/ai/conversations",
       "source": "platform/server/server.js",
-      "line": 1633
+      "line": 1647
     },
     {
       "method": "GET",
       "path": "/api/ai/conversations/:id",
       "source": "platform/server/server.js",
-      "line": 1650
+      "line": 1664
     },
     {
       "method": "POST",
       "path": "/api/ai/proposal-draft",
       "source": "platform/server/server.js",
-      "line": 1665
+      "line": 1679
     },
     {
       "method": "POST",
       "path": "/api/demand/parse-file",
       "source": "platform/server/server.js",
-      "line": 1703
+      "line": 1717
     },
     {
       "method": "POST",
       "path": "/api/ai/strategy",
       "source": "platform/server/server.js",
-      "line": 1745
+      "line": 1759
     },
     {
       "method": "POST",
       "path": "/api/ai/demand-analysis",
       "source": "platform/server/server.js",
-      "line": 1754
+      "line": 1768
     },
     {
       "method": "POST",
       "path": "/api/ai/ppt-outline",
       "source": "platform/server/server.js",
-      "line": 1784
+      "line": 1798
     },
     {
       "method": "GET",
       "path": "/api/knowledge/categories",
       "source": "platform/server/server.js",
-      "line": 1794
+      "line": 1808
     },
     {
       "method": "POST",
       "path": "/api/auth/register",
       "source": "platform/server/server.js",
-      "line": 1804
+      "line": 1818
     },
     {
       "method": "GET",
       "path": "/api/users",
       "source": "platform/server/server.js",
-      "line": 1835
+      "line": 1849
     },
     {
       "method": "GET",
       "path": "/api/health",
       "source": "platform/server/server.js",
-      "line": 1840
+      "line": 1854
     },
     {
       "method": "GET",
       "path": "/{*path}",
       "source": "platform/server/server.js",
-      "line": 1849
+      "line": 1872
     },
     {
       "method": "GET",
@@ -374,205 +374,205 @@
       "method": "GET",
       "path": "/api/leads",
       "source": "platform/server/routes_customers.js",
-      "line": 580
+      "line": 585
     },
     {
       "method": "POST",
       "path": "/api/leads",
       "source": "platform/server/routes_customers.js",
-      "line": 600
+      "line": 605
     },
     {
       "method": "PUT",
       "path": "/api/leads/:id",
       "source": "platform/server/routes_customers.js",
-      "line": 630
+      "line": 635
     },
     {
       "method": "POST",
       "path": "/api/leads/:id/convert",
       "source": "platform/server/routes_customers.js",
-      "line": 662
+      "line": 667
     },
     {
       "method": "GET",
       "path": "/api/customers",
-      "source": "platform/server/routes_customers.js",
-      "line": 679
-    },
-    {
-      "method": "GET",
-      "path": "/api/customers/stats",
       "source": "platform/server/routes_customers.js",
       "line": 684
     },
     {
       "method": "GET",
+      "path": "/api/customers/stats",
+      "source": "platform/server/routes_customers.js",
+      "line": 689
+    },
+    {
+      "method": "GET",
       "path": "/api/customers/:id/detail",
       "source": "platform/server/routes_customers.js",
-      "line": 688
+      "line": 693
     },
     {
       "method": "POST",
       "path": "/api/customers",
       "source": "platform/server/routes_customers.js",
-      "line": 692
+      "line": 697
     },
     {
       "method": "POST",
       "path": "/api/customers/:id/archive-result",
       "source": "platform/server/routes_customers.js",
-      "line": 696
+      "line": 701
     },
     {
       "method": "PUT",
       "path": "/api/customers/:id",
       "source": "platform/server/routes_customers.js",
-      "line": 705
+      "line": 710
     },
     {
       "method": "DELETE",
       "path": "/api/customers/:id",
       "source": "platform/server/routes_customers.js",
-      "line": 709
+      "line": 714
     },
     {
       "method": "POST",
       "path": "/api/customers/:id/assign",
       "source": "platform/server/routes_customers.js",
-      "line": 713
+      "line": 718
     },
     {
       "method": "POST",
       "path": "/api/customers/:id/return-pool",
       "source": "platform/server/routes_customers.js",
-      "line": 741
+      "line": 746
     },
     {
       "method": "POST",
       "path": "/api/customers/:id/return",
       "source": "platform/server/routes_customers.js",
-      "line": 745
+      "line": 750
     },
     {
       "method": "GET",
       "path": "/api/opportunities",
       "source": "platform/server/routes_customers.js",
-      "line": 749
+      "line": 754
     },
     {
       "method": "GET",
       "path": "/api/opportunities/:id/detail",
       "source": "platform/server/routes_customers.js",
-      "line": 755
+      "line": 760
     },
     {
       "method": "POST",
       "path": "/api/opportunities",
       "source": "platform/server/routes_customers.js",
-      "line": 759
+      "line": 764
     },
     {
       "method": "PUT",
       "path": "/api/opportunities/:id",
       "source": "platform/server/routes_customers.js",
-      "line": 763
+      "line": 768
     },
     {
       "method": "DELETE",
       "path": "/api/opportunities/:id",
       "source": "platform/server/routes_customers.js",
-      "line": 767
+      "line": 772
     },
     {
       "method": "GET",
       "path": "/api/sales-targets",
       "source": "platform/server/routes_customers.js",
-      "line": 775
+      "line": 780
     },
     {
       "method": "POST",
       "path": "/api/sales-targets",
       "source": "platform/server/routes_customers.js",
-      "line": 776
+      "line": 781
     },
     {
       "method": "GET",
       "path": "/api/sales-performance",
       "source": "platform/server/routes_customers.js",
-      "line": 777
+      "line": 782
     },
     {
       "method": "GET",
       "path": "/api/customers/sea-pool",
       "source": "platform/server/routes_customers.js",
-      "line": 779
+      "line": 784
     },
     {
       "method": "POST",
       "path": "/api/customers/:id/claim",
       "source": "platform/server/routes_customers.js",
-      "line": 789
+      "line": 794
     },
     {
       "method": "GET",
       "path": "/api/customers/dashboard",
       "source": "platform/server/routes_customers.js",
-      "line": 800
+      "line": 805
     },
     {
       "method": "GET",
       "path": "/api/dashboard/sales",
       "source": "platform/server/routes_customers.js",
-      "line": 810
+      "line": 815
     },
     {
       "method": "GET",
       "path": "/api/dashboard/stats",
       "source": "platform/server/routes_customers.js",
-      "line": 811
+      "line": 816
     },
     {
       "method": "POST",
       "path": "/api/customers/:customerId/contacts",
       "source": "platform/server/routes_customers.js",
-      "line": 813
+      "line": 818
     },
     {
       "method": "PUT",
       "path": "/api/customers/:customerId/contacts/:contactId",
       "source": "platform/server/routes_customers.js",
-      "line": 823
+      "line": 828
     },
     {
       "method": "POST",
       "path": "/api/customers/:customerId/contacts/:contactId/archive",
       "source": "platform/server/routes_customers.js",
-      "line": 834
+      "line": 839
     },
     {
       "method": "POST",
       "path": "/api/customers/:customerId/tasks",
       "source": "platform/server/routes_customers.js",
-      "line": 843
+      "line": 848
     },
     {
       "method": "POST",
       "path": "/api/customers/:customerId/tasks/:taskId/complete",
       "source": "platform/server/routes_customers.js",
-      "line": 865
+      "line": 870
     },
     {
       "method": "POST",
       "path": "/api/customers/:customerId/tasks/:taskId/cancel",
       "source": "platform/server/routes_customers.js",
-      "line": 869
+      "line": 874
     },
     {
       "method": "POST",
       "path": "/api/customers/:id/activity",
       "source": "platform/server/routes_customers.js",
-      "line": 873
+      "line": 878
     },
     {
       "method": "POST",
@@ -734,73 +734,73 @@
       "method": "GET",
       "path": "/index.html",
       "source": "platform/server/services/public_assets_service.js",
-      "line": 109
+      "line": 111
     },
     {
       "method": "GET",
       "path": "/app.js",
       "source": "platform/server/services/public_assets_service.js",
-      "line": 110
+      "line": 112
     },
     {
       "method": "GET",
       "path": "/ppt.js",
       "source": "platform/server/services/public_assets_service.js",
-      "line": 111
+      "line": 113
     },
     {
       "method": "GET",
       "path": "/client/shared/build_info.js",
       "source": "platform/server/services/public_assets_service.js",
-      "line": 112
+      "line": 114
     },
     {
       "method": "GET",
       "path": "/client/core/navigation.js",
       "source": "platform/server/services/public_assets_service.js",
-      "line": 113
+      "line": 115
     },
     {
       "method": "GET",
       "path": "/client/core/accessibility.js",
       "source": "platform/server/services/public_assets_service.js",
-      "line": 114
+      "line": 116
     },
     {
       "method": "GET",
       "path": "/client/core/shell.js",
       "source": "platform/server/services/public_assets_service.js",
-      "line": 115
+      "line": 117
     },
     {
       "method": "GET",
       "path": "/client/core/csp_compat.js",
       "source": "platform/server/services/public_assets_service.js",
-      "line": 116
+      "line": 118
     },
     {
       "method": "GET",
       "path": "/client/features/ppt_preview_runtime.js",
       "source": "platform/server/services/public_assets_service.js",
-      "line": 117
+      "line": 119
     },
     {
       "method": "GET",
       "path": "/client/styles/tokens.css",
       "source": "platform/server/services/public_assets_service.js",
-      "line": 118
+      "line": 120
     },
     {
       "method": "GET",
       "path": "/client/styles/components.css",
       "source": "platform/server/services/public_assets_service.js",
-      "line": 119
+      "line": 121
     },
     {
       "method": "GET",
       "path": "/client/styles/layout.css",
       "source": "platform/server/services/public_assets_service.js",
-      "line": 120
+      "line": 122
     }
   ],
   "duplicateInventory": {
@@ -820,10 +820,10 @@
         "column": 1,
         "loadOrder": 2,
         "occurrenceIndex": 2,
-        "globalIndex": 306
+        "globalIndex": 317
       }
     },
-    "sha256": "9b38a6a525956a398015680274ee2f16dfdf48baf1ad7c82f45d2e72fa90454e"
+    "sha256": "5c6a3f3a2d78f7ab60a4d33c33a80a5683df35b96cacff03f8d26768aa5eed60"
   },
   "activeDefinitions": {
     "rememberAuthContext": {

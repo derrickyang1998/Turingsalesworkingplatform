@@ -117,7 +117,14 @@ const OUTER_KEYS = Object.freeze([
 ]);
 
 const COMMAND_KEYS = Object.freeze({
-  customer: Object.freeze(['mode', 'customerId', 'sourceLeadId', 'values', 'transition']),
+  customer: Object.freeze([
+    'mode',
+    'customerId',
+    'sourceLeadId',
+    'expected_notes',
+    'values',
+    'transition'
+  ]),
   lifecycle: Object.freeze([
     'customerId',
     'to_stage',
@@ -250,6 +257,7 @@ const ERROR_DEFINITIONS = Object.freeze({
   CRM_CHILD_NOT_FOUND: Object.freeze({ status: 404, title: 'CRM child record was not found' }),
   CRM_CUSTOMER_FORBIDDEN: Object.freeze({ status: 403, title: 'CRM customer mutation is not allowed' }),
   CRM_CUSTOMER_DUPLICATE: Object.freeze({ status: 409, title: 'Customer identity conflicts with an existing record' }),
+  CRM_CUSTOMER_CONFLICT: Object.freeze({ status: 409, title: 'CRM customer changed' }),
   CRM_PUBLIC_POOL_UNAVAILABLE: Object.freeze({ status: 409, title: 'CRM public-pool customer is unavailable' }),
   CRM_CUSTODY_CONFLICT: Object.freeze({ status: 409, title: 'CRM customer custody changed' }),
   CRM_TRANSITION_INVALID: Object.freeze({ status: 409, title: 'CRM transition is not allowed' }),
@@ -319,6 +327,14 @@ function canonicalText(value, field, required = false) {
   }
   if (normalized.length > CUSTOMER_TEXT_LIMITS[field]) throw invalidMutation();
   return normalized;
+}
+
+function exactExpectedText(value, field) {
+  if (value === null) return null;
+  if (typeof value !== 'string' || value.length > CUSTOMER_TEXT_LIMITS[field]) {
+    throw invalidMutation();
+  }
+  return value;
 }
 
 function canonicalBoundedText(value, maximum, required = false) {
@@ -1090,6 +1106,13 @@ function createCustomer(db, context, input) {
 }
 
 function updateCustomer(db, context, input, customer, profileCommand = input.command, lifecycle = null) {
+  const hasExpectedNotes = Object.hasOwn(profileCommand, 'expected_notes');
+  const expectedNotes = hasExpectedNotes
+    ? exactExpectedText(profileCommand.expected_notes, 'notes')
+    : null;
+  if (hasExpectedNotes && customer.notes !== expectedNotes) {
+    throw mutationError('CRM_CUSTOMER_CONFLICT');
+  }
   const final = customerFinalState(profileCommand, customer, lifecycle);
   const duplicate = final.values.duplicate_enforced === 1
     ? duplicateDecision(
@@ -1126,6 +1149,7 @@ function updateCustomer(db, context, input, customer, profileCommand = input.com
               next_action_at=?,stage=?,normalized_identity_key=?,duplicate_enforced=?,
               updated_at=CURRENT_TIMESTAMP
           WHERE id=? AND org_id=? AND stage IS ?
+            AND (?=0 OR notes IS ?)
         `).run(
           ...profileValues,
           lifecycle.to_stage,
@@ -1133,7 +1157,9 @@ function updateCustomer(db, context, input, customer, profileCommand = input.com
           final.values.duplicate_enforced,
           customer.id,
           context.organization.id,
-          customer.stage
+          customer.stage,
+          hasExpectedNotes ? 1 : 0,
+          expectedNotes
         )
       : db.prepare(`
           UPDATE customers
@@ -1142,12 +1168,15 @@ function updateCustomer(db, context, input, customer, profileCommand = input.com
               next_action_at=?,normalized_identity_key=?,duplicate_enforced=?,
               updated_at=CURRENT_TIMESTAMP
           WHERE id=? AND org_id=?
+            AND (?=0 OR notes IS ?)
         `).run(
           ...profileValues,
           final.values.normalized_identity_key,
           final.values.duplicate_enforced,
           customer.id,
-          context.organization.id
+          context.organization.id,
+          hasExpectedNotes ? 1 : 0,
+          expectedNotes
         );
   } catch (error) {
     if (!isIdentityUniqueFailure(error)) throw error;
@@ -1162,6 +1191,7 @@ function updateCustomer(db, context, input, customer, profileCommand = input.com
     throw error;
   }
   if (updated.changes !== 1) {
+    if (hasExpectedNotes) throw mutationError('CRM_CUSTOMER_CONFLICT');
     throw lifecycle ? invalidTransition() : mutationError('CRM_MUTATION_FAILED');
   }
 

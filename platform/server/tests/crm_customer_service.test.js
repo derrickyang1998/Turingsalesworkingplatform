@@ -1066,6 +1066,44 @@ test('customer identity: update merges the final identity and rejects client cus
   assert.equal(db.prepare('SELECT assigned_to FROM customers WHERE id=?').get(IDS.ownedA).assigned_to, IDS.ownerA);
 });
 
+test('customer identity: expected notes guard rejects a stale write without changing the customer', (t) => {
+  const db = openFixture(t);
+  const before = db.prepare('SELECT notes FROM customers WHERE id=?').get(IDS.ownedA);
+  const first = service.createOrUpdateCustomer(db, {
+    actorUserId: IDS.ownerA,
+    organizationId: IDS.orgA,
+    requestId: 'notes-precondition-first',
+    correlationId: 'notes-precondition-flow',
+    command: {
+      mode: 'update',
+      customerId: IDS.ownedA,
+      expected_notes: before.notes,
+      values: { notes: 'release smoke marker' }
+    }
+  });
+  assert.equal(first.action, 'updated');
+
+  db.prepare('UPDATE customers SET notes=? WHERE id=?').run('concurrent customer notes', IDS.ownedA);
+  const stale = captureError(() => service.createOrUpdateCustomer(db, {
+    actorUserId: IDS.ownerA,
+    organizationId: IDS.orgA,
+    requestId: 'notes-precondition-stale',
+    correlationId: 'notes-precondition-flow',
+    command: {
+      mode: 'update',
+      customerId: IDS.ownedA,
+      expected_notes: 'release smoke marker',
+      values: { notes: before.notes }
+    }
+  }));
+  assert.equal(stale.code, 'CRM_CUSTOMER_CONFLICT');
+  assert.equal(stale.status, 409);
+  assert.equal(
+    db.prepare('SELECT notes FROM customers WHERE id=?').get(IDS.ownedA).notes,
+    'concurrent customer notes'
+  );
+});
+
 test('customer identity: another organization is neither a conflict nor an oracle', (t) => {
   const db = openFixture(t);
   const identity = buildCustomerIdentity({ brand_name: 'Cross Org Brand', company_name: 'Cross Org Company' }).key;

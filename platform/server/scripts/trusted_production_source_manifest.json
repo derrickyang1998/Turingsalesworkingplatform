@@ -57,7 +57,7 @@
     { "path": "server/services/campaign_workflow_service.js", "sha256": "ff67e787adfb649bef04b96842dc2209fb2dabcfd7df48b6bc2c8a0ee2d9bb57" },
     { "path": "server/services/crm_access_service.js", "sha256": "100f31b8bbd36d937b4cf8aa1730ffe980dcb03aa1eff9a8018913a7232f0218" },
     { "path": "server/services/crm_contract.js", "sha256": "b48a8f68b5ab589e9a1c118e2cd7cf760947e4139c3fc3695ce7f5a0b9b8326a" },
-    { "path": "server/services/crm_customer_service.js", "sha256": "83fff3df9bb051305dea95261e45193b5de17e27c5811cbbb12944871909058c" },
+    { "path": "server/services/crm_customer_service.js", "sha256": "69dd1231cd4225d4e6ad9d0b3cb5ed28b0c9a85f2e9c68a0561a0bfa139b3beb" },
     { "path": "server/services/crm_query_service.js", "sha256": "783f97a0d6df9f93c73debb106a8700e4b02d635b36b99cbf856aff4a0f7248b" },
     { "path": "server/services/crm_scope_service.js", "sha256": "311ddd96949bbc11474a185b6346f5d0f91c0f5e6ba163facd2aa7b3825854f6" },
     { "path": "server/services/idempotency_service.js", "sha256": "191bd5b55b3eb2565c7a8406e5e3921ef535b9859f1669652ba296f849c1e83d" },

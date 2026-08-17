@@ -602,6 +602,7 @@ test('crm http: customer mixed update becomes one atomic S4 command', async () =
     params: { id: '41' },
     body: {
       brand_name: 'Acme Next',
+      expected_notes: 'existing notes',
       stage: 'paused',
       reason_code: 'timeline_changed',
       next_action_at: '2099-01-01 09:00:00'
@@ -612,6 +613,7 @@ test('crm http: customer mixed update becomes one atomic S4 command', async () =
   assert.deepEqual(lastCall(harness, 'createOrUpdateCustomer').input.command, {
     mode: 'update',
     customerId: 41,
+    expected_notes: 'existing notes',
     values: { brand_name: 'Acme Next' },
     transition: {
       to_stage: 'paused',
@@ -784,6 +786,34 @@ test('crm http: known errors preserve status and bounded details without leaking
   assert.deepEqual(response.payload.conflict, { visibility: 'restricted' });
   assert.equal(response.payload.request_id, 'http-request');
   assert.doesNotMatch(JSON.stringify(response.payload), /SQLITE|private|secret@example/i);
+});
+
+test('crm http: stale customer preconditions serialize as a bounded conflict', async () => {
+  const harness = makeHarness({
+    crmCustomerService: {
+      createOrUpdateCustomer() {
+        const error = new Error('private concurrent value');
+        Object.assign(error, {
+          name: 'CrmMutationError',
+          code: 'CRM_CUSTOMER_CONFLICT',
+          status: 409,
+          title: 'CRM customer changed',
+          details: null
+        });
+        throw error;
+      }
+    }
+  });
+  const response = await harness.invoke('PUT /api/customers/:id', {
+    params: { id: '41' },
+    body: { notes: 'release marker', expected_notes: 'stale value' }
+  });
+  assert.equal(response.statusCode, 409);
+  assert.equal(response.contentType, 'application/problem+json');
+  assert.equal(response.payload.code, 'CRM_CUSTOMER_CONFLICT');
+  assert.equal(response.payload.title, 'CRM customer changed');
+  assert.equal(response.payload.request_id, 'http-request');
+  assert.doesNotMatch(JSON.stringify(response.payload), /private concurrent value/i);
 });
 
 test('crm http: invalid identifiers and conflicting read aliases fail before services', async () => {

@@ -90,6 +90,7 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
     'CRM_CHILD_NOT_FOUND',
     'CRM_CUSTOMER_FORBIDDEN',
     'CRM_CUSTOMER_DUPLICATE',
+    'CRM_CUSTOMER_CONFLICT',
     'CRM_PUBLIC_POOL_UNAVAILABLE',
     'CRM_CUSTODY_CONFLICT',
     'CRM_TRANSITION_INVALID',
@@ -113,6 +114,7 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
     CRM_CHILD_NOT_FOUND: 'CRM child record was not found',
     CRM_CUSTOMER_FORBIDDEN: 'CRM customer mutation is not allowed',
     CRM_CUSTOMER_DUPLICATE: 'Customer identity conflicts with an existing record',
+    CRM_CUSTOMER_CONFLICT: 'CRM customer changed',
     CRM_PUBLIC_POOL_UNAVAILABLE: 'CRM public-pool customer is unavailable',
     CRM_CUSTODY_CONFLICT: 'CRM customer custody changed',
     CRM_TRANSITION_INVALID: 'CRM transition is not allowed',
@@ -380,7 +382,8 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
     if (code === 'CRM_SCOPE_FORBIDDEN' || code === 'CRM_CUSTOMER_FORBIDDEN') return 403;
     if (code === 'CRM_SCOPE_NOT_FOUND' || code === 'CRM_CUSTOMER_NOT_FOUND' ||
         code === 'CRM_CHILD_NOT_FOUND') return 404;
-    if (code === 'CRM_CUSTOMER_DUPLICATE' || code === 'CRM_PUBLIC_POOL_UNAVAILABLE' ||
+    if (code === 'CRM_CUSTOMER_DUPLICATE' || code === 'CRM_CUSTOMER_CONFLICT' ||
+        code === 'CRM_PUBLIC_POOL_UNAVAILABLE' ||
         code === 'CRM_CUSTODY_CONFLICT' || code === 'CRM_TRANSITION_INVALID' ||
         code === 'CRM_HARD_DELETE_UNAVAILABLE' || code === 'CRM_SALES_SCOPE_UNAVAILABLE') return 409;
     if (code === 'CRM_STORAGE_BUSY') return 503;
@@ -506,6 +509,8 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
         next_action_at: compatibleTimestamp
       })
     };
+    const expectedNotes = ownValue(body, 'expected_notes');
+    if (expectedNotes.present) command.expected_notes = expectedNotes.value;
     const transition = customerTransition(body);
     if (transition) {
       command.transition = transition;
