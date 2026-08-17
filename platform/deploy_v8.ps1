@@ -7813,6 +7813,7 @@ TestRoot="$ReleaseRoot/tmp/deploy-v060-gate-__STAMP__"
 TestRootMaxBytes="6442450944"
 TestRootMaxInodes="262144"
 TestRootMounted=0
+ReleaseTraversalRelaxed=0
 DependencyCopyByteReserveFloor="536870912"
 DependencyCopyInodeReserveFloor="16384"
 DependencyCopyCleanupArmed=0
@@ -7958,6 +7959,37 @@ cleanup_candidate_dependency_copy() {
   return "$CleanupStatus"
 }
 
+restore_release_traversal() {
+  local CleanupStatus=0 ReleaseRootValid=0 ReleaseTmpValid=0
+  if [ "$ReleaseTraversalRelaxed" != "1" ]; then return 0; fi
+  if test -d "$ReleaseRoot" &&
+    test ! -L "$ReleaseRoot" &&
+    test "$(stat -c '%U:%G' "$ReleaseRoot" 2>/dev/null)" = "root:root"; then
+    ReleaseRootValid=1
+  else
+    CleanupStatus=1
+  fi
+  if [ "$ReleaseRootValid" = "1" ]; then
+    if [ -e "$ReleaseRoot/tmp" ] || [ -L "$ReleaseRoot/tmp" ]; then
+      if test -d "$ReleaseRoot/tmp" &&
+        test ! -L "$ReleaseRoot/tmp" &&
+        test "$(stat -c '%U:%G' "$ReleaseRoot/tmp" 2>/dev/null)" = "root:root"; then
+        ReleaseTmpValid=1
+      else
+        CleanupStatus=1
+      fi
+    fi
+  fi
+  if [ "$ReleaseTmpValid" = "1" ]; then
+    chmod 0700 "$ReleaseRoot/tmp" || CleanupStatus=1
+  fi
+  if [ "$ReleaseRootValid" = "1" ]; then
+    chmod 0700 "$ReleaseRoot" || CleanupStatus=1
+  fi
+  if [ "$CleanupStatus" = "0" ]; then ReleaseTraversalRelaxed=0; fi
+  return "$CleanupStatus"
+}
+
 cleanup_test_root() {
   local PreserveCandidateDependencies="${1:-0}" CleanupStatus=0
   case "$PreserveCandidateDependencies" in 0|1) ;;
@@ -7990,6 +8022,21 @@ cleanup_test_root() {
   else
     TestRootMounted=0
     rm -rf -- "$TestRoot" || CleanupStatus=1
+  fi
+  restore_release_traversal || CleanupStatus=1
+  if [ ! -e "$TestRoot" ] && [ ! -L "$TestRoot" ]; then
+    if [ -e "$ReleaseRoot/tmp" ] || [ -L "$ReleaseRoot/tmp" ]; then
+      if test -d "$ReleaseRoot" &&
+        test ! -L "$ReleaseRoot" &&
+        test "$(stat -c '%U:%G:%a' "$ReleaseRoot" 2>/dev/null)" = "root:root:700" &&
+        test -d "$ReleaseRoot/tmp" &&
+        test ! -L "$ReleaseRoot/tmp" &&
+        test "$(stat -c '%U:%G:%a' "$ReleaseRoot/tmp" 2>/dev/null)" = "root:root:700"; then
+        rmdir -- "$ReleaseRoot/tmp" || CleanupStatus=1
+      else
+        CleanupStatus=1
+      fi
+    fi
   fi
   return "$CleanupStatus"
 }
@@ -8075,6 +8122,18 @@ assert_canonical_candidate
 runuser -u "$GateUser" -- test ! -r "$ProductionBackupDb"
 runuser -u "$GateUser" -- test ! -r "$ProductionLiveDb"
 command -v ip >/dev/null
+test "$(stat -c '%U:%G:%a' "$ReleaseRoot")" = "root:root:700"
+test "$(stat -c '%U:%G:%a' "$ReleaseRoot/tmp")" = "root:root:700"
+test "$(stat -c '%U:%G:%a' "$CandidateDir")" = "root:root:700"
+ReleaseTraversalRelaxed=1
+chmod 0711 "$ReleaseRoot"
+chmod 0711 "$ReleaseRoot/tmp"
+runuser -u "$GateUser" -- test -x "$ReleaseRoot"
+runuser -u "$GateUser" -- test ! -r "$ReleaseRoot"
+runuser -u "$GateUser" -- test -x "$ReleaseRoot/tmp"
+runuser -u "$GateUser" -- test ! -r "$ReleaseRoot/tmp"
+runuser -u "$GateUser" -- test ! -r "$CandidateDir"
+runuser -u "$GateUser" -- test -d "$DependencyStageRoot"
 
 set +e
 timeout --signal=KILL 20m systemd-run --quiet --wait --pipe --unit="$DependencyUnit" \

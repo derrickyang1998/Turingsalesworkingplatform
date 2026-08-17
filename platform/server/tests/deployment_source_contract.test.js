@@ -1695,6 +1695,25 @@ test('candidate dependency and test writes are confined to a verified aggregate 
   assert.match(gate, /TestRootMaxInodes="262144"/);
   assert.match(gate, /mount -t tmpfs -o "nodev,nosuid,size=\$TestRootMaxBytes,nr_inodes=\$TestRootMaxInodes/);
   assert.match(gate, /findmnt -n -o FSTYPE --target "\$TestRoot"/);
+  assert.match(gate, /ReleaseTraversalRelaxed=0/);
+  assert.match(gate, /chmod 0711 "\$ReleaseRoot"/);
+  assert.match(gate, /ReleaseTraversalRelaxed=1/);
+  assert.match(gate, /chmod 0711 "\$ReleaseRoot\/tmp"/);
+  assert.match(gate, /runuser -u "\$GateUser" -- test ! -r "\$CandidateDir"/);
+  assert.match(gate, /runuser -u "\$GateUser" -- test -d "\$DependencyStageRoot"/);
+  assert.match(gate, /restore_release_traversal\(\)/);
+  assert.match(gate, /ReleaseRootValid=0/);
+  assert.match(gate, /ReleaseTmpValid=0/);
+  assert.match(
+    gate,
+    /if \[ "\$ReleaseRootValid" = "1" \]; then\s+if \[ -e "\$ReleaseRoot\/tmp" \] \|\| \[ -L "\$ReleaseRoot\/tmp" \]; then/
+  );
+  assert.match(gate, /chmod 0700 "\$ReleaseRoot\/tmp"/);
+  assert.match(gate, /chmod 0700 "\$ReleaseRoot"/);
+  assert.match(
+    gate,
+    /if test -d "\$ReleaseRoot" &&\s+test ! -L "\$ReleaseRoot" &&\s+test "\$\(stat -c '%U:%G:%a' "\$ReleaseRoot" 2>\/dev\/null\)" = "root:root:700" &&\s+test -d "\$ReleaseRoot\/tmp" &&\s+test ! -L "\$ReleaseRoot\/tmp" &&\s+test "\$\(stat -c '%U:%G:%a' "\$ReleaseRoot\/tmp" 2>\/dev\/null\)" = "root:root:700"; then\s+rmdir -- "\$ReleaseRoot\/tmp" \|\| CleanupStatus=1\s+else\s+CleanupStatus=1\s+fi/
+  );
   assert.match(gate, /df -B1 --output=size "\$TestRoot"/);
   assert.match(gate, /df --output=itotal "\$TestRoot"/);
   assert.doesNotMatch(gate, /df -i --output=itotal/);
@@ -1727,6 +1746,15 @@ test('candidate dependency and test writes are confined to a verified aggregate 
   assert.match(gate, /trap 'cleanup_candidate_gate \$\?' EXIT/);
   assert.match(gate, /umount -- "\$TestRoot"/);
   assert.match(gate, /mountpoint -q "\$TestRoot"/);
+  assert.ok(
+    gate.indexOf('ReleaseTraversalRelaxed=1') <
+      gate.indexOf('chmod 0711 "$ReleaseRoot"') &&
+      gate.indexOf('chmod 0711 "$ReleaseRoot"') <
+        gate.indexOf('chmod 0711 "$ReleaseRoot/tmp"') &&
+      gate.indexOf('chmod 0711 "$ReleaseRoot/tmp"') <
+      gate.indexOf('systemd-run --quiet --wait --pipe --unit="$DependencyUnit"'),
+    'candidate release traversal cleanup must be armed before admission and before the unprivileged dependency unit starts'
+  );
   assert.ok(gate.indexOf('mount -t tmpfs') < gate.indexOf('npm ci --ignore-scripts'));
   assert.ok(gate.indexOf('test "$TargetAvailableBytes" -ge "$DependencyCopyRequiredBytes"') < gate.indexOf('cp -a -- "$DependencyRoot/node_modules"'));
   assert.ok(gate.lastIndexOf('\nif ! cleanup_test_root 1; then\n') > gate.indexOf('TM_UNPRIVILEGED_GATE'));
