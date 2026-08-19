@@ -46,3 +46,18 @@ Status: implemented
 - Transactionality: ingest failure aborts before `completeAdmissionInTransaction`; focused rollback test verifies admission is not completed.
 - Dedupe: repeat same owner plus same file bytes reuses one entry and leaves one chunk and one FTS row.
 - Response compatibility: legacy fields are preserved; only `knowledge.archivedEntryId` is additive.
+
+## Review Fix: Unicode Summary Truncation
+
+- Reviewer finding: `compactDemandArchiveText` used UTF-16 slicing and could split an astral character, leaving an isolated surrogate rejected by knowledge validation.
+- RED command: `node --test --test-name-pattern "demand parsing archives long Unicode summaries" tests\phase4_server_integration.test.js`
+- RED result: failed as expected with 500 response body `{"error":"knowledge summary contains an isolated Unicode surrogate"}`.
+- Fix: changed demand archive summary truncation to count code points with `Array.from(text)` before slicing and joining.
+- Regression command: `node --test --test-name-pattern "demand parsing archives long Unicode summaries" tests\phase4_server_integration.test.js`
+- Regression result: pass. 1 test passed, 0 failed.
+- Focused command: `node --test --test-name-pattern "demand parsing archives|demand parsing reuses|demand parsing keeps|demand parsing rolls back" tests\phase4_server_integration.test.js`
+- Focused result: pass. 6 tests passed, 0 failed.
+- Syntax commands: `node --check platform\server\server.js`; `node --check platform\server\tests\phase4_server_integration.test.js`
+- Syntax result: both pass, no output.
+- Diff check: `git diff --check -- platform\server\server.js platform\server\tests\phase4_server_integration.test.js`
+- Diff check result: pass, no output.

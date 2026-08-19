@@ -653,8 +653,9 @@ function compactDemandArchiveText(value, maxLength) {
   const text = String(value === undefined || value === null ? '' : value)
     .replace(/\s+/g, ' ')
     .trim();
-  if (!maxLength || text.length <= maxLength) return text;
-  return text.slice(0, maxLength - 1) + '...';
+  const points = Array.from(text);
+  if (!maxLength || points.length <= maxLength) return text;
+  return points.slice(0, maxLength - 1).join('') + '...';
 }
 
 function ownerScopedDemandFileDigest(ownerId, fileSha256) {

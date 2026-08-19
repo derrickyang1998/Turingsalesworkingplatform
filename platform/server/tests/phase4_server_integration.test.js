@@ -2104,6 +2104,38 @@ test('demand parsing archives a private requirement sheet and returns its knowle
   }
 });
 
+test('demand parsing archives long Unicode summaries without splitting astral characters', {
+  timeout: 30000
+}, async () => {
+  const server = await startTestServer('tm-phase6-demand-unicode-summary-');
+  try {
+    const login = await loginAdmin(server);
+    const astral = '🧪';
+    const content = `${'A'.repeat(238)}${astral}${'Z'.repeat(40)}`;
+    const uploaded = await uploadDemandFile(server, login.body.token, 'demand-unicode-summary', {
+      name: 'unicode-demand.txt',
+      type: 'text/plain',
+      bytes: Buffer.from(content, 'utf8')
+    });
+    assert.equal(uploaded.response.status, 200, uploaded.text + '\n' + server.output());
+
+    const inspection = new Database(server.dbPath, { readonly: true });
+    try {
+      const archived = readDemandArchive(inspection, uploaded.body.knowledge.archivedEntryId);
+      assert.equal(archived.summary, `${'A'.repeat(238)}${astral}...`);
+      assert.equal([...archived.summary].length, 242);
+      for (const point of archived.summary) {
+        const codePoint = point.codePointAt(0);
+        assert.ok(codePoint < 0xd800 || codePoint > 0xdfff);
+      }
+    } finally {
+      inspection.close();
+    }
+  } finally {
+    await server.close();
+  }
+});
+
 test('demand parsing reuses the same private archive for the same owner and file bytes', {
   timeout: 30000
 }, async () => {
