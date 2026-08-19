@@ -649,6 +649,71 @@ function sandboxWarning(data) {
   return data.warning || undefined;
 }
 
+function compactDemandArchiveText(value, maxLength) {
+  const text = String(value === undefined || value === null ? '' : value)
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!maxLength || text.length <= maxLength) return text;
+  return text.slice(0, maxLength - 1) + '...';
+}
+
+function ownerScopedDemandFileDigest(ownerId, fileSha256) {
+  const digest = crypto
+    .createHash('sha256')
+    .update('tm-demand-file-upload-owner-digest-v1')
+    .update('\0')
+    .update(String(ownerId))
+    .update('\0')
+    .update(String(fileSha256 || ''))
+    .digest('hex');
+  return `tm-demand-file-upload-owner-digest-v1:${digest}`;
+}
+
+function archiveDemandParseResult(dbHandle, req, data) {
+  const warning = sandboxWarning(data);
+  const qualityState = data.fallback || data.needsOcr || warning
+    ? 'needs_review'
+    : 'parsed';
+  const fileSha256 = req.file.sha256;
+  const sourceHash = ownerScopedDemandFileDigest(req.user.id, fileSha256);
+  const content = String(data.text || '');
+  return knowledgeService.ingestKnowledge(dbHandle, {
+    title: 'Requirement sheet: ' + (req.file.originalname || 'upload'),
+    summary: compactDemandArchiveText(content, 240),
+    content,
+    entry_type: 'requirement_sheet',
+    source_type: 'demand_file_upload',
+    source_id: sourceHash,
+    source_hash: sourceHash,
+    allow_source_hash: true,
+    visibility: 'private',
+    tags: [
+      'demand',
+      'requirement_sheet',
+      'demand_file_upload',
+      data.parser || ''
+    ],
+    business_type: 'demand',
+    business_id: sourceHash,
+    created_by: req.user.id,
+    actor_role: req.user.role,
+    metadata: {
+      filename: req.file.originalname,
+      mime: req.file.mimetype,
+      size: req.file.size,
+      file_sha256: fileSha256,
+      parser: data.parser || null,
+      fallback: Boolean(data.fallback),
+      needs_ocr: Boolean(data.needsOcr),
+      ocr_used: Boolean(data.ocrUsed),
+      warning: warning || null,
+      quality_state: qualityState,
+      retention_class: 'business_source',
+      citation_count: 0
+    }
+  });
+}
+
 function projectKnowledgeUpload(req, parsed, actor) {
   const data = parsed && parsed.data ? parsed.data : {};
   const rows = Array.isArray(data.rows) ? data.rows : [];
@@ -1701,6 +1766,7 @@ app.post('/api/demand/parse-file', authMiddleware, async (req, res) => {
       assertAuthorized: () => assertUploadAuthorityFresh(authority),
       finalize(parsed, lifecycle) {
         const data = parsed && parsed.data ? parsed.data : {};
+        let archivedKnowledge;
         const response = {
           fileName: req.file.originalname,
           extractedText: data.text,
@@ -1717,8 +1783,12 @@ app.post('/api/demand/parse-file', authMiddleware, async (req, res) => {
         };
         db.transaction(() => {
           authority.readFresh(db);
+          archivedKnowledge = archiveDemandParseResult(db, req, data);
           lifecycle.completeAdmissionInTransaction(db);
         }).immediate();
+        response.knowledge = {
+          archivedEntryId: archivedKnowledge.id
+        };
         return response;
       }
     });

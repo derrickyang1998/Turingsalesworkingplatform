@@ -1984,52 +1984,109 @@ test('influencer import rolls back when parser admission completion conflicts', 
   }
 });
 
-test('demand parsing completes admission without writing business knowledge', {
+async function loginAdmin(server) {
+  const login = await jsonRequest(server.baseUrl, '/api/auth/login', {
+    method: 'POST',
+    body: { username: 'admin', password: 'AdminTest1!Secure' }
+  });
+  assert.equal(login.response.status, 200, login.text + '\n' + server.output());
+  return login;
+}
+
+async function uploadDemandFile(server, token, label, file) {
+  return multipartRequest(
+    server.baseUrl,
+    '/api/demand/parse-file',
+    {
+      token,
+      headers: { 'X-Request-Id': label },
+      file
+    }
+  );
+}
+
+function readDemandArchive(db, entryId) {
+  return db.prepare(`
+    SELECT id,entry_type,source_type,source_id,title,summary,content,
+      created_by,visibility,is_public,tags_json,source_hash,business_type,
+      business_id,metadata_json
+    FROM knowledge_entries
+    WHERE id=?
+  `).get(entryId);
+}
+
+function demandArchiveCounts(db) {
+  return {
+    entries: db.prepare(`
+      SELECT COUNT(*) AS count FROM knowledge_entries
+      WHERE source_type='demand_file_upload'
+    `).get().count,
+    chunks: db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM knowledge_chunks chunk
+      JOIN knowledge_entries entry ON entry.id=chunk.entry_id
+      WHERE entry.source_type='demand_file_upload'
+    `).get().count,
+    fts: db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM knowledge_chunks_fts fts
+      JOIN knowledge_entries entry ON entry.id=fts.entry_id
+      WHERE entry.source_type='demand_file_upload'
+    `).get().count
+  };
+}
+
+test('demand parsing archives a private requirement sheet and returns its knowledge ID', {
   timeout: 30000
 }, async () => {
-  const server = await startTestServer('tm-phase4-demand-sandbox-');
+  const server = await startTestServer('tm-phase6-demand-archive-');
   try {
-    const login = await jsonRequest(server.baseUrl, '/api/auth/login', {
-      method: 'POST',
-      body: { username: 'admin', password: 'AdminTest1!Secure' }
+    const login = await loginAdmin(server);
+    const bytes = Buffer.from('Brand: Northstar\nBudget: 50000\nMarket: US', 'utf8');
+    const uploaded = await uploadDemandFile(server, login.body.token, 'demand-archive-success', {
+      name: 'demand.txt',
+      type: 'text/plain',
+      bytes
     });
-    assert.equal(login.response.status, 200, login.text + '\n' + server.output());
-    const beforeDb = new Database(server.dbPath, { readonly: true });
-    const beforeKnowledge = beforeDb.prepare('SELECT COUNT(*) AS count FROM knowledge_entries').get().count;
-    beforeDb.close();
-
-    const uploaded = await multipartRequest(
-      server.baseUrl,
-      '/api/demand/parse-file',
-      {
-        token: login.body.token,
-        headers: { 'X-Request-Id': 'demand-sandbox-success' },
-        file: {
-          name: 'demand.txt',
-          type: 'text/plain',
-          bytes: Buffer.from('Brand: Northstar\nBudget: 50000\nMarket: US', 'utf8')
-        }
-      }
-    );
     assert.equal(uploaded.response.status, 200, uploaded.text + '\n' + server.output());
-    assert.deepEqual(Object.keys(uploaded.body), [
-      'fileName',
-      'extractedText',
-      'analysisHint',
-      'fallback',
-      'parser',
-      'needsOcr',
-      'ocrUsed'
-    ]);
     assert.equal(uploaded.body.fileName, 'demand.txt');
     assert.match(uploaded.body.extractedText, /Northstar/);
+    assert.equal(uploaded.body.fallback, false);
+    assert.equal(uploaded.body.parser, 'plain-text');
+    assert.equal(uploaded.body.needsOcr, false);
+    assert.equal(uploaded.body.ocrUsed, false);
+    assert.ok(Number.isSafeInteger(uploaded.body.knowledge.archivedEntryId));
 
     const inspection = new Database(server.dbPath, { readonly: true });
     try {
-      assert.equal(
-        inspection.prepare('SELECT COUNT(*) AS count FROM knowledge_entries').get().count,
-        beforeKnowledge
-      );
+      const archived = readDemandArchive(inspection, uploaded.body.knowledge.archivedEntryId);
+      assert.equal(archived.entry_type, 'requirement_sheet');
+      assert.equal(archived.source_type, 'demand_file_upload');
+      assert.equal(archived.visibility, 'private');
+      assert.equal(archived.is_public, 0);
+      assert.equal(archived.business_type, 'demand');
+      assert.equal(archived.created_by, login.body.user.id);
+      assert.match(archived.content, /Budget: 50000/);
+      assert.match(archived.summary, /Northstar/);
+      assert.notEqual(archived.source_hash, crypto.createHash('sha256').update(bytes).digest('hex'));
+      const tags = JSON.parse(archived.tags_json);
+      assert.ok(tags.includes('demand'));
+      assert.ok(tags.includes('requirement_sheet'));
+      assert.ok(tags.includes('demand_file_upload'));
+      assert.deepEqual(JSON.parse(archived.metadata_json), {
+        filename: 'demand.txt',
+        mime: 'text/plain',
+        size: bytes.length,
+        file_sha256: crypto.createHash('sha256').update(bytes).digest('hex'),
+        parser: 'plain-text',
+        fallback: false,
+        needs_ocr: false,
+        ocr_used: false,
+        warning: null,
+        quality_state: 'parsed',
+        retention_class: 'business_source',
+        citation_count: 0
+      });
       assert.deepEqual(inspection.prepare(`
         SELECT state,status_code,response_kind
         FROM request_idempotency
@@ -2039,6 +2096,186 @@ test('demand parsing completes admission without writing business knowledge', {
         status_code: 200,
         response_kind: 'admission'
       });
+    } finally {
+      inspection.close();
+    }
+  } finally {
+    await server.close();
+  }
+});
+
+test('demand parsing reuses the same private archive for the same owner and file bytes', {
+  timeout: 30000
+}, async () => {
+  const server = await startTestServer('tm-phase6-demand-dedupe-');
+  try {
+    const login = await loginAdmin(server);
+    const bytes = Buffer.from('Brand: Polaris\nBudget: 88000\nMarket: CA', 'utf8');
+    const first = await uploadDemandFile(server, login.body.token, 'demand-dedupe-first', {
+      name: 'brief-a.txt',
+      type: 'text/plain',
+      bytes
+    });
+    assert.equal(first.response.status, 200, first.text + '\n' + server.output());
+    const second = await uploadDemandFile(server, login.body.token, 'demand-dedupe-second', {
+      name: 'renamed-brief.txt',
+      type: 'text/plain',
+      bytes
+    });
+    assert.equal(second.response.status, 200, second.text + '\n' + server.output());
+    assert.equal(second.body.knowledge.archivedEntryId, first.body.knowledge.archivedEntryId);
+
+    const inspection = new Database(server.dbPath, { readonly: true });
+    try {
+      assert.deepEqual(demandArchiveCounts(inspection), {
+        entries: 1,
+        chunks: 1,
+        fts: 1
+      });
+      const archived = readDemandArchive(inspection, first.body.knowledge.archivedEntryId);
+      assert.equal(JSON.parse(archived.metadata_json).filename, 'renamed-brief.txt');
+    } finally {
+      inspection.close();
+    }
+  } finally {
+    await server.close();
+  }
+});
+
+test('demand parsing keeps same file bytes private per user', {
+  timeout: 30000
+}, async () => {
+  const server = await startTestServer('tm-phase6-demand-owner-scope-');
+  try {
+    const admin = await loginAdmin(server);
+    const created = await jsonRequest(server.baseUrl, '/api/admin/users', {
+      method: 'POST',
+      token: admin.body.token,
+      body: {
+        username: 'demand-owner-scope',
+        password: 'DemandOwner1!Safe',
+        display_name: 'Demand Owner Scope',
+        role: 'user',
+        department: 'Sales',
+        email: 'demand-owner-scope@example.invalid'
+      }
+    });
+    assert.equal(created.response.status, 200, created.text);
+    const other = await jsonRequest(server.baseUrl, '/api/auth/login', {
+      method: 'POST',
+      body: { username: 'demand-owner-scope', password: 'DemandOwner1!Safe' }
+    });
+    assert.equal(other.response.status, 200, other.text + '\n' + server.output());
+
+    const bytes = Buffer.from('Brand: SharedBytes\nBudget: 42000\nMarket: UK', 'utf8');
+    const adminUpload = await uploadDemandFile(server, admin.body.token, 'demand-owner-admin', {
+      name: 'shared.txt',
+      type: 'text/plain',
+      bytes
+    });
+    assert.equal(adminUpload.response.status, 200, adminUpload.text + '\n' + server.output());
+    const userUpload = await uploadDemandFile(server, other.body.token, 'demand-owner-user', {
+      name: 'shared-renamed.txt',
+      type: 'text/plain',
+      bytes
+    });
+    assert.equal(userUpload.response.status, 200, userUpload.text + '\n' + server.output());
+    assert.notEqual(userUpload.body.knowledge.archivedEntryId, adminUpload.body.knowledge.archivedEntryId);
+
+    const inspection = new Database(server.dbPath, { readonly: true });
+    try {
+      const rows = inspection.prepare(`
+        SELECT id,created_by,visibility,source_hash
+        FROM knowledge_entries
+        WHERE source_type='demand_file_upload'
+        ORDER BY id
+      `).all();
+      assert.equal(rows.length, 2);
+      assert.deepEqual(rows.map((row) => row.created_by), [admin.body.user.id, other.body.user.id]);
+      assert.deepEqual(rows.map((row) => row.visibility), ['private', 'private']);
+      assert.notEqual(rows[0].source_hash, rows[1].source_hash);
+    } finally {
+      inspection.close();
+    }
+  } finally {
+    await server.close();
+  }
+});
+
+test('demand parsing archives fallback or warning parses as needs review', {
+  timeout: 30000
+}, async () => {
+  const server = await startTestServer('tm-phase6-demand-needs-review-');
+  try {
+    const login = await loginAdmin(server);
+    const png = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=',
+      'base64'
+    );
+    const uploaded = await uploadDemandFile(server, login.body.token, 'demand-needs-review', {
+      name: 'scan.png',
+      type: 'image/png',
+      bytes: png
+    });
+    assert.equal(uploaded.response.status, 200, uploaded.text + '\n' + server.output());
+    assert.equal(uploaded.body.fallback, true);
+
+    const inspection = new Database(server.dbPath, { readonly: true });
+    try {
+      const archived = readDemandArchive(inspection, uploaded.body.knowledge.archivedEntryId);
+      const metadata = JSON.parse(archived.metadata_json);
+      assert.equal(metadata.quality_state, 'needs_review');
+      assert.equal(metadata.retention_class, 'business_source');
+      assert.equal(metadata.citation_count, 0);
+      assert.equal(archived.entry_type, 'requirement_sheet');
+    } finally {
+      inspection.close();
+    }
+  } finally {
+    await server.close();
+  }
+});
+
+test('demand parsing rolls back admission completion when archive ingest fails', {
+  timeout: 30000
+}, async () => {
+  const server = await startTestServer('tm-phase6-demand-archive-rollback-');
+  try {
+    const login = await loginAdmin(server);
+    const setup = new Database(server.dbPath);
+    try {
+      setup.exec(`
+        CREATE TRIGGER fail_demand_archive_insert
+        BEFORE INSERT ON knowledge_entries
+        WHEN NEW.source_type='demand_file_upload'
+        BEGIN
+          SELECT RAISE(ABORT,'forced demand archive failure');
+        END
+      `);
+    } finally {
+      setup.close();
+    }
+
+    const uploaded = await uploadDemandFile(server, login.body.token, 'demand-archive-rollback', {
+      name: 'rollback-demand.txt',
+      type: 'text/plain',
+      bytes: Buffer.from('Brand: Rollback\nBudget: 100\nMarket: US', 'utf8')
+    });
+    assert.equal(uploaded.response.status, 500, uploaded.text);
+
+    const inspection = new Database(server.dbPath, { readonly: true });
+    try {
+      assert.equal(
+        inspection.prepare(`
+          SELECT COUNT(*) AS count FROM knowledge_entries
+          WHERE source_type='demand_file_upload'
+        `).get().count,
+        0
+      );
+      assert.equal(inspection.prepare(`
+        SELECT state FROM request_idempotency
+        WHERE scope='parser.demand-parse.admission'
+      `).get().state, 'failed');
     } finally {
       inspection.close();
     }
