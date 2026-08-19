@@ -7,9 +7,14 @@
 - 需求分析的检索查询与 JSON 指令分离，避免长系统指令耗尽检索词预算；不再用文件名或默认业务类型错误收窄知识范围，团队知识可命中，其他用户的私有知识保持不可见。
 - 保留既有 `analysis`、`fallback`、`warning` 响应；新增 `ai` 审计投影，并保留模型降级及非 JSON 响应的安全原因。`prompt` 与上传内容同时存在时不再丢失上传内容。
 
+### PPT 大纲审计链 / Auditable PPT Outline
+- `/api/ai/ppt-outline` 现在通过同一知识优先 AI 服务生成大纲，持久化对话、消息、模型、Token、知识引用、联网来源和自动摘要；现有 `ppt_outline` 知识归档继续保存本次审计引用及 AI 会话/消息标识。
+- 保留联网搜索默认开启的既有行为，并支持 `allow_web=false` 显式关闭；关闭时不调用联网 provider、不保存联网引用，开启时把 Tavily 结果写入审计引用。
+- 保留 `outline`、`knowledge_references`、`research`、`fallback`、`warning` 响应和现有客户版大纲降级结构，仅新增 `ai` 审计投影；知识检索查询与 JSON 格式指令分离，私有知识保持隔离。
+
 ### 验证与状态 / Verification And Status
 - 新增真实临时 SQLite 集成回归，覆盖知识权限、对话与消息持久化、知识/联网引用、关闭联网时零 provider 调用、降级兼容和路由参数传递。
-- 聚焦矩阵 `18/18`、四个变更 JavaScript 文件语法、`git diff --check`、密钥扫描与 UTF-8 替换字符检查通过；独立终审为 `APPROVE`。
+- 需求分析切片聚焦矩阵 `18/18`；加入 PPT 审计链后聚焦矩阵 `22/22`。变更 JavaScript 语法、`git diff --check`、密钥扫描与 UTF-8 替换字符检查通过；两次独立终审均为 `APPROVE`。
 - 本条目是阶段 6 的开发检查点，不代表生产发布。阶段 5 v0.6 完成受控切换、生产登录和 CRM 冒烟后，本切片才进入独立备份、部署与线上需求分析验收。
 
 ---

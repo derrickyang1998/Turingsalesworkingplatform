@@ -3,8 +3,6 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 const knowledgeService = require('./knowledge_service');
 const llm = require('./llm_service');
-const rag = require('./rag_service');
-const webSearch = require('./web_search_service');
 
 const TEXT_EXTS = new Set(['.txt', '.md', '.csv', '.json']);
 const DOC_EXTS = new Set(['.pdf', '.docx', '.pptx']);
@@ -294,37 +292,62 @@ function buildPptOutlineFallback(demand, proposal, reason, research) {
   return { title: brand + ' 海外红人营销方案', subtitle: product + ' / ' + market, sections: base, research };
 }
 
-async function generatePptOutline(db, user, body) {
+function booleanOption(value, fallback) {
+  if (value === undefined || value === null || value === '') return fallback;
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value === 1;
+  return ['1', 'true', 'yes', 'on'].includes(String(value).trim().toLowerCase());
+}
+
+function researchFromAiResult(aiResult) {
+  const web = aiResult && aiResult.web_search || {};
+  return {
+    used: !!web.used,
+    provider: web.provider || 'tavily',
+    results: Array.isArray(aiResult && aiResult.web_results) ? aiResult.web_results : [],
+    reason: web.reason || ''
+  };
+}
+
+async function generatePptOutline(db, user, body, opts) {
+  body = body || {};
+  opts = opts || {};
   const demand = body.demand || {};
   const proposal = [body.proposal || '', body.deckContext || ''].filter(Boolean).join('\n\n');
   const query = [demand.brand, demand.company, demand.product, demand.product_name, demand.target_market, demand.market, 'influencer marketing'].filter(Boolean).join(' ');
-  const ragContext = rag.buildRagContext(db, {
-    user,
-    query: [query, proposal].filter(Boolean).join('\n\n'),
-    limit: body.knowledge_limit || 8,
-    business_type: body.business_type || ''
-  });
-  const research = await webSearch.searchWeb(query || 'overseas influencer marketing campaign', { db, maxResults: 5 });
-  webSearch.cacheSearchResult(db, query || 'overseas influencer marketing campaign', research);
-  const fallback = buildPptOutlineFallback(demand, proposal, '', research);
+  const retrievalQuery = [query, JSON.stringify(demand), proposal].filter(Boolean).join('\n\n');
   const prompt = [
     'Create a client-facing overseas influencer marketing PPT outline for TuringMarket.',
     'Return JSON only with title, subtitle, sections. sections must include title, type, points array, note.',
     'Use 9-12 sections and include market research, product angle, creator mix, budget, timeline, KPI, risks, next steps.',
     'Use the internal knowledge base first when it is relevant. When using it, reference [KB-n] in slide points or notes.',
     'Demand JSON:', JSON.stringify(demand),
-    'Proposal/context:', compactText(proposal, 5000),
-    'Internal knowledge base context:', ragContext.contextText || 'No relevant internal knowledge was found.',
-    'Web research:', JSON.stringify((research.results || []).slice(0, 5))
+    'Proposal/context:', compactText(proposal, 5000)
   ].join('\n');
-  const generated = await generateJsonWithDeepSeek(prompt, fallback, { db, user, temperature: 0.25, max_tokens: 3200, endpoint: 'ppt_outline' });
-  const outline = normalizePptOutline(generated.value, fallback, research);
-  outline.knowledge_references = ragContext.references;
-  knowledgeService.recordKnowledgeUsageTelemetry(
-    db,
-    ragContext.references.map(function(ref) { return ref.id; }),
-    user
-  );
+  const aiService = opts.aiService || require('./ai_service');
+  const aiResult = await aiService.handleChat(db, {
+    user,
+    message: prompt,
+    ragQuery: retrievalQuery,
+    webQuery: query || 'overseas influencer marketing campaign',
+    allowWeb: booleanOption(body.allow_web, true),
+    source_module: 'ppt_outline',
+    summaryVisibility: body.summary_visibility || 'private',
+    knowledgeLimit: body.knowledge_limit || 8,
+    business_type: body.business_type || undefined,
+    temperature: 0.25,
+    max_tokens: 3200,
+    provider: opts.provider,
+    webSearchProvider: opts.webSearchProvider
+  });
+  const research = researchFromAiResult(aiResult);
+  const fallback = buildPptOutlineFallback(demand, proposal, aiResult.reason || '', research);
+  const raw = String(aiResult.answer || '').replace(/^```json\s*/i, '').replace(/```$/i, '').trim();
+  const parsed = safeJson(raw, null);
+  const outline = normalizePptOutline(parsed, fallback, research);
+  const knowledgeReferences = Array.isArray(aiResult.knowledge_references) ? aiResult.knowledge_references : [];
+  outline.knowledge_references = knowledgeReferences;
+  outline.research = research;
   try {
     knowledgeService.ingestKnowledge(db, {
       title: 'PPT outline: ' + (outline.title || demand.brand || 'campaign'),
@@ -341,16 +364,19 @@ async function generatePptOutline(db, user, body) {
       actor_role: user.role,
       metadata: {
         research_used: !!research.used,
-        knowledge_reference_ids: ragContext.references.map(function(ref) { return ref.id; })
+        knowledge_reference_ids: knowledgeReferences.map(function(ref) { return ref.id; }),
+        ai_conversation_id: aiResult.conversation_id || null,
+        ai_message_id: aiResult.message_id || null
       }
     });
   } catch (e) {}
   return {
     outline,
-    knowledge_references: ragContext.references,
+    knowledge_references: knowledgeReferences,
     research,
-    fallback: generated.fallback,
-    warning: generated.warning
+    fallback: !parsed || !!aiResult.degraded,
+    warning: aiResult.reason || (!parsed ? 'AI JSON parse failed' : ''),
+    ai: aiResult
   };
 }
 
