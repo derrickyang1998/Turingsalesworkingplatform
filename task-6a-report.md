@@ -78,3 +78,31 @@
 ### Follow-up Residual Risk
 
 - The campaign event trigger still permits only five metadata keys for `link_attached`; composite auditability therefore dereferences the event `link_ids` through `campaign_record_links` rather than embedding nested record objects directly in event metadata.
+
+## Confirmation Button Follow-up
+
+### RED Evidence
+
+- `node --test --test-name-pattern "campaign proposal confirmation reuses unchanged retry key and rotates after edited content" tests/latest_ui_proposal_flow.test.js`
+  - Result before the application fix: 1 test, 0 pass, 1 fail.
+  - Failure: after a successful confirmation and real editor change, `confirmProposalBtn.disabled` remained `true` instead of becoming retryable.
+
+### GREEN Evidence
+
+- `node --test --test-name-pattern "campaign proposal confirmation reuses unchanged retry key and rotates after edited content" tests/latest_ui_proposal_flow.test.js`
+  - Result: 1 test, 1 pass, 0 fail.
+- `node --test --test-name-pattern "campaign proposal confirmation|campaign proposal confirmation reuses|stale proposal confirmation|proposal influencer handoff|linked demand and proposal archives project only committed immutable rows with canonical JSON and scalar-safe summaries|proposal route forwards controls and latest M3 uses AI draft then explicit confirmation" tests/campaign_record_integration.test.js tests/latest_ui_proposal_flow.test.js`
+  - Result: 10 tests, 10 pass, 0 fail.
+- `node --check platform/app.js`
+  - Result: pass.
+- `node --check platform/server/tests/latest_ui_proposal_flow.test.js`
+  - Result: pass.
+
+### Validation Checks
+
+- `git -c safe.directory='C:/Users/29272/Documents/在线商务平台/phase6-ai-knowledge' diff --check -- platform/app.js platform/server/tests/latest_ui_proposal_flow.test.js task-6a-report.md`
+  - Result: pass; Git emitted only the existing LF-to-CRLF working-copy warnings.
+- `node -e 'const fs=require("fs"); const files=["platform/app.js","platform/server/tests/latest_ui_proposal_flow.test.js","task-6a-report.md"]; const decoder=new TextDecoder("utf-8",{fatal:true}); for (const file of files) { const text=decoder.decode(fs.readFileSync(file)); if (text.includes(String.fromCharCode(0xfffd))) throw new Error(file+": replacement character found"); } console.log("UTF-8/replacement scan: 3 files valid, 0 replacement characters");'`
+  - Result: 3 files valid UTF-8, 0 replacement characters.
+- Focused credential-prefix scan over the same three-file Git diff (`sk-`, GitHub token, AWS access key, Google API key, Slack token, and private-key markers).
+  - Result: 0 candidates.

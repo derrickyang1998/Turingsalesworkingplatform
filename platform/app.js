@@ -1813,6 +1813,11 @@ function updateProposalDraftFromEditor() {
   if (editor && editor.value !== lastProp) {
     lastProp = editor.value;
     clearLinkedProposalConfirmation();
+    var confirmButton = document.getElementById('confirmProposalBtn');
+    if (confirmButton) {
+      confirmButton.disabled = false;
+      confirmButton.textContent = '确认方案并归档';
+    }
   } else if (editor) {
     lastProp = editor.value;
   }

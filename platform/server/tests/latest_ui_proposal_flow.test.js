@@ -410,13 +410,20 @@ test('campaign proposal confirmation reuses unchanged retry key and rotates afte
     proposal_content_sha256: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
     demand_entry_id: 501
   });
+  const confirmButton = harness.elements.get('confirmProposalBtn');
+  assert.equal(confirmButton.disabled, true);
+  assert.equal(confirmButton.textContent, '已确认归档');
 
   harness.elements.get('proposalEditor').value = '# Edited proposal content';
   harness.run('updateProposalDraftFromEditor()');
   assert.equal(harness.state('lastLinkedProposalConfirmation'), null);
+  assert.equal(confirmButton.disabled, false);
+  assert.equal(confirmButton.textContent, '确认方案并归档');
 
   const editedSave = harness.run('saveCurrentProposal()');
   await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(confirmButton.disabled, true);
+  assert.equal(confirmButton.textContent, '正在归档...');
   assert.equal(harness.apiCalls.length, 3);
   assert.equal(
     harness.apiCalls[2].options.headers['Idempotency-Key'],
