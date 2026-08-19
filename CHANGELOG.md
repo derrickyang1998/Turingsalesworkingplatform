@@ -22,6 +22,11 @@
 - AI 草稿、知识引用和联网来源分别展示；草稿保持可编辑，只有用户点击“确认方案并归档”时才把编辑器中的当前版本写入最终方案知识。客户上下文使用受治理的客户归档接口，无客户上下文使用既有 `/api/proposals` 路径。
 - AI 或 provider 不可用时保留本地可编辑草稿。方案生成绑定本次客户上下文并拒绝过期异步响应，重置或重新进入需求页会清理旧客户上下文，避免错归档和旧响应覆盖新草稿。
 
+### Task 6A 活动需求与人工确认方案原子闭环 / Campaign Demand And Human-Confirmed Proposal Atomic Loop
+- 受认证的活动方案确认使用活动路径身份创建真实需求 ID 与真实方案 ID；需求、方案及其知识归档、业务链接、归档链接、活动记录和幂等证据在同一 immediate SQLite 事务中提交。/ The authenticated campaign confirmation creates real demand and proposal IDs; demand/proposal knowledge archives, business/archive links, activity evidence, and idempotency evidence commit in one immediate SQLite transaction.
+- 同一幂等键且请求体不变时，在重新授权后返回原始结果；同键不同请求体返回 `IDEMPOTENCY_KEY_REUSED`。复合审计身份通过现有兼容事件与真实链接 ID 关联。/ An unchanged idempotency replay returns the original result after reauthorization; a changed body with the same key returns `IDEMPOTENCY_KEY_REUSED`. Composite audit identity is linked through the existing-compatible event and real link IDs.
+- M3 在异步确认前冻结尝试状态；重置、导航或编辑后的旧响应不能恢复确认 UI 或借用新的审计上下文。确认成功后向 M4 传递活动、客户、商机以及真实需求/方案 ID 和 `demand_entry_id`。/ M3 snapshots confirmation attempts before awaiting; stale responses after reset, navigation, or editing cannot restore confirmed UI or borrow newer audit context. A confirmed handoff passes campaign, customer, opportunity, real demand/proposal IDs, and `demand_entry_id` to M4.
+
 ### 需求文件解析归档与准入原子性 / Demand Parse Archival And Admission Atomicity
 - `POST /api/demand/parse-file` 现在会把成功解析的需求文件归档为私有 `requirement_sheet` 知识条目，固定使用 `source_type='demand_file_upload'` 和 `business_type='demand'`；既有响应字段保持不变，仅新增 `knowledge.archivedEntryId` 作为附加知识标识。
 - 文件去重改为版本化的 owner-scoped file-byte digest：同一用户上传相同文件字节时即使改名也复用同一知识条目，其他用户上传相同字节仍会得到各自隔离的私有条目，不再把原始文件 SHA-256 直接当作全局 `source_hash`。
@@ -32,7 +37,9 @@
 - 新增真实临时 SQLite 集成回归，覆盖知识权限、对话与消息持久化、知识/联网引用、关闭联网时零 provider 调用、降级兼容和路由参数传递。
 - 需求分析切片聚焦矩阵 `18/18`；加入 PPT 审计链后为 `22/22`；加入策略审计链后为 `26/26`。方案草稿闭环按新的快速发布节奏运行本功能聚焦测试 `3/3`、变更 JavaScript 语法和 `git diff --check`；需求文件解析归档切片最终聚焦矩阵为 `6/6`，覆盖私有 `requirement_sheet` 归档、owner-scoped file-byte 去重、fallback 保留、事务回滚和长 Unicode 摘要回归。
 - Task 5 独立审查先发现 Unicode 摘要截断会拆断 astral character 并触发孤立 surrogate 校验失败；问题已通过 RED/GREEN 复现与修复，最终独立复审结论为 `APPROVE`。
-- 本条目是阶段 6 的开发检查点，不代表生产发布。阶段 5 v0.6 完成受控切换、生产登录和 CRM 冒烟后，本切片才进入独立备份、部署与线上需求分析验收。
+- Task 6A 批准实现头为 `ff88e80758742a1cbba537015ab342b297f5a5b0`；独立审查为 `APPROVE`，新鲜聚焦验证 `10/10` 通过，Node 语法、`git diff --check`、UTF-8/替换字符和定向敏感信息检查均通过。/ Task 6A approved head is `ff88e80758742a1cbba537015ab342b297f5a5b0`; independent review is `APPROVE`, fresh focused verification is `10/10` passing, and Node syntax, `git diff --check`, UTF-8/replacement-character, and focused secret checks pass.
+- 本条目是阶段 6 的开发检查点和本地打包记录，不代表生产发布。2026-08-19 19:18:36 +08:00 的公网探针确认 `/api/health` 为 HTTP 200、`status=ok`，但首页仍公布 `app.js?v=20260714v040productshelldesignsystem` 与 `ppt.js?v=20260702v916kbbridge`，因此生产仍为较旧 v0.4 资产，v0.6/v0.7 均未部署。/ This checkpoint is locally packaged, not production released. The public probe at 2026-08-19 19:18:36 +08:00 returned HTTP 200 and `status=ok` from `/api/health`, while the root still advertised the older v0.4 asset markers; v0.6 and v0.7 are not deployed.
+- 权威工作树写入受限制、GitHub CLI token 失效且连接器变更审批被拒绝、生产 SSH 身份文件不可读且随后 publickey 被拒绝，分别阻断权威同步、GitHub 同步和生产发布。/ Authoritative-worktree writes are restricted; the GitHub CLI token is invalid and connector mutation approval was denied; the production SSH identity file is unreadable and the attempt then receives publickey denial. These are separate blockers for authoritative sync, GitHub sync, and production deployment.
 
 ---
 
