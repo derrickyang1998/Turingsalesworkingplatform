@@ -22,9 +22,16 @@
 - AI 草稿、知识引用和联网来源分别展示；草稿保持可编辑，只有用户点击“确认方案并归档”时才把编辑器中的当前版本写入最终方案知识。客户上下文使用受治理的客户归档接口，无客户上下文使用既有 `/api/proposals` 路径。
 - AI 或 provider 不可用时保留本地可编辑草稿。方案生成绑定本次客户上下文并拒绝过期异步响应，重置或重新进入需求页会清理旧客户上下文，避免错归档和旧响应覆盖新草稿。
 
+### 需求文件解析归档与准入原子性 / Demand Parse Archival And Admission Atomicity
+- `POST /api/demand/parse-file` 现在会把成功解析的需求文件归档为私有 `requirement_sheet` 知识条目，固定使用 `source_type='demand_file_upload'` 和 `business_type='demand'`；既有响应字段保持不变，仅新增 `knowledge.archivedEntryId` 作为附加知识标识。
+- 文件去重改为版本化的 owner-scoped file-byte digest：同一用户上传相同文件字节时即使改名也复用同一知识条目，其他用户上传相同字节仍会得到各自隔离的私有条目，不再把原始文件 SHA-256 直接当作全局 `source_hash`。
+- 归档 metadata 只保留上传和解析操作事实：文件名、MIME、大小、原始文件 SHA-256、parser/fallback/OCR/warning 状态，以及 `quality_state`、`retention_class='business_source'`、`citation_count=0`。普通解析写入 `parsed`，fallback、OCR 或 warning 场景写入 `needs_review`。
+- `authority.readFresh(db)`、知识归档写入和 admission 完成现在放进同一个 immediate SQLite 事务；若归档失败，admission 不会被标记为 completed。长 Unicode 摘要截断改为按 code point 计数，避免 UTF-16 截断产生孤立 surrogate 并被知识校验拒绝。
+
 ### 验证与状态 / Verification And Status
 - 新增真实临时 SQLite 集成回归，覆盖知识权限、对话与消息持久化、知识/联网引用、关闭联网时零 provider 调用、降级兼容和路由参数传递。
-- 需求分析切片聚焦矩阵 `18/18`；加入 PPT 审计链后为 `22/22`；加入策略审计链后为 `26/26`。方案草稿闭环按新的快速发布节奏仅运行本功能聚焦测试 `3/3`、变更 JavaScript 语法和 `git diff --check`；独立审查发现的客户上下文、摘要可见性和并发覆盖问题均经 RED/GREEN 修复，最终为 `APPROVE`。
+- 需求分析切片聚焦矩阵 `18/18`；加入 PPT 审计链后为 `22/22`；加入策略审计链后为 `26/26`。方案草稿闭环按新的快速发布节奏运行本功能聚焦测试 `3/3`、变更 JavaScript 语法和 `git diff --check`；需求文件解析归档切片最终聚焦矩阵为 `6/6`，覆盖私有 `requirement_sheet` 归档、owner-scoped file-byte 去重、fallback 保留、事务回滚和长 Unicode 摘要回归。
+- Task 5 独立审查先发现 Unicode 摘要截断会拆断 astral character 并触发孤立 surrogate 校验失败；问题已通过 RED/GREEN 复现与修复，最终独立复审结论为 `APPROVE`。
 - 本条目是阶段 6 的开发检查点，不代表生产发布。阶段 5 v0.6 完成受控切换、生产登录和 CRM 冒烟后，本切片才进入独立备份、部署与线上需求分析验收。
 
 ---
