@@ -1767,7 +1767,17 @@ app.post('/api/ai/strategy', authMiddleware, aiLimiter, aiQuotaGuard, async (req
 
 app.post('/api/ai/demand-analysis', authMiddleware, aiLimiter, aiQuotaGuard, async (req, res) => {
   try {
-    const result = await latestUiCompat.generateDemandAnalysis(req.body.prompt, req.body.input, req.body.fileName, { db, user: req.user });
+    const result = await latestUiCompat.generateDemandAnalysis(
+      req.body.prompt,
+      req.body.input,
+      req.body.fileName,
+      {
+        db,
+        user: req.user,
+        allowWeb: boolParam(req.body.allow_web, false),
+        knowledgeLimit: req.body.knowledge_limit || 8
+      }
+    );
     try {
       knowledgeService.ingestKnowledge(db, {
         title: 'Demand analysis: ' + (result.analysis.brand || result.analysis.product || req.body.fileName || 'untitled'),

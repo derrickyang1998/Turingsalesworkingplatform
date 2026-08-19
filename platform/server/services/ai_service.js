@@ -149,8 +149,10 @@ async function handleLegacyChat(db, opts) {
     metadata: { source_module: opts.source_module || conversation.source_module || 'assistant' }
   });
 
+  const retrievalQuery = String(opts.ragQuery || message).trim() || message;
+  const webQuery = String(opts.webQuery || retrievalQuery).trim() || retrievalQuery;
   const ragContext = rag.buildRagContext(db, {
-    query: message,
+    query: retrievalQuery,
     user: opts.user,
     limit: opts.knowledgeLimit || 8,
     business_type: opts.business_type,
@@ -160,15 +162,15 @@ async function handleLegacyChat(db, opts) {
   let searchResult = { used: false, provider: opts.webProvider || 'tavily', results: [], reason: 'disabled' };
   if (opts.allowWeb !== false) {
     if (opts.webSearchProvider && typeof opts.webSearchProvider.search === 'function') {
-      searchResult = await opts.webSearchProvider.search(message);
+      searchResult = await opts.webSearchProvider.search(webQuery);
     } else {
-      searchResult = await webSearch.searchWeb(message, {
+      searchResult = await webSearch.searchWeb(webQuery, {
         provider: opts.webProvider || process.env.WEB_SEARCH_PROVIDER || 'tavily',
         maxResults: opts.webMaxResults || 5,
         db: db
       });
     }
-    webSearch.cacheSearchResult(db, message, searchResult);
+    webSearch.cacheSearchResult(db, webQuery, searchResult);
   }
 
   const history = recentMessages(db, conversation.id, 8);
@@ -246,6 +248,8 @@ async function handleLegacyChat(db, opts) {
       provider: searchResult.provider || 'tavily',
       reason: searchResult.reason || ''
     },
+    degraded: !!completion.degraded,
+    reason: completion.reason || '',
     archived_summary_id: archived && archived.id ? archived.id : null
   };
 }

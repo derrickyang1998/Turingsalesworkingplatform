@@ -1,5 +1,19 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.7.0-ai-knowledge-proposal-ppt-loop (Development Checkpoint, 2026-08-19) - AI、知识库、方案与 PPT 闭环
+
+### 需求分析审计链 / Auditable Demand Analysis
+- `/api/ai/demand-analysis` 现在复用统一的 `aiService.handleChat`：先执行用户权限过滤后的知识检索，再按 `allow_web` 显式开关决定是否调用联网服务，并保存用户消息、AI 回复、知识引用、联网来源、Token 和自动摘要。
+- 需求分析的检索查询与 JSON 指令分离，避免长系统指令耗尽检索词预算；不再用文件名或默认业务类型错误收窄知识范围，团队知识可命中，其他用户的私有知识保持不可见。
+- 保留既有 `analysis`、`fallback`、`warning` 响应；新增 `ai` 审计投影，并保留模型降级及非 JSON 响应的安全原因。`prompt` 与上传内容同时存在时不再丢失上传内容。
+
+### 验证与状态 / Verification And Status
+- 新增真实临时 SQLite 集成回归，覆盖知识权限、对话与消息持久化、知识/联网引用、关闭联网时零 provider 调用、降级兼容和路由参数传递。
+- 聚焦矩阵 `18/18`、四个变更 JavaScript 文件语法、`git diff --check`、密钥扫描与 UTF-8 替换字符检查通过；独立终审为 `APPROVE`。
+- 本条目是阶段 6 的开发检查点，不代表生产发布。阶段 5 v0.6 完成受控切换、生产登录和 CRM 冒烟后，本切片才进入独立备份、部署与线上需求分析验收。
+
+---
+
 ## v0.6.0-crm-sales-workspace (Release Candidate, 2026-08-11; updated 2026-08-17) - CRM 销售工作台
 
 ### CRM 销售工作台 / CRM Sales Workspace
