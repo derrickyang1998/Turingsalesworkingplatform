@@ -1105,7 +1105,7 @@ function insertRecordLink(db, values) {
 }
 
 function insertLinkEvent(db, values) {
-  const metadata = {
+  const metadata = values.metadata || {
     record_type: values.recordType,
     record_id: String(values.recordId),
     relation_types: [values.relationType],
@@ -1539,7 +1539,7 @@ function createCampaignLinkService(db) {
         relationType: 'demand',
         metadata: proposalConfirmationAuditMetadata(body.draft)
       });
-      insertRecordLink(db, {
+      const demandArchiveLink = insertRecordLink(db, {
         organizationId: access.campaign.org_id,
         campaignId,
         userId,
@@ -1586,7 +1586,7 @@ function createCampaignLinkService(db) {
         relationType: 'proposal',
         metadata: proposalConfirmationAuditMetadata(body.draft)
       });
-      insertRecordLink(db, {
+      const proposalArchiveLink = insertRecordLink(db, {
         organizationId: access.campaign.org_id,
         campaignId,
         userId,
@@ -1606,7 +1606,19 @@ function createCampaignLinkService(db) {
         recordType: 'proposal',
         recordId: proposalId,
         relationType: 'proposal',
-        producerLink: proposalLink
+        producerLink: proposalLink,
+        metadata: {
+          record_type: 'proposal',
+          record_id: String(proposalId),
+          relation_types: ['demand', 'knowledge', 'proposal'],
+          link_ids: [
+            demandLink.id,
+            demandArchiveLink.id,
+            proposalLink.id,
+            proposalArchiveLink.id
+          ].sort((left, right) => left - right),
+          bundle_id: proposalLink.bundleId
+        }
       });
       applyProducerGaugePlan(db, proposalArchive);
       return {

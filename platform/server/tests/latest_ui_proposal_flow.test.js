@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const vm = require('node:vm');
 
 const latestUiCompat = require('../services/latest_ui_compat_service');
 
@@ -28,6 +29,220 @@ function aiResult(overrides) {
     reason: '',
     archived_summary_id: 53
   }, overrides || {});
+}
+
+function createDeferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+function jsonResponse(body, ok = true) {
+  return {
+    ok,
+    async json() {
+      return body;
+    }
+  };
+}
+
+function createElement(overrides = {}) {
+  return Object.assign({
+    value: '',
+    textContent: '',
+    innerHTML: '',
+    disabled: false,
+    style: {},
+    dataset: {},
+    classList: {
+      add() {},
+      remove() {},
+      contains() { return false; }
+    },
+    setAttribute() {},
+    removeAttribute() {},
+    getAttribute() { return ''; },
+    focus() {}
+  }, overrides);
+}
+
+function createProposalVmHarness() {
+  const elements = new Map();
+  const apiCalls = [];
+  const apiQueue = [];
+  const toasts = [];
+  const navigations = [];
+
+  for (const id of [
+    'proposalEditor',
+    'proposalTextMirror',
+    'confirmProposalBtn',
+    'm3s1',
+    'm3s2',
+    'm3s3',
+    'demandFileStatus',
+    'btnAnalyzeAI',
+    'aiAnalyzeHint',
+    'proposalOutput',
+    'demandDropZone',
+    'step1',
+    'step2',
+    'step3',
+    'filt_project',
+    'filt_product',
+    'filt_platform',
+    'filt_region',
+    'filt_tag'
+  ]) {
+    elements.set(id, createElement());
+  }
+
+  const documentStub = {
+    getElementById(id) {
+      if (!elements.has(id)) elements.set(id, createElement());
+      return elements.get(id);
+    },
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+    addEventListener() {},
+    dispatchEvent() {}
+  };
+
+  const context = {
+    window: {
+      location: { origin: 'http://task6a.test' },
+      TMNavigation: {
+        navigate(id, options) {
+          navigations.push({ id, options });
+        }
+      }
+    },
+    document: documentStub,
+    localStorage: {
+      getItem() { return ''; },
+      setItem() {},
+      removeItem() {}
+    },
+    navigator: { clipboard: { writeText() {} } },
+    location: { reload() {} },
+    console,
+    CustomEvent: function CustomEvent(type, init) {
+      this.type = type;
+      this.detail = init && init.detail;
+    },
+    setTimeout(fn) {
+      if (typeof fn === 'function') fn();
+      return 0;
+    },
+    clearTimeout() {},
+    fetch: async () => jsonResponse({}),
+    __apiFetch(url, options) {
+      const deferred = apiQueue.shift() || createDeferred();
+      apiCalls.push({ url, options, deferred });
+      return deferred.promise;
+    },
+    __toast(message, type) {
+      toasts.push({ message, type });
+    }
+  };
+  context.window.window = context.window;
+  context.window.document = documentStub;
+  context.globalThis = context;
+
+  vm.createContext(context);
+  vm.runInContext(
+    fs.readFileSync(path.join(__dirname, '..', '..', 'app.js'), 'utf8'),
+    context
+  );
+  vm.runInContext(`
+    apiFetch = __apiFetch;
+    toast = __toast;
+    var __task6aKeyCounter = 0;
+    createIdempotencyKey = function(prefix) {
+      __task6aKeyCounter += 1;
+      return prefix + __task6aKeyCounter;
+    };
+    switchTab = function() {};
+  `, context);
+
+  function seedProposalState(overrides = {}) {
+    const state = {
+      content: '# Initial confirmed proposal',
+      campaignId: 77,
+      customerId: 88,
+      opportunityId: 99,
+      demandEntryId: 501,
+      generationSequence: 9,
+      demand: {
+        brand: 'Aurora',
+        company: 'Aurora Co',
+        product: 'Solar Kit',
+        category: 'Energy',
+        budget: '10000 USD',
+        platform: 'YouTube',
+        area: 'US',
+        usp: 'Field-test proof',
+        competitors: 'SunX'
+      }
+    };
+    Object.assign(state, overrides);
+    elements.get('proposalEditor').value = state.content;
+    vm.runInContext(`
+      curDemand = ${JSON.stringify(Object.assign({}, state.demand, {
+        customer_id: state.customerId,
+        opportunity_id: state.opportunityId,
+        campaign_id: state.campaignId
+      }))};
+      selTpl = 'task6a-template';
+      lastProp = ${JSON.stringify(state.content)};
+      lastProposalContext = {
+        campaign_id: ${state.campaignId},
+        customer_id: ${state.customerId},
+        opportunity_id: ${state.opportunityId},
+        brand: 'Aurora',
+        company: 'Aurora Co',
+        product: 'Solar Kit',
+        platform: 'YouTube',
+        market: 'US'
+      };
+      lastProposalDraftAudit = { demand_entry_id: ${state.demandEntryId} };
+      lastProposalAI = { conversation_id: 601, message_id: 602 };
+      lastLinkedProposalConfirmation = null;
+      pendingLinkedProposalConfirmation = null;
+      proposalGenerationSequence = ${state.generationSequence};
+    `, context);
+  }
+
+  function enqueueResponse(body) {
+    const deferred = createDeferred();
+    apiQueue.push(deferred);
+    deferred.resolve(jsonResponse(body));
+    return deferred;
+  }
+
+  return {
+    context,
+    elements,
+    apiCalls,
+    apiQueue,
+    toasts,
+    navigations,
+    seedProposalState,
+    enqueueResponse,
+    state(expression) {
+      return vm.runInContext(expression, context);
+    },
+    stateJson(expression) {
+      return JSON.parse(JSON.stringify(vm.runInContext(expression, context)));
+    },
+    run(expression) {
+      return vm.runInContext(expression, context);
+    }
+  };
 }
 
 test('proposal draft keeps instructions separate from retrieval and defaults web off', async () => {
@@ -154,6 +369,168 @@ test('proposal route forwards controls and latest M3 uses AI draft then explicit
   assert.match(handoffBlock, /demand_id/);
   assert.match(handoffBlock, /proposal_id/);
   assert.match(handoffBlock, /proposal_content_sha256/);
+});
+
+test('campaign proposal confirmation reuses unchanged retry key and rotates after edited content', async () => {
+  const harness = createProposalVmHarness();
+  harness.seedProposalState();
+
+  const firstSave = harness.run('saveCurrentProposal()');
+  await new Promise((resolve) => setImmediate(resolve));
+  const retrySave = harness.run('saveCurrentProposal()');
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(harness.apiCalls.length, 2);
+  assert.equal(harness.apiCalls[0].url, '/campaigns/77/proposal-confirmations');
+  assert.equal(
+    harness.apiCalls[0].options.headers['Idempotency-Key'],
+    harness.apiCalls[1].options.headers['Idempotency-Key']
+  );
+  assert.equal(
+    harness.apiCalls[0].options.headers['Idempotency-Key'],
+    'proposal-confirmation-1'
+  );
+
+  const confirmedBody = {
+    campaign_id: 77,
+    demand: { id: 701, link_id: 702 },
+    proposal: {
+      id: 801,
+      content_sha256: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    }
+  };
+  harness.apiCalls[0].deferred.resolve(jsonResponse(confirmedBody));
+  harness.apiCalls[1].deferred.resolve(jsonResponse(confirmedBody));
+  await Promise.all([firstSave, retrySave]);
+  assert.deepEqual(harness.stateJson('lastLinkedProposalConfirmation'), {
+    campaign_id: 77,
+    demand_id: 701,
+    demand_link_id: 702,
+    proposal_id: 801,
+    proposal_content_sha256: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    demand_entry_id: 501
+  });
+
+  harness.elements.get('proposalEditor').value = '# Edited proposal content';
+  harness.run('updateProposalDraftFromEditor()');
+  assert.equal(harness.state('lastLinkedProposalConfirmation'), null);
+
+  const editedSave = harness.run('saveCurrentProposal()');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(harness.apiCalls.length, 3);
+  assert.equal(
+    harness.apiCalls[2].options.headers['Idempotency-Key'],
+    'proposal-confirmation-2'
+  );
+  assert.notEqual(
+    harness.apiCalls[2].options.headers['Idempotency-Key'],
+    harness.apiCalls[0].options.headers['Idempotency-Key']
+  );
+  harness.apiCalls[2].deferred.resolve(jsonResponse({
+    campaign_id: 77,
+    demand: { id: 703, link_id: 704 },
+    proposal: {
+      id: 802,
+      content_sha256: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+    }
+  }));
+  await editedSave;
+});
+
+test('stale proposal confirmation success after reset or navigation cannot restore linked UI state', async () => {
+  const resetHarness = createProposalVmHarness();
+  resetHarness.seedProposalState({ demandEntryId: 111 });
+  const resetSave = resetHarness.run('saveCurrentProposal()');
+  await new Promise((resolve) => setImmediate(resolve));
+  resetHarness.run(`
+    resetDemand();
+    lastProposalDraftAudit = { demand_entry_id: 222 };
+  `);
+  resetHarness.apiCalls[0].deferred.resolve(jsonResponse({
+    campaign_id: 77,
+    demand: { id: 711, link_id: 712 },
+    proposal: {
+      id: 811,
+      content_sha256: 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc'
+    }
+  }));
+  await resetSave;
+  assert.equal(resetHarness.state('lastLinkedProposalConfirmation'), null);
+  assert.equal(resetHarness.elements.get('confirmProposalBtn').disabled, false);
+  assert.equal(resetHarness.elements.get('confirmProposalBtn').textContent, '确认方案并归档');
+
+  const navigationHarness = createProposalVmHarness();
+  navigationHarness.seedProposalState({ demandEntryId: 333 });
+  const navigationSave = navigationHarness.run('saveCurrentProposal()');
+  await new Promise((resolve) => setImmediate(resolve));
+  navigationHarness.run("switchPage('m0')");
+  navigationHarness.apiCalls[0].deferred.resolve(jsonResponse({
+    campaign_id: 77,
+    demand: { id: 713, link_id: 714 },
+    proposal: {
+      id: 812,
+      content_sha256: 'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd'
+    }
+  }));
+  await navigationSave;
+  assert.equal(navigationHarness.state('lastLinkedProposalConfirmation'), null);
+  assert.equal(navigationHarness.elements.get('confirmProposalBtn').disabled, false);
+  assert.equal(navigationHarness.elements.get('confirmProposalBtn').textContent, '确认方案并归档');
+
+  const editHarness = createProposalVmHarness();
+  editHarness.seedProposalState({ demandEntryId: 444 });
+  const editSave = editHarness.run('saveCurrentProposal()');
+  await new Promise((resolve) => setImmediate(resolve));
+  editHarness.elements.get('proposalEditor').value = '# Superseding in-flight edit';
+  editHarness.run('updateProposalDraftFromEditor()');
+  editHarness.apiCalls[0].deferred.resolve(jsonResponse({
+    campaign_id: 77,
+    demand: { id: 715, link_id: 716 },
+    proposal: {
+      id: 813,
+      content_sha256: 'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff'
+    }
+  }));
+  await editSave;
+  assert.equal(editHarness.state('lastLinkedProposalConfirmation'), null);
+  assert.equal(editHarness.elements.get('confirmProposalBtn').disabled, false);
+  assert.equal(editHarness.elements.get('confirmProposalBtn').textContent, '确认方案并归档');
+});
+
+test('proposal influencer handoff preserves confirmed campaign proposal context before navigation', () => {
+  const harness = createProposalVmHarness();
+  harness.seedProposalState();
+  harness.run(`
+    lastLinkedProposalConfirmation = {
+      campaign_id: 77,
+      demand_id: 701,
+      demand_link_id: 702,
+      proposal_id: 801,
+      proposal_content_sha256: 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
+      demand_entry_id: 501
+    };
+  `);
+
+  harness.run('openProposalToInfluencers()');
+
+  assert.deepEqual(harness.navigations.map((item) => item.id), ['m4']);
+  assert.deepEqual(harness.stateJson(`({
+    campaign_id: activeWorkflowContext.campaign_id,
+    customer_id: activeWorkflowContext.customer_id,
+    opportunity_id: activeWorkflowContext.opportunity_id,
+    demand_id: activeWorkflowContext.demand_id,
+    demand_entry_id: activeWorkflowContext.demand_entry_id,
+    proposal_id: activeWorkflowContext.proposal_id,
+    proposal_content_sha256: activeWorkflowContext.proposal_content_sha256
+  })`), {
+    campaign_id: 77,
+    customer_id: 88,
+    opportunity_id: 99,
+    demand_id: 701,
+    demand_entry_id: 501,
+    proposal_id: 801,
+    proposal_content_sha256: 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
+  });
 });
 
 test('proposal draft persists only authorized references and preserves degradation reason', async () => {

@@ -45,3 +45,36 @@
 ## Residual Risk
 
 - Existing schema triggers constrain `proposal.create.linked` to one `proposal_link` event without migrations. Task 6A creates both demand and proposal links/archives, but records one existing-compatible campaign event for the transaction.
+
+## REQUEST_CHANGES Follow-up
+
+### Fixes
+
+- Captured immutable confirmation attempt state in M3 before awaiting the campaign confirmation response: generation sequence, pending key/body identity, attempt sequence, and submitted `demand_entry_id`.
+- Applied `lastLinkedProposalConfirmation` only when the submitted attempt is still current; stale successes after reset or navigation no longer restore UI linkage or borrow newer draft audit globals.
+- Restored the current confirm button to a retryable state when a stale success completes after reset, navigation, or an in-flight edit.
+- Invalidated confirmed linkage and rotated the next pending idempotency attempt only when editor content actually changes; no-op editor sync during save preserves unchanged retry keys.
+- Preserved M3 to M4 handoff by copying confirmed context before navigation and passing an explicit handoff-preservation option.
+- Kept the single schema-compatible `proposal.create.linked` event, and encoded the composite audit identity in trigger-approved metadata fields: `relation_types` includes demand, knowledge, and proposal; `link_ids` contains the real demand link, proposal link, demand archive link, and proposal archive link.
+
+### Follow-up RED Evidence
+
+- `node --test --test-name-pattern "campaign proposal confirmation|campaign proposal confirmation reuses|stale proposal confirmation|proposal influencer handoff" tests/campaign_record_integration.test.js tests/latest_ui_proposal_flow.test.js`
+  - Corrected RED result before production fixes: 8 tests, 5 pass, 3 fail.
+  - Failures: missing composite event metadata, editing after success did not clear linked UI state, stale reset/navigation success restored linked UI state and borrowed newer `demand_entry_id`.
+- `node --test --test-name-pattern "stale proposal confirmation success after reset or navigation cannot restore linked UI state" tests/latest_ui_proposal_flow.test.js`
+  - Self-review RED result before button-state fix: 1 test, 0 pass, 1 fail.
+  - Failure: stale completion left `confirmProposalBtn.disabled` as `true`.
+
+### Follow-up GREEN Evidence
+
+- `node --test --test-name-pattern "campaign proposal confirmation|campaign proposal confirmation reuses|stale proposal confirmation|proposal influencer handoff" tests/campaign_record_integration.test.js tests/latest_ui_proposal_flow.test.js`
+  - Result: 8 tests, 8 pass, 0 fail.
+- `node --test --test-name-pattern "stale proposal confirmation success after reset or navigation cannot restore linked UI state" tests/latest_ui_proposal_flow.test.js`
+  - Result: 1 test, 1 pass, 0 fail.
+- `node --test --test-name-pattern "linked demand and proposal archives project only committed immutable rows with canonical JSON and scalar-safe summaries|proposal route forwards controls and latest M3 uses AI draft then explicit confirmation" tests/campaign_record_integration.test.js tests/latest_ui_proposal_flow.test.js`
+  - Result: 2 tests, 2 pass, 0 fail.
+
+### Follow-up Residual Risk
+
+- The campaign event trigger still permits only five metadata keys for `link_attached`; composite auditability therefore dereferences the event `link_ids` through `campaign_record_links` rather than embedding nested record objects directly in event metadata.

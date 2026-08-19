@@ -10,7 +10,7 @@ let currentAIConversationId = null;
 let selectedKnowledgeEntryIds = [];
 let BRANDS = [], INFLUENCERS = [], TEMPLATES = [], CBLOCKS = {};
 let curDemand = null, selTpl = null, lastMatch = [], lastProp = "", lastProposalAI = null;
-let lastProposalContext = null, lastProposalDraftAudit = null, lastLinkedProposalConfirmation = null, pendingLinkedProposalConfirmation = null, proposalGenerationSequence = 0;
+let lastProposalContext = null, lastProposalDraftAudit = null, lastLinkedProposalConfirmation = null, pendingLinkedProposalConfirmation = null, proposalGenerationSequence = 0, proposalConfirmationAttemptSequence = 0;
 let uploadedFileContent = "";
 let lastAIStrategyRaw = "";
 let chatHistory = [{role: "system", content: "You are the TuringMarket AI assistant. Answer in Chinese, concise and professional."}];
@@ -922,8 +922,12 @@ function fillWorkflowDemand(context) {
   if (btn) btn.disabled = false;
   toast('已带入客户上下文到需求方案');
 }
-function fillWorkflowInfluencers(context) {
-  switchPage('m4', { substate: { tab: 'tab1' } });
+function fillWorkflowInfluencers(context, options) {
+  options = options || {};
+  switchPage('m4', {
+    substate: { tab: 'tab1' },
+    preserveProposalHandoff: options.preserveProposalHandoff === true
+  });
   var fieldMap = {
     filt_project: context.brand || '',
     filt_product: context.product || '',
@@ -1036,6 +1040,7 @@ async function saveCurrentStrategy() {
 function clearLinkedProposalConfirmation() {
   lastLinkedProposalConfirmation = null;
   pendingLinkedProposalConfirmation = null;
+  proposalConfirmationAttemptSequence += 1;
 }
 function buildProposalConfirmationDemandPayload(context) {
   context = context || {};
@@ -1095,8 +1100,23 @@ function getLinkedProposalConfirmationKey(bodyJson) {
     return pendingLinkedProposalConfirmation.key;
   }
   var key = createIdempotencyKey('proposal-confirmation-');
-  pendingLinkedProposalConfirmation = { bodyJson: bodyJson, key: key };
+  proposalConfirmationAttemptSequence += 1;
+  pendingLinkedProposalConfirmation = {
+    bodyJson: bodyJson,
+    key: key,
+    attemptSequence: proposalConfirmationAttemptSequence
+  };
   return key;
+}
+function isLinkedProposalConfirmationAttemptCurrent(attempt) {
+  return !!(
+    attempt &&
+    proposalGenerationSequence === attempt.generationSequence &&
+    pendingLinkedProposalConfirmation &&
+    pendingLinkedProposalConfirmation.key === attempt.key &&
+    pendingLinkedProposalConfirmation.bodyJson === attempt.bodyJson &&
+    pendingLinkedProposalConfirmation.attemptSequence === attempt.attemptSequence
+  );
 }
 async function saveCurrentProposal() {
   var button = document.getElementById('confirmProposalBtn');
@@ -1114,6 +1134,16 @@ async function saveCurrentProposal() {
       var linkedBody = buildLinkedProposalConfirmationBody(content, context);
       var linkedBodyJson = JSON.stringify(linkedBody);
       var linkedKey = getLinkedProposalConfirmationKey(linkedBodyJson);
+      var linkedAttempt = pendingLinkedProposalConfirmation;
+      var submittedAttempt = {
+        generationSequence: proposalGenerationSequence,
+        attemptSequence: linkedAttempt && linkedAttempt.attemptSequence,
+        key: linkedKey,
+        bodyJson: linkedBodyJson,
+        draft: lastProposalDraftAudit
+          ? Object.assign({}, lastProposalDraftAudit)
+          : null
+      };
       var linkedResponse = await apiFetch('/campaigns/' + campaignId + '/proposal-confirmations', {
         method: 'POST',
         headers: { 'Idempotency-Key': linkedKey },
@@ -1123,13 +1153,20 @@ async function saveCurrentProposal() {
       if (!linkedResponse.ok) {
         throw new Error(linkedData.error || '方案归档失败');
       }
+      if (!isLinkedProposalConfirmationAttemptCurrent(submittedAttempt)) {
+        if (button) {
+          button.disabled = false;
+          button.textContent = '确认方案并归档';
+        }
+        return;
+      }
       lastLinkedProposalConfirmation = {
         campaign_id: linkedData.campaign_id,
         demand_id: linkedData.demand && linkedData.demand.id,
         demand_link_id: linkedData.demand && linkedData.demand.link_id,
         proposal_id: linkedData.proposal && linkedData.proposal.id,
         proposal_content_sha256: linkedData.proposal && linkedData.proposal.content_sha256,
-        demand_entry_id: lastProposalDraftAudit && lastProposalDraftAudit.demand_entry_id
+        demand_entry_id: submittedAttempt.draft && submittedAttempt.draft.demand_entry_id
       };
       toast('方案已确认并归档到项目知识库');
     } else if (customerId) {
@@ -1773,7 +1810,12 @@ async function generateProposal() {
 }
 function updateProposalDraftFromEditor() {
   var editor = document.getElementById('proposalEditor');
-  if (editor) lastProp = editor.value;
+  if (editor && editor.value !== lastProp) {
+    lastProp = editor.value;
+    clearLinkedProposalConfirmation();
+  } else if (editor) {
+    lastProp = editor.value;
+  }
   var mirror = document.getElementById('proposalTextMirror');
   if (mirror) mirror.textContent = lastProp || '';
   return lastProp;
@@ -1813,7 +1855,7 @@ function openProposalToInfluencers() {
     context.proposal_content_sha256 = lastLinkedProposalConfirmation.proposal_content_sha256;
   }
   setWorkflowContext(context);
-  fillWorkflowInfluencers(activeWorkflowContext);
+  fillWorkflowInfluencers(activeWorkflowContext, { preserveProposalHandoff: true });
 }
 
 // ===== HTML PPT GENERATION (reveal.js) =====
@@ -4266,6 +4308,8 @@ function switchPage(id, options) {
     lastProposalDraftAudit = null;
     clearLinkedProposalConfirmation();
     proposalGenerationSequence += 1;
+  } else if (!options.preserveProposalHandoff) {
+    clearLinkedProposalConfirmation();
   }
   if (window.TMNavigation) {
     window.TMNavigation.navigate(id, {
