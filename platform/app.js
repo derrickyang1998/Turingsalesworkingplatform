@@ -10,7 +10,7 @@ let currentAIConversationId = null;
 let selectedKnowledgeEntryIds = [];
 let BRANDS = [], INFLUENCERS = [], TEMPLATES = [], CBLOCKS = {};
 let curDemand = null, selTpl = null, lastMatch = [], lastProp = "", lastProposalAI = null;
-let lastProposalContext = null, proposalGenerationSequence = 0;
+let lastProposalContext = null, lastProposalDraftAudit = null, lastLinkedProposalConfirmation = null, pendingLinkedProposalConfirmation = null, proposalGenerationSequence = 0;
 let uploadedFileContent = "";
 let lastAIStrategyRaw = "";
 let chatHistory = [{role: "system", content: "You are the TuringMarket AI assistant. Answer in Chinese, concise and professional."}];
@@ -1033,6 +1033,71 @@ async function saveCurrentStrategy() {
     await archiveCustomerArtifact('strategy', (activeWorkflowContext?.brand || '客户') + ' AI策略分析', lastAIStrategyRaw, activeWorkflowContext);
   } catch(e) { toast('保存策略失败: ' + e.message, 'error'); }
 }
+function clearLinkedProposalConfirmation() {
+  lastLinkedProposalConfirmation = null;
+  pendingLinkedProposalConfirmation = null;
+}
+function buildProposalConfirmationDemandPayload(context) {
+  context = context || {};
+  var demand = curDemand || {};
+  var dataJson = {
+    customer_id: context.customer_id || demand.customer_id || '',
+    opportunity_id: context.opportunity_id || demand.opportunity_id || '',
+    usp: demand.usp || context.usp || '',
+    competitors: demand.competitors || '',
+    notes: demand.notes || context.notes || '',
+    source_text: demand.source_text || ''
+  };
+  return {
+    brand_name: demand.brand || context.brand || '',
+    company_name: demand.company || context.company || '',
+    product_name: demand.product || context.product || '',
+    industry: demand.category || demand.industry || context.industry || '',
+    budget: demand.budget || context.budget || '',
+    target_market: demand.area || context.market || '',
+    platform: demand.platform || context.platform || '',
+    data_json: dataJson
+  };
+}
+function buildProposalConfirmationDraftAudit() {
+  var draft = {};
+  if (lastProposalDraftAudit && lastProposalDraftAudit.demand_entry_id) {
+    draft.demand_entry_id = lastProposalDraftAudit.demand_entry_id;
+  }
+  if (lastProposalAI && lastProposalAI.conversation_id) {
+    draft.ai_conversation_id = lastProposalAI.conversation_id;
+  }
+  if (lastProposalAI && lastProposalAI.message_id) {
+    draft.ai_message_id = lastProposalAI.message_id;
+  }
+  draft.source = 'human_confirmed';
+  return draft;
+}
+function buildLinkedProposalConfirmationBody(content, context) {
+  var body = {
+    demand: buildProposalConfirmationDemandPayload(context),
+    proposal: {
+      template_id: selTpl || 'custom',
+      content: content
+    }
+  };
+  var draft = buildProposalConfirmationDraftAudit();
+  if (draft.demand_entry_id || draft.ai_conversation_id || draft.ai_message_id || draft.source) {
+    body.draft = draft;
+  }
+  return body;
+}
+function getLinkedProposalConfirmationKey(bodyJson) {
+  if (
+    pendingLinkedProposalConfirmation &&
+    pendingLinkedProposalConfirmation.bodyJson === bodyJson
+  ) {
+    return pendingLinkedProposalConfirmation.key;
+  }
+  var key = createIdempotencyKey('proposal-confirmation-');
+  pendingLinkedProposalConfirmation = { bodyJson: bodyJson, key: key };
+  return key;
+}
 async function saveCurrentProposal() {
   var button = document.getElementById('confirmProposalBtn');
   try {
@@ -1041,10 +1106,33 @@ async function saveCurrentProposal() {
     if (button) { button.disabled = true; button.textContent = '正在归档...'; }
     var context = lastProposalContext || {};
     var customerId = context.customer_id;
+    var campaignId = readExplicitCampaignId(context);
     var aiTags = [];
     if (lastProposalAI && lastProposalAI.conversation_id) aiTags.push('ai-conversation-' + lastProposalAI.conversation_id);
     if (lastProposalAI && lastProposalAI.message_id) aiTags.push('ai-message-' + lastProposalAI.message_id);
-    if (customerId) {
+    if (campaignId) {
+      var linkedBody = buildLinkedProposalConfirmationBody(content, context);
+      var linkedBodyJson = JSON.stringify(linkedBody);
+      var linkedKey = getLinkedProposalConfirmationKey(linkedBodyJson);
+      var linkedResponse = await apiFetch('/campaigns/' + campaignId + '/proposal-confirmations', {
+        method: 'POST',
+        headers: { 'Idempotency-Key': linkedKey },
+        body: linkedBodyJson
+      });
+      var linkedData = await linkedResponse.json().catch(function() { return {}; });
+      if (!linkedResponse.ok) {
+        throw new Error(linkedData.error || '方案归档失败');
+      }
+      lastLinkedProposalConfirmation = {
+        campaign_id: linkedData.campaign_id,
+        demand_id: linkedData.demand && linkedData.demand.id,
+        demand_link_id: linkedData.demand && linkedData.demand.link_id,
+        proposal_id: linkedData.proposal && linkedData.proposal.id,
+        proposal_content_sha256: linkedData.proposal && linkedData.proposal.content_sha256,
+        demand_entry_id: lastProposalDraftAudit && lastProposalDraftAudit.demand_entry_id
+      };
+      toast('方案已确认并归档到项目知识库');
+    } else if (customerId) {
       await archiveCustomerArtifact(
         'proposal',
         (curDemand?.brand || context.brand || '客户') + ' 红人营销方案',
@@ -1623,13 +1711,14 @@ async function generateProposal() {
   if (!tpl) return;
   var generationId = ++proposalGenerationSequence;
   lastProposalAI = null;
-  var generationContext = {};
-  if (curDemand.customer_id) {
-    generationContext = Object.assign({}, activeWorkflowContext || {}, {
-      customer_id: curDemand.customer_id,
-      brand: curDemand.brand || (activeWorkflowContext && activeWorkflowContext.brand) || ''
-    });
-  }
+  lastProposalDraftAudit = null;
+  clearLinkedProposalConfirmation();
+  var generationContext = Object.assign({}, activeWorkflowContext || {}, {
+    customer_id: curDemand.customer_id || (activeWorkflowContext && activeWorkflowContext.customer_id) || '',
+    opportunity_id: curDemand.opportunity_id || (activeWorkflowContext && activeWorkflowContext.opportunity_id) || '',
+    campaign_id: curDemand.campaign_id || (activeWorkflowContext && activeWorkflowContext.campaign_id) || '',
+    brand: curDemand.brand || (activeWorkflowContext && activeWorkflowContext.brand) || ''
+  });
   var similarCases = [];
   try {
     similarCases = await fetchSimilarKnowledge(curDemand, 'proposal');
@@ -1664,11 +1753,15 @@ async function generateProposal() {
     if (generationId !== proposalGenerationSequence) return;
     lastProp = d.draft;
     lastProposalAI = d.ai || null;
+    lastProposalDraftAudit = {
+      demand_entry_id: d.demand_entry && d.demand_entry.id
+    };
     lastProposalContext = generationContext;
     proposalWarning = d.fallback ? (d.warning || 'AI 服务处于降级模式，草稿仍可继续编辑确认') : '';
   } catch (error) {
     if (generationId !== proposalGenerationSequence) return;
     lastProp = localDraft;
+    lastProposalDraftAudit = null;
     lastProposalContext = generationContext;
     proposalWarning = 'AI 草稿暂不可用，已提供基础可编辑草稿：' + error.message;
   }
@@ -1696,7 +1789,7 @@ function openProposalToInfluencers() {
     toast('当前方案上下文为空', 'error');
     return;
   }
-  setWorkflowContext({
+  var context = Object.assign({}, lastProposalContext || {}, {
     brand: curDemand.brand || '',
     company: curDemand.company || '',
     industry: curDemand.category || curDemand.industry || '',
@@ -1706,6 +1799,20 @@ function openProposalToInfluencers() {
     market: curDemand.area || '',
     tags: curDemand.category || curDemand.industry || ''
   });
+  if (lastProposalContext && lastProposalContext.campaign_id) context.campaign_id = lastProposalContext.campaign_id;
+  if (lastProposalContext && lastProposalContext.customer_id) context.customer_id = lastProposalContext.customer_id;
+  if (lastProposalContext && lastProposalContext.opportunity_id) context.opportunity_id = lastProposalContext.opportunity_id;
+  if (lastProposalDraftAudit && lastProposalDraftAudit.demand_entry_id) {
+    context.demand_entry_id = lastProposalDraftAudit.demand_entry_id;
+  }
+  if (lastLinkedProposalConfirmation) {
+    context.campaign_id = lastLinkedProposalConfirmation.campaign_id || context.campaign_id;
+    context.demand_id = lastLinkedProposalConfirmation.demand_id;
+    context.demand_entry_id = lastLinkedProposalConfirmation.demand_entry_id || context.demand_entry_id;
+    context.proposal_id = lastLinkedProposalConfirmation.proposal_id;
+    context.proposal_content_sha256 = lastLinkedProposalConfirmation.proposal_content_sha256;
+  }
+  setWorkflowContext(context);
   fillWorkflowInfluencers(activeWorkflowContext);
 }
 
@@ -3246,6 +3353,12 @@ async function analyzeDemandAI() {
     return;
   }
   if (!out || !hint) return;
+  clearLinkedProposalConfirmation();
+  lastProposalDraftAudit = null;
+  lastProposalAI = null;
+  lastProposalContext = null;
+  lastProp = '';
+  proposalGenerationSequence += 1;
   hint.textContent = 'Analyzing...';
   if (status) status.innerHTML = 'AI 正在分析需求...';
   var source = uploadedDemandContent || [
@@ -3316,6 +3429,8 @@ function syncCurDemandFromAnalysis() {
   var demand = getEditedDemand();
   curDemand = {
     customer_id: activeWorkflowContext?.customer_id || '',
+    opportunity_id: activeWorkflowContext?.opportunity_id || '',
+    campaign_id: activeWorkflowContext?.campaign_id || '',
     brand: demand.brand || '',
     company: demand.company || '',
     product: demand.product || '',
@@ -3345,6 +3460,8 @@ function resetDemand() {
   curDemand = null;
   activeWorkflowContext = null;
   lastProposalContext = null;
+  lastProposalDraftAudit = null;
+  clearLinkedProposalConfirmation();
   lastProposalAI = null;
   lastProp = '';
   proposalGenerationSequence += 1;
@@ -4146,6 +4263,8 @@ function switchPage(id, options) {
   if (id === 'm3') {
     activeWorkflowContext = null;
     lastProposalContext = null;
+    lastProposalDraftAudit = null;
+    clearLinkedProposalConfirmation();
     proposalGenerationSequence += 1;
   }
   if (window.TMNavigation) {

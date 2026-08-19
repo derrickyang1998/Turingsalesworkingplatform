@@ -1182,6 +1182,28 @@ app.post('/api/proposals', authMiddleware, (req, res) => {
   }
 });
 
+app.post('/api/campaigns/:campaign_id/proposal-confirmations', authMiddleware, (req, res) => {
+  try {
+    if (!req.is('application/json')) {
+      throw new CampaignLinkServiceError(
+        415,
+        'UNSUPPORTED_MEDIA_TYPE',
+        'Proposal confirmations require application/json.'
+      );
+    }
+    return sendCampaignLinkResult(res, campaignLinkService.createProposalConfirmation({
+      userId: req.user.id,
+      campaignId: req.params.campaign_id,
+      requestId: campaignLinkRequestId(req),
+      idempotencyKey: req.get('Idempotency-Key'),
+      body: req.body,
+      ipAddress: req.ip
+    }));
+  } catch (error) {
+    return sendCampaignLinkError(req, res, error);
+  }
+});
+
 app.get('/api/proposals', authMiddleware, (req, res) => {
   const proposals = readDemandProposalCollection(db, {
     userId: req.user.id,

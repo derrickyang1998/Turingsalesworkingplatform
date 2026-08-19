@@ -314,6 +314,23 @@ function proposalBody(demandId, overrides = {}) {
   };
 }
 
+function proposalConfirmationBody(overrides = {}) {
+  return {
+    demand: demandBody({ brand_name: 'Task 6A confirmed demand' }),
+    proposal: {
+      template_id: 'task6a-human-confirmed',
+      content: '# Task 6A human edited proposal\n\nUse the edited creator plan.'
+    },
+    draft: {
+      demand_entry_id: 987654,
+      ai_conversation_id: 456,
+      ai_message_id: 789,
+      source: 'human_confirmed'
+    },
+    ...overrides
+  };
+}
+
 function contractFramedSha256(values) {
   const frames = values.map((value) => {
     const payload = Buffer.from(String(value), 'utf8');
@@ -550,6 +567,230 @@ test('linked demand and proposal success commits business archive links event an
         events: 2,
         ledgers: 2
       }
+    });
+  } finally {
+    await fixture.close();
+  }
+});
+
+test('campaign proposal confirmation commits real demand proposal archives links events ledger once and replays', {
+  timeout: 30000
+}, async () => {
+  const fixture = await createFixture('tm-task6a-confirmation-success-');
+  try {
+    const body = proposalConfirmationBody();
+    const requestPath = `/api/campaigns/${fixture.campaignId}/proposal-confirmations`;
+    const created = await jsonRequest(fixture.server, requestPath, {
+      token: fixture.token,
+      idempotencyKey: 'task6a-confirmation-success',
+      body
+    });
+    assert.equal(created.status, 201, created.text);
+    assert.equal(created.body.campaign_id, fixture.campaignId);
+    assert.ok(created.body.demand.id > 0);
+    assert.ok(created.body.demand.link_id > 0);
+    assert.ok(created.body.proposal.id > 0);
+    assert.match(created.body.proposal.content_sha256, /^[0-9a-f]{64}$/);
+    assert.equal(
+      created.body.proposal.content_sha256,
+      sha256Hex(Buffer.from(body.proposal.content, 'utf8'))
+    );
+
+    const proposalRow = fixture.db.prepare(`
+      SELECT id,demand_id,template_id,content
+      FROM proposals
+      WHERE id=?
+    `).get(created.body.proposal.id);
+    assert.deepEqual(proposalRow, {
+      id: created.body.proposal.id,
+      demand_id: created.body.demand.id,
+      template_id: body.proposal.template_id,
+      content: body.proposal.content
+    });
+    assert.notEqual(proposalRow.demand_id, body.draft.demand_entry_id);
+
+    const firstState = fixture.db.prepare(`
+      SELECT
+        (SELECT COUNT(*) FROM demands WHERE brand_name='Task 6A confirmed demand') AS demands,
+        (SELECT COUNT(*) FROM proposals WHERE template_id='task6a-human-confirmed') AS proposals,
+        (SELECT COUNT(*) FROM knowledge_entries
+          WHERE source_type IN ('campaign_demand','campaign_proposal')) AS archives,
+        (SELECT COUNT(*) FROM knowledge_chunks
+          WHERE entry_id IN (
+            SELECT id FROM knowledge_entries
+            WHERE source_type IN ('campaign_demand','campaign_proposal')
+          )) AS chunks,
+        (SELECT COUNT(*) FROM campaign_record_links
+          WHERE campaign_id=@campaignId AND relation_type IN ('demand','proposal')
+            AND revoked_at IS NULL) AS businessLinks,
+        (SELECT COUNT(*) FROM campaign_record_links
+          WHERE campaign_id=@campaignId AND relation_type='knowledge'
+            AND revoked_at IS NULL) AS archiveLinks,
+        (SELECT COUNT(*) FROM campaign_events
+          WHERE campaign_id=@campaignId AND event_type='link_attached'
+            AND source IN ('demand_link','proposal_link')) AS events,
+        (SELECT COUNT(*) FROM activity_log
+          WHERE user_id=@userId AND action IN ('create_demand','generate_proposal')
+            AND (details LIKE '%Task 6A confirmed demand%'
+              OR details LIKE '%task6a-human-confirmed%')) AS activity,
+        (SELECT COUNT(*) FROM request_idempotency
+          WHERE campaign_id=@campaignId
+            AND scope='proposal.create.linked'
+            AND idempotency_key='task6a-confirmation-success'
+            AND state='completed'
+            AND status_code=201) AS ledgers
+    `).get({ campaignId: fixture.campaignId, userId: fixture.userId });
+    assert.deepEqual(firstState, {
+      demands: 1,
+      proposals: 1,
+      archives: 2,
+      chunks: 2,
+      businessLinks: 2,
+      archiveLinks: 2,
+      events: 1,
+      activity: 2,
+      ledgers: 1
+    });
+
+    const replay = await jsonRequest(fixture.server, requestPath, {
+      token: fixture.token,
+      idempotencyKey: 'task6a-confirmation-success',
+      body
+    });
+    const conflict = await jsonRequest(fixture.server, requestPath, {
+      token: fixture.token,
+      idempotencyKey: 'task6a-confirmation-success',
+      body: proposalConfirmationBody({
+        proposal: {
+          template_id: 'task6a-human-confirmed',
+          content: '# Task 6A changed human proposal'
+        }
+      })
+    });
+    const secondState = fixture.db.prepare(`
+      SELECT
+        (SELECT COUNT(*) FROM demands WHERE brand_name='Task 6A confirmed demand') AS demands,
+        (SELECT COUNT(*) FROM proposals WHERE template_id='task6a-human-confirmed') AS proposals,
+        (SELECT COUNT(*) FROM knowledge_entries
+          WHERE source_type IN ('campaign_demand','campaign_proposal')) AS archives,
+        (SELECT COUNT(*) FROM campaign_record_links WHERE campaign_id=@campaignId) AS links,
+        (SELECT COUNT(*) FROM campaign_events WHERE campaign_id=@campaignId) AS events,
+        (SELECT COUNT(*) FROM request_idempotency
+          WHERE campaign_id=@campaignId
+            AND scope='proposal.create.linked') AS ledgers
+    `).get({ campaignId: fixture.campaignId });
+    assert.equal(replay.status, 201, replay.text);
+    assert.deepEqual(replay.body, created.body);
+    assert.deepEqual(responseSummary(conflict), {
+      status: 409,
+      code: 'IDEMPOTENCY_KEY_REUSED'
+    });
+    assert.deepEqual(secondState, {
+      demands: 1,
+      proposals: 1,
+      archives: 2,
+      links: 4,
+      events: 1,
+      ledgers: 1
+    });
+  } finally {
+    await fixture.close();
+  }
+});
+
+test('campaign proposal confirmation replay reauthorizes after campaign access is revoked', {
+  timeout: 30000
+}, async () => {
+  const fixture = await createFixture('tm-task6a-confirmation-revoked-');
+  try {
+    const body = proposalConfirmationBody({
+      demand: demandBody({ brand_name: 'Task 6A revoked replay demand' }),
+      proposal: {
+        template_id: 'task6a-revoked-replay',
+        content: '# Task 6A revoked replay proposal'
+      }
+    });
+    const requestPath = `/api/campaigns/${fixture.campaignId}/proposal-confirmations`;
+    const created = await jsonRequest(fixture.server, requestPath, {
+      token: fixture.token,
+      idempotencyKey: 'task6a-confirmation-revoked',
+      body
+    });
+    assert.equal(created.status, 201, created.text);
+
+    transferCampaignAway(fixture);
+    const replay = await jsonRequest(fixture.server, requestPath, {
+      token: fixture.token,
+      idempotencyKey: 'task6a-confirmation-revoked',
+      body
+    });
+    assert.deepEqual(responseSummary(replay), {
+      status: 403,
+      code: 'CAMPAIGN_FORBIDDEN'
+    });
+  } finally {
+    await fixture.close();
+  }
+});
+
+test('campaign proposal confirmation archive failure rolls back every linked artifact and ledger', {
+  timeout: 30000
+}, async () => {
+  const fixture = await createFixture('tm-task6a-confirmation-rollback-');
+  try {
+    fixture.db.exec(`
+      CREATE TRIGGER task6a_fail_confirmation_archive
+      BEFORE INSERT ON knowledge_entries
+      WHEN NEW.source_type IN ('campaign_demand','campaign_proposal')
+      BEGIN SELECT RAISE(ABORT,'injected task6a archive failure'); END
+    `);
+    const response = await jsonRequest(
+      fixture.server,
+      `/api/campaigns/${fixture.campaignId}/proposal-confirmations`,
+      {
+        token: fixture.token,
+        idempotencyKey: 'task6a-confirmation-rollback',
+        body: proposalConfirmationBody({
+          demand: demandBody({ brand_name: 'Task 6A rollback demand' }),
+          proposal: {
+            template_id: 'task6a-rollback-proposal',
+            content: '# Task 6A rollback proposal'
+          }
+        })
+      }
+    );
+    assert.equal(response.status, 500, response.text);
+    assert.equal(response.body.code, 'AUDIT_PERSISTENCE_FAILED');
+    assert.equal(JSON.stringify(response.body).includes('task6a archive failure'), false);
+    assert.deepEqual(fixture.db.prepare(`
+      SELECT
+        (SELECT COUNT(*) FROM demands WHERE brand_name='Task 6A rollback demand') AS demands,
+        (SELECT COUNT(*) FROM proposals WHERE template_id='task6a-rollback-proposal') AS proposals,
+        (SELECT COUNT(*) FROM knowledge_entries
+          WHERE source_type IN ('campaign_demand','campaign_proposal')) AS archives,
+        (SELECT COUNT(*) FROM knowledge_chunks
+          WHERE entry_id IN (
+            SELECT id FROM knowledge_entries
+            WHERE source_type IN ('campaign_demand','campaign_proposal')
+          )) AS chunks,
+        (SELECT COUNT(*) FROM campaign_record_links WHERE campaign_id=@campaignId) AS links,
+        (SELECT COUNT(*) FROM campaign_events WHERE campaign_id=@campaignId) AS events,
+        (SELECT COUNT(*) FROM activity_log
+          WHERE user_id=@userId AND action IN ('create_demand','generate_proposal')
+            AND (details LIKE '%Task 6A rollback demand%'
+              OR details LIKE '%task6a-rollback-proposal%')) AS activity,
+        (SELECT COUNT(*) FROM request_idempotency
+          WHERE campaign_id=@campaignId
+            AND idempotency_key='task6a-confirmation-rollback') AS ledgers
+    `).get({ campaignId: fixture.campaignId, userId: fixture.userId }), {
+      demands: 0,
+      proposals: 0,
+      archives: 0,
+      chunks: 0,
+      links: 0,
+      events: 0,
+      activity: 0,
+      ledgers: 0
     });
   } finally {
     await fixture.close();

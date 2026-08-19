@@ -58,6 +58,31 @@ const PROPOSAL_FIELDS = Object.freeze([
   'template_id',
   'content'
 ]);
+const PROPOSAL_CONFIRMATION_FIELDS = Object.freeze([
+  'demand',
+  'proposal',
+  'draft'
+]);
+const PROPOSAL_CONFIRMATION_DEMAND_FIELDS = Object.freeze([
+  'brand_name',
+  'company_name',
+  'product_name',
+  'industry',
+  'budget',
+  'target_market',
+  'platform',
+  'data_json'
+]);
+const PROPOSAL_CONFIRMATION_PROPOSAL_FIELDS = Object.freeze([
+  'template_id',
+  'content'
+]);
+const PROPOSAL_CONFIRMATION_DRAFT_FIELDS = Object.freeze([
+  'demand_entry_id',
+  'ai_conversation_id',
+  'ai_message_id',
+  'source'
+]);
 const KNOWLEDGE_FIELDS = Object.freeze([
   'campaign_id',
   'entry_type',
@@ -156,6 +181,14 @@ function positiveSafeId(value, label) {
     throw invalidInput(`${label} is invalid.`);
   }
   return value;
+}
+
+function positiveSafeIdOrPathSegment(value, label) {
+  if (typeof value === 'string' && /^[1-9][0-9]{0,15}$/.test(value)) {
+    const parsed = Number(value);
+    if (Number.isSafeInteger(parsed) && String(parsed) === value) return parsed;
+  }
+  return positiveSafeId(value, label);
 }
 
 function validScalarText(value, label, { required = false } = {}) {
@@ -317,6 +350,76 @@ function normalizeProposalBody(value) {
     demand_id: positiveSafeId(body.demand_id, 'demand_id'),
     template_id: validScalarText(body.template_id, 'template_id', { required: true }),
     content: validScalarText(body.content, 'content', { required: true })
+  });
+}
+
+function normalizeProposalConfirmationDemand(value, campaignId) {
+  const body = snapshotBody(
+    value,
+    PROPOSAL_CONFIRMATION_DEMAND_FIELDS,
+    []
+  );
+  return Object.freeze({
+    campaign_id: campaignId,
+    brand_name: validScalarText(body.brand_name, 'demand.brand_name'),
+    company_name: validScalarText(body.company_name, 'demand.company_name'),
+    product_name: validScalarText(body.product_name, 'demand.product_name'),
+    industry: validScalarText(body.industry, 'demand.industry'),
+    budget: validScalarText(body.budget, 'demand.budget'),
+    target_market: validScalarText(body.target_market, 'demand.target_market'),
+    platform: validScalarText(body.platform, 'demand.platform'),
+    data_json: Object.hasOwn(body, 'data_json')
+      ? snapshotJsonValue(body.data_json, 'demand.data_json')
+      : null
+  });
+}
+
+function normalizeProposalConfirmationProposal(value) {
+  const body = snapshotBody(
+    value,
+    PROPOSAL_CONFIRMATION_PROPOSAL_FIELDS,
+    ['template_id', 'content']
+  );
+  return Object.freeze({
+    template_id: requiredNonemptyText(body.template_id, 'proposal.template_id'),
+    content: requiredNonemptyText(body.content, 'proposal.content')
+  });
+}
+
+function normalizeProposalConfirmationDraft(value) {
+  if (value === undefined) return null;
+  const body = snapshotBody(
+    value,
+    PROPOSAL_CONFIRMATION_DRAFT_FIELDS,
+    []
+  );
+  return Object.freeze({
+    demand_entry_id: Object.hasOwn(body, 'demand_entry_id')
+      ? positiveSafeId(body.demand_entry_id, 'draft.demand_entry_id')
+      : null,
+    ai_conversation_id: Object.hasOwn(body, 'ai_conversation_id')
+      ? positiveSafeId(body.ai_conversation_id, 'draft.ai_conversation_id')
+      : null,
+    ai_message_id: Object.hasOwn(body, 'ai_message_id')
+      ? positiveSafeId(body.ai_message_id, 'draft.ai_message_id')
+      : null,
+    source: Object.hasOwn(body, 'source')
+      ? validScalarText(body.source, 'draft.source', { required: true })
+      : null
+  });
+}
+
+function normalizeProposalConfirmationBody(value, campaignId) {
+  const body = snapshotBody(
+    value,
+    PROPOSAL_CONFIRMATION_FIELDS,
+    ['demand', 'proposal']
+  );
+  return Object.freeze({
+    campaign_id: campaignId,
+    demand: normalizeProposalConfirmationDemand(body.demand, campaignId),
+    proposal: normalizeProposalConfirmationProposal(body.proposal),
+    draft: normalizeProposalConfirmationDraft(body.draft)
   });
 }
 
@@ -1061,6 +1164,41 @@ function proposalContentSha256(content) {
   return sha256Hex(canonicalJsonBytes(proposalContent));
 }
 
+function proposalTextContentSha256(content) {
+  if (typeof content !== 'string') throw invalidInput('proposal content is invalid.');
+  return sha256Hex(Buffer.from(content, 'utf8'));
+}
+
+function proposalArchiveProjection(content, { allowTextContent = false } = {}) {
+  try {
+    const proposalContent = parseCommittedJson(content, 'committed proposal content');
+    if (
+      proposalContent !== null &&
+      typeof proposalContent === 'object' &&
+      !Array.isArray(proposalContent)
+    ) {
+      return {
+        kind: 'json',
+        title: requiredNonemptyText(
+          proposalContent.title,
+          'committed proposal title'
+        ),
+        content: proposalContent,
+        contentSha256: sha256Hex(canonicalJsonBytes(proposalContent))
+      };
+    }
+  } catch (_error) {
+    if (!allowTextContent) throw invalidInput('committed proposal content is invalid.');
+  }
+  if (!allowTextContent) throw invalidInput('committed proposal content is invalid.');
+  return {
+    kind: 'text',
+    title: 'Human-confirmed proposal',
+    content,
+    contentSha256: proposalTextContentSha256(content)
+  };
+}
+
 function archiveSummary(content) {
   return Array.from(content.replace(/\s+/gu, ' ').trim()).slice(0, 1000).join('');
 }
@@ -1187,29 +1325,25 @@ function archiveDemand(db, values) {
 
 function archiveProposal(db, values) {
   const proposal = readCommittedProposal(db, values.proposalId);
-  const proposalContent = parseCommittedJson(
-    proposal.content,
-    'committed proposal content'
-  );
-  if (
-    proposalContent === null ||
-    typeof proposalContent !== 'object' ||
-    Array.isArray(proposalContent)
-  ) {
-    throw invalidInput('committed proposal content is invalid.');
-  }
-  const proposalTitle = requiredNonemptyText(
-    proposalContent.title,
-    'committed proposal title'
-  );
-  const contentSha256 = proposalContentSha256(proposal.content);
-  const content = JSON.stringify({
-    id: positiveSafeId(proposal.id, 'committed proposal id'),
-    demand_id: positiveSafeId(proposal.demand_id, 'committed proposal demand_id'),
-    title: proposalTitle,
-    content_sha256: contentSha256,
-    content: proposalContent
+  const projection = proposalArchiveProjection(proposal.content, {
+    allowTextContent: values.allowTextContent === true
   });
+  const content = projection.kind === 'json'
+    ? JSON.stringify({
+        id: positiveSafeId(proposal.id, 'committed proposal id'),
+        demand_id: positiveSafeId(proposal.demand_id, 'committed proposal demand_id'),
+        title: projection.title,
+        content_sha256: projection.contentSha256,
+        content: projection.content
+      })
+    : JSON.stringify({
+        id: positiveSafeId(proposal.id, 'committed proposal id'),
+        demand_id: positiveSafeId(proposal.demand_id, 'committed proposal demand_id'),
+        title: projection.title,
+        content_sha256: projection.contentSha256,
+        content_kind: projection.kind,
+        content: projection.content
+      });
   const written = knowledgeService.writeCampaignKnowledgeInTransaction(db, {
     organizationId: values.organizationId,
     campaignId: values.campaignId,
@@ -1231,10 +1365,22 @@ function archiveProposal(db, values) {
   Object.defineProperty(written, 'contentSha256', {
     configurable: false,
     enumerable: true,
-    value: contentSha256,
+    value: projection.contentSha256,
     writable: false
   });
   return written;
+}
+
+function proposalConfirmationAuditMetadata(draft) {
+  const metadata = {};
+  if (!draft) return metadata;
+  if (draft.demand_entry_id !== null) metadata.demand_entry_id = draft.demand_entry_id;
+  if (draft.ai_conversation_id !== null) {
+    metadata.ai_conversation_id = draft.ai_conversation_id;
+  }
+  if (draft.ai_message_id !== null) metadata.ai_message_id = draft.ai_message_id;
+  if (draft.source !== null) metadata.source = draft.source;
+  return metadata;
 }
 
 function createCampaignLinkService(db) {
@@ -1329,6 +1475,152 @@ function createCampaignLinkService(db) {
           id: demandId,
           campaign_id: campaignId,
           link_id: producerLink.id
+        }
+      };
+    });
+  }
+
+  function createProposalConfirmation(input) {
+    const campaignId = positiveSafeIdOrPathSegment(input.campaignId, 'campaign_id');
+    const body = normalizeProposalConfirmationBody(input.body, campaignId);
+    return runLinkedMutation(db, {
+      userId: input.userId,
+      campaignId,
+      requestId: input.requestId,
+      idempotencyKey: input.idempotencyKey,
+      path: `/api/campaigns/${campaignId}/proposal-confirmations`,
+      scope: 'proposal.create.linked',
+      body
+    }, ({ access, auditFingerprint, campaignId, userId }) => {
+      assertCampaignWritable(access);
+      const dataJson = body.demand.data_json === null
+        ? null
+        : JSON.stringify(body.demand.data_json);
+      const demandResult = db.prepare(`
+        INSERT INTO demands (
+          user_id,brand_name,company_name,product_name,industry,budget,
+          target_market,platform,data_json
+        ) VALUES (?,?,?,?,?,?,?,?,?)
+      `).run(
+        userId,
+        body.demand.brand_name,
+        body.demand.company_name,
+        body.demand.product_name,
+        body.demand.industry,
+        body.demand.budget,
+        body.demand.target_market,
+        body.demand.platform,
+        dataJson
+      );
+      const demandId = Number(demandResult.lastInsertRowid);
+      db.prepare(`
+        INSERT INTO activity_log (user_id,action,module,details,ip_address)
+        VALUES (?,?,?,?,?)
+      `).run(
+        userId,
+        'create_demand',
+        'demand',
+        `Created demand for ${body.demand.brand_name || ''}`,
+        input.ipAddress || null
+      );
+      const demandArchive = archiveDemand(db, {
+        organizationId: access.campaign.org_id,
+        campaignId,
+        userId,
+        demandId,
+        body: body.demand
+      });
+      const demandLink = insertRecordLink(db, {
+        organizationId: access.campaign.org_id,
+        campaignId,
+        userId,
+        recordType: 'demand',
+        recordId: demandId,
+        relationType: 'demand',
+        metadata: proposalConfirmationAuditMetadata(body.draft)
+      });
+      insertRecordLink(db, {
+        organizationId: access.campaign.org_id,
+        campaignId,
+        userId,
+        recordType: 'knowledge_entry',
+        recordId: demandArchive.entry.id,
+        relationType: 'knowledge',
+        metadata: proposalConfirmationAuditMetadata(body.draft)
+      });
+      applyProducerGaugePlan(db, demandArchive);
+
+      const proposalResult = db.prepare(`
+        INSERT INTO proposals (user_id,demand_id,template_id,content)
+        VALUES (?,?,?,?)
+      `).run(
+        userId,
+        demandId,
+        body.proposal.template_id,
+        body.proposal.content
+      );
+      const proposalId = Number(proposalResult.lastInsertRowid);
+      db.prepare(`
+        INSERT INTO activity_log (user_id,action,module,details,ip_address)
+        VALUES (?,?,?,?,?)
+      `).run(
+        userId,
+        'generate_proposal',
+        'proposal',
+        `Generated proposal with template ${body.proposal.template_id}`,
+        input.ipAddress || null
+      );
+      const proposalArchive = archiveProposal(db, {
+        organizationId: access.campaign.org_id,
+        campaignId,
+        userId,
+        proposalId,
+        allowTextContent: true
+      });
+      const proposalLink = insertRecordLink(db, {
+        organizationId: access.campaign.org_id,
+        campaignId,
+        userId,
+        recordType: 'proposal',
+        recordId: proposalId,
+        relationType: 'proposal',
+        metadata: proposalConfirmationAuditMetadata(body.draft)
+      });
+      insertRecordLink(db, {
+        organizationId: access.campaign.org_id,
+        campaignId,
+        userId,
+        recordType: 'knowledge_entry',
+        recordId: proposalArchive.entry.id,
+        relationType: 'knowledge',
+        metadata: proposalConfirmationAuditMetadata(body.draft)
+      });
+      insertLinkEvent(db, {
+        organizationId: access.campaign.org_id,
+        campaignId,
+        userId,
+        requestId: input.requestId,
+        auditFingerprint,
+        source: 'proposal_link',
+        reason: 'Linked proposal',
+        recordType: 'proposal',
+        recordId: proposalId,
+        relationType: 'proposal',
+        producerLink: proposalLink
+      });
+      applyProducerGaugePlan(db, proposalArchive);
+      return {
+        status: 201,
+        body: {
+          campaign_id: campaignId,
+          demand: {
+            id: demandId,
+            link_id: demandLink.id
+          },
+          proposal: {
+            id: proposalId,
+            content_sha256: proposalArchive.contentSha256
+          }
         }
       };
     });
@@ -1658,6 +1950,7 @@ function createCampaignLinkService(db) {
 
   return Object.freeze({
     createDemand,
+    createProposalConfirmation,
     createProposal,
     createKnowledge,
     createMultipartKnowledgeFinalizer,

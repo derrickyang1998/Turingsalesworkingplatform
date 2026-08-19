@@ -117,6 +117,11 @@ test('proposal route forwards controls and latest M3 uses AI draft then explicit
   assert.doesNotMatch(saveBlock, /var context\s*=\s*activeWorkflowContext/);
   assert.match(saveBlock, /archiveCustomerArtifact/);
   assert.match(saveBlock, /apiFetch\(["']\/proposals["']/);
+  assert.match(saveBlock, /apiFetch\(['"`]\/campaigns\/['"`]\s*\+\s*campaignId\s*\+\s*['"`]\/proposal-confirmations['"`]/);
+  assert.match(saveBlock, /headers:\s*\{\s*'Idempotency-Key':\s*linkedKey\s*\}/);
+  assert.match(saveBlock, /lastLinkedProposalConfirmation\s*=\s*\{/);
+  assert.doesNotMatch(saveBlock, /campaign_id\s*:\s*null/);
+  assert.doesNotMatch(saveBlock, /demand_id\s*:\s*lastProposalAI\.demand_entry/);
 
   const resetStart = appSource.indexOf('function resetDemand(');
   const resetEnd = appSource.indexOf('\n}', resetStart);
@@ -124,6 +129,7 @@ test('proposal route forwards controls and latest M3 uses AI draft then explicit
   const resetBlock = appSource.slice(resetStart, resetEnd);
   assert.match(resetBlock, /activeWorkflowContext\s*=\s*null/);
   assert.match(resetBlock, /lastProposalContext\s*=\s*null/);
+  assert.match(resetBlock, /clearLinkedProposalConfirmation\(\)/);
   assert.match(resetBlock, /proposalGenerationSequence\s*\+=\s*1/);
 
   const workflowStart = appSource.indexOf('function fillWorkflowDemand(');
@@ -135,6 +141,19 @@ test('proposal route forwards controls and latest M3 uses AI draft then explicit
   const switchEnd = appSource.indexOf('\n}', switchStart);
   const switchBlock = appSource.slice(switchStart, switchEnd);
   assert.match(switchBlock, /id\s*===\s*'m3'[\s\S]*activeWorkflowContext\s*=\s*null/);
+  assert.match(switchBlock, /id\s*===\s*'m3'[\s\S]*clearLinkedProposalConfirmation\(\)/);
+
+  const handoffStart = appSource.indexOf('function openProposalToInfluencers(');
+  const handoffEnd = appSource.indexOf('\n}', handoffStart);
+  assert.notEqual(handoffStart, -1);
+  const handoffBlock = appSource.slice(handoffStart, handoffEnd);
+  assert.match(handoffBlock, /lastProposalContext/);
+  assert.match(handoffBlock, /lastLinkedProposalConfirmation/);
+  assert.match(handoffBlock, /campaign_id/);
+  assert.match(handoffBlock, /demand_entry_id/);
+  assert.match(handoffBlock, /demand_id/);
+  assert.match(handoffBlock, /proposal_id/);
+  assert.match(handoffBlock, /proposal_content_sha256/);
 });
 
 test('proposal draft persists only authorized references and preserves degradation reason', async () => {
