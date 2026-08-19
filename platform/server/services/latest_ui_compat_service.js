@@ -244,6 +244,89 @@ async function generateStrategy(db, user, prompt, input, opts) {
   };
 }
 
+function proposalDemandText(body) {
+  let value;
+  if (Object.prototype.hasOwnProperty.call(body, 'demand_content')) value = body.demand_content;
+  else if (Object.prototype.hasOwnProperty.call(body, 'content')) value = body.content;
+  else value = body.demand || {};
+  if (typeof value === 'string') return value.trim();
+  try { return JSON.stringify(value || {}); } catch (e) { return '{}'; }
+}
+
+function proposalTemplateText(template) {
+  if (!template || typeof template !== 'object' || Array.isArray(template)) return '';
+  const sections = Array.isArray(template.sections)
+    ? template.sections.map(function(section) { return String(section || '').trim(); }).filter(Boolean)
+    : [];
+  return [
+    template.name ? 'Template: ' + String(template.name) : '',
+    template.description ? 'Template purpose: ' + String(template.description) : '',
+    sections.length ? 'Requested sections:\n- ' + sections.join('\n- ') : ''
+  ].filter(Boolean).join('\n');
+}
+
+async function generateProposalDraft(db, user, body, opts) {
+  body = body || {};
+  opts = opts || {};
+  const demandText = proposalDemandText(body);
+  const templateText = proposalTemplateText(body.template);
+  const retrievalQuery = [demandText, templateText].filter(Boolean).join('\n\n');
+  const demandTitle = body.title || (
+    body.demand && (body.demand.brand || body.demand.product)
+  ) || '需求方案草稿';
+  const knowledge = opts.knowledgeService || knowledgeService;
+  const demandEntry = knowledge.ingestKnowledge(db, {
+    title: '需求归档：' + demandTitle,
+    summary: compactText(demandText, 240),
+    content: demandText,
+    entry_type: 'demand',
+    source_type: body.source_type || 'proposal_draft_request',
+    source_id: body.demand_id || body.source_id || demandTitle,
+    visibility: body.visibility || 'private',
+    tags: body.tags || ['demand', 'proposal'],
+    business_type: 'demand',
+    business_id: body.demand_id || '',
+    created_by: user.id,
+    actor_role: user.role,
+    metadata: { demand: body.demand || null, template: body.template || null }
+  });
+  const message = [
+    '请基于以下客户需求和平台知识库，生成可编辑的海外红人营销方案草稿。',
+    '必须包含：执行摘要、市场/竞品判断、达人类型与平台建议、60-30-10预算建议、执行时间线、KPI、风险与下一步确认项。',
+    '这是待人工编辑和确认的草稿，不要将其描述为最终已确认方案。',
+    '',
+    retrievalQuery
+  ].join('\n');
+  const aiService = opts.aiService || require('./ai_service');
+  const knowledgeLimit = Object.prototype.hasOwnProperty.call(opts, 'knowledgeLimit')
+    ? opts.knowledgeLimit
+    : body.knowledge_limit;
+  const allowWeb = Object.prototype.hasOwnProperty.call(opts, 'allowWeb')
+    ? opts.allowWeb === true
+    : body.allow_web === true;
+  const result = await aiService.handleChat(db, {
+    user,
+    message,
+    ragQuery: retrievalQuery,
+    webQuery: retrievalQuery,
+    allowWeb,
+    source_module: 'proposal',
+    summaryVisibility: opts.summaryVisibility || body.summary_visibility || 'private',
+    knowledgeLimit: normalizeKnowledgeLimit(knowledgeLimit, 10),
+    max_tokens: opts.max_tokens || 3000,
+    temperature: 0.3,
+    provider: opts.provider,
+    webSearchProvider: opts.webSearchProvider
+  });
+  return {
+    draft: result.answer,
+    demand_entry: demandEntry,
+    fallback: !!result.degraded,
+    warning: result.reason || '',
+    ai: result
+  };
+}
+
 async function generateDemandAnalysis(prompt, input, fileName, opts) {
   opts = opts || {};
   const fallback = inferDemandAnalysis(input || prompt, '', fileName);
@@ -439,6 +522,7 @@ module.exports = {
   parseDemandFile,
   inferDemandAnalysis,
   generateStrategy,
+  generateProposalDraft,
   generateDemandAnalysis,
   generatePptOutline,
   similarKnowledge

@@ -9,7 +9,8 @@ let AUTH_GENERATION = 0;
 let currentAIConversationId = null;
 let selectedKnowledgeEntryIds = [];
 let BRANDS = [], INFLUENCERS = [], TEMPLATES = [], CBLOCKS = {};
-let curDemand = null, selTpl = null, lastMatch = [], lastProp = "";
+let curDemand = null, selTpl = null, lastMatch = [], lastProp = "", lastProposalAI = null;
+let lastProposalContext = null, proposalGenerationSequence = 0;
 let uploadedFileContent = "";
 let lastAIStrategyRaw = "";
 let chatHistory = [{role: "system", content: "You are the TuringMarket AI assistant. Answer in Chinese, concise and professional."}];
@@ -898,6 +899,7 @@ function fillWorkflowStrategy(context) {
 function fillWorkflowDemand(context) {
   switchPage('m3');
   resetDemand();
+  setWorkflowContext(context);
   var mapping = {
     d_brand: context.brand || '',
     d_product: context.product || '',
@@ -953,7 +955,7 @@ function openWorkflowFromCustomer(target, opportunityId) {
   if (target === 'm3') return fillWorkflowDemand(context);
   if (target === 'm4') return fillWorkflowInfluencers(context);
 }
-async function archiveCustomerArtifact(artifactType, title, content, context) {
+async function archiveCustomerArtifact(artifactType, title, content, context, extraTags) {
   context = context || activeWorkflowContext || {};
   var customerId = context.customer_id || (curDemand && curDemand.customer_id);
   if (!customerId) {
@@ -964,7 +966,9 @@ async function archiveCustomerArtifact(artifactType, title, content, context) {
     toast('没有可保存的内容', 'error');
     return null;
   }
-  var tags = [context.brand, context.company, context.industry, artifactType].filter(Boolean);
+  var tags = [context.brand, context.company, context.industry, artifactType]
+    .concat(Array.isArray(extraTags) ? extraTags : [])
+    .filter(Boolean);
   var resp = await apiFetch('/customers/' + customerId + '/archive-result', {
     method: 'POST',
     body: JSON.stringify({
@@ -1030,9 +1034,44 @@ async function saveCurrentStrategy() {
   } catch(e) { toast('保存策略失败: ' + e.message, 'error'); }
 }
 async function saveCurrentProposal() {
+  var button = document.getElementById('confirmProposalBtn');
   try {
-    await archiveCustomerArtifact('proposal', (curDemand?.brand || activeWorkflowContext?.brand || '客户') + ' 红人营销方案', lastProp, activeWorkflowContext);
-  } catch(e) { toast('保存方案失败: ' + e.message, 'error'); }
+    var content = getCurrentProposalDraft();
+    if (!content || !String(content).trim()) throw new Error('没有可确认的方案内容');
+    if (button) { button.disabled = true; button.textContent = '正在归档...'; }
+    var context = lastProposalContext || {};
+    var customerId = context.customer_id;
+    var aiTags = [];
+    if (lastProposalAI && lastProposalAI.conversation_id) aiTags.push('ai-conversation-' + lastProposalAI.conversation_id);
+    if (lastProposalAI && lastProposalAI.message_id) aiTags.push('ai-message-' + lastProposalAI.message_id);
+    if (customerId) {
+      await archiveCustomerArtifact(
+        'proposal',
+        (curDemand?.brand || context.brand || '客户') + ' 红人营销方案',
+        content,
+        context,
+        aiTags
+      );
+    } else {
+      var response = await apiFetch('/proposals', {
+        method: 'POST',
+        body: JSON.stringify({
+          demand_id: null,
+          template_id: selTpl || 'custom',
+          content: content
+        })
+      });
+      if (!response.ok) {
+        var error = await response.json().catch(function() { return {}; });
+        throw new Error(error.error || '方案归档失败');
+      }
+      toast('方案已确认并归档到知识库');
+    }
+    if (button) button.textContent = '已确认归档';
+  } catch(e) {
+    if (button) { button.disabled = false; button.textContent = '确认方案并归档'; }
+    toast('确认方案失败: ' + e.message, 'error');
+  }
 }
 function renderCustomerSidebar(d) {
   var c = d.customer;
@@ -1513,7 +1552,13 @@ function initM3() {
 function goAnalyze() {
   var brand = gv("d_brand"), product = gv("d_product"), usp = gv("d_usp");
   if (!brand || !product || !usp) { toast("请至少填写品牌、产品、USP", "error"); return; }
-  curDemand = { brand: brand, company: gv("d_company"), product: product, usp: usp, budget: gv("d_budget"), platform: gv("d_platform"), area: gv("d_area"), category: gv("d_category"), competitors: gv("d_competitors"), notes: gv("d_notes") };
+  var workflowCustomerId = activeWorkflowContext && activeWorkflowContext.customer_id
+    ? activeWorkflowContext.customer_id
+    : '';
+  curDemand = { customer_id: workflowCustomerId, brand: brand, company: gv("d_company"), product: product, usp: usp, budget: gv("d_budget"), platform: gv("d_platform"), area: gv("d_area"), category: gv("d_category"), competitors: gv("d_competitors"), notes: gv("d_notes") };
+  lastProposalAI = null;
+  lastProposalContext = null;
+  lastProp = '';
   document.getElementById("analysisResult").innerHTML = "<table style='width:100%;font-size:12px'><tr><td><strong>品牌:</strong> " + esc(brand) + "</td><td><strong>产品:</strong> " + esc(product) + "</td></tr><tr><td><strong>卖点:</strong> " + esc(usp) + "</td><td><strong>预算:</strong> " + (curDemand.budget || "待定") + "</td></tr></table>";
   document.getElementById("m3s1").classList.add("hidden");
   document.getElementById("m3s2").classList.remove("hidden");
@@ -1547,12 +1592,44 @@ function getSelectedProposalTemplate() {
   }
   return TEMPLATES.find(function(t) { return t.id === selTpl; });
 }
+function renderProposalAIReferences(ai, warning) {
+  var refs = ai && Array.isArray(ai.knowledge_references) ? ai.knowledge_references : [];
+  var web = ai && Array.isArray(ai.web_results) ? ai.web_results : [];
+  if (!refs.length && !web.length && !warning) return '';
+  var html = '<div class="card" style="margin-top:12px">';
+  html += '<h3 style="font-size:14px;margin-bottom:8px">本次草稿依据</h3>';
+  if (warning) html += '<p style="font-size:12px;color:var(--amber);margin-bottom:8px">' + esc(warning) + '</p>';
+  if (refs.length) {
+    html += '<div style="font-size:12px;margin-bottom:8px"><strong>知识库引用</strong></div>';
+    html += refs.slice(0, 6).map(function(ref, index) {
+      return '<div style="font-size:12px;padding:6px 0;border-bottom:1px solid var(--border)">KB-' + (index + 1) + ' · ' + esc(ref.title || ('知识条目 #' + ref.id)) + '</div>';
+    }).join('');
+  }
+  if (web.length) {
+    html += '<div style="font-size:12px;margin:10px 0 4px"><strong>联网来源</strong></div>';
+    html += web.slice(0, 4).map(function(item, index) {
+      var label = item.title || item.url || 'Web source';
+      return '<div style="font-size:12px;padding:6px 0">WEB-' + (index + 1) + ' · ' + esc(label) + (item.url ? '<div style="color:var(--text2);word-break:break-all">' + esc(item.url) + '</div>' : '') + '</div>';
+    }).join('');
+  }
+  html += '</div>';
+  return html;
+}
 async function generateProposal() {
   if (!curDemand && typeof syncCurDemandFromAnalysis === 'function') syncCurDemandFromAnalysis();
   if (!curDemand) { toast("请先完成需求分析", "error"); return; }
   if (!selTpl) { toast("请选择方案模板", "error"); return; }
   var tpl = getSelectedProposalTemplate();
   if (!tpl) return;
+  var generationId = ++proposalGenerationSequence;
+  lastProposalAI = null;
+  var generationContext = {};
+  if (curDemand.customer_id) {
+    generationContext = Object.assign({}, activeWorkflowContext || {}, {
+      customer_id: curDemand.customer_id,
+      brand: curDemand.brand || (activeWorkflowContext && activeWorkflowContext.brand) || ''
+    });
+  }
   var similarCases = [];
   try {
     similarCases = await fetchSimilarKnowledge(curDemand, 'proposal');
@@ -1566,11 +1643,40 @@ async function generateProposal() {
       h += (idx + 1) + ". 案例 #" + e.id + "（" + e.entry_type + "，匹配 " + Number(e.similarity_score || 0).toFixed(1) + "）: " + String(e.content || '').replace(/\s+/g, ' ').slice(0, 260) + nl;
     });
   }
-  lastProp = h;
+  var localDraft = h;
+  var proposalWarning = '';
+  try {
+    var response = await apiFetch('/ai/proposal-draft', {
+      method: 'POST',
+      body: JSON.stringify({
+        title: (curDemand.brand || curDemand.product || '需求') + ' 红人营销方案',
+        demand: curDemand,
+        demand_content: JSON.stringify(curDemand),
+        template: tpl,
+        allow_web: false,
+        visibility: 'private',
+        summary_visibility: 'private'
+      })
+    });
+    var d = await response.json().catch(function() { return {}; });
+    if (!response.ok) throw new Error(d.error || 'AI 方案草稿生成失败');
+    if (!d.draft || !String(d.draft).trim()) throw new Error('AI 返回了空方案草稿');
+    if (generationId !== proposalGenerationSequence) return;
+    lastProp = d.draft;
+    lastProposalAI = d.ai || null;
+    lastProposalContext = generationContext;
+    proposalWarning = d.fallback ? (d.warning || 'AI 服务处于降级模式，草稿仍可继续编辑确认') : '';
+  } catch (error) {
+    if (generationId !== proposalGenerationSequence) return;
+    lastProp = localDraft;
+    lastProposalContext = generationContext;
+    proposalWarning = 'AI 草稿暂不可用，已提供基础可编辑草稿：' + error.message;
+  }
   var proposalOut = document.getElementById("proposalOutput") || document.getElementById("propResult");
-  var saveBtn = (curDemand.customer_id || activeWorkflowContext?.customer_id) ? '<button class="btn btn-primary btn-sm" onclick="saveCurrentProposal()">保存到客户记录和知识库</button>' : '';
-  if (proposalOut) proposalOut.innerHTML = renderKnowledgeReuse(similarCases, '本次方案参考的历史案例') + '<div class="card"><div style="display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:8px"><h3 style="margin:0">✅ 方案已生成，可直接编辑</h3><span style="font-size:11px;color:var(--text2)">编辑后下载、复制、生成 PPT 都会使用最新草稿</span></div><textarea id="proposalEditor" class="tm-proposal-editor" oninput="updateProposalDraftFromEditor()">' + esc(h) + '</textarea><div id="proposalTextMirror" style="font-size:1px;line-height:1px;max-height:1px;overflow:hidden;opacity:.01;white-space:pre-wrap">' + esc(h) + '</div><div class="btn-group" style="margin-top:10px"><button class="btn btn-primary btn-sm" onclick="downloadProposal()">📥 下载 MD</button><button class="btn btn-sm" onclick="copyProposal()">📋 复制</button><button class="btn btn-sm" onclick="openProposalToInfluencers()">👥 去匹配达人</button>' + saveBtn + '</div></div>';
-  toast("方案已生成");
+  var saveBtn = '<button class="btn btn-primary btn-sm" id="confirmProposalBtn" onclick="saveCurrentProposal()">确认方案并归档</button>';
+  var auditHtml = renderProposalAIReferences(lastProposalAI, proposalWarning);
+  if (proposalOut) proposalOut.innerHTML = renderKnowledgeReuse(similarCases, '本次方案参考的历史案例') + auditHtml + '<div class="card"><div style="display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:8px"><h3 style="margin:0">AI 草稿已生成，等待人工确认</h3><span style="font-size:11px;color:var(--text2)">下载、复制、确认和生成 PPT 均使用当前编辑内容</span></div><textarea id="proposalEditor" class="tm-proposal-editor" oninput="updateProposalDraftFromEditor()">' + esc(lastProp) + '</textarea><div id="proposalTextMirror" style="font-size:1px;line-height:1px;max-height:1px;overflow:hidden;opacity:.01;white-space:pre-wrap">' + esc(lastProp) + '</div><div class="btn-group" style="margin-top:10px"><button class="btn btn-sm" onclick="downloadProposal()">下载 MD</button><button class="btn btn-sm" onclick="copyProposal()">复制</button><button class="btn btn-sm" onclick="openProposalToInfluencers()">去匹配达人</button>' + saveBtn + '</div></div>';
+  toast(lastProposalAI ? 'AI 方案草稿已生成，请编辑后确认' : '基础方案草稿已生成，请编辑后确认');
 }
 function updateProposalDraftFromEditor() {
   var editor = document.getElementById('proposalEditor');
@@ -3237,6 +3343,11 @@ function resetDemand() {
   uploadedDemandFileName = '';
   demandAnalysisResult = '';
   curDemand = null;
+  activeWorkflowContext = null;
+  lastProposalContext = null;
+  lastProposalAI = null;
+  lastProp = '';
+  proposalGenerationSequence += 1;
   document.getElementById('m3s2').classList.add('hidden');
   document.getElementById('m3s3').classList.add('hidden');
   document.getElementById('m3s1').classList.remove('hidden');
@@ -4032,6 +4143,11 @@ const TM_NAVIGATION_APP = (function() {
 
 function switchPage(id, options) {
   options = options || {};
+  if (id === 'm3') {
+    activeWorkflowContext = null;
+    lastProposalContext = null;
+    proposalGenerationSequence += 1;
+  }
   if (window.TMNavigation) {
     window.TMNavigation.navigate(id, {
       substate: options.substate || TM_NAVIGATION_APP.substateForPage(id),

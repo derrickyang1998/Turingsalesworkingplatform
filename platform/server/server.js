@@ -1678,38 +1678,12 @@ app.get('/api/ai/conversations/:id', authMiddleware, (req, res) => {
 
 app.post('/api/ai/proposal-draft', authMiddleware, aiLimiter, aiQuotaGuard, async (req, res) => {
   try {
-    const demandText = req.body.demand_content || req.body.content || JSON.stringify(req.body.demand || {});
-    const demandTitle = req.body.title || (req.body.demand && (req.body.demand.brand || req.body.demand.product)) || '需求方案草稿';
-    const demandEntry = knowledgeService.ingestKnowledge(db, {
-      title: '需求归档：' + demandTitle,
-      summary: String(demandText).slice(0, 240),
-      content: demandText,
-      entry_type: 'demand',
-      source_type: req.body.source_type || 'proposal_draft_request',
-      source_id: req.body.demand_id || req.body.source_id || demandTitle,
-      visibility: req.body.visibility || 'private',
-      tags: req.body.tags || ['demand', 'proposal'],
-      business_type: 'demand',
-      business_id: req.body.demand_id || '',
-      created_by: req.user.id,
-      actor_role: req.user.role,
-      metadata: { demand: req.body.demand || null }
-    });
-    const prompt = [
-      '请基于以下客户需求和平台知识库，生成红人营销方案草稿。',
-      '必须包含：执行摘要、市场/竞品判断、达人类型与平台建议、60-30-10预算建议、执行时间线、KPI、风险与下一步确认项。',
-      '',
-      demandText
-    ].join('\n');
-    const result = await aiService.handleChat(db, {
-      user: req.user,
-      message: prompt,
+    const result = await latestUiCompat.generateProposalDraft(db, req.user, req.body, {
       allowWeb: boolParam(req.body.allow_web, false),
-      source_module: 'proposal',
-      knowledgeLimit: req.body.knowledge_limit || 10,
-      summaryVisibility: req.body.summary_visibility || 'private'
+      knowledgeLimit: req.body.knowledge_limit,
+      summaryVisibility: 'private'
     });
-    res.json({ draft: result.answer, demand_entry: demandEntry, ai: result });
+    res.json(result);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
