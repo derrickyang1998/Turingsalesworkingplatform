@@ -1758,7 +1758,17 @@ app.post('/api/demand/parse-file', authMiddleware, async (req, res) => {
 
 app.post('/api/ai/strategy', authMiddleware, aiLimiter, aiQuotaGuard, async (req, res) => {
   try {
-    const result = await latestUiCompat.generateStrategy(db, req.user, req.body.prompt, req.body.input);
+    const result = await latestUiCompat.generateStrategy(
+      db,
+      req.user,
+      req.body.prompt,
+      req.body.input,
+      {
+        allowWeb: boolParam(req.body.allow_web, true),
+        knowledgeLimit: req.body.knowledge_limit,
+        summaryVisibility: req.body.summary_visibility || 'team'
+      }
+    );
     res.json(result);
   } catch (e) {
     res.status(500).json({ error: e.message, content: '', fallback: true, warning: e.message });

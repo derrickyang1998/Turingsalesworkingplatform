@@ -14,6 +14,21 @@ function compactText(value, max) {
   return text.slice(0, max - 1) + '...';
 }
 
+function normalizeKnowledgeLimit(value, fallback) {
+  const defaultLimit = Number.isSafeInteger(fallback) && fallback > 0 ? fallback : 8;
+  if (value === undefined || value === null || value === '') return defaultLimit;
+  let parsed;
+  if (typeof value === 'number') {
+    parsed = value;
+  } else if (typeof value === 'string' && /^\d+$/.test(value)) {
+    parsed = Number(value);
+  } else {
+    return defaultLimit;
+  }
+  if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > 100) return defaultLimit;
+  return parsed;
+}
+
 function safeJson(text, fallback) {
   try { return JSON.parse(text); } catch (e) { return fallback; }
 }
@@ -204,17 +219,29 @@ function recordTokenUsage(opts, completion) {
   } catch (e) {}
 }
 
-async function generateStrategy(db, user, prompt, input) {
-  const result = await require('./ai_service').handleChat(db, {
+async function generateStrategy(db, user, prompt, input, opts) {
+  opts = opts || {};
+  const message = [prompt, input].filter(Boolean).join('\n\n');
+  const aiService = opts.aiService || require('./ai_service');
+  const result = await aiService.handleChat(db, {
     user,
-    message: prompt || input || '',
-    allowWeb: true,
+    message,
+    ragQuery: message,
+    webQuery: message,
+    allowWeb: opts.allowWeb !== false,
     source_module: 'strategy',
-    summaryVisibility: 'team',
-    knowledgeLimit: 8,
-    max_tokens: 2500
+    summaryVisibility: opts.summaryVisibility || 'team',
+    knowledgeLimit: normalizeKnowledgeLimit(opts.knowledgeLimit, 8),
+    max_tokens: opts.max_tokens || 2500,
+    provider: opts.provider,
+    webSearchProvider: opts.webSearchProvider
   });
-  return { content: result.answer, fallback: false, ai: result };
+  return {
+    content: result.answer,
+    fallback: !!result.degraded,
+    warning: result.reason || '',
+    ai: result
+  };
 }
 
 async function generateDemandAnalysis(prompt, input, fileName, opts) {
