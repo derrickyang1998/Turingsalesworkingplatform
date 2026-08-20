@@ -77,7 +77,8 @@ test('Nginx maps non-empty Expect to a header-only 417 and maps exact request ID
 
   assert.match(expectMap, /""\s+0\s*;/);
   assert.match(expectMap, /\bdefault\s+1\s*;/);
-  assert.match(requestIdMap, /~"\^\[\\x20-\\x7E\]\{8,120\}\$"\s+\$http_x_request_id\s*;/);
+  assert.match(requestIdMap, /"~\^\[\\x20-\\x7E\]\{8,120\}\$"\s+\$http_x_request_id\s*;/);
+  assert.doesNotMatch(requestIdMap, /~"\^\[\\x20-\\x7E\]\{8,120\}\$"/);
   assert.match(requestIdMap, /\bdefault\s+\$request_id\s*;/);
 });
 
