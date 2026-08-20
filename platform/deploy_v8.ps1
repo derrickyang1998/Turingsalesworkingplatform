@@ -426,7 +426,7 @@ function Invoke-NativeWithUtf8Input {
     param(
         [Parameter(Mandatory = $true)][string]$FileName,
         [Parameter(Mandatory = $true)][string[]]$ArgumentList,
-        [Parameter(Mandatory = $true)][string]$InputText,
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$InputText,
         [Parameter(Mandatory = $true)][string]$FailureMessage,
         [ValidateRange(1, 14400)][int]$TimeoutSeconds = 7200,
         [switch]$CaptureOutput
@@ -582,13 +582,27 @@ TM_OPERATION_FENCE
 
     $normalizedRemoteScript = $Script -replace "`r`n?", "`n"
     $remoteScriptPath = "/run/turingmarket-remote-script-{0}" -f ([Guid]::NewGuid().ToString('N'))
-    $remoteLoader = @'
+    $utf8 = New-Object Text.UTF8Encoding($false)
+    $remoteScriptBytes = $utf8.GetBytes($normalizedRemoteScript)
+    $sha256 = [Security.Cryptography.SHA256]::Create()
+    try {
+        $remoteScriptSha256 = -join ($sha256.ComputeHash($remoteScriptBytes) | ForEach-Object { $_.ToString('x2') })
+    }
+    finally {
+        $sha256.Dispose()
+    }
+
+    $remoteUpload = @'
 set -euo pipefail
 RemoteScript=__REMOTE_SCRIPT_PATH__
-cleanup_remote_script() {
-  rm -f -- "$RemoteScript"
+ExpectedSha256=__REMOTE_SCRIPT_SHA256__
+UploadComplete=0
+cleanup_failed_upload() {
+  if [ "$UploadComplete" != "1" ]; then
+    rm -f -- "$RemoteScript"
+  fi
 }
-trap cleanup_remote_script EXIT HUP INT TERM
+trap cleanup_failed_upload EXIT HUP INT TERM
 umask 077
 set -o noclobber
 cat > "$RemoteScript"
@@ -597,15 +611,45 @@ test -f "$RemoteScript"
 test ! -L "$RemoteScript"
 test "$(stat -c "%U:%G:%a:%h" -- "$RemoteScript")" = "root:root:600:1"
 test -s "$RemoteScript"
+printf "%s  %s\n" "$ExpectedSha256" "$RemoteScript" | sha256sum --check --status
+UploadComplete=1
+trap - EXIT HUP INT TERM
+'@
+    $remoteUpload = $remoteUpload.Replace('__REMOTE_SCRIPT_PATH__', $remoteScriptPath)
+    $remoteUpload = $remoteUpload.Replace('__REMOTE_SCRIPT_SHA256__', $remoteScriptSha256)
+
+    $remoteExecution = @'
+set -euo pipefail
+RemoteScript=__REMOTE_SCRIPT_PATH__
+ExpectedSha256=__REMOTE_SCRIPT_SHA256__
+cleanup_remote_script() {
+  rm -f -- "$RemoteScript"
+}
+trap cleanup_remote_script EXIT HUP INT TERM
+test -f "$RemoteScript"
+test ! -L "$RemoteScript"
+test "$(stat -c "%U:%G:%a:%h" -- "$RemoteScript")" = "root:root:600:1"
+test -s "$RemoteScript"
+printf "%s  %s\n" "$ExpectedSha256" "$RemoteScript" | sha256sum --check --status
 /bin/bash -e -- "$RemoteScript" </dev/null
 '@
-    $remoteLoader = $remoteLoader.Replace('__REMOTE_SCRIPT_PATH__', $remoteScriptPath)
-    if ($remoteLoader.Contains("'")) {
-        throw "Remote loader contains an unsupported single quote."
+    $remoteExecution = $remoteExecution.Replace('__REMOTE_SCRIPT_PATH__', $remoteScriptPath)
+    $remoteExecution = $remoteExecution.Replace('__REMOTE_SCRIPT_SHA256__', $remoteScriptSha256)
+    $remoteCleanup = @'
+set -euo pipefail
+RemoteScript=__REMOTE_SCRIPT_PATH__
+rm -f -- "$RemoteScript"
+'@
+    $remoteCleanup = $remoteCleanup.Replace('__REMOTE_SCRIPT_PATH__', $remoteScriptPath)
+    if ($remoteUpload.Contains("'") -or $remoteExecution.Contains("'") -or $remoteCleanup.Contains("'")) {
+        throw "Remote transport command contains an unsupported single quote."
     }
-    $remoteCommand = "bash -c '$remoteLoader'"
+    $uploadCommand = "bash -c '$remoteUpload'"
+    $executionCommand = "bash -c '$remoteExecution'"
+    $cleanupCommand = "bash -c '$remoteCleanup'"
 
-    $arguments = @(
+    $uploadArguments = @(
+        '-T',
         '-i',
         $SSH_KEY,
         '-o',
@@ -613,9 +657,48 @@ test -s "$RemoteScript"
         '-o',
         'StrictHostKeyChecking=yes',
         "root@$SERVER",
-        $remoteCommand
+        $uploadCommand
     )
-    $result = Invoke-NativeWithUtf8Input -FileName 'ssh.exe' -ArgumentList $arguments -InputText $normalizedRemoteScript -FailureMessage $FailureMessage -TimeoutSeconds $TimeoutSeconds -CaptureOutput:$CaptureOutput
+    $executionArguments = @(
+        '-T',
+        '-n',
+        '-i',
+        $SSH_KEY,
+        '-o',
+        'BatchMode=yes',
+        '-o',
+        'StrictHostKeyChecking=yes',
+        "root@$SERVER",
+        $executionCommand
+    )
+    $cleanupArguments = @(
+        '-T',
+        '-n',
+        '-i',
+        $SSH_KEY,
+        '-o',
+        'BatchMode=yes',
+        '-o',
+        'StrictHostKeyChecking=yes',
+        "root@$SERVER",
+        $cleanupCommand
+    )
+
+    $result = $null
+    try {
+        Invoke-NativeWithUtf8Input -FileName 'ssh.exe' -ArgumentList $uploadArguments -InputText $normalizedRemoteScript -FailureMessage "$FailureMessage (script upload)" -TimeoutSeconds $TimeoutSeconds
+        $result = Invoke-NativeWithUtf8Input -FileName 'ssh.exe' -ArgumentList $executionArguments -InputText '' -FailureMessage $FailureMessage -TimeoutSeconds $TimeoutSeconds -CaptureOutput:$CaptureOutput
+    }
+    catch {
+        $transportError = $_
+        try {
+            Invoke-NativeWithUtf8Input -FileName 'ssh.exe' -ArgumentList $cleanupArguments -InputText '' -FailureMessage "$FailureMessage (runtime cleanup)" -TimeoutSeconds 30
+        }
+        catch {
+            Write-Warning "$FailureMessage left an unverified remote runtime file; the next guarded deploy must clear it before proceeding."
+        }
+        throw $transportError
+    }
     if ($CaptureOutput) {
         return $result
     }

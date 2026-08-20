@@ -346,14 +346,13 @@ test('Task 12 local deploy preflight executes under Windows PowerShell 5.1 witho
   assert.match(result.stdout, /LOCAL_DEPLOY_PREFLIGHT_OK/);
 });
 
-test('Task 12 remote Bash transport preloads the complete payload before execution', {
+test('Task 12 remote Bash transport uploads the complete payload before stdin-free execution', {
   skip: process.platform !== 'win32'
 }, () => {
   const result = runPowerShellFunctionHarness(['Invoke-RemoteBash'], String.raw`
 $script:SSH_KEY = 'C:\fixture\deploy-key'
 $script:SERVER = 'example.invalid'
-$script:CapturedInput = $null
-$script:CapturedArguments = $null
+$script:CapturedCalls = New-Object 'Collections.Generic.List[object]'
 function Invoke-NativeWithUtf8Input {
   param(
     [string]$FileName,
@@ -363,38 +362,120 @@ function Invoke-NativeWithUtf8Input {
     [int]$TimeoutSeconds,
     [switch]$CaptureOutput
   )
-  $script:CapturedInput = $InputText
-  $script:CapturedArguments = $ArgumentList
+  $script:CapturedCalls.Add([pscustomobject]@{
+    FileName = $FileName
+    Arguments = @($ArgumentList)
+    Input = $InputText
+    CaptureOutput = [bool]$CaptureOutput
+  })
+  if ($CaptureOutput) { return 'REMOTE_OUTPUT' }
 }
 $lf = [string][char]10
 $payload = 'set -euo pipefail' + $lf + 'exit 19' + $lf + (('# unread payload padding' * 20000) -join $lf)
-Invoke-RemoteBash -Script $payload -FailureMessage 'early failure probe' -TimeoutSeconds 30
-if ($script:CapturedInput -cne $payload) { throw 'SSH stdin must contain only the complete remote payload' }
-$remoteLoader = [string]$script:CapturedArguments[$script:CapturedArguments.Count - 1]
-if ($remoteLoader -notmatch "^bash -c 'set -euo pipefail") {
-  throw 'Remote loader must be supplied as an SSH command argument'
+$capturedResult = Invoke-RemoteBash -Script $payload -FailureMessage 'early failure probe' -TimeoutSeconds 30 -CaptureOutput
+if ($capturedResult -cne 'REMOTE_OUTPUT') { throw 'Execution output was not returned to the caller' }
+if ($script:CapturedCalls.Count -ne 2) { throw 'Remote transport must use one upload connection and one execution connection' }
+$upload = $script:CapturedCalls[0]
+$execution = $script:CapturedCalls[1]
+if ($upload.FileName -cne 'ssh.exe' -or $execution.FileName -cne 'ssh.exe') { throw 'Both transport phases must use the pinned SSH client' }
+if ($upload.Input -cne $payload) { throw 'Upload stdin must contain only the complete remote payload' }
+if ($execution.Input -cne '') { throw 'Execution SSH stdin must be empty' }
+if ($upload.CaptureOutput) { throw 'Upload connection must not capture execution output' }
+if (-not $execution.CaptureOutput) { throw 'Execution connection must preserve caller output capture' }
+$uploadCommand = [string]$upload.Arguments[$upload.Arguments.Count - 1]
+$executionCommand = [string]$execution.Arguments[$execution.Arguments.Count - 1]
+if ($uploadCommand -notmatch "^bash -c 'set -euo pipefail") {
+  throw 'Remote upload command must be supplied as an SSH command argument'
 }
-if ($remoteLoader -notmatch 'RemoteScript=/run/turingmarket-remote-script-[a-f0-9]{32}') {
-  throw 'Remote payload was not staged in a bounded runtime file'
+if ($uploadCommand -notmatch 'RemoteScript=/run/turingmarket-remote-script-[a-f0-9]{32}') {
+  throw 'Remote payload was not uploaded to a bounded runtime file'
 }
 foreach ($required in @(
   'cat > "$RemoteScript"',
   'test ! -L "$RemoteScript"',
   'root:root:600:1',
   'set -o noclobber',
+  'sha256sum --check --status'
+)) {
+  if (-not $uploadCommand.Contains($required)) { throw "Remote upload control missing: $required" }
+}
+if ($executionCommand -notmatch 'RemoteScript=/run/turingmarket-remote-script-[a-f0-9]{32}') {
+  throw 'Remote execution did not reference the bounded runtime file'
+}
+$uploadPath = [regex]::Match($uploadCommand, 'RemoteScript=(/run/turingmarket-remote-script-[a-f0-9]{32})').Groups[1].Value
+$executionPath = [regex]::Match($executionCommand, 'RemoteScript=(/run/turingmarket-remote-script-[a-f0-9]{32})').Groups[1].Value
+if ($uploadPath -cne $executionPath) { throw 'Upload and execution must use the same runtime file' }
+foreach ($required in @(
   'trap cleanup_remote_script EXIT HUP INT TERM',
+  'sha256sum --check --status',
   '/bin/bash -e -- "$RemoteScript" </dev/null'
 )) {
-  if (-not $remoteLoader.Contains($required)) { throw "Remote preload control missing: $required" }
+  if (-not $executionCommand.Contains($required)) { throw "Remote execution control missing: $required" }
 }
-if ($remoteLoader.Contains('exit 19') -or $remoteLoader.Contains('# unread payload padding')) {
-  throw 'Remote payload must not be interpolated into the loader command'
+if ($execution.Arguments -notcontains '-n') { throw 'Execution SSH must disconnect standard input' }
+if ($upload.Arguments -contains '-n') { throw 'Upload SSH must retain its payload input' }
+if ($uploadCommand.Contains('exit 19') -or $uploadCommand.Contains('# unread payload padding') -or
+    $executionCommand.Contains('exit 19') -or $executionCommand.Contains('# unread payload padding')) {
+  throw 'Remote payload must not be interpolated into either SSH command'
 }
-Write-Output 'REMOTE_PRELOAD_OK'
+Write-Output 'REMOTE_UPLOAD_EXEC_OK'
 `);
 
   assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /REMOTE_PRELOAD_OK/);
+  assert.match(result.stdout, /REMOTE_UPLOAD_EXEC_OK/);
+});
+
+test('Task 12 remote Bash transport removes the uploaded runtime file after execution transport failure', {
+  skip: process.platform !== 'win32'
+}, () => {
+  const result = runPowerShellFunctionHarness(['Invoke-RemoteBash'], String.raw`
+$script:SSH_KEY = 'C:\fixture\deploy-key'
+$script:SERVER = 'example.invalid'
+$script:CapturedCalls = New-Object 'Collections.Generic.List[object]'
+function Invoke-NativeWithUtf8Input {
+  param(
+    [string]$FileName,
+    [string[]]$ArgumentList,
+    [AllowEmptyString()][string]$InputText,
+    [string]$FailureMessage,
+    [int]$TimeoutSeconds,
+    [switch]$CaptureOutput
+  )
+  $script:CapturedCalls.Add([pscustomobject]@{
+    Arguments = @($ArgumentList)
+    Input = $InputText
+    FailureMessage = $FailureMessage
+  })
+  if ($script:CapturedCalls.Count -eq 2) { throw 'EXECUTION_TRANSPORT_FAILURE' }
+}
+try {
+  Invoke-RemoteBash -Script 'exit 19' -FailureMessage 'expected execution failure' -TimeoutSeconds 30
+  throw 'UNSAFE_CONTINUATION_AFTER_EXECUTION_FAILURE'
+}
+catch {
+  if ($_.Exception.Message -notmatch 'EXECUTION_TRANSPORT_FAILURE') { throw }
+}
+if ($script:CapturedCalls.Count -ne 3) { throw 'Execution failure must trigger a separate cleanup connection' }
+$uploadCommand = [string]$script:CapturedCalls[0].Arguments[-1]
+$cleanup = $script:CapturedCalls[2]
+$cleanupCommand = [string]$cleanup.Arguments[-1]
+$uploadPath = [regex]::Match($uploadCommand, 'RemoteScript=(/run/turingmarket-remote-script-[a-f0-9]{32})').Groups[1].Value
+$cleanupPath = [regex]::Match($cleanupCommand, 'RemoteScript=(/run/turingmarket-remote-script-[a-f0-9]{32})').Groups[1].Value
+if ([string]::IsNullOrWhiteSpace($uploadPath) -or $cleanupPath -cne $uploadPath) {
+  throw 'Cleanup must target only the uploaded runtime file'
+}
+if ($cleanup.Arguments -notcontains '-n' -or $cleanup.Input -cne '') {
+  throw 'Cleanup connection must disconnect standard input'
+}
+if (-not $cleanupCommand.Contains('rm -f -- "$RemoteScript"')) {
+  throw 'Cleanup command must remove the exact bounded runtime file'
+}
+Write-Output 'REMOTE_FAILURE_CLEANUP_OK'
+`);
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /REMOTE_FAILURE_CLEANUP_OK/);
+  assert.doesNotMatch(result.stdout, /UNSAFE_CONTINUATION_AFTER_EXECUTION_FAILURE/);
 });
 
 test('Phase 4 deployment mode routing requires explicit destructive restore consent before remote access', {

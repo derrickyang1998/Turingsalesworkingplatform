@@ -1376,3 +1376,20 @@ catch {
   assert.match(result.stdout, /captured nonzero probe failed/);
   assert.doesNotMatch(result.stdout, /UNSAFE_CONTINUATION_AFTER_NONZERO/);
 });
+
+test('native outer invocation accepts an intentionally disconnected empty stdin', {
+  skip: process.platform !== 'win32'
+}, () => {
+  const result = runPowerShellFunctionHarness(
+    ['Assert-LastExitCode', 'Convert-ToNativeArgument', 'Invoke-NativeWithUtf8Input'],
+    String.raw`
+Invoke-NativeWithUtf8Input -FileName 'powershell.exe' -ArgumentList @(
+  '-NoLogo', '-NoProfile', '-NonInteractive', '-Command', 'exit 0'
+) -InputText '' -FailureMessage 'empty-stdin probe failed' -TimeoutSeconds 10
+Write-Output 'EMPTY_STDIN_OK'
+`
+  );
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /EMPTY_STDIN_OK/);
+});
