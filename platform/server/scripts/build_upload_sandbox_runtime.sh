@@ -38,6 +38,16 @@ unprivileged_build_worker() {
 
   declare -A COPIED=()
   declare -A EXECUTABLE_CLOSURE=()
+  list_binary_libraries() {
+    local first second third remainder
+    while read -r first second third remainder; do
+      if [[ "$second" = '=>' && "$third" = /* ]]; then
+        printf '%s\n' "$third"
+      elif [[ "$first" = /* ]]; then
+        printf '%s\n' "$first"
+      fi
+    done
+  }
   copy_binary_closure() {
     local source="$1" target="$2"
     resolved="$(realpath -e -- "$source")"
@@ -55,10 +65,7 @@ unprivileged_build_worker() {
         copy_file "$resolved" "$library" 0555
         EXECUTABLE_CLOSURE["$library"]=1
       fi
-    done < <(ldd "$scan_target" 2>/dev/null | awk '
-      /=> \/[^ ]+/ { print $3 }
-      $1 ~ /^\// { print $1 }
-    ' | LC_ALL=C sort -u || true)
+    done < <(ldd "$scan_target" 2>/dev/null | list_binary_libraries || true)
   }
 
   copy_binary_closure /bin/bash /bin/bash
@@ -74,7 +81,9 @@ unprivileged_build_worker() {
   install -d -m 0555 "$OUTPUT_ROOT/usr/lib/python3.14"
   rsync -rt --copy-links --delete-excluded \
     --exclude='__pycache__/' --exclude='*.pyc' --exclude='site-packages/' --exclude='dist-packages/' \
+    --exclude='sitecustomize.py' \
     "$PYTHON_STDLIB/" "$OUTPUT_ROOT/usr/lib/python3.14/"
+  copy_file "$SOURCE_ROOT/parser-runtime/sitecustomize.py" /usr/lib/python3.14/sitecustomize.py 0444
 
   PYTHON_SITE="$OUTPUT_ROOT/usr/local/lib/python3.14/dist-packages"
   install -d -m 0755 "$PYTHON_SITE"
@@ -127,10 +136,7 @@ unprivileged_build_worker() {
             copy_file "$(realpath -e -- "$library")" "$library" 0555
             EXECUTABLE_CLOSURE["$library"]=1
           fi
-        done < <(ldd "$candidate" 2>/dev/null | awk '
-          /=> \/[^ ]+/ { print $3 }
-          $1 ~ /^\// { print $1 }
-        ' | LC_ALL=C sort -u || true)
+        done < <(ldd "$candidate" 2>/dev/null | list_binary_libraries || true)
       fi
     done
   done
@@ -400,6 +406,7 @@ for required in \
   parser-runtime/package.json \
   parser-runtime/package-lock.json \
   parser-runtime/requirements.lock \
+  parser-runtime/sitecustomize.py \
   extract_document_text.py \
   extract_xlsx_text.py \
   ocr_document_text.py \
@@ -431,6 +438,7 @@ for required in \
   parser-runtime/package.json \
   parser-runtime/package-lock.json \
   parser-runtime/requirements.lock \
+  parser-runtime/sitecustomize.py \
   extract_document_text.py \
   extract_xlsx_text.py \
   ocr_document_text.py \

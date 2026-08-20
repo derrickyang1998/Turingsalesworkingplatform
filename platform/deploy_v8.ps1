@@ -33,7 +33,7 @@ $EXPECTED_PPT_SHA256 = "f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57
 $TRUSTED_SOURCE_GATE_RELATIVE_PATH = "server\scripts\trusted_production_source_gate.js"
 $TRUSTED_SOURCE_MANIFEST_RELATIVE_PATH = "server\scripts\trusted_production_source_manifest.json"
 $EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "99ae10ca115dbe2be4dc560de31b300e96e235628ba6c9f3acb8674f54434e21"
-$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "9b196c0373ad93688af16aebb5ce0f7b9ea0c10a66fe0761785c3fb0e3cb41c1"
+$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "e947c4dd55a3235ac924ba0a26c6a5ab99db2e0174c4aae4ce66fdcad4d71b16"
 $EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256 = "bdc60e6a9da601c8c65cd2a374d8cb69eeea629fa6cd5af514dd995eddfe74dc"
 $EXPECTED_TRUSTED_PARSER_VERIFIER_SHA256 = "a8a6a2881bf05bdb171eaab4fa15666cf2c57ce8ac48ef35a3d0158caf218a4a"
 $EXPECTED_TRUSTED_PUBLIC_GUARD_SHA256 = "d45fe8fcc01587aaa0e73eccfb9714c27801e232cb6c0effd6daedb703316d66"
@@ -111,6 +111,7 @@ $FILES = @(
     "server\parser-runtime\package.json",
     "server\parser-runtime\package-lock.json",
     "server\parser-runtime\requirements.lock",
+    "server\parser-runtime\sitecustomize.py",
     "server\ppt_generator.js",
     "server\requirements.txt",
     "server\requirements-ocr.txt",
@@ -2994,6 +2995,7 @@ PY
 copy_trusted_parser_source server/parser-runtime/package.json
 copy_trusted_parser_source server/parser-runtime/package-lock.json
 copy_trusted_parser_source server/parser-runtime/requirements.lock
+copy_trusted_parser_source server/parser-runtime/sitecustomize.py
 copy_trusted_parser_source server/extract_document_text.py
 copy_trusted_parser_source server/extract_xlsx_text.py
 copy_trusted_parser_source server/ocr_document_text.py

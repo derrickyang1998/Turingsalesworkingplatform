@@ -928,6 +928,13 @@ test('OCR image self-test retains the legacy tuple result compatibility path', (
 
 test('parser runtime manifest pins the exact production-built tree', () => {
   const manifest = JSON.parse(read(runtimeManifestPath));
+  const sitecustomizePath = path.join(serverRoot, 'parser-runtime', 'sitecustomize.py');
+  assert.equal(fs.existsSync(sitecustomizePath), true, 'sitecustomize must be a repository-pinned build input');
+  assert.equal(
+    manifest.artifacts['parser-runtime/sitecustomize.py'],
+    require('node:crypto').createHash('sha256').update(fs.readFileSync(sitecustomizePath)).digest('hex'),
+    'the parser manifest must pin the repository-owned sitecustomize bytes'
+  );
   assert.deepEqual(manifest.runtime_tree, {
     format: 'tm-parser-runtime-tree-v1',
     root: '/var/lib/turingmarket-parser/runtime-root',
@@ -952,7 +959,7 @@ function runtimeBuilderSourceSections() {
 }
 
 test('runtime builder preserves the pinned reproducible no-symlink runtime contract', () => {
-  const source = read(buildScript);
+  const { source, worker } = runtimeBuilderSourceSections();
   const manifest = JSON.parse(read(runtimeManifestPath));
   const copiedInputs = source.match(/for required in \\\r?\n([\s\S]*?); do\r?\n  copy_build_input/);
   assert.ok(copiedInputs, 'builder must expose its trusted build-input closure');
@@ -985,6 +992,12 @@ test('runtime builder preserves the pinned reproducible no-symlink runtime contr
   assert.match(source, /--expected-sha256/);
   assert.match(source, /--json/);
   assert.match(source, /ldd/);
+  assert.doesNotMatch(worker, /\bawk\b/, 'the isolated worker must not depend on the host /etc alternatives chain');
+  assert.match(worker, /--exclude='sitecustomize\.py'/);
+  assert.match(
+    worker,
+    /copy_file "\$SOURCE_ROOT\/parser-runtime\/sitecustomize\.py" \/usr\/lib\/python3\.14\/sitecustomize\.py 0444/
+  );
   assert.match(source, /case "\$library" in "\$OUTPUT_ROOT"\/\*\) continue/);
   assert.match(source, /declare -A EXECUTABLE_CLOSURE=\(\)/);
   assert.match(source, /EXECUTABLE_CLOSURE\["\$target"\]=1/);
