@@ -348,6 +348,7 @@ test('trusted source manifest pins the sanitizer closure, policy, baseline, and 
     deterministicAppendTables: ['activity_log']
   });
   for (const required of [
+    'server/scripts/adopt_legacy_production_v1.js',
     'server/scripts/sanitization_manifest.json',
     'server/scripts/sanitize_production_shape.js',
     'server/scripts/verify_campaign_migration_gate.js',
@@ -378,6 +379,7 @@ test('trusted source manifest pins the sanitizer closure, policy, baseline, and 
     assert.equal(paths.has(required), true, `trusted bundle must pin ${required}`);
   }
   assert.deepEqual(manifest.entrypoints, {
+    legacyProductionV1Adoption: 'server/scripts/adopt_legacy_production_v1.js',
     sanitizer: 'server/scripts/sanitize_production_shape.js',
     sanitizationManifest: 'server/scripts/sanitization_manifest.json',
     verifier: 'server/scripts/verify_campaign_migration_gate.js',
@@ -419,6 +421,7 @@ test('trusted source manifest pins the complete parser control plane and deploy 
   const manifest = loadTrustedManifest();
   const deploy = read(deployPath);
   const expectedEntrypoints = {
+    legacyProductionV1Adoption: 'server/scripts/adopt_legacy_production_v1.js',
     sanitizer: 'server/scripts/sanitize_production_shape.js',
     sanitizationManifest: 'server/scripts/sanitization_manifest.json',
     verifier: 'server/scripts/verify_campaign_migration_gate.js',

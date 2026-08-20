@@ -351,6 +351,15 @@ test('sanitizer keeps migrated probability fields inside the production 0-100 do
       INSERT INTO customers (brand_name,company_name,stage,source,created_by,assigned_to,win_probability)
       VALUES ('Probability 80','Probability 80 company','maintenance','probability-fixture',?,?,80)
     `).run(userId, userId);
+    const insertGlobalInteger = fixture.db.prepare(`
+      INSERT INTO brands (name,youtube_followers,created_at)
+      VALUES (?,?,CURRENT_TIMESTAMP)
+    `);
+    fixture.db.transaction(() => {
+      for (let value = 0; value <= 100; value += 1) {
+        insertGlobalInteger.run(`Global integer ${value}`, value);
+      }
+    })();
     fixture.db.close();
 
     const outputPath = path.join(fixture.root, 'sanitized.db');
@@ -365,6 +374,7 @@ test('sanitizer keeps migrated probability fields inside the production 0-100 do
       assert.equal(values.length >= 2, true);
       assert.equal(values.every((value) => Number.isSafeInteger(value) && value >= 0 && value <= 100), true);
       assert.equal(new Set(values).size, values.length, 'distinct source probabilities retain distinct ranks');
+      assert.ok(values.every((value) => ![20, 80].includes(value)));
     } finally {
       output.close();
     }
@@ -394,6 +404,94 @@ test('sanitizer fails closed with a bounded error when the probability replaceme
       () => sanitizer.sanitizeProductionShape({ sourcePath: fixture.dbPath, outputPath }),
       /customers\.win_probability probability replacement domain is exhausted/i
     );
+  } finally {
+    closeAndRemove(fixture);
+  }
+});
+
+test('managed v1 text-backed sensitive-number columns keep text storage and sanitize source values', () => {
+  const fixture = migratedFixture('text-backed-sensitive-number', 1);
+  try {
+    const insert = fixture.db.prepare(`
+      INSERT INTO brands (name,name_cn,estimated_annual_revenue,avg_engagement,created_at)
+      VALUES (?,?,?,?,CURRENT_TIMESTAMP)
+    `);
+    const firstId = Number(insert.run(
+      'Private numeric text brand one', 'Private numeric text one', '$50M-$100M', '3.8'
+    ).lastInsertRowid);
+    const secondId = Number(insert.run(
+      'Private numeric text brand two', 'Private numeric text two', '500000000.0', '0.035'
+    ).lastInsertRowid);
+    fixture.db.close();
+
+    const outputPath = path.join(fixture.root, 'sanitized.db');
+    assert.doesNotThrow(
+      () => sanitizer.sanitizeProductionShape({ sourcePath: fixture.dbPath, outputPath })
+    );
+    const output = new Database(outputPath, { readonly: true, fileMustExist: true });
+    try {
+      const rows = output.prepare(`
+        SELECT id,
+          typeof(estimated_annual_revenue) AS revenue_type,estimated_annual_revenue,
+          typeof(avg_engagement) AS engagement_type,avg_engagement
+        FROM brands WHERE id IN (?,?) ORDER BY id
+      `).all(firstId, secondId);
+      assert.equal(rows.length, 2);
+      assert.ok(rows.every((row) => row.revenue_type === 'text'));
+      assert.ok(rows.every((row) => row.engagement_type === 'text'));
+      assert.equal(new Set(rows.map((row) => row.estimated_annual_revenue)).size, 2);
+      assert.equal(new Set(rows.map((row) => row.avg_engagement)).size, 2);
+      assert.ok(rows.every((row) => !['$50M-$100M', '500000000.0'].includes(row.estimated_annual_revenue)));
+      assert.ok(rows.every((row) => !['3.8', '0.035'].includes(row.avg_engagement)));
+    } finally {
+      output.close();
+    }
+  } finally {
+    closeAndRemove(fixture);
+  }
+});
+
+test('derived AI total tokens may rebuild equality partitions while preserving the declared formula', () => {
+  const fixture = migratedFixture('derived-ai-total-tokens', 1);
+  try {
+    const userId = fixture.db.prepare('SELECT MIN(id) AS id FROM users').get().id;
+    const conversationId = Number(fixture.db.prepare(`
+      INSERT INTO ai_conversations (user_id,title,visibility,source_module)
+      VALUES (?,'Private token accounting','private','assistant')
+    `).run(userId).lastInsertRowid);
+    const insert = fixture.db.prepare(`
+      INSERT INTO ai_messages (
+        conversation_id,user_id,role,content,prompt_tokens,completion_tokens,total_tokens,metadata_json
+      ) VALUES (?,?,'assistant',?,?,?,?, '{}')
+    `);
+    insert.run(conversationId, userId, 'Private response one', 1015, 326, 1341);
+    insert.run(conversationId, userId, 'Private response two', 1027, 319, 1346);
+    fixture.db.close();
+
+    const outputPath = path.join(fixture.root, 'sanitized.db');
+    assert.doesNotThrow(
+      () => sanitizer.sanitizeProductionShape({ sourcePath: fixture.dbPath, outputPath })
+    );
+    const output = new Database(outputPath, { readonly: true, fileMustExist: true });
+    try {
+      const accounting = output.prepare(`
+        SELECT COUNT(*) AS rows,
+          SUM(CASE WHEN total_tokens=prompt_tokens+completion_tokens THEN 1 ELSE 0 END) AS valid_rows,
+          SUM(CASE WHEN
+            prompt_tokens BETWEEN 0 AND 9007199254740991
+            AND completion_tokens BETWEEN 0 AND 9007199254740991
+            AND total_tokens BETWEEN 0 AND 9007199254740991
+          THEN 1 ELSE 0 END) AS safe_rows,
+          COUNT(DISTINCT total_tokens) AS total_partitions
+        FROM ai_messages WHERE conversation_id=?
+      `).get(conversationId);
+      assert.equal(accounting.rows, 2);
+      assert.equal(accounting.valid_rows, 2);
+      assert.equal(accounting.safe_rows, 2);
+      assert.equal(accounting.total_partitions, 1);
+    } finally {
+      output.close();
+    }
   } finally {
     closeAndRemove(fixture);
   }
@@ -990,7 +1088,7 @@ test('manifest declares exact managed v1 as primary and keeps v6 in one isolated
       assert.equal(profile.jsonPolicy.preserveLeafTypes, true);
       assert.equal(
         profile.jsonPolicy.booleanReplacement,
-        'type-preserving-source-disjoint-or-reject'
+        'type-preserving-run-randomized-bijection'
       );
       assert.equal(profile.semanticPolicies.forbiddenValues.liveMatch, 'exact-substring');
       assert.equal(profile.semanticPolicies.forbiddenValues.minimumLength, 0);
@@ -1248,9 +1346,7 @@ test('replacement domains stay globally disjoint across adversarial rows and typ
     assert.ok(currencies.every((value) => /^[A-Z]{3}$/.test(value)));
     assert.ok(currencies.every((value) => !sourceCurrencies.has(value)));
 
-    const typedSource = new Set([
-      'boolean:true', 'integer:731927', 'integer:-731927'
-    ]);
+    const typedSource = new Set(['integer:731927', 'integer:-731927']);
     const typedOutput = [
       JSON.parse(output.prepare('SELECT metadata_json FROM knowledge_entries WHERE id=?').get(populated.entryId).metadata_json),
       JSON.parse(output.prepare('SELECT metadata_json FROM knowledge_chunks WHERE id=?').get(populated.chunkId).metadata_json)
@@ -1259,11 +1355,7 @@ test('replacement domains stay globally disjoint across adversarial rows and typ
         if (typeof value === 'number') return `${Number.isInteger(value) ? 'integer' : 'real'}:${value}`;
         return `text:${value}`;
       }));
-    assert.equal(
-      typedOutput.filter((value) => value.startsWith('boolean:')).every((value) => value === 'boolean:false'),
-      true,
-      'JSON boolean replacements must preserve type and use the source-disjoint boolean value'
-    );
+    assert.equal(typedOutput.filter((value) => value.startsWith('boolean:')).length, 2);
     assert.equal(
       typedOutput.some((value) => value.startsWith('text:tmjson-b-')),
       false,
@@ -1276,24 +1368,49 @@ test('replacement domains stay globally disjoint across adversarial rows and typ
   }
 });
 
-test('JSON boolean sanitization fails closed when the complete type-preserving domain is occupied', () => {
-  const fixture = migratedFixture('boolean-domain-exhausted');
+test('JSON boolean sanitization uses a run-randomized bijection and preserves cross-row partitions', () => {
+  const fixture = migratedFixture('boolean-domain-bijection');
   try {
-    populateCriticalReviewFixture(fixture, {
-      knowledgeEntryMetadata: { enabled: true, disabled: false }
-    });
-    fixture.db.close();
-    const outputPath = path.join(fixture.root, 'must-not-publish.db');
-    assert.throws(
-      () => sanitizer.sanitizeProductionShape({ sourcePath: fixture.dbPath, outputPath }),
-      (error) => {
-        assert.equal(error.name, 'SanitizerJsonBooleanDomainExhaustedError');
-        assert.equal(error.code, 'TM_SANITIZER_JSON_BOOLEAN_DOMAIN_EXHAUSTED');
-        assert.match(error.message, /type-preserving JSON boolean replacement domain is exhausted/i);
-        return true;
-      }
+    const populated = populateCriticalReviewFixture(fixture);
+    const secondMessageId = populated.messageId + 1000;
+    fixture.db.prepare('UPDATE ai_messages SET metadata_json=? WHERE id=?')
+      .run(JSON.stringify({ enabled: true, disabled: false }), populated.messageId);
+    fixture.db.prepare(`
+      INSERT INTO ai_messages (
+        id,conversation_id,user_id,role,content,model,
+        prompt_tokens,completion_tokens,total_tokens,metadata_json
+      ) VALUES (?,? ,?,'assistant','Boolean partition','private-model',17,19,36,?)
+    `).run(
+      secondMessageId,
+      populated.conversationId,
+      populated.userId,
+      JSON.stringify({ enabled: false, disabled: true })
     );
-    assert.equal(fs.existsSync(outputPath), false);
+    const forbidden = sanitizer._testing.collectForbiddenValues(fixture.db, v6Manifest);
+    assert.equal(
+      forbidden.rawProbes.some((probe) => probe.kind === 'json-leaf' && probe.storageType === 'boolean'),
+      false,
+      'low-entropy JSON boolean literals must not be treated as identifying raw secrets'
+    );
+    fixture.db.close();
+    const outputPath = path.join(fixture.root, 'sanitized.db');
+    assert.doesNotThrow(
+      () => sanitizer.sanitizeProductionShape({ sourcePath: fixture.dbPath, outputPath })
+    );
+    const output = new Database(outputPath, { readonly: true, fileMustExist: true });
+    try {
+      const storedRows = output.prepare(`
+        SELECT id,metadata_json FROM ai_messages WHERE id IN (?,?) ORDER BY id
+      `).all(populated.messageId, secondMessageId);
+      assert.equal(storedRows.length, 2);
+      assert.notEqual(storedRows[0].metadata_json, storedRows[1].metadata_json);
+      const booleanPartitions = storedRows.map((row) => Object.values(JSON.parse(row.metadata_json))
+        .filter((value) => typeof value === 'boolean').sort());
+      assert.ok(booleanPartitions.every((values) => values.length === 2));
+      assert.deepEqual(booleanPartitions.flat().sort(), [false, false, true, true]);
+    } finally {
+      output.close();
+    }
   } finally {
     closeAndRemove(fixture);
   }

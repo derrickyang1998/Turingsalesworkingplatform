@@ -10,7 +10,7 @@
 
 ### Schema 6 与发布底座 / Schema 6 And Release Foundation
 - 新增迁移 `006_crm_sales_workspace`、CRM 查询/命令/作用域/合同服务，并将发布迁移链升级为精确的 `v1 -> v6` 两次恢复验证。
-- trusted-source 清单扩展为 46 个 SHA-256 固定文件，覆盖迁移 006、CRM 服务、当前受信任运行时、独立公网发布守护器及迁移清理 helper/unit；sanitization manifest 重建为主 v1 + 隔离 v6 精确配置。
+- trusted-source 清单扩展为 47 个 SHA-256 固定文件，覆盖一次性 legacy v0->v1 adoption、迁移 006、CRM 服务、当前受信任运行时、独立公网发布守护器及迁移清理 helper/unit；sanitization manifest 重建为主 v1 + 隔离 v6 精确配置。
 - 发布分支、构建标识、缓存键、候选/备份路径和远端文件清单升级为 `codex/v0.6.0-crm-sales-workspace` / `v060-crm-sales-workspace`，冻结 PPT build、query 与 SHA-256 保持不变。
 
 ### 解析器运行时设备 / Parser Runtime Appliance

@@ -63,6 +63,7 @@ const REQUIRED_BUNDLE_FILES = Object.freeze([
   'server/extract_document_text.py',
   'server/extract_xlsx_text.py',
   'server/ocr_document_text.py',
+  'server/scripts/adopt_legacy_production_v1.js',
   'server/scripts/build_upload_sandbox_runtime.sh',
   'server/scripts/check_cutover_capacity.py',
   'server/scripts/cleanup_stale_migration_gate.sh',
@@ -95,6 +96,7 @@ const REQUIRED_BUNDLE_FILES = Object.freeze([
 ]);
 
 const EXPECTED_ENTRYPOINTS = Object.freeze({
+  legacyProductionV1Adoption: 'server/scripts/adopt_legacy_production_v1.js',
   sanitizer: 'server/scripts/sanitize_production_shape.js',
   sanitizationManifest: 'server/scripts/sanitization_manifest.json',
   verifier: 'server/scripts/verify_campaign_migration_gate.js',

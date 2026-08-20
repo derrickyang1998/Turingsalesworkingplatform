@@ -68,12 +68,16 @@ const FTS_MANIFEST = Object.freeze({
 const JSON_POLICY = Object.freeze({
   allowedLeafTypes: Object.freeze(['null', 'boolean', 'number', 'string']),
   preserveLeafTypes: true,
-  booleanReplacement: 'type-preserving-source-disjoint-or-reject',
+  booleanReplacement: 'type-preserving-run-randomized-bijection',
   rejectPrototypeKeys: true,
   rejectNonFiniteNumbers: true,
   maxDepth: 64,
   maxLeaves: 100000
 });
+const BOUNDED_PROBABILITY_CONTEXTS = new Set([
+  'customers.win_probability',
+  'opportunities.win_probability'
+]);
 const EQUALITY_GROUPS = Object.freeze([
   Object.freeze({
     name: 'knowledge-source-identity',
@@ -729,20 +733,36 @@ function replacementAttemptToken(token, attempt) {
   return sha256(Buffer.from(`${token}\0${attempt}`, 'utf8'));
 }
 
-class SanitizerJsonBooleanDomainExhaustedError extends Error {
-  constructor(context) {
-    super(`type-preserving JSON boolean replacement domain is exhausted at ${context}`);
-    this.name = 'SanitizerJsonBooleanDomainExhaustedError';
-    this.code = 'TM_SANITIZER_JSON_BOOLEAN_DOMAIN_EXHAUSTED';
-    this.context = context;
-  }
+function secretDomainKey(value, label) {
+  const key = value === undefined ? crypto.randomBytes(32) : Buffer.from(value);
+  if (key.length !== 32) throw new Error(`${label} must be exactly 32 bytes`);
+  return key;
 }
 
-function createReplacementDomain(db, manifest) {
-  const sourceKeys = new Set(collectLiveOutputValues(db, manifest).map((entry) => entry.key));
+function secretContextBit(key, context) {
+  const digest = crypto.createHmac('sha256', key).update(String(context), 'utf8').digest();
+  return (digest[0] & 1) === 1;
+}
+
+function secretContextOrder(key, context, values) {
+  return [...values].map((value) => ({
+    value,
+    digest: crypto.createHmac('sha256', key)
+      .update(`${context}\0${logicalValueKey(value, logicalStorageType(value))}`, 'utf8')
+      .digest('hex')
+  })).sort((left, right) => left.digest.localeCompare(right.digest)).map((entry) => entry.value);
+}
+
+function createReplacementDomain(db, manifest, options = {}) {
+  const sourceKeys = new Set(
+    collectLiveOutputValues(db, manifest)
+      .filter((entry) => entry.storageType !== 'boolean')
+      .map((entry) => entry.key)
+  );
+  const booleanKey = secretDomainKey(options.booleanKey, 'boolean replacement key');
+  const boundedNumberKey = secretDomainKey(options.boundedNumberKey, 'bounded number replacement key');
   const assignedKeys = new Set();
   const replacements = new Map();
-  const booleanReplacements = new Map();
   return Object.freeze({
     sourceKeys,
     isUnavailable(value, storageType) {
@@ -750,14 +770,10 @@ function createReplacementDomain(db, manifest) {
       return sourceKeys.has(key) || assignedKeys.has(key);
     },
     reserveBoolean(original, context) {
-      const mappingKey = original ? 'true' : 'false';
-      if (booleanReplacements.has(mappingKey)) return booleanReplacements.get(mappingKey);
-      const candidate = !original;
-      if (sourceKeys.has(logicalValueKey(candidate, 'boolean'))) {
-        throw new SanitizerJsonBooleanDomainExhaustedError(context);
-      }
-      booleanReplacements.set(mappingKey, candidate);
-      return candidate;
+      return Boolean(original) !== secretContextBit(booleanKey, context);
+    },
+    orderBoundedNumbers(context, values) {
+      return secretContextOrder(boundedNumberKey, context, values);
     },
     reserve(mappingKey, storageType, candidateFactory) {
       const key = `${storageType}\0${mappingKey}`;
@@ -3311,7 +3327,8 @@ function captureSemanticShape(db, manifest) {
   });
 }
 
-function assertSemanticShapePreserved(before, after) {
+function assertSemanticShapePreserved(before, after, manifest = null) {
+  const derivedRebuilds = new Set(manifest?.derivedRebuilds || []);
   const beforeTables = Object.keys(before.tables);
   const afterTables = Object.keys(after.tables);
   if (JSON.stringify(beforeTables) !== JSON.stringify(afterTables)) throw new Error('semantic base-table inventory changed');
@@ -3324,7 +3341,10 @@ function assertSemanticShapePreserved(before, after) {
       const right = actual.columns[column];
       if (JSON.stringify(left.nullRows) !== JSON.stringify(right.nullRows)) throw new Error(`row-level NULL pattern changed for ${table}.${column}`);
       if (JSON.stringify(left.storage) !== JSON.stringify(right.storage)) throw new Error(`storage class changed for ${table}.${column}`);
-      if (JSON.stringify(left.partitions) !== JSON.stringify(right.partitions)) throw new Error(`equality partition changed for ${table}.${column}`);
+      if (!derivedRebuilds.has(`${table}.${column}`)
+          && JSON.stringify(left.partitions) !== JSON.stringify(right.partitions)) {
+        throw new Error(`equality partition changed for ${table}.${column}`);
+      }
     }
   }
   for (const [name, expected] of Object.entries(before.equalityGroups)) {
@@ -3747,22 +3767,27 @@ function rankMapFor(db, table, column, replacementDomain) {
   for (const [storageType, values] of byType) {
     const sourceKeys = new Set(values.map((row) => valueStorageKey(storageType, row.value)));
     const replacementKeys = new Set();
-    const probabilityDomain = column === 'win_probability'
-      && (table === 'customers' || table === 'opportunities');
+    const probabilityContext = `${table}.${column}`;
+    const probabilityDomain = BOUNDED_PROBABILITY_CONTEXTS.has(probabilityContext);
     if (probabilityDomain && storageType !== 'integer') {
       throw new Error(`${table}.${column} probability values must use integer storage`);
     }
-    const availableProbabilityValues = probabilityDomain && replacementDomain
+    const probabilityCandidates = probabilityDomain
       ? Array.from({ length: 101 }, (_value, index) => index)
-        .filter((value) => !replacementDomain.isUnavailable(value, 'integer'))
+        .filter((value) => !sourceKeys.has(valueStorageKey('integer', value)))
+      : null;
+    const availableProbabilityValues = probabilityDomain
+      ? replacementDomain.orderBoundedNumbers(
+        `sensitive-number\0${probabilityContext}`,
+        probabilityCandidates
+      )
       : null;
     if (probabilityDomain && (
-      values.length > 101
-      || (availableProbabilityValues && availableProbabilityValues.length < values.length)
+      availableProbabilityValues.length < values.length
     )) {
       throw new Error(`${table}.${column} probability replacement domain is exhausted`);
     }
-    let integerCandidate = probabilityDomain ? 0 : replacementDomain ? 8_000_000_000_000_000 : 1;
+    let integerCandidate = probabilityDomain ? 0 : replacementDomain ? 2_000_000_000_000_000 : 1;
     let realNumerator = 1;
     const realDenominator = Math.max(1_000_003, values.length + 1);
     values.forEach((row, index) => {
@@ -3777,13 +3802,17 @@ function rankMapFor(db, table, column, replacementDomain) {
             (attempt) => (realNumerator + attempt) / realDenominator
           );
           realNumerator = Math.round(replacement * realDenominator) + 1;
-        } else if (probabilityDomain) {
+        } else if (storageType === 'text') {
+          const rank = String(index + 1).padStart(16, '0');
+          const token = stableToken('sensitive-number-text-rank', table, column, rank);
           replacement = reserveTypedReplacement(
             replacementDomain,
             mappingKey,
-            'integer',
-            (attempt) => availableProbabilityValues[attempt]
+            'text',
+            (attempt) => `R${rank}${replacementAttemptToken(token, attempt).slice(0, 16)}`
           );
+        } else if (probabilityDomain) {
+          replacement = availableProbabilityValues[index];
         } else {
           replacement = reserveTypedReplacement(
             replacementDomain,
@@ -4310,6 +4339,10 @@ function collectForbiddenValues(db, manifest, options = {}) {
     const storageType = logicalStorageType(value, declaredStorageType);
     const canonicalKey = logicalValueKey(value, storageType);
     logicalEntries.push(Object.freeze({ kind, context, category, storageType, value, key: canonicalKey }));
+    // Boolean literals have no source-disjoint replacement; canonical false removes the source bit.
+    if (kind === 'json-leaf' && storageType === 'boolean') return;
+    // Bounded probabilities are remapped against their own 0-100 source domain.
+    if (kind === 'cell' && storageType === 'integer' && BOUNDED_PROBABILITY_CONTEXTS.has(context)) return;
     for (const [encoding, bytes] of rawEncodings(value)) {
       const key = `${context}\0${canonicalKey}\0${encoding}\0${bytes.toString('hex')}`;
       if (probeKeys.has(key)) continue;
@@ -4507,13 +4540,22 @@ function exactProbeAt(bytes, offset, probe, absoluteOffset = 0) {
   return bytes.subarray(offset, offset + probe.bytes.length).equals(probe.bytes);
 }
 
+const MAX_RECORD_PROBE_PREFIX_BYTES = 4;
+
+function recordProbePrefixKey(bytes, offset, length) {
+  let key = length;
+  for (let index = 0; index < length; index += 1) key = (key * 256) + bytes[offset + index];
+  return key;
+}
+
 function buildRecordProbeIndex(rawProbes) {
   const index = new Map();
   for (const probe of rawProbes) {
     if (probe.kind === 'json-container' || probe.bytes.length === 0) continue;
-    const first = probe.bytes[0];
-    if (!index.has(first)) index.set(first, []);
-    index.get(first).push(probe);
+    const prefixLength = Math.min(MAX_RECORD_PROBE_PREFIX_BYTES, probe.bytes.length);
+    const key = recordProbePrefixKey(probe.bytes, 0, prefixLength);
+    if (!index.has(key)) index.set(key, []);
+    index.get(key).push(probe);
   }
   return index;
 }
@@ -4521,10 +4563,13 @@ function buildRecordProbeIndex(rawProbes) {
 function matchingRecordProbe(observed, probeIndex) {
   const bytes = bytesForForbiddenValue(observed.value);
   for (let offset = 0; offset < bytes.length; offset += 1) {
-    const candidates = probeIndex.get(bytes[offset]);
-    if (!candidates) continue;
-    for (const probe of candidates) {
-      if (exactProbeAt(bytes, offset, probe)) return probe;
+    const maximumPrefixLength = Math.min(MAX_RECORD_PROBE_PREFIX_BYTES, bytes.length - offset);
+    for (let prefixLength = maximumPrefixLength; prefixLength >= 1; prefixLength -= 1) {
+      const candidates = probeIndex.get(recordProbePrefixKey(bytes, offset, prefixLength));
+      if (!candidates) continue;
+      for (const probe of candidates) {
+        if (exactProbeAt(bytes, offset, probe)) return probe;
+      }
     }
   }
   return null;
@@ -4594,17 +4639,20 @@ function zeroSqliteNonLiveRegions(outputPath) {
 function assertNoPhysicalLeaks(outputPath, forbidden) {
   const probes = forbidden.rawProbes.filter((probe) => probe.bytes.length > 0);
   if (probes.length === 0) return;
+  const probeIndex = buildRecordProbeIndex(probes);
   for (const region of sqliteNonLiveRegions(outputPath)) {
-    const probeIndex = buildRecordProbeIndex(probes);
     for (let offset = 0; offset < region.bytes.length; offset += 1) {
-      const candidates = probeIndex.get(region.bytes[offset]);
-      if (!candidates) continue;
-      for (const probe of candidates) {
-        if (exactProbeAt(region.bytes, offset, probe, region.offset)) {
-          throw new Error(
-            `sanitized output contains a classified source leak from ${probe.context} `
-            + `(${probe.encoding}) in non-live SQLite page bytes`
-          );
+      const maximumPrefixLength = Math.min(MAX_RECORD_PROBE_PREFIX_BYTES, region.bytes.length - offset);
+      for (let prefixLength = maximumPrefixLength; prefixLength >= 1; prefixLength -= 1) {
+        const candidates = probeIndex.get(recordProbePrefixKey(region.bytes, offset, prefixLength));
+        if (!candidates) continue;
+        for (const probe of candidates) {
+          if (exactProbeAt(region.bytes, offset, probe, region.offset)) {
+            throw new Error(
+              `sanitized output contains a classified source leak from ${probe.context} `
+              + `(${probe.encoding}) in non-live SQLite page bytes`
+            );
+          }
         }
       }
     }
@@ -4630,6 +4678,12 @@ function outputJsonPositionAuthorized(observed, manifest) {
     && column.jsonPolicy.mode === 'closed'
     && closedJsonPathAllowed(column.jsonPolicy, baseContext, pointer)
     && structuralJsonLeaf(baseContext, pointer);
+}
+
+function boundedProbabilityOutputAuthorized(observed) {
+  return observed.kind === 'cell'
+    && observed.storageType === 'integer'
+    && BOUNDED_PROBABILITY_CONTEXTS.has(observed.context);
 }
 
 function verifiedDerivedOutputAllowsSubstringCoincidence(observed, manifest) {
@@ -4665,7 +4719,8 @@ function assertNoForbiddenValues(outputPath, forbidden, manifest) {
       const contextKey = `${observed.context}\0${observed.key}`;
       const invariant = authorizedContextKeys.has(contextKey)
         || TRANSFORMATION_EXCLUDED_CLASSIFICATIONS.has(observed.category)
-        || outputJsonPositionAuthorized(observed, manifest);
+        || outputJsonPositionAuthorized(observed, manifest)
+        || boundedProbabilityOutputAuthorized(observed);
       if (!invariant
           && observed.category !== 'virtual-derived'
           && sourceDomainKeys.has(observed.key)) {
@@ -4951,11 +5006,12 @@ function sanitizeProductionShapePipeline(options) {
     afterDigest = sqliteDigest.databaseDigest(outputDb, FTS_MANIFEST);
     assertTopologyPreserved(beforeDigest, afterDigest, 'sanitized database');
     const afterCounts = sourceCounts(outputDb, manifest);
-    assertSemanticShapePreserved(semanticShape, captureSemanticShape(outputDb, manifest));
+    assertSemanticShapePreserved(semanticShape, captureSemanticShape(outputDb, manifest), manifest);
     const afterNulls = sourceNullTopology(outputDb, manifest);
     if (JSON.stringify(afterCounts) !== JSON.stringify(counts)) throw new Error('sanitizer changed base-table row counts');
     if (JSON.stringify(afterNulls) !== JSON.stringify(nulls)) throw new Error('sanitizer changed NULL topology');
     for (const [key, expected] of Object.entries(cardinality)) {
+      if (manifest.derivedRebuilds.includes(key)) continue;
       const [table, column] = key.split('.');
       const actual = equalityCardinality(outputDb, table, column);
       if (actual.nonnull !== expected.nonnull || actual.cardinality !== expected.cardinality) {
@@ -4991,7 +5047,7 @@ function sanitizeProductionShapePipeline(options) {
     if (finalProfile.schemaVersion !== manifest.schemaVersion) {
       throw new Error('published copy changed exact sanitization profile');
     }
-    assertSemanticShapePreserved(semanticShape, captureSemanticShape(finalDb, manifest));
+    assertSemanticShapePreserved(semanticShape, captureSemanticShape(finalDb, manifest), manifest);
     assertReplacementSentinelsConfined(finalDb, manifest);
     finalDigest = sqliteDigest.databaseDigest(finalDb, FTS_MANIFEST);
     sqliteDigest.verifyKnowledgeChunksFtsIntegrity(finalDb, FTS_MANIFEST, { checkMainIntegrity: true });

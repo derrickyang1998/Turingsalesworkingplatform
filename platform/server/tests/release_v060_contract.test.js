@@ -201,10 +201,10 @@ test('v0.6 release records match the trusted-source and parser self-test contrac
   );
   const runbook = read('platform', 'DEPLOY.md');
 
-  assert.equal(trustedManifest.files.length, 46);
+  assert.equal(trustedManifest.files.length, 47);
   assert.equal(parserManifest.required_self_tests.length, 21);
-  assert.match(changelog, /46 个 SHA-256 固定文件/);
-  assert.match(versionRecord, /Trusted source: 46 SHA-256-pinned files/);
+  assert.match(changelog, /47 个 SHA-256 固定文件/);
+  assert.match(versionRecord, /Trusted source: 47 SHA-256-pinned files/);
   for (const record of [changelog, runbook, versionRecord, archiveRecord]) {
     assert.match(record, /21[^\r\n]*(?:self-tests|自检)/i);
     assert.doesNotMatch(record, /(?:builder|构建器)[^\r\n]*chroot/i);

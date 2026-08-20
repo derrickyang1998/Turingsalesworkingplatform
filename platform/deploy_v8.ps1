@@ -32,8 +32,8 @@ $EXPECTED_PPT_QUERY = "20260702v916kbbridge"
 $EXPECTED_PPT_SHA256 = "f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e"
 $TRUSTED_SOURCE_GATE_RELATIVE_PATH = "server\scripts\trusted_production_source_gate.js"
 $TRUSTED_SOURCE_MANIFEST_RELATIVE_PATH = "server\scripts\trusted_production_source_manifest.json"
-$EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "4a3a417f30aa581f94b9554c2b8811e0881c45ff0a7842c19beaa5ab5649e6c3"
-$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "ab87f656e1047ad5204be0c5cb0213cac031343ae1be0129a06e9d707439b8c5"
+$EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "3876df70337e6ce5a54f9d506fa90d52e3f386bc3fbfd1d295448b3a54806493"
+$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "b5cf8d7543f91e9bc2bed4c192eb87ba0f94546ebe25631ae65611a8459c3742"
 $EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256 = "bdc60e6a9da601c8c65cd2a374d8cb69eeea629fa6cd5af514dd995eddfe74dc"
 $EXPECTED_TRUSTED_PARSER_VERIFIER_SHA256 = "93973d83379c1b22a779751be135f59c992d0784957519b3fdb1abebaad2d2f6"
 $EXPECTED_TRUSTED_PUBLIC_GUARD_SHA256 = "d45fe8fcc01587aaa0e73eccfb9714c27801e232cb6c0effd6daedb703316d66"
@@ -157,6 +157,7 @@ $FILES = @(
     "server\services\upload_sandbox_service.js",
     "server\services\vault_export_service.js",
     "server\services\web_search_service.js",
+    "server\scripts\adopt_legacy_production_v1.js",
     "server\scripts\bootstrap_production_browser_state.js",
     "server\scripts\bootstrap_production_runtime.sh",
     "server\scripts\build_upload_sandbox_runtime.sh",
@@ -233,6 +234,7 @@ $FILES = @(
     "server\tests\knowledge_archive_contract.test.js",
     "server\tests\knowledge_capacity_observability.test.js",
     "server\tests\knowledge_digest_compat.test.js",
+    "server\tests\legacy_production_adoption.test.js",
     "server\tests\migration_gate_exactness.test.js",
     "server\tests\migration_service.test.js",
     "server\tests\obsidian_and_business_knowledge.test.js",

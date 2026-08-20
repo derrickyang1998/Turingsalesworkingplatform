@@ -126,7 +126,7 @@
       "string"
     ],
     "preserveLeafTypes": true,
-    "booleanReplacement": "type-preserving-source-disjoint-or-reject",
+    "booleanReplacement": "type-preserving-run-randomized-bijection",
     "rejectPrototypeKeys": true,
     "rejectNonFiniteNumbers": true,
     "maxDepth": 64,
