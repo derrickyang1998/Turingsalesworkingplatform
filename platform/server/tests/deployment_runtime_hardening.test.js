@@ -1251,7 +1251,7 @@ test('candidate verification cannot read production data and runs candidate code
   assert.ok(deploy.indexOf("TM_DEPENDENCY_STAGE") < deploy.indexOf('systemd-run --quiet --wait --pipe --unit="$DependencyBuildUnit"'));
   assert.ok(deploy.indexOf('systemd-run --quiet --wait --pipe --unit="$OfflineGateUnit"') < deploy.indexOf("TM_UNPRIVILEGED_GATE"));
   assert.ok(deploy.indexOf("TM_DEPENDENCY_BUILD") < deploy.indexOf('systemd-run --quiet --wait --pipe --unit="$OfflineGateUnit"'));
-  assert.ok(deploy.indexOf('systemd-run --quiet --wait --pipe --unit="$OfflineGateUnit"') < deploy.indexOf('node --test --test-concurrency=1 tests/*.test.js'));
+  assert.ok(deploy.indexOf('systemd-run --quiet --wait --pipe --unit="$OfflineGateUnit"') < deploy.indexOf('node --test --test-concurrency=1 "${CandidateTestFiles[@]}"'));
   assert.doesNotMatch(deploy, /unshare --net --fork/);
   assert.doesNotMatch(gate, /\bip\s+(?:route|(?:-o\s+)?link)\b/, 'offline verification must not require AF_NETLINK');
   assert.match(gate, /Path\('\/sys\/class\/net'\)/);
@@ -1259,6 +1259,22 @@ test('candidate verification cannot read production data and runs candidate code
   assert.doesNotMatch(gate, /Path\('\/proc\/net\/ipv6_route'\)/, 'the isolated kernel reject route is not an outbound route');
   assert.match(deploy, /printf "%s\\n" "OFFLINE_NETWORK_NAMESPACE_OK"/);
   assert.doesNotMatch(deploy, /printf '%s\\n' "OFFLINE_NETWORK_NAMESPACE_OK"/);
+});
+
+test('unprivileged candidate validation excludes the Linux root migration control-plane suite', () => {
+  const deploy = read('platform/deploy_v8.ps1');
+  const gateMatch = deploy.match(/<<'TM_UNPRIVILEGED_GATE'\r?\n([\s\S]*?)\r?\nTM_UNPRIVILEGED_GATE/);
+  assert.ok(gateMatch, 'offline unprivileged gate must exist');
+  const gate = gateMatch[1];
+
+  assert.doesNotMatch(gate, /node --test server\/tests\/sanitized_migration_gate\.test\.js/);
+  assert.match(gate, /! -name 'sanitized_migration_gate\.test\.js'/);
+  assert.match(gate, /node --test --test-concurrency=1 "\$\{CandidateTestFiles\[@\]\}"/);
+  assert.match(
+    deploy,
+    /\/usr\/bin\/node "\$TrustedSourceGate" sanitize-and-verify[\s\S]*?TRUSTED_SANITIZATION_AND_MIGRATION_REHEARSAL_OK/,
+    'the real trusted migration rehearsal must remain the production gate'
+  );
 });
 
 test('candidate dependency and offline gates are filesystem-confined transient services', () => {
@@ -1343,6 +1359,7 @@ test('unprivileged gate uses only variables explicitly passed through env -i', (
     'APP_BUILD',
     'APP_QUERY',
     'CANDIDATE_DIR',
+    'CandidateTestFiles',
     'DB_PATH',
     'NGINX_GATE_DIR',
     'NGINX_TEST_SOCKET',
