@@ -61,6 +61,7 @@ const REQUIRED_BUNDLE_FILES = Object.freeze([
   'server/parser-runtime/package-lock.json',
   'server/parser-runtime/package.json',
   'server/parser-runtime/requirements.lock',
+  'server/parser-runtime/sitecustomize.py',
   'server/extract_document_text.py',
   'server/extract_xlsx_text.py',
   'server/ocr_document_text.py',
