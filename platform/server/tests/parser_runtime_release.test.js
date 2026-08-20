@@ -945,10 +945,10 @@ test('parser runtime manifest pins the exact production-built tree', () => {
   assert.deepEqual(manifest.runtime_tree, {
     format: 'tm-parser-runtime-tree-v1',
     root: '/var/lib/turingmarket-parser/runtime-root',
-    sha256: '30fbfca170772f23071d6216eea8a83b86d27aad18c2b22b1a1e0e9ae773d7cd',
-    files: 4213,
-    directories: 491,
-    bytes: 716157800
+    sha256: '019b3b58724e4117d9c55d28ace475a51b0fb91e817250964f785b5ca4788796',
+    files: 3474,
+    directories: 431,
+    bytes: 640591815
   });
 });
 
@@ -1141,6 +1141,19 @@ test('runtime builder launches exactly one fixed-identity disposable offline bui
   assert.match(unit, /\/usr\/bin\/env -i/);
   assert.match(unit, /PIP_CONFIG_FILE=\/dev\/null/);
   assert.match(unit, /npm_config_userconfig=\/dev\/null/);
+});
+
+test('runtime builder keeps npm user and global config files distinct', () => {
+  const { controller, worker } = runtimeBuilderSourceSections();
+
+  assert.match(controller, /npm_config_userconfig=\/dev\/null/);
+  assert.match(controller, /npm_config_globalconfig=\/build-work\/npm-global\.npmrc/);
+  assert.match(worker, /NPM_GLOBAL_CONFIG=\/build-work\/npm-global\.npmrc/);
+  assert.match(worker, /install -m 0600 \/dev\/null "\$NPM_GLOBAL_CONFIG"/);
+  assert.doesNotMatch(
+    controller,
+    /npm_config_userconfig=([^\s\\]+)[\s\S]*?npm_config_globalconfig=\1(?:\s|\\)/
+  );
 });
 
 test('runtime builder hides the private build parent and collects the unit before verification and sealing', () => {

@@ -87,7 +87,7 @@ const UPLOAD_SANDBOX_SPOOL_ROOT = path.resolve(
   process.env.UPLOAD_SANDBOX_SPOOL_ROOT || '/var/lib/turingmarket-parser/jobs'
 );
 const RELEASE_PINNED_UPLOAD_MANIFEST_SHA256 =
-  '970b6111a433faae77bd07efbcdcdc608d6c923c563e708c70dd8b62006d6970';
+  'df4db3102fc698b5441f7968994db7576ec35b1d639b50ab1fa4ef120e0505ce';
 const UPLOAD_SANDBOX_SELF_TEST_RUNNER =
   '/usr/local/libexec/turingmarket/upload_sandbox_self_test';
 const REQUIRED_UPLOAD_SANDBOX_SELF_TESTS = Object.freeze([

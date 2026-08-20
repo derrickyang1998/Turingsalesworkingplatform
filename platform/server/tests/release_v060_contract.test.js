@@ -201,10 +201,10 @@ test('v0.6 release records match the trusted-source and parser self-test contrac
   );
   const runbook = read('platform', 'DEPLOY.md');
 
-  assert.equal(trustedManifest.files.length, 47);
+  assert.equal(trustedManifest.files.length, 49);
   assert.equal(parserManifest.required_self_tests.length, 21);
-  assert.match(changelog, /47 个 SHA-256 固定文件/);
-  assert.match(versionRecord, /Trusted source: 47 SHA-256-pinned files/);
+  assert.match(changelog, /49 个 SHA-256 固定文件/);
+  assert.match(versionRecord, /Trusted source: 49 SHA-256-pinned files/);
   for (const record of [changelog, runbook, versionRecord, archiveRecord]) {
     assert.match(record, /21[^\r\n]*(?:self-tests|自检)/i);
     assert.doesNotMatch(record, /(?:builder|构建器)[^\r\n]*chroot/i);
@@ -298,7 +298,9 @@ test('v0.6 deploy inventory contains the parser release and capacity gate artifa
   assert.deepEqual(parserFiles.sort(), [
     'server/parser-runtime/package.json',
     'server/parser-runtime/package-lock.json',
+    'server/parser-runtime/pip-cacert.crt',
     'server/parser-runtime/requirements.lock',
+    'server/parser-runtime/sitecustomize.py',
     'server/scripts/build_upload_sandbox_runtime.sh',
     'server/scripts/check_cutover_capacity.py',
     'server/scripts/provision_upload_sandbox_runtime.sh',
@@ -394,7 +396,7 @@ test('v0.6 deploy seals the parser appliance under the root-only lifecycle befor
     'chmod 0444',
     'PARSER_RUNTIME_CANDIDATE_READY'
   ], 'parser candidate preparation');
-  assert.match(preparation, /716157800/);
+  assert.match(preparation, /640591815/);
   assert.match(preparation, /ParserRequiredBytes/);
   assert.match(preparation, /test -f "\$TrustedSource"/);
   assert.match(preparation, /test ! -L "\$TrustedSource"/);

@@ -10,11 +10,11 @@
 
 ### Schema 6 与发布底座 / Schema 6 And Release Foundation
 - 新增迁移 `006_crm_sales_workspace`、CRM 查询/命令/作用域/合同服务，并将发布迁移链升级为精确的 `v1 -> v6` 两次恢复验证。
-- trusted-source 清单扩展为 47 个 SHA-256 固定文件，覆盖一次性 legacy v0->v1 adoption、迁移 006、CRM 服务、当前受信任运行时、独立公网发布守护器及迁移清理 helper/unit；受信任门禁会先识别精确 legacy v0、在私有可写副本中演练接管，并在生产切换中以 no-clobber 方式发布精确 managed v1，随后执行 v1->v6 双轮验证。sanitization manifest 重建为主 v1 + 隔离 v6 精确配置。
+- trusted-source 清单扩展为 49 个 SHA-256 固定文件，覆盖一次性 legacy v0->v1 adoption、迁移 006、CRM 服务、当前受信任运行时、解析器固定 CA 与 `sitecustomize.py`、独立公网发布守护器及迁移清理 helper/unit；受信任门禁会先识别精确 legacy v0、在私有可写副本中演练接管，并在生产切换中以 no-clobber 方式发布精确 managed v1，随后执行 v1->v6 双轮验证。sanitization manifest 重建为主 v1 + 隔离 v6 精确配置。
 - 发布分支、构建标识、缓存键、候选/备份路径和远端文件清单升级为 `codex/v0.6.0-crm-sales-workspace` / `v060-crm-sales-workspace`，冻结 PPT build、query 与 SHA-256 保持不变。
 
 ### 解析器运行时设备 / Parser Runtime Appliance
-- 为知识库、网红和需求文件上传增加独立解析器设备。生产构建固定为 Linux `x86_64`、Node.js `v20.20.2` 与 Python `3.14.4`；密封运行时树固定为 4,213 个文件、491 个目录、716,157,800 字节，SHA-256 为 `30fbfca170772f23071d6216eea8a83b86d27aad18c2b22b1a1e0e9ae773d7cd`。
+- 为知识库、网红和需求文件上传增加独立解析器设备。生产构建固定为 Linux `x86_64`、Node.js `v20.20.2` 与 Python `3.14.4`；与禁止 Python 字节码缓存的构建策略一致，密封运行时树固定为 3,474 个文件、431 个目录、640,591,815 字节，SHA-256 为 `019b3b58724e4117d9c55d28ace475a51b0fb91e817250964f785b5ca4788796`。
 - Node 依赖闭包精确锁定为 `read-excel-file@9.2.0`、`@xmldom/xmldom@0.9.11`、`fflate@0.8.3`、`unzipper-esm@0.13.3`、`graceful-fs@4.2.11` 与 `node-int64@0.4.0`；`package-lock.json` SHA-256 为 `e1d6e5ababef1fb6f0aa69363be328e4da42283c96e268378c2f83076722fc46`。
 - Python 闭包精确锁定为 `certifi==2026.7.22`、`charset-normalizer==3.5.0`、`colorlog==6.12.0`、`flatbuffers==25.12.19`、`idna==3.18`、`numpy==2.5.2`、`omegaconf==2.4.0.dev13`、`onnxruntime==1.28.0`、`opencv-python==5.0.0.93`、`packaging==26.3`、`pillow==12.3.0`、`protobuf==7.35.1`、`pyclipper==1.4.0`、`PyMuPDF==1.27.2.3`、`pypdf==6.14.2`、`PyYAML==6.0.3`、`rapidocr==3.9.2`、`requests==2.34.2`、`shapely==2.1.2`、`six==1.17.0`、`tqdm==4.70.0`、`typing_extensions==4.16.0` 与 `urllib3==2.7.0`；逐包验签的 `requirements.lock` SHA-256 为 `22f72070ee7c62b428261b64435fbb0b24d87f0aaa7a4d0ac0d8e7a45bfb44df`。
 - 构建、安装、快照和回滚只允许在 root 所有的生命周期目录内执行。解析任务以禁止登录的 `turingmarket-parser` 身份运行于 systemd 257+ 的 `RootDirectory` chroot，并启用私有网络、PID、IPC、用户和挂载命名空间、只读系统、空 capability 与资源上限。
@@ -26,7 +26,7 @@
 - `/var/lib/turingmarket/ppt-cache` 现作为第五个外置状态目标，由 `PPT_CACHE_DIR` 直接引用，不是候选树软链接。备份记录其 `present`/`absent` 起源；首次安装只在停写后创建空的 `root:root 0700` 目录，预变更恢复仅在目录仍为空时删除它。
 - 生产变更前按实际文件系统设备计算数据库、PPT 缓存、既有/待装解析器运行时与 `node_modules` 增量的备份、安装和回滚空间，并要求每个设备满足计算值加 `max(10%, 512 MiB)` 余量及最终 `CUTOVER_CAPACITY_OK`。
 - 切换顺序固定为：全流量维护、首次解析器 admission/spool/unit/cgroup 排空、停止并静默 PM2 与 SQLite、再次排空解析器、准备 PPT 缓存、建立同一验签快照、交换代码、安装解析器、启动候选与执行验收。
-- `/api/health` 现在返回 `parser.ready` 与 `parser.manifest_sha256`。候选必须同时满足 `status=ok`、解析器 ready 和 manifest SHA-256 `970b6111a433faae77bd07efbcdcdc608d6c923c563e708c70dd8b62006d6970`；安装后自检、接受事实与运行时树哈希写入 schema 3 验收标记，公开流量恢复前会重新绑定核验。
+- `/api/health` 现在返回 `parser.ready` 与 `parser.manifest_sha256`。候选必须同时满足 `status=ok`、解析器 ready 和 manifest SHA-256 `df4db3102fc698b5441f7968994db7576ec35b1d639b50ab1fa4ef120e0505ce`；安装后自检、接受事实与运行时树哈希写入 schema 3 验收标记，公开流量恢复前会重新绑定核验。
 
 ### 审查与状态 / Review And Status
 - 本轮发布包装器使用严格子进程环境白名单、语义化远端证据、可逆 CRM 写入冒烟及强制注销；任何由本轮生产变更引起的必选验收失败会自动使用本轮已验证备份回滚。成功、畸形响应、并发冲突、写入超时、注销失败、回滚后身份失败和自动回滚编排共 7 条动态场景通过，客户服务/HTTP 定向测试 3/3 通过，独立终审为 `APPROVE`。

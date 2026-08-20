@@ -340,6 +340,8 @@ const RUNTIME_ARTIFACTS = Object.freeze([
   'parser-runtime/package.json',
   'parser-runtime/package-lock.json',
   'parser-runtime/requirements.lock',
+  'parser-runtime/pip-cacert.crt',
+  'parser-runtime/sitecustomize.py',
   'extract_document_text.py',
   'extract_xlsx_text.py',
   'ocr_document_text.py',

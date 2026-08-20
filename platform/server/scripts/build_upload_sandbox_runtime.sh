@@ -11,7 +11,7 @@ unprivileged_build_worker() {
 
   local SOURCE_ROOT=/build-input
   local OUTPUT_ROOT=/build-work/runtime
-  local PYTHON_SITE PIP_BUNDLED_CA APP_ROOT NPM_CACHE resolved library scan_target candidate
+  local PYTHON_SITE PIP_BUNDLED_CA APP_ROOT NPM_CACHE NPM_GLOBAL_CONFIG resolved library scan_target candidate
   [[ -d "$SOURCE_ROOT" && -d /dependency-cache && -d /build-work ]] || return 66
   [[ ! -e "$OUTPUT_ROOT" && ! -L "$OUTPUT_ROOT" ]] || return 66
   for attempt in $(seq 1 1200); do
@@ -128,14 +128,16 @@ PY
   copy_file "$SOURCE_ROOT/scripts/parse_upload_sandbox.sh" /usr/local/libexec/turingmarket/parse_upload_sandbox.sh 0555
 
   NPM_CACHE=/build-work/npm-cache
+  NPM_GLOBAL_CONFIG=/build-work/npm-global.npmrc
+  install -m 0600 /dev/null "$NPM_GLOBAL_CONFIG"
   install -d -m 0700 "$NPM_CACHE"
   cp -R --no-preserve=ownership,mode,timestamps /dependency-cache/npm/. "$NPM_CACHE/"
   (
     cd "$APP_ROOT"
-    HOME=/build-work/home npm_config_cache="$NPM_CACHE" \
+    HOME=/build-work/home npm_config_cache="$NPM_CACHE" npm_config_globalconfig="$NPM_GLOBAL_CONFIG" \
       npm ci --offline --omit=dev --ignore-scripts --no-audit --no-fund >/dev/null
   )
-  rm -rf -- "$APP_ROOT/node_modules/.bin" "$NPM_CACHE"
+  rm -rf -- "$APP_ROOT/node_modules/.bin" "$NPM_CACHE" "$NPM_GLOBAL_CONFIG"
 
   for _pass in 1 2 3; do
     mapfile -d '' ELF_CANDIDATES < <(find "$OUTPUT_ROOT" -xdev -type f -print0)
@@ -550,7 +552,7 @@ systemd-run --quiet --wait --collect \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_INPUT=1 \
     npm_config_userconfig=/dev/null \
-    npm_config_globalconfig=/dev/null \
+    npm_config_globalconfig=/build-work/npm-global.npmrc \
     npm_config_update_notifier=false \
     npm_config_audit=false \
     npm_config_fund=false \

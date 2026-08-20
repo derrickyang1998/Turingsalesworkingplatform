@@ -46,7 +46,7 @@
     { "path": "server/extract_xlsx_text.py", "sha256": "69db3140f8d08f2754df0b13d9ba728db5117539a507faabd4088c74b89ee3c8" },
     { "path": "server/ocr_document_text.py", "sha256": "917d5b14872eeb3a7b628d80cc70dbab46a79ef632e031fa599f15e0840e1a0a" },
     { "path": "server/scripts/adopt_legacy_production_v1.js", "sha256": "9b9d0e790f2fcd034ec3df2109931e85c036e862086d3350ba77234e1b0ded91" },
-    { "path": "server/scripts/build_upload_sandbox_runtime.sh", "sha256": "bc72792b912d999b17c981c67119899028f98ec4542ad081d1b5f23a1e59c91c" },
+    { "path": "server/scripts/build_upload_sandbox_runtime.sh", "sha256": "80af307b0fa1e9528e20636a60a4c10a547d7538dc33cd8b093e98732dd11897" },
     { "path": "server/scripts/check_cutover_capacity.py", "sha256": "3cfca1526919e3c2ae65bcc0d7fa0fc347c023d36a353b98a5cd149b9a824b83" },
     { "path": "server/scripts/cleanup_stale_migration_gate.sh", "sha256": "d5f2befa902522dd9de3e9dd2397a99ee5e78ab1a1c6e526a27f14bb2829e1fa" },
     { "path": "server/scripts/parse_upload_sandbox.sh", "sha256": "2d77151dac802ce00d80c9df04ba879232001b014ab672379c36836d767b8d95" },
@@ -70,9 +70,9 @@
     { "path": "server/services/migration_service.js", "sha256": "4c447505f16e6fab80683eefe9a5d30012d3ed725efee7db66ef5e2573f939af" },
     { "path": "server/services/organization_access_service.js", "sha256": "a6a4b7d681e7da163bcf026c5fae9f93a125ef9f6604307f4c51c3bfe8a91505" },
     { "path": "server/services/sqlite_digest_service.js", "sha256": "84f701b14e2e49f7f92a31c2b954996bc331dd564bbcf7a35c8005d04f17d301" },
-    { "path": "server/services/upload_sandbox_service.js", "sha256": "aa6f06ba91ea77703c6630e41893b766c6bcb6d53e21a0637c19dbad7baccc81" },
+    { "path": "server/services/upload_sandbox_service.js", "sha256": "496bb8f41d734c51ca5de72a79617427925c3c5426063e413f1cd2452f803b34" },
     { "path": "server/systemd/turingmarket-gate-cleanup.service", "sha256": "acc42c90010eca793d22b6ee517231872aed5c17b36f0222052351b97cfdb7c6" },
-    { "path": "server/systemd/turingmarket-parser.manifest.json", "sha256": "aca02452aadd5b31b10ad0ce7db8f14fd9709a1bd7704bcf9eb20c48329e017c" },
+    { "path": "server/systemd/turingmarket-parser.manifest.json", "sha256": "df4db3102fc698b5441f7968994db7576ec35b1d639b50ab1fa4ef120e0505ce" },
     { "path": "server/systemd/turingmarket-parser.slice", "sha256": "d0cc089526feff2cbe0240a6fc711b113c2eac0af95c3763a00ef0edc8467c17" },
     { "path": "server/systemd/turingmarket-parser@.service", "sha256": "a363f7ce7021067be99fdf74144b1ca7e25ba6ac68ce070a1bfa07d07a73c49a" }
   ]
