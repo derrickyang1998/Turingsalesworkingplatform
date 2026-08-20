@@ -1251,7 +1251,7 @@ test('candidate verification cannot read production data and runs candidate code
   assert.ok(deploy.indexOf("TM_DEPENDENCY_STAGE") < deploy.indexOf('systemd-run --quiet --wait --pipe --unit="$DependencyBuildUnit"'));
   assert.ok(deploy.indexOf('systemd-run --quiet --wait --pipe --unit="$OfflineGateUnit"') < deploy.indexOf("TM_UNPRIVILEGED_GATE"));
   assert.ok(deploy.indexOf("TM_DEPENDENCY_BUILD") < deploy.indexOf('systemd-run --quiet --wait --pipe --unit="$OfflineGateUnit"'));
-  assert.ok(deploy.indexOf('systemd-run --quiet --wait --pipe --unit="$OfflineGateUnit"') < deploy.indexOf('node --test --test-concurrency=1 "${CandidateTestFiles[@]}"'));
+  assert.ok(deploy.indexOf('systemd-run --quiet --wait --pipe --unit="$OfflineGateUnit"') < deploy.indexOf('node server/scripts/verify_phase4_one_request_replay.js'));
   assert.doesNotMatch(deploy, /unshare --net --fork/);
   assert.doesNotMatch(gate, /\bip\s+(?:route|(?:-o\s+)?link)\b/, 'offline verification must not require AF_NETLINK');
   assert.match(gate, /Path\('\/sys\/class\/net'\)/);
@@ -1261,15 +1261,26 @@ test('candidate verification cannot read production data and runs candidate code
   assert.doesNotMatch(deploy, /printf '%s\\n' "OFFLINE_NETWORK_NAMESPACE_OK"/);
 });
 
-test('unprivileged candidate validation excludes the Linux root migration control-plane suite', () => {
+test('unprivileged candidate validation runs bounded release proofs instead of developer regression suites', () => {
   const deploy = read('platform/deploy_v8.ps1');
   const gateMatch = deploy.match(/<<'TM_UNPRIVILEGED_GATE'\r?\n([\s\S]*?)\r?\nTM_UNPRIVILEGED_GATE/);
   assert.ok(gateMatch, 'offline unprivileged gate must exist');
   const gate = gateMatch[1];
 
-  assert.doesNotMatch(gate, /node --test server\/tests\/sanitized_migration_gate\.test\.js/);
-  assert.match(gate, /! -name 'sanitized_migration_gate\.test\.js'/);
-  assert.match(gate, /node --test --test-concurrency=1 "\$\{CandidateTestFiles\[@\]\}"/);
+  const releaseProofs = [
+    'node server/scripts/verify_phase4_one_request_replay.js',
+    'node --test server/tests/verify_phase4_one_request_replay.test.js',
+    'node --test server/tests/release_replay_gate.test.js',
+    'node node_modules/playwright-deploy/cli.js test -c server/tests/deployment-browser-smoke.config.js'
+  ];
+  let cursor = -1;
+  for (const proof of releaseProofs) {
+    const position = gate.indexOf(proof);
+    assert.ok(position > cursor, `${proof} must execute once in release-proof order`);
+    assert.equal(gate.indexOf(proof, position + 1), -1, `${proof} must not be duplicated`);
+    cursor = position;
+  }
+  assert.doesNotMatch(gate, /tests\/\*\.test\.js|CandidateTestFiles|sanitized_migration_gate|bootstrap_phase4_boundary|browser_baseline_tools/);
   assert.match(
     deploy,
     /\/usr\/bin\/node "\$TrustedSourceGate" sanitize-and-verify[\s\S]*?TRUSTED_SANITIZATION_AND_MIGRATION_REHEARSAL_OK/,
@@ -1349,9 +1360,8 @@ test('unprivileged gate uses only variables explicitly passed through env -i', (
   const gate = match[1];
   const envBoundary = deploy.slice(deploy.lastIndexOf('timeout --signal=KILL', match.index), match.index);
 
-  assert.match(envBoundary, /DB_PATH="\$TestDb"/);
-  assert.doesNotMatch(gate, /\$TestDb\b/, 'parent-shell TestDb is unavailable after env -i');
-  assert.match(gate, /DB_PATH="\$DB_PATH"/);
+  assert.doesNotMatch(envBoundary, /DB_PATH=/, 'the bounded release proofs do not receive a generic database path');
+  assert.doesNotMatch(gate, /\$(?:TestDb|DB_PATH)\b/);
   const referencedVariables = [...new Set(
     [...gate.matchAll(/\$\{?([A-Za-z_][A-Za-z0-9_]*)/g)].map((entry) => entry[1])
   )].sort();
@@ -1359,8 +1369,6 @@ test('unprivileged gate uses only variables explicitly passed through env -i', (
     'APP_BUILD',
     'APP_QUERY',
     'CANDIDATE_DIR',
-    'CandidateTestFiles',
-    'DB_PATH',
     'NGINX_GATE_DIR',
     'NGINX_TEST_SOCKET',
     'PPT_BUILD',

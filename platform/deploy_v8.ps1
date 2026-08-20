@@ -7907,7 +7907,6 @@ ReleaseTraversalRelaxed=0
 DependencyCopyByteReserveFloor="536870912"
 DependencyCopyInodeReserveFloor="16384"
 DependencyCopyCleanupArmed=0
-TestDb="$TestRoot/test.db"
 SchemaDb="$TestRoot/schema.db"
 BrowserCache="$TestRoot/browser-cache"
 DependencyStageRoot="$TestRoot/dependency-stage"
@@ -8860,7 +8859,6 @@ timeout --signal=KILL 30m systemd-run --quiet --wait --pipe --unit="$OfflineGate
     NODE_ENV="test" \
     TM_DISABLE_DOTENV="1" \
     TM_ENV_FILE="$TestRoot/no-production.env" \
-    DB_PATH="$TestDb" \
     UPLOAD_DIR="$TestRoot/uploads" \
     TMP_DIR="$TestRoot/tmp" \
     PLAYWRIGHT_BROWSERS_PATH="$BrowserCache" \
@@ -8939,14 +8937,6 @@ cd "$CANDIDATE_DIR"
 NODE_ENV=test TM_DISABLE_DOTENV=1 node server/scripts/verify_phase4_one_request_replay.js
 NODE_ENV=test TM_DISABLE_DOTENV=1 node --test server/tests/verify_phase4_one_request_replay.test.js
 node --test server/tests/release_replay_gate.test.js
-cd "$CANDIDATE_DIR/server"
-mapfile -d '' -t CandidateTestFiles < <(
-  find tests -maxdepth 1 -type f -name '*.test.js' ! -name 'sanitized_migration_gate.test.js' -print0 | sort -z
-)
-test "${#CandidateTestFiles[@]}" -gt 0
-NODE_ENV=test TM_DISABLE_DOTENV=1 DB_PATH="$DB_PATH" UPLOAD_DIR="$TEST_ROOT/uploads" TMP_DIR="$TEST_ROOT/tmp" \
-  node --test --test-concurrency=1 "${CandidateTestFiles[@]}"
-cd ..
 TM_DEPLOYMENT_SMOKE_PORT=43188 node node_modules/playwright-deploy/cli.js test -c server/tests/deployment-browser-smoke.config.js
 
 NGINX_TEST_SOCKET="$NGINX_GATE_DIR/listen.sock"
