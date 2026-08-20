@@ -144,22 +144,53 @@ function fsyncDirectory(directory) {
   try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
 }
 
-function publishNoReplace(stagePath, outputPath) {
+function publishNoReplace(stagePath, outputPath, hooks = {}) {
   const parent = path.dirname(outputPath);
   const parentBefore = fs.lstatSync(parent, { bigint: true });
   if (!parentBefore.isDirectory() || parentBefore.isSymbolicLink()) {
     throw new Error('adopted output parent must remain a regular directory');
   }
   const parentIdentity = comparableDirectoryIdentity(parentBefore);
-  fs.linkSync(stagePath, outputPath);
-  const parentAfter = fs.lstatSync(parent, { bigint: true });
-  if (!parentAfter.isDirectory() || parentAfter.isSymbolicLink()
-      || JSON.stringify(comparableDirectoryIdentity(parentAfter)) !== JSON.stringify(parentIdentity)) {
-    throw new Error('adopted output parent identity changed during publish');
+  const stageIdentity = fs.lstatSync(stagePath, { bigint: true });
+  const expectedInode = Object.freeze({ dev: String(stageIdentity.dev), ino: String(stageIdentity.ino) });
+  let outputLinked = false;
+  try {
+    fs.linkSync(stagePath, outputPath);
+    outputLinked = true;
+    if (typeof hooks.afterLink === 'function') hooks.afterLink({ stagePath, outputPath });
+    const parentAfter = fs.lstatSync(parent, { bigint: true });
+    if (!parentAfter.isDirectory() || parentAfter.isSymbolicLink()
+        || JSON.stringify(comparableDirectoryIdentity(parentAfter)) !== JSON.stringify(parentIdentity)) {
+      throw new Error('adopted output parent identity changed during publish');
+    }
+    fsyncDirectory(parent);
+    fs.unlinkSync(stagePath);
+    if (typeof hooks.afterStageUnlink === 'function') hooks.afterStageUnlink({ outputPath });
+    fsyncDirectory(parent);
+  } catch (error) {
+    let rollbackError = null;
+    if (outputLinked && fs.existsSync(outputPath)) {
+      const outputStat = fs.lstatSync(outputPath, { bigint: true });
+      const outputInode = { dev: String(outputStat.dev), ino: String(outputStat.ino) };
+      if (!outputStat.isFile() || outputStat.isSymbolicLink()
+          || JSON.stringify(outputInode) !== JSON.stringify(expectedInode)) {
+        rollbackError = new Error('failed adoption output no longer matches the published stage inode');
+      } else {
+        try {
+          fs.unlinkSync(outputPath);
+          fsyncDirectory(parent);
+        } catch (cleanupError) {
+          rollbackError = cleanupError;
+        }
+      }
+    }
+    if (rollbackError) {
+      const failure = new Error(`adopted output rollback could not be made durable: ${rollbackError.message}`);
+      failure.cause = error;
+      throw failure;
+    }
+    throw error;
   }
-  fsyncDirectory(parent);
-  fs.unlinkSync(stagePath);
-  fsyncDirectory(parent);
 }
 
 function cleanupPrivateStage(stagePath) {
@@ -189,6 +220,27 @@ function assertOutputPath(outputPath, sourcePath) {
   const parentStat = fs.lstatSync(parent);
   if (!parentStat.isDirectory() || parentStat.isSymbolicLink()) {
     throw new Error('adopted output parent must be a regular directory');
+  }
+  return resolved;
+}
+
+function assertPrivateStagePath(privateStagePath, sourcePath, outputPath) {
+  const resolved = typeof privateStagePath === 'string' && privateStagePath
+    ? path.resolve(privateStagePath)
+    : `${outputPath}.stage-${process.pid}-${crypto.randomBytes(8).toString('hex')}`;
+  if (resolved === sourcePath || resolved === outputPath) {
+    throw new Error('legacy source, adopted output, and private stage must differ');
+  }
+  if (path.dirname(resolved) !== path.dirname(outputPath)) {
+    throw new Error('private adoption stage must share the adopted output parent');
+  }
+  for (const candidate of [resolved, ...SOURCE_SIDECAR_SUFFIXES.map((suffix) => `${resolved}${suffix}`)]) {
+    try {
+      fs.lstatSync(candidate);
+      throw new Error('private adoption stage already exists');
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
   }
   return resolved;
 }
@@ -280,7 +332,7 @@ function adoptLegacyProductionV1(options) {
   }
   const sourcePath = assertSourcePath(options.sourcePath);
   const outputPath = assertOutputPath(options.outputPath, sourcePath);
-  const stagePath = `${outputPath}.stage-${process.pid}-${crypto.randomBytes(8).toString('hex')}`;
+  const stagePath = assertPrivateStagePath(options.privateStagePath, sourcePath, outputPath);
   const sourceCapture = captureSourceIdentity(sourcePath);
   const sourceSha256 = fileDescriptorSha256(sourceCapture.fd);
   if (sourceSha256 !== expectedSourceSha256) {
@@ -352,7 +404,10 @@ function adoptLegacyProductionV1(options) {
     assertStableSource(sourcePath, sourceCapture, sourceSha256);
     const fd = fs.openSync(stagePath, 'r+');
     try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
-    publishNoReplace(stagePath, outputPath);
+    publishNoReplace(stagePath, outputPath, {
+      afterLink: options.afterPublishLink,
+      afterStageUnlink: options.afterPublishStageUnlink
+    });
     published = true;
     assertRegularSingleLink(outputPath, 'adopted output');
     return Object.freeze({

@@ -109,7 +109,7 @@
     "secret-synthetic": "disjoint inert credential sentinel preserving nullness",
     "secret-null": "NULL only; source column must be entirely NULL",
     "json-leaves": "every JSON leaf at /** is replaced by type-preserving deterministic data",
-    "sensitive-number": "deterministic rank bucket preserving null/equality/cardinality",
+    "sensitive-number": "run-randomized bounded-domain bijection preserving null/equality/cardinality and SQLite storage type",
     "blob-digest": "deterministic digest bytes preserving byte length",
     "dependent-digest": "deterministic SHA-256 replacement derived from sanitized ownership row",
     "derived": "recomputed or allowlisted aggregate",

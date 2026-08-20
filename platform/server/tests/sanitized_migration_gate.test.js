@@ -1077,6 +1077,10 @@ test('manifest declares exact managed v1 as primary and keeps v6 in one isolated
   try {
     assert.equal(manifest.schemaVersion, 1);
     assert.deepEqual(manifest.exactProfiles.map((profile) => profile.schemaVersion), [6]);
+    assert.equal(
+      manifest.categories['sensitive-number'],
+      'run-randomized bounded-domain bijection preserving null/equality/cardinality and SQLite storage type'
+    );
 
     const v1Profile = sanitizer._testing.manifestProfileForVersion(manifest, 1);
     const v6Profile = sanitizer._testing.manifestProfileForVersion(manifest, 6);
@@ -3959,6 +3963,7 @@ bootstrap_terminal_journal_gate() {
   JOURNAL_TERMINAL_STATE=
 }
 external_layout_marker_state() { record_action marker-state; printf 'valid\n'; }
+bootstrap_prepare_committed_validation_backup() { record_action backup-root; }
 bootstrap_prepare_journal_run_identity() {
   record_action identity
   BOOTSTRAP_OWNER_TOKEN=11111111111111111111111111111111
@@ -3996,6 +4001,7 @@ mkdir -p "$TM_REMOTE_ROOT"
 bootstrap_production_main > "$TM_REMOTE_ROOT/main.out"
 grep -Fq 'BOOTSTRAP_JOURNAL_TERMINAL_OUTCOME=post-marker-repair-complete' "$TM_REMOTE_ROOT/main.out"
 grep -Fxq artifact-preflight ${shellQuote(actions)}
+grep -Fxq backup-root ${shellQuote(actions)}
 grep -Fxq gen0-committed ${shellQuote(actions)}
 grep -Fxq idle-owned-committed ${shellQuote(actions)}
 grep -Fxq setup-repair ${shellQuote(actions)}

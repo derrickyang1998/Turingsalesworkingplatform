@@ -9,6 +9,7 @@ const MANIFEST_FORMAT = 'tm-trusted-production-source-manifest-v1';
 const STAGE_FORMAT = 'tm-trusted-production-source-stage-v1';
 const RUNTIME_FORMAT = 'tm-trusted-production-source-runtime-v1';
 const VERDICT_FORMAT = 'tm-trusted-production-source-verdict-v1';
+const ADOPTION_VERDICT_FORMAT = 'tm-trusted-legacy-adoption-verdict-v1';
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const RUNTIME_COMMAND_TIMEOUT_MS = 20 * 60 * 1000;
 const MAX_CHILD_OUTPUT_BYTES = 1024 * 1024;
@@ -1194,6 +1195,19 @@ function rejectDatabaseSidecars(databasePath, label) {
   }
 }
 
+function fsyncDirectory(directoryPath) {
+  if (process.platform === 'win32') return;
+  const descriptor = fs.openSync(
+    directoryPath,
+    fs.constants.O_RDONLY | (fs.constants.O_DIRECTORY || 0)
+  );
+  try {
+    fs.fsyncSync(descriptor);
+  } finally {
+    fs.closeSync(descriptor);
+  }
+}
+
 function identityFields(metadata) {
   const mode = typeof metadata.mode === 'bigint'
     ? Number(metadata.mode & 0o777n)
@@ -1238,7 +1252,7 @@ function assertImmutableDatabaseIdentitySnapshot(expected, actual, label) {
   return actual;
 }
 
-function captureImmutableDatabaseIdentity(filePath, label) {
+function captureStableDatabaseIdentity(filePath, label, { requireReadOnly = true } = {}) {
   const absolute = assertSafeDatabaseFile(filePath, label);
   rejectDatabaseSidecars(absolute, label);
   const descriptor = fs.openSync(absolute, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
@@ -1257,7 +1271,7 @@ function captureImmutableDatabaseIdentity(filePath, label) {
     const pathMetadata = fs.statSync(absolute, { bigint: true });
     const pathIdentity = identityFields(pathMetadata);
     if (!sameIdentityFields(after, pathIdentity)) throw new Error(`${label} path identity changed while hashing`);
-    if (process.platform !== 'win32' && (pathMetadata.mode & 0o222n) !== 0n) {
+    if (requireReadOnly && process.platform !== 'win32' && (pathMetadata.mode & 0o222n) !== 0n) {
       throw new Error(`${label} must be immutable before trusted verification`);
     }
     return Object.freeze({
@@ -1268,6 +1282,66 @@ function captureImmutableDatabaseIdentity(filePath, label) {
   } finally {
     fs.closeSync(descriptor);
   }
+}
+
+function captureImmutableDatabaseIdentity(filePath, label) {
+  return captureStableDatabaseIdentity(filePath, label, { requireReadOnly: true });
+}
+
+function createMutableAdoptionSource(sourcePath, mutableSourcePath, sourceIdentity) {
+  const targetPath = normalizedAbsolute(mutableSourcePath);
+  const parent = assertDirectoryNoSymlink(path.dirname(targetPath), 'trusted mutable adoption source parent');
+  if (pathsEqual(sourcePath, targetPath)) throw new Error('trusted mutable adoption source must differ from its immutable source');
+  let created = false;
+  try {
+    fs.copyFileSync(sourcePath, targetPath, fs.constants.COPYFILE_EXCL);
+    created = true;
+    fs.chmodSync(targetPath, 0o600);
+    const descriptor = fs.openSync(
+      targetPath,
+      fs.constants.O_RDWR | (fs.constants.O_NOFOLLOW || 0)
+    );
+    try {
+      fs.fsyncSync(descriptor);
+    } finally {
+      fs.closeSync(descriptor);
+    }
+    fsyncDirectory(parent);
+    const identity = captureStableDatabaseIdentity(
+      targetPath,
+      'trusted mutable adoption source',
+      { requireReadOnly: false }
+    );
+    if (identity.sha256 !== sourceIdentity.sha256) {
+      throw new Error('trusted mutable adoption source SHA-256 does not match its immutable source');
+    }
+    return identity;
+  } catch (error) {
+    if (created) {
+      try {
+        fs.unlinkSync(targetPath);
+        fsyncDirectory(parent);
+      } catch (cleanupError) {
+        const failure = new Error(`trusted mutable adoption source cleanup failed: ${cleanupError.message}`);
+        failure.cause = error;
+        throw failure;
+      }
+    }
+    throw error;
+  }
+}
+
+function retireMutableAdoptionSource(identity) {
+  rejectDatabaseSidecars(identity.path, 'trusted mutable adoption source');
+  const current = captureStableDatabaseIdentity(
+    identity.path,
+    'trusted mutable adoption source before retirement',
+    { requireReadOnly: false }
+  );
+  assertImmutableDatabaseIdentitySnapshot(identity, current, 'trusted mutable adoption source');
+  const parent = path.dirname(identity.path);
+  fs.unlinkSync(identity.path);
+  fsyncDirectory(parent);
 }
 
 function assertDatabaseIdentity(expected, label) {
@@ -1315,6 +1389,183 @@ function trustedEntrypoint(manifest, key, label) {
   return entry;
 }
 
+function trustedBundleModule(manifest, verified, relativePath, label) {
+  const entry = manifest.files.find((candidate) => candidate.path === relativePath);
+  if (!entry) throw new Error(`${label} is missing from the trusted bundle manifest`);
+  const modulePath = path.join(verified.bundleRoot, ...entry.path.split('/'));
+  assertPinnedFile(modulePath, entry.sha256, label);
+  delete require.cache[require.resolve(modulePath)];
+  return { entry, modulePath, value: require(modulePath) };
+}
+
+function classifyTrustedDatabase(manifest, verified, sourcePath) {
+  const migration = trustedBundleModule(
+    manifest,
+    verified,
+    'server/services/migration_service.js',
+    'trusted migration service'
+  ).value;
+  const verifier = trustedBundleModule(
+    manifest,
+    verified,
+    manifest.entrypoints.verifier,
+    'trusted migration verifier registry'
+  ).value;
+  if (!migration || typeof migration.classifyDatabase !== 'function'
+      || typeof migration.defaultMigrations !== 'function'
+      || !verifier || !Array.isArray(verifier.REGISTERED_MIGRATIONS)) {
+    throw new Error('trusted migration service interface is invalid');
+  }
+  const migrations = [...migration.defaultMigrations(), ...verifier.REGISTERED_MIGRATIONS];
+  if (
+    migrations.length !== manifest.migrationContract.targetVersion ||
+    migrations.some((entry, index) => !entry || entry.version !== index + 1)
+  ) {
+    throw new Error('trusted migration registry does not match the pinned target version');
+  }
+  const Database = require('better-sqlite3');
+  const database = new Database(sourcePath, { readonly: true, fileMustExist: true });
+  try {
+    if (database.pragma('quick_check', { simple: true }) !== 'ok') {
+      throw new Error('trusted source quick_check failed before classification');
+    }
+    if (database.pragma('foreign_key_check').length !== 0) {
+      throw new Error('trusted source foreign_key_check failed before classification');
+    }
+    return migration.classifyDatabase(database, {
+      rootDir: path.join(verified.bundleRoot, 'server'),
+      migrations
+    });
+  } finally {
+    database.close();
+  }
+}
+
+function prepareTrustedLegacySource({
+  manifest,
+  verified,
+  sourcePath,
+  sourceIdentity,
+  outputPath,
+  mutableSourcePath = null,
+  privateStagePath = null
+}) {
+  const classification = classifyTrustedDatabase(manifest, verified, sourcePath);
+  if (classification.status === 'managed' && [1, 6].includes(classification.currentVersion)) {
+    return Object.freeze({
+      effectiveSourcePath: sourcePath,
+      report: Object.freeze({
+        format: ADOPTION_VERDICT_FORMAT,
+        applied: false,
+        sourceVersion: classification.currentVersion,
+        targetVersion: classification.currentVersion,
+        sourceSha256: sourceIdentity.sha256,
+        outputSha256: sourceIdentity.sha256,
+        baseTableCount: null,
+        baseRowCount: null,
+        repairs: null
+      })
+    });
+  }
+  if (classification.status !== 'legacy' || classification.currentVersion !== 0) {
+    throw new Error(`trusted legacy adoption requires exact version 0 or managed version 1/6; got ${classification.status}:${classification.currentVersion}`);
+  }
+  if (fs.existsSync(outputPath) || databaseSidecarPaths(outputPath).some((candidate) => fs.existsSync(candidate))) {
+    throw new Error('trusted legacy adoption output must not exist before execution');
+  }
+  const adoptionEntry = trustedEntrypoint(manifest, 'legacyProductionV1Adoption', 'trusted legacy adoption');
+  const adoptionPath = path.join(verified.bundleRoot, ...adoptionEntry.path.split('/'));
+  assertPinnedFile(adoptionPath, adoptionEntry.sha256, 'trusted legacy adoption');
+  delete require.cache[require.resolve(adoptionPath)];
+  const adoption = require(adoptionPath);
+  if (!adoption || typeof adoption.adoptLegacyProductionV1 !== 'function') {
+    throw new Error('trusted legacy adoption interface is invalid');
+  }
+  const mutableSourceIdentity = mutableSourcePath
+    ? createMutableAdoptionSource(sourcePath, mutableSourcePath, sourceIdentity)
+    : null;
+  let result;
+  try {
+    result = adoption.adoptLegacyProductionV1({
+      sourcePath: mutableSourceIdentity ? mutableSourceIdentity.path : sourcePath,
+      outputPath,
+      privateStagePath,
+      expectedSourceSha256: sourceIdentity.sha256
+    });
+  } finally {
+    if (mutableSourceIdentity) retireMutableAdoptionSource(mutableSourceIdentity);
+  }
+  if (
+    result.format !== adoption.REPORT_VERSION || result.sourceVersion !== 0 || result.targetVersion !== 1 ||
+    result.sourceSha256 !== sourceIdentity.sha256 || !SHA256_PATTERN.test(result.outputSha256 || '') ||
+    !Number.isSafeInteger(result.baseTableCount) || result.baseTableCount < 1 ||
+    !Number.isSafeInteger(result.baseRowCount) || result.baseRowCount < 1 ||
+    !result.repairs || result.repairs.ftsRebuilt !== true
+  ) {
+    throw new Error('trusted legacy adoption verdict is incomplete');
+  }
+  const outputIdentity = captureStableDatabaseIdentity(
+    outputPath,
+    'trusted adopted version 1 output',
+    { requireReadOnly: false }
+  );
+  if (outputIdentity.sha256 !== result.outputSha256) {
+    throw new Error('trusted legacy adoption output SHA-256 does not match its verdict');
+  }
+  return Object.freeze({
+    effectiveSourcePath: outputPath,
+    report: Object.freeze({
+      format: ADOPTION_VERDICT_FORMAT,
+      applied: true,
+      sourceVersion: 0,
+      targetVersion: 1,
+      sourceSha256: result.sourceSha256,
+      outputSha256: result.outputSha256,
+      baseTableCount: result.baseTableCount,
+      baseRowCount: result.baseRowCount,
+      repairs: result.repairs
+    })
+  });
+}
+
+function adoptIfLegacyTrustedSource(options) {
+  const manifest = assertPinnedRuntime(options);
+  const verified = verifyTrustedBundle(options);
+  const sourcePath = assertSafeDatabaseFile(options.sourcePath, 'trusted live adoption source');
+  assertPathOutsideCandidate(options.candidateRoot, sourcePath, 'trusted live adoption source');
+  const outputPath = normalizedAbsolute(options.outputPath);
+  const outputParent = assertDirectoryNoSymlink(path.dirname(outputPath), 'trusted live adoption output parent');
+  assertPathOutsideCandidate(options.candidateRoot, outputParent, 'trusted live adoption output parent');
+  if (pathsEqual(sourcePath, outputPath)) throw new Error('trusted live adoption source and output must differ');
+  if (!SHA256_PATTERN.test(options.expectedSourceSha256 || '')) {
+    throw new Error('trusted live adoption expected source SHA-256 is invalid');
+  }
+  const sourceIdentity = captureStableDatabaseIdentity(
+    sourcePath,
+    'trusted live adoption source',
+    { requireReadOnly: false }
+  );
+  if (sourceIdentity.sha256 !== options.expectedSourceSha256) {
+    throw new Error('trusted live adoption source SHA-256 does not match the quiesced snapshot');
+  }
+  const prepared = prepareTrustedLegacySource({
+    manifest,
+    verified,
+    sourcePath,
+    sourceIdentity,
+    outputPath,
+    privateStagePath: options.privateStagePath
+  });
+  const sourceAfter = captureStableDatabaseIdentity(
+    sourcePath,
+    'trusted live adoption source after execution',
+    { requireReadOnly: false }
+  );
+  assertImmutableDatabaseIdentitySnapshot(sourceIdentity, sourceAfter, 'trusted live adoption source');
+  verifyTrustedBundle(options);
+  return prepared.report;
+}
+
 function runTrustedMigrationVerification({ manifest, verified, sanitizedPath, workDir }) {
   const verifierEntry = trustedEntrypoint(manifest, 'verifier', 'trusted migration verifier');
   const verifierPath = path.join(verified.bundleRoot, ...verifierEntry.path.split('/'));
@@ -1340,6 +1591,136 @@ function runTrustedMigrationVerification({ manifest, verified, sanitizedPath, wo
   assertDigestReport(report.preMigration, 'pre-migration');
   assertDigestReport(report.postMigration, 'post-migration');
   return report;
+}
+
+function verifyTrustedManagedV6Noop({ manifest, verified, sanitizedPath, workDir }) {
+  const classification = classifyTrustedDatabase(manifest, verified, sanitizedPath);
+  if (classification.status !== 'managed'
+      || classification.currentVersion !== manifest.migrationContract.targetVersion) {
+    throw new Error('trusted managed no-op source is not the exact pinned target version');
+  }
+  const sqliteDigest = trustedBundleModule(
+    manifest,
+    verified,
+    'server/services/sqlite_digest_service.js',
+    'trusted SQLite digest service'
+  ).value;
+  const migration = trustedBundleModule(
+    manifest,
+    verified,
+    'server/services/migration_service.js',
+    'trusted managed no-op migration service'
+  ).value;
+  const verifier = trustedBundleModule(
+    manifest,
+    verified,
+    manifest.entrypoints.verifier,
+    'trusted managed no-op migration registry'
+  ).value;
+  const adoptionEntry = trustedEntrypoint(manifest, 'legacyProductionV1Adoption', 'trusted legacy adoption');
+  const adoption = trustedBundleModule(
+    manifest,
+    verified,
+    adoptionEntry.path,
+    'trusted legacy adoption FTS contract'
+  ).value;
+  if (!sqliteDigest || typeof sqliteDigest.databaseDigest !== 'function'
+      || typeof sqliteDigest.verifyKnowledgeChunksFtsIntegrity !== 'function'
+      || !adoption || !adoption.FTS_MANIFEST
+      || !migration || typeof migration.runMigrations !== 'function'
+      || typeof migration.defaultMigrations !== 'function'
+      || typeof migration.classifyDatabase !== 'function'
+      || !verifier || !Array.isArray(verifier.REGISTERED_MIGRATIONS)) {
+    throw new Error('trusted managed no-op verification interface is invalid');
+  }
+  const migrations = [...migration.defaultMigrations(), ...verifier.REGISTERED_MIGRATIONS];
+  if (
+    migrations.length !== manifest.migrationContract.targetVersion ||
+    migrations.some((entry, index) => !entry || entry.version !== index + 1)
+  ) {
+    throw new Error('trusted managed no-op migration registry is not exact');
+  }
+  const trustedWorkRoot = assertDirectoryNoSymlink(workDir, 'trusted managed no-op work directory');
+  const runDirectory = fs.mkdtempSync(path.join(trustedWorkRoot, 'tm-managed-v6-noop-'));
+  fs.chmodSync(runDirectory, 0o700);
+  const mutablePath = path.join(runDirectory, 'managed-v6.db');
+  const Database = require('better-sqlite3');
+  let database = null;
+  let preMigration;
+  let postMigration;
+  try {
+    fs.copyFileSync(sanitizedPath, mutablePath, fs.constants.COPYFILE_EXCL);
+    fs.chmodSync(mutablePath, 0o600);
+    database = new Database(mutablePath, { fileMustExist: true });
+    try {
+      if (database.pragma('quick_check', { simple: true }) !== 'ok') {
+        throw new Error('trusted managed no-op quick_check failed');
+      }
+      if (database.pragma('foreign_key_check').length !== 0) {
+        throw new Error('trusted managed no-op foreign_key_check failed');
+      }
+      sqliteDigest.verifyKnowledgeChunksFtsIntegrity(
+        database,
+        adoption.FTS_MANIFEST,
+        { checkMainIntegrity: false }
+      );
+      preMigration = sqliteDigest.databaseDigest(database, adoption.FTS_MANIFEST);
+      try {
+        for (let run = 0; run < EXPECTED_MIGRATION_CONTRACT.runs; run += 1) {
+          migration.runMigrations(database, {
+            rootDir: path.join(verified.bundleRoot, 'server'),
+            registeredMigrations: verifier.REGISTERED_MIGRATIONS
+          });
+          const afterRun = migration.classifyDatabase(database, {
+            rootDir: path.join(verified.bundleRoot, 'server'),
+            migrations
+          });
+          if (afterRun.status !== 'managed'
+              || afterRun.currentVersion !== manifest.migrationContract.targetVersion) {
+            throw new Error('migration classification changed');
+          }
+        }
+      } catch (error) {
+        throw new Error(`managed v6 migration no-op changed database: ${error.message}`);
+      }
+      if (database.pragma('quick_check', { simple: true }) !== 'ok'
+          || database.pragma('foreign_key_check').length !== 0) {
+        throw new Error('managed v6 migration no-op changed database integrity');
+      }
+      sqliteDigest.verifyKnowledgeChunksFtsIntegrity(
+        database,
+        adoption.FTS_MANIFEST,
+        { checkMainIntegrity: false }
+      );
+      postMigration = sqliteDigest.databaseDigest(database, adoption.FTS_MANIFEST);
+    } finally {
+      database.close();
+      database = null;
+    }
+    if (JSON.stringify(preMigration) !== JSON.stringify(postMigration)) {
+      throw new Error('managed v6 migration no-op changed database digest');
+    }
+    const freezeDigest = (digest) => Object.freeze({
+      topologySha256: digest.topologySha256,
+      logicalSha256: digest.logicalSha256,
+      fts: Object.freeze(digest.fts.map((entry) => Object.freeze({ ...entry })))
+    });
+    return Object.freeze({
+      verificationMode: 'managed-v6-noop',
+      sourceVersion: manifest.migrationContract.targetVersion,
+      targetVersion: manifest.migrationContract.targetVersion,
+      runs: EXPECTED_MIGRATION_CONTRACT.runs,
+      legacyTableCount: null,
+      legacyRowCount: null,
+      preMigrationRestoreVerified: false,
+      legacyPreservationVerified: false,
+      preMigration: freezeDigest(preMigration),
+      postMigration: freezeDigest(postMigration)
+    });
+  } finally {
+    if (database) database.close();
+    fs.rmSync(runDirectory, { recursive: true, force: true });
+  }
 }
 
 function sanitizeAndVerifyTrustedSource(options) {
@@ -1374,6 +1755,18 @@ function sanitizeAndVerifyTrustedSource(options) {
       'trusted immutable source copy'
     );
   }
+  const preparedSource = prepareTrustedLegacySource({
+    manifest,
+    verified,
+    sourcePath,
+    sourceIdentity,
+    outputPath: path.join(workDir, 'trusted-adopted-v1.db'),
+    mutableSourcePath: path.join(workDir, 'trusted-legacy-mutable-source.db')
+  });
+  if (preparedSource.report.applied) fs.chmodSync(preparedSource.effectiveSourcePath, 0o444);
+  const effectiveSourceIdentity = preparedSource.report.applied
+    ? captureImmutableDatabaseIdentity(preparedSource.effectiveSourcePath, 'trusted adopted version 1 source')
+    : sourceIdentity;
   const sanitizerEntry = trustedEntrypoint(manifest, 'sanitizer', 'trusted sanitizer');
   const policyEntry = trustedEntrypoint(manifest, 'sanitizationManifest', 'trusted sanitization manifest');
   const sanitizerPath = path.join(verified.bundleRoot, ...sanitizerEntry.path.split('/'));
@@ -1387,14 +1780,17 @@ function sanitizeAndVerifyTrustedSource(options) {
     throw new Error('trusted sanitizer interface is invalid');
   }
   const sanitization = sanitizer.sanitizeProductionShape({
-    sourcePath,
+    sourcePath: preparedSource.effectiveSourcePath,
     outputPath: sanitizedPath,
     manifestPath: policyPath,
     journalPath: path.join(workDir, 'trusted-sanitizer.run.json')
   });
+  const effectiveSourceVersion = preparedSource.report.targetVersion;
   if (
     sanitization.format !== sanitizer.REPORT_VERSION ||
-    sanitization.sourceVersion !== EXPECTED_MIGRATION_CONTRACT.sourceVersion ||
+    ![EXPECTED_MIGRATION_CONTRACT.sourceVersion, EXPECTED_MIGRATION_CONTRACT.targetVersion]
+      .includes(effectiveSourceVersion) ||
+    sanitization.sourceVersion !== effectiveSourceVersion ||
     !Number.isSafeInteger(sanitization.tableCount) || sanitization.tableCount < 1 ||
     !Number.isSafeInteger(sanitization.rowCount) || sanitization.rowCount < 1 ||
     !SHA256_PATTERN.test(sanitization.outputSha256 || '')
@@ -1403,6 +1799,7 @@ function sanitizeAndVerifyTrustedSource(options) {
   }
 
   assertDatabaseIdentity(sourceIdentity, 'trusted immutable source copy after sanitization');
+  assertDatabaseIdentity(effectiveSourceIdentity, 'trusted effective source after sanitization');
   fs.chmodSync(sanitizedPath, 0o444);
   const sanitizedIdentity = captureImmutableDatabaseIdentity(sanitizedPath, 'trusted sanitized output');
   if (sanitization.outputSha256 !== sanitizedIdentity.sha256) {
@@ -1410,13 +1807,26 @@ function sanitizeAndVerifyTrustedSource(options) {
   }
   const verifiedBeforeMigrationVerifier = verifyTrustedBundle(options);
 
-  const report = runTrustedMigrationVerification({
-    manifest,
-    verified: verifiedBeforeMigrationVerifier,
-    sanitizedPath,
-    workDir
-  });
+  const report = effectiveSourceVersion === EXPECTED_MIGRATION_CONTRACT.sourceVersion
+    ? Object.freeze({
+      verificationMode: 'v1-to-v6-migration',
+      ...runTrustedMigrationVerification({
+        manifest,
+        verified: verifiedBeforeMigrationVerifier,
+        sanitizedPath,
+        workDir
+      }),
+      preMigrationRestoreVerified: true,
+      legacyPreservationVerified: true
+    })
+    : verifyTrustedManagedV6Noop({
+      manifest,
+      verified: verifiedBeforeMigrationVerifier,
+      sanitizedPath,
+      workDir
+    });
   assertDatabaseIdentity(sourceIdentity, 'trusted immutable source copy after migration rehearsal');
+  assertDatabaseIdentity(effectiveSourceIdentity, 'trusted effective source after migration rehearsal');
   assertDatabaseIdentity(sanitizedIdentity, 'trusted sanitized output after migration rehearsal');
   verifyTrustedBundle(options);
   return Object.freeze({
@@ -1429,13 +1839,15 @@ function sanitizeAndVerifyTrustedSource(options) {
     sanitizedSourceInode: sanitizedIdentity.ino,
     trustedSanitizerSha256: sanitizerEntry.sha256,
     trustedSanitizationManifestSha256: policyEntry.sha256,
+    databaseAdoption: preparedSource.report,
+    verificationMode: report.verificationMode,
     sourceVersion: report.sourceVersion,
     targetVersion: report.targetVersion,
     runs: report.runs,
     legacyTableCount: report.legacyTableCount,
     legacyRowCount: report.legacyRowCount,
-    preMigrationRestoreVerified: true,
-    legacyPreservationVerified: true,
+    preMigrationRestoreVerified: report.preMigrationRestoreVerified,
+    legacyPreservationVerified: report.legacyPreservationVerified,
     preMigration: report.preMigration,
     postMigration: report.postMigration
   });
@@ -1443,7 +1855,7 @@ function sanitizeAndVerifyTrustedSource(options) {
 
 function parseCli(argv) {
   const command = argv[0];
-  if (!['stage', 'prepare-runtime', 'sanitize-and-verify'].includes(command)) {
+  if (!['stage', 'prepare-runtime', 'sanitize-and-verify', 'adopt-if-legacy'].includes(command)) {
     throw new Error('trusted gate command is invalid');
   }
   const options = {};
@@ -1500,7 +1912,7 @@ function main(argv) {
       dependencyRoot: runtime.dependencyRoot,
       manifestSha256: common.expectedManifestSha256
     };
-  } else {
+  } else if (parsed.command === 'sanitize-and-verify') {
     report = sanitizeAndVerifyTrustedSource({
       ...common,
       dependencyRoot: required(parsed.options, 'dependencyRoot'),
@@ -1508,6 +1920,14 @@ function main(argv) {
       expectedSourceGid: required(parsed.options, 'expectedSourceGid'),
       sanitizedPath: required(parsed.options, 'sanitizedSource'),
       workDir: required(parsed.options, 'workDir')
+    });
+  } else {
+    report = adoptIfLegacyTrustedSource({
+      ...common,
+      sourcePath: required(parsed.options, 'source'),
+      outputPath: required(parsed.options, 'output'),
+      privateStagePath: required(parsed.options, 'privateStage'),
+      expectedSourceSha256: required(parsed.options, 'expectedSourceSha256')
     });
   }
   process.stdout.write(`${JSON.stringify(report)}\n`);
@@ -1523,6 +1943,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  ADOPTION_VERDICT_FORMAT,
   MANIFEST_FORMAT,
   RUNTIME_FORMAT,
   STAGE_FORMAT,
@@ -1532,6 +1953,7 @@ module.exports = {
   pruneBetterSqliteBuildArtifacts,
   prepareTrustedRuntime,
   stageTrustedBundle,
+  adoptIfLegacyTrustedSource,
   sanitizeAndVerifyTrustedSource,
   captureImmutableDatabaseIdentity,
   assertExpectedSourceIdentityMetadata,

@@ -7,6 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const test = require('node:test');
+const Database = require('better-sqlite3');
 
 const platformRoot = path.resolve(__dirname, '..', '..');
 const serverRoot = path.join(platformRoot, 'server');
@@ -19,7 +20,11 @@ const trustedParserVerifierPath = path.join(
   'trusted_parser_runtime_verifier.js'
 );
 const dependencyRoot = fs.realpathSync(path.join(serverRoot, 'node_modules'));
+const legacy = require('../migrations/baselines/legacy_v1');
+const migration001 = require('../migrations/001_legacy_compat_columns');
 const migrationService = require('../services/migration_service');
+const sqliteDigest = require('../services/sqlite_digest_service');
+const migrationVerifier = require('../scripts/verify_campaign_migration_gate');
 
 function read(filePath) {
   return fs.readFileSync(filePath, 'utf8');
@@ -87,6 +92,57 @@ function createV1Fixture(t, name) {
   const database = migrationService.openMigratedDatabase(databasePath, { rootDir: serverRoot });
   database.prepare('UPDATE users SET display_name=? WHERE id=(SELECT MIN(id) FROM users)')
     .run('trusted-source-fixture');
+  database.close();
+  return { root, databasePath };
+}
+
+function createV6Fixture(t, name) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `tm-trusted-source-v6-${name}-`));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const databasePath = path.join(root, 'managed-v6.db');
+  const database = migrationService.openMigratedDatabase(databasePath, {
+    rootDir: serverRoot,
+    registeredMigrations: migrationVerifier.REGISTERED_MIGRATIONS
+  });
+  database.close();
+  return { root, databasePath };
+}
+
+function createLegacyV0Fixture(t, name) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `tm-trusted-source-v0-${name}-`));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const databasePath = path.join(root, 'legacy-v0.db');
+  const database = new Database(databasePath);
+  database.pragma('foreign_keys = ON');
+  legacy.apply(database);
+  migration001.apply(database);
+  database.prepare(`
+    INSERT INTO users (id,username,password_hash,display_name,role)
+    VALUES (1,'admin','hash','Admin','admin')
+  `).run();
+  database.prepare(`
+    INSERT INTO influencers (id,platform,kol_handle,cost_usd,quoted_price)
+    VALUES (128,'YouTube','@production-shape',-3000,-4500)
+  `).run();
+  database.prepare(`
+    INSERT INTO customers (id,brand_name,stage,created_by,assigned_to)
+    VALUES (8,'Production shape customer','new_lead',1,1)
+  `).run();
+  database.prepare(`
+    INSERT INTO customer_activity (id,customer_id,user_id,action,stage_from,stage_to)
+    VALUES (23,8,1,'stage_change','proposal','new_lead')
+  `).run();
+  const entryId = Number(database.prepare(`
+    INSERT INTO knowledge_entries (
+      entry_type,source_type,key_terms,content,created_by,is_public,title,tags_json,visibility
+    ) VALUES ('note','legacy-adoption','legacy adoption','Private adoption content',1,0,'Private title','[]','private')
+  `).run().lastInsertRowid);
+  database.prepare(`
+    INSERT INTO knowledge_chunks (entry_id,chunk_index,content,token_count)
+    VALUES (?,0,'Private adoption chunk',4)
+  `).run(entryId);
+  sqliteDigest.rebuildKnowledgeChunksFts(database);
+  database.exec('DELETE FROM knowledge_chunks_fts');
   database.close();
   return { root, databasePath };
 }
@@ -542,6 +598,285 @@ test('trusted bundle staging rejects a candidate sanitizer that would substitute
   assert.equal(fs.existsSync(bundleRoot), false, 'a forged sanitizer must not publish executable trusted bytes');
 });
 
+test('trusted deployment gate adopts exact legacy v0 before sanitized v1-to-v6 verification', (t) => {
+  const gate = loadTrustedGate();
+  assert.match(
+    read(trustedGatePath),
+    /mutableSourcePath:\s*path\.join\(workDir, 'trusted-legacy-mutable-source\.db'\)/
+  );
+  const fixture = createLegacyV0Fixture(t, 'adopt-before-rehearsal');
+  const sanitizedPath = path.join(fixture.root, 'trusted-sanitized-v1.db');
+  const { manifest, manifestPath } = writeCurrentContractManifest(fixture.root);
+  const candidateRoot = path.join(fixture.root, 'candidate');
+  const bundleRoot = path.join(fixture.root, 'trusted', 'bundle');
+  copyContractCandidate(manifest, candidateRoot);
+  gate.stageTrustedBundle({ candidateRoot, bundleRoot, manifestPath });
+  const sourceBefore = sha256(fixture.databasePath);
+  fs.chmodSync(fixture.databasePath, 0o440);
+  const workDir = path.join(fixture.root, 'migration-work');
+  const result = spawnSync(process.execPath, [
+    trustedGatePath,
+    'sanitize-and-verify',
+    '--candidate-root', candidateRoot,
+    '--bundle-root', bundleRoot,
+    '--manifest', manifestPath,
+    '--source', fixture.databasePath,
+    '--expected-source-gid', String(typeof process.getgid === 'function' ? process.getgid() : 0),
+    '--sanitized-source', sanitizedPath,
+    '--work-dir', workDir,
+    '--dependency-root', dependencyRoot,
+    '--expected-self-sha256', sha256(trustedGatePath),
+    '--expected-manifest-sha256', sha256(manifestPath),
+    '--expected-verifier-sha256', verifierSha256(manifest)
+  ], {
+    cwd: fixture.root,
+    encoding: 'utf8',
+    env: { ...process.env, NODE_PATH: dependencyRoot },
+    timeout: 120_000
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const report = JSON.parse(result.stdout.trim());
+  assert.deepEqual({
+    format: report.format,
+    sourceVersion: report.sourceVersion,
+    targetVersion: report.targetVersion,
+    runs: report.runs,
+    adoption: report.databaseAdoption
+  }, {
+    format: 'tm-trusted-production-source-verdict-v1',
+    sourceVersion: 1,
+    targetVersion: 6,
+    runs: 2,
+    adoption: {
+      format: 'tm-trusted-legacy-adoption-verdict-v1',
+      applied: true,
+      sourceVersion: 0,
+      targetVersion: 1,
+      sourceSha256: sourceBefore,
+      outputSha256: report.databaseAdoption.outputSha256,
+      baseTableCount: report.databaseAdoption.baseTableCount,
+      baseRowCount: report.databaseAdoption.baseRowCount,
+      repairs: {
+        influencerRows: 1,
+        customerRows: 1,
+        activityRows: 1,
+        ftsRebuilt: true
+      }
+    }
+  });
+  assert.match(report.databaseAdoption.outputSha256, /^[0-9a-f]{64}$/);
+  assert.notEqual(report.databaseAdoption.outputSha256, sourceBefore);
+  assert.equal(sha256(fixture.databasePath), sourceBefore);
+  assert.equal(fs.existsSync(path.join(workDir, 'trusted-legacy-mutable-source.db')), false);
+});
+
+test('trusted live adoption recognizes exact managed v6 as a no-op', (t) => {
+  const fixture = createV6Fixture(t, 'adoption-noop');
+  const outputPath = path.join(fixture.root, 'must-not-exist.db');
+  const { manifest, manifestPath } = writeCurrentContractManifest(fixture.root);
+  const candidateRoot = path.join(fixture.root, 'candidate');
+  const bundleRoot = path.join(fixture.root, 'trusted', 'bundle');
+  copyContractCandidate(manifest, candidateRoot);
+  loadTrustedGate().stageTrustedBundle({ candidateRoot, bundleRoot, manifestPath });
+  const sourceSha256 = sha256(fixture.databasePath);
+  const result = spawnSync(process.execPath, [
+    trustedGatePath,
+    'adopt-if-legacy',
+    '--candidate-root', candidateRoot,
+    '--bundle-root', bundleRoot,
+    '--manifest', manifestPath,
+    '--source', fixture.databasePath,
+    '--output', outputPath,
+    '--private-stage', path.join(fixture.root, '.trusted-live-adoption.private'),
+    '--expected-source-sha256', sourceSha256,
+    '--expected-self-sha256', sha256(trustedGatePath),
+    '--expected-manifest-sha256', sha256(manifestPath),
+    '--expected-verifier-sha256', verifierSha256(manifest)
+  ], {
+    cwd: fixture.root,
+    encoding: 'utf8',
+    env: { ...process.env, NODE_PATH: dependencyRoot },
+    timeout: 30_000
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.deepEqual(JSON.parse(result.stdout.trim()), {
+    format: 'tm-trusted-legacy-adoption-verdict-v1',
+    applied: false,
+    sourceVersion: 6,
+    targetVersion: 6,
+    sourceSha256,
+    outputSha256: sourceSha256,
+    baseTableCount: null,
+    baseRowCount: null,
+    repairs: null
+  });
+  assert.equal(fs.existsSync(outputPath), false);
+});
+
+test('trusted required sanitize-and-verify path admits exact managed v6 as a verified no-op', (t) => {
+  const fixture = createV6Fixture(t, 'required-v6-gate');
+  const sanitizedPath = path.join(fixture.root, 'trusted-sanitized-v6.db');
+  const workDir = path.join(fixture.root, 'migration-work');
+  const { manifest, manifestPath } = writeCurrentContractManifest(fixture.root);
+  const candidateRoot = path.join(fixture.root, 'candidate');
+  const bundleRoot = path.join(fixture.root, 'trusted', 'bundle');
+  copyContractCandidate(manifest, candidateRoot);
+  loadTrustedGate().stageTrustedBundle({ candidateRoot, bundleRoot, manifestPath });
+  const sourceSha256 = sha256(fixture.databasePath);
+  fs.chmodSync(fixture.databasePath, 0o440);
+  const result = spawnSync(process.execPath, [
+    trustedGatePath,
+    'sanitize-and-verify',
+    '--candidate-root', candidateRoot,
+    '--bundle-root', bundleRoot,
+    '--manifest', manifestPath,
+    '--source', fixture.databasePath,
+    '--expected-source-gid', String(typeof process.getgid === 'function' ? process.getgid() : 0),
+    '--sanitized-source', sanitizedPath,
+    '--work-dir', workDir,
+    '--dependency-root', dependencyRoot,
+    '--expected-self-sha256', sha256(trustedGatePath),
+    '--expected-manifest-sha256', sha256(manifestPath),
+    '--expected-verifier-sha256', verifierSha256(manifest)
+  ], {
+    cwd: fixture.root,
+    encoding: 'utf8',
+    env: { ...process.env, NODE_PATH: dependencyRoot },
+    timeout: 120_000
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const report = JSON.parse(result.stdout.trim());
+  assert.deepEqual({
+    format: report.format,
+    verificationMode: report.verificationMode,
+    sourceVersion: report.sourceVersion,
+    targetVersion: report.targetVersion,
+    runs: report.runs,
+    adoption: report.databaseAdoption
+  }, {
+    format: 'tm-trusted-production-source-verdict-v1',
+    verificationMode: 'managed-v6-noop',
+    sourceVersion: 6,
+    targetVersion: 6,
+    runs: 2,
+    adoption: {
+      format: 'tm-trusted-legacy-adoption-verdict-v1',
+      applied: false,
+      sourceVersion: 6,
+      targetVersion: 6,
+      sourceSha256,
+      outputSha256: sourceSha256,
+      baseTableCount: null,
+      baseRowCount: null,
+      repairs: null
+    }
+  });
+  assert.match(report.preMigration.topologySha256, /^[0-9a-f]{64}$/);
+  assert.equal(report.preMigration.topologySha256, report.postMigration.topologySha256);
+  assert.equal(report.preMigration.logicalSha256, report.postMigration.logicalSha256);
+  assert.equal(sha256(fixture.databasePath), sourceSha256);
+  assert.equal(fs.existsSync(sanitizedPath), true);
+});
+
+test('managed v6 no-op verification rejects a pinned migration startup mutation', (t) => {
+  const fixture = createV6Fixture(t, 'required-v6-startup-mutation');
+  const sanitizedPath = path.join(fixture.root, 'trusted-sanitized-v6.db');
+  const workDir = path.join(fixture.root, 'migration-work');
+  const { manifest, manifestPath } = writeCurrentContractManifest(fixture.root);
+  const candidateRoot = path.join(fixture.root, 'candidate');
+  const bundleRoot = path.join(fixture.root, 'trusted', 'bundle');
+  copyContractCandidate(manifest, candidateRoot);
+
+  const migrationServiceRelative = 'server/services/migration_service.js';
+  const candidateMigrationService = path.join(candidateRoot, ...migrationServiceRelative.split('/'));
+  fs.appendFileSync(candidateMigrationService, `
+const tmOriginalRunMigrationsForNoopRegression = module.exports.runMigrations;
+module.exports.runMigrations = function tmMutatingManagedV6Startup(db, options) {
+  const result = tmOriginalRunMigrationsForNoopRegression(db, options);
+  db.exec('CREATE TABLE IF NOT EXISTS tm_managed_v6_startup_regression(id INTEGER PRIMARY KEY)');
+  return result;
+};
+`, 'utf8');
+  manifest.files.find((entry) => entry.path === migrationServiceRelative).sha256 = sha256(candidateMigrationService);
+  fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+  loadTrustedGate().stageTrustedBundle({ candidateRoot, bundleRoot, manifestPath });
+
+  fs.chmodSync(fixture.databasePath, 0o440);
+  const result = spawnSync(process.execPath, [
+    trustedGatePath,
+    'sanitize-and-verify',
+    '--candidate-root', candidateRoot,
+    '--bundle-root', bundleRoot,
+    '--manifest', manifestPath,
+    '--source', fixture.databasePath,
+    '--expected-source-gid', String(typeof process.getgid === 'function' ? process.getgid() : 0),
+    '--sanitized-source', sanitizedPath,
+    '--work-dir', workDir,
+    '--dependency-root', dependencyRoot,
+    '--expected-self-sha256', sha256(trustedGatePath),
+    '--expected-manifest-sha256', sha256(manifestPath),
+    '--expected-verifier-sha256', verifierSha256(manifest)
+  ], {
+    cwd: fixture.root,
+    encoding: 'utf8',
+    env: { ...process.env, NODE_PATH: dependencyRoot },
+    timeout: 120_000
+  });
+
+  assert.notEqual(result.status, 0, result.stdout);
+  assert.match(result.stderr, /managed v6 migration no-op changed/i);
+  assert.deepEqual(
+    fs.readdirSync(workDir).filter((entry) => entry.startsWith('tm-managed-v6-noop-')),
+    []
+  );
+});
+
+test('cutover owns and cleans deterministic database adoption artifacts across retries', () => {
+  const deploy = read(deployPath);
+  const cutoverMatch = deploy.match(/\$cutoverGate\s*=\s*@'\r?\n([\s\S]*?)\r?\n'@/);
+  assert.ok(cutoverMatch, 'cutover gate must exist');
+  const cutoverGate = cutoverMatch[1];
+
+  assert.match(cutoverGate, /DatabaseAdoptionStage="\$DatabaseDir\/\.turingmarket\.db\.adopted"/);
+  assert.match(cutoverGate, /DatabaseAdoptionPrivateStage="\$DatabaseDir\/\.turingmarket\.db\.adopted\.private"/);
+  assert.doesNotMatch(cutoverGate, /DatabaseAdoptionStage=.*__RUN_ID__/);
+  assert.match(cutoverGate, /--private-stage "\$DatabaseAdoptionPrivateStage"/);
+  assert.match(cutoverGate, /cleanup_database_adoption_artifacts\(\)/);
+  assert.match(
+    cutoverGate,
+    /python3 - "\$DatabaseDir" "\$DatabaseAdoptionPrivateStage" "\$DatabaseAdoptionStage"/
+  );
+  assert.match(cutoverGate, /os\.unlink\(candidate\)/);
+  assert.match(cutoverGate, /cutover_exit_guard\(\)[\s\S]*cleanup_database_adoption_artifacts \|\| FailClosedStatus=1/);
+
+  const helperStart = cutoverGate.indexOf('\ncleanup_database_adoption_artifacts() {');
+  const helperEnd = cutoverGate.indexOf('\n}\n\ncutover_exit_guard()', helperStart);
+  assert.ok(helperStart >= 0 && helperEnd > helperStart, 'cutover adoption cleanup helper must be bounded');
+  const helper = cutoverGate.slice(helperStart, helperEnd);
+  const completePairValidation = helper.indexOf('database adoption hardlink pair is inconsistent');
+  const firstUnlink = helper.indexOf('os.unlink(candidate)');
+  assert.ok(
+    completePairValidation >= 0 && firstUnlink > completePairValidation,
+    'all adoption artifacts and hardlink relationships must validate before the first unlink'
+  );
+
+  const restoreCleanup = deploy.match(/cleanup_restore_stages\(\) \{([\s\S]*?)\n\}/);
+  assert.ok(restoreCleanup, 'rollback cleanup helper must exist');
+  assert.match(restoreCleanup[1], /cleanup_database_adoption_artifacts/);
+  assert.doesNotMatch(restoreCleanup[1], /rm -f[\s\S]*DatabaseAdoption/);
+
+  const writerLock = cutoverGate.indexOf('writer_acquired=1');
+  const retryCleanup = cutoverGate.indexOf('\ncleanup_database_adoption_artifacts\n', writerLock);
+  const adoptionCall = cutoverGate.indexOf('\nadopt_legacy_database_if_required\n');
+  assert.ok(
+    writerLock >= 0 && retryCleanup > writerLock && adoptionCall > retryCleanup,
+    'stale deterministic adoption artifacts must be cleaned under the writer lock before adoption'
+  );
+});
+
 test('trusted deployment-side verifier independently admits exact populated v1 through two preserved v1-to-v6 runs', (t) => {
   const gate = loadTrustedGate();
   const fixture = createV1Fixture(t, 'two-runs');
@@ -598,6 +933,17 @@ test('trusted deployment-side verifier independently admits exact populated v1 t
   assert.equal(report.trustedSanitizerSha256, manifest.files.find((entry) => (
     entry.path === manifest.entrypoints.sanitizer
   )).sha256);
+  assert.deepEqual(report.databaseAdoption, {
+    format: 'tm-trusted-legacy-adoption-verdict-v1',
+    applied: false,
+    sourceVersion: 1,
+    targetVersion: 1,
+    sourceSha256: report.sourceSha256,
+    outputSha256: report.sourceSha256,
+    baseTableCount: null,
+    baseRowCount: null,
+    repairs: null
+  });
   assert.match(report.preMigration.topologySha256, /^[0-9a-f]{64}$/);
   assert.match(report.postMigration.logicalSha256, /^[0-9a-f]{64}$/);
 });
@@ -779,6 +1125,30 @@ test('deploy pins trusted sanitizer closure and never executes candidate sanitiz
   assert.match(candidateGate, /TrustedDependencyRoot="\$TrustedSourceRuntime\/server\/node_modules"/);
   assert.doesNotMatch(candidateGate, /--dependency-root "\$CandidateDir/);
   assert.doesNotMatch(candidateGate, /require\('\.\/scripts\/(?:sanitize_production_shape|verify_campaign_migration_gate)'\)/);
+
+  const cutoverMatch = deploy.match(/\$cutoverGate\s*=\s*@'\r?\n([\s\S]*?)\r?\n'@/);
+  assert.ok(cutoverMatch, 'cutover gate must exist');
+  const cutoverGate = cutoverMatch[1];
+  assert.match(cutoverGate, /TrustedSourceGate="__TRUSTED_SOURCE_GATE__"/);
+  assert.match(cutoverGate, /TrustedSourceManifest="__TRUSTED_SOURCE_MANIFEST__"/);
+  assert.match(cutoverGate, /TrustedSourceRuntime="__TRUSTED_SOURCE_RUNTIME__"/);
+  assert.match(cutoverGate, /"\$TrustedSourceGate" adopt-if-legacy/);
+  assert.match(cutoverGate, /--expected-source-sha256 "\$DatabaseSourceSha256"/);
+  assert.match(cutoverGate, /TM_DATABASE_ADOPTION_JSON="\$DatabaseAdoptionJson"/);
+  assert.match(cutoverGate, /'databaseAdoption': databaseAdoption/);
+  const writerStopCall = cutoverGate.indexOf('\nstop_and_quiesce_writers\n');
+  const snapshotCall = cutoverGate.indexOf('\ncreate_cutover_snapshot\n');
+  const mutationPhaseCall = cutoverGate.indexOf('\nrecord_phase mutation-started\n');
+  const adoptionCall = cutoverGate.indexOf('\nadopt_legacy_database_if_required\n');
+  const restartCall = cutoverGate.indexOf('pm2 restart ecosystem.config.js', adoptionCall);
+  assert.ok(
+    writerStopCall >= 0 && snapshotCall > writerStopCall && adoptionCall > snapshotCall && restartCall > adoptionCall,
+    'live legacy adoption must run after writer quiescence and durable snapshot but before candidate restart'
+  );
+  assert.ok(
+    mutationPhaseCall > snapshotCall && adoptionCall > mutationPhaseCall,
+    'the lifecycle must enter rollback-required mutation state before replacing the live database'
+  );
 
   assert.match(deploy, /function Assert-TrustedProductionSourceArtifacts/);
   assert.match(deploy, /Assert-TrustedProductionSourceArtifacts[\s\S]*?Assert-ImmutableDeploymentActionPlan -DeploymentPlan \$DeploymentPlan/);

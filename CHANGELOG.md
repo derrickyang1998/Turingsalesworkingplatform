@@ -1,6 +1,6 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
-## v0.6.0-crm-sales-workspace (Release Candidate, 2026-08-11; updated 2026-08-17) - CRM 销售工作台
+## v0.6.0-crm-sales-workspace (Release Candidate, 2026-08-11; updated 2026-08-20) - CRM 销售工作台
 
 ### CRM 销售工作台 / CRM Sales Workspace
 - 将客户看板与客户明细保持为两个独立界面，并把客户、联系人、商机、任务、跟进记录、阶段流转、领取/释放、公海、团队与个人作用域接入统一的组织权限模型。
@@ -10,7 +10,7 @@
 
 ### Schema 6 与发布底座 / Schema 6 And Release Foundation
 - 新增迁移 `006_crm_sales_workspace`、CRM 查询/命令/作用域/合同服务，并将发布迁移链升级为精确的 `v1 -> v6` 两次恢复验证。
-- trusted-source 清单扩展为 47 个 SHA-256 固定文件，覆盖一次性 legacy v0->v1 adoption、迁移 006、CRM 服务、当前受信任运行时、独立公网发布守护器及迁移清理 helper/unit；sanitization manifest 重建为主 v1 + 隔离 v6 精确配置。
+- trusted-source 清单扩展为 47 个 SHA-256 固定文件，覆盖一次性 legacy v0->v1 adoption、迁移 006、CRM 服务、当前受信任运行时、独立公网发布守护器及迁移清理 helper/unit；受信任门禁会先识别精确 legacy v0、在私有可写副本中演练接管，并在生产切换中以 no-clobber 方式发布精确 managed v1，随后执行 v1->v6 双轮验证。sanitization manifest 重建为主 v1 + 隔离 v6 精确配置。
 - 发布分支、构建标识、缓存键、候选/备份路径和远端文件清单升级为 `codex/v0.6.0-crm-sales-workspace` / `v060-crm-sales-workspace`，冻结 PPT build、query 与 SHA-256 保持不变。
 
 ### 解析器运行时设备 / Parser Runtime Appliance
@@ -42,6 +42,8 @@
 - 第三次正式尝试在新备份和生产切换前识别出上一轮控制面恢复停留在 `topology-restored`，因此安全拒绝，线上 v0.4 继续健康。根因是 systemd/cleanup 正常读取会推进 `atime`，旧恢复器却把它当作最终不可变字段；恢复现在仍先写回捕获时间，但最终一致性只绑定 SHA-256、大小、uid/gid、权限、`mtime`、链接和 systemd 拓扑。发布源合同聚焦回归 `48/48`，独立复审为 `APPROVE`。
 - 第四次正式尝试在候选 tmpfs 容量读取阶段因 GNU `df` 拒绝同时使用 `-i` 与 `--output` 而安全退出，生产和控制面均自动恢复。inode 总量/余量读取改为 `df --output=itotal/iavail`，数值与容量上限合同不变；定向回归 `1/1`、独立复审 `APPROVE`。
 - 第五次正式尝试在候选依赖 transient unit 启动前因 root-only 发布目录阻止非特权门禁进入 `WorkingDirectory` 而安全退出，未进入生产切换。候选门禁现在只在 unit 生命周期内把 `ReleaseRoot` 与其专用 `tmp` 临时设为 `0711`，仍保持 `CandidateDir` 为 `0700`；退出、信号和失败清理会在父子路径身份复核后分别恢复 `0700`，异常父路径不会触及子路径，校验失败的目录也不会被删除。RED/GREEN 定向合同与 Git Bash 语法为 `2/2`，PowerShell AST 和 `git diff --check` 通过；独立复审两轮阻断并修复异常恢复路径后最终为 `APPROVE`、无剩余发现。
+- 第六次正式尝试在数据库迁移演练阶段发现线上仍为无 `schema_migrations` 的 legacy v0，而 v0.6 发布链只固定了接管脚本、没有调用它，因此在生产写入、备份和公网切换前安全退出；失败候选已清理且控制面恢复。修复采用 RED/GREEN：旧实现的受信任接管合同 `1/6`，接线后 `6/6`；旧库原子发布、no-clobber 与失败清理 `6/6`。本条仍等待独立复审和重新部署，不把预演失败记为生产发布。
+- 接管链终审先阻断两项 Important：异常中断可能遗留未追踪的完整数据库副本，以及 managed v6 未实际执行迁移入口。修复后，生产接管只使用两个固定、root-only、身份可验证的临时路径；切换、重试与回滚均在验证全部文件、sidecar 和硬链接关系后统一清理。managed v6 在私有副本上执行两轮固定迁移并比较 topology/logical/FTS 摘要，恶意启动期写入回归会被拒绝。受影响完整测试 `32/32`、发布源最新复验 `25/25`、本地发布预检、PowerShell AST、Node/JSON、哈希闭包、diff 与敏感信息扫描通过；最终独立复审为 `APPROVE`，无剩余 Critical/Important。
 - 当前功能切片父级定向证据：生命周期接管 `31/31`、发布源合同 `44/44`、公网守护关键并发/读取/超时用例 `4/4`，PowerShell AST、守护脚本 Bash 语法、可信哈希一致性、`git diff --check` 与聚焦敏感信息扫描均通过。2026-08-16 Windows 71 文件非浏览器汇总 `1875/1784/0/91` 及早期公网守护结果仅作为历史/阶段收口证据保留；生产匹配 Linux/root 验证在受控部署中执行。
 - 开发节奏调整为“单功能实现 -> 定向测试 -> 独立审查 -> 备份 -> 上线 -> 线上健康/登录/核心路径冒烟”。完整非浏览器回归、Playwright 和多角色复审仅在阶段收口、计划发布窗口或改动跨越认证、权限、迁移、共享基础设施等高风险边界时执行；HIGH/CRITICAL、备份/回滚、迁移安全和生产冒烟继续作为硬阻断项。
 - 本条目仍是发布候选，不代表线上已切换。生产 v0.4 保持原样且未触碰；当前功能切片须完成最终定向证据、独立审查、干净权威工作区、GitHub 同步、可校验备份、容量门禁、受控部署和远端运行时/API/权限/回滚验收后才能标记发布。

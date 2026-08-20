@@ -32,8 +32,8 @@ $EXPECTED_PPT_QUERY = "20260702v916kbbridge"
 $EXPECTED_PPT_SHA256 = "f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e"
 $TRUSTED_SOURCE_GATE_RELATIVE_PATH = "server\scripts\trusted_production_source_gate.js"
 $TRUSTED_SOURCE_MANIFEST_RELATIVE_PATH = "server\scripts\trusted_production_source_manifest.json"
-$EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "3876df70337e6ce5a54f9d506fa90d52e3f386bc3fbfd1d295448b3a54806493"
-$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "b5cf8d7543f91e9bc2bed4c192eb87ba0f94546ebe25631ae65611a8459c3742"
+$EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "99ae10ca115dbe2be4dc560de31b300e96e235628ba6c9f3acb8674f54434e21"
+$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "536a2cc02f0157ee3c74ce805c6b10730b2835a874f54ffc43c1ee07d5905a8e"
 $EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256 = "bdc60e6a9da601c8c65cd2a374d8cb69eeea629fa6cd5af514dd995eddfe74dc"
 $EXPECTED_TRUSTED_PARSER_VERIFIER_SHA256 = "93973d83379c1b22a779751be135f59c992d0784957519b3fdb1abebaad2d2f6"
 $EXPECTED_TRUSTED_PUBLIC_GUARD_SHA256 = "d45fe8fcc01587aaa0e73eccfb9714c27801e232cb6c0effd6daedb703316d66"
@@ -4531,6 +4531,8 @@ RestoreIdentity="$RestoreStateDir/identity"
 RestoreStep="$RestoreStateDir/step"
 DatabaseDir="/var/lib/turingmarket/db"
 DatabasePath="$DatabaseDir/turingmarket.db"
+DatabaseAdoptionStage="$DatabaseDir/.turingmarket.db.adopted"
+DatabaseAdoptionPrivateStage="$DatabaseDir/.turingmarket.db.adopted.private"
 PptCacheDir="/var/lib/turingmarket/ppt-cache"
 PptCacheParent="$(dirname "$PptCacheDir")"
 DatabaseStage="$DatabaseDir/.turingmarket.db.restore.__RESTORE_TOKEN__"
@@ -4702,7 +4704,74 @@ record_restore_step() {
   fi
 }
 
+cleanup_database_adoption_artifacts() {
+  python3 - "$DatabaseDir" "$DatabaseAdoptionPrivateStage" "$DatabaseAdoptionStage" <<'PY'
+import os
+import stat
+import sys
+
+database_dir, private_stage, adopted_stage = sys.argv[1:]
+expected_dir = '/var/lib/turingmarket/db'
+if database_dir != expected_dir or os.path.realpath(database_dir) != expected_dir:
+    raise SystemExit('database adoption parent is not canonical')
+directory = os.lstat(database_dir)
+if (not stat.S_ISDIR(directory.st_mode) or stat.S_ISLNK(directory.st_mode) or
+        directory.st_uid != 0 or directory.st_gid != 0 or
+        stat.S_IMODE(directory.st_mode) != 0o700):
+    raise SystemExit('database adoption parent identity is unsafe')
+if private_stage != os.path.join(database_dir, '.turingmarket.db.adopted.private'):
+    raise SystemExit('private database adoption stage path is invalid')
+if adopted_stage != os.path.join(database_dir, '.turingmarket.db.adopted'):
+    raise SystemExit('database adoption stage path is invalid')
+
+def metadata(candidate):
+    try:
+        value = os.lstat(candidate)
+    except FileNotFoundError:
+        return None
+    if (not stat.S_ISREG(value.st_mode) or stat.S_ISLNK(value.st_mode) or
+            value.st_uid != 0 or value.st_gid != 0 or
+            stat.S_IMODE(value.st_mode) != 0o600):
+        raise SystemExit(f'unsafe database adoption artifact: {candidate}')
+    return value
+
+artifacts = []
+for base in (private_stage, adopted_stage):
+    for suffix in ('-journal', '-wal', '-shm'):
+        candidate = base + suffix
+        value = metadata(candidate)
+        if value is not None:
+            if value.st_nlink != 1:
+                raise SystemExit(f'unsafe database adoption sidecar link count: {candidate}')
+            artifacts.append((candidate, value))
+
+private_metadata = metadata(private_stage)
+adopted_metadata = metadata(adopted_stage)
+if private_metadata is not None and adopted_metadata is not None:
+    if ((private_metadata.st_dev, private_metadata.st_ino) !=
+            (adopted_metadata.st_dev, adopted_metadata.st_ino) or
+            private_metadata.st_nlink != 2 or adopted_metadata.st_nlink != 2):
+        raise SystemExit('database adoption hardlink pair is inconsistent')
+elif private_metadata is not None and private_metadata.st_nlink != 1:
+    raise SystemExit('private database adoption stage has an external hardlink')
+elif adopted_metadata is not None and adopted_metadata.st_nlink != 1:
+    raise SystemExit('database adoption stage has an external hardlink')
+for candidate, value in ((private_stage, private_metadata), (adopted_stage, adopted_metadata)):
+    if value is not None:
+        artifacts.append((candidate, value))
+
+for candidate, _value in artifacts:
+    os.unlink(candidate)
+descriptor = os.open(database_dir, os.O_RDONLY | os.O_DIRECTORY)
+try:
+    os.fsync(descriptor)
+finally:
+    os.close(descriptor)
+PY
+}
+
 cleanup_restore_stages() {
+  cleanup_database_adoption_artifacts
   rm -f -- "$DatabaseStage"
   rm -rf -- "$PptCacheStage" "$RestoreStateStage"
 }
@@ -5630,17 +5699,23 @@ if os.path.lexists(currentPath):
         canonicalFacts = (json.dumps(acceptanceFacts, sort_keys=True, separators=(',', ':')) + '\n').encode('ascii')
         factsRequired = {
             'schemaVersion', 'runId', 'cutoverCapacity', 'candidateHealth',
-            'cutoverSnapshotSha256SumsSha256', 'pm2', 'nginx'
+            'databaseAdoption', 'cutoverSnapshotSha256SumsSha256', 'pm2', 'nginx'
         }
         health = acceptanceFacts.get('candidateHealth', {})
         parserHealth = health.get('parser', {}) if isinstance(health, dict) else {}
         capacity = acceptanceFacts.get('cutoverCapacity', {})
+        databaseAdoption = acceptanceFacts.get('databaseAdoption', {})
         pm2Projection = acceptanceFacts.get('pm2', {})
         nginxProjection = acceptanceFacts.get('nginx', {})
         snapshotSha256 = acceptanceFacts.get('cutoverSnapshotSha256SumsSha256')
         if (acceptanceFactsBytes != canonicalFacts or set(acceptanceFacts) != factsRequired or
                 acceptanceFacts.get('schemaVersion') != 1 or acceptanceFacts.get('runId') != runId or
                 not isinstance(capacity, dict) or capacity.get('contract') != 'tm-cutover-capacity-v1' or
+                not isinstance(databaseAdoption, dict) or
+                databaseAdoption.get('format') != 'tm-trusted-legacy-adoption-verdict-v1' or
+                not isinstance(databaseAdoption.get('applied'), bool) or
+                not re.fullmatch(r'[0-9a-f]{64}', str(databaseAdoption.get('sourceSha256', ''))) or
+                not re.fullmatch(r'[0-9a-f]{64}', str(databaseAdoption.get('outputSha256', ''))) or
                 capacity.get('ok') is not True or set(health) != {'status', 'parser'} or
                 health.get('status') != 'ok' or set(parserHealth) != {'ready', 'manifest_sha256'} or
                 parserHealth.get('ready') is not True or
@@ -5886,6 +5961,13 @@ RemoteRoot="__REMOTE_ROOT__"
 ReleaseRoot="__RELEASE_ROOT__"
 LockDir="$RemoteRoot/.deploy-v030.lock"
 TrustedSourceBundle="__TRUSTED_SOURCE_BUNDLE__"
+TrustedSourceGate="__TRUSTED_SOURCE_GATE__"
+TrustedSourceManifest="__TRUSTED_SOURCE_MANIFEST__"
+TrustedSourceRuntime="__TRUSTED_SOURCE_RUNTIME__"
+TrustedDependencyRoot="$TrustedSourceRuntime/server/node_modules"
+ExpectedTrustedSourceGateSha256="__TRUSTED_SOURCE_GATE_SHA256__"
+ExpectedTrustedSourceManifestSha256="__TRUSTED_SOURCE_MANIFEST_SHA256__"
+ExpectedTrustedMigrationVerifierSha256="__TRUSTED_MIGRATION_VERIFIER_SHA256__"
 AcceptedMarker="$LockDir/accepted"
 ParserRuntimeRoot="/var/lib/turingmarket-parser/runtime-root"
 ParserApplianceRoot="$LockDir/parser-appliance"
@@ -6133,9 +6215,10 @@ except (UnicodeDecodeError, json.JSONDecodeError):
 canonical = (json.dumps(facts, sort_keys=True, separators=(',', ':')) + '\n').encode('ascii')
 requiredFacts = {
     'schemaVersion', 'runId', 'cutoverCapacity', 'candidateHealth',
-    'cutoverSnapshotSha256SumsSha256', 'pm2', 'nginx'
+    'databaseAdoption', 'cutoverSnapshotSha256SumsSha256', 'pm2', 'nginx'
 }
 capacity = facts.get('cutoverCapacity', {})
+databaseAdoption = facts.get('databaseAdoption', {})
 health = facts.get('candidateHealth', {})
 parserHealth = health.get('parser', {}) if isinstance(health, dict) else {}
 pm2Projection = facts.get('pm2', {})
@@ -6143,6 +6226,11 @@ nginxProjection = facts.get('nginx', {})
 snapshotSha256 = facts.get('cutoverSnapshotSha256SumsSha256')
 if (factsBytes != canonical or set(facts) != requiredFacts or facts.get('schemaVersion') != 1 or
         facts.get('runId') != runId or not isinstance(capacity, dict) or
+        not isinstance(databaseAdoption, dict) or
+        databaseAdoption.get('format') != 'tm-trusted-legacy-adoption-verdict-v1' or
+        not isinstance(databaseAdoption.get('applied'), bool) or
+        not re.fullmatch(r'[0-9a-f]{64}', str(databaseAdoption.get('sourceSha256', ''))) or
+        not re.fullmatch(r'[0-9a-f]{64}', str(databaseAdoption.get('outputSha256', ''))) or
         capacity.get('contract') != 'tm-cutover-capacity-v1' or capacity.get('ok') is not True or
         set(health) != {'status', 'parser'} or health.get('status') != 'ok' or
         set(parserHealth) != {'ready', 'manifest_sha256'} or parserHealth.get('ready') is not True or
@@ -9038,6 +9126,13 @@ CandidateDir="__CANDIDATE_DIR__"
 BackupAbsolute="$RemoteRoot/__BACKUP_PATH__"
 LockDir="$RemoteRoot/.deploy-v030.lock"
 TrustedSourceBundle="__TRUSTED_SOURCE_BUNDLE__"
+TrustedSourceGate="__TRUSTED_SOURCE_GATE__"
+TrustedSourceManifest="__TRUSTED_SOURCE_MANIFEST__"
+TrustedSourceRuntime="__TRUSTED_SOURCE_RUNTIME__"
+TrustedDependencyRoot="$TrustedSourceRuntime/server/node_modules"
+ExpectedTrustedSourceGateSha256="__TRUSTED_SOURCE_GATE_SHA256__"
+ExpectedTrustedSourceManifestSha256="__TRUSTED_SOURCE_MANIFEST_SHA256__"
+ExpectedTrustedMigrationVerifierSha256="__TRUSTED_MIGRATION_VERIFIER_SHA256__"
 ParserApplianceRoot="$LockDir/parser-appliance"
 ParserSourceRoot="$ParserApplianceRoot/source"
 ParserRuntimeStage="$ParserApplianceRoot/runtime.stage"
@@ -9063,6 +9158,10 @@ AcceptedEvidenceRoot="$RemoteRoot/deployment-evidence"
 AcceptedEvidence="$AcceptedEvidenceRoot/accepted-__RUN_ID__.json"
 ParserAcceptedEvidence="$AcceptedEvidenceRoot/parser-__RUN_ID__.json"
 AcceptanceFacts="$AcceptedEvidenceRoot/acceptance-facts-__RUN_ID__.json"
+DatabaseAdoptionReport="$AcceptedEvidenceRoot/database-adoption-__RUN_ID__.json"
+DatabaseAdoptionError="$LockDir/database-adoption-__RUN_ID__.stderr"
+DatabaseAdoptionStage="$DatabaseDir/.turingmarket.db.adopted"
+DatabaseAdoptionPrivateStage="$DatabaseDir/.turingmarket.db.adopted.private"
 CurrentAcceptedMarker="$AcceptedEvidenceRoot/current-accepted.json"
 LastGoodMarker="$AcceptedEvidenceRoot/last-good.json"
 StagedPublicNginx="$LockDir/nginx-candidate-public.conf"
@@ -9107,6 +9206,16 @@ test -f "$PublicGuardHelper"
 test ! -L "$PublicGuardHelper"
 test "$(stat -c '%U:%G:%a:%h' "$PublicGuardHelper")" = "root:root:444:1"
 test "$(sha256sum "$PublicGuardHelper" | awk '{print $1}')" = "$ExpectedPublicGuardSha256"
+test -f "$TrustedSourceGate"
+test ! -L "$TrustedSourceGate"
+test "$(stat -c '%U:%G:%a:%h' "$TrustedSourceGate")" = "root:root:444:1"
+test "$(sha256sum "$TrustedSourceGate" | awk '{print $1}')" = "$ExpectedTrustedSourceGateSha256"
+test -f "$TrustedSourceManifest"
+test ! -L "$TrustedSourceManifest"
+test "$(stat -c '%U:%G:%a:%h' "$TrustedSourceManifest")" = "root:root:444:1"
+test "$(sha256sum "$TrustedSourceManifest" | awk '{print $1}')" = "$ExpectedTrustedSourceManifestSha256"
+test -d "$TrustedDependencyRoot"
+test ! -L "$TrustedDependencyRoot"
 
 run_exact_public_nginx_gate() {
   local socket_path="$1"
@@ -9238,12 +9347,80 @@ release_writer() {
   fi
 }
 
+cleanup_database_adoption_artifacts() {
+  python3 - "$DatabaseDir" "$DatabaseAdoptionPrivateStage" "$DatabaseAdoptionStage" <<'PY'
+import os
+import stat
+import sys
+
+database_dir, private_stage, adopted_stage = sys.argv[1:]
+expected_dir = '/var/lib/turingmarket/db'
+if database_dir != expected_dir or os.path.realpath(database_dir) != expected_dir:
+    raise SystemExit('database adoption parent is not canonical')
+directory = os.lstat(database_dir)
+if (not stat.S_ISDIR(directory.st_mode) or stat.S_ISLNK(directory.st_mode) or
+        directory.st_uid != 0 or directory.st_gid != 0 or
+        stat.S_IMODE(directory.st_mode) != 0o700):
+    raise SystemExit('database adoption parent identity is unsafe')
+if private_stage != os.path.join(database_dir, '.turingmarket.db.adopted.private'):
+    raise SystemExit('private database adoption stage path is invalid')
+if adopted_stage != os.path.join(database_dir, '.turingmarket.db.adopted'):
+    raise SystemExit('database adoption stage path is invalid')
+
+def metadata(candidate):
+    try:
+        value = os.lstat(candidate)
+    except FileNotFoundError:
+        return None
+    if (not stat.S_ISREG(value.st_mode) or stat.S_ISLNK(value.st_mode) or
+            value.st_uid != 0 or value.st_gid != 0 or
+            stat.S_IMODE(value.st_mode) != 0o600):
+        raise SystemExit(f'unsafe database adoption artifact: {candidate}')
+    return value
+
+artifacts = []
+for base in (private_stage, adopted_stage):
+    for suffix in ('-journal', '-wal', '-shm'):
+        candidate = base + suffix
+        value = metadata(candidate)
+        if value is not None:
+            if value.st_nlink != 1:
+                raise SystemExit(f'unsafe database adoption sidecar link count: {candidate}')
+            artifacts.append((candidate, value))
+
+private_metadata = metadata(private_stage)
+adopted_metadata = metadata(adopted_stage)
+if private_metadata is not None and adopted_metadata is not None:
+    if ((private_metadata.st_dev, private_metadata.st_ino) !=
+            (adopted_metadata.st_dev, adopted_metadata.st_ino) or
+            private_metadata.st_nlink != 2 or adopted_metadata.st_nlink != 2):
+        raise SystemExit('database adoption hardlink pair is inconsistent')
+elif private_metadata is not None and private_metadata.st_nlink != 1:
+    raise SystemExit('private database adoption stage has an external hardlink')
+elif adopted_metadata is not None and adopted_metadata.st_nlink != 1:
+    raise SystemExit('database adoption stage has an external hardlink')
+
+for candidate, value in ((private_stage, private_metadata), (adopted_stage, adopted_metadata)):
+    if value is not None:
+        artifacts.append((candidate, value))
+
+for candidate, _value in artifacts:
+    os.unlink(candidate)
+descriptor = os.open(database_dir, os.O_RDONLY | os.O_DIRECTORY)
+try:
+    os.fsync(descriptor)
+finally:
+    os.close(descriptor)
+PY
+}
+
 cutover_exit_guard() {
   local CutoverStatus="${1:-1}"
   local FailClosedStatus=0
   trap - ERR EXIT HUP INT TERM
   trap '' HUP INT TERM
   set +e
+  cleanup_database_adoption_artifacts || FailClosedStatus=1
   if [ "$public_gate_armed" = "1" ]; then
     public_release_guard close \
       --state-file "$PublicGateGuard" \
@@ -9278,6 +9455,7 @@ if ! test -f "$LockDir/owner" ||
   echo "The deployment lock generation changed before cutover" >&2
   exit 1
 fi
+cleanup_database_adoption_artifacts
 
 assert_canonical_candidate
 ExpectedCandidateDigest="$(cat "$LockDir/candidate-tree.sha256")"
@@ -9900,6 +10078,142 @@ NODE
   sync -f "$BackupAbsolute"
   CutoverSnapshotSha256SumsSha256="$(sha256sum "$CutoverSnapshot/SHA256SUMS" | awk '{print $1}')"
   printf '%s\n' 'CUTOVER_SNAPSHOT_OK'
+}
+
+adopt_legacy_database_if_required() {
+  local DatabaseSourceSha256 AdoptionStatus AdoptionProjection DatabaseAdoptionApplied DatabaseAdoptionOutputSha
+  test -f "$CutoverSnapshot/database/turingmarket.db"
+  test ! -L "$CutoverSnapshot/database/turingmarket.db"
+  DatabaseSourceSha256="$(awk 'NR == 1 {print $1}' "$CutoverSnapshot/database.sha256")"
+  [[ "$DatabaseSourceSha256" =~ ^[0-9a-f]{64}$ ]]
+  test "$(sha256sum "$CutoverSnapshot/database/turingmarket.db" | awk '{print $1}')" = "$DatabaseSourceSha256"
+  test "$(sha256sum "$DatabasePath" | awk '{print $1}')" = "$DatabaseSourceSha256"
+  test ! -e "$DatabasePath-wal"
+  test ! -e "$DatabasePath-shm"
+  test ! -e "$DatabasePath-journal"
+  test ! -e "$DatabaseAdoptionStage"
+  test ! -e "$DatabaseAdoptionReport"
+  test ! -e "$DatabaseAdoptionReport.next"
+  test ! -e "$DatabaseAdoptionError"
+
+  set +e
+  /usr/bin/env -i \
+    HOME=/root \
+    PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    NODE_ENV=test \
+    TM_DISABLE_DOTENV=1 \
+    NODE_PATH="$TrustedDependencyRoot" \
+    /usr/bin/node "$TrustedSourceGate" adopt-if-legacy \
+      --candidate-root "$CandidateDir" \
+      --bundle-root "$TrustedSourceBundle" \
+      --manifest "$TrustedSourceManifest" \
+      --source "$DatabasePath" \
+      --output "$DatabaseAdoptionStage" \
+      --private-stage "$DatabaseAdoptionPrivateStage" \
+      --expected-source-sha256 "$DatabaseSourceSha256" \
+      --expected-self-sha256 "$ExpectedTrustedSourceGateSha256" \
+      --expected-manifest-sha256 "$ExpectedTrustedSourceManifestSha256" \
+      --expected-verifier-sha256 "$ExpectedTrustedMigrationVerifierSha256" \
+      > "$DatabaseAdoptionReport.next" 2> "$DatabaseAdoptionError"
+  AdoptionStatus=$?
+  set -e
+  if [ "$AdoptionStatus" != "0" ]; then
+    echo "Trusted live database adoption failed; inspect the root-only adoption error" >&2
+    return "$AdoptionStatus"
+  fi
+  test ! -s "$DatabaseAdoptionError"
+  rm -f -- "$DatabaseAdoptionError"
+  test "$(wc -l < "$DatabaseAdoptionReport.next")" = "1"
+
+  AdoptionProjection="$(python3 - "$DatabaseAdoptionReport.next" "$DatabaseAdoptionStage" "$DatabaseSourceSha256" <<'PY'
+import hashlib
+import json
+import os
+import re
+import stat
+import sys
+
+report_path, stage_path, expected_source_sha256 = sys.argv[1:]
+with open(report_path, encoding='utf-8') as handle:
+    report = json.load(handle)
+required = {
+    'format', 'applied', 'sourceVersion', 'targetVersion', 'sourceSha256',
+    'outputSha256', 'baseTableCount', 'baseRowCount', 'repairs'
+}
+if set(report) != required or report.get('format') != 'tm-trusted-legacy-adoption-verdict-v1':
+    raise SystemExit('Trusted live database adoption report schema is invalid')
+if report.get('sourceSha256') != expected_source_sha256:
+    raise SystemExit('Trusted live database adoption source digest is invalid')
+applied = report.get('applied')
+if not isinstance(applied, bool):
+    raise SystemExit('Trusted live database adoption applied flag is invalid')
+output_sha256 = report.get('outputSha256')
+if not re.fullmatch(r'[0-9a-f]{64}', str(output_sha256 or '')):
+    raise SystemExit('Trusted live database adoption output digest is invalid')
+if applied:
+    repairs = report.get('repairs')
+    if (report.get('sourceVersion') != 0 or report.get('targetVersion') != 1 or
+            output_sha256 == expected_source_sha256 or
+            not isinstance(report.get('baseTableCount'), int) or report['baseTableCount'] < 1 or
+            not isinstance(report.get('baseRowCount'), int) or report['baseRowCount'] < 1 or
+            repairs != {'influencerRows': 1, 'customerRows': 1, 'activityRows': 1, 'ftsRebuilt': True}):
+        raise SystemExit('Trusted live database adoption applied report is invalid')
+    metadata = os.lstat(stage_path)
+    if (not stat.S_ISREG(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode) or metadata.st_nlink != 1 or
+            metadata.st_uid != 0 or metadata.st_gid != 0 or stat.S_IMODE(metadata.st_mode) != 0o600):
+        raise SystemExit('Trusted live database adoption stage identity is invalid')
+    with open(stage_path, 'rb') as handle:
+        if hashlib.sha256(handle.read()).hexdigest() != output_sha256:
+            raise SystemExit('Trusted live database adoption stage digest is invalid')
+else:
+    if (report.get('sourceVersion') not in (1, 6) or
+            report.get('targetVersion') != report.get('sourceVersion') or
+            output_sha256 != expected_source_sha256 or
+            report.get('baseTableCount') is not None or report.get('baseRowCount') is not None or
+            report.get('repairs') is not None or os.path.exists(stage_path)):
+        raise SystemExit('Trusted live database no-op adoption report is invalid')
+canonical = json.dumps(report, sort_keys=True, separators=(',', ':'))
+print(('1' if applied else '0') + '\t' + output_sha256 + '\t' + canonical)
+PY
+)"
+  IFS=$'\t' read -r DatabaseAdoptionApplied DatabaseAdoptionOutputSha DatabaseAdoptionJson <<< "$AdoptionProjection"
+  test "$DatabaseAdoptionApplied" = "0" || test "$DatabaseAdoptionApplied" = "1"
+  [[ "$DatabaseAdoptionOutputSha" =~ ^[0-9a-f]{64}$ ]]
+  test -n "$DatabaseAdoptionJson"
+
+  printf '%s\n' "$DatabaseAdoptionJson" > "$DatabaseAdoptionReport.next"
+  chown root:root "$DatabaseAdoptionReport.next"
+  chmod 0600 "$DatabaseAdoptionReport.next"
+  sync -f "$DatabaseAdoptionReport.next"
+  mv "$DatabaseAdoptionReport.next" "$DatabaseAdoptionReport"
+  sync -f "$DatabaseAdoptionReport"
+  sync -f "$AcceptedEvidenceRoot"
+
+  if [ "$DatabaseAdoptionApplied" = "1" ]; then
+    test "$(sha256sum "$DatabasePath" | awk '{print $1}')" = "$DatabaseSourceSha256"
+    test ! -e "$DatabasePath-wal"
+    test ! -e "$DatabasePath-shm"
+    test ! -e "$DatabasePath-journal"
+    python3 - "$DatabaseAdoptionStage" "$DatabasePath" <<'PY'
+import os
+import sys
+
+stage_path, live_path = sys.argv[1:]
+os.replace(stage_path, live_path)
+directory = os.open(os.path.dirname(live_path), os.O_RDONLY | os.O_DIRECTORY)
+try:
+    os.fsync(directory)
+finally:
+    os.close(directory)
+PY
+    test ! -e "$DatabaseAdoptionStage"
+    test "$(stat -c '%U:%G:%a:%h' "$DatabasePath")" = "root:root:600:1"
+    test "$(sha256sum "$DatabasePath" | awk '{print $1}')" = "$DatabaseAdoptionOutputSha"
+  else
+    test ! -e "$DatabaseAdoptionStage"
+    test "$(sha256sum "$DatabasePath" | awk '{print $1}')" = "$DatabaseSourceSha256"
+  fi
+  printf '%s\n' 'LIVE_DATABASE_ADOPTION_VERIFIED'
 }
 
 archive_prior_current_marker() {
@@ -10829,6 +11143,10 @@ NODE
 record_acceptance_facts() {
   test ! -e "$AcceptanceFacts"
   test ! -e "$AcceptanceFacts.next"
+  test -f "$DatabaseAdoptionReport"
+  test ! -L "$DatabaseAdoptionReport"
+  test "$(stat -c '%U:%G:%a:%h' "$DatabaseAdoptionReport")" = "root:root:600:1"
+  test "$(cat "$DatabaseAdoptionReport")" = "$DatabaseAdoptionJson"
   test "$(sha256sum "$CutoverSnapshot/SHA256SUMS" | awk '{print $1}')" = "$CutoverSnapshotSha256SumsSha256"
   Pm2Projection="$(project_pm2_acceptance)"
   NginxSha="$(awk 'NR == 1 {print $1}' "$StagedPublicNginxSha")"
@@ -10849,6 +11167,7 @@ PY
 )"
   TM_CUTOVER_CAPACITY_JSON="$CutoverCapacityJson" \
   TM_CANDIDATE_HEALTH_PROJECTION="$CandidateHealthProjection" \
+  TM_DATABASE_ADOPTION_JSON="$DatabaseAdoptionJson" \
   TM_PM2_FINAL_PROJECTION="$Pm2Projection" \
   TM_NGINX_FINAL_PROJECTION="$NginxProjection" \
   python3 - "$AcceptanceFacts.next" "__RUN_ID__" "$CutoverSnapshotSha256SumsSha256" <<'PY'
@@ -10860,10 +11179,21 @@ import sys
 target, runId, snapshotSha256 = sys.argv[1:]
 capacity = json.loads(os.environ['TM_CUTOVER_CAPACITY_JSON'])
 health = json.loads(os.environ['TM_CANDIDATE_HEALTH_PROJECTION'])
+databaseAdoption = json.loads(os.environ['TM_DATABASE_ADOPTION_JSON'])
 pm2Projection = json.loads(os.environ['TM_PM2_FINAL_PROJECTION'])
 nginxProjection = json.loads(os.environ['TM_NGINX_FINAL_PROJECTION'])
 if capacity.get('contract') != 'tm-cutover-capacity-v1' or capacity.get('ok') is not True:
     raise SystemExit('Acceptance facts cutover capacity is invalid')
+adoptionRequired = {
+    'format', 'applied', 'sourceVersion', 'targetVersion', 'sourceSha256',
+    'outputSha256', 'baseTableCount', 'baseRowCount', 'repairs'
+}
+if (set(databaseAdoption) != adoptionRequired or
+        databaseAdoption.get('format') != 'tm-trusted-legacy-adoption-verdict-v1' or
+        not isinstance(databaseAdoption.get('applied'), bool) or
+        not re.fullmatch(r'[0-9a-f]{64}', str(databaseAdoption.get('sourceSha256', ''))) or
+        not re.fullmatch(r'[0-9a-f]{64}', str(databaseAdoption.get('outputSha256', '')))):
+    raise SystemExit('Acceptance facts database adoption is invalid')
 if (set(health) != {'status', 'parser'} or health.get('status') != 'ok' or
         set(health.get('parser', {})) != {'ready', 'manifest_sha256'} or
         health['parser'].get('ready') is not True or
@@ -10893,6 +11223,7 @@ payload = {
     'runId': runId,
     'cutoverCapacity': capacity,
     'candidateHealth': health,
+    'databaseAdoption': databaseAdoption,
     'cutoverSnapshotSha256SumsSha256': snapshotSha256,
     'pm2': {'expected': pm2Expected, 'final': pm2Final},
     'nginx': {'expected': nginxExpected, 'final': nginxFinal},
@@ -11064,6 +11395,7 @@ record_phase prior-marker-archived
 stage_nginx_candidate
 record_phase nginx-candidate-staged
 record_phase mutation-started
+adopt_legacy_database_if_required
 
 cd "$RemoteRoot"
 while IFS= read -r file; do
@@ -11386,6 +11718,12 @@ echo "DEPLOY_OK"
     $cutoverGate = $cutoverGate.Replace('__SOURCE_IDENTITY__', $deploymentSourceIdentity)
     $cutoverGate = $cutoverGate.Replace('__SOURCE_SHA256__', $deploymentSourceSha256)
     $cutoverGate = $cutoverGate.Replace('__TRUSTED_SOURCE_BUNDLE__', $TRUSTED_SOURCE_BUNDLE_REMOTE_PATH)
+    $cutoverGate = $cutoverGate.Replace('__TRUSTED_SOURCE_GATE__', $TRUSTED_SOURCE_GATE_REMOTE_PATH)
+    $cutoverGate = $cutoverGate.Replace('__TRUSTED_SOURCE_MANIFEST__', $TRUSTED_SOURCE_MANIFEST_REMOTE_PATH)
+    $cutoverGate = $cutoverGate.Replace('__TRUSTED_SOURCE_RUNTIME__', $TRUSTED_SOURCE_RUNTIME_REMOTE_PATH)
+    $cutoverGate = $cutoverGate.Replace('__TRUSTED_SOURCE_GATE_SHA256__', $EXPECTED_TRUSTED_SOURCE_GATE_SHA256)
+    $cutoverGate = $cutoverGate.Replace('__TRUSTED_SOURCE_MANIFEST_SHA256__', $EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256)
+    $cutoverGate = $cutoverGate.Replace('__TRUSTED_MIGRATION_VERIFIER_SHA256__', $EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256)
     $cutoverGate = $cutoverGate.Replace('__TRUSTED_PARSER_VERIFIER_SHA256__', $EXPECTED_TRUSTED_PARSER_VERIFIER_SHA256)
     $cutoverGate = $cutoverGate.Replace('__TRUSTED_PUBLIC_GUARD_SHA256__', $EXPECTED_TRUSTED_PUBLIC_GUARD_SHA256)
     $cutoverGate = $cutoverGate.Replace('__EXACT_PUBLIC_NGINX_VERIFIER__', $exactPublicNginxVerifier)

@@ -163,3 +163,58 @@ test('legacy production adoption publishes with atomic no-clobber semantics', (t
   assert.equal(fs.readFileSync(fixture.outputPath, 'utf8'), 'operator-owned target');
   assert.equal(sha256(fixture.sourcePath), sourceBefore);
 });
+
+test('legacy production adoption uses and retires the caller-owned private stage', (t) => {
+  const fixture = productionShapeFixture('caller-owned-stage');
+  t.after(() => fs.rmSync(fixture.root, { recursive: true, force: true }));
+  const sourceBefore = sha256(fixture.sourcePath);
+  const privateStagePath = path.join(fixture.root, '.legacy-adoption.private');
+  let observedStagePath = null;
+
+  adoption.adoptLegacyProductionV1({
+    sourcePath: fixture.sourcePath,
+    outputPath: fixture.outputPath,
+    privateStagePath,
+    expectedSourceSha256: sourceBefore,
+    beforePublish: ({ stagePath }) => { observedStagePath = stagePath; }
+  });
+
+  assert.equal(observedStagePath, privateStagePath);
+  assert.equal(fs.existsSync(privateStagePath), false);
+  assert.equal(fs.existsSync(fixture.outputPath), true);
+  assert.equal(sha256(fixture.sourcePath), sourceBefore);
+});
+
+test('legacy production adoption removes its exact output when post-link validation fails', (t) => {
+  const fixture = productionShapeFixture('post-link-failure');
+  t.after(() => fs.rmSync(fixture.root, { recursive: true, force: true }));
+  const sourceBefore = sha256(fixture.sourcePath);
+  assert.throws(
+    () => adoption.adoptLegacyProductionV1({
+      sourcePath: fixture.sourcePath,
+      outputPath: fixture.outputPath,
+      expectedSourceSha256: sourceBefore,
+      afterPublishLink: () => { throw new Error('injected post-link validation failure'); }
+    }),
+    /injected post-link validation failure/i
+  );
+  assert.equal(fs.existsSync(fixture.outputPath), false);
+  assert.equal(sha256(fixture.sourcePath), sourceBefore);
+});
+
+test('legacy production adoption removes its exact output when post-unlink durability fails', (t) => {
+  const fixture = productionShapeFixture('post-unlink-failure');
+  t.after(() => fs.rmSync(fixture.root, { recursive: true, force: true }));
+  const sourceBefore = sha256(fixture.sourcePath);
+  assert.throws(
+    () => adoption.adoptLegacyProductionV1({
+      sourcePath: fixture.sourcePath,
+      outputPath: fixture.outputPath,
+      expectedSourceSha256: sourceBefore,
+      afterPublishStageUnlink: () => { throw new Error('injected post-unlink durability failure'); }
+    }),
+    /injected post-unlink durability failure/i
+  );
+  assert.equal(fs.existsSync(fixture.outputPath), false);
+  assert.equal(sha256(fixture.sourcePath), sourceBefore);
+});
