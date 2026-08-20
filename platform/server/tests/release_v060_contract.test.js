@@ -415,6 +415,16 @@ test('v0.6 deploy seals the parser appliance under the root-only lifecycle befor
   assert.match(cacheFetch, /IPAddressDeny=[^"\r\n]*192\.168\.0\.0\/16/);
   assert.match(cacheFetch, /IPAddressDeny=[^"\r\n]*fc00::\/7/);
   assert.match(cacheFetch, /IPAddressAllow=127\.0\.0\.53\/32 127\.0\.0\.54\/32/);
+  assert.match(preparation, /npm_config_userconfig=\/dev\/null/);
+  assert.match(preparation, /npm_config_globalconfig=\/tmp\/turingmarket-parser-global\.npmrc/);
+  assert.match(preparation, /install -m 0600 \/dev\/null \/tmp\/turingmarket-parser-global\.npmrc/);
+  assert.doesNotMatch(
+    preparation,
+    /npm_config_userconfig=([^\s]+)[\s\S]*?npm_config_globalconfig=\1(?:\s|$)/,
+    'npm user and global configuration paths must remain distinct'
+  );
+  assert.match(preparation, /set \+e[\s\S]*?systemd-run --quiet --wait --collect[\s\S]*?ParserCacheStatus="\$\?"[\s\S]*?set -e/);
+  assert.match(preparation, /if \[ "\$ParserCacheStatus" -ne 0 \]; then[\s\S]*?exit "\$ParserCacheStatus"/);
   assert.doesNotMatch(preparation, /\$ReleaseRoot\/parser-runtime/);
   assert.doesNotMatch(preparation, /TargetSource=.*\$ReleaseRoot/);
   assert.doesNotMatch(preparation, /"\$CandidateDir\/server\/scripts\/(?:build|provision)_upload_sandbox_runtime\.sh"\s+(?:--|snapshot|install|rollback)/);

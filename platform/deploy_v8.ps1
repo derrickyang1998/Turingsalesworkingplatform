@@ -2938,6 +2938,7 @@ cleanup_parser_cache_unit() {
   systemctl reset-failed "$ParserCacheUnit" >/dev/null 2>&1 || true
 }
 trap cleanup_parser_cache_unit EXIT
+set +e
 systemd-run --quiet --wait --collect \
   --unit="$ParserCacheUnit" \
   --service-type=exec \
@@ -2976,13 +2977,14 @@ systemd-run --quiet --wait --collect \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_INPUT=1 \
     npm_config_userconfig=/dev/null \
-    npm_config_globalconfig=/dev/null \
+    npm_config_globalconfig=/tmp/turingmarket-parser-global.npmrc \
     npm_config_update_notifier=false \
     npm_config_audit=false \
     npm_config_fund=false \
     bash --noprofile --norc -c '
 set -euo pipefail
 install -d -m 0700 /parser-cache/npm /parser-cache/python /tmp/parser-npm
+install -m 0600 /dev/null /tmp/turingmarket-parser-global.npmrc
 cp /parser-source/parser-runtime/package.json /tmp/parser-npm/package.json
 cp /parser-source/parser-runtime/package-lock.json /tmp/parser-npm/package-lock.json
 cd /tmp/parser-npm
@@ -2993,6 +2995,12 @@ rm -f /parser-cache/npm/_update-notifier-last-checked
 python3 -m pip download --require-hashes --only-binary=:all: --no-deps \
   --dest /parser-cache/python -r /parser-source/parser-runtime/requirements.lock
 '
+ParserCacheStatus="$?"
+set -e
+if [ "$ParserCacheStatus" -ne 0 ]; then
+  echo "Parser dependency cache unit failed with status $ParserCacheStatus" >&2
+  exit "$ParserCacheStatus"
+fi
 cleanup_parser_cache_unit
 trap - EXIT
 chown -R root:root "$ParserDependencyCacheStage"
