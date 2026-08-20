@@ -8910,9 +8910,17 @@ echo "$PPT_SHA256  ppt.js" | sha256sum --check --status
 
 cd server
 
-NODE_ENV=test TM_DISABLE_DOTENV=1 DB_PATH="$SCHEMA_DB" node <<'NODE'
-const Database = require('better-sqlite3');
-const database = new Database(process.env.DB_PATH, { readonly: true, fileMustExist: true });
+SCHEMA_RUNTIME_DIR="$TEST_ROOT/schema-runtime"
+SCHEMA_RUNTIME_DB="$SCHEMA_RUNTIME_DIR/schema.db"
+cleanup_schema_runtime() {
+  rm -rf -- "$SCHEMA_RUNTIME_DIR"
+}
+trap cleanup_schema_runtime EXIT
+test ! -e "$SCHEMA_RUNTIME_DIR"
+install -d -m 0700 "$SCHEMA_RUNTIME_DIR"
+install -m 0600 "$SCHEMA_DB" "$SCHEMA_RUNTIME_DB"
+NODE_ENV=test TM_DISABLE_DOTENV=1 DB_PATH="$SCHEMA_RUNTIME_DB" node <<'NODE'
+const database = require('./db');
 try {
   if (database.pragma('integrity_check', { simple: true }) !== 'ok') throw new Error('Candidate DB integrity_check failed');
   if (database.pragma('foreign_key_check').length !== 0) throw new Error('Candidate DB foreign_key_check failed');
@@ -8923,6 +8931,8 @@ try {
   database.close();
 }
 NODE
+rm -rf -- "$SCHEMA_RUNTIME_DIR"
+trap - EXIT
 printf '%s\n' "TM_SCHEMA_COMPATIBILITY_OK"
 
 cd "$CandidateDir"

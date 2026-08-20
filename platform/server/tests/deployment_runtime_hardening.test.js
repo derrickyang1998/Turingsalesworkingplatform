@@ -1231,9 +1231,12 @@ test('candidate verification cannot read production data and runs candidate code
   assert.match(trustedVerifier, /REGISTERED_MIGRATIONS\.at\(-1\)/);
   assert.match(trustedVerifier, /verifyDeterministicFtsCanaries/);
   assert.match(gate, /TM_SANITIZED_MIGRATION_COMPATIBILITY_OK/);
-  assert.match(gate, /const Database = require\('better-sqlite3'\);/);
-  assert.match(gate, /new Database\(process\.env\.DB_PATH, \{ readonly: true, fileMustExist: true \}\)/);
-  assert.doesNotMatch(gate, /require\('\.\/db'\)/, 'the sealed sanitized database must not enter the write-capable startup path');
+  assert.match(gate, /SCHEMA_RUNTIME_DIR="\$TEST_ROOT\/schema-runtime"/);
+  assert.match(gate, /install -m 0600 "\$SCHEMA_DB" "\$SCHEMA_RUNTIME_DB"/);
+  assert.match(gate, /DB_PATH="\$SCHEMA_RUNTIME_DB" node <<'NODE'/);
+  assert.match(gate, /const database = require\('\.\/db'\);/, 'the writable copy must exercise the real candidate startup migration');
+  assert.match(gate, /trap cleanup_schema_runtime EXIT/);
+  assert.doesNotMatch(gate, /readonly: true/, 'the sealed source is copied before the write-capable migration path');
   assert.doesNotMatch(gate, /TM_SYNTHETIC_SENTINELS_OK|EXPECTED_SCHEMA_FINGERPRINT/);
 
   assert.match(dependencyStage, /npm ci --ignore-scripts[\s\S]*?install chromium[\s\S]*?npm ci --ignore-scripts/);
