@@ -11,7 +11,7 @@ unprivileged_build_worker() {
 
   local SOURCE_ROOT=/build-input
   local OUTPUT_ROOT=/build-work/runtime
-  local PYTHON_SITE APP_ROOT NPM_CACHE resolved library scan_target candidate
+  local PYTHON_SITE PIP_BUNDLED_CA APP_ROOT NPM_CACHE resolved library scan_target candidate
   [[ -d "$SOURCE_ROOT" && -d /dependency-cache && -d /build-work ]] || return 66
   [[ ! -e "$OUTPUT_ROOT" && ! -L "$OUTPUT_ROOT" ]] || return 66
   for attempt in $(seq 1 1200); do
@@ -86,17 +86,30 @@ unprivileged_build_worker() {
   copy_file "$SOURCE_ROOT/parser-runtime/sitecustomize.py" /usr/lib/python3.14/sitecustomize.py 0444
 
   PYTHON_SITE="$OUTPUT_ROOT/usr/local/lib/python3.14/dist-packages"
+  PIP_BUNDLED_CA="$SOURCE_ROOT/parser-runtime/pip-cacert.crt"
+  [[ -f "$PIP_BUNDLED_CA" && ! -L "$PIP_BUNDLED_CA" ]] || return 66
   install -d -m 0755 "$PYTHON_SITE"
-  /usr/bin/python3 -m pip install \
-    --disable-pip-version-check \
-    --require-hashes \
-    --only-binary=:all: \
-    --no-compile \
-    --no-deps \
-    --no-index \
-    --find-links /dependency-cache/python \
-    --target "$PYTHON_SITE" \
-    -r "$SOURCE_ROOT/parser-runtime/requirements.lock" >/dev/null
+  /usr/bin/python3 - "$PYTHON_SITE" "$PIP_BUNDLED_CA" "$SOURCE_ROOT/parser-runtime/requirements.lock" <<'PY' >/dev/null
+import sys
+
+target, ca_bundle, requirements = sys.argv[1:]
+from pip._vendor.certifi import core as certifi_core
+certifi_core.DEBIAN_CA_CERTS_PATH = ca_bundle
+from pip._internal.cli.main import main as pip_main
+
+raise SystemExit(pip_main([
+    'install',
+    '--disable-pip-version-check',
+    '--require-hashes',
+    '--only-binary=:all:',
+    '--no-compile',
+    '--no-deps',
+    '--no-index',
+    '--find-links', '/dependency-cache/python',
+    '--target', target,
+    '-r', requirements,
+]))
+PY
 
   APP_ROOT="$OUTPUT_ROOT/opt/turingmarket-parser/app"
   install -d -m 0755 \
@@ -406,6 +419,7 @@ for required in \
   parser-runtime/package.json \
   parser-runtime/package-lock.json \
   parser-runtime/requirements.lock \
+  parser-runtime/pip-cacert.crt \
   parser-runtime/sitecustomize.py \
   extract_document_text.py \
   extract_xlsx_text.py \
@@ -438,6 +452,7 @@ for required in \
   parser-runtime/package.json \
   parser-runtime/package-lock.json \
   parser-runtime/requirements.lock \
+  parser-runtime/pip-cacert.crt \
   parser-runtime/sitecustomize.py \
   extract_document_text.py \
   extract_xlsx_text.py \

@@ -501,6 +501,7 @@ test('trusted source manifest pins the complete parser control plane and deploy 
     'server/parser-runtime/package.json',
     'server/parser-runtime/package-lock.json',
     'server/parser-runtime/requirements.lock',
+    'server/parser-runtime/pip-cacert.crt',
     'server/parser-runtime/sitecustomize.py',
     'server/extract_document_text.py',
     'server/extract_xlsx_text.py',

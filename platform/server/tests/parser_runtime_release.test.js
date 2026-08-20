@@ -929,11 +929,18 @@ test('OCR image self-test retains the legacy tuple result compatibility path', (
 test('parser runtime manifest pins the exact production-built tree', () => {
   const manifest = JSON.parse(read(runtimeManifestPath));
   const sitecustomizePath = path.join(serverRoot, 'parser-runtime', 'sitecustomize.py');
+  const pipCaPath = path.join(serverRoot, 'parser-runtime', 'pip-cacert.crt');
   assert.equal(fs.existsSync(sitecustomizePath), true, 'sitecustomize must be a repository-pinned build input');
   assert.equal(
     manifest.artifacts['parser-runtime/sitecustomize.py'],
     require('node:crypto').createHash('sha256').update(fs.readFileSync(sitecustomizePath)).digest('hex'),
     'the parser manifest must pin the repository-owned sitecustomize bytes'
+  );
+  assert.equal(fs.existsSync(pipCaPath), true, 'the offline pip CA bundle must be a repository-pinned build input');
+  assert.equal(
+    manifest.artifacts['parser-runtime/pip-cacert.crt'],
+    require('node:crypto').createHash('sha256').update(fs.readFileSync(pipCaPath)).digest('hex'),
+    'the parser manifest must pin the offline pip CA bundle bytes'
   );
   assert.deepEqual(manifest.runtime_tree, {
     format: 'tm-parser-runtime-tree-v1',
@@ -994,6 +1001,10 @@ test('runtime builder preserves the pinned reproducible no-symlink runtime contr
   assert.match(source, /ldd/);
   assert.doesNotMatch(worker, /\bawk\b/, 'the isolated worker must not depend on the host /etc alternatives chain');
   assert.match(worker, /--exclude='sitecustomize\.py'/);
+  assert.match(worker, /PIP_BUNDLED_CA="\$SOURCE_ROOT\/parser-runtime\/pip-cacert\.crt"/);
+  assert.match(worker, /certifi_core\.DEBIAN_CA_CERTS_PATH = ca_bundle/);
+  assert.match(worker, /from pip\._internal\.cli\.main import main as pip_main/);
+  assert.doesNotMatch(worker, /\/usr\/bin\/python3 -m pip install/);
   assert.match(
     worker,
     /install -d -m 0755 "\$OUTPUT_ROOT\/usr\/lib\/python3\.14"[\s\S]*?copy_file "\$SOURCE_ROOT\/parser-runtime\/sitecustomize\.py" \/usr\/lib\/python3\.14\/sitecustomize\.py 0444[\s\S]*?find "\$OUTPUT_ROOT" -xdev -type d -exec chmod 0555 \{\} \+/,
@@ -1048,7 +1059,8 @@ test('runtime builder root controller never runs package tooling or imports cand
   );
 
   assert.match(worker, /\[\[ "\$\(id -u\)" -ne 0 \]\]/);
-  assert.match(worker, /\/usr\/bin\/python3 -m pip install/);
+  assert.match(worker, /from pip\._internal\.cli\.main import main as pip_main/);
+  assert.match(worker, /'--no-index'/);
   assert.match(worker, /npm ci --offline --omit=dev --ignore-scripts/);
   assert.match(worker, /from rapidocr import RapidOCR/);
   assert.match(worker, /RapidOCR\(\)/);
