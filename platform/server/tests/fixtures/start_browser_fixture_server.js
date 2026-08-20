@@ -14,17 +14,19 @@ const repoRoot = path.resolve(__dirname, '..', '..', '..', '..');
 const platformRoot = path.join(repoRoot, 'platform');
 const serverRoot = path.join(platformRoot, 'server');
 const port = Number(process.env.TM_BROWSER_FIXTURE_PORT || 43187);
-const runRoot = path.join(repoRoot, '.superpowers', 'sdd', 'browser-fixture-server', String(port));
+const configuredFixtureRoot = process.env.TM_BROWSER_FIXTURE_ROOT;
+const superpowersRoot = path.resolve(configuredFixtureRoot || path.join(repoRoot, '.superpowers'));
+const superpowersParent = configuredFixtureRoot ? path.dirname(superpowersRoot) : repoRoot;
+const sddRoot = path.join(superpowersRoot, 'sdd');
+const browserFixtureRoot = path.join(sddRoot, 'browser-fixture-server');
+const runRoot = path.join(browserFixtureRoot, String(port));
 const dbPath = path.join(runRoot, 'fixture.db');
 const stdoutPath = path.join(runRoot, 'server.stdout.log');
 const stderrPath = path.join(runRoot, 'server.stderr.log');
 const TEST_JWT_SECRET = 'r5mvdP9IQlk87XKX7U5crz6K-4EEe9heCdEnXEpm-zg';
-const superpowersRoot = path.join(repoRoot, '.superpowers');
-const sddRoot = path.join(superpowersRoot, 'sdd');
-const browserFixtureRoot = path.join(sddRoot, 'browser-fixture-server');
 
 function ensureFixtureRoots() {
-  ensureSafeFixtureDirectory(repoRoot, superpowersRoot, 'private test root');
+  ensureSafeFixtureDirectory(superpowersParent, superpowersRoot, 'private test root');
   ensureSafeFixtureDirectory(superpowersRoot, sddRoot, 'private test data root');
   ensureSafeFixtureDirectory(sddRoot, browserFixtureRoot, 'browser fixture root');
 }
@@ -64,6 +66,8 @@ function publicEnvironment() {
     TM_UPLOAD_SANDBOX_TEST_MODE: 'local-worker',
     UPLOAD_SANDBOX_SPOOL_ROOT: path.join(runRoot, 'upload-spool'),
     DB_PATH: dbPath,
+    TMP_DIR: path.join(runRoot, 'tmp'),
+    PPT_CACHE_DIR: path.join(runRoot, 'ppt-cache'),
     JWT_SECRET: TEST_JWT_SECRET,
     OBISIDIAN_KB_ROOT: '',
     PLATFORM_KB_VAULT_ROOT: ''

@@ -102,6 +102,28 @@ test('deployment browser stays separate from the frozen Playwright baseline', ()
   assert.equal(lock.packages['node_modules/playwright-deploy'].version, '1.61.1');
 });
 
+test('deployment browser smoke confines writable artifacts to the isolated candidate test root', () => {
+  const deploy = read('platform/deploy_v8.ps1');
+  const config = read('platform/server/tests/deployment-browser-smoke.config.js');
+  const fixtureServer = read('platform/server/tests/fixtures/start_browser_fixture_server.js');
+  const gateMatch = deploy.match(/<<'TM_UNPRIVILEGED_GATE'\r?\n([\s\S]*?)\r?\nTM_UNPRIVILEGED_GATE/);
+  assert.ok(gateMatch, 'offline unprivileged gate must exist');
+  const gate = gateMatch[1];
+
+  assert.match(
+    gate,
+    /TM_DEPLOYMENT_SMOKE_ROOT="\$TEST_ROOT\/browser-smoke"[\s\\\r\n]*TM_DEPLOYMENT_SMOKE_PORT=43188/,
+    'the release smoke must place writable state under the only writable candidate test root'
+  );
+  assert.match(config, /process\.env\.TM_DEPLOYMENT_SMOKE_ROOT/);
+  assert.match(config, /outputDir:\s*path\.join\(smokeRoot,\s*'playwright-artifacts'\)/);
+  assert.match(config, /TM_BROWSER_FIXTURE_ROOT:\s*path\.join\(smokeRoot,\s*'browser-fixture'\)/);
+  assert.doesNotMatch(config, /outputDir:\s*path\.join\(repoRoot,\s*'\.superpowers'/);
+  assert.match(fixtureServer, /process\.env\.TM_BROWSER_FIXTURE_ROOT/);
+  assert.match(fixtureServer, /TMP_DIR:\s*path\.join\(runRoot,\s*'tmp'\)/);
+  assert.match(fixtureServer, /PPT_CACHE_DIR:\s*path\.join\(runRoot,\s*'ppt-cache'\)/);
+});
+
 test('all production and deployment browser launches use the native sandboxed runtime', () => {
   const expectedTopLevelTestLaunchers = [
     'platform/server/tests/accessibility_shell.test.js',

@@ -8937,6 +8937,8 @@ cd "$CANDIDATE_DIR"
 NODE_ENV=test TM_DISABLE_DOTENV=1 node server/scripts/verify_phase4_one_request_replay.js
 NODE_ENV=test TM_DISABLE_DOTENV=1 node --test server/tests/verify_phase4_one_request_replay.test.js
 node --test server/tests/release_replay_gate.test.js
+install -d -m 0700 "$TEST_ROOT/browser-smoke"
+TM_DEPLOYMENT_SMOKE_ROOT="$TEST_ROOT/browser-smoke" \
 TM_DEPLOYMENT_SMOKE_PORT=43188 node node_modules/playwright-deploy/cli.js test -c server/tests/deployment-browser-smoke.config.js
 
 NGINX_TEST_SOCKET="$NGINX_GATE_DIR/listen.sock"
