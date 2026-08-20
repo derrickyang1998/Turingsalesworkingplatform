@@ -45,7 +45,7 @@
     { "path": "server/extract_xlsx_text.py", "sha256": "69db3140f8d08f2754df0b13d9ba728db5117539a507faabd4088c74b89ee3c8" },
     { "path": "server/ocr_document_text.py", "sha256": "917d5b14872eeb3a7b628d80cc70dbab46a79ef632e031fa599f15e0840e1a0a" },
     { "path": "server/scripts/adopt_legacy_production_v1.js", "sha256": "9b9d0e790f2fcd034ec3df2109931e85c036e862086d3350ba77234e1b0ded91" },
-    { "path": "server/scripts/build_upload_sandbox_runtime.sh", "sha256": "eeef64252435530a32a042ff6eafd1d463d0bdc1140f906ae721da2afc314aa4" },
+    { "path": "server/scripts/build_upload_sandbox_runtime.sh", "sha256": "98a75bda1f59eaf7bd72d59c727213908d8290775a44842a7b139a8f5079d542" },
     { "path": "server/scripts/check_cutover_capacity.py", "sha256": "3cfca1526919e3c2ae65bcc0d7fa0fc347c023d36a353b98a5cd149b9a824b83" },
     { "path": "server/scripts/cleanup_stale_migration_gate.sh", "sha256": "d5f2befa902522dd9de3e9dd2397a99ee5e78ab1a1c6e526a27f14bb2829e1fa" },
     { "path": "server/scripts/parse_upload_sandbox.sh", "sha256": "2d77151dac802ce00d80c9df04ba879232001b014ab672379c36836d767b8d95" },

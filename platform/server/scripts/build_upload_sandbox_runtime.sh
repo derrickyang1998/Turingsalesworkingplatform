@@ -78,7 +78,7 @@ unprivileged_build_worker() {
     printf '%s\n' 'unexpected Python standard library' >&2
     return 65
   }
-  install -d -m 0555 "$OUTPUT_ROOT/usr/lib/python3.14"
+  install -d -m 0755 "$OUTPUT_ROOT/usr/lib/python3.14"
   rsync -rt --copy-links --delete-excluded \
     --exclude='__pycache__/' --exclude='*.pyc' --exclude='site-packages/' --exclude='dist-packages/' \
     --exclude='sitecustomize.py' \

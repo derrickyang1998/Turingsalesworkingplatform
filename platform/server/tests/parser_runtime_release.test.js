@@ -996,6 +996,11 @@ test('runtime builder preserves the pinned reproducible no-symlink runtime contr
   assert.match(worker, /--exclude='sitecustomize\.py'/);
   assert.match(
     worker,
+    /install -d -m 0755 "\$OUTPUT_ROOT\/usr\/lib\/python3\.14"[\s\S]*?copy_file "\$SOURCE_ROOT\/parser-runtime\/sitecustomize\.py" \/usr\/lib\/python3\.14\/sitecustomize\.py 0444[\s\S]*?find "\$OUTPUT_ROOT" -xdev -type d -exec chmod 0555 \{\} \+/,
+    'the pinned sitecustomize copy must occur while the staging directory is writable and before final sealing'
+  );
+  assert.match(
+    worker,
     /copy_file "\$SOURCE_ROOT\/parser-runtime\/sitecustomize\.py" \/usr\/lib\/python3\.14\/sitecustomize\.py 0444/
   );
   assert.match(source, /case "\$library" in "\$OUTPUT_ROOT"\/\*\) continue/);
