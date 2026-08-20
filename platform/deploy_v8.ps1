@@ -8911,7 +8911,8 @@ echo "$PPT_SHA256  ppt.js" | sha256sum --check --status
 cd server
 
 NODE_ENV=test TM_DISABLE_DOTENV=1 DB_PATH="$SCHEMA_DB" node <<'NODE'
-const database = require('./db');
+const Database = require('better-sqlite3');
+const database = new Database(process.env.DB_PATH, { readonly: true, fileMustExist: true });
 try {
   if (database.pragma('integrity_check', { simple: true }) !== 'ok') throw new Error('Candidate DB integrity_check failed');
   if (database.pragma('foreign_key_check').length !== 0) throw new Error('Candidate DB foreign_key_check failed');
