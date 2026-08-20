@@ -39,9 +39,12 @@ test('deployment browser smoke loads the public shell and enforces the static bo
   }
 });
 
-test('deployment browser smoke restores authenticated CRM, influencer, and admin routes', async ({ page }) => {
+test('deployment browser smoke restores authenticated CRM, influencer, and admin routes', async ({ page, baseURL }) => {
   await installBaselineBrowserControls(page, { fixture });
-  await installFixtureApi(page, { fixture });
+  await installFixtureApi(page, {
+    fixture,
+    expectedOrigin: new URL(baseURL).origin
+  });
   await installBaselineAuthState(page, fixture.auth.admin);
 
   const routes = [

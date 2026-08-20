@@ -665,13 +665,14 @@ async function installFixtureApi(page, {
   fixture,
   loginFailure = null,
   expireNextApi = null,
-  routingScope = 'page'
+  routingScope = 'page',
+  expectedOrigin = null
 }) {
   if (!['page', 'context'].includes(routingScope)) {
     throw new Error(`Unsupported fixture routing scope: ${routingScope}`);
   }
   const port = Number(process.env.TM_BROWSER_FIXTURE_PORT || 43187);
-  const expectedOrigin = `http://127.0.0.1:${port}`;
+  const allowedOrigin = expectedOrigin || `http://127.0.0.1:${port}`;
   const fixtureState = cloneFixtureApiState(fixture);
   const scenario = { loginFailure, expireNextApi, expiryConsumed: false };
   page.__tmTask9M4Calls = [];
@@ -684,7 +685,7 @@ async function installFixtureApi(page, {
   const routeOwner = routingScope === 'context' ? page.context() : page;
   await routeOwner.route('**/*', async (route) => {
     const request = route.request();
-    const classification = classifyFixtureRequest(request.url(), expectedOrigin);
+    const classification = classifyFixtureRequest(request.url(), allowedOrigin);
     if (classification === 'external') {
       const url = new URL(request.url());
       page.__baselineUnhandledNetworkRequests.push(`${request.method()} ${url.origin}${url.pathname}`);

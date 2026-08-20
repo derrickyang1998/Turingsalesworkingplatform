@@ -153,6 +153,42 @@ test('fixture request classifier rejects external API origins', () => {
   assert.equal(classifyFixtureRequest('https://external.invalid/api/customers', origin), 'external');
 });
 
+test('fixture API routing honors an explicit deployment smoke origin', async () => {
+  const { installFixtureApi, loadBaselineFixture } = require(browserFixture);
+  const expectedOrigin = 'http://127.0.0.1:43188';
+  let routeHandler = null;
+  let routeAction = null;
+  const page = {
+    __baselineUnhandledApiCalls: [],
+    __baselineUnhandledNetworkRequests: [],
+    async route(_pattern, handler) {
+      routeHandler = handler;
+    }
+  };
+
+  await installFixtureApi(page, {
+    fixture: loadBaselineFixture(),
+    expectedOrigin
+  });
+  await routeHandler({
+    request() {
+      return {
+        method: () => 'GET',
+        url: () => `${expectedOrigin}/m0`
+      };
+    },
+    async continue() {
+      routeAction = 'continue';
+    },
+    async abort(reason) {
+      routeAction = `abort:${reason}`;
+    }
+  });
+
+  assert.equal(routeAction, 'continue');
+  assert.deepEqual(page.__baselineUnhandledNetworkRequests, []);
+});
+
 test('baseline comparison rejects non-Windows or divergent runner metadata', () => {
   const { validateRunEnvironments } = require(compareScript);
   const manifest = { viewports: [{ name: 'fixture-1440', width: 1440, height: 900 }] };
