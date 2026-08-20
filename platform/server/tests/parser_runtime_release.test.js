@@ -469,10 +469,10 @@ function buildUnitObservationFixture(verifier, overrides = {}) {
     KeyringMode: 'private',
     Environment: '',
     EnvironmentFiles: '',
-    LoadCredential: '',
-    LoadCredentialEncrypted: '',
-    SetCredential: '',
-    SetCredentialEncrypted: '',
+    LoadCredential: '[unprintable]',
+    LoadCredentialEncrypted: '[unprintable]',
+    SetCredential: '[unprintable]',
+    SetCredentialEncrypted: '[unprintable]',
     MemoryMax: '3221225472',
     TasksMax: '256',
     LimitNOFILE: '1024',
@@ -521,10 +521,14 @@ function buildUnitObservationFixture(verifier, overrides = {}) {
   );
 }
 
-test('trusted verifier derives the unavailable EnvironmentFiles fact from the transient fragment', () => {
+test('trusted verifier derives redacted environment and credential facts from the transient fragment', () => {
   const verifier = require(trustedVerifierPath);
   const observed = buildUnitObservationFixture(verifier);
   assert.equal(observed.EnvironmentFiles, '');
+  assert.equal(observed.LoadCredential, '');
+  assert.equal(observed.LoadCredentialEncrypted, '');
+  assert.equal(observed.SetCredential, '');
+  assert.equal(observed.SetCredentialEncrypted, '');
   assert.throws(() => buildUnitObservationFixture(verifier, {
     readBuildUnitArtifact: () => Buffer.from([
       '[Unit]',
@@ -546,6 +550,16 @@ test('trusted verifier derives the unavailable EnvironmentFiles fact from the tr
       ''
     ].join('\n'))
   }), /continuation|environment file/i);
+  assert.throws(() => buildUnitObservationFixture(verifier, {
+    readBuildUnitArtifact: () => Buffer.from([
+      '[Unit]',
+      'Description=parser build fixture',
+      '[Service]',
+      'LoadCredential=api-token:/run/untrusted-token',
+      'Type=exec',
+      ''
+    ].join('\n'))
+  }), /credential/i);
 });
 
 test('trusted parser verifier rejects forged booleans and binds canonical raw observations', async () => {

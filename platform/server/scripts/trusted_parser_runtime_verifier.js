@@ -1360,6 +1360,13 @@ const BUILD_UNIT_MOUNT_PROPERTIES = Object.freeze([
   'TemporaryFileSystem', 'InaccessiblePaths', 'BindReadOnlyPaths', 'BindPaths', 'ReadWritePaths'
 ]);
 const BUILD_UNIT_EVIDENCE_PROPERTIES = Object.freeze(['SystemCallPolicyEvidence']);
+const BUILD_UNIT_FRAGMENT_DERIVED_PROPERTIES = Object.freeze([
+  'EnvironmentFiles',
+  'LoadCredential',
+  'LoadCredentialEncrypted',
+  'SetCredential',
+  'SetCredentialEncrypted'
+]);
 
 const BUILD_UNIT_STATIC_PROPERTIES = Object.freeze({
   Type: 'exec',
@@ -1454,7 +1461,7 @@ const BUILD_MOUNT_EVIDENCE_PROPERTIES = Object.freeze({
   ReadWritePaths: '/build-work'
 });
 
-function observeBuildEnvironmentFiles(fragmentPath, options = {}) {
+function observeBuildFragmentIsolation(fragmentPath, options = {}) {
   if (fragmentPath !== BUILD_UNIT_STATIC_PROPERTIES.FragmentPath) {
     throw new Error('parser build unit fragment path mismatch');
   }
@@ -1479,9 +1486,18 @@ function observeBuildEnvironmentFiles(fragmentPath, options = {}) {
     if (/^EnvironmentFile[ \t]*=/.test(line)) {
       throw new Error('parser build unit environment file directive is not allowed');
     }
+    if (/^(?:LoadCredential|LoadCredentialEncrypted|SetCredential|SetCredentialEncrypted)[ \t]*=/.test(line)) {
+      throw new Error('parser build unit credential directive is not allowed');
+    }
   }
   if (serviceSections !== 1) throw new Error('parser build unit service section mismatch');
-  return '';
+  return Object.freeze({
+    EnvironmentFiles: '',
+    LoadCredential: '',
+    LoadCredentialEncrypted: '',
+    SetCredential: '',
+    SetCredentialEncrypted: ''
+  });
 }
 
 function validateBuildUnitProperties(properties) {
@@ -1578,11 +1594,13 @@ function observeBuildUnit(unit, sourceRoot, dependencyCacheRoot, buildWork, opti
   }
   const propertyNames = [
     ...BUILD_UNIT_LIVE_PROPERTIES,
-    ...Object.keys(BUILD_UNIT_STATIC_PROPERTIES).filter((name) => name !== 'EnvironmentFiles'),
+    ...Object.keys(BUILD_UNIT_STATIC_PROPERTIES).filter(
+      (name) => !BUILD_UNIT_FRAGMENT_DERIVED_PROPERTIES.includes(name)
+    ),
     ...BUILD_UNIT_MOUNT_PROPERTIES
   ];
   const observed = systemdProperties(unit, propertyNames, options);
-  observed.EnvironmentFiles = observeBuildEnvironmentFiles(observed.FragmentPath, options);
+  Object.assign(observed, observeBuildFragmentIsolation(observed.FragmentPath, options));
   const systemCallPolicyEvidence = measureConcreteSystemCallPolicy(
     observed.SystemCallFilter,
     BUILD_UNIT_STATIC_PROPERTIES.SystemCallFilter,
