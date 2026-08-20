@@ -8935,12 +8935,12 @@ rm -rf -- "$SCHEMA_RUNTIME_DIR"
 trap - EXIT
 printf '%s\n' "TM_SCHEMA_COMPATIBILITY_OK"
 
-cd "$CandidateDir"
+cd "$CANDIDATE_DIR"
 NODE_ENV=test TM_DISABLE_DOTENV=1 node server/scripts/verify_phase4_one_request_replay.js
 NODE_ENV=test TM_DISABLE_DOTENV=1 node --test server/tests/verify_phase4_one_request_replay.test.js
 node --test server/tests/release_replay_gate.test.js
 node --test server/tests/sanitized_migration_gate.test.js
-cd "$CandidateDir/server"
+cd "$CANDIDATE_DIR/server"
 NODE_ENV=test TM_DISABLE_DOTENV=1 DB_PATH="$DB_PATH" UPLOAD_DIR="$TEST_ROOT/uploads" TMP_DIR="$TEST_ROOT/tmp" \
   node --test --test-concurrency=1 tests/*.test.js
 cd ..

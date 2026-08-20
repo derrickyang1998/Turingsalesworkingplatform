@@ -1336,6 +1336,24 @@ test('unprivileged gate uses only variables explicitly passed through env -i', (
   assert.match(envBoundary, /DB_PATH="\$TestDb"/);
   assert.doesNotMatch(gate, /\$TestDb\b/, 'parent-shell TestDb is unavailable after env -i');
   assert.match(gate, /DB_PATH="\$DB_PATH"/);
+  const referencedVariables = [...new Set(
+    [...gate.matchAll(/\$\{?([A-Za-z_][A-Za-z0-9_]*)/g)].map((entry) => entry[1])
+  )].sort();
+  assert.deepEqual(referencedVariables, [
+    'APP_BUILD',
+    'APP_QUERY',
+    'CANDIDATE_DIR',
+    'DB_PATH',
+    'NGINX_GATE_DIR',
+    'NGINX_TEST_SOCKET',
+    'PPT_BUILD',
+    'PPT_QUERY',
+    'PPT_SHA256',
+    'SCHEMA_DB',
+    'SCHEMA_RUNTIME_DB',
+    'SCHEMA_RUNTIME_DIR',
+    'TEST_ROOT'
+  ]);
 });
 
 test('candidate lifecycle rejects directory substitution and clears network-stage processes before offline validation', () => {
