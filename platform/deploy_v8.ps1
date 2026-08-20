@@ -288,6 +288,7 @@ $FILES = @(
     "server\tests\fixtures\task-9-upload-header-contract.json",
     "server\tests\fixtures\transitive_dependency_migration.js",
     "server\tests\fixtures\undeclared_transitive_dependency.js",
+    "server\tests\fixtures\start_deployment_browser_smoke_server.js",
     "server\tests\fixtures\start_browser_fixture_server.js",
     "server\tests\helpers\browser_fixture.js",
     "server\tests\helpers\safe_fixture_paths.js"

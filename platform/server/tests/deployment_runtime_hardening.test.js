@@ -102,10 +102,9 @@ test('deployment browser stays separate from the frozen Playwright baseline', ()
   assert.equal(lock.packages['node_modules/playwright-deploy'].version, '1.61.1');
 });
 
-test('deployment browser smoke confines writable artifacts to the isolated candidate test root', () => {
+test('deployment browser smoke keeps candidate code read-only and writes only Playwright artifacts', () => {
   const deploy = read('platform/deploy_v8.ps1');
   const config = read('platform/server/tests/deployment-browser-smoke.config.js');
-  const fixtureServer = read('platform/server/tests/fixtures/start_browser_fixture_server.js');
   const gateMatch = deploy.match(/<<'TM_UNPRIVILEGED_GATE'\r?\n([\s\S]*?)\r?\nTM_UNPRIVILEGED_GATE/);
   assert.ok(gateMatch, 'offline unprivileged gate must exist');
   const gate = gateMatch[1];
@@ -117,11 +116,21 @@ test('deployment browser smoke confines writable artifacts to the isolated candi
   );
   assert.match(config, /process\.env\.TM_DEPLOYMENT_SMOKE_ROOT/);
   assert.match(config, /outputDir:\s*path\.join\(smokeRoot,\s*'playwright-artifacts'\)/);
-  assert.match(config, /TM_BROWSER_FIXTURE_ROOT:\s*path\.join\(smokeRoot,\s*'browser-fixture'\)/);
   assert.doesNotMatch(config, /outputDir:\s*path\.join\(repoRoot,\s*'\.superpowers'/);
-  assert.match(fixtureServer, /process\.env\.TM_BROWSER_FIXTURE_ROOT/);
-  assert.match(fixtureServer, /TMP_DIR:\s*path\.join\(runRoot,\s*'tmp'\)/);
-  assert.match(fixtureServer, /PPT_CACHE_DIR:\s*path\.join\(runRoot,\s*'ppt-cache'\)/);
+  assert.match(
+    config,
+    /command:\s*'node server\/tests\/fixtures\/start_deployment_browser_smoke_server\.js'/
+  );
+  assert.doesNotMatch(config, /start_browser_fixture_server|TM_BROWSER_FIXTURE_ROOT/);
+
+  const smokeServer = read('platform/server/tests/fixtures/start_deployment_browser_smoke_server.js');
+  assert.match(smokeServer, /publicAssets\.registerPublicAssets\(app, express, platformRoot\)/);
+  assert.match(smokeServer, /app\.get\('\/api\/health'/);
+  assert.match(smokeServer, /app\.listen\(port,\s*'127\.0\.0\.1'/);
+  assert.match(smokeServer, /!\['GET',\s*'HEAD'\]\.includes\(req\.method\)/);
+  assert.doesNotMatch(smokeServer, /app\.get\('\*'/);
+  assert.doesNotMatch(smokeServer, /DB_PATH|PPT_CACHE_DIR|UPLOAD_SANDBOX|child_process|node:fs/);
+  assert.match(deploy, /"server\\tests\\fixtures\\start_deployment_browser_smoke_server\.js"/);
 });
 
 test('all production and deployment browser launches use the native sandboxed runtime', () => {

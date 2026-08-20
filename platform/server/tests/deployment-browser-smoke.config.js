@@ -10,7 +10,6 @@ const smokeRoot = path.resolve(
   process.env.TM_DEPLOYMENT_SMOKE_ROOT
     || path.join(repoRoot, '.superpowers', 'sdd', 'deployment-smoke')
 );
-process.env.TM_BROWSER_FIXTURE_PORT = String(port);
 
 module.exports = defineConfig({
   testDir: __dirname,
@@ -23,15 +22,12 @@ module.exports = defineConfig({
   expect: { timeout: 10_000 },
   outputDir: path.join(smokeRoot, 'playwright-artifacts'),
   webServer: {
-    command: 'node server/tests/fixtures/start_browser_fixture_server.js',
+    command: 'node server/tests/fixtures/start_deployment_browser_smoke_server.js',
     cwd: platformRoot,
     url: `http://127.0.0.1:${port}/api/health`,
     timeout: 120_000,
     reuseExistingServer: false,
-    env: {
-      TM_BROWSER_FIXTURE_PORT: String(port),
-      TM_BROWSER_FIXTURE_ROOT: path.join(smokeRoot, 'browser-fixture')
-    }
+    env: { TM_DEPLOYMENT_SMOKE_PORT: String(port) }
   },
   use: {
     ...devices['Desktop Chrome'],
