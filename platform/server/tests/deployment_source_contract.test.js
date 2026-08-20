@@ -414,6 +414,12 @@ foreach ($required in @(
 }
 if ($execution.Arguments -notcontains '-n') { throw 'Execution SSH must disconnect standard input' }
 if ($upload.Arguments -contains '-n') { throw 'Upload SSH must retain its payload input' }
+foreach ($phase in @($upload, $execution)) {
+  if ($phase.Arguments -notcontains 'ServerAliveInterval=15' -or
+      $phase.Arguments -notcontains 'ServerAliveCountMax=12') {
+    throw 'Every remote Bash transport phase must keep the encrypted SSH session active'
+  }
+}
 if ($uploadCommand.Contains('exit 19') -or $uploadCommand.Contains('# unread payload padding') -or
     $executionCommand.Contains('exit 19') -or $executionCommand.Contains('# unread payload padding')) {
   throw 'Remote payload must not be interpolated into either SSH command'
@@ -466,6 +472,10 @@ if ([string]::IsNullOrWhiteSpace($uploadPath) -or $cleanupPath -cne $uploadPath)
 }
 if ($cleanup.Arguments -notcontains '-n' -or $cleanup.Input -cne '') {
   throw 'Cleanup connection must disconnect standard input'
+}
+if ($cleanup.Arguments -notcontains 'ServerAliveInterval=15' -or
+    $cleanup.Arguments -notcontains 'ServerAliveCountMax=12') {
+  throw 'Cleanup connection must retain the deployment SSH keepalive policy'
 }
 if (-not $cleanupCommand.Contains('rm -f -- "$RemoteScript"')) {
   throw 'Cleanup command must remove the exact bounded runtime file'

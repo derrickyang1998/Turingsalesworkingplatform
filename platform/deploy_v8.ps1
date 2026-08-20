@@ -656,6 +656,10 @@ rm -f -- "$RemoteScript"
         'BatchMode=yes',
         '-o',
         'StrictHostKeyChecking=yes',
+        '-o',
+        'ServerAliveInterval=15',
+        '-o',
+        'ServerAliveCountMax=12',
         "root@$SERVER",
         $uploadCommand
     )
@@ -668,6 +672,10 @@ rm -f -- "$RemoteScript"
         'BatchMode=yes',
         '-o',
         'StrictHostKeyChecking=yes',
+        '-o',
+        'ServerAliveInterval=15',
+        '-o',
+        'ServerAliveCountMax=12',
         "root@$SERVER",
         $executionCommand
     )
@@ -680,6 +688,10 @@ rm -f -- "$RemoteScript"
         'BatchMode=yes',
         '-o',
         'StrictHostKeyChecking=yes',
+        '-o',
+        'ServerAliveInterval=15',
+        '-o',
+        'ServerAliveCountMax=12',
         "root@$SERVER",
         $cleanupCommand
     )
