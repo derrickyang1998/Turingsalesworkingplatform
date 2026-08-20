@@ -1175,7 +1175,9 @@ test('Phase 4 takeover and candidate cleanup unmount only the exact interrupted 
     assert.match(source, /findmnt -n -o FSTYPE --mountpoint "\$CandidateTestMount"/);
     assert.match(source, /test "\$CandidateTestFsType" = "tmpfs"/);
     assert.match(source, /umount -- "\$CandidateTestMount"/);
+    assert.match(source, /for _attempt in \$\(seq 1 50\)[\s\S]*?umount -- "\$CandidateTestMount"[\s\S]*?sleep 0\.2/);
     assert.match(source, /! mountpoint -q "\$CandidateTestMount"/);
+    assert.doesNotMatch(source, /umount\s+(?:--lazy|-l)\b/);
     assert.match(source, /Unexpected nested candidate mount/);
     assert.match(source, /if mount_path == release:[\s\S]*?Unexpected candidate release mount/);
   }

@@ -1888,6 +1888,8 @@ test('candidate dependency and test writes are confined to a verified aggregate 
   assert.match(gate, /trap 'cleanup_candidate_gate \$\?' EXIT/);
   assert.match(gate, /umount -- "\$TestRoot"/);
   assert.match(gate, /mountpoint -q "\$TestRoot"/);
+  assert.match(gate, /unmount_test_root\(\) \{[\s\S]*?for _attempt in \$\(seq 1 50\)[\s\S]*?findmnt -n -o FSTYPE --mountpoint "\$TestRoot"[\s\S]*?test "\$TestRootFsType" = "tmpfs"[\s\S]*?umount -- "\$TestRoot"[\s\S]*?sleep 0\.2/);
+  assert.doesNotMatch(gate, /umount\s+(?:--lazy|-l)\b/);
   assert.ok(
     gate.indexOf('ReleaseTraversalRelaxed=1') <
       gate.indexOf('chmod 0711 "$ReleaseRoot"') &&
@@ -1900,6 +1902,52 @@ test('candidate dependency and test writes are confined to a verified aggregate 
   assert.ok(gate.indexOf('mount -t tmpfs') < gate.indexOf('npm ci --ignore-scripts'));
   assert.ok(gate.indexOf('test "$TargetAvailableBytes" -ge "$DependencyCopyRequiredBytes"') < gate.indexOf('cp -a -- "$DependencyRoot/node_modules"'));
   assert.ok(gate.lastIndexOf('\nif ! cleanup_test_root 1; then\n') > gate.indexOf('TM_UNPRIVILEGED_GATE'));
+});
+
+test('candidate tmpfs cleanup retries a verified busy mount without lazy unmount', {
+  skip: spawnSync('bash', ['--version'], { encoding: 'utf8' }).status !== 0
+}, () => {
+  const deploy = read(deployPath);
+  const candidateMatch = deploy.match(/\$candidateGate\s*=\s*@'\r?\n([\s\S]*?)\r?\n'@/);
+  assert.ok(candidateMatch, 'candidate-only gate must exist');
+  const functionMatch = candidateMatch[1].match(/unmount_test_root\(\) \{\r?\n([\s\S]*?)\r?\n\}\r?\n\r?\ncleanup_test_root\(\)/);
+  assert.ok(functionMatch, 'candidate tmpfs unmount helper must exist');
+  const harness = `
+set -euo pipefail
+TestRoot=/verified/candidate/tmpfs
+AttemptFile="$(mktemp)"
+trap 'rm -f "$AttemptFile"' EXIT
+printf '0\\n' > "$AttemptFile"
+mountpoint() {
+  test "$1" = "-q"
+  test "$2" = "$TestRoot"
+  test "$(cat "$AttemptFile")" -lt 3
+}
+findmnt() {
+  test "$1 $2 $3 $4" = "-n -o FSTYPE --mountpoint"
+  test "$5" = "$TestRoot"
+  printf 'tmpfs\\n'
+}
+umount() {
+  test "$1" = "--"
+  test "$2" = "$TestRoot"
+  Attempt="$(( $(cat "$AttemptFile") + 1 ))"
+  printf '%s\\n' "$Attempt" > "$AttemptFile"
+  test "$Attempt" -ge 3
+}
+sleep() {
+  test "$1" = "0.2"
+}
+unmount_test_root() {
+${functionMatch[1]}
+}
+unmount_test_root
+test "$(cat "$AttemptFile")" = "3"
+printf 'BUSY_TMPFS_RETRY_OK\\n'
+`;
+  const result = spawnSync('bash', ['-s'], { input: harness, encoding: 'utf8', timeout: 30_000 });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /BUSY_TMPFS_RETRY_OK/);
 });
 
 test('Phase 4 candidate gate remains valid Bash after isolation hardening', {

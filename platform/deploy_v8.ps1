@@ -2149,12 +2149,19 @@ PY
 
 unmount_candidate_test_tmpfs() {
   local CandidateRelease="$1" ExpectedCandidateTestMount="${2:-}"
-  local CandidateTestMount CandidateTestFsType RemainingCandidateMount
+  local CandidateTestMount CandidateTestFsType RemainingCandidateMount _attempt
   CandidateTestMount="$(discover_candidate_test_mount "$CandidateRelease" "$ExpectedCandidateTestMount")"
   if [ "$CandidateTestMount" = "-" ]; then return 0; fi
-  CandidateTestFsType="$(findmnt -n -o FSTYPE --mountpoint "$CandidateTestMount")"
-  test "$CandidateTestFsType" = "tmpfs"
-  umount -- "$CandidateTestMount"
+  for _attempt in $(seq 1 50); do
+    if ! mountpoint -q "$CandidateTestMount"; then break; fi
+    if ! CandidateTestFsType="$(findmnt -n -o FSTYPE --mountpoint "$CandidateTestMount")"; then
+      if ! mountpoint -q "$CandidateTestMount"; then break; fi
+      return 1
+    fi
+    test "$CandidateTestFsType" = "tmpfs"
+    if umount -- "$CandidateTestMount" 2>/dev/null; then break; fi
+    sleep 0.2
+  done
   ! mountpoint -q "$CandidateTestMount"
   RemainingCandidateMount="$(discover_candidate_test_mount "$CandidateRelease" "$ExpectedCandidateTestMount")"
   test "$RemainingCandidateMount" = "-"
@@ -6615,12 +6622,19 @@ PY
 
 unmount_candidate_test_tmpfs() {
   local CandidateRelease="$1" ExpectedCandidateTestMount="${2:-}"
-  local CandidateTestMount CandidateTestFsType RemainingCandidateMount
+  local CandidateTestMount CandidateTestFsType RemainingCandidateMount _attempt
   CandidateTestMount="$(discover_candidate_test_mount "$CandidateRelease" "$ExpectedCandidateTestMount")"
   if [ "$CandidateTestMount" = "-" ]; then return 0; fi
-  CandidateTestFsType="$(findmnt -n -o FSTYPE --mountpoint "$CandidateTestMount")"
-  test "$CandidateTestFsType" = "tmpfs"
-  umount -- "$CandidateTestMount"
+  for _attempt in $(seq 1 50); do
+    if ! mountpoint -q "$CandidateTestMount"; then break; fi
+    if ! CandidateTestFsType="$(findmnt -n -o FSTYPE --mountpoint "$CandidateTestMount")"; then
+      if ! mountpoint -q "$CandidateTestMount"; then break; fi
+      return 1
+    fi
+    test "$CandidateTestFsType" = "tmpfs"
+    if umount -- "$CandidateTestMount" 2>/dev/null; then break; fi
+    sleep 0.2
+  done
   ! mountpoint -q "$CandidateTestMount"
   RemainingCandidateMount="$(discover_candidate_test_mount "$CandidateRelease" "$ExpectedCandidateTestMount")"
   test "$RemainingCandidateMount" = "-"
@@ -8249,6 +8263,21 @@ restore_release_traversal() {
   return "$CleanupStatus"
 }
 
+unmount_test_root() {
+  local TestRootFsType _attempt
+  for _attempt in $(seq 1 50); do
+    if ! mountpoint -q "$TestRoot"; then return 0; fi
+    if ! TestRootFsType="$(findmnt -n -o FSTYPE --mountpoint "$TestRoot")"; then
+      if ! mountpoint -q "$TestRoot"; then return 0; fi
+      return 1
+    fi
+    test "$TestRootFsType" = "tmpfs" || return 1
+    if umount -- "$TestRoot" 2>/dev/null; then return 0; fi
+    sleep 0.2
+  done
+  return 1
+}
+
 cleanup_test_root() {
   local PreserveCandidateDependencies="${1:-0}" CleanupStatus=0
   case "$PreserveCandidateDependencies" in 0|1) ;;
@@ -8272,9 +8301,7 @@ cleanup_test_root() {
   drain_gate_unit "$DependencyBuildUnit" || CleanupStatus=1
   drain_gate_unit "$OfflineGateUnit" || CleanupStatus=1
   kill_gate_processes "candidate cleanup" || CleanupStatus=1
-  if mountpoint -q "$TestRoot"; then
-    umount -- "$TestRoot" || CleanupStatus=1
-  fi
+  unmount_test_root || CleanupStatus=1
   if mountpoint -q "$TestRoot"; then
     echo "Candidate test tmpfs remained mounted" >&2
     CleanupStatus=1
