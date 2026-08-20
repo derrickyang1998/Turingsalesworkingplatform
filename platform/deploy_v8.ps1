@@ -581,38 +581,29 @@ TM_OPERATION_FENCE
     }
 
     $normalizedRemoteScript = $Script -replace "`r`n?", "`n"
-    do {
-        $remoteScriptDelimiter = "TM_REMOTE_SCRIPT_{0}" -f ([Guid]::NewGuid().ToString('N'))
-    } while (($normalizedRemoteScript -split "`n") -contains $remoteScriptDelimiter)
     $remoteScriptPath = "/run/turingmarket-remote-script-{0}" -f ([Guid]::NewGuid().ToString('N'))
-    $preloadPrefix = @'
+    $remoteLoader = @'
 set -euo pipefail
-RemoteScript='__REMOTE_SCRIPT_PATH__'
+RemoteScript=__REMOTE_SCRIPT_PATH__
 cleanup_remote_script() {
   rm -f -- "$RemoteScript"
 }
 trap cleanup_remote_script EXIT HUP INT TERM
 umask 077
 set -o noclobber
-cat > "$RemoteScript" <<'__REMOTE_SCRIPT_DELIMITER__'
-'@
-    $preloadPrefix = $preloadPrefix.Replace('__REMOTE_SCRIPT_PATH__', $remoteScriptPath)
-    $preloadPrefix = $preloadPrefix.Replace('__REMOTE_SCRIPT_DELIMITER__', $remoteScriptDelimiter)
-    $preloadSuffix = @'
-__REMOTE_SCRIPT_DELIMITER__
+cat > "$RemoteScript"
 set +o noclobber
 test -f "$RemoteScript"
 test ! -L "$RemoteScript"
-test "$(stat -c '%U:%G:%a:%h' -- "$RemoteScript")" = "root:root:600:1"
+test "$(stat -c "%U:%G:%a:%h" -- "$RemoteScript")" = "root:root:600:1"
 test -s "$RemoteScript"
 /bin/bash -e -- "$RemoteScript" </dev/null
 '@
-    $preloadSuffix = $preloadSuffix.Replace('__REMOTE_SCRIPT_DELIMITER__', $remoteScriptDelimiter)
-    $transportScript = $preloadPrefix + "`n" + $normalizedRemoteScript
-    if (-not $transportScript.EndsWith("`n")) {
-        $transportScript += "`n"
+    $remoteLoader = $remoteLoader.Replace('__REMOTE_SCRIPT_PATH__', $remoteScriptPath)
+    if ($remoteLoader.Contains("'")) {
+        throw "Remote loader contains an unsupported single quote."
     }
-    $transportScript += $preloadSuffix
+    $remoteCommand = "bash -c '$remoteLoader'"
 
     $arguments = @(
         '-i',
@@ -622,10 +613,9 @@ test -s "$RemoteScript"
         '-o',
         'StrictHostKeyChecking=yes',
         "root@$SERVER",
-        'bash',
-        '-se'
+        $remoteCommand
     )
-    $result = Invoke-NativeWithUtf8Input -FileName 'ssh.exe' -ArgumentList $arguments -InputText $transportScript -FailureMessage $FailureMessage -TimeoutSeconds $TimeoutSeconds -CaptureOutput:$CaptureOutput
+    $result = Invoke-NativeWithUtf8Input -FileName 'ssh.exe' -ArgumentList $arguments -InputText $normalizedRemoteScript -FailureMessage $FailureMessage -TimeoutSeconds $TimeoutSeconds -CaptureOutput:$CaptureOutput
     if ($CaptureOutput) {
         return $result
     }

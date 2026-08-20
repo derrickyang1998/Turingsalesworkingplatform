@@ -353,6 +353,7 @@ test('Task 12 remote Bash transport preloads the complete payload before executi
 $script:SSH_KEY = 'C:\fixture\deploy-key'
 $script:SERVER = 'example.invalid'
 $script:CapturedInput = $null
+$script:CapturedArguments = $null
 function Invoke-NativeWithUtf8Input {
   param(
     [string]$FileName,
@@ -363,34 +364,32 @@ function Invoke-NativeWithUtf8Input {
     [switch]$CaptureOutput
   )
   $script:CapturedInput = $InputText
+  $script:CapturedArguments = $ArgumentList
 }
 $lf = [string][char]10
 $payload = 'set -euo pipefail' + $lf + 'exit 19' + $lf + (('# unread payload padding' * 20000) -join $lf)
 Invoke-RemoteBash -Script $payload -FailureMessage 'early failure probe' -TimeoutSeconds 30
-if ($script:CapturedInput -ceq $payload) { throw 'Remote payload was still executed directly from SSH stdin' }
-if ($script:CapturedInput -notmatch "RemoteScript='/run/turingmarket-remote-script-[a-f0-9]{32}'") {
+if ($script:CapturedInput -cne $payload) { throw 'SSH stdin must contain only the complete remote payload' }
+$remoteLoader = [string]$script:CapturedArguments[$script:CapturedArguments.Count - 1]
+if ($remoteLoader -notmatch "^bash -c 'set -euo pipefail") {
+  throw 'Remote loader must be supplied as an SSH command argument'
+}
+if ($remoteLoader -notmatch 'RemoteScript=/run/turingmarket-remote-script-[a-f0-9]{32}') {
   throw 'Remote payload was not staged in a bounded runtime file'
 }
-$preloadMatch = [regex]::Match(
-  $script:CapturedInput,
-  'cat > "\$RemoteScript" <<''(?<delimiter>TM_REMOTE_SCRIPT_[a-f0-9]{32})'''
-)
-if (-not $preloadMatch.Success) { throw 'Remote payload preload heredoc is missing' }
-$delimiter = $preloadMatch.Groups['delimiter'].Value
-$closingPattern = '(?m)^' + [regex]::Escape($delimiter) + '\r?$'
-if ([regex]::Matches($script:CapturedInput, $closingPattern).Count -ne 1) {
-  throw 'Remote payload delimiter must close exactly once'
-}
 foreach ($required in @(
+  'cat > "$RemoteScript"',
   'test ! -L "$RemoteScript"',
   'root:root:600:1',
   'set -o noclobber',
   'trap cleanup_remote_script EXIT HUP INT TERM',
   '/bin/bash -e -- "$RemoteScript" </dev/null'
 )) {
-  if (-not $script:CapturedInput.Contains($required)) { throw "Remote preload control missing: $required" }
+  if (-not $remoteLoader.Contains($required)) { throw "Remote preload control missing: $required" }
 }
-if (-not $script:CapturedInput.Contains($payload)) { throw 'Remote preload omitted payload bytes' }
+if ($remoteLoader.Contains('exit 19') -or $remoteLoader.Contains('# unread payload padding')) {
+  throw 'Remote payload must not be interpolated into the loader command'
+}
 Write-Output 'REMOTE_PRELOAD_OK'
 `);
 
