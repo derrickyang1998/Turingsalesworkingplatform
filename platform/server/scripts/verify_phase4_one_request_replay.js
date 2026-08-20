@@ -110,6 +110,7 @@ function fixtureEnvironment({ dbPath, fault, port, tempDir }) {
     PPT_CACHE_DIR: path.join(tempDir, 'ppt-cache'),
     TM_UPLOAD_SANDBOX_TEST_MODE: 'local-worker',
     UPLOAD_SANDBOX_SPOOL_ROOT: path.join(tempDir, 'upload-spool'),
+    TM_PHASE4_ONE_REQUEST_REPLAY_MODE: '1',
     TM_PHASE4_ONE_REQUEST_REPLAY_FAULT: fault,
     TM_PHASE4_ONE_REQUEST_REPLAY_USER_ID: '1',
     TZ: 'UTC'

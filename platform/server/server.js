@@ -1,5 +1,6 @@
 const runtimeConfig = require('./config/runtime_config');
 const LOCAL_UPLOAD_WORKER_MODE = explicitLocalUploadWorkerMode();
+const PHASE4_ONE_REQUEST_REPLAY_MODE = explicitPhase4OneRequestReplayMode();
 runtimeConfig.loadPlatformEnvironment();
 const { jwtSecret: JWT_SECRET } = runtimeConfig.validateNetworkRuntimeConfig();
 const PORT = process.env.PORT || 3002;
@@ -416,6 +417,20 @@ function explicitLocalUploadWorkerMode() {
   return true;
 }
 
+function explicitPhase4OneRequestReplayMode() {
+  const mode = process.env.TM_PHASE4_ONE_REQUEST_REPLAY_MODE;
+  if (mode === undefined || mode === '') return false;
+  if (
+    mode !== '1' ||
+    !LOCAL_UPLOAD_WORKER_MODE ||
+    process.env.TM_PHASE4_ONE_REQUEST_REPLAY_USER_ID !== '1' ||
+    typeof process.send !== 'function'
+  ) {
+    throw new Error('Invalid Phase 4 one-request replay configuration');
+  }
+  return true;
+}
+
 function uploadSelfTestResult(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('Upload sandbox self-test result is invalid');
@@ -453,6 +468,23 @@ async function runProductionUploadSandboxSelfTests() {
     }
   );
   return uploadSelfTestResult(JSON.parse(result.stdout));
+}
+
+function localUploadReadinessSnapshot() {
+  return Object.freeze({
+    ready: true,
+    manifestSha256: loadRuntimeManifest().manifestSha256,
+    parserIdentity: Object.freeze({
+      user: 'turingmarket-parser',
+      group: 'turingmarket-parser',
+      home: '/nonexistent',
+      shell: '/usr/sbin/nologin',
+      locked: true,
+      supplementary_groups: [],
+      uid: 64123,
+      gid: 64123
+    })
+  });
 }
 
 function localUploadReadinessAdapters() {
@@ -1910,16 +1942,18 @@ async function bootstrapServer() {
     });
     await fs.promises.chmod(UPLOAD_SANDBOX_SPOOL_ROOT, 0o700);
   }
-  const readiness = await assertUploadSandboxStartupReady({
-    expectedManifestSha256: localWorker
-      ? loadRuntimeManifest().manifestSha256
-      : RELEASE_PINNED_UPLOAD_MANIFEST_SHA256,
-    idempotency: uploadAdmissionIdempotency,
-    spoolRoot: UPLOAD_SANDBOX_SPOOL_ROOT,
-    recoverAdmissions: recoverUploadAdmissions,
-    runSelfTests: runProductionUploadSandboxSelfTests,
-    ...(localWorker ? localUploadReadinessAdapters() : {})
-  });
+  const readiness = PHASE4_ONE_REQUEST_REPLAY_MODE
+    ? localUploadReadinessSnapshot()
+    : await assertUploadSandboxStartupReady({
+        expectedManifestSha256: localWorker
+          ? loadRuntimeManifest().manifestSha256
+          : RELEASE_PINNED_UPLOAD_MANIFEST_SHA256,
+        idempotency: uploadAdmissionIdempotency,
+        spoolRoot: UPLOAD_SANDBOX_SPOOL_ROOT,
+        recoverAdmissions: recoverUploadAdmissions,
+        runSelfTests: runProductionUploadSandboxSelfTests,
+        ...(localWorker ? localUploadReadinessAdapters() : {})
+      });
   uploadSandboxReadiness = Object.freeze({
     ready: readiness.ready === true,
     manifestSha256: readiness.manifestSha256

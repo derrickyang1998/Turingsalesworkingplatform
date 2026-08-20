@@ -2,6 +2,8 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 
@@ -25,10 +27,55 @@ test('proof binds every server startup write path to its isolated temp directory
   assert.equal(environment.UPLOAD_DIR, path.join(tempDir, 'uploads'));
   assert.equal(environment.TMP_DIR, path.join(tempDir, 'runtime-tmp'));
   assert.equal(environment.PPT_CACHE_DIR, path.join(tempDir, 'ppt-cache'));
+  assert.equal(environment.TM_PHASE4_ONE_REQUEST_REPLAY_MODE, '1');
   assert.equal(
     environment.UPLOAD_SANDBOX_SPOOL_ROOT,
     path.join(tempDir, 'upload-spool')
   );
+});
+
+test('local-worker proof bypasses production-only parser readiness without changing it', () => {
+  const serverSource = fs.readFileSync(path.join(serverRoot, 'server.js'), 'utf8');
+  assert.match(
+    serverSource,
+    /const readiness = PHASE4_ONE_REQUEST_REPLAY_MODE\s*\?\s*localUploadReadinessSnapshot\(\)\s*:\s*await assertUploadSandboxStartupReady/
+  );
+});
+
+test('replay-only readiness snapshot rejects the marker outside the IPC proof process', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-phase4-no-ipc-'));
+  const environment = proof._testing.fixtureEnvironment({
+    dbPath: path.join(tempDir, 'fixture.db'),
+    fault: 'none',
+    port: 43187,
+    tempDir
+  });
+  try {
+    const result = await new Promise((resolve, reject) => {
+      const child = spawn(process.execPath, [path.join(serverRoot, 'server.js')], {
+        cwd: serverRoot,
+        env: environment,
+        stdio: ['ignore', 'pipe', 'pipe']
+      });
+      const output = [];
+      const timer = setTimeout(() => {
+        child.kill('SIGKILL');
+        reject(new Error('non-IPC replay marker rejection timed out'));
+      }, 10_000);
+      timer.unref();
+      child.stdout.on('data', (chunk) => output.push(chunk));
+      child.stderr.on('data', (chunk) => output.push(chunk));
+      child.once('error', reject);
+      child.once('close', (code) => {
+        clearTimeout(timer);
+        resolve({ code, output: Buffer.concat(output).toString('utf8') });
+      });
+    });
+    assert.notEqual(result.code, 0);
+    assert.match(result.output, /Invalid Phase 4 one-request replay configuration/);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
 });
 
 function lastJsonLine(value) {
