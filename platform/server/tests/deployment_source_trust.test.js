@@ -1351,3 +1351,28 @@ catch {
   assert.match(result.stdout, /hard-timeout probe failed timed out after 1 second/i);
   assert.doesNotMatch(result.stdout, /UNSAFE_CONTINUATION_AFTER_TIMEOUT/);
 });
+
+test('native outer invocation propagates a nonzero exit code while capturing output', {
+  skip: process.platform !== 'win32'
+}, () => {
+  const result = runPowerShellFunctionHarness(
+    ['Assert-LastExitCode', 'Convert-ToNativeArgument', 'Invoke-NativeWithUtf8Input'],
+    String.raw`
+try {
+  Invoke-NativeWithUtf8Input -FileName 'powershell.exe' -ArgumentList @(
+    '-NoLogo', '-NoProfile', '-NonInteractive', '-Command', "Write-Output 'INNER_OUTPUT'; exit 19"
+  ) -InputText 'ignored' -FailureMessage 'captured nonzero probe failed' -TimeoutSeconds 10 -CaptureOutput
+  Write-Output 'UNSAFE_CONTINUATION_AFTER_NONZERO'
+  exit 91
+}
+catch {
+  Write-Output $_.Exception.Message
+  exit 17
+}
+`
+  );
+
+  assert.equal(result.status, 17, result.stderr || result.stdout);
+  assert.match(result.stdout, /captured nonzero probe failed/);
+  assert.doesNotMatch(result.stdout, /UNSAFE_CONTINUATION_AFTER_NONZERO/);
+});

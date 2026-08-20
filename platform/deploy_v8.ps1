@@ -33,9 +33,9 @@ $EXPECTED_PPT_SHA256 = "f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57
 $TRUSTED_SOURCE_GATE_RELATIVE_PATH = "server\scripts\trusted_production_source_gate.js"
 $TRUSTED_SOURCE_MANIFEST_RELATIVE_PATH = "server\scripts\trusted_production_source_manifest.json"
 $EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "99ae10ca115dbe2be4dc560de31b300e96e235628ba6c9f3acb8674f54434e21"
-$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "536a2cc02f0157ee3c74ce805c6b10730b2835a874f54ffc43c1ee07d5905a8e"
+$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "6fb3e33e83f84acbaa2bf0808c111e7020aa423aa7e5594039c06372ce6e6e2a"
 $EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256 = "bdc60e6a9da601c8c65cd2a374d8cb69eeea629fa6cd5af514dd995eddfe74dc"
-$EXPECTED_TRUSTED_PARSER_VERIFIER_SHA256 = "93973d83379c1b22a779751be135f59c992d0784957519b3fdb1abebaad2d2f6"
+$EXPECTED_TRUSTED_PARSER_VERIFIER_SHA256 = "462773c69252767c802cad97598bd101a127dd3c8d2fb16016a34c84aebdd8d3"
 $EXPECTED_TRUSTED_PUBLIC_GUARD_SHA256 = "d45fe8fcc01587aaa0e73eccfb9714c27801e232cb6c0effd6daedb703316d66"
 $EXPECTED_TRUSTED_MIGRATION_CLEANUP_HELPER_SHA256 = "d5f2befa902522dd9de3e9dd2397a99ee5e78ab1a1c6e526a27f14bb2829e1fa"
 $EXPECTED_TRUSTED_MIGRATION_CLEANUP_UNIT_SHA256 = "acc42c90010eca793d22b6ee517231872aed5c17b36f0222052351b97cfdb7c6"
@@ -460,6 +460,10 @@ function Invoke-NativeWithUtf8Input {
             $startArguments.RedirectStandardError = $errorPath
         }
         $process = Start-Process @startArguments
+        $processHandle = $process.Handle
+        if ($processHandle -eq [IntPtr]::Zero) {
+            throw "$FailureMessage did not acquire a native process handle."
+        }
         if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
             Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
             [void]$process.WaitForExit(5000)
@@ -576,6 +580,40 @@ TM_OPERATION_FENCE
         $Script = $fence.Replace('__PROTECTED_BODY__', $protectedBody)
     }
 
+    $normalizedRemoteScript = $Script -replace "`r`n?", "`n"
+    do {
+        $remoteScriptDelimiter = "TM_REMOTE_SCRIPT_{0}" -f ([Guid]::NewGuid().ToString('N'))
+    } while (($normalizedRemoteScript -split "`n") -contains $remoteScriptDelimiter)
+    $remoteScriptPath = "/run/turingmarket-remote-script-{0}" -f ([Guid]::NewGuid().ToString('N'))
+    $preloadPrefix = @'
+set -euo pipefail
+RemoteScript='__REMOTE_SCRIPT_PATH__'
+cleanup_remote_script() {
+  rm -f -- "$RemoteScript"
+}
+trap cleanup_remote_script EXIT HUP INT TERM
+umask 077
+set -o noclobber
+cat > "$RemoteScript" <<'__REMOTE_SCRIPT_DELIMITER__'
+'@
+    $preloadPrefix = $preloadPrefix.Replace('__REMOTE_SCRIPT_PATH__', $remoteScriptPath)
+    $preloadPrefix = $preloadPrefix.Replace('__REMOTE_SCRIPT_DELIMITER__', $remoteScriptDelimiter)
+    $preloadSuffix = @'
+__REMOTE_SCRIPT_DELIMITER__
+set +o noclobber
+test -f "$RemoteScript"
+test ! -L "$RemoteScript"
+test "$(stat -c '%U:%G:%a:%h' -- "$RemoteScript")" = "root:root:600:1"
+test -s "$RemoteScript"
+/bin/bash -e -- "$RemoteScript" </dev/null
+'@
+    $preloadSuffix = $preloadSuffix.Replace('__REMOTE_SCRIPT_DELIMITER__', $remoteScriptDelimiter)
+    $transportScript = $preloadPrefix + "`n" + $normalizedRemoteScript
+    if (-not $transportScript.EndsWith("`n")) {
+        $transportScript += "`n"
+    }
+    $transportScript += $preloadSuffix
+
     $arguments = @(
         '-i',
         $SSH_KEY,
@@ -587,7 +625,7 @@ TM_OPERATION_FENCE
         'bash',
         '-se'
     )
-    $result = Invoke-NativeWithUtf8Input -FileName 'ssh.exe' -ArgumentList $arguments -InputText $Script -FailureMessage $FailureMessage -TimeoutSeconds $TimeoutSeconds -CaptureOutput:$CaptureOutput
+    $result = Invoke-NativeWithUtf8Input -FileName 'ssh.exe' -ArgumentList $arguments -InputText $transportScript -FailureMessage $FailureMessage -TimeoutSeconds $TimeoutSeconds -CaptureOutput:$CaptureOutput
     if ($CaptureOutput) {
         return $result
     }

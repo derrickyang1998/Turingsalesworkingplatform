@@ -1454,6 +1454,36 @@ const BUILD_MOUNT_EVIDENCE_PROPERTIES = Object.freeze({
   ReadWritePaths: '/build-work'
 });
 
+function observeBuildEnvironmentFiles(fragmentPath, options = {}) {
+  if (fragmentPath !== BUILD_UNIT_STATIC_PROPERTIES.FragmentPath) {
+    throw new Error('parser build unit fragment path mismatch');
+  }
+  const reader = options.readBuildUnitArtifact || readInstalledUnitArtifact;
+  const bytes = reader(fragmentPath);
+  if (!Buffer.isBuffer(bytes) || bytes.length < 1 || bytes.length > 1024 * 1024) {
+    throw new Error('parser build unit fragment is invalid');
+  }
+  const text = bytes.toString('utf8');
+  if (text.includes('\0') || /\r(?!\n)/.test(text) || !Buffer.from(text, 'utf8').equals(bytes)) {
+    throw new Error('parser build unit fragment encoding is invalid');
+  }
+
+  let serviceSections = 0;
+  for (const rawLine of text.split(/\r?\n/)) {
+    if (rawLine.endsWith('\\')) {
+      throw new Error('parser build unit line continuation is not allowed');
+    }
+    const line = rawLine.trim();
+    if (line === '[Service]') serviceSections += 1;
+    if (!line || line.startsWith('#') || line.startsWith(';')) continue;
+    if (/^EnvironmentFile[ \t]*=/.test(line)) {
+      throw new Error('parser build unit environment file directive is not allowed');
+    }
+  }
+  if (serviceSections !== 1) throw new Error('parser build unit service section mismatch');
+  return '';
+}
+
 function validateBuildUnitProperties(properties) {
   try {
     assertExactKeys(
@@ -1548,10 +1578,11 @@ function observeBuildUnit(unit, sourceRoot, dependencyCacheRoot, buildWork, opti
   }
   const propertyNames = [
     ...BUILD_UNIT_LIVE_PROPERTIES,
-    ...Object.keys(BUILD_UNIT_STATIC_PROPERTIES),
+    ...Object.keys(BUILD_UNIT_STATIC_PROPERTIES).filter((name) => name !== 'EnvironmentFiles'),
     ...BUILD_UNIT_MOUNT_PROPERTIES
   ];
   const observed = systemdProperties(unit, propertyNames, options);
+  observed.EnvironmentFiles = observeBuildEnvironmentFiles(observed.FragmentPath, options);
   const systemCallPolicyEvidence = measureConcreteSystemCallPolicy(
     observed.SystemCallFilter,
     BUILD_UNIT_STATIC_PROPERTIES.SystemCallFilter,

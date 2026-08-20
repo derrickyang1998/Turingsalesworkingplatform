@@ -380,6 +380,14 @@ function parserVerifierTestOptions(overrides = {}) {
   return {
     expandSyscallGroup: parserSyscallGroupFixture,
     pinnedSystemCallMaximumSha256ForTest: TEST_SYSTEM_CALL_POLICY_PINS,
+    readBuildUnitArtifact: () => Buffer.from([
+      '# /run/systemd/transient/turingmarket-parser-build.service',
+      '[Unit]',
+      'Description=parser build fixture',
+      '[Service]',
+      'Type=exec',
+      ''
+    ].join('\n')),
     ...overrides
   };
 }
@@ -407,7 +415,7 @@ function parserSyscallGroupFixture(group) {
   return groups[group];
 }
 
-function buildUnitObservationFixture(verifier) {
+function buildUnitObservationFixture(verifier, overrides = {}) {
   const roots = {
     sourceRoot: '/var/lib/turingmarket-parser-build/input',
     dependencyCacheRoot: '/var/cache/turingmarket-parser-dependencies',
@@ -496,7 +504,8 @@ function buildUnitObservationFixture(verifier) {
   };
   const spawnSync = (_command, args) => {
     const keys = args.find((value) => value.startsWith('--property='))
-      .slice('--property='.length).split(',');
+      .slice('--property='.length).split(',')
+      .filter((key) => key !== 'EnvironmentFiles');
     return {
       status: 0,
       stdout: `${keys.map((key) => `${key}=${raw[key]}`).join('\n')}\n`,
@@ -508,9 +517,36 @@ function buildUnitObservationFixture(verifier) {
     roots.sourceRoot,
     roots.dependencyCacheRoot,
     roots.buildWork,
-    parserVerifierTestOptions({ spawnSync })
+    parserVerifierTestOptions({ spawnSync, ...overrides })
   );
 }
+
+test('trusted verifier derives the unavailable EnvironmentFiles fact from the transient fragment', () => {
+  const verifier = require(trustedVerifierPath);
+  const observed = buildUnitObservationFixture(verifier);
+  assert.equal(observed.EnvironmentFiles, '');
+  assert.throws(() => buildUnitObservationFixture(verifier, {
+    readBuildUnitArtifact: () => Buffer.from([
+      '[Unit]',
+      'Description=parser build fixture',
+      '[Service]',
+      'EnvironmentFile=/run/untrusted-parser.env',
+      'Type=exec',
+      ''
+    ].join('\n'))
+  }), /environment file/i);
+  assert.throws(() => buildUnitObservationFixture(verifier, {
+    readBuildUnitArtifact: () => Buffer.from([
+      '[Unit]',
+      'Description=parser build fixture',
+      '[Service]',
+      'EnvironmentFile\\',
+      '=/run/untrusted-parser.env',
+      'Type=exec',
+      ''
+    ].join('\n'))
+  }), /continuation|environment file/i);
+});
 
 test('trusted parser verifier rejects forged booleans and binds canonical raw observations', async () => {
   assert.equal(fs.existsSync(trustedVerifierPath), true, 'independent parser verifier must exist');
@@ -2139,7 +2175,8 @@ test('trusted verifier independently observes every configured build-unit securi
   };
   const spawnSync = (_command, args) => {
     const keyList = args.find((value) => value.startsWith('--property='))
-      .slice('--property='.length).split(',');
+      .slice('--property='.length).split(',')
+      .filter((key) => key !== 'EnvironmentFiles');
     return {
       status: 0,
       stdout: `${keyList.map((key) => `${key}=${expected[key]}`).join('\n')}\n`,

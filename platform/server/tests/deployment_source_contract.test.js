@@ -346,6 +346,58 @@ test('Task 12 local deploy preflight executes under Windows PowerShell 5.1 witho
   assert.match(result.stdout, /LOCAL_DEPLOY_PREFLIGHT_OK/);
 });
 
+test('Task 12 remote Bash transport preloads the complete payload before execution', {
+  skip: process.platform !== 'win32'
+}, () => {
+  const result = runPowerShellFunctionHarness(['Invoke-RemoteBash'], String.raw`
+$script:SSH_KEY = 'C:\fixture\deploy-key'
+$script:SERVER = 'example.invalid'
+$script:CapturedInput = $null
+function Invoke-NativeWithUtf8Input {
+  param(
+    [string]$FileName,
+    [string[]]$ArgumentList,
+    [string]$InputText,
+    [string]$FailureMessage,
+    [int]$TimeoutSeconds,
+    [switch]$CaptureOutput
+  )
+  $script:CapturedInput = $InputText
+}
+$lf = [string][char]10
+$payload = 'set -euo pipefail' + $lf + 'exit 19' + $lf + (('# unread payload padding' * 20000) -join $lf)
+Invoke-RemoteBash -Script $payload -FailureMessage 'early failure probe' -TimeoutSeconds 30
+if ($script:CapturedInput -ceq $payload) { throw 'Remote payload was still executed directly from SSH stdin' }
+if ($script:CapturedInput -notmatch "RemoteScript='/run/turingmarket-remote-script-[a-f0-9]{32}'") {
+  throw 'Remote payload was not staged in a bounded runtime file'
+}
+$preloadMatch = [regex]::Match(
+  $script:CapturedInput,
+  'cat > "\$RemoteScript" <<''(?<delimiter>TM_REMOTE_SCRIPT_[a-f0-9]{32})'''
+)
+if (-not $preloadMatch.Success) { throw 'Remote payload preload heredoc is missing' }
+$delimiter = $preloadMatch.Groups['delimiter'].Value
+$closingPattern = '(?m)^' + [regex]::Escape($delimiter) + '\r?$'
+if ([regex]::Matches($script:CapturedInput, $closingPattern).Count -ne 1) {
+  throw 'Remote payload delimiter must close exactly once'
+}
+foreach ($required in @(
+  'test ! -L "$RemoteScript"',
+  'root:root:600:1',
+  'set -o noclobber',
+  'trap cleanup_remote_script EXIT HUP INT TERM',
+  '/bin/bash -e -- "$RemoteScript" </dev/null'
+)) {
+  if (-not $script:CapturedInput.Contains($required)) { throw "Remote preload control missing: $required" }
+}
+if (-not $script:CapturedInput.Contains($payload)) { throw 'Remote preload omitted payload bytes' }
+Write-Output 'REMOTE_PRELOAD_OK'
+`);
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /REMOTE_PRELOAD_OK/);
+});
+
 test('Phase 4 deployment mode routing requires explicit destructive restore consent before remote access', {
   skip: process.platform !== 'win32'
 }, () => {
