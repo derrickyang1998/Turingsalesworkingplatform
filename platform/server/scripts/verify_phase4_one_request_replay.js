@@ -107,6 +107,7 @@ function fixtureEnvironment({ dbPath, fault, port, tempDir }) {
     JWT_SECRET,
     UPLOAD_DIR: path.join(tempDir, 'uploads'),
     TMP_DIR: path.join(tempDir, 'runtime-tmp'),
+    PPT_CACHE_DIR: path.join(tempDir, 'ppt-cache'),
     TM_UPLOAD_SANDBOX_TEST_MODE: 'local-worker',
     UPLOAD_SANDBOX_SPOOL_ROOT: path.join(tempDir, 'upload-spool'),
     TM_PHASE4_ONE_REQUEST_REPLAY_FAULT: fault,
@@ -757,5 +758,6 @@ if (require.main === module) main();
 module.exports = {
   ALLOWED_FAULTS,
   VerificationError,
-  verifyPhase4OneRequestReplay
+  verifyPhase4OneRequestReplay,
+  _testing: Object.freeze({ fixtureEnvironment })
 };

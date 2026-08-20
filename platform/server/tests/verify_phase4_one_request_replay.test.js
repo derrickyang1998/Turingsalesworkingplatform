@@ -11,6 +11,25 @@ const proofScript = path.join(
   'scripts',
   'verify_phase4_one_request_replay.js'
 );
+const proof = require(proofScript);
+
+test('proof binds every server startup write path to its isolated temp directory', () => {
+  const tempDir = path.join('isolated', 'phase4-proof');
+  const environment = proof._testing.fixtureEnvironment({
+    dbPath: path.join(tempDir, 'fixture.db'),
+    fault: 'none',
+    port: 43187,
+    tempDir
+  });
+
+  assert.equal(environment.UPLOAD_DIR, path.join(tempDir, 'uploads'));
+  assert.equal(environment.TMP_DIR, path.join(tempDir, 'runtime-tmp'));
+  assert.equal(environment.PPT_CACHE_DIR, path.join(tempDir, 'ppt-cache'));
+  assert.equal(
+    environment.UPLOAD_SANDBOX_SPOOL_ROOT,
+    path.join(tempDir, 'upload-spool')
+  );
+});
 
 function lastJsonLine(value) {
   const lines = String(value || '')
