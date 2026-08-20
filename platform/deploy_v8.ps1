@@ -8876,8 +8876,21 @@ timeout --signal=KILL 30m systemd-run --quiet --wait --pipe --unit="$OfflineGate
     PPT_SHA256="__PPT_SHA256__" \
     /bin/bash --noprofile --norc -s <<'TM_UNPRIVILEGED_GATE'
 set -euo pipefail
-test -z "$(ip route show default)"
-test "$(ip -o link show | wc -l)" = "1"
+python3 - <<'PY'
+from pathlib import Path
+
+interfaces = sorted(path.name for path in Path('/sys/class/net').iterdir())
+if interfaces != ['lo']:
+    raise SystemExit(f'offline network namespace has unexpected interfaces: {interfaces!r}')
+
+ipv4_routes = Path('/proc/net/route').read_text(encoding='ascii').splitlines()
+for line in ipv4_routes[1:]:
+    fields = line.split()
+    if len(fields) < 8:
+        raise SystemExit('offline network namespace has a malformed IPv4 route entry')
+    if fields[1].upper() == '00000000' and fields[7].upper() == '00000000':
+        raise SystemExit('offline network namespace has an IPv4 default route')
+PY
 printf "%s\n" "OFFLINE_NETWORK_NAMESPACE_OK"
 cd "$CANDIDATE_DIR"
 node --check app.js

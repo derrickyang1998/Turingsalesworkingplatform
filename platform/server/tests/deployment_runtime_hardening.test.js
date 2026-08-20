@@ -1247,7 +1247,10 @@ test('candidate verification cannot read production data and runs candidate code
   assert.ok(deploy.indexOf("TM_DEPENDENCY_BUILD") < deploy.indexOf('systemd-run --quiet --wait --pipe --unit="$OfflineGateUnit"'));
   assert.ok(deploy.indexOf('systemd-run --quiet --wait --pipe --unit="$OfflineGateUnit"') < deploy.indexOf('node --test --test-concurrency=1 tests/*.test.js'));
   assert.doesNotMatch(deploy, /unshare --net --fork/);
-  assert.match(deploy, /test -z "\$\(ip route show default\)"/);
+  assert.doesNotMatch(gate, /\bip\s+(?:route|(?:-o\s+)?link)\b/, 'offline verification must not require AF_NETLINK');
+  assert.match(gate, /Path\('\/sys\/class\/net'\)/);
+  assert.match(gate, /Path\('\/proc\/net\/route'\)/);
+  assert.doesNotMatch(gate, /Path\('\/proc\/net\/ipv6_route'\)/, 'the isolated kernel reject route is not an outbound route');
   assert.match(deploy, /printf "%s\\n" "OFFLINE_NETWORK_NAMESPACE_OK"/);
   assert.doesNotMatch(deploy, /printf '%s\\n' "OFFLINE_NETWORK_NAMESPACE_OK"/);
 });
