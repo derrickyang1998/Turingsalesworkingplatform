@@ -2175,6 +2175,7 @@ test('recovery reads the pre-writer phase under the lifecycle lock and keeps lat
 $script:deploymentLockToken = 'lifecycle-owner'
 $script:deploymentWriterToken = $null
 $script:Calls = New-Object 'Collections.Generic.List[string]'
+$script:RemotePhase = 'locked'
 function Invoke-RemoteBash {
   param(
     [string]$Script,
@@ -2195,13 +2196,17 @@ function Invoke-RemoteBash {
   else {
     $script:Calls.Add('lifecycle-only')
   }
-  return 'locked'
+  return $script:RemotePhase
 }
 if ((Get-RemoteDeploymentPhase -DeploymentLockOnly) -ne 'locked') { throw 'Unexpected lifecycle-only phase' }
 $script:deploymentWriterToken = 'writer-owner'
 if ((Get-RemoteDeploymentPhase) -ne 'locked') { throw 'Unexpected writer-protected phase' }
+$script:RemotePhase = 'LOCKED'
+$threw = $false
+try { Get-RemoteDeploymentPhase -DeploymentLockOnly } catch { $threw = $true }
+if (-not $threw) { throw 'Wrong-case lifecycle phase must fail closed' }
 $actual = $script:Calls -join ','
-if ($actual -ne 'lifecycle-only,writer-protected') { throw "Unexpected phase probe guards: $actual" }
+if ($actual -ne 'lifecycle-only,writer-protected,lifecycle-only') { throw "Unexpected phase probe guards: $actual" }
 Write-Output 'RECOVERY_PHASE_GUARDS_OK'
 `);
   assert.equal(result.status, 0, result.stderr || result.stdout);
@@ -2220,9 +2225,17 @@ $script:RestoreFails = $false
 $script:RestoreFailuresRemaining = 0
 $script:CleanupFails = $false
 $script:WriterEnterFails = $false
+$script:AcceptanceStateOverride = $null
 function Get-RemoteDeploymentPhase {
   if ($script:ProbeFails) { throw 'phase unavailable' }
   return $script:Phase
+}
+function Get-RemoteDeploymentAcceptanceState {
+  if ($null -ne $script:AcceptanceStateOverride) { return $script:AcceptanceStateOverride }
+  if (@('accepted', 'accepted-public-enabled', 'cutover-complete') -ccontains $script:Phase) {
+    return 'current-marker-new'
+  }
+  return 'current-marker-absent'
 }
 function Invoke-RemoteRestore {
   param([string]$BackupPath, [switch]$RestoreDatabase)
@@ -2284,6 +2297,7 @@ function Reset-Case {
   $script:RestoreFailuresRemaining = 0
   $script:CleanupFails = $false
   $script:WriterEnterFails = $false
+  $script:AcceptanceStateOverride = $null
 }
 function Assert-Actions {
   param([string]$Expected)
@@ -2321,6 +2335,21 @@ Reset-Case
 $script:Phase = 'accepted'
 Invoke-DeploymentFailureRecovery -BackupPath 'backups/v060-crm-sales-workspace-20260714-120000' -ReleaseRoot '/var/lib/turingmarket-gate/releases/test' -BackupCreated $true
 Assert-Actions 'source-sweep,writer-enter,finalize-new,retention,exit'
+
+Reset-Case
+$script:Phase = 'ACCEPTED'
+$threw = $false
+try { Invoke-DeploymentFailureRecovery -BackupPath 'backups/v060-crm-sales-workspace-20260714-120000' -ReleaseRoot '/var/lib/turingmarket-gate/releases/test' -BackupCreated $true } catch { $threw = $true }
+if (-not $threw) { throw 'Wrong-case recovery phase must fail closed' }
+Assert-Actions 'source-sweep,writer-enter'
+
+Reset-Case
+$script:Phase = 'accepted'
+$script:AcceptanceStateOverride = 'CURRENT-MARKER-NEW'
+$threw = $false
+try { Invoke-DeploymentFailureRecovery -BackupPath 'backups/v060-crm-sales-workspace-20260714-120000' -ReleaseRoot '/var/lib/turingmarket-gate/releases/test' -BackupCreated $true } catch { $threw = $true }
+if (-not $threw) { throw 'Wrong-case recovery acceptance marker must fail closed' }
+Assert-Actions 'source-sweep,writer-enter'
 
 Reset-Case
 $script:Phase = 'mutation-started'
@@ -2369,6 +2398,149 @@ Write-Output 'RECOVERY_STATE_MACHINE_OK'
 `);
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.match(result.stdout, /RECOVERY_STATE_MACHINE_OK/);
+});
+
+test('Phase 4 cutover success is revalidated from the durable lifecycle and accepted marker before retention', {
+  skip: process.platform !== 'win32'
+}, () => {
+  const deploy = read(deployPath);
+  assert.match(deploy, /function Assert-RemoteCutoverComplete/);
+  assert.match(
+    deploy,
+    /Invoke-RemoteBash -Script \$cutoverGate[\s\S]*?Assert-RemoteCutoverComplete[\s\S]*?Invoke-RemoteRetentionCleanup/
+  );
+
+  const result = runPowerShellFunctionHarness(['Assert-RemoteCutoverComplete'], String.raw`
+$script:Phase = 'candidate-ready'
+$script:Acceptance = 'current-marker-absent'
+$script:AcceptanceCalls = 0
+function Get-RemoteDeploymentPhase {
+  param([switch]$DeploymentLockOnly)
+  if (-not $DeploymentLockOnly) { throw 'Cutover phase probe must only require the deployment lock' }
+  return $script:Phase
+}
+function Get-RemoteDeploymentAcceptanceState {
+  param([switch]$DeploymentLockOnly)
+  if (-not $DeploymentLockOnly) { throw 'Post-cutover acceptance probe must only require the deployment lock' }
+  $script:AcceptanceCalls += 1
+  return $script:Acceptance
+}
+
+$threw = $false
+try { Assert-RemoteCutoverComplete } catch { $threw = $true }
+if (-not $threw) { throw 'Candidate-ready must not be accepted as a completed cutover' }
+if ($script:AcceptanceCalls -ne 0) { throw 'Acceptance must not be probed before cutover-complete is durable' }
+
+$script:Phase = 'CUTOVER-COMPLETE'
+$threw = $false
+try { Assert-RemoteCutoverComplete } catch { $threw = $true }
+if (-not $threw) { throw 'Wrong-case lifecycle phase must fail closed' }
+if ($script:AcceptanceCalls -ne 0) { throw 'Wrong-case lifecycle phase must not probe acceptance' }
+
+$script:Phase = 'cutover-complete'
+$threw = $false
+try { Assert-RemoteCutoverComplete } catch { $threw = $true }
+if (-not $threw) { throw 'A missing current marker must not be accepted as a completed cutover' }
+if ($script:AcceptanceCalls -ne 1) { throw 'Acceptance marker was not probed exactly once' }
+
+$script:Acceptance = 'CURRENT-MARKER-NEW'
+$threw = $false
+try { Assert-RemoteCutoverComplete } catch { $threw = $true }
+if (-not $threw) { throw 'Wrong-case accepted marker must fail closed' }
+if ($script:AcceptanceCalls -ne 2) { throw 'Wrong-case accepted marker was not probed exactly once' }
+
+$script:Acceptance = 'current-marker-new'
+Assert-RemoteCutoverComplete
+if ($script:AcceptanceCalls -ne 3) { throw 'Successful acceptance marker was not probed exactly once' }
+Write-Output 'CUTOVER_POSTCONDITION_OK'
+`);
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /CUTOVER_POSTCONDITION_OK/);
+});
+
+test('Phase 4 acceptance probe keeps writer protection by default and permits deployment-only post-cutover verification', {
+  skip: process.platform !== 'win32'
+}, () => {
+  const result = runPowerShellFunctionHarness(['Get-RemoteDeploymentAcceptanceState'], String.raw`
+$script:REMOTE_ROOT = '/root/turingmarket'
+$script:TRUSTED_SOURCE_BUNDLE_REMOTE_PATH = '/usr/local/libexec/turingmarket/source'
+$script:EXPECTED_TRUSTED_PARSER_VERIFIER_SHA256 = ('a' * 64)
+$script:Calls = New-Object 'Collections.Generic.List[string]'
+function Invoke-RemoteBash {
+  param(
+    [string]$Script,
+    [string]$FailureMessage,
+    [switch]$RequireDeploymentLock,
+    [switch]$RequireWriterLock,
+    [switch]$CaptureOutput
+  )
+  if (-not $RequireDeploymentLock -or -not $CaptureOutput) {
+    throw 'Acceptance probe must remain deployment-locked and captured'
+  }
+  if ($RequireWriterLock) { $script:Calls.Add('writer') }
+  else { $script:Calls.Add('deployment-only') }
+  return 'current-marker-new'
+}
+
+if ((Get-RemoteDeploymentAcceptanceState) -cne 'current-marker-new') {
+  throw 'Default acceptance probe returned an unexpected state'
+}
+if ((Get-RemoteDeploymentAcceptanceState -DeploymentLockOnly) -cne 'current-marker-new') {
+  throw 'Post-cutover acceptance probe returned an unexpected state'
+}
+$actual = $script:Calls -join ','
+if ($actual -cne 'writer,deployment-only') { throw "Unexpected acceptance probe guards: $actual" }
+Write-Output 'ACCEPTANCE_PROBE_GUARDS_OK'
+`);
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /ACCEPTANCE_PROBE_GUARDS_OK/);
+});
+
+test('Phase 4 retention requires its explicit remote success marker before returning', {
+  skip: process.platform !== 'win32'
+}, () => {
+  const result = runPowerShellFunctionHarness([
+    'Assert-RollbackBackupPath',
+    'Invoke-RemoteRetentionCleanup'
+  ], String.raw`
+$script:REMOTE_ROOT = '/root/turingmarket'
+$script:CANDIDATE_ROOT = '/var/lib/turingmarket-gate/releases'
+$script:GATE_USER = 'turingmarket-gate'
+$script:RemoteResult = ''
+$script:Calls = 0
+function Invoke-RemoteBash {
+  param(
+    [string]$Script,
+    [string]$FailureMessage,
+    [switch]$RequireDeploymentLock,
+    [switch]$RequireWriterLock,
+    [switch]$CaptureOutput
+  )
+  if (-not $RequireDeploymentLock -or $RequireWriterLock -or -not $CaptureOutput) {
+    throw 'Retention confirmation must be deployment-locked, writer-free, and captured'
+  }
+  $script:Calls += 1
+  return $script:RemoteResult
+}
+
+$backup = 'backups/v060-crm-sales-workspace-20260820-230240'
+$release = '/var/lib/turingmarket-gate/releases/v060-crm-sales-workspace-20260820-230240'
+$threw = $false
+try { Invoke-RemoteRetentionCleanup -BackupPath $backup -ReleaseRoot $release } catch { $threw = $true }
+if (-not $threw) { throw 'Missing retention marker must fail closed' }
+
+$script:RemoteResult = 'retention_cleanup_ok'
+$threw = $false
+try { Invoke-RemoteRetentionCleanup -BackupPath $backup -ReleaseRoot $release } catch { $threw = $true }
+if (-not $threw) { throw 'Wrong-case retention marker must fail closed' }
+
+$script:RemoteResult = 'diagnostic' + [Environment]::NewLine + 'RETENTION_CLEANUP_OK'
+Invoke-RemoteRetentionCleanup -BackupPath $backup -ReleaseRoot $release
+if ($script:Calls -ne 3) { throw 'Unexpected retention invocation count' }
+Write-Output 'RETENTION_CONFIRMATION_OK'
+`);
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /RETENTION_CONFIRMATION_OK/);
 });
 
 test('Phase 4 retention cleanup keeps a rollback floor and removes only validated stale deployment artifacts', (t) => {

@@ -1214,7 +1214,8 @@ test('Phase 4 current accepted marker is authoritative and gates public Nginx ac
   assert.match(recovery, /Get-RemoteDeploymentAcceptanceState/);
   assert.match(recovery, /current-marker-new/);
   assert.match(recovery, /Invoke-RemoteAcceptedFinalize/);
-  assert.ok(recovery.indexOf('current-marker-new') < recovery.indexOf("switch ($phase)"));
+  assert.match(recovery, /switch -CaseSensitive \(\$phase\)/);
+  assert.ok(recovery.indexOf('current-marker-new') < recovery.indexOf("switch -CaseSensitive ($phase)"));
   const finalize = functionSource(deploy, 'Invoke-RemoteAcceptedFinalize', 'Invoke-RemoteCandidateCleanup');
   assert.match(finalize, /public_release_guard close[\s\S]*?public_release_guard arm/);
   assert.match(finalize, /current-accepted\.json/);

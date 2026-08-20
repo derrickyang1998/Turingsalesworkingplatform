@@ -2713,7 +2713,7 @@ cat "$LockDir/phase"
         'accepted-public-enabled',
         'cutover-complete'
     )
-    if ($allowed -notcontains $phase) {
+    if ($allowed -cnotcontains $phase) {
         throw "Remote deployment phase is missing or invalid."
     }
     return $phase
@@ -5538,6 +5538,8 @@ printf '%s\n' 'PRE_MUTATION_RESUME_OK'
 }
 
 function Get-RemoteDeploymentAcceptanceState {
+    param([switch]$DeploymentLockOnly)
+
     $remoteScript = @'
 set -euo pipefail
 RemoteRoot="__REMOTE_ROOT__"
@@ -5804,8 +5806,25 @@ PY
     $remoteScript = $remoteScript.Replace('__REMOTE_ROOT__', $REMOTE_ROOT)
     $remoteScript = $remoteScript.Replace('__TRUSTED_SOURCE_BUNDLE__', $TRUSTED_SOURCE_BUNDLE_REMOTE_PATH)
     $remoteScript = $remoteScript.Replace('__TRUSTED_PARSER_VERIFIER_SHA256__', $EXPECTED_TRUSTED_PARSER_VERIFIER_SHA256)
-    $result = Invoke-RemoteBash -Script $remoteScript -FailureMessage "Authoritative accepted marker validation failed" -RequireDeploymentLock -RequireWriterLock -CaptureOutput
+    if ($DeploymentLockOnly) {
+        $result = Invoke-RemoteBash -Script $remoteScript -FailureMessage "Authoritative accepted marker validation failed" -RequireDeploymentLock -CaptureOutput
+    }
+    else {
+        $result = Invoke-RemoteBash -Script $remoteScript -FailureMessage "Authoritative accepted marker validation failed" -RequireDeploymentLock -RequireWriterLock -CaptureOutput
+    }
     return (($result | Select-Object -Last 1).Trim())
+}
+
+function Assert-RemoteCutoverComplete {
+    $phase = Get-RemoteDeploymentPhase -DeploymentLockOnly
+    if ($phase -cne 'cutover-complete') {
+        throw "Remote cutover did not durably commit cutover-complete."
+    }
+
+    $acceptanceState = Get-RemoteDeploymentAcceptanceState -DeploymentLockOnly
+    if ($acceptanceState -cne 'current-marker-new') {
+        throw "Remote cutover did not durably publish the current accepted marker."
+    }
 }
 
 function Get-ExactPublicNginxBehaviorVerifier {
@@ -6855,7 +6874,14 @@ TM_RETENTION_CLEANUP
     $remoteScript = $remoteScript.Replace('__BACKUP_PATH__', $BackupPath)
     $remoteScript = $remoteScript.Replace('__RELEASE_ROOT__', $ReleaseRoot)
     $remoteScript = $remoteScript.Replace('__GATE_USER__', $GATE_USER)
-    Invoke-RemoteBash -Script $remoteScript -FailureMessage "Remote retention cleanup failed" -RequireDeploymentLock
+    $retentionOutput = Invoke-RemoteBash -Script $remoteScript -FailureMessage "Remote retention cleanup failed" -RequireDeploymentLock -CaptureOutput
+    $retentionLines = @($retentionOutput -split '\r?\n' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if ($retentionLines.Count -eq 0 -or $retentionLines[-1] -cne 'RETENTION_CLEANUP_OK') {
+        throw "Remote retention cleanup did not return its success marker."
+    }
+    foreach ($retentionLine in $retentionLines) {
+        Write-Host $retentionLine
+    }
 }
 
 function Invoke-DeploymentFailureRecovery {
@@ -6867,7 +6893,7 @@ function Invoke-DeploymentFailureRecovery {
 
     Invoke-RemoteTrustedSourceInputSweep
     $preWriterPhase = Get-RemoteDeploymentPhase -DeploymentLockOnly
-    if ($preWriterPhase -in @('mutation-started', 'release-replay-complete')) {
+    if ($preWriterPhase -cin @('mutation-started', 'release-replay-complete')) {
         if (-not $BackupCreated) {
             throw "Production mutation started without a completed rollback backup."
         }
@@ -6888,17 +6914,17 @@ function Invoke-DeploymentFailureRecovery {
     else {
         $acceptanceState = 'current-marker-absent'
     }
-    if ($acceptanceState -eq 'current-marker-new') {
-        if ($phase -ne 'cutover-complete') {
+    if ($acceptanceState -ceq 'current-marker-new') {
+        if ($phase -cne 'cutover-complete') {
             # The durable current marker wins if its journal mirror was torn.
             $phase = 'accepted'
         }
     }
-    elseif ($phase -in @('accepted', 'accepted-public-enabled', 'cutover-complete')) {
+    elseif ($phase -cin @('accepted', 'accepted-public-enabled', 'cutover-complete')) {
         throw "The lifecycle journal claims acceptance without the authoritative current marker."
     }
-    switch ($phase) {
-        { $_ -in @('mutation-started', 'release-replay-complete') } {
+    switch -CaseSensitive ($phase) {
+        { $_ -cin @('mutation-started', 'release-replay-complete') } {
             if (-not $BackupCreated) {
                 throw "Production mutation started without a completed rollback backup."
             }
@@ -6917,7 +6943,7 @@ function Invoke-DeploymentFailureRecovery {
             }
             Invoke-RemoteCandidateCleanup -ReleaseRoot $ReleaseRoot
         }
-        { $_ -in @('mutation-intent', 'maintenance-entered', 'writers-stopped', 'snapshot-ready', 'prior-marker-archived', 'nginx-candidate-staged') } {
+        { $_ -cin @('mutation-intent', 'maintenance-entered', 'writers-stopped', 'snapshot-ready', 'prior-marker-archived', 'nginx-candidate-staged') } {
             if (-not $BackupCreated) {
                 throw "Pre-mutation recovery requires the completed deployment backup."
             }
@@ -11751,6 +11777,7 @@ echo "DEPLOY_OK"
     $cutoverGate = $cutoverGate.Replace('__EXACT_PUBLIC_NGINX_VERIFIER__', $exactPublicNginxVerifier)
     $cutoverGate = $cutoverGate.Replace('__PM2_PERSISTENCE_VERIFIER__', $pm2PersistenceVerifier)
     Invoke-RemoteBash -Script $cutoverGate -FailureMessage "Remote atomic release failed" -RequireDeploymentLock
+    Assert-RemoteCutoverComplete
     Invoke-RemoteRetentionCleanup -BackupPath $backupDir -ReleaseRoot $remoteReleaseRoot
 
     Exit-RemoteDeploymentLock
