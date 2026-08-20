@@ -444,6 +444,42 @@ test('v0.6 deploy seals the parser appliance under the root-only lifecycle befor
   ], 'deployment orchestration');
 });
 
+test('v0.6 parser dependency fetch uses the accelerated mirror and proves completion before sealing', () => {
+  const deploy = read('platform', 'deploy_v8.ps1');
+  const preparation = sourceBetween(
+    deploy,
+    'function Invoke-RemoteParserCandidatePreparation {',
+    'function Invoke-RemoteBackup {',
+    'parser candidate preparation function'
+  );
+
+  assert.match(preparation, /PIP_INDEX_URL=https:\/\/mirrors\.aliyun\.com\/pypi\/simple\//);
+  assert.match(
+    preparation,
+    /printf "%s\\n" "PARSER_DEPENDENCY_CACHE_READY" > \/parser-cache\/\.fetch-complete/
+  );
+  const transientFetchMatch = preparation.match(
+    /systemd-run --quiet --wait --collect([\s\S]*?)\r?\n'\r?\nParserCacheStatus=/
+  );
+  assert.ok(transientFetchMatch, 'parser dependency fetch command must remain one transient unit');
+  const transientFetch = transientFetchMatch[1];
+  assert.match(transientFetch, /UMask=0077/);
+  assert.match(transientFetch, /PIP_INDEX_URL=https:\/\/mirrors\.aliyun\.com\/pypi\/simple\//);
+  assert.match(transientFetch, /python3 -m pip download --require-hashes/);
+  assert.match(transientFetch, /printf "%s\\n" "PARSER_DEPENDENCY_CACHE_READY" > \/parser-cache\/\.fetch-complete/);
+  assertOrdered(preparation, [
+    'python3 -m pip download --require-hashes',
+    'printf "%s\\n" "PARSER_DEPENDENCY_CACHE_READY" > /parser-cache/.fetch-complete',
+    'ParserCacheStatus="$?"',
+    'test -f "$ParserCacheCompletionMarker"',
+    'test -L "$ParserCacheCompletionMarker"',
+    "test \"$(stat -c '%U:%G:%a:%h' \"$ParserCacheCompletionMarker\")\" = \"$GateUser:$GateUser:600:1\"",
+    "test \"$(cat \"$ParserCacheCompletionMarker\")\" = 'PARSER_DEPENDENCY_CACHE_READY'",
+    'rm -f -- "$ParserCacheCompletionMarker"',
+    'chown -R root:root "$ParserDependencyCacheStage"'
+  ], 'parser dependency fetch completion proof');
+});
+
 test('v0.6 root parser control plane uses only the independently pinned verifier', () => {
   const deploy = read('platform', 'deploy_v8.ps1');
   const preparation = sourceBetween(

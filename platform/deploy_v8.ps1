@@ -2932,6 +2932,8 @@ install -d -o "$GateUser" -g "$GateUser" -m 0700 \
   "$ParserDependencyCacheStage/npm" \
   "$ParserDependencyCacheStage/python"
 ParserCacheUnit="turingmarket-parser-cache-$(basename "$ReleaseRoot").service"
+ParserCacheCompletionMarker="$ParserDependencyCacheStage/.fetch-complete"
+test ! -e "$ParserCacheCompletionMarker"
 cleanup_parser_cache_unit() {
   systemctl kill --kill-who=all --signal=KILL "$ParserCacheUnit" >/dev/null 2>&1 || true
   systemctl stop "$ParserCacheUnit" >/dev/null 2>&1 || true
@@ -2974,6 +2976,7 @@ systemd-run --quiet --wait --collect \
     HOME=/tmp \
     PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     PIP_CONFIG_FILE=/dev/null \
+    PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/ \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_INPUT=1 \
     npm_config_userconfig=/dev/null \
@@ -2994,6 +2997,7 @@ rm -rf /parser-cache/npm/_logs
 rm -f /parser-cache/npm/_update-notifier-last-checked
 python3 -m pip download --require-hashes --only-binary=:all: --no-deps \
   --dest /parser-cache/python -r /parser-source/parser-runtime/requirements.lock
+printf "%s\n" "PARSER_DEPENDENCY_CACHE_READY" > /parser-cache/.fetch-complete
 '
 ParserCacheStatus="$?"
 set -e
@@ -3001,6 +3005,14 @@ if [ "$ParserCacheStatus" -ne 0 ]; then
   echo "Parser dependency cache unit failed with status $ParserCacheStatus" >&2
   exit "$ParserCacheStatus"
 fi
+if ! test -f "$ParserCacheCompletionMarker" ||
+   test -L "$ParserCacheCompletionMarker" ||
+   ! test "$(stat -c '%U:%G:%a:%h' "$ParserCacheCompletionMarker")" = "$GateUser:$GateUser:600:1" ||
+   ! test "$(cat "$ParserCacheCompletionMarker")" = 'PARSER_DEPENDENCY_CACHE_READY'; then
+  echo "Parser dependency cache completion proof is missing or invalid" >&2
+  exit 1
+fi
+rm -f -- "$ParserCacheCompletionMarker"
 cleanup_parser_cache_unit
 trap - EXIT
 chown -R root:root "$ParserDependencyCacheStage"
