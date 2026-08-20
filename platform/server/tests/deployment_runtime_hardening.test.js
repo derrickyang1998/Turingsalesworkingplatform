@@ -1400,7 +1400,6 @@ test('unprivileged gate uses only variables explicitly passed through env -i', (
     'APP_BUILD',
     'APP_QUERY',
     'CANDIDATE_DIR',
-    'NGINX_GATE_DIR',
     'NGINX_TEST_SOCKET',
     'PPT_BUILD',
     'PPT_QUERY',
@@ -1446,7 +1445,7 @@ test('unprivileged nginx gate derives a socket listener while root validates the
   assert.match(gateSetup, /install -d -o "\$GateUser" -g "\$GateUser" -m 0700 "\$NginxGateDir"/);
   assert.match(deploy, /trap 'cleanup_candidate_gate \$\?' EXIT/);
   assert.match(deploy, /cleanup_test_root\(\)[\s\S]*?declare -F cleanup_nginx_gate_dir[\s\S]*?cleanup_nginx_gate_dir/);
-  assert.match(envBoundary, /NGINX_GATE_DIR="\$NginxGateDir"/);
+  assert.doesNotMatch(envBoundary, /NGINX_GATE_DIR=/);
   assert.doesNotMatch(gate, /mktemp -d \/tmp\/tm-nginx-gate/);
   assert.match(gate, /turingmarket-gate\.conf/);
   assert.ok(gate.includes("pattern = re.compile(r'(?m)^(\\s*listen\\s+)80(\\s*;\\s*(?:#.*)?)$')"));
@@ -1455,6 +1454,13 @@ test('unprivileged nginx gate derives a socket listener while root validates the
   assert.match(gate, /python3 - "\$CANDIDATE_DIR\/nginx\/turingmarket\.conf" "\$TEST_ROOT\/turingmarket-gate\.conf"/);
   assert.match(gate, /include \$TEST_ROOT\/turingmarket-gate\.conf;/);
   assert.doesNotMatch(gate, /include \$CANDIDATE_DIR\/nginx\/turingmarket\.conf;/);
+  assert.match(gate, /NGINX_TEST_SOCKET="nginx-gate\/listen\.sock"/);
+  assert.doesNotMatch(gate, /NGINX_TEST_SOCKET="\$NGINX_GATE_DIR\/listen\.sock"/);
+  assert.match(
+    gate,
+    /\(\s*cd "\$TEST_ROOT"\s*nginx -t -p "\$TEST_ROOT\/nginx-prefix\/" -c "\$TEST_ROOT\/nginx-test\.conf"\s*\)/,
+    'the short relative socket must resolve from the writable test root'
+  );
 
   assert.match(afterGate, /kill_gate_processes "offline candidate validation"[\s\S]*?cleanup_nginx_gate_dir[\s\S]*?\[ "\$GateStatus" = "0" \]/);
   assert.match(afterGate, /\[ "\$GateStatus" = "0" \][\s\S]*?sha256sum --check --status "\$LockDir\/upload\.sha256"/);

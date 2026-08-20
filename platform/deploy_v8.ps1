@@ -8867,7 +8867,6 @@ timeout --signal=KILL 30m systemd-run --quiet --wait --pipe --unit="$OfflineGate
     RELEASE_ROOT="$ReleaseRoot" \
     TEST_ROOT="$TestRoot" \
     SCHEMA_DB="$SchemaDb" \
-    NGINX_GATE_DIR="$NginxGateDir" \
     APP_QUERY="__APP_QUERY__" \
     APP_BUILD="__APP_BUILD__" \
     PPT_QUERY="__PPT_QUERY__" \
@@ -8942,7 +8941,7 @@ install -d -m 0700 "$TEST_ROOT/browser-smoke"
 TM_DEPLOYMENT_SMOKE_ROOT="$TEST_ROOT/browser-smoke" \
 TM_DEPLOYMENT_SMOKE_PORT=43188 node node_modules/playwright-deploy/cli.js test -c server/tests/deployment-browser-smoke.config.js
 
-NGINX_TEST_SOCKET="$NGINX_GATE_DIR/listen.sock"
+NGINX_TEST_SOCKET="nginx-gate/listen.sock"
 python3 - "$CANDIDATE_DIR/nginx/turingmarket.conf" "$TEST_ROOT/turingmarket-gate.conf" "$NGINX_TEST_SOCKET" <<'PY'
 import re
 import sys
@@ -8976,7 +8975,10 @@ http {
   include $TEST_ROOT/turingmarket-gate.conf;
 }
 TM_NGINX_TEST
-nginx -t -p "$TEST_ROOT/nginx-prefix/" -c "$TEST_ROOT/nginx-test.conf"
+(
+  cd "$TEST_ROOT"
+  nginx -t -p "$TEST_ROOT/nginx-prefix/" -c "$TEST_ROOT/nginx-test.conf"
+)
 printf '%s\n' "UNPRIVILEGED_GATE_OK"
 TM_UNPRIVILEGED_GATE
 GateStatus=$?
