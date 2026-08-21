@@ -1292,6 +1292,28 @@ test('candidate verification cannot read production data and runs candidate code
   assert.doesNotMatch(deploy, /printf '%s\\n' "OFFLINE_NETWORK_NAMESPACE_OK"/);
 });
 
+test('networked npm dependency stages use the reachable integrity-locked registry mirror', () => {
+  const deploy = read('platform/deploy_v8.ps1');
+  assert.equal(
+    (deploy.match(/npm_config_registry=https:\/\/registry\.npmmirror\.com/g) || []).length,
+    2,
+    'parser and candidate dependency fetch units must use the same reachable registry mirror'
+  );
+  assert.equal(
+    (deploy.match(/npm_config_replace_registry_host=always/g) || []).length,
+    2,
+    'lockfile-resolved npmjs hosts must be replaced while npm ci still enforces package integrity hashes'
+  );
+  assert.match(
+    deploy,
+    /npm_config_registry=https:\/\/registry\.npmmirror\.com[\s\S]*?npm ci --ignore-scripts --cache \/parser-cache\/npm/
+  );
+  assert.match(
+    deploy,
+    /--unit="\$DependencyUnit"[\s\S]*?npm_config_registry=https:\/\/registry\.npmmirror\.com[\s\S]*?TM_DEPENDENCY_STAGE/
+  );
+});
+
 test('unprivileged candidate validation runs bounded release proofs instead of developer regression suites', () => {
   const deploy = read('platform/deploy_v8.ps1');
   const gateMatch = deploy.match(/<<'TM_UNPRIVILEGED_GATE'\r?\n([\s\S]*?)\r?\nTM_UNPRIVILEGED_GATE/);

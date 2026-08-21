@@ -3118,6 +3118,8 @@ systemd-run --quiet --wait --collect \
     npm_config_update_notifier=false \
     npm_config_audit=false \
     npm_config_fund=false \
+    npm_config_registry=https://registry.npmmirror.com \
+    npm_config_replace_registry_host=always \
     bash --noprofile --norc -c '
 set -euo pipefail
 install -d -m 0700 /parser-cache/npm /parser-cache/python /tmp/parser-npm
@@ -8550,6 +8552,8 @@ timeout --signal=KILL 20m systemd-run --quiet --wait --pipe --unit="$DependencyU
     PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
     PLAYWRIGHT_BROWSERS_PATH="$BrowserCache" \
     npm_config_cache="$TestRoot/npm-cache" \
+    npm_config_registry=https://registry.npmmirror.com \
+    npm_config_replace_registry_host=always \
     DEPENDENCY_ROOT="$DependencyRoot" \
     DEPENDENCY_SERVER_ROOT="$DependencyServerRoot" \
     /bin/bash --noprofile --norc -s <<'TM_DEPENDENCY_STAGE'
