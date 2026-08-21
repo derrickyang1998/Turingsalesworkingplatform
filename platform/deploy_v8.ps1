@@ -32,7 +32,7 @@ $EXPECTED_PPT_QUERY = "20260702v916kbbridge"
 $EXPECTED_PPT_SHA256 = "f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e"
 $TRUSTED_SOURCE_GATE_RELATIVE_PATH = "server\scripts\trusted_production_source_gate.js"
 $TRUSTED_SOURCE_MANIFEST_RELATIVE_PATH = "server\scripts\trusted_production_source_manifest.json"
-$EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "b80f7ac1fda9d0b8c1ee1dfb17523adc7bf85d88d75f94801f7d603b4ffae29a"
+$EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "587c4142bba0cd055927dfebe8b75149d9436ef8225dbdd9093de1ff31ac7337"
 $EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "8d708af092b92fc3f4ce3f6c349f24d1479c3795b2bdeb4e44288176453a535d"
 $EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256 = "bdc60e6a9da601c8c65cd2a374d8cb69eeea629fa6cd5af514dd995eddfe74dc"
 $EXPECTED_TRUSTED_PARSER_VERIFIER_SHA256 = "a8a6a2881bf05bdb171eaab4fa15666cf2c57ce8ac48ef35a3d0158caf218a4a"
@@ -4869,6 +4869,7 @@ import stat
 import sys
 
 database_dir, private_stage, adopted_stage = sys.argv[1:]
+mutable_stage = private_stage + '.source'
 expected_dir = '/var/lib/turingmarket/db'
 if database_dir != expected_dir or os.path.realpath(database_dir) != expected_dir:
     raise SystemExit('database adoption parent is not canonical')
@@ -4881,6 +4882,8 @@ if private_stage != os.path.join(database_dir, '.turingmarket.db.adopted.private
     raise SystemExit('private database adoption stage path is invalid')
 if adopted_stage != os.path.join(database_dir, '.turingmarket.db.adopted'):
     raise SystemExit('database adoption stage path is invalid')
+if mutable_stage != os.path.join(database_dir, '.turingmarket.db.adopted.private.source'):
+    raise SystemExit('mutable database adoption source path is invalid')
 
 def metadata(candidate):
     try:
@@ -4894,7 +4897,7 @@ def metadata(candidate):
     return value
 
 artifacts = []
-for base in (private_stage, adopted_stage):
+for base in (private_stage, mutable_stage, adopted_stage):
     for suffix in ('-journal', '-wal', '-shm'):
         candidate = base + suffix
         value = metadata(candidate)
@@ -4904,6 +4907,7 @@ for base in (private_stage, adopted_stage):
             artifacts.append((candidate, value))
 
 private_metadata = metadata(private_stage)
+mutable_metadata = metadata(mutable_stage)
 adopted_metadata = metadata(adopted_stage)
 if private_metadata is not None and adopted_metadata is not None:
     if ((private_metadata.st_dev, private_metadata.st_ino) !=
@@ -4914,7 +4918,12 @@ elif private_metadata is not None and private_metadata.st_nlink != 1:
     raise SystemExit('private database adoption stage has an external hardlink')
 elif adopted_metadata is not None and adopted_metadata.st_nlink != 1:
     raise SystemExit('database adoption stage has an external hardlink')
-for candidate, value in ((private_stage, private_metadata), (adopted_stage, adopted_metadata)):
+if mutable_metadata is not None and mutable_metadata.st_nlink != 1:
+    raise SystemExit('mutable database adoption source has an external hardlink')
+for candidate, value in (
+        (private_stage, private_metadata),
+        (mutable_stage, mutable_metadata),
+        (adopted_stage, adopted_metadata)):
     if value is not None:
         artifacts.append((candidate, value))
 
@@ -9663,6 +9672,7 @@ import stat
 import sys
 
 database_dir, private_stage, adopted_stage = sys.argv[1:]
+mutable_stage = private_stage + '.source'
 expected_dir = '/var/lib/turingmarket/db'
 if database_dir != expected_dir or os.path.realpath(database_dir) != expected_dir:
     raise SystemExit('database adoption parent is not canonical')
@@ -9675,6 +9685,8 @@ if private_stage != os.path.join(database_dir, '.turingmarket.db.adopted.private
     raise SystemExit('private database adoption stage path is invalid')
 if adopted_stage != os.path.join(database_dir, '.turingmarket.db.adopted'):
     raise SystemExit('database adoption stage path is invalid')
+if mutable_stage != os.path.join(database_dir, '.turingmarket.db.adopted.private.source'):
+    raise SystemExit('mutable database adoption source path is invalid')
 
 def metadata(candidate):
     try:
@@ -9688,7 +9700,7 @@ def metadata(candidate):
     return value
 
 artifacts = []
-for base in (private_stage, adopted_stage):
+for base in (private_stage, mutable_stage, adopted_stage):
     for suffix in ('-journal', '-wal', '-shm'):
         candidate = base + suffix
         value = metadata(candidate)
@@ -9698,6 +9710,7 @@ for base in (private_stage, adopted_stage):
             artifacts.append((candidate, value))
 
 private_metadata = metadata(private_stage)
+mutable_metadata = metadata(mutable_stage)
 adopted_metadata = metadata(adopted_stage)
 if private_metadata is not None and adopted_metadata is not None:
     if ((private_metadata.st_dev, private_metadata.st_ino) !=
@@ -9709,7 +9722,12 @@ elif private_metadata is not None and private_metadata.st_nlink != 1:
 elif adopted_metadata is not None and adopted_metadata.st_nlink != 1:
     raise SystemExit('database adoption stage has an external hardlink')
 
-for candidate, value in ((private_stage, private_metadata), (adopted_stage, adopted_metadata)):
+if mutable_metadata is not None and mutable_metadata.st_nlink != 1:
+    raise SystemExit('mutable database adoption source has an external hardlink')
+for candidate, value in (
+        (private_stage, private_metadata),
+        (mutable_stage, mutable_metadata),
+        (adopted_stage, adopted_metadata)):
     if value is not None:
         artifacts.append((candidate, value))
 

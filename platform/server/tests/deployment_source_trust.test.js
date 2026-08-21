@@ -673,6 +673,62 @@ test('trusted deployment gate adopts exact legacy v0 before sanitized v1-to-v6 v
   assert.equal(fs.existsSync(path.join(workDir, 'trusted-legacy-mutable-source.db')), false);
 });
 
+test('trusted live adoption normalizes a quiesced WAL legacy source through a private copy', (t) => {
+  const fixture = createLegacyV0Fixture(t, 'live-wal-adoption');
+  const database = new Database(fixture.databasePath, { fileMustExist: true });
+  database.pragma('journal_mode = WAL');
+  database.pragma('wal_checkpoint(TRUNCATE)');
+  database.close();
+  assert.equal(fs.readFileSync(fixture.databasePath)[18], 2, 'fixture must retain a WAL database header');
+  for (const suffix of ['-wal', '-shm', '-journal']) {
+    assert.equal(fs.existsSync(`${fixture.databasePath}${suffix}`), false, `fixture must not retain ${suffix}`);
+  }
+
+  const outputPath = path.join(fixture.root, 'adopted-v1.db');
+  const privateStagePath = path.join(fixture.root, '.trusted-live-adoption.private');
+  const mutableSourcePath = `${privateStagePath}.source`;
+  const { manifest, manifestPath } = writeCurrentContractManifest(fixture.root);
+  const candidateRoot = path.join(fixture.root, 'candidate');
+  const bundleRoot = path.join(fixture.root, 'trusted', 'bundle');
+  copyContractCandidate(manifest, candidateRoot);
+  loadTrustedGate().stageTrustedBundle({ candidateRoot, bundleRoot, manifestPath });
+  const sourceSha256 = sha256(fixture.databasePath);
+  const result = spawnSync(process.execPath, [
+    trustedGatePath,
+    'adopt-if-legacy',
+    '--candidate-root', candidateRoot,
+    '--bundle-root', bundleRoot,
+    '--manifest', manifestPath,
+    '--source', fixture.databasePath,
+    '--output', outputPath,
+    '--private-stage', privateStagePath,
+    '--expected-source-sha256', sourceSha256,
+    '--expected-self-sha256', sha256(trustedGatePath),
+    '--expected-manifest-sha256', sha256(manifestPath),
+    '--expected-verifier-sha256', verifierSha256(manifest)
+  ], {
+    cwd: fixture.root,
+    encoding: 'utf8',
+    env: { ...process.env, NODE_PATH: dependencyRoot },
+    timeout: 30_000
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const report = JSON.parse(result.stdout.trim());
+  assert.equal(report.applied, true);
+  assert.equal(report.sourceSha256, sourceSha256);
+  assert.match(report.outputSha256, /^[0-9a-f]{64}$/);
+  assert.equal(sha256(fixture.databasePath), sourceSha256, 'approved live source must stay byte-identical');
+  assert.equal(fs.readFileSync(fixture.databasePath)[18], 2, 'approved live source must remain WAL-mode');
+  assert.equal(fs.existsSync(outputPath), true);
+  for (const artifact of [mutableSourcePath, privateStagePath]) {
+    assert.equal(fs.existsSync(artifact), false, `${path.basename(artifact)} must be retired`);
+    for (const suffix of ['-wal', '-shm', '-journal']) {
+      assert.equal(fs.existsSync(`${artifact}${suffix}`), false, `${path.basename(artifact)}${suffix} must be retired`);
+    }
+  }
+});
+
 test('trusted live adoption recognizes exact managed v6 as a no-op', (t) => {
   const fixture = createV6Fixture(t, 'adoption-noop');
   const outputPath = path.join(fixture.root, 'must-not-exist.db');
@@ -858,6 +914,13 @@ test('cutover owns and cleans deterministic database adoption artifacts across r
   const helperEnd = cutoverGate.indexOf('\n}\n\ncutover_exit_guard()', helperStart);
   assert.ok(helperStart >= 0 && helperEnd > helperStart, 'cutover adoption cleanup helper must be bounded');
   const helper = cutoverGate.slice(helperStart, helperEnd);
+  assert.match(helper, /mutable_stage = private_stage \+ '\.source'/);
+  assert.match(helper, /for base in \(private_stage, mutable_stage, adopted_stage\):/);
+  assert.equal(
+    [...deploy.matchAll(/mutable_stage = private_stage \+ '\.source'/g)].length,
+    2,
+    'cutover and rollback cleanup must both own the derived mutable source'
+  );
   const completePairValidation = helper.indexOf('database adoption hardlink pair is inconsistent');
   const firstUnlink = helper.indexOf('os.unlink(candidate)');
   assert.ok(

@@ -1309,15 +1309,55 @@ function createMutableAdoptionSource(sourcePath, mutableSourcePath, sourceIdenti
       fs.closeSync(descriptor);
     }
     fsyncDirectory(parent);
-    const identity = captureStableDatabaseIdentity(
+    const copiedIdentity = captureStableDatabaseIdentity(
       targetPath,
       'trusted mutable adoption source',
       { requireReadOnly: false }
     );
-    if (identity.sha256 !== sourceIdentity.sha256) {
+    if (copiedIdentity.sha256 !== sourceIdentity.sha256) {
       throw new Error('trusted mutable adoption source SHA-256 does not match its immutable source');
     }
-    return identity;
+
+    const Database = require('better-sqlite3');
+    const database = new Database(targetPath, { fileMustExist: true });
+    try {
+      database.pragma('busy_timeout = 5000');
+      let journalMode = String(database.pragma('journal_mode', { simple: true }) || '').toLowerCase();
+      if (journalMode === 'wal') {
+        const checkpoint = database.pragma('wal_checkpoint(TRUNCATE)');
+        if (!Array.isArray(checkpoint) || checkpoint.some((entry) => Number(entry.busy) !== 0)) {
+          throw new Error('trusted mutable adoption source WAL checkpoint remained busy');
+        }
+        journalMode = String(database.pragma('journal_mode = DELETE', { simple: true }) || '').toLowerCase();
+      }
+      if (journalMode !== 'delete') {
+        throw new Error(`trusted mutable adoption source journal mode is unsupported: ${journalMode || 'unknown'}`);
+      }
+      if (database.pragma('quick_check', { simple: true }) !== 'ok') {
+        throw new Error('trusted mutable adoption source quick_check failed after journal normalization');
+      }
+      if (database.pragma('foreign_key_check').length !== 0) {
+        throw new Error('trusted mutable adoption source foreign_key_check failed after journal normalization');
+      }
+    } finally {
+      database.close();
+    }
+    rejectDatabaseSidecars(targetPath, 'trusted normalized mutable adoption source');
+    const normalizedDescriptor = fs.openSync(
+      targetPath,
+      fs.constants.O_RDWR | (fs.constants.O_NOFOLLOW || 0)
+    );
+    try {
+      fs.fsyncSync(normalizedDescriptor);
+    } finally {
+      fs.closeSync(normalizedDescriptor);
+    }
+    fsyncDirectory(parent);
+    return captureStableDatabaseIdentity(
+      targetPath,
+      'trusted normalized mutable adoption source',
+      { requireReadOnly: false }
+    );
   } catch (error) {
     if (created) {
       try {
@@ -1452,82 +1492,83 @@ function prepareTrustedLegacySource({
   mutableSourcePath = null,
   privateStagePath = null
 }) {
-  const classification = classifyTrustedDatabase(manifest, verified, sourcePath);
-  if (classification.status === 'managed' && [1, 6].includes(classification.currentVersion)) {
-    return Object.freeze({
-      effectiveSourcePath: sourcePath,
-      report: Object.freeze({
-        format: ADOPTION_VERDICT_FORMAT,
-        applied: false,
-        sourceVersion: classification.currentVersion,
-        targetVersion: classification.currentVersion,
-        sourceSha256: sourceIdentity.sha256,
-        outputSha256: sourceIdentity.sha256,
-        baseTableCount: null,
-        baseRowCount: null,
-        repairs: null
-      })
-    });
-  }
-  if (classification.status !== 'legacy' || classification.currentVersion !== 0) {
-    throw new Error(`trusted legacy adoption requires exact version 0 or managed version 1/6; got ${classification.status}:${classification.currentVersion}`);
-  }
-  if (fs.existsSync(outputPath) || databaseSidecarPaths(outputPath).some((candidate) => fs.existsSync(candidate))) {
-    throw new Error('trusted legacy adoption output must not exist before execution');
-  }
-  const adoptionEntry = trustedEntrypoint(manifest, 'legacyProductionV1Adoption', 'trusted legacy adoption');
-  const adoptionPath = path.join(verified.bundleRoot, ...adoptionEntry.path.split('/'));
-  assertPinnedFile(adoptionPath, adoptionEntry.sha256, 'trusted legacy adoption');
-  delete require.cache[require.resolve(adoptionPath)];
-  const adoption = require(adoptionPath);
-  if (!adoption || typeof adoption.adoptLegacyProductionV1 !== 'function') {
-    throw new Error('trusted legacy adoption interface is invalid');
-  }
   const mutableSourceIdentity = mutableSourcePath
     ? createMutableAdoptionSource(sourcePath, mutableSourcePath, sourceIdentity)
     : null;
-  let result;
   try {
-    result = adoption.adoptLegacyProductionV1({
-      sourcePath: mutableSourceIdentity ? mutableSourceIdentity.path : sourcePath,
+    const adoptionSourcePath = mutableSourceIdentity ? mutableSourceIdentity.path : sourcePath;
+    const adoptionSourceSha256 = mutableSourceIdentity ? mutableSourceIdentity.sha256 : sourceIdentity.sha256;
+    const classification = classifyTrustedDatabase(manifest, verified, adoptionSourcePath);
+    if (classification.status === 'managed' && [1, 6].includes(classification.currentVersion)) {
+      return Object.freeze({
+        effectiveSourcePath: sourcePath,
+        report: Object.freeze({
+          format: ADOPTION_VERDICT_FORMAT,
+          applied: false,
+          sourceVersion: classification.currentVersion,
+          targetVersion: classification.currentVersion,
+          sourceSha256: sourceIdentity.sha256,
+          outputSha256: sourceIdentity.sha256,
+          baseTableCount: null,
+          baseRowCount: null,
+          repairs: null
+        })
+      });
+    }
+    if (classification.status !== 'legacy' || classification.currentVersion !== 0) {
+      throw new Error(`trusted legacy adoption requires exact version 0 or managed version 1/6; got ${classification.status}:${classification.currentVersion}`);
+    }
+    if (fs.existsSync(outputPath) || databaseSidecarPaths(outputPath).some((candidate) => fs.existsSync(candidate))) {
+      throw new Error('trusted legacy adoption output must not exist before execution');
+    }
+    const adoptionEntry = trustedEntrypoint(manifest, 'legacyProductionV1Adoption', 'trusted legacy adoption');
+    const adoptionPath = path.join(verified.bundleRoot, ...adoptionEntry.path.split('/'));
+    assertPinnedFile(adoptionPath, adoptionEntry.sha256, 'trusted legacy adoption');
+    delete require.cache[require.resolve(adoptionPath)];
+    const adoption = require(adoptionPath);
+    if (!adoption || typeof adoption.adoptLegacyProductionV1 !== 'function') {
+      throw new Error('trusted legacy adoption interface is invalid');
+    }
+    const result = adoption.adoptLegacyProductionV1({
+      sourcePath: adoptionSourcePath,
       outputPath,
       privateStagePath,
-      expectedSourceSha256: sourceIdentity.sha256
+      expectedSourceSha256: adoptionSourceSha256
+    });
+    if (
+      result.format !== adoption.REPORT_VERSION || result.sourceVersion !== 0 || result.targetVersion !== 1 ||
+      result.sourceSha256 !== adoptionSourceSha256 || !SHA256_PATTERN.test(result.outputSha256 || '') ||
+      !Number.isSafeInteger(result.baseTableCount) || result.baseTableCount < 1 ||
+      !Number.isSafeInteger(result.baseRowCount) || result.baseRowCount < 1 ||
+      !result.repairs || result.repairs.ftsRebuilt !== true
+    ) {
+      throw new Error('trusted legacy adoption verdict is incomplete');
+    }
+    const outputIdentity = captureStableDatabaseIdentity(
+      outputPath,
+      'trusted adopted version 1 output',
+      { requireReadOnly: false }
+    );
+    if (outputIdentity.sha256 !== result.outputSha256) {
+      throw new Error('trusted legacy adoption output SHA-256 does not match its verdict');
+    }
+    return Object.freeze({
+      effectiveSourcePath: outputPath,
+      report: Object.freeze({
+        format: ADOPTION_VERDICT_FORMAT,
+        applied: true,
+        sourceVersion: 0,
+        targetVersion: 1,
+        sourceSha256: sourceIdentity.sha256,
+        outputSha256: result.outputSha256,
+        baseTableCount: result.baseTableCount,
+        baseRowCount: result.baseRowCount,
+        repairs: result.repairs
+      })
     });
   } finally {
     if (mutableSourceIdentity) retireMutableAdoptionSource(mutableSourceIdentity);
   }
-  if (
-    result.format !== adoption.REPORT_VERSION || result.sourceVersion !== 0 || result.targetVersion !== 1 ||
-    result.sourceSha256 !== sourceIdentity.sha256 || !SHA256_PATTERN.test(result.outputSha256 || '') ||
-    !Number.isSafeInteger(result.baseTableCount) || result.baseTableCount < 1 ||
-    !Number.isSafeInteger(result.baseRowCount) || result.baseRowCount < 1 ||
-    !result.repairs || result.repairs.ftsRebuilt !== true
-  ) {
-    throw new Error('trusted legacy adoption verdict is incomplete');
-  }
-  const outputIdentity = captureStableDatabaseIdentity(
-    outputPath,
-    'trusted adopted version 1 output',
-    { requireReadOnly: false }
-  );
-  if (outputIdentity.sha256 !== result.outputSha256) {
-    throw new Error('trusted legacy adoption output SHA-256 does not match its verdict');
-  }
-  return Object.freeze({
-    effectiveSourcePath: outputPath,
-    report: Object.freeze({
-      format: ADOPTION_VERDICT_FORMAT,
-      applied: true,
-      sourceVersion: 0,
-      targetVersion: 1,
-      sourceSha256: result.sourceSha256,
-      outputSha256: result.outputSha256,
-      baseTableCount: result.baseTableCount,
-      baseRowCount: result.baseRowCount,
-      repairs: result.repairs
-    })
-  });
 }
 
 function adoptIfLegacyTrustedSource(options) {
@@ -1539,6 +1580,14 @@ function adoptIfLegacyTrustedSource(options) {
   const outputParent = assertDirectoryNoSymlink(path.dirname(outputPath), 'trusted live adoption output parent');
   assertPathOutsideCandidate(options.candidateRoot, outputParent, 'trusted live adoption output parent');
   if (pathsEqual(sourcePath, outputPath)) throw new Error('trusted live adoption source and output must differ');
+  const privateStagePath = normalizedAbsolute(options.privateStagePath);
+  if (!pathsEqual(path.dirname(privateStagePath), outputParent)) {
+    throw new Error('trusted live adoption private stage must share the output parent');
+  }
+  const mutableSourcePath = `${privateStagePath}.source`;
+  if ([sourcePath, outputPath, privateStagePath].some((candidate) => pathsEqual(candidate, mutableSourcePath))) {
+    throw new Error('trusted live adoption mutable source path is not distinct');
+  }
   if (!SHA256_PATTERN.test(options.expectedSourceSha256 || '')) {
     throw new Error('trusted live adoption expected source SHA-256 is invalid');
   }
@@ -1556,7 +1605,8 @@ function adoptIfLegacyTrustedSource(options) {
     sourcePath,
     sourceIdentity,
     outputPath,
-    privateStagePath: options.privateStagePath
+    mutableSourcePath,
+    privateStagePath
   });
   const sourceAfter = captureStableDatabaseIdentity(
     sourcePath,
