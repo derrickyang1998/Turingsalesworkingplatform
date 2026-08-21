@@ -1051,9 +1051,17 @@ function normalizeSystemCallFilter(value, expected) {
 
 function normalizeSystemdProperties(unitName, observed, expected) {
   if (!exactKeys(observed, Object.keys(expected))) {
-    throw new Error('parser effective property evidence is incomplete');
+    if (
+      unitName !== SLICE_UNIT ||
+      !exactKeys(observed, Object.keys(expected).filter((key) => key !== 'CPUAccounting'))
+    ) {
+      throw new Error('parser effective property evidence is incomplete');
+    }
   }
   const normalized = { ...observed };
+  if (unitName === SLICE_UNIT && normalized.CPUAccounting === undefined) {
+    normalized.CPUAccounting = expected.CPUAccounting;
+  }
   const expansions = {
     IPAddressDeny: (value, wanted) => wanted === 'any' && value === '0.0.0.0/0 ::/0',
     RestrictAddressFamilies: (value, wanted) => wanted === 'none' && value === '',
@@ -2275,6 +2283,7 @@ module.exports = {
   createTrustedJobController,
   createTrustedSelfTestSandbox,
   executeProductionSelfTests,
+  normalizeSystemdProperties,
   parseDeclaredSyscallDenyTokens,
   parseProperties,
   runtimeSourceArtifactPath,

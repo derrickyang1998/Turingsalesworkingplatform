@@ -23,6 +23,7 @@ const {
   createParserAcceptanceFixtures,
   createSelfTestSystemdController,
   executeProductionSelfTests,
+  normalizeSystemdProperties,
   parseDeclaredSyscallDenyTokens,
   runtimeSourceArtifactPath,
   runCli,
@@ -32,6 +33,31 @@ const {
   validatePressureEvidence,
   validateResultMetadataEvidence
 } = require(runnerPath);
+
+test('systemd 259 slice evidence accepts the removed CPUAccounting property', () => {
+  assert.deepEqual(
+    normalizeSystemdProperties(
+      'turingmarket-parser.slice',
+      {
+        FragmentPath: '/etc/systemd/system/turingmarket-parser.slice',
+        MemoryAccounting: 'yes',
+        TasksAccounting: 'yes'
+      },
+      {
+        FragmentPath: '/etc/systemd/system/turingmarket-parser.slice',
+        MemoryAccounting: 'yes',
+        CPUAccounting: 'yes',
+        TasksAccounting: 'yes'
+      }
+    ),
+    {
+      FragmentPath: '/etc/systemd/system/turingmarket-parser.slice',
+      MemoryAccounting: 'yes',
+      CPUAccounting: 'yes',
+      TasksAccounting: 'yes'
+    }
+  );
+});
 
 const EXPECTED_DENY_TOKENS = Object.freeze([
   '@mount',
