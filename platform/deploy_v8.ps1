@@ -8220,6 +8220,7 @@ DependencyCopyInodeReserveFloor="16384"
 DependencyCopyCleanupArmed=0
 SchemaRoot="$TestRoot/schema"
 SchemaDb="$SchemaRoot/schema.db"
+OfflineWork="$TestRoot/offline"
 BrowserCache="$TestRoot/browser-cache"
 DependencyStageRoot="$TestRoot/dependency-stage"
 DependencyRoot="$DependencyStageRoot/root"
@@ -8693,7 +8694,8 @@ runuser -u "$GateUser" -- test -x "$ReleaseRoot/tmp"
 runuser -u "$GateUser" -- test ! -r "$ReleaseRoot/tmp"
 runuser -u "$GateUser" -- test ! -r "$CandidateDir"
 install -d -o "$GateUser" -g "$GateUser" -m 0700 \
-  "$TestRoot/home" "$TestRoot/uploads" "$TestRoot/tmp" "$TestRoot/nginx-prefix" "$TestRoot/npm-cache" "$SchemaRoot" \
+  "$TestRoot/home" "$TestRoot/uploads" "$TestRoot/tmp" "$TestRoot/npm-cache" "$SchemaRoot" \
+  "$OfflineWork" "$OfflineWork/nginx-prefix" \
   "$DependencyStageRoot" "$DependencyRoot" "$DependencyServerRoot"
 restore_playwright_cache
 install -o "$GateUser" -g "$GateUser" -m 0600 "$CandidateDir/package.json" "$DependencyRoot/package.json"
@@ -9357,7 +9359,7 @@ timeout --signal=KILL 30m systemd-run --quiet --wait --pipe --unit="$OfflineGate
     PLAYWRIGHT_BROWSERS_PATH="$BrowserCache" \
     CANDIDATE_DIR="$CandidateDir" \
     RELEASE_ROOT="$ReleaseRoot" \
-    TEST_ROOT="$TestRoot" \
+    TEST_ROOT="$OfflineWork" \
     SCHEMA_DB="$SchemaDb" \
     APP_QUERY="__APP_QUERY__" \
     APP_BUILD="__APP_BUILD__" \
