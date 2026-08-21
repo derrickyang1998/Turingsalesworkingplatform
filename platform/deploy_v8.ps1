@@ -9303,12 +9303,12 @@ CANDIDATE_VALIDATION_SHA256_BEFORE="$(python3 "$LockDir/candidate_digest.py" "$C
 cleanup_nginx_gate_dir() {
   if [ -n "$NginxGateDir" ]; then
     case "$NginxGateDir" in
-      "$TestRoot"/nginx-gate) rm -rf -- "$NginxGateDir" ;;
+      "$OfflineWork"/nginx-gate) rm -rf -- "$NginxGateDir" ;;
       *) echo "Unexpected Nginx gate cleanup path" >&2; return 1 ;;
     esac
   fi
 }
-NginxGateDir="$TestRoot/nginx-gate"
+NginxGateDir="$OfflineWork/nginx-gate"
 test ! -e "$NginxGateDir"
 install -d -o "$GateUser" -g "$GateUser" -m 0700 "$NginxGateDir"
 
