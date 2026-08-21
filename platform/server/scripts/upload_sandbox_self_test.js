@@ -832,7 +832,7 @@ function validateSelfTestManifest(manifest) {
     !sameArray(manifest.identity.supplementary_groups, []) ||
     !isRecord(manifest.artifacts) || Object.keys(manifest.artifacts).length < 1 ||
     Object.entries(manifest.artifacts).some(([name, digest]) => (
-      !/^[A-Za-z0-9._/-]+$/.test(name) || name.startsWith('/') ||
+      !/^[A-Za-z0-9._@/-]+$/.test(name) || name.startsWith('/') ||
       name.split('/').includes('..') || !HEX_64.test(digest)
     )) ||
     !exactKeys(manifest.runtime_tree, [
@@ -2295,5 +2295,6 @@ module.exports = {
   validateParserAcceptanceEvidence,
   validatePressureEvidence,
   validateResultMetadataEvidence,
+  validateSelfTestManifest,
   validateWritableEvidence
 };

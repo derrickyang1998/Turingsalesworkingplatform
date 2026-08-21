@@ -55,7 +55,7 @@
     { "path": "server/scripts/sanitization_manifest.json", "sha256": "ba444ca2723bc840aa11dc67dc9e36c8f0461ae765b442ad1482f112d54a039a" },
     { "path": "server/scripts/sanitize_production_shape.js", "sha256": "ff8ba42481e0dbcd2b6dc7ae5170c26168773bd5e67fb7f3cac187c89940ba82" },
     { "path": "server/scripts/trusted_parser_runtime_verifier.js", "sha256": "a8a6a2881bf05bdb171eaab4fa15666cf2c57ce8ac48ef35a3d0158caf218a4a" },
-    { "path": "server/scripts/upload_sandbox_self_test.js", "sha256": "bafcdd5a4d4fa20fa3f2d6500019e6a354acfc5acc9abfa67916fafef3c53860" },
+    { "path": "server/scripts/upload_sandbox_self_test.js", "sha256": "3184e9a842684e238b6437d710dee5d0a9cf91f903c1969dacf8478d663e15d3" },
     { "path": "server/scripts/verify_campaign_migration_gate.js", "sha256": "bdc60e6a9da601c8c65cd2a374d8cb69eeea629fa6cd5af514dd995eddfe74dc" },
     { "path": "server/services/campaign_access_service.js", "sha256": "49b76c97b8afd8d70034a3a3230f838677a6da6493d9852f5e7ef2dfe3b72481" },
     { "path": "server/services/campaign_workflow_service.js", "sha256": "ff67e787adfb649bef04b96842dc2209fb2dabcfd7df48b6bc2c8a0ee2d9bb57" },

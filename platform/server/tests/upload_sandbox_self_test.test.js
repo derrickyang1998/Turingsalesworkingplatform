@@ -31,8 +31,28 @@ const {
   validateAggregateEvidence,
   validateParserAcceptanceEvidence,
   validatePressureEvidence,
-  validateResultMetadataEvidence
+  validateResultMetadataEvidence,
+  validateSelfTestManifest
 } = require(runnerPath);
+
+test('release manifest accepts the pinned systemd template artifact and rejects unsafe names', () => {
+  const manifest = JSON.parse(fs.readFileSync(
+    path.join(__dirname, '..', 'systemd', 'turingmarket-parser.manifest.json'),
+    'utf8'
+  ));
+
+  assert.strictEqual(validateSelfTestManifest(manifest), manifest);
+  assert.throws(
+    () => validateSelfTestManifest({
+      ...manifest,
+      artifacts: {
+        ...manifest.artifacts,
+        'systemd/turingmarket-parser@.service:unsafe': 'a'.repeat(64)
+      }
+    }),
+    /parser runtime manifest is invalid/
+  );
+});
 
 test('systemd 259 slice evidence accepts the removed CPUAccounting property', () => {
   assert.deepEqual(
