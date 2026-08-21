@@ -9823,12 +9823,25 @@ TM_MAINTENANCE_NGINX
   expect_maintenance() {
     expected="$1"
     request_path="$2"
-    actual=$(curl -sS -o /dev/null -w '%{http_code}' "http://localhost$request_path")
+    actual=$(curl -sS -o /dev/null -w '%{http_code}' "http://localhost$request_path" || true)
     test "$actual" = "$expected"
   }
-  expect_maintenance 503 /api/health
-  expect_maintenance 503 /api/auth/login
-  expect_maintenance 503 /m0
+  MaintenanceReady=0
+  for attempt in $(seq 1 30); do
+    MaintenanceReady=1
+    for request_path in /api/health /api/auth/login /m0; do
+      if ! expect_maintenance 503 "$request_path"; then
+        MaintenanceReady=0
+        break
+      fi
+    done
+    if [ "$MaintenanceReady" = "1" ]; then break; fi
+    if [ "$attempt" = "30" ]; then
+      echo "Cutover maintenance listener did not converge" >&2
+      return 1
+    fi
+    sleep 0.1
+  done
   printf '%s\n' 'ALL_TRAFFIC_MAINTENANCE_OK'
 }
 

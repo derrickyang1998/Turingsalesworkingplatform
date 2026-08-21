@@ -539,6 +539,53 @@ ${recoveryBlock}
     'neither Nginx validation nor startup may run after the trusted check rejects');
 });
 
+test('cutover maintenance gate waits through one stale Nginx reload response', {
+  skip: !bashAvailable() ? 'requires Linux Bash' : false,
+}, () => {
+  const deploy = read(deployPath);
+  const cutover = deploy.match(/\$cutoverGate\s*=\s*@'\r?\n([\s\S]*?)\r?\n'@/)?.[1] || '';
+  const maintenanceStartMarker = 'enter_all_traffic_maintenance() {';
+  const maintenanceStart = cutover.indexOf(maintenanceStartMarker);
+  const maintenanceBodyStart = cutover.indexOf('\n', maintenanceStart) + 1;
+  const maintenanceEnd = cutover.indexOf('\n}\n\ndrain_admitted_http_connections() {', maintenanceBodyStart);
+  assert.ok(maintenanceStart >= 0 && maintenanceEnd > maintenanceBodyStart,
+    'cutover maintenance function must exist');
+  const maintenanceBody = cutover.slice(maintenanceBodyStart, maintenanceEnd);
+  const result = runBashSync(['--noprofile', '--norc', '-s'], {
+    input: `
+set -eEuo pipefail
+LockDir="$(mktemp -d)"
+trap 'command rm -rf "$LockDir"' EXIT
+MaintenanceConfig="$LockDir/maintenance.conf"
+printf '0\\n' > "$LockDir/curl-count"
+install() { command cp -- "\${@: -2:1}" "\${@: -1}"; }
+ln() { :; }
+mv() { :; }
+nginx() { :; }
+systemctl() { :; }
+sleep() { :; }
+curl() {
+  count="$(cat "$LockDir/curl-count")"
+  count=$((count + 1))
+  printf '%s\\n' "$count" > "$LockDir/curl-count"
+  if [ "$count" = 1 ]; then printf 200; else printf 503; fi
+}
+enter_all_traffic_maintenance() {
+${maintenanceBody}
+}
+enter_all_traffic_maintenance
+printf 'REQUESTS=%s\\n' "$(cat "$LockDir/curl-count")"
+`,
+    encoding: 'utf8',
+    timeout: 10_000,
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /ALL_TRAFFIC_MAINTENANCE_OK/);
+  assert.match(result.stdout, /REQUESTS=4/,
+    'the first stale response must trigger one full three-route retry');
+});
+
 test('Phase 4 arms exactly one Unix-socket release replay while public traffic remains closed', () => {
   const deploy = read(deployPath);
   for (const file of [
