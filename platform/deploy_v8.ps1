@@ -4712,7 +4712,8 @@ public_release_guard() {
 run_exact_public_nginx_gate() {
   local socket_path="$1"
   local port="$2"
-  node - "$socket_path" "$port" <<'TM_EXACT_PUBLIC_NGINX_VERIFIER'
+  local verifier_mode="${3:-current}"
+  node - "$socket_path" "$port" "$verifier_mode" <<'TM_EXACT_PUBLIC_NGINX_VERIFIER'
 __EXACT_PUBLIC_NGINX_VERIFIER__
 TM_EXACT_PUBLIC_NGINX_VERIFIER
 }
@@ -5415,7 +5416,7 @@ systemctl reload nginx
 record_restore_step nginx-restored
 
 # RESTORE_PUBLIC_GATE
-run_exact_public_nginx_gate - 80
+run_exact_public_nginx_gate - 80 previous
 record_restore_step public-verified
 public_release_guard disarm \
   --state-file "$PublicGuardState" \
@@ -5484,7 +5485,8 @@ public_release_guard() {
 run_exact_public_nginx_gate() {
   local socket_path="$1"
   local port="$2"
-  node - "$socket_path" "$port" <<'TM_EXACT_PUBLIC_NGINX_VERIFIER'
+  local verifier_mode="${3:-current}"
+  node - "$socket_path" "$port" "$verifier_mode" <<'TM_EXACT_PUBLIC_NGINX_VERIFIER'
 __EXACT_PUBLIC_NGINX_VERIFIER__
 TM_EXACT_PUBLIC_NGINX_VERIFIER
 }
@@ -5519,8 +5521,30 @@ public_release_guard close \
   --maintenance-config "$MaintenanceConfig" \
   --recovery-link "$PublicGuardRecoveryLink" \
   --site-link /etc/nginx/sites-enabled/turingmarket
-for request_path in /api/health /api/auth/login /m0; do
-  test "$(curl -sS -o /dev/null -w '%{http_code}' "http://localhost$request_path")" = "503"
+public_release_guard assert-start-allowed \
+  --state-file "$PublicGuardState" \
+  --maintenance-config "$MaintenanceConfig" \
+  --site-link /etc/nginx/sites-enabled/turingmarket
+nginx -t
+if ! systemctl is-active --quiet nginx; then
+  systemctl start nginx
+fi
+MaintenanceReady=0
+for attempt in $(seq 1 30); do
+  MaintenanceReady=1
+  for request_path in /api/health /api/auth/login /m0; do
+    MaintenanceStatus="$(curl -sS -o /dev/null -w '%{http_code}' "http://localhost$request_path" || true)"
+    if [ "$MaintenanceStatus" != "503" ]; then
+      MaintenanceReady=0
+      break
+    fi
+  done
+  if [ "$MaintenanceReady" = "1" ]; then break; fi
+  if [ "$attempt" = "30" ]; then
+    echo "Pre-mutation maintenance listener did not converge" >&2
+    exit 1
+  fi
+  sleep 0.1
 done
 
 resume_public_gate_armed=0
@@ -5661,7 +5685,7 @@ public_release_guard verify-armed \
 mv -Tf "$ResumePublicLink" /etc/nginx/sites-enabled/turingmarket
 nginx -t
 systemctl reload nginx
-run_exact_public_nginx_gate - 80
+run_exact_public_nginx_gate - 80 previous
 public_release_guard disarm \
   --state-file "$PublicGuardState" \
   --unit "$PublicGuardUnit" \
@@ -5987,24 +6011,36 @@ function Get-ExactPublicNginxBehaviorVerifier {
 'use strict';
 
 const http = require('node:http');
+const { performance } = require('node:perf_hooks');
+
+const RELOAD_CONVERGENCE_TIMEOUT_MS = 3000;
+const RELOAD_RETRY_DELAY_MS = 100;
+const verificationDeadline = performance.now() + RELOAD_CONVERGENCE_TIMEOUT_MS;
 
 const socketPath = process.argv[2];
 const port = Number.parseInt(process.argv[3], 10);
-if (!socketPath || (socketPath === '-' && (!Number.isInteger(port) || port < 1 || port > 65535))) {
-  throw new Error('Usage: verify-exact-public-nginx.js <socket-path|-> <port>');
+const verificationMode = process.argv[4] || 'current';
+if (!socketPath || !['current', 'previous'].includes(verificationMode)
+    || (socketPath === '-' && (!Number.isInteger(port) || port < 1 || port > 65535))) {
+  throw new Error('Usage: verify-exact-public-nginx.js <socket-path|-> <port> [current|previous]');
 }
 
-const assets = [
+const compatibilityAssets = [
   ['/client/shared/build_info.js', 'javascript'],
   ['/client/core/navigation.js', 'javascript'],
   ['/client/core/accessibility.js', 'javascript'],
   ['/client/core/shell.js', 'javascript'],
-  ['/client/core/csp_compat.js', 'javascript'],
-  ['/client/features/ppt_preview_runtime.js', 'javascript'],
   ['/client/styles/tokens.css', 'css'],
   ['/client/styles/components.css', 'css'],
   ['/client/styles/layout.css', 'css'],
 ];
+const currentOnlyAssets = [
+  ['/client/core/csp_compat.js', 'javascript'],
+  ['/client/features/ppt_preview_runtime.js', 'javascript'],
+];
+const assets = verificationMode === 'previous'
+  ? compatibilityAssets
+  : [...compatibilityAssets, ...currentOnlyAssets];
 const pages = ['/m0', '/m0-detail', '/m4', '/admin'];
 const denied = [
   '/client/unknown.js',
@@ -6021,33 +6057,55 @@ const denied = [
 
 function requestRoute(requestPath) {
   return new Promise((resolve, reject) => {
+    const remainingMs = Math.ceil(verificationDeadline - performance.now());
+    if (remainingMs <= 0) {
+      reject(new Error(`Nginx reload did not converge within ${RELOAD_CONVERGENCE_TIMEOUT_MS}ms`));
+      return;
+    }
     const target = socketPath === '-'
       ? { host: '127.0.0.1', port, path: requestPath }
       : { socketPath, path: requestPath };
+    let settled = false;
+    let deadlineTimer;
+    const settle = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(deadlineTimer);
+      callback(value);
+    };
+    const succeed = (value) => settle(resolve, value);
+    const fail = (error) => settle(reject, error);
     const request = http.request({
       ...target,
       method: 'GET',
       headers: { Host: 'localhost', Connection: 'close' },
-      timeout: 5000,
     }, (response) => {
       const chunks = [];
       let length = 0;
       response.on('data', (chunk) => {
         length += chunk.length;
         if (length > 8 * 1024 * 1024) {
-          request.destroy(new Error(`${requestPath} response exceeded the verifier limit`));
+          const error = new Error(`${requestPath} response exceeded the verifier limit`);
+          request.destroy(error);
+          fail(error);
           return;
         }
         chunks.push(chunk);
       });
-      response.on('end', () => resolve({
+      response.on('error', fail);
+      response.on('end', () => succeed({
         status: response.statusCode,
         headers: response.headers,
         body: Buffer.concat(chunks).toString('utf8'),
       }));
     });
-    request.on('timeout', () => request.destroy(new Error(`${requestPath} timed out`)));
-    request.on('error', reject);
+    deadlineTimer = setTimeout(() => {
+      const error = new Error(`Nginx verification did not complete within ${RELOAD_CONVERGENCE_TIMEOUT_MS}ms`);
+      error.code = 'EVERIFIERDEADLINE';
+      request.destroy(error);
+      fail(error);
+    }, remainingMs);
+    request.on('error', fail);
     request.end();
   });
 }
@@ -6066,8 +6124,15 @@ function assertNginx(response, requestPath) {
 function assertStatus(response, requestPath, expected) {
   assertNginx(response, requestPath);
   if (response.status !== expected) {
-    throw new Error(`${requestPath} returned ${response.status}; expected ${expected}`);
+    const error = new Error(`${requestPath} returned ${response.status}; expected ${expected}`);
+    error.reloadTransition = response.status === 503;
+    throw error;
   }
+}
+
+function isReloadTransitionError(error) {
+  const code = String(error?.code || '');
+  return error?.reloadTransition === true || code === 'EPIPE' || code.startsWith('ECONN');
 }
 
 async function verify() {
@@ -6112,7 +6177,23 @@ async function verify() {
   }
 }
 
-verify().then(
+async function verifyWithReloadConvergence() {
+  while (true) {
+    try {
+      await verify();
+      return;
+    } catch (error) {
+      if (!isReloadTransitionError(error)) throw error;
+      const remainingMs = verificationDeadline - performance.now();
+      if (remainingMs <= 0) {
+        throw new Error(`Nginx reload did not converge within ${RELOAD_CONVERGENCE_TIMEOUT_MS}ms: ${error.message}`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, Math.min(RELOAD_RETRY_DELAY_MS, remainingMs)));
+    }
+  }
+}
+
+verifyWithReloadConvergence().then(
   () => process.stdout.write('EXACT_PUBLIC_NGINX_BEHAVIOR_OK\n'),
   (error) => {
     process.stderr.write(`EXACT_PUBLIC_NGINX_BEHAVIOR_FAILED: ${error.message}\n`);
@@ -6168,7 +6249,8 @@ public_release_guard() {
 run_exact_public_nginx_gate() {
   local socket_path="$1"
   local port="$2"
-  node - "$socket_path" "$port" <<'TM_EXACT_PUBLIC_NGINX_VERIFIER'
+  local verifier_mode="${3:-current}"
+  node - "$socket_path" "$port" "$verifier_mode" <<'TM_EXACT_PUBLIC_NGINX_VERIFIER'
 __EXACT_PUBLIC_NGINX_VERIFIER__
 TM_EXACT_PUBLIC_NGINX_VERIFIER
 }
@@ -9442,7 +9524,8 @@ test ! -L "$TrustedDependencyRoot"
 run_exact_public_nginx_gate() {
   local socket_path="$1"
   local port="$2"
-  node - "$socket_path" "$port" <<'TM_EXACT_PUBLIC_NGINX_VERIFIER'
+  local verifier_mode="${3:-current}"
+  node - "$socket_path" "$port" "$verifier_mode" <<'TM_EXACT_PUBLIC_NGINX_VERIFIER'
 __EXACT_PUBLIC_NGINX_VERIFIER__
 TM_EXACT_PUBLIC_NGINX_VERIFIER
 }

@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const crypto = require('node:crypto');
 const os = require('node:os');
 const path = require('node:path');
+const { performance } = require('node:perf_hooks');
 const vm = require('node:vm');
 const { spawn, spawnSync } = require('node:child_process');
 
@@ -188,6 +189,13 @@ function exactPublicNginxVerifierSource() {
   return deploy.slice(begin, end + endMarker.length);
 }
 
+function exactPublicReloadTransitionClassifier() {
+  const verifier = exactPublicNginxVerifierSource();
+  const match = verifier.match(/function isReloadTransitionError\(error\) \{[\s\S]*?^\}/m);
+  assert.ok(match, 'reload transition classifier must be present');
+  return vm.runInNewContext(`(${match[0]})`);
+}
+
 function acceptedFinalizeSource() {
   const deploy = read(deployScriptPath);
   const start = deploy.indexOf('function Invoke-RemoteAcceptedFinalize');
@@ -285,7 +293,7 @@ printf finalized > "$FinalizationPublication"
   }
 }
 
-async function runExactVerifierAgainstSyntheticCandidate(mode) {
+async function runExactVerifierAgainstSyntheticCandidate(mode, verificationMode = 'current') {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-nginx-verifier-'));
   const serverPath = path.join(root, 'candidate.js');
   const verifierPath = path.join(root, 'verify.js');
@@ -295,7 +303,39 @@ async function runExactVerifierAgainstSyntheticCandidate(mode) {
 const http = require('node:http');
 const mode = process.argv[2];
 const assets = new Set(${assets}.map((entry) => '/' + entry));
+const currentOnlyAssets = new Set(['/client/core/csp_compat.js', '/client/features/ppt_preview_runtime.js']);
+let requestCount = 0;
 const server = http.createServer((request, response) => {
+  requestCount += 1;
+  if (mode === 'slow-drip' && requestCount === 1) {
+    response.statusCode = 200;
+    response.setHeader('Server', 'nginx');
+    response.setHeader('Content-Type', 'application/javascript');
+    const interval = setInterval(() => response.write('x'), 50);
+    const finish = setTimeout(() => {
+      clearInterval(interval);
+      response.end('done');
+    }, 5000);
+    response.on('close', () => {
+      clearInterval(interval);
+      clearTimeout(finish);
+    });
+    return;
+  }
+  if (mode === 'permanent-maintenance') {
+    response.statusCode = 503;
+    response.setHeader('Server', 'nginx');
+    response.setHeader('Content-Type', 'application/json');
+    response.end(JSON.stringify({ error: 'MAINTENANCE' }));
+    return;
+  }
+  if (mode === 'transient-maintenance' && requestCount === 1) {
+    response.statusCode = 503;
+    response.setHeader('Server', 'nginx');
+    response.setHeader('Content-Type', 'application/json');
+    response.end(JSON.stringify({ error: 'MAINTENANCE' }));
+    return;
+  }
   response.setHeader('Server', 'nginx');
   if (request.url === '/server/server.js') {
     response.statusCode = mode === 'exposed-server' ? 200 : 404;
@@ -304,6 +344,12 @@ const server = http.createServer((request, response) => {
     return;
   }
   if (assets.has(request.url)) {
+    if (mode === 'previous-compatible' && currentOnlyAssets.has(request.url)) {
+      response.statusCode = 404;
+      response.setHeader('Content-Type', 'text/plain');
+      response.end('not found');
+      return;
+    }
     response.statusCode = 200;
     const wrongMime = mode === 'wrong-mime' && request.url === '/client/core/navigation.js';
     response.setHeader('Content-Type', wrongMime ? 'text/plain' : (request.url.endsWith('.css') ? 'text/css' : 'application/javascript'));
@@ -336,7 +382,13 @@ server.listen(0, '127.0.0.1', () => process.stdout.write(String(server.address()
       });
       child.once('exit', (code) => reject(new Error(`synthetic candidate exited ${code}: ${stderr}`)));
     });
-    return spawnSync(process.execPath, [verifierPath, '-', port], { encoding: 'utf8', timeout: 10_000 });
+    const startedAt = performance.now();
+    const result = spawnSync(process.execPath, [verifierPath, '-', port, verificationMode], {
+      encoding: 'utf8',
+      timeout: 10_000
+    });
+    result.elapsedMs = performance.now() - startedAt;
+    return result;
   } finally {
     child.kill();
     fs.rmSync(root, { recursive: true, force: true });
@@ -2131,13 +2183,68 @@ test('exact public Nginx verifier rejects wrong MIME and exposed server routes',
   const valid = await runExactVerifierAgainstSyntheticCandidate('valid');
   assert.equal(valid.status, 0, `valid candidate must pass:\n${valid.stderr}`);
 
+  const transientMaintenance = await runExactVerifierAgainstSyntheticCandidate('transient-maintenance');
+  assert.equal(
+    transientMaintenance.status,
+    0,
+    `one stale maintenance response after reload must converge inside the verifier:\n${transientMaintenance.stderr}`
+  );
+
+  const permanentMaintenance = await runExactVerifierAgainstSyntheticCandidate('permanent-maintenance');
+  assert.notEqual(permanentMaintenance.status, 0, 'permanent maintenance must fail the exact verifier');
+  assert.ok(permanentMaintenance.elapsedMs < 3500,
+    `reload convergence must obey its 3 second wall-clock deadline, observed ${permanentMaintenance.elapsedMs}ms`);
+
+  const slowDrip = await runExactVerifierAgainstSyntheticCandidate('slow-drip');
+  assert.notEqual(slowDrip.status, 0, 'a response that never completes before the deadline must fail');
+  assert.ok(slowDrip.elapsedMs < 3500,
+    `continuous socket activity must not extend the 3 second absolute deadline, observed ${slowDrip.elapsedMs}ms`);
+
+  const previousAsCurrent = await runExactVerifierAgainstSyntheticCandidate('previous-compatible');
+  assert.notEqual(previousAsCurrent.status, 0, 'the current release gate must require every current-only asset');
+  const previousCompatible = await runExactVerifierAgainstSyntheticCandidate('previous-compatible', 'previous');
+  assert.equal(previousCompatible.status, 0, `rollback compatibility mode must accept the prior asset contract:\n${previousCompatible.stderr}`);
+
   const wrongMime = await runExactVerifierAgainstSyntheticCandidate('wrong-mime');
   assert.notEqual(wrongMime.status, 0, 'wrong JavaScript MIME must fail the exact verifier');
   assert.match(wrongMime.stderr, /Content-Type.*JavaScript/i);
+  assert.ok(wrongMime.elapsedMs < 1500, 'semantic MIME failures must not consume the reload convergence window');
 
   const exposedServer = await runExactVerifierAgainstSyntheticCandidate('exposed-server');
   assert.notEqual(exposedServer.status, 0, 'an exposed server route must fail the exact verifier');
   assert.match(exposedServer.stderr, /server\/server\.js.*expected 404/i);
+});
+
+test('exact public Nginx gate delegates bounded reload convergence to one verifier process', () => {
+  const deploy = read(deployScriptPath);
+  const wrappers = Array.from(
+    deploy.matchAll(/^run_exact_public_nginx_gate\(\)\s*\{\r?\n(?<body>[\s\S]*?)^\}/gm),
+    (match) => match.groups.body
+  );
+  assert.equal(wrappers.length, 4, 'every restore, resume, finalize, and cutover gate must share the verifier contract');
+  for (const body of wrappers) {
+    assert.match(body, /local verifier_mode="\$\{3:-current\}"/);
+    assert.match(body, /node - "\$socket_path" "\$port" "\$verifier_mode" <<'TM_EXACT_PUBLIC_NGINX_VERIFIER'/);
+    assert.equal((body.match(/node - "\$socket_path"/g) || []).length, 1,
+      'each gate must launch exactly one verifier process');
+    assert.doesNotMatch(body, /for attempt|sleep 0\.1|set [+-]e|VerifierStatus/);
+  }
+
+  const restore = deploy.match(/function Invoke-RemoteRestore[\s\S]*?(?=function Invoke-RemotePreMutationResume)/)?.[0] || '';
+  const resume = deploy.match(/function Invoke-RemotePreMutationResume[\s\S]*?(?=function Get-RemoteDeploymentAcceptanceState)/)?.[0] || '';
+  assert.match(restore, /run_exact_public_nginx_gate - 80 previous/);
+  assert.match(resume, /run_exact_public_nginx_gate - 80 previous/);
+});
+
+test('reload transition classifier accepts every ECONN code and EPIPE only', () => {
+  const classify = exactPublicReloadTransitionClassifier();
+  for (const code of ['ECONNREFUSED', 'ECONNRESET', 'ECONNABORTED', 'ECONNANY', 'EPIPE']) {
+    assert.equal(classify({ code }), true, `${code} must be retryable during Nginx reload convergence`);
+  }
+  assert.equal(classify({ reloadTransition: true }), true, 'HTTP 503 must be retryable');
+  for (const code of ['ETIMEDOUT', 'ENOENT', 'EACCES', '']) {
+    assert.equal(classify({ code }), false, `${code || '<empty>'} must remain a terminal verifier failure`);
+  }
 });
 
 test('accepted-finalize verifier failures restore the closed API gate before publishing finalization', {

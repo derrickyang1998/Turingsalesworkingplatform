@@ -478,6 +478,67 @@ test('Phase 4 rollback keeps public Nginx closed through control convergence in 
   assert.doesNotMatch(manual, /Restore-RemoteMigrationGateCleanupControl/);
 });
 
+test('pre-mutation resume restores the maintenance listener after a reload convergence failure', () => {
+  const deploy = read(deployPath);
+  const resume = functionSource(deploy, 'Invoke-RemotePreMutationResume', 'Get-RemoteDeploymentAcceptanceState');
+  const closeIndex = resume.indexOf('public_release_guard close');
+  const assertStartIndex = resume.indexOf('public_release_guard assert-start-allowed', closeIndex);
+  const nginxTestIndex = resume.indexOf('nginx -t', assertStartIndex);
+  const activeIndex = resume.indexOf('systemctl is-active --quiet nginx', nginxTestIndex);
+  const startIndex = resume.indexOf('systemctl start nginx', activeIndex);
+  const retryIndex = resume.indexOf('for attempt in $(seq 1 30); do', startIndex);
+  const armIndex = resume.indexOf('public_release_guard arm', retryIndex);
+
+  assert.ok(closeIndex >= 0, 'pre-mutation resume must first establish fail-closed maintenance');
+  assert.ok(assertStartIndex > closeIndex && nginxTestIndex > assertStartIndex,
+    'the trusted guard and Nginx syntax check must prove maintenance is start-safe');
+  assert.ok(activeIndex > closeIndex && startIndex > activeIndex,
+    'an inactive listener must be restarted only after maintenance is established');
+  assert.ok(retryIndex > startIndex && armIndex > retryIndex,
+    'maintenance HTTP convergence must be bounded and complete before the watchdog is armed');
+  assert.match(
+    resume.slice(retryIndex, armIndex),
+    /for request_path in \/api\/health \/api\/auth\/login \/m0; do[\s\S]*?sleep 0\.1/,
+    'maintenance convergence must verify every protected route and retry briefly'
+  );
+});
+
+test('pre-mutation resume never starts Nginx when the trusted maintenance start check rejects', {
+  skip: !bashAvailable() ? 'requires Linux Bash' : false,
+}, () => {
+  const deploy = read(deployPath);
+  const resume = remoteBody(deploy, 'Invoke-RemotePreMutationResume', 'Get-RemoteDeploymentAcceptanceState');
+  const blockStart = resume.indexOf('public_release_guard close \\');
+  const blockEnd = resume.indexOf('\n\nresume_public_gate_armed=0', blockStart);
+  assert.ok(blockStart >= 0 && blockEnd > blockStart, 'maintenance listener recovery block must be bounded');
+  const recoveryBlock = resume.slice(blockStart, blockEnd);
+  const result = runBashSync(['--noprofile', '--norc', '-s'], {
+    input: `
+set -eEuo pipefail
+PublicGuardState=/tmp/state
+ResumeMaintenanceStage=/tmp/maintenance.next
+MaintenanceConfig=/tmp/maintenance.conf
+PublicGuardRecoveryLink=/tmp/recovery.link
+public_release_guard() {
+  printf 'guard:%s\\n' "$1"
+  if [ "$1" = assert-start-allowed ]; then return 47; fi
+}
+nginx() { printf 'nginx:%s\\n' "$*"; }
+systemctl() { printf 'systemctl:%s\\n' "$*"; return 1; }
+curl() { printf 503; }
+${recoveryBlock}
+`,
+    encoding: 'utf8',
+    timeout: 10_000,
+  });
+
+  assert.notEqual(result.status, 0, 'a rejected trusted start check must abort recovery');
+  assert.match(result.stdout, /^guard:close$/m);
+  assert.match(result.stdout, /^guard:assert-start-allowed$/m);
+  assert.doesNotMatch(result.stdout, /^nginx:|^systemctl:/m,
+    'neither Nginx validation nor startup may run after the trusted check rejects');
+});
+
 test('Phase 4 arms exactly one Unix-socket release replay while public traffic remains closed', () => {
   const deploy = read(deployPath);
   for (const file of [

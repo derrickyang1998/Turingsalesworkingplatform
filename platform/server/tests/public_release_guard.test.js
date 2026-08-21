@@ -701,6 +701,26 @@ test('Nginx start barrier permits only a durably verified public gate', {
   assert.equal(verified.status, 0, verified.stderr || verified.stdout);
 });
 
+test('closed Nginx start barrier permits only the exact maintenance link', {
+  skip: !hasBash || !hasNativeSymlinks ? 'requires Bash and native symlinks' : false,
+}, () => {
+  const harness = createHarness();
+  const publicConfig = path.join(harness.paths.root, 'public.conf');
+  fs.writeFileSync(harness.paths.maintenance, 'MAINTENANCE\n');
+  fs.writeFileSync(publicConfig, 'PUBLIC\n');
+  writeGuardRecord(harness.paths.state, 'closed');
+  fs.rmSync(harness.paths.site);
+  fs.symlinkSync(harness.paths.maintenance, harness.paths.site);
+
+  const maintenance = runGuard('assert-start-allowed', harness);
+  assert.equal(maintenance.status, 0, maintenance.stderr || maintenance.stdout);
+
+  fs.rmSync(harness.paths.site);
+  fs.symlinkSync(publicConfig, harness.paths.site);
+  const publicRelease = runGuard('assert-start-allowed', harness);
+  assert.notEqual(publicRelease.status, 0, 'closed state must reject a non-maintenance Nginx link');
+});
+
 test('a concurrent verified transition cannot overwrite a committed closed state', {
   skip: !hasBash || !hasPython ? 'requires Bash and Python' : false,
   timeout: 30_000,
