@@ -10153,6 +10153,79 @@ prepare_ppt_cache_for_cutover() {
   printf '%s\n' 'PPT_CACHE_CUTOVER_READY'
 }
 
+remove_quiesced_database_sidecars() {
+  python3 - "$DatabasePath" <<'PY'
+import os
+import re
+import stat
+import sys
+
+database_path = sys.argv[1]
+expected_path = '/var/lib/turingmarket/db/turingmarket.db'
+if database_path != expected_path or os.path.realpath(database_path) != expected_path:
+    raise SystemExit('quiesced database path is not canonical')
+
+database_dir = os.path.dirname(database_path)
+directory_metadata = os.lstat(database_dir)
+if (not stat.S_ISDIR(directory_metadata.st_mode) or stat.S_ISLNK(directory_metadata.st_mode) or
+        directory_metadata.st_uid != 0 or directory_metadata.st_gid != 0 or
+        stat.S_IMODE(directory_metadata.st_mode) != 0o700):
+    raise SystemExit('quiesced database parent identity is unsafe')
+
+database_metadata = os.lstat(database_path)
+if (not stat.S_ISREG(database_metadata.st_mode) or stat.S_ISLNK(database_metadata.st_mode) or
+        database_metadata.st_nlink != 1 or database_metadata.st_uid != 0 or
+        database_metadata.st_gid != 0 or stat.S_IMODE(database_metadata.st_mode) != 0o600):
+    raise SystemExit('quiesced database identity is unsafe')
+
+artifacts = []
+protected_identities = {(database_metadata.st_dev, database_metadata.st_ino)}
+for suffix in ('-journal', '-wal', '-shm'):
+    candidate = database_path + suffix
+    try:
+        metadata = os.lstat(candidate)
+    except FileNotFoundError:
+        continue
+    if (not stat.S_ISREG(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode) or
+            metadata.st_nlink != 1 or metadata.st_uid != 0 or metadata.st_gid != 0 or
+            stat.S_IMODE(metadata.st_mode) != 0o600):
+        raise SystemExit(f'quiesced database sidecar identity is unsafe: {suffix}')
+    if suffix in ('-journal', '-wal') and metadata.st_size != 0:
+        raise SystemExit(f'quiesced database sidecar still contains data: {suffix}')
+    protected_identities.add((metadata.st_dev, metadata.st_ino))
+    artifacts.append(candidate)
+
+for process in os.scandir('/proc'):
+    if not re.fullmatch(r'[0-9]+', process.name):
+        continue
+    descriptor_root = os.path.join(process.path, 'fd')
+    try:
+        descriptors = os.scandir(descriptor_root)
+    except (FileNotFoundError, PermissionError, ProcessLookupError):
+        continue
+    with descriptors:
+        for descriptor in descriptors:
+            try:
+                opened = os.stat(descriptor.path)
+            except (FileNotFoundError, PermissionError, ProcessLookupError):
+                continue
+            if (opened.st_dev, opened.st_ino) in protected_identities:
+                raise SystemExit(f'database file remains open by pid {process.name}')
+
+for candidate in artifacts:
+    os.unlink(candidate)
+directory = os.open(database_dir, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+try:
+    os.fsync(directory)
+finally:
+    os.close(directory)
+for suffix in ('-journal', '-wal', '-shm'):
+    if os.path.lexists(database_path + suffix):
+        raise SystemExit(f'quiesced database sidecar removal failed: {suffix}')
+PY
+  printf '%s\n' 'QUIESCED_DATABASE_SIDECARS_REMOVED'
+}
+
 create_cutover_snapshot() {
   SnapshotStage="$BackupAbsolute/.cutover-snapshot.__WRITER_TOKEN__"
   test ! -e "$CutoverSnapshot"
@@ -11735,6 +11808,7 @@ record_phase prior-marker-archived
 stage_nginx_candidate
 record_phase nginx-candidate-staged
 record_phase mutation-started
+remove_quiesced_database_sidecars
 adopt_legacy_database_if_required
 
 cd "$RemoteRoot"

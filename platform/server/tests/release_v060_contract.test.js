@@ -653,12 +653,31 @@ test('v0.6 cutover drains parser work, installs after code exchange, and accepts
     'pm2 stop turingmarket',
     'create_cutover_snapshot',
     'record_phase mutation-started',
+    'remove_quiesced_database_sidecars',
+    'adopt_legacy_database_if_required',
     "'atomic release exchange failed'",
     'install_parser_appliance',
     'pm2 restart ecosystem.config.js',
     'record_parser_acceptance_evidence',
     'record_phase accepted'
   ], 'parser cutover lifecycle');
+  const sidecarCleanup = sourceBetween(
+    cutover,
+    'remove_quiesced_database_sidecars() {',
+    'create_cutover_snapshot() {',
+    'quiesced database sidecar cleanup'
+  );
+  assert.match(sidecarCleanup, /for suffix in \('-journal', '-wal', '-shm'\)/);
+  assert.match(sidecarCleanup, /os\.lstat\(candidate\)/);
+  assert.match(sidecarCleanup, /stat\.S_ISREG/);
+  assert.match(sidecarCleanup, /stat\.S_ISLNK/);
+  assert.match(sidecarCleanup, /metadata\.st_nlink != 1/);
+  assert.match(sidecarCleanup, /metadata\.st_uid != 0 or metadata\.st_gid != 0/);
+  assert.match(sidecarCleanup, /stat\.S_IMODE\(metadata\.st_mode\) != 0o600/);
+  assert.match(sidecarCleanup, /suffix in \('-journal', '-wal'\) and metadata\.st_size != 0/);
+  assert.match(sidecarCleanup, /os\.unlink\(candidate\)/);
+  assert.match(sidecarCleanup, /os\.fsync\(directory\)/);
+  assert.match(sidecarCleanup, /QUIESCED_DATABASE_SIDECARS_REMOVED/);
   const install = sourceBetween(
     cutover,
     'install_parser_appliance() {',
