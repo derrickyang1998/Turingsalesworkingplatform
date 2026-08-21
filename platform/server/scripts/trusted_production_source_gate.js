@@ -1116,6 +1116,8 @@ function prepareTrustedRuntime(options) {
       npm_config_cache: cacheRoot,
       npm_config_audit: 'false',
       npm_config_fund: 'false',
+      npm_config_registry: 'https://registry.npmmirror.com',
+      npm_config_replace_registry_host: 'always',
       npm_config_update_notifier: 'false',
       npm_config_progress: 'false'
     };

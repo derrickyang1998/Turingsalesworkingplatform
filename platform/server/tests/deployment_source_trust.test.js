@@ -1278,6 +1278,8 @@ test('trusted runtime dependency scripts are cgroup-contained, egress-bounded, a
   assert.match(trustedGate, /readRuntimeUnitProperty\(unitName, 'MainPID'\)/);
   assert.match(trustedGate, /npm[\s\S]*?\['ci', '--omit=dev', '--ignore-scripts'\][\s\S]*?'fetch'/);
   assert.match(trustedGate, /npm[\s\S]*?\['rebuild', 'better-sqlite3'\][\s\S]*?'build'/);
+  assert.match(trustedGate, /npm_config_registry:\s*'https:\/\/registry\.npmmirror\.com'/);
+  assert.match(trustedGate, /npm_config_replace_registry_host:\s*'always'/);
   assert.match(trustedGate, /npm_config_nodedir:\s*'\/usr'/);
   assert.match(trustedGate, /pruneBetterSqliteBuildArtifacts/);
   assert.doesNotMatch(
