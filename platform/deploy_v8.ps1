@@ -3104,7 +3104,7 @@ systemd-run --quiet --wait --collect \
   --property="BindReadOnlyPaths=$ParserSourceRoot:/parser-source" \
   --property="BindPaths=$ParserDependencyCacheStage:/parser-cache" \
   --property="ReadWritePaths=/parser-cache" \
-  --property="RuntimeMaxSec=20m" \
+  --property="RuntimeMaxSec=30m" \
   --property="TimeoutStopSec=5" \
   -- /usr/bin/env -i \
     HOME=/tmp \
