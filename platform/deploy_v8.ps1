@@ -8218,7 +8218,8 @@ ReleaseTraversalRelaxed=0
 DependencyCopyByteReserveFloor="536870912"
 DependencyCopyInodeReserveFloor="16384"
 DependencyCopyCleanupArmed=0
-SchemaDb="$TestRoot/schema.db"
+SchemaRoot="$TestRoot/schema"
+SchemaDb="$SchemaRoot/schema.db"
 BrowserCache="$TestRoot/browser-cache"
 DependencyStageRoot="$TestRoot/dependency-stage"
 DependencyRoot="$DependencyStageRoot/root"
@@ -8692,7 +8693,7 @@ runuser -u "$GateUser" -- test -x "$ReleaseRoot/tmp"
 runuser -u "$GateUser" -- test ! -r "$ReleaseRoot/tmp"
 runuser -u "$GateUser" -- test ! -r "$CandidateDir"
 install -d -o "$GateUser" -g "$GateUser" -m 0700 \
-  "$TestRoot/home" "$TestRoot/uploads" "$TestRoot/tmp" "$TestRoot/nginx-prefix" "$TestRoot/npm-cache" \
+  "$TestRoot/home" "$TestRoot/uploads" "$TestRoot/tmp" "$TestRoot/nginx-prefix" "$TestRoot/npm-cache" "$SchemaRoot" \
   "$DependencyStageRoot" "$DependencyRoot" "$DependencyServerRoot"
 restore_playwright_cache
 install -o "$GateUser" -g "$GateUser" -m 0600 "$CandidateDir/package.json" "$DependencyRoot/package.json"
@@ -9219,6 +9220,9 @@ test "$(stat -c '%U:%G:%a:%h' "$SchemaDb")" = "$GateUser:$GateUser:444:1"
 SANITIZED_SOURCE_SHA256_BEFORE="$(sha256sum "$SchemaDb" | awk '{print $1}')"
 chown root:root "$SchemaDb"
 test "$(stat -c '%U:%G:%a:%h' "$SchemaDb")" = "root:root:444:1"
+chown root:root "$SchemaRoot"
+chmod 0555 "$SchemaRoot"
+test "$(stat -c '%U:%G:%a' "$SchemaRoot")" = "root:root:555"
 if find "$MigrationWork" -maxdepth 1 -type f -size +268435456c -print -quit | grep -q .; then
   echo "Trusted source verification exceeded its database size bound" >&2
   exit 1

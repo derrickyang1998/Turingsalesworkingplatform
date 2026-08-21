@@ -1247,6 +1247,9 @@ test('guarded deploy restores a pinned Playwright cache before dependency stagin
   assert.match(deploy, /runuser -u "\$GateUser" -- tar[\s\S]*--file "\$CacheSnapshot" --directory "\$CacheExtractRoot"/);
   assert.match(deploy, /mode=0711,uid=0,gid=0[\s\S]*root:root:711/);
   assert.match(deploy, /install -d -o "\$GateUser" -g "\$GateUser" -m 0700[\s\S]*"\$TestRoot\/npm-cache"[\s\S]*restore_playwright_cache/);
+  assert.match(deploy, /SchemaRoot="\$TestRoot\/schema"[\s\S]*SchemaDb="\$SchemaRoot\/schema\.db"/);
+  assert.match(deploy, /install -d -o "\$GateUser" -g "\$GateUser" -m 0700[\s\S]*"\$SchemaRoot"[\s\S]*restore_playwright_cache/);
+  assert.match(deploy, /chown root:root "\$SchemaDb"[\s\S]*chown root:root "\$SchemaRoot"[\s\S]*chmod 0555 "\$SchemaRoot"/);
   assert.doesNotMatch(deploy, /tar[^\n]*"\$PlaywrightCacheBundle"/);
   assert.match(deploy, /PLAYWRIGHT_DOWNLOAD_HOST=https:\/\/127\.0\.0\.1:9/);
   assert.ok(traversalIndex >= 0 && traversalIndex < restoreIndex);
