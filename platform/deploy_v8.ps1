@@ -8692,7 +8692,7 @@ runuser -u "$GateUser" -- test -x "$ReleaseRoot/tmp"
 runuser -u "$GateUser" -- test ! -r "$ReleaseRoot/tmp"
 runuser -u "$GateUser" -- test ! -r "$CandidateDir"
 install -d -o "$GateUser" -g "$GateUser" -m 0700 \
-  "$TestRoot/home" "$TestRoot/uploads" "$TestRoot/tmp" "$TestRoot/nginx-prefix" \
+  "$TestRoot/home" "$TestRoot/uploads" "$TestRoot/tmp" "$TestRoot/nginx-prefix" "$TestRoot/npm-cache" \
   "$DependencyStageRoot" "$DependencyRoot" "$DependencyServerRoot"
 restore_playwright_cache
 install -o "$GateUser" -g "$GateUser" -m 0600 "$CandidateDir/package.json" "$DependencyRoot/package.json"
