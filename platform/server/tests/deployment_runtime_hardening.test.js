@@ -1276,6 +1276,14 @@ test('pinned candidate uploads retry transient SSH resets without reopening loca
   assert.doesNotMatch(upload, /\bSourcePath\b|\bscp(?:\.exe)?\b/i);
 });
 
+test('parser installation emits root-only diagnostic evidence before production acceptance', () => {
+  const deploy = read('platform/deploy_v8.ps1');
+
+  assert.match(deploy, /TM_UPLOAD_SANDBOX_PROVISION_DIAGNOSTIC=1 "\$ParserLifecycleProvisioner" install/);
+  assert.match(deploy, /TM_UPLOAD_SANDBOX_PROVISION_DIAGNOSTIC=0 "\$ParserLifecycleProvisioner" verify/);
+  assert.match(deploy, /TM_UPLOAD_SANDBOX_PROVISION_DIAGNOSTIC=0 "\$ParserRollbackProvisioner" rollback/);
+});
+
 test('candidate verification cannot read production data and runs candidate code without external networking', () => {
   const deploy = read('platform/deploy_v8.ps1');
   const trustedGate = read('platform/server/scripts/trusted_production_source_gate.js');

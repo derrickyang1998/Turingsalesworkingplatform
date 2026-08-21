@@ -10196,7 +10196,7 @@ if not re.fullmatch(r'[0-9a-f]{64}', value):
 print(value)
 PY
 )"
-  TM_UPLOAD_SANDBOX_PROVISION_DIAGNOSTIC=0 "$ParserLifecycleProvisioner" install \
+  TM_UPLOAD_SANDBOX_PROVISION_DIAGNOSTIC=1 "$ParserLifecycleProvisioner" install \
     --snapshot-root "$ParserSnapshot" \
     --staged-runtime "$ParserRuntimeStage" \
     --source-root "$ParserSourceRoot" \
