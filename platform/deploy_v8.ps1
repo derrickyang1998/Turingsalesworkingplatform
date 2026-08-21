@@ -39,6 +39,12 @@ $EXPECTED_TRUSTED_PARSER_VERIFIER_SHA256 = "a8a6a2881bf05bdb171eaab4fa15666cf2c5
 $EXPECTED_TRUSTED_PUBLIC_GUARD_SHA256 = "d45fe8fcc01587aaa0e73eccfb9714c27801e232cb6c0effd6daedb703316d66"
 $EXPECTED_TRUSTED_MIGRATION_CLEANUP_HELPER_SHA256 = "d5f2befa902522dd9de3e9dd2397a99ee5e78ab1a1c6e526a27f14bb2829e1fa"
 $EXPECTED_TRUSTED_MIGRATION_CLEANUP_UNIT_SHA256 = "acc42c90010eca793d22b6ee517231872aed5c17b36f0222052351b97cfdb7c6"
+$PLAYWRIGHT_CACHE_BUNDLE_REMOTE_PATH = "/var/cache/turingmarket-playwright/chromium-1228-linux-x64-v1.tgz"
+$EXPECTED_PLAYWRIGHT_CACHE_BUNDLE_SHA256 = "aa86503de3215642b6956f78b2be18a05b6246c09b2cd5dffcc8bab12a12dcd2"
+$EXPECTED_PLAYWRIGHT_CACHE_BUNDLE_BYTES = 281725422
+$EXPECTED_PLAYWRIGHT_CACHE_FILES = 599
+$EXPECTED_PLAYWRIGHT_CACHE_DIRECTORIES = 20
+$EXPECTED_PLAYWRIGHT_CACHE_TREE_BYTES = 674450733
 $TRUSTED_SOURCE_INSTALL_ROOT = "/usr/local/libexec/turingmarket/production-source-trust/$EXPECTED_TRUSTED_SOURCE_GATE_SHA256/$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256"
 $TRUSTED_SOURCE_GATE_REMOTE_PATH = "$TRUSTED_SOURCE_INSTALL_ROOT/trusted_production_source_gate.js"
 $TRUSTED_SOURCE_MANIFEST_REMOTE_PATH = "$TRUSTED_SOURCE_INSTALL_ROOT/trusted_production_source_manifest.json"
@@ -8201,6 +8207,12 @@ TrustedDependencyRoot="$TrustedSourceRuntime/server/node_modules"
 ExpectedTrustedSourceGateSha256="__TRUSTED_SOURCE_GATE_SHA256__"
 ExpectedTrustedSourceManifestSha256="__TRUSTED_SOURCE_MANIFEST_SHA256__"
 ExpectedTrustedMigrationVerifierSha256="__TRUSTED_MIGRATION_VERIFIER_SHA256__"
+PlaywrightCacheBundle="__PLAYWRIGHT_CACHE_BUNDLE__"
+ExpectedPlaywrightCacheSha256="__PLAYWRIGHT_CACHE_SHA256__"
+ExpectedPlaywrightCacheBundleBytes="__PLAYWRIGHT_CACHE_BUNDLE_BYTES__"
+ExpectedPlaywrightCacheFiles="__PLAYWRIGHT_CACHE_FILES__"
+ExpectedPlaywrightCacheDirectories="__PLAYWRIGHT_CACHE_DIRECTORIES__"
+ExpectedPlaywrightCacheTreeBytes="__PLAYWRIGHT_CACHE_TREE_BYTES__"
 
 assert_trusted_source_gate() {
   local TrustedSourceGateReal TrustedSourceManifestReal
@@ -8216,6 +8228,158 @@ assert_trusted_source_gate() {
   TrustedSourceManifestReal="$(realpath -e "$TrustedSourceManifest")"
   case "$TrustedSourceGateReal" in "$CandidateDir"/*) return 1 ;; esac
   case "$TrustedSourceManifestReal" in "$CandidateDir"/*) return 1 ;; esac
+}
+
+restore_playwright_cache() {
+  local CacheSnapshot="$TestRoot/.playwright-cache.bundle.tgz"
+  local CacheExtractRoot="$TestRoot/.playwright-cache-extract"
+  local CacheStage="$CacheExtractRoot/cache"
+  test "$PlaywrightCacheBundle" = /var/cache/turingmarket-playwright/chromium-1228-linux-x64-v1.tgz
+  test -f "$PlaywrightCacheBundle"
+  test ! -L "$PlaywrightCacheBundle"
+  test "$(stat -c '%U:%G:%a:%h' "$PlaywrightCacheBundle")" = "root:root:444:1"
+  test "$(stat -c '%s' "$PlaywrightCacheBundle")" = "$ExpectedPlaywrightCacheBundleBytes"
+  python3 - "$PlaywrightCacheBundle" <<'PY'
+import os
+import stat
+import sys
+
+path = sys.argv[1]
+expected = '/var/cache/turingmarket-playwright/chromium-1228-linux-x64-v1.tgz'
+if path != expected or os.path.realpath(path) != expected:
+    raise SystemExit('Playwright cache bundle path is not canonical')
+for directory in ('/var', '/var/cache', '/var/cache/turingmarket-playwright'):
+    value = os.lstat(directory)
+    if (not stat.S_ISDIR(value.st_mode) or stat.S_ISLNK(value.st_mode) or
+            value.st_uid != 0 or value.st_gid != 0 or stat.S_IMODE(value.st_mode) & 0o022):
+        raise SystemExit('Playwright cache bundle ancestor is unsafe')
+value = os.lstat(path)
+if (not stat.S_ISREG(value.st_mode) or stat.S_ISLNK(value.st_mode) or
+        value.st_uid != 0 or value.st_gid != 0 or value.st_nlink != 1 or
+        stat.S_IMODE(value.st_mode) != 0o444):
+    raise SystemExit('Playwright cache bundle identity is unsafe')
+PY
+  test ! -e "$BrowserCache"
+  test ! -L "$BrowserCache"
+  test ! -e "$CacheSnapshot"
+  test ! -L "$CacheSnapshot"
+  test ! -e "$CacheExtractRoot"
+  test ! -L "$CacheExtractRoot"
+  install -o root -g root -m 0444 -- "$PlaywrightCacheBundle" "$CacheSnapshot"
+  test "$(stat -c '%U:%G:%a:%h' "$CacheSnapshot")" = "root:root:444:1"
+  test "$(stat -c '%s' "$CacheSnapshot")" = "$ExpectedPlaywrightCacheBundleBytes"
+  test "$(sha256sum "$CacheSnapshot" | awk '{print $1}')" = "$ExpectedPlaywrightCacheSha256"
+  python3 - \
+    "$CacheSnapshot" \
+    "$ExpectedPlaywrightCacheFiles" \
+    "$ExpectedPlaywrightCacheDirectories" \
+    "$ExpectedPlaywrightCacheTreeBytes" <<'PY'
+import pathlib
+import stat
+import sys
+import tarfile
+
+archive = sys.argv[1]
+expected_files, expected_directories, expected_bytes = map(int, sys.argv[2:])
+files = 0
+directories = 0
+total_bytes = 0
+seen = set()
+with tarfile.open(archive, mode='r:gz') as handle:
+    for member in handle.getmembers():
+        name = member.name.rstrip('/')
+        path = pathlib.PurePosixPath(name)
+        if (not name or '\\' in name or path.is_absolute() or
+                tuple(path.parts)[0] != 'cache' or
+                any(part in ('', '.', '..') for part in path.parts) or
+                path.as_posix() != name or name in seen):
+            raise SystemExit('Playwright cache archive path is unsafe')
+        seen.add(name)
+        if member.mode & 0o7022:
+            raise SystemExit('Playwright cache archive mode is unsafe')
+        if member.isdir():
+            directories += 1
+        elif member.isreg():
+            files += 1
+            total_bytes += member.size
+        else:
+            raise SystemExit('Playwright cache archive member type is unsafe')
+if 'cache' not in seen:
+    raise SystemExit('Playwright cache archive root is missing')
+if (files, directories, total_bytes) != (expected_files, expected_directories, expected_bytes):
+    raise SystemExit('Playwright cache archive measurement mismatch')
+PY
+  install -d -o "$GateUser" -g "$GateUser" -m 0700 "$CacheExtractRoot"
+  runuser -u "$GateUser" -- tar \
+    --extract --gzip --file "$CacheSnapshot" --directory "$CacheExtractRoot" \
+    --no-same-owner --no-same-permissions --delay-directory-restore
+  test -d "$CacheStage"
+  test ! -L "$CacheStage"
+  test "$(find "$CacheExtractRoot" -mindepth 1 -maxdepth 1 -printf '%f\n')" = cache
+  mv -T "$CacheStage" "$BrowserCache"
+  rmdir "$CacheExtractRoot"
+  rm -f -- "$CacheSnapshot"
+  python3 - \
+    "$BrowserCache" \
+    "$TrustedRuntimeBuildUid" \
+    "$TrustedRuntimeBuildGid" \
+    "$ExpectedPlaywrightCacheFiles" \
+    "$ExpectedPlaywrightCacheDirectories" \
+    "$ExpectedPlaywrightCacheTreeBytes" <<'PY'
+import os
+import stat
+import sys
+
+root = sys.argv[1]
+expected_uid, expected_gid, expected_files, expected_directories, expected_bytes = map(int, sys.argv[2:])
+expected_children = {'.links', 'chromium-1228', 'chromium_headless_shell-1228', 'ffmpeg-1011'}
+if os.path.realpath(root) != root or set(os.listdir(root)) != expected_children:
+    raise SystemExit('Playwright cache root is invalid')
+files = 0
+directories = 0
+total_bytes = 0
+for current, child_directories, child_files in os.walk(root, topdown=True, followlinks=False):
+    current_status = os.lstat(current)
+    if (not stat.S_ISDIR(current_status.st_mode) or stat.S_ISLNK(current_status.st_mode) or
+            current_status.st_uid != expected_uid or current_status.st_gid != expected_gid or
+            stat.S_IMODE(current_status.st_mode) & 0o022):
+        raise SystemExit('Playwright cache directory identity is unsafe')
+    directories += 1
+    for name in child_directories:
+        value = os.lstat(os.path.join(current, name))
+        if not stat.S_ISDIR(value.st_mode) or stat.S_ISLNK(value.st_mode):
+            raise SystemExit('Playwright cache contains an unsafe directory')
+    for name in child_files:
+        path = os.path.join(current, name)
+        value = os.lstat(path)
+        if (not stat.S_ISREG(value.st_mode) or stat.S_ISLNK(value.st_mode) or value.st_nlink != 1 or
+                value.st_uid != expected_uid or value.st_gid != expected_gid or
+                stat.S_IMODE(value.st_mode) & 0o022):
+            raise SystemExit('Playwright cache contains an unsafe file')
+        files += 1
+        total_bytes += value.st_size
+for relative in (
+    'chromium-1228/INSTALLATION_COMPLETE',
+    'chromium_headless_shell-1228/INSTALLATION_COMPLETE',
+    'ffmpeg-1011/INSTALLATION_COMPLETE',
+):
+    marker = os.lstat(os.path.join(root, relative))
+    if not stat.S_ISREG(marker.st_mode) or marker.st_size != 0:
+        raise SystemExit('Playwright cache marker is invalid')
+for relative in (
+    'chromium-1228/chrome-linux64/chrome',
+    'chromium_headless_shell-1228/chrome-headless-shell-linux64/chrome-headless-shell',
+    'ffmpeg-1011/ffmpeg-linux',
+):
+    executable = os.lstat(os.path.join(root, relative))
+    if not stat.S_ISREG(executable.st_mode) or not stat.S_IMODE(executable.st_mode) & 0o100:
+        raise SystemExit('Playwright cache executable is invalid')
+if (files, directories, total_bytes) != (expected_files, expected_directories, expected_bytes):
+    raise SystemExit('Playwright cache tree measurement mismatch')
+PY
+  sync -f "$BrowserCache"
+  sync -f "$TestRoot"
+  printf '%s\n' 'PLAYWRIGHT_CACHE_RESTORED'
 }
 
 validate_gate_identity() {
@@ -8309,6 +8473,7 @@ command -v awk >/dev/null
 command -v tail >/dev/null
 command -v tr >/dev/null
 command -v python3 >/dev/null
+command -v tar >/dev/null
 DependencyUnit="turingmarket-candidate-dependency-__STAMP__"
 DependencyBuildUnit="turingmarket-candidate-dependency-build-__STAMP__"
 OfflineGateUnit="turingmarket-candidate-offline-__STAMP__"
@@ -8481,9 +8646,10 @@ test -d "$TrustedDependencyRoot"
 
 rm -rf -- "$TestRoot"
 install -d -o root -g root -m 0700 "$TestRoot"
-mount -t tmpfs -o "nodev,nosuid,size=$TestRootMaxBytes,nr_inodes=$TestRootMaxInodes,mode=0700,uid=$TrustedRuntimeBuildUid,gid=$TrustedRuntimeBuildGid" tmpfs "$TestRoot"
+mount -t tmpfs -o "nodev,nosuid,size=$TestRootMaxBytes,nr_inodes=$TestRootMaxInodes,mode=0711,uid=0,gid=0" tmpfs "$TestRoot"
 TestRootMounted=1
 test "$(findmnt -n -o FSTYPE --target "$TestRoot")" = "tmpfs"
+test "$(stat -c '%U:%G:%a' "$TestRoot")" = "root:root:711"
 ActualTestRootBytes="$(df -B1 --output=size "$TestRoot" | tail -n 1 | tr -d ' ')"
 ActualTestRootInodes="$(df --output=itotal "$TestRoot" | tail -n 1 | tr -d ' ')"
 [[ "$ActualTestRootBytes" =~ ^[1-9][0-9]*$ ]]
@@ -8493,6 +8659,7 @@ test "$ActualTestRootInodes" -le "$TestRootMaxInodes"
 install -d -o "$GateUser" -g "$GateUser" -m 0700 \
   "$TestRoot/home" "$TestRoot/uploads" "$TestRoot/tmp" "$TestRoot/nginx-prefix" \
   "$DependencyStageRoot" "$DependencyRoot" "$DependencyServerRoot"
+restore_playwright_cache
 install -o "$GateUser" -g "$GateUser" -m 0600 "$CandidateDir/package.json" "$DependencyRoot/package.json"
 install -o "$GateUser" -g "$GateUser" -m 0600 "$CandidateDir/package-lock.json" "$DependencyRoot/package-lock.json"
 install -o "$GateUser" -g "$GateUser" -m 0600 "$CandidateDir/server/package.json" "$DependencyServerRoot/package.json"
@@ -8560,6 +8727,7 @@ timeout --signal=KILL 20m systemd-run --quiet --wait --pipe --unit="$DependencyU
     HOME="$TestRoot/home" \
     PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
     PLAYWRIGHT_BROWSERS_PATH="$BrowserCache" \
+    PLAYWRIGHT_DOWNLOAD_HOST=https://127.0.0.1:9 \
     npm_config_cache="$TestRoot/npm-cache" \
     npm_config_registry=https://registry.npmmirror.com \
     npm_config_replace_registry_host=always \
@@ -9422,6 +9590,12 @@ echo "CANDIDATE_OK"
     $candidateGate = $candidateGate.Replace('__TRUSTED_SOURCE_GATE_SHA256__', $EXPECTED_TRUSTED_SOURCE_GATE_SHA256)
     $candidateGate = $candidateGate.Replace('__TRUSTED_SOURCE_MANIFEST_SHA256__', $EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256)
     $candidateGate = $candidateGate.Replace('__TRUSTED_MIGRATION_VERIFIER_SHA256__', $EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256)
+    $candidateGate = $candidateGate.Replace('__PLAYWRIGHT_CACHE_BUNDLE__', $PLAYWRIGHT_CACHE_BUNDLE_REMOTE_PATH)
+    $candidateGate = $candidateGate.Replace('__PLAYWRIGHT_CACHE_SHA256__', $EXPECTED_PLAYWRIGHT_CACHE_BUNDLE_SHA256)
+    $candidateGate = $candidateGate.Replace('__PLAYWRIGHT_CACHE_BUNDLE_BYTES__', [string]$EXPECTED_PLAYWRIGHT_CACHE_BUNDLE_BYTES)
+    $candidateGate = $candidateGate.Replace('__PLAYWRIGHT_CACHE_FILES__', [string]$EXPECTED_PLAYWRIGHT_CACHE_FILES)
+    $candidateGate = $candidateGate.Replace('__PLAYWRIGHT_CACHE_DIRECTORIES__', [string]$EXPECTED_PLAYWRIGHT_CACHE_DIRECTORIES)
+    $candidateGate = $candidateGate.Replace('__PLAYWRIGHT_CACHE_TREE_BYTES__', [string]$EXPECTED_PLAYWRIGHT_CACHE_TREE_BYTES)
     $candidateGate = $candidateGate.Replace('__STAMP__', $stamp)
     Invoke-RemoteBash -Script $candidateGate -FailureMessage "Remote candidate validation failed" -TimeoutSeconds $CANDIDATE_GATE_TIMEOUT_SECONDS -RequireDeploymentLock
     Assert-RemoteCandidateReady

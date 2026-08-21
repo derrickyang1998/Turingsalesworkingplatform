@@ -1227,6 +1227,29 @@ test('guarded deploy runs the full gate unprivileged and seals only external-sta
   assert.doesNotMatch(deploy, /for path in \.env server\/db uploads tmp/);
 });
 
+test('guarded deploy restores a pinned Playwright cache before dependency staging', () => {
+  const deploy = read('platform/deploy_v8.ps1');
+  const restoreIndex = deploy.indexOf('\nrestore_playwright_cache\n');
+  const dependencyIndex = deploy.indexOf('node node_modules/playwright-deploy/cli.js install chromium');
+
+  assert.match(deploy, /\$PLAYWRIGHT_CACHE_BUNDLE_REMOTE_PATH = "\/var\/cache\/turingmarket-playwright\/chromium-1228-linux-x64-v1\.tgz"/);
+  assert.match(deploy, /\$EXPECTED_PLAYWRIGHT_CACHE_BUNDLE_SHA256 = "aa86503de3215642b6956f78b2be18a05b6246c09b2cd5dffcc8bab12a12dcd2"/);
+  assert.match(deploy, /\$EXPECTED_PLAYWRIGHT_CACHE_BUNDLE_BYTES = 281725422/);
+  assert.match(deploy, /\$EXPECTED_PLAYWRIGHT_CACHE_FILES = 599/);
+  assert.match(deploy, /\$EXPECTED_PLAYWRIGHT_CACHE_DIRECTORIES = 20/);
+  assert.match(deploy, /\$EXPECTED_PLAYWRIGHT_CACHE_TREE_BYTES = 674450733/);
+  assert.match(deploy, /stat -c '%U:%G:%a:%h' "\$PlaywrightCacheBundle"[\s\S]*root:root:444:1/);
+  assert.match(deploy, /for directory in \('\/var', '\/var\/cache', '\/var\/cache\/turingmarket-playwright'\)/);
+  assert.match(deploy, /install -o root -g root -m 0444 -- "\$PlaywrightCacheBundle" "\$CacheSnapshot"/);
+  assert.match(deploy, /sha256sum "\$CacheSnapshot"[\s\S]*ExpectedPlaywrightCacheSha256/);
+  assert.match(deploy, /tarfile\.open\(archive, mode='r:gz'\)[\s\S]*member\.isdir\(\)[\s\S]*member\.isreg\(\)/);
+  assert.match(deploy, /runuser -u "\$GateUser" -- tar[\s\S]*--file "\$CacheSnapshot" --directory "\$CacheExtractRoot"/);
+  assert.match(deploy, /mode=0711,uid=0,gid=0[\s\S]*root:root:711/);
+  assert.doesNotMatch(deploy, /tar[^\n]*"\$PlaywrightCacheBundle"/);
+  assert.match(deploy, /PLAYWRIGHT_DOWNLOAD_HOST=https:\/\/127\.0\.0\.1:9/);
+  assert.ok(restoreIndex >= 0 && restoreIndex < dependencyIndex);
+});
+
 test('candidate verification cannot read production data and runs candidate code without external networking', () => {
   const deploy = read('platform/deploy_v8.ps1');
   const trustedGate = read('platform/server/scripts/trusted_production_source_gate.js');
