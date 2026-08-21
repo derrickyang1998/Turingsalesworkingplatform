@@ -8656,6 +8656,17 @@ ActualTestRootInodes="$(df --output=itotal "$TestRoot" | tail -n 1 | tr -d ' ')"
 [[ "$ActualTestRootInodes" =~ ^[1-9][0-9]*$ ]]
 test "$ActualTestRootBytes" -le "$TestRootMaxBytes"
 test "$ActualTestRootInodes" -le "$TestRootMaxInodes"
+test "$(stat -c '%U:%G:%a' "$ReleaseRoot")" = "root:root:700"
+test "$(stat -c '%U:%G:%a' "$ReleaseRoot/tmp")" = "root:root:700"
+test "$(stat -c '%U:%G:%a' "$CandidateDir")" = "root:root:700"
+ReleaseTraversalRelaxed=1
+chmod 0711 "$ReleaseRoot"
+chmod 0711 "$ReleaseRoot/tmp"
+runuser -u "$GateUser" -- test -x "$ReleaseRoot"
+runuser -u "$GateUser" -- test ! -r "$ReleaseRoot"
+runuser -u "$GateUser" -- test -x "$ReleaseRoot/tmp"
+runuser -u "$GateUser" -- test ! -r "$ReleaseRoot/tmp"
+runuser -u "$GateUser" -- test ! -r "$CandidateDir"
 install -d -o "$GateUser" -g "$GateUser" -m 0700 \
   "$TestRoot/home" "$TestRoot/uploads" "$TestRoot/tmp" "$TestRoot/nginx-prefix" \
   "$DependencyStageRoot" "$DependencyRoot" "$DependencyServerRoot"
@@ -8672,16 +8683,6 @@ assert_canonical_candidate
 runuser -u "$GateUser" -- test ! -r "$ProductionBackupDb"
 runuser -u "$GateUser" -- test ! -r "$ProductionLiveDb"
 command -v ip >/dev/null
-test "$(stat -c '%U:%G:%a' "$ReleaseRoot")" = "root:root:700"
-test "$(stat -c '%U:%G:%a' "$ReleaseRoot/tmp")" = "root:root:700"
-test "$(stat -c '%U:%G:%a' "$CandidateDir")" = "root:root:700"
-ReleaseTraversalRelaxed=1
-chmod 0711 "$ReleaseRoot"
-chmod 0711 "$ReleaseRoot/tmp"
-runuser -u "$GateUser" -- test -x "$ReleaseRoot"
-runuser -u "$GateUser" -- test ! -r "$ReleaseRoot"
-runuser -u "$GateUser" -- test -x "$ReleaseRoot/tmp"
-runuser -u "$GateUser" -- test ! -r "$ReleaseRoot/tmp"
 runuser -u "$GateUser" -- test ! -r "$CandidateDir"
 runuser -u "$GateUser" -- test -d "$DependencyStageRoot"
 

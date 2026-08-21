@@ -1229,6 +1229,7 @@ test('guarded deploy runs the full gate unprivileged and seals only external-sta
 
 test('guarded deploy restores a pinned Playwright cache before dependency staging', () => {
   const deploy = read('platform/deploy_v8.ps1');
+  const traversalIndex = deploy.indexOf('chmod 0711 "$ReleaseRoot"');
   const restoreIndex = deploy.indexOf('\nrestore_playwright_cache\n');
   const dependencyIndex = deploy.indexOf('node node_modules/playwright-deploy/cli.js install chromium');
 
@@ -1247,6 +1248,7 @@ test('guarded deploy restores a pinned Playwright cache before dependency stagin
   assert.match(deploy, /mode=0711,uid=0,gid=0[\s\S]*root:root:711/);
   assert.doesNotMatch(deploy, /tar[^\n]*"\$PlaywrightCacheBundle"/);
   assert.match(deploy, /PLAYWRIGHT_DOWNLOAD_HOST=https:\/\/127\.0\.0\.1:9/);
+  assert.ok(traversalIndex >= 0 && traversalIndex < restoreIndex);
   assert.ok(restoreIndex >= 0 && restoreIndex < dependencyIndex);
 });
 
