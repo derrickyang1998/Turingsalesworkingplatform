@@ -1252,6 +1252,20 @@ test('guarded deploy restores a pinned Playwright cache before dependency stagin
   assert.ok(restoreIndex >= 0 && restoreIndex < dependencyIndex);
 });
 
+test('pinned candidate uploads retry transient SSH resets without reopening local source files', () => {
+  const deploy = read('platform/deploy_v8.ps1');
+  const upload = deploy.match(/function Invoke-PinnedDeploymentUpload[\s\S]*?(?=function Assert-TrustedProductionSourceArtifacts)/)?.[0] || '';
+
+  assert.match(upload, /\$maxAttempts = 4/);
+  assert.match(upload, /for \(\$attempt = 1; \$attempt -le \$maxAttempts; \$attempt\+\+\)/);
+  assert.match(upload, /rm -f -- "`\$Temporary"/);
+  assert.match(upload, /test "`\$\(sha256sum "`\$Target"[\s\S]*exit 0/);
+  assert.match(upload, /ServerAliveInterval=15[\s\S]*ServerAliveCountMax=4[\s\S]*ConnectTimeout=30/);
+  assert.match(upload, /catch[\s\S]*Start-Sleep -Seconds/);
+  assert.equal((upload.match(/Invoke-NativeWithPinnedInput/g) || []).length, 1);
+  assert.doesNotMatch(upload, /\bSourcePath\b|\bscp(?:\.exe)?\b/i);
+});
+
 test('candidate verification cannot read production data and runs candidate code without external networking', () => {
   const deploy = read('platform/deploy_v8.ps1');
   const trustedGate = read('platform/server/scripts/trusted_production_source_gate.js');

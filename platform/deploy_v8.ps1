@@ -7816,24 +7816,48 @@ set -euo pipefail
 Target=$remotePathLiteral
 Temporary=$temporaryPathLiteral
 ExpectedSha256=$expectedSha256Literal
-test ! -e "`$Temporary"
 test -d "`$(dirname "`$Target")"
+if [ -f "`$Target" ] && [ ! -L "`$Target" ] && \
+   test "`$(sha256sum "`$Target" | awk '{print `$1}')" = "`$ExpectedSha256"; then
+  rm -f -- "`$Temporary"
+  exit 0
+fi
+test ! -L "`$Target"
+rm -f -- "`$Temporary"
 cat > "`$Temporary"
 chmod 0600 "`$Temporary"
 test "`$(sha256sum "`$Temporary" | awk '{print `$1}')" = "`$ExpectedSha256"
 mv -f "`$Temporary" "`$Target"
 "@
-    Invoke-NativeWithPinnedInput `
-        -Record $Record `
-        -FileName 'ssh' `
-        -ArgumentList @(
-            '-i', $SSH_KEY,
-            '-o', 'BatchMode=yes',
-            '-o', 'StrictHostKeyChecking=yes',
-            "root@${SERVER}",
-            $remoteCommand
-        ) `
-        -FailureMessage "Candidate pinned upload failed: $($Record.RemoteRelativePath)"
+    $maxAttempts = 4
+    for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+        try {
+            Invoke-NativeWithPinnedInput `
+                -Record $Record `
+                -FileName 'ssh' `
+                -ArgumentList @(
+                    '-i', $SSH_KEY,
+                    '-o', 'BatchMode=yes',
+                    '-o', 'StrictHostKeyChecking=yes',
+                    '-o', 'ServerAliveInterval=15',
+                    '-o', 'ServerAliveCountMax=4',
+                    '-o', 'ConnectTimeout=30',
+                    '-o', 'ConnectionAttempts=3',
+                    "root@${SERVER}",
+                    $remoteCommand
+                ) `
+                -FailureMessage "Candidate pinned upload failed: $($Record.RemoteRelativePath)"
+            return
+        }
+        catch {
+            if ($attempt -ge $maxAttempts) {
+                throw
+            }
+            $delaySeconds = [Math]::Min(8, 2 * $attempt)
+            Write-Host "Candidate pinned upload retry $attempt/$maxAttempts after transport failure: $($Record.RemoteRelativePath)"
+            Start-Sleep -Seconds $delaySeconds
+        }
+    }
 }
 
 function Assert-TrustedProductionSourceArtifacts {
