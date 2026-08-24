@@ -2080,7 +2080,8 @@ module.exports = Object.freeze({
   validateConcreteSystemCallPolicyEvidence,
   observeBuildUnit,
   validateBuildMountIsolation,
-  relativeRequireTargets
+  relativeRequireTargets,
+  diagnosticFailureCode
 });
 
 if (require.main === module) {

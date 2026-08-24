@@ -776,11 +776,15 @@ test('trusted parser verifier rejects duplicate CLI flags', (t) => {
     '--require-root-ownership', 'false'
   ], {
     cwd: serverRoot,
-    encoding: 'utf8'
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      TM_UPLOAD_SANDBOX_PROVISION_DIAGNOSTIC: '0'
+    }
   });
 
   assert.equal(execution.status, 1, execution.stderr || execution.stdout);
-  assert.match(execution.stderr, /trusted parser runtime verifier failed/i);
+  assert.equal(execution.stderr, 'trusted parser runtime verifier failed\n');
 });
 
 test('trusted parser verifier exposes only a bounded failure code during provisioning diagnostics', () => {
@@ -801,6 +805,34 @@ test('trusted parser verifier exposes only a bounded failure code during provisi
   assert.equal(execution.status, 1, execution.stderr || execution.stdout);
   assert.equal(execution.stderr, 'trusted parser runtime verifier failed: cli-command\n');
   assert.doesNotMatch(execution.stderr, /private-path|should-not-leak|tmp/i);
+});
+
+test('trusted parser verifier maps every diagnostic branch to a fixed allowlisted code', () => {
+  const verifier = require(trustedVerifierPath);
+  const cases = [
+    ['unknown command', 'cli-command'],
+    ['invalid bind-acceptance arguments', 'cli-arguments'],
+    ['trusted parser verifier SHA-256 mismatch', 'verifier-identity'],
+    ['manifest SHA-256 mismatch', 'manifest-identity'],
+    ['raw observations are required', 'self-test-envelope'],
+    ['runtime tree observation mismatch', 'runtime-observation'],
+    ['runtime tree identity mismatch', 'runtime-identity'],
+    ['effective property identity mismatch', 'self-test-policy'],
+    ['installed systemd manager state changed', 'installed-manager-race'],
+    ['installed systemd unit identity mismatch', 'installed-unit-identity'],
+    ['concrete system call policy evidence mismatch', 'installed-syscall-policy'],
+    ['installed systemd policy mismatch', 'installed-policy'],
+    ['build source artifact identity mismatch', 'build-source-identity'],
+    ['build unit properties mismatch', 'build-policy'],
+    ['build boundary unit mismatch', 'build-evidence'],
+    ['evidence file JSON mismatch', 'evidence-format'],
+    ['/tmp/private-path?token=should-not-leak', 'internal']
+  ];
+
+  for (const [message, expected] of cases) {
+    assert.equal(verifier.diagnosticFailureCode(new Error(message)), expected);
+  }
+  assert.equal(verifier.diagnosticFailureCode('/tmp/private-path'), 'internal');
 });
 
 test('trusted parser verifier validates escaped and raw surrogate pairs', () => {
