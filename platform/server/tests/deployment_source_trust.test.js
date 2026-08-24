@@ -1241,6 +1241,43 @@ test('deploy pins trusted sanitizer closure and never executes candidate sanitiz
   assert.ok(deploy.indexOf('pm2 restart ecosystem.config.js', deploy.indexOf(gateCall[0])) > deploy.indexOf(gateCall[0]));
 });
 
+test('live database adoption keeps the source digest distinct from the recovery snapshot digest', () => {
+  const deploy = read(deployPath);
+  const cutoverMatch = deploy.match(/\$cutoverGate\s*=\s*@'\r?\n([\s\S]*?)\r?\n'@/);
+  assert.ok(cutoverMatch, 'cutover gate must exist');
+  const cutover = cutoverMatch[1];
+  const snapshot = cutover.match(
+    /create_cutover_snapshot\(\) \{([\s\S]*?)\n\}\n\nadopt_legacy_database_if_required\(\)/
+  );
+  const adoption = cutover.match(
+    /adopt_legacy_database_if_required\(\) \{([\s\S]*?)\n\}\n\narchive_prior_current_marker\(\)/
+  );
+  assert.ok(snapshot, 'cutover snapshot helper must exist');
+  assert.ok(adoption, 'live database adoption helper must exist');
+
+  assert.match(snapshot[1], /DatabaseSourceShaBefore="\$\(sha256sum "\$DatabasePath"/);
+  assert.match(snapshot[1], /test "\$DatabaseSourceShaBefore" = "\$DatabaseSourceShaAfter"/);
+  assert.doesNotMatch(
+    snapshot[1],
+    /\blocal\b[^\r\n]*\bDatabaseSourceShaBefore\b/,
+    'source digest must remain available to the later adoption helper'
+  );
+  assert.match(adoption[1], /DatabaseSourceSha256="\$DatabaseSourceShaBefore"/);
+  assert.match(
+    adoption[1],
+    /DatabaseSnapshotSha256="\$\(awk 'NR == 1 \{print \$1\}' "\$CutoverSnapshot\/database\.sha256"\)"/
+  );
+  assert.match(
+    adoption[1],
+    /sha256sum "\$CutoverSnapshot\/database\/turingmarket\.db"[^\r\n]*= "\$DatabaseSnapshotSha256"/
+  );
+  assert.match(adoption[1], /sha256sum "\$DatabasePath"[^\r\n]*= "\$DatabaseSourceSha256"/);
+  assert.doesNotMatch(
+    adoption[1],
+    /sha256sum "\$CutoverSnapshot\/database\/turingmarket\.db"[^\r\n]*= "\$DatabaseSourceSha256"/
+  );
+});
+
 test('trusted runtime dependency scripts are cgroup-contained, egress-bounded, and drained before sealing', () => {
   const deploy = read(deployPath);
   const trustedGate = read(trustedGatePath);

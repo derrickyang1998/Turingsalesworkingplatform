@@ -10699,12 +10699,14 @@ NODE
 }
 
 adopt_legacy_database_if_required() {
-  local DatabaseSourceSha256 AdoptionStatus AdoptionProjection DatabaseAdoptionApplied DatabaseAdoptionOutputSha
+  local DatabaseSourceSha256 DatabaseSnapshotSha256 AdoptionStatus AdoptionProjection DatabaseAdoptionApplied DatabaseAdoptionOutputSha
   test -f "$CutoverSnapshot/database/turingmarket.db"
   test ! -L "$CutoverSnapshot/database/turingmarket.db"
-  DatabaseSourceSha256="$(awk 'NR == 1 {print $1}' "$CutoverSnapshot/database.sha256")"
+  DatabaseSourceSha256="$DatabaseSourceShaBefore"
+  DatabaseSnapshotSha256="$(awk 'NR == 1 {print $1}' "$CutoverSnapshot/database.sha256")"
   [[ "$DatabaseSourceSha256" =~ ^[0-9a-f]{64}$ ]]
-  test "$(sha256sum "$CutoverSnapshot/database/turingmarket.db" | awk '{print $1}')" = "$DatabaseSourceSha256"
+  [[ "$DatabaseSnapshotSha256" =~ ^[0-9a-f]{64}$ ]]
+  test "$(sha256sum "$CutoverSnapshot/database/turingmarket.db" | awk '{print $1}')" = "$DatabaseSnapshotSha256"
   test "$(sha256sum "$DatabasePath" | awk '{print $1}')" = "$DatabaseSourceSha256"
   test ! -e "$DatabasePath-wal"
   test ! -e "$DatabasePath-shm"
