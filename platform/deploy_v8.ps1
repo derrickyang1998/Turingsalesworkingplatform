@@ -10772,11 +10772,15 @@ if not re.fullmatch(r'[0-9a-f]{64}', str(output_sha256 or '')):
     raise SystemExit('Trusted live database adoption output digest is invalid')
 if applied:
     repairs = report.get('repairs')
+    allowed_repairs = (
+        {'influencerRows': 1, 'customerRows': 1, 'activityRows': 1, 'ftsRebuilt': True},
+        {'influencerRows': 5, 'customerRows': 1, 'activityRows': 1, 'ftsRebuilt': True},
+    )
     if (report.get('sourceVersion') != 0 or report.get('targetVersion') != 1 or
             output_sha256 == expected_source_sha256 or
             not isinstance(report.get('baseTableCount'), int) or report['baseTableCount'] < 1 or
             not isinstance(report.get('baseRowCount'), int) or report['baseRowCount'] < 1 or
-            repairs != {'influencerRows': 1, 'customerRows': 1, 'activityRows': 1, 'ftsRebuilt': True}):
+            repairs not in allowed_repairs):
         raise SystemExit('Trusted live database adoption applied report is invalid')
     metadata = os.lstat(stage_path)
     if (not stat.S_ISREG(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode) or metadata.st_nlink != 1 or

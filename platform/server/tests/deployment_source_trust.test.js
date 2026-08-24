@@ -1278,6 +1278,22 @@ test('live database adoption keeps the source digest distinct from the recovery 
   );
 });
 
+test('live database adoption accepts only the frozen repair report profiles', () => {
+  const deploy = read(deployPath);
+  const cutoverMatch = deploy.match(/\$cutoverGate\s*=\s*@'\r?\n([\s\S]*?)\r?\n'@/);
+  assert.ok(cutoverMatch, 'cutover gate must exist');
+  const adoption = cutoverMatch[1].match(
+    /adopt_legacy_database_if_required\(\) \{([\s\S]*?)\n\}\n\narchive_prior_current_marker\(\)/
+  );
+  assert.ok(adoption, 'live database adoption helper must exist');
+
+  assert.match(adoption[1], /allowed_repairs = \(/);
+  assert.match(adoption[1], /'influencerRows': 1/);
+  assert.match(adoption[1], /'influencerRows': 5/);
+  assert.match(adoption[1], /repairs not in allowed_repairs/);
+  assert.doesNotMatch(adoption[1], /repairs != \{'influencerRows': 1/);
+});
+
 test('trusted runtime dependency scripts are cgroup-contained, egress-bounded, and drained before sealing', () => {
   const deploy = read(deployPath);
   const trustedGate = read(trustedGatePath);
