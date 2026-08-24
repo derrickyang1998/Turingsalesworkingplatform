@@ -783,6 +783,26 @@ test('trusted parser verifier rejects duplicate CLI flags', (t) => {
   assert.match(execution.stderr, /trusted parser runtime verifier failed/i);
 });
 
+test('trusted parser verifier exposes only a bounded failure code during provisioning diagnostics', () => {
+  const execution = spawnSync(process.execPath, [
+    trustedVerifierPath,
+    'unknown-command',
+    '--private-path',
+    '/tmp/should-not-leak'
+  ], {
+    cwd: serverRoot,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      TM_UPLOAD_SANDBOX_PROVISION_DIAGNOSTIC: '1'
+    }
+  });
+
+  assert.equal(execution.status, 1, execution.stderr || execution.stdout);
+  assert.equal(execution.stderr, 'trusted parser runtime verifier failed: cli-command\n');
+  assert.doesNotMatch(execution.stderr, /private-path|should-not-leak|tmp/i);
+});
+
 test('trusted parser verifier validates escaped and raw surrogate pairs', () => {
   const verifier = require(trustedVerifierPath);
   const expected = String.fromCodePoint(0x1f600);
@@ -2373,16 +2393,21 @@ test('deployment validators accept and bind the complete parser build unit evide
   }
 });
 
-test('deployment clears parser lifecycle diagnostics at every privileged invocation', () => {
+test('deployment enables parser lifecycle diagnostics only for the guarded install', () => {
   const deploy = read(path.join(serverRoot, '..', 'deploy_v8.ps1'));
   const privilegedInvocations = deploy.match(
-    /TM_UPLOAD_SANDBOX_PROVISION_DIAGNOSTIC=0 "\$Parser(?:Rollback|Lifecycle)Provisioner" (?:install|rollback|verify|snapshot)/g
+    /TM_UPLOAD_SANDBOX_PROVISION_DIAGNOSTIC=[01] "\$Parser(?:Rollback|Lifecycle)Provisioner" (?:install|rollback|verify|snapshot)/g
   ) || [];
   assert.equal(privilegedInvocations.length, 5);
+  assert.deepEqual(
+    privilegedInvocations.filter((invocation) => invocation.includes('DIAGNOSTIC=1')),
+    ['TM_UPLOAD_SANDBOX_PROVISION_DIAGNOSTIC=1 "$ParserLifecycleProvisioner" install'],
+    'only the guarded install may emit bounded diagnostic evidence'
+  );
   assert.equal(
     (deploy.match(/"\$Parser(?:Rollback|Lifecycle)Provisioner" (?:install|rollback|verify|snapshot)/g) || []).length,
     privilegedInvocations.length,
-    'no privileged lifecycle invocation may inherit a diagnostic environment value'
+    'every privileged lifecycle invocation must set diagnostics explicitly'
   );
 });
 

@@ -2044,6 +2044,29 @@ async function cli(argv) {
   throw new Error('unknown command');
 }
 
+function diagnosticFailureCode(error) {
+  const message = error instanceof Error ? error.message : '';
+  const categories = [
+    [/unknown command/i, 'cli-command'],
+    [/argument|option|duplicate/i, 'cli-arguments'],
+    [/verifier SHA-256/i, 'verifier-identity'],
+    [/manifest/i, 'manifest-identity'],
+    [/raw observations|required self-test|parser acceptance/i, 'self-test-envelope'],
+    [/runtime tree observation/i, 'runtime-observation'],
+    [/runtime tree|runtime identity|built parser runtime/i, 'runtime-identity'],
+    [/effective propert/i, 'self-test-policy'],
+    [/manager state changed/i, 'installed-manager-race'],
+    [/installed systemd unit identity/i, 'installed-unit-identity'],
+    [/concrete system call/i, 'installed-syscall-policy'],
+    [/installed systemd policy|installed policy observation/i, 'installed-policy'],
+    [/build source artifact|source artifact/i, 'build-source-identity'],
+    [/build unit propert/i, 'build-policy'],
+    [/build evidence|build boundary|build unit/i, 'build-evidence'],
+    [/JSON|evidence file/i, 'evidence-format']
+  ];
+  return (categories.find(([pattern]) => pattern.test(message)) || [null, 'internal'])[1];
+}
+
 module.exports = Object.freeze({
   parseStrictJson,
   measureRuntimeTree,
@@ -2061,8 +2084,11 @@ module.exports = Object.freeze({
 });
 
 if (require.main === module) {
-  cli(process.argv.slice(2)).catch(() => {
-    process.stderr.write('trusted parser runtime verifier failed\n');
+  cli(process.argv.slice(2)).catch((error) => {
+    const diagnostic = process.env.TM_UPLOAD_SANDBOX_PROVISION_DIAGNOSTIC === '1'
+      ? `: ${diagnosticFailureCode(error)}`
+      : '';
+    process.stderr.write(`trusted parser runtime verifier failed${diagnostic}\n`);
     process.exitCode = 1;
   });
 }
