@@ -46,6 +46,20 @@ const ALLOWED_NEGATIVE_INFLUENCER_REPAIR_PROFILES = Object.freeze([
   EXPECTED_REPAIR_PROFILE.negativeInfluencers,
   POST_UPLOAD_NEGATIVE_INFLUENCER_REPAIR_PROFILE
 ]);
+const POST_UPLOAD_UNSAFE_AMOUNT_REPAIR_PROFILE = Object.freeze([
+  Object.freeze({
+    id: 2740,
+    avg_views_10: 49000,
+    storage: 'real',
+    quoted_price: '8.0001800011200004e+19',
+    cpm: '1.6326897961469399e+18',
+    cpv: '1632689796146940.0'
+  })
+]);
+const ALLOWED_UNSAFE_AMOUNT_REPAIR_PROFILES = Object.freeze([
+  Object.freeze([]),
+  POST_UPLOAD_UNSAFE_AMOUNT_REPAIR_PROFILE
+]);
 
 function sqliteString(value) {
   return `'${String(value).replaceAll("'", "''")}'`;
@@ -293,6 +307,13 @@ function assertAllowedExactRows(label, actual, expectedProfiles) {
   }
 }
 
+function numericFingerprint(value, label) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new Error(`${label} is not a finite number`);
+  }
+  return value.toPrecision(17);
+}
+
 function assertAndApplyRepairs(db) {
   const negativeInfluencers = db.prepare(`
     SELECT id,cost_usd,quoted_price,cpm,cpv FROM influencers
@@ -305,6 +326,20 @@ function assertAndApplyRepairs(db) {
   const invalidActivityTo = invalidStageRows(
     db, 'customer_activity', 'stage_to', 'id,customer_id,stage_to'
   );
+  const unsafeInfluencerAmounts = db.prepare(`
+    SELECT id,avg_views_10,quoted_price,cpm,cpv,typeof(quoted_price) AS storage
+    FROM influencers
+    WHERE quoted_price IS NOT NULL AND typeof(quoted_price)<>'integer'
+    ORDER BY id
+  `).all();
+  const unsafeInfluencerAmountProfile = unsafeInfluencerAmounts.map((row) => Object.freeze({
+    id: row.id,
+    avg_views_10: row.avg_views_10,
+    storage: row.storage,
+    quoted_price: numericFingerprint(row.quoted_price, 'unsafe influencer quoted_price'),
+    cpm: numericFingerprint(row.cpm, 'unsafe influencer cpm'),
+    cpv: numericFingerprint(row.cpv, 'unsafe influencer cpv')
+  }));
 
   assertAllowedExactRows(
     'negative influencer rows',
@@ -314,6 +349,11 @@ function assertAndApplyRepairs(db) {
   assertExactRows('invalid customer stages', invalidCustomers, EXPECTED_REPAIR_PROFILE.invalidCustomers);
   assertExactRows('invalid activity stage_from values', invalidActivityFrom, EXPECTED_REPAIR_PROFILE.invalidActivityFrom);
   assertExactRows('invalid activity stage_to values', invalidActivityTo, EXPECTED_REPAIR_PROFILE.invalidActivityTo);
+  assertAllowedExactRows(
+    'unsafe influencer amount storage',
+    unsafeInfluencerAmountProfile,
+    ALLOWED_UNSAFE_AMOUNT_REPAIR_PROFILES
+  );
 
   db.transaction(() => {
     const repairInfluencer = db.prepare(`
@@ -327,6 +367,25 @@ function assertAndApplyRepairs(db) {
     for (const row of negativeInfluencers) {
       const influencer = repairInfluencer.run(row.id, row.cost_usd, row.quoted_price, row.cpm, row.cpv);
       if (influencer.changes !== 1) throw new Error('frozen influencer repair lost its exact target');
+    }
+    const repairUnsafeInfluencerAmount = db.prepare(`
+      UPDATE influencers
+      SET quoted_price=8000,
+          cpm=ROUND(8000*1000.0/avg_views_10,2),
+          cpv=ROUND(8000*1.0/avg_views_10,2)
+      WHERE id=? AND avg_views_10=? AND typeof(quoted_price)=?
+        AND quoted_price=? AND cpm=? AND cpv=?
+    `);
+    for (const row of unsafeInfluencerAmounts) {
+      const influencer = repairUnsafeInfluencerAmount.run(
+        row.id,
+        row.avg_views_10,
+        row.storage,
+        row.quoted_price,
+        row.cpm,
+        row.cpv
+      );
+      if (influencer.changes !== 1) throw new Error('frozen unsafe influencer amount repair lost its exact target');
     }
     const customer = db.prepare(`
       UPDATE customers SET stage='lead' WHERE id=8 AND stage='new_lead'
@@ -342,7 +401,7 @@ function assertAndApplyRepairs(db) {
   sqliteDigest.rebuildKnowledgeChunksFts(db);
   sqliteDigest.verifyKnowledgeChunksFtsIntegrity(db, FTS_MANIFEST, { checkMainIntegrity: true });
   return Object.freeze({
-    influencerRows: negativeInfluencers.length,
+    influencerRows: negativeInfluencers.length + unsafeInfluencerAmounts.length,
     customerRows: invalidCustomers.length,
     activityRows: invalidActivityFrom.length + invalidActivityTo.length,
     ftsRebuilt: true

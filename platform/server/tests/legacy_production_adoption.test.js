@@ -119,6 +119,10 @@ test('legacy production adoption accepts the exact post-upload negative amount p
       (2734,'Instagram','@known-quote-a',0,-1500,-20.16,-0.02),
       (2760,'TikTok','@known-quote-b',0,-4000,-60.61,-0.06)
   `).run();
+  db.prepare(`
+    INSERT INTO influencers (id,platform,kol_handle,avg_views_10,cost_usd,quoted_price,cpm,cpv)
+    VALUES (2740,'TikTok','@known-concatenated-quote',49000,0,8.00018000112e19,1.63268979614694e18,1.63268979614694e15)
+  `).run();
   db.close();
   const sourceBefore = sha256(fixture.sourcePath);
 
@@ -129,7 +133,7 @@ test('legacy production adoption accepts the exact post-upload negative amount p
   });
 
   assert.equal(sha256(fixture.sourcePath), sourceBefore);
-  assert.equal(report.repairs.influencerRows, 4);
+  assert.equal(report.repairs.influencerRows, 5);
   const output = new Database(fixture.outputPath, { readonly: true, fileMustExist: true });
   try {
     assert.deepEqual(
@@ -144,9 +148,36 @@ test('legacy production adoption accepts the exact post-upload negative amount p
         { id: 2760, cost_usd: 0, quoted_price: 4000, cpm: 60.61, cpv: 0.06 }
       ]
     );
+    assert.deepEqual(
+      output.prepare('SELECT id,quoted_price,cpm,cpv FROM influencers WHERE id=2740').get(),
+      { id: 2740, quoted_price: 8000, cpm: 163.27, cpv: 0.16 }
+    );
   } finally {
     output.close();
   }
+});
+
+test('legacy production adoption rejects unapproved unsafe amount storage', (t) => {
+  const fixture = productionShapeFixture('unsafe-amount-drift');
+  t.after(() => fs.rmSync(fixture.root, { recursive: true, force: true }));
+  const db = new Database(fixture.sourcePath);
+  db.prepare(`
+    INSERT INTO influencers (id,platform,kol_handle,avg_views_10,cost_usd,quoted_price,cpm,cpv)
+    VALUES (129,'TikTok','@unexpected-real-quote',1000,0,1.5,1.5,0.01)
+  `).run();
+  db.close();
+  const sourceBefore = sha256(fixture.sourcePath);
+
+  assert.throws(
+    () => adoption.adoptLegacyProductionV1({
+      sourcePath: fixture.sourcePath,
+      outputPath: fixture.outputPath,
+      expectedSourceSha256: sourceBefore
+    }),
+    /frozen production repair profile/i
+  );
+  assert.equal(fs.existsSync(fixture.outputPath), false);
+  assert.equal(sha256(fixture.sourcePath), sourceBefore);
 });
 
 test('legacy production adoption rejects repair-profile drift without publishing output', (t) => {

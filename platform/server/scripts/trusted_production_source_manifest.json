@@ -45,7 +45,7 @@
     { "path": "server/extract_document_text.py", "sha256": "c979614c6d415c4b868c13d8f64d4c50f64df11c3ddbd78304bf939f008e9d97" },
     { "path": "server/extract_xlsx_text.py", "sha256": "69db3140f8d08f2754df0b13d9ba728db5117539a507faabd4088c74b89ee3c8" },
     { "path": "server/ocr_document_text.py", "sha256": "917d5b14872eeb3a7b628d80cc70dbab46a79ef632e031fa599f15e0840e1a0a" },
-    { "path": "server/scripts/adopt_legacy_production_v1.js", "sha256": "c9a8ca729c6f0799aeea3c00a7597872db6b7cd732a4d3775e7aba53875a6dcd" },
+    { "path": "server/scripts/adopt_legacy_production_v1.js", "sha256": "9477d221632862bb3df085843dc2b2a45271ddf5c9a68e96d3120e9792cf6761" },
     { "path": "server/scripts/build_upload_sandbox_runtime.sh", "sha256": "80af307b0fa1e9528e20636a60a4c10a547d7538dc33cd8b093e98732dd11897" },
     { "path": "server/scripts/check_cutover_capacity.py", "sha256": "3cfca1526919e3c2ae65bcc0d7fa0fc347c023d36a353b98a5cd149b9a824b83" },
     { "path": "server/scripts/cleanup_stale_migration_gate.sh", "sha256": "d5f2befa902522dd9de3e9dd2397a99ee5e78ab1a1c6e526a27f14bb2829e1fa" },
