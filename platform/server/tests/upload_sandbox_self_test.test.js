@@ -418,14 +418,69 @@ test('forged PID and cgroup observations do not satisfy aggregate or sibling pro
   assert.equal(result.aggregate_task_pressure, false);
 });
 
-test('PID proofs use namespace-local peer PID when systemd MainPID is a host shim', () => {
-  const evidence = completeEvidence();
-  evidence.aggregate.memberships[0].host_pid_changed = true;
-  evidence.aggregate.memberships[1].host_pid_changed = true;
-  evidence.pid_proofs[0].peer_pid = 3001;
-  evidence.pid_proofs[1].peer_pid = 3002;
-  const result = composeSelfTestResult(evidence);
-  assert.equal(result.pid_namespace_sibling_fd_denial, true);
+test('PID proofs bind a changed systemd MainPID to the current cgroup-verified peer', () => {
+  for (const changedPeerIndex of [0, 1]) {
+    const evidence = completeEvidence();
+    const membership = evidence.aggregate.memberships[changedPeerIndex];
+    membership.main_pid += 1000;
+    membership.cgroup_procs = [membership.main_pid];
+    membership.host_pid_changed = true;
+    evidence.pid_proofs[changedPeerIndex === 0 ? 1 : 0].peer_pid = membership.main_pid;
+
+    const result = composeSelfTestResult(evidence);
+    assert.equal(result.pid_namespace_sibling_fd_denial, true);
+  }
+});
+
+test('PID proofs reject stale peer PIDs after either systemd MainPID changes', () => {
+  for (const changedPeerIndex of [0, 1]) {
+    const evidence = completeEvidence();
+    const membership = evidence.aggregate.memberships[changedPeerIndex];
+    membership.main_pid += 1000;
+    membership.cgroup_procs = [membership.main_pid];
+    membership.host_pid_changed = true;
+
+    const result = composeSelfTestResult(evidence);
+    assert.equal(result.pid_namespace_sibling_fd_denial, false);
+  }
+});
+
+test('PID proofs cannot borrow a MainPID change from the unrelated worker', () => {
+  for (const changedPeerIndex of [0, 1]) {
+    const evidence = completeEvidence();
+    evidence.aggregate.memberships[changedPeerIndex].host_pid_changed = true;
+    evidence.pid_proofs[changedPeerIndex].peer_pid = 3001 + changedPeerIndex;
+
+    const result = composeSelfTestResult(evidence);
+    assert.equal(result.pid_namespace_sibling_fd_denial, false);
+  }
+});
+
+test('PID controller targets stable cgroup-verified current peer PIDs', () => {
+  const source = fs.readFileSync(runnerPath, 'utf8');
+  const start = source.indexOf('async function runPidProof(context) {');
+  const end = source.indexOf('\nasync function executeProductionSelfTests', start);
+  assert.ok(start >= 0 && end > start, 'PID proof controller source must be bounded');
+  const body = source.slice(start, end);
+
+  const firstObservation = body.indexOf(
+    'const firstMembership = await observeStableMembership('
+  );
+  const secondRequest = body.indexOf(
+    "jobs[1],\n      context.parserIdentity.gid,\n      'pid-namespace-peer-v1',\n      firstMembership.main_pid"
+  );
+  const aggregateObservation = body.indexOf(
+    'observeStableMembership(context.runCommand, jobs[1].unitName, secondPid)'
+  );
+  const firstRelease = body.indexOf(
+    "jobs[0],\n      context.parserIdentity.gid,\n      'pid-namespace-peer-v1',\n      memberships[1].main_pid"
+  );
+
+  assert.ok(firstObservation >= 0, 'first peer membership must be stable before use');
+  assert.ok(secondRequest > firstObservation, 'second worker must target the verified first peer');
+  assert.ok(aggregateObservation > secondRequest, 'both live memberships must be re-observed');
+  assert.ok(firstRelease > aggregateObservation, 'waiting first worker must target the verified second peer');
+  assert.doesNotMatch(body, /jobs\[1\],[\s\S]{0,160}'pid-namespace-peer-v1',[\s\S]{0,40}firstPid/);
 });
 
 test('pressure evidence requires the exact real probe protocol and kernel denial', () => {

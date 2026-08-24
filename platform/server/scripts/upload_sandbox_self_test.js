@@ -581,14 +581,8 @@ function validatePidEvidence(proofs, memberships) {
     validatePidProof(proofs[1], proofs[1].peer_pid) &&
     proofs[0].peer_pid !== memberships[0].main_pid &&
     proofs[1].peer_pid !== memberships[1].main_pid &&
-    (
-      memberships[0].host_pid_changed ||
-      proofs[0].peer_pid === memberships[1].main_pid
-    ) &&
-    (
-      memberships[1].host_pid_changed ||
-      proofs[1].peer_pid === memberships[0].main_pid
-    );
+    proofs[0].peer_pid === memberships[1].main_pid &&
+    proofs[1].peer_pid === memberships[0].main_pid;
 }
 
 function parserPidEvidenceDiagnostic(value) {
@@ -1997,6 +1991,37 @@ async function observeMembership(runCommand, unitName, expectedPid) {
   });
 }
 
+function sameMembershipObservation(left, right) {
+  return left.unit_name === right.unit_name &&
+    left.main_pid === right.main_pid &&
+    left.slice === right.slice &&
+    left.control_group === right.control_group &&
+    left.proc_control_group === right.proc_control_group &&
+    left.cgroup_exists === right.cgroup_exists &&
+    left.host_pid_changed === right.host_pid_changed &&
+    sameArray(left.cgroup_procs, right.cgroup_procs);
+}
+
+async function observeStableMembership(runCommand, unitName, expectedPid) {
+  const deadline = Date.now() + 5_000;
+  let previous = null;
+  let lastError = null;
+  while (Date.now() < deadline) {
+    try {
+      const current = await observeMembership(runCommand, unitName, expectedPid);
+      if (previous && sameMembershipObservation(previous, current)) return current;
+      previous = current;
+      lastError = null;
+    } catch (error) {
+      previous = null;
+      lastError = error;
+    }
+    await pause(50);
+  }
+  if (lastError) throw lastError;
+  throw new Error('parser unit cgroup evidence did not stabilize');
+}
+
 async function readSliceControlGroup(runCommand) {
   const result = await systemctl(runCommand, [
     'show',
@@ -2045,12 +2070,17 @@ async function runPidProof(context) {
       jobs[0].unitName
     ], { timeoutMs: 5_000 });
     const firstPid = await waitForMainPid(context.runCommand, jobs[0].unitName);
+    const firstMembership = await observeStableMembership(
+      context.runCommand,
+      jobs[0].unitName,
+      firstPid
+    );
 
     writeSelfTestRequest(
       jobs[1],
       context.parserIdentity.gid,
       'pid-namespace-peer-v1',
-      firstPid
+      firstMembership.main_pid
     );
     await systemctl(context.runCommand, [
       '--no-block',
@@ -2061,8 +2091,8 @@ async function runPidProof(context) {
 
     const sliceControlGroup = await readSliceControlGroup(context.runCommand);
     const memberships = await Promise.all([
-      observeMembership(context.runCommand, jobs[0].unitName, firstPid),
-      observeMembership(context.runCommand, jobs[1].unitName, secondPid)
+      observeStableMembership(context.runCommand, jobs[0].unitName, firstPid),
+      observeStableMembership(context.runCommand, jobs[1].unitName, secondPid)
     ]);
     const aggregate = Object.freeze({
       slice_properties_verified: true,
@@ -2072,12 +2102,15 @@ async function runPidProof(context) {
     if (!validateAggregateEvidence(aggregate)) {
       throw new Error('parser aggregate cgroup proof failed');
     }
+    if (memberships[0].main_pid !== firstMembership.main_pid) {
+      throw new Error('parser first peer PID changed before sibling proof');
+    }
 
     writeSelfTestRequest(
       jobs[0],
       context.parserIdentity.gid,
       'pid-namespace-peer-v1',
-      secondPid
+      memberships[1].main_pid
     );
     await Promise.all(jobs.map((job) => waitForSuccess(context.runCommand, job.unitName)));
 
