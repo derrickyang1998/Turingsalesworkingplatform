@@ -22,10 +22,12 @@ unprivileged_build_worker() {
   rm -f -- /build-work/.controller-release
 
   install -d -m 0700 "$OUTPUT_ROOT"
-  SYSTEMD_ROOT_DIRECTORY_MOUNTPOINTS=(dev etc proc root run sys var)
+  SYSTEMD_ROOT_DIRECTORY_MOUNTPOINTS=(dev etc input output proc root run runtime scratch sys var)
   for mountpoint in "${SYSTEMD_ROOT_DIRECTORY_MOUNTPOINTS[@]}"; do
     install -d -m 0555 "$OUTPUT_ROOT/$mountpoint"
   done
+  install -m 0644 /dev/null "$OUTPUT_ROOT/input/input.bin"
+  install -m 0644 /dev/null "$OUTPUT_ROOT/runtime/request.json"
 
   copy_file() {
     local source="$1" target="$2" mode="${3:-0555}"
@@ -181,6 +183,9 @@ PY
     find "$OUTPUT_ROOT/lib" -xdev -type d -exec chmod 0555 {} +
     find "$OUTPUT_ROOT/lib" -xdev -type f -exec chmod 0444 {} +
   fi
+  # Keep systemd from creating bind and tmpfs mountpoints after the tree is sealed.
+  chmod 0755 "$OUTPUT_ROOT"/{input,output,runtime,scratch}
+  chmod 0644 "$OUTPUT_ROOT/input/input.bin" "$OUTPUT_ROOT/runtime/request.json"
   if find "$OUTPUT_ROOT" -xdev -type l -print -quit | grep -q .; then
     printf '%s\n' 'runtime tree contains a symbolic link' >&2
     return 66

@@ -945,9 +945,9 @@ test('parser runtime manifest pins the exact production-built tree', () => {
   assert.deepEqual(manifest.runtime_tree, {
     format: 'tm-parser-runtime-tree-v1',
     root: '/var/lib/turingmarket-parser/runtime-root',
-    sha256: 'cf27366e5e5404b6538be9e0da0f9b9ef36c4a3efbde9883f688c71006c118b1',
-    files: 3474,
-    directories: 431,
+    sha256: '20b5f5186ec26b726d07659566071c0ce6b367138497f772d57830734f5d4418',
+    files: 3476,
+    directories: 435,
     bytes: 640592018
   });
 });
@@ -990,9 +990,13 @@ test('runtime builder preserves the pinned reproducible no-symlink runtime contr
   assert.match(source, /npm ci --offline --omit=dev --ignore-scripts/);
   assert.match(
     source,
-    /SYSTEMD_ROOT_DIRECTORY_MOUNTPOINTS=\(dev etc proc root run sys var\)/
+    /SYSTEMD_ROOT_DIRECTORY_MOUNTPOINTS=\(dev etc input output proc root run runtime scratch sys var\)/
   );
   assert.match(source, /for mountpoint in "\$\{SYSTEMD_ROOT_DIRECTORY_MOUNTPOINTS\[@\]\}"/);
+  assert.match(worker, /install -m 0644 \/dev\/null "\$OUTPUT_ROOT\/input\/input\.bin"/);
+  assert.match(worker, /install -m 0644 \/dev\/null "\$OUTPUT_ROOT\/runtime\/request\.json"/);
+  assert.match(worker, /chmod 0755 "\$OUTPUT_ROOT"\/\{input,output,runtime,scratch\}/);
+  assert.match(worker, /chmod 0644 "\$OUTPUT_ROOT\/input\/input\.bin" "\$OUTPUT_ROOT\/runtime\/request\.json"/);
   assert.match(source, /--dependency-cache-root/);
   assert.match(source, /--trusted-verifier/);
   assert.match(source, /--expected-verifier-sha256/);

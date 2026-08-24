@@ -46,7 +46,7 @@
     { "path": "server/extract_xlsx_text.py", "sha256": "69db3140f8d08f2754df0b13d9ba728db5117539a507faabd4088c74b89ee3c8" },
     { "path": "server/ocr_document_text.py", "sha256": "917d5b14872eeb3a7b628d80cc70dbab46a79ef632e031fa599f15e0840e1a0a" },
     { "path": "server/scripts/adopt_legacy_production_v1.js", "sha256": "9477d221632862bb3df085843dc2b2a45271ddf5c9a68e96d3120e9792cf6761" },
-    { "path": "server/scripts/build_upload_sandbox_runtime.sh", "sha256": "80af307b0fa1e9528e20636a60a4c10a547d7538dc33cd8b093e98732dd11897" },
+    { "path": "server/scripts/build_upload_sandbox_runtime.sh", "sha256": "41ecce6e71a73ac226f244bc990ca94c23bd22c8a13104dcd1c5502075c83cc5" },
     { "path": "server/scripts/check_cutover_capacity.py", "sha256": "3cfca1526919e3c2ae65bcc0d7fa0fc347c023d36a353b98a5cd149b9a824b83" },
     { "path": "server/scripts/cleanup_stale_migration_gate.sh", "sha256": "d5f2befa902522dd9de3e9dd2397a99ee5e78ab1a1c6e526a27f14bb2829e1fa" },
     { "path": "server/scripts/parse_upload_sandbox.sh", "sha256": "2d77151dac802ce00d80c9df04ba879232001b014ab672379c36836d767b8d95" },
@@ -72,7 +72,7 @@
     { "path": "server/services/sqlite_digest_service.js", "sha256": "84f701b14e2e49f7f92a31c2b954996bc331dd564bbcf7a35c8005d04f17d301" },
     { "path": "server/services/upload_sandbox_service.js", "sha256": "5fa3e3323a730e38705eed1c21bc3928dd17044e25de8017d8920510e8664acb" },
     { "path": "server/systemd/turingmarket-gate-cleanup.service", "sha256": "acc42c90010eca793d22b6ee517231872aed5c17b36f0222052351b97cfdb7c6" },
-    { "path": "server/systemd/turingmarket-parser.manifest.json", "sha256": "f6afd7d6127b428ce5e7f2c7db496c49f73a1ea6460354852856170a53c451f5" },
+    { "path": "server/systemd/turingmarket-parser.manifest.json", "sha256": "44db310046efe65bd68c110313b4887995c73e276e7d58f65fe037c09a973c5b" },
     { "path": "server/systemd/turingmarket-parser.slice", "sha256": "d0cc089526feff2cbe0240a6fc711b113c2eac0af95c3763a00ef0edc8467c17" },
     { "path": "server/systemd/turingmarket-parser@.service", "sha256": "a363f7ce7021067be99fdf74144b1ca7e25ba6ac68ce070a1bfa07d07a73c49a" }
   ]

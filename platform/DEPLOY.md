@@ -96,7 +96,7 @@ The appliance uses `npm ci --omit=dev --ignore-scripts --no-audit --no-fund`. `p
 
 Dependency acquisition and build execution run only in disposable, unprivileged systemd units with bounded network access, no production mounts, no inherited credentials, and a drained cgroup before sealing. Root owns inaccessible lifecycle paths and independently verifies, seals, snapshots, installs, accepts, and rolls back the resulting runtime; root never executes candidate dependency or build tooling. / 依赖获取与构建仅在一次性非特权 systemd 单元中执行，网络访问受限，不挂载生产路径、不继承凭据，并在密封前清空 cgroup。Root 只负责不可访问的生命周期路径，并独立完成验证、密封、快照、安装、验收与回滚；Root 不执行候选依赖或构建工具。
 
-The sealed runtime is fixed at 3,474 files, 431 directories, 640,592,018 bytes, with SHA-256 `cf27366e5e5404b6538be9e0da0f9b9ef36c4a3efbde9883f688c71006c118b1`. It contains no symlinks or Python bytecode caches and is installed at `/var/lib/turingmarket-parser/runtime-root`. / 密封运行时的文件、目录、字节数与哈希如前，不包含软链接或 Python 字节码缓存，并安装到上述路径。
+The sealed runtime is fixed at 3,476 files, 435 directories, 640,592,018 bytes, with SHA-256 `20b5f5186ec26b726d07659566071c0ce6b367138497f772d57830734f5d4418`. It contains no symlinks or Python bytecode caches and is installed at `/var/lib/turingmarket-parser/runtime-root`. / 密封运行时的文件、目录、字节数与哈希如前，不包含软链接或 Python 字节码缓存，并安装到上述路径。
 
 Each job runs as the locked, no-login `turingmarket-parser` account in `turingmarket-parser@.service`. The unit uses `RootDirectory=/var/lib/turingmarket-parser/runtime-root`, private network/PID/IPC/user/mount namespaces, no capabilities, denied socket and selected syscall families, a read-only root, writable `/scratch` plus `/output/result.json` only, and per-job CPU, memory, task, file, and time limits. `turingmarket-parser.slice` applies aggregate limits. / 每个任务以锁定且禁止登录的解析器账号运行于模板 unit 中，并使用 chroot、私有命名空间、空 capability、socket 与系统调用限制、只读根目录、限定写路径及单任务和 slice 聚合资源上限。
 
@@ -416,7 +416,7 @@ The initial backup records exactly one of `ppt-cache.present` or `ppt-cache.abse
 
 ### Parser-Aware Health And Acceptance / 解析器感知健康与验收
 
-The application does not finish startup until parser readiness and the production self-tests pass. `/api/health` must return `status: "ok"`, `parser.ready: true`, and `parser.manifest_sha256: "f6afd7d6127b428ce5e7f2c7db496c49f73a1ea6460354852856170a53c451f5"`. A `200` response without those exact parser fields is not healthy for v0.6. / 应用只有在解析器 readiness 与生产自检通过后才完成启动。健康接口必须返回上述精确状态与清单哈希；缺少这些解析器字段的 `200` 对 v0.6 不构成健康。
+The application does not finish startup until parser readiness and the production self-tests pass. `/api/health` must return `status: "ok"`, `parser.ready: true`, and `parser.manifest_sha256: "44db310046efe65bd68c110313b4887995c73e276e7d58f65fe037c09a973c5b"`. A `200` response without those exact parser fields is not healthy for v0.6. / 应用只有在解析器 readiness 与生产自检通过后才完成启动。健康接口必须返回上述精确状态与清单哈希；缺少这些解析器字段的 `200` 对 v0.6 不构成健康。
 
 Acceptance writes root-only parser and acceptance-facts evidence, hashes both, and combines those digests with the installed runtime-tree digest in `accepted-<run-id>.json` and `current-accepted.json` schema 3 records. The finalizer and public-traffic activation re-inspect the installed root-owned tree and reject legacy or mismatched markers. / 验收以 root-only 形式写入解析器与验收事实证据，计算两者哈希，并与已安装运行时树哈希共同写入 schema 3 的代次验收记录和当前验收记录；finalizer 与公开流量激活会重新检查已安装 root-owned 树，并拒绝旧版或不匹配标记。
 
@@ -444,7 +444,7 @@ process.stdin.setEncoding("utf8");
 process.stdin.on("data", chunk => { body += chunk; });
 process.stdin.on("end", () => {
   const health = JSON.parse(body);
-  const expected = "f6afd7d6127b428ce5e7f2c7db496c49f73a1ea6460354852856170a53c451f5";
+  const expected = "44db310046efe65bd68c110313b4887995c73e276e7d58f65fe037c09a973c5b";
   if (health.status !== "ok" || !health.parser || health.parser.ready !== true ||
       health.parser.manifest_sha256 !== expected) process.exit(1);
   process.stdout.write("PARSER_HEALTH_OK\n");
@@ -455,7 +455,7 @@ systemctl show turingmarket-parser.slice \
   --property=LoadState,ActiveState,ControlGroup,MemoryCurrent,TasksCurrent
 ```
 
-Check the installed appliance identity and spool without following links. Expected runtime identity is 3,474 files, 431 directories, 640,592,018 bytes, SHA-256 `cf27366e5e5404b6538be9e0da0f9b9ef36c4a3efbde9883f688c71006c118b1`; the jobs directory must be empty outside active admissions. / 不跟随软链接检查已安装设备身份与 spool；预期运行时身份如前，非活动 admission 期间 jobs 目录必须为空。
+Check the installed appliance identity and spool without following links. Expected runtime identity is 3,476 files, 435 directories, 640,592,018 bytes, SHA-256 `20b5f5186ec26b726d07659566071c0ce6b367138497f772d57830734f5d4418`; the jobs directory must be empty outside active admissions. / 不跟随软链接检查已安装设备身份与 spool；预期运行时身份如前，非活动 admission 期间 jobs 目录必须为空。
 
 ```bash
 set -euo pipefail
