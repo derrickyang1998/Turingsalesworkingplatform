@@ -2024,12 +2024,22 @@ async function cli(argv) {
     if (!expected.every((key) => args[key]) || Object.keys(args).some((key) => !expected.includes(key))) {
       throw new Error('invalid bind-acceptance arguments');
     }
-    const trustedManifest = loadTrustedParserManifest(args.manifest, args['expected-manifest-sha256']);
-    const raw = readStrictEvidenceFile(args['raw-observations'], 'raw observations');
-    const buildEvidence = readStrictEvidenceFile(args['build-evidence'], 'build evidence');
-    const runtimeObservation = await measureRuntimeTree(args['runtime-root'], { requireRootOwnership: true });
-    const installedPolicyObservation = observeInstalledSystemdPolicy(trustedManifest.manifest);
-    const binding = bindAcceptanceEvidence({
+    const trustedManifest = await runDiagnosticStage('manifest-load', () => (
+      loadTrustedParserManifest(args.manifest, args['expected-manifest-sha256'])
+    ));
+    const raw = await runDiagnosticStage('raw-evidence-read', () => (
+      readStrictEvidenceFile(args['raw-observations'], 'raw observations')
+    ));
+    const buildEvidence = await runDiagnosticStage('build-evidence-read', () => (
+      readStrictEvidenceFile(args['build-evidence'], 'build evidence')
+    ));
+    const runtimeObservation = await runDiagnosticStage('runtime-measure', () => (
+      measureRuntimeTree(args['runtime-root'], { requireRootOwnership: true })
+    ));
+    const installedPolicyObservation = await runDiagnosticStage('installed-policy-observe', () => (
+      observeInstalledSystemdPolicy(trustedManifest.manifest)
+    ));
+    const binding = await runDiagnosticStage('acceptance-bind', () => bindAcceptanceEvidence({
       trustedManifest,
       expectedManifestSha256: args['expected-manifest-sha256'],
       expectedVerifierSha256: args['expected-verifier-sha256'],
@@ -2037,14 +2047,40 @@ async function cli(argv) {
       runtimeObservation,
       installedPolicyObservation,
       buildEvidence
-    });
+    }));
     process.stdout.write(`${canonicalJson(binding)}\n`);
     return;
   }
   throw new Error('unknown command');
 }
 
+const DIAGNOSTIC_STAGE_CODES = new Set([
+  'manifest-load',
+  'raw-evidence-read',
+  'build-evidence-read',
+  'runtime-measure',
+  'installed-policy-observe',
+  'acceptance-bind'
+]);
+
+async function runDiagnosticStage(code, operation) {
+  if (!DIAGNOSTIC_STAGE_CODES.has(code) || typeof operation !== 'function') {
+    throw new Error('invalid diagnostic stage');
+  }
+  try {
+    return await operation();
+  } catch (error) {
+    if (diagnosticFailureCode(error) !== 'internal') throw error;
+    const failure = new Error('trusted verifier stage failed');
+    Object.defineProperty(failure, 'diagnosticCode', { value: code });
+    throw failure;
+  }
+}
+
 function diagnosticFailureCode(error) {
+  if (error instanceof Error && DIAGNOSTIC_STAGE_CODES.has(error.diagnosticCode)) {
+    return error.diagnosticCode;
+  }
   const message = error instanceof Error ? error.message : '';
   const categories = [
     [/unknown command/i, 'cli-command'],
@@ -2081,7 +2117,8 @@ module.exports = Object.freeze({
   observeBuildUnit,
   validateBuildMountIsolation,
   relativeRequireTargets,
-  diagnosticFailureCode
+  diagnosticFailureCode,
+  runDiagnosticStage
 });
 
 if (require.main === module) {

@@ -807,7 +807,7 @@ test('trusted parser verifier exposes only a bounded failure code during provisi
   assert.doesNotMatch(execution.stderr, /private-path|should-not-leak|tmp/i);
 });
 
-test('trusted parser verifier maps every diagnostic branch to a fixed allowlisted code', () => {
+test('trusted parser verifier maps every diagnostic branch and binding stage to a fixed allowlisted code', async () => {
   const verifier = require(trustedVerifierPath);
   const cases = [
     ['unknown command', 'cli-command'],
@@ -833,6 +833,34 @@ test('trusted parser verifier maps every diagnostic branch to a fixed allowliste
     assert.equal(verifier.diagnosticFailureCode(new Error(message)), expected);
   }
   assert.equal(verifier.diagnosticFailureCode('/tmp/private-path'), 'internal');
+
+  const stageCodes = [
+    'manifest-load',
+    'raw-evidence-read',
+    'build-evidence-read',
+    'runtime-measure',
+    'installed-policy-observe',
+    'acceptance-bind'
+  ];
+  for (const code of stageCodes) {
+    await assert.rejects(
+      verifier.runDiagnosticStage(code, () => {
+        throw new Error('/tmp/private-path?token=should-not-leak');
+      }),
+      (error) => verifier.diagnosticFailureCode(error) === code
+    );
+  }
+  await assert.rejects(
+    verifier.runDiagnosticStage('runtime-measure', () => {
+      throw new Error('manifest SHA-256 mismatch');
+    }),
+    (error) => verifier.diagnosticFailureCode(error) === 'manifest-identity'
+  );
+
+  const source = read(trustedVerifierPath);
+  for (const code of stageCodes) {
+    assert.match(source, new RegExp(`runDiagnosticStage\\('${code}'`));
+  }
 });
 
 test('trusted parser verifier validates escaped and raw surrogate pairs', () => {
