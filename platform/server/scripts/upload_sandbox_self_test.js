@@ -591,6 +591,58 @@ function validatePidEvidence(proofs, memberships) {
     );
 }
 
+function parserPidEvidenceDiagnostic(value) {
+  if (
+    !isRecord(value) ||
+    !exactKeys(value, ['format', 'memberships', 'proofs']) ||
+    value.format !== 'tm-parser-pid-evidence-diagnostic-v1' ||
+    !Array.isArray(value.memberships) || value.memberships.length !== 2 ||
+    !Array.isArray(value.proofs) || value.proofs.length !== 2
+  ) {
+    return '';
+  }
+  const memberships = [];
+  for (const item of value.memberships) {
+    if (
+      !isRecord(item) ||
+      !exactKeys(item, ['cgroup_procs', 'host_pid_changed', 'main_pid']) ||
+      !Number.isSafeInteger(item.main_pid) || item.main_pid <= 1 ||
+      typeof item.host_pid_changed !== 'boolean' ||
+      !Array.isArray(item.cgroup_procs) ||
+      !item.cgroup_procs.every((pid) => Number.isSafeInteger(pid) && pid > 1)
+    ) {
+      return '';
+    }
+    memberships.push({
+      cgroup_procs: item.cgroup_procs,
+      host_pid_changed: item.host_pid_changed,
+      main_pid: item.main_pid
+    });
+  }
+  const proofs = [];
+  for (const item of value.proofs) {
+    if (
+      !isRecord(item) ||
+      !exactKeys(item, ['peer_pid', 'self_pid', 'visible_pids']) ||
+      !Number.isSafeInteger(item.peer_pid) || item.peer_pid <= 1 ||
+      item.self_pid !== 1 ||
+      !sameArray(item.visible_pids, [1])
+    ) {
+      return '';
+    }
+    proofs.push({
+      peer_pid: item.peer_pid,
+      self_pid: item.self_pid,
+      visible_pids: item.visible_pids
+    });
+  }
+  return `pid_evidence=${JSON.stringify({
+    format: value.format,
+    memberships,
+    proofs
+  })}\n`;
+}
+
 function validatePressureEvidence(value, expectedContract) {
   return exactKeys(value, [
     'contract',
@@ -2042,7 +2094,21 @@ async function runPidProof(context) {
       ));
     }
     if (!validatePidEvidence(proofs, memberships)) {
-      throw new Error('parser sibling PID proof failed');
+      const error = new Error('parser sibling PID proof failed');
+      error.parserPidEvidence = {
+        format: 'tm-parser-pid-evidence-diagnostic-v1',
+        memberships: memberships.map((item) => ({
+          cgroup_procs: item.cgroup_procs,
+          host_pid_changed: item.host_pid_changed,
+          main_pid: item.main_pid
+        })),
+        proofs: proofs.map((item) => ({
+          peer_pid: item.peer_pid,
+          self_pid: item.self_pid,
+          visible_pids: item.visible_pids
+        }))
+      };
+      throw error;
     }
     if (!metadataChecks.every((item) => item === true)) {
       throw new Error('parser sibling result metadata proof failed');
@@ -2262,8 +2328,11 @@ async function runDiagnosticCli(argv, options = {}) {
   } catch (error) {
     const stage = error && error.selfTestStage ? `stage=${error.selfTestStage}\n` : '';
     const captured = error && error.capturedStderr ? `child=${error.capturedStderr}\n` : '';
+    const pidEvidence = parserPidEvidenceDiagnostic(error && error.parserPidEvidence);
     const message = error && error.stack ? error.stack : String(error);
-    (options.writeStderr || ((value) => process.stderr.write(value)))(`${stage}${captured}${message}\n`);
+    (options.writeStderr || ((value) => process.stderr.write(value)))(
+      `${stage}${captured}${pidEvidence}${message}\n`
+    );
     return 1;
   }
 }

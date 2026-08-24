@@ -599,6 +599,53 @@ test('diagnostic CLI requires an explicit trusted root Linux environment path', 
   }), 64);
 });
 
+test('diagnostic CLI reports only canonical parser PID evidence facts', async () => {
+  const writes = [];
+  const failure = new Error('parser sibling PID proof failed');
+  failure.selfTestStage = 'probe:pid-namespace-peer-v1';
+  failure.parserPidEvidence = {
+    format: 'tm-parser-pid-evidence-diagnostic-v1',
+    proofs: [
+      { peer_pid: 102, self_pid: 1, visible_pids: [1] },
+      { peer_pid: 101, self_pid: 1, visible_pids: [1] }
+    ],
+    memberships: [
+      { main_pid: 101, host_pid_changed: false, cgroup_procs: [101] },
+      { main_pid: 102, host_pid_changed: false, cgroup_procs: [102] }
+    ]
+  };
+
+  assert.equal(await runDiagnosticCli(['--diagnose'], {
+    platform: 'linux',
+    getuid: () => 0,
+    execute: async () => { throw failure; },
+    writeStderr: (value) => writes.push(value)
+  }), 1);
+
+  assert.equal(
+    writes[0].split('\n')[1],
+    'pid_evidence={"format":"tm-parser-pid-evidence-diagnostic-v1","memberships":' +
+      '[{"cgroup_procs":[101],"host_pid_changed":false,"main_pid":101},' +
+      '{"cgroup_procs":[102],"host_pid_changed":false,"main_pid":102}],"proofs":' +
+      '[{"peer_pid":102,"self_pid":1,"visible_pids":[1]},' +
+      '{"peer_pid":101,"self_pid":1,"visible_pids":[1]}]}'
+  );
+
+  const rejected = new Error('parser sibling PID proof failed');
+  rejected.parserPidEvidence = {
+    ...failure.parserPidEvidence,
+    customer_secret: 'must-not-appear'
+  };
+  assert.equal(await runDiagnosticCli(['--diagnose'], {
+    platform: 'linux',
+    getuid: () => 0,
+    execute: async () => { throw rejected; },
+    writeStderr: (value) => writes.push(value)
+  }), 1);
+  assert.doesNotMatch(writes[1], /^pid_evidence=/m);
+  assert.doesNotMatch(writes[1], /must-not-appear/);
+});
+
 test('production runner requests a concrete measured runtime identity', async () => {
   const calls = [];
   const stop = new Error('stop-after-runtime-measurement');
