@@ -24,7 +24,7 @@ unprivileged_build_worker() {
   install -d -m 0700 "$OUTPUT_ROOT"
   SYSTEMD_ROOT_DIRECTORY_MOUNTPOINTS=(dev etc input output proc root run runtime scratch sys var)
   for mountpoint in "${SYSTEMD_ROOT_DIRECTORY_MOUNTPOINTS[@]}"; do
-    install -d -m 0555 "$OUTPUT_ROOT/$mountpoint"
+    install -d -m 0755 "$OUTPUT_ROOT/$mountpoint"
   done
   install -m 0644 /dev/null "$OUTPUT_ROOT/input/input.bin"
   install -m 0644 /dev/null "$OUTPUT_ROOT/runtime/request.json"
@@ -659,6 +659,8 @@ find "$ROOT_STAGE" -xdev -type d -exec chmod 0555 {} +
 find "$ROOT_STAGE" -xdev -type f -perm /0111 -exec chmod 0555 {} +
 find "$ROOT_STAGE" -xdev -type f ! -perm /0111 -exec chmod 0444 {} +
 chown -R 0:0 "$ROOT_STAGE"
+chmod 0755 "$ROOT_STAGE"/{input,output,runtime,scratch}
+chmod 0644 "$ROOT_STAGE/input/input.bin" "$ROOT_STAGE/runtime/request.json"
 if find "$ROOT_STAGE" -xdev -type l -print -quit | grep -q .; then exit 66; fi
 if find "$ROOT_STAGE" -xdev ! -type d ! -type f -print -quit | grep -q .; then exit 66; fi
 verify_trusted_verifier

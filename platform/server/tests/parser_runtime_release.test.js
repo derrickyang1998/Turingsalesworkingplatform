@@ -966,7 +966,7 @@ function runtimeBuilderSourceSections() {
 }
 
 test('runtime builder preserves the pinned reproducible no-symlink runtime contract', () => {
-  const { source, worker } = runtimeBuilderSourceSections();
+  const { source, controller, worker } = runtimeBuilderSourceSections();
   const manifest = JSON.parse(read(runtimeManifestPath));
   const copiedInputs = source.match(/for required in \\\r?\n([\s\S]*?); do\r?\n  copy_build_input/);
   assert.ok(copiedInputs, 'builder must expose its trusted build-input closure');
@@ -992,11 +992,19 @@ test('runtime builder preserves the pinned reproducible no-symlink runtime contr
     source,
     /SYSTEMD_ROOT_DIRECTORY_MOUNTPOINTS=\(dev etc input output proc root run runtime scratch sys var\)/
   );
-  assert.match(source, /for mountpoint in "\$\{SYSTEMD_ROOT_DIRECTORY_MOUNTPOINTS\[@\]\}"/);
+  assert.match(
+    worker,
+    /for mountpoint in "\$\{SYSTEMD_ROOT_DIRECTORY_MOUNTPOINTS\[@\]\}"; do\r?\n\s+install -d -m 0755/
+  );
   assert.match(worker, /install -m 0644 \/dev\/null "\$OUTPUT_ROOT\/input\/input\.bin"/);
   assert.match(worker, /install -m 0644 \/dev\/null "\$OUTPUT_ROOT\/runtime\/request\.json"/);
   assert.match(worker, /chmod 0755 "\$OUTPUT_ROOT"\/\{input,output,runtime,scratch\}/);
   assert.match(worker, /chmod 0644 "\$OUTPUT_ROOT\/input\/input\.bin" "\$OUTPUT_ROOT\/runtime\/request\.json"/);
+  assert.match(
+    controller,
+    /find "\$ROOT_STAGE" -xdev -type f ! -perm \/0111 -exec chmod 0444 \{\} \+\r?\nchown -R 0:0 "\$ROOT_STAGE"\r?\nchmod 0755 "\$ROOT_STAGE"\/\{input,output,runtime,scratch\}\r?\nchmod 0644 "\$ROOT_STAGE\/input\/input\.bin" "\$ROOT_STAGE\/runtime\/request\.json"/,
+    'root sealing must preserve the pinned systemd mountpoint modes before identity measurement'
+  );
   assert.match(source, /--dependency-cache-root/);
   assert.match(source, /--trusted-verifier/);
   assert.match(source, /--expected-verifier-sha256/);
