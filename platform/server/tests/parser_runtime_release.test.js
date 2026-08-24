@@ -1928,6 +1928,14 @@ test('root provisioning invokes only the dependency-free trusted self-test contr
   assert.doesNotMatch(source, /TM_UPLOAD_SANDBOX_SPOOL_ROOT=/);
 });
 
+test('runtime evidence mismatch emits canonical identity facts only in diagnostic mode', () => {
+  const source = read(provisionScript);
+  assert.match(source, /TM_PROVISION_DIAGNOSTIC="\$\{TM_UPLOAD_SANDBOX_PROVISION_DIAGNOSTIC:-0\}"/);
+  assert.match(source, /parser runtime evidence details:/);
+  assert.match(source, /'expected': projection/);
+  assert.match(source, /'observed': observed/);
+});
+
 test('provision and cutover authorize only the exact raw envelope through trusted binding', () => {
   const provision = read(provisionScript);
   const deploy = read(path.resolve(serverRoot, '..', 'deploy_v8.ps1'));

@@ -33,6 +33,7 @@
 ### 审查与状态 / Review And Status
 - 2026-08-24 解析器暂存修复已完成 RED/GREEN：真实 XLSX 在强制 `fs.promises.copyFile` 返回 `EPERM` 时由失败转为通过；CSV/XLSX/PPTX、zip-bomb 与受信任 artifact 定向用例 `5/5`、Phase 4 服务集成 `32/32`、`-ValidateLocalOnly`、哈希闭环、diff 与聚焦 secret scan 均通过。独立 code-reviewer 结论为 `APPROVE`，无 Critical/High/Medium/Low 发现；五项宽范围旧合同失败已在未修改的 `e4ca1ce` 基线逐项复现，不归因于本次差异。
 - 解析器暂存修复后的首次受控切换证明 XLSX、PPTX 隔离任务均成功，但 OCR BMP 功能验收因夹具头部与换行匹配问题失败；发布器自动恢复 v0.4，公网与 loopback 健康检查均为 `ok`。本轮只修正该验收夹具与比较逻辑，不改变解析服务、运行时依赖或 systemd 安全策略。
+- OCR 修复后的下一次受控切换在安装前被运行时证据一致性门禁拒绝，并再次自动恢复健康的 v0.4。为定位具体漂移，provisioner 仅在显式诊断模式下输出 expected/observed/provided SHA-256、文件数、目录数与字节数的 canonical JSON；默认路径仍只返回受限错误，门禁判定与 systemd 策略不变。
 - 本轮发布包装器使用严格子进程环境白名单、语义化远端证据、可逆 CRM 写入冒烟及强制注销；任何由本轮生产变更引起的必选验收失败会自动使用本轮已验证备份回滚。成功、畸形响应、并发冲突、写入超时、注销失败、回滚后身份失败和自动回滚编排共 7 条动态场景通过，客户服务/HTTP 定向测试 3/3 通过，独立终审为 `APPROVE`。
 - S6 已验收检查点的独立 Code Review 为 `APPROVE`，独立 QA 为 `GO`；该检查点最终审查矩阵 342/342、提交前扩展矩阵 373/373，6 个关键 JavaScript 文件语法通过。
 - 完整历史 bundle `phase5-v060-90713b23f417-full-source.bundle` 已验签，SHA-256 为 `fd4b925d82056d1eb53a5c65cc67461bc3eadd9ba88f47020ed37343d5dae887`。

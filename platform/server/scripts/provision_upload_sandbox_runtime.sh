@@ -367,7 +367,10 @@ bind_installed_parser_acceptance() {
 validate_runtime_against_manifest() {
   local root="$1" observed
   observed="$(inspect_runtime "$root")"
-  TM_EXPECTED_SHA256="$EXPECTED_SHA256" TM_RUNTIME_OBSERVED="$observed" /usr/bin/python3 - "$SOURCE_ROOT/systemd/turingmarket-parser.manifest.json" <<'PY'
+  TM_EXPECTED_SHA256="$EXPECTED_SHA256" \
+  TM_RUNTIME_OBSERVED="$observed" \
+  TM_PROVISION_DIAGNOSTIC="${TM_UPLOAD_SANDBOX_PROVISION_DIAGNOSTIC:-0}" \
+  /usr/bin/python3 - "$SOURCE_ROOT/systemd/turingmarket-parser.manifest.json" <<'PY'
 import json, os, sys
 with open(sys.argv[1], encoding='utf-8') as handle:
     manifest = json.load(handle)
@@ -375,6 +378,17 @@ observed = json.loads(os.environ['TM_RUNTIME_OBSERVED'])
 expected = manifest.get('runtime_tree', {})
 projection = {key: expected.get(key) for key in ('format', 'sha256', 'files', 'directories', 'bytes')}
 if projection.get('sha256') != os.environ['TM_EXPECTED_SHA256'] or observed != projection:
+    if os.environ.get('TM_PROVISION_DIAGNOSTIC') == '1':
+        details = {
+            'expected': projection,
+            'observed': observed,
+            'provided_sha256': os.environ['TM_EXPECTED_SHA256'],
+        }
+        print(
+            'parser runtime evidence details:' +
+            json.dumps(details, sort_keys=True, separators=(',', ':')),
+            file=sys.stderr,
+        )
     raise SystemExit('parser runtime evidence mismatch')
 PY
 }

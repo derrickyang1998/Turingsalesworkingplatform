@@ -50,7 +50,7 @@
     { "path": "server/scripts/check_cutover_capacity.py", "sha256": "3cfca1526919e3c2ae65bcc0d7fa0fc347c023d36a353b98a5cd149b9a824b83" },
     { "path": "server/scripts/cleanup_stale_migration_gate.sh", "sha256": "d5f2befa902522dd9de3e9dd2397a99ee5e78ab1a1c6e526a27f14bb2829e1fa" },
     { "path": "server/scripts/parse_upload_sandbox.sh", "sha256": "2d77151dac802ce00d80c9df04ba879232001b014ab672379c36836d767b8d95" },
-    { "path": "server/scripts/provision_upload_sandbox_runtime.sh", "sha256": "13856495f49f53081d1922c94230d0616f6f97ec83db3077f08ad9ed0f81ae8d" },
+    { "path": "server/scripts/provision_upload_sandbox_runtime.sh", "sha256": "18dabbb91c705357027b5acabbb465e6d51dacb4dbe122eb1005666b441f369d" },
     { "path": "server/scripts/public_release_guard.sh", "sha256": "d45fe8fcc01587aaa0e73eccfb9714c27801e232cb6c0effd6daedb703316d66" },
     { "path": "server/scripts/sanitization_manifest.json", "sha256": "ba444ca2723bc840aa11dc67dc9e36c8f0461ae765b442ad1482f112d54a039a" },
     { "path": "server/scripts/sanitize_production_shape.js", "sha256": "ff8ba42481e0dbcd2b6dc7ae5170c26168773bd5e67fb7f3cac187c89940ba82" },
