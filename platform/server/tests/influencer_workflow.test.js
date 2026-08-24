@@ -364,6 +364,32 @@ test('influencer import accepts the historical 19-column template aliases', asyn
   db.close();
 });
 
+test('influencer import normalizes legacy negative amount cells to nonnegative magnitudes', async () => {
+  const db = freshDb();
+  const routes = mountRoutes(db);
+
+  const result = await invoke(routes, 'POST /api/influencers/import', {
+    body: {
+      batch_id: 'legacy-negative-amounts',
+      rows: [{
+        '网红频道名称': '@legacy_negative_amounts',
+        '网红成本价格（折算美元）': '-3000',
+        '对外商务报价（美元）': '-4500',
+        'CPM（自动计算）': '-137.2',
+        'CPV(自动计算)': '-0.14'
+      }]
+    }
+  });
+
+  assert.equal(result.statusCode, 200);
+  assert.equal(result.payload.imported, 1);
+  const inf = db.prepare('SELECT cost_usd,quoted_price,cpm,cpv FROM influencers WHERE kol_handle = ?')
+    .get('@legacy_negative_amounts');
+  assert.deepEqual(inf, { cost_usd: 3000, quoted_price: 4500, cpm: 137.2, cpv: 0.14 });
+
+  db.close();
+});
+
 test('influencer import accepts the custom upload header workbook contract', async () => {
   const db = freshDb();
   const routes = mountRoutes(db);

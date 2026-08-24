@@ -121,8 +121,8 @@ function createLegacyV0Fixture(t, name) {
     VALUES (1,'admin','hash','Admin','admin')
   `).run();
   database.prepare(`
-    INSERT INTO influencers (id,platform,kol_handle,cost_usd,quoted_price)
-    VALUES (128,'YouTube','@production-shape',-3000,-4500)
+    INSERT INTO influencers (id,platform,kol_handle,cost_usd,quoted_price,cpm,cpv)
+    VALUES (128,'YouTube','@production-shape',-3000,-4500,-137.2,-0.14)
   `).run();
   database.prepare(`
     INSERT INTO customers (id,brand_name,stage,created_by,assigned_to)

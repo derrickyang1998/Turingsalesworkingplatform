@@ -31,8 +31,8 @@ function productionShapeFixture(name) {
     VALUES (1,'admin','hash','Admin','admin')
   `).run();
   db.prepare(`
-    INSERT INTO influencers (id,platform,kol_handle,cost_usd,quoted_price)
-    VALUES (128,'YouTube','@production-shape',-3000,-4500)
+    INSERT INTO influencers (id,platform,kol_handle,cost_usd,quoted_price,cpm,cpv)
+    VALUES (128,'YouTube','@production-shape',-3000,-4500,-137.2,-0.14)
   `).run();
   db.prepare(`
     INSERT INTO customers (id,brand_name,stage,created_by,assigned_to)
@@ -103,6 +103,47 @@ test('legacy production adoption repairs the frozen profile and publishes exact 
     assert.doesNotThrow(() => sqliteDigest.verifyKnowledgeChunksFtsIntegrity(
       output, adoption.FTS_MANIFEST, { checkMainIntegrity: true }
     ));
+  } finally {
+    output.close();
+  }
+});
+
+test('legacy production adoption accepts the exact post-upload negative amount profile', (t) => {
+  const fixture = productionShapeFixture('post-upload-profile');
+  t.after(() => fs.rmSync(fixture.root, { recursive: true, force: true }));
+  const db = new Database(fixture.sourcePath);
+  db.prepare(`
+    INSERT INTO influencers (id,platform,kol_handle,cost_usd,quoted_price,cpm,cpv)
+    VALUES
+      (2702,'YouTube','@known-duplicate',-3000,-4500,-137.2,-0.14),
+      (2734,'Instagram','@known-quote-a',0,-1500,-20.16,-0.02),
+      (2760,'TikTok','@known-quote-b',0,-4000,-60.61,-0.06)
+  `).run();
+  db.close();
+  const sourceBefore = sha256(fixture.sourcePath);
+
+  const report = adoption.adoptLegacyProductionV1({
+    sourcePath: fixture.sourcePath,
+    outputPath: fixture.outputPath,
+    expectedSourceSha256: sourceBefore
+  });
+
+  assert.equal(sha256(fixture.sourcePath), sourceBefore);
+  assert.equal(report.repairs.influencerRows, 4);
+  const output = new Database(fixture.outputPath, { readonly: true, fileMustExist: true });
+  try {
+    assert.deepEqual(
+      output.prepare(`
+        SELECT id,cost_usd,quoted_price,cpm,cpv FROM influencers
+        WHERE id IN (128,2702,2734,2760) ORDER BY id
+      `).all(),
+      [
+        { id: 128, cost_usd: 3000, quoted_price: 4500, cpm: 137.2, cpv: 0.14 },
+        { id: 2702, cost_usd: 3000, quoted_price: 4500, cpm: 137.2, cpv: 0.14 },
+        { id: 2734, cost_usd: 0, quoted_price: 1500, cpm: 20.16, cpv: 0.02 },
+        { id: 2760, cost_usd: 0, quoted_price: 4000, cpm: 60.61, cpv: 0.06 }
+      ]
+    );
   } finally {
     output.close();
   }

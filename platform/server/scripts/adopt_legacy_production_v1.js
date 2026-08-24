@@ -26,7 +26,7 @@ const ALLOWED_V1_CUSTOMER_STAGES = Object.freeze([
 ]);
 const EXPECTED_REPAIR_PROFILE = Object.freeze({
   negativeInfluencers: Object.freeze([
-    Object.freeze({ id: 128, cost_usd: -3000, quoted_price: -4500 })
+    Object.freeze({ id: 128, cost_usd: -3000, quoted_price: -4500, cpm: -137.2, cpv: -0.14 })
   ]),
   invalidCustomers: Object.freeze([
     Object.freeze({ id: 8, stage: 'new_lead' })
@@ -36,6 +36,16 @@ const EXPECTED_REPAIR_PROFILE = Object.freeze({
     Object.freeze({ id: 23, customer_id: 8, stage_to: 'new_lead' })
   ])
 });
+const POST_UPLOAD_NEGATIVE_INFLUENCER_REPAIR_PROFILE = Object.freeze([
+  Object.freeze({ id: 128, cost_usd: -3000, quoted_price: -4500, cpm: -137.2, cpv: -0.14 }),
+  Object.freeze({ id: 2702, cost_usd: -3000, quoted_price: -4500, cpm: -137.2, cpv: -0.14 }),
+  Object.freeze({ id: 2734, cost_usd: 0, quoted_price: -1500, cpm: -20.16, cpv: -0.02 }),
+  Object.freeze({ id: 2760, cost_usd: 0, quoted_price: -4000, cpm: -60.61, cpv: -0.06 })
+]);
+const ALLOWED_NEGATIVE_INFLUENCER_REPAIR_PROFILES = Object.freeze([
+  EXPECTED_REPAIR_PROFILE.negativeInfluencers,
+  POST_UPLOAD_NEGATIVE_INFLUENCER_REPAIR_PROFILE
+]);
 
 function sqliteString(value) {
   return `'${String(value).replaceAll("'", "''")}'`;
@@ -277,9 +287,15 @@ function assertExactRows(label, actual, expected) {
   }
 }
 
+function assertAllowedExactRows(label, actual, expectedProfiles) {
+  if (!expectedProfiles.some((expected) => JSON.stringify(actual) === JSON.stringify(expected))) {
+    throw new Error(`${label} does not match the frozen production repair profile`);
+  }
+}
+
 function assertAndApplyRepairs(db) {
   const negativeInfluencers = db.prepare(`
-    SELECT id,cost_usd,quoted_price FROM influencers
+    SELECT id,cost_usd,quoted_price,cpm,cpv FROM influencers
     WHERE cost_usd<0 OR quoted_price<0 ORDER BY id
   `).all();
   const invalidCustomers = invalidStageRows(db, 'customers', 'stage', 'id,stage');
@@ -290,17 +306,28 @@ function assertAndApplyRepairs(db) {
     db, 'customer_activity', 'stage_to', 'id,customer_id,stage_to'
   );
 
-  assertExactRows('negative influencer rows', negativeInfluencers, EXPECTED_REPAIR_PROFILE.negativeInfluencers);
+  assertAllowedExactRows(
+    'negative influencer rows',
+    negativeInfluencers,
+    ALLOWED_NEGATIVE_INFLUENCER_REPAIR_PROFILES
+  );
   assertExactRows('invalid customer stages', invalidCustomers, EXPECTED_REPAIR_PROFILE.invalidCustomers);
   assertExactRows('invalid activity stage_from values', invalidActivityFrom, EXPECTED_REPAIR_PROFILE.invalidActivityFrom);
   assertExactRows('invalid activity stage_to values', invalidActivityTo, EXPECTED_REPAIR_PROFILE.invalidActivityTo);
 
   db.transaction(() => {
-    const influencer = db.prepare(`
-      UPDATE influencers SET cost_usd=3000,quoted_price=4500
-      WHERE id=128 AND cost_usd=-3000 AND quoted_price=-4500
-    `).run();
-    if (influencer.changes !== 1) throw new Error('frozen influencer repair lost its exact target');
+    const repairInfluencer = db.prepare(`
+      UPDATE influencers
+      SET cost_usd=CASE WHEN cost_usd<0 THEN -cost_usd ELSE cost_usd END,
+          quoted_price=CASE WHEN quoted_price<0 THEN -quoted_price ELSE quoted_price END,
+          cpm=CASE WHEN cpm<0 THEN -cpm ELSE cpm END,
+          cpv=CASE WHEN cpv<0 THEN -cpv ELSE cpv END
+      WHERE id=? AND cost_usd=? AND quoted_price=? AND cpm=? AND cpv=?
+    `);
+    for (const row of negativeInfluencers) {
+      const influencer = repairInfluencer.run(row.id, row.cost_usd, row.quoted_price, row.cpm, row.cpv);
+      if (influencer.changes !== 1) throw new Error('frozen influencer repair lost its exact target');
+    }
     const customer = db.prepare(`
       UPDATE customers SET stage='lead' WHERE id=8 AND stage='new_lead'
     `).run();
