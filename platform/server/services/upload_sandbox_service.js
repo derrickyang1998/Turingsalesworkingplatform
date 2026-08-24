@@ -1933,11 +1933,14 @@ async function runPressureProbe(contract, target, limitBytes, attemptedBytes, op
   });
 }
 
-async function parseDemandWorkerFile(filePath, file) {
+async function parseDemandWorkerFile(filePath, file, verifiedBytes) {
   const extension = path.extname(file.basename).toLowerCase();
+  if (!Buffer.isBuffer(verifiedBytes) || verifiedBytes.length !== file.length) {
+    throw uploadError(400, 'UPLOAD_INVALID_CONTENT', 'Parser input buffer is invalid');
+  }
   if (['.txt', '.md', '.csv', '.json'].includes(extension)) {
     return {
-      text: (await fsp.readFile(filePath)).toString('utf8'),
+      text: verifiedBytes.toString('utf8'),
       parser: 'plain-text',
       fallback: false,
       warnings: [],
@@ -1950,7 +1953,7 @@ async function parseDemandWorkerFile(filePath, file) {
     ? '/scratch'
     : path.dirname(filePath);
   const scratchPath = path.join(scratchRoot, `source${extension}`);
-  await fsp.copyFile(filePath, scratchPath, fs.constants.COPYFILE_EXCL);
+  await writeExclusiveFile(scratchPath, verifiedBytes, 0o600);
   try {
     if (['.xlsx', '.xlsm'].includes(extension)) {
       const parsed = await runWorkerPython('extract_xlsx_text.py', scratchPath, 20_000);
@@ -2005,7 +2008,7 @@ async function parseDemandWorkerFile(filePath, file) {
   }
 }
 
-async function parseWorkerFile(route, filePath, file) {
+async function parseWorkerFile(route, filePath, file, verifiedBytes) {
   const extension = path.extname(file.basename).toLowerCase();
   const descriptor = {
     path: filePath,
@@ -2018,7 +2021,7 @@ async function parseWorkerFile(route, filePath, file) {
     ['.pdf', '.docx', '.pptx', '.jpg', '.jpeg', '.png', '.webp', '.bmp', '.tif', '.tiff']
       .includes(extension)
   ) {
-    const parsed = await parseDemandWorkerFile(filePath, file);
+    const parsed = await parseDemandWorkerFile(filePath, file, verifiedBytes);
     if (Buffer.byteLength(String(parsed.text || ''), 'utf8') > SANDBOX_LIMITS.outputBytes) {
       throw uploadError(413, 'UPLOAD_LIMIT_EXCEEDED', 'Extracted parser output exceeds the limit');
     }
@@ -2188,7 +2191,7 @@ async function workerMain(argv) {
   }
   assertMagicBytes(extension, file.bytes);
   inspectContainer(extension, file.bytes);
-  const data = await parseWorkerFile(route, input.inputPath, request.file);
+  const data = await parseWorkerFile(route, input.inputPath, request.file, file.bytes);
   const resultBytes = jsonBytes({ version: 1, route: route.id, data });
   const resultSha256 = crypto.createHash('sha256').update(resultBytes).digest('hex');
   await writeStagedResultFile(path.join(input.outputRoot, 'result.json'), resultBytes);

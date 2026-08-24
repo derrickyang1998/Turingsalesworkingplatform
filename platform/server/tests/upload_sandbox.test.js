@@ -1144,6 +1144,51 @@ test('worker parses the generated minimal XLSX and PPTX payload markers through 
   }
 });
 
+test('worker scratch staging does not require the copy_file_range fast path', { concurrency: false }, async () => {
+  const spoolRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-upload-copy-fallback-'));
+  const service = createUploadSandboxService({ parserIdentity: TEST_PARSER_IDENTITY, spoolRoot });
+  const fixture = createParserAcceptanceFixtures().find(({ format }) => format === 'xlsx');
+  const route = matchUploadRoute('POST', '/api/demand/parse-file');
+  const originalCopyFile = fs.promises.copyFile;
+  let job;
+
+  fs.promises.copyFile = async () => {
+    throw Object.assign(new Error('copy_file_range is denied by the parser sandbox'), {
+      code: 'EPERM'
+    });
+  };
+  try {
+    const multipart = {
+      route,
+      fields: [],
+      files: [{
+        buffer: fixture.buffer,
+        basename: fixture.filename,
+        mime: fixture.mime,
+        length: fixture.buffer.length,
+        sha256: require('node:crypto').createHash('sha256').update(fixture.buffer).digest('hex')
+      }]
+    };
+    job = await service.stageJob(multipart, {
+      ledgerId: 299,
+      requestHash: 'a'.repeat(64),
+      leaseToken: 'b'.repeat(64),
+      route: route.id
+    });
+    await workerMain([
+      'worker', '--job-id', job.id, '--request', job.requestPath,
+      '--input', job.inputPath, '--output-root', job.outputRoot
+    ]);
+    const parsed = await validateParserOutput(job.outputRoot);
+    assert.match(parsed.data.text, new RegExp(fixture.marker));
+    assert.equal(parsed.data.parser, fixture.parser);
+  } finally {
+    fs.promises.copyFile = originalCopyFile;
+    if (job) await service.cleanupJob(job).catch(() => {});
+    fs.rmSync(spoolRoot, { recursive: true, force: true });
+  }
+});
+
 test('trusted parser completion event records a successful job exactly once', async () => {
   const spoolRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-parser-event-success-'));
   const events = [];

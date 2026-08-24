@@ -396,7 +396,7 @@ test('v0.6 deploy seals the parser appliance under the root-only lifecycle befor
     'chmod 0444',
     'PARSER_RUNTIME_CANDIDATE_READY'
   ], 'parser candidate preparation');
-  assert.match(preparation, /640591815/);
+  assert.match(preparation, /640592018/);
   assert.match(preparation, /ParserRequiredBytes/);
   assert.match(preparation, /test -f "\$TrustedSource"/);
   assert.match(preparation, /test ! -L "\$TrustedSource"/);
