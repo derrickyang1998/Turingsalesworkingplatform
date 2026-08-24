@@ -18,6 +18,7 @@ const {
   PRESSURE_ERRNOS,
   REQUIRED_SELF_TESTS,
   assertCompleteSelfTestResult,
+  containsNormalizedMarker,
   composeRawSelfTestObservations,
   composeSelfTestResult,
   createParserAcceptanceFixtures,
@@ -290,6 +291,7 @@ test('minimal parser fixtures are real XLSX, PPTX, and raster payloads with fixe
   assert.equal(fixtures[0].buffer.subarray(0, 4).toString('hex'), '504b0304');
   assert.equal(fixtures[1].buffer.subarray(0, 4).toString('hex'), '504b0304');
   assert.equal(fixtures[2].buffer.subarray(0, 2).toString('ascii'), 'BM');
+  assert.equal(fixtures[2].buffer.readUInt32LE(30), 0, 'BMP fixture must be uncompressed');
   assert.ok(fixtures.every((fixture) => fixture.buffer.length > 100));
 });
 
@@ -302,6 +304,13 @@ test('parser acceptance evidence requires actual format parsers and OCR inferenc
   assert.equal(validateParserAcceptanceEvidence(evidence.map((item) => (
     item.format === 'bmp' ? { ...item, parser: 'image-ocr', ocr_used: false } : item
   ))), false);
+});
+
+test('parser acceptance treats OCR line wrapping as equivalent whitespace', () => {
+  assert.equal(
+    containsNormalizedMarker && containsNormalizedMarker('OCR\n123', 'OCR 123'),
+    true
+  );
 });
 
 test('manifest syscall policy accounts for every declared deny token and rejects omissions', () => {

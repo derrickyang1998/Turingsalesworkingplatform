@@ -213,6 +213,14 @@ function exactKeys(value, keys) {
     Object.keys(value).sort().join('\n') === [...keys].sort().join('\n');
 }
 
+function containsNormalizedMarker(text, marker) {
+  const normalize = (value) => typeof value === 'string'
+    ? value.replace(/\s+/g, ' ').trim().toLocaleLowerCase('en-US')
+    : '';
+  const normalizedMarker = normalize(marker);
+  return normalizedMarker.length > 0 && normalize(text).includes(normalizedMarker);
+}
+
 function sameArray(value, expected) {
   return Array.isArray(value) &&
     value.length === expected.length &&
@@ -317,7 +325,8 @@ function textBmp(text) {
   const width = padding * 2 + text.length * glyphWidth - scale;
   const height = padding * 2 + 7 * scale;
   const stride = Math.ceil((width * 3) / 4) * 4;
-  const bitmap = Buffer.alloc(54 + stride * height, 0xff);
+  const bitmap = Buffer.alloc(54 + stride * height);
+  bitmap.fill(0xff, 54);
   bitmap.write('BM', 0, 2, 'ascii');
   bitmap.writeUInt32LE(bitmap.length, 2);
   bitmap.writeUInt32LE(54, 10);
@@ -1805,9 +1814,7 @@ async function runParserAcceptanceProbes(context) {
         multipart.route.id
       );
       const text = typeof data.text === 'string' ? data.text : '';
-      const markerFound = text.toLocaleLowerCase('en-US').includes(
-        fixture.marker.toLocaleLowerCase('en-US')
-      );
+      const markerFound = containsNormalizedMarker(text, fixture.marker);
       const item = Object.freeze({
         format: fixture.format,
         filename: fixture.filename,
@@ -2276,6 +2283,7 @@ module.exports = {
   PRESSURE_ERRNOS,
   REQUIRED_SELF_TESTS,
   assertCompleteSelfTestResult,
+  containsNormalizedMarker,
   composeRawSelfTestObservations,
   composeSelfTestResult,
   createParserAcceptanceFixtures,

@@ -16,6 +16,7 @@
 ### 解析器运行时设备 / Parser Runtime Appliance
 - 为知识库、网红和需求文件上传增加独立解析器设备。生产构建固定为 Linux `x86_64`、Node.js `v20.20.2` 与 Python `3.14.4`；与禁止 Python 字节码缓存的构建策略一致，密封运行时树固定为 3,474 个文件、431 个目录、640,592,018 字节，SHA-256 为 `cf27366e5e5404b6538be9e0da0f9b9ef36c4a3efbde9883f688c71006c118b1`。
 - 解析器 worker 现在复用已完成长度与 SHA-256 校验的输入字节，并以独占写入方式暂存到 `/scratch`；不再触发受 systemd 系统调用策略拒绝的 `copy_file_range` 快路径，且未放宽网络、挂载、系统调用或写路径隔离。
+- 生产解析器验收进一步修复 OCR 夹具：BMP 文件头改为零初始化并仅将像素区填白，避免压缩字段误写为 `4294967295`；OCR 标记比较会折叠等价空白，因此 RapidOCR 返回 `OCR\n123` 时可正确匹配 `OCR 123`。头部合法性与换行匹配回归 `26/26`、相同 Linux RapidOCR 运行时实测通过。
 - Node 依赖闭包精确锁定为 `read-excel-file@9.2.0`、`@xmldom/xmldom@0.9.11`、`fflate@0.8.3`、`unzipper-esm@0.13.3`、`graceful-fs@4.2.11` 与 `node-int64@0.4.0`；`package-lock.json` SHA-256 为 `e1d6e5ababef1fb6f0aa69363be328e4da42283c96e268378c2f83076722fc46`。
 - Python 闭包精确锁定为 `certifi==2026.7.22`、`charset-normalizer==3.5.0`、`colorlog==6.12.0`、`flatbuffers==25.12.19`、`idna==3.18`、`numpy==2.5.2`、`omegaconf==2.4.0.dev13`、`onnxruntime==1.28.0`、`opencv-python==5.0.0.93`、`packaging==26.3`、`pillow==12.3.0`、`protobuf==7.35.1`、`pyclipper==1.4.0`、`PyMuPDF==1.27.2.3`、`pypdf==6.14.2`、`PyYAML==6.0.3`、`rapidocr==3.9.2`、`requests==2.34.2`、`shapely==2.1.2`、`six==1.17.0`、`tqdm==4.70.0`、`typing_extensions==4.16.0` 与 `urllib3==2.7.0`；逐包验签的 `requirements.lock` SHA-256 为 `22f72070ee7c62b428261b64435fbb0b24d87f0aaa7a4d0ac0d8e7a45bfb44df`。
 - 构建、安装、快照和回滚只允许在 root 所有的生命周期目录内执行。解析任务以禁止登录的 `turingmarket-parser` 身份运行于 systemd 257+ 的 `RootDirectory` chroot，并启用私有网络、PID、IPC、用户和挂载命名空间、只读系统、空 capability 与资源上限。
@@ -31,6 +32,7 @@
 
 ### 审查与状态 / Review And Status
 - 2026-08-24 解析器暂存修复已完成 RED/GREEN：真实 XLSX 在强制 `fs.promises.copyFile` 返回 `EPERM` 时由失败转为通过；CSV/XLSX/PPTX、zip-bomb 与受信任 artifact 定向用例 `5/5`、Phase 4 服务集成 `32/32`、`-ValidateLocalOnly`、哈希闭环、diff 与聚焦 secret scan 均通过。独立 code-reviewer 结论为 `APPROVE`，无 Critical/High/Medium/Low 发现；五项宽范围旧合同失败已在未修改的 `e4ca1ce` 基线逐项复现，不归因于本次差异。
+- 解析器暂存修复后的首次受控切换证明 XLSX、PPTX 隔离任务均成功，但 OCR BMP 功能验收因夹具头部与换行匹配问题失败；发布器自动恢复 v0.4，公网与 loopback 健康检查均为 `ok`。本轮只修正该验收夹具与比较逻辑，不改变解析服务、运行时依赖或 systemd 安全策略。
 - 本轮发布包装器使用严格子进程环境白名单、语义化远端证据、可逆 CRM 写入冒烟及强制注销；任何由本轮生产变更引起的必选验收失败会自动使用本轮已验证备份回滚。成功、畸形响应、并发冲突、写入超时、注销失败、回滚后身份失败和自动回滚编排共 7 条动态场景通过，客户服务/HTTP 定向测试 3/3 通过，独立终审为 `APPROVE`。
 - S6 已验收检查点的独立 Code Review 为 `APPROVE`，独立 QA 为 `GO`；该检查点最终审查矩阵 342/342、提交前扩展矩阵 373/373，6 个关键 JavaScript 文件语法通过。
 - 完整历史 bundle `phase5-v060-90713b23f417-full-source.bundle` 已验签，SHA-256 为 `fd4b925d82056d1eb53a5c65cc67461bc3eadd9ba88f47020ed37343d5dae887`。
