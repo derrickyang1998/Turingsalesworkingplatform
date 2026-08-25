@@ -795,6 +795,20 @@ printf 'REQUESTS=%s\\n' "$(cat "$counter")"
   assert.match(result.stdout, /REQUESTS=2/);
 });
 
+test('cutover renders a unique replay unit stamp and rejects only unresolved uppercase placeholders', () => {
+  const deploy = read(deployPath);
+  const cutover = deploy.match(/\$cutoverGate\s*=\s*@'\r?\n([\s\S]*?)\r?\n'@/)?.[1] || '';
+  const guard = deploy.match(/if \(\$cutoverGate (-(?:c)?match) '([^']+)'\)/);
+  assert.ok(guard, 'cutover placeholder guard must exist');
+  const placeholderPattern = new RegExp(guard[2], guard[1] === '-match' ? 'i' : '');
+  const renderedCutover = cutover.replace(/__[A-Z0-9_]+__/g, 'rendered');
+
+  assert.match(deploy, /\$cutoverGate = \$cutoverGate\.Replace\('__STAMP__', \$stamp\)/);
+  assert.match('__STAMP__', placeholderPattern);
+  assert.doesNotMatch(renderedCutover, placeholderPattern);
+  assert.match(deploy, /throw "Cutover gate contains an unresolved template placeholder\."/);
+});
+
 test('Phase 4 lifecycle creation quarantines only validated incomplete lock generations', (t) => {
   const deploy = read(deployPath);
   const enter = functionSource(deploy, 'Enter-RemoteDeploymentLock', 'Exit-RemoteDeploymentLock');

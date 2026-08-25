@@ -12543,6 +12543,7 @@ echo "DEPLOY_OK"
     $cutoverGate = $cutoverGate.Replace('__PARSER_STARTUP_TIMEOUT_SECONDS__', $PARSER_STARTUP_TIMEOUT_SECONDS.ToString())
     $cutoverGate = $cutoverGate.Replace('__PUBLIC_GUARD_TIMEOUT_SECONDS__', $PUBLIC_GUARD_TIMEOUT_SECONDS.ToString())
     $cutoverGate = $cutoverGate.Replace('__HTTP_DRAIN_STABLE_SECONDS__', $HttpDrainStableSeconds.ToString())
+    $cutoverGate = $cutoverGate.Replace('__STAMP__', $stamp)
     $cutoverGate = $cutoverGate.Replace('__LOCK_TOKEN__', $deploymentLockToken)
     $cutoverGate = $cutoverGate.Replace('__WRITER_TOKEN__', $deploymentWriterToken)
     $cutoverGate = $cutoverGate.Replace('__RUN_ID__', $deploymentRunId)
@@ -12559,6 +12560,9 @@ echo "DEPLOY_OK"
     $cutoverGate = $cutoverGate.Replace('__TRUSTED_PUBLIC_GUARD_SHA256__', $EXPECTED_TRUSTED_PUBLIC_GUARD_SHA256)
     $cutoverGate = $cutoverGate.Replace('__EXACT_PUBLIC_NGINX_VERIFIER__', $exactPublicNginxVerifier)
     $cutoverGate = $cutoverGate.Replace('__PM2_PERSISTENCE_VERIFIER__', $pm2PersistenceVerifier)
+    if ($cutoverGate -cmatch '__[A-Z0-9_]+__') {
+        throw "Cutover gate contains an unresolved template placeholder."
+    }
     Invoke-RemoteBash -Script $cutoverGate -FailureMessage "Remote atomic release failed" -RequireDeploymentLock
     Assert-RemoteCutoverComplete
     Invoke-RemoteRetentionCleanup -BackupPath $backupDir -ReleaseRoot $remoteReleaseRoot
