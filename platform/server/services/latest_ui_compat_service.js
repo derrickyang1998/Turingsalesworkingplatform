@@ -220,14 +220,62 @@ async function generateStrategy(db, user, prompt, input) {
 }
 
 async function generateDemandAnalysis(prompt, input, fileName, opts) {
+  opts = opts || {};
   const fallback = inferDemandAnalysis(input || prompt, '', fileName);
-  const result = await generateJsonWithDeepSeek([
+  const message = [
     'Analyze this overseas influencer marketing demand. Return JSON keys:',
     'brand, company, product, usp, industry, budget_range, target_market, platforms, competitors, requirements.',
     'platforms, competitors, requirements must be arrays.',
+    'Return JSON only. No markdown fences. No commentary.',
     '',
-    prompt || input || ''
-  ].join('\n'), fallback, Object.assign({}, opts || {}, { temperature: 0.1, max_tokens: 1800, endpoint: 'demand_analysis' }));
+    [prompt, input].filter(Boolean).join('\n\n')
+  ].join('\n');
+
+  if (opts.db && opts.user && opts.user.id) {
+    const aiService = opts.aiService || require('./ai_service');
+    const retrievalQuery = [prompt, input].filter(Boolean).join('\n\n');
+    const aiResult = await aiService.handleChat(opts.db, {
+      user: opts.user,
+      message,
+      ragQuery: retrievalQuery,
+      webQuery: retrievalQuery,
+      allowWeb: opts.allowWeb === true,
+      source_module: 'demand_analysis',
+      campaign_id: opts.campaignId,
+      idempotencyKey: opts.idempotencyKey,
+      requestId: opts.requestId,
+      visibility: 'private',
+      archiveSummary: false,
+      atomicOneShot: true,
+      knowledgeLimit: 8,
+      temperature: 0.1,
+      max_tokens: 1800,
+      operationTimeoutMs: opts.operationTimeoutMs,
+      degradedContent: JSON.stringify(fallback),
+      validateCompletion(content) {
+        const candidate = String(content || '').replace(/^```json\s*/i, '').replace(/```$/i, '').trim();
+        return safeJson(candidate, null) !== null;
+      },
+      provider: opts.provider,
+      webSearchProvider: opts.webSearchProvider,
+      signal: opts.signal
+    });
+    const raw = String(aiResult.answer || '').replace(/^```json\s*/i, '').replace(/```$/i, '').trim();
+    const parsed = safeJson(raw, null);
+    const degraded = !parsed || !!aiResult.degraded;
+    return {
+      analysis: normalizeAnalysis(parsed, fallback),
+      fallback: degraded,
+      warning: aiResult.reason || (!parsed ? 'AI JSON parse failed' : ''),
+      ai: aiResult
+    };
+  }
+
+  const result = await generateJsonWithDeepSeek(message, fallback, Object.assign({}, opts, {
+    temperature: 0.1,
+    max_tokens: 1800,
+    endpoint: 'demand_analysis'
+  }));
   return {
     analysis: normalizeAnalysis(result.value, fallback),
     fallback: result.fallback,

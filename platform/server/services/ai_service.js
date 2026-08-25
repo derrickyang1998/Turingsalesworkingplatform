@@ -28,6 +28,12 @@ function clampMaxTokens(value) {
   return Math.max(256, Math.min(parsed, 4000));
 }
 
+function clampKnowledgeLimit(value, fallback) {
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 1) return fallback || 8;
+  return Math.min(parsed, 20);
+}
+
 function insertMessage(db, payload) {
   const result = db.prepare(`
     INSERT INTO ai_messages (
@@ -149,10 +155,12 @@ async function handleLegacyChat(db, opts) {
     metadata: { source_module: opts.source_module || conversation.source_module || 'assistant' }
   });
 
+  const retrievalQuery = String(opts.ragQuery || message).trim() || message;
+  const webQuery = String(opts.webQuery || retrievalQuery).trim() || retrievalQuery;
   const ragContext = rag.buildRagContext(db, {
-    query: message,
+    query: retrievalQuery,
     user: opts.user,
-    limit: opts.knowledgeLimit || 8,
+    limit: clampKnowledgeLimit(opts.knowledgeLimit, 8),
     business_type: opts.business_type,
     business_id: opts.business_id
   });
@@ -160,15 +168,15 @@ async function handleLegacyChat(db, opts) {
   let searchResult = { used: false, provider: opts.webProvider || 'tavily', results: [], reason: 'disabled' };
   if (opts.allowWeb !== false) {
     if (opts.webSearchProvider && typeof opts.webSearchProvider.search === 'function') {
-      searchResult = await opts.webSearchProvider.search(message);
+      searchResult = await opts.webSearchProvider.search(webQuery);
     } else {
-      searchResult = await webSearch.searchWeb(message, {
+      searchResult = await webSearch.searchWeb(webQuery, {
         provider: opts.webProvider || process.env.WEB_SEARCH_PROVIDER || 'tavily',
         maxResults: opts.webMaxResults || 5,
         db: db
       });
     }
-    webSearch.cacheSearchResult(db, message, searchResult);
+    webSearch.cacheSearchResult(db, webQuery, searchResult);
   }
 
   const history = recentMessages(db, conversation.id, 8);
@@ -248,6 +256,239 @@ async function handleLegacyChat(db, opts) {
     },
     archived_summary_id: archived && archived.id ? archived.id : null
   };
+}
+
+function createOneShotProviderContext(opts) {
+  const rawTimeout = Number(opts.operationTimeoutMs);
+  const timeoutMs = Number.isSafeInteger(rawTimeout) && rawTimeout > 0
+    ? Math.min(rawTimeout, 120000)
+    : 60000;
+  const controller = new AbortController();
+  const abort = () => {
+    if (!controller.signal.aborted) {
+      controller.abort(new Error('AI provider deadline exceeded.'));
+    }
+  };
+  let detachExternal = null;
+  if (opts.signal && typeof opts.signal.addEventListener === 'function') {
+    if (opts.signal.aborted) {
+      abort();
+    } else {
+      const onAbort = () => abort();
+      opts.signal.addEventListener('abort', onAbort, { once: true });
+      detachExternal = () => opts.signal.removeEventListener('abort', onAbort);
+    }
+  }
+  const timer = setTimeout(abort, timeoutMs);
+  if (typeof timer.unref === 'function') timer.unref();
+  return {
+    signal: controller.signal,
+    deadlineAt: Date.now() + timeoutMs,
+    dispose() {
+      clearTimeout(timer);
+      if (detachExternal) detachExternal();
+    }
+  };
+}
+
+function validateOneShotCompletion(completion, opts) {
+  let valid = Boolean(completion && typeof completion.content === 'string' && completion.content.length > 0);
+  if (valid && typeof opts.validateCompletion === 'function') {
+    try {
+      valid = opts.validateCompletion(completion.content) === true;
+    } catch (_error) {
+      valid = false;
+    }
+  }
+  if (!valid) {
+    return {
+      content: String(opts.degradedContent || ''),
+      usage: completion && completion.usage || {},
+      model: completion && completion.model || opts.model || process.env.AI_MODEL || 'deepseek-chat',
+      degraded: true,
+      reason: 'AI response format invalid'
+    };
+  }
+  if (completion.degraded) {
+    return Object.assign({}, completion, {
+      degraded: true,
+      reason: 'AI provider returned a degraded response'
+    });
+  }
+  return Object.assign({}, completion, { degraded: false, reason: '' });
+}
+
+function persistAtomicOneShot(db, opts) {
+  return db.transaction(() => {
+    const conversation = ensureConversation(db, opts);
+    const userMessageId = insertMessage(db, {
+      conversation_id: conversation.id,
+      user_id: opts.user.id,
+      role: 'user',
+      content: opts.message,
+      metadata: {
+        source_module: opts.source_module || conversation.source_module || 'assistant',
+        status: opts.completion.degraded ? 'degraded' : 'succeeded'
+      }
+    });
+    const usage = opts.completion.usage || {};
+    const assistantMessageId = insertMessage(db, {
+      conversation_id: conversation.id,
+      user_id: opts.user.id,
+      role: 'assistant',
+      content: opts.completion.content || '',
+      model: opts.completion.model || opts.model || process.env.AI_MODEL || 'deepseek-chat',
+      prompt_tokens: usage.prompt_tokens || 0,
+      completion_tokens: usage.completion_tokens || 0,
+      total_tokens: usage.total_tokens || 0,
+      metadata: {
+        degraded: !!opts.completion.degraded,
+        reason: opts.completion.reason || '',
+        status: opts.completion.degraded ? 'degraded' : 'succeeded',
+        latency_ms: opts.latencyMs,
+        rag_has_knowledge: opts.ragContext.hasKnowledge,
+        web_used: !!opts.searchResult.used,
+        user_message_id: userMessageId
+      }
+    });
+
+    saveReferences(db, assistantMessageId, opts.ragContext.references, opts.searchResult.results);
+    knowledge.recordKnowledgeUsageTelemetry(
+      db,
+      opts.ragContext.references.map(function(reference) { return reference.id; }),
+      opts.user
+    );
+    db.prepare('UPDATE ai_conversations SET updated_at=datetime(\'now\') WHERE id=?')
+      .run(conversation.id);
+    if (usage.total_tokens || usage.prompt_tokens || usage.completion_tokens) {
+      db.prepare(`
+        INSERT INTO token_usage (
+          user_id,model,prompt_tokens,completion_tokens,total_tokens,endpoint
+        ) VALUES (?,?,?,?,?,?)
+      `).run(
+        opts.user.id,
+        opts.completion.model || opts.model || process.env.AI_MODEL || 'deepseek-chat',
+        usage.prompt_tokens || 0,
+        usage.completion_tokens || 0,
+        usage.total_tokens || 0,
+        opts.source_module || 'ai_one_shot'
+      );
+    }
+    if (opts.searchResult.used) {
+      webSearch.cacheSearchResultInTransaction(db, opts.webQuery, opts.searchResult);
+    }
+
+    return {
+      conversation_id: conversation.id,
+      message_id: assistantMessageId,
+      answer: opts.completion.content || '',
+      model: opts.completion.model || opts.model || process.env.AI_MODEL || 'deepseek-chat',
+      usage,
+      knowledge_references: opts.ragContext.references,
+      web_results: opts.searchResult.results || [],
+      web_search: {
+        used: !!opts.searchResult.used,
+        provider: opts.searchResult.provider || 'tavily',
+        reason: opts.searchResult.reason || ''
+      },
+      degraded: !!opts.completion.degraded,
+      reason: opts.completion.reason || '',
+      status: opts.completion.degraded ? 'degraded' : 'succeeded',
+      latency_ms: opts.latencyMs,
+      archived_summary_id: null
+    };
+  }).immediate();
+}
+
+async function handleAtomicLegacyOneShot(db, opts) {
+  const message = String(opts.message || '').trim();
+  const retrievalQuery = String(opts.ragQuery || message).trim() || message;
+  const webQuery = String(opts.webQuery || retrievalQuery).trim() || retrievalQuery;
+  const ragContext = rag.buildRagContext(db, {
+    query: retrievalQuery,
+    user: opts.user,
+    limit: clampKnowledgeLimit(opts.knowledgeLimit, 8),
+    visibility: opts.visibility || 'private',
+    business_type: opts.business_type,
+    business_id: opts.business_id
+  });
+  const providerContext = createOneShotProviderContext(opts);
+  const startedAt = Date.now();
+  let searchResult = {
+    used: false,
+    provider: opts.webProvider || 'tavily',
+    results: [],
+    reason: 'disabled'
+  };
+  let completion;
+  try {
+    if (opts.allowWeb === true) {
+      try {
+        const webOperation = opts.webSearchProvider && typeof opts.webSearchProvider.search === 'function'
+          ? opts.webSearchProvider.search(webQuery, {
+              signal: providerContext.signal,
+              deadlineAt: providerContext.deadlineAt
+            })
+          : webSearch.searchWeb(webQuery, {
+              provider: opts.webProvider || process.env.WEB_SEARCH_PROVIDER || 'tavily',
+              maxResults: opts.webMaxResults || 5,
+              db,
+              signal: providerContext.signal
+            });
+        searchResult = normalizeWebSearchResult(
+          await awaitWithAbort(webOperation, providerContext.signal),
+          opts.webProvider || 'tavily'
+        );
+      } catch (_error) {
+        searchResult = {
+          used: false,
+          provider: opts.webProvider || 'tavily',
+          results: [],
+          reason: 'web search unavailable'
+        };
+      }
+    }
+
+    const provider = opts.provider || llm.createDeepSeekProvider();
+    const systemPrompt = rag.buildSystemPrompt({
+      contextText: ragContext.contextText,
+      webContext: webSearch.formatWebContext(searchResult)
+    });
+    try {
+      const rawCompletion = await awaitWithAbort(provider.complete({
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: message }
+        ],
+        temperature: opts.temperature,
+        max_tokens: clampMaxTokens(opts.max_tokens),
+        model: opts.model,
+        signal: providerContext.signal,
+        deadlineAt: providerContext.deadlineAt
+      }), providerContext.signal);
+      completion = validateOneShotCompletion(rawCompletion, opts);
+    } catch (_error) {
+      completion = {
+        content: String(opts.degradedContent || ''),
+        usage: {},
+        model: opts.model || process.env.AI_MODEL || 'deepseek-chat',
+        degraded: true,
+        reason: 'AI provider unavailable'
+      };
+    }
+  } finally {
+    providerContext.dispose();
+  }
+
+  return persistAtomicOneShot(db, {
+    ...opts,
+    message,
+    webQuery,
+    ragContext,
+    searchResult,
+    completion,
+    latencyMs: Math.max(0, Date.now() - startedAt)
+  });
 }
 
 function serviceError(statusCode, code, message) {
@@ -745,6 +986,9 @@ function persistLinkedChat(db, opts) {
       total_tokens: usage.total_tokens || 0,
       metadata: {
         degraded: false,
+        reason: '',
+        status: 'succeeded',
+        latency_ms: opts.latencyMs,
         rag_has_knowledge: opts.ragContext.hasKnowledge,
         web_used: opts.searchResult.used,
         user_message_id: userMessageId,
@@ -779,18 +1023,20 @@ function persistLinkedChat(db, opts) {
       );
     }
     if (opts.searchResult.used) {
-      webSearch.cacheSearchResultInTransaction(db, opts.message, opts.searchResult);
+      webSearch.cacheSearchResultInTransaction(db, opts.webQuery, opts.searchResult);
     }
-    const archived = archiveLinkedChatSummary(db, {
-      access,
-      campaignId: opts.linked.campaignId,
-      user: opts.user,
-      message: opts.message,
-      answer: opts.completion.content || '',
-      conversationId: conversation.id,
-      assistantMessageId,
-      summaryVisibility: opts.summaryVisibility
-    });
+    const archived = opts.archiveSummary === false
+      ? null
+      : archiveLinkedChatSummary(db, {
+          access,
+          campaignId: opts.linked.campaignId,
+          user: opts.user,
+          message: opts.message,
+          answer: opts.completion.content || '',
+          conversationId: conversation.id,
+          assistantMessageId,
+          summaryVisibility: opts.summaryVisibility
+        });
     const response = {
       conversation_id: conversation.id,
       message_id: assistantMessageId,
@@ -804,6 +1050,10 @@ function persistLinkedChat(db, opts) {
         provider: opts.searchResult.provider || 'tavily',
         reason: opts.searchResult.reason || ''
       },
+      degraded: false,
+      reason: '',
+      status: 'succeeded',
+      latency_ms: opts.latencyMs,
       archived_summary_id: archived && archived.id ? archived.id : null,
       campaign_id: opts.linked.campaignId
     };
@@ -821,13 +1071,15 @@ function persistLinkedChat(db, opts) {
 
 async function handleLinkedChat(db, opts, linked) {
   const message = String(opts.message || '').trim();
+  const retrievalQuery = String(opts.ragQuery || message).trim() || message;
+  const webQuery = String(opts.webQuery || retrievalQuery).trim() || retrievalQuery;
   const user = opts.user;
   requireLinkedCampaignAccess(db, user.id, linked.campaignId);
   if (linked.conversationId !== null) {
     requireLinkedConversationAccess(db, user, linked.conversationId);
   }
   const ragContext = rag.buildLinkedRagContext(db, {
-    query: message,
+    query: retrievalQuery,
     user,
     campaignId: linked.campaignId,
     knowledge_entry_ids: opts.knowledge_entry_ids === undefined
@@ -864,11 +1116,12 @@ async function handleLinkedChat(db, opts, linked) {
   });
   if (reservation.state === 'replay') return reservation.responseBody;
   const providerContext = createLinkedProviderContext(reservation, opts.signal);
+  const startedAt = Date.now();
   try {
     let searchResult;
     let completion;
     try {
-      searchResult = await runOptionalWebSearch(db, message, opts, providerContext);
+      searchResult = await runOptionalWebSearch(db, webQuery, opts, providerContext);
       assertProviderContextActive(providerContext);
       const history = linked.conversationId === null
         ? []
@@ -887,11 +1140,20 @@ async function handleLinkedChat(db, opts, linked) {
         signal: providerContext.signal,
         deadlineAt: providerContext.deadlineAt
       }), providerContext.signal);
+      let completionValid = true;
+      if (typeof opts.validateCompletion === 'function') {
+        try {
+          completionValid = opts.validateCompletion(completion && completion.content) === true;
+        } catch (_error) {
+          completionValid = false;
+        }
+      }
       if (
         !completion ||
         completion.degraded ||
         typeof completion.content !== 'string' ||
-        completion.content.length === 0
+        completion.content.length === 0 ||
+        !completionValid
       ) {
         throw providerUnavailableError();
       }
@@ -916,7 +1178,9 @@ async function handleLinkedChat(db, opts, linked) {
         providerContext,
         ragContext,
         searchResult,
-        completion
+        completion,
+        webQuery,
+        latencyMs: Math.max(0, Date.now() - startedAt)
       });
     } catch (error) {
       const terminalError = error && error.statusCode
@@ -936,9 +1200,9 @@ async function handleChat(db, opts) {
   const message = String(opts.message || '').trim();
   if (!message) throw new Error('Message required');
   const linked = resolveLinkedContext(db, opts);
-  return linked.linked
-    ? handleLinkedChat(db, opts, linked)
-    : handleLegacyChat(db, opts);
+  if (linked.linked) return handleLinkedChat(db, opts, linked);
+  if (opts.atomicOneShot === true) return handleAtomicLegacyOneShot(db, opts);
+  return handleLegacyChat(db, opts);
 }
 
 function conversationReadLimit(value) {

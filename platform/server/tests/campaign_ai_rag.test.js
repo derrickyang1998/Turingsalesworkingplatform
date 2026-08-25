@@ -517,6 +517,28 @@ test('linked chat writes no conversation, message, reference, token, archive, ca
   }
 });
 
+test('linked one-shot chat can suppress an unconfirmed knowledge summary without losing its audited run', async () => {
+  const db = openDatabase();
+  try {
+    const fixture = createCampaignFixture(db);
+    const result = await ai.handleChat(db, linkedInput(fixture, 'unconfirmed-summary', {
+      archiveSummary: false,
+      provider: successfulProvider([])
+    }));
+
+    assert.equal(result.archived_summary_id, null);
+    assert.equal(result.campaign_id, fixture.campaignId);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM knowledge_entries WHERE entry_type='ai_chat_summary'").get().count, 0);
+    assert.equal(db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM campaign_record_links
+      WHERE campaign_id=? AND record_type='ai_conversation' AND relation_type='ai_run'
+    `).get(fixture.campaignId).count, 1);
+  } finally {
+    db.close();
+  }
+});
+
 test('linked chat treats DeepSeek failure as zero-event 503 and does not retain linked domain rows', async () => {
   const db = openDatabase();
   try {

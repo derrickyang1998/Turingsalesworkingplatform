@@ -1798,31 +1798,29 @@ app.post('/api/ai/strategy', authMiddleware, aiLimiter, aiQuotaGuard, async (req
 });
 
 app.post('/api/ai/demand-analysis', authMiddleware, aiLimiter, aiQuotaGuard, async (req, res) => {
+  const body = req.body && typeof req.body === 'object' ? req.body : {};
+  const linkedRequest = hasCampaignId(body);
   try {
-    const result = await latestUiCompat.generateDemandAnalysis(req.body.prompt, req.body.input, req.body.fileName, { db, user: req.user });
-    try {
-      knowledgeService.ingestKnowledge(db, {
-        title: 'Demand analysis: ' + (result.analysis.brand || result.analysis.product || req.body.fileName || 'untitled'),
-        summary: JSON.stringify(result.analysis).slice(0, 240),
-        content: JSON.stringify(result.analysis, null, 2),
-        entry_type: 'demand_analysis',
-        source_type: 'ai_demand_analysis',
-        source_id: req.body.fileName || result.analysis.brand || Date.now(),
-        visibility: 'private',
-        tags: ['demand', 'analysis', result.analysis.industry || '', result.analysis.brand || ''],
-        business_type: 'demand',
-        business_id: result.analysis.brand || result.analysis.product || '',
-        created_by: req.user.id,
-        actor_role: req.user.role,
-        metadata: { fallback: !!result.fallback }
-      });
-    } catch (e2) {}
+    const result = await latestUiCompat.generateDemandAnalysis(
+      body.prompt,
+      body.input,
+      body.fileName,
+      {
+        db,
+        user: req.user,
+        allowWeb: boolParam(body.allow_web, false),
+        campaignId: body.campaign_id,
+        idempotencyKey: req.get('Idempotency-Key'),
+        requestId: campaignLinkRequestId(req),
+        knowledgeLimit: 8
+      }
+    );
     res.json(result);
   } catch (e) {
-    res.json({
-      analysis: latestUiCompat.inferDemandAnalysis(req.body.input || req.body.prompt || '', e.message, req.body.fileName),
-      fallback: true,
-      warning: e.message
+    if (linkedRequest) return sendAiChatError(req, res, e);
+    return res.status(500).json({
+      error: 'AI demand analysis request failed.',
+      code: 'AI_DEMAND_ANALYSIS_FAILED'
     });
   }
 });
