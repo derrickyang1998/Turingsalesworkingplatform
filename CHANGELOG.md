@@ -1,6 +1,6 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
-## v0.6.0-crm-sales-workspace (Release Candidate, 2026-08-11; updated 2026-08-25) - CRM 销售工作台
+## v0.6.0-crm-sales-workspace (Production, 2026-08-25) - CRM 销售工作台
 
 ### CRM 销售工作台 / CRM Sales Workspace
 - 将客户看板与客户明细保持为两个独立界面，并把客户、联系人、商机、任务、跟进记录、阶段流转、领取/释放、公海、团队与个人作用域接入统一的组织权限模型。
@@ -28,7 +28,7 @@
 - `/var/lib/turingmarket/ppt-cache` 现作为第五个外置状态目标，由 `PPT_CACHE_DIR` 直接引用，不是候选树软链接。备份记录其 `present`/`absent` 起源；首次安装只在停写后创建空的 `root:root 0700` 目录，预变更恢复仅在目录仍为空时删除它。
 - 生产变更前按实际文件系统设备计算数据库、PPT 缓存、既有/待装解析器运行时与 `node_modules` 增量的备份、安装和回滚空间，并要求每个设备满足计算值加 `max(10%, 512 MiB)` 余量及最终 `CUTOVER_CAPACITY_OK`。
 - 切换顺序固定为：全流量维护、首次解析器 admission/spool/unit/cgroup 排空、停止并静默 PM2 与 SQLite、再次排空解析器、准备 PPT 缓存、建立同一验签快照、交换代码、安装解析器、启动候选与执行验收。
-- `/api/health` 现在返回 `parser.ready` 与 `parser.manifest_sha256`。候选必须同时满足 `status=ok`、解析器 ready 和 manifest SHA-256 `44db310046efe65bd68c110313b4887995c73e276e7d58f65fe037c09a973c5b`；安装后自检、接受事实与运行时树哈希写入 schema 3 验收标记，公开流量恢复前会重新绑定核验。
+- `/api/health` 现在返回 `parser.ready` 与 `parser.manifest_sha256`。候选必须同时满足 `status=ok`、解析器 ready 和 manifest SHA-256 `44db310046efe65bd68c110313b4887995c73e276e7d58f65fe037c09a973c5b`；安装后自检、接受事实与运行时树哈希写入 schema 4 验收标记，公开流量恢复前会重新绑定核验。
 
 ### 审查与状态 / Review And Status
 - 2026-08-24 解析器暂存修复已完成 RED/GREEN：真实 XLSX 在强制 `fs.promises.copyFile` 返回 `EPERM` 时由失败转为通过；CSV/XLSX/PPTX、zip-bomb 与受信任 artifact 定向用例 `5/5`、Phase 4 服务集成 `32/32`、`-ValidateLocalOnly`、哈希闭环、diff 与聚焦 secret scan 均通过。独立 code-reviewer 结论为 `APPROVE`，无 Critical/High/Medium/Low 发现；五项宽范围旧合同失败已在未修改的 `e4ca1ce` 基线逐项复现，不归因于本次差异。
@@ -47,7 +47,7 @@
 - 本轮发布包装器使用严格子进程环境白名单、语义化远端证据、可逆 CRM 写入冒烟及强制注销；任何由本轮生产变更引起的必选验收失败会自动使用本轮已验证备份回滚。成功、畸形响应、并发冲突、写入超时、注销失败、回滚后身份失败和自动回滚编排共 7 条动态场景通过，客户服务/HTTP 定向测试 3/3 通过，独立终审为 `APPROVE`。
 - S6 已验收检查点的独立 Code Review 为 `APPROVE`，独立 QA 为 `GO`；该检查点最终审查矩阵 342/342、提交前扩展矩阵 373/373，6 个关键 JavaScript 文件语法通过。
 - 完整历史 bundle `phase5-v060-90713b23f417-full-source.bundle` 已验签，SHA-256 为 `fd4b925d82056d1eb53a5c65cc67461bc3eadd9ba88f47020ed37343d5dae887`。
-- 当前 v0.6 发布候选在 S6 后又补充了跨平台可信哈希、schema 6 已填充 CRM 脱敏回归、概率字段域约束、发布清单修复和上述解析器/切换加固，因此 S6 结论不替代当前功能切片的定向复审；完整回归改在阶段收口、计划发布窗口或跨模块高风险变更时执行。
+- v0.6 在 S6 后又补充了跨平台可信哈希、schema 6 已填充 CRM 脱敏回归、概率字段域约束、发布清单修复和上述解析器/切换加固，因此发布前另行完成了当前功能切片的定向复审；完整回归保留在阶段收口、计划发布窗口或跨模块高风险变更时执行。
 - 本轮 AppSec 首轮 4 项及终审追加 2 项 HIGH 已完成 RED/GREEN 整改：`0444` 公网守护器只经固定 `/bin/bash --noprofile --norc` 调用；`ss`、状态 `fsync` 或嵌套条件调用失败均不能持久化 `closed`；候选依赖按目标文件系统块大小逐 inode 核算分配上界、拒绝 xattr/特殊文件/硬链接，并以完整 tmpfs 字节与 inode 上限作为最低容量基线；中断接管和候选清理仅卸载经过精确路径与 `tmpfs` 类型校验的残留挂载。历史 AppSec 聚焦证据为公网守护器 `9/9`、发布源合同 `40/40`、生命周期接管 `22/22`、可信源与 v0.6 合同 `47/47`，`-ValidateLocalOnly` 与 `git diff --check` 通过；该历史结果不替代当前保留证据。
 - DevOps 第 5-10 轮进一步封闭公网守护接管：只允许 exact no-follow、root:root、`0600`、单链接、regular、空文件且无 xattr 的 transaction lock；可信 helper 增加 transaction-locked `read-record`；四类 transient unit 按生命周期阶段与 RunId 精确绑定并排空；lock-only 缺失状态只能按显式 `absent` 收敛；disarm 在 watchdog 退出后重新锁读 `verified`，维护配置、链接和父目录均执行持久化；inventory 使用不可变 `rootGid`/`wwwDataGid`，不受扫描顺序影响；`cutover-complete` 接受态恢复会在任何 PM2 变更前先通过可信 helper 关闭公网并启动 watchdog，直到公网与 PM2 精确事实收敛后才解除守卫。接受态 finalization 另设 7,200 秒有界 watchdog deadline，覆盖 PM2 命令、完整 180 秒解析器启动窗口及最终公网/事实验证，避免沿用 120 秒切换窗口造成合法慢启动误关断。
 - 首次正式候选构建在生产切换前因离线 `better-sqlite3` 编译尝试下载 Node 头文件而拒绝；生产继续运行 v0.4。可信运行时与候选依赖的断网构建现固定使用服务器已安装的 `/usr/include/node`（`npm_config_nodedir=/usr`），不放宽构建网络边界。
@@ -71,7 +71,10 @@
 - 第十六次正式尝试再次通过真实生产备份迁移、schema v6、一次请求重放 `8/8` 与公网重放守护 `21/21`，随后发现通用浏览器夹具会启动完整后端，而 Linux 非特权候选不能也不应伪装成生产解析器要求的 `root:root` spool；该候选仍在切换前退出并完成清理与控制面恢复，线上 v0.4 未变更。部署浏览器冒烟现改用专用只读静态服务，直接复用生产 `public_assets_service` 的公开资产白名单，只提供健康检查、SPA 壳层与静态边界，不启动数据库、PPT、上传解析器或任何业务写路径，也不放宽生产解析器 readiness。RED/GREEN 合同、真实 HTTP 壳层/资产/私有路径探针、受影响测试 `53 passed / 0 failed / 3 platform skips`、部署源定向 `2/2`、本地预检与 diff 校验通过；独立复审为 `APPROVE`、无剩余发现，立即重发。
 - 当前功能切片父级定向证据：生命周期接管 `31/31`、发布源合同 `44/44`、公网守护关键并发/读取/超时用例 `4/4`，PowerShell AST、守护脚本 Bash 语法、可信哈希一致性、`git diff --check` 与聚焦敏感信息扫描均通过。2026-08-16 Windows 71 文件非浏览器汇总 `1875/1784/0/91` 及早期公网守护结果仅作为历史/阶段收口证据保留；生产匹配 Linux/root 验证在受控部署中执行。
 - 开发节奏调整为“单功能实现 -> 定向测试 -> 独立审查 -> 备份 -> 上线 -> 线上健康/登录/核心路径冒烟”。完整非浏览器回归、Playwright 和多角色复审仅在阶段收口、计划发布窗口或改动跨越认证、权限、迁移、共享基础设施等高风险边界时执行；HIGH/CRITICAL、备份/回滚、迁移安全和生产冒烟继续作为硬阻断项。
-- 本条目仍是发布候选，不代表线上已切换。生产 v0.4 保持原样且未触碰；当前功能切片须完成最终定向证据、独立审查、干净权威工作区、GitHub 同步、可校验备份、容量门禁、受控部署和远端运行时/API/权限/回滚验收后才能标记发布。
+- 2026-08-25 受控部署已完成生产切换，线上 App build 为 `20260811-v060-crm-sales-workspace`，PPT build 继续冻结为 `20260702-v916-kb-bridge-client-cn`。接受记录为 schema 4，Run ID `d4829334b008489aa05a5abe4076807f`，候选摘要 `2bef3f8883c4747d837438693f27787d162c3568ef2ce83b0e7a9467314b8c43`；迁移、解析器安装、自检、切换、恢复 finalizer 和保留清理均已收敛。
+- 生产验收通过公网与回环健康、解析器 manifest、PM2、Nginx、锁释放、管理员登录、`/api/auth/me`、管理概览、CRM 客户与看板、网红搜索、知识检索、AI 对话审计、六个主界面、注销及令牌撤销。公开 `app.js` 的 SHA-256 与权威工作区一致。
+- 管理员登录失败的根因是 2026-07-12 全员凭据轮换覆盖了此前指定值，而不是本次数据库或界面回退。已先建立一致性 SQLite 私有备份，再恢复既定管理员凭据、撤销旧会话并写入安全审计；数据库 `quick_check` 与重新登录均通过，公开记录不保存账号名或密码。
+- 发布修复最终提交 `86d05fa` 已同步到 GitHub 分支 `codex/v0.6.0-crm-sales-workspace`。后续继续采用“单功能定向测试 + 一次独立审查 + 可验证备份 + 立即上线 + 线上核心路径冒烟”，完整回归保留在阶段收口或高风险边界。
 
 ---
 
@@ -325,7 +328,7 @@
 - `npm test`：18/18 通过。
 - `git diff --check`：通过。
 - 前端密钥扫描：`DS_KEY`、`DS_URL`、`api.deepseek.com`、`sk-*` 未出现在公开前端文件。
-- 本地 API smoke：临时服务登录 `derrick`、AI 对话归档、Admin 对话列表、需求 TXT 解析、PPT outline、PPTX 生成、品牌补全通过；临时库写入 1 个 AI conversation、2 条 message、4 条知识记录、1 条 PPT 请求归档，PPTX 输出 38KB。
+- 本地 API smoke：临时管理员登录、AI 对话归档、Admin 对话列表、需求 TXT 解析、PPT outline、PPTX 生成、品牌补全通过；临时库写入 1 个 AI conversation、2 条 message、4 条知识记录、1 条 PPT 请求归档，PPTX 输出 38KB。
 
 ---
 
