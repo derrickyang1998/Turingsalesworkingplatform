@@ -8,6 +8,7 @@ let authExpiredNotified = false;
 let AUTH_GENERATION = 0;
 let currentAIConversationId = null;
 let selectedKnowledgeEntryIds = [];
+let selectedKnowledgeCampaignId = null;
 let BRANDS = [], INFLUENCERS = [], TEMPLATES = [], CBLOCKS = {};
 let curDemand = null, selTpl = null, lastMatch = [], lastProp = "";
 let uploadedFileContent = "";
@@ -816,12 +817,22 @@ function getActiveCampaignId() {
   return campaignId;
 }
 function rememberKnowledgeEntryForChat(id) {
+  var campaignId = getActiveCampaignId();
+  if (selectedKnowledgeCampaignId !== campaignId) {
+    selectedKnowledgeEntryIds = [];
+    selectedKnowledgeCampaignId = campaignId;
+  }
   var entryId = readPositiveInteger(id);
   if (entryId === null || selectedKnowledgeEntryIds.indexOf(entryId) >= 0) return;
   selectedKnowledgeEntryIds.push(entryId);
   if (selectedKnowledgeEntryIds.length > 20) selectedKnowledgeEntryIds.splice(0, selectedKnowledgeEntryIds.length - 20);
 }
 function getSelectedKnowledgeEntryIds() {
+  var campaignId = getActiveCampaignId();
+  if (selectedKnowledgeCampaignId !== campaignId) {
+    selectedKnowledgeEntryIds = [];
+    selectedKnowledgeCampaignId = campaignId;
+  }
   return selectedKnowledgeEntryIds.slice(0, 20);
 }
 function createAiChatIdempotencyKey() {
@@ -864,7 +875,15 @@ function buildWorkflowContext(customer, opportunity) {
   return context;
 }
 function setWorkflowContext(context) {
+  var previousCampaignId = getActiveCampaignId();
   activeWorkflowContext = context || null;
+  var nextCampaignId = readExplicitCampaignId(activeWorkflowContext);
+  if (typeof invalidateDemandAnalysisRequests === 'function') invalidateDemandAnalysisRequests();
+  if (previousCampaignId !== nextCampaignId) {
+    selectedKnowledgeEntryIds = [];
+    selectedKnowledgeCampaignId = nextCampaignId;
+    currentAIConversationId = null;
+  }
 }
 function fillWorkflowBrandSearch(context) {
   switchPage('m1');
@@ -2924,6 +2943,118 @@ function buildBrandSearchUrl(brandName, platform) {
 var uploadedDemandContent = '';
 var uploadedDemandFileName = '';
 var demandAnalysisResult = '';
+var lastDemandAnalysisAI = null;
+var demandAnalysisRequestGeneration = 0;
+var demandAnalysisInFlight = false;
+function createDemandAnalysisOperationId(prefix) {
+  prefix = String(prefix || 'demand-analysis-');
+  if (window.crypto && typeof window.crypto.randomUUID === 'function') return prefix + window.crypto.randomUUID();
+  if (window.crypto && typeof window.crypto.getRandomValues === 'function') {
+    var randomValues = new Uint32Array(2);
+    window.crypto.getRandomValues(randomValues);
+    return prefix + Date.now().toString(36) + '-' + randomValues[0].toString(36) + randomValues[1].toString(36);
+  }
+  return prefix + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+}
+function beginDemandAnalysisRequest() {
+  if (demandAnalysisInFlight) return null;
+  demandAnalysisInFlight = true;
+  var campaignId = getActiveCampaignId();
+  return {
+    generation: ++demandAnalysisRequestGeneration,
+    campaignId: campaignId,
+    requestId: createDemandAnalysisOperationId('demand-analysis-request-'),
+    idempotencyKey: campaignId === null ? '' : createDemandAnalysisOperationId('demand-analysis-')
+  };
+}
+function isCurrentDemandAnalysisRequest(requestContext) {
+  return !!requestContext && requestContext.generation === demandAnalysisRequestGeneration;
+}
+function finishDemandAnalysisRequest(requestContext) {
+  if (!isCurrentDemandAnalysisRequest(requestContext)) return false;
+  demandAnalysisInFlight = false;
+  return true;
+}
+function invalidateDemandAnalysisRequests() {
+  demandAnalysisRequestGeneration += 1;
+  demandAnalysisInFlight = false;
+  lastDemandAnalysisAI = null;
+}
+function buildDemandAnalysisRequestOptions(source, prompt, fileName, requestContext) {
+  var body = {
+    prompt: prompt,
+    input: source,
+    fileName: fileName,
+    allow_web: false
+  };
+  var options = { method: 'POST' };
+  if (requestContext && readPositiveInteger(requestContext.campaignId) !== null) {
+    body.campaign_id = requestContext.campaignId;
+    options.headers = {
+      'Idempotency-Key': requestContext.idempotencyKey,
+      'X-Request-Id': requestContext.requestId
+    };
+  }
+  options.body = JSON.stringify(body);
+  return options;
+}
+function normalizeDemandAnalysisAudit(ai, campaignId) {
+  ai = ai && typeof ai === 'object' ? ai : {};
+  var references = Array.isArray(ai.knowledge_references) ? ai.knowledge_references : [];
+  var seen = {};
+  var normalizedReferences = [];
+  references.forEach(function(reference) {
+    reference = reference && typeof reference === 'object' ? reference : {};
+    var entryId = readPositiveInteger(reference.entry_id);
+    if (entryId === null) entryId = readPositiveInteger(reference.id);
+    if (entryId === null || seen[entryId]) return;
+    seen[entryId] = true;
+    normalizedReferences.push({
+      entry_id: entryId,
+      citation_label: String(reference.citation_label || ('KB-' + (normalizedReferences.length + 1))).slice(0, 32),
+      title: String(reference.title || ('知识条目 #' + entryId)).slice(0, 160)
+    });
+  });
+  return {
+    campaign_id: readPositiveInteger(campaignId),
+    conversation_id: readPositiveInteger(ai.conversation_id),
+    message_id: readPositiveInteger(ai.message_id),
+    knowledge_entry_ids: normalizedReferences.map(function(reference) { return reference.entry_id; }),
+    knowledge_references: normalizedReferences
+  };
+}
+function captureDemandAnalysisAudit(ai, campaignId) {
+  lastDemandAnalysisAI = normalizeDemandAnalysisAudit(ai, campaignId);
+  lastDemandAnalysisAI.knowledge_entry_ids.forEach(rememberKnowledgeEntryForChat);
+  return lastDemandAnalysisAI;
+}
+function renderDemandAnalysisEvidence(audit) {
+  audit = audit && typeof audit === 'object' ? audit : {};
+  var references = Array.isArray(audit.knowledge_references) ? audit.knowledge_references : [];
+  var auditParts = [];
+  if (readPositiveInteger(audit.campaign_id) !== null) auditParts.push('活动 #' + audit.campaign_id);
+  if (readPositiveInteger(audit.conversation_id) !== null) auditParts.push('对话 #' + audit.conversation_id);
+  if (readPositiveInteger(audit.message_id) !== null) auditParts.push('消息 #' + audit.message_id);
+  if (!auditParts.length && !references.length) return '';
+  var html = '<div class="demand-ai-evidence" style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">';
+  html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">';
+  html += '<strong style="font-size:13px">知识依据与 AI 审计</strong>';
+  if (auditParts.length) html += '<span style="font-size:11px;color:var(--text2)">' + esc(auditParts.join(' · ')) + '</span>';
+  html += '</div>';
+  if (references.length) {
+    html += '<div style="display:grid;gap:6px;margin-top:8px">';
+    references.forEach(function(reference) {
+      html += '<div style="display:flex;gap:8px;align-items:baseline;font-size:12px">'
+        + '<span style="color:var(--primary);font-weight:600;white-space:nowrap">' + esc(reference.citation_label) + '</span>'
+        + '<span style="min-width:0;overflow-wrap:anywhere">' + esc(reference.title) + '</span>'
+        + '</div>';
+    });
+    html += '</div>';
+  } else {
+    html += '<div style="margin-top:8px;font-size:12px;color:var(--text2)">本次未命中可引用知识，分析结果仍已写入 AI 审计记录。</div>';
+  }
+  return html + '</div>';
+}
 function handleDemandFile(event) {
   var file = event.target.files[0];
   if (!file) return;
@@ -3140,7 +3271,11 @@ async function analyzeDemandAI() {
     return;
   }
   if (!out || !hint) return;
+  var requestContext = beginDemandAnalysisRequest();
+  if (!requestContext) return;
   hint.textContent = 'Analyzing...';
+  var analyzeButton = document.getElementById('btnAnalyzeAI');
+  if (analyzeButton) analyzeButton.disabled = true;
   if (status) status.innerHTML = 'AI 正在分析需求...';
   var source = uploadedDemandContent || [
     'Brand: ' + (document.getElementById('d_brand')?.value || ''),
@@ -3152,11 +3287,9 @@ async function analyzeDemandAI() {
   ].join('\n');
   if (uploadedDemandFileName && source.indexOf('File name:') < 0) source = 'File name: ' + uploadedDemandFileName + '\n' + source;
   var prompt = 'Analyze this demand and extract as JSON with: brand, company, product, usp, industry, budget_range, target_market, platforms(array), competitors(array), requirements(array). Content: ' + source;
+  lastDemandAnalysisAI = null;
   try {
-    var r = await apiFetch('/ai/demand-analysis', {
-      method: 'POST',
-      body: JSON.stringify({ prompt: prompt, input: source, fileName: uploadedDemandFileName })
-    });
+    var r = await apiFetch('/ai/demand-analysis', buildDemandAnalysisRequestOptions(source, prompt, uploadedDemandFileName, requestContext));
     if (!r.ok) {
       var errText = '';
       try { var errJson = await r.json(); errText = errJson.error || JSON.stringify(errJson); } catch(e0) {}
@@ -3164,6 +3297,7 @@ async function analyzeDemandAI() {
       throw new Error(errText || ('服务请求失败: ' + r.status));
     }
     var d = await r.json();
+    if (!isCurrentDemandAnalysisRequest(requestContext)) return;
     var parsed = mergeDemandAnalysis(d.analysis || {}, inferDemandFromText(source));
     if (!hasDemandAnalysisValue(parsed)) {
       parsed.requirements = ['AI 未能识别有效字段，请在本页手动补充后继续生成方案'];
@@ -3182,6 +3316,8 @@ async function analyzeDemandAI() {
     if (parsed.competitors.length) h += '<div class="detail-field"><span class="detail-field-label">Competitors</span><span class="detail-field-value">' + esc(parsed.competitors.join(', ')) + '</span></div>';
     if (parsed.requirements.length) h += '<div class="detail-field"><span class="detail-field-label">Needs</span><span class="detail-field-value">' + esc(parsed.requirements.join('；')) + '</span></div>';
     h += '</div><p style="font-size:11px;color:#999">Edit fields above if needed. Then click Next to generate proposal.</p>';
+    captureDemandAnalysisAudit(d.ai, requestContext.campaignId);
+    h += renderDemandAnalysisEvidence(lastDemandAnalysisAI);
     out.innerHTML = h;
     hint.textContent = d.fallback ? 'Basic analysis generated' : 'OK';
     if (status) status.innerHTML = 'AI 分析完成';
@@ -3189,9 +3325,14 @@ async function analyzeDemandAI() {
     document.getElementById('m3s2').classList.remove('hidden');
     updSteps(2);
   } catch(e) {
+    if (!isCurrentDemandAnalysisRequest(requestContext)) return;
     hint.textContent = 'Failed';
     if (status) status.innerHTML = '<span style="color:#d94641">AI 分析失败：' + esc(e.message) + '</span>';
     out.innerHTML = '<p style="color:#d94641">AI 分析失败：' + esc(e.message) + '。请检查登录状态或联系管理员查看服务器 AI 配置。</p>';
+  } finally {
+    var releaseCurrentRequest = isCurrentDemandAnalysisRequest(requestContext);
+    finishDemandAnalysisRequest(requestContext);
+    if (releaseCurrentRequest && analyzeButton) analyzeButton.disabled = false;
   }
 }
 function getEditedDemand() {
@@ -3208,7 +3349,11 @@ function getEditedDemand() {
 }
 function syncCurDemandFromAnalysis() {
   var demand = getEditedDemand();
+  var demandAudit = lastDemandAnalysisAI || {};
+  var campaignId = readPositiveInteger(demandAudit.campaign_id);
+  if (campaignId === null) campaignId = getActiveCampaignId();
   curDemand = {
+    campaign_id: campaignId || '',
     customer_id: activeWorkflowContext?.customer_id || '',
     brand: demand.brand || '',
     company: demand.company || '',
@@ -3221,7 +3366,10 @@ function syncCurDemandFromAnalysis() {
     industry: demand.industry || '',
     competitors: Array.isArray(demandAnalysisResult?.competitors) ? demandAnalysisResult.competitors.join(', ') : '',
     notes: Array.isArray(demandAnalysisResult?.requirements) ? demandAnalysisResult.requirements.join('；') : '',
-    source_text: uploadedDemandContent || ''
+    source_text: uploadedDemandContent || '',
+    demand_analysis_conversation_id: demandAudit.conversation_id || '',
+    demand_analysis_message_id: demandAudit.message_id || '',
+    knowledge_entry_ids: Array.isArray(demandAudit.knowledge_entry_ids) ? demandAudit.knowledge_entry_ids.slice(0, 20) : []
   };
   return curDemand;
 }
@@ -3233,9 +3381,11 @@ function goStep3() {
   initM3();
 }
 function resetDemand() {
+  invalidateDemandAnalysisRequests();
   uploadedDemandContent = '';
   uploadedDemandFileName = '';
   demandAnalysisResult = '';
+  lastDemandAnalysisAI = null;
   curDemand = null;
   document.getElementById('m3s2').classList.add('hidden');
   document.getElementById('m3s3').classList.add('hidden');
