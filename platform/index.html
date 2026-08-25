@@ -992,7 +992,7 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
         <span id="pptContextStatus" style="font-size:12px;color:var(--text2)">生成 PPT 时会自动带入这些上下文。</span>
       </div>
     </div>
-    <button class="btn btn-primary" style="width:100%" onclick="generateProposal()">🚀 自动生成方案</button>
+    <button class="btn btn-primary" id="btnGenerateProposal" style="width:100%" onclick="generateProposal()">🚀 自动生成方案</button>
     <button class="btn btn-outline btn-sm" style="width:100%;margin-top:8px" onclick="copyProposal()">📋 复制方案</button>
     <button class="btn btn-primary btn-sm" id="btnGenPPT" style="width:100%;margin-top:8px;background:#635bff" onclick="generateHTMLPPT()">📊 生成 / 修改 PPT</button>
       <div id="proposalOutput" style="margin-top:12px;padding:16px;background:var(--surface2);border-radius:8px;font-size:12px;white-space:pre-wrap;max-height:400px;overflow-y:auto"></div>

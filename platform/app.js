@@ -879,6 +879,7 @@ function setWorkflowContext(context) {
   activeWorkflowContext = context || null;
   var nextCampaignId = readExplicitCampaignId(activeWorkflowContext);
   if (typeof invalidateDemandAnalysisRequests === 'function') invalidateDemandAnalysisRequests();
+  if (typeof invalidateProposalDraftRequests === 'function') invalidateProposalDraftRequests();
   if (previousCampaignId !== nextCampaignId) {
     selectedKnowledgeEntryIds = [];
     selectedKnowledgeCampaignId = nextCampaignId;
@@ -1566,30 +1567,187 @@ function getSelectedProposalTemplate() {
   }
   return TEMPLATES.find(function(t) { return t.id === selTpl; });
 }
+var lastProposalAI = null;
+var proposalRequestGeneration = 0;
+var proposalInFlight = false;
+function beginProposalDraftRequest() {
+  if (proposalInFlight) return null;
+  proposalInFlight = true;
+  var campaignId = getActiveCampaignId();
+  return {
+    generation: ++proposalRequestGeneration,
+    campaignId: campaignId,
+    requestId: createDemandAnalysisOperationId('proposal-draft-request-'),
+    idempotencyKey: campaignId === null ? '' : createDemandAnalysisOperationId('proposal-draft-')
+  };
+}
+function isCurrentProposalDraftRequest(requestContext) {
+  return !!requestContext && requestContext.generation === proposalRequestGeneration;
+}
+function finishProposalDraftRequest(requestContext) {
+  if (!isCurrentProposalDraftRequest(requestContext)) return false;
+  proposalInFlight = false;
+  return true;
+}
+function invalidateProposalDraftRequests() {
+  proposalRequestGeneration += 1;
+  proposalInFlight = false;
+  lastProposalAI = null;
+}
+function buildProposalDemandContent(demand) {
+  demand = demand || {};
+  return [
+    '品牌: ' + (demand.brand || ''),
+    '公司: ' + (demand.company || ''),
+    '产品: ' + (demand.product || ''),
+    '卖点: ' + (demand.usp || demand.notes || ''),
+    '平台: ' + (demand.platform || ''),
+    '市场: ' + (demand.area || ''),
+    '预算: ' + (demand.budget || ''),
+    '行业: ' + (demand.category || demand.industry || ''),
+    '竞品: ' + (demand.competitors || ''),
+    '补充要求: ' + (demand.notes || '')
+  ].join('\n');
+}
+function buildProposalDraftRequestOptions(demand, template, requestContext) {
+  demand = demand || {};
+  template = template || {};
+  var seenKnowledge = {};
+  var knowledgeEntryIds = [];
+  (Array.isArray(demand.knowledge_entry_ids) ? demand.knowledge_entry_ids : []).forEach(function(value) {
+    var id = readPositiveInteger(value);
+    if (id === null || seenKnowledge[id] || knowledgeEntryIds.length >= 20) return;
+    seenKnowledge[id] = true;
+    knowledgeEntryIds.push(id);
+  });
+  var body = {
+    title: (demand.brand || demand.product || '客户需求') + ' 红人营销方案',
+    demand: demand,
+    demand_content: buildProposalDemandContent(demand),
+    template: {
+      id: String(template.id || '').slice(0, 80),
+      name: String(template.name || '').slice(0, 160),
+      description: String(template.description || '').slice(0, 600),
+      sections: (Array.isArray(template.sections) ? template.sections : []).slice(0, 20).map(function(section) {
+        return String(section || '').slice(0, 200);
+      })
+    },
+    allow_web: false,
+    knowledge_entry_ids: knowledgeEntryIds,
+    demand_analysis_conversation_id: readPositiveInteger(demand.demand_analysis_conversation_id),
+    demand_analysis_message_id: readPositiveInteger(demand.demand_analysis_message_id)
+  };
+  var options = { method: 'POST' };
+  if (requestContext && readPositiveInteger(requestContext.campaignId) !== null) {
+    body.campaign_id = requestContext.campaignId;
+    options.headers = {
+      'Idempotency-Key': requestContext.idempotencyKey,
+      'X-Request-Id': requestContext.requestId
+    };
+  }
+  options.body = JSON.stringify(body);
+  return options;
+}
+function captureProposalDraftAudit(ai, campaignId) {
+  lastProposalAI = normalizeDemandAnalysisAudit(ai, campaignId);
+  if (curDemand && typeof curDemand === 'object') {
+    curDemand.proposal_conversation_id = lastProposalAI.conversation_id || '';
+    curDemand.proposal_message_id = lastProposalAI.message_id || '';
+    curDemand.proposal_knowledge_entry_ids = lastProposalAI.knowledge_entry_ids.slice(0, 20);
+  }
+  if (typeof rememberKnowledgeEntryForChat === 'function') {
+    lastProposalAI.knowledge_entry_ids.forEach(rememberKnowledgeEntryForChat);
+  }
+  return lastProposalAI;
+}
+function renderProposalDraftEvidence(audit) {
+  return renderDemandAnalysisEvidence(audit);
+}
+function buildLocalProposalDraft(demand, template, similarCases) {
+  demand = demand || {};
+  template = template || { name: '方案模板', sections: [] };
+  similarCases = Array.isArray(similarCases) ? similarCases : [];
+  var nl = '\n';
+  var content = '# ' + (demand.brand || '品牌') + ' 红人营销方案' + nl + nl
+    + '**TuringMarket 图灵集市**' + nl + nl
+    + '## 客户需求' + nl
+    + '- 品牌: ' + (demand.brand || '') + nl
+    + '- 公司: ' + (demand.company || '') + nl
+    + '- 产品: ' + (demand.product || '') + nl
+    + '- 卖点: ' + (demand.usp || demand.notes || '') + nl
+    + '- 平台: ' + (demand.platform || '') + nl
+    + '- 市场: ' + (demand.area || '') + nl
+    + '- 预算: ' + (demand.budget || '') + nl
+    + '- 行业: ' + (demand.category || demand.industry || '') + nl + nl
+    + '## 模板: ' + (template.name || '方案模板') + nl;
+  (Array.isArray(template.sections) ? template.sections : []).forEach(function(section, index) {
+    content += (index + 1) + '. ' + section + nl;
+  });
+  if (similarCases.length) {
+    content += nl + '## 可复用历史案例' + nl;
+    similarCases.forEach(function(entry, index) {
+      content += (index + 1) + '. 案例 #' + entry.id + '（' + entry.entry_type + '，匹配 '
+        + Number(entry.similarity_score || 0).toFixed(1) + '）: '
+        + String(entry.content || '').replace(/\s+/g, ' ').slice(0, 260) + nl;
+    });
+  }
+  return content;
+}
+function renderProposalDraftResult(draft, similarCases, audit, warning) {
+  var proposalOut = document.getElementById('proposalOutput') || document.getElementById('propResult');
+  if (!proposalOut) return;
+  var saveBtn = (curDemand && curDemand.customer_id) || activeWorkflowContext?.customer_id
+    ? '<button class="btn btn-primary btn-sm" onclick="saveCurrentProposal()">保存到客户记录和知识库</button>'
+    : '';
+  var warningHtml = warning
+    ? '<div style="margin-bottom:10px;padding:9px 11px;border:1px solid #fed7aa;background:#fff7ed;color:#c2410c;border-radius:8px;font-size:12px">' + esc(warning) + '</div>'
+    : '';
+  proposalOut.innerHTML = warningHtml
+    + renderKnowledgeReuse(similarCases, '本次方案参考的历史案例')
+    + renderProposalDraftEvidence(audit)
+    + '<div class="card"><div style="display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:8px"><h3 style="margin:0">方案已生成，可直接编辑</h3><span style="font-size:11px;color:var(--text2)">编辑后下载、复制、生成 PPT 都会使用最新草稿</span></div><textarea id="proposalEditor" class="tm-proposal-editor" oninput="updateProposalDraftFromEditor()">' + esc(draft) + '</textarea><div id="proposalTextMirror" style="font-size:1px;line-height:1px;max-height:1px;overflow:hidden;opacity:.01;white-space:pre-wrap">' + esc(draft) + '</div><div class="btn-group" style="margin-top:10px"><button class="btn btn-primary btn-sm" onclick="downloadProposal()">下载 MD</button><button class="btn btn-sm" onclick="copyProposal()">复制</button><button class="btn btn-sm" onclick="openProposalToInfluencers()">去匹配达人</button>' + saveBtn + '</div></div>';
+}
 async function generateProposal() {
   if (!curDemand && typeof syncCurDemandFromAnalysis === 'function') syncCurDemandFromAnalysis();
   if (!curDemand) { toast("请先完成需求分析", "error"); return; }
   if (!selTpl) { toast("请选择方案模板", "error"); return; }
   var tpl = getSelectedProposalTemplate();
   if (!tpl) return;
+  var requestContext = beginProposalDraftRequest();
+  if (!requestContext) return;
+  var generateButton = document.getElementById('btnGenerateProposal');
+  if (generateButton) generateButton.disabled = true;
   var similarCases = [];
   try {
     similarCases = await fetchSimilarKnowledge(curDemand, 'proposal');
     if (!similarCases.length) similarCases = await fetchSimilarKnowledge(curDemand, 'strategy');
   } catch(e) { similarCases = []; }
-  var nl = "\n"; var h = "# " + (curDemand.brand || "品牌") + " 红人营销方案" + nl + nl + "**TuringMarket 图灵集市**" + nl + nl + "## 客户需求" + nl + "- 品牌: " + (curDemand.brand || "") + nl + "- 公司: " + (curDemand.company || "") + nl + "- 产品: " + (curDemand.product || "") + nl + "- 卖点: " + (curDemand.usp || curDemand.notes || "") + nl + "- 平台: " + (curDemand.platform || "") + nl + "- 市场: " + (curDemand.area || "") + nl + "- 预算: " + (curDemand.budget || "") + nl + "- 行业: " + (curDemand.category || curDemand.industry || "") + nl + nl + "## 模板: " + tpl.name + nl;
-  for (var si = 0; si < tpl.sections.length; si++) { h += (si + 1) + ". " + tpl.sections[si] + nl; }
-  if (similarCases.length) {
-    h += nl + "## 可复用历史案例" + nl;
-    similarCases.forEach(function(e, idx) {
-      h += (idx + 1) + ". 案例 #" + e.id + "（" + e.entry_type + "，匹配 " + Number(e.similarity_score || 0).toFixed(1) + "）: " + String(e.content || '').replace(/\s+/g, ' ').slice(0, 260) + nl;
-    });
+  var localDraft = buildLocalProposalDraft(curDemand, tpl, similarCases);
+  try {
+    if (!isCurrentProposalDraftRequest(requestContext)) return;
+    lastProposalAI = null;
+    var response = await apiFetch('/ai/proposal-draft', buildProposalDraftRequestOptions(curDemand, tpl, requestContext));
+    if (!response.ok) throw new Error('AI proposal request failed');
+    var data = await response.json();
+    if (!isCurrentProposalDraftRequest(requestContext)) return;
+    var generatedDraft = String(data.draft || (data.ai && data.ai.answer) || '').trim();
+    if (!generatedDraft) throw new Error('AI proposal response was empty');
+    lastProp = generatedDraft;
+    var audit = captureProposalDraftAudit(data.ai, requestContext.campaignId);
+    var warning = data.ai && data.ai.status === 'degraded' ? 'AI 服务当前为降级输出，请人工复核后再确认方案。' : '';
+    renderProposalDraftResult(lastProp, similarCases, audit, warning);
+    toast('AI 方案草稿已生成');
+  } catch(e) {
+    if (!isCurrentProposalDraftRequest(requestContext)) return;
+    lastProposalAI = null;
+    lastProp = localDraft;
+    renderProposalDraftResult(lastProp, similarCases, null, 'AI 服务暂不可用，已保留可编辑的基础方案。');
+    toast('已生成基础方案，请人工复核', 'warning');
+  } finally {
+    var releaseCurrentRequest = isCurrentProposalDraftRequest(requestContext);
+    finishProposalDraftRequest(requestContext);
+    if (releaseCurrentRequest && generateButton) generateButton.disabled = false;
   }
-  lastProp = h;
-  var proposalOut = document.getElementById("proposalOutput") || document.getElementById("propResult");
-  var saveBtn = (curDemand.customer_id || activeWorkflowContext?.customer_id) ? '<button class="btn btn-primary btn-sm" onclick="saveCurrentProposal()">保存到客户记录和知识库</button>' : '';
-  if (proposalOut) proposalOut.innerHTML = renderKnowledgeReuse(similarCases, '本次方案参考的历史案例') + '<div class="card"><div style="display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:8px"><h3 style="margin:0">✅ 方案已生成，可直接编辑</h3><span style="font-size:11px;color:var(--text2)">编辑后下载、复制、生成 PPT 都会使用最新草稿</span></div><textarea id="proposalEditor" class="tm-proposal-editor" oninput="updateProposalDraftFromEditor()">' + esc(h) + '</textarea><div id="proposalTextMirror" style="font-size:1px;line-height:1px;max-height:1px;overflow:hidden;opacity:.01;white-space:pre-wrap">' + esc(h) + '</div><div class="btn-group" style="margin-top:10px"><button class="btn btn-primary btn-sm" onclick="downloadProposal()">📥 下载 MD</button><button class="btn btn-sm" onclick="copyProposal()">📋 复制</button><button class="btn btn-sm" onclick="openProposalToInfluencers()">👥 去匹配达人</button>' + saveBtn + '</div></div>';
-  toast("方案已生成");
 }
 function updateProposalDraftFromEditor() {
   var editor = document.getElementById('proposalEditor');
@@ -3382,6 +3540,7 @@ function goStep3() {
 }
 function resetDemand() {
   invalidateDemandAnalysisRequests();
+  invalidateProposalDraftRequests();
   uploadedDemandContent = '';
   uploadedDemandFileName = '';
   demandAnalysisResult = '';

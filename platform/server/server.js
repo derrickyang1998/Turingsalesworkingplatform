@@ -1709,40 +1709,78 @@ app.get('/api/ai/conversations/:id', authMiddleware, (req, res) => {
 });
 
 app.post('/api/ai/proposal-draft', authMiddleware, aiLimiter, aiQuotaGuard, async (req, res) => {
+  const body = req.body && typeof req.body === 'object' ? req.body : {};
+  const linkedRequest = hasCampaignId(body);
   try {
-    const demandText = req.body.demand_content || req.body.content || JSON.stringify(req.body.demand || {});
-    const demandTitle = req.body.title || (req.body.demand && (req.body.demand.brand || req.body.demand.product)) || '需求方案草稿';
-    const demandEntry = knowledgeService.ingestKnowledge(db, {
-      title: '需求归档：' + demandTitle,
-      summary: String(demandText).slice(0, 240),
-      content: demandText,
-      entry_type: 'demand',
-      source_type: req.body.source_type || 'proposal_draft_request',
-      source_id: req.body.demand_id || req.body.source_id || demandTitle,
-      visibility: req.body.visibility || 'private',
-      tags: req.body.tags || ['demand', 'proposal'],
-      business_type: 'demand',
-      business_id: req.body.demand_id || '',
-      created_by: req.user.id,
-      actor_role: req.user.role,
-      metadata: { demand: req.body.demand || null }
-    });
+    const demand = body.demand && typeof body.demand === 'object' ? body.demand : {};
+    const demandText = String(body.demand_content || body.content || JSON.stringify(demand));
+    const demandTitle = body.title || demand.brand || demand.product || '需求方案草稿';
+    let demandEntry = null;
+    if (!linkedRequest) {
+      demandEntry = knowledgeService.ingestKnowledge(db, {
+        title: '需求归档：' + demandTitle,
+        summary: demandText.slice(0, 240),
+        content: demandText,
+        entry_type: 'demand',
+        source_type: body.source_type || 'proposal_draft_request',
+        source_id: body.demand_id || body.source_id || demandTitle,
+        visibility: body.visibility || 'private',
+        tags: body.tags || ['demand', 'proposal'],
+        business_type: 'demand',
+        business_id: body.demand_id || '',
+        created_by: req.user.id,
+        actor_role: req.user.role,
+        metadata: { demand }
+      });
+    }
+    const template = body.template && typeof body.template === 'object' ? body.template : {};
+    const templateSections = Array.isArray(template.sections)
+      ? template.sections.slice(0, 20).map((section) => String(section).slice(0, 200))
+      : [];
+    const demandConversationId = Number(body.demand_analysis_conversation_id);
+    const demandMessageId = Number(body.demand_analysis_message_id);
+    const demandAudit = [];
+    if (Number.isSafeInteger(demandConversationId) && demandConversationId > 0) {
+      demandAudit.push('需求分析对话 #' + demandConversationId);
+    }
+    if (Number.isSafeInteger(demandMessageId) && demandMessageId > 0) {
+      demandAudit.push('需求分析消息 #' + demandMessageId);
+    }
     const prompt = [
       '请基于以下客户需求和平台知识库，生成红人营销方案草稿。',
+      '请使用 Markdown，明确区分事实依据、推断和待客户确认项；知识引用沿用系统提供的 [KB-n] 标记。',
       '必须包含：执行摘要、市场/竞品判断、达人类型与平台建议、60-30-10预算建议、执行时间线、KPI、风险与下一步确认项。',
+      template.name ? '方案模板：' + String(template.name).slice(0, 160) : '',
+      template.description ? '模板说明：' + String(template.description).slice(0, 600) : '',
+      templateSections.length ? '模板章节：' + templateSections.join('；') : '',
+      demandAudit.length ? '审计上下文：' + demandAudit.join('，') : '',
       '',
       demandText
-    ].join('\n');
+    ].filter(Boolean).join('\n');
     const result = await aiService.handleChat(db, {
       user: req.user,
       message: prompt,
-      allowWeb: boolParam(req.body.allow_web, false),
+      ragQuery: demandText,
+      allowWeb: false,
       source_module: 'proposal',
-      knowledgeLimit: req.body.knowledge_limit || 10,
-      summaryVisibility: req.body.summary_visibility || 'private'
+      campaign_id: body.campaign_id,
+      idempotencyKey: req.get('Idempotency-Key'),
+      requestId: campaignLinkRequestId(req),
+      knowledge_entry_ids: body.knowledge_entry_ids,
+      visibility: 'private',
+      knowledgeLimit: 8,
+      archiveSummary: false,
+      atomicOneShot: true,
+      max_tokens: 3200
     });
     res.json({ draft: result.answer, demand_entry: demandEntry, ai: result });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) {
+    if (linkedRequest) return sendAiChatError(req, res, e);
+    return res.status(500).json({
+      error: 'AI proposal draft request failed.',
+      code: 'AI_PROPOSAL_DRAFT_FAILED'
+    });
+  }
 });
 
 // ===== LATEST UI COMPATIBILITY ROUTES =====
