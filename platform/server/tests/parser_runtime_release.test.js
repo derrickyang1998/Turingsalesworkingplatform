@@ -2092,6 +2092,9 @@ test('trusted verifier normalizes exact systemd expansions and inspects a concre
       ? 'turingmarket-parser@.service'
       : unit;
     const observed = { ...manifest.effective_properties[manifestUnit] };
+    if (manifestUnit === 'turingmarket-parser.slice') {
+      delete observed.CPUAccounting;
+    }
     observed.Id = unit;
     observed.LoadState = 'loaded';
     observed.SourcePath = '';
@@ -2109,7 +2112,9 @@ test('trusted verifier normalizes exact systemd expansions and inspects a concre
     }
     return {
       status: 0,
-      stdout: `${keyList.map((key) => `${key}=${observed[key]}`).join('\n')}\n`,
+      stdout: `${keyList
+        .filter((key) => observed[key] !== undefined)
+        .map((key) => `${key}=${observed[key]}`).join('\n')}\n`,
       stderr: ''
     };
   };

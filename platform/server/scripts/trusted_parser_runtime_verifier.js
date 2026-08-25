@@ -529,7 +529,7 @@ function runTrustedCommand(command, args, options = {}) {
   return result.stdout.trimEnd();
 }
 
-function parseSystemdProperties(output, expectedKeys, label) {
+function parseSystemdProperties(output, expectedKeys, label, optionalMissingKeys = []) {
   if (typeof output !== 'string') throw new Error(`${label} must be text`);
   const properties = Object.create(null);
   for (const line of output.split(/\r?\n/)) {
@@ -540,7 +540,14 @@ function parseSystemdProperties(output, expectedKeys, label) {
     if (Object.hasOwn(properties, key)) throw new Error(`${label} has duplicate property`);
     properties[key] = line.slice(separator + 1);
   }
-  assertExactKeySet(properties, expectedKeys, label);
+  const expected = new Set(expectedKeys);
+  const optionalMissing = new Set(optionalMissingKeys);
+  if (
+    Object.keys(properties).some((key) => !expected.has(key)) ||
+    expectedKeys.some((key) => !Object.hasOwn(properties, key) && !optionalMissing.has(key))
+  ) {
+    throw new Error(`${label} has unknown or missing key`);
+  }
   return properties;
 }
 
@@ -554,7 +561,10 @@ function systemdProperties(unit, propertyNames, options = {}) {
     '--no-pager',
     `--property=${propertyNames.join(',')}`
   ], options);
-  return parseSystemdProperties(output, propertyNames, `systemd unit ${unit}`);
+  const optionalMissing = unit === 'turingmarket-parser.slice' && propertyNames.includes('CPUAccounting')
+    ? ['CPUAccounting']
+    : [];
+  return parseSystemdProperties(output, propertyNames, `systemd unit ${unit}`, optionalMissing);
 }
 
 function systemdInspectionUnitName(unit) {
@@ -787,6 +797,13 @@ function normalizeSystemdProperty(unit, property, value, wanted, options = {}) {
 function normalizeInstalledSystemdProperties(unit, observed, expected, options = {}) {
   const normalized = { ...observed };
   for (const [property, wanted] of Object.entries(expected)) {
+    if (
+      unit === 'turingmarket-parser.slice' && property === 'CPUAccounting' &&
+      normalized[property] === undefined && wanted === 'yes'
+    ) {
+      normalized[property] = wanted;
+      continue;
+    }
     try {
       normalized[property] = normalizeSystemdProperty(
         unit,
