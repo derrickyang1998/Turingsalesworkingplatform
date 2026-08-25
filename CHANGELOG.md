@@ -1,5 +1,25 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.7.0-ai-knowledge-loop-task1 (Production Slice, 2026-08-26) - 需求分析 AI 审计链路
+
+### 需求分析与知识检索 / Demand Analysis And Knowledge Retrieval
+- `/api/ai/demand-analysis` 现通过统一 AI/RAG 服务生成结构化需求分析，固定最多检索 8 条当前用户可见知识；调用方传入的异常 `knowledge_limit` 不再绕过服务边界。
+- 关联 Campaign 的请求会携带 `campaign_id`、`Idempotency-Key` 与请求 ID，保存完整用户消息、AI 回复、知识引用、token 使用、状态和延迟，并建立 `ai_run` 业务关联。
+- 未确认的需求分析不自动写入知识库；只有原始对话与引用进入审计表，后续仍保持“AI 草稿 -> 人工确认 -> 正式方案/知识归档”的业务合同。
+
+### 审计、降级与权限 / Audit, Degradation, And Access
+- 未关联的一次性分析采用私有知识范围、共享超时/取消信号和单事务持久化；Provider 异常或超时返回受限降级结果，同时原子保存成对消息和安全状态，不留下半写会话。
+- 普通用户只能读取自己的 AI 会话；管理员可以查询全部会话、消息和引用，并且列表与详情读取均写入 `ai_audit` 活动日志。
+- 通用旧版 AI 兼容响应保持原形；本切片没有数据库迁移、没有前端静态包替换，生产 App build 继续为 `20260811-v060-crm-sales-workspace`，冻结 PPT build 与哈希不变。
+
+### 验证与生产发布 / Verification And Production Release
+- 聚焦回归 44/44、相关 JavaScript 语法与 `git diff --check` 通过；独立 Code Review 为 `APPROVE`，无 P0/P1。
+- 生产备份 `/root/turingmarket/backups/v070-task1-demand-ai-20260825-165902` 已通过 SHA-256 清单；三个后端运行文件按固定旧/新哈希原子替换，PM2、公开健康、解析器 ready 与 SQLite `quick_check` 通过。
+- 线上冒烟通过管理员及普通用户登录、关联需求分析、8 条知识引用、禁用联网、未确认摘要不入库、幂等重放、管理员会话列表/详情审计、普通用户跨会话 404、注销和会话关闭。
+- 生产库原无 Campaign，验收通过正式幂等 API 创建一条明确标记的系统验收 Campaign；它仅承载本次审计证据，不混入客户业务记录。
+
+---
+
 ## v0.6.0-crm-sales-workspace (Production, 2026-08-25) - CRM 销售工作台
 
 ### CRM 销售工作台 / CRM Sales Workspace
