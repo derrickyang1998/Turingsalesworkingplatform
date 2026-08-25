@@ -1211,40 +1211,48 @@ function selectInstalledManagerState(raw) {
 
 function observeInstalledSystemdPolicy(manifest, options = {}) {
   validateTrustedManifest(manifest);
+  const diagnosticStage = options.runDiagnosticStageSync || ((_code, operation) => operation());
+  if (typeof diagnosticStage !== 'function') throw new Error('invalid installed policy diagnostic stage runner');
+  const observationOptions = { ...options };
+  delete observationOptions.runDiagnosticStageSync;
   const effectiveProperties = {};
   const managerState = {};
   const concreteSystemCallPolicies = {};
   for (const [unit, expected] of Object.entries(manifest.effective_properties)) {
+    const stages = INSTALLED_POLICY_DIAGNOSTIC_STAGES[unit];
+    if (!stages) throw new Error('invalid installed policy unit');
     const propertyNames = [...new Set([...Object.keys(expected), ...INSTALLED_MANAGER_STATE_KEYS])];
-    const raw = systemdProperties(unit, propertyNames, options);
+    const raw = diagnosticStage(stages.propertiesRead, () => (
+      systemdProperties(unit, propertyNames, observationOptions)
+    ));
     const managerBefore = selectInstalledManagerState(raw);
     const expectedManager = expectedInstalledManagerState(unit, expected);
     if (!sameValue(managerBefore, expectedManager)) {
       throw new Error(`installed systemd policy mismatch for ${unit}`);
     }
     if (Object.hasOwn(expected, 'SystemCallFilter')) {
-      concreteSystemCallPolicies[unit] = measureConcreteSystemCallPolicy(
+      concreteSystemCallPolicies[unit] = diagnosticStage(stages.syscallPolicy, () => measureConcreteSystemCallPolicy(
         raw.SystemCallFilter,
         expected.SystemCallFilter,
         unit,
-        options
-      );
+        observationOptions
+      ));
     }
     const policy = Object.fromEntries(Object.keys(expected).map((name) => [name, raw[name]]));
-    const observed = normalizeInstalledSystemdProperties(
+    const observed = diagnosticStage(stages.policyNormalize, () => normalizeInstalledSystemdProperties(
       unit,
       policy,
       expected,
-      options
-    );
+      observationOptions
+    ));
     if (!sameValue(observed, expected)) {
       throw new Error(`installed systemd policy mismatch for ${unit}`);
     }
-    verifyInstalledUnitArtifact(unit, managerBefore, manifest, options);
-    const managerAfter = selectInstalledManagerState(systemdProperties(
-      unit,
-      INSTALLED_MANAGER_STATE_KEYS,
-      options
+    diagnosticStage(stages.unitArtifact, () => (
+      verifyInstalledUnitArtifact(unit, managerBefore, manifest, observationOptions)
+    ));
+    const managerAfter = diagnosticStage(stages.managerRecheck, () => selectInstalledManagerState(
+      systemdProperties(unit, INSTALLED_MANAGER_STATE_KEYS, observationOptions)
     ));
     if (!sameValue(managerAfter, managerBefore)) {
       throw new Error(`installed systemd manager state changed for ${unit}`);
@@ -2037,7 +2045,7 @@ async function cli(argv) {
       measureRuntimeTree(args['runtime-root'], { requireRootOwnership: true })
     ));
     const installedPolicyObservation = await runDiagnosticStage('installed-policy-observe', () => (
-      observeInstalledSystemdPolicy(trustedManifest.manifest)
+      observeInstalledSystemdPolicy(trustedManifest.manifest, { runDiagnosticStageSync })
     ));
     const binding = await runDiagnosticStage('acceptance-bind', () => bindAcceptanceEvidence({
       trustedManifest,
@@ -2054,14 +2062,38 @@ async function cli(argv) {
   throw new Error('unknown command');
 }
 
+const INSTALLED_POLICY_DIAGNOSTIC_STAGES = Object.freeze({
+  'turingmarket-parser@.service': Object.freeze({
+    propertiesRead: 'service-properties-read',
+    syscallPolicy: 'service-syscall-policy',
+    policyNormalize: 'service-policy-normalize',
+    unitArtifact: 'service-unit-artifact',
+    managerRecheck: 'service-manager-recheck'
+  }),
+  'turingmarket-parser.slice': Object.freeze({
+    propertiesRead: 'slice-properties-read',
+    policyNormalize: 'slice-policy-normalize',
+    unitArtifact: 'slice-unit-artifact',
+    managerRecheck: 'slice-manager-recheck'
+  })
+});
+
 const DIAGNOSTIC_STAGE_CODES = new Set([
   'manifest-load',
   'raw-evidence-read',
   'build-evidence-read',
   'runtime-measure',
   'installed-policy-observe',
-  'acceptance-bind'
+  'acceptance-bind',
+  ...Object.values(INSTALLED_POLICY_DIAGNOSTIC_STAGES).flatMap((stages) => Object.values(stages))
 ]);
+
+function wrapDiagnosticStageError(code, error) {
+  if (diagnosticFailureCode(error) !== 'internal') return error;
+  const failure = new Error('trusted verifier stage failed');
+  Object.defineProperty(failure, 'diagnosticCode', { value: code });
+  return failure;
+}
 
 async function runDiagnosticStage(code, operation) {
   if (!DIAGNOSTIC_STAGE_CODES.has(code) || typeof operation !== 'function') {
@@ -2070,10 +2102,18 @@ async function runDiagnosticStage(code, operation) {
   try {
     return await operation();
   } catch (error) {
-    if (diagnosticFailureCode(error) !== 'internal') throw error;
-    const failure = new Error('trusted verifier stage failed');
-    Object.defineProperty(failure, 'diagnosticCode', { value: code });
-    throw failure;
+    throw wrapDiagnosticStageError(code, error);
+  }
+}
+
+function runDiagnosticStageSync(code, operation) {
+  if (!DIAGNOSTIC_STAGE_CODES.has(code) || typeof operation !== 'function') {
+    throw new Error('invalid diagnostic stage');
+  }
+  try {
+    return operation();
+  } catch (error) {
+    throw wrapDiagnosticStageError(code, error);
   }
 }
 
@@ -2118,7 +2158,8 @@ module.exports = Object.freeze({
   validateBuildMountIsolation,
   relativeRequireTargets,
   diagnosticFailureCode,
-  runDiagnosticStage
+  runDiagnosticStage,
+  runDiagnosticStageSync
 });
 
 if (require.main === module) {

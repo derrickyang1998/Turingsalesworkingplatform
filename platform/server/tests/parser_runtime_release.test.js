@@ -861,6 +861,27 @@ test('trusted parser verifier maps every diagnostic branch and binding stage to 
   for (const code of stageCodes) {
     assert.match(source, new RegExp(`runDiagnosticStage\\('${code}'`));
   }
+
+  const installedPolicyStageCodes = [
+    'service-properties-read',
+    'service-syscall-policy',
+    'service-policy-normalize',
+    'service-unit-artifact',
+    'service-manager-recheck',
+    'slice-properties-read',
+    'slice-policy-normalize',
+    'slice-unit-artifact',
+    'slice-manager-recheck'
+  ];
+  for (const code of installedPolicyStageCodes) {
+    assert.throws(
+      () => verifier.runDiagnosticStageSync(code, () => {
+        throw new Error('/tmp/private-path?token=should-not-leak');
+      }),
+      (error) => verifier.diagnosticFailureCode(error) === code
+    );
+    assert.match(source, new RegExp(`['\"]${code}['\"]`));
+  }
 });
 
 test('trusted parser verifier validates escaped and raw surrogate pairs', () => {
@@ -2098,11 +2119,30 @@ test('trusted verifier normalizes exact systemd expansions and inspects a concre
     'systemd',
     unit
   ));
+  const diagnosticStages = [];
   const observation = verifier.observeInstalledSystemdPolicy(
     manifest,
-    parserVerifierTestOptions({ spawnSync, readInstalledArtifact })
+    parserVerifierTestOptions({
+      spawnSync,
+      readInstalledArtifact,
+      runDiagnosticStageSync: (code, operation) => {
+        diagnosticStages.push(code);
+        return operation();
+      }
+    })
   );
   assert.deepEqual(observation, installedPolicyObservationFixture(manifest, verifier));
+  assert.deepEqual(diagnosticStages, [
+    'service-properties-read',
+    'service-syscall-policy',
+    'service-policy-normalize',
+    'service-unit-artifact',
+    'service-manager-recheck',
+    'slice-properties-read',
+    'slice-policy-normalize',
+    'slice-unit-artifact',
+    'slice-manager-recheck'
+  ]);
   assert.equal(calls[0][1], 'turingmarket-parser@test_instance.service');
   assert.match(calls[0].find((value) => value.startsWith('--property=')), /LoadState/);
   assert.match(calls[0].find((value) => value.startsWith('--property=')), /NeedDaemonReload/);
