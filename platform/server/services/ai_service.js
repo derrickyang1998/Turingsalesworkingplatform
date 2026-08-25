@@ -1616,9 +1616,83 @@ function getConversation(db, opts) {
   }).immediate();
 }
 
+function verifyDemandAnalysisAuditContext(db, opts) {
+  opts = opts || {};
+  const rawConversationId = ownValue(opts, 'conversation_id');
+  const rawMessageId = ownValue(opts, 'message_id');
+  const hasConversationId = rawConversationId !== undefined && rawConversationId !== null && rawConversationId !== '';
+  const hasMessageId = rawMessageId !== undefined && rawMessageId !== null && rawMessageId !== '';
+  if (!hasConversationId && !hasMessageId) return null;
+
+  const campaignId = positiveId(requestedCampaignValue(opts));
+  const conversationId = positiveId(rawConversationId);
+  const messageId = positiveId(rawMessageId);
+  if (campaignId === null || conversationId === null || messageId === null) {
+    throw serviceError(
+      400,
+      'INVALID_DEMAND_AUDIT_CONTEXT',
+      'Demand analysis audit context is invalid.'
+    );
+  }
+
+  const getConversationFn = typeof opts.getConversationFn === 'function'
+    ? opts.getConversationFn
+    : getConversation;
+  const conversation = getConversationFn(db, {
+    id: conversationId,
+    user: opts.user,
+    authContext: opts.authContext,
+    requestId: opts.requestId
+  });
+  const message = conversation && Array.isArray(conversation.messages)
+    ? conversation.messages.find((item) => positiveId(item && item.id) === messageId)
+    : null;
+  const conversationUserId = positiveId(conversation && conversation.user_id);
+  if (
+    !conversation ||
+    positiveId(conversation.id) !== conversationId ||
+    conversationUserId === null ||
+    conversation.source_module !== 'demand_analysis' ||
+    !message ||
+    positiveId(message.conversation_id) !== conversationId ||
+    positiveId(message.user_id) !== conversationUserId ||
+    message.role !== 'assistant'
+  ) {
+    throw serviceError(
+      400,
+      'INVALID_DEMAND_AUDIT_CONTEXT',
+      'Demand analysis audit context is invalid.'
+    );
+  }
+
+  const resolveConversationCampaignFn = typeof opts.resolveConversationCampaignFn === 'function'
+    ? opts.resolveConversationCampaignFn
+    : resolveConversationCampaign;
+  const resolution = resolveConversationCampaignFn(db, {
+    conversationId,
+    requestedCampaignId: campaignId
+  });
+  const messageCampaignId = positiveId(message.metadata && message.metadata.campaign_id);
+  if (
+    !resolution ||
+    resolution.ok !== true ||
+    resolution.derived !== true ||
+    positiveId(resolution.campaignId) !== campaignId ||
+    messageCampaignId !== campaignId
+  ) {
+    throw serviceError(
+      409,
+      'DEMAND_AUDIT_CAMPAIGN_MISMATCH',
+      'Demand analysis audit context does not belong to this campaign.'
+    );
+  }
+  return { conversation_id: conversationId, message_id: messageId };
+}
+
 module.exports = {
   handleChat,
   listConversations,
   getConversation,
+  verifyDemandAnalysisAuditContext,
   ensureConversation
 };

@@ -1737,14 +1737,20 @@ app.post('/api/ai/proposal-draft', authMiddleware, aiLimiter, aiQuotaGuard, asyn
     const templateSections = Array.isArray(template.sections)
       ? template.sections.slice(0, 20).map((section) => String(section).slice(0, 200))
       : [];
-    const demandConversationId = Number(body.demand_analysis_conversation_id);
-    const demandMessageId = Number(body.demand_analysis_message_id);
+    const verifiedDemandAudit = linkedRequest
+      ? aiService.verifyDemandAnalysisAuditContext(db, {
+          user: req.user,
+          authContext: req.authContext,
+          requestId: campaignLinkRequestId(req),
+          campaign_id: body.campaign_id,
+          conversation_id: body.demand_analysis_conversation_id,
+          message_id: body.demand_analysis_message_id
+        })
+      : null;
     const demandAudit = [];
-    if (Number.isSafeInteger(demandConversationId) && demandConversationId > 0) {
-      demandAudit.push('需求分析对话 #' + demandConversationId);
-    }
-    if (Number.isSafeInteger(demandMessageId) && demandMessageId > 0) {
-      demandAudit.push('需求分析消息 #' + demandMessageId);
+    if (verifiedDemandAudit) {
+      demandAudit.push('需求分析对话 #' + verifiedDemandAudit.conversation_id);
+      demandAudit.push('需求分析消息 #' + verifiedDemandAudit.message_id);
     }
     const prompt = [
       '请基于以下客户需求和平台知识库，生成红人营销方案草稿。',

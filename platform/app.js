@@ -1593,6 +1593,8 @@ function invalidateProposalDraftRequests() {
   proposalRequestGeneration += 1;
   proposalInFlight = false;
   lastProposalAI = null;
+  var generateButton = document.getElementById('btnGenerateProposal');
+  if (generateButton) generateButton.disabled = false;
 }
 function buildProposalDemandContent(demand) {
   demand = demand || {};
@@ -1718,10 +1720,12 @@ async function generateProposal() {
   var generateButton = document.getElementById('btnGenerateProposal');
   if (generateButton) generateButton.disabled = true;
   var similarCases = [];
-  try {
-    similarCases = await fetchSimilarKnowledge(curDemand, 'proposal');
-    if (!similarCases.length) similarCases = await fetchSimilarKnowledge(curDemand, 'strategy');
-  } catch(e) { similarCases = []; }
+  if (requestContext.campaignId === null) {
+    try {
+      similarCases = await fetchSimilarKnowledge(curDemand, 'proposal');
+      if (!similarCases.length) similarCases = await fetchSimilarKnowledge(curDemand, 'strategy');
+    } catch(e) { similarCases = []; }
+  }
   var localDraft = buildLocalProposalDraft(curDemand, tpl, similarCases);
   try {
     if (!isCurrentProposalDraftRequest(requestContext)) return;

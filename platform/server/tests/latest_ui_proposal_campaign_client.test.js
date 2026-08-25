@@ -10,6 +10,7 @@ const appPath = path.join(__dirname, '..', '..', 'app.js');
 const appSource = fs.readFileSync(appPath, 'utf8');
 const serverPath = path.join(__dirname, '..', 'server.js');
 const serverSource = fs.readFileSync(serverPath, 'utf8');
+const aiService = require('../services/ai_service');
 
 function extractFunction(source, name) {
   const declaration = new RegExp(`(?:async\\s+)?function\\s+${name}\\s*\\([^)]*\\)\\s*\\{`, 'g');
@@ -72,6 +73,7 @@ function createRuntime(initialCampaignId = 12) {
   };
   const pending = [];
   const toasts = [];
+  let similarKnowledgeCalls = 0;
   let campaignId = initialCampaignId;
   let uuid = 0;
   const context = {
@@ -129,7 +131,10 @@ function createRuntime(initialCampaignId = 12) {
         sections: ['执行摘要', '达人策略', '预算与 KPI']
       };
     },
-    async fetchSimilarKnowledge() { return []; },
+    async fetchSimilarKnowledge() {
+      similarKnowledgeCalls += 1;
+      return [];
+    },
     apiFetch(url, options) {
       return new Promise((resolve) => pending.push({ url, options, resolve }));
     },
@@ -163,6 +168,7 @@ function createRuntime(initialCampaignId = 12) {
   context.elements = elements;
   context.pending = pending;
   context.toasts = toasts;
+  context.getSimilarKnowledgeCalls = () => similarKnowledgeCalls;
   return context;
 }
 
@@ -196,6 +202,7 @@ test('linked proposal draft sends Campaign RAG controls and audited demand conte
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.equal(context.pending.length, 1);
+  assert.equal(context.getSimilarKnowledgeCalls(), 0, 'linked proposal must not call the legacy unscoped similar-knowledge endpoint');
   const request = context.pending[0];
   const body = JSON.parse(request.options.body);
   assert.equal(request.url, '/ai/proposal-draft');
@@ -234,6 +241,7 @@ test('proposal draft coalesces duplicate clicks and ignores stale Campaign respo
   assert.equal(context.pending.length, 1, 'duplicate click must share the in-flight operation');
 
   context.invalidateProposalDraftRequests();
+  assert.equal(context.elements.btnGenerateProposal.disabled, false, 'context invalidation must make the real submit control usable');
   context.setCampaignId(32);
   const second = context.generateProposal();
   await new Promise((resolve) => setImmediate(resolve));
@@ -259,6 +267,7 @@ test('proposal draft keeps the editable local proposal when the AI request fails
   const requestBody = JSON.parse(context.pending[0].options.body);
   assert.equal(Object.hasOwn(requestBody, 'campaign_id'), false);
   assert.equal(Object.hasOwn(context.pending[0].options, 'headers'), false);
+  assert.equal(context.getSimilarKnowledgeCalls(), 2, 'unlinked legacy proposal keeps its existing similar-case lookup');
 
   context.pending[0].resolve({
     ok: false,
@@ -290,8 +299,93 @@ test('proposal route uses fixed private Campaign RAG without archiving an unconf
   assert.match(route, /archiveSummary:\s*false/);
   assert.match(route, /atomicOneShot:\s*true/);
   assert.match(route, /source_module:\s*'proposal'/);
+  assert.match(route, /verifyDemandAnalysisAuditContext/);
   assert.match(route, /if \(!linkedRequest\)[\s\S]*knowledgeService\.ingestKnowledge/);
   assert.match(route, /if \(linkedRequest\) return sendAiChatError\(req, res, e\)/);
   assert.doesNotMatch(route, /body\.knowledge_limit/);
   assert.doesNotMatch(route, /summaryVisibility/);
+});
+
+test('verified demand audit context requires the exact linked Campaign conversation and assistant message', () => {
+  const conversation = {
+    id: 21,
+    user_id: 5,
+    source_module: 'demand_analysis',
+    messages: [{
+      id: 22,
+      conversation_id: 21,
+      user_id: 5,
+      role: 'assistant',
+      metadata: { campaign_id: 12 }
+    }]
+  };
+  let readCount = 0;
+  const result = aiService.verifyDemandAnalysisAuditContext({}, {
+    user: { id: 5, role: 'user' },
+    authContext: {},
+    requestId: 'proposal-audit-test',
+    campaign_id: 12,
+    conversation_id: 21,
+    message_id: 22,
+    resolveConversationCampaignFn() {
+      return { ok: true, campaignId: 12, derived: true };
+    },
+    getConversationFn() {
+      readCount += 1;
+      return conversation;
+    }
+  });
+
+  assert.deepEqual(result, { conversation_id: 21, message_id: 22 });
+  assert.equal(readCount, 1);
+});
+
+test('demand audit context rejects incomplete, foreign, or misleading provenance', () => {
+  const base = {
+    user: { id: 5, role: 'user' },
+    campaign_id: 12,
+    conversation_id: 21,
+    message_id: 22,
+    resolveConversationCampaignFn() {
+      return { ok: true, campaignId: 12, derived: true };
+    },
+    getConversationFn() {
+      return {
+        id: 21,
+        user_id: 5,
+        source_module: 'demand_analysis',
+        messages: [{ id: 22, conversation_id: 21, user_id: 5, role: 'assistant', metadata: { campaign_id: 12 } }]
+      };
+    }
+  };
+
+  assert.throws(
+    () => aiService.verifyDemandAnalysisAuditContext({}, { ...base, message_id: undefined }),
+    (error) => error.code === 'INVALID_DEMAND_AUDIT_CONTEXT'
+  );
+  assert.throws(
+    () => aiService.verifyDemandAnalysisAuditContext({}, {
+      ...base,
+      resolveConversationCampaignFn() { return { ok: true, campaignId: 13, derived: true }; }
+    }),
+    (error) => error.code === 'DEMAND_AUDIT_CAMPAIGN_MISMATCH'
+  );
+  assert.throws(
+    () => aiService.verifyDemandAnalysisAuditContext({}, {
+      ...base,
+      getConversationFn() { return { ...base.getConversationFn(), source_module: 'assistant' }; }
+    }),
+    (error) => error.code === 'INVALID_DEMAND_AUDIT_CONTEXT'
+  );
+  assert.throws(
+    () => aiService.verifyDemandAnalysisAuditContext({}, {
+      ...base,
+      getConversationFn() {
+        const value = base.getConversationFn();
+        value.messages[0].metadata.campaign_id = 13;
+        return value;
+      }
+    }),
+    (error) => error.code === 'DEMAND_AUDIT_CAMPAIGN_MISMATCH'
+  );
 });
