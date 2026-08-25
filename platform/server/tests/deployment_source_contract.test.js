@@ -2124,10 +2124,14 @@ test('Task 12 deploy validates an isolated candidate and atomically exchanges it
 test('production replay reuses the server JWT runtime contract before database or request work', () => {
   const deploy = read(deployPath);
   const start = deploy.indexOf("const environmentPath = fs.realpathSync(process.env.TM_REPLAY_ENV);");
+  const shellEnd = deploy.lastIndexOf('    "$NodeBin" <<\'NODE\'', start);
+  const shellStart = deploy.lastIndexOf('  cd "$LiveDir/server"', shellEnd);
   const end = deploy.indexOf('const probePath = process.env.TM_REPLAY_PROBE;', start);
   assert.ok(start !== -1 && end > start, 'production replay environment preflight must exist');
   const replayPreflight = deploy.slice(start, end);
 
+  assert.ok(shellStart !== -1 && shellEnd > shellStart, 'production replay shell environment must exist');
+  assert.match(deploy.slice(shellStart, shellEnd), /env -i\s+\\[\s\S]*?NODE_ENV=production\s+\\/);
   assert.match(replayPreflight, /require\('dotenv'\)\.config\(\{ path: environmentPath, override: true \}\)/);
   assert.match(replayPreflight, /require\('\.\/config\/runtime_config'\)/);
   assert.match(replayPreflight, /validateNetworkRuntimeConfig\(process\.env\)/);

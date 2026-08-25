@@ -11087,6 +11087,7 @@ arm_one_request_release_replay() {
 
   cd "$LiveDir/server"
   env -i \
+    NODE_ENV=production \
     TM_REPLAY_DB="$DatabasePath" \
     TM_REPLAY_ENV="$LiveDir/.env" \
     TM_REPLAY_PROBE="$ReplayProbe" \
