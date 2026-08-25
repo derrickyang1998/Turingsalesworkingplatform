@@ -1207,13 +1207,17 @@ test('initial cutover keeps a durable fail-closed public guard through final acc
   assert.match(cutover, /public_release_guard disarm/);
 
   const armedFlag = cutover.indexOf('public_gate_armed=1');
-  const armedGuard = cutover.indexOf('public_release_guard arm', armedFlag);
+  const closedGuard = cutover.indexOf('public_release_guard close', armedFlag);
+  const armedGuard = cutover.indexOf('public_release_guard arm', closedGuard);
   const publicActivation = cutover.indexOf('activate_public_candidate', armedGuard);
   const exactGate = cutover.lastIndexOf('run_exact_public_nginx_gate - 80');
   const finalFacts = cutover.indexOf('assert_final_acceptance_facts', exactGate);
   const disarmedGuard = cutover.indexOf('public_release_guard disarm', finalFacts);
   const disarmedFlag = cutover.indexOf('public_gate_armed=0', disarmedGuard);
-  assert.ok(armedFlag >= 0 && armedGuard > armedFlag && publicActivation > armedGuard, 'cutover guard must be durable before public activation');
+  assert.ok(
+    armedFlag >= 0 && closedGuard > armedFlag && armedGuard > closedGuard && publicActivation > armedGuard,
+    'cutover must initialize a closed state before arming the durable guard and activating public traffic'
+  );
   assert.ok(exactGate > publicActivation && finalFacts > exactGate, 'public checks must precede guard completion');
   assert.ok(disarmedGuard > finalFacts && disarmedFlag > disarmedGuard, 'cutover guard may disarm only after durable final verification');
 });

@@ -6994,10 +6994,13 @@ def validateTree(target, expectedDevice, allowedOwners):
     for entry in os.scandir(target):
         child = entry.path
         childMetadata = entry.stat(follow_symlinks=False)
-        if stat.S_ISLNK(childMetadata.st_mode) or (os.name != 'nt' and childMetadata.st_dev != expectedDevice):
+        if os.name != 'nt' and childMetadata.st_dev != expectedDevice:
             raise RuntimeError(f'Unsafe retention tree entry: {child}')
         if childMetadata.st_uid not in allowedOwners:
             raise RuntimeError(f'Unexpected retention tree owner: {child}')
+        # Symlinks are unlinkable leaves; their targets are never traversed.
+        if stat.S_ISLNK(childMetadata.st_mode):
+            continue
         if stat.S_ISDIR(childMetadata.st_mode):
             if os.path.ismount(child):
                 raise RuntimeError(f'Retention tree crosses a mount: {child}')
@@ -12444,6 +12447,12 @@ printf '%s\n' 'ACCEPTED_MARKER_DURABLE'
 CutoverControllerStartTicks="$(awk '{print $22}' "/proc/$$/stat")"
 CutoverGuardDeadline="$(( $(date +%s) + __PUBLIC_GUARD_TIMEOUT_SECONDS__ ))"
 public_gate_armed=1
+public_release_guard close \
+  --state-file "$PublicGateGuard" \
+  --maintenance-source "$ApiGateConfig" \
+  --maintenance-config "$MaintenanceConfig" \
+  --recovery-link "$PublicGateRecoveryLink" \
+  --site-link /etc/nginx/sites-enabled/turingmarket
 public_release_guard arm \
   --state-file "$PublicGateGuard" \
   --maintenance-source "$ApiGateConfig" \

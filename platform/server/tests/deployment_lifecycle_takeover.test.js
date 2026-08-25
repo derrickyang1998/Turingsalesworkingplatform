@@ -1450,6 +1450,50 @@ test('Phase 4 retention protects live references and deletes through resumable q
   assert.match(retention, /resumedQuarantines/);
 });
 
+test('Phase 4 retention unlinks stale candidate symlinks without following their targets', {
+  skip: !bashAvailable() ? 'requires Linux Bash' : false,
+}, () => {
+  const deploy = read(deployPath);
+  const retentionSource = Buffer.from(shellHereDocBody(deploy, 'TM_RETENTION_CLEANUP'), 'utf8').toString('base64');
+  const result = runBashSync(['--noprofile', '--norc', '-s'], {
+    input: `
+set -eEuo pipefail
+root="$(mktemp -d)"
+trap 'rm -rf -- "$root"' EXIT
+backup_root="$root/backups"
+candidate_root="$root/releases"
+current_backup="$backup_root/v060-crm-sales-workspace-20260825-120000"
+stale_candidate="$candidate_root/v060-crm-sales-workspace-20260820-120000"
+active_release="$candidate_root/v060-crm-sales-workspace-20260825-130000"
+outside="$root/outside-retention.txt"
+mkdir -p "$current_backup" "$stale_candidate"
+printf 'backup\n' > "$current_backup/evidence.txt"
+printf 'candidate\n' > "$stale_candidate/evidence.txt"
+printf 'must remain\n' > "$outside"
+ln -s "$outside" "$stale_candidate/external-link"
+touch -d '2 days ago' "$stale_candidate"
+TM_SOURCE_PATH="$root/retention.py" TM_SOURCE_B64='${retentionSource}' python3 - <<'PYWRITE'
+import base64
+import os
+with open(os.environ['TM_SOURCE_PATH'], 'wb') as handle:
+    handle.write(base64.b64decode(os.environ['TM_SOURCE_B64']))
+PYWRITE
+python3 "$root/retention.py" \
+  "$backup_root" "$candidate_root" "$current_backup" "$active_release" \
+  "$(id -u)" "$(id -u)"
+test ! -e "$stale_candidate"
+test "$(cat "$outside")" = 'must remain'
+printf 'RETENTION_SYMLINK_LEAF_OK\n'
+`,
+    encoding: 'utf8',
+    timeout: 30_000,
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /RETENTION_CLEANUP_OK/);
+  assert.match(result.stdout, /RETENTION_SYMLINK_LEAF_OK/);
+});
+
 test('Phase 4 retention resumes a quarantined deletion and preserves every durable backup reference', (t) => {
   const deploy = read(deployPath);
   const python = ['python', 'python3'].find((command) => (
