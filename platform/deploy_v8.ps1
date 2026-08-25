@@ -12143,6 +12143,51 @@ PY
 
 install_parser_appliance
 
+cd "$LiveDir/server"
+node <<'NODE'
+'use strict';
+
+const Database = require('better-sqlite3');
+const idempotency = require('./services/idempotency_service');
+const uploadSandbox = require('./services/upload_sandbox_service');
+
+(async () => {
+  const verified = await uploadSandbox.verifyCheckedInArtifacts({
+    expectedManifestSha256: '44db310046efe65bd68c110313b4887995c73e276e7d58f65fe037c09a973c5b'
+  });
+  process.stdout.write('APPLICATION_PARSER_CHECKED_IN_OK\n');
+
+  await uploadSandbox.verifyInstalledParserArtifacts(verified.manifest);
+  process.stdout.write('APPLICATION_PARSER_RUNTIME_OK\n');
+
+  for (const [unitName, expected] of Object.entries(verified.manifest.effective_properties)) {
+    const observed = await uploadSandbox.readSystemdProperties(unitName, expected);
+    const expectedJson = JSON.stringify(Object.fromEntries(
+      Object.keys(expected).sort().map((key) => [key, expected[key]])
+    ));
+    const observedJson = JSON.stringify(Object.fromEntries(
+      Object.keys(observed).sort().map((key) => [key, observed[key]])
+    ));
+    if (observedJson !== expectedJson) throw new Error('parser systemd readiness mismatch');
+  }
+  process.stdout.write('APPLICATION_PARSER_SYSTEMD_OK\n');
+
+  const database = new Database('/var/lib/turingmarket/db/turingmarket.db');
+  try {
+    database.transaction(() => (
+      idempotency.recoverParserAdmissionsInTransaction(database)
+    )).immediate();
+  } finally {
+    database.close();
+  }
+  process.stdout.write('APPLICATION_PARSER_ADMISSIONS_OK\n');
+  process.stdout.write('APPLICATION_PARSER_READINESS_PREFLIGHT_OK\n');
+})().catch(() => {
+  process.stderr.write('APPLICATION_PARSER_READINESS_PREFLIGHT_FAILED\n');
+  process.exitCode = 1;
+});
+NODE
+
 # INVALIDATE_SESSIONS
 cd "$LiveDir/server"
 node <<'NODE'

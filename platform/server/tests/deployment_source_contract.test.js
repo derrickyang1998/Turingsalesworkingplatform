@@ -1468,6 +1468,31 @@ test('Phase 4 validates the authoritative JWT environment before candidate prepa
     'runtime environment must be validated from the pinned deployment plan before candidate preparation');
 });
 
+test('Phase 4 checks parser readiness with candidate application code before process restart', () => {
+  const deploy = read(deployPath);
+  const cutoverIndex = deploy.indexOf('record_phase mutation-intent');
+  const installIndex = deploy.indexOf('install_parser_appliance', cutoverIndex);
+  const readinessIndex = deploy.indexOf('APPLICATION_PARSER_CHECKED_IN_OK', installIndex);
+  const sessionIndex = deploy.indexOf('# INVALIDATE_SESSIONS', readinessIndex);
+  const restartIndex = deploy.indexOf('pm2 restart ecosystem.config.js', readinessIndex);
+  assert.ok(
+    cutoverIndex >= 0 && installIndex > cutoverIndex && readinessIndex > installIndex &&
+      sessionIndex > readinessIndex && restartIndex > sessionIndex,
+    'candidate application readiness must run after parser installation and before PM2 restart'
+  );
+
+  const readiness = deploy.slice(installIndex, sessionIndex);
+  assert.match(readiness, /verifyCheckedInArtifacts/);
+  assert.match(readiness, /verifyInstalledParserArtifacts/);
+  assert.match(readiness, /readSystemdProperties/);
+  assert.match(readiness, /recoverParserAdmissionsInTransaction/);
+  assert.match(readiness, /APPLICATION_PARSER_RUNTIME_OK/);
+  assert.match(readiness, /APPLICATION_PARSER_SYSTEMD_OK/);
+  assert.match(readiness, /APPLICATION_PARSER_ADMISSIONS_OK/);
+  assert.match(readiness, /APPLICATION_PARSER_READINESS_PREFLIGHT_OK/);
+  assert.doesNotMatch(readiness, /error\.message|error\.stack/);
+});
+
 test('Phase 4 pre-mutation recovery removes a first-install PPT cache before restarting the prior release', () => {
   const deploy = read(deployPath);
   const resumeMatch = deploy.match(/function Invoke-RemotePreMutationResume[\s\S]*?(?=function Get-RemoteDeploymentAcceptanceState)/);
