@@ -11067,6 +11067,56 @@ TM_NGINX_ISOLATED_CONFIG
 )
 
 arm_one_request_release_replay() {
+  capture_nginx_worker_generation() {
+    local master_pid pid start_ticks generation=''
+    master_pid="$(cat /run/nginx.pid)"
+    case "$master_pid" in
+      ''|*[!0-9]*) echo 'Invalid Nginx master process identity' >&2; return 1 ;;
+    esac
+    test -r "/proc/$master_pid/stat"
+    while read -r pid; do
+      [ -n "$pid" ] || continue
+      case "$pid" in
+        *[!0-9]*) echo 'Invalid Nginx worker process identity' >&2; return 1 ;;
+      esac
+      start_ticks="$(awk '{print $22}' "/proc/$pid/stat")"
+      case "$start_ticks" in
+        ''|*[!0-9]*) echo 'Invalid Nginx worker start identity' >&2; return 1 ;;
+      esac
+      generation="${generation}${generation:+ }${pid}:${start_ticks}"
+    done < <(pgrep -P "$master_pid" || true)
+    test -n "$generation"
+    printf '%s\n' "$generation"
+  }
+
+  wait_for_nginx_generation() {
+    local previous_generation="$1" probe_path="$2" expected_body="$3" label="$4"
+    local attempt identity pid expected_start current_start previous_alive observed
+    for attempt in $(seq 1 300); do
+      previous_alive=0
+      for identity in $previous_generation; do
+        pid="${identity%%:*}"
+        expected_start="${identity##*:}"
+        current_start=''
+        if [ -r "/proc/$pid/stat" ]; then
+          current_start="$(awk '{print $22}' "/proc/$pid/stat" 2>/dev/null || true)"
+        fi
+        if [ "$current_start" = "$expected_start" ]; then
+          previous_alive=1
+          break
+        fi
+      done
+      observed="$(curl -sS --connect-timeout 1 --max-time 2 "http://localhost$probe_path" 2>/dev/null || true)"
+      if [ "$previous_alive" = "0" ] && [ "$observed" = "$expected_body" ]; then
+        printf '%s\n' "$label Nginx generation converged"
+        return 0
+      fi
+      sleep 0.1
+    done
+    echo "$label Nginx generation did not converge" >&2
+    return 1
+  }
+
   test "$(curl -sS -o /dev/null -w '%{http_code}' http://localhost/api/health)" = "503"
   test ! -e "$CurrentAcceptedMarker"
   test ! -e "$ReplayRuntime"
@@ -11374,6 +11424,13 @@ server {
     listen 80;
     server_name _;
     default_type application/json;
+    location = /__turingmarket/release-replay-ready {
+        allow 127.0.0.1;
+        deny all;
+        default_type text/plain;
+        add_header Cache-Control "no-store" always;
+        return 503 '__RUN_ID__';
+    }
     location = /api/workflow/templates {
         allow 127.0.0.1;
         deny all;
@@ -11465,9 +11522,14 @@ if evidence != {
     raise SystemExit('Release replay armed-state evidence is invalid')
 PY
 
+  PreviousNginxGeneration="$(capture_nginx_worker_generation)"
   install -o root -g root -m 0644 "$ReplayNginx" "$MaintenanceConfig"
   nginx -t
   systemctl reload nginx
+  wait_for_nginx_generation "$PreviousNginxGeneration" \
+    /__turingmarket/release-replay-ready \
+    '__RUN_ID__' \
+    'Release replay'
   test "$(curl -sS -o /dev/null -w '%{http_code}' http://localhost/not-the-replay-route)" = "503"
   cd "$LiveDir/server"
   TM_REPLAY_EXPECTED_HEADER="$ReplayExpectedHeader" \
@@ -11726,9 +11788,14 @@ NODE
   test "$(stat -c '%U:%G:%a:%h' "$ReplayProbe")" = "root:root:600:1"
 
   # Close the public-facing bypass before stopping or cleaning the one-use helper.
+  PreviousNginxGeneration="$(capture_nginx_worker_generation)"
   install -o root -g root -m 0644 "$ApiGateConfig" "$MaintenanceConfig"
   nginx -t
   systemctl reload nginx
+  wait_for_nginx_generation "$PreviousNginxGeneration" \
+    /api/health \
+    '{"error":"ACCEPTANCE_GATE_CLOSED","message":"Candidate acceptance pending"}' \
+    'Closed API gate'
   test "$(curl -sS -o /dev/null -w '%{http_code}' http://localhost/api/health)" = "503"
   test ! -e "$CurrentAcceptedMarker"
 

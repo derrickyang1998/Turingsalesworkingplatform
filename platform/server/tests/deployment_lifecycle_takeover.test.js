@@ -650,7 +650,7 @@ test('Phase 4 arms exactly one Unix-socket release replay while public traffic r
   assert.match(currentMarkerFunction, /os\.replace\(temporary, current\)/);
   assert.doesNotMatch(currentMarkerFunction, /os\.link\(/);
   assert.match(replayFunction, /jwt\.sign/);
-  assert.match(replayFunction, /env -i \\\r?\n\s+TM_REPLAY_DB="\$DatabasePath"/);
+  assert.match(replayFunction, /env -i \\\r?\n\s+NODE_ENV=production \\\r?\n\s+TM_REPLAY_DB="\$DatabasePath"/);
   assert.match(replayFunction, /require\('dotenv'\)\.config\(\{ path: environmentPath, override: true \}\)/);
   assert.doesNotMatch(replayFunction, /override: false|env -i[^\n]*JWT_SECRET|JWT_SECRET="/);
   assert.match(replayFunction, /role='admin'/);
@@ -707,6 +707,92 @@ test('Phase 4 arms exactly one Unix-socket release replay while public traffic r
   const takeoverStop = takeover.indexOf('systemctl stop "$ReplayUnit"');
   const takeoverCleanup = takeover.indexOf('TM_REPLAY_MODE=cleanup');
   assert.ok(takeoverStop >= 0 && takeoverCleanup > takeoverStop, 'takeover must stop the validated unit before helper cleanup');
+});
+
+test('release replay waits for the new Nginx worker generation before consuming or removing the one-shot gate', () => {
+  const deploy = read(deployPath);
+  const cutover = deploy.match(/\$cutoverGate\s*=\s*@'\r?\n([\s\S]*?)\r?\n'@/);
+  assert.ok(cutover, 'cutover gate must exist');
+  const body = cutover[1];
+  const replayFunction = body.slice(
+    body.indexOf('arm_one_request_release_replay()'),
+    body.indexOf('install_current_accepted_marker()')
+  );
+
+  assert.match(replayFunction, /capture_nginx_worker_generation\(\)/);
+  assert.match(replayFunction, /wait_for_nginx_generation\(\)/);
+  assert.match(replayFunction, /\/proc\/\$pid\/stat/);
+  assert.match(replayFunction, /location = \/__turingmarket\/release-replay-ready/);
+  assert.match(replayFunction, /return 503 '__RUN_ID__'/);
+
+  const replayInstall = replayFunction.indexOf('install -o root -g root -m 0644 "$ReplayNginx"');
+  const replayReload = replayFunction.indexOf('systemctl reload nginx', replayInstall);
+  const replayReady = replayFunction.indexOf(
+    'wait_for_nginx_generation "$PreviousNginxGeneration"',
+    replayReload
+  );
+  const retryClient = replayFunction.indexOf('TM_REPLAY_EXPECTED_HEADER="$ReplayExpectedHeader"', replayReady);
+  assert.ok(
+    replayInstall >= 0 && replayReload > replayInstall && replayReady > replayReload && retryClient > replayReady,
+    'the replay request must wait until all prior Nginx workers have left and the replay generation is observable'
+  );
+
+  const closedInstall = replayFunction.lastIndexOf('install -o root -g root -m 0644 "$ApiGateConfig"');
+  const closedReload = replayFunction.indexOf('systemctl reload nginx', closedInstall);
+  const closedReady = replayFunction.indexOf(
+    'wait_for_nginx_generation "$PreviousNginxGeneration"',
+    closedReload
+  );
+  const helperStop = replayFunction.lastIndexOf('systemctl stop "$ReplayUnit"');
+  assert.ok(
+    closedInstall > retryClient && closedReload > closedInstall && closedReady > closedReload && helperStop > closedReady,
+    'the replay helper must remain available until all replay-config Nginx workers have left'
+  );
+});
+
+test('release replay generation wait rejects one stale worker response before converging', {
+  skip: !bashAvailable() ? 'requires Linux Bash' : false,
+}, () => {
+  const deploy = read(deployPath);
+  const cutover = deploy.match(/\$cutoverGate\s*=\s*@'\r?\n([\s\S]*?)\r?\n'@/)?.[1] || '';
+  const replayStart = cutover.indexOf('arm_one_request_release_replay()');
+  const replayEnd = cutover.indexOf('install_current_accepted_marker()', replayStart);
+  const replayFunction = cutover.slice(replayStart, replayEnd);
+  const waitStart = replayFunction.indexOf('  wait_for_nginx_generation() {');
+  const waitEnd = replayFunction.indexOf('\n  }\n\n  test "', waitStart);
+  assert.ok(waitStart >= 0 && waitEnd > waitStart, 'Nginx generation wait helper must exist');
+  const waitFunction = replayFunction.slice(waitStart, waitEnd + 4).replace(/^  /gm, '');
+
+  const result = runBashSync(['--noprofile', '--norc', '-s'], {
+    input: `
+set -eEuo pipefail
+counter="$(mktemp)"
+printf '0\\n' > "$counter"
+command sleep 1000 &
+old_pid=$!
+trap 'command kill "$old_pid" 2>/dev/null || true; command wait "$old_pid" 2>/dev/null || true; command rm -f "$counter"' EXIT
+old_start="$(awk '{print $22}' "/proc/$old_pid/stat")"
+curl() {
+  count="$(cat "$counter")"
+  count=$((count + 1))
+  printf '%s\\n' "$count" > "$counter"
+  printf 'new-generation'
+}
+sleep() {
+  command kill "$old_pid" 2>/dev/null || true
+  command wait "$old_pid" 2>/dev/null || true
+}
+${waitFunction}
+wait_for_nginx_generation "$old_pid:$old_start" /probe new-generation Replay
+printf 'REQUESTS=%s\\n' "$(cat "$counter")"
+`,
+    encoding: 'utf8',
+    timeout: 10_000,
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /Replay Nginx generation converged/);
+  assert.match(result.stdout, /REQUESTS=2/);
 });
 
 test('Phase 4 lifecycle creation quarantines only validated incomplete lock generations', (t) => {
