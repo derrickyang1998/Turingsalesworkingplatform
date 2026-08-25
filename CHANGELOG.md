@@ -1,5 +1,20 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.7.0-ai-knowledge-loop-task2 (Production Slice, 2026-08-26) - M3 活动上下文与知识引用
+
+### 最新界面接入 / Latest UI Integration
+- M3 需求分析在不替换 v0.6 产品壳层和冻结 PPT 的前提下，向 `/api/ai/demand-analysis` 发送当前 `campaign_id`、固定 `allow_web=false`、请求 ID 和幂等键；重复点击合并为同一请求，切换 Campaign 后过期响应不会覆盖新上下文。
+- 需求上下文保存 AI 会话、消息和知识引用 ID，并在最新界面显示经过转义的“知识依据与 AI 审计”区块；知识选择按 Campaign 隔离，未关联旧流程继续兼容。
+- DeepSeek 偶发返回“说明文字 + 合法 JSON + 说明文字”时，需求分析适配层现提取并验证其中的 JSON 对象，不再把有效结果误报为 `AI_PROVIDER_UNAVAILABLE`；无效或数组结果仍不会通过校验。
+
+### 验证与生产发布 / Verification And Production Release
+- 前端与契约聚焦回归 29/29，最终服务适配回归 15/15，JavaScript 语法、`git diff --check` 和聚焦敏感信息扫描通过；两次独立审查均为 `APPROVE`，无 P0/P1/P2。
+- 实现提交为 `6f99a69` 与 `3bc7952`。生产 `app.js` SHA-256 为 `79c5900f06d9b48f571247cb9da93817b1c44f76e95de22ce757b2801c40b4bd`，需求分析服务 SHA-256 为 `ce8c7ce9a66f9103d949245ff5367aee24726ecb567e77293c4b94ac32e1d86e`；数据库无迁移。
+- 已验签备份为 `/root/turingmarket/backups/v070-slice2-m3-demand-client-20260826-015448` 与 `/root/turingmarket/backups/v070-slice2-m3-demand-json-20260826-021550`。首次服务重启因错误使用 20 秒健康窗口而自动回滚；精确识别并通过项目受信清理器回收被中断的解析器自检任务后，详细自检、旧版恢复、180 秒发布窗口与第二次发布全部通过。
+- 线上验收通过管理员登录、Campaign 关联需求分析、8 条知识引用、禁用联网、未确认摘要不归档、幂等重放、2 条消息、1 条 `ai_run` 关联、注销后零近期测试会话、解析器 ready、PM2、Nginx 与 SQLite `quick_check`。
+
+---
+
 ## v0.7.0-ai-knowledge-loop-task1 (Production Slice, 2026-08-26) - 需求分析 AI 审计链路
 
 ### 需求分析与知识检索 / Demand Analysis And Knowledge Retrieval
