@@ -20,6 +20,28 @@ function safeJson(text, fallback) {
   try { return JSON.parse(text); } catch (e) { return fallback; }
 }
 
+function parseJsonObjectResponse(text, fallback) {
+  const raw = String(text || '').trim();
+  const direct = safeJson(raw, null);
+  if (direct && typeof direct === 'object' && !Array.isArray(direct)) return direct;
+
+  const starts = [];
+  const ends = [];
+  for (let index = 0; index < raw.length; index += 1) {
+    if (raw[index] === '{') starts.push(index);
+    if (raw[index] === '}') ends.push(index);
+  }
+  for (const start of starts) {
+    for (let index = ends.length - 1; index >= 0; index -= 1) {
+      const end = ends[index];
+      if (end <= start) continue;
+      const parsed = safeJson(raw.slice(start, end + 1), null);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
+    }
+  }
+  return fallback;
+}
+
 function safeUnlink(filePath) {
   try { if (filePath) fs.unlinkSync(filePath); } catch (e) {}
 }
@@ -253,15 +275,13 @@ async function generateDemandAnalysis(prompt, input, fileName, opts) {
       operationTimeoutMs: opts.operationTimeoutMs,
       degradedContent: JSON.stringify(fallback),
       validateCompletion(content) {
-        const candidate = String(content || '').replace(/^```json\s*/i, '').replace(/```$/i, '').trim();
-        return safeJson(candidate, null) !== null;
+        return parseJsonObjectResponse(content, null) !== null;
       },
       provider: opts.provider,
       webSearchProvider: opts.webSearchProvider,
       signal: opts.signal
     });
-    const raw = String(aiResult.answer || '').replace(/^```json\s*/i, '').replace(/```$/i, '').trim();
-    const parsed = safeJson(raw, null);
+    const parsed = parseJsonObjectResponse(aiResult.answer, null);
     const degraded = !parsed || !!aiResult.degraded;
     return {
       analysis: normalizeAnalysis(parsed, fallback),

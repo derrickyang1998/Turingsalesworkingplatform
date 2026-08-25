@@ -98,6 +98,50 @@ test('demand analysis uses the auditable knowledge-first AI conversation path', 
   }
 });
 
+test('demand analysis accepts one JSON object wrapped in provider commentary', async () => {
+  const wrappedAnswer = [
+    'I analyzed the request. The structured result is:',
+    JSON.stringify({
+      brand: 'Acme',
+      product: 'Portable power station',
+      platforms: ['TikTok'],
+      competitors: [],
+      requirements: ['Creator review']
+    }),
+    'This result is ready for the next workflow step.'
+  ].join('\n');
+  let completionWasAccepted = false;
+
+  const result = await latestUiCompat.generateDemandAnalysis(
+    'Analyze demand.',
+    'Brand: Acme',
+    'brief.xlsx',
+    {
+      db: {},
+      user: { id: 17, role: 'member' },
+      aiService: {
+        async handleChat(_db, options) {
+          completionWasAccepted = options.validateCompletion(wrappedAnswer);
+          return {
+            answer: wrappedAnswer,
+            degraded: false,
+            reason: '',
+            knowledge_references: [],
+            web_results: [],
+            web_search: { used: false, provider: 'tavily', reason: 'disabled' }
+          };
+        }
+      }
+    }
+  );
+
+  assert.equal(completionWasAccepted, true);
+  assert.equal(result.analysis.brand, 'Acme');
+  assert.deepEqual(result.analysis.platforms, ['TikTok']);
+  assert.equal(result.fallback, false);
+  assert.equal(result.warning, '');
+});
+
 test('demand analysis route forwards campaign audit controls and fixes the retrieval limit', () => {
   const serverSource = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
   const routeStart = serverSource.indexOf("app.post('/api/ai/demand-analysis'");
