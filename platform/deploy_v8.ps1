@@ -32,8 +32,10 @@ $EXPECTED_PPT_QUERY = "20260702v916kbbridge"
 $EXPECTED_PPT_SHA256 = "f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e"
 $TRUSTED_SOURCE_GATE_RELATIVE_PATH = "server\scripts\trusted_production_source_gate.js"
 $TRUSTED_SOURCE_MANIFEST_RELATIVE_PATH = "server\scripts\trusted_production_source_manifest.json"
+$TRUSTED_RUNTIME_CONFIG_RELATIVE_PATH = "server\config\runtime_config.js"
 $EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "cb407c385f54fb6dfbd954723f4381e349b337a2881e341cb734a5d2d4ff5650"
 $EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "767b4fa2536a02b50a718ac2381f0934614f2091746538f09773f368dd26b3c9"
+$EXPECTED_TRUSTED_RUNTIME_CONFIG_SHA256 = "76d43d3e811c6fa8daae987cc9eb2fff2dc8a8095f84b1cd309e4e214df94dcb"
 $EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256 = "bdc60e6a9da601c8c65cd2a374d8cb69eeea629fa6cd5af514dd995eddfe74dc"
 $EXPECTED_TRUSTED_PARSER_VERIFIER_SHA256 = "9714e09699c243a06e638e048ff98d425698cb8cfb812eedda4d600c76d1cd6e"
 $EXPECTED_TRUSTED_PUBLIC_GUARD_SHA256 = "d45fe8fcc01587aaa0e73eccfb9714c27801e232cb6c0effd6daedb703316d66"
@@ -1032,6 +1034,80 @@ printf '%s\n' 'EXTERNAL_RUNTIME_BOUNDARY_OK'
 '@
     $remoteScript = $remoteScript.Replace('__REMOTE_ROOT__', $REMOTE_ROOT)
     Invoke-RemoteBash -Script $remoteScript -FailureMessage "External runtime ownership boundary preflight failed" -RequireDeploymentLock
+}
+
+function Assert-RemoteAuthoritativeRuntimeEnvironment {
+    param([Parameter(Mandatory = $true)][object]$DeploymentPlan)
+
+    Initialize-PinnedDeploymentTypes
+    if ($DeploymentPlan -isnot [ImmutableDeploymentActionPlan]) {
+        throw 'Authoritative runtime environment preflight requires the immutable deployment action plan.'
+    }
+    $runtimeConfigRecord = $DeploymentPlan.GetByRemoteRelativePath(
+        "platform/$(Convert-ToRemotePath $TRUSTED_RUNTIME_CONFIG_RELATIVE_PATH)"
+    )
+    if ($runtimeConfigRecord.ExpectedSha256 -cne $EXPECTED_TRUSTED_RUNTIME_CONFIG_SHA256) {
+        throw 'Pinned runtime configuration SHA-256 does not match the deploy contract.'
+    }
+    $runtimeConfigBase64 = $runtimeConfigRecord.ToBase64()
+
+    $remoteScript = @'
+set -euo pipefail
+LiveNodeModules="__REMOTE_DIR__/server/node_modules"
+EnvironmentDir="/etc/turingmarket"
+EnvironmentFile="/etc/turingmarket/turingmarket.env"
+RuntimeConfigBase64='__RUNTIME_CONFIG_BASE64__'
+ExpectedRuntimeConfigSha256="__RUNTIME_CONFIG_SHA256__"
+
+test -d "$EnvironmentDir"
+test ! -L "$EnvironmentDir"
+test "$(realpath -e "$EnvironmentDir")" = "$EnvironmentDir"
+test "$(stat -c '%U:%G:%a:%h' "$EnvironmentDir")" = "root:root:700:2"
+test -f "$EnvironmentFile"
+test ! -L "$EnvironmentFile"
+test "$(realpath -e "$EnvironmentFile")" = "$EnvironmentFile"
+test "$(stat -c '%U:%G:%a:%h' "$EnvironmentFile")" = "root:root:600:1"
+test -d "$LiveNodeModules/dotenv"
+
+env -i \
+  PATH=/usr/sbin:/usr/bin:/sbin:/bin \
+  NODE_PATH="$LiveNodeModules" \
+  TM_RUNTIME_CONFIG_BASE64="$RuntimeConfigBase64" \
+  TM_RUNTIME_CONFIG_SHA256="$ExpectedRuntimeConfigSha256" \
+  TM_RUNTIME_ENVIRONMENT="$EnvironmentFile" \
+  /usr/bin/node <<'NODE'
+'use strict';
+
+const crypto = require('node:crypto');
+const Module = require('node:module');
+
+const runtimeConfigSource = Buffer.from(process.env.TM_RUNTIME_CONFIG_BASE64, 'base64');
+const runtimeConfigSha256 = crypto.createHash('sha256').update(runtimeConfigSource).digest('hex');
+if (runtimeConfigSha256 !== process.env.TM_RUNTIME_CONFIG_SHA256) {
+  throw new Error('authoritative runtime configuration digest mismatch');
+}
+const trustedRuntimeModule = new Module('/turingmarket-trusted/runtime_config.js');
+trustedRuntimeModule.filename = '/turingmarket-trusted/runtime_config.js';
+trustedRuntimeModule.paths = Module._nodeModulePaths('/turingmarket-trusted');
+trustedRuntimeModule._compile(runtimeConfigSource.toString('utf8'), trustedRuntimeModule.filename);
+const runtimeConfig = trustedRuntimeModule.exports;
+const environment = { NODE_ENV: 'production' };
+const loaded = runtimeConfig.loadPlatformEnvironment({
+  environment,
+  envPath: process.env.TM_RUNTIME_ENVIRONMENT
+});
+if (loaded.error) throw new Error('authoritative runtime environment could not be loaded');
+const validated = runtimeConfig.validateNetworkRuntimeConfig(environment);
+if (!validated || validated.nodeEnv !== 'production') {
+  throw new Error('authoritative runtime environment is not production-ready');
+}
+process.stdout.write('AUTHORITATIVE_RUNTIME_ENVIRONMENT_OK\n');
+NODE
+'@
+    $remoteScript = $remoteScript.Replace('__REMOTE_DIR__', $REMOTE_DIR)
+    $remoteScript = $remoteScript.Replace('__RUNTIME_CONFIG_BASE64__', $runtimeConfigBase64)
+    $remoteScript = $remoteScript.Replace('__RUNTIME_CONFIG_SHA256__', $EXPECTED_TRUSTED_RUNTIME_CONFIG_SHA256)
+    Invoke-RemoteBash -Script $remoteScript -FailureMessage "Authoritative runtime environment preflight failed" -RequireDeploymentLock
 }
 
 function Assert-RemoteLoopbackIsolationPreflight {
@@ -4502,6 +4578,21 @@ TM_MIGRATION_CLEANUP_CONTROL_REPLAY
 
 function Get-Pm2PersistenceVerifier {
     return @'
+restart_pm2_from_ecosystem_exactly() {
+  if pm2 describe turingmarket >/dev/null 2>&1; then
+    pm2 delete turingmarket
+  fi
+  env -u NODE_ENV \
+    -u PORT \
+    -u SERVER_HOST \
+    -u TM_ENV_FILE \
+    -u DB_PATH \
+    -u UPLOAD_DIR \
+    -u TMP_DIR \
+    -u PPT_CACHE_DIR \
+    pm2 start ecosystem.config.js --only turingmarket --update-env
+}
+
 persist_pm2_dump() {
   local DumpPath="/root/.pm2/dump.pm2"
   pm2 save
@@ -5392,7 +5483,7 @@ record_restore_step marker-restored
 # RESTORE_PROCESS
 cd "$LiveDir"
 export SERVER_HOST=127.0.0.1
-pm2 restart ecosystem.config.js --only turingmarket --update-env || pm2 start ecosystem.config.js --only turingmarket --update-env
+restart_pm2_from_ecosystem_exactly
 record_restore_step process-restored
 
 # RESTORE_HEALTH
@@ -5639,7 +5730,7 @@ if [ "$Phase" = mutation-intent ] || [ "$Phase" = maintenance-entered ]; then
     exit 1
   fi
 else
-  pm2 restart ecosystem.config.js --only turingmarket --update-env || pm2 start ecosystem.config.js --only turingmarket --update-env
+  restart_pm2_from_ecosystem_exactly
 fi
 for attempt in $(seq 1 __PARSER_STARTUP_TIMEOUT_SECONDS__); do
   if curl -fsS http://localhost:3002/api/health >/dev/null; then break; fi
@@ -8109,6 +8200,7 @@ try {
     Invoke-RemoteTrustedSourceInputSweep
     Install-RemoteTrustedProductionSourceGate -DeploymentPlan $deploymentActionPlan
     Assert-RemoteExternalRuntimeBoundary
+    Assert-RemoteAuthoritativeRuntimeEnvironment -DeploymentPlan $deploymentActionPlan
     Assert-RemoteLoopbackIsolationPreflight
 
     $prepareScript = @'

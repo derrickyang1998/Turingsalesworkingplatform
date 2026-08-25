@@ -1408,6 +1408,66 @@ test('Phase 4 persists the verified PM2 projection before any recovery or cutove
   assert.equal((deploy.match(/\.Replace\('__PM2_PERSISTENCE_VERIFIER__', \$pm2PersistenceVerifier\)/g) || []).length, 4);
 });
 
+test('Phase 4 rollback recreates PM2 from the restored ecosystem without stale managed environment keys', () => {
+  const deploy = read(deployPath);
+  const verifierMatch = deploy.match(
+    /function Get-Pm2PersistenceVerifier \{[\s\S]*?(?=function Assert-RemoteRestoreCapacity)/
+  );
+  assert.ok(verifierMatch, 'PM2 persistence helper must exist');
+  const verifier = verifierMatch[0];
+  assert.match(verifier, /restart_pm2_from_ecosystem_exactly\(\)/);
+  assert.match(verifier, /pm2 delete turingmarket/);
+  assert.match(verifier, /env -u NODE_ENV[\s\S]*?-u PPT_CACHE_DIR[\s\S]*?pm2 start ecosystem\.config\.js/);
+
+  const restore = deploy.match(/function Invoke-RemoteRestore \{[\s\S]*?(?=function Invoke-RemotePreMutationResume)/)?.[0];
+  const resume = deploy.match(/function Invoke-RemotePreMutationResume \{[\s\S]*?(?=function Get-RemoteDeploymentAcceptanceState)/)?.[0];
+  assert.ok(restore && resume, 'rollback and pre-mutation recovery functions must exist');
+  for (const [label, source] of [['rollback', restore], ['pre-mutation recovery', resume]]) {
+    assert.match(source, /restart_pm2_from_ecosystem_exactly/);
+    assert.doesNotMatch(source, /pm2 restart ecosystem\.config\.js --only turingmarket --update-env/,
+      `${label} must not retain removed ecosystem keys through PM2 restart`);
+  }
+  assert.match(
+    resume,
+    /if \[ "\$Phase" = mutation-intent \] \|\| \[ "\$Phase" = maintenance-entered \]; then[\s\S]*?curl -fsS http:\/\/localhost:3002\/api\/health[\s\S]*?else\s+restart_pm2_from_ecosystem_exactly\s+fi/,
+    'pre-stop recovery must preserve admitted requests while later recovery recreates PM2 exactly'
+  );
+});
+
+test('Phase 4 validates the authoritative JWT environment before candidate preparation', () => {
+  const deploy = read(deployPath);
+  const runtimeConfigPath = path.join(platformRoot, 'server', 'config', 'runtime_config.js');
+  const verifierMatch = deploy.match(
+    /function Assert-RemoteAuthoritativeRuntimeEnvironment \{[\s\S]*?(?=function Assert-RemoteLoopbackIsolationPreflight)/
+  );
+  assert.ok(verifierMatch, 'authoritative runtime environment verifier must exist');
+  const verifier = verifierMatch[0];
+  assert.match(verifier, /param\(\[Parameter\(Mandatory = \$true\)\]\[object\]\$DeploymentPlan\)/);
+  assert.match(verifier, /GetByRemoteRelativePath/);
+  assert.match(verifier, /\.ToBase64\(\)/);
+  assert.match(deploy, new RegExp(
+    `\\$EXPECTED_TRUSTED_RUNTIME_CONFIG_SHA256\\s*=\\s*"${sha256(runtimeConfigPath)}"`
+  ));
+  assert.match(verifier, /\$EXPECTED_TRUSTED_RUNTIME_CONFIG_SHA256/);
+  assert.match(verifier, /createHash\('sha256'\)/);
+  assert.match(verifier, /\/etc\/turingmarket\/turingmarket\.env/);
+  assert.match(verifier, /root:root:600:1/);
+  assert.doesNotMatch(verifier, /TrustedSourceBundle/);
+  assert.match(verifier, /loadPlatformEnvironment/);
+  assert.match(verifier, /validateNetworkRuntimeConfig/);
+  assert.match(verifier, /AUTHORITATIVE_RUNTIME_ENVIRONMENT_OK/);
+  assert.doesNotMatch(verifier, /console\.log\([^\n]*jwtSecret|process\.stdout\.write\([^\n]*jwtSecret/);
+
+  const installIndex = deploy.indexOf('Install-RemoteTrustedProductionSourceGate -DeploymentPlan $deploymentActionPlan');
+  const environmentIndex = deploy.indexOf(
+    'Assert-RemoteAuthoritativeRuntimeEnvironment -DeploymentPlan $deploymentActionPlan',
+    installIndex
+  );
+  const prepareIndex = deploy.indexOf("$prepareScript = @'", environmentIndex);
+  assert.ok(installIndex >= 0 && environmentIndex > installIndex && prepareIndex > environmentIndex,
+    'runtime environment must be validated from the pinned deployment plan before candidate preparation');
+});
+
 test('Phase 4 pre-mutation recovery removes a first-install PPT cache before restarting the prior release', () => {
   const deploy = read(deployPath);
   const resumeMatch = deploy.match(/function Invoke-RemotePreMutationResume[\s\S]*?(?=function Get-RemoteDeploymentAcceptanceState)/);
@@ -1417,8 +1477,10 @@ test('Phase 4 pre-mutation recovery removes a first-install PPT cache before res
   assert.match(resume, /ppt-cache\.present/);
   assert.match(resume, /find "\$PptCacheDir" -mindepth 1 -print -quit/);
   assert.match(resume, /rmdir -- "\$PptCacheDir"/);
+  const cacheRestoreIndex = resume.indexOf('rmdir -- "$PptCacheDir"');
+  const processRestartIndex = resume.indexOf('restart_pm2_from_ecosystem_exactly');
   assert.ok(
-    resume.indexOf('rmdir -- "$PptCacheDir"') < resume.indexOf('pm2 restart ecosystem.config.js'),
+    cacheRestoreIndex >= 0 && processRestartIndex > cacheRestoreIndex,
     'the prior release must not restart until first-install cache state is restored'
   );
 });
