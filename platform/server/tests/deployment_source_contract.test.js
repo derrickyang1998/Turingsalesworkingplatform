@@ -1482,14 +1482,23 @@ test('Phase 4 checks parser readiness with candidate application code before pro
   );
 
   const readiness = deploy.slice(installIndex, sessionIndex);
+  assert.match(readiness, /DB_PATH="\$DatabasePath" node <<'NODE'/);
   assert.match(readiness, /verifyCheckedInArtifacts/);
   assert.match(readiness, /verifyInstalledParserArtifacts/);
   assert.match(readiness, /readSystemdProperties/);
+  assert.match(readiness, /const database = require\('\.\/db'\)/);
+  assert.match(readiness, /APPLICATION_DATABASE_MIGRATIONS_OK/);
   assert.match(readiness, /recoverParserAdmissionsInTransaction/);
   assert.match(readiness, /APPLICATION_PARSER_RUNTIME_OK/);
   assert.match(readiness, /APPLICATION_PARSER_SYSTEMD_OK/);
   assert.match(readiness, /APPLICATION_PARSER_ADMISSIONS_OK/);
   assert.match(readiness, /APPLICATION_PARSER_READINESS_PREFLIGHT_OK/);
+  assert.ok(
+    readiness.indexOf('APPLICATION_DATABASE_MIGRATIONS_OK') <
+      readiness.indexOf('recoverParserAdmissionsInTransaction'),
+    'candidate database migrations must complete before parser admission recovery'
+  );
+  assert.doesNotMatch(readiness, /new Database\('\/var\/lib\/turingmarket\/db\/turingmarket\.db'\)/);
   assert.doesNotMatch(readiness, /error\.message|error\.stack/);
 });
 

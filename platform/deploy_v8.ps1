@@ -12144,10 +12144,9 @@ PY
 install_parser_appliance
 
 cd "$LiveDir/server"
-node <<'NODE'
+DB_PATH="$DatabasePath" node <<'NODE'
 'use strict';
 
-const Database = require('better-sqlite3');
 const idempotency = require('./services/idempotency_service');
 const uploadSandbox = require('./services/upload_sandbox_service');
 
@@ -12172,7 +12171,8 @@ const uploadSandbox = require('./services/upload_sandbox_service');
   }
   process.stdout.write('APPLICATION_PARSER_SYSTEMD_OK\n');
 
-  const database = new Database('/var/lib/turingmarket/db/turingmarket.db');
+  const database = require('./db');
+  process.stdout.write('APPLICATION_DATABASE_MIGRATIONS_OK\n');
   try {
     database.transaction(() => (
       idempotency.recoverParserAdmissionsInTransaction(database)
