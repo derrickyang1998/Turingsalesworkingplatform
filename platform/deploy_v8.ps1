@@ -156,6 +156,7 @@ $FILES = @(
     "server\services\migration_service.js",
     "server\services\obsidian_ingest_service.js",
     "server\services\organization_access_service.js",
+    "server\services\parser_startup_service.js",
     "server\services\path_policy_service.js",
     "server\services\performance_content_import_service.js",
     "server\services\performance_metrics_service.js",

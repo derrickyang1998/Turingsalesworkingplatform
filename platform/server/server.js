@@ -53,6 +53,10 @@ const publicAssets = require('./services/public_assets_service');
 const credentialRotation = require('./services/credential_rotation_service');
 const organizationAccess = require('./services/organization_access_service');
 const {
+  productionSelfTestEnvironment,
+  verifyInstalledControlArtifacts
+} = require('./services/parser_startup_service');
+const {
   getCampaignAccess,
   readDemandProposalCollection
 } = require('./services/campaign_access_service');
@@ -460,11 +464,7 @@ async function runProductionUploadSandboxSelfTests() {
     {
       captureStdout: true,
       timeoutMs: 120_000,
-      env: Object.freeze({
-        PATH: '/usr/sbin:/usr/bin:/sbin:/bin',
-        LANG: 'C.UTF-8',
-        LC_ALL: 'C.UTF-8'
-      })
+      env: productionSelfTestEnvironment()
     }
   );
   return uploadSelfTestResult(JSON.parse(result.stdout));
@@ -1951,6 +1951,7 @@ async function bootstrapServer() {
         idempotency: uploadAdmissionIdempotency,
         spoolRoot: UPLOAD_SANDBOX_SPOOL_ROOT,
         recoverAdmissions: recoverUploadAdmissions,
+        verifyInstalledArtifacts: verifyInstalledControlArtifacts,
         runSelfTests: runProductionUploadSandboxSelfTests,
         ...(localWorker ? localUploadReadinessAdapters() : {})
       });

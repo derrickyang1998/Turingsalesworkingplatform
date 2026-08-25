@@ -758,6 +758,32 @@ test('v0.6 process startup deadline exceeds the production parser self-test ceil
   );
 });
 
+test('v0.6 production startup performs one complete parser runtime scan', () => {
+  const server = read('platform', 'server', 'server.js');
+  const selfTests = sourceBetween(
+    server,
+    'async function runProductionUploadSandboxSelfTests() {',
+    'function localUploadReadinessSnapshot() {',
+    'production parser self-test runner'
+  );
+  const bootstrap = sourceBetween(
+    server,
+    'async function bootstrapServer() {',
+    'bootstrapServer().catch((error) => {',
+    'server bootstrap'
+  );
+
+  assert.match(selfTests, /env:\s*productionSelfTestEnvironment\(\)/);
+  assert.match(
+    bootstrap,
+    /verifyInstalledArtifacts:\s*verifyInstalledControlArtifacts/
+  );
+  assert.match(
+    server,
+    /require\('\.\/services\/parser_startup_service'\)/
+  );
+});
+
 test('v0.6 cutover drains admitted Node HTTP connections to stable zero before PM2 stop', () => {
   const deploy = read('platform', 'deploy_v8.ps1');
   const cutover = sourceBetween(
