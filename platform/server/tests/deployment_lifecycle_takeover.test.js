@@ -633,6 +633,7 @@ test('Phase 4 arms exactly one Unix-socket release replay while public traffic r
     body.indexOf('arm_one_request_release_replay()'),
     body.indexOf('install_current_accepted_marker()')
   );
+  assert.match(replayFunction, /--property="RemainAfterExit=yes"/);
   assert.match(replayFunction, /return 503/);
   assert.match(replayFunction, /test ! -[eS] "\$ReplaySocket"/);
   assert.doesNotMatch(replayFunction, /net\.createServer|let accepted\s*=|acceptedRequests/);

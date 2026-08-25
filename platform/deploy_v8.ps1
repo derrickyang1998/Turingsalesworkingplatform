@@ -11477,6 +11477,7 @@ TM_RELEASE_REPLAY_NGINX
   systemd-run --quiet --unit="$ReplayUnit" --service-type=exec \
     --uid=root --gid=root --property="WorkingDirectory=$LiveDir/server" \
     --property=KillMode=control-group \
+    --property="RemainAfterExit=yes" \
     --property="StandardOutput=append:$LockDir/release-replay.stdout.log" \
     --property="StandardError=append:$LockDir/release-replay.stderr.log" \
     /usr/bin/env -i \
