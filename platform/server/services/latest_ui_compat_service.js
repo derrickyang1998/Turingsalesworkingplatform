@@ -326,10 +326,78 @@ function buildPptOutlineFallback(demand, proposal, reason, research) {
   return { title: brand + ' 海外红人营销方案', subtitle: product + ' / ' + market, sections: base, research };
 }
 
-async function generatePptOutline(db, user, body) {
+async function generatePptOutline(db, user, body, opts) {
+  body = body && typeof body === 'object' ? body : {};
+  opts = opts || {};
   const demand = body.demand || {};
   const proposal = [body.proposal || '', body.deckContext || ''].filter(Boolean).join('\n\n');
   const query = [demand.brand, demand.company, demand.product, demand.product_name, demand.target_market, demand.market, 'influencer marketing'].filter(Boolean).join(' ');
+  const campaignId = Number(opts.campaignId);
+  if (Number.isSafeInteger(campaignId) && campaignId > 0) {
+    const research = {
+      used: false,
+      provider: 'tavily',
+      results: [],
+      reason: 'disabled'
+    };
+    const fallback = buildPptOutlineFallback(demand, proposal, '', research);
+    const auditContext = [];
+    if (opts.demandAudit) {
+      auditContext.push('需求分析对话 #' + opts.demandAudit.conversation_id);
+      auditContext.push('需求分析消息 #' + opts.demandAudit.message_id);
+    }
+    if (opts.proposalAudit) {
+      auditContext.push('方案草稿对话 #' + opts.proposalAudit.conversation_id);
+      auditContext.push('方案草稿消息 #' + opts.proposalAudit.message_id);
+    }
+    const message = [
+      'Create a client-facing overseas influencer marketing PPT outline for TuringMarket.',
+      'Return JSON only with title, subtitle, sections. sections must include title, type, points array, note.',
+      'Use 9-12 sections and include market research, product angle, creator mix, budget, timeline, KPI, risks, next steps.',
+      'Use the Campaign knowledge base first when it is relevant and preserve system [KB-n] citation labels.',
+      auditContext.length ? '审计上下文：' + auditContext.join('，') : '',
+      'Demand JSON:', JSON.stringify(demand),
+      'Proposal/context:', compactText(proposal, 5000)
+    ].filter(Boolean).join('\n');
+    const aiService = opts.aiService || require('./ai_service');
+    const aiResult = await aiService.handleChat(db, {
+      user,
+      message,
+      ragQuery: [query, proposal].filter(Boolean).join('\n\n'),
+      webQuery: query,
+      allowWeb: false,
+      source_module: 'ppt_outline',
+      campaign_id: campaignId,
+      idempotencyKey: opts.idempotencyKey,
+      requestId: opts.requestId,
+      knowledge_entry_ids: body.knowledge_entry_ids,
+      visibility: 'private',
+      archiveSummary: false,
+      atomicOneShot: true,
+      knowledgeLimit: 8,
+      temperature: 0.25,
+      max_tokens: 3200,
+      operationTimeoutMs: opts.operationTimeoutMs,
+      degradedContent: JSON.stringify(fallback),
+      validateCompletion(content) {
+        return parseJsonObjectResponse(content, null) !== null;
+      },
+      provider: opts.provider,
+      webSearchProvider: opts.webSearchProvider,
+      signal: opts.signal
+    });
+    const parsed = parseJsonObjectResponse(aiResult.answer, null);
+    const outline = normalizePptOutline(parsed, fallback, research);
+    outline.knowledge_references = aiResult.knowledge_references || [];
+    return {
+      outline,
+      knowledge_references: aiResult.knowledge_references || [],
+      research,
+      fallback: !parsed || !!aiResult.degraded,
+      warning: aiResult.reason || (!parsed ? 'AI JSON parse failed' : ''),
+      ai: aiResult
+    };
+  }
   const ragContext = rag.buildRagContext(db, {
     user,
     query: [query, proposal].filter(Boolean).join('\n\n'),

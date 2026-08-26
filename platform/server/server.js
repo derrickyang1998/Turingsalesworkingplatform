@@ -1870,11 +1870,45 @@ app.post('/api/ai/demand-analysis', authMiddleware, aiLimiter, aiQuotaGuard, asy
 });
 
 app.post('/api/ai/ppt-outline', authMiddleware, aiLimiter, aiQuotaGuard, async (req, res) => {
+  const body = req.body && typeof req.body === 'object' ? req.body : {};
+  const linkedRequest = hasCampaignId(body);
   try {
-    const result = await latestUiCompat.generatePptOutline(db, req.user, req.body || {});
+    const demandAudit = linkedRequest
+      ? aiService.verifyDemandAnalysisAuditContext(db, {
+          user: req.user,
+          authContext: req.authContext,
+          requestId: campaignLinkRequestId(req),
+          campaign_id: body.campaign_id,
+          conversation_id: body.demand_analysis_conversation_id,
+          message_id: body.demand_analysis_message_id
+        })
+      : null;
+    const proposalAudit = linkedRequest
+      ? aiService.verifyProposalDraftAuditContext(db, {
+          user: req.user,
+          authContext: req.authContext,
+          requestId: campaignLinkRequestId(req),
+          campaign_id: body.campaign_id,
+          conversation_id: body.proposal_conversation_id,
+          message_id: body.proposal_message_id
+        })
+      : null;
+    const result = await latestUiCompat.generatePptOutline(db, req.user, body, {
+      campaignId: body.campaign_id,
+      idempotencyKey: req.get('Idempotency-Key'),
+      requestId: campaignLinkRequestId(req),
+      knowledgeLimit: 8,
+      allowWeb: false,
+      demandAudit,
+      proposalAudit
+    });
     res.json(result);
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    if (linkedRequest) return sendAiChatError(req, res, e);
+    return res.status(500).json({
+      error: 'AI PPT outline request failed.',
+      code: 'AI_PPT_OUTLINE_FAILED'
+    });
   }
 });
 

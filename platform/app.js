@@ -176,8 +176,97 @@ function handleAuthExpired(message) {
   }
 }
 
+function prepareCampaignPptOutlineRequest(url, opts) {
+  if (url !== '/ai/ppt-outline' || !opts || typeof opts.body !== 'string') return opts;
+  var campaignId = typeof getActiveCampaignId === 'function' ? getActiveCampaignId() : null;
+  campaignId = typeof readPositiveInteger === 'function' ? readPositiveInteger(campaignId) : null;
+  if (campaignId === null) return opts;
+
+  var body;
+  try { body = JSON.parse(opts.body); } catch (error) { return opts; }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return opts;
+
+  var demand = body.demand && typeof body.demand === 'object' && !Array.isArray(body.demand)
+    ? body.demand
+    : {};
+  var demandAudit = lastDemandAnalysisAI && typeof lastDemandAnalysisAI === 'object'
+    ? lastDemandAnalysisAI
+    : {};
+  var proposalAudit = lastProposalAI && typeof lastProposalAI === 'object'
+    ? lastProposalAI
+    : {};
+  var currentDemand = curDemand && typeof curDemand === 'object' ? curDemand : {};
+  var positive = typeof readPositiveInteger === 'function'
+    ? readPositiveInteger
+    : function(value) {
+        var parsed = Number(value);
+        return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+      };
+  var firstPositive = function(values) {
+    for (var index = 0; index < values.length; index += 1) {
+      var parsed = positive(values[index]);
+      if (parsed !== null) return parsed;
+    }
+    return null;
+  };
+
+  body.campaign_id = campaignId;
+  body.demand_analysis_conversation_id = firstPositive([
+    currentDemand.demand_analysis_conversation_id,
+    demand.demand_analysis_conversation_id,
+    demandAudit.conversation_id
+  ]);
+  body.demand_analysis_message_id = firstPositive([
+    currentDemand.demand_analysis_message_id,
+    demand.demand_analysis_message_id,
+    demandAudit.message_id
+  ]);
+  body.proposal_conversation_id = firstPositive([
+    currentDemand.proposal_conversation_id,
+    demand.proposal_conversation_id,
+    proposalAudit.conversation_id
+  ]);
+  body.proposal_message_id = firstPositive([
+    currentDemand.proposal_message_id,
+    demand.proposal_message_id,
+    proposalAudit.message_id
+  ]);
+
+  var knowledgeEntryIds = [];
+  var seenKnowledge = {};
+  var collectKnowledge = function(values) {
+    (Array.isArray(values) ? values : []).forEach(function(value) {
+      var id = positive(value);
+      if (id === null || seenKnowledge[id] || knowledgeEntryIds.length >= 20) return;
+      seenKnowledge[id] = true;
+      knowledgeEntryIds.push(id);
+    });
+  };
+  collectKnowledge(body.knowledge_entry_ids);
+  collectKnowledge(demand.knowledge_entry_ids);
+  collectKnowledge(currentDemand.knowledge_entry_ids);
+  collectKnowledge(currentDemand.proposal_knowledge_entry_ids);
+  collectKnowledge(demandAudit.knowledge_entry_ids);
+  collectKnowledge(proposalAudit.knowledge_entry_ids);
+  if (typeof getSelectedKnowledgeEntryIds === 'function') collectKnowledge(getSelectedKnowledgeEntryIds());
+  body.knowledge_entry_ids = knowledgeEntryIds;
+  body.allow_web = false;
+  delete body.knowledge_limit;
+
+  var headers = {};
+  if (opts.headers && typeof opts.headers.forEach === 'function') {
+    opts.headers.forEach(function(value, name) { headers[name] = value; });
+  } else if (opts.headers && typeof opts.headers === 'object') {
+    Object.keys(opts.headers).forEach(function(name) { headers[name] = opts.headers[name]; });
+  }
+  headers['Idempotency-Key'] = createDemandAnalysisOperationId('ppt-outline-');
+  headers['X-Request-Id'] = createDemandAnalysisOperationId('ppt-outline-request-');
+  return Object.assign({}, opts, { headers: headers, body: JSON.stringify(body) });
+}
+
 async function apiFetch(url, opts) {
   opts = opts || {};
+  opts = prepareCampaignPptOutlineRequest(url, opts);
   var isFormData = typeof FormData !== 'undefined' && opts.body instanceof FormData;
   var headers = new Headers(opts.headers || {});
   var requestToken = AUTH_TOKEN;

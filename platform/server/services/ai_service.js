@@ -1616,8 +1616,9 @@ function getConversation(db, opts) {
   }).immediate();
 }
 
-function verifyDemandAnalysisAuditContext(db, opts) {
+function verifyCampaignAiAuditContext(db, opts, contract) {
   opts = opts || {};
+  contract = contract || {};
   const rawConversationId = ownValue(opts, 'conversation_id');
   const rawMessageId = ownValue(opts, 'message_id');
   const hasConversationId = rawConversationId !== undefined && rawConversationId !== null && rawConversationId !== '';
@@ -1630,8 +1631,8 @@ function verifyDemandAnalysisAuditContext(db, opts) {
   if (campaignId === null || conversationId === null || messageId === null) {
     throw serviceError(
       400,
-      'INVALID_DEMAND_AUDIT_CONTEXT',
-      'Demand analysis audit context is invalid.'
+      contract.invalidCode,
+      contract.invalidMessage
     );
   }
 
@@ -1652,7 +1653,7 @@ function verifyDemandAnalysisAuditContext(db, opts) {
     !conversation ||
     positiveId(conversation.id) !== conversationId ||
     conversationUserId === null ||
-    conversation.source_module !== 'demand_analysis' ||
+    conversation.source_module !== contract.sourceModule ||
     !message ||
     positiveId(message.conversation_id) !== conversationId ||
     positiveId(message.user_id) !== conversationUserId ||
@@ -1660,8 +1661,8 @@ function verifyDemandAnalysisAuditContext(db, opts) {
   ) {
     throw serviceError(
       400,
-      'INVALID_DEMAND_AUDIT_CONTEXT',
-      'Demand analysis audit context is invalid.'
+      contract.invalidCode,
+      contract.invalidMessage
     );
   }
 
@@ -1682,11 +1683,31 @@ function verifyDemandAnalysisAuditContext(db, opts) {
   ) {
     throw serviceError(
       409,
-      'DEMAND_AUDIT_CAMPAIGN_MISMATCH',
-      'Demand analysis audit context does not belong to this campaign.'
+      contract.mismatchCode,
+      contract.mismatchMessage
     );
   }
   return { conversation_id: conversationId, message_id: messageId };
+}
+
+function verifyDemandAnalysisAuditContext(db, opts) {
+  return verifyCampaignAiAuditContext(db, opts, {
+    sourceModule: 'demand_analysis',
+    invalidCode: 'INVALID_DEMAND_AUDIT_CONTEXT',
+    invalidMessage: 'Demand analysis audit context is invalid.',
+    mismatchCode: 'DEMAND_AUDIT_CAMPAIGN_MISMATCH',
+    mismatchMessage: 'Demand analysis audit context does not belong to this campaign.'
+  });
+}
+
+function verifyProposalDraftAuditContext(db, opts) {
+  return verifyCampaignAiAuditContext(db, opts, {
+    sourceModule: 'proposal',
+    invalidCode: 'INVALID_PROPOSAL_AUDIT_CONTEXT',
+    invalidMessage: 'Proposal draft audit context is invalid.',
+    mismatchCode: 'PROPOSAL_AUDIT_CAMPAIGN_MISMATCH',
+    mismatchMessage: 'Proposal draft audit context does not belong to this campaign.'
+  });
 }
 
 module.exports = {
@@ -1694,5 +1715,6 @@ module.exports = {
   listConversations,
   getConversation,
   verifyDemandAnalysisAuditContext,
+  verifyProposalDraftAuditContext,
   ensureConversation
 };
