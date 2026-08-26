@@ -1,5 +1,22 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.7.0-ai-knowledge-loop-task4a (Production Slice, 2026-08-26) - M5 AI 对话可靠性
+
+### 最新 AI 助手接入 / Latest AI Assistant Integration
+- M5 AI 助手现在只把用户实际输入的问题提交给 `/api/ai/chat`，不再把本地历史记录或品牌数量拼入持久化消息；现有联网开关真正控制 `allow_web`，关联 Campaign 时继续携带当前 Campaign 与已选知识条目。
+- 同一 Campaign 的网络结果不明确时复用稳定幂等键，每次传输尝试仍使用新的请求 ID；明确 HTTP 失败或成功完成后轮换新键。单飞控制阻止并发首条消息拆成多个会话。
+- Campaign、登录态和会话代次共同隔离陈旧响应；切换 Campaign、重新登录、登录过期、注销或清空对话都会中止旧请求并清除重试状态。后端错误改为纯文本渲染，不再解释服务端返回的标记。
+- 本切片没有替换页面布局、后端服务、数据库结构或冻结 PPT renderer；未关联旧版 AI 对话继续保持原 API 兼容行为。
+
+### 验证与生产发布 / Verification And Production Release
+- 实现提交为 `b96cf6d`；受影响的 AI/RAG、会话审计、Campaign、M3、PPT 与前端架构矩阵 140/140 通过，JavaScript 语法、`git diff --check`、聚焦敏感信息扫描和冻结 PPT 哈希均通过。独立审查结论为 `APPROVE`，无 Critical、Important 或 Minor 发现。
+- 生产备份为 `/root/turingmarket/backups/v070-slice4a-m5-ai-client-20260826-061018`，聚合清单 SHA-256 为 `1fececb8069a73e42ceccef184a99962689853c0104707b1ed3127229fcdbd75`；仅发布 `platform/app.js`，生产 SHA-256 为 `44e67c0a034d68629a450cd1691e0005183b4689df6564ddf9ccaa80d2ad24a6`。
+- 生产管理员历史密码哈希未随此前重置落库，已在独立 SQLite Backup API 快照 `/root/turingmarket/backups/v070-slice4a-admin-reset-20260826-062343` 后完成审计恢复；备份聚合 SHA-256 为 `4f651b0037aea4acd38cfccf420db8c2ac97c07f47c6f5fbc035377e49b9fb6c`。公开记录不保存账号标识或明文凭据。
+- 线上验收通过管理员登录、`/api/auth/me`、Campaign 1 关联 AI 对话、8 条知识引用、自动知识摘要归档、两条 Campaign 关联、单条 `link_attached` 事件、完成态幂等账本、同键语义一致回放和注销；近期回环验收会话为 0。
+- 公网健康为 200、解析器 ready、PM2/Nginx 正常、SQLite `quick_check=ok` 且无外键异常；公网与本机 Nginx 返回的 `app.js` 均与生产 SHA-256 一致，冻结 `ppt.js` 哈希保持 `f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e`。
+
+---
+
 ## v0.7.0-ai-knowledge-loop-task3c (Production Slice, 2026-08-26) - Campaign 方案与 PPTX 成品归档
 
 ### 确认方案、PPTX 与 Campaign / Confirmed Proposal, PPTX, And Campaign
