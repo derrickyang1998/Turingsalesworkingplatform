@@ -259,7 +259,7 @@ function getActiveDemandId() {
     if (!context || typeof context !== 'object') continue;
     var contextCampaignId = readPositiveInteger(context.campaign_id);
     if (contextCampaignId === null) contextCampaignId = readPositiveInteger(context.campaignId);
-    if (contextCampaignId !== null && contextCampaignId !== campaignId) continue;
+    if (contextCampaignId !== campaignId) continue;
     var demandId = readPositiveInteger(context.demand_id);
     if (demandId === null) demandId = readPositiveInteger(context.demandId);
     if (demandId !== null) return demandId;
@@ -347,6 +347,14 @@ async function ensureCampaignPptDemandRecord(campaignId) {
       readPositiveInteger(data && data.link_id) === null
     ) {
       throw new Error((data && (data.error || data.message)) || 'Campaign 需求归档失败。');
+    }
+    if (
+      !campaignPptDemandRecord ||
+      campaignPptDemandRecord.campaignId !== campaignId ||
+      campaignPptDemandRecord.fingerprint !== fingerprint ||
+      campaignPptDemandRecord.promise !== requestPromise
+    ) {
+      throw new Error('Campaign 需求内容已替换，已忽略过期归档结果。');
     }
     if (
       requestAuthGeneration !== AUTH_GENERATION ||
@@ -620,7 +628,9 @@ function renderCampaignPptArchiveStatus() {
     status.appendChild(retry);
   }
   if (!existing) output.appendChild(status);
-  var downloadButton = output.querySelector('button[onclick="downloadPPTX()"]');
+  var downloadButton = output.querySelector(
+    'button[onclick="downloadPPTX()"], button[data-tm-ppt-action="downloadPPTX"]'
+  );
   if (downloadButton) {
     downloadButton.disabled = campaignPptDownloadInFlight || (state !== 'ready' && state !== 'generated');
   }

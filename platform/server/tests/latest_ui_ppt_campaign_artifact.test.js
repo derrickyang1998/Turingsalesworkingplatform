@@ -172,6 +172,57 @@ test('demand persistence retries the same content with one key and rejects a sta
   assert.equal(keys[0], keys[1], 'same demand content must retain its idempotency key');
 });
 
+test('newer same-Campaign demand content wins when an older request resolves last', async () => {
+  const pending = [];
+  const context = baseContext({
+    apiFetch(url, options) {
+      return new Promise((resolve) => pending.push({
+        body: JSON.parse(options.body),
+        key: options.headers['Idempotency-Key'],
+        resolve
+      }));
+    }
+  });
+  loadFunctions(context, coreFunctions);
+
+  const older = context.ensureCampaignPptDemandRecord(12);
+  context.curDemand.brand = 'Acme Next';
+  const newer = context.ensureCampaignPptDemandRecord(12);
+  assert.equal(pending.length, 2);
+  assert.notEqual(pending[0].key, pending[1].key);
+
+  pending[1].resolve(jsonResponse(201, { id: 62, campaign_id: 12, link_id: 102 }));
+  assert.equal(await newer, 62);
+  pending[0].resolve(jsonResponse(201, { id: 61, campaign_id: 12, link_id: 101 }));
+  await assert.rejects(older, /过期|已替换|superseded/i);
+
+  assert.equal(context.campaignPptDemandRecord.demandId, 62);
+  assert.equal(context.curDemand.demand_id, 62);
+  assert.equal(context.curDemand.brand, 'Acme Next');
+});
+
+test('active Campaign never reuses a demand ID without an explicit matching Campaign', async () => {
+  const calls = [];
+  const context = baseContext({
+    curDemand: {
+      demand_id: 41,
+      brand: 'Legacy Acme',
+      product: 'Legacy product'
+    },
+    async apiFetch(url, options) {
+      calls.push({ url, options });
+      return jsonResponse(201, { id: 63, campaign_id: 12, link_id: 103 });
+    }
+  });
+  loadFunctions(context, coreFunctions);
+
+  assert.equal(await context.ensureCampaignPptDemandRecord(12), 63);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, '/demands');
+  assert.equal(context.curDemand.demand_id, 63);
+  assert.equal(context.curDemand.campaign_id, 12);
+});
+
 test('linked proposal save uses the exact Campaign demand and only a valid cloned 201 response arms download', async () => {
   const context = baseContext();
   loadFunctions(context, [
@@ -324,4 +375,10 @@ test('Campaign switch and auth cleanup clear artifact state while frozen PPT byt
     crypto.createHash('sha256').update(fs.readFileSync(pptPath)).digest('hex'),
     'f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e'
   );
+});
+
+test('archive status controls both frozen and CSP-translated PPTX buttons', () => {
+  const source = extractFunction(appSource, 'renderCampaignPptArchiveStatus');
+  assert.match(source, /button\[onclick="downloadPPTX\(\)"\]/);
+  assert.match(source, /button\[data-tm-ppt-action="downloadPPTX"\]/);
 });
