@@ -1392,9 +1392,24 @@ function authorizedConversationProjection(actor) {
             )
           )
       ),
+      conversation_message_activity AS MATERIALIZED (
+        SELECT
+          message.conversation_id,
+          MAX(message.created_at) AS last_message_at
+        FROM ai_messages message
+        JOIN authorized_conversation_ids authorized
+          ON authorized.conversation_id=message.conversation_id
+        GROUP BY message.conversation_id
+      ),
       authorized_conversations AS MATERIALIZED (
         SELECT
           conversation.*,
+          CASE
+            WHEN message_activity.last_message_at IS NOT NULL
+              AND message_activity.last_message_at > COALESCE(conversation.updated_at,conversation.created_at)
+            THEN message_activity.last_message_at
+            ELSE COALESCE(conversation.updated_at,conversation.created_at)
+          END AS activity_at,
           owner.username,
           owner.display_name,
           authorized.__organization_id,
@@ -1406,6 +1421,8 @@ function authorizedConversationProjection(actor) {
         JOIN ai_conversations conversation
           ON conversation.id=authorized.conversation_id
         JOIN users owner ON owner.id=conversation.user_id
+        LEFT JOIN conversation_message_activity message_activity
+          ON message_activity.conversation_id=conversation.id
       )
     `,
     params: [
@@ -1475,11 +1492,11 @@ function conversationListFilters(opts, actor) {
     params.push(sourceModule);
   }
   if (dateFrom) {
-    conditions.push("COALESCE(authorized.updated_at,authorized.created_at)>=?");
+    conditions.push('authorized.activity_at>=?');
     params.push(dateFrom + ' 00:00:00');
   }
   if (dateTo) {
-    conditions.push("COALESCE(authorized.updated_at,authorized.created_at)<?");
+    conditions.push('authorized.activity_at<?');
     params.push(nextAiAuditDate(dateTo) + ' 00:00:00');
   }
   if (referenceType) {
@@ -1664,7 +1681,7 @@ function listConversations(db, opts) {
             AND counted_reference.reference_type='web'
         ) AS web_reference_count
       FROM filtered_conversations filtered
-      ORDER BY filtered.updated_at DESC,filtered.id DESC
+      ORDER BY filtered.activity_at DESC,filtered.id DESC
       LIMIT ?
     `).all(
       ...projection.params,

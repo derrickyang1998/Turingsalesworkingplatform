@@ -700,6 +700,46 @@ test('administrator audit filters combine user, date, source, archive, and refer
   }
 });
 
+test('AI conversation audit dates include a persisted prompt even when completion never updates the conversation', () => {
+  const db = openDatabase();
+  try {
+    const fixture = createFixture(db);
+    const conversationId = createConversation(db, {
+      userId: fixture.owner.id,
+      title: 'Provider failure evidence',
+      createdAt: '2026-07-01 09:00:00',
+      updatedAt: '2026-07-01 09:00:00'
+    });
+    linkConversation(db, {
+      campaignId: fixture.ownerCampaignId,
+      conversationId,
+      createdBy: fixture.owner.id
+    });
+    db.prepare(`
+      INSERT INTO ai_messages (
+        conversation_id,user_id,role,content,model,prompt_tokens,
+        completion_tokens,total_tokens,metadata_json,created_at
+      ) VALUES (?,?,'user','Prompt saved before provider failure',NULL,0,0,0,'{}',?)
+    `).run(conversationId, fixture.owner.id, '2026-07-05 14:30:00');
+
+    const rows = ai.listConversations(db, secureRead(
+      fixture.platformAdmin,
+      fixture.platformAdminAuth,
+      'prompt-only-activity-request',
+      {
+        date_from: '2026-07-05',
+        date_to: '2026-07-05'
+      }
+    ));
+
+    assert.deepEqual(rows.map((row) => row.id), [conversationId]);
+    assert.equal(rows[0].updated_at, '2026-07-01 09:00:00');
+    assert.equal(rows[0].activity_at, '2026-07-05 14:30:00');
+  } finally {
+    db.close();
+  }
+});
+
 test('AI conversation audit rejects malformed or reversed bounded filters before audit persistence', () => {
   const db = openDatabase();
   try {

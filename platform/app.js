@@ -5127,7 +5127,7 @@ function loadAdminAIAudit() {
           ? '<span style="color:#0f7b3c">Archived</span>'
           : '<span style="opacity:.55">Unarchived</span>';
         return '<tr>'
-          + '<td style="white-space:nowrap">' + esc((c.updated_at || c.created_at || '').substring(0, 16)) + '</td>'
+          + '<td style="white-space:nowrap">' + esc((c.activity_at || c.updated_at || c.created_at || '').substring(0, 16)) + '</td>'
           + '<td>' + esc(c.display_name || c.username || '-') + '</td>'
           + '<td>' + esc(c.source_module || '-') + '</td>'
           + '<td style="white-space:nowrap">' + esc(campaign) + '</td>'

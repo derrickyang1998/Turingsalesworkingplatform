@@ -191,6 +191,7 @@ test('admin AI audit loads the user directory and renders campaign, reference, a
           web_reference_count: 1,
           archived_summary_id: 91,
           last_answer: 'Verified answer',
+          activity_at: '2026-07-11 08:45:00',
           updated_at: '2026-07-10 11:20:00'
         }]
       });
@@ -213,6 +214,8 @@ test('admin AI audit loads the user directory and renders campaign, reference, a
   assert.match(elements.ad_aiAuditList.innerHTML, /Campaign #12/);
   assert.match(elements.ad_aiAuditList.innerHTML, /KB 2 \/ Web 1/);
   assert.match(elements.ad_aiAuditList.innerHTML, /Archived/);
+  assert.match(elements.ad_aiAuditList.innerHTML, /2026-07-11 08:45/);
+  assert.doesNotMatch(elements.ad_aiAuditList.innerHTML, /2026-07-10 11:20/);
 });
 
 test('admin AI audit refreshes its user directory after in-app user changes', async () => {
