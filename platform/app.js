@@ -29,6 +29,10 @@ let campaignPptDownloadFingerprint = '';
 let campaignPptDownloadIdempotencyKey = '';
 let campaignPptDownloadInFlight = false;
 let campaignPptArchiveState = { status: 'idle', message: '' };
+let aiChatIdempotencyFingerprint = '';
+let aiChatIdempotencyKey = '';
+let aiChatRequestSequence = 0;
+let activeAiChatRequest = null;
 
 // Navigation registry and page visibility are owned by client/core/navigation.js.
 // ==== FIX DOM NESTING: ensure all page-* divs are direct children of <main> ====
@@ -118,6 +122,8 @@ async function doLogin() {
     CURRENT_USER = d.user;
     rememberAuthContext(d.auth_context || d.authContext || (d.user && d.user.auth_context));
     AUTH_GENERATION += 1;
+    if (typeof invalidateAiChatRequests === 'function') invalidateAiChatRequests();
+    currentAIConversationId = null;
     authExpiredNotified = false;
     clearLoginError();
     localStorage.setItem('tm_token', AUTH_TOKEN);
@@ -156,7 +162,9 @@ async function doLogout() {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + AUTH_TOKEN }
     });
   } catch (e) {}
-  resetCampaignPptArtifactState();
+  if (typeof invalidateAiChatRequests === 'function') invalidateAiChatRequests();
+  currentAIConversationId = null;
+  if (typeof resetCampaignPptArtifactState === 'function') resetCampaignPptArtifactState();
   AUTH_TOKEN = ''; CURRENT_USER = null; CURRENT_AUTH_CONTEXT = null; CURRENT_CRM_TEAM_ID = null; AUTH_GENERATION += 1;
   localStorage.removeItem('tm_token'); localStorage.removeItem('tm_user'); localStorage.removeItem('tm_auth_context');
   location.reload();
@@ -167,7 +175,9 @@ function handleAuthExpired(message) {
     window.TMAccessibility.dismissAllDialogs();
   }
   closeCustomerDetail();
-  resetCampaignPptArtifactState();
+  if (typeof invalidateAiChatRequests === 'function') invalidateAiChatRequests();
+  currentAIConversationId = null;
+  if (typeof resetCampaignPptArtifactState === 'function') resetCampaignPptArtifactState();
   AUTH_TOKEN = '';
   CURRENT_USER = null;
   CURRENT_AUTH_CONTEXT = null;
@@ -1611,8 +1621,9 @@ function setWorkflowContext(context) {
   if (typeof invalidateDemandAnalysisRequests === 'function') invalidateDemandAnalysisRequests();
   if (typeof invalidateProposalDraftRequests === 'function') invalidateProposalDraftRequests();
   if (previousCampaignId !== nextCampaignId) {
+    if (typeof invalidateAiChatRequests === 'function') invalidateAiChatRequests();
     if (typeof invalidateCampaignPptGeneration === 'function') invalidateCampaignPptGeneration();
-    resetCampaignPptArtifactState();
+    if (typeof resetCampaignPptArtifactState === 'function') resetCampaignPptArtifactState();
     selectedKnowledgeEntryIds = [];
     selectedKnowledgeCampaignId = nextCampaignId;
     currentAIConversationId = null;
@@ -4680,14 +4691,140 @@ function renderAIReferenceText(data) {
   }
   return lines.length ? '\n\n' + lines.join('\n') : '';
 }
+function aiChatFingerprint(payload) {
+  payload = payload && typeof payload === 'object' ? payload : {};
+  var knowledgeIds = Array.isArray(payload.knowledge_entry_ids)
+    ? payload.knowledge_entry_ids.map(readPositiveInteger).filter(function(id) { return id !== null; })
+    : [];
+  return JSON.stringify({
+    auth_generation: AUTH_GENERATION,
+    campaign_id: readPositiveInteger(payload.campaign_id),
+    conversation_id: readPositiveInteger(payload.conversation_id),
+    message: String(payload.message || ''),
+    allow_web: payload.allow_web === true,
+    knowledge_entry_ids: knowledgeIds
+  });
+}
+function prepareAiChatRequest(payload) {
+  var fingerprint = aiChatFingerprint(payload);
+  var campaignId = readPositiveInteger(payload && payload.campaign_id);
+  if (
+    campaignId !== null &&
+    (aiChatIdempotencyFingerprint !== fingerprint || !aiChatIdempotencyKey)
+  ) {
+    aiChatIdempotencyFingerprint = fingerprint;
+    aiChatIdempotencyKey = createAiChatIdempotencyKey();
+  }
+  var headers = {
+    'X-Request-Id': createDemandAnalysisOperationId('ai-chat-request-')
+  };
+  if (campaignId !== null) headers['Idempotency-Key'] = aiChatIdempotencyKey;
+  return {
+    fingerprint: fingerprint,
+    idempotencyKey: campaignId === null ? '' : aiChatIdempotencyKey,
+    requestId: headers['X-Request-Id'],
+    headers: headers
+  };
+}
+function setAiChatControlsBusy(busy) {
+  var input = document.getElementById('chatInput');
+  var button = document.querySelector('#page-m5 .chat-input-area button');
+  if (input) input.disabled = !!busy;
+  if (button) button.disabled = !!busy;
+}
+function beginAiChatRequest(prepared, payload) {
+  if (activeAiChatRequest) return null;
+  var controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  var requestContext = {
+    generation: ++aiChatRequestSequence,
+    authGeneration: AUTH_GENERATION,
+    campaignId: readPositiveInteger(payload && payload.campaign_id),
+    conversationId: readPositiveInteger(payload && payload.conversation_id),
+    fingerprint: prepared.fingerprint,
+    idempotencyKey: prepared.idempotencyKey,
+    invalidated: false,
+    abortController: controller,
+    pendingNode: null,
+    promise: null
+  };
+  activeAiChatRequest = requestContext;
+  setAiChatControlsBusy(true);
+  return requestContext;
+}
+function isAiChatRequestCurrent(requestContext) {
+  if (
+    !requestContext ||
+    activeAiChatRequest !== requestContext ||
+    requestContext.invalidated ||
+    requestContext.generation !== aiChatRequestSequence ||
+    requestContext.authGeneration !== AUTH_GENERATION
+  ) return false;
+  if (readPositiveInteger(getActiveCampaignId()) !== requestContext.campaignId) return false;
+  return readPositiveInteger(currentAIConversationId) === requestContext.conversationId;
+}
+function invalidateAiChatRequests() {
+  aiChatRequestSequence += 1;
+  aiChatIdempotencyFingerprint = '';
+  aiChatIdempotencyKey = '';
+  if (activeAiChatRequest) {
+    activeAiChatRequest.invalidated = true;
+    if (activeAiChatRequest.abortController) activeAiChatRequest.abortController.abort();
+    if (activeAiChatRequest.pendingNode && typeof activeAiChatRequest.pendingNode.remove === 'function') {
+      activeAiChatRequest.pendingNode.remove();
+    }
+    activeAiChatRequest = null;
+  }
+  setAiChatControlsBusy(false);
+}
+function finishAiChatRequest(requestContext, rotateReplayKey) {
+  if (
+    rotateReplayKey &&
+    aiChatIdempotencyFingerprint === requestContext.fingerprint &&
+    aiChatIdempotencyKey === requestContext.idempotencyKey
+  ) {
+    aiChatIdempotencyFingerprint = '';
+    aiChatIdempotencyKey = '';
+  }
+  requestContext.pendingNode = null;
+  if (activeAiChatRequest === requestContext) {
+    activeAiChatRequest = null;
+    setAiChatControlsBusy(false);
+  }
+}
+function renderAiChatError(target, message) {
+  if (!target) return;
+  target.innerHTML = '';
+  var bubble = document.createElement('div');
+  bubble.className = 'bubble';
+  bubble.style.color = '#f44336';
+  bubble.textContent = 'Error: ' + String(message || 'AI request failed');
+  target.appendChild(bubble);
+}
 function sendChat() {
+  if (activeAiChatRequest && activeAiChatRequest.promise) return activeAiChatRequest.promise;
   var inp = document.getElementById('chatInput');
   var msg = inp ? inp.value.trim() : '';
-  if (!msg) return;
+  if (!msg) return Promise.resolve(null);
+  var campaignId = readPositiveInteger(getActiveCampaignId());
+  var webToggle = document.getElementById('webSearchToggle');
+  var chatPayload = {
+    message: msg,
+    conversation_id: readPositiveInteger(currentAIConversationId),
+    allow_web: !!(webToggle && webToggle.checked),
+    source_module: 'assistant',
+    summary_visibility: 'private',
+    knowledge_limit: 8,
+    max_tokens: 2048
+  };
+  if (campaignId !== null) {
+    chatPayload.campaign_id = campaignId;
+    chatPayload.knowledge_entry_ids = getSelectedKnowledgeEntryIds();
+  }
+  var prepared = prepareAiChatRequest(chatPayload);
+  var requestContext = beginAiChatRequest(prepared, chatPayload);
+  if (!requestContext) return activeAiChatRequest ? activeAiChatRequest.promise : Promise.resolve(null);
   addChatMsg('user', msg);
   inp.value = '';
-  var memKeys = Object.keys(aiMemory).slice(-10);
-  var memContext = memKeys.length ? '\n\nPast:\n' + memKeys.map(function(k) { return '- ' + String(aiMemory[k]).substring(0, 200); }).join('\n') : '';
   var memId = 'm' + Date.now();
   aiMemory[memId] = msg;
   saveAIMemory();
@@ -4697,38 +4834,63 @@ function sendChat() {
   td.innerHTML = '<div class="bubble">Thinking...</div>';
   msgs.appendChild(td);
   msgs.scrollTop = msgs.scrollHeight;
-  var backendMessage = msg + '\n\n[Local UI context]\nLoaded brand records: ' + BRANDS.length + memContext;
-  var chatPayload = {
-    message: backendMessage,
-    conversation_id: currentAIConversationId,
-    allow_web: true,
-    source_module: 'assistant',
-    summary_visibility: 'private',
-    knowledge_limit: 8,
-    max_tokens: 2048
-  };
-  var chatOptions = { method: 'POST' };
-  var campaignId = getActiveCampaignId();
-  if (campaignId !== null) {
-    chatPayload.campaign_id = campaignId;
-    chatPayload.knowledge_entry_ids = getSelectedKnowledgeEntryIds();
-    chatOptions.headers = { 'Idempotency-Key': createAiChatIdempotencyKey() };
-  }
-  chatOptions.body = JSON.stringify(chatPayload);
-  apiFetch('/ai/chat', chatOptions)
-    .then(function(r) {
-      if (!r.ok) return r.json().then(function(err) { throw new Error(err.error || ('API:' + r.status)); });
-      return r.json();
-    })
-    .then(function(d) {
+  requestContext.pendingNode = td;
+  var rotateReplayKey = false;
+  var operation = (async function() {
+    try {
+      var chatOptions = {
+        method: 'POST',
+        headers: prepared.headers,
+        body: JSON.stringify(chatPayload)
+      };
+      if (requestContext.abortController) chatOptions.signal = requestContext.abortController.signal;
+      var response = await apiFetch('/ai/chat', chatOptions);
+      var data = await response.json().catch(function() { return null; });
+      if (!response.ok) {
+        rotateReplayKey = true;
+        throw new Error((data && (data.error || data.message)) || ('API:' + response.status));
+      }
+      if (!isAiChatRequestCurrent(requestContext)) {
+        td.remove();
+        return null;
+      }
+      rotateReplayKey = true;
+      var responseConversationId = readPositiveInteger(data && data.conversation_id);
+      if (responseConversationId === null) throw new Error('AI 会话响应无效，请重试。');
+      if (
+        requestContext.conversationId !== null &&
+        responseConversationId !== requestContext.conversationId
+      ) {
+        throw new Error('AI 会话已切换，已忽略不匹配的回复。');
+      }
+      if (
+        requestContext.campaignId !== null &&
+        readPositiveInteger(data && data.campaign_id) !== requestContext.campaignId
+      ) {
+        throw new Error('Campaign 已切换，已忽略不匹配的 AI 回复。');
+      }
       td.remove();
-      currentAIConversationId = d.conversation_id || currentAIConversationId;
-      var reply = d.answer || 'No response.';
+      requestContext.pendingNode = null;
+      currentAIConversationId = responseConversationId;
+      var reply = data.answer || 'No response.';
       chatHistory.push({role:'assistant', content: reply});
       aiMemory[memId + '_r'] = reply.substring(0, 500);
       saveAIMemory();
-      addChatMsg('assistant', reply + renderAIReferenceText(d));
-    }).catch(function(e) { td.innerHTML = '<div class="bubble" style="color:#f44336">Error: ' + e.message + '</div>'; });
+      addChatMsg('assistant', reply + renderAIReferenceText(data));
+      return data;
+    } catch (e) {
+      if (!isAiChatRequestCurrent(requestContext)) {
+        td.remove();
+        return null;
+      }
+      renderAiChatError(td, e.message);
+      return null;
+    } finally {
+      finishAiChatRequest(requestContext, rotateReplayKey);
+    }
+  })();
+  requestContext.promise = operation;
+  return operation;
 }
 function addChatMsg(role, text) {
   var msgs = document.getElementById('chatMessages');
@@ -4740,7 +4902,12 @@ function addChatMsg(role, text) {
   msgs.appendChild(div);
   msgs.scrollTop = msgs.scrollHeight;
 }
-function clearChat() { document.getElementById('chatMessages').innerHTML = '<div class="chat-msg assistant"><div class="bubble">Chat cleared</div></div>'; chatHistory = [{role:'system', content:'You are TuringMarket AI assistant.'}]; currentAIConversationId = null; }
+function clearChat() {
+  invalidateAiChatRequests();
+  document.getElementById('chatMessages').innerHTML = '<div class="chat-msg assistant"><div class="bubble">Chat cleared</div></div>';
+  chatHistory = [{role:'system', content:'You are TuringMarket AI assistant.'}];
+  currentAIConversationId = null;
+}
 function clearAIMemory() { if (!confirm('Clear memory?')) return; aiMemory = {}; saveAIMemory(); toast('Memory cleared'); }
 // ===== ADMIN (v8.0) =====
 function switchAdminTab(tab, options) { options = options || {}; if (!options.skipHistory && window.TMNavigation) { window.TMNavigation.navigate('admin', { substate: { tab: tab }, user: CURRENT_USER }); return; }
