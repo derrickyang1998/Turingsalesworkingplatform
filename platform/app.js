@@ -5036,7 +5036,7 @@ function loadAdminAIAuditUsers() {
   var select = document.getElementById('ad_aiAuditUser');
   if (!select) return Promise.resolve([]);
   if (adminAIAuditUsersPromise) return adminAIAuditUsersPromise;
-  adminAIAuditUsersPromise = apiFetch('/admin/users').then(function(r) {
+  var request = apiFetch('/admin/users').then(function(r) {
     if (!r.ok) throw new Error('API:' + r.status);
     return r.json();
   }).then(function(d) {
@@ -5051,10 +5051,13 @@ function loadAdminAIAuditUsers() {
     }
     return users;
   }).catch(function() {
-    adminAIAuditUsersPromise = null;
     return [];
   });
-  return adminAIAuditUsersPromise;
+  adminAIAuditUsersPromise = request;
+  request.then(function() {
+    if (adminAIAuditUsersPromise === request) adminAIAuditUsersPromise = null;
+  });
+  return request;
 }
 function buildAdminAIAuditQuery() {
   function value(id) {

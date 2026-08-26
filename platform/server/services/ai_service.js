@@ -1475,11 +1475,11 @@ function conversationListFilters(opts, actor) {
     params.push(sourceModule);
   }
   if (dateFrom) {
-    conditions.push("authorized.created_at>=?");
+    conditions.push("COALESCE(authorized.updated_at,authorized.created_at)>=?");
     params.push(dateFrom + ' 00:00:00');
   }
   if (dateTo) {
-    conditions.push("authorized.created_at<?");
+    conditions.push("COALESCE(authorized.updated_at,authorized.created_at)<?");
     params.push(nextAiAuditDate(dateTo) + ' 00:00:00');
   }
   if (referenceType) {

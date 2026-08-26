@@ -214,3 +214,32 @@ test('admin AI audit loads the user directory and renders campaign, reference, a
   assert.match(elements.ad_aiAuditList.innerHTML, /KB 2 \/ Web 1/);
   assert.match(elements.ad_aiAuditList.innerHTML, /Archived/);
 });
+
+test('admin AI audit refreshes its user directory after in-app user changes', async () => {
+  const select = { value: '', innerHTML: '' };
+  let calls = 0;
+  const context = loadFunctions({
+    adminAIAuditUsersPromise: null,
+    document: {
+      getElementById(id) { return id === 'ad_aiAuditUser' ? select : null; }
+    },
+    esc: escapeHtml,
+    Promise,
+    async apiFetch(url) {
+      assert.equal(url, '/admin/users');
+      calls += 1;
+      return response(200, {
+        users: calls === 1
+          ? [{ id: 22, username: 'first', display_name: 'First user' }]
+          : [{ id: 23, username: 'second', display_name: 'Second user' }]
+      });
+    }
+  }, ['loadAdminAIAuditUsers']);
+
+  await context.loadAdminAIAuditUsers();
+  await context.loadAdminAIAuditUsers();
+
+  assert.equal(calls, 2);
+  assert.doesNotMatch(select.innerHTML, /First user/);
+  assert.match(select.innerHTML, /Second user/);
+});

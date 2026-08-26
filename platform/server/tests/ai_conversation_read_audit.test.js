@@ -618,7 +618,8 @@ test('administrator audit filters combine user, date, source, archive, and refer
       title: 'Evidence-backed target',
       sourceModule: 'assistant',
       content: 'The answer itself does not contain the source keyword.',
-      createdAt: '2026-07-05 23:59:59.999'
+      createdAt: '2026-06-30 23:59:59.999',
+      updatedAt: '2026-07-05 23:59:59.999'
     });
     linkConversation(db, {
       campaignId: fixture.ownerCampaignId,
