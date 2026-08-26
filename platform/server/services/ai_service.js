@@ -1392,24 +1392,9 @@ function authorizedConversationProjection(actor) {
             )
           )
       ),
-      conversation_message_activity AS MATERIALIZED (
-        SELECT
-          message.conversation_id,
-          MAX(message.created_at) AS last_message_at
-        FROM ai_messages message
-        JOIN authorized_conversation_ids authorized
-          ON authorized.conversation_id=message.conversation_id
-        GROUP BY message.conversation_id
-      ),
       authorized_conversations AS MATERIALIZED (
         SELECT
           conversation.*,
-          CASE
-            WHEN message_activity.last_message_at IS NOT NULL
-              AND message_activity.last_message_at > COALESCE(conversation.updated_at,conversation.created_at)
-            THEN message_activity.last_message_at
-            ELSE COALESCE(conversation.updated_at,conversation.created_at)
-          END AS activity_at,
           owner.username,
           owner.display_name,
           authorized.__organization_id,
@@ -1421,8 +1406,6 @@ function authorizedConversationProjection(actor) {
         JOIN ai_conversations conversation
           ON conversation.id=authorized.conversation_id
         JOIN users owner ON owner.id=conversation.user_id
-        LEFT JOIN conversation_message_activity message_activity
-          ON message_activity.conversation_id=conversation.id
       )
     `,
     params: [
@@ -1581,6 +1564,7 @@ function stripConversationReadMetadata(row) {
   delete projected.__custody_valid;
   delete projected.__campaign_allowed;
   delete projected.__access_role;
+  delete projected.last_message_at;
   return projected;
 }
 
@@ -1644,9 +1628,30 @@ function listConversations(db, opts) {
     const filters = conversationListFilters(opts, actor);
     const rows = db.prepare(`
       ${projection.cte},
+      conversation_list_activity_source AS MATERIALIZED (
+        SELECT
+          authorized.*,
+          (
+            SELECT MAX(activity_message.created_at)
+            FROM ai_messages activity_message
+            WHERE activity_message.conversation_id=authorized.id
+          ) AS last_message_at
+        FROM authorized_conversations authorized
+      ),
+      authorized_conversation_activity AS MATERIALIZED (
+        SELECT
+          activity_source.*,
+          CASE
+            WHEN activity_source.last_message_at IS NOT NULL
+              AND activity_source.last_message_at > COALESCE(activity_source.updated_at,activity_source.created_at)
+            THEN activity_source.last_message_at
+            ELSE COALESCE(activity_source.updated_at,activity_source.created_at)
+          END AS activity_at
+        FROM conversation_list_activity_source activity_source
+      ),
       filtered_conversations AS MATERIALIZED (
         SELECT *
-        FROM authorized_conversations authorized
+        FROM authorized_conversation_activity authorized
         ${filters.conditions.length ? 'WHERE ' + filters.conditions.join(' AND ') : ''}
       )
       SELECT
