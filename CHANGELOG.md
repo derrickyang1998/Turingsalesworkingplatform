@@ -1,5 +1,23 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.7.0-ai-knowledge-loop-task4b2 (Production Slice, 2026-08-26) - 联网来源治理与高价值摘要晋升
+
+### 受控联网与自成长知识 / Governed Web Sources And Self-Growing Knowledge
+- Tavily 查询现统一规范化并限制长度；只接收绝对 HTTP/HTTPS 来源，去除凭据、锚点和常见追踪参数，按规范 URL 去重，并限制标题、摘要、评分和结果数量。Provider 原始 `response`、`answer` 与内部异常不再进入接口、引用或缓存。
+- 联网搜索增加 8 秒默认超时、一次有界重试、连续失败熔断、稳定安全原因码和 24 小时受治理缓存降级；即使 AI 请求已带总截止信号，Tavily 仍使用独立子信号在超时时真正中止底层请求。
+- 原始 AI 对话、消息和引用继续全量留存；只有内容充分且具备受治理知识/Web 证据的回复默认晋升为 `ai_chat_summary`。未确认草稿、低价值、无证据和降级回复只留在会话审计中，晋升决定与策略版本写入知识元数据。
+- M5 引用区标记缓存联网来源，并在自动晋升时提示“已自动沉淀为可复用知识”；现有 v0.6 产品壳层、App build 与冻结 PPT renderer 均未替换。
+
+### 验证与生产发布 / Verification And Production Release
+- 实现提交为 `184e3dc`；最终受影响矩阵 80/80 通过，JavaScript 语法、`git diff --check`、聚焦敏感信息扫描和冻结 PPT 哈希均通过。独立复审先发现超时只结束等待但未中止底层请求，新增 RED 回归并修复后最终结论为 `APPROVE`。
+- 已验证发布备份为 `/root/turingmarket/backups/v070-slice4b2-web-governance-summary-20260826-100544`，聚合 SHA-256 为 `004e4b95e45973d2bc3b2bdedc311873d256da0c54c521c11fa251e4c0c2ebbf`；容量要求 574,480 KiB，发布前可用 8,647,868 KiB。SQLite Backup API 快照通过 `quick_check` 与外键检查。
+- 发布保护在两次临时验收脚本变量冲突时均自动恢复旧代码并确认健康，第三次使用同一验签候选成功发布。13 条历史搜索缓存已在已验证数据库备份后清空，避免旧格式原始 Provider 数据继续保留。
+- 线上烟测通过登录、AI 对话持久化、管理员全局可见、普通用户跨会话 404、普通用户管理员目录 403、真实 Tavily 联网与 2 条受治理来源，以及生产结构副本上的高价值摘要晋升。可复用审计身份均停用，临时会话和测试对话为 0。
+- 公网 `/`、`/m5`、`/admin`、`/api/health` 均返回 200；解析器 ready，PM2 PID 为 `1411078`，Nginx 配置与服务正常，SQLite `quick_check=ok`、外键异常为 0。冻结 `ppt.js` SHA-256 保持 `f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e`。
+- 本切片按加速节奏执行，未运行浏览器自动化；完整回归继续保留到阶段 6 收口或跨认证、权限、迁移、运行时和基础设施的高风险变更。
+
+---
+
 ## v0.7.0-ai-knowledge-loop-task4b1 (Production Slice, 2026-08-26) - 管理员 AI 对话审计
 
 ### 全量筛选与来源审计 / Full Audit Filters And Sources

@@ -288,7 +288,7 @@ flowchart LR
 **Work items / 工作项：**
 
 - [ ] **EN:** Represent chat, strategy, demand analysis, proposal draft, and PPT outline generation as one auditable AI-run model with user, campaign, prompt, model, tokens, latency, knowledge references, web sources, and result state.<br>**中文：** 将对话、策略、需求分析、方案草稿和 PPT 大纲生成统一为可审计的 AI 运行模型，记录用户、活动、提示词、模型、Token、延迟、知识引用、联网来源和结果状态。
-- [ ] **EN:** Apply ownership/team/admin knowledge visibility before retrieval and preserve administrator-wide conversation audit with audit logging.<br>**中文：** 检索前执行所有者/团队/管理员知识可见性规则，并保留管理员全量对话审计及审计日志。
+- [x] **EN:** Apply ownership/team/admin knowledge visibility before retrieval and preserve administrator-wide conversation audit with audit logging. Production accepted through Task 4B2 on 2026-08-26.<br>**中文：** 检索前执行所有者/团队/管理员知识可见性规则，并保留管理员全量对话审计及审计日志；已于 2026-08-26 通过 Task 4B2 生产验收。
 - [ ] **EN:** Make requirement sheets, influencer batches, confirmed proposals, PPT outputs, project reviews, AI summaries, and selected conclusions enter the knowledge base through one deduplicated ingestion contract.<br>**中文：** 需求表、网红批次、已确认方案、PPT 输出、项目复盘、AI 摘要和选定结论通过统一去重入库契约进入知识库。
 - [ ] **EN:** Add source hash, business linkage, visibility, metadata, chunking, FTS retrieval, citation counts, quality state, supersession/version linkage, and retention controls.<br>**中文：** 增加来源哈希、业务关联、可见性、元数据、切片、FTS 检索、引用次数、质量状态、替代/版本关联和保留策略。
 - [ ] **EN:** Add provider timeout, bounded retry, cache, circuit-breaker/fallback, token/cost tracking, and safe error messages for DeepSeek and Tavily.<br>**中文：** 为 DeepSeek 和 Tavily 增加超时、有界重试、缓存、熔断/降级、Token/成本跟踪和安全错误信息。

@@ -3,7 +3,8 @@
 ## Source Contract / 发布源契约
 
 - Authoritative checkout / 唯一权威工作区：`C:\Users\29272\Documents\在线商务平台-github-sync`
-- Release branch / 发布分支：`codex/v0.6.0-crm-sales-workspace`
+- Guarded full-release branch / 完整受控发布分支：`codex/v0.6.0-crm-sales-workspace`
+- Current incremental branch / 当前增量发布分支：`codex/v0.7.0-ai-knowledge-proposal-ppt-loop-production`
 - Deployment entry / 部署入口：`platform/deploy_v8.ps1`
 - Application runtime / 应用运行时：Node.js 20, Express 5 + SQLite (better-sqlite3)
 - Parser appliance build runtime / 解析器设备构建运行时：Linux `x86_64`, Node.js `v20.20.2`, Python `3.14.4`, systemd 257+
@@ -15,14 +16,14 @@ The script is executable with the installed Windows PowerShell 5.1 and keeps its
 
 ## Release Candidate Status / 发布候选状态
 
-This runbook describes the current v0.6 release candidate controls. It does not record a production release. / 本手册描述当前 v0.6 发布候选的控制项，不代表已完成生产发布。
+This runbook retains the v0.6 full-release controls and records the current per-feature v0.7 incremental cadence. Production runs the accepted v0.6 shell plus only the v0.7 slices explicitly listed as accepted below. / 本手册保留 v0.6 完整发布控制，并记录当前 v0.7 单功能增量节奏；生产运行已验收 v0.6 壳层及下方明确验收的 v0.7 切片。
 
 - Local post-remediation gates / 本地修复后门禁：Task 1 `182 total / 163 pass / 0 fail / 19 Linux skips`; Task 2 `135 / 119 / 0 / 16`; Task 3 `81 / 79 / 0 / 2`
 - Historical phase-closeout evidence / 历史阶段收口证据：the 71-file Windows non-browser aggregate reports `1,875 total / 1,784 pass / 0 fail / 91 explicit skips`; earlier public-guard runs are retained as historical evidence only and do not describe the current feature slice. / 71 文件 Windows 非浏览器汇总及早期公网守护结果仅作为历史阶段收口证据保留，不代表当前功能切片。
 - Public-guard state recovery / 公网守护状态恢复：`public-gate-guard` 与 `.next` 使用 exact operation-aware 事务；transaction lock 只允许 no-follow、root:root、`0600`、nlink 1、regular、空文件且无 xattr。可信 `read-record`、四类 transient unit 的 phase/RunId 绑定与精确排空、lock-only `absent` 收敛、watchdog 后置状态复核、目录 fsync 和固定 `rootGid`/`wwwDataGid` 消除接管竞态与扫描顺序依赖。接受态恢复在任何 PM2 变更前先通过可信 helper 进入受 watchdog 保护的维护态，并使用独立 7,200 秒有界 deadline 覆盖 PM2、完整 180 秒健康窗口及最终验证；公网与 PM2 精确事实收敛后才 disarm。
-- Current focused slice / 当前定向切片：lifecycle takeover `31/31`, deployment source contract `44/44`, and selected public-guard concurrency/read/timeout tests `4/4`; PowerShell AST, Bash syntax, trusted hashes, diff check, and focused secret scan pass. Independent final review is recorded separately before deployment. / 生命周期接管 31/31、发布源合同 44/44、公网守护关键并发/读取/超时用例 4/4；PowerShell AST、Bash 语法、可信哈希、diff 与聚焦敏感信息检查通过，独立终审在部署前单独记录。
-- Current-candidate Playwright / 当前候选 Playwright：pending; not recorded as passed / 待执行或待验收，不记为通过
-- Production / 生产：verified v0.4 remains untouched; no v0.6 cutover or production mutation has started / 已验证的 v0.4 保持原样，尚未开始 v0.6 切换或生产变更
+- Current focused slice / 当前定向切片：Task 4B2 web-source governance and high-value summary promotion is production accepted. The affected matrix is `80/80`, final independent review is `APPROVE`, syntax/diff/secret/frozen-PPT checks pass, and the verified backup plus production acceptance are recorded in the Task 4B2 version record. / Task 4B2 联网来源治理与高价值摘要晋升已通过生产验收；受影响矩阵 `80/80`、独立终审 `APPROVE`，语法、diff、敏感信息与冻结 PPT 门禁通过，备份和线上证据见本切片版本记录。
+- Current-candidate Playwright / 当前候选 Playwright：not required for this backend-focused feature slice under the approved cadence; remains a Phase 6 closeout gate / 按批准节奏，本后端定向切片不要求执行，阶段 6 收口时运行
+- Production / 生产：accepted v0.6 shell plus v0.7 Phase 6 slices 1 through 4B2; App and PPT build markers remain unchanged / 已验收 v0.6 壳层叠加 v0.7 阶段 6 切片 1 至 4B2，App 与 PPT build 标识不变
 
 ### Incremental Delivery Cadence / 单功能增量发布节奏
 
@@ -30,7 +31,7 @@ Each completed feature slice runs only the affected unit/API/contract tests, syn
 
 ## Frozen Client Contract / 冻结前端契约
 
-The v0.6.0 guarded workflow prepares the CRM sales workspace on top of the approved product shell while keeping the frozen PPT bytes exact. Production remains on v0.4 until every local, independent, backup, deployment, and remote acceptance gate passes. / v0.6.0 受控流程在已批准产品壳层上准备 CRM 销售工作台，并保持冻结 PPT 字节完全不变；所有本地、独立审查、备份、部署和远端验收门禁通过前，生产继续运行 v0.4。
+The accepted v0.6 product shell remains the production UI baseline and keeps the frozen PPT bytes exact. v0.7 feature slices may add only independently reviewed, backed-up, deployed, and remotely accepted behavior without replacing that shell. / 已验收 v0.6 产品壳层继续作为生产 UI 基线并保持冻结 PPT 字节完全一致；v0.7 仅叠加独立审查、备份、部署和远端验收通过的功能，不替换该壳层。
 
 ```text
 App build: 20260811-v060-crm-sales-workspace
