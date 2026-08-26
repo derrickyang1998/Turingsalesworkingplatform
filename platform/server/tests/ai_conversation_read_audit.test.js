@@ -821,7 +821,11 @@ test('AI conversation detail rechecks custody before loading messages and refere
           if (!moved) move();
           messageMaterializations += 1;
         }
-        if (/conversation_message_activity|MAX\s*\(\s*message\.created_at\s*\)/i.test(normalized)) {
+        if (
+          /conversation_message_activity|MAX\s*\(\s*message\.created_at\s*\)/i.test(normalized) ||
+          /FROM\s+ai_messages\s+activity_message/i.test(normalized) ||
+          /SELECT\s+MAX\s*\(\s*created_at\s*\)[\s\S]*FROM\s+ai_messages/i.test(normalized)
+        ) {
           broadMessageActivityAggregations += 1;
         }
         return db.prepare(sql);

@@ -1612,26 +1612,10 @@ function readAuthorizedConversation(db, actor, conversationId) {
   const projection = authorizedConversationProjection(actor);
   return db.prepare(`
     ${projection.cte}
-    SELECT
-      bounded.*,
-      CASE
-        WHEN bounded.last_message_at IS NOT NULL
-          AND bounded.last_message_at > COALESCE(bounded.updated_at,bounded.created_at)
-        THEN bounded.last_message_at
-        ELSE COALESCE(bounded.updated_at,bounded.created_at)
-      END AS activity_at
-    FROM (
-      SELECT
-        authorized.*,
-        (
-          SELECT MAX(activity_message.created_at)
-          FROM ai_messages activity_message
-          WHERE activity_message.conversation_id=authorized.id
-        ) AS last_message_at
-      FROM authorized_conversations authorized
-      WHERE authorized.id=?
-      LIMIT 1
-    ) bounded
+    SELECT *
+    FROM authorized_conversations authorized
+    WHERE authorized.id=?
+    LIMIT 1
   `).get(...projection.params, conversationId) || null;
 }
 
@@ -1729,6 +1713,15 @@ function getConversation(db, opts) {
     if (!initial) return null;
     const authorized = readAuthorizedConversation(db, actor, conversationId);
     if (!authorized) return null;
+    const messageActivity = db.prepare(`
+      SELECT MAX(created_at) AS last_message_at
+      FROM ai_messages
+      WHERE conversation_id=?
+    `).get(conversationId);
+    const baselineActivity = authorized.updated_at || authorized.created_at || null;
+    authorized.activity_at = messageActivity && messageActivity.last_message_at > baselineActivity
+      ? messageActivity.last_message_at
+      : baselineActivity;
     const messages = db.prepare(`
       SELECT *
       FROM ai_messages
