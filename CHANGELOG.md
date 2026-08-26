@@ -1,5 +1,23 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.7.0-ai-knowledge-loop-task4d1 (Production Slice, 2026-08-26) - AI 运行状态与 Token 投影
+
+### 统一运行审计 / Unified Run Audit
+- AI 对话列表和详情现提供同一套 `run_summary`，逐条 assistant 消息提供有界 `run` 投影，统一显示成功、降级、失败、未知、未完成或混合状态，以及模型、Prompt/Completion/Total Token、延迟和知识/Web 引用数量。
+- 历史成功对话后追加但未完成的用户问题会明确显示“未完成”；畸形或非对象运行元数据安全归为“未知”，延迟只接受 0 至 1 小时内的真实整数，Token 累计封顶于 JavaScript 安全整数。
+- 管理员 AI 对话审计列表增加紧凑运行摘要，详情展示每次运行状态、Token 分项和延迟；所有后端文本继续转义，普通用户仍只能读取自己的会话，管理员读取继续写入审计。
+- 列表侧改为 SQLite 按会话分组聚合，不再把最多 300 个会话的全部历史 assistant 消息载入 Node.js。无数据库迁移、无生成/RAG 行为变更，现有产品壳层与冻结 PPT renderer 保持不变。
+
+### 验证与生产发布 / Verification And Production Release
+- 实现提交为 `1d65b6d`；最终受影响矩阵 `94/94` 通过，独立复审在关闭引用计数一致性、尾部未完成提示、Token 累计、延迟类型和长历史查询五项发现后为 `APPROVE`。JavaScript 语法、`git diff --check`、新增行敏感信息扫描和冻结 PPT 哈希均通过。
+- 已验证发布备份为 `/root/turingmarket/backups/v070-slice4d1-ai-run-projection-20260826-120239`，聚合 SHA-256 为 `86cad01ea86dc1e4c13d6374353e249bde9cb816fef57a5ecb99e26319b6b8ac`；容量要求 77,817 KiB，发布前可用 8,624,212 KiB，SQLite Backup API 副本 `quick_check=ok`、外键异常为 0。
+- 生产仅替换 `app.js` 与 `ai_service.js`，SHA-256 分别为 `d4b66c5c6360f4059a31e8fff0b14a46eb76212fcf092ec5e43082de565be76d` 与 `bc645faeb2ca32cdda04435538c4eb97cfb8f6f730b67c355761d5933f0ed305`。首次切换因 Node 不接受 `.new` 临时扩展名做语法检查而在生产变更前停止；改用 `.js` 临时文件后上线成功，PM2 PID 为 `1415442`。
+- 最终真实 HTTP 冒烟通过所有者与管理员运行投影、普通用户跨所有者 `404`、两条精确管理员读取审计和完整清理。前两次验收脚本分别暴露生产 JSON 完整性约束和历史审计脏 JSON 的脚本兼容问题，均未造成产品故障或残留；最终临时会话、对话和启用账号均为 0。
+- 公网 `/`、`/m5`、`/admin`、`/api/health` 与 `/app.js` 均为 200，公网客户端哈希与发布字节一致；解析器 ready、Nginx active、SQLite `quick_check=ok`、外键异常为 0。冻结 `ppt.js` SHA-256 保持 `f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e`。
+- 本切片继续采用轻量单功能发布节奏，未运行浏览器自动化；完整回归保留到阶段 6 收口或广泛风险变更。下一切片为 Task 4D2 的版本化模型定价与成本投影。
+
+---
+
 ## v0.7.0-ai-knowledge-loop-task4c (Production Slice, 2026-08-26) - AI 回复手动沉淀知识库
 
 ### 可控沉淀与知识归属 / Controlled Promotion And Knowledge Custody
