@@ -10,6 +10,7 @@ const latestUiCompat = require('../services/latest_ui_compat_service');
 const aiService = require('../services/ai_service');
 
 const appPath = path.join(__dirname, '..', '..', 'app.js');
+const indexPath = path.join(__dirname, '..', '..', 'index.html');
 const serverPath = path.join(__dirname, '..', 'server.js');
 
 function extractFunction(source, name) {
@@ -43,6 +44,7 @@ function extractFunction(source, name) {
 
 test('Campaign PPT request enrichment carries audited demand, proposal, and selected knowledge without touching ppt.js', () => {
   const appSource = fs.readFileSync(appPath, 'utf8');
+  let operationId = 0;
   const context = {
     curDemand: {
       campaign_id: 12,
@@ -55,13 +57,18 @@ test('Campaign PPT request enrichment carries audited demand, proposal, and sele
     },
     lastDemandAnalysisAI: null,
     lastProposalAI: null,
+    pptOutlineIdempotencyFingerprint: '',
+    pptOutlineIdempotencyKey: '',
     getActiveCampaignId() { return 12; },
     getSelectedKnowledgeEntryIds() { return [10, 9]; },
     readPositiveInteger(value) {
       const parsed = Number(value);
       return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
     },
-    createDemandAnalysisOperationId(prefix) { return `${prefix}fixed-operation`; }
+    createDemandAnalysisOperationId(prefix) {
+      operationId += 1;
+      return `${prefix}${operationId}`;
+    }
   };
   context.globalThis = context;
   vm.createContext(context);
@@ -89,8 +96,19 @@ test('Campaign PPT request enrichment carries audited demand, proposal, and sele
   assert.deepEqual(Array.from(body.knowledge_entry_ids), [7, 8, 9, 10]);
   assert.equal(body.allow_web, false);
   assert.equal(Object.hasOwn(body, 'knowledge_limit'), false);
-  assert.equal(prepared.headers['Idempotency-Key'], 'ppt-outline-fixed-operation');
-  assert.equal(prepared.headers['X-Request-Id'], 'ppt-outline-request-fixed-operation');
+  assert.equal(prepared.headers['Idempotency-Key'], 'ppt-outline-1');
+  assert.equal(prepared.headers['X-Request-Id'], 'ppt-outline-request-2');
+
+  const retry = context.prepareCampaignPptOutlineRequest('/ai/ppt-outline', original);
+  assert.equal(retry.headers['Idempotency-Key'], 'ppt-outline-1');
+  assert.equal(retry.headers['X-Request-Id'], 'ppt-outline-request-3');
+
+  const changed = context.prepareCampaignPptOutlineRequest('/ai/ppt-outline', {
+    ...original,
+    body: JSON.stringify({ demand: { brand: 'Acme', knowledge_entry_ids: [7] }, proposal: '# Revised proposal' })
+  });
+  assert.equal(changed.headers['Idempotency-Key'], 'ppt-outline-4');
+  assert.equal(changed.headers['X-Request-Id'], 'ppt-outline-request-5');
 });
 
 test('unlinked PPT request enrichment preserves the legacy payload', () => {
@@ -111,6 +129,66 @@ test('unlinked PPT request enrichment preserves the legacy payload', () => {
 
   assert.equal(context.prepareCampaignPptOutlineRequest('/ai/ppt-outline', original), original);
   assert.equal(context.prepareCampaignPptOutlineRequest('/ai/proposal-draft', original), original);
+});
+
+test('Campaign PPT render fence aborts and discards a response after the active Campaign changes', () => {
+  const appSource = fs.readFileSync(appPath, 'utf8');
+  let campaignId = 12;
+  let renderCalls = 0;
+  const context = {
+    pptGenerationSequence: 0,
+    pptGenerationInFlight: false,
+    activePptGenerationContext: null,
+    lastPPTOutline: null,
+    lastPPT: '',
+    lastPPTSource: '',
+    getActiveCampaignId() { return campaignId; },
+    renderPPTResult() { renderCalls += 1; }
+  };
+  context.window = context;
+  context.globalThis = context;
+  vm.createContext(context);
+  [
+    'beginCampaignPptGeneration',
+    'isCampaignPptGenerationCurrent',
+    'invalidateCampaignPptGeneration',
+    'finishCampaignPptGeneration',
+    'installCampaignPptRenderFence'
+  ].forEach(function(name) {
+    vm.runInContext(extractFunction(appSource, name), context);
+  });
+
+  context.installCampaignPptRenderFence();
+  const requestContext = context.beginCampaignPptGeneration();
+  context.renderPPTResult({ title: 'Current Campaign' });
+  assert.equal(renderCalls, 1);
+
+  let aborted = false;
+  requestContext.abortController = { abort() { aborted = true; } };
+  context.lastPPTOutline = { title: 'Stale Campaign' };
+  context.lastPPT = '<html>stale</html>';
+  context.lastPPTSource = '{"title":"stale"}';
+  campaignId = 13;
+  context.invalidateCampaignPptGeneration();
+  context.renderPPTResult({ title: 'Stale Campaign' });
+
+  assert.equal(aborted, true);
+  assert.equal(renderCalls, 1, 'stale Campaign output must not reach the frozen renderer');
+  assert.equal(context.lastPPTOutline, null);
+  assert.equal(context.lastPPT, '');
+  assert.equal(context.lastPPTSource, '');
+  context.finishCampaignPptGeneration(requestContext);
+  assert.equal(context.pptGenerationInFlight, false);
+});
+
+test('M3 routes the PPT button through the Campaign lifecycle wrapper', () => {
+  const indexSource = fs.readFileSync(indexPath, 'utf8');
+  const appSource = fs.readFileSync(appPath, 'utf8');
+  const button = indexSource.match(/<button[^>]+id="btnGenPPT"[^>]*>/);
+  assert.ok(button);
+  assert.match(button[0], /onclick="generateCampaignPPT\(\)"/);
+  assert.doesNotMatch(button[0], /onclick="generateHTMLPPT\(\)"/);
+  assert.match(extractFunction(appSource, 'setWorkflowContext'), /invalidateCampaignPptGeneration\(\)/);
 });
 
 test('linked PPT outline uses private Campaign RAG and returns auditable references without archiving a draft', async () => {

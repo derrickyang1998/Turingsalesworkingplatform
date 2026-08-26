@@ -14,6 +14,11 @@ let curDemand = null, selTpl = null, lastMatch = [], lastProp = "";
 let uploadedFileContent = "";
 let lastAIStrategyRaw = "";
 let chatHistory = [{role: "system", content: "You are the TuringMarket AI assistant. Answer in Chinese, concise and professional."}];
+let pptOutlineIdempotencyFingerprint = '';
+let pptOutlineIdempotencyKey = '';
+let pptGenerationSequence = 0;
+let pptGenerationInFlight = false;
+let activePptGenerationContext = null;
 
 // Navigation registry and page visibility are owned by client/core/navigation.js.
 // ==== FIX DOM NESTING: ensure all page-* divs are direct children of <main> ====
@@ -176,6 +181,69 @@ function handleAuthExpired(message) {
   }
 }
 
+function beginCampaignPptGeneration() {
+  if (pptGenerationInFlight) return null;
+  pptGenerationInFlight = true;
+  activePptGenerationContext = {
+    generation: ++pptGenerationSequence,
+    campaignId: typeof getActiveCampaignId === 'function' ? getActiveCampaignId() : null,
+    invalidated: false,
+    abortController: null
+  };
+  return activePptGenerationContext;
+}
+
+function isCampaignPptGenerationCurrent(requestContext) {
+  if (!requestContext || activePptGenerationContext !== requestContext || requestContext.invalidated) return false;
+  var activeCampaignId = typeof getActiveCampaignId === 'function' ? getActiveCampaignId() : null;
+  return activeCampaignId === requestContext.campaignId;
+}
+
+function invalidateCampaignPptGeneration() {
+  if (!activePptGenerationContext) return;
+  activePptGenerationContext.invalidated = true;
+  if (activePptGenerationContext.abortController) {
+    try { activePptGenerationContext.abortController.abort(); } catch (error) {}
+  }
+}
+
+function finishCampaignPptGeneration(requestContext) {
+  if (activePptGenerationContext !== requestContext) return false;
+  activePptGenerationContext = null;
+  pptGenerationInFlight = false;
+  return true;
+}
+
+function installCampaignPptRenderFence() {
+  if (window.__tmCampaignPptRenderFenceInstalled || typeof window.renderPPTResult !== 'function') return;
+  var originalRenderPPTResult = window.renderPPTResult;
+  window.renderPPTResult = function(parsed, warning, contextWarning) {
+    if (activePptGenerationContext && !isCampaignPptGenerationCurrent(activePptGenerationContext)) {
+      if (typeof lastPPTOutline !== 'undefined') lastPPTOutline = null;
+      if (typeof lastPPT !== 'undefined') lastPPT = '';
+      if (typeof lastPPTSource !== 'undefined') lastPPTSource = '';
+      return;
+    }
+    return originalRenderPPTResult.call(this, parsed, warning, contextWarning);
+  };
+  window.__tmCampaignPptRenderFenceInstalled = true;
+}
+
+async function generateCampaignPPT() {
+  var requestContext = beginCampaignPptGeneration();
+  if (!requestContext) return;
+  try {
+    await generateHTMLPPT();
+  } finally {
+    finishCampaignPptGeneration(requestContext);
+  }
+}
+
+if (typeof document !== 'undefined') {
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', installCampaignPptRenderFence);
+  else setTimeout(installCampaignPptRenderFence, 0);
+}
+
 function prepareCampaignPptOutlineRequest(url, opts) {
   if (url !== '/ai/ppt-outline' || !opts || typeof opts.body !== 'string') return opts;
   var campaignId = typeof getActiveCampaignId === 'function' ? getActiveCampaignId() : null;
@@ -253,20 +321,49 @@ function prepareCampaignPptOutlineRequest(url, opts) {
   body.allow_web = false;
   delete body.knowledge_limit;
 
+  var fingerprintBody = Object.assign({}, body);
+  delete fingerprintBody.previousOutline;
+  var fingerprint = JSON.stringify(fingerprintBody);
+  if (pptOutlineIdempotencyFingerprint !== fingerprint || !pptOutlineIdempotencyKey) {
+    pptOutlineIdempotencyFingerprint = fingerprint;
+    pptOutlineIdempotencyKey = createDemandAnalysisOperationId('ppt-outline-');
+  }
+
   var headers = {};
   if (opts.headers && typeof opts.headers.forEach === 'function') {
     opts.headers.forEach(function(value, name) { headers[name] = value; });
   } else if (opts.headers && typeof opts.headers === 'object') {
     Object.keys(opts.headers).forEach(function(name) { headers[name] = opts.headers[name]; });
   }
-  headers['Idempotency-Key'] = createDemandAnalysisOperationId('ppt-outline-');
+  headers['Idempotency-Key'] = pptOutlineIdempotencyKey;
   headers['X-Request-Id'] = createDemandAnalysisOperationId('ppt-outline-request-');
   return Object.assign({}, opts, { headers: headers, body: JSON.stringify(body) });
 }
 
 async function apiFetch(url, opts) {
   opts = opts || {};
+  if (
+    url === '/proposals' &&
+    activePptGenerationContext &&
+    !isCampaignPptGenerationCurrent(activePptGenerationContext)
+  ) {
+    return { ok: true, status: 204 };
+  }
   opts = prepareCampaignPptOutlineRequest(url, opts);
+  var upstreamSignal = null;
+  var forwardAbort = null;
+  var pptAbortController = null;
+  if (url === '/ai/ppt-outline' && activePptGenerationContext && typeof AbortController !== 'undefined') {
+    pptAbortController = new AbortController();
+    activePptGenerationContext.abortController = pptAbortController;
+    upstreamSignal = opts.signal || null;
+    forwardAbort = function() { pptAbortController.abort(); };
+    if (upstreamSignal) {
+      if (upstreamSignal.aborted) forwardAbort();
+      else upstreamSignal.addEventListener('abort', forwardAbort, { once: true });
+    }
+    opts = Object.assign({}, opts, { signal: pptAbortController.signal });
+  }
   var isFormData = typeof FormData !== 'undefined' && opts.body instanceof FormData;
   var headers = new Headers(opts.headers || {});
   var requestToken = AUTH_TOKEN;
@@ -274,7 +371,15 @@ async function apiFetch(url, opts) {
   if (requestToken) headers.set('Authorization', 'Bearer ' + requestToken);
   if (!isFormData && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
   opts.headers = headers;
-  var resp = await fetch(API + url, opts);
+  var resp;
+  try {
+    resp = await fetch(API + url, opts);
+  } finally {
+    if (upstreamSignal && forwardAbort) upstreamSignal.removeEventListener('abort', forwardAbort);
+    if (activePptGenerationContext && activePptGenerationContext.abortController === pptAbortController) {
+      activePptGenerationContext.abortController = null;
+    }
+  }
   if (resp.status === 401 && requestAuthGeneration === AUTH_GENERATION && requestToken === AUTH_TOKEN) {
     handleAuthExpired();
   }
@@ -970,6 +1075,7 @@ function setWorkflowContext(context) {
   if (typeof invalidateDemandAnalysisRequests === 'function') invalidateDemandAnalysisRequests();
   if (typeof invalidateProposalDraftRequests === 'function') invalidateProposalDraftRequests();
   if (previousCampaignId !== nextCampaignId) {
+    if (typeof invalidateCampaignPptGeneration === 'function') invalidateCampaignPptGeneration();
     selectedKnowledgeEntryIds = [];
     selectedKnowledgeCampaignId = nextCampaignId;
     currentAIConversationId = null;
