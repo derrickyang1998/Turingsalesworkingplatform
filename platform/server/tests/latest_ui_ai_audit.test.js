@@ -266,6 +266,9 @@ test('unlinked demand analysis is atomic, private-only, and does not archive an 
     assert.equal(metadata.degraded, true);
     assert.equal(metadata.reason, 'AI provider returned a degraded response');
     assert.equal(metadata.status, 'degraded');
+    assert.equal(metadata.cost_snapshot.status, 'unavailable');
+    assert.equal(metadata.cost_snapshot.reason, 'degraded_response');
+    assert.equal(result.ai.cost_projection.status, 'unavailable');
   } finally {
     fixture.close();
   }
@@ -296,9 +299,13 @@ test('unlinked demand analysis records a complete safe fallback when the provide
     assert.equal(result.ai.status, 'degraded');
     assert.equal(db.prepare('SELECT COUNT(*) AS count FROM ai_conversations').get().count, 1);
     assert.equal(db.prepare('SELECT COUNT(*) AS count FROM ai_messages').get().count, 2);
-    const assistant = db.prepare("SELECT content,metadata_json FROM ai_messages WHERE role='assistant'").get();
+    const assistant = db.prepare("SELECT content,model,metadata_json FROM ai_messages WHERE role='assistant'").get();
     assert.doesNotMatch(assistant.content, /socket path|credential detail/i);
-    assert.deepEqual(JSON.parse(assistant.metadata_json).status, 'degraded');
+    assert.equal(assistant.model, 'deepseek-v4-flash');
+    const metadata = JSON.parse(assistant.metadata_json);
+    assert.equal(metadata.status, 'degraded');
+    assert.equal(metadata.cost_snapshot.status, 'unavailable');
+    assert.equal(metadata.cost_snapshot.reason, 'degraded_response');
   } finally {
     fixture.close();
   }

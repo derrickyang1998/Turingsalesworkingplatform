@@ -1,4 +1,6 @@
 const DEFAULT_DEEPSEEK_URL = 'https://api.deepseek.com/v1/chat/completions';
+const DEFAULT_DEEPSEEK_MODEL = 'deepseek-v4-flash';
+const aiCost = require('./ai_cost_service');
 
 function extractSystemContext(messages) {
   const system = (messages || []).filter(function(message) {
@@ -42,7 +44,7 @@ function createDeepSeekProvider(opts) {
   opts = opts || {};
   const apiKey = opts.apiKey !== undefined ? opts.apiKey : process.env.DEEPSEEK_API_KEY;
   const endpoint = opts.endpoint || process.env.DEEPSEEK_API_URL || DEFAULT_DEEPSEEK_URL;
-  const model = opts.model || process.env.DEEPSEEK_MODEL || process.env.AI_MODEL || 'deepseek-chat';
+  const model = opts.model || process.env.DEEPSEEK_MODEL || process.env.AI_MODEL || DEFAULT_DEEPSEEK_MODEL;
   const fetchImpl = opts.fetchImpl || global.fetch;
 
   return {
@@ -55,6 +57,8 @@ function createDeepSeekProvider(opts) {
           content: fallbackContent(messages, reason),
           usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
           model: model,
+          provider: 'deepseek',
+          completed_at: new Date().toISOString(),
           degraded: true,
           reason: reason
         };
@@ -71,6 +75,7 @@ function createDeepSeekProvider(opts) {
           body: JSON.stringify({
             model: request.model || model,
             messages: messages,
+            thinking: { type: 'disabled' },
             temperature: request.temperature === undefined ? 0.7 : request.temperature,
             max_tokens: request.max_tokens || request.maxTokens || 2000
           })
@@ -82,6 +87,8 @@ function createDeepSeekProvider(opts) {
           content: fallbackContent(messages, 'deepseek network error: ' + e.message),
           usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
           model: model,
+          provider: 'deepseek',
+          completed_at: new Date().toISOString(),
           degraded: true,
           reason: 'deepseek network error'
         };
@@ -93,6 +100,8 @@ function createDeepSeekProvider(opts) {
           content: fallbackContent(messages, 'deepseek api failed: ' + response.status),
           usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
           model: model,
+          provider: 'deepseek',
+          completed_at: new Date().toISOString(),
           degraded: true,
           reason: 'deepseek api failed: ' + response.status + (text ? ' ' + text.slice(0, 180) : '')
         };
@@ -103,6 +112,8 @@ function createDeepSeekProvider(opts) {
         content: data.choices && data.choices[0] && data.choices[0].message ? data.choices[0].message.content : '',
         usage: data.usage || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
         model: data.model || request.model || model,
+        provider: 'deepseek',
+        completed_at: new Date().toISOString(),
         raw: data
       };
     }
@@ -110,6 +121,9 @@ function createDeepSeekProvider(opts) {
 }
 
 module.exports = {
+  DEFAULT_DEEPSEEK_MODEL,
   createDeepSeekProvider,
-  fallbackContent
+  fallbackContent,
+  createDeepSeekCostSnapshot: aiCost.createDeepSeekCostSnapshot,
+  projectDeepSeekCostSnapshot: aiCost.projectDeepSeekCostSnapshot
 };

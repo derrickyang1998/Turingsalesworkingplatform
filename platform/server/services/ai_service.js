@@ -16,6 +16,7 @@ const LINKED_IDEMPOTENCY_KEY = /^[A-Za-z0-9._:-]{8,200}$/;
 const SUMMARY_PROMOTION_POLICY_VERSION = 'ai-summary-promotion-v1';
 const SUMMARY_PROMOTION_MIN_QUESTION_LENGTH = 8;
 const SUMMARY_PROMOTION_MIN_ANSWER_LENGTH = 240;
+const aiCostSqlDatabases = new WeakSet();
 
 function canAccessConversation(user, conversation) {
   return user && conversation && (user.role === 'admin' || Number(conversation.user_id) === Number(user.id));
@@ -105,6 +106,21 @@ function insertMessage(db, payload) {
     JSON.stringify(payload.metadata || {})
   );
   return result.lastInsertRowid;
+}
+
+function resolveCompletionModel(completion, requestedModel) {
+  return completion && completion.model || requestedModel || process.env.AI_MODEL || llm.DEFAULT_DEEPSEEK_MODEL;
+}
+
+function completionCostSnapshot(completion, model) {
+  const result = completion || {};
+  return llm.createDeepSeekCostSnapshot({
+    provider: result.provider || 'deepseek',
+    model,
+    occurredAt: result.completed_at,
+    usage: result.usage || {},
+    degraded: result.degraded === true
+  });
 }
 
 function ensureConversation(db, opts) {
@@ -258,12 +274,14 @@ async function handleLegacyChat(db, opts) {
   });
 
   const usage = completion.usage || {};
+  const completionModel = resolveCompletionModel(completion, opts.model);
+  const costSnapshot = completionCostSnapshot(completion, completionModel);
   const assistantMessageId = insertMessage(db, {
     conversation_id: conversation.id,
     user_id: opts.user.id,
     role: 'assistant',
     content: completion.content || '',
-    model: completion.model || opts.model || process.env.AI_MODEL || 'deepseek-chat',
+    model: completionModel,
     prompt_tokens: usage.prompt_tokens || 0,
     completion_tokens: usage.completion_tokens || 0,
     total_tokens: usage.total_tokens || 0,
@@ -272,7 +290,8 @@ async function handleLegacyChat(db, opts) {
       reason: completion.reason || '',
       rag_has_knowledge: ragContext.hasKnowledge,
       web_used: !!searchResult.used,
-      user_message_id: userMessageId
+      user_message_id: userMessageId,
+      cost_snapshot: costSnapshot
     }
   });
 
@@ -286,7 +305,7 @@ async function handleLegacyChat(db, opts) {
   if (usage.total_tokens || usage.prompt_tokens || usage.completion_tokens) {
     try {
       db.prepare('INSERT INTO token_usage (user_id, model, prompt_tokens, completion_tokens, total_tokens, endpoint) VALUES (?, ?, ?, ?, ?, ?)')
-        .run(opts.user.id, completion.model || 'deepseek-chat', usage.prompt_tokens || 0, usage.completion_tokens || 0, usage.total_tokens || 0, 'ai_chat');
+        .run(opts.user.id, completionModel, usage.prompt_tokens || 0, usage.completion_tokens || 0, usage.total_tokens || 0, 'ai_chat');
     } catch (e) {}
   }
 
@@ -319,8 +338,9 @@ async function handleLegacyChat(db, opts) {
     conversation_id: conversation.id,
     message_id: assistantMessageId,
     answer: completion.content || '',
-    model: completion.model || opts.model || process.env.AI_MODEL || 'deepseek-chat',
+    model: completionModel,
     usage: usage,
+    cost_projection: llm.projectDeepSeekCostSnapshot(costSnapshot),
     knowledge_references: ragContext.references,
     web_results: searchResult.results || [],
     web_search: {
@@ -381,7 +401,7 @@ function validateOneShotCompletion(completion, opts) {
     return {
       content: String(opts.degradedContent || ''),
       usage: completion && completion.usage || {},
-      model: completion && completion.model || opts.model || process.env.AI_MODEL || 'deepseek-chat',
+      model: completion && completion.model || opts.model || process.env.AI_MODEL || llm.DEFAULT_DEEPSEEK_MODEL,
       degraded: true,
       reason: 'AI response format invalid'
     };
@@ -409,12 +429,14 @@ function persistAtomicOneShot(db, opts) {
       }
     });
     const usage = opts.completion.usage || {};
+    const completionModel = resolveCompletionModel(opts.completion, opts.model);
+    const costSnapshot = completionCostSnapshot(opts.completion, completionModel);
     const assistantMessageId = insertMessage(db, {
       conversation_id: conversation.id,
       user_id: opts.user.id,
       role: 'assistant',
       content: opts.completion.content || '',
-      model: opts.completion.model || opts.model || process.env.AI_MODEL || 'deepseek-chat',
+      model: completionModel,
       prompt_tokens: usage.prompt_tokens || 0,
       completion_tokens: usage.completion_tokens || 0,
       total_tokens: usage.total_tokens || 0,
@@ -425,7 +447,8 @@ function persistAtomicOneShot(db, opts) {
         latency_ms: opts.latencyMs,
         rag_has_knowledge: opts.ragContext.hasKnowledge,
         web_used: !!opts.searchResult.used,
-        user_message_id: userMessageId
+        user_message_id: userMessageId,
+        cost_snapshot: costSnapshot
       }
     });
 
@@ -444,7 +467,7 @@ function persistAtomicOneShot(db, opts) {
         ) VALUES (?,?,?,?,?,?)
       `).run(
         opts.user.id,
-        opts.completion.model || opts.model || process.env.AI_MODEL || 'deepseek-chat',
+        completionModel,
         usage.prompt_tokens || 0,
         usage.completion_tokens || 0,
         usage.total_tokens || 0,
@@ -459,8 +482,9 @@ function persistAtomicOneShot(db, opts) {
       conversation_id: conversation.id,
       message_id: assistantMessageId,
       answer: opts.completion.content || '',
-      model: opts.completion.model || opts.model || process.env.AI_MODEL || 'deepseek-chat',
+      model: completionModel,
       usage,
+      cost_projection: llm.projectDeepSeekCostSnapshot(costSnapshot),
       knowledge_references: opts.ragContext.references,
       web_results: opts.searchResult.results || [],
       web_search: {
@@ -548,7 +572,7 @@ async function handleAtomicLegacyOneShot(db, opts) {
       completion = {
         content: String(opts.degradedContent || ''),
         usage: {},
-        model: opts.model || process.env.AI_MODEL || 'deepseek-chat',
+        model: opts.model || process.env.AI_MODEL || llm.DEFAULT_DEEPSEEK_MODEL,
         degraded: true,
         reason: 'AI provider unavailable'
       };
@@ -1056,12 +1080,14 @@ function persistLinkedChat(db, opts) {
       metadata: { source_module: opts.source_module || conversation.source_module || 'assistant' }
     });
     const usage = opts.completion.usage || {};
+    const completionModel = resolveCompletionModel(opts.completion, opts.model);
+    const costSnapshot = completionCostSnapshot(opts.completion, completionModel);
     const assistantMessageId = insertMessage(db, {
       conversation_id: conversation.id,
       user_id: opts.user.id,
       role: 'assistant',
       content: opts.completion.content || '',
-      model: opts.completion.model || opts.model || process.env.AI_MODEL || 'deepseek-chat',
+      model: completionModel,
       prompt_tokens: usage.prompt_tokens || 0,
       completion_tokens: usage.completion_tokens || 0,
       total_tokens: usage.total_tokens || 0,
@@ -1073,7 +1099,8 @@ function persistLinkedChat(db, opts) {
         rag_has_knowledge: opts.ragContext.hasKnowledge,
         web_used: opts.searchResult.used,
         user_message_id: userMessageId,
-        campaign_id: opts.linked.campaignId
+        campaign_id: opts.linked.campaignId,
+        cost_snapshot: costSnapshot
       }
     });
     saveLinkedReferences(
@@ -1096,7 +1123,7 @@ function persistLinkedChat(db, opts) {
         ) VALUES (?,?,?,?,?,?)
       `).run(
         opts.user.id,
-        opts.completion.model || opts.model || process.env.AI_MODEL || 'deepseek-chat',
+        completionModel,
         usage.prompt_tokens || 0,
         usage.completion_tokens || 0,
         usage.total_tokens || 0,
@@ -1131,8 +1158,9 @@ function persistLinkedChat(db, opts) {
       conversation_id: conversation.id,
       message_id: assistantMessageId,
       answer: opts.completion.content || '',
-      model: opts.completion.model || opts.model || process.env.AI_MODEL || 'deepseek-chat',
+      model: completionModel,
       usage,
+      cost_projection: llm.projectDeepSeekCostSnapshot(costSnapshot),
       knowledge_references: projectLinkedReferences(opts.ragContext.references),
       web_results: opts.searchResult.results || [],
       web_search: {
@@ -1711,9 +1739,45 @@ function aiRunLatency(metadata) {
   return value;
 }
 
+function ensureAiCostSqlProjection(db) {
+  if (aiCostSqlDatabases.has(db)) return;
+  db.function('tm_ai_cost_nano_usd', { deterministic: true }, function(metadataJson) {
+    try {
+      const parsed = parseAiRunMetadata(metadataJson);
+      const projected = llm.projectDeepSeekCostSnapshot(parsed.metadata.cost_snapshot, {
+        metadataValid: parsed.valid
+      });
+      return projected.status === 'priced' ? projected.total_cost_nano_usd : null;
+    } catch (_error) {
+      return null;
+    }
+  });
+  aiCostSqlDatabases.add(db);
+}
+
+function summarizeAiRunCost(runCount, pricedRunCount, totalCost, overflow) {
+  const runs = boundedAiRunInteger(runCount);
+  const priced = Math.min(runs, boundedAiRunInteger(pricedRunCount));
+  const unavailable = runs - priced;
+  let status = overflow === true ? 'overflow' : 'empty';
+  if (!overflow && runs > 0 && priced === 0) status = 'unavailable';
+  else if (!overflow && priced === runs && runs > 0) status = 'priced';
+  else if (!overflow && priced > 0) status = 'partial';
+  return {
+    status,
+    currency: 'USD',
+    priced_run_count: priced,
+    unavailable_run_count: unavailable,
+    total_cost_nano_usd: priced > 0 && !overflow ? boundedAiRunAggregate(totalCost) : null
+  };
+}
+
 function projectAssistantRun(message, references, parsedMetadata) {
   const parsed = parsedMetadata || parseAiRunMetadata(message && message.metadata_json);
   const visibleReferences = Array.isArray(references) ? references : [];
+  const costProjection = llm.projectDeepSeekCostSnapshot(parsed.metadata.cost_snapshot, {
+    metadataValid: parsed.valid
+  });
   return {
     run_id: positiveId(message && message.id),
     status: aiRunStatus(parsed),
@@ -1724,7 +1788,8 @@ function projectAssistantRun(message, references, parsedMetadata) {
     latency_ms: aiRunLatency(parsed.metadata),
     knowledge_reference_count: visibleReferences.filter((reference) => reference.reference_type === 'knowledge').length,
     web_reference_count: visibleReferences.filter((reference) => reference.reference_type === 'web').length,
-    created_at: message && message.created_at ? message.created_at : null
+    created_at: message && message.created_at ? message.created_at : null,
+    cost_projection: costProjection
   };
 }
 
@@ -1737,6 +1802,9 @@ function summarizeAiRuns(runs, options) {
   let totalTokens = 0;
   let latencyTotal = 0;
   let latencyCount = 0;
+  let pricedRunCount = 0;
+  let totalCost = 0;
+  let costOverflow = false;
   projectedRuns.forEach((run) => {
     const status = Object.hasOwn(counts, run.status) ? run.status : 'unknown';
     counts[status] += 1;
@@ -1746,6 +1814,12 @@ function summarizeAiRuns(runs, options) {
     if (run.latency_ms !== null) {
       latencyTotal = addBoundedAiRunInteger(latencyTotal, run.latency_ms);
       latencyCount += 1;
+    }
+    if (run.cost_projection && run.cost_projection.status === 'priced') {
+      pricedRunCount += 1;
+      const cost = boundedAiRunInteger(run.cost_projection.total_cost_nano_usd);
+      if (totalCost > Number.MAX_SAFE_INTEGER - cost) costOverflow = true;
+      else if (!costOverflow) totalCost += cost;
     }
   });
   const activeStates = Object.values(counts).filter((count) => count > 0).length;
@@ -1770,7 +1844,8 @@ function summarizeAiRuns(runs, options) {
     average_latency_ms: latencyCount > 0 ? Math.round(latencyTotal / latencyCount) : null,
     latest_model: projectedRuns.length > 0 ? projectedRuns[projectedRuns.length - 1].model : null,
     knowledge_reference_count: boundedAiRunInteger(opts.knowledgeReferenceCount),
-    web_reference_count: boundedAiRunInteger(opts.webReferenceCount)
+    web_reference_count: boundedAiRunInteger(opts.webReferenceCount),
+    cost_summary: summarizeAiRunCost(projectedRuns.length, pricedRunCount, totalCost, costOverflow)
   };
 }
 
@@ -1811,7 +1886,13 @@ function summarizeAiRunAggregate(row, options) {
       ? aggregate.latest_model
       : null,
     knowledge_reference_count: boundedAiRunInteger(aggregate.knowledge_reference_count),
-    web_reference_count: boundedAiRunInteger(aggregate.web_reference_count)
+    web_reference_count: boundedAiRunInteger(aggregate.web_reference_count),
+    cost_summary: summarizeAiRunCost(
+      runCount,
+      aggregate.priced_run_count,
+      aggregate.total_cost_nano_usd,
+      Number(aggregate.cost_overflow) === 1
+    )
   };
 }
 
@@ -2128,6 +2209,7 @@ function promoteMessageToKnowledge(db, opts) {
 
 function listConversations(db, opts) {
   opts = opts || {};
+  ensureAiCostSqlProjection(db);
   return db.transaction(() => {
     const actor = resolveConversationReadActor(db, opts);
     if (!actor) return [];
@@ -2250,6 +2332,7 @@ function listConversations(db, opts) {
             THEN json_extract(source.run_metadata,'$.latency_ms')
             ELSE NULL
           END AS latency_ms,
+          tm_ai_cost_nano_usd(source.run_metadata) AS cost_nano_usd,
           ROW_NUMBER() OVER (
             PARTITION BY source.conversation_id
             ORDER BY source.created_at DESC,source.id DESC
@@ -2282,6 +2365,11 @@ function listConversations(db, opts) {
               AND run.total_tokens=CAST(run.total_tokens AS INTEGER)
             THEN run.total_tokens ELSE 0 END
           ) AS total_tokens,
+          SUM(run.cost_nano_usd IS NOT NULL) AS priced_run_count,
+          TOTAL(COALESCE(run.cost_nano_usd,0)) AS total_cost_nano_usd,
+          CASE
+            WHEN TOTAL(COALESCE(run.cost_nano_usd,0))>9007199254740991 THEN 1 ELSE 0
+          END AS cost_overflow,
           AVG(run.latency_ms) AS average_latency_ms,
           MAX(CASE WHEN run.latest_rank=1 THEN run.model END) AS latest_model
         FROM projected_runs run

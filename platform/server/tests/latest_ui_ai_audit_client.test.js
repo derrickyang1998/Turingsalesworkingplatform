@@ -200,7 +200,14 @@ test('admin AI audit loads the user directory and renders campaign, reference, a
             average_latency_ms: 540,
             latest_model: 'deepseek-chat',
             knowledge_reference_count: 2,
-            web_reference_count: 1
+            web_reference_count: 1,
+            cost_summary: {
+              status: 'partial',
+              currency: 'USD',
+              priced_run_count: 1,
+              unavailable_run_count: 1,
+              total_cost_nano_usd: 6628
+            }
           },
           knowledge_reference_count: 2,
           web_reference_count: 1,
@@ -216,6 +223,7 @@ test('admin AI audit loads the user directory and renders campaign, reference, a
     'buildAdminAIAuditQuery',
     'adminAIRunStatusLabel',
     'adminAIRunNumber',
+    'adminAICostText',
     'adminAIRunSummaryText',
     'loadAdminAIAudit'
   ]);
@@ -235,6 +243,7 @@ test('admin AI audit loads the user directory and renders campaign, reference, a
   assert.match(elements.ad_aiAuditList.innerHTML, /降级/);
   assert.match(elements.ad_aiAuditList.innerHTML, /32 tokens/);
   assert.match(elements.ad_aiAuditList.innerHTML, /540 ms/);
+  assert.match(elements.ad_aiAuditList.innerHTML, /部分投影成本 \$0\.000006628/);
   assert.match(elements.ad_aiAuditList.innerHTML, /Archived/);
   assert.match(elements.ad_aiAuditList.innerHTML, /2026-07-11 08:45/);
   assert.doesNotMatch(elements.ad_aiAuditList.innerHTML, /2026-07-10 11:20/);
@@ -270,7 +279,14 @@ test('admin AI audit detail renders the backend run projection without trusting 
             average_latency_ms: 420,
             latest_model: 'deepseek-chat',
             knowledge_reference_count: 1,
-            web_reference_count: 0
+            web_reference_count: 0,
+            cost_summary: {
+              status: 'priced',
+              currency: 'USD',
+              priced_run_count: 1,
+              unavailable_run_count: 0,
+              total_cost_nano_usd: 6628
+            }
           },
           messages: [{
             id: 91,
@@ -288,7 +304,15 @@ test('admin AI audit detail renders the backend run projection without trusting 
               latency_ms: 420,
               knowledge_reference_count: 1,
               web_reference_count: 0,
-              created_at: '2026-07-11 08:45:01'
+              created_at: '2026-07-11 08:45:01',
+              cost_projection: {
+                status: 'priced',
+                currency: 'USD',
+                total_cost_nano_usd: 6628,
+                policy_version: 'deepseek-v4-usd-2026-08-13-v1',
+                rate_period: 'off_peak',
+                reason: null
+              }
             },
             references: []
           }]
@@ -298,6 +322,7 @@ test('admin AI audit detail renders the backend run projection without trusting 
   }, [
     'adminAIRunStatusLabel',
     'adminAIRunNumber',
+    'adminAICostText',
     'adminAIRunSummaryText',
     'adminAIMessageMetaText',
     'loadAdminAIConversation'
@@ -312,9 +337,22 @@ test('admin AI audit detail renders the backend run projection without trusting 
   assert.match(detail.innerHTML, /18 tokens/);
   assert.match(detail.innerHTML, /420 ms/);
   assert.match(detail.innerHTML, /P 10 \/ C 8 \/ T 18/);
+  assert.match(detail.innerHTML, /投影成本 \$0\.000006628/);
   assert.match(detail.innerHTML, /deepseek-chat&lt;script&gt;/);
   assert.doesNotMatch(detail.innerHTML, /ignored-model|999999|<script>/);
   assert.match(detail.innerHTML, /Safe &lt;answer&gt;/);
+});
+
+test('admin AI audit labels unavailable cost without presenting it as zero', () => {
+  const context = loadFunctions({}, [
+    'adminAIRunNumber',
+    'adminAICostText'
+  ]);
+
+  assert.equal(context.adminAICostText({ status: 'unavailable', total_cost_nano_usd: null }), '投影成本不可用');
+  assert.equal(context.adminAICostText({ status: 'overflow', total_cost_nano_usd: null }), '投影成本不可用');
+  assert.equal(context.adminAICostText({ status: 'empty', total_cost_nano_usd: null }), '投影成本 -');
+  assert.equal(context.adminAICostText({ status: 'priced', total_cost_nano_usd: 1000000000 }), '投影成本 $1');
 });
 
 test('admin AI audit refreshes its user directory after in-app user changes', async () => {

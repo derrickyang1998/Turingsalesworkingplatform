@@ -209,8 +209,16 @@ test('ai service persists conversations and restricts non-admin visibility', asy
     provider: {
       complete: async ({ messages }) => ({
         content: `答复基于 ${messages.length} 条上下文。`,
-        usage: { prompt_tokens: 10, completion_tokens: 8, total_tokens: 18 },
-        model: 'test-model'
+        usage: {
+          prompt_tokens: 10,
+          completion_tokens: 8,
+          total_tokens: 18,
+          prompt_cache_hit_tokens: 4,
+          prompt_cache_miss_tokens: 6
+        },
+        model: 'deepseek-v4-flash',
+        provider: 'deepseek',
+        completed_at: '2026-08-23T12:00:00.000Z'
       })
     },
     webSearchProvider: null,
@@ -219,8 +227,30 @@ test('ai service persists conversations and restricts non-admin visibility', asy
 
   assert.equal(response.answer, '答复基于 2 条上下文。');
   assert.equal(response.knowledge_references.length, 1);
+  assert.deepEqual(response.cost_projection, {
+    status: 'priced',
+    currency: 'USD',
+    total_cost_nano_usd: 6628,
+    policy_version: 'deepseek-v4-usd-2026-08-13-v1',
+    rate_period: 'off_peak',
+    reason: null
+  });
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM ai_conversations').get().count, 1);
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM ai_messages').get().count, 2);
+  const assistant = db.prepare("SELECT metadata_json FROM ai_messages WHERE role='assistant'").get();
+  const assistantMetadata = JSON.parse(assistant.metadata_json);
+  assert.equal(assistantMetadata.cost_snapshot.status, 'priced');
+  assert.equal(assistantMetadata.cost_snapshot.total_cost_nano_usd, 6628);
+
+  const detail = ai.getConversation(db, { id: response.conversation_id, user: { id: 2, role: 'user' } });
+  assert.deepEqual(detail.messages[1].run.cost_projection, response.cost_projection);
+  assert.deepEqual(detail.run_summary.cost_summary, {
+    status: 'priced',
+    currency: 'USD',
+    priced_run_count: 1,
+    unavailable_run_count: 0,
+    total_cost_nano_usd: 6628
+  });
 
   const own = ai.listConversations(db, { user: { id: 2, role: 'user' } });
   assert.equal(own.length, 1);

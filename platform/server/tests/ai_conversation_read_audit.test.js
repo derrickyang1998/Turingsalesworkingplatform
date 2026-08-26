@@ -8,6 +8,7 @@ const Database = require('better-sqlite3');
 
 const migrationService = require('../services/migration_service');
 const ai = require('../services/ai_service');
+const llm = require('../services/llm_service');
 const knowledge = require('../services/knowledge_service');
 
 const SERVER_ROOT = path.resolve(__dirname, '..');
@@ -844,7 +845,14 @@ test('AI conversation reads expose one bounded run projection for status, tokens
       average_latency_ms: 300,
       latest_model: 'legacy-model',
       knowledge_reference_count: 1,
-      web_reference_count: 1
+      web_reference_count: 1,
+      cost_summary: {
+        status: 'unavailable',
+        currency: 'USD',
+        priced_run_count: 0,
+        unavailable_run_count: 3,
+        total_cost_nano_usd: null
+      }
     });
     for (const field of [
       'run_count',
@@ -879,7 +887,15 @@ test('AI conversation reads expose one bounded run projection for status, tokens
       latency_ms: 420,
       knowledge_reference_count: 1,
       web_reference_count: 0,
-      created_at: '2026-07-05 10:00:01'
+      created_at: '2026-07-05 10:00:01',
+      cost_projection: {
+        status: 'unavailable',
+        currency: 'USD',
+        total_cost_nano_usd: null,
+        policy_version: null,
+        rate_period: null,
+        reason: 'historical_snapshot_missing'
+      }
     });
     assert.deepEqual(detail.messages[2].run, {
       run_id: degradedId,
@@ -891,7 +907,15 @@ test('AI conversation reads expose one bounded run projection for status, tokens
       latency_ms: 180,
       knowledge_reference_count: 0,
       web_reference_count: 1,
-      created_at: '2026-07-05 10:00:02'
+      created_at: '2026-07-05 10:00:02',
+      cost_projection: {
+        status: 'unavailable',
+        currency: 'USD',
+        total_cost_nano_usd: null,
+        policy_version: null,
+        rate_period: null,
+        reason: 'historical_snapshot_missing'
+      }
     });
     assert.deepEqual(detail.messages[3].run, {
       run_id: unknownId,
@@ -903,7 +927,15 @@ test('AI conversation reads expose one bounded run projection for status, tokens
       latency_ms: null,
       knowledge_reference_count: 0,
       web_reference_count: 0,
-      created_at: '2026-07-05 10:00:03'
+      created_at: '2026-07-05 10:00:03',
+      cost_projection: {
+        status: 'unavailable',
+        currency: 'USD',
+        total_cost_nano_usd: null,
+        policy_version: null,
+        rate_period: null,
+        reason: 'invalid_snapshot'
+      }
     });
     assert.equal(detail.messages[3].metadata_valid, false);
   } finally {
@@ -941,7 +973,14 @@ test('AI conversation run summary marks a persisted prompt without an assistant 
       average_latency_ms: null,
       latest_model: null,
       knowledge_reference_count: 0,
-      web_reference_count: 0
+      web_reference_count: 0,
+      cost_summary: {
+        status: 'empty',
+        currency: 'USD',
+        priced_run_count: 0,
+        unavailable_run_count: 0,
+        total_cost_nano_usd: null
+      }
     });
     const detail = ai.getConversation(db, secureRead(
       fixture.platformAdmin,
@@ -1020,6 +1059,142 @@ test('AI conversation run summary keeps totals bounded and marks a trailing prom
     assert.deepEqual(detail.run_summary, row.run_summary);
     assert.equal(detail.messages[0].run.latency_ms, null);
     assert.equal(detail.messages[1].run.latency_ms, null);
+  } finally {
+    db.close();
+  }
+});
+
+test('AI cost summaries reject an overflowing aggregate instead of presenting a capped amount', () => {
+  const db = openDatabase();
+  try {
+    const fixture = createFixture(db);
+    const conversationId = createConversation(db, {
+      userId: fixture.owner.id,
+      title: 'Cost aggregate overflow evidence',
+      message: false
+    });
+    const insertMessage = db.prepare(`
+      INSERT INTO ai_messages (
+        conversation_id,user_id,role,content,model,prompt_tokens,
+        completion_tokens,total_tokens,metadata_json,created_at
+      ) VALUES (?,?,?,?,?,?,?,?,?,?)
+    `);
+    const completionTokens = 7000000000000;
+    const costSnapshot = llm.createDeepSeekCostSnapshot({
+      provider: 'deepseek',
+      model: 'deepseek-v4-flash',
+      occurredAt: '2026-08-23T12:00:00.000Z',
+      usage: {
+        prompt_tokens: 0,
+        completion_tokens: completionTokens,
+        total_tokens: completionTokens,
+        prompt_cache_hit_tokens: 0,
+        prompt_cache_miss_tokens: 0
+      }
+    });
+    assert.equal(costSnapshot.total_cost_nano_usd, 4620000000000000);
+    const costMetadata = JSON.stringify({
+      status: 'succeeded',
+      cost_snapshot: costSnapshot
+    });
+    for (const index of [1, 2]) {
+      insertMessage.run(
+        conversationId,
+        fixture.owner.id,
+        'assistant',
+        `Overflowing priced run ${index}`,
+        'deepseek-v4-flash',
+        1,
+        1,
+        2,
+        costMetadata,
+        `2026-07-07 10:00:0${index}`
+      );
+    }
+
+    const row = ai.listConversations(db, secureRead(
+      fixture.platformAdmin,
+      fixture.platformAdminAuth,
+      'cost-overflow-list',
+      { q: 'Cost aggregate overflow evidence' }
+    ))[0];
+    assert.deepEqual(row.run_summary.cost_summary, {
+      status: 'overflow',
+      currency: 'USD',
+      priced_run_count: 2,
+      unavailable_run_count: 0,
+      total_cost_nano_usd: null
+    });
+
+    const detail = ai.getConversation(db, secureRead(
+      fixture.platformAdmin,
+      fixture.platformAdminAuth,
+      'cost-overflow-detail',
+      { id: conversationId }
+    ));
+    assert.deepEqual(detail.run_summary.cost_summary, row.run_summary.cost_summary);
+    assert.equal(detail.messages.every((message) => message.run.cost_projection.status === 'priced'), true);
+  } finally {
+    db.close();
+  }
+});
+
+test('AI list and detail projections agree on integral JSON real cost values', () => {
+  const db = openDatabase();
+  try {
+    const fixture = createFixture(db);
+    const conversationId = createConversation(db, {
+      userId: fixture.owner.id,
+      title: 'Integral real cost evidence',
+      message: false
+    });
+    const costSnapshot = llm.createDeepSeekCostSnapshot({
+      provider: 'deepseek',
+      model: 'deepseek-v4-flash',
+      occurredAt: '2026-08-23T12:00:00.000Z',
+      usage: {
+        prompt_tokens: 10,
+        completion_tokens: 8,
+        total_tokens: 18,
+        prompt_cache_hit_tokens: 4,
+        prompt_cache_miss_tokens: 6
+      }
+    });
+    const metadataJson = JSON.stringify({ status: 'succeeded', cost_snapshot: costSnapshot })
+      .replace('"total_cost_nano_usd":6628', '"total_cost_nano_usd":6628.0');
+    db.prepare(`
+      INSERT INTO ai_messages (
+        conversation_id,user_id,role,content,model,prompt_tokens,
+        completion_tokens,total_tokens,metadata_json,created_at
+      ) VALUES (?,?,'assistant','Integral real cost','deepseek-v4-flash',1,1,2,?,?)
+    `).run(
+      conversationId,
+      fixture.owner.id,
+      metadataJson,
+      '2026-07-08 10:00:01'
+    );
+
+    const row = ai.listConversations(db, secureRead(
+      fixture.platformAdmin,
+      fixture.platformAdminAuth,
+      'integral-real-cost-list',
+      { q: 'Integral real cost evidence' }
+    ))[0];
+    assert.deepEqual(row.run_summary.cost_summary, {
+      status: 'priced',
+      currency: 'USD',
+      priced_run_count: 1,
+      unavailable_run_count: 0,
+      total_cost_nano_usd: 6628
+    });
+    const detail = ai.getConversation(db, secureRead(
+      fixture.platformAdmin,
+      fixture.platformAdminAuth,
+      'integral-real-cost-detail',
+      { id: conversationId }
+    ));
+    assert.deepEqual(detail.run_summary.cost_summary, row.run_summary.cost_summary);
+    assert.equal(detail.messages[0].run.cost_projection.total_cost_nano_usd, 6628);
   } finally {
     db.close();
   }

@@ -253,8 +253,16 @@ function successfulProvider(calls, answer = 'deterministic linked answer') {
       calls.push(request);
       return {
         content: answer,
-        model: 'fake-deepseek',
-        usage: { prompt_tokens: 11, completion_tokens: 7, total_tokens: 18 }
+        model: 'deepseek-v4-flash',
+        provider: 'deepseek',
+        completed_at: '2026-08-23T12:00:00.000Z',
+        usage: {
+          prompt_tokens: 11,
+          completion_tokens: 7,
+          total_tokens: 18,
+          prompt_cache_hit_tokens: 5,
+          prompt_cache_miss_tokens: 6
+        }
       };
     }
   };
@@ -368,6 +376,20 @@ test('linked chat keeps 20 selected entries in input order, then appends only th
     assert.equal(capturedKnowledgeContext(calls[0]), expectedContext);
     assert.equal(result.campaign_id, fixture.campaignId);
     assert.equal(typeof result.link_id, 'number');
+    assert.deepEqual(result.cost_projection, {
+      status: 'priced',
+      currency: 'USD',
+      total_cost_nano_usd: 5975,
+      policy_version: 'deepseek-v4-usd-2026-08-13-v1',
+      rate_period: 'off_peak',
+      reason: null
+    });
+    const assistantMetadata = JSON.parse(db.prepare(`
+      SELECT metadata_json FROM ai_messages
+      WHERE id=? AND role='assistant'
+    `).get(result.message_id).metadata_json);
+    assert.equal(assistantMetadata.cost_snapshot.status, 'priced');
+    assert.equal(assistantMetadata.cost_snapshot.total_cost_nano_usd, 5975);
     assert.deepEqual(result.knowledge_references.map((reference) => ({
       entry_id: reference.entry_id,
       chunk_id: reference.chunk_id,

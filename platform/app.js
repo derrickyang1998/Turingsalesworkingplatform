@@ -5177,6 +5177,16 @@ function adminAIRunNumber(value) {
   var parsed = Number(value);
   return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : 0;
 }
+function adminAICostText(cost) {
+  cost = cost || {};
+  var status = String(cost.status || 'unavailable');
+  if (status === 'empty') return '投影成本 -';
+  if (status === 'unavailable' || status === 'overflow') return '投影成本不可用';
+  var amount = cost.total_cost_nano_usd;
+  if (typeof amount !== 'number' || !Number.isSafeInteger(amount) || amount < 0) return '投影成本不可用';
+  var dollars = (amount / 1000000000).toFixed(9).replace(/\.?0+$/, '');
+  return (status === 'partial' ? '部分投影成本 ' : '投影成本 ') + '$' + (dollars || '0');
+}
 function adminAIRunSummaryText(summary) {
   summary = summary || {};
   var text = adminAIRunNumber(summary.run_count) + ' 次 · '
@@ -5184,6 +5194,9 @@ function adminAIRunSummaryText(summary) {
     + adminAIRunNumber(summary.total_tokens) + ' tokens';
   var latency = Number(summary.average_latency_ms);
   if (Number.isSafeInteger(latency) && latency >= 0) text += ' · ' + latency + ' ms';
+  if (summary.cost_summary && typeof summary.cost_summary === 'object') {
+    text += ' · ' + adminAICostText(summary.cost_summary);
+  }
   return text;
 }
 function adminAIMessageMetaText(message) {
@@ -5205,6 +5218,9 @@ function adminAIMessageMetaText(message) {
     + adminAIRunNumber(run.total_tokens);
   var latency = Number(run.latency_ms);
   if (Number.isSafeInteger(latency) && latency >= 0) text += ' · ' + latency + ' ms';
+  if (run.cost_projection && typeof run.cost_projection === 'object') {
+    text += ' · ' + adminAICostText(run.cost_projection);
+  }
   return text;
 }
 function loadAdminAIAudit() {
