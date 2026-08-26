@@ -4914,7 +4914,7 @@ function switchAdminTab(tab, options) { options = options || {}; if (!options.sk
   ['overview','users','knowledge','ai-audit','tokens'].forEach(function(t) { var el = document.getElementById('admin-tab-' + t); if (el) el.style.display = t === tab ? 'block' : 'none'; });
   if (tab === 'overview') loadAdminDashboard();
   if (tab === 'users') loadAdminUsers();
-  if (tab === 'ai-audit') loadAdminAIAudit();
+  if (tab === 'ai-audit') { loadAdminAIAuditUsers(); loadAdminAIAudit(); }
   if (tab === 'tokens') loadAdminTokens();
 }
 function loadAdminDashboard() {
@@ -5031,56 +5031,135 @@ function loadAdminTokens() {
     }).join('') + '</tbody></table>';
   }).catch(function(e) {});
 }
+var adminAIAuditUsersPromise = null;
+function loadAdminAIAuditUsers() {
+  var select = document.getElementById('ad_aiAuditUser');
+  if (!select) return Promise.resolve([]);
+  if (adminAIAuditUsersPromise) return adminAIAuditUsersPromise;
+  adminAIAuditUsersPromise = apiFetch('/admin/users').then(function(r) {
+    if (!r.ok) throw new Error('API:' + r.status);
+    return r.json();
+  }).then(function(d) {
+    var selected = select.value;
+    var users = d.users || [];
+    select.innerHTML = '<option value="">全部用户</option>' + users.map(function(u) {
+      var label = u.display_name || u.username || ('User #' + u.id);
+      return '<option value="' + esc(u.id) + '">' + esc(label) + '</option>';
+    }).join('');
+    if (users.some(function(u) { return String(u.id) === String(selected); })) {
+      select.value = selected;
+    }
+    return users;
+  }).catch(function() {
+    adminAIAuditUsersPromise = null;
+    return [];
+  });
+  return adminAIAuditUsersPromise;
+}
+function buildAdminAIAuditQuery() {
+  function value(id) {
+    var element = document.getElementById(id);
+    return element ? String(element.value || '').trim() : '';
+  }
+  var fields = [
+    ['q', value('ad_aiAuditSearch')],
+    ['user_id', value('ad_aiAuditUser')],
+    ['source_module', value('ad_aiAuditModule')],
+    ['date_from', value('ad_aiAuditDateFrom')],
+    ['date_to', value('ad_aiAuditDateTo')],
+    ['reference_type', value('ad_aiAuditReference')],
+    ['archive_status', value('ad_aiAuditArchive')]
+  ];
+  var dateFrom = fields[3][1];
+  var dateTo = fields[4][1];
+  if (dateFrom && dateTo && dateFrom > dateTo) {
+    throw new Error('Start date must not be later than end date.');
+  }
+  var query = ['limit=100'];
+  fields.forEach(function(field) {
+    if (field[1]) query.push(field[0] + '=' + encodeURIComponent(field[1]));
+  });
+  return '?' + query.join('&');
+}
+function renderAdminAIReference(reference) {
+  reference = reference || {};
+  var type = reference.reference_type === 'web' ? 'Web' : 'Knowledge';
+  var label = reference.title || reference.reference_id || (type === 'Web' ? 'Web source' : 'Knowledge entry');
+  var prefix = '<span style="opacity:.65">' + type + ':</span> ';
+  if (type === 'Web' && reference.url) {
+    try {
+      var parsed = new URL(String(reference.url));
+      if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+        return prefix + '<a href="' + esc(parsed.href) + '" target="_blank" rel="noopener noreferrer">' + esc(label) + '</a>';
+      }
+    } catch (error) {}
+  }
+  return prefix + esc(label);
+}
 function loadAdminAIAudit() {
   var list = document.getElementById('ad_aiAuditList');
-  if (!list) return;
-  list.innerHTML = '<p style="opacity:.5;font-size:12px">Loading conversations...</p>';
-  var q = document.getElementById('ad_aiAuditSearch')?.value || '';
-  var module = document.getElementById('ad_aiAuditModule')?.value || '';
-  var qs = '?limit=100';
-  if (q) qs += '&q=' + encodeURIComponent(q);
-  if (module) qs += '&source_module=' + encodeURIComponent(module);
-  apiFetch('/ai/conversations' + qs).then(function(r) {
+  if (!list) return Promise.resolve([]);
+  list.innerHTML = '<p style="opacity:.5;font-size:12px">正在加载对话...</p>';
+  var qs;
+  try {
+    qs = buildAdminAIAuditQuery();
+  } catch (error) {
+    list.innerHTML = '<p style="color:#d94641;font-size:12px">' + esc(error.message) + '</p>';
+    return Promise.resolve([]);
+  }
+  return apiFetch('/ai/conversations' + qs).then(function(r) {
     if (!r.ok) throw new Error('API:' + r.status);
     return r.json();
   }).then(function(d) {
     var rows = d.conversations || [];
     if (!rows.length) {
-      list.innerHTML = '<p style="opacity:.5;font-size:12px">No AI conversations found.</p>';
-      return;
+      list.innerHTML = '<p style="opacity:.5;font-size:12px">没有符合条件的 AI 对话。</p>';
+      return rows;
     }
-    list.innerHTML = '<table><thead><tr><th>Time</th><th>User</th><th>Module</th><th>Title</th><th>Messages</th><th>Last answer</th><th>Action</th></tr></thead><tbody>'
+    list.innerHTML = '<table><thead style="position:sticky;top:0;z-index:1;background:#fff"><tr><th>时间</th><th>用户</th><th>模块</th><th>Campaign</th><th>标题</th><th>消息</th><th>引用</th><th>归档</th><th>最后回复</th><th>操作</th></tr></thead><tbody>'
       + rows.map(function(c) {
+        var campaign = c.campaign_id ? ('Campaign #' + c.campaign_id) : '-';
+        var references = 'KB ' + (c.knowledge_reference_count || 0) + ' / Web ' + (c.web_reference_count || 0);
+        var archive = c.archived_summary_id
+          ? '<span style="color:#0f7b3c">Archived</span>'
+          : '<span style="opacity:.55">Unarchived</span>';
         return '<tr>'
           + '<td style="white-space:nowrap">' + esc((c.updated_at || c.created_at || '').substring(0, 16)) + '</td>'
           + '<td>' + esc(c.display_name || c.username || '-') + '</td>'
           + '<td>' + esc(c.source_module || '-') + '</td>'
+          + '<td style="white-space:nowrap">' + esc(campaign) + '</td>'
           + '<td><strong>' + esc(c.title || '-') + '</strong></td>'
           + '<td>' + (c.message_count || 0) + '</td>'
+          + '<td style="white-space:nowrap">' + esc(references) + '</td>'
+          + '<td style="white-space:nowrap">' + archive + '</td>'
           + '<td style="max-width:320px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(c.last_answer || '') + '</td>'
-          + '<td><button class="btn btn-xs" onclick="loadAdminAIConversation(' + c.id + ')">View</button></td>'
+          + '<td><button class="btn btn-xs" onclick="loadAdminAIConversation(' + c.id + ')">查看</button></td>'
           + '</tr>';
       }).join('') + '</tbody></table>';
+    return rows;
   }).catch(function(e) {
-    list.innerHTML = '<p style="color:#d94641;font-size:12px">Failed: ' + esc(e.message) + '</p>';
+    list.innerHTML = '<p style="color:#d94641;font-size:12px">加载失败：' + esc(e.message) + '</p>';
+    return [];
   });
 }
 function loadAdminAIConversation(id) {
   var detail = document.getElementById('ad_aiAuditDetail');
   if (!detail) return;
-  detail.innerHTML = '<div class="card" style="background:#fafafa"><p style="opacity:.5;font-size:12px">Loading detail...</p></div>';
+  detail.innerHTML = '<div style="background:#fafafa;border:1px solid #eee;border-radius:8px;padding:16px"><p style="opacity:.5;font-size:12px">正在加载详情...</p></div>';
   apiFetch('/ai/conversations/' + id).then(function(r) {
     if (!r.ok) throw new Error('API:' + r.status);
     return r.json();
   }).then(function(d) {
     var c = d.conversation || {};
     var messages = c.messages || [];
-    var html = '<div class="card" style="background:#fafafa;border-color:#eee">'
-      + '<div style="display:flex;justify-content:space-between;gap:10px;margin-bottom:10px"><div><strong>' + esc(c.title || ('Conversation #' + id)) + '</strong><div style="font-size:12px;opacity:.6">' + esc(c.display_name || c.username || '-') + ' / ' + esc(c.source_module || '-') + ' / ' + esc(c.created_at || '') + '</div></div><button class="btn btn-xs" onclick="document.getElementById(&quot;ad_aiAuditDetail&quot;).innerHTML=&quot;&quot;">Close</button></div>';
+    var campaign = c.campaign_id ? ('Campaign #' + c.campaign_id) : 'No Campaign';
+    var archive = c.archived_summary_id ? ('Archived #' + c.archived_summary_id) : 'Unarchived';
+    var html = '<div style="background:#fafafa;border:1px solid #eee;border-radius:8px;padding:16px">'
+      + '<div style="display:flex;justify-content:space-between;gap:10px;margin-bottom:10px"><div><strong>' + esc(c.title || ('Conversation #' + id)) + '</strong><div style="font-size:12px;opacity:.6">' + esc(c.display_name || c.username || '-') + ' / ' + esc(c.source_module || '-') + ' / ' + esc(campaign) + ' / ' + esc(archive) + ' / ' + esc(c.created_at || '') + '</div></div><button class="btn btn-xs" aria-label="关闭详情" title="关闭详情" onclick="document.getElementById(&quot;ad_aiAuditDetail&quot;).innerHTML=&quot;&quot;">&times;</button></div>';
     html += messages.map(function(m) {
       var refs = m.references || [];
-      var refHtml = refs.length ? '<div style="margin-top:8px;font-size:11px;opacity:.75">References: ' + refs.map(function(r) {
-        return esc((r.reference_type || '') + ': ' + (r.title || r.url || r.reference_id || ''));
+      var refHtml = refs.length ? '<div style="margin-top:8px;font-size:11px">引用：' + refs.map(function(r) {
+        return renderAdminAIReference(r);
       }).join(' | ') + '</div>' : '';
       return '<div style="padding:10px;border:1px solid #eee;border-radius:8px;background:#fff;margin-bottom:8px">'
         + '<div style="font-size:11px;opacity:.55;margin-bottom:4px">' + esc(m.role || '') + ' · ' + esc(m.model || '') + ' · tokens ' + (m.total_tokens || 0) + '</div>'
@@ -5091,7 +5170,7 @@ function loadAdminAIConversation(id) {
     html += '</div>';
     detail.innerHTML = html;
   }).catch(function(e) {
-    detail.innerHTML = '<p style="color:#d94641;font-size:12px">Failed: ' + esc(e.message) + '</p>';
+    detail.innerHTML = '<p style="color:#d94641;font-size:12px">加载失败：' + esc(e.message) + '</p>';
   });
 }
 function toggleUserActive(id, active) { apiFetch('/admin/users/'+id, {method:'PUT', body:JSON.stringify({is_active:active})}).then(function() { loadAdminUsers(); toast(active?'Activated':'Deactivated'); }).catch(function(e) { toast('Failed','error'); }); }

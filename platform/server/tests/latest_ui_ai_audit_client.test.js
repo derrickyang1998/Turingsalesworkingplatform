@@ -1,0 +1,216 @@
+'use strict';
+
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+
+const appSource = fs.readFileSync(path.join(__dirname, '..', '..', 'app.js'), 'utf8');
+const indexSource = fs.readFileSync(path.join(__dirname, '..', '..', 'index.html'), 'utf8');
+
+function extractFunction(source, name) {
+  const declaration = new RegExp(`(?:async\\s+)?function\\s+${name}\\s*\\([^)]*\\)\\s*\\{`, 'g');
+  const matches = Array.from(source.matchAll(declaration));
+  assert.ok(matches.length, `${name} must exist`);
+  const match = matches[matches.length - 1];
+  const openingBrace = source.indexOf('{', match.index);
+  let depth = 0;
+  let quote = null;
+  let escaped = false;
+  for (let index = openingBrace; index < source.length; index += 1) {
+    const character = source[index];
+    if (quote) {
+      if (escaped) escaped = false;
+      else if (character === '\\') escaped = true;
+      else if (character === quote) quote = null;
+      continue;
+    }
+    if (character === '\'' || character === '"' || character === '`') {
+      quote = character;
+      continue;
+    }
+    if (character === '{') depth += 1;
+    if (character === '}') {
+      depth -= 1;
+      if (depth === 0) return source.slice(match.index, index + 1);
+    }
+  }
+  assert.fail(`${name} must have a balanced function body`);
+}
+
+function loadFunctions(context, names) {
+  context.window = context.window || context;
+  context.globalThis = context;
+  vm.createContext(context);
+  for (const name of names) vm.runInContext(extractFunction(appSource, name), context);
+  return context;
+}
+
+function response(status, body) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    async json() { return body; }
+  };
+}
+
+function escapeHtml(value) {
+  return String(value == null ? '' : value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+test('admin AI audit exposes bounded evidence filters in one scrollable work surface', () => {
+  for (const id of [
+    'ad_aiAuditSearch',
+    'ad_aiAuditUser',
+    'ad_aiAuditModule',
+    'ad_aiAuditDateFrom',
+    'ad_aiAuditDateTo',
+    'ad_aiAuditReference',
+    'ad_aiAuditArchive'
+  ]) {
+    assert.match(indexSource, new RegExp(`id=["']${id}["']`));
+  }
+  assert.match(
+    indexSource,
+    /id=["']ad_aiAuditList["'][^>]*style=["'][^"']*overflow\s*:\s*auto/i
+  );
+});
+
+test('admin AI audit query includes every selected filter and blocks reversed dates', () => {
+  const values = {
+    ad_aiAuditSearch: 'source evidence',
+    ad_aiAuditUser: '22',
+    ad_aiAuditModule: 'assistant',
+    ad_aiAuditDateFrom: '2026-07-01',
+    ad_aiAuditDateTo: '2026-07-31',
+    ad_aiAuditReference: 'web',
+    ad_aiAuditArchive: 'archived'
+  };
+  const context = loadFunctions({
+    document: {
+      getElementById(id) { return { value: values[id] || '' }; }
+    },
+    encodeURIComponent,
+    Error
+  }, ['buildAdminAIAuditQuery']);
+
+  const query = context.buildAdminAIAuditQuery();
+  const params = new URLSearchParams(query);
+  assert.equal(params.get('limit'), '100');
+  assert.equal(params.get('q'), 'source evidence');
+  assert.equal(params.get('user_id'), '22');
+  assert.equal(params.get('source_module'), 'assistant');
+  assert.equal(params.get('date_from'), '2026-07-01');
+  assert.equal(params.get('date_to'), '2026-07-31');
+  assert.equal(params.get('reference_type'), 'web');
+  assert.equal(params.get('archive_status'), 'archived');
+
+  values.ad_aiAuditDateFrom = '2026-08-01';
+  assert.throws(
+    () => context.buildAdminAIAuditQuery(),
+    /Start date must not be later than end date/
+  );
+});
+
+test('admin AI audit renders only absolute HTTP sources as external links', () => {
+  const context = loadFunctions({
+    esc: escapeHtml,
+    URL
+  }, ['renderAdminAIReference']);
+
+  const safe = context.renderAdminAIReference({
+    reference_type: 'web',
+    title: 'Verified <source>',
+    url: 'https://example.com/report?q=1&lang=en'
+  });
+  assert.match(safe, /href="https:\/\/example\.com\/report\?q=1&amp;lang=en"/);
+  assert.match(safe, /target="_blank"/);
+  assert.match(safe, /rel="noopener noreferrer"/);
+  assert.match(safe, /Verified &lt;source&gt;/);
+
+  const unsafe = context.renderAdminAIReference({
+    reference_type: 'web',
+    title: 'Unsafe source',
+    url: 'javascript:alert(1)'
+  });
+  assert.doesNotMatch(unsafe, /href=|javascript:/i);
+  assert.match(unsafe, /Unsafe source/);
+
+  const knowledge = context.renderAdminAIReference({
+    reference_type: 'knowledge',
+    title: 'Internal method'
+  });
+  assert.doesNotMatch(knowledge, /href=/i);
+  assert.match(knowledge, /Internal method/);
+});
+
+test('admin AI audit loads the user directory and renders campaign, reference, and archive evidence', async () => {
+  const elements = {
+    ad_aiAuditSearch: { value: 'source evidence' },
+    ad_aiAuditUser: { value: '', innerHTML: '' },
+    ad_aiAuditModule: { value: 'assistant' },
+    ad_aiAuditDateFrom: { value: '2026-07-01' },
+    ad_aiAuditDateTo: { value: '2026-07-31' },
+    ad_aiAuditReference: { value: 'web' },
+    ad_aiAuditArchive: { value: 'archived' },
+    ad_aiAuditList: { innerHTML: '' }
+  };
+  const calls = [];
+  const context = loadFunctions({
+    adminAIAuditUsersPromise: null,
+    document: {
+      getElementById(id) { return elements[id] || null; }
+    },
+    esc: escapeHtml,
+    encodeURIComponent,
+    Error,
+    Promise,
+    async apiFetch(url) {
+      calls.push(url);
+      if (url === '/admin/users') {
+        return response(200, {
+          users: [{ id: 22, username: 'owner', display_name: 'Owner <One>' }]
+        });
+      }
+      return response(200, {
+        conversations: [{
+          id: 41,
+          campaign_id: 12,
+          username: 'owner',
+          display_name: 'Owner One',
+          source_module: 'assistant',
+          title: 'Evidence review',
+          message_count: 3,
+          knowledge_reference_count: 2,
+          web_reference_count: 1,
+          archived_summary_id: 91,
+          last_answer: 'Verified answer',
+          updated_at: '2026-07-10 11:20:00'
+        }]
+      });
+    }
+  }, [
+    'loadAdminAIAuditUsers',
+    'buildAdminAIAuditQuery',
+    'loadAdminAIAudit'
+  ]);
+
+  await context.loadAdminAIAuditUsers();
+  elements.ad_aiAuditUser.value = '22';
+  await context.loadAdminAIAudit();
+
+  assert.match(elements.ad_aiAuditUser.innerHTML, /Owner &lt;One&gt;/);
+  assert.equal(calls[0], '/admin/users');
+  assert.match(calls[1], /^\/ai\/conversations\?/);
+  const params = new URLSearchParams(calls[1].split('?')[1]);
+  assert.equal(params.get('user_id'), '22');
+  assert.match(elements.ad_aiAuditList.innerHTML, /Campaign #12/);
+  assert.match(elements.ad_aiAuditList.innerHTML, /KB 2 \/ Web 1/);
+  assert.match(elements.ad_aiAuditList.innerHTML, /Archived/);
+});

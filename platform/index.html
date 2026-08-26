@@ -1316,19 +1316,34 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
 <div id="admin-tab-ai-audit" style="display:none">
   <div class="card">
     <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap">
-      <h3 style="margin:0">🤖 AI Conversation Audit</h3>
+      <h3 style="margin:0">🤖 AI 对话审计</h3>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        <input id="ad_aiAuditSearch" placeholder="Search conversations..." onkeydown="if(event.key==='Enter')loadAdminAIAudit()" style="width:240px;font-size:12px">
-        <select id="ad_aiAuditModule" onchange="loadAdminAIAudit()" style="font-size:12px">
-          <option value="">All modules</option>
-          <option value="assistant">Assistant</option>
-          <option value="strategy">Strategy</option>
-          <option value="proposal">Proposal</option>
+        <input id="ad_aiAuditSearch" aria-label="搜索 AI 对话" placeholder="搜索标题 / 用户 / 消息 / 引用" onkeydown="if(event.key==='Enter')loadAdminAIAudit()" style="width:250px;font-size:12px">
+        <select id="ad_aiAuditUser" onchange="loadAdminAIAudit()" aria-label="按用户筛选" style="width:150px;font-size:12px">
+          <option value="">全部用户</option>
         </select>
-        <button class="btn btn-sm" onclick="loadAdminAIAudit()">Refresh</button>
+        <select id="ad_aiAuditModule" onchange="loadAdminAIAudit()" style="font-size:12px">
+          <option value="">全部模块</option>
+          <option value="assistant">AI 助手</option>
+          <option value="strategy">策略</option>
+          <option value="proposal">方案</option>
+        </select>
+        <input id="ad_aiAuditDateFrom" type="date" aria-label="开始日期" title="开始日期" onchange="loadAdminAIAudit()" style="width:140px;font-size:12px">
+        <input id="ad_aiAuditDateTo" type="date" aria-label="结束日期" title="结束日期" onchange="loadAdminAIAudit()" style="width:140px;font-size:12px">
+        <select id="ad_aiAuditReference" onchange="loadAdminAIAudit()" aria-label="按引用类型筛选" style="width:130px;font-size:12px">
+          <option value="">全部引用</option>
+          <option value="knowledge">知识库引用</option>
+          <option value="web">联网来源</option>
+        </select>
+        <select id="ad_aiAuditArchive" onchange="loadAdminAIAudit()" aria-label="按归档状态筛选" style="width:120px;font-size:12px">
+          <option value="">全部归档状态</option>
+          <option value="archived">已归档</option>
+          <option value="unarchived">未归档</option>
+        </select>
+        <button class="btn btn-sm" onclick="loadAdminAIAudit()">刷新</button>
       </div>
     </div>
-    <div id="ad_aiAuditList" style="max-height:480px;overflow-y:auto"></div>
+    <div id="ad_aiAuditList" style="max-height:480px;overflow:auto;position:relative"></div>
     <div id="ad_aiAuditDetail" style="margin-top:12px"></div>
   </div>
 </div>

@@ -8,6 +8,7 @@ const Database = require('better-sqlite3');
 
 const migrationService = require('../services/migration_service');
 const ai = require('../services/ai_service');
+const knowledge = require('../services/knowledge_service');
 
 const SERVER_ROOT = path.resolve(__dirname, '..');
 const MIGRATIONS = Object.freeze([
@@ -232,6 +233,24 @@ function createConversation(db, values = {}) {
     );
   }
   return conversationId;
+}
+
+function addWebReference(db, conversationId, title = 'Tavily source needle') {
+  const message = db.prepare(`
+    SELECT id FROM ai_messages WHERE conversation_id=? ORDER BY id DESC LIMIT 1
+  `).get(conversationId);
+  db.prepare(`
+    INSERT INTO ai_references (
+      message_id,reference_type,reference_id,title,url,snippet,provider,metadata_json
+    ) VALUES (?,'web',?,?,?,?,?,'{}')
+  `).run(
+    message.id,
+    `audit-web-source-${conversationId}`,
+    title,
+    `https://example.com/evidence/${conversationId}`,
+    'Evidence snippet',
+    'tavily'
+  );
 }
 
 function linkConversation(db, values) {
@@ -576,6 +595,137 @@ test('AI conversation authorization and query matching happen before message cou
     assert.deepEqual(rows.map((row) => row.id), authorized);
     assert.deepEqual(rows.map((row) => row.message_count), [1, 1]);
     assert.equal(rows.every((row) => /authorized/.test(row.last_answer)), true);
+  } finally {
+    db.close();
+  }
+});
+
+test('administrator audit filters combine user, date, source, archive, and reference evidence', () => {
+  const db = openDatabase();
+  try {
+    const fixture = createFixture(db);
+    const archive = knowledge.ingestKnowledge(db, {
+      title: 'Audit filter archive',
+      content: 'Approved audit filter archive content.',
+      entry_type: 'ai_chat_summary',
+      source_type: 'audit_filter_fixture',
+      source_id: 'audit-filter-archive',
+      visibility: 'private',
+      created_by: fixture.owner.id
+    });
+    const target = createConversation(db, {
+      userId: fixture.owner.id,
+      title: 'Evidence-backed target',
+      sourceModule: 'assistant',
+      content: 'The answer itself does not contain the source keyword.',
+      createdAt: '2026-07-05 23:59:59.999'
+    });
+    linkConversation(db, {
+      campaignId: fixture.ownerCampaignId,
+      conversationId: target,
+      createdBy: fixture.owner.id
+    });
+    db.prepare('UPDATE ai_conversations SET archived_summary_id=? WHERE id=?')
+      .run(archive.id, target);
+    addWebReference(db, target);
+
+    const unarchived = createConversation(db, {
+      userId: fixture.owner.id,
+      title: 'Unarchived distractor',
+      sourceModule: 'assistant',
+      content: 'Tavily source needle',
+      createdAt: '2026-07-05 10:00:00'
+    });
+    linkConversation(db, {
+      campaignId: fixture.ownerCampaignId,
+      conversationId: unarchived,
+      createdBy: fixture.owner.id
+    });
+    addWebReference(db, unarchived);
+    const outsideDate = createConversation(db, {
+      userId: fixture.owner.id,
+      title: 'Outside-date distractor',
+      sourceModule: 'assistant',
+      content: 'Tavily source needle',
+      createdAt: '2026-07-06 10:00:00'
+    });
+    linkConversation(db, {
+      campaignId: fixture.ownerCampaignId,
+      conversationId: outsideDate,
+      createdBy: fixture.owner.id
+    });
+    db.prepare('UPDATE ai_conversations SET archived_summary_id=? WHERE id=?')
+      .run(archive.id, outsideDate);
+    addWebReference(db, outsideDate);
+
+    const rows = ai.listConversations(db, secureRead(
+      fixture.platformAdmin,
+      fixture.platformAdminAuth,
+      'audit-combined-filter-request',
+      {
+        q: 'Tavily source needle',
+        user_id: fixture.owner.id,
+        source_module: 'assistant',
+        date_from: '2026-07-05',
+        date_to: '2026-07-05',
+        reference_type: 'web',
+        archive_status: 'archived',
+        limit: 20
+      }
+    ));
+
+    assert.deepEqual(rows.map((row) => row.id), [target]);
+    assert.equal(rows[0].campaign_id, fixture.ownerCampaignId);
+    assert.equal(rows[0].knowledge_reference_count, 0);
+    assert.equal(rows[0].web_reference_count, 1);
+    assert.equal(rows[0].archived_summary_id, archive.id);
+    const audit = db.prepare(`
+      SELECT details FROM activity_log
+      WHERE action='admin_list_ai_conversations' AND module='ai_audit'
+      ORDER BY id DESC LIMIT 1
+    `).get();
+    assert.deepEqual(JSON.parse(audit.details).filter_names, [
+      'q',
+      'user_id',
+      'source_module',
+      'date_from',
+      'date_to',
+      'reference_type',
+      'archive_status',
+      'limit'
+    ]);
+  } finally {
+    db.close();
+  }
+});
+
+test('AI conversation audit rejects malformed or reversed bounded filters before audit persistence', () => {
+  const db = openDatabase();
+  try {
+    const fixture = createFixture(db);
+    const invalidInputs = [
+      { reference_type: 'javascript' },
+      { archive_status: 'deleted' },
+      { date_from: '07/05/2026' },
+      { date_from: '2026-07-06', date_to: '2026-07-05' }
+    ];
+    invalidInputs.forEach((extra, index) => {
+      assert.throws(
+        () => ai.listConversations(db, secureRead(
+          fixture.platformAdmin,
+          fixture.platformAdminAuth,
+          `invalid-audit-filter-${index}`,
+          extra
+        )),
+        (error) => error &&
+          error.name === 'AIServiceError' &&
+          error.statusCode === 400 &&
+          error.code === 'INVALID_AI_AUDIT_FILTER'
+      );
+    });
+    assert.equal(db.prepare(`
+      SELECT COUNT(*) AS count FROM activity_log WHERE module='ai_audit'
+    `).get().count, 0);
   } finally {
     db.close();
   }

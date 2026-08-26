@@ -1427,15 +1427,42 @@ function conversationListFilters(opts, actor) {
   const conditions = [];
   const params = [];
   const filterNames = [];
-  if (opts.q) {
+  const q = opts.q === undefined || opts.q === null ? '' : String(opts.q).trim();
+  const sourceModule = opts.source_module === undefined || opts.source_module === null
+    ? ''
+    : String(opts.source_module).trim();
+  const dateFrom = normalizeAiAuditDate(opts.date_from);
+  const dateTo = normalizeAiAuditDate(opts.date_to);
+  const referenceType = normalizeAiAuditEnum(
+    opts.reference_type,
+    ['knowledge', 'web'],
+    'Invalid AI audit reference type.'
+  );
+  const archiveStatus = normalizeAiAuditEnum(
+    opts.archive_status,
+    ['archived', 'unarchived'],
+    'Invalid AI audit archive status.'
+  );
+  if (dateFrom && dateTo && dateFrom > dateTo) {
+    throw serviceError(
+      400,
+      'INVALID_AI_AUDIT_FILTER',
+      'AI audit start date must not be later than end date.'
+    );
+  }
+  if (q) {
     filterNames.push('q');
   }
   if (opts.user_id) {
     filterNames.push('user_id');
   }
-  if (opts.source_module) {
+  if (sourceModule) {
     filterNames.push('source_module');
   }
+  if (dateFrom) filterNames.push('date_from');
+  if (dateTo) filterNames.push('date_to');
+  if (referenceType) filterNames.push('reference_type');
+  if (archiveStatus) filterNames.push('archive_status');
   if (ownValue(opts, 'limit') !== undefined) {
     filterNames.push('limit');
   }
@@ -1443,24 +1470,95 @@ function conversationListFilters(opts, actor) {
     conditions.push('authorized.user_id=?');
     params.push(positiveId(opts.user_id) || -1);
   }
-  if (opts.source_module) {
+  if (sourceModule) {
     conditions.push('authorized.source_module=?');
-    params.push(opts.source_module);
+    params.push(sourceModule);
   }
-  if (opts.q) {
+  if (dateFrom) {
+    conditions.push("authorized.created_at>=?");
+    params.push(dateFrom + ' 00:00:00');
+  }
+  if (dateTo) {
+    conditions.push("authorized.created_at<?");
+    params.push(nextAiAuditDate(dateTo) + ' 00:00:00');
+  }
+  if (referenceType) {
     conditions.push(`EXISTS (
       SELECT 1
-      FROM ai_messages matching_message
-      WHERE matching_message.conversation_id=authorized.id
-        AND matching_message.content LIKE ?
+      FROM ai_messages reference_message
+      JOIN ai_references matching_reference
+        ON matching_reference.message_id=reference_message.id
+      WHERE reference_message.conversation_id=authorized.id
+        AND matching_reference.reference_type=?
     )`);
-    params.push('%' + opts.q + '%');
+    params.push(referenceType);
+  }
+  if (archiveStatus === 'archived') {
+    conditions.push('authorized.archived_summary_id IS NOT NULL');
+  } else if (archiveStatus === 'unarchived') {
+    conditions.push('authorized.archived_summary_id IS NULL');
+  }
+  if (q) {
+    const pattern = '%' + q + '%';
+    conditions.push(`(
+      authorized.title LIKE ?
+      OR authorized.username LIKE ?
+      OR COALESCE(authorized.display_name,'') LIKE ?
+      OR EXISTS (
+        SELECT 1
+        FROM ai_messages matching_message
+        WHERE matching_message.conversation_id=authorized.id
+          AND matching_message.content LIKE ?
+      )
+      OR EXISTS (
+        SELECT 1
+        FROM ai_messages matching_reference_message
+        JOIN ai_references searched_reference
+          ON searched_reference.message_id=matching_reference_message.id
+        WHERE matching_reference_message.conversation_id=authorized.id
+          AND (
+            searched_reference.title LIKE ?
+            OR searched_reference.url LIKE ?
+            OR searched_reference.snippet LIKE ?
+          )
+      )
+    )`);
+    params.push(pattern, pattern, pattern, pattern, pattern, pattern, pattern);
   }
   return { conditions, params, filterNames };
 }
 
+function normalizeAiAuditDate(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const normalized = String(value).trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
+    throw serviceError(400, 'INVALID_AI_AUDIT_FILTER', 'Invalid AI audit date.');
+  }
+  const parsed = new Date(normalized + 'T00:00:00Z');
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== normalized) {
+    throw serviceError(400, 'INVALID_AI_AUDIT_FILTER', 'Invalid AI audit date.');
+  }
+  return normalized;
+}
+
+function normalizeAiAuditEnum(value, allowed, message) {
+  if (value === undefined || value === null || value === '') return null;
+  const normalized = String(value).trim();
+  if (!allowed.includes(normalized)) {
+    throw serviceError(400, 'INVALID_AI_AUDIT_FILTER', message);
+  }
+  return normalized;
+}
+
+function nextAiAuditDate(value) {
+  const parsed = new Date(value + 'T00:00:00Z');
+  parsed.setUTCDate(parsed.getUTCDate() + 1);
+  return parsed.toISOString().slice(0, 10);
+}
+
 function stripConversationReadMetadata(row) {
   const projected = { ...row };
+  projected.campaign_id = positiveId(projected.__campaign_id);
   delete projected.__organization_id;
   delete projected.__campaign_id;
   delete projected.__custody_valid;
@@ -1548,7 +1646,23 @@ function listConversations(db, opts) {
             AND latest_answer.role='assistant'
           ORDER BY latest_answer.id DESC
           LIMIT 1
-        ) AS last_answer
+        ) AS last_answer,
+        (
+          SELECT COUNT(*)
+          FROM ai_messages referenced_message
+          JOIN ai_references counted_reference
+            ON counted_reference.message_id=referenced_message.id
+          WHERE referenced_message.conversation_id=filtered.id
+            AND counted_reference.reference_type='knowledge'
+        ) AS knowledge_reference_count,
+        (
+          SELECT COUNT(*)
+          FROM ai_messages referenced_message
+          JOIN ai_references counted_reference
+            ON counted_reference.message_id=referenced_message.id
+          WHERE referenced_message.conversation_id=filtered.id
+            AND counted_reference.reference_type='web'
+        ) AS web_reference_count
       FROM filtered_conversations filtered
       ORDER BY filtered.updated_at DESC,filtered.id DESC
       LIMIT ?

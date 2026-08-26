@@ -1629,6 +1629,18 @@ test('AI conversation routes persist one service-owned privileged audit with the
   const server = await startTestServer('tm-phase4-ai-read-route-');
   try {
     const fixture = await seedPrivilegedAiReadFixture(server, 'audit');
+    const invalid = await jsonRequest(
+      server.baseUrl,
+      '/api/ai/conversations?reference_type=javascript',
+      { token: fixture.token, headers: { 'X-Request-Id': 'ai-read-invalid-filter-0001' } }
+    );
+    assert.equal(invalid.response.status, 400, invalid.text + '\n' + server.output());
+    assert.deepEqual(invalid.body, {
+      error: 'Invalid AI audit reference type.',
+      code: 'INVALID_AI_AUDIT_FILTER',
+      request_id: 'ai-read-invalid-filter-0001'
+    });
+
     const listRequestId = 'ai-read-list-route-0001';
     const listed = await jsonRequest(server.baseUrl, '/api/ai/conversations', {
       token: fixture.token,

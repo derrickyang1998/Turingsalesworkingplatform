@@ -1030,6 +1030,16 @@ function sendAiChatError(req, res, error) {
 }
 
 function sendAiReadError(req, res, error) {
+  const invalidFilter = error &&
+    error.name === 'AIServiceError' &&
+    error.code === 'INVALID_AI_AUDIT_FILTER';
+  if (invalidFilter) {
+    return res.status(400).json({
+      error: error.message,
+      code: error.code,
+      request_id: campaignLinkRequestId(req)
+    });
+  }
   const knownAuditFailure = error &&
     error.name === 'AIServiceError' &&
     error.code === 'AUDIT_PERSISTENCE_FAILED';
@@ -1685,6 +1695,10 @@ app.get('/api/ai/conversations', authMiddleware, (req, res) => {
       q: req.query.q || '',
       user_id: req.query.user_id,
       source_module: req.query.source_module,
+      date_from: req.query.date_from,
+      date_to: req.query.date_to,
+      reference_type: req.query.reference_type,
+      archive_status: req.query.archive_status,
       limit: req.query.limit || 100
     });
     res.json({ conversations });
