@@ -1,5 +1,22 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.7.0-ai-knowledge-loop-task4c (Production Slice, 2026-08-26) - AI 回复手动沉淀知识库
+
+### 可控沉淀与知识归属 / Controlled Promotion And Knowledge Custody
+- M5 已在持久化的 AI 回复下增加“沉淀到知识库”操作；自动晋升过的回复显示只读“已沉淀”。前端仅提交后端返回的会话/消息 ID，文本继续先转义再渲染，不引入原始 HTML。
+- 会话所有者可把自己的 assistant 回复沉淀为私有或团队知识；平台管理员可在已有授权范围内代为整理，普通用户无法沉淀他人的回复。
+- 同一消息重复请求只返回原知识条目，不产生重复知识；Campaign 关联回复继续保留原 Campaign 归属、知识关联和容量治理。
+- 首次成功、幂等重放和拒绝请求均写入有界 `ai_knowledge` 审计，记录请求、会话、消息、知识、可见性、结果和安全错误码；审计失败会使知识写入整体回滚。
+
+### 验证与生产发布 / Verification And Production Release
+- 实现提交为 `d38a34c`；定向回归 `72/72` 通过，JavaScript 语法、`git diff --check`、新增行敏感信息扫描和冻结 PPT 哈希均通过，独立终审为 `APPROVE`。
+- 已验证发布备份为 `/root/turingmarket/backups/v070-slice4c-manual-ai-promotion-20260826-190822`，聚合 SHA-256 为 `596c10f8d1ee11e140b45402c28889c6ed2d56856b33f9ea029951bece593a25`；SQLite Backup API 副本 `quick_check=ok`、外键异常为 0。
+- 生产仅替换 `app.js`、`index.html`、`server.js` 与 `ai_service.js`；App build 和冻结 `ppt.js` 保持不变。发布后 PM2 PID 为 `1413180`，公网 `/`、`/m5`、`/admin`、`/api/health` 与客户端资源均为 200。
+- 线上真实 HTTP 验收通过所有者首次沉淀、同消息幂等重放、普通用户越权 404、管理员代为沉淀和 4 条精确审计。首个验收脚本在功能与清理完成后因末尾验证查询错误返回非零；独立只读复核确认临时会话、对话和知识均为 0、验收身份已停用，最终 SQLite 与服务健康检查全部通过。
+- 本切片继续采用轻量单功能发布节奏，未运行浏览器自动化；完整回归保留到阶段 6 收口或广泛风险变更。
+
+---
+
 ## v0.7.0-ai-knowledge-loop-task4b2 (Production Slice, 2026-08-26) - 联网来源治理与高价值摘要晋升
 
 ### 受控联网与自成长知识 / Governed Web Sources And Self-Growing Knowledge
