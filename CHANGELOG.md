@@ -1,5 +1,19 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.7.0-ai-knowledge-loop-task3b (Production Slice, 2026-08-26) - Campaign PPT 大纲 RAG
+
+### PPT 大纲与活动上下文 / PPT Outline And Campaign Context
+- M3 最新 PPT 入口在调用 `/api/ai/ppt-outline` 前注入当前 `campaign_id`、已验证的需求分析与方案会话/消息、授权知识 ID、请求 ID 和稳定幂等键；联网固定关闭，服务端检索上限固定为 8。
+- Campaign PPT 大纲通过统一 AI/RAG 服务生成并保存完整会话、消息、知识引用和 `ai_run` 关联；未确认大纲不归档，旧版未关联 PPT 路径继续保持兼容。
+- 冻结 `ppt.js` 未修改；重复生成保持单飞，切换 Campaign 会中止并隔离旧响应，相同业务输入重试复用同一幂等键，旧响应不能渲染或写入已切换的活动上下文。
+
+### 验证与生产发布 / Verification And Production Release
+- 实现提交为 `e6d0bcc` 与 `0507843`；最终聚焦回归 66/66、JavaScript 语法、架构清单、`git diff --check` 与聚焦敏感信息扫描通过。独立审查首轮发现 2 项 Important 与 1 项 Minor，整改后复审 `APPROVE`；剩余 Minor 为非阻断浏览器到 HTTP 延迟切换集成用例缺口，已用生产 HTTP/数据库验收覆盖。
+- 生产备份为 `/root/turingmarket/backups/v070-slice3b-ppt-rag-20260826-104042`；仅发布五个运行文件，数据库无迁移，生产 App build 与冻结 PPT build/hash 均保持不变。
+- 线上验收通过管理员登录、Campaign 读取、已审计需求/方案来源、PPT 大纲生成、相同幂等键重放与注销；生成 10 个大纲章节并持久化 22 条 Campaign 知识引用，未联网、未归档未确认摘要，SQLite `quick_check=ok`，公网静态字节与本地发布哈希一致。
+
+---
+
 ## v0.7.0-ai-knowledge-loop-task3a (Production Slice, 2026-08-26) - Campaign 方案草稿 RAG
 
 ### 方案草稿与审计 / Proposal Draft And Audit
