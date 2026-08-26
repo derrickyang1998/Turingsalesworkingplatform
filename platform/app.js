@@ -19,6 +19,16 @@ let pptOutlineIdempotencyKey = '';
 let pptGenerationSequence = 0;
 let pptGenerationInFlight = false;
 let activePptGenerationContext = null;
+let campaignPptDemandFingerprint = '';
+let campaignPptDemandIdempotencyKey = '';
+let campaignPptDemandRecord = null;
+let campaignPptProposalFingerprint = '';
+let campaignPptProposalIdempotencyKey = '';
+let campaignPptProposalVersion = null;
+let campaignPptDownloadFingerprint = '';
+let campaignPptDownloadIdempotencyKey = '';
+let campaignPptDownloadInFlight = false;
+let campaignPptArchiveState = { status: 'idle', message: '' };
 
 // Navigation registry and page visibility are owned by client/core/navigation.js.
 // ==== FIX DOM NESTING: ensure all page-* divs are direct children of <main> ====
@@ -146,6 +156,7 @@ async function doLogout() {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + AUTH_TOKEN }
     });
   } catch (e) {}
+  resetCampaignPptArtifactState();
   AUTH_TOKEN = ''; CURRENT_USER = null; CURRENT_AUTH_CONTEXT = null; CURRENT_CRM_TEAM_ID = null; AUTH_GENERATION += 1;
   localStorage.removeItem('tm_token'); localStorage.removeItem('tm_user'); localStorage.removeItem('tm_auth_context');
   location.reload();
@@ -156,6 +167,7 @@ function handleAuthExpired(message) {
     window.TMAccessibility.dismissAllDialogs();
   }
   closeCustomerDetail();
+  resetCampaignPptArtifactState();
   AUTH_TOKEN = '';
   CURRENT_USER = null;
   CURRENT_AUTH_CONTEXT = null;
@@ -214,6 +226,480 @@ function finishCampaignPptGeneration(requestContext) {
   return true;
 }
 
+function campaignPptFingerprint(value) {
+  return JSON.stringify(value === undefined ? null : value);
+}
+
+function campaignPptBuildHeaders(options, idempotencyKey, prefix) {
+  var headers = {};
+  var source = options && options.headers;
+  if (source && typeof source.forEach === 'function') {
+    source.forEach(function(value, name) { headers[name] = value; });
+  } else if (source && typeof source === 'object') {
+    Object.keys(source).forEach(function(name) { headers[name] = source[name]; });
+  }
+  headers['Idempotency-Key'] = idempotencyKey;
+  headers['X-Request-Id'] = createDemandAnalysisOperationId(prefix + '-request-');
+  return headers;
+}
+
+function getActiveDemandId() {
+  var campaignId = readPositiveInteger(getActiveCampaignId());
+  if (campaignId === null) return null;
+  if (
+    campaignPptDemandRecord &&
+    readPositiveInteger(campaignPptDemandRecord.campaignId) === campaignId
+  ) {
+    var recordedId = readPositiveInteger(campaignPptDemandRecord.demandId);
+    if (recordedId !== null) return recordedId;
+  }
+  var contexts = [activeWorkflowContext, curDemand];
+  for (var index = 0; index < contexts.length; index += 1) {
+    var context = contexts[index];
+    if (!context || typeof context !== 'object') continue;
+    var contextCampaignId = readPositiveInteger(context.campaign_id);
+    if (contextCampaignId === null) contextCampaignId = readPositiveInteger(context.campaignId);
+    if (contextCampaignId !== null && contextCampaignId !== campaignId) continue;
+    var demandId = readPositiveInteger(context.demand_id);
+    if (demandId === null) demandId = readPositiveInteger(context.demandId);
+    if (demandId !== null) return demandId;
+  }
+  return null;
+}
+
+function buildCampaignPptDemandPayload(campaignId) {
+  var demand = curDemand && typeof curDemand === 'object' ? curDemand : {};
+  var workflow = activeWorkflowContext && typeof activeWorkflowContext === 'object'
+    ? activeWorkflowContext
+    : {};
+  var firstText = function(values) {
+    for (var index = 0; index < values.length; index += 1) {
+      if (values[index] === null || values[index] === undefined) continue;
+      var text = String(values[index]).trim();
+      if (text) return text;
+    }
+    return '';
+  };
+  return {
+    campaign_id: readPositiveInteger(campaignId),
+    brand_name: firstText([demand.brand, workflow.brand]),
+    company_name: firstText([demand.company, workflow.company]),
+    product_name: firstText([demand.product, workflow.product]),
+    industry: firstText([demand.category, demand.industry, workflow.industry]),
+    budget: firstText([demand.budget, workflow.budget]),
+    target_market: firstText([demand.area, demand.market, workflow.market]),
+    platform: firstText([demand.platform, demand.platforms, workflow.platform]),
+    data_json: Object.assign({}, demand, {
+      campaign_id: readPositiveInteger(campaignId)
+    })
+  };
+}
+
+async function ensureCampaignPptDemandRecord(campaignId) {
+  campaignId = readPositiveInteger(campaignId);
+  if (campaignId === null || readPositiveInteger(getActiveCampaignId()) !== campaignId) {
+    throw new Error('当前 Campaign 已切换，请重新生成方案。');
+  }
+
+  var payload = buildCampaignPptDemandPayload(campaignId);
+  var fingerprint = campaignPptFingerprint(payload);
+  if (
+    campaignPptDemandRecord &&
+    campaignPptDemandRecord.campaignId === campaignId &&
+    campaignPptDemandRecord.fingerprint === fingerprint
+  ) {
+    if (readPositiveInteger(campaignPptDemandRecord.demandId) !== null) {
+      return campaignPptDemandRecord.demandId;
+    }
+    if (campaignPptDemandRecord.promise) return campaignPptDemandRecord.promise;
+  }
+
+  var explicitDemandId = getActiveDemandId();
+  if (explicitDemandId !== null) {
+    campaignPptDemandRecord = {
+      campaignId: campaignId,
+      demandId: explicitDemandId,
+      fingerprint: fingerprint,
+      autoCreated: false
+    };
+    return explicitDemandId;
+  }
+
+  if (campaignPptDemandFingerprint !== fingerprint || !campaignPptDemandIdempotencyKey) {
+    campaignPptDemandFingerprint = fingerprint;
+    campaignPptDemandIdempotencyKey = createDemandAnalysisOperationId('ppt-demand-');
+  }
+  var requestAuthGeneration = AUTH_GENERATION;
+  var requestPromise = (async function() {
+    var response = await apiFetch('/demands', {
+      method: 'POST',
+      headers: campaignPptBuildHeaders({}, campaignPptDemandIdempotencyKey, 'ppt-demand'),
+      body: JSON.stringify(payload)
+    });
+    var data = response && typeof response.json === 'function'
+      ? await response.json().catch(function() { return {}; })
+      : {};
+    var demandId = readPositiveInteger(data && data.id);
+    var responseCampaignId = readPositiveInteger(data && data.campaign_id);
+    if (
+      !response || response.status !== 201 ||
+      demandId === null || responseCampaignId !== campaignId ||
+      readPositiveInteger(data && data.link_id) === null
+    ) {
+      throw new Error((data && (data.error || data.message)) || 'Campaign 需求归档失败。');
+    }
+    if (
+      requestAuthGeneration !== AUTH_GENERATION ||
+      readPositiveInteger(getActiveCampaignId()) !== campaignId
+    ) {
+      throw new Error('活动已切换，已忽略过期的 Campaign 需求归档结果。');
+    }
+    campaignPptDemandRecord = {
+      campaignId: campaignId,
+      demandId: demandId,
+      fingerprint: fingerprint,
+      autoCreated: true
+    };
+    if (curDemand && typeof curDemand === 'object') {
+      curDemand.campaign_id = campaignId;
+      curDemand.demand_id = demandId;
+    }
+    return demandId;
+  })();
+  campaignPptDemandRecord = {
+    campaignId: campaignId,
+    demandId: null,
+    fingerprint: fingerprint,
+    promise: requestPromise,
+    autoCreated: true
+  };
+  try {
+    return await requestPromise;
+  } catch (error) {
+    if (
+      campaignPptDemandRecord &&
+      campaignPptDemandRecord.campaignId === campaignId &&
+      campaignPptDemandRecord.promise === requestPromise
+    ) {
+      campaignPptDemandRecord = null;
+    }
+    throw error;
+  }
+}
+
+function prepareCampaignPptProposalRequest(url, options, demandId) {
+  var campaignId = readPositiveInteger(getActiveCampaignId());
+  if (url !== '/proposals' || campaignId === null) return { options: options, context: null };
+  demandId = readPositiveInteger(demandId);
+  if (demandId === null || !options || typeof options.body !== 'string') {
+    throw new Error('当前 Campaign 缺少有效需求记录。');
+  }
+  var body;
+  try { body = JSON.parse(options.body); } catch (error) { body = null; }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    throw new Error('PPT 方案内容格式无效。');
+  }
+  body.campaign_id = campaignId;
+  body.demand_id = demandId;
+  var outline;
+  try { outline = JSON.parse(body.content); } catch (error) { outline = null; }
+  if (!outline || typeof outline !== 'object' || Array.isArray(outline)) {
+    throw new Error('PPT 方案大纲格式无效。');
+  }
+  var fingerprint = campaignPptFingerprint(body);
+  if (campaignPptProposalFingerprint !== fingerprint || !campaignPptProposalIdempotencyKey) {
+    campaignPptProposalFingerprint = fingerprint;
+    campaignPptProposalIdempotencyKey = createDemandAnalysisOperationId('ppt-proposal-');
+  }
+  campaignPptArchiveState = { status: 'saving', message: '正在归档最新方案版本...' };
+  renderCampaignPptArchiveStatus();
+  return {
+    options: Object.assign({}, options, {
+      headers: campaignPptBuildHeaders(options, campaignPptProposalIdempotencyKey, 'ppt-proposal'),
+      body: JSON.stringify(body)
+    }),
+    context: {
+      authGeneration: AUTH_GENERATION,
+      campaignId: campaignId,
+      demandId: demandId,
+      outlineFingerprint: campaignPptFingerprint(outline),
+      idempotencyKey: campaignPptProposalIdempotencyKey
+    }
+  };
+}
+
+async function observeCampaignPptProposalSave(response, requestContext) {
+  if (!requestContext) return null;
+  var data = {};
+  try {
+    data = response && typeof response.clone === 'function'
+      ? await response.clone().json()
+      : {};
+  } catch (error) {}
+  var keys = data && typeof data === 'object' && !Array.isArray(data)
+    ? Object.keys(data).sort().join(',')
+    : '';
+  var valid = !!response && response.status === 201 &&
+    keys === 'campaign_id,content_sha256,id' &&
+    readPositiveInteger(data.id) !== null &&
+    readPositiveInteger(data.campaign_id) === requestContext.campaignId &&
+    typeof data.content_sha256 === 'string' && /^[a-f0-9]{64}$/.test(data.content_sha256) &&
+    requestContext.authGeneration === AUTH_GENERATION &&
+    readPositiveInteger(getActiveCampaignId()) === requestContext.campaignId &&
+    campaignPptFingerprint(lastPPTOutline) === requestContext.outlineFingerprint;
+  if (!valid) {
+    campaignPptProposalVersion = null;
+    campaignPptArchiveState = {
+      status: 'failed',
+      message: '最新方案尚未归档，请重试保存后再下载 PPTX。'
+    };
+    renderCampaignPptArchiveStatus();
+    return null;
+  }
+  campaignPptProposalVersion = {
+    campaignId: requestContext.campaignId,
+    demandId: requestContext.demandId,
+    proposalId: readPositiveInteger(data.id),
+    contentSha256: data.content_sha256,
+    outlineFingerprint: requestContext.outlineFingerprint,
+    idempotencyKey: requestContext.idempotencyKey
+  };
+  campaignPptArchiveState = {
+    status: 'ready',
+    message: '最新方案已归档，可生成并下载 PPTX。'
+  };
+  renderCampaignPptArchiveStatus();
+  return campaignPptProposalVersion;
+}
+
+function campaignPptProposalVersionMatches(outline, campaignId, demandId) {
+  return !!campaignPptProposalVersion &&
+    readPositiveInteger(campaignPptProposalVersion.campaignId) === readPositiveInteger(campaignId) &&
+    readPositiveInteger(campaignPptProposalVersion.demandId) === readPositiveInteger(demandId) &&
+    readPositiveInteger(campaignPptProposalVersion.proposalId) !== null &&
+    typeof campaignPptProposalVersion.contentSha256 === 'string' &&
+    /^[a-f0-9]{64}$/.test(campaignPptProposalVersion.contentSha256) &&
+    campaignPptProposalVersion.outlineFingerprint === campaignPptFingerprint(outline);
+}
+
+async function ensureCampaignPptProposalVersion() {
+  var campaignId = readPositiveInteger(getActiveCampaignId());
+  if (campaignId === null) return null;
+  if (!lastPPTOutline || typeof lastPPTOutline !== 'object') {
+    throw new Error('请先生成 PPT 大纲。');
+  }
+  var demandId = await ensureCampaignPptDemandRecord(campaignId);
+  if (campaignPptProposalVersionMatches(lastPPTOutline, campaignId, demandId)) {
+    return campaignPptProposalVersion;
+  }
+  var response = await apiFetch('/proposals', {
+    method: 'POST',
+    body: JSON.stringify({
+      demand_id: demandId,
+      template_id: 'ppt_html',
+      content: JSON.stringify(lastPPTOutline)
+    })
+  });
+  if (!response || !response.ok || !campaignPptProposalVersionMatches(lastPPTOutline, campaignId, demandId)) {
+    var data = {};
+    try { data = await response.clone().json(); } catch (error) {}
+    throw new Error(data.error || data.message || '最新方案归档失败。');
+  }
+  return campaignPptProposalVersion;
+}
+
+function prepareCampaignPptDownloadRequest(url, options) {
+  var campaignId = readPositiveInteger(getActiveCampaignId());
+  if (url !== '/proposal/generate-ppt' || campaignId === null) {
+    return { options: options, context: null };
+  }
+  if (!options || typeof options.body !== 'string') throw new Error('PPTX 请求格式无效。');
+  var body;
+  try { body = JSON.parse(options.body); } catch (error) { body = null; }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    throw new Error('PPTX 请求格式无效。');
+  }
+  var demandId = campaignPptDemandRecord && campaignPptDemandRecord.campaignId === campaignId
+    ? readPositiveInteger(campaignPptDemandRecord.demandId)
+    : null;
+  if (demandId === null && campaignPptProposalVersion) {
+    demandId = readPositiveInteger(campaignPptProposalVersion.demandId);
+  }
+  if (!campaignPptProposalVersionMatches(lastPPTOutline, campaignId, demandId)) {
+    throw new Error('最新方案尚未确认归档，请先保存后重试。');
+  }
+  body.campaign_id = campaignId;
+  body.proposal_id = campaignPptProposalVersion.proposalId;
+  body.proposal_content_sha256 = campaignPptProposalVersion.contentSha256;
+  body.outline = lastPPTOutline;
+  var fingerprint = campaignPptFingerprint(body);
+  if (campaignPptDownloadFingerprint !== fingerprint || !campaignPptDownloadIdempotencyKey) {
+    campaignPptDownloadFingerprint = fingerprint;
+    campaignPptDownloadIdempotencyKey = createDemandAnalysisOperationId('ppt-download-');
+  }
+  return {
+    options: Object.assign({}, options, {
+      headers: campaignPptBuildHeaders(options, campaignPptDownloadIdempotencyKey, 'ppt-download'),
+      body: JSON.stringify(body)
+    }),
+    context: {
+      authGeneration: AUTH_GENERATION,
+      campaignId: campaignId,
+      demandId: demandId,
+      proposalId: campaignPptProposalVersion.proposalId,
+      outlineFingerprint: campaignPptProposalVersion.outlineFingerprint
+    }
+  };
+}
+
+function invalidateCampaignPptProposalVersion(reason) {
+  campaignPptProposalVersion = null;
+  campaignPptProposalFingerprint = '';
+  campaignPptProposalIdempotencyKey = '';
+  campaignPptDownloadFingerprint = '';
+  campaignPptDownloadIdempotencyKey = '';
+  campaignPptArchiveState = {
+    status: 'dirty',
+    message: reason || 'PPT 大纲已修改，请先保存最新方案。'
+  };
+  renderCampaignPptArchiveStatus();
+}
+
+function resetCampaignPptArtifactState(preserveDemand) {
+  if (!preserveDemand) {
+    campaignPptDemandFingerprint = '';
+    campaignPptDemandIdempotencyKey = '';
+    campaignPptDemandRecord = null;
+  }
+  campaignPptProposalFingerprint = '';
+  campaignPptProposalIdempotencyKey = '';
+  campaignPptProposalVersion = null;
+  campaignPptDownloadFingerprint = '';
+  campaignPptDownloadIdempotencyKey = '';
+  campaignPptDownloadInFlight = false;
+  campaignPptArchiveState = { status: 'idle', message: '' };
+  renderCampaignPptArchiveStatus();
+}
+
+function renderCampaignPptArchiveStatus() {
+  if (typeof document === 'undefined') return;
+  var output = document.getElementById('proposalOutput');
+  if (!output) return;
+  var existing = document.getElementById('campaignPptArchiveStatus');
+  var campaignId = readPositiveInteger(getActiveCampaignId());
+  if (campaignId === null) {
+    if (existing) existing.remove();
+    return;
+  }
+  var status = existing || document.createElement('div');
+  status.id = 'campaignPptArchiveStatus';
+  status.setAttribute('role', 'status');
+  status.setAttribute('aria-live', 'polite');
+  status.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:12px;margin:12px 16px 16px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--surface);font-size:12px;color:var(--text2)';
+  while (status.firstChild) status.removeChild(status.firstChild);
+  var message = document.createElement('span');
+  var state = campaignPptArchiveState && campaignPptArchiveState.status
+    ? campaignPptArchiveState.status
+    : 'idle';
+  message.textContent = campaignPptArchiveState.message || (state === 'idle'
+    ? '尚未归档到当前项目。'
+    : '正在处理当前项目方案。');
+  status.appendChild(message);
+  if (state === 'failed' || state === 'dirty' || state === 'idle') {
+    var retry = document.createElement('button');
+    retry.type = 'button';
+    retry.className = 'btn btn-sm';
+    retry.textContent = state === 'idle' ? '保存最新方案' : '重试保存';
+    retry.addEventListener('click', function() {
+      retry.disabled = true;
+      ensureCampaignPptProposalVersion().catch(function(error) {
+        campaignPptArchiveState = { status: 'failed', message: error.message || '方案归档失败。' };
+        renderCampaignPptArchiveStatus();
+      });
+    });
+    status.appendChild(retry);
+  }
+  if (!existing) output.appendChild(status);
+  var downloadButton = output.querySelector('button[onclick="downloadPPTX()"]');
+  if (downloadButton) {
+    downloadButton.disabled = campaignPptDownloadInFlight || (state !== 'ready' && state !== 'generated');
+  }
+}
+
+function installCampaignPptArtifactBridge() {
+  if (
+    window.__tmCampaignPptArtifactBridgeInstalled ||
+    typeof window.downloadPPTX !== 'function'
+  ) return;
+  var originalDownloadPPTX = window.downloadPPTX;
+  var downloadPromise = null;
+  window.downloadPPTX = function() {
+    var args = arguments;
+    var receiver = this;
+    if (readPositiveInteger(getActiveCampaignId()) === null) {
+      return originalDownloadPPTX.apply(receiver, args);
+    }
+    if (downloadPromise) return downloadPromise;
+    campaignPptDownloadInFlight = true;
+    renderCampaignPptArchiveStatus();
+    var proposalPromise;
+    try {
+      proposalPromise = ensureCampaignPptProposalVersion();
+    } catch (error) {
+      proposalPromise = Promise.reject(error);
+    }
+    downloadPromise = Promise.resolve(proposalPromise)
+      .then(function() { return originalDownloadPPTX.apply(receiver, args); })
+      .catch(function(error) {
+        campaignPptArchiveState = {
+          status: 'failed',
+          message: error && error.message ? error.message : 'PPTX 生成失败。'
+        };
+        renderCampaignPptArchiveStatus();
+        if (typeof toast === 'function') toast(campaignPptArchiveState.message, 'error');
+      })
+      .finally(function() {
+        campaignPptDownloadInFlight = false;
+        downloadPromise = null;
+        renderCampaignPptArchiveStatus();
+      });
+    return downloadPromise;
+  };
+
+  [
+    'savePPTEditorAndRender',
+    'previewEditedPPT',
+    'addPPTEditorSlide',
+    'duplicatePPTEditorSlide',
+    'deletePPTEditorSlide',
+    'movePPTEditorSlide',
+    'selectPPTEditorSlide'
+  ].forEach(function(name) {
+    if (typeof window[name] !== 'function') return;
+    var original = window[name];
+    window[name] = function() {
+      var before = campaignPptFingerprint(lastPPTOutline);
+      var result = original.apply(this, arguments);
+      var compare = function() {
+        if (
+          readPositiveInteger(getActiveCampaignId()) !== null &&
+          before !== campaignPptFingerprint(lastPPTOutline)
+        ) {
+          invalidateCampaignPptProposalVersion('PPT 大纲已修改，请保存最新方案后再下载。');
+        }
+      };
+      if (result && typeof result.then === 'function') return result.then(function(value) {
+        compare();
+        return value;
+      });
+      compare();
+      return result;
+    };
+  });
+  window.__tmCampaignPptArtifactBridgeInstalled = true;
+  renderCampaignPptArchiveStatus();
+}
+
 function installCampaignPptRenderFence() {
   if (window.__tmCampaignPptRenderFenceInstalled || typeof window.renderPPTResult !== 'function') return;
   var originalRenderPPTResult = window.renderPPTResult;
@@ -224,7 +710,9 @@ function installCampaignPptRenderFence() {
       if (typeof lastPPTSource !== 'undefined') lastPPTSource = '';
       return;
     }
-    return originalRenderPPTResult.call(this, parsed, warning, contextWarning);
+    var result = originalRenderPPTResult.call(this, parsed, warning, contextWarning);
+    if (typeof renderCampaignPptArchiveStatus === 'function') renderCampaignPptArchiveStatus();
+    return result;
   };
   window.__tmCampaignPptRenderFenceInstalled = true;
 }
@@ -232,6 +720,9 @@ function installCampaignPptRenderFence() {
 async function generateCampaignPPT() {
   var requestContext = beginCampaignPptGeneration();
   if (!requestContext) return;
+  if (readPositiveInteger(requestContext.campaignId) !== null) {
+    resetCampaignPptArtifactState(true);
+  }
   try {
     await generateHTMLPPT();
   } finally {
@@ -240,8 +731,12 @@ async function generateCampaignPPT() {
 }
 
 if (typeof document !== 'undefined') {
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', installCampaignPptRenderFence);
-  else setTimeout(installCampaignPptRenderFence, 0);
+  var installCampaignPptBridges = function() {
+    installCampaignPptRenderFence();
+    installCampaignPptArtifactBridge();
+  };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', installCampaignPptBridges);
+  else setTimeout(installCampaignPptBridges, 0);
 }
 
 function prepareCampaignPptOutlineRequest(url, opts) {
@@ -349,6 +844,20 @@ async function apiFetch(url, opts) {
   ) {
     return { ok: true, status: 204 };
   }
+  var campaignProposalContext = null;
+  var campaignDownloadContext = null;
+  var campaignId = readPositiveInteger(getActiveCampaignId());
+  if (url === '/proposals' && campaignId !== null) {
+    var demandId = await ensureCampaignPptDemandRecord(campaignId);
+    var preparedProposal = prepareCampaignPptProposalRequest(url, opts, demandId);
+    opts = preparedProposal.options;
+    campaignProposalContext = preparedProposal.context;
+  }
+  if (url === '/proposal/generate-ppt' && campaignId !== null) {
+    var preparedDownload = prepareCampaignPptDownloadRequest(url, opts);
+    opts = preparedDownload.options;
+    campaignDownloadContext = preparedDownload.context;
+  }
   opts = prepareCampaignPptOutlineRequest(url, opts);
   var upstreamSignal = null;
   var forwardAbort = null;
@@ -379,6 +888,23 @@ async function apiFetch(url, opts) {
     if (activePptGenerationContext && activePptGenerationContext.abortController === pptAbortController) {
       activePptGenerationContext.abortController = null;
     }
+  }
+  if (campaignProposalContext) {
+    await observeCampaignPptProposalSave(resp, campaignProposalContext);
+  }
+  if (
+    campaignDownloadContext && resp.ok &&
+    campaignDownloadContext.authGeneration === AUTH_GENERATION &&
+    readPositiveInteger(getActiveCampaignId()) === campaignDownloadContext.campaignId &&
+    campaignPptProposalVersion &&
+    campaignPptProposalVersion.proposalId === campaignDownloadContext.proposalId &&
+    campaignPptProposalVersion.outlineFingerprint === campaignDownloadContext.outlineFingerprint
+  ) {
+    campaignPptArchiveState = {
+      status: 'generated',
+      message: 'PPTX 已生成并归档到当前项目。'
+    };
+    renderCampaignPptArchiveStatus();
   }
   if (resp.status === 401 && requestAuthGeneration === AUTH_GENERATION && requestToken === AUTH_TOKEN) {
     handleAuthExpired();
@@ -1076,6 +1602,7 @@ function setWorkflowContext(context) {
   if (typeof invalidateProposalDraftRequests === 'function') invalidateProposalDraftRequests();
   if (previousCampaignId !== nextCampaignId) {
     if (typeof invalidateCampaignPptGeneration === 'function') invalidateCampaignPptGeneration();
+    resetCampaignPptArtifactState();
     selectedKnowledgeEntryIds = [];
     selectedKnowledgeCampaignId = nextCampaignId;
     currentAIConversationId = null;
@@ -3740,6 +4267,7 @@ function goStep3() {
 function resetDemand() {
   invalidateDemandAnalysisRequests();
   invalidateProposalDraftRequests();
+  resetCampaignPptArtifactState();
   uploadedDemandContent = '';
   uploadedDemandFileName = '';
   demandAnalysisResult = '';
