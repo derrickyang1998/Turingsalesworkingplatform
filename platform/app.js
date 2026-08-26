@@ -5161,6 +5161,52 @@ function renderAdminAIReference(reference) {
   }
   return prefix + esc(label);
 }
+function adminAIRunStatusLabel(status) {
+  var labels = {
+    succeeded: '成功',
+    degraded: '降级',
+    failed: '失败',
+    mixed: '混合',
+    incomplete: '未完成',
+    unknown: '未知',
+    empty: '无运行'
+  };
+  return labels[String(status || '')] || labels.unknown;
+}
+function adminAIRunNumber(value) {
+  var parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : 0;
+}
+function adminAIRunSummaryText(summary) {
+  summary = summary || {};
+  var text = adminAIRunNumber(summary.run_count) + ' 次 · '
+    + adminAIRunStatusLabel(summary.status) + ' · '
+    + adminAIRunNumber(summary.total_tokens) + ' tokens';
+  var latency = Number(summary.average_latency_ms);
+  if (Number.isSafeInteger(latency) && latency >= 0) text += ' · ' + latency + ' ms';
+  return text;
+}
+function adminAIMessageMetaText(message) {
+  message = message || {};
+  var role = String(message.role || '');
+  var run = role === 'assistant' && message.run && typeof message.run === 'object'
+    ? message.run
+    : null;
+  if (!run) {
+    var legacy = role;
+    if (message.model) legacy += ' · ' + String(message.model);
+    if (message.total_tokens) legacy += ' · tokens ' + adminAIRunNumber(message.total_tokens);
+    return legacy;
+  }
+  var text = role + ' · ' + String(run.model || '-') + ' · '
+    + adminAIRunStatusLabel(run.status) + ' · P '
+    + adminAIRunNumber(run.prompt_tokens) + ' / C '
+    + adminAIRunNumber(run.completion_tokens) + ' / T '
+    + adminAIRunNumber(run.total_tokens);
+  var latency = Number(run.latency_ms);
+  if (Number.isSafeInteger(latency) && latency >= 0) text += ' · ' + latency + ' ms';
+  return text;
+}
 function loadAdminAIAudit() {
   var list = document.getElementById('ad_aiAuditList');
   if (!list) return Promise.resolve([]);
@@ -5181,7 +5227,7 @@ function loadAdminAIAudit() {
       list.innerHTML = '<p style="opacity:.5;font-size:12px">没有符合条件的 AI 对话。</p>';
       return rows;
     }
-    list.innerHTML = '<table><thead style="position:sticky;top:0;z-index:1;background:#fff"><tr><th>时间</th><th>用户</th><th>模块</th><th>Campaign</th><th>标题</th><th>消息</th><th>引用</th><th>归档</th><th>最后回复</th><th>操作</th></tr></thead><tbody>'
+    list.innerHTML = '<table><thead style="position:sticky;top:0;z-index:1;background:#fff"><tr><th>时间</th><th>用户</th><th>模块</th><th>Campaign</th><th>标题</th><th>消息</th><th>运行</th><th>引用</th><th>归档</th><th>最后回复</th><th>操作</th></tr></thead><tbody>'
       + rows.map(function(c) {
         var campaign = c.campaign_id ? ('Campaign #' + c.campaign_id) : '-';
         var references = 'KB ' + (c.knowledge_reference_count || 0) + ' / Web ' + (c.web_reference_count || 0);
@@ -5195,6 +5241,7 @@ function loadAdminAIAudit() {
           + '<td style="white-space:nowrap">' + esc(campaign) + '</td>'
           + '<td><strong>' + esc(c.title || '-') + '</strong></td>'
           + '<td>' + (c.message_count || 0) + '</td>'
+          + '<td style="white-space:nowrap">' + esc(adminAIRunSummaryText(c.run_summary)) + '</td>'
           + '<td style="white-space:nowrap">' + esc(references) + '</td>'
           + '<td style="white-space:nowrap">' + archive + '</td>'
           + '<td style="max-width:320px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(c.last_answer || '') + '</td>'
@@ -5220,14 +5267,14 @@ function loadAdminAIConversation(id) {
     var campaign = c.campaign_id ? ('Campaign #' + c.campaign_id) : 'No Campaign';
     var archive = c.archived_summary_id ? ('Archived #' + c.archived_summary_id) : 'Unarchived';
     var html = '<div style="background:#fafafa;border:1px solid #eee;border-radius:8px;padding:16px">'
-      + '<div style="display:flex;justify-content:space-between;gap:10px;margin-bottom:10px"><div><strong>' + esc(c.title || ('Conversation #' + id)) + '</strong><div style="font-size:12px;opacity:.6">' + esc(c.display_name || c.username || '-') + ' / ' + esc(c.source_module || '-') + ' / ' + esc(campaign) + ' / ' + esc(archive) + ' / ' + esc(c.created_at || '') + '</div></div><button class="btn btn-xs" aria-label="关闭详情" title="关闭详情" onclick="document.getElementById(&quot;ad_aiAuditDetail&quot;).innerHTML=&quot;&quot;">&times;</button></div>';
+      + '<div style="display:flex;justify-content:space-between;gap:10px;margin-bottom:10px"><div><strong>' + esc(c.title || ('Conversation #' + id)) + '</strong><div style="font-size:12px;opacity:.6">' + esc(c.display_name || c.username || '-') + ' / ' + esc(c.source_module || '-') + ' / ' + esc(campaign) + ' / ' + esc(archive) + ' / ' + esc(c.created_at || '') + '</div><div style="font-size:11px;opacity:.65;margin-top:4px">运行：' + esc(adminAIRunSummaryText(c.run_summary)) + '</div></div><button class="btn btn-xs" aria-label="关闭详情" title="关闭详情" onclick="document.getElementById(&quot;ad_aiAuditDetail&quot;).innerHTML=&quot;&quot;">&times;</button></div>';
     html += messages.map(function(m) {
       var refs = m.references || [];
       var refHtml = refs.length ? '<div style="margin-top:8px;font-size:11px">引用：' + refs.map(function(r) {
         return renderAdminAIReference(r);
       }).join(' | ') + '</div>' : '';
       return '<div style="padding:10px;border:1px solid #eee;border-radius:8px;background:#fff;margin-bottom:8px">'
-        + '<div style="font-size:11px;opacity:.55;margin-bottom:4px">' + esc(m.role || '') + ' · ' + esc(m.model || '') + ' · tokens ' + (m.total_tokens || 0) + '</div>'
+        + '<div style="font-size:11px;opacity:.55;margin-bottom:4px">' + esc(adminAIMessageMetaText(m)) + '</div>'
         + '<div style="font-size:12px;line-height:1.7;white-space:pre-wrap">' + esc(m.content || '') + '</div>'
         + refHtml
         + '</div>';

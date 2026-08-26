@@ -1658,7 +1658,161 @@ function stripConversationReadMetadata(row) {
   delete projected.__campaign_allowed;
   delete projected.__access_role;
   delete projected.last_message_at;
+  delete projected.latest_message_role;
   return projected;
+}
+
+function boundedAiRunInteger(value) {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : 0;
+}
+
+function boundedAiRunAggregate(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+  if (parsed >= Number.MAX_SAFE_INTEGER) return Number.MAX_SAFE_INTEGER;
+  return Math.floor(parsed);
+}
+
+function addBoundedAiRunInteger(current, value) {
+  const left = boundedAiRunInteger(current);
+  const right = boundedAiRunInteger(value);
+  return left > Number.MAX_SAFE_INTEGER - right
+    ? Number.MAX_SAFE_INTEGER
+    : left + right;
+}
+
+function parseAiRunMetadata(value) {
+  try {
+    const parsed = JSON.parse(value || '{}');
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return { metadata: {}, valid: false };
+    }
+    return { metadata: parsed, valid: true };
+  } catch (error) {
+    return { metadata: {}, valid: false };
+  }
+}
+
+function aiRunStatus(parsedMetadata) {
+  if (!parsedMetadata.valid) return 'unknown';
+  const metadata = parsedMetadata.metadata;
+  if (metadata.status === 'succeeded' || metadata.status === 'degraded' || metadata.status === 'failed') {
+    return metadata.status;
+  }
+  if (metadata.status !== undefined && metadata.status !== null && metadata.status !== '') return 'unknown';
+  return metadata.degraded === true ? 'degraded' : 'succeeded';
+}
+
+function aiRunLatency(metadata) {
+  const value = metadata && metadata.latency_ms;
+  if (typeof value !== 'number' || !Number.isSafeInteger(value)) return null;
+  if (value < 0 || value > 60 * 60 * 1000) return null;
+  return value;
+}
+
+function projectAssistantRun(message, references, parsedMetadata) {
+  const parsed = parsedMetadata || parseAiRunMetadata(message && message.metadata_json);
+  const visibleReferences = Array.isArray(references) ? references : [];
+  return {
+    run_id: positiveId(message && message.id),
+    status: aiRunStatus(parsed),
+    model: message && typeof message.model === 'string' && message.model ? message.model : null,
+    prompt_tokens: boundedAiRunInteger(message && message.prompt_tokens),
+    completion_tokens: boundedAiRunInteger(message && message.completion_tokens),
+    total_tokens: boundedAiRunInteger(message && message.total_tokens),
+    latency_ms: aiRunLatency(parsed.metadata),
+    knowledge_reference_count: visibleReferences.filter((reference) => reference.reference_type === 'knowledge').length,
+    web_reference_count: visibleReferences.filter((reference) => reference.reference_type === 'web').length,
+    created_at: message && message.created_at ? message.created_at : null
+  };
+}
+
+function summarizeAiRuns(runs, options) {
+  const projectedRuns = Array.isArray(runs) ? runs : [];
+  const opts = options || {};
+  const counts = { succeeded: 0, degraded: 0, failed: 0, unknown: 0 };
+  let promptTokens = 0;
+  let completionTokens = 0;
+  let totalTokens = 0;
+  let latencyTotal = 0;
+  let latencyCount = 0;
+  projectedRuns.forEach((run) => {
+    const status = Object.hasOwn(counts, run.status) ? run.status : 'unknown';
+    counts[status] += 1;
+    promptTokens = addBoundedAiRunInteger(promptTokens, run.prompt_tokens);
+    completionTokens = addBoundedAiRunInteger(completionTokens, run.completion_tokens);
+    totalTokens = addBoundedAiRunInteger(totalTokens, run.total_tokens);
+    if (run.latency_ms !== null) {
+      latencyTotal = addBoundedAiRunInteger(latencyTotal, run.latency_ms);
+      latencyCount += 1;
+    }
+  });
+  const activeStates = Object.values(counts).filter((count) => count > 0).length;
+  let status = 'empty';
+  if (opts.latestMessageRole === 'user') status = 'incomplete';
+  else if (projectedRuns.length === 0) status = boundedAiRunInteger(opts.messageCount) > 0 ? 'incomplete' : 'empty';
+  else if (activeStates > 1) status = 'mixed';
+  else if (counts.failed > 0) status = 'failed';
+  else if (counts.degraded > 0) status = 'degraded';
+  else if (counts.unknown > 0) status = 'unknown';
+  else status = 'succeeded';
+  return {
+    status,
+    run_count: projectedRuns.length,
+    succeeded_count: counts.succeeded,
+    degraded_count: counts.degraded,
+    failed_count: counts.failed,
+    unknown_count: counts.unknown,
+    prompt_tokens: promptTokens,
+    completion_tokens: completionTokens,
+    total_tokens: totalTokens,
+    average_latency_ms: latencyCount > 0 ? Math.round(latencyTotal / latencyCount) : null,
+    latest_model: projectedRuns.length > 0 ? projectedRuns[projectedRuns.length - 1].model : null,
+    knowledge_reference_count: boundedAiRunInteger(opts.knowledgeReferenceCount),
+    web_reference_count: boundedAiRunInteger(opts.webReferenceCount)
+  };
+}
+
+function summarizeAiRunAggregate(row, options) {
+  const aggregate = row || {};
+  const opts = options || {};
+  const counts = {
+    succeeded: boundedAiRunInteger(aggregate.succeeded_count),
+    degraded: boundedAiRunInteger(aggregate.degraded_count),
+    failed: boundedAiRunInteger(aggregate.failed_count),
+    unknown: boundedAiRunInteger(aggregate.unknown_count)
+  };
+  const runCount = boundedAiRunInteger(aggregate.run_count);
+  const activeStates = Object.values(counts).filter((count) => count > 0).length;
+  let status = 'empty';
+  if (opts.latestMessageRole === 'user') status = 'incomplete';
+  else if (runCount === 0) status = boundedAiRunInteger(opts.messageCount) > 0 ? 'incomplete' : 'empty';
+  else if (activeStates > 1) status = 'mixed';
+  else if (counts.failed > 0) status = 'failed';
+  else if (counts.degraded > 0) status = 'degraded';
+  else if (counts.unknown > 0) status = 'unknown';
+  else status = 'succeeded';
+  const latency = aggregate.average_latency_ms === null || aggregate.average_latency_ms === undefined
+    ? null
+    : boundedAiRunInteger(Math.round(Number(aggregate.average_latency_ms)));
+  return {
+    status,
+    run_count: runCount,
+    succeeded_count: counts.succeeded,
+    degraded_count: counts.degraded,
+    failed_count: counts.failed,
+    unknown_count: counts.unknown,
+    prompt_tokens: boundedAiRunAggregate(aggregate.prompt_tokens),
+    completion_tokens: boundedAiRunAggregate(aggregate.completion_tokens),
+    total_tokens: boundedAiRunAggregate(aggregate.total_tokens),
+    average_latency_ms: latency,
+    latest_model: typeof aggregate.latest_model === 'string' && aggregate.latest_model
+      ? aggregate.latest_model
+      : null,
+    knowledge_reference_count: boundedAiRunInteger(aggregate.knowledge_reference_count),
+    web_reference_count: boundedAiRunInteger(aggregate.web_reference_count)
+  };
 }
 
 function auditTargetForConversation(row) {
@@ -1988,7 +2142,14 @@ function listConversations(db, opts) {
             SELECT MAX(activity_message.created_at)
             FROM ai_messages activity_message
             WHERE activity_message.conversation_id=authorized.id
-          ) AS last_message_at
+          ) AS last_message_at,
+          (
+            SELECT latest_message.role
+            FROM ai_messages latest_message
+            WHERE latest_message.conversation_id=authorized.id
+            ORDER BY latest_message.created_at DESC,latest_message.id DESC
+            LIMIT 1
+          ) AS latest_message_role
         FROM authorized_conversations authorized
       ),
       authorized_conversation_activity AS MATERIALIZED (
@@ -2046,12 +2207,122 @@ function listConversations(db, opts) {
       ...filters.params,
       conversationReadLimit(opts.limit)
     );
+    const runRows = rows.length === 0 ? [] : db.prepare(`
+      WITH selected_conversations(conversation_id) AS (
+        VALUES ${rows.map(() => '(?)').join(',')}
+      ),
+      metadata_source AS MATERIALIZED (
+        SELECT
+          message.id,message.conversation_id,message.model,message.prompt_tokens,
+          message.completion_tokens,message.total_tokens,message.created_at,
+          CASE
+            WHEN message.metadata_json IS NULL OR message.metadata_json='' THEN '{}'
+            WHEN json_valid(message.metadata_json)=1 THEN message.metadata_json
+            ELSE NULL
+          END AS run_metadata
+        FROM ai_messages message
+        JOIN selected_conversations selected
+          ON selected.conversation_id=message.conversation_id
+        WHERE message.role='assistant'
+      ),
+      projected_runs AS MATERIALIZED (
+        SELECT
+          source.*,
+          CASE
+            WHEN source.run_metadata IS NULL OR json_type(source.run_metadata,'$')<>'object'
+              THEN 'unknown'
+            WHEN json_extract(source.run_metadata,'$.status') IN ('succeeded','degraded','failed')
+              THEN json_extract(source.run_metadata,'$.status')
+            WHEN json_type(source.run_metadata,'$.status') IS NOT NULL
+              AND NOT (
+                json_type(source.run_metadata,'$.status')='null'
+                OR (
+                  json_type(source.run_metadata,'$.status')='text'
+                  AND json_extract(source.run_metadata,'$.status')=''
+                )
+              ) THEN 'unknown'
+            WHEN json_type(source.run_metadata,'$.degraded')='true' THEN 'degraded'
+            ELSE 'succeeded'
+          END AS run_status,
+          CASE
+            WHEN json_type(source.run_metadata,'$.latency_ms')='integer'
+              AND json_extract(source.run_metadata,'$.latency_ms') BETWEEN 0 AND 3600000
+            THEN json_extract(source.run_metadata,'$.latency_ms')
+            ELSE NULL
+          END AS latency_ms,
+          ROW_NUMBER() OVER (
+            PARTITION BY source.conversation_id
+            ORDER BY source.created_at DESC,source.id DESC
+          ) AS latest_rank
+        FROM metadata_source source
+      ),
+      run_totals AS MATERIALIZED (
+        SELECT
+          run.conversation_id,
+          COUNT(*) AS run_count,
+          SUM(run.run_status='succeeded') AS succeeded_count,
+          SUM(run.run_status='degraded') AS degraded_count,
+          SUM(run.run_status='failed') AS failed_count,
+          SUM(run.run_status='unknown') AS unknown_count,
+          TOTAL(CASE
+            WHEN typeof(run.prompt_tokens) IN ('integer','real')
+              AND run.prompt_tokens BETWEEN 0 AND 9007199254740991
+              AND run.prompt_tokens=CAST(run.prompt_tokens AS INTEGER)
+            THEN run.prompt_tokens ELSE 0 END
+          ) AS prompt_tokens,
+          TOTAL(CASE
+            WHEN typeof(run.completion_tokens) IN ('integer','real')
+              AND run.completion_tokens BETWEEN 0 AND 9007199254740991
+              AND run.completion_tokens=CAST(run.completion_tokens AS INTEGER)
+            THEN run.completion_tokens ELSE 0 END
+          ) AS completion_tokens,
+          TOTAL(CASE
+            WHEN typeof(run.total_tokens) IN ('integer','real')
+              AND run.total_tokens BETWEEN 0 AND 9007199254740991
+              AND run.total_tokens=CAST(run.total_tokens AS INTEGER)
+            THEN run.total_tokens ELSE 0 END
+          ) AS total_tokens,
+          AVG(run.latency_ms) AS average_latency_ms,
+          MAX(CASE WHEN run.latest_rank=1 THEN run.model END) AS latest_model
+        FROM projected_runs run
+        GROUP BY run.conversation_id
+      ),
+      reference_totals AS MATERIALIZED (
+        SELECT
+          message.conversation_id,
+          SUM(reference.reference_type='knowledge') AS knowledge_reference_count,
+          SUM(reference.reference_type='web') AS web_reference_count
+        FROM ai_messages message
+        JOIN selected_conversations selected
+          ON selected.conversation_id=message.conversation_id
+        JOIN ai_references reference ON reference.message_id=message.id
+        WHERE message.role='assistant'
+        GROUP BY message.conversation_id
+      )
+      SELECT
+        totals.*,
+        COALESCE(reference.knowledge_reference_count,0) AS knowledge_reference_count,
+        COALESCE(reference.web_reference_count,0) AS web_reference_count
+      FROM run_totals totals
+      LEFT JOIN reference_totals reference
+        ON reference.conversation_id=totals.conversation_id
+    `).all(...rows.map((row) => row.id));
+    const runsByConversation = new Map(
+      runRows.map((row) => [row.conversation_id, row])
+    );
     persistPrivilegedConversationReadAudit(db, actor, opts, {
       action: 'admin_list_ai_conversations',
       filterNames: filters.filterNames,
       rows
     });
-    return rows.map(stripConversationReadMetadata);
+    return rows.map((row) => {
+      const conversation = stripConversationReadMetadata(row);
+      conversation.run_summary = summarizeAiRunAggregate(runsByConversation.get(row.id), {
+        messageCount: row.message_count,
+        latestMessageRole: row.latest_message_role
+      });
+      return conversation;
+    });
   }).immediate();
 }
 
@@ -2094,14 +2365,17 @@ function getConversation(db, opts) {
       byMessage[ref.message_id].push(ref);
     });
     messages.forEach(function(message) {
-      message.metadata = (() => {
-        try { return JSON.parse(message.metadata_json || '{}'); } catch (e) { return {}; }
-      })();
+      const parsedMetadata = parseAiRunMetadata(message.metadata_json);
+      message.metadata = parsedMetadata.metadata;
+      if (!parsedMetadata.valid) message.metadata_valid = false;
       message.references = knowledge.redactKnowledgeReferences(
         db,
         byMessage[message.id] || [],
         opts.user
       );
+      if (message.role === 'assistant') {
+        message.run = projectAssistantRun(message, byMessage[message.id] || [], parsedMetadata);
+      }
     });
     persistPrivilegedConversationReadAudit(db, actor, opts, {
       action: 'admin_view_ai_conversation',
@@ -2110,6 +2384,22 @@ function getConversation(db, opts) {
     });
     const conversation = stripConversationReadMetadata(authorized);
     conversation.messages = messages;
+    const projectedRuns = messages.filter((message) => message.run).map((message) => message.run);
+    conversation.run_summary = summarizeAiRuns(
+      projectedRuns,
+      {
+        messageCount: messages.length,
+        latestMessageRole: messages.length > 0 ? messages[messages.length - 1].role : null,
+        knowledgeReferenceCount: projectedRuns.reduce(
+          (count, run) => addBoundedAiRunInteger(count, run.knowledge_reference_count),
+          0
+        ),
+        webReferenceCount: projectedRuns.reduce(
+          (count, run) => addBoundedAiRunInteger(count, run.web_reference_count),
+          0
+        )
+      }
+    );
     return conversation;
   }).immediate();
 }

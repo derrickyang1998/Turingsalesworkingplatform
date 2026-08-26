@@ -750,6 +750,382 @@ test('AI conversation audit dates include a persisted prompt even when completio
   }
 });
 
+test('AI conversation reads expose one bounded run projection for status, tokens, latency, and references', () => {
+  const db = openDatabase();
+  try {
+    const fixture = createFixture(db);
+    const conversationId = createConversation(db, {
+      userId: fixture.owner.id,
+      title: 'Run projection evidence',
+      message: false
+    });
+    const insertMessage = db.prepare(`
+      INSERT INTO ai_messages (
+        conversation_id,user_id,role,content,model,prompt_tokens,
+        completion_tokens,total_tokens,metadata_json,created_at
+      ) VALUES (?,?,?,?,?,?,?,?,?,?)
+    `);
+    insertMessage.run(
+      conversationId,
+      fixture.owner.id,
+      'user',
+      'Project one auditable run model',
+      null,
+      0,
+      0,
+      0,
+      '{}',
+      '2026-07-05 10:00:00'
+    );
+    const succeededId = Number(insertMessage.run(
+      conversationId,
+      fixture.owner.id,
+      'assistant',
+      'Succeeded answer',
+      'deepseek-chat',
+      10,
+      5,
+      15,
+      JSON.stringify({ status: 'succeeded', latency_ms: 420 }),
+      '2026-07-05 10:00:01'
+    ).lastInsertRowid);
+    const degradedId = Number(insertMessage.run(
+      conversationId,
+      fixture.owner.id,
+      'assistant',
+      'Degraded answer',
+      'deepseek-chat',
+      20,
+      8,
+      28,
+      JSON.stringify({ degraded: true, latency_ms: 180 }),
+      '2026-07-05 10:00:02'
+    ).lastInsertRowid);
+    const unknownId = Number(insertMessage.run(
+      conversationId,
+      fixture.owner.id,
+      'assistant',
+      'Legacy answer with malformed run metadata',
+      'legacy-model',
+      3,
+      4,
+      7,
+      '{',
+      '2026-07-05 10:00:03'
+    ).lastInsertRowid);
+    db.prepare(`
+      INSERT INTO ai_references (
+        message_id,reference_type,reference_id,title,url,snippet,provider,metadata_json
+      ) VALUES (?,'knowledge','71','Internal method','','','knowledge','{}')
+    `).run(succeededId);
+    db.prepare(`
+      INSERT INTO ai_references (
+        message_id,reference_type,reference_id,title,url,snippet,provider,metadata_json
+      ) VALUES (?,'web','web-1','External evidence','https://example.com/evidence','','tavily','{}')
+    `).run(degradedId);
+
+    const rows = ai.listConversations(db, secureRead(
+      fixture.platformAdmin,
+      fixture.platformAdminAuth,
+      'run-projection-list-request',
+      { q: 'Run projection evidence' }
+    ));
+    assert.equal(rows.length, 1);
+    assert.deepEqual(rows[0].run_summary, {
+      status: 'mixed',
+      run_count: 3,
+      succeeded_count: 1,
+      degraded_count: 1,
+      failed_count: 0,
+      unknown_count: 1,
+      prompt_tokens: 33,
+      completion_tokens: 17,
+      total_tokens: 50,
+      average_latency_ms: 300,
+      latest_model: 'legacy-model',
+      knowledge_reference_count: 1,
+      web_reference_count: 1
+    });
+    for (const field of [
+      'run_count',
+      'succeeded_run_count',
+      'degraded_run_count',
+      'failed_run_count',
+      'unknown_run_count',
+      'run_prompt_tokens',
+      'run_completion_tokens',
+      'run_total_tokens',
+      'average_run_latency_ms',
+      'latest_run_model'
+    ]) {
+      assert.equal(Object.hasOwn(rows[0], field), false);
+    }
+
+    const detail = ai.getConversation(db, secureRead(
+      fixture.platformAdmin,
+      fixture.platformAdminAuth,
+      'run-projection-detail-request',
+      { id: conversationId }
+    ));
+    assert.deepEqual(detail.run_summary, rows[0].run_summary);
+    assert.equal(Object.hasOwn(detail.messages[0], 'run'), false);
+    assert.deepEqual(detail.messages[1].run, {
+      run_id: succeededId,
+      status: 'succeeded',
+      model: 'deepseek-chat',
+      prompt_tokens: 10,
+      completion_tokens: 5,
+      total_tokens: 15,
+      latency_ms: 420,
+      knowledge_reference_count: 1,
+      web_reference_count: 0,
+      created_at: '2026-07-05 10:00:01'
+    });
+    assert.deepEqual(detail.messages[2].run, {
+      run_id: degradedId,
+      status: 'degraded',
+      model: 'deepseek-chat',
+      prompt_tokens: 20,
+      completion_tokens: 8,
+      total_tokens: 28,
+      latency_ms: 180,
+      knowledge_reference_count: 0,
+      web_reference_count: 1,
+      created_at: '2026-07-05 10:00:02'
+    });
+    assert.deepEqual(detail.messages[3].run, {
+      run_id: unknownId,
+      status: 'unknown',
+      model: 'legacy-model',
+      prompt_tokens: 3,
+      completion_tokens: 4,
+      total_tokens: 7,
+      latency_ms: null,
+      knowledge_reference_count: 0,
+      web_reference_count: 0,
+      created_at: '2026-07-05 10:00:03'
+    });
+    assert.equal(detail.messages[3].metadata_valid, false);
+  } finally {
+    db.close();
+  }
+});
+
+test('AI conversation run summary marks a persisted prompt without an assistant result as incomplete', () => {
+  const db = openDatabase();
+  try {
+    const fixture = createFixture(db);
+    const conversationId = createConversation(db, {
+      userId: fixture.owner.id,
+      title: 'Incomplete run evidence',
+      role: 'user',
+      content: 'Prompt retained before provider failure'
+    });
+
+    const row = ai.listConversations(db, secureRead(
+      fixture.platformAdmin,
+      fixture.platformAdminAuth,
+      'run-projection-incomplete-list',
+      { q: 'Incomplete run evidence' }
+    ))[0];
+    assert.deepEqual(row.run_summary, {
+      status: 'incomplete',
+      run_count: 0,
+      succeeded_count: 0,
+      degraded_count: 0,
+      failed_count: 0,
+      unknown_count: 0,
+      prompt_tokens: 0,
+      completion_tokens: 0,
+      total_tokens: 0,
+      average_latency_ms: null,
+      latest_model: null,
+      knowledge_reference_count: 0,
+      web_reference_count: 0
+    });
+    const detail = ai.getConversation(db, secureRead(
+      fixture.platformAdmin,
+      fixture.platformAdminAuth,
+      'run-projection-incomplete-detail',
+      { id: conversationId }
+    ));
+    assert.deepEqual(detail.run_summary, row.run_summary);
+  } finally {
+    db.close();
+  }
+});
+
+test('AI conversation run summary keeps totals bounded and marks a trailing prompt incomplete', () => {
+  const db = openDatabase();
+  try {
+    const fixture = createFixture(db);
+    const conversationId = createConversation(db, {
+      userId: fixture.owner.id,
+      title: 'Bounded incomplete run evidence',
+      message: false
+    });
+    const insertMessage = db.prepare(`
+      INSERT INTO ai_messages (
+        conversation_id,user_id,role,content,model,prompt_tokens,
+        completion_tokens,total_tokens,metadata_json,created_at
+      ) VALUES (?,?,?,?,?,?,?,?,?,?)
+    `);
+    for (const [index, latency] of [[1, null], [2, '']]) {
+      insertMessage.run(
+        conversationId,
+        fixture.owner.id,
+        'assistant',
+        `Large token run ${index}`,
+        `bounded-model-${index}`,
+        Number.MAX_SAFE_INTEGER,
+        Number.MAX_SAFE_INTEGER,
+        Number.MAX_SAFE_INTEGER,
+        JSON.stringify({ latency_ms: latency }),
+        `2026-07-06 10:00:0${index}`
+      );
+    }
+    insertMessage.run(
+      conversationId,
+      fixture.owner.id,
+      'user',
+      'The provider never completed this latest prompt',
+      null,
+      0,
+      0,
+      0,
+      '{}',
+      '2026-07-06 10:00:03'
+    );
+
+    const row = ai.listConversations(db, secureRead(
+      fixture.platformAdmin,
+      fixture.platformAdminAuth,
+      'run-projection-bounded-list',
+      { q: 'Bounded incomplete run evidence' }
+    ))[0];
+    assert.equal(row.run_summary.status, 'incomplete');
+    assert.equal(row.run_summary.run_count, 2);
+    assert.equal(row.run_summary.prompt_tokens, Number.MAX_SAFE_INTEGER);
+    assert.equal(row.run_summary.completion_tokens, Number.MAX_SAFE_INTEGER);
+    assert.equal(row.run_summary.total_tokens, Number.MAX_SAFE_INTEGER);
+    assert.equal(row.run_summary.average_latency_ms, null);
+    assert.equal(row.run_summary.latest_model, 'bounded-model-2');
+
+    const detail = ai.getConversation(db, secureRead(
+      fixture.platformAdmin,
+      fixture.platformAdminAuth,
+      'run-projection-bounded-detail',
+      { id: conversationId }
+    ));
+    assert.deepEqual(detail.run_summary, row.run_summary);
+    assert.equal(detail.messages[0].run.latency_ms, null);
+    assert.equal(detail.messages[1].run.latency_ms, null);
+  } finally {
+    db.close();
+  }
+});
+
+test('AI run counts retain restricted citation evidence without exposing its knowledge payload', () => {
+  const db = openDatabase();
+  try {
+    const fixture = createFixture(db);
+    let hidden;
+    db.transaction(() => {
+      hidden = knowledge.writeCampaignKnowledgeInTransaction(db, {
+        organizationId: 2,
+        campaignId: fixture.crossOrgCampaignId,
+        createdBy: fixture.outsider.id,
+        title: 'Restricted run citation',
+        summary: '',
+        content: 'Only the other owner may inspect this private knowledge payload.',
+        entryType: 'document',
+        sourceType: 'run_projection_fixture',
+        sourceId: 'restricted-run-citation',
+        visibility: 'private',
+        tags: ['run', 'restricted'],
+        metadata: { schema_version: 1 }
+      });
+      db.prepare(`
+        INSERT INTO campaign_record_links (
+          org_id,campaign_id,record_type,bundle_id,record_id,relation_type,
+          created_by,metadata_json
+        ) VALUES (2,?,'knowledge_entry',?,?,'knowledge',?,'{}')
+      `).run(
+        fixture.crossOrgCampaignId,
+        sha256(`restricted-run-citation:${hidden.entry.id}`),
+        String(hidden.entry.id),
+        fixture.outsider.id
+      );
+      knowledge.applyKnowledgeCapacityGaugePlanInTransaction(db, hidden.capacityGaugePlan);
+    }).immediate();
+    const snapshot = db.prepare(`
+      SELECT
+        entry.id AS entry_id,entry.title,entry.source_identity_sha256,
+        entry.content_sha256 AS entry_content_sha256,
+        chunk.id AS chunk_id,chunk.content_sha256 AS chunk_content_sha256
+      FROM knowledge_entries entry
+      JOIN knowledge_chunks chunk ON chunk.entry_id=entry.id
+      WHERE entry.id=?
+      ORDER BY chunk.chunk_index
+      LIMIT 1
+    `).get(hidden.entry.id);
+    const conversationId = createConversation(db, {
+      userId: fixture.owner.id,
+      title: 'Restricted reference run evidence'
+    });
+    const messageId = db.prepare(`
+      SELECT id FROM ai_messages WHERE conversation_id=? ORDER BY id DESC LIMIT 1
+    `).get(conversationId).id;
+    db.prepare(`
+      INSERT INTO ai_references (
+        message_id,reference_type,reference_id,title,url,snippet,provider,metadata_json,
+        reference_schema_version,knowledge_entry_id,knowledge_chunk_id,campaign_id,
+        source_identity_sha256,entry_content_sha256,chunk_content_sha256,reference_rank,
+        selection_origin
+      ) VALUES (
+        @messageId,'knowledge',@referenceId,@title,'','restricted snippet','','{}',
+        1,@entryId,@chunkId,@campaignId,@sourceIdentitySha256,@entryContentSha256,
+        @chunkContentSha256,1,'retrieved'
+      )
+    `).run({
+      messageId,
+      referenceId: String(snapshot.entry_id),
+      title: snapshot.title,
+      entryId: snapshot.entry_id,
+      chunkId: snapshot.chunk_id,
+      campaignId: fixture.crossOrgCampaignId,
+      sourceIdentitySha256: snapshot.source_identity_sha256,
+      entryContentSha256: snapshot.entry_content_sha256,
+      chunkContentSha256: snapshot.chunk_content_sha256
+    });
+
+    const row = ai.listConversations(db, secureRead(
+      fixture.owner,
+      fixture.ownerAuth,
+      'run-projection-restricted-list',
+      { q: 'Restricted reference run evidence' }
+    ))[0];
+    assert.equal(row.run_summary.knowledge_reference_count, 1);
+
+    const detail = ai.getConversation(db, secureRead(
+      fixture.owner,
+      fixture.ownerAuth,
+      'run-projection-restricted-detail',
+      { id: conversationId }
+    ));
+    assert.deepEqual(detail.messages[0].references, [{
+      citation_label: 'KB-1',
+      access_state: 'restricted'
+    }]);
+    assert.equal(detail.messages[0].run.knowledge_reference_count, 1);
+    assert.equal(detail.run_summary.knowledge_reference_count, 1);
+    assert.equal(JSON.stringify(detail).includes('restricted snippet'), false);
+    assert.equal(JSON.stringify(detail).includes(snapshot.title), false);
+  } finally {
+    db.close();
+  }
+});
+
 test('AI conversation audit rejects malformed or reversed bounded filters before audit persistence', () => {
   const db = openDatabase();
   try {

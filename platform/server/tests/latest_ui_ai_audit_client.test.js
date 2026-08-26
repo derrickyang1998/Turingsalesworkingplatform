@@ -187,6 +187,21 @@ test('admin AI audit loads the user directory and renders campaign, reference, a
           source_module: 'assistant',
           title: 'Evidence review',
           message_count: 3,
+          run_summary: {
+            status: 'degraded',
+            run_count: 2,
+            succeeded_count: 1,
+            degraded_count: 1,
+            failed_count: 0,
+            unknown_count: 0,
+            prompt_tokens: 20,
+            completion_tokens: 12,
+            total_tokens: 32,
+            average_latency_ms: 540,
+            latest_model: 'deepseek-chat',
+            knowledge_reference_count: 2,
+            web_reference_count: 1
+          },
           knowledge_reference_count: 2,
           web_reference_count: 1,
           archived_summary_id: 91,
@@ -199,6 +214,9 @@ test('admin AI audit loads the user directory and renders campaign, reference, a
   }, [
     'loadAdminAIAuditUsers',
     'buildAdminAIAuditQuery',
+    'adminAIRunStatusLabel',
+    'adminAIRunNumber',
+    'adminAIRunSummaryText',
     'loadAdminAIAudit'
   ]);
 
@@ -213,9 +231,90 @@ test('admin AI audit loads the user directory and renders campaign, reference, a
   assert.equal(params.get('user_id'), '22');
   assert.match(elements.ad_aiAuditList.innerHTML, /Campaign #12/);
   assert.match(elements.ad_aiAuditList.innerHTML, /KB 2 \/ Web 1/);
+  assert.match(elements.ad_aiAuditList.innerHTML, /2 次/);
+  assert.match(elements.ad_aiAuditList.innerHTML, /降级/);
+  assert.match(elements.ad_aiAuditList.innerHTML, /32 tokens/);
+  assert.match(elements.ad_aiAuditList.innerHTML, /540 ms/);
   assert.match(elements.ad_aiAuditList.innerHTML, /Archived/);
   assert.match(elements.ad_aiAuditList.innerHTML, /2026-07-11 08:45/);
   assert.doesNotMatch(elements.ad_aiAuditList.innerHTML, /2026-07-10 11:20/);
+});
+
+test('admin AI audit detail renders the backend run projection without trusting metadata markup', async () => {
+  const detail = { innerHTML: '' };
+  const context = loadFunctions({
+    document: {
+      getElementById(id) { return id === 'ad_aiAuditDetail' ? detail : null; }
+    },
+    esc: escapeHtml,
+    Promise,
+    async apiFetch(url) {
+      assert.equal(url, '/ai/conversations/41');
+      return response(200, {
+        conversation: {
+          id: 41,
+          title: 'Run <audit>',
+          display_name: 'Owner',
+          source_module: 'assistant',
+          created_at: '2026-07-11 08:45:00',
+          run_summary: {
+            status: 'succeeded',
+            run_count: 1,
+            succeeded_count: 1,
+            degraded_count: 0,
+            failed_count: 0,
+            unknown_count: 0,
+            prompt_tokens: 10,
+            completion_tokens: 8,
+            total_tokens: 18,
+            average_latency_ms: 420,
+            latest_model: 'deepseek-chat',
+            knowledge_reference_count: 1,
+            web_reference_count: 0
+          },
+          messages: [{
+            id: 91,
+            role: 'assistant',
+            model: 'ignored-model<script>',
+            total_tokens: 999999,
+            content: 'Safe <answer>',
+            run: {
+              run_id: 91,
+              status: 'succeeded',
+              model: 'deepseek-chat<script>',
+              prompt_tokens: 10,
+              completion_tokens: 8,
+              total_tokens: 18,
+              latency_ms: 420,
+              knowledge_reference_count: 1,
+              web_reference_count: 0,
+              created_at: '2026-07-11 08:45:01'
+            },
+            references: []
+          }]
+        }
+      });
+    }
+  }, [
+    'adminAIRunStatusLabel',
+    'adminAIRunNumber',
+    'adminAIRunSummaryText',
+    'adminAIMessageMetaText',
+    'loadAdminAIConversation'
+  ]);
+
+  context.loadAdminAIConversation(41);
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.match(detail.innerHTML, /1 次/);
+  assert.match(detail.innerHTML, /成功/);
+  assert.match(detail.innerHTML, /18 tokens/);
+  assert.match(detail.innerHTML, /420 ms/);
+  assert.match(detail.innerHTML, /P 10 \/ C 8 \/ T 18/);
+  assert.match(detail.innerHTML, /deepseek-chat&lt;script&gt;/);
+  assert.doesNotMatch(detail.innerHTML, /ignored-model|999999|<script>/);
+  assert.match(detail.innerHTML, /Safe &lt;answer&gt;/);
 });
 
 test('admin AI audit refreshes its user directory after in-app user changes', async () => {
