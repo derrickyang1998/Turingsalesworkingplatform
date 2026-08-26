@@ -527,6 +527,8 @@ test('linked one-shot chat can suppress an unconfirmed knowledge summary without
     }));
 
     assert.equal(result.archived_summary_id, null);
+    assert.equal(result.summary_promotion.status, 'retained_only');
+    assert.equal(result.summary_promotion.reason, 'disabled');
     assert.equal(result.campaign_id, fixture.campaignId);
     assert.equal(db.prepare("SELECT COUNT(*) AS count FROM knowledge_entries WHERE entry_type='ai_chat_summary'").get().count, 0);
     assert.equal(db.prepare(`
@@ -534,6 +536,25 @@ test('linked one-shot chat can suppress an unconfirmed knowledge summary without
       FROM campaign_record_links
       WHERE campaign_id=? AND record_type='ai_conversation' AND relation_type='ai_run'
     `).get(fixture.campaignId).count, 1);
+  } finally {
+    db.close();
+  }
+});
+
+test('linked low-value chat persists the audited run without polluting campaign knowledge', async () => {
+  const db = openDatabase();
+  try {
+    const fixture = createCampaignFixture(db);
+    const result = await ai.handleChat(db, linkedInput(fixture, 'low-value-summary', {
+      provider: successfulProvider([], 'Short operational reply.')
+    }));
+
+    assert.equal(result.archived_summary_id, null);
+    assert.equal(result.summary_promotion.status, 'retained_only');
+    assert.equal(result.summary_promotion.reason, 'insufficient_substance');
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM ai_conversations').get().count, 1);
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM ai_messages').get().count, 2);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM knowledge_entries WHERE entry_type='ai_chat_summary'").get().count, 0);
   } finally {
     db.close();
   }
@@ -731,6 +752,7 @@ test('campaign retrieval admits authorized unclassified knowledge but excludes e
 
     const result = await ai.handleChat(db, linkedInput(fixture, 'cross-campaign-leakage', {
       message: 'crosscampaignneedle',
+      archiveSummary: true,
       provider: successfulProvider(calls)
     }));
 
@@ -960,7 +982,7 @@ test('selected context exceeding 98,304 UTF-8 bytes fails as 413 without truncat
   }
 });
 
-test('LLM and web adapters forward the caller AbortSignal to every fetch', async () => {
+test('LLM forwards the caller signal while Tavily derives a cancellable timeout signal', async () => {
   const controller = new AbortController();
   const deadlineAt = Date.now() + 120_000;
   let llmFetchSignal;
@@ -1000,12 +1022,13 @@ test('LLM and web adapters forward the caller AbortSignal to every fetch', async
   });
 
   assert.equal(llmFetchSignal, controller.signal);
-  assert.equal(webFetchSignal, controller.signal);
+  assert.notEqual(webFetchSignal, controller.signal);
+  assert.equal(webFetchSignal.aborted, false);
 });
 
-test('unlinked adapter calls preserve the legacy fetch option shape when no AbortSignal is supplied', async () => {
+test('unlinked Tavily calls add an internal timeout signal while LLM preserves its legacy fetch shape', async () => {
   let llmHasSignal = true;
-  let webHasSignal = true;
+  let webFetchSignal;
   const provider = llm.createDeepSeekProvider({
     apiKey: 'test-key',
     fetchImpl: async (_url, init) => {
@@ -1026,7 +1049,7 @@ test('unlinked adapter calls preserve the legacy fetch option shape when no Abor
   await webSearch.searchWeb('legacy adapter test', {
     apiKey: 'test-key',
     fetchImpl: async (_url, init) => {
-      webHasSignal = Object.hasOwn(init, 'signal');
+      webFetchSignal = init.signal;
       return {
         ok: true,
         async json() { return { results: [] }; }
@@ -1035,7 +1058,8 @@ test('unlinked adapter calls preserve the legacy fetch option shape when no Abor
   });
 
   assert.equal(llmHasSignal, false);
-  assert.equal(webHasSignal, false);
+  assert.ok(webFetchSignal);
+  assert.equal(webFetchSignal.aborted, false);
 });
 
 test('linked web and LLM share one deadline signal and an aborted late completion cannot write', async () => {
@@ -1185,6 +1209,7 @@ test('web cache insertion failure rolls back the linked conversation, references
     const before = durableLinkedState(db, fixture.campaignId);
     const outcome = await settled(ai.handleChat(db, linkedInput(fixture, 'cache-rollback', {
       allowWeb: true,
+      archiveSummary: true,
       webSearchProvider: {
         async search() {
           return {
@@ -1236,6 +1261,8 @@ test('linked AI response uses the safe source projection and archives the exact 
     }));
 
     assert.equal(result.knowledge_references.length, 1);
+    assert.equal(result.summary_promotion.status, 'promoted');
+    assert.equal(result.summary_promotion.reason, 'high_value');
     const reference = result.knowledge_references[0];
     assert.deepEqual(Object.keys(reference), [
       'citation_label', 'entry_id', 'chunk_id', 'chunk_index', 'title',
@@ -1261,6 +1288,10 @@ test('linked AI response uses the safe source projection and archives the exact 
     assert.equal(archive.business_id, String(fixture.campaignId));
     assert.equal(archive.created_by, fixture.userId);
     assert.equal(archive.tags_json, '["ai_chat","campaign","conversation"]');
+    const metadata = JSON.parse(archive.metadata_json);
+    assert.equal(metadata.promotion.policy_version, 'ai-summary-promotion-v1');
+    assert.equal(metadata.promotion.reason, 'high_value');
+    assert.equal(metadata.promotion.evidence_count, 1);
     assert.match(archive.source_identity_sha256, /^[0-9a-f]{64}$/);
     assert.match(archive.content_sha256, /^[0-9a-f]{64}$/);
   } finally {

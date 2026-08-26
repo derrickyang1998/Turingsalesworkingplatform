@@ -4686,8 +4686,12 @@ function renderAIReferenceText(data) {
   if (web.length) {
     lines.push('', '联网来源:');
     web.slice(0, 3).forEach(function(item, idx) {
-      lines.push((idx + 1) + '. ' + (item.title || item.url || 'Web source') + (item.url ? ' - ' + item.url : ''));
+      var cacheLabel = item.cached === true ? '（缓存）' : '';
+      lines.push((idx + 1) + '. ' + cacheLabel + (item.title || item.url || 'Web source') + (item.url ? ' - ' + item.url : ''));
     });
+  }
+  if (data && data.summary_promotion && data.summary_promotion.status === 'promoted') {
+    lines.push('', '知识沉淀：已自动沉淀为可复用知识');
   }
   return lines.length ? '\n\n' + lines.join('\n') : '';
 }

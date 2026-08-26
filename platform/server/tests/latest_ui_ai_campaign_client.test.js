@@ -188,6 +188,27 @@ test('M5 sends the exact user prompt and honors the existing web-search toggle',
   assert.equal(context.elements.sendButton.disabled, false);
 });
 
+test('M5 reference text distinguishes cached web evidence and promoted knowledge', () => {
+  const context = loadFunctions({}, ['renderAIReferenceText']);
+  const rendered = context.renderAIReferenceText({
+    knowledge_references: [{ id: 7, title: '项目方法论' }],
+    web_results: [{
+      title: '行业来源',
+      url: 'https://example.com/report',
+      cached: true
+    }],
+    summary_promotion: {
+      status: 'promoted',
+      reason: 'high_value'
+    }
+  });
+
+  assert.match(rendered, /知识库引用/);
+  assert.match(rendered, /行业来源/);
+  assert.match(rendered, /缓存/);
+  assert.match(rendered, /已自动沉淀为可复用知识/);
+});
+
 test('M5 keeps one request in flight so simultaneous first messages cannot split conversations', async () => {
   const pending = deferred();
   let calls = 0;

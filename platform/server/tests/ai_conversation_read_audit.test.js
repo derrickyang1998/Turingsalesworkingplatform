@@ -1010,7 +1010,7 @@ test('privileged list/detail audits are sanitized and audit persistence failure 
   }
 });
 
-test('linked AI archive and ai_run/knowledge links persist exact empty metadata objects', async () => {
+test('linked AI archive stores governed promotion metadata while links keep closed metadata objects', async () => {
   const db = openDatabase();
   try {
     const fixture = createFixture(db);
@@ -1023,6 +1023,7 @@ test('linked AI archive and ai_run/knowledge links persist exact empty metadata 
       idempotencyKey: 'ai-read-metadata-contract',
       requestId: 'ai-read-metadata-contract-request',
       allowWeb: false,
+      archiveSummary: true,
       provider: {
         async complete() {
           return {
@@ -1054,7 +1055,12 @@ test('linked AI archive and ai_run/knowledge links persist exact empty metadata 
       String(result.conversation_id),
       String(result.archived_summary_id)
     );
-    assert.equal(archive.metadata_json, '{}');
+    const archiveMetadata = JSON.parse(archive.metadata_json);
+    assert.equal(archiveMetadata.conversation_id, result.conversation_id);
+    assert.equal(archiveMetadata.assistant_message_id, result.message_id);
+    assert.deepEqual(archiveMetadata.promotion, result.summary_promotion);
+    assert.equal(archiveMetadata.promotion.reason, 'explicit_selection');
+    assert.equal(Object.hasOwn(archiveMetadata, 'source_module'), false);
     assert.deepEqual(links, [
       { record_type: 'ai_conversation', relation_type: 'ai_run', metadata_json: '{}' },
       { record_type: 'knowledge_entry', relation_type: 'knowledge', metadata_json: '{}' }
