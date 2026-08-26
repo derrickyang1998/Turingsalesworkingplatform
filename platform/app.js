@@ -4804,6 +4804,39 @@ function renderAiChatError(target, message) {
   bubble.textContent = 'Error: ' + String(message || 'AI request failed');
   target.appendChild(bubble);
 }
+async function promoteAIMessage(conversationId, messageId, button) {
+  conversationId = readPositiveInteger(conversationId);
+  messageId = readPositiveInteger(messageId);
+  if (conversationId === null || messageId === null || !button || button.disabled) return null;
+  var originalText = button.textContent;
+  button.disabled = true;
+  button.textContent = '沉淀中...';
+  try {
+    var response = await apiFetch(
+      '/ai/conversations/' + conversationId + '/messages/' + messageId + '/promote',
+      {
+        method: 'POST',
+        headers: { 'X-Request-Id': createDemandAnalysisOperationId('ai-promotion-request-') },
+        body: JSON.stringify({ visibility: 'private' })
+      }
+    );
+    var data = await response.json().catch(function() { return null; });
+    if (!response.ok) {
+      throw new Error((data && (data.error || data.message)) || ('API:' + response.status));
+    }
+    if (readPositiveInteger(data && data.knowledge_entry_id) === null) {
+      throw new Error('知识沉淀结果无效，请重试。');
+    }
+    button.textContent = '已沉淀';
+    button.title = '该回复已归档到知识库';
+    return data;
+  } catch (error) {
+    button.disabled = false;
+    button.textContent = originalText;
+    toast(error.message || '知识沉淀失败', 'error');
+    return null;
+  }
+}
 function sendChat() {
   if (activeAiChatRequest && activeAiChatRequest.promise) return activeAiChatRequest.promise;
   var inp = document.getElementById('chatInput');
@@ -4880,7 +4913,11 @@ function sendChat() {
       chatHistory.push({role:'assistant', content: reply});
       aiMemory[memId + '_r'] = reply.substring(0, 500);
       saveAIMemory();
-      addChatMsg('assistant', reply + renderAIReferenceText(data));
+      addChatMsg('assistant', reply + renderAIReferenceText(data), {
+        conversationId: responseConversationId,
+        messageId: readPositiveInteger(data && data.message_id),
+        archivedSummaryId: readPositiveInteger(data && data.archived_summary_id)
+      });
       return data;
     } catch (e) {
       if (!isAiChatRequestCurrent(requestContext)) {
@@ -4896,13 +4933,34 @@ function sendChat() {
   requestContext.promise = operation;
   return operation;
 }
-function addChatMsg(role, text) {
+function addChatMsg(role, text, options) {
   var msgs = document.getElementById('chatMessages');
   if (!msgs) return;
+  options = options || {};
   var div = document.createElement('div');
   div.className = 'chat-msg ' + role;
-  var formatted = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>').replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-  div.innerHTML = '<div class="bubble">' + formatted + '</div>';
+  var bubble = document.createElement('div');
+  bubble.className = 'bubble';
+  var formatted = String(text || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>').replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  bubble.innerHTML = formatted;
+  var conversationId = readPositiveInteger(options.conversationId);
+  var messageId = readPositiveInteger(options.messageId);
+  if (role === 'assistant' && conversationId !== null && messageId !== null) {
+    var action = document.createElement('button');
+    action.type = 'button';
+    action.className = 'ai-promote-action';
+    action.title = '将这条 AI 回复归档到个人知识库';
+    if (readPositiveInteger(options.archivedSummaryId) !== null) {
+      action.disabled = true;
+      action.textContent = '已沉淀';
+      action.title = '该回复已归档到知识库';
+    } else {
+      action.textContent = '沉淀到知识库';
+      action.onclick = function() { promoteAIMessage(conversationId, messageId, action); };
+    }
+    bubble.appendChild(action);
+  }
+  div.appendChild(bubble);
   msgs.appendChild(div);
   msgs.scrollTop = msgs.scrollHeight;
 }

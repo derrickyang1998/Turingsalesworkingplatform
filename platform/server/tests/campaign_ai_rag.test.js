@@ -560,6 +560,97 @@ test('linked low-value chat persists the audited run without polluting campaign 
   }
 });
 
+test('a linked retained answer can be manually promoted once into the same Campaign knowledge custody', async () => {
+  const db = openDatabase();
+  try {
+    const fixture = createCampaignFixture(db);
+    const calls = [];
+    const chat = await ai.handleChat(db, linkedInput(fixture, 'manual-promotion', {
+      archiveSummary: false,
+      provider: successfulProvider(calls, 'short linked answer')
+    }));
+    assert.equal(chat.archived_summary_id, null);
+
+    const promoted = ai.promoteMessageToKnowledge(db, {
+      user: fixture.user,
+      conversation_id: chat.conversation_id,
+      message_id: chat.message_id,
+      visibility: 'private',
+      requestId: 'linked-manual-promotion-0001'
+    });
+    const replay = ai.promoteMessageToKnowledge(db, {
+      user: fixture.user,
+      conversation_id: chat.conversation_id,
+      message_id: chat.message_id,
+      visibility: 'private',
+      requestId: 'linked-manual-promotion-0002'
+    });
+
+    assert.equal(promoted.status, 'promoted');
+    assert.equal(replay.status, 'already_promoted');
+    assert.equal(replay.knowledge_entry_id, promoted.knowledge_entry_id);
+    const entry = db.prepare('SELECT source_type,source_id,visibility FROM knowledge_entries WHERE id=?')
+      .get(promoted.knowledge_entry_id);
+    assert.equal(entry.source_type, 'campaign_ai_message');
+    assert.equal(Number(entry.source_id), chat.message_id);
+    assert.equal(entry.visibility, 'private');
+    const links = db.prepare(`
+      SELECT campaign_id,record_type,record_id,relation_type
+      FROM campaign_record_links
+      WHERE campaign_id=? AND record_type='knowledge_entry' AND record_id=?
+    `).all(fixture.campaignId, String(promoted.knowledge_entry_id));
+    assert.deepEqual(links, [{
+      campaign_id: fixture.campaignId,
+      record_type: 'knowledge_entry',
+      record_id: String(promoted.knowledge_entry_id),
+      relation_type: 'knowledge'
+    }]);
+    assert.equal(db.prepare(`
+      SELECT COUNT(*) AS count FROM activity_log
+      WHERE module='ai_knowledge' AND action='manual_promote_ai_message'
+    `).get().count, 2);
+  } finally {
+    db.close();
+  }
+});
+
+test('a platform admin can curate an authorized linked answer without losing its Campaign custody', async () => {
+  const db = openDatabase();
+  try {
+    const fixture = createCampaignFixture(db);
+    const admin = db.prepare("SELECT id,role FROM users WHERE role='admin' AND is_active=1 ORDER BY id LIMIT 1").get();
+    assert.ok(admin);
+    const chat = await ai.handleChat(db, linkedInput(fixture, 'platform-admin-manual-promotion', {
+      archiveSummary: false,
+      provider: successfulProvider([], 'platform admin linked answer')
+    }));
+
+    const promoted = ai.promoteMessageToKnowledge(db, {
+      user: admin,
+      conversation_id: chat.conversation_id,
+      message_id: chat.message_id,
+      visibility: 'private',
+      requestId: 'linked-platform-admin-promotion-0001'
+    });
+
+    assert.equal(promoted.status, 'promoted');
+    const link = db.prepare(`
+      SELECT org_id,campaign_id,record_type,record_id,relation_type
+      FROM campaign_record_links
+      WHERE record_type='knowledge_entry' AND record_id=? AND revoked_at IS NULL
+    `).get(String(promoted.knowledge_entry_id));
+    assert.deepEqual(link, {
+      org_id: fixture.orgId,
+      campaign_id: fixture.campaignId,
+      record_type: 'knowledge_entry',
+      record_id: String(promoted.knowledge_entry_id),
+      relation_type: 'knowledge'
+    });
+  } finally {
+    db.close();
+  }
+});
+
 test('linked chat treats DeepSeek failure as zero-event 503 and does not retain linked domain rows', async () => {
   const db = openDatabase();
   try {

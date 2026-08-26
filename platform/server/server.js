@@ -1722,6 +1722,23 @@ app.get('/api/ai/conversations/:id', authMiddleware, (req, res) => {
   }
 });
 
+app.post('/api/ai/conversations/:id/messages/:messageId/promote', authMiddleware, (req, res) => {
+  try {
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    const result = aiService.promoteMessageToKnowledge(db, {
+      user: req.user,
+      authContext: req.authContext,
+      conversation_id: req.params.id,
+      message_id: req.params.messageId,
+      visibility: body.visibility,
+      requestId: campaignLinkRequestId(req)
+    });
+    res.json(result);
+  } catch (error) {
+    sendAiChatError(req, res, error);
+  }
+});
+
 app.post('/api/ai/proposal-draft', authMiddleware, aiLimiter, aiQuotaGuard, async (req, res) => {
   const body = req.body && typeof req.body === 'object' ? req.body : {};
   const linkedRequest = hasCampaignId(body);

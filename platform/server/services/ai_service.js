@@ -947,7 +947,7 @@ function archiveLinkedChatSummary(db, opts) {
     summary: Array.from(answer).slice(0, 1000).join(''),
     content,
     tags: ['ai_chat', 'campaign', 'conversation'],
-    visibility: 'private',
+    visibility: opts.visibility || 'private',
     metadata: {
       conversation_id: opts.conversationId,
       assistant_message_id: opts.assistantMessageId,
@@ -1712,6 +1712,266 @@ function readAuthorizedConversation(db, actor, conversationId) {
   `).get(...projection.params, conversationId) || null;
 }
 
+function parseMetadataObject(value) {
+  try {
+    const parsed = JSON.parse(value || '{}');
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch (error) {
+    return {};
+  }
+}
+
+function manualPromotionVisibility(value) {
+  const visibility = value === undefined || value === null || value === ''
+    ? 'private'
+    : String(value).trim();
+  if (visibility !== 'private' && visibility !== 'team') {
+    throw serviceError(
+      400,
+      'INVALID_AI_PROMOTION_VISIBILITY',
+      'AI knowledge visibility must be private or team.'
+    );
+  }
+  return visibility;
+}
+
+function manualPromotionQuestion(db, conversationId, ownerId, assistantMessage) {
+  const metadata = parseMetadataObject(assistantMessage.metadata_json);
+  const referencedUserMessageId = positiveId(metadata.user_message_id);
+  let question = null;
+  if (referencedUserMessageId !== null) {
+    question = db.prepare(`
+      SELECT id,content
+      FROM ai_messages
+      WHERE id=? AND conversation_id=? AND user_id=? AND role='user'
+    `).get(referencedUserMessageId, conversationId, ownerId) || null;
+  }
+  if (!question) {
+    question = db.prepare(`
+      SELECT id,content
+      FROM ai_messages
+      WHERE conversation_id=? AND user_id=? AND role='user' AND id<?
+      ORDER BY id DESC
+      LIMIT 1
+    `).get(conversationId, ownerId, assistantMessage.id) || null;
+  }
+  return {
+    content: question ? String(question.content || '') : '',
+    metadata
+  };
+}
+
+function existingPromotedMessageKnowledge(db, sourceType, messageId) {
+  return db.prepare(`
+    SELECT id,visibility,metadata_json
+    FROM knowledge_entries
+    WHERE source_type=? AND CAST(source_id AS TEXT)=?
+    ORDER BY id
+    LIMIT 1
+  `).get(sourceType, String(messageId)) || null;
+}
+
+function requireExistingCampaignKnowledgeLink(db, campaignId, knowledgeEntryId) {
+  const linked = db.prepare(`
+    SELECT 1 AS present
+    FROM campaign_record_links
+    WHERE campaign_id=?
+      AND record_type='knowledge_entry'
+      AND record_id=?
+      AND relation_type='knowledge'
+      AND revoked_at IS NULL
+    LIMIT 1
+  `).get(campaignId, String(knowledgeEntryId));
+  if (!linked) {
+    throw serviceError(
+      409,
+      'KNOWLEDGE_CUSTODY_CONFLICT',
+      'Existing AI knowledge belongs to another custody context.'
+    );
+  }
+}
+
+function persistManualPromotionAudit(db, actor, opts, values) {
+  try {
+    const result = values.result === 'promoted' || values.result === 'already_promoted'
+      ? values.result
+      : 'rejected';
+    const details = {
+      request_id: readRequestId(opts),
+      conversation_id: positiveId(values.conversationId),
+      message_id: positiveId(values.messageId),
+      knowledge_entry_id: positiveId(values.knowledgeEntryId),
+      visibility: values.visibility === 'private' || values.visibility === 'team'
+        ? values.visibility
+        : null,
+      result
+    };
+    if (result === 'rejected') {
+      details.error_code = typeof values.errorCode === 'string' && values.errorCode
+        ? values.errorCode.slice(0, 100)
+        : 'AI_PROMOTION_FAILED';
+    }
+    db.prepare(`
+      INSERT INTO activity_log (user_id,action,module,details,ip_address)
+      VALUES (?,'manual_promote_ai_message','ai_knowledge',?,NULL)
+    `).run(actor.id, JSON.stringify(details));
+  } catch (error) {
+    throw serviceError(
+      500,
+      'AUDIT_PERSISTENCE_FAILED',
+      'AI knowledge promotion audit could not be persisted.'
+    );
+  }
+}
+
+function promoteMessageToKnowledge(db, opts) {
+  opts = opts || {};
+  const conversationId = positiveId(requestedConversationValue(opts));
+  const rawMessageId = ownValue(opts, 'message_id') !== undefined
+    ? opts.message_id
+    : ownValue(opts, 'messageId');
+  const messageId = positiveId(rawMessageId);
+  const auditActor = resolveConversationReadActor(db, opts);
+  let visibility = opts.visibility === undefined || opts.visibility === null || opts.visibility === ''
+    ? 'private'
+    : String(opts.visibility).trim();
+
+  try {
+    if (conversationId === null || messageId === null) {
+      throw serviceError(
+        400,
+        'INVALID_AI_PROMOTION_TARGET',
+        'Conversation and assistant message identifiers must be positive integers.'
+      );
+    }
+    visibility = manualPromotionVisibility(visibility);
+
+    return db.transaction(() => {
+      const actor = resolveConversationReadActor(db, opts);
+      if (!actor) throw serviceError(404, 'RECORD_NOT_FOUND', 'Conversation was not found.');
+      const conversation = readAuthorizedConversation(db, actor, conversationId);
+      if (
+        !conversation ||
+        (!actor.platformAdmin && Number(conversation.user_id) !== actor.id)
+      ) {
+        throw serviceError(404, 'RECORD_NOT_FOUND', 'Conversation was not found.');
+      }
+      const assistantMessage = db.prepare(`
+        SELECT id,conversation_id,user_id,content,metadata_json
+        FROM ai_messages
+        WHERE id=? AND conversation_id=? AND user_id=? AND role='assistant'
+      `).get(messageId, conversationId, conversation.user_id);
+      if (!assistantMessage) {
+        throw serviceError(
+          400,
+          'INVALID_AI_PROMOTION_TARGET',
+          'Only a persisted assistant response can be promoted.'
+        );
+      }
+
+      const question = manualPromotionQuestion(
+        db,
+        conversationId,
+        conversation.user_id,
+        assistantMessage
+      );
+      const references = db.prepare(`
+        SELECT reference_type,title,url,snippet
+        FROM ai_references
+        WHERE message_id=?
+        ORDER BY id
+      `).all(messageId);
+      const knowledgeReferences = references.filter((reference) => reference.reference_type === 'knowledge');
+      const webReferences = references.filter((reference) => reference.reference_type === 'web');
+      const promotion = Object.assign(decideSummaryPromotion({
+        message: question.content,
+        answer: assistantMessage.content,
+        knowledgeReferences,
+        searchResult: { used: webReferences.length > 0, results: webReferences },
+        archiveSummary: true,
+        degraded: question.metadata.degraded === true
+      }), {
+        trigger: 'manual',
+        actor_user_id: actor.id
+      });
+      const campaignId = positiveId(conversation.__campaign_id);
+      const sourceType = campaignId === null ? 'ai_message' : 'campaign_ai_message';
+      const existing = existingPromotedMessageKnowledge(db, sourceType, messageId);
+      let knowledgeEntryId;
+      let result = 'promoted';
+      let resultVisibility = visibility;
+
+      if (existing) {
+        if (campaignId !== null) {
+          requireExistingCampaignKnowledgeLink(db, campaignId, existing.id);
+        }
+        knowledgeEntryId = Number(existing.id);
+        result = 'already_promoted';
+        resultVisibility = existing.visibility || visibility;
+      } else if (campaignId !== null) {
+        const access = requireLinkedCampaignAccess(db, actor.id, campaignId);
+        const archived = archiveLinkedChatSummary(db, {
+          access,
+          campaignId,
+          user: { id: actor.id, role: opts.user && opts.user.role },
+          message: question.content,
+          answer: assistantMessage.content,
+          conversationId,
+          assistantMessageId: messageId,
+          promotion,
+          visibility
+        });
+        knowledgeEntryId = Number(archived.id);
+      } else {
+        const archived = archiveChatSummary(db, {
+          user: { id: actor.id, role: opts.user && opts.user.role },
+          message: question.content,
+          answer: assistantMessage.content,
+          conversationId,
+          assistantMessageId: messageId,
+          source_module: conversation.source_module || 'assistant',
+          promotion,
+          visibility
+        });
+        if (!archived || positiveId(archived.id) === null) {
+          throw serviceError(500, 'AI_PROMOTION_FAILED', 'AI response could not be promoted.');
+        }
+        knowledgeEntryId = Number(archived.id);
+      }
+
+      db.prepare('UPDATE ai_conversations SET archived_summary_id=? WHERE id=?')
+        .run(knowledgeEntryId, conversationId);
+      persistManualPromotionAudit(db, actor, opts, {
+        conversationId,
+        messageId,
+        knowledgeEntryId,
+        visibility: resultVisibility,
+        result
+      });
+      return {
+        status: result,
+        conversation_id: conversationId,
+        message_id: messageId,
+        knowledge_entry_id: knowledgeEntryId,
+        visibility: resultVisibility,
+        promotion
+      };
+    }).immediate();
+  } catch (error) {
+    if (auditActor) {
+      persistManualPromotionAudit(db, auditActor, opts, {
+        conversationId,
+        messageId,
+        knowledgeEntryId: null,
+        visibility,
+        result: 'rejected',
+        errorCode: error && error.code
+      });
+    }
+    throw error;
+  }
+}
+
 function listConversations(db, opts) {
   opts = opts || {};
   return db.transaction(() => {
@@ -1950,6 +2210,7 @@ function verifyProposalDraftAuditContext(db, opts) {
 
 module.exports = {
   handleChat,
+  promoteMessageToKnowledge,
   listConversations,
   getConversation,
   verifyDemandAnalysisAuditContext,

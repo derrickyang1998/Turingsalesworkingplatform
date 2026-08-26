@@ -115,7 +115,7 @@ function baseContext(overrides = {}) {
     getSelectedKnowledgeEntryIds() { return context.selectedKnowledgeEntryIds.slice(); },
     createAiChatIdempotencyKey() { generatedId += 1; return `ai-chat-key-${generatedId}`; },
     createDemandAnalysisOperationId(prefix) { generatedId += 1; return `${prefix}${generatedId}`; },
-    addChatMsg(role, text) { rendered.push({ role, text }); },
+    addChatMsg(role, text, options) { rendered.push({ role, text, options }); },
     renderAIReferenceText(data) { return data.archived_summary_id ? '\nARCHIVED' : ''; },
     saveAIMemory() {},
     toast() {},
@@ -184,6 +184,9 @@ test('M5 sends the exact user prompt and honors the existing web-search toggle',
   assert.equal(context.currentAIConversationId, 41);
   assert.deepEqual(context.rendered.map((row) => row.role), ['user', 'assistant']);
   assert.match(context.rendered[1].text, /策略回复/);
+  assert.equal(context.rendered[1].options.conversationId, 41);
+  assert.equal(context.rendered[1].options.messageId, 81);
+  assert.equal(context.rendered[1].options.archivedSummaryId, 91);
   assert.equal(context.elements.chatInput.disabled, false);
   assert.equal(context.elements.sendButton.disabled, false);
 });
@@ -207,6 +210,34 @@ test('M5 reference text distinguishes cached web evidence and promoted knowledge
   assert.match(rendered, /行业来源/);
   assert.match(rendered, /缓存/);
   assert.match(rendered, /已自动沉淀为可复用知识/);
+});
+
+test('M5 manual promotion posts the persisted conversation and assistant message then locks the action', async () => {
+  const calls = [];
+  const button = { disabled: false, textContent: '沉淀到知识库', title: '' };
+  const context = baseContext({
+    async apiFetch(url, options) {
+      calls.push({ url, options });
+      return response(200, {
+        status: 'promoted',
+        conversation_id: 41,
+        message_id: 81,
+        knowledge_entry_id: 91
+      });
+    }
+  });
+  loadFunctions(context, ['readPositiveInteger', 'promoteAIMessage']);
+
+  const result = await context.promoteAIMessage(41, 81, button);
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, '/ai/conversations/41/messages/81/promote');
+  assert.equal(calls[0].options.method, 'POST');
+  assert.deepEqual(JSON.parse(calls[0].options.body), { visibility: 'private' });
+  assert.match(calls[0].options.headers['X-Request-Id'], /^ai-promotion-request-/);
+  assert.equal(result.knowledge_entry_id, 91);
+  assert.equal(button.disabled, true);
+  assert.equal(button.textContent, '已沉淀');
 });
 
 test('M5 keeps one request in flight so simultaneous first messages cannot split conversations', async () => {

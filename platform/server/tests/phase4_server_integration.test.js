@@ -1689,6 +1689,64 @@ test('AI conversation routes persist one service-owned privileged audit with the
   }
 });
 
+test('AI manual-promotion route is idempotent and persists a bounded mutation audit', {
+  timeout: 30000
+}, async () => {
+  const server = await startTestServer('tm-phase4-ai-manual-promotion-route-');
+  try {
+    const fixture = await seedPrivilegedAiReadFixture(server, 'manual-promotion');
+    const inspection = new Database(server.dbPath, { readonly: true });
+    let messageId;
+    try {
+      messageId = inspection.prepare(
+        "SELECT id FROM ai_messages WHERE conversation_id=? AND role='assistant' ORDER BY id DESC LIMIT 1"
+      ).get(fixture.conversationId).id;
+    } finally {
+      inspection.close();
+    }
+
+    const requestPath = `/api/ai/conversations/${fixture.conversationId}/messages/${messageId}/promote`;
+    const first = await jsonRequest(server.baseUrl, requestPath, {
+      method: 'POST',
+      token: fixture.token,
+      headers: { 'X-Request-Id': 'ai-manual-promotion-route-0001' },
+      body: { visibility: 'private' }
+    });
+    const replay = await jsonRequest(server.baseUrl, requestPath, {
+      method: 'POST',
+      token: fixture.token,
+      headers: { 'X-Request-Id': 'ai-manual-promotion-route-0002' },
+      body: { visibility: 'private' }
+    });
+
+    assert.equal(first.response.status, 200, first.text + '\n' + server.output());
+    assert.equal(replay.response.status, 200, replay.text);
+    assert.equal(first.body.status, 'promoted');
+    assert.equal(replay.body.status, 'already_promoted');
+    assert.equal(replay.body.knowledge_entry_id, first.body.knowledge_entry_id);
+
+    const verified = new Database(server.dbPath, { readonly: true });
+    try {
+      assert.equal(verified.prepare(`
+        SELECT COUNT(*) AS count FROM knowledge_entries
+        WHERE entry_type='ai_chat_summary' AND source_type='ai_message' AND source_id=?
+      `).get(messageId).count, 1);
+      const audits = verified.prepare(`
+        SELECT details FROM activity_log
+        WHERE action='manual_promote_ai_message' AND module='ai_knowledge'
+        ORDER BY id
+      `).all();
+      assert.equal(audits.length, 2);
+      assert.equal(JSON.parse(audits[0].details).request_id, 'ai-manual-promotion-route-0001');
+      assert.equal(JSON.parse(audits[1].details).request_id, 'ai-manual-promotion-route-0002');
+    } finally {
+      verified.close();
+    }
+  } finally {
+    await server.close();
+  }
+});
+
 test('AI conversation routes fail closed with the bounded audit error envelope', {
   timeout: 30000
 }, async () => {
