@@ -1,5 +1,20 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.7.0-ai-knowledge-loop-task3c (Production Slice, 2026-08-26) - Campaign 方案与 PPTX 成品归档
+
+### 确认方案、PPTX 与 Campaign / Confirmed Proposal, PPTX, And Campaign
+- M3 最新 PPT 下载链路现将当前 Campaign、明确匹配该 Campaign 的需求记录和人工确认后的精确方案版本传入既有 `/api/proposal/generate-ppt`；后端返回的 PPTX 保持不可变，完成后再建立 Campaign 的 `ppt` 关联并归档成品知识。
+- 同一业务输入使用稳定幂等键并保持单飞；重复下载返回完全相同的 PPTX 字节。切换 Campaign、用户、编辑内容或请求代次后，旧响应不能写入新的活动上下文；需求 ID 只有在携带同一 Campaign 的明确关联证据时才复用。
+- 归档状态、失败原因和重试入口保留在当前编辑会话中；CSP 翻译后的按钮定位与下载控制保持兼容。未关联旧版 PPT 生成路径继续精确透传，冻结 `ppt.js` 未修改。
+
+### 验证与生产发布 / Verification And Production Release
+- 实现提交为 `3988c47` 与 `899be8a`；最终聚焦矩阵 75/75、JavaScript 语法、架构清单、`git diff --check`、聚焦敏感信息扫描及冻结 PPT 哈希通过。独立审查首轮发现 2 项 Important 与 1 项 Minor，全部整改后复审 `APPROVE`，无剩余发现。
+- 生产备份为 `/root/turingmarket/backups/v070-slice3c-campaign-ppt-artifact-20260826-130804`，聚合清单 SHA-256 为 `bcffa0ae7958e66d75b645829ae0ef607128c6f267c89abe473ffcef9477001a`；仅发布 `platform/app.js`，数据库无迁移，后端服务与冻结 PPT 字节保持不变。
+- 线上管理员链路通过 Campaign 需求关联、精确方案版本、PPTX 生成、重复请求重放和注销；成品为 29,460 字节，SHA-256 `800b35c07401cf098c343b5722d7f9c1f03bd1c099032a3f2edfc0b0f67ca026`，重放字节完全一致。
+- 生产库验证 Campaign 的需求、方案、PPT 关联、成品知识归档、`link_attached` 事件和完成态二进制幂等账本均各 1 条；公网健康为 200、解析器 ready、PM2/Nginx 正常、SQLite `quick_check=ok`，公网 `app.js` 与部署 SHA-256 一致。
+
+---
+
 ## v0.7.0-ai-knowledge-loop-task3b (Production Slice, 2026-08-26) - Campaign PPT 大纲 RAG
 
 ### PPT 大纲与活动上下文 / PPT Outline And Campaign Context
