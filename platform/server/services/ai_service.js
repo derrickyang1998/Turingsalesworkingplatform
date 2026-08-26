@@ -1612,10 +1612,26 @@ function readAuthorizedConversation(db, actor, conversationId) {
   const projection = authorizedConversationProjection(actor);
   return db.prepare(`
     ${projection.cte}
-    SELECT *
-    FROM authorized_conversations authorized
-    WHERE authorized.id=?
-    LIMIT 1
+    SELECT
+      bounded.*,
+      CASE
+        WHEN bounded.last_message_at IS NOT NULL
+          AND bounded.last_message_at > COALESCE(bounded.updated_at,bounded.created_at)
+        THEN bounded.last_message_at
+        ELSE COALESCE(bounded.updated_at,bounded.created_at)
+      END AS activity_at
+    FROM (
+      SELECT
+        authorized.*,
+        (
+          SELECT MAX(activity_message.created_at)
+          FROM ai_messages activity_message
+          WHERE activity_message.conversation_id=authorized.id
+        ) AS last_message_at
+      FROM authorized_conversations authorized
+      WHERE authorized.id=?
+      LIMIT 1
+    ) bounded
   `).get(...projection.params, conversationId) || null;
 }
 

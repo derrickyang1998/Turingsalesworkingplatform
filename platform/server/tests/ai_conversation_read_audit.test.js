@@ -736,6 +736,15 @@ test('AI conversation audit dates include a persisted prompt even when completio
     assert.equal(rows[0].updated_at, '2026-07-01 09:00:00');
     assert.equal(rows[0].activity_at, '2026-07-05 14:30:00');
     assert.equal(Object.hasOwn(rows[0], 'last_message_at'), false);
+
+    const detail = ai.getConversation(db, secureRead(
+      fixture.platformAdmin,
+      fixture.platformAdminAuth,
+      'prompt-only-activity-detail-request',
+      { id: conversationId }
+    ));
+    assert.equal(detail.activity_at, '2026-07-05 14:30:00');
+    assert.equal(Object.hasOwn(detail, 'last_message_at'), false);
   } finally {
     db.close();
   }
