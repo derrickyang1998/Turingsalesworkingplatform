@@ -1,5 +1,22 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.7.0-ai-knowledge-loop-task4d2 (Production Slice, 2026-08-26) - 版本化 AI 成本投影
+
+### 版本化计价与审计 / Versioned Pricing And Audit
+- DeepSeek 默认模型更新为 `deepseek-v4-flash`，并显式关闭 thinking 以保持既有非思考式产品行为；每次成功回复按完成时间、模型、缓存命中/未命中输入 Token 和输出 Token 固化不可变计价快照。
+- 首期策略固定为 `deepseek-v4-usd-2026-08-13-v1`，使用整数 nano-USD 计算工作日 UTC 峰/谷时段的 V4 Flash 与 V4 Pro 费率，避免浮点漂移。历史消息没有合法快照时显示“投影成本不可用”，不会使用可变化的当前价格追溯重算。
+- 成本快照执行严格闭合验证：Provider、模型、策略版本、时段、费率、Token 算式和总额必须一致；不完整、伪造、继承属性模型名和超出安全整数的汇总均失败关闭。列表使用与详情相同的服务端投影器，通过单一确定性 SQLite 函数聚合，避免列表/详情口径漂移和无界 Node.js 加载。
+- 管理员 AI 审计列表显示“投影成本/部分投影成本/投影成本不可用”，详情逐次显示同源投影；普通用户会话隔离和管理员读取审计保持不变。无数据库迁移，现有产品壳层与冻结 PPT renderer 未替换。
+
+### 验证与生产发布 / Verification And Production Release
+- 实现提交为 `bb08c4f`；最终受影响矩阵 `113/113` 通过，JavaScript 语法、`git diff --check`、聚焦敏感信息/乱码扫描及冻结 PPT 哈希均通过。两位独立审查者提出的聚合溢出、SQLite 整数实数一致性、继承属性模型名、伪造快照和遗留 fallback 模型问题全部新增 RED 用例并关闭，最终复审为 `APPROVE`。
+- 已验证发布备份为 `/root/turingmarket/backups/v070-slice4d2-ai-cost-projection-20260826-131957`，聚合 SHA-256 为 `ad4337a5a1c6bc17a5e82342ca3009ed17437e29b7ec11034d50e27bc8e039c2`；容量要求 45,096 KiB，发布前可用 8,610,016 KiB。SQLite Backup API 副本与源库均为 `quick_check=ok`、外键异常为 0，回滚脚本及逐文件校验和已复核。
+- 生产仅替换 `app.js`、`ai_service.js`、`llm_service.js` 并新增 `ai_cost_service.js`；SHA-256 分别为 `8b5f2ec4a171fb149b8e8e354cd3fd9d9479ddd92ebe522c7ff1ab593f6fa92e`、`b0e524fb537f70aa5cdb69b6eb0c5ea9d8dec2904d7aa99eef06d9a2bcffd3cb`、`b6e9cdb9c258e4271995d2eba4d43cc6ee3b6f19fdabac791d54926d8452e9a6`、`101a87a0574f2bc037e5c75bfb84e581c5ef2190041cc8edb16218c179e83acc`。公网 `app.js` 与安装字节一致，PM2 PID 为 `1417880`。
+- 线上真实 HTTP 验收通过三角色登录、DeepSeek V4 Flash 非降级回复、Token 与计价快照持久化、管理员列表/详情金额一致、所有者读取、普通用户跨所有者 `404` 和两条精确管理员读取审计。首轮验收的功能断言已完成，但清理脚本删除审计日志时被只追加保护拦截；修正为保留审计后整套复跑通过，临时对话、会话和启用验收身份均为 0。
+- 解析器清单匹配、Nginx active、SQLite `quick_check=ok`、外键异常为 0；冻结 `ppt.js` SHA-256 保持 `f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e`。本切片继续采用轻量单功能发布节奏，未运行浏览器自动化；下一切片为 Task 4D3 知识质量、版本替代与保留治理。
+
+---
+
 ## v0.7.0-ai-knowledge-loop-task4d1 (Production Slice, 2026-08-26) - AI 运行状态与 Token 投影
 
 ### 统一运行审计 / Unified Run Audit
