@@ -1,5 +1,19 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.7.0-ai-knowledge-loop-task3a (Production Slice, 2026-08-26) - Campaign 方案草稿 RAG
+
+### 方案草稿与审计 / Proposal Draft And Audit
+- M3 最新方案页现调用 `/api/ai/proposal-draft`，携带当前 `campaign_id`、需求分析会话/消息、模板、授权知识 ID、请求 ID 与幂等键；联网固定关闭，检索扩展固定为 8 个 Campaign 范围知识分块。
+- AI 草稿继续进入可编辑区，只有人工确认后的正式方案才归档；AI 服务失败时保留既有本地基础方案，重复点击合并，切换 Campaign 后旧响应不能覆盖新上下文。
+- 方案页不再为 Campaign 请求调用旧版非活动范围的相似案例接口；需求分析审计 ID 必须验证为同一 Campaign、同一会话的 assistant 消息后才能进入方案提示与审计记录。
+
+### 验证与生产发布 / Verification And Production Release
+- 实现提交为 `37cfcaf` 与 `4c44e6c`；最终聚焦回归 58/58、JavaScript 语法、架构清单、`git diff --check` 与聚焦敏感信息扫描通过。独立审查先发现 2 项 P1 和 1 项 P2，整改后复审 `APPROVE`。
+- 生产备份为 `/root/turingmarket/backups/v070-slice3a-proposal-rag-20260826-033422`；生产 `app.js`、`index.html`、`server.js`、`ai_service.js` SHA-256 分别为 `7e62ef4ce0e963a3787f4795ff06dc109ca930f4137d1f2c43a4d4d49af9c09f`、`5199c28ce55639247de00b3106a31af3c6a413d6a5fada1d6aac9cd10b8698f4`、`2ddb53c8a74fc104a9102f8dc00b66a0e9b3de170ff85b2faf806b18ff00bf4d`、`56322c81758424b06efc2bd17120d0d88f80a485d354c57220ca9fba582de47c`；数据库无迁移，冻结 PPT 未修改。
+- 线上验收通过管理员登录、Campaign 读取、关联需求分析、关联方案生成、同键重放与注销；方案会话保存 2 条消息、17 条授权知识分块引用、1 条 `ai_run` 关联、完成态 200 幂等记录，未联网、未归档未确认摘要，SQLite `quick_check=ok`。
+
+---
+
 ## v0.7.0-ai-knowledge-loop-task2 (Production Slice, 2026-08-26) - M3 活动上下文与知识引用
 
 ### 最新界面接入 / Latest UI Integration
