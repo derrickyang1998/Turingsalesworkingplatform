@@ -4,16 +4,16 @@
 
 ### 可治理知识生命周期 / Governed Knowledge Lifecycle
 - 新增 schema v7 `knowledge_entry_governance` 侧表，为既有及新增知识统一提供 `candidate / confirmed / rejected` 质量状态、`protected / scheduled` 保留策略、版本号、当前版本、替代关系、血缘根和乐观治理版本；123 条生产知识完成无损回填。
-- 管理员可在知识库中确认、拒绝、设置保留期限或用已确认知识替代旧版本；普通用户不能调用治理 API。每次治理变更写入只追加 `activity_log`，历史版本仍可供既有引用审计，但不可再次修改。
+- 管理员可在知识库中确认、拒绝、设置保留期限或用已确认知识替代旧版本；普通用户不能调用治理 API。每次治理变更写入只追加 `activity_log`，历史版本仍可供既有引用审计，但不能再次执行治理动作。
 - RAG/FTS 检索现在排除已拒绝、非当前、已过期知识，并优先排序已确认知识；知识详情继续保留历史引用可读性、业务关联、可见性和引用计数。现有 v0.6 产品壳层与冻结 PPT renderer 均未替换。
 - 生产 systemd 升级至 259 后，严格解析器策略读取兼容 deny-all 两个精确前缀的等价输出顺序；不完整、额外或畸形策略仍失败关闭，未放宽任何网络隔离要求。
 
 ### 验证与生产发布 / Verification And Production Release
 - 实现提交为 `032fab7`，systemd 259 兼容提交为 `41352b2`。知识治理测试 `5/5`、解析器单元矩阵 `36/36`、运行时聚焦验证 `4/4`、可信来源/发布聚焦验证 `3/3` 通过；真实解析器设备自检 `21/21` 通过。独立审查关闭历史版本可变更问题后为 `APPROVE`，兼容修复独立复审同样为 `APPROVE`。
-- 首次重启因 systemd 259 属性顺序漂移停止并自动恢复；兼容修复在不改变策略集合的前提下恢复生产。首轮 v7 线上烟测清理又暴露自引用外键删除顺序问题并自动回滚，修正仅限验收清理脚本后完整复跑通过，未遗留临时业务数据。
+- 首次重启因 systemd 259 属性顺序漂移停止并自动恢复；兼容修复在不改变策略集合的前提下恢复生产。首轮 v7 线上烟测清理又暴露自引用外键删除顺序问题并自动回滚。后续主机重启暴露 root PM2 未配置 systemd 自启动，同时验收清理遗留 3 条孤立 FTS 投影（`860/857`）；修复先建立 `/root/turingmarket/backups/runtime-recovery-fts-20260827-173656`，备份清单 SHA-256 `8537b8946d5445a6f342c0ece4d2d24b49ce37a2d0d1b6b52410784a6bdacbe3`，再重建 FTS 至 `857/857`，并安装启用精确 `pm2-root.service`。
 - 最终可验证备份为 `/root/turingmarket/backups/v070-slice4d3-knowledge-governance-20260827-062433`，聚合 SHA-256 为 `34e8a4fb1952a7d4424e96afd70b532339da50ac6572044a18cd44f8188be11c`；容量要求 `276,728 KiB`，发布前可用 `8,254,328 KiB`。发布阶段目录为 `/root/turingmarket/releases/v070-slice4d3-knowledge-governance-20260827-062433`。
 - 线上 schema v7、迁移 007 校验和 `8914205f9c63209e83948b317354453f067038389eb1053a267c714f92a54dcd`、知识/治理记录 `123/123`、治理审计 5 条、SQLite `quick_check=ok`、外键异常 0；普通用户治理拒绝、确认/替代/保留及活动检索路径均通过。
-- PM2 PID 为 `1432338`，Nginx active，内外健康均为 `ok`；公网与安装 `app.js` SHA-256 同为 `ed304b9d21ab2fbee46f7449eb2b3af432b8bdb6a37e77434f8ae8ccc03a5c93`，解析器 manifest 保持 `44db310046efe65bd68c110313b4887995c73e276e7d58f65fe037c09a973c5b`，冻结 `ppt.js` SHA-256 保持 `f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e`。
+- 恢复验收时 PM2 PID 为 `4867`，`pm2-root.service` unit SHA-256 为 `b81d5362a43a97f2ef8527dfb4d7be8b6123029a02e6714f08b69e80cad93f5e` 且 enabled/active，Nginx active，内外健康均为 `ok`；公网与安装 `app.js` SHA-256 同为 `ed304b9d21ab2fbee46f7449eb2b3af432b8bdb6a37e77434f8ae8ccc03a5c93`，解析器 manifest 与冻结 `ppt.js` 哈希保持不变。
 - 本切片按批准的轻量单功能节奏发布，未运行浏览器自动化；完整非浏览器回归与浏览器验收保留到阶段 6 收口。下一切片统一确认方案、PPT 成品及其他确认产物的知识入库契约。
 
 ---

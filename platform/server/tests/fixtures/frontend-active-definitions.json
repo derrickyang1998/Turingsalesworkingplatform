@@ -1,7 +1,7 @@
 {
   "metadata": {
     "schemaVersion": 1,
-    "reviewedAt": "2026-08-26",
+    "reviewedAt": "2026-08-27",
     "reviewedDuplicateCount": 1,
     "activeDefinitionPolicy": "last definition by app.js then ppt.js load order",
     "loadOrder": [
@@ -22,7 +22,7 @@
       "column": 1,
       "loadOrder": 2,
       "occurrenceIndex": 2,
-      "globalIndex": 368
+      "globalIndex": 379
     }
   }
 }

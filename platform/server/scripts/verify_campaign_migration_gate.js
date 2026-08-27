@@ -15,6 +15,7 @@ const PRESERVATION_REPORT_VERSION = 'tm-campaign-migration-preservation-v1';
 const LEGACY_TOPOLOGY_FORMAT = 'tm-legacy-topology-subset-v1';
 const REQUIRED_SOURCE_VERSION = 1;
 const REQUIRED_TARGET_VERSION = 7;
+const SUPPORTED_SOURCE_VERSIONS = new Set([REQUIRED_SOURCE_VERSION, 6]);
 const DEFAULT_FROZEN_MIGRATION_TIMESTAMP = '2040-01-02 03:04:05';
 const EXCLUDED_PRESERVATION_TABLES = new Set(['schema_migrations', 'sqlite_sequence']);
 const DETERMINISTIC_APPEND_TABLES = new Set(['activity_log']);
@@ -809,8 +810,8 @@ function installFrozenMigrationClock(db, value) {
 }
 
 function migrateAndVerify(databasePath, legacySnapshot, sourceVersion, options = {}) {
-  if (sourceVersion !== REQUIRED_SOURCE_VERSION) {
-    throw new Error(`pre-Phase-4 sanitized source version must be exactly ${REQUIRED_SOURCE_VERSION}`);
+  if (!SUPPORTED_SOURCE_VERSIONS.has(sourceVersion)) {
+    throw new Error(`sanitized migration source version is unsupported: ${sourceVersion}`);
   }
   const db = new Database(databasePath);
   try {
@@ -844,6 +845,12 @@ function verifySanitizedMigrationCopy(options) {
     throw new Error(`migration verifier target must be exactly version ${REQUIRED_TARGET_VERSION}`);
   }
   const frozenMigrationTimestamp = normalizedFrozenMigrationTimestamp(options.frozenMigrationTimestamp);
+  const sourceVersion = options.sourceVersion === undefined
+    ? REQUIRED_SOURCE_VERSION
+    : Number(options.sourceVersion);
+  if (!Number.isSafeInteger(sourceVersion) || !SUPPORTED_SOURCE_VERSIONS.has(sourceVersion)) {
+    throw new Error(`sanitized migration source version is unsupported: ${options.sourceVersion}`);
+  }
   const sanitizedPath = assertCleanDatabaseFile(options.sanitizedPath, 'sanitized migration source');
   const workRoot = path.resolve(options.workDir || os.tmpdir());
   fs.mkdirSync(workRoot, { recursive: true, mode: 0o700 });
@@ -860,13 +867,13 @@ function verifySanitizedMigrationCopy(options) {
       sourceClassification = migrationService.classifyDatabase(sourceDb, classificationOptions());
       if (
         sourceClassification.status !== 'managed' ||
-        sourceClassification.currentVersion !== REQUIRED_SOURCE_VERSION
+        sourceClassification.currentVersion !== sourceVersion
       ) {
         const actualVersion = sourceClassification.currentVersion === null
           ? sourceClassification.status
           : sourceClassification.currentVersion;
         throw new Error(
-          `pre-Phase-4 sanitized source version must be exactly ${REQUIRED_SOURCE_VERSION}; got ${actualVersion}`
+          `sanitized source version must be exactly ${sourceVersion}; got ${actualVersion}`
         );
       }
       legacySnapshot = captureLegacyLogicalShape(sourceDb);
@@ -875,7 +882,6 @@ function verifySanitizedMigrationCopy(options) {
     }
     if (legacySnapshot.rowCount < 1) throw new Error('populated migration gate requires legacy rows');
 
-    const sourceVersion = REQUIRED_SOURCE_VERSION;
     const firstPath = restoreCleanCopy(cleanBackupPath, path.join(runDirectory, 'migration-run-one.db'));
     assertByteIdenticalDatabaseFiles(cleanBackupPath, firstPath, 'first migration restored input');
     const first = migrateAndVerify(firstPath, legacySnapshot, sourceVersion, { frozenMigrationTimestamp });

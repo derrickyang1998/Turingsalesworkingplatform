@@ -12,9 +12,11 @@ const migrationService = require('../services/migration_service');
 const knowledge = require('../services/knowledge_service');
 const idempotency = require('../services/idempotency_service');
 const sqliteDigest = require('../services/sqlite_digest_service');
+const migrationVerifier = require('../scripts/verify_campaign_migration_gate');
 const {
   createCampaignService
 } = require('../services/campaign_service');
+const { createCampaignLinkService } = require('../services/campaign_link_service');
 const campaignContract = require('../contracts/campaign_contract');
 const {
   createPhase4RequestPipeline
@@ -73,6 +75,15 @@ function openV4Database(databaseOptions = {}) {
         dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
       })
     ]
+  });
+  return db;
+}
+
+function openV7Database(databaseOptions = {}) {
+  const db = new Database(':memory:', databaseOptions);
+  migrationService.runMigrations(db, {
+    rootDir: SERVER_ROOT,
+    registeredMigrations: migrationVerifier.REGISTERED_MIGRATIONS
   });
   return db;
 }
@@ -3919,6 +3930,150 @@ test('GET campaign knowledge detail returns bounded source capabilities and conc
   );
   assert.equal(concealed.status, 404);
   assert.equal(concealed.body.code, 'KNOWLEDGE_ENTRY_NOT_FOUND');
+});
+
+test('campaign knowledge list and detail conceal rejected and expired governance states', () => {
+  const db = openV7Database();
+  try {
+    const context = createCampaignContext(db);
+    const admin = db.prepare(`
+      SELECT id,role FROM users WHERE role='admin' AND is_active=1 ORDER BY id LIMIT 1
+    `).get();
+    assert.ok(admin);
+    let active;
+    let rejected;
+    let expired;
+    let unlinkedRejected;
+    db.transaction(() => {
+      active = knowledge.writeCampaignKnowledgeInTransaction(
+        db,
+        writerOptions(context, 541, { title: 'Active governance knowledge' })
+      );
+      rejected = knowledge.writeCampaignKnowledgeInTransaction(
+        db,
+        writerOptions(context, 542, { title: 'Rejected governance knowledge' })
+      );
+      expired = knowledge.writeCampaignKnowledgeInTransaction(
+        db,
+        writerOptions(context, 543, { title: 'Expired governance knowledge' })
+      );
+      unlinkedRejected = knowledge.writeCampaignKnowledgeInTransaction(
+        db,
+        writerOptions(context, 544, { title: 'Unlinked rejected governance knowledge' })
+      );
+      linkKnowledgeEntry(
+        db,
+        context,
+        rejected.entry.id,
+        'campaign-governance-rejected-use'
+      );
+    }).immediate();
+    knowledge.governKnowledgeEntry(db, {
+      user: admin,
+      entryId: rejected.entry.id,
+      action: 'reject',
+      expectedVersion: 1,
+      reason: 'Campaign governance rejection contract'
+    });
+    knowledge.governKnowledgeEntry(db, {
+      user: admin,
+      entryId: expired.entry.id,
+      action: 'set_retention',
+      expectedVersion: 1,
+      retentionClass: 'scheduled',
+      retainUntil: '2000-01-01 00:00:00',
+      reason: 'Campaign governance expiration contract'
+    });
+    knowledge.governKnowledgeEntry(db, {
+      user: admin,
+      entryId: unlinkedRejected.entry.id,
+      action: 'reject',
+      expectedVersion: 1,
+      reason: 'Campaign candidate governance rejection contract'
+    });
+
+    const service = createCampaignService(db);
+    const candidates = service.listCampaignLinkCandidates({
+      userId: context.userId,
+      campaignId: context.campaignId,
+      query: {
+        relation_type: 'knowledge',
+        q: 'governance knowledge',
+        limit: '20',
+        offset: '0'
+      }
+    });
+    assert.deepEqual(candidates.items.map((item) => item.record_id), [String(active.entry.id)]);
+    assert.equal(candidates.total, 1);
+    const listed = service.listCampaignKnowledge({
+      userId: context.userId,
+      campaignId: context.campaignId,
+      query: { linked: 'all', limit: '20', offset: '0' }
+    });
+    assert.deepEqual(listed.items.map((entry) => entry.id), [active.entry.id]);
+    assert.equal(listed.total, 1);
+    const detail = service.getCampaignKnowledgeDetail({
+      userId: context.userId,
+      campaignId: context.campaignId,
+      entryId: active.entry.id,
+      query: {}
+    });
+    assert.equal(detail.can_use_in_ai, true);
+    for (const entryId of [rejected.entry.id, expired.entry.id]) {
+      assert.throws(
+        () => service.getCampaignKnowledgeDetail({
+          userId: context.userId,
+          campaignId: context.campaignId,
+          entryId,
+          query: {}
+        }),
+        (error) => error && error.statusCode === 404 && error.code === 'KNOWLEDGE_ENTRY_NOT_FOUND'
+      );
+    }
+    assert.throws(
+      () => createCampaignLinkService(db).useKnowledge({
+        userId: context.userId,
+        requestId: 'campaign-governance-rejected-use-request',
+        idempotencyKey: 'campaign-governance-rejected-use-key',
+        entryId: rejected.entry.id
+      }),
+      (error) => error && error.statusCode === 409 && error.code === 'KNOWLEDGE_GOVERNANCE_INACTIVE'
+    );
+    assert.equal(
+      db.prepare('SELECT usage_count FROM knowledge_entries WHERE id=?')
+        .get(rejected.entry.id).usage_count,
+      0
+    );
+    assert.equal(db.prepare(`
+      SELECT COUNT(*) AS count FROM request_idempotency
+      WHERE idempotency_key='campaign-governance-rejected-use-key'
+    `).get().count, 0);
+    assert.throws(
+      () => service.attachCampaignLink({
+        userId: context.userId,
+        campaignId: context.campaignId,
+        requestId: 'campaign-governance-rejected-attach-request',
+        idempotencyKey: 'campaign-governance-rejected-attach-key',
+        body: {
+          relation_type: 'knowledge',
+          record_type: 'knowledge_entry',
+          record_id: String(unlinkedRejected.entry.id),
+          reason: 'Rejected governance attach must fail'
+        }
+      }),
+      (error) => error && error.statusCode === 409 && error.code === 'KNOWLEDGE_GOVERNANCE_INACTIVE'
+    );
+    assert.equal(db.prepare(`
+      SELECT COUNT(*) AS count FROM campaign_record_links
+      WHERE record_type='knowledge_entry' AND record_id=?
+    `).get(String(unlinkedRejected.entry.id)).count, 0);
+    assert.equal(db.prepare(`
+      SELECT COUNT(*) AS count FROM request_idempotency
+      WHERE idempotency_key='campaign-governance-rejected-attach-key'
+    `).get().count, 0);
+  } finally {
+    db.close();
+  }
 });
 
 test('campaign knowledge reads follow moved and revoke-only custody without leaking to unauthorized callers', async (t) => {

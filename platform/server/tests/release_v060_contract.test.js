@@ -11,7 +11,7 @@ const Database = require('better-sqlite3');
 
 const repoRoot = path.resolve(__dirname, '..', '..', '..');
 const platformRoot = path.join(repoRoot, 'platform');
-const releaseBranch = 'codex/v0.6.0-crm-sales-workspace';
+const releaseBranch = 'codex/v0.7.0-ai-knowledge-proposal-ppt-loop-production';
 const releaseSlug = 'v060-crm-sales-workspace';
 const appBuild = '20260811-v060-crm-sales-workspace';
 const appQuery = '20260811v060crmsalesworkspace';
@@ -58,6 +58,70 @@ function assertOrdered(source, anchors, label) {
   }
 }
 
+function v060ChangelogSection() {
+  return sourceBetween(
+    read('CHANGELOG.md'),
+    '## v0.6.0-crm-sales-workspace',
+    '\n---\n',
+    'v0.6 changelog section'
+  );
+}
+
+function assertExactPm2RecoveryHelper(deploy) {
+  const helper = sourceBetween(
+    deploy,
+    'function Get-Pm2PersistenceVerifier {',
+    'function Assert-RemoteRestoreCapacity {',
+    'PM2 recovery helper'
+  );
+  const restart = sourceBetween(
+    helper,
+    'restart_pm2_from_ecosystem_exactly() {',
+    'persist_pm2_dump() {',
+    'exact PM2 restart helper'
+  );
+
+  assert.deepEqual(
+    Array.from(restart.matchAll(/-u ([A-Z_]+)/g), (match) => match[1]),
+    [
+      'NODE_ENV',
+      'PORT',
+      'SERVER_HOST',
+      'TM_ENV_FILE',
+      'DB_PATH',
+      'UPLOAD_DIR',
+      'TMP_DIR',
+      'PPT_CACHE_DIR'
+    ]
+  );
+  assertOrdered(restart, [
+    'pm2 describe turingmarket',
+    'pm2 delete turingmarket',
+    'env -u NODE_ENV',
+    'pm2 start ecosystem.config.js --only turingmarket --update-env'
+  ], 'exact PM2 restart projection');
+  assert.doesNotMatch(restart, /pm2 restart|\|\|\s*pm2 start/);
+
+  assert.match(
+    helper,
+    /const environmentKeys = \[\s*'NODE_ENV', 'PORT', 'SERVER_HOST', 'TM_ENV_FILE', 'DB_PATH',\s*'UPLOAD_DIR', 'TMP_DIR', 'PPT_CACHE_DIR',\s*\];/
+  );
+  assert.match(helper, /configured\.length !== 1 \|\| running\.length !== 1 \|\| persisted\.length !== 1/);
+  assert.match(helper, /running\[0\]\.pm2_env\?\.status !== 'online'/);
+  assert.match(helper, /JSON\.stringify\(project\(running\[0\]\)\) !== JSON\.stringify\(expected\)/);
+  assert.match(helper, /JSON\.stringify\(project\(persisted\[0\]\)\) !== JSON\.stringify\(expected\)/);
+  assertOrdered(helper, [
+    'pm2 save',
+    'test -f "$DumpPath"',
+    'test ! -L "$DumpPath"',
+    "metadata.nlink !== 1",
+    "metadata.uid !== 0 || metadata.gid !== 0",
+    "process.stdout.write('PM2_DUMP_PROJECTION_OK\\n')",
+    'sync -f "$DumpPath"',
+    'PM2_DUMP_PERSISTED'
+  ], 'persisted PM2 projection verification');
+}
+
 function parserAdmissionProbeSource(deploy) {
   const cutover = sourceBetween(
     deploy,
@@ -87,7 +151,7 @@ function runParserAdmissionProbe(source, databasePath) {
   });
 }
 
-test('v0.6 release locks branch, build identity, release slug, and frozen PPT identity', () => {
+test('current release locks the v0.7 branch while retaining the v0.6 shell and frozen PPT identity', () => {
   const deploy = read('platform', 'deploy_v8.ps1');
   const buildInfo = read('platform', 'client', 'shared', 'build_info.js');
   const index = read('platform', 'index.html');
@@ -131,7 +195,7 @@ test('v0.6 deploy inventory ships migration 006, CRM runtime, and every Phase 5 
   }
 });
 
-test('current trusted source and sanitization contracts are exact v1-to-v7', () => {
+test('current trusted source and sanitization contracts accept exact v1, v6, and v7 sources', () => {
   const trustedManifest = JSON.parse(read(
     'platform', 'server', 'scripts', 'trusted_production_source_manifest.json'
   ));
@@ -141,7 +205,7 @@ test('current trusted source and sanitization contracts are exact v1-to-v7', () 
   const trustedPaths = new Set(trustedManifest.files.map((entry) => entry.path));
 
   assert.deepEqual(trustedManifest.migrationContract, {
-    sourceVersion: 1,
+    acceptedSourceVersions: [1, 6, 7],
     targetVersion: 7,
     runs: 2,
     deterministicAppendTables: ['activity_log']
@@ -193,37 +257,39 @@ test('v0.6 release records match the trusted-source and parser self-test contrac
   const parserManifest = JSON.parse(read(
     'platform', 'server', 'systemd', 'turingmarket-parser.manifest.json'
   ));
-  const changelog = read('CHANGELOG.md').split(/\r?\n---\r?\n/, 1)[0];
+  const changelog = v060ChangelogSection();
   const versionRecord = read(
     'docs', 'version-records', '2026-08-11-v0.6.0-crm-sales-workspace.md'
   );
   const archiveRecord = read(
     'archive', 'versions', '2026-08-11-v0.6.0-crm-sales-workspace.md'
   );
-  const runbook = read('platform', 'DEPLOY.md');
 
   assert.equal(trustedManifest.files.length, 50);
   assert.equal(parserManifest.required_self_tests.length, 21);
   assert.match(versionRecord, /Trusted source: 49 SHA-256-pinned files/);
   assert.match(archiveRecord, /trusted-source manifest now pins 49 files/i);
-  for (const record of [changelog, runbook, versionRecord, archiveRecord]) {
+  for (const record of [changelog, versionRecord, archiveRecord]) {
     assert.match(record, /21[^\r\n]*(?:self-tests|自检)/i);
     assert.doesNotMatch(record, /(?:builder|构建器)[^\r\n]*chroot/i);
     assert.match(record, /(?:unprivileged build unit|非特权构建单元)/i);
   }
 });
 
-test('v0.6 current parent public-guard evidence retains 8 of 11 and keeps Linux root authority pending', () => {
+test('v0.6 parent public-guard evidence is read from the historical release records', () => {
   const records = [
-    read('CHANGELOG.md').split(/\r?\n---\r?\n/, 1)[0],
-    read('platform', 'DEPLOY.md'),
-    read('docs', 'version-records', '2026-08-11-v0.6.0-crm-sales-workspace.md'),
-    read('archive', 'versions', '2026-08-11-v0.6.0-crm-sales-workspace.md')
+    v060ChangelogSection(),
+    read('docs', 'version-records', '2026-08-11-v0.6.0-crm-sales-workspace.md')
   ];
   for (const record of records) {
-    assert.match(record, /current[^\r\n]*11 total[^\r\n]*8 pass(?:ed)?[^\r\n]*3 fail(?:ed)?[^\r\n]*0 skip(?:ped)?/i);
-    assert.match(record, /Git Bash[^\r\n]*\/usr\/bin\/install -d[^\r\n]*(?:denial|denied)/i);
-    assert.match(record, /(?:native Linux|Linux\/root)[^\r\n]*(?:authority|authoritative|pending)/i);
+    assert.match(
+      record,
+      /(?:Current[^\r\n]*parent-focused evidence|当前[^\r\n]*父级定向证据)[^\r\n]*31\/31[^\r\n]*44\/44[^\r\n]*4\/4/i
+    );
+    assert.match(
+      record,
+      /(?:(?:earlier public-guard|早期公网守护)[^\r\n]*(?:historical|历史)|(?:historical|历史)[^\r\n]*(?:earlier public-guard|早期公网守护))/i
+    );
     for (const line of record.split(/\r?\n/).filter((entry) => /9\s*\/\s*9/.test(entry))) {
       assert.match(line, /historical|historic|此前|历史/i, '9/9 may appear only as explicitly historical evidence');
     }
@@ -659,7 +725,7 @@ test('v0.6 cutover drains parser work, installs after code exchange, and accepts
     'adopt_legacy_database_if_required',
     "'atomic release exchange failed'",
     'install_parser_appliance',
-    'pm2 restart ecosystem.config.js',
+    'restart_pm2_from_ecosystem_exactly',
     'record_parser_acceptance_evidence',
     'record_phase accepted'
   ], 'parser cutover lifecycle');
@@ -787,6 +853,7 @@ test('v0.6 production startup performs one complete parser runtime scan', () => 
 
 test('v0.6 cutover drains admitted Node HTTP connections to stable zero before PM2 stop', () => {
   const deploy = read('platform', 'deploy_v8.ps1');
+  assertExactPm2RecoveryHelper(deploy);
   const cutover = sourceBetween(
     deploy,
     '$cutoverGate = @\'',
@@ -836,7 +903,14 @@ test('v0.6 cutover drains admitted Node HTTP connections to stable zero before P
   assert.match(processRecovery, /\$Phase" = mutation-intent/);
   assert.match(processRecovery, /\$Phase" = maintenance-entered/);
   assert.match(processRecovery, /Previous release is not healthy while admitted connections may remain/);
-  assert.match(processRecovery, /else[\s\S]*pm2 restart ecosystem\.config\.js/);
+  assert.match(processRecovery, /else\r?\n\s+restart_pm2_from_ecosystem_exactly\r?\nfi/);
+  assertOrdered(processRecovery, [
+    'restart_pm2_from_ecosystem_exactly',
+    'for attempt in $(seq 1 __PARSER_STARTUP_TIMEOUT_SECONDS__)',
+    'persist_pm2_dump',
+    'restore_migration_gate_cleanup_control'
+  ], 'pre-mutation PM2 recovery');
+  assert.match(resume, /\.Replace\('__PM2_PERSISTENCE_VERIFIER__', \$pm2PersistenceVerifier\)/);
 });
 
 test('v0.6 parser admission drain accepts an absent legacy ledger and rejects unexpected schema', (t) => {
@@ -1124,6 +1198,7 @@ test('v0.6 acceptance facts are canonical, root-only, and hash-bound through eve
 
 test('v0.6 rollback restores parser before code and process, and fails closed', () => {
   const deploy = read('platform', 'deploy_v8.ps1');
+  assertExactPm2RecoveryHelper(deploy);
   const restore = sourceBetween(
     deploy,
     'function Invoke-RemoteRestore {',
@@ -1144,8 +1219,13 @@ test('v0.6 rollback restores parser before code and process, and fails closed', 
     '# RESTORE_CODE',
     'record_restore_step code-restored',
     '# RESTORE_PROCESS',
-    'pm2 restart ecosystem.config.js'
+    'restart_pm2_from_ecosystem_exactly',
+    'record_restore_step process-restored',
+    '# RESTORE_HEALTH',
+    'record_restore_step health-verified',
+    'persist_pm2_dump'
   ], 'coupled rollback');
+  assert.match(restore, /\.Replace\('__PM2_PERSISTENCE_VERIFIER__', \$pm2PersistenceVerifier\)/);
   assert.match(restore, /parser-rollback\.failed/);
   assert.match(restore, /PARSER_ROLLBACK_FAILED/);
   assert.doesNotMatch(restore, /\$LiveDir\/server\/scripts\/provision_upload_sandbox_runtime\.sh/);

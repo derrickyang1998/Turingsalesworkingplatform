@@ -283,7 +283,11 @@ test('guarded deploy records present and absent files instead of swallowing back
   const deploy = readDeployScript();
   const backupBlock = extractRemoteBackupBlock(deploy);
 
-  assert.doesNotMatch(backupBlock, /\|\|\s*true/);
+  assert.equal((backupBlock.match(/\|\|\s*true/g) || []).length, 1);
+  assert.match(
+    backupBlock,
+    /CleanupEnablement="\$\(\/usr\/bin\/systemctl is-enabled "\$CleanupUnitName" 2>\/dev\/null \|\| true\)"/
+  );
   assert.match(backupBlock, /if \[ -f "\$file" \]/);
   assert.match(backupBlock, /printf '%s\\n' "\$file" >> "\$BackupAbsolute\/files\.present"/);
   assert.match(backupBlock, /printf '%s\\n' "\$file" >> "\$BackupAbsolute\/files\.absent"/);
@@ -304,7 +308,10 @@ test('guarded deploy always invalidates and verifies all production sessions bef
   assert.ok(cutover, 'cutover gate must exist');
   for (const source of [restore[0], cutover[1]]) {
     assert.equal((source.match(/DELETE FROM sessions(?! WHERE)/g) || []).length, 1);
-    assert.ok(source.indexOf('DELETE FROM sessions') < source.indexOf('pm2 restart ecosystem.config.js'));
-    assert.ok(source.indexOf('SESSIONS_REMAINING=0') < source.indexOf('pm2 restart ecosystem.config.js'));
+    const deleteIndex = source.indexOf('DELETE FROM sessions');
+    const verifiedIndex = source.indexOf('SESSIONS_REMAINING=0', deleteIndex);
+    const restartIndex = source.indexOf('restart_pm2_from_ecosystem_exactly', verifiedIndex);
+    assert.ok(deleteIndex >= 0 && verifiedIndex > deleteIndex);
+    assert.ok(restartIndex > verifiedIndex);
   }
 });

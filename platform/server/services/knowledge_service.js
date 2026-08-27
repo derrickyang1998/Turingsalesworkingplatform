@@ -449,6 +449,28 @@ function governanceEligibilitySql(alias = 'governance') {
   )`;
 }
 
+function knowledgeGovernanceSql(db, entryAlias = 'entry', governanceAlias = 'governance') {
+  for (const alias of [entryAlias, governanceAlias]) {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(alias)) {
+      throw new TypeError('knowledge governance SQL alias is invalid');
+    }
+  }
+  if (!hasKnowledgeGovernance(db)) {
+    return Object.freeze({
+      joinSql: '',
+      eligibilitySql: '1=1',
+      canUseInAiSql: '1'
+    });
+  }
+  const eligibilitySql = governanceEligibilitySql(governanceAlias);
+  return Object.freeze({
+    joinSql: `JOIN knowledge_entry_governance ${governanceAlias}
+      ON ${governanceAlias}.knowledge_entry_id=${entryAlias}.id`,
+    eligibilitySql,
+    canUseInAiSql: `CASE WHEN ${eligibilitySql} THEN 1 ELSE 0 END`
+  });
+}
+
 function readKnowledgeGovernance(db, entryId) {
   if (!hasKnowledgeGovernance(db)) return null;
   return db.prepare(`
@@ -3435,6 +3457,119 @@ function recordKnowledgeUsageTelemetry(db, ids, user) {
   return updateKnowledgeUsage(db, ids, user, { telemetry: true });
 }
 
+function purgeEphemeralKnowledgeEntries(db, options) {
+  if (!db || typeof db.prepare !== 'function') {
+    throw new TypeError('purgeEphemeralKnowledgeEntries requires a database');
+  }
+  const input = options || {};
+  const sourceType = typeof input.sourceType === 'string' ? input.sourceType.trim() : '';
+  const entryIds = Array.isArray(input.entryIds) ? input.entryIds : [];
+  const sourceIds = Array.isArray(input.sourceIds) ? input.sourceIds : [];
+  if (sourceType !== 'deployment_smoke') {
+    throw new TypeError('ephemeral knowledge sourceType is invalid');
+  }
+  if (entryIds.length < 1 || entryIds.length > 100 || sourceIds.length !== entryIds.length) {
+    throw new TypeError('ephemeral knowledge cleanup requires 1-100 exact entry/source identities');
+  }
+  const expected = new Map();
+  entryIds.forEach(function(value, index) {
+    const entryId = Number(value);
+    const sourceId = typeof sourceIds[index] === 'string' ? sourceIds[index].trim() : '';
+    if (!Number.isSafeInteger(entryId) || entryId < 1 || !sourceId || sourceId.length > 200) {
+      throw new TypeError('ephemeral knowledge cleanup identity is invalid');
+    }
+    if (expected.has(entryId)) throw new TypeError('ephemeral knowledge cleanup entry IDs must be unique');
+    expected.set(entryId, sourceId);
+  });
+
+  const purge = function() {
+    const ids = [...expected.keys()].sort(function(left, right) { return left - right; });
+    const placeholders = ids.map(function() { return '?'; }).join(',');
+    const rows = db.prepare(`
+      SELECT entry.id,entry.source_type,entry.source_id,
+        governance.lineage_root_entry_id,governance.supersedes_entry_id,
+        governance.version_no,governance.is_current,governance.quality_state,
+        governance.retention_class,
+        (SELECT COUNT(*) FROM knowledge_chunks chunk WHERE chunk.entry_id=entry.id) AS chunk_count,
+        (SELECT COUNT(*) FROM knowledge_chunks_fts fts
+          WHERE CAST(fts.entry_id AS INTEGER)=entry.id) AS fts_count,
+        (SELECT COUNT(*) FROM ai_references reference
+          WHERE reference.knowledge_entry_id=entry.id
+             OR (reference.reference_type='knowledge'
+                 AND reference.reference_id=CAST(entry.id AS TEXT))) AS reference_count,
+        (SELECT COUNT(*) FROM campaign_record_links link
+          WHERE link.record_type='knowledge_entry'
+            AND link.record_id=CAST(entry.id AS TEXT)) AS custody_count
+      FROM knowledge_entries entry
+      JOIN knowledge_entry_governance governance
+        ON governance.knowledge_entry_id=entry.id
+      WHERE entry.id IN (${placeholders})
+      ORDER BY entry.id
+    `).all(...ids);
+    if (rows.length !== ids.length) {
+      throw new Error('ephemeral knowledge cleanup identity set is incomplete');
+    }
+    let chunkCount = 0;
+    let ftsCount = 0;
+    for (const row of rows) {
+      if (
+        row.source_type !== sourceType || row.source_id !== expected.get(row.id) ||
+        !expected.has(row.lineage_root_entry_id) ||
+        (row.supersedes_entry_id !== null && !expected.has(row.supersedes_entry_id)) ||
+        row.reference_count !== 0 || row.custody_count !== 0 ||
+        row.chunk_count < 1 || row.fts_count !== row.chunk_count
+      ) {
+        throw new Error(`ephemeral knowledge cleanup rejected entry ${row.id}`);
+      }
+      chunkCount += row.chunk_count;
+      ftsCount += row.fts_count;
+    }
+    const outsideSuccessors = db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM knowledge_entry_governance
+      WHERE supersedes_entry_id IN (${placeholders})
+        AND knowledge_entry_id NOT IN (${placeholders})
+    `).get(...ids, ...ids).count;
+    if (outsideSuccessors !== 0) {
+      throw new Error('ephemeral knowledge cleanup lineage is incomplete');
+    }
+
+    const fts = db.prepare(`
+      DELETE FROM knowledge_chunks_fts
+      WHERE CAST(entry_id AS INTEGER) IN (${placeholders})
+    `).run(...ids);
+    const deleteGovernance = db.prepare(`
+      DELETE FROM knowledge_entry_governance WHERE knowledge_entry_id=?
+    `);
+    let governanceChanges = 0;
+    rows.sort(function(left, right) { return right.version_no - left.version_no; })
+      .forEach(function(row) {
+        governanceChanges += deleteGovernance.run(row.id).changes;
+      });
+    const entries = db.prepare(`
+      DELETE FROM knowledge_entries WHERE id IN (${placeholders})
+    `).run(...ids);
+    if (fts.changes !== ftsCount || governanceChanges !== ids.length || entries.changes !== ids.length) {
+      throw new Error('ephemeral knowledge cleanup cardinality mismatch');
+    }
+    db.prepare(
+      "INSERT INTO knowledge_chunks_fts(knowledge_chunks_fts) VALUES('integrity-check')"
+    ).run();
+    const leftovers = db.prepare(`
+      SELECT
+        (SELECT COUNT(*) FROM knowledge_entries WHERE id IN (${placeholders})) AS entries,
+        (SELECT COUNT(*) FROM knowledge_chunks WHERE entry_id IN (${placeholders})) AS chunks,
+        (SELECT COUNT(*) FROM knowledge_chunks_fts
+          WHERE CAST(entry_id AS INTEGER) IN (${placeholders})) AS fts
+    `).get(...ids, ...ids, ...ids);
+    if (leftovers.entries !== 0 || leftovers.chunks !== 0 || leftovers.fts !== 0) {
+      throw new Error('ephemeral knowledge cleanup left residual rows');
+    }
+    return { entries: entries.changes, chunks: chunkCount, fts: fts.changes };
+  };
+  return db.transaction(purge).immediate();
+}
+
 module.exports = {
   ingestKnowledge,
   writeCampaignKnowledgeInTransaction,
@@ -3453,9 +3588,11 @@ module.exports = {
   listKnowledgeCategories,
   markKnowledgeUsed,
   recordKnowledgeUsageTelemetry,
+  purgeEphemeralKnowledgeEntries,
   governKnowledgeEntry,
   readKnowledgeGovernance,
   isKnowledgeRetrievable,
+  knowledgeGovernanceSql,
   redactKnowledgeReferences,
   normalizeEntry,
   normalizeTags,

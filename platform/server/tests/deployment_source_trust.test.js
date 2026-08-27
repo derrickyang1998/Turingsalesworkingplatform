@@ -96,6 +96,20 @@ function createV1Fixture(t, name) {
   return { root, databasePath };
 }
 
+function createV6Fixture(t, name) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `tm-trusted-source-v6-${name}-`));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const databasePath = path.join(root, 'managed-v6.db');
+  const database = migrationService.openMigratedDatabase(databasePath, {
+    rootDir: serverRoot,
+    registeredMigrations: migrationVerifier.REGISTERED_MIGRATIONS.slice(0, -1)
+  });
+  database.prepare('UPDATE users SET display_name=? WHERE id=(SELECT MIN(id) FROM users)')
+    .run('trusted-v6-source-fixture');
+  database.close();
+  return { root, databasePath };
+}
+
 function createV7Fixture(t, name) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), `tm-trusted-source-v7-${name}-`));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -393,12 +407,12 @@ test('deployment source verdict rejects a same-name verifier supplied by the can
   );
 });
 
-test('trusted source manifest pins the sanitizer closure, policy, baseline, and exact v1-to-v7 bundle', () => {
+test('trusted source manifest pins the sanitizer closure and exact supported source-version bundle', () => {
   const manifest = loadTrustedManifest();
   const paths = new Set(manifest.files.map((entry) => entry.path));
   assert.equal(manifest.format, 'tm-trusted-production-source-manifest-v1');
   assert.deepEqual(manifest.migrationContract, {
-    sourceVersion: 1,
+    acceptedSourceVersions: [1, 6, 7],
     targetVersion: 7,
     runs: 2,
     deterministicAppendTables: ['activity_log']
@@ -772,6 +786,112 @@ test('trusted live adoption recognizes exact managed v7 as a no-op', (t) => {
     repairs: null
   });
   assert.equal(fs.existsSync(outputPath), false);
+});
+
+test('trusted required sanitize-and-verify migrates exact managed v6 to v7 twice with preservation', (t) => {
+  const fixture = createV6Fixture(t, 'required-v6-gate');
+  const sanitizedPath = path.join(fixture.root, 'trusted-sanitized-v6.db');
+  const workDir = path.join(fixture.root, 'migration-work');
+  const { manifest, manifestPath } = writeCurrentContractManifest(fixture.root);
+  const candidateRoot = path.join(fixture.root, 'candidate');
+  const bundleRoot = path.join(fixture.root, 'trusted', 'bundle');
+  copyContractCandidate(manifest, candidateRoot);
+  loadTrustedGate().stageTrustedBundle({ candidateRoot, bundleRoot, manifestPath });
+  const sourceSha256 = sha256(fixture.databasePath);
+  fs.chmodSync(fixture.databasePath, 0o440);
+  const result = spawnSync(process.execPath, [
+    trustedGatePath,
+    'sanitize-and-verify',
+    '--candidate-root', candidateRoot,
+    '--bundle-root', bundleRoot,
+    '--manifest', manifestPath,
+    '--source', fixture.databasePath,
+    '--expected-source-gid', String(typeof process.getgid === 'function' ? process.getgid() : 0),
+    '--sanitized-source', sanitizedPath,
+    '--work-dir', workDir,
+    '--dependency-root', dependencyRoot,
+    '--expected-self-sha256', sha256(trustedGatePath),
+    '--expected-manifest-sha256', sha256(manifestPath),
+    '--expected-verifier-sha256', verifierSha256(manifest)
+  ], {
+    cwd: fixture.root,
+    encoding: 'utf8',
+    env: { ...process.env, NODE_PATH: dependencyRoot },
+    timeout: 120_000
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const report = JSON.parse(result.stdout.trim());
+  assert.deepEqual({
+    verificationMode: report.verificationMode,
+    sourceVersion: report.sourceVersion,
+    targetVersion: report.targetVersion,
+    runs: report.runs,
+    preMigrationRestoreVerified: report.preMigrationRestoreVerified,
+    legacyPreservationVerified: report.legacyPreservationVerified
+  }, {
+    verificationMode: 'v6-to-v7-migration',
+    sourceVersion: 6,
+    targetVersion: 7,
+    runs: 2,
+    preMigrationRestoreVerified: true,
+    legacyPreservationVerified: true
+  });
+  assert.ok(report.legacyTableCount > 1);
+  assert.ok(report.legacyRowCount > 1);
+  assert.equal(sha256(fixture.databasePath), sourceSha256);
+  assert.equal(fs.existsSync(sanitizedPath), true);
+});
+
+test('trusted managed v6 migration rejects pinned 007 code that mutates existing business data', (t) => {
+  const fixture = createV6Fixture(t, 'required-v6-tamper');
+  const sanitizedPath = path.join(fixture.root, 'trusted-sanitized-v6.db');
+  const workDir = path.join(fixture.root, 'migration-work');
+  const { manifest, manifestPath } = writeCurrentContractManifest(fixture.root);
+  const candidateRoot = path.join(fixture.root, 'candidate');
+  const bundleRoot = path.join(fixture.root, 'trusted', 'bundle');
+  copyContractCandidate(manifest, candidateRoot);
+
+  const migrationRelative = 'server/migrations/007_knowledge_governance.js';
+  const candidateMigration = path.join(candidateRoot, ...migrationRelative.split('/'));
+  fs.appendFileSync(candidateMigration, `
+const tmOriginalApplyForV6PreservationRegression = module.exports.apply;
+module.exports.apply = function tmMutatingV6Migration(db) {
+  tmOriginalApplyForV6PreservationRegression(db);
+  db.prepare('UPDATE users SET display_name=? WHERE id=(SELECT MIN(id) FROM users)')
+    .run('tampered-by-007');
+};
+`, 'utf8');
+  manifest.files.find((entry) => entry.path === migrationRelative).sha256 = sha256(candidateMigration);
+  fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+  loadTrustedGate().stageTrustedBundle({ candidateRoot, bundleRoot, manifestPath });
+
+  const sourceSha256 = sha256(fixture.databasePath);
+  fs.chmodSync(fixture.databasePath, 0o440);
+  const result = spawnSync(process.execPath, [
+    trustedGatePath,
+    'sanitize-and-verify',
+    '--candidate-root', candidateRoot,
+    '--bundle-root', bundleRoot,
+    '--manifest', manifestPath,
+    '--source', fixture.databasePath,
+    '--expected-source-gid', String(typeof process.getgid === 'function' ? process.getgid() : 0),
+    '--sanitized-source', sanitizedPath,
+    '--work-dir', workDir,
+    '--dependency-root', dependencyRoot,
+    '--expected-self-sha256', sha256(trustedGatePath),
+    '--expected-manifest-sha256', sha256(manifestPath),
+    '--expected-verifier-sha256', verifierSha256(manifest)
+  ], {
+    cwd: fixture.root,
+    encoding: 'utf8',
+    env: { ...process.env, NODE_PATH: dependencyRoot },
+    timeout: 120_000
+  });
+
+  assert.notEqual(result.status, 0, result.stdout);
+  assert.match(result.stderr, /legacy preservation row equality drift for users/i);
+  assert.equal(sha256(fixture.databasePath), sourceSha256);
 });
 
 test('trusted required sanitize-and-verify path admits exact managed v7 as a verified no-op', (t) => {
@@ -1206,7 +1326,7 @@ test('deploy pins trusted sanitizer closure and never executes candidate sanitiz
   const snapshotCall = cutoverGate.indexOf('\ncreate_cutover_snapshot\n');
   const mutationPhaseCall = cutoverGate.indexOf('\nrecord_phase mutation-started\n');
   const adoptionCall = cutoverGate.indexOf('\nadopt_legacy_database_if_required\n');
-  const restartCall = cutoverGate.indexOf('pm2 restart ecosystem.config.js', adoptionCall);
+  const restartCall = cutoverGate.indexOf('restart_pm2_from_ecosystem_exactly', adoptionCall);
   assert.ok(
     writerStopCall >= 0 && snapshotCall > writerStopCall && adoptionCall > snapshotCall && restartCall > adoptionCall,
     'live legacy adoption must run after writer quiescence and durable snapshot but before candidate restart'
@@ -1239,7 +1359,7 @@ test('deploy pins trusted sanitizer closure and never executes candidate sanitiz
   assert.match(gateCall[0], /-TimeoutSeconds \$CANDIDATE_GATE_TIMEOUT_SECONDS/);
   assert.ok(deploy.indexOf(gateCall[0]) < deploy.indexOf('$deploymentWriterToken = [Guid]::NewGuid()'));
   assert.ok(deploy.indexOf(gateCall[0]) < deploy.indexOf('RENAME_EXCHANGE = 2'));
-  assert.ok(deploy.indexOf('pm2 restart ecosystem.config.js', deploy.indexOf(gateCall[0])) > deploy.indexOf(gateCall[0]));
+  assert.ok(deploy.indexOf('restart_pm2_from_ecosystem_exactly', deploy.indexOf(gateCall[0])) > deploy.indexOf(gateCall[0]));
 });
 
 test('live database adoption keeps the source digest distinct from the recovery snapshot digest', () => {

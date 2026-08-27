@@ -1,12 +1,12 @@
 # TuringMarket Engineering Handoff / 图灵商务平台工程交接
 
-Updated / 更新日期：2026-08-11
+Updated / 更新日期：2026-08-27
 
 ## Authoritative Baseline / 权威基线
 
 - Checkout / 工作区：`C:\Users\29272\Documents\在线商务平台-github-sync`
 - Current production delivery branch / 当前生产交付分支：`codex/v0.4.0-product-shell-and-design-system`
-- Guarded Phase 5 release branch / 第 5 阶段受控发布分支：`codex/v0.6.0-crm-sales-workspace`
+- Guarded Phase 6 incremental release branch / 第 6 阶段受控增量发布分支：`codex/v0.7.0-ai-knowledge-proposal-ppt-loop-production`
 - Phase 4 development base / 第 4 阶段开发基线：`5960ade03e1bd605ee4bfbe877baa09bc6482083`
 - Current production source / 当前生产源码：`7511b6395a599a4f683cd60d6366e957c48ae302` (`v0.4.0-product-shell-and-design-system`)
 - Backend / 后端：Node.js 20 + Express 5
@@ -86,20 +86,21 @@ Run only from the authoritative checkout / 仅从权威工作区运行：
 
 `-ValidateLocalOnly` never resolves the production server or performs SSH/SCP. It is mutually exclusive with rollback and destructive-restore controls; an explicitly empty, blank, or invalid rollback value is rejected locally instead of being treated as a formal deployment. / `-ValidateLocalOnly` 不会解析生产服务器，也不会执行 SSH/SCP，并且与回滚和破坏性恢复参数互斥；显式空值、空白或非法回滚参数会在本地拒绝，不会被当作正式发布。
 
-Before the first v0.3.0 deployment, run `platform/server/scripts/bootstrap_production_runtime.sh` once as root on Ubuntu 26.04. It creates the no-login `turingmarket-gate` account, installs the audited native browser dependencies, loads the narrow AppArmor user-namespace profile, and migrates `.env`, SQLite, uploads, and temporary files to `/etc/turingmarket` and `/var/lib/turingmarket`. The script snapshots host/package state, keeps a root-only state backup, restores the old layout on failure, and proves PM2 health plus SQLite `quick_check`. Root PM2 remains intentionally unchanged in this phase. / 首次发布 v0.3.0 前，在 Ubuntu 26.04 上以 root 执行一次生产运行时引导脚本；它创建禁止登录的门禁用户、安装经审查的原生浏览器依赖、加载最小 AppArmor user namespace 配置，并把环境文件、SQLite、上传与临时文件迁移到发布目录之外。脚本会留存主机和软件包快照，失败时恢复旧布局，并验证 PM2 健康与 SQLite 完整性；本阶段保留 root PM2。
+Before the first deployment using the external runtime layout, run `platform/server/scripts/bootstrap_production_runtime.sh` once as root on Ubuntu 26.04. It creates the no-login `turingmarket-gate` account, installs the audited native browser dependencies, loads the narrow AppArmor user-namespace profile, and migrates `.env`, SQLite, uploads, and temporary files to `/etc/turingmarket` and `/var/lib/turingmarket`. It also installs and enables the exact root-owned `/etc/systemd/system/pm2-root.service`, verifies the fixed PM2 runtime entrypoints, and preserves the PM2 dump only after that startup contract passes. The script snapshots host/package state, keeps a root-only state backup, restores the old layout on failure, and proves PM2 health plus SQLite `quick_check`. / 首次使用外置运行时布局发布前，在 Ubuntu 26.04 上以 root 执行该引导脚本；除门禁账号、依赖、AppArmor 与可变状态迁移外，它还会安装并启用精确的 root 所有 `pm2-root.service`，验证固定 PM2 入口，并仅在自启动合同通过后保存 PM2 dump；失败时恢复旧布局，并验证 PM2 健康与 SQLite 完整性。
 
 The bootstrap persists its migration phase under `/var/lib/turingmarket-bootstrap/active` before stopping PM2. It captures the rollback database through the SQLite Backup API only after writers stop, handles `ERR`, `INT`, `TERM`, and `HUP`, and on a later rerun first restores or finalizes an interrupted migration. A restored database must pass `quick_check` before PM2 can restart. The bootstrap and every guarded deploy independently reject gate-account UID, primary/supplementary-group, credential-lock, home, or shell drift. / 引导脚本会在停止 PM2 前把迁移阶段持久化到 root-only journal；停服后才通过 SQLite Backup API 生成回滚数据库。脚本处理错误与常见终止信号，进程或主机中断后再次执行时会先恢复或完成已提交迁移；恢复数据库必须通过 `quick_check` 才能重启。引导和每次发布都会独立拒绝门禁账号的 UID、主组、补充组、凭据锁定、home 或 shell 漂移。
 
-The ASCII-safe script runs under Windows PowerShell 5.1 and normalizes CRLF/CR to LF before no-BOM UTF-8 transport to remote Bash; local preflight executes that exact conversion check. Production deployment requires the exact authoritative checkout, the exact v0.6 branch, and a clean tracked worktree. It creates `backups/v060-crm-sales-workspace-<timestamp>`, binds the `better-sqlite3` copy and private `PPT_CACHE_DIR=/var/lib/turingmarket/ppt-cache` tree into nested plus aggregate checksum manifests, and uploads only into an isolated release candidate. / ASCII 安全脚本兼容 Windows PowerShell 5.1；正式发布要求精确权威工作区、精确 v0.6 分支及干净工作树，并把数据库与私有 PPT 缓存绑定为同一验签备份单元。
+The ASCII-safe script runs under Windows PowerShell 5.1 and normalizes CRLF/CR to LF before no-BOM UTF-8 transport to remote Bash; local preflight executes that exact conversion check. Production deployment requires the exact authoritative checkout, the exact `codex/v0.7.0-ai-knowledge-proposal-ppt-loop-production` branch, and a clean tracked worktree. It retains the frozen v0.6 shell/PPT identity and historical `v060-crm-sales-workspace` backup slug while adding reviewed v0.7 backend slices. / ASCII 安全脚本兼容 Windows PowerShell 5.1；正式发布要求精确权威工作区、精确 v0.7 增量发布分支及干净工作树；冻结的 v0.6 UI/PPT 标识与历史备份 slug 保持不变，仅叠加已审查的 v0.7 后端切片。
 
-Remote Node verification includes / 远端 Node 验证包含：
+Per-feature candidate Node verification is bounded to migration/replay evidence. Affected unit/API/contract tests run locally before deployment; full non-browser regression and browser verification run at phase closeout or when a hard-gate risk boundary requires them. / 单功能候选 Node 验证限定为迁移与重放证据；受影响的单元、API 和合同测试在部署前本地执行，完整非浏览器回归与浏览器验证只在阶段收口或硬门禁风险边界触发时执行：
 
 ```bash
-cd server
-NODE_ENV=test TM_DISABLE_DOTENV=1 DB_PATH=/var/lib/turingmarket-gate/releases/<release>/tmp/deploy-v060-gate-<timestamp>/test.db node --test --test-concurrency=1 tests/*.test.js
+NODE_ENV=test TM_DISABLE_DOTENV=1 node server/scripts/verify_phase4_one_request_replay.js
+NODE_ENV=test TM_DISABLE_DOTENV=1 node --test server/tests/verify_phase4_one_request_replay.test.js
+NODE_ENV=test TM_DISABLE_DOTENV=1 node --test server/tests/release_replay_gate.test.js
 ```
 
-The candidate lives under `/var/lib/turingmarket-gate/releases`. Trusted active-runtime code first rebuilds a non-secret v4 fixture from the checksummed production schema and copies only the migration ledger. Candidate migration code never runs as root and never receives the production database: it runs as `turingmarket-gate` in a bounded systemd cgroup with private network/PID/mount namespaces, read-only paths, production-state denial, resource limits, and root-only output. Trusted active-runtime code then verifies preserved business tables, exact user security fields, organization/team/campaign rows, rerun idempotence, and unchanged production-backup plus PPT-manifest hashes before the existing Node, Playwright, and Nginx gates. / 可信活动运行时先根据已验签生产结构重建不含真实数据的 v4 合成副本，并且只复制迁移账本。候选迁移代码不再以 root 运行，也不会取得生产数据库；它以门禁用户在受限 systemd cgroup 中运行，使用独立网络、PID 与挂载命名空间、只读路径、生产状态拒绝、资源上限及仅 root 可读输出。随后由可信活动运行时核对保留业务表、用户安全字段、组织/团队/项目数据、重复迁移幂等性，以及生产备份与 PPT 清单哈希不变，再进入 Node、Playwright 与 Nginx 门禁。
+The candidate lives under `/var/lib/turingmarket-gate/releases`. Trusted active-runtime code accepts only exact source schema versions `1`, `6`, or `7`: v1 and v6 run the pinned two-pass preservation verifier to schema v7, while exact managed v7 follows the verified no-op path. Candidate migration code never runs as root and never receives the production database. Per-feature validation then runs the bounded migration/replay, route/static, and Nginx checks; full Node and browser gates remain phase-closeout or risk-trigger checks. / 候选版本位于受限发布目录；可信运行时只接受精确 schema `1`、`6` 或 `7`，其中 v1/v6 通过固定的双跑保持性验证迁移到 v7，受管 v7 走已验证的 no-op 路径。候选迁移代码不以 root 运行，也不取得生产数据库；单功能只运行有界迁移/重放、路由/静态资源和 Nginx 检查，完整 Node 与浏览器门禁保留到阶段收口或风险触发。
 
 A rejected candidate is deleted without stopping active PM2. The current lifecycle moves from `locked` directly into writer-protected `mutation-intent`, confirmed `mutation-started`, and `cutover-complete`; historical `candidate-ready` is read only for recovery compatibility and is not independently written. Production cutover, recovery, and rollback require the stable global `/root/turingmarket/.deploy-v030.writer` mutex and revalidate the lifecycle owner after acquiring it. Recovery cannot overlap a cutover that survived an SSH disconnect, a delayed cutover cannot enter a replacement lock generation, and an old phase writer cannot overwrite a newer lifecycle. Only confirmed mutation triggers automatic restore. An unreadable or uncertain phase, or an active/stale writer mutex, causes no further automatic production action and retains the locks. / 候选验证失败时仅删除候选目录，不停止活动 PM2；当前生命周期从 `locked` 直接进入受 writer 保护的 `mutation-intent`、确认开始变更与切换完成，历史 `candidate-ready` 仅作恢复兼容读取，不再独立写入。生产切换、恢复与回滚必须取得稳定的全局 `/root/turingmarket/.deploy-v030.writer` 互斥，并在获取后重新校验生命周期 owner，从而阻止 SSH 中断并发、延迟切换进入新锁代际及旧阶段覆盖新生命周期。只有确认开始变更才自动恢复；阶段不可读、不确定或 writer 活动/残留时不再自动操作生产并保留锁。
 
@@ -111,7 +112,7 @@ Manual rollback / 手工回滚：
 
 The same restore function is used by automatic and manual rollback. Phase 4 rejects code-only rollback: manual restore requires `-RollbackBackup`, `-RestoreDatabase`, and `-ConfirmDataLoss`; automatic post-mutation recovery always selects the same database/cache path. Every manifest is verified, SQLite and `PPT_CACHE_DIR` are restored as one unit, stale SQLite sidecars are removed, and every session is deleted before PM2 starts with `SERVER_HOST=127.0.0.1`. `-PreserveSessions` is always rejected. / 自动与手工回滚共用同一数据库与缓存恢复函数；手工恢复必须显式提供备份、恢复数据库及确认数据丢失，且始终在 PM2 启动前撤销全部会话。
 
-The v0.6 candidate is not production yet. Remaining serial gates are the complete local release matrix, independent Code Review/AppSec/QA, GitHub synchronization, verified production backup, guarded cutover, remote runtime/API/UI/access acceptance, rollback rehearsal, and final version/Obsidian evidence sync. Production therefore remains on the verified v0.4 source. / v0.6 当前仍是候选；剩余串行门禁包括完整本地发布矩阵、独立 Code Review/AppSec/QA、GitHub 同步、生产可校验备份、受控切换、远端运行时/API/UI/权限验收、回滚演练及最终版本/Obsidian 证据同步，因此生产继续保持已验证的 v0.4。
+Production runs the accepted v0.6 product shell and frozen PPT renderer with the reviewed v0.7 Phase 6 slices through Task 4D3, on schema v7. The current Task 4D4 governance-hardening bytes remain a candidate until their focused tests, independent review, GitHub synchronization, verified backup, guarded deployment, production health/login/core-path acceptance, rollback evidence, and final version/Obsidian sync are complete. / 生产当前运行已验收 v0.6 产品壳层与冻结 PPT renderer，并叠加至 Task 4D3 的 v0.7 阶段 6 切片，数据库为 schema v7；当前 Task 4D4 治理加固字节在定向测试、独立审查、GitHub 同步、可验证备份、受控部署、线上验收、回滚证据及版本/Obsidian 同步完成前仍是候选。
 
 ## Security And Secrets / 安全与密钥
 
@@ -121,4 +122,4 @@ Session invalidation is mandatory for Phase 4 deploy and restore; `-PreserveSess
 
 ## Required Completion Evidence / 完成证据
 
-Before a release is accepted, retain the Git commit and remote SHA, backup identifier, checksum verification, Node and Playwright counts, frozen PPT hash, 72-image comparison, route/static smoke, Nginx status, PM2 status, and authenticated production workflow results. / 版本验收前必须留存 Git 与远端 SHA、备份编号、校验结果、Node/Playwright 计数、冻结 PPT 哈希、72 图对比、路由与静态冒烟、Nginx、PM2 及生产登录态业务验收证据。
+Before each feature slice is accepted, retain the Git commit and remote SHA, focused test counts, independent-review verdict, backup identifier and checksum verification, frozen PPT hash, route/static smoke, Nginx and PM2 startup state, and authenticated production workflow results. Add full Node, browser, and visual-comparison evidence at phase closeout or when the risk-trigger rule requires those gates. / 每个功能切片验收前必须留存 Git 与远端 SHA、定向测试计数、独立审查结论、备份编号和校验、冻结 PPT 哈希、路由与静态冒烟、Nginx 与 PM2 自启动状态及生产登录态业务验收；完整 Node、浏览器和视觉对比证据仅在阶段收口或风险触发时补充。

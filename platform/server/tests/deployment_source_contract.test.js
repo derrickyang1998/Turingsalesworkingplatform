@@ -26,7 +26,7 @@ const docs = [
 ];
 
 const AUTHORITATIVE_CHECKOUT = String.raw`C:\Users\29272\Documents\在线商务平台-github-sync`;
-const AUTHORITATIVE_BRANCH = 'codex/v0.6.0-crm-sales-workspace';
+const AUTHORITATIVE_BRANCH = 'codex/v0.7.0-ai-knowledge-proposal-ppt-loop-production';
 const RELEASE_SLUG = 'v060-crm-sales-workspace';
 const APP_BUILD = '20260811-v060-crm-sales-workspace';
 const APP_QUERY = '20260811v060crmsalesworkspace';
@@ -289,11 +289,14 @@ test('Phase 4 docs lock public assets, preview, build markers, backup, rollback,
   ]) {
     assert.ok(source.includes(marker), `documentation must include ${marker}`);
   }
-  assert.match(
-    source,
-    /cd server\s*\r?\n\s*NODE_ENV=test TM_DISABLE_DOTENV=1 DB_PATH=\S+ node --test --test-concurrency=1 tests\/\*\.test\.js/i,
-    'isolated remote full Node test must be documented'
-  );
+  assert.match(source, /verify_phase4_one_request_replay\.js/i,
+    'bounded candidate replay verifier must be documented');
+  assert.match(source, /verify_phase4_one_request_replay\.test\.js/i,
+    'bounded candidate replay tests must be documented');
+  assert.match(source, /release_replay_gate\.test\.js/i,
+    'bounded release replay tests must be documented');
+  assert.match(source, /Full non-browser regression[\s\S]*phase closeout/i,
+    'phase-closeout regression policy must be documented');
   assert.doesNotMatch(source, /(?:tvly|sk)-[A-Za-z0-9_-]{12,}|BEGIN (?:RSA |OPENSSH )?PRIVATE KEY/);
 });
 
@@ -302,7 +305,7 @@ test('Phase 4 deploy source guards the exact branch and locked build contract', 
   assert.match(deploy, /\[string\]\$RollbackBackup/);
   assert.ok(
     deploy.includes(`$EXPECTED_BRANCH = "${AUTHORITATIVE_BRANCH}"`),
-    'deploy script must guard the authoritative v0.6 branch'
+    'deploy script must guard the authoritative v0.7 branch'
   );
   assert.match(deploy, /git\s+-C\s+\$REPO_DIR\s+branch\s+--show-current/);
   assert.match(deploy, /git\s+-C\s+\$REPO_DIR\s+status\s+--porcelain/);
@@ -320,12 +323,24 @@ test('Phase 4 deploy source guards the exact branch and locked build contract', 
 
 test('Task 12 local deploy preflight executes under Windows PowerShell 5.1 without network access', {
   skip: process.platform !== 'win32'
-}, () => {
+}, (t) => {
   const deploy = read(deployPath);
   assert.match(deploy, /\$normalizedInput\s*=\s*\$InputText\s+-replace\s+"`r`n\?",\s*"`n"/);
   assert.match(deploy, /-InputText\s+"set -euo pipefail`r`n"/);
   assert.match(deploy, /\$transportResult\s*=\s*Invoke-NativeWithUtf8Input[\s\S]*?-CaptureOutput/);
   assert.match(deploy, /TRANSPORT_OK/);
+  const expectedBranch = deploy.match(/\$EXPECTED_BRANCH\s*=\s*"([^"]+)"/);
+  assert.ok(expectedBranch, 'deploy script must declare its authoritative branch');
+  const currentBranch = spawnSync('git', ['-C', repoRoot, 'branch', '--show-current'], {
+    encoding: 'utf8',
+    timeout: 30_000,
+    env: safeGitEnvironment()
+  });
+  assert.equal(currentBranch.status, 0, currentBranch.stderr || currentBranch.stdout);
+  if (currentBranch.stdout.trim() !== expectedBranch[1]) {
+    t.skip(`runtime preflight requires authoritative branch ${expectedBranch[1]}`);
+    return;
+  }
   const result = spawnSync('powershell.exe', [
     '-NoLogo',
     '-NoProfile',
@@ -554,7 +569,7 @@ test('Phase 4 deployment mode routing requires explicit destructive restore cons
   }
 });
 
-test('Task 12 deploy inventory includes every client asset and remote full-test dependency', () => {
+test('Task 12 deploy inventory includes every client asset and bounded remote-gate dependency', () => {
   const deploy = read(deployPath);
   const files = powerShellArrayEntries(deploy, 'FILES');
   const fileSet = new Set(files);
@@ -587,10 +602,15 @@ test('Task 12 deploy inventory includes every client asset and remote full-test 
     assert.equal(fileSet.has(file), true, `${file} must support remote verification`);
   }
 
-  const nodeTests = fs.readdirSync(path.join(platformRoot, 'server', 'tests'))
-    .filter((name) => name.endsWith('.test.js'))
-    .map((name) => `server/tests/${name}`);
-  for (const file of nodeTests) assert.equal(fileSet.has(file), true, `${file} must be uploaded before remote npm test`);
+  for (const file of [
+    'server/scripts/verify_phase4_one_request_replay.js',
+    'server/tests/verify_phase4_one_request_replay.test.js',
+    'server/tests/release_replay_gate.test.js',
+    'server/tests/deployment-browser-smoke.config.js',
+    'server/tests/deployment-browser-smoke.spec.js'
+  ]) {
+    assert.equal(fileSet.has(file), true, `${file} must be uploaded before the bounded remote gate`);
+  }
   const deployedJavaScript = files.filter((file) => file.endsWith('.js'));
   for (const sourceFile of deployedJavaScript) {
     const absolute = path.join(platformRoot, ...sourceFile.split('/'));
@@ -1377,9 +1397,16 @@ test('Phase 4 persists the verified PM2 projection before any recovery or cutove
   );
   assert.ok(verifierMatch, 'PM2 persistence verifier must exist');
   assert.match(verifierMatch[0], /persist_pm2_dump\(\)/);
+  assert.match(verifierMatch[0], /assert_pm2_startup_service\(\)/);
+  assert.match(verifierMatch[0], /systemctl is-enabled --quiet pm2-root\.service/);
+  assert.match(verifierMatch[0], /ExecStart=\/usr\/lib\/node_modules\/pm2\/bin\/pm2 resurrect/);
   assert.match(verifierMatch[0], /pm2 save/);
   assert.match(verifierMatch[0], /\/root\/\.pm2\/dump\.pm2/);
   assert.match(verifierMatch[0], /PM2_DUMP_PERSISTED/);
+  assert.ok(
+    verifierMatch[0].indexOf('assert_pm2_startup_service') < verifierMatch[0].indexOf('pm2 save'),
+    'PM2 startup service must be verified before persisting a restart dump'
+  );
   const extractFunction = (name, nextName) => {
     const match = deploy.match(new RegExp(`function ${name} \\{[\\s\\S]*?(?=function ${nextName})`));
     assert.ok(match, `${name} function must exist`);
@@ -1478,11 +1505,11 @@ test('Phase 4 checks parser readiness with candidate application code before pro
   const installIndex = deploy.indexOf('install_parser_appliance', cutoverIndex);
   const readinessIndex = deploy.indexOf('APPLICATION_PARSER_CHECKED_IN_OK', installIndex);
   const sessionIndex = deploy.indexOf('# INVALIDATE_SESSIONS', readinessIndex);
-  const restartIndex = deploy.indexOf('pm2 restart ecosystem.config.js', readinessIndex);
+  const restartIndex = deploy.indexOf('restart_pm2_from_ecosystem_exactly', readinessIndex);
   assert.ok(
     cutoverIndex >= 0 && installIndex > cutoverIndex && readinessIndex > installIndex &&
       sessionIndex > readinessIndex && restartIndex > sessionIndex,
-    'candidate application readiness must run after parser installation and before PM2 restart'
+    'candidate application readiness must run after parser installation and before the exact PM2 projection starts'
   );
 
   const readiness = deploy.slice(installIndex, sessionIndex);
@@ -2119,9 +2146,11 @@ test('Task 12 deploy validates an isolated candidate and atomically exchanges it
   assert.doesNotMatch(deploy, /Invoke-PinnedDeploymentUpload\s+-Record\s+\$\w+\s+-RemoteRoot\s+\$REMOTE_DIR\b/);
   assert.match(deploy, /renameat2/);
   assert.match(deploy, /RENAME_EXCHANGE/);
-  assert.match(deploy, /pm2 stop turingmarket[\s\S]*?renameat2[\s\S]*?pm2 (?:restart|start)/);
+  assert.match(deploy, /pm2 stop turingmarket[\s\S]*?renameat2[\s\S]*?restart_pm2_from_ecosystem_exactly/);
   assert.match(deploy, /TM_DISABLE_DOTENV=1/);
-  assert.match(deploy, /DB_PATH="\$TestDb"/);
+  assert.match(deploy, /SCHEMA_RUNTIME_DB="\$SCHEMA_RUNTIME_DIR\/schema\.db"/);
+  assert.match(deploy, /install -m 0600 "\$SCHEMA_DB" "\$SCHEMA_RUNTIME_DB"/);
+  assert.match(deploy, /DB_PATH="\$SCHEMA_RUNTIME_DB"/);
   assert.match(deploy, /\^\[A-Za-z0-9\]\[A-Za-z0-9\.-\]\{0,252\}\$/);
 });
 
@@ -2205,7 +2234,7 @@ test('Phase 4 cutover invalidates every session before the candidate service sta
   assert.ok(cutoverMatch, 'production cutover gate must exist');
   const cutover = cutoverMatch[1];
   const sessionIndex = cutover.indexOf('DELETE FROM sessions');
-  const restartIndex = cutover.indexOf('pm2 restart ecosystem.config.js');
+  const restartIndex = cutover.indexOf('restart_pm2_from_ecosystem_exactly');
 
   assert.ok(sessionIndex > cutover.indexOf('pm2 stop turingmarket'), 'sessions clear only after writers stop');
   assert.ok(restartIndex > sessionIndex, 'candidate must not start before sessions are cleared');
@@ -2234,7 +2263,7 @@ test('Phase 4 cutover quiesces traffic and writers before replacing the stale ro
 
   assert.match(cutover, /return 503/);
   assert.match(cutover, /Retry-After/);
-  assert.match(cutover, /expect_maintenance 503 \/api\/health/);
+  assert.match(cutover, /for request_path in \/api\/health \/api\/auth\/login \/m0; do[\s\S]*?expect_maintenance 503 "\$request_path"/);
   assert.match(cutover, /PM2_WRITERS_STOPPED/);
   assert.match(cutover, /command -v ss/);
   assert.match(cutover, /ss -H -ltnp/);
@@ -2962,22 +2991,28 @@ Write-Output 'MANUAL_ROLLBACK_PREFLIGHT_OK'
   assert.match(result.stdout, /MANUAL_ROLLBACK_PREFLIGHT_OK/);
 });
 
-test('Task 12 remote deploy gate runs full tests and exact route/static smoke before success', () => {
+test('Task 12 remote deploy gate runs bounded replay tests and exact route/static smoke before success', () => {
   const deploy = read(deployPath);
   assert.match(deploy, /npm ci --ignore-scripts/);
   assert.match(deploy, /node node_modules\/playwright-deploy\/cli\.js install chromium/);
   assert.match(deploy, /TM_DISABLE_DOTENV=1/);
   assert.match(deploy, /DB_PATH=/);
-  assert.match(deploy, /cd server[\s\S]*?node --test --test-concurrency=1 tests\/\*\.test\.js/);
+  const candidateMatch = deploy.match(/\$candidateGate\s*=\s*@'\r?\n([\s\S]*?)\r?\n'@/);
+  assert.ok(candidateMatch, 'candidate-only gate must exist');
+  const candidateGate = candidateMatch[1];
+  assert.match(candidateGate, /node server\/scripts\/verify_phase4_one_request_replay\.js/);
+  assert.match(candidateGate, /node --test server\/tests\/verify_phase4_one_request_replay\.test\.js/);
+  assert.match(candidateGate, /node --test server\/tests\/release_replay_gate\.test\.js/);
+  assert.doesNotMatch(candidateGate, /tests\/\*\.test\.js/);
   assert.doesNotMatch(deploy, /npm test -- --test-concurrency=1/);
   assert.ok(
     deploy.indexOf('node node_modules/playwright-deploy/cli.js install chromium') <
-      deploy.indexOf('node --test --test-concurrency=1 tests/*.test.js'),
-    'Chromium must be installed before the full Node suite launches browser-backed tests'
+      deploy.indexOf('node node_modules/playwright-deploy/cli.js test -c server/tests/deployment-browser-smoke.config.js'),
+    'Chromium must be installed before the bounded browser smoke launches'
   );
   assert.match(deploy, /node node_modules\/playwright-deploy\/cli\.js test -c server\/tests\/deployment-browser-smoke\.config\.js/);
   assert.doesNotMatch(deploy, /npx\s+playwright|playwright-deploy\/cli\.js test -c server\/tests\/browser-baseline\.config\.js/);
-  assert.match(deploy, /pm2 start ecosystem\.config\.js --only turingmarket|pm2 restart ecosystem\.config\.js --only turingmarket/);
+  assert.match(deploy, /restart_pm2_from_ecosystem_exactly/);
   for (const route of ['/api/health', '/m0', '/m0-detail', '/m4', '/admin']) {
     assert.ok(deploy.includes(route), `route smoke must include ${route}`);
   }

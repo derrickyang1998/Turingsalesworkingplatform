@@ -80,12 +80,18 @@ function identities(db) {
   return { admin, owner };
 }
 
-function addKnowledge(db, owner, suffix, content = 'governance-contract') {
+function addKnowledge(
+  db,
+  owner,
+  suffix,
+  content = 'governance-contract',
+  sourceType = 'governance_contract'
+) {
   return knowledge.ingestKnowledge(db, {
     title: `Governance ${suffix}`,
     content: `${content} ${suffix}`,
     entry_type: 'methodology',
-    source_type: 'governance_contract',
+    source_type: sourceType,
     source_id: suffix,
     visibility: 'team',
     tags: ['governance-contract'],
@@ -166,6 +172,148 @@ test('migration 007 backfills existing knowledge without changing content or FTS
   const governanceBefore = JSON.stringify(governanceRow(db, entry.id));
   runMigrations(db, MIGRATIONS_V7);
   assert.equal(JSON.stringify(governanceRow(db, entry.id)), governanceBefore);
+  db.close();
+});
+
+test('supported ephemeral knowledge cleanup removes the matching FTS projection', () => {
+  const db = openDatabase();
+  const { owner } = identities(db);
+  const entry = addKnowledge(db, owner, 'fts-delete', 'governance-contract', 'deployment_smoke');
+  const chunk = db.prepare('SELECT id FROM knowledge_chunks WHERE entry_id=?').get(entry.id);
+  assert.ok(chunk);
+  assert.equal(db.prepare(`
+    SELECT COUNT(*) AS count FROM knowledge_chunks_fts
+    WHERE CAST(chunk_id AS INTEGER)=?
+  `).get(chunk.id).count, 1);
+
+  const result = knowledge.purgeEphemeralKnowledgeEntries(db, {
+    entryIds: [entry.id],
+    sourceType: 'deployment_smoke',
+    sourceIds: ['fts-delete']
+  });
+
+  assert.deepEqual(result, { entries: 1, chunks: 1, fts: 1 });
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM knowledge_chunks WHERE id=?').get(chunk.id).count, 0);
+  assert.equal(db.prepare(`
+    SELECT COUNT(*) AS count FROM knowledge_chunks_fts
+    WHERE CAST(chunk_id AS INTEGER)=?
+  `).get(chunk.id).count, 0);
+  db.close();
+});
+
+test('ephemeral cleanup rolls back every projection when a nested delete fails', () => {
+  const db = openDatabase();
+  const { owner } = identities(db);
+  const entry = addKnowledge(db, owner, 'fts-rollback', 'governance-contract', 'deployment_smoke');
+  const before = db.prepare(`
+    SELECT
+      (SELECT COUNT(*) FROM knowledge_entries WHERE id=?) AS entries,
+      (SELECT COUNT(*) FROM knowledge_entry_governance WHERE knowledge_entry_id=?) AS governance,
+      (SELECT COUNT(*) FROM knowledge_chunks WHERE entry_id=?) AS chunks,
+      (SELECT COUNT(*) FROM knowledge_chunks_fts
+        WHERE CAST(entry_id AS INTEGER)=?) AS fts
+  `).get(entry.id, entry.id, entry.id, entry.id);
+  db.exec(`
+    CREATE TEMP TRIGGER reject_ephemeral_governance_delete
+    BEFORE DELETE ON knowledge_entry_governance
+    BEGIN
+      SELECT RAISE(ABORT, 'injected governance delete failure');
+    END
+  `);
+
+  db.transaction(function() {
+    assert.throws(
+      () => knowledge.purgeEphemeralKnowledgeEntries(db, {
+        entryIds: [entry.id],
+        sourceType: 'deployment_smoke',
+        sourceIds: ['fts-rollback']
+      }),
+      /injected governance delete failure/
+    );
+  })();
+
+  const after = db.prepare(`
+    SELECT
+      (SELECT COUNT(*) FROM knowledge_entries WHERE id=?) AS entries,
+      (SELECT COUNT(*) FROM knowledge_entry_governance WHERE knowledge_entry_id=?) AS governance,
+      (SELECT COUNT(*) FROM knowledge_chunks WHERE entry_id=?) AS chunks,
+      (SELECT COUNT(*) FROM knowledge_chunks_fts
+        WHERE CAST(entry_id AS INTEGER)=?) AS fts
+  `).get(entry.id, entry.id, entry.id, entry.id);
+  assert.deepEqual(after, before);
+  db.prepare(
+    "INSERT INTO knowledge_chunks_fts(knowledge_chunks_fts) VALUES('integrity-check')"
+  ).run();
+  db.close();
+});
+
+test('ephemeral cleanup rejects non-smoke knowledge and preserves its complete projection', () => {
+  const db = openDatabase();
+  const { admin, owner } = identities(db);
+  const entry = addKnowledge(db, owner, 'fts-protected');
+  govern(db, admin, entry.id, 'confirm', 1);
+  const before = db.prepare(`
+    SELECT
+      (SELECT COUNT(*) FROM knowledge_entries WHERE id=?) AS entries,
+      (SELECT COUNT(*) FROM knowledge_entry_governance WHERE knowledge_entry_id=?) AS governance,
+      (SELECT COUNT(*) FROM knowledge_chunks WHERE entry_id=?) AS chunks,
+      (SELECT COUNT(*) FROM knowledge_chunks_fts
+        WHERE CAST(entry_id AS INTEGER)=?) AS fts
+  `).get(entry.id, entry.id, entry.id, entry.id);
+
+  assert.throws(
+    () => knowledge.purgeEphemeralKnowledgeEntries(db, {
+      entryIds: [entry.id],
+      sourceType: 'governance_contract',
+      sourceIds: ['fts-protected']
+    }),
+    /ephemeral knowledge sourceType is invalid/
+  );
+  const after = db.prepare(`
+    SELECT
+      (SELECT COUNT(*) FROM knowledge_entries WHERE id=?) AS entries,
+      (SELECT COUNT(*) FROM knowledge_entry_governance WHERE knowledge_entry_id=?) AS governance,
+      (SELECT COUNT(*) FROM knowledge_chunks WHERE entry_id=?) AS chunks,
+      (SELECT COUNT(*) FROM knowledge_chunks_fts
+        WHERE CAST(entry_id AS INTEGER)=?) AS fts
+  `).get(entry.id, entry.id, entry.id, entry.id);
+  assert.deepEqual(after, before);
+  db.close();
+});
+
+test('deployment smoke cleanup removes a complete reviewed lineage without FTS residue', () => {
+  const db = openDatabase();
+  const { admin, owner } = identities(db);
+  const original = addKnowledge(
+    db,
+    owner,
+    'smoke-original',
+    'deployment smoke lineage',
+    'deployment_smoke'
+  );
+  const replacement = addKnowledge(
+    db,
+    owner,
+    'smoke-replacement',
+    'deployment smoke lineage',
+    'deployment_smoke'
+  );
+  govern(db, admin, original.id, 'confirm', 1);
+  govern(db, admin, replacement.id, 'confirm', 1);
+  govern(db, admin, original.id, 'supersede', 2, {
+    replacementEntryId: replacement.id
+  });
+
+  const result = knowledge.purgeEphemeralKnowledgeEntries(db, {
+    entryIds: [original.id, replacement.id],
+    sourceType: 'deployment_smoke',
+    sourceIds: ['smoke-original', 'smoke-replacement']
+  });
+  assert.deepEqual(result, { entries: 2, chunks: 2, fts: 2 });
+  assert.equal(db.prepare(`
+    SELECT COUNT(*) AS count FROM knowledge_chunks_fts
+    WHERE CAST(entry_id AS INTEGER) IN (?,?)
+  `).get(original.id, replacement.id).count, 0);
   db.close();
 });
 

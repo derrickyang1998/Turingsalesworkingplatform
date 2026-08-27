@@ -250,7 +250,7 @@ const expectedRouteSources = Object.freeze([
 ]);
 
 const expectedRouteCountsBySource = Object.freeze({
-  'platform/server/server.js': 40,
+  'platform/server/server.js': 42,
   'platform/server/routes.js': 11,
   'platform/server/routes_customers.js': 34,
   'platform/server/routes_brands.js': 4,
@@ -647,7 +647,7 @@ test('generateManifest records every registered route contract in deterministic 
     duplicateFixturePath: fixturePath
   });
 
-  assert.equal(manifest.routeContracts.length, 123);
+  assert.equal(manifest.routeContracts.length, 125);
   assert.deepEqual([...new Set(manifest.routeContracts.map((route) => route.source))], expectedRouteSources);
 
   const routeCountsBySource = Object.fromEntries(

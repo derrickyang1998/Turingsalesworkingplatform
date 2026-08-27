@@ -85,6 +85,8 @@ FIREWALL_UNIT="turingmarket-loopback-firewall.service"
 FIREWALL_RULE_FILE="$ENV_DIR/turingmarket-loopback-firewall.nft"
 FIREWALL_HELPER="$LOCAL_SBIN_DIR/turingmarket-loopback-firewall"
 FIREWALL_SERVICE_FILE="$SYSTEMD_UNIT_DIR/$FIREWALL_UNIT"
+PM2_UNIT="pm2-root.service"
+PM2_SERVICE_FILE="$SYSTEMD_UNIT_DIR/$PM2_UNIT"
 PM2_FIREWALL_DROPIN_DIR="$SYSTEMD_UNIT_DIR/pm2-root.service.d"
 PM2_FIREWALL_DROPIN_FILE="$PM2_FIREWALL_DROPIN_DIR/turingmarket-loopback-firewall.conf"
 STAMP="$(date -u +%Y%m%d-%H%M%S)"
@@ -5582,11 +5584,12 @@ write_loopback_firewall_candidates() {
   local rules="$candidate_dir/rules.nft"
   local helper="$candidate_dir/helper"
   local service="$candidate_dir/service"
+  local pm2_service="$candidate_dir/pm2-service"
   local dropin="$candidate_dir/pm2-dropin"
 
   bootstrap_remove_anchored_fixed_tree \
     "$(dirname "$candidate_dir")" "${candidate_dir##*/}" 0700 \
-    'candidate,candidate/rules.nft,candidate/helper,candidate/service,candidate/pm2-dropin' || return 1
+    'candidate,candidate/rules.nft,candidate/helper,candidate/service,candidate/pm2-service,candidate/pm2-dropin' || return 1
   mkdir -m 0700 "$candidate_dir" || return 1
   cat > "$rules" <<'NFT_RULES' || return 1
 destroy table inet turingmarket_loopback
@@ -5639,6 +5642,30 @@ ExecStop=$FIREWALL_HELPER remove
 [Install]
 WantedBy=multi-user.target
 EOF
+  cat > "$pm2_service" <<'PM2_SERVICE' || return 1
+[Unit]
+Description=PM2 process manager
+Documentation=https://pm2.keymetrics.io/
+After=network.target
+
+[Service]
+Type=forking
+User=root
+LimitNOFILE=infinity
+LimitNPROC=infinity
+LimitCORE=infinity
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin:/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
+Environment=PM2_HOME=/root/.pm2
+PIDFile=/root/.pm2/pm2.pid
+Restart=on-failure
+
+ExecStart=/usr/lib/node_modules/pm2/bin/pm2 resurrect
+ExecReload=/usr/lib/node_modules/pm2/bin/pm2 reload all
+ExecStop=/usr/lib/node_modules/pm2/bin/pm2 kill
+
+[Install]
+WantedBy=multi-user.target
+PM2_SERVICE
   cat > "$dropin" <<EOF || return 1
 [Unit]
 Requires=$FIREWALL_UNIT
@@ -5646,7 +5673,7 @@ After=$FIREWALL_UNIT
 EOF
   chmod 0600 "$rules" || return 1
   chmod 0700 "$helper" || return 1
-  chmod 0644 "$service" "$dropin" || return 1
+  chmod 0644 "$service" "$pm2_service" "$dropin" || return 1
   bootstrap_trusted_bash -n "$helper" || return 1
   "$NFT_BIN" --check -f "$rules" || return 1
 }
@@ -5657,17 +5684,19 @@ validate_loopback_firewall_artifacts() {
   if [ "${TM_BOOTSTRAP_LIBRARY_ONLY:-0}" = "1" ]; then
     expected_owner="$(bootstrap_trusted_id -un):$(bootstrap_trusted_id -gn)"
   fi
-  for path in "$FIREWALL_RULE_FILE" "$FIREWALL_HELPER" "$FIREWALL_SERVICE_FILE" "$PM2_FIREWALL_DROPIN_FILE"; do
+  for path in "$FIREWALL_RULE_FILE" "$FIREWALL_HELPER" "$FIREWALL_SERVICE_FILE" "$PM2_SERVICE_FILE" "$PM2_FIREWALL_DROPIN_FILE"; do
     [ -f "$path" ] && [ ! -L "$path" ] || return 1
     [ "$(bootstrap_trusted_stat -c '%U:%G' "$path")" = "$expected_owner" ] || return 1
   done
   [ "$(bootstrap_trusted_stat -c '%a' "$FIREWALL_RULE_FILE")" = "600" ] || return 1
   [ "$(bootstrap_trusted_stat -c '%a' "$FIREWALL_HELPER")" = "700" ] || return 1
   [ "$(bootstrap_trusted_stat -c '%a' "$FIREWALL_SERVICE_FILE")" = "644" ] || return 1
+  [ "$(bootstrap_trusted_stat -c '%a' "$PM2_SERVICE_FILE")" = "644" ] || return 1
   [ "$(bootstrap_trusted_stat -c '%a' "$PM2_FIREWALL_DROPIN_FILE")" = "644" ] || return 1
   cmp -s "$candidate_dir/rules.nft" "$FIREWALL_RULE_FILE" || return 1
   cmp -s "$candidate_dir/helper" "$FIREWALL_HELPER" || return 1
   cmp -s "$candidate_dir/service" "$FIREWALL_SERVICE_FILE" || return 1
+  cmp -s "$candidate_dir/pm2-service" "$PM2_SERVICE_FILE" || return 1
   cmp -s "$candidate_dir/pm2-dropin" "$PM2_FIREWALL_DROPIN_FILE" || return 1
 }
 
@@ -5675,6 +5704,7 @@ loopback_firewall_installation_is_exact() {
   local candidate_dir="$1"
   validate_loopback_firewall_artifacts "$candidate_dir" || return 1
   systemctl is-enabled --quiet "$FIREWALL_UNIT" || return 1
+  systemctl is-enabled --quiet "$PM2_UNIT" || return 1
   systemctl is-active --quiet "$FIREWALL_UNIT" || return 1
   validate_loopback_firewall
 }
@@ -5685,8 +5715,10 @@ snapshot_loopback_firewall_installation() {
   copy_existing_path "$FIREWALL_RULE_FILE" "$backup/rules" || return 1
   copy_existing_path "$FIREWALL_HELPER" "$backup/helper" || return 1
   copy_existing_path "$FIREWALL_SERVICE_FILE" "$backup/service" || return 1
+  copy_existing_path "$PM2_SERVICE_FILE" "$backup/pm2-service" || return 1
   copy_existing_path "$PM2_FIREWALL_DROPIN_FILE" "$backup/pm2-dropin" || return 1
   if systemctl is-enabled --quiet "$FIREWALL_UNIT"; then : > "$backup/unit.enabled" || return 1; else : > "$backup/unit.disabled" || return 1; fi
+  if systemctl is-enabled --quiet "$PM2_UNIT"; then : > "$backup/pm2-unit.enabled" || return 1; else : > "$backup/pm2-unit.disabled" || return 1; fi
   if systemctl is-active --quiet "$FIREWALL_UNIT"; then : > "$backup/unit.active" || return 1; else : > "$backup/unit.inactive" || return 1; fi
   if "$NFT_BIN" -j list table inet "$FIREWALL_TABLE" > "$backup/table.json" 2>/dev/null; then
     validate_loopback_firewall_json "$(cat "$backup/table.json")" || return 1
@@ -5711,12 +5743,18 @@ restore_loopback_firewall_installation() {
   restore_copy "$backup/rules" "$FIREWALL_RULE_FILE" "$ENV_DIR" "${FIREWALL_RULE_FILE##*/}" 0700 0 0 || failed=1
   restore_copy "$backup/helper" "$FIREWALL_HELPER" "$LOCAL_SBIN_DIR" "${FIREWALL_HELPER##*/}" 0755 0 0 || failed=1
   restore_copy "$backup/service" "$FIREWALL_SERVICE_FILE" "$SYSTEMD_UNIT_DIR" "${FIREWALL_SERVICE_FILE##*/}" 0755 0 0 || failed=1
+  restore_copy "$backup/pm2-service" "$PM2_SERVICE_FILE" "$SYSTEMD_UNIT_DIR" "${PM2_SERVICE_FILE##*/}" 0755 0 0 || failed=1
   restore_copy "$backup/pm2-dropin" "$PM2_FIREWALL_DROPIN_FILE" "$SYSTEMD_UNIT_DIR" "${PM2_FIREWALL_DROPIN_DIR##*/}/${PM2_FIREWALL_DROPIN_FILE##*/}" 0755 0 0 || failed=1
   systemctl daemon-reload || failed=1
   if [ -f "$backup/unit.enabled" ]; then
     systemctl enable "$FIREWALL_UNIT" || failed=1
   else
     systemctl disable "$FIREWALL_UNIT" >/dev/null 2>&1 || true
+  fi
+  if [ -f "$backup/pm2-unit.enabled" ]; then
+    systemctl enable "$PM2_UNIT" || failed=1
+  else
+    systemctl disable "$PM2_UNIT" >/dev/null 2>&1 || true
   fi
   if [ -f "$backup/unit.active" ]; then
     systemctl start "$FIREWALL_UNIT" || failed=1
@@ -5738,11 +5776,13 @@ commit_loopback_firewall_installation() {
   install -m 0600 "$candidate_dir/rules.nft" "$FIREWALL_RULE_FILE" || return 1
   install -m 0700 "$candidate_dir/helper" "$FIREWALL_HELPER" || return 1
   install -m 0644 "$candidate_dir/service" "$FIREWALL_SERVICE_FILE" || return 1
+  install -m 0644 "$candidate_dir/pm2-service" "$PM2_SERVICE_FILE" || return 1
   install -m 0644 "$candidate_dir/pm2-dropin" "$PM2_FIREWALL_DROPIN_FILE" || return 1
   systemctl daemon-reload || return 1
   "$FIREWALL_HELPER" apply || return 1
   validate_loopback_firewall || return 1
   systemctl enable "$FIREWALL_UNIT" || return 1
+  systemctl enable "$PM2_UNIT" || return 1
   systemctl start "$FIREWALL_UNIT" || return 1
   loopback_firewall_installation_is_exact "$candidate_dir"
 }
@@ -5755,14 +5795,14 @@ install_loopback_firewall() {
   command -v python3 >/dev/null || return 1
   command -v systemctl >/dev/null || return 1
   command -v ss >/dev/null || return 1
-  for path in "$FIREWALL_RULE_FILE" "$FIREWALL_HELPER" "$FIREWALL_SERVICE_FILE" "$PM2_FIREWALL_DROPIN_FILE"; do
+  for path in "$FIREWALL_RULE_FILE" "$FIREWALL_HELPER" "$FIREWALL_SERVICE_FILE" "$PM2_SERVICE_FILE" "$PM2_FIREWALL_DROPIN_FILE"; do
     if [ -e "$path" ] || [ -L "$path" ]; then
       [ -f "$path" ] && [ ! -L "$path" ] || { printf '%s\n' "Unsafe firewall artifact path: $path" >&2; return 1; }
     fi
   done
   bootstrap_remove_anchored_fixed_tree \
     "$BACKUP_DIR" "${transaction##*/}" 0700 \
-    'loopback-firewall-install,loopback-firewall-install/candidate,loopback-firewall-install/candidate/rules.nft,loopback-firewall-install/candidate/helper,loopback-firewall-install/candidate/service,loopback-firewall-install/candidate/pm2-dropin,loopback-firewall-install/prior,loopback-firewall-install/prior/rules,loopback-firewall-install/prior/rules.present,loopback-firewall-install/prior/rules.absent,loopback-firewall-install/prior/helper,loopback-firewall-install/prior/helper.present,loopback-firewall-install/prior/helper.absent,loopback-firewall-install/prior/service,loopback-firewall-install/prior/service.present,loopback-firewall-install/prior/service.absent,loopback-firewall-install/prior/pm2-dropin,loopback-firewall-install/prior/pm2-dropin.present,loopback-firewall-install/prior/pm2-dropin.absent,loopback-firewall-install/prior/unit.enabled,loopback-firewall-install/prior/unit.disabled,loopback-firewall-install/prior/unit.active,loopback-firewall-install/prior/unit.inactive,loopback-firewall-install/prior/table.json,loopback-firewall-install/prior/table.present,loopback-firewall-install/prior/table.absent' || return 1
+    'loopback-firewall-install,loopback-firewall-install/candidate,loopback-firewall-install/candidate/rules.nft,loopback-firewall-install/candidate/helper,loopback-firewall-install/candidate/service,loopback-firewall-install/candidate/pm2-service,loopback-firewall-install/candidate/pm2-dropin,loopback-firewall-install/prior,loopback-firewall-install/prior/rules,loopback-firewall-install/prior/rules.present,loopback-firewall-install/prior/rules.absent,loopback-firewall-install/prior/helper,loopback-firewall-install/prior/helper.present,loopback-firewall-install/prior/helper.absent,loopback-firewall-install/prior/service,loopback-firewall-install/prior/service.present,loopback-firewall-install/prior/service.absent,loopback-firewall-install/prior/pm2-service,loopback-firewall-install/prior/pm2-service.present,loopback-firewall-install/prior/pm2-service.absent,loopback-firewall-install/prior/pm2-dropin,loopback-firewall-install/prior/pm2-dropin.present,loopback-firewall-install/prior/pm2-dropin.absent,loopback-firewall-install/prior/unit.enabled,loopback-firewall-install/prior/unit.disabled,loopback-firewall-install/prior/pm2-unit.enabled,loopback-firewall-install/prior/pm2-unit.disabled,loopback-firewall-install/prior/unit.active,loopback-firewall-install/prior/unit.inactive,loopback-firewall-install/prior/table.json,loopback-firewall-install/prior/table.present,loopback-firewall-install/prior/table.absent' || return 1
   mkdir -m 0700 "$transaction" || return 1
   write_loopback_firewall_candidates "$candidate_dir" || return 1
   if loopback_firewall_installation_is_exact "$candidate_dir"; then

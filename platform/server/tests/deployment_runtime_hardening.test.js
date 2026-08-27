@@ -795,6 +795,19 @@ test('bootstrap installs isolation while PM2 is stopped and validates it before 
   assert.match(source, /validate_current_release_health\(\)[\s\S]*?validate_loopback_listener/);
 });
 
+test('runtime bootstrap installs and enables the exact PM2 resurrect service', () => {
+  const source = fs.readFileSync(bootstrapPath, 'utf8');
+  assert.match(source, /PM2_UNIT="pm2-root\.service"/);
+  assert.match(source, /PM2_SERVICE_FILE="\$SYSTEMD_UNIT_DIR\/\$PM2_UNIT"/);
+  assert.match(source, /ExecStart=\/usr\/lib\/node_modules\/pm2\/bin\/pm2 resurrect/);
+  assert.match(source, /ExecReload=\/usr\/lib\/node_modules\/pm2\/bin\/pm2 reload all/);
+  assert.match(source, /ExecStop=\/usr\/lib\/node_modules\/pm2\/bin\/pm2 kill/);
+  assert.match(source, /install -m 0644 "\$candidate_dir\/pm2-service" "\$PM2_SERVICE_FILE"/);
+  assert.match(source, /systemctl enable "\$PM2_UNIT"/);
+  assert.match(source, /systemctl is-enabled --quiet "\$PM2_UNIT"/);
+  assert.match(source, /cmp -s "\$candidate_dir\/pm2-service" "\$PM2_SERVICE_FILE"/);
+});
+
 test('runtime bootstrap is audited, reversible, and keeps mutable state outside releases', () => {
   assert.equal(fs.existsSync(bootstrapPath), true);
   const source = fs.readFileSync(bootstrapPath, 'utf8');
@@ -1520,7 +1533,7 @@ test('unprivileged nginx gate derives a socket listener while root validates the
   const envBoundary = deploy.slice(deploy.lastIndexOf('set +e', match.index), match.index);
   const afterGate = deploy.slice(match.index + match[0].length);
 
-  assert.match(gateSetup, /NginxGateDir="\$TestRoot\/nginx-gate"/);
+  assert.match(gateSetup, /NginxGateDir="\$OfflineWork\/nginx-gate"/);
   assert.match(gateSetup, /install -d -o "\$GateUser" -g "\$GateUser" -m 0700 "\$NginxGateDir"/);
   assert.match(deploy, /trap 'cleanup_candidate_gate \$\?' EXIT/);
   assert.match(deploy, /cleanup_test_root\(\)[\s\S]*?declare -F cleanup_nginx_gate_dir[\s\S]*?cleanup_nginx_gate_dir/);

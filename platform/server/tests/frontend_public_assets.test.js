@@ -2331,8 +2331,8 @@ test('the exact staged Nginx gate precedes acceptance and is reused after public
   assert.match(finalize, /systemctl reload nginx\s+run_exact_public_nginx_gate - 80/);
   assert.equal(
     (deploy.match(/\.Replace\('__EXACT_PUBLIC_NGINX_VERIFIER__', \$exactPublicNginxVerifier\)/g) || []).length,
-    3,
-    'cutover, accepted finalization, and rollback recovery must receive the same verifier source'
+    4,
+    'cutover, accepted finalization, rollback recovery, and pre-mutation resume must receive the same verifier source'
   );
   for (const asset of CANONICAL_CLIENT_ASSETS) {
     assert.match(exactVerifier, new RegExp(`['"]/${asset.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['"]`));
@@ -3300,80 +3300,52 @@ Write-Output ('PINNED:' + $record.ExpectedSha256 + ':' + $record.ByteLength)
   }
 });
 
-test('migration cleanup installation consumes its pinned plan records after a parent junction swap', {
+test('migration cleanup installation consumes the staged trusted-source bundle under pinned hashes', {
   skip: process.platform !== 'win32'
 }, () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-pinned-cleanup-swap-'));
-  const checkout = path.join(root, 'checkout');
-  const inventory = path.join(checkout, 'platform');
-  const serverParent = path.join(inventory, 'server');
-  const originalParent = path.join(root, 'attested-server');
-  const outside = path.join(root, 'outside-server');
-  const cleanupRelative = path.join('server', 'scripts', 'cleanup_stale_migration_gate.sh');
-  const unitRelative = path.join('server', 'systemd', 'turingmarket-gate-cleanup.service');
-  const cleanupBytes = Buffer.from('#!/bin/sh\nprintf pinned-cleanup\\n\n', 'utf8');
-  const unitBytes = Buffer.from('[Service]\nType=oneshot\nExecStart=/pinned\n', 'utf8');
-  const escapingCleanup = Buffer.from('#!/bin/sh\nprintf escaped-cleanup\\n\n', 'utf8');
-  const escapingUnit = Buffer.from('[Service]\nExecStart=/escaped\n', 'utf8');
-  fs.mkdirSync(path.dirname(path.join(inventory, cleanupRelative)), { recursive: true });
-  fs.mkdirSync(path.dirname(path.join(inventory, unitRelative)), { recursive: true });
-  fs.mkdirSync(path.dirname(path.join(outside, 'scripts', 'cleanup_stale_migration_gate.sh')), { recursive: true });
-  fs.mkdirSync(path.dirname(path.join(outside, 'systemd', 'turingmarket-gate-cleanup.service')), { recursive: true });
-  fs.writeFileSync(path.join(inventory, cleanupRelative), cleanupBytes);
-  fs.writeFileSync(path.join(inventory, unitRelative), unitBytes);
-  fs.writeFileSync(path.join(outside, 'scripts', 'cleanup_stale_migration_gate.sh'), escapingCleanup);
-  fs.writeFileSync(path.join(outside, 'systemd', 'turingmarket-gate-cleanup.service'), escapingUnit);
-
-  try {
-    const result = runDeployPowerShellHarness(
-      [...PINNED_ACTION_PLAN_FUNCTIONS, 'Install-RemoteMigrationGateCleanup'],
-      String.raw`
+  const trustedBundle = '/trusted/source/bundle';
+  const cleanupSha256 = 'a'.repeat(64);
+  const unitSha256 = 'b'.repeat(64);
+  const result = runDeployPowerShellHarness(
+    ['Install-RemoteMigrationGateCleanup'],
+    String.raw`
 $script:REMOTE_ROOT = '/root/turingmarket-test'
-$script:LOCAL_DIR = $InventoryRoot
 $script:deploymentRunId = '0123456789abcdef0123456789abcdef'
-$plan = New-ImmutableDeploymentActionPlan `
-        + String.raw`-CheckoutRoot $CheckoutRoot -PlatformRoot $InventoryRoot `
-        + String.raw`-PlatformEntries @(
-  'server\scripts\cleanup_stale_migration_gate.sh',
-  'server\systemd\turingmarket-gate-cleanup.service'
-) -RequiredPublicAssetEntries @() -RootRelativeEntries @() -CandidateOnlyEntries @()
-Move-Item -LiteralPath (Join-Path $InventoryRoot 'server') -Destination $OriginalParent
-$null = New-Item -ItemType Junction -Path (Join-Path $InventoryRoot 'server') -Target $OutsideRoot
+$script:TRUSTED_SOURCE_BUNDLE_REMOTE_PATH = '${trustedBundle}'
+$script:EXPECTED_TRUSTED_MIGRATION_CLEANUP_HELPER_SHA256 = '${cleanupSha256}'
+$script:EXPECTED_TRUSTED_MIGRATION_CLEANUP_UNIT_SHA256 = '${unitSha256}'
+$script:requireDeploymentLockObserved = $false
 function Invoke-RemoteBash {
   param([string]$Script, [string]$FailureMessage, [switch]$RequireDeploymentLock)
+  $script:requireDeploymentLockObserved = [bool]$RequireDeploymentLock
   Write-Output $Script
 }
-Install-RemoteMigrationGateCleanup -DeploymentPlan $plan
-`,
-      [
-        '-CheckoutRoot', checkout,
-        '-InventoryRoot', inventory,
-        '-OutsideRoot', outside,
-        '-OriginalParent', originalParent
-      ]
-    );
-    assertPowerShellHarnessSucceeded(result);
-    assert.match(result.stdout, new RegExp(cleanupBytes.toString('base64')));
-    assert.match(result.stdout, new RegExp(unitBytes.toString('base64')));
-    assert.match(result.stdout, new RegExp(crypto.createHash('sha256').update(cleanupBytes).digest('hex')));
-    assert.match(result.stdout, new RegExp(crypto.createHash('sha256').update(unitBytes).digest('hex')));
-    assert.doesNotMatch(result.stdout, new RegExp(escapingCleanup.toString('base64')));
-    assert.doesNotMatch(result.stdout, new RegExp(escapingUnit.toString('base64')));
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
+Install-RemoteMigrationGateCleanup
+if (-not $script:requireDeploymentLockObserved) { throw 'CLEANUP_INSTALL_LOCK_NOT_REQUIRED' }
+`
+  );
+  assertPowerShellHarnessSucceeded(result);
+  assert.match(result.stdout, new RegExp(`TrustedSourceBundle="${trustedBundle}"`));
+  assert.match(result.stdout, /TrustedHelper="\$TrustedSourceBundle\/server\/scripts\/cleanup_stale_migration_gate\.sh"/);
+  assert.match(result.stdout, /TrustedUnit="\$TrustedSourceBundle\/server\/systemd\/turingmarket-gate-cleanup\.service"/);
+  assert.match(result.stdout, new RegExp(cleanupSha256));
+  assert.match(result.stdout, new RegExp(unitSha256));
+  assert.doesNotMatch(result.stdout, /__(?:TRUSTED_SOURCE_BUNDLE|CLEANUP_SHA256|UNIT_SHA256)__/);
 });
 
-test('one immutable action plan supplies backup, attestation, checksum, preparation, and every upload action', () => {
+test('one immutable action plan supplies backup, attestation, checksum, upload, and trusted-bundle cleanup inputs', () => {
   const deploy = read(deployScriptPath);
   const backup = deploy.match(/^function Invoke-RemoteBackup\s*\{(?<body>[\s\S]*?)^\}/m);
   const trustedInstall = deploy.match(
     /^function Install-RemoteTrustedProductionSourceGate\s*\{(?<body>[\s\S]*?)^\}/m
   );
+  const trustedStage = deploy.match(
+    /^function Stage-RemoteTrustedProductionSourceBundle\s*\{(?<body>[\s\S]*?)^\}/m
+  );
   const cleanupInstall = deploy.match(
     /^function Install-RemoteMigrationGateCleanup\s*\{(?<body>[\s\S]*?)^\}/m
   );
-  assert.ok(backup && trustedInstall && cleanupInstall);
+  assert.ok(backup && trustedInstall && trustedStage && cleanupInstall);
 
   assert.equal(
     (deploy.match(/^\s*\$deploymentPlan = New-ImmutableDeploymentActionPlan\b/gm) || []).length,
@@ -3382,12 +3354,31 @@ test('one immutable action plan supplies backup, attestation, checksum, preparat
   );
   assert.match(backup.groups.body, /\$DeploymentPlan\.Records/);
   assert.match(trustedInstall.groups.body, /\$DeploymentPlan\.GetByRemoteRelativePath\(/);
-  assert.match(cleanupInstall.groups.body, /\$DeploymentPlan\.GetByRemoteRelativePath\(/);
+  assert.match(trustedStage.groups.body, /\/usr\/bin\/node "\$TrustedSourceGate" stage/);
+  assert.match(trustedStage.groups.body, /test "\$\(stat -c '%U:%G:%a' "\$TrustedSourceBundle"\)" = "root:root:555"/);
+  assert.doesNotMatch(cleanupInstall.groups.body, /\$DeploymentPlan\.GetByRemoteRelativePath\(/);
+  assert.match(cleanupInstall.groups.body, /TrustedSourceBundle="__TRUSTED_SOURCE_BUNDLE__"/);
+  assert.match(cleanupInstall.groups.body, /test "\$\(sha256sum "\$TrustedHelper" \| awk '\{print \$1\}'\)" = "__CLEANUP_SHA256__"/);
+  assert.match(cleanupInstall.groups.body, /test "\$\(sha256sum "\$TrustedUnit" \| awk '\{print \$1\}'\)" = "__UNIT_SHA256__"/);
   assert.match(deploy, /Invoke-RemoteBackup -BackupPath \$backupDir -DeploymentPlan \$deploymentActionPlan/);
   assert.match(deploy, /Install-RemoteTrustedProductionSourceGate -DeploymentPlan \$deploymentActionPlan/);
-  assert.match(deploy, /Install-RemoteMigrationGateCleanup -DeploymentPlan \$deploymentActionPlan/);
+  assert.match(deploy, /Stage-RemoteTrustedProductionSourceBundle -ReleaseRoot \$remoteReleaseRoot -CandidateDir \$remoteCandidateDir/);
+  assert.match(deploy, /^\s*Install-RemoteMigrationGateCleanup\s*$/m);
+  assert.doesNotMatch(deploy, /Install-RemoteMigrationGateCleanup -DeploymentPlan/);
   assert.match(deploy, /\$uploadChecksums = Get-DeploymentPlanChecksumManifest -DeploymentPlan \$deploymentActionPlan/);
   assert.match(deploy, /\$remotePathManifest = Get-DeploymentPlanRemotePathManifest -DeploymentPlan \$deploymentActionPlan/);
+
+  const uploadStart = deploy.indexOf('foreach ($record in $deploymentActionPlan.Records)');
+  const uploadVerification = deploy.indexOf('sha256sum --check --status "$LockDir/upload.sha256"', uploadStart);
+  const trustedStageCall = deploy.indexOf('Stage-RemoteTrustedProductionSourceBundle', uploadVerification);
+  const cleanupInstallCall = deploy.indexOf('Install-RemoteMigrationGateCleanup', trustedStageCall);
+  assert.ok(
+    uploadStart >= 0
+      && uploadStart < uploadVerification
+      && uploadVerification < trustedStageCall
+      && trustedStageCall < cleanupInstallCall,
+    'cleanup installation must consume the read-only bundle only after every immutable-plan upload passes checksum verification'
+  );
 
   const uploadCalls = deploy.match(
     /Invoke-PinnedDeploymentUpload -Record \$record -RemoteRoot \$remoteReleaseRoot/g
@@ -3510,7 +3501,7 @@ test('guarded deploy verifies the full build-info contract and exact remote SHA-
   assert.match(deploy, /sha256sum --check --status "\$LockDir\/upload\.sha256"/);
 });
 
-test('guarded deploy uploads and syntax-checks the baseline generator and architecture inventory test', () => {
+test('guarded deploy uploads release evidence and runs controlled focused remote gates', () => {
   const deploy = read(deployScriptPath);
 
   assert.match(deploy, /"server\\scripts\\generate_ui_baseline_manifest\.js"/);
@@ -3520,7 +3511,10 @@ test('guarded deploy uploads and syntax-checks the baseline generator and archit
   assert.match(deploy, /"server\\tests\\frontend_architecture_inventory\.test\.js"/);
   assert.match(deploy, /<<'TM_DEPENDENCY_STAGE'[\s\S]*?cd "\$DEPENDENCY_SERVER_ROOT"[\s\S]*?npm ci --ignore-scripts[\s\S]*?TM_DEPENDENCY_STAGE/);
   assert.match(deploy, /npm_config_offline=true[\s\S]*?<<'TM_DEPENDENCY_BUILD'[\s\S]*?npm rebuild better-sqlite3[\s\S]*?TM_DEPENDENCY_BUILD/);
-  assert.match(deploy, /node --test --test-concurrency=1 tests\/\*\.test\.js/);
+  assert.match(deploy, /^NODE_ENV=test TM_DISABLE_DOTENV=1 node server\/scripts\/verify_phase4_one_request_replay\.js$/m);
+  assert.match(deploy, /^NODE_ENV=test TM_DISABLE_DOTENV=1 node --test server\/tests\/verify_phase4_one_request_replay\.test\.js$/m);
+  assert.match(deploy, /^node --test server\/tests\/release_replay_gate\.test\.js$/m);
+  assert.doesNotMatch(deploy, /node --test[^\r\n]*tests\/\*\.test\.js/);
   assert.doesNotMatch(deploy, /npm test -- --test-concurrency=1/);
   assert.match(deploy, /node node_modules\/playwright-deploy\/cli\.js test -c server\/tests\/deployment-browser-smoke\.config\.js/);
 });

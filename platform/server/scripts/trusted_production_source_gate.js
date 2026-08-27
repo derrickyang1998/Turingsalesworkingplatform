@@ -118,7 +118,7 @@ const EXPECTED_ENTRYPOINTS = Object.freeze({
 });
 
 const EXPECTED_MIGRATION_CONTRACT = Object.freeze({
-  sourceVersion: 1,
+  acceptedSourceVersions: Object.freeze([1, 6, 7]),
   targetVersion: 7,
   runs: 2,
   deterministicAppendTables: Object.freeze(['activity_log'])
@@ -195,7 +195,7 @@ function loadTrustedManifest(manifestPath) {
   assertPlainObject(document.migrationContract, 'trusted migration contract');
   assertExactKeys(document.migrationContract, Object.keys(EXPECTED_MIGRATION_CONTRACT), 'trusted migration contract');
   if (JSON.stringify(document.migrationContract) !== JSON.stringify(EXPECTED_MIGRATION_CONTRACT)) {
-    throw new Error('trusted v1-to-v7 migration contract is not exact');
+    throw new Error('trusted migration contract is not exact');
   }
 
   if (!Array.isArray(document.files)) throw new Error('trusted production source files must be an array');
@@ -220,6 +220,7 @@ function loadTrustedManifest(manifestPath) {
     entrypoints: Object.freeze({ ...document.entrypoints }),
     migrationContract: Object.freeze({
       ...document.migrationContract,
+      acceptedSourceVersions: Object.freeze([...document.migrationContract.acceptedSourceVersions]),
       deterministicAppendTables: Object.freeze([...document.migrationContract.deterministicAppendTables])
     }),
     files: Object.freeze(files)
@@ -1621,7 +1622,7 @@ function adoptIfLegacyTrustedSource(options) {
   return prepared.report;
 }
 
-function runTrustedMigrationVerification({ manifest, verified, sanitizedPath, workDir }) {
+function runTrustedMigrationVerification({ manifest, verified, sanitizedPath, workDir, sourceVersion }) {
   const verifierEntry = trustedEntrypoint(manifest, 'verifier', 'trusted migration verifier');
   const verifierPath = path.join(verified.bundleRoot, ...verifierEntry.path.split('/'));
   assertPinnedFile(verifierPath, verifierEntry.sha256, 'trusted migration verifier');
@@ -1630,10 +1631,10 @@ function runTrustedMigrationVerification({ manifest, verified, sanitizedPath, wo
   if (!verifier || typeof verifier.verifySanitizedMigrationCopy !== 'function') {
     throw new Error('trusted migration verifier interface is invalid');
   }
-  const report = verifier.verifySanitizedMigrationCopy({ sanitizedPath, workDir });
+  const report = verifier.verifySanitizedMigrationCopy({ sanitizedPath, workDir, sourceVersion });
   if (
     report.format !== verifier.PRESERVATION_REPORT_VERSION ||
-    report.sourceVersion !== EXPECTED_MIGRATION_CONTRACT.sourceVersion ||
+    report.sourceVersion !== sourceVersion ||
     report.targetVersion !== EXPECTED_MIGRATION_CONTRACT.targetVersion ||
     report.runs !== EXPECTED_MIGRATION_CONTRACT.runs ||
     report.preMigrationRestoreVerified !== true ||
@@ -1641,7 +1642,7 @@ function runTrustedMigrationVerification({ manifest, verified, sanitizedPath, wo
     !Number.isSafeInteger(report.legacyTableCount) || report.legacyTableCount < 1 ||
     !Number.isSafeInteger(report.legacyRowCount) || report.legacyRowCount < 1
   ) {
-    throw new Error('trusted v1-to-v7 migration preservation verdict is incomplete');
+    throw new Error(`trusted v${sourceVersion}-to-v${EXPECTED_MIGRATION_CONTRACT.targetVersion} migration preservation verdict is incomplete`);
   }
   assertDigestReport(report.preMigration, 'pre-migration');
   assertDigestReport(report.postMigration, 'post-migration');
@@ -1843,8 +1844,7 @@ function sanitizeAndVerifyTrustedSource(options) {
   const effectiveSourceVersion = preparedSource.report.targetVersion;
   if (
     sanitization.format !== sanitizer.REPORT_VERSION ||
-    ![EXPECTED_MIGRATION_CONTRACT.sourceVersion, EXPECTED_MIGRATION_CONTRACT.targetVersion]
-      .includes(effectiveSourceVersion) ||
+    !EXPECTED_MIGRATION_CONTRACT.acceptedSourceVersions.includes(effectiveSourceVersion) ||
     sanitization.sourceVersion !== effectiveSourceVersion ||
     !Number.isSafeInteger(sanitization.tableCount) || sanitization.tableCount < 1 ||
     !Number.isSafeInteger(sanitization.rowCount) || sanitization.rowCount < 1 ||
@@ -1862,14 +1862,15 @@ function sanitizeAndVerifyTrustedSource(options) {
   }
   const verifiedBeforeMigrationVerifier = verifyTrustedBundle(options);
 
-  const report = effectiveSourceVersion === EXPECTED_MIGRATION_CONTRACT.sourceVersion
+  const report = effectiveSourceVersion !== EXPECTED_MIGRATION_CONTRACT.targetVersion
     ? Object.freeze({
-      verificationMode: 'v1-to-v7-migration',
+      verificationMode: `v${effectiveSourceVersion}-to-v${EXPECTED_MIGRATION_CONTRACT.targetVersion}-migration`,
       ...runTrustedMigrationVerification({
         manifest,
         verified: verifiedBeforeMigrationVerifier,
         sanitizedPath,
-        workDir
+        workDir,
+        sourceVersion: effectiveSourceVersion
       }),
       preMigrationRestoreVerified: true,
       legacyPreservationVerified: true

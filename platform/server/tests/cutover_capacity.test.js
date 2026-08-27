@@ -378,6 +378,14 @@ test('rollback dependency reserve uses live minus candidate on the live-dir targ
 test('ten-percent margin uses integer ceiling and exact boundary availability succeeds', (t) => {
   const paths = createCapacityTree(t);
   const parserStageBytes = 5 * GIB + 1;
+  if (process.platform === 'win32') {
+    const tempFilesystem = fs.statfsSync(os.tmpdir());
+    const availableBytes = tempFilesystem.bavail * tempFilesystem.bsize;
+    if (availableBytes < parserStageBytes) {
+      t.skip(`requires ${parserStageBytes} bytes on the Windows temp filesystem; ${availableBytes} available`);
+      return;
+    }
+  }
   writeSparseBytes(path.join(paths.parserStage, 'runtime.bin'), parserStageBytes);
   const requiredBytes = parserStageBytes + 370;
   const marginBytes = Math.ceil(requiredBytes / 10);

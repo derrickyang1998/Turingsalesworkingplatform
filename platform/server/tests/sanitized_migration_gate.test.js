@@ -15,7 +15,6 @@ const { buildCustomerIdentity } = require('../services/crm_contract');
 const sanitizer = require('../scripts/sanitize_production_shape');
 const migrationGate = require('../scripts/verify_campaign_migration_gate');
 const manifest = require('../scripts/sanitization_manifest.json');
-const v6Manifest = sanitizer._testing.manifestProfileForVersion(manifest, 6);
 const v7Manifest = sanitizer._testing.manifestProfileForVersion(manifest, 7);
 const {
   buildCampaignWorkflowSnapshot,
@@ -1196,27 +1195,27 @@ test('sanitizer rejects unknown, partial, and future managed source shapes witho
   }
 });
 
-test('manifest exhaustively classifies v6 base, virtual, shadow, storage, and closed JSON paths', () => {
+test('manifest exhaustively classifies v7 base, virtual, shadow, storage, and closed JSON paths', () => {
   const fixture = migratedFixture('manifest');
-  const v6Manifest = sanitizer._testing.manifestProfileForVersion(manifest, 6);
+  const v7Manifest = sanitizer._testing.manifestProfileForVersion(manifest, 7);
   assert.doesNotThrow(() => sanitizer.validateManifest(manifest, fixture.db));
-  assert.equal(v6Manifest.objects.length, sanitizer.actualInventory(fixture.db).length);
-  assert.equal(v6Manifest.objects.filter((object) => object.type === 'virtual').length, 1);
-  assert.equal(v6Manifest.objects.filter((object) => object.type === 'shadow').length, 5);
-  assert.ok(v6Manifest.objects.flatMap((object) => object.columns).every((column) => column.classification));
+  assert.equal(v7Manifest.objects.length, sanitizer.actualInventory(fixture.db).length);
+  assert.equal(v7Manifest.objects.filter((object) => object.type === 'virtual').length, 1);
+  assert.equal(v7Manifest.objects.filter((object) => object.type === 'shadow').length, 5);
+  assert.ok(v7Manifest.objects.flatMap((object) => object.columns).every((column) => column.classification));
   assert.ok(manifest.categories['secret-null']);
   assert.ok(manifest.categories['preserved-accounting']);
 
   const unknownColumn = structuredClone(manifest);
-  unknownColumn.exactProfiles[0].objects[0].columns[0].name = 'unknown_column';
+  unknownColumn.exactProfiles[1].objects[0].columns[0].name = 'unknown_column';
   assert.throws(() => sanitizer.validateManifest(unknownColumn, fixture.db), /unknown|changed column/i);
 
   const unknownObject = structuredClone(manifest);
-  unknownObject.exactProfiles[0].objects[0].name = 'unknown_table';
+  unknownObject.exactProfiles[1].objects[0].name = 'unknown_table';
   assert.throws(() => sanitizer.validateManifest(unknownObject, fixture.db), /unknown|reordered schema/i);
 
   const newJsonPath = structuredClone(manifest);
-  const nodes = newJsonPath.exactProfiles[0].objects.find((object) => object.name === 'workflow_templates')
+  const nodes = newJsonPath.exactProfiles[1].objects.find((object) => object.name === 'workflow_templates')
     .columns.find((column) => column.name === 'nodes');
   nodes.jsonPolicy.allowedPaths.push('/*/new_sensitive_field');
   assert.throws(() => sanitizer.validateManifest(newJsonPath, fixture.db), /unknown JSON path/i);
@@ -1228,7 +1227,7 @@ test('manifest rejects object and column classifications that drift from canonic
   try {
     for (const columnName of ['password_hash', 'email']) {
       const candidate = structuredClone(manifest);
-      candidate.exactProfiles[0].objects.find((object) => object.name === 'users').columns
+      candidate.exactProfiles[1].objects.find((object) => object.name === 'users').columns
         .find((column) => column.name === columnName).classification = 'structural';
       assert.throws(
         () => sanitizer.validateManifest(candidate, fixture.db),
@@ -1238,7 +1237,7 @@ test('manifest rejects object and column classifications that drift from canonic
     }
 
     const objectCandidate = structuredClone(manifest);
-    objectCandidate.exactProfiles[0].objects.find((object) => object.name === 'users').classification = 'structural';
+    objectCandidate.exactProfiles[1].objects.find((object) => object.name === 'users').classification = 'structural';
     assert.throws(
       () => sanitizer.validateManifest(objectCandidate, fixture.db),
       /canonical inventory classification.*users/i,
@@ -1252,25 +1251,25 @@ test('manifest rejects object and column classifications that drift from canonic
 test('manifest fails closed when semantic equality, reference, rebuild, storage, or frozen FTS policy changes', () => {
   const fixture = migratedFixture('manifest-semantics');
   const mutations = [
-    ['equality groups', (candidate) => { delete candidate.exactProfiles[0].equalityGroups; }],
-    ['reference groups', (candidate) => { delete candidate.exactProfiles[0].referenceGroups; }],
-    ['derived rebuilds', (candidate) => { delete candidate.exactProfiles[0].derivedRebuilds; }],
+    ['equality groups', (candidate) => { delete candidate.exactProfiles[1].equalityGroups; }],
+    ['reference groups', (candidate) => { delete candidate.exactProfiles[1].referenceGroups; }],
+    ['derived rebuilds', (candidate) => { delete candidate.exactProfiles[1].derivedRebuilds; }],
     ['preserved accounting classification', (candidate) => {
-      candidate.exactProfiles[0].objects.find((object) => object.name === 'request_idempotency').columns
+      candidate.exactProfiles[1].objects.find((object) => object.name === 'request_idempotency').columns
         .find((column) => column.name === 'response_bytes').classification = 'derived';
     }],
     ['storage policy', (candidate) => {
-      candidate.exactProfiles[0].semanticPolicies ||= { storage: {} };
-      candidate.exactProfiles[0].semanticPolicies.storage ||= {};
-      candidate.exactProfiles[0].semanticPolicies.storage.preservePerCellStorageClass = false;
+      candidate.exactProfiles[1].semanticPolicies ||= { storage: {} };
+      candidate.exactProfiles[1].semanticPolicies.storage ||= {};
+      candidate.exactProfiles[1].semanticPolicies.storage.preservePerCellStorageClass = false;
     }],
     ['equality member', (candidate) => {
-      candidate.exactProfiles[0].equalityGroups ||= [{ members: ['missing'] }];
-      candidate.exactProfiles[0].equalityGroups[0].members[0] = 'users.email';
+      candidate.exactProfiles[1].equalityGroups ||= [{ members: ['missing'] }];
+      candidate.exactProfiles[1].equalityGroups[0].members[0] = 'users.email';
     }],
     ['reference encoding', (candidate) => {
-      candidate.exactProfiles[0].referenceGroups ||= [{ encoding: 'missing' }];
-      candidate.exactProfiles[0].referenceGroups[0].encoding = 'free-text';
+      candidate.exactProfiles[1].referenceGroups ||= [{ encoding: 'missing' }];
+      candidate.exactProfiles[1].referenceGroups[0].encoding = 'free-text';
     }],
     ['frozen FTS', (candidate) => { candidate.fts[0].tokenizerOptions = 'porter'; }]
   ];
@@ -1401,7 +1400,7 @@ test('JSON boolean sanitization uses a run-randomized bijection and preserves cr
       populated.userId,
       JSON.stringify({ enabled: false, disabled: true })
     );
-    const forbidden = sanitizer._testing.collectForbiddenValues(fixture.db, v6Manifest);
+    const forbidden = sanitizer._testing.collectForbiddenValues(fixture.db, v7Manifest);
     assert.equal(
       forbidden.rawProbes.some((probe) => probe.kind === 'json-leaf' && probe.storageType === 'boolean'),
       false,
@@ -1435,12 +1434,12 @@ test('template checksum is rebuilt while response_bytes remains preserved non-re
   const fixture = migratedFixture('explicit-derived-evidence');
   const populated = populateCriticalReviewFixture(fixture);
   const binary = insertBinaryIdempotencyFixture(fixture.db, populated);
-  const responseBytesColumn = v6Manifest.objects
+  const responseBytesColumn = v7Manifest.objects
     .find((object) => object.name === 'request_idempotency').columns
     .find((column) => column.name === 'response_bytes');
   assert.equal(responseBytesColumn.classification, 'preserved-accounting');
-  assert.deepEqual(v6Manifest.semanticPolicies.preservedAccounting, ['request_idempotency.response_bytes']);
-  assert.equal(v6Manifest.derivedRebuilds.includes('request_idempotency.response_bytes'), false);
+  assert.deepEqual(v7Manifest.semanticPolicies.preservedAccounting, ['request_idempotency.response_bytes']);
+  assert.equal(v7Manifest.derivedRebuilds.includes('request_idempotency.response_bytes'), false);
   assert.equal(sanitizer._testing.captureRequestIdempotencyResponseEvidence, undefined);
   assert.equal(sanitizer._testing.rebuildRequestIdempotencyResponseEvidence, undefined);
 
@@ -1819,13 +1818,13 @@ test('secret-null fails closed for non-null data and malformed or partial output
   const fixture = migratedFixture('secret-null');
   fixture.db.close();
   const changed = structuredClone(manifest);
-  const password = changed.exactProfiles[0].objects.find((object) => object.name === 'users').columns
+  const password = changed.exactProfiles[1].objects.find((object) => object.name === 'users').columns
     .find((column) => column.name === 'password_hash');
   password.classification = 'secret-null';
   assert.throws(
     () => sanitizer._testing.transformedValue(
       'secret-null', 'users', 'password_hash', 'non-null-secret', 'text',
-      new Map(), v6Manifest.jsonPolicy, undefined, null
+      new Map(), v7Manifest.jsonPolicy, undefined, null
     ),
     /secret-null column contains data/i
   );
@@ -5860,7 +5859,7 @@ test('privileged preparation checkpoints and compacts a secret-free readonly sou
     fixture.db.prepare('SELECT 1 AS present FROM activity_log WHERE instr(details,?)>0 LIMIT 1').get(shortSecret),
     'fixture must carry a short secret into a non-secret audit detail'
   );
-  const sourceSecretProbes = sanitizer._testing.collectSecretOnlySourceProbes(fixture.db, v6Manifest);
+  const sourceSecretProbes = sanitizer._testing.collectSecretOnlySourceProbes(fixture.db, v7Manifest);
   assert.ok(sourceSecretProbes.rawProbes.every((probe) => probe.category === 'secret-synthetic'));
   assert.ok(
     sourceSecretProbes.authorizedEntries.some((entry) => (
@@ -5910,8 +5909,8 @@ test('privileged preparation checkpoints and compacts a secret-free readonly sou
     assert.equal(preparedBytes.includes(Buffer.from(representation, 'utf8')), false, 'prepared SQLite must not retain a secret representation');
     assert.equal(JSON.stringify(prepared).includes(representation), false, 'preparation result must not persist raw secret material');
   }
-  assert.doesNotThrow(() => sanitizer._testing.assertNoForbiddenValues(preparedPath, sourceSecretProbes, v6Manifest));
-  assert.doesNotThrow(() => sanitizer._testing.assertNoSecretCopies(preparedPath, sourceSecretProbes, v6Manifest));
+  assert.doesNotThrow(() => sanitizer._testing.assertNoForbiddenValues(preparedPath, sourceSecretProbes, v7Manifest));
+  assert.doesNotThrow(() => sanitizer._testing.assertNoSecretCopies(preparedPath, sourceSecretProbes, v7Manifest));
   const copiedShortSecretPath = compactSqliteClone(
     preparedPath,
     path.join(fixture.root, 'prepared-short-secret-copy.db'),
@@ -5930,7 +5929,7 @@ test('privileged preparation checkpoints and compacts a secret-free readonly sou
     }
   );
   assert.throws(
-    () => sanitizer._testing.assertNoSecretCopies(copiedShortSecretPath, sourceSecretProbes, v6Manifest),
+    () => sanitizer._testing.assertNoSecretCopies(copiedShortSecretPath, sourceSecretProbes, v7Manifest),
     (error) => {
       assert.match(error.message, /users\.password_hash/i);
       assert.match(error.message, /activity_log\.details/i);
@@ -7412,7 +7411,7 @@ test('forbidden collection covers short secrets, numerics, every JSON leaf, FTS 
   const populated = populateCriticalReviewFixture(fixture);
   const shortSecret = 'x7';
   fixture.db.prepare('UPDATE users SET password_hash=? WHERE id=(SELECT MIN(id) FROM users)').run(shortSecret);
-  const forbidden = sanitizer._testing.collectForbiddenValues(fixture.db, v6Manifest);
+  const forbidden = sanitizer._testing.collectForbiddenValues(fixture.db, v7Manifest);
 
   const requiredContexts = [
     ['cell', 'users.password_hash', (entry) => entry.value === shortSecret],
@@ -7449,7 +7448,7 @@ test('forbidden collection covers short secrets, numerics, every JSON leaf, FTS 
   fixture.db.close();
   fs.copyFileSync(fixture.dbPath, leakyPath);
   assert.throws(
-    () => sanitizer._testing.assertNoForbiddenValues(leakyPath, forbidden, v6Manifest),
+    () => sanitizer._testing.assertNoForbiddenValues(leakyPath, forbidden, v7Manifest),
     (error) => {
       assert.equal(error.name, 'SanitizerTypedSourceDomainIntersectionError');
       assert.equal(error.code, 'TM_SANITIZER_TYPED_SOURCE_DOMAIN_INTERSECTION');
@@ -7472,7 +7471,7 @@ test('forbidden collection authorizes JSON keys only through their closed path p
     const populated = populateCriticalReviewFixture(fixture, {
       knowledgeEntryMetadata: { previous_version: 7, source: 'private-dynamic-metadata-source' }
     });
-    const forbidden = sanitizer._testing.collectForbiddenValues(fixture.db, v6Manifest);
+    const forbidden = sanitizer._testing.collectForbiddenValues(fixture.db, v7Manifest);
 
     for (const [key, value] of [['previous_version', 7], ['source', 'private-dynamic-metadata-source']]) {
       const keyContext = `knowledge_entries.metadata_json#/${key}@key`;
@@ -7512,7 +7511,7 @@ test('forbidden collection authorizes JSON keys only through their closed path p
       for (const trigger of triggers) db.exec(trigger.sql);
     });
     assert.throws(
-      () => sanitizer._testing.assertNoForbiddenValues(leakPath, forbidden, v6Manifest),
+      () => sanitizer._testing.assertNoForbiddenValues(leakPath, forbidden, v7Manifest),
       /knowledge_entries\.metadata_json.*previous_version|previous_version.*knowledge_entries\.metadata_json/i,
       'dynamic JSON keys must remain record-level forbidden even when physical schema text shares their name'
     );
@@ -7548,7 +7547,7 @@ test('raw leak scanning rejects short raw, UTF, hex, and base64 probes without a
 });
 
 test('replacement sentinels are confined to manifest-authorized cells and JSON positions', () => {
-  assert.deepEqual(v6Manifest.semanticPolicies.replacementSentinels.allowedClassifications, {
+  assert.deepEqual(v7Manifest.semanticPolicies.replacementSentinels.allowedClassifications, {
     'tmtext-': ['synthetic-text'],
     'tmjson-': ['json-leaves'],
     'tmkey-': ['json-leaves'],
@@ -7563,14 +7562,14 @@ test('replacement sentinels are confined to manifest-authorized cells and JSON p
   sanitizer.sanitizeProductionShape({ sourcePath: fixture.dbPath, outputPath });
   const output = new Database(outputPath);
   try {
-    assert.doesNotThrow(() => sanitizer._testing.assertReplacementSentinelsConfined(output, v6Manifest));
+    assert.doesNotThrow(() => sanitizer._testing.assertReplacementSentinelsConfined(output, v7Manifest));
     output.prepare("UPDATE schema_migrations SET source_path='tmtext-illegal-structural-cell' WHERE version=(SELECT MIN(version) FROM schema_migrations)").run();
     assert.throws(
-      () => sanitizer._testing.assertReplacementSentinelsConfined(output, v6Manifest),
+      () => sanitizer._testing.assertReplacementSentinelsConfined(output, v7Manifest),
       /sentinel.*schema_migrations\.source_path|classified/i
     );
     output.prepare("UPDATE schema_migrations SET source_path='migrations/fixture.js' WHERE version=(SELECT MIN(version) FROM schema_migrations)").run();
-    const metadataColumn = v6Manifest.objects
+    const metadataColumn = v7Manifest.objects
       .find((object) => object.name === 'knowledge_entries').columns
       .find((column) => column.name === 'metadata_json');
     assert.throws(
@@ -7578,7 +7577,7 @@ test('replacement sentinels are confined to manifest-authorized cells and JSON p
         { leak: 'tm-node-illegal-json-position' },
         'knowledge_entries.metadata_json',
         metadataColumn.classification,
-        v6Manifest.semanticPolicies.replacementSentinels,
+        v7Manifest.semanticPolicies.replacementSentinels,
         metadataColumn.jsonPolicy
       ),
       /sentinel.*knowledge_entries\.metadata_json.*\/leak|authorized JSON position/i
@@ -7625,13 +7624,13 @@ test('per-PK semantic shape preserves exact NULLs, storage classes, and equality
   for (const [id, rating, followers, angle] of rows) {
     insert.run(id, `shape-${id}`, `shape-cn-${id}`, rating, followers, angle);
   }
-  const before = sanitizer._testing.captureSemanticShape(fixture.db, v6Manifest);
+  const before = sanitizer._testing.captureSemanticShape(fixture.db, v7Manifest);
   fixture.db.close();
   const outputPath = path.join(fixture.root, 'sanitized.db');
   sanitizer.sanitizeProductionShape({ sourcePath: fixture.dbPath, outputPath });
   const output = new Database(outputPath);
   try {
-    const after = sanitizer._testing.captureSemanticShape(output, v6Manifest);
+    const after = sanitizer._testing.captureSemanticShape(output, v7Manifest);
     assert.doesNotThrow(() => sanitizer._testing.assertSemanticShapePreserved(before, after));
     assert.equal(output.prepare('SELECT typeof(creative_angles) AS type FROM brands WHERE id=882105').get().type, 'blob');
     assert.equal(output.prepare('SELECT typeof(amazon_rating) AS type FROM brands WHERE id=882101').get().type, 'real');
@@ -7640,7 +7639,7 @@ test('per-PK semantic shape preserves exact NULLs, storage classes, and equality
     output.prepare('UPDATE brands SET creative_angles=? WHERE id=882106').run(textValue);
     output.prepare('UPDATE brands SET creative_angles=NULL WHERE id=882104').run();
     assert.throws(
-      () => sanitizer._testing.assertSemanticShapePreserved(after, sanitizer._testing.captureSemanticShape(output, v6Manifest)),
+      () => sanitizer._testing.assertSemanticShapePreserved(after, sanitizer._testing.captureSemanticShape(output, v7Manifest)),
       /NULL.*brands\.creative_angles|row-level NULL/i
     );
     output.prepare('UPDATE brands SET creative_angles=? WHERE id=882104').run(textValue);
@@ -7650,7 +7649,7 @@ test('per-PK semantic shape preserves exact NULLs, storage classes, and equality
     output.prepare('UPDATE brands SET creative_angles=? WHERE id=882105').run(textValue);
     output.prepare('UPDATE brands SET creative_angles=? WHERE id=882104').run(blobValue);
     assert.throws(
-      () => sanitizer._testing.assertSemanticShapePreserved(after, sanitizer._testing.captureSemanticShape(output, v6Manifest)),
+      () => sanitizer._testing.assertSemanticShapePreserved(after, sanitizer._testing.captureSemanticShape(output, v7Manifest)),
       /storage class.*brands\.creative_angles/i
     );
     output.prepare('UPDATE brands SET creative_angles=? WHERE id=882105').run(blobValue);
@@ -7661,7 +7660,7 @@ test('per-PK semantic shape preserves exact NULLs, storage classes, and equality
     output.prepare('UPDATE brands SET creative_angles=? WHERE id=882102').run(second);
     output.prepare('UPDATE brands SET creative_angles=? WHERE id=882103').run(first);
     assert.throws(
-      () => sanitizer._testing.assertSemanticShapePreserved(after, sanitizer._testing.captureSemanticShape(output, v6Manifest)),
+      () => sanitizer._testing.assertSemanticShapePreserved(after, sanitizer._testing.captureSemanticShape(output, v7Manifest)),
       /equality partition.*brands\.creative_angles/i
     );
   } finally {
@@ -7687,7 +7686,7 @@ test('record-level scan authorizes only declared structural contexts and rejects
     INSERT INTO brands (name,name_cn,creative_angles,created_at)
     VALUES ('record-context-target','record-context-target','source-safe',CURRENT_TIMESTAMP)
   `).run().lastInsertRowid);
-  const forbidden = sanitizer._testing.collectForbiddenValues(fixture.db, v6Manifest);
+  const forbidden = sanitizer._testing.collectForbiddenValues(fixture.db, v7Manifest);
   assert.ok(forbidden.rawProbes.some((probe) => (
     probe.context === 'teams.code'
       && probe.encoding === 'utf8'
@@ -7698,13 +7697,13 @@ test('record-level scan authorizes only declared structural contexts and rejects
   const cleanPath = path.join(fixture.root, 'clean.db');
   sanitizer.sanitizeProductionShape({ sourcePath: fixture.dbPath, outputPath: cleanPath });
   assert.ok(fs.readFileSync(cleanPath).includes(Buffer.from('code')), 'fixture must contain the schema/structural collision');
-  assert.doesNotThrow(() => sanitizer._testing.assertNoForbiddenValues(cleanPath, forbidden, v6Manifest));
+  assert.doesNotThrow(() => sanitizer._testing.assertNoForbiddenValues(cleanPath, forbidden, v7Manifest));
 
   const leakPath = compactSqliteClone(cleanPath, path.join(fixture.root, 'context-leak.db'), (db) => {
     db.prepare('UPDATE brands SET creative_angles=? WHERE id=?').run('prefix:code:suffix', targetBrandId);
   });
   assert.throws(
-    () => sanitizer._testing.assertNoForbiddenValues(leakPath, forbidden, v6Manifest),
+    () => sanitizer._testing.assertNoForbiddenValues(leakPath, forbidden, v7Manifest),
     (error) => {
       assert.match(error.message, /teams\.code/i);
       assert.match(error.message, /brands\.creative_angles/i);
@@ -7716,7 +7715,7 @@ test('record-level scan authorizes only declared structural contexts and rejects
     db.prepare('UPDATE brands SET creative_angles=? WHERE id=?').run('prefixcodesuffix', targetBrandId);
   });
   assert.throws(
-    () => sanitizer._testing.assertNoForbiddenValues(containerPath, forbidden, v6Manifest),
+    () => sanitizer._testing.assertNoForbiddenValues(containerPath, forbidden, v7Manifest),
     (error) => {
       assert.match(error.message, /teams\.code/i);
       assert.match(error.message, /brands\.creative_angles/i);
@@ -7735,7 +7734,7 @@ test('record-level scan authorizes only declared structural contexts and rejects
   }, { vacuum: false });
   assert.ok(fs.readFileSync(freeSpacePath).includes(Buffer.from(freeSpaceMarker)), 'fixture must retain a non-live page coincidence');
   assert.throws(
-    () => sanitizer._testing.assertNoForbiddenValues(freeSpacePath, forbidden, v6Manifest),
+    () => sanitizer._testing.assertNoForbiddenValues(freeSpacePath, forbidden, v7Manifest),
     /teams\.code|classified source leak/i,
     'physical scanning must reject a complete short secret in non-live page bytes'
   );
@@ -7749,7 +7748,7 @@ test('record-level scan rejects live UTF, hex, base64, aligned UTF-16, and short
     INSERT INTO brands (name,name_cn,youtube_followers,creative_angles,created_at)
     VALUES ('record-encoding-target','record-encoding-target',731927,'source-safe',CURRENT_TIMESTAMP)
   `).run().lastInsertRowid);
-  const forbidden = sanitizer._testing.collectForbiddenValues(fixture.db, v6Manifest);
+  const forbidden = sanitizer._testing.collectForbiddenValues(fixture.db, v7Manifest);
   fixture.db.close();
   const cleanPath = path.join(fixture.root, 'clean.db');
   sanitizer.sanitizeProductionShape({ sourcePath: fixture.dbPath, outputPath: cleanPath });
@@ -7769,7 +7768,7 @@ test('record-level scan rejects live UTF, hex, base64, aligned UTF-16, and short
         db.prepare('UPDATE brands SET creative_angles=? WHERE id=?').run(value, targetBrandId);
       });
       assert.throws(
-        () => sanitizer._testing.assertNoForbiddenValues(candidatePath, forbidden, v6Manifest),
+        () => sanitizer._testing.assertNoForbiddenValues(candidatePath, forbidden, v7Manifest),
         (error) => {
           assert.match(error.message, /forbidden|leak/i);
           assert.match(error.message, /brands\.creative_angles/i);
@@ -7783,7 +7782,7 @@ test('record-level scan rejects live UTF, hex, base64, aligned UTF-16, and short
       db.prepare('UPDATE brands SET amazon_rating=? WHERE id=?').run(731927, targetBrandId);
     });
     assert.throws(
-      () => sanitizer._testing.assertNoForbiddenValues(crossNumericPath, forbidden, v6Manifest),
+      () => sanitizer._testing.assertNoForbiddenValues(crossNumericPath, forbidden, v7Manifest),
       (error) => {
         assert.match(error.message, /brands\.youtube_followers/i);
         assert.match(error.message, /brands\.amazon_rating/i);
@@ -7801,7 +7800,7 @@ test('record-level scan rejects live UTF, hex, base64, aligned UTF-16, and short
     }, { vacuum: false });
     assert.ok(fs.readFileSync(physicalShortPath).includes(Buffer.from('prefixx7suffix')));
     assert.throws(
-      () => sanitizer._testing.assertNoForbiddenValues(physicalShortPath, forbidden, v6Manifest),
+      () => sanitizer._testing.assertNoForbiddenValues(physicalShortPath, forbidden, v7Manifest),
       /users\.password_hash|classified source leak/i,
       'physical scanning must not exempt a complete short sensitive value'
     );

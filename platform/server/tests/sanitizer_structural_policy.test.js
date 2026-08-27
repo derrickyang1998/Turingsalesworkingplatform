@@ -15,15 +15,19 @@ const migrationService = require('../services/migration_service');
 const migrationGate = require('../scripts/verify_campaign_migration_gate');
 const sanitizer = require('../scripts/sanitize_production_shape');
 const manifestDocument = require('../scripts/sanitization_manifest.json');
-const manifest = sanitizer._testing.manifestProfileForVersion(manifestDocument, 6);
+const manifest = sanitizer._testing.manifestProfileForVersion(manifestDocument, 7);
 const BASH = process.platform === 'win32' ? 'C:\\Program Files\\Git\\bin\\bash.exe' : 'bash';
 const HAS_BASH = process.platform !== 'win32' || fs.existsSync(BASH);
 
-function openMigratedFixture(label, targetVersion = 6) {
+function openMigratedFixture(label, targetVersion = 7) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), `tm-sanitizer-policy-${label}-`));
   const dbPath = path.join(root, 'source.db');
   const migrationOptions = { rootDir: path.resolve(__dirname, '..') };
-  if (targetVersion === 6) migrationOptions.registeredMigrations = migrationGate.REGISTERED_MIGRATIONS;
+  if (targetVersion > 1) {
+    migrationOptions.registeredMigrations = migrationGate.REGISTERED_MIGRATIONS.filter(
+      (migration) => migration.version <= targetVersion
+    );
+  }
   const db = migrationService.openMigratedDatabase(dbPath, migrationOptions);
   return { root, dbPath, db };
 }
@@ -117,7 +121,7 @@ test('arbitrary model, source, industry, platform, market, region, module, and c
   }
 });
 
-test('schema 6 CRM structure is preserved while customer identity fields are rebuilt', () => {
+test('schema 7 preserves CRM structure while customer identity fields are rebuilt', () => {
   const classifications = new Map(manifest.objects.flatMap((object) => (
     object.columns.map((column) => [`${object.name}.${column.name}`, column.classification])
   )));

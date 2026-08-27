@@ -376,7 +376,10 @@ test('Phase 4 restores the migration cleanup control plane on every rejected or 
   assert.match(restoreControl, /os\.unlink/);
   assert.match(restoreControl, /os\.chown/);
   assert.match(restoreControl, /os\.chmod/);
-  assert.match(restoreControl, /st_atime_ns/);
+  assert.match(
+    restoreControl,
+    /os\.utime\(temporary, ns=\(record\['atimeNs'\], record\['mtimeNs'\]\), follow_symlinks=False\)/
+  );
   assert.match(restoreControl, /st_mtime_ns/);
   assert.match(restoreControl, /os\.listxattr/);
   assert.match(restoreControl, /00-turingmarket-restore-barrier\.conf/);
@@ -1307,7 +1310,7 @@ if ($actual -ne 'sweep,writer,finalize,retention,candidate,release') { throw "Un
   const failureTrap = finalizerShell.indexOf("trap 'recover_accepted_finalize_public_failure $?' ERR EXIT", armedFlag);
   const trustedClose = finalizerShell.indexOf('public_release_guard close', failureTrap);
   const guardArm = finalizerShell.indexOf('public_release_guard arm', trustedClose);
-  const pm2Restart = finalizerShell.indexOf('pm2 restart ecosystem.config.js', guardArm);
+  const pm2Restart = finalizerShell.indexOf('restart_pm2_from_ecosystem_exactly', guardArm);
   const healthWait = finalizerShell.indexOf('for attempt in $(seq 1 __PARSER_STARTUP_TIMEOUT_SECONDS__)', pm2Restart);
   const identityCheck = finalizerShell.indexOf('public_release_guard verify-armed', healthWait);
   const publicSwap = finalizerShell.indexOf('mv -Tf "$LockDir/nginx-finalize-new.link" /etc/nginx/sites-enabled/turingmarket', identityCheck);

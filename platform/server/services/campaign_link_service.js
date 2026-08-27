@@ -1621,12 +1621,22 @@ function createCampaignLinkService(db) {
     if (input.bodyIsEmpty === false) {
       throw invalidInput('Campaign-linked knowledge use requests must have an empty body.');
     }
-    const authorize = () => requireKnowledgeTargetAccess(
-      db,
-      userId,
-      custody.campaignId,
-      entryId
-    );
+    const authorize = () => {
+      const access = requireKnowledgeTargetAccess(
+        db,
+        userId,
+        custody.campaignId,
+        entryId
+      );
+      if (!knowledgeService.isKnowledgeRetrievable(db, entryId)) {
+        throw serviceError(
+          409,
+          'KNOWLEDGE_GOVERNANCE_INACTIVE',
+          'Knowledge entry is not available for AI use.'
+        );
+      }
+      return access;
+    };
     return runLinkedMutation(db, {
       userId: input.userId,
       campaignId: custody.campaignId,

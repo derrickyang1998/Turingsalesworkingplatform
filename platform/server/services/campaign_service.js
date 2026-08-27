@@ -1689,6 +1689,17 @@ function workspaceLinkProjection(db, row) {
   );
 }
 
+function requireRetrievableKnowledgeTarget(db, recordType, recordId) {
+  if (recordType !== 'knowledge_entry') return;
+  if (!knowledgeService.isKnowledgeRetrievable(db, Number(recordId))) {
+    throw new CampaignServiceError(
+      409,
+      'KNOWLEDGE_GOVERNANCE_INACTIVE',
+      'Knowledge entry is not available for campaign use.'
+    );
+  }
+}
+
 function attachCampaignLink(db, input) {
   const body = normalizeLinkBody(input.body);
   const campaignId = canonicalId(input.campaignId);
@@ -1702,6 +1713,7 @@ function attachCampaignLink(db, input) {
     relationType: body.relation_type,
     intent: 'manage'
   });
+  requireRetrievableKnowledgeTarget(db, body.record_type, body.record_id);
   return runCampaignMutation(db, {
     ...input,
     method: 'POST',
@@ -1718,6 +1730,7 @@ function attachCampaignLink(db, input) {
         relationType: body.relation_type,
         intent: 'manage'
       });
+      requireRetrievableKnowledgeTarget(db, body.record_type, body.record_id);
     }
   }, ({ access, auditFingerprint }) => {
     requireTargetAccess(db, {
@@ -1728,6 +1741,7 @@ function attachCampaignLink(db, input) {
       relationType: body.relation_type,
       intent: 'attach'
     });
+    requireRetrievableKnowledgeTarget(db, body.record_type, body.record_id);
     let knowledgeGaugePlan = [];
     if (body.record_type === 'knowledge_entry') {
       knowledgeGaugePlan = knowledgeService.preflightCampaignKnowledgeCustodyMoveInTransaction(
@@ -2219,7 +2233,8 @@ function candidateSqlDefinition(relationType, {
   access,
   actor,
   userId,
-  campaignId
+  campaignId,
+  governance
 }) {
   const unclassified = `
     NOT EXISTS (
@@ -2359,7 +2374,9 @@ function candidateSqlDefinition(relationType, {
             NULL AS status,
             NULL AS row_version
           FROM knowledge_entries target
-          WHERE (
+          ${governance.joinSql}
+          WHERE ${governance.eligibilitySql}
+            AND (
             @platformAdmin=1
             OR target.created_by=@userId
           )
@@ -2482,7 +2499,8 @@ function listCampaignLinkCandidates(db, input) {
     access,
     actor,
     userId,
-    campaignId
+    campaignId,
+    governance: knowledgeService.knowledgeGovernanceSql(db, 'target', 'governance')
   });
   const sql = candidateQuerySql(definition);
   const params = { ...definition.params, q };
@@ -3102,6 +3120,7 @@ function knowledgeQueryDefinition({
   campaignId,
   actor,
   filters,
+  governance,
   entryId = null
 }) {
   const visibility = projectedKnowledgeVisibilitySql('entry');
@@ -3153,6 +3172,7 @@ function knowledgeQueryDefinition({
       authorized AS MATERIALIZED (
         SELECT
           entry.*,
+          ${governance.canUseInAiSql} AS governance_can_use_in_ai,
           ${visibility} AS projected_visibility,
           CASE
             WHEN custody.entry_id IS NULL THEN 'available'
@@ -3160,7 +3180,9 @@ function knowledgeQueryDefinition({
           END AS link_state
         FROM knowledge_entries entry
         LEFT JOIN current_custody custody ON custody.entry_id=entry.id
-        WHERE (
+        ${governance.joinSql}
+        WHERE ${governance.eligibilitySql}
+          AND (
           custody.entry_id IS NULL
           OR custody.campaign_id=@campaignId
         )
@@ -3254,6 +3276,7 @@ function listCampaignKnowledge(db, input) {
     userId,
     campaignId,
     actor,
+    governance: knowledgeService.knowledgeGovernanceSql(db),
     filters
   });
   if (definition.impossibleSearch) {
@@ -3334,6 +3357,7 @@ function getCampaignKnowledgeDetail(db, input) {
     userId,
     campaignId,
     actor,
+    governance: knowledgeService.knowledgeGovernanceSql(db),
     entryId,
     filters: {
       q: '',
@@ -3377,7 +3401,7 @@ function getCampaignKnowledgeDetail(db, input) {
       access.permissions.write &&
       (actor.role === 'admin' || row.created_by === userId)
     ),
-    can_use_in_ai: true
+    can_use_in_ai: row.governance_can_use_in_ai === 1
   };
 }
 

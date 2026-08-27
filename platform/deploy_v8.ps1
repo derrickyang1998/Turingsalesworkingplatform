@@ -24,7 +24,7 @@ $LOCAL_DIR = Split-Path -Parent $MyInvocation.MyCommand.Path
 $REPO_DIR = Split-Path -Parent $LOCAL_DIR
 $EXPECTED_REPO_DIR_B64 = "QzpcVXNlcnNcMjkyNzJcRG9jdW1lbnRzXOWcqOe6v+WVhuWKoeW5s+WPsC1naXRodWItc3luYw=="
 $EXPECTED_REPO_DIR = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($EXPECTED_REPO_DIR_B64))
-$EXPECTED_BRANCH = "codex/v0.6.0-crm-sales-workspace"
+$EXPECTED_BRANCH = "codex/v0.7.0-ai-knowledge-proposal-ppt-loop-production"
 $EXPECTED_APP_BUILD = "20260811-v060-crm-sales-workspace"
 $EXPECTED_APP_QUERY = "20260811v060crmsalesworkspace"
 $EXPECTED_PPT_BUILD = "20260702-v916-kb-bridge-client-cn"
@@ -33,10 +33,10 @@ $EXPECTED_PPT_SHA256 = "f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57
 $TRUSTED_SOURCE_GATE_RELATIVE_PATH = "server\scripts\trusted_production_source_gate.js"
 $TRUSTED_SOURCE_MANIFEST_RELATIVE_PATH = "server\scripts\trusted_production_source_manifest.json"
 $TRUSTED_RUNTIME_CONFIG_RELATIVE_PATH = "server\config\runtime_config.js"
-$EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "e0bec8b0d20487f50357ba0f5f9622c2c3dfddbedcbf0d782e8f75fe51d1679a"
-$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "59582cb830a9dd7a45942f920b1013bca46cc1ad6039d8d9250bfa0d5aa1b92d"
+$EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "9cb05b2d48a15364eee417048d9cda064634f2ff16c8efd91b36fff7bb962a9f"
+$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "19ae3ca8cf884ece130304fbb7b22611ad834b190f58c57b6371c25539065dc8"
 $EXPECTED_TRUSTED_RUNTIME_CONFIG_SHA256 = "76d43d3e811c6fa8daae987cc9eb2fff2dc8a8095f84b1cd309e4e214df94dcb"
-$EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256 = "b039f9b3c27871a4ebf2cc6f09e4adedc20761975e555cef7362aab56f6e32db"
+$EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256 = "6c983772bfebd666ca170205d030034b2407bca4147054e828bb00b97b724aac"
 $EXPECTED_TRUSTED_PARSER_VERIFIER_SHA256 = "7f9efaac02675b21e025891a400474cc7481c1adaf58c88bd8b356d5276f2eaa"
 $EXPECTED_TRUSTED_PUBLIC_GUARD_SHA256 = "d45fe8fcc01587aaa0e73eccfb9714c27801e232cb6c0effd6daedb703316d66"
 $EXPECTED_TRUSTED_MIGRATION_CLEANUP_HELPER_SHA256 = "d5f2befa902522dd9de3e9dd2397a99ee5e78ab1a1c6e526a27f14bb2829e1fa"
@@ -134,6 +134,7 @@ $FILES = @(
     "server\routes_workflow.js",
     "server\server.js",
     "server\workflow_engine.js",
+    "server\services\ai_cost_service.js",
     "server\services\ai_service.js",
     "server\services\business_knowledge_service.js",
     "server\services\campaign_access_service.js",
@@ -4581,6 +4582,40 @@ TM_MIGRATION_CLEANUP_CONTROL_REPLAY
 
 function Get-Pm2PersistenceVerifier {
     return @'
+assert_pm2_startup_service() {
+  local UnitPath="/etc/systemd/system/pm2-root.service"
+  local Pm2Runtime="/usr/lib/node_modules/pm2/bin/pm2"
+  test -f "$UnitPath"
+  test ! -L "$UnitPath"
+  test "$(stat -c '%U:%G:%a:%h' "$UnitPath")" = "root:root:644:1"
+  test -x "$Pm2Runtime"
+  cmp -s "$UnitPath" /dev/stdin <<'PM2_UNIT'
+[Unit]
+Description=PM2 process manager
+Documentation=https://pm2.keymetrics.io/
+After=network.target
+
+[Service]
+Type=forking
+User=root
+LimitNOFILE=infinity
+LimitNPROC=infinity
+LimitCORE=infinity
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin:/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
+Environment=PM2_HOME=/root/.pm2
+PIDFile=/root/.pm2/pm2.pid
+Restart=on-failure
+
+ExecStart=/usr/lib/node_modules/pm2/bin/pm2 resurrect
+ExecReload=/usr/lib/node_modules/pm2/bin/pm2 reload all
+ExecStop=/usr/lib/node_modules/pm2/bin/pm2 kill
+
+[Install]
+WantedBy=multi-user.target
+PM2_UNIT
+  systemctl is-enabled --quiet pm2-root.service
+}
+
 restart_pm2_from_ecosystem_exactly() {
   if pm2 describe turingmarket >/dev/null 2>&1; then
     pm2 delete turingmarket
@@ -4598,6 +4633,7 @@ restart_pm2_from_ecosystem_exactly() {
 
 persist_pm2_dump() {
   local DumpPath="/root/.pm2/dump.pm2"
+  assert_pm2_startup_service
   pm2 save
   test -f "$DumpPath"
   test ! -L "$DumpPath"
@@ -6670,7 +6706,7 @@ public_release_guard arm \
 
 cd "$LiveDir"
 export SERVER_HOST=127.0.0.1
-pm2 restart ecosystem.config.js --only turingmarket --update-env || pm2 start ecosystem.config.js --only turingmarket --update-env
+restart_pm2_from_ecosystem_exactly
 for attempt in $(seq 1 __PARSER_STARTUP_TIMEOUT_SECONDS__); do
   if curl -fsS http://localhost:3002/api/health >/dev/null; then break; fi
   if [ "$attempt" = "__PARSER_STARTUP_TIMEOUT_SECONDS__" ]; then
@@ -12281,7 +12317,7 @@ NODE
 
 cd "$LiveDir"
 export SERVER_HOST=127.0.0.1
-pm2 restart ecosystem.config.js --only turingmarket --update-env || pm2 start ecosystem.config.js --only turingmarket --update-env
+restart_pm2_from_ecosystem_exactly
 
 for attempt in $(seq 1 __PARSER_STARTUP_TIMEOUT_SECONDS__); do
   if curl -fsS http://localhost:3002/api/health >/dev/null; then

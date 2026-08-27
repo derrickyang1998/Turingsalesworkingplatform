@@ -59,7 +59,7 @@ test('browser baseline generator preserves the frozen pre-edit inventory require
 
   assert.equal(manifest.preEdit.routeContracts.length, 106);
   assert.equal(manifest.preEdit.duplicateInventory.reviewedDuplicateCount, 39);
-  assert.equal(manifest.routeContracts.length, 123);
+  assert.equal(manifest.routeContracts.length, 125);
   assert.deepEqual(manifest.duplicateInventory.duplicates, ['esc']);
 });
 
