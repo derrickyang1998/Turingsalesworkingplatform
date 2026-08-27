@@ -1,5 +1,22 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.7.0-ai-knowledge-loop-task4d4 (Production Slice, 2026-08-27) - 知识治理与发布恢复加固
+
+### 迁移、清理与 Campaign 治理 / Migration, Cleanup, And Campaign Governance
+- 可信迁移合同显式接受受管 schema `1/6/7`：v1/v6 执行固定双跑保持性验证至 v7，受管 v7 走 no-op；篡改 007 并改写既有业务数据会失败关闭。
+- 新增唯一受支持的 `deployment_smoke` 知识清理服务，拒绝已有引用、Campaign 托管、不完整血缘及非验收来源；FTS、治理和知识投影在嵌套事务保存点内原子清理，中途故障完整回滚。
+- Campaign 知识候选、直接关联、列表、详情与 AI 使用统一治理过滤；拒绝、过期、被替代或非当前知识不能再进入项目能力链或增加使用计数。
+- bootstrap 安装并启用精确 `pm2-root.service`；发布与回滚从 ecosystem 重建精确 PM2 投影，并在保存 dump 前验证 unit、固定入口和 enabled 状态。受控分支及运行手册同步到 v0.7 单功能加速节奏，冻结 UI/PPT 未修改。
+
+### 验证与生产发布 / Verification And Production Release
+- 独立最终复审为 `APPROVE`，Critical/Important/Minor 均为 0。发布源合同 `57/57`、公网静态边界换用 D 盘临时夹具后 `9/9`、运行时加固 `58 通过 / 3 个仅 Linux 跳过`、清理回滚 `4/4`、可信 v6/v7 `5/5` 及 Campaign 最终负向用例 `1/1` 通过；真实 `-ValidateLocalOnly`、三类语法、diff、敏感信息、50 文件可信清单和冻结资产校验通过。
+- 实现与 GitHub SHA 为 `f65fcf47d51fdd3487843211c5cc566ee3835823`；增量包 SHA-256 `47538fe9ff84e82fca3e71d688118992c7846640e184370d0a1f3dcea3cb0053`，清单 SHA-256 `bc6f6155293074fa292dd6adeeea1243cfb1251e03cd4da3db64946948582ddd`。
+- 可验证备份为 `/root/turingmarket/backups/v070-slice4d4-governance-hardening-20260827-112449`，聚合 SHA-256 `6eaa544d52701b80aa91b0f4cf81a7b8d8ec03b19815a1a497b3d898be83c2b8`；容量要求 `188,096 KiB`，可用 `8,159,448 KiB`，发布阶段目录为 `/root/turingmarket/releases/v070-slice4d4-governance-hardening-20260827-112449`。
+- 线上内外健康 `ok`、解析器 ready、PM2 PID `7177`、PM2 unit enabled/active、Nginx active；schema v7、知识/治理 `123/123`、chunks/FTS `857/857`、SQLite/外键/FTS 完整性均通过。
+- 真实 HTTP 冒烟通过双角色登录、知识治理、Campaign 候选过滤和失效知识直接关联拒绝；无链接或幂等账本副作用。最终启用验收账号、会话和 `deployment_smoke` 知识均为 0，独立后验通过后远端 `/tmp` 上传件已清理。安装/公网 `app.js` 哈希保持 `ed304b9d...5c93`，冻结 `ppt.js` 哈希保持 `f311a7b3...e291e`。
+
+---
+
 ## v0.7.0-ai-knowledge-loop-task4d3 (Production Slice, 2026-08-27) - 知识质量、版本血缘与保留治理
 
 ### 可治理知识生命周期 / Governed Knowledge Lifecycle

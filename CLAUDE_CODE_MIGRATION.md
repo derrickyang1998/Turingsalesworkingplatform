@@ -112,7 +112,7 @@ Manual rollback / 手工回滚：
 
 The same restore function is used by automatic and manual rollback. Phase 4 rejects code-only rollback: manual restore requires `-RollbackBackup`, `-RestoreDatabase`, and `-ConfirmDataLoss`; automatic post-mutation recovery always selects the same database/cache path. Every manifest is verified, SQLite and `PPT_CACHE_DIR` are restored as one unit, stale SQLite sidecars are removed, and every session is deleted before PM2 starts with `SERVER_HOST=127.0.0.1`. `-PreserveSessions` is always rejected. / 自动与手工回滚共用同一数据库与缓存恢复函数；手工恢复必须显式提供备份、恢复数据库及确认数据丢失，且始终在 PM2 启动前撤销全部会话。
 
-Production runs the accepted v0.6 product shell and frozen PPT renderer with the reviewed v0.7 Phase 6 slices through Task 4D3, on schema v7. The current Task 4D4 governance-hardening bytes remain a candidate until their focused tests, independent review, GitHub synchronization, verified backup, guarded deployment, production health/login/core-path acceptance, rollback evidence, and final version/Obsidian sync are complete. / 生产当前运行已验收 v0.6 产品壳层与冻结 PPT renderer，并叠加至 Task 4D3 的 v0.7 阶段 6 切片，数据库为 schema v7；当前 Task 4D4 治理加固字节在定向测试、独立审查、GitHub 同步、可验证备份、受控部署、线上验收、回滚证据及版本/Obsidian 同步完成前仍是候选。
+Production runs the accepted v0.6 product shell and frozen PPT renderer with the reviewed v0.7 Phase 6 slices through Task 4D4, on schema v7. Task 4D4 is backed by GitHub SHA `f65fcf47d51fdd3487843211c5cc566ee3835823`, a verified production backup, independent `APPROVE`, and online schema/FTS/authorization acceptance. Task 4E is the next candidate. / 生产当前运行已验收 v0.6 产品壳层与冻结 PPT renderer，并叠加至 Task 4D4 的 v0.7 阶段 6 切片，数据库为 schema v7；Task 4D4 已具备 GitHub SHA、可验证生产备份、独立 `APPROVE` 及线上 schema/FTS/权限验收，下一候选为 Task 4E。
 
 ## Security And Secrets / 安全与密钥
 
