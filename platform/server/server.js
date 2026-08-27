@@ -40,7 +40,9 @@ const {
   assertUploadSandboxStartupReady,
   createUploadSandboxService,
   loadRuntimeManifest,
+  normalizeSystemdEffectiveProperties,
   runCommandNoDisclosure,
+  systemdInspectionUnitName,
   workerMain
 } = require('./services/upload_sandbox_service');
 const obsidianIngestService = require('./services/obsidian_ingest_service');
@@ -53,6 +55,7 @@ const publicAssets = require('./services/public_assets_service');
 const credentialRotation = require('./services/credential_rotation_service');
 const organizationAccess = require('./services/organization_access_service');
 const {
+  createProductionSystemdPropertyReader,
   productionSelfTestEnvironment,
   verifyInstalledControlArtifacts
 } = require('./services/parser_startup_service');
@@ -117,6 +120,11 @@ const REQUIRED_UPLOAD_SANDBOX_SELF_TESTS = Object.freeze([
   'pptx_parsing',
   'ocr_inference'
 ]);
+const readProductionSystemdProperties = createProductionSystemdPropertyReader({
+  runCommand: runCommandNoDisclosure,
+  normalizeSystemdEffectiveProperties,
+  systemdInspectionUnitName
+});
 const campaignPptService = createCampaignPptService(db, {
   artifactStore: createPptArtifactStore({ rootDir: PPT_CACHE_DIR }),
   tempDir: TMP_DIR,
@@ -2097,6 +2105,7 @@ async function bootstrapServer() {
         recoverAdmissions: recoverUploadAdmissions,
         verifyInstalledArtifacts: verifyInstalledControlArtifacts,
         runSelfTests: runProductionUploadSandboxSelfTests,
+        systemctlShow: readProductionSystemdProperties,
         ...(localWorker ? localUploadReadinessAdapters() : {})
       });
   uploadSandboxReadiness = Object.freeze({

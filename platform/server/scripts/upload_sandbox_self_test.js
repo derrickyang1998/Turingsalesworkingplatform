@@ -1104,6 +1104,15 @@ function normalizeSystemCallFilter(value, expected) {
       .every((token) => allowed.has(token));
 }
 
+function completeDenyAllAddressExpansion(value, wanted) {
+  if (wanted !== 'any' || typeof value !== 'string') return false;
+  const prefixes = value.split(/\s+/).filter(Boolean);
+  return prefixes.length === 2 &&
+    new Set(prefixes).size === 2 &&
+    prefixes.includes('0.0.0.0/0') &&
+    prefixes.includes('::/0');
+}
+
 function normalizeSystemdProperties(unitName, observed, expected) {
   if (!exactKeys(observed, Object.keys(expected))) {
     if (
@@ -1118,7 +1127,7 @@ function normalizeSystemdProperties(unitName, observed, expected) {
     normalized.CPUAccounting = expected.CPUAccounting;
   }
   const expansions = {
-    IPAddressDeny: (value, wanted) => wanted === 'any' && value === '0.0.0.0/0 ::/0',
+    IPAddressDeny: completeDenyAllAddressExpansion,
     RestrictAddressFamilies: (value, wanted) => wanted === 'none' && value === '',
     SystemCallFilter: normalizeSystemCallFilter,
     SystemCallErrorNumber: (value, wanted) => wanted === 'EPERM' && value === '1',

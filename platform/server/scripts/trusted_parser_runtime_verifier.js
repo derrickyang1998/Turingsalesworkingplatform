@@ -770,12 +770,19 @@ function normalizedSystemCallFilter(value, expected, unit, options = {}) {
   }
 }
 
+function completeDenyAllAddressExpansion(observed, expected) {
+  if (expected !== 'any' || typeof observed !== 'string') return false;
+  const prefixes = observed.split(/\s+/).filter(Boolean);
+  return prefixes.length === 2 &&
+    new Set(prefixes).size === 2 &&
+    prefixes.includes('0.0.0.0/0') &&
+    prefixes.includes('::/0');
+}
+
 function normalizeSystemdProperty(unit, property, value, wanted, options = {}) {
   if (value === wanted && property !== 'SystemCallFilter') return wanted;
   const expansions = Object.freeze({
-    IPAddressDeny: (observed, expected) => (
-      expected === 'any' && observed === '0.0.0.0/0 ::/0'
-    ),
+    IPAddressDeny: completeDenyAllAddressExpansion,
     RestrictAddressFamilies: (observed, expected) => (
       expected === 'none' && observed === ''
     ),

@@ -2270,15 +2270,17 @@ test('trusted verifier rejects target syscall-group drift beyond the reviewed co
 
 test('trusted verifier normalizes systemd IPAddressDeny expansion for the live build unit', () => {
   const verifier = require(trustedVerifierPath);
-  assert.equal(
-    verifier.normalizeSystemdProperty(
-      'turingmarket-parser-build.service',
-      'IPAddressDeny',
-      '0.0.0.0/0 ::/0',
+  for (const value of ['0.0.0.0/0 ::/0', '::/0 0.0.0.0/0']) {
+    assert.equal(
+      verifier.normalizeSystemdProperty(
+        'turingmarket-parser-build.service',
+        'IPAddressDeny',
+        value,
+        'any'
+      ),
       'any'
-    ),
-    'any'
-  );
+    );
+  }
   assert.throws(() => verifier.normalizeSystemdProperty(
     'turingmarket-parser-build.service',
     'IPAddressDeny',

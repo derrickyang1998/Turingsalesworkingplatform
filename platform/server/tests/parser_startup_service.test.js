@@ -5,9 +5,14 @@ const crypto = require('node:crypto');
 const test = require('node:test');
 
 const {
+  createProductionSystemdPropertyReader,
   productionSelfTestEnvironment,
   verifyInstalledControlArtifacts
 } = require('../services/parser_startup_service');
+const {
+  normalizeSystemdEffectiveProperties,
+  systemdInspectionUnitName
+} = require('../services/upload_sandbox_service');
 
 const ARTIFACT_PATH = 'systemd/turingmarket-parser@.service';
 const INSTALLED_PATH = '/etc/systemd/system/turingmarket-parser@.service';
@@ -72,6 +77,60 @@ test('production parser self-test environment is exact and isolated', () => {
     TM_UPLOAD_SANDBOX_SERVER_ROOT:
       '/var/lib/turingmarket-parser/runtime-root/opt/turingmarket-parser/app'
   });
+});
+
+test('systemd 259 deny-all address order is normalized before strict startup verification', async () => {
+  const calls = [];
+  const reader = createProductionSystemdPropertyReader({
+    async runCommand(command, args, options) {
+      calls.push({ command, args, options });
+      return {
+        stdout: [
+          'IPAddressDeny=::/0 0.0.0.0/0',
+          'PrivateNetwork=yes',
+          ''
+        ].join('\n')
+      };
+    },
+    normalizeSystemdEffectiveProperties,
+    systemdInspectionUnitName
+  });
+  const expected = {
+    IPAddressDeny: 'any',
+    PrivateNetwork: 'yes'
+  };
+
+  assert.deepEqual(
+    await reader('turingmarket-parser@.service', expected),
+    expected
+  );
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].command, '/usr/bin/systemctl');
+  assert.deepEqual(calls[0].args, [
+    'show',
+    'turingmarket-parser@test_instance.service',
+    '--no-pager',
+    '--property=IPAddressDeny,PrivateNetwork'
+  ]);
+  assert.deepEqual(calls[0].options.env, productionSelfTestEnvironment());
+});
+
+test('production property reader still rejects an incomplete deny-all expansion', async () => {
+  const reader = createProductionSystemdPropertyReader({
+    async runCommand() {
+      return { stdout: 'IPAddressDeny=::/0\nPrivateNetwork=yes\n' };
+    },
+    normalizeSystemdEffectiveProperties,
+    systemdInspectionUnitName
+  });
+
+  await assert.rejects(
+    reader('turingmarket-parser@.service', {
+      IPAddressDeny: 'any',
+      PrivateNetwork: 'yes'
+    }),
+    /effective property drift/
+  );
 });
 
 test('installed parser control verification uses no-follow descriptors and exact hashes', () => {

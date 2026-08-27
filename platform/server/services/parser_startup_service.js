@@ -22,6 +22,7 @@ const INSTALLED_CONTROL_ARTIFACTS = Object.freeze({
     mode: 0o644
   })
 });
+const DENY_ALL_ADDRESS_PREFIXES = Object.freeze(['0.0.0.0/0', '::/0']);
 
 function productionSelfTestEnvironment() {
   return Object.freeze({
@@ -35,6 +36,64 @@ function productionSelfTestEnvironment() {
     TM_UPLOAD_SANDBOX_MANIFEST_PATH: UPLOAD_SANDBOX_MANIFEST_PATH,
     TM_UPLOAD_SANDBOX_SERVER_ROOT: UPLOAD_SANDBOX_RUNTIME_SERVER_ROOT
   });
+}
+
+function completeDenyAllAddressExpansion(value) {
+  if (typeof value !== 'string') return false;
+  const prefixes = value.split(/\s+/).filter(Boolean);
+  return prefixes.length === DENY_ALL_ADDRESS_PREFIXES.length &&
+    new Set(prefixes).size === DENY_ALL_ADDRESS_PREFIXES.length &&
+    DENY_ALL_ADDRESS_PREFIXES.every((prefix) => prefixes.includes(prefix));
+}
+
+function createProductionSystemdPropertyReader(options = {}) {
+  const runCommand = options.runCommand;
+  const normalize = options.normalizeSystemdEffectiveProperties;
+  const inspectUnitName = options.systemdInspectionUnitName;
+  if (
+    typeof runCommand !== 'function' ||
+    typeof normalize !== 'function' ||
+    typeof inspectUnitName !== 'function'
+  ) {
+    throw new TypeError('Production systemd property reader dependencies are required');
+  }
+  return async function readProductionSystemdProperties(unitName, expectedProperties) {
+    if (!expectedProperties || typeof expectedProperties !== 'object') {
+      throw new TypeError('Expected systemd properties are required');
+    }
+    const names = Object.keys(expectedProperties);
+    const result = await runCommand('/usr/bin/systemctl', [
+      'show',
+      inspectUnitName(unitName),
+      '--no-pager',
+      `--property=${names.join(',')}`
+    ], {
+      captureStdout: true,
+      timeoutMs: 5_000,
+      env: productionSelfTestEnvironment()
+    });
+    if (!result || typeof result.stdout !== 'string') {
+      throw new Error('systemd property output is invalid');
+    }
+    const observed = {};
+    for (const line of result.stdout.split(/\r?\n/)) {
+      if (line === '') continue;
+      const separator = line.indexOf('=');
+      if (separator < 1) throw new Error('systemd property output is invalid');
+      const key = line.slice(0, separator);
+      if (Object.prototype.hasOwnProperty.call(observed, key)) {
+        throw new Error('systemd property output is invalid');
+      }
+      observed[key] = line.slice(separator + 1);
+    }
+    if (
+      expectedProperties.IPAddressDeny === 'any' &&
+      completeDenyAllAddressExpansion(observed.IPAddressDeny)
+    ) {
+      observed.IPAddressDeny = DENY_ALL_ADDRESS_PREFIXES.join(' ');
+    }
+    return normalize(unitName, observed, expectedProperties);
+  };
 }
 
 function verifyInstalledControlArtifacts(manifest, options = {}) {
@@ -72,6 +131,7 @@ function verifyInstalledControlArtifacts(manifest, options = {}) {
 }
 
 module.exports = {
+  createProductionSystemdPropertyReader,
   INSTALLED_CONTROL_ARTIFACTS,
   productionSelfTestEnvironment,
   verifyInstalledControlArtifacts

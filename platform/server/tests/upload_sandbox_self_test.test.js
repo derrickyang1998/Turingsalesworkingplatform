@@ -80,6 +80,31 @@ test('systemd 259 slice evidence accepts the removed CPUAccounting property', ()
   );
 });
 
+test('systemd 259 deny-all evidence accepts either complete address-family order', () => {
+  const expected = {
+    IPAddressDeny: 'any',
+    PrivateNetwork: 'yes'
+  };
+  for (const value of ['0.0.0.0/0 ::/0', '::/0 0.0.0.0/0']) {
+    assert.deepEqual(
+      normalizeSystemdProperties(
+        'turingmarket-parser@.service',
+        { IPAddressDeny: value, PrivateNetwork: 'yes' },
+        expected
+      ),
+      expected
+    );
+  }
+  assert.throws(
+    () => normalizeSystemdProperties(
+      'turingmarket-parser@.service',
+      { IPAddressDeny: '::/0', PrivateNetwork: 'yes' },
+      expected
+    ),
+    /effective property drift/
+  );
+});
+
 const EXPECTED_DENY_TOKENS = Object.freeze([
   '@mount',
   'accept', 'accept4', 'bind', 'connect', 'getpeername', 'getsockname',
