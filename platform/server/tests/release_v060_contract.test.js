@@ -105,8 +105,8 @@ test('v0.6 release locks branch, build identity, release slug, and frozen PPT id
   assert.match(deploy, /20260702-v916-kb-bridge-client-cn/);
   assert.match(deploy, /20260702v916kbbridge/);
   assert.match(deploy, /f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e/);
-  assert.match(deploy, /if \(Number\(version\) !== 6\) throw new Error\('Candidate migration target version mismatch'\)/);
-  assert.doesNotMatch(deploy, /if \(Number\(version\) !== 5\) throw new Error\('Candidate migration target version mismatch'\)/);
+  assert.match(deploy, /if \(Number\(version\) !== 7\) throw new Error\('Candidate migration target version mismatch'\)/);
+  assert.doesNotMatch(deploy, /if \(Number\(version\) !== 6\) throw new Error\('Candidate migration target version mismatch'\)/);
 });
 
 test('v0.6 deploy inventory ships migration 006, CRM runtime, and every Phase 5 regression', () => {
@@ -131,7 +131,7 @@ test('v0.6 deploy inventory ships migration 006, CRM runtime, and every Phase 5 
   }
 });
 
-test('v0.6 trusted source and sanitization contracts are exact v1-to-v6', () => {
+test('current trusted source and sanitization contracts are exact v1-to-v7', () => {
   const trustedManifest = JSON.parse(read(
     'platform', 'server', 'scripts', 'trusted_production_source_manifest.json'
   ));
@@ -142,16 +142,17 @@ test('v0.6 trusted source and sanitization contracts are exact v1-to-v6', () => 
 
   assert.deepEqual(trustedManifest.migrationContract, {
     sourceVersion: 1,
-    targetVersion: 6,
+    targetVersion: 7,
     runs: 2,
     deterministicAppendTables: ['activity_log']
   });
   assert.deepEqual(
     sanitizationManifest.exactProfiles.map((profile) => profile.schemaVersion),
-    [6]
+    [6, 7]
   );
   for (const required of [
     'server/migrations/006_crm_sales_workspace.js',
+    'server/migrations/007_knowledge_governance.js',
     'server/services/crm_contract.js',
     'server/services/crm_customer_service.js',
     'server/services/crm_query_service.js',
@@ -201,10 +202,10 @@ test('v0.6 release records match the trusted-source and parser self-test contrac
   );
   const runbook = read('platform', 'DEPLOY.md');
 
-  assert.equal(trustedManifest.files.length, 49);
+  assert.equal(trustedManifest.files.length, 50);
   assert.equal(parserManifest.required_self_tests.length, 21);
-  assert.match(changelog, /49 个 SHA-256 固定文件/);
   assert.match(versionRecord, /Trusted source: 49 SHA-256-pinned files/);
+  assert.match(archiveRecord, /trusted-source manifest now pins 49 files/i);
   for (const record of [changelog, runbook, versionRecord, archiveRecord]) {
     assert.match(record, /21[^\r\n]*(?:self-tests|自检)/i);
     assert.doesNotMatch(record, /(?:builder|构建器)[^\r\n]*chroot/i);

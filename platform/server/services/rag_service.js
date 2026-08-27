@@ -105,6 +105,13 @@ function assertSelectedEntryAccess(db, opts, entryId) {
       access.status || access.statusCode || 403
     );
   }
+  if (!knowledge.isKnowledgeRetrievable(db, entryId)) {
+    throw ragInputError(
+      'KNOWLEDGE_NOT_RETRIEVABLE',
+      'Selected knowledge is not an active reusable version.',
+      409
+    );
+  }
 }
 
 function buildLinkedRagContext(db, opts) {

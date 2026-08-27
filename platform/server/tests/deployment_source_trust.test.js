@@ -96,10 +96,10 @@ function createV1Fixture(t, name) {
   return { root, databasePath };
 }
 
-function createV6Fixture(t, name) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), `tm-trusted-source-v6-${name}-`));
+function createV7Fixture(t, name) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `tm-trusted-source-v7-${name}-`));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const databasePath = path.join(root, 'managed-v6.db');
+  const databasePath = path.join(root, 'managed-v7.db');
   const database = migrationService.openMigratedDatabase(databasePath, {
     rootDir: serverRoot,
     registeredMigrations: migrationVerifier.REGISTERED_MIGRATIONS
@@ -393,13 +393,13 @@ test('deployment source verdict rejects a same-name verifier supplied by the can
   );
 });
 
-test('trusted source manifest pins the sanitizer closure, policy, baseline, and exact v1-to-v6 bundle', () => {
+test('trusted source manifest pins the sanitizer closure, policy, baseline, and exact v1-to-v7 bundle', () => {
   const manifest = loadTrustedManifest();
   const paths = new Set(manifest.files.map((entry) => entry.path));
   assert.equal(manifest.format, 'tm-trusted-production-source-manifest-v1');
   assert.deepEqual(manifest.migrationContract, {
     sourceVersion: 1,
-    targetVersion: 6,
+    targetVersion: 7,
     runs: 2,
     deterministicAppendTables: ['activity_log']
   });
@@ -428,6 +428,7 @@ test('trusted source manifest pins the sanitizer closure, policy, baseline, and 
     'server/migrations/004_knowledge_capacity_observability.js',
     'server/migrations/005_knowledge_custody_projection.js',
     'server/migrations/006_crm_sales_workspace.js',
+    'server/migrations/007_knowledge_governance.js',
     'server/migrations/vendor/bcryptjs_v3_0_3.js',
     'server/package.json',
     'server/package-lock.json'
@@ -600,7 +601,7 @@ test('trusted bundle staging rejects a candidate sanitizer that would substitute
   assert.equal(fs.existsSync(bundleRoot), false, 'a forged sanitizer must not publish executable trusted bytes');
 });
 
-test('trusted deployment gate adopts exact legacy v0 before sanitized v1-to-v6 verification', (t) => {
+test('trusted deployment gate adopts exact legacy v0 before sanitized v1-to-v7 verification', (t) => {
   const gate = loadTrustedGate();
   assert.match(
     read(trustedGatePath),
@@ -648,7 +649,7 @@ test('trusted deployment gate adopts exact legacy v0 before sanitized v1-to-v6 v
   }, {
     format: 'tm-trusted-production-source-verdict-v1',
     sourceVersion: 1,
-    targetVersion: 6,
+    targetVersion: 7,
     runs: 2,
     adoption: {
       format: 'tm-trusted-legacy-adoption-verdict-v1',
@@ -729,8 +730,8 @@ test('trusted live adoption normalizes a quiesced WAL legacy source through a pr
   }
 });
 
-test('trusted live adoption recognizes exact managed v6 as a no-op', (t) => {
-  const fixture = createV6Fixture(t, 'adoption-noop');
+test('trusted live adoption recognizes exact managed v7 as a no-op', (t) => {
+  const fixture = createV7Fixture(t, 'adoption-noop');
   const outputPath = path.join(fixture.root, 'must-not-exist.db');
   const { manifest, manifestPath } = writeCurrentContractManifest(fixture.root);
   const candidateRoot = path.join(fixture.root, 'candidate');
@@ -762,8 +763,8 @@ test('trusted live adoption recognizes exact managed v6 as a no-op', (t) => {
   assert.deepEqual(JSON.parse(result.stdout.trim()), {
     format: 'tm-trusted-legacy-adoption-verdict-v1',
     applied: false,
-    sourceVersion: 6,
-    targetVersion: 6,
+    sourceVersion: 7,
+    targetVersion: 7,
     sourceSha256,
     outputSha256: sourceSha256,
     baseTableCount: null,
@@ -773,9 +774,9 @@ test('trusted live adoption recognizes exact managed v6 as a no-op', (t) => {
   assert.equal(fs.existsSync(outputPath), false);
 });
 
-test('trusted required sanitize-and-verify path admits exact managed v6 as a verified no-op', (t) => {
-  const fixture = createV6Fixture(t, 'required-v6-gate');
-  const sanitizedPath = path.join(fixture.root, 'trusted-sanitized-v6.db');
+test('trusted required sanitize-and-verify path admits exact managed v7 as a verified no-op', (t) => {
+  const fixture = createV7Fixture(t, 'required-v7-gate');
+  const sanitizedPath = path.join(fixture.root, 'trusted-sanitized-v7.db');
   const workDir = path.join(fixture.root, 'migration-work');
   const { manifest, manifestPath } = writeCurrentContractManifest(fixture.root);
   const candidateRoot = path.join(fixture.root, 'candidate');
@@ -816,15 +817,15 @@ test('trusted required sanitize-and-verify path admits exact managed v6 as a ver
     adoption: report.databaseAdoption
   }, {
     format: 'tm-trusted-production-source-verdict-v1',
-    verificationMode: 'managed-v6-noop',
-    sourceVersion: 6,
-    targetVersion: 6,
+    verificationMode: 'managed-v7-noop',
+    sourceVersion: 7,
+    targetVersion: 7,
     runs: 2,
     adoption: {
       format: 'tm-trusted-legacy-adoption-verdict-v1',
       applied: false,
-      sourceVersion: 6,
-      targetVersion: 6,
+      sourceVersion: 7,
+      targetVersion: 7,
       sourceSha256,
       outputSha256: sourceSha256,
       baseTableCount: null,
@@ -839,9 +840,9 @@ test('trusted required sanitize-and-verify path admits exact managed v6 as a ver
   assert.equal(fs.existsSync(sanitizedPath), true);
 });
 
-test('managed v6 no-op verification rejects a pinned migration startup mutation', (t) => {
-  const fixture = createV6Fixture(t, 'required-v6-startup-mutation');
-  const sanitizedPath = path.join(fixture.root, 'trusted-sanitized-v6.db');
+test('managed v7 no-op verification rejects a pinned migration startup mutation', (t) => {
+  const fixture = createV7Fixture(t, 'required-v7-startup-mutation');
+  const sanitizedPath = path.join(fixture.root, 'trusted-sanitized-v7.db');
   const workDir = path.join(fixture.root, 'migration-work');
   const { manifest, manifestPath } = writeCurrentContractManifest(fixture.root);
   const candidateRoot = path.join(fixture.root, 'candidate');
@@ -852,9 +853,9 @@ test('managed v6 no-op verification rejects a pinned migration startup mutation'
   const candidateMigrationService = path.join(candidateRoot, ...migrationServiceRelative.split('/'));
   fs.appendFileSync(candidateMigrationService, `
 const tmOriginalRunMigrationsForNoopRegression = module.exports.runMigrations;
-module.exports.runMigrations = function tmMutatingManagedV6Startup(db, options) {
+module.exports.runMigrations = function tmMutatingManagedV7Startup(db, options) {
   const result = tmOriginalRunMigrationsForNoopRegression(db, options);
-  db.exec('CREATE TABLE IF NOT EXISTS tm_managed_v6_startup_regression(id INTEGER PRIMARY KEY)');
+  db.exec('CREATE TABLE IF NOT EXISTS tm_managed_v7_startup_regression(id INTEGER PRIMARY KEY)');
   return result;
 };
 `, 'utf8');
@@ -885,9 +886,9 @@ module.exports.runMigrations = function tmMutatingManagedV6Startup(db, options) 
   });
 
   assert.notEqual(result.status, 0, result.stdout);
-  assert.match(result.stderr, /managed v6 migration no-op changed/i);
+  assert.match(result.stderr, /managed target migration no-op changed/i);
   assert.deepEqual(
-    fs.readdirSync(workDir).filter((entry) => entry.startsWith('tm-managed-v6-noop-')),
+    fs.readdirSync(workDir).filter((entry) => entry.startsWith('tm-managed-target-noop-')),
     []
   );
 });
@@ -942,7 +943,7 @@ test('cutover owns and cleans deterministic database adoption artifacts across r
   );
 });
 
-test('trusted deployment-side verifier independently admits exact populated v1 through two preserved v1-to-v6 runs', (t) => {
+test('trusted deployment-side verifier independently admits exact populated v1 through two preserved v1-to-v7 runs', (t) => {
   const gate = loadTrustedGate();
   const fixture = createV1Fixture(t, 'two-runs');
   const sanitizedPath = path.join(fixture.root, 'trusted-sanitized-v1.db');
@@ -987,7 +988,7 @@ test('trusted deployment-side verifier independently admits exact populated v1 t
   }, {
     format: 'tm-trusted-production-source-verdict-v1',
     sourceVersion: 1,
-    targetVersion: 6,
+    targetVersion: 7,
     runs: 2,
     preMigrationRestoreVerified: true,
     legacyPreservationVerified: true

@@ -4976,6 +4976,7 @@ function switchAdminTab(tab, options) { options = options || {}; if (!options.sk
   ['overview','users','knowledge','ai-audit','tokens'].forEach(function(t) { var el = document.getElementById('admin-tab-' + t); if (el) el.style.display = t === tab ? 'block' : 'none'; });
   if (tab === 'overview') loadAdminDashboard();
   if (tab === 'users') loadAdminUsers();
+  if (tab === 'knowledge') loadKnowledgeBase();
   if (tab === 'ai-audit') { loadAdminAIAuditUsers(); loadAdminAIAudit(); }
   if (tab === 'tokens') loadAdminTokens();
 }
@@ -5052,6 +5053,140 @@ function renderAdminKnowledgeHealth(s) {
     + '<div style="background:#fafafa;border:1px solid #eee;border-radius:8px;padding:10px"><div style="font-size:20px;font-weight:700">' + (s.totalKnowledgeEntries || 0) + '</div><div style="font-size:11px;opacity:.6">知识条目</div></div>'
     + '<div style="background:#fafafa;border:1px solid #eee;border-radius:8px;padding:10px"><div style="font-size:20px;font-weight:700">' + (s.aiArtifacts || 0) + '</div><div style="font-size:11px;opacity:.6">AI策略/方案</div></div>'
     + '</div>' + typeHtml;
+}
+
+var knowledgeBaseLoadTimer = null;
+function scheduleKnowledgeBaseLoad() {
+  if (knowledgeBaseLoadTimer) clearTimeout(knowledgeBaseLoadTimer);
+  knowledgeBaseLoadTimer = setTimeout(loadKnowledgeBase, 220);
+}
+
+function knowledgeGovernanceLabel(governance) {
+  if (!governance) return '未治理';
+  if (!governance.is_current) return '历史版本';
+  if (!governance.is_retrievable && governance.quality_state === 'rejected') return '已拒绝';
+  if (!governance.is_retrievable) return '已到期';
+  return governance.quality_state === 'confirmed' ? '已确认' : '候选';
+}
+
+function renderKnowledgeGovernanceActions(entry) {
+  var governance = entry && entry.governance;
+  if (!governance) return '';
+  var id = readPositiveInteger(entry.id);
+  var version = readPositiveInteger(governance.governance_version);
+  if (id === null || version === null) return '';
+  var buttons = [];
+  if (governance.is_current && governance.quality_state === 'candidate') {
+    buttons.push('<button type="button" class="btn btn-xs" onclick="adminGovernKnowledge(' + id + ',\'confirm\',' + version + ')">确认</button>');
+    buttons.push('<button type="button" class="btn btn-xs" onclick="adminGovernKnowledge(' + id + ',\'reject\',' + version + ')">拒绝</button>');
+  } else if (governance.is_current && governance.quality_state === 'confirmed') {
+    buttons.push('<button type="button" class="btn btn-xs" onclick="adminGovernKnowledge(' + id + ',\'reject\',' + version + ')">撤回</button>');
+  }
+  if (governance.is_current) {
+    buttons.push('<button type="button" class="btn btn-xs" onclick="adminGovernKnowledge(' + id + ',\'set_retention\',' + version + ')">保留期</button>');
+    buttons.push('<button type="button" class="btn btn-xs" onclick="adminGovernKnowledge(' + id + ',\'supersede\',' + version + ')">替代版本</button>');
+  }
+  return buttons.length
+    ? '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">' + buttons.join('') + '</div>'
+    : '';
+}
+
+function loadKnowledgeBase() {
+  var container = document.getElementById('kbEntries');
+  if (!container) return Promise.resolve([]);
+  var search = document.getElementById('kbSearch');
+  var quality = document.getElementById('kbQualityFilter');
+  var retention = document.getElementById('kbRetentionFilter');
+  var params = ['include_inactive=1', 'limit=100'];
+  if (search && search.value.trim()) params.push('q=' + encodeURIComponent(search.value.trim()));
+  if (quality && quality.value) params.push('quality_state=' + encodeURIComponent(quality.value));
+  if (retention && retention.value) params.push('retention_class=' + encodeURIComponent(retention.value));
+  container.innerHTML = '<p style="font-size:12px;opacity:.55">正在加载...</p>';
+  return apiFetch('/knowledge?' + params.join('&')).then(function(response) {
+    if (!response.ok) throw new Error('知识库加载失败 (' + response.status + ')');
+    return response.json();
+  }).then(function(data) {
+    var entries = Array.isArray(data.entries) ? data.entries : [];
+    if (!entries.length) {
+      container.innerHTML = '<p style="font-size:12px;opacity:.55">暂无匹配知识</p>';
+      return entries;
+    }
+    container.innerHTML = entries.map(function(entry) {
+      var governance = entry.governance || null;
+      var status = knowledgeGovernanceLabel(governance);
+      var version = governance ? 'v' + (governance.version_no || 1) : 'v1';
+      var retentionText = governance && governance.retention_class === 'scheduled'
+        ? '保留至 ' + esc(governance.retain_until || '-')
+        : '长期保留';
+      var tags = Array.isArray(entry.tags) && entry.tags.length
+        ? entry.tags.slice(0, 8).map(function(tag) { return '<span class="brand-chip">' + esc(tag) + '</span>'; }).join('')
+        : '';
+      return '<div style="padding:12px 0;border-bottom:1px solid #e5e7eb">'
+        + '<div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start">'
+        + '<div style="min-width:0"><strong>' + esc(entry.title || '未命名知识') + '</strong>'
+        + '<div style="font-size:11px;opacity:.58;margin-top:3px">#' + entry.id + ' · ' + esc(entry.entry_type || 'note') + ' · ' + esc(entry.source_type || 'manual') + '</div></div>'
+        + '<div style="font-size:11px;white-space:nowrap"><span class="brand-chip dark">' + esc(status) + '</span> <span class="brand-chip">' + esc(version) + '</span></div>'
+        + '</div>'
+        + '<p style="font-size:12px;line-height:1.55;margin:8px 0 0;color:var(--text2)">' + esc(entry.summary || entry.snippet || '') + '</p>'
+        + (tags ? '<div class="brand-chip-row" style="margin-top:7px">' + tags + '</div>' : '')
+        + '<div style="font-size:11px;opacity:.58;margin-top:7px">' + esc(entry.visibility || 'private') + ' · ' + esc(retentionText) + ' · 引用 ' + (entry.usage_count || 0) + '</div>'
+        + renderKnowledgeGovernanceActions(entry)
+        + '</div>';
+    }).join('');
+    return entries;
+  }).catch(function(error) {
+    container.innerHTML = '<p style="font-size:12px;color:#b42318">' + esc(error.message || '知识库加载失败') + '</p>';
+    return [];
+  });
+}
+
+async function adminGovernKnowledge(entryId, action, expectedVersion) {
+  entryId = readPositiveInteger(entryId);
+  expectedVersion = readPositiveInteger(expectedVersion);
+  if (entryId === null || expectedVersion === null) return;
+  var payload = { action: action, expected_version: expectedVersion };
+  if (action === 'supersede') {
+    var replacement = prompt('输入已确认的新知识条目 ID');
+    var replacementId = readPositiveInteger(replacement);
+    if (replacementId === null) return;
+    payload.replacement_entry_id = replacementId;
+  }
+  if (action === 'set_retention') {
+    var date = prompt('输入到期日 YYYY-MM-DD；留空表示长期保留');
+    if (date === null) return;
+    date = date.trim();
+    if (date) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        toast('到期日格式应为 YYYY-MM-DD');
+        return;
+      }
+      payload.retention_class = 'scheduled';
+      payload.retain_until = date + ' 23:59:59';
+    } else {
+      payload.retention_class = 'protected';
+    }
+  }
+  var defaultReason = {
+    confirm: '管理员确认可复用知识',
+    reject: '管理员撤回不可复用知识',
+    supersede: '管理员建立知识替代版本',
+    set_retention: '管理员调整知识保留策略'
+  }[action] || '管理员知识治理';
+  var reason = prompt('填写治理原因', defaultReason);
+  if (reason === null || !reason.trim()) return;
+  payload.reason = reason.trim();
+  try {
+    var response = await apiFetch('/admin/knowledge/' + entryId + '/governance', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+    var data = await response.json();
+    if (!response.ok) throw new Error(data.error || '知识治理失败');
+    toast('知识治理已更新');
+    await loadKnowledgeBase();
+  } catch (error) {
+    toast(error.message || '知识治理失败');
+  }
 }
 
 function renderAdminTeamPerformance(rows) {

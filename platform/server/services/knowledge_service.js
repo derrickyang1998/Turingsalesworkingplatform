@@ -113,6 +113,16 @@ class CampaignKnowledgeInputError extends Error {
   }
 }
 
+class KnowledgeGovernanceError extends Error {
+  constructor(statusCode, code, message) {
+    super(message);
+    this.name = 'KnowledgeGovernanceError';
+    this.code = code;
+    this.status = statusCode;
+    this.statusCode = statusCode;
+  }
+}
+
 function assertScalarText(value, label) {
   const text = String(value);
   for (const point of text) {
@@ -331,6 +341,7 @@ function normalizeEntry(row) {
   if (!row) return null;
   const tags = normalizeTags(row.tags_json || row.key_terms || []);
   const visibility = normalizeVisibility(row.visibility || (row.is_public ? 'team' : 'private'));
+  const governance = normalizeGovernance(row);
   return {
     id: row.id,
     entry_type: row.entry_type || 'note',
@@ -351,8 +362,361 @@ function normalizeEntry(row) {
     usage_count: row.usage_count || 0,
     created_at: row.created_at,
     updated_at: row.updated_at,
-    snippet: compactText(row.summary || row.content || '', 220)
+    snippet: compactText(row.summary || row.content || '', 220),
+    governance
   };
+}
+
+function hasKnowledgeGovernance(db) {
+  return Boolean(db.prepare(`
+    SELECT 1 AS present
+    FROM sqlite_schema
+    WHERE type='table' AND name='knowledge_entry_governance'
+  `).get());
+}
+
+function governanceValue(row, name) {
+  if (!row || typeof row !== 'object') return undefined;
+  const projected = row[`governance_${name}`];
+  return projected === undefined ? row[name] : projected;
+}
+
+function governanceRetrievable(row, now) {
+  const quality = governanceValue(row, 'quality_state');
+  const isCurrent = governanceValue(row, 'is_current');
+  const retentionClass = governanceValue(row, 'retention_class');
+  const retainUntil = governanceValue(row, 'retain_until');
+  if (quality === undefined) return true;
+  if (isCurrent !== 1 || !['candidate', 'confirmed'].includes(quality)) return false;
+  if (retentionClass === 'protected') return true;
+  return (
+    retentionClass === 'scheduled' &&
+    typeof retainUntil === 'string' &&
+    retainUntil > now
+  );
+}
+
+function normalizeGovernance(row) {
+  const knowledgeEntryId = governanceValue(row, 'knowledge_entry_id');
+  if (knowledgeEntryId === undefined || knowledgeEntryId === null) return null;
+  const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
+  return {
+    knowledge_entry_id: knowledgeEntryId,
+    lineage_root_entry_id: governanceValue(row, 'lineage_root_entry_id'),
+    supersedes_entry_id: governanceValue(row, 'supersedes_entry_id'),
+    version_no: governanceValue(row, 'version_no'),
+    is_current: governanceValue(row, 'is_current') === 1,
+    quality_state: governanceValue(row, 'quality_state'),
+    retention_class: governanceValue(row, 'retention_class'),
+    retain_until: governanceValue(row, 'retain_until'),
+    governance_version: governanceValue(row, 'governance_version'),
+    reviewed_by: governanceValue(row, 'reviewed_by'),
+    reviewed_at: governanceValue(row, 'reviewed_at'),
+    review_reason: governanceValue(row, 'review_reason'),
+    created_at: governanceValue(row, 'created_at'),
+    updated_at: governanceValue(row, 'updated_at'),
+    is_retrievable: governanceRetrievable(row, now)
+  };
+}
+
+function governanceProjection(alias = 'governance') {
+  return `
+    ${alias}.knowledge_entry_id AS governance_knowledge_entry_id,
+    ${alias}.lineage_root_entry_id AS governance_lineage_root_entry_id,
+    ${alias}.supersedes_entry_id AS governance_supersedes_entry_id,
+    ${alias}.version_no AS governance_version_no,
+    ${alias}.is_current AS governance_is_current,
+    ${alias}.quality_state AS governance_quality_state,
+    ${alias}.retention_class AS governance_retention_class,
+    ${alias}.retain_until AS governance_retain_until,
+    ${alias}.governance_version AS governance_governance_version,
+    ${alias}.reviewed_by AS governance_reviewed_by,
+    ${alias}.reviewed_at AS governance_reviewed_at,
+    ${alias}.review_reason AS governance_review_reason,
+    ${alias}.created_at AS governance_created_at,
+    ${alias}.updated_at AS governance_updated_at`;
+}
+
+function governanceEligibilitySql(alias = 'governance') {
+  return `(
+    ${alias}.knowledge_entry_id IS NOT NULL
+    AND ${alias}.is_current=1
+    AND ${alias}.quality_state IN ('candidate','confirmed')
+    AND (
+      ${alias}.retention_class='protected'
+      OR (${alias}.retention_class='scheduled' AND ${alias}.retain_until>CURRENT_TIMESTAMP)
+    )
+  )`;
+}
+
+function readKnowledgeGovernance(db, entryId) {
+  if (!hasKnowledgeGovernance(db)) return null;
+  return db.prepare(`
+    SELECT governance.*
+    FROM knowledge_entry_governance governance
+    WHERE governance.knowledge_entry_id=?
+  `).get(entryId) || null;
+}
+
+function isKnowledgeRetrievable(db, entryId) {
+  const numericId = Number(entryId);
+  if (!Number.isSafeInteger(numericId) || numericId < 1) return false;
+  if (!hasKnowledgeGovernance(db)) {
+    return Boolean(db.prepare('SELECT 1 AS present FROM knowledge_entries WHERE id=?').get(numericId));
+  }
+  return Boolean(db.prepare(`
+    SELECT 1 AS present
+    FROM knowledge_entry_governance governance
+    WHERE governance.knowledge_entry_id=?
+      AND ${governanceEligibilitySql('governance')}
+  `).get(numericId));
+}
+
+function knowledgeGovernanceError(statusCode, code, message) {
+  throw new KnowledgeGovernanceError(statusCode, code, message);
+}
+
+function governanceId(value, label) {
+  const numeric = Number(value);
+  if (!Number.isSafeInteger(numeric) || numeric < 1 || String(numeric) !== String(value)) {
+    knowledgeGovernanceError(400, 'INVALID_KNOWLEDGE_GOVERNANCE_INPUT', `${label} is invalid.`);
+  }
+  return numeric;
+}
+
+function governanceReason(value) {
+  const reason = canonicalKnowledgeText(value === undefined ? '' : value, 'governance reason').trim();
+  if (Array.from(reason).length < 1 || Array.from(reason).length > 500) {
+    knowledgeGovernanceError(
+      400,
+      'INVALID_KNOWLEDGE_GOVERNANCE_INPUT',
+      'A governance reason between 1 and 500 characters is required.'
+    );
+  }
+  return reason;
+}
+
+function governanceTimestamp(value) {
+  const canonical = typeof value === 'string'
+    ? new Date(value.replace(' ', 'T') + 'Z')
+    : null;
+  if (
+    typeof value !== 'string' ||
+    !/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(value) ||
+    Number.isNaN(canonical.getTime()) ||
+    canonical.toISOString().slice(0, 19).replace('T', ' ') !== value
+  ) {
+    knowledgeGovernanceError(
+      400,
+      'INVALID_KNOWLEDGE_GOVERNANCE_INPUT',
+      'retain_until must be a UTC timestamp in YYYY-MM-DD HH:mm:ss format.'
+    );
+  }
+  return value;
+}
+
+function governanceRecord(db, entryId) {
+  const custodyProjection = hasKnowledgeCurrentCustody(db)
+    ? `LEFT JOIN knowledge_current_custody custody
+         ON custody.knowledge_entry_id=entry.id`
+    : '';
+  return db.prepare(`
+    SELECT
+      entry.id,entry.created_by,entry.entry_type,
+      ${hasKnowledgeCurrentCustody(db) ? 'custody.org_id,custody.campaign_id,' : 'NULL AS org_id,NULL AS campaign_id,'}
+      ${governanceProjection('governance')}
+    FROM knowledge_entries entry
+    JOIN knowledge_entry_governance governance
+      ON governance.knowledge_entry_id=entry.id
+    ${custodyProjection}
+    WHERE entry.id=?
+  `).get(entryId) || null;
+}
+
+function sameGovernanceScope(left, right) {
+  if (left.campaign_id !== null || right.campaign_id !== null) {
+    return (
+      left.campaign_id !== null &&
+      left.campaign_id === right.campaign_id &&
+      left.org_id === right.org_id
+    );
+  }
+  return left.created_by === right.created_by;
+}
+
+function auditKnowledgeGovernance(db, input, before, after, replacement) {
+  const details = JSON.stringify({
+    schema_version: 1,
+    entry_id: input.entryId,
+    action: input.action,
+    reason: input.reason,
+    before: {
+      quality_state: governanceValue(before, 'quality_state'),
+      retention_class: governanceValue(before, 'retention_class'),
+      retain_until: governanceValue(before, 'retain_until'),
+      is_current: governanceValue(before, 'is_current'),
+      governance_version: governanceValue(before, 'governance_version')
+    },
+    after: {
+      quality_state: governanceValue(after, 'quality_state'),
+      retention_class: governanceValue(after, 'retention_class'),
+      retain_until: governanceValue(after, 'retain_until'),
+      is_current: governanceValue(after, 'is_current'),
+      governance_version: governanceValue(after, 'governance_version')
+    },
+    replacement_entry_id: replacement ? replacement.id : null
+  });
+  const inserted = db.prepare(`
+    INSERT INTO activity_log (user_id,action,module,details,ip_address)
+    VALUES (?,'knowledge_governance_updated','knowledge_governance',?,?)
+  `).run(input.user.id, details, input.ipAddress || null);
+  if (inserted.changes !== 1) throw new Error('knowledge governance audit insert failed');
+}
+
+function governKnowledgeEntry(db, options) {
+  const input = options || {};
+  if (!input.user || input.user.role !== 'admin') {
+    knowledgeGovernanceError(403, 'KNOWLEDGE_GOVERNANCE_FORBIDDEN', 'Knowledge governance requires an administrator.');
+  }
+  if (!hasKnowledgeGovernance(db)) {
+    throw new Error('knowledge governance schema is unavailable');
+  }
+  const entryId = governanceId(input.entryId, 'knowledge entry id');
+  const expectedVersion = governanceId(input.expectedVersion, 'governance version');
+  const action = String(input.action || '');
+  if (!['confirm', 'reject', 'supersede', 'set_retention'].includes(action)) {
+    knowledgeGovernanceError(400, 'INVALID_KNOWLEDGE_GOVERNANCE_INPUT', 'Knowledge governance action is invalid.');
+  }
+  const reason = governanceReason(input.reason);
+  const tx = db.transaction(function() {
+    const current = governanceRecord(db, entryId);
+    if (!current) {
+      knowledgeGovernanceError(404, 'KNOWLEDGE_GOVERNANCE_NOT_FOUND', 'Knowledge entry was not found.');
+    }
+    if (governanceValue(current, 'governance_version') !== expectedVersion) {
+      knowledgeGovernanceError(409, 'KNOWLEDGE_GOVERNANCE_STALE', 'Knowledge governance version is stale.');
+    }
+    if (governanceValue(current, 'is_current') !== 1) {
+      knowledgeGovernanceError(
+        409,
+        'KNOWLEDGE_GOVERNANCE_TRANSITION_INVALID',
+        'Historical knowledge governance is immutable.'
+      );
+    }
+    let replacement = null;
+    if (action === 'confirm' || action === 'reject') {
+      const priorQuality = governanceValue(current, 'quality_state');
+      const nextQuality = action === 'confirm' ? 'confirmed' : 'rejected';
+      const allowed = (
+        (priorQuality === 'candidate' && ['confirmed', 'rejected'].includes(nextQuality)) ||
+        (priorQuality === 'confirmed' && nextQuality === 'rejected')
+      );
+      if (!allowed) {
+        knowledgeGovernanceError(
+          409,
+          'KNOWLEDGE_GOVERNANCE_TRANSITION_INVALID',
+          'Knowledge quality transition is not allowed.'
+        );
+      }
+      const update = db.prepare(`
+        UPDATE knowledge_entry_governance
+        SET quality_state=?,reviewed_by=?,reviewed_at=CURRENT_TIMESTAMP,
+            review_reason=?,governance_version=governance_version+1,
+            updated_at=CURRENT_TIMESTAMP
+        WHERE knowledge_entry_id=? AND governance_version=?
+      `).run(nextQuality, input.user.id, reason, entryId, expectedVersion);
+      if (update.changes !== 1) {
+        knowledgeGovernanceError(409, 'KNOWLEDGE_GOVERNANCE_STALE', 'Knowledge governance version is stale.');
+      }
+    } else if (action === 'set_retention') {
+      const retentionClass = String(input.retentionClass || '');
+      if (!['protected', 'scheduled'].includes(retentionClass)) {
+        knowledgeGovernanceError(400, 'INVALID_KNOWLEDGE_GOVERNANCE_INPUT', 'Retention class is invalid.');
+      }
+      const retainUntil = retentionClass === 'protected'
+        ? null
+        : governanceTimestamp(input.retainUntil);
+      const update = db.prepare(`
+        UPDATE knowledge_entry_governance
+        SET retention_class=?,retain_until=?,
+            governance_version=governance_version+1,updated_at=CURRENT_TIMESTAMP
+        WHERE knowledge_entry_id=? AND governance_version=?
+      `).run(retentionClass, retainUntil, entryId, expectedVersion);
+      if (update.changes !== 1) {
+        knowledgeGovernanceError(409, 'KNOWLEDGE_GOVERNANCE_STALE', 'Knowledge governance version is stale.');
+      }
+    } else {
+      const replacementEntryId = governanceId(input.replacementEntryId, 'replacement knowledge entry id');
+      if (replacementEntryId === entryId) {
+        knowledgeGovernanceError(409, 'KNOWLEDGE_GOVERNANCE_TRANSITION_INVALID', 'A knowledge entry cannot replace itself.');
+      }
+      replacement = governanceRecord(db, replacementEntryId);
+      if (!replacement) {
+        knowledgeGovernanceError(404, 'KNOWLEDGE_GOVERNANCE_NOT_FOUND', 'Replacement knowledge entry was not found.');
+      }
+      if (
+        governanceValue(current, 'is_current') !== 1 ||
+        governanceValue(replacement, 'is_current') !== 1 ||
+        governanceValue(replacement, 'quality_state') !== 'confirmed' ||
+        governanceValue(replacement, 'version_no') !== 1 ||
+        governanceValue(replacement, 'lineage_root_entry_id') !== replacementEntryId ||
+        governanceValue(replacement, 'supersedes_entry_id') !== null ||
+        current.entry_type !== replacement.entry_type ||
+        !sameGovernanceScope(current, replacement)
+      ) {
+        knowledgeGovernanceError(
+          409,
+          'KNOWLEDGE_GOVERNANCE_TRANSITION_INVALID',
+          'Replacement knowledge must be a confirmed current root in the same scope and type.'
+        );
+      }
+      const nextVersion = governanceValue(current, 'version_no') + 1;
+      if (!Number.isSafeInteger(nextVersion)) {
+        knowledgeGovernanceError(409, 'KNOWLEDGE_GOVERNANCE_TRANSITION_INVALID', 'Knowledge lineage version is exhausted.');
+      }
+      const oldUpdate = db.prepare(`
+        UPDATE knowledge_entry_governance
+        SET is_current=0,governance_version=governance_version+1,
+            updated_at=CURRENT_TIMESTAMP
+        WHERE knowledge_entry_id=? AND governance_version=? AND is_current=1
+      `).run(entryId, expectedVersion);
+      if (oldUpdate.changes !== 1) {
+        knowledgeGovernanceError(409, 'KNOWLEDGE_GOVERNANCE_STALE', 'Knowledge governance version is stale.');
+      }
+      const replacementUpdate = db.prepare(`
+        UPDATE knowledge_entry_governance
+        SET lineage_root_entry_id=?,supersedes_entry_id=?,version_no=?,
+            governance_version=governance_version+1,updated_at=CURRENT_TIMESTAMP
+        WHERE knowledge_entry_id=? AND governance_version=? AND is_current=1
+      `).run(
+        governanceValue(current, 'lineage_root_entry_id'),
+        entryId,
+        nextVersion,
+        replacementEntryId,
+        governanceValue(replacement, 'governance_version')
+      );
+      if (replacementUpdate.changes !== 1) {
+        knowledgeGovernanceError(409, 'KNOWLEDGE_GOVERNANCE_STALE', 'Replacement governance version is stale.');
+      }
+    }
+    const after = governanceRecord(db, entryId);
+    const replacementAfter = replacement
+      ? governanceRecord(db, replacement.id)
+      : null;
+    auditKnowledgeGovernance(
+      db,
+      { ...input, entryId, action, reason },
+      current,
+      after,
+      replacementAfter
+    );
+    return {
+      entry: normalizeEntry(db.prepare('SELECT * FROM knowledge_entries WHERE id=?').get(entryId)),
+      governance: normalizeGovernance(after),
+      replacement_governance: normalizeGovernance(replacementAfter)
+    };
+  });
+  return tx.immediate();
 }
 
 function preparedChunks(entry) {
@@ -2531,6 +2895,12 @@ function buildWhere(db, opts, scope, accessOptions) {
   const params = [];
   const user = opts.user || {};
   const access = knowledgeAccessParts(db, user, scope, accessOptions);
+  const governanceAvailable = hasKnowledgeGovernance(db);
+  const includeInactiveGovernance = Boolean(
+    governanceAvailable &&
+    accessOptions &&
+    accessOptions.includeInactiveGovernance
+  );
   if (opts.entry_type || opts.type) { where.push('entry.entry_type = ?'); params.push(opts.entry_type || opts.type); }
   if (opts.source_type) { where.push('entry.source_type = ?'); params.push(opts.source_type); }
   const visibilitySql = access.hasCustody
@@ -2542,13 +2912,33 @@ function buildWhere(db, opts, scope, accessOptions) {
   if (opts.visibility) { where.push(`${visibilitySql} = ?`); params.push(opts.visibility); }
   if (opts.business_type) { where.push('entry.business_type = ?'); params.push(opts.business_type); }
   if (opts.business_id) { where.push('entry.business_id = ?'); params.push(String(opts.business_id)); }
+  if (governanceAvailable && !includeInactiveGovernance) {
+    where.push(governanceEligibilitySql('governance'));
+  }
+  if (governanceAvailable && opts.quality_state) {
+    where.push('governance.quality_state = ?');
+    params.push(String(opts.quality_state));
+  }
+  if (governanceAvailable && opts.retention_class) {
+    where.push('governance.retention_class = ?');
+    params.push(String(opts.retention_class));
+  }
   where.push(access.clause);
   params.push(...access.params);
   return {
     withClause: access.withClause,
-    fromClause: access.fromClause,
+    fromClause: governanceAvailable
+      ? `${access.fromClause}
+        LEFT JOIN knowledge_entry_governance governance
+          ON governance.knowledge_entry_id=entry.id`
+      : access.fromClause,
     hasCustody: access.hasCustody,
     custodyPresence: access.custodyPresence || null,
+    hasGovernance: governanceAvailable,
+    governanceProjection: governanceAvailable ? governanceProjection('governance') : 'NULL AS governance_knowledge_entry_id',
+    governanceOrder: governanceAvailable
+      ? "CASE governance.quality_state WHEN 'confirmed' THEN 0 WHEN 'candidate' THEN 1 ELSE 2 END"
+      : 'CASE WHEN 1=1 THEN 0 ELSE 1 END',
     clause: where.join(' AND '),
     params
   };
@@ -2612,7 +3002,8 @@ function historicalKnowledgeCustodyAllowsRead(db, entryId, user) {
   const where = buildWhere(
     db,
     { user: user || {} },
-    'knowledge_references'
+    'knowledge_references',
+    { includeInactiveGovernance: true }
   );
   return Boolean(db.prepare(`
     ${where.withClause}
@@ -2651,7 +3042,7 @@ function redactKnowledgeReferences(db, references, user) {
   });
 }
 
-function adminKnowledgeBaseWhere(opts) {
+function adminKnowledgeBaseWhere(db, opts) {
   const where = ['1=1'];
   const params = [];
   if (opts.entry_type || opts.type) {
@@ -2670,7 +3061,35 @@ function adminKnowledgeBaseWhere(opts) {
     where.push('entry.business_id = ?');
     params.push(String(opts.business_id));
   }
-  return { clause: where.join(' AND '), params };
+  const governanceAvailable = hasKnowledgeGovernance(db);
+  const includeInactive = Boolean(opts.include_inactive);
+  if (governanceAvailable && !includeInactive) {
+    where.push(governanceEligibilitySql('governance'));
+  }
+  if (governanceAvailable && opts.quality_state) {
+    where.push('governance.quality_state = ?');
+    params.push(String(opts.quality_state));
+  }
+  if (governanceAvailable && opts.retention_class) {
+    where.push('governance.retention_class = ?');
+    params.push(String(opts.retention_class));
+  }
+  return {
+    clause: where.join(' AND '),
+    params,
+    hasGovernance: governanceAvailable,
+    fromClause: governanceAvailable
+      ? `knowledge_entries entry
+        LEFT JOIN knowledge_entry_governance governance
+          ON governance.knowledge_entry_id=entry.id`
+      : 'knowledge_entries entry',
+    governanceProjection: governanceAvailable
+      ? governanceProjection('governance')
+      : 'NULL AS governance_knowledge_entry_id',
+    governanceOrder: governanceAvailable
+      ? "CASE governance.quality_state WHEN 'confirmed' THEN 0 WHEN 'candidate' THEN 1 ELSE 2 END"
+      : 'CASE WHEN 1=1 THEN 0 ELSE 1 END'
+  };
 }
 
 function extractSearchTerms(query) {
@@ -2758,7 +3177,8 @@ function searchCampaignKnowledgeChunks(db, opts) {
       chunk.chunk_index,
       chunk.content AS chunk_content,
       chunk.content_sha256 AS chunk_content_sha256,
-      bm25(knowledge_chunks_fts) AS fts_rank
+      bm25(knowledge_chunks_fts) AS fts_rank,
+      ${where.governanceProjection}
     FROM ${where.fromClause}
     JOIN knowledge_chunks chunk ON chunk.entry_id=entry.id
     JOIN knowledge_chunks_fts
@@ -2767,6 +3187,7 @@ function searchCampaignKnowledgeChunks(db, opts) {
     WHERE knowledge_chunks_fts MATCH ?
       AND ${where.clause}
     ORDER BY
+      ${where.governanceOrder} ASC,
       fts_rank ASC,
       entry.updated_at DESC,
       entry.id ASC,
@@ -2786,7 +3207,8 @@ function searchCampaignKnowledgeChunks(db, opts) {
           is_public: row.is_public,
           source_identity_sha256: row.source_identity_sha256,
           content_sha256: row.entry_content_sha256,
-          updated_at: row.updated_at
+          updated_at: row.updated_at,
+          governance: normalizeGovernance(row)
         }
       },
       chunk: {
@@ -2829,8 +3251,17 @@ function searchKnowledge(db, opts) {
     opts.user && opts.user.role === 'admin' && !opts.visibility
   );
   const where = adminCandidateFirst
-    ? adminKnowledgeBaseWhere(opts)
-    : buildWhere(db, opts, 'knowledge');
+    ? adminKnowledgeBaseWhere(db, opts)
+    : buildWhere(
+        db,
+        opts,
+        'knowledge',
+        {
+          includeInactiveGovernance: Boolean(
+            opts.include_inactive && opts.user && opts.user.role === 'admin'
+          )
+        }
+      );
   const hasCustody = adminCandidateFirst
     ? hasCampaignKnowledgeCustody(db)
     : where.hasCustody;
@@ -2839,22 +3270,30 @@ function searchKnowledge(db, opts) {
     const custodyJoin = latestKnowledgeCustodyJoin(db, 'entry');
     rows = db.prepare(`
       WITH admin_candidates AS MATERIALIZED (
-        SELECT entry.*
-        FROM knowledge_entries entry
+        SELECT entry.*,${where.governanceProjection}
+        FROM ${where.fromClause}
         WHERE ${where.clause}
-        ORDER BY entry.usage_count DESC, entry.updated_at DESC, entry.id DESC
+        ORDER BY ${where.governanceOrder} ASC,
+          entry.usage_count DESC, entry.updated_at DESC, entry.id DESC
         LIMIT 500
       )
       SELECT entry.*,${custodyJoin.presence} AS campaign_custody_entry_id
       FROM admin_candidates entry
       ${custodyJoin.sql}
-      ORDER BY entry.usage_count DESC, entry.updated_at DESC, entry.id DESC
+      ORDER BY
+        ${where.hasGovernance
+          ? `CASE entry.governance_quality_state
+              WHEN 'confirmed' THEN 0 WHEN 'candidate' THEN 1 ELSE 2
+            END`
+          : 'CASE WHEN 1=1 THEN 0 ELSE 1 END'} ASC,
+        entry.usage_count DESC, entry.updated_at DESC, entry.id DESC
     `).all(...where.params);
   } else {
     const boundedCandidates = Boolean(
       !adminCandidateFirst &&
       hasCustody &&
-      hasKnowledgeCurrentCustody(db)
+      hasKnowledgeCurrentCustody(db) &&
+      !where.hasGovernance
     );
     if (boundedCandidates) {
       rows = db.prepare(`
@@ -2879,11 +3318,13 @@ function searchKnowledge(db, opts) {
         ${where.withClause || ''}
         SELECT
           entry.*,
+          ${where.governanceProjection},
           ${hasCustody ? where.custodyPresence : 'NULL'}
             AS campaign_custody_entry_id
-        FROM ${adminCandidateFirst ? 'knowledge_entries entry' : where.fromClause}
+        FROM ${where.fromClause}
         WHERE ${where.clause}
-        ORDER BY entry.usage_count DESC, entry.updated_at DESC, entry.id DESC
+        ORDER BY ${where.governanceOrder} ASC,
+          entry.usage_count DESC, entry.updated_at DESC, entry.id DESC
         LIMIT 500
       `).all(...where.params);
     }
@@ -2915,6 +3356,9 @@ function searchKnowledge(db, opts) {
       .filter(function(entry) { return entry.score > 0; })
       .sort(function(a, b) {
         if (b.score !== a.score) return b.score - a.score;
+        const aQuality = a.governance && a.governance.quality_state === 'confirmed' ? 0 : 1;
+        const bQuality = b.governance && b.governance.quality_state === 'confirmed' ? 0 : 1;
+        if (aQuality !== bQuality) return aQuality - bQuality;
         return (b.usage_count || 0) - (a.usage_count || 0);
       });
   }
@@ -2925,10 +3369,10 @@ function searchKnowledge(db, opts) {
 function listKnowledgeCategories(db, opts) {
   opts = opts || {};
   if (opts.user && opts.user.role === 'admin' && !opts.visibility) {
-    const where = adminKnowledgeBaseWhere(opts);
+    const where = adminKnowledgeBaseWhere(db, opts);
     return db.prepare(`
       SELECT entry.entry_type,COUNT(*) AS count
-      FROM knowledge_entries entry
+      FROM ${where.fromClause}
       WHERE ${where.clause}
       GROUP BY entry.entry_type
       ORDER BY entry.entry_type
@@ -3009,6 +3453,9 @@ module.exports = {
   listKnowledgeCategories,
   markKnowledgeUsed,
   recordKnowledgeUsageTelemetry,
+  governKnowledgeEntry,
+  readKnowledgeGovernance,
+  isKnowledgeRetrievable,
   redactKnowledgeReferences,
   normalizeEntry,
   normalizeTags,
@@ -3016,5 +3463,6 @@ module.exports = {
   makeChunks,
   CampaignKnowledgeConflictError,
   CampaignKnowledgeCapacityError,
-  CampaignKnowledgeInputError
+  CampaignKnowledgeInputError,
+  KnowledgeGovernanceError
 };

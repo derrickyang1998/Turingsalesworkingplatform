@@ -16,13 +16,14 @@ const sanitizer = require('../scripts/sanitize_production_shape');
 const migrationGate = require('../scripts/verify_campaign_migration_gate');
 const manifest = require('../scripts/sanitization_manifest.json');
 const v6Manifest = sanitizer._testing.manifestProfileForVersion(manifest, 6);
+const v7Manifest = sanitizer._testing.manifestProfileForVersion(manifest, 7);
 const {
   buildCampaignWorkflowSnapshot,
   checksumCampaignWorkflowSnapshot
 } = require('../services/campaign_workflow_service');
 
 const REGISTERED_MIGRATIONS = migrationGate.REGISTERED_MIGRATIONS;
-const EXPECTED_STRUCTURAL_POLICY_SHA256 = '3c1ca1b4f927a4c7f6a4b3be9d06d192b2ae9e5b0243d886019476fc634fa9b1';
+const EXPECTED_STRUCTURAL_POLICY_SHA256 = '9a2d796ce33705dc334a5846936cfa4ac40252417ce88f8a436493112fed9c1e';
 const BASH = process.platform === 'win32' ? 'C:\\Program Files\\Git\\bin\\bash.exe' : 'bash';
 const HAS_BASH = process.platform !== 'win32' || fs.existsSync(BASH);
 const HAS_NATIVE_FLOCK = process.platform === 'linux'
@@ -263,11 +264,15 @@ function runLinuxTestThroughWsl(t, testName, timeout = 90_000) {
   return true;
 }
 
-function migratedFixture(name, targetVersion = 6) {
+function migratedFixture(name, targetVersion = 7) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), `tm-sanitize-${name}-`));
   const dbPath = path.join(root, 'source.db');
   const migrationOptions = { rootDir: path.resolve(__dirname, '..') };
-  if (targetVersion === 6) migrationOptions.registeredMigrations = REGISTERED_MIGRATIONS;
+  if (targetVersion > 1) {
+    migrationOptions.registeredMigrations = REGISTERED_MIGRATIONS.filter(
+      (migration) => migration.version <= targetVersion
+    );
+  }
   const db = migrationService.openMigratedDatabase(dbPath, migrationOptions);
   return { root, dbPath, db };
 }
@@ -1071,12 +1076,13 @@ function compactSqliteClone(sourcePath, outputPath, mutate, options = {}) {
   return outputPath;
 }
 
-test('manifest declares exact managed v1 as primary and keeps v6 in one isolated exact profile', () => {
+test('manifest declares exact managed v1 as primary and keeps isolated v6 and v7 profiles', () => {
   const v1Fixture = migratedFixture('manifest-v1-primary', 1);
   const v6Fixture = migratedFixture('manifest-v6-isolated', 6);
+  const v7Fixture = migratedFixture('manifest-v7-isolated', 7);
   try {
     assert.equal(manifest.schemaVersion, 1);
-    assert.deepEqual(manifest.exactProfiles.map((profile) => profile.schemaVersion), [6]);
+    assert.deepEqual(manifest.exactProfiles.map((profile) => profile.schemaVersion), [6, 7]);
     assert.equal(
       manifest.categories['sensitive-number'],
       'run-randomized bounded-domain bijection preserving null/equality/cardinality and SQLite storage type'
@@ -1084,11 +1090,14 @@ test('manifest declares exact managed v1 as primary and keeps v6 in one isolated
 
     const v1Profile = sanitizer._testing.manifestProfileForVersion(manifest, 1);
     const v6Profile = sanitizer._testing.manifestProfileForVersion(manifest, 6);
+    const v7Profile = sanitizer._testing.manifestProfileForVersion(manifest, 7);
     assert.equal(v1Profile.schemaVersion, 1);
     assert.equal(v6Profile.schemaVersion, 6);
+    assert.equal(v7Profile.schemaVersion, 7);
     assert.equal(v1Profile.objects.length, sanitizer.actualInventory(v1Fixture.db).length);
     assert.equal(v6Profile.objects.length, sanitizer.actualInventory(v6Fixture.db).length);
-    for (const profile of [v1Profile, v6Profile]) {
+    assert.equal(v7Profile.objects.length, sanitizer.actualInventory(v7Fixture.db).length);
+    for (const profile of [v1Profile, v6Profile, v7Profile]) {
       assert.equal(profile.jsonPolicy.preserveLeafTypes, true);
       assert.equal(
         profile.jsonPolicy.booleanReplacement,
@@ -1106,9 +1115,11 @@ test('manifest declares exact managed v1 as primary and keeps v6 in one isolated
     assert.equal(sanitizer.STRUCTURAL_POLICY_SHA256, EXPECTED_STRUCTURAL_POLICY_SHA256);
     assert.doesNotThrow(() => sanitizer.validateManifest(manifest, v1Fixture.db));
     assert.doesNotThrow(() => sanitizer.validateManifest(manifest, v6Fixture.db));
+    assert.doesNotThrow(() => sanitizer.validateManifest(manifest, v7Fixture.db));
   } finally {
     closeAndRemove(v1Fixture);
     closeAndRemove(v6Fixture);
+    closeAndRemove(v7Fixture);
   }
 });
 
@@ -1835,7 +1846,7 @@ test('secret-null fails closed for non-null data and malformed or partial output
   closeAndRemove(fixture);
 });
 
-test('campaign migration gate sanitizes populated managed v1 and verifies two exact restores through v6', () => {
+test('campaign migration gate sanitizes populated managed v1 and verifies two exact restores through v7', () => {
   const fixture = migratedFixture('twice', 1);
   const populated = populateManagedV1GateFixture(fixture);
   const sourceClassification = migrationService.classifyDatabase(fixture.db, {
@@ -1852,7 +1863,7 @@ test('campaign migration gate sanitizes populated managed v1 and verifies two ex
   assert.equal(report.format, 'tm-campaign-migration-gate-v1');
   assert.equal(report.runs, 2);
   assert.equal(report.sourceVersion, 1);
-  assert.equal(report.targetVersion, 6);
+  assert.equal(report.targetVersion, 7);
   assert.equal(report.preMigrationRestoreVerified, true);
   assert.equal(report.legacyPreservationVerified, true);
   const sanitizedPath = path.join(fixture.root, 'stage-preservation-sanitized.db');

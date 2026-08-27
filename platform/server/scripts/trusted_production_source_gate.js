@@ -53,6 +53,7 @@ const REQUIRED_BUNDLE_FILES = Object.freeze([
   'server/migrations/004_knowledge_capacity_observability.js',
   'server/migrations/005_knowledge_custody_projection.js',
   'server/migrations/006_crm_sales_workspace.js',
+  'server/migrations/007_knowledge_governance.js',
   'server/migrations/baselines/legacy_v1.js',
   'server/migrations/engines/v1.js',
   'server/migrations/vendor/bcryptjs_v3_0_3.js',
@@ -118,7 +119,7 @@ const EXPECTED_ENTRYPOINTS = Object.freeze({
 
 const EXPECTED_MIGRATION_CONTRACT = Object.freeze({
   sourceVersion: 1,
-  targetVersion: 6,
+  targetVersion: 7,
   runs: 2,
   deterministicAppendTables: Object.freeze(['activity_log'])
 });
@@ -194,7 +195,7 @@ function loadTrustedManifest(manifestPath) {
   assertPlainObject(document.migrationContract, 'trusted migration contract');
   assertExactKeys(document.migrationContract, Object.keys(EXPECTED_MIGRATION_CONTRACT), 'trusted migration contract');
   if (JSON.stringify(document.migrationContract) !== JSON.stringify(EXPECTED_MIGRATION_CONTRACT)) {
-    throw new Error('trusted v1-to-v6 migration contract is not exact');
+    throw new Error('trusted v1-to-v7 migration contract is not exact');
   }
 
   if (!Array.isArray(document.files)) throw new Error('trusted production source files must be an array');
@@ -1501,7 +1502,7 @@ function prepareTrustedLegacySource({
     const adoptionSourcePath = mutableSourceIdentity ? mutableSourceIdentity.path : sourcePath;
     const adoptionSourceSha256 = mutableSourceIdentity ? mutableSourceIdentity.sha256 : sourceIdentity.sha256;
     const classification = classifyTrustedDatabase(manifest, verified, adoptionSourcePath);
-    if (classification.status === 'managed' && [1, 6].includes(classification.currentVersion)) {
+    if (classification.status === 'managed' && [1, 6, 7].includes(classification.currentVersion)) {
       return Object.freeze({
         effectiveSourcePath: sourcePath,
         report: Object.freeze({
@@ -1518,7 +1519,7 @@ function prepareTrustedLegacySource({
       });
     }
     if (classification.status !== 'legacy' || classification.currentVersion !== 0) {
-      throw new Error(`trusted legacy adoption requires exact version 0 or managed version 1/6; got ${classification.status}:${classification.currentVersion}`);
+      throw new Error(`trusted legacy adoption requires exact version 0 or managed version 1/6/7; got ${classification.status}:${classification.currentVersion}`);
     }
     if (fs.existsSync(outputPath) || databaseSidecarPaths(outputPath).some((candidate) => fs.existsSync(candidate))) {
       throw new Error('trusted legacy adoption output must not exist before execution');
@@ -1640,14 +1641,14 @@ function runTrustedMigrationVerification({ manifest, verified, sanitizedPath, wo
     !Number.isSafeInteger(report.legacyTableCount) || report.legacyTableCount < 1 ||
     !Number.isSafeInteger(report.legacyRowCount) || report.legacyRowCount < 1
   ) {
-    throw new Error('trusted v1-to-v6 migration preservation verdict is incomplete');
+    throw new Error('trusted v1-to-v7 migration preservation verdict is incomplete');
   }
   assertDigestReport(report.preMigration, 'pre-migration');
   assertDigestReport(report.postMigration, 'post-migration');
   return report;
 }
 
-function verifyTrustedManagedV6Noop({ manifest, verified, sanitizedPath, workDir }) {
+function verifyTrustedManagedTargetNoop({ manifest, verified, sanitizedPath, workDir }) {
   const classification = classifyTrustedDatabase(manifest, verified, sanitizedPath);
   if (classification.status !== 'managed'
       || classification.currentVersion !== manifest.migrationContract.targetVersion) {
@@ -1695,9 +1696,9 @@ function verifyTrustedManagedV6Noop({ manifest, verified, sanitizedPath, workDir
     throw new Error('trusted managed no-op migration registry is not exact');
   }
   const trustedWorkRoot = assertDirectoryNoSymlink(workDir, 'trusted managed no-op work directory');
-  const runDirectory = fs.mkdtempSync(path.join(trustedWorkRoot, 'tm-managed-v6-noop-'));
+  const runDirectory = fs.mkdtempSync(path.join(trustedWorkRoot, 'tm-managed-target-noop-'));
   fs.chmodSync(runDirectory, 0o700);
-  const mutablePath = path.join(runDirectory, 'managed-v6.db');
+  const mutablePath = path.join(runDirectory, 'managed-target.db');
   const Database = require('better-sqlite3');
   let database = null;
   let preMigration;
@@ -1735,11 +1736,11 @@ function verifyTrustedManagedV6Noop({ manifest, verified, sanitizedPath, workDir
           }
         }
       } catch (error) {
-        throw new Error(`managed v6 migration no-op changed database: ${error.message}`);
+        throw new Error(`managed target migration no-op changed database: ${error.message}`);
       }
       if (database.pragma('quick_check', { simple: true }) !== 'ok'
           || database.pragma('foreign_key_check').length !== 0) {
-        throw new Error('managed v6 migration no-op changed database integrity');
+        throw new Error('managed target migration no-op changed database integrity');
       }
       sqliteDigest.verifyKnowledgeChunksFtsIntegrity(
         database,
@@ -1752,7 +1753,7 @@ function verifyTrustedManagedV6Noop({ manifest, verified, sanitizedPath, workDir
       database = null;
     }
     if (JSON.stringify(preMigration) !== JSON.stringify(postMigration)) {
-      throw new Error('managed v6 migration no-op changed database digest');
+      throw new Error('managed target migration no-op changed database digest');
     }
     const freezeDigest = (digest) => Object.freeze({
       topologySha256: digest.topologySha256,
@@ -1760,7 +1761,7 @@ function verifyTrustedManagedV6Noop({ manifest, verified, sanitizedPath, workDir
       fts: Object.freeze(digest.fts.map((entry) => Object.freeze({ ...entry })))
     });
     return Object.freeze({
-      verificationMode: 'managed-v6-noop',
+      verificationMode: 'managed-v7-noop',
       sourceVersion: manifest.migrationContract.targetVersion,
       targetVersion: manifest.migrationContract.targetVersion,
       runs: EXPECTED_MIGRATION_CONTRACT.runs,
@@ -1863,7 +1864,7 @@ function sanitizeAndVerifyTrustedSource(options) {
 
   const report = effectiveSourceVersion === EXPECTED_MIGRATION_CONTRACT.sourceVersion
     ? Object.freeze({
-      verificationMode: 'v1-to-v6-migration',
+      verificationMode: 'v1-to-v7-migration',
       ...runTrustedMigrationVerification({
         manifest,
         verified: verifiedBeforeMigrationVerifier,
@@ -1873,7 +1874,7 @@ function sanitizeAndVerifyTrustedSource(options) {
       preMigrationRestoreVerified: true,
       legacyPreservationVerified: true
     })
-    : verifyTrustedManagedV6Noop({
+    : verifyTrustedManagedTargetNoop({
       manifest,
       verified: verifiedBeforeMigrationVerifier,
       sanitizedPath,

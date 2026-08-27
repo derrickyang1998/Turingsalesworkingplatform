@@ -33,10 +33,10 @@ $EXPECTED_PPT_SHA256 = "f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57
 $TRUSTED_SOURCE_GATE_RELATIVE_PATH = "server\scripts\trusted_production_source_gate.js"
 $TRUSTED_SOURCE_MANIFEST_RELATIVE_PATH = "server\scripts\trusted_production_source_manifest.json"
 $TRUSTED_RUNTIME_CONFIG_RELATIVE_PATH = "server\config\runtime_config.js"
-$EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "cb407c385f54fb6dfbd954723f4381e349b337a2881e341cb734a5d2d4ff5650"
-$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "767b4fa2536a02b50a718ac2381f0934614f2091746538f09773f368dd26b3c9"
+$EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "e0bec8b0d20487f50357ba0f5f9622c2c3dfddbedcbf0d782e8f75fe51d1679a"
+$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "e0f19f18fe016f824f29d7b0d9c8d26b10245d0251a618e9534b84346987a20e"
 $EXPECTED_TRUSTED_RUNTIME_CONFIG_SHA256 = "76d43d3e811c6fa8daae987cc9eb2fff2dc8a8095f84b1cd309e4e214df94dcb"
-$EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256 = "bdc60e6a9da601c8c65cd2a374d8cb69eeea629fa6cd5af514dd995eddfe74dc"
+$EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256 = "b039f9b3c27871a4ebf2cc6f09e4adedc20761975e555cef7362aab56f6e32db"
 $EXPECTED_TRUSTED_PARSER_VERIFIER_SHA256 = "9714e09699c243a06e638e048ff98d425698cb8cfb812eedda4d600c76d1cd6e"
 $EXPECTED_TRUSTED_PUBLIC_GUARD_SHA256 = "d45fe8fcc01587aaa0e73eccfb9714c27801e232cb6c0effd6daedb703316d66"
 $EXPECTED_TRUSTED_MIGRATION_CLEANUP_HELPER_SHA256 = "d5f2befa902522dd9de3e9dd2397a99ee5e78ab1a1c6e526a27f14bb2829e1fa"
@@ -106,6 +106,7 @@ $FILES = @(
     "server\migrations\004_knowledge_capacity_observability.js",
     "server\migrations\005_knowledge_custody_projection.js",
     "server\migrations\006_crm_sales_workspace.js",
+    "server\migrations\007_knowledge_governance.js",
     "server\migrations\baselines\legacy_v1.js",
     "server\migrations\engines\v1.js",
     "server\migrations\vendor\bcryptjs_v3_0_3.js",
@@ -245,6 +246,7 @@ $FILES = @(
     "server\tests\knowledge_archive_contract.test.js",
     "server\tests\knowledge_capacity_observability.test.js",
     "server\tests\knowledge_digest_compat.test.js",
+    "server\tests\knowledge_governance.test.js",
     "server\tests\legacy_production_adoption.test.js",
     "server\tests\migration_gate_exactness.test.js",
     "server\tests\migration_service.test.js",
@@ -9513,7 +9515,7 @@ try {
   if (database.pragma('integrity_check', { simple: true }) !== 'ok') throw new Error('Candidate DB integrity_check failed');
   if (database.pragma('foreign_key_check').length !== 0) throw new Error('Candidate DB foreign_key_check failed');
   const version = database.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version;
-  if (Number(version) !== 6) throw new Error('Candidate migration target version mismatch');
+  if (Number(version) !== 7) throw new Error('Candidate migration target version mismatch');
   console.log('TM_SANITIZED_MIGRATION_COMPATIBILITY_OK');
 } finally {
   database.close();

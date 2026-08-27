@@ -1413,6 +1413,9 @@ app.get('/api/knowledge', authMiddleware, (req, res) => {
       business_type: req.query.business_type,
       business_id: req.query.business_id,
       tags: req.query.tags,
+      quality_state: req.query.quality_state,
+      retention_class: req.query.retention_class,
+      include_inactive: req.user.role === 'admin' && boolParam(req.query.include_inactive, false),
       limit: req.query.limit || 100,
       user: req.user
     });
@@ -1454,6 +1457,9 @@ app.get('/api/knowledge/search', authMiddleware, (req, res) => {
       business_type: req.query.business_type,
       business_id: req.query.business_id,
       tags: req.query.tags,
+      quality_state: req.query.quality_state,
+      retention_class: req.query.retention_class,
+      include_inactive: req.user.role === 'admin' && boolParam(req.query.include_inactive, false),
       limit: req.query.limit || 50,
       user: req.user
     });
@@ -1627,6 +1633,37 @@ app.get('/api/knowledge/similar', authMiddleware, (req, res) => {
     res.json({ entries });
   } catch (e) {
     res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/admin/knowledge/:id/governance', authMiddleware, adminOnly, (req, res) => {
+  try {
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    const result = knowledgeService.governKnowledgeEntry(db, {
+      user: req.user,
+      entryId: req.params.id,
+      action: body.action,
+      expectedVersion: body.expected_version === undefined
+        ? body.expectedVersion
+        : body.expected_version,
+      reason: body.reason,
+      replacementEntryId: body.replacement_entry_id === undefined
+        ? body.replacementEntryId
+        : body.replacement_entry_id,
+      retentionClass: body.retention_class === undefined
+        ? body.retentionClass
+        : body.retention_class,
+      retainUntil: body.retain_until === undefined
+        ? body.retainUntil
+        : body.retain_until,
+      ipAddress: req.ip
+    });
+    return res.json(result);
+  } catch (error) {
+    return res.status(error.statusCode || error.status || 500).json({
+      error: error.statusCode || error.status ? error.message : 'Knowledge governance failed.',
+      code: error.code || 'KNOWLEDGE_GOVERNANCE_FAILED'
+    });
   }
 });
 

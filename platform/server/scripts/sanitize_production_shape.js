@@ -54,6 +54,13 @@ const EXACT_PROFILE_MIGRATIONS = Object.freeze([
     sourcePath: 'migrations/006_crm_sales_workspace.js',
     engineVersion: 1,
     dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
+  }),
+  Object.freeze({
+    version: 7,
+    name: '007_knowledge_governance',
+    sourcePath: 'migrations/007_knowledge_governance.js',
+    engineVersion: 1,
+    dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
   })
 ]);
 const FTS_MANIFEST = Object.freeze({
@@ -287,6 +294,10 @@ const STRUCTURAL_COLUMN_POLICY = freezeStructuralColumnPolicy({
     'knowledge_chunks.entry_id', 'knowledge_chunks.chunk_index', 'knowledge_current_custody.knowledge_entry_id', 'knowledge_current_custody.link_id',
     'knowledge_current_custody.org_id', 'knowledge_current_custody.campaign_id', 'knowledge_entries.id', 'knowledge_entries.created_by',
     'knowledge_entries.is_public', 'knowledge_entry_footprints.knowledge_entry_id', 'knowledge_entry_footprints.created_by', 'knowledge_unlinked_user_usage.user_id',
+    'knowledge_entry_governance.knowledge_entry_id', 'knowledge_entry_governance.lineage_root_entry_id',
+    'knowledge_entry_governance.supersedes_entry_id', 'knowledge_entry_governance.version_no',
+    'knowledge_entry_governance.is_current', 'knowledge_entry_governance.governance_version',
+    'knowledge_entry_governance.reviewed_by',
     'leads.id', 'leads.assigned_to', 'leads.converted_customer_id', 'opportunities.id',
     'opportunities.customer_id', 'opportunities.created_by', 'opportunities.org_id', 'opportunities.team_id',
     'opportunities.owner_user_id', 'opportunities.campaign_id', 'organization_memberships.org_id', 'organization_memberships.user_id',
@@ -316,7 +327,9 @@ const STRUCTURAL_COLUMN_POLICY = freezeStructuralColumnPolicy({
     'customers.next_action_at', 'customers.stalled_at',
     'demands.created_at', 'demands.updated_at', 'influencers.created_at', 'influencers.updated_at',
     'knowledge_capacity_gauges.updated_at', 'knowledge_chunks.created_at', 'knowledge_current_custody.updated_at', 'knowledge_entries.created_at',
-    'knowledge_entries.updated_at', 'knowledge_entry_footprints.updated_at', 'knowledge_unlinked_user_usage.updated_at', 'leads.created_at',
+    'knowledge_entries.updated_at', 'knowledge_entry_footprints.updated_at', 'knowledge_unlinked_user_usage.updated_at',
+    'knowledge_entry_governance.retain_until', 'knowledge_entry_governance.reviewed_at',
+    'knowledge_entry_governance.created_at', 'knowledge_entry_governance.updated_at', 'leads.created_at',
     'leads.updated_at', 'opportunities.expected_close_date', 'opportunities.created_at', 'opportunities.updated_at',
     'opportunities.next_action_at', 'opportunities.closed_at',
     'organization_memberships.created_at', 'organization_memberships.revoked_at', 'organizations.created_at', 'proposals.created_at',
@@ -386,6 +399,8 @@ const STRUCTURAL_COLUMN_POLICY = freezeStructuralColumnPolicy({
     'knowledge_capacity_gauges.scope_type': Object.freeze(['user', 'campaign', 'organization']),
     'knowledge_capacity_gauges.metric': Object.freeze(['entries', 'chunks', 'payload_bytes', 'references']),
     'knowledge_current_custody.custody_state': Object.freeze(['active', 'revoke_only']),
+    'knowledge_entry_governance.quality_state': Object.freeze(['candidate', 'confirmed', 'rejected']),
+    'knowledge_entry_governance.retention_class': Object.freeze(['protected', 'scheduled']),
     'knowledge_entries.visibility': Object.freeze(['private', 'team', 'public', 'shared']),
     'leads.status': Object.freeze(['new', 'contacted', 'qualified', 'converted', 'lost']),
     'opportunities.stage': Object.freeze(['discovery', 'qualification', 'proposal', 'negotiation', 'won', 'lost']),
@@ -417,7 +432,8 @@ const STRUCTURAL_COLUMN_POLICY = freezeStructuralColumnPolicy({
       '003_campaign_workflow_dispatch_evidence',
       '004_knowledge_capacity_observability',
       '005_knowledge_custody_projection',
-      '006_crm_sales_workspace'
+      '006_crm_sales_workspace',
+      '007_knowledge_governance'
     ]),
     'schema_migrations.checksum': Object.freeze([
       'c2df6a8da2554f871dc07370f5409f58d2bc1874597928c3bbd273ecb6cb0741',
@@ -425,7 +441,8 @@ const STRUCTURAL_COLUMN_POLICY = freezeStructuralColumnPolicy({
       '534a5eab8fd9581c3584128d9d69564cf85bd802cd24038a5ef8c5aea3d3ba56',
       '8beda613d3a8b8ea2604bd4a1b5ae72df2db56ec813987c05de9de18fc0b6e92',
       '2c8978c77a56cd068d9fc7b7eaa1ae986402900f5d5e9d2d883288c3421342b2',
-      'f51697d1af1b5d49b793b34ab9c67b6b4823a826cbdcad7dd606063519a13418'
+      'f51697d1af1b5d49b793b34ab9c67b6b4823a826cbdcad7dd606063519a13418',
+      '8914205f9c63209e83948b317354453f067038389eb1053a267c714f92a54dcd'
     ]),
     'schema_migrations.source_path': Object.freeze([
       'migrations/001_legacy_compat_columns.js',
@@ -433,7 +450,8 @@ const STRUCTURAL_COLUMN_POLICY = freezeStructuralColumnPolicy({
       'migrations/003_campaign_workflow_dispatch_evidence.js',
       'migrations/004_knowledge_capacity_observability.js',
       'migrations/005_knowledge_custody_projection.js',
-      'migrations/006_crm_sales_workspace.js'
+      'migrations/006_crm_sales_workspace.js',
+      'migrations/007_knowledge_governance.js'
     ])
   })
 });
@@ -891,7 +909,7 @@ function profileContractForVersion(schemaVersion) {
       preservedAccounting: V1_PRESERVED_ACCOUNTING
     });
   }
-  if (schemaVersion === 6) {
+  if (schemaVersion === 6 || schemaVersion === 7) {
     return Object.freeze({
       semanticPolicies: SEMANTIC_POLICIES,
       equalityGroups: EQUALITY_GROUPS,
@@ -919,19 +937,21 @@ function assertManifestDocumentShape(manifest) {
   ) {
     throw new Error('malformed sanitization manifest header');
   }
-  if (!Array.isArray(manifest.exactProfiles) || manifest.exactProfiles.length !== 1) {
-    throw new Error('sanitization manifest must contain one isolated exact v6 profile');
+  if (!Array.isArray(manifest.exactProfiles) || manifest.exactProfiles.length !== 2) {
+    throw new Error('sanitization manifest must contain isolated exact v6 and v7 profiles');
   }
-  const compatibilityProfile = manifest.exactProfiles[0];
   const profileKeys = [
     'schemaVersion', 'semanticPolicies', 'equalityGroups', 'referenceGroups',
     'derivedRebuilds', 'objects'
   ];
-  if (
-    !exactObjectKeys(compatibilityProfile, profileKeys)
-    || compatibilityProfile.schemaVersion !== 6
-  ) {
-    throw new Error('malformed isolated exact sanitization manifest profile');
+  const versions = manifest.exactProfiles.map((profile) => profile.schemaVersion);
+  if (JSON.stringify(versions) !== JSON.stringify([6, 7])) {
+    throw new Error('sanitization manifest exact profiles must be ordered v6 then v7');
+  }
+  for (const compatibilityProfile of manifest.exactProfiles) {
+    if (!exactObjectKeys(compatibilityProfile, profileKeys)) {
+      throw new Error('malformed isolated exact sanitization manifest profile');
+    }
   }
 }
 
@@ -963,12 +983,12 @@ function exactProfileClassification(db) {
   });
   if (
     classification.status !== 'managed'
-    || ![1, 6].includes(classification.currentVersion)
+    || ![1, 6, 7].includes(classification.currentVersion)
   ) {
     const observed = classification.currentVersion === undefined || classification.currentVersion === null
       ? classification.status
       : classification.currentVersion;
-    throw new Error(`sanitization source must be an exact managed version 1 or version 6 profile; got ${observed}`);
+    throw new Error(`sanitization source must be an exact managed version 1, version 6, or version 7 profile; got ${observed}`);
   }
   return classification;
 }
@@ -4160,7 +4180,7 @@ function rebuildCrmDerivedData(db) {
 }
 
 function rebuildDerivedData(db, manifest) {
-  if (![1, 6].includes(manifest.schemaVersion)) {
+  if (![1, 6, 7].includes(manifest.schemaVersion)) {
     throw new Error(`unsupported derived rebuild profile ${manifest.schemaVersion}`);
   }
   const hasKnowledge = db.prepare("SELECT 1 AS present FROM sqlite_schema WHERE type='table' AND name='knowledge_entries'").get();
@@ -4228,7 +4248,7 @@ function rebuildDerivedData(db, manifest) {
     const rebuild = db.transaction(() => rebuildKnowledgeProjections(db));
     rebuild.immediate();
   }
-  if (manifest.schemaVersion === 6) rebuildCrmDerivedData(db);
+  if (manifest.schemaVersion >= 6) rebuildCrmDerivedData(db);
   rebuildCampaignWorkflowDispatchEvidence(db);
   sqliteDigest.rebuildKnowledgeChunksFts(db);
   sqliteDigest.verifyKnowledgeChunksFtsIntegrity(db, FTS_MANIFEST, { checkMainIntegrity: true });
@@ -4357,7 +4377,7 @@ function collectForbiddenValues(db, manifest, options = {}) {
     for (const column of object.columns) {
       if (column.classification === 'secret-null') continue;
       const secretColumn = column.classification === 'secret-synthetic';
-      const semanticAuthorization = manifest.schemaVersion === 6
+      const semanticAuthorization = manifest.schemaVersion >= 6
         && object.name === 'ai_references' && column.name === 'reference_id'
         ? `CASE WHEN (
           reference_schema_version=1

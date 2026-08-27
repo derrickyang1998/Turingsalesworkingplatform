@@ -1310,7 +1310,21 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
   <div class="card">
     <h3>📚 Knowledge Base</h3>
     <p style="font-size:12px;opacity:.6;margin-bottom:12px">Auto-archived from customer creation, strategy generation, and demand analysis</p>
-    <input id="kbSearch" placeholder="Search knowledge base..." oninput="loadKnowledgeBase()" style="margin-bottom:12px;width:300px">
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+      <input id="kbSearch" aria-label="搜索知识库" placeholder="搜索标题、摘要、标签或正文" oninput="scheduleKnowledgeBaseLoad()" style="width:min(360px,100%);font-size:12px">
+      <select id="kbQualityFilter" aria-label="按知识质量筛选" onchange="loadKnowledgeBase()" style="width:130px;font-size:12px">
+        <option value="">全部质量状态</option>
+        <option value="candidate">候选</option>
+        <option value="confirmed">已确认</option>
+        <option value="rejected">已拒绝</option>
+      </select>
+      <select id="kbRetentionFilter" aria-label="按保留策略筛选" onchange="loadKnowledgeBase()" style="width:130px;font-size:12px">
+        <option value="">全部保留策略</option>
+        <option value="protected">长期保留</option>
+        <option value="scheduled">定期保留</option>
+      </select>
+      <button type="button" class="btn btn-sm" onclick="loadKnowledgeBase()">刷新</button>
+    </div>
     <div id="kbEntries" style="max-height:400px;overflow-y:auto"></div>
   </div>
 </div>

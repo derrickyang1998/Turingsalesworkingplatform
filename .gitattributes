@@ -13,6 +13,7 @@ platform/server/migrations/003_campaign_workflow_dispatch_evidence.js text eol=l
 platform/server/migrations/004_knowledge_capacity_observability.js text eol=lf
 platform/server/migrations/005_knowledge_custody_projection.js text eol=lf
 platform/server/migrations/006_crm_sales_workspace.js text eol=lf
+platform/server/migrations/007_knowledge_governance.js text eol=lf
 platform/server/migrations/baselines/legacy_v1.js text eol=lf
 platform/server/migrations/engines/v1.js text eol=lf
 platform/server/migrations/vendor/bcryptjs_v3_0_3.js text eol=lf
