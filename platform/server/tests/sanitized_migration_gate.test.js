@@ -7607,6 +7607,50 @@ test('sanitizer pipeline rejects replacement sentinels that escape classified po
   }
 });
 
+test('knowledge-entry reference semantics exclude web URL identifiers', () => {
+  const fixture = migratedFixture('knowledge-reference-web-predicate');
+  try {
+    const populated = populateCriticalReviewFixture(fixture);
+    const baseline = sanitizer._testing.captureSemanticShape(fixture.db, v7Manifest);
+    fixture.db.prepare(`
+      INSERT INTO ai_references (
+        id,message_id,reference_type,reference_id,title,url,snippet,provider,metadata_json
+      ) VALUES (?,?,'web',?,'Public source',?,'Public snippet','test-provider','{}')
+    `).run(
+      populated.referenceId + 1,
+      populated.messageId,
+      'https://example.invalid/source',
+      'https://example.invalid/source'
+    );
+
+    const withWebReference = sanitizer._testing.captureSemanticShape(fixture.db, v7Manifest);
+    assert.deepEqual(
+      withWebReference.referenceGroups['campaign-knowledge-record-id'],
+      baseline.referenceGroups['campaign-knowledge-record-id']
+    );
+  } finally {
+    closeAndRemove(fixture);
+  }
+});
+
+test('knowledge-entry reference semantics still reject non-canonical knowledge identifiers', () => {
+  const fixture = migratedFixture('knowledge-reference-invalid-knowledge-id');
+  try {
+    const populated = populateCriticalReviewFixture(fixture);
+    fixture.db.prepare('UPDATE ai_references SET reference_id=? WHERE id=?').run(
+      'https://example.invalid/not-a-knowledge-id',
+      populated.referenceId
+    );
+
+    assert.throws(
+      () => sanitizer._testing.captureSemanticShape(fixture.db, v7Manifest),
+      /non-canonical decimal semantic reference.*ai_references\.reference_id/i
+    );
+  } finally {
+    closeAndRemove(fixture);
+  }
+});
+
 test('per-PK semantic shape preserves exact NULLs, storage classes, and equality partitions', () => {
   const fixture = migratedFixture('per-pk-shape');
   const rows = [

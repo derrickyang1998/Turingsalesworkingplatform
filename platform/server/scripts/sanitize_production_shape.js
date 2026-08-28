@@ -3230,18 +3230,39 @@ function semanticTableShape(db, object) {
   return Object.freeze({ rowKeys: Object.freeze(rowKeys.sort()), columns: Object.freeze(columns) });
 }
 
-function directSemanticLocations(db, specification) {
+const SEMANTIC_REFERENCE_PREDICATES = Object.freeze({
+  'knowledge-entry-reference': Object.freeze({
+    knowledge_entries: null,
+    campaign_record_links: Object.freeze({ column: 'record_type', value: 'knowledge_entry' }),
+    ai_references: Object.freeze({ column: 'reference_type', value: 'knowledge' })
+  })
+});
+
+function semanticReferenceFilter(predicate, table) {
+  if (!predicate) return null;
+  const tableFilters = SEMANTIC_REFERENCE_PREDICATES[predicate];
+  if (!tableFilters || !Object.hasOwn(tableFilters, table)) {
+    throw new Error(`unsupported semantic reference predicate ${predicate} for ${table}`);
+  }
+  return tableFilters[table];
+}
+
+function directSemanticLocations(db, specification, options = {}) {
   const separator = specification.indexOf('.');
   const table = specification.slice(0, separator);
   const column = specification.slice(separator + 1);
   const keys = primaryKeyColumns(db, table);
+  const filter = semanticReferenceFilter(options.predicate, table);
   const projection = [
     ...keys.map(quoteIdentifier),
     ...keys.map((key) => `typeof(${quoteIdentifier(key)}) AS ${quoteIdentifier(`__tm_pk_type_${key}`)}`),
     quoteIdentifier(column),
     `typeof(${quoteIdentifier(column)}) AS __tm_value_type`
   ].join(',');
-  return db.prepare(`SELECT ${projection} FROM ${quoteIdentifier(table)} ORDER BY ${keys.map(quoteIdentifier).join(',')}`).all()
+  const where = filter ? ` WHERE ${quoteIdentifier(filter.column)}=?` : '';
+  const statement = db.prepare(`SELECT ${projection} FROM ${quoteIdentifier(table)}${where} ORDER BY ${keys.map(quoteIdentifier).join(',')}`);
+  const rows = filter ? statement.all(filter.value) : statement.all();
+  return rows
     .filter((row) => row[column] !== null)
     .map((row) => ({
       location: `${specification}@${semanticRowKey(row, keys)}`,
@@ -3299,16 +3320,20 @@ function jsonSemanticLocations(db, specification) {
   return locations;
 }
 
-function semanticLocations(db, specification) {
-  return specification.includes('#')
-    ? jsonSemanticLocations(db, specification)
-    : directSemanticLocations(db, specification);
+function semanticLocations(db, specification, options = {}) {
+  if (specification.includes('#')) {
+    if (options.predicate) {
+      throw new Error(`semantic reference predicate ${options.predicate} cannot target JSON path ${specification}`);
+    }
+    return jsonSemanticLocations(db, specification);
+  }
+  return directSemanticLocations(db, specification, options);
 }
 
 function semanticGroupPartitions(db, specifications, options = {}) {
   const partitions = new Map();
   for (const specification of specifications) {
-    for (const entry of semanticLocations(db, specification)) {
+    for (const entry of semanticLocations(db, specification, options)) {
       let key;
       if (options.canonicalDecimal) {
         const text = String(entry.value);
@@ -3336,7 +3361,8 @@ function captureSemanticShape(db, manifest) {
   const referenceGroups = Object.fromEntries(manifest.referenceGroups.map((group) => [
     group.name,
     semanticGroupPartitions(db, [...(group.owners || [group.owner]), ...group.references], {
-      canonicalDecimal: group.encoding === 'canonical-positive-decimal-text'
+      canonicalDecimal: group.encoding === 'canonical-positive-decimal-text',
+      predicate: group.predicate || null
     })
   ]));
   return Object.freeze({

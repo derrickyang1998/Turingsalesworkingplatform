@@ -54,7 +54,7 @@
     { "path": "server/scripts/provision_upload_sandbox_runtime.sh", "sha256": "18dabbb91c705357027b5acabbb465e6d51dacb4dbe122eb1005666b441f369d" },
     { "path": "server/scripts/public_release_guard.sh", "sha256": "d45fe8fcc01587aaa0e73eccfb9714c27801e232cb6c0effd6daedb703316d66" },
     { "path": "server/scripts/sanitization_manifest.json", "sha256": "064ddc4287e84ded4b76820750cef9d981f46f6cb95b9d19c8633e11b403aba1" },
-    { "path": "server/scripts/sanitize_production_shape.js", "sha256": "47aad6ac4d3d5f2150f897c01bde6a1c220b37c3b4e66e9e3bbedae2258720f3" },
+    { "path": "server/scripts/sanitize_production_shape.js", "sha256": "4cdb2b126859bc9fa49eb0dbd4ddb40195888773f5680305084c60111abbfc45" },
     { "path": "server/scripts/trusted_parser_runtime_verifier.js", "sha256": "7f9efaac02675b21e025891a400474cc7481c1adaf58c88bd8b356d5276f2eaa" },
     { "path": "server/scripts/upload_sandbox_self_test.js", "sha256": "36567b9127d3c631f97d7ecb83ff5547c24e6f397af43d21beb12fd7f3bd6e76" },
     { "path": "server/scripts/verify_campaign_migration_gate.js", "sha256": "6c983772bfebd666ca170205d030034b2407bca4147054e828bb00b97b724aac" },
