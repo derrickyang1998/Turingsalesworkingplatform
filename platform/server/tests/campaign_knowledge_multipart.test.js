@@ -340,7 +340,7 @@ function gaugeUsage(db, scopeType, scopeId) {
   return usage;
 }
 
-test('demand and proposal links retain exact archives and store empty metadata', () => {
+test('demand and proposal links retain exact archives and business artifact metadata', () => {
   const db = openDatabase();
   try {
     const context = createContext(db);
@@ -428,7 +428,11 @@ test('demand and proposal links retain exact archives and store empty metadata',
       content: expectedDemandContent,
       tags_json: demandTags,
       visibility: 'team',
-      metadata_json: '{}',
+      metadata_json: JSON.stringify({
+        artifact_contract: 'tm-business-artifact-v1',
+        artifact_state: 'ingested',
+        artifact_type: 'requirement_sheet'
+      }),
       created_by: context.userId,
       source_identity_sha256: campaignSourceIdentityDigest({
         organizationId: context.orgId,
@@ -456,7 +460,11 @@ test('demand and proposal links retain exact archives and store empty metadata',
       content: expectedProposalContent,
       tags_json: proposalTags,
       visibility: 'team',
-      metadata_json: '{}',
+      metadata_json: JSON.stringify({
+        artifact_contract: 'tm-business-artifact-v1',
+        artifact_state: 'confirmed',
+        artifact_type: 'confirmed_proposal'
+      }),
       created_by: context.userId,
       source_identity_sha256: campaignSourceIdentityDigest({
         organizationId: context.orgId,
