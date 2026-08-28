@@ -3247,6 +3247,18 @@ function semanticReferenceFilter(predicate, table) {
   return tableFilters[table];
 }
 
+function semanticReferencePreservationSql(schemaVersion, table, column) {
+  if (schemaVersion < 6 || table !== 'ai_references' || column !== 'reference_id') return null;
+  return `CASE WHEN (
+    ai_references.reference_type='knowledge'
+    AND typeof(ai_references.reference_id)='text'
+    AND EXISTS (
+      SELECT 1 FROM knowledge_entries AS tm_reference_owner
+      WHERE CAST(tm_reference_owner.id AS TEXT)=ai_references.reference_id
+    )
+  ) THEN 1 ELSE 0 END`;
+}
+
 function directSemanticLocations(db, specification, options = {}) {
   const separator = specification.indexOf('.');
   const table = specification.slice(0, separator);
@@ -3716,9 +3728,13 @@ function collectExpectedOutputContextKeys(db, manifest, options = {}) {
     for (const column of object.columns) {
       if (TRANSFORMATION_EXCLUDED_CLASSIFICATIONS.has(column.classification)) continue;
       if (options.secretOnly && column.classification !== 'secret-synthetic') continue;
+      const semanticPreservation = semanticReferencePreservationSql(
+        manifest.schemaVersion, object.name, column.name
+      );
       const rows = db.prepare(`
         SELECT DISTINCT typeof(${quoteIdentifier(column.name)}) AS storage_type,
           ${quoteIdentifier(column.name)} AS value
+          ${semanticPreservation ? `,${semanticPreservation} AS semantic_preserved` : ''}
         FROM ${quoteIdentifier(object.name)}
         WHERE ${quoteIdentifier(column.name)} IS NOT NULL
       `).all();
@@ -3726,8 +3742,11 @@ function collectExpectedOutputContextKeys(db, manifest, options = {}) {
         ? rankMapFor(db, object.name, column.name, replacementDomain)
         : new Map();
       for (const row of rows) {
+        const effectiveClassification = semanticPreservation && row.semantic_preserved
+          ? 'structural'
+          : column.classification;
         const replacement = transformedValue(
-          column.classification,
+          effectiveClassification,
           object.name,
           column.name,
           row.value,
@@ -3741,7 +3760,7 @@ function collectExpectedOutputContextKeys(db, manifest, options = {}) {
         authorizeExpectedOutputValue(
           authorized,
           `${object.name}.${column.name}`,
-          column.classification,
+          effectiveClassification,
           replacement,
           logicalStorageType(replacement, row.storage_type)
         );
@@ -3905,10 +3924,18 @@ function sanitizeBaseTables(db, manifest, options = {}) {
       if (!keys.length) throw new Error(`sanitizer requires a primary key for ${object.name}`);
       const projection = [
         ...keys.map(quoteIdentifier),
-        ...columns.flatMap((column) => [
-          quoteIdentifier(column.name),
-          `typeof(${quoteIdentifier(column.name)}) AS ${quoteIdentifier(`__tm_type_${column.name}`)}`
-        ])
+        ...columns.flatMap((column) => {
+          const semanticPreservation = semanticReferencePreservationSql(
+            manifest.schemaVersion, object.name, column.name
+          );
+          return [
+            quoteIdentifier(column.name),
+            `typeof(${quoteIdentifier(column.name)}) AS ${quoteIdentifier(`__tm_type_${column.name}`)}`,
+            ...(semanticPreservation ? [
+              `${semanticPreservation} AS ${quoteIdentifier(`__tm_semantic_preserve_${column.name}`)}`
+            ] : [])
+          ];
+        })
       ].join(',');
       const order = keys.map(quoteIdentifier).join(',');
       const rows = db.prepare(`SELECT ${projection} FROM ${quoteIdentifier(object.name)} ORDER BY ${order}`).all();
@@ -3920,18 +3947,27 @@ function sanitizeBaseTables(db, manifest, options = {}) {
       const whereSql = keys.map((key) => `${quoteIdentifier(key)} IS ?`).join(' AND ');
       const update = db.prepare(`UPDATE ${quoteIdentifier(object.name)} SET ${setSql} WHERE ${whereSql}`);
       for (const row of rows) {
-        const values = columns.map((column) => transformedValue(
-          column.classification,
-          object.name,
-          column.name,
-          row[column.name],
-          row[`__tm_type_${column.name}`],
-          ranks.get(column.name) || new Map(),
+        const values = columns.map((column) => {
+          const semanticPreservation = semanticReferencePreservationSql(
+            manifest.schemaVersion, object.name, column.name
+          );
+          const effectiveClassification = semanticPreservation
+              && row[`__tm_semantic_preserve_${column.name}`]
+            ? 'structural'
+            : column.classification;
+          return transformedValue(
+            effectiveClassification,
+            object.name,
+            column.name,
+            row[column.name],
+            row[`__tm_type_${column.name}`],
+            ranks.get(column.name) || new Map(),
             manifest.jsonPolicy,
             column.jsonPolicy,
             relationshipTokens,
             replacementDomain
-        ));
+          );
+        });
         const result = update.run(...values, ...keys.map((key) => row[key]));
         if (result.changes !== 1) throw new Error(`sanitizer primary-key update failed for ${object.name}`);
       }
@@ -4403,14 +4439,9 @@ function collectForbiddenValues(db, manifest, options = {}) {
     for (const column of object.columns) {
       if (column.classification === 'secret-null') continue;
       const secretColumn = column.classification === 'secret-synthetic';
-      const semanticAuthorization = manifest.schemaVersion >= 6
-        && object.name === 'ai_references' && column.name === 'reference_id'
-        ? `CASE WHEN (
-          reference_schema_version=1
-          AND knowledge_entry_id IS NOT NULL
-          AND reference_id=CAST(knowledge_entry_id AS TEXT)
-        ) THEN 1 ELSE 0 END`
-        : '0';
+      const semanticAuthorization = semanticReferencePreservationSql(
+        manifest.schemaVersion, object.name, column.name
+      ) || '0';
       const rows = db.prepare(`
         SELECT DISTINCT typeof(${quoteIdentifier(column.name)}) AS storage_type,
           ${quoteIdentifier(column.name)} AS value,

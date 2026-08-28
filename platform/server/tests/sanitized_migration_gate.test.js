@@ -7651,6 +7651,66 @@ test('knowledge-entry reference semantics still reject non-canonical knowledge i
   }
 });
 
+test('sanitizer preserves legacy knowledge references while sanitizing web reference identifiers', () => {
+  const fixture = migratedFixture('knowledge-reference-legacy-full-pipeline');
+  try {
+    const populated = populateCriticalReviewFixture(fixture);
+    const webReferenceId = populated.referenceId + 1;
+    const webUrl = 'https://example.invalid/public-source';
+    const referenceTriggers = fixture.db.prepare(`
+      SELECT name,sql FROM sqlite_schema
+      WHERE type='trigger' AND tbl_name='ai_references' ORDER BY name
+    `).all();
+    for (const trigger of referenceTriggers) {
+      fixture.db.exec(`DROP TRIGGER "${trigger.name.replace(/"/g, '""')}"`);
+    }
+    fixture.db.prepare(`
+      UPDATE ai_references
+      SET reference_schema_version=NULL,knowledge_entry_id=NULL,knowledge_chunk_id=NULL,campaign_id=NULL,
+        source_identity_sha256=NULL,entry_content_sha256=NULL,chunk_content_sha256=NULL,
+        reference_rank=NULL,selection_origin=NULL
+      WHERE id=?
+    `).run(populated.referenceId);
+    for (const trigger of referenceTriggers) fixture.db.exec(trigger.sql);
+    fixture.db.prepare(`
+      INSERT INTO ai_references (
+        id,message_id,reference_type,reference_id,title,url,snippet,provider,metadata_json
+      ) VALUES (?,?,'web',?,'Public source',?,'Public snippet','test-provider','{}')
+    `).run(webReferenceId, populated.messageId, webUrl, webUrl);
+    fixture.db.close();
+
+    const outputPath = path.join(fixture.root, 'sanitized-legacy-references.db');
+    assert.doesNotThrow(
+      () => sanitizer.sanitizeProductionShape({ sourcePath: fixture.dbPath, outputPath })
+    );
+    const output = new Database(outputPath, { readonly: true, fileMustExist: true });
+    try {
+      assert.deepEqual(
+        output.prepare(`
+          SELECT reference_type,reference_id,reference_schema_version,knowledge_entry_id
+          FROM ai_references WHERE id=?
+        `).get(populated.referenceId),
+        {
+          reference_type: 'knowledge',
+          reference_id: String(populated.entryId),
+          reference_schema_version: null,
+          knowledge_entry_id: null
+        }
+      );
+      const webReference = output.prepare(`
+        SELECT reference_type,reference_id FROM ai_references WHERE id=?
+      `).get(webReferenceId);
+      assert.equal(webReference.reference_type, 'web');
+      assert.notEqual(webReference.reference_id, webUrl);
+      assert.match(webReference.reference_id, /^tmtext-[0-9a-f]{32}$/);
+    } finally {
+      output.close();
+    }
+  } finally {
+    closeAndRemove(fixture);
+  }
+});
+
 test('per-PK semantic shape preserves exact NULLs, storage classes, and equality partitions', () => {
   const fixture = migratedFixture('per-pk-shape');
   const rows = [
