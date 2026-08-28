@@ -171,6 +171,8 @@ test('current release locks the v0.7 branch while retaining the v0.6 shell and f
   assert.match(deploy, /f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e/);
   assert.match(deploy, /if \(Number\(version\) !== 7\) throw new Error\('Candidate migration target version mismatch'\)/);
   assert.doesNotMatch(deploy, /if \(Number\(version\) !== 6\) throw new Error\('Candidate migration target version mismatch'\)/);
+  assert.match(deploy, /report\.get\('sourceVersion'\) not in \(1, 6, 7\)/);
+  assert.doesNotMatch(deploy, /report\.get\('sourceVersion'\) not in \(1, 6\) or/);
 });
 
 test('v0.6 deploy inventory ships migration 006, CRM runtime, and every Phase 5 regression', () => {
