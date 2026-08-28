@@ -1,5 +1,22 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.7.0-ai-knowledge-loop-task4e (Release Candidate, 2026-08-28) - 业务产物统一知识归档
+
+### 统一业务产物合同 / Unified Business Artifact Contract
+- 需求表、网红导入批次、确认方案、PPT 成品、项目复盘、AI 自动摘要和人工精选统一使用 `tm-business-artifact-v1`，并记录产物类型、生命周期、业务归属、内容身份和可复用血缘。
+- 旧版业务产物精确重放会复用原知识条目；同一来源身份的内容、元数据或业务归属发生变化时返回确定性冲突，不再静默覆盖不可变知识。Campaign 方案和 PPT 路径继续保持原子业务写入、知识归档、关联和回滚。
+- Legacy PPT 以规范输入哈希和实际成品哈希共同标识成品，因此同一输入产生不同有效字节时可分别归档；生成或归档失败会同时清理 JSON 与 PPT 临时文件。
+- Task 4C 的旧版人工精选继续幂等复用，但只有 `promotion.trigger=manual` 的旧 `ai_message` / `campaign_ai_message` 会被识别，自动摘要不会被误判为人工精选。
+- 网红上传在现有前端默认把文件名作为批次值时改由上传文件 SHA-256 派生不可变批次；同名新版文件可再次导入，显式自定义批次仍保留原冲突语义。行写入和批次知识归档保持同一事务。
+- 严格 `local-worker` 测试适配器使用固定容量投影，避免开发机磁盘低于生产 2 GiB 安全线时阻断功能测试；生产模式仍使用真实文件系统容量门。已验收的 `app.js` 与冻结 `ppt.js` 字节未修改。
+
+### 验证与发布状态 / Verification And Release State
+- 受影响轻量回归 `27/27`、最终 PPT 精确用例 `1/1` 通过；部署信任硬门 `79` 通过、`0` 失败、`10` 项按 Windows 环境跳过。16 个变更 JavaScript 文件语法、`git diff --check`、聚焦敏感信息扫描、可信清单、真实本地发布预检及冻结前端哈希均通过。
+- 独立审查关闭 PPT 非确定性成品身份、Task 4C 人工精选兼容、同名新版网红文件及一条测试断言问题后，最终结论为 `APPROVE`。本地批准实现提交为 `1e25379d126c43e3f38730b269531a2b903a650a`。
+- 本记录当前是发布候选，不是生产验收记录：权威工作区和 GitHub 远端仍为 `50867bc8fa662c0ccb518508fd8ceaf39fab6412`；当前执行沙箱无法写入权威目录或读取部署 SSH 私钥，因此尚未创建 Task 4E 远端备份、切换生产或执行线上冒烟。
+
+---
+
 ## v0.7.0-ai-knowledge-loop-task4d4 (Production Slice, 2026-08-27) - 知识治理与发布恢复加固
 
 ### 迁移、清理与 Campaign 治理 / Migration, Cleanup, And Campaign Governance
