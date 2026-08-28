@@ -64,10 +64,13 @@ test('an owner can manually promote a retained AI answer exactly once with polic
 
     const entry = db.prepare('SELECT source_type,source_id,visibility,metadata_json FROM knowledge_entries WHERE id=?')
       .get(first.knowledge_entry_id);
-    assert.equal(entry.source_type, 'ai_message');
+    assert.equal(entry.source_type, 'ai_selected_message');
     assert.equal(Number(entry.source_id), chat.message_id);
     assert.equal(entry.visibility, 'private');
     const metadata = JSON.parse(entry.metadata_json);
+    assert.equal(metadata.artifact_contract, 'tm-business-artifact-v1');
+    assert.equal(metadata.artifact_state, 'selected');
+    assert.equal(metadata.artifact_type, 'selected_conclusion');
     assert.equal(metadata.promotion.status, 'promoted');
     assert.equal(metadata.promotion.reason, 'explicit_selection');
     assert.equal(metadata.promotion.policy_version, 'ai-summary-promotion-v1');
@@ -83,6 +86,61 @@ test('an owner can manually promote a retained AI answer exactly once with polic
     assert.equal(JSON.parse(audits[0].details).request_id, 'manual-promotion-owner-0001');
     assert.equal(JSON.parse(audits[0].details).result, 'promoted');
     assert.equal(JSON.parse(audits[1].details).result, 'already_promoted');
+  } finally {
+    db.close();
+  }
+});
+
+test('a Task4C legacy manual promotion replays without creating a selected-conclusion duplicate', async () => {
+  const db = freshDb();
+  try {
+    const ai = require('../services/ai_service');
+    const knowledge = require('../services/knowledge_service');
+    const chat = await ai.handleChat(db, {
+      user: { id: 2, role: 'user' },
+      message: '复用旧版人工沉淀记录。',
+      allowWeb: false,
+      provider: shortProvider('旧版已人工确认。')
+    });
+    const legacy = knowledge.ingestKnowledge(db, {
+      entry_type: 'ai_chat_summary',
+      source_type: 'ai_message',
+      source_id: chat.message_id,
+      title: 'Legacy manually selected answer',
+      summary: 'Legacy manually selected answer',
+      content: 'Q: 复用旧版人工沉淀记录。\n\nA: 旧版已人工确认。',
+      visibility: 'private',
+      tags: ['ai_chat', 'conversation'],
+      business_type: 'assistant',
+      business_id: chat.conversation_id,
+      created_by: 2,
+      actor_role: 'user',
+      metadata: {
+        conversation_id: chat.conversation_id,
+        assistant_message_id: chat.message_id,
+        promotion: { trigger: 'manual' }
+      }
+    });
+
+    const replay = ai.promoteMessageToKnowledge(db, {
+      user: { id: 2, role: 'user' },
+      conversation_id: chat.conversation_id,
+      message_id: chat.message_id,
+      visibility: 'private',
+      requestId: 'legacy-manual-promotion-replay-0001'
+    });
+
+    assert.equal(replay.status, 'already_promoted');
+    assert.equal(replay.knowledge_entry_id, legacy.id);
+    assert.equal(db.prepare(`
+      SELECT COUNT(*) AS count FROM knowledge_entries
+      WHERE source_id=? AND source_type IN ('ai_message','ai_selected_message')
+    `).get(chat.message_id).count, 1);
+    assert.equal(
+      db.prepare('SELECT archived_summary_id FROM ai_conversations WHERE id=?')
+        .get(chat.conversation_id).archived_summary_id,
+      legacy.id
+    );
   } finally {
     db.close();
   }

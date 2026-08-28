@@ -1164,13 +1164,13 @@ function archiveDemand(db, values) {
     status: canonicalProjectionValue(demand.status, 'committed demand status'),
     data: parseCommittedJson(demand.data_json, 'committed demand data_json')
   });
-  const written = knowledgeService.writeCampaignKnowledgeInTransaction(db, {
+  const written = knowledgeService.ingestBusinessArtifact(db, {
+    artifactType: 'requirement_sheet',
+    artifactState: 'ingested',
     organizationId: values.organizationId,
     campaignId: values.campaignId,
     createdBy: values.userId,
-    sourceType: 'campaign_demand',
     sourceId: demand.id,
-    entryType: 'campaign_demand',
     title: `Campaign demand #${demand.id}`,
     summary: archiveSummary(content),
     content,
@@ -1210,13 +1210,13 @@ function archiveProposal(db, values) {
     content_sha256: contentSha256,
     content: proposalContent
   });
-  const written = knowledgeService.writeCampaignKnowledgeInTransaction(db, {
+  const written = knowledgeService.ingestBusinessArtifact(db, {
+    artifactType: 'confirmed_proposal',
+    artifactState: 'confirmed',
     organizationId: values.organizationId,
     campaignId: values.campaignId,
     createdBy: values.userId,
-    sourceType: 'campaign_proposal',
     sourceId: proposal.id,
-    entryType: 'campaign_proposal',
     title: `Campaign proposal #${proposal.id}`,
     summary: archiveSummary(content),
     content,

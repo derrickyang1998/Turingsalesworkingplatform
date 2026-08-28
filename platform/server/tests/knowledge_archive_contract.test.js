@@ -244,6 +244,150 @@ function archiveState(db, context) {
   };
 }
 
+test('business artifact contract deduplicates legacy artifacts and stamps reusable lineage', () => {
+  const db = openDatabase();
+  try {
+    const context = createContext(db);
+    const options = {
+      artifactType: 'influencer_batch',
+      artifactState: 'ingested',
+      sourceId: 'wave2-influencer-batch',
+      title: 'Wave 2 influencer batch',
+      summary: 'One approved influencer batch',
+      content: 'Influencer batch content',
+      tags: ['campaign', 'influencer'],
+      visibility: 'team',
+      createdBy: context.userId,
+      actorRole: 'user',
+      businessType: 'influencer',
+      businessId: 'wave2-influencer-batch',
+      metadata: { imported: 10 }
+    };
+
+    const created = knowledge.ingestBusinessArtifact(db, options);
+    const replay = knowledge.ingestBusinessArtifact(db, options);
+
+    assert.equal(created.status, 'created');
+    assert.equal(replay.status, 'exact_existing');
+    assert.equal(replay.entry.id, created.entry.id);
+    assert.equal(db.prepare(`
+      SELECT COUNT(*) AS count FROM knowledge_entries
+      WHERE source_type='influencer_import' AND source_id='wave2-influencer-batch'
+    `).get().count, 1);
+    assert.deepEqual(created.entry.metadata, {
+      artifact_contract: 'tm-business-artifact-v1',
+      artifact_state: 'ingested',
+      artifact_type: 'influencer_batch',
+      imported: 10
+    });
+    const immutableState = archiveState(db, context);
+    for (const changed of [
+      { content: 'Changed influencer batch content' },
+      { metadata: { imported: 11 } },
+      { businessId: 'wave2-influencer-batch-moved' }
+    ]) {
+      assert.throws(
+        () => knowledge.ingestBusinessArtifact(db, { ...options, ...changed }),
+        (error) => error && error.code === 'KNOWLEDGE_SOURCE_CONTENT_CONFLICT'
+      );
+    }
+    assert.deepEqual(archiveState(db, context), immutableState);
+  } finally {
+    db.close();
+  }
+});
+
+test('business artifact contract keeps campaign proposal identity immutable', () => {
+  const db = openDatabase();
+  try {
+    const context = createContext(db);
+    const options = {
+      artifactType: 'confirmed_proposal',
+      artifactState: 'confirmed',
+      organizationId: context.orgId,
+      campaignId: context.campaignId,
+      sourceId: 'wave2-confirmed-proposal',
+      title: 'Wave 2 confirmed proposal',
+      summary: 'Approved proposal summary',
+      content: 'Approved proposal content',
+      tags: ['campaign', 'proposal'],
+      visibility: 'team',
+      createdBy: context.userId,
+      metadata: { proposal_version: 1 }
+    };
+    let created;
+    let replay;
+    db.transaction(() => {
+      created = knowledge.ingestBusinessArtifact(db, options);
+      linkKnowledge(db, context, created.entry.id, 'business-artifact-proposal');
+      replay = knowledge.ingestBusinessArtifact(db, options);
+    }).immediate();
+
+    assert.equal(created.status, 'created');
+    assert.equal(replay.status, 'exact_existing');
+    assert.equal(replay.entry.id, created.entry.id);
+    assert.equal(created.entry.entry_type, 'campaign_proposal');
+    assert.equal(created.entry.source_type, 'campaign_proposal');
+    assert.equal(created.entry.metadata.artifact_type, 'confirmed_proposal');
+    assert.throws(
+      () => db.transaction(() => knowledge.ingestBusinessArtifact(db, {
+        ...options,
+        content: 'Changed proposal content under the same immutable source identity'
+      })).immediate(),
+      (error) => error && error.code === 'KNOWLEDGE_SOURCE_CONTENT_CONFLICT'
+    );
+    assert.throws(
+      () => db.transaction(() => knowledge.ingestBusinessArtifact(db, {
+        ...options,
+        metadata: { proposal_version: 2 }
+      })).immediate(),
+      (error) => error && error.code === 'KNOWLEDGE_SOURCE_CONTENT_CONFLICT'
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('business artifact contract rejects invalid lifecycle state without mutation', () => {
+  const db = openDatabase();
+  try {
+    const context = createContext(db);
+    const before = archiveState(db, context);
+    assert.throws(
+      () => knowledge.ingestBusinessArtifact(db, {
+        artifactType: 'ppt_output',
+        artifactState: 'draft',
+        sourceId: 'wave2-draft-ppt',
+        title: 'Draft PPT',
+        summary: 'Draft output must not become reusable knowledge',
+        content: 'Draft PPT content',
+        tags: ['ppt'],
+        visibility: 'private',
+        createdBy: context.userId,
+        businessType: 'proposal',
+        businessId: 'wave2-draft-ppt'
+      }),
+      (error) => error && error.code === 'INVALID_BUSINESS_KNOWLEDGE_ARTIFACT'
+    );
+    assert.throws(
+      () => knowledge.ingestBusinessArtifact(db, {
+        artifactType: 'influencer_batch',
+        artifactState: 'ingested',
+        title: 'Missing source identity',
+        summary: 'A source identity is required for deterministic deduplication',
+        content: 'Missing source identity content',
+        tags: ['influencer'],
+        visibility: 'team',
+        createdBy: context.userId
+      }),
+      (error) => error && error.code === 'INVALID_BUSINESS_KNOWLEDGE_ARTIFACT'
+    );
+    assert.deepEqual(archiveState(db, context), before);
+  } finally {
+    db.close();
+  }
+});
+
 test('tm-knowledge-chunk-v1 goldens and ordered campaign digests preserve legacy refresh', () => {
   const db = openDatabase();
   try {
@@ -860,6 +1004,14 @@ test('capacity authority fails closed on drift and reconciliation restores admis
       reviewInput(context, 'authority-reconciled')
     );
     assert.equal(result.status, 201);
+    const reviewMetadata = JSON.parse(db.prepare(`
+      SELECT metadata_json FROM knowledge_entries
+      WHERE id=?
+    `).get(result.body.entry.id).metadata_json);
+    assert.equal(reviewMetadata.artifact_contract, 'tm-business-artifact-v1');
+    assert.equal(reviewMetadata.artifact_state, 'confirmed');
+    assert.equal(reviewMetadata.artifact_type, 'project_review');
+    assert.ok(Number.isSafeInteger(reviewMetadata.settled_event_id));
     assert.equal(knowledge.userKnowledgeUsage(db, context.userId).entries, 1);
     assert.equal(knowledge.campaignKnowledgeUsage(db, context.campaignId).entries, 1);
     assert.equal(

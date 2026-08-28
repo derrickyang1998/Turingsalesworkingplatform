@@ -3571,13 +3571,13 @@ function createCampaignReview(db, input) {
     ])].sort(compareUtf8);
     let written;
     try {
-      written = knowledgeService.writeCampaignKnowledgeInTransaction(db, {
+      written = knowledgeService.ingestBusinessArtifact(db, {
+        artifactType: 'project_review',
+        artifactState: 'confirmed',
         organizationId: access.campaign.org_id,
         campaignId,
         createdBy: userId,
-        sourceType: 'campaign_review',
         sourceId,
-        entryType: 'campaign_review',
         title: body.title,
         summary: body.summary,
         content: body.content,

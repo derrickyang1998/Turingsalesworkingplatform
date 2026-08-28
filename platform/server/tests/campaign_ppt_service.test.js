@@ -299,7 +299,11 @@ test('linked campaign PPT generation publishes, archives, and replays a verified
     business_id: String(fixture.campaignId),
     visibility: 'team',
     tags_json: '["campaign","ppt"]',
-    metadata_json: '{}'
+    metadata_json: JSON.stringify({
+      artifact_contract: 'tm-business-artifact-v1',
+      artifact_state: 'completed',
+      artifact_type: 'ppt_output'
+    })
   });
   const retained = db.prepare(`
     SELECT id,state,status_code,response_kind,response_cache_key,response_content_type,

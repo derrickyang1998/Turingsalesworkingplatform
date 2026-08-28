@@ -613,7 +613,7 @@ test('a linked retained answer can be manually promoted once into the same Campa
     assert.equal(replay.knowledge_entry_id, promoted.knowledge_entry_id);
     const entry = db.prepare('SELECT source_type,source_id,visibility FROM knowledge_entries WHERE id=?')
       .get(promoted.knowledge_entry_id);
-    assert.equal(entry.source_type, 'campaign_ai_message');
+    assert.equal(entry.source_type, 'campaign_ai_selected_message');
     assert.equal(Number(entry.source_id), chat.message_id);
     assert.equal(entry.visibility, 'private');
     const links = db.prepare(`
@@ -631,6 +631,58 @@ test('a linked retained answer can be manually promoted once into the same Campa
       SELECT COUNT(*) AS count FROM activity_log
       WHERE module='ai_knowledge' AND action='manual_promote_ai_message'
     `).get().count, 2);
+  } finally {
+    db.close();
+  }
+});
+
+test('a Task4C linked manual promotion replays from its legacy campaign source without duplication', async () => {
+  const db = openDatabase();
+  try {
+    const fixture = createCampaignFixture(db);
+    const chat = await ai.handleChat(db, linkedInput(fixture, 'legacy-manual-promotion', {
+      archiveSummary: false,
+      provider: successfulProvider([], 'legacy selected linked answer')
+    }));
+    let legacy;
+    db.transaction(() => {
+      legacy = knowledge.writeCampaignKnowledgeInTransaction(db, {
+        organizationId: fixture.orgId,
+        campaignId: fixture.campaignId,
+        createdBy: fixture.userId,
+        sourceType: 'campaign_ai_message',
+        sourceId: chat.message_id,
+        entryType: 'ai_chat_summary',
+        title: 'Legacy linked manually selected answer',
+        summary: 'Legacy selected linked answer',
+        content: 'Question:\nlegacy\n\nAnswer:\nlegacy selected linked answer',
+        tags: ['ai_chat', 'campaign', 'conversation'],
+        visibility: 'private',
+        metadata: {
+          conversation_id: chat.conversation_id,
+          assistant_message_id: chat.message_id,
+          promotion: { trigger: 'manual' }
+        }
+      });
+      linkKnowledge(db, fixture, legacy.entry.id, 'legacy-manual-promotion');
+      knowledge.applyKnowledgeCapacityGaugePlanInTransaction(db, legacy.capacityGaugePlan);
+    }).immediate();
+
+    const replay = ai.promoteMessageToKnowledge(db, {
+      user: fixture.user,
+      conversation_id: chat.conversation_id,
+      message_id: chat.message_id,
+      visibility: 'private',
+      requestId: 'linked-legacy-manual-promotion-0001'
+    });
+
+    assert.equal(replay.status, 'already_promoted');
+    assert.equal(replay.knowledge_entry_id, legacy.entry.id);
+    assert.equal(db.prepare(`
+      SELECT COUNT(*) AS count FROM knowledge_entries
+      WHERE source_id=?
+        AND source_type IN ('campaign_ai_message','campaign_ai_selected_message')
+    `).get(chat.message_id).count, 1);
   } finally {
     db.close();
   }
@@ -1402,11 +1454,38 @@ test('linked AI response uses the safe source projection and archives the exact 
     assert.equal(archive.created_by, fixture.userId);
     assert.equal(archive.tags_json, '["ai_chat","campaign","conversation"]');
     const metadata = JSON.parse(archive.metadata_json);
+    assert.equal(metadata.artifact_contract, 'tm-business-artifact-v1');
+    assert.equal(metadata.artifact_state, 'promoted');
+    assert.equal(metadata.artifact_type, 'ai_summary');
     assert.equal(metadata.promotion.policy_version, 'ai-summary-promotion-v1');
     assert.equal(metadata.promotion.reason, 'high_value');
     assert.equal(metadata.promotion.evidence_count, 1);
     assert.match(archive.source_identity_sha256, /^[0-9a-f]{64}$/);
     assert.match(archive.content_sha256, /^[0-9a-f]{64}$/);
+
+    const promotedSelection = ai.promoteMessageToKnowledge(db, {
+      user: fixture.user,
+      conversation_id: result.conversation_id,
+      message_id: result.message_id,
+      visibility: 'private',
+      requestId: 'linked-auto-then-manual-selection-0001'
+    });
+    assert.equal(promotedSelection.status, 'promoted');
+    assert.notEqual(promotedSelection.knowledge_entry_id, result.archived_summary_id);
+    const selectedArchive = db.prepare(`
+      SELECT source_type,metadata_json FROM knowledge_entries WHERE id=?
+    `).get(promotedSelection.knowledge_entry_id);
+    assert.equal(selectedArchive.source_type, 'campaign_ai_selected_message');
+    assert.equal(JSON.parse(selectedArchive.metadata_json).artifact_type, 'selected_conclusion');
+    assert.equal(db.prepare(`
+      SELECT COUNT(*) AS count FROM campaign_record_links
+      WHERE campaign_id=? AND record_type='knowledge_entry'
+        AND record_id IN (?,?) AND revoked_at IS NULL
+    `).get(
+      fixture.campaignId,
+      String(result.archived_summary_id),
+      String(promotedSelection.knowledge_entry_id)
+    ).count, 2);
   } finally {
     db.close();
   }

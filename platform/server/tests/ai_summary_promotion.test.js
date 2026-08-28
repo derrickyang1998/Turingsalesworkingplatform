@@ -94,11 +94,35 @@ test('a substantive evidence-backed answer is promoted with auditable policy met
     const archive = db.prepare('SELECT metadata_json FROM knowledge_entries WHERE id=?')
       .get(result.archived_summary_id);
     const metadata = JSON.parse(archive.metadata_json);
+    assert.equal(metadata.artifact_contract, 'tm-business-artifact-v1');
+    assert.equal(metadata.artifact_state, 'promoted');
+    assert.equal(metadata.artifact_type, 'ai_summary');
     assert.equal(metadata.promotion.policy_version, 'ai-summary-promotion-v1');
     assert.equal(metadata.promotion.reason, 'high_value');
     assert.equal(metadata.promotion.evidence_count, 1);
     assert.equal(metadata.conversation_id, result.conversation_id);
     assert.equal(metadata.assistant_message_id, result.message_id);
+
+    const selected = ai.promoteMessageToKnowledge(db, {
+      user: { id: 2, role: 'user' },
+      conversation_id: result.conversation_id,
+      message_id: result.message_id,
+      visibility: 'private',
+      requestId: 'auto-then-manual-selection-0001'
+    });
+    assert.equal(selected.status, 'promoted');
+    assert.notEqual(selected.knowledge_entry_id, result.archived_summary_id);
+    assert.equal(countSummaries(db), 2);
+    const selectedEntry = db.prepare(`
+      SELECT source_type,metadata_json FROM knowledge_entries WHERE id=?
+    `).get(selected.knowledge_entry_id);
+    assert.equal(selectedEntry.source_type, 'ai_selected_message');
+    const selectedMetadata = JSON.parse(selectedEntry.metadata_json);
+    assert.equal(selectedMetadata.artifact_state, 'selected');
+    assert.equal(selectedMetadata.artifact_type, 'selected_conclusion');
+    assert.equal(JSON.parse(db.prepare(`
+      SELECT metadata_json FROM knowledge_entries WHERE id=?
+    `).get(result.archived_summary_id).metadata_json).artifact_type, 'ai_summary');
   } finally {
     db.close();
   }

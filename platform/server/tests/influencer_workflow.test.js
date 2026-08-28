@@ -337,6 +337,18 @@ test('influencer import accepts the historical 19-column template aliases', asyn
 
   assert.equal(result.statusCode, 200);
   assert.equal(result.payload.imported, 1);
+  assert.ok(Number.isSafeInteger(result.payload.knowledge_entry_id));
+  const batchKnowledge = db.prepare(`
+    SELECT entry_type,source_type,source_id,metadata_json
+    FROM knowledge_entries WHERE id=?
+  `).get(result.payload.knowledge_entry_id);
+  const batchMetadata = JSON.parse(batchKnowledge.metadata_json);
+  assert.equal(batchKnowledge.entry_type, 'influencer_batch');
+  assert.equal(batchKnowledge.source_type, 'influencer_import');
+  assert.equal(batchKnowledge.source_id, 'legacy-template-batch');
+  assert.equal(batchMetadata.artifact_contract, 'tm-business-artifact-v1');
+  assert.equal(batchMetadata.artifact_state, 'ingested');
+  assert.equal(batchMetadata.artifact_type, 'influencer_batch');
   const inf = db.prepare("SELECT * FROM influencers WHERE import_batch = ? AND kol_handle = ?").get('legacy-template-batch', '@legacy_kol');
   assert.ok(inf);
   assert.equal(inf.platform, 'TikTok');
@@ -360,6 +372,75 @@ test('influencer import accepts the historical 19-column template aliases', asyn
   assert.equal(byLink.payload.influencers.some(function(row) { return row.id === inf.id; }), true);
   const byTag = await invoke(routes, 'GET /api/influencers', { query: { search: 'outdoor' } });
   assert.equal(byTag.payload.influencers.some(function(row) { return row.id === inf.id; }), true);
+
+  db.close();
+});
+
+test('influencer import rolls back business rows when required knowledge archival fails', async () => {
+  const db = freshDb();
+  const routes = mountRoutes(db);
+  const before = db.prepare('SELECT COUNT(*) AS count FROM influencers').get().count;
+  db.exec(`
+    CREATE TRIGGER test_fail_required_influencer_batch_archive
+    BEFORE INSERT ON knowledge_entries
+    WHEN NEW.source_type='influencer_import'
+    BEGIN SELECT RAISE(ABORT,'injected required influencer archive failure'); END
+  `);
+
+  const result = await invoke(routes, 'POST /api/influencers/import', {
+    body: {
+      batch_id: 'required-archive-rollback',
+      rows: [{ '网红频道名称': '@required_archive_rollback' }]
+    }
+  });
+  assert.equal(result.statusCode, 500);
+  assert.match(result.payload.error, /injected required influencer archive failure/);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM influencers').get().count, before);
+  assert.equal(db.prepare(`
+    SELECT COUNT(*) AS count FROM knowledge_entries
+    WHERE source_type='influencer_import' AND source_id='required-archive-rollback'
+  `).get().count, 0);
+
+  db.close();
+});
+
+test('influencer import replays one batch without duplicate rows and rejects changed evidence', async () => {
+  const db = freshDb();
+  const routes = mountRoutes(db);
+  const request = {
+    batch_id: 'idempotent-influencer-batch',
+    rows: [{
+      '网红频道名称': '@idempotent_creator',
+      '网红频道链接': 'https://example.com/idempotent_creator',
+      '网红粉丝量': '12000',
+      '项目&客户': 'Idempotent Project'
+    }]
+  };
+
+  const created = await invoke(routes, 'POST /api/influencers/import', { body: request });
+  const replay = await invoke(routes, 'POST /api/influencers/import', { body: request });
+  const changed = await invoke(routes, 'POST /api/influencers/import', {
+    body: {
+      ...request,
+      rows: [{ ...request.rows[0], '网红粉丝量': '13000' }]
+    }
+  });
+
+  assert.equal(created.statusCode, 200);
+  assert.equal(created.payload.imported, 1);
+  assert.equal(created.payload.replayed, false);
+  assert.equal(replay.statusCode, 200);
+  assert.equal(replay.payload.imported, 0);
+  assert.equal(replay.payload.replayed, true);
+  assert.equal(replay.payload.knowledge_entry_id, created.payload.knowledge_entry_id);
+  assert.equal(changed.statusCode, 409);
+  assert.equal(db.prepare(`
+    SELECT COUNT(*) AS count FROM influencers WHERE import_batch=?
+  `).get(request.batch_id).count, 1);
+  assert.equal(db.prepare(`
+    SELECT COUNT(*) AS count FROM knowledge_entries
+    WHERE source_type='influencer_import' AND source_id=?
+  `).get(request.batch_id).count, 1);
 
   db.close();
 });
@@ -517,6 +598,52 @@ test('influencer upload route imports a multipart CSV through the real server', 
     assert.equal(inf.cpv, 0.07);
     assert.equal(inf.parent_record, 'UPLOAD-PARENT');
     db.close();
+  });
+});
+
+test('same-name influencer uploads derive distinct immutable batches from revised file bytes', async () => {
+  await withTempServer(async ({ baseUrl, token, dbPath }) => {
+    const Database = require('better-sqlite3');
+    async function upload(handle, followers) {
+      const csv = [
+        'KOL Handle,Platform,Followers,Link,Project',
+        `${handle},TikTok,${followers},https://example.com/${handle.slice(1)},Same Name Upload`
+      ].join('\n');
+      const form = new FormData();
+      form.append('batch_id', 'revised-influencers.csv');
+      form.append('file', new Blob([csv], { type: 'text/csv;charset=utf-8' }), 'revised-influencers.csv');
+      const response = await fetch(baseUrl + '/api/influencers/upload', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + token },
+        body: form
+      });
+      const text = await response.text();
+      assert.equal(response.status, 200, text);
+      return JSON.parse(text);
+    }
+
+    const first = await upload('@same_name_v1', 1000);
+    const revised = await upload('@same_name_v2', 2000);
+
+    assert.notEqual(first.batch, 'revised-influencers.csv');
+    assert.notEqual(revised.batch, 'revised-influencers.csv');
+    assert.notEqual(first.batch, revised.batch);
+    assert.equal(first.imported, 1);
+    assert.equal(revised.imported, 1);
+
+    const db = new Database(dbPath, { readonly: true });
+    try {
+      assert.equal(db.prepare(`
+        SELECT COUNT(*) AS count FROM influencers
+        WHERE kol_handle IN ('@same_name_v1','@same_name_v2')
+      `).get().count, 2);
+      assert.equal(db.prepare(`
+        SELECT COUNT(DISTINCT import_batch) AS count FROM influencers
+        WHERE kol_handle IN ('@same_name_v1','@same_name_v2')
+      `).get().count, 2);
+    } finally {
+      db.close();
+    }
   });
 });
 

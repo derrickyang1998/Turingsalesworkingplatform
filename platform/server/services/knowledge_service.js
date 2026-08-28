@@ -52,6 +52,72 @@ const CAPACITY_METRICS = Object.freeze([
   'payloadBytes',
   'references'
 ]);
+const BUSINESS_ARTIFACT_CONTRACT = 'tm-business-artifact-v1';
+const BUSINESS_ARTIFACT_DEFINITIONS = Object.freeze({
+  requirement_sheet: Object.freeze({
+    states: Object.freeze(['ingested', 'confirmed']),
+    campaignEntryType: 'campaign_demand',
+    campaignSourceType: 'campaign_demand',
+    legacyEntryType: 'demand',
+    legacySourceType: 'demand_record',
+    businessType: 'demand',
+    tags: Object.freeze([])
+  }),
+  influencer_batch: Object.freeze({
+    states: Object.freeze(['ingested']),
+    campaignEntryType: 'influencer_batch',
+    campaignSourceType: 'campaign_influencer_batch',
+    legacyEntryType: 'influencer_batch',
+    legacySourceType: 'influencer_import',
+    businessType: 'influencer',
+    tags: Object.freeze([])
+  }),
+  confirmed_proposal: Object.freeze({
+    states: Object.freeze(['confirmed']),
+    campaignEntryType: 'campaign_proposal',
+    campaignSourceType: 'campaign_proposal',
+    legacyEntryType: 'proposal_confirmed',
+    legacySourceType: 'proposal_record',
+    businessType: 'proposal',
+    tags: Object.freeze([])
+  }),
+  ppt_output: Object.freeze({
+    states: Object.freeze(['completed']),
+    campaignEntryType: 'campaign_ppt',
+    campaignSourceType: 'campaign_ppt',
+    legacyEntryType: 'proposal_ppt_output',
+    legacySourceType: 'ppt_generation',
+    businessType: 'proposal',
+    tags: Object.freeze([])
+  }),
+  project_review: Object.freeze({
+    states: Object.freeze(['confirmed']),
+    campaignEntryType: 'campaign_review',
+    campaignSourceType: 'campaign_review',
+    legacyEntryType: null,
+    legacySourceType: null,
+    businessType: 'campaign',
+    tags: Object.freeze([])
+  }),
+  ai_summary: Object.freeze({
+    states: Object.freeze(['promoted']),
+    campaignEntryType: 'ai_chat_summary',
+    campaignSourceType: 'campaign_ai_message',
+    legacyEntryType: 'ai_chat_summary',
+    legacySourceType: 'ai_message',
+    businessType: 'assistant',
+    tags: Object.freeze([])
+  }),
+  selected_conclusion: Object.freeze({
+    states: Object.freeze(['selected']),
+    campaignEntryType: 'ai_chat_summary',
+    campaignSourceType: 'campaign_ai_selected_message',
+    legacyEntryType: 'ai_chat_summary',
+    legacySourceType: 'ai_selected_message',
+    businessType: 'assistant',
+    tags: Object.freeze([])
+  })
+});
 const KNOWLEDGE_CUSTODY_CTE = `
   knowledge_custody_ranked AS MATERIALIZED (
     SELECT
@@ -108,6 +174,16 @@ class CampaignKnowledgeInputError extends Error {
     super(message || 'Campaign knowledge input is invalid');
     this.name = 'CampaignKnowledgeInputError';
     this.code = 'INVALID_CAMPAIGN_INPUT';
+    this.status = 400;
+    this.statusCode = 400;
+  }
+}
+
+class BusinessKnowledgeArtifactInputError extends Error {
+  constructor(message) {
+    super(message || 'Business knowledge artifact input is invalid');
+    this.name = 'BusinessKnowledgeArtifactInputError';
+    this.code = 'INVALID_BUSINESS_KNOWLEDGE_ARTIFACT';
     this.status = 400;
     this.statusCode = 400;
   }
@@ -999,6 +1075,243 @@ function prepareCampaignKnowledge(options) {
     entry,
     chunks: preparedChunks(entry)
   };
+}
+
+function businessArtifactDefinition(artifactType, artifactState) {
+  if (
+    typeof artifactType !== 'string' ||
+    !Object.prototype.hasOwnProperty.call(BUSINESS_ARTIFACT_DEFINITIONS, artifactType)
+  ) {
+    throw new BusinessKnowledgeArtifactInputError('Business knowledge artifact type is invalid');
+  }
+  const definition = BUSINESS_ARTIFACT_DEFINITIONS[artifactType];
+  if (typeof artifactState !== 'string' || !definition.states.includes(artifactState)) {
+    throw new BusinessKnowledgeArtifactInputError(
+      `Business knowledge artifact state is invalid for ${artifactType}`
+    );
+  }
+  return definition;
+}
+
+function businessArtifactMetadata(options, artifactType, artifactState) {
+  const raw = options.metadata === undefined ? {} : options.metadata;
+  const reserved = ['artifact_contract', 'artifact_state', 'artifact_type'];
+  if (
+    raw === null ||
+    typeof raw !== 'object' ||
+    Array.isArray(raw) ||
+    reserved.some(function(key) { return Object.prototype.hasOwnProperty.call(raw, key); })
+  ) {
+    throw new BusinessKnowledgeArtifactInputError(
+      'Business knowledge artifact metadata must be an object without reserved contract fields'
+    );
+  }
+  const metadata = JSON.parse(canonicalStoredJson(
+    raw,
+    {},
+    'business knowledge artifact metadata',
+    true
+  ));
+  metadata.artifact_contract = BUSINESS_ARTIFACT_CONTRACT;
+  metadata.artifact_state = artifactState;
+  metadata.artifact_type = artifactType;
+  return JSON.parse(canonicalStoredJson(
+    metadata,
+    {},
+    'business knowledge artifact metadata',
+    true
+  ));
+}
+
+function normalizedBusinessArtifact(options) {
+  if (!options || typeof options !== 'object' || Array.isArray(options)) {
+    throw new BusinessKnowledgeArtifactInputError(
+      'Business knowledge artifact options must be an object'
+    );
+  }
+  const artifactType = options.artifactType;
+  const artifactState = options.artifactState;
+  const definition = businessArtifactDefinition(artifactType, artifactState);
+  const campaignScoped = (
+    options.organizationId !== undefined || options.campaignId !== undefined
+  );
+  if (
+    campaignScoped &&
+    (options.organizationId === undefined || options.campaignId === undefined)
+  ) {
+    throw new BusinessKnowledgeArtifactInputError(
+      'Campaign business knowledge requires organizationId and campaignId'
+    );
+  }
+  if (!campaignScoped && !definition.legacyEntryType) {
+    throw new BusinessKnowledgeArtifactInputError(
+      `${artifactType} requires campaign custody`
+    );
+  }
+  const createdBy = canonicalCampaignId(options.createdBy, 'createdBy');
+  let sourceId;
+  try {
+    sourceId = canonicalCampaignSourceId(options.sourceId);
+  } catch (_error) {
+    throw new BusinessKnowledgeArtifactInputError(
+      'Business knowledge artifact sourceId is invalid'
+    );
+  }
+  const title = requiredCampaignText(options.title, 'business knowledge artifact title');
+  const summary = requiredCampaignText(options.summary, 'business knowledge artifact summary');
+  const content = requiredCampaignText(options.content, 'business knowledge artifact content');
+  if (!title.trim() || !content.trim()) {
+    throw new BusinessKnowledgeArtifactInputError(
+      'Business knowledge artifact title and content must not be empty'
+    );
+  }
+  if (!Array.isArray(options.tags)) {
+    throw new BusinessKnowledgeArtifactInputError(
+      'Business knowledge artifact tags must be an array'
+    );
+  }
+  const tags = canonicalKnowledgeTags(
+    definition.tags.concat(options.tags.map(function(tag) {
+      if (typeof tag !== 'string') {
+        throw new BusinessKnowledgeArtifactInputError(
+          'Business knowledge artifact tags must contain only strings'
+        );
+      }
+      return tag;
+    }))
+  );
+  const visibility = options.visibility === undefined ? 'private' : options.visibility;
+  if (visibility !== 'private' && visibility !== 'team') {
+    throw new BusinessKnowledgeArtifactInputError(
+      'Business knowledge artifact visibility must be private or team'
+    );
+  }
+  return {
+    artifactType,
+    artifactState,
+    definition,
+    campaignScoped,
+    organizationId: options.organizationId,
+    campaignId: options.campaignId,
+    createdBy,
+    actorRole: options.actorRole,
+    sourceId,
+    title,
+    summary,
+    content,
+    tags,
+    visibility,
+    businessType: options.businessType || definition.businessType,
+    businessId: options.businessId === undefined ? sourceId : options.businessId,
+    metadata: businessArtifactMetadata(options, artifactType, artifactState)
+  };
+}
+
+function artifactResult(result, normalized) {
+  Object.defineProperties(result, {
+    artifact_type: {
+      configurable: false,
+      enumerable: true,
+      value: normalized.artifactType,
+      writable: false
+    },
+    artifact_state: {
+      configurable: false,
+      enumerable: true,
+      value: normalized.artifactState,
+      writable: false
+    },
+    artifact_contract: {
+      configurable: false,
+      enumerable: true,
+      value: BUSINESS_ARTIFACT_CONTRACT,
+      writable: false
+    }
+  });
+  return result;
+}
+
+function legacyBusinessArtifactSourceHash(normalized) {
+  return framedDigest([
+    typedText(BUSINESS_ARTIFACT_CONTRACT, 'business artifact contract'),
+    typedText(normalized.artifactType, 'business artifact type'),
+    typedText(normalized.definition.legacyEntryType, 'business artifact entry type'),
+    typedText(normalized.definition.legacySourceType, 'business artifact source type'),
+    typedText(normalized.sourceId, 'business artifact source id'),
+    normalized.visibility === 'private'
+      ? typedInteger(normalized.createdBy, 'business artifact owner')
+      : Buffer.from([0])
+  ]);
+}
+
+function exactLegacyBusinessArtifact(existing, prepared) {
+  return (
+    existing.entry_type === prepared.entry_type &&
+    existing.source_type === prepared.source_type &&
+    existing.source_id === prepared.source_id &&
+    existing.business_type === prepared.business_type &&
+    existing.business_id === prepared.business_id &&
+    existing.content_sha256 === prepared.content_sha256 &&
+    existing.metadata_json === prepared.metadata_json
+  );
+}
+
+function ingestBusinessArtifact(db, options) {
+  const normalized = normalizedBusinessArtifact(options);
+  if (normalized.campaignScoped) {
+    const written = writeCampaignKnowledgeInTransaction(db, {
+      organizationId: normalized.organizationId,
+      campaignId: normalized.campaignId,
+      createdBy: normalized.createdBy,
+      entryType: normalized.definition.campaignEntryType,
+      title: normalized.title,
+      summary: normalized.summary,
+      content: normalized.content,
+      tags: normalized.tags,
+      sourceType: normalized.definition.campaignSourceType,
+      sourceId: normalized.sourceId,
+      visibility: normalized.visibility,
+      metadata: normalized.metadata
+    });
+    return artifactResult(written, normalized);
+  }
+
+  const input = {
+    entry_type: normalized.definition.legacyEntryType,
+    source_type: normalized.definition.legacySourceType,
+    source_id: normalized.sourceId,
+    title: normalized.title,
+    summary: normalized.summary,
+    content: normalized.content,
+    tags: normalized.tags,
+    visibility: normalized.visibility,
+    business_type: normalized.businessType,
+    business_id: normalized.businessId,
+    created_by: normalized.createdBy,
+    actor_role: normalized.actorRole,
+    metadata: normalized.metadata,
+    allow_source_hash: true,
+    source_hash: legacyBusinessArtifactSourceHash(normalized)
+  };
+  const prepared = prepareLegacyEntry(input);
+  const existing = findSourceHashEntry(db, prepared.source_hash);
+  if (existing) {
+    if (!exactLegacyBusinessArtifact(existing, prepared)) {
+      throw new CampaignKnowledgeConflictError(
+        'Business knowledge artifact source identity is immutable'
+      );
+    }
+    const decision = existingWriteDecision(db, existing, prepared, input);
+    const entry = normalizeEntry(
+      db.prepare('SELECT * FROM knowledge_entries WHERE id=?').get(existing.id)
+    );
+    return artifactResult({
+      status: decision === 'reuse' ? 'reused' : 'exact_existing',
+      entry
+    }, normalized);
+  }
+  const entry = ingestKnowledge(db, input);
+  return artifactResult({ status: 'created', entry }, normalized);
 }
 
 function knowledgeEntryPayloadBytes(entry) {
@@ -2179,7 +2492,7 @@ function findSourceHashEntry(db, sourceHash) {
   return db.prepare(`
     SELECT
       id,entry_type,source_type,source_id,source_hash,business_type,business_id,
-      created_by,visibility,is_public,source_identity_sha256
+      created_by,visibility,is_public,metadata_json,source_identity_sha256,content_sha256
     FROM knowledge_entries
     WHERE source_hash=?
   `).get(sourceHash) || null;
@@ -2467,6 +2780,11 @@ function exactCampaignKnowledgeGraph(db, existing, prepared) {
     );
   }
   const expected = prepared.entry;
+  const expectedMetadata = parseJson(expected.metadata_json, {});
+  const metadataMatches = (
+    expectedMetadata.artifact_contract !== BUSINESS_ARTIFACT_CONTRACT ||
+    graph.entry.metadata_json === expected.metadata_json
+  );
   const entryMatches = (
     graph.entry.source_identity_sha256 === expected.source_identity_sha256 &&
     graph.entry.content_sha256 === expected.content_sha256 &&
@@ -2475,7 +2793,8 @@ function exactCampaignKnowledgeGraph(db, existing, prepared) {
     graph.entry.summary === expected.summary &&
     graph.entry.content === expected.content &&
     graph.entry.tags_json === expected.tags_json &&
-    graph.entry.visibility === expected.visibility
+    graph.entry.visibility === expected.visibility &&
+    metadataMatches
   );
   const chunksMatch = (
     graph.chunks.length === prepared.chunks.length &&
@@ -3572,6 +3891,7 @@ function purgeEphemeralKnowledgeEntries(db, options) {
 
 module.exports = {
   ingestKnowledge,
+  ingestBusinessArtifact,
   writeCampaignKnowledgeInTransaction,
   preflightCampaignKnowledgeCustodyMoveInTransaction,
   applyKnowledgeCapacityGaugePlanInTransaction,
@@ -3601,5 +3921,6 @@ module.exports = {
   CampaignKnowledgeConflictError,
   CampaignKnowledgeCapacityError,
   CampaignKnowledgeInputError,
+  BusinessKnowledgeArtifactInputError,
   KnowledgeGovernanceError
 };

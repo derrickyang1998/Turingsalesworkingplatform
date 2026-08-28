@@ -448,13 +448,13 @@ function archivePptKnowledge(db, values) {
     artifact_sha256: values.artifact.sha256,
     response_bytes: values.artifact.bytes
   });
-  const archive = knowledgeService.writeCampaignKnowledgeInTransaction(db, {
+  const archive = knowledgeService.ingestBusinessArtifact(db, {
+    artifactType: 'ppt_output',
+    artifactState: 'completed',
     organizationId: values.organizationId,
     campaignId: values.campaignId,
     createdBy: values.userId,
-    sourceType: 'campaign_ppt',
     sourceId: `${values.proposalId}:${values.proposalContentSha256}`,
-    entryType: 'campaign_ppt',
     title: `Campaign PPT #${values.proposalId}`,
     summary: Array.from(projection.replace(/\s+/gu, ' ').trim()).slice(0, 1000).join(''),
     content: projection,

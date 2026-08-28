@@ -67,7 +67,7 @@
     { "path": "server/services/crm_scope_service.js", "sha256": "311ddd96949bbc11474a185b6346f5d0f91c0f5e6ba163facd2aa7b3825854f6" },
     { "path": "server/services/idempotency_service.js", "sha256": "191bd5b55b3eb2565c7a8406e5e3921ef535b9859f1669652ba296f849c1e83d" },
     { "path": "server/services/file_ingest_service.js", "sha256": "9fbb756a1109939da1c9cb5e3e7b77b0175ec2a9ea602d500a5f293f97f99c70" },
-    { "path": "server/services/knowledge_service.js", "sha256": "1f9c53ff93be4a6002dfe38c2e6c737b573f462cf82aa127456000116392e978" },
+    { "path": "server/services/knowledge_service.js", "sha256": "5a625241d7b18f21244ce1bcd9f35badded715332a06c2fa7e36e12dc572a81b" },
     { "path": "server/services/migration_service.js", "sha256": "4c447505f16e6fab80683eefe9a5d30012d3ed725efee7db66ef5e2573f939af" },
     { "path": "server/services/organization_access_service.js", "sha256": "a6a4b7d681e7da163bcf026c5fae9f93a125ef9f6604307f4c51c3bfe8a91505" },
     { "path": "server/services/sqlite_digest_service.js", "sha256": "84f701b14e2e49f7f92a31c2b954996bc331dd564bbcf7a35c8005d04f17d301" },

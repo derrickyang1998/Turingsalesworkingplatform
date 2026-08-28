@@ -783,7 +783,11 @@ test('linked demand and proposal archives project only committed immutable rows 
       source_hash: null,
       business_type: 'campaign',
       business_id: String(fixture.campaignId),
-      metadata_json: '{}',
+      metadata_json: JSON.stringify({
+        artifact_contract: 'tm-business-artifact-v1',
+        artifact_state: 'ingested',
+        artifact_type: 'requirement_sheet'
+      }),
       embedding_json: null,
       created_by: fixture.userId,
       source_identity_sha256: campaignSourceIdentityDigestFixture({
@@ -818,7 +822,11 @@ test('linked demand and proposal archives project only committed immutable rows 
       source_hash: null,
       business_type: 'campaign',
       business_id: String(fixture.campaignId),
-      metadata_json: '{}',
+      metadata_json: JSON.stringify({
+        artifact_contract: 'tm-business-artifact-v1',
+        artifact_state: 'confirmed',
+        artifact_type: 'confirmed_proposal'
+      }),
       embedding_json: null,
       created_by: fixture.userId,
       source_identity_sha256: campaignSourceIdentityDigestFixture({

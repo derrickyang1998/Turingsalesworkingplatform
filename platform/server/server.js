@@ -37,6 +37,7 @@ const uploadAdmissionIdempotency = Object.freeze({
   failInternalInTransaction: idempotency.failInternalInTransaction
 });
 const {
+  SANDBOX_LIMITS,
   assertUploadSandboxStartupReady,
   createUploadSandboxService,
   loadRuntimeManifest,
@@ -495,6 +496,15 @@ function localUploadReadinessSnapshot() {
   });
 }
 
+function localUploadCapacityStatfs() {
+  const bsize = 4096;
+  const availableBytes = SANDBOX_LIMITS.freeFloorBytes + (SANDBOX_LIMITS.reservationBytes * 2);
+  return Promise.resolve({
+    bavail: Math.ceil(availableBytes / bsize),
+    bsize
+  });
+}
+
 function localUploadReadinessAdapters() {
   return {
     verifyIdentity: async () => ({
@@ -508,6 +518,7 @@ function localUploadReadinessAdapters() {
       gid: 64123
     }),
     verifyInstalledArtifacts: async () => {},
+    statfs: localUploadCapacityStatfs,
     systemdVersion: async () => loadRuntimeManifest().manifest.minimum_systemd_version,
     systemctlShow: async (_unitName, expected) => expected,
     staleUnitController: Object.freeze({
@@ -1079,27 +1090,32 @@ function requireCampaignLinkedJson(req) {
 
 function createLegacyDemand(req, res) {
   const { brand_name, company_name, product_name, industry, budget, target_market, platform, data_json } = req.body;
-  const result = db.prepare('INSERT INTO demands (user_id, brand_name, company_name, product_name, industry, budget, target_market, platform, data_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
-    req.user.id, brand_name, company_name, product_name, industry, budget, target_market, platform, JSON.stringify(data_json)
-  );
-  db.prepare('INSERT INTO activity_log (user_id, action, module, details, ip_address) VALUES (?, ?, ?, ?, ?)').run(req.user.id, 'create_demand', 'demand', `Created demand for ${brand_name}`, req.ip);
   try {
-    knowledgeService.ingestKnowledge(db, {
-      title: '需求归档：' + (brand_name || product_name || result.lastInsertRowid),
-      summary: [brand_name, product_name, industry, target_market, budget].filter(Boolean).join(' / '),
-      content: JSON.stringify({ brand_name, company_name, product_name, industry, budget, target_market, platform, data_json }, null, 2),
-      entry_type: 'demand',
-      source_type: 'demand_record',
-      source_id: result.lastInsertRowid,
-      visibility: 'private',
-      tags: ['demand', industry, target_market].filter(Boolean),
-      business_type: 'demand',
-      business_id: result.lastInsertRowid,
-      created_by: req.user.id,
-      actor_role: req.user.role
-    });
-  } catch(e) {}
-  res.json({ id: result.lastInsertRowid });
+    const demandId = db.transaction(function() {
+      const result = db.prepare('INSERT INTO demands (user_id, brand_name, company_name, product_name, industry, budget, target_market, platform, data_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
+        req.user.id, brand_name, company_name, product_name, industry, budget, target_market, platform, JSON.stringify(data_json)
+      );
+      db.prepare('INSERT INTO activity_log (user_id, action, module, details, ip_address) VALUES (?, ?, ?, ?, ?)').run(req.user.id, 'create_demand', 'demand', `Created demand for ${brand_name}`, req.ip);
+      knowledgeService.ingestBusinessArtifact(db, {
+        artifactType: 'requirement_sheet',
+        artifactState: 'ingested',
+        title: '需求归档：' + (brand_name || product_name || result.lastInsertRowid),
+        summary: [brand_name, product_name, industry, target_market, budget].filter(Boolean).join(' / '),
+        content: JSON.stringify({ brand_name, company_name, product_name, industry, budget, target_market, platform, data_json }, null, 2),
+        sourceId: result.lastInsertRowid,
+        visibility: 'private',
+        tags: ['demand', industry, target_market].filter(Boolean),
+        businessType: 'demand',
+        businessId: result.lastInsertRowid,
+        createdBy: req.user.id,
+        actorRole: req.user.role
+      });
+      return Number(result.lastInsertRowid);
+    }).immediate();
+    res.json({ id: demandId });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
 }
 
 app.post('/api/demands', authMiddleware, (req, res) => {
@@ -1129,26 +1145,31 @@ app.get('/api/demands', authMiddleware, (req, res) => {
 // ===== PROPOSAL ROUTES =====
 function createLegacyProposal(req, res) {
   const { demand_id, template_id, content } = req.body;
-  const result = db.prepare('INSERT INTO proposals (user_id, demand_id, template_id, content) VALUES (?, ?, ?, ?)').run(req.user.id, demand_id, template_id, content);
-  db.prepare('INSERT INTO activity_log (user_id, action, module, details, ip_address) VALUES (?, ?, ?, ?, ?)').run(req.user.id, 'generate_proposal', 'proposal', `Generated proposal with template ${template_id}`, req.ip);
   try {
-    knowledgeService.ingestKnowledge(db, {
-      title: '确认方案：' + (demand_id || result.lastInsertRowid),
-      summary: String(content || '').slice(0, 240),
-      content: content || '',
-      entry_type: 'proposal_confirmed',
-      source_type: 'proposal_record',
-      source_id: result.lastInsertRowid,
-      visibility: 'team',
-      tags: ['proposal', 'confirmed', template_id].filter(Boolean),
-      business_type: 'proposal',
-      business_id: result.lastInsertRowid,
-      created_by: req.user.id,
-      metadata: { demand_id, template_id },
-      actor_role: req.user.role
-    });
-  } catch(e) {}
-  res.json({ id: result.lastInsertRowid });
+    const proposalId = db.transaction(function() {
+      const result = db.prepare('INSERT INTO proposals (user_id, demand_id, template_id, content) VALUES (?, ?, ?, ?)').run(req.user.id, demand_id, template_id, content);
+      db.prepare('INSERT INTO activity_log (user_id, action, module, details, ip_address) VALUES (?, ?, ?, ?, ?)').run(req.user.id, 'generate_proposal', 'proposal', `Generated proposal with template ${template_id}`, req.ip);
+      knowledgeService.ingestBusinessArtifact(db, {
+        artifactType: 'confirmed_proposal',
+        artifactState: 'confirmed',
+        title: '确认方案：' + (demand_id || result.lastInsertRowid),
+        summary: String(content || '').slice(0, 240),
+        content: content || '',
+        sourceId: result.lastInsertRowid,
+        visibility: 'team',
+        tags: ['proposal', 'confirmed', template_id].filter(Boolean),
+        businessType: 'proposal',
+        businessId: result.lastInsertRowid,
+        createdBy: req.user.id,
+        metadata: { demand_id, template_id },
+        actorRole: req.user.role
+      });
+      return Number(result.lastInsertRowid);
+    }).immediate();
+    res.json({ id: proposalId });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
 }
 
 app.post('/api/proposals', authMiddleware, (req, res) => {
@@ -1363,22 +1384,6 @@ function createLegacyPpt(req, res) {
   const pptPayload = normalizePptRequestPayload(req.body);
   fs.writeFileSync(dataPath, JSON.stringify(pptPayload));
   try {
-    try {
-      knowledgeService.ingestKnowledge(db, {
-        title: 'PPT 生成请求：' + (pptPayload.brand || pptPayload.title || Date.now()),
-        summary: String(req.body.summary || pptPayload.title || pptPayload.brand || '').slice(0, 240),
-        content: JSON.stringify(pptPayload, null, 2),
-        entry_type: 'proposal_ppt_request',
-        source_type: 'ppt_generation',
-        source_id: req.body.demand_id || pptPayload.brand || dataPath,
-        visibility: 'private',
-        tags: ['ppt', 'proposal', pptPayload.brand].filter(Boolean),
-        business_type: 'proposal',
-        business_id: req.body.demand_id || '',
-        created_by: req.user.id,
-        actor_role: req.user.role
-      });
-    } catch (archiveErr) {}
     const python = process.env.PYTHON_BIN || (process.platform === 'win32' ? 'python' : 'python3');
     cp.execFileSync(python, [path.join(__dirname, 'generate_ppt.py'), dataPath, outPath], {
       timeout: 30000,
@@ -1386,9 +1391,37 @@ function createLegacyPpt(req, res) {
       env: runtimeConfig.pythonChildEnvironment()
     });
     fs.unlinkSync(dataPath);
+    const artifact = fs.readFileSync(outPath);
+    const payloadSha256 = crypto.createHash('sha256')
+      .update(Buffer.from(JSON.stringify(pptPayload), 'utf8'))
+      .digest('hex');
+    const artifactSha256 = crypto.createHash('sha256').update(artifact).digest('hex');
+    knowledgeService.ingestBusinessArtifact(db, {
+      artifactType: 'ppt_output',
+      artifactState: 'completed',
+      title: 'PPT 成品：' + (pptPayload.brand || pptPayload.title || payloadSha256.slice(0, 12)),
+      summary: String(req.body.summary || pptPayload.title || pptPayload.brand || '').slice(0, 240),
+      content: JSON.stringify(pptPayload, null, 2),
+      sourceId: req.body.demand_id
+        ? `${req.body.demand_id}:${payloadSha256}:${artifactSha256}`
+        : `${payloadSha256}:${artifactSha256}`,
+      visibility: 'private',
+      tags: ['ppt', 'proposal', pptPayload.brand].filter(Boolean),
+      businessType: 'proposal',
+      businessId: req.body.demand_id || payloadSha256,
+      createdBy: req.user.id,
+      actorRole: req.user.role,
+      metadata: {
+        demand_id: req.body.demand_id || null,
+        payload_sha256: payloadSha256,
+        artifact_sha256: artifactSha256,
+        artifact_bytes: artifact.length
+      }
+    });
     res.download(outPath, 'proposal.pptx', function() { try { fs.unlinkSync(outPath); } catch(e) {} });
   } catch (e) {
     try { fs.unlinkSync(dataPath); } catch(e2) {}
+    try { fs.unlinkSync(outPath); } catch(e2) {}
     res.status(500).json({ error: 'PPT generation failed: ' + e.message });
   }
 }
@@ -1580,8 +1613,12 @@ app.post('/api/influencers/upload', authMiddleware, async (req, res) => {
             error.statusCode = 400;
             throw error;
           }
+          const requestedBatchId = String(req.body.batch_id || '').trim();
+          const uploadBatchId = requestedBatchId && requestedBatchId !== req.file.originalname
+            ? requestedBatchId
+            : `upload_${req.file.sha256}`;
           const imported = influencerWorkflow.importInfluencerRows(db, data.rows, {
-            batch_id: req.body.batch_id || req.file.originalname,
+            batch_id: uploadBatchId,
             user: current.user,
             data_source: 'upload'
           });
@@ -1793,21 +1830,28 @@ app.post('/api/ai/proposal-draft', authMiddleware, aiLimiter, aiQuotaGuard, asyn
     const demandTitle = body.title || demand.brand || demand.product || '需求方案草稿';
     let demandEntry = null;
     if (!linkedRequest) {
-      demandEntry = knowledgeService.ingestKnowledge(db, {
+      const demandSourceId = body.demand_id || body.source_id || crypto
+        .createHash('sha256')
+        .update(Buffer.from(demandText, 'utf8'))
+        .digest('hex');
+      demandEntry = knowledgeService.ingestBusinessArtifact(db, {
+        artifactType: 'requirement_sheet',
+        artifactState: 'ingested',
         title: '需求归档：' + demandTitle,
         summary: demandText.slice(0, 240),
         content: demandText,
-        entry_type: 'demand',
-        source_type: body.source_type || 'proposal_draft_request',
-        source_id: body.demand_id || body.source_id || demandTitle,
+        sourceId: demandSourceId,
         visibility: body.visibility || 'private',
         tags: body.tags || ['demand', 'proposal'],
-        business_type: 'demand',
-        business_id: body.demand_id || '',
-        created_by: req.user.id,
-        actor_role: req.user.role,
-        metadata: { demand }
-      });
+        businessType: 'demand',
+        businessId: demandSourceId,
+        createdBy: req.user.id,
+        actorRole: req.user.role,
+        metadata: {
+          demand,
+          requested_source_type: body.source_type || null
+        }
+      }).entry;
     }
     const template = body.template && typeof body.template === 'object' ? body.template : {};
     const templateSections = Array.isArray(template.sections)
@@ -1879,6 +1923,7 @@ app.post('/api/demand/parse-file', authMiddleware, async (req, res) => {
       assertAuthorized: () => assertUploadAuthorityFresh(authority),
       finalize(parsed, lifecycle) {
         const data = parsed && parsed.data ? parsed.data : {};
+        const sourceFile = req.phase4Request.multipart.file;
         const response = {
           fileName: req.file.originalname,
           extractedText: data.text,
@@ -1894,7 +1939,34 @@ app.post('/api/demand/parse-file', authMiddleware, async (req, res) => {
           ocrUsed: data.ocrUsed
         };
         db.transaction(() => {
-          authority.readFresh(db);
+          const current = authority.readFresh(db);
+          const extractedText = String(data.text || '');
+          response.demand_entry = extractedText.trim()
+            ? knowledgeService.ingestBusinessArtifact(db, {
+                artifactType: 'requirement_sheet',
+                artifactState: 'ingested',
+                title: '需求文件：' + sourceFile.originalname,
+                summary: extractedText.slice(0, 240),
+                content: extractedText,
+                sourceId: sourceFile.sha256,
+                visibility: 'private',
+                tags: ['demand', 'upload'],
+                businessType: 'demand',
+                businessId: sourceFile.sha256,
+                createdBy: current.user.id,
+                actorRole: current.user.role,
+                metadata: {
+                  file_name: sourceFile.originalname,
+                  file_sha256: sourceFile.sha256,
+                  mime: sourceFile.mimetype,
+                  size: sourceFile.size,
+                  parser: data.parser || null,
+                  fallback: data.fallback === true,
+                  needs_ocr: data.needsOcr === true,
+                  ocr_used: data.ocrUsed === true
+                }
+              }).entry
+            : null;
           lifecycle.completeAdmissionInTransaction(db);
         }).immediate();
         return response;
@@ -2120,6 +2192,7 @@ async function bootstrapServer() {
     emitControllerEvent: emitUploadSandboxControllerEvent
   };
   if (localWorker) {
+    sandboxOptions.statfs = localUploadCapacityStatfs;
     sandboxOptions.executeJob = async (job, options) => {
       await options.assertLeaseOwned(job.admission);
       await workerMain([

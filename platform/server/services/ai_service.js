@@ -189,26 +189,27 @@ function archiveChatSummary(db, opts) {
   const question = String(opts.message || '');
   if (!answer.trim() && !question.trim()) return null;
   const summary = 'Q: ' + question.slice(0, 1200) + '\n\nA: ' + answer.slice(0, 1800);
-  return knowledge.ingestKnowledge(db, {
+  const manuallySelected = opts.promotion && opts.promotion.trigger === 'manual';
+  return knowledge.ingestBusinessArtifact(db, {
+    artifactType: manuallySelected ? 'selected_conclusion' : 'ai_summary',
+    artifactState: manuallySelected ? 'selected' : 'promoted',
     title: 'AI 对话摘要：' + makeTitle(question),
     summary: answer.slice(0, 240),
     content: summary,
-    entry_type: 'ai_chat_summary',
-    source_type: 'ai_message',
-    source_id: opts.assistantMessageId,
-    business_type: opts.source_module || 'assistant',
-    business_id: opts.conversationId,
+    sourceId: opts.assistantMessageId,
+    businessType: opts.source_module || 'assistant',
+    businessId: opts.conversationId,
     visibility: opts.visibility || 'private',
     tags: ['ai_chat', 'conversation'],
-    created_by: opts.user.id,
-    actor_role: opts.user.role,
+    createdBy: opts.user.id,
+    actorRole: opts.user.role,
     metadata: {
       conversation_id: opts.conversationId,
       assistant_message_id: opts.assistantMessageId,
       question: question.slice(0, 240),
       promotion: opts.promotion
     }
-  });
+  }).entry;
 }
 
 async function handleLegacyChat(db, opts) {
@@ -960,12 +961,13 @@ function archiveLinkedChatSummary(db, opts) {
   const answer = String(opts.answer || '');
   const question = String(opts.message || '');
   const content = `Question:\n${question}\n\nAnswer:\n${answer}`;
-  const written = knowledge.writeCampaignKnowledgeInTransaction(db, {
+  const manuallySelected = opts.promotion && opts.promotion.trigger === 'manual';
+  const written = knowledge.ingestBusinessArtifact(db, {
+    artifactType: manuallySelected ? 'selected_conclusion' : 'ai_summary',
+    artifactState: manuallySelected ? 'selected' : 'promoted',
     organizationId: opts.access.campaign.org_id,
     campaignId: opts.campaignId,
     createdBy: opts.user.id,
-    entryType: 'ai_chat_summary',
-    sourceType: 'campaign_ai_message',
     sourceId: opts.assistantMessageId,
     title: `AI conversation summary #${opts.conversationId}`,
     summary: Array.from(answer).slice(0, 1000).join(''),
@@ -1996,14 +1998,32 @@ function manualPromotionQuestion(db, conversationId, ownerId, assistantMessage) 
   };
 }
 
-function existingPromotedMessageKnowledge(db, sourceType, messageId) {
+function existingPromotedMessageKnowledge(
+  db,
+  selectedSourceType,
+  legacySourceType,
+  messageId
+) {
   return db.prepare(`
     SELECT id,visibility,metadata_json
     FROM knowledge_entries
-    WHERE source_type=? AND CAST(source_id AS TEXT)=?
-    ORDER BY id
+    WHERE CAST(source_id AS TEXT)=?
+      AND (
+        source_type=?
+        OR (
+          source_type=?
+          AND json_valid(metadata_json)
+          AND json_extract(metadata_json,'$.promotion.trigger')='manual'
+        )
+      )
+    ORDER BY CASE WHEN source_type=? THEN 0 ELSE 1 END,id
     LIMIT 1
-  `).get(sourceType, String(messageId)) || null;
+  `).get(
+    String(messageId),
+    selectedSourceType,
+    legacySourceType,
+    selectedSourceType
+  ) || null;
 }
 
 function requireExistingCampaignKnowledgeLink(db, campaignId, knowledgeEntryId) {
@@ -2130,8 +2150,18 @@ function promoteMessageToKnowledge(db, opts) {
         actor_user_id: actor.id
       });
       const campaignId = positiveId(conversation.__campaign_id);
-      const sourceType = campaignId === null ? 'ai_message' : 'campaign_ai_message';
-      const existing = existingPromotedMessageKnowledge(db, sourceType, messageId);
+      const selectedSourceType = campaignId === null
+        ? 'ai_selected_message'
+        : 'campaign_ai_selected_message';
+      const legacySourceType = campaignId === null
+        ? 'ai_message'
+        : 'campaign_ai_message';
+      const existing = existingPromotedMessageKnowledge(
+        db,
+        selectedSourceType,
+        legacySourceType,
+        messageId
+      );
       let knowledgeEntryId;
       let result = 'promoted';
       let resultVisibility = visibility;

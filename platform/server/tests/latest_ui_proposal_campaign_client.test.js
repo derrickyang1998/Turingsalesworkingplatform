@@ -300,7 +300,10 @@ test('proposal route uses fixed private Campaign RAG without archiving an unconf
   assert.match(route, /atomicOneShot:\s*true/);
   assert.match(route, /source_module:\s*'proposal'/);
   assert.match(route, /verifyDemandAnalysisAuditContext/);
-  assert.match(route, /if \(!linkedRequest\)[\s\S]*knowledgeService\.ingestKnowledge/);
+  assert.match(route, /if \(!linkedRequest\)[\s\S]*knowledgeService\.ingestBusinessArtifact/);
+  assert.match(route, /artifactType:\s*'requirement_sheet'/);
+  assert.match(route, /artifactState:\s*'ingested'/);
+  assert.doesNotMatch(route, /knowledgeService\.ingestKnowledge/);
   assert.match(route, /if \(linkedRequest\) return sendAiChatError\(req, res, e\)/);
   assert.doesNotMatch(route, /body\.knowledge_limit/);
   assert.doesNotMatch(route, /summaryVisibility/);

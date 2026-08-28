@@ -243,11 +243,19 @@ const originalExecFileSync = childProcess.execFileSync;
 childProcess.execFileSync = function(file, args, options) {
   if (Array.isArray(args) && args[0] && /generate_ppt\\.py$/i.test(args[0])) {
     fs.appendFileSync(${JSON.stringify(counterPath)}, 'render\\n');
+    const payload = JSON.parse(fs.readFileSync(args[1], 'utf8'));
+    const renderCount = fs.readFileSync(${JSON.stringify(counterPath)}, 'utf8')
+      .trim()
+      .split(/\\r?\\n/)
+      .length;
+    const label = payload && payload.outline && payload.outline.title === 'Legacy nondeterministic replay'
+      ? 'legacy-variant-' + renderCount
+      : 'runtime';
     fs.writeFileSync(
       args[2],
       Buffer.concat([
         Buffer.from([0x50, 0x4b, 0x03, 0x04]),
-        Buffer.from('phase4-server-ppt:runtime', 'utf8')
+        Buffer.from('phase4-server-ppt:' + label, 'utf8')
       ])
     );
     return Buffer.alloc(0);
@@ -1729,7 +1737,7 @@ test('AI manual-promotion route is idempotent and persists a bounded mutation au
     try {
       assert.equal(verified.prepare(`
         SELECT COUNT(*) AS count FROM knowledge_entries
-        WHERE entry_type='ai_chat_summary' AND source_type='ai_message' AND source_id=?
+        WHERE entry_type='ai_chat_summary' AND source_type='ai_selected_message' AND source_id=?
       `).get(messageId).count, 1);
       const audits = verified.prepare(`
         SELECT details FROM activity_log
@@ -2054,7 +2062,7 @@ test('influencer import rolls back when parser admission completion conflicts', 
   }
 });
 
-test('demand parsing completes admission without writing business knowledge', {
+test('demand parsing completes admission and deduplicates the uploaded requirement sheet', {
   timeout: 30000
 }, async () => {
   const server = await startTestServer('tm-phase4-demand-sandbox-');
@@ -2089,17 +2097,42 @@ test('demand parsing completes admission without writing business knowledge', {
       'fallback',
       'parser',
       'needsOcr',
-      'ocrUsed'
+      'ocrUsed',
+      'demand_entry'
     ]);
     assert.equal(uploaded.body.fileName, 'demand.txt');
     assert.match(uploaded.body.extractedText, /Northstar/);
+    assert.ok(Number.isSafeInteger(uploaded.body.demand_entry.id));
+
+    const replay = await multipartRequest(
+      server.baseUrl,
+      '/api/demand/parse-file',
+      {
+        token: login.body.token,
+        headers: { 'X-Request-Id': 'demand-sandbox-replay' },
+        file: {
+          name: 'demand.txt',
+          type: 'text/plain',
+          bytes: Buffer.from('Brand: Northstar\nBudget: 50000\nMarket: US', 'utf8')
+        }
+      }
+    );
+    assert.equal(replay.response.status, 200, replay.text + '\n' + server.output());
+    assert.equal(replay.body.demand_entry.id, uploaded.body.demand_entry.id);
 
     const inspection = new Database(server.dbPath, { readonly: true });
     try {
       assert.equal(
         inspection.prepare('SELECT COUNT(*) AS count FROM knowledge_entries').get().count,
-        beforeKnowledge
+        beforeKnowledge + 1
       );
+      const demandMetadata = JSON.parse(inspection.prepare(`
+        SELECT metadata_json FROM knowledge_entries WHERE id=?
+      `).get(uploaded.body.demand_entry.id).metadata_json);
+      assert.equal(demandMetadata.artifact_contract, 'tm-business-artifact-v1');
+      assert.equal(demandMetadata.artifact_state, 'ingested');
+      assert.equal(demandMetadata.artifact_type, 'requirement_sheet');
+      assert.match(demandMetadata.file_sha256, /^[0-9a-f]{64}$/);
       assert.deepEqual(inspection.prepare(`
         SELECT state,status_code,response_kind
         FROM request_idempotency
@@ -2342,6 +2375,79 @@ test('upload final authorization re-reads the live session before business persi
   }
 });
 
+test('legacy demand and confirmed proposal use the unified business artifact contract', {
+  timeout: 30000
+}, async () => {
+  const server = await startTestServer('tm-phase4-legacy-artifact-route-');
+  let inspection;
+  try {
+    const login = await jsonRequest(server.baseUrl, '/api/auth/login', {
+      method: 'POST',
+      body: { username: 'admin', password: 'AdminTest1!Secure' }
+    });
+    assert.equal(login.response.status, 200, login.text + '\n' + server.output());
+    const demand = await jsonRequest(server.baseUrl, '/api/demands', {
+      method: 'POST',
+      token: login.body.token,
+      body: {
+        brand_name: 'Legacy artifact brand',
+        product_name: 'Legacy artifact product',
+        industry: 'Consumer electronics',
+        target_market: 'US',
+        data_json: { requirement: 'confirmed' }
+      }
+    });
+    assert.equal(demand.response.status, 200, demand.text);
+    const proposal = await jsonRequest(server.baseUrl, '/api/proposals', {
+      method: 'POST',
+      token: login.body.token,
+      body: {
+        demand_id: demand.body.id,
+        template_id: 'legacy-confirmed-template',
+        content: '{"title":"Legacy confirmed proposal"}'
+      }
+    });
+    assert.equal(proposal.response.status, 200, proposal.text);
+
+    inspection = new Database(server.dbPath, { readonly: true });
+    const artifacts = inspection.prepare(`
+      SELECT source_type,source_id,metadata_json
+      FROM knowledge_entries
+      WHERE (source_type='demand_record' AND source_id=?)
+         OR (source_type='proposal_record' AND source_id=?)
+      ORDER BY source_type
+    `).all(demand.body.id, proposal.body.id);
+    assert.equal(artifacts.length, 2);
+    const demandMetadata = JSON.parse(
+      artifacts.find((row) => row.source_type === 'demand_record').metadata_json
+    );
+    const proposalMetadata = JSON.parse(
+      artifacts.find((row) => row.source_type === 'proposal_record').metadata_json
+    );
+    assert.deepEqual({
+      contract: demandMetadata.artifact_contract,
+      state: demandMetadata.artifact_state,
+      type: demandMetadata.artifact_type
+    }, {
+      contract: 'tm-business-artifact-v1',
+      state: 'ingested',
+      type: 'requirement_sheet'
+    });
+    assert.deepEqual({
+      contract: proposalMetadata.artifact_contract,
+      state: proposalMetadata.artifact_state,
+      type: proposalMetadata.artifact_type
+    }, {
+      contract: 'tm-business-artifact-v1',
+      state: 'confirmed',
+      type: 'confirmed_proposal'
+    });
+  } finally {
+    if (inspection) inspection.close();
+    await server.close();
+  }
+});
+
 test('one PPT endpoint preserves legacy omission and replays linked persisted proposal bytes', {
   timeout: 30000
 }, async () => {
@@ -2389,7 +2495,71 @@ test('one PPT endpoint preserves legacy omission and replays linked persisted pr
     assert.match(legacy.response.headers.get('content-disposition'), /filename="proposal\.pptx"/);
     assert.deepEqual(legacy.bytes, fixturePptx('runtime'));
 
+    const nondeterministicBody = {
+      outline: { title: 'Legacy nondeterministic replay' }
+    };
+    const nondeterministicFirst = await binaryRequest(server.baseUrl, pathName, {
+      method: 'POST',
+      token: login.body.token,
+      body: nondeterministicBody
+    });
+    const nondeterministicSecond = await binaryRequest(server.baseUrl, pathName, {
+      method: 'POST',
+      token: login.body.token,
+      body: nondeterministicBody
+    });
+    assert.equal(nondeterministicFirst.response.status, 200);
+    assert.equal(nondeterministicSecond.response.status, 200);
+    assert.deepEqual(nondeterministicFirst.bytes, fixturePptx('legacy-variant-2'));
+    assert.deepEqual(nondeterministicSecond.bytes, fixturePptx('legacy-variant-3'));
+
     fixtureDb = new Database(server.dbPath);
+    const legacyPptArchive = fixtureDb.prepare(`
+      SELECT entry_type,source_type,metadata_json
+      FROM knowledge_entries
+      WHERE source_type='ppt_generation'
+        AND title='PPT 成品：Legacy omission route'
+      LIMIT 1
+    `).get();
+    assert.ok(legacyPptArchive);
+    assert.equal(legacyPptArchive.entry_type, 'proposal_ppt_output');
+    const legacyPptMetadata = JSON.parse(legacyPptArchive.metadata_json);
+    assert.equal(legacyPptMetadata.artifact_contract, 'tm-business-artifact-v1');
+    assert.equal(legacyPptMetadata.artifact_state, 'completed');
+    assert.equal(legacyPptMetadata.artifact_type, 'ppt_output');
+    assert.match(legacyPptMetadata.artifact_sha256, /^[0-9a-f]{64}$/);
+    assert.equal(legacyPptMetadata.artifact_bytes, legacy.bytes.length);
+    const nondeterministicArchives = fixtureDb.prepare(`
+      SELECT source_id,metadata_json
+      FROM knowledge_entries
+      WHERE source_type='ppt_generation'
+        AND title='PPT 成品：Legacy nondeterministic replay'
+      ORDER BY id
+    `).all();
+    assert.equal(nondeterministicArchives.length, 2);
+    assert.equal(new Set(nondeterministicArchives.map((row) => row.source_id)).size, 2);
+    assert.equal(new Set(nondeterministicArchives.map((row) => (
+      JSON.parse(row.metadata_json).artifact_sha256
+    ))).size, 2);
+    fixtureDb.exec(`
+      CREATE TRIGGER reject_legacy_ppt_archive_for_cleanup_test
+      BEFORE INSERT ON knowledge_entries
+      WHEN NEW.source_type='ppt_generation'
+      BEGIN SELECT RAISE(ABORT,'injected legacy PPT archive failure'); END
+    `);
+    const failedLegacy = await jsonRequest(server.baseUrl, pathName, {
+      method: 'POST',
+      token: login.body.token,
+      body: { outline: { title: 'Legacy archive cleanup failure' } }
+    });
+    assert.equal(failedLegacy.response.status, 500, failedLegacy.text);
+    assert.match(failedLegacy.body.error, /injected legacy PPT archive failure/);
+    assert.deepEqual(
+      fs.readdirSync(path.join(server.tempDir, 'tmp')).filter((name) => (
+        /^ppt_data_.*\.json$/.test(name) || /^proposal_.*\.pptx$/.test(name)
+      )),
+      []
+    );
     assert.equal(fixtureDb.prepare(`
       SELECT COUNT(*) AS count FROM request_idempotency
       WHERE scope='proposal.ppt.generate.linked'
@@ -2498,8 +2668,8 @@ test('one PPT endpoint preserves legacy omission and replays linked persisted pr
     assert.deepEqual(replay.bytes, first.bytes);
     assert.equal(
       fs.readFileSync(generator.counterPath, 'utf8').trim().split(/\r?\n/).length,
-      2,
-      'legacy omission and first linked render should each invoke the generator once'
+      5,
+      'legacy outputs, archive-failure cleanup, and first linked render each invoke the generator once'
     );
 
     fixtureDb = new Database(server.dbPath, { readonly: true });
