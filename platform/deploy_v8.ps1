@@ -3256,6 +3256,7 @@ if runtime.get('bytes') != 640592018 or not re.fullmatch(r'[0-9a-f]{64}', runtim
 print(runtime['sha256'])
 PY
 )"
+export TM_UPLOAD_SANDBOX_PROVISION_DIAGNOSTIC=1
 BuildEvidence="$(
   "$ParserBuild" \
     --source-root "$ParserSourceRoot" \
