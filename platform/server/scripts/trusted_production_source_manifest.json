@@ -73,7 +73,7 @@
     { "path": "server/services/sqlite_digest_service.js", "sha256": "84f701b14e2e49f7f92a31c2b954996bc331dd564bbcf7a35c8005d04f17d301" },
     { "path": "server/services/upload_sandbox_service.js", "sha256": "5fa3e3323a730e38705eed1c21bc3928dd17044e25de8017d8920510e8664acb" },
     { "path": "server/systemd/turingmarket-gate-cleanup.service", "sha256": "acc42c90010eca793d22b6ee517231872aed5c17b36f0222052351b97cfdb7c6" },
-    { "path": "server/systemd/turingmarket-parser.manifest.json", "sha256": "44db310046efe65bd68c110313b4887995c73e276e7d58f65fe037c09a973c5b" },
+    { "path": "server/systemd/turingmarket-parser.manifest.json", "sha256": "7d1c5bd2bb3b33d954513d107950c55e6d1468f2b1ecef9ae56d2349c861927d" },
     { "path": "server/systemd/turingmarket-parser.slice", "sha256": "d0cc089526feff2cbe0240a6fc711b113c2eac0af95c3763a00ef0edc8467c17" },
     { "path": "server/systemd/turingmarket-parser@.service", "sha256": "a363f7ce7021067be99fdf74144b1ca7e25ba6ac68ce070a1bfa07d07a73c49a" }
   ]

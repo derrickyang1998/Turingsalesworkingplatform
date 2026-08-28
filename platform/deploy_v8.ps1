@@ -34,7 +34,7 @@ $TRUSTED_SOURCE_GATE_RELATIVE_PATH = "server\scripts\trusted_production_source_g
 $TRUSTED_SOURCE_MANIFEST_RELATIVE_PATH = "server\scripts\trusted_production_source_manifest.json"
 $TRUSTED_RUNTIME_CONFIG_RELATIVE_PATH = "server\config\runtime_config.js"
 $EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "9cb05b2d48a15364eee417048d9cda064634f2ff16c8efd91b36fff7bb962a9f"
-$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "9966f6e576b574886554b907d1834fb8e89c5e1c06f8192dd507cc2270f1a9ef"
+$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "6d010210a0e9d72c660b9f1132a9c868ca1894b8777cf366fc0c3cf89dff9329"
 $EXPECTED_TRUSTED_RUNTIME_CONFIG_SHA256 = "76d43d3e811c6fa8daae987cc9eb2fff2dc8a8095f84b1cd309e4e214df94dcb"
 $EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256 = "6c983772bfebd666ca170205d030034b2407bca4147054e828bb00b97b724aac"
 $EXPECTED_TRUSTED_PARSER_VERIFIER_SHA256 = "7f9efaac02675b21e025891a400474cc7481c1adaf58c88bd8b356d5276f2eaa"
@@ -12264,7 +12264,7 @@ const uploadSandbox = require('./services/upload_sandbox_service');
 
 (async () => {
   const verified = await uploadSandbox.verifyCheckedInArtifacts({
-    expectedManifestSha256: '44db310046efe65bd68c110313b4887995c73e276e7d58f65fe037c09a973c5b'
+    expectedManifestSha256: '7d1c5bd2bb3b33d954513d107950c55e6d1468f2b1ecef9ae56d2349c861927d'
   });
   process.stdout.write('APPLICATION_PARSER_CHECKED_IN_OK\n');
 
