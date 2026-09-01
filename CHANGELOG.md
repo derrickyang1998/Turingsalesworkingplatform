@@ -1,5 +1,23 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.7.1-feishu-connection-foundation (Production Deployed, Bitable Writes Deferred, 2026-09-01) - 飞书连接基础
+
+### 交付与范围 / Delivery And Scope
+- M4 网红匹配与执行管理新增受保护的飞书连接状态：所有登录用户可查看不含凭据的配置状态；管理员可执行服务器端连接验证。界面会明确区分未配置、Webhook 已配置和飞书多维表格只读配置，并在同步后刷新状态。
+- 既有已选网红 Webhook 推送和 20 列 CSV 兜底保持兼容。Webhook 仍是本切片唯一的线上写入传输；飞书多维表格当前只支持配置与只读访问验证，推送会返回 CSV 供手动导入。
+- 未配置状态下，管理员测试接口以 `409 FEISHU_NOT_CONFIGURED` 安全降级，不会向外部发起请求。Webhook 测试只允许使用独立的 `FEISHU_WEBHOOK_TEST_URL`；多维表格验证只读取一页记录。
+
+### 定向验证、审查与上线 / Focused Verification, Review, And Release
+- 定向验证通过：Feishu provider `8/8`、状态/管理员测试路由 `3/3`、完整网红工作流 `25/25`、M4 活动协作客户端 `5/5`、协作权限/幂等 `5/5`、不启动浏览器的部署基线工具 `14/14`。相关 JavaScript 语法、`git diff --check` 与 `deploy_v8.ps1 -ValidateLocalOnly` 均通过。
+- 独立代码审查结论为 `APPROVE`，未发现发布阻断项；补充了“HTTP 200 但飞书逻辑成功码缺失”必须失败的负向用例，避免把代理或畸形响应误报为连接成功。
+- 实现提交为 `1beeb79`。受控发布已完成，备份为 `/root/turingmarket/backups/v060-crm-sales-workspace-20260901-184658`，顶层 `SHA256SUMS` 校验通过，清单 SHA-256 为 `fb52057ff6a9363009eb02ec5071b8de104a5fafa0ecbdd1d29c4d5139b471da`。
+- 线上公网与回环 `/api/health` 均为 `200` / `ok`、Parser ready，PM2/Nginx online，发布锁已清理，数据库 `quick_check=ok` 且外键异常为 `0`。M4 页面为 `200`，公网 `app.js` 已含飞书状态加载逻辑。认证后的连接状态读取返回未配置安全态；管理员测试接口按预期返回 `409 FEISHU_NOT_CONFIGURED`，未触发外部飞书请求，临时烟测会话已清理。
+
+### 刻意延后 / Intentionally Deferred
+- 多维表格记录写入、字段最小化映射、远端记录 ID、Outbox、重试、对账和幂等写入将在后续独立切片实现；在这些合同完成前，不将客户或网红数据直接写入多维表格。
+
+---
+
 ## v0.7.0-m4-campaign-collaboration (Production Deployed, M4 Transaction Acceptance Pending, 2026-09-01) - M4 活动协作工作台
 
 ### 交付与范围 / Delivery And Scope
