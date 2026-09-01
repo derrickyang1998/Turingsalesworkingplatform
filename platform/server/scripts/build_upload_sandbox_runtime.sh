@@ -616,6 +616,9 @@ fi
 assert_unprivileged_runtime
 verify_trusted_verifier
 UNPRIVILEGED_OBSERVED="$(/usr/bin/node "$TRUSTED_VERIFIER" measure-runtime --root "$BUILD_RUNTIME" --require-root-ownership false)"
+if [[ "${TM_UPLOAD_SANDBOX_PROVISION_DIAGNOSTIC:-0}" = "1" ]]; then
+  printf 'parser candidate runtime identity: %s\n' "$UNPRIVILEGED_OBSERVED" >&2
+fi
 verify_trusted_verifier
 BUILD_EVIDENCE="$(/usr/bin/node "$TRUSTED_VERIFIER" finalize-build-boundary \
   --manifest "$TRUSTED_MANIFEST" \

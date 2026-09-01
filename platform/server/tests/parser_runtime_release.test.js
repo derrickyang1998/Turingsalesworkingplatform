@@ -1111,6 +1111,11 @@ test('runtime builder preserves the pinned reproducible no-symlink runtime contr
   assert.match(source, /--expected-verifier-sha256/);
   assert.match(source, /--expected-sha256/);
   assert.match(source, /--json/);
+  assert.match(
+    controller,
+    /TM_UPLOAD_SANDBOX_PROVISION_DIAGNOSTIC:-0[\s\S]*?parser candidate runtime identity: %s\\n[\s\S]*?"\$UNPRIVILEGED_OBSERVED" >&2/,
+    'diagnostic mode may emit only the canonical runtime identity needed to repin a rejected candidate'
+  );
   assert.match(source, /ldd/);
   assert.doesNotMatch(worker, /\bawk\b/, 'the isolated worker must not depend on the host /etc alternatives chain');
   assert.match(worker, /--exclude='sitecustomize\.py'/);

@@ -131,7 +131,7 @@
     },
     {
       "path": "server/scripts/build_upload_sandbox_runtime.sh",
-      "sha256": "3a6637c5df520daf9254ee409fab2a5aa123005b29791dc2294150267bffdeeb"
+      "sha256": "f97ab4ef678240bf7928d96bae9aab7358a31b6ba8323c63cab7d739c60e2907"
     },
     {
       "path": "server/scripts/check_cutover_capacity.py",
