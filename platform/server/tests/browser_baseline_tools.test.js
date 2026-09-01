@@ -189,6 +189,46 @@ test('fixture API routing honors an explicit deployment smoke origin', async () 
   assert.deepEqual(page.__baselineUnhandledNetworkRequests, []);
 });
 
+test('fixture API supplies active campaigns for the M4 campaign selector', async () => {
+  const { installFixtureApi, loadBaselineFixture } = require(browserFixture);
+  const expectedOrigin = 'http://127.0.0.1:43188';
+  let routeHandler = null;
+  let fulfilled = null;
+  const page = {
+    __baselineUnhandledApiCalls: [],
+    __baselineUnhandledNetworkRequests: [],
+    async route(_pattern, handler) {
+      routeHandler = handler;
+    }
+  };
+
+  await installFixtureApi(page, {
+    fixture: loadBaselineFixture(),
+    expectedOrigin
+  });
+  await routeHandler({
+    request() {
+      return {
+        method: () => 'GET',
+        url: () => `${expectedOrigin}/api/campaigns?limit=100&operational_status=active`,
+        headers: () => ({})
+      };
+    },
+    async fulfill(response) {
+      fulfilled = response;
+    }
+  });
+
+  assert.equal(fulfilled.status, 200);
+  assert.deepEqual(JSON.parse(fulfilled.body), {
+    items: [loadBaselineFixture().campaigns[0]],
+    total: 1,
+    limit: 100,
+    offset: 0
+  });
+  assert.deepEqual(page.__baselineUnhandledApiCalls, []);
+});
+
 test('baseline comparison rejects non-Windows or divergent runner metadata', () => {
   const { validateRunEnvironments } = require(compareScript);
   const manifest = { viewports: [{ name: 'fixture-1440', width: 1440, height: 900 }] };

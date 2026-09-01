@@ -503,6 +503,27 @@ function apiResponseFor(request, fixture, recorder) {
   if (method === 'GET' && apiPath === '/dashboard/sales') return ok(fixture.salesDashboard);
   if (method === 'GET' && apiPath === '/dashboard/stats') return ok(fixture.dashboardStats);
 
+  if (method === 'GET' && apiPath === '/campaigns') {
+    let campaigns = Array.isArray(fixture.campaigns) ? fixture.campaigns.slice() : [];
+    const operationalStatus = url.searchParams.get('operational_status');
+    if (operationalStatus) {
+      campaigns = campaigns.filter((campaign) => campaign.operational_status === operationalStatus);
+    }
+    const limit = Number(url.searchParams.get('limit')) || 25;
+    const offset = Number(url.searchParams.get('offset')) || 0;
+    return ok({
+      items: campaigns.slice(offset, offset + limit),
+      total: campaigns.length,
+      limit,
+      offset
+    });
+  }
+  if (method === 'GET' && /^\/campaigns\/\d+$/.test(apiPath)) {
+    const campaignId = Number(apiPath.split('/').pop());
+    const campaign = (fixture.campaigns || []).find((item) => Number(item.id) === campaignId);
+    return campaign ? ok({ campaign }) : jsonResponse({ error: 'Fixture campaign not found' }, 404);
+  }
+
   if (method === 'GET' && apiPath === '/influencers') {
     const influencers = queryInfluencersFixture(fixture, Object.fromEntries(url.searchParams.entries()));
     return ok({ influencers, total: influencers.length });
