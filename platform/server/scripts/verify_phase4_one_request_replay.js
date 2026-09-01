@@ -20,7 +20,7 @@ const TARGET_PATH = '/api/workflow/templates';
 const REQUEST_ID = 'phase4-one-request-replay-0001';
 const IDEMPOTENCY_KEY = 'phase4.one-request.replay.v1';
 const TEMPLATE_NAME = 'Phase 4 one-request replay proof';
-const CURRENT_PRODUCTION_MIGRATION_VERSIONS = Object.freeze([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+const CURRENT_PRODUCTION_MIGRATION_VERSIONS = Object.freeze([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
 const JWT_SECRET = crypto
   .createHash('sha256')
   .update('phase4-one-request-replay-isolated-fixture-v1')
