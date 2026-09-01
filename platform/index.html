@@ -1099,6 +1099,28 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
         <button class="btn btn-outline btn-sm" type="button" id="feishuTestButton" onclick="testFeishuConnection()" title="管理员测试服务器端飞书连接" hidden>测试连接</button>
       </div>
       <div id="feishuStatus" style="font-size:11px;opacity:.6;margin-top:6px"></div>
+      <div id="feishuReconciliationPanel" hidden style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border)">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
+          <strong style="font-size:12px">飞书回执核对</strong>
+          <button class="btn btn-outline btn-sm" type="button" onclick="loadFeishuOutbox()" title="刷新待核对飞书回执">刷新回执</button>
+        </div>
+        <div id="feishuReconciliationMeta" style="font-size:11px;color:var(--text2);margin-top:7px"></div>
+        <label style="display:block;font-size:11px;color:var(--text2);margin-top:7px">
+          <span>待核对批次</span>
+          <select id="feishuReconciliationDelivery" aria-label="选择待核对的飞书推送批次" onchange="selectFeishuReconciliationDelivery()" style="width:100%;margin-top:5px;font-size:12px"></select>
+        </label>
+        <div id="feishuReconciliationAccess" style="font-size:11px;margin-top:5px"></div>
+        <div id="feishuReconciliationForm" style="margin-top:8px">
+          <label style="display:block;font-size:11px;color:var(--text2)">
+            <span>已核验的 Record ID</span>
+            <textarea id="feishuReconciliationRecordIds" aria-label="已核验的飞书 Record ID，每行一个" autocomplete="off" rows="3" placeholder="每行一个 Record ID" style="width:100%;box-sizing:border-box;resize:vertical;margin-top:5px;font-size:12px"></textarea>
+          </label>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:7px">
+            <button class="btn btn-primary btn-sm" type="button" id="feishuReconciliationSubmit" onclick="reconcileFeishuDelivery()" title="确认已核验的飞书回执">确认回执</button>
+            <span id="feishuReconciliationStatus" role="status" aria-live="polite" style="font-size:11px;color:var(--text2)"></span>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </div>

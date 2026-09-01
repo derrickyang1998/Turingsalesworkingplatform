@@ -4411,11 +4411,13 @@ function changeM4CampaignContext() {
   m4CampaignContextId = select && select.value ? readPositiveInteger(select.value) : 0;
   renderM4CampaignContext();
   loadCollaborations();
+  renderFeishuReconciliationPanel([], getM4CampaignId());
   loadFeishuOutbox();
 }
 function syncM4CampaignContextFromWorkflow() {
   var campaignId = readPositiveInteger(getActiveCampaignId());
   if (campaignId !== null) m4CampaignContextId = campaignId;
+  renderFeishuReconciliationPanel([], getM4CampaignId());
   return loadM4Campaigns().then(function(campaigns) {
     loadFeishuOutbox();
     return campaigns;
@@ -4698,10 +4700,261 @@ function renderFeishuDeliveryStatus(delivery, campaignId, errorMessage) {
   status.style.color = 'var(--amber)';
 }
 
+var feishuOutboxLoadGeneration = 0;
+var feishuReconciliationState = {
+  campaignId: null,
+  deliveries: [],
+  deliveryId: null,
+  inFlight: null
+};
+var feishuReconciliationInFlightByDelivery = {};
+
+function isM4FeishuReconciliationOperator(campaign) {
+  var organization = typeof CURRENT_AUTH_CONTEXT !== 'undefined' && CURRENT_AUTH_CONTEXT
+    ? CURRENT_AUTH_CONTEXT.organization
+    : null;
+  if (organization && organization.role_code === 'org_admin') return true;
+  var ownerId = readPositiveInteger(campaign && campaign.owner && campaign.owner.id);
+  var userId = readPositiveInteger(CURRENT_USER && CURRENT_USER.id);
+  return ownerId !== null && userId !== null && ownerId === userId;
+}
+
+function pendingFeishuDeliveries(deliveries) {
+  return Array.isArray(deliveries) ? deliveries.filter(function(delivery) {
+    return delivery && delivery.status === 'pending' && readPositiveInteger(delivery.id) !== null;
+  }) : [];
+}
+
+function selectedFeishuReconciliationDelivery() {
+  var deliveryId = readPositiveInteger(feishuReconciliationState.deliveryId);
+  if (deliveryId === null) return null;
+  return feishuReconciliationState.deliveries.find(function(delivery) {
+    return readPositiveInteger(delivery.id) === deliveryId;
+  }) || null;
+}
+
+function normalizeFeishuReconciliationRecordIds(value) {
+  return String(value || '').split(/\r?\n/).map(function(recordId) {
+    return recordId.trim();
+  }).filter(function(recordId) {
+    return recordId.length > 0;
+  });
+}
+
+function feishuReconciliationActionKey(campaignId, deliveryId) {
+  var normalizedCampaignId = readPositiveInteger(campaignId);
+  var normalizedDeliveryId = readPositiveInteger(deliveryId);
+  return normalizedCampaignId === null || normalizedDeliveryId === null
+    ? ''
+    : String(normalizedCampaignId) + ':' + String(normalizedDeliveryId);
+}
+
+function renderFeishuReconciliationPanel(deliveries, campaignId, errorMessage) {
+  var panel = document.getElementById('feishuReconciliationPanel');
+  if (!panel) return;
+  var normalizedCampaignId = readPositiveInteger(campaignId);
+  var pending = pendingFeishuDeliveries(deliveries);
+  var select = document.getElementById('feishuReconciliationDelivery');
+  var meta = document.getElementById('feishuReconciliationMeta');
+  var access = document.getElementById('feishuReconciliationAccess');
+  var form = document.getElementById('feishuReconciliationForm');
+  var input = document.getElementById('feishuReconciliationRecordIds');
+  var submit = document.getElementById('feishuReconciliationSubmit');
+  var status = document.getElementById('feishuReconciliationStatus');
+  if (normalizedCampaignId === null || errorMessage || !pending.length) {
+    var activeActionKey = feishuReconciliationActionKey(
+      feishuReconciliationState.campaignId,
+      feishuReconciliationState.deliveryId
+    );
+    var activeAction = activeActionKey ? feishuReconciliationInFlightByDelivery[activeActionKey] : null;
+    var keepInFlightDelivery = Boolean(activeAction) &&
+      feishuReconciliationState.campaignId === normalizedCampaignId;
+    panel.hidden = true;
+    if (!keepInFlightDelivery) {
+      feishuReconciliationState.campaignId = normalizedCampaignId;
+      feishuReconciliationState.deliveries = [];
+      feishuReconciliationState.deliveryId = null;
+      feishuReconciliationState.inFlight = null;
+      if (input) input.value = '';
+      if (status) status.textContent = '';
+    } else {
+      feishuReconciliationState.deliveries = [];
+      feishuReconciliationState.inFlight = activeAction;
+    }
+    return;
+  }
+  var previousCampaignId = feishuReconciliationState.campaignId;
+  var previousDeliveryId = feishuReconciliationState.deliveryId;
+  var selected = previousCampaignId === normalizedCampaignId
+    ? pending.find(function(delivery) {
+      return readPositiveInteger(delivery.id) === readPositiveInteger(previousDeliveryId);
+    })
+    : null;
+  if (!selected) selected = pending[0];
+  feishuReconciliationState.campaignId = normalizedCampaignId;
+  feishuReconciliationState.deliveries = pending;
+  feishuReconciliationState.deliveryId = readPositiveInteger(selected.id);
+  feishuReconciliationState.inFlight = feishuReconciliationInFlightByDelivery[
+    feishuReconciliationActionKey(normalizedCampaignId, feishuReconciliationState.deliveryId)
+  ] || null;
+  panel.hidden = false;
+  if (select) {
+    select.innerHTML = pending.map(function(delivery) {
+      var label = '批次 #' + Number(delivery.id) + ' · ' + Number(delivery.record_count || 0) + ' 条 · ' + (delivery.updated_at || '待核对');
+      return '<option value="' + Number(delivery.id) + '">' + esc(label) + '</option>';
+    }).join('');
+    select.value = String(feishuReconciliationState.deliveryId);
+    select.disabled = pending.length < 2 || Boolean(feishuReconciliationState.inFlight);
+  }
+  if (meta) {
+    meta.textContent = '待核对批次 #' + feishuReconciliationState.deliveryId + '，需要 ' + Number(selected.record_count || 0) + ' 条唯一 Record ID。';
+  }
+  var canReconcile = isM4FeishuReconciliationOperator(getM4CampaignById(normalizedCampaignId));
+  if (access) {
+    access.textContent = canReconcile
+      ? '确认后回执不可修改。'
+      : '仅活动 Owner 或组织管理员可确认回执。';
+    access.style.color = canReconcile ? 'var(--text2)' : 'var(--amber)';
+  }
+  if (form) form.hidden = !canReconcile;
+  if (input) input.disabled = !canReconcile || Boolean(feishuReconciliationState.inFlight);
+  if (submit) submit.disabled = !canReconcile || Boolean(feishuReconciliationState.inFlight);
+  if (
+    (previousCampaignId !== normalizedCampaignId || previousDeliveryId !== feishuReconciliationState.deliveryId) &&
+    !feishuReconciliationState.inFlight
+  ) {
+    if (input) input.value = '';
+    if (status) status.textContent = '';
+  }
+}
+
+function selectFeishuReconciliationDelivery() {
+  var select = document.getElementById('feishuReconciliationDelivery');
+  var deliveryId = readPositiveInteger(select && select.value);
+  if (deliveryId === null || !feishuReconciliationState.deliveries.some(function(delivery) {
+    return readPositiveInteger(delivery.id) === deliveryId;
+  })) return;
+  feishuReconciliationState.deliveryId = deliveryId;
+  var input = document.getElementById('feishuReconciliationRecordIds');
+  var status = document.getElementById('feishuReconciliationStatus');
+  if (input) input.value = '';
+  if (status) status.textContent = '';
+  renderFeishuReconciliationPanel(feishuReconciliationState.deliveries, feishuReconciliationState.campaignId);
+}
+
+function reconcileFeishuDelivery() {
+  var campaignId = getM4CampaignId();
+  var activeActionKey = feishuReconciliationActionKey(
+    feishuReconciliationState.campaignId,
+    feishuReconciliationState.deliveryId
+  );
+  if (
+    feishuReconciliationState.campaignId === campaignId && activeActionKey &&
+    feishuReconciliationInFlightByDelivery[activeActionKey]
+  ) {
+    return feishuReconciliationInFlightByDelivery[activeActionKey];
+  }
+  var delivery = selectedFeishuReconciliationDelivery();
+  var campaign = getM4CampaignById(campaignId);
+  var input = document.getElementById('feishuReconciliationRecordIds');
+  var status = document.getElementById('feishuReconciliationStatus');
+  var submit = document.getElementById('feishuReconciliationSubmit');
+  if (
+    campaignId === null || !delivery || delivery.status !== 'pending' ||
+    feishuReconciliationState.campaignId !== campaignId
+  ) {
+    if (status) status.textContent = '没有可确认的待核对回执。';
+    return null;
+  }
+  if (!isM4FeishuReconciliationOperator(campaign)) {
+    if (status) status.textContent = '当前账号无权确认该回执。';
+    toast('当前账号无权确认该回执', 'error');
+    return null;
+  }
+  var actionCampaignId = campaignId;
+  var actionDeliveryId = readPositiveInteger(delivery.id);
+  var actionKey = feishuReconciliationActionKey(actionCampaignId, actionDeliveryId);
+  if (actionKey && feishuReconciliationInFlightByDelivery[actionKey]) {
+    return feishuReconciliationInFlightByDelivery[actionKey];
+  }
+  var remoteRecordIds = normalizeFeishuReconciliationRecordIds(input && input.value);
+  var expectedCount = Number(delivery.record_count || 0);
+  if (
+    remoteRecordIds.length !== expectedCount ||
+    remoteRecordIds.some(function(recordId) { return recordId.length > 255; }) ||
+    new Set(remoteRecordIds).size !== expectedCount
+  ) {
+    if (status) status.textContent = '请录入 ' + expectedCount + ' 条不重复的 Record ID。';
+    return null;
+  }
+  if (status) status.textContent = '正在确认飞书回执...';
+  if (submit) submit.disabled = true;
+  var action = (async function() {
+    try {
+      var response = await apiFetch(
+        '/campaigns/' + encodeURIComponent(actionCampaignId) + '/feishu-deliveries/' + encodeURIComponent(actionDeliveryId) + '/reconcile',
+        {
+          method: 'POST',
+          body: JSON.stringify({ remote_record_ids: remoteRecordIds })
+        }
+      );
+      var data = await response.json();
+      if (!response.ok) {
+        if (response.status === 409) {
+          await loadFeishuOutbox();
+          if (getM4CampaignId() === actionCampaignId && status) {
+            status.textContent = '回执状态已更新，请按最新结果处理。';
+          }
+          toast('回执状态已更新，请按最新结果处理');
+          return null;
+        }
+        throw new Error(data.error || '飞书回执确认失败');
+      }
+      if (!data.delivery || data.delivery.status !== 'succeeded') {
+        throw new Error('飞书回执确认结果无效');
+      }
+      if (
+        getM4CampaignId() === actionCampaignId &&
+        feishuReconciliationState.deliveryId === actionDeliveryId &&
+        input
+      ) input.value = '';
+      if (getM4CampaignId() === actionCampaignId && status) {
+        status.textContent = '飞书回执已确认。';
+      }
+      toast('飞书回执已确认');
+      await loadFeishuOutbox();
+      return data.delivery;
+    } catch (error) {
+      if (getM4CampaignId() === actionCampaignId && status) {
+        status.textContent = error.message || '飞书回执确认失败。';
+      }
+      toast(error.message || '飞书回执确认失败', 'error');
+      return null;
+    }
+  })();
+  var settlement = action.finally(function() {
+    if (actionKey && feishuReconciliationInFlightByDelivery[actionKey] === settlement) {
+      delete feishuReconciliationInFlightByDelivery[actionKey];
+    }
+    if (feishuReconciliationState.inFlight === settlement) {
+      feishuReconciliationState.inFlight = null;
+      renderFeishuReconciliationPanel(
+        feishuReconciliationState.deliveries,
+        feishuReconciliationState.campaignId
+      );
+    }
+  });
+  if (actionKey) feishuReconciliationInFlightByDelivery[actionKey] = settlement;
+  feishuReconciliationState.inFlight = settlement;
+  return settlement;
+}
+
 async function loadFeishuOutbox() {
   var campaignId = getM4CampaignId();
+  var requestGeneration = ++feishuOutboxLoadGeneration;
   if (campaignId === null) {
     renderFeishuDeliveryStatus(null, null);
+    renderFeishuReconciliationPanel([], null);
     return [];
   }
   var status = document.getElementById('feishuDeliveryStatus');
@@ -4710,14 +4963,18 @@ async function loadFeishuOutbox() {
     status.style.color = 'var(--text2)';
   }
   try {
-    var response = await apiFetch('/campaigns/' + encodeURIComponent(campaignId) + '/feishu-deliveries?limit=1');
+    var response = await apiFetch('/campaigns/' + encodeURIComponent(campaignId) + '/feishu-deliveries?limit=20');
     var data = await response.json();
     if (!response.ok) throw new Error(data.error || '无法读取飞书推送回执');
+    if (requestGeneration !== feishuOutboxLoadGeneration || campaignId !== getM4CampaignId()) return [];
     var deliveries = Array.isArray(data.deliveries) ? data.deliveries : [];
     renderFeishuDeliveryStatus(deliveries[0] || null, campaignId);
+    renderFeishuReconciliationPanel(deliveries, campaignId);
     return deliveries;
   } catch (error) {
+    if (requestGeneration !== feishuOutboxLoadGeneration || campaignId !== getM4CampaignId()) return [];
     renderFeishuDeliveryStatus(null, campaignId, error);
+    renderFeishuReconciliationPanel([], campaignId, error);
     return [];
   }
 }
@@ -6191,7 +6448,7 @@ function switchPage(id, options) {
     'getEditedDemand', 'syncCurDemandFromAnalysis', 'handleDemandFile', 'analyzeDemandAI',
     'switchTab', 'matchInfluencers', 'smartMatch', 'handleUpload', 'handleDrop', 'openInfUploadModal', 'handleUploadModal', 'downloadInfTemplate', 'exportAll', 'exportFiltered', 'exportSelected',
     'toggleAll', 'syncInfluencerSelectionState', 'loadM4Campaigns', 'changeM4CampaignContext', 'startCollab', 'submitCollabOrder', 'closeCollabOrderModal', 'loadCollaborations', 'updateCollabStatus', 'runCampaignCollabAction', 'closeCampaignSettlementModal', 'submitCampaignSettlement',
-    'sendChat', 'clearChat', 'clearAIMemory', 'pushToFeishu', 'loadFeishuStatus', 'loadFeishuOutbox', 'testFeishuConnection',
+    'sendChat', 'clearChat', 'clearAIMemory', 'pushToFeishu', 'loadFeishuStatus', 'loadFeishuOutbox', 'testFeishuConnection', 'selectFeishuReconciliationDelivery', 'reconcileFeishuDelivery',
     'switchAdminTab', 'loadAdminDashboard', 'loadAdminUsers', 'adminAddUser', 'adminCreateInvite', 'adminResetPw',
     'wfUndo', 'wfRedo', 'wfClearCanvas', 'wfSaveTemplate', 'wfPublishTemplate', 'wfResetTaskFilters', 'wfLoadTasks', 'wfLoadInstances',
     'showRelatedBrands', 'closeBrandRelModal'
