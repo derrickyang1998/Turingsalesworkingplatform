@@ -143,6 +143,7 @@ $FILES = @(
     "server\services\campaign_ppt_service.js",
     "server\services\campaign_service.js",
     "server\services\campaign_workflow_service.js",
+    "server\services\collaboration_resource_contract.js",
     "server\services\credential_rotation_service.js",
     "server\services\crm_access_service.js",
     "server\services\crm_contract.js",
