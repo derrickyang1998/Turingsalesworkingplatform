@@ -12,6 +12,7 @@
 - 生产受控发布完成候选隔离迁移、真实 Express 重放、安全边界、依赖构建、Parser 自检、数据库迁移、Nginx 静态边界及部署浏览器冒烟（`2/2`）验证；已创建可恢复备份 `/root/turingmarket/backups/v060-crm-sales-workspace-20260901-131109`。
 - 公网验收通过：`/api/health` 返回 `ok` 且解析器清单为 `7d1c5bd2bb3b33d954513d107950c55e6d1468f2b1ecef9ae56d2349c861927d`；`/app.js` 返回 `200` 和 `text/javascript`；Nginx active、PM2 进程在线、发布锁与临时公网守卫均已清理。完整的人工交互浏览器验收仍作为后续阶段收口，不被本次部署冒烟替代。
 - 功能级发布节奏自本版本起固定：普通功能完成后执行受影响测试、必要语法检查、独立审查、备份、上线和线上核心路径冒烟；仅数据库迁移、安全/systemd、广泛跨模块改动或阶段收口执行完整回归。
+- 版本记录、仓库归档与 Obsidian 归档的 SHA-256 一致；GitHub 分支 `codex/v0.7.0-ai-knowledge-proposal-ppt-loop-production` 已同步至 `7714825`。
 
 ---
 
