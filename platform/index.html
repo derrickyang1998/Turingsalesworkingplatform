@@ -1121,6 +1121,28 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
           </div>
         </div>
       </div>
+      <div id="feishuRetryPanel" hidden style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border)">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
+          <strong style="font-size:12px">失败批次重试</strong>
+          <button class="btn btn-outline btn-sm" type="button" onclick="loadFeishuOutbox()" title="刷新可重试的飞书失败批次">刷新回执</button>
+        </div>
+        <div id="feishuRetryMeta" style="font-size:11px;color:var(--text2);margin-top:7px"></div>
+        <label style="display:block;font-size:11px;color:var(--text2);margin-top:7px">
+          <span>可重试失败批次</span>
+          <select id="feishuRetryDelivery" aria-label="选择可重试的飞书失败批次" onchange="selectFeishuRetryDelivery()" style="width:100%;margin-top:5px;font-size:12px"></select>
+        </label>
+        <div id="feishuRetryAccess" style="font-size:11px;margin-top:5px"></div>
+        <div id="feishuRetryForm" style="margin-top:8px">
+          <label style="display:block;font-size:11px;color:var(--text2)">
+            <span>重试原因</span>
+            <input id="feishuRetryReason" aria-label="飞书失败批次重试原因" autocomplete="off" maxlength="280" placeholder="例如：已修正字段映射" style="width:100%;box-sizing:border-box;margin-top:5px;font-size:12px">
+          </label>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:7px">
+            <button class="btn btn-primary btn-sm" type="button" id="feishuRetrySubmit" onclick="retryFeishuDelivery()" title="基于原始快照重试飞书推送">重试推送</button>
+            <span id="feishuRetryStatus" role="status" aria-live="polite" style="font-size:11px;color:var(--text2)"></span>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </div>

@@ -56,6 +56,13 @@ const db = migrationService.openMigratedDatabase(DB_PATH, {
       sourcePath: 'migrations/008_feishu_bitable_outbox.js',
       engineVersion: 1,
       dependencies: ['migrations/vendor/bcryptjs_v3_0_3.js']
+    },
+    {
+      version: 9,
+      name: '009_feishu_bitable_retry_lineage',
+      sourcePath: 'migrations/009_feishu_bitable_retry_lineage.js',
+      engineVersion: 1,
+      dependencies: ['migrations/vendor/bcryptjs_v3_0_3.js']
     }
   ]
 });

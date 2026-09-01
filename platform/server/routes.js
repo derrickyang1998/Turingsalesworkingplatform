@@ -450,6 +450,151 @@ app.post('/api/campaigns/:id/feishu-deliveries/:deliveryId/reconcile', authMiddl
   }
 });
 
+app.post('/api/campaigns/:id/feishu-deliveries/:deliveryId/retry', authMiddleware, async (req, res) => {
+  try {
+    const campaignId = feishuCampaignId(req.params.id);
+    const deliveryId = feishuCampaignId(req.params.deliveryId);
+    const operationId = req.get
+      ? req.get('Idempotency-Key')
+      : req.headers && req.headers['idempotency-key'];
+    if (campaignId === null || deliveryId === null) {
+      return res.status(400).json({
+        error: 'A valid campaign and Feishu delivery are required for retry.',
+        code: 'FEISHU_OUTBOX_REQUEST_INVALID'
+      });
+    }
+    const feishuStatus = feishuClient.getStatus();
+    if (!bitableOutboxEnabled(feishuStatus, campaignId)) {
+      throw new FeishuClientError('FEISHU_BITABLE_WRITE_NOT_AVAILABLE', 'Feishu Bitable delivery is not available.', 409);
+    }
+    const reservation = feishuBitableOutbox.retry({
+      userId: req.user.id,
+      campaignId,
+      deliveryId,
+      operationId,
+      reason: req.body && req.body.reason
+    });
+    if (reservation.state === 'replay') {
+      if (reservation.delivery.status === 'succeeded') {
+        writeFeishuSyncAudit(req, 'feishu_sync_retry_replayed', {
+          campaign_id: campaignId,
+          delivery_id: reservation.delivery.id,
+          retry_of_delivery_id: deliveryId,
+          delivery_status: reservation.delivery.status
+        });
+        return res.json({
+          configured: true,
+          replayed: true,
+          synced: reservation.delivery.remote_record_count,
+          records: reservation.delivery.record_count,
+          delivery: reservation.delivery
+        });
+      }
+      if (reservation.delivery.status === 'pending') {
+        return res.status(202).json({
+          error: 'Feishu retry result requires reconciliation before another write is attempted.',
+          code: 'FEISHU_OUTBOX_RECONCILIATION_REQUIRED',
+          delivery: reservation.delivery
+        });
+      }
+      return res.status(409).json({
+        error: 'The existing retry delivery failed. Retry that delivery explicitly after resolving the failure.',
+        code: 'FEISHU_OUTBOX_RETRY_CHILD_FAILED',
+        delivery: reservation.delivery
+      });
+    }
+    let result;
+    try {
+      result = await feishuClient.syncInfluencers({
+        records: reservation.records,
+        csv: '',
+        operationId,
+        bitableRecords: reservation.records,
+        includeReceipt: true
+      });
+    } catch (providerError) {
+      const providerFailure = feishuFailure(providerError);
+      if (requiresFeishuReconciliation(providerFailure)) {
+        writeFeishuSyncAudit(req, 'feishu_sync_retry_reconciliation_required', {
+          campaign_id: campaignId,
+          delivery_id: reservation.delivery.id,
+          retry_of_delivery_id: deliveryId,
+          code: providerFailure.code
+        });
+        return res.status(202).json({
+          error: 'Feishu retry result requires reconciliation before another write is attempted.',
+          code: 'FEISHU_OUTBOX_RECONCILIATION_REQUIRED',
+          delivery: reservation.delivery
+        });
+      }
+      const delivery = feishuBitableOutbox.fail({
+        deliveryId: reservation.delivery.id,
+        reservationToken: reservation.reservationToken,
+        errorCode: providerFailure.code
+      });
+      writeFeishuSyncAudit(req, 'feishu_sync_retry_failed', {
+        campaign_id: campaignId,
+        delivery_id: delivery.id,
+        retry_of_delivery_id: deliveryId,
+        code: providerFailure.code
+      });
+      return res.status(providerFailure.statusCode).json({
+        error: providerFailure.message,
+        code: providerFailure.code,
+        delivery
+      });
+    }
+    if (!result.configured) {
+      const delivery = feishuBitableOutbox.fail({
+        deliveryId: reservation.delivery.id,
+        reservationToken: reservation.reservationToken,
+        errorCode: 'FEISHU_BITABLE_WRITE_NOT_AVAILABLE'
+      });
+      return res.json({
+        configured: false,
+        records: result.records,
+        csv: result.csv,
+        message: result.message || 'Feishu Bitable write is no longer available. CSV fallback is ready for manual upload.',
+        delivery
+      });
+    }
+    let delivery;
+    try {
+      delivery = feishuBitableOutbox.complete({
+        deliveryId: reservation.delivery.id,
+        reservationToken: reservation.reservationToken,
+        remoteRecordIds: result.remoteRecordIds
+      });
+    } catch (finalizationError) {
+      const finalizationFailure = feishuFailure(finalizationError);
+      writeFeishuSyncAudit(req, 'feishu_sync_retry_reconciliation_required', {
+        campaign_id: campaignId,
+        delivery_id: reservation.delivery.id,
+        retry_of_delivery_id: deliveryId,
+        code: finalizationFailure.code
+      });
+      return res.status(202).json({
+        error: 'Feishu retry result requires reconciliation before another write is attempted.',
+        code: 'FEISHU_OUTBOX_RECONCILIATION_REQUIRED',
+        delivery: reservation.delivery
+      });
+    }
+    writeFeishuSyncAudit(req, 'feishu_sync_retry', {
+      mode: result.mode,
+      synced: result.synced,
+      campaign_id: campaignId,
+      delivery_id: delivery.id,
+      retry_of_delivery_id: deliveryId,
+      delivery_status: delivery.status
+    });
+    return res.json({ configured: true, synced: result.synced, records: result.records, delivery });
+  } catch (error) {
+    const failure = feishuFailure(error);
+    writeFeishuSyncAudit(req, 'feishu_sync_retry_failed', { code: failure.code });
+    return res.status(failure.statusCode).json({ error: failure.message, code: failure.code });
+  }
+});
+
 app.post('/api/influencers/export', authMiddleware, (req, res) => {
   try {
     const { mode, ids, filters } = req.body;

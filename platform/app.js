@@ -4412,12 +4412,14 @@ function changeM4CampaignContext() {
   renderM4CampaignContext();
   loadCollaborations();
   renderFeishuReconciliationPanel([], getM4CampaignId());
+  renderFeishuRetryPanel([], getM4CampaignId());
   loadFeishuOutbox();
 }
 function syncM4CampaignContextFromWorkflow() {
   var campaignId = readPositiveInteger(getActiveCampaignId());
   if (campaignId !== null) m4CampaignContextId = campaignId;
   renderFeishuReconciliationPanel([], getM4CampaignId());
+  renderFeishuRetryPanel([], getM4CampaignId());
   return loadM4Campaigns().then(function(campaigns) {
     loadFeishuOutbox();
     return campaigns;
@@ -4692,7 +4694,9 @@ function renderFeishuDeliveryStatus(delivery, campaignId, errorMessage) {
     return;
   }
   if (delivery.status === 'failed') {
-    status.textContent = '最近一次推送失败（' + (delivery.last_error_code || 'FEISHU_SYNC_FAILED') + '），等待显式重试。';
+    status.textContent = delivery.retry_available
+      ? '最近一次推送失败（' + (delivery.last_error_code || 'FEISHU_SYNC_FAILED') + '），活动 Owner 或组织管理员可显式重试。'
+      : '最近一次推送失败（' + (delivery.last_error_code || 'FEISHU_SYNC_FAILED') + '），请先处理失败原因或核对飞书记录。';
     status.style.color = 'var(--red)';
     return;
   }
@@ -4708,6 +4712,14 @@ var feishuReconciliationState = {
   inFlight: null
 };
 var feishuReconciliationInFlightByDelivery = {};
+var feishuRetryState = {
+  campaignId: null,
+  deliveries: [],
+  deliveryId: null,
+  inFlight: null
+};
+var feishuRetryInFlightByDelivery = {};
+var feishuRetryOperationIds = {};
 
 function isM4FeishuReconciliationOperator(campaign) {
   var organization = typeof CURRENT_AUTH_CONTEXT !== 'undefined' && CURRENT_AUTH_CONTEXT
@@ -4722,6 +4734,13 @@ function isM4FeishuReconciliationOperator(campaign) {
 function pendingFeishuDeliveries(deliveries) {
   return Array.isArray(deliveries) ? deliveries.filter(function(delivery) {
     return delivery && delivery.status === 'pending' && readPositiveInteger(delivery.id) !== null;
+  }) : [];
+}
+
+function retryableFeishuDeliveries(deliveries) {
+  return Array.isArray(deliveries) ? deliveries.filter(function(delivery) {
+    return delivery && delivery.status === 'failed' && delivery.retry_available === true &&
+      readPositiveInteger(delivery.id) !== null;
   }) : [];
 }
 
@@ -4949,12 +4968,238 @@ function reconcileFeishuDelivery() {
   return settlement;
 }
 
+function selectedFeishuRetryDelivery() {
+  var deliveryId = readPositiveInteger(feishuRetryState.deliveryId);
+  if (deliveryId === null) return null;
+  return feishuRetryState.deliveries.find(function(delivery) {
+    return readPositiveInteger(delivery.id) === deliveryId;
+  }) || null;
+}
+
+function feishuRetryActionKey(campaignId, deliveryId) {
+  var normalizedCampaignId = readPositiveInteger(campaignId);
+  var normalizedDeliveryId = readPositiveInteger(deliveryId);
+  return normalizedCampaignId === null || normalizedDeliveryId === null
+    ? ''
+    : String(normalizedCampaignId) + ':' + String(normalizedDeliveryId);
+}
+
+function renderFeishuRetryPanel(deliveries, campaignId, errorMessage) {
+  var panel = document.getElementById('feishuRetryPanel');
+  if (!panel) return;
+  var normalizedCampaignId = readPositiveInteger(campaignId);
+  var retryable = retryableFeishuDeliveries(deliveries);
+  var select = document.getElementById('feishuRetryDelivery');
+  var meta = document.getElementById('feishuRetryMeta');
+  var access = document.getElementById('feishuRetryAccess');
+  var form = document.getElementById('feishuRetryForm');
+  var input = document.getElementById('feishuRetryReason');
+  var submit = document.getElementById('feishuRetrySubmit');
+  var status = document.getElementById('feishuRetryStatus');
+  if (normalizedCampaignId === null || errorMessage || !retryable.length) {
+    var activeActionKey = feishuRetryActionKey(feishuRetryState.campaignId, feishuRetryState.deliveryId);
+    var activeAction = activeActionKey ? feishuRetryInFlightByDelivery[activeActionKey] : null;
+    var keepInFlightDelivery = Boolean(activeAction) && feishuRetryState.campaignId === normalizedCampaignId;
+    panel.hidden = true;
+    if (!keepInFlightDelivery) {
+      feishuRetryState.campaignId = normalizedCampaignId;
+      feishuRetryState.deliveries = [];
+      feishuRetryState.deliveryId = null;
+      feishuRetryState.inFlight = null;
+      if (input) input.value = '';
+      if (status) status.textContent = '';
+    } else {
+      feishuRetryState.deliveries = [];
+      feishuRetryState.inFlight = activeAction;
+    }
+    return;
+  }
+  var previousCampaignId = feishuRetryState.campaignId;
+  var previousDeliveryId = feishuRetryState.deliveryId;
+  var selected = previousCampaignId === normalizedCampaignId
+    ? retryable.find(function(delivery) {
+      return readPositiveInteger(delivery.id) === readPositiveInteger(previousDeliveryId);
+    })
+    : null;
+  if (!selected) selected = retryable[0];
+  feishuRetryState.campaignId = normalizedCampaignId;
+  feishuRetryState.deliveries = retryable;
+  feishuRetryState.deliveryId = readPositiveInteger(selected.id);
+  feishuRetryState.inFlight = feishuRetryInFlightByDelivery[
+    feishuRetryActionKey(normalizedCampaignId, feishuRetryState.deliveryId)
+  ] || null;
+  panel.hidden = false;
+  if (select) {
+    select.innerHTML = retryable.map(function(delivery) {
+      var label = '失败批次 #' + Number(delivery.id) + ' · ' + Number(delivery.record_count || 0) + ' 条 · ' +
+        (delivery.last_error_code || 'FEISHU_SYNC_FAILED');
+      return '<option value="' + Number(delivery.id) + '">' + esc(label) + '</option>';
+    }).join('');
+    select.value = String(feishuRetryState.deliveryId);
+    select.disabled = retryable.length < 2 || Boolean(feishuRetryState.inFlight);
+  }
+  if (meta) {
+    meta.textContent = '失败批次 #' + feishuRetryState.deliveryId + '，将基于原始快照创建新的推送回执。';
+  }
+  var canRetry = isM4FeishuReconciliationOperator(getM4CampaignById(normalizedCampaignId));
+  if (access) {
+    access.textContent = canRetry
+      ? '重试会创建新的不可变回执，原失败回执会保留。'
+      : '仅活动 Owner 或组织管理员可显式重试。';
+    access.style.color = canRetry ? 'var(--text2)' : 'var(--amber)';
+  }
+  if (form) form.hidden = !canRetry;
+  if (input) input.disabled = !canRetry || Boolean(feishuRetryState.inFlight);
+  if (submit) submit.disabled = !canRetry || Boolean(feishuRetryState.inFlight);
+  if (
+    (previousCampaignId !== normalizedCampaignId || previousDeliveryId !== feishuRetryState.deliveryId) &&
+    !feishuRetryState.inFlight
+  ) {
+    if (input) input.value = '';
+    if (status) status.textContent = '';
+  }
+}
+
+function selectFeishuRetryDelivery() {
+  var select = document.getElementById('feishuRetryDelivery');
+  var deliveryId = readPositiveInteger(select && select.value);
+  if (deliveryId === null || !feishuRetryState.deliveries.some(function(delivery) {
+    return readPositiveInteger(delivery.id) === deliveryId;
+  })) return;
+  feishuRetryState.deliveryId = deliveryId;
+  var input = document.getElementById('feishuRetryReason');
+  var status = document.getElementById('feishuRetryStatus');
+  if (input) input.value = '';
+  if (status) status.textContent = '';
+  renderFeishuRetryPanel(feishuRetryState.deliveries, feishuRetryState.campaignId);
+}
+
+function retryFeishuDelivery() {
+  var campaignId = getM4CampaignId();
+  var activeActionKey = feishuRetryActionKey(feishuRetryState.campaignId, feishuRetryState.deliveryId);
+  if (
+    feishuRetryState.campaignId === campaignId && activeActionKey &&
+    feishuRetryInFlightByDelivery[activeActionKey]
+  ) {
+    return feishuRetryInFlightByDelivery[activeActionKey];
+  }
+  var delivery = selectedFeishuRetryDelivery();
+  var campaign = getM4CampaignById(campaignId);
+  var input = document.getElementById('feishuRetryReason');
+  var status = document.getElementById('feishuRetryStatus');
+  var submit = document.getElementById('feishuRetrySubmit');
+  if (
+    campaignId === null || !delivery || delivery.status !== 'failed' || delivery.retry_available !== true ||
+    feishuRetryState.campaignId !== campaignId
+  ) {
+    if (status) status.textContent = '没有可安全重试的失败回执。';
+    return null;
+  }
+  if (!isM4FeishuReconciliationOperator(campaign)) {
+    if (status) status.textContent = '当前账号无权重试该回执。';
+    toast('当前账号无权重试该回执', 'error');
+    return null;
+  }
+  var reason = String(input && input.value || '').trim();
+  if (!reason || reason.length > 280) {
+    if (status) status.textContent = reason.length > 280
+      ? 'Retry reason must not exceed 280 characters.'
+      : 'A retry reason is required.';
+    return null;
+  }
+  var actionCampaignId = campaignId;
+  var actionDeliveryId = readPositiveInteger(delivery.id);
+  var actionKey = feishuRetryActionKey(actionCampaignId, actionDeliveryId);
+  if (actionKey && feishuRetryInFlightByDelivery[actionKey]) {
+    return feishuRetryInFlightByDelivery[actionKey];
+  }
+  if (!feishuRetryOperationIds[actionKey]) {
+    feishuRetryOperationIds[actionKey] = createFeishuBitableOperationId();
+  }
+  var operationId = feishuRetryOperationIds[actionKey];
+  if (status) status.textContent = '正在基于原始快照重试飞书推送...';
+  if (submit) submit.disabled = true;
+  var action = (async function() {
+    try {
+      var response = await apiFetch(
+        '/campaigns/' + encodeURIComponent(actionCampaignId) + '/feishu-deliveries/' + encodeURIComponent(actionDeliveryId) + '/retry',
+        {
+          method: 'POST',
+          headers: { 'Idempotency-Key': operationId },
+          body: JSON.stringify({ reason: reason })
+        }
+      );
+      var data = await response.json();
+      if (data.delivery && data.delivery.status === 'pending') {
+        await loadFeishuOutbox();
+        if (getM4CampaignId() === actionCampaignId && status) {
+          status.textContent = '重试已提交，等待飞书回执核对。';
+        }
+        toast('飞书重试已提交，等待回执核对');
+        return data.delivery;
+      }
+      if (data.delivery && data.delivery.status === 'failed') {
+        await loadFeishuOutbox();
+        if (getM4CampaignId() === actionCampaignId && status) {
+          status.textContent = '飞书重试未写入，失败回执已更新。';
+        }
+        toast('飞书重试未写入，失败回执已更新', 'error');
+        return data.delivery;
+      }
+      if (!response.ok) {
+        if (response.status === 409) {
+          await loadFeishuOutbox();
+          if (getM4CampaignId() === actionCampaignId && status) {
+            status.textContent = '重试回执状态已更新，请按最新结果处理。';
+          }
+          toast('Feishu retry state was refreshed');
+          return null;
+        }
+        throw new Error(data.error || '飞书重试失败');
+      }
+      if (!data.delivery || data.delivery.status !== 'succeeded') {
+        throw new Error('飞书重试结果无效');
+      }
+      if (
+        getM4CampaignId() === actionCampaignId &&
+        feishuRetryState.deliveryId === actionDeliveryId &&
+        input
+      ) input.value = '';
+      if (getM4CampaignId() === actionCampaignId && status) {
+        status.textContent = '飞书推送已重试成功。';
+      }
+      toast('Feishu retry completed');
+      await loadFeishuOutbox();
+      return data.delivery;
+    } catch (error) {
+      if (getM4CampaignId() === actionCampaignId && status) {
+        status.textContent = error.message || '飞书重试失败。';
+      }
+      toast(error.message || '飞书重试失败', 'error');
+      return null;
+    }
+  })();
+  var settlement = action.finally(function() {
+    if (actionKey && feishuRetryInFlightByDelivery[actionKey] === settlement) {
+      delete feishuRetryInFlightByDelivery[actionKey];
+    }
+    if (feishuRetryState.inFlight === settlement) {
+      feishuRetryState.inFlight = null;
+      renderFeishuRetryPanel(feishuRetryState.deliveries, feishuRetryState.campaignId);
+    }
+  });
+  if (actionKey) feishuRetryInFlightByDelivery[actionKey] = settlement;
+  feishuRetryState.inFlight = settlement;
+  return settlement;
+}
+
 async function loadFeishuOutbox() {
   var campaignId = getM4CampaignId();
   var requestGeneration = ++feishuOutboxLoadGeneration;
   if (campaignId === null) {
     renderFeishuDeliveryStatus(null, null);
     renderFeishuReconciliationPanel([], null);
+    renderFeishuRetryPanel([], null);
     return [];
   }
   var status = document.getElementById('feishuDeliveryStatus');
@@ -4970,11 +5215,13 @@ async function loadFeishuOutbox() {
     var deliveries = Array.isArray(data.deliveries) ? data.deliveries : [];
     renderFeishuDeliveryStatus(deliveries[0] || null, campaignId);
     renderFeishuReconciliationPanel(deliveries, campaignId);
+    renderFeishuRetryPanel(deliveries, campaignId);
     return deliveries;
   } catch (error) {
     if (requestGeneration !== feishuOutboxLoadGeneration || campaignId !== getM4CampaignId()) return [];
     renderFeishuDeliveryStatus(null, campaignId, error);
     renderFeishuReconciliationPanel([], campaignId, error);
+    renderFeishuRetryPanel([], campaignId, error);
     return [];
   }
 }
@@ -6448,7 +6695,7 @@ function switchPage(id, options) {
     'getEditedDemand', 'syncCurDemandFromAnalysis', 'handleDemandFile', 'analyzeDemandAI',
     'switchTab', 'matchInfluencers', 'smartMatch', 'handleUpload', 'handleDrop', 'openInfUploadModal', 'handleUploadModal', 'downloadInfTemplate', 'exportAll', 'exportFiltered', 'exportSelected',
     'toggleAll', 'syncInfluencerSelectionState', 'loadM4Campaigns', 'changeM4CampaignContext', 'startCollab', 'submitCollabOrder', 'closeCollabOrderModal', 'loadCollaborations', 'updateCollabStatus', 'runCampaignCollabAction', 'closeCampaignSettlementModal', 'submitCampaignSettlement',
-    'sendChat', 'clearChat', 'clearAIMemory', 'pushToFeishu', 'loadFeishuStatus', 'loadFeishuOutbox', 'testFeishuConnection', 'selectFeishuReconciliationDelivery', 'reconcileFeishuDelivery',
+    'sendChat', 'clearChat', 'clearAIMemory', 'pushToFeishu', 'loadFeishuStatus', 'loadFeishuOutbox', 'testFeishuConnection', 'selectFeishuReconciliationDelivery', 'reconcileFeishuDelivery', 'selectFeishuRetryDelivery', 'retryFeishuDelivery',
     'switchAdminTab', 'loadAdminDashboard', 'loadAdminUsers', 'adminAddUser', 'adminCreateInvite', 'adminResetPw',
     'wfUndo', 'wfRedo', 'wfClearCanvas', 'wfSaveTemplate', 'wfPublishTemplate', 'wfResetTaskFilters', 'wfLoadTasks', 'wfLoadInstances',
     'showRelatedBrands', 'closeBrandRelModal'

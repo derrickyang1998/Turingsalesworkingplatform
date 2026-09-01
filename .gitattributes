@@ -15,6 +15,7 @@ platform/server/migrations/005_knowledge_custody_projection.js text eol=lf
 platform/server/migrations/006_crm_sales_workspace.js text eol=lf
 platform/server/migrations/007_knowledge_governance.js text eol=lf
 platform/server/migrations/008_feishu_bitable_outbox.js text eol=lf
+platform/server/migrations/009_feishu_bitable_retry_lineage.js text eol=lf
 platform/server/migrations/baselines/legacy_v1.js text eol=lf
 platform/server/migrations/engines/v1.js text eol=lf
 platform/server/migrations/vendor/bcryptjs_v3_0_3.js text eol=lf

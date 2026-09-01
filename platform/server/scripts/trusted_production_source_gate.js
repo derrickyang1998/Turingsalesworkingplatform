@@ -55,6 +55,7 @@ const REQUIRED_BUNDLE_FILES = Object.freeze([
   'server/migrations/006_crm_sales_workspace.js',
   'server/migrations/007_knowledge_governance.js',
   'server/migrations/008_feishu_bitable_outbox.js',
+  'server/migrations/009_feishu_bitable_retry_lineage.js',
   'server/migrations/baselines/legacy_v1.js',
   'server/migrations/engines/v1.js',
   'server/migrations/vendor/bcryptjs_v3_0_3.js',
@@ -119,8 +120,8 @@ const EXPECTED_ENTRYPOINTS = Object.freeze({
 });
 
 const EXPECTED_MIGRATION_CONTRACT = Object.freeze({
-  acceptedSourceVersions: Object.freeze([1, 6, 7, 8]),
-  targetVersion: 8,
+  acceptedSourceVersions: Object.freeze([1, 6, 7, 8, 9]),
+  targetVersion: 9,
   runs: 2,
   deterministicAppendTables: Object.freeze(['activity_log'])
 });
@@ -1504,7 +1505,7 @@ function prepareTrustedLegacySource({
     const adoptionSourcePath = mutableSourceIdentity ? mutableSourceIdentity.path : sourcePath;
     const adoptionSourceSha256 = mutableSourceIdentity ? mutableSourceIdentity.sha256 : sourceIdentity.sha256;
     const classification = classifyTrustedDatabase(manifest, verified, adoptionSourcePath);
-    if (classification.status === 'managed' && [1, 6, 7, 8].includes(classification.currentVersion)) {
+    if (classification.status === 'managed' && [1, 6, 7, 8, 9].includes(classification.currentVersion)) {
       return Object.freeze({
         effectiveSourcePath: sourcePath,
         report: Object.freeze({
@@ -1521,7 +1522,7 @@ function prepareTrustedLegacySource({
       });
     }
     if (classification.status !== 'legacy' || classification.currentVersion !== 0) {
-      throw new Error(`trusted legacy adoption requires exact version 0 or managed version 1/6/7/8; got ${classification.status}:${classification.currentVersion}`);
+      throw new Error(`trusted legacy adoption requires exact version 0 or managed version 1/6/7/8/9; got ${classification.status}:${classification.currentVersion}`);
     }
     if (fs.existsSync(outputPath) || databaseSidecarPaths(outputPath).some((candidate) => fs.existsSync(candidate))) {
       throw new Error('trusted legacy adoption output must not exist before execution');

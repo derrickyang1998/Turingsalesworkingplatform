@@ -33,10 +33,10 @@ $EXPECTED_PPT_SHA256 = "f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57
 $TRUSTED_SOURCE_GATE_RELATIVE_PATH = "server\scripts\trusted_production_source_gate.js"
 $TRUSTED_SOURCE_MANIFEST_RELATIVE_PATH = "server\scripts\trusted_production_source_manifest.json"
 $TRUSTED_RUNTIME_CONFIG_RELATIVE_PATH = "server\config\runtime_config.js"
-$EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "2e17cec03ad413d3ff8d015645e6ae5f12e0ac060bfeb8271495318f0068d90b"
-$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "5c33abf6b374b1057c28afbc09565a4e0ac7423d5d739bb1ae3de31c7ae0c182"
+$EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "c5836d1475de8b081cd8aad1bbe1a5b372fdb7eb0eb2636c97e0720544f178de"
+$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "a8acfd2ccad4cf1f6e6ba88f31110e45b859e77bfbb7b6e2eb04140881fe570a"
 $EXPECTED_TRUSTED_RUNTIME_CONFIG_SHA256 = "76d43d3e811c6fa8daae987cc9eb2fff2dc8a8095f84b1cd309e4e214df94dcb"
-$EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256 = "33ac6b2dc7fd454d49b8796dd1d93da22be54fea16e37eb046f260e779c5d47a"
+$EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256 = "ec4483ed5c3ab5dee361df641ef87a27623b0a8283bfc07464379f18da80756a"
 $EXPECTED_TRUSTED_PARSER_VERIFIER_SHA256 = "7f9efaac02675b21e025891a400474cc7481c1adaf58c88bd8b356d5276f2eaa"
 $EXPECTED_TRUSTED_PUBLIC_GUARD_SHA256 = "d45fe8fcc01587aaa0e73eccfb9714c27801e232cb6c0effd6daedb703316d66"
 $EXPECTED_TRUSTED_MIGRATION_CLEANUP_HELPER_SHA256 = "d5f2befa902522dd9de3e9dd2397a99ee5e78ab1a1c6e526a27f14bb2829e1fa"
@@ -108,6 +108,7 @@ $FILES = @(
     "server\migrations\006_crm_sales_workspace.js",
     "server\migrations\007_knowledge_governance.js",
     "server\migrations\008_feishu_bitable_outbox.js",
+    "server\migrations\009_feishu_bitable_retry_lineage.js",
     "server\migrations\baselines\legacy_v1.js",
     "server\migrations\engines\v1.js",
     "server\migrations\vendor\bcryptjs_v3_0_3.js",
@@ -9560,7 +9561,7 @@ try {
   if (database.pragma('integrity_check', { simple: true }) !== 'ok') throw new Error('Candidate DB integrity_check failed');
   if (database.pragma('foreign_key_check').length !== 0) throw new Error('Candidate DB foreign_key_check failed');
   const version = database.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version;
-  if (Number(version) !== 8) throw new Error('Candidate migration target version mismatch');
+  if (Number(version) !== 9) throw new Error('Candidate migration target version mismatch');
   console.log('TM_SANITIZED_MIGRATION_COMPATIBILITY_OK');
 } finally {
   database.close();
@@ -10936,7 +10937,7 @@ if applied:
         if hashlib.sha256(handle.read()).hexdigest() != output_sha256:
             raise SystemExit('Trusted live database adoption stage digest is invalid')
 else:
-    if (report.get('sourceVersion') not in (1, 6, 7, 8) or
+    if (report.get('sourceVersion') not in (1, 6, 7, 8, 9) or
             report.get('targetVersion') != report.get('sourceVersion') or
             output_sha256 != expected_source_sha256 or
             report.get('baseTableCount') is not None or report.get('baseRowCount') is not None or

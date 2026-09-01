@@ -111,6 +111,7 @@ function createContext() {
     getActiveCampaignId() { return 91; },
     esc(value) { return String(value || ''); },
     toast(message, type) { toasts.push({ message, type: type || null }); },
+    renderFeishuRetryPanel() {},
     async apiFetch() { throw new Error('Unexpected request'); }
   };
   context.window = context;

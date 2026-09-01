@@ -1365,6 +1365,95 @@ test('campaign-scoped Bitable sync preserves an ambiguous provider result for ow
   db.close();
 });
 
+test('campaign-scoped Bitable retry sends one exact stored snapshot and replays without another provider write', async () => {
+  const db = freshDb();
+  const campaignId = createFeishuOutboxCampaign(db, 980301, 2);
+  const influencerId = insertInfluencer(db, {
+    platform: 'TikTok',
+    kol_handle: '@outbox_retry',
+    profile_link: 'https://example.com/outbox-retry',
+    followers: 73000,
+    project_name: 'Retry Project',
+    product_name: 'Retry Product',
+    data_source: 'test'
+  });
+  const syncCalls = [];
+  const routes = mountRoutes(db, {
+    feishuClient: {
+      getStatus: function() {
+        return { configured: true, mode: 'bitable', sync_available: true };
+      },
+      prepareBitableOutboxPayload: function(values) {
+        return {
+          records: values.records.map(function(record) {
+            return {
+              fields: {
+                '网红频道名称': record['网红频道名称'],
+                '网红频道链接': record['网红频道链接'],
+                '项目&客户': record['项目&客户']
+              }
+            };
+          })
+        };
+      },
+      syncInfluencers: async function(values) {
+        syncCalls.push(values);
+        if (syncCalls.length === 1) {
+          return {
+            configured: false,
+            mode: 'bitable',
+            records: values.records.length,
+            csv: values.csv,
+            message: 'Feishu Bitable write is not available.'
+          };
+        }
+        return {
+          configured: true,
+          mode: 'bitable',
+          synced: values.records.length,
+          records: values.records.length,
+          remoteRecordIds: ['rec_retry_1']
+        };
+      }
+    }
+  });
+  const initial = await invoke(routes, 'POST /api/influencers/feishu/sync', {
+    body: { ids: [influencerId], campaign_id: campaignId },
+    headers: { 'Idempotency-Key': '5f9f5a2c-aa47-4c91-996d-dd84a17aaf75' }
+  });
+  assert.equal(initial.statusCode, 200);
+  assert.equal(initial.payload.configured, false);
+  assert.equal(initial.payload.delivery.status, 'failed');
+  assert.equal(initial.payload.delivery.last_error_code, 'FEISHU_BITABLE_WRITE_NOT_AVAILABLE');
+
+  const retryRequest = {
+    params: { id: campaignId, deliveryId: initial.payload.delivery.id },
+    body: { reason: 'Bitable write was enabled after the original failure.' },
+    headers: { 'Idempotency-Key': '32681ac4-e1aa-4fb4-bb7c-8119a38625f4' }
+  };
+  const retried = await invoke(routes, 'POST /api/campaigns/:id/feishu-deliveries/:deliveryId/retry', retryRequest);
+  assert.equal(retried.statusCode, 200);
+  assert.equal(retried.payload.delivery.status, 'succeeded');
+  assert.equal(retried.payload.delivery.retry_of_delivery_id, initial.payload.delivery.id);
+  assert.equal(syncCalls.length, 2);
+  assert.equal(syncCalls[1].operationId, retryRequest.headers['Idempotency-Key']);
+  assert.equal(syncCalls[1].includeReceipt, true);
+  assert.deepEqual(syncCalls[1].records, syncCalls[1].bitableRecords);
+  assert.deepEqual(syncCalls[1].bitableRecords, [{
+    fields: {
+      '网红频道名称': '@outbox_retry',
+      '网红频道链接': 'https://example.com/outbox-retry',
+      '项目&客户': 'Retry Project'
+    }
+  }]);
+
+  const replay = await invoke(routes, 'POST /api/campaigns/:id/feishu-deliveries/:deliveryId/retry', retryRequest);
+  assert.equal(replay.statusCode, 200);
+  assert.deepEqual(replay.payload.delivery, retried.payload.delivery);
+  assert.equal(syncCalls.length, 2);
+  db.close();
+});
+
 test('collaboration order creation stores the selected resource definition', async () => {
   const db = freshDb();
   const routes = mountRoutes(db);

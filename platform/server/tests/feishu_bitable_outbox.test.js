@@ -19,7 +19,8 @@ const MIGRATIONS = Object.freeze([
   ['005_knowledge_custody_projection', 5],
   ['006_crm_sales_workspace', 6],
   ['007_knowledge_governance', 7],
-  ['008_feishu_bitable_outbox', 8]
+  ['008_feishu_bitable_outbox', 8],
+  ['009_feishu_bitable_retry_lineage', 9]
 ].map(function(entry) {
   return Object.freeze({
     version: entry[1],
@@ -36,7 +37,7 @@ function openDatabase(t) {
   assert.deepEqual(migrationService.runMigrations(db, {
     rootDir: SERVER_ROOT,
     registeredMigrations: MIGRATIONS
-  }), { status: 'managed', currentVersion: 8 });
+  }), { status: 'managed', currentVersion: 9 });
   return db;
 }
 
@@ -280,4 +281,74 @@ test('campaign-scoped Bitable outbox rejects duplicate remote record IDs and let
     remote_record_count: 2,
     last_error_code: null
   });
+});
+
+test('campaign-scoped Bitable outbox retries a known no-write failure through a new append-only delivery', (t) => {
+  const db = openDatabase(t);
+  const owner = identity(db, 2);
+  const campaignId = createCampaign(db, owner, 8401, 'Bitable retry delivery');
+  const service = createFeishuBitableOutboxService(db);
+  const source = service.reserve({
+    userId: owner.user_id,
+    campaignId,
+    operationId: '4c5aa92a-59bb-4a99-8f54-badcd3b9015c',
+    records: DELIVERY_RECORDS
+  });
+  const failed = service.fail({
+    deliveryId: source.delivery.id,
+    reservationToken: source.reservationToken,
+    errorCode: 'FEISHU_BITABLE_SCHEMA_MISMATCH'
+  });
+
+  const retry = service.retry({
+    userId: owner.user_id,
+    campaignId,
+    deliveryId: failed.id,
+    operationId: '63b7acba-8e48-4bce-9da5-4554a30f62c6',
+    reason: 'Schema mapping was corrected before retrying this batch.'
+  });
+
+  assert.equal(retry.state, 'reserved');
+  assert.equal(retry.delivery.id > failed.id, true);
+  assertDelivery(retry.delivery, {
+    id: retry.delivery.id,
+    campaign_id: campaignId,
+    status: 'pending',
+    record_count: 2,
+    remote_record_count: 0,
+    last_error_code: null
+  });
+  assert.equal(retry.delivery.retry_of_delivery_id, failed.id);
+  assert.equal(retry.sourceDelivery.retry_delivery_id, retry.delivery.id);
+  assert.deepEqual(retry.records, DELIVERY_RECORDS);
+  const replay = service.retry({
+    userId: owner.user_id,
+    campaignId,
+    deliveryId: failed.id,
+    operationId: '63b7acba-8e48-4bce-9da5-4554a30f62c6',
+    reason: 'Schema mapping was corrected before retrying this batch.'
+  });
+  assert.equal(replay.state, 'replay');
+  assert.equal(replay.delivery.id, retry.delivery.id);
+  assert.throws(function() {
+    service.retry({
+      userId: owner.user_id,
+      campaignId,
+      deliveryId: failed.id,
+      operationId: '63b7acba-8e48-4bce-9da5-4554a30f62c6',
+      reason: 'A materially different retry explanation.'
+    });
+  }, function(error) {
+    return error instanceof FeishuBitableOutboxError && error.code === 'FEISHU_OUTBOX_IDEMPOTENCY_CONFLICT';
+  });
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM feishu_bitable_outbox').get().count, 2);
+  assert.deepEqual(db.prepare(`
+    SELECT failed_delivery_id,retry_delivery_id,actor_user_id,reason
+    FROM feishu_bitable_outbox_retries
+  `).all(), [{
+    failed_delivery_id: failed.id,
+    retry_delivery_id: retry.delivery.id,
+    actor_user_id: owner.user_id,
+    reason: 'Schema mapping was corrected before retrying this batch.'
+  }]);
 });

@@ -22,7 +22,11 @@ function createFixture(t, name, targetVersion = 1) {
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const databasePath = path.join(root, `source-v${targetVersion}.db`);
   const options = { rootDir: SERVER_ROOT };
-  if (targetVersion === 6) options.registeredMigrations = migrationGate.REGISTERED_MIGRATIONS;
+  if (targetVersion > 1) {
+    options.registeredMigrations = migrationGate.REGISTERED_MIGRATIONS.filter(function(migration) {
+      return migration.version <= targetVersion;
+    });
+  }
   const db = migrationService.openMigratedDatabase(databasePath, options);
   db.prepare('UPDATE users SET display_name=?,department=? WHERE id=(SELECT MIN(id) FROM users)')
     .run('synthetic-exactness-user', 'synthetic-exactness-department');
@@ -71,8 +75,8 @@ test('migration verifier rejects a sanitized source that is already at version 6
   );
 });
 
-test('migration verifier accepts a populated sanitized version 1 source and reaches version 8', (t) => {
-  const fixture = createFixture(t, 'v1-to-v8', 1);
+test('migration verifier accepts a populated sanitized version 1 source and reaches version 9', (t) => {
+  const fixture = createFixture(t, 'v1-to-v9', 1);
   const sourceSha256 = sha256File(fixture.databasePath);
 
   const report = migrationGate.verifySanitizedMigrationCopy({
@@ -81,7 +85,25 @@ test('migration verifier accepts a populated sanitized version 1 source and reac
   });
 
   assert.equal(report.sourceVersion, 1);
-  assert.equal(report.targetVersion, 8);
+  assert.equal(report.targetVersion, 9);
+  assert.equal(report.runs, 2);
+  assert.equal(report.preMigrationRestoreVerified, true);
+  assert.equal(report.legacyPreservationVerified, true);
+  assert.equal(sha256File(fixture.databasePath), sourceSha256);
+});
+
+test('migration verifier accepts a populated managed version 9 source without mutating it', (t) => {
+  const fixture = createFixture(t, 'v9-noop', 9);
+  const sourceSha256 = sha256File(fixture.databasePath);
+
+  const report = migrationGate.verifySanitizedMigrationCopy({
+    sanitizedPath: fixture.databasePath,
+    sourceVersion: 9,
+    workDir: path.join(fixture.root, 'work')
+  });
+
+  assert.equal(report.sourceVersion, 9);
+  assert.equal(report.targetVersion, 9);
   assert.equal(report.runs, 2);
   assert.equal(report.preMigrationRestoreVerified, true);
   assert.equal(report.legacyPreservationVerified, true);
@@ -103,7 +125,7 @@ test('migration verifier preserves an existing activity_log allocator across det
   });
 
   assert.equal(report.sourceVersion, 1);
-  assert.equal(report.targetVersion, 8);
+  assert.equal(report.targetVersion, 9);
   assert.equal(report.legacyPreservationVerified, true);
 });
 
