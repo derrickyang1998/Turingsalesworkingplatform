@@ -1,5 +1,25 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.7.3-feishu-bitable-batch-delivery (Production Deployed, 2026-09-01) - 飞书多维表格受控批量写入
+
+### 交付与范围 / Delivery And Scope
+- 既有“推送到飞书”入口现在可在 `FEISHU_BITABLE_WRITE_ENABLED=true` 时向飞书多维表格批量创建已选网红记录；开关默认关闭，未配置、配置不完整或开关关闭时保持既有 CSV 下载兜底，Webhook 行为不变。
+- 每次写入都要求浏览器生成的裸 UUID `Idempotency-Key`，并传给飞书 `client_token`；重复点击合并为单请求，网络丢失响应时保留同一 UUID，服务器确认后才轮换。服务端始终重新读取活动网红并构造数据，不接受客户端记录内容。
+- 写入前会获取 tenant token，验证远端 Bitable 必须具备批准的完整 20 列上传合同，再只发送允许字段。`网红联系方式` 列始终要求存在，但默认不发送联系人值；仅当 `FEISHU_BITABLE_INCLUDE_CONTACT_EMAIL=true` 时才显式发送。批次上限为 500 条，飞书逻辑成功码、返回数量和非空远端记录 ID 必须全部确认才报告成功。
+- v0.7.3 是直接创建的可独立使用切片，不持久化远端 ID，也不包含 Outbox、自动重试、更新或对账；这些能力继续留给 v0.7.4，避免把未验证的“恰好一次”语义宣称为已完成。
+
+### 定向验证、审查与上线 / Focused Verification, Review, And Release
+- 受影响测试通过：Feishu provider `13/13`、客户端 UUID 重放 `1/1`、网红同步路由 `2/2`、飞书状态/管理员测试路由 `3/3`；JavaScript 语法、`git diff --check` 与 `deploy_v8.ps1 -ValidateLocalOnly` 通过。独立审查先发现逻辑成功码强制转换及 19 列远端预检两项阻断，补充 RED 用例修复后最终结论为 `APPROVE`，另验证 501 条边界拒绝。
+- 实现提交：`06c7dd1`。受控生产备份：`/root/turingmarket/backups/v060-crm-sales-workspace-20260901-224913`，顶层 `SHA256SUMS` 已校验，清单 SHA-256 为 `acdae3dea97776e4ec2a0f3928db144a10267875051429b31f9a55f136c38ea0`。
+- 发布候选通过可信来源、迁移演练、隔离 Express 重放、Nginx 合同、部署浏览器基线、解析器运行时和容量门禁后原子切换。公网与回环 `/api/health` 均为 `200` / `ok`、Parser ready，`/m4` 与 `/app.js` 均为 `200`，线上 `app.js` 已包含 Bitable UUID 逻辑，PM2/Nginx online。
+- 生产服务器飞书配置当前为 `unconfigured`，因此线上验收只证明安全状态和 CSV 兜底路径，不执行真实飞书写入；启用前仍需在服务器端配置 Bitable 凭据、完整 20 列表头与写入开关。
+
+### 后续边界 / Next Boundaries
+- v0.7.4：活动范围的最小字段 Outbox、远端记录链接、已知 ID 更新、失败重放和管理员对账，继续按单功能闭环即发布。
+- 解析器冷缓存下载是本轮唯一的长耗时环节；后续单独评估受控预热/复用，保持来源校验、隔离和回滚保护不变。
+
+---
+
 ## v0.7.2-collaboration-resource-contract (Production Deployed, 2026-09-01) - M4 合作资源下单合同
 
 ### 交付与范围 / Delivery And Scope
