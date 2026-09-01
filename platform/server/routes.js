@@ -245,8 +245,10 @@ app.post('/api/influencers/feishu/sync', authMiddleware, async (req, res) => {
           : 'FEISHU_WEBHOOK_URL is not configured. CSV fallback is ready for manual upload.'
       });
     }
-    db.prepare('INSERT INTO activity_log (user_id, action, module, details, ip_address) VALUES (?, ?, ?, ?, ?)')
-      .run(req.user.id, 'feishu_sync', 'influencer', 'Synced ' + result.synced + ' influencers to Feishu ' + result.mode, req.ip);
+    try {
+      db.prepare('INSERT INTO activity_log (user_id, action, module, details, ip_address) VALUES (?, ?, ?, ?, ?)')
+        .run(req.user.id, 'feishu_sync', 'influencer', 'Synced ' + result.synced + ' influencers to Feishu ' + result.mode, req.ip);
+    } catch (auditError) {}
     res.json({ configured: true, synced: result.synced, records: result.records });
   } catch (e) {
     const statusCode = e instanceof FeishuClientError ? e.statusCode : 502;

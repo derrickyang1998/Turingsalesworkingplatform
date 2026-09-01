@@ -1,5 +1,30 @@
 const FEISHU_API_ORIGIN = 'https://open.feishu.cn/open-apis';
 const DEFAULT_TIMEOUT_MS = 10000;
+const MAX_BITABLE_BATCH_RECORDS = 500;
+const BITABLE_CONTACT_FIELD = '网红联系方式';
+const BITABLE_TEMPLATE_FIELDS = [
+  '日期',
+  '提报人',
+  '项目&客户',
+  '推广产品',
+  '是否重复',
+  '网红频道名称',
+  '网红粉丝量',
+  '网红频道链接',
+  '社媒平台',
+  '国家',
+  '网红类型',
+  '近10个视频均播',
+  '网红成本价格（折算美元）',
+  '网红交付物（植入-完播等信息）',
+  'Turing备注',
+  '对外商务报价（美元）',
+  BITABLE_CONTACT_FIELD,
+  'CPM（自动计算）',
+  'CPV(自动计算)',
+  '父记录'
+];
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 class FeishuClientError extends Error {
   constructor(code, message, statusCode) {
@@ -13,6 +38,10 @@ class FeishuClientError extends Error {
 function readEnvironmentValue(env, name) {
   const value = env && Object.prototype.hasOwnProperty.call(env, name) ? env[name] : '';
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function readEnvironmentBoolean(env, name) {
+  return ['1', 'true', 'yes', 'on'].indexOf(readEnvironmentValue(env, name).toLowerCase()) !== -1;
 }
 
 function normalizeMode(value) {
@@ -33,7 +62,9 @@ function resolveConfiguration(env) {
     appId: readEnvironmentValue(env, 'FEISHU_APP_ID'),
     appSecret: readEnvironmentValue(env, 'FEISHU_APP_SECRET'),
     appToken: readEnvironmentValue(env, 'FEISHU_BITABLE_APP_TOKEN'),
-    tableId: readEnvironmentValue(env, 'FEISHU_BITABLE_TABLE_ID')
+    tableId: readEnvironmentValue(env, 'FEISHU_BITABLE_TABLE_ID'),
+    writeEnabled: readEnvironmentBoolean(env, 'FEISHU_BITABLE_WRITE_ENABLED'),
+    includeContactEmail: readEnvironmentBoolean(env, 'FEISHU_BITABLE_INCLUDE_CONTACT_EMAIL')
   };
 
   let mode = requestedMode;
@@ -79,7 +110,10 @@ function publicStatus(configuration) {
   return {
     configured: configuration.configured,
     mode: configuration.mode,
-    sync_available: configuration.configured && configuration.mode === 'webhook',
+    sync_available: configuration.configured && (
+      configuration.mode === 'webhook' ||
+      (configuration.mode === 'bitable' && configuration.bitable.writeEnabled)
+    ),
     test_available: configuration.configured && (
       configuration.mode === 'bitable' || Boolean(configuration.webhookTestUrl)
     ),
@@ -168,6 +202,87 @@ function createFeishuClient(options) {
     });
   }
 
+  function bitableFieldsFor(config) {
+    return BITABLE_TEMPLATE_FIELDS.filter(function(fieldName) {
+      return config.bitable.includeContactEmail || fieldName !== BITABLE_CONTACT_FIELD;
+    });
+  }
+
+  function assertBitableWriteRequest(records, operationId) {
+    if (!UUID_PATTERN.test(String(operationId || '').trim())) {
+      throw new FeishuClientError('FEISHU_IDEMPOTENCY_REQUIRED', 'A UUID Idempotency-Key is required for Feishu Bitable writes.', 400);
+    }
+    if (records.length > MAX_BITABLE_BATCH_RECORDS) {
+      throw new FeishuClientError('FEISHU_BATCH_LIMIT_EXCEEDED', 'Feishu Bitable accepts at most 500 records per batch.', 422);
+    }
+  }
+
+  function projectBitableRecords(records, config) {
+    const fieldNames = bitableFieldsFor(config);
+    return records.map(function(record) {
+      const fields = {};
+      fieldNames.forEach(function(fieldName) {
+        const value = record && record[fieldName];
+        fields[fieldName] = value === undefined || value === null ? '' : value;
+      });
+      return { fields };
+    });
+  }
+
+  async function listBitableFields(config, tenantToken) {
+    const response = await request(
+      FEISHU_API_ORIGIN + '/bitable/v1/apps/' + encodeURIComponent(config.bitable.appToken) +
+      '/tables/' + encodeURIComponent(config.bitable.tableId) + '/fields?page_size=100',
+      {
+        method: 'GET',
+        headers: { Authorization: 'Bearer ' + tenantToken }
+      }
+    );
+    const payload = await parseJsonSafely(response);
+    const items = payload && payload.data && payload.data.items;
+    if (payload.code !== 0 || !Array.isArray(items)) {
+      throw new FeishuClientError('FEISHU_PROVIDER_REJECTED', 'Feishu provider rejected the request.', 502);
+    }
+    return new Set(items.map(function(item) { return item && item.field_name; }).filter(Boolean));
+  }
+
+  async function syncBitable(config, records, operationId) {
+    assertBitableWriteRequest(records, operationId);
+    const tenantToken = await requestTenantToken(config);
+    const expectedFields = BITABLE_TEMPLATE_FIELDS;
+    const availableFields = await listBitableFields(config, tenantToken);
+    if (expectedFields.some(function(fieldName) { return !availableFields.has(fieldName); })) {
+      throw new FeishuClientError('FEISHU_BITABLE_SCHEMA_MISMATCH', 'Feishu Bitable schema does not match the approved import template.', 409);
+    }
+
+    const response = await request(
+      FEISHU_API_ORIGIN + '/bitable/v1/apps/' + encodeURIComponent(config.bitable.appToken) +
+      '/tables/' + encodeURIComponent(config.bitable.tableId) + '/records/batch_create',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer ' + tenantToken,
+          'Content-Type': 'application/json; charset=utf-8'
+        },
+        body: JSON.stringify({
+          client_token: String(operationId).trim(),
+          records: projectBitableRecords(records, config)
+        })
+      }
+    );
+    const payload = await parseJsonSafely(response);
+    const createdRecords = payload && payload.data && payload.data.records;
+    if (payload.code !== 0) {
+      throw new FeishuClientError('FEISHU_PROVIDER_REJECTED', 'Feishu provider rejected the request.', 502);
+    }
+    if (!Array.isArray(createdRecords) || createdRecords.length !== records.length || createdRecords.some(function(record) {
+      return !record || typeof record.record_id !== 'string' || !record.record_id;
+    })) {
+      throw new FeishuClientError('FEISHU_WRITE_RESULT_INCOMPLETE', 'Feishu did not confirm every record in the batch.', 502);
+    }
+    return { configured: true, mode: 'bitable', synced: records.length, records: records.length };
+  }
+
   async function syncInfluencers(values) {
     values = values || {};
     const records = Array.isArray(values.records) ? values.records : [];
@@ -183,6 +298,9 @@ function createFeishuClient(options) {
       };
     }
     if (config.mode === 'bitable') {
+      if (config.bitable.writeEnabled) {
+        return syncBitable(config, records, values.operationId);
+      }
       return {
         configured: false,
         mode: 'bitable',
@@ -222,7 +340,7 @@ function createFeishuClient(options) {
         }
       );
       const payload = await parseJsonSafely(response);
-      if (Number(payload.code) !== 0) {
+      if (payload.code !== 0) {
         throw new FeishuClientError('FEISHU_PROVIDER_REJECTED', 'Feishu provider rejected the request.', 502);
       }
     }

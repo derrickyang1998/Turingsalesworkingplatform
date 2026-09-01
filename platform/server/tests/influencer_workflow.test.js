@@ -273,6 +273,12 @@ async function invoke(routes, key, opts) {
     params: opts.params || {},
     query: opts.query || {},
     body: opts.body || {},
+    headers: opts.headers || {},
+    get: function(name) {
+      const target = String(name || '').toLowerCase();
+      const key = Object.keys(this.headers).find(function(headerName) { return String(headerName).toLowerCase() === target; });
+      return key ? this.headers[key] : undefined;
+    },
     ip: '127.0.0.1'
   };
   let statusCode = 200;
@@ -1058,6 +1064,100 @@ test('feishu sync endpoint keeps configured Bitable mode on CSV fallback until t
       FEISHU_APP_SECRET: previous.appSecret,
       FEISHU_BITABLE_APP_TOKEN: previous.appToken,
       FEISHU_BITABLE_TABLE_ID: previous.tableId
+    }).forEach(function(entry) {
+      if (entry[1] === undefined) delete process.env[entry[0]];
+      else process.env[entry[0]] = entry[1];
+    });
+    db.close();
+  }
+});
+
+test('feishu sync endpoint sends a server-built Bitable batch only with a UUID idempotency key', async () => {
+  const previous = {
+    mode: process.env.FEISHU_SYNC_MODE,
+    webhookUrl: process.env.FEISHU_WEBHOOK_URL,
+    webhook: process.env.FEISHU_WEBHOOK,
+    appId: process.env.FEISHU_APP_ID,
+    appSecret: process.env.FEISHU_APP_SECRET,
+    appToken: process.env.FEISHU_BITABLE_APP_TOKEN,
+    tableId: process.env.FEISHU_BITABLE_TABLE_ID,
+    writeEnabled: process.env.FEISHU_BITABLE_WRITE_ENABLED,
+    includeContactEmail: process.env.FEISHU_BITABLE_INCLUDE_CONTACT_EMAIL,
+    fetch: global.fetch
+  };
+  process.env.FEISHU_SYNC_MODE = 'bitable';
+  delete process.env.FEISHU_WEBHOOK_URL;
+  delete process.env.FEISHU_WEBHOOK;
+  process.env.FEISHU_APP_ID = 'cli_test_app';
+  process.env.FEISHU_APP_SECRET = 'test-secret';
+  process.env.FEISHU_BITABLE_APP_TOKEN = 'basc_test';
+  process.env.FEISHU_BITABLE_TABLE_ID = 'tbl_test';
+  process.env.FEISHU_BITABLE_WRITE_ENABLED = 'true';
+  delete process.env.FEISHU_BITABLE_INCLUDE_CONTACT_EMAIL;
+  const db = freshDb();
+  const routes = mountRoutes(db);
+  const originalPrepare = db.prepare;
+  db.prepare = function(sql) {
+    if (String(sql).indexOf('INSERT INTO activity_log') !== -1) throw new Error('activity log is temporarily unavailable');
+    return originalPrepare.call(this, sql);
+  };
+  const id = insertInfluencer(db, {
+    platform: 'TikTok',
+    kol_handle: '@bitable_delivery',
+    profile_link: 'https://example.com/bitable-delivery',
+    followers: 88888,
+    region: 'US',
+    contact_email: 'private@example.com',
+    data_source: 'test'
+  });
+  const calls = [];
+  global.fetch = async function(url, options) {
+    calls.push({ url, options });
+    if (calls.length === 1) return { ok: true, status: 200, async json() { return { code: 0, tenant_access_token: 'tenant-test-token' }; } };
+    if (calls.length === 2) {
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return {
+            code: 0,
+            data: {
+              items: influencerWorkflow.TEMPLATE_HEADERS
+                .map(function(fieldName) { return { field_name: fieldName }; })
+            }
+          };
+        }
+      };
+    }
+    return { ok: true, status: 200, async json() { return { code: 0, data: { records: [{ record_id: 'rec_delivery_1' }] } }; } };
+  };
+
+  try {
+    const result = await invoke(routes, 'POST /api/influencers/feishu/sync', {
+      body: { ids: [id] },
+      headers: { 'Idempotency-Key': '6b4dd91f-e911-4416-a201-4d5f80875c5c' }
+    });
+
+    assert.equal(result.statusCode, 200);
+    assert.deepEqual(result.payload, { configured: true, synced: 1, records: 1 });
+    assert.equal(calls.length, 3);
+    const body = JSON.parse(calls[2].options.body);
+    assert.equal(body.client_token, '6b4dd91f-e911-4416-a201-4d5f80875c5c');
+    assert.equal(body.records[0].fields['网红频道名称'], '@bitable_delivery');
+    assert.equal(Object.hasOwn(body.records[0].fields, '网红联系方式'), false);
+  } finally {
+    global.fetch = previous.fetch;
+    db.prepare = originalPrepare;
+    Object.entries({
+      FEISHU_SYNC_MODE: previous.mode,
+      FEISHU_WEBHOOK_URL: previous.webhookUrl,
+      FEISHU_WEBHOOK: previous.webhook,
+      FEISHU_APP_ID: previous.appId,
+      FEISHU_APP_SECRET: previous.appSecret,
+      FEISHU_BITABLE_APP_TOKEN: previous.appToken,
+      FEISHU_BITABLE_TABLE_ID: previous.tableId,
+      FEISHU_BITABLE_WRITE_ENABLED: previous.writeEnabled,
+      FEISHU_BITABLE_INCLUDE_CONTACT_EMAIL: previous.includeContactEmail
     }).forEach(function(entry) {
       if (entry[1] === undefined) delete process.env[entry[0]];
       else process.env[entry[0]] = entry[1];

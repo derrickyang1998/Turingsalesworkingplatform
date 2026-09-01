@@ -4620,8 +4620,10 @@ function renderFeishuConnectionStatus(data) {
         : '飞书尚未配置，推送会自动下载 CSV。';
       connection.style.color = 'var(--amber)';
     } else if (data.mode === 'bitable') {
-      connection.textContent = '飞书多维表格连接已配置，可由管理员验证访问权限；当前推送仍会下载 CSV。';
-      connection.style.color = 'var(--text2)';
+      connection.textContent = syncAvailable
+        ? '飞书多维表格写入已启用，可推送已选网红。'
+        : '飞书多维表格连接已配置，可由管理员验证访问权限；当前推送仍会下载 CSV。';
+      connection.style.color = syncAvailable ? 'var(--green)' : 'var(--text2)';
     } else {
       connection.textContent = '飞书 ' + feishuModeLabel(data.mode) + ' 已配置，可推送已选网红。';
       connection.style.color = syncAvailable ? 'var(--green)' : 'var(--text2)';
@@ -4680,6 +4682,32 @@ async function testFeishuConnection() {
   }
 }
 
+var feishuBitableSyncState = { selectionKey: '', operationId: '', inFlight: null };
+function createFeishuBitableOperationId() {
+  if (window.crypto && typeof window.crypto.randomUUID === 'function') return window.crypto.randomUUID();
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(character) {
+    var random = Math.floor(Math.random() * 16);
+    var value = character === 'x' ? random : ((random & 0x3) | 0x8);
+    return value.toString(16);
+  });
+}
+function feishuBitableSelectionSignature(ids) {
+  return (ids || [])
+    .map(function(id) { return Number(id); })
+    .filter(function(id) { return Number.isInteger(id) && id > 0; })
+    .sort(function(left, right) { return left - right; })
+    .join(',');
+}
+function feishuBitableSyncStateFor(ids) {
+  var selectionKey = feishuBitableSelectionSignature(ids);
+  if (feishuBitableSyncState.selectionKey !== selectionKey) {
+    feishuBitableSyncState = { selectionKey: selectionKey, operationId: '', inFlight: null };
+  }
+  if (!feishuBitableSyncState.operationId) {
+    feishuBitableSyncState.operationId = createFeishuBitableOperationId();
+  }
+  return feishuBitableSyncState;
+}
 async function pushToFeishu() {
   var status = document.getElementById('feishuStatus');
   var ids = getSelectedInfIds();
@@ -4688,25 +4716,37 @@ async function pushToFeishu() {
     toast('Select influencers first', 'error');
     return;
   }
+  var syncState = feishuBitableSyncStateFor(ids);
+  if (syncState.inFlight) return syncState.inFlight;
   if (status) status.innerHTML = '<span>Syncing selected influencers...</span>';
-  try {
-    var r = await apiFetch('/influencers/feishu/sync', { method: 'POST', body: JSON.stringify({ ids: ids }) });
-    var d = await r.json();
-    if (!r.ok) throw new Error(d.error || 'Feishu sync failed');
-    if (d.configured === false) {
-      dlFile('feishu_influencers_fallback.csv', d.csv || '', 'text/csv;charset=utf-8');
-      if (status) status.innerHTML = '<span style="color:#d49900">' + esc(d.message || 'CSV fallback downloaded.') + '</span>';
-      toast('Feishu fallback CSV downloaded');
-      return;
+  syncState.inFlight = (async function() {
+    try {
+      var r = await apiFetch('/influencers/feishu/sync', {
+        method: 'POST',
+        headers: { 'Idempotency-Key': syncState.operationId },
+        body: JSON.stringify({ ids: ids })
+      });
+      var d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Feishu sync failed');
+      if (d.configured === false) {
+        dlFile('feishu_influencers_fallback.csv', d.csv || '', 'text/csv;charset=utf-8');
+        if (status) status.innerHTML = '<span style="color:#d49900">' + esc(d.message || 'CSV fallback downloaded.') + '</span>';
+        toast('Feishu fallback CSV downloaded');
+        syncState.operationId = '';
+        return;
+      }
+      if (status) status.innerHTML = '<span style="color:#0f7b3c">Synced ' + (d.synced || d.records || ids.length) + ' influencers to Feishu</span>';
+      toast('Synced to Feishu');
+      syncState.operationId = '';
+    } catch (e) {
+      if (status) status.innerHTML = '<span style="color:#d94641">' + esc(e.message) + '</span>';
+      toast(e.message, 'error');
+    } finally {
+      syncState.inFlight = null;
+      loadFeishuStatus();
     }
-    if (status) status.innerHTML = '<span style="color:#0f7b3c">Synced ' + (d.synced || d.records || ids.length) + ' influencers to Feishu</span>';
-    toast('Synced to Feishu');
-  } catch (e) {
-    if (status) status.innerHTML = '<span style="color:#d94641">' + esc(e.message) + '</span>';
-    toast(e.message, 'error');
-  } finally {
-    loadFeishuStatus();
-  }
+  })();
+  return syncState.inFlight;
 }
 var pendingCollabInfId = null;
 var pendingCollabCreateIntentId = null;
