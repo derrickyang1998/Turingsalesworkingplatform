@@ -645,6 +645,218 @@ test('linked collaboration creation is idempotent and commits its order evidence
   `).get().count, 1);
 });
 
+test('linked collaboration creation stores the canonical resource order contract', (t) => {
+  const db = openCampaignDatabase(t);
+  const fixture = seedFixture(db);
+  const service = createCampaignCollaborationService(db);
+
+  const created = service.createLinked({
+    userId: 2,
+    requestId: 'collaboration-resource-contract',
+    idempotencyKey: 'collaboration-resource-contract-0001',
+    body: {
+      campaign_id: 7001,
+      influencer_id: fixture.influencerId,
+      status: 'confirmed',
+      resource: {
+        schema: 'turingmarket.collaboration-order.v1',
+        project_name: 'Autumn launch',
+        product_name: 'Portable power station',
+        order_type: 'retainer',
+        order_reference: 'PO-LINKED-7001',
+        deliverable: 'Four short videos per month',
+        quoted_price: 4200
+      },
+      cost_quoted: 4200,
+      notes: 'Retainer approved'
+    }
+  });
+
+  assert.equal(created.status, 201);
+  assert.deepEqual(JSON.parse(db.prepare('SELECT proposal_notes FROM collaborations WHERE id=?').get(created.body.id).proposal_notes), {
+    schema: 'turingmarket.collaboration-order.v1',
+    project_name: 'Autumn launch',
+    product_name: 'Portable power station',
+    order_type: 'retainer',
+    order_reference: 'PO-LINKED-7001',
+    deliverable: 'Four short videos per month',
+    quoted_price: 4200
+  });
+  assert.equal(db.prepare('SELECT cost_quoted FROM collaborations WHERE id=?').get(created.body.id).cost_quoted, 4200);
+  const archive = JSON.parse(db.prepare(`
+    SELECT content FROM knowledge_entries
+    WHERE source_type='campaign_collaboration' AND source_id=?
+  `).get(`${created.body.id}:1`).content);
+  assert.equal(archive.cost_quoted, 4200);
+  assert.deepEqual(archive.resource, {
+    schema: 'turingmarket.collaboration-order.v1',
+    project_name: 'Autumn launch',
+    product_name: 'Portable power station',
+    order_type: 'retainer',
+    order_reference: 'PO-LINKED-7001',
+    deliverable: 'Four short videos per month',
+    quoted_price: 4200
+  });
+});
+
+test('linked collaboration resource rejects a conflicting price before a reservation is created', (t) => {
+  const db = openCampaignDatabase(t);
+  const fixture = seedFixture(db);
+  const service = createCampaignCollaborationService(db);
+  const before = collaborationWriteState(db);
+
+  assert.throws(
+    () => service.createLinked({
+      userId: 2,
+      requestId: 'collaboration-resource-mismatch',
+      idempotencyKey: 'collaboration-resource-mismatch-0001',
+      body: {
+        campaign_id: 7001,
+        influencer_id: fixture.influencerId,
+        resource: { schema: 'turingmarket.collaboration-order.v1', quoted_price: 4200 },
+        cost_quoted: 4000
+      }
+    }),
+    (error) => error && error.statusCode === 400 && error.code === 'RESOURCE_PRICE_MISMATCH'
+  );
+  assert.deepEqual(collaborationWriteState(db), before);
+});
+
+test('canonical linked resource orders lock their quoted price after creation', (t) => {
+  const db = openCampaignDatabase(t);
+  const fixture = seedFixture(db);
+  const service = createCampaignCollaborationService(db);
+  const created = service.createLinked({
+    userId: 2,
+    requestId: 'collaboration-resource-lock-create',
+    idempotencyKey: 'collaboration-resource-lock-create-0001',
+    body: {
+      campaign_id: 7001,
+      influencer_id: fixture.influencerId,
+      resource: {
+        schema: 'turingmarket.collaboration-order.v1',
+        quoted_price: 4200
+      },
+      cost_quoted: 4200
+    }
+  });
+  const before = collaborationWriteState(db, created.body.id);
+
+  assert.throws(
+    () => service.updateLinked({
+      userId: 2,
+      collaborationId: created.body.id,
+      requestId: 'collaboration-resource-lock-update',
+      idempotencyKey: 'collaboration-resource-lock-update-0001',
+      body: {
+        campaign_id: 7001,
+        expected_version: 1,
+        reason: 'Attempt to alter confirmed quote',
+        cost_quoted: 4300
+      }
+    }),
+    (error) => error && error.statusCode === 409 && error.code === 'RESOURCE_QUOTE_LOCKED'
+  );
+  assert.deepEqual(collaborationWriteState(db, created.body.id), before);
+});
+
+test('linked resource and proposal notes conflict before an idempotency reservation is created', (t) => {
+  const db = openCampaignDatabase(t);
+  const fixture = seedFixture(db);
+  const service = createCampaignCollaborationService(db);
+  const before = collaborationWriteState(db);
+
+  assert.throws(
+    () => service.createLinked({
+      userId: 2,
+      requestId: 'collaboration-resource-proposal-conflict',
+      idempotencyKey: 'collaboration-resource-proposal-conflict-0001',
+      body: {
+        campaign_id: 7001,
+        influencer_id: fixture.influencerId,
+        resource: { schema: 'turingmarket.collaboration-order.v1', quoted_price: 4200 },
+        proposal_notes: 'Legacy proposal notes must not be overwritten.'
+      }
+    }),
+    (error) => error && error.statusCode === 400 && error.code === 'RESOURCE_PROPOSAL_NOTES_CONFLICT'
+  );
+  assert.deepEqual(collaborationWriteState(db), before);
+});
+
+test('linked legacy resource keeps its historical proposal-note path', (t) => {
+  const db = openCampaignDatabase(t);
+  const fixture = seedFixture(db);
+  const service = createCampaignCollaborationService(db);
+  const created = service.createLinked({
+    userId: 2,
+    requestId: 'linked-legacy-schema-resource',
+    idempotencyKey: 'linked-legacy-schema-resource-0001',
+    body: {
+      campaign_id: 7001,
+      influencer_id: fixture.influencerId,
+      resource: { schema: 'legacy.v0', price: 5100, owner: 'Derrick' },
+      proposal_notes: 'Existing legacy proposal note'
+    }
+  });
+
+  assert.equal(created.status, 201);
+  assert.deepEqual(db.prepare('SELECT proposal_notes,cost_quoted FROM collaborations WHERE id=?').get(created.body.id), {
+    proposal_notes: 'Existing legacy proposal note',
+    cost_quoted: 5100
+  });
+  const archive = JSON.parse(db.prepare(`
+    SELECT content FROM knowledge_entries
+    WHERE source_type='campaign_collaboration' AND source_id=?
+  `).get(`${created.body.id}:1`).content);
+  assert.equal(Object.hasOwn(archive, 'resource'), false);
+  assert.equal(Object.hasOwn(archive, 'cost_quoted'), false);
+});
+
+test('linked v1 resource retries are idempotent after whitespace normalization', (t) => {
+  const db = openCampaignDatabase(t);
+  const fixture = seedFixture(db);
+  const service = createCampaignCollaborationService(db);
+  const first = service.createLinked({
+    userId: 2,
+    requestId: 'collaboration-resource-whitespace-first',
+    idempotencyKey: 'collaboration-resource-whitespace-0001',
+    body: {
+      campaign_id: 7001,
+      influencer_id: fixture.influencerId,
+      resource: {
+        schema: 'turingmarket.collaboration-order.v1',
+        project_name: 'Autumn launch',
+        order_type: 'paid',
+        order_reference: 'PO-WHITESPACE',
+        deliverable: 'One short video',
+        quoted_price: '1200'
+      },
+      cost_quoted: 1200
+    }
+  });
+  const replay = service.createLinked({
+    userId: 2,
+    requestId: 'collaboration-resource-whitespace-replay',
+    idempotencyKey: 'collaboration-resource-whitespace-0001',
+    body: {
+      campaign_id: 7001,
+      influencer_id: fixture.influencerId,
+      resource: {
+        schema: 'turingmarket.collaboration-order.v1',
+        project_name: '  Autumn launch  ',
+        order_type: 'paid',
+        order_reference: ' PO-WHITESPACE ',
+        deliverable: ' One short video ',
+        quoted_price: 1200
+      },
+      cost_quoted: '1200'
+    }
+  });
+
+  assert.deepEqual(replay, first);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM collaborations').get().count, 4);
+});
+
 test('collaboration list exposes campaign workspace context and filters to the selected campaign', (t) => {
   const db = openCampaignDatabase(t);
   const fixture = seedFixture(db);

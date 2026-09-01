@@ -138,7 +138,7 @@ function createClientContext() {
     const idempotencyKey = options.headers && options.headers['Idempotency-Key'];
     const replayKey = idempotencyKey ? '/collaborations:' + idempotencyKey : null;
     if (replayKey && completedByKey.has(replayKey)) return jsonResponse(201, completedByKey.get(replayKey));
-    const resource = JSON.parse(body.proposal_notes);
+    const resource = body.resource;
     const row = {
       id: nextCollaborationId++,
       influencer_id: body.influencer_id,
@@ -149,7 +149,7 @@ function createClientContext() {
       status: body.status,
       row_version: 1,
       active_relations: ['order'],
-      proposal_notes: body.proposal_notes,
+      proposal_notes: JSON.stringify(resource),
       project_name: resource.project_name,
       product_name: resource.product_name,
       timeline_start: body.timeline_start,
@@ -390,7 +390,7 @@ test('M4 campaign workspace executes selector, linked order, lifecycle, and repl
   assert.equal(createBody.campaign_id, 91);
   assert.equal(createBody.demand_id, 17);
   assert.equal(createBody.status, 'confirmed');
-  assert.deepEqual(JSON.parse(createBody.proposal_notes), {
+  assert.deepEqual(createBody.resource, {
     schema: 'turingmarket.collaboration-order.v1',
     project_name: 'Campaign project',
     product_name: 'Campaign product',

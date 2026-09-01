@@ -4790,7 +4790,7 @@ function startCollab(infId) {
     '<div><label>推广产品</label><input id="orderProduct" value="' + esc(inf.product_name || '') + '"></div>' +
     '<div><label>资源类型</label><select id="orderType"><option value="paid">付费合作</option><option value="affiliate">联盟分佣</option><option value="gifting">寄样置换</option><option value="retainer">长期合作</option></select></div>' +
     '<div><label>合同 / PO 编号</label><input id="orderReference" placeholder="可选"></div>' +
-    '<div><label>对外报价</label><input id="orderQuotedPrice" type="number" min="0" step="0.01" value="' + esc(inf.quoted_price || inf.cost_usd || '') + '"></div>' +
+    '<div><label>对外报价（整数）</label><input id="orderQuotedPrice" type="number" min="0" step="1" value="' + esc(inf.quoted_price || inf.cost_usd || '') + '"></div>' +
     '<div><label>初始状态</label><div style="padding:8px 0;font-size:12px">已确认下单</div></div>' +
     '<div><label>开始时间</label><input id="orderTimelineStart" type="date"></div>' +
     '<div><label>结束时间</label><input id="orderTimelineEnd" type="date"></div>' +
@@ -4830,6 +4830,10 @@ async function submitCollabOrder() {
     deliverable: document.getElementById('orderDeliverable')?.value || '',
     quoted_price: Number(document.getElementById('orderQuotedPrice')?.value || 0)
   };
+  if (!Number.isSafeInteger(resource.quoted_price) || resource.quoted_price < 0) {
+    toast('对外报价必须是非负整数。', 'error');
+    return;
+  }
   var body = {
     influencer_id: pendingCollabInfId,
     status: 'confirmed',
@@ -4845,7 +4849,7 @@ async function submitCollabOrder() {
     body.resource = resource;
   } else {
     body.campaign_id = campaignId;
-    body.proposal_notes = JSON.stringify(resource);
+    body.resource = resource;
     var demandId = m4ActiveDemandId(campaignId);
     if (demandId !== null) body.demand_id = demandId;
     createMutationSlot = m4CollabCreateMutationSlot(campaignId, body);
@@ -4877,6 +4881,7 @@ async function submitCollabOrder() {
 }
 var STATUS_LABELS = { proposed: '待提案', contacted: '已建联', negotiating: '谈判中', confirmed: '已确认', contract_sent: '合同已发', live: '执行中', content_review: '内容审核', completed: '已完成', cancelled: '已取消' };
 var COLLAB_RELATION_LABELS = { order: '下单', execution: '执行', publication: '发布', settlement: '结算' };
+var COLLAB_ORDER_TYPE_LABELS = { paid: '付费合作', affiliate: '联盟分佣', gifting: '寄样置换', retainer: '长期合作' };
 async function loadCollaborations(status) {
   var filterEl = document.getElementById('collabFilter');
   var selectedStatus = status || (filterEl ? filterEl.value : '');
@@ -4945,17 +4950,18 @@ function renderCollabTable(data) {
   var c = document.getElementById('execTableContainer');
   if (!c) return;
   if (!data || !data.length) { c.innerHTML = '<p style="text-align:center;padding:30px;opacity:.5">暂无合作记录</p>'; return; }
-  var h = '<table class="m4-table"><thead><tr><th>KOL</th><th>活动 / 项目</th><th>交付物</th><th>执行状态</th><th>阶段证据</th><th>报价</th><th>排期</th><th>备注</th><th>操作</th></tr></thead><tbody>';
+  var h = '<table class="m4-table"><thead><tr><th>KOL</th><th>活动 / 项目</th><th>合作资源</th><th>执行状态</th><th>阶段证据</th><th>报价</th><th>排期</th><th>合同 / PO</th><th>备注</th><th>操作</th></tr></thead><tbody>';
   data.forEach(function(collab) {
     var resource = collabResource(collab);
     var project = resource.project_name || collab.project_name || '-';
     var product = resource.product_name || collab.product_name || '-';
     var deliverable = resource.deliverable || collab.content_deliverable || '-';
+    var resourceType = COLLAB_ORDER_TYPE_LABELS[resource.order_type] || resource.order_type || '未定义';
     var linked = isCampaignCollaboration(collab);
     var campaignText = linked ? (collab.campaign_name || ('活动 #' + collab.campaign_id)) : '独立合作记录';
     h += '<tr><td><strong>' + esc(collab.kol_handle || '') + '</strong><br><span style="font-size:10px;opacity:.55">' + esc(collab.platform || '') + ' / ' + fmtCount(collab.followers) + '</span></td>';
     h += '<td><strong>' + esc(campaignText) + '</strong><br><span style="font-size:10px;opacity:.6">' + esc(project) + ' / ' + esc(product) + '</span></td>';
-    h += '<td style="max-width:180px">' + esc(deliverable) + '</td>';
+    h += '<td style="min-width:180px"><strong>' + esc(resourceType) + '</strong><br><span style="font-size:10px;opacity:.6">' + esc(deliverable) + '</span></td>';
     if (linked) {
       h += '<td><strong>' + esc(STATUS_LABELS[collab.status] || collab.status || '-') + '</strong><br><span style="font-size:10px;opacity:.55">版本 ' + esc(collab.row_version || '-') + '</span></td>';
     } else {
@@ -4966,7 +4972,8 @@ function renderCollabTable(data) {
     h += '<td style="min-width:160px">' + (linked ? renderCollabRelationTags(collab) : '<span style="font-size:10px;opacity:.55">未接入活动</span>') + '</td>';
     h += '<td>$' + (collab.cost_quoted || resource.quoted_price || 0) + '</td>';
     h += '<td style="font-size:10px">' + esc([collab.timeline_start || '', collab.timeline_end || ''].filter(Boolean).join(' -> ') || '-') + '</td>';
-    h += '<td style="max-width:140px;font-size:10px">' + esc(collab.notes || resource.order_reference || '-') + '</td>';
+    h += '<td style="max-width:140px;font-size:10px">' + esc(resource.order_reference || '-') + '</td>';
+    h += '<td style="max-width:140px;font-size:10px">' + esc(collab.notes || '-') + '</td>';
     h += '<td style="min-width:150px">' + (linked ? renderCampaignCollabActions(collab) : '<button type="button" class="btn btn-sm" onclick="updateCollabStatus(' + collab.id + ')">保存</button>') + '</td></tr>';
   });
   h += '</tbody></table>';

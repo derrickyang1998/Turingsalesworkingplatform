@@ -5,6 +5,14 @@ const idempotencyService = require('./idempotency_service');
 const knowledgeService = require('./knowledge_service');
 const { requestHash } = require('./sqlite_digest_service');
 const {
+  CollaborationResourceContractError,
+  isCanonicalCollaborationResource,
+  isV1CollaborationResourceInput,
+  normalizeCollaborationResource,
+  resolveResourceQuotedPrice,
+  serializeCollaborationResource
+} = require('./collaboration_resource_contract');
+const {
   buildCollectionAccessPredicate,
   getCampaignAccess
 } = require('./campaign_access_service');
@@ -53,6 +61,7 @@ const LINKED_CREATE_KEYS = new Set([
   'demand_id',
   'status',
   'proposal_notes',
+  'resource',
   'cost_quoted',
   'notes',
   'timeline_start',
@@ -628,7 +637,7 @@ function completeJson(db, reservation, hash, statusCode, responseBody) {
 
 function collaborationArchive(db, values) {
   const row = db.prepare(`
-    SELECT id,influencer_id,status,row_version,cost_actual,cost_actual_confirmed
+    SELECT id,influencer_id,status,row_version,cost_quoted,cost_actual,cost_actual_confirmed
     FROM collaborations
     WHERE id=?
   `).get(values.collaborationId);
@@ -639,7 +648,7 @@ function collaborationArchive(db, values) {
   if (campaignRelation !== null && !COLLABORATION_RELATIONS.includes(campaignRelation)) {
     throw new Error('Committed collaboration campaign relation is invalid.');
   }
-  const content = JSON.stringify({
+  const contentValues = {
     id: row.id,
     influencer_id: row.influencer_id,
     status: row.status,
@@ -647,7 +656,12 @@ function collaborationArchive(db, values) {
     campaign_relation: campaignRelation,
     cost_actual: row.cost_actual,
     cost_actual_confirmed: row.cost_actual_confirmed
-  });
+  };
+  if (values.resource) {
+    contentValues.cost_quoted = row.cost_quoted;
+    contentValues.resource = values.resource;
+  }
+  const content = JSON.stringify(contentValues);
   const archive = knowledgeService.writeCampaignKnowledgeInTransaction(db, {
     organizationId: values.orgId,
     campaignId: values.campaignId,
@@ -792,6 +806,9 @@ function createCampaignCollaborationService(db) {
           { campaign_id: custodyCampaignId }
         );
       }
+      if (Object.hasOwn(body, 'cost_quoted') && isCanonicalCollaborationResource(current.proposal_notes)) {
+        throw serviceError(409, 'RESOURCE_QUOTE_LOCKED', 'A confirmed resource order locks its quoted price.');
+      }
       const update = db.prepare(`
         UPDATE collaborations
         SET
@@ -838,16 +855,52 @@ function createCampaignCollaborationService(db) {
     }
     const campaignId = body.campaign_id;
     const initialAccess = requireCampaignWrite(db, userId, campaignId);
+    const rawResource = body.resource && typeof body.resource === 'object' ? body.resource : {};
+    const hasLegacyResource = Object.keys(rawResource).length > 0;
+    const versionedResourceRequest = isV1CollaborationResourceInput(body.resource);
+    let resourcePayload = null;
+    let proposalNotes = body.proposal_notes || (hasLegacyResource ? JSON.stringify(rawResource) : null);
+    let costQuoted = body.cost_quoted !== undefined && body.cost_quoted !== null && body.cost_quoted !== ''
+      ? body.cost_quoted
+      : (rawResource.quoted_price || rawResource.price || 0);
+    try {
+      if (versionedResourceRequest) {
+        resourcePayload = normalizeCollaborationResource(body.resource);
+        if (Object.hasOwn(body, 'proposal_notes')) {
+          throw serviceError(
+            400,
+            'RESOURCE_PROPOSAL_NOTES_CONFLICT',
+            'resource and proposal_notes cannot be supplied together.'
+          );
+        }
+        proposalNotes = serializeCollaborationResource(resourcePayload);
+        costQuoted = resolveResourceQuotedPrice(resourcePayload, body.cost_quoted);
+      }
+    } catch (error) {
+      if (error instanceof CollaborationResourceContractError) {
+        throw serviceError(error.statusCode, error.code, error.message, error.details);
+      }
+      throw error;
+    }
+    const resourceFallbacks = versionedResourceRequest && resourcePayload.extensions
+      ? resourcePayload.extensions
+      : rawResource;
+    const resourceNoteFallback = typeof resourceFallbacks.notes === 'string' ? resourceFallbacks.notes : '';
+    const resourceTimelineStart = typeof resourceFallbacks.timeline_start === 'string' ? resourceFallbacks.timeline_start : null;
+    const resourceTimelineEnd = typeof resourceFallbacks.timeline_end === 'string' ? resourceFallbacks.timeline_end : null;
     const key = input.idempotencyKey;
     if (typeof key !== 'string' || !/^[A-Za-z0-9._:-]{8,200}$/.test(key)) {
       throw serviceError(400, 'IDEMPOTENCY_REQUIRED', 'Idempotency-Key is required.');
     }
+    const hashPayload = resourcePayload
+      ? Object.assign({}, body, { resource: resourcePayload, cost_quoted: costQuoted })
+      : body;
     const hash = requestHash({
       method: 'POST',
       path: '/api/collaborations',
       campaignId,
       kind: 'json',
-      payload: body
+      payload: hashPayload
     });
     const reservationInput = {
       organizationId: initialAccess.campaign.org_id,
@@ -874,8 +927,9 @@ function createCampaignCollaborationService(db) {
         INSERT INTO collaborations (demand_id,influencer_id,user_id,status,proposal_notes,cost_quoted,notes,timeline_start,timeline_end,row_version,cost_actual_confirmed)
         VALUES (?,?,?,?,?,?,?,?,?,1,0)
       `).run(
-        body.demand_id || null, body.influencer_id, userId, 'confirmed', body.proposal_notes || null,
-        body.cost_quoted || 0, body.notes || '', body.timeline_start || null, body.timeline_end || null
+        body.demand_id || null, body.influencer_id, userId, 'confirmed', proposalNotes,
+        costQuoted, body.notes || resourceNoteFallback || '',
+        body.timeline_start || resourceTimelineStart, body.timeline_end || resourceTimelineEnd
       );
       const collaborationId = Number(result.lastInsertRowid);
       const archive = collaborationArchive(db, {
@@ -883,7 +937,8 @@ function createCampaignCollaborationService(db) {
         campaignId,
         userId,
         collaborationId,
-        campaignRelation: 'order'
+        campaignRelation: 'order',
+        resource: resourcePayload
       });
       const link = insertLink(db, {
         orgId: access.campaign.org_id,
@@ -1012,6 +1067,9 @@ function createCampaignCollaborationService(db) {
       if (reservation.state !== 'reserved') return idempotencyOutcome(reservation);
       const current = db.prepare('SELECT * FROM collaborations WHERE id=?').get(collaborationId);
       if (current.row_version !== body.expected_version) throw serviceError(409, 'STALE_COLLABORATION_VERSION', 'Collaboration version is stale.');
+      if (Object.hasOwn(body, 'cost_quoted') && isCanonicalCollaborationResource(current.proposal_notes)) {
+        throw serviceError(409, 'RESOURCE_QUOTE_LOCKED', 'A confirmed resource order locks its quoted price.');
+      }
       if (current.row_version === SAFE_MAX) {
         throw serviceError(409, 'ROW_VERSION_EXHAUSTED', 'Collaboration row version is exhausted.');
       }

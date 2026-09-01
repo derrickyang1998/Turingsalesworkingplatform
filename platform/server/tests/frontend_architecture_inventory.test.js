@@ -51,7 +51,7 @@ const task9M4DuplicateNames = Object.freeze([
 const task9M4FinalDefinitionContracts = Object.freeze({
   initM4: [
     'ensureM4TableStyles();',
-    'loadInfluencersFromAPI().then(function() { loadCollaborations(); });'
+    'Promise.all([loadInfluencersFromAPI(), loadM4Campaigns(), loadFeishuStatus()]).then(function() { loadCollaborations(); });'
   ],
   loadInfluencersFromAPI: [
     "apiFetch('/influencers' + qs)",
@@ -116,8 +116,8 @@ const task9M4FinalDefinitionContracts = Object.freeze({
     'id="orderProject"'
   ],
   loadCollaborations: [
-    "apiFetch('/collaborations' + qs)",
-    'var rows = d.collaborations || [];',
+    "apiFetch('/collaborations' + (query.length ? '?' + query.join('&') : ''))",
+    'var rows = Array.isArray(d.collaborations) ? d.collaborations : [];',
     'renderCollabTable(rows);'
   ],
   renderCollabTable: [

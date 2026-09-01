@@ -1079,8 +1079,11 @@ test('collaboration order creation stores the selected resource definition', asy
       influencer_id: influencerId,
       status: 'confirmed',
       resource: {
+        schema: 'turingmarket.collaboration-order.v1',
         project_name: 'New Product Launch',
         product_name: 'Battery Pack',
+        order_type: 'affiliate',
+        order_reference: 'PO-RESOURCE-3200',
         deliverable: '1 short video + 1 livestream mention',
         quoted_price: 3200,
         owner: 'Derrick'
@@ -1098,10 +1101,212 @@ test('collaboration order creation stores the selected resource definition', asy
   assert.equal(collab.cost_quoted, 3200);
   assert.equal(collab.timeline_start, '2026-07-10');
   assert.equal(collab.timeline_end, '2026-07-30');
-  assert.match(collab.proposal_notes, /New Product Launch/);
-  assert.match(collab.proposal_notes, /1 short video/);
+  assert.deepEqual(JSON.parse(collab.proposal_notes), {
+    schema: 'turingmarket.collaboration-order.v1',
+    project_name: 'New Product Launch',
+    product_name: 'Battery Pack',
+    order_type: 'affiliate',
+    order_reference: 'PO-RESOURCE-3200',
+    deliverable: '1 short video + 1 livestream mention',
+    quoted_price: 3200,
+    extensions: { owner: 'Derrick' }
+  });
   assert.match(collab.notes, /Priority partner/);
 
+  const update = await invoke(routes, 'PUT /api/collaborations/:id', {
+    params: { id: result.payload.id },
+    body: { cost_quoted: 3500 }
+  });
+  assert.equal(update.statusCode, 409);
+  assert.equal(update.payload.code, 'RESOURCE_QUOTE_LOCKED');
+  assert.equal(db.prepare('SELECT cost_quoted FROM collaborations WHERE id=?').get(result.payload.id).cost_quoted, 3200);
+
+  db.close();
+});
+
+test('collaboration resource rejects invalid types before inserting a record', async () => {
+  const db = freshDb();
+  const routes = mountRoutes(db);
+  const influencerId = insertInfluencer(db, {
+    platform: 'TikTok',
+    kol_handle: '@invalid_resource',
+    profile_link: 'https://example.com/invalid-resource'
+  });
+  const before = db.prepare('SELECT COUNT(*) AS count FROM collaborations').get().count;
+
+  const result = await invoke(routes, 'POST /api/collaborations', {
+    body: {
+      influencer_id: influencerId,
+      resource: { schema: 'turingmarket.collaboration-order.v1', order_type: 'barter' }
+    }
+  });
+
+  assert.equal(result.statusCode, 400);
+  assert.equal(result.payload.code, 'INVALID_RESOURCE_TYPE');
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM collaborations').get().count, before);
+  db.close();
+});
+
+test('legacy collaboration proposal notes remain unchanged without a resource payload', async () => {
+  const db = freshDb();
+  const routes = mountRoutes(db);
+  const influencerId = insertInfluencer(db, {
+    platform: 'YouTube',
+    kol_handle: '@legacy_resource_notes',
+    profile_link: 'https://example.com/legacy-resource-notes'
+  });
+  const result = await invoke(routes, 'POST /api/collaborations', {
+    body: {
+      influencer_id: influencerId,
+      proposal_notes: 'Legacy free-form proposal note',
+      cost_quoted: 990
+    }
+  });
+
+  assert.equal(result.statusCode, 200);
+  assert.deepEqual(db.prepare('SELECT proposal_notes,cost_quoted FROM collaborations WHERE id=?').get(result.payload.id), {
+    proposal_notes: 'Legacy free-form proposal note',
+    cost_quoted: 990
+  });
+  db.close();
+});
+
+test('legacy scalar resource fields keep their note and timeline fallbacks', async () => {
+  const db = freshDb();
+  const routes = mountRoutes(db);
+  const influencerId = insertInfluencer(db, {
+    platform: 'TikTok',
+    kol_handle: '@legacy_scalar_resource',
+    profile_link: 'https://example.com/legacy-scalar-resource'
+  });
+  const result = await invoke(routes, 'POST /api/collaborations', {
+    body: {
+      influencer_id: influencerId,
+      resource: {
+        price: '1200',
+        owner: 'Derrick',
+        notes: 'Legacy resource note',
+        timeline_start: '2026-09-01',
+        timeline_end: '2026-09-10'
+      }
+    }
+  });
+
+  assert.equal(result.statusCode, 200);
+  assert.deepEqual(db.prepare('SELECT cost_quoted,notes,timeline_start,timeline_end FROM collaborations WHERE id=?').get(result.payload.id), {
+    cost_quoted: 1200,
+    notes: 'Legacy resource note',
+    timeline_start: '2026-09-01',
+    timeline_end: '2026-09-10'
+  });
+  assert.deepEqual(JSON.parse(db.prepare('SELECT proposal_notes FROM collaborations WHERE id=?').get(result.payload.id).proposal_notes), {
+    price: '1200',
+    owner: 'Derrick',
+    notes: 'Legacy resource note',
+    timeline_start: '2026-09-01',
+    timeline_end: '2026-09-10'
+  });
+
+  const update = await invoke(routes, 'PUT /api/collaborations/:id', {
+    params: { id: result.payload.id },
+    body: { cost_quoted: 1300 }
+  });
+  assert.equal(update.statusCode, 200);
+  assert.equal(db.prepare('SELECT cost_quoted FROM collaborations WHERE id=?').get(result.payload.id).cost_quoted, 1300);
+  db.close();
+});
+
+test('resource and legacy proposal notes cannot be supplied together', async () => {
+  const db = freshDb();
+  const routes = mountRoutes(db);
+  const influencerId = insertInfluencer(db, {
+    platform: 'YouTube',
+    kol_handle: '@resource_proposal_conflict',
+    profile_link: 'https://example.com/resource-proposal-conflict'
+  });
+  const before = db.prepare('SELECT COUNT(*) AS count FROM collaborations').get().count;
+  const result = await invoke(routes, 'POST /api/collaborations', {
+    body: {
+      influencer_id: influencerId,
+      resource: { schema: 'turingmarket.collaboration-order.v1', quoted_price: 1200 },
+      proposal_notes: 'This must not be silently replaced.'
+    }
+  });
+
+  assert.equal(result.statusCode, 400);
+  assert.equal(result.payload.code, 'RESOURCE_PROPOSAL_NOTES_CONFLICT');
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM collaborations').get().count, before);
+  db.close();
+});
+
+test('v1 resource rejects an empty legacy proposal-notes field', async () => {
+  const db = freshDb();
+  const routes = mountRoutes(db);
+  const influencerId = insertInfluencer(db, {
+    platform: 'YouTube',
+    kol_handle: '@resource_empty_proposal_conflict',
+    profile_link: 'https://example.com/resource-empty-proposal-conflict'
+  });
+  const before = db.prepare('SELECT COUNT(*) AS count FROM collaborations').get().count;
+  const result = await invoke(routes, 'POST /api/collaborations', {
+    body: {
+      influencer_id: influencerId,
+      resource: { schema: 'turingmarket.collaboration-order.v1', quoted_price: 1200 },
+      proposal_notes: ''
+    }
+  });
+
+  assert.equal(result.statusCode, 400);
+  assert.equal(result.payload.code, 'RESOURCE_PROPOSAL_NOTES_CONFLICT');
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM collaborations').get().count, before);
+  db.close();
+});
+
+test('legacy resource plus proposal notes keeps the historical free-form proposal note', async () => {
+  const db = freshDb();
+  const routes = mountRoutes(db);
+  const influencerId = insertInfluencer(db, {
+    platform: 'TikTok',
+    kol_handle: '@legacy_combined_resource',
+    profile_link: 'https://example.com/legacy-combined-resource'
+  });
+  const result = await invoke(routes, 'POST /api/collaborations', {
+    body: {
+      influencer_id: influencerId,
+      resource: { price: 1200, owner: 'Derrick' },
+      proposal_notes: 'Existing legacy proposal note'
+    }
+  });
+
+  assert.equal(result.statusCode, 200);
+  assert.deepEqual(db.prepare('SELECT proposal_notes,cost_quoted FROM collaborations WHERE id=?').get(result.payload.id), {
+    proposal_notes: 'Existing legacy proposal note',
+    cost_quoted: 1200
+  });
+  db.close();
+});
+
+test('legacy resources with their own schema keep the historical free-form proposal path', async () => {
+  const db = freshDb();
+  const routes = mountRoutes(db);
+  const influencerId = insertInfluencer(db, {
+    platform: 'TikTok',
+    kol_handle: '@legacy_schema_resource',
+    profile_link: 'https://example.com/legacy-schema-resource'
+  });
+  const result = await invoke(routes, 'POST /api/collaborations', {
+    body: {
+      influencer_id: influencerId,
+      resource: { schema: 'legacy.v0', price: 1200, owner: 'Derrick' },
+      proposal_notes: 'Existing legacy proposal note'
+    }
+  });
+
+  assert.equal(result.statusCode, 200);
+  assert.deepEqual(db.prepare('SELECT proposal_notes,cost_quoted FROM collaborations WHERE id=?').get(result.payload.id), {
+    proposal_notes: 'Existing legacy proposal note',
+    cost_quoted: 1200
+  });
   db.close();
 });
 
@@ -1381,8 +1586,14 @@ test('m4 frontend keeps import, feishu, and order-resource controls wired', () =
   assert.match(appJs, /campaign_relation/);
   assert.match(appJs, /\/campaigns\?limit=100/);
   assert.match(appJs, /var resource = \{/);
-  assert.match(appJs, /body\.proposal_notes = JSON\.stringify\(resource\)/);
   assert.match(appJs, /body\.resource = resource/);
+  assert.doesNotMatch(appJs, /body\.proposal_notes = JSON\.stringify\(resource\)/);
+  assert.match(appJs, /var COLLAB_ORDER_TYPE_LABELS =/);
+  assert.match(appJs, /<th>合作资源<\/th>/);
+  assert.match(appJs, /<th>合同 \/ PO<\/th>/);
+  assert.match(appJs, /resource\.order_reference \|\| '-'/);
+  assert.match(appJs, /collab\.notes \|\| '-'/);
+  assert.match(appJs, /id="orderQuotedPrice" type="number" min="0" step="1"/);
 
   const m4SingletonNames = [
     'downloadInfTemplate',
