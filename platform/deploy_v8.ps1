@@ -34,7 +34,7 @@ $TRUSTED_SOURCE_GATE_RELATIVE_PATH = "server\scripts\trusted_production_source_g
 $TRUSTED_SOURCE_MANIFEST_RELATIVE_PATH = "server\scripts\trusted_production_source_manifest.json"
 $TRUSTED_RUNTIME_CONFIG_RELATIVE_PATH = "server\config\runtime_config.js"
 $EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "e93d45bb3c0368c4087ceeca92b263cd66f1be5b9aca432abd732b36a107f355"
-$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "0154ecc877b80711559c7535d3b9189ecc80e8401ba44142a1a3ab00bbdbc1dd"
+$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "2a68196f22d5f8ad4957944b9ff2777a501fcd002f5fb4b16ee7d313e9e92657"
 $EXPECTED_TRUSTED_RUNTIME_CONFIG_SHA256 = "76d43d3e811c6fa8daae987cc9eb2fff2dc8a8095f84b1cd309e4e214df94dcb"
 $EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256 = "3f1325dbc2335bd97208924efe7eab6d6b8e84a7b720caea2ac6578781e99f4f"
 $EXPECTED_TRUSTED_PARSER_VERIFIER_SHA256 = "7f9efaac02675b21e025891a400474cc7481c1adaf58c88bd8b356d5276f2eaa"
@@ -53,7 +53,7 @@ $TRUSTED_SOURCE_MANIFEST_REMOTE_PATH = "$TRUSTED_SOURCE_INSTALL_ROOT/trusted_pro
 $TRUSTED_SOURCE_BUNDLE_REMOTE_PATH = "$TRUSTED_SOURCE_INSTALL_ROOT/bundles/$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256"
 $TRUSTED_SOURCE_RUNTIME_REMOTE_PATH = "$TRUSTED_SOURCE_INSTALL_ROOT/runtime/$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256"
 $CANDIDATE_GATE_TIMEOUT_SECONDS = 7200
-$PARSER_RUNTIME_BYTES = 640592018
+$PARSER_RUNTIME_BYTES = 640592225
 $PARSER_STARTUP_TIMEOUT_SECONDS = 180
 $PUBLIC_GUARD_TIMEOUT_SECONDS = 120
 $ACCEPTED_FINALIZE_PUBLIC_GUARD_TIMEOUT_SECONDS = 7200
@@ -3272,7 +3272,7 @@ import sys
 with open(sys.argv[1], encoding='utf-8') as handle:
     manifest = json.load(handle)
 runtime = manifest.get('runtime_tree', {})
-if runtime.get('bytes') != 640592018 or not re.fullmatch(r'[0-9a-f]{64}', runtime.get('sha256', '')):
+if runtime.get('bytes') != 640592225 or not re.fullmatch(r'[0-9a-f]{64}', runtime.get('sha256', '')):
     raise SystemExit('parser runtime manifest identity is invalid')
 print(runtime['sha256'])
 PY
@@ -12288,7 +12288,7 @@ const readProductionSystemdProperties = parserStartup.createProductionSystemdPro
 
 (async () => {
   const verified = await uploadSandbox.verifyCheckedInArtifacts({
-    expectedManifestSha256: '75199daa1cee1b55f57257263177f3c5e287b6462b5a3bd2bc62c67a096395b2'
+    expectedManifestSha256: '57b88420afa9d7d6b9bfec6dcd7c4e5fce74c76762b00bb810d9c44a4ee354d4'
   });
   process.stdout.write('APPLICATION_PARSER_CHECKED_IN_OK\n');
 
