@@ -1,5 +1,25 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.7.2-collaboration-resource-contract (Production Deployed, 2026-09-01) - M4 合作资源下单合同
+
+### 交付与范围 / Delivery And Scope
+- M4 合作下单现在使用版本化资源合同 `turingmarket.collaboration-order.v1`，将项目、产品、合作类型、资源/内容交付、对外报价及合同/PO 参考拆分为清晰字段，不再把资源定义混入备注。
+- v1 仅接受 JavaScript 安全整数的非负金额；创建后规范报价锁定，避免资源合同价格与结算报价漂移。v1 资源与 `proposal_notes` 同时提交会明确拒绝，避免同一业务语义出现两个来源。
+- 既有无 schema、`legacy.v0` 资源和历史备注/报价兼容保留；关联活动时，v1 合同资源、报价及业务上下文会一并归档，规范化重放保持幂等。M4 列表将资源交付、合同/PO 与备注分列展示。
+
+### 定向验证、审查与上线 / Focused Verification, Review, And Release
+- 受影响验证通过：资源合同 `7/7`、活动协作安全与幂等 `22/22`、网红工作流 `32/32`、M4 协作客户端 `5/5`、前端架构/浏览器基线工具 `28/28`。相关 JavaScript 语法、`git diff --check` 和 `deploy_v8.ps1 -ValidateLocalOnly` 均通过。
+- 独立复审结论为 `APPROVE`。审查中发现的报价漂移、金额精度、遗留备注兼容、legacy schema 与空备注绕过均已补充负向测试并关闭。
+- 首个候选在生产变更前因部署清单遗漏新服务文件安全中止；修复后第二个候选因冷解析器依赖缓存的 30 分钟上限安全中止。最终仅补齐服务文件清单并将受控解析器缓存上限调整为 60 分钟，生产切换成功。
+- 实现与发布修复提交：`01c202e`、`0fe9990`、`002e75a`。受控生产备份为 `/root/turingmarket/backups/v060-crm-sales-workspace-20260901-210048`，顶层 `SHA256SUMS` 校验通过，清单 SHA-256 为 `a0b5e8b48470f15a157d0d7ff626d8d32db69a7dec5fae1c8487444c70f0f894`。
+- 公网与回环 `/api/health` 均为 `200` / `ok`、Parser ready，`/m4` 返回 `200`，PM2/Nginx online，发布锁已清理，SQLite `quick_check=ok` 且外键异常为 `0`。为避免污染真实合作记录，本轮未以生产数据执行 M4 创建、更新或状态流转写入烟测。
+
+### 后续边界 / Next Boundaries
+- 解析器依赖缓存的安全复用或预热将作为独立可靠性切片评估，不在本版本以降低校验强度换取速度。
+- 飞书多维表格的字段映射、远端记录 ID、Outbox、重试/对账和幂等写入，以及真实测试活动交易验收，继续按单功能切片完成后立即上线。
+
+---
+
 ## v0.7.1-feishu-connection-foundation (Production Deployed, Bitable Writes Deferred, 2026-09-01) - 飞书连接基础
 
 ### 交付与范围 / Delivery And Scope
