@@ -4,11 +4,14 @@
     'campaign-link-request';
 }
 
+const { createFeishuClient, FeishuClientError } = require('./feishu_client');
+
 module.exports = function(app, db, authMiddleware, options = {}) {
 
 const businessKnowledge = require('./services/business_knowledge_service');
 const influencerWorkflow = require('./services/influencer_workflow_service');
 const campaignCollaboration = options.campaignCollaborationService;
+const feishuClient = options.feishuClient || createFeishuClient();
 
 // ===== INFLUENCER ROUTES =====
 app.get('/api/influencers', authMiddleware, (req, res) => {
@@ -195,33 +198,32 @@ app.post('/api/influencers/feishu/sync', authMiddleware, async (req, res) => {
       influencerWorkflow.TEMPLATE_HEADERS.forEach(function(header, headerIndex) { record[header] = values[headerIndex]; });
       return record;
     });
-    const webhook = process.env.FEISHU_WEBHOOK_URL || process.env.FEISHU_WEBHOOK;
-    if (!webhook) {
+    const operationId = req.get
+      ? req.get('Idempotency-Key')
+      : req.headers && req.headers['idempotency-key'];
+    const result = await feishuClient.syncInfluencers({ records, csv, operationId });
+    if (!result.configured) {
       return res.json({
         configured: false,
-        records: records.length,
-        csv,
-        message: 'FEISHU_WEBHOOK_URL is not configured. CSV fallback is ready for manual upload.'
+        records: result.records,
+        csv: result.csv,
+        message: result.mode === 'bitable'
+          ? result.message
+          : 'FEISHU_WEBHOOK_URL is not configured. CSV fallback is ready for manual upload.'
       });
     }
-    const response = await fetch(webhook, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        event: 'turingmarket.influencers.sync',
-        source: 'TuringMarket',
-        records,
-        csv
-      })
-    });
-    if (!response.ok) {
-      return res.status(502).json({ configured: true, synced: 0, records: records.length, error: 'Feishu webhook failed with HTTP ' + response.status, csv });
-    }
     db.prepare('INSERT INTO activity_log (user_id, action, module, details, ip_address) VALUES (?, ?, ?, ?, ?)')
-      .run(req.user.id, 'feishu_sync', 'influencer', 'Synced ' + records.length + ' influencers to Feishu workflow', req.ip);
-    res.json({ configured: true, synced: records.length, records: records.length });
+      .run(req.user.id, 'feishu_sync', 'influencer', 'Synced ' + result.synced + ' influencers to Feishu ' + result.mode, req.ip);
+    res.json({ configured: true, synced: result.synced, records: result.records });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    const statusCode = e instanceof FeishuClientError ? e.statusCode : 502;
+    const code = e instanceof FeishuClientError ? e.code : 'FEISHU_SYNC_FAILED';
+    const message = e instanceof FeishuClientError ? e.message : 'Feishu sync failed.';
+    try {
+      db.prepare('INSERT INTO activity_log (user_id, action, module, details, ip_address) VALUES (?, ?, ?, ?, ?)')
+        .run(req.user.id, 'feishu_sync_failed', 'influencer', JSON.stringify({ code }), req.ip);
+    } catch (auditError) {}
+    res.status(statusCode).json({ error: message, code });
   }
 });
 

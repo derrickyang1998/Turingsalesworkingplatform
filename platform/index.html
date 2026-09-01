@@ -1090,8 +1090,13 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
     </div>
     <div class="card">
       <h3>📊 飞书同步</h3>
-      <p style="font-size:12px;opacity:.7;margin-bottom:8px">在 Tab 1 中勾选网红 -> 后端推送到飞书工作流；未配置时自动生成 CSV</p>
-      <button class="btn btn-primary btn-sm" onclick="pushToFeishu()">📨 推送到飞书</button>
+      <p style="font-size:12px;opacity:.7;margin-bottom:8px">在 Tab 1 中勾选网红后推送；未配置时仍可下载 CSV 供手动导入。</p>
+      <div id="feishuConnectionStatus" role="status" aria-live="polite" style="font-size:12px;color:var(--text2);margin:10px 0">正在检查飞书连接状态...</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <button class="btn btn-primary btn-sm" type="button" onclick="pushToFeishu()" title="推送已选网红到飞书">📨 推送到飞书</button>
+        <button class="btn btn-outline btn-sm" type="button" id="feishuStatusRefresh" onclick="loadFeishuStatus()" title="刷新飞书连接状态">刷新状态</button>
+        <button class="btn btn-outline btn-sm" type="button" id="feishuTestButton" onclick="testFeishuConnection()" title="管理员测试服务器端飞书连接" hidden>测试连接</button>
+      </div>
       <div id="feishuStatus" style="font-size:11px;opacity:.6;margin-top:6px"></div>
     </div>
   </div>

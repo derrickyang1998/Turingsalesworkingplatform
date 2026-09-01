@@ -556,6 +556,18 @@ function apiResponseFor(request, fixture, recorder) {
       message: 'FEISHU_WEBHOOK_URL is not configured. CSV fallback is ready for manual upload.'
     });
   }
+  if (method === 'GET' && apiPath === '/feishu/status') {
+    return ok({
+      configured: false,
+      mode: 'unconfigured',
+      sync_available: false,
+      test_available: false,
+      missing: ['FEISHU_WEBHOOK_URL_OR_BITABLE_CONFIG']
+    });
+  }
+  if (method === 'POST' && apiPath === '/feishu/test') {
+    return jsonResponse({ error: 'Feishu connection test is not configured.', code: 'FEISHU_TEST_NOT_CONFIGURED' }, 409);
+  }
   if (method === 'POST' && apiPath === '/influencers/upload') {
     const imported = importInfluencersFromCsv(fixture, csvFromUploadRequest(request));
     return ok({ success: true, imported: imported.length, skipped: 0, sample: imported.slice(0, 5) });

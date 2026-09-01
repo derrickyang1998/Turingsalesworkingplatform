@@ -1434,6 +1434,7 @@ app.post('/api/proposal/generate-ppt', authMiddleware, (req, res) => {
 
 // ===== INFLUENCER & COLLABORATION ROUTES =====
 require('./routes')(app, db, authMiddleware, { campaignCollaborationService });
+require('./routes_feishu')(app, { db, authMiddleware, adminOnly });
 require('./routes_customers')(app, db, authMiddleware);
 registerCampaignRoutes(app, db);
 require('./routes_brands')(app, db, authMiddleware, aiLimiter, aiQuotaGuard);

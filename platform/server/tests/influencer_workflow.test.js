@@ -256,7 +256,7 @@ function mountRoutes(db) {
       routes[method.toUpperCase() + ' ' + routePath] = Array.prototype.slice.call(arguments, 1);
     };
   });
-  const authMiddleware = function(req, res, next) { next(); };
+  const authMiddleware = function(req, res, next) { return next(); };
   const campaignCollaborationService = createCampaignCollaborationService(db);
   const routesModule = path.resolve(__dirname, '../routes.js');
   delete require.cache[routesModule];
@@ -537,6 +537,26 @@ test('influencer template download uses the custom upload headers', async () => 
   assert.match(result.body, /@sample_creator/);
 
   db.close();
+});
+
+test('real server exposes a credential-safe Feishu connection status to authenticated users', async () => {
+  await withTempServer(async ({ baseUrl, token }) => {
+    const response = await fetch(baseUrl + '/api/feishu/status', {
+      headers: { Authorization: 'Bearer ' + token }
+    });
+    const text = await response.text();
+
+    assert.equal(response.status, 200, text);
+    const payload = JSON.parse(text);
+    assert.deepEqual(payload, {
+      configured: false,
+      mode: 'unconfigured',
+      sync_available: false,
+      test_available: false,
+      missing: ['FEISHU_WEBHOOK_URL_OR_BITABLE_CONFIG']
+    });
+    assert.doesNotMatch(text, /secret|https?:/i);
+  });
 });
 
 test('influencer upload route imports a multipart CSV through the real server', async () => {
@@ -985,6 +1005,67 @@ test('feishu sync endpoint posts approved 20-header records when webhook is conf
   }
 });
 
+test('feishu sync endpoint keeps configured Bitable mode on CSV fallback until the write contract is approved', async () => {
+  const previous = {
+    mode: process.env.FEISHU_SYNC_MODE,
+    webhookUrl: process.env.FEISHU_WEBHOOK_URL,
+    webhook: process.env.FEISHU_WEBHOOK,
+    appId: process.env.FEISHU_APP_ID,
+    appSecret: process.env.FEISHU_APP_SECRET,
+    appToken: process.env.FEISHU_BITABLE_APP_TOKEN,
+    tableId: process.env.FEISHU_BITABLE_TABLE_ID,
+    fetch: global.fetch
+  };
+  process.env.FEISHU_SYNC_MODE = 'bitable';
+  delete process.env.FEISHU_WEBHOOK_URL;
+  delete process.env.FEISHU_WEBHOOK;
+  process.env.FEISHU_APP_ID = 'cli_test_app';
+  process.env.FEISHU_APP_SECRET = 'test-secret';
+  process.env.FEISHU_BITABLE_APP_TOKEN = 'basc_test';
+  process.env.FEISHU_BITABLE_TABLE_ID = 'tbl_test';
+  const db = freshDb();
+  const routes = mountRoutes(db);
+  const id = insertInfluencer(db, {
+    platform: 'TikTok',
+    kol_handle: '@bitable_configured',
+    profile_link: 'https://example.com/bitable-configured',
+    followers: 88888,
+    region: 'US',
+    data_source: 'test'
+  });
+  const calls = [];
+  global.fetch = async function(url, options) {
+    calls.push({ url, options });
+    throw new Error('Bitable write must not be called by the current sync endpoint');
+  };
+
+  try {
+    const result = await invoke(routes, 'POST /api/influencers/feishu/sync', { body: { ids: [id] } });
+
+    assert.equal(result.statusCode, 200);
+    assert.equal(result.payload.configured, false);
+    assert.equal(result.payload.records, 1);
+    assert.match(result.payload.csv, /@bitable_configured/);
+    assert.equal(result.payload.message, 'Feishu Bitable write is not enabled. CSV fallback is ready for manual upload.');
+    assert.equal(calls.length, 0);
+  } finally {
+    global.fetch = previous.fetch;
+    Object.entries({
+      FEISHU_SYNC_MODE: previous.mode,
+      FEISHU_WEBHOOK_URL: previous.webhookUrl,
+      FEISHU_WEBHOOK: previous.webhook,
+      FEISHU_APP_ID: previous.appId,
+      FEISHU_APP_SECRET: previous.appSecret,
+      FEISHU_BITABLE_APP_TOKEN: previous.appToken,
+      FEISHU_BITABLE_TABLE_ID: previous.tableId
+    }).forEach(function(entry) {
+      if (entry[1] === undefined) delete process.env[entry[0]];
+      else process.env[entry[0]] = entry[1];
+    });
+    db.close();
+  }
+});
+
 test('collaboration order creation stores the selected resource definition', async () => {
   const db = freshDb();
   const routes = mountRoutes(db);
@@ -1275,6 +1356,9 @@ test('m4 frontend keeps import, feishu, and order-resource controls wired', () =
   assert.match(indexHtml, /id="m4CampaignContextStatus"/);
   assert.match(indexHtml, /id="filt_search"/);
   assert.match(indexHtml, /id="infFileModal" accept="\.csv,\.json,\.xlsx"/);
+  assert.match(indexHtml, /id="feishuConnectionStatus"/);
+  assert.match(indexHtml, /id="feishuStatusRefresh"/);
+  assert.match(indexHtml, /id="feishuTestButton"/);
   assert.match(appJs, /m4-table thead th\{position:sticky/);
   assert.match(appJs, /m4-table input\[type="checkbox"\]\{width:16px!important;height:16px!important/);
   assert.match(appJs, /function handleDrop/);
@@ -1283,6 +1367,12 @@ test('m4 frontend keeps import, feishu, and order-resource controls wired', () =
   assert.match(appJs, /\/influencers\/upload/);
   assert.match(appJs, /\/influencers\/template/);
   assert.match(appJs, /\/influencers\/feishu\/sync/);
+  assert.match(appJs, /\/feishu\/status/);
+  assert.match(appJs, /\/feishu\/test/);
+  assert.match(appJs, /function loadFeishuStatus/);
+  assert.match(appJs, /function testFeishuConnection/);
+  assert.match(appJs, /d\.message \|\| 'CSV fallback downloaded\.'/);
+  assert.match(appJs, /CURRENT_USER && CURRENT_USER\.role === 'admin'/);
   assert.match(appJs, /function startCollab/);
   assert.match(appJs, /function submitCollabOrder/);
   assert.match(appJs, /function loadM4Campaigns/);
@@ -1310,6 +1400,8 @@ test('m4 frontend keeps import, feishu, and order-resource controls wired', () =
     'loadInfluencersFromAPI',
     'matchInfluencers',
     'pushToFeishu',
+    'loadFeishuStatus',
+    'testFeishuConnection',
     'renderCollabTable',
     'renderInfTable',
     'showInfPreview',

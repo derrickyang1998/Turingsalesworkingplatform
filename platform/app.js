@@ -4419,7 +4419,7 @@ function syncM4CampaignContextFromWorkflow() {
 }
 function initM4() {
   ensureM4TableStyles();
-  Promise.all([loadInfluencersFromAPI(), loadM4Campaigns()]).then(function() { loadCollaborations(); });
+  Promise.all([loadInfluencersFromAPI(), loadM4Campaigns(), loadFeishuStatus()]).then(function() { loadCollaborations(); });
 }
 function m4Filters() {
   return {
@@ -4600,6 +4600,86 @@ async function downloadInfTemplate() {
     dlFile('influencer_import_template.csv', csv, 'text/csv;charset=utf-8');
   }
 }
+function feishuModeLabel(mode) {
+  if (mode === 'webhook') return 'Webhook';
+  if (mode === 'bitable') return '飞书多维表格';
+  return '未配置';
+}
+
+function renderFeishuConnectionStatus(data) {
+  var connection = document.getElementById('feishuConnectionStatus');
+  var testButton = document.getElementById('feishuTestButton');
+  var isAdmin = !!(CURRENT_USER && CURRENT_USER.role === 'admin');
+  var configured = !!(data && data.configured);
+  var syncAvailable = !!(data && data.sync_available);
+  var testAvailable = !!(data && data.test_available);
+  if (connection) {
+    if (!configured) {
+      connection.textContent = data && data.mode === 'bitable'
+        ? '飞书多维表格配置尚未完整，推送会自动下载 CSV。'
+        : '飞书尚未配置，推送会自动下载 CSV。';
+      connection.style.color = 'var(--amber)';
+    } else if (data.mode === 'bitable') {
+      connection.textContent = '飞书多维表格连接已配置，可由管理员验证访问权限；当前推送仍会下载 CSV。';
+      connection.style.color = 'var(--text2)';
+    } else {
+      connection.textContent = '飞书 ' + feishuModeLabel(data.mode) + ' 已配置，可推送已选网红。';
+      connection.style.color = syncAvailable ? 'var(--green)' : 'var(--text2)';
+    }
+  }
+  if (testButton) {
+    testButton.hidden = !isAdmin;
+    testButton.disabled = !configured || !testAvailable;
+    testButton.title = testAvailable
+      ? '管理员测试服务器端飞书连接'
+      : '需配置独立的飞书测试端点或多维表格访问权限';
+  }
+}
+
+async function loadFeishuStatus() {
+  var connection = document.getElementById('feishuConnectionStatus');
+  if (connection) {
+    connection.textContent = '正在检查飞书连接状态...';
+    connection.style.color = 'var(--text2)';
+  }
+  try {
+    var response = await apiFetch('/feishu/status');
+    var data = await response.json();
+    if (!response.ok) throw new Error(data.error || '无法读取飞书连接状态');
+    renderFeishuConnectionStatus(data);
+    return data;
+  } catch (error) {
+    if (connection) {
+      connection.textContent = '暂时无法读取飞书连接状态。';
+      connection.style.color = 'var(--red)';
+    }
+    return null;
+  }
+}
+
+async function testFeishuConnection() {
+  var status = document.getElementById('feishuStatus');
+  var button = document.getElementById('feishuTestButton');
+  if (!(CURRENT_USER && CURRENT_USER.role === 'admin')) {
+    toast('仅管理员可测试飞书连接', 'error');
+    return;
+  }
+  if (button) button.disabled = true;
+  if (status) status.textContent = '正在测试飞书连接...';
+  try {
+    var response = await apiFetch('/feishu/test', { method: 'POST', body: JSON.stringify({}) });
+    var data = await response.json();
+    if (!response.ok) throw new Error(data.error || '飞书连接测试失败');
+    if (status) status.textContent = '飞书 ' + feishuModeLabel(data.mode) + ' 连接验证通过。';
+    toast('飞书连接验证通过');
+  } catch (error) {
+    if (status) status.textContent = '飞书连接测试未通过：' + (error.message || '请检查服务器配置。');
+    toast(error.message || '飞书连接测试失败', 'error');
+  } finally {
+    await loadFeishuStatus();
+  }
+}
+
 async function pushToFeishu() {
   var status = document.getElementById('feishuStatus');
   var ids = getSelectedInfIds();
@@ -4615,7 +4695,7 @@ async function pushToFeishu() {
     if (!r.ok) throw new Error(d.error || 'Feishu sync failed');
     if (d.configured === false) {
       dlFile('feishu_influencers_fallback.csv', d.csv || '', 'text/csv;charset=utf-8');
-      if (status) status.innerHTML = '<span style="color:#d49900">FEISHU_WEBHOOK_URL not configured. CSV fallback downloaded.</span>';
+      if (status) status.innerHTML = '<span style="color:#d49900">' + esc(d.message || 'CSV fallback downloaded.') + '</span>';
       toast('Feishu fallback CSV downloaded');
       return;
     }
@@ -4624,6 +4704,8 @@ async function pushToFeishu() {
   } catch (e) {
     if (status) status.innerHTML = '<span style="color:#d94641">' + esc(e.message) + '</span>';
     toast(e.message, 'error');
+  } finally {
+    loadFeishuStatus();
   }
 }
 var pendingCollabInfId = null;
@@ -5990,7 +6072,7 @@ function switchPage(id, options) {
     'getEditedDemand', 'syncCurDemandFromAnalysis', 'handleDemandFile', 'analyzeDemandAI',
     'switchTab', 'matchInfluencers', 'smartMatch', 'handleUpload', 'handleDrop', 'openInfUploadModal', 'handleUploadModal', 'downloadInfTemplate', 'exportAll', 'exportFiltered', 'exportSelected',
     'toggleAll', 'syncInfluencerSelectionState', 'loadM4Campaigns', 'changeM4CampaignContext', 'startCollab', 'submitCollabOrder', 'closeCollabOrderModal', 'loadCollaborations', 'updateCollabStatus', 'runCampaignCollabAction', 'closeCampaignSettlementModal', 'submitCampaignSettlement',
-    'sendChat', 'clearChat', 'clearAIMemory', 'pushToFeishu',
+    'sendChat', 'clearChat', 'clearAIMemory', 'pushToFeishu', 'loadFeishuStatus', 'testFeishuConnection',
     'switchAdminTab', 'loadAdminDashboard', 'loadAdminUsers', 'adminAddUser', 'adminCreateInvite', 'adminResetPw',
     'wfUndo', 'wfRedo', 'wfClearCanvas', 'wfSaveTemplate', 'wfPublishTemplate', 'wfResetTaskFilters', 'wfLoadTasks', 'wfLoadInstances',
     'showRelatedBrands', 'closeBrandRelModal'
