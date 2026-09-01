@@ -1,5 +1,25 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.7.4b-feishu-reconciliation-console (Production Deployed, 2026-09-02) - M4 飞书回执核对操作台
+
+### 交付与范围 / Delivery And Scope
+- M4 最新“导入 & 飞书”界面现会列出所选活动的待核对 Bitable 批次。活动 Owner 或组织管理员可逐行录入已核验的唯一飞书 Record ID，并提交既有受保护的回执确认接口；普通协作者只能看到权限说明，不能从界面发起确认。
+- 操作台只显示 `pending` 回执并允许在同一活动内切换批次。提交前客户端校验 Record ID 数量、去重和长度；服务端仍是唯一的权限与终态约束来源，已确认回执不允许再次修改。
+- 对账确认采用按“活动 + 批次”维度的单飞锁，跨活动切换、手动刷新失败或回到原活动都不会产生第二次确认请求。另一位授权操作员已完成对账时，`409` 会刷新最新回执状态而不是保留陈旧待核对界面。
+- 本切片没有引入自动重发、更新或补偿写入；CSV 兜底、Webhook、受控 Bitable 写入和已部署的持久化 Outbox 合同保持不变。
+
+### 定向验证、审查与上线 / Focused Verification, Review, And Release
+- 受影响 M4/Feishu/Outbox 客户端与服务矩阵 `18/18` 通过；新增操作台客户端覆盖为 `8/8`，涵盖 Owner/组织管理员显示、非授权隐藏、Record ID 校验、重复点击、刷新失败、跨活动切换、并发终态刷新和陈旧加载隔离。JavaScript 语法、页面标记检查、`git diff --check` 与 `deploy_v8.ps1 -ValidateLocalOnly` 通过。
+- 独立代码审查首轮结论 `APPROVE`，并提出跨活动单飞及并发终态刷新两个残余风险；修复后第二轮审查为 `APPROVE`。实现提交：`7b65140`。
+- 受控候选执行隔离重放 `8/8`、发布门禁 `21/21` 和部署浏览器冒烟 `2/2` 后完成切换。可恢复备份为 `/root/turingmarket/backups/v060-crm-sales-workspace-20260902-030830`，顶层 `SHA256SUMS` 已在备份目录中验证，清单 SHA-256 为 `4710320e2c37f722aa93173e6fd68691779b5b43927a834c36726a1006f05421`。
+- 公网与回环 `/api/health` 均为 `ok`、Parser ready，公网 `/m4` 为 `200`，公网 `app.js` 已包含对账处理器和跨活动锁；PM2/Nginx online，SQLite `quick_check=ok`、外键异常 `0`、schema 为 `v8`。
+- 线上验收未向真实飞书 Bitable 写入或补发业务记录，因此不把外部投递成功作为本次验证事实。
+
+### 后续边界 / Next Boundaries
+- 继续以独立功能切片设计显式更新、重试或补偿合同，仍不允许静默重发；随后进入 Phase 7B 内容监控、效果看板、飞书同步与 AI 复盘。
+
+---
+
 ## v0.7.4a-feishu-bitable-outbox (Production Deployed, 2026-09-02) - 飞书多维表格活动范围投递回执
 
 ### 交付与范围 / Delivery And Scope
