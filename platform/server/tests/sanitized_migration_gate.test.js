@@ -1075,14 +1075,16 @@ function compactSqliteClone(sourcePath, outputPath, mutate, options = {}) {
   return outputPath;
 }
 
-test('manifest declares exact managed v1 as primary and keeps isolated v6, v7, and v8 profiles', () => {
+test('manifest declares exact managed v1 as primary and keeps isolated v6 through v10 profiles', () => {
   const v1Fixture = migratedFixture('manifest-v1-primary', 1);
   const v6Fixture = migratedFixture('manifest-v6-isolated', 6);
   const v7Fixture = migratedFixture('manifest-v7-isolated', 7);
   const v8Fixture = migratedFixture('manifest-v8-isolated', 8);
+  const v9Fixture = migratedFixture('manifest-v9-isolated', 9);
+  const v10Fixture = migratedFixture('manifest-v10-isolated', 10);
   try {
     assert.equal(manifest.schemaVersion, 1);
-    assert.deepEqual(manifest.exactProfiles.map((profile) => profile.schemaVersion), [6, 7, 8]);
+    assert.deepEqual(manifest.exactProfiles.map((profile) => profile.schemaVersion), [6, 7, 8, 9, 10]);
     assert.equal(
       manifest.categories['sensitive-number'],
       'run-randomized bounded-domain bijection preserving null/equality/cardinality and SQLite storage type'
@@ -1092,14 +1094,20 @@ test('manifest declares exact managed v1 as primary and keeps isolated v6, v7, a
     const v6Profile = sanitizer._testing.manifestProfileForVersion(manifest, 6);
     const v7Profile = sanitizer._testing.manifestProfileForVersion(manifest, 7);
     const v8Profile = sanitizer._testing.manifestProfileForVersion(manifest, 8);
+    const v9Profile = sanitizer._testing.manifestProfileForVersion(manifest, 9);
+    const v10Profile = sanitizer._testing.manifestProfileForVersion(manifest, 10);
     assert.equal(v1Profile.schemaVersion, 1);
     assert.equal(v6Profile.schemaVersion, 6);
     assert.equal(v7Profile.schemaVersion, 7);
     assert.equal(v8Profile.schemaVersion, 8);
+    assert.equal(v9Profile.schemaVersion, 9);
+    assert.equal(v10Profile.schemaVersion, 10);
     assert.equal(v1Profile.objects.length, sanitizer.actualInventory(v1Fixture.db).length);
     assert.equal(v6Profile.objects.length, sanitizer.actualInventory(v6Fixture.db).length);
     assert.equal(v7Profile.objects.length, sanitizer.actualInventory(v7Fixture.db).length);
     assert.equal(v8Profile.objects.length, sanitizer.actualInventory(v8Fixture.db).length);
+    assert.equal(v9Profile.objects.length, sanitizer.actualInventory(v9Fixture.db).length);
+    assert.equal(v10Profile.objects.length, sanitizer.actualInventory(v10Fixture.db).length);
     for (const profile of [v1Profile, v6Profile, v7Profile, v8Profile]) {
       assert.equal(profile.jsonPolicy.preserveLeafTypes, true);
       assert.equal(
@@ -1116,15 +1124,21 @@ test('manifest declares exact managed v1 as primary and keeps isolated v6, v7, a
       assert.equal(profile.semanticPolicies.structuralColumns.policySha256, EXPECTED_STRUCTURAL_POLICY_SHA256);
     }
     assert.equal(sanitizer.STRUCTURAL_POLICY_SHA256, EXPECTED_STRUCTURAL_POLICY_SHA256);
+    assert.equal(v9Profile.semanticPolicies.structuralColumns.validatorVersion, 'tm-structural-policy-v4-bitable-retry-lineage');
+    assert.equal(v10Profile.semanticPolicies.structuralColumns.validatorVersion, 'tm-structural-policy-v5-performance-manual');
     assert.doesNotThrow(() => sanitizer.validateManifest(manifest, v1Fixture.db));
     assert.doesNotThrow(() => sanitizer.validateManifest(manifest, v6Fixture.db));
     assert.doesNotThrow(() => sanitizer.validateManifest(manifest, v7Fixture.db));
     assert.doesNotThrow(() => sanitizer.validateManifest(manifest, v8Fixture.db));
+    assert.doesNotThrow(() => sanitizer.validateManifest(manifest, v9Fixture.db));
+    assert.doesNotThrow(() => sanitizer.validateManifest(manifest, v10Fixture.db));
   } finally {
     closeAndRemove(v1Fixture);
     closeAndRemove(v6Fixture);
     closeAndRemove(v7Fixture);
     closeAndRemove(v8Fixture);
+    closeAndRemove(v9Fixture);
+    closeAndRemove(v10Fixture);
   }
 });
 

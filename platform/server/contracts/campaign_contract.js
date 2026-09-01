@@ -169,6 +169,33 @@ const REQUEST_POLICIES = Object.freeze({
     'GET',
     '/api/campaigns/:id/knowledge/:entryId'
   ),
+  CAMPAIGN_PERFORMANCE_CONTENT_LIST: empty(
+    'campaign.performance.content.list',
+    'GET',
+    '/api/campaigns/:id/performance/contents'
+  ),
+  CAMPAIGN_PERFORMANCE_DASHBOARD: empty(
+    'campaign.performance.dashboard',
+    'GET',
+    '/api/campaigns/:id/performance/dashboard'
+  ),
+  CAMPAIGN_PERFORMANCE_CONTENT_CREATE: controlJson(
+    'campaign.performance.content.create',
+    'POST',
+    '/api/campaigns/:id/performance/contents'
+  ),
+  CAMPAIGN_PERFORMANCE_IMPORT: definePolicy(
+    'campaign.performance.import',
+    'POST',
+    '/api/campaigns/:id/performance/import',
+    MEDIA_KINDS.JSON,
+    BODY_LIMITS.KNOWLEDGE_JSON
+  ),
+  CAMPAIGN_PERFORMANCE_MANUAL_INPUT: controlJson(
+    'campaign.performance.manual-input',
+    'POST',
+    '/api/campaigns/:id/performance/contents/:contentId/manual-inputs'
+  ),
   CAMPAIGN_REVIEW_CREATE: definePolicy(
     'campaign.review.create',
     'POST',
@@ -234,6 +261,11 @@ const REQUEST_POLICIES = Object.freeze({
     'parser.influencer-upload',
     '/api/influencers/upload',
     'parser.influencer-upload.admission'
+  ),
+  SHARED_PERFORMANCE_UPLOAD: multipart(
+    'parser.performance-upload',
+    '/api/performance/upload',
+    'parser.performance-upload.admission'
   ),
   SHARED_DEMAND_PARSE_FILE: multipart(
     'parser.demand-parse',
@@ -382,6 +414,7 @@ const POLICY_GROUPS = Object.freeze({
   SHARED_PARSERS: Object.freeze([
     'SHARED_KNOWLEDGE_UPLOAD',
     'SHARED_INFLUENCER_UPLOAD',
+    'SHARED_PERFORMANCE_UPLOAD',
     'SHARED_DEMAND_PARSE_FILE'
   ])
 });

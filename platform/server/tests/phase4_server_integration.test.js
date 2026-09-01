@@ -40,7 +40,7 @@ function isolatedChildEnvironment(overrides, sourceEnvironment = process.env) {
   return Object.assign(environment, overrides);
 }
 const RELEASE_PINNED_UPLOAD_MANIFEST_SHA256 =
-  '7d1c5bd2bb3b33d954513d107950c55e6d1468f2b1ecef9ae56d2349c861927d';
+  '75199daa1cee1b55f57257263177f3c5e287b6462b5a3bd2bc62c67a096395b2';
 
 test('production parser manifest pin matches the exact checked-in manifest bytes', () => {
   const observed = crypto
@@ -1828,7 +1828,10 @@ test('collaboration routes use the injected singleton and one request-id fallbac
     app,
     {},
     authMiddleware,
-    { campaignCollaborationService }
+    {
+      campaignCollaborationService,
+      feishuBitableOutboxService: Object.freeze({})
+    }
   );
 
   assert.equal(Object.hasOwn(registered, 'POST /api/collaborations'), true);

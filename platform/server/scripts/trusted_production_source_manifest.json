@@ -23,9 +23,10 @@
       6,
       7,
       8,
-      9
+      9,
+      10
     ],
-    "targetVersion": 9,
+    "targetVersion": 10,
     "runs": 2,
     "deterministicAppendTables": [
       "activity_log"
@@ -67,6 +68,10 @@
     {
       "path": "server/migrations/009_feishu_bitable_retry_lineage.js",
       "sha256": "67d4206c22f00cb47fdf0b8557036b3e4a0a8829106c3e0af102b40368f1b4ab"
+    },
+    {
+      "path": "server/migrations/010_performance_manual_foundation.js",
+      "sha256": "45f38f29a11008c04b347a8eadb3dcde8f694a30b5956ee8442339e6dad8542f"
     },
     {
       "path": "server/migrations/baselines/legacy_v1.js",
@@ -150,11 +155,11 @@
     },
     {
       "path": "server/scripts/sanitization_manifest.json",
-      "sha256": "fb40f89c6cb2f38bf5b3c99753660d8ca73cdf151af2e869f4dac00ff97ecc79"
+      "sha256": "0a93bbf8b426cd863468275dde565d80c80ee4262d3788b11478fd20f7f7e938"
     },
     {
       "path": "server/scripts/sanitize_production_shape.js",
-      "sha256": "747a14858e3e9d12df286614d744a9f802862ab2abedde8bfe4279556115af07"
+      "sha256": "23b008fe0691f87ca077156279557ee7f5e01858e4b9b744bf4eaf31d53709b5"
     },
     {
       "path": "server/scripts/trusted_parser_runtime_verifier.js",
@@ -166,7 +171,7 @@
     },
     {
       "path": "server/scripts/verify_campaign_migration_gate.js",
-      "sha256": "ec4483ed5c3ab5dee361df641ef87a27623b0a8283bfc07464379f18da80756a"
+      "sha256": "3f1325dbc2335bd97208924efe7eab6d6b8e84a7b720caea2ac6578781e99f4f"
     },
     {
       "path": "server/services/campaign_access_service.js",
@@ -222,7 +227,7 @@
     },
     {
       "path": "server/services/upload_sandbox_service.js",
-      "sha256": "5fa3e3323a730e38705eed1c21bc3928dd17044e25de8017d8920510e8664acb"
+      "sha256": "345f6ec50c5e972eb314572a3203ed3b1f7e97cfa5d68d67a18832cb3520830a"
     },
     {
       "path": "server/systemd/turingmarket-gate-cleanup.service",
@@ -230,7 +235,7 @@
     },
     {
       "path": "server/systemd/turingmarket-parser.manifest.json",
-      "sha256": "7d1c5bd2bb3b33d954513d107950c55e6d1468f2b1ecef9ae56d2349c861927d"
+      "sha256": "75199daa1cee1b55f57257263177f3c5e287b6462b5a3bd2bc62c67a096395b2"
     },
     {
       "path": "server/systemd/turingmarket-parser.slice",

@@ -15,7 +15,7 @@
     "locked": true,
     "supplementary_groups": []
   },
-  "route_registry_sha256": "2d4ff7bde5ff69d69069e4480a03a2a4178724a25a8d8324ad4f9d856b39bc0e",
+  "route_registry_sha256": "6a888e9e5ab4759fbf32c4f15be884a57a5f9691de78a67265db9fb709499b64",
   "artifacts": {
     "parser-runtime/package.json": "e4f15777ba324933c26059712501bc666d54480b149445d43680ea0e7375c846",
     "parser-runtime/package-lock.json": "e1d6e5ababef1fb6f0aa69363be328e4da42283c96e268378c2f83076722fc46",
@@ -26,7 +26,7 @@
     "extract_xlsx_text.py": "69db3140f8d08f2754df0b13d9ba728db5117539a507faabd4088c74b89ee3c8",
     "ocr_document_text.py": "917d5b14872eeb3a7b628d80cc70dbab46a79ef632e031fa599f15e0840e1a0a",
     "services/file_ingest_service.js": "9fbb756a1109939da1c9cb5e3e7b77b0175ec2a9ea602d500a5f293f97f99c70",
-    "services/upload_sandbox_service.js": "5fa3e3323a730e38705eed1c21bc3928dd17044e25de8017d8920510e8664acb",
+    "services/upload_sandbox_service.js": "345f6ec50c5e972eb314572a3203ed3b1f7e97cfa5d68d67a18832cb3520830a",
     "scripts/parse_upload_sandbox.sh": "2d77151dac802ce00d80c9df04ba879232001b014ab672379c36836d767b8d95",
     "systemd/turingmarket-parser@.service": "a363f7ce7021067be99fdf74144b1ca7e25ba6ac68ce070a1bfa07d07a73c49a",
     "systemd/turingmarket-parser.slice": "d0cc089526feff2cbe0240a6fc711b113c2eac0af95c3763a00ef0edc8467c17"

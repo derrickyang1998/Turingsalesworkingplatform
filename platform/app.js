@@ -6608,6 +6608,617 @@ document.addEventListener("click", function(e) {
     el = el.parentElement;
   }
 });
+
+// ===== PERFORMANCE: CONTENT MONITORING AND MANUAL KPI FOUNDATION =====
+var performanceCampaigns = [];
+var performanceCampaignContextId = null;
+var performanceContents = [];
+var performanceCapabilities = {};
+var performanceDashboardData = null;
+var performanceSearchTimer = null;
+
+function performancePositiveId(value) {
+  return typeof readPositiveInteger === 'function' ? readPositiveInteger(value) : null;
+}
+
+function performanceCampaignLabel(campaign) {
+  if (!campaign) return '';
+  var id = performancePositiveId(campaign.id);
+  var parts = [campaign.name || (id === null ? '推广活动' : '活动 #' + id)];
+  if (campaign.product_name) parts.push(campaign.product_name);
+  return parts.join(' · ');
+}
+
+function getPerformanceCampaignId() {
+  return performancePositiveId(performanceCampaignContextId);
+}
+
+function getPerformanceCampaignById(campaignId) {
+  var normalized = performancePositiveId(campaignId);
+  if (normalized === null) return null;
+  return performanceCampaigns.find(function(campaign) {
+    return performancePositiveId(campaign && campaign.id) === normalized;
+  }) || null;
+}
+
+function setPerformanceStatus(message, type) {
+  ['performanceMonitorCampaignStatus', 'performanceDashboardStatus'].forEach(function(id) {
+    var element = document.getElementById(id);
+    if (!element) return;
+    element.textContent = message || '';
+    element.style.color = type === 'error' ? 'var(--tm-color-danger)' : 'var(--tm-color-text-muted)';
+  });
+}
+
+function syncPerformanceCampaignSelectors() {
+  var campaignId = getPerformanceCampaignId();
+  var options = '<option value="">请选择推广活动</option>' + performanceCampaigns.map(function(campaign) {
+    var id = performancePositiveId(campaign.id);
+    return '<option value="' + id + '">' + esc(performanceCampaignLabel(campaign)) + '</option>';
+  }).join('');
+  ['performanceMonitorCampaign', 'performanceDashboardCampaign'].forEach(function(id) {
+    var select = document.getElementById(id);
+    if (!select) return;
+    select.innerHTML = options;
+    if (campaignId !== null && getPerformanceCampaignById(campaignId)) select.value = String(campaignId);
+  });
+}
+
+async function loadPerformanceCampaigns() {
+  var workflowCampaignId = performancePositiveId(typeof getActiveCampaignId === 'function' ? getActiveCampaignId() : null);
+  try {
+    var response = await apiFetch('/campaigns?limit=100&operational_status=active');
+    var data = await response.json();
+    if (!response.ok) throw new Error(data.error || '活动列表加载失败');
+    var items = Array.isArray(data.items) ? data.items : [];
+    if (workflowCampaignId !== null && !items.some(function(campaign) {
+      return performancePositiveId(campaign && campaign.id) === workflowCampaignId;
+    })) {
+      try {
+        var detailResponse = await apiFetch('/campaigns/' + workflowCampaignId);
+        var detail = await detailResponse.json();
+        if (detailResponse.ok && detail.campaign) items.unshift(detail.campaign);
+      } catch (error) {}
+    }
+    performanceCampaigns = items.filter(function(campaign, index, campaigns) {
+      var id = performancePositiveId(campaign && campaign.id);
+      return id !== null && campaigns.findIndex(function(candidate) {
+        return performancePositiveId(candidate && candidate.id) === id;
+      }) === index;
+    });
+    if (getPerformanceCampaignId() === null) {
+      performanceCampaignContextId = workflowCampaignId !== null ? workflowCampaignId : (performanceCampaigns[0] ? performanceCampaigns[0].id : null);
+    }
+    syncPerformanceCampaignSelectors();
+    var campaign = getPerformanceCampaignById(getPerformanceCampaignId());
+    setPerformanceStatus(campaign ? ('当前活动：' + performanceCampaignLabel(campaign)) : '请先创建或选择可访问的推广活动。');
+    return performanceCampaigns;
+  } catch (error) {
+    performanceCampaigns = [];
+    performanceCampaignContextId = null;
+    syncPerformanceCampaignSelectors();
+    setPerformanceStatus(error.message || '活动列表加载失败', 'error');
+    return [];
+  }
+}
+
+function changePerformanceCampaignContext(value) {
+  performanceCampaignContextId = performancePositiveId(value);
+  syncPerformanceCampaignSelectors();
+  var campaign = getPerformanceCampaignById(getPerformanceCampaignId());
+  setPerformanceStatus(campaign ? ('当前活动：' + performanceCampaignLabel(campaign)) : '请选择推广活动。');
+  loadPerformanceContents();
+  loadPerformanceDashboard();
+}
+
+function refreshPerformanceMonitor() {
+  return loadPerformanceCampaigns().then(function() { return loadPerformanceContents(); });
+}
+
+function refreshPerformanceDashboard() {
+  return loadPerformanceCampaigns().then(function() { return loadPerformanceDashboard(); });
+}
+
+function initPerformanceMonitor() {
+  return loadPerformanceCampaigns().then(function() { return loadPerformanceContents(); });
+}
+
+function initPerformanceDashboard() {
+  return loadPerformanceCampaigns().then(function() { return loadPerformanceDashboard(); });
+}
+
+function performanceTextValue(id) {
+  var element = document.getElementById(id);
+  return element ? String(element.value || '').trim() : '';
+}
+
+function performanceContentQuery() {
+  var params = new URLSearchParams();
+  var search = performanceTextValue('performanceContentSearch');
+  var platform = performanceTextValue('performanceContentPlatform');
+  var tag = performanceTextValue('performanceContentTag');
+  if (search) params.set('q', search);
+  if (platform) params.set('platform', platform);
+  if (tag) params.set('tag', tag);
+  params.set('limit', '100');
+  return params.toString();
+}
+
+function debouncedPerformanceContentSearch() {
+  if (performanceSearchTimer) window.clearTimeout(performanceSearchTimer);
+  performanceSearchTimer = window.setTimeout(function() {
+    performanceSearchTimer = null;
+    loadPerformanceContents();
+  }, 220);
+}
+
+function performanceMetricValue(metric) {
+  if (typeof metric === 'number' && Number.isFinite(metric)) return metric;
+  if (!metric || metric.available === false || !Number.isFinite(Number(metric.value))) return null;
+  return Number(metric.value);
+}
+
+function performanceCount(value) {
+  var number = Number(value);
+  if (!Number.isFinite(number)) return '-';
+  if (Math.abs(number) >= 1000000) return (number / 1000000).toFixed(number >= 10000000 ? 1 : 2) + 'M';
+  if (Math.abs(number) >= 1000) return (number / 1000).toFixed(number >= 100000 ? 0 : 1) + 'K';
+  return Number.isInteger(number) ? String(number) : number.toFixed(2);
+}
+
+function performanceRate(metric) {
+  var value = performanceMetricValue(metric);
+  return value === null ? '-' : (value * 100).toFixed(value * 100 >= 10 ? 1 : 2) + '%';
+}
+
+function performanceMoney(metric) {
+  var value = performanceMetricValue(metric);
+  if (value === null) return '-';
+  var currency = metric && metric.currency ? String(metric.currency) + ' ' : '';
+  return currency + value.toFixed(Math.abs(value) >= 100 ? 0 : 2);
+}
+
+function performanceRatio(metric, suffix) {
+  var value = performanceMetricValue(metric);
+  return value === null ? '-' : value.toFixed(2) + (suffix || 'x');
+}
+
+function performanceDate(value) {
+  if (!value) return '-';
+  var text = String(value);
+  return /^\d{4}-\d{2}-\d{2}/.test(text) ? text.slice(0, 10) : text;
+}
+
+function performanceContentTitle(content) {
+  if (!content) return '未命名内容';
+  return content.creator_name || content.product || content.original_url || ('内容 #' + content.id);
+}
+
+function performanceObservationValue(content, key) {
+  var observation = content && content.latest_observation;
+  var value = observation && observation[key];
+  return Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
+function renderPerformanceContents(items, total, capabilities) {
+  performanceContents = Array.isArray(items) ? items : [];
+  performanceCapabilities = capabilities || {};
+  var container = document.getElementById('performanceContentTable');
+  var meta = document.getElementById('performanceContentListMeta');
+  if (meta) meta.textContent = total ? ('共 ' + total + ' 条，当前显示 ' + performanceContents.length + ' 条。') : '尚未导入视频链接。';
+  if (!container) return;
+  if (!performanceContents.length) {
+    container.innerHTML = '<div class="tm-state-empty">尚未找到内容。可新增视频链接或导入 CSV / XLSX。</div>';
+    return;
+  }
+  var rows = performanceContents.map(function(content) {
+    var observedEngagement = performanceMetricValue(content.metrics && content.metrics.observed_engagement_total);
+    var observedAt = content.latest_observation && content.latest_observation.observed_at;
+    var originalUrl = content.original_url || '';
+    return '<tr>'
+      + '<td><a class="tm-performance-content-link" href="' + esc(originalUrl) + '" target="_blank" rel="noopener noreferrer" title="打开视频链接">' + esc(performanceContentTitle(content)) + '</a></td>'
+      + '<td>' + esc(content.platform || '-') + '</td>'
+      + '<td>' + esc(content.creator_name || content.creator_id || '-') + '</td>'
+      + '<td>' + esc(content.product || '-') + '</td>'
+      + '<td>' + esc(Array.isArray(content.tags) && content.tags.length ? content.tags.join(' / ') : '-') + '</td>'
+      + '<td>' + esc(performanceDate(content.published_at)) + '</td>'
+      + '<td>' + performanceCount(performanceObservationValue(content, 'views')) + '</td>'
+      + '<td>' + performanceCount(observedEngagement) + '</td>'
+      + '<td>' + performanceRate(content.metrics && content.metrics.core_view_er) + '</td>'
+      + '<td>' + performanceCount(performanceObservationValue(content, 'clicks')) + '</td>'
+      + '<td class="tm-performance-muted-cell">' + esc(performanceDate(observedAt)) + '</td>'
+      + '<td><button class="btn btn-outline btn-sm" type="button" onclick="openPerformanceInputModal(' + Number(content.id) + ')">录入数据</button></td>'
+      + '</tr>';
+  }).join('');
+  container.innerHTML = '<table class="tm-performance-table"><thead><tr>'
+    + '<th scope="col">内容</th><th scope="col">平台</th><th scope="col">达人</th><th scope="col">产品</th><th scope="col">标签</th><th scope="col">发布日期</th><th scope="col">播放</th><th scope="col">互动</th><th scope="col">互动率</th><th scope="col">点击</th><th scope="col">数据更新</th><th scope="col">操作</th>'
+    + '</tr></thead><tbody>' + rows + '</tbody></table>';
+  if (window.TMAccessibility) window.TMAccessibility.refresh();
+}
+
+async function loadPerformanceContents() {
+  var campaignId = getPerformanceCampaignId();
+  var container = document.getElementById('performanceContentTable');
+  if (campaignId === null) {
+    renderPerformanceContents([], 0, {});
+    return [];
+  }
+  if (container) container.innerHTML = '<div class="tm-state-loading">正在加载内容...</div>';
+  try {
+    var response = await apiFetch('/campaigns/' + encodeURIComponent(campaignId) + '/performance/contents?' + performanceContentQuery());
+    var data = await response.json();
+    if (!response.ok) throw new Error(data.error || '内容加载失败');
+    renderPerformanceContents(data.items || [], Number(data.total || 0), data.capabilities || {});
+    return data.items || [];
+  } catch (error) {
+    if (container) container.innerHTML = '<div class="tm-state-error">' + esc(error.message || '内容加载失败') + '</div>';
+    return [];
+  }
+}
+
+async function createPerformanceContent(event) {
+  if (event) event.preventDefault();
+  var campaignId = getPerformanceCampaignId();
+  var status = document.getElementById('performanceContentCreateStatus');
+  if (campaignId === null) {
+    if (status) status.textContent = '请先选择推广活动。';
+    return false;
+  }
+  var form = document.getElementById('performanceContentForm');
+  var body = {
+    url: performanceTextValue('performanceContentUrl'),
+    creator_name: performanceTextValue('performanceCreatorName'),
+    product: performanceTextValue('performanceProduct'),
+    tags: performanceTextValue('performanceTags')
+  };
+  if (status) status.textContent = '正在保存...';
+  try {
+    var response = await apiFetch('/campaigns/' + encodeURIComponent(campaignId) + '/performance/contents', {
+      method: 'POST',
+      body: JSON.stringify(body)
+    });
+    var data = await response.json();
+    if (!response.ok) throw new Error(data.error || '视频保存失败');
+    if (form) form.reset();
+    if (status) status.textContent = '已保存到当前活动。';
+    toast('视频链接已保存');
+    await loadPerformanceContents();
+    await loadPerformanceDashboard();
+  } catch (error) {
+    if (status) status.textContent = error.message || '视频保存失败';
+    toast(error.message || '视频保存失败', 'error');
+  }
+  return false;
+}
+
+function performanceUploadMapping() {
+  var mapping = {
+    content_url: performanceTextValue('performanceMappingUrl'),
+    creator_id: performanceTextValue('performanceMappingCreatorId'),
+    creator_name: performanceTextValue('performanceMappingCreatorName'),
+    product: performanceTextValue('performanceMappingProduct'),
+    tags: performanceTextValue('performanceMappingTags'),
+    published_at: performanceTextValue('performanceMappingPublishedAt')
+  };
+  Object.keys(mapping).forEach(function(key) {
+    if (!mapping[key]) delete mapping[key];
+  });
+  if (!mapping.content_url && !mapping.video_url) {
+    throw new Error('请填写视频链接对应的表头。');
+  }
+  return mapping;
+}
+
+function downloadPerformanceTemplate() {
+  var csv = '视频链接,达人 ID,达人名称,推广产品,内容标签,发布日期\n';
+  dlFile('内容监控上传模板.csv', '\ufeff' + csv, 'text/csv;charset=utf-8');
+}
+
+function handlePerformanceImport(event) {
+  var file = event && event.target && event.target.files ? event.target.files[0] : null;
+  importPerformanceFile(file);
+  if (event && event.target) event.target.value = '';
+}
+
+function handlePerformanceDrop(event) {
+  if (event) event.preventDefault();
+  var dropZone = document.getElementById('performanceImportDropZone');
+  if (dropZone) dropZone.classList.remove('is-dragover');
+  var file = event && event.dataTransfer && event.dataTransfer.files ? event.dataTransfer.files[0] : null;
+  importPerformanceFile(file);
+}
+
+async function importPerformanceFile(file) {
+  var status = document.getElementById('performanceImportStatus');
+  var campaignId = getPerformanceCampaignId();
+  if (!file) return;
+  if (campaignId === null) {
+    if (status) status.textContent = '请先选择推广活动。';
+    return;
+  }
+  var extension = ((file.name || '').split('.').pop() || '').toLowerCase();
+  if (['csv', 'xlsx'].indexOf(extension) === -1) {
+    if (status) status.textContent = '仅支持 CSV 或 XLSX 文件。';
+    return;
+  }
+  try {
+    var form = new FormData();
+    form.append('file', file);
+    form.append('campaign_id', String(campaignId));
+    form.append('mapping_version', 'performance-ui-v1');
+    form.append('column_mapping', JSON.stringify(performanceUploadMapping()));
+    if (status) status.textContent = '正在导入 ' + file.name + '...';
+    var response = await apiFetch('/performance/upload', { method: 'POST', body: form });
+    var data = await response.json();
+    if (!response.ok) throw new Error(data.error || '导入失败');
+    var detail = '已导入 ' + Number(data.accepted_count || 0) + ' 条';
+    if (Number(data.duplicate_count || 0)) detail += '，跳过重复 ' + Number(data.duplicate_count || 0) + ' 条';
+    if (Number(data.rejected_count || 0)) detail += '，未通过 ' + Number(data.rejected_count || 0) + ' 条';
+    if (status) status.textContent = detail + '。';
+    toast(detail);
+    await loadPerformanceContents();
+    await loadPerformanceDashboard();
+  } catch (error) {
+    if (status) status.textContent = error.message || '导入失败';
+    toast(error.message || '导入失败', 'error');
+  }
+}
+
+function performanceInputValue(content, key) {
+  var observation = content && content.latest_observation;
+  if (observation && observation[key] !== undefined && observation[key] !== null) return String(observation[key]);
+  var commercial = content && content.commercial;
+  if (commercial && commercial[key] !== undefined && commercial[key] !== null) return String(commercial[key]);
+  return '';
+}
+
+function performanceInputField(id, label, value, step) {
+  return '<label class="tm-performance-field" for="' + id + '">' + esc(label)
+    + '<input id="' + id + '" type="number" min="0" step="' + (step || '1') + '" inputmode="decimal" value="' + esc(value) + '"></label>';
+}
+
+function openPerformanceInputModal(contentId) {
+  var content = performanceContents.find(function(item) { return Number(item.id) === Number(contentId); });
+  if (!content) {
+    toast('内容已更新，请刷新列表后重试。', 'error');
+    return;
+  }
+  var opener = document.activeElement;
+  var commercialEnabled = Boolean(performanceCapabilities && performanceCapabilities.can_edit_commercial);
+  var commercialConfirmed = Boolean(content.commercial && content.commercial.approval_state === 'approved');
+  var overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'performanceInputOverlay';
+  overlay.addEventListener('click', function(event) {
+    if (event.target === overlay) closePerformanceInputModal();
+  });
+  var commercialHtml = '';
+  if (commercialEnabled) {
+    commercialHtml = '<h4>费用与收益</h4>'
+      + performanceInputField('performanceCreatorFee', '视频花费', performanceInputValue(content, 'creator_fee'), '0.01')
+      + performanceInputField('performanceProductSampleCost', '寄样成本', performanceInputValue(content, 'product_sample_cost'), '0.01')
+      + performanceInputField('performanceLogisticsCost', '物流成本', performanceInputValue(content, 'logistics_cost'), '0.01')
+      + performanceInputField('performancePaidMediaSpend', '付费投流', performanceInputValue(content, 'paid_media_spend'), '0.01')
+      + performanceInputField('performanceAgencyFee', '服务费', performanceInputValue(content, 'platform_agency_fee'), '0.01')
+      + performanceInputField('performanceOtherCost', '其他成本', performanceInputValue(content, 'other_cost'), '0.01')
+      + performanceInputField('performanceAttributedRevenue', '归因收入', performanceInputValue(content, 'attributed_revenue'), '0.01')
+      + '<label class="tm-performance-field" for="performanceCurrency">币种<select id="performanceCurrency"><option value="USD">USD</option><option value="CNY">CNY</option><option value="EUR">EUR</option></select></label>'
+      + '<label class="tm-performance-field" for="performanceAttributionModel">归因模型<input id="performanceAttributionModel" maxlength="80" value="' + esc((content.commercial && content.commercial.attribution_model) || 'manual') + '"></label>'
+      + '<label class="tm-performance-field" for="performanceAttributionWindow">归因窗口<input id="performanceAttributionWindow" maxlength="80" value="' + esc((content.commercial && content.commercial.attribution_window) || 'campaign') + '"></label>';
+    if (performanceCapabilities.can_approve_commercial) {
+      commercialHtml += '<label class="tm-performance-confirmation tm-performance-input-section"><input id="performanceConfirmed" type="checkbox"' + (commercialConfirmed ? ' checked' : '') + '>确认费用与收益，纳入项目级 ROI / ROAS</label>';
+    } else {
+      commercialHtml += '<p class="tm-metric-note tm-performance-input-section">费用与收益由活动管理员确认后才会纳入项目级 ROI / ROAS。</p>';
+    }
+  }
+  var dialog = document.createElement('div');
+  dialog.className = 'modal tm-performance-input-modal';
+  dialog.id = 'performanceInputDialog';
+  dialog.setAttribute('role', 'dialog');
+  dialog.setAttribute('aria-modal', 'true');
+  dialog.setAttribute('aria-labelledby', 'performanceInputTitle');
+  dialog.innerHTML = '<div class="modal-header"><h3 id="performanceInputTitle">录入内容数据</h3><button class="btn btn-outline btn-sm" type="button" aria-label="关闭录入窗口" onclick="closePerformanceInputModal()">关闭</button></div>'
+    + '<p class="tm-metric-note" style="margin:0">' + esc(performanceContentTitle(content)) + '</p>'
+    + '<form id="performanceInputForm" class="tm-performance-input-grid" onsubmit="return savePerformanceInput(event,' + Number(content.id) + ')">'
+    + '<h4>内容指标</h4>'
+    + performanceInputField('performanceViews', '播放量', performanceInputValue(content, 'views'))
+    + performanceInputField('performanceImpressions', '展示量', performanceInputValue(content, 'impressions'))
+    + performanceInputField('performanceLikes', '点赞数', performanceInputValue(content, 'likes'))
+    + performanceInputField('performanceComments', '评论数', performanceInputValue(content, 'comments'))
+    + performanceInputField('performanceSaves', '收藏数', performanceInputValue(content, 'saves'))
+    + performanceInputField('performanceShares', '转发数', performanceInputValue(content, 'shares'))
+    + performanceInputField('performanceClicks', '点击数', performanceInputValue(content, 'clicks'))
+    + performanceInputField('performanceConversions', '转化数', performanceInputValue(content, 'conversions'))
+    + commercialHtml
+    + '<label class="tm-performance-field tm-performance-input-section" for="performanceCorrectionReason">备注<input id="performanceCorrectionReason" maxlength="500" placeholder="可选：修正原因或数据说明"></label>'
+    + '<div class="tm-performance-input-section" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><button class="btn btn-primary" type="submit">保存数据</button><span id="performanceInputStatus" class="tm-metric-note" role="status" aria-live="polite"></span></div>'
+    + '</form>';
+  overlay.appendChild(dialog);
+  document.body.appendChild(overlay);
+  var currency = document.getElementById('performanceCurrency');
+  if (currency && content.commercial && /^[A-Z]{3}$/.test(content.commercial.base_currency || '')) currency.value = content.commercial.base_currency;
+  if (window.TMAccessibility) window.TMAccessibility.openDialog(dialog, opener, closePerformanceInputModal);
+}
+
+function closePerformanceInputModal() {
+  var overlay = document.getElementById('performanceInputOverlay');
+  var dialog = document.getElementById('performanceInputDialog');
+  if (dialog && window.TMAccessibility) window.TMAccessibility.closeDialog(dialog);
+  if (overlay) overlay.remove();
+}
+
+function performanceOptionalNumber(id, label, integerOnly) {
+  var raw = performanceTextValue(id);
+  if (!raw) return null;
+  var value = Number(raw);
+  if (!Number.isFinite(value) || value < 0 || (integerOnly && !Number.isSafeInteger(value))) {
+    throw new Error(label + '必须是非负' + (integerOnly ? '整数' : '数字') + '。');
+  }
+  return value;
+}
+
+async function savePerformanceInput(event, contentId) {
+  if (event) event.preventDefault();
+  var campaignId = getPerformanceCampaignId();
+  var status = document.getElementById('performanceInputStatus');
+  if (campaignId === null) return false;
+  try {
+    var observation = {};
+    [
+      ['performanceViews', 'views', '播放量'], ['performanceImpressions', 'impressions', '展示量'], ['performanceLikes', 'likes', '点赞数'],
+      ['performanceComments', 'comments', '评论数'], ['performanceSaves', 'saves', '收藏数'],
+      ['performanceShares', 'shares', '转发数'], ['performanceClicks', 'clicks', '点击数'],
+      ['performanceConversions', 'conversions', '转化数']
+    ].forEach(function(field) {
+      var value = performanceOptionalNumber(field[0], field[2], true);
+      if (value !== null) observation[field[1]] = value;
+    });
+    var commercial = null;
+    if (performanceCapabilities && performanceCapabilities.can_edit_commercial) {
+      var commercialFields = [
+        ['performanceCreatorFee', 'creator_fee', '视频花费'], ['performanceProductSampleCost', 'product_sample_cost', '寄样成本'],
+        ['performanceLogisticsCost', 'logistics_cost', '物流成本'], ['performancePaidMediaSpend', 'paid_media_spend', '付费投流'],
+        ['performanceAgencyFee', 'platform_agency_fee', '服务费'], ['performanceOtherCost', 'other_cost', '其他成本'],
+        ['performanceAttributedRevenue', 'attributed_revenue', '归因收入']
+      ];
+      var hasCommercial = commercialFields.some(function(field) { return performanceTextValue(field[0]) !== ''; });
+      if (hasCommercial) {
+        commercial = {
+          base_currency: performanceTextValue('performanceCurrency') || 'USD',
+          attribution_model: performanceTextValue('performanceAttributionModel') || 'manual',
+          attribution_window: performanceTextValue('performanceAttributionWindow') || 'campaign'
+        };
+        commercialFields.forEach(function(field) {
+          var value = performanceOptionalNumber(field[0], field[2], false);
+          commercial[field[1]] = value === null ? 0 : value;
+        });
+      }
+    }
+    if (!Object.keys(observation).length && !commercial) throw new Error('请至少录入一项内容指标或费用数据。');
+    var confirmed = Boolean(document.getElementById('performanceConfirmed') && document.getElementById('performanceConfirmed').checked);
+    var body = {
+      observation: Object.keys(observation).length ? observation : undefined,
+      commercial: commercial,
+      confirmed: confirmed,
+      correction_reason: performanceTextValue('performanceCorrectionReason') || undefined
+    };
+    if (status) status.textContent = '正在保存...';
+    var response = await apiFetch('/campaigns/' + encodeURIComponent(campaignId) + '/performance/contents/' + encodeURIComponent(contentId) + '/manual-inputs', {
+      method: 'POST',
+      body: JSON.stringify(body)
+    });
+    var data = await response.json();
+    if (!response.ok) throw new Error(data.error || '数据保存失败');
+    closePerformanceInputModal();
+    toast(confirmed ? '数据已确认并纳入项目计算' : '数据已保存');
+    await loadPerformanceContents();
+    await loadPerformanceDashboard();
+  } catch (error) {
+    if (status) status.textContent = error.message || '数据保存失败';
+    toast(error.message || '数据保存失败', 'error');
+  }
+  return false;
+}
+
+function performanceDashboardMetricLabels() {
+  return {
+    views: '播放量', likes: '点赞数', comments: '评论数', saves: '收藏数', shares: '转发数',
+    clicks: '点击数', core_view_er: '互动率'
+  };
+}
+
+function performanceTotalValue(data, key) {
+  return data && data.totals ? data.totals[key] : null;
+}
+
+function performanceCoverageText(total) {
+  if (!total || !total.coverage) return '暂无';
+  return Number(total.coverage.available_records || 0) + ' / ' + Number(total.coverage.total_records || 0);
+}
+
+function renderPerformanceDashboard(data) {
+  performanceDashboardData = data || null;
+  var metricContainer = document.getElementById('performanceDashboardMetrics');
+  var topContainer = document.getElementById('performanceTopContentList');
+  var coverageContainer = document.getElementById('performanceDashboardCoverage');
+  if (!data) {
+    if (metricContainer) metricContainer.innerHTML = '<div class="tm-metric-card"><span class="tm-metric-label">内容数</span><strong class="tm-metric-value">-</strong></div>';
+    if (topContainer) topContainer.innerHTML = '<div class="tm-state-empty">暂无可排序的数据。</div>';
+    if (coverageContainer) coverageContainer.innerHTML = '<div class="tm-state-empty">暂无数据。</div>';
+    return;
+  }
+  var metrics = data.metrics || {};
+  var metricsToRender = [
+    { label: '内容数', value: performanceCount(data.records && data.records.total), note: '已归档视频' },
+    { label: '播放量', value: performanceCount(performanceTotalValue(data, 'views') && performanceTotalValue(data, 'views').value), note: '最新录入汇总' },
+    { label: '展示量', value: performanceCount(performanceTotalValue(data, 'impressions') && performanceTotalValue(data, 'impressions').value), note: 'CPM 计算分母' },
+    { label: '互动量', value: performanceCount(performanceMetricValue(metrics.observed_engagement_total)), note: '点赞、评论、收藏、转发' },
+    { label: '互动率', value: performanceRate(metrics.core_view_er), note: '点赞与评论 / 播放' },
+    { label: '点击数', value: performanceCount(performanceTotalValue(data, 'clicks') && performanceTotalValue(data, 'clicks').value), note: '最新录入汇总' },
+    { label: 'CPM', value: performanceMoney(metrics.cpm), note: '确认成本 / 千次曝光' },
+    { label: 'CPC', value: performanceMoney(metrics.cpc), note: '确认成本 / 点击' },
+    { label: 'ROI', value: performanceRate(metrics.roi), note: '确认收入与总成本' },
+    { label: 'ROAS', value: performanceRatio(metrics.roas), note: '确认收入 / 付费投流' }
+  ];
+  if (metricContainer) {
+    metricContainer.innerHTML = metricsToRender.map(function(item) {
+      return '<div class="tm-metric-card"><span class="tm-metric-label">' + esc(item.label) + '</span><strong class="tm-metric-value">' + esc(item.value) + '</strong><span class="tm-metric-note">' + esc(item.note) + '</span></div>';
+    }).join('');
+  }
+  var topMetric = data.top_metric || 'views';
+  var labels = performanceDashboardMetricLabels();
+  var topRows = Array.isArray(data.top_contents) ? data.top_contents : [];
+  if (topContainer) {
+    topContainer.innerHTML = topRows.length ? topRows.map(function(item) {
+      var content = item.content || {};
+      var value = topMetric === 'core_view_er' ? performanceRate(item.metric) : performanceCount(item.metric && item.metric.value);
+      return '<div class="tm-performance-top-row">'
+        + '<span class="tm-performance-rank">' + Number(item.rank || 0) + '</span>'
+        + '<div><div class="tm-performance-top-title" title="' + esc(performanceContentTitle(content)) + '">' + esc(performanceContentTitle(content)) + '</div>'
+        + '<div class="tm-performance-top-meta">' + esc(content.creator_name || content.platform || '-') + ' · ' + esc(content.platform || '-') + '</div></div>'
+        + '<strong class="tm-performance-top-value">' + esc(value) + '</strong>'
+        + '</div>';
+    }).join('') : '<div class="tm-state-empty">当前筛选下暂无可排序的数据。</div>';
+  }
+  var viewCoverage = performanceTotalValue(data, 'views');
+  var clickCoverage = performanceTotalValue(data, 'clicks');
+  var records = data.records || {};
+  var coverageRows = [
+    ['已导入内容', Number(records.total || 0) + ' 条'],
+    ['已录入指标', Number(records.active_with_observations || 0) + ' / ' + Number(records.total || 0)],
+    ['已确认商业数据', Number(records.confirmed_commercial || 0) + ' / ' + Number(records.total || 0)],
+    ['播放量完整度', performanceCoverageText(viewCoverage)],
+    ['点击数据完整度', performanceCoverageText(clickCoverage)],
+    ['当前排序', labels[topMetric] || topMetric]
+  ];
+  if (coverageContainer) {
+    coverageContainer.innerHTML = coverageRows.map(function(row) {
+      return '<div class="tm-performance-coverage-row"><span>' + esc(row[0]) + '</span><strong class="tm-performance-coverage-value">' + esc(row[1]) + '</strong></div>';
+    }).join('');
+  }
+  if (window.TMAccessibility) window.TMAccessibility.refresh();
+}
+
+async function loadPerformanceDashboard() {
+  var campaignId = getPerformanceCampaignId();
+  if (campaignId === null) {
+    renderPerformanceDashboard(null);
+    return null;
+  }
+  var topMetric = performanceTextValue('performanceTopMetric') || 'views';
+  try {
+    var response = await apiFetch('/campaigns/' + encodeURIComponent(campaignId) + '/performance/dashboard?top_metric=' + encodeURIComponent(topMetric));
+    var data = await response.json();
+    if (!response.ok) throw new Error(data.error || '效果看板加载失败');
+    renderPerformanceDashboard(data);
+    return data;
+  } catch (error) {
+    renderPerformanceDashboard(null);
+    setPerformanceStatus(error.message || '效果看板加载失败', 'error');
+    return null;
+  }
+}
+
 // ===== PAGE NAVIGATION =====
 const TM_NAVIGATION_APP = (function() {
   function activeM4Tab() {
@@ -6638,6 +7249,8 @@ const TM_NAVIGATION_APP = (function() {
     if (id === 'm0') { loadCustomerStats(); renderCrmCommandCenter(); }
     if (id === 'm0-detail') { switchCrmView(substate.view || curCrmView || 'pipeline', { skipHistory: true }); }
     if (id === 'm4') { switchTab(substate.tab || activeM4Tab(), { skipHistory: true }); }
+    if (id === 'performance-monitor') { initPerformanceMonitor(); }
+    if (id === 'performance-dashboard') { initPerformanceDashboard(); }
     if (id === 'admin') { switchAdminTab(substate.tab || visibleAdminTab(), { skipHistory: true }); }
     if (id === 'workflow-designer') { setTimeout(function() { if (typeof initWorkflowDesigner === 'function') initWorkflowDesigner(); }, 200); }
     if (id === 'workflow-templates') { setTimeout(function() { if (typeof wfLoadTemplates === 'function') wfLoadTemplates(); }, 200); }
@@ -6676,6 +7289,8 @@ function switchPage(id, options) {
   if (pg) { pg.classList.add('active'); pg.style.display = 'block'; }
   if (id === 'm0') { loadCustomerStats(); renderCrmCommandCenter(); }
   if (id === 'm0-detail') { switchCrmView(curCrmView || 'pipeline', { skipHistory: true }); }
+  if (id === 'performance-monitor') { initPerformanceMonitor(); }
+  if (id === 'performance-dashboard') { initPerformanceDashboard(); }
   if (id === 'admin') loadAdminDashboard();
   if (id === 'workflow-designer') { setTimeout(function() { if (typeof initWorkflowDesigner === 'function') initWorkflowDesigner(); }, 200); }
   if (id === 'workflow-templates') { setTimeout(function() { if (typeof wfLoadTemplates === 'function') wfLoadTemplates(); }, 200); }
@@ -6695,6 +7310,7 @@ function switchPage(id, options) {
     'getEditedDemand', 'syncCurDemandFromAnalysis', 'handleDemandFile', 'analyzeDemandAI',
     'switchTab', 'matchInfluencers', 'smartMatch', 'handleUpload', 'handleDrop', 'openInfUploadModal', 'handleUploadModal', 'downloadInfTemplate', 'exportAll', 'exportFiltered', 'exportSelected',
     'toggleAll', 'syncInfluencerSelectionState', 'loadM4Campaigns', 'changeM4CampaignContext', 'startCollab', 'submitCollabOrder', 'closeCollabOrderModal', 'loadCollaborations', 'updateCollabStatus', 'runCampaignCollabAction', 'closeCampaignSettlementModal', 'submitCampaignSettlement',
+    'initPerformanceMonitor', 'initPerformanceDashboard', 'refreshPerformanceMonitor', 'refreshPerformanceDashboard', 'changePerformanceCampaignContext', 'loadPerformanceContents', 'createPerformanceContent', 'downloadPerformanceTemplate', 'handlePerformanceImport', 'handlePerformanceDrop', 'openPerformanceInputModal', 'closePerformanceInputModal', 'savePerformanceInput', 'loadPerformanceDashboard', 'debouncedPerformanceContentSearch',
     'sendChat', 'clearChat', 'clearAIMemory', 'pushToFeishu', 'loadFeishuStatus', 'loadFeishuOutbox', 'testFeishuConnection', 'selectFeishuReconciliationDelivery', 'reconcileFeishuDelivery', 'selectFeishuRetryDelivery', 'retryFeishuDelivery',
     'switchAdminTab', 'loadAdminDashboard', 'loadAdminUsers', 'adminAddUser', 'adminCreateInvite', 'adminResetPw',
     'wfUndo', 'wfRedo', 'wfClearCanvas', 'wfSaveTemplate', 'wfPublishTemplate', 'wfResetTaskFilters', 'wfLoadTasks', 'wfLoadInstances',

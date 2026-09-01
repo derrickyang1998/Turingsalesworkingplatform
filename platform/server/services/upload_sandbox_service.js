@@ -319,6 +319,13 @@ const UPLOAD_ROUTES = Object.freeze([
     ['.csv', '.json', '.xlsx']
   ),
   routePolicy(
+    'parser.performance-upload',
+    '/api/performance/upload',
+    'parser.performance-upload.admission',
+    ['campaign_id', 'mapping_version', 'column_mapping'],
+    ['.csv', '.xlsx']
+  ),
+  routePolicy(
     'parser.demand-parse',
     '/api/demand/parse-file',
     'parser.demand-parse.admission',

@@ -416,7 +416,7 @@ The initial backup records exactly one of `ppt-cache.present` or `ppt-cache.abse
 
 ### Parser-Aware Health And Acceptance / 解析器感知健康与验收
 
-The application does not finish startup until parser readiness and the production self-tests pass. `/api/health` must return `status: "ok"`, `parser.ready: true`, and `parser.manifest_sha256: "7d1c5bd2bb3b33d954513d107950c55e6d1468f2b1ecef9ae56d2349c861927d"`. A `200` response without those exact parser fields is not healthy for v0.6. / 应用只有在解析器 readiness 与生产自检通过后才完成启动。健康接口必须返回上述精确状态与清单哈希；缺少这些解析器字段的 `200` 对 v0.6 不构成健康。
+The application does not finish startup until parser readiness and the production self-tests pass. `/api/health` must return `status: "ok"`, `parser.ready: true`, and `parser.manifest_sha256: "75199daa1cee1b55f57257263177f3c5e287b6462b5a3bd2bc62c67a096395b2"`. A `200` response without those exact parser fields is not healthy for v0.6. / 应用只有在解析器 readiness 与生产自检通过后才完成启动。健康接口必须返回上述精确状态与清单哈希；缺少这些解析器字段的 `200` 对 v0.6 不构成健康。
 
 Acceptance writes root-only parser and acceptance-facts evidence, hashes both, and combines those digests with the installed runtime-tree digest in `accepted-<run-id>.json` and `current-accepted.json` schema 3 records. The finalizer and public-traffic activation re-inspect the installed root-owned tree and reject legacy or mismatched markers. / 验收以 root-only 形式写入解析器与验收事实证据，计算两者哈希，并与已安装运行时树哈希共同写入 schema 3 的代次验收记录和当前验收记录；finalizer 与公开流量激活会重新检查已安装 root-owned 树，并拒绝旧版或不匹配标记。
 
@@ -445,7 +445,7 @@ process.stdin.setEncoding("utf8");
 process.stdin.on("data", chunk => { body += chunk; });
 process.stdin.on("end", () => {
   const health = JSON.parse(body);
-  const expected = "7d1c5bd2bb3b33d954513d107950c55e6d1468f2b1ecef9ae56d2349c861927d";
+  const expected = "75199daa1cee1b55f57257263177f3c5e287b6462b5a3bd2bc62c67a096395b2";
   if (health.status !== "ok" || !health.parser || health.parser.ready !== true ||
       health.parser.manifest_sha256 !== expected) process.exit(1);
   process.stdout.write("PARSER_HEALTH_OK\n");

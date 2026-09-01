@@ -570,6 +570,8 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
     <div class="nav-item" data-page="m2" onclick="switchPage('m2')"><span class="nav-icon">🎯</span> 客户策略规划</div>
     <div class="nav-item" data-page="m3" onclick="switchPage('m3')"><span class="nav-icon">📋</span> 需求接入 & 方案生成</div>
     <div class="nav-item" data-page="m4" onclick="switchPage('m4')"><span class="nav-icon">👥</span> 网红匹配 & 执行管理</div>
+    <div class="nav-item" data-page="performance-monitor" onclick="switchPage('performance-monitor')"><span class="nav-icon">监</span> 内容监控</div>
+    <div class="nav-item" data-page="performance-dashboard" onclick="switchPage('performance-dashboard')"><span class="nav-icon">效</span> 效果看板</div>
     <div class="nav-item" data-page="m5" onclick="switchPage('m5')"><span class="nav-icon">🤖</span> AI 助手</div>
     <div class="nav-item" data-page="workflow-designer" onclick="switchPage('workflow-designer')"><span class="nav-icon">✏️</span> 流程设计</div>
 	    <div class="nav-item" data-page="workflow-templates" onclick="switchPage('workflow-templates')"><span class="nav-icon">📋</span> 流程模板</div>
@@ -1146,6 +1148,187 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
     </div>
   </div>
 </div>
+</div>
+
+<!-- PERFORMANCE: Content monitor -->
+<div class="page" id="page-performance-monitor">
+  <div class="tm-performance-page">
+    <div class="tm-performance-heading">
+      <div>
+        <h2>内容监控</h2>
+        <p class="subtitle">按推广活动归档视频链接、录入指标并保留数据来源。</p>
+      </div>
+      <button class="btn btn-outline btn-sm" type="button" onclick="switchPage('performance-dashboard')">查看效果看板</button>
+    </div>
+
+    <section class="toolbar-area tm-performance-toolbar" aria-label="内容监控活动选择">
+      <div class="tm-performance-field">
+        <label for="performanceMonitorCampaign">推广活动</label>
+        <select id="performanceMonitorCampaign" aria-label="选择内容监控推广活动" onchange="changePerformanceCampaignContext(this.value)">
+          <option value="">加载活动中...</option>
+        </select>
+      </div>
+      <div class="tm-performance-toolbar-actions">
+        <span id="performanceMonitorCampaignStatus" class="tm-metric-note" role="status" aria-live="polite">选择活动后可开始导入。</span>
+        <button class="btn btn-outline btn-sm" type="button" onclick="refreshPerformanceMonitor()">刷新</button>
+      </div>
+    </section>
+
+    <div class="tm-performance-action-grid">
+      <section class="card tm-performance-action-card" aria-labelledby="performanceManualTitle">
+        <div class="tm-performance-section-heading">
+          <div>
+            <h3 id="performanceManualTitle">新增视频链接</h3>
+            <p class="tm-metric-note">一条链接对应一个可追踪内容。</p>
+          </div>
+        </div>
+        <form id="performanceContentForm" class="tm-performance-form-grid" onsubmit="return createPerformanceContent(event)">
+          <div class="tm-performance-field tm-performance-field-wide">
+            <label for="performanceContentUrl">视频链接</label>
+            <input id="performanceContentUrl" name="url" type="url" inputmode="url" autocomplete="url" required placeholder="https://www.tiktok.com/... 或 https://www.instagram.com/...">
+          </div>
+          <div class="tm-performance-field">
+            <label for="performanceCreatorName">达人名称</label>
+            <input id="performanceCreatorName" name="creator_name" autocomplete="off" maxlength="500" placeholder="可选">
+          </div>
+          <div class="tm-performance-field">
+            <label for="performanceProduct">推广产品</label>
+            <input id="performanceProduct" name="product" autocomplete="off" maxlength="500" placeholder="可选">
+          </div>
+          <div class="tm-performance-field tm-performance-field-wide">
+            <label for="performanceTags">内容标签</label>
+            <input id="performanceTags" name="tags" autocomplete="off" maxlength="500" placeholder="例如：开箱, 户外, 转化">
+          </div>
+          <div class="tm-performance-form-submit">
+            <button class="btn btn-primary" type="submit">保存视频</button>
+            <span id="performanceContentCreateStatus" class="tm-metric-note" role="status" aria-live="polite"></span>
+          </div>
+        </form>
+      </section>
+
+      <section class="card tm-performance-action-card" aria-labelledby="performanceImportTitle">
+        <div class="tm-performance-section-heading">
+          <div>
+            <h3 id="performanceImportTitle">批量导入</h3>
+            <p class="tm-metric-note">CSV 或 XLSX，上传后自动检查重复链接。</p>
+          </div>
+          <button class="btn btn-outline btn-sm" type="button" onclick="downloadPerformanceTemplate()">下载表头模板</button>
+        </div>
+        <label class="file-upload tm-performance-dropzone" id="performanceImportDropZone" for="performanceImportFile" ondragover="event.preventDefault();this.classList.add('is-dragover')" ondragleave="this.classList.remove('is-dragover')" ondrop="handlePerformanceDrop(event)">
+          <span class="upload-text">选择或拖入视频数据文件</span>
+          <span class="tm-metric-note">CSV / XLSX</span>
+        </label>
+        <input id="performanceImportFile" type="file" accept=".csv,.xlsx" hidden onchange="handlePerformanceImport(event)">
+        <details class="tm-performance-mapping">
+          <summary>表头映射</summary>
+          <div class="tm-performance-mapping-grid">
+            <label>视频链接列<input id="performanceMappingUrl" value="视频链接" maxlength="256"></label>
+            <label>达人 ID 列<input id="performanceMappingCreatorId" value="达人 ID" maxlength="256"></label>
+            <label>达人名称列<input id="performanceMappingCreatorName" value="达人名称" maxlength="256"></label>
+            <label>产品列<input id="performanceMappingProduct" value="推广产品" maxlength="256"></label>
+            <label>标签列<input id="performanceMappingTags" value="内容标签" maxlength="256"></label>
+            <label>发布日期列<input id="performanceMappingPublishedAt" value="发布日期" maxlength="256"></label>
+          </div>
+        </details>
+        <div id="performanceImportStatus" class="tm-performance-import-status" role="status" aria-live="polite"></div>
+      </section>
+    </div>
+
+    <section class="card tm-performance-table-card" aria-labelledby="performanceContentListTitle">
+      <div class="tm-performance-section-heading tm-performance-list-heading">
+        <div>
+          <h3 id="performanceContentListTitle">已监控内容</h3>
+          <p id="performanceContentListMeta" class="tm-metric-note">尚未加载内容。</p>
+        </div>
+        <button class="btn btn-outline btn-sm" type="button" onclick="switchPage('performance-dashboard')">查看汇总</button>
+      </div>
+      <div class="tm-performance-filters" aria-label="内容筛选">
+        <input id="performanceContentSearch" type="search" aria-label="搜索视频链接、达人、产品或标签" placeholder="搜索链接、达人、产品或标签" oninput="debouncedPerformanceContentSearch()">
+        <select id="performanceContentPlatform" aria-label="按平台筛选内容" onchange="loadPerformanceContents()">
+          <option value="">全部平台</option>
+          <option value="tiktok">TikTok</option>
+          <option value="instagram">Instagram</option>
+          <option value="youtube">YouTube</option>
+          <option value="facebook">Facebook</option>
+        </select>
+        <input id="performanceContentTag" aria-label="按内容标签筛选" placeholder="标签" oninput="debouncedPerformanceContentSearch()">
+      </div>
+      <div class="table-container tm-performance-table-container" id="performanceContentTable" tabindex="0" aria-label="视频内容监控列表">
+        <div class="tm-state-empty">选择推广活动后加载内容。</div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<!-- PERFORMANCE: Dashboard -->
+<div class="page" id="page-performance-dashboard">
+  <div class="tm-performance-page">
+    <div class="tm-performance-heading">
+      <div>
+        <h2>效果看板</h2>
+        <p class="subtitle">基于已录入并确认的数据计算互动率、CPM、CPC、ROI 与 ROAS。</p>
+      </div>
+      <button class="btn btn-outline btn-sm" type="button" onclick="switchPage('performance-monitor')">管理监控内容</button>
+    </div>
+
+    <section class="toolbar-area tm-performance-toolbar" aria-label="效果看板活动选择">
+      <div class="tm-performance-field">
+        <label for="performanceDashboardCampaign">推广活动</label>
+        <select id="performanceDashboardCampaign" aria-label="选择效果看板推广活动" onchange="changePerformanceCampaignContext(this.value)">
+          <option value="">加载活动中...</option>
+        </select>
+      </div>
+      <div class="tm-performance-field tm-performance-metric-select">
+        <label for="performanceTopMetric">TOP 内容排序</label>
+        <select id="performanceTopMetric" aria-label="选择内容排序指标" onchange="loadPerformanceDashboard()">
+          <option value="views">播放量</option>
+          <option value="likes">点赞数</option>
+          <option value="comments">评论数</option>
+          <option value="saves">收藏数</option>
+          <option value="shares">转发数</option>
+          <option value="clicks">点击数</option>
+          <option value="core_view_er">互动率</option>
+        </select>
+      </div>
+      <div class="tm-performance-toolbar-actions">
+        <span id="performanceDashboardStatus" class="tm-metric-note" role="status" aria-live="polite">选择活动后加载看板。</span>
+        <button class="btn btn-outline btn-sm" type="button" onclick="refreshPerformanceDashboard()">刷新</button>
+      </div>
+    </section>
+
+    <section id="performanceDashboardMetrics" class="tm-performance-metric-grid" aria-live="polite">
+      <div class="tm-metric-card"><span class="tm-metric-label">内容数</span><strong class="tm-metric-value">-</strong></div>
+      <div class="tm-metric-card"><span class="tm-metric-label">播放量</span><strong class="tm-metric-value">-</strong></div>
+      <div class="tm-metric-card"><span class="tm-metric-label">互动率</span><strong class="tm-metric-value">-</strong></div>
+      <div class="tm-metric-card"><span class="tm-metric-label">ROI</span><strong class="tm-metric-value">-</strong></div>
+    </section>
+
+    <div class="tm-performance-dashboard-grid">
+      <section class="card tm-performance-top-card" aria-labelledby="performanceTopContentTitle">
+        <div class="tm-performance-section-heading">
+          <div>
+            <h3 id="performanceTopContentTitle">TOP 内容</h3>
+            <p class="tm-metric-note">仅对存在当前排序指标的数据进行排序。</p>
+          </div>
+        </div>
+        <div id="performanceTopContentList" class="tm-performance-top-list">
+          <div class="tm-state-empty">暂无可排序的数据。</div>
+        </div>
+      </section>
+
+      <section class="card tm-performance-coverage-card" aria-labelledby="performanceCoverageTitle">
+        <div class="tm-performance-section-heading">
+          <div>
+            <h3 id="performanceCoverageTitle">数据完整度</h3>
+            <p class="tm-metric-note">成本与收益仅在所有内容完成确认后参与项目级计算。</p>
+          </div>
+        </div>
+        <div id="performanceDashboardCoverage" class="tm-performance-coverage-list">
+          <div class="tm-state-empty">暂无数据。</div>
+        </div>
+      </section>
+    </div>
+  </div>
 </div>
 
 <!-- M5: AI Chat (v8.0) -->

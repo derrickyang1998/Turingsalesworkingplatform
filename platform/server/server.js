@@ -70,7 +70,9 @@ const { createCampaignPptService } = require('./services/campaign_ppt_service');
 const {
   createCampaignCollaborationService
 } = require('./services/campaign_collaboration_service');
+const { createPerformanceManualService } = require('./services/performance_manual_service');
 const registerCampaignRoutes = require('./routes_campaigns');
+const registerPerformanceRoutes = require('./routes_performance');
 const {
   createCampaignPptBridgeHandler
 } = registerCampaignRoutes;
@@ -95,7 +97,7 @@ const UPLOAD_SANDBOX_SPOOL_ROOT = path.resolve(
   process.env.UPLOAD_SANDBOX_SPOOL_ROOT || '/var/lib/turingmarket-parser/jobs'
 );
 const RELEASE_PINNED_UPLOAD_MANIFEST_SHA256 =
-  '7d1c5bd2bb3b33d954513d107950c55e6d1468f2b1ecef9ae56d2349c861927d';
+  '75199daa1cee1b55f57257263177f3c5e287b6462b5a3bd2bc62c67a096395b2';
 const UPLOAD_SANDBOX_SELF_TEST_RUNNER =
   '/usr/local/libexec/turingmarket/upload_sandbox_self_test';
 const REQUIRED_UPLOAD_SANDBOX_SELF_TESTS = Object.freeze([
@@ -155,6 +157,7 @@ const campaignPptService = createCampaignPptService(db, {
   }
 });
 const campaignCollaborationService = createCampaignCollaborationService(db);
+const performanceManualService = createPerformanceManualService(db);
 const campaignPptBridgeHandler = createCampaignPptBridgeHandler(campaignPptService);
 let campaignPptJanitor = null;
 let uploadSandboxService = null;
@@ -178,6 +181,11 @@ const phase4PolicyNames = [
   'CAMPAIGN_WORKSPACE',
   'CAMPAIGN_KNOWLEDGE_LIST',
   'CAMPAIGN_KNOWLEDGE_DETAIL',
+  'CAMPAIGN_PERFORMANCE_CONTENT_LIST',
+  'CAMPAIGN_PERFORMANCE_DASHBOARD',
+  'CAMPAIGN_PERFORMANCE_CONTENT_CREATE',
+  'CAMPAIGN_PERFORMANCE_IMPORT',
+  'CAMPAIGN_PERFORMANCE_MANUAL_INPUT',
   'CAMPAIGN_REVIEW_CREATE',
   'CAMPAIGN_PROPOSAL_PPT_GENERATE',
   'LEGACY_COLLABORATION_CREATE',
@@ -190,6 +198,7 @@ const phase4PolicyNames = [
   'LEGACY_AI_CHAT',
   'SHARED_KNOWLEDGE_UPLOAD',
   'SHARED_INFLUENCER_UPLOAD',
+  'SHARED_PERFORMANCE_UPLOAD',
   'SHARED_DEMAND_PARSE_FILE',
   'CRM_LEAD_CREATE',
   'CRM_LEAD_UPDATE',
@@ -693,6 +702,67 @@ function multipartTags(value) {
   return value.split(/[,;\n|]/).map((tag) => tag.trim()).filter(Boolean);
 }
 
+function performanceUploadError(code, message) {
+  const error = new Error(message);
+  error.statusCode = 400;
+  error.code = code;
+  return error;
+}
+
+function performanceUploadCampaignId(value) {
+  const text = typeof value === 'string' ? value.trim() : String(value || '');
+  if (!/^[1-9][0-9]{0,15}$/.test(text)) {
+    throw performanceUploadError('PERFORMANCE_CAMPAIGN_INVALID', 'campaign_id must be a positive integer.');
+  }
+  const campaignId = Number(text);
+  if (!Number.isSafeInteger(campaignId)) {
+    throw performanceUploadError('PERFORMANCE_CAMPAIGN_INVALID', 'campaign_id must be a positive integer.');
+  }
+  return campaignId;
+}
+
+function performanceUploadColumnMapping(value) {
+  if (typeof value !== 'string' || value.trim() === '' || value.length > 32_768) {
+    throw performanceUploadError('PERFORMANCE_IMPORT_MAPPING_INVALID', 'column_mapping must be a JSON object.');
+  }
+  try {
+    const mapping = JSON.parse(value);
+    if (mapping === null || typeof mapping !== 'object' || Array.isArray(mapping)) {
+      throw performanceUploadError('PERFORMANCE_IMPORT_MAPPING_INVALID', 'column_mapping must be a JSON object.');
+    }
+    return mapping;
+  } catch (error) {
+    if (error && error.code === 'PERFORMANCE_IMPORT_MAPPING_INVALID') throw error;
+    throw performanceUploadError('PERFORMANCE_IMPORT_MAPPING_INVALID', 'column_mapping must be valid JSON.');
+  }
+}
+
+function performanceUploadRows(data) {
+  if (!data || !Array.isArray(data.rows) || data.rows.length === 0) {
+    throw performanceUploadError('PERFORMANCE_CONTENT_IMPORT_EMPTY', 'No table rows found in uploaded file.');
+  }
+  return data.rows.map((row, index) => {
+    if (row === null || typeof row !== 'object' || Array.isArray(row)) return row;
+    const output = {};
+    for (const [key, value] of Object.entries(row)) {
+      if (key === 'source_row_number') continue;
+      Object.defineProperty(output, key, {
+        value,
+        enumerable: true,
+        configurable: true,
+        writable: true
+      });
+    }
+    Object.defineProperty(output, 'source_row_number', {
+      value: index + 2,
+      enumerable: true,
+      configurable: true,
+      writable: true
+    });
+    return output;
+  });
+}
+
 function sandboxWarning(data) {
   if (Array.isArray(data.warnings) && data.warnings.length) {
     return data.warnings.join(' | ');
@@ -760,9 +830,11 @@ function legacyUploadError(res, error) {
     : Number.isSafeInteger(error && error.status)
       ? error.status
       : 500;
-  return res.status(status).json({
+  const body = {
     error: error && error.message ? error.message : 'Upload request failed.'
-  });
+  };
+  if (error && typeof error.code === 'string' && error.code.length > 0) body.code = error.code;
+  return res.status(status).json(body);
 }
 
 function phase4UploadHookError(error) {
@@ -1437,6 +1509,7 @@ require('./routes')(app, db, authMiddleware, { campaignCollaborationService });
 require('./routes_feishu')(app, { db, authMiddleware, adminOnly });
 require('./routes_customers')(app, db, authMiddleware);
 registerCampaignRoutes(app, db);
+registerPerformanceRoutes(app, { authMiddleware, service: performanceManualService });
 require('./routes_brands')(app, db, authMiddleware, aiLimiter, aiQuotaGuard);
 
 // ===== WORKFLOW ENGINE ROUTES =====
@@ -1627,6 +1700,56 @@ app.post('/api/influencers/upload', authMiddleware, async (req, res) => {
           return Object.assign({
             parser: data.parser,
             warning: sandboxWarning(data)
+          }, imported);
+        }).immediate();
+      }
+    });
+    return res.json(result);
+  } catch (error) {
+    return legacyUploadError(res, error);
+  } finally {
+    requestSignal.dispose();
+  }
+});
+
+app.post('/api/performance/upload', authMiddleware, async (req, res) => {
+  const requestSignal = requestUploadSignal(req);
+  try {
+    const campaignId = performanceUploadCampaignId(req.body && req.body.campaign_id);
+    const authority = createUploadAuthority(req, campaignId);
+    const admission = req.phase4Request.admission;
+    const result = await uploadSandboxService.processUpload({
+      multipart: req.phase4Request.multipart.sandboxMultipart,
+      admission,
+      signal: requestSignal.signal,
+      assertLeaseOwned: () => renewUploadAdmissionLease(admission),
+      assertAuthorized: () => assertUploadAuthorityFresh(authority),
+      finalize(parsed, lifecycle) {
+        return db.transaction(() => {
+          const current = authority.readFresh(db);
+          const data = parsed && parsed.data ? parsed.data : {};
+          const imported = performanceManualService.importContentRows({
+            userId: current.user.id,
+            campaignId,
+            body: {
+              mapping_version: String(req.body.mapping_version || '').trim(),
+              provenance: {
+                source_mode: 'csv_xlsx',
+                file_hash: req.file.sha256
+              },
+              column_mapping: performanceUploadColumnMapping(req.body.column_mapping),
+              rows: performanceUploadRows(data)
+            }
+          });
+          lifecycle.completeAdmissionInTransaction(db);
+          return Object.assign({
+            parser: data.parser,
+            warning: sandboxWarning(data),
+            file: {
+              original_name: req.file.originalname,
+              sha256: req.file.sha256,
+              row_count: Array.isArray(data.rows) ? data.rows.length : 0
+            }
           }, imported);
         }).immediate();
       }
