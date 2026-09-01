@@ -1,5 +1,20 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.7.0-ai-knowledge-loop-task4e (Production Accepted, 2026-09-01) - 业务产物知识归档与发布守卫收敛
+
+### 生产交付 / Production Delivery
+- Phase 6 Task 4E 的 `tm-business-artifact-v1` 已随受控生产发布接受：需求表、网红导入批次、确认方案、PPT 成品、项目复盘、AI 自动摘要与人工精选可按统一业务产物合同沉淀、去重、关联并保留可复用血缘。最新 v0.6 产品界面与冻结 PPT 客户端字节未替换。
+- 发布守卫改为在公网流量恢复后复用精确 Nginx 验证器。该验证器只对 Nginx 优雅重载期间的瞬时 `503` / 连接收敛状态做有界重试，随后仍逐项验证公网路由、拒绝边界、JavaScript MIME 和健康接口；任何非瞬时错误继续失败关闭。
+- 首次热修候选在生产变更前被容量门禁阻止：可用空间 `6,814,842,880` bytes 低于候选依赖验证所需 `7,086,696,039` bytes。经进程、服务和配置引用复核后，仅删除两份未引用的历史解析器构建暂存目录（各 `327,147,156` bytes），未触碰业务数据、当前运行时或版本备份；重试容量门禁以 `7,400,501,248 / 7,086,696,039` bytes 通过。
+
+### 验证、审查与上线 / Verification, Review, And Release
+- 红绿测试覆盖发布守卫收敛契约；`release_v060_contract` 为 `35/35`，运行时与发布聚焦矩阵为 `93` 通过、`0` 失败、`3` 个仅 Linux 环境跳过，前端公共资产热修用例 `5/5` 通过，`-ValidateLocalOnly` 通过。独立审查先发现移除旧辅助函数后残留的前端测试契约，修正后最终结论 `APPROVE`。
+- 生产受控发布完成候选隔离迁移、真实 Express 重放、安全边界、依赖构建、Parser 自检、数据库迁移、Nginx 静态边界及部署浏览器冒烟（`2/2`）验证；已创建可恢复备份 `/root/turingmarket/backups/v060-crm-sales-workspace-20260901-131109`。
+- 公网验收通过：`/api/health` 返回 `ok` 且解析器清单为 `7d1c5bd2bb3b33d954513d107950c55e6d1468f2b1ecef9ae56d2349c861927d`；`/app.js` 返回 `200` 和 `text/javascript`；Nginx active、PM2 进程在线、发布锁与临时公网守卫均已清理。完整的人工交互浏览器验收仍作为后续阶段收口，不被本次部署冒烟替代。
+- 功能级发布节奏自本版本起固定：普通功能完成后执行受影响测试、必要语法检查、独立审查、备份、上线和线上核心路径冒烟；仅数据库迁移、安全/systemd、广泛跨模块改动或阶段收口执行完整回归。
+
+---
+
 ## v0.7.0-ai-knowledge-loop-task4e (Release Candidate, 2026-08-28) - 业务产物统一知识归档
 
 ### 统一业务产物合同 / Unified Business Artifact Contract
