@@ -9128,13 +9128,7 @@ DependencyCopyByteBase="$DependencyCopyAllocatedBytes"
 if [ "$DependencyCopyByteBase" -lt "$DependencyCopyBytes" ]; then
   DependencyCopyByteBase="$DependencyCopyBytes"
 fi
-if [ "$DependencyCopyByteBase" -lt "$TestRootMaxBytes" ]; then
-  DependencyCopyByteBase="$TestRootMaxBytes"
-fi
 DependencyCopyInodeBase="$DependencyCopyInodes"
-if [ "$DependencyCopyInodeBase" -lt "$TestRootMaxInodes" ]; then
-  DependencyCopyInodeBase="$TestRootMaxInodes"
-fi
 DependencyCopyByteMargin=$(( (DependencyCopyByteBase + 9) / 10 ))
 DependencyCopyInodeMargin=$(( (DependencyCopyInodeBase + 9) / 10 ))
 if [ "$DependencyCopyByteMargin" -lt "$DependencyCopyByteReserveFloor" ]; then

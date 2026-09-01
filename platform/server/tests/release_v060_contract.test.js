@@ -1425,3 +1425,42 @@ test('install, cutover, recovery, and finalization require a fresh trusted parse
     assert.match(source, /--build-evidence/);
   }
 });
+
+test('candidate dependency capacity reserves for the copy rather than an independent tmpfs ceiling', () => {
+  const deploy = read('platform', 'deploy_v8.ps1');
+  const capacityGate = sourceBetween(
+    deploy,
+    'DependencyCopyByteBase="$DependencyCopyAllocatedBytes"',
+    'test ! -e "$CandidateDir/node_modules"',
+    'candidate dependency capacity gate'
+  )
+    .replace(
+      /TargetAvailableBytes="\$\(df -B1 --output=avail "\$CandidateDir" \| tail -n 1 \| tr -d ' '\)"/,
+      'TargetAvailableBytes=7085973504'
+    )
+    .replace(
+      /TargetAvailableInodes="\$\(df --output=iavail "\$CandidateDir" \| tail -n 1 \| tr -d ' '\)"/,
+      'TargetAvailableInodes=100000'
+    );
+  const shell = process.platform === 'win32' ? 'bash.exe' : 'bash';
+  const result = spawnSync(shell, ['-s'], {
+    input: [
+      'set -euo pipefail',
+      'DependencyCopyAllocatedBytes=83169280',
+      'DependencyCopyBytes=75539168',
+      'DependencyCopyInodes=2585',
+      'TestRootMaxBytes=6442450944',
+      'TestRootMaxInodes=262144',
+      'DependencyCopyByteReserveFloor=536870912',
+      'DependencyCopyInodeReserveFloor=16384',
+      capacityGate
+    ].join('\n'),
+    encoding: 'utf8'
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(
+    result.stdout,
+    /CANDIDATE_DEPENDENCY_CAPACITY_OK=bytes:7085973504\/620040192,inodes:100000\/18969/
+  );
+});
