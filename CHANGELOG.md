@@ -1,5 +1,26 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.7.4a-feishu-bitable-outbox (Production Deployed, 2026-09-02) - 飞书多维表格活动范围投递回执
+
+### 交付与范围 / Delivery And Scope
+- M4 已选网红的 Bitable 批量投递现在使用活动范围的持久化 Outbox：服务端保存精确批次快照、请求 UUID、执行者、活动、状态、远端记录回执和安全错误码。重放相同 UUID 不会再次向飞书发送请求，并只返回安全的计数与状态。
+- 飞书或本地终态写入结果不完整时，投递保持 `pending`，不会自动重发或误报失败。活动 Owner 或组织管理员可使用受保护的手工对账接口，以已核实且唯一的远端记录 ID 完成回执；普通协作者无权对账。
+- 终态回执在数据库层不可更新、删除或被 `INSERT OR REPLACE` 覆盖，即使 SQLite 关闭递归触发器也会拒绝替换。远端记录 ID 在服务层和数据库层均要求唯一，避免一个远端记录被误记为多条成功。
+- 既有 CSV 兜底、Webhook 与最新 M4 界面保持兼容。M4 对待核对状态明确提示管理员核验，不宣称存在自动重试。v0.7.4a 不宣称“恰好一次”或盲目自动重发；自动化更新/重试与操作台继续作为后续独立切片。
+
+### 定向验证、审查与上线 / Focused Verification, Review, And Release
+- 受影响 Feishu/Outbox/导入流程 `31/31`、迁移和脱敏闭环 `3/3`、可信来源 `32/32`、部署/迁移/发布合同 `108/108`、真实 Express 重放 `8/8` 均通过；JavaScript 语法、`git diff --check`、敏感字面量扫描和 `deploy_v8.ps1 -ValidateLocalOnly` 通过。
+- 独立复审先发现模糊响应对账、终态回执可变、重复远端 ID，以及 SQLite `INSERT OR REPLACE`/数据库唯一性边界问题；均以失败用例驱动修复并复审为 `APPROVE`。候选发布还安全拦截了一个遗留 v7 重放夹具断言，修复后由独立复审再次 `APPROVE`。
+- 实现提交：`feedfba`；发布夹具修复：`5d4c683`。首个候选在任何生产写入前安全中止；最终受控备份为 `/root/turingmarket/backups/v060-crm-sales-workspace-20260902-021014`，顶层 `SHA256SUMS` 已校验，清单 SHA-256 为 `41473cddec70ea67e0fa96d3a7fc9daa931ac63e9c560b1f695b19fa15bd4395`。
+- 最终切换通过受控迁移、隔离 Express 重放、发布网关、浏览器烟测、Nginx 与公共发布守卫。公网和回环 `/api/health` 均返回 `ok`，`/m4` 返回 `200`，PM2/Nginx online；数据库 `quick_check=ok`、外键异常 `0`、schema 版本 `8` 且 `feishu_bitable_outbox` 已存在。
+- 本轮线上验收没有向真实飞书 Bitable 写入任何业务记录，因此不把外部投递成功作为已验证事实。
+
+### 后续边界 / Next Boundaries
+- v0.7.4b：为 Owner/组织管理员补齐可视化对账工作台，并在明确的活动和远端回执合同下设计更新、重试或补偿，不引入静默重发。
+- 后续普通功能继续执行“受影响测试 + 一次独立审查 + 备份 + 立即上线 + 线上核心路径冒烟”；迁移、权限、共享运行时和外部写入保留高风险门禁。
+
+---
+
 ## v0.7.3-feishu-bitable-batch-delivery (Production Deployed, 2026-09-01) - 飞书多维表格受控批量写入
 
 ### 交付与范围 / Delivery And Scope
