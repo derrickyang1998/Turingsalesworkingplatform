@@ -12261,6 +12261,12 @@ DB_PATH="$DatabasePath" node <<'NODE'
 
 const idempotency = require('./services/idempotency_service');
 const uploadSandbox = require('./services/upload_sandbox_service');
+const parserStartup = require('./services/parser_startup_service');
+const readProductionSystemdProperties = parserStartup.createProductionSystemdPropertyReader({
+  runCommand: uploadSandbox.runCommandNoDisclosure,
+  normalizeSystemdEffectiveProperties: uploadSandbox.normalizeSystemdEffectiveProperties,
+  systemdInspectionUnitName: uploadSandbox.systemdInspectionUnitName
+});
 
 (async () => {
   const verified = await uploadSandbox.verifyCheckedInArtifacts({
@@ -12272,7 +12278,7 @@ const uploadSandbox = require('./services/upload_sandbox_service');
   process.stdout.write('APPLICATION_PARSER_RUNTIME_OK\n');
 
   for (const [unitName, expected] of Object.entries(verified.manifest.effective_properties)) {
-    const observed = await uploadSandbox.readSystemdProperties(unitName, expected);
+    const observed = await readProductionSystemdProperties(unitName, expected);
     const expectedJson = JSON.stringify(Object.fromEntries(
       Object.keys(expected).sort().map((key) => [key, expected[key]])
     ));

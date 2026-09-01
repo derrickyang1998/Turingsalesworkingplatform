@@ -175,6 +175,21 @@ test('current release locks the v0.7 branch while retaining the v0.6 shell and f
   assert.doesNotMatch(deploy, /report\.get\('sourceVersion'\) not in \(1, 6\) or/);
 });
 
+test('cutover parser readiness reuses production systemd normalization', () => {
+  const deploy = read('platform', 'deploy_v8.ps1');
+  const readiness = sourceBetween(
+    deploy,
+    "const idempotency = require('./services/idempotency_service');",
+    '# INVALIDATE_SESSIONS',
+    'cutover parser readiness preflight'
+  );
+
+  assert.match(readiness, /require\('\.\/services\/parser_startup_service'\)/);
+  assert.match(readiness, /createProductionSystemdPropertyReader/);
+  assert.match(readiness, /await readProductionSystemdProperties\(unitName, expected\)/);
+  assert.doesNotMatch(readiness, /await uploadSandbox\.readSystemdProperties\(unitName, expected\)/);
+});
+
 test('v0.6 deploy inventory ships migration 006, CRM runtime, and every Phase 5 regression', () => {
   const files = powerShellArrayEntries(read('platform', 'deploy_v8.ps1'), 'FILES');
   for (const required of [
