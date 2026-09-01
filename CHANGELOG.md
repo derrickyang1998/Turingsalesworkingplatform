@@ -1,5 +1,24 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.7.4c-feishu-bitable-retry-lineage (Production Deployed, 2026-09-02) - M4 飞书失败批次显式重试
+
+### 交付与范围 / Delivery And Scope
+- M4 最新“导入 & 飞书”面板现在仅为所选活动中、明确可安全重试的失败 Bitable 批次显示“失败批次重试”。活动 Owner 或组织管理员必须填写 1-280 字的重试原因；普通协作者不可发起操作。
+- 重试不会修改历史失败回执，也不会自动补发。服务端以原始不可变快照创建一个新的子投递回执，并将原失败回执、重试人、原因与新回执以只追加血缘记录关联。模糊结果保持 `pending` 并进入人工核对；再次失败会刷新失败回执，不会继续展示旧批次为可重试。
+- 同一活动、批次和 UUID 只有在重试原因完全一致时才返回同一重放结果；相同 UUID 携带不同原因会被拒绝。客户端按活动和批次保持单飞，跨活动切换不会产生第二次外部写入。
+- schema v9 新增重试血缘表及不可变约束。迁移/可信来源/部署合同现在接受已受管的 v9 数据库，以保证后续发布和恢复不会拒绝当前生产结构。
+
+### 定向验证、审查与上线 / Focused Verification, Review, And Release
+- 受影响 M4/Feishu/Outbox/发布合同矩阵 `55/55`、迁移验证 `15/15`、可信来源 `32/32`、真实回放验证 `8/8` 和发布门禁 `21/21` 通过；部署浏览器烟测 `2/2` 通过。JavaScript 语法、`git diff --check` 与 `deploy_v8.ps1 -ValidateLocalOnly` 通过。
+- 独立审查首轮发现 v9 no-op 验证、非成功重试回执刷新和“原因未绑定幂等键”三个阻断项；均以定向回归修复，复审结论为 `CLEAR`。候选发布还在任何生产写入前安全拦截了旧 v1-v8 回放夹具；修正为 v1-v9 后，第二次独立复审为 `CLEAR`。
+- 实现提交：`d2b1f17`；部署回放夹具修复：`e949e18`。可恢复备份：`/root/turingmarket/backups/v060-crm-sales-workspace-20260902-045118`，备份目录 `SHA256SUMS` 已验证，清单 SHA-256 为 `d6f25d8724419a7f5d66ba286f2231cdfa7cdb685c97a944b670b0e81e3a5b8e`。
+- 线上公网与回环 `/api/health` 均为 `ok`、Parser ready，`/m4` 为 `200`，PM2/Nginx online。只读 SQLite 检查为 `quick_check=ok`、外键异常 `0`、schema `v9`。本轮不向真实飞书 Bitable 写入、更新或补发业务记录。
+
+### 后续边界 / Next Boundaries
+- 显式失败重试已闭环；真实 Bitable 外部投递验收仍须使用经批准的测试活动。下一项进入已批准的 Phase 7B 内容监控、效果看板、飞书同步和 AI 复盘工作流。
+
+---
+
 ## v0.7.4b-feishu-reconciliation-console (Production Deployed, 2026-09-02) - M4 飞书回执核对操作台
 
 ### 交付与范围 / Delivery And Scope
