@@ -229,6 +229,39 @@ function createFeishuClient(options) {
     });
   }
 
+  function assertPreparedBitableRecords(records, config, expectedCount) {
+    const expectedFields = bitableFieldsFor(config).slice().sort();
+    if (!Array.isArray(records) || records.length !== expectedCount) {
+      throw new FeishuClientError('FEISHU_OUTBOX_SNAPSHOT_INVALID', 'Feishu Bitable delivery snapshot is invalid.', 422);
+    }
+    for (const record of records) {
+      if (!record || typeof record !== 'object' || Array.isArray(record) ||
+          !record.fields || typeof record.fields !== 'object' || Array.isArray(record.fields)) {
+        throw new FeishuClientError('FEISHU_OUTBOX_SNAPSHOT_INVALID', 'Feishu Bitable delivery snapshot is invalid.', 422);
+      }
+      const fieldNames = Object.keys(record.fields).sort();
+      if (JSON.stringify(fieldNames) !== JSON.stringify(expectedFields)) {
+        throw new FeishuClientError('FEISHU_OUTBOX_SNAPSHOT_INVALID', 'Feishu Bitable delivery snapshot is invalid.', 422);
+      }
+    }
+    return records;
+  }
+
+  function prepareBitableOutboxPayload(values) {
+    values = values || {};
+    const records = Array.isArray(values.records) ? values.records : [];
+    const config = configuration();
+    if (!config.configured || config.mode !== 'bitable' || !config.bitable.writeEnabled) {
+      throw new FeishuClientError(
+        'FEISHU_BITABLE_WRITE_NOT_AVAILABLE',
+        'Feishu Bitable delivery is not available.',
+        409
+      );
+    }
+    assertBitableWriteRequest(records, values.operationId);
+    return { records: projectBitableRecords(records, config) };
+  }
+
   async function listBitableFields(config, tenantToken) {
     const response = await request(
       FEISHU_API_ORIGIN + '/bitable/v1/apps/' + encodeURIComponent(config.bitable.appToken) +
@@ -246,7 +279,7 @@ function createFeishuClient(options) {
     return new Set(items.map(function(item) { return item && item.field_name; }).filter(Boolean));
   }
 
-  async function syncBitable(config, records, operationId) {
+  async function syncBitable(config, records, operationId, preparedRecords) {
     assertBitableWriteRequest(records, operationId);
     const tenantToken = await requestTenantToken(config);
     const expectedFields = BITABLE_TEMPLATE_FIELDS;
@@ -254,6 +287,9 @@ function createFeishuClient(options) {
     if (expectedFields.some(function(fieldName) { return !availableFields.has(fieldName); })) {
       throw new FeishuClientError('FEISHU_BITABLE_SCHEMA_MISMATCH', 'Feishu Bitable schema does not match the approved import template.', 409);
     }
+    const bitableRecords = preparedRecords === undefined
+      ? projectBitableRecords(records, config)
+      : assertPreparedBitableRecords(preparedRecords, config, records.length);
 
     const response = await request(
       FEISHU_API_ORIGIN + '/bitable/v1/apps/' + encodeURIComponent(config.bitable.appToken) +
@@ -266,7 +302,7 @@ function createFeishuClient(options) {
         },
         body: JSON.stringify({
           client_token: String(operationId).trim(),
-          records: projectBitableRecords(records, config)
+          records: bitableRecords
         })
       }
     );
@@ -277,10 +313,16 @@ function createFeishuClient(options) {
     }
     if (!Array.isArray(createdRecords) || createdRecords.length !== records.length || createdRecords.some(function(record) {
       return !record || typeof record.record_id !== 'string' || !record.record_id;
-    })) {
+    }) || new Set(createdRecords.map(function(record) { return record.record_id; })).size !== records.length) {
       throw new FeishuClientError('FEISHU_WRITE_RESULT_INCOMPLETE', 'Feishu did not confirm every record in the batch.', 502);
     }
-    return { configured: true, mode: 'bitable', synced: records.length, records: records.length };
+    return {
+      configured: true,
+      mode: 'bitable',
+      synced: records.length,
+      records: records.length,
+      remoteRecordIds: createdRecords.map(function(record) { return record.record_id; })
+    };
   }
 
   async function syncInfluencers(values) {
@@ -299,7 +341,14 @@ function createFeishuClient(options) {
     }
     if (config.mode === 'bitable') {
       if (config.bitable.writeEnabled) {
-        return syncBitable(config, records, values.operationId);
+        const result = await syncBitable(config, records, values.operationId, values.bitableRecords);
+        if (values.includeReceipt) return result;
+        return {
+          configured: result.configured,
+          mode: result.mode,
+          synced: result.synced,
+          records: result.records
+        };
       }
       return {
         configured: false,
@@ -349,6 +398,7 @@ function createFeishuClient(options) {
 
   return {
     getStatus: function() { return publicStatus(configuration()); },
+    prepareBitableOutboxPayload,
     syncInfluencers,
     testConnection
   };

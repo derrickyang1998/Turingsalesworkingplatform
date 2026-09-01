@@ -6,6 +6,10 @@
 
 const { createFeishuClient, FeishuClientError } = require('./feishu_client');
 const {
+  FeishuBitableOutboxError,
+  createFeishuBitableOutboxService
+} = require('./services/feishu_bitable_outbox_service');
+const {
   CollaborationResourceContractError,
   isV1CollaborationResourceInput,
   normalizeCollaborationResource,
@@ -19,6 +23,47 @@ const businessKnowledge = require('./services/business_knowledge_service');
 const influencerWorkflow = require('./services/influencer_workflow_service');
 const campaignCollaboration = options.campaignCollaborationService;
 const feishuClient = options.feishuClient || createFeishuClient();
+const feishuBitableOutbox = options.feishuBitableOutboxService || createFeishuBitableOutboxService(db);
+
+function feishuCampaignId(value) {
+  if (Number.isSafeInteger(value) && value > 0) return value;
+  if (typeof value === 'string' && /^[1-9][0-9]{0,15}$/.test(value)) {
+    const parsed = Number(value);
+    if (Number.isSafeInteger(parsed) && String(parsed) === value) return parsed;
+  }
+  return null;
+}
+
+function writeFeishuSyncAudit(req, action, details) {
+  try {
+    db.prepare('INSERT INTO activity_log (user_id, action, module, details, ip_address) VALUES (?, ?, ?, ?, ?)')
+      .run(req.user.id, action, 'influencer', JSON.stringify(details || {}), req.ip);
+  } catch (auditError) {}
+}
+
+function feishuFailure(error) {
+  if (error instanceof FeishuBitableOutboxError) {
+    return { statusCode: error.statusCode || 500, code: error.code, message: error.message };
+  }
+  if (error instanceof FeishuClientError) {
+    return { statusCode: error.statusCode || 502, code: error.code, message: error.message };
+  }
+  return { statusCode: 502, code: 'FEISHU_SYNC_FAILED', message: 'Feishu sync failed.' };
+}
+
+function bitableOutboxEnabled(status, campaignId) {
+  return campaignId !== null && Boolean(status && status.configured && status.mode === 'bitable' && status.sync_available);
+}
+
+function requiresFeishuReconciliation(failure) {
+  return [
+    'FEISHU_PROVIDER_UNAVAILABLE',
+    'FEISHU_WRITE_RESULT_INCOMPLETE',
+    'FEISHU_SYNC_FAILED',
+    'FEISHU_OUTBOX_FINALIZATION_FAILED',
+    'FEISHU_OUTBOX_RECEIPT_INVALID'
+  ].includes(failure.code);
+}
 
 // ===== INFLUENCER ROUTES =====
 app.get('/api/influencers', authMiddleware, (req, res) => {
@@ -234,6 +279,121 @@ app.post('/api/influencers/feishu/sync', authMiddleware, async (req, res) => {
     const operationId = req.get
       ? req.get('Idempotency-Key')
       : req.headers && req.headers['idempotency-key'];
+    const campaignRequested = Boolean(req.body && Object.hasOwn(req.body, 'campaign_id'));
+    const campaignId = campaignRequested ? feishuCampaignId(req.body.campaign_id) : null;
+    if (campaignRequested && campaignId === null) {
+      return res.status(400).json({
+        error: 'A valid campaign_id is required for campaign-scoped Feishu delivery.',
+        code: 'FEISHU_OUTBOX_REQUEST_INVALID'
+      });
+    }
+    const feishuStatus = campaignId === null ? null : feishuClient.getStatus();
+    if (bitableOutboxEnabled(feishuStatus, campaignId)) {
+      if (typeof feishuClient.prepareBitableOutboxPayload !== 'function') {
+        throw new FeishuClientError('FEISHU_OUTBOX_NOT_SUPPORTED', 'Feishu Bitable delivery is not available.', 502);
+      }
+      const snapshot = feishuClient.prepareBitableOutboxPayload({ records, operationId });
+      const reservation = feishuBitableOutbox.reserve({
+        userId: req.user.id,
+        campaignId,
+        operationId,
+        records: snapshot.records
+      });
+      if (reservation.state === 'replay') {
+        return res.json({
+          configured: true,
+          synced: reservation.delivery.record_count,
+          records: reservation.delivery.record_count,
+          delivery: reservation.delivery
+        });
+      }
+      if (reservation.state === 'failed') {
+        return res.status(409).json({
+          error: 'This Feishu delivery previously failed. Use the explicit retry workflow.',
+          code: 'FEISHU_OUTBOX_RETRY_REQUIRED',
+          delivery: reservation.delivery
+        });
+      }
+      if (reservation.state === 'processing') {
+        return res.status(409).json({
+          error: 'This Feishu delivery requires reconciliation before another write is attempted.',
+          code: 'FEISHU_OUTBOX_RECONCILIATION_REQUIRED',
+          delivery: reservation.delivery
+        });
+      }
+      let result;
+      try {
+        result = await feishuClient.syncInfluencers({
+          records,
+          csv,
+          operationId,
+          bitableRecords: snapshot.records,
+          includeReceipt: true
+        });
+      } catch (providerError) {
+        const providerFailure = feishuFailure(providerError);
+        if (requiresFeishuReconciliation(providerFailure)) {
+          writeFeishuSyncAudit(req, 'feishu_sync_reconciliation_required', {
+            campaign_id: campaignId,
+            delivery_id: reservation.delivery.id,
+            code: providerFailure.code
+          });
+          return res.status(202).json({
+            error: 'Feishu delivery result requires reconciliation before another write is attempted.',
+            code: 'FEISHU_OUTBOX_RECONCILIATION_REQUIRED',
+            delivery: reservation.delivery
+          });
+        }
+        feishuBitableOutbox.fail({
+          deliveryId: reservation.delivery.id,
+          reservationToken: reservation.reservationToken,
+          errorCode: providerFailure.code
+        });
+        throw providerError;
+      }
+      if (!result.configured) {
+        const delivery = feishuBitableOutbox.fail({
+          deliveryId: reservation.delivery.id,
+          reservationToken: reservation.reservationToken,
+          errorCode: 'FEISHU_BITABLE_WRITE_NOT_AVAILABLE'
+        });
+        return res.json({
+          configured: false,
+          records: result.records,
+          csv: result.csv,
+          message: result.message || 'Feishu Bitable write is no longer available. CSV fallback is ready for manual upload.',
+          delivery
+        });
+      }
+      let delivery;
+      try {
+        delivery = feishuBitableOutbox.complete({
+          deliveryId: reservation.delivery.id,
+          reservationToken: reservation.reservationToken,
+          remoteRecordIds: result.remoteRecordIds
+        });
+      } catch (finalizationError) {
+        const finalizationFailure = feishuFailure(finalizationError);
+        writeFeishuSyncAudit(req, 'feishu_sync_reconciliation_required', {
+          campaign_id: campaignId,
+          delivery_id: reservation.delivery.id,
+          code: finalizationFailure.code
+        });
+        return res.status(202).json({
+          error: 'Feishu delivery result requires reconciliation before another write is attempted.',
+          code: 'FEISHU_OUTBOX_RECONCILIATION_REQUIRED',
+          delivery: reservation.delivery
+        });
+      }
+      writeFeishuSyncAudit(req, 'feishu_sync', {
+        mode: result.mode,
+        synced: result.synced,
+        campaign_id: campaignId,
+        delivery_id: delivery.id,
+        delivery_status: delivery.status
+      });
+      return res.json({ configured: true, synced: result.synced, records: result.records, delivery });
+    }
     const result = await feishuClient.syncInfluencers({ records, csv, operationId });
     if (!result.configured) {
       return res.json({
@@ -245,20 +405,48 @@ app.post('/api/influencers/feishu/sync', authMiddleware, async (req, res) => {
           : 'FEISHU_WEBHOOK_URL is not configured. CSV fallback is ready for manual upload.'
       });
     }
-    try {
-      db.prepare('INSERT INTO activity_log (user_id, action, module, details, ip_address) VALUES (?, ?, ?, ?, ?)')
-        .run(req.user.id, 'feishu_sync', 'influencer', 'Synced ' + result.synced + ' influencers to Feishu ' + result.mode, req.ip);
-    } catch (auditError) {}
+    writeFeishuSyncAudit(req, 'feishu_sync', { mode: result.mode, synced: result.synced });
     res.json({ configured: true, synced: result.synced, records: result.records });
   } catch (e) {
-    const statusCode = e instanceof FeishuClientError ? e.statusCode : 502;
-    const code = e instanceof FeishuClientError ? e.code : 'FEISHU_SYNC_FAILED';
-    const message = e instanceof FeishuClientError ? e.message : 'Feishu sync failed.';
-    try {
-      db.prepare('INSERT INTO activity_log (user_id, action, module, details, ip_address) VALUES (?, ?, ?, ?, ?)')
-        .run(req.user.id, 'feishu_sync_failed', 'influencer', JSON.stringify({ code }), req.ip);
-    } catch (auditError) {}
-    res.status(statusCode).json({ error: message, code });
+    const failure = feishuFailure(e);
+    writeFeishuSyncAudit(req, 'feishu_sync_failed', { code: failure.code });
+    res.status(failure.statusCode).json({ error: failure.message, code: failure.code });
+  }
+});
+
+app.get('/api/campaigns/:id/feishu-deliveries', authMiddleware, (req, res) => {
+  try {
+    const deliveries = feishuBitableOutbox.list({
+      userId: req.user.id,
+      campaignId: req.params.id,
+      limit: req.query && req.query.limit
+    });
+    res.json({ deliveries });
+  } catch (error) {
+    const failure = feishuFailure(error);
+    res.status(failure.statusCode).json({ error: failure.message, code: failure.code });
+  }
+});
+
+app.post('/api/campaigns/:id/feishu-deliveries/:deliveryId/reconcile', authMiddleware, (req, res) => {
+  try {
+    const delivery = feishuBitableOutbox.reconcile({
+      userId: req.user.id,
+      campaignId: req.params.id,
+      deliveryId: req.params.deliveryId,
+      remoteRecordIds: req.body && req.body.remote_record_ids
+    });
+    writeFeishuSyncAudit(req, 'feishu_sync_reconciled', {
+      campaign_id: delivery.campaign_id,
+      delivery_id: delivery.id,
+      delivery_status: delivery.status,
+      synced: delivery.record_count
+    });
+    res.json({ delivery });
+  } catch (error) {
+    const failure = feishuFailure(error);
+    writeFeishuSyncAudit(req, 'feishu_sync_reconcile_failed', { code: failure.code });
+    res.status(failure.statusCode).json({ error: failure.message, code: failure.code });
   }
 });
 

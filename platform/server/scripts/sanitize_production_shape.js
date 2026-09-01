@@ -61,6 +61,13 @@ const EXACT_PROFILE_MIGRATIONS = Object.freeze([
     sourcePath: 'migrations/007_knowledge_governance.js',
     engineVersion: 1,
     dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
+  }),
+  Object.freeze({
+    version: 8,
+    name: '008_feishu_bitable_outbox',
+    sourcePath: 'migrations/008_feishu_bitable_outbox.js',
+    engineVersion: 1,
+    dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
   })
 ]);
 const FTS_MANIFEST = Object.freeze({
@@ -223,6 +230,9 @@ function freezeStructuralColumnPolicy(definition) {
   for (const context of definition.canonicalPositiveDecimal) {
     add(context, { storage: 'text', kind: 'canonical-positive-decimal' });
   }
+  for (const context of definition.upperCode || []) {
+    add(context, { storage: 'text', kind: 'upper-code' });
+  }
   for (const [context, allowedValues] of Object.entries(definition.enums)) {
     add(context, { storage: 'text', kind: 'enum', allowedValues });
   }
@@ -289,7 +299,9 @@ const STRUCTURAL_COLUMN_POLICY = freezeStructuralColumnPolicy({
     'customer_activity.id', 'customer_activity.customer_id', 'customer_activity.user_id', 'customer_contacts.id',
     'customer_contacts.org_id', 'customer_contacts.customer_id', 'customer_contacts.is_preferred', 'customer_contacts.created_by',
     'customers.id', 'customers.created_by', 'customers.assigned_to', 'customers.org_id', 'customers.team_id',
-    'customers.is_public', 'demands.id', 'demands.user_id', 'influencers.id',
+    'customers.is_public', 'demands.id', 'demands.user_id',
+    'feishu_bitable_outbox.id', 'feishu_bitable_outbox.org_id', 'feishu_bitable_outbox.campaign_id',
+    'feishu_bitable_outbox.actor_user_id', 'feishu_bitable_outbox.record_count', 'influencers.id',
     'influencers.is_active', 'influencers.is_duplicate', 'knowledge_capacity_gauges.scope_id', 'knowledge_chunks.id',
     'knowledge_chunks.entry_id', 'knowledge_chunks.chunk_index', 'knowledge_current_custody.knowledge_entry_id', 'knowledge_current_custody.link_id',
     'knowledge_current_custody.org_id', 'knowledge_current_custody.campaign_id', 'knowledge_entries.id', 'knowledge_entries.created_by',
@@ -325,7 +337,9 @@ const STRUCTURAL_COLUMN_POLICY = freezeStructuralColumnPolicy({
     'customer_contacts.created_at', 'customer_contacts.updated_at', 'customer_contacts.archived_at', 'customers.created_at',
     'customers.updated_at', 'customers.assigned_at', 'customers.last_followup', 'customers.claim_deadline',
     'customers.next_action_at', 'customers.stalled_at',
-    'demands.created_at', 'demands.updated_at', 'influencers.created_at', 'influencers.updated_at',
+    'demands.created_at', 'demands.updated_at', 'feishu_bitable_outbox.created_at',
+    'feishu_bitable_outbox.updated_at', 'feishu_bitable_outbox.completed_at',
+    'feishu_bitable_outbox.failed_at', 'influencers.created_at', 'influencers.updated_at',
     'knowledge_capacity_gauges.updated_at', 'knowledge_chunks.created_at', 'knowledge_current_custody.updated_at', 'knowledge_entries.created_at',
     'knowledge_entries.updated_at', 'knowledge_entry_footprints.updated_at', 'knowledge_unlinked_user_usage.updated_at',
     'knowledge_entry_governance.retain_until', 'knowledge_entry_governance.reviewed_at',
@@ -349,6 +363,9 @@ const STRUCTURAL_COLUMN_POLICY = freezeStructuralColumnPolicy({
   ]),
   canonicalPositiveDecimal: Object.freeze([
     'campaign_record_links.record_id'
+  ]),
+  upperCode: Object.freeze([
+    'feishu_bitable_outbox.last_error_code'
   ]),
   enums: Object.freeze({
     'ai_conversations.visibility': Object.freeze(['private', 'team', 'public', 'shared']),
@@ -396,6 +413,7 @@ const STRUCTURAL_COLUMN_POLICY = freezeStructuralColumnPolicy({
     'customer_activity.stage_to': CUSTOMER_STAGES,
     'customers.stage': CUSTOMER_STAGES,
     'demands.status': Object.freeze(['draft', 'confirmed', 'completed', 'archived']),
+    'feishu_bitable_outbox.status': Object.freeze(['pending', 'succeeded', 'failed']),
     'knowledge_capacity_gauges.scope_type': Object.freeze(['user', 'campaign', 'organization']),
     'knowledge_capacity_gauges.metric': Object.freeze(['entries', 'chunks', 'payload_bytes', 'references']),
     'knowledge_current_custody.custody_state': Object.freeze(['active', 'revoke_only']),
@@ -433,7 +451,8 @@ const STRUCTURAL_COLUMN_POLICY = freezeStructuralColumnPolicy({
       '004_knowledge_capacity_observability',
       '005_knowledge_custody_projection',
       '006_crm_sales_workspace',
-      '007_knowledge_governance'
+      '007_knowledge_governance',
+      '008_feishu_bitable_outbox'
     ]),
     'schema_migrations.checksum': Object.freeze([
       'c2df6a8da2554f871dc07370f5409f58d2bc1874597928c3bbd273ecb6cb0741',
@@ -442,7 +461,8 @@ const STRUCTURAL_COLUMN_POLICY = freezeStructuralColumnPolicy({
       '8beda613d3a8b8ea2604bd4a1b5ae72df2db56ec813987c05de9de18fc0b6e92',
       '2c8978c77a56cd068d9fc7b7eaa1ae986402900f5d5e9d2d883288c3421342b2',
       'f51697d1af1b5d49b793b34ab9c67b6b4823a826cbdcad7dd606063519a13418',
-      '8914205f9c63209e83948b317354453f067038389eb1053a267c714f92a54dcd'
+      '8914205f9c63209e83948b317354453f067038389eb1053a267c714f92a54dcd',
+      '1d723895a63306046ff5a8429f812bc259ef78e52ea90969470a20513e0bd03b'
     ]),
     'schema_migrations.source_path': Object.freeze([
       'migrations/001_legacy_compat_columns.js',
@@ -451,7 +471,8 @@ const STRUCTURAL_COLUMN_POLICY = freezeStructuralColumnPolicy({
       'migrations/004_knowledge_capacity_observability.js',
       'migrations/005_knowledge_custody_projection.js',
       'migrations/006_crm_sales_workspace.js',
-      'migrations/007_knowledge_governance.js'
+      'migrations/007_knowledge_governance.js',
+      'migrations/008_feishu_bitable_outbox.js'
     ])
   })
 });
@@ -461,7 +482,7 @@ const TRANSFORMATION_EXCLUDED_CLASSIFICATIONS = new Set([
   'derived',
   'preserved-accounting'
 ]);
-const STRUCTURAL_POLICY_VALIDATOR_VERSION = 'tm-structural-policy-v2-calendar-exact';
+const STRUCTURAL_POLICY_VALIDATOR_VERSION = 'tm-structural-policy-v3-bitable-outbox';
 const STRUCTURAL_POLICY_SHA256 = crypto.createHash('sha256')
   .update(JSON.stringify({
     validatorVersion: STRUCTURAL_POLICY_VALIDATOR_VERSION,
@@ -543,7 +564,7 @@ const JSON_NAMES = new Set([
 ]);
 
 const SECRET_NAMES = new Set([
-  'password_hash', 'token', 'lease_token', 'reservation_nonce', 'idempotency_key',
+  'password_hash', 'token', 'lease_token', 'reservation_nonce', 'reservation_token', 'idempotency_key',
   'resource_claim', 'code'
 ]);
 
@@ -909,7 +930,7 @@ function profileContractForVersion(schemaVersion) {
       preservedAccounting: V1_PRESERVED_ACCOUNTING
     });
   }
-  if (schemaVersion === 6 || schemaVersion === 7) {
+  if (schemaVersion === 6 || schemaVersion === 7 || schemaVersion === 8) {
     return Object.freeze({
       semanticPolicies: SEMANTIC_POLICIES,
       equalityGroups: EQUALITY_GROUPS,
@@ -937,16 +958,16 @@ function assertManifestDocumentShape(manifest) {
   ) {
     throw new Error('malformed sanitization manifest header');
   }
-  if (!Array.isArray(manifest.exactProfiles) || manifest.exactProfiles.length !== 2) {
-    throw new Error('sanitization manifest must contain isolated exact v6 and v7 profiles');
+  if (!Array.isArray(manifest.exactProfiles) || manifest.exactProfiles.length !== 3) {
+    throw new Error('sanitization manifest must contain isolated exact v6, v7, and v8 profiles');
   }
   const profileKeys = [
     'schemaVersion', 'semanticPolicies', 'equalityGroups', 'referenceGroups',
     'derivedRebuilds', 'objects'
   ];
   const versions = manifest.exactProfiles.map((profile) => profile.schemaVersion);
-  if (JSON.stringify(versions) !== JSON.stringify([6, 7])) {
-    throw new Error('sanitization manifest exact profiles must be ordered v6 then v7');
+  if (JSON.stringify(versions) !== JSON.stringify([6, 7, 8])) {
+    throw new Error('sanitization manifest exact profiles must be ordered v6 then v7 then v8');
   }
   for (const compatibilityProfile of manifest.exactProfiles) {
     if (!exactObjectKeys(compatibilityProfile, profileKeys)) {
@@ -983,12 +1004,12 @@ function exactProfileClassification(db) {
   });
   if (
     classification.status !== 'managed'
-    || ![1, 6, 7].includes(classification.currentVersion)
+    || ![1, 6, 7, 8].includes(classification.currentVersion)
   ) {
     const observed = classification.currentVersion === undefined || classification.currentVersion === null
       ? classification.status
       : classification.currentVersion;
-    throw new Error(`sanitization source must be an exact managed version 1, version 6, or version 7 profile; got ${observed}`);
+    throw new Error(`sanitization source must be an exact managed version 1, version 6, version 7, or version 8 profile; got ${observed}`);
   }
   return classification;
 }
@@ -1181,6 +1202,12 @@ function assertStructuralValueAllowed(context, value, observedStorageType) {
   if (policy.kind === 'canonical-positive-decimal') {
     if (!/^[1-9][0-9]{0,15}$/.test(value) || !Number.isSafeInteger(Number(value))) {
       throw new Error(`structural policy rejected ${context}: value is not a canonical positive decimal`);
+    }
+    return true;
+  }
+  if (policy.kind === 'upper-code') {
+    if (!/^[A-Z0-9_]{3,100}$/.test(value)) {
+      throw new Error(`structural policy rejected ${context}: value is not an uppercase code`);
     }
     return true;
   }
@@ -3613,6 +3640,13 @@ function transformedValue(
       (attempt) => replacementAttemptToken(token, attempt)
     );
   }
+  if (category === 'secret-synthetic' && table === 'feishu_bitable_outbox'
+      && column === 'reservation_token' && storageType === 'text') {
+    return reserveTypedReplacement(
+      replacementDomain, mappingKey, 'text',
+      (attempt) => replacementAttemptToken(token, attempt)
+    );
+  }
   if (category === 'secret-synthetic') return typePreservingReplacement(
     storageType, value, token,
     (_attempt, attemptToken) => `tm-inert-secret-${attemptToken}`,
@@ -3653,6 +3687,14 @@ function transformedValue(
       replacementDomain, mappingKey, 'text',
       (attempt) => replacementAttemptToken(token, attempt)
     );
+  }
+  if (category === 'synthetic-text' && table === 'feishu_bitable_outbox'
+      && column === 'operation_id' && storageType === 'text') {
+    return reserveTypedReplacement(replacementDomain, mappingKey, 'text', (attempt) => {
+      const hex = replacementAttemptToken(token, attempt);
+      const variant = ['8', '9', 'a', 'b'][Number.parseInt(hex.slice(16, 17), 16) & 0x3];
+      return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-${variant}${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+    });
   }
   if (category === 'synthetic-text') return typePreservingReplacement(
     storageType, value, token,
@@ -4242,7 +4284,7 @@ function rebuildCrmDerivedData(db) {
 }
 
 function rebuildDerivedData(db, manifest) {
-  if (![1, 6, 7].includes(manifest.schemaVersion)) {
+  if (![1, 6, 7, 8].includes(manifest.schemaVersion)) {
     throw new Error(`unsupported derived rebuild profile ${manifest.schemaVersion}`);
   }
   const hasKnowledge = db.prepare("SELECT 1 AS present FROM sqlite_schema WHERE type='table' AND name='knowledge_entries'").get();

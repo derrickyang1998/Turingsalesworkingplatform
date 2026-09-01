@@ -102,7 +102,7 @@ function createV6Fixture(t, name) {
   const databasePath = path.join(root, 'managed-v6.db');
   const database = migrationService.openMigratedDatabase(databasePath, {
     rootDir: serverRoot,
-    registeredMigrations: migrationVerifier.REGISTERED_MIGRATIONS.slice(0, -1)
+    registeredMigrations: migrationVerifier.REGISTERED_MIGRATIONS.filter((migration) => migration.version <= 6)
   });
   database.prepare('UPDATE users SET display_name=? WHERE id=(SELECT MIN(id) FROM users)')
     .run('trusted-v6-source-fixture');
@@ -114,6 +114,18 @@ function createV7Fixture(t, name) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), `tm-trusted-source-v7-${name}-`));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const databasePath = path.join(root, 'managed-v7.db');
+  const database = migrationService.openMigratedDatabase(databasePath, {
+    rootDir: serverRoot,
+    registeredMigrations: migrationVerifier.REGISTERED_MIGRATIONS.filter((migration) => migration.version <= 7)
+  });
+  database.close();
+  return { root, databasePath };
+}
+
+function createV8Fixture(t, name) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `tm-trusted-source-v8-${name}-`));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const databasePath = path.join(root, 'managed-v8.db');
   const database = migrationService.openMigratedDatabase(databasePath, {
     rootDir: serverRoot,
     registeredMigrations: migrationVerifier.REGISTERED_MIGRATIONS
@@ -412,8 +424,8 @@ test('trusted source manifest pins the sanitizer closure and exact supported sou
   const paths = new Set(manifest.files.map((entry) => entry.path));
   assert.equal(manifest.format, 'tm-trusted-production-source-manifest-v1');
   assert.deepEqual(manifest.migrationContract, {
-    acceptedSourceVersions: [1, 6, 7],
-    targetVersion: 7,
+    acceptedSourceVersions: [1, 6, 7, 8],
+    targetVersion: 8,
     runs: 2,
     deterministicAppendTables: ['activity_log']
   });
@@ -443,6 +455,7 @@ test('trusted source manifest pins the sanitizer closure and exact supported sou
     'server/migrations/005_knowledge_custody_projection.js',
     'server/migrations/006_crm_sales_workspace.js',
     'server/migrations/007_knowledge_governance.js',
+    'server/migrations/008_feishu_bitable_outbox.js',
     'server/migrations/vendor/bcryptjs_v3_0_3.js',
     'server/package.json',
     'server/package-lock.json'
@@ -615,7 +628,7 @@ test('trusted bundle staging rejects a candidate sanitizer that would substitute
   assert.equal(fs.existsSync(bundleRoot), false, 'a forged sanitizer must not publish executable trusted bytes');
 });
 
-test('trusted deployment gate adopts exact legacy v0 before sanitized v1-to-v7 verification', (t) => {
+test('trusted deployment gate adopts exact legacy v0 before sanitized v1-to-v8 verification', (t) => {
   const gate = loadTrustedGate();
   assert.match(
     read(trustedGatePath),
@@ -663,7 +676,7 @@ test('trusted deployment gate adopts exact legacy v0 before sanitized v1-to-v7 v
   }, {
     format: 'tm-trusted-production-source-verdict-v1',
     sourceVersion: 1,
-    targetVersion: 7,
+    targetVersion: 8,
     runs: 2,
     adoption: {
       format: 'tm-trusted-legacy-adoption-verdict-v1',
@@ -788,9 +801,9 @@ test('trusted live adoption recognizes exact managed v7 as a no-op', (t) => {
   assert.equal(fs.existsSync(outputPath), false);
 });
 
-test('trusted required sanitize-and-verify migrates exact managed v6 to v7 twice with preservation', (t) => {
-  const fixture = createV6Fixture(t, 'required-v6-gate');
-  const sanitizedPath = path.join(fixture.root, 'trusted-sanitized-v6.db');
+test('trusted required sanitize-and-verify migrates the current managed v7 source to v8 twice with preservation', (t) => {
+  const fixture = createV7Fixture(t, 'required-v7-gate');
+  const sanitizedPath = path.join(fixture.root, 'trusted-sanitized-v7.db');
   const workDir = path.join(fixture.root, 'migration-work');
   const { manifest, manifestPath } = writeCurrentContractManifest(fixture.root);
   const candidateRoot = path.join(fixture.root, 'candidate');
@@ -830,9 +843,9 @@ test('trusted required sanitize-and-verify migrates exact managed v6 to v7 twice
     preMigrationRestoreVerified: report.preMigrationRestoreVerified,
     legacyPreservationVerified: report.legacyPreservationVerified
   }, {
-    verificationMode: 'v6-to-v7-migration',
-    sourceVersion: 6,
-    targetVersion: 7,
+    verificationMode: 'v7-to-v8-migration',
+    sourceVersion: 7,
+    targetVersion: 8,
     runs: 2,
     preMigrationRestoreVerified: true,
     legacyPreservationVerified: true
@@ -843,7 +856,7 @@ test('trusted required sanitize-and-verify migrates exact managed v6 to v7 twice
   assert.equal(fs.existsSync(sanitizedPath), true);
 });
 
-test('trusted managed v6 migration rejects pinned 007 code that mutates existing business data', (t) => {
+test('trusted managed v6 migration rejects pinned 008 code that mutates existing business data', (t) => {
   const fixture = createV6Fixture(t, 'required-v6-tamper');
   const sanitizedPath = path.join(fixture.root, 'trusted-sanitized-v6.db');
   const workDir = path.join(fixture.root, 'migration-work');
@@ -852,14 +865,14 @@ test('trusted managed v6 migration rejects pinned 007 code that mutates existing
   const bundleRoot = path.join(fixture.root, 'trusted', 'bundle');
   copyContractCandidate(manifest, candidateRoot);
 
-  const migrationRelative = 'server/migrations/007_knowledge_governance.js';
+  const migrationRelative = 'server/migrations/008_feishu_bitable_outbox.js';
   const candidateMigration = path.join(candidateRoot, ...migrationRelative.split('/'));
   fs.appendFileSync(candidateMigration, `
-const tmOriginalApplyForV6PreservationRegression = module.exports.apply;
-module.exports.apply = function tmMutatingV6Migration(db) {
-  tmOriginalApplyForV6PreservationRegression(db);
+const tmOriginalApplyForV8PreservationRegression = module.exports.apply;
+module.exports.apply = function tmMutatingV8Migration(db) {
+  tmOriginalApplyForV8PreservationRegression(db);
   db.prepare('UPDATE users SET display_name=? WHERE id=(SELECT MIN(id) FROM users)')
-    .run('tampered-by-007');
+    .run('tampered-by-008');
 };
 `, 'utf8');
   manifest.files.find((entry) => entry.path === migrationRelative).sha256 = sha256(candidateMigration);
@@ -894,9 +907,9 @@ module.exports.apply = function tmMutatingV6Migration(db) {
   assert.equal(sha256(fixture.databasePath), sourceSha256);
 });
 
-test('trusted required sanitize-and-verify path admits exact managed v7 as a verified no-op', (t) => {
-  const fixture = createV7Fixture(t, 'required-v7-gate');
-  const sanitizedPath = path.join(fixture.root, 'trusted-sanitized-v7.db');
+test('trusted required sanitize-and-verify path admits exact managed v8 as a verified no-op', (t) => {
+  const fixture = createV8Fixture(t, 'required-v8-gate');
+  const sanitizedPath = path.join(fixture.root, 'trusted-sanitized-v8.db');
   const workDir = path.join(fixture.root, 'migration-work');
   const { manifest, manifestPath } = writeCurrentContractManifest(fixture.root);
   const candidateRoot = path.join(fixture.root, 'candidate');
@@ -937,15 +950,15 @@ test('trusted required sanitize-and-verify path admits exact managed v7 as a ver
     adoption: report.databaseAdoption
   }, {
     format: 'tm-trusted-production-source-verdict-v1',
-    verificationMode: 'managed-v7-noop',
-    sourceVersion: 7,
-    targetVersion: 7,
+    verificationMode: 'managed-v8-noop',
+    sourceVersion: 8,
+    targetVersion: 8,
     runs: 2,
     adoption: {
       format: 'tm-trusted-legacy-adoption-verdict-v1',
       applied: false,
-      sourceVersion: 7,
-      targetVersion: 7,
+      sourceVersion: 8,
+      targetVersion: 8,
       sourceSha256,
       outputSha256: sourceSha256,
       baseTableCount: null,
@@ -960,9 +973,9 @@ test('trusted required sanitize-and-verify path admits exact managed v7 as a ver
   assert.equal(fs.existsSync(sanitizedPath), true);
 });
 
-test('managed v7 no-op verification rejects a pinned migration startup mutation', (t) => {
-  const fixture = createV7Fixture(t, 'required-v7-startup-mutation');
-  const sanitizedPath = path.join(fixture.root, 'trusted-sanitized-v7.db');
+test('managed v8 no-op verification rejects a pinned migration startup mutation', (t) => {
+  const fixture = createV8Fixture(t, 'required-v8-startup-mutation');
+  const sanitizedPath = path.join(fixture.root, 'trusted-sanitized-v8.db');
   const workDir = path.join(fixture.root, 'migration-work');
   const { manifest, manifestPath } = writeCurrentContractManifest(fixture.root);
   const candidateRoot = path.join(fixture.root, 'candidate');
@@ -1063,7 +1076,7 @@ test('cutover owns and cleans deterministic database adoption artifacts across r
   );
 });
 
-test('trusted deployment-side verifier independently admits exact populated v1 through two preserved v1-to-v7 runs', (t) => {
+test('trusted deployment-side verifier independently admits exact populated v1 through two preserved v1-to-v8 runs', (t) => {
   const gate = loadTrustedGate();
   const fixture = createV1Fixture(t, 'two-runs');
   const sanitizedPath = path.join(fixture.root, 'trusted-sanitized-v1.db');
@@ -1108,7 +1121,7 @@ test('trusted deployment-side verifier independently admits exact populated v1 t
   }, {
     format: 'tm-trusted-production-source-verdict-v1',
     sourceVersion: 1,
-    targetVersion: 7,
+    targetVersion: 8,
     runs: 2,
     preMigrationRestoreVerified: true,
     legacyPreservationVerified: true

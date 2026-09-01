@@ -15,11 +15,11 @@ const migrationService = require('../services/migration_service');
 const migrationGate = require('../scripts/verify_campaign_migration_gate');
 const sanitizer = require('../scripts/sanitize_production_shape');
 const manifestDocument = require('../scripts/sanitization_manifest.json');
-const manifest = sanitizer._testing.manifestProfileForVersion(manifestDocument, 7);
+const manifest = sanitizer._testing.manifestProfileForVersion(manifestDocument, 8);
 const BASH = process.platform === 'win32' ? 'C:\\Program Files\\Git\\bin\\bash.exe' : 'bash';
 const HAS_BASH = process.platform !== 'win32' || fs.existsSync(BASH);
 
-function openMigratedFixture(label, targetVersion = 7) {
+function openMigratedFixture(label, targetVersion = 8) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), `tm-sanitizer-policy-${label}-`));
   const dbPath = path.join(root, 'source.db');
   const migrationOptions = { rootDir: path.resolve(__dirname, '..') };
@@ -66,7 +66,7 @@ test('every preserved structural text column has a closed exact-column validator
           `${context} must have a non-empty closed value set`);
         assert.ok(Object.isFrozen(policy.allowedValues), `${context} allowed values must be frozen`);
       } else {
-        assert.ok(['timestamp', 'date', 'canonical-positive-decimal'].includes(policy.kind),
+        assert.ok(['timestamp', 'date', 'canonical-positive-decimal', 'upper-code'].includes(policy.kind),
           `${context} must use an explicit closed structural format`);
       }
       assert.throws(
@@ -121,7 +121,7 @@ test('arbitrary model, source, industry, platform, market, region, module, and c
   }
 });
 
-test('schema 7 preserves CRM structure while customer identity fields are rebuilt', () => {
+test('schema 8 preserves CRM structure while customer identity fields are rebuilt', () => {
   const classifications = new Map(manifest.objects.flatMap((object) => (
     object.columns.map((column) => [`${object.name}.${column.name}`, column.classification])
   )));
@@ -146,6 +146,83 @@ test('schema 7 preserves CRM structure while customer identity fields are rebuil
   }
   for (const context of ['customers.normalized_identity_key', 'customers.duplicate_enforced']) {
     assert.equal(classifications.get(context), 'derived', `${context} must be rebuilt from sanitized customer data`);
+  }
+});
+
+test('schema 8 sanitizes a Bitable outbox receipt without breaking its durable receipt constraints', () => {
+  const fixture = openMigratedFixture('bitable-outbox-receipt');
+  const outputPath = path.join(fixture.root, 'sanitized-bitable-outbox.db');
+  const sourceOperationId = 'e75c6fea-1d6a-4b46-b912-8e41d5b2392e';
+  const sourceReservationToken = 'a'.repeat(64);
+  try {
+    const identity = fixture.db.prepare(`
+      SELECT membership.org_id,team.team_id
+      FROM organization_memberships membership
+      JOIN team_memberships team
+        ON team.org_id=membership.org_id AND team.user_id=membership.user_id AND team.status='active'
+      WHERE membership.user_id=2 AND membership.status='active'
+      ORDER BY team.team_id
+      LIMIT 1
+    `).get();
+    assert.ok(identity);
+    fixture.db.prepare(`
+      INSERT INTO customers (id,brand_name,company_name,stage,source,created_by,assigned_to)
+      VALUES (880101,'Outbox Brand','Outbox Brand Ltd','qualified','test',2,2)
+    `).run();
+    fixture.db.prepare(`
+      INSERT INTO opportunities (id,customer_id,name,stage,value,win_probability,product_name,channel_type,created_by)
+      VALUES (880102,880101,'Outbox Opportunity','proposal',1000,60,'Outbox Product','influencer',2)
+    `).run();
+    fixture.db.prepare(`
+      INSERT INTO campaigns (
+        id,org_id,name,customer_id,opportunity_id,owner_user_id,team_id,
+        lifecycle_state,operational_status,row_version
+      ) VALUES (880103,?, 'Outbox Campaign',880101,880102,2,?,'lead','active',1)
+    `).run(identity.org_id, identity.team_id);
+    fixture.db.prepare(`
+      INSERT INTO feishu_bitable_outbox (
+        org_id,campaign_id,actor_user_id,operation_id,reservation_token,payload_sha256,
+        payload_json,record_count,status,remote_record_ids_json,completed_at
+      ) VALUES (?,?,?,?,?,?,?,1,'succeeded',?,CURRENT_TIMESTAMP)
+    `).run(
+      identity.org_id,
+      880103,
+      2,
+      sourceOperationId,
+      sourceReservationToken,
+      'b'.repeat(64),
+      JSON.stringify([{ fields: { email: 'outbox-private@example.test', title: 'Private Bitable content' } }]),
+      JSON.stringify(['rec_private_outbox'])
+    );
+    fixture.db.close();
+    sanitizer.sanitizeProductionShape({ sourcePath: fixture.dbPath, outputPath });
+    const output = new Database(outputPath, { readonly: true, fileMustExist: true });
+    try {
+      const row = output.prepare(`
+        SELECT operation_id,reservation_token,payload_sha256,payload_json,record_count,status,
+          remote_record_ids_json,last_error_code,completed_at,failed_at
+        FROM feishu_bitable_outbox
+      `).get();
+      assert.match(row.operation_id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+      assert.notEqual(row.operation_id, sourceOperationId);
+      assert.match(row.reservation_token, /^[0-9a-f]{64}$/);
+      assert.notEqual(row.reservation_token, sourceReservationToken);
+      assert.match(row.payload_sha256, /^[0-9a-f]{64}$/);
+      assert.equal(row.record_count, 1);
+      assert.equal(row.status, 'succeeded');
+      assert.deepEqual(JSON.parse(row.remote_record_ids_json).length, 1);
+      assert.equal(row.last_error_code, null);
+      assert.match(row.completed_at, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+      assert.equal(row.failed_at, null);
+      assert.doesNotMatch(row.payload_json, /outbox-private@example\.test|Private Bitable content/);
+      assert.doesNotMatch(row.remote_record_ids_json, /rec_private_outbox/);
+      assert.equal(output.pragma('integrity_check', { simple: true }), 'ok');
+      assert.deepEqual(output.pragma('foreign_key_check'), []);
+    } finally {
+      output.close();
+    }
+  } finally {
+    closeFixture(fixture);
   }
 });
 

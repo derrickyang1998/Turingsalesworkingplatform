@@ -248,7 +248,7 @@ function freshDb() {
   return require(dbModule);
 }
 
-function mountRoutes(db) {
+function mountRoutes(db, options) {
   const routes = {};
   const app = {};
   ['get', 'post', 'put', 'delete'].forEach(function(method) {
@@ -260,8 +260,40 @@ function mountRoutes(db) {
   const campaignCollaborationService = createCampaignCollaborationService(db);
   const routesModule = path.resolve(__dirname, '../routes.js');
   delete require.cache[routesModule];
-  require(routesModule)(app, db, authMiddleware, { campaignCollaborationService });
+  require(routesModule)(app, db, authMiddleware, Object.assign({ campaignCollaborationService }, options || {}));
   return routes;
+}
+
+function createFeishuOutboxCampaign(db, id, ownerId) {
+  const identity = db.prepare(`
+    SELECT membership.org_id,team.team_id
+    FROM organization_memberships membership
+    JOIN team_memberships team
+      ON team.org_id=membership.org_id AND team.user_id=membership.user_id AND team.status='active'
+    WHERE membership.user_id=? AND membership.status='active'
+    ORDER BY team.team_id
+    LIMIT 1
+  `).get(ownerId);
+  assert.ok(identity, 'missing owner identity for Feishu outbox test');
+  const customerId = id + 1;
+  const opportunityId = id + 2;
+  db.prepare(`
+    INSERT INTO customers (
+      id,brand_name,company_name,stage,source,created_by,assigned_to
+    ) VALUES (?,?,?,'qualified','test',?,?)
+  `).run(customerId, 'Bitable Outbox Brand', 'Bitable Outbox Brand Ltd', ownerId, ownerId);
+  db.prepare(`
+    INSERT INTO opportunities (
+      id,customer_id,name,stage,value,win_probability,product_name,channel_type,created_by
+    ) VALUES (?,?,'Bitable Outbox Opportunity','proposal',1000,60,'Bitable Product','influencer',?)
+  `).run(opportunityId, customerId, ownerId);
+  db.prepare(`
+    INSERT INTO campaigns (
+      id,org_id,name,customer_id,opportunity_id,owner_user_id,team_id,
+      lifecycle_state,operational_status,row_version
+    ) VALUES (?,?,?,?,?,?,?,'lead','active',1)
+  `).run(id, identity.org_id, 'Bitable Outbox Campaign', customerId, opportunityId, ownerId, identity.team_id);
+  return id;
 }
 
 async function invoke(routes, key, opts) {
@@ -1166,6 +1198,173 @@ test('feishu sync endpoint sends a server-built Bitable batch only with a UUID i
   }
 });
 
+test('campaign-scoped Bitable sync stores a durable receipt, returns it on replay, and lists it without a second provider call', async () => {
+  const db = freshDb();
+  const campaignId = createFeishuOutboxCampaign(db, 980101, 2);
+  const influencerId = insertInfluencer(db, {
+    platform: 'TikTok',
+    kol_handle: '@outbox_delivery',
+    profile_link: 'https://example.com/outbox-delivery',
+    followers: 120000,
+    project_name: 'Outbox Project',
+    product_name: 'Outbox Product',
+    data_source: 'test'
+  });
+  const calls = { prepare: 0, sync: [] };
+  const feishuClient = {
+    getStatus: function() {
+      return { configured: true, mode: 'bitable', sync_available: true };
+    },
+    prepareBitableOutboxPayload: function(values) {
+      calls.prepare += 1;
+      return {
+        records: values.records.map(function(record) {
+          return {
+            fields: {
+              '网红频道名称': record['网红频道名称'],
+              '网红频道链接': record['网红频道链接'],
+              '项目&客户': record['项目&客户']
+            }
+          };
+        })
+      };
+    },
+    syncInfluencers: async function(values) {
+      calls.sync.push(values);
+      return {
+        configured: true,
+        mode: 'bitable',
+        synced: values.records.length,
+        records: values.records.length,
+        remoteRecordIds: values.bitableRecords.map(function(record, index) {
+          return 'rec_outbox_' + (index + 1) + '_' + record.fields['网红频道名称'];
+        })
+      };
+    }
+  };
+  const routes = mountRoutes(db, { feishuClient });
+  const request = {
+    body: { ids: [influencerId], campaign_id: campaignId },
+    headers: { 'Idempotency-Key': 'f47ac1cb-5d7a-4542-9282-26e3e273f5a0' }
+  };
+
+  const first = await invoke(routes, 'POST /api/influencers/feishu/sync', request);
+  assert.equal(first.statusCode, 200);
+  assert.equal(first.payload.configured, true);
+  assert.equal(first.payload.synced, 1);
+  assert.deepEqual(first.payload.delivery && {
+    campaign_id: first.payload.delivery.campaign_id,
+    status: first.payload.delivery.status,
+    record_count: first.payload.delivery.record_count,
+    remote_record_count: first.payload.delivery.remote_record_count,
+    last_error_code: first.payload.delivery.last_error_code
+  }, {
+    campaign_id: campaignId,
+    status: 'succeeded',
+    record_count: 1,
+    remote_record_count: 1,
+    last_error_code: null
+  });
+  assert.equal(calls.sync.length, 1);
+  assert.equal(calls.sync[0].includeReceipt, true);
+  assert.equal(calls.sync[0].operationId, request.headers['Idempotency-Key']);
+  assert.deepEqual(calls.sync[0].bitableRecords, [{
+    fields: {
+      '网红频道名称': '@outbox_delivery',
+      '网红频道链接': 'https://example.com/outbox-delivery',
+      '项目&客户': 'Outbox Project'
+    }
+  }]);
+
+  const replay = await invoke(routes, 'POST /api/influencers/feishu/sync', request);
+  assert.equal(replay.statusCode, 200);
+  assert.deepEqual(replay.payload, first.payload);
+  assert.equal(calls.prepare, 2);
+  assert.equal(calls.sync.length, 1);
+
+  const deliveries = await invoke(routes, 'GET /api/campaigns/:id/feishu-deliveries', {
+    params: { id: campaignId },
+    query: { limit: '1' }
+  });
+  assert.equal(deliveries.statusCode, 200);
+  assert.deepEqual(deliveries.payload.deliveries, [first.payload.delivery]);
+  db.close();
+});
+
+test('campaign-scoped Bitable sync preserves an ambiguous provider result for owner reconciliation without a second provider call', async () => {
+  const db = freshDb();
+  const campaignId = createFeishuOutboxCampaign(db, 980201, 2);
+  const influencerId = insertInfluencer(db, {
+    platform: 'YouTube',
+    kol_handle: '@outbox_failure',
+    profile_link: 'https://example.com/outbox-failure',
+    followers: 90000,
+    data_source: 'test'
+  });
+  let providerCalls = 0;
+  const routes = mountRoutes(db, {
+    feishuClient: {
+      getStatus: function() {
+        return { configured: true, mode: 'bitable', sync_available: true };
+      },
+      prepareBitableOutboxPayload: function(values) {
+        return {
+          records: values.records.map(function(record) {
+            return { fields: { '网红频道名称': record['网红频道名称'] } };
+          })
+        };
+      },
+      syncInfluencers: async function() {
+        providerCalls += 1;
+        throw new Error('provider unavailable');
+      }
+    }
+  });
+  const request = {
+    body: { ids: [influencerId], campaign_id: campaignId },
+    headers: { 'Idempotency-Key': 'e4d12f8f-bb3e-4a99-b12e-92605b9e9927' }
+  };
+
+  const ambiguous = await invoke(routes, 'POST /api/influencers/feishu/sync', request);
+  assert.equal(ambiguous.statusCode, 202);
+  assert.equal(ambiguous.payload.code, 'FEISHU_OUTBOX_RECONCILIATION_REQUIRED');
+  assert.equal(ambiguous.payload.delivery.status, 'pending');
+  assert.equal(providerCalls, 1);
+
+  const repeated = await invoke(routes, 'POST /api/influencers/feishu/sync', request);
+  assert.equal(repeated.statusCode, 409);
+  assert.equal(repeated.payload.code, 'FEISHU_OUTBOX_RECONCILIATION_REQUIRED');
+  assert.equal(repeated.payload.delivery.status, 'pending');
+  assert.equal(providerCalls, 1);
+
+  const reconciled = await invoke(routes, 'POST /api/campaigns/:id/feishu-deliveries/:deliveryId/reconcile', {
+    params: { id: campaignId, deliveryId: ambiguous.payload.delivery.id },
+    body: { remote_record_ids: ['rec_manual_reconciliation'] }
+  });
+  assert.equal(reconciled.statusCode, 200);
+  assert.deepEqual(reconciled.payload.delivery && {
+    id: reconciled.payload.delivery.id,
+    campaign_id: reconciled.payload.delivery.campaign_id,
+    status: reconciled.payload.delivery.status,
+    record_count: reconciled.payload.delivery.record_count,
+    remote_record_count: reconciled.payload.delivery.remote_record_count,
+    last_error_code: reconciled.payload.delivery.last_error_code
+  }, {
+    id: ambiguous.payload.delivery.id,
+    campaign_id: campaignId,
+    status: 'succeeded',
+    record_count: 1,
+    remote_record_count: 1,
+    last_error_code: null
+  });
+
+  const replayed = await invoke(routes, 'POST /api/influencers/feishu/sync', request);
+  assert.equal(replayed.statusCode, 200);
+  assert.equal(replayed.payload.delivery.status, 'succeeded');
+  assert.equal(providerCalls, 1);
+  db.close();
+});
+
 test('collaboration order creation stores the selected resource definition', async () => {
   const db = freshDb();
   const routes = mountRoutes(db);
@@ -1662,6 +1861,7 @@ test('m4 frontend keeps import, feishu, and order-resource controls wired', () =
   assert.match(indexHtml, /id="filt_search"/);
   assert.match(indexHtml, /id="infFileModal" accept="\.csv,\.json,\.xlsx"/);
   assert.match(indexHtml, /id="feishuConnectionStatus"/);
+  assert.match(indexHtml, /id="feishuDeliveryStatus"/);
   assert.match(indexHtml, /id="feishuStatusRefresh"/);
   assert.match(indexHtml, /id="feishuTestButton"/);
   assert.match(appJs, /m4-table thead th\{position:sticky/);
@@ -1672,10 +1872,13 @@ test('m4 frontend keeps import, feishu, and order-resource controls wired', () =
   assert.match(appJs, /\/influencers\/upload/);
   assert.match(appJs, /\/influencers\/template/);
   assert.match(appJs, /\/influencers\/feishu\/sync/);
+  assert.match(appJs, /\/campaigns\/.*feishu-deliveries/);
   assert.match(appJs, /\/feishu\/status/);
   assert.match(appJs, /\/feishu\/test/);
   assert.match(appJs, /function loadFeishuStatus/);
+  assert.match(appJs, /function loadFeishuOutbox/);
   assert.match(appJs, /function testFeishuConnection/);
+  assert.match(appJs, /campaign_id: campaignId/);
   assert.match(appJs, /d\.message \|\| 'CSV fallback downloaded\.'/);
   assert.match(appJs, /CURRENT_USER && CURRENT_USER\.role === 'admin'/);
   assert.match(appJs, /function startCollab/);

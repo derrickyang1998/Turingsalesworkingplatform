@@ -71,8 +71,8 @@ test('migration verifier rejects a sanitized source that is already at version 6
   );
 });
 
-test('migration verifier accepts a populated sanitized version 1 source and reaches version 7', (t) => {
-  const fixture = createFixture(t, 'v1-to-v7', 1);
+test('migration verifier accepts a populated sanitized version 1 source and reaches version 8', (t) => {
+  const fixture = createFixture(t, 'v1-to-v8', 1);
   const sourceSha256 = sha256File(fixture.databasePath);
 
   const report = migrationGate.verifySanitizedMigrationCopy({
@@ -81,7 +81,7 @@ test('migration verifier accepts a populated sanitized version 1 source and reac
   });
 
   assert.equal(report.sourceVersion, 1);
-  assert.equal(report.targetVersion, 7);
+  assert.equal(report.targetVersion, 8);
   assert.equal(report.runs, 2);
   assert.equal(report.preMigrationRestoreVerified, true);
   assert.equal(report.legacyPreservationVerified, true);
@@ -103,7 +103,7 @@ test('migration verifier preserves an existing activity_log allocator across det
   });
 
   assert.equal(report.sourceVersion, 1);
-  assert.equal(report.targetVersion, 7);
+  assert.equal(report.targetVersion, 8);
   assert.equal(report.legacyPreservationVerified, true);
 });
 

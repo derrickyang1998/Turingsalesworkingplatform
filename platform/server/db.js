@@ -49,6 +49,13 @@ const db = migrationService.openMigratedDatabase(DB_PATH, {
       sourcePath: 'migrations/007_knowledge_governance.js',
       engineVersion: 1,
       dependencies: ['migrations/vendor/bcryptjs_v3_0_3.js']
+    },
+    {
+      version: 8,
+      name: '008_feishu_bitable_outbox',
+      sourcePath: 'migrations/008_feishu_bitable_outbox.js',
+      engineVersion: 1,
+      dependencies: ['migrations/vendor/bcryptjs_v3_0_3.js']
     }
   ]
 });

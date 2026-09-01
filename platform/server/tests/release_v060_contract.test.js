@@ -169,9 +169,9 @@ test('current release locks the v0.7 branch while retaining the v0.6 shell and f
   assert.match(deploy, /20260702-v916-kb-bridge-client-cn/);
   assert.match(deploy, /20260702v916kbbridge/);
   assert.match(deploy, /f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e/);
-  assert.match(deploy, /if \(Number\(version\) !== 7\) throw new Error\('Candidate migration target version mismatch'\)/);
-  assert.doesNotMatch(deploy, /if \(Number\(version\) !== 6\) throw new Error\('Candidate migration target version mismatch'\)/);
-  assert.match(deploy, /report\.get\('sourceVersion'\) not in \(1, 6, 7\)/);
+  assert.match(deploy, /if \(Number\(version\) !== 8\) throw new Error\('Candidate migration target version mismatch'\)/);
+  assert.doesNotMatch(deploy, /if \(Number\(version\) !== 7\) throw new Error\('Candidate migration target version mismatch'\)/);
+  assert.match(deploy, /report\.get\('sourceVersion'\) not in \(1, 6, 7, 8\)/);
   assert.doesNotMatch(deploy, /report\.get\('sourceVersion'\) not in \(1, 6\) or/);
 });
 
@@ -215,14 +215,16 @@ test('cutover uses reload-convergent Nginx verification before its public route 
   assert.doesNotMatch(publicEnablement, /expect_stylesheet\(\)/);
 });
 
-test('v0.6 deploy inventory ships migration 006, CRM runtime, and every Phase 5 regression', () => {
+test('current deploy inventory ships the v8 Bitable outbox runtime and its focused regression', () => {
   const files = powerShellArrayEntries(read('platform', 'deploy_v8.ps1'), 'FILES');
   for (const required of [
     'server/migrations/006_crm_sales_workspace.js',
+    'server/migrations/008_feishu_bitable_outbox.js',
     'server/services/crm_contract.js',
     'server/services/crm_customer_service.js',
     'server/services/crm_query_service.js',
     'server/services/crm_scope_service.js',
+    'server/services/feishu_bitable_outbox_service.js',
     'server/tests/crm_contract.test.js',
     'server/tests/crm_customer_service.test.js',
     'server/tests/crm_phase5_http.test.js',
@@ -231,13 +233,14 @@ test('v0.6 deploy inventory ships migration 006, CRM runtime, and every Phase 5 
     'server/tests/crm_scope_query.test.js',
     'server/tests/customer_mutation_ui.test.js',
     'server/tests/organization_access_context.test.js',
-    'server/tests/release_v060_contract.test.js'
+    'server/tests/release_v060_contract.test.js',
+    'server/tests/feishu_bitable_outbox.test.js'
   ]) {
     assert.equal(files.has(required), true, `${required} must ship in v0.6`);
   }
 });
 
-test('current trusted source and sanitization contracts accept exact v1, v6, and v7 sources', () => {
+test('current trusted source and sanitization contracts accept exact v1, v6, v7, and v8 sources', () => {
   const trustedManifest = JSON.parse(read(
     'platform', 'server', 'scripts', 'trusted_production_source_manifest.json'
   ));
@@ -247,18 +250,19 @@ test('current trusted source and sanitization contracts accept exact v1, v6, and
   const trustedPaths = new Set(trustedManifest.files.map((entry) => entry.path));
 
   assert.deepEqual(trustedManifest.migrationContract, {
-    acceptedSourceVersions: [1, 6, 7],
-    targetVersion: 7,
+    acceptedSourceVersions: [1, 6, 7, 8],
+    targetVersion: 8,
     runs: 2,
     deterministicAppendTables: ['activity_log']
   });
   assert.deepEqual(
     sanitizationManifest.exactProfiles.map((profile) => profile.schemaVersion),
-    [6, 7]
+    [6, 7, 8]
   );
   for (const required of [
     'server/migrations/006_crm_sales_workspace.js',
     'server/migrations/007_knowledge_governance.js',
+    'server/migrations/008_feishu_bitable_outbox.js',
     'server/services/crm_contract.js',
     'server/services/crm_customer_service.js',
     'server/services/crm_query_service.js',
@@ -273,10 +277,12 @@ test('v0.6 trusted bytes have exact LF rules and release records exist', () => {
   for (const required of [
     'platform/ppt.js',
     'platform/server/migrations/006_crm_sales_workspace.js',
+    'platform/server/migrations/008_feishu_bitable_outbox.js',
     'platform/server/services/crm_contract.js',
     'platform/server/services/crm_customer_service.js',
     'platform/server/services/crm_query_service.js',
     'platform/server/services/crm_scope_service.js',
+    'platform/server/services/feishu_bitable_outbox_service.js',
     'platform/server/scripts/check_cutover_capacity.py'
   ]) {
     assert.equal(attributes.has(`${required} text eol=lf`), true, `${required} must be LF-pinned`);
@@ -307,7 +313,7 @@ test('v0.6 release records match the trusted-source and parser self-test contrac
     'archive', 'versions', '2026-08-11-v0.6.0-crm-sales-workspace.md'
   );
 
-  assert.equal(trustedManifest.files.length, 50);
+  assert.equal(trustedManifest.files.length, 51);
   assert.equal(parserManifest.required_self_tests.length, 21);
   assert.match(versionRecord, /Trusted source: 49 SHA-256-pinned files/);
   assert.match(archiveRecord, /trusted-source manifest now pins 49 files/i);

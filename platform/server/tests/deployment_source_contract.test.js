@@ -1516,7 +1516,7 @@ test('Phase 4 checks parser readiness with candidate application code before pro
   assert.match(readiness, /DB_PATH="\$DatabasePath" node <<'NODE'/);
   assert.match(readiness, /verifyCheckedInArtifacts/);
   assert.match(readiness, /verifyInstalledParserArtifacts/);
-  assert.match(readiness, /readSystemdProperties/);
+  assert.match(readiness, /readProductionSystemdProperties/);
   assert.match(readiness, /const database = require\('\.\/db'\)/);
   assert.match(readiness, /APPLICATION_DATABASE_MIGRATIONS_OK/);
   assert.match(readiness, /recoverParserAdmissionsInTransaction/);
@@ -1998,9 +1998,14 @@ test('candidate dependency and test writes are confined to a verified aggregate 
   assert.match(gate, /allocated_bytes \+= max\(block_size, \(\(status\.st_size \+ block_size - 1\) \/\/ block_size\) \* block_size\)/);
   assert.match(gate, /test "\$DependencyCopyMeasuredInodes" = "\$DependencyCopyInodes"/);
   assert.match(gate, /DependencyCopyByteBase="\$DependencyCopyAllocatedBytes"/);
-  assert.match(gate, /if \[ "\$DependencyCopyByteBase" -lt "\$TestRootMaxBytes" \]; then[\s\S]*?DependencyCopyByteBase="\$TestRootMaxBytes"/);
+  assert.match(gate, /if \[ "\$DependencyCopyByteBase" -lt "\$DependencyCopyBytes" \]; then[\s\S]*?DependencyCopyByteBase="\$DependencyCopyBytes"/);
   assert.match(gate, /DependencyCopyInodeBase="\$DependencyCopyInodes"/);
-  assert.match(gate, /if \[ "\$DependencyCopyInodeBase" -lt "\$TestRootMaxInodes" \]; then[\s\S]*?DependencyCopyInodeBase="\$TestRootMaxInodes"/);
+  assert.match(gate, /DependencyCopyByteMargin=\$\(\( \(DependencyCopyByteBase \+ 9\) \/ 10 \)\)/);
+  assert.match(gate, /DependencyCopyInodeMargin=\$\(\( \(DependencyCopyInodeBase \+ 9\) \/ 10 \)\)/);
+  assert.match(gate, /if \[ "\$DependencyCopyByteMargin" -lt "\$DependencyCopyByteReserveFloor" \]; then[\s\S]*?DependencyCopyByteMargin="\$DependencyCopyByteReserveFloor"/);
+  assert.match(gate, /if \[ "\$DependencyCopyInodeMargin" -lt "\$DependencyCopyInodeReserveFloor" \]; then[\s\S]*?DependencyCopyInodeMargin="\$DependencyCopyInodeReserveFloor"/);
+  assert.match(gate, /DependencyCopyRequiredBytes=\$\(\( DependencyCopyByteBase \+ DependencyCopyByteMargin \)\)/);
+  assert.match(gate, /DependencyCopyRequiredInodes=\$\(\( DependencyCopyInodeBase \+ DependencyCopyInodeMargin \)\)/);
   assert.match(gate, /df -B1 --output=avail "\$CandidateDir"/);
   assert.match(gate, /df --output=iavail "\$CandidateDir"/);
   assert.doesNotMatch(gate, /df -i --output=iavail/);

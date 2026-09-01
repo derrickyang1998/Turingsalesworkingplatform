@@ -507,7 +507,7 @@ test('empty database applies contiguous CRM migration version 6 with the exact d
   }
 });
 
-test('db.js runtime registry opens a temporary database at migration version 7', (t) => {
+test('db.js runtime registry opens a temporary database at migration version 8', (t) => {
   const databasePath = temporaryDatabase(t, 'runtime-registration');
   const script = [
     "const db = require('./db');",
@@ -525,7 +525,7 @@ test('db.js runtime registry opens a temporary database at migration version 7',
     }
   });
   assert.equal(child.status, 0, child.stderr);
-  assert.equal(child.stdout, '7');
+  assert.equal(child.stdout, '8');
 });
 
 test('empty v6 migration installs the exact additive CRM schema manifest', (t) => {

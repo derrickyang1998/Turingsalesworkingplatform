@@ -224,6 +224,82 @@ test('Feishu Bitable batch delivery preflights the approved fields and strips co
   assert.doesNotMatch(JSON.stringify(result), /test-secret|tenant-test-token|rec_test_1/i);
 });
 
+test('Feishu Bitable delivery sends the prebuilt outbox snapshot without re-projecting changed source rows', async () => {
+  const calls = [];
+  const client = createFeishuClient({
+    env: environment({
+      FEISHU_SYNC_MODE: 'bitable',
+      FEISHU_APP_ID: 'cli_test_app',
+      FEISHU_APP_SECRET: 'test-secret',
+      FEISHU_BITABLE_APP_TOKEN: 'basc_test',
+      FEISHU_BITABLE_TABLE_ID: 'tbl_test',
+      FEISHU_BITABLE_WRITE_ENABLED: 'true'
+    }),
+    fetchImpl: async function(url, options) {
+      calls.push({ url, options });
+      if (calls.length === 1) return okResponse({ code: 0, tenant_access_token: 'tenant-test-token' });
+      if (calls.length === 2) return bitableFieldsResponse();
+      return okResponse({ code: 0, data: { records: [{ record_id: 'rec_snapshot_1' }] } });
+    }
+  });
+  const operationId = 'f58f171f-71b8-4dda-84dd-7d27e43ef5f5';
+  const sourceRecords = [{
+    '网红频道名称': '@snapshot_creator',
+    '网红频道链接': 'https://example.com/snapshot',
+    '父记录': 'CRM-101'
+  }];
+  const snapshot = client.prepareBitableOutboxPayload({ records: sourceRecords, operationId });
+  sourceRecords[0]['网红频道名称'] = '@changed_after_reservation';
+
+  const result = await client.syncInfluencers({
+    records: sourceRecords,
+    csv: '网红频道名称\n@snapshot_creator\n',
+    operationId,
+    bitableRecords: snapshot.records,
+    includeReceipt: true
+  });
+
+  assert.deepEqual(result.remoteRecordIds, ['rec_snapshot_1']);
+  const body = JSON.parse(calls[2].options.body);
+  assert.deepEqual(body.records, snapshot.records);
+  assert.equal(body.records[0].fields['网红频道名称'], '@snapshot_creator');
+});
+
+test('Feishu Bitable batch delivery rejects a response that repeats one remote record ID', async () => {
+  const calls = [];
+  const client = createFeishuClient({
+    env: environment({
+      FEISHU_SYNC_MODE: 'bitable',
+      FEISHU_APP_ID: 'cli_test_app',
+      FEISHU_APP_SECRET: 'test-secret',
+      FEISHU_BITABLE_APP_TOKEN: 'basc_test',
+      FEISHU_BITABLE_TABLE_ID: 'tbl_test',
+      FEISHU_BITABLE_WRITE_ENABLED: 'true'
+    }),
+    fetchImpl: async function(url, options) {
+      calls.push({ url, options });
+      if (calls.length === 1) return okResponse({ code: 0, tenant_access_token: 'tenant-test-token' });
+      if (calls.length === 2) return bitableFieldsResponse();
+      return okResponse({
+        code: 0,
+        data: { records: [{ record_id: 'rec_duplicate' }, { record_id: 'rec_duplicate' }] }
+      });
+    }
+  });
+
+  await assert.rejects(
+    client.syncInfluencers({
+      records: [{ '网红频道名称': '@creator-one' }, { '网红频道名称': '@creator-two' }],
+      csv: '网红频道名称\n@creator-one\n@creator-two\n',
+      operationId: 'fd1d679a-6a69-4f93-b431-e78f11ad578b'
+    }),
+    function(error) {
+      return error instanceof FeishuClientError && error.code === 'FEISHU_WRITE_RESULT_INCOMPLETE';
+    }
+  );
+  assert.equal(calls.length, 3);
+});
+
 test('Feishu Bitable batch delivery requires the full remote template even when contact values are withheld', async () => {
   const calls = [];
   const client = createFeishuClient({

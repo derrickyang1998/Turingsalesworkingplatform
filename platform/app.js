@@ -4411,15 +4411,22 @@ function changeM4CampaignContext() {
   m4CampaignContextId = select && select.value ? readPositiveInteger(select.value) : 0;
   renderM4CampaignContext();
   loadCollaborations();
+  loadFeishuOutbox();
 }
 function syncM4CampaignContextFromWorkflow() {
   var campaignId = readPositiveInteger(getActiveCampaignId());
   if (campaignId !== null) m4CampaignContextId = campaignId;
-  return loadM4Campaigns();
+  return loadM4Campaigns().then(function(campaigns) {
+    loadFeishuOutbox();
+    return campaigns;
+  });
 }
 function initM4() {
   ensureM4TableStyles();
-  Promise.all([loadInfluencersFromAPI(), loadM4Campaigns(), loadFeishuStatus()]).then(function() { loadCollaborations(); });
+  Promise.all([loadInfluencersFromAPI(), loadM4Campaigns(), loadFeishuStatus()]).then(function() {
+    loadCollaborations();
+    loadFeishuOutbox();
+  });
 }
 function m4Filters() {
   return {
@@ -4659,6 +4666,62 @@ async function loadFeishuStatus() {
   }
 }
 
+function renderFeishuDeliveryStatus(delivery, campaignId, errorMessage) {
+  var status = document.getElementById('feishuDeliveryStatus');
+  if (!status) return;
+  if (campaignId === null) {
+    status.textContent = '选择关联活动后，可查看最近一次飞书推送回执。';
+    status.style.color = 'var(--text2)';
+    return;
+  }
+  if (errorMessage) {
+    status.textContent = '暂时无法读取活动的飞书推送回执。';
+    status.style.color = 'var(--red)';
+    return;
+  }
+  if (!delivery) {
+    status.textContent = '当前活动暂未产生飞书推送记录。';
+    status.style.color = 'var(--text2)';
+    return;
+  }
+  if (delivery.status === 'succeeded') {
+    status.textContent = '最近一次推送已成功写入 ' + (delivery.remote_record_count || delivery.record_count || 0) + ' 条网红记录。';
+    status.style.color = 'var(--green)';
+    return;
+  }
+  if (delivery.status === 'failed') {
+    status.textContent = '最近一次推送失败（' + (delivery.last_error_code || 'FEISHU_SYNC_FAILED') + '），等待显式重试。';
+    status.style.color = 'var(--red)';
+    return;
+  }
+  status.textContent = '最近一次推送结果待管理员与飞书记录核对，请勿重复提交。';
+  status.style.color = 'var(--amber)';
+}
+
+async function loadFeishuOutbox() {
+  var campaignId = getM4CampaignId();
+  if (campaignId === null) {
+    renderFeishuDeliveryStatus(null, null);
+    return [];
+  }
+  var status = document.getElementById('feishuDeliveryStatus');
+  if (status) {
+    status.textContent = '正在读取最近一次飞书推送回执...';
+    status.style.color = 'var(--text2)';
+  }
+  try {
+    var response = await apiFetch('/campaigns/' + encodeURIComponent(campaignId) + '/feishu-deliveries?limit=1');
+    var data = await response.json();
+    if (!response.ok) throw new Error(data.error || '无法读取飞书推送回执');
+    var deliveries = Array.isArray(data.deliveries) ? data.deliveries : [];
+    renderFeishuDeliveryStatus(deliveries[0] || null, campaignId);
+    return deliveries;
+  } catch (error) {
+    renderFeishuDeliveryStatus(null, campaignId, error);
+    return [];
+  }
+}
+
 async function testFeishuConnection() {
   var status = document.getElementById('feishuStatus');
   var button = document.getElementById('feishuTestButton');
@@ -4691,15 +4754,17 @@ function createFeishuBitableOperationId() {
     return value.toString(16);
   });
 }
-function feishuBitableSelectionSignature(ids) {
-  return (ids || [])
+function feishuBitableSelectionSignature(ids, campaignId) {
+  var scope = readPositiveInteger(campaignId);
+  var selection = (ids || [])
     .map(function(id) { return Number(id); })
     .filter(function(id) { return Number.isInteger(id) && id > 0; })
     .sort(function(left, right) { return left - right; })
     .join(',');
+  return String(scope === null ? 0 : scope) + ':' + selection;
 }
-function feishuBitableSyncStateFor(ids) {
-  var selectionKey = feishuBitableSelectionSignature(ids);
+function feishuBitableSyncStateFor(ids, campaignId) {
+  var selectionKey = feishuBitableSelectionSignature(ids, campaignId);
   if (feishuBitableSyncState.selectionKey !== selectionKey) {
     feishuBitableSyncState = { selectionKey: selectionKey, operationId: '', inFlight: null };
   }
@@ -4716,7 +4781,8 @@ async function pushToFeishu() {
     toast('Select influencers first', 'error');
     return;
   }
-  var syncState = feishuBitableSyncStateFor(ids);
+  var campaignId = getM4CampaignId();
+  var syncState = feishuBitableSyncStateFor(ids, campaignId);
   if (syncState.inFlight) return syncState.inFlight;
   if (status) status.innerHTML = '<span>Syncing selected influencers...</span>';
   syncState.inFlight = (async function() {
@@ -4724,7 +4790,7 @@ async function pushToFeishu() {
       var r = await apiFetch('/influencers/feishu/sync', {
         method: 'POST',
         headers: { 'Idempotency-Key': syncState.operationId },
-        body: JSON.stringify({ ids: ids })
+        body: JSON.stringify(campaignId === null ? { ids: ids } : { ids: ids, campaign_id: campaignId })
       });
       var d = await r.json();
       if (!r.ok) throw new Error(d.error || 'Feishu sync failed');
@@ -4733,6 +4799,11 @@ async function pushToFeishu() {
         if (status) status.innerHTML = '<span style="color:#d49900">' + esc(d.message || 'CSV fallback downloaded.') + '</span>';
         toast('Feishu fallback CSV downloaded');
         syncState.operationId = '';
+        return;
+      }
+      if (d.code === 'FEISHU_OUTBOX_RECONCILIATION_REQUIRED') {
+        if (status) status.innerHTML = '<span style="color:#d49900">Feishu delivery requires reconciliation before another write is attempted.</span>';
+        toast('Feishu delivery requires reconciliation');
         return;
       }
       if (status) status.innerHTML = '<span style="color:#0f7b3c">Synced ' + (d.synced || d.records || ids.length) + ' influencers to Feishu</span>';
@@ -4744,6 +4815,7 @@ async function pushToFeishu() {
     } finally {
       syncState.inFlight = null;
       loadFeishuStatus();
+      loadFeishuOutbox();
     }
   })();
   return syncState.inFlight;
@@ -6119,7 +6191,7 @@ function switchPage(id, options) {
     'getEditedDemand', 'syncCurDemandFromAnalysis', 'handleDemandFile', 'analyzeDemandAI',
     'switchTab', 'matchInfluencers', 'smartMatch', 'handleUpload', 'handleDrop', 'openInfUploadModal', 'handleUploadModal', 'downloadInfTemplate', 'exportAll', 'exportFiltered', 'exportSelected',
     'toggleAll', 'syncInfluencerSelectionState', 'loadM4Campaigns', 'changeM4CampaignContext', 'startCollab', 'submitCollabOrder', 'closeCollabOrderModal', 'loadCollaborations', 'updateCollabStatus', 'runCampaignCollabAction', 'closeCampaignSettlementModal', 'submitCampaignSettlement',
-    'sendChat', 'clearChat', 'clearAIMemory', 'pushToFeishu', 'loadFeishuStatus', 'testFeishuConnection',
+    'sendChat', 'clearChat', 'clearAIMemory', 'pushToFeishu', 'loadFeishuStatus', 'loadFeishuOutbox', 'testFeishuConnection',
     'switchAdminTab', 'loadAdminDashboard', 'loadAdminUsers', 'adminAddUser', 'adminCreateInvite', 'adminResetPw',
     'wfUndo', 'wfRedo', 'wfClearCanvas', 'wfSaveTemplate', 'wfPublishTemplate', 'wfResetTaskFilters', 'wfLoadTasks', 'wfLoadInstances',
     'showRelatedBrands', 'closeBrandRelModal'
