@@ -686,6 +686,15 @@ function createCampaignCollaborationService(db) {
   function list(input) {
     const userId = requirePositiveSafeId(input && input.userId, 'userId');
     if (!requireActiveActor(db, userId)) return { collaborations: [] };
+    const rawCampaignId = input && input.campaignId;
+    const campaignId = rawCampaignId === undefined || rawCampaignId === null || rawCampaignId === ''
+      ? null
+      : Number(rawCampaignId);
+    if (campaignId !== null && (!Number.isSafeInteger(campaignId) || campaignId < 1)) {
+      throw serviceError(400, 'INVALID_CAMPAIGN_INPUT', 'Campaign id is invalid.');
+    }
+    const includeCampaignContext = campaignId !== null ||
+      input && (input.includeCampaignContext === true || input.includeCampaignContext === '1' || input.includeCampaignContext === 'true');
     const scope = authorizedCollaborationScope(userId);
     const conditions = [];
     const params = [...scope.params];
@@ -697,16 +706,39 @@ function createCampaignCollaborationService(db) {
       conditions.push('collaboration.demand_id=?');
       params.push(parseInt(input.demandId));
     }
-    const collaborations = db.prepare(`
+    if (campaignId !== null) {
+      conditions.push('authorized.custody_campaign_id=?');
+      params.push(campaignId);
+    }
+    const contextProjection = includeCampaignContext
+      ? `, collaboration.row_version,
+        authorized.custody_campaign_id AS campaign_id,
+        campaign.name AS campaign_name,
+        campaign.lifecycle_state AS campaign_lifecycle_state,
+        campaign.operational_status AS campaign_operational_status`
+      : '';
+    const contextJoin = includeCampaignContext
+      ? 'LEFT JOIN campaigns campaign ON campaign.id=authorized.custody_campaign_id'
+      : '';
+    const rows = db.prepare(`
       WITH ${scope.sql}
-      SELECT ${legacyCollaborationColumns('collaboration')}
+      SELECT ${legacyCollaborationColumns('collaboration')}${contextProjection}
       FROM authorized_collaborations authorized
       JOIN collaborations collaboration ON collaboration.id=authorized.id
       JOIN influencers influencer ON collaboration.influencer_id=influencer.id
+      ${contextJoin}
       ${conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''}
       ORDER BY collaboration.updated_at DESC
       LIMIT 200
     `).all(...params);
+    const collaborations = includeCampaignContext
+      ? rows.map((row) => ({
+          ...row,
+          active_relations: row.campaign_id === null
+            ? []
+            : activeRelations(db, row.campaign_id, row.id)
+        }))
+      : rows;
     return { collaborations };
   }
 

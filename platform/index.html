@@ -1008,6 +1008,18 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
 <div class="page" id="page-m4">
 <h2>👥 网红匹配 & 执行管理</h2>
 <p class="subtitle">提报资源名单 · 下单合作追踪 · 飞书同步</p>
+<div class="card" style="padding:12px 16px">
+  <div style="display:flex;justify-content:space-between;align-items:end;gap:12px;flex-wrap:wrap">
+    <div>
+      <h3 style="margin:0;font-size:14px">活动执行上下文</h3>
+      <div id="m4CampaignContextStatus" style="font-size:11px;color:var(--text2);margin-top:4px">加载可访问活动后，可把下单、执行、发布和结算留存在同一活动链路中。</div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:end;min-width:min(100%,420px)">
+      <div style="flex:1;min-width:220px"><label for="m4CampaignContext">关联活动</label><select id="m4CampaignContext" aria-label="选择网红执行关联活动" onchange="changeM4CampaignContext()"><option value="">未关联活动（独立合作记录）</option></select></div>
+      <button class="btn btn-outline btn-sm" type="button" onclick="loadM4Campaigns()">刷新活动</button>
+    </div>
+  </div>
+</div>
 <div class="tabs" id="tabBar" aria-label="网红执行视图">
   <div class="tab active" data-tab="tab1" onclick="switchTab('tab1')">📋 提报资源名单</div>
   <div class="tab" data-tab="tab2" onclick="switchTab('tab2')">📊 下单合作资源</div>

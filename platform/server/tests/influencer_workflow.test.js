@@ -1271,6 +1271,8 @@ test('m4 frontend keeps import, feishu, and order-resource controls wired', () =
 
   assert.match(indexHtml, /id="collabFilter"/);
   assert.match(indexHtml, /id="collabStatsBar"/);
+  assert.match(indexHtml, /id="m4CampaignContext"/);
+  assert.match(indexHtml, /id="m4CampaignContextStatus"/);
   assert.match(indexHtml, /id="filt_search"/);
   assert.match(indexHtml, /id="infFileModal" accept="\.csv,\.json,\.xlsx"/);
   assert.match(appJs, /m4-table thead th\{position:sticky/);
@@ -1283,8 +1285,14 @@ test('m4 frontend keeps import, feishu, and order-resource controls wired', () =
   assert.match(appJs, /\/influencers\/feishu\/sync/);
   assert.match(appJs, /function startCollab/);
   assert.match(appJs, /function submitCollabOrder/);
+  assert.match(appJs, /function loadM4Campaigns/);
+  assert.match(appJs, /function getM4CampaignId/);
+  assert.match(appJs, /function runCampaignCollabAction/);
+  assert.match(appJs, /campaign_relation/);
+  assert.match(appJs, /\/campaigns\?limit=100/);
   assert.match(appJs, /var resource = \{/);
-  assert.match(appJs, /resource:\s*resource/);
+  assert.match(appJs, /body\.proposal_notes = JSON\.stringify\(resource\)/);
+  assert.match(appJs, /body\.resource = resource/);
 
   const m4SingletonNames = [
     'downloadInfTemplate',
@@ -1296,6 +1304,8 @@ test('m4 frontend keeps import, feishu, and order-resource controls wired', () =
     'handleUpload',
     'importInfluencers',
     'initM4',
+    'loadM4Campaigns',
+    'changeM4CampaignContext',
     'loadCollaborations',
     'loadInfluencersFromAPI',
     'matchInfluencers',
@@ -1305,7 +1315,10 @@ test('m4 frontend keeps import, feishu, and order-resource controls wired', () =
     'showInfPreview',
     'startCollab',
     'toggleAll',
-    'updateCollabStatus'
+    'updateCollabStatus',
+    'runCampaignCollabAction',
+    'closeCampaignSettlementModal',
+    'submitCampaignSettlement'
   ];
   for (const name of m4SingletonNames) {
     const re = new RegExp('^(?:async\\s+)?function\\s+' + name + '\\s*\\(', 'gm');
@@ -1329,8 +1342,13 @@ test('m4 frontend keeps import, feishu, and order-resource controls wired', () =
     'startCollab',
     'submitCollabOrder',
     'closeCollabOrderModal',
+    'loadM4Campaigns',
+    'changeM4CampaignContext',
     'loadCollaborations',
     'updateCollabStatus',
+    'runCampaignCollabAction',
+    'closeCampaignSettlementModal',
+    'submitCampaignSettlement',
     'pushToFeishu'
   ]) {
     assert.match(inlineHandlerBlock, new RegExp("'" + name + "'"), `${name} must remain exported for inline handlers`);

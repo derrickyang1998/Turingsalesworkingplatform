@@ -645,6 +645,41 @@ test('linked collaboration creation is idempotent and commits its order evidence
   `).get().count, 1);
 });
 
+test('collaboration list exposes campaign workspace context and filters to the selected campaign', (t) => {
+  const db = openCampaignDatabase(t);
+  const fixture = seedFixture(db);
+  const service = createCampaignCollaborationService(db);
+  const restricted = seedRestrictedCampaign(db, fixture);
+
+  const selected = service.list({ userId: 2, campaignId: 7001 });
+  assert.equal(selected.collaborations.length, 1);
+  const collaboration = selected.collaborations[0];
+  assert.deepEqual({
+    id: collaboration.id,
+    influencer_id: collaboration.influencer_id,
+    status: collaboration.status,
+    row_version: collaboration.row_version,
+    campaign_id: collaboration.campaign_id,
+    campaign_name: collaboration.campaign_name,
+    campaign_lifecycle_state: collaboration.campaign_lifecycle_state,
+    campaign_operational_status: collaboration.campaign_operational_status,
+    active_relations: collaboration.active_relations
+  }, {
+    id: 7101,
+    influencer_id: fixture.influencerId,
+    status: 'confirmed',
+    row_version: 1,
+    campaign_id: 7001,
+    campaign_name: 'Collaboration authorization',
+    campaign_lifecycle_state: 'lead',
+    campaign_operational_status: 'active',
+    active_relations: ['order']
+  });
+
+  const restrictedSelection = service.list({ userId: 2, campaignId: restricted.campaignId });
+  assert.deepEqual(restrictedSelection, { collaborations: [] });
+});
+
 test('linked update fences stale versions and replays the final authorized transition', (t) => {
   const db = openCampaignDatabase(t);
   seedFixture(db);

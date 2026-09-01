@@ -1696,6 +1696,7 @@ function fillWorkflowInfluencers(context) {
     var el = document.getElementById(id);
     if (el) el.value = fieldMap[id];
   });
+  if (typeof syncM4CampaignContextFromWorkflow === 'function') syncM4CampaignContextFromWorkflow();
   matchInfluencers();
   toast('已带入客户上下文到网红匹配');
 }
@@ -4323,9 +4324,102 @@ function ensureM4TableStyles() {
   style.textContent = '.m4-table{border-collapse:separate;border-spacing:0;min-width:1320px}.m4-table thead th{position:sticky;top:0;z-index:3;background:var(--surface);box-shadow:0 1px 0 var(--border)}.m4-table th:first-child,.m4-table td:first-child{width:42px;text-align:center}.m4-table input[type="checkbox"]{width:16px!important;height:16px!important;min-width:16px;margin:0;vertical-align:middle;accent-color:#1a1a1a}.m4-table tbody tr:hover{background:#fafaf9}';
   document.head.appendChild(style);
 }
+var m4Campaigns = [];
+var m4CampaignContextId = null;
+var lastCollabRows = [];
+function getM4CampaignId() {
+  if (m4CampaignContextId === 0) return null;
+  if (readPositiveInteger(m4CampaignContextId) !== null) return readPositiveInteger(m4CampaignContextId);
+  var select = document.getElementById('m4CampaignContext');
+  var selected = select ? readPositiveInteger(select.value) : null;
+  if (selected !== null) return selected;
+  return readPositiveInteger(getActiveCampaignId());
+}
+function getM4CampaignById(campaignId) {
+  campaignId = readPositiveInteger(campaignId);
+  return campaignId === null ? null : m4Campaigns.find(function(campaign) {
+    return readPositiveInteger(campaign && campaign.id) === campaignId;
+  }) || null;
+}
+function m4CampaignLabel(campaign) {
+  if (!campaign) return '';
+  var id = readPositiveInteger(campaign.id);
+  var parts = [campaign.name || (id === null ? '活动' : '活动 #' + id)];
+  if (campaign.product_name) parts.push(campaign.product_name);
+  return parts.join(' · ');
+}
+function renderM4CampaignContext() {
+  var status = document.getElementById('m4CampaignContextStatus');
+  if (!status) return;
+  var campaignId = getM4CampaignId();
+  var campaign = getM4CampaignById(campaignId);
+  if (campaignId === null) {
+    status.textContent = '当前会创建独立合作记录。选择活动后，下单、执行、发布和结算会自动沉淀到同一活动与知识库。';
+    return;
+  }
+  var parts = ['已关联 ' + (campaign ? m4CampaignLabel(campaign) : ('活动 #' + campaignId))];
+  if (campaign && campaign.lifecycle_state) parts.push('阶段：' + campaign.lifecycle_state);
+  if (campaign && campaign.operational_status) parts.push('状态：' + campaign.operational_status);
+  parts.push('订单、执行、发布和结算将写入活动审计链路。');
+  status.textContent = parts.join(' · ');
+}
+async function loadM4Campaigns() {
+  var select = document.getElementById('m4CampaignContext');
+  if (!select) return [];
+  var workflowCampaignId = readPositiveInteger(getActiveCampaignId());
+  try {
+    var response = await apiFetch('/campaigns?limit=100&operational_status=active');
+    var data = await response.json();
+    if (!response.ok) throw new Error(data.error || '活动列表加载失败');
+    var items = Array.isArray(data.items) ? data.items : [];
+    var selectedId = getM4CampaignId();
+    if (workflowCampaignId !== null && !items.some(function(campaign) {
+      return readPositiveInteger(campaign && campaign.id) === workflowCampaignId;
+    })) {
+      try {
+        var detailResponse = await apiFetch('/campaigns/' + workflowCampaignId);
+        var detail = await detailResponse.json();
+        if (detailResponse.ok && detail.campaign) items.unshift(detail.campaign);
+      } catch (error) {}
+    }
+    m4Campaigns = items.filter(function(campaign, index, campaigns) {
+      var id = readPositiveInteger(campaign && campaign.id);
+      return id !== null && campaigns.findIndex(function(item) {
+        return readPositiveInteger(item && item.id) === id;
+      }) === index;
+    });
+    if (m4CampaignContextId === null && workflowCampaignId !== null) {
+      m4CampaignContextId = workflowCampaignId;
+      selectedId = workflowCampaignId;
+    }
+    select.innerHTML = '<option value="">未关联活动（独立合作记录）</option>' + m4Campaigns.map(function(campaign) {
+      var id = readPositiveInteger(campaign.id);
+      return '<option value="' + id + '">' + esc(m4CampaignLabel(campaign)) + '</option>';
+    }).join('');
+    if (selectedId !== null && getM4CampaignById(selectedId)) select.value = String(selectedId);
+    renderM4CampaignContext();
+    return m4Campaigns;
+  } catch (error) {
+    m4Campaigns = [];
+    select.innerHTML = '<option value="">未关联活动（独立合作记录）</option>';
+    renderM4CampaignContext();
+    return [];
+  }
+}
+function changeM4CampaignContext() {
+  var select = document.getElementById('m4CampaignContext');
+  m4CampaignContextId = select && select.value ? readPositiveInteger(select.value) : 0;
+  renderM4CampaignContext();
+  loadCollaborations();
+}
+function syncM4CampaignContextFromWorkflow() {
+  var campaignId = readPositiveInteger(getActiveCampaignId());
+  if (campaignId !== null) m4CampaignContextId = campaignId;
+  return loadM4Campaigns();
+}
 function initM4() {
   ensureM4TableStyles();
-  loadInfluencersFromAPI().then(function() { loadCollaborations(); });
+  Promise.all([loadInfluencersFromAPI(), loadM4Campaigns()]).then(function() { loadCollaborations(); });
 }
 function m4Filters() {
   return {
@@ -4533,13 +4627,70 @@ async function pushToFeishu() {
   }
 }
 var pendingCollabInfId = null;
+var pendingCollabCreateIntentId = null;
+var pendingSettlementCollabId = null;
+var m4CollabMutationOperations = {};
+var m4CollabMutationInFlight = {};
 function findInfluencerById(infId) {
   var id = Number(infId);
   return (lastInfAPI || lastMatch || []).find(function(inf) { return Number(inf.id) === id; }) || {};
 }
+function findCollaborationById(collabId) {
+  var id = Number(collabId);
+  return (lastCollabRows || []).find(function(collaboration) {
+    return Number(collaboration.id) === id;
+  }) || null;
+}
+function m4OperationId(prefix) {
+  return createDemandAnalysisOperationId(prefix || 'm4-collaboration-');
+}
+function m4MutationHeaders(prefix, idempotencyKey) {
+  var operationPrefix = prefix || 'm4-collaboration-';
+  return {
+    'Idempotency-Key': idempotencyKey || m4OperationId(operationPrefix),
+    'X-Request-Id': m4OperationId(operationPrefix + 'request-')
+  };
+}
+function m4CollabMutationSlot(collab, patch, action) {
+  var stablePatch = {};
+  Object.keys(patch || {}).sort().forEach(function(key) { stablePatch[key] = patch[key]; });
+  return [
+    Number(collab && collab.id) || 0,
+    Number(collab && collab.campaign_id) || 0,
+    Number(collab && collab.row_version) || 0,
+    String(action || 'update'),
+    JSON.stringify(stablePatch)
+  ].join(':');
+}
+function m4CollabCreateMutationSlot(campaignId, body) {
+  if (!pendingCollabCreateIntentId) pendingCollabCreateIntentId = m4OperationId('m4-collaboration-create-intent-');
+  var stableBody = {};
+  Object.keys(body || {}).sort().forEach(function(key) { stableBody[key] = body[key]; });
+  return [
+    'create',
+    String(pendingCollabCreateIntentId),
+    Number(campaignId) || 0,
+    JSON.stringify(stableBody)
+  ].join(':');
+}
+function m4CollabMutationOperationKey(slot, prefix) {
+  if (!m4CollabMutationOperations[slot]) {
+    m4CollabMutationOperations[slot] = m4OperationId(prefix || 'm4-collaboration-update-');
+  }
+  return m4CollabMutationOperations[slot];
+}
+function m4OrderCampaignText(campaignId) {
+  var campaign = getM4CampaignById(campaignId);
+  return campaign ? m4CampaignLabel(campaign) : '活动 #' + campaignId;
+}
 function startCollab(infId) {
   pendingCollabInfId = Number(infId);
+  pendingCollabCreateIntentId = m4OperationId('m4-collaboration-create-intent-');
   var inf = findInfluencerById(infId);
+  var campaignId = getM4CampaignId();
+  var campaignContext = campaignId === null
+    ? '未关联活动：本次会创建独立合作记录。'
+    : '已关联 ' + m4OrderCampaignText(campaignId) + '：订单会进入活动审计和知识库。';
   var opener = document.activeElement;
   var existing = document.getElementById('collabOrderModal');
   if (existing) existing.remove();
@@ -4550,18 +4701,21 @@ function startCollab(infId) {
   overlay.innerHTML = '<div class="modal" id="collabOrderDialog" role="dialog" aria-modal="true" aria-labelledby="collabOrderDialogTitle" onclick="event.stopPropagation()">' +
     '<button type="button" class="modal-close" aria-label="关闭下单合作资源" title="关闭下单合作资源" onclick="closeCollabOrderModal()">&times;</button>' +
     '<h3 id="collabOrderDialogTitle">下单合作资源</h3>' +
-    '<p style="font-size:12px;opacity:.6;margin-bottom:12px">' + esc(inf.kol_handle || '') + ' / ' + esc(inf.platform || '') + '</p>' +
+    '<p style="font-size:12px;opacity:.6;margin-bottom:8px">' + esc(inf.kol_handle || '') + ' / ' + esc(inf.platform || '') + '</p>' +
+    '<div style="font-size:11px;padding:8px 10px;background:var(--surface2);border-radius:var(--radius-sm);margin-bottom:12px">' + esc(campaignContext) + '</div>' +
     '<div class="grid grid-2">' +
     '<div><label>项目</label><input id="orderProject" value="' + esc(inf.project_name || '') + '"></div>' +
     '<div><label>推广产品</label><input id="orderProduct" value="' + esc(inf.product_name || '') + '"></div>' +
-    '<div><label>对外报价</label><input id="orderQuotedPrice" type="number" value="' + esc(inf.quoted_price || inf.cost_usd || '') + '"></div>' +
-    '<div><label>状态</label><select id="orderStatus"><option value="confirmed">已确认</option><option value="proposed">待提案</option><option value="negotiating">谈判中</option><option value="live">执行中</option></select></div>' +
+    '<div><label>资源类型</label><select id="orderType"><option value="paid">付费合作</option><option value="affiliate">联盟分佣</option><option value="gifting">寄样置换</option><option value="retainer">长期合作</option></select></div>' +
+    '<div><label>合同 / PO 编号</label><input id="orderReference" placeholder="可选"></div>' +
+    '<div><label>对外报价</label><input id="orderQuotedPrice" type="number" min="0" step="0.01" value="' + esc(inf.quoted_price || inf.cost_usd || '') + '"></div>' +
+    '<div><label>初始状态</label><div style="padding:8px 0;font-size:12px">已确认下单</div></div>' +
     '<div><label>开始时间</label><input id="orderTimelineStart" type="date"></div>' +
     '<div><label>结束时间</label><input id="orderTimelineEnd" type="date"></div>' +
     '</div>' +
     '<div style="margin-top:10px"><label>交付物</label><textarea id="orderDeliverable" rows="3">' + esc(inf.content_deliverable || inf.collab_type || '') + '</textarea></div>' +
     '<div style="margin-top:10px"><label>备注</label><textarea id="orderNotes" rows="3"></textarea></div>' +
-    '<div class="btn-group" style="justify-content:flex-end"><button class="btn btn-outline" onclick="closeCollabOrderModal()">取消</button><button class="btn btn-primary" onclick="submitCollabOrder()">确认下单</button></div>' +
+    '<div class="btn-group" style="justify-content:flex-end"><button type="button" class="btn btn-outline" onclick="closeCollabOrderModal()">取消</button><button type="button" class="btn btn-primary" onclick="submitCollabOrder()">确认下单</button></div>' +
     '</div>';
   document.body.appendChild(overlay);
   if (window.TMAccessibility) {
@@ -4575,46 +4729,85 @@ function closeCollabOrderModal(targetOverlay) {
   var dialog = overlay ? overlay.querySelector('#collabOrderDialog') : document.getElementById('collabOrderDialog');
   if (dialog && window.TMAccessibility) window.TMAccessibility.closeDialog(dialog);
   if (overlay) overlay.remove();
+  pendingCollabInfId = null;
+  pendingCollabCreateIntentId = null;
+}
+function m4ActiveDemandId(campaignId) {
+  if (readPositiveInteger(getActiveCampaignId()) !== campaignId || typeof getActiveDemandId !== 'function') return null;
+  return readPositiveInteger(getActiveDemandId());
 }
 async function submitCollabOrder() {
   if (!pendingCollabInfId) return;
+  var campaignId = getM4CampaignId();
   var resource = {
+    schema: 'turingmarket.collaboration-order.v1',
     project_name: document.getElementById('orderProject')?.value || '',
     product_name: document.getElementById('orderProduct')?.value || '',
+    order_type: document.getElementById('orderType')?.value || 'paid',
+    order_reference: document.getElementById('orderReference')?.value || '',
     deliverable: document.getElementById('orderDeliverable')?.value || '',
     quoted_price: Number(document.getElementById('orderQuotedPrice')?.value || 0)
   };
   var body = {
     influencer_id: pendingCollabInfId,
-    status: document.getElementById('orderStatus')?.value || 'confirmed',
+    status: 'confirmed',
     cost_quoted: resource.quoted_price,
     timeline_start: document.getElementById('orderTimelineStart')?.value || '',
     timeline_end: document.getElementById('orderTimelineEnd')?.value || '',
-    notes: document.getElementById('orderNotes')?.value || '',
-    resource: resource
+    notes: document.getElementById('orderNotes')?.value || ''
   };
+  var options = { method: 'POST' };
+  var createMutationSlot = null;
+  var createIntentId = pendingCollabCreateIntentId;
+  if (campaignId === null) {
+    body.resource = resource;
+  } else {
+    body.campaign_id = campaignId;
+    body.proposal_notes = JSON.stringify(resource);
+    var demandId = m4ActiveDemandId(campaignId);
+    if (demandId !== null) body.demand_id = demandId;
+    createMutationSlot = m4CollabCreateMutationSlot(campaignId, body);
+    createIntentId = pendingCollabCreateIntentId;
+    if (m4CollabMutationInFlight[createMutationSlot]) {
+      toast('活动订单正在创建，请勿重复点击。');
+      return m4CollabMutationInFlight[createMutationSlot];
+    }
+    options.headers = m4MutationHeaders('m4-collaboration-create-', m4CollabMutationOperationKey(createMutationSlot, 'm4-collaboration-create-'));
+  }
+  options.body = JSON.stringify(body);
+  var request = Promise.resolve().then(function() { return apiFetch('/collaborations', options); });
+  if (createMutationSlot) m4CollabMutationInFlight[createMutationSlot] = request;
   try {
-    var r = await apiFetch('/collaborations', { method: 'POST', body: JSON.stringify(body) });
+    var r = await request;
     var d = await r.json();
     if (!r.ok) throw new Error(d.error || 'Order failed');
+    if (createIntentId && pendingCollabCreateIntentId !== createIntentId) return d;
     closeCollabOrderModal();
-    toast('Order created #' + d.id);
+    toast((campaignId === null ? '独立合作记录已创建 #' : '活动订单已创建 #') + d.id);
     switchTab('tab2');
     loadCollaborations();
   } catch (e) {
+    if (createIntentId && pendingCollabCreateIntentId !== createIntentId) return;
     toast(e.message, 'error');
+  } finally {
+    if (createMutationSlot && m4CollabMutationInFlight[createMutationSlot] === request) delete m4CollabMutationInFlight[createMutationSlot];
   }
 }
 var STATUS_LABELS = { proposed: '待提案', contacted: '已建联', negotiating: '谈判中', confirmed: '已确认', contract_sent: '合同已发', live: '执行中', content_review: '内容审核', completed: '已完成', cancelled: '已取消' };
+var COLLAB_RELATION_LABELS = { order: '下单', execution: '执行', publication: '发布', settlement: '结算' };
 async function loadCollaborations(status) {
   var filterEl = document.getElementById('collabFilter');
   var selectedStatus = status || (filterEl ? filterEl.value : '');
+  var campaignId = getM4CampaignId();
   try {
-    var qs = selectedStatus ? '?status=' + encodeURIComponent(selectedStatus) : '';
-    var r = await apiFetch('/collaborations' + qs);
+    var query = ['include_campaign_context=1'];
+    if (selectedStatus) query.push('status=' + encodeURIComponent(selectedStatus));
+    if (campaignId !== null) query.push('campaign_id=' + encodeURIComponent(campaignId));
+    var r = await apiFetch('/collaborations' + (query.length ? '?' + query.join('&') : ''));
     var d = await r.json();
     if (!r.ok) throw new Error(d.error || 'Load collaborations failed');
-    var rows = d.collaborations || [];
+    var rows = Array.isArray(d.collaborations) ? d.collaborations : [];
+    lastCollabRows = rows;
     renderCollabTable(rows);
     var stats = document.getElementById('collabStatsBar');
     if (stats) {
@@ -4625,6 +4818,7 @@ async function loadCollaborations(status) {
       }).join('');
     }
   } catch (e) {
+    lastCollabRows = [];
     var c = document.getElementById('execTableContainer');
     if (c) c.innerHTML = '<p style="text-align:center;padding:30px;opacity:.5">Load failed: ' + esc(e.message) + '</p>';
   }
@@ -4632,31 +4826,76 @@ async function loadCollaborations(status) {
 function collabResource(collab) {
   try { return collab.proposal_notes ? JSON.parse(collab.proposal_notes) : {}; } catch (e) { return {}; }
 }
+function collabRelations(collab) {
+  return Array.isArray(collab && collab.active_relations) ? collab.active_relations : [];
+}
+function isCampaignCollaboration(collab) {
+  return readPositiveInteger(collab && collab.campaign_id) !== null;
+}
+function renderCollabRelationTags(collab) {
+  var relations = collabRelations(collab);
+  if (!relations.length) return '<span style="font-size:10px;opacity:.55">未关联</span>';
+  return relations.map(function(relation) {
+    return '<span style="display:inline-block;margin:2px 4px 2px 0;padding:2px 6px;border:1px solid var(--border);border-radius:999px;font-size:10px">' + esc(COLLAB_RELATION_LABELS[relation] || relation) + '</span>';
+  }).join('');
+}
+function renderCampaignCollabActions(collab) {
+  var relationSet = {};
+  collabRelations(collab).forEach(function(relation) { relationSet[relation] = true; });
+  var actions = [];
+  if (collab.status === 'confirmed') {
+    actions.push('<button type="button" class="btn btn-sm" onclick="runCampaignCollabAction(' + collab.id + ',\'contract\')">合同已发</button>');
+    actions.push('<button type="button" class="btn btn-sm btn-primary" onclick="runCampaignCollabAction(' + collab.id + ',\'execution\')">开始执行</button>');
+  } else if (collab.status === 'contract_sent') {
+    actions.push('<button type="button" class="btn btn-sm btn-primary" onclick="runCampaignCollabAction(' + collab.id + ',\'execution\')">开始执行</button>');
+  } else if (collab.status === 'live') {
+    actions.push('<button type="button" class="btn btn-sm btn-primary" onclick="runCampaignCollabAction(' + collab.id + ',\'review\')">进入内容审核</button>');
+  } else if (collab.status === 'content_review') {
+    actions.push('<button type="button" class="btn btn-sm btn-primary" onclick="runCampaignCollabAction(' + collab.id + ',\'publication\')">确认发布</button>');
+  } else if (collab.status === 'completed' && relationSet.execution && !relationSet.publication) {
+    actions.push('<button type="button" class="btn btn-sm btn-primary" onclick="runCampaignCollabAction(' + collab.id + ',\'publication\')">确认发布</button>');
+  } else if (collab.status === 'completed' && relationSet.publication && !relationSet.settlement) {
+    actions.push('<button type="button" class="btn btn-sm btn-primary" onclick="runCampaignCollabAction(' + collab.id + ',\'settlement\')">确认结算</button>');
+  }
+  return actions.length ? '<div style="display:flex;gap:6px;flex-wrap:wrap">' + actions.join('') + '</div>' : '<span style="font-size:11px;opacity:.55">无需操作</span>';
+}
 function renderCollabTable(data) {
   var c = document.getElementById('execTableContainer');
   if (!c) return;
   if (!data || !data.length) { c.innerHTML = '<p style="text-align:center;padding:30px;opacity:.5">暂无合作记录</p>'; return; }
-  var h = '<table><thead><tr><th>KOL</th><th>Project / Product</th><th>Deliverable</th><th>Status</th><th>Price</th><th>Timeline</th><th>Notes</th><th>Action</th></tr></thead><tbody>';
+  var h = '<table class="m4-table"><thead><tr><th>KOL</th><th>活动 / 项目</th><th>交付物</th><th>执行状态</th><th>阶段证据</th><th>报价</th><th>排期</th><th>备注</th><th>操作</th></tr></thead><tbody>';
   data.forEach(function(collab) {
     var resource = collabResource(collab);
     var project = resource.project_name || collab.project_name || '-';
     var product = resource.product_name || collab.product_name || '-';
     var deliverable = resource.deliverable || collab.content_deliverable || '-';
+    var linked = isCampaignCollaboration(collab);
+    var campaignText = linked ? (collab.campaign_name || ('活动 #' + collab.campaign_id)) : '独立合作记录';
     h += '<tr><td><strong>' + esc(collab.kol_handle || '') + '</strong><br><span style="font-size:10px;opacity:.55">' + esc(collab.platform || '') + ' / ' + fmtCount(collab.followers) + '</span></td>';
-    h += '<td><strong>' + esc(project) + '</strong><br><span style="font-size:10px;opacity:.6">' + esc(product) + '</span></td>';
+    h += '<td><strong>' + esc(campaignText) + '</strong><br><span style="font-size:10px;opacity:.6">' + esc(project) + ' / ' + esc(product) + '</span></td>';
     h += '<td style="max-width:180px">' + esc(deliverable) + '</td>';
-    h += '<td><select id="st_' + collab.id + '" onchange="updateCollabStatus(' + collab.id + ')" style="width:auto;font-size:11px">';
-    Object.keys(STATUS_LABELS).forEach(function(key) { h += '<option value="' + key + '"' + (collab.status === key ? ' selected' : '') + '>' + STATUS_LABELS[key] + '</option>'; });
-    h += '</select></td>';
+    if (linked) {
+      h += '<td><strong>' + esc(STATUS_LABELS[collab.status] || collab.status || '-') + '</strong><br><span style="font-size:10px;opacity:.55">版本 ' + esc(collab.row_version || '-') + '</span></td>';
+    } else {
+      h += '<td><select id="st_' + collab.id + '" onchange="updateCollabStatus(' + collab.id + ')" style="width:auto;font-size:11px">';
+      Object.keys(STATUS_LABELS).forEach(function(key) { h += '<option value="' + key + '"' + (collab.status === key ? ' selected' : '') + '>' + STATUS_LABELS[key] + '</option>'; });
+      h += '</select></td>';
+    }
+    h += '<td style="min-width:160px">' + (linked ? renderCollabRelationTags(collab) : '<span style="font-size:10px;opacity:.55">未接入活动</span>') + '</td>';
     h += '<td>$' + (collab.cost_quoted || resource.quoted_price || 0) + '</td>';
     h += '<td style="font-size:10px">' + esc([collab.timeline_start || '', collab.timeline_end || ''].filter(Boolean).join(' -> ') || '-') + '</td>';
-    h += '<td style="max-width:140px;font-size:10px">' + esc(collab.notes || '-') + '</td>';
-    h += '<td><button class="btn btn-sm" onclick="updateCollabStatus(' + collab.id + ')">保存</button></td></tr>';
+    h += '<td style="max-width:140px;font-size:10px">' + esc(collab.notes || resource.order_reference || '-') + '</td>';
+    h += '<td style="min-width:150px">' + (linked ? renderCampaignCollabActions(collab) : '<button type="button" class="btn btn-sm" onclick="updateCollabStatus(' + collab.id + ')">保存</button>') + '</td></tr>';
   });
   h += '</tbody></table>';
   c.innerHTML = h;
 }
 async function updateCollabStatus(collabId) {
+  var collab = findCollaborationById(collabId);
+  if (isCampaignCollaboration(collab)) {
+    toast('活动订单请使用右侧的阶段操作，系统会保留审计和知识证据。', 'error');
+    return;
+  }
   var sel = document.getElementById('st_' + collabId);
   if (!sel) return;
   try {
@@ -4667,6 +4906,131 @@ async function updateCollabStatus(collabId) {
     loadCollaborations();
   } catch (e) {
     toast(e.message, 'error');
+  }
+}
+async function submitCampaignCollabUpdate(collab, patch, action) {
+  var campaignId = readPositiveInteger(collab && collab.campaign_id);
+  var expectedVersion = readPositiveInteger(collab && collab.row_version);
+  if (campaignId === null || expectedVersion === null) throw new Error('活动订单缺少版本上下文，请刷新后重试。');
+  var body = Object.assign({
+    campaign_id: campaignId,
+    expected_version: expectedVersion
+  }, patch || {});
+  var mutationSlot = m4CollabMutationSlot(collab, patch, action);
+  if (m4CollabMutationInFlight[mutationSlot]) return m4CollabMutationInFlight[mutationSlot];
+  var request = Promise.resolve().then(function() {
+    return apiFetch('/collaborations/' + collab.id, {
+      method: 'PUT',
+      headers: m4MutationHeaders('m4-collaboration-update-', m4CollabMutationOperationKey(mutationSlot)),
+      body: JSON.stringify(body)
+    });
+  }).then(async function(response) {
+    var data = await response.json();
+    if (!response.ok) throw new Error(data.error || '活动订单更新失败');
+    return data;
+  });
+  m4CollabMutationInFlight[mutationSlot] = request;
+  try {
+    return await request;
+  } finally {
+    if (m4CollabMutationInFlight[mutationSlot] === request) delete m4CollabMutationInFlight[mutationSlot];
+  }
+}
+async function runCampaignCollabAction(collabId, action) {
+  var collab = findCollaborationById(collabId);
+  if (!isCampaignCollaboration(collab)) {
+    toast('请先刷新活动订单。', 'error');
+    return;
+  }
+  if (action === 'settlement') {
+    openCampaignSettlementModal(collab);
+    return;
+  }
+  var actions = {
+    contract: { status: 'contract_sent', reason: '从下单工作台确认合同已发' },
+    execution: { status: 'live', campaign_relation: 'execution', reason: '从下单工作台确认开始执行' },
+    review: { status: 'content_review', reason: '从下单工作台提交内容审核' },
+    publication: { status: 'completed', campaign_relation: 'publication', reason: '从下单工作台确认内容发布' }
+  };
+  var patch = actions[action];
+  if (!patch) return;
+  var mutationSlot = m4CollabMutationSlot(collab, patch, action);
+  if (m4CollabMutationInFlight[mutationSlot]) {
+    toast('操作正在提交，请勿重复点击。');
+    return m4CollabMutationInFlight[mutationSlot];
+  }
+  try {
+    await submitCampaignCollabUpdate(collab, patch, action);
+    toast('活动订单已更新');
+    loadCollaborations();
+  } catch (error) {
+    toast(error.message, 'error');
+    loadCollaborations();
+  }
+}
+function openCampaignSettlementModal(collab) {
+  pendingSettlementCollabId = Number(collab.id);
+  var existing = document.getElementById('campaignSettlementModal');
+  if (existing) existing.remove();
+  var overlay = document.createElement('div');
+  overlay.id = 'campaignSettlementModal';
+  overlay.className = 'modal-overlay';
+  overlay.onclick = function(event) { if (event.target === overlay) closeCampaignSettlementModal(); };
+  var initialCost = collab.cost_actual || collab.cost_quoted || 0;
+  overlay.innerHTML = '<div class="modal" id="campaignSettlementDialog" role="dialog" aria-modal="true" aria-labelledby="campaignSettlementDialogTitle" onclick="event.stopPropagation()">' +
+    '<button type="button" class="modal-close" aria-label="关闭结算确认" title="关闭结算确认" onclick="closeCampaignSettlementModal()">&times;</button>' +
+    '<h3 id="campaignSettlementDialogTitle">确认结算</h3>' +
+    '<p style="font-size:12px;opacity:.65;margin-bottom:12px">' + esc(collab.kol_handle || '') + ' · ' + esc(collab.campaign_name || ('活动 #' + collab.campaign_id)) + '</p>' +
+    '<div><label>实际结算成本（整数）</label><input id="settlementActualCost" type="number" min="0" step="1" value="' + esc(initialCost) + '"></div>' +
+    '<label style="display:flex;align-items:center;gap:8px;margin-top:14px;font-size:12px;text-transform:none;letter-spacing:0;opacity:1"><input id="settlementCostConfirmed" type="checkbox" style="width:16px;height:16px;min-width:16px">我已核对并确认实际结算成本</label>' +
+    '<div class="btn-group" style="justify-content:flex-end"><button type="button" class="btn btn-outline" onclick="closeCampaignSettlementModal()">取消</button><button type="button" class="btn btn-primary" onclick="submitCampaignSettlement()">确认结算</button></div>' +
+    '</div>';
+  document.body.appendChild(overlay);
+  if (window.TMAccessibility) window.TMAccessibility.openDialog(document.getElementById('campaignSettlementDialog'), document.activeElement, closeCampaignSettlementModal);
+}
+function closeCampaignSettlementModal() {
+  var overlay = document.getElementById('campaignSettlementModal');
+  var dialog = overlay ? overlay.querySelector('#campaignSettlementDialog') : null;
+  if (dialog && window.TMAccessibility) window.TMAccessibility.closeDialog(dialog);
+  if (overlay) overlay.remove();
+  pendingSettlementCollabId = null;
+}
+async function submitCampaignSettlement() {
+  var collab = findCollaborationById(pendingSettlementCollabId);
+  var cost = Number(document.getElementById('settlementActualCost')?.value);
+  var confirmed = document.getElementById('settlementCostConfirmed')?.checked === true;
+  if (!Number.isSafeInteger(cost) || cost < 0) {
+    toast('实际结算成本必须是非负整数。', 'error');
+    return;
+  }
+  if (!confirmed) {
+    toast('请先确认实际结算成本。', 'error');
+    return;
+  }
+  if (!isCampaignCollaboration(collab)) {
+    toast('活动订单已变化，请刷新后重试。', 'error');
+    return;
+  }
+  var patch = {
+    status: 'completed',
+    campaign_relation: 'settlement',
+    cost_actual: cost,
+    confirm_cost_actual: true,
+    reason: '从下单工作台确认结算成本'
+  };
+  var mutationSlot = m4CollabMutationSlot(collab, patch, 'settlement');
+  if (m4CollabMutationInFlight[mutationSlot]) {
+    toast('结算正在提交，请勿重复点击。');
+    return;
+  }
+  try {
+    await submitCampaignCollabUpdate(collab, patch, 'settlement');
+    closeCampaignSettlementModal();
+    toast('活动订单已完成结算');
+    loadCollaborations();
+  } catch (error) {
+    toast(error.message, 'error');
+    loadCollaborations();
   }
 }
 // ===== M5: AI ASSISTANT (v8.0) =====
@@ -5625,7 +5989,7 @@ function switchPage(id, options) {
     'generateProposal', 'updateProposalDraftFromEditor', 'getCurrentProposalDraft', 'downloadProposal', 'copyProposal', 'openProposalToInfluencers',
     'getEditedDemand', 'syncCurDemandFromAnalysis', 'handleDemandFile', 'analyzeDemandAI',
     'switchTab', 'matchInfluencers', 'smartMatch', 'handleUpload', 'handleDrop', 'openInfUploadModal', 'handleUploadModal', 'downloadInfTemplate', 'exportAll', 'exportFiltered', 'exportSelected',
-    'toggleAll', 'syncInfluencerSelectionState', 'startCollab', 'submitCollabOrder', 'closeCollabOrderModal', 'loadCollaborations', 'updateCollabStatus',
+    'toggleAll', 'syncInfluencerSelectionState', 'loadM4Campaigns', 'changeM4CampaignContext', 'startCollab', 'submitCollabOrder', 'closeCollabOrderModal', 'loadCollaborations', 'updateCollabStatus', 'runCampaignCollabAction', 'closeCampaignSettlementModal', 'submitCampaignSettlement',
     'sendChat', 'clearChat', 'clearAIMemory', 'pushToFeishu',
     'switchAdminTab', 'loadAdminDashboard', 'loadAdminUsers', 'adminAddUser', 'adminCreateInvite', 'adminResetPw',
     'wfUndo', 'wfRedo', 'wfClearCanvas', 'wfSaveTemplate', 'wfPublishTemplate', 'wfResetTaskFilters', 'wfLoadTasks', 'wfLoadInstances',

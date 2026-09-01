@@ -122,11 +122,13 @@ app.post('/api/collaborations', authMiddleware, (req, res) => {
 });
 
 app.get('/api/collaborations', authMiddleware, (req, res) => {
-  const { status, demand_id } = req.query;
+  const { status, demand_id, campaign_id, include_campaign_context } = req.query;
   res.json(campaignCollaboration.list({
     userId: req.user.id,
     status,
-    demandId: demand_id
+    demandId: demand_id,
+    campaignId: campaign_id,
+    includeCampaignContext: include_campaign_context === '1' || include_campaign_context === 'true'
   }));
 });
 
