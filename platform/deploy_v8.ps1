@@ -443,9 +443,13 @@ function Invoke-NativeWithUtf8Input {
         [Parameter(Mandatory = $true)][AllowEmptyString()][string]$InputText,
         [Parameter(Mandatory = $true)][string]$FailureMessage,
         [ValidateRange(1, 14400)][int]$TimeoutSeconds = 7200,
-        [switch]$CaptureOutput
+        [switch]$CaptureOutput,
+        [switch]$SurfaceFailureOutput
     )
 
+    if ($SurfaceFailureOutput -and -not $CaptureOutput) {
+        throw "$FailureMessage can surface failure output only when capture is enabled."
+    }
     $inputPath = Join-Path $env:TEMP ("tm-native-stdin-{0}.tmp" -f ([Guid]::NewGuid().ToString('N')))
     $outputPath = Join-Path $env:TEMP ("tm-native-stdout-{0}.tmp" -f ([Guid]::NewGuid().ToString('N')))
     $errorPath = Join-Path $env:TEMP ("tm-native-stderr-{0}.tmp" -f ([Guid]::NewGuid().ToString('N')))
@@ -489,13 +493,18 @@ function Invoke-NativeWithUtf8Input {
         if ($CaptureOutput) {
             $capturedOutput = [IO.File]::ReadAllText($outputPath, [Text.Encoding]::UTF8)
         }
+        if ($exitCode -ne 0) {
+            if ($SurfaceFailureOutput -and -not [string]::IsNullOrWhiteSpace($capturedOutput)) {
+                throw "$FailureMessage`n$($capturedOutput.Trim())"
+            }
+            throw $FailureMessage
+        }
     }
     finally {
         Remove-Item -LiteralPath $inputPath -Force -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath $outputPath -Force -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath $errorPath -Force -ErrorAction SilentlyContinue
     }
-    Assert-LastExitCode -Message $FailureMessage -ExitCode $exitCode
     if ($CaptureOutput) {
         return $capturedOutput.Trim()
     }
@@ -535,7 +544,8 @@ function Invoke-RemoteBash {
         [ValidateRange(1, 14400)][int]$TimeoutSeconds = 7200,
         [switch]$RequireDeploymentLock,
         [switch]$RequireWriterLock,
-        [switch]$CaptureOutput
+        [switch]$CaptureOutput,
+        [switch]$SurfaceFailureOutput
     )
 
     $guards = New-Object 'Collections.Generic.List[string]'
@@ -713,7 +723,7 @@ rm -f -- "$RemoteScript"
     $result = $null
     try {
         Invoke-NativeWithUtf8Input -FileName 'ssh.exe' -ArgumentList $uploadArguments -InputText $normalizedRemoteScript -FailureMessage "$FailureMessage (script upload)" -TimeoutSeconds $TimeoutSeconds
-        $result = Invoke-NativeWithUtf8Input -FileName 'ssh.exe' -ArgumentList $executionArguments -InputText '' -FailureMessage $FailureMessage -TimeoutSeconds $TimeoutSeconds -CaptureOutput:$CaptureOutput
+        $result = Invoke-NativeWithUtf8Input -FileName 'ssh.exe' -ArgumentList $executionArguments -InputText '' -FailureMessage $FailureMessage -TimeoutSeconds $TimeoutSeconds -CaptureOutput:$CaptureOutput -SurfaceFailureOutput:$SurfaceFailureOutput
     }
     catch {
         $transportError = $_
@@ -9495,7 +9505,7 @@ timeout --signal=KILL 30m systemd-run --quiet --wait --pipe --unit="$OfflineGate
     PPT_QUERY="__PPT_QUERY__" \
     PPT_BUILD="__PPT_BUILD__" \
     PPT_SHA256="__PPT_SHA256__" \
-    /bin/bash --noprofile --norc -s <<'TM_UNPRIVILEGED_GATE'
+    /bin/bash --noprofile --norc -s <<'TM_UNPRIVILEGED_GATE' 2>&1 | tail -c 8192
 set -euo pipefail
 python3 - <<'PY'
 from pathlib import Path
@@ -9604,7 +9614,7 @@ TM_NGINX_TEST
 )
 printf '%s\n' "UNPRIVILEGED_GATE_OK"
 TM_UNPRIVILEGED_GATE
-GateStatus=$?
+GateStatus=${PIPESTATUS[0]}
 set -e
 
 drain_gate_unit "$OfflineGateUnit"
@@ -9757,7 +9767,10 @@ echo "CANDIDATE_OK"
     $candidateGate = $candidateGate.Replace('__PLAYWRIGHT_CACHE_DIRECTORIES__', [string]$EXPECTED_PLAYWRIGHT_CACHE_DIRECTORIES)
     $candidateGate = $candidateGate.Replace('__PLAYWRIGHT_CACHE_TREE_BYTES__', [string]$EXPECTED_PLAYWRIGHT_CACHE_TREE_BYTES)
     $candidateGate = $candidateGate.Replace('__STAMP__', $stamp)
-    Invoke-RemoteBash -Script $candidateGate -FailureMessage "Remote candidate validation failed" -TimeoutSeconds $CANDIDATE_GATE_TIMEOUT_SECONDS -RequireDeploymentLock
+    $candidateGateOutput = Invoke-RemoteBash -Script $candidateGate -FailureMessage "Remote candidate validation failed" -TimeoutSeconds $CANDIDATE_GATE_TIMEOUT_SECONDS -RequireDeploymentLock -CaptureOutput -SurfaceFailureOutput
+    if (-not [string]::IsNullOrWhiteSpace($candidateGateOutput)) {
+        Write-Host $candidateGateOutput
+    }
     Assert-RemoteCandidateReady
 
     Invoke-RemoteParserCandidatePreparation `

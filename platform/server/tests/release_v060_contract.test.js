@@ -1464,3 +1464,69 @@ test('candidate dependency capacity reserves for the copy rather than an indepen
     /CANDIDATE_DEPENDENCY_CAPACITY_OK=bytes:7085973504\/620040192,inodes:100000\/18969/
   );
 });
+
+test('captured candidate transport bounds and preserves offline gate diagnostics', (t) => {
+  const deploy = read('platform', 'deploy_v8.ps1');
+  const candidateInvocation = sourceBetween(
+    deploy,
+    'Invoke-RemoteBash -Script $candidateGate',
+    'Assert-RemoteCandidateReady',
+    'candidate transport invocation'
+  );
+  assert.match(candidateInvocation, /-CaptureOutput\s+-SurfaceFailureOutput/);
+  const candidateGate = sourceBetween(
+    deploy,
+    "$candidateGate = @'",
+    "$candidateGate = $candidateGate.Replace('__REMOTE_DIR__'",
+    'candidate gate'
+  );
+  assert.match(candidateGate, /2>&1\s*\|\s*tail -c 8192/);
+  assert.match(candidateGate, /GateStatus=\$\{PIPESTATUS\[0\]\}/);
+
+  if (process.platform !== 'win32') {
+    t.skip('the native transport harness exercises the Windows deployment host');
+    return;
+  }
+
+  const nativeArgument = sourceBetween(
+    deploy,
+    'function Convert-ToNativeArgument {',
+    'function Invoke-NativeWithUtf8Input {',
+    'native transport argument conversion'
+  );
+  const nativeTransport = sourceBetween(
+    deploy,
+    'function Invoke-NativeWithUtf8Input {',
+    'function Assert-Utf8StandardInputTransport {',
+    'native transport implementation'
+  );
+  assert.doesNotMatch(nativeTransport, /\$capturedError/);
+  const harnessPath = path.join(os.tmpdir(), `tm-native-transport-${crypto.randomUUID()}.ps1`);
+  const harness = [
+    '$ErrorActionPreference = "Stop"',
+    'Set-StrictMode -Version Latest',
+    nativeArgument,
+    nativeTransport,
+    '$node = (Get-Command node.exe -ErrorAction Stop).Source',
+    'try {',
+    "  Invoke-NativeWithUtf8Input -FileName $node -ArgumentList @('-e', \"process.stdout.write('candidate offline evidence\\\\n'); process.exit(7)\") -InputText '' -FailureMessage 'candidate transport failure' -CaptureOutput -SurfaceFailureOutput",
+    "  throw 'expected native transport failure'",
+    '} catch {',
+    "  if ($_.Exception.Message -notlike '*candidate offline evidence*') { throw }",
+    "  Write-Output 'NATIVE_FAILURE_DETAIL_OK'",
+    '}'
+  ].join('\r\n');
+
+  fs.writeFileSync(harnessPath, harness, 'utf8');
+  try {
+    const result = spawnSync(
+      'powershell.exe',
+      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', harnessPath],
+      { encoding: 'utf8' }
+    );
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, /NATIVE_FAILURE_DETAIL_OK/);
+  } finally {
+    fs.rmSync(harnessPath, { force: true });
+  }
+});
