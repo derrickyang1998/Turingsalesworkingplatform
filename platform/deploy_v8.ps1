@@ -12511,65 +12511,8 @@ public_release_guard arm \
   --drop-in "$PublicGuardDropIn"
 activate_public_candidate
 record_phase accepted-public-enabled
-expect_status() {
-  expected="$1"
-  request_path="$2"
-  actual=$(curl -sS -o /dev/null -w '%{http_code}' "http://localhost$request_path")
-  if [ "$actual" != "$expected" ]; then
-    echo "$request_path returned $actual; expected $expected" >&2
-    exit 1
-  fi
-}
-expect_javascript() {
-  request_path="$1"
-  response=$(curl -sS -o /dev/null -w '%{http_code} %{content_type}' "http://localhost$request_path")
-  actual="${response%% *}"
-  content_type="${response#* }"
-  if [ "$actual" != "200" ]; then
-    echo "$request_path returned $actual; expected 200" >&2
-    exit 1
-  fi
-  case "$content_type" in
-    application/javascript|application/javascript\;*|text/javascript|text/javascript\;*) ;;
-    *)
-      echo "$request_path returned Content-Type '$content_type'; expected JavaScript" >&2
-      exit 1
-      ;;
-  esac
-}
-expect_stylesheet() {
-  request_path="$1"
-  response=$(curl -sS -o /dev/null -w '%{http_code} %{content_type}' "http://localhost$request_path")
-  actual="${response%% *}"
-  content_type="${response#* }"
-  if [ "$actual" != "200" ]; then
-    echo "$request_path returned $actual; expected 200" >&2
-    exit 1
-  fi
-  case "$content_type" in
-    text/css|text/css\;*) ;;
-    *)
-      echo "$request_path returned Content-Type '$content_type'; expected CSS" >&2
-      exit 1
-      ;;
-  esac
-}
-expect_status 200 /api/health
-expect_status 200 /m0
-expect_status 200 /m0-detail
-expect_status 200 /m4
-expect_status 200 /admin
-expect_javascript /client/shared/build_info.js
-expect_javascript /client/core/navigation.js
-expect_javascript /client/core/accessibility.js
-expect_javascript /client/core/shell.js
-expect_javascript /client/core/csp_compat.js
-expect_javascript /client/features/ppt_preview_runtime.js
-expect_stylesheet /client/styles/tokens.css
-expect_stylesheet /client/styles/components.css
-expect_stylesheet /client/styles/layout.css
-expect_status 404 /client/unknown.js
-expect_status 404 /server/server.js
+# The exact verifier retries only transient 503/connection states while Nginx
+# finishes a graceful reload, then enforces every public route contract.
 run_exact_public_nginx_gate - 80
 assert_final_acceptance_facts
 public_release_guard disarm \

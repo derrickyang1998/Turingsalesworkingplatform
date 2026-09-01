@@ -190,6 +190,31 @@ test('cutover parser readiness reuses production systemd normalization', () => {
   assert.doesNotMatch(readiness, /await uploadSandbox\.readSystemdProperties\(unitName, expected\)/);
 });
 
+test('cutover uses reload-convergent Nginx verification before its public route assertions', () => {
+  const deploy = read('platform', 'deploy_v8.ps1');
+  const cutover = sourceBetween(
+    deploy,
+    "$cutoverGate = @'",
+    '$cutoverGate = $cutoverGate.Replace(',
+    'cutover gate'
+  );
+  const publicEnablement = sourceBetween(
+    cutover,
+    'record_phase accepted-public-enabled',
+    'public_gate_armed=0',
+    'cutover public enablement verification'
+  );
+
+  assertOrdered(publicEnablement, [
+    'record_phase accepted-public-enabled',
+    'run_exact_public_nginx_gate - 80',
+    'assert_final_acceptance_facts'
+  ], 'cutover public enablement verification');
+  assert.doesNotMatch(publicEnablement, /expect_status\(\)/);
+  assert.doesNotMatch(publicEnablement, /expect_javascript\(\)/);
+  assert.doesNotMatch(publicEnablement, /expect_stylesheet\(\)/);
+});
+
 test('v0.6 deploy inventory ships migration 006, CRM runtime, and every Phase 5 regression', () => {
   const files = powerShellArrayEntries(read('platform', 'deploy_v8.ps1'), 'FILES');
   for (const required of [

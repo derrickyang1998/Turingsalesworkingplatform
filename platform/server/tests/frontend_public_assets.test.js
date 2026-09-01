@@ -2099,8 +2099,9 @@ test('guarded deploy uploads, checks, verifies, and backs up all nine Wave 1 cli
   assert.match(deploy, /node --check client\/core\/shell\.js/);
   assert.match(deploy, /node --check client\/core\/csp_compat\.js/);
   assert.match(deploy, /node --check client\/features\/ppt_preview_runtime\.js/);
-  assert.match(deploy, /expect_javascript \/client\/core\/csp_compat\.js/);
-  assert.match(deploy, /expect_javascript \/client\/features\/ppt_preview_runtime\.js/);
+  const exactVerifier = exactPublicNginxVerifierSource();
+  assert.ok(exactVerifier.includes("['/client/core/csp_compat.js', 'javascript']"));
+  assert.ok(exactVerifier.includes("['/client/features/ppt_preview_runtime.js', 'javascript']"));
   assert.match(deploy, /grep -Fq "\$APP_QUERY" index\.html/);
   assert.match(deploy, /grep -Fq "\$APP_BUILD" client\/shared\/build_info\.js/);
   assert.match(deploy, /grep -Fq "\$PPT_QUERY" index\.html/);
@@ -2127,22 +2128,15 @@ test('guarded deploy keeps distinct pinned-local and candidate-path syntax check
   assert.equal((deploy.match(/^\s*node --check client\/features\/ppt_preview_runtime\.js\s*$/gm) || []).length, 1);
 });
 
-test('deployment smoke requires HTTP 200 and a JavaScript Content-Type for every public JS asset', () => {
-  const deploy = read(deployScriptPath);
-  const helperMatch = deploy.match(/^expect_javascript\(\)\s*\{\r?\n(?<body>[\s\S]*?)^\}/m);
-  assert.ok(helperMatch, 'deploy smoke must define expect_javascript');
-  const helperBody = helperMatch.groups.body;
+test('deployment public verifier requires HTTP 200 and a JavaScript Content-Type for every public JS asset', () => {
+  const exactVerifier = exactPublicNginxVerifierSource();
 
-  assert.match(helperBody, /curl[\s\S]*?-w '%\{http_code\} %\{content_type\}'/);
-  assert.match(helperBody, /if \[ "\$actual" != "200" \]/);
-  assert.match(helperBody, /case "\$content_type" in[\s\S]*?(?:application|text)\/javascript/);
-
+  assert.match(exactVerifier, /assertStatus\(response, requestPath, 200\)/);
+  assert.match(exactVerifier, /new Set\(\['application\/javascript', 'text\/javascript'\]\)/);
   for (const asset of CANONICAL_CLIENT_ASSETS.filter((entry) => entry.endsWith('.js'))) {
-    const escapedRoute = `/${asset}`.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    assert.equal(
-      (deploy.match(new RegExp(`^\\s*expect_javascript ${escapedRoute}\\s*$`, 'gm')) || []).length,
-      1,
-      `${asset} must have one JavaScript-aware smoke check`
+    assert.ok(
+      exactVerifier.includes("['/" + asset + "', 'javascript']"),
+      asset + ' must have one JavaScript-aware public verifier check'
     );
   }
 });
@@ -2372,21 +2366,27 @@ test('candidate exposure failures are fail-closed before any durable acceptance 
   assert.ok(replayBoundary < markerPublication, 'checks must fail before the current marker can become durable');
 });
 
-test('post-public smoke retains exact JS and CSS MIME plus unknown-path checks as a secondary gate', () => {
+test('post-public smoke uses the reload-convergent shared verifier as its secondary gate', () => {
   const cutover = powerShellSingleQuotedHereString(read(deployScriptPath), 'cutoverGate');
+  const exactVerifier = exactPublicNginxVerifierSource();
   const publicBoundary = cutover.indexOf('\nactivate_public_candidate\n');
   assert.notEqual(publicBoundary, -1);
   const postPublic = cutover.slice(publicBoundary);
-  assert.match(postPublic, /^expect_javascript\(\)/m);
-  assert.match(postPublic, /^expect_stylesheet\(\)/m);
+  const verifierOffset = postPublic.indexOf('\nrun_exact_public_nginx_gate - 80\n');
+  const finalFactsOffset = postPublic.indexOf('\nassert_final_acceptance_facts\n');
+  assert.ok(verifierOffset >= 0 && verifierOffset < finalFactsOffset);
+  assert.doesNotMatch(postPublic, /^expect_javascript\(\)/m);
+  assert.doesNotMatch(postPublic, /^expect_stylesheet\(\)/m);
   for (const asset of CANONICAL_CLIENT_ASSETS) {
-    const helper = asset.endsWith('.js') ? 'expect_javascript' : 'expect_stylesheet';
-    const escapedRoute = `/${asset}`.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    assert.equal((postPublic.match(new RegExp(`^${helper} ${escapedRoute}$`, 'gm')) || []).length, 1);
+    const type = asset.endsWith('.js') ? 'javascript' : 'css';
+    assert.ok(
+      exactVerifier.includes("['/" + asset + "', '" + type + "']"),
+      asset + ' must remain covered by the shared verifier'
+    );
   }
-  assert.match(postPublic, /^expect_status 404 \/client\/unknown\.js$/m);
-  assert.match(postPublic, /^expect_status 404 \/server\/server\.js$/m);
-  assert.match(postPublic, /^run_exact_public_nginx_gate - 80$/m);
+  for (const denied of ['/client/unknown.js', '/server/server.js']) {
+    assert.ok(exactVerifier.includes("'" + denied + "'"), denied + ' must remain denied by the shared verifier');
+  }
 });
 
 test('one immutable action-plan identity feeds backup, hash, preparation, and upload actions', () => {
