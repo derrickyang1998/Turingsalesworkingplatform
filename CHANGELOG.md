@@ -1,5 +1,30 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.8.4-performance-feishu-connection-config (Production Deployed, 2026-09-02) - Phase 7B.2c 活动飞书连接配置
+
+### 交付与范围 / Delivery And Scope
+- “内容监控”现提供活动范围的“活动飞书连接配置”折叠面板。活动 Owner 与组织管理员可保存版本化草稿；只有组织管理员可批准当前活动的一份映射，批准后会原子替换先前已批准版本并写入活动审计记录。
+- 新增迁移 `v11`、受保护的读取、草稿与批准接口，以及公开字段映射合同。映射仅允许内容链接、指标、达人/平台和项目标签等公开字段；商业字段不会进入飞书投影配置。
+- 普通成员可看到不含表格标识、映射或快照的安全状态，不能读取、保存或批准连接配置。前端对保存/批准动作同时绑定请求序号和当前活动 ID，切换活动时旧响应不能覆盖新活动表单。
+- 外部同步在本版本硬性关闭：所有状态都明确返回 `not_enabled_in_this_release`，不会读取或写入飞书、调用 provider、创建定时任务或发送业务数据。
+
+### 定向验证、审查与上线 / Focused Verification, Review, And Release
+- 修复后的性能服务、路由与前端合同定向验证 `19/19` 通过；迁移脱敏门禁 `183` 通过、`0` 失败（`10` 项仅限 Linux 的检查按预期跳过）；可信来源门禁 `32/32`、发布合同 `37/37`、请求重放 `8/8` 通过。
+- 独立审查发现保存或批准过程中切换活动时，旧响应可能覆盖当前表单的风险。已将请求序号和活动 ID 双重守卫加入成功与错误路径，并以定向回归覆盖；该审查发现已关闭。
+- 本切片包含数据库迁移和权限边界，因此按风险执行候选迁移演练、隔离重放、发布守卫与部署浏览器烟测；普通无此类高风险边界的独立功能继续按轻量范围验证后即时发布。
+- 实现提交：`63b2178`。
+
+### 生产证据 / Production Evidence
+- 可恢复备份：`/root/turingmarket/backups/v060-crm-sales-workspace-20260902-144134`；备份目录 `SHA256SUMS` 已验证，清单 SHA-256 为 `23c2d8b68a3316cd603ccc7ccb933d41c0d2b06529c4399aaece674728195c7f`。
+- 公网 `/api/health` 为 `200` / `ok`；`/performance-monitor` 与 `/performance-dashboard` 均为 `200`；未认证的飞书连接读取返回 `401`。
+- PM2 与 Nginx online；只读 SQLite 校验为 `schema v11`、`quick_check=ok`、外键异常 `0`，且 `performance_feishu_projection_configs` 已存在。
+- 本轮未执行真实飞书读取、写入、provider 抓取、定时同步或真实业务数据写入验收。
+
+### 后续边界 / Next Boundaries
+- 真实飞书投影仅在明确授权、已批准测试活动、字段验证、外部回执和调度边界作为新的独立功能切片后才可启用；不会因本次配置发布而自动打开。
+
+---
+
 ## v0.8.3-performance-batch-metric-import (Production Deployed, 2026-09-02) - Phase 7B.2b 视频指标批量补录
 
 ### 交付与范围 / Delivery And Scope
