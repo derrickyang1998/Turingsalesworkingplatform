@@ -140,6 +140,8 @@ test('production server serves browser assets but denies private platform files'
       ['/client/styles/components.css', 200],
       ['/client/styles/layout.css', 200],
       ['/data/influencer_schema.json', 200],
+      ['/performance-monitor', 200],
+      ['/performance-dashboard', 200],
       ['/client/', 404],
       ['/client/core/', 404],
       ['/client/shared/', 404],

@@ -40,6 +40,8 @@ const PUBLIC_SPA_PATHS = new Set([
   '/m3',
   '/m4',
   '/m5',
+  '/performance-monitor',
+  '/performance-dashboard',
   '/kb',
   '/workflow',
   '/workflow-templates',

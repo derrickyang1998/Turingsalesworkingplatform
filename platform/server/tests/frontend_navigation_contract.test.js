@@ -352,6 +352,8 @@ test('navigation rebuild preserves the registry as canonical anchors with groupe
     ['m2', '/m2', '<span class="nav-icon" aria-hidden="true">策</span> 客户策略规划', false],
     ['m3', '/m3', '<span class="nav-icon" aria-hidden="true">需</span> 需求接入 & 方案生成', false],
     ['m4', '/m4?tab=tab1', '<span class="nav-icon" aria-hidden="true">红</span> 网红匹配 & 执行管理', false],
+    ['performance-monitor', '/performance-monitor', '<span class="nav-icon" aria-hidden="true">监</span> 内容监控', false],
+    ['performance-dashboard', '/performance-dashboard', '<span class="nav-icon" aria-hidden="true">效</span> 效果看板', false],
     ['m5', '/m5', '<span class="nav-icon" aria-hidden="true">🤖</span> AI 助手', false],
     ['workflow-designer', '/workflow', '<span class="nav-icon" aria-hidden="true">流</span> 流程设计', false],
     ['workflow-templates', '/workflow-templates', '<span class="nav-icon" aria-hidden="true">模</span> 流程模板', false],
