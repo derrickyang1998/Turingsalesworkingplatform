@@ -1,5 +1,30 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.8.5-performance-review-evidence (Production Deployed, 2026-09-02) - Phase 7B.3a 项目复盘依据
+
+### 交付与范围 / Delivery And Scope
+- “效果看板”新增活动范围的“复盘依据”区域和受保护的 `GET /api/campaigns/:id/performance/review-evidence`。它只基于当前已保存的视频指标快照生成可追溯的复盘事实，不调用模型或外部服务。
+- 用户可按当前 KPI 查看可比内容的 Top / Bottom 排名、平台/产品/达人分组对比、覆盖率、来源方式和观测时间窗；每条证据都保留内容、来源与观测时间的血缘提示。
+- 排名需要至少两条可比记录且所选 KPI 的活动覆盖率达到 `80%`；未达到门槛时明确不输出“最佳/最弱”结论。分组 KPI 同样按覆盖率门槛失败关闭。
+- 商业字段继续按现有 `can_view_commercial` 权限脱敏；页面和既有看板加载都加入请求序号与活动 ID 守卫，活动切换时旧响应不能覆盖新活动。
+
+### 定向验证、审查与上线 / Focused Verification, Review, And Release
+- 受影响性能服务、路由和前端合同定向检查 `32/32` 通过；JavaScript 语法、`git diff --check` 与本地发布预检通过。
+- 独立代码审查结论为 `APPROVE`。审查覆盖商业数据暴露、覆盖率/排名门槛、路由装配和陈旧响应隔离。
+- 本功能本身没有数据库迁移、真实外部写入或生产业务数据变换，因此按“单功能即上线”的轻量范围验证执行；生产发布平台仍保留候选隔离、重放、发布守卫和浏览器烟测等基础保护。
+- 实现提交：`22c4af7`。
+
+### 生产证据 / Production Evidence
+- 可恢复备份：`/root/turingmarket/backups/v060-crm-sales-workspace-20260902-154428`；备份目录 `SHA256SUMS` 已验证，清单 SHA-256 为 `23eb0703cee89cded1c7d2fa565977606158fff1c894a488d008f4983a061a17`。
+- 公网 `/api/health` 为 `200` / `ok`；`/performance-monitor` 与 `/performance-dashboard` 均为 `200`；未认证的新复盘依据接口返回 `401`，保持在鉴权边界内。
+- PM2 online；远端 `app.js`、`index.html`、性能样式、合同、路由、主服务和性能服务共 7 个文件 SHA-256 与本地一致。发布脚本完成数据库迁移检查但本版本没有 schema 变更。
+- 本轮未执行真实视频抓取、媒体内容分析、AI/LLM 调用、知识库晋升、客户报告/PPT 生成、provider 请求、飞书读取/写入或真实业务数据写入。
+
+### 后续边界 / Next Boundaries
+- 下一独立切片可在该可追溯事实基础上增加只读 AI 内容分析草稿；只有获得明确素材权限和真实数据来源后，才可引入视频内容/钩子/风格分析或外部平台/飞书同步。
+
+---
+
 ## v0.8.4-performance-feishu-connection-config (Production Deployed, 2026-09-02) - Phase 7B.2c 活动飞书连接配置
 
 ### 交付与范围 / Delivery And Scope
