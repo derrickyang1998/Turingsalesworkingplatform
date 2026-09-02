@@ -34,7 +34,7 @@
   "runtime_tree": {
     "format": "tm-parser-runtime-tree-v1",
     "root": "/var/lib/turingmarket-parser/runtime-root",
-    "sha256": "885f08b6d441ea8cbb40d2ce71ce308ef3b35c15e7086efa42f02f6f1f7db218",
+    "sha256": "ea2395ff87797e426cca518be6d22755d14f9f612d0a95add0f9fc9f65970779",
     "files": 3476,
     "directories": 435,
     "bytes": 640592225

@@ -34,7 +34,7 @@ $TRUSTED_SOURCE_GATE_RELATIVE_PATH = "server\scripts\trusted_production_source_g
 $TRUSTED_SOURCE_MANIFEST_RELATIVE_PATH = "server\scripts\trusted_production_source_manifest.json"
 $TRUSTED_RUNTIME_CONFIG_RELATIVE_PATH = "server\config\runtime_config.js"
 $EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "e93d45bb3c0368c4087ceeca92b263cd66f1be5b9aca432abd732b36a107f355"
-$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "a5088859131bd5177167e8493bc2f4cc83e96131495885b94af6247484b50be6"
+$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "6fbd4d9036d222f2289701571fa95747272f428df84c2254a47d464eaa90d378"
 $EXPECTED_TRUSTED_RUNTIME_CONFIG_SHA256 = "76d43d3e811c6fa8daae987cc9eb2fff2dc8a8095f84b1cd309e4e214df94dcb"
 $EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256 = "3f1325dbc2335bd97208924efe7eab6d6b8e84a7b720caea2ac6578781e99f4f"
 $EXPECTED_TRUSTED_PARSER_VERIFIER_SHA256 = "7f9efaac02675b21e025891a400474cc7481c1adaf58c88bd8b356d5276f2eaa"
@@ -12288,7 +12288,7 @@ const readProductionSystemdProperties = parserStartup.createProductionSystemdPro
 
 (async () => {
   const verified = await uploadSandbox.verifyCheckedInArtifacts({
-    expectedManifestSha256: '57b88420afa9d7d6b9bfec6dcd7c4e5fce74c76762b00bb810d9c44a4ee354d4'
+    expectedManifestSha256: '7c12f7f325a0c9be8af37ce3d6eff6a5b47f37dac2264fc9ee67d7be1594e7d7'
   });
   process.stdout.write('APPLICATION_PARSER_CHECKED_IN_OK\n');
 
