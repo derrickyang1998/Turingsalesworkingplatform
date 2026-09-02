@@ -271,3 +271,128 @@ test('imports accepted parsed rows atomically while returning malformed rows as 
     db.close();
   }
 });
+
+test('exports only the current filtered content view for a commercial-capable operator', () => {
+  const { db, service } = createFixture();
+  try {
+    const matching = addCanonicalVideo(service);
+    service.createContent({
+      userId: 1,
+      campaignId: 7,
+      body: {
+        url: 'https://www.tiktok.com/@creator/video/1234567890123456789',
+        creator_name: 'Other Creator',
+        tags: ['other']
+      }
+    });
+    service.recordManualInput({
+      userId: 1,
+      campaignId: 7,
+      contentId: matching.id,
+      body: {
+        observation: { views: 1000, likes: 80, comments: 20, clicks: 100 },
+        commercial: confirmedCommercialInput(),
+        confirmed: true
+      }
+    });
+
+    const exported = service.exportContents({
+      userId: 1,
+      campaignId: 7,
+      scope: 'filtered',
+      query: { tag: 'launch' }
+    });
+
+    assert.equal(exported.scope, 'filtered');
+    assert.equal(exported.total, 1);
+    assert.match(exported.csv, /^\uFEFF/);
+    assert.match(exported.csv, /视频花费/);
+    assert.match(exported.csv, /Creator One/);
+    assert.doesNotMatch(exported.csv, /Other Creator/);
+  } finally {
+    db.close();
+  }
+});
+
+test('redacts commercial columns from a team member export', () => {
+  const { db, service } = createFixture();
+  try {
+    const content = addCanonicalVideo(service);
+    service.recordManualInput({
+      userId: 1,
+      campaignId: 7,
+      contentId: content.id,
+      body: {
+        observation: { views: 1000, likes: 80, comments: 20 },
+        commercial: confirmedCommercialInput(),
+        confirmed: true,
+        correction_reason: 'Commercial correction must remain private.'
+      }
+    });
+
+    const exported = service.exportContents({
+      userId: 2,
+      campaignId: 7,
+      scope: 'filtered',
+      query: {}
+    });
+
+    assert.equal(exported.total, 1);
+    assert.doesNotMatch(exported.csv, /视频花费|归因收入|ROI|ROAS/);
+    assert.doesNotMatch(exported.csv, /Commercial correction must remain private/);
+    assert.match(exported.csv, /Creator One/);
+  } finally {
+    db.close();
+  }
+});
+
+test('exports all campaign content when all scope is requested', () => {
+  const { db, service } = createFixture();
+  try {
+    addCanonicalVideo(service);
+    service.createContent({
+      userId: 1,
+      campaignId: 7,
+      body: {
+        url: 'https://www.tiktok.com/@creator/video/1234567890123456789',
+        creator_name: 'Other Creator',
+        tags: ['other']
+      }
+    });
+
+    const exported = service.exportContents({
+      userId: 1,
+      campaignId: 7,
+      scope: 'all',
+      query: { tag: 'launch' }
+    });
+
+    assert.equal(exported.scope, 'all');
+    assert.equal(exported.total, 2);
+    assert.match(exported.csv, /Creator One/);
+    assert.match(exported.csv, /Other Creator/);
+  } finally {
+    db.close();
+  }
+});
+
+test('escapes spreadsheet formula strings after non-breaking whitespace in CSV exports', () => {
+  const { db, service } = createFixture();
+  try {
+    const content = addCanonicalVideo(service);
+    db.exec('DROP TRIGGER campaign_publications_no_update');
+    db.prepare('UPDATE campaign_publications SET creator_name=? WHERE id=?')
+      .run('\u00A0=HYPERLINK("https://unsafe.example", "unsafe")', content.id);
+
+    const exported = service.exportContents({
+      userId: 1,
+      campaignId: 7,
+      scope: 'all',
+      query: {}
+    });
+
+    assert.match(exported.csv, /"'\u00A0=HYPERLINK/);
+  } finally {
+    db.close();
+  }
+});

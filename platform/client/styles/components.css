@@ -201,7 +201,8 @@ thead th {
 .tm-performance-section-heading,
 .tm-performance-toolbar,
 .tm-performance-toolbar-actions,
-.tm-performance-list-heading {
+.tm-performance-list-heading,
+.tm-performance-list-actions {
   display: flex;
   align-items: center;
   gap: var(--tm-space-3);
@@ -211,6 +212,11 @@ thead th {
 .tm-performance-section-heading,
 .tm-performance-list-heading {
   justify-content: space-between;
+}
+
+.tm-performance-list-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .tm-performance-heading {

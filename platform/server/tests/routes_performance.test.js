@@ -10,8 +10,11 @@ function createResponse() {
   return {
     statusCode: 200,
     body: null,
+    headers: {},
     status(value) { this.statusCode = value; return this; },
-    json(value) { this.body = value; return this; }
+    json(value) { this.body = value; return this; },
+    setHeader(key, value) { this.headers[key] = value; return this; },
+    send(value) { this.body = value; return this; }
   };
 }
 
@@ -27,6 +30,10 @@ function createFixture() {
     createContent(input) { calls.push(['create', input]); return { content: { id: 1 } }; },
     importContentRows(input) { calls.push(['import', input]); return { accepted_count: 1 }; },
     recordManualInput(input) { calls.push(['input', input]); return { observation_id: 1 }; },
+    exportContents(input) {
+      calls.push(['export', input]);
+      return { filename: 'performance_campaign_7_filtered_export.csv', csv: '\ufeff视频链接\r\nhttps://example.test/video\r\n' };
+    },
     getDashboard(input) { calls.push(['dashboard', input]); return { records: { total: 0 } }; }
   };
   registerPerformanceRoutes(app, {
@@ -52,6 +59,7 @@ test('registers campaign-scoped performance endpoints and forwards authenticated
   const { routes, calls } = createFixture();
   assert.deepEqual([...routes.keys()].sort(), [
     'GET /api/campaigns/:id/performance/contents',
+    'GET /api/campaigns/:id/performance/contents/export',
     'GET /api/campaigns/:id/performance/dashboard',
     'POST /api/campaigns/:id/performance/contents',
     'POST /api/campaigns/:id/performance/contents/:contentId/manual-inputs',
@@ -92,4 +100,25 @@ test('returns known performance errors with a stable request identifier', () => 
     code: 'PERFORMANCE_FORBIDDEN',
     request_id: 'phase4-request'
   });
+});
+
+test('streams scoped performance CSV exports without serializing the CSV as JSON', () => {
+  const { routes, calls } = createFixture();
+  const response = invoke(routes.get('GET /api/campaigns/:id/performance/contents/export'), {
+    user: { id: 9 },
+    params: { id: '7' },
+    query: { q: 'creator', tag: 'launch', scope: 'filtered' },
+    requestId: 'request-export'
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.headers['Content-Type'], 'text/csv;charset=utf-8');
+  assert.equal(response.headers['Content-Disposition'], 'attachment; filename="performance_campaign_7_filtered_export.csv"');
+  assert.match(response.body, /^\ufeff视频链接/);
+  assert.deepEqual(calls[0], ['export', {
+    userId: 9,
+    campaignId: '7',
+    scope: 'filtered',
+    query: { q: 'creator', tag: 'launch' }
+  }]);
 });

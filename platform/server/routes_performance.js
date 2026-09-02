@@ -39,7 +39,7 @@ function registerPerformanceRoutes(app, options = {}) {
     throw new TypeError('An authentication middleware is required.');
   }
   const service = options.service || createPerformanceManualService(options.db);
-  if (!service || typeof service.listContents !== 'function' || typeof service.getDashboard !== 'function') {
+  if (!service || typeof service.listContents !== 'function' || typeof service.exportContents !== 'function' || typeof service.getDashboard !== 'function') {
     throw new TypeError('A performance manual service is required.');
   }
 
@@ -50,6 +50,25 @@ function registerPerformanceRoutes(app, options = {}) {
         campaignId: request.params.id,
         query: request.query || {}
       }));
+    } catch (error) {
+      return sendError(request, response, error);
+    }
+  });
+
+  app.get('/api/campaigns/:id/performance/contents/export', options.authMiddleware, (request, response) => {
+    try {
+      const query = Object.assign({}, request.query || {});
+      const scope = query.scope;
+      delete query.scope;
+      const exported = service.exportContents({
+        userId: authenticatedUserId(request),
+        campaignId: request.params.id,
+        scope,
+        query
+      });
+      response.setHeader('Content-Type', 'text/csv;charset=utf-8');
+      response.setHeader('Content-Disposition', `attachment; filename="${exported.filename}"`);
+      return response.send(exported.csv);
     } catch (error) {
       return sendError(request, response, error);
     }

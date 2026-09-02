@@ -6616,6 +6616,7 @@ var performanceContents = [];
 var performanceCapabilities = {};
 var performanceDashboardData = null;
 var performanceSearchTimer = null;
+var performanceExportInFlight = null;
 
 function performancePositiveId(value) {
   return typeof readPositiveInteger === 'function' ? readPositiveInteger(value) : null;
@@ -6742,6 +6743,50 @@ function performanceContentQuery() {
   if (tag) params.set('tag', tag);
   params.set('limit', '100');
   return params.toString();
+}
+
+function setPerformanceExportBusy(busy) {
+  ['performanceExportFiltered', 'performanceExportAll'].forEach(function(id) {
+    var button = document.getElementById(id);
+    if (button) button.disabled = Boolean(busy);
+  });
+}
+
+async function exportPerformanceContents(scope) {
+  var campaignId = getPerformanceCampaignId();
+  if (campaignId === null) {
+    toast('请先选择推广活动。', 'error');
+    return null;
+  }
+  if (performanceExportInFlight) return performanceExportInFlight;
+  scope = scope === 'all' ? 'all' : 'filtered';
+  var params = new URLSearchParams(performanceContentQuery());
+  params.set('scope', scope);
+  setPerformanceExportBusy(true);
+  var request = (async function() {
+    try {
+      var response = await apiFetch('/campaigns/' + encodeURIComponent(campaignId) + '/performance/contents/export?' + params.toString());
+      if (!response.ok) {
+        var errorData = null;
+        try { errorData = await response.json(); } catch (error) {}
+        throw new Error(errorData && errorData.error || '内容导出失败');
+      }
+      var blob = await response.blob();
+      dlFile('content_performance_' + scope + '.csv', blob, 'text/csv;charset=utf-8');
+      toast(scope === 'all' ? '已导出全部内容数据。' : '已导出当前筛选数据。');
+      return true;
+    } catch (error) {
+      toast(error.message || '内容导出失败', 'error');
+      return null;
+    }
+  })();
+  performanceExportInFlight = request;
+  try {
+    return await request;
+  } finally {
+    if (performanceExportInFlight === request) performanceExportInFlight = null;
+    setPerformanceExportBusy(false);
+  }
 }
 
 function debouncedPerformanceContentSearch() {
@@ -7310,7 +7355,7 @@ function switchPage(id, options) {
     'getEditedDemand', 'syncCurDemandFromAnalysis', 'handleDemandFile', 'analyzeDemandAI',
     'switchTab', 'matchInfluencers', 'smartMatch', 'handleUpload', 'handleDrop', 'openInfUploadModal', 'handleUploadModal', 'downloadInfTemplate', 'exportAll', 'exportFiltered', 'exportSelected',
     'toggleAll', 'syncInfluencerSelectionState', 'loadM4Campaigns', 'changeM4CampaignContext', 'startCollab', 'submitCollabOrder', 'closeCollabOrderModal', 'loadCollaborations', 'updateCollabStatus', 'runCampaignCollabAction', 'closeCampaignSettlementModal', 'submitCampaignSettlement',
-    'initPerformanceMonitor', 'initPerformanceDashboard', 'refreshPerformanceMonitor', 'refreshPerformanceDashboard', 'changePerformanceCampaignContext', 'loadPerformanceContents', 'createPerformanceContent', 'downloadPerformanceTemplate', 'handlePerformanceImport', 'handlePerformanceDrop', 'openPerformanceInputModal', 'closePerformanceInputModal', 'savePerformanceInput', 'loadPerformanceDashboard', 'debouncedPerformanceContentSearch',
+    'initPerformanceMonitor', 'initPerformanceDashboard', 'refreshPerformanceMonitor', 'refreshPerformanceDashboard', 'changePerformanceCampaignContext', 'loadPerformanceContents', 'createPerformanceContent', 'downloadPerformanceTemplate', 'handlePerformanceImport', 'handlePerformanceDrop', 'openPerformanceInputModal', 'closePerformanceInputModal', 'savePerformanceInput', 'loadPerformanceDashboard', 'debouncedPerformanceContentSearch', 'exportPerformanceContents',
     'sendChat', 'clearChat', 'clearAIMemory', 'pushToFeishu', 'loadFeishuStatus', 'loadFeishuOutbox', 'testFeishuConnection', 'selectFeishuReconciliationDelivery', 'reconcileFeishuDelivery', 'selectFeishuRetryDelivery', 'retryFeishuDelivery',
     'switchAdminTab', 'loadAdminDashboard', 'loadAdminUsers', 'adminAddUser', 'adminCreateInvite', 'adminResetPw',
     'wfUndo', 'wfRedo', 'wfClearCanvas', 'wfSaveTemplate', 'wfPublishTemplate', 'wfResetTaskFilters', 'wfLoadTasks', 'wfLoadInstances',

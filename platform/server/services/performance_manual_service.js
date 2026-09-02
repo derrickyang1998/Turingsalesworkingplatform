@@ -10,6 +10,7 @@ const { getCampaignAccess: defaultGetCampaignAccess } = require('./campaign_acce
 
 const MAX_PAGE_SIZE = 100;
 const DEFAULT_PAGE_SIZE = 50;
+const MAX_EXPORT_ROWS = 5000;
 const MAX_QUERY_LENGTH = 160;
 const MAX_TEXT_LENGTH = 500;
 const PUBLIC_METRIC_KEYS = Object.freeze({
@@ -340,6 +341,76 @@ function serializePublication(row, capabilities) {
     };
   }
   return output;
+}
+
+function exportMetricValue(content, key) {
+  const metric = content && content.metrics && content.metrics[key];
+  return metric && metric.available !== false && Number.isFinite(Number(metric.value)) ? metric.value : '';
+}
+
+function csvCell(value) {
+  if (value === undefined || value === null) return '';
+  if (typeof value === 'number') return Number.isFinite(value) ? String(value) : '';
+  const text = String(value).replace(/[\r\n]+/g, ' ').replace(/\u0000/g, '');
+  const formulaSafe = /^\s*[=+\-@]/.test(text) ? "'" + text : text;
+  return '"' + formulaSafe.replace(/"/g, '""') + '"';
+}
+
+function performanceExportColumns(canViewCommercial) {
+  const columns = [
+    ['视频链接', (content) => content.original_url],
+    ['规范链接', (content) => content.canonical_url],
+    ['平台', (content) => content.platform],
+    ['内容 ID', (content) => content.platform_content_id],
+    ['达人 ID', (content) => content.creator_id],
+    ['达人名称', (content) => content.creator_name],
+    ['推广产品', (content) => content.product],
+    ['内容标签', (content) => Array.isArray(content.tags) ? content.tags.join(' | ') : ''],
+    ['发布日期', (content) => content.published_at],
+    ['数据来源', (content) => content.source_mode],
+    ['最近观测时间', (content) => content.latest_observation && content.latest_observation.observed_at],
+    ['播放量', (content) => content.latest_observation && content.latest_observation.views],
+    ['展示量', (content) => content.latest_observation && content.latest_observation.impressions],
+    ['点赞数', (content) => content.latest_observation && content.latest_observation.likes],
+    ['评论数', (content) => content.latest_observation && content.latest_observation.comments],
+    ['收藏数', (content) => content.latest_observation && content.latest_observation.saves],
+    ['转发数', (content) => content.latest_observation && content.latest_observation.shares],
+    ['点击数', (content) => content.latest_observation && content.latest_observation.clicks],
+    ['转化数', (content) => content.latest_observation && content.latest_observation.conversions],
+    ['互动率', (content) => exportMetricValue(content, 'core_view_er')]
+  ];
+  if (!canViewCommercial) return columns;
+  return columns.concat([
+    ['确认状态', (content) => content.commercial && content.commercial.approval_state],
+    ['视频花费', (content) => content.commercial && content.commercial.creator_fee],
+    ['寄样成本', (content) => content.commercial && content.commercial.product_sample_cost],
+    ['物流成本', (content) => content.commercial && content.commercial.logistics_cost],
+    ['付费投流', (content) => content.commercial && content.commercial.paid_media_spend],
+    ['服务费', (content) => content.commercial && content.commercial.platform_agency_fee],
+    ['其他成本', (content) => content.commercial && content.commercial.other_cost],
+    ['归因收入', (content) => content.commercial && content.commercial.attributed_revenue],
+    ['客户报价', (content) => content.commercial && content.commercial.client_charge],
+    ['币种', (content) => content.commercial && content.commercial.base_currency],
+    ['归因模型', (content) => content.commercial && content.commercial.attribution_model],
+    ['归因窗口', (content) => content.commercial && content.commercial.attribution_window],
+    ['CPM', (content) => exportMetricValue(content, 'cpm')],
+    ['CPC', (content) => exportMetricValue(content, 'cpc')],
+    ['ROI', (content) => exportMetricValue(content, 'roi')],
+    ['ROAS', (content) => exportMetricValue(content, 'roas')]
+  ]);
+}
+
+function performanceExportCsv(contents, canViewCommercial) {
+  const columns = performanceExportColumns(canViewCommercial);
+  const header = columns.map(([label]) => csvCell(label)).join(',');
+  const rows = contents.map((content) => columns.map(([, value]) => csvCell(value(content))).join(','));
+  return '\ufeff' + [header].concat(rows).join('\r\n') + '\r\n';
+}
+
+function normalizeExportScope(value) {
+  if (value === undefined || value === null || value === '') return 'filtered';
+  if (value === 'filtered' || value === 'all') return value;
+  throw serviceError(400, 'PERFORMANCE_EXPORT_SCOPE_INVALID', 'Export scope is invalid.', { field: 'scope' });
 }
 
 function integerLimit(value, fallback) {
@@ -781,6 +852,36 @@ function createPerformanceManualService(db, options = {}) {
     };
   }
 
+  function exportContents(input) {
+    const context = requireAccess(input && input.userId, input && input.campaignId, 'view');
+    const query = normalizeQuery(input && input.query);
+    const scope = normalizeExportScope(input && input.scope);
+    const scopedQuery = scope === 'all'
+      ? Object.assign({}, query, { q: '', platform: '', tag: '' })
+      : query;
+    const current = currentRows(context, scopedQuery, false);
+    if (current.total > MAX_EXPORT_ROWS) {
+      throw serviceError(413, 'PERFORMANCE_EXPORT_LIMIT_EXCEEDED', 'Export exceeds the current record limit.', {
+        max_rows: MAX_EXPORT_ROWS,
+        total: current.total
+      });
+    }
+    const contents = current.rows.map((row) => serializePublication(row, context.capabilities));
+    writeAudit(context.userId, 'performance_content_export', {
+      campaign_id: context.campaignId,
+      scope,
+      total: contents.length,
+      includes_commercial: context.capabilities.can_view_commercial
+    });
+    return {
+      campaign_id: context.campaignId,
+      scope,
+      total: contents.length,
+      filename: `performance_campaign_${context.campaignId}_${scope}_export.csv`,
+      csv: performanceExportCsv(contents, context.capabilities.can_view_commercial)
+    };
+  }
+
   function observedTotal(rows, field) {
     const values = rows.map((row) => safeJson(row.metrics_json, {})[field])
       .filter((value) => Number.isSafeInteger(value) && value >= 0);
@@ -897,6 +998,7 @@ function createPerformanceManualService(db, options = {}) {
     importContentRows,
     recordManualInput,
     listContents,
+    exportContents,
     getDashboard: dashboard
   });
 }

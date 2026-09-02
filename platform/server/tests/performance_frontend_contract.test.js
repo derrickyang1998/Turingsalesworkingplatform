@@ -50,3 +50,12 @@ test('performance tables retain compact, sticky operational controls', () => {
   assert.match(componentStyles, /\.tm-performance-confirmation[\s\S]*?align-items: center/);
   assert.match(componentStyles, /\.tm-performance-metric-grid[\s\S]*?grid-template-columns/);
 });
+
+test('performance monitor offers both current-filter and full-campaign CSV exports', () => {
+  assert.match(indexHtml, /id="performanceExportFiltered"[^>]+onclick="exportPerformanceContents\('filtered'\)"/);
+  assert.match(indexHtml, /id="performanceExportAll"[^>]+onclick="exportPerformanceContents\('all'\)"/);
+  assert.match(appSource, /function exportPerformanceContents\(scope\)/);
+  assert.match(appSource, /params\.set\('scope', scope\)/);
+  assert.match(appSource, /performance\/contents\/export\?/);
+  assert.match(appSource, /dlFile\('content_performance_' \+ scope \+ '\.csv'/);
+});

@@ -1240,7 +1240,11 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
           <h3 id="performanceContentListTitle">已监控内容</h3>
           <p id="performanceContentListMeta" class="tm-metric-note">尚未加载内容。</p>
         </div>
-        <button class="btn btn-outline btn-sm" type="button" onclick="switchPage('performance-dashboard')">查看汇总</button>
+        <div class="tm-performance-list-actions">
+          <button id="performanceExportFiltered" class="btn btn-outline btn-sm" type="button" onclick="exportPerformanceContents('filtered')">导出当前筛选</button>
+          <button id="performanceExportAll" class="btn btn-outline btn-sm" type="button" onclick="exportPerformanceContents('all')">导出全部</button>
+          <button class="btn btn-outline btn-sm" type="button" onclick="switchPage('performance-dashboard')">查看汇总</button>
+        </div>
       </div>
       <div class="tm-performance-filters" aria-label="内容筛选">
         <input id="performanceContentSearch" type="search" aria-label="搜索视频链接、达人、产品或标签" placeholder="搜索链接、达人、产品或标签" oninput="debouncedPerformanceContentSearch()">
