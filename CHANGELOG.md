@@ -1,5 +1,30 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.8.2-performance-integration-preview (Production Deployed, 2026-09-02) - Phase 7B.2a 数据来源与飞书字段映射预览
+
+### 交付与范围 / Delivery And Scope
+- “内容监控”新增活动范围的“数据接入与飞书字段映射”折叠预览。它只展示当前已批准可用的手工录入和 CSV/XLSX 导入能力，以及平台视频数据到拟定飞书字段的映射。
+- 新增受保护的 `GET /api/campaigns/:id/performance/integration-preview`。接口始终经过活动查看权限，复用现有商业权限：普通成员看不到商业数据录入能力、花费、收入、ROI、ROAS 等商业字段映射。
+- 预览为代码拥有的只读合同，不调用飞书 client、Bitable Outbox 或外部 provider；不会访问或写入飞书、创建任务、保存预览选择或产生业务数据。
+- 页面在切换活动或重复刷新时使用请求序号和活动 ID 双重校验，旧请求不能覆盖新选择活动的映射内容。
+
+### 定向验证、审查与上线 / Focused Verification, Review, And Release
+- 性能服务、路由、请求合同和前端合同 `21/21` 通过；请求管线 `16/16` 通过。JavaScript 语法、`git diff --check` 和本地发布预检通过。
+- 独立审查首轮发现快速切换活动时旧预览响应可能覆盖新活动；先加入回归断言，再以请求序号和活动 ID 守卫成功与错误渲染。复审结论为 `APPROVE`，无遗留发现。
+- 受控候选在隔离环境完成验证后才原子切换；本切片没有数据库迁移、真实活动/视频写入、外部平台抓取或飞书写入。
+- 实现提交：`1a4effc`。
+
+### 生产证据 / Production Evidence
+- 可恢复备份：`/root/turingmarket/backups/v060-crm-sales-workspace-20260902-121710`；备份目录 `SHA256SUMS` 已验证，清单 SHA-256 为 `8d118ed9c8421114736c9d7b4fe551a3309a397179f77e543e7a8c13711d9b3b`。
+- 公网 `/api/health` 为 `200` / `ok`，Parser ready；`/performance-monitor` 与 `/performance-dashboard` 均为 `200`，PM2 online。未认证的新接口返回 `401`，确认其仍在鉴权边界内。
+- `app.js`、`index.html`、性能样式、性能请求合同、路由、运行时服务及性能服务共 7 个发布文件线上 SHA-256 与本地一致。只读 SQLite 校验为 `quick_check=ok`、外键异常 `0`。
+- 初始候选仅留下发布锁且未修改生产；内置恢复程序完成候选清理后，最终受控发布完成切换并释放发布锁。
+
+### 后续边界 / Next Boundaries
+- 下一切片进入 `7B.2b`：在明确的活动范围、字段合同和授权配置下设计飞书投影与数据来源连接，不自动启用外部抓取或写入；随后再进入事实驱动的 AI 内容分析和项目复盘报告。
+
+---
+
 ## v0.8.1b-performance-content-export (Production Deployed, 2026-09-02) - Phase 7B 内容效果 CSV 导出
 
 ### 交付与范围 / Delivery And Scope
