@@ -167,7 +167,8 @@ test('does not disclose commercial input or financial KPI values to a campaign t
       body: {
         observation: { views: 1000, likes: 80, comments: 20 },
         commercial: confirmedCommercialInput(),
-        confirmed: true
+        confirmed: true,
+        correction_reason: 'Creator fee corrected to USD 10,000.'
       }
     });
 
@@ -180,10 +181,49 @@ test('does not disclose commercial input or financial KPI values to a campaign t
 
     assert.equal(list.capabilities.can_view_commercial, false);
     assert.equal(Object.hasOwn(list.items[0], 'commercial'), false);
+    assert.equal(Object.hasOwn(list.items[0].latest_observation, 'correction_reason'), false);
     assert.equal(dashboard.capabilities.can_view_commercial, false);
     assert.equal(Object.hasOwn(dashboard.metrics, 'roi'), false);
     assert.equal(Object.hasOwn(dashboard.metrics, 'roas'), false);
     assert.equal(Object.hasOwn(dashboard.metrics, 'total_campaign_cost'), false);
+  } finally {
+    db.close();
+  }
+});
+
+test('uses the latest observed_at value when a late backfill is appended', () => {
+  const { db, service } = createFixture();
+  try {
+    const content = addCanonicalVideo(service);
+    service.recordManualInput({
+      userId: 1,
+      campaignId: 7,
+      contentId: content.id,
+      body: {
+        observation: {
+          views: 1000,
+          observed_at: '2026-09-02T12:00:00.000Z'
+        }
+      }
+    });
+    service.recordManualInput({
+      userId: 1,
+      campaignId: 7,
+      contentId: content.id,
+      body: {
+        observation: {
+          views: 100,
+          observed_at: '2026-09-01T12:00:00.000Z'
+        }
+      }
+    });
+
+    const list = service.listContents({ userId: 1, campaignId: 7, query: {} });
+    const dashboard = service.getDashboard({ userId: 1, campaignId: 7, query: {} });
+
+    assert.equal(list.items[0].latest_observation.observed_at, '2026-09-02T12:00:00.000Z');
+    assert.equal(list.items[0].latest_observation.views, 1000);
+    assert.equal(dashboard.totals.views.value, 1000);
   } finally {
     db.close();
   }

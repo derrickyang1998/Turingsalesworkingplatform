@@ -302,6 +302,15 @@ function calculateRowMetrics(row) {
 
 function serializePublication(row, capabilities) {
   const metrics = calculateRowMetrics(row);
+  const latestObservation = row.observation_id === null || row.observation_id === undefined ? null : {
+    id: row.observation_id,
+    observed_at: row.observed_at,
+    source_mode: row.observation_source_mode,
+    ...safeJson(row.metrics_json, {})
+  };
+  if (latestObservation && capabilities.can_view_commercial) {
+    latestObservation.correction_reason = row.observation_correction_reason;
+  }
   const output = {
     id: row.id,
     campaign_id: row.campaign_id,
@@ -318,13 +327,7 @@ function serializePublication(row, capabilities) {
     source_mode: row.source_mode,
     published_at: row.published_at,
     created_at: row.created_at,
-    latest_observation: row.observation_id === null || row.observation_id === undefined ? null : {
-      id: row.observation_id,
-      observed_at: row.observed_at,
-      source_mode: row.observation_source_mode,
-      correction_reason: row.observation_correction_reason,
-      ...safeJson(row.metrics_json, {})
-    },
+    latest_observation: latestObservation,
     metrics: apiMetrics(metrics, capabilities.can_view_commercial)
   };
   if (capabilities.can_view_commercial && row.manual_id !== null && row.manual_id !== undefined) {
@@ -500,7 +503,7 @@ function createPerformanceManualService(db, options = {}) {
         WHERE current_observation.org_id=publication.org_id
           AND current_observation.campaign_id=publication.campaign_id
           AND current_observation.publication_id=publication.id
-        ORDER BY current_observation.created_at DESC,current_observation.id DESC LIMIT 1
+        ORDER BY current_observation.observed_at DESC,current_observation.id DESC LIMIT 1
       )
       LEFT JOIN performance_manual_inputs manual ON manual.id=(
         SELECT current_input.id

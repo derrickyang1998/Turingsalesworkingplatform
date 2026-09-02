@@ -213,6 +213,8 @@ function createDocument() {
     'm2',
     'm3',
     'm4',
+    'performance-monitor',
+    'performance-dashboard',
     'm5',
     'workflow-designer',
     'workflow-templates',
@@ -430,6 +432,8 @@ test('stateFromLocation and pathForState use the canonical route and substate ta
     [{ pageId: 'm0-detail', substate: { view: 'seapool' } }, '/m0-detail?view=seapool'],
     [{ pageId: 'm4' }, '/m4?tab=tab1'],
     [{ pageId: 'm4', substate: { tab: 'tab3' } }, '/m4?tab=tab3'],
+    [{ pageId: 'performance-monitor' }, '/performance-monitor'],
+    [{ pageId: 'performance-dashboard' }, '/performance-dashboard'],
     [{ pageId: 'm4', substate: { tab: 'tab2' }, preview: 'v030' }, '/m4?tab=tab2&preview=v030'],
     [{ pageId: 'admin' }, '/admin?tab=overview'],
     [{ pageId: 'admin', substate: { tab: 'knowledge' } }, '/admin?tab=knowledge'],
@@ -449,6 +453,8 @@ test('stateFromLocation and pathForState use the canonical route and substate ta
     ['/m0-detail?view=opportunities', { pageId: 'm0-detail', substate: { view: 'opportunities' }, preview: null }],
     ['/m4', { pageId: 'm4', substate: { tab: 'tab1' }, preview: null }],
     ['/m4?tab=tab2', { pageId: 'm4', substate: { tab: 'tab2' }, preview: null }],
+    ['/performance-monitor', { pageId: 'performance-monitor', substate: null, preview: null }],
+    ['/performance-dashboard', { pageId: 'performance-dashboard', substate: null, preview: null }],
     ['/m4?tab=tab2&preview=v030', { pageId: 'm4', substate: { tab: 'tab2' }, preview: 'v030' }],
     ['/m4?tab=2', { pageId: 'm0', substate: null, preview: null }],
     ['/admin', { pageId: 'admin', substate: { tab: 'overview' }, preview: null }],
@@ -499,6 +505,16 @@ test('restore role-gates admin and kb routes before rendering and gates preview 
   assert.deepEqual(plain(userPreviewContext.historyCalls.map((call) => [call.method, call.url])), [
     ['replaceState', '/m4?tab=tab2']
   ]);
+
+  for (const pageId of ['performance-monitor', 'performance-dashboard']) {
+    const context = loadNavigation('/' + pageId);
+    context.nav.restore(normalUser);
+    assert.equal(context.document.getElementById('page-' + pageId).style.display, 'block');
+    assert.equal(context.lastNavigationEvent().detail.state.pageId, pageId);
+    assert.deepEqual(context.historyCalls.map((call) => [call.method, call.url]), [
+      ['replaceState', '/' + pageId]
+    ]);
+  }
 });
 
 test('restore binds popstate once and popstate applies URL state without writing history', () => {
