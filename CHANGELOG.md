@@ -1,5 +1,30 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.8.3-performance-batch-metric-import (Production Deployed, 2026-09-02) - Phase 7B.2b 视频指标批量补录
+
+### 交付与范围 / Delivery And Scope
+- “内容监控”新增“批量更新指标”：可下载 CSV 模板并上传 CSV/XLSX，按视频链接匹配已纳入监控的内容，追加带明确 UTC 时间戳的播放、展示、点赞、评论、收藏、转发、点击和转化观测。
+- 每一行必须提供数据更新时间且至少有一个指标；同一内容、同一时间点和相同指标的重复导入会被幂等识别，不会重复写入或重复计入看板。
+- 无法匹配的视频链接、无效时间、负数/非整数指标或不支持的映射字段会逐行拒绝并返回原因；有效行与拒绝行不会相互污染。
+- 新增受保护的 `POST /api/performance/metrics/upload`，复用活动范围、内容管理权限、上传隔离与最终授权复核。该切片不接收花费、收入或其他商业字段，也没有数据库迁移。
+
+### 定向验证、审查与上线 / Focused Verification, Review, And Release
+- 性能服务、前端合同和 Phase 4 请求管线定向矩阵 `38/38` 通过；受影响的扩展矩阵 `115/115` 通过。JavaScript 语法、`git diff --check` 与本地发布预检通过。
+- 独立审查先发现“缺失时间可能导致重放不确定”的风险；已改为要求严格 UTC ISO 时间戳并补齐回归用例，复审结论为 `APPROVE`，风险为低。
+- 候选环境完成隔离迁移演练、可信来源验证、真实 Express 重放、发布守卫与部署浏览器烟测后才执行原子切换。
+- 实现提交：`ef218d2`。
+
+### 生产证据 / Production Evidence
+- 可恢复备份：`/root/turingmarket/backups/v060-crm-sales-workspace-20260902-130147`；备份目录 `SHA256SUMS` 已验证，清单 SHA-256 为 `d45a67fb1d58b1889a48f46b29a7849f3e4c021739f6021bddc235268b99156b`。
+- 公网 `/api/health`、`/performance-monitor` 与 `/performance-dashboard` 均为 `200`；PM2 online。未认证的批量指标接口返回 `401`，确认仍在鉴权边界内。
+- `app.js`、`index.html`、主服务、活动合同和性能服务共 5 个发布文件线上 SHA-256 与本地一致。只读 SQLite 校验为 `quick_check=ok`、外键异常 `0`。
+- 本切片未进行真实 provider 抓取、飞书读取/写入、定时同步或真实业务数据写入验收。
+
+### 后续边界 / Next Boundaries
+- 下一切片进入 `7B.2c`：在显式活动范围和权限下建立飞书投影/数据来源连接配置，并保留独立授权后才可启用真实外部读取或写入的边界。
+
+---
+
 ## v0.8.2-performance-integration-preview (Production Deployed, 2026-09-02) - Phase 7B.2a 数据来源与飞书字段映射预览
 
 ### 交付与范围 / Delivery And Scope
