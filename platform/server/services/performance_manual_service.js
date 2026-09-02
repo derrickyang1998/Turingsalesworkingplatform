@@ -56,6 +56,10 @@ const ACTION_POLICIES = Object.freeze({
   PERF_COMMERCIAL_APPROVE: 'PERF_COMMERCIAL_APPROVE'
 });
 const INTEGRATION_PREVIEW_CONTRACT_VERSION = 'performance-integration-preview-v1';
+const METRIC_IMPORT_CONTRACT_VERSION = 'performance-metric-import-v1';
+const METRIC_IMPORT_MAPPING_FIELDS = Object.freeze([
+  'content_url', 'video_url', 'observed_at', ...OBSERVATION_FIELDS, 'correction_reason'
+]);
 const INTEGRATION_PREVIEW_SOURCES = Object.freeze([
   Object.freeze({
     id: 'manual',
@@ -69,8 +73,8 @@ const INTEGRATION_PREVIEW_SOURCES = Object.freeze([
     id: 'csv_xlsx',
     label: 'CSV / XLSX 导入',
     status: 'available',
-    detail: '可批量导入视频链接、达人、产品、标签和发布日期。',
-    supports: Object.freeze(['content_import']),
+    detail: '可批量导入视频链接，也可为已监控视频追加指标快照。',
+    supports: Object.freeze(['content_import', 'metric_input']),
     dispatch_available: false
   })
 ]);
@@ -273,6 +277,224 @@ function normalizeCommercial(value) {
     output.attribution_window = window;
   }
   return output;
+}
+
+function metricImportError(code, message, details) {
+  return serviceError(400, code, message, details);
+}
+
+function metricImportMappingSnapshot(value) {
+  let descriptors;
+  try {
+    if (!isPlainObject(value)) {
+      throw metricImportError(
+        'PERFORMANCE_METRIC_IMPORT_MAPPING_INVALID',
+        'Metric import column mapping must be a plain object.',
+        { field: 'column_mapping' }
+      );
+    }
+    descriptors = Object.getOwnPropertyDescriptors(value);
+  } catch (error) {
+    if (error instanceof PerformanceManualServiceError) throw error;
+    throw metricImportError(
+      'PERFORMANCE_METRIC_IMPORT_MAPPING_INVALID',
+      'Metric import column mapping cannot be inspected safely.',
+      { field: 'column_mapping' }
+    );
+  }
+  const keys = Reflect.ownKeys(descriptors);
+  if (keys.length > METRIC_IMPORT_MAPPING_FIELDS.length || keys.some((key) => typeof key !== 'string' || !METRIC_IMPORT_MAPPING_FIELDS.includes(key))) {
+    throw metricImportError(
+      'PERFORMANCE_METRIC_IMPORT_MAPPING_INVALID',
+      'Metric import column mapping contains an unsupported field.',
+      { field: 'column_mapping' }
+    );
+  }
+  const snapshot = {};
+  for (const key of keys) {
+    const descriptor = descriptors[key];
+    if (!Object.hasOwn(descriptor, 'value')) {
+      throw metricImportError(
+        'PERFORMANCE_METRIC_IMPORT_MAPPING_INVALID',
+        'Metric import column mapping accessors are not supported.',
+        { field: 'column_mapping' }
+      );
+    }
+    snapshot[key] = descriptor.value;
+  }
+  return snapshot;
+}
+
+function normalizeMetricImportMapping(value) {
+  const source = metricImportMappingSnapshot(value);
+  const hasContentUrl = own(source, 'content_url');
+  const hasVideoUrl = own(source, 'video_url');
+  if (!hasContentUrl && !hasVideoUrl) {
+    throw metricImportError(
+      'PERFORMANCE_METRIC_IMPORT_URL_MAPPING_REQUIRED',
+      'Metric import must map a content or video URL column.',
+      { field: 'column_mapping.content_url' }
+    );
+  }
+  if (hasContentUrl && hasVideoUrl) {
+    throw metricImportError(
+      'PERFORMANCE_METRIC_IMPORT_URL_MAPPING_AMBIGUOUS',
+      'Metric import must map exactly one content or video URL column.',
+      { field: 'column_mapping' }
+    );
+  }
+  const normalized = {};
+  const usedSourceColumns = new Set();
+  for (const field of METRIC_IMPORT_MAPPING_FIELDS) {
+    if (field === 'video_url') continue;
+    const sourceField = field === 'content_url' && hasVideoUrl ? 'video_url' : field;
+    if (!own(source, sourceField)) continue;
+    const raw = source[sourceField];
+    if (typeof raw !== 'string') {
+      throw metricImportError(
+        'PERFORMANCE_METRIC_IMPORT_MAPPING_INVALID',
+        'Metric import column names must be text.',
+        { field: `column_mapping.${field}` }
+      );
+    }
+    const column = raw.trim();
+    if (!column || column.length > 256 || column.includes('\u0000') || column === 'source_row_number') {
+      throw metricImportError(
+        'PERFORMANCE_METRIC_IMPORT_MAPPING_INVALID',
+        'Metric import column names are invalid.',
+        { field: `column_mapping.${field}` }
+      );
+    }
+    if (usedSourceColumns.has(column)) {
+      throw metricImportError(
+        'PERFORMANCE_METRIC_IMPORT_MAPPING_DUPLICATE',
+        'Each metric import field must use a distinct source column.',
+        { field: 'column_mapping' }
+      );
+    }
+    usedSourceColumns.add(column);
+    normalized[field] = column;
+  }
+  if (!OBSERVATION_FIELDS.some((field) => own(normalized, field))) {
+    throw metricImportError(
+      'PERFORMANCE_METRIC_IMPORT_MAPPING_REQUIRED',
+      'Metric import must map at least one performance metric column.',
+      { field: 'column_mapping' }
+    );
+  }
+  if (!own(normalized, 'observed_at')) {
+    throw metricImportError(
+      'PERFORMANCE_METRIC_IMPORT_TIMESTAMP_MAPPING_REQUIRED',
+      'Metric import must map a data update time column.',
+      { field: 'column_mapping.observed_at' }
+    );
+  }
+  return normalized;
+}
+
+function metricImportRowError(row, code, message, field) {
+  const details = { source_row_number: row && row.source_row_number ? row.source_row_number : null };
+  if (field) details.field = field;
+  return {
+    index: row && Number.isSafeInteger(row.index) ? row.index : null,
+    source_row_number: details.source_row_number,
+    outcome: 'rejected',
+    status: 'rejected',
+    publication_id: null,
+    observation_id: null,
+    observed_at: null,
+    error: { code, statusCode: 400, message, details }
+  };
+}
+
+function metricImportDuplicateRow(row, publicationId, observationId) {
+  return {
+    index: row && Number.isSafeInteger(row.index) ? row.index : null,
+    source_row_number: row && row.source_row_number ? row.source_row_number : null,
+    outcome: 'duplicate',
+    status: 'duplicate',
+    publication_id: publicationId || null,
+    observation_id: observationId || null,
+    observed_at: null,
+    error: null
+  };
+}
+
+function metricImportAcceptedRow(row, publicationId, observationId, observedAt) {
+  return {
+    index: row && Number.isSafeInteger(row.index) ? row.index : null,
+    source_row_number: row && row.source_row_number ? row.source_row_number : null,
+    outcome: 'accepted',
+    status: 'accepted',
+    publication_id: publicationId,
+    observation_id: observationId,
+    observed_at: observedAt,
+    error: null
+  };
+}
+
+function parseMetricImportCount(value, field, row) {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (Number.isSafeInteger(value) && value >= 0) return value;
+  if (typeof value === 'string') {
+    const normalized = value.trim().replace(/,/g, '');
+    if (/^(?:0|[1-9][0-9]{0,15})$/.test(normalized)) {
+      const parsed = Number(normalized);
+      if (Number.isSafeInteger(parsed)) return parsed;
+    }
+  }
+  throw metricImportError(
+    'PERFORMANCE_METRIC_IMPORT_ROW_INVALID',
+    'Metric values must be nonnegative integers.',
+    { field, source_row_number: row.source_row_number }
+  );
+}
+
+function normalizeMetricImportRow(row, customFields, mapping) {
+  const observation = {};
+  for (const field of OBSERVATION_FIELDS) {
+    if (!own(mapping, field)) continue;
+    const value = parseMetricImportCount(customFields[field], field, row);
+    if (value !== undefined) observation[field] = value;
+  }
+  if (Object.keys(observation).length === 0) {
+    throw metricImportError(
+      'PERFORMANCE_METRIC_IMPORT_ROW_INVALID',
+      'At least one metric value is required for every imported row.',
+      { source_row_number: row.source_row_number }
+    );
+  }
+  const rawObservedAt = customFields.observed_at;
+  if (typeof rawObservedAt !== 'string' || !isStrictIsoTimestamp(rawObservedAt.trim())) {
+    throw metricImportError(
+      'PERFORMANCE_METRIC_IMPORT_ROW_INVALID',
+      'Data update time must be a UTC ISO timestamp.',
+      { field: 'observed_at', source_row_number: row.source_row_number }
+    );
+  }
+  const observedAt = rawObservedAt.trim();
+  let correctionReason = null;
+  if (own(mapping, 'correction_reason')) {
+    const raw = customFields.correction_reason;
+    if (raw !== undefined && raw !== null && raw !== '') {
+      if (typeof raw !== 'string') {
+        throw metricImportError(
+          'PERFORMANCE_METRIC_IMPORT_ROW_INVALID',
+          'Correction reason must be text.',
+          { field: 'correction_reason', source_row_number: row.source_row_number }
+        );
+      }
+      correctionReason = raw.trim();
+      if (!correctionReason || correctionReason.length > MAX_TEXT_LENGTH || correctionReason.includes('\u0000')) {
+        throw metricImportError(
+          'PERFORMANCE_METRIC_IMPORT_ROW_INVALID',
+          'Correction reason is invalid.',
+          { field: 'correction_reason', source_row_number: row.source_row_number }
+        );
+      }
+    }
+  }
+  return { metrics: observation, observedAt, correctionReason };
 }
 
 function accessCapabilities(access) {
@@ -805,6 +1027,149 @@ function createPerformanceManualService(db, options = {}) {
     return result;
   }
 
+  function importMetricRows(input) {
+    const context = requireAccess(input && input.userId, input && input.campaignId, 'content');
+    const body = assertOnlyKeys((input && input.body) || {}, [
+      'mapping_version', 'provenance', 'column_mapping', 'rows'
+    ], 'PERFORMANCE_METRIC_IMPORT_INVALID');
+    const mapping = normalizeMetricImportMapping(body.column_mapping);
+    let prepared;
+    try {
+      prepared = preparePerformanceContentImport({
+        campaign_id: String(context.campaignId),
+        mapping_version: body.mapping_version,
+        provenance: body.provenance,
+        column_mapping: {
+          content_url: mapping.content_url,
+          custom_fields: Object.fromEntries(
+            Object.entries(mapping).filter(([field]) => field !== 'content_url')
+          )
+        },
+        rows: body.rows
+      });
+    } catch (error) {
+      if (error instanceof PerformanceContentImportServiceError) {
+        throw serviceError(error.statusCode || 400, error.code, error.message, error.details);
+      }
+      throw error;
+    }
+
+    const rows = new Array(prepared.rows.length);
+    const candidates = [];
+    prepared.rows.forEach((preparedRow) => {
+      if (preparedRow.outcome === 'duplicate') {
+        rows[preparedRow.index] = metricImportDuplicateRow(preparedRow, null, null);
+        return;
+      }
+      if (preparedRow.outcome !== 'accepted' || !preparedRow.draft) {
+        rows[preparedRow.index] = metricImportRowError(
+          preparedRow,
+          preparedRow.error && preparedRow.error.code || 'PERFORMANCE_METRIC_IMPORT_ROW_INVALID',
+          preparedRow.error && preparedRow.error.message || 'Metric import row is invalid.'
+        );
+        return;
+      }
+      try {
+        const normalized = normalizeMetricImportRow(preparedRow, preparedRow.draft.custom_fields || {}, mapping);
+        candidates.push({ row: preparedRow, normalized });
+      } catch (error) {
+        if (!(error instanceof PerformanceManualServiceError)) throw error;
+        rows[preparedRow.index] = metricImportRowError(
+          preparedRow,
+          error.code || 'PERFORMANCE_METRIC_IMPORT_ROW_INVALID',
+          error.message || 'Metric import row is invalid.',
+          error.details && error.details.field
+        );
+      }
+    });
+
+    db.transaction(() => {
+      if (candidates.length === 0) return;
+      const identities = [...new Set(candidates.map((candidate) => candidate.row.canonical_identity))];
+      const placeholders = identities.map(() => '?').join(',');
+      const publications = db.prepare(`
+        SELECT id,canonical_identity FROM campaign_publications
+        WHERE org_id=? AND campaign_id=? AND canonical_identity IN (${placeholders})
+      `).all(context.access.campaign.org_id, context.campaignId, ...identities);
+      const publicationByIdentity = new Map(publications.map((publication) => [publication.canonical_identity, publication.id]));
+      const findExact = db.prepare(`
+        SELECT id FROM performance_metric_observations
+        WHERE org_id=? AND campaign_id=? AND publication_id=? AND source_mode='csv_xlsx'
+          AND observed_at=? AND metrics_json=?
+        ORDER BY id DESC LIMIT 1
+      `);
+      const insertObservation = db.prepare(`
+        INSERT INTO performance_metric_observations (
+          org_id,campaign_id,publication_id,source_mode,metrics_json,observed_at,correction_reason,created_by
+        ) VALUES (?,?,?,?,?,?,?,?)
+      `);
+      candidates.forEach((candidate) => {
+        const publicationId = publicationByIdentity.get(candidate.row.canonical_identity);
+        if (!publicationId) {
+          rows[candidate.row.index] = metricImportRowError(
+            candidate.row,
+            'PERFORMANCE_METRIC_IMPORT_CONTENT_NOT_FOUND',
+            'Metric import can only update content already monitored in this campaign.'
+          );
+          return;
+        }
+        const metricsJson = JSON.stringify(candidate.normalized.metrics);
+        const existing = findExact.get(
+          context.access.campaign.org_id,
+          context.campaignId,
+          publicationId,
+          candidate.normalized.observedAt,
+          metricsJson
+        );
+        if (existing) {
+          rows[candidate.row.index] = metricImportDuplicateRow(candidate.row, publicationId, Number(existing.id));
+          return;
+        }
+        const observationId = Number(insertObservation.run(
+          context.access.campaign.org_id,
+          context.campaignId,
+          publicationId,
+          'csv_xlsx',
+          metricsJson,
+          candidate.normalized.observedAt,
+          candidate.normalized.correctionReason,
+          context.userId
+        ).lastInsertRowid);
+        rows[candidate.row.index] = metricImportAcceptedRow(
+          candidate.row,
+          publicationId,
+          observationId,
+          candidate.normalized.observedAt
+        );
+      });
+    }).immediate();
+
+    const acceptedCount = rows.filter((row) => row && row.outcome === 'accepted').length;
+    const duplicateCount = rows.filter((row) => row && row.outcome === 'duplicate').length;
+    const rejectedCount = rows.filter((row) => row && row.outcome === 'rejected').length;
+    const result = {
+      contract_version: METRIC_IMPORT_CONTRACT_VERSION,
+      campaign_id: context.campaignId,
+      source_mode: 'csv_xlsx',
+      file_hash: prepared.file_hash,
+      mapping_version: prepared.mapping_version,
+      total_count: prepared.total_count,
+      accepted_count: acceptedCount,
+      duplicate_count: duplicateCount,
+      rejected_count: rejectedCount,
+      rows
+    };
+    writeAudit(context.userId, 'performance_metric_import', {
+      campaign_id: context.campaignId,
+      accepted: acceptedCount,
+      duplicate: duplicateCount,
+      rejected: rejectedCount,
+      file_hash: prepared.file_hash,
+      mapping_version: prepared.mapping_version
+    });
+    return result;
+  }
+
   function recordManualInput(input) {
     const preliminary = requireAccess(input && input.userId, input && input.campaignId, 'view');
     const body = assertOnlyKeys((input && input.body) || {}, [
@@ -1085,6 +1450,7 @@ function createPerformanceManualService(db, options = {}) {
   return Object.freeze({
     createContent,
     importContentRows,
+    importMetricRows,
     recordManualInput,
     listContents,
     getIntegrationPreview,

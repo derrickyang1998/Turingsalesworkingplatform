@@ -272,6 +272,141 @@ test('imports accepted parsed rows atomically while returning malformed rows as 
   }
 });
 
+test('imports batch metric snapshots for existing canonical content and skips an exact CSV replay', () => {
+  const { db, service } = createFixture();
+  try {
+    const content = addCanonicalVideo(service);
+    const request = {
+      userId: 1,
+      campaignId: 7,
+      body: {
+        mapping_version: 'performance-metrics-v1',
+        provenance: {
+          source_mode: 'csv_xlsx',
+          file_hash: 'b'.repeat(64)
+        },
+        column_mapping: {
+          content_url: '视频链接',
+          observed_at: '数据更新时间',
+          views: '播放量',
+          likes: '点赞数',
+          comments: '评论数',
+          shares: '转发数',
+          clicks: '点击数'
+        },
+        rows: [
+          {
+            source_row_number: 2,
+            视频链接: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+            数据更新时间: '2026-09-02T12:00:00.000Z',
+            播放量: '1,250',
+            点赞数: '88',
+            评论数: 12,
+            转发数: '4',
+            点击数: '34'
+          },
+          {
+            source_row_number: 3,
+            视频链接: 'https://www.youtube.com/watch?v=aBcDeFgHiJ1',
+            数据更新时间: '2026-09-02T12:00:00.000Z',
+            播放量: '100'
+          }
+        ]
+      }
+    };
+
+    const imported = service.importMetricRows(request);
+    assert.equal(imported.contract_version, 'performance-metric-import-v1');
+    assert.equal(imported.accepted_count, 1);
+    assert.equal(imported.duplicate_count, 0);
+    assert.equal(imported.rejected_count, 1);
+    assert.equal(imported.rows[0].publication_id, content.id);
+    assert.equal(imported.rows[1].error.code, 'PERFORMANCE_METRIC_IMPORT_CONTENT_NOT_FOUND');
+
+    const current = service.listContents({ userId: 1, campaignId: 7, query: {} }).items[0];
+    assert.equal(current.latest_observation.source_mode, 'csv_xlsx');
+    assert.equal(current.latest_observation.views, 1250);
+    assert.equal(current.latest_observation.clicks, 34);
+    assert.equal(current.metrics.core_view_er.value, 0.08);
+
+    const replayed = service.importMetricRows(request);
+    assert.equal(replayed.accepted_count, 0);
+    assert.equal(replayed.duplicate_count, 1);
+    assert.equal(replayed.rejected_count, 1);
+    assert.equal(
+      db.prepare('SELECT COUNT(*) AS count FROM performance_metric_observations').get().count,
+      1
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('rejects malformed batch metric cells without creating an observation', () => {
+  const { db, service } = createFixture();
+  try {
+    addCanonicalVideo(service);
+    const result = service.importMetricRows({
+      userId: 1,
+      campaignId: 7,
+      body: {
+        mapping_version: 'performance-metrics-v1',
+        provenance: {
+          source_mode: 'csv_xlsx',
+          file_hash: 'c'.repeat(64)
+        },
+        column_mapping: {
+          content_url: '视频链接',
+          observed_at: '数据更新时间',
+          views: '播放量'
+        },
+        rows: [{
+          source_row_number: 2,
+          视频链接: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+          数据更新时间: '2026-09-02T12:00:00.000Z',
+          播放量: '-1'
+        }]
+      }
+    });
+
+    assert.equal(result.accepted_count, 0);
+    assert.equal(result.duplicate_count, 0);
+    assert.equal(result.rejected_count, 1);
+    assert.equal(result.rows[0].error.code, 'PERFORMANCE_METRIC_IMPORT_ROW_INVALID');
+    assert.equal(
+      db.prepare('SELECT COUNT(*) AS count FROM performance_metric_observations').get().count,
+      0
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('requires an explicit data update time mapping for batch metric imports', () => {
+  const { db, service } = createFixture();
+  try {
+    assert.throws(() => service.importMetricRows({
+      userId: 1,
+      campaignId: 7,
+      body: {
+        mapping_version: 'performance-metrics-v1',
+        provenance: {
+          source_mode: 'csv_xlsx',
+          file_hash: 'd'.repeat(64)
+        },
+        column_mapping: {
+          content_url: '视频链接',
+          views: '播放量'
+        },
+        rows: []
+      }
+    }), (error) => error instanceof PerformanceManualServiceError &&
+      error.code === 'PERFORMANCE_METRIC_IMPORT_TIMESTAMP_MAPPING_REQUIRED');
+  } finally {
+    db.close();
+  }
+});
+
 test('returns a campaign-scoped read-only source and Feishu mapping preview for an administrator', () => {
   const { db, service } = createFixture();
   try {
@@ -283,6 +418,10 @@ test('returns a campaign-scoped read-only source and Feishu mapping preview for 
     assert.equal(preview.capabilities.can_view, true);
     assert.deepEqual(preview.data_sources.map((source) => source.id), ['manual', 'csv_xlsx']);
     assert.equal(preview.data_sources.every((source) => source.dispatch_available === false), true);
+    assert.equal(
+      preview.data_sources.find((source) => source.id === 'csv_xlsx').supports.includes('metric_input'),
+      true
+    );
     assert.equal(preview.feishu.status, 'preview_only');
     assert.equal(preview.feishu.provider_validation, 'not_attempted');
     assert.equal(preview.feishu.write_attempted, false);

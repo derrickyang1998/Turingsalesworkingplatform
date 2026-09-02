@@ -200,6 +200,7 @@ const phase4PolicyNames = [
   'SHARED_KNOWLEDGE_UPLOAD',
   'SHARED_INFLUENCER_UPLOAD',
   'SHARED_PERFORMANCE_UPLOAD',
+  'SHARED_PERFORMANCE_METRICS_UPLOAD',
   'SHARED_DEMAND_PARSE_FILE',
   'CRM_LEAD_CREATE',
   'CRM_LEAD_UPDATE',
@@ -1730,6 +1731,56 @@ app.post('/api/performance/upload', authMiddleware, async (req, res) => {
           const current = authority.readFresh(db);
           const data = parsed && parsed.data ? parsed.data : {};
           const imported = performanceManualService.importContentRows({
+            userId: current.user.id,
+            campaignId,
+            body: {
+              mapping_version: String(req.body.mapping_version || '').trim(),
+              provenance: {
+                source_mode: 'csv_xlsx',
+                file_hash: req.file.sha256
+              },
+              column_mapping: performanceUploadColumnMapping(req.body.column_mapping),
+              rows: performanceUploadRows(data)
+            }
+          });
+          lifecycle.completeAdmissionInTransaction(db);
+          return Object.assign({
+            parser: data.parser,
+            warning: sandboxWarning(data),
+            file: {
+              original_name: req.file.originalname,
+              sha256: req.file.sha256,
+              row_count: Array.isArray(data.rows) ? data.rows.length : 0
+            }
+          }, imported);
+        }).immediate();
+      }
+    });
+    return res.json(result);
+  } catch (error) {
+    return legacyUploadError(res, error);
+  } finally {
+    requestSignal.dispose();
+  }
+});
+
+app.post('/api/performance/metrics/upload', authMiddleware, async (req, res) => {
+  const requestSignal = requestUploadSignal(req);
+  try {
+    const campaignId = performanceUploadCampaignId(req.body && req.body.campaign_id);
+    const authority = createUploadAuthority(req, campaignId);
+    const admission = req.phase4Request.admission;
+    const result = await uploadSandboxService.processUpload({
+      multipart: req.phase4Request.multipart.sandboxMultipart,
+      admission,
+      signal: requestSignal.signal,
+      assertLeaseOwned: () => renewUploadAdmissionLease(admission),
+      assertAuthorized: () => assertUploadAuthorityFresh(authority),
+      finalize(parsed, lifecycle) {
+        return db.transaction(() => {
+          const current = authority.readFresh(db);
+          const data = parsed && parsed.data ? parsed.data : {};
+          const imported = performanceManualService.importMetricRows({
             userId: current.user.id,
             campaignId,
             body: {

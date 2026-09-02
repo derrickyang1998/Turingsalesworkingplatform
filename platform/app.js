@@ -7050,6 +7050,36 @@ function downloadPerformanceTemplate() {
   dlFile('内容监控上传模板.csv', '\ufeff' + csv, 'text/csv;charset=utf-8');
 }
 
+function performanceMetricsUploadMapping() {
+  var mapping = {
+    content_url: performanceTextValue('performanceMetricsMappingUrl'),
+    observed_at: performanceTextValue('performanceMetricsMappingObservedAt'),
+    views: performanceTextValue('performanceMetricsMappingViews'),
+    impressions: performanceTextValue('performanceMetricsMappingImpressions'),
+    likes: performanceTextValue('performanceMetricsMappingLikes'),
+    comments: performanceTextValue('performanceMetricsMappingComments'),
+    saves: performanceTextValue('performanceMetricsMappingSaves'),
+    shares: performanceTextValue('performanceMetricsMappingShares'),
+    clicks: performanceTextValue('performanceMetricsMappingClicks'),
+    conversions: performanceTextValue('performanceMetricsMappingConversions'),
+    correction_reason: performanceTextValue('performanceMetricsMappingCorrectionReason')
+  };
+  Object.keys(mapping).forEach(function(key) {
+    if (!mapping[key]) delete mapping[key];
+  });
+  if (!mapping.content_url) throw new Error('请填写视频链接对应的表头。');
+  var metricFields = ['views', 'impressions', 'likes', 'comments', 'saves', 'shares', 'clicks', 'conversions'];
+  if (!metricFields.some(function(field) { return Boolean(mapping[field]); })) {
+    throw new Error('请至少填写一个指标对应的表头。');
+  }
+  return mapping;
+}
+
+function downloadPerformanceMetricsTemplate() {
+  var csv = '视频链接,数据更新时间,播放量,展示量,点赞数,评论数,收藏数,转发数,点击数,转化数,修正说明\n';
+  dlFile('内容监控指标更新模板.csv', '\ufeff' + csv, 'text/csv;charset=utf-8');
+}
+
 function handlePerformanceImport(event) {
   var file = event && event.target && event.target.files ? event.target.files[0] : null;
   importPerformanceFile(file);
@@ -7097,6 +7127,56 @@ async function importPerformanceFile(file) {
   } catch (error) {
     if (status) status.textContent = error.message || '导入失败';
     toast(error.message || '导入失败', 'error');
+  }
+}
+
+function handlePerformanceMetricsImport(event) {
+  var file = event && event.target && event.target.files ? event.target.files[0] : null;
+  importPerformanceMetricsFile(file);
+  if (event && event.target) event.target.value = '';
+}
+
+function handlePerformanceMetricsDrop(event) {
+  if (event) event.preventDefault();
+  var dropZone = document.getElementById('performanceMetricsImportDropZone');
+  if (dropZone) dropZone.classList.remove('is-dragover');
+  var file = event && event.dataTransfer && event.dataTransfer.files ? event.dataTransfer.files[0] : null;
+  importPerformanceMetricsFile(file);
+}
+
+async function importPerformanceMetricsFile(file) {
+  var status = document.getElementById('performanceMetricsImportStatus');
+  var campaignId = getPerformanceCampaignId();
+  if (!file) return;
+  if (campaignId === null) {
+    if (status) status.textContent = '请先选择推广活动。';
+    return;
+  }
+  var extension = ((file.name || '').split('.').pop() || '').toLowerCase();
+  if (['csv', 'xlsx'].indexOf(extension) === -1) {
+    if (status) status.textContent = '仅支持 CSV 或 XLSX 文件。';
+    return;
+  }
+  try {
+    var form = new FormData();
+    form.append('file', file);
+    form.append('campaign_id', String(campaignId));
+    form.append('mapping_version', 'performance-metrics-ui-v1');
+    form.append('column_mapping', JSON.stringify(performanceMetricsUploadMapping()));
+    if (status) status.textContent = '正在更新 ' + file.name + '...';
+    var response = await apiFetch('/performance/metrics/upload', { method: 'POST', body: form });
+    var data = await response.json();
+    if (!response.ok) throw new Error(data.error || '指标更新失败');
+    var detail = '已更新 ' + Number(data.accepted_count || 0) + ' 条指标数据';
+    if (Number(data.duplicate_count || 0)) detail += '，跳过重复 ' + Number(data.duplicate_count || 0) + ' 条';
+    if (Number(data.rejected_count || 0)) detail += '，未通过 ' + Number(data.rejected_count || 0) + ' 条';
+    if (status) status.textContent = detail + '。';
+    toast(detail);
+    await loadPerformanceContents();
+    await loadPerformanceDashboard();
+  } catch (error) {
+    if (status) status.textContent = error.message || '指标更新失败';
+    toast(error.message || '指标更新失败', 'error');
   }
 }
 
@@ -7446,7 +7526,7 @@ function switchPage(id, options) {
     'getEditedDemand', 'syncCurDemandFromAnalysis', 'handleDemandFile', 'analyzeDemandAI',
     'switchTab', 'matchInfluencers', 'smartMatch', 'handleUpload', 'handleDrop', 'openInfUploadModal', 'handleUploadModal', 'downloadInfTemplate', 'exportAll', 'exportFiltered', 'exportSelected',
     'toggleAll', 'syncInfluencerSelectionState', 'loadM4Campaigns', 'changeM4CampaignContext', 'startCollab', 'submitCollabOrder', 'closeCollabOrderModal', 'loadCollaborations', 'updateCollabStatus', 'runCampaignCollabAction', 'closeCampaignSettlementModal', 'submitCampaignSettlement',
-    'initPerformanceMonitor', 'initPerformanceDashboard', 'refreshPerformanceMonitor', 'refreshPerformanceDashboard', 'changePerformanceCampaignContext', 'loadPerformanceContents', 'loadPerformanceIntegrationPreview', 'createPerformanceContent', 'downloadPerformanceTemplate', 'handlePerformanceImport', 'handlePerformanceDrop', 'openPerformanceInputModal', 'closePerformanceInputModal', 'savePerformanceInput', 'loadPerformanceDashboard', 'debouncedPerformanceContentSearch', 'exportPerformanceContents',
+    'initPerformanceMonitor', 'initPerformanceDashboard', 'refreshPerformanceMonitor', 'refreshPerformanceDashboard', 'changePerformanceCampaignContext', 'loadPerformanceContents', 'loadPerformanceIntegrationPreview', 'createPerformanceContent', 'downloadPerformanceTemplate', 'handlePerformanceImport', 'handlePerformanceDrop', 'downloadPerformanceMetricsTemplate', 'handlePerformanceMetricsImport', 'handlePerformanceMetricsDrop', 'openPerformanceInputModal', 'closePerformanceInputModal', 'savePerformanceInput', 'loadPerformanceDashboard', 'debouncedPerformanceContentSearch', 'exportPerformanceContents',
     'sendChat', 'clearChat', 'clearAIMemory', 'pushToFeishu', 'loadFeishuStatus', 'loadFeishuOutbox', 'testFeishuConnection', 'selectFeishuReconciliationDelivery', 'reconcileFeishuDelivery', 'selectFeishuRetryDelivery', 'retryFeishuDelivery',
     'switchAdminTab', 'loadAdminDashboard', 'loadAdminUsers', 'adminAddUser', 'adminCreateInvite', 'adminResetPw',
     'wfUndo', 'wfRedo', 'wfClearCanvas', 'wfSaveTemplate', 'wfPublishTemplate', 'wfResetTaskFilters', 'wfLoadTasks', 'wfLoadInstances',

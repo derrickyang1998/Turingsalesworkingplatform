@@ -8,6 +8,7 @@ const path = require('node:path');
 const platformRoot = path.resolve(__dirname, '..', '..');
 const indexHtml = fs.readFileSync(path.join(platformRoot, 'index.html'), 'utf8');
 const appSource = fs.readFileSync(path.join(platformRoot, 'app.js'), 'utf8');
+const serverSource = fs.readFileSync(path.join(platformRoot, 'server', 'server.js'), 'utf8');
 const navigationSource = fs.readFileSync(path.join(platformRoot, 'client', 'core', 'navigation.js'), 'utf8');
 const componentStyles = fs.readFileSync(path.join(platformRoot, 'client', 'styles', 'components.css'), 'utf8');
 
@@ -29,6 +30,22 @@ test('performance monitor uses the sandboxed import API with explicit header map
   assert.match(appSource, /apiFetch\('\/performance\/upload', \{ method: 'POST', body: form \}\)/);
   assert.match(appSource, /accepted_count/);
   assert.match(appSource, /duplicate_count/);
+});
+
+test('performance monitor supports a separate sandboxed batch-metrics update with explicit mapping', () => {
+  assert.match(indexHtml, /id="performanceMetricsImportFile"[^>]+accept="\.csv,\.xlsx"/);
+  assert.match(indexHtml, /id="performanceMetricsMappingUrl"/);
+  assert.match(indexHtml, /id="performanceMetricsMappingViews"/);
+  assert.match(indexHtml, /onclick="downloadPerformanceMetricsTemplate\(\)"/);
+  assert.match(appSource, /function performanceMetricsUploadMapping\(\)/);
+  assert.match(appSource, /form\.append\('mapping_version', 'performance-metrics-ui-v1'\)/);
+  assert.match(appSource, /performanceMetricsUploadMapping\(\)/);
+  assert.match(appSource, /apiFetch\('\/performance\/metrics\/upload', \{ method: 'POST', body: form \}\)/);
+  assert.match(appSource, /function handlePerformanceMetricsImport\(event\)/);
+  assert.match(appSource, /function handlePerformanceMetricsDrop\(event\)/);
+  assert.match(serverSource, /app\.post\('\/api\/performance\/metrics\/upload', authMiddleware/);
+  assert.match(serverSource, /req\.phase4Request\.multipart\.sandboxMultipart/);
+  assert.match(serverSource, /performanceManualService\.importMetricRows/);
 });
 
 test('manual data entry keeps performance inputs and commercial confirmation distinct', () => {

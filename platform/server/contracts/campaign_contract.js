@@ -272,6 +272,11 @@ const REQUEST_POLICIES = Object.freeze({
     '/api/performance/upload',
     'parser.performance-upload.admission'
   ),
+  SHARED_PERFORMANCE_METRICS_UPLOAD: multipart(
+    'parser.performance-metrics-upload',
+    '/api/performance/metrics/upload',
+    'parser.performance-metrics-upload.admission'
+  ),
   SHARED_DEMAND_PARSE_FILE: multipart(
     'parser.demand-parse',
     '/api/demand/parse-file',
@@ -420,6 +425,7 @@ const POLICY_GROUPS = Object.freeze({
     'SHARED_KNOWLEDGE_UPLOAD',
     'SHARED_INFLUENCER_UPLOAD',
     'SHARED_PERFORMANCE_UPLOAD',
+    'SHARED_PERFORMANCE_METRICS_UPLOAD',
     'SHARED_DEMAND_PARSE_FILE'
   ])
 });

@@ -379,6 +379,8 @@ test('request contract freezes the exact raw-byte and multipart limits', () => {
   for (const policyName of [
     'SHARED_KNOWLEDGE_UPLOAD',
     'SHARED_INFLUENCER_UPLOAD',
+    'SHARED_PERFORMANCE_UPLOAD',
+    'SHARED_PERFORMANCE_METRICS_UPLOAD',
     'SHARED_DEMAND_PARSE_FILE'
   ]) {
     assert.equal(
@@ -390,6 +392,20 @@ test('request contract freezes the exact raw-byte and multipart limits', () => {
       contract.MULTIPART_LIMITS
     );
   }
+});
+
+test('batch performance metrics upload is an admitted multipart route in the shared parser inventory', () => {
+  const { contract } = loadBoundary();
+  const policy = contract.REQUEST_POLICIES.SHARED_PERFORMANCE_METRICS_UPLOAD;
+
+  assert.ok(policy);
+  assert.equal(policy.id, 'parser.performance-metrics-upload');
+  assert.equal(policy.method, 'POST');
+  assert.equal(policy.pathTemplate, '/api/performance/metrics/upload');
+  assert.equal(policy.mediaKind, contract.MEDIA_KINDS.MULTIPART);
+  assert.equal(policy.maxRawBytes, contract.BODY_LIMITS.MULTIPART_ENVELOPE);
+  assert.deepEqual(policy.multipartLimits, contract.MULTIPART_LIMITS);
+  assert.equal(contract.POLICY_GROUPS.SHARED_PARSERS.includes('SHARED_PERFORMANCE_METRICS_UPLOAD'), true);
 });
 
 test('owned-route matching covers every Express-dispatchable path shape while future policies stay inactive', () => {

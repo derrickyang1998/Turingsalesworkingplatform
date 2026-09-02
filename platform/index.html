@@ -1232,6 +1232,38 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
         </details>
         <div id="performanceImportStatus" class="tm-performance-import-status" role="status" aria-live="polite"></div>
       </section>
+
+      <section class="card tm-performance-action-card" aria-labelledby="performanceMetricsImportTitle">
+        <div class="tm-performance-section-heading">
+          <div>
+            <h3 id="performanceMetricsImportTitle">批量更新指标</h3>
+            <p class="tm-metric-note">按已监控的视频链接追加带更新时间的数据快照。</p>
+          </div>
+          <button class="btn btn-outline btn-sm" type="button" onclick="downloadPerformanceMetricsTemplate()">下载指标模板</button>
+        </div>
+        <label class="file-upload tm-performance-dropzone" id="performanceMetricsImportDropZone" for="performanceMetricsImportFile" ondragover="event.preventDefault();this.classList.add('is-dragover')" ondragleave="this.classList.remove('is-dragover')" ondrop="handlePerformanceMetricsDrop(event)">
+          <span class="upload-text">选择或拖入指标更新文件</span>
+          <span class="tm-metric-note">CSV / XLSX</span>
+        </label>
+        <input id="performanceMetricsImportFile" type="file" accept=".csv,.xlsx" hidden onchange="handlePerformanceMetricsImport(event)">
+        <details class="tm-performance-mapping">
+          <summary>指标表头映射</summary>
+          <div class="tm-performance-mapping-grid">
+            <label>视频链接列<input id="performanceMetricsMappingUrl" value="视频链接" maxlength="256"></label>
+            <label>数据更新时间列<input id="performanceMetricsMappingObservedAt" value="数据更新时间" maxlength="256" placeholder="2026-09-02T12:00:00.000Z"></label>
+            <label>播放量列<input id="performanceMetricsMappingViews" value="播放量" maxlength="256"></label>
+            <label>展示量列<input id="performanceMetricsMappingImpressions" value="展示量" maxlength="256"></label>
+            <label>点赞数列<input id="performanceMetricsMappingLikes" value="点赞数" maxlength="256"></label>
+            <label>评论数列<input id="performanceMetricsMappingComments" value="评论数" maxlength="256"></label>
+            <label>收藏数列<input id="performanceMetricsMappingSaves" value="收藏数" maxlength="256"></label>
+            <label>转发数列<input id="performanceMetricsMappingShares" value="转发数" maxlength="256"></label>
+            <label>点击数列<input id="performanceMetricsMappingClicks" value="点击数" maxlength="256"></label>
+            <label>转化数列<input id="performanceMetricsMappingConversions" value="转化数" maxlength="256"></label>
+            <label>修正说明列<input id="performanceMetricsMappingCorrectionReason" value="修正说明" maxlength="256"></label>
+          </div>
+        </details>
+        <div id="performanceMetricsImportStatus" class="tm-performance-import-status" role="status" aria-live="polite"></div>
+      </section>
     </div>
 
     <section class="card tm-performance-integration-card" aria-labelledby="performanceIntegrationTitle">
