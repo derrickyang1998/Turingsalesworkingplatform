@@ -1,5 +1,31 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.8.1a-performance-manual-foundation (Production Deployed, 2026-09-02) - Phase 7B 内容监控与效果看板基础
+
+### 交付与范围 / Delivery And Scope
+- 新增独立的“内容监控”和“效果看板”工作区。用户在已授权活动中可登记视频链接、导入 CSV/XLSX、明确映射上传表头、按列搜索和筛选内容，并在固定表头列表中维护数据。
+- 首期数据模型持久化视频链接、平台/达人/内容标签、展示、播放、点赞、评论、收藏、转发、点击、花费、收入和已确认商业数据；后端计算互动率、CPM、CPC、ROI 与 ROAS。商业字段只在授权的商业权限下可编辑和汇总，未确认的花费/收入不会进入项目财务 KPI。
+- 内容导入、手工输入与活动访问均由活动范围 API 和服务端权限控制；不引入虚构的趋势、抓取结果或 AI 结论。飞书定时投影、外部平台数据 provider、AI 内容复盘和客户 PPT 复盘报告保留为后续独立切片。
+- 补齐两个工作区的公共 SPA 路由白名单：直接打开或刷新 `/performance-monitor`、`/performance-dashboard` 现在均返回应用壳层，而不会被静态边界误判为私有路径。
+
+### 定向验证、审查与上线 / Focused Verification, Review, And Release
+- 最终性能服务、路由和前端合同 `11/11` 通过，覆盖商业纠正原因对团队成员脱敏与按 `observed_at` 选择最新观测；JavaScript 语法和 `git diff --check` 通过。
+- 受控候选完成可信来源、隔离迁移演练、真实 Express 重放 `8/8`、发布守卫 `21/21` 和部署浏览器烟测 `2/2` 后切换。
+- 主功能审查与修复后的独立复审均为 `APPROVE / CLEAR`；不再保留“复审进行中”的状态。
+- 实现提交：`7ed55a6`；部署链修复：`8cca48a`、`ff69396`、`ff303e3`、`6a5f273`、`6e4bcd3`；直接路由修复：`b2470ca`；生产隐私与观测时序修复：`640c72c`。
+
+### 生产证据 / Production Evidence
+- 最终受控备份：`/root/turingmarket/backups/v060-crm-sales-workspace-20260902-094609`；备份目录 `SHA256SUMS` 已验证，清单 SHA-256 为 `c1c8ed0ad8be6693471d20e29575b3035222941e087be331401bb4794686e193`。
+- 公网 `/api/health` 为 `ok` 且 Parser ready；`/performance-monitor` 和 `/performance-dashboard` 均为 `200`；PM2/Nginx online，发布锁已清理。只读 SQLite 验证为 `quick_check=ok`、外键异常 `0`、schema `v10`、知识库 FTS 投影校验通过。
+- 发布恢复期间保留了可校验 SQLite 事故快照，并只归档了过量的远端发布备份与失效部署锁；客户、项目与知识库业务数据未被清理或回退。
+- 为避免污染真实活动数据，线上验收未创建活动、视频内容或商业数据；功能写入和权限合同由隔离候选与定向测试验证。
+
+### 后续边界 / Next Boundaries
+- 后续普通功能固定按“一个可独立使用的功能切片 -> 受影响模块定向验证 -> 一次独立审查 -> 可验证备份 -> 当轮上线 -> 线上核心路径验收”推进，不等待整阶段全量回归；数据库迁移、权限/安全、systemd 或跨模块基础设施变更仍保留完整发布门禁。
+- 下一切片优先进入视频数据 provider/手工更新批次和飞书投影合同，再引入基于事实数据的 AI 内容分析与客户复盘报告。
+
+---
+
 ## v0.7.4c-feishu-bitable-retry-lineage (Production Deployed, 2026-09-02) - M4 飞书失败批次显式重试
 
 ### 交付与范围 / Delivery And Scope
