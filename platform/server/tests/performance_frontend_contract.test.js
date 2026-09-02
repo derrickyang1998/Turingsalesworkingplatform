@@ -93,3 +93,27 @@ test('performance monitor exposes a collapsed, campaign-scoped integration previ
     /requestSequence !== performanceIntegrationRequestSequence \|\| campaignId !== getPerformanceCampaignId\(\)/
   );
 });
+
+test('performance monitor exposes a permission-aware Feishu connection configuration without external synchronization', () => {
+  assert.match(indexHtml, /id="performanceFeishuConnection"/);
+  assert.match(indexHtml, /活动飞书连接配置/);
+  assert.match(appSource, /var performanceFeishuConnectionRequestSequence = 0;/);
+  assert.match(appSource, /async function loadPerformanceFeishuConnection\(\)/);
+  assert.match(appSource, /function renderPerformanceFeishuConnection\(/);
+  assert.match(appSource, /function savePerformanceFeishuConnectionDraft\(\)/);
+  assert.match(appSource, /function approvePerformanceFeishuConnectionDraft\(\)/);
+  assert.match(appSource, /performance\/feishu-connection/);
+  assert.match(appSource, /not_enabled_in_this_release/);
+  assert.match(appSource, /field\.access !== 'commercial'/);
+  for (const action of ['savePerformanceFeishuConnectionDraft', 'approvePerformanceFeishuConnectionDraft']) {
+    assert.match(
+      appSource,
+      new RegExp(
+        'async function ' + action + '\\(\\)[\\s\\S]*?var requestSequence = \\+\\+performanceFeishuConnectionRequestSequence;[\\s\\S]*?requestSequence !== performanceFeishuConnectionRequestSequence \\|\\| campaignId !== getPerformanceCampaignId\\(\\)'
+      )
+    );
+  }
+  assert.match(componentStyles, /\.tm-performance-feishu-connection-form/);
+  assert.match(componentStyles, /\.tm-performance-feishu-connection-mapping/);
+  assert.match(serverSource, /CAMPAIGN_PERFORMANCE_FEISHU_CONNECTION_APPROVE/);
+});

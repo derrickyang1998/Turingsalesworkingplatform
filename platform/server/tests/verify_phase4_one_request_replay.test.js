@@ -174,7 +174,7 @@ test('real Express assembly proves one mutation and a byte-equivalent authentica
     fallback_request_ids: 0
   });
   assert.deepEqual(report.integrity, {
-    migration_versions: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+    migration_versions: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
     quick_check: 'ok',
     foreign_key_violations: 0
   });

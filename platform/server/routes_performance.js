@@ -4,6 +4,10 @@ const {
   PerformanceManualServiceError,
   createPerformanceManualService
 } = require('./services/performance_manual_service');
+const {
+  PerformanceFeishuConnectionServiceError,
+  createPerformanceFeishuConnectionService
+} = require('./services/performance_feishu_connection_service');
 
 function requestId(request) {
   return request.requestId ||
@@ -12,7 +16,8 @@ function requestId(request) {
 }
 
 function sendError(request, response, error) {
-  const known = error instanceof PerformanceManualServiceError;
+  const known = error instanceof PerformanceManualServiceError ||
+    error instanceof PerformanceFeishuConnectionServiceError;
   const status = known ? error.statusCode : 500;
   const body = {
     error: known ? error.message : 'Performance request failed.',
@@ -41,6 +46,14 @@ function registerPerformanceRoutes(app, options = {}) {
   const service = options.service || createPerformanceManualService(options.db);
   if (!service || typeof service.listContents !== 'function' || typeof service.getIntegrationPreview !== 'function' || typeof service.exportContents !== 'function' || typeof service.getDashboard !== 'function') {
     throw new TypeError('A performance manual service is required.');
+  }
+  const feishuConnectionService = options.feishuConnectionService ||
+    createPerformanceFeishuConnectionService(options.db);
+  if (!feishuConnectionService ||
+    typeof feishuConnectionService.getConnection !== 'function' ||
+    typeof feishuConnectionService.createDraft !== 'function' ||
+    typeof feishuConnectionService.approveDraft !== 'function') {
+    throw new TypeError('A performance Feishu connection service is required.');
   }
 
   app.get('/api/campaigns/:id/performance/contents', options.authMiddleware, (request, response) => {
@@ -79,6 +92,41 @@ function registerPerformanceRoutes(app, options = {}) {
       return sendResult(request, response, service.getIntegrationPreview({
         userId: authenticatedUserId(request),
         campaignId: request.params.id
+      }));
+    } catch (error) {
+      return sendError(request, response, error);
+    }
+  });
+
+  app.get('/api/campaigns/:id/performance/feishu-connection', options.authMiddleware, (request, response) => {
+    try {
+      return sendResult(request, response, feishuConnectionService.getConnection({
+        userId: authenticatedUserId(request),
+        campaignId: request.params.id
+      }));
+    } catch (error) {
+      return sendError(request, response, error);
+    }
+  });
+
+  app.post('/api/campaigns/:id/performance/feishu-connection', options.authMiddleware, (request, response) => {
+    try {
+      return sendResult(request, response, feishuConnectionService.createDraft({
+        userId: authenticatedUserId(request),
+        campaignId: request.params.id,
+        body: request.body
+      }));
+    } catch (error) {
+      return sendError(request, response, error);
+    }
+  });
+
+  app.post('/api/campaigns/:id/performance/feishu-connection/approve', options.authMiddleware, (request, response) => {
+    try {
+      return sendResult(request, response, feishuConnectionService.approveDraft({
+        userId: authenticatedUserId(request),
+        campaignId: request.params.id,
+        configurationId: request.body && request.body.configuration_id
       }));
     } catch (error) {
       return sendError(request, response, error);

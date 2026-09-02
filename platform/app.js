@@ -6617,6 +6617,9 @@ var performanceCapabilities = {};
 var performanceDashboardData = null;
 var performanceIntegrationPreview = null;
 var performanceIntegrationRequestSequence = 0;
+var performanceFeishuConnection = null;
+var performanceFeishuConnectionRequestSequence = 0;
+var performanceFeishuConnectionSaveInFlight = false;
 var performanceSearchTimer = null;
 var performanceExportInFlight = null;
 
@@ -6711,13 +6714,15 @@ function changePerformanceCampaignContext(value) {
   var campaign = getPerformanceCampaignById(getPerformanceCampaignId());
   setPerformanceStatus(campaign ? ('当前活动：' + performanceCampaignLabel(campaign)) : '请选择推广活动。');
   loadPerformanceContents();
-  loadPerformanceIntegrationPreview();
+  loadPerformanceIntegrationPreview().then(function() { return loadPerformanceFeishuConnection(); });
   loadPerformanceDashboard();
 }
 
 function refreshPerformanceMonitor() {
   return loadPerformanceCampaigns().then(function() {
-    return Promise.all([loadPerformanceContents(), loadPerformanceIntegrationPreview()]);
+    return Promise.all([loadPerformanceContents(), loadPerformanceIntegrationPreview()]).then(function() {
+      return loadPerformanceFeishuConnection();
+    });
   });
 }
 
@@ -6727,7 +6732,9 @@ function refreshPerformanceDashboard() {
 
 function initPerformanceMonitor() {
   return loadPerformanceCampaigns().then(function() {
-    return Promise.all([loadPerformanceContents(), loadPerformanceIntegrationPreview()]);
+    return Promise.all([loadPerformanceContents(), loadPerformanceIntegrationPreview()]).then(function() {
+      return loadPerformanceFeishuConnection();
+    });
   });
 }
 
@@ -6832,6 +6839,218 @@ async function loadPerformanceIntegrationPreview() {
     if (requestSequence !== performanceIntegrationRequestSequence || campaignId !== getPerformanceCampaignId()) return null;
     if (status) status.textContent = error.message || '映射预览加载失败';
     if (container) container.innerHTML = '<div class="tm-state-error">' + esc(error.message || '映射预览加载失败') + '</div>';
+    return null;
+  }
+}
+
+function performanceFeishuConnectionFields() {
+  var feishu = performanceIntegrationPreview && performanceIntegrationPreview.feishu || {};
+  var fields = Array.isArray(feishu.field_mapping) ? feishu.field_mapping : [];
+  var supported = fields.filter(function(field) {
+    return field && field.access !== 'commercial' && field.source_key && field.source_label;
+  });
+  if (supported.length) return supported;
+  return [
+    { source_key: 'content.original_url', source_label: '视频链接', proposed_target_field: '视频链接' },
+    { source_key: 'latest_observation.observed_at', source_label: '数据更新时间', proposed_target_field: '数据更新时间' }
+  ];
+}
+
+function performanceFeishuConnectionSummary(connection) {
+  var draft = connection && connection.draft_configuration;
+  var active = connection && connection.active_configuration;
+  if (draft && draft.status === 'draft') {
+    return { label: '草稿待组织管理员审核', detail: '当前草稿已保存，组织管理员批准后才会成为活动的有效映射。' };
+  }
+  if (active && active.status === 'approved') {
+    return { label: '映射已批准', detail: '当前活动已有批准的飞书字段映射。' };
+  }
+  return { label: '尚未配置', detail: '保存草稿后可由组织管理员审核。' };
+}
+
+function performanceFeishuExternalSyncDetail(connection) {
+  var external = connection && connection.external_sync || {};
+  if (external.reason === 'not_enabled_in_this_release') {
+    return '本版本只保存并审核配置，尚未执行飞书读取或写入。';
+  }
+  return '外部同步尚未启用。';
+}
+
+function renderPerformanceFeishuConnection(connection) {
+  performanceFeishuConnection = connection || null;
+  var container = document.getElementById('performanceFeishuConnection');
+  if (!container) return;
+  if (!connection) {
+    container.innerHTML = '<div class="tm-state-empty">选择推广活动后加载连接配置。</div>';
+    return;
+  }
+
+  var capabilities = connection.capabilities || {};
+  var canManage = capabilities.can_manage === true;
+  var canApprove = capabilities.can_approve === true;
+  var draft = connection.draft_configuration || null;
+  var active = connection.active_configuration || null;
+  var configuration = draft || active || null;
+  var summary = performanceFeishuConnectionSummary(connection);
+  var html = '<div class="tm-performance-feishu-connection-panel">'
+    + '<div class="tm-performance-feishu-connection-summary">'
+    + '<div><h4>连接状态</h4><p class="tm-performance-feishu-connection-state" role="status" aria-live="polite">'
+    + esc(summary.detail) + ' ' + esc(performanceFeishuExternalSyncDetail(connection)) + '</p></div>'
+    + '<span class="tm-performance-feishu-connection-status">' + esc(summary.label) + '</span></div>';
+
+  if (!canManage) {
+    html += '<p class="tm-performance-integration-note">当前角色可查看连接状态；目标表与字段映射仅对活动负责人和组织管理员开放。</p>';
+    container.innerHTML = html + '</div>';
+    if (window.TMAccessibility) window.TMAccessibility.refresh();
+    return;
+  }
+
+  var mapping = configuration && configuration.field_mapping && typeof configuration.field_mapping === 'object'
+    ? configuration.field_mapping
+    : {};
+  var fields = performanceFeishuConnectionFields();
+  var mappingHtml = fields.map(function(field) {
+    var sourceKey = field.source_key;
+    var target = mapping[sourceKey] || field.proposed_target_field || field.source_label;
+    return '<div class="tm-performance-feishu-connection-mapping-row">'
+      + '<div class="tm-performance-feishu-connection-source">' + esc(field.source_label) + '</div>'
+      + '<label>飞书列名<input type="text" data-performance-feishu-source="' + esc(sourceKey)
+      + '" value="' + esc(target) + '" maxlength="100"></label></div>';
+  }).join('');
+  var disabled = performanceFeishuConnectionSaveInFlight ? ' disabled' : '';
+  html += '<div class="tm-performance-feishu-connection-form">'
+    + '<div class="tm-performance-feishu-connection-fields">'
+    + '<label>飞书多维表格 App Token<input id="performanceFeishuConnectionAppToken" type="text" value="'
+    + esc(configuration && configuration.bitable_app_token || '') + '" maxlength="160" autocomplete="off"></label>'
+    + '<label>当前状态表 ID<input id="performanceFeishuConnectionCurrentTableId" type="text" value="'
+    + esc(configuration && configuration.current_table_id || '') + '" maxlength="160" autocomplete="off"></label>'
+    + '<label>每日快照表 ID（可选）<input id="performanceFeishuConnectionSnapshotTableId" type="text" value="'
+    + esc(configuration && configuration.daily_snapshot_table_id || '') + '" maxlength="160" autocomplete="off"></label>'
+    + '</div>'
+    + '<div><h4 class="tm-performance-integration-heading">可配置的公开指标字段</h4>'
+    + '<div class="tm-performance-feishu-connection-mapping">' + mappingHtml + '</div></div>'
+    + '<div class="tm-performance-feishu-connection-actions">'
+    + '<button class="btn btn-primary btn-sm" type="button" data-performance-feishu-action="save" onclick="savePerformanceFeishuConnectionDraft()"' + disabled + '>保存草稿</button>'
+    + (canApprove && draft && draft.id
+      ? '<button class="btn btn-outline btn-sm" type="button" data-performance-feishu-action="approve" onclick="approvePerformanceFeishuConnectionDraft()"' + disabled + '>批准当前草稿</button>'
+      : '')
+    + '</div></div>';
+  container.innerHTML = html + '</div>';
+  if (window.TMAccessibility) window.TMAccessibility.refresh();
+}
+
+function performanceFeishuConnectionDraftPayload() {
+  var container = document.getElementById('performanceFeishuConnection');
+  var appToken = performanceTextValue('performanceFeishuConnectionAppToken');
+  var currentTableId = performanceTextValue('performanceFeishuConnectionCurrentTableId');
+  var snapshotTableId = performanceTextValue('performanceFeishuConnectionSnapshotTableId');
+  var inputs = container ? container.querySelectorAll('[data-performance-feishu-source]') : [];
+  var fieldMapping = {};
+  for (var index = 0; index < inputs.length; index += 1) {
+    var input = inputs[index];
+    var sourceKey = input.getAttribute('data-performance-feishu-source');
+    var target = String(input.value || '').trim();
+    if (!sourceKey || !target) throw new Error('请完整填写公开指标字段映射。');
+    fieldMapping[sourceKey] = target;
+  }
+  if (!appToken || !currentTableId) throw new Error('请填写飞书多维表格 App Token 和当前状态表 ID。');
+  return {
+    bitable_app_token: appToken,
+    current_table_id: currentTableId,
+    daily_snapshot_table_id: snapshotTableId || null,
+    field_mapping: fieldMapping
+  };
+}
+
+function setPerformanceFeishuConnectionBusy(busy) {
+  var container = document.getElementById('performanceFeishuConnection');
+  if (!container) return;
+  var controls = container.querySelectorAll('[data-performance-feishu-action]');
+  for (var index = 0; index < controls.length; index += 1) controls[index].disabled = Boolean(busy);
+}
+
+async function savePerformanceFeishuConnectionDraft() {
+  var campaignId = getPerformanceCampaignId();
+  if (campaignId === null || performanceFeishuConnectionSaveInFlight) return;
+  var payload;
+  try {
+    payload = performanceFeishuConnectionDraftPayload();
+  } catch (error) {
+    toast(error.message || '连接配置不完整', 'error');
+    return;
+  }
+  var requestSequence = ++performanceFeishuConnectionRequestSequence;
+  performanceFeishuConnectionSaveInFlight = true;
+  setPerformanceFeishuConnectionBusy(true);
+  try {
+    var response = await apiFetch('/campaigns/' + encodeURIComponent(campaignId) + '/performance/feishu-connection', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+    var data = await response.json();
+    if (!response.ok) throw new Error(data.error || '连接草稿保存失败');
+    if (requestSequence !== performanceFeishuConnectionRequestSequence || campaignId !== getPerformanceCampaignId()) return;
+    renderPerformanceFeishuConnection(data);
+    toast('飞书连接草稿已保存，尚未启用外部同步。');
+  } catch (error) {
+    if (requestSequence === performanceFeishuConnectionRequestSequence && campaignId === getPerformanceCampaignId()) {
+      toast(error.message || '连接草稿保存失败', 'error');
+    }
+  } finally {
+    performanceFeishuConnectionSaveInFlight = false;
+    setPerformanceFeishuConnectionBusy(false);
+  }
+}
+
+async function approvePerformanceFeishuConnectionDraft() {
+  var campaignId = getPerformanceCampaignId();
+  var draft = performanceFeishuConnection && performanceFeishuConnection.draft_configuration;
+  if (campaignId === null || !draft || !draft.id || performanceFeishuConnectionSaveInFlight) {
+    toast('没有可批准的连接草稿。', 'error');
+    return;
+  }
+  var requestSequence = ++performanceFeishuConnectionRequestSequence;
+  performanceFeishuConnectionSaveInFlight = true;
+  setPerformanceFeishuConnectionBusy(true);
+  try {
+    var response = await apiFetch('/campaigns/' + encodeURIComponent(campaignId) + '/performance/feishu-connection/approve', {
+      method: 'POST',
+      body: JSON.stringify({ configuration_id: draft.id })
+    });
+    var data = await response.json();
+    if (!response.ok) throw new Error(data.error || '连接草稿批准失败');
+    if (requestSequence !== performanceFeishuConnectionRequestSequence || campaignId !== getPerformanceCampaignId()) return;
+    renderPerformanceFeishuConnection(data);
+    toast('飞书连接映射已批准，外部同步仍未启用。');
+  } catch (error) {
+    if (requestSequence === performanceFeishuConnectionRequestSequence && campaignId === getPerformanceCampaignId()) {
+      toast(error.message || '连接草稿批准失败', 'error');
+    }
+  } finally {
+    performanceFeishuConnectionSaveInFlight = false;
+    setPerformanceFeishuConnectionBusy(false);
+  }
+}
+
+async function loadPerformanceFeishuConnection() {
+  var campaignId = getPerformanceCampaignId();
+  var container = document.getElementById('performanceFeishuConnection');
+  var requestSequence = ++performanceFeishuConnectionRequestSequence;
+  if (campaignId === null) {
+    renderPerformanceFeishuConnection(null);
+    return null;
+  }
+  if (container) container.innerHTML = '<div class="tm-state-loading">正在加载连接配置...</div>';
+  try {
+    var response = await apiFetch('/campaigns/' + encodeURIComponent(campaignId) + '/performance/feishu-connection');
+    var data = await response.json();
+    if (requestSequence !== performanceFeishuConnectionRequestSequence || campaignId !== getPerformanceCampaignId()) return null;
+    if (!response.ok) throw new Error(data.error || '连接配置加载失败');
+    renderPerformanceFeishuConnection(data);
+    return data;
+  } catch (error) {
+    if (requestSequence !== performanceFeishuConnectionRequestSequence || campaignId !== getPerformanceCampaignId()) return null;
+    if (container) container.innerHTML = '<div class="tm-state-error">' + esc(error.message || '连接配置加载失败') + '</div>';
     return null;
   }
 }
@@ -7526,7 +7745,7 @@ function switchPage(id, options) {
     'getEditedDemand', 'syncCurDemandFromAnalysis', 'handleDemandFile', 'analyzeDemandAI',
     'switchTab', 'matchInfluencers', 'smartMatch', 'handleUpload', 'handleDrop', 'openInfUploadModal', 'handleUploadModal', 'downloadInfTemplate', 'exportAll', 'exportFiltered', 'exportSelected',
     'toggleAll', 'syncInfluencerSelectionState', 'loadM4Campaigns', 'changeM4CampaignContext', 'startCollab', 'submitCollabOrder', 'closeCollabOrderModal', 'loadCollaborations', 'updateCollabStatus', 'runCampaignCollabAction', 'closeCampaignSettlementModal', 'submitCampaignSettlement',
-    'initPerformanceMonitor', 'initPerformanceDashboard', 'refreshPerformanceMonitor', 'refreshPerformanceDashboard', 'changePerformanceCampaignContext', 'loadPerformanceContents', 'loadPerformanceIntegrationPreview', 'createPerformanceContent', 'downloadPerformanceTemplate', 'handlePerformanceImport', 'handlePerformanceDrop', 'downloadPerformanceMetricsTemplate', 'handlePerformanceMetricsImport', 'handlePerformanceMetricsDrop', 'openPerformanceInputModal', 'closePerformanceInputModal', 'savePerformanceInput', 'loadPerformanceDashboard', 'debouncedPerformanceContentSearch', 'exportPerformanceContents',
+    'initPerformanceMonitor', 'initPerformanceDashboard', 'refreshPerformanceMonitor', 'refreshPerformanceDashboard', 'changePerformanceCampaignContext', 'loadPerformanceContents', 'loadPerformanceIntegrationPreview', 'loadPerformanceFeishuConnection', 'savePerformanceFeishuConnectionDraft', 'approvePerformanceFeishuConnectionDraft', 'createPerformanceContent', 'downloadPerformanceTemplate', 'handlePerformanceImport', 'handlePerformanceDrop', 'downloadPerformanceMetricsTemplate', 'handlePerformanceMetricsImport', 'handlePerformanceMetricsDrop', 'openPerformanceInputModal', 'closePerformanceInputModal', 'savePerformanceInput', 'loadPerformanceDashboard', 'debouncedPerformanceContentSearch', 'exportPerformanceContents',
     'sendChat', 'clearChat', 'clearAIMemory', 'pushToFeishu', 'loadFeishuStatus', 'loadFeishuOutbox', 'testFeishuConnection', 'selectFeishuReconciliationDelivery', 'reconcileFeishuDelivery', 'selectFeishuRetryDelivery', 'retryFeishuDelivery',
     'switchAdminTab', 'loadAdminDashboard', 'loadAdminUsers', 'adminAddUser', 'adminCreateInvite', 'adminResetPw',
     'wfUndo', 'wfRedo', 'wfClearCanvas', 'wfSaveTemplate', 'wfPublishTemplate', 'wfResetTaskFilters', 'wfLoadTasks', 'wfLoadInstances',

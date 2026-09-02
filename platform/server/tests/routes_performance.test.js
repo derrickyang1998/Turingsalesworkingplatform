@@ -7,6 +7,7 @@ const path = require('node:path');
 
 const registerPerformanceRoutes = require('../routes_performance');
 const { PerformanceManualServiceError } = require('../services/performance_manual_service');
+const { PerformanceFeishuConnectionServiceError } = require('../services/performance_feishu_connection_service');
 const campaignContract = require('../contracts/campaign_contract');
 
 function createResponse() {
@@ -49,11 +50,40 @@ function createFixture() {
     },
     getDashboard(input) { calls.push(['dashboard', input]); return { records: { total: 0 } }; }
   };
+  const feishuConnectionService = {
+    getConnection(input) {
+      calls.push(['feishu-connection-get', input]);
+      return {
+        campaign_id: 7,
+        active_configuration: null,
+        draft_configuration: null,
+        capabilities: { can_manage: true, can_approve: false, external_sync_enabled: false },
+        external_sync: { enabled: false }
+      };
+    },
+    createDraft(input) {
+      calls.push(['feishu-connection-draft', input]);
+      return {
+        configuration: { id: 11, status: 'draft' },
+        capabilities: { can_manage: true, can_approve: false, external_sync_enabled: false },
+        external_sync: { enabled: false }
+      };
+    },
+    approveDraft(input) {
+      calls.push(['feishu-connection-approve', input]);
+      return {
+        configuration: { id: 11, status: 'approved' },
+        capabilities: { can_manage: true, can_approve: true, external_sync_enabled: false },
+        external_sync: { enabled: false }
+      };
+    }
+  };
   registerPerformanceRoutes(app, {
     authMiddleware(_request, _response, next) { next(); },
-    service
+    service,
+    feishuConnectionService
   });
-  return { routes, calls, service };
+  return { routes, calls, service, feishuConnectionService };
 }
 
 function invoke(handlers, request) {
@@ -74,9 +104,12 @@ test('registers campaign-scoped performance endpoints and forwards authenticated
     'GET /api/campaigns/:id/performance/contents',
     'GET /api/campaigns/:id/performance/contents/export',
     'GET /api/campaigns/:id/performance/dashboard',
+    'GET /api/campaigns/:id/performance/feishu-connection',
     'GET /api/campaigns/:id/performance/integration-preview',
     'POST /api/campaigns/:id/performance/contents',
     'POST /api/campaigns/:id/performance/contents/:contentId/manual-inputs',
+    'POST /api/campaigns/:id/performance/feishu-connection',
+    'POST /api/campaigns/:id/performance/feishu-connection/approve',
     'POST /api/campaigns/:id/performance/import'
   ]);
 
@@ -95,6 +128,78 @@ test('registers campaign-scoped performance endpoints and forwards authenticated
     campaignId: '7',
     body: request.body
   }]);
+});
+
+test('routes Feishu projection configuration reads, drafts, and approvals through campaign request contracts', () => {
+  const { routes, calls, feishuConnectionService } = createFixture();
+  const getResponse = invoke(routes.get('GET /api/campaigns/:id/performance/feishu-connection'), {
+    user: { id: 9 },
+    params: { id: '7' },
+    requestId: 'connection-read'
+  });
+  assert.equal(getResponse.statusCode, 200);
+  assert.equal(getResponse.body.external_sync.enabled, false);
+  assert.deepEqual(calls[0], ['feishu-connection-get', { userId: 9, campaignId: '7' }]);
+
+  const draftRequest = {
+    bitable_app_token: 'bascnPerformanceApp',
+    current_table_id: 'tblCurrentState',
+    field_mapping: {
+      'content.original_url': '视频链接',
+      'latest_observation.observed_at': '数据更新时间'
+    }
+  };
+  const draftResponse = invoke(routes.get('POST /api/campaigns/:id/performance/feishu-connection'), {
+    user: { id: 9 },
+    params: { id: '7' },
+    body: draftRequest,
+    requestId: 'connection-draft'
+  });
+  assert.equal(draftResponse.statusCode, 200);
+  assert.equal(draftResponse.body.configuration.status, 'draft');
+  assert.deepEqual(calls[1], ['feishu-connection-draft', {
+    userId: 9,
+    campaignId: '7',
+    body: draftRequest
+  }]);
+
+  const approveResponse = invoke(routes.get('POST /api/campaigns/:id/performance/feishu-connection/approve'), {
+    user: { id: 2 },
+    params: { id: '7' },
+    body: { configuration_id: 11 },
+    requestId: 'connection-approve'
+  });
+  assert.equal(approveResponse.statusCode, 200);
+  assert.equal(approveResponse.body.configuration.status, 'approved');
+  assert.deepEqual(calls[2], ['feishu-connection-approve', {
+    userId: 2,
+    campaignId: '7',
+    configurationId: 11
+  }]);
+
+  for (const [name, id, method, pathTemplate] of [
+    ['CAMPAIGN_PERFORMANCE_FEISHU_CONNECTION_GET', 'campaign.performance.feishu-connection.get', 'GET', '/api/campaigns/:id/performance/feishu-connection'],
+    ['CAMPAIGN_PERFORMANCE_FEISHU_CONNECTION_DRAFT', 'campaign.performance.feishu-connection.draft', 'POST', '/api/campaigns/:id/performance/feishu-connection'],
+    ['CAMPAIGN_PERFORMANCE_FEISHU_CONNECTION_APPROVE', 'campaign.performance.feishu-connection.approve', 'POST', '/api/campaigns/:id/performance/feishu-connection/approve']
+  ]) {
+    const policy = campaignContract.REQUEST_POLICIES[name];
+    assert.ok(policy);
+    assert.equal(policy.id, id);
+    assert.equal(policy.method, method);
+    assert.equal(policy.pathTemplate, pathTemplate);
+  }
+
+  feishuConnectionService.createDraft = () => {
+    throw new PerformanceFeishuConnectionServiceError(403, 'PERFORMANCE_FEISHU_CONNECTION_MANAGE_FORBIDDEN', 'Feishu connection configuration is not available.');
+  };
+  const forbidden = invoke(routes.get('POST /api/campaigns/:id/performance/feishu-connection'), {
+    user: { id: 3 },
+    params: { id: '7' },
+    body: draftRequest,
+    requestId: 'connection-forbidden'
+  });
+  assert.equal(forbidden.statusCode, 403);
+  assert.equal(forbidden.body.code, 'PERFORMANCE_FEISHU_CONNECTION_MANAGE_FORBIDDEN');
 });
 
 test('returns integration previews through the campaign request contract without a body', () => {

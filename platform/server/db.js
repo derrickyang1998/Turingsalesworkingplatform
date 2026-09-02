@@ -70,6 +70,13 @@ const db = migrationService.openMigratedDatabase(DB_PATH, {
       sourcePath: 'migrations/010_performance_manual_foundation.js',
       engineVersion: 1,
       dependencies: ['migrations/vendor/bcryptjs_v3_0_3.js']
+    },
+    {
+      version: 11,
+      name: '011_performance_feishu_connection_config',
+      sourcePath: 'migrations/011_performance_feishu_connection_config.js',
+      engineVersion: 1,
+      dependencies: ['migrations/vendor/bcryptjs_v3_0_3.js']
     }
   ]
 });

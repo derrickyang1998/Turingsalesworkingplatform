@@ -359,6 +359,92 @@ thead th {
   margin-top: var(--tm-space-3);
 }
 
+.tm-performance-feishu-connection-panel {
+  border-top: 1px solid var(--tm-color-border);
+}
+
+.tm-performance-feishu-connection-summary {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: var(--tm-space-3);
+  padding: var(--tm-space-3) 0;
+  border-bottom: 1px solid var(--tm-color-border);
+}
+
+.tm-performance-feishu-connection-summary h4 {
+  margin: 0;
+  color: var(--tm-color-text);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.tm-performance-feishu-connection-state {
+  margin: var(--tm-space-1) 0 0;
+  color: var(--tm-color-text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.tm-performance-feishu-connection-status {
+  flex: 0 0 auto;
+  color: var(--tm-color-accent);
+  font-size: 12px;
+  font-weight: 650;
+  text-align: right;
+}
+
+.tm-performance-feishu-connection-form {
+  display: grid;
+  gap: var(--tm-space-3);
+  margin-top: var(--tm-space-3);
+}
+
+.tm-performance-feishu-connection-fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--tm-space-2) var(--tm-space-3);
+}
+
+.tm-performance-feishu-connection-fields label,
+.tm-performance-feishu-connection-mapping label {
+  color: var(--tm-color-text-muted);
+  font-size: 11px;
+}
+
+.tm-performance-feishu-connection-fields input,
+.tm-performance-feishu-connection-mapping input {
+  min-height: 32px;
+  margin-top: var(--tm-space-1);
+  font-size: 12px;
+}
+
+.tm-performance-feishu-connection-mapping {
+  display: grid;
+  border-top: 1px solid var(--tm-color-border);
+}
+
+.tm-performance-feishu-connection-mapping-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.8fr) minmax(0, 1.2fr);
+  gap: var(--tm-space-3);
+  align-items: end;
+  padding: var(--tm-space-2) 0;
+  border-bottom: 1px solid var(--tm-color-border);
+}
+
+.tm-performance-feishu-connection-source {
+  color: var(--tm-color-text);
+  font-size: 12px;
+  line-height: 32px;
+}
+
+.tm-performance-feishu-connection-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--tm-space-2);
+}
+
 .tm-performance-integration-layout {
   display: grid;
   grid-template-columns: minmax(220px, 0.8fr) minmax(0, 1.2fr);
@@ -661,12 +747,26 @@ thead th {
   .tm-performance-action-grid,
   .tm-performance-dashboard-grid,
   .tm-performance-integration-layout,
+  .tm-performance-feishu-connection-fields,
   .tm-performance-form-grid,
   .tm-performance-mapping-grid,
   .tm-performance-metric-grid,
   .tm-performance-input-grid,
   .tm-performance-filters {
     grid-template-columns: 1fr;
+  }
+
+  .tm-performance-feishu-connection-summary,
+  .tm-performance-feishu-connection-mapping-row {
+    grid-template-columns: 1fr;
+  }
+
+  .tm-performance-feishu-connection-summary {
+    display: grid;
+  }
+
+  .tm-performance-feishu-connection-status {
+    text-align: left;
   }
 }
 

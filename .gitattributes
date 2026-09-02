@@ -17,6 +17,7 @@ platform/server/migrations/007_knowledge_governance.js text eol=lf
 platform/server/migrations/008_feishu_bitable_outbox.js text eol=lf
 platform/server/migrations/009_feishu_bitable_retry_lineage.js text eol=lf
 platform/server/migrations/010_performance_manual_foundation.js text eol=lf
+platform/server/migrations/011_performance_feishu_connection_config.js text eol=lf
 platform/server/migrations/baselines/legacy_v1.js text eol=lf
 platform/server/migrations/engines/v1.js text eol=lf
 platform/server/migrations/vendor/bcryptjs_v3_0_3.js text eol=lf

@@ -184,6 +184,11 @@ const REQUEST_POLICIES = Object.freeze({
     'GET',
     '/api/campaigns/:id/performance/integration-preview'
   ),
+  CAMPAIGN_PERFORMANCE_FEISHU_CONNECTION_GET: empty(
+    'campaign.performance.feishu-connection.get',
+    'GET',
+    '/api/campaigns/:id/performance/feishu-connection'
+  ),
   CAMPAIGN_PERFORMANCE_CONTENT_CREATE: controlJson(
     'campaign.performance.content.create',
     'POST',
@@ -200,6 +205,16 @@ const REQUEST_POLICIES = Object.freeze({
     'campaign.performance.manual-input',
     'POST',
     '/api/campaigns/:id/performance/contents/:contentId/manual-inputs'
+  ),
+  CAMPAIGN_PERFORMANCE_FEISHU_CONNECTION_DRAFT: controlJson(
+    'campaign.performance.feishu-connection.draft',
+    'POST',
+    '/api/campaigns/:id/performance/feishu-connection'
+  ),
+  CAMPAIGN_PERFORMANCE_FEISHU_CONNECTION_APPROVE: controlJson(
+    'campaign.performance.feishu-connection.approve',
+    'POST',
+    '/api/campaigns/:id/performance/feishu-connection/approve'
   ),
   CAMPAIGN_REVIEW_CREATE: definePolicy(
     'campaign.review.create',

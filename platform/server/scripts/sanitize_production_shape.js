@@ -82,6 +82,13 @@ const EXACT_PROFILE_MIGRATIONS = Object.freeze([
     sourcePath: 'migrations/010_performance_manual_foundation.js',
     engineVersion: 1,
     dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
+  }),
+  Object.freeze({
+    version: 11,
+    name: '011_performance_feishu_connection_config',
+    sourcePath: 'migrations/011_performance_feishu_connection_config.js',
+    engineVersion: 1,
+    dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
   })
 ]);
 const FTS_MANIFEST = Object.freeze({
@@ -540,6 +547,20 @@ const V10_MIGRATION_LEDGER = Object.freeze({
     'migrations/010_performance_manual_foundation.js'
   ])
 });
+const V11_MIGRATION_LEDGER = Object.freeze({
+  name: Object.freeze([
+    ...V10_MIGRATION_LEDGER.name,
+    '011_performance_feishu_connection_config'
+  ]),
+  checksum: Object.freeze([
+    ...V10_MIGRATION_LEDGER.checksum,
+    '7ed6b8b4382029b1dbc6bc998e36791559a2e31dc2a8a102a2c4f224d2138963'
+  ]),
+  sourcePath: Object.freeze([
+    ...V10_MIGRATION_LEDGER.sourcePath,
+    'migrations/011_performance_feishu_connection_config.js'
+  ])
+});
 const STRUCTURAL_COLUMN_POLICY_V9 = Object.freeze(Object.assign(Object.create(null), STRUCTURAL_COLUMN_POLICY, {
   'feishu_bitable_outbox_retries.id': Object.freeze({ storage: 'integer', kind: 'integer' }),
   'feishu_bitable_outbox_retries.org_id': Object.freeze({ storage: 'integer', kind: 'integer' }),
@@ -624,6 +645,36 @@ const STRUCTURAL_POLICY_V10_SHA256 = crypto.createHash('sha256')
     columns: STRUCTURAL_COLUMN_POLICY_V10
   }), 'utf8')
   .digest('hex');
+const STRUCTURAL_COLUMN_POLICY_V11 = Object.freeze(Object.assign(Object.create(null), STRUCTURAL_COLUMN_POLICY_V10, {
+  'performance_feishu_projection_configs.id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'performance_feishu_projection_configs.org_id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'performance_feishu_projection_configs.campaign_id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'performance_feishu_projection_configs.version': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'performance_feishu_projection_configs.status': Object.freeze({
+    storage: 'text', kind: 'enum', allowedValues: Object.freeze(['draft', 'approved', 'superseded'])
+  }),
+  'performance_feishu_projection_configs.created_by': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'performance_feishu_projection_configs.approved_by': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'performance_feishu_projection_configs.approved_at': Object.freeze({ storage: 'text', kind: 'timestamp' }),
+  'performance_feishu_projection_configs.superseded_at': Object.freeze({ storage: 'text', kind: 'timestamp' }),
+  'performance_feishu_projection_configs.created_at': Object.freeze({ storage: 'text', kind: 'timestamp' }),
+  'schema_migrations.name': Object.freeze({
+    storage: 'text', kind: 'migration-ledger', allowedValues: V11_MIGRATION_LEDGER.name
+  }),
+  'schema_migrations.checksum': Object.freeze({
+    storage: 'text', kind: 'migration-ledger', allowedValues: V11_MIGRATION_LEDGER.checksum
+  }),
+  'schema_migrations.source_path': Object.freeze({
+    storage: 'text', kind: 'migration-ledger', allowedValues: V11_MIGRATION_LEDGER.sourcePath
+  })
+}));
+const STRUCTURAL_POLICY_V11_VALIDATOR_VERSION = 'tm-structural-policy-v6-performance-feishu-connection';
+const STRUCTURAL_POLICY_V11_SHA256 = crypto.createHash('sha256')
+  .update(JSON.stringify({
+    validatorVersion: STRUCTURAL_POLICY_V11_VALIDATOR_VERSION,
+    columns: STRUCTURAL_COLUMN_POLICY_V11
+  }), 'utf8')
+  .digest('hex');
 
 const TRANSFORMATION_EXCLUDED_CLASSIFICATIONS = new Set([
   'structural',
@@ -700,8 +751,17 @@ const V10_SEMANTIC_POLICIES = Object.freeze({
     policySha256: STRUCTURAL_POLICY_V10_SHA256
   })
 });
+const V11_SEMANTIC_POLICIES = Object.freeze({
+  ...SEMANTIC_POLICIES,
+  structuralColumns: Object.freeze({
+    ...SEMANTIC_POLICIES.structuralColumns,
+    validatorVersion: STRUCTURAL_POLICY_V11_VALIDATOR_VERSION,
+    policySha256: STRUCTURAL_POLICY_V11_SHA256
+  })
+});
 
 function structuralColumnPolicyForVersion(schemaVersion) {
+  if (schemaVersion === 11) return STRUCTURAL_COLUMN_POLICY_V11;
   if (schemaVersion === 10) return STRUCTURAL_COLUMN_POLICY_V10;
   if (schemaVersion === 9) return STRUCTURAL_COLUMN_POLICY_V9;
   return STRUCTURAL_COLUMN_POLICY;
@@ -735,7 +795,7 @@ const JSON_NAMES = new Set([
 
 const SECRET_NAMES = new Set([
   'password_hash', 'token', 'lease_token', 'reservation_nonce', 'reservation_token', 'idempotency_key',
-  'resource_claim', 'code'
+  'resource_claim', 'code', 'bitable_app_token'
 ]);
 
 const DIGEST_NAMES = new Set([
@@ -1127,6 +1187,15 @@ function profileContractForVersion(schemaVersion) {
       preservedAccounting: PRESERVED_ACCOUNTING
     });
   }
+  if (schemaVersion === 11) {
+    return Object.freeze({
+      semanticPolicies: V11_SEMANTIC_POLICIES,
+      equalityGroups: EQUALITY_GROUPS,
+      referenceGroups: REFERENCE_GROUPS,
+      derivedRebuilds: DERIVED_REBUILDS,
+      preservedAccounting: PRESERVED_ACCOUNTING
+    });
+  }
   throw new Error(`unsupported exact sanitization profile version ${schemaVersion}`);
 }
 
@@ -1146,16 +1215,16 @@ function assertManifestDocumentShape(manifest) {
   ) {
     throw new Error('malformed sanitization manifest header');
   }
-  if (!Array.isArray(manifest.exactProfiles) || manifest.exactProfiles.length !== 5) {
-    throw new Error('sanitization manifest must contain isolated exact v6, v7, v8, v9, and v10 profiles');
+  if (!Array.isArray(manifest.exactProfiles) || manifest.exactProfiles.length !== 6) {
+    throw new Error('sanitization manifest must contain isolated exact v6, v7, v8, v9, v10, and v11 profiles');
   }
   const profileKeys = [
     'schemaVersion', 'semanticPolicies', 'equalityGroups', 'referenceGroups',
     'derivedRebuilds', 'objects'
   ];
   const versions = manifest.exactProfiles.map((profile) => profile.schemaVersion);
-  if (JSON.stringify(versions) !== JSON.stringify([6, 7, 8, 9, 10])) {
-    throw new Error('sanitization manifest exact profiles must be ordered v6 then v7 then v8 then v9 then v10');
+  if (JSON.stringify(versions) !== JSON.stringify([6, 7, 8, 9, 10, 11])) {
+    throw new Error('sanitization manifest exact profiles must be ordered v6 then v7 then v8 then v9 then v10 then v11');
   }
   for (const compatibilityProfile of manifest.exactProfiles) {
     if (!exactObjectKeys(compatibilityProfile, profileKeys)) {
@@ -1192,12 +1261,12 @@ function exactProfileClassification(db) {
   });
   if (
     classification.status !== 'managed'
-    || ![1, 6, 7, 8, 9, 10].includes(classification.currentVersion)
+    || ![1, 6, 7, 8, 9, 10, 11].includes(classification.currentVersion)
   ) {
     const observed = classification.currentVersion === undefined || classification.currentVersion === null
       ? classification.status
       : classification.currentVersion;
-    throw new Error(`sanitization source must be an exact managed version 1, version 6, version 7, version 8, version 9, or version 10 profile; got ${observed}`);
+    throw new Error(`sanitization source must be an exact managed version 1, version 6, version 7, version 8, version 9, version 10, or version 11 profile; got ${observed}`);
   }
   return classification;
 }
@@ -4479,7 +4548,7 @@ function rebuildCrmDerivedData(db) {
 }
 
 function rebuildDerivedData(db, manifest) {
-  if (![1, 6, 7, 8, 9, 10].includes(manifest.schemaVersion)) {
+  if (![1, 6, 7, 8, 9, 10, 11].includes(manifest.schemaVersion)) {
     throw new Error(`unsupported derived rebuild profile ${manifest.schemaVersion}`);
   }
   const hasKnowledge = db.prepare("SELECT 1 AS present FROM sqlite_schema WHERE type='table' AND name='knowledge_entries'").get();

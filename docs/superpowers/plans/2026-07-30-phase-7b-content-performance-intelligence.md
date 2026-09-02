@@ -325,7 +325,15 @@ Cost, client charge, margin, attributed revenue, and conversion details are inde
 - **Scope / 范围：** Authorized evidence extraction, comparable-cohort best/weak diagnosis, degraded analysis when media is missing, human approval, campaign knowledge, second-approval organization promotion, methodology reuse/supersession, redacted customer report, immutable snapshot, and PPT generation. / 获授权证据提取、可比分组最佳/较弱诊断、媒体缺失降级分析、人工批准、项目知识、二次批准组织晋升、方法论复用/替代、脱敏客户报告、不可变快照和 PPT 生成。
 - **Exit gate / 退出门禁：** Acceptance scenarios `7`, `8`, `14`, `16`, and `17`; AI evidence, report fields, redaction, knowledge retrieval, and frozen-PPT regression are independently approved. / 通过验收场景 `7`、`8`、`14`、`16`、`17`；AI 证据、报告字段、脱敏、知识检索和冻结 PPT 回归均获独立批准。
 
-Each slice has its own migration, tests, independent review, backup, production rollout, rollback, version record, Obsidian archive, and GitHub commit. / 每个切片均独立完成迁移、测试、审查、备份、生产发布、回滚、版本记录、Obsidian 归档和 GitHub 提交。
+### Feature-By-Feature Release Cadence / 单功能即时发布节奏
+
+Every independently usable feature is a release slice. Once the feature is complete, it is published to production instead of waiting for a larger phase bundle. The default release path is: affected-scope checks, one independent code review, a verified backup, production deployment, online core-path smoke verification, and version/archive synchronization. / 每个可独立使用的功能都是一个发布切片。功能完成后直接发布到生产，不再等待更大的阶段包。默认发布路径为：受影响范围校验、一次独立代码审查、可验证备份、生产部署、线上核心路径冒烟验收，以及版本和归档同步。
+
+Routine feature slices use focused checks only: changed API/service behavior, changed UI contract, and the directly affected workflow. We do not run unrelated platform-wide heavy regression for every ordinary feature. / 常规功能切片只运行定向校验：已改 API 或服务行为、已改 UI 契约及直接受影响的业务流程。普通功能不再每次执行无关的平台级重型回归。
+
+Database migrations, authentication or authorization, security controls, systemd or shared infrastructure, production data transformations, and any real external write require the additional migration, security, rollback, and integration checks appropriate to that risk. / 数据库迁移、认证或授权、安全控制、systemd 或共享基础设施、生产数据转换，以及任何真实外部写入，仍必须按风险增加迁移、安全、回滚和集成校验。
+
+Each released slice still records its migration status, focused verification evidence, review verdict, backup and rollback reference, production result, version record, Obsidian archive, and GitHub commit. / 每个已发布切片仍记录迁移状态、定向验证证据、审查结论、备份及回滚引用、生产结果、版本记录、Obsidian 归档和 GitHub 提交。
 
 ### Product Success Targets / 产品成功目标
 

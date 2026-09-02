@@ -71,6 +71,7 @@ const {
   createCampaignCollaborationService
 } = require('./services/campaign_collaboration_service');
 const { createPerformanceManualService } = require('./services/performance_manual_service');
+const { createPerformanceFeishuConnectionService } = require('./services/performance_feishu_connection_service');
 const registerCampaignRoutes = require('./routes_campaigns');
 const registerPerformanceRoutes = require('./routes_performance');
 const {
@@ -158,6 +159,7 @@ const campaignPptService = createCampaignPptService(db, {
 });
 const campaignCollaborationService = createCampaignCollaborationService(db);
 const performanceManualService = createPerformanceManualService(db);
+const performanceFeishuConnectionService = createPerformanceFeishuConnectionService(db);
 const campaignPptBridgeHandler = createCampaignPptBridgeHandler(campaignPptService);
 let campaignPptJanitor = null;
 let uploadSandboxService = null;
@@ -184,9 +186,12 @@ const phase4PolicyNames = [
   'CAMPAIGN_PERFORMANCE_CONTENT_LIST',
   'CAMPAIGN_PERFORMANCE_DASHBOARD',
   'CAMPAIGN_PERFORMANCE_INTEGRATION_PREVIEW',
+  'CAMPAIGN_PERFORMANCE_FEISHU_CONNECTION_GET',
   'CAMPAIGN_PERFORMANCE_CONTENT_CREATE',
   'CAMPAIGN_PERFORMANCE_IMPORT',
   'CAMPAIGN_PERFORMANCE_MANUAL_INPUT',
+  'CAMPAIGN_PERFORMANCE_FEISHU_CONNECTION_DRAFT',
+  'CAMPAIGN_PERFORMANCE_FEISHU_CONNECTION_APPROVE',
   'CAMPAIGN_REVIEW_CREATE',
   'CAMPAIGN_PROPOSAL_PPT_GENERATE',
   'LEGACY_COLLABORATION_CREATE',
@@ -1511,7 +1516,11 @@ require('./routes')(app, db, authMiddleware, { campaignCollaborationService });
 require('./routes_feishu')(app, { db, authMiddleware, adminOnly });
 require('./routes_customers')(app, db, authMiddleware);
 registerCampaignRoutes(app, db);
-registerPerformanceRoutes(app, { authMiddleware, service: performanceManualService });
+registerPerformanceRoutes(app, {
+  authMiddleware,
+  service: performanceManualService,
+  feishuConnectionService: performanceFeishuConnectionService
+});
 require('./routes_brands')(app, db, authMiddleware, aiLimiter, aiQuotaGuard);
 
 // ===== WORKFLOW ENGINE ROUTES =====
