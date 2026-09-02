@@ -282,6 +282,148 @@ thead th {
   min-width: 0;
 }
 
+.tm-performance-review-evidence {
+  margin-top: var(--tm-space-4);
+}
+
+.tm-performance-review-body {
+  margin-top: var(--tm-space-3);
+}
+
+.tm-performance-review-summary {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: var(--tm-space-2);
+  padding-bottom: var(--tm-space-3);
+  border-bottom: 1px solid var(--tm-color-border);
+}
+
+.tm-performance-review-summary > div {
+  min-width: 0;
+}
+
+.tm-performance-review-summary span,
+.tm-performance-review-ranking-main span,
+.tm-performance-review-breakdown-row span {
+  display: block;
+  color: var(--tm-color-text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.tm-performance-review-summary strong {
+  display: block;
+  margin-top: var(--tm-space-1);
+  color: var(--tm-color-text);
+  font-size: 14px;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
+.tm-performance-review-ranking-grid,
+.tm-performance-review-breakdown-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--tm-space-4);
+  margin-top: var(--tm-space-4);
+}
+
+.tm-performance-review-ranking,
+.tm-performance-review-breakdown {
+  min-width: 0;
+}
+
+.tm-performance-review-ranking h4,
+.tm-performance-review-breakdown h4,
+.tm-performance-review-limits-wrap h4 {
+  margin: 0 0 var(--tm-space-2);
+  color: var(--tm-color-text);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.tm-performance-review-ranking-row,
+.tm-performance-review-breakdown-row {
+  display: grid;
+  align-items: center;
+  gap: var(--tm-space-2);
+  min-width: 0;
+  padding: var(--tm-space-2) 0;
+  border-top: 1px solid var(--tm-color-border);
+}
+
+.tm-performance-review-ranking-row {
+  grid-template-columns: 26px minmax(0, 1fr) auto;
+}
+
+.tm-performance-review-ranking-main {
+  min-width: 0;
+}
+
+.tm-performance-review-ranking-main strong {
+  display: block;
+  color: var(--tm-color-text);
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tm-performance-review-ranking-value,
+.tm-performance-review-breakdown-row strong {
+  color: var(--tm-color-text);
+  font-size: 13px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.tm-performance-review-breakdown-row {
+  grid-template-columns: minmax(0, 1fr) minmax(88px, auto) auto;
+}
+
+.tm-performance-review-breakdown-row > span:first-child {
+  color: var(--tm-color-text);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tm-performance-review-empty {
+  display: grid;
+  gap: var(--tm-space-1);
+  margin-top: var(--tm-space-4);
+  padding: var(--tm-space-3) 0;
+  border-top: 1px solid var(--tm-color-border);
+  border-bottom: 1px solid var(--tm-color-border);
+}
+
+.tm-performance-review-empty strong {
+  color: var(--tm-color-text);
+  font-size: 13px;
+}
+
+.tm-performance-review-empty span,
+.tm-performance-review-limits-wrap li {
+  color: var(--tm-color-text-muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.tm-performance-review-limits-wrap {
+  margin-top: var(--tm-space-4);
+  padding-top: var(--tm-space-3);
+  border-top: 1px solid var(--tm-color-border);
+}
+
+.tm-performance-review-limits {
+  display: grid;
+  gap: var(--tm-space-1);
+  margin: 0;
+  padding-left: 18px;
+}
+
 .tm-performance-form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -722,8 +864,14 @@ thead th {
 @media (max-width: 980px) {
   .tm-performance-action-grid,
   .tm-performance-dashboard-grid,
-  .tm-performance-metric-grid {
+  .tm-performance-metric-grid,
+  .tm-performance-review-summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .tm-performance-review-ranking-grid,
+  .tm-performance-review-breakdown-grid {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -751,9 +899,20 @@ thead th {
   .tm-performance-form-grid,
   .tm-performance-mapping-grid,
   .tm-performance-metric-grid,
+  .tm-performance-review-summary,
+  .tm-performance-review-ranking-grid,
+  .tm-performance-review-breakdown-grid,
   .tm-performance-input-grid,
   .tm-performance-filters {
     grid-template-columns: 1fr;
+  }
+
+  .tm-performance-review-breakdown-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .tm-performance-review-breakdown-row > span:nth-child(2) {
+    grid-column: 1 / -1;
   }
 
   .tm-performance-feishu-connection-summary,

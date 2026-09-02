@@ -117,3 +117,27 @@ test('performance monitor exposes a permission-aware Feishu connection configura
   assert.match(componentStyles, /\.tm-performance-feishu-connection-mapping/);
   assert.match(serverSource, /CAMPAIGN_PERFORMANCE_FEISHU_CONNECTION_APPROVE/);
 });
+
+test('performance dashboard exposes metadata-only review evidence with a stale-response guard', () => {
+  assert.match(indexHtml, /id="performanceReviewEvidence"/);
+  assert.match(indexHtml, /id="performanceReviewStatus"/);
+  assert.match(indexHtml, /onclick="loadPerformanceReviewEvidence\(\)"/);
+  assert.match(indexHtml, /复盘依据/);
+  assert.match(appSource, /var performanceReviewRequestSequence = 0;/);
+  assert.match(appSource, /var performanceDashboardRequestSequence = 0;/);
+  assert.match(appSource, /async function loadPerformanceReviewEvidence\(\)/);
+  assert.match(appSource, /function renderPerformanceReviewEvidence\(/);
+  assert.match(appSource, /performance\/review-evidence/);
+  assert.match(appSource, /metadata_only/);
+  assert.match(
+    appSource,
+    /requestSequence !== performanceReviewRequestSequence \|\| campaignId !== getPerformanceCampaignId\(\)/
+  );
+  assert.match(
+    appSource,
+    /async function loadPerformanceDashboard\(\)[\s\S]*?requestSequence !== performanceDashboardRequestSequence \|\| campaignId !== getPerformanceCampaignId\(\)/
+  );
+  assert.match(componentStyles, /\.tm-performance-review-evidence/);
+  assert.match(componentStyles, /\.tm-performance-review-ranking/);
+  assert.match(serverSource, /CAMPAIGN_PERFORMANCE_REVIEW_EVIDENCE/);
+});

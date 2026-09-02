@@ -579,3 +579,185 @@ test('escapes spreadsheet formula strings after non-breaking whitespace in CSV e
     db.close();
   }
 });
+
+test('builds a campaign-scoped metadata-only review evidence pack from current performance snapshots', () => {
+  const { db, service } = createFixture();
+  try {
+    const strongest = addCanonicalVideo(service);
+    const weakest = service.createContent({
+      userId: 1,
+      campaignId: 7,
+      body: {
+        url: 'https://www.youtube.com/watch?v=aBcDeFgHiJ1',
+        creator_name: 'Creator Two',
+        creator_id: 'creator-2',
+        product: 'Merach S19',
+        tags: ['launch', 'review']
+      }
+    }).content;
+    const mid = service.createContent({
+      userId: 1,
+      campaignId: 7,
+      body: {
+        url: 'https://www.tiktok.com/@creator/video/1234567890123456789',
+        creator_name: 'Creator Three',
+        creator_id: 'creator-3',
+        product: 'Merach S19',
+        tags: ['launch']
+      }
+    }).content;
+    service.recordManualInput({
+      userId: 1,
+      campaignId: 7,
+      contentId: strongest.id,
+      body: {
+        observation: {
+          views: 4200,
+          likes: 210,
+          comments: 40,
+          saves: 30,
+          shares: 20,
+          observed_at: '2026-09-02T12:00:00.000Z'
+        }
+      }
+    });
+    service.recordManualInput({
+      userId: 1,
+      campaignId: 7,
+      contentId: weakest.id,
+      body: {
+        observation: {
+          views: 800,
+          likes: 16,
+          comments: 4,
+          saves: 1,
+          shares: 0,
+          observed_at: '2026-09-01T12:00:00.000Z'
+        }
+      }
+    });
+    service.recordManualInput({
+      userId: 1,
+      campaignId: 7,
+      contentId: mid.id,
+      body: {
+        observation: {
+          views: 1200,
+          likes: 48,
+          comments: 10,
+          saves: 4,
+          shares: 2,
+          observed_at: '2026-09-02T10:00:00.000Z'
+        }
+      }
+    });
+
+    const review = service.getReviewEvidence({
+      userId: 1,
+      campaignId: 7,
+      query: { top_metric: 'views' }
+    });
+
+    assert.equal(review.contract_version, 'performance-review-evidence-v1');
+    assert.equal(review.analysis.mode, 'metadata_only');
+    assert.equal(review.analysis.media_evidence.status, 'not_collected');
+    assert.equal(review.records.total, 3);
+    assert.equal(review.records.active_with_observations, 3);
+    assert.equal(review.rankings.status, 'available');
+    assert.equal(review.rankings.metric, 'views');
+    assert.equal(review.rankings.comparable_records, 3);
+    assert.equal(review.rankings.top_contents[0].content.id, strongest.id);
+    assert.equal(review.rankings.bottom_contents[0].content.id, weakest.id);
+    assert.equal(review.rankings.top_contents[0].evidence.latest_observation.observed_at, '2026-09-02T12:00:00.000Z');
+    assert.equal(review.breakdowns.platforms[0].content_count, 2);
+    assert.deepEqual(
+      review.data_quality.metric_coverage.find((item) => item.metric === 'views'),
+      { metric: 'views', available_records: 3, total_records: 3, coverage: 1 }
+    );
+    assert.equal(review.limitations.some((item) => item.code === 'media_evidence_not_collected'), true);
+  } finally {
+    db.close();
+  }
+});
+
+test('does not expose commercial facts in a review evidence pack for a team member', () => {
+  const { db, service } = createFixture();
+  try {
+    const content = addCanonicalVideo(service);
+    service.recordManualInput({
+      userId: 1,
+      campaignId: 7,
+      contentId: content.id,
+      body: {
+        observation: { views: 1000, likes: 80, comments: 20 },
+        commercial: confirmedCommercialInput(),
+        confirmed: true,
+        correction_reason: 'Commercial facts must remain private.'
+      }
+    });
+    const second = service.createContent({
+      userId: 1,
+      campaignId: 7,
+      body: {
+        url: 'https://www.youtube.com/watch?v=aBcDeFgHiJ1',
+        creator_name: 'Creator Two',
+        creator_id: 'creator-2'
+      }
+    }).content;
+    service.recordManualInput({
+      userId: 1,
+      campaignId: 7,
+      contentId: second.id,
+      body: { observation: { views: 300, likes: 10, comments: 2 } }
+    });
+
+    const review = service.getReviewEvidence({
+      userId: 2,
+      campaignId: 7,
+      query: { top_metric: 'views' }
+    });
+
+    assert.equal(review.capabilities.can_view_commercial, false);
+    assert.equal(Object.hasOwn(review.metrics, 'roi'), false);
+    assert.equal(Object.hasOwn(review.metrics, 'roas'), false);
+    assert.equal(Object.hasOwn(review.rankings.top_contents[0].content, 'commercial'), false);
+    assert.equal(review.limitations.some((item) => item.code === 'commercial_metrics_restricted'), true);
+  } finally {
+    db.close();
+  }
+});
+
+test('withholds content rankings when the selected metric has less than eighty percent coverage', () => {
+  const { db, service } = createFixture();
+  try {
+    const observed = addCanonicalVideo(service);
+    service.createContent({
+      userId: 1,
+      campaignId: 7,
+      body: {
+        url: 'https://www.youtube.com/watch?v=aBcDeFgHiJ1',
+        creator_name: 'Missing Snapshot Creator'
+      }
+    });
+    service.recordManualInput({
+      userId: 1,
+      campaignId: 7,
+      contentId: observed.id,
+      body: { observation: { views: 1200, likes: 48, comments: 12 } }
+    });
+
+    const review = service.getReviewEvidence({
+      userId: 1,
+      campaignId: 7,
+      query: { top_metric: 'views' }
+    });
+
+    assert.equal(review.rankings.status, 'insufficient_coverage');
+    assert.equal(review.rankings.eligibility.coverage, 0.5);
+    assert.deepEqual(review.rankings.top_contents, []);
+    assert.deepEqual(review.rankings.bottom_contents, []);
+    assert.equal(review.limitations.some((item) => item.code === 'ranking_coverage_insufficient'), true);
+  } finally {
+    db.close();
+  }
+});

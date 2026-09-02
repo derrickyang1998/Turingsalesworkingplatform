@@ -44,7 +44,7 @@ function registerPerformanceRoutes(app, options = {}) {
     throw new TypeError('An authentication middleware is required.');
   }
   const service = options.service || createPerformanceManualService(options.db);
-  if (!service || typeof service.listContents !== 'function' || typeof service.getIntegrationPreview !== 'function' || typeof service.exportContents !== 'function' || typeof service.getDashboard !== 'function') {
+  if (!service || typeof service.listContents !== 'function' || typeof service.getIntegrationPreview !== 'function' || typeof service.exportContents !== 'function' || typeof service.getDashboard !== 'function' || typeof service.getReviewEvidence !== 'function') {
     throw new TypeError('A performance manual service is required.');
   }
   const feishuConnectionService = options.feishuConnectionService ||
@@ -180,6 +180,18 @@ function registerPerformanceRoutes(app, options = {}) {
         userId: authenticatedUserId(request),
         campaignId: request.params.id,
         query: request.query || {}
+      }));
+    } catch (error) {
+      return sendError(request, response, error);
+    }
+  });
+
+  app.get('/api/campaigns/:id/performance/review-evidence', options.authMiddleware, (request, response) => {
+    try {
+      return sendResult(request, response, service.getReviewEvidence({
+        userId: authenticatedUserId(request),
+        campaignId: request.params.id,
+        query: { top_metric: request.query && request.query.top_metric }
       }));
     } catch (error) {
       return sendError(request, response, error);

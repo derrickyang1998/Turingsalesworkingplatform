@@ -179,6 +179,11 @@ const REQUEST_POLICIES = Object.freeze({
     'GET',
     '/api/campaigns/:id/performance/dashboard'
   ),
+  CAMPAIGN_PERFORMANCE_REVIEW_EVIDENCE: empty(
+    'campaign.performance.review-evidence',
+    'GET',
+    '/api/campaigns/:id/performance/review-evidence'
+  ),
   CAMPAIGN_PERFORMANCE_INTEGRATION_PREVIEW: empty(
     'campaign.performance.integration-preview',
     'GET',

@@ -48,6 +48,15 @@ function createFixture() {
         feishu: { status: 'preview_only', provider_validation: 'not_attempted', write_attempted: false, field_mapping: [] }
       };
     },
+    getReviewEvidence(input) {
+      calls.push(['review-evidence', input]);
+      return {
+        contract_version: 'performance-review-evidence-v1',
+        campaign_id: 7,
+        analysis: { mode: 'metadata_only' },
+        rankings: { status: 'insufficient_data', top_contents: [], bottom_contents: [] }
+      };
+    },
     getDashboard(input) { calls.push(['dashboard', input]); return { records: { total: 0 } }; }
   };
   const feishuConnectionService = {
@@ -106,6 +115,7 @@ test('registers campaign-scoped performance endpoints and forwards authenticated
     'GET /api/campaigns/:id/performance/dashboard',
     'GET /api/campaigns/:id/performance/feishu-connection',
     'GET /api/campaigns/:id/performance/integration-preview',
+    'GET /api/campaigns/:id/performance/review-evidence',
     'POST /api/campaigns/:id/performance/contents',
     'POST /api/campaigns/:id/performance/contents/:contentId/manual-inputs',
     'POST /api/campaigns/:id/performance/feishu-connection',
@@ -128,6 +138,32 @@ test('registers campaign-scoped performance endpoints and forwards authenticated
     campaignId: '7',
     body: request.body
   }]);
+});
+
+test('returns campaign-scoped review evidence through a read-only request contract', () => {
+  const { routes, calls } = createFixture();
+  const response = invoke(routes.get('GET /api/campaigns/:id/performance/review-evidence'), {
+    user: { id: 9 },
+    params: { id: '7' },
+    query: { top_metric: 'core_view_er', ignored: 'value' },
+    requestId: 'review-evidence-request'
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.request_id, 'review-evidence-request');
+  assert.equal(response.body.analysis.mode, 'metadata_only');
+  assert.deepEqual(calls[0], ['review-evidence', {
+    userId: 9,
+    campaignId: '7',
+    query: { top_metric: 'core_view_er' }
+  }]);
+
+  const policy = campaignContract.REQUEST_POLICIES.CAMPAIGN_PERFORMANCE_REVIEW_EVIDENCE;
+  assert.ok(policy);
+  assert.equal(policy.id, 'campaign.performance.review-evidence');
+  assert.equal(policy.method, 'GET');
+  assert.equal(policy.pathTemplate, '/api/campaigns/:id/performance/review-evidence');
+  assert.equal(policy.mediaKind, campaignContract.MEDIA_KINDS.EMPTY);
 });
 
 test('routes Feishu projection configuration reads, drafts, and approvals through campaign request contracts', () => {

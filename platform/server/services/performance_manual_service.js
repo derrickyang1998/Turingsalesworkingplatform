@@ -5,7 +5,12 @@ const {
   preparePerformanceContentImport,
   PerformanceContentImportServiceError
 } = require('./performance_content_import_service');
-const { calculatePerformanceMetrics } = require('./performance_metrics_service');
+const {
+  calculatePerformanceMetrics,
+  aggregateRatio,
+  assessComparisonEligibility,
+  MINIMUM_COMPARISON_COVERAGE
+} = require('./performance_metrics_service');
 const { getCampaignAccess: defaultGetCampaignAccess } = require('./campaign_access_service');
 
 const MAX_PAGE_SIZE = 100;
@@ -57,6 +62,9 @@ const ACTION_POLICIES = Object.freeze({
 });
 const INTEGRATION_PREVIEW_CONTRACT_VERSION = 'performance-integration-preview-v1';
 const METRIC_IMPORT_CONTRACT_VERSION = 'performance-metric-import-v1';
+const REVIEW_EVIDENCE_CONTRACT_VERSION = 'performance-review-evidence-v1';
+const REVIEW_RANKING_LIMIT = 3;
+const REVIEW_BREAKDOWN_LIMIT = 5;
 const METRIC_IMPORT_MAPPING_FIELDS = Object.freeze([
   'content_url', 'video_url', 'observed_at', ...OBSERVATION_FIELDS, 'correction_reason'
 ]);
@@ -618,6 +626,298 @@ function serializePublication(row, capabilities) {
     };
   }
   return output;
+}
+
+function reviewMetricValue(content, metric) {
+  if (!content || !metric) return null;
+  if (metric === 'core_view_er') {
+    const derived = content.metrics && content.metrics.core_view_er;
+    if (!derived || derived.available !== true || !Number.isFinite(Number(derived.value))) return null;
+    return {
+      metric,
+      value: Number(derived.value),
+      source: 'derived',
+      definition_version: derived.definitionVersion || null
+    };
+  }
+  const observation = content.latest_observation;
+  const value = observation && observation[metric];
+  if (!Number.isSafeInteger(value) || value < 0) return null;
+  return { metric, value, source: 'latest_observation', definition_version: null };
+}
+
+function reviewContentReference(content) {
+  return {
+    id: content.id,
+    original_url: content.original_url,
+    canonical_url: content.canonical_url,
+    platform: content.platform,
+    creator_id: content.creator_id,
+    creator_name: content.creator_name,
+    product: content.product,
+    tags: Array.isArray(content.tags) ? content.tags.slice() : [],
+    published_at: content.published_at
+  };
+}
+
+function reviewObservationReference(content) {
+  const observation = content && content.latest_observation;
+  if (!observation) return null;
+  return {
+    id: observation.id,
+    observed_at: observation.observed_at,
+    source_mode: observation.source_mode
+  };
+}
+
+function reviewCoverage(contents, metric) {
+  const totalRecords = contents.length;
+  const availableRecords = contents.reduce((count, content) => (
+    reviewMetricValue(content, metric) ? count + 1 : count
+  ), 0);
+  return {
+    metric,
+    available_records: availableRecords,
+    total_records: totalRecords,
+    coverage: totalRecords === 0 ? 0 : availableRecords / totalRecords
+  };
+}
+
+function reviewMetricCoverage(contents) {
+  return OBSERVATION_FIELDS.map((metric) => reviewCoverage(contents, metric));
+}
+
+function reviewRankingEligibility(contents, metric, scored) {
+  const coverage = contents.length === 0 ? 0 : scored.length / contents.length;
+  const common = {
+    minimum_coverage: MINIMUM_COMPARISON_COVERAGE,
+    coverage,
+    comparable_records: scored.length,
+    total_records: contents.length,
+    missing_records: contents.length - scored.length
+  };
+  if (metric === 'core_view_er') {
+    const engineEligibility = assessComparisonEligibility(contents.map((content) => (
+      content.metrics && content.metrics.core_view_er
+    )));
+    const eligible = scored.length >= 2 && engineEligibility.eligible === true;
+    return Object.assign({}, common, {
+      eligible,
+      coverage: engineEligibility.coverage,
+      comparable_records: engineEligibility.comparableRecordCount,
+      missing_records: engineEligibility.excludedRecordCount,
+      reason: eligible ? null : (
+        scored.length < 2
+          ? { code: 'insufficient_comparable_records', minimum_records: 2, actual_records: scored.length }
+          : engineEligibility.reason || { code: 'insufficient_metric_coverage' }
+      ),
+      signature: engineEligibility.signature || null
+    });
+  }
+  const eligible = scored.length >= 2 && coverage >= MINIMUM_COMPARISON_COVERAGE;
+  return Object.assign({}, common, {
+    eligible,
+    reason: eligible ? null : (
+      scored.length < 2
+        ? { code: 'insufficient_comparable_records', minimum_records: 2, actual_records: scored.length }
+        : {
+          code: 'insufficient_metric_coverage',
+          minimum_coverage: MINIMUM_COMPARISON_COVERAGE,
+          actual_coverage: coverage
+        }
+    ),
+    signature: null
+  });
+}
+
+function reviewRankingEntry(item, rank) {
+  return {
+    rank,
+    content: reviewContentReference(item.content),
+    metric: item.metric,
+    evidence: { latest_observation: reviewObservationReference(item.content) }
+  };
+}
+
+function buildReviewRankings(contents, metric) {
+  const scored = contents.map((content) => ({ content, metric: reviewMetricValue(content, metric) }))
+    .filter((item) => item.metric !== null);
+  const eligibility = reviewRankingEligibility(contents, metric, scored);
+  const status = eligibility.eligible
+    ? 'available'
+    : (scored.length === 0 ? 'no_observed_metric' : 'insufficient_coverage');
+  if (!eligibility.eligible) {
+    return {
+      status,
+      metric,
+      eligibility,
+      comparable_records: eligibility.comparable_records,
+      missing_records: eligibility.missing_records,
+      top_contents: [],
+      bottom_contents: []
+    };
+  }
+  const descending = scored.slice().sort((left, right) => (
+    right.metric.value - left.metric.value || left.content.id - right.content.id
+  ));
+  const ascending = scored.slice().sort((left, right) => (
+    left.metric.value - right.metric.value || left.content.id - right.content.id
+  ));
+  return {
+    status,
+    metric,
+    eligibility,
+    comparable_records: eligibility.comparable_records,
+    missing_records: eligibility.missing_records,
+    top_contents: descending.slice(0, REVIEW_RANKING_LIMIT)
+      .map((item, index) => reviewRankingEntry(item, index + 1)),
+    bottom_contents: ascending.slice(0, REVIEW_RANKING_LIMIT)
+      .map((item, index) => reviewRankingEntry(item, index + 1))
+  };
+}
+
+function reviewGroupLabel(content, dimension) {
+  if (dimension === 'platform') return content.platform || 'unassigned';
+  if (dimension === 'product') return content.product || 'unassigned';
+  return content.creator_name || content.creator_id || 'unassigned';
+}
+
+function reviewGroupMetric(contents, metric) {
+  const coverage = reviewCoverage(contents, metric);
+  if (metric === 'core_view_er') {
+    const sourceMetrics = contents.map((content) => content.metrics && content.metrics.core_view_er);
+    const aggregate = aggregateRatio(sourceMetrics);
+    const eligibility = assessComparisonEligibility(sourceMetrics);
+    const available = aggregate.available === true && eligibility.coverage >= MINIMUM_COMPARISON_COVERAGE;
+    return {
+      metric,
+      aggregation: 'weighted_ratio',
+      available,
+      value: available ? aggregate.value : null,
+      coverage: coverage.coverage,
+      available_records: coverage.available_records,
+      total_records: coverage.total_records,
+      reason: available ? null : (
+        aggregate.reason || eligibility.reason || { code: 'insufficient_metric_coverage' }
+      )
+    };
+  }
+  const values = contents.map((content) => reviewMetricValue(content, metric))
+    .filter((value) => value !== null)
+    .map((value) => value.value);
+  const available = values.length > 0 && coverage.coverage >= MINIMUM_COMPARISON_COVERAGE;
+  return {
+    metric,
+    aggregation: 'sum',
+    available,
+    value: available ? values.reduce((sum, value) => sum + value, 0) : null,
+    coverage: coverage.coverage,
+    available_records: coverage.available_records,
+    total_records: coverage.total_records,
+    reason: available ? null : (
+      values.length === 0
+        ? { code: 'no_observed_metric' }
+        : {
+          code: 'insufficient_metric_coverage',
+          minimum_coverage: MINIMUM_COMPARISON_COVERAGE,
+          actual_coverage: coverage.coverage
+        }
+    )
+  };
+}
+
+function buildReviewBreakdown(contents, dimension, metric) {
+  const groups = new Map();
+  contents.forEach((content) => {
+    const label = reviewGroupLabel(content, dimension);
+    if (!groups.has(label)) groups.set(label, []);
+    groups.get(label).push(content);
+  });
+  return [...groups.entries()].map(([label, items]) => {
+    const observedTimes = items.map((content) => (
+      content.latest_observation && content.latest_observation.observed_at
+    )).filter(Boolean).sort();
+    return {
+      key: label,
+      label,
+      content_count: items.length,
+      observed_content_count: items.filter((content) => content.latest_observation !== null).length,
+      latest_observed_at: observedTimes.length ? observedTimes[observedTimes.length - 1] : null,
+      metric: reviewGroupMetric(items, metric)
+    };
+  }).sort((left, right) => {
+    const leftValue = left.metric && left.metric.available ? left.metric.value : null;
+    const rightValue = right.metric && right.metric.available ? right.metric.value : null;
+    if (leftValue !== null && rightValue !== null && rightValue !== leftValue) return rightValue - leftValue;
+    if (leftValue !== null && rightValue === null) return -1;
+    if (leftValue === null && rightValue !== null) return 1;
+    if (right.content_count !== left.content_count) return right.content_count - left.content_count;
+    return left.label < right.label ? -1 : (left.label > right.label ? 1 : 0);
+  }).slice(0, REVIEW_BREAKDOWN_LIMIT);
+}
+
+function reviewSourceModeCounts(contents) {
+  const counts = {};
+  contents.forEach((content) => {
+    const sourceMode = content.latest_observation && content.latest_observation.source_mode;
+    if (!sourceMode) return;
+    counts[sourceMode] = (counts[sourceMode] || 0) + 1;
+  });
+  return counts;
+}
+
+function reviewObservationWindow(contents) {
+  const observedAt = contents.map((content) => (
+    content.latest_observation && content.latest_observation.observed_at
+  )).filter(Boolean).sort();
+  return {
+    min_observed_at: observedAt.length ? observedAt[0] : null,
+    max_observed_at: observedAt.length ? observedAt[observedAt.length - 1] : null,
+    freshness_policy: 'not_configured'
+  };
+}
+
+function reviewLimitations(records, rankings, capabilities) {
+  const limits = [
+    {
+      code: 'metadata_only',
+      detail: '本次复盘只使用活动内当前可见的结构化数据和指标快照。'
+    },
+    {
+      code: 'manual_or_csv_only',
+      detail: '当前数据来源仅包含手工录入和 CSV/XLSX 导入，不包含服务商自动采集。'
+    },
+    {
+      code: 'feishu_sync_disabled',
+      detail: '本版本不读取或写入飞书数据。'
+    },
+    {
+      code: 'media_evidence_not_collected',
+      detail: '未抓取、存储或分析视频内容、钩子、风格和画面。'
+    },
+    {
+      code: 'causal_diagnosis_not_available',
+      detail: '当前仅提供数据比较，不对内容效果原因作因果判断。'
+    }
+  ];
+  if (records.total === 0) {
+    limits.push({ code: 'no_registered_content', detail: '当前活动尚未登记任何监控内容。' });
+  } else if (records.active_with_observations === 0) {
+    limits.push({ code: 'no_media_metrics', detail: '当前活动尚未录入可用于复盘的内容指标。' });
+  }
+  if (rankings.status !== 'available') {
+    limits.push({
+      code: 'ranking_coverage_insufficient',
+      detail: '排序依据未达到可比较覆盖率，当前不会标记最佳或最弱内容。'
+    });
+  }
+  if (!capabilities.can_view_commercial) {
+    limits.push({
+      code: 'commercial_metrics_restricted',
+      detail: '费用、收益、ROI 和 ROAS 仅向活动负责人或组织管理员展示。'
+    });
+  }
+  return limits;
 }
 
 function exportMetricValue(content, key) {
@@ -1447,6 +1747,67 @@ function createPerformanceManualService(db, options = {}) {
     };
   }
 
+  function getReviewEvidence(input) {
+    const context = requireAccess(input && input.userId, input && input.campaignId, 'view');
+    const sourceQuery = input && input.query && typeof input.query === 'object' ? input.query : {};
+    const query = normalizeQuery({ top_metric: sourceQuery.top_metric });
+    const current = currentRows(context, query, false);
+    const contents = current.rows.map((row) => serializePublication(row, context.capabilities));
+    const dashboardResult = dashboard({
+      userId: context.userId,
+      campaignId: context.campaignId,
+      query: { top_metric: query.topMetric }
+    });
+    const records = Object.assign({}, dashboardResult.records);
+    if (!context.capabilities.can_view_commercial) delete records.confirmed_commercial;
+    const rankings = buildReviewRankings(contents, query.topMetric);
+    return {
+      contract_version: REVIEW_EVIDENCE_CONTRACT_VERSION,
+      campaign_id: context.campaignId,
+      scope: {
+        type: 'campaign_current_snapshot',
+        selected_metric: query.topMetric,
+        observation_selector: 'observed_at_desc_id_desc',
+        commercial_selector: 'created_at_desc_id_desc'
+      },
+      records,
+      totals: dashboardResult.totals,
+      metrics: dashboardResult.metrics,
+      rankings,
+      breakdowns: {
+        platforms: buildReviewBreakdown(contents, 'platform', query.topMetric),
+        products: buildReviewBreakdown(contents, 'product', query.topMetric),
+        creators: buildReviewBreakdown(contents, 'creator', query.topMetric)
+      },
+      data_quality: {
+        metric_coverage: reviewMetricCoverage(contents),
+        source_mode_counts: reviewSourceModeCounts(contents),
+        observation_window: reviewObservationWindow(contents)
+      },
+      analysis: {
+        mode: 'metadata_only',
+        media_evidence: {
+          status: 'not_collected',
+          reason: 'authorized_media_access_required'
+        },
+        external_collection: {
+          status: 'not_connected',
+          reason: 'provider_not_enabled'
+        },
+        causal_diagnosis: {
+          status: 'not_available',
+          reason: 'media_evidence_not_collected'
+        },
+        human_confirmation: {
+          required: true,
+          status: 'not_started'
+        }
+      },
+      limitations: reviewLimitations(records, rankings, context.capabilities),
+      capabilities: context.capabilities
+    };
+  }
+
   return Object.freeze({
     createContent,
     importContentRows,
@@ -1455,7 +1816,8 @@ function createPerformanceManualService(db, options = {}) {
     listContents,
     getIntegrationPreview,
     exportContents,
-    getDashboard: dashboard
+    getDashboard: dashboard,
+    getReviewEvidence
   });
 }
 

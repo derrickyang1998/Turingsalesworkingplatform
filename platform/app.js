@@ -6615,6 +6615,9 @@ var performanceCampaignContextId = null;
 var performanceContents = [];
 var performanceCapabilities = {};
 var performanceDashboardData = null;
+var performanceDashboardRequestSequence = 0;
+var performanceReviewEvidence = null;
+var performanceReviewRequestSequence = 0;
 var performanceIntegrationPreview = null;
 var performanceIntegrationRequestSequence = 0;
 var performanceFeishuConnection = null;
@@ -6716,6 +6719,7 @@ function changePerformanceCampaignContext(value) {
   loadPerformanceContents();
   loadPerformanceIntegrationPreview().then(function() { return loadPerformanceFeishuConnection(); });
   loadPerformanceDashboard();
+  loadPerformanceReviewEvidence();
 }
 
 function refreshPerformanceMonitor() {
@@ -6727,7 +6731,9 @@ function refreshPerformanceMonitor() {
 }
 
 function refreshPerformanceDashboard() {
-  return loadPerformanceCampaigns().then(function() { return loadPerformanceDashboard(); });
+  return loadPerformanceCampaigns().then(function() {
+    return Promise.all([loadPerformanceDashboard(), loadPerformanceReviewEvidence()]);
+  });
 }
 
 function initPerformanceMonitor() {
@@ -6739,7 +6745,9 @@ function initPerformanceMonitor() {
 }
 
 function initPerformanceDashboard() {
-  return loadPerformanceCampaigns().then(function() { return loadPerformanceDashboard(); });
+  return loadPerformanceCampaigns().then(function() {
+    return Promise.all([loadPerformanceDashboard(), loadPerformanceReviewEvidence()]);
+  });
 }
 
 function performanceTextValue(id) {
@@ -7571,6 +7579,116 @@ function performanceCoverageText(total) {
   return Number(total.coverage.available_records || 0) + ' / ' + Number(total.coverage.total_records || 0);
 }
 
+function setPerformanceReviewStatus(message, type) {
+  var element = document.getElementById('performanceReviewStatus');
+  if (!element) return;
+  element.textContent = message || '';
+  element.style.color = type === 'error' ? 'var(--tm-color-danger)' : 'var(--tm-color-text-muted)';
+}
+
+function performanceReviewMetricText(metric, topMetric) {
+  return topMetric === 'core_view_er'
+    ? performanceRate(metric)
+    : performanceCount(metric && metric.value);
+}
+
+function performanceReviewSourceLabel(sourceMode) {
+  var labels = { manual: '手工录入', csv_xlsx: 'CSV / XLSX 导入' };
+  return labels[sourceMode] || sourceMode || '未提供';
+}
+
+function performanceReviewRankingRows(items, topMetric) {
+  if (!Array.isArray(items) || !items.length) return '<div class="tm-state-empty">暂无可比较的已观测内容。</div>';
+  return items.map(function(item) {
+    var content = item.content || {};
+    var observation = item.evidence && item.evidence.latest_observation || {};
+    var title = performanceContentTitle(content);
+    return '<div class="tm-performance-review-ranking-row">'
+      + '<span class="tm-performance-rank">' + Number(item.rank || 0) + '</span>'
+      + '<div class="tm-performance-review-ranking-main"><strong title="' + esc(title) + '">' + esc(title) + '</strong>'
+      + '<span>' + esc(content.platform || '未标注平台') + ' · ' + esc(performanceReviewSourceLabel(observation.source_mode))
+      + ' · ' + esc(performanceDate(observation.observed_at)) + '</span></div>'
+      + '<strong class="tm-performance-review-ranking-value">' + esc(performanceReviewMetricText(item.metric, topMetric)) + '</strong>'
+      + '</div>';
+  }).join('');
+}
+
+function performanceReviewBreakdownRows(title, groups, topMetric) {
+  var rows = Array.isArray(groups) ? groups : [];
+  var body = rows.length ? rows.map(function(group) {
+    var metric = group.metric || {};
+    var value = metric.available ? performanceReviewMetricText(metric, topMetric) : '未提供';
+    var count = Number(group.content_count || 0);
+    var observed = Number(group.observed_content_count || 0);
+    return '<div class="tm-performance-review-breakdown-row">'
+      + '<span>' + esc(group.label || '未标注') + '</span>'
+      + '<span>' + count + ' 条 / ' + observed + ' 条已观测</span>'
+      + '<strong>' + esc(value) + '</strong>'
+      + '</div>';
+  }).join('') : '<div class="tm-state-empty">暂无分组数据。</div>';
+  return '<section class="tm-performance-review-breakdown" aria-label="' + esc(title) + '">'
+    + '<h4>' + esc(title) + '</h4>' + body + '</section>';
+}
+
+function performanceReviewLimitationsHtml(items) {
+  var limits = Array.isArray(items) ? items : [];
+  if (!limits.length) return '';
+  return '<ul class="tm-performance-review-limits">' + limits.map(function(item) {
+    return '<li>' + esc(item.detail || item.code || '数据范围受限') + '</li>';
+  }).join('') + '</ul>';
+}
+
+function renderPerformanceReviewEvidence(data) {
+  performanceReviewEvidence = data || null;
+  var container = document.getElementById('performanceReviewEvidence');
+  if (!container) return;
+  if (!data) {
+    setPerformanceReviewStatus('选择活动后加载复盘依据。');
+    container.innerHTML = '<div class="tm-state-empty">暂无复盘依据。</div>';
+    return;
+  }
+  var rankings = data.rankings || {};
+  var topMetric = rankings.metric || (data.scope && data.scope.selected_metric) || 'views';
+  var labels = performanceDashboardMetricLabels();
+  var metadataOnly = data.analysis && data.analysis.mode === 'metadata_only';
+  var eligibility = rankings.eligibility || {};
+  var records = data.records || {};
+  var coverage = Number(eligibility.coverage || 0);
+  var comparable = Number(rankings.comparable_records || 0);
+  var total = Number(records.total || 0);
+  var status = rankings.status === 'available' && metadataOnly
+    ? '已形成当前指标的可比较复盘依据。'
+    : '当前数据不足以形成最佳或最弱内容比较。';
+  setPerformanceReviewStatus(status, rankings.status === 'available' && metadataOnly ? '' : 'warning');
+  var overview = [
+    ['复盘范围', total + ' 条内容'],
+    ['排序指标', labels[topMetric] || topMetric],
+    ['可比较内容', comparable + ' / ' + total],
+    ['指标覆盖率', (coverage * 100).toFixed(0) + '%'],
+    ['最近数据时间', performanceDate(data.data_quality && data.data_quality.observation_window && data.data_quality.observation_window.max_observed_at)]
+  ];
+  var rankingHtml = rankings.status === 'available'
+    ? '<div class="tm-performance-review-ranking-grid">'
+      + '<section class="tm-performance-review-ranking" aria-label="当前表现靠前内容"><h4>当前表现靠前</h4>'
+      + performanceReviewRankingRows(rankings.top_contents, topMetric) + '</section>'
+      + '<section class="tm-performance-review-ranking" aria-label="当前待观察内容"><h4>当前待观察</h4>'
+      + performanceReviewRankingRows(rankings.bottom_contents, topMetric) + '</section></div>'
+    : '<div class="tm-performance-review-empty"><strong>暂不做内容优劣判断</strong><span>排序需至少两条已观测内容，并达到 80% 指标覆盖率。</span></div>';
+  var breakdowns = data.breakdowns || {};
+  container.innerHTML = '<div class="tm-performance-review-summary">' + overview.map(function(item) {
+    return '<div><span>' + esc(item[0]) + '</span><strong>' + esc(item[1]) + '</strong></div>';
+  }).join('') + '</div>'
+    + rankingHtml
+    + '<div class="tm-performance-review-breakdown-grid">'
+    + performanceReviewBreakdownRows('平台对比', breakdowns.platforms, topMetric)
+    + performanceReviewBreakdownRows('产品对比', breakdowns.products, topMetric)
+    + performanceReviewBreakdownRows('达人对比', breakdowns.creators, topMetric)
+    + '</div>'
+    + '<div class="tm-performance-review-limits-wrap"><h4>数据边界</h4>'
+    + performanceReviewLimitationsHtml(data.limitations) + '</div>';
+  if (window.TMAccessibility) window.TMAccessibility.refresh();
+}
+
 function renderPerformanceDashboard(data) {
   performanceDashboardData = data || null;
   var metricContainer = document.getElementById('performanceDashboardMetrics');
@@ -7636,6 +7754,7 @@ function renderPerformanceDashboard(data) {
 
 async function loadPerformanceDashboard() {
   var campaignId = getPerformanceCampaignId();
+  var requestSequence = ++performanceDashboardRequestSequence;
   if (campaignId === null) {
     renderPerformanceDashboard(null);
     return null;
@@ -7644,12 +7763,40 @@ async function loadPerformanceDashboard() {
   try {
     var response = await apiFetch('/campaigns/' + encodeURIComponent(campaignId) + '/performance/dashboard?top_metric=' + encodeURIComponent(topMetric));
     var data = await response.json();
+    if (requestSequence !== performanceDashboardRequestSequence || campaignId !== getPerformanceCampaignId()) return null;
     if (!response.ok) throw new Error(data.error || '效果看板加载失败');
     renderPerformanceDashboard(data);
     return data;
   } catch (error) {
+    if (requestSequence !== performanceDashboardRequestSequence || campaignId !== getPerformanceCampaignId()) return null;
     renderPerformanceDashboard(null);
     setPerformanceStatus(error.message || '效果看板加载失败', 'error');
+    return null;
+  }
+}
+
+async function loadPerformanceReviewEvidence() {
+  var campaignId = getPerformanceCampaignId();
+  var requestSequence = ++performanceReviewRequestSequence;
+  var container = document.getElementById('performanceReviewEvidence');
+  if (campaignId === null) {
+    renderPerformanceReviewEvidence(null);
+    return null;
+  }
+  var topMetric = performanceTextValue('performanceTopMetric') || 'views';
+  setPerformanceReviewStatus('正在加载复盘依据...');
+  if (container) container.innerHTML = '<div class="tm-state-loading">正在核对当前活动的数据范围...</div>';
+  try {
+    var response = await apiFetch('/campaigns/' + encodeURIComponent(campaignId) + '/performance/review-evidence?top_metric=' + encodeURIComponent(topMetric));
+    var data = await response.json();
+    if (requestSequence !== performanceReviewRequestSequence || campaignId !== getPerformanceCampaignId()) return null;
+    if (!response.ok) throw new Error(data.error || '复盘依据加载失败');
+    renderPerformanceReviewEvidence(data);
+    return data;
+  } catch (error) {
+    if (requestSequence !== performanceReviewRequestSequence || campaignId !== getPerformanceCampaignId()) return null;
+    setPerformanceReviewStatus(error.message || '复盘依据加载失败', 'error');
+    if (container) container.innerHTML = '<div class="tm-state-error">' + esc(error.message || '复盘依据加载失败') + '</div>';
     return null;
   }
 }
@@ -7745,7 +7892,7 @@ function switchPage(id, options) {
     'getEditedDemand', 'syncCurDemandFromAnalysis', 'handleDemandFile', 'analyzeDemandAI',
     'switchTab', 'matchInfluencers', 'smartMatch', 'handleUpload', 'handleDrop', 'openInfUploadModal', 'handleUploadModal', 'downloadInfTemplate', 'exportAll', 'exportFiltered', 'exportSelected',
     'toggleAll', 'syncInfluencerSelectionState', 'loadM4Campaigns', 'changeM4CampaignContext', 'startCollab', 'submitCollabOrder', 'closeCollabOrderModal', 'loadCollaborations', 'updateCollabStatus', 'runCampaignCollabAction', 'closeCampaignSettlementModal', 'submitCampaignSettlement',
-    'initPerformanceMonitor', 'initPerformanceDashboard', 'refreshPerformanceMonitor', 'refreshPerformanceDashboard', 'changePerformanceCampaignContext', 'loadPerformanceContents', 'loadPerformanceIntegrationPreview', 'loadPerformanceFeishuConnection', 'savePerformanceFeishuConnectionDraft', 'approvePerformanceFeishuConnectionDraft', 'createPerformanceContent', 'downloadPerformanceTemplate', 'handlePerformanceImport', 'handlePerformanceDrop', 'downloadPerformanceMetricsTemplate', 'handlePerformanceMetricsImport', 'handlePerformanceMetricsDrop', 'openPerformanceInputModal', 'closePerformanceInputModal', 'savePerformanceInput', 'loadPerformanceDashboard', 'debouncedPerformanceContentSearch', 'exportPerformanceContents',
+    'initPerformanceMonitor', 'initPerformanceDashboard', 'refreshPerformanceMonitor', 'refreshPerformanceDashboard', 'changePerformanceCampaignContext', 'loadPerformanceContents', 'loadPerformanceIntegrationPreview', 'loadPerformanceFeishuConnection', 'savePerformanceFeishuConnectionDraft', 'approvePerformanceFeishuConnectionDraft', 'createPerformanceContent', 'downloadPerformanceTemplate', 'handlePerformanceImport', 'handlePerformanceDrop', 'downloadPerformanceMetricsTemplate', 'handlePerformanceMetricsImport', 'handlePerformanceMetricsDrop', 'openPerformanceInputModal', 'closePerformanceInputModal', 'savePerformanceInput', 'loadPerformanceDashboard', 'loadPerformanceReviewEvidence', 'debouncedPerformanceContentSearch', 'exportPerformanceContents',
     'sendChat', 'clearChat', 'clearAIMemory', 'pushToFeishu', 'loadFeishuStatus', 'loadFeishuOutbox', 'testFeishuConnection', 'selectFeishuReconciliationDelivery', 'reconcileFeishuDelivery', 'selectFeishuRetryDelivery', 'retryFeishuDelivery',
     'switchAdminTab', 'loadAdminDashboard', 'loadAdminUsers', 'adminAddUser', 'adminCreateInvite', 'adminResetPw',
     'wfUndo', 'wfRedo', 'wfClearCanvas', 'wfSaveTemplate', 'wfPublishTemplate', 'wfResetTaskFilters', 'wfLoadTasks', 'wfLoadInstances',
