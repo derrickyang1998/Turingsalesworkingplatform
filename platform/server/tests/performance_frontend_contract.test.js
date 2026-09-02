@@ -59,3 +59,20 @@ test('performance monitor offers both current-filter and full-campaign CSV expor
   assert.match(appSource, /performance\/contents\/export\?/);
   assert.match(appSource, /dlFile\('content_performance_' \+ scope \+ '\.csv'/);
 });
+
+test('performance monitor exposes a collapsed, campaign-scoped integration preview without dispatch controls', () => {
+  assert.match(indexHtml, /id="performanceIntegrationPreview"/);
+  assert.match(indexHtml, /id="performanceIntegrationStatus"/);
+  assert.match(indexHtml, /onclick="loadPerformanceIntegrationPreview\(\)"/);
+  assert.match(indexHtml, /飞书字段映射预览/);
+  assert.match(appSource, /async function loadPerformanceIntegrationPreview\(\)/);
+  assert.match(appSource, /performance\/integration-preview/);
+  assert.match(appSource, /function renderPerformanceIntegrationPreview\(/);
+  assert.match(appSource, /provider_validation/);
+  assert.match(appSource, /write_attempted/);
+  assert.match(appSource, /var performanceIntegrationRequestSequence = 0;/);
+  assert.match(
+    appSource,
+    /requestSequence !== performanceIntegrationRequestSequence \|\| campaignId !== getPerformanceCampaignId\(\)/
+  );
+});

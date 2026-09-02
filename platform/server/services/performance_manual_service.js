@@ -55,6 +55,61 @@ const ACTION_POLICIES = Object.freeze({
   PERF_COMMERCIAL_EDIT: 'PERF_COMMERCIAL_EDIT',
   PERF_COMMERCIAL_APPROVE: 'PERF_COMMERCIAL_APPROVE'
 });
+const INTEGRATION_PREVIEW_CONTRACT_VERSION = 'performance-integration-preview-v1';
+const INTEGRATION_PREVIEW_SOURCES = Object.freeze([
+  Object.freeze({
+    id: 'manual',
+    label: '手工录入',
+    status: 'available',
+    detail: '可登记视频链接，并录入视频表现与商业数据。',
+    supports: Object.freeze(['content_registration', 'metric_input', 'commercial_input']),
+    dispatch_available: false
+  }),
+  Object.freeze({
+    id: 'csv_xlsx',
+    label: 'CSV / XLSX 导入',
+    status: 'available',
+    detail: '可批量导入视频链接、达人、产品、标签和发布日期。',
+    supports: Object.freeze(['content_import']),
+    dispatch_available: false
+  })
+]);
+function integrationPreviewField(sourceKey, sourceLabel, proposedTargetField, access) {
+  return Object.freeze({
+    source_key: sourceKey,
+    source_label: sourceLabel,
+    proposed_target_field: proposedTargetField,
+    access: access || 'view'
+  });
+}
+const INTEGRATION_PREVIEW_FIELDS = Object.freeze([
+  integrationPreviewField('content.original_url', '视频链接', '视频链接'),
+  integrationPreviewField('content.platform', '平台', '平台'),
+  integrationPreviewField('content.creator_id', '达人 ID', '达人 ID'),
+  integrationPreviewField('content.creator_name', '达人名称', '达人名称'),
+  integrationPreviewField('content.product', '推广产品', '推广产品'),
+  integrationPreviewField('content.tags', '内容标签', '内容标签'),
+  integrationPreviewField('content.published_at', '发布日期', '发布日期'),
+  integrationPreviewField('latest_observation.observed_at', '数据更新时间', '数据更新时间'),
+  integrationPreviewField('latest_observation.views', '播放量', '播放量'),
+  integrationPreviewField('latest_observation.impressions', '展示量', '展示量'),
+  integrationPreviewField('latest_observation.likes', '点赞数', '点赞数'),
+  integrationPreviewField('latest_observation.comments', '评论数', '评论数'),
+  integrationPreviewField('latest_observation.saves', '收藏数', '收藏数'),
+  integrationPreviewField('latest_observation.shares', '转发数', '转发数'),
+  integrationPreviewField('latest_observation.clicks', '点击数', '点击数'),
+  integrationPreviewField('latest_observation.conversions', '转化数', '转化数'),
+  integrationPreviewField('metrics.observed_engagement_total', '互动总量', '互动总量'),
+  integrationPreviewField('metrics.core_view_er', '互动率', '互动率'),
+  integrationPreviewField('metrics.ctr', '点击率', '点击率'),
+  integrationPreviewField('commercial.creator_fee', '视频花费', '视频花费', 'commercial'),
+  integrationPreviewField('commercial.attributed_revenue', '归因收入', '归因收入', 'commercial'),
+  integrationPreviewField('metrics.total_campaign_cost', '项目总成本', '项目总成本', 'commercial'),
+  integrationPreviewField('metrics.cpm', 'CPM', 'CPM', 'commercial'),
+  integrationPreviewField('metrics.cpc', 'CPC', 'CPC', 'commercial'),
+  integrationPreviewField('metrics.roi', 'ROI', 'ROI', 'commercial'),
+  integrationPreviewField('metrics.roas', 'ROAS', 'ROAS', 'commercial')
+]);
 const IMPORT_URL_ERROR_CODES = new Set([
   'PUBLICATION_URL_HTTPS_REQUIRED',
   'PUBLICATION_URL_INVALID',
@@ -852,6 +907,40 @@ function createPerformanceManualService(db, options = {}) {
     };
   }
 
+  function getIntegrationPreview(input) {
+    const context = requireAccess(input && input.userId, input && input.campaignId, 'view');
+    const canViewCommercial = context.capabilities.can_view_commercial;
+    return {
+      contract_version: INTEGRATION_PREVIEW_CONTRACT_VERSION,
+      campaign_id: context.campaignId,
+      capabilities: context.capabilities,
+      data_sources: INTEGRATION_PREVIEW_SOURCES.map((source) => ({
+        id: source.id,
+        label: source.label,
+        status: source.status,
+        detail: source.detail,
+        supports: source.supports.filter((support) => support !== 'commercial_input' || canViewCommercial),
+        dispatch_available: false
+      })),
+      feishu: {
+        status: 'preview_only',
+        detail: '仅展示拟定字段映射；不会访问或写入飞书。',
+        mapping_scope: 'proposed_video_performance_schema',
+        provider_validation: 'not_attempted',
+        write_attempted: false,
+        commercial_fields_included: canViewCommercial,
+        field_mapping: INTEGRATION_PREVIEW_FIELDS
+          .filter((field) => field.access !== 'commercial' || canViewCommercial)
+          .map((field) => ({
+            source_key: field.source_key,
+            source_label: field.source_label,
+            proposed_target_field: field.proposed_target_field,
+            access: field.access
+          }))
+      }
+    };
+  }
+
   function exportContents(input) {
     const context = requireAccess(input && input.userId, input && input.campaignId, 'view');
     const query = normalizeQuery(input && input.query);
@@ -998,6 +1087,7 @@ function createPerformanceManualService(db, options = {}) {
     importContentRows,
     recordManualInput,
     listContents,
+    getIntegrationPreview,
     exportContents,
     getDashboard: dashboard
   });

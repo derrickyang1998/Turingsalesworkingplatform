@@ -179,6 +179,11 @@ const REQUEST_POLICIES = Object.freeze({
     'GET',
     '/api/campaigns/:id/performance/dashboard'
   ),
+  CAMPAIGN_PERFORMANCE_INTEGRATION_PREVIEW: empty(
+    'campaign.performance.integration-preview',
+    'GET',
+    '/api/campaigns/:id/performance/integration-preview'
+  ),
   CAMPAIGN_PERFORMANCE_CONTENT_CREATE: controlJson(
     'campaign.performance.content.create',
     'POST',

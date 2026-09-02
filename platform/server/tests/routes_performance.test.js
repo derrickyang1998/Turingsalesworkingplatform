@@ -2,9 +2,12 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 
 const registerPerformanceRoutes = require('../routes_performance');
 const { PerformanceManualServiceError } = require('../services/performance_manual_service');
+const campaignContract = require('../contracts/campaign_contract');
 
 function createResponse() {
   return {
@@ -34,6 +37,16 @@ function createFixture() {
       calls.push(['export', input]);
       return { filename: 'performance_campaign_7_filtered_export.csv', csv: '\ufeff视频链接\r\nhttps://example.test/video\r\n' };
     },
+    getIntegrationPreview(input) {
+      calls.push(['integration-preview', input]);
+      return {
+        contract_version: 'performance-integration-preview-v1',
+        campaign_id: 7,
+        capabilities: { can_view: true },
+        data_sources: [],
+        feishu: { status: 'preview_only', provider_validation: 'not_attempted', write_attempted: false, field_mapping: [] }
+      };
+    },
     getDashboard(input) { calls.push(['dashboard', input]); return { records: { total: 0 } }; }
   };
   registerPerformanceRoutes(app, {
@@ -61,6 +74,7 @@ test('registers campaign-scoped performance endpoints and forwards authenticated
     'GET /api/campaigns/:id/performance/contents',
     'GET /api/campaigns/:id/performance/contents/export',
     'GET /api/campaigns/:id/performance/dashboard',
+    'GET /api/campaigns/:id/performance/integration-preview',
     'POST /api/campaigns/:id/performance/contents',
     'POST /api/campaigns/:id/performance/contents/:contentId/manual-inputs',
     'POST /api/campaigns/:id/performance/import'
@@ -81,6 +95,31 @@ test('registers campaign-scoped performance endpoints and forwards authenticated
     campaignId: '7',
     body: request.body
   }]);
+});
+
+test('returns integration previews through the campaign request contract without a body', () => {
+  const { routes, calls } = createFixture();
+  const response = invoke(routes.get('GET /api/campaigns/:id/performance/integration-preview'), {
+    user: { id: 9 },
+    params: { id: '7' },
+    query: { ignored: 'value' },
+    requestId: 'request-preview'
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.request_id, 'request-preview');
+  assert.equal(response.body.feishu.write_attempted, false);
+  assert.deepEqual(calls[0], ['integration-preview', { userId: 9, campaignId: '7' }]);
+
+  const policy = campaignContract.REQUEST_POLICIES.CAMPAIGN_PERFORMANCE_INTEGRATION_PREVIEW;
+  assert.ok(policy);
+  assert.equal(policy.id, 'campaign.performance.integration-preview');
+  assert.equal(policy.method, 'GET');
+  assert.equal(policy.pathTemplate, '/api/campaigns/:id/performance/integration-preview');
+  assert.equal(policy.mediaKind, campaignContract.MEDIA_KINDS.EMPTY);
+
+  const serverSource = fs.readFileSync(path.resolve(__dirname, '..', 'server.js'), 'utf8');
+  assert.match(serverSource, /'CAMPAIGN_PERFORMANCE_INTEGRATION_PREVIEW'/);
 });
 
 test('returns known performance errors with a stable request identifier', () => {

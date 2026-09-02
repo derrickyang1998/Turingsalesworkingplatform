@@ -272,6 +272,50 @@ test('imports accepted parsed rows atomically while returning malformed rows as 
   }
 });
 
+test('returns a campaign-scoped read-only source and Feishu mapping preview for an administrator', () => {
+  const { db, service } = createFixture();
+  try {
+    const before = db.prepare('SELECT COUNT(*) AS count FROM campaign_publications').get().count;
+    const preview = service.getIntegrationPreview({ userId: 1, campaignId: 7 });
+
+    assert.equal(preview.contract_version, 'performance-integration-preview-v1');
+    assert.equal(preview.campaign_id, 7);
+    assert.equal(preview.capabilities.can_view, true);
+    assert.deepEqual(preview.data_sources.map((source) => source.id), ['manual', 'csv_xlsx']);
+    assert.equal(preview.data_sources.every((source) => source.dispatch_available === false), true);
+    assert.equal(preview.feishu.status, 'preview_only');
+    assert.equal(preview.feishu.provider_validation, 'not_attempted');
+    assert.equal(preview.feishu.write_attempted, false);
+    assert.equal(
+      preview.feishu.field_mapping.some((field) => field.source_key === 'commercial.creator_fee'),
+      true
+    );
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM campaign_publications').get().count, before);
+  } finally {
+    db.close();
+  }
+});
+
+test('omits commercial fields from the preview for a non-privileged campaign member', () => {
+  const { db, service } = createFixture();
+  try {
+    const preview = service.getIntegrationPreview({ userId: 2, campaignId: 7 });
+
+    assert.equal(preview.capabilities.can_view, true);
+    assert.equal(preview.capabilities.can_view_commercial, false);
+    assert.equal(
+      preview.data_sources.find((source) => source.id === 'manual').supports.includes('commercial_input'),
+      false
+    );
+    assert.equal(
+      preview.feishu.field_mapping.some((field) => field.access === 'commercial'),
+      false
+    );
+  } finally {
+    db.close();
+  }
+});
+
 test('exports only the current filtered content view for a commercial-capable operator', () => {
   const { db, service } = createFixture();
   try {

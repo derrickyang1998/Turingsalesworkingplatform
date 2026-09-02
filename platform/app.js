@@ -6615,6 +6615,8 @@ var performanceCampaignContextId = null;
 var performanceContents = [];
 var performanceCapabilities = {};
 var performanceDashboardData = null;
+var performanceIntegrationPreview = null;
+var performanceIntegrationRequestSequence = 0;
 var performanceSearchTimer = null;
 var performanceExportInFlight = null;
 
@@ -6709,11 +6711,14 @@ function changePerformanceCampaignContext(value) {
   var campaign = getPerformanceCampaignById(getPerformanceCampaignId());
   setPerformanceStatus(campaign ? ('当前活动：' + performanceCampaignLabel(campaign)) : '请选择推广活动。');
   loadPerformanceContents();
+  loadPerformanceIntegrationPreview();
   loadPerformanceDashboard();
 }
 
 function refreshPerformanceMonitor() {
-  return loadPerformanceCampaigns().then(function() { return loadPerformanceContents(); });
+  return loadPerformanceCampaigns().then(function() {
+    return Promise.all([loadPerformanceContents(), loadPerformanceIntegrationPreview()]);
+  });
 }
 
 function refreshPerformanceDashboard() {
@@ -6721,7 +6726,9 @@ function refreshPerformanceDashboard() {
 }
 
 function initPerformanceMonitor() {
-  return loadPerformanceCampaigns().then(function() { return loadPerformanceContents(); });
+  return loadPerformanceCampaigns().then(function() {
+    return Promise.all([loadPerformanceContents(), loadPerformanceIntegrationPreview()]);
+  });
 }
 
 function initPerformanceDashboard() {
@@ -6743,6 +6750,90 @@ function performanceContentQuery() {
   if (tag) params.set('tag', tag);
   params.set('limit', '100');
   return params.toString();
+}
+
+function performanceIntegrationSupportLabel(value) {
+  var labels = {
+    content_registration: '内容登记',
+    metric_input: '数据录入',
+    commercial_input: '商业数据录入',
+    content_import: '内容批量导入'
+  };
+  return labels[value] || value || '-';
+}
+
+function renderPerformanceIntegrationPreview(preview) {
+  performanceIntegrationPreview = preview || null;
+  var container = document.getElementById('performanceIntegrationPreview');
+  var status = document.getElementById('performanceIntegrationStatus');
+  if (!container) return;
+  if (!preview) {
+    if (status) status.textContent = '选择推广活动后加载预览。';
+    container.innerHTML = '<div class="tm-state-empty">选择推广活动后加载映射。</div>';
+    return;
+  }
+  var feishu = preview.feishu || {};
+  var sources = Array.isArray(preview.data_sources) ? preview.data_sources : [];
+  var mapping = Array.isArray(feishu.field_mapping) ? feishu.field_mapping : [];
+  var sourcesHtml = sources.length ? sources.map(function(source) {
+    var supports = Array.isArray(source.supports)
+      ? source.supports.map(performanceIntegrationSupportLabel).join('、')
+      : '-';
+    return '<div class="tm-performance-source-row">'
+      + '<div><div class="tm-performance-source-title">' + esc(source.label || source.id || '数据来源') + '</div>'
+      + '<p class="tm-performance-source-detail">' + esc(source.detail || '') + '</p>'
+      + '<p class="tm-performance-source-detail">支持：' + esc(supports) + '</p></div>'
+      + '<span class="tm-performance-source-status">' + (source.status === 'available' ? '可用' : '待配置') + '</span>'
+      + '</div>';
+  }).join('') : '<div class="tm-state-empty">当前没有可用的数据来源。</div>';
+  var mappingHtml = mapping.length ? mapping.map(function(field) {
+    return '<tr><td>' + esc(field.source_label || field.source_key || '-') + '</td><td>'
+      + esc(field.proposed_target_field || '-') + '</td><td>'
+      + (field.access === 'commercial' ? '商业权限' : '活动可见') + '</td></tr>';
+  }).join('') : '<tr><td colspan="3" class="tm-performance-muted-cell">当前权限下没有可展示的字段。</td></tr>';
+  var previewState = feishu.provider_validation === 'not_attempted' && feishu.write_attempted === false
+    ? '映射预览未连接飞书，也不会写入飞书。'
+    : (feishu.detail || '映射状态暂不可用。');
+  var commercialNote = feishu.commercial_fields_included === false
+    ? '商业字段仅对具备商业查看权限的成员显示。'
+    : '';
+  if (status) status.textContent = previewState;
+  container.innerHTML = '<div class="tm-performance-integration-layout">'
+    + '<div><h4 class="tm-performance-integration-heading">已支持的数据来源</h4>'
+    + '<div class="tm-performance-source-list">' + sourcesHtml + '</div></div>'
+    + '<div><h4 class="tm-performance-integration-heading">拟定飞书字段</h4>'
+    + '<div class="tm-performance-integration-table-wrap"><table class="tm-performance-integration-table">'
+    + '<thead><tr><th scope="col">平台字段</th><th scope="col">拟定飞书字段</th><th scope="col">可见范围</th></tr></thead>'
+    + '<tbody>' + mappingHtml + '</tbody></table></div>'
+    + (commercialNote ? '<p class="tm-performance-integration-note">' + esc(commercialNote) + '</p>' : '')
+    + '</div></div>';
+  if (window.TMAccessibility) window.TMAccessibility.refresh();
+}
+
+async function loadPerformanceIntegrationPreview() {
+  var campaignId = getPerformanceCampaignId();
+  var container = document.getElementById('performanceIntegrationPreview');
+  var status = document.getElementById('performanceIntegrationStatus');
+  var requestSequence = ++performanceIntegrationRequestSequence;
+  if (campaignId === null) {
+    renderPerformanceIntegrationPreview(null);
+    return null;
+  }
+  if (status) status.textContent = '正在加载映射预览...';
+  if (container) container.innerHTML = '<div class="tm-state-loading">正在加载数据来源与字段映射...</div>';
+  try {
+    var response = await apiFetch('/campaigns/' + encodeURIComponent(campaignId) + '/performance/integration-preview');
+    var data = await response.json();
+    if (requestSequence !== performanceIntegrationRequestSequence || campaignId !== getPerformanceCampaignId()) return null;
+    if (!response.ok) throw new Error(data.error || '映射预览加载失败');
+    renderPerformanceIntegrationPreview(data);
+    return data;
+  } catch (error) {
+    if (requestSequence !== performanceIntegrationRequestSequence || campaignId !== getPerformanceCampaignId()) return null;
+    if (status) status.textContent = error.message || '映射预览加载失败';
+    if (container) container.innerHTML = '<div class="tm-state-error">' + esc(error.message || '映射预览加载失败') + '</div>';
+    return null;
+  }
 }
 
 function setPerformanceExportBusy(busy) {
@@ -7355,7 +7446,7 @@ function switchPage(id, options) {
     'getEditedDemand', 'syncCurDemandFromAnalysis', 'handleDemandFile', 'analyzeDemandAI',
     'switchTab', 'matchInfluencers', 'smartMatch', 'handleUpload', 'handleDrop', 'openInfUploadModal', 'handleUploadModal', 'downloadInfTemplate', 'exportAll', 'exportFiltered', 'exportSelected',
     'toggleAll', 'syncInfluencerSelectionState', 'loadM4Campaigns', 'changeM4CampaignContext', 'startCollab', 'submitCollabOrder', 'closeCollabOrderModal', 'loadCollaborations', 'updateCollabStatus', 'runCampaignCollabAction', 'closeCampaignSettlementModal', 'submitCampaignSettlement',
-    'initPerformanceMonitor', 'initPerformanceDashboard', 'refreshPerformanceMonitor', 'refreshPerformanceDashboard', 'changePerformanceCampaignContext', 'loadPerformanceContents', 'createPerformanceContent', 'downloadPerformanceTemplate', 'handlePerformanceImport', 'handlePerformanceDrop', 'openPerformanceInputModal', 'closePerformanceInputModal', 'savePerformanceInput', 'loadPerformanceDashboard', 'debouncedPerformanceContentSearch', 'exportPerformanceContents',
+    'initPerformanceMonitor', 'initPerformanceDashboard', 'refreshPerformanceMonitor', 'refreshPerformanceDashboard', 'changePerformanceCampaignContext', 'loadPerformanceContents', 'loadPerformanceIntegrationPreview', 'createPerformanceContent', 'downloadPerformanceTemplate', 'handlePerformanceImport', 'handlePerformanceDrop', 'openPerformanceInputModal', 'closePerformanceInputModal', 'savePerformanceInput', 'loadPerformanceDashboard', 'debouncedPerformanceContentSearch', 'exportPerformanceContents',
     'sendChat', 'clearChat', 'clearAIMemory', 'pushToFeishu', 'loadFeishuStatus', 'loadFeishuOutbox', 'testFeishuConnection', 'selectFeishuReconciliationDelivery', 'reconcileFeishuDelivery', 'selectFeishuRetryDelivery', 'retryFeishuDelivery',
     'switchAdminTab', 'loadAdminDashboard', 'loadAdminUsers', 'adminAddUser', 'adminCreateInvite', 'adminResetPw',
     'wfUndo', 'wfRedo', 'wfClearCanvas', 'wfSaveTemplate', 'wfPublishTemplate', 'wfResetTaskFilters', 'wfLoadTasks', 'wfLoadInstances',

@@ -1234,6 +1234,23 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
       </section>
     </div>
 
+    <section class="card tm-performance-integration-card" aria-labelledby="performanceIntegrationTitle">
+      <div class="tm-performance-section-heading">
+        <div>
+          <h3 id="performanceIntegrationTitle">数据接入与飞书字段映射</h3>
+          <p class="tm-metric-note">按当前推广活动查看可用数据来源和拟定字段。</p>
+        </div>
+        <button class="btn btn-outline btn-sm" type="button" onclick="loadPerformanceIntegrationPreview()">刷新预览</button>
+      </div>
+      <div id="performanceIntegrationStatus" class="tm-performance-import-status" role="status" aria-live="polite">选择活动后加载预览。</div>
+      <details class="tm-performance-integration-preview">
+        <summary>飞书字段映射预览</summary>
+        <div id="performanceIntegrationPreview" class="tm-performance-integration-body">
+          <div class="tm-state-empty">选择推广活动后加载映射。</div>
+        </div>
+      </details>
+    </section>
+
     <section class="card tm-performance-table-card" aria-labelledby="performanceContentListTitle">
       <div class="tm-performance-section-heading tm-performance-list-heading">
         <div>

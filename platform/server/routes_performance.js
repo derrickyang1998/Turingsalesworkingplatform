@@ -39,7 +39,7 @@ function registerPerformanceRoutes(app, options = {}) {
     throw new TypeError('An authentication middleware is required.');
   }
   const service = options.service || createPerformanceManualService(options.db);
-  if (!service || typeof service.listContents !== 'function' || typeof service.exportContents !== 'function' || typeof service.getDashboard !== 'function') {
+  if (!service || typeof service.listContents !== 'function' || typeof service.getIntegrationPreview !== 'function' || typeof service.exportContents !== 'function' || typeof service.getDashboard !== 'function') {
     throw new TypeError('A performance manual service is required.');
   }
 
@@ -69,6 +69,17 @@ function registerPerformanceRoutes(app, options = {}) {
       response.setHeader('Content-Type', 'text/csv;charset=utf-8');
       response.setHeader('Content-Disposition', `attachment; filename="${exported.filename}"`);
       return response.send(exported.csv);
+    } catch (error) {
+      return sendError(request, response, error);
+    }
+  });
+
+  app.get('/api/campaigns/:id/performance/integration-preview', options.authMiddleware, (request, response) => {
+    try {
+      return sendResult(request, response, service.getIntegrationPreview({
+        userId: authenticatedUserId(request),
+        campaignId: request.params.id
+      }));
     } catch (error) {
       return sendError(request, response, error);
     }
