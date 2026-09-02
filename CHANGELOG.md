@@ -1,5 +1,30 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.8.1b-performance-content-export (Production Deployed, 2026-09-02) - Phase 7B 内容效果 CSV 导出
+
+### 交付与范围 / Delivery And Scope
+- “内容监控”现在可以导出“当前筛选”或“全部内容”的 CSV。导出复用当前活动范围、搜索、平台和标签过滤；“全部内容”只忽略这些内容过滤，不跨活动或跨组织。
+- 后端直接流式返回 UTF-8 BOM CSV，最多导出 5,000 条内容，并记录 `performance_content_export` 审计事件。前端在请求期间禁用两个导出按钮，避免重复下载。
+- 商业字段、成本和财务 KPI 仅会出现在拥有商业查看权限的导出中；团队协作者的导出不含花费、收入、ROI、ROAS 或商业纠正原因。
+- CSV 转义覆盖公式起始字符及前置 Unicode 空白，避免电子表格把业务文本解释为公式。
+
+### 定向验证、审查与上线 / Focused Verification, Review, And Release
+- 性能服务、路由与前端合同 `17/17` 通过；JavaScript 语法、`git diff --check` 与 `deploy_v8.ps1 -ValidateLocalOnly` 通过。
+- 独立审查首轮发现 Unicode 空白前缀可能绕过公式防护；已先用失败用例复现，再扩大转义规则，复审结论为 `APPROVE`。
+- 因本切片涉及权限隔离和导出数据，生产候选额外执行可信来源、隔离迁移演练、真实 Express 重放 `8/8`、发布守卫 `21/21` 和部署浏览器烟测 `2/2`。
+- 实现提交：`4799328`。
+
+### 生产证据 / Production Evidence
+- 可恢复备份：`/root/turingmarket/backups/v060-crm-sales-workspace-20260902-112211`；备份目录 `SHA256SUMS` 已验证，清单 SHA-256 为 `85a92add0a47549f048693d644e95179da2ec65961924e54f082c0f09e51f128`。
+- 公网与回环 `/api/health` 均为 `ok` 且 Parser ready；`/performance-monitor` 与 `/performance-dashboard` 均返回 `200`；PM2/Nginx online。
+- 已核验 `app.js`、`index.html`、性能样式、性能路由及性能服务的线上 SHA-256 与本地发布源一致。只读 SQLite 校验为 `quick_check=ok`、外键异常 `0`、schema `v10`。
+- 首次候选在生产切换前遭遇网络传输重置，内置恢复程序确认未修改生产并清理候选；第二次受控发布完成最终切换。未创建真实活动、视频或商业数据进行线上写入验收。
+
+### 后续边界 / Next Boundaries
+- 下一切片进入 `7B.2a`：先建立已批准数据来源能力矩阵与飞书字段映射预览，不启用真实 provider 抓取或飞书写入；随后再做定期更新、事实驱动 AI 复盘和客户项目报告。
+
+---
+
 ## v0.8.1a-performance-manual-foundation (Production Deployed, 2026-09-02) - Phase 7B 内容监控与效果看板基础
 
 ### 交付与范围 / Delivery And Scope
