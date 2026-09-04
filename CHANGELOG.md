@@ -1,5 +1,32 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.8.7-performance-ai-review-approval (Production Deployment Completed; Access Acceptance Pending, 2026-09-04) - Phase 7B.3c AI 复盘人工确认
+
+### 交付与范围 / Delivery And Scope
+- 效果看板新增受保护的 `POST /api/campaigns/:id/performance/ai-review-draft/approve`。活动负责人或组织管理员可在保留原始草稿的前提下编辑、确认并归档一份活动内知识。
+- 归档前会复核原始关联 AI 对话、活动归属、当前指标快照、全部 `[PERF-n]` 引用、可见性和元数据安全边界。相同确认可幂等回放；同一不可变草稿的不同确认会被拒绝，必须重新生成草稿。
+- 归档结果是带有原稿/定稿哈希、证据快照与来源关系的不可变活动知识；不会自动提升为跨项目知识，也不会调用联网搜索、视频/媒体、飞书、PPT 或外部 provider。
+- 本切片没有数据库迁移，线上继续使用既有 schema `v12` 与冻结 PPT。
+
+### 定向验证、审查与上线 / Focused Verification, Review, And Deployment
+- 受影响的 AI/RAG、性能路由和前端合同聚焦矩阵 `53/53` 通过；可信来源检查 `32/32`、部署来源合同 `57/57`、JavaScript 语法、`git diff --check`、新增凭据差异扫描和本地发布预检均通过。
+- 独立 Code Reviewer 首轮提出安全词绕过、可见性幂等、快照重放顺序和前端忙碌锁定问题；整改后复审结论为 `APPROVE`。
+- 按“单功能完成即上线”的节奏，已创建可验证备份并部署提交 `733b900a4e12536fd4999eae0b251fd96d5737cd`；本功能不触发完整平台矩阵。
+
+### 生产部署证据 / Production Deployment Evidence
+- 可恢复备份：`/root/turingmarket/backups/v060-crm-sales-workspace-20260904-160643`；备份目录清单 SHA-256 为 `683917375944e6db1ee40e91a2f37078a4a78e099f066832f7fd441ebae2a7e5`。
+- 公网 `/api/health` 为 `200` / `ok`，Parser ready；公网 `/performance-dashboard` 为 `200`；Nginx active、PM2 online，进程零重启。
+- 已部署的 10 个受控文件 SHA-256 与已审查提交完全一致。SQLite 只读检查为 schema `v12`、`quick_check=ok`、外键异常 `0`，既有 `performance_ai_review_audits` 表存在。
+- 未认证的确认接口保持 `401`。线上验收未创建真实业务数据，也未调用 DeepSeek、视频/媒体、联网 provider、飞书或定时任务。
+
+### 验收状态 / Acceptance Status
+- 业务代码和线上服务已完成受控部署；管理员登录、`/api/auth/me` 与登出验收等待用户提供满足当前安全策略的恢复密码。此前指定密码不符合生产密码长度与符号规则，标准重置流程已按策略拒绝，未绕过安全控制。
+
+### 后续边界 / Next Boundaries
+- 完成管理员登录验收后，本切片记录转为完整生产验收。下一独立功能为不可变客户复盘报告快照；视频内容/钩子/风格分析、真实飞书投影、provider 和 PPT 生成继续独立审批、开发和上线。
+
+---
+
 ## v0.8.6-performance-ai-review-draft (Production Deployed, 2026-09-04) - Phase 7B.3b AI 复盘草稿
 
 ### 交付与范围 / Delivery And Scope
