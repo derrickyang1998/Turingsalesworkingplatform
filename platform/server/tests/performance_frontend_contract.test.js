@@ -9,6 +9,7 @@ const platformRoot = path.resolve(__dirname, '..', '..');
 const indexHtml = fs.readFileSync(path.join(platformRoot, 'index.html'), 'utf8');
 const appSource = fs.readFileSync(path.join(platformRoot, 'app.js'), 'utf8');
 const serverSource = fs.readFileSync(path.join(platformRoot, 'server', 'server.js'), 'utf8');
+const performanceServiceSource = fs.readFileSync(path.join(platformRoot, 'server', 'services', 'performance_manual_service.js'), 'utf8');
 const navigationSource = fs.readFileSync(path.join(platformRoot, 'client', 'core', 'navigation.js'), 'utf8');
 const componentStyles = fs.readFileSync(path.join(platformRoot, 'client', 'styles', 'components.css'), 'utf8');
 
@@ -121,7 +122,7 @@ test('performance monitor exposes a permission-aware Feishu connection configura
 test('performance dashboard exposes metadata-only review evidence with a stale-response guard', () => {
   assert.match(indexHtml, /id="performanceReviewEvidence"/);
   assert.match(indexHtml, /id="performanceReviewStatus"/);
-  assert.match(indexHtml, /onclick="loadPerformanceReviewEvidence\(\)"/);
+  assert.match(indexHtml, /onclick="refreshPerformanceReviewEvidence\(\)"/);
   assert.match(indexHtml, /复盘依据/);
   assert.match(appSource, /var performanceReviewRequestSequence = 0;/);
   assert.match(appSource, /var performanceDashboardRequestSequence = 0;/);
@@ -140,4 +141,25 @@ test('performance dashboard exposes metadata-only review evidence with a stale-r
   assert.match(componentStyles, /\.tm-performance-review-evidence/);
   assert.match(componentStyles, /\.tm-performance-review-ranking/);
   assert.match(serverSource, /CAMPAIGN_PERFORMANCE_REVIEW_EVIDENCE/);
+});
+
+test('performance dashboard exposes an evidence-bound AI review draft with isolated stale-response protection', () => {
+  assert.match(indexHtml, /id="performanceAiReviewGenerate"/);
+  assert.match(indexHtml, /id="performanceAiReviewStatus"/);
+  assert.match(indexHtml, /id="performanceAiReviewDraft"/);
+  assert.match(indexHtml, /onclick="generatePerformanceAiReviewDraft\(\)"/);
+  assert.match(indexHtml, /onchange="handlePerformanceTopMetricChange\(\)"/);
+  assert.match(appSource, /var performanceAiReviewRequestSequence = 0;/);
+  assert.match(appSource, /var activePerformanceAiReviewRequest = null;/);
+  assert.match(appSource, /function invalidatePerformanceAiReviewDraft\(/);
+  assert.match(appSource, /async function generatePerformanceAiReviewDraft\(\)/);
+  assert.match(appSource, /performance\/ai-review-draft/);
+  assert.match(appSource, /'Idempotency-Key': performanceAiReviewRetry\.idempotencyKey/);
+  assert.match(performanceServiceSource, /allowWeb: false/);
+  assert.match(performanceServiceSource, /archiveSummary: false/);
+  assert.match(appSource, /performanceAiReviewIsCurrent\(context\)/);
+  assert.match(appSource, /不读取视频素材、不联网、不自动沉淀知识库/);
+  assert.match(componentStyles, /\.tm-performance-ai-review/);
+  assert.match(componentStyles, /\.tm-performance-ai-review-references/);
+  assert.match(serverSource, /CAMPAIGN_PERFORMANCE_AI_REVIEW_DRAFT/);
 });

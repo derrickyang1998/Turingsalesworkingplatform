@@ -6,7 +6,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const registerPerformanceRoutes = require('../routes_performance');
-const { PerformanceManualServiceError } = require('../services/performance_manual_service');
+const {
+  PerformanceManualServiceError,
+  PerformanceAiReviewServiceError
+} = require('../services/performance_manual_service');
 const { PerformanceFeishuConnectionServiceError } = require('../services/performance_feishu_connection_service');
 const campaignContract = require('../contracts/campaign_contract');
 
@@ -87,12 +90,27 @@ function createFixture() {
       };
     }
   };
+  const aiReviewService = {
+    async createDraft(input) {
+      calls.push(['ai-review-draft', input]);
+      return {
+        contract_version: 'performance-ai-review-draft-v1',
+        campaign_id: 7,
+        status: 'not_ready',
+        reason_code: 'insufficient_comparable_data',
+        analysis: { mode: 'metadata_only', web_search: { used: false } },
+        draft: null,
+        ai: null
+      };
+    }
+  };
   registerPerformanceRoutes(app, {
     authMiddleware(_request, _response, next) { next(); },
     service,
-    feishuConnectionService
+    feishuConnectionService,
+    aiReviewService
   });
-  return { routes, calls, service, feishuConnectionService };
+  return { routes, calls, service, feishuConnectionService, aiReviewService };
 }
 
 function invoke(handlers, request) {
@@ -107,6 +125,30 @@ function invoke(handlers, request) {
   return response;
 }
 
+async function invokeAsync(handlers, request) {
+  const response = createResponse();
+  async function dispatch(index) {
+    const handler = handlers[index];
+    if (!handler) return;
+    await new Promise((resolve, reject) => {
+      let advanced = false;
+      const next = (error) => {
+        advanced = true;
+        if (error) {
+          reject(error);
+          return;
+        }
+        dispatch(index + 1).then(resolve, reject);
+      };
+      Promise.resolve(handler(request, response, next)).then(() => {
+        if (!advanced) resolve();
+      }, reject);
+    });
+  }
+  await dispatch(0);
+  return response;
+}
+
 test('registers campaign-scoped performance endpoints and forwards authenticated context', () => {
   const { routes, calls } = createFixture();
   assert.deepEqual([...routes.keys()].sort(), [
@@ -116,6 +158,7 @@ test('registers campaign-scoped performance endpoints and forwards authenticated
     'GET /api/campaigns/:id/performance/feishu-connection',
     'GET /api/campaigns/:id/performance/integration-preview',
     'GET /api/campaigns/:id/performance/review-evidence',
+    'POST /api/campaigns/:id/performance/ai-review-draft',
     'POST /api/campaigns/:id/performance/contents',
     'POST /api/campaigns/:id/performance/contents/:contentId/manual-inputs',
     'POST /api/campaigns/:id/performance/feishu-connection',
@@ -138,6 +181,44 @@ test('registers campaign-scoped performance endpoints and forwards authenticated
     campaignId: '7',
     body: request.body
   }]);
+});
+
+test('creates a campaign-scoped AI review draft through the protected JSON request contract', async () => {
+  const { routes, calls, aiReviewService } = createFixture();
+  const request = {
+    user: { id: 9, role: 'member' },
+    params: { id: '7' },
+    body: { top_metric: 'views' },
+    headers: { 'idempotency-key': 'ai-review-request-key' },
+    phase4Request: { requestId: 'ai-review-request-id' }
+  };
+  const response = await invokeAsync(routes.get('POST /api/campaigns/:id/performance/ai-review-draft'), request);
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.status, 'not_ready');
+  assert.equal(response.body.request_id, 'ai-review-request-id');
+  assert.deepEqual(calls[0], ['ai-review-draft', {
+    user: request.user,
+    campaignId: '7',
+    body: request.body,
+    idempotencyKey: 'ai-review-request-key',
+    requestId: 'ai-review-request-id'
+  }]);
+
+  const policy = campaignContract.REQUEST_POLICIES.CAMPAIGN_PERFORMANCE_AI_REVIEW_DRAFT;
+  assert.ok(policy);
+  assert.equal(policy.id, 'campaign.performance.ai-review-draft');
+  assert.equal(policy.method, 'POST');
+  assert.equal(policy.pathTemplate, '/api/campaigns/:id/performance/ai-review-draft');
+  assert.equal(policy.mediaKind, campaignContract.MEDIA_KINDS.JSON);
+
+  aiReviewService.createDraft = async () => {
+    throw new PerformanceAiReviewServiceError(422, 'PERFORMANCE_AI_REVIEW_INVALID', 'AI review input is invalid.');
+  };
+  const invalid = await invokeAsync(routes.get('POST /api/campaigns/:id/performance/ai-review-draft'), request);
+  assert.equal(invalid.statusCode, 422);
+  assert.equal(invalid.body.code, 'PERFORMANCE_AI_REVIEW_INVALID');
+  assert.equal(invalid.body.request_id, 'ai-review-request-id');
 });
 
 test('returns campaign-scoped review evidence through a read-only request contract', () => {

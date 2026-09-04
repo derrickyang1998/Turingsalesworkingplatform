@@ -184,6 +184,11 @@ const REQUEST_POLICIES = Object.freeze({
     'GET',
     '/api/campaigns/:id/performance/review-evidence'
   ),
+  CAMPAIGN_PERFORMANCE_AI_REVIEW_DRAFT: controlJson(
+    'campaign.performance.ai-review-draft',
+    'POST',
+    '/api/campaigns/:id/performance/ai-review-draft'
+  ),
   CAMPAIGN_PERFORMANCE_INTEGRATION_PREVIEW: empty(
     'campaign.performance.integration-preview',
     'GET',

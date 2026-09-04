@@ -1075,7 +1075,7 @@ function compactSqliteClone(sourcePath, outputPath, mutate, options = {}) {
   return outputPath;
 }
 
-test('manifest declares exact managed v1 as primary and keeps isolated v6 through v11 profiles', () => {
+test('manifest declares exact managed v1 as primary and keeps isolated v6 through v12 profiles', () => {
   const v1Fixture = migratedFixture('manifest-v1-primary', 1);
   const v6Fixture = migratedFixture('manifest-v6-isolated', 6);
   const v7Fixture = migratedFixture('manifest-v7-isolated', 7);
@@ -1083,9 +1083,10 @@ test('manifest declares exact managed v1 as primary and keeps isolated v6 throug
   const v9Fixture = migratedFixture('manifest-v9-isolated', 9);
   const v10Fixture = migratedFixture('manifest-v10-isolated', 10);
   const v11Fixture = migratedFixture('manifest-v11-isolated', 11);
+  const v12Fixture = migratedFixture('manifest-v12-isolated', 12);
   try {
     assert.equal(manifest.schemaVersion, 1);
-    assert.deepEqual(manifest.exactProfiles.map((profile) => profile.schemaVersion), [6, 7, 8, 9, 10, 11]);
+    assert.deepEqual(manifest.exactProfiles.map((profile) => profile.schemaVersion), [6, 7, 8, 9, 10, 11, 12]);
     assert.equal(
       manifest.categories['sensitive-number'],
       'run-randomized bounded-domain bijection preserving null/equality/cardinality and SQLite storage type'
@@ -1098,6 +1099,7 @@ test('manifest declares exact managed v1 as primary and keeps isolated v6 throug
     const v9Profile = sanitizer._testing.manifestProfileForVersion(manifest, 9);
     const v10Profile = sanitizer._testing.manifestProfileForVersion(manifest, 10);
     const v11Profile = sanitizer._testing.manifestProfileForVersion(manifest, 11);
+    const v12Profile = sanitizer._testing.manifestProfileForVersion(manifest, 12);
     assert.equal(v1Profile.schemaVersion, 1);
     assert.equal(v6Profile.schemaVersion, 6);
     assert.equal(v7Profile.schemaVersion, 7);
@@ -1105,6 +1107,7 @@ test('manifest declares exact managed v1 as primary and keeps isolated v6 throug
     assert.equal(v9Profile.schemaVersion, 9);
     assert.equal(v10Profile.schemaVersion, 10);
     assert.equal(v11Profile.schemaVersion, 11);
+    assert.equal(v12Profile.schemaVersion, 12);
     assert.equal(v1Profile.objects.length, sanitizer.actualInventory(v1Fixture.db).length);
     assert.equal(v6Profile.objects.length, sanitizer.actualInventory(v6Fixture.db).length);
     assert.equal(v7Profile.objects.length, sanitizer.actualInventory(v7Fixture.db).length);
@@ -1112,6 +1115,7 @@ test('manifest declares exact managed v1 as primary and keeps isolated v6 throug
     assert.equal(v9Profile.objects.length, sanitizer.actualInventory(v9Fixture.db).length);
     assert.equal(v10Profile.objects.length, sanitizer.actualInventory(v10Fixture.db).length);
     assert.equal(v11Profile.objects.length, sanitizer.actualInventory(v11Fixture.db).length);
+    assert.equal(v12Profile.objects.length, sanitizer.actualInventory(v12Fixture.db).length);
     for (const profile of [v1Profile, v6Profile, v7Profile, v8Profile]) {
       assert.equal(profile.jsonPolicy.preserveLeafTypes, true);
       assert.equal(
@@ -1131,6 +1135,7 @@ test('manifest declares exact managed v1 as primary and keeps isolated v6 throug
     assert.equal(v9Profile.semanticPolicies.structuralColumns.validatorVersion, 'tm-structural-policy-v4-bitable-retry-lineage');
     assert.equal(v10Profile.semanticPolicies.structuralColumns.validatorVersion, 'tm-structural-policy-v5-performance-manual');
     assert.equal(v11Profile.semanticPolicies.structuralColumns.validatorVersion, 'tm-structural-policy-v6-performance-feishu-connection');
+    assert.equal(v12Profile.semanticPolicies.structuralColumns.validatorVersion, 'tm-structural-policy-v7-performance-ai-review-audit');
     assert.doesNotThrow(() => sanitizer.validateManifest(manifest, v1Fixture.db));
     assert.doesNotThrow(() => sanitizer.validateManifest(manifest, v6Fixture.db));
     assert.doesNotThrow(() => sanitizer.validateManifest(manifest, v7Fixture.db));
@@ -1138,6 +1143,7 @@ test('manifest declares exact managed v1 as primary and keeps isolated v6 throug
     assert.doesNotThrow(() => sanitizer.validateManifest(manifest, v9Fixture.db));
     assert.doesNotThrow(() => sanitizer.validateManifest(manifest, v10Fixture.db));
     assert.doesNotThrow(() => sanitizer.validateManifest(manifest, v11Fixture.db));
+    assert.doesNotThrow(() => sanitizer.validateManifest(manifest, v12Fixture.db));
   } finally {
     closeAndRemove(v1Fixture);
     closeAndRemove(v6Fixture);
@@ -1146,6 +1152,7 @@ test('manifest declares exact managed v1 as primary and keeps isolated v6 throug
     closeAndRemove(v9Fixture);
     closeAndRemove(v10Fixture);
     closeAndRemove(v11Fixture);
+    closeAndRemove(v12Fixture);
   }
 });
 
@@ -1343,6 +1350,70 @@ test('critical populated fixture preserves record IDs, immutable knowledge equal
     assertCriticalFixtureInvariants(output, populated, { expectRebuiltDerived: true });
   } finally {
     output.close();
+    closeAndRemove(fixture);
+  }
+});
+
+test('v12 sanitizer preserves the audit fingerprint link between AI review audits and idempotency records', () => {
+  const fixture = migratedFixture('performance-ai-audit-fingerprint', 12);
+  try {
+    const populated = populateCriticalReviewFixture(fixture);
+    const auditFingerprint = 'a'.repeat(64);
+    const request = fixture.db.prepare(`
+      INSERT INTO request_idempotency (
+        org_id,user_id,campaign_id,resource_claim,scope,idempotency_key,reservation_nonce,
+        request_hash,audit_fingerprint,expected_event_count,state,lease_until,lease_token,
+        created_at,updated_at,operation_deadline,expires_at
+      ) VALUES (
+        ?,?,?,NULL,'ai.conversation.create.linked','sanitizer-ai-review-audit',?,
+        ?,?,1,'processing',datetime('now','+10 minutes'),?,
+        datetime('now','-1 minute'),datetime('now','-1 minute'),datetime('now','+1 hour'),NULL
+      )
+    `).run(
+      populated.orgId,
+      populated.userId,
+      populated.campaignId,
+      'b'.repeat(64),
+      'c'.repeat(64),
+      auditFingerprint,
+      'sanitizer-ai-review-lease-token'
+    );
+    const tokenUsage = fixture.db.prepare(`
+      INSERT INTO token_usage (user_id,model,prompt_tokens,completion_tokens,total_tokens,endpoint)
+      VALUES (?,'sanitizer-private-model',11,7,18,'ai_chat_linked_rejected')
+    `).run(populated.userId);
+    fixture.db.prepare(`
+      INSERT INTO performance_ai_review_audits (
+        request_idempotency_id,token_usage_id,org_id,campaign_id,actor_user_id,
+        audit_fingerprint,outcome,reason_code,stage
+      ) VALUES (?,?,?,?,?,?,'withheld','ai_review_protocol_invalid','completion_validation')
+    `).run(
+      Number(request.lastInsertRowid),
+      Number(tokenUsage.lastInsertRowid),
+      populated.orgId,
+      populated.campaignId,
+      populated.userId,
+      auditFingerprint
+    );
+    fixture.db.close();
+
+    const outputPath = path.join(fixture.root, 'sanitized.db');
+    sanitizer.sanitizeProductionShape({ sourcePath: fixture.dbPath, outputPath });
+    const output = new Database(outputPath, { readonly: true, fileMustExist: true });
+    try {
+      const fingerprints = output.prepare(`
+        SELECT request.audit_fingerprint AS request_fingerprint,
+          audit.audit_fingerprint AS audit_fingerprint
+        FROM performance_ai_review_audits audit
+        JOIN request_idempotency request ON request.id=audit.request_idempotency_id
+      `).get();
+      assert.ok(fingerprints);
+      assert.equal(fingerprints.audit_fingerprint, fingerprints.request_fingerprint);
+      assert.notEqual(fingerprints.audit_fingerprint, auditFingerprint);
+    } finally {
+      output.close();
+    }
+  } finally {
     closeAndRemove(fixture);
   }
 });
@@ -1872,7 +1943,7 @@ test('secret-null fails closed for non-null data and malformed or partial output
   closeAndRemove(fixture);
 });
 
-test('campaign migration gate sanitizes populated managed v1 and verifies two exact restores through v11', () => {
+test('campaign migration gate sanitizes populated managed v1 and verifies two exact restores through v12', () => {
   const fixture = migratedFixture('twice', 1);
   const populated = populateManagedV1GateFixture(fixture);
   const sourceClassification = migrationService.classifyDatabase(fixture.db, {
@@ -1889,7 +1960,7 @@ test('campaign migration gate sanitizes populated managed v1 and verifies two ex
   assert.equal(report.format, 'tm-campaign-migration-gate-v1');
   assert.equal(report.runs, 2);
   assert.equal(report.sourceVersion, 1);
-  assert.equal(report.targetVersion, 11);
+  assert.equal(report.targetVersion, 12);
   assert.equal(report.preMigrationRestoreVerified, true);
   assert.equal(report.legacyPreservationVerified, true);
   const sanitizedPath = path.join(fixture.root, 'stage-preservation-sanitized.db');

@@ -1622,6 +1622,7 @@ function setWorkflowContext(context) {
   if (typeof invalidateProposalDraftRequests === 'function') invalidateProposalDraftRequests();
   if (previousCampaignId !== nextCampaignId) {
     if (typeof invalidateAiChatRequests === 'function') invalidateAiChatRequests();
+    if (typeof invalidatePerformanceAiReviewDraft === 'function') invalidatePerformanceAiReviewDraft();
     if (typeof invalidateCampaignPptGeneration === 'function') invalidateCampaignPptGeneration();
     if (typeof resetCampaignPptArtifactState === 'function') resetCampaignPptArtifactState();
     selectedKnowledgeEntryIds = [];
@@ -6618,6 +6619,10 @@ var performanceDashboardData = null;
 var performanceDashboardRequestSequence = 0;
 var performanceReviewEvidence = null;
 var performanceReviewRequestSequence = 0;
+var performanceAiReviewDraft = null;
+var performanceAiReviewRequestSequence = 0;
+var activePerformanceAiReviewRequest = null;
+var performanceAiReviewRetry = { fingerprint: '', idempotencyKey: '' };
 var performanceIntegrationPreview = null;
 var performanceIntegrationRequestSequence = 0;
 var performanceFeishuConnection = null;
@@ -6640,6 +6645,24 @@ function performanceCampaignLabel(campaign) {
 
 function getPerformanceCampaignId() {
   return performancePositiveId(performanceCampaignContextId);
+}
+
+function getPerformanceTopMetric() {
+  var element = document.getElementById('performanceTopMetric');
+  return element && element.value ? String(element.value) : 'views';
+}
+
+function invalidatePerformanceAiReviewDraft(message) {
+  performanceAiReviewRequestSequence += 1;
+  if (activePerformanceAiReviewRequest && activePerformanceAiReviewRequest.controller) {
+    activePerformanceAiReviewRequest.controller.abort();
+  }
+  activePerformanceAiReviewRequest = null;
+  performanceAiReviewDraft = null;
+  performanceAiReviewRetry = { fingerprint: '', idempotencyKey: '' };
+  if (typeof renderPerformanceAiReviewDraft === 'function') renderPerformanceAiReviewDraft(null);
+  if (message && typeof setPerformanceAiReviewStatus === 'function') setPerformanceAiReviewStatus(message);
+  if (typeof setPerformanceAiReviewControlsBusy === 'function') setPerformanceAiReviewControlsBusy(false);
 }
 
 function getPerformanceCampaignById(campaignId) {
@@ -6712,6 +6735,7 @@ async function loadPerformanceCampaigns() {
 }
 
 function changePerformanceCampaignContext(value) {
+  invalidatePerformanceAiReviewDraft('活动已切换，请基于当前数据重新生成草稿。');
   performanceCampaignContextId = performancePositiveId(value);
   syncPerformanceCampaignSelectors();
   var campaign = getPerformanceCampaignById(getPerformanceCampaignId());
@@ -6731,6 +6755,7 @@ function refreshPerformanceMonitor() {
 }
 
 function refreshPerformanceDashboard() {
+  invalidatePerformanceAiReviewDraft('正在刷新当前活动数据，原草稿已作废。');
   return loadPerformanceCampaigns().then(function() {
     return Promise.all([loadPerformanceDashboard(), loadPerformanceReviewEvidence()]);
   });
@@ -6745,9 +6770,25 @@ function initPerformanceMonitor() {
 }
 
 function initPerformanceDashboard() {
+  invalidatePerformanceAiReviewDraft('正在核对当前活动的数据范围。');
   return loadPerformanceCampaigns().then(function() {
     return Promise.all([loadPerformanceDashboard(), loadPerformanceReviewEvidence()]);
   });
+}
+
+function handlePerformanceTopMetricChange() {
+  invalidatePerformanceAiReviewDraft('排序指标已变更，请基于当前指标重新生成草稿。');
+  return Promise.all([loadPerformanceDashboard(), loadPerformanceReviewEvidence()]);
+}
+
+function refreshPerformanceReviewEvidence() {
+  invalidatePerformanceAiReviewDraft('正在刷新复盘依据，原草稿已作废。');
+  return loadPerformanceReviewEvidence();
+}
+
+async function refreshPerformanceInsightsAfterMutation() {
+  invalidatePerformanceAiReviewDraft('内容数据已更新，请基于最新快照重新生成草稿。');
+  await Promise.all([loadPerformanceDashboard(), loadPerformanceReviewEvidence()]);
 }
 
 function performanceTextValue(id) {
@@ -7246,7 +7287,7 @@ async function createPerformanceContent(event) {
     if (status) status.textContent = '已保存到当前活动。';
     toast('视频链接已保存');
     await loadPerformanceContents();
-    await loadPerformanceDashboard();
+    await refreshPerformanceInsightsAfterMutation();
   } catch (error) {
     if (status) status.textContent = error.message || '视频保存失败';
     toast(error.message || '视频保存失败', 'error');
@@ -7350,7 +7391,7 @@ async function importPerformanceFile(file) {
     if (status) status.textContent = detail + '。';
     toast(detail);
     await loadPerformanceContents();
-    await loadPerformanceDashboard();
+    await refreshPerformanceInsightsAfterMutation();
   } catch (error) {
     if (status) status.textContent = error.message || '导入失败';
     toast(error.message || '导入失败', 'error');
@@ -7400,7 +7441,7 @@ async function importPerformanceMetricsFile(file) {
     if (status) status.textContent = detail + '。';
     toast(detail);
     await loadPerformanceContents();
-    await loadPerformanceDashboard();
+    await refreshPerformanceInsightsAfterMutation();
   } catch (error) {
     if (status) status.textContent = error.message || '指标更新失败';
     toast(error.message || '指标更新失败', 'error');
@@ -7555,7 +7596,7 @@ async function savePerformanceInput(event, contentId) {
     closePerformanceInputModal();
     toast(confirmed ? '数据已确认并纳入项目计算' : '数据已保存');
     await loadPerformanceContents();
-    await loadPerformanceDashboard();
+    await refreshPerformanceInsightsAfterMutation();
   } catch (error) {
     if (status) status.textContent = error.message || '数据保存失败';
     toast(error.message || '数据保存失败', 'error');
@@ -7584,6 +7625,160 @@ function setPerformanceReviewStatus(message, type) {
   if (!element) return;
   element.textContent = message || '';
   element.style.color = type === 'error' ? 'var(--tm-color-danger)' : 'var(--tm-color-text-muted)';
+}
+
+function setPerformanceAiReviewStatus(message, type) {
+  var element = document.getElementById('performanceAiReviewStatus');
+  if (!element) return;
+  element.textContent = message || '';
+  element.style.color = type === 'error' ? 'var(--tm-color-danger)' : 'var(--tm-color-text-muted)';
+}
+
+function setPerformanceAiReviewControlsBusy(busy) {
+  var button = document.getElementById('performanceAiReviewGenerate');
+  if (!button) return;
+  button.disabled = !!busy;
+  button.textContent = busy ? '正在生成...' : '生成 AI 复盘草稿';
+  button.setAttribute('aria-busy', busy ? 'true' : 'false');
+}
+
+function performanceAiReviewIsCurrent(context) {
+  return Boolean(
+    context &&
+    context.sequence === performanceAiReviewRequestSequence &&
+    context.authGeneration === AUTH_GENERATION &&
+    context.campaignId === getPerformanceCampaignId() &&
+    context.topMetric === getPerformanceTopMetric()
+  );
+}
+
+function performanceAiReviewShortHash(value) {
+  var hash = String(value || '');
+  return hash ? hash.slice(0, 12) : '未提供';
+}
+
+function performanceAiReviewReferencesHtml(references) {
+  var items = Array.isArray(references) ? references : [];
+  if (!items.length) return '<p class="tm-metric-note">当前草稿没有可引用的内容快照。</p>';
+  return '<div class="tm-performance-ai-review-references"><strong>当前数据引用</strong><ul>'
+    + items.map(function(reference) {
+      var classifications = Array.isArray(reference.classifications) ? reference.classifications : [];
+      var status = classifications.indexOf('top') >= 0 ? '表现靠前' : '待观察';
+      var metric = reference.selected_metric || {};
+      var metricValue = metric.available
+        ? (metric.key === 'core_view_er' ? performanceRate(metric) : performanceCount(metric.value))
+        : '未提供';
+      return '<li><code>' + esc(reference.id || 'PERF') + '</code><span>'
+        + esc(reference.label || ('内容 #' + (reference.content_id || ''))) + '</span>'
+        + '<em>' + esc(status) + ' · ' + esc(metricValue) + '</em></li>';
+    }).join('') + '</ul></div>';
+}
+
+function performanceAiReviewKnowledgeHtml(ai) {
+  var references = ai && Array.isArray(ai.knowledge_references) ? ai.knowledge_references : [];
+  if (!references.length) {
+    return '<p class="tm-metric-note">知识库：本次未命中已确认的复盘方法论；不会使用未确认草稿作为方法论。</p>';
+  }
+  return '<div class="tm-performance-ai-review-knowledge"><strong>知识库参考</strong><span>'
+    + references.map(function(reference) {
+      return esc(reference.title || ('知识 #' + (reference.id || '')));
+    }).join('；') + '</span></div>';
+}
+
+function performanceAiReviewReasonText(data) {
+  var reasons = {
+    insufficient_comparable_data: '当前排序数据不足，尚不能生成优劣判断。',
+    ai_review_unavailable: 'AI 服务暂不可用，未展示不完整草稿。',
+    citation_validation_failed: '草稿未通过数据引用核验，未予展示。',
+    ai_review_protocol_invalid: '草稿未通过受限输出与证据绑定核验，未予展示。',
+    draft_safety_validation_failed: '草稿未通过内容边界核验，未予展示。',
+    review_evidence_changed: '数据在生成期间发生变化，草稿已作废。'
+  };
+  return reasons[data && data.reason_code] || '当前无法生成复盘草稿。';
+}
+
+function renderPerformanceAiReviewDraft(data) {
+  performanceAiReviewDraft = data || null;
+  var container = document.getElementById('performanceAiReviewDraft');
+  if (!container) return;
+  if (!data) {
+    container.innerHTML = '<div class="tm-state-empty">确认当前数据范围后，可生成仅供内部确认的 AI 复盘草稿。</div>';
+    return;
+  }
+  var evidence = data.evidence || {};
+  var explanation = '当前指标快照 ' + performanceAiReviewShortHash(evidence.snapshot_hash)
+    + '；仅使用录入指标，不读取视频素材、不联网、不自动沉淀知识库。';
+  if (data.status === 'generated' && data.draft) {
+    setPerformanceAiReviewStatus('草稿已生成，需人工确认后才能形成正式复盘。');
+    container.innerHTML = '<div class="tm-performance-ai-review-meta"><span>' + esc(explanation) + '</span>'
+      + '<span>置信等级：' + esc((data.confidence && data.confidence.level) || '未提供') + '</span></div>'
+      + '<div class="tm-performance-ai-review-draft">' + renderSafeMarkdown(data.draft) + '</div>'
+      + performanceAiReviewReferencesHtml(evidence.evidence_references)
+      + performanceAiReviewKnowledgeHtml(data.ai);
+  } else {
+    setPerformanceAiReviewStatus(performanceAiReviewReasonText(data), data.status === 'withheld' ? 'error' : '');
+    container.innerHTML = '<div class="tm-performance-review-empty"><strong>' + esc(performanceAiReviewReasonText(data)) + '</strong>'
+      + '<span>' + esc(explanation) + '</span></div>'
+      + performanceAiReviewReferencesHtml(evidence.evidence_references);
+  }
+  if (window.TMAccessibility) window.TMAccessibility.refresh();
+}
+
+async function generatePerformanceAiReviewDraft() {
+  var campaignId = getPerformanceCampaignId();
+  if (campaignId === null) {
+    setPerformanceAiReviewStatus('请先选择推广活动。', 'error');
+    return null;
+  }
+  if (activePerformanceAiReviewRequest) return null;
+  var topMetric = getPerformanceTopMetric();
+  var fingerprint = [AUTH_GENERATION, campaignId, topMetric].join(':');
+  if (performanceAiReviewRetry.fingerprint !== fingerprint || !performanceAiReviewRetry.idempotencyKey) {
+    performanceAiReviewRetry = {
+      fingerprint: fingerprint,
+      idempotencyKey: createAiChatIdempotencyKey()
+    };
+  }
+  var controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  var context = {
+    sequence: ++performanceAiReviewRequestSequence,
+    authGeneration: AUTH_GENERATION,
+    campaignId: campaignId,
+    topMetric: topMetric,
+    controller: controller
+  };
+  activePerformanceAiReviewRequest = context;
+  setPerformanceAiReviewControlsBusy(true);
+  setPerformanceAiReviewStatus('正在基于当前指标快照生成草稿...');
+  var container = document.getElementById('performanceAiReviewDraft');
+  if (container) container.innerHTML = '<div class="tm-state-loading">正在核对数据引用与草稿边界...</div>';
+  try {
+    var response = await apiFetch('/campaigns/' + encodeURIComponent(campaignId) + '/performance/ai-review-draft', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': performanceAiReviewRetry.idempotencyKey,
+        'X-Request-Id': createDemandAnalysisOperationId('performance-ai-review-request-')
+      },
+      body: JSON.stringify({ top_metric: topMetric }),
+      signal: controller ? controller.signal : undefined
+    });
+    var data = await response.json().catch(function() { return {}; });
+    if (!performanceAiReviewIsCurrent(context)) return null;
+    if (!response.ok) throw new Error(data.error || 'AI 复盘草稿生成失败');
+    performanceAiReviewRetry = { fingerprint: '', idempotencyKey: '' };
+    renderPerformanceAiReviewDraft(data);
+    return data;
+  } catch (error) {
+    if (!performanceAiReviewIsCurrent(context)) return null;
+    if (error && error.name === 'AbortError') return null;
+    setPerformanceAiReviewStatus(error.message || 'AI 复盘草稿生成失败', 'error');
+    if (container) container.innerHTML = '<div class="tm-state-error">' + esc(error.message || 'AI 复盘草稿生成失败') + '</div>';
+    return null;
+  } finally {
+    if (activePerformanceAiReviewRequest === context) activePerformanceAiReviewRequest = null;
+    if (performanceAiReviewIsCurrent(context)) setPerformanceAiReviewControlsBusy(false);
+  }
 }
 
 function performanceReviewMetricText(metric, topMetric) {
@@ -7892,7 +8087,7 @@ function switchPage(id, options) {
     'getEditedDemand', 'syncCurDemandFromAnalysis', 'handleDemandFile', 'analyzeDemandAI',
     'switchTab', 'matchInfluencers', 'smartMatch', 'handleUpload', 'handleDrop', 'openInfUploadModal', 'handleUploadModal', 'downloadInfTemplate', 'exportAll', 'exportFiltered', 'exportSelected',
     'toggleAll', 'syncInfluencerSelectionState', 'loadM4Campaigns', 'changeM4CampaignContext', 'startCollab', 'submitCollabOrder', 'closeCollabOrderModal', 'loadCollaborations', 'updateCollabStatus', 'runCampaignCollabAction', 'closeCampaignSettlementModal', 'submitCampaignSettlement',
-    'initPerformanceMonitor', 'initPerformanceDashboard', 'refreshPerformanceMonitor', 'refreshPerformanceDashboard', 'changePerformanceCampaignContext', 'loadPerformanceContents', 'loadPerformanceIntegrationPreview', 'loadPerformanceFeishuConnection', 'savePerformanceFeishuConnectionDraft', 'approvePerformanceFeishuConnectionDraft', 'createPerformanceContent', 'downloadPerformanceTemplate', 'handlePerformanceImport', 'handlePerformanceDrop', 'downloadPerformanceMetricsTemplate', 'handlePerformanceMetricsImport', 'handlePerformanceMetricsDrop', 'openPerformanceInputModal', 'closePerformanceInputModal', 'savePerformanceInput', 'loadPerformanceDashboard', 'loadPerformanceReviewEvidence', 'debouncedPerformanceContentSearch', 'exportPerformanceContents',
+    'initPerformanceMonitor', 'initPerformanceDashboard', 'refreshPerformanceMonitor', 'refreshPerformanceDashboard', 'changePerformanceCampaignContext', 'handlePerformanceTopMetricChange', 'refreshPerformanceReviewEvidence', 'generatePerformanceAiReviewDraft', 'loadPerformanceContents', 'loadPerformanceIntegrationPreview', 'loadPerformanceFeishuConnection', 'savePerformanceFeishuConnectionDraft', 'approvePerformanceFeishuConnectionDraft', 'createPerformanceContent', 'downloadPerformanceTemplate', 'handlePerformanceImport', 'handlePerformanceDrop', 'downloadPerformanceMetricsTemplate', 'handlePerformanceMetricsImport', 'handlePerformanceMetricsDrop', 'openPerformanceInputModal', 'closePerformanceInputModal', 'savePerformanceInput', 'loadPerformanceDashboard', 'loadPerformanceReviewEvidence', 'debouncedPerformanceContentSearch', 'exportPerformanceContents',
     'sendChat', 'clearChat', 'clearAIMemory', 'pushToFeishu', 'loadFeishuStatus', 'loadFeishuOutbox', 'testFeishuConnection', 'selectFeishuReconciliationDelivery', 'reconcileFeishuDelivery', 'selectFeishuRetryDelivery', 'retryFeishuDelivery',
     'switchAdminTab', 'loadAdminDashboard', 'loadAdminUsers', 'adminAddUser', 'adminCreateInvite', 'adminResetPw',
     'wfUndo', 'wfRedo', 'wfClearCanvas', 'wfSaveTemplate', 'wfPublishTemplate', 'wfResetTaskFilters', 'wfLoadTasks', 'wfLoadInstances',

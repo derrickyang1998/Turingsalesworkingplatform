@@ -14,8 +14,8 @@ const REPORT_VERSION = 'tm-campaign-migration-gate-v1';
 const PRESERVATION_REPORT_VERSION = 'tm-campaign-migration-preservation-v1';
 const LEGACY_TOPOLOGY_FORMAT = 'tm-legacy-topology-subset-v1';
 const REQUIRED_SOURCE_VERSION = 1;
-const REQUIRED_TARGET_VERSION = 11;
-const SUPPORTED_SOURCE_VERSIONS = new Set([REQUIRED_SOURCE_VERSION, 6, 7, 8, 9, 10, 11]);
+const REQUIRED_TARGET_VERSION = 12;
+const SUPPORTED_SOURCE_VERSIONS = new Set([REQUIRED_SOURCE_VERSION, 6, 7, 8, 9, 10, 11, 12]);
 const DEFAULT_FROZEN_MIGRATION_TIMESTAMP = '2040-01-02 03:04:05';
 const EXCLUDED_PRESERVATION_TABLES = new Set(['schema_migrations', 'sqlite_sequence']);
 const DETERMINISTIC_APPEND_TABLES = new Set(['activity_log']);
@@ -90,6 +90,21 @@ const REGISTERED_MIGRATIONS = Object.freeze([
     sourcePath: 'migrations/011_performance_feishu_connection_config.js',
     engineVersion: 1,
     dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
+  }),
+  Object.freeze({
+    version: 12,
+    name: '012_performance_ai_review_audit',
+    sourcePath: 'migrations/012_performance_ai_review_audit.js',
+    engineVersion: 1,
+    dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
+  })
+]);
+const APPROVED_TARGET_TOPOLOGY_REPLACEMENTS = Object.freeze([
+  Object.freeze({
+    type: 'trigger',
+    name: 'request_idempotency_legal_transition',
+    tblName: 'request_idempotency',
+    sqlSha256: '806401a3d8a9b3ee20f98c4d429904264e504de4f7c8aa897aacc49a750b7ba8'
   })
 ]);
 
@@ -460,7 +475,25 @@ function captureLegacyTopologyShape(db, tables) {
   });
 }
 
-function assertLegacyTopologyPreserved(db, snapshot) {
+function approvedTargetTopologyReplacement(expected, actual, options) {
+  if (!options || options.approvedTopologyReplacements !== true) return false;
+  const replacement = APPROVED_TARGET_TOPOLOGY_REPLACEMENTS.find((candidate) => (
+    candidate.type === expected.type
+    && candidate.name === expected.name
+    && candidate.tblName === expected.tblName
+  ));
+  if (!replacement || !actual || actual.sql === null) return false;
+  if (
+    actual.type !== replacement.type
+    || actual.name !== replacement.name
+    || actual.tblName !== replacement.tblName
+  ) {
+    return false;
+  }
+  return crypto.createHash('sha256').update(actual.sql, 'utf8').digest('hex') === replacement.sqlSha256;
+}
+
+function assertLegacyTopologyPreserved(db, snapshot, options = {}) {
   if (!snapshot || snapshot.format !== LEGACY_TOPOLOGY_FORMAT) {
     throw new Error('invalid legacy preservation topology snapshot');
   }
@@ -472,6 +505,7 @@ function assertLegacyTopologyPreserved(db, snapshot) {
     const actual = current.objects.get(key);
     if (!actual) throw new Error(`legacy preservation topology missing ${expected.type} ${expected.name}`);
     if (actual.record.equals(expected.record)) continue;
+    if (approvedTargetTopologyReplacement(expected, actual, options)) continue;
     const tableMetadata = snapshot.tables.get(expected.name);
     if (
       expected.type !== 'table' ||
@@ -649,9 +683,9 @@ function assertSameJson(actual, expected, message) {
   if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error(message);
 }
 
-function assertLegacyLogicalShapePreserved(db, snapshot) {
+function assertLegacyLogicalShapePreserved(db, snapshot, options = {}) {
   if (!snapshot || snapshot.format !== 'tm-legacy-logical-shape-v1') throw new Error('invalid legacy preservation snapshot');
-  assertLegacyTopologyPreserved(db, snapshot.topology);
+  assertLegacyTopologyPreserved(db, snapshot.topology, options);
   const currentNames = new Set(tableInventory(db));
   for (const expected of snapshot.tables) {
     if (!currentNames.has(expected.name)) throw new Error(`legacy preservation schema missing table ${expected.name}`);
@@ -847,13 +881,13 @@ function migrateAndVerify(databasePath, legacySnapshot, sourceVersion, options =
     migrationService.runMigrations(db, migrationOptions());
     if (db.pragma('integrity_check', { simple: true }) !== 'ok') throw new Error('migration integrity_check failed');
     if (db.pragma('foreign_key_check').length) throw new Error('migration foreign_key_check failed');
-    assertLegacyLogicalShapePreserved(db, legacySnapshot);
+    assertLegacyLogicalShapePreserved(db, legacySnapshot, { approvedTopologyReplacements: true });
     verifyFtsCanaries(db);
     const first = sqliteDigest.databaseDigest(db, sanitizer.FTS_MANIFEST);
     migrationService.runMigrations(db, migrationOptions());
     if (db.pragma('integrity_check', { simple: true }) !== 'ok') throw new Error('migration rerun integrity_check failed');
     if (db.pragma('foreign_key_check').length) throw new Error('migration rerun foreign_key_check failed');
-    assertLegacyLogicalShapePreserved(db, legacySnapshot);
+    assertLegacyLogicalShapePreserved(db, legacySnapshot, { approvedTopologyReplacements: true });
     verifyFtsCanaries(db);
     const rerun = sqliteDigest.databaseDigest(db, sanitizer.FTS_MANIFEST);
     assertDigestEqual(first, rerun, 'migration no-op rerun');

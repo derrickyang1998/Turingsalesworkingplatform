@@ -13,6 +13,7 @@ const MAX_OPERATION_SECONDS = 600;
 const HEX_64 = /^[0-9a-f]{64}$/;
 const IDEMPOTENCY_KEY = /^[A-Za-z0-9._:-]{8,200}$/;
 const SCOPE = /^[a-z0-9.-]{1,120}$/;
+const PERFORMANCE_AI_REVIEW_SCOPE = 'ai.conversation.create.linked';
 const RESERVATION_KEYS = Object.freeze([
   'organizationId',
   'actorUserId',
@@ -107,7 +108,7 @@ const SCOPES = new Set([
   'knowledge.ingest.linked',
   'knowledge.upload.linked',
   'knowledge.use.linked',
-  'ai.conversation.create.linked',
+  PERFORMANCE_AI_REVIEW_SCOPE,
   'ai.conversation.continue.linked',
   'parser.knowledge-upload.admission',
   'parser.influencer-upload.admission',
@@ -138,7 +139,7 @@ const ONE_EVENT_SCOPES = new Set([
   'knowledge.create.linked',
   'knowledge.ingest.linked',
   'knowledge.upload.linked',
-  'ai.conversation.create.linked'
+  PERFORMANCE_AI_REVIEW_SCOPE
 ]);
 const PPT_SCOPES = new Set([
   'proposal.ppt.generate.linked',
@@ -1514,23 +1515,45 @@ function completeJsonInTransaction(db, options) {
     owner.user_id,
     owner.audit_fingerprint
   );
+  const terminalAuditCount = owner.scope === PERFORMANCE_AI_REVIEW_SCOPE
+    ? db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM performance_ai_review_audits
+      WHERE request_idempotency_id=?
+        AND org_id=? AND campaign_id=? AND actor_user_id=? AND audit_fingerprint=?
+    `).get(
+      owner.id,
+      owner.org_id,
+      owner.campaign_id,
+      owner.user_id,
+      owner.audit_fingerprint
+    ).count
+    : 0;
   const success = input.statusCode >= 200 && input.statusCode <= 299;
+  const terminalReviewAuditMatches = owner.scope === PERFORMANCE_AI_REVIEW_SCOPE &&
+    owner.expected_event_count === 1 &&
+    owner.secondary_campaign_id === null &&
+    counts.total === 0 &&
+    terminalAuditCount === 1;
   const cardinalityMatches = success
     ? (
-      counts.total === owner.expected_event_count &&
-      (
-        owner.expected_event_count === 0 ||
-        owner.expected_event_count === 1 &&
-          owner.secondary_campaign_id === null &&
-          counts.primary_count === 1 ||
-        owner.expected_event_count === 2 &&
-          owner.scope === 'campaign.link.correct' &&
-          owner.secondary_campaign_id !== null &&
-          counts.primary_count === 1 &&
-          counts.secondary_count === 1
+      terminalReviewAuditMatches || (
+        terminalAuditCount === 0 &&
+        counts.total === owner.expected_event_count &&
+        (
+          owner.expected_event_count === 0 ||
+          owner.expected_event_count === 1 &&
+            owner.secondary_campaign_id === null &&
+            counts.primary_count === 1 ||
+          owner.expected_event_count === 2 &&
+            owner.scope === 'campaign.link.correct' &&
+            owner.secondary_campaign_id !== null &&
+            counts.primary_count === 1 &&
+            counts.secondary_count === 1
+        )
       )
     )
-    : counts.total === 0;
+    : counts.total === 0 && terminalAuditCount === 0;
   if (!cardinalityMatches) {
     throw serviceError(
       500,

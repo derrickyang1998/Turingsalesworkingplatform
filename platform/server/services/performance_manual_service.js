@@ -63,6 +63,13 @@ const ACTION_POLICIES = Object.freeze({
 const INTEGRATION_PREVIEW_CONTRACT_VERSION = 'performance-integration-preview-v1';
 const METRIC_IMPORT_CONTRACT_VERSION = 'performance-metric-import-v1';
 const REVIEW_EVIDENCE_CONTRACT_VERSION = 'performance-review-evidence-v1';
+const AI_REVIEW_DRAFT_CONTRACT_VERSION = 'performance-ai-review-draft-v1';
+const AI_REVIEW_PROTOCOL_VERSION = 1;
+const AI_REVIEW_EXPERIMENT_TYPES = Object.freeze({
+  data_coverage: '补齐关键指标与统一观察时间，验证当前排名是否稳定。',
+  cohort_comparison: '按平台、产品或达人分组对比当前指标，验证差异是否具有可重复性。',
+  observation_timing: '在统一的后续观察窗口复测，避免不同观察时长影响当前比较。'
+});
 const REVIEW_RANKING_LIMIT = 3;
 const REVIEW_BREAKDOWN_LIMIT = 5;
 const METRIC_IMPORT_MAPPING_FIELDS = Object.freeze([
@@ -763,15 +770,16 @@ function buildReviewRankings(contents, metric) {
   const ascending = scored.slice().sort((left, right) => (
     left.metric.value - right.metric.value || left.content.id - right.content.id
   ));
+  const cohortSize = Math.min(REVIEW_RANKING_LIMIT, Math.floor(scored.length / 2));
   return {
     status,
     metric,
     eligibility,
     comparable_records: eligibility.comparable_records,
     missing_records: eligibility.missing_records,
-    top_contents: descending.slice(0, REVIEW_RANKING_LIMIT)
+    top_contents: descending.slice(0, cohortSize)
       .map((item, index) => reviewRankingEntry(item, index + 1)),
-    bottom_contents: ascending.slice(0, REVIEW_RANKING_LIMIT)
+    bottom_contents: ascending.slice(0, cohortSize)
       .map((item, index) => reviewRankingEntry(item, index + 1))
   };
 }
@@ -1821,8 +1829,877 @@ function createPerformanceManualService(db, options = {}) {
   });
 }
 
+class PerformanceAiReviewServiceError extends Error {
+  constructor(statusCode, code, message, details) {
+    super(message);
+    this.name = 'PerformanceAiReviewServiceError';
+    this.statusCode = statusCode;
+    this.code = code;
+    this.details = details;
+  }
+}
+
+function aiReviewError(statusCode, code, message, details) {
+  return new PerformanceAiReviewServiceError(statusCode, code, message, details);
+}
+
+function aiReviewPlainObject(value) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
+  try {
+    if (Object.getPrototypeOf(value) !== Object.prototype) return null;
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    const result = {};
+    for (const key of Object.keys(descriptors)) {
+      const descriptor = descriptors[key];
+      if (!descriptor || !Object.hasOwn(descriptor, 'value')) return null;
+      result[key] = descriptor.value;
+    }
+    return result;
+  } catch {
+    return null;
+  }
+}
+
+function aiReviewPositiveId(value) {
+  if (Number.isSafeInteger(value) && value > 0) return value;
+  if (typeof value === 'string' && /^[1-9][0-9]{0,15}$/.test(value)) {
+    const parsed = Number(value);
+    if (Number.isSafeInteger(parsed) && parsed > 0 && String(parsed) === value) return parsed;
+  }
+  return null;
+}
+
+function aiReviewInput(body) {
+  const source = aiReviewPlainObject(body || {});
+  if (!source || Object.keys(source).some((key) => key !== 'top_metric')) {
+    throw aiReviewError(400, 'PERFORMANCE_AI_REVIEW_INVALID', 'AI review input is invalid.');
+  }
+  let topMetric = 'views';
+  if (source.top_metric !== undefined) {
+    if (typeof source.top_metric !== 'string' || !source.top_metric.trim() || source.top_metric.trim().length > 64) {
+      throw aiReviewError(400, 'PERFORMANCE_AI_REVIEW_INVALID', 'top_metric is invalid.', { field: 'top_metric' });
+    }
+    topMetric = source.top_metric.trim();
+  }
+  return { topMetric };
+}
+
+function enforceAiReviewQuota(db, user) {
+  const quota = Number(user && user.api_quota || 0);
+  if (!quota || (user && user.role === 'admin')) return;
+  const used = db.prepare(`
+    SELECT COALESCE(SUM(total_tokens), 0) AS total
+    FROM token_usage
+    WHERE user_id=?
+  `).get(user.id).total;
+  if (used >= quota) {
+    throw aiReviewError(429, 'AI_QUOTA_EXCEEDED', 'AI quota exceeded.');
+  }
+}
+
+function aiReviewMetricLabel(metric) {
+  const labels = {
+    views: '播放量',
+    likes: '点赞数',
+    comments: '评论数',
+    saves: '收藏数',
+    shares: '转发数',
+    clicks: '点击数',
+    conversions: '转化数',
+    core_view_er: '核心播放互动率'
+  };
+  return labels[metric] || metric || '所选指标';
+}
+
+function aiReviewSafeText(value, maxLength) {
+  if (typeof value !== 'string') return null;
+  const text = value.replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!text) return null;
+  return text.slice(0, maxLength || 120);
+}
+
+function aiReviewContentLabel(content) {
+  const source = content && typeof content === 'object' ? content : {};
+  const parts = [
+    aiReviewSafeText(source.creator_name, 80),
+    aiReviewSafeText(source.product, 80),
+    aiReviewSafeText(source.platform, 40)
+  ].filter(Boolean);
+  return parts.length ? parts.join(' / ') : `内容 #${source.id || '未知'}`;
+}
+
+function aiReviewEvidenceReferences(evidence) {
+  const seen = new Map();
+  const rankings = evidence && evidence.rankings && typeof evidence.rankings === 'object'
+    ? evidence.rankings
+    : {};
+  const add = (items, classification) => {
+    (Array.isArray(items) ? items : []).forEach((item) => {
+      const content = item && item.content && typeof item.content === 'object' ? item.content : {};
+      const contentId = aiReviewPositiveId(content.id);
+      if (contentId === null) return;
+      const observation = (item && item.evidence && item.evidence.latest_observation) || {};
+      const metric = item && item.metric && typeof item.metric === 'object' ? item.metric : {};
+      const existing = seen.get(contentId);
+      const classifications = existing ? existing.classifications : [];
+      if (!classifications.includes(classification)) classifications.push(classification);
+      seen.set(contentId, {
+        id: `PERF-${contentId}`,
+        content_id: contentId,
+        label: aiReviewContentLabel(content),
+        classifications,
+        platform: aiReviewSafeText(content.platform, 40),
+        creator_name: aiReviewSafeText(content.creator_name, 80),
+        product: aiReviewSafeText(content.product, 80),
+        selected_metric: {
+          key: aiReviewSafeText(metric.metric, 64),
+          value: Number.isFinite(metric.value) ? metric.value : null,
+          available: metric.available === true
+        },
+        source_mode: aiReviewSafeText(observation.source_mode, 40),
+        observed_at: aiReviewSafeText(observation.observed_at, 64)
+      });
+    });
+  };
+  add(rankings.top_contents, 'top');
+  add(rankings.bottom_contents, 'bottom');
+  return [...seen.values()].sort((left, right) => left.content_id - right.content_id);
+}
+
+function aiReviewEvidenceProjection(evidence, evidenceReferences) {
+  const rankings = evidence && evidence.rankings && typeof evidence.rankings === 'object'
+    ? evidence.rankings
+    : {};
+  const dataQuality = evidence && evidence.data_quality && typeof evidence.data_quality === 'object'
+    ? evidence.data_quality
+    : {};
+  const scope = evidence && evidence.scope && typeof evidence.scope === 'object' ? evidence.scope : {};
+  const sourceRecords = evidence && evidence.records && typeof evidence.records === 'object'
+    ? evidence.records
+    : {};
+  // Do not rely on a deny list: only non-commercial record counts enter the model prompt.
+  const records = {
+    total: Number.isSafeInteger(sourceRecords.total) ? sourceRecords.total : 0,
+    active_with_observations: Number.isSafeInteger(sourceRecords.active_with_observations)
+      ? sourceRecords.active_with_observations
+      : 0
+  };
+  return {
+    contract_version: evidence && evidence.contract_version || REVIEW_EVIDENCE_CONTRACT_VERSION,
+    scope: {
+      type: scope.type || 'campaign_current_snapshot',
+      selected_metric: scope.selected_metric || null,
+      selected_metric_label: aiReviewMetricLabel(scope.selected_metric),
+      observation_selector: scope.observation_selector || null
+    },
+    records,
+    ranking: {
+      status: rankings.status || 'insufficient_data',
+      eligibility: rankings.eligibility || null
+    },
+    data_quality: {
+      source_mode_counts: dataQuality.source_mode_counts || {},
+      observation_window: dataQuality.observation_window || null,
+      metric_coverage: dataQuality.metric_coverage || []
+    },
+    evidence_references: evidenceReferences,
+    limitations: Array.isArray(evidence && evidence.limitations) ? evidence.limitations : []
+  };
+}
+
+function aiReviewSnapshotHash(projection) {
+  return crypto.createHash('sha256')
+    .update(JSON.stringify(projection), 'utf8')
+    .digest('hex');
+}
+
+function aiReviewAiProjection(ai) {
+  return {
+    conversation_id: ai && ai.conversation_id || null,
+    message_id: ai && ai.message_id || null,
+    model: ai && ai.model || null,
+    usage: ai && ai.usage || {},
+    latency_ms: ai && ai.latency_ms || null,
+    knowledge_references: ai && ai.knowledge_references || [],
+    web_search: ai && ai.web_search || { used: false },
+    summary_promotion: ai && ai.summary_promotion || null,
+    archived_summary_id: ai && ai.archived_summary_id || null
+  };
+}
+
+function aiReviewGeneratedResult(input) {
+  const source = input && typeof input === 'object' ? input : {};
+  return {
+    contract_version: AI_REVIEW_DRAFT_CONTRACT_VERSION,
+    campaign_id: source.campaignId || null,
+    status: 'generated',
+    analysis: aiReviewAnalysis(),
+    confidence: source.confidence || null,
+    evidence: Object.assign({}, source.evidenceProjection || {}, {
+      snapshot_hash: source.snapshotHash || null,
+      citation_validation: source.citationValidation || null,
+      draft_validation: source.draftValidation || null,
+      protocol_validation: source.protocolValidation || null
+    }),
+    draft: source.draft || '',
+    ai: aiReviewAiProjection(source.ai)
+  };
+}
+
+function aiReviewReplayAnalysisValid(value) {
+  const source = aiReviewPlainObject(value);
+  const mediaEvidence = source && aiReviewPlainObject(source.media_evidence);
+  const webSearch = source && aiReviewPlainObject(source.web_search);
+  const knowledgePromotion = source && aiReviewPlainObject(source.knowledge_promotion);
+  const humanConfirmation = source && aiReviewPlainObject(source.human_confirmation);
+  return !!source &&
+    source.mode === 'metadata_only' &&
+    mediaEvidence &&
+    mediaEvidence.status === 'not_collected' &&
+    mediaEvidence.reason === 'authorized_media_access_required' &&
+    webSearch &&
+    webSearch.used === false &&
+    webSearch.reason === 'disabled_for_performance_review' &&
+    knowledgePromotion &&
+    knowledgePromotion.status === 'not_started' &&
+    knowledgePromotion.reason === 'human_confirmation_required' &&
+    humanConfirmation &&
+    humanConfirmation.required === true &&
+    humanConfirmation.status === 'not_started';
+}
+
+function aiReviewReplayTerminalResult(source) {
+  const expectedKeys = [
+    'ai', 'analysis', 'campaign_id', 'confidence', 'contract_version', 'draft', 'evidence', 'reason_code', 'status'
+  ];
+  const allowedWithheldReasons = new Set([
+    'draft_safety_validation_failed',
+    'ai_review_protocol_invalid',
+    'citation_validation_failed',
+    'ai_review_unavailable'
+  ]);
+  const confidence = aiReviewPlainObject(source && source.confidence);
+  const evidence = aiReviewPlainObject(source && source.evidence);
+  const terminalStatus = source && source.status;
+  const validReason = terminalStatus === 'stale_snapshot'
+    ? source.reason_code === 'review_evidence_changed'
+    : terminalStatus === 'withheld' && allowedWithheldReasons.has(source.reason_code);
+  if (
+    !source ||
+    Object.keys(source).sort().join('|') !== expectedKeys.join('|') ||
+    source.contract_version !== AI_REVIEW_DRAFT_CONTRACT_VERSION ||
+    !['withheld', 'stale_snapshot'].includes(terminalStatus) ||
+    !validReason ||
+    aiReviewPositiveId(source.campaign_id) === null ||
+    source.draft !== null ||
+    source.ai !== null ||
+    !aiReviewReplayAnalysisValid(source.analysis) ||
+    !confidence ||
+    !['high', 'medium', 'insufficient'].includes(confidence.level) ||
+    typeof confidence.detail !== 'string' ||
+    !evidence ||
+    !/^[a-f0-9]{64}$/.test(String(evidence.snapshot_hash || ''))
+  ) {
+    return null;
+  }
+  return {
+    contract_version: source.contract_version,
+    campaign_id: source.campaign_id,
+    status: terminalStatus,
+    reason_code: source.reason_code,
+    analysis: source.analysis,
+    confidence,
+    evidence,
+    draft: null,
+    ai: null
+  };
+}
+
+function aiReviewReplayEnvelope(ai) {
+  const source = aiReviewPlainObject(ai && ai.response_envelope) || aiReviewPlainObject(ai);
+  if (!source) return null;
+  if (source.status === 'withheld' || source.status === 'stale_snapshot') {
+    return aiReviewReplayTerminalResult(source);
+  }
+  const expectedKeys = [
+    'ai', 'analysis', 'campaign_id', 'confidence', 'contract_version', 'draft', 'evidence', 'status'
+  ];
+  if (Object.keys(source).sort().join('|') !== expectedKeys.join('|')) return null;
+  if (
+    source.contract_version !== AI_REVIEW_DRAFT_CONTRACT_VERSION ||
+    source.status !== 'generated' ||
+    aiReviewPositiveId(source.campaign_id) === null ||
+    typeof source.draft !== 'string' ||
+    !source.draft.trim() ||
+    source.draft.length > 24000
+  ) {
+    return null;
+  }
+  const confidence = aiReviewPlainObject(source.confidence);
+  const evidence = aiReviewPlainObject(source.evidence);
+  const evidenceValidation = evidence && aiReviewPlainObject(evidence.citation_validation);
+  const draftValidation = evidence && aiReviewPlainObject(evidence.draft_validation);
+  const protocolValidation = evidence && aiReviewPlainObject(evidence.protocol_validation);
+  if (
+    !aiReviewReplayAnalysisValid(source.analysis) ||
+    !confidence ||
+    !evidence ||
+    !/^[a-f0-9]{64}$/.test(String(evidence.snapshot_hash || '')) ||
+    !evidenceValidation || evidenceValidation.valid !== true ||
+    !draftValidation || draftValidation.valid !== true ||
+    !protocolValidation || protocolValidation.valid !== true
+  ) {
+    return null;
+  }
+  return aiReviewGeneratedResult({
+    campaignId: source.campaign_id,
+    confidence,
+    evidenceProjection: evidence,
+    snapshotHash: evidence.snapshot_hash,
+    citationValidation: evidenceValidation,
+    draftValidation,
+    protocolValidation,
+    draft: source.draft,
+    ai: source.ai
+  });
+}
+
+function aiReviewUniqueStrings(value, matcher, limit) {
+  if (!Array.isArray(value) || !value.length || value.length > limit) return null;
+  const seen = new Set();
+  const result = [];
+  for (const item of value) {
+    if (typeof item !== 'string' || !matcher.test(item) || seen.has(item)) return null;
+    seen.add(item);
+    result.push(item);
+  }
+  return result;
+}
+
+function aiReviewProtocolValidation(answer, evidenceReferences) {
+  const text = String(answer || '').trim();
+  const failure = (code, details = {}) => Object.assign({
+    valid: false,
+    protocol: null,
+    code,
+    citations: [],
+    unknown: [],
+    includes_top: false,
+    includes_bottom: false
+  }, details);
+  if (!text || text.length > 2400) return failure('output_size_invalid');
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch (_error) {
+    return failure('json_required');
+  }
+  const source = aiReviewPlainObject(parsed);
+  if (!source) return failure('object_required');
+  const expectedKeys = [
+    'bottom_evidence_ids',
+    'contract_version',
+    'experiment_types',
+    'human_confirmation',
+    'top_evidence_ids'
+  ];
+  if (Object.keys(source).sort().join('|') !== expectedKeys.join('|')) return failure('fields_invalid');
+  if (source.contract_version !== AI_REVIEW_PROTOCOL_VERSION) return failure('version_invalid');
+  if (source.human_confirmation !== 'required') return failure('human_confirmation_required');
+  const topEvidenceIds = aiReviewUniqueStrings(source.top_evidence_ids, /^PERF-[1-9][0-9]*$/, 3);
+  const bottomEvidenceIds = aiReviewUniqueStrings(source.bottom_evidence_ids, /^PERF-[1-9][0-9]*$/, 3);
+  const experimentTypes = aiReviewUniqueStrings(
+    source.experiment_types,
+    /^(?:data_coverage|cohort_comparison|observation_timing)$/,
+    3
+  );
+  if (!topEvidenceIds || !bottomEvidenceIds || !experimentTypes) return failure('values_invalid');
+  const known = new Map((evidenceReferences || []).map((reference) => [reference.id, reference]));
+  const citations = [...new Set(topEvidenceIds.concat(bottomEvidenceIds))];
+  const overlappingCitations = topEvidenceIds.filter((citation) => bottomEvidenceIds.includes(citation));
+  const unknown = citations.filter((citation) => !known.has(citation));
+  const topBound = topEvidenceIds.every((citation) => {
+    const reference = known.get(citation);
+    return reference && Array.isArray(reference.classifications) && reference.classifications.includes('top');
+  });
+  const bottomBound = bottomEvidenceIds.every((citation) => {
+    const reference = known.get(citation);
+    return reference && Array.isArray(reference.classifications) && reference.classifications.includes('bottom');
+  });
+  if (overlappingCitations.length || unknown.length || !topBound || !bottomBound) {
+    return failure('evidence_binding_invalid', {
+      citations,
+      overlapping: overlappingCitations,
+      unknown,
+      includes_top: topBound,
+      includes_bottom: bottomBound
+    });
+  }
+  return {
+    valid: true,
+    code: 'ok',
+    protocol: {
+      contract_version: AI_REVIEW_PROTOCOL_VERSION,
+      top_evidence_ids: topEvidenceIds,
+      bottom_evidence_ids: bottomEvidenceIds,
+      experiment_types: experimentTypes,
+      human_confirmation: 'required'
+    },
+    citations,
+    unknown: [],
+    includes_top: true,
+    includes_bottom: true
+  };
+}
+
+function aiReviewCitationValidation(protocolValidation) {
+  const source = protocolValidation || {};
+  return {
+    valid: source.valid === true,
+    citations: Array.isArray(source.citations) ? source.citations : [],
+    unknown: Array.isArray(source.unknown) ? source.unknown : [],
+    includes_top: source.includes_top === true,
+    includes_bottom: source.includes_bottom === true,
+    required_citation_count: 2,
+    protocol_code: source.code || 'invalid'
+  };
+}
+
+function aiReviewDraftSafety(answer) {
+  const text = String(answer || '');
+  const mediaTermDetected = /钩子|画面|脚本|风格|创意|镜头|视觉|素材|CTA|call\s+to\s+action|\b(?:hook|visual|script|style|creative|scene|cta)\b/i.test(text);
+  const causalMediaClaim = [
+    /(?:由于|因为|归因于|导致|源于).{0,40}(?:钩子|画面|脚本|风格|创意|镜头|视觉|素材|CTA)/i,
+    /(?:钩子|画面|脚本|风格|创意|镜头|视觉|素材|CTA).{0,40}(?:导致|提升|降低|驱动|影响|解释)/i,
+    /(?:because|driven by|caused by).{0,80}(?:hook|visual|script|style|creative|scene|cta|call\s+to\s+action)/i,
+    /(?:hook|visual|script|style|creative|scene|cta|call\s+to\s+action).{0,80}(?:caused|drove|improved|reduced|explains)/i
+  ].some((pattern) => pattern.test(text));
+  return {
+    valid: !mediaTermDetected && !causalMediaClaim,
+    media_term_detected: mediaTermDetected,
+    causal_media_claim_detected: causalMediaClaim,
+    human_confirmation_present: /人工(?:确认|复核|审核)|"human_confirmation"\s*:\s*"required"/.test(text)
+  };
+}
+
+function aiReviewRenderedDraft(protocol, evidenceReferences, evidenceProjection) {
+  const known = new Map((evidenceReferences || []).map((reference) => [reference.id, reference]));
+  const metricLabel = aiReviewSafeText(
+    evidenceProjection && evidenceProjection.scope && evidenceProjection.scope.selected_metric_label,
+    64
+  ) || '所选指标';
+  const list = (ids, groupLabel) => ids.map((id) => {
+    const reference = known.get(id) || {};
+    return `- ${aiReviewSafeText(reference.label, 160) || id}：当前${metricLabel}处于${groupLabel} [${id}]。`;
+  }).join('\n');
+  const experiments = protocol.experiment_types.map((type) => (
+    `- ${AI_REVIEW_EXPERIMENT_TYPES[type]}`
+  )).join('\n');
+  return [
+    '## 数据范围与置信等级',
+    '- 本草稿仅基于当前录入的结构化指标与已确认的方法论参考。',
+    '- 所有结论均需人工确认；不包含视频、图片、字幕、脚本或创意证据。',
+    '## 当前表现靠前内容',
+    list(protocol.top_evidence_ids, '表现靠前组'),
+    '## 当前待观察内容',
+    list(protocol.bottom_evidence_ids, '待观察组'),
+    '## 可验证的复用假设与下一步实验',
+    experiments,
+    '## 数据边界与人工确认项',
+    '- 当前排名不构成内容因果判断，也不等同于内容质量结论。',
+    '- 请由项目负责人结合后续数据与授权素材完成人工确认。'
+  ].join('\n');
+}
+
+function aiReviewAnalysis() {
+  return {
+    mode: 'metadata_only',
+    media_evidence: { status: 'not_collected', reason: 'authorized_media_access_required' },
+    web_search: { used: false, reason: 'disabled_for_performance_review' },
+    knowledge_promotion: { status: 'not_started', reason: 'human_confirmation_required' },
+    human_confirmation: { required: true, status: 'not_started' }
+  };
+}
+
+function aiReviewWithheldResult(input) {
+  const source = input && typeof input === 'object' ? input : {};
+  const evidence = Object.assign({}, source.evidenceProjection || {}, {
+    snapshot_hash: source.snapshotHash || null
+  });
+  if (source.citationValidation) evidence.citation_validation = source.citationValidation;
+  if (source.draftValidation) evidence.draft_validation = source.draftValidation;
+  if (source.protocolValidation) evidence.protocol_validation = source.protocolValidation;
+  return {
+    contract_version: AI_REVIEW_DRAFT_CONTRACT_VERSION,
+    campaign_id: source.campaignId || null,
+    status: 'withheld',
+    reason_code: source.reasonCode || 'ai_review_unavailable',
+    analysis: aiReviewAnalysis(),
+    confidence: source.confidence || null,
+    evidence,
+    draft: null,
+    ai: source.ai === undefined ? null : aiReviewAiProjection(source.ai)
+  };
+}
+
+function aiReviewStaleResult(input) {
+  const source = input && typeof input === 'object' ? input : {};
+  return {
+    contract_version: AI_REVIEW_DRAFT_CONTRACT_VERSION,
+    campaign_id: source.campaignId || null,
+    status: 'stale_snapshot',
+    reason_code: 'review_evidence_changed',
+    analysis: aiReviewAnalysis(),
+    confidence: aiReviewConfidence(source.currentEvidence || source.evidence),
+    evidence: Object.assign({}, source.currentProjection || source.evidenceProjection || {}, {
+      snapshot_hash: source.currentSnapshotHash || source.snapshotHash || null
+    }),
+    draft: null,
+    ai: null
+  };
+}
+
+function aiReviewConfidence(evidence) {
+  const rankings = evidence && evidence.rankings && typeof evidence.rankings === 'object'
+    ? evidence.rankings
+    : {};
+  const eligibility = rankings.eligibility && typeof rankings.eligibility === 'object'
+    ? rankings.eligibility
+    : {};
+  const coverage = Number(eligibility.coverage);
+  const comparable = Number(eligibility.comparable_records || 0);
+  const total = Number(eligibility.total_records || 0);
+  if (rankings.status !== 'available') {
+    return {
+      level: 'insufficient',
+      detail: '当前数据不满足可比排名门槛，不能生成 AI 优劣判断。'
+    };
+  }
+  if (coverage >= 0.95 && comparable >= 5) {
+    return {
+      level: 'high',
+      detail: '所选指标覆盖充分，且已有五条以上可比内容。'
+    };
+  }
+  return {
+    level: 'medium',
+    detail: `所选指标已覆盖 ${comparable}/${total} 条内容；结论仍需人工确认。`
+  };
+}
+
+function aiReviewPrompt(evidence, evidenceReferences) {
+  const projection = aiReviewEvidenceProjection(evidence, evidenceReferences);
+  return [
+    '你是 TuringMarket 的项目复盘助手。仅基于下面的结构化活动指标和已授权的项目知识选择证据与实验类型。',
+    '本次没有视频、图片、字幕、脚本、钩子或风格证据；不得判断内容创意、视频原因、转化原因或任何因果关系。不得联网，不得编造外部数据。',
+    '只输出一个合法 JSON 对象，不得输出 Markdown、解释、句子或其他字段。对象必须精确符合以下结构：',
+    '{"contract_version":1,"top_evidence_ids":["PERF-1"],"bottom_evidence_ids":["PERF-2"],"experiment_types":["data_coverage"],"human_confirmation":"required"}',
+    'top_evidence_ids 只能从当前表现靠前证据中选择；bottom_evidence_ids 只能从当前待观察证据中选择；每个数组 1-3 项且不得重复。',
+    'experiment_types 只能选择 data_coverage、cohort_comparison、observation_timing 中的 1-3 项。不得添加任何自由文本。',
+    '',
+    '结构化事实（不可补充未提供的内容）：',
+    JSON.stringify(projection)
+  ].join('\n');
+}
+
+function createPerformanceAiReviewService(db, options = {}) {
+  if (!db || typeof db.prepare !== 'function') throw new TypeError('A SQLite database is required.');
+  const performanceService = options.performanceService;
+  const aiService = options.aiService;
+  if (!performanceService || typeof performanceService.getReviewEvidence !== 'function') {
+    throw new TypeError('A performance review evidence service is required.');
+  }
+  if (!aiService || typeof aiService.handleChat !== 'function') {
+    throw new TypeError('An AI chat service is required.');
+  }
+
+  async function createDraft(input) {
+    const user = input && input.user;
+    if (!user || aiReviewPositiveId(user.id) === null) {
+      throw aiReviewError(401, 'PERFORMANCE_AI_REVIEW_UNAUTHORIZED', 'An authenticated user is required.');
+    }
+    const request = aiReviewInput(input && input.body);
+    const linkedAiInput = {
+      user,
+      campaign_id: input && input.campaignId,
+      idempotencyKey: input && input.idempotencyKey,
+      requestId: input && input.requestId,
+      source_module: 'performance_review',
+      performance_review_idempotency_input: {
+        contract_version: AI_REVIEW_DRAFT_CONTRACT_VERSION,
+        top_metric: request.topMetric
+      }
+    };
+    if (typeof aiService.replayLinkedPerformanceReview === 'function') {
+      try {
+        const replayed = aiService.replayLinkedPerformanceReview(db, linkedAiInput);
+        if (replayed) {
+          const replayedResult = aiReviewReplayEnvelope(replayed);
+          if (replayedResult) return replayedResult;
+          throw aiReviewError(
+            500,
+            'PERFORMANCE_AI_REVIEW_REPLAY_INVALID',
+            'Saved AI review output was invalid.'
+          );
+        }
+      } catch (error) {
+        if (error instanceof PerformanceAiReviewServiceError) throw error;
+        if (error && error.name === 'AIServiceError' && Number.isSafeInteger(error.statusCode)) {
+          throw aiReviewError(error.statusCode, error.code || 'PERFORMANCE_AI_REVIEW_FAILED', error.message);
+        }
+        throw error;
+      }
+    }
+    let evidence;
+    try {
+      evidence = performanceService.getReviewEvidence({
+        userId: user.id,
+        campaignId: input && input.campaignId,
+        query: { top_metric: request.topMetric }
+      });
+    } catch (error) {
+      if (error instanceof PerformanceManualServiceError) throw error;
+      throw aiReviewError(500, 'PERFORMANCE_AI_REVIEW_EVIDENCE_FAILED', 'Review evidence could not be prepared.');
+    }
+    const evidenceReferences = aiReviewEvidenceReferences(evidence);
+    const evidenceProjection = aiReviewEvidenceProjection(evidence, evidenceReferences);
+    const snapshotHash = aiReviewSnapshotHash(evidenceProjection);
+    const confidence = aiReviewConfidence(evidence);
+    if (!evidence || !evidence.rankings || evidence.rankings.status !== 'available') {
+      return {
+        contract_version: AI_REVIEW_DRAFT_CONTRACT_VERSION,
+        campaign_id: (evidence && evidence.campaign_id) || aiReviewPositiveId(input && input.campaignId),
+        status: 'not_ready',
+        reason_code: 'insufficient_comparable_data',
+        analysis: aiReviewAnalysis(),
+        confidence,
+        evidence: Object.assign({}, evidenceProjection, { snapshot_hash: snapshotHash }),
+        draft: null,
+        ai: null
+      };
+    }
+    const prompt = aiReviewPrompt(evidence, evidenceReferences);
+    const generationGuard = {
+      citationValidation: null,
+      draftValidation: null,
+      protocolValidation: null,
+      renderedDraft: '',
+      currentEvidence: null,
+      currentProjection: null,
+      currentSnapshotHash: null,
+      failure: null
+    };
+    let ai;
+    try {
+      ai = await aiService.handleChat(db, Object.assign({}, linkedAiInput, {
+        message: prompt,
+        ragQuery: `${aiReviewMetricLabel(request.topMetric)} 项目复盘方法与可验证优化假设`,
+        campaign_id: evidence.campaign_id,
+        // Only curated, human-confirmed performance methodology is eligible for linked RAG here.
+        entry_type: 'performance_review_methodology',
+        source_type: 'performance_review_methodology',
+        quality_state: 'confirmed',
+        business_type: 'campaign',
+        business_id: String(evidence.campaign_id),
+        allowWeb: false,
+        summaryVisibility: 'private',
+        knowledgeLimit: 5,
+        archiveSummary: false,
+        max_tokens: 700,
+        terminalRejectionAudit: true,
+        beforeProvider() {
+          enforceAiReviewQuota(db, user);
+        },
+        validateCompletion(answer) {
+          generationGuard.draftValidation = aiReviewDraftSafety(answer);
+          if (!generationGuard.draftValidation.valid) {
+            generationGuard.failure = 'draft_safety_validation_failed';
+            return false;
+          }
+          generationGuard.protocolValidation = aiReviewProtocolValidation(answer, evidenceReferences);
+          generationGuard.citationValidation = aiReviewCitationValidation(generationGuard.protocolValidation);
+          if (!generationGuard.protocolValidation.valid) {
+            generationGuard.failure = 'ai_review_protocol_invalid';
+            return false;
+          }
+          if (!generationGuard.citationValidation.valid) {
+            generationGuard.failure = 'citation_validation_failed';
+            return false;
+          }
+          generationGuard.renderedDraft = aiReviewRenderedDraft(
+            generationGuard.protocolValidation.protocol,
+            evidenceReferences,
+            evidenceProjection
+          );
+          if (!generationGuard.renderedDraft) {
+            generationGuard.failure = 'ai_review_protocol_invalid';
+            return false;
+          }
+          return true;
+        },
+        transformCompletion() {
+          return generationGuard.renderedDraft;
+        },
+        createResponseEnvelope(aiResponse) {
+          return aiReviewGeneratedResult({
+            campaignId: evidence.campaign_id,
+            confidence,
+            evidenceProjection,
+            snapshotHash,
+            citationValidation: generationGuard.citationValidation,
+            draftValidation: generationGuard.draftValidation,
+            protocolValidation: generationGuard.protocolValidation,
+            draft: generationGuard.renderedDraft,
+            ai: aiResponse
+          });
+        },
+        validateBeforePersist() {
+          try {
+            const currentEvidence = performanceService.getReviewEvidence({
+              userId: user.id,
+              campaignId: input && input.campaignId,
+              query: { top_metric: request.topMetric }
+            });
+            const currentReferences = aiReviewEvidenceReferences(currentEvidence);
+            const currentProjection = aiReviewEvidenceProjection(currentEvidence, currentReferences);
+            const currentSnapshotHash = aiReviewSnapshotHash(currentProjection);
+            generationGuard.currentEvidence = currentEvidence;
+            generationGuard.currentProjection = currentProjection;
+            generationGuard.currentSnapshotHash = currentSnapshotHash;
+            if (
+              !currentEvidence ||
+              !currentEvidence.rankings ||
+              currentEvidence.rankings.status !== 'available' ||
+              currentSnapshotHash !== snapshotHash
+            ) {
+              generationGuard.failure = 'stale_snapshot';
+              return false;
+            }
+            return true;
+          } catch (_error) {
+            generationGuard.failure = 'stale_snapshot';
+            return false;
+          }
+        },
+        terminalRejection() {
+          if (generationGuard.failure === 'stale_snapshot') {
+            return aiReviewStaleResult({
+              campaignId: evidence.campaign_id,
+              evidence,
+              evidenceProjection,
+              snapshotHash,
+              currentEvidence: generationGuard.currentEvidence,
+              currentProjection: generationGuard.currentProjection,
+              currentSnapshotHash: generationGuard.currentSnapshotHash
+            });
+          }
+          return aiReviewWithheldResult({
+            campaignId: evidence.campaign_id,
+            confidence,
+            evidenceProjection,
+            snapshotHash,
+            reasonCode: generationGuard.failure || 'ai_review_unavailable',
+            citationValidation: generationGuard.citationValidation,
+            draftValidation: generationGuard.draftValidation,
+            protocolValidation: generationGuard.protocolValidation
+          });
+        }
+      }));
+    } catch (error) {
+      if (error && error.name === 'AIServiceError' && Number.isSafeInteger(error.statusCode)) {
+        if (generationGuard.failure === 'stale_snapshot') {
+          return aiReviewStaleResult({
+            campaignId: evidence.campaign_id,
+            evidence,
+            evidenceProjection,
+            snapshotHash,
+            currentEvidence: generationGuard.currentEvidence,
+            currentProjection: generationGuard.currentProjection,
+            currentSnapshotHash: generationGuard.currentSnapshotHash
+          });
+        }
+        if (
+          generationGuard.failure === 'citation_validation_failed' ||
+          generationGuard.failure === 'draft_safety_validation_failed' ||
+          generationGuard.failure === 'ai_review_protocol_invalid'
+        ) {
+          return aiReviewWithheldResult({
+            campaignId: evidence.campaign_id,
+            confidence,
+            evidenceProjection,
+            snapshotHash,
+            reasonCode: generationGuard.failure,
+            citationValidation: generationGuard.citationValidation,
+            draftValidation: generationGuard.draftValidation,
+            protocolValidation: generationGuard.protocolValidation
+          });
+        }
+        if (error.code === 'AI_PROVIDER_UNAVAILABLE') {
+          return aiReviewWithheldResult({
+            campaignId: evidence.campaign_id,
+            confidence,
+            evidenceProjection,
+            snapshotHash,
+            reasonCode: 'ai_review_unavailable'
+          });
+        }
+        throw aiReviewError(error.statusCode, error.code || 'PERFORMANCE_AI_REVIEW_FAILED', error.message);
+      }
+      throw error;
+    }
+    if (ai && (ai.status === 'withheld' || ai.status === 'stale_snapshot')) return ai;
+    const replayedResult = aiReviewReplayEnvelope(ai);
+    if (replayedResult) return replayedResult;
+    if (!ai || ai.degraded === true || ai.status !== 'succeeded' || (ai.web_search && ai.web_search.used === true)) {
+      return aiReviewWithheldResult({
+        campaignId: evidence.campaign_id,
+        confidence,
+        evidenceProjection,
+        snapshotHash,
+        reasonCode: 'ai_review_unavailable',
+        ai
+      });
+    }
+    const protocolValidation = generationGuard.protocolValidation || aiReviewProtocolValidation(ai.answer, evidenceReferences);
+    const citationValidation = generationGuard.citationValidation || aiReviewCitationValidation(protocolValidation);
+    const draftValidation = generationGuard.draftValidation || aiReviewDraftSafety(ai.answer);
+    if (!protocolValidation.valid || !citationValidation.valid || !draftValidation.valid) {
+      return aiReviewWithheldResult({
+        campaignId: evidence.campaign_id,
+        confidence,
+        evidenceProjection,
+        snapshotHash,
+        reasonCode: !draftValidation.valid
+          ? 'draft_safety_validation_failed'
+          : !protocolValidation.valid
+            ? 'ai_review_protocol_invalid'
+            : 'citation_validation_failed',
+        citationValidation,
+        draftValidation,
+        protocolValidation,
+        ai
+      });
+    }
+    return aiReviewGeneratedResult({
+      campaignId: evidence.campaign_id,
+      confidence,
+      evidenceProjection,
+      snapshotHash,
+      citationValidation,
+      draftValidation,
+      protocolValidation,
+      draft: generationGuard.renderedDraft || ai.answer || '',
+      ai
+    });
+  }
+
+  return Object.freeze({ createDraft });
+}
+
 module.exports = {
   ACTION_POLICIES,
   PerformanceManualServiceError,
-  createPerformanceManualService
+  PerformanceAiReviewServiceError,
+  createPerformanceManualService,
+  createPerformanceAiReviewService
 };

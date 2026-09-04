@@ -142,6 +142,7 @@ function buildLinkedRagContext(db, opts) {
     limit: LINKED_RAG_LIMITS.retrievalCandidates,
     entry_type: opts.entry_type,
     source_type: opts.source_type,
+    quality_state: opts.quality_state,
     visibility: opts.visibility,
     business_type: opts.business_type,
     business_id: opts.business_id,

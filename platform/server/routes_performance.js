@@ -2,7 +2,9 @@
 
 const {
   PerformanceManualServiceError,
-  createPerformanceManualService
+  PerformanceAiReviewServiceError,
+  createPerformanceManualService,
+  createPerformanceAiReviewService
 } = require('./services/performance_manual_service');
 const {
   PerformanceFeishuConnectionServiceError,
@@ -17,7 +19,8 @@ function requestId(request) {
 
 function sendError(request, response, error) {
   const known = error instanceof PerformanceManualServiceError ||
-    error instanceof PerformanceFeishuConnectionServiceError;
+    error instanceof PerformanceFeishuConnectionServiceError ||
+    error instanceof PerformanceAiReviewServiceError;
   const status = known ? error.statusCode : 500;
   const body = {
     error: known ? error.message : 'Performance request failed.',
@@ -34,6 +37,12 @@ function sendResult(request, response, payload) {
 
 function authenticatedUserId(request) {
   return request.user && request.user.id;
+}
+
+function requestHeader(request, name) {
+  if (request && typeof request.get === 'function') return request.get(name);
+  const headers = request && request.headers && typeof request.headers === 'object' ? request.headers : {};
+  return headers[String(name || '').toLowerCase()] || null;
 }
 
 function registerPerformanceRoutes(app, options = {}) {
@@ -55,6 +64,16 @@ function registerPerformanceRoutes(app, options = {}) {
     typeof feishuConnectionService.approveDraft !== 'function') {
     throw new TypeError('A performance Feishu connection service is required.');
   }
+  const aiReviewService = options.aiReviewService || createPerformanceAiReviewService(options.db, {
+    performanceService: service,
+    aiService: options.aiService
+  });
+  if (!aiReviewService || typeof aiReviewService.createDraft !== 'function') {
+    throw new TypeError('A performance AI review service is required.');
+  }
+  const aiLimiter = typeof options.aiLimiter === 'function'
+    ? options.aiLimiter
+    : (_request, _response, next) => next();
 
   app.get('/api/campaigns/:id/performance/contents', options.authMiddleware, (request, response) => {
     try {
@@ -197,6 +216,26 @@ function registerPerformanceRoutes(app, options = {}) {
       return sendError(request, response, error);
     }
   });
+
+  app.post(
+    '/api/campaigns/:id/performance/ai-review-draft',
+    options.authMiddleware,
+    aiLimiter,
+    async (request, response) => {
+      try {
+        const result = await aiReviewService.createDraft({
+          user: request.user,
+          campaignId: request.params.id,
+          body: request.body,
+          idempotencyKey: requestHeader(request, 'Idempotency-Key'),
+          requestId: requestId(request)
+        });
+        return sendResult(request, response, result);
+      } catch (error) {
+        return sendError(request, response, error);
+      }
+    }
+  );
 }
 
 module.exports = registerPerformanceRoutes;

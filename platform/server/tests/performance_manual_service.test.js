@@ -5,7 +5,8 @@ const Database = require('better-sqlite3');
 const migration = require('../migrations/010_performance_manual_foundation');
 const {
   PerformanceManualServiceError,
-  createPerformanceManualService
+  createPerformanceManualService,
+  createPerformanceAiReviewService
 } = require('../services/performance_manual_service');
 
 function createFixture() {
@@ -87,6 +88,67 @@ function confirmedCommercialInput() {
     attribution_model: 'last_touch',
     attribution_window: '30_days'
   };
+}
+
+function addComparableReviewData(service, options = {}) {
+  const strongest = addCanonicalVideo(service);
+  const weakest = service.createContent({
+    userId: 1,
+    campaignId: 7,
+    body: {
+      url: 'https://www.youtube.com/watch?v=aBcDeFgHiJ1',
+      creator_name: 'Creator Two',
+      creator_id: 'creator-2',
+      product: 'Merach S19',
+      tags: ['launch', 'review']
+    }
+  }).content;
+  service.recordManualInput({
+    userId: 1,
+    campaignId: 7,
+    contentId: strongest.id,
+    body: Object.assign({
+      observation: { views: 4200, likes: 210, comments: 40, saves: 30, shares: 20 },
+      correction_reason: 'Current strongest observation'
+    }, options.withCommercial ? { commercial: confirmedCommercialInput(), confirmed: true } : {})
+  });
+  service.recordManualInput({
+    userId: 1,
+    campaignId: 7,
+    contentId: weakest.id,
+    body: {
+      observation: { views: 800, likes: 16, comments: 4, saves: 1, shares: 0 },
+      correction_reason: 'Current weakest observation'
+    }
+  });
+  return { strongest, weakest };
+}
+
+function rejectedAiCompletion() {
+  const error = new Error('DeepSeek is unavailable for linked AI chat.');
+  error.name = 'AIServiceError';
+  error.statusCode = 503;
+  error.code = 'AI_PROVIDER_UNAVAILABLE';
+  return error;
+}
+
+function validateFakeAiReviewCompletion(input, answer) {
+  if (typeof input.validateCompletion === 'function' && input.validateCompletion(answer) !== true) {
+    throw rejectedAiCompletion();
+  }
+  if (typeof input.validateBeforePersist === 'function' && input.validateBeforePersist(answer) !== true) {
+    throw rejectedAiCompletion();
+  }
+}
+
+function aiReviewProtocol(strongest, weakest, options = {}) {
+  return JSON.stringify({
+    contract_version: 1,
+    top_evidence_ids: [`PERF-${strongest.id}`],
+    bottom_evidence_ids: [`PERF-${weakest.id}`],
+    experiment_types: options.experiment_types || ['data_coverage', 'cohort_comparison'],
+    human_confirmation: 'required'
+  });
 }
 
 test('creates one campaign-scoped canonical content record and preserves its original URL', () => {
@@ -757,6 +819,337 @@ test('withholds content rankings when the selected metric has less than eighty p
     assert.deepEqual(review.rankings.top_contents, []);
     assert.deepEqual(review.rankings.bottom_contents, []);
     assert.equal(review.limitations.some((item) => item.code === 'ranking_coverage_insufficient'), true);
+  } finally {
+    db.close();
+  }
+});
+
+test('uses disjoint performance cohorts for two through five comparable records', () => {
+  for (const recordCount of [2, 3, 4, 5]) {
+    const { db, service } = createFixture();
+    try {
+      for (let index = 0; index < recordCount; index += 1) {
+        const content = service.createContent({
+          userId: 1,
+          campaignId: 7,
+          body: {
+            url: `https://www.youtube.com/watch?v=${String(index + 1).padStart(11, 'A')}`,
+            creator_name: `Cohort Creator ${index + 1}`
+          }
+        }).content;
+        service.recordManualInput({
+          userId: 1,
+          campaignId: 7,
+          contentId: content.id,
+          body: { observation: { views: 1000 + index * 100 } }
+        });
+      }
+      const review = service.getReviewEvidence({
+        userId: 1,
+        campaignId: 7,
+        query: { top_metric: 'views' }
+      });
+      const topIds = review.rankings.top_contents.map((item) => item.content.id);
+      const bottomIds = review.rankings.bottom_contents.map((item) => item.content.id);
+      const expectedCohortSize = Math.floor(recordCount / 2);
+
+      assert.equal(topIds.length, expectedCohortSize, `${recordCount} records: top cohort size`);
+      assert.equal(bottomIds.length, expectedCohortSize, `${recordCount} records: bottom cohort size`);
+      assert.deepEqual(topIds.filter((id) => bottomIds.includes(id)), [], `${recordCount} records: cohorts overlap`);
+    } finally {
+      db.close();
+    }
+  }
+});
+
+test('generates an evidence-bound AI review draft without sending commercial or URL fields to the model', async () => {
+  const { db, service } = createFixture();
+  try {
+    const { strongest, weakest } = addComparableReviewData(service, { withCommercial: true });
+    const requests = [];
+    const aiReviewService = createPerformanceAiReviewService(db, {
+      performanceService: service,
+      aiService: {
+        async handleChat(_database, input) {
+          requests.push(input);
+          const response = {
+            conversation_id: 31,
+            message_id: 32,
+            answer: aiReviewProtocol(strongest, weakest),
+            model: 'deepseek-test',
+            usage: { total_tokens: 99 },
+            latency_ms: 12,
+            knowledge_references: [],
+            web_search: { used: false },
+            summary_promotion: { status: 'retained_only', reason: 'disabled' },
+            archived_summary_id: null,
+            degraded: false,
+            status: 'succeeded'
+          };
+          validateFakeAiReviewCompletion(input, response.answer);
+          return response;
+        }
+      }
+    });
+
+    const result = await aiReviewService.createDraft({
+      user: { id: 1, role: 'admin' },
+      campaignId: 7,
+      body: { top_metric: 'views' },
+      idempotencyKey: 'ai-review-test-1',
+      requestId: 'ai-review-request-1'
+    });
+
+    assert.equal(result.status, 'generated');
+    assert.equal(result.analysis.mode, 'metadata_only');
+    assert.equal(result.analysis.web_search.used, false);
+    assert.equal(result.analysis.knowledge_promotion.status, 'not_started');
+    assert.equal(result.confidence.level, 'medium');
+    assert.match(result.confidence.detail, /2\/2/);
+    assert.equal(result.evidence.citation_validation.valid, true);
+    assert.equal(result.evidence.draft_validation.valid, true);
+    assert.match(result.evidence.snapshot_hash, /^[a-f0-9]{64}$/);
+    assert.match(result.draft, new RegExp(`\\[PERF-${strongest.id}\\]`));
+    assert.match(result.draft, new RegExp(`\\[PERF-${weakest.id}\\]`));
+    assert.doesNotMatch(result.draft, /contract_version|top_evidence_ids/);
+    assert.equal(result.ai.conversation_id, 31);
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].allowWeb, false);
+    assert.equal(requests[0].archiveSummary, false);
+    assert.equal(requests[0].source_module, 'performance_review');
+    assert.equal(requests[0].entry_type, 'performance_review_methodology');
+    assert.equal(requests[0].source_type, 'performance_review_methodology');
+    assert.equal(requests[0].quality_state, 'confirmed');
+    assert.equal(requests[0].business_type, 'campaign');
+    assert.equal(requests[0].business_id, '7');
+    assert.equal(Object.hasOwn(requests[0], 'knowledge_entry_ids'), false);
+    assert.doesNotMatch(requests[0].message, /confirmed_commercial|creator_fee|attributed_revenue|\"roi\"|\"roas\"/i);
+    assert.doesNotMatch(requests[0].message, /https?:\/\//i);
+  } finally {
+    db.close();
+  }
+});
+
+test('does not call AI when current performance evidence cannot support a comparable ranking', async () => {
+  const { db, service } = createFixture();
+  try {
+    const observed = addCanonicalVideo(service);
+    service.createContent({
+      userId: 1,
+      campaignId: 7,
+      body: { url: 'https://www.youtube.com/watch?v=aBcDeFgHiJ1', creator_name: 'Missing Snapshot Creator' }
+    });
+    service.recordManualInput({
+      userId: 1,
+      campaignId: 7,
+      contentId: observed.id,
+      body: { observation: { views: 1200, likes: 48, comments: 12 } }
+    });
+    let callCount = 0;
+    const aiReviewService = createPerformanceAiReviewService(db, {
+      performanceService: service,
+      aiService: { async handleChat() { callCount += 1; throw new Error('must not run'); } }
+    });
+
+    const result = await aiReviewService.createDraft({
+      user: { id: 1, role: 'admin' },
+      campaignId: 7,
+      body: { top_metric: 'views' },
+      idempotencyKey: 'ai-review-test-2',
+      requestId: 'ai-review-request-2'
+    });
+
+    assert.equal(result.status, 'not_ready');
+    assert.equal(result.reason_code, 'insufficient_comparable_data');
+    assert.equal(result.draft, null);
+    assert.equal(result.ai, null);
+    assert.equal(callCount, 0);
+  } finally {
+    db.close();
+  }
+});
+
+test('withholds AI review drafts that fail citation or content-boundary validation', async () => {
+  const { db, service } = createFixture();
+  try {
+    const { strongest, weakest } = addComparableReviewData(service);
+    const aiReviewService = createPerformanceAiReviewService(db, {
+      performanceService: service,
+      aiService: {
+        async handleChat(_database, input) {
+          const response = {
+            conversation_id: 41,
+            message_id: 42,
+            answer: `The call to action drove conversions [PERF-${strongest.id}] while [PERF-${weakest.id}] needs attention; 需人工确认。`,
+            model: 'deepseek-test',
+            usage: {},
+            latency_ms: 10,
+            knowledge_references: [],
+            web_search: { used: false },
+            summary_promotion: { status: 'retained_only' },
+            degraded: false,
+            status: 'succeeded'
+          };
+          validateFakeAiReviewCompletion(input, response.answer);
+          return response;
+        }
+      }
+    });
+
+    const result = await aiReviewService.createDraft({
+      user: { id: 1, role: 'admin' },
+      campaignId: 7,
+      body: { top_metric: 'views' },
+      idempotencyKey: 'ai-review-test-3',
+      requestId: 'ai-review-request-3'
+    });
+
+    assert.equal(result.status, 'withheld');
+    assert.equal(result.reason_code, 'draft_safety_validation_failed');
+    assert.equal(result.draft, null);
+    assert.equal(result.ai, null);
+    assert.equal(result.evidence.draft_validation.causal_media_claim_detected, true);
+  } finally {
+    db.close();
+  }
+});
+
+test('withholds AI review drafts when the protocol reuses one item across opposing cohorts', async () => {
+  const { db, service } = createFixture();
+  try {
+    const { strongest } = addComparableReviewData(service);
+    const aiReviewService = createPerformanceAiReviewService(db, {
+      performanceService: service,
+      aiService: {
+        async handleChat(_database, input) {
+          const response = {
+            conversation_id: 46,
+            message_id: 47,
+            answer: aiReviewProtocol(strongest, strongest),
+            model: 'deepseek-test',
+            usage: {},
+            latency_ms: 10,
+            knowledge_references: [],
+            web_search: { used: false },
+            summary_promotion: { status: 'retained_only' },
+            degraded: false,
+            status: 'succeeded'
+          };
+          validateFakeAiReviewCompletion(input, response.answer);
+          return response;
+        }
+      }
+    });
+
+    const result = await aiReviewService.createDraft({
+      user: { id: 1, role: 'admin' },
+      campaignId: 7,
+      body: { top_metric: 'views' },
+      idempotencyKey: 'ai-review-test-overlap',
+      requestId: 'ai-review-request-overlap'
+    });
+
+    assert.equal(result.status, 'withheld');
+    assert.equal(result.reason_code, 'ai_review_protocol_invalid');
+    assert.deepEqual(result.evidence.protocol_validation.overlapping, [`PERF-${strongest.id}`]);
+  } finally {
+    db.close();
+  }
+});
+
+test('withholds a generated AI review draft when the performance evidence changes before it can be shown', async () => {
+  const { db, service } = createFixture();
+  try {
+    const { strongest, weakest } = addComparableReviewData(service);
+    let evidenceReadCount = 0;
+    const performanceService = {
+      getReviewEvidence(input) {
+        const evidence = service.getReviewEvidence(input);
+        evidenceReadCount += 1;
+        if (evidenceReadCount > 1) {
+          return Object.assign({}, evidence, {
+            records: Object.assign({}, evidence.records, { total: evidence.records.total + 1 })
+          });
+        }
+        return evidence;
+      }
+    };
+    const aiReviewService = createPerformanceAiReviewService(db, {
+      performanceService,
+      aiService: {
+        async handleChat(_database, input) {
+          const response = {
+            conversation_id: 51,
+            message_id: 52,
+            answer: aiReviewProtocol(strongest, weakest),
+            model: 'deepseek-test',
+            usage: {},
+            latency_ms: 10,
+            knowledge_references: [],
+            web_search: { used: false },
+            summary_promotion: { status: 'retained_only' },
+            degraded: false,
+            status: 'succeeded'
+          };
+          validateFakeAiReviewCompletion(input, response.answer);
+          return response;
+        }
+      }
+    });
+
+    const result = await aiReviewService.createDraft({
+      user: { id: 1, role: 'admin' },
+      campaignId: 7,
+      body: { top_metric: 'views' },
+      idempotencyKey: 'ai-review-test-4',
+      requestId: 'ai-review-request-4'
+    });
+
+    assert.equal(result.status, 'stale_snapshot');
+    assert.equal(result.reason_code, 'review_evidence_changed');
+    assert.equal(result.draft, null);
+    assert.equal(result.ai, null);
+  } finally {
+    db.close();
+  }
+});
+
+test('withholds provider-degraded AI review output instead of returning an unsafe draft', async () => {
+  const { db, service } = createFixture();
+  try {
+    addComparableReviewData(service);
+    const aiReviewService = createPerformanceAiReviewService(db, {
+      performanceService: service,
+      aiService: {
+        async handleChat() {
+          return {
+            conversation_id: 61,
+            message_id: 62,
+            answer: 'Provider fallback content',
+            model: 'fallback',
+            usage: {},
+            latency_ms: 10,
+            knowledge_references: [],
+            web_search: { used: false },
+            summary_promotion: { status: 'retained_only' },
+            degraded: true,
+            status: 'succeeded'
+          };
+        }
+      }
+    });
+
+    const result = await aiReviewService.createDraft({
+      user: { id: 1, role: 'admin' },
+      campaignId: 7,
+      body: { top_metric: 'views' },
+      idempotencyKey: 'ai-review-test-5',
+      requestId: 'ai-review-request-5'
+    });
+
+    assert.equal(result.status, 'withheld');
+    assert.equal(result.reason_code, 'ai_review_unavailable');
+    assert.equal(result.draft, null);
   } finally {
     db.close();
   }

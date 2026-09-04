@@ -1339,7 +1339,7 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
       </div>
       <div class="tm-performance-field tm-performance-metric-select">
         <label for="performanceTopMetric">TOP 内容排序</label>
-        <select id="performanceTopMetric" aria-label="选择内容排序指标" onchange="loadPerformanceDashboard();loadPerformanceReviewEvidence()">
+        <select id="performanceTopMetric" aria-label="选择内容排序指标" onchange="handlePerformanceTopMetricChange()">
           <option value="views">播放量</option>
           <option value="likes">点赞数</option>
           <option value="comments">评论数</option>
@@ -1394,11 +1394,24 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
           <h3 id="performanceReviewTitle">复盘依据</h3>
           <p class="tm-metric-note">基于当前活动已录入的指标快照，先确认数据范围与比较条件。</p>
         </div>
-        <button class="btn btn-outline btn-sm" type="button" onclick="loadPerformanceReviewEvidence()">刷新复盘依据</button>
+        <button class="btn btn-outline btn-sm" type="button" onclick="refreshPerformanceReviewEvidence()">刷新复盘依据</button>
       </div>
       <p id="performanceReviewStatus" class="tm-metric-note" role="status" aria-live="polite">选择活动后加载复盘依据。</p>
       <div id="performanceReviewEvidence" class="tm-performance-review-body" aria-live="polite">
         <div class="tm-state-empty">暂无复盘依据。</div>
+      </div>
+      <div class="tm-performance-ai-review" aria-labelledby="performanceAiReviewTitle">
+        <div class="tm-performance-ai-review-heading">
+          <div>
+            <h4 id="performanceAiReviewTitle">AI 复盘草稿</h4>
+            <p class="tm-metric-note">仅根据当前录入指标生成内部草稿，需人工确认；不读取视频素材、不联网、不自动沉淀知识库。</p>
+          </div>
+          <button id="performanceAiReviewGenerate" class="btn btn-primary btn-sm" type="button" onclick="generatePerformanceAiReviewDraft()">生成 AI 复盘草稿</button>
+        </div>
+        <p id="performanceAiReviewStatus" class="tm-metric-note" role="status" aria-live="polite">确认复盘依据后可生成草稿。</p>
+        <div id="performanceAiReviewDraft" class="tm-performance-ai-review-body" aria-live="polite">
+          <div class="tm-state-empty">确认当前数据范围后，可生成仅供内部确认的 AI 复盘草稿。</div>
+        </div>
       </div>
     </section>
   </div>

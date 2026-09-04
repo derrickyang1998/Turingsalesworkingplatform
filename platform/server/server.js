@@ -70,7 +70,10 @@ const { createCampaignPptService } = require('./services/campaign_ppt_service');
 const {
   createCampaignCollaborationService
 } = require('./services/campaign_collaboration_service');
-const { createPerformanceManualService } = require('./services/performance_manual_service');
+const {
+  createPerformanceManualService,
+  createPerformanceAiReviewService
+} = require('./services/performance_manual_service');
 const { createPerformanceFeishuConnectionService } = require('./services/performance_feishu_connection_service');
 const registerCampaignRoutes = require('./routes_campaigns');
 const registerPerformanceRoutes = require('./routes_performance');
@@ -159,6 +162,10 @@ const campaignPptService = createCampaignPptService(db, {
 });
 const campaignCollaborationService = createCampaignCollaborationService(db);
 const performanceManualService = createPerformanceManualService(db);
+const performanceAiReviewService = createPerformanceAiReviewService(db, {
+  performanceService: performanceManualService,
+  aiService
+});
 const performanceFeishuConnectionService = createPerformanceFeishuConnectionService(db);
 const campaignPptBridgeHandler = createCampaignPptBridgeHandler(campaignPptService);
 let campaignPptJanitor = null;
@@ -186,6 +193,7 @@ const phase4PolicyNames = [
   'CAMPAIGN_PERFORMANCE_CONTENT_LIST',
   'CAMPAIGN_PERFORMANCE_DASHBOARD',
   'CAMPAIGN_PERFORMANCE_REVIEW_EVIDENCE',
+  'CAMPAIGN_PERFORMANCE_AI_REVIEW_DRAFT',
   'CAMPAIGN_PERFORMANCE_INTEGRATION_PREVIEW',
   'CAMPAIGN_PERFORMANCE_FEISHU_CONNECTION_GET',
   'CAMPAIGN_PERFORMANCE_CONTENT_CREATE',
@@ -1520,7 +1528,10 @@ registerCampaignRoutes(app, db);
 registerPerformanceRoutes(app, {
   authMiddleware,
   service: performanceManualService,
-  feishuConnectionService: performanceFeishuConnectionService
+  feishuConnectionService: performanceFeishuConnectionService,
+  aiReviewService: performanceAiReviewService,
+  aiLimiter,
+  aiQuotaGuard
 });
 require('./routes_brands')(app, db, authMiddleware, aiLimiter, aiQuotaGuard);
 

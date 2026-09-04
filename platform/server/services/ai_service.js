@@ -16,6 +16,7 @@ const LINKED_IDEMPOTENCY_KEY = /^[A-Za-z0-9._:-]{8,200}$/;
 const SUMMARY_PROMOTION_POLICY_VERSION = 'ai-summary-promotion-v1';
 const SUMMARY_PROMOTION_MIN_QUESTION_LENGTH = 8;
 const SUMMARY_PROMOTION_MIN_ANSWER_LENGTH = 240;
+const PERFORMANCE_REVIEW_IDEMPOTENCY_CONTRACT = 'performance-ai-review-draft-v1';
 const aiCostSqlDatabases = new WeakSet();
 
 function canAccessConversation(user, conversation) {
@@ -606,6 +607,172 @@ function providerUnavailableError() {
   return serviceError(503, 'AI_PROVIDER_UNAVAILABLE', 'DeepSeek is unavailable for linked AI chat.');
 }
 
+function completionRejectedError() {
+  return serviceError(422, 'AI_COMPLETION_REJECTED', 'Linked AI completion was rejected before persistence.');
+}
+
+function completionUsage(completion) {
+  const source = completion && completion.usage && typeof completion.usage === 'object'
+    ? completion.usage
+    : {};
+  const count = (value) => {
+    const parsed = Number(value);
+    return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : 0;
+  };
+  return {
+    prompt_tokens: count(source.prompt_tokens),
+    completion_tokens: count(source.completion_tokens),
+    total_tokens: count(source.total_tokens)
+  };
+}
+
+function recordLinkedTokenUsageInTransaction(db, user, completion, requestedModel, endpoint, recordZeroUsage) {
+  const usage = completionUsage(completion);
+  if (!recordZeroUsage && !usage.total_tokens && !usage.prompt_tokens && !usage.completion_tokens) {
+    return Object.assign({ id: null }, usage);
+  }
+  const result = db.prepare(`
+    INSERT INTO token_usage (
+      user_id,model,prompt_tokens,completion_tokens,total_tokens,endpoint
+    ) VALUES (?,?,?,?,?,?)
+  `).run(
+    user.id,
+    resolveCompletionModel(completion, requestedModel),
+    usage.prompt_tokens,
+    usage.completion_tokens,
+    usage.total_tokens,
+    endpoint
+  );
+  return Object.assign({ id: Number(result.lastInsertRowid) }, usage);
+}
+
+function linkedTerminalRejectionResult(opts, stage, completion) {
+  if (!opts || typeof opts.terminalRejection !== 'function') return null;
+  let result;
+  try {
+    result = opts.terminalRejection({
+      stage,
+      model: resolveCompletionModel(completion, opts.model),
+      usage: completionUsage(completion)
+    });
+  } catch (_error) {
+    return null;
+  }
+  if (result === null || typeof result !== 'object' || Array.isArray(result)) return null;
+  if (!['withheld', 'stale_snapshot'].includes(result.status)) return null;
+  return result;
+}
+
+function linkedTerminalAuditValues(opts, stage, responseBody, context) {
+  if (!opts || opts.terminalRejectionAudit !== true) return null;
+  const outcome = responseBody && responseBody.status;
+  const reasonCode = responseBody && responseBody.reason_code;
+  const allowedStages = new Set([
+    'completion_validation',
+    'completion_transformation',
+    'persistence_validation',
+    'provider_unavailable'
+  ]);
+  const allowedReasons = new Set([
+    'draft_safety_validation_failed',
+    'ai_review_protocol_invalid',
+    'citation_validation_failed',
+    'ai_review_unavailable',
+    'review_evidence_changed'
+  ]);
+  if (
+    !context ||
+    !Number.isSafeInteger(context.organizationId) || context.organizationId <= 0 ||
+    !Number.isSafeInteger(context.campaignId) || context.campaignId <= 0 ||
+    !Number.isSafeInteger(context.actorUserId) || context.actorUserId <= 0 ||
+    !['withheld', 'stale_snapshot'].includes(outcome) ||
+    !allowedReasons.has(reasonCode) ||
+    !allowedStages.has(stage) ||
+    (outcome === 'stale_snapshot' && (
+      reasonCode !== 'review_evidence_changed' || stage !== 'persistence_validation'
+    ))
+  ) return false;
+  return {
+    organizationId: context.organizationId,
+    campaignId: context.campaignId,
+    actorUserId: context.actorUserId,
+    outcome,
+    reasonCode,
+    stage
+  };
+}
+
+function isLinkedCampaignAccessError(error) {
+  return !!error && ['CAMPAIGN_FORBIDDEN', 'CAMPAIGN_NOT_FOUND'].includes(error.code);
+}
+
+function insertLinkedTerminalAuditInTransaction(db, reservation, tokenUsage, audit) {
+  db.prepare(`
+    INSERT INTO performance_ai_review_audits (
+      request_idempotency_id,token_usage_id,org_id,campaign_id,actor_user_id,
+      audit_fingerprint,outcome,reason_code,stage
+    ) VALUES (?,?,?,?,?,?,?,?,?)
+  `).run(
+    reservation.ledgerId,
+    tokenUsage.id,
+    audit.organizationId,
+    audit.campaignId,
+    audit.actorUserId,
+    reservation.auditFingerprint,
+    audit.outcome,
+    audit.reasonCode,
+    audit.stage
+  );
+}
+
+function completeLinkedTerminalRejection(
+  db,
+  reservation,
+  requestHashValue,
+  opts,
+  linked,
+  auditContext,
+  stage,
+  completion
+) {
+  const responseBody = linkedTerminalRejectionResult(opts, stage, completion);
+  if (!responseBody) return null;
+  const audit = linkedTerminalAuditValues(opts, stage, responseBody, auditContext);
+  if (audit === false) return null;
+  try {
+    db.transaction(() => {
+      const currentAccess = requireLinkedCampaignAccess(db, opts.user.id, linked.campaignId);
+      const currentAudit = audit && Object.assign({}, audit, {
+        organizationId: currentAccess.campaign.org_id,
+        campaignId: linked.campaignId,
+        actorUserId: opts.user.id
+      });
+      const tokenUsage = recordLinkedTokenUsageInTransaction(
+        db,
+        opts.user,
+        completion,
+        opts.model,
+        'ai_chat_linked_rejected',
+        true
+      );
+      if (currentAudit) insertLinkedTerminalAuditInTransaction(db, reservation, tokenUsage, currentAudit);
+      idempotency.completeJsonInTransaction(db, {
+        ledgerId: reservation.ledgerId,
+        requestHash: requestHashValue,
+        leaseToken: reservation.leaseToken,
+        statusCode: 200,
+        responseBody
+      });
+    }).immediate();
+  } catch (error) {
+    if (isLinkedCampaignAccessError(error)) {
+      completeLinkedFailure(db, reservation, requestHashValue, opts.requestId, error);
+    }
+    throw error;
+  }
+  return responseBody;
+}
+
 function parseSqliteDeadline(value) {
   if (typeof value !== 'string') return NaN;
   return Date.parse(value.replace(' ', 'T') + 'Z');
@@ -685,6 +852,43 @@ function ownValue(object, key) {
   return object && Object.prototype.hasOwnProperty.call(object, key)
     ? object[key]
     : undefined;
+}
+
+function normalizeLinkedResponseEnvelope(value) {
+  if (
+    value === null ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    Object.getPrototypeOf(value) !== Object.prototype
+  ) {
+    return null;
+  }
+  let serialized = '';
+  try {
+    serialized = JSON.stringify(value);
+  } catch (_error) {
+    return null;
+  }
+  if (!serialized || Buffer.byteLength(serialized, 'utf8') > 48000) return null;
+  try {
+    const parsed = JSON.parse(serialized);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+  } catch (_error) {
+    return null;
+  }
+}
+
+function createLinkedResponseEnvelope(opts, response) {
+  if (typeof opts.createResponseEnvelope !== 'function') return null;
+  let envelope = null;
+  try {
+    envelope = opts.createResponseEnvelope(Object.freeze(Object.assign({}, response)));
+  } catch (_error) {
+    throw completionRejectedError();
+  }
+  const normalized = normalizeLinkedResponseEnvelope(envelope);
+  if (!normalized) throw completionRejectedError();
+  return normalized;
 }
 
 function requestedCampaignValue(opts) {
@@ -770,19 +974,54 @@ function normalizeRequestId(opts, key) {
   return `ai-chat:${key.slice(0, 160)}`;
 }
 
+function performanceReviewIdempotencyInput(opts) {
+  const source = opts && opts.performance_review_idempotency_input;
+  if (source === undefined) return null;
+  if (
+    String(opts && opts.source_module || '') !== 'performance_review' ||
+    !source ||
+    typeof source !== 'object' ||
+    Array.isArray(source) ||
+    Object.getPrototypeOf(source) !== Object.prototype ||
+    JSON.stringify(Object.keys(source).sort()) !== JSON.stringify(['contract_version', 'top_metric']) ||
+    source.contract_version !== PERFORMANCE_REVIEW_IDEMPOTENCY_CONTRACT ||
+    typeof source.top_metric !== 'string' ||
+    !source.top_metric.trim() ||
+    source.top_metric.trim().length > 64
+  ) {
+    throw serviceError(
+      500,
+      'AI_REVIEW_IDEMPOTENCY_INPUT_INVALID',
+      'Performance AI review idempotency input is invalid.'
+    );
+  }
+  return Object.freeze({
+    contract_version: source.contract_version,
+    top_metric: source.top_metric.trim()
+  });
+}
+
 function linkedRequestHash(message, linked, ragContext, opts) {
+  const performanceReviewInput = performanceReviewIdempotencyInput(opts);
   return requestHash({
     method: 'POST',
     path: '/api/ai/chat',
     campaignId: linked.campaignId,
     kind: 'json',
-    payload: {
+    payload: performanceReviewInput ? {
+      campaign_id: linked.campaignId,
+      conversation_id: linked.conversationId,
+      source_module: 'performance_review',
+      allow_web: false,
+      performance_review: performanceReviewInput
+    } : {
       message,
       campaign_id: linked.campaignId,
       conversation_id: linked.conversationId,
       source_module: String(opts.source_module || 'assistant'),
       allow_web: opts.allowWeb !== false,
-      knowledge_entry_ids: ragContext.selectedEntryIds
+      knowledge_entry_ids: ragContext.selectedEntryIds,
+      quality_state: String(opts.quality_state || '')
     }
   });
 }
@@ -817,6 +1056,52 @@ function reserveLinkedOperation(db, opts) {
       );
     }
     return disposition;
+  }
+  throw reservationDispositionError(disposition);
+}
+
+function replayLinkedPerformanceReview(db, opts) {
+  opts = opts || {};
+  if (!opts.user || !opts.user.id) throw new Error('User required');
+  if (String(opts.source_module || '') !== 'performance_review') {
+    throw serviceError(500, 'AI_REVIEW_IDEMPOTENCY_INPUT_INVALID', 'Performance AI review source is invalid.');
+  }
+  const linked = resolveLinkedContext(db, opts);
+  if (!linked.linked || !linked.initialLink) {
+    throw serviceError(
+      400,
+      'INVALID_CAMPAIGN_INPUT',
+      'Performance AI review must start a campaign-linked conversation.'
+    );
+  }
+  const key = requireLinkedIdempotencyKey(opts);
+  const requestHashValue = linkedRequestHash('', linked, null, opts);
+  const disposition = db.transaction(() => {
+    const access = requireLinkedCampaignAccess(db, opts.user.id, linked.campaignId);
+    return idempotency.inspectRetained(db, {
+      organizationId: access.campaign.org_id,
+      actorUserId: opts.user.id,
+      campaignId: linked.campaignId,
+      secondaryCampaignId: null,
+      resourceClaim: null,
+      scope: 'ai.conversation.create.linked',
+      key,
+      requestHash: requestHashValue,
+      expectedEventCount: 1,
+      operationTimeoutSeconds: 120
+    });
+  }).immediate();
+  if (disposition.state === 'absent') return null;
+  if (disposition.state === 'replay') {
+    if (disposition.statusCode >= 400) {
+      const body = disposition.responseBody || {};
+      throw serviceError(
+        disposition.statusCode,
+        body.code || 'AI_PROVIDER_UNAVAILABLE',
+        body.error || 'Linked AI chat could not be completed.'
+      );
+    }
+    return disposition.responseBody || null;
   }
   throw reservationDispositionError(disposition);
 }
@@ -1031,6 +1316,15 @@ function persistLinkedChat(db, opts) {
   return db.transaction(() => {
     assertProviderContextActive(opts.providerContext);
     const access = requireLinkedCampaignAccess(db, opts.user.id, opts.linked.campaignId);
+    if (typeof opts.validateBeforePersist === 'function') {
+      let valid = false;
+      try {
+        valid = opts.validateBeforePersist(opts.completion && opts.completion.content) === true;
+      } catch (_error) {
+        valid = false;
+      }
+      if (!valid) throw completionRejectedError();
+    }
     let conversation;
     let link = null;
     if (opts.linked.conversationId !== null) {
@@ -1118,20 +1412,13 @@ function persistLinkedChat(db, opts) {
       opts.user
     );
     db.prepare('UPDATE ai_conversations SET updated_at=datetime(\'now\') WHERE id=?').run(conversation.id);
-    if (usage.total_tokens || usage.prompt_tokens || usage.completion_tokens) {
-      db.prepare(`
-        INSERT INTO token_usage (
-          user_id,model,prompt_tokens,completion_tokens,total_tokens,endpoint
-        ) VALUES (?,?,?,?,?,?)
-      `).run(
-        opts.user.id,
-        completionModel,
-        usage.prompt_tokens || 0,
-        usage.completion_tokens || 0,
-        usage.total_tokens || 0,
-        'ai_chat_linked'
-      );
-    }
+    recordLinkedTokenUsageInTransaction(
+      db,
+      opts.user,
+      opts.completion,
+      opts.model,
+      'ai_chat_linked'
+    );
     if (opts.searchResult.used) {
       webSearch.cacheSearchResultInTransaction(db, opts.webQuery, opts.searchResult);
     }
@@ -1181,6 +1468,8 @@ function persistLinkedChat(db, opts) {
       campaign_id: opts.linked.campaignId
     };
     if (link) response.link_id = link.id;
+    const responseEnvelope = createLinkedResponseEnvelope(opts, response);
+    if (responseEnvelope) response.response_envelope = responseEnvelope;
     idempotency.completeJsonInTransaction(db, {
       ledgerId: opts.reservation.ledgerId,
       requestHash: opts.requestHashValue,
@@ -1197,7 +1486,7 @@ async function handleLinkedChat(db, opts, linked) {
   const retrievalQuery = String(opts.ragQuery || message).trim() || message;
   const webQuery = String(opts.webQuery || retrievalQuery).trim() || retrievalQuery;
   const user = opts.user;
-  requireLinkedCampaignAccess(db, user.id, linked.campaignId);
+  const linkedAccess = requireLinkedCampaignAccess(db, user.id, linked.campaignId);
   if (linked.conversationId !== null) {
     requireLinkedConversationAccess(db, user, linked.conversationId);
   }
@@ -1210,6 +1499,7 @@ async function handleLinkedChat(db, opts, linked) {
       : opts.knowledge_entry_ids,
     entry_type: opts.entry_type,
     source_type: opts.source_type,
+    quality_state: opts.quality_state,
     visibility: opts.visibility,
     business_type: opts.business_type,
     business_id: opts.business_id,
@@ -1218,8 +1508,19 @@ async function handleLinkedChat(db, opts, linked) {
   const key = requireLinkedIdempotencyKey(opts);
   const requestId = normalizeRequestId(opts, key);
   const requestHashValue = linkedRequestHash(message, linked, ragContext, opts);
+  const terminalAuditEnabled = opts.terminalRejectionAudit === true &&
+    opts.source_module === 'performance_review' && linked.initialLink;
+  const terminalOptions = Object.assign({}, opts, {
+    terminalRejectionAudit: terminalAuditEnabled,
+    requestId
+  });
+  const terminalAuditContext = terminalAuditEnabled ? {
+    organizationId: linkedAccess.campaign.org_id,
+    campaignId: linked.campaignId,
+    actorUserId: user.id
+  } : null;
   const reservationInput = {
-    organizationId: requireLinkedCampaignAccess(db, user.id, linked.campaignId).campaign.org_id,
+    organizationId: linkedAccess.campaign.org_id,
     actorUserId: user.id,
     campaignId: linked.campaignId,
     secondaryCampaignId: null,
@@ -1238,6 +1539,22 @@ async function handleLinkedChat(db, opts, linked) {
     reservationInput
   });
   if (reservation.state === 'replay') return reservation.responseBody;
+  if (typeof opts.beforeProvider === 'function') {
+    try {
+      await opts.beforeProvider({
+        db,
+        user,
+        campaignId: linked.campaignId,
+        reservation
+      });
+    } catch (error) {
+      const guardError = error && error.statusCode
+        ? error
+        : serviceError(500, 'AI_PREPARATION_FAILED', 'Linked AI chat could not be prepared.');
+      completeLinkedFailure(db, reservation, requestHashValue, requestId, guardError);
+      throw guardError;
+    }
+  }
   const providerContext = createLinkedProviderContext(reservation, opts.signal);
   const startedAt = Date.now();
   try {
@@ -1278,13 +1595,59 @@ async function handleLinkedChat(db, opts, linked) {
         completion.content.length === 0 ||
         !completionValid
       ) {
+        const terminal = completeLinkedTerminalRejection(
+          db,
+          reservation,
+          requestHashValue,
+          terminalOptions,
+          linked,
+          terminalAuditContext,
+          'completion_validation',
+          completion
+        );
+        if (terminal) return terminal;
         throw providerUnavailableError();
+      }
+      if (typeof opts.transformCompletion === 'function') {
+        let transformed = '';
+        try {
+          transformed = opts.transformCompletion(completion.content);
+        } catch (_error) {
+          transformed = '';
+        }
+        if (typeof transformed !== 'string' || !transformed.trim() || transformed.length > 24000) {
+          const terminal = completeLinkedTerminalRejection(
+            db,
+            reservation,
+            requestHashValue,
+            terminalOptions,
+            linked,
+            terminalAuditContext,
+            'completion_transformation',
+            completion
+          );
+          if (terminal) return terminal;
+          throw providerUnavailableError();
+        }
+        completion = Object.assign({}, completion, { content: transformed.trim() });
       }
       assertProviderContextActive(providerContext);
     } catch (error) {
+      if (isLinkedCampaignAccessError(error)) throw error;
       const providerError = error && error.code === 'AI_PROVIDER_UNAVAILABLE'
         ? error
         : providerUnavailableError();
+      const terminal = completeLinkedTerminalRejection(
+        db,
+        reservation,
+        requestHashValue,
+        terminalOptions,
+        linked,
+        terminalAuditContext,
+        'provider_unavailable',
+        completion
+      );
+      if (terminal) return terminal;
       completeLinkedFailure(db, reservation, requestHashValue, requestId, providerError);
       throw providerError;
     }
@@ -1306,6 +1669,19 @@ async function handleLinkedChat(db, opts, linked) {
         latencyMs: Math.max(0, Date.now() - startedAt)
       });
     } catch (error) {
+      if (error && error.code === 'AI_COMPLETION_REJECTED') {
+        const terminal = completeLinkedTerminalRejection(
+          db,
+          reservation,
+          requestHashValue,
+          terminalOptions,
+          linked,
+          terminalAuditContext,
+          'persistence_validation',
+          completion
+        );
+        if (terminal) return terminal;
+      }
       const terminalError = error && error.statusCode
         ? error
         : serviceError(500, 'AI_PERSISTENCE_FAILED', 'Linked AI chat could not be stored safely.');
@@ -2618,6 +2994,7 @@ function verifyProposalDraftAuditContext(db, opts) {
 
 module.exports = {
   handleChat,
+  replayLinkedPerformanceReview,
   promoteMessageToKnowledge,
   listConversations,
   getConversation,

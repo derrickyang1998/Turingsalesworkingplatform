@@ -12,6 +12,10 @@ const ai = require('../services/ai_service');
 const llm = require('../services/llm_service');
 const webSearch = require('../services/web_search_service');
 const { resolveConversationCampaign } = require('../services/campaign_access_service');
+const {
+  createPerformanceManualService,
+  createPerformanceAiReviewService
+} = require('../services/performance_manual_service');
 
 const SERVER_ROOT = path.resolve(__dirname, '..');
 const MIGRATIONS = Object.freeze([
@@ -42,6 +46,55 @@ const MIGRATIONS = Object.freeze([
     sourcePath: 'migrations/005_knowledge_custody_projection.js',
     engineVersion: 1,
     dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
+  }),
+  Object.freeze({
+    version: 6,
+    name: '006_crm_sales_workspace',
+    sourcePath: 'migrations/006_crm_sales_workspace.js',
+    engineVersion: 1,
+    dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
+  }),
+  Object.freeze({
+    version: 7,
+    name: '007_knowledge_governance',
+    sourcePath: 'migrations/007_knowledge_governance.js',
+    engineVersion: 1,
+    dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
+  }),
+  Object.freeze({
+    version: 8,
+    name: '008_feishu_bitable_outbox',
+    sourcePath: 'migrations/008_feishu_bitable_outbox.js',
+    engineVersion: 1,
+    dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
+  }),
+  Object.freeze({
+    version: 9,
+    name: '009_feishu_bitable_retry_lineage',
+    sourcePath: 'migrations/009_feishu_bitable_retry_lineage.js',
+    engineVersion: 1,
+    dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
+  }),
+  Object.freeze({
+    version: 10,
+    name: '010_performance_manual_foundation',
+    sourcePath: 'migrations/010_performance_manual_foundation.js',
+    engineVersion: 1,
+    dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
+  }),
+  Object.freeze({
+    version: 11,
+    name: '011_performance_feishu_connection_config',
+    sourcePath: 'migrations/011_performance_feishu_connection_config.js',
+    engineVersion: 1,
+    dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
+  }),
+  Object.freeze({
+    version: 12,
+    name: '012_performance_ai_review_audit',
+    sourcePath: 'migrations/012_performance_ai_review_audit.js',
+    engineVersion: 1,
+    dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
   })
 ]);
 
@@ -57,6 +110,44 @@ function openDatabase() {
   });
   return db;
 }
+
+test('migration 012 upgrades an existing v11 database with a terminal AI review audit ledger', () => {
+  const db = new Database(':memory:');
+  try {
+    migrationService.runMigrations(db, {
+      rootDir: SERVER_ROOT,
+      registeredMigrations: MIGRATIONS.slice(0, -1)
+    });
+    assert.equal(db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version, 11);
+
+    migrationService.runMigrations(db, {
+      rootDir: SERVER_ROOT,
+      registeredMigrations: MIGRATIONS
+    });
+    assert.equal(db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version, 12);
+    assert.equal(db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM sqlite_schema
+      WHERE name IN (
+        'performance_ai_review_audits',
+        'idx_performance_ai_review_audits_campaign_created',
+        'performance_ai_review_audits_request_fingerprint_insert'
+      )
+    `).get().count, 3);
+    assert.match(
+      db.prepare("SELECT sql FROM sqlite_schema WHERE name='request_idempotency_legal_transition'").get().sql,
+      /performance_ai_review_audits/
+    );
+
+    migrationService.runMigrations(db, {
+      rootDir: SERVER_ROOT,
+      registeredMigrations: MIGRATIONS
+    });
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM schema_migrations WHERE version=12').get().count, 1);
+  } finally {
+    db.close();
+  }
+});
 
 function createCampaignFixture(db) {
   const identity = db.prepare(`
@@ -267,6 +358,277 @@ function successfulProvider(calls, answer = 'deterministic linked answer') {
     }
   };
 }
+
+test('performance AI review replays its persisted server-rendered envelope for the same idempotency key', async () => {
+  const db = openDatabase();
+  try {
+    const fixture = createCampaignFixture(db);
+    const performanceService = createPerformanceManualService(db);
+    const strongest = performanceService.createContent({
+      userId: fixture.userId,
+      campaignId: fixture.campaignId,
+      body: {
+        url: 'https://www.youtube.com/watch?v=a1B2c3D4e5F',
+        creator_name: 'Review Top Creator',
+        creator_id: 'review-top',
+        product: 'Review Product'
+      }
+    }).content;
+    const weakest = performanceService.createContent({
+      userId: fixture.userId,
+      campaignId: fixture.campaignId,
+      body: {
+        url: 'https://www.youtube.com/watch?v=f6G7h8I9j0K',
+        creator_name: 'Review Bottom Creator',
+        creator_id: 'review-bottom',
+        product: 'Review Product'
+      }
+    }).content;
+    performanceService.recordManualInput({
+      userId: fixture.userId,
+      campaignId: fixture.campaignId,
+      contentId: strongest.id,
+      body: { observation: { views: 4200, likes: 210, comments: 40 } }
+    });
+    performanceService.recordManualInput({
+      userId: fixture.userId,
+      campaignId: fixture.campaignId,
+      contentId: weakest.id,
+      body: { observation: { views: 800, likes: 16, comments: 4 } }
+    });
+
+    const providerCalls = [];
+    const protocol = JSON.stringify({
+      contract_version: 1,
+      top_evidence_ids: [`PERF-${strongest.id}`],
+      bottom_evidence_ids: [`PERF-${weakest.id}`],
+      experiment_types: ['data_coverage', 'cohort_comparison'],
+      human_confirmation: 'required'
+    });
+    const aiReviewService = createPerformanceAiReviewService(db, {
+      performanceService,
+      aiService: {
+        replayLinkedPerformanceReview: ai.replayLinkedPerformanceReview,
+        handleChat(database, input) {
+          return ai.handleChat(database, Object.assign({}, input, {
+            provider: successfulProvider(providerCalls, protocol)
+          }));
+        }
+      }
+    });
+    const input = {
+      user: fixture.user,
+      campaignId: fixture.campaignId,
+      body: { top_metric: 'views' },
+      idempotencyKey: 'performance-ai-review-replay-0001',
+      requestId: 'performance-ai-review-replay-request-0001'
+    };
+
+    const created = await aiReviewService.createDraft(input);
+    performanceService.recordManualInput({
+      userId: fixture.userId,
+      campaignId: fixture.campaignId,
+      contentId: strongest.id,
+      body: {
+        observation: {
+          views: 9000,
+          likes: 360,
+          comments: 72,
+          observed_at: '2027-09-03T12:00:00.000Z'
+        }
+      }
+    });
+    for (let index = 0; index < 3; index += 1) {
+      performanceService.createContent({
+        userId: fixture.userId,
+        campaignId: fixture.campaignId,
+        body: {
+          url: `https://www.youtube.com/watch?v=z${String(index + 1).padStart(10, '0')}`,
+          creator_name: `Late unobserved creator ${index + 1}`
+        }
+      });
+    }
+    const replayed = await aiReviewService.createDraft(input);
+
+    assert.equal(created.status, 'generated');
+    assert.deepEqual(replayed, created);
+    assert.equal(providerCalls.length, 1);
+    assert.match(created.draft, new RegExp(`\\[PERF-${strongest.id}\\]`));
+    assert.match(created.draft, new RegExp(`\\[PERF-${weakest.id}\\]`));
+    const stored = db.prepare(`
+      SELECT response_json
+      FROM request_idempotency
+      WHERE idempotency_key=?
+    `).get(input.idempotencyKey);
+    const storedResponse = JSON.parse(stored.response_json);
+    assert.equal(storedResponse.response_envelope.status, 'generated');
+    assert.equal(storedResponse.response_envelope.draft, created.draft);
+    const assistant = db.prepare(`
+      SELECT content
+      FROM ai_messages
+      WHERE conversation_id=? AND role='assistant'
+    `).get(created.ai.conversation_id);
+    assert.equal(assistant.content, created.draft);
+    assert.doesNotMatch(assistant.content, /top_evidence_ids|contract_version/);
+  } finally {
+    db.close();
+  }
+});
+
+test('performance AI review replays a terminal result after consuming the caller quota', async () => {
+  const db = openDatabase();
+  try {
+    const fixture = createCampaignFixture(db);
+    const performanceService = createPerformanceManualService(db);
+    const strongest = performanceService.createContent({
+      userId: fixture.userId,
+      campaignId: fixture.campaignId,
+      body: {
+        url: 'https://www.youtube.com/watch?v=K1L2m3N4o5P',
+        creator_name: 'Quota Top Creator'
+      }
+    }).content;
+    const weakest = performanceService.createContent({
+      userId: fixture.userId,
+      campaignId: fixture.campaignId,
+      body: {
+        url: 'https://www.youtube.com/watch?v=Q6r7S8t9U0V',
+        creator_name: 'Quota Bottom Creator'
+      }
+    }).content;
+    performanceService.recordManualInput({
+      userId: fixture.userId,
+      campaignId: fixture.campaignId,
+      contentId: strongest.id,
+      body: { observation: { views: 4200, likes: 210, comments: 40 } }
+    });
+    performanceService.recordManualInput({
+      userId: fixture.userId,
+      campaignId: fixture.campaignId,
+      contentId: weakest.id,
+      body: { observation: { views: 800, likes: 16, comments: 4 } }
+    });
+
+    const providerCalls = [];
+    const aiReviewService = createPerformanceAiReviewService(db, {
+      performanceService,
+      aiService: {
+        replayLinkedPerformanceReview: ai.replayLinkedPerformanceReview,
+        handleChat(database, input) {
+          return ai.handleChat(database, Object.assign({}, input, {
+            provider: successfulProvider(providerCalls, 'invalid protocol response')
+          }));
+        }
+      }
+    });
+    const input = {
+      user: Object.assign({}, fixture.user, { api_quota: 18 }),
+      campaignId: fixture.campaignId,
+      body: { top_metric: 'views' },
+      idempotencyKey: 'performance-ai-review-quota-replay-0001',
+      requestId: 'performance-ai-review-quota-replay-request-0001'
+    };
+
+    const initial = await aiReviewService.createDraft(input);
+    assert.equal(initial.status, 'withheld');
+    assert.equal(initial.reason_code, 'ai_review_protocol_invalid');
+    assert.equal(db.prepare(`
+      SELECT COALESCE(SUM(total_tokens), 0) AS total
+      FROM token_usage
+      WHERE user_id=?
+    `).get(fixture.userId).total, 18);
+
+    const replayed = await aiReviewService.createDraft(input);
+    assert.deepEqual(replayed, initial);
+    assert.equal(providerCalls.length, 1);
+  } finally {
+    db.close();
+  }
+});
+
+test('performance AI review replays a stale terminal result without re-running the provider', async () => {
+  const db = openDatabase();
+  try {
+    const fixture = createCampaignFixture(db);
+    const performanceService = createPerformanceManualService(db);
+    const strongest = performanceService.createContent({
+      userId: fixture.userId,
+      campaignId: fixture.campaignId,
+      body: {
+        url: 'https://www.youtube.com/watch?v=S1T2A3L4E5Q',
+        creator_name: 'Stale Top Creator'
+      }
+    }).content;
+    const weakest = performanceService.createContent({
+      userId: fixture.userId,
+      campaignId: fixture.campaignId,
+      body: {
+        url: 'https://www.youtube.com/watch?v=R6E7P8L9A0Y',
+        creator_name: 'Stale Bottom Creator'
+      }
+    }).content;
+    performanceService.recordManualInput({
+      userId: fixture.userId,
+      campaignId: fixture.campaignId,
+      contentId: strongest.id,
+      body: { observation: { views: 4200, likes: 210, comments: 40 } }
+    });
+    performanceService.recordManualInput({
+      userId: fixture.userId,
+      campaignId: fixture.campaignId,
+      contentId: weakest.id,
+      body: { observation: { views: 800, likes: 16, comments: 4 } }
+    });
+
+    let evidenceReads = 0;
+    const staleEvidenceService = {
+      getReviewEvidence(input) {
+        const evidence = performanceService.getReviewEvidence(input);
+        evidenceReads += 1;
+        return evidenceReads > 1
+          ? Object.assign({}, evidence, {
+            records: Object.assign({}, evidence.records, { total: evidence.records.total + 1 })
+          })
+          : evidence;
+      }
+    };
+    const providerCalls = [];
+    const aiReviewService = createPerformanceAiReviewService(db, {
+      performanceService: staleEvidenceService,
+      aiService: {
+        replayLinkedPerformanceReview: ai.replayLinkedPerformanceReview,
+        handleChat(database, input) {
+          return ai.handleChat(database, Object.assign({}, input, {
+            provider: successfulProvider(providerCalls, JSON.stringify({
+              contract_version: 1,
+              top_evidence_ids: [`PERF-${strongest.id}`],
+              bottom_evidence_ids: [`PERF-${weakest.id}`],
+              experiment_types: ['data_coverage'],
+              human_confirmation: 'required'
+            }))
+          }));
+        }
+      }
+    });
+    const input = {
+      user: fixture.user,
+      campaignId: fixture.campaignId,
+      body: { top_metric: 'views' },
+      idempotencyKey: 'performance-ai-review-stale-replay-0001',
+      requestId: 'performance-ai-review-stale-replay-request-0001'
+    };
+
+    const initial = await aiReviewService.createDraft(input);
+    const replayed = await aiReviewService.createDraft(input);
+
+    assert.equal(initial.status, 'stale_snapshot');
+    assert.equal(initial.reason_code, 'review_evidence_changed');
+    assert.deepEqual(replayed, initial);
+    assert.equal(providerCalls.length, 1);
+  } finally {
+    db.close();
+  }
+});
 
 function linkedInput(fixture, suffix, overrides = {}) {
   return {
@@ -750,6 +1112,87 @@ test('linked chat treats DeepSeek failure as zero-event 503 and does not retain 
       state: 'completed',
       status_code: 503
     });
+  } finally {
+    db.close();
+  }
+});
+
+test('linked chat replays a terminal rejection and accounts for provider usage without storing a conversation', async () => {
+  const db = openDatabase();
+  try {
+    const fixture = createCampaignFixture(db);
+    const before = durableLinkedState(db, fixture.campaignId);
+    let completionValidationCalls = 0;
+    let persistValidationCalls = 0;
+    let terminalRejectionCalls = 0;
+    const providerCalls = [];
+    const terminalResult = {
+      status: 'withheld',
+      reason_code: 'draft_safety_validation_failed',
+      campaign_id: fixture.campaignId,
+      draft: null,
+      ai: null
+    };
+    const input = linkedInput(fixture, 'pre-persist-validation', {
+      source_module: 'performance_review',
+      terminalRejectionAudit: true,
+      provider: successfulProvider(providerCalls, 'unsafe completion must not be retained'),
+      validateCompletion(answer) {
+        completionValidationCalls += 1;
+        return answer === 'unsafe completion must not be retained';
+      },
+      validateBeforePersist(answer) {
+        persistValidationCalls += 1;
+        return answer !== 'unsafe completion must not be retained';
+      },
+      terminalRejection(context) {
+        terminalRejectionCalls += 1;
+        assert.equal(context.stage, 'persistence_validation');
+        return terminalResult;
+      }
+    });
+    const result = await ai.handleChat(db, input);
+    const replay = await ai.handleChat(db, input);
+
+    assert.deepEqual(result, terminalResult);
+    assert.deepEqual(replay, terminalResult);
+    assert.equal(completionValidationCalls, 1);
+    assert.equal(persistValidationCalls, 1);
+    assert.equal(terminalRejectionCalls, 1);
+    assert.equal(providerCalls.length, 1);
+    const after = durableLinkedState(db, fixture.campaignId);
+    assert.deepEqual(Object.assign({}, after, { tokens: before.tokens }), before);
+    assert.equal(after.tokens, before.tokens + 1);
+    assert.deepEqual(db.prepare(`
+      SELECT model,prompt_tokens,completion_tokens,total_tokens,endpoint
+      FROM token_usage ORDER BY id DESC LIMIT 1
+    `).get(), {
+      model: 'deepseek-v4-flash',
+      prompt_tokens: 11,
+      completion_tokens: 7,
+      total_tokens: 18,
+      endpoint: 'ai_chat_linked_rejected'
+    });
+    assert.deepEqual(db.prepare(`
+      SELECT state,status_code,json_extract(response_json, '$.status') AS status,
+        json_extract(response_json, '$.reason_code') AS reason_code
+      FROM request_idempotency
+      WHERE idempotency_key=?
+    `).get('campaign-ai-rag-key-pre-persist-validation'), {
+      state: 'completed',
+      status_code: 200,
+      status: 'withheld',
+      reason_code: 'draft_safety_validation_failed'
+    });
+    assert.deepEqual(db.prepare(`
+      SELECT outcome,reason_code,stage
+      FROM performance_ai_review_audits
+      WHERE campaign_id=?
+    `).all(fixture.campaignId), [{
+      outcome: 'withheld',
+      reason_code: 'draft_safety_validation_failed',
+      stage: 'persistence_validation'
+    }]);
   } finally {
     db.close();
   }
@@ -1357,6 +1800,71 @@ test('final transaction rejects an in-flight campaign access revocation before w
 
     assertServiceError(outcome, 403, 'CAMPAIGN_FORBIDDEN');
     assert.deepEqual(durableLinkedState(db, fixture.campaignId), afterRevocation);
+  } finally {
+    db.close();
+  }
+});
+
+test('terminal AI rejection rechecks campaign access before returning a withheld review payload', async () => {
+  const db = openDatabase();
+  try {
+    const fixture = createCampaignFixture(db);
+    const replacement = db.prepare(`
+      SELECT membership.user_id AS userId,membership.team_id AS teamId
+      FROM team_memberships membership
+      JOIN users user ON user.id=membership.user_id AND user.is_active=1
+      WHERE membership.org_id=? AND membership.status='active' AND membership.team_id<>?
+      ORDER BY membership.user_id,membership.team_id
+      LIMIT 1
+    `).get(fixture.orgId, fixture.teamId);
+    assert.ok(replacement, 'fixture requires a second active team');
+    const before = durableLinkedState(db, fixture.campaignId);
+    const outcome = await settled(ai.handleChat(db, linkedInput(fixture, 'terminal-access-revoke-race', {
+      source_module: 'performance_review',
+      terminalRejectionAudit: true,
+      provider: {
+        async complete() {
+          db.prepare(`
+            UPDATE campaigns
+            SET owner_user_id=?,team_id=?,row_version=row_version+1
+            WHERE id=?
+          `).run(replacement.userId, replacement.teamId, fixture.campaignId);
+          return {
+            content: 'unsafe completion that must not be disclosed after revocation',
+            usage: { prompt_tokens: 11, completion_tokens: 7, total_tokens: 18 },
+            model: 'fake-deepseek'
+          };
+        }
+      },
+      validateCompletion() {
+        return false;
+      },
+      terminalRejection() {
+        return {
+          status: 'withheld',
+          reason_code: 'draft_safety_validation_failed',
+          evidence: { private_scope: 'must not leave the server after revocation' },
+          draft: null,
+          ai: null
+        };
+      }
+    })));
+
+    assertServiceError(outcome, 403, 'CAMPAIGN_FORBIDDEN');
+    assert.deepEqual(durableLinkedState(db, fixture.campaignId), before);
+    assert.equal(db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM performance_ai_review_audits
+      WHERE campaign_id=?
+    `).get(fixture.campaignId).count, 0);
+    const ledger = db.prepare(`
+      SELECT state,status_code,response_json
+      FROM request_idempotency
+      WHERE idempotency_key=?
+    `).get('campaign-ai-rag-key-terminal-access-revoke-race');
+    assert.equal(ledger.state, 'completed');
+    assert.equal(ledger.status_code, 403);
+    assert.doesNotMatch(ledger.response_json, /private_scope|withheld/);
   } finally {
     db.close();
   }

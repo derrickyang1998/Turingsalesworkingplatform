@@ -58,6 +58,7 @@ const REQUIRED_BUNDLE_FILES = Object.freeze([
   'server/migrations/009_feishu_bitable_retry_lineage.js',
   'server/migrations/010_performance_manual_foundation.js',
   'server/migrations/011_performance_feishu_connection_config.js',
+  'server/migrations/012_performance_ai_review_audit.js',
   'server/migrations/baselines/legacy_v1.js',
   'server/migrations/engines/v1.js',
   'server/migrations/vendor/bcryptjs_v3_0_3.js',
@@ -122,8 +123,8 @@ const EXPECTED_ENTRYPOINTS = Object.freeze({
 });
 
 const EXPECTED_MIGRATION_CONTRACT = Object.freeze({
-  acceptedSourceVersions: Object.freeze([1, 6, 7, 8, 9, 10, 11]),
-  targetVersion: 11,
+  acceptedSourceVersions: Object.freeze([1, 6, 7, 8, 9, 10, 11, 12]),
+  targetVersion: 12,
   runs: 2,
   deterministicAppendTables: Object.freeze(['activity_log'])
 });
@@ -1507,7 +1508,10 @@ function prepareTrustedLegacySource({
     const adoptionSourcePath = mutableSourceIdentity ? mutableSourceIdentity.path : sourcePath;
     const adoptionSourceSha256 = mutableSourceIdentity ? mutableSourceIdentity.sha256 : sourceIdentity.sha256;
     const classification = classifyTrustedDatabase(manifest, verified, adoptionSourcePath);
-    if (classification.status === 'managed' && [1, 6, 7, 8, 9, 10, 11].includes(classification.currentVersion)) {
+    if (
+      classification.status === 'managed'
+      && EXPECTED_MIGRATION_CONTRACT.acceptedSourceVersions.includes(classification.currentVersion)
+    ) {
       return Object.freeze({
         effectiveSourcePath: sourcePath,
         report: Object.freeze({

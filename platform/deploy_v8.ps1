@@ -33,10 +33,10 @@ $EXPECTED_PPT_SHA256 = "f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57
 $TRUSTED_SOURCE_GATE_RELATIVE_PATH = "server\scripts\trusted_production_source_gate.js"
 $TRUSTED_SOURCE_MANIFEST_RELATIVE_PATH = "server\scripts\trusted_production_source_manifest.json"
 $TRUSTED_RUNTIME_CONFIG_RELATIVE_PATH = "server\config\runtime_config.js"
-$EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "633b745b019fc47a4bba50d14cf64e8a8512f8a4acaa350beadc8592fd78c52f"
-$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "21f185b6341c2bb71b237eb4f97e50d6f9a1a648cc917459c6e9caf8d137ed0b"
+$EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "28feef73196338959e4ef032997659e03a45ae6b7e0fb564e96bdfd182accea1"
+$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "aa1999abef0c1bff3a99243567deef1fddc0b6eb03ecc50f9a65007ea89be21d"
 $EXPECTED_TRUSTED_RUNTIME_CONFIG_SHA256 = "76d43d3e811c6fa8daae987cc9eb2fff2dc8a8095f84b1cd309e4e214df94dcb"
-$EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256 = "60a118dd494b1047b2ce78139acc6cedf50682a11f3c9a4adbd0bdedfb887bfa"
+$EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256 = "26bc1484724bacf5f087c6febe018e641bf51089ec261314356125067d3d19be"
 $EXPECTED_TRUSTED_PARSER_VERIFIER_SHA256 = "7f9efaac02675b21e025891a400474cc7481c1adaf58c88bd8b356d5276f2eaa"
 $EXPECTED_TRUSTED_PUBLIC_GUARD_SHA256 = "d45fe8fcc01587aaa0e73eccfb9714c27801e232cb6c0effd6daedb703316d66"
 $EXPECTED_TRUSTED_MIGRATION_CLEANUP_HELPER_SHA256 = "d5f2befa902522dd9de3e9dd2397a99ee5e78ab1a1c6e526a27f14bb2829e1fa"
@@ -111,6 +111,7 @@ $FILES = @(
     "server\migrations\009_feishu_bitable_retry_lineage.js",
     "server\migrations\010_performance_manual_foundation.js",
     "server\migrations\011_performance_feishu_connection_config.js",
+    "server\migrations\012_performance_ai_review_audit.js",
     "server\migrations\baselines\legacy_v1.js",
     "server\migrations\engines\v1.js",
     "server\migrations\vendor\bcryptjs_v3_0_3.js",

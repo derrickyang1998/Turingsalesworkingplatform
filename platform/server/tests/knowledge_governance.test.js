@@ -2,6 +2,7 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
+const { createHash } = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const Database = require('better-sqlite3');
@@ -115,6 +116,99 @@ function govern(db, admin, entryId, action, expectedVersion, extra = {}) {
     reason: `${action} governance contract`,
     ...extra
   });
+}
+
+function createCampaignKnowledgeFixture(db) {
+  const identity = db.prepare(`
+    SELECT organization.id AS orgId,user.id AS userId,user.role AS role,
+      team_membership.team_id AS teamId
+    FROM organizations organization
+    JOIN organization_memberships organization_membership
+      ON organization_membership.org_id=organization.id
+     AND organization_membership.status='active'
+    JOIN users user
+      ON user.id=organization_membership.user_id AND user.is_active=1
+    JOIN team_memberships team_membership
+      ON team_membership.org_id=organization.id
+     AND team_membership.user_id=user.id
+     AND team_membership.status='active'
+    WHERE organization.code='turingmarket-default' AND user.role<>'admin'
+    ORDER BY user.id,team_membership.team_id
+    LIMIT 1
+  `).get();
+  assert.ok(identity, 'fixture requires an active non-admin organization member');
+  const fixture = {
+    ...identity,
+    customerId: 970401,
+    opportunityId: 970402,
+    campaignId: 970403
+  };
+  db.prepare(`
+    INSERT INTO customers (
+      id,brand_name,company_name,stage,source,created_by,assigned_to,is_public
+    ) VALUES (
+      @customerId,'Governance RAG contract','Governance RAG contract Ltd',
+      'qualified','governance-rag-contract',@userId,@userId,0
+    )
+  `).run(fixture);
+  db.prepare(`
+    INSERT INTO opportunities (
+      id,customer_id,name,stage,value,win_probability,product_name,channel_type,created_by
+    ) VALUES (
+      @opportunityId,@customerId,'Governance RAG opportunity','proposal',1000,50,
+      'Governance RAG product','influencer',@userId
+    )
+  `).run(fixture);
+  db.prepare(`
+    INSERT INTO campaigns (
+      id,org_id,name,customer_id,opportunity_id,owner_user_id,team_id,
+      lifecycle_state,operational_status,row_version
+    ) VALUES (
+      @campaignId,@orgId,'Governance RAG campaign',@customerId,@opportunityId,
+      @userId,@teamId,'lead','active',1
+    )
+  `).run(fixture);
+  fixture.user = { id: fixture.userId, role: fixture.role };
+  return fixture;
+}
+
+function writeCampaignMethodology(db, fixture, label) {
+  let written;
+  db.transaction(() => {
+    written = knowledge.writeCampaignKnowledgeInTransaction(db, {
+      organizationId: fixture.orgId,
+      campaignId: fixture.campaignId,
+      createdBy: fixture.userId,
+      entryType: 'performance_review_methodology',
+      sourceType: 'performance_review_methodology',
+      sourceId: label,
+      title: `Performance methodology ${label}`,
+      summary: '',
+      content: `confirmed-methodology-token ${label}`,
+      tags: ['performance', 'methodology'],
+      visibility: 'team',
+      metadata: { schema_version: 1 }
+    });
+    db.prepare(`
+      INSERT INTO campaign_record_links (
+        org_id,campaign_id,record_type,bundle_id,record_id,relation_type,
+        created_by,metadata_json
+      ) VALUES (
+        @orgId,@campaignId,'knowledge_entry',@bundleId,@recordId,'knowledge',
+        @userId,'{}'
+      )
+    `).run({
+      ...fixture,
+      recordId: String(written.entry.id),
+      bundleId: createHash('sha256')
+        .update(`governance-rag:${label}:${written.entry.id}`)
+        .digest('hex')
+    });
+    if (written.capacityGaugePlan) {
+      knowledge.applyKnowledgeCapacityGaugePlanInTransaction(db, written.capacityGaugePlan);
+    }
+  }).immediate();
+  return written.entry;
 }
 
 test('migration 007 backfills existing knowledge without changing content or FTS and reruns as a no-op', () => {
@@ -421,6 +515,38 @@ test('confirmed knowledge ranks first while rejected, superseded, and expired ve
   assert.equal(knowledge.isKnowledgeRetrievable(db, rejected.id), false);
   assert.equal(knowledge.isKnowledgeRetrievable(db, confirmed.id), true);
   db.close();
+});
+
+test('campaign RAG restricts performance methodology retrieval to confirmed knowledge', () => {
+  const db = openDatabase();
+  try {
+    const { admin } = identities(db);
+    const fixture = createCampaignKnowledgeFixture(db);
+    const candidate = writeCampaignMethodology(db, fixture, 'candidate');
+    const confirmed = writeCampaignMethodology(db, fixture, 'confirmed');
+    govern(db, admin, confirmed.id, 'confirm', 1);
+
+    const results = knowledge.searchCampaignKnowledgeChunks(db, {
+      query: 'confirmed-methodology-token',
+      user: fixture.user,
+      campaignId: fixture.campaignId,
+      entry_type: 'performance_review_methodology',
+      source_type: 'performance_review_methodology',
+      quality_state: 'confirmed',
+      business_type: 'campaign',
+      business_id: String(fixture.campaignId),
+      limit: 10
+    });
+
+    assert.deepEqual(
+      [...new Set(results.map((item) => item.record.entry.id))],
+      [confirmed.id]
+    );
+    assert.equal(results[0].record.entry.governance.quality_state, 'confirmed');
+    assert.notEqual(candidate.id, confirmed.id);
+  } finally {
+    db.close();
+  }
 });
 
 test('supersession creates one linear lineage and keeps an inactive version available to historical citation audit', () => {
