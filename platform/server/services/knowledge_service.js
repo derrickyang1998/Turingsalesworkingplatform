@@ -99,6 +99,15 @@ const BUSINESS_ARTIFACT_DEFINITIONS = Object.freeze({
     businessType: 'campaign',
     tags: Object.freeze([])
   }),
+  performance_review_confirmation: Object.freeze({
+    states: Object.freeze(['confirmed']),
+    campaignEntryType: 'campaign_performance_review',
+    campaignSourceType: 'performance_ai_review_confirmation',
+    legacyEntryType: null,
+    legacySourceType: null,
+    businessType: 'campaign',
+    tags: Object.freeze([])
+  }),
   ai_summary: Object.freeze({
     states: Object.freeze(['promoted']),
     campaignEntryType: 'ai_chat_summary',

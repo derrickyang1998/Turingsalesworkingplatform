@@ -407,6 +407,70 @@ thead th {
   white-space: nowrap;
 }
 
+.tm-performance-ai-review-confirmation {
+  display: grid;
+  gap: var(--tm-space-3);
+  margin-top: var(--tm-space-4);
+  padding-top: var(--tm-space-4);
+  border-top: 1px solid var(--tm-color-border);
+}
+
+.tm-performance-ai-review-confirmation label {
+  display: grid;
+  gap: var(--tm-space-1);
+  min-width: 0;
+  color: var(--tm-color-text-muted);
+  font-size: 12px;
+}
+
+.tm-performance-ai-review-confirmation textarea,
+.tm-performance-ai-review-confirmation select {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  color: var(--tm-color-text);
+  background: var(--tm-color-surface);
+  border: 1px solid var(--tm-color-border);
+  border-radius: var(--tm-radius-sm, 4px);
+}
+
+.tm-performance-ai-review-confirmation textarea {
+  min-height: 180px;
+  padding: var(--tm-space-2);
+  resize: vertical;
+  line-height: 1.55;
+}
+
+.tm-performance-ai-review-confirmation select {
+  min-height: 32px;
+  padding: 0 var(--tm-space-2);
+}
+
+.tm-performance-ai-review-confirmation-actions {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--tm-space-3);
+}
+
+.tm-performance-ai-review-confirmation-actions label {
+  width: min(180px, 100%);
+}
+
+.tm-performance-ai-review-confirmation-actions .btn {
+  flex: 0 0 auto;
+}
+
+.tm-performance-ai-review-confirmation-done {
+  color: var(--tm-color-text-muted);
+  font-size: 12px;
+}
+
+.tm-performance-ai-review-confirmation-done strong {
+  color: var(--tm-color-text);
+  font-size: 13px;
+}
+
 .tm-performance-review-summary {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));

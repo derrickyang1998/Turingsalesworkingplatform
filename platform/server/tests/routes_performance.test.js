@@ -102,6 +102,21 @@ function createFixture() {
         draft: null,
         ai: null
       };
+    },
+    async approveDraft(input) {
+      calls.push(['ai-review-approve', input]);
+      return {
+        contract_version: 'performance-ai-review-approval-v1',
+        status: 'confirmed',
+        campaign_id: 7,
+        conversation_id: 31,
+        message_id: 32,
+        knowledge_entry_id: 33,
+        visibility: 'private',
+        evidence_snapshot_hash: 'a'.repeat(64),
+        draft_sha256: 'b'.repeat(64),
+        final_content_sha256: 'c'.repeat(64)
+      };
     }
   };
   registerPerformanceRoutes(app, {
@@ -159,6 +174,7 @@ test('registers campaign-scoped performance endpoints and forwards authenticated
     'GET /api/campaigns/:id/performance/integration-preview',
     'GET /api/campaigns/:id/performance/review-evidence',
     'POST /api/campaigns/:id/performance/ai-review-draft',
+    'POST /api/campaigns/:id/performance/ai-review-draft/approve',
     'POST /api/campaigns/:id/performance/contents',
     'POST /api/campaigns/:id/performance/contents/:contentId/manual-inputs',
     'POST /api/campaigns/:id/performance/feishu-connection',
@@ -181,6 +197,60 @@ test('registers campaign-scoped performance endpoints and forwards authenticated
     campaignId: '7',
     body: request.body
   }]);
+});
+
+test('confirms a campaign-scoped AI review draft through the protected JSON request contract', async () => {
+  const { routes, calls, aiReviewService } = createFixture();
+  const request = {
+    user: { id: 9, role: 'org_admin' },
+    params: { id: '7' },
+    body: {
+      conversation_id: 31,
+      message_id: 32,
+      expected_snapshot_hash: 'a'.repeat(64),
+      edited_draft: 'Reviewed result [PERF-1] [PERF-2]',
+      visibility: 'private'
+    },
+    headers: { 'idempotency-key': 'ai-review-approval-request-key' },
+    phase4Request: { requestId: 'ai-review-approval-request-id' }
+  };
+  const response = await invokeAsync(
+    routes.get('POST /api/campaigns/:id/performance/ai-review-draft/approve'),
+    request
+  );
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.status, 'confirmed');
+  assert.equal(response.body.request_id, 'ai-review-approval-request-id');
+  assert.deepEqual(calls[0], ['ai-review-approve', {
+    user: request.user,
+    campaignId: '7',
+    body: request.body,
+    idempotencyKey: 'ai-review-approval-request-key',
+    requestId: 'ai-review-approval-request-id'
+  }]);
+
+  const policy = campaignContract.REQUEST_POLICIES.CAMPAIGN_PERFORMANCE_AI_REVIEW_APPROVE;
+  assert.ok(policy);
+  assert.equal(policy.id, 'campaign.performance.ai-review-draft.approve');
+  assert.equal(policy.method, 'POST');
+  assert.equal(policy.pathTemplate, '/api/campaigns/:id/performance/ai-review-draft/approve');
+  assert.equal(policy.mediaKind, campaignContract.MEDIA_KINDS.JSON);
+
+  aiReviewService.approveDraft = async () => {
+    throw new PerformanceAiReviewServiceError(
+      409,
+      'PERFORMANCE_AI_REVIEW_STALE',
+      'Performance evidence changed after the AI review draft was generated.'
+    );
+  };
+  const stale = await invokeAsync(
+    routes.get('POST /api/campaigns/:id/performance/ai-review-draft/approve'),
+    request
+  );
+  assert.equal(stale.statusCode, 409);
+  assert.equal(stale.body.code, 'PERFORMANCE_AI_REVIEW_STALE');
+  assert.equal(stale.body.request_id, 'ai-review-approval-request-id');
 });
 
 test('creates a campaign-scoped AI review draft through the protected JSON request contract', async () => {

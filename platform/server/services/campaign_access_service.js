@@ -201,6 +201,10 @@ const KNOWLEDGE_SOURCE_PROJECTIONS = Object.freeze({
     kind: 'review',
     label: 'Campaign review'
   }),
+  performance_ai_review_confirmation: Object.freeze({
+    kind: 'review',
+    label: 'Performance AI review'
+  }),
   review: Object.freeze({
     kind: 'review',
     label: 'Campaign review'

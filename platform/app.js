@@ -6623,6 +6623,9 @@ var performanceAiReviewDraft = null;
 var performanceAiReviewRequestSequence = 0;
 var activePerformanceAiReviewRequest = null;
 var performanceAiReviewRetry = { fingerprint: '', idempotencyKey: '' };
+var performanceAiReviewApprovalRequestSequence = 0;
+var activePerformanceAiReviewApprovalRequest = null;
+var performanceAiReviewApprovalRetry = { fingerprint: '', idempotencyKey: '' };
 var performanceIntegrationPreview = null;
 var performanceIntegrationRequestSequence = 0;
 var performanceFeishuConnection = null;
@@ -6658,11 +6661,18 @@ function invalidatePerformanceAiReviewDraft(message) {
     activePerformanceAiReviewRequest.controller.abort();
   }
   activePerformanceAiReviewRequest = null;
+  performanceAiReviewApprovalRequestSequence += 1;
+  if (activePerformanceAiReviewApprovalRequest && activePerformanceAiReviewApprovalRequest.controller) {
+    activePerformanceAiReviewApprovalRequest.controller.abort();
+  }
+  activePerformanceAiReviewApprovalRequest = null;
   performanceAiReviewDraft = null;
   performanceAiReviewRetry = { fingerprint: '', idempotencyKey: '' };
+  performanceAiReviewApprovalRetry = { fingerprint: '', idempotencyKey: '' };
   if (typeof renderPerformanceAiReviewDraft === 'function') renderPerformanceAiReviewDraft(null);
   if (message && typeof setPerformanceAiReviewStatus === 'function') setPerformanceAiReviewStatus(message);
   if (typeof setPerformanceAiReviewControlsBusy === 'function') setPerformanceAiReviewControlsBusy(false);
+  if (typeof setPerformanceAiReviewApprovalBusy === 'function') setPerformanceAiReviewApprovalBusy(false);
 }
 
 function getPerformanceCampaignById(campaignId) {
@@ -7642,6 +7652,18 @@ function setPerformanceAiReviewControlsBusy(busy) {
   button.setAttribute('aria-busy', busy ? 'true' : 'false');
 }
 
+function setPerformanceAiReviewApprovalBusy(busy) {
+  var button = document.getElementById('performanceAiReviewApprove');
+  var draftInput = document.getElementById('performanceAiReviewEditedDraft');
+  var visibilityInput = document.getElementById('performanceAiReviewVisibility');
+  [button, draftInput, visibilityInput].forEach(function(control) {
+    if (control) control.disabled = !!busy;
+  });
+  if (!button) return;
+  button.textContent = busy ? '正在归档...' : '确认并归档';
+  button.setAttribute('aria-busy', busy ? 'true' : 'false');
+}
+
 function performanceAiReviewIsCurrent(context) {
   return Boolean(
     context &&
@@ -7649,6 +7671,40 @@ function performanceAiReviewIsCurrent(context) {
     context.authGeneration === AUTH_GENERATION &&
     context.campaignId === getPerformanceCampaignId() &&
     context.topMetric === getPerformanceTopMetric()
+  );
+}
+
+function performanceAiReviewApprovalSource(data) {
+  var source = data && data.status === 'generated' && data.draft ? data : null;
+  var ai = source && source.ai || {};
+  var evidence = source && source.evidence || {};
+  var conversationId = performancePositiveId(ai.conversation_id);
+  var messageId = performancePositiveId(ai.message_id);
+  var snapshotHash = String(evidence.snapshot_hash || '');
+  if (conversationId === null || messageId === null || !/^[a-f0-9]{64}$/.test(snapshotHash)) return null;
+  return {
+    conversationId: conversationId,
+    messageId: messageId,
+    snapshotHash: snapshotHash,
+    identity: [conversationId, messageId, snapshotHash].join(':')
+  };
+}
+
+function performanceAiReviewCanApprove() {
+  var dashboardCapabilities = performanceDashboardData && performanceDashboardData.capabilities || {};
+  var evidenceCapabilities = performanceReviewEvidence && performanceReviewEvidence.capabilities || {};
+  return dashboardCapabilities.can_approve_ai_review === true || evidenceCapabilities.can_approve_ai_review === true;
+}
+
+function performanceAiReviewApprovalIsCurrent(context) {
+  var source = performanceAiReviewApprovalSource(performanceAiReviewDraft);
+  return Boolean(
+    context &&
+    source &&
+    context.sequence === performanceAiReviewApprovalRequestSequence &&
+    context.authGeneration === AUTH_GENERATION &&
+    context.campaignId === getPerformanceCampaignId() &&
+    context.sourceIdentity === source.identity
   );
 }
 
@@ -7697,6 +7753,29 @@ function performanceAiReviewReasonText(data) {
   return reasons[data && data.reason_code] || '当前无法生成复盘草稿。';
 }
 
+function performanceAiReviewApprovalHtml(data) {
+  var source = performanceAiReviewApprovalSource(data);
+  if (!source) return '';
+  var approval = data && data.approval || null;
+  if (approval && (approval.status === 'confirmed' || approval.status === 'already_confirmed')) {
+    return '<div class="tm-performance-ai-review-confirmation tm-performance-ai-review-confirmation-done">'
+      + '<strong>已归档到项目知识库</strong><span>知识条目 #' + esc(approval.knowledge_entry_id || '')
+      + ' · 指标快照 ' + esc(performanceAiReviewShortHash(approval.evidence_snapshot_hash)) + '</span></div>';
+  }
+  if (!performanceAiReviewCanApprove()) {
+    return '<p class="tm-metric-note">需由项目负责人或组织管理员确认后归档。</p>';
+  }
+  return '<div class="tm-performance-ai-review-confirmation">'
+    + '<label for="performanceAiReviewEditedDraft"><span>确认内容</span>'
+    + '<textarea id="performanceAiReviewEditedDraft" rows="12" maxlength="24000" aria-label="确认内容">'
+    + esc(data.draft) + '</textarea></label>'
+    + '<div class="tm-performance-ai-review-confirmation-actions">'
+    + '<label for="performanceAiReviewVisibility"><span>可见性</span><select id="performanceAiReviewVisibility">'
+    + '<option value="private">仅自己</option><option value="team">项目团队</option></select></label>'
+    + '<button id="performanceAiReviewApprove" class="btn btn-primary btn-sm" type="button" onclick="approvePerformanceAiReviewDraft()">确认并归档</button>'
+    + '</div></div>';
+}
+
 function renderPerformanceAiReviewDraft(data) {
   performanceAiReviewDraft = data || null;
   var container = document.getElementById('performanceAiReviewDraft');
@@ -7709,12 +7788,18 @@ function renderPerformanceAiReviewDraft(data) {
   var explanation = '当前指标快照 ' + performanceAiReviewShortHash(evidence.snapshot_hash)
     + '；仅使用录入指标，不读取视频素材、不联网、不自动沉淀知识库。';
   if (data.status === 'generated' && data.draft) {
-    setPerformanceAiReviewStatus('草稿已生成，需人工确认后才能形成正式复盘。');
+    var approval = data.approval || null;
+    setPerformanceAiReviewStatus(
+      approval && (approval.status === 'confirmed' || approval.status === 'already_confirmed')
+        ? 'AI 复盘已人工确认并归档。'
+        : '草稿已生成，需人工确认后才能形成正式复盘。'
+    );
     container.innerHTML = '<div class="tm-performance-ai-review-meta"><span>' + esc(explanation) + '</span>'
       + '<span>置信等级：' + esc((data.confidence && data.confidence.level) || '未提供') + '</span></div>'
       + '<div class="tm-performance-ai-review-draft">' + renderSafeMarkdown(data.draft) + '</div>'
       + performanceAiReviewReferencesHtml(evidence.evidence_references)
-      + performanceAiReviewKnowledgeHtml(data.ai);
+      + performanceAiReviewKnowledgeHtml(data.ai)
+      + performanceAiReviewApprovalHtml(data);
   } else {
     setPerformanceAiReviewStatus(performanceAiReviewReasonText(data), data.status === 'withheld' ? 'error' : '');
     container.innerHTML = '<div class="tm-performance-review-empty"><strong>' + esc(performanceAiReviewReasonText(data)) + '</strong>'
@@ -7730,7 +7815,7 @@ async function generatePerformanceAiReviewDraft() {
     setPerformanceAiReviewStatus('请先选择推广活动。', 'error');
     return null;
   }
-  if (activePerformanceAiReviewRequest) return null;
+  if (activePerformanceAiReviewRequest || activePerformanceAiReviewApprovalRequest) return null;
   var topMetric = getPerformanceTopMetric();
   var fingerprint = [AUTH_GENERATION, campaignId, topMetric].join(':');
   if (performanceAiReviewRetry.fingerprint !== fingerprint || !performanceAiReviewRetry.idempotencyKey) {
@@ -7778,6 +7863,83 @@ async function generatePerformanceAiReviewDraft() {
   } finally {
     if (activePerformanceAiReviewRequest === context) activePerformanceAiReviewRequest = null;
     if (performanceAiReviewIsCurrent(context)) setPerformanceAiReviewControlsBusy(false);
+  }
+}
+
+async function approvePerformanceAiReviewDraft() {
+  var campaignId = getPerformanceCampaignId();
+  var source = performanceAiReviewApprovalSource(performanceAiReviewDraft);
+  if (campaignId === null || !source) {
+    setPerformanceAiReviewStatus('请先生成当前活动的 AI 复盘草稿。', 'error');
+    return null;
+  }
+  if (!performanceAiReviewCanApprove()) {
+    setPerformanceAiReviewStatus('需由项目负责人或组织管理员确认。', 'error');
+    return null;
+  }
+  if (activePerformanceAiReviewApprovalRequest) return null;
+  var draftInput = document.getElementById('performanceAiReviewEditedDraft');
+  var visibilityInput = document.getElementById('performanceAiReviewVisibility');
+  var editedDraft = draftInput ? String(draftInput.value || '').trim() : '';
+  var visibility = visibilityInput ? String(visibilityInput.value || 'private') : 'private';
+  if (!editedDraft) {
+    setPerformanceAiReviewStatus('请填写确认内容。', 'error');
+    if (draftInput) draftInput.focus();
+    return null;
+  }
+  var fingerprint = [AUTH_GENERATION, campaignId, source.identity, visibility, editedDraft].join('\n');
+  if (
+    performanceAiReviewApprovalRetry.fingerprint !== fingerprint ||
+    !performanceAiReviewApprovalRetry.idempotencyKey
+  ) {
+    performanceAiReviewApprovalRetry = {
+      fingerprint: fingerprint,
+      idempotencyKey: createAiChatIdempotencyKey()
+    };
+  }
+  var controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  var context = {
+    sequence: ++performanceAiReviewApprovalRequestSequence,
+    authGeneration: AUTH_GENERATION,
+    campaignId: campaignId,
+    sourceIdentity: source.identity,
+    controller: controller
+  };
+  activePerformanceAiReviewApprovalRequest = context;
+  setPerformanceAiReviewApprovalBusy(true);
+  setPerformanceAiReviewStatus('正在确认并归档到项目知识库...');
+  try {
+    var response = await apiFetch('/campaigns/' + encodeURIComponent(campaignId) + '/performance/ai-review-draft/approve', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': performanceAiReviewApprovalRetry.idempotencyKey,
+        'X-Request-Id': createDemandAnalysisOperationId('performance-ai-review-approval-request-')
+      },
+      body: JSON.stringify({
+        conversation_id: source.conversationId,
+        message_id: source.messageId,
+        expected_snapshot_hash: source.snapshotHash,
+        edited_draft: editedDraft,
+        visibility: visibility
+      }),
+      signal: controller ? controller.signal : undefined
+    });
+    var data = await response.json().catch(function() { return {}; });
+    if (!performanceAiReviewApprovalIsCurrent(context)) return null;
+    if (!response.ok) throw new Error(data.error || 'AI 复盘确认失败');
+    performanceAiReviewApprovalRetry = { fingerprint: '', idempotencyKey: '' };
+    performanceAiReviewDraft.approval = data;
+    renderPerformanceAiReviewDraft(performanceAiReviewDraft);
+    return data;
+  } catch (error) {
+    if (!performanceAiReviewApprovalIsCurrent(context)) return null;
+    if (error && error.name === 'AbortError') return null;
+    setPerformanceAiReviewStatus(error.message || 'AI 复盘确认失败', 'error');
+    return null;
+  } finally {
+    if (activePerformanceAiReviewApprovalRequest === context) activePerformanceAiReviewApprovalRequest = null;
+    if (performanceAiReviewApprovalIsCurrent(context)) setPerformanceAiReviewApprovalBusy(false);
   }
 }
 

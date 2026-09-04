@@ -185,7 +185,7 @@
     },
     {
       "path": "server/services/campaign_access_service.js",
-      "sha256": "49b76c97b8afd8d70034a3a3230f838677a6da6493d9852f5e7ef2dfe3b72481"
+      "sha256": "45035e07eed8706279c594deefdc2a94680c4bb4a115a80f92ac7ffdaef7cfb8"
     },
     {
       "path": "server/services/campaign_workflow_service.js",
@@ -221,7 +221,7 @@
     },
     {
       "path": "server/services/knowledge_service.js",
-      "sha256": "5a625241d7b18f21244ce1bcd9f35badded715332a06c2fa7e36e12dc572a81b"
+      "sha256": "ccf4c3b4264779a7b2277c9c328595df3bf52524c79e9b6beae1de91e3818124"
     },
     {
       "path": "server/services/migration_service.js",

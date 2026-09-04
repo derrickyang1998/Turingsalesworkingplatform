@@ -68,7 +68,11 @@ function registerPerformanceRoutes(app, options = {}) {
     performanceService: service,
     aiService: options.aiService
   });
-  if (!aiReviewService || typeof aiReviewService.createDraft !== 'function') {
+  if (
+    !aiReviewService ||
+    typeof aiReviewService.createDraft !== 'function' ||
+    typeof aiReviewService.approveDraft !== 'function'
+  ) {
     throw new TypeError('A performance AI review service is required.');
   }
   const aiLimiter = typeof options.aiLimiter === 'function'
@@ -224,6 +228,25 @@ function registerPerformanceRoutes(app, options = {}) {
     async (request, response) => {
       try {
         const result = await aiReviewService.createDraft({
+          user: request.user,
+          campaignId: request.params.id,
+          body: request.body,
+          idempotencyKey: requestHeader(request, 'Idempotency-Key'),
+          requestId: requestId(request)
+        });
+        return sendResult(request, response, result);
+      } catch (error) {
+        return sendError(request, response, error);
+      }
+    }
+  );
+
+  app.post(
+    '/api/campaigns/:id/performance/ai-review-draft/approve',
+    options.authMiddleware,
+    async (request, response) => {
+      try {
+        const result = await aiReviewService.approveDraft({
           user: request.user,
           campaignId: request.params.id,
           body: request.body,

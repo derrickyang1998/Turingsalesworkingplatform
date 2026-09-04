@@ -12,6 +12,7 @@ const {
   MINIMUM_COMPARISON_COVERAGE
 } = require('./performance_metrics_service');
 const { getCampaignAccess: defaultGetCampaignAccess } = require('./campaign_access_service');
+const knowledge = require('./knowledge_service');
 
 const MAX_PAGE_SIZE = 100;
 const DEFAULT_PAGE_SIZE = 50;
@@ -58,12 +59,14 @@ const ACTION_POLICIES = Object.freeze({
   PERF_VIEW: 'PERF_VIEW',
   PERF_CONTENT_MANAGE: 'PERF_CONTENT_MANAGE',
   PERF_COMMERCIAL_EDIT: 'PERF_COMMERCIAL_EDIT',
-  PERF_COMMERCIAL_APPROVE: 'PERF_COMMERCIAL_APPROVE'
+  PERF_COMMERCIAL_APPROVE: 'PERF_COMMERCIAL_APPROVE',
+  PERF_AI_REVIEW_APPROVE: 'PERF_AI_REVIEW_APPROVE'
 });
 const INTEGRATION_PREVIEW_CONTRACT_VERSION = 'performance-integration-preview-v1';
 const METRIC_IMPORT_CONTRACT_VERSION = 'performance-metric-import-v1';
 const REVIEW_EVIDENCE_CONTRACT_VERSION = 'performance-review-evidence-v1';
 const AI_REVIEW_DRAFT_CONTRACT_VERSION = 'performance-ai-review-draft-v1';
+const AI_REVIEW_APPROVAL_CONTRACT_VERSION = 'performance-ai-review-approval-v1';
 const AI_REVIEW_PROTOCOL_VERSION = 1;
 const AI_REVIEW_EXPERIMENT_TYPES = Object.freeze({
   data_coverage: '补齐关键指标与统一观察时间，验证当前排名是否稳定。',
@@ -520,6 +523,7 @@ function accessCapabilities(access) {
     can_manage_content: Boolean(access && access.permissions && access.permissions.write),
     can_edit_commercial: Boolean(privileged && access && access.permissions && access.permissions.write),
     can_approve_commercial: Boolean(privileged && access && access.permissions && access.permissions.write),
+    can_approve_ai_review: Boolean(privileged && access && access.permissions && access.permissions.write),
     can_view_commercial: Boolean(privileged)
   });
 }
@@ -1884,6 +1888,242 @@ function aiReviewInput(body) {
   return { topMetric };
 }
 
+function aiReviewCanonicalDraft(value) {
+  if (typeof value !== 'string') {
+    throw aiReviewError(400, 'PERFORMANCE_AI_REVIEW_EDIT_INVALID', 'edited_draft must be text.', {
+      field: 'edited_draft'
+    });
+  }
+  const normalized = value.replace(/\r\n?/g, '\n').normalize('NFC').trim();
+  if (!normalized || normalized.length > 24000 || normalized.includes('\u0000')) {
+    throw aiReviewError(400, 'PERFORMANCE_AI_REVIEW_EDIT_INVALID', 'edited_draft is invalid.', {
+      field: 'edited_draft'
+    });
+  }
+  return normalized;
+}
+
+function aiReviewApprovalInput(body) {
+  const source = aiReviewPlainObject(body || {});
+  const allowed = new Set([
+    'conversation_id',
+    'message_id',
+    'expected_snapshot_hash',
+    'edited_draft',
+    'visibility'
+  ]);
+  if (!source || Object.keys(source).some((key) => !allowed.has(key))) {
+    throw aiReviewError(400, 'PERFORMANCE_AI_REVIEW_APPROVAL_INVALID', 'AI review approval input is invalid.');
+  }
+  const conversationId = aiReviewPositiveId(source.conversation_id);
+  const messageId = aiReviewPositiveId(source.message_id);
+  const expectedSnapshotHash = typeof source.expected_snapshot_hash === 'string'
+    ? source.expected_snapshot_hash.trim()
+    : '';
+  if (conversationId === null || messageId === null || !/^[a-f0-9]{64}$/.test(expectedSnapshotHash)) {
+    throw aiReviewError(
+      400,
+      'PERFORMANCE_AI_REVIEW_APPROVAL_INVALID',
+      'Conversation, message, or evidence snapshot is invalid.'
+    );
+  }
+  const visibility = source.visibility === undefined ? 'private' : source.visibility;
+  if (visibility !== 'private' && visibility !== 'team') {
+    throw aiReviewError(400, 'PERFORMANCE_AI_REVIEW_APPROVAL_INVALID', 'visibility must be private or team.', {
+      field: 'visibility'
+    });
+  }
+  return {
+    conversationId,
+    messageId,
+    expectedSnapshotHash,
+    editedDraft: aiReviewCanonicalDraft(source.edited_draft),
+    visibility
+  };
+}
+
+function aiReviewApprovalIdempotencyKey(value) {
+  const key = typeof value === 'string' ? value.trim() : '';
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{7,199}$/.test(key)) {
+    throw aiReviewError(
+      400,
+      'PERFORMANCE_AI_REVIEW_IDEMPOTENCY_INVALID',
+      'Idempotency-Key is required for AI review approval.'
+    );
+  }
+  return key;
+}
+
+function aiReviewApprovalRequestId(value) {
+  if (typeof value !== 'string') return null;
+  const requestId = value.trim();
+  return requestId && requestId.length <= 200 && !requestId.includes('\u0000') ? requestId : null;
+}
+
+function aiReviewSummaryText(value) {
+  return Array.from(String(value || '').replace(/\s+/g, ' ').trim()).slice(0, 1000).join('');
+}
+
+function aiReviewStoredGeneratedDraft(db, access, request) {
+  const conversation = db.prepare(`
+    SELECT conversation.id,conversation.source_module,conversation.user_id
+    FROM ai_conversations conversation
+    JOIN campaign_record_links link
+      ON link.record_type='ai_conversation'
+     AND link.record_id=CAST(conversation.id AS TEXT)
+     AND link.relation_type='ai_run'
+     AND link.revoked_at IS NULL
+    WHERE conversation.id=? AND link.org_id=? AND link.campaign_id=?
+    LIMIT 1
+  `).get(request.conversationId, access.campaign.org_id, access.campaign.id);
+  if (!conversation || conversation.source_module !== 'performance_review') {
+    throw aiReviewError(404, 'PERFORMANCE_AI_REVIEW_DRAFT_NOT_FOUND', 'AI review draft was not found.');
+  }
+  const message = db.prepare(`
+    SELECT id,conversation_id,role,content
+    FROM ai_messages
+    WHERE id=? AND conversation_id=? AND role='assistant'
+    LIMIT 1
+  `).get(request.messageId, request.conversationId);
+  if (!message || typeof message.content !== 'string' || !message.content) {
+    throw aiReviewError(404, 'PERFORMANCE_AI_REVIEW_DRAFT_NOT_FOUND', 'AI review draft was not found.');
+  }
+  const retained = db.prepare(`
+    SELECT response_json
+    FROM request_idempotency
+    WHERE org_id=? AND campaign_id=?
+      AND scope='ai.conversation.create.linked'
+      AND state='completed' AND response_kind='json'
+      AND response_json IS NOT NULL
+    ORDER BY id DESC
+  `).all(access.campaign.org_id, access.campaign.id);
+  for (const row of retained) {
+    const generated = aiReviewReplayEnvelope(safeJson(row.response_json, null));
+    if (
+      !generated ||
+      generated.campaign_id !== access.campaign.id ||
+      !generated.ai ||
+      generated.ai.conversation_id !== request.conversationId ||
+      generated.ai.message_id !== request.messageId
+    ) continue;
+    if (generated.draft !== message.content) {
+      throw aiReviewError(
+        409,
+        'PERFORMANCE_AI_REVIEW_SOURCE_INVALID',
+        'Stored AI review draft no longer matches its retained evidence.'
+      );
+    }
+    return {
+      conversation,
+      message,
+      generated,
+      draftSha256: sha256(generated.draft)
+    };
+  }
+  throw aiReviewError(
+    409,
+    'PERFORMANCE_AI_REVIEW_SOURCE_INVALID',
+    'Stored AI review evidence is unavailable.'
+  );
+}
+
+function aiReviewCurrentConfirmationEvidence(performanceService, user, campaignId, generated) {
+  const selectedMetric = generated && generated.evidence && generated.evidence.scope
+    ? generated.evidence.scope.selected_metric
+    : 'views';
+  let evidence;
+  try {
+    evidence = performanceService.getReviewEvidence({
+      userId: user.id,
+      campaignId,
+      query: { top_metric: selectedMetric || 'views' }
+    });
+  } catch (_error) {
+    throw aiReviewError(
+      409,
+      'PERFORMANCE_AI_REVIEW_STALE',
+      'Current review evidence could not be verified.'
+    );
+  }
+  const references = aiReviewEvidenceReferences(evidence);
+  const projection = aiReviewEvidenceProjection(evidence, references);
+  const snapshotHash = aiReviewSnapshotHash(projection);
+  if (!evidence || !evidence.rankings || evidence.rankings.status !== 'available') {
+    throw aiReviewError(
+      409,
+      'PERFORMANCE_AI_REVIEW_STALE',
+      'Current review evidence is no longer ready for confirmation.'
+    );
+  }
+  return { evidence, projection, snapshotHash };
+}
+
+function aiReviewRequiredCitations(generated) {
+  const validation = generated && generated.evidence && generated.evidence.citation_validation;
+  const citations = validation && Array.isArray(validation.citations) ? validation.citations : [];
+  const unique = [...new Set(citations.filter((citation) => /^PERF-[1-9][0-9]*$/.test(citation)))];
+  if (unique.length < 2) {
+    throw aiReviewError(
+      409,
+      'PERFORMANCE_AI_REVIEW_SOURCE_INVALID',
+      'Stored AI review citations are unavailable.'
+    );
+  }
+  return unique;
+}
+
+function aiReviewConfirmationDraftSafety(value) {
+  const fixedBoundaryStatements = [
+    '- 所有结论均需人工确认；不包含视频、图片、字幕、脚本或创意证据。',
+    '- 请由项目负责人结合后续数据与授权素材完成人工确认。'
+  ];
+  const reviewableText = fixedBoundaryStatements.reduce(
+    (text, statement) => text.replace(statement, ''),
+    String(value || '')
+  );
+  return aiReviewDraftSafety(reviewableText);
+}
+
+function aiReviewApprovalMetadata(input) {
+  return {
+    schema_version: 1,
+    source_ai: {
+      conversation_id: input.source.generated.ai.conversation_id,
+      message_id: input.source.generated.ai.message_id,
+      draft_sha256: input.source.draftSha256,
+      draft_contract_version: input.source.generated.contract_version
+    },
+    evidence: {
+      snapshot_hash: input.snapshotHash,
+      selected_metric: input.current.projection.scope.selected_metric,
+      citation_ids: input.citations
+    },
+    confirmation: {
+      approved_by: input.user.id,
+      approved_at: new Date().toISOString(),
+      final_content_sha256: input.finalContentSha256,
+      request_id: input.requestId,
+      idempotency_key: input.idempotencyKey,
+      contract_version: AI_REVIEW_APPROVAL_CONTRACT_VERSION
+    }
+  };
+}
+
+function aiReviewApprovalResult(status, entry, input) {
+  return {
+    contract_version: AI_REVIEW_APPROVAL_CONTRACT_VERSION,
+    status,
+    campaign_id: input.campaignId,
+    conversation_id: input.source.generated.ai.conversation_id,
+    message_id: input.source.generated.ai.message_id,
+    knowledge_entry_id: Number(entry.id),
+    visibility: entry.visibility,
+    evidence_snapshot_hash: input.snapshotHash,
+    draft_sha256: input.source.draftSha256,
+    final_content_sha256: input.finalContentSha256
+  };
+}
+
 function enforceAiReviewQuota(db, user) {
   const quota = Number(user && user.api_quota || 0);
   if (!quota || (user && user.role === 'admin')) return;
@@ -2265,19 +2505,33 @@ function aiReviewCitationValidation(protocolValidation) {
   };
 }
 
+function aiReviewSafetyInspectionText(value) {
+  return String(value || '')
+    .normalize('NFKC')
+    .replace(/[\p{Cf}\p{White_Space}]+/gu, '');
+}
+
 function aiReviewDraftSafety(answer) {
-  const text = String(answer || '');
-  const mediaTermDetected = /钩子|画面|脚本|风格|创意|镜头|视觉|素材|CTA|call\s+to\s+action|\b(?:hook|visual|script|style|creative|scene|cta)\b/i.test(text);
+  const text = aiReviewSafetyInspectionText(answer);
+  const mediaTermDetected = /视频|图片|图像|字幕|音频|钩子|画面|脚本|风格|创意|镜头|视觉|素材|CTA|call\s*to\s*action|\b(?:video|image|photo|subtitle|audio|hook|visual|script|style|creative|scene|cta)\b/i.test(text);
+  const externalEvidenceDetected = /联网|网络搜索|搜索结果|网页资料|web\s*search|internet|google|bing|tavily|serpapi|PPT|powerpoint|幻灯片|飞书|feishu|bitable|多维表格/i.test(text);
   const causalMediaClaim = [
     /(?:由于|因为|归因于|导致|源于).{0,40}(?:钩子|画面|脚本|风格|创意|镜头|视觉|素材|CTA)/i,
     /(?:钩子|画面|脚本|风格|创意|镜头|视觉|素材|CTA).{0,40}(?:导致|提升|降低|驱动|影响|解释)/i,
-    /(?:because|driven by|caused by).{0,80}(?:hook|visual|script|style|creative|scene|cta|call\s+to\s+action)/i,
-    /(?:hook|visual|script|style|creative|scene|cta|call\s+to\s+action).{0,80}(?:caused|drove|improved|reduced|explains)/i
+    /(?:because|driven\s*by|caused\s*by).{0,80}(?:hook|visual|script|style|creative|scene|cta|call\s*to\s*action)/i,
+    /(?:hook|visual|script|style|creative|scene|cta|call\s*to\s*action).{0,80}(?:caused|drove|improved|reduced|explains)/i
+  ].some((pattern) => pattern.test(text));
+  const causalClaimDetected = [
+    /(?:由于|因为|归因于|导致|造成|驱动|证明|解释|因此|because|caused|drove|proved|explains)/i,
+    /(?:策略|内容|投放|方法|方案|文案|标题).{0,24}(?:使|让|令|带来|促进|推动).{0,24}(?:播放|展示|互动|点击|转化|指标|效果|roi|roas).{0,24}(?:提高|提升|降低|改善|增加|减少)?/i,
+    /(?:播放|展示|互动|点击|转化|指标|效果|roi|roas).{0,24}(?:提高|提升|降低|改善|增加|减少)/i
   ].some((pattern) => pattern.test(text));
   return {
-    valid: !mediaTermDetected && !causalMediaClaim,
+    valid: !mediaTermDetected && !externalEvidenceDetected && !causalMediaClaim && !causalClaimDetected,
     media_term_detected: mediaTermDetected,
+    external_evidence_detected: externalEvidenceDetected,
     causal_media_claim_detected: causalMediaClaim,
+    causal_claim_detected: causalClaimDetected,
     human_confirmation_present: /人工(?:确认|复核|审核)|"human_confirmation"\s*:\s*"required"/.test(text)
   };
 }
@@ -2411,6 +2665,77 @@ function createPerformanceAiReviewService(db, options = {}) {
   }
   if (!aiService || typeof aiService.handleChat !== 'function') {
     throw new TypeError('An AI chat service is required.');
+  }
+  const getCampaignAccess = options.getCampaignAccess || defaultGetCampaignAccess;
+
+  function requireApprovalAccess(user, campaignIdValue) {
+    const userId = user && aiReviewPositiveId(user.id);
+    const campaignId = aiReviewPositiveId(campaignIdValue);
+    if (userId === null) {
+      throw aiReviewError(401, 'PERFORMANCE_AI_REVIEW_UNAUTHORIZED', 'An authenticated user is required.');
+    }
+    if (campaignId === null) {
+      throw aiReviewError(400, 'PERFORMANCE_AI_REVIEW_APPROVAL_INVALID', 'Campaign is invalid.');
+    }
+    const access = getCampaignAccess(db, { userId, campaignId });
+    if (!access || access.ok !== true) {
+      throw aiReviewError(
+        access && Number.isSafeInteger(access.status) ? access.status : 403,
+        access && access.code ? access.code : 'PERFORMANCE_AI_REVIEW_FORBIDDEN',
+        'Campaign access is forbidden.'
+      );
+    }
+    if (!accessCapabilities(access).can_approve_ai_review) {
+      throw aiReviewError(
+        403,
+        'PERFORMANCE_AI_REVIEW_APPROVAL_FORBIDDEN',
+        'Only a campaign owner or organization administrator can confirm this AI review.'
+      );
+    }
+    return { userId, campaignId, access };
+  }
+
+  function existingConfirmation(dbEntry, input) {
+    const metadata = aiReviewPlainObject(safeJson(dbEntry && dbEntry.metadata_json, null));
+    const sourceAi = metadata && aiReviewPlainObject(metadata.source_ai);
+    const evidence = metadata && aiReviewPlainObject(metadata.evidence);
+    const confirmation = metadata && aiReviewPlainObject(metadata.confirmation);
+    return Boolean(
+      dbEntry &&
+      dbEntry.content === input.editedDraft &&
+      sourceAi &&
+      sourceAi.conversation_id === input.source.generated.ai.conversation_id &&
+      sourceAi.message_id === input.source.generated.ai.message_id &&
+      sourceAi.draft_sha256 === input.source.draftSha256 &&
+      evidence &&
+      evidence.snapshot_hash === input.snapshotHash &&
+      dbEntry.visibility === input.visibility &&
+      confirmation &&
+      confirmation.final_content_sha256 === input.finalContentSha256
+    );
+  }
+
+  function writeApprovalAudit(user, input, entryId, outcome) {
+    const table = db.prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='activity_log'").get();
+    if (!table) {
+      throw aiReviewError(500, 'PERFORMANCE_AI_REVIEW_AUDIT_FAILED', 'AI review approval audit is unavailable.');
+    }
+    db.prepare(`
+      INSERT INTO activity_log (user_id,action,module,details,ip_address)
+      VALUES (?,'confirm_performance_ai_review','performance_review',?,NULL)
+    `).run(user.id, JSON.stringify({
+      request_id: input.requestId,
+      idempotency_key: input.idempotencyKey,
+      campaign_id: input.campaignId,
+      conversation_id: input.source.generated.ai.conversation_id,
+      message_id: input.source.generated.ai.message_id,
+      knowledge_entry_id: entryId,
+      visibility: input.visibility,
+      evidence_snapshot_hash: input.snapshotHash,
+      draft_sha256: input.source.draftSha256,
+      final_content_sha256: input.finalContentSha256,
+      outcome
+    }));
   }
 
   async function createDraft(input) {
@@ -2693,7 +3018,173 @@ function createPerformanceAiReviewService(db, options = {}) {
     });
   }
 
-  return Object.freeze({ createDraft });
+  function approveDraft(input) {
+    const user = input && input.user;
+    const approval = aiReviewApprovalInput(input && input.body);
+    const idempotencyKey = aiReviewApprovalIdempotencyKey(input && input.idempotencyKey);
+    const requestId = aiReviewApprovalRequestId(input && input.requestId);
+    const finalContentSha256 = sha256(approval.editedDraft);
+    const inputCampaignId = aiReviewPositiveId(input && input.campaignId);
+
+    return db.transaction(() => {
+      const approvedAccess = requireApprovalAccess(user, inputCampaignId);
+      const source = aiReviewStoredGeneratedDraft(db, approvedAccess.access, approval);
+      const storedSnapshotHash = source.generated.evidence.snapshot_hash;
+      if (approval.expectedSnapshotHash !== storedSnapshotHash) {
+        throw aiReviewError(
+          409,
+          'PERFORMANCE_AI_REVIEW_SNAPSHOT_MISMATCH',
+          'The selected AI review draft does not match the supplied evidence snapshot.'
+        );
+      }
+      const sourceId = `${approval.conversationId}:${approval.messageId}`;
+      const existingRows = db.prepare(`
+        SELECT id,content,visibility,metadata_json
+        FROM knowledge_entries
+        WHERE business_type='campaign' AND business_id=?
+          AND source_type='performance_ai_review_confirmation' AND source_id=?
+        ORDER BY id
+      `).all(String(approvedAccess.campaignId), sourceId);
+      if (existingRows.length > 1) {
+        throw aiReviewError(
+          409,
+          'PERFORMANCE_AI_REVIEW_ARCHIVE_CONFLICT',
+          'AI review confirmation has conflicting knowledge archives.'
+        );
+      }
+      const replayState = {
+        user,
+        campaignId: approvedAccess.campaignId,
+        source,
+        snapshotHash: storedSnapshotHash,
+        finalContentSha256,
+        visibility: approval.visibility,
+        idempotencyKey,
+        requestId,
+        editedDraft: approval.editedDraft
+      };
+      if (existingRows.length === 1 && existingConfirmation(existingRows[0], replayState)) {
+        const existing = existingRows[0];
+        const link = db.prepare(`
+          SELECT id
+          FROM campaign_record_links
+          WHERE org_id=? AND campaign_id=? AND record_type='knowledge_entry'
+            AND record_id=? AND relation_type='knowledge' AND revoked_at IS NULL
+          LIMIT 1
+        `).get(
+          approvedAccess.access.campaign.org_id,
+          approvedAccess.campaignId,
+          String(existing.id)
+        );
+        if (!link) {
+          throw aiReviewError(
+            409,
+            'PERFORMANCE_AI_REVIEW_ARCHIVE_CONFLICT',
+            'AI review confirmation knowledge custody is incomplete.'
+          );
+        }
+        const result = aiReviewApprovalResult('already_confirmed', existing, replayState);
+        writeApprovalAudit(user, replayState, Number(existing.id), result.status);
+        return result;
+      }
+      const current = aiReviewCurrentConfirmationEvidence(
+        performanceService,
+        user,
+        approvedAccess.campaignId,
+        source.generated
+      );
+      if (current.snapshotHash !== storedSnapshotHash) {
+        throw aiReviewError(
+          409,
+          'PERFORMANCE_AI_REVIEW_STALE',
+          'Performance evidence changed after the AI review draft was generated.'
+        );
+      }
+      const safety = aiReviewConfirmationDraftSafety(approval.editedDraft);
+      if (!safety.valid) {
+        throw aiReviewError(
+          400,
+          'PERFORMANCE_AI_REVIEW_EDIT_INVALID',
+          'Edited AI review content exceeds the metadata-only evidence boundary.',
+          safety
+        );
+      }
+      const citations = aiReviewRequiredCitations(source.generated);
+      const missingCitations = citations.filter((citation) => !approval.editedDraft.includes(`[${citation}]`));
+      if (missingCitations.length) {
+        throw aiReviewError(
+          400,
+          'PERFORMANCE_AI_REVIEW_CITATION_REQUIRED',
+          'Edited AI review content must retain every validated performance citation.',
+          { citations: missingCitations }
+        );
+      }
+
+      const approvalState = {
+        user,
+        campaignId: approvedAccess.campaignId,
+        source,
+        current,
+        citations,
+        snapshotHash: storedSnapshotHash,
+        finalContentSha256,
+        visibility: approval.visibility,
+        idempotencyKey,
+        requestId,
+        editedDraft: approval.editedDraft
+      };
+      if (existingRows.length === 1) {
+        throw aiReviewError(
+          409,
+          'PERFORMANCE_AI_REVIEW_ALREADY_CONFIRMED',
+          'This immutable AI review draft was already confirmed with different content.'
+        );
+      }
+
+      const written = knowledge.ingestBusinessArtifact(db, {
+        artifactType: 'performance_review_confirmation',
+        artifactState: 'confirmed',
+        organizationId: approvedAccess.access.campaign.org_id,
+        campaignId: approvedAccess.campaignId,
+        createdBy: user.id,
+        sourceId,
+        title: `AI performance review confirmation #${approval.messageId}`,
+        summary: aiReviewSummaryText(approval.editedDraft),
+        content: approval.editedDraft,
+        tags: ['performance', 'ai_review', 'human_confirmed'],
+        visibility: approval.visibility,
+        metadata: aiReviewApprovalMetadata(approvalState)
+      });
+      if (!written || written.status !== 'created' || !written.entry || !written.entry.id) {
+        throw aiReviewError(
+          409,
+          'PERFORMANCE_AI_REVIEW_ARCHIVE_CONFLICT',
+          'AI review confirmation knowledge archive already exists.'
+        );
+      }
+      db.prepare(`
+        INSERT INTO campaign_record_links (
+          org_id,campaign_id,record_type,bundle_id,record_id,relation_type,
+          created_by,metadata_json
+        ) VALUES (?,?,?,?,?,?,?,?)
+      `).run(
+        approvedAccess.access.campaign.org_id,
+        approvedAccess.campaignId,
+        'knowledge_entry',
+        crypto.randomBytes(32).toString('hex'),
+        String(written.entry.id),
+        'knowledge',
+        user.id,
+        JSON.stringify({ source: 'performance_ai_review_confirmation' })
+      );
+      knowledge.applyKnowledgeCapacityGaugePlanInTransaction(db, written.capacityGaugePlan);
+      const result = aiReviewApprovalResult('confirmed', written.entry, approvalState);
+      writeApprovalAudit(user, approvalState, Number(written.entry.id), result.status);
+      return result;
+    }).immediate();
+  }
+
+  return Object.freeze({ createDraft, approveDraft });
 }
 
 module.exports = {

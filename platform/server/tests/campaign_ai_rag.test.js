@@ -475,6 +475,220 @@ test('performance AI review replays its persisted server-rendered envelope for t
   }
 });
 
+test('performance AI review confirmation archives one edited campaign-local knowledge artifact and replays it exactly', async () => {
+  const db = openDatabase();
+  try {
+    const fixture = createCampaignFixture(db);
+    const performanceService = createPerformanceManualService(db);
+    const strongest = performanceService.createContent({
+      userId: fixture.userId,
+      campaignId: fixture.campaignId,
+      body: {
+        url: 'https://www.youtube.com/watch?v=p1A2p3P4p5P',
+        creator_name: 'Confirmation Top Creator',
+        creator_id: 'confirmation-top',
+        product: 'Confirmation Product'
+      }
+    }).content;
+    const weakest = performanceService.createContent({
+      userId: fixture.userId,
+      campaignId: fixture.campaignId,
+      body: {
+        url: 'https://www.youtube.com/watch?v=q1B2q3Q4q5Q',
+        creator_name: 'Confirmation Bottom Creator',
+        creator_id: 'confirmation-bottom',
+        product: 'Confirmation Product'
+      }
+    }).content;
+    performanceService.recordManualInput({
+      userId: fixture.userId,
+      campaignId: fixture.campaignId,
+      contentId: strongest.id,
+      body: { observation: { views: 5600, likes: 280, comments: 56 } }
+    });
+    performanceService.recordManualInput({
+      userId: fixture.userId,
+      campaignId: fixture.campaignId,
+      contentId: weakest.id,
+      body: { observation: { views: 920, likes: 18, comments: 5 } }
+    });
+
+    const protocol = JSON.stringify({
+      contract_version: 1,
+      top_evidence_ids: [`PERF-${strongest.id}`],
+      bottom_evidence_ids: [`PERF-${weakest.id}`],
+      experiment_types: ['data_coverage', 'cohort_comparison'],
+      human_confirmation: 'required'
+    });
+    const aiReviewService = createPerformanceAiReviewService(db, {
+      performanceService,
+      aiService: {
+        replayLinkedPerformanceReview: ai.replayLinkedPerformanceReview,
+        handleChat(database, input) {
+          return ai.handleChat(database, Object.assign({}, input, {
+            provider: successfulProvider([], protocol)
+          }));
+        }
+      }
+    });
+    const generated = await aiReviewService.createDraft({
+      user: fixture.user,
+      campaignId: fixture.campaignId,
+      body: { top_metric: 'views' },
+      idempotencyKey: 'performance-ai-review-confirmation-draft-0001',
+      requestId: 'performance-ai-review-confirmation-draft-request-0001'
+    });
+    assert.equal(generated.status, 'generated');
+
+    const editedDraft = `${generated.draft}\n\n人工确认：后续统一观察窗口，并保留当前指标口径。`;
+    const approvalInput = {
+      user: fixture.user,
+      campaignId: fixture.campaignId,
+      body: {
+        conversation_id: generated.ai.conversation_id,
+        message_id: generated.ai.message_id,
+        expected_snapshot_hash: generated.evidence.snapshot_hash,
+        edited_draft: editedDraft,
+        visibility: 'team'
+      },
+      idempotencyKey: 'performance-ai-review-confirmation-0001',
+      requestId: 'performance-ai-review-confirmation-request-0001'
+    };
+    assert.throws(() => aiReviewService.approveDraft(Object.assign({}, approvalInput, {
+      body: Object.assign({}, approvalInput.body, {
+        edited_draft: `${editedDraft}\n\n视频钩子导致播放提升 [PERF-${strongest.id}]。`
+      })
+    })), (error) => error && error.code === 'PERFORMANCE_AI_REVIEW_EDIT_INVALID');
+    for (const unsafeEdit of [
+      `视频内容表现突出 [PERF-${strongest.id}]。`,
+      `图片展示带来更多互动 [PERF-${strongest.id}]。`,
+      `字幕优化可以提升播放 [PERF-${strongest.id}]。`,
+      `Google 搜索与联网资料支持这个判断 [PERF-${strongest.id}]。`,
+      `PPT 和飞书数据已经证明这个结论 [PERF-${strongest.id}]。`,
+      `视\u200B频内容表现突出 [PERF-${strongest.id}]。`,
+      `飞\u200B书数据支持这个判断 [PERF-${strongest.id}]。`,
+      `Ｐ\u200BＰＴ 资料支持这个判断 [PERF-${strongest.id}]。`,
+      `当前策略使转化率提高 [PERF-${strongest.id}]。`
+    ]) {
+      assert.throws(() => aiReviewService.approveDraft(Object.assign({}, approvalInput, {
+        body: Object.assign({}, approvalInput.body, {
+          edited_draft: `${editedDraft}\n\n${unsafeEdit}`
+        })
+      })), (error) => error && error.code === 'PERFORMANCE_AI_REVIEW_EDIT_INVALID');
+    }
+    assert.equal(db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM knowledge_entries
+      WHERE source_type='performance_ai_review_confirmation'
+    `).get().count, 0);
+    const confirmed = await aiReviewService.approveDraft(approvalInput);
+
+    assert.equal(confirmed.status, 'confirmed');
+    assert.equal(confirmed.campaign_id, fixture.campaignId);
+    assert.equal(confirmed.conversation_id, generated.ai.conversation_id);
+    assert.equal(confirmed.message_id, generated.ai.message_id);
+    assert.equal(confirmed.evidence_snapshot_hash, generated.evidence.snapshot_hash);
+    assert.match(confirmed.final_content_sha256, /^[a-f0-9]{64}$/);
+    assert.equal(confirmed.knowledge_entry_id > 0, true);
+
+    const entry = db.prepare(`
+      SELECT entry_type,source_type,source_id,business_type,business_id,content,visibility,metadata_json
+      FROM knowledge_entries
+      WHERE id=?
+    `).get(confirmed.knowledge_entry_id);
+    assert.deepEqual({
+      entry_type: entry.entry_type,
+      source_type: entry.source_type,
+      source_id: entry.source_id,
+      business_type: entry.business_type,
+      business_id: entry.business_id,
+      content: entry.content,
+      visibility: entry.visibility
+    }, {
+      entry_type: 'campaign_performance_review',
+      source_type: 'performance_ai_review_confirmation',
+      source_id: `${generated.ai.conversation_id}:${generated.ai.message_id}`,
+      business_type: 'campaign',
+      business_id: String(fixture.campaignId),
+      content: editedDraft,
+      visibility: 'team'
+    });
+    const metadata = JSON.parse(entry.metadata_json);
+    assert.equal(metadata.source_ai.conversation_id, generated.ai.conversation_id);
+    assert.equal(metadata.source_ai.message_id, generated.ai.message_id);
+    assert.equal(metadata.source_ai.draft_sha256, sha256(generated.draft));
+    assert.equal(metadata.evidence.snapshot_hash, generated.evidence.snapshot_hash);
+    assert.equal(metadata.confirmation.final_content_sha256, sha256(editedDraft));
+    assert.equal(db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM campaign_record_links
+      WHERE campaign_id=? AND record_type='knowledge_entry' AND record_id=?
+        AND relation_type='knowledge' AND revoked_at IS NULL
+    `).get(fixture.campaignId, String(confirmed.knowledge_entry_id)).count, 1);
+
+    assert.throws(() => aiReviewService.approveDraft(Object.assign({}, approvalInput, {
+      body: Object.assign({}, approvalInput.body, { visibility: 'private' })
+    })), (error) => error && error.code === 'PERFORMANCE_AI_REVIEW_ALREADY_CONFIRMED');
+
+    const replayed = await aiReviewService.approveDraft(approvalInput);
+    assert.equal(replayed.status, 'already_confirmed');
+    assert.equal(replayed.knowledge_entry_id, confirmed.knowledge_entry_id);
+    performanceService.recordManualInput({
+      userId: fixture.userId,
+      campaignId: fixture.campaignId,
+      contentId: strongest.id,
+      body: { observation: { views: 5800, likes: 290, comments: 58 } }
+    });
+    const replayedAfterEvidenceChanged = await aiReviewService.approveDraft(approvalInput);
+    assert.equal(replayedAfterEvidenceChanged.status, 'already_confirmed');
+    assert.equal(replayedAfterEvidenceChanged.knowledge_entry_id, confirmed.knowledge_entry_id);
+    assert.equal(db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM knowledge_entries
+      WHERE source_type='performance_ai_review_confirmation'
+    `).get().count, 1);
+  } finally {
+    db.close();
+  }
+});
+
+test('performance AI review confirmation rejects a team member before reading draft evidence', () => {
+  const db = openDatabase();
+  try {
+    const aiReviewService = createPerformanceAiReviewService(db, {
+      performanceService: {
+        getReviewEvidence() {
+          throw new Error('must not read evidence for a forbidden approval');
+        }
+      },
+      aiService: { async handleChat() { throw new Error('must not call AI'); } },
+      getCampaignAccess() {
+        return {
+          ok: true,
+          role: 'team_member',
+          campaign: { id: 7, org_id: 1 },
+          permissions: { read: true, write: true }
+        };
+      }
+    });
+    assert.throws(() => aiReviewService.approveDraft({
+      user: { id: 77, role: 'member' },
+      campaignId: 7,
+      body: {
+        conversation_id: 31,
+        message_id: 32,
+        expected_snapshot_hash: 'a'.repeat(64),
+        edited_draft: 'Reviewed result [PERF-1] [PERF-2]',
+        visibility: 'private'
+      },
+      idempotencyKey: 'performance-ai-review-forbidden-0001',
+      requestId: 'performance-ai-review-forbidden-request-0001'
+    }), (error) => error && error.code === 'PERFORMANCE_AI_REVIEW_APPROVAL_FORBIDDEN');
+  } finally {
+    db.close();
+  }
+});
+
 test('performance AI review replays a terminal result after consuming the caller quota', async () => {
   const db = openDatabase();
   try {
