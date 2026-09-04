@@ -1,5 +1,33 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.8.6-performance-ai-review-draft (Production Deployed, 2026-09-04) - Phase 7B.3b AI 复盘草稿
+
+### 交付与范围 / Delivery And Scope
+- “效果看板”新增受保护的 `POST /api/campaigns/:id/performance/ai-review-draft`，在当前活动和当前已保存的视频指标快照范围内生成可编辑的 AI 复盘草稿。
+- 草稿只使用后端组装的活动证据和已确认的 `performance_review_methodology` 知识；联网搜索、视频/媒体抓取、自动知识库晋升、飞书写入和定时任务均保持关闭。
+- DeepSeek 输出被限制为严格 JSON 协议，后端校验结论、引用、证据快照和置信度后才渲染为安全的中文草稿。证据变化、模型不可用或协议不合法时会明确保留/拒绝草稿，而不会伪造结论。
+- 新增 schema `v12` 的 `performance_ai_review_audits` 只追加审计表，保存已拒绝/过期快照等终态结果；成功草稿继续作为关联 AI 对话与引用持久化，普通用户仅能访问自己的活动范围，管理员审计边界保持不变。
+- 持久化回放在当前权限复核之后进行。相同活动、指标与合同版本可重放既有安全结果，不会因为后来数据更新而重新调用模型或扩大结论。
+
+### 定向验证、审查与上线 / Focused Verification, Review, And Release
+- 功能核心矩阵 `84/84` 通过，覆盖性能服务、RAG、路由、前端合同、知识治理、成功/保留/过期快照回放和权限边界。
+- 发布修复采用 RED -> GREEN：候选迁移校验与离线回放证明从 v11 正确升级到 v12。发布合同 `37/37`、回放证明 `8/8`、可信来源与发布合同 `69/69`、JavaScript/PowerShell 语法、`git diff --check` 和本地发布预检均通过。
+- 两次独立审查均为 `APPROVE`：功能本体无阻断项；发布修复确认首次 v11 升级和后续 v12 重发均与可信迁移清单一致。
+- 按“单功能完成即上线”执行定向验证和独立审查；本切片包含 schema、鉴权、AI 会话与发布基础设施，因此仍完成候选隔离迁移、真实 Express 回放、发布守卫和部署浏览器烟测后才切换。
+- 实现提交：`8b8ebd0`；发布门禁修复：`8d7544e`、`5842c34`。
+
+### 生产证据 / Production Evidence
+- 可恢复备份：`/root/turingmarket/backups/v060-crm-sales-workspace-20260904-142543`；备份目录 `SHA256SUMS` SHA-256 为 `d13ca93b628290150d158f234df9f23d8cb3e8b1970269b96f19ca0cb51667d3`。
+- 受控候选完成 sanitized migration rehearsal、真实回放 `8/8`、release gate `21/21`、部署浏览器烟测 `2/2`、Nginx 校验与容量门禁；随后原子切换并恢复公网流量。
+- 公网 `/api/health` 为 `200` / `ok`，Parser ready；`/performance-dashboard` 为 `200`；PM2 online。
+- 只读 SQLite 验证为 schema `v12`、`performance_ai_review_audits` 存在、`quick_check=ok`、外键异常 `0`；远端运行时语法检查通过。
+- 线上验收未触发真实 DeepSeek、视频抓取、外部 provider、飞书读写、定时同步或真实业务数据写入。
+
+### 后续边界 / Next Boundaries
+- 下一独立功能可以在本草稿和当前指标证据之上增加“人工确认后的客户复盘报告/PPT”；真实视频内容、钩子和风格分析仍需取得明确素材/平台数据授权。
+
+---
+
 ## v0.8.5-performance-review-evidence (Production Deployed, 2026-09-02) - Phase 7B.3a 项目复盘依据
 
 ### 交付与范围 / Delivery And Scope
