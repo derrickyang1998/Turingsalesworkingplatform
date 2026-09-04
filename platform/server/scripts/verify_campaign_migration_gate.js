@@ -14,8 +14,8 @@ const REPORT_VERSION = 'tm-campaign-migration-gate-v1';
 const PRESERVATION_REPORT_VERSION = 'tm-campaign-migration-preservation-v1';
 const LEGACY_TOPOLOGY_FORMAT = 'tm-legacy-topology-subset-v1';
 const REQUIRED_SOURCE_VERSION = 1;
-const REQUIRED_TARGET_VERSION = 12;
-const SUPPORTED_SOURCE_VERSIONS = new Set([REQUIRED_SOURCE_VERSION, 6, 7, 8, 9, 10, 11, 12]);
+const REQUIRED_TARGET_VERSION = 13;
+const SUPPORTED_SOURCE_VERSIONS = new Set([REQUIRED_SOURCE_VERSION, 6, 7, 8, 9, 10, 11, 12, 13]);
 const DEFAULT_FROZEN_MIGRATION_TIMESTAMP = '2040-01-02 03:04:05';
 const EXCLUDED_PRESERVATION_TABLES = new Set(['schema_migrations', 'sqlite_sequence']);
 const DETERMINISTIC_APPEND_TABLES = new Set(['activity_log']);
@@ -92,11 +92,18 @@ const REGISTERED_MIGRATIONS = Object.freeze([
     dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
   }),
   Object.freeze({
-    version: 12,
-    name: '012_performance_ai_review_audit',
-    sourcePath: 'migrations/012_performance_ai_review_audit.js',
-    engineVersion: 1,
-    dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
+      version: 12,
+      name: '012_performance_ai_review_audit',
+      sourcePath: 'migrations/012_performance_ai_review_audit.js',
+      engineVersion: 1,
+      dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
+  }),
+  Object.freeze({
+      version: 13,
+      name: '013_customer_report_snapshot',
+      sourcePath: 'migrations/013_customer_report_snapshot.js',
+      engineVersion: 1,
+      dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
   })
 ]);
 const APPROVED_TARGET_TOPOLOGY_REPLACEMENTS = Object.freeze([

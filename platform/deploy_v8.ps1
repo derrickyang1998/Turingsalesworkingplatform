@@ -33,10 +33,10 @@ $EXPECTED_PPT_SHA256 = "f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57
 $TRUSTED_SOURCE_GATE_RELATIVE_PATH = "server\scripts\trusted_production_source_gate.js"
 $TRUSTED_SOURCE_MANIFEST_RELATIVE_PATH = "server\scripts\trusted_production_source_manifest.json"
 $TRUSTED_RUNTIME_CONFIG_RELATIVE_PATH = "server\config\runtime_config.js"
-$EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "28feef73196338959e4ef032997659e03a45ae6b7e0fb564e96bdfd182accea1"
-$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "27d8c0ae1e42f144159720fae1a47b8cde744b416600da6707722fc36d124176"
+$EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "5038e803c7109e7ac01e6fa960b9614ae3ce955b86c3f1c8fe11c723158773c1"
+$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "6c57f4b6e72a42bf254c687f1bbfed572ddaea5e938b900ffd214bf2b8553a01"
 $EXPECTED_TRUSTED_RUNTIME_CONFIG_SHA256 = "76d43d3e811c6fa8daae987cc9eb2fff2dc8a8095f84b1cd309e4e214df94dcb"
-$EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256 = "26bc1484724bacf5f087c6febe018e641bf51089ec261314356125067d3d19be"
+$EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256 = "92b0cf69d8f56093ff807dff8b9773842ec5aa3b777e7afafa741eb75470f6bd"
 $EXPECTED_TRUSTED_PARSER_VERIFIER_SHA256 = "7f9efaac02675b21e025891a400474cc7481c1adaf58c88bd8b356d5276f2eaa"
 $EXPECTED_TRUSTED_PUBLIC_GUARD_SHA256 = "d45fe8fcc01587aaa0e73eccfb9714c27801e232cb6c0effd6daedb703316d66"
 $EXPECTED_TRUSTED_MIGRATION_CLEANUP_HELPER_SHA256 = "d5f2befa902522dd9de3e9dd2397a99ee5e78ab1a1c6e526a27f14bb2829e1fa"
@@ -112,6 +112,7 @@ $FILES = @(
     "server\migrations\010_performance_manual_foundation.js",
     "server\migrations\011_performance_feishu_connection_config.js",
     "server\migrations\012_performance_ai_review_audit.js",
+    "server\migrations\013_customer_report_snapshot.js",
     "server\migrations\baselines\legacy_v1.js",
     "server\migrations\engines\v1.js",
     "server\migrations\vendor\bcryptjs_v3_0_3.js",
@@ -9571,7 +9572,7 @@ try {
   if (database.pragma('integrity_check', { simple: true }) !== 'ok') throw new Error('Candidate DB integrity_check failed');
   if (database.pragma('foreign_key_check').length !== 0) throw new Error('Candidate DB foreign_key_check failed');
   const version = database.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version;
-  if (Number(version) !== 12) throw new Error('Candidate migration target version mismatch');
+  if (Number(version) !== 13) throw new Error('Candidate migration target version mismatch');
   console.log('TM_SANITIZED_MIGRATION_COMPATIBILITY_OK');
 } finally {
   database.close();
@@ -10947,7 +10948,7 @@ if applied:
         if hashlib.sha256(handle.read()).hexdigest() != output_sha256:
             raise SystemExit('Trusted live database adoption stage digest is invalid')
 else:
-    if (report.get('sourceVersion') not in (1, 6, 7, 8, 9, 10, 11, 12) or
+    if (report.get('sourceVersion') not in (1, 6, 7, 8, 9, 10, 11, 12, 13) or
             report.get('targetVersion') != report.get('sourceVersion') or
             output_sha256 != expected_source_sha256 or
             report.get('baseTableCount') is not None or report.get('baseRowCount') is not None or

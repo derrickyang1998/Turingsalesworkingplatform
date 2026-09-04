@@ -1075,7 +1075,7 @@ function compactSqliteClone(sourcePath, outputPath, mutate, options = {}) {
   return outputPath;
 }
 
-test('manifest declares exact managed v1 as primary and keeps isolated v6 through v12 profiles', () => {
+test('manifest declares exact managed v1 as primary and keeps isolated v6 through v13 profiles', () => {
   const v1Fixture = migratedFixture('manifest-v1-primary', 1);
   const v6Fixture = migratedFixture('manifest-v6-isolated', 6);
   const v7Fixture = migratedFixture('manifest-v7-isolated', 7);
@@ -1084,9 +1084,10 @@ test('manifest declares exact managed v1 as primary and keeps isolated v6 throug
   const v10Fixture = migratedFixture('manifest-v10-isolated', 10);
   const v11Fixture = migratedFixture('manifest-v11-isolated', 11);
   const v12Fixture = migratedFixture('manifest-v12-isolated', 12);
+  const v13Fixture = migratedFixture('manifest-v13-isolated', 13);
   try {
     assert.equal(manifest.schemaVersion, 1);
-    assert.deepEqual(manifest.exactProfiles.map((profile) => profile.schemaVersion), [6, 7, 8, 9, 10, 11, 12]);
+    assert.deepEqual(manifest.exactProfiles.map((profile) => profile.schemaVersion), [6, 7, 8, 9, 10, 11, 12, 13]);
     assert.equal(
       manifest.categories['sensitive-number'],
       'run-randomized bounded-domain bijection preserving null/equality/cardinality and SQLite storage type'
@@ -1100,6 +1101,7 @@ test('manifest declares exact managed v1 as primary and keeps isolated v6 throug
     const v10Profile = sanitizer._testing.manifestProfileForVersion(manifest, 10);
     const v11Profile = sanitizer._testing.manifestProfileForVersion(manifest, 11);
     const v12Profile = sanitizer._testing.manifestProfileForVersion(manifest, 12);
+    const v13Profile = sanitizer._testing.manifestProfileForVersion(manifest, 13);
     assert.equal(v1Profile.schemaVersion, 1);
     assert.equal(v6Profile.schemaVersion, 6);
     assert.equal(v7Profile.schemaVersion, 7);
@@ -1108,6 +1110,7 @@ test('manifest declares exact managed v1 as primary and keeps isolated v6 throug
     assert.equal(v10Profile.schemaVersion, 10);
     assert.equal(v11Profile.schemaVersion, 11);
     assert.equal(v12Profile.schemaVersion, 12);
+    assert.equal(v13Profile.schemaVersion, 13);
     assert.equal(v1Profile.objects.length, sanitizer.actualInventory(v1Fixture.db).length);
     assert.equal(v6Profile.objects.length, sanitizer.actualInventory(v6Fixture.db).length);
     assert.equal(v7Profile.objects.length, sanitizer.actualInventory(v7Fixture.db).length);
@@ -1116,6 +1119,7 @@ test('manifest declares exact managed v1 as primary and keeps isolated v6 throug
     assert.equal(v10Profile.objects.length, sanitizer.actualInventory(v10Fixture.db).length);
     assert.equal(v11Profile.objects.length, sanitizer.actualInventory(v11Fixture.db).length);
     assert.equal(v12Profile.objects.length, sanitizer.actualInventory(v12Fixture.db).length);
+    assert.equal(v13Profile.objects.length, sanitizer.actualInventory(v13Fixture.db).length);
     for (const profile of [v1Profile, v6Profile, v7Profile, v8Profile]) {
       assert.equal(profile.jsonPolicy.preserveLeafTypes, true);
       assert.equal(
@@ -1136,6 +1140,7 @@ test('manifest declares exact managed v1 as primary and keeps isolated v6 throug
     assert.equal(v10Profile.semanticPolicies.structuralColumns.validatorVersion, 'tm-structural-policy-v5-performance-manual');
     assert.equal(v11Profile.semanticPolicies.structuralColumns.validatorVersion, 'tm-structural-policy-v6-performance-feishu-connection');
     assert.equal(v12Profile.semanticPolicies.structuralColumns.validatorVersion, 'tm-structural-policy-v7-performance-ai-review-audit');
+    assert.equal(v13Profile.semanticPolicies.structuralColumns.validatorVersion, 'tm-structural-policy-v8-customer-report-snapshot');
     assert.doesNotThrow(() => sanitizer.validateManifest(manifest, v1Fixture.db));
     assert.doesNotThrow(() => sanitizer.validateManifest(manifest, v6Fixture.db));
     assert.doesNotThrow(() => sanitizer.validateManifest(manifest, v7Fixture.db));
@@ -1144,6 +1149,7 @@ test('manifest declares exact managed v1 as primary and keeps isolated v6 throug
     assert.doesNotThrow(() => sanitizer.validateManifest(manifest, v10Fixture.db));
     assert.doesNotThrow(() => sanitizer.validateManifest(manifest, v11Fixture.db));
     assert.doesNotThrow(() => sanitizer.validateManifest(manifest, v12Fixture.db));
+    assert.doesNotThrow(() => sanitizer.validateManifest(manifest, v13Fixture.db));
   } finally {
     closeAndRemove(v1Fixture);
     closeAndRemove(v6Fixture);
@@ -1153,6 +1159,7 @@ test('manifest declares exact managed v1 as primary and keeps isolated v6 throug
     closeAndRemove(v10Fixture);
     closeAndRemove(v11Fixture);
     closeAndRemove(v12Fixture);
+    closeAndRemove(v13Fixture);
   }
 });
 

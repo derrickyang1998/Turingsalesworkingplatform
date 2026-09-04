@@ -26,9 +26,10 @@
       9,
       10,
       11,
-      12
+      12,
+      13
     ],
-    "targetVersion": 12,
+    "targetVersion": 13,
     "runs": 2,
     "deterministicAppendTables": [
       "activity_log"
@@ -82,6 +83,10 @@
     {
       "path": "server/migrations/012_performance_ai_review_audit.js",
       "sha256": "deab5c59514eef46ce52d8c2aed4081583fe9a0766d20f929d5c2b11688e25d5"
+    },
+    {
+      "path": "server/migrations/013_customer_report_snapshot.js",
+      "sha256": "8241267c63f346506753a67596dd7bef9386b8555944021fae5f91a01eda77f9"
     },
     {
       "path": "server/migrations/baselines/legacy_v1.js",
@@ -165,11 +170,11 @@
     },
     {
       "path": "server/scripts/sanitization_manifest.json",
-      "sha256": "2b8f2eb586cc682d6cda206e20328aa78df006134c51b5a586b2689f00e59542"
+      "sha256": "12a45cb2b8c4bb0bbce17b7a46c4d9a740a480c5bff65c156c340c7b8a5065e9"
     },
     {
       "path": "server/scripts/sanitize_production_shape.js",
-      "sha256": "804c708bc8146ef909bef0c47f0d71735bcc861c8c1781750dac786a2b814877"
+      "sha256": "720c7dcd95db2c8dd4c1f70fcd97025c3a1cb76ab115b97d93b86744758b4bb1"
     },
     {
       "path": "server/scripts/trusted_parser_runtime_verifier.js",
@@ -181,7 +186,7 @@
     },
     {
       "path": "server/scripts/verify_campaign_migration_gate.js",
-      "sha256": "26bc1484724bacf5f087c6febe018e641bf51089ec261314356125067d3d19be"
+      "sha256": "92b0cf69d8f56093ff807dff8b9773842ec5aa3b777e7afafa741eb75470f6bd"
     },
     {
       "path": "server/services/campaign_access_service.js",

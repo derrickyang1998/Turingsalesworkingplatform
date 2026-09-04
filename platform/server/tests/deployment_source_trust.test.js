@@ -436,8 +436,8 @@ test('trusted source manifest pins the sanitizer closure and exact supported sou
   const paths = new Set(manifest.files.map((entry) => entry.path));
   assert.equal(manifest.format, 'tm-trusted-production-source-manifest-v1');
   assert.deepEqual(manifest.migrationContract, {
-    acceptedSourceVersions: [1, 6, 7, 8, 9, 10, 11, 12],
-    targetVersion: 12,
+    acceptedSourceVersions: [1, 6, 7, 8, 9, 10, 11, 12, 13],
+    targetVersion: 13,
     runs: 2,
     deterministicAppendTables: ['activity_log']
   });
@@ -644,7 +644,7 @@ test('trusted bundle staging rejects a candidate sanitizer that would substitute
   assert.equal(fs.existsSync(bundleRoot), false, 'a forged sanitizer must not publish executable trusted bytes');
 });
 
-test('trusted deployment gate adopts exact legacy v0 before sanitized v1-to-v12 verification', (t) => {
+test('trusted deployment gate adopts exact legacy v0 before sanitized v1-to-v13 verification', (t) => {
   const gate = loadTrustedGate();
   assert.match(
     read(trustedGatePath),
@@ -692,7 +692,7 @@ test('trusted deployment gate adopts exact legacy v0 before sanitized v1-to-v12 
   }, {
     format: 'tm-trusted-production-source-verdict-v1',
     sourceVersion: 1,
-    targetVersion: 12,
+    targetVersion: 13,
     runs: 2,
     adoption: {
       format: 'tm-trusted-legacy-adoption-verdict-v1',
@@ -817,7 +817,7 @@ test('trusted live adoption recognizes exact managed v7 as a no-op', (t) => {
   assert.equal(fs.existsSync(outputPath), false);
 });
 
-test('trusted required sanitize-and-verify migrates the current managed v7 source to v12 twice with preservation', (t) => {
+test('trusted required sanitize-and-verify migrates the current managed v7 source to v13 twice with preservation', (t) => {
   const fixture = createV7Fixture(t, 'required-v7-gate');
   const sanitizedPath = path.join(fixture.root, 'trusted-sanitized-v7.db');
   const workDir = path.join(fixture.root, 'migration-work');
@@ -859,9 +859,9 @@ test('trusted required sanitize-and-verify migrates the current managed v7 sourc
     preMigrationRestoreVerified: report.preMigrationRestoreVerified,
     legacyPreservationVerified: report.legacyPreservationVerified
   }, {
-    verificationMode: 'v7-to-v12-migration',
+    verificationMode: 'v7-to-v13-migration',
     sourceVersion: 7,
-    targetVersion: 12,
+    targetVersion: 13,
     runs: 2,
     preMigrationRestoreVerified: true,
     legacyPreservationVerified: true
@@ -923,7 +923,7 @@ module.exports.apply = function tmMutatingV9Migration(db) {
   assert.equal(sha256(fixture.databasePath), sourceSha256);
 });
 
-test('trusted required sanitize-and-verify path migrates exact managed v8 to v12', (t) => {
+test('trusted required sanitize-and-verify path migrates exact managed v8 to v13', (t) => {
   const fixture = createV8Fixture(t, 'required-v8-gate');
   const sanitizedPath = path.join(fixture.root, 'trusted-sanitized-v8.db');
   const workDir = path.join(fixture.root, 'migration-work');
@@ -966,9 +966,9 @@ test('trusted required sanitize-and-verify path migrates exact managed v8 to v12
     adoption: report.databaseAdoption
   }, {
     format: 'tm-trusted-production-source-verdict-v1',
-    verificationMode: 'v8-to-v12-migration',
+    verificationMode: 'v8-to-v13-migration',
     sourceVersion: 8,
-    targetVersion: 12,
+    targetVersion: 13,
     runs: 2,
     adoption: {
       format: 'tm-trusted-legacy-adoption-verdict-v1',
@@ -1092,7 +1092,7 @@ test('cutover owns and cleans deterministic database adoption artifacts across r
   );
 });
 
-test('trusted deployment-side verifier independently admits exact populated v1 through two preserved v1-to-v12 runs', (t) => {
+test('trusted deployment-side verifier independently admits exact populated v1 through two preserved v1-to-v13 runs', (t) => {
   const gate = loadTrustedGate();
   const fixture = createV1Fixture(t, 'two-runs');
   const sanitizedPath = path.join(fixture.root, 'trusted-sanitized-v1.db');
@@ -1137,7 +1137,7 @@ test('trusted deployment-side verifier independently admits exact populated v1 t
   }, {
     format: 'tm-trusted-production-source-verdict-v1',
     sourceVersion: 1,
-    targetVersion: 12,
+    targetVersion: 13,
     runs: 2,
     preMigrationRestoreVerified: true,
     legacyPreservationVerified: true
