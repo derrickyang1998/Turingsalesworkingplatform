@@ -169,10 +169,10 @@ test('current release locks the v0.7 branch while retaining the v0.6 shell and f
   assert.match(deploy, /20260702-v916-kb-bridge-client-cn/);
   assert.match(deploy, /20260702v916kbbridge/);
   assert.match(deploy, /f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e/);
-  assert.match(deploy, /if \(Number\(version\) !== 11\) throw new Error\('Candidate migration target version mismatch'\)/);
-  assert.doesNotMatch(deploy, /if \(Number\(version\) !== 10\) throw new Error\('Candidate migration target version mismatch'\)/);
-  assert.match(deploy, /report\.get\('sourceVersion'\) not in \(1, 6, 7, 8, 9, 10, 11\)/);
-  assert.doesNotMatch(deploy, /report\.get\('sourceVersion'\) not in \(1, 6\) or/);
+  assert.match(deploy, /if \(Number\(version\) !== 12\) throw new Error\('Candidate migration target version mismatch'\)/);
+  assert.doesNotMatch(deploy, /if \(Number\(version\) !== 11\) throw new Error\('Candidate migration target version mismatch'\)/);
+  assert.match(deploy, /report\.get\('sourceVersion'\) not in \(1, 6, 7, 8, 9, 10, 11, 12\)/);
+  assert.doesNotMatch(deploy, /report\.get\('sourceVersion'\) not in \(1, 6, 7, 8, 9, 10, 11\) or/);
 });
 
 test('cutover parser readiness reuses production systemd normalization', () => {

@@ -9571,7 +9571,7 @@ try {
   if (database.pragma('integrity_check', { simple: true }) !== 'ok') throw new Error('Candidate DB integrity_check failed');
   if (database.pragma('foreign_key_check').length !== 0) throw new Error('Candidate DB foreign_key_check failed');
   const version = database.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version;
-  if (Number(version) !== 11) throw new Error('Candidate migration target version mismatch');
+  if (Number(version) !== 12) throw new Error('Candidate migration target version mismatch');
   console.log('TM_SANITIZED_MIGRATION_COMPATIBILITY_OK');
 } finally {
   database.close();
@@ -10947,7 +10947,7 @@ if applied:
         if hashlib.sha256(handle.read()).hexdigest() != output_sha256:
             raise SystemExit('Trusted live database adoption stage digest is invalid')
 else:
-    if (report.get('sourceVersion') not in (1, 6, 7, 8, 9, 10, 11) or
+    if (report.get('sourceVersion') not in (1, 6, 7, 8, 9, 10, 11, 12) or
             report.get('targetVersion') != report.get('sourceVersion') or
             output_sha256 != expected_source_sha256 or
             report.get('baseTableCount') is not None or report.get('baseRowCount') is not None or
