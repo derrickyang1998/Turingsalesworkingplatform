@@ -343,7 +343,9 @@ flowchart LR
 
 ### Phase 7B: Content Performance Data Foundation / 阶段 7B：内容效果数据底座
 
-**Releases / 版本：** `v0.8.1-performance-manual-foundation`, `v0.8.2-performance-collection-feishu`, `v0.8.3-performance-ai-review`; shipped patch slices through `v0.8.11-performance-observation-history` / 已发布补丁切片至 `v0.8.11-performance-observation-history`
+**Releases / 版本：** `v0.8.1-performance-manual-foundation`, `v0.8.2-performance-collection-feishu`, `v0.8.3-performance-ai-review`; shipped patch slices through `v0.8.12-performance-commercial-four-eyes` / 已发布补丁切片至 `v0.8.12-performance-commercial-four-eyes`
+
+**Latest accepted slice / 最新验收切片：** `v0.8.12` separates commercial submission from approval, forbids self-approval, keeps the last approved KPI baseline active while a replacement draft is pending, and binds aggregate financial lineage to every approved version. Production schema remains `v14`. / `v0.8.12` 已拆分商业数据提交与批准、禁止自批，并在新草稿待复核期间继续使用上一已批准 KPI 基线；项目财务汇总绑定全部已批准版本血缘，生产 schema 保持 `v14`。
 
 **Scheduling rule / 排期规则：**
 
@@ -359,7 +361,7 @@ flowchart LR
 - [ ] **EN:** Register campaign publications from individual links or bulk import, normalize platform/content/creator identity, and preserve the original URL and provider payload for audit.<br>**中文：** 支持单条链接和批量导入项目内容，标准化平台、内容和达人身份，并保留原始链接与服务商响应以供审计。
 - [ ] **EN:** Store append-only metric observations for views, impressions, likes, comments, saves, shares, clicks, orders, installs, revenue, and custom metrics; every value records source mode, provider, collection time, freshness, confidence, and availability.<br>**中文：** 以只追加快照保存播放、曝光、点赞、评论、收藏、转发、点击、订单、安装、收入和自定义指标；每个值必须记录来源模式、服务商、采集时间、新鲜度、置信度和可用性。
 - [ ] **EN:** Implement pluggable provider adapters and scheduled collection with per-content retry/backoff, rate-limit handling, collection-run history, and explicit degraded/manual states when authorization or APIs are unavailable.<br>**中文：** 实现可插拔平台适配器和定时采集，具备逐内容重试/退避、限流处理、采集运行历史，以及授权或 API 不可用时的明确降级/人工状态。
-- [ ] **EN:** Add campaign-controlled manual inputs for spend, client charge, clicks, conversions, orders, attributed revenue, and currency with version history and audit ownership.<br>**中文：** 增加活动范围内的花费、客户报价、点击、转化、订单、归因收入和币种手工输入，并保留版本历史与操作人审计。
+- [x] **EN:** Add campaign-controlled manual inputs for spend, client charge, clicks, conversions, orders, attributed revenue, and currency with append-only version history, distinct approval, and audit ownership.<br>**中文：** 增加活动范围内的花费、客户报价、点击、转化、订单、归因收入和币种手工输入，并保留只追加版本历史、独立复核与操作人审计。
 - [ ] **EN:** Treat the linked Phase 7B detailed specification as the normative KPI contract. It defines Core/Extended/Impression ER comparability, visible cost bases, total campaign cost, ROI as `(attributed revenue - total campaign cost) / total campaign cost`, ROAS as `attributed revenue / paid-media spend`, gross margin as `(client charge - total campaign cost) / client charge`, approval/FX/attribution requirements, and unknown handling. No alternate formula may be implemented from this summary.<br>**中文：** 以关联的阶段 7B 详细规格作为唯一权威 KPI 契约，包含核心/扩展/曝光互动率可比规则、可见成本口径、项目总成本、ROI“归因收入减项目总成本后除以项目总成本”、ROAS“归因收入除以付费媒体花费”、毛利率“客户报价减项目总成本后除以客户报价”，以及批准/汇率/归因和未知值规则；不得依据本摘要实现另一套公式。
 - [ ] **EN:** Implement an idempotent Feishu Bitable outbox with project/table mapping, batch upsert, retry, dead-letter status, last-success watermark, and platform-visible failure recovery.<br>**中文：** 实现幂等飞书多维表格 Outbox，支持项目/表格映射、批量更新或新增、重试、死信状态、最近成功水位和平台内可见的失败恢复。
 - [ ] **EN:** Keep normalized snapshots and confirmed manual inputs as structured campaign lineage, not general methodology results; only human-approved conclusions become retrievable campaign knowledge, and organization-wide promotion requires a second approval, dedupe, and supersession handling.<br>**中文：** 将标准化快照和已确认人工输入保留为结构化项目血缘而非通用方法论结果；只有人工确认结论才进入可检索项目知识，晋升组织方法论还需二次批准、去重和替代处理。

@@ -1,5 +1,27 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.8.12-performance-commercial-four-eyes (Production Deployed, 2026-09-08) - Phase 7B.1h 商业数据独立复核
+
+### 交付与范围 / Delivery And Scope
+- 内容监控中的商业数据录入改为“提交复核”：每次提交始终生成只追加草稿，提交人即使拥有批准权限也不能批准自己的版本；只有另一位活动负责人或组织管理员可通过独立受保护接口批准。
+- 新增 `POST /api/campaigns/:id/performance/manual-inputs/:inputId/approve`。只允许批准当前草稿；重复批准幂等返回既有批准版本，过期草稿和越权审批均失败关闭，批准与脱敏审计在同一事务中完成，审计不可写时整笔回滚。
+- 内容行同时投影最新提交版本与最新已批准基线。待复核的新草稿不会移除或改变上一版已批准商业数据计算出的 CPM、CPC、ROI、ROAS 等 KPI；批准后列表、看板与导出统一切换到新版本，并保留全部批准版本血缘。
+- 现有内容监控表格和录入弹窗增加紧凑的“待复核 / 已批准 / 受限”状态与独立批准操作，不新增页面、不替换现有产品壳层。数据库 schema 保持 `v14`，方案/PPT、AI 复盘、飞书、provider 与历史快照边界不变。
+
+### 定向验证、审查与上线 / Focused Verification, Review, And Deployment
+- 性能服务、路由、前端合同及 KPI 引擎聚焦矩阵 `110/110` 通过；本切片涉及授权边界，额外的鉴权、请求管线和发布合同矩阵 `256/256` 通过。JavaScript 语法、差异格式、定向凭据扫描和本地发布预检通过。
+- 独立审查首轮发现审批读取、审计失败关闭及项目汇总批准血缘三项问题；补齐精确事务内读取、必需审计回滚和全版本聚合血缘后，复审结论为 `APPROVE`，无未关闭 Important/Critical。
+- 生产候选通过真实 Express 回放 `8/8`、发布守卫 `21/21`、内置浏览器烟测 `2/2`、迁移演练、容量、解析器运行时与 Nginx 校验后受控切换。实现提交：`fb9b82e`。
+
+### 生产证据 / Production Evidence
+- 可恢复备份：`/root/turingmarket/backups/v060-crm-sales-workspace-20260908-031822`；备份 `SHA256SUMS` SHA-256 为 `d0201ba4e7e0d14c0434b36368919b7e37699261f888ce5843437f057bd6d33d`，完整清单复验通过。
+- 生产候选树 SHA-256 为 `a0738d23942b942d45dd0f69f71f2c05759e561243c4d958d8847feb08a0007b`；六个受影响运行文件与本地审查提交哈希一致，远端 JavaScript 语法通过。冻结 `ppt.js` SHA-256 仍为 `f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e`。
+- 公网 `/api/health` 与 `/performance-monitor` 为 `200`，匿名批准接口为 `401`；临时管理员会话在真实活动范围内访问不存在审批单得到受控 `404 PERFORMANCE_COMMERCIAL_INPUT_NOT_FOUND`，随后已清理，未创建任何业务审批或商业数据。
+- PM2 `turingmarket` online 且重启计数 `0`，Nginx active。SQLite schema 保持 `v14`、`quick_check=ok`、外键异常 `0`，回环验收会话为 `0`。
+
+### 后续边界 / Next Boundaries
+- Phase 7B.1 的商业数据版本与批准口径已闭环。下一独立功能继续从真实飞书投影、首个获批数据 provider 与视频内容分析中选择具备生产配置条件的最小切片，完成一个即上线；共享发布缓存优化另行审查，不与业务功能混发。
+
 ## v0.8.11-performance-observation-history (Production Deployed, 2026-09-08) - Phase 7B.1g 单视频历史快照与阶段增量
 
 ### 交付与范围 / Delivery And Scope

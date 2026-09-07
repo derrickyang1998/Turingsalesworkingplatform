@@ -29,3 +29,10 @@ Split commercial-data submission from approval so the submitter cannot approve t
 - A pending replacement draft never removes or changes KPI values calculated from the previous approved baseline. / 待复核新草稿不改变上一已批准 KPI。
 - After independent approval, all authorized list/dashboard/export reads select the new approved version consistently; restricted data remains hidden from ordinary members. / 独立批准后各读取口径一致，普通成员仍不可见受限数据。
 - Production health, protected-route behavior, database integrity, runtime hashes and rollback backup are verified. / 验证生产健康、受保护接口、数据库完整性、线上文件与回滚备份。
+
+## Release Outcome / 发布结果
+
+- Status: production deployed and independently accepted on `2026-09-08`. / 状态：已于 `2026-09-08` 部署生产并通过独立验收。
+- Implementation commit: `fb9b82e`. Database schema remains `v14`; no migration was introduced. / 实现提交：`fb9b82e`；数据库保持 `v14`，无新增迁移。
+- Verification: focused `110/110`, authorization/request/release `256/256`, independent review `APPROVE`, candidate replay `8/8`, release guard `21/21`, built-in browser smoke `2/2`. / 验证：聚焦 `110/110`、鉴权/请求/发布 `256/256`、独立审查 `APPROVE`、候选回放 `8/8`、发布守卫 `21/21`、内置浏览器烟测 `2/2`。
+- Production: health and Content Monitor `200`, anonymous approval `401`, authenticated scoped missing input `404`, PM2/Nginx healthy, SQLite integrity clean, runtime hashes matched, and the verified rollback backup is `/root/turingmarket/backups/v060-crm-sales-workspace-20260908-031822`. / 生产：健康与内容监控 `200`、匿名批准 `401`、登录态范围内不存在审批单 `404`，PM2/Nginx、SQLite、运行文件哈希与可恢复备份均已验证。
