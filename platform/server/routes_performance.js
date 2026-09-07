@@ -285,6 +285,23 @@ function registerPerformanceRoutes(app, options = {}) {
     }
   );
 
+  app.post(
+    '/api/campaigns/:id/performance/manual-inputs/:inputId/approve',
+    options.authMiddleware,
+    (request, response) => {
+      try {
+        return sendResult(request, response, service.approveManualInput({
+          userId: authenticatedUserId(request),
+          campaignId: request.params.id,
+          manualInputId: request.params.inputId,
+          body: request.body
+        }));
+      } catch (error) {
+        return sendError(request, response, error);
+      }
+    }
+  );
+
   app.get('/api/campaigns/:id/performance/dashboard', options.authMiddleware, (request, response) => {
     try {
       return sendResult(request, response, service.getDashboard({

@@ -69,6 +69,7 @@ const ACTION_POLICIES = Object.freeze({
 const INTEGRATION_PREVIEW_CONTRACT_VERSION = 'performance-integration-preview-v1';
 const METRIC_IMPORT_CONTRACT_VERSION = 'performance-metric-import-v1';
 const OBSERVATION_HISTORY_CONTRACT_VERSION = 'performance-observation-history-v1';
+const COMMERCIAL_APPROVAL_CONTRACT_VERSION = 'performance-commercial-approval-v1';
 const OBSERVATION_HISTORY_DEFAULT_LIMIT = 20;
 const OBSERVATION_HISTORY_MAX_LIMIT = 50;
 const REVIEW_EVIDENCE_CONTRACT_VERSION = 'performance-review-evidence-v1';
@@ -703,21 +704,22 @@ function apiMetrics(metrics, includeFinancial) {
 }
 
 function rowCommercialToMetricInput(row) {
-  if (!row || row.manual_id === null || row.manual_id === undefined) return {};
-  const commercial = safeJson(row.commercial_json, {});
-  const approved = row.approval_state === 'approved';
-  const provenance = approved ? {
-    approvalId: `performance-manual-${row.manual_id}`,
-    approvedBy: `user-${row.approved_by}`,
-    approvedAt: row.approved_at,
-    policyVersion: 'phase7b.1a-manual-confirmation'
-  } : {};
+  if (!row || row.approved_manual_id === null || row.approved_manual_id === undefined) return {};
+  const commercial = safeJson(row.approved_commercial_json, {});
+  const provenance = {
+    approvalId: `performance-manual-${row.approved_manual_id}`,
+    approvedBy: `user-${row.approved_manual_approved_by}`,
+    approvedAt: row.approved_manual_approved_at,
+    policyVersion: row.approved_manual_created_by === row.approved_manual_approved_by
+      ? 'phase7b.1a-manual-confirmation'
+      : 'phase7b.1h-distinct-approver'
+  };
   const money = (key) => {
     if (!own(commercial, key)) return undefined;
     return {
       amount: commercial[key],
       currency: commercial.base_currency,
-      approvalState: approved ? 'approved' : 'draft',
+      approvalState: 'approved',
       ...provenance
     };
   };
@@ -736,7 +738,7 @@ function rowCommercialToMetricInput(row) {
     output.attribution = {
       model: commercial.attribution_model,
       window: commercial.attribution_window,
-      approvalState: approved ? 'approved' : 'draft',
+      approvalState: 'approved',
       ...provenance
     };
   }
@@ -756,6 +758,34 @@ function calculateRowMetrics(row) {
       observed_at: row.observed_at
     }] : []
   });
+}
+
+function latestCommercialVersion(row) {
+  if (!row || row.manual_id === null || row.manual_id === undefined) return null;
+  return {
+    id: row.manual_id,
+    approval_state: row.approval_state,
+    correction_reason: row.manual_correction_reason,
+    created_by: row.manual_created_by,
+    created_at: row.manual_created_at,
+    approved_by: row.approved_by,
+    approved_at: row.approved_at,
+    ...safeJson(row.commercial_json, {})
+  };
+}
+
+function approvedCommercialVersion(row) {
+  if (!row || row.approved_manual_id === null || row.approved_manual_id === undefined) return null;
+  return {
+    id: row.approved_manual_id,
+    approval_state: 'approved',
+    correction_reason: row.approved_manual_correction_reason,
+    created_by: row.approved_manual_created_by,
+    created_at: row.approved_manual_created_at,
+    approved_by: row.approved_manual_approved_by,
+    approved_at: row.approved_manual_approved_at,
+    ...safeJson(row.approved_commercial_json, {})
+  };
 }
 
 function serializePublication(row, capabilities) {
@@ -788,14 +818,11 @@ function serializePublication(row, capabilities) {
     latest_observation: latestObservation,
     metrics: apiMetrics(metrics, capabilities.can_view_commercial)
   };
-  if (capabilities.can_view_commercial && row.manual_id !== null && row.manual_id !== undefined) {
-    output.commercial = {
-      id: row.manual_id,
-      approval_state: row.approval_state,
-      correction_reason: row.manual_correction_reason,
-      approved_at: row.approved_at,
-      ...safeJson(row.commercial_json, {})
-    };
+  if (capabilities.can_view_commercial) {
+    const latestCommercial = latestCommercialVersion(row);
+    const approvedCommercial = approvedCommercialVersion(row);
+    if (latestCommercial) output.commercial = latestCommercial;
+    if (approvedCommercial) output.approved_commercial = approvedCommercial;
   }
   return output;
 }
@@ -1132,17 +1159,19 @@ function performanceExportColumns(canViewCommercial) {
   if (!canViewCommercial) return columns;
   return columns.concat([
     ['确认状态', (content) => content.commercial && content.commercial.approval_state],
-    ['视频花费', (content) => content.commercial && content.commercial.creator_fee],
-    ['寄样成本', (content) => content.commercial && content.commercial.product_sample_cost],
-    ['物流成本', (content) => content.commercial && content.commercial.logistics_cost],
-    ['付费投流', (content) => content.commercial && content.commercial.paid_media_spend],
-    ['服务费', (content) => content.commercial && content.commercial.platform_agency_fee],
-    ['其他成本', (content) => content.commercial && content.commercial.other_cost],
-    ['归因收入', (content) => content.commercial && content.commercial.attributed_revenue],
-    ['客户报价', (content) => content.commercial && content.commercial.client_charge],
-    ['币种', (content) => content.commercial && content.commercial.base_currency],
-    ['归因模型', (content) => content.commercial && content.commercial.attribution_model],
-    ['归因窗口', (content) => content.commercial && content.commercial.attribution_window],
+    ['最新提交版本 ID', (content) => content.commercial && content.commercial.id],
+    ['KPI 已批准版本 ID', (content) => content.approved_commercial && content.approved_commercial.id],
+    ['视频花费', (content) => content.approved_commercial && content.approved_commercial.creator_fee],
+    ['寄样成本', (content) => content.approved_commercial && content.approved_commercial.product_sample_cost],
+    ['物流成本', (content) => content.approved_commercial && content.approved_commercial.logistics_cost],
+    ['付费投流', (content) => content.approved_commercial && content.approved_commercial.paid_media_spend],
+    ['服务费', (content) => content.approved_commercial && content.approved_commercial.platform_agency_fee],
+    ['其他成本', (content) => content.approved_commercial && content.approved_commercial.other_cost],
+    ['归因收入', (content) => content.approved_commercial && content.approved_commercial.attributed_revenue],
+    ['客户报价', (content) => content.approved_commercial && content.approved_commercial.client_charge],
+    ['币种', (content) => content.approved_commercial && content.approved_commercial.base_currency],
+    ['归因模型', (content) => content.approved_commercial && content.approved_commercial.attribution_model],
+    ['归因窗口', (content) => content.approved_commercial && content.approved_commercial.attribution_window],
     ['CPM', (content) => exportMetricValue(content, 'cpm')],
     ['CPC', (content) => exportMetricValue(content, 'cpc')],
     ['ROI', (content) => exportMetricValue(content, 'roi')],
@@ -1238,11 +1267,23 @@ function createPerformanceManualService(db, options = {}) {
     return { userId, campaignId, access, capabilities };
   }
 
-  function writeAudit(userId, action, details) {
+  function writeAudit(userId, action, details, required = false) {
     const table = db.prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='activity_log'").get();
-    if (!table) return;
-    db.prepare(`INSERT INTO activity_log (user_id,action,module,details,ip_address) VALUES (?,?,?,?,?)`)
-      .run(userId, action, 'performance', JSON.stringify(details), null);
+    if (!table) {
+      if (required) {
+        throw serviceError(503, 'PERFORMANCE_AUDIT_UNAVAILABLE', 'Required performance audit storage is unavailable.');
+      }
+      return;
+    }
+    try {
+      db.prepare(`INSERT INTO activity_log (user_id,action,module,details,ip_address) VALUES (?,?,?,?,?)`)
+        .run(userId, action, 'performance', JSON.stringify(details), null);
+    } catch (error) {
+      if (required) {
+        throw serviceError(503, 'PERFORMANCE_AUDIT_UNAVAILABLE', 'Required performance audit storage is unavailable.');
+      }
+      throw error;
+    }
   }
 
   function insertDraft(draft, context) {
@@ -1305,6 +1346,14 @@ function createPerformanceManualService(db, options = {}) {
       )`);
       params.push(needle, needle, needle, needle, needle, needle, needle);
     }
+    if (query.contentId !== undefined) {
+      const contentId = canonicalId(query.contentId);
+      if (contentId === null) {
+        throw serviceError(400, 'PERFORMANCE_CONTENT_INVALID', 'Content id is invalid.');
+      }
+      where.push('publication.id=?');
+      params.push(contentId);
+    }
     const total = db.prepare(`SELECT COUNT(*) AS count FROM campaign_publications publication WHERE ${where.join(' AND ')}`)
       .get(...params).count;
     const limitClause = paged ? ' LIMIT ? OFFSET ?' : '';
@@ -1316,7 +1365,16 @@ function createPerformanceManualService(db, options = {}) {
         observation.metrics_json,observation.observed_at,
         observation.correction_reason AS observation_correction_reason,
         manual.id AS manual_id,manual.commercial_json,manual.approval_state,
-        manual.correction_reason AS manual_correction_reason,manual.approved_by,manual.approved_at
+        manual.correction_reason AS manual_correction_reason,
+        manual.created_by AS manual_created_by,manual.created_at AS manual_created_at,
+        manual.approved_by,manual.approved_at,
+        approved_manual.id AS approved_manual_id,
+        approved_manual.commercial_json AS approved_commercial_json,
+        approved_manual.correction_reason AS approved_manual_correction_reason,
+        approved_manual.created_by AS approved_manual_created_by,
+        approved_manual.created_at AS approved_manual_created_at,
+        approved_manual.approved_by AS approved_manual_approved_by,
+        approved_manual.approved_at AS approved_manual_approved_at
       FROM campaign_publications publication
       LEFT JOIN performance_metric_observations observation ON observation.id=(
         SELECT current_observation.id
@@ -1333,6 +1391,15 @@ function createPerformanceManualService(db, options = {}) {
           AND current_input.campaign_id=publication.campaign_id
           AND current_input.publication_id=publication.id
         ORDER BY current_input.created_at DESC,current_input.id DESC LIMIT 1
+      )
+      LEFT JOIN performance_manual_inputs approved_manual ON approved_manual.id=(
+        SELECT approved_input.id
+        FROM performance_manual_inputs approved_input
+        WHERE approved_input.org_id=publication.org_id
+          AND approved_input.campaign_id=publication.campaign_id
+          AND approved_input.publication_id=publication.id
+          AND approved_input.approval_state='approved'
+        ORDER BY julianday(approved_input.approved_at) DESC,approved_input.id DESC LIMIT 1
       )
       WHERE ${where.join(' AND ')}
       ORDER BY publication.created_at DESC,publication.id DESC${limitClause}
@@ -1663,10 +1730,11 @@ function createPerformanceManualService(db, options = {}) {
     }
     if (commercial) requireAccess(input.userId, input.campaignId, 'commercial');
     if (confirmed) {
-      if (!commercial) {
-        throw serviceError(400, 'PERFORMANCE_MANUAL_INPUT_INVALID', 'confirmed requires commercial input.');
-      }
-      requireAccess(input.userId, input.campaignId, 'approve');
+      throw serviceError(
+        409,
+        'PERFORMANCE_COMMERCIAL_DISTINCT_APPROVAL_REQUIRED',
+        'Commercial input must be submitted as a draft and approved by a different authorized user.'
+      );
     }
     const contentId = publicationById(preliminary, input && input.contentId);
     const outcome = db.transaction(() => {
@@ -1704,12 +1772,12 @@ function createPerformanceManualService(db, options = {}) {
           preliminary.campaignId,
           contentId,
           JSON.stringify(commercial),
-          confirmed ? 'approved' : 'draft',
+          'draft',
           correctionReason,
           previous ? previous.id : null,
           preliminary.userId,
-          confirmed ? preliminary.userId : null,
-          confirmed ? nowIso() : null
+          null,
+          null
         ).lastInsertRowid);
       }
       return { observationId, manualInputId };
@@ -1719,7 +1787,8 @@ function createPerformanceManualService(db, options = {}) {
       publication_id: contentId,
       observation_id: outcome.observationId,
       manual_input_id: outcome.manualInputId,
-      confirmed
+      approval_state: outcome.manualInputId ? 'draft' : null,
+      requires_distinct_approver: Boolean(outcome.manualInputId)
     });
     const row = currentRows(preliminary, { q: '', platform: '', tag: '', limit: 1, offset: 0 }, false)
       .rows.find((item) => item.id === contentId);
@@ -1728,7 +1797,115 @@ function createPerformanceManualService(db, options = {}) {
       content,
       observation: content.latest_observation,
       manual_input: content.commercial || null,
+      approved_commercial: content.approved_commercial || null,
       capabilities: preliminary.capabilities
+    };
+  }
+
+  function approveManualInput(input) {
+    const context = requireAccess(input && input.userId, input && input.campaignId, 'approve');
+    assertOnlyKeys((input && input.body) || {}, [], 'PERFORMANCE_COMMERCIAL_APPROVAL_INVALID');
+    const manualInputId = canonicalId(input && input.manualInputId);
+    if (manualInputId === null) {
+      throw serviceError(400, 'PERFORMANCE_COMMERCIAL_APPROVAL_INVALID', 'Commercial input id is invalid.');
+    }
+    const readApprovedContent = (publicationId) => {
+      const row = currentRows(context, {
+        q: '', platform: '', tag: '', limit: 1, offset: 0, contentId: publicationId
+      }, false).rows[0];
+      if (!row) {
+        throw serviceError(500, 'PERFORMANCE_COMMERCIAL_APPROVAL_READ_FAILED', 'Approved commercial input could not be read.');
+      }
+      return serializePublication(row, context.capabilities);
+    };
+
+    const outcome = db.transaction(() => {
+      const draft = db.prepare(`
+        SELECT * FROM performance_manual_inputs
+        WHERE id=? AND org_id=? AND campaign_id=?
+      `).get(manualInputId, context.access.campaign.org_id, context.campaignId);
+      if (!draft) {
+        throw serviceError(404, 'PERFORMANCE_COMMERCIAL_INPUT_NOT_FOUND', 'Commercial input was not found.');
+      }
+      const existing = db.prepare(`
+        SELECT id,publication_id FROM performance_manual_inputs
+        WHERE org_id=? AND campaign_id=? AND supersedes_input_id=? AND approval_state='approved'
+        ORDER BY id DESC LIMIT 1
+      `).get(context.access.campaign.org_id, context.campaignId, manualInputId);
+      if (existing) {
+        const publicationId = Number(existing.publication_id);
+        return {
+          approvedInputId: Number(existing.id),
+          publicationId,
+          replayed: true,
+          content: readApprovedContent(publicationId)
+        };
+      }
+      if (draft.approval_state !== 'draft') {
+        throw serviceError(409, 'PERFORMANCE_COMMERCIAL_APPROVAL_STATE_INVALID', 'Only a draft can be approved.');
+      }
+      if (Number(draft.created_by) === context.userId) {
+        throw serviceError(
+          409,
+          'PERFORMANCE_COMMERCIAL_SELF_APPROVAL_FORBIDDEN',
+          'The commercial input submitter cannot approve the same version.'
+        );
+      }
+      const latest = db.prepare(`
+        SELECT id FROM performance_manual_inputs
+        WHERE org_id=? AND campaign_id=? AND publication_id=?
+        ORDER BY created_at DESC,id DESC LIMIT 1
+      `).get(context.access.campaign.org_id, context.campaignId, draft.publication_id);
+      if (!latest || Number(latest.id) !== manualInputId) {
+        throw serviceError(
+          409,
+          'PERFORMANCE_COMMERCIAL_APPROVAL_STALE',
+          'This commercial draft has been superseded by a newer version.'
+        );
+      }
+      const approvedAt = nowIso();
+      const approvedInputId = Number(db.prepare(`
+        INSERT INTO performance_manual_inputs (
+          org_id,campaign_id,publication_id,commercial_json,approval_state,correction_reason,
+          supersedes_input_id,created_by,approved_by,approved_at
+        ) VALUES (?,?,?,?,?,?,?,?,?,?)
+      `).run(
+        draft.org_id,
+        draft.campaign_id,
+        draft.publication_id,
+        draft.commercial_json,
+        'approved',
+        draft.correction_reason,
+        draft.id,
+        draft.created_by,
+        context.userId,
+        approvedAt
+      ).lastInsertRowid);
+      writeAudit(context.userId, 'performance_commercial_approval', {
+        campaign_id: context.campaignId,
+        publication_id: Number(draft.publication_id),
+        submitted_input_id: manualInputId,
+        approved_input_id: approvedInputId,
+        submitted_by: Number(draft.created_by),
+        distinct_approver: true
+      }, true);
+      const publicationId = Number(draft.publication_id);
+      return {
+        approvedInputId,
+        publicationId,
+        replayed: false,
+        content: readApprovedContent(publicationId)
+      };
+    }).immediate();
+    const content = outcome.content;
+    return {
+      contract_version: COMMERCIAL_APPROVAL_CONTRACT_VERSION,
+      status: 'approved',
+      replayed: outcome.replayed,
+      content,
+      manual_input: content.commercial || null,
+      approved_commercial: content.approved_commercial || null,
+      capabilities: context.capabilities
     };
   }
 
@@ -1905,18 +2082,25 @@ function createPerformanceManualService(db, options = {}) {
     if (!rows.length) return {};
     const source = rows.map((row) => ({
       row,
-      input: safeJson(row.commercial_json, {})
+      input: safeJson(row.approved_commercial_json, {})
     }));
-    if (source.some(({ row }) => row.manual_id === null || row.approval_state !== 'approved')) return {};
+    if (source.some(({ row }) => row.approved_manual_id === null || row.approved_manual_id === undefined)) return {};
     const currencies = new Set(source.map(({ input }) => input.base_currency));
     if (currencies.size !== 1 || !/^[A-Z]{3}$/.test([...currencies][0] || '')) return {};
     const currency = [...currencies][0];
     const firstRow = source[0].row;
+    const approvalLineage = approvedCommercialLineage(rows);
+    const approvers = [...new Set(approvalLineage.map((item) => item.approved_by))].sort((left, right) => left - right);
+    const latestApprovedAt = approvalLineage.map((item) => item.approved_at).sort().at(-1);
+    const approvalFingerprint = sha256(JSON.stringify(approvalLineage)).slice(0, 24);
+    const hasLegacyApproval = approvalLineage.some((item) => item.policy_version === 'phase7b.1a-manual-confirmation');
     const provenance = {
-      approvalId: `performance-campaign-${firstRow.campaign_id}`,
-      approvedBy: `campaign-${firstRow.campaign_id}`,
-      approvedAt: firstRow.approved_at,
-      policyVersion: 'phase7b.1a-manual-confirmation'
+      approvalId: `performance-campaign-${firstRow.campaign_id}-${approvalFingerprint}`,
+      approvedBy: approvers.length === 1 ? `user-${approvers[0]}` : `users-${approvers.join('-')}`,
+      approvedAt: latestApprovedAt,
+      policyVersion: hasLegacyApproval
+        ? 'phase7b.1h-aggregate-legacy-compatible'
+        : 'phase7b.1h-aggregate-distinct-approvers'
     };
     const sumMoney = (field) => {
       if (source.some(({ input }) => typeof input[field] !== 'number')) return undefined;
@@ -1951,6 +2135,36 @@ function createPerformanceManualService(db, options = {}) {
     return output;
   }
 
+  function approvedCommercialLineage(rows) {
+    return rows
+      .filter((row) => row.approved_manual_id !== null && row.approved_manual_id !== undefined)
+      .map((row) => ({
+        type: 'performance_commercial_approval',
+        publication_id: Number(row.id),
+        manual_input_id: Number(row.approved_manual_id),
+        submitted_by: Number(row.approved_manual_created_by),
+        approved_by: Number(row.approved_manual_approved_by),
+        approved_at: row.approved_manual_approved_at,
+        policy_version: row.approved_manual_created_by === row.approved_manual_approved_by
+          ? 'phase7b.1a-manual-confirmation'
+          : 'phase7b.1h-distinct-approver'
+      }))
+      .sort((left, right) => left.publication_id - right.publication_id || left.manual_input_id - right.manual_input_id);
+  }
+
+  function dashboardAuditLineage(rows, includeCommercial) {
+    const observations = rows
+      .filter((row) => row.observation_id !== null && row.observation_id !== undefined)
+      .map((row) => ({
+        type: 'performance_metric_observation',
+        publication_id: Number(row.id),
+        observation_id: Number(row.observation_id),
+        observed_at: row.observed_at
+      }));
+    const commercial = includeCommercial ? approvedCommercialLineage(rows) : [];
+    return observations.concat(commercial);
+  }
+
   function dashboard(input) {
     const context = requireAccess(input && input.userId, input && input.campaignId, 'view');
     const query = normalizeQuery(input && input.query);
@@ -1967,7 +2181,8 @@ function createPerformanceManualService(db, options = {}) {
       observations: aggregateObservations,
       engagementComponents: ['likes', 'comments', 'saves', 'shares'],
       commercial: context.capabilities.can_view_commercial ? aggregateCommercial(current.rows) : {},
-      costBasis: 'total_campaign_cost'
+      costBasis: 'total_campaign_cost',
+      auditLineage: dashboardAuditLineage(current.rows, context.capabilities.can_view_commercial)
     });
     const serialized = current.rows.map((row) => serializePublication(row, context.capabilities));
     const metricFor = (item) => {
@@ -1991,7 +2206,7 @@ function createPerformanceManualService(db, options = {}) {
       records: {
         total: current.total,
         active_with_observations: current.rows.filter((row) => row.observation_id !== null).length,
-        confirmed_commercial: current.rows.filter((row) => row.approval_state === 'approved').length
+        confirmed_commercial: current.rows.filter((row) => row.approved_manual_id !== null).length
       },
       totals,
       metrics: apiMetrics(aggregate, context.capabilities.can_view_commercial),
@@ -2022,7 +2237,7 @@ function createPerformanceManualService(db, options = {}) {
         type: 'campaign_current_snapshot',
         selected_metric: query.topMetric,
         observation_selector: 'observed_at_desc_id_desc',
-        commercial_selector: 'created_at_desc_id_desc'
+        commercial_selector: 'approved_at_desc_id_desc'
       },
       records,
       totals: dashboardResult.totals,
@@ -2067,6 +2282,7 @@ function createPerformanceManualService(db, options = {}) {
     importContentRows,
     importMetricRows,
     recordManualInput,
+    approveManualInput,
     getObservationHistory,
     listContents,
     getIntegrationPreview,

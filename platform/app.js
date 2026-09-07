@@ -7249,6 +7249,16 @@ function performanceObservationValue(content, key) {
   return Number.isSafeInteger(value) && value >= 0 ? value : null;
 }
 
+function performanceCommercialStateHtml(content, canViewCommercial) {
+  if (!canViewCommercial) return '<span class="tm-performance-approval-state">受限</span>';
+  var commercial = content && content.commercial;
+  if (!commercial) return '<span class="tm-performance-approval-state">未录入</span>';
+  if (commercial.approval_state === 'approved') {
+    return '<span class="tm-performance-approval-state is-approved">已批准</span>';
+  }
+  return '<span class="tm-performance-approval-state is-pending">待复核</span>';
+}
+
 function renderPerformanceContents(items, total, capabilities) {
   performanceContents = Array.isArray(items) ? items : [];
   performanceCapabilities = capabilities || {};
@@ -7275,12 +7285,13 @@ function renderPerformanceContents(items, total, capabilities) {
       + '<td>' + performanceCount(observedEngagement) + '</td>'
       + '<td>' + performanceRate(content.metrics && content.metrics.core_view_er) + '</td>'
       + '<td>' + performanceCount(performanceObservationValue(content, 'clicks')) + '</td>'
+      + '<td>' + performanceCommercialStateHtml(content, Boolean(capabilities && capabilities.can_view_commercial)) + '</td>'
       + '<td class="tm-performance-muted-cell">' + esc(performanceDate(observedAt)) + '</td>'
       + '<td><button class="btn btn-outline btn-sm" type="button" onclick="openPerformanceInputModal(' + Number(content.id) + ')">录入数据</button></td>'
       + '</tr>';
   }).join('');
   container.innerHTML = '<table class="tm-performance-table"><thead><tr>'
-    + '<th scope="col">内容</th><th scope="col">平台</th><th scope="col">达人</th><th scope="col">产品</th><th scope="col">标签</th><th scope="col">发布日期</th><th scope="col">播放</th><th scope="col">互动</th><th scope="col">互动率</th><th scope="col">点击</th><th scope="col">数据更新</th><th scope="col">操作</th>'
+    + '<th scope="col">内容</th><th scope="col">平台</th><th scope="col">达人</th><th scope="col">产品</th><th scope="col">标签</th><th scope="col">发布日期</th><th scope="col">播放</th><th scope="col">互动</th><th scope="col">互动率</th><th scope="col">点击</th><th scope="col">商业状态</th><th scope="col">数据更新</th><th scope="col">操作</th>'
     + '</tr></thead><tbody>' + rows + '</tbody></table>';
   if (window.TMAccessibility) window.TMAccessibility.refresh();
 }
@@ -7676,6 +7687,34 @@ function loadMorePerformanceObservationHistory() {
   return state ? loadPerformanceObservationHistory(state.contentId, false) : null;
 }
 
+function performanceCommercialApprovalHtml(content) {
+  var latest = content && content.commercial;
+  var approved = content && content.approved_commercial;
+  if (!latest) {
+    return '<div class="tm-performance-commercial-approval tm-performance-input-section"><div><strong>尚未提交商业数据</strong><span>保存费用与收益后，将进入独立复核。</span></div></div>';
+  }
+  if (latest.approval_state === 'approved') {
+    return '<div class="tm-performance-commercial-approval is-approved tm-performance-input-section"><div><strong>商业数据已批准</strong><span>提交人 #' + esc(latest.created_by || '-') + ' · 批准人 #' + esc(latest.approved_by || '-') + '，当前版本已用于 KPI。</span></div></div>';
+  }
+
+  var currentUserId = Number(CURRENT_USER && CURRENT_USER.id);
+  var submittedBy = Number(latest.created_by);
+  var canApprove = Boolean(
+    performanceCapabilities && performanceCapabilities.can_approve_commercial &&
+    Number.isSafeInteger(currentUserId) && currentUserId > 0 && currentUserId !== submittedBy
+  );
+  var baseline = approved
+    ? '上一已批准版本继续用于 KPI，直到本草稿通过复核。'
+    : '首次批准前，费用与收益不会进入项目 KPI。';
+  var action = canApprove
+    ? '<button id="performanceCommercialApprove" class="btn btn-primary btn-sm" type="button" onclick="approvePerformanceCommercialInput(' + Number(content.id) + ',' + Number(latest.id) + ')">批准并纳入 KPI</button>'
+    : '<span class="tm-performance-commercial-approval-note">需另一位负责人或组织管理员复核。</span>';
+  return '<div class="tm-performance-commercial-approval is-pending tm-performance-input-section">'
+    + '<div><strong>商业数据待复核</strong><span>提交人 #' + esc(latest.created_by || '-') + '。' + esc(baseline) + '</span></div>'
+    + action
+    + '</div>';
+}
+
 function openPerformanceInputModal(contentId) {
   var content = performanceContents.find(function(item) { return Number(item.id) === Number(contentId); });
   if (!content) {
@@ -7697,7 +7736,6 @@ function openPerformanceInputModal(contentId) {
   };
   var opener = document.activeElement;
   var commercialEnabled = Boolean(performanceCapabilities && performanceCapabilities.can_edit_commercial);
-  var commercialConfirmed = Boolean(content.commercial && content.commercial.approval_state === 'approved');
   var overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.id = 'performanceInputOverlay';
@@ -7716,12 +7754,8 @@ function openPerformanceInputModal(contentId) {
       + performanceInputField('performanceAttributedRevenue', '归因收入', performanceInputValue(content, 'attributed_revenue'), '0.01')
       + '<label class="tm-performance-field" for="performanceCurrency">币种<select id="performanceCurrency"><option value="USD">USD</option><option value="CNY">CNY</option><option value="EUR">EUR</option></select></label>'
       + '<label class="tm-performance-field" for="performanceAttributionModel">归因模型<input id="performanceAttributionModel" maxlength="80" value="' + esc((content.commercial && content.commercial.attribution_model) || 'manual') + '"></label>'
-      + '<label class="tm-performance-field" for="performanceAttributionWindow">归因窗口<input id="performanceAttributionWindow" maxlength="80" value="' + esc((content.commercial && content.commercial.attribution_window) || 'campaign') + '"></label>';
-    if (performanceCapabilities.can_approve_commercial) {
-      commercialHtml += '<label class="tm-performance-confirmation tm-performance-input-section"><input id="performanceConfirmed" type="checkbox"' + (commercialConfirmed ? ' checked' : '') + '>确认费用与收益，纳入项目级 ROI / ROAS</label>';
-    } else {
-      commercialHtml += '<p class="tm-metric-note tm-performance-input-section">费用与收益由活动管理员确认后才会纳入项目级 ROI / ROAS。</p>';
-    }
+      + '<label class="tm-performance-field" for="performanceAttributionWindow">归因窗口<input id="performanceAttributionWindow" maxlength="80" value="' + esc((content.commercial && content.commercial.attribution_window) || 'campaign') + '"></label>'
+      + performanceCommercialApprovalHtml(content);
   }
   var dialog = document.createElement('div');
   dialog.className = 'modal tm-performance-input-modal';
@@ -7826,11 +7860,9 @@ async function savePerformanceInput(event, contentId) {
       }
     }
     if (!Object.keys(observation).length && !commercial) throw new Error('请至少录入一项内容指标或费用数据。');
-    var confirmed = Boolean(document.getElementById('performanceConfirmed') && document.getElementById('performanceConfirmed').checked);
     var body = {
       observation: Object.keys(observation).length ? observation : undefined,
       commercial: commercial,
-      confirmed: confirmed,
       correction_reason: performanceTextValue('performanceCorrectionReason') || undefined
     };
     if (status) status.textContent = '正在保存...';
@@ -7841,12 +7873,44 @@ async function savePerformanceInput(event, contentId) {
     var data = await response.json();
     if (!response.ok) throw new Error(data.error || '数据保存失败');
     closePerformanceInputModal();
-    toast(confirmed ? '数据已确认并纳入项目计算' : '数据已保存');
+    toast(commercial ? '商业数据已提交复核' : '内容指标已保存');
     await loadPerformanceContents();
     await refreshPerformanceInsightsAfterMutation();
   } catch (error) {
     if (status) status.textContent = error.message || '数据保存失败';
     toast(error.message || '数据保存失败', 'error');
+  }
+  return false;
+}
+
+async function approvePerformanceCommercialInput(contentId, inputId) {
+  var campaignId = getPerformanceCampaignId();
+  var status = document.getElementById('performanceInputStatus');
+  var button = document.getElementById('performanceCommercialApprove');
+  if (campaignId === null || !Number.isSafeInteger(Number(inputId)) || Number(inputId) < 1) return false;
+  if (button) {
+    button.disabled = true;
+    button.textContent = '正在批准...';
+  }
+  if (status) status.textContent = '正在核对提交人与批准人...';
+  try {
+    var response = await apiFetch('/campaigns/' + encodeURIComponent(campaignId) + '/performance/manual-inputs/' + encodeURIComponent(inputId) + '/approve', {
+      method: 'POST',
+      body: JSON.stringify({})
+    });
+    var data = await response.json();
+    if (!response.ok) throw new Error(data.error || '商业数据批准失败');
+    closePerformanceInputModal();
+    toast(data.replayed ? '该商业版本已批准' : '商业数据已由第二位负责人批准并纳入 KPI');
+    await loadPerformanceContents();
+    await refreshPerformanceInsightsAfterMutation();
+  } catch (error) {
+    if (status) status.textContent = error.message || '商业数据批准失败';
+    toast(error.message || '商业数据批准失败', 'error');
+    if (button) {
+      button.disabled = false;
+      button.textContent = '批准并纳入 KPI';
+    }
   }
   return false;
 }

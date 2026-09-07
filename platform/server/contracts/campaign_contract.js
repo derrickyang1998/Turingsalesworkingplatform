@@ -264,6 +264,11 @@ const REQUEST_POLICIES = Object.freeze({
     'POST',
     '/api/campaigns/:id/performance/contents/:contentId/manual-inputs'
   ),
+  CAMPAIGN_PERFORMANCE_MANUAL_INPUT_APPROVE: controlJson(
+    'campaign.performance.manual-input.approve',
+    'POST',
+    '/api/campaigns/:id/performance/manual-inputs/:inputId/approve'
+  ),
   CAMPAIGN_PERFORMANCE_FEISHU_CONNECTION_DRAFT: controlJson(
     'campaign.performance.feishu-connection.draft',
     'POST',

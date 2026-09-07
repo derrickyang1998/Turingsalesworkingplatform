@@ -41,6 +41,7 @@ function createFixture() {
     createContent(input) { calls.push(['create', input]); return { content: { id: 1 } }; },
     importContentRows(input) { calls.push(['import', input]); return { accepted_count: 1 }; },
     recordManualInput(input) { calls.push(['input', input]); return { observation_id: 1 }; },
+    approveManualInput(input) { calls.push(['commercial-approve', input]); return { status: 'approved', manual_input: { id: 12 } }; },
     exportContents(input) {
       calls.push(['export', input]);
       return { filename: 'performance_campaign_7_filtered_export.csv', csv: '\ufeff视频链接\r\nhttps://example.test/video\r\n' };
@@ -268,7 +269,8 @@ test('registers campaign-scoped performance endpoints and forwards authenticated
     'POST /api/campaigns/:id/performance/customer-report-snapshots/:snapshotId/ppt',
     'POST /api/campaigns/:id/performance/feishu-connection',
     'POST /api/campaigns/:id/performance/feishu-connection/approve',
-    'POST /api/campaigns/:id/performance/import'
+    'POST /api/campaigns/:id/performance/import',
+    'POST /api/campaigns/:id/performance/manual-inputs/:inputId/approve'
   ]);
 
   const request = {
@@ -286,6 +288,39 @@ test('registers campaign-scoped performance endpoints and forwards authenticated
     campaignId: '7',
     body: request.body
   }]);
+});
+
+test('routes commercial approval through a distinct protected campaign contract', () => {
+  const { routes, calls } = createFixture();
+  const request = {
+    user: { id: 3 },
+    params: { id: '7', inputId: '11' },
+    body: {},
+    requestId: 'commercial-approval-request'
+  };
+  const response = invoke(
+    routes.get('POST /api/campaigns/:id/performance/manual-inputs/:inputId/approve'),
+    request
+  );
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.status, 'approved');
+  assert.equal(response.body.request_id, 'commercial-approval-request');
+  assert.deepEqual(calls[0], ['commercial-approve', {
+    userId: 3,
+    campaignId: '7',
+    manualInputId: '11',
+    body: {}
+  }]);
+
+  const policy = campaignContract.REQUEST_POLICIES.CAMPAIGN_PERFORMANCE_MANUAL_INPUT_APPROVE;
+  assert.ok(policy);
+  assert.equal(policy.id, 'campaign.performance.manual-input.approve');
+  assert.equal(policy.method, 'POST');
+  assert.equal(policy.pathTemplate, '/api/campaigns/:id/performance/manual-inputs/:inputId/approve');
+
+  const serverSource = fs.readFileSync(path.resolve(__dirname, '..', 'server.js'), 'utf8');
+  assert.match(serverSource, /'CAMPAIGN_PERFORMANCE_MANUAL_INPUT_APPROVE'/);
 });
 
 test('returns one video observation history through the protected campaign read contract', () => {

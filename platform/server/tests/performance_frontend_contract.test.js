@@ -49,12 +49,19 @@ test('performance monitor supports a separate sandboxed batch-metrics update wit
   assert.match(serverSource, /performanceManualService\.importMetricRows/);
 });
 
-test('manual data entry keeps performance inputs and commercial confirmation distinct', () => {
+test('manual data entry submits commercial drafts for distinct approval while retaining KPI rendering', () => {
   assert.match(appSource, /performanceCapabilities && performanceCapabilities\.can_edit_commercial/);
   assert.match(appSource, /performanceImpressions', '展示量'/);
-  assert.match(appSource, /id="performanceConfirmed"/);
-  assert.match(appSource, /confirmed: confirmed/);
+  assert.doesNotMatch(appSource, /id="performanceConfirmed"/);
+  assert.doesNotMatch(appSource, /confirmed: confirmed/);
   assert.match(appSource, /performance\/contents\/' \+ encodeURIComponent\(contentId\) \+ '\/manual-inputs/);
+  assert.match(appSource, /function performanceCommercialApprovalHtml\(content\)/);
+  assert.match(appSource, /function performanceCommercialStateHtml\(content, canViewCommercial\)/);
+  assert.match(appSource, /if \(!canViewCommercial\) return '<span class="tm-performance-approval-state">受限<\/span>'/);
+  assert.match(appSource, /function approvePerformanceCommercialInput\(contentId, inputId\)/);
+  assert.match(appSource, /performance\/manual-inputs\/' \+ encodeURIComponent\(inputId\) \+ '\/approve'/);
+  assert.match(appSource, /需另一位负责人或组织管理员复核/);
+  assert.match(appSource, /上一已批准版本继续用于 KPI/);
   assert.match(appSource, /performanceRate\(metrics\.core_view_er\)/);
   assert.match(appSource, /performanceMoney\(metrics\.cpm\)/);
   assert.match(appSource, /performanceMoney\(metrics\.cpc\)/);
@@ -93,7 +100,7 @@ test('manual data entry exposes a compact paginated observation history without 
 test('performance tables retain compact, sticky operational controls', () => {
   assert.match(componentStyles, /\.tm-performance-table-container[\s\S]*?overflow-y: auto/);
   assert.match(componentStyles, /\.tm-performance-table th:first-child[\s\S]*?position: sticky/);
-  assert.match(componentStyles, /\.tm-performance-confirmation[\s\S]*?align-items: center/);
+  assert.match(componentStyles, /\.tm-performance-commercial-approval[\s\S]*?align-items: center/);
   assert.match(componentStyles, /\.tm-performance-metric-grid[\s\S]*?grid-template-columns/);
 });
 

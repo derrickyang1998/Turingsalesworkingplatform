@@ -28,10 +28,19 @@ function createFixture() {
       status TEXT NOT NULL DEFAULT 'active',
       PRIMARY KEY(org_id,user_id)
     ) STRICT;
+    CREATE TABLE activity_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      action TEXT NOT NULL,
+      module TEXT,
+      details TEXT,
+      ip_address TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
     INSERT INTO campaigns (id,org_id,owner_user_id,name,operational_status)
     VALUES (7,1,1,'Merach Autumn Launch','active');
     INSERT INTO organization_memberships (org_id,user_id,role_code,status)
-    VALUES (1,1,'org_admin','active'),(1,2,'member','active');
+    VALUES (1,1,'org_admin','active'),(1,2,'member','active'),(1,3,'org_admin','active');
   `);
   migration.apply(db);
 
@@ -39,7 +48,7 @@ function createFixture() {
     if (Number(input.campaignId) !== 7) {
       return { ok: false, status: 404, code: 'CAMPAIGN_NOT_FOUND' };
     }
-    const role = Number(input.userId) === 1 ? 'org_admin' : 'team_member';
+    const role = [1, 3].includes(Number(input.userId)) ? 'org_admin' : 'team_member';
     return {
       ok: true,
       role,
@@ -103,15 +112,23 @@ function addComparableReviewData(service, options = {}) {
       tags: ['launch', 'review']
     }
   }).content;
-  service.recordManualInput({
+  const strongestInput = service.recordManualInput({
     userId: 1,
     campaignId: 7,
     contentId: strongest.id,
     body: Object.assign({
       observation: { views: 4200, likes: 210, comments: 40, saves: 30, shares: 20 },
       correction_reason: 'Current strongest observation'
-    }, options.withCommercial ? { commercial: confirmedCommercialInput(), confirmed: true } : {})
+    }, options.withCommercial ? { commercial: confirmedCommercialInput() } : {})
   });
+  if (options.withCommercial) {
+    service.approveManualInput({
+      userId: 3,
+      campaignId: 7,
+      manualInputId: strongestInput.manual_input.id,
+      body: {}
+    });
+  }
   service.recordManualInput({
     userId: 1,
     campaignId: 7,
@@ -175,7 +192,7 @@ test('creates one campaign-scoped canonical content record and preserves its ori
   }
 });
 
-test('appends confirmed manual facts and calculates campaign KPI values from the confirmed commercial basis', () => {
+test('requires a distinct commercial approver before calculating campaign KPI values', () => {
   const { db, service } = createFixture();
   try {
     const content = addCanonicalVideo(service);
@@ -195,15 +212,57 @@ test('appends confirmed manual facts and calculates campaign KPI values from the
           conversions: 20
         },
         commercial: confirmedCommercialInput(),
-        confirmed: true,
         correction_reason: 'Initial campaign snapshot'
       }
     });
 
-    assert.equal(result.manual_input.approval_state, 'approved');
+    assert.equal(result.manual_input.approval_state, 'draft');
     assert.equal(result.observation.views, 1000);
+    assert.equal(result.approved_commercial, null);
 
-    const dashboard = service.getDashboard({ userId: 1, campaignId: 7, query: {} });
+    let dashboard = service.getDashboard({ userId: 1, campaignId: 7, query: {} });
+    assert.equal(dashboard.metrics.total_campaign_cost.available, false);
+    assert.equal(dashboard.records.confirmed_commercial, 0);
+
+    assert.throws(() => service.approveManualInput({
+      userId: 1,
+      campaignId: 7,
+      manualInputId: result.manual_input.id,
+      body: {}
+    }), (error) => (
+      error instanceof PerformanceManualServiceError &&
+      error.code === 'PERFORMANCE_COMMERCIAL_SELF_APPROVAL_FORBIDDEN'
+    ));
+
+    const approval = service.approveManualInput({
+      userId: 3,
+      campaignId: 7,
+      manualInputId: result.manual_input.id,
+      body: {}
+    });
+    assert.equal(approval.status, 'approved');
+    assert.equal(approval.replayed, false);
+    assert.equal(approval.manual_input.approval_state, 'approved');
+    assert.equal(approval.manual_input.created_by, 1);
+    assert.equal(approval.manual_input.approved_by, 3);
+    assert.equal(approval.approved_commercial.id, approval.manual_input.id);
+    const approvalAudit = db.prepare(`
+      SELECT user_id,action,module,details FROM activity_log
+      WHERE action='performance_commercial_approval'
+    `).get();
+    assert.equal(approvalAudit.user_id, 3);
+    assert.equal(approvalAudit.module, 'performance');
+    assert.deepEqual(JSON.parse(approvalAudit.details), {
+      campaign_id: 7,
+      publication_id: content.id,
+      submitted_input_id: result.manual_input.id,
+      approved_input_id: approval.manual_input.id,
+      submitted_by: 1,
+      distinct_approver: true
+    });
+    assert.doesNotMatch(approvalAudit.details, /creator_fee|attributed_revenue|client_charge/);
+
+    dashboard = service.getDashboard({ userId: 1, campaignId: 7, query: {} });
     assert.equal(dashboard.records.total, 1);
     assert.equal(dashboard.totals.views.value, 1000);
     assert.equal(dashboard.metrics.core_view_er.value, 0.1);
@@ -212,7 +271,19 @@ test('appends confirmed manual facts and calculates campaign KPI values from the
     assert.equal(dashboard.metrics.cpc.value, 12);
     assert.equal(dashboard.metrics.roi.value, 0.5);
     assert.equal(dashboard.metrics.roas.value, 6);
+    assert.equal(dashboard.records.confirmed_commercial, 1);
     assert.equal(dashboard.top_contents[0].content.id, content.id);
+
+    const replay = service.approveManualInput({
+      userId: 3,
+      campaignId: 7,
+      manualInputId: result.manual_input.id,
+      body: {}
+    });
+    assert.equal(replay.replayed, true);
+    assert.equal(replay.manual_input.id, approval.manual_input.id);
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM performance_manual_inputs').get().count, 2);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM activity_log WHERE action='performance_commercial_approval'").get().count, 1);
   } finally {
     db.close();
   }
@@ -229,10 +300,10 @@ test('does not disclose commercial input or financial KPI values to a campaign t
       body: {
         observation: { views: 1000, likes: 80, comments: 20 },
         commercial: confirmedCommercialInput(),
-        confirmed: true,
         correction_reason: 'Creator fee corrected to USD 10,000.'
       }
     });
+    service.approveManualInput({ userId: 3, campaignId: 7, manualInputId: 1, body: {} });
 
     const list = service.listContents({
       userId: 2,
@@ -243,11 +314,209 @@ test('does not disclose commercial input or financial KPI values to a campaign t
 
     assert.equal(list.capabilities.can_view_commercial, false);
     assert.equal(Object.hasOwn(list.items[0], 'commercial'), false);
+    assert.equal(Object.hasOwn(list.items[0], 'approved_commercial'), false);
     assert.equal(Object.hasOwn(list.items[0].latest_observation, 'correction_reason'), false);
     assert.equal(dashboard.capabilities.can_view_commercial, false);
     assert.equal(Object.hasOwn(dashboard.metrics, 'roi'), false);
     assert.equal(Object.hasOwn(dashboard.metrics, 'roas'), false);
     assert.equal(Object.hasOwn(dashboard.metrics, 'total_campaign_cost'), false);
+  } finally {
+    db.close();
+  }
+});
+
+test('keeps the last approved commercial baseline active while a replacement draft awaits review', () => {
+  const { db, service } = createFixture();
+  try {
+    const content = addCanonicalVideo(service);
+    const firstDraft = service.recordManualInput({
+      userId: 1,
+      campaignId: 7,
+      contentId: content.id,
+      body: {
+        observation: { views: 1000, impressions: 2000, clicks: 100 },
+        commercial: confirmedCommercialInput()
+      }
+    });
+    service.approveManualInput({
+      userId: 3,
+      campaignId: 7,
+      manualInputId: firstDraft.manual_input.id,
+      body: {}
+    });
+    const approvedDashboard = service.getDashboard({ userId: 1, campaignId: 7, query: {} });
+    assert.equal(approvedDashboard.metrics.total_campaign_cost.value, 1200);
+
+    const replacement = Object.assign({}, confirmedCommercialInput(), {
+      creator_fee: 800,
+      attributed_revenue: 2400
+    });
+    const pending = service.recordManualInput({
+      userId: 1,
+      campaignId: 7,
+      contentId: content.id,
+      body: { commercial: replacement, correction_reason: 'Updated invoice' }
+    });
+    assert.equal(pending.manual_input.approval_state, 'draft');
+    assert.equal(pending.manual_input.creator_fee, 800);
+    assert.equal(pending.approved_commercial.creator_fee, 500);
+
+    const pendingDashboard = service.getDashboard({ userId: 1, campaignId: 7, query: {} });
+    assert.equal(pendingDashboard.records.confirmed_commercial, 1);
+    assert.equal(pendingDashboard.metrics.total_campaign_cost.value, 1200);
+    assert.equal(pendingDashboard.metrics.roi.value, 0.5);
+    const pendingExport = service.exportContents({
+      userId: 1,
+      campaignId: 7,
+      scope: 'all',
+      query: {}
+    });
+    assert.match(pendingExport.csv, /"确认状态","最新提交版本 ID","KPI 已批准版本 ID","视频花费"/);
+    assert.match(pendingExport.csv, /"draft",3,2,500,100,100,300,100,100,1800,1500,"USD"/);
+    assert.doesNotMatch(pendingExport.csv, /"draft",3,2,800/);
+
+    service.approveManualInput({
+      userId: 3,
+      campaignId: 7,
+      manualInputId: pending.manual_input.id,
+      body: {}
+    });
+    const revisedDashboard = service.getDashboard({ userId: 1, campaignId: 7, query: {} });
+    assert.equal(revisedDashboard.metrics.total_campaign_cost.value, 1500);
+    assert.equal(revisedDashboard.metrics.roi.value, 0.6);
+  } finally {
+    db.close();
+  }
+});
+
+test('rejects stale commercial drafts and users without approval capability', () => {
+  const { db, service } = createFixture();
+  try {
+    const content = addCanonicalVideo(service);
+    const stale = service.recordManualInput({
+      userId: 1,
+      campaignId: 7,
+      contentId: content.id,
+      body: { commercial: confirmedCommercialInput() }
+    });
+    service.recordManualInput({
+      userId: 1,
+      campaignId: 7,
+      contentId: content.id,
+      body: { commercial: Object.assign({}, confirmedCommercialInput(), { creator_fee: 700 }) }
+    });
+
+    assert.throws(() => service.approveManualInput({
+      userId: 3,
+      campaignId: 7,
+      manualInputId: stale.manual_input.id,
+      body: {}
+    }), (error) => (
+      error instanceof PerformanceManualServiceError &&
+      error.code === 'PERFORMANCE_COMMERCIAL_APPROVAL_STALE'
+    ));
+    assert.throws(() => service.approveManualInput({
+      userId: 2,
+      campaignId: 7,
+      manualInputId: stale.manual_input.id,
+      body: {}
+    }), (error) => (
+      error instanceof PerformanceManualServiceError &&
+      error.code === 'PERFORMANCE_COMMERCIAL_APPROVAL_FORBIDDEN'
+    ));
+    assert.throws(() => service.recordManualInput({
+      userId: 1,
+      campaignId: 7,
+      contentId: content.id,
+      body: { commercial: confirmedCommercialInput(), confirmed: true }
+    }), (error) => (
+      error instanceof PerformanceManualServiceError &&
+      error.code === 'PERFORMANCE_COMMERCIAL_DISTINCT_APPROVAL_REQUIRED'
+    ));
+  } finally {
+    db.close();
+  }
+});
+
+test('rolls back commercial approval when required audit storage is unavailable', () => {
+  const { db, service } = createFixture();
+  try {
+    const content = addCanonicalVideo(service);
+    const draft = service.recordManualInput({
+      userId: 1,
+      campaignId: 7,
+      contentId: content.id,
+      body: { commercial: confirmedCommercialInput() }
+    });
+    db.exec('DROP TABLE activity_log');
+
+    assert.throws(() => service.approveManualInput({
+      userId: 3,
+      campaignId: 7,
+      manualInputId: draft.manual_input.id,
+      body: {}
+    }), (error) => (
+      error instanceof PerformanceManualServiceError &&
+      error.code === 'PERFORMANCE_AUDIT_UNAVAILABLE'
+    ));
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM performance_manual_inputs').get().count, 1);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM performance_manual_inputs WHERE approval_state='approved'").get().count, 0);
+  } finally {
+    db.close();
+  }
+});
+
+test('binds aggregate financial KPI evidence to every independently approved commercial version', () => {
+  const { db, service } = createFixture();
+  try {
+    const first = addCanonicalVideo(service);
+    const second = service.createContent({
+      userId: 1,
+      campaignId: 7,
+      body: { url: 'https://www.youtube.com/watch?v=aggregate02', creator_name: 'Creator Two' }
+    }).content;
+    const firstDraft = service.recordManualInput({
+      userId: 1,
+      campaignId: 7,
+      contentId: first.id,
+      body: { commercial: confirmedCommercialInput() }
+    });
+    const firstApproval = service.approveManualInput({
+      userId: 3,
+      campaignId: 7,
+      manualInputId: firstDraft.manual_input.id,
+      body: {}
+    });
+    const secondDraft = service.recordManualInput({
+      userId: 3,
+      campaignId: 7,
+      contentId: second.id,
+      body: { commercial: confirmedCommercialInput() }
+    });
+    const secondApproval = service.approveManualInput({
+      userId: 1,
+      campaignId: 7,
+      manualInputId: secondDraft.manual_input.id,
+      body: {}
+    });
+
+    const dashboard = service.getDashboard({ userId: 1, campaignId: 7, query: {} });
+    assert.equal(dashboard.metrics.total_campaign_cost.value, 2400);
+    assert.equal(dashboard.metrics.roi.value, 0.5);
+    const commercialLineage = dashboard.metrics.total_campaign_cost.auditLineage
+      .filter((item) => item.type === 'performance_commercial_approval');
+    assert.deepEqual(commercialLineage.map((item) => ({
+      publication_id: item.publication_id,
+      manual_input_id: item.manual_input_id,
+      submitted_by: item.submitted_by,
+      approved_by: item.approved_by
+    })), [
+      { publication_id: first.id, manual_input_id: firstApproval.manual_input.id, submitted_by: 1, approved_by: 3 },
+      { publication_id: second.id, manual_input_id: secondApproval.manual_input.id, submitted_by: 3, approved_by: 1 }
+    ]);
+    assert.match(dashboard.metrics.roi.attributionEvidence.approvalId, /^performance-campaign-7-[a-f0-9]{24}$/);
+    assert.equal(dashboard.metrics.roi.attributionEvidence.approvedBy, 'users-1-3');
+    assert.equal(dashboard.metrics.roi.attributionEvidence.policyVersion, 'phase7b.1h-aggregate-distinct-approvers');
   } finally {
     db.close();
   }
@@ -829,15 +1098,20 @@ test('exports only the current filtered content view for a commercial-capable op
         tags: ['other']
       }
     });
-    service.recordManualInput({
+    const commercialDraft = service.recordManualInput({
       userId: 1,
       campaignId: 7,
       contentId: matching.id,
       body: {
         observation: { views: 1000, likes: 80, comments: 20, clicks: 100 },
-        commercial: confirmedCommercialInput(),
-        confirmed: true
+        commercial: confirmedCommercialInput()
       }
+    });
+    service.approveManualInput({
+      userId: 3,
+      campaignId: 7,
+      manualInputId: commercialDraft.manual_input.id,
+      body: {}
     });
 
     const exported = service.exportContents({
@@ -862,16 +1136,21 @@ test('redacts commercial columns from a team member export', () => {
   const { db, service } = createFixture();
   try {
     const content = addCanonicalVideo(service);
-    service.recordManualInput({
+    const commercialDraft = service.recordManualInput({
       userId: 1,
       campaignId: 7,
       contentId: content.id,
       body: {
         observation: { views: 1000, likes: 80, comments: 20 },
         commercial: confirmedCommercialInput(),
-        confirmed: true,
         correction_reason: 'Commercial correction must remain private.'
       }
+    });
+    service.approveManualInput({
+      userId: 3,
+      campaignId: 7,
+      manualInputId: commercialDraft.manual_input.id,
+      body: {}
     });
 
     const exported = service.exportContents({
@@ -1045,16 +1324,21 @@ test('does not expose commercial facts in a review evidence pack for a team memb
   const { db, service } = createFixture();
   try {
     const content = addCanonicalVideo(service);
-    service.recordManualInput({
+    const commercialDraft = service.recordManualInput({
       userId: 1,
       campaignId: 7,
       contentId: content.id,
       body: {
         observation: { views: 1000, likes: 80, comments: 20 },
         commercial: confirmedCommercialInput(),
-        confirmed: true,
         correction_reason: 'Commercial facts must remain private.'
       }
+    });
+    service.approveManualInput({
+      userId: 3,
+      campaignId: 7,
+      manualInputId: commercialDraft.manual_input.id,
+      body: {}
     });
     const second = service.createContent({
       userId: 1,
