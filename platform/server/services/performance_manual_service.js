@@ -2045,9 +2045,9 @@ function aiReviewCurrentConfirmationEvidence(performanceService, user, campaignI
       'Current review evidence could not be verified.'
     );
   }
-  const references = aiReviewEvidenceReferences(evidence);
-  const projection = aiReviewEvidenceProjection(evidence, references);
-  const snapshotHash = aiReviewSnapshotHash(projection);
+  const snapshot = buildPerformanceReviewEvidenceSnapshot(evidence);
+  const projection = snapshot.projection;
+  const snapshotHash = snapshot.snapshotHash;
   if (!evidence || !evidence.rankings || evidence.rankings.status !== 'available') {
     throw aiReviewError(
       409,
@@ -2251,6 +2251,16 @@ function aiReviewSnapshotHash(projection) {
   return crypto.createHash('sha256')
     .update(JSON.stringify(projection), 'utf8')
     .digest('hex');
+}
+
+function buildPerformanceReviewEvidenceSnapshot(evidence) {
+  const references = aiReviewEvidenceReferences(evidence);
+  const projection = aiReviewEvidenceProjection(evidence, references);
+  return Object.freeze({
+    references,
+    projection,
+    snapshotHash: aiReviewSnapshotHash(projection)
+  });
 }
 
 function aiReviewAiProjection(ai) {
@@ -2786,9 +2796,10 @@ function createPerformanceAiReviewService(db, options = {}) {
       if (error instanceof PerformanceManualServiceError) throw error;
       throw aiReviewError(500, 'PERFORMANCE_AI_REVIEW_EVIDENCE_FAILED', 'Review evidence could not be prepared.');
     }
-    const evidenceReferences = aiReviewEvidenceReferences(evidence);
-    const evidenceProjection = aiReviewEvidenceProjection(evidence, evidenceReferences);
-    const snapshotHash = aiReviewSnapshotHash(evidenceProjection);
+    const evidenceSnapshot = buildPerformanceReviewEvidenceSnapshot(evidence);
+    const evidenceReferences = evidenceSnapshot.references;
+    const evidenceProjection = evidenceSnapshot.projection;
+    const snapshotHash = evidenceSnapshot.snapshotHash;
     const confidence = aiReviewConfidence(evidence);
     if (!evidence || !evidence.rankings || evidence.rankings.status !== 'available') {
       return {
@@ -2885,9 +2896,10 @@ function createPerformanceAiReviewService(db, options = {}) {
               campaignId: input && input.campaignId,
               query: { top_metric: request.topMetric }
             });
-            const currentReferences = aiReviewEvidenceReferences(currentEvidence);
-            const currentProjection = aiReviewEvidenceProjection(currentEvidence, currentReferences);
-            const currentSnapshotHash = aiReviewSnapshotHash(currentProjection);
+            const currentSnapshot = buildPerformanceReviewEvidenceSnapshot(currentEvidence);
+            const currentReferences = currentSnapshot.references;
+            const currentProjection = currentSnapshot.projection;
+            const currentSnapshotHash = currentSnapshot.snapshotHash;
             generationGuard.currentEvidence = currentEvidence;
             generationGuard.currentProjection = currentProjection;
             generationGuard.currentSnapshotHash = currentSnapshotHash;
@@ -3191,6 +3203,7 @@ module.exports = {
   ACTION_POLICIES,
   PerformanceManualServiceError,
   PerformanceAiReviewServiceError,
+  buildPerformanceReviewEvidenceSnapshot,
   createPerformanceManualService,
   createPerformanceAiReviewService
 };
