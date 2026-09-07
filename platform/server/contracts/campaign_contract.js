@@ -194,6 +194,26 @@ const REQUEST_POLICIES = Object.freeze({
     'POST',
     '/api/campaigns/:id/performance/ai-review-draft/approve'
   ),
+  CAMPAIGN_PERFORMANCE_CUSTOMER_REPORT_PREVIEW: controlJson(
+    'campaign.performance.customer-report-preview',
+    'POST',
+    '/api/campaigns/:id/performance/customer-report-preview'
+  ),
+  CAMPAIGN_PERFORMANCE_CUSTOMER_REPORT_SNAPSHOT_CREATE: controlJson(
+    'campaign.performance.customer-report-snapshot.create',
+    'POST',
+    '/api/campaigns/:id/performance/customer-report-snapshots'
+  ),
+  CAMPAIGN_PERFORMANCE_CUSTOMER_REPORT_SNAPSHOT_LIST: empty(
+    'campaign.performance.customer-report-snapshot.list',
+    'GET',
+    '/api/campaigns/:id/performance/customer-report-snapshots'
+  ),
+  CAMPAIGN_PERFORMANCE_CUSTOMER_REPORT_SNAPSHOT_DETAIL: empty(
+    'campaign.performance.customer-report-snapshot.detail',
+    'GET',
+    '/api/campaigns/:id/performance/customer-report-snapshots/:snapshotId'
+  ),
   CAMPAIGN_PERFORMANCE_INTEGRATION_PREVIEW: empty(
     'campaign.performance.integration-preview',
     'GET',

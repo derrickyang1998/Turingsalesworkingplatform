@@ -74,6 +74,7 @@ const {
   createPerformanceManualService,
   createPerformanceAiReviewService
 } = require('./services/performance_manual_service');
+const { createCustomerReportSnapshotService } = require('./services/customer_report_snapshot_service');
 const { createPerformanceFeishuConnectionService } = require('./services/performance_feishu_connection_service');
 const registerCampaignRoutes = require('./routes_campaigns');
 const registerPerformanceRoutes = require('./routes_performance');
@@ -166,6 +167,9 @@ const performanceAiReviewService = createPerformanceAiReviewService(db, {
   performanceService: performanceManualService,
   aiService
 });
+const customerReportSnapshotService = createCustomerReportSnapshotService(db, {
+  performanceService: performanceManualService
+});
 const performanceFeishuConnectionService = createPerformanceFeishuConnectionService(db);
 const campaignPptBridgeHandler = createCampaignPptBridgeHandler(campaignPptService);
 let campaignPptJanitor = null;
@@ -195,6 +199,10 @@ const phase4PolicyNames = [
   'CAMPAIGN_PERFORMANCE_REVIEW_EVIDENCE',
   'CAMPAIGN_PERFORMANCE_AI_REVIEW_DRAFT',
   'CAMPAIGN_PERFORMANCE_AI_REVIEW_APPROVE',
+  'CAMPAIGN_PERFORMANCE_CUSTOMER_REPORT_PREVIEW',
+  'CAMPAIGN_PERFORMANCE_CUSTOMER_REPORT_SNAPSHOT_CREATE',
+  'CAMPAIGN_PERFORMANCE_CUSTOMER_REPORT_SNAPSHOT_LIST',
+  'CAMPAIGN_PERFORMANCE_CUSTOMER_REPORT_SNAPSHOT_DETAIL',
   'CAMPAIGN_PERFORMANCE_INTEGRATION_PREVIEW',
   'CAMPAIGN_PERFORMANCE_FEISHU_CONNECTION_GET',
   'CAMPAIGN_PERFORMANCE_CONTENT_CREATE',
@@ -1531,6 +1539,7 @@ registerPerformanceRoutes(app, {
   service: performanceManualService,
   feishuConnectionService: performanceFeishuConnectionService,
   aiReviewService: performanceAiReviewService,
+  customerReportSnapshotService,
   aiLimiter,
   aiQuotaGuard
 });

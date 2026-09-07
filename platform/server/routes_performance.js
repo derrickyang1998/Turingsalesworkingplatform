@@ -7,6 +7,10 @@ const {
   createPerformanceAiReviewService
 } = require('./services/performance_manual_service');
 const {
+  CustomerReportSnapshotServiceError,
+  createCustomerReportSnapshotService
+} = require('./services/customer_report_snapshot_service');
+const {
   PerformanceFeishuConnectionServiceError,
   createPerformanceFeishuConnectionService
 } = require('./services/performance_feishu_connection_service');
@@ -20,7 +24,8 @@ function requestId(request) {
 function sendError(request, response, error) {
   const known = error instanceof PerformanceManualServiceError ||
     error instanceof PerformanceFeishuConnectionServiceError ||
-    error instanceof PerformanceAiReviewServiceError;
+    error instanceof PerformanceAiReviewServiceError ||
+    error instanceof CustomerReportSnapshotServiceError;
   const status = known ? error.statusCode : 500;
   const body = {
     error: known ? error.message : 'Performance request failed.',
@@ -74,6 +79,17 @@ function registerPerformanceRoutes(app, options = {}) {
     typeof aiReviewService.approveDraft !== 'function'
   ) {
     throw new TypeError('A performance AI review service is required.');
+  }
+  const customerReportSnapshotService = options.customerReportSnapshotService ||
+    createCustomerReportSnapshotService(options.db, { performanceService: service });
+  if (
+    !customerReportSnapshotService ||
+    typeof customerReportSnapshotService.preview !== 'function' ||
+    typeof customerReportSnapshotService.seal !== 'function' ||
+    typeof customerReportSnapshotService.list !== 'function' ||
+    typeof customerReportSnapshotService.get !== 'function'
+  ) {
+    throw new TypeError('A customer report snapshot service is required.');
   }
   const aiLimiter = typeof options.aiLimiter === 'function'
     ? options.aiLimiter
@@ -215,6 +231,55 @@ function registerPerformanceRoutes(app, options = {}) {
         userId: authenticatedUserId(request),
         campaignId: request.params.id,
         query: { top_metric: request.query && request.query.top_metric }
+      }));
+    } catch (error) {
+      return sendError(request, response, error);
+    }
+  });
+
+  app.get('/api/campaigns/:id/performance/customer-report-snapshots', options.authMiddleware, (request, response) => {
+    try {
+      return sendResult(request, response, customerReportSnapshotService.list({
+        userId: authenticatedUserId(request),
+        campaignId: request.params.id
+      }));
+    } catch (error) {
+      return sendError(request, response, error);
+    }
+  });
+
+  app.get('/api/campaigns/:id/performance/customer-report-snapshots/:snapshotId', options.authMiddleware, (request, response) => {
+    try {
+      return sendResult(request, response, customerReportSnapshotService.get({
+        userId: authenticatedUserId(request),
+        campaignId: request.params.id,
+        snapshotId: request.params.snapshotId
+      }));
+    } catch (error) {
+      return sendError(request, response, error);
+    }
+  });
+
+  app.post('/api/campaigns/:id/performance/customer-report-preview', options.authMiddleware, (request, response) => {
+    try {
+      return sendResult(request, response, customerReportSnapshotService.preview({
+        user: request.user,
+        campaignId: request.params.id,
+        body: request.body
+      }));
+    } catch (error) {
+      return sendError(request, response, error);
+    }
+  });
+
+  app.post('/api/campaigns/:id/performance/customer-report-snapshots', options.authMiddleware, (request, response) => {
+    try {
+      return sendResult(request, response, customerReportSnapshotService.seal({
+        user: request.user,
+        campaignId: request.params.id,
+        body: request.body,
+        idempotencyKey: requestHeader(request, 'Idempotency-Key'),
+        requestId: requestId(request)
       }));
     } catch (error) {
       return sendError(request, response, error);

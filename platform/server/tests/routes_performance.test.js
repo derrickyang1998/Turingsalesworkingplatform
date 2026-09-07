@@ -11,6 +11,7 @@ const {
   PerformanceAiReviewServiceError
 } = require('../services/performance_manual_service');
 const { PerformanceFeishuConnectionServiceError } = require('../services/performance_feishu_connection_service');
+const { CustomerReportSnapshotServiceError } = require('../services/customer_report_snapshot_service');
 const campaignContract = require('../contracts/campaign_contract');
 
 function createResponse() {
@@ -119,13 +120,52 @@ function createFixture() {
       };
     }
   };
+  const customerReportSnapshotService = {
+    preview(input) {
+      calls.push(['customer-report-preview', input]);
+      return {
+        contract_version: 'customer_safe_v1',
+        status: 'preview',
+        campaign_id: 7,
+        evidence_snapshot_hash: 'd'.repeat(64),
+        sections: {}
+      };
+    },
+    seal(input) {
+      calls.push(['customer-report-seal', input]);
+      return {
+        status: 'sealed',
+        snapshot: { id: 81, report: { contract_version: 'customer_safe_v1' } }
+      };
+    },
+    list(input) {
+      calls.push(['customer-report-list', input]);
+      return { contract_version: 'customer_safe_v1', campaign_id: 7, snapshots: [] };
+    },
+    get(input) {
+      calls.push(['customer-report-get', input]);
+      return {
+        contract_version: 'customer_safe_v1',
+        campaign_id: 7,
+        snapshot: { id: 81, report: { contract_version: 'customer_safe_v1' } }
+      };
+    }
+  };
   registerPerformanceRoutes(app, {
     authMiddleware(_request, _response, next) { next(); },
     service,
     feishuConnectionService,
-    aiReviewService
+    aiReviewService,
+    customerReportSnapshotService
   });
-  return { routes, calls, service, feishuConnectionService, aiReviewService };
+  return {
+    routes,
+    calls,
+    service,
+    feishuConnectionService,
+    aiReviewService,
+    customerReportSnapshotService
+  };
 }
 
 function invoke(handlers, request) {
@@ -169,6 +209,8 @@ test('registers campaign-scoped performance endpoints and forwards authenticated
   assert.deepEqual([...routes.keys()].sort(), [
     'GET /api/campaigns/:id/performance/contents',
     'GET /api/campaigns/:id/performance/contents/export',
+    'GET /api/campaigns/:id/performance/customer-report-snapshots',
+    'GET /api/campaigns/:id/performance/customer-report-snapshots/:snapshotId',
     'GET /api/campaigns/:id/performance/dashboard',
     'GET /api/campaigns/:id/performance/feishu-connection',
     'GET /api/campaigns/:id/performance/integration-preview',
@@ -177,6 +219,8 @@ test('registers campaign-scoped performance endpoints and forwards authenticated
     'POST /api/campaigns/:id/performance/ai-review-draft/approve',
     'POST /api/campaigns/:id/performance/contents',
     'POST /api/campaigns/:id/performance/contents/:contentId/manual-inputs',
+    'POST /api/campaigns/:id/performance/customer-report-preview',
+    'POST /api/campaigns/:id/performance/customer-report-snapshots',
     'POST /api/campaigns/:id/performance/feishu-connection',
     'POST /api/campaigns/:id/performance/feishu-connection/approve',
     'POST /api/campaigns/:id/performance/import'
@@ -197,6 +241,109 @@ test('registers campaign-scoped performance endpoints and forwards authenticated
     campaignId: '7',
     body: request.body
   }]);
+});
+
+test('routes customer report preview and immutable snapshots through protected campaign contracts', () => {
+  const { routes, calls, customerReportSnapshotService } = createFixture();
+  const body = {
+    top_metric: 'views',
+    title: 'Customer performance review',
+    optimization_actions: [],
+    next_cycle_plan: ''
+  };
+  const previewRequest = {
+    user: { id: 9, role: 'org_admin' },
+    params: { id: '7' },
+    body,
+    requestId: 'customer-report-preview-request'
+  };
+  const preview = invoke(
+    routes.get('POST /api/campaigns/:id/performance/customer-report-preview'),
+    previewRequest
+  );
+  assert.equal(preview.statusCode, 200);
+  assert.equal(preview.body.status, 'preview');
+  assert.equal(preview.body.request_id, 'customer-report-preview-request');
+  assert.deepEqual(calls[0], ['customer-report-preview', {
+    user: previewRequest.user,
+    campaignId: '7',
+    body
+  }]);
+
+  const sealRequest = {
+    user: previewRequest.user,
+    params: { id: '7' },
+    body: Object.assign({}, body, { expected_evidence_snapshot_hash: 'd'.repeat(64) }),
+    headers: { 'idempotency-key': 'customer-report-snapshot-key' },
+    phase4Request: { requestId: 'customer-report-seal-request' }
+  };
+  const sealed = invoke(
+    routes.get('POST /api/campaigns/:id/performance/customer-report-snapshots'),
+    sealRequest
+  );
+  assert.equal(sealed.statusCode, 200);
+  assert.equal(sealed.body.status, 'sealed');
+  assert.equal(sealed.body.request_id, 'customer-report-seal-request');
+  assert.deepEqual(calls[1], ['customer-report-seal', {
+    user: sealRequest.user,
+    campaignId: '7',
+    body: sealRequest.body,
+    idempotencyKey: 'customer-report-snapshot-key',
+    requestId: 'customer-report-seal-request'
+  }]);
+
+  const listed = invoke(
+    routes.get('GET /api/campaigns/:id/performance/customer-report-snapshots'),
+    { user: { id: 10 }, params: { id: '7' }, requestId: 'customer-report-list-request' }
+  );
+  assert.equal(listed.statusCode, 200);
+  assert.equal(listed.body.request_id, 'customer-report-list-request');
+  assert.deepEqual(calls[2], ['customer-report-list', { userId: 10, campaignId: '7' }]);
+
+  const detail = invoke(
+    routes.get('GET /api/campaigns/:id/performance/customer-report-snapshots/:snapshotId'),
+    { user: { id: 10 }, params: { id: '7', snapshotId: '81' }, requestId: 'customer-report-detail-request' }
+  );
+  assert.equal(detail.statusCode, 200);
+  assert.equal(detail.body.snapshot.id, 81);
+  assert.deepEqual(calls[3], ['customer-report-get', {
+    userId: 10,
+    campaignId: '7',
+    snapshotId: '81'
+  }]);
+
+  for (const [name, id, method, pathTemplate, mediaKind] of [
+    ['CAMPAIGN_PERFORMANCE_CUSTOMER_REPORT_PREVIEW', 'campaign.performance.customer-report-preview', 'POST', '/api/campaigns/:id/performance/customer-report-preview', campaignContract.MEDIA_KINDS.JSON],
+    ['CAMPAIGN_PERFORMANCE_CUSTOMER_REPORT_SNAPSHOT_CREATE', 'campaign.performance.customer-report-snapshot.create', 'POST', '/api/campaigns/:id/performance/customer-report-snapshots', campaignContract.MEDIA_KINDS.JSON],
+    ['CAMPAIGN_PERFORMANCE_CUSTOMER_REPORT_SNAPSHOT_LIST', 'campaign.performance.customer-report-snapshot.list', 'GET', '/api/campaigns/:id/performance/customer-report-snapshots', campaignContract.MEDIA_KINDS.EMPTY],
+    ['CAMPAIGN_PERFORMANCE_CUSTOMER_REPORT_SNAPSHOT_DETAIL', 'campaign.performance.customer-report-snapshot.detail', 'GET', '/api/campaigns/:id/performance/customer-report-snapshots/:snapshotId', campaignContract.MEDIA_KINDS.EMPTY]
+  ]) {
+    const policy = campaignContract.REQUEST_POLICIES[name];
+    assert.ok(policy);
+    assert.equal(policy.id, id);
+    assert.equal(policy.method, method);
+    assert.equal(policy.pathTemplate, pathTemplate);
+    assert.equal(policy.mediaKind, mediaKind);
+  }
+
+  customerReportSnapshotService.preview = () => {
+    throw new CustomerReportSnapshotServiceError(
+      409,
+      'CUSTOMER_REPORT_STALE_EVIDENCE',
+      'Current performance evidence no longer matches the confirmed review.'
+    );
+  };
+  const stale = invoke(
+    routes.get('POST /api/campaigns/:id/performance/customer-report-preview'),
+    previewRequest
+  );
+  assert.equal(stale.statusCode, 409);
+  assert.equal(stale.body.code, 'CUSTOMER_REPORT_STALE_EVIDENCE');
+  assert.equal(stale.body.request_id, 'customer-report-preview-request');
+
+  const serverSource = fs.readFileSync(path.resolve(__dirname, '..', 'server.js'), 'utf8');
+  assert.match(serverSource, /'CAMPAIGN_PERFORMANCE_CUSTOMER_REPORT_PREVIEW'/);
+  assert.match(serverSource, /'CAMPAIGN_PERFORMANCE_CUSTOMER_REPORT_SNAPSHOT_CREATE'/);
 });
 
 test('confirms a campaign-scoped AI review draft through the protected JSON request contract', async () => {
