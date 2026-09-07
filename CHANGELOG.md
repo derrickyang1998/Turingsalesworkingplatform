@@ -1,5 +1,28 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.8.9-customer-report-ppt (Production Deployed, 2026-09-07) - Phase 7B.3e 客户复盘 PPT 交付
+
+### 交付与范围 / Delivery And Scope
+- 效果看板的每个已封存客户复盘快照新增紧凑的“客户版 PPT”操作。活动负责人或组织管理员可生成并下载；只读成员保持无权限。PPT 严格绑定不可变快照，重复请求回放同一份已留存成品。
+- 新增 schema `v14`、只追加的 `customer_report_ppt_artifacts` 和独立客户报告 PPT 渲染/留存链路。成品只使用 `customer_safe_v1` 七章节脱敏报告，不读取后续实时数据，也不包含原始链接、达人联系方式、商业数据、内部提示词或外部投递信息。
+- 客户报告成品固定在现有 PPT 备份边界下的隔离命名空间；备份清单同时绑定既有方案 PPT 与客户报告 PPT。冻结方案 PPT 生成路径和最新产品界面保持不变。
+- 本切片不调用 DeepSeek、联网搜索、视频/媒体 provider、飞书或定时同步；生产验收未创建真实客户业务成品。
+
+### 定向验证、审查与上线 / Focused Verification, Review, And Deployment
+- 功能服务、路由、迁移、权限和前端合同定向矩阵 `37/37` 通过；PPT 存储、服务与回放组合检查 `29` 通过、`0` 失败、`2` 个 Windows 环境跳过；可信来源 `32/32`、发布合同 `37/37`、备份清单精确测试 `1/1` 通过。
+- 专用客户报告 PPT 实际渲染成功；JavaScript/Python 语法、数据库 v1→v14 双次迁移回放、SQLite 完整性、差异格式、定向凭据扫描和本地发布预检均通过。
+- 两次候选发布在生产切换前被门禁阻断，生产均未修改：先补齐 schema v14 候选目标，再隔离客户报告成品命名空间并升级备份清单。修复后真实 Express 回放 `8/8`、发布门禁 `21/21`、部署浏览器烟测 `2/2` 通过。
+- 功能、迁移、运行时与回滚边界均经独立审查，结论为 `APPROVE`。本功能包含迁移、权限和二进制留存，因此按高风险路径发布；后续普通独立功能继续采用轻量定向检查并在完成后立即上线。
+
+### 生产证据 / Production Evidence
+- 可恢复备份：`/root/turingmarket/backups/v060-crm-sales-workspace-20260907-221037`；备份 `SHA256SUMS` SHA-256 为 `947df0435e58d6a16f3bf9f10bf0a980696028d0b4bb0b47a9b5092136562d86`。
+- 公网 `/api/health` 为 `200` / `ok` 且 Parser ready；公网 `/performance-dashboard` 为 `200`；匿名 PPT 生成接口为 `401`。Nginx active，PM2 `turingmarket` online 且本次发布后重启计数为 `0`。
+- 只读 SQLite 验证为 schema `v14`、`quick_check=ok`、外键异常 `0`，快照表和 PPT 成品表均存在。客户报告私有目录权限为 `700`，冻结 `ppt.js` SHA-256 仍为 `f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e`。
+- 生产候选树 SHA-256 为 `09261102a89959aad38dd2e5d4e36861cc1057eb3ffa0182cee862889001ea5d2`。实现与发布修复提交：`b76f018`、`51d4686`、`2983531`。
+
+### 后续边界 / Next Boundaries
+- 未使用真实客户账号执行成品写入/下载，以避免制造业务数据；离线真实渲染、服务回放和线上受保护路由边界已验证。下一独立功能按路线图继续选择客户 HTML/数据导出或经批准的飞书投影，完成一个即上线。
+
 ## v0.8.8-customer-report-snapshot (Production Deployed, 2026-09-07) - Phase 7B.3d 客户复盘报告快照
 
 ### 交付与范围 / Delivery And Scope
