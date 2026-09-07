@@ -62,6 +62,34 @@ test('manual data entry keeps performance inputs and commercial confirmation dis
   assert.match(appSource, /performanceRatio\(metrics\.roas\)/);
 });
 
+test('manual data entry exposes a compact paginated observation history without changing the dashboard snapshot contract', () => {
+  for (const id of [
+    'performanceObservationHistoryPanel',
+    'performanceObservationHistory',
+    'performanceObservationHistoryMore'
+  ]) {
+    assert.match(appSource, new RegExp(id));
+  }
+  assert.match(appSource, /var performanceObservationHistoryRequestSequence = 0;/);
+  assert.match(appSource, /var activePerformanceObservationHistoryRequest = null;/);
+  assert.match(appSource, /function renderPerformanceObservationHistory\(/);
+  assert.match(appSource, /async function loadPerformanceObservationHistory\(/);
+  assert.match(
+    appSource,
+    /performance\/contents\/' \+ encodeURIComponent\(normalizedContentId\) \+ '\/observations'/
+  );
+  assert.match(appSource, /performanceObservationHistoryIsCurrent\(context\)/);
+  assert.match(appSource, /data_rollback_or_correction/);
+  assert.match(appSource, /不可比/);
+  assert.match(
+    appSource,
+    /function closePerformanceInputModal\(\)[\s\S]*?activePerformanceObservationHistoryRequest\.controller\.abort\(\)/
+  );
+  assert.match(componentStyles, /\.tm-performance-observation-history/);
+  assert.match(componentStyles, /\.tm-performance-observation-table-wrap[\s\S]*?overflow: auto/);
+  assert.match(componentStyles, /\.tm-performance-observation-table th[\s\S]*?position: sticky/);
+});
+
 test('performance tables retain compact, sticky operational controls', () => {
   assert.match(componentStyles, /\.tm-performance-table-container[\s\S]*?overflow-y: auto/);
   assert.match(componentStyles, /\.tm-performance-table th:first-child[\s\S]*?position: sticky/);

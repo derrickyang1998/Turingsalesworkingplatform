@@ -64,6 +64,17 @@ function createFixture() {
         rankings: { status: 'insufficient_data', top_contents: [], bottom_contents: [] }
       };
     },
+    getObservationHistory(input) {
+      calls.push(['observation-history', input]);
+      return {
+        contract_version: 'performance-observation-history-v1',
+        campaign_id: 7,
+        content_id: 13,
+        order: 'observed_at_desc_id_desc',
+        items: [],
+        page: { limit: 20, has_more: false, next_cursor: null }
+      };
+    },
     getDashboard(input) { calls.push(['dashboard', input]); return { records: { total: 0 } }; }
   };
   const feishuConnectionService = {
@@ -239,6 +250,7 @@ test('registers campaign-scoped performance endpoints and forwards authenticated
   const { routes, calls } = createFixture();
   assert.deepEqual([...routes.keys()].sort(), [
     'GET /api/campaigns/:id/performance/contents',
+    'GET /api/campaigns/:id/performance/contents/:contentId/observations',
     'GET /api/campaigns/:id/performance/contents/export',
     'GET /api/campaigns/:id/performance/customer-report-snapshots',
     'GET /api/campaigns/:id/performance/customer-report-snapshots/:snapshotId',
@@ -274,6 +286,42 @@ test('registers campaign-scoped performance endpoints and forwards authenticated
     campaignId: '7',
     body: request.body
   }]);
+});
+
+test('returns one video observation history through the protected campaign read contract', () => {
+  const { routes, calls } = createFixture();
+  const response = invoke(
+    routes.get('GET /api/campaigns/:id/performance/contents/:contentId/observations'),
+    {
+      user: { id: 9 },
+      params: { id: '7', contentId: '13' },
+      query: { limit: '10', cursor: 'opaque-cursor', ignored: 'value' },
+      requestId: 'observation-history-request'
+    }
+  );
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.contract_version, 'performance-observation-history-v1');
+  assert.equal(response.body.request_id, 'observation-history-request');
+  assert.deepEqual(calls[0], ['observation-history', {
+    userId: 9,
+    campaignId: '7',
+    contentId: '13',
+    query: { limit: '10', cursor: 'opaque-cursor' }
+  }]);
+
+  const policy = campaignContract.REQUEST_POLICIES.CAMPAIGN_PERFORMANCE_OBSERVATION_HISTORY;
+  assert.ok(policy);
+  assert.equal(policy.id, 'campaign.performance.observation-history');
+  assert.equal(policy.method, 'GET');
+  assert.equal(
+    policy.pathTemplate,
+    '/api/campaigns/:id/performance/contents/:contentId/observations'
+  );
+  assert.equal(policy.mediaKind, campaignContract.MEDIA_KINDS.EMPTY);
+
+  const serverSource = fs.readFileSync(path.resolve(__dirname, '..', 'server.js'), 'utf8');
+  assert.match(serverSource, /'CAMPAIGN_PERFORMANCE_OBSERVATION_HISTORY'/);
 });
 
 test('routes customer report preview, immutable snapshots, and retained PPT delivery through protected campaign contracts', () => {

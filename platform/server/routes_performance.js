@@ -104,7 +104,7 @@ function registerPerformanceRoutes(app, options = {}) {
     throw new TypeError('An authentication middleware is required.');
   }
   const service = options.service || createPerformanceManualService(options.db);
-  if (!service || typeof service.listContents !== 'function' || typeof service.getIntegrationPreview !== 'function' || typeof service.exportContents !== 'function' || typeof service.getDashboard !== 'function' || typeof service.getReviewEvidence !== 'function') {
+  if (!service || typeof service.listContents !== 'function' || typeof service.getObservationHistory !== 'function' || typeof service.getIntegrationPreview !== 'function' || typeof service.exportContents !== 'function' || typeof service.getDashboard !== 'function' || typeof service.getReviewEvidence !== 'function') {
     throw new TypeError('A performance manual service is required.');
   }
   const feishuConnectionService = options.feishuConnectionService ||
@@ -158,6 +158,26 @@ function registerPerformanceRoutes(app, options = {}) {
       return sendError(request, response, error);
     }
   });
+
+  app.get(
+    '/api/campaigns/:id/performance/contents/:contentId/observations',
+    options.authMiddleware,
+    (request, response) => {
+      try {
+        return sendResult(request, response, service.getObservationHistory({
+          userId: authenticatedUserId(request),
+          campaignId: request.params.id,
+          contentId: request.params.contentId,
+          query: {
+            limit: request.query && request.query.limit,
+            cursor: request.query && request.query.cursor
+          }
+        }));
+      } catch (error) {
+        return sendError(request, response, error);
+      }
+    }
+  );
 
   app.get('/api/campaigns/:id/performance/contents/export', options.authMiddleware, (request, response) => {
     try {

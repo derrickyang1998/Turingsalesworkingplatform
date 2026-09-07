@@ -43,6 +43,10 @@ const OBSERVATION_FIELDS = Object.freeze([
   'views', 'impressions', 'likes', 'comments', 'saves', 'shares', 'clicks',
   'conversions', 'orders', 'visits', 'installs', 'leads', 'affiliate_sales'
 ]);
+const OBSERVATION_HISTORY_FIELDS = Object.freeze([
+  'views', 'impressions', 'likes', 'comments', 'saves', 'shares', 'clicks',
+  'conversions'
+]);
 const COMMERCIAL_FIELDS = Object.freeze([
   'creator_fee', 'product_sample_cost', 'logistics_cost', 'paid_media_spend',
   'platform_agency_fee', 'other_cost', 'attributed_revenue', 'client_charge'
@@ -64,6 +68,9 @@ const ACTION_POLICIES = Object.freeze({
 });
 const INTEGRATION_PREVIEW_CONTRACT_VERSION = 'performance-integration-preview-v1';
 const METRIC_IMPORT_CONTRACT_VERSION = 'performance-metric-import-v1';
+const OBSERVATION_HISTORY_CONTRACT_VERSION = 'performance-observation-history-v1';
+const OBSERVATION_HISTORY_DEFAULT_LIMIT = 20;
+const OBSERVATION_HISTORY_MAX_LIMIT = 50;
 const REVIEW_EVIDENCE_CONTRACT_VERSION = 'performance-review-evidence-v1';
 const AI_REVIEW_DRAFT_CONTRACT_VERSION = 'performance-ai-review-draft-v1';
 const AI_REVIEW_APPROVAL_CONTRACT_VERSION = 'performance-ai-review-approval-v1';
@@ -224,6 +231,10 @@ function isStrictIsoTimestamp(value) {
     Number.isFinite(Date.parse(value));
 }
 
+function canonicalIsoTimestamp(value) {
+  return new Date(value).toISOString();
+}
+
 function sha256(value) {
   return crypto.createHash('sha256').update(value).digest('hex');
 }
@@ -262,7 +273,157 @@ function normalizeObservation(value) {
   if (!isStrictIsoTimestamp(observedAt)) {
     throw serviceError(400, 'PERFORMANCE_OBSERVATION_INVALID', 'observed_at must be a UTC ISO timestamp.', { field: 'observed_at' });
   }
-  return { metrics: output, observedAt };
+  return { metrics: output, observedAt: canonicalIsoTimestamp(observedAt) };
+}
+
+function observationHistoryLimit(value) {
+  if (value === undefined || value === null || value === '') {
+    return OBSERVATION_HISTORY_DEFAULT_LIMIT;
+  }
+  const canonical = typeof value === 'number' ? String(value) : value;
+  if (typeof canonical !== 'string' || !/^[1-9][0-9]*$/.test(canonical)) {
+    throw serviceError(
+      400,
+      'PERFORMANCE_OBSERVATION_HISTORY_INVALID',
+      'Observation history limit is invalid.',
+      { field: 'limit' }
+    );
+  }
+  const parsed = Number(canonical);
+  if (!Number.isSafeInteger(parsed) || parsed > OBSERVATION_HISTORY_MAX_LIMIT) {
+    throw serviceError(
+      400,
+      'PERFORMANCE_OBSERVATION_HISTORY_INVALID',
+      'Observation history limit must be between 1 and 50.',
+      { field: 'limit' }
+    );
+  }
+  return parsed;
+}
+
+function observationHistoryCursor(value) {
+  if (value === undefined || value === null || value === '') return null;
+  if (
+    typeof value !== 'string' ||
+    value.length > 256 ||
+    !/^[A-Za-z0-9_-]+$/.test(value)
+  ) {
+    throw serviceError(
+      400,
+      'PERFORMANCE_OBSERVATION_HISTORY_INVALID',
+      'Observation history cursor is invalid.',
+      { field: 'cursor' }
+    );
+  }
+  let decoded;
+  let parsed;
+  try {
+    decoded = Buffer.from(value, 'base64url').toString('utf8');
+    if (Buffer.from(decoded, 'utf8').toString('base64url') !== value) throw new Error('non-canonical');
+    parsed = JSON.parse(decoded);
+  } catch (_error) {
+    throw serviceError(
+      400,
+      'PERFORMANCE_OBSERVATION_HISTORY_INVALID',
+      'Observation history cursor is invalid.',
+      { field: 'cursor' }
+    );
+  }
+  if (
+    !isPlainObject(parsed) ||
+    Object.keys(parsed).sort().join(',') !== 'id,observed_at,watermark_id' ||
+    !Number.isSafeInteger(parsed.id) || parsed.id <= 0 ||
+    !Number.isSafeInteger(parsed.watermark_id) || parsed.watermark_id < parsed.id ||
+    !isStrictIsoTimestamp(parsed.observed_at) ||
+    canonicalIsoTimestamp(parsed.observed_at) !== parsed.observed_at
+  ) {
+    throw serviceError(
+      400,
+      'PERFORMANCE_OBSERVATION_HISTORY_INVALID',
+      'Observation history cursor is invalid.',
+      { field: 'cursor' }
+    );
+  }
+  return {
+    id: parsed.id,
+    observedAt: parsed.observed_at,
+    watermarkId: parsed.watermark_id
+  };
+}
+
+function observationHistoryCursorToken(item, watermarkId) {
+  return Buffer.from(JSON.stringify({
+    id: item.id,
+    observed_at: item.observed_at,
+    watermark_id: watermarkId
+  }), 'utf8').toString('base64url');
+}
+
+function observationHistoryMetrics(value) {
+  const stored = safeJson(value, {});
+  const observations = {};
+  for (const field of OBSERVATION_HISTORY_FIELDS) {
+    if (Number.isSafeInteger(stored[field]) && stored[field] >= 0) {
+      observations[field] = stored[field];
+    }
+  }
+  const calculated = calculatePerformanceMetrics({ observations });
+  return Object.assign({}, observations, { core_view_er: calculated.coreViewEr });
+}
+
+function unavailableObservationDelta(code) {
+  return {
+    available: false,
+    value: null,
+    direction: null,
+    reason: { code }
+  };
+}
+
+function observationMetricValue(metrics, field) {
+  if (field === 'core_view_er') {
+    const derived = metrics && metrics.core_view_er;
+    return derived && derived.available === true && Number.isFinite(derived.value)
+      ? derived.value
+      : null;
+  }
+  return metrics && Number.isSafeInteger(metrics[field]) && metrics[field] >= 0
+    ? metrics[field]
+    : null;
+}
+
+function observationHistoryDeltas(current, previous) {
+  const result = {};
+  const fields = [...OBSERVATION_HISTORY_FIELDS, 'core_view_er'];
+  for (const field of fields) {
+    if (!previous) {
+      result[field] = unavailableObservationDelta('no_previous_snapshot');
+      continue;
+    }
+    const currentValue = observationMetricValue(current.metrics, field);
+    const previousValue = observationMetricValue(previous.metrics, field);
+    if (currentValue === null || previousValue === null) {
+      result[field] = unavailableObservationDelta('not_comparable');
+      continue;
+    }
+    const difference = currentValue - previousValue;
+    if (!Number.isFinite(difference)) {
+      result[field] = unavailableObservationDelta('numeric_overflow');
+      continue;
+    }
+    let direction = 'unchanged';
+    if (difference > 0) direction = 'increase';
+    if (difference < 0) {
+      direction = field === 'core_view_er' ? 'decrease' : 'data_rollback_or_correction';
+    }
+    result[field] = {
+      available: true,
+      value: difference,
+      direction,
+      reason: null
+    };
+  }
+  return result;
 }
 
 function normalizeCommercial(value) {
@@ -490,7 +651,7 @@ function normalizeMetricImportRow(row, customFields, mapping) {
       { field: 'observed_at', source_row_number: row.source_row_number }
     );
   }
-  const observedAt = rawObservedAt.trim();
+  const observedAt = canonicalIsoTimestamp(rawObservedAt.trim());
   let correctionReason = null;
   if (own(mapping, 'correction_reason')) {
     const raw = customFields.correction_reason;
@@ -1163,7 +1324,7 @@ function createPerformanceManualService(db, options = {}) {
         WHERE current_observation.org_id=publication.org_id
           AND current_observation.campaign_id=publication.campaign_id
           AND current_observation.publication_id=publication.id
-        ORDER BY current_observation.observed_at DESC,current_observation.id DESC LIMIT 1
+        ORDER BY julianday(current_observation.observed_at) DESC,current_observation.id DESC LIMIT 1
       )
       LEFT JOIN performance_manual_inputs manual ON manual.id=(
         SELECT current_input.id
@@ -1407,7 +1568,7 @@ function createPerformanceManualService(db, options = {}) {
       const findExact = db.prepare(`
         SELECT id FROM performance_metric_observations
         WHERE org_id=? AND campaign_id=? AND publication_id=? AND source_mode='csv_xlsx'
-          AND observed_at=? AND metrics_json=?
+          AND julianday(observed_at)=julianday(?) AND metrics_json=?
         ORDER BY id DESC LIMIT 1
       `);
       const insertObservation = db.prepare(`
@@ -1568,6 +1729,87 @@ function createPerformanceManualService(db, options = {}) {
       observation: content.latest_observation,
       manual_input: content.commercial || null,
       capabilities: preliminary.capabilities
+    };
+  }
+
+  function getObservationHistory(input) {
+    const context = requireAccess(input && input.userId, input && input.campaignId, 'view');
+    const contentId = publicationById(context, input && input.contentId);
+    const query = input && isPlainObject(input.query) ? input.query : {};
+    assertOnlyKeys(query, ['limit', 'cursor'], 'PERFORMANCE_OBSERVATION_HISTORY_INVALID');
+    const limit = observationHistoryLimit(query.limit);
+    const cursor = observationHistoryCursor(query.cursor);
+    const watermarkId = cursor
+      ? cursor.watermarkId
+      : Number(db.prepare(`
+        SELECT COALESCE(MAX(id),0) AS id
+        FROM performance_metric_observations
+        WHERE org_id=? AND campaign_id=? AND publication_id=?
+      `).get(
+        context.access.campaign.org_id,
+        context.campaignId,
+        contentId
+      ).id);
+    const cursorClause = cursor
+      ? ' AND (julianday(observation.observed_at)<julianday(?) OR (julianday(observation.observed_at)=julianday(?) AND observation.id<?))'
+      : '';
+    const params = [
+      context.access.campaign.org_id,
+      context.campaignId,
+      contentId,
+      watermarkId
+    ];
+    if (cursor) params.push(cursor.observedAt, cursor.observedAt, cursor.id);
+    params.push(limit + 1);
+    const rows = db.prepare(`
+      SELECT
+        observation.id,observation.source_mode,observation.metrics_json,
+        observation.observed_at,observation.correction_reason,observation.created_at
+      FROM performance_metric_observations observation
+      WHERE observation.org_id=? AND observation.campaign_id=?
+        AND observation.publication_id=? AND observation.id<=?${cursorClause}
+      ORDER BY julianday(observation.observed_at) DESC,observation.id DESC
+      LIMIT ?
+    `).all(...params);
+    const snapshots = rows.map((row) => ({
+      id: Number(row.id),
+      observed_at: canonicalIsoTimestamp(row.observed_at),
+      source_mode: row.source_mode,
+      metrics: observationHistoryMetrics(row.metrics_json),
+      created_at: row.created_at,
+      correction_reason: row.correction_reason
+    }));
+    const returned = snapshots.slice(0, limit).map((snapshot, index) => {
+      const item = {
+        id: snapshot.id,
+        observed_at: snapshot.observed_at,
+        source_mode: snapshot.source_mode,
+        metrics: snapshot.metrics,
+        deltas: observationHistoryDeltas(snapshot, snapshots[index + 1] || null),
+        comparison: {
+          previous_observation_id: snapshots[index + 1] ? snapshots[index + 1].id : null
+        }
+      };
+      if (context.capabilities.can_view_commercial && snapshot.correction_reason) {
+        item.correction_reason = snapshot.correction_reason;
+      }
+      return item;
+    });
+    const hasMore = snapshots.length > limit;
+    return {
+      contract_version: OBSERVATION_HISTORY_CONTRACT_VERSION,
+      campaign_id: context.campaignId,
+      content_id: contentId,
+      order: 'observed_at_desc_id_desc',
+      items: returned,
+      page: {
+        limit,
+        has_more: hasMore,
+        next_cursor: hasMore && returned.length
+          ? observationHistoryCursorToken(returned[returned.length - 1], watermarkId)
+          : null
+      },
+      capabilities: context.capabilities
     };
   }
 
@@ -1825,6 +2067,7 @@ function createPerformanceManualService(db, options = {}) {
     importContentRows,
     importMetricRows,
     recordManualInput,
+    getObservationHistory,
     listContents,
     getIntegrationPreview,
     exportContents,

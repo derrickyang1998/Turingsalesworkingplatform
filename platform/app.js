@@ -6648,6 +6648,9 @@ var performanceFeishuConnectionRequestSequence = 0;
 var performanceFeishuConnectionSaveInFlight = false;
 var performanceSearchTimer = null;
 var performanceExportInFlight = null;
+var performanceObservationHistoryRequestSequence = 0;
+var activePerformanceObservationHistoryRequest = null;
+var performanceObservationHistoryState = null;
 
 function performancePositiveId(value) {
   return typeof readPositiveInteger === 'function' ? readPositiveInteger(value) : null;
@@ -7503,12 +7506,195 @@ function performanceInputField(id, label, value, step) {
     + '<input id="' + id + '" type="number" min="0" step="' + (step || '1') + '" inputmode="decimal" value="' + esc(value) + '"></label>';
 }
 
+function performanceObservationHistoryTime(value) {
+  var text = String(value || '');
+  if (!/^\d{4}-\d{2}-\d{2}T/.test(text)) return text || '-';
+  return text.replace('T', ' ').replace(/(?:\.\d{3})?Z$/, ' UTC');
+}
+
+function performanceObservationHistoryDeltaHtml(delta, isRate) {
+  if (!delta || delta.available !== true || !Number.isFinite(Number(delta.value))) {
+    return '<small class="tm-performance-observation-delta is-muted">不可比</small>';
+  }
+  var value = Number(delta.value);
+  var magnitude = isRate
+    ? (Math.abs(value) * 100).toFixed(2) + ' 个百分点'
+    : performanceCount(Math.abs(value));
+  var sign = value > 0 ? '+' : (value < 0 ? '-' : '');
+  var direction = String(delta.direction || 'unchanged');
+  var title = direction === 'data_rollback_or_correction'
+    ? '累计值回撤或数据修正，不代表效果自然下降'
+    : '';
+  return '<small class="tm-performance-observation-delta is-' + esc(direction)
+    + '"' + (title ? ' title="' + esc(title) + '"' : '') + '>'
+    + esc(sign + magnitude) + '</small>';
+}
+
+function performanceObservationHistoryMetricHtml(item, key) {
+  var metrics = item && item.metrics || {};
+  var isRate = key === 'core_view_er';
+  var value = isRate ? performanceRate(metrics[key]) : performanceCount(metrics[key]);
+  return '<td><strong>' + esc(value) + '</strong>'
+    + performanceObservationHistoryDeltaHtml(item && item.deltas && item.deltas[key], isRate)
+    + '</td>';
+}
+
+function renderPerformanceObservationHistory() {
+  var container = document.getElementById('performanceObservationHistory');
+  var more = document.getElementById('performanceObservationHistoryMore');
+  var status = document.getElementById('performanceObservationHistoryStatus');
+  var state = performanceObservationHistoryState;
+  if (!container || !state) return;
+  var items = Array.isArray(state.items) ? state.items : [];
+  if (!items.length) {
+    container.innerHTML = '<div class="tm-state-empty">暂无历史快照。</div>';
+  } else {
+    var metricColumns = [
+      ['views', '播放'], ['impressions', '展示'], ['likes', '点赞'], ['comments', '评论'],
+      ['saves', '收藏'], ['shares', '转发'], ['clicks', '点击'], ['conversions', '转化'],
+      ['core_view_er', '互动率']
+    ];
+    container.innerHTML = '<div class="tm-performance-observation-table-wrap"><table class="tm-performance-observation-table" aria-label="单视频指标历史">'
+      + '<thead><tr><th>观测时间</th><th>来源</th>'
+      + metricColumns.map(function(column) { return '<th>' + esc(column[1]) + '</th>'; }).join('')
+      + '</tr></thead><tbody>'
+      + items.map(function(item) {
+        var source = item.source_mode === 'csv_xlsx' ? '表格' : '手工';
+        var note = item.correction_reason
+          ? '<small class="tm-performance-observation-note">' + esc(item.correction_reason) + '</small>'
+          : '';
+        return '<tr><td><strong>' + esc(performanceObservationHistoryTime(item.observed_at))
+          + '</strong>' + note + '</td><td><span class="tm-performance-observation-source">'
+          + esc(source) + '</span></td>'
+          + metricColumns.map(function(column) {
+            return performanceObservationHistoryMetricHtml(item, column[0]);
+          }).join('') + '</tr>';
+      }).join('') + '</tbody></table></div>';
+  }
+  if (status) {
+    status.textContent = state.loaded
+      ? '已加载 ' + items.length + ' 条'
+      : '展开后加载';
+  }
+  if (more) {
+    more.hidden = !state.hasMore;
+    more.disabled = false;
+    more.textContent = '加载更多';
+  }
+  if (window.TMAccessibility) window.TMAccessibility.refresh();
+}
+
+function performanceObservationHistoryIsCurrent(context) {
+  var state = performanceObservationHistoryState;
+  return Boolean(
+    context && state && document.getElementById('performanceInputOverlay') &&
+    context.sequence === performanceObservationHistoryRequestSequence &&
+    context.authGeneration === AUTH_GENERATION &&
+    context.campaignId === getPerformanceCampaignId() &&
+    context.campaignId === state.campaignId &&
+    context.contentId === state.contentId
+  );
+}
+
+async function loadPerformanceObservationHistory(contentId, reset) {
+  var campaignId = getPerformanceCampaignId();
+  var normalizedContentId = performancePositiveId(contentId);
+  var state = performanceObservationHistoryState;
+  if (
+    campaignId === null || normalizedContentId === null || !state ||
+    state.campaignId !== campaignId || state.contentId !== normalizedContentId ||
+    activePerformanceObservationHistoryRequest
+  ) return null;
+  var cursor = reset === false ? state.nextCursor : null;
+  if (reset === false && !cursor) return null;
+  var controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  var context = {
+    sequence: ++performanceObservationHistoryRequestSequence,
+    authGeneration: AUTH_GENERATION,
+    campaignId: campaignId,
+    contentId: normalizedContentId,
+    controller: controller
+  };
+  activePerformanceObservationHistoryRequest = context;
+  var container = document.getElementById('performanceObservationHistory');
+  var more = document.getElementById('performanceObservationHistoryMore');
+  var status = document.getElementById('performanceObservationHistoryStatus');
+  if (reset !== false && container) {
+    container.innerHTML = '<div class="tm-state-loading">正在加载历史快照...</div>';
+  }
+  if (status) status.textContent = '正在加载...';
+  if (more) {
+    more.disabled = true;
+    more.textContent = '正在加载...';
+  }
+  try {
+    var path = '/campaigns/' + encodeURIComponent(campaignId)
+      + '/performance/contents/' + encodeURIComponent(normalizedContentId) + '/observations';
+    var params = new URLSearchParams({ limit: '20' });
+    if (cursor) params.set('cursor', cursor);
+    var response = await apiFetch(path + '?' + params.toString(), {
+      signal: controller ? controller.signal : undefined
+    });
+    var data = await response.json().catch(function() { return {}; });
+    if (!performanceObservationHistoryIsCurrent(context)) return null;
+    if (!response.ok) throw new Error(data.error || '历史快照加载失败');
+    var incoming = Array.isArray(data.items) ? data.items : [];
+    if (reset === false) {
+      var known = new Set(state.items.map(function(item) { return Number(item.id); }));
+      state.items = state.items.concat(incoming.filter(function(item) {
+        return !known.has(Number(item.id));
+      }));
+    } else {
+      state.items = incoming;
+    }
+    state.nextCursor = data.page && data.page.next_cursor || null;
+    state.hasMore = Boolean(data.page && data.page.has_more && state.nextCursor);
+    state.loaded = true;
+    renderPerformanceObservationHistory();
+    return data;
+  } catch (error) {
+    if (!performanceObservationHistoryIsCurrent(context)) return null;
+    if (error && error.name === 'AbortError') return null;
+    if (status) status.textContent = error.message || '历史快照加载失败';
+    if (reset !== false && container) {
+      container.innerHTML = '<div class="tm-state-error">' + esc(error.message || '历史快照加载失败') + '</div>';
+    }
+    return null;
+  } finally {
+    if (activePerformanceObservationHistoryRequest === context) {
+      activePerformanceObservationHistoryRequest = null;
+    }
+    if (performanceObservationHistoryIsCurrent(context) && more) {
+      more.disabled = false;
+      more.textContent = '加载更多';
+    }
+  }
+}
+
+function loadMorePerformanceObservationHistory() {
+  var state = performanceObservationHistoryState;
+  return state ? loadPerformanceObservationHistory(state.contentId, false) : null;
+}
+
 function openPerformanceInputModal(contentId) {
   var content = performanceContents.find(function(item) { return Number(item.id) === Number(contentId); });
   if (!content) {
     toast('内容已更新，请刷新列表后重试。', 'error');
     return;
   }
+  if (activePerformanceObservationHistoryRequest && activePerformanceObservationHistoryRequest.controller) {
+    activePerformanceObservationHistoryRequest.controller.abort();
+  }
+  activePerformanceObservationHistoryRequest = null;
+  performanceObservationHistoryRequestSequence += 1;
+  performanceObservationHistoryState = {
+    campaignId: getPerformanceCampaignId(),
+    contentId: Number(content.id),
+    items: [],
+    nextCursor: null,
+    hasMore: false,
+    loaded: false
+  };
   var opener = document.activeElement;
   var commercialEnabled = Boolean(performanceCapabilities && performanceCapabilities.can_edit_commercial);
   var commercialConfirmed = Boolean(content.commercial && content.commercial.approval_state === 'approved');
@@ -7558,15 +7744,34 @@ function openPerformanceInputModal(contentId) {
     + commercialHtml
     + '<label class="tm-performance-field tm-performance-input-section" for="performanceCorrectionReason">备注<input id="performanceCorrectionReason" maxlength="500" placeholder="可选：修正原因或数据说明"></label>'
     + '<div class="tm-performance-input-section" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><button class="btn btn-primary" type="submit">保存数据</button><span id="performanceInputStatus" class="tm-metric-note" role="status" aria-live="polite"></span></div>'
-    + '</form>';
+    + '</form>'
+    + '<details id="performanceObservationHistoryPanel" class="tm-performance-observation-history">'
+    + '<summary><span>历史快照</span><small id="performanceObservationHistoryStatus" role="status" aria-live="polite">展开后加载</small></summary>'
+    + '<div id="performanceObservationHistory"><div class="tm-state-empty">展开后查看每次数据观测及阶段变化。</div></div>'
+    + '<div class="tm-performance-observation-history-actions"><button id="performanceObservationHistoryMore" class="btn btn-outline btn-sm" type="button" onclick="loadMorePerformanceObservationHistory()" hidden>加载更多</button></div>'
+    + '</details>';
   overlay.appendChild(dialog);
   document.body.appendChild(overlay);
+  var historyPanel = document.getElementById('performanceObservationHistoryPanel');
+  if (historyPanel) {
+    historyPanel.addEventListener('toggle', function() {
+      if (historyPanel.open && performanceObservationHistoryState && !performanceObservationHistoryState.loaded) {
+        loadPerformanceObservationHistory(content.id, true);
+      }
+    });
+  }
   var currency = document.getElementById('performanceCurrency');
   if (currency && content.commercial && /^[A-Z]{3}$/.test(content.commercial.base_currency || '')) currency.value = content.commercial.base_currency;
   if (window.TMAccessibility) window.TMAccessibility.openDialog(dialog, opener, closePerformanceInputModal);
 }
 
 function closePerformanceInputModal() {
+  if (activePerformanceObservationHistoryRequest && activePerformanceObservationHistoryRequest.controller) {
+    activePerformanceObservationHistoryRequest.controller.abort();
+  }
+  activePerformanceObservationHistoryRequest = null;
+  performanceObservationHistoryRequestSequence += 1;
+  performanceObservationHistoryState = null;
   var overlay = document.getElementById('performanceInputOverlay');
   var dialog = document.getElementById('performanceInputDialog');
   if (dialog && window.TMAccessibility) window.TMAccessibility.closeDialog(dialog);

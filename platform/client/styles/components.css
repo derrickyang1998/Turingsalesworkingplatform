@@ -1312,6 +1312,135 @@ thead th {
   font-size: 13px;
 }
 
+.tm-performance-observation-history {
+  margin-top: var(--tm-space-4);
+  padding-top: var(--tm-space-3);
+  border-top: 1px solid var(--tm-color-border);
+}
+
+.tm-performance-observation-history summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--tm-space-3);
+  min-height: 36px;
+  color: var(--tm-color-text);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.tm-performance-observation-history summary small {
+  color: var(--tm-color-text-muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.tm-performance-observation-history[open] summary {
+  margin-bottom: var(--tm-space-2);
+}
+
+.tm-performance-observation-table-wrap {
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid var(--tm-color-border);
+  border-radius: var(--tm-radius-sm, 4px);
+  background: var(--tm-color-surface);
+}
+
+.tm-performance-observation-table {
+  width: 100%;
+  min-width: 1080px;
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: fixed;
+  color: var(--tm-color-text);
+  font-size: 12px;
+}
+
+.tm-performance-observation-table th,
+.tm-performance-observation-table td {
+  min-width: 88px;
+  padding: 8px;
+  border-bottom: 1px solid var(--tm-color-border);
+  text-align: right;
+  vertical-align: top;
+  font-variant-numeric: tabular-nums;
+}
+
+.tm-performance-observation-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  color: var(--tm-color-text-muted);
+  background: var(--tm-color-surface);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.tm-performance-observation-table th:first-child,
+.tm-performance-observation-table td:first-child {
+  width: 176px;
+  min-width: 176px;
+  text-align: left;
+}
+
+.tm-performance-observation-table th:nth-child(2),
+.tm-performance-observation-table td:nth-child(2) {
+  width: 68px;
+  min-width: 68px;
+  text-align: left;
+}
+
+.tm-performance-observation-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.tm-performance-observation-table td > strong,
+.tm-performance-observation-table td > small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.tm-performance-observation-delta {
+  margin-top: 2px;
+  color: var(--tm-color-text-muted);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+.tm-performance-observation-delta.is-increase {
+  color: var(--tm-color-success, #137a4b);
+}
+
+.tm-performance-observation-delta.is-decrease {
+  color: var(--tm-color-danger);
+}
+
+.tm-performance-observation-delta.is-data_rollback_or_correction {
+  color: var(--tm-color-warning, #8a5a00);
+}
+
+.tm-performance-observation-note {
+  margin-top: 3px;
+  color: var(--tm-color-text-muted);
+  font-weight: 400;
+  line-height: 1.35;
+}
+
+.tm-performance-observation-source {
+  color: var(--tm-color-text-muted);
+  white-space: nowrap;
+}
+
+.tm-performance-observation-history-actions {
+  display: flex;
+  justify-content: flex-end;
+  min-height: 32px;
+  padding-top: var(--tm-space-2);
+}
+
 .tm-performance-confirmation {
   display: flex !important;
   align-items: center;

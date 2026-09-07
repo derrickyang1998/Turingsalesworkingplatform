@@ -291,6 +291,257 @@ test('uses the latest observed_at value when a late backfill is appended', () =>
   }
 });
 
+test('lists one video observation history in business-time order with stable cursor pagination and comparable deltas', () => {
+  const { db, service } = createFixture();
+  try {
+    const content = addCanonicalVideo(service);
+    for (const observation of [
+      {
+        views: 900,
+        impressions: 1500,
+        likes: 80,
+        comments: 20,
+        clicks: 45,
+        orders: 7,
+        visits: 55,
+        observed_at: '2026-09-03T12:00:00.000Z'
+      },
+      {
+        views: 800,
+        likes: 60,
+        observed_at: '2026-09-01T12:00:00.000Z'
+      },
+      {
+        views: 1000,
+        impressions: 1400,
+        likes: 70,
+        comments: 30,
+        clicks: 40,
+        observed_at: '2026-09-02T12:00:00.000Z'
+      }
+    ]) {
+      service.recordManualInput({
+        userId: 1,
+        campaignId: 7,
+        contentId: content.id,
+        body: { observation }
+      });
+    }
+
+    const first = service.getObservationHistory({
+      userId: 1,
+      campaignId: 7,
+      contentId: content.id,
+      query: { limit: '2' }
+    });
+
+    assert.equal(first.contract_version, 'performance-observation-history-v1');
+    assert.equal(first.campaign_id, 7);
+    assert.equal(first.content_id, content.id);
+    assert.equal(first.order, 'observed_at_desc_id_desc');
+    assert.equal(first.page.limit, 2);
+    assert.equal(first.page.has_more, true);
+    assert.match(first.page.next_cursor, /^[A-Za-z0-9_-]+$/);
+    const cursorPayload = JSON.parse(Buffer.from(first.page.next_cursor, 'base64url').toString('utf8'));
+    assert.deepEqual(Object.keys(cursorPayload).sort(), ['id', 'observed_at', 'watermark_id']);
+    assert.ok(cursorPayload.watermark_id >= cursorPayload.id);
+    assert.deepEqual(
+      first.items.map((item) => item.observed_at),
+      ['2026-09-03T12:00:00.000Z', '2026-09-02T12:00:00.000Z']
+    );
+    assert.equal(first.items[0].metrics.views, 900);
+    assert.equal(first.items[0].metrics.core_view_er.available, true);
+    assert.equal(first.items[0].metrics.core_view_er.value, 100 / 900);
+    assert.equal(Object.hasOwn(first.items[0].metrics, 'orders'), false);
+    assert.equal(Object.hasOwn(first.items[0].metrics, 'visits'), false);
+    assert.equal(Object.hasOwn(first.items[0].deltas, 'orders'), false);
+    assert.equal(Object.hasOwn(first.items[0].deltas, 'visits'), false);
+    assert.deepEqual(first.items[0].deltas.views, {
+      available: true,
+      value: -100,
+      direction: 'data_rollback_or_correction',
+      reason: null
+    });
+    assert.deepEqual(first.items[0].deltas.likes, {
+      available: true,
+      value: 10,
+      direction: 'increase',
+      reason: null
+    });
+    assert.equal(first.items[1].deltas.views.value, 200);
+    assert.equal(first.items[1].deltas.comments.available, false);
+    assert.equal(first.items[1].deltas.comments.reason.code, 'not_comparable');
+    assert.equal(first.items[1].deltas.core_view_er.available, false);
+
+    service.recordManualInput({
+      userId: 1,
+      campaignId: 7,
+      contentId: content.id,
+      body: {
+        observation: {
+          views: 850,
+          likes: 65,
+          observed_at: '2026-09-01T18:00:00.000Z'
+        }
+      }
+    });
+
+    const second = service.getObservationHistory({
+      userId: 1,
+      campaignId: 7,
+      contentId: content.id,
+      query: { limit: 2, cursor: first.page.next_cursor }
+    });
+    assert.deepEqual(
+      second.items.map((item) => item.observed_at),
+      ['2026-09-01T12:00:00.000Z']
+    );
+    assert.equal(second.page.has_more, false);
+    assert.equal(second.page.next_cursor, null);
+    assert.equal(second.items[0].deltas.views.available, false);
+    assert.equal(second.items[0].deltas.views.reason.code, 'no_previous_snapshot');
+
+    const fresh = service.getObservationHistory({
+      userId: 1,
+      campaignId: 7,
+      contentId: content.id,
+      query: { limit: '10' }
+    });
+    assert.deepEqual(
+      fresh.items.map((item) => item.observed_at),
+      [
+        '2026-09-03T12:00:00.000Z',
+        '2026-09-02T12:00:00.000Z',
+        '2026-09-01T18:00:00.000Z',
+        '2026-09-01T12:00:00.000Z'
+      ]
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('canonicalizes accepted timestamps and orders mixed historical precision chronologically', () => {
+  const { db, service } = createFixture();
+  try {
+    const content = addCanonicalVideo(service);
+    db.prepare(`
+      INSERT INTO performance_metric_observations (
+        org_id,campaign_id,publication_id,source_mode,metrics_json,observed_at,created_by
+      ) VALUES (?,?,?,?,?,?,?)
+    `).run(1, 7, content.id, 'manual', JSON.stringify({ views: 100, likes: 10 }), '2026-09-04T12:00:00Z', 1);
+    service.recordManualInput({
+      userId: 1,
+      campaignId: 7,
+      contentId: content.id,
+      body: {
+        observation: {
+          views: 101,
+          likes: 11,
+          observed_at: '2026-09-04T12:00:00.001Z'
+        }
+      }
+    });
+    service.recordManualInput({
+      userId: 1,
+      campaignId: 7,
+      contentId: content.id,
+      body: {
+        observation: {
+          views: 90,
+          likes: 9,
+          observed_at: '2026-09-04T11:00:00Z'
+        }
+      }
+    });
+
+    const history = service.getObservationHistory({
+      userId: 1,
+      campaignId: 7,
+      contentId: content.id,
+      query: {}
+    });
+    assert.deepEqual(
+      history.items.slice(0, 2).map((item) => item.observed_at),
+      ['2026-09-04T12:00:00.001Z', '2026-09-04T12:00:00.000Z']
+    );
+    const current = service.listContents({ userId: 1, campaignId: 7, query: {} }).items[0];
+    assert.equal(current.latest_observation.observed_at, '2026-09-04T12:00:00.001Z');
+    assert.equal(
+      db.prepare("SELECT observed_at FROM performance_metric_observations WHERE json_extract(metrics_json,'$.views')=90").get().observed_at,
+      '2026-09-04T11:00:00.000Z'
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('keeps observation correction notes privileged and rejects invalid history scope or cursors', () => {
+  const { db, service } = createFixture();
+  try {
+    const content = addCanonicalVideo(service);
+    service.recordManualInput({
+      userId: 1,
+      campaignId: 7,
+      contentId: content.id,
+      body: {
+        observation: {
+          views: 1000,
+          likes: 80,
+          comments: 20,
+          observed_at: '2026-09-03T12:00:00.000Z'
+        },
+        correction_reason: 'Provider corrected a duplicated view batch.'
+      }
+    });
+
+    const privileged = service.getObservationHistory({
+      userId: 1,
+      campaignId: 7,
+      contentId: content.id,
+      query: {}
+    });
+    const member = service.getObservationHistory({
+      userId: 2,
+      campaignId: 7,
+      contentId: content.id,
+      query: {}
+    });
+    assert.equal(privileged.items[0].correction_reason, 'Provider corrected a duplicated view batch.');
+    assert.equal(Object.hasOwn(member.items[0], 'correction_reason'), false);
+
+    assert.throws(() => service.getObservationHistory({
+      userId: 1,
+      campaignId: 8,
+      contentId: content.id,
+      query: {}
+    }), (error) => (
+      error instanceof PerformanceManualServiceError &&
+      error.code === 'CAMPAIGN_NOT_FOUND'
+    ));
+    assert.throws(() => service.getObservationHistory({
+      userId: 1,
+      campaignId: 7,
+      contentId: content.id,
+      query: { cursor: 'not-a-valid-history-cursor!' }
+    }), (error) => (
+      error instanceof PerformanceManualServiceError &&
+      error.code === 'PERFORMANCE_OBSERVATION_HISTORY_INVALID'
+    ));
+    assert.throws(() => service.getObservationHistory({
+      userId: 1,
+      campaignId: 7,
+      contentId: content.id,
+      query: { limit: '51' }
+    }), (error) => (
+      error instanceof PerformanceManualServiceError &&
+      error.code === 'PERFORMANCE_OBSERVATION_HISTORY_INVALID'
+    ));
+  } finally {
+    db.close();
+  }
+});
+
 test('imports accepted parsed rows atomically while returning malformed rows as safe rejections', () => {
   const { db, service } = createFixture();
   try {
@@ -360,7 +611,7 @@ test('imports batch metric snapshots for existing canonical content and skips an
           {
             source_row_number: 2,
             视频链接: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
-            数据更新时间: '2026-09-02T12:00:00.000Z',
+            数据更新时间: '2026-09-02T12:00:00Z',
             播放量: '1,250',
             点赞数: '88',
             评论数: 12,
@@ -387,6 +638,7 @@ test('imports batch metric snapshots for existing canonical content and skips an
 
     const current = service.listContents({ userId: 1, campaignId: 7, query: {} }).items[0];
     assert.equal(current.latest_observation.source_mode, 'csv_xlsx');
+    assert.equal(current.latest_observation.observed_at, '2026-09-02T12:00:00.000Z');
     assert.equal(current.latest_observation.views, 1250);
     assert.equal(current.latest_observation.clicks, 34);
     assert.equal(current.metrics.core_view_er.value, 0.08);
@@ -395,6 +647,53 @@ test('imports batch metric snapshots for existing canonical content and skips an
     assert.equal(replayed.accepted_count, 0);
     assert.equal(replayed.duplicate_count, 1);
     assert.equal(replayed.rejected_count, 1);
+    assert.equal(
+      db.prepare('SELECT COUNT(*) AS count FROM performance_metric_observations').get().count,
+      1
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('recognizes a legacy no-millisecond metric snapshot as the same imported instant', () => {
+  const { db, service } = createFixture();
+  try {
+    const content = addCanonicalVideo(service);
+    const metrics = { views: 1250, likes: 88, comments: 12 };
+    db.prepare(`
+      INSERT INTO performance_metric_observations (
+        org_id,campaign_id,publication_id,source_mode,metrics_json,observed_at,created_by
+      ) VALUES (?,?,?,?,?,?,?)
+    `).run(1, 7, content.id, 'csv_xlsx', JSON.stringify(metrics), '2026-09-02T12:00:00Z', 1);
+
+    const replayed = service.importMetricRows({
+      userId: 1,
+      campaignId: 7,
+      body: {
+        mapping_version: 'performance-metrics-v1',
+        provenance: { source_mode: 'csv_xlsx', file_hash: 'c'.repeat(64) },
+        column_mapping: {
+          content_url: '视频链接',
+          observed_at: '数据更新时间',
+          views: '播放量',
+          likes: '点赞数',
+          comments: '评论数'
+        },
+        rows: [{
+          source_row_number: 2,
+          视频链接: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+          数据更新时间: '2026-09-02T12:00:00Z',
+          播放量: 1250,
+          点赞数: 88,
+          评论数: 12
+        }]
+      }
+    });
+
+    assert.equal(replayed.accepted_count, 0);
+    assert.equal(replayed.duplicate_count, 1);
+    assert.equal(replayed.rejected_count, 0);
     assert.equal(
       db.prepare('SELECT COUNT(*) AS count FROM performance_metric_observations').get().count,
       1
