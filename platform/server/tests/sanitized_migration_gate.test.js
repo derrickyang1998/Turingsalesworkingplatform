@@ -1075,7 +1075,7 @@ function compactSqliteClone(sourcePath, outputPath, mutate, options = {}) {
   return outputPath;
 }
 
-test('manifest declares exact managed v1 as primary and keeps isolated v6 through v13 profiles', () => {
+test('manifest declares exact managed v1 as primary and keeps isolated v6 through v14 profiles', () => {
   const v1Fixture = migratedFixture('manifest-v1-primary', 1);
   const v6Fixture = migratedFixture('manifest-v6-isolated', 6);
   const v7Fixture = migratedFixture('manifest-v7-isolated', 7);
@@ -1085,12 +1085,13 @@ test('manifest declares exact managed v1 as primary and keeps isolated v6 throug
   const v11Fixture = migratedFixture('manifest-v11-isolated', 11);
   const v12Fixture = migratedFixture('manifest-v12-isolated', 12);
   const v13Fixture = migratedFixture('manifest-v13-isolated', 13);
+  const v14Fixture = migratedFixture('manifest-v14-isolated', 14);
   try {
     assert.equal(manifest.schemaVersion, 1);
-    assert.deepEqual(manifest.exactProfiles.map((profile) => profile.schemaVersion), [6, 7, 8, 9, 10, 11, 12, 13]);
+    assert.deepEqual(manifest.exactProfiles.map((profile) => profile.schemaVersion), [6, 7, 8, 9, 10, 11, 12, 13, 14]);
     assert.equal(
       manifest.categories['sensitive-number'],
-      'run-randomized bounded-domain bijection preserving null/equality/cardinality and SQLite storage type'
+      'deterministic rank bucket preserving null/equality/cardinality'
     );
 
     const v1Profile = sanitizer._testing.manifestProfileForVersion(manifest, 1);
@@ -1102,6 +1103,7 @@ test('manifest declares exact managed v1 as primary and keeps isolated v6 throug
     const v11Profile = sanitizer._testing.manifestProfileForVersion(manifest, 11);
     const v12Profile = sanitizer._testing.manifestProfileForVersion(manifest, 12);
     const v13Profile = sanitizer._testing.manifestProfileForVersion(manifest, 13);
+    const v14Profile = sanitizer._testing.manifestProfileForVersion(manifest, 14);
     assert.equal(v1Profile.schemaVersion, 1);
     assert.equal(v6Profile.schemaVersion, 6);
     assert.equal(v7Profile.schemaVersion, 7);
@@ -1111,6 +1113,7 @@ test('manifest declares exact managed v1 as primary and keeps isolated v6 throug
     assert.equal(v11Profile.schemaVersion, 11);
     assert.equal(v12Profile.schemaVersion, 12);
     assert.equal(v13Profile.schemaVersion, 13);
+    assert.equal(v14Profile.schemaVersion, 14);
     assert.equal(v1Profile.objects.length, sanitizer.actualInventory(v1Fixture.db).length);
     assert.equal(v6Profile.objects.length, sanitizer.actualInventory(v6Fixture.db).length);
     assert.equal(v7Profile.objects.length, sanitizer.actualInventory(v7Fixture.db).length);
@@ -1120,6 +1123,7 @@ test('manifest declares exact managed v1 as primary and keeps isolated v6 throug
     assert.equal(v11Profile.objects.length, sanitizer.actualInventory(v11Fixture.db).length);
     assert.equal(v12Profile.objects.length, sanitizer.actualInventory(v12Fixture.db).length);
     assert.equal(v13Profile.objects.length, sanitizer.actualInventory(v13Fixture.db).length);
+    assert.equal(v14Profile.objects.length, sanitizer.actualInventory(v14Fixture.db).length);
     for (const profile of [v1Profile, v6Profile, v7Profile, v8Profile]) {
       assert.equal(profile.jsonPolicy.preserveLeafTypes, true);
       assert.equal(
@@ -1141,6 +1145,7 @@ test('manifest declares exact managed v1 as primary and keeps isolated v6 throug
     assert.equal(v11Profile.semanticPolicies.structuralColumns.validatorVersion, 'tm-structural-policy-v6-performance-feishu-connection');
     assert.equal(v12Profile.semanticPolicies.structuralColumns.validatorVersion, 'tm-structural-policy-v7-performance-ai-review-audit');
     assert.equal(v13Profile.semanticPolicies.structuralColumns.validatorVersion, 'tm-structural-policy-v8-customer-report-snapshot');
+    assert.equal(v14Profile.semanticPolicies.structuralColumns.validatorVersion, 'tm-structural-policy-v9-customer-report-ppt-artifact');
     assert.doesNotThrow(() => sanitizer.validateManifest(manifest, v1Fixture.db));
     assert.doesNotThrow(() => sanitizer.validateManifest(manifest, v6Fixture.db));
     assert.doesNotThrow(() => sanitizer.validateManifest(manifest, v7Fixture.db));
@@ -1150,6 +1155,7 @@ test('manifest declares exact managed v1 as primary and keeps isolated v6 throug
     assert.doesNotThrow(() => sanitizer.validateManifest(manifest, v11Fixture.db));
     assert.doesNotThrow(() => sanitizer.validateManifest(manifest, v12Fixture.db));
     assert.doesNotThrow(() => sanitizer.validateManifest(manifest, v13Fixture.db));
+    assert.doesNotThrow(() => sanitizer.validateManifest(manifest, v14Fixture.db));
   } finally {
     closeAndRemove(v1Fixture);
     closeAndRemove(v6Fixture);
@@ -1160,6 +1166,7 @@ test('manifest declares exact managed v1 as primary and keeps isolated v6 throug
     closeAndRemove(v11Fixture);
     closeAndRemove(v12Fixture);
     closeAndRemove(v13Fixture);
+    closeAndRemove(v14Fixture);
   }
 });
 
@@ -1417,6 +1424,95 @@ test('v12 sanitizer preserves the audit fingerprint link between AI review audit
       assert.ok(fingerprints);
       assert.equal(fingerprints.audit_fingerprint, fingerprints.request_fingerprint);
       assert.notEqual(fingerprints.audit_fingerprint, auditFingerprint);
+    } finally {
+      output.close();
+    }
+  } finally {
+    closeAndRemove(fixture);
+  }
+});
+
+test('v14 sanitizer preserves customer report snapshot lineage for retained PPT artifacts', () => {
+  const fixture = migratedFixture('customer-report-ppt-lineage', 14);
+  try {
+    const populated = populateCriticalReviewFixture(fixture);
+    const sourceReviewContentSha = sha256Text('private customer report review content');
+    const sourceReviewSnapshotHash = sha256Text('private customer report review snapshot');
+    const currentEvidenceSnapshotHash = sha256Text('private customer report current evidence');
+    const requestFingerprint = sha256Text('private customer report request');
+    const reportSha = sha256Text('private customer report payload');
+    const artifactCacheKey = sha256Text('private customer report PPT cache key');
+    const artifactSha = sha256Text('private customer report PPT artifact');
+    const snapshotId = 881030;
+    const artifactId = 881031;
+
+    fixture.db.prepare(`
+      INSERT INTO customer_report_snapshots (
+        id,org_id,campaign_id,created_by,source_knowledge_entry_id,
+        report_contract_version,redaction_policy_version,selected_metric,
+        source_review_content_sha256,source_review_snapshot_hash,current_evidence_snapshot_hash,
+        request_fingerprint,report_sha256,report_json,created_at
+      ) VALUES (
+        ?,?,?,?,?,'customer_safe_v1','customer-safe-v1','private_metric',
+        ?,?,?,?,?,'{"summary":"Private customer report","score":42}',
+        '2026-09-07 12:00:00'
+      )
+    `).run(
+      snapshotId,
+      populated.orgId,
+      populated.campaignId,
+      populated.userId,
+      populated.entryId,
+      sourceReviewContentSha,
+      sourceReviewSnapshotHash,
+      currentEvidenceSnapshotHash,
+      requestFingerprint,
+      reportSha
+    );
+    fixture.db.prepare(`
+      INSERT INTO customer_report_ppt_artifacts (
+        id,org_id,campaign_id,snapshot_id,created_by,
+        report_contract_version,redaction_policy_version,ppt_contract_version,
+        snapshot_report_sha256,artifact_cache_key,artifact_sha256,artifact_bytes,created_at
+      ) VALUES (
+        ?,?,?,?,?,'customer_safe_v1','customer-safe-v1','customer-report-ppt-v1',
+        ?,?,?,40052,'2026-09-07 12:01:00'
+      )
+    `).run(
+      artifactId,
+      populated.orgId,
+      populated.campaignId,
+      snapshotId,
+      populated.userId,
+      reportSha,
+      artifactCacheKey,
+      artifactSha
+    );
+    fixture.db.close();
+
+    const outputPath = path.join(fixture.root, 'sanitized.db');
+    sanitizer.sanitizeProductionShape({ sourcePath: fixture.dbPath, outputPath });
+    const output = new Database(outputPath, { readonly: true, fileMustExist: true });
+    try {
+      const row = output.prepare(`
+        SELECT snapshot.report_sha256 AS report_sha256,
+          artifact.snapshot_report_sha256 AS snapshot_report_sha256,
+          artifact.artifact_cache_key AS artifact_cache_key,
+          artifact.artifact_sha256 AS artifact_sha256,
+          artifact.artifact_bytes AS artifact_bytes
+        FROM customer_report_ppt_artifacts artifact
+        JOIN customer_report_snapshots snapshot ON snapshot.id=artifact.snapshot_id
+        WHERE artifact.id=?
+      `).get(artifactId);
+      assert.ok(row);
+      assert.equal(row.snapshot_report_sha256, row.report_sha256);
+      assert.match(row.artifact_cache_key, /^[0-9a-f]{64}$/);
+      assert.match(row.artifact_sha256, /^[0-9a-f]{64}$/);
+      assert.notEqual(row.artifact_cache_key, artifactCacheKey);
+      assert.notEqual(row.artifact_sha256, artifactSha);
+      assert.equal(row.artifact_bytes, 40052);
+      assert.equal(output.pragma('integrity_check', { simple: true }), 'ok');
+      assert.deepEqual(output.pragma('foreign_key_check'), []);
     } finally {
       output.close();
     }
@@ -2021,7 +2117,7 @@ test('secret-null fails closed for non-null data and malformed or partial output
   closeAndRemove(fixture);
 });
 
-test('campaign migration gate sanitizes populated managed v1 and verifies two exact restores through v13', () => {
+test('campaign migration gate sanitizes populated managed v1 and verifies two exact restores through v14', () => {
   const fixture = migratedFixture('twice', 1);
   const populated = populateManagedV1GateFixture(fixture);
   const sourceClassification = migrationService.classifyDatabase(fixture.db, {
@@ -2038,7 +2134,7 @@ test('campaign migration gate sanitizes populated managed v1 and verifies two ex
   assert.equal(report.format, 'tm-campaign-migration-gate-v1');
   assert.equal(report.runs, 2);
   assert.equal(report.sourceVersion, 1);
-  assert.equal(report.targetVersion, 13);
+  assert.equal(report.targetVersion, 14);
   assert.equal(report.preMigrationRestoreVerified, true);
   assert.equal(report.legacyPreservationVerified, true);
   const sanitizedPath = path.join(fixture.root, 'stage-preservation-sanitized.db');

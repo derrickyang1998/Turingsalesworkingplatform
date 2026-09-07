@@ -53,6 +53,8 @@ const SAFE_SOURCE_MODE_LABELS = Object.freeze({
 const UNSAFE_TEXT_PATTERNS = Object.freeze([
   /(?:https?|ftp):\/\//i,
   /\bwww\./i,
+  /\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:[a-z]{2,63}|xn--[a-z0-9-]{2,59})(?::\d{1,5})?(?:[/?#][^\s]*)?/i,
+  /\b(?:localhost|(?:\d{1,3}\.){3}\d{1,3})(?::\d{1,5})?(?:[/?#][^\s]*)?/i,
   /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i,
   /(?:\+?\d[\d\s().-]{6,}\d)/,
   /[$€£¥]/,
@@ -795,7 +797,32 @@ function createCustomerReportSnapshotService(db, options = {}) {
     };
   }
 
-  return Object.freeze({ preview, seal, list, get });
+  function getForDelivery(input) {
+    const context = requireAccess(input && input.user && input.user.id, input && input.campaignId, 'write');
+    const snapshotId = canonicalId(input && input.snapshotId);
+    if (snapshotId === null) {
+      throw customerReportError(400, 'CUSTOMER_REPORT_SNAPSHOT_INVALID', 'Customer report snapshot is invalid.');
+    }
+    const row = db.prepare(`
+      SELECT id,created_at,report_sha256,report_json
+      FROM customer_report_snapshots
+      WHERE id=? AND org_id=? AND campaign_id=?
+      LIMIT 1
+    `).get(snapshotId, context.organizationId, context.campaignId);
+    if (!row) {
+      throw customerReportError(404, 'CUSTOMER_REPORT_SNAPSHOT_NOT_FOUND', 'Customer report snapshot was not found.');
+    }
+    return Object.freeze({
+      context: Object.freeze({
+        userId: context.userId,
+        campaignId: context.campaignId,
+        organizationId: context.organizationId
+      }),
+      snapshot: serializeStoredSnapshot(row)
+    });
+  }
+
+  return Object.freeze({ preview, seal, list, get, getForDelivery });
 }
 
 module.exports = {

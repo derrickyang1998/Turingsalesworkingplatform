@@ -726,10 +726,16 @@ thead th {
   border-bottom: 0;
 }
 
-.tm-performance-customer-report-snapshot-row > div {
+.tm-performance-customer-report-snapshot-summary {
   display: grid;
   gap: 2px;
   min-width: 0;
+}
+
+.tm-performance-customer-report-snapshot-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: var(--tm-space-2);
 }
 
 .tm-performance-customer-report-snapshot-row strong,
@@ -1405,6 +1411,12 @@ thead th {
   .tm-performance-customer-report-actions .btn,
   .tm-performance-customer-report-snapshots-heading .btn,
   .tm-performance-customer-report-snapshot-row .btn {
+    width: 100%;
+  }
+
+  .tm-performance-customer-report-snapshot-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     width: 100%;
   }
 

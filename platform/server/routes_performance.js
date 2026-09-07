@@ -11,6 +11,9 @@ const {
   createCustomerReportSnapshotService
 } = require('./services/customer_report_snapshot_service');
 const {
+  CustomerReportDeliveryServiceError
+} = require('./services/customer_report_delivery_service');
+const {
   PerformanceFeishuConnectionServiceError,
   createPerformanceFeishuConnectionService
 } = require('./services/performance_feishu_connection_service');
@@ -25,7 +28,8 @@ function sendError(request, response, error) {
   const known = error instanceof PerformanceManualServiceError ||
     error instanceof PerformanceFeishuConnectionServiceError ||
     error instanceof PerformanceAiReviewServiceError ||
-    error instanceof CustomerReportSnapshotServiceError;
+    error instanceof CustomerReportSnapshotServiceError ||
+    error instanceof CustomerReportDeliveryServiceError;
   const status = known ? error.statusCode : 500;
   const body = {
     error: known ? error.message : 'Performance request failed.',
@@ -38,6 +42,24 @@ function sendError(request, response, error) {
 
 function sendResult(request, response, payload) {
   return response.json(Object.assign({}, payload, { request_id: requestId(request) }));
+}
+
+function sendPptResult(request, response, result) {
+  for (const [name, value] of Object.entries(result.headers || {})) {
+    response.setHeader(name, value);
+  }
+  return response.status(result.status).sendFile(result.filePath, (error) => {
+    if (!error) return;
+    if (response.headersSent) {
+      response.destroy(error);
+      return;
+    }
+    sendError(request, response, new CustomerReportDeliveryServiceError(
+      503,
+      'CUSTOMER_REPORT_PPT_ARTIFACT_UNAVAILABLE',
+      'The retained customer report PPT could not be delivered safely.'
+    ));
+  });
 }
 
 function authenticatedUserId(request) {
@@ -90,6 +112,10 @@ function registerPerformanceRoutes(app, options = {}) {
     typeof customerReportSnapshotService.get !== 'function'
   ) {
     throw new TypeError('A customer report snapshot service is required.');
+  }
+  const customerReportDeliveryService = options.customerReportDeliveryService;
+  if (!customerReportDeliveryService || typeof customerReportDeliveryService.generate !== 'function') {
+    throw new TypeError('A customer report delivery service is required.');
   }
   const aiLimiter = typeof options.aiLimiter === 'function'
     ? options.aiLimiter
@@ -279,6 +305,19 @@ function registerPerformanceRoutes(app, options = {}) {
         campaignId: request.params.id,
         body: request.body,
         idempotencyKey: requestHeader(request, 'Idempotency-Key'),
+        requestId: requestId(request)
+      }));
+    } catch (error) {
+      return sendError(request, response, error);
+    }
+  });
+
+  app.post('/api/campaigns/:id/performance/customer-report-snapshots/:snapshotId/ppt', options.authMiddleware, (request, response) => {
+    try {
+      return sendPptResult(request, response, customerReportDeliveryService.generate({
+        user: request.user,
+        campaignId: request.params.id,
+        snapshotId: request.params.snapshotId,
         requestId: requestId(request)
       }));
     } catch (error) {

@@ -177,7 +177,7 @@ test('performance dashboard exposes an evidence-bound AI review draft with isola
   assert.match(serverSource, /CAMPAIGN_PERFORMANCE_AI_REVIEW_DRAFT/);
 });
 
-test('performance dashboard exposes a customer-safe preview and immutable snapshot flow', () => {
+test('performance dashboard exposes a customer-safe preview, immutable snapshot, and customer PPT delivery flow', () => {
   for (const id of [
     'performanceCustomerReportTitle',
     'performanceCustomerReportActions',
@@ -194,14 +194,32 @@ test('performance dashboard exposes a customer-safe preview and immutable snapsh
   assert.match(appSource, /var performanceCustomerReportRequestSequence = 0;/);
   assert.match(appSource, /var activePerformanceCustomerReportRequest = null;/);
   assert.match(appSource, /var performanceCustomerReportSealRequestSequence = 0;/);
+  assert.match(appSource, /var performanceCustomerReportPptDownloadGeneration = 0;/);
   assert.match(appSource, /function invalidatePerformanceCustomerReportPreview\(/);
+  assert.match(
+    appSource,
+    /function invalidatePerformanceCustomerReportPreview\([\s\S]*?performanceCustomerReportPptDownloadGeneration \+= 1;[\s\S]*?performanceCustomerReportPptDownloads = Object\.create\(null\);/
+  );
   assert.match(appSource, /async function generatePerformanceCustomerReportPreview\(\)/);
   assert.match(appSource, /async function sealPerformanceCustomerReportSnapshot\(\)/);
   assert.match(appSource, /async function loadPerformanceCustomerReportSnapshots\(\)/);
+  assert.match(appSource, /async function downloadPerformanceCustomerReportPpt\(snapshotId\)/);
+  assert.match(
+    appSource,
+    /function performanceCustomerReportPptDownloadIsCurrent\([\s\S]*?context\.generation === performanceCustomerReportPptDownloadGeneration/
+  );
+  assert.match(
+    appSource,
+    /async function downloadPerformanceCustomerReportPpt\([\s\S]*?generation: performanceCustomerReportPptDownloadGeneration/
+  );
   assert.match(appSource, /function renderPerformanceCustomerReportPreview\(/);
   assert.match(appSource, /function renderPerformanceCustomerReportSnapshots\(/);
   assert.match(appSource, /performance\/customer-report-preview/);
   assert.match(appSource, /performance\/customer-report-snapshots/);
+  assert.match(appSource, /customer-report-snapshots\/.*\/ppt/);
+  assert.match(appSource, /onclick=\\"downloadPerformanceCustomerReportPpt\(/);
+  assert.match(appSource, /response\.blob\(\)/);
+  assert.match(appSource, /dlFile\('customer-report-'/);
   assert.match(appSource, /expected_evidence_snapshot_hash/);
   assert.match(appSource, /'Idempotency-Key': performanceCustomerReportSealRetry\.idempotencyKey/);
   assert.match(
@@ -212,4 +230,5 @@ test('performance dashboard exposes a customer-safe preview and immutable snapsh
   assert.match(componentStyles, /\.tm-performance-customer-report-preview/);
   assert.match(componentStyles, /\.tm-performance-customer-report-snapshots/);
   assert.match(serverSource, /CAMPAIGN_PERFORMANCE_CUSTOMER_REPORT_SNAPSHOT_CREATE/);
+  assert.match(serverSource, /CAMPAIGN_PERFORMANCE_CUSTOMER_REPORT_PPT_GENERATE/);
 });

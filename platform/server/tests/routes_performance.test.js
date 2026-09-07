@@ -12,6 +12,7 @@ const {
 } = require('../services/performance_manual_service');
 const { PerformanceFeishuConnectionServiceError } = require('../services/performance_feishu_connection_service');
 const { CustomerReportSnapshotServiceError } = require('../services/customer_report_snapshot_service');
+const { CustomerReportDeliveryServiceError } = require('../services/customer_report_delivery_service');
 const campaignContract = require('../contracts/campaign_contract');
 
 function createResponse() {
@@ -22,7 +23,9 @@ function createResponse() {
     status(value) { this.statusCode = value; return this; },
     json(value) { this.body = value; return this; },
     setHeader(key, value) { this.headers[key] = value; return this; },
-    send(value) { this.body = value; return this; }
+    send(value) { this.body = value; return this; },
+    sendFile(filePath, callback) { this.filePath = filePath; if (callback) callback(); return this; },
+    destroy(error) { this.destroyed = error; }
   };
 }
 
@@ -151,12 +154,27 @@ function createFixture() {
       };
     }
   };
+  const customerReportDeliveryService = {
+    generate(input) {
+      calls.push(['customer-report-ppt', input]);
+      return {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+          'Content-Disposition': 'attachment; filename="customer-report-81.pptx"'
+        },
+        filePath: '/private/customer-report-81.pptx',
+        replayed: false
+      };
+    }
+  };
   registerPerformanceRoutes(app, {
     authMiddleware(_request, _response, next) { next(); },
     service,
     feishuConnectionService,
     aiReviewService,
-    customerReportSnapshotService
+    customerReportSnapshotService,
+    customerReportDeliveryService
   });
   return {
     routes,
@@ -164,7 +182,8 @@ function createFixture() {
     service,
     feishuConnectionService,
     aiReviewService,
-    customerReportSnapshotService
+    customerReportSnapshotService,
+    customerReportDeliveryService
   };
 }
 
@@ -221,6 +240,7 @@ test('registers campaign-scoped performance endpoints and forwards authenticated
     'POST /api/campaigns/:id/performance/contents/:contentId/manual-inputs',
     'POST /api/campaigns/:id/performance/customer-report-preview',
     'POST /api/campaigns/:id/performance/customer-report-snapshots',
+    'POST /api/campaigns/:id/performance/customer-report-snapshots/:snapshotId/ppt',
     'POST /api/campaigns/:id/performance/feishu-connection',
     'POST /api/campaigns/:id/performance/feishu-connection/approve',
     'POST /api/campaigns/:id/performance/import'
@@ -243,8 +263,8 @@ test('registers campaign-scoped performance endpoints and forwards authenticated
   }]);
 });
 
-test('routes customer report preview and immutable snapshots through protected campaign contracts', () => {
-  const { routes, calls, customerReportSnapshotService } = createFixture();
+test('routes customer report preview, immutable snapshots, and retained PPT delivery through protected campaign contracts', () => {
+  const { routes, calls, customerReportSnapshotService, customerReportDeliveryService } = createFixture();
   const body = {
     top_metric: 'views',
     title: 'Customer performance review',
@@ -312,11 +332,34 @@ test('routes customer report preview and immutable snapshots through protected c
     snapshotId: '81'
   }]);
 
+  const delivered = invoke(
+    routes.get('POST /api/campaigns/:id/performance/customer-report-snapshots/:snapshotId/ppt'),
+    {
+      user: previewRequest.user,
+      params: { id: '7', snapshotId: '81' },
+      body: {},
+      requestId: 'customer-report-ppt-request'
+    }
+  );
+  assert.equal(delivered.statusCode, 200);
+  assert.equal(delivered.filePath, '/private/customer-report-81.pptx');
+  assert.equal(
+    delivered.headers['Content-Type'],
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+  );
+  assert.deepEqual(calls[4], ['customer-report-ppt', {
+    user: previewRequest.user,
+    campaignId: '7',
+    snapshotId: '81',
+    requestId: 'customer-report-ppt-request'
+  }]);
+
   for (const [name, id, method, pathTemplate, mediaKind] of [
     ['CAMPAIGN_PERFORMANCE_CUSTOMER_REPORT_PREVIEW', 'campaign.performance.customer-report-preview', 'POST', '/api/campaigns/:id/performance/customer-report-preview', campaignContract.MEDIA_KINDS.JSON],
     ['CAMPAIGN_PERFORMANCE_CUSTOMER_REPORT_SNAPSHOT_CREATE', 'campaign.performance.customer-report-snapshot.create', 'POST', '/api/campaigns/:id/performance/customer-report-snapshots', campaignContract.MEDIA_KINDS.JSON],
     ['CAMPAIGN_PERFORMANCE_CUSTOMER_REPORT_SNAPSHOT_LIST', 'campaign.performance.customer-report-snapshot.list', 'GET', '/api/campaigns/:id/performance/customer-report-snapshots', campaignContract.MEDIA_KINDS.EMPTY],
-    ['CAMPAIGN_PERFORMANCE_CUSTOMER_REPORT_SNAPSHOT_DETAIL', 'campaign.performance.customer-report-snapshot.detail', 'GET', '/api/campaigns/:id/performance/customer-report-snapshots/:snapshotId', campaignContract.MEDIA_KINDS.EMPTY]
+    ['CAMPAIGN_PERFORMANCE_CUSTOMER_REPORT_SNAPSHOT_DETAIL', 'campaign.performance.customer-report-snapshot.detail', 'GET', '/api/campaigns/:id/performance/customer-report-snapshots/:snapshotId', campaignContract.MEDIA_KINDS.EMPTY],
+    ['CAMPAIGN_PERFORMANCE_CUSTOMER_REPORT_PPT_GENERATE', 'campaign.performance.customer-report-ppt.generate', 'POST', '/api/campaigns/:id/performance/customer-report-snapshots/:snapshotId/ppt', campaignContract.MEDIA_KINDS.JSON]
   ]) {
     const policy = campaignContract.REQUEST_POLICIES[name];
     assert.ok(policy);
@@ -341,9 +384,30 @@ test('routes customer report preview and immutable snapshots through protected c
   assert.equal(stale.body.code, 'CUSTOMER_REPORT_STALE_EVIDENCE');
   assert.equal(stale.body.request_id, 'customer-report-preview-request');
 
+  customerReportDeliveryService.generate = () => {
+    throw new CustomerReportDeliveryServiceError(
+      403,
+      'CUSTOMER_REPORT_PPT_FORBIDDEN',
+      'Customer report PPT access is forbidden.'
+    );
+  };
+  const forbidden = invoke(
+    routes.get('POST /api/campaigns/:id/performance/customer-report-snapshots/:snapshotId/ppt'),
+    {
+      user: { id: 10 },
+      params: { id: '7', snapshotId: '81' },
+      body: {},
+      requestId: 'customer-report-ppt-forbidden'
+    }
+  );
+  assert.equal(forbidden.statusCode, 403);
+  assert.equal(forbidden.body.code, 'CUSTOMER_REPORT_PPT_FORBIDDEN');
+  assert.equal(forbidden.body.request_id, 'customer-report-ppt-forbidden');
+
   const serverSource = fs.readFileSync(path.resolve(__dirname, '..', 'server.js'), 'utf8');
   assert.match(serverSource, /'CAMPAIGN_PERFORMANCE_CUSTOMER_REPORT_PREVIEW'/);
   assert.match(serverSource, /'CAMPAIGN_PERFORMANCE_CUSTOMER_REPORT_SNAPSHOT_CREATE'/);
+  assert.match(serverSource, /'CAMPAIGN_PERFORMANCE_CUSTOMER_REPORT_PPT_GENERATE'/);
 });
 
 test('confirms a campaign-scoped AI review draft through the protected JSON request contract', async () => {

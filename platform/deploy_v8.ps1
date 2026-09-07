@@ -33,10 +33,10 @@ $EXPECTED_PPT_SHA256 = "f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57
 $TRUSTED_SOURCE_GATE_RELATIVE_PATH = "server\scripts\trusted_production_source_gate.js"
 $TRUSTED_SOURCE_MANIFEST_RELATIVE_PATH = "server\scripts\trusted_production_source_manifest.json"
 $TRUSTED_RUNTIME_CONFIG_RELATIVE_PATH = "server\config\runtime_config.js"
-$EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "5038e803c7109e7ac01e6fa960b9614ae3ce955b86c3f1c8fe11c723158773c1"
-$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "3096d516f15a153e469cf63d14931d1b4ed213f7daf1216e102daed2981a486e"
+$EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "63210b31722957f7718214ce532765b6bd2fd728ec9d51fc1b617d57575c8cfd"
+$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "a888f612ce744664f75fa59e513a80073773e13e0812b298ebce4ec2268d1543"
 $EXPECTED_TRUSTED_RUNTIME_CONFIG_SHA256 = "76d43d3e811c6fa8daae987cc9eb2fff2dc8a8095f84b1cd309e4e214df94dcb"
-$EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256 = "92b0cf69d8f56093ff807dff8b9773842ec5aa3b777e7afafa741eb75470f6bd"
+$EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256 = "513d7841956de5678fa6a85ffb70c649f5820881b651d811c3b30e95e76da2a2"
 $EXPECTED_TRUSTED_PARSER_VERIFIER_SHA256 = "7f9efaac02675b21e025891a400474cc7481c1adaf58c88bd8b356d5276f2eaa"
 $EXPECTED_TRUSTED_PUBLIC_GUARD_SHA256 = "d45fe8fcc01587aaa0e73eccfb9714c27801e232cb6c0effd6daedb703316d66"
 $EXPECTED_TRUSTED_MIGRATION_CLEANUP_HELPER_SHA256 = "d5f2befa902522dd9de3e9dd2397a99ee5e78ab1a1c6e526a27f14bb2829e1fa"
@@ -113,6 +113,7 @@ $FILES = @(
     "server\migrations\011_performance_feishu_connection_config.js",
     "server\migrations\012_performance_ai_review_audit.js",
     "server\migrations\013_customer_report_snapshot.js",
+    "server\migrations\014_customer_report_ppt_artifact.js",
     "server\migrations\baselines\legacy_v1.js",
     "server\migrations\engines\v1.js",
     "server\migrations\vendor\bcryptjs_v3_0_3.js",
@@ -122,6 +123,7 @@ $FILES = @(
     "server\extract_xlsx_text.py",
     "server\feishu_client.js",
     "server\generate_ppt.py",
+    "server\generate_customer_report_ppt.py",
     "server\ocr_document_text.py",
     "server\parser-runtime\package.json",
     "server\parser-runtime\package-lock.json",
@@ -152,6 +154,7 @@ $FILES = @(
     "server\services\campaign_workflow_service.js",
     "server\services\collaboration_resource_contract.js",
     "server\services\customer_report_snapshot_service.js",
+    "server\services\customer_report_delivery_service.js",
     "server\services\credential_rotation_service.js",
     "server\services\crm_access_service.js",
     "server\services\crm_contract.js",
@@ -246,6 +249,8 @@ $FILES = @(
     "server\tests\customer_mutation_ui.test.js",
     "server\tests\customer_report_snapshot_migration.test.js",
     "server\tests\customer_report_snapshot_service.test.js",
+    "server\tests\customer_report_delivery_service.test.js",
+    "server\tests\customer_report_ppt_artifact_migration.test.js",
     "server\tests\customer_workspace_ui.test.js",
     "server\tests\deployment_source_contract.test.js",
     "server\tests\deployment_source_trust.test.js",

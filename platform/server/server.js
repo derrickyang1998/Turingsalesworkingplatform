@@ -67,6 +67,7 @@ const {
 const campaignContract = require('./contracts/campaign_contract');
 const { createPptArtifactStore } = require('./services/ppt_artifact_store');
 const { createCampaignPptService } = require('./services/campaign_ppt_service');
+const { createCustomerReportDeliveryService } = require('./services/customer_report_delivery_service');
 const {
   createCampaignCollaborationService
 } = require('./services/campaign_collaboration_service');
@@ -97,6 +98,12 @@ const TOKEN_EXPIRY = '24h';
 const TMP_DIR = path.resolve(process.env.TMP_DIR || path.join(__dirname, '..', 'tmp'));
 const PPT_CACHE_DIR = path.resolve(
   process.env.PPT_CACHE_DIR || path.join(__dirname, '..', 'ppt-cache')
+);
+const CUSTOMER_REPORT_PPT_CACHE_DIR = path.resolve(
+  process.env.CUSTOMER_REPORT_PPT_CACHE_DIR || path.join(PPT_CACHE_DIR, 'customer-reports')
+);
+const CUSTOMER_REPORT_PPT_TMP_DIR = path.resolve(
+  process.env.CUSTOMER_REPORT_PPT_TMP_DIR || path.join(TMP_DIR, 'customer-report-ppt')
 );
 const UPLOAD_SANDBOX_SPOOL_ROOT = path.resolve(
   process.env.UPLOAD_SANDBOX_SPOOL_ROOT || '/var/lib/turingmarket-parser/jobs'
@@ -170,9 +177,39 @@ const performanceAiReviewService = createPerformanceAiReviewService(db, {
 const customerReportSnapshotService = createCustomerReportSnapshotService(db, {
   performanceService: performanceManualService
 });
+const customerReportDeliveryService = createCustomerReportDeliveryService(db, {
+  snapshotService: customerReportSnapshotService,
+  artifactStore: createPptArtifactStore({ rootDir: CUSTOMER_REPORT_PPT_CACHE_DIR }),
+  tempDir: CUSTOMER_REPORT_PPT_TMP_DIR,
+  runPptGenerator({ report, outputPath }) {
+    const workDir = path.dirname(outputPath);
+    const dataPath = path.join(workDir, 'customer-report-payload.json');
+    fs.writeFileSync(dataPath, JSON.stringify(report), {
+      encoding: 'utf8',
+      mode: 0o600,
+      flag: 'wx'
+    });
+    try {
+      const python = process.env.PYTHON_BIN || (process.platform === 'win32' ? 'python' : 'python3');
+      childProcess.execFileSync(
+        python,
+        [path.join(__dirname, 'generate_customer_report_ppt.py'), dataPath, outputPath],
+        {
+          timeout: 60_000,
+          cwd: __dirname,
+          stdio: 'pipe',
+          env: runtimeConfig.pythonChildEnvironment()
+        }
+      );
+    } finally {
+      fs.rmSync(dataPath, { force: true });
+    }
+  }
+});
 const performanceFeishuConnectionService = createPerformanceFeishuConnectionService(db);
 const campaignPptBridgeHandler = createCampaignPptBridgeHandler(campaignPptService);
 let campaignPptJanitor = null;
+let customerReportPptJanitor = null;
 let uploadSandboxService = null;
 let phase4RequestPipeline = null;
 let uploadSandboxReadiness = null;
@@ -203,6 +240,7 @@ const phase4PolicyNames = [
   'CAMPAIGN_PERFORMANCE_CUSTOMER_REPORT_SNAPSHOT_CREATE',
   'CAMPAIGN_PERFORMANCE_CUSTOMER_REPORT_SNAPSHOT_LIST',
   'CAMPAIGN_PERFORMANCE_CUSTOMER_REPORT_SNAPSHOT_DETAIL',
+  'CAMPAIGN_PERFORMANCE_CUSTOMER_REPORT_PPT_GENERATE',
   'CAMPAIGN_PERFORMANCE_INTEGRATION_PREVIEW',
   'CAMPAIGN_PERFORMANCE_FEISHU_CONNECTION_GET',
   'CAMPAIGN_PERFORMANCE_CONTENT_CREATE',
@@ -1540,6 +1578,7 @@ registerPerformanceRoutes(app, {
   feishuConnectionService: performanceFeishuConnectionService,
   aiReviewService: performanceAiReviewService,
   customerReportSnapshotService,
+  customerReportDeliveryService,
   aiLimiter,
   aiQuotaGuard
 });
@@ -2345,12 +2384,20 @@ function stopCampaignPptJanitor() {
   if (campaignPptJanitor) clearInterval(campaignPptJanitor);
 }
 
+let customerReportPptJanitorStopped = false;
+function stopCustomerReportPptJanitor() {
+  if (customerReportPptJanitorStopped) return;
+  customerReportPptJanitorStopped = true;
+  if (customerReportPptJanitor) clearInterval(customerReportPptJanitor);
+}
+
 let httpServer = null;
 let shutdownStarted = false;
 function shutdownServer(signal) {
   if (shutdownStarted) return;
   shutdownStarted = true;
   stopCampaignPptJanitor();
+  stopCustomerReportPptJanitor();
   if (!httpServer) {
     process.exit(1);
     return;
@@ -2452,6 +2499,18 @@ async function bootstrapServer() {
     campaignPptJanitor.unref();
   }
 
+  customerReportDeliveryService.runArtifactJanitor();
+  customerReportPptJanitor = setInterval(() => {
+    try {
+      customerReportDeliveryService.runArtifactJanitor();
+    } catch (error) {
+      console.error('Customer report PPT artifact janitor tick failed', error);
+    }
+  }, 60 * 60 * 1000);
+  if (customerReportPptJanitor && typeof customerReportPptJanitor.unref === 'function') {
+    customerReportPptJanitor.unref();
+  }
+
   const workflowEngine = require('./workflow_engine');
   workflowEngine.initEngine();
   const { startCampaignWorkflowDispatcher } = require('./services/campaign_workflow_service');
@@ -2460,13 +2519,17 @@ async function bootstrapServer() {
   httpServer = app.listen(...SERVER_LISTEN_ARGS, () => {
     console.log(`TuringMarket server running on http://localhost:${PORT}`);
   });
-  httpServer.once('close', stopCampaignPptJanitor);
+  httpServer.once('close', () => {
+    stopCampaignPptJanitor();
+    stopCustomerReportPptJanitor();
+  });
   process.once('SIGTERM', () => shutdownServer('SIGTERM'));
   process.once('SIGINT', () => shutdownServer('SIGINT'));
 }
 
 bootstrapServer().catch((error) => {
   stopCampaignPptJanitor();
+  stopCustomerReportPptJanitor();
   console.error('Server startup failed', error);
   process.exitCode = 1;
 });

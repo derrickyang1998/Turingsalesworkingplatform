@@ -91,6 +91,13 @@ const db = migrationService.openMigratedDatabase(DB_PATH, {
       sourcePath: 'migrations/013_customer_report_snapshot.js',
       engineVersion: 1,
       dependencies: ['migrations/vendor/bcryptjs_v3_0_3.js']
+    },
+    {
+      version: 14,
+      name: '014_customer_report_ppt_artifact',
+      sourcePath: 'migrations/014_customer_report_ppt_artifact.js',
+      engineVersion: 1,
+      dependencies: ['migrations/vendor/bcryptjs_v3_0_3.js']
     }
   ]
 });

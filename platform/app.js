@@ -6637,6 +6637,8 @@ var performanceCustomerReportSnapshotListRequestSequence = 0;
 var activePerformanceCustomerReportSnapshotListRequest = null;
 var performanceCustomerReportSnapshotDetailRequestSequence = 0;
 var activePerformanceCustomerReportSnapshotDetailRequest = null;
+var performanceCustomerReportPptDownloadGeneration = 0;
+var performanceCustomerReportPptDownloads = Object.create(null);
 var performanceIntegrationPreview = null;
 var performanceIntegrationRequestSequence = 0;
 var performanceFeishuConnection = null;
@@ -8046,6 +8048,8 @@ function invalidatePerformanceCustomerReportPreview(message) {
     activePerformanceCustomerReportSnapshotDetailRequest.controller.abort();
   }
   activePerformanceCustomerReportSnapshotDetailRequest = null;
+  performanceCustomerReportPptDownloadGeneration += 1;
+  performanceCustomerReportPptDownloads = Object.create(null);
   performanceCustomerReportPreview = null;
   performanceCustomerReportSealRetry = { fingerprint: '', idempotencyKey: '' };
   renderPerformanceCustomerReportPreview(null);
@@ -8295,13 +8299,96 @@ function renderPerformanceCustomerReportSnapshots(snapshots, options) {
   }
   container.innerHTML = rows.map(function(item) {
     var snapshot = item.data;
-    return '<div class="tm-performance-customer-report-snapshot-row"><div><strong>'
+    var downloadKey = [AUTH_GENERATION, getPerformanceCampaignId(), item.id].join(':');
+    var pptBusy = !!performanceCustomerReportPptDownloads[downloadKey];
+    return '<div class="tm-performance-customer-report-snapshot-row"><div class="tm-performance-customer-report-snapshot-summary"><strong>'
       + esc(snapshot.title || '客户复盘') + '</strong><span>' + esc(performanceDate(snapshot.created_at))
       + ' · ' + esc(performanceCustomerReportMetricLabel(snapshot.selected_metric)) + ' · '
       + esc(performanceAiReviewShortHash(snapshot.report_sha256)) + '</span></div>'
-      + '<button class="btn btn-outline btn-sm" type="button" onclick="loadPerformanceCustomerReportSnapshotDetail(' + item.id + ')">查看</button></div>';
+      + '<div class="tm-performance-customer-report-snapshot-actions"><button class="btn btn-outline btn-sm" type="button" onclick="loadPerformanceCustomerReportSnapshotDetail(' + item.id + ')">查看</button>'
+      + "<button class=\"btn btn-outline btn-sm\" type=\"button\" data-customer-report-ppt-id=\"" + item.id
+      + "\" onclick=\"downloadPerformanceCustomerReportPpt(" + item.id + ")\"" + (pptBusy ? ' disabled aria-busy="true"' : '') + ">"
+      + (pptBusy ? '正在准备...' : '客户版 PPT') + '</button></div></div>';
   }).join('');
   if (window.TMAccessibility) window.TMAccessibility.refresh();
+}
+
+function setPerformanceCustomerReportPptBusy(snapshotId, busy) {
+  var normalizedSnapshotId = performancePositiveId(snapshotId);
+  if (normalizedSnapshotId === null || typeof document === 'undefined') return;
+  var selector = '[data-customer-report-ppt-id="' + normalizedSnapshotId + '"]';
+  Array.prototype.forEach.call(document.querySelectorAll(selector), function(button) {
+    button.disabled = !!busy;
+    button.textContent = busy ? '正在准备...' : '客户版 PPT';
+    button.setAttribute('aria-busy', busy ? 'true' : 'false');
+  });
+}
+
+function performanceCustomerReportPptDownloadIsCurrent(context) {
+  return Boolean(
+    context &&
+    context.authGeneration === AUTH_GENERATION &&
+    context.generation === performanceCustomerReportPptDownloadGeneration &&
+    context.campaignId === getPerformanceCampaignId() &&
+    context.snapshotId === performancePositiveId(context.snapshotId)
+  );
+}
+
+async function downloadPerformanceCustomerReportPpt(snapshotId) {
+  var campaignId = getPerformanceCampaignId();
+  var normalizedSnapshotId = performancePositiveId(snapshotId);
+  if (campaignId === null || normalizedSnapshotId === null) {
+    toast('请先选择推广活动。', 'error');
+    return null;
+  }
+  var key = [AUTH_GENERATION, campaignId, normalizedSnapshotId].join(':');
+  if (performanceCustomerReportPptDownloads[key]) return performanceCustomerReportPptDownloads[key];
+  var context = {
+    authGeneration: AUTH_GENERATION,
+    generation: performanceCustomerReportPptDownloadGeneration,
+    campaignId: campaignId,
+    snapshotId: normalizedSnapshotId
+  };
+  setPerformanceCustomerReportPptBusy(normalizedSnapshotId, true);
+  setPerformanceCustomerReportStatus('正在准备已封存客户版的 PPT...');
+  var request = (async function() {
+    try {
+      var response = await apiFetch('/campaigns/' + encodeURIComponent(campaignId)
+        + '/performance/customer-report-snapshots/' + encodeURIComponent(normalizedSnapshotId) + '/ppt', {
+          method: 'POST',
+          body: JSON.stringify({})
+        });
+      if (!response.ok) {
+        var errorData = await response.json().catch(function() { return {}; });
+        throw new Error(performanceCustomerReportErrorMessage(errorData, errorData.error));
+      }
+      var blob = await response.blob();
+      if (!performanceCustomerReportPptDownloadIsCurrent(context)) return null;
+      var contentType = response.headers.get('Content-Type') ||
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+      dlFile('customer-report-' + normalizedSnapshotId + '.pptx', blob, contentType);
+      setPerformanceCustomerReportStatus('客户版 PPT 已准备完成。');
+      toast('客户版 PPT 已下载。');
+      return true;
+    } catch (error) {
+      if (!performanceCustomerReportPptDownloadIsCurrent(context)) return null;
+      var message = error.message || '客户版 PPT 生成失败。';
+      setPerformanceCustomerReportStatus(message, 'error');
+      toast(message, 'error');
+      return null;
+    }
+  })();
+  performanceCustomerReportPptDownloads[key] = request;
+  try {
+    return await request;
+  } finally {
+    if (performanceCustomerReportPptDownloads[key] === request) {
+      delete performanceCustomerReportPptDownloads[key];
+    }
+    if (performanceCustomerReportPptDownloadIsCurrent(context)) {
+      setPerformanceCustomerReportPptBusy(normalizedSnapshotId, false);
+    }
+  }
 }
 
 async function generatePerformanceCustomerReportPreview() {

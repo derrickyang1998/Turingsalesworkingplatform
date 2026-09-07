@@ -507,6 +507,33 @@ test('seals one immutable pre-redacted report and exactly replays the same idemp
   }
 });
 
+test('exposes a sealed snapshot to the delivery service only through write-authorized access', () => {
+  const fixture = createFixture();
+  try {
+    const sealed = fixture.snapshots.seal(sealInput(fixture));
+    assert.throws(
+      () => fixture.snapshots.getForDelivery({
+        user: fixture.reader,
+        campaignId: fixture.campaign.id,
+        snapshotId: sealed.snapshot.id
+      }),
+      (error) => error instanceof CustomerReportSnapshotServiceError &&
+        error.code === 'CUSTOMER_REPORT_FORBIDDEN'
+    );
+    const delivery = fixture.snapshots.getForDelivery({
+      user: fixture.owner,
+      campaignId: fixture.campaign.id,
+      snapshotId: sealed.snapshot.id
+    });
+    assert.equal(delivery.context.organizationId, fixture.campaign.orgId);
+    assert.equal(delivery.context.campaignId, fixture.campaign.id);
+    assert.equal(delivery.snapshot.id, sealed.snapshot.id);
+    assert.deepEqual(delivery.snapshot.report, sealed.snapshot.report);
+  } finally {
+    fixture.db.close();
+  }
+});
+
 test('rejects a changed request that reuses an existing customer report idempotency key', () => {
   const fixture = createFixture();
   try {
@@ -551,6 +578,12 @@ test('rejects unsafe operator text before it can enter a customer report', () =>
     transactionPrice.body.title = '本期成交价为壹佰万元';
     assert.throws(
       () => fixture.snapshots.preview(transactionPrice),
+      (error) => error instanceof CustomerReportSnapshotServiceError && error.code === 'CUSTOMER_REPORT_INPUT_INVALID'
+    );
+    const bareDomain = previewInput(fixture);
+    bareDomain.body.next_cycle_plan = 'Review reports.example/path before sharing.';
+    assert.throws(
+      () => fixture.snapshots.preview(bareDomain),
       (error) => error instanceof CustomerReportSnapshotServiceError && error.code === 'CUSTOMER_REPORT_INPUT_INVALID'
     );
   } finally {

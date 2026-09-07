@@ -60,6 +60,7 @@ const REQUIRED_BUNDLE_FILES = Object.freeze([
   'server/migrations/011_performance_feishu_connection_config.js',
   'server/migrations/012_performance_ai_review_audit.js',
   'server/migrations/013_customer_report_snapshot.js',
+  'server/migrations/014_customer_report_ppt_artifact.js',
   'server/migrations/baselines/legacy_v1.js',
   'server/migrations/engines/v1.js',
   'server/migrations/vendor/bcryptjs_v3_0_3.js',
@@ -124,8 +125,8 @@ const EXPECTED_ENTRYPOINTS = Object.freeze({
 });
 
 const EXPECTED_MIGRATION_CONTRACT = Object.freeze({
-  acceptedSourceVersions: Object.freeze([1, 6, 7, 8, 9, 10, 11, 12, 13]),
-  targetVersion: 13,
+  acceptedSourceVersions: Object.freeze([1, 6, 7, 8, 9, 10, 11, 12, 13, 14]),
+  targetVersion: 14,
   runs: 2,
   deterministicAppendTables: Object.freeze(['activity_log'])
 });

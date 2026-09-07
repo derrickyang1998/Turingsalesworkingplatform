@@ -214,6 +214,11 @@ const REQUEST_POLICIES = Object.freeze({
     'GET',
     '/api/campaigns/:id/performance/customer-report-snapshots/:snapshotId'
   ),
+  CAMPAIGN_PERFORMANCE_CUSTOMER_REPORT_PPT_GENERATE: controlJson(
+    'campaign.performance.customer-report-ppt.generate',
+    'POST',
+    '/api/campaigns/:id/performance/customer-report-snapshots/:snapshotId/ppt'
+  ),
   CAMPAIGN_PERFORMANCE_INTEGRATION_PREVIEW: empty(
     'campaign.performance.integration-preview',
     'GET',
