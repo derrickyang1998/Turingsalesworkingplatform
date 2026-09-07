@@ -99,11 +99,12 @@ const TMP_DIR = path.resolve(process.env.TMP_DIR || path.join(__dirname, '..', '
 const PPT_CACHE_DIR = path.resolve(
   process.env.PPT_CACHE_DIR || path.join(__dirname, '..', 'ppt-cache')
 );
+const CUSTOMER_REPORT_PPT_CACHE_NAMESPACE = 'customer-reports';
 const CUSTOMER_REPORT_PPT_CACHE_DIR = path.resolve(
-  process.env.CUSTOMER_REPORT_PPT_CACHE_DIR || path.join(PPT_CACHE_DIR, 'customer-reports')
+  path.join(PPT_CACHE_DIR, CUSTOMER_REPORT_PPT_CACHE_NAMESPACE)
 );
 const CUSTOMER_REPORT_PPT_TMP_DIR = path.resolve(
-  process.env.CUSTOMER_REPORT_PPT_TMP_DIR || path.join(TMP_DIR, 'customer-report-ppt')
+  path.join(TMP_DIR, 'customer-report-ppt')
 );
 const UPLOAD_SANDBOX_SPOOL_ROOT = path.resolve(
   process.env.UPLOAD_SANDBOX_SPOOL_ROOT || '/var/lib/turingmarket-parser/jobs'
@@ -141,7 +142,10 @@ const readProductionSystemdProperties = createProductionSystemdPropertyReader({
   systemdInspectionUnitName
 });
 const campaignPptService = createCampaignPptService(db, {
-  artifactStore: createPptArtifactStore({ rootDir: PPT_CACHE_DIR }),
+  artifactStore: createPptArtifactStore({
+    rootDir: PPT_CACHE_DIR,
+    reservedRootDirectories: [CUSTOMER_REPORT_PPT_CACHE_NAMESPACE]
+  }),
   tempDir: TMP_DIR,
   runPptGenerator({ payload, outputPath }) {
     const workDir = path.dirname(outputPath);

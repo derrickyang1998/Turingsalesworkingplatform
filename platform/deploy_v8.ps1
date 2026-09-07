@@ -10670,8 +10670,14 @@ function sha256(filePath) {
   return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
 }
 
-function artifactFile(cacheKey) {
-  return `${cacheKey.slice(0, 2)}/${cacheKey}.pptx`;
+const PPT_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+const CUSTOMER_REPORT_CACHE_NAMESPACE = 'customer-reports';
+
+function artifactFile(namespace, cacheKey) {
+  const relative = `${cacheKey.slice(0, 2)}/${cacheKey}.pptx`;
+  return namespace === 'customer-report'
+    ? `${CUSTOMER_REPORT_CACHE_NAMESPACE}/${relative}`
+    : relative;
 }
 
 function buildLedger() {
@@ -10696,10 +10702,11 @@ function buildLedger() {
     const ledgerColumns = ledgerTable
       ? new Set(database.prepare('PRAGMA table_info(request_idempotency)').all().map((column) => column.name))
       : new Set();
+    let campaignRows;
     if (!ledgerTable || Array.from(requiredColumns).some((column) => !ledgerColumns.has(column))) {
-      rows = [];
+      campaignRows = [];
     } else {
-      rows = database.prepare(`
+      campaignRows = database.prepare(`
         SELECT
           id,state,response_cache_key,response_sha256,response_bytes,
           response_content_type,response_filename
@@ -10708,6 +10715,62 @@ function buildLedger() {
         ORDER BY response_cache_key,id
       `).all();
     }
+    const customerReportTable = database.prepare(`
+      SELECT COUNT(*) AS count
+      FROM sqlite_master
+      WHERE type='table' AND name='customer_report_ppt_artifacts'
+    `).get().count;
+    const customerReportRequiredColumns = new Set([
+      'id', 'snapshot_id', 'ppt_contract_version', 'artifact_cache_key',
+      'artifact_sha256', 'artifact_bytes'
+    ]);
+    const customerReportColumns = customerReportTable
+      ? new Set(database.prepare('PRAGMA table_info(customer_report_ppt_artifacts)').all()
+        .map((column) => column.name))
+      : new Set();
+    if (
+      customerReportTable &&
+      Array.from(customerReportRequiredColumns).some((column) => !customerReportColumns.has(column))
+    ) {
+      throw new Error('Customer report PPT ledger table is incomplete');
+    }
+    const customerReportRows = customerReportTable
+      ? database.prepare(`
+          SELECT
+            id,snapshot_id,ppt_contract_version,artifact_cache_key,
+            artifact_sha256,artifact_bytes
+          FROM customer_report_ppt_artifacts
+          ORDER BY artifact_cache_key,id
+        `).all()
+      : [];
+    rows = [
+      ...campaignRows.map((row) => ({
+        namespace: 'campaign',
+        id: row.id,
+        cacheKey: row.response_cache_key,
+        sha256: row.response_sha256,
+        bytes: row.response_bytes,
+        contentType: row.response_content_type,
+        reference: {
+          ledgerId: row.id,
+          filename: row.response_filename,
+          state: row.state
+        }
+      })),
+      ...customerReportRows.map((row) => ({
+        namespace: 'customer-report',
+        id: row.id,
+        cacheKey: row.artifact_cache_key,
+        sha256: row.artifact_sha256,
+        bytes: row.artifact_bytes,
+        contentType: PPT_CONTENT_TYPE,
+        contractVersion: row.ppt_contract_version,
+        reference: {
+          artifactId: row.id,
+          snapshotId: row.snapshot_id
+        }
+      }))
+    ];
   } finally {
     database.close();
   }
@@ -10715,16 +10778,20 @@ function buildLedger() {
   const artifacts = new Map();
   for (const row of rows) {
     if (
+      !['campaign', 'customer-report'].includes(row.namespace) ||
       !Number.isSafeInteger(row.id) || row.id <= 0 ||
-      !/^[0-9a-f]{64}$/.test(row.response_cache_key || '') ||
-      !/^[0-9a-f]{64}$/.test(row.response_sha256 || '') ||
-      !Number.isSafeInteger(row.response_bytes) || row.response_bytes < 0 ||
-      row.response_content_type !== 'application/vnd.openxmlformats-officedocument.presentationml.presentation' ||
-      typeof row.response_filename !== 'string' || row.response_filename.length === 0
+      !/^[0-9a-f]{64}$/.test(row.cacheKey || '') ||
+      !/^[0-9a-f]{64}$/.test(row.sha256 || '') ||
+      !Number.isSafeInteger(row.bytes) || row.bytes < 0 ||
+      row.contentType !== PPT_CONTENT_TYPE ||
+      (row.namespace === 'campaign' && (
+        typeof row.reference.filename !== 'string' || row.reference.filename.length === 0
+      )) ||
+      (row.namespace === 'customer-report' && row.contractVersion !== 'customer-report-ppt-v1')
     ) {
       throw new Error(`Invalid binary ledger row: ${row.id}`);
     }
-    const fileName = artifactFile(row.response_cache_key);
+    const fileName = artifactFile(row.namespace, row.cacheKey);
     const target = path.join(cacheRoot, fileName);
     const stat = fs.lstatSync(target);
     if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1) {
@@ -10734,59 +10801,78 @@ function buildLedger() {
       throw new Error(`PPT cache artifact mode is not 0600: ${fileName}`);
     }
     const actualSha256 = sha256(target);
-    if (actualSha256 !== row.response_sha256 || stat.size !== row.response_bytes) {
+    if (actualSha256 !== row.sha256 || stat.size !== row.bytes) {
       throw new Error(`PPT cache artifact does not match SQLite: ${fileName}`);
     }
-    let artifact = artifacts.get(row.response_cache_key);
+    const artifactIdentity = `${row.namespace}:${row.cacheKey}`;
+    let artifact = artifacts.get(artifactIdentity);
     if (!artifact) {
       artifact = {
-        cacheKey: row.response_cache_key,
+        namespace: row.namespace,
+        cacheKey: row.cacheKey,
         fileName,
-        sha256: row.response_sha256,
-        bytes: row.response_bytes,
-        contentType: row.response_content_type,
+        sha256: row.sha256,
+        bytes: row.bytes,
+        contentType: row.contentType,
         references: []
       };
-      artifacts.set(row.response_cache_key, artifact);
+      artifacts.set(artifactIdentity, artifact);
     } else if (
-      artifact.sha256 !== row.response_sha256 ||
-      artifact.bytes !== row.response_bytes ||
-      artifact.contentType !== row.response_content_type
+      artifact.sha256 !== row.sha256 ||
+      artifact.bytes !== row.bytes ||
+      artifact.contentType !== row.contentType
     ) {
       throw new Error(`Conflicting SQLite references for PPT cache artifact: ${fileName}`);
     }
-    artifact.references.push({
-      ledgerId: row.id,
-      filename: row.response_filename,
-      state: row.state
-    });
+    artifact.references.push(row.reference);
   }
 
   const expectedFiles = new Set(Array.from(artifacts.values(), (artifact) => artifact.fileName));
   const actualFiles = [];
-  for (const shard of fs.readdirSync(cacheRoot, { withFileTypes: true })) {
+  function scanShard(parentRoot, shard, prefix) {
     if (!shard.isDirectory() || shard.isSymbolicLink() || !/^[0-9a-f]{2}$/.test(shard.name)) {
       throw new Error(`PPT cache entry is not represented by SQLite: ${shard.name}`);
     }
-    const shardPath = path.join(cacheRoot, shard.name);
+    const shardPath = path.join(parentRoot, shard.name);
     const shardStat = fs.lstatSync(shardPath);
     if (process.platform !== 'win32' && (shardStat.mode & 0o777) !== 0o700) {
       throw new Error(`PPT cache shard mode is not 0700: ${shard.name}`);
     }
     for (const entry of fs.readdirSync(shardPath, { withFileTypes: true })) {
-      const relative = `${shard.name}/${entry.name}`;
+      const relative = `${prefix}${shard.name}/${entry.name}`;
       if (!entry.isFile() || entry.isSymbolicLink() || !expectedFiles.has(relative)) {
         throw new Error(`PPT cache file is not represented by SQLite: ${relative}`);
       }
       actualFiles.push(relative);
     }
   }
+  for (const entry of fs.readdirSync(cacheRoot, { withFileTypes: true })) {
+    if (entry.name === CUSTOMER_REPORT_CACHE_NAMESPACE) {
+      const namespaceRoot = path.join(cacheRoot, entry.name);
+      const namespaceStat = fs.lstatSync(namespaceRoot);
+      if (
+        !entry.isDirectory() ||
+        entry.isSymbolicLink() ||
+        (process.platform !== 'win32' && (namespaceStat.mode & 0o777) !== 0o700)
+      ) {
+        throw new Error(`PPT cache entry is not represented by SQLite: ${entry.name}`);
+      }
+      for (const shard of fs.readdirSync(namespaceRoot, { withFileTypes: true })) {
+        scanShard(namespaceRoot, shard, `${CUSTOMER_REPORT_CACHE_NAMESPACE}/`);
+      }
+      continue;
+    }
+    scanShard(cacheRoot, entry, '');
+  }
   if (actualFiles.length !== expectedFiles.size) {
     throw new Error('PPT cache tree does not have one file per SQLite artifact');
   }
   return {
-    schemaVersion: 1,
-    naming: '<first-2>/<response_cache_key>.pptx',
+    schemaVersion: 2,
+    naming: {
+      campaign: '<first-2>/<response_cache_key>.pptx',
+      customerReport: 'customer-reports/<first-2>/<artifact_cache_key>.pptx'
+    },
     artifacts: Array.from(artifacts.values())
   };
 }

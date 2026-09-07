@@ -155,6 +155,7 @@ test('current release locks the v0.7 branch while retaining the v0.6 shell and f
   const deploy = read('platform', 'deploy_v8.ps1');
   const buildInfo = read('platform', 'client', 'shared', 'build_info.js');
   const index = read('platform', 'index.html');
+  const server = read('platform', 'server', 'server.js');
 
   assert.ok(deploy.includes(`$EXPECTED_BRANCH = "${releaseBranch}"`));
   assert.ok(deploy.includes(`$EXPECTED_APP_BUILD = "${appBuild}"`));
@@ -173,6 +174,9 @@ test('current release locks the v0.7 branch while retaining the v0.6 shell and f
   assert.doesNotMatch(deploy, /if \(Number\(version\) !== 13\) throw new Error\('Candidate migration target version mismatch'\)/);
   assert.match(deploy, /report\.get\('sourceVersion'\) not in \(1, 6, 7, 8, 9, 10, 11, 12, 13, 14\)/);
   assert.doesNotMatch(deploy, /report\.get\('sourceVersion'\) not in \(1, 6, 7, 8, 9, 10, 11, 12, 13\) or/);
+  assert.match(server, /const CUSTOMER_REPORT_PPT_CACHE_NAMESPACE = 'customer-reports'/);
+  assert.match(server, /reservedRootDirectories: \[CUSTOMER_REPORT_PPT_CACHE_NAMESPACE\]/);
+  assert.doesNotMatch(server, /process\.env\.CUSTOMER_REPORT_PPT_(?:CACHE|TMP)_DIR/);
 });
 
 test('cutover parser readiness reuses production systemd normalization', () => {

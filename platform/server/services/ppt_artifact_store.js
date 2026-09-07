@@ -6,6 +6,7 @@ const path = require('node:path');
 
 const CACHE_KEY = /^[0-9a-f]{64}$/;
 const SHARD_NAME = /^[0-9a-f]{2}$/;
+const RESERVED_ROOT_DIRECTORY = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const ARTIFACT_FILE = /^([0-9a-f]{64})\.pptx$/;
 const STAGE_FILE = /^\.([0-9a-f]{64})\.[0-9a-f]{32}\.stage$/;
 const ATTEMPT_DIRECTORY = /^campaign-ppt-([0-9a-f]{64})-/;
@@ -186,6 +187,26 @@ function normalizeCacheKeyList(value, label) {
   if (!Array.isArray(value)) throw new TypeError(`${label} must be an array`);
   const unique = new Set();
   for (const key of value) unique.add(normalizeCacheKey(key));
+  return [...unique];
+}
+
+function normalizeReservedRootDirectories(value) {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) {
+    throw new TypeError('PPT artifact store reservedRootDirectories must be an array');
+  }
+  const unique = new Set();
+  for (const name of value) {
+    if (
+      typeof name !== 'string' ||
+      !RESERVED_ROOT_DIRECTORY.test(name) ||
+      SHARD_NAME.test(name) ||
+      path.basename(name) !== name
+    ) {
+      throw new TypeError('PPT artifact store reservedRootDirectories contains an invalid name');
+    }
+    unique.add(name);
+  }
   return [...unique];
 }
 
@@ -475,6 +496,9 @@ function createPptArtifactStore(options) {
   if (!Number.isSafeInteger(maxBytes) || maxBytes < PPT_HEADER.length || maxBytes > DEFAULT_MAX_BYTES) {
     throw new TypeError('PPT artifact store maxBytes is invalid');
   }
+  const reservedRootDirectories = new Set(
+    normalizeReservedRootDirectories(options.reservedRootDirectories)
+  );
   ensureCacheDirectory(rootDir);
 
   function publishFromFile(input) {
@@ -634,6 +658,16 @@ function createPptArtifactStore(options) {
       if (!consumeBudget()) break;
       const shardPath = path.join(rootDir, shardName);
       const shardStat = fs.lstatSync(shardPath);
+      if (reservedRootDirectories.has(shardName)) {
+        if (!shardStat.isDirectory() || shardStat.isSymbolicLink()) {
+          throw storeError(
+            'PPT_ARTIFACT_INTEGRITY_FAILED',
+            'PPT artifact cache reserved namespace is not a real directory.'
+          );
+        }
+        validatePrivateDirectory(shardPath);
+        continue;
+      }
       if (!SHARD_NAME.test(shardName) || !shardStat.isDirectory() || shardStat.isSymbolicLink()) {
         throw storeError(
           'PPT_ARTIFACT_INTEGRITY_FAILED',

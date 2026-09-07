@@ -210,3 +210,55 @@ test('PPT artifact janitor protects live and retained keys while resuming expiri
   assert.equal(fs.existsSync(liveAttempt), true);
   assert.equal(fs.existsSync(orphanAttempt), false);
 });
+
+test('PPT artifact janitor preserves an explicitly reserved child cache namespace', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-ppt-store-namespaces-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const cacheRoot = path.join(root, 'cache');
+  const customerReportRoot = path.join(cacheRoot, 'customer-reports');
+  const parentStore = createPptArtifactStore({
+    rootDir: cacheRoot,
+    reservedRootDirectories: ['customer-reports']
+  });
+  const customerReportStore = createPptArtifactStore({ rootDir: customerReportRoot });
+  const sourcePath = path.join(root, 'customer-report.pptx');
+  const key = cacheKey('customer-report-namespace');
+  const content = fixturePptx('customer-report-namespace');
+  fs.writeFileSync(sourcePath, content);
+  customerReportStore.publishFromFile({ cacheKey: key, sourcePath });
+
+  const result = parentStore.runJanitor({
+    liveCacheKeys: [],
+    retainedCacheKeys: [],
+    expiringCacheKeys: []
+  });
+
+  assert.equal(result.orphanArtifactKeysRemoved.length, 0);
+  assert.deepEqual(fs.readFileSync(
+    path.join(customerReportRoot, key.slice(0, 2), `${key}.pptx`)
+  ), content);
+
+  fs.mkdirSync(path.join(cacheRoot, 'unexpected-namespace'), { mode: 0o700 });
+  assert.throws(
+    () => parentStore.runJanitor({
+      liveCacheKeys: [],
+      retainedCacheKeys: [],
+      expiringCacheKeys: []
+    }),
+    (error) => error.code === 'PPT_ARTIFACT_INTEGRITY_FAILED'
+  );
+});
+
+test('PPT artifact store rejects unsafe reserved child cache namespace names', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-ppt-store-namespace-config-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  for (const name of ['aa', '../escape', '.', 'Customer Reports']) {
+    assert.throws(
+      () => createPptArtifactStore({
+        rootDir: path.join(root, digest(name).slice(0, 12)),
+        reservedRootDirectories: [name]
+      }),
+      /reservedRootDirectories/
+    );
+  }
+});

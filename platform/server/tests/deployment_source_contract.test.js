@@ -1707,6 +1707,9 @@ test('Phase 4 cutover binds the SQLite binary ledger to the exact PPT cache tree
 
   assert.match(cutover, /TM_PPT_LEDGER_TOOL/);
   assert.match(cutover, /response_cache_key,response_sha256,response_bytes/);
+  assert.match(cutover, /artifact_cache_key,[\s\S]*artifact_sha256,artifact_bytes/);
+  assert.match(cutover, /customer_report_ppt_artifacts/);
+  assert.match(cutover, /customer-reports/);
   assert.match(cutover, /ppt-ledger\.json/);
   assert.match(cutover, /ppt-ledger\.sha256/);
   assert.match(cutover, /PPT_LEDGER_BUILD_OK/);
@@ -1731,6 +1734,20 @@ test('Phase 4 cutover binds the SQLite binary ledger to the exact PPT cache tree
   const cacheShard = path.join(cacheRoot, cacheKey.slice(0, 2));
   fs.mkdirSync(cacheShard, { mode: 0o700 });
   fs.writeFileSync(path.join(cacheShard, `${cacheKey}.pptx`), bytes, { mode: 0o600 });
+  const customerReportCacheKey = crypto.createHash('sha256').update('customer-report-cache-key').digest('hex');
+  const customerReportBytes = Buffer.from('customer-report-ppt-cache-contract', 'utf8');
+  const customerReportSha256 = sha256Buffer(customerReportBytes);
+  const customerReportCacheRoot = path.join(cacheRoot, 'customer-reports');
+  const customerReportCacheShard = path.join(
+    customerReportCacheRoot,
+    customerReportCacheKey.slice(0, 2)
+  );
+  fs.mkdirSync(customerReportCacheShard, { recursive: true, mode: 0o700 });
+  fs.writeFileSync(
+    path.join(customerReportCacheShard, `${customerReportCacheKey}.pptx`),
+    customerReportBytes,
+    { mode: 0o600 }
+  );
   const database = new Database(databasePath);
   database.exec(`
     CREATE TABLE request_idempotency (
@@ -1742,6 +1759,14 @@ test('Phase 4 cutover binds the SQLite binary ledger to the exact PPT cache tree
       response_bytes INTEGER,
       response_content_type TEXT,
       response_filename TEXT
+    );
+    CREATE TABLE customer_report_ppt_artifacts (
+      id INTEGER PRIMARY KEY,
+      snapshot_id INTEGER NOT NULL,
+      ppt_contract_version TEXT NOT NULL,
+      artifact_cache_key TEXT NOT NULL,
+      artifact_sha256 TEXT NOT NULL,
+      artifact_bytes INTEGER NOT NULL
     );
   `);
   database.prepare(`
@@ -1756,6 +1781,11 @@ test('Phase 4 cutover binds the SQLite binary ledger to the exact PPT cache tree
     'application/vnd.openxmlformats-officedocument.presentationml.presentation',
     'proposal.pptx'
   );
+  database.prepare(`
+    INSERT INTO customer_report_ppt_artifacts (
+      id,snapshot_id,ppt_contract_version,artifact_cache_key,artifact_sha256,artifact_bytes
+    ) VALUES (2,17,'customer-report-ppt-v1',?,?,?)
+  `).run(customerReportCacheKey, customerReportSha256, customerReportBytes.length);
   database.close();
 
   fs.writeFileSync(toolPath, shellHereDocBody(cutover, 'TM_PPT_LEDGER_TOOL'));
@@ -1775,16 +1805,31 @@ test('Phase 4 cutover binds the SQLite binary ledger to the exact PPT cache tree
   assert.match(build.stdout, /PPT_LEDGER_BUILD_OK/);
   const ledger = JSON.parse(fs.readFileSync(ledgerPath, 'utf8'));
   assert.deepEqual(ledger, {
-    schemaVersion: 1,
-    naming: '<first-2>/<response_cache_key>.pptx',
-    artifacts: [{
-      cacheKey,
-      fileName: `${cacheKey.slice(0, 2)}/${cacheKey}.pptx`,
-      sha256: responseSha256,
-      bytes: bytes.length,
-      contentType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-      references: [{ ledgerId: 1, filename: 'proposal.pptx', state: 'completed' }]
-    }]
+    schemaVersion: 2,
+    naming: {
+      campaign: '<first-2>/<response_cache_key>.pptx',
+      customerReport: 'customer-reports/<first-2>/<artifact_cache_key>.pptx'
+    },
+    artifacts: [
+      {
+        namespace: 'campaign',
+        cacheKey,
+        fileName: `${cacheKey.slice(0, 2)}/${cacheKey}.pptx`,
+        sha256: responseSha256,
+        bytes: bytes.length,
+        contentType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        references: [{ ledgerId: 1, filename: 'proposal.pptx', state: 'completed' }]
+      },
+      {
+        namespace: 'customer-report',
+        cacheKey: customerReportCacheKey,
+        fileName: `customer-reports/${customerReportCacheKey.slice(0, 2)}/${customerReportCacheKey}.pptx`,
+        sha256: customerReportSha256,
+        bytes: customerReportBytes.length,
+        contentType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        references: [{ artifactId: 2, snapshotId: 17 }]
+      }
+    ]
   });
   const verify = spawnSync(process.execPath, [toolPath], {
     encoding: 'utf8',
@@ -1824,8 +1869,11 @@ test('Phase 4 cutover binds the SQLite binary ledger to the exact PPT cache tree
   });
   assert.equal(legacyBuild.status, 0, legacyBuild.stderr || legacyBuild.stdout);
   assert.deepEqual(JSON.parse(fs.readFileSync(legacyLedgerPath, 'utf8')), {
-    schemaVersion: 1,
-    naming: '<first-2>/<response_cache_key>.pptx',
+    schemaVersion: 2,
+    naming: {
+      campaign: '<first-2>/<response_cache_key>.pptx',
+      customerReport: 'customer-reports/<first-2>/<artifact_cache_key>.pptx'
+    },
     artifacts: []
   });
 
