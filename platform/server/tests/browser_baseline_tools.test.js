@@ -229,6 +229,41 @@ test('fixture API supplies active campaigns for the M4 campaign selector', async
   assert.deepEqual(page.__baselineUnhandledApiCalls, []);
 });
 
+test('fixture API supplies the empty saved-view list used by M4 startup', async () => {
+  const { installFixtureApi, loadBaselineFixture } = require(browserFixture);
+  const expectedOrigin = 'http://127.0.0.1:43188';
+  let routeHandler = null;
+  let fulfilled = null;
+  const page = {
+    __baselineUnhandledApiCalls: [],
+    __baselineUnhandledNetworkRequests: [],
+    async route(_pattern, handler) {
+      routeHandler = handler;
+    }
+  };
+
+  await installFixtureApi(page, {
+    fixture: loadBaselineFixture(),
+    expectedOrigin
+  });
+  await routeHandler({
+    request() {
+      return {
+        method: () => 'GET',
+        url: () => `${expectedOrigin}/api/influencer-views`,
+        headers: () => ({})
+      };
+    },
+    async fulfill(response) {
+      fulfilled = response;
+    }
+  });
+
+  assert.equal(fulfilled.status, 200);
+  assert.deepEqual(JSON.parse(fulfilled.body), { views: [] });
+  assert.deepEqual(page.__baselineUnhandledApiCalls, []);
+});
+
 test('baseline comparison rejects non-Windows or divergent runner metadata', () => {
   const { validateRunEnvironments } = require(compareScript);
   const manifest = { viewports: [{ name: 'fixture-1440', width: 1440, height: 900 }] };

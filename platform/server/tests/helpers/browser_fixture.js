@@ -528,6 +528,7 @@ function apiResponseFor(request, fixture, recorder) {
     const influencers = queryInfluencersFixture(fixture, Object.fromEntries(url.searchParams.entries()));
     return ok({ influencers, total: influencers.length });
   }
+  if (method === 'GET' && apiPath === '/influencer-views') return ok({ views: [] });
   if (method === 'POST' && apiPath === '/influencers/match') return ok({ matches: queryInfluencersFixture(fixture, requestJson(request)) });
   if (method === 'GET' && apiPath === '/influencers/template') return textResponse(fixture.csv.influencerTemplate || templateCsvFromFixture(), 'text/csv; charset=utf-8');
   if (method === 'POST' && apiPath === '/influencers/export') {
