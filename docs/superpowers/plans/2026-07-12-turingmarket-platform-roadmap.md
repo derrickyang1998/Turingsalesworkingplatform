@@ -313,9 +313,9 @@ flowchart LR
 
 **Release / 版本：** `v0.8.0-influencer-execution-loop`
 
-**Latest accepted patch / 最新验收补丁：** `v0.8.13-influencer-column-filters-saved-views` adds field filters for every column currently displayed in the M4 shortlist, deterministic two-row sticky headers, stale-response protection, filter/export query parity, and browser-local saved filters isolated by user ID. Production schema remains `v14`. / `v0.8.13-influencer-column-filters-saved-views` 已为 M4 当前显示的每一列增加筛选，并交付确定性的双层粘性表头、陈旧响应保护、列表/导出同条件查询及按用户 ID 隔离的浏览器本地筛选视图；生产 schema 保持 `v14`。
+**Latest accepted patch / 最新验收补丁：** `v0.8.14-m4-column-workspace` adds dedicated cost, client quote, CPM, and CPV columns and filters; account-synchronized saved views; column visibility and order; legacy local-view merge; and narrow-screen workspace containment. Production schema is `v15`. / `v0.8.14-m4-column-workspace` 已增加成本、客户报价、CPM、CPV 独立列与筛选、账号同步保存视图、列显示与顺序、旧本地视图增量合并及窄屏工作区边界；生产 schema 为 `v15`。
 
-**Open boundary / 未完成边界：** The field-search and saved-view work items remain open until dedicated quote/CPM/CPV columns, server-synchronized views, column visibility/order, and the complete execution/payment/settlement loop are accepted. / 字段检索与保存视图工作项仍保持未完成，直至独立报价/CPM/CPV 列、服务端同步视图、列显示/顺序及完整执行/付款/结算闭环通过验收。
+**Open boundary / 未完成边界：** Field search, account-synchronized saved views, and column workspace management are accepted. Phase 7 remains open for guided import mapping, real configured Feishu delivery, and the complete collaboration execution, payment, settlement, and review lifecycle. / 字段检索、账号同步保存视图和列工作区已通过验收；阶段 7 仍需完成上传字段引导映射、真实配置飞书投递，以及完整合作执行、付款、结算与复盘生命周期。
 
 **Primary files / 主要文件：**
 
@@ -327,8 +327,8 @@ flowchart LR
 **Work items / 工作项：**
 
 - [ ] **EN:** Preserve the approved 20-column Chinese upload contract and historical 19-column aliases; add user-guided field mapping and row-level import errors without discarding valid rows.<br>**中文：** 保留已批准的 20 列中文上传契约和历史 19 列别名，增加用户引导的字段映射和逐行导入错误，且不得丢弃有效行。
-- [ ] **EN:** Add field-level search/filter support for every displayed influencer column, including ID, handle, tags, links, platform, country, project, product, deliverable, cost, quote, CPM, CPV, and parent record.<br>**中文：** 为所有展示的网红字段增加字段级搜索/筛选，包括 ID、账号、标签、链接、平台、国家、项目、产品、交付物、成本、报价、CPM、CPV 和父记录。
-- [ ] **EN:** Add saved views, column visibility/order, bulk selection, export-before-filter, export-after-filter, and deterministic sticky-header/checkbox behavior.<br>**中文：** 增加保存视图、列显示/顺序、批量选择、筛选前导出、筛选后导出，以及确定性的粘性表头/复选框行为。
+- [x] **EN:** Add field-level search/filter support for every displayed influencer column, including ID, handle, tags, links, platform, country, project, product, deliverable, cost, quote, CPM, CPV, and parent record.<br>**中文：** 为所有展示的网红字段增加字段级搜索/筛选，包括 ID、账号、标签、链接、平台、国家、项目、产品、交付物、成本、报价、CPM、CPV 和父记录。
+- [x] **EN:** Add saved views, column visibility/order, bulk selection, export-before-filter, export-after-filter, and deterministic sticky-header/checkbox behavior.<br>**中文：** 增加保存视图、列显示/顺序、批量选择、筛选前导出、筛选后导出，以及确定性的粘性表头/复选框行为。
 - [ ] **EN:** Implement a Feishu provider interface supporting webhook and app/table API modes, encrypted server-side configuration, connection test, sync status, idempotency, retry, and actionable failure logs.<br>**中文：** 实现飞书服务接口，支持 Webhook 和应用/多维表格 API 模式、服务器端加密配置、连接测试、同步状态、幂等、重试和可执行的失败日志。
 - [ ] **EN:** Define collaboration orders with campaign, customer, influencer, owner, deliverables, cost, client quote, currency, margin, deadlines, contract, payment, content review, publish link, performance, settlement, and notes.<br>**中文：** 合作订单包含活动、客户、网红、负责人、交付物、成本、客户报价、币种、毛利、截止日期、合同、付款、内容审核、发布链接、效果、结算和备注。
 - [ ] **EN:** Enforce owner/team/admin access on shortlist, order, execution, and settlement operations.<br>**中文：** 对候选名单、订单、执行和结算操作强制执行负责人/团队/管理员权限。
