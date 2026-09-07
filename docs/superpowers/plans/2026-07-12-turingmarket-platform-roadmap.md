@@ -313,6 +313,10 @@ flowchart LR
 
 **Release / 版本：** `v0.8.0-influencer-execution-loop`
 
+**Latest accepted patch / 最新验收补丁：** `v0.8.13-influencer-column-filters-saved-views` adds field filters for every column currently displayed in the M4 shortlist, deterministic two-row sticky headers, stale-response protection, filter/export query parity, and browser-local saved filters isolated by user ID. Production schema remains `v14`. / `v0.8.13-influencer-column-filters-saved-views` 已为 M4 当前显示的每一列增加筛选，并交付确定性的双层粘性表头、陈旧响应保护、列表/导出同条件查询及按用户 ID 隔离的浏览器本地筛选视图；生产 schema 保持 `v14`。
+
+**Open boundary / 未完成边界：** The field-search and saved-view work items remain open until dedicated quote/CPM/CPV columns, server-synchronized views, column visibility/order, and the complete execution/payment/settlement loop are accepted. / 字段检索与保存视图工作项仍保持未完成，直至独立报价/CPM/CPV 列、服务端同步视图、列显示/顺序及完整执行/付款/结算闭环通过验收。
+
 **Primary files / 主要文件：**
 
 - **Modify / 修改：** `platform/server/services/influencer_workflow_service.js`, `file_ingest_service.js`, `platform/server/routes.js`, `platform/server/db.js`.

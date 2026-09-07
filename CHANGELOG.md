@@ -1,5 +1,26 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.8.13-influencer-column-filters-saved-views (Production Deployed, 2026-09-08) - Phase 7 M4 网红名单可操作性
+
+### 交付与范围 / Delivery And Scope
+- 现有 M4“提报资源名单”增加双层吸顶表头，并为当前显示的 ID、账号、平台、粉丝数、项目、产品、地区、类型/标签、父记录、链接、交付物和展示成本提供逐列筛选。输入时仅刷新数据行，不再重建表头或丢失输入焦点。
+- `/api/influencers` 与“导出筛选”改为共用同一参数化查询构造器；数字列使用精确值，文本列有界筛选，非法、数组或超长条件稳定返回 `400 INVALID_INFLUENCER_FILTER`。筛选导出继续覆盖全部命中行，列表仍保持 200 行显示上限。
+- 增加每账号最多 20 个浏览器本地筛选视图，支持保存、应用、覆盖、删除和清空。视图只保存允许的筛选字段，损坏/不可用存储安全降级，切换登录账号时清空上一账号的活动筛选。
+- 保留既有 20/19 列导入、全部/筛选/选中导出、活动上下文、合作下单、飞书降级、AI/知识、方案和 PPT。数据库 schema 保持 `v14`，冻结 `ppt.js` 未修改；本版本不宣称跨设备视图、列显示/排序或 Phase 7 付款结算闭环完成。
+
+### 定向验证、审查与上线 / Focused Verification, Review, And Deployment
+- 先通过失败测试固定逐列筛选、列表/导出同条件、非法输入和前端结构合同；最终网红工作流与前端结构聚焦矩阵 `52/52` 通过。JavaScript 语法、差异格式、定向凭据扫描和本地发布预检通过。
+- 独立上下文审查确认该切片是当前不依赖外部凭据的最高价值 Phase 7 项；独立代码审查结论 `APPROVE`、风险 LOW、无 Blocker/High/Medium/Low finding。
+- 生产候选通过迁移演练、真实 Express 回放 `8/8`、发布守卫 `21/21`、内置浏览器烟测 `2/2`、容量、解析器运行时和 Nginx 校验后受控切换。实现提交：`94bdbcb`。
+
+### 生产证据 / Production Evidence
+- 可恢复备份：`/root/turingmarket/backups/v060-crm-sales-workspace-20260908-045018`；完整 `SHA256SUMS` 校验通过，清单 SHA-256 为 `a719a17a02fe71b0f37f5248019ac378abde7b3423933ad7b57277be142cd008`。候选树 SHA-256 为 `d3096ea6b84254552096ce151a1b61ce09d138253bdc72c8c628b582a9e7b74b`。
+- 公网健康与首页均为 `200`，匿名逐列筛选接口为 `401`；临时管理员登录态的精确 ID 筛选为 `200` 且仅返回 1 行，非法粉丝数为 `400 INVALID_INFLUENCER_FILTER`，筛选导出为 `200` 且仅含 1 条数据，临时会话已清理为 `0`。
+- PM2 `turingmarket` online、重启计数 `0`，Nginx active。SQLite schema `v14`、`quick_check=ok`、外键异常 `0`，生产活动网红 `4786` 条；四个变更运行文件与本地提交哈希一致，冻结 `ppt.js` SHA-256 仍为 `f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e`。
+
+### 后续边界 / Next Boundaries
+- Phase 7 仍需补齐独立报价/CPM/CPV 展示与筛选、服务端跨设备视图、列显示/顺序、完整付款/结算/复盘状态和真实配置飞书闭环；这些继续拆成可独立验收的小功能，完成一个即上线。
+
 ## v0.8.12-performance-commercial-four-eyes (Production Deployed, 2026-09-08) - Phase 7B.1h 商业数据独立复核
 
 ### 交付与范围 / Delivery And Scope
