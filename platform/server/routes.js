@@ -17,6 +17,185 @@ const {
   serializeCollaborationResource
 } = require('./services/collaboration_resource_contract');
 
+class InfluencerFilterError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'InfluencerFilterError';
+    this.code = 'INVALID_INFLUENCER_FILTER';
+    this.statusCode = 400;
+  }
+}
+
+const INFLUENCER_FILTER_TEXT_LIMIT = 200;
+
+function influencerFilterObject(value) {
+  if (value === undefined || value === null) return {};
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    throw new InfluencerFilterError('Influencer filters must be an object.');
+  }
+  return value;
+}
+
+function influencerTextFilter(filters, name) {
+  const value = filters[name];
+  if (value === undefined || value === null || value === '') return '';
+  if (typeof value !== 'string' && typeof value !== 'number') {
+    throw new InfluencerFilterError(`Invalid ${name} filter.`);
+  }
+  const normalized = String(value).trim();
+  if (normalized.length > INFLUENCER_FILTER_TEXT_LIMIT) {
+    throw new InfluencerFilterError(`${name} filter is too long.`);
+  }
+  return normalized;
+}
+
+function influencerIntegerFilter(filters, name, options = {}) {
+  let value = influencerTextFilter(filters, name);
+  if (!value) return null;
+  if (options.allowHash) value = value.replace(/^#/, '');
+  if (!/^\d{1,16}$/.test(value)) {
+    throw new InfluencerFilterError(`Invalid ${name} filter.`);
+  }
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < (options.minimum || 0)) {
+    throw new InfluencerFilterError(`Invalid ${name} filter.`);
+  }
+  return parsed;
+}
+
+function influencerAmountFilter(filters, name) {
+  const value = influencerTextFilter(filters, name);
+  if (!value) return null;
+  if (!/^(?:0|[1-9]\d{0,11})(?:\.\d{1,4})?$/.test(value)) {
+    throw new InfluencerFilterError(`Invalid ${name} filter.`);
+  }
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new InfluencerFilterError(`Invalid ${name} filter.`);
+  }
+  return parsed;
+}
+
+function buildInfluencerSelect(filters, options = {}) {
+  filters = influencerFilterObject(filters);
+  let sql = 'SELECT * FROM influencers WHERE is_active = 1';
+  const params = [];
+  const exactText = [
+    ['platform', 'platform'],
+    ['category', 'category'],
+    ['region', 'region']
+  ];
+  const containsText = [
+    ['project_name', 'project_name'],
+    ['product_name', 'product_name'],
+    ['filter_kol_handle', 'kol_handle'],
+    ['filter_platform', 'platform'],
+    ['filter_project_name', 'project_name'],
+    ['filter_product_name', 'product_name'],
+    ['filter_region', 'region'],
+    ['filter_parent_record', 'parent_record'],
+    ['filter_profile_link', 'profile_link']
+  ];
+
+  exactText.forEach(function(definition) {
+    const value = influencerTextFilter(filters, definition[0]);
+    if (!value) return;
+    sql += ` AND ${definition[1]} = ?`;
+    params.push(value);
+  });
+  containsText.forEach(function(definition) {
+    const value = influencerTextFilter(filters, definition[0]);
+    if (!value) return;
+    sql += ` AND ${definition[1]} LIKE ?`;
+    params.push('%' + value + '%');
+  });
+
+  const tags = influencerTextFilter(filters, 'tags');
+  if (tags) {
+    sql += ' AND (tags LIKE ? OR category LIKE ?)';
+    params.push('%' + tags + '%', '%' + tags + '%');
+  }
+
+  const type = influencerTextFilter(filters, 'filter_type');
+  if (type) {
+    sql += " AND COALESCE(NULLIF(influencer_type, ''), NULLIF(tags, ''), NULLIF(category, ''), '') LIKE ?";
+    params.push('%' + type + '%');
+  }
+
+  const deliverable = influencerTextFilter(filters, 'filter_content_deliverable');
+  if (deliverable) {
+    sql += " AND COALESCE(NULLIF(content_deliverable, ''), NULLIF(collab_type, ''), '') LIKE ?";
+    params.push('%' + deliverable + '%');
+  }
+
+  const search = influencerTextFilter(filters, 'search');
+  if (search) {
+    sql += ` AND (
+      CAST(id AS TEXT) LIKE ? OR
+      kol_handle LIKE ? OR
+      profile_link LIKE ? OR
+      content_style LIKE ? OR
+      brand_collab_history LIKE ? OR
+      project_name LIKE ? OR
+      product_name LIKE ? OR
+      tags LIKE ? OR
+      category LIKE ? OR
+      platform LIKE ? OR
+      region LIKE ? OR
+      contact_email LIKE ? OR
+      content_deliverable LIKE ? OR
+      influencer_type LIKE ? OR
+      parent_record LIKE ? OR
+      CAST(followers AS TEXT) LIKE ? OR
+      CAST(avg_views_10 AS TEXT) LIKE ? OR
+      CAST(cost_usd AS TEXT) LIKE ? OR
+      CAST(quoted_price AS TEXT) LIKE ? OR
+      CAST(cpm AS TEXT) LIKE ? OR
+      CAST(cpv AS TEXT) LIKE ?
+    )`;
+    for (let i = 0; i < 21; i++) params.push('%' + search + '%');
+  }
+
+  const id = influencerIntegerFilter(filters, 'filter_id', { allowHash: true, minimum: 1 });
+  if (id !== null) {
+    sql += ' AND id = ?';
+    params.push(id);
+  }
+  const followers = influencerIntegerFilter(filters, 'filter_followers');
+  if (followers !== null) {
+    sql += ' AND followers = ?';
+    params.push(followers);
+  }
+  const cost = influencerAmountFilter(filters, 'filter_cost');
+  if (cost !== null) {
+    sql += ' AND COALESCE(NULLIF(quoted_price, 0), cost_usd, 0) = ?';
+    params.push(cost);
+  }
+  const minFollowers = influencerIntegerFilter(filters, 'min_followers');
+  if (minFollowers !== null) {
+    sql += ' AND followers >= ?';
+    params.push(minFollowers);
+  }
+  const maxFollowers = influencerIntegerFilter(filters, 'max_followers');
+  if (maxFollowers !== null) {
+    sql += ' AND followers <= ?';
+    params.push(maxFollowers);
+  }
+
+  const sortBy = influencerTextFilter(filters, 'sort_by');
+  const sortColumns = { engagement: 'avg_engagement', followers: 'followers', cost_usd: 'cost_usd' };
+  const sortColumn = sortColumns[sortBy] || 'followers';
+  sql += ` ORDER BY ${sortColumn} DESC`;
+  if (options.limit !== false) sql += ' LIMIT 200';
+  return { sql, params };
+}
+
+function sendInfluencerFilterError(res, error) {
+  if (!(error instanceof InfluencerFilterError)) return false;
+  res.status(error.statusCode).json({ error: error.message, code: error.code });
+  return true;
+}
+
 module.exports = function(app, db, authMiddleware, options = {}) {
 
 const businessKnowledge = require('./services/business_knowledge_service');
@@ -67,46 +246,14 @@ function requiresFeishuReconciliation(failure) {
 
 // ===== INFLUENCER ROUTES =====
 app.get('/api/influencers', authMiddleware, (req, res) => {
-  const { platform, category, region, search, min_followers, max_followers, sort_by, project_name, product_name, tags } = req.query;
-  let sql = 'SELECT * FROM influencers WHERE is_active = 1';
-  const params = [];
-  if (platform) { sql += ' AND platform = ?'; params.push(platform); }
-  if (category) { sql += ' AND category = ?'; params.push(category); }
-  if (region) { sql += ' AND region = ?'; params.push(region); }
-  if (project_name) { sql += ' AND project_name LIKE ?'; params.push('%' + project_name + '%'); }
-  if (product_name) { sql += ' AND product_name LIKE ?'; params.push('%' + product_name + '%'); }
-  if (tags) { sql += ' AND (tags LIKE ? OR category LIKE ?)'; params.push('%' + tags + '%', '%' + tags + '%'); }
-  if (search) {
-    sql += ` AND (
-      CAST(id AS TEXT) LIKE ? OR
-      kol_handle LIKE ? OR
-      profile_link LIKE ? OR
-      content_style LIKE ? OR
-      brand_collab_history LIKE ? OR
-      project_name LIKE ? OR
-      product_name LIKE ? OR
-      tags LIKE ? OR
-      category LIKE ? OR
-      platform LIKE ? OR
-      region LIKE ? OR
-      contact_email LIKE ? OR
-      content_deliverable LIKE ? OR
-      influencer_type LIKE ? OR
-      parent_record LIKE ? OR
-      CAST(followers AS TEXT) LIKE ? OR
-      CAST(avg_views_10 AS TEXT) LIKE ? OR
-      CAST(cost_usd AS TEXT) LIKE ? OR
-      CAST(quoted_price AS TEXT) LIKE ? OR
-      CAST(cpm AS TEXT) LIKE ? OR
-      CAST(cpv AS TEXT) LIKE ?
-    )`;
-    for (let i = 0; i < 21; i++) params.push('%' + search + '%');
+  try {
+    const query = buildInfluencerSelect(req.query);
+    const influencers = db.prepare(query.sql).all(...query.params);
+    res.json({ influencers, total: influencers.length });
+  } catch (error) {
+    if (sendInfluencerFilterError(res, error)) return;
+    res.status(500).json({ error: error.message });
   }
-  if (min_followers) { sql += ' AND followers >= ?'; params.push(parseInt(min_followers)); }
-  if (max_followers) { sql += ' AND followers <= ?'; params.push(parseInt(max_followers)); }
-  sql += ' ORDER BY ' + ((sort_by === 'engagement' || sort_by === 'followers' || sort_by === 'cost_usd') ? sort_by : 'followers') + ' DESC LIMIT 200';
-  const influencers = db.prepare(sql).all(...params);
-  res.json({ influencers, total: influencers.length });
 });
 
 app.post('/api/influencers', authMiddleware, (req, res) => {
@@ -598,9 +745,11 @@ app.post('/api/campaigns/:id/feishu-deliveries/:deliveryId/retry', authMiddlewar
 app.post('/api/influencers/export', authMiddleware, (req, res) => {
   try {
     const { mode, ids, filters } = req.body;
-    let sql = 'SELECT * FROM influencers WHERE is_active = 1';
-    const params = [];
+    let sql;
+    let params;
     if (mode === 'selected') {
+      sql = 'SELECT * FROM influencers WHERE is_active = 1';
+      params = [];
       const selectedIds = Array.isArray(ids)
         ? ids.map(Number).filter(function(id) { return Number.isInteger(id) && id > 0; })
         : [];
@@ -610,49 +759,19 @@ app.post('/api/influencers/export', authMiddleware, (req, res) => {
       } else {
         sql += ' AND 1 = 0';
       }
-    } else if (mode === 'filtered' && filters) {
-      if (filters.platform) { sql += ' AND platform = ?'; params.push(filters.platform); }
-      if (filters.category) { sql += ' AND category = ?'; params.push(filters.category); }
-      if (filters.region) { sql += ' AND region = ?'; params.push(filters.region); }
-      if (filters.project_name) { sql += ' AND project_name LIKE ?'; params.push('%' + filters.project_name + '%'); }
-      if (filters.product_name) { sql += ' AND product_name LIKE ?'; params.push('%' + filters.product_name + '%'); }
-      if (filters.tags) { sql += ' AND (tags LIKE ? OR category LIKE ?)'; params.push('%' + filters.tags + '%', '%' + filters.tags + '%'); }
-      if (filters.search) {
-        sql += ` AND (
-          CAST(id AS TEXT) LIKE ? OR
-          kol_handle LIKE ? OR
-          profile_link LIKE ? OR
-          content_style LIKE ? OR
-          brand_collab_history LIKE ? OR
-          project_name LIKE ? OR
-          product_name LIKE ? OR
-          tags LIKE ? OR
-          category LIKE ? OR
-          platform LIKE ? OR
-          region LIKE ? OR
-          contact_email LIKE ? OR
-          content_deliverable LIKE ? OR
-          influencer_type LIKE ? OR
-          parent_record LIKE ? OR
-          CAST(followers AS TEXT) LIKE ? OR
-          CAST(avg_views_10 AS TEXT) LIKE ? OR
-          CAST(cost_usd AS TEXT) LIKE ? OR
-          CAST(quoted_price AS TEXT) LIKE ? OR
-          CAST(cpm AS TEXT) LIKE ? OR
-          CAST(cpv AS TEXT) LIKE ?
-        )`;
-        for (let i = 0; i < 21; i++) params.push('%' + filters.search + '%');
-      }
-      if (filters.min_followers) { sql += ' AND followers >= ?'; params.push(parseInt(filters.min_followers)); }
-      if (filters.max_followers) { sql += ' AND followers <= ?'; params.push(parseInt(filters.max_followers)); }
+      sql += ' ORDER BY followers DESC';
+    } else {
+      const query = buildInfluencerSelect(mode === 'filtered' ? filters : {}, { limit: false });
+      sql = query.sql;
+      params = query.params;
     }
-    sql += ' ORDER BY followers DESC';
     const influencers = db.prepare(sql).all(...params);
     const csv = influencerWorkflow.buildInfluencerCsv(influencers);
     res.setHeader('Content-Type', 'text/csv;charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename=influencers_export.csv');
     res.send(csv);
   } catch (e) {
+    if (sendInfluencerFilterError(res, e)) return;
     res.status(500).json({ error: e.message });
   }
 });

@@ -796,6 +796,144 @@ test('influencer list search covers ids, tags, links, contacts, resource fields,
   db.close();
 });
 
+test('influencer column filters cover every displayed data field and keep filtered exports in parity', async () => {
+  const db = freshDb();
+  const routes = mountRoutes(db);
+  const targetId = insertInfluencer(db, {
+    platform: 'YouTube',
+    kol_handle: '@column_target',
+    profile_link: 'https://example.com/column-target-video',
+    followers: 777123,
+    avg_views_10: 54321,
+    avg_engagement: 4.8,
+    category: 'Outdoor Search',
+    region: 'US-West',
+    content_style: 'field filter style',
+    cost_usd: 987,
+    cpm: 12,
+    cpv: 0.11,
+    brand_collab_history: 'field filter history',
+    contact_email: 'column-target@example.com',
+    data_source: 'test',
+    project_name: 'Column Project Alpha',
+    product_name: 'Column Product Prime',
+    tags: 'solar,column-tag',
+    quoted_price: 3210,
+    content_deliverable: 'one dedicated field review',
+    influencer_type: 'Precision Creator',
+    parent_record: 'CRM-COLUMN-777'
+  });
+  const distractorId = insertInfluencer(db, {
+    platform: 'Instagram',
+    kol_handle: '@column_distractor',
+    profile_link: 'https://example.com/other-video',
+    followers: 120000,
+    category: 'Lifestyle',
+    region: 'DE',
+    cost_usd: 800,
+    contact_email: 'column-distractor@example.com',
+    data_source: 'test',
+    project_name: 'Different Project',
+    product_name: 'Different Product',
+    tags: 'home',
+    quoted_price: 1400,
+    content_deliverable: 'two reels',
+    influencer_type: 'Lifestyle Creator',
+    parent_record: 'CRM-OTHER'
+  });
+
+  const cases = [
+    { filter_id: '#' + targetId },
+    { filter_kol_handle: 'column_target' },
+    { filter_platform: 'YouTu' },
+    { filter_followers: '777123' },
+    { filter_project_name: 'Project Alpha' },
+    { filter_product_name: 'Product Prime' },
+    { filter_region: 'US-West' },
+    { filter_type: 'Precision' },
+    { filter_parent_record: 'COLUMN-777' },
+    { filter_profile_link: 'column-target-video' },
+    { filter_content_deliverable: 'dedicated field' },
+    { filter_cost: '3210' }
+  ];
+
+  for (const filters of cases) {
+    const list = await invoke(routes, 'GET /api/influencers', { query: filters });
+    assert.equal(list.statusCode, 200, JSON.stringify(filters));
+    const listIds = list.payload.influencers.map(function(row) { return row.id; });
+    const listHandles = list.payload.influencers.map(function(row) { return row.kol_handle; });
+    assert.equal(listIds.includes(targetId), true, JSON.stringify(filters));
+    assert.equal(listIds.includes(distractorId), false, JSON.stringify(filters));
+
+    const exported = await invoke(routes, 'POST /api/influencers/export', {
+      body: { mode: 'filtered', filters }
+    });
+    assert.equal(exported.statusCode, 200, JSON.stringify(filters));
+    assert.deepEqual(
+      parseCsvRows(exported.body).slice(1).map(function(row) { return row[5]; }),
+      listHandles,
+      'filtered export must mirror column filter ' + JSON.stringify(filters)
+    );
+  }
+
+  const fallbackCostId = insertInfluencer(db, {
+    platform: 'TikTok',
+    kol_handle: '@fallback_cost',
+    profile_link: 'https://example.com/fallback-cost',
+    followers: 88000,
+    category: 'Tech',
+    region: 'UK',
+    cost_usd: 2468,
+    quoted_price: 0,
+    data_source: 'test'
+  });
+  const fallbackCost = await invoke(routes, 'GET /api/influencers', { query: { filter_cost: '2468' } });
+  assert.equal(fallbackCost.payload.influencers.some(function(row) { return row.id === fallbackCostId; }), true);
+
+  const engagementSorted = await invoke(routes, 'GET /api/influencers', { query: { sort_by: 'engagement' } });
+  assert.equal(engagementSorted.statusCode, 200);
+  for (let index = 1; index < engagementSorted.payload.influencers.length; index += 1) {
+    assert.ok(
+      Number(engagementSorted.payload.influencers[index - 1].avg_engagement || 0) >= Number(engagementSorted.payload.influencers[index].avg_engagement || 0),
+      'engagement sorting must use avg_engagement'
+    );
+  }
+
+  db.close();
+});
+
+test('influencer column filters reject malformed or oversized values for list and export routes', async () => {
+  const db = freshDb();
+  const routes = mountRoutes(db);
+  const invalidQueries = [
+    { filter_id: 'not-an-id' },
+    { filter_followers: '-1' },
+    { filter_cost: 'NaN' },
+    { filter_kol_handle: ['one', 'two'] },
+    { filter_profile_link: 'x'.repeat(201) }
+  ];
+
+  for (const filters of invalidQueries) {
+    const list = await invoke(routes, 'GET /api/influencers', { query: filters });
+    assert.equal(list.statusCode, 400, JSON.stringify(filters));
+    assert.equal(list.payload.code, 'INVALID_INFLUENCER_FILTER');
+
+    const exported = await invoke(routes, 'POST /api/influencers/export', {
+      body: { mode: 'filtered', filters }
+    });
+    assert.equal(exported.statusCode, 400, JSON.stringify(filters));
+    assert.equal(exported.payload.code, 'INVALID_INFLUENCER_FILTER');
+  }
+
+  const invalidFilterContainer = await invoke(routes, 'POST /api/influencers/export', {
+    body: { mode: 'filtered', filters: 'not-an-object' }
+  });
+  assert.equal(invalidFilterContainer.statusCode, 400);
+  assert.equal(invalidFilterContainer.payload.code, 'INVALID_INFLUENCER_FILTER');
+
+  db.close();
+});
+
 test('influencer export uses approved headers and mirrors active list filtering for all, filtered, and selected rows', async () => {
   const db = freshDb();
   const routes = mountRoutes(db);
@@ -1942,12 +2080,18 @@ test('m4 frontend keeps import, feishu, and order-resource controls wired', () =
   const repoRoot = path.resolve(__dirname, '..', '..', '..');
   const indexHtml = fs.readFileSync(path.join(repoRoot, 'platform', 'index.html'), 'utf8');
   const appJs = fs.readFileSync(path.join(repoRoot, 'platform', 'app.js'), 'utf8');
+  const componentCss = fs.readFileSync(path.join(repoRoot, 'platform', 'client', 'styles', 'components.css'), 'utf8');
 
   assert.match(indexHtml, /id="collabFilter"/);
   assert.match(indexHtml, /id="collabStatsBar"/);
   assert.match(indexHtml, /id="m4CampaignContext"/);
   assert.match(indexHtml, /id="m4CampaignContextStatus"/);
   assert.match(indexHtml, /id="filt_search"/);
+  assert.match(indexHtml, /id="m4SavedViewSelect"/);
+  assert.match(indexHtml, /id="m4SavedViewName"/);
+  assert.match(indexHtml, /onclick="saveM4SavedView\(\)"/);
+  assert.match(indexHtml, /onclick="deleteM4SavedView\(\)"/);
+  assert.match(indexHtml, /onclick="clearM4Filters\(\)"/);
   assert.match(indexHtml, /id="infFileModal" accept="\.csv,\.json,\.xlsx"/);
   assert.match(indexHtml, /id="feishuConnectionStatus"/);
   assert.match(indexHtml, /id="feishuDeliveryStatus"/);
@@ -1955,6 +2099,22 @@ test('m4 frontend keeps import, feishu, and order-resource controls wired', () =
   assert.match(indexHtml, /id="feishuTestButton"/);
   assert.match(appJs, /m4-table thead th\{position:sticky/);
   assert.match(appJs, /m4-table input\[type="checkbox"\]\{width:16px!important;height:16px!important/);
+  assert.match(appJs, /var M4_COLUMN_FILTER_DEFINITIONS =/);
+  assert.match(appJs, /var M4_SAVED_VIEW_STORAGE_PREFIX = 'tm_m4_saved_views_v1:'/);
+  assert.match(appJs, /var m4ActiveFilterOwnerUserId = null/);
+  assert.match(appJs, /m4ActiveFilterOwnerUserId !== currentFilterOwnerUserId/);
+  assert.match(appJs, /function ensureInfluencerTableShell/);
+  assert.match(appJs, /data-role="influencer-results-body"/);
+  assert.match(appJs, /function saveM4SavedView/);
+  assert.match(appJs, /function applyM4SavedView/);
+  assert.match(appJs, /function deleteM4SavedView/);
+  assert.match(appJs, /function clearM4Filters/);
+  assert.match(appJs, /m4InfluencerRequestSequence/);
+  assert.match(appJs, /m4InfluencerRequestSequence \+= 1/);
+  assert.match(componentCss, /\.m4-table thead \.m4-filter-row th/);
+  assert.match(componentCss, /--m4-table-header-height: 40px/);
+  assert.match(componentCss, /top: var\(--m4-table-header-height\)/);
+  assert.match(componentCss, /\.m4-table \.m4-column-filter/);
   assert.match(appJs, /function handleDrop/);
   assert.match(appJs, /function openInfUploadModal/);
   assert.match(appJs, /function handleUploadModal/);
@@ -1993,6 +2153,10 @@ test('m4 frontend keeps import, feishu, and order-resource controls wired', () =
     'exportFiltered',
     'exportInf',
     'exportSelected',
+    'saveM4SavedView',
+    'applyM4SavedView',
+    'deleteM4SavedView',
+    'clearM4Filters',
     'getSelectedInfIds',
     'handleUpload',
     'importInfluencers',
@@ -2033,6 +2197,10 @@ test('m4 frontend keeps import, feishu, and order-resource controls wired', () =
     'exportAll',
     'exportFiltered',
     'exportSelected',
+    'saveM4SavedView',
+    'applyM4SavedView',
+    'deleteM4SavedView',
+    'clearM4Filters',
     'toggleAll',
     'startCollab',
     'submitCollabOrder',

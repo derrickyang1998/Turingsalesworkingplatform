@@ -32,6 +32,10 @@ const task9M4DuplicateNames = Object.freeze([
   'exportFiltered',
   'exportInf',
   'exportSelected',
+  'saveM4SavedView',
+  'applyM4SavedView',
+  'deleteM4SavedView',
+  'clearM4Filters',
   'getSelectedInfIds',
   'handleUpload',
   'importInfluencers',
@@ -51,7 +55,11 @@ const task9M4DuplicateNames = Object.freeze([
 const task9M4FinalDefinitionContracts = Object.freeze({
   initM4: [
     'ensureM4TableStyles();',
-    'Promise.all([loadInfluencersFromAPI(), loadM4Campaigns(), loadFeishuStatus()]).then(function() { loadCollaborations(); });'
+    'ensureInfluencerTableShell();',
+    'renderM4SavedViews();',
+    'Promise.all([loadInfluencersFromAPI(), loadM4Campaigns(), loadFeishuStatus()]).then(function() {',
+    'loadCollaborations();',
+    'loadFeishuOutbox();'
   ],
   loadInfluencersFromAPI: [
     "apiFetch('/influencers' + qs)",
@@ -59,12 +67,30 @@ const task9M4FinalDefinitionContracts = Object.freeze({
     'renderInfTable(lastInfAPI);'
   ],
   matchInfluencers: [
-    'function matchInfluencers() { return loadInfluencersFromAPI(); }'
+    'm4InfluencerSearchTimer = setTimeout(function() {',
+    'loadInfluencersFromAPI();'
   ],
   renderInfTable: [
-    '<table class="m4-table">',
-    'toggleAll(this)',
+    'var body = ensureInfluencerTableShell();',
+    'data.map(function(inf)',
     'startCollab('
+  ],
+  saveM4SavedView: [
+    'readM4SavedViews();',
+    'normalizeM4SavedViewFilters(m4Filters())',
+    'writeM4SavedViews(views)'
+  ],
+  applyM4SavedView: [
+    'setM4FilterValues(view.filters);',
+    'loadInfluencersFromAPI();'
+  ],
+  deleteM4SavedView: [
+    'readM4SavedViews().filter(function(view)',
+    'writeM4SavedViews(views)'
+  ],
+  clearM4Filters: [
+    'setM4FilterValues({});',
+    'return loadInfluencersFromAPI();'
   ],
   toggleAll: [
     "document.querySelectorAll('.infcb').forEach(function(item) { item.checked = cb.checked; });"
@@ -250,8 +276,8 @@ const expectedRouteSources = Object.freeze([
 ]);
 
 const expectedRouteCountsBySource = Object.freeze({
-  'platform/server/server.js': 42,
-  'platform/server/routes.js': 11,
+  'platform/server/server.js': 44,
+  'platform/server/routes.js': 14,
   'platform/server/routes_customers.js': 34,
   'platform/server/routes_brands.js': 4,
   'platform/server/routes_workflow.js': 22,
@@ -647,7 +673,7 @@ test('generateManifest records every registered route contract in deterministic 
     duplicateFixturePath: fixturePath
   });
 
-  assert.equal(manifest.routeContracts.length, 125);
+  assert.equal(manifest.routeContracts.length, 130);
   assert.deepEqual([...new Set(manifest.routeContracts.map((route) => route.source))], expectedRouteSources);
 
   const routeCountsBySource = Object.fromEntries(

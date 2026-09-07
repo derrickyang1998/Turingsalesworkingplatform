@@ -1042,6 +1042,16 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
       <button class="btn btn-sm" onclick="exportFiltered()">📥 导出筛选</button>
       <button class="btn btn-sm" onclick="exportSelected()">📥 导出选中</button>
     </div>
+    <div class="m4-view-toolbar" aria-label="网红筛选视图">
+      <select id="m4SavedViewSelect" aria-label="选择已保存的网红筛选视图" onchange="applyM4SavedView(this.value)">
+        <option value="">筛选视图</option>
+      </select>
+      <input id="m4SavedViewName" aria-label="网红筛选视图名称" maxlength="32" placeholder="视图名称">
+      <button class="btn btn-outline btn-sm" type="button" onclick="saveM4SavedView()">保存视图</button>
+      <button class="btn btn-outline btn-sm" id="m4DeleteSavedView" type="button" onclick="deleteM4SavedView()" disabled>删除视图</button>
+      <button class="btn btn-outline btn-sm" type="button" onclick="clearM4Filters()">清空筛选</button>
+      <span id="m4FilterStatus" role="status" aria-live="polite">正在加载网红...</span>
+    </div>
     <div class="table-container" id="infTableContainer" style="max-height:450px;overflow-y:auto"><p style="text-align:center;padding:30px;opacity:.5">请先在「导入 & 飞书」页面上传网红数据</p></div>
   </div>
 </div>

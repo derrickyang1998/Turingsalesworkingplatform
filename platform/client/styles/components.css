@@ -191,6 +191,115 @@ thead th {
   overscroll-behavior: contain;
 }
 
+.m4-view-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--tm-space-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--tm-space-3);
+  padding-top: var(--tm-space-3);
+  border-top: 1px solid var(--tm-color-border);
+}
+
+.m4-view-toolbar select,
+.m4-view-toolbar input {
+  width: auto;
+  min-height: 32px;
+  font-size: 12px;
+}
+
+#m4SavedViewSelect {
+  flex: 0 0 180px;
+}
+
+#m4SavedViewName {
+  flex: 0 1 180px;
+}
+
+#m4FilterStatus {
+  margin-left: auto;
+  color: var(--tm-color-text-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+#infTableContainer {
+  position: relative;
+  --m4-table-header-height: 40px;
+}
+
+#infTableContainer .m4-table {
+  min-width: 1740px;
+  table-layout: fixed;
+}
+
+.m4-table thead tr:first-child th {
+  top: 0;
+  height: var(--m4-table-header-height);
+  z-index: 5;
+  white-space: nowrap;
+}
+
+.m4-table thead .m4-filter-row th {
+  top: var(--m4-table-header-height);
+  height: 44px;
+  padding: 6px 5px;
+  z-index: 4;
+  background: var(--tm-color-surface);
+}
+
+.m4-table .m4-column-filter {
+  width: 100%;
+  min-width: 0;
+  min-height: 30px;
+  height: 30px;
+  padding: 4px 7px;
+  border-radius: var(--tm-radius-compact);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.m4-table tbody td:not(:first-child):not(:last-child) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.m4-table th:nth-child(1),
+.m4-table td:nth-child(1) { width: 42px; }
+.m4-table th:nth-child(2),
+.m4-table td:nth-child(2) { width: 76px; }
+.m4-table th:nth-child(3),
+.m4-table td:nth-child(3) { width: 140px; }
+.m4-table th:nth-child(4),
+.m4-table td:nth-child(4) { width: 108px; }
+.m4-table th:nth-child(5),
+.m4-table td:nth-child(5) { width: 112px; }
+.m4-table th:nth-child(6),
+.m4-table td:nth-child(6),
+.m4-table th:nth-child(7),
+.m4-table td:nth-child(7) { width: 150px; }
+.m4-table th:nth-child(8),
+.m4-table td:nth-child(8) { width: 112px; }
+.m4-table th:nth-child(9),
+.m4-table td:nth-child(9) { width: 140px; }
+.m4-table th:nth-child(10),
+.m4-table td:nth-child(10) { width: 140px; }
+.m4-table th:nth-child(11),
+.m4-table td:nth-child(11) { width: 210px; }
+.m4-table th:nth-child(12),
+.m4-table td:nth-child(12) { width: 170px; }
+.m4-table th:nth-child(13),
+.m4-table td:nth-child(13) { width: 110px; }
+.m4-table th:nth-child(14),
+.m4-table td:nth-child(14) { width: 90px; }
+
+.m4-table .m4-empty-row td {
+  height: 120px;
+  color: var(--tm-color-text-muted);
+  text-align: center;
+}
+
 /* Performance monitoring keeps campaign operations and commercial inputs compact. */
 .tm-performance-page {
   display: grid;

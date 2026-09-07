@@ -2543,8 +2543,7 @@ function switchTab(id, options) { options = options || {}; if (!options.skipHist
 lastMatch = []; var lastInfAPI = [];
 
 async function smartMatch() {
-  var c = document.getElementById('infTableContainer');
-  c.innerHTML = '<p style=\"text-align:center;padding:30px;opacity:.5\">智能匹配中...</p>';
+  renderInfTable([], { message: '智能匹配中...' });
   var body = {};
   var cat = document.getElementById('filt_category')?.value;
   var plat = document.getElementById('filt_platform')?.value;
@@ -2559,7 +2558,7 @@ async function smartMatch() {
     renderInfTable(d.matches || [], true);
     toast('Smart matched ' + (d.matches || []).length + ' influencers');
   } catch (e) {
-    c.innerHTML = '<p style=\"text-align:center;padding:30px;opacity:.5\">Match failed: ' + e.message + '</p>';
+    renderInfTable([], { message: '匹配失败：' + (e.message || '未知错误') });
   }
 }
 
@@ -4322,9 +4321,35 @@ function ensureM4TableStyles() {
   if (document.getElementById('m4TableStickyStyles')) return;
   var style = document.createElement('style');
   style.id = 'm4TableStickyStyles';
-  style.textContent = '.m4-table{border-collapse:separate;border-spacing:0;min-width:1320px}.m4-table thead th{position:sticky;top:0;z-index:3;background:var(--surface);box-shadow:0 1px 0 var(--border)}.m4-table th:first-child,.m4-table td:first-child{width:42px;text-align:center}.m4-table input[type="checkbox"]{width:16px!important;height:16px!important;min-width:16px;margin:0;vertical-align:middle;accent-color:#1a1a1a}.m4-table tbody tr:hover{background:#fafaf9}';
+  style.textContent = '.m4-table{border-collapse:separate;border-spacing:0;min-width:1320px}.m4-table thead th{position:sticky;top:0;z-index:3;background:var(--surface);box-shadow:0 1px 0 var(--border)}.m4-table th:first-child,.m4-table td:first-child{width:42px;text-align:center}.m4-table input[type="checkbox"]{width:16px!important;height:16px!important;min-width:16px;margin:0;vertical-align:middle;accent-color:var(--tm-color-accent,#1a1a1a)}.m4-table tbody tr:hover{background:#fafaf9}';
   document.head.appendChild(style);
 }
+var M4_COLUMN_FILTER_DEFINITIONS = [
+  { key: 'filter_id', elementId: 'm4col_id', label: 'ID', placeholder: '精确 ID', inputMode: 'numeric' },
+  { key: 'filter_kol_handle', elementId: 'm4col_kol_handle', label: 'KOL', placeholder: '名称' },
+  { key: 'filter_platform', elementId: 'm4col_platform', label: 'Platform', placeholder: '平台' },
+  { key: 'filter_followers', elementId: 'm4col_followers', label: 'Followers', placeholder: '精确值', inputMode: 'numeric' },
+  { key: 'filter_project_name', elementId: 'm4col_project_name', label: 'Project', placeholder: '项目' },
+  { key: 'filter_product_name', elementId: 'm4col_product_name', label: 'Product', placeholder: '产品' },
+  { key: 'filter_region', elementId: 'm4col_region', label: 'Region', placeholder: '地区' },
+  { key: 'filter_type', elementId: 'm4col_type', label: 'Type', placeholder: '类型 / 标签' },
+  { key: 'filter_parent_record', elementId: 'm4col_parent_record', label: 'Parent', placeholder: '父记录' },
+  { key: 'filter_profile_link', elementId: 'm4col_profile_link', label: 'Link', placeholder: '链接' },
+  { key: 'filter_content_deliverable', elementId: 'm4col_content_deliverable', label: 'Deliverable', placeholder: '交付内容' },
+  { key: 'filter_cost', elementId: 'm4col_cost', label: 'Cost', placeholder: '精确金额', inputMode: 'decimal' }
+];
+var M4_FILTER_ELEMENT_IDS = {
+  search: 'filt_search',
+  platform: 'filt_platform',
+  region: 'filt_region',
+  project_name: 'filt_project',
+  product_name: 'filt_product',
+  tags: 'filt_tags'
+};
+var M4_SAVED_VIEW_STORAGE_PREFIX = 'tm_m4_saved_views_v1:';
+var m4InfluencerRequestSequence = 0;
+var m4InfluencerSearchTimer = null;
+var m4ActiveFilterOwnerUserId = null;
 var m4Campaigns = [];
 var m4CampaignContextId = null;
 var lastCollabRows = [];
@@ -4428,71 +4453,287 @@ function syncM4CampaignContextFromWorkflow() {
 }
 function initM4() {
   ensureM4TableStyles();
+  ensureInfluencerTableShell();
+  var currentFilterOwnerUserId = readPositiveInteger(CURRENT_USER && CURRENT_USER.id);
+  if (m4ActiveFilterOwnerUserId !== currentFilterOwnerUserId) setM4FilterValues({});
+  m4ActiveFilterOwnerUserId = currentFilterOwnerUserId;
+  renderM4SavedViews();
   Promise.all([loadInfluencersFromAPI(), loadM4Campaigns(), loadFeishuStatus()]).then(function() {
     loadCollaborations();
     loadFeishuOutbox();
   });
 }
 function m4Filters() {
-  return {
-    platform: document.getElementById('filt_platform')?.value || '',
-    region: document.getElementById('filt_region')?.value || '',
-    project_name: document.getElementById('filt_project')?.value || '',
-    product_name: document.getElementById('filt_product')?.value || '',
-    tags: document.getElementById('filt_tags')?.value || '',
-    search: document.getElementById('filt_search')?.value || document.getElementById('filt_project')?.value || document.getElementById('filt_product')?.value || document.getElementById('filt_tags')?.value || ''
-  };
+  var filters = {};
+  Object.keys(M4_FILTER_ELEMENT_IDS).forEach(function(key) {
+    var element = document.getElementById(M4_FILTER_ELEMENT_IDS[key]);
+    filters[key] = element ? String(element.value || '').trim() : '';
+  });
+  M4_COLUMN_FILTER_DEFINITIONS.forEach(function(definition) {
+    var element = document.getElementById(definition.elementId);
+    filters[definition.key] = element ? String(element.value || '').trim() : '';
+  });
+  return filters;
 }
 function loadInfluencersFromAPI() {
+  var requestSequence = ++m4InfluencerRequestSequence;
   var filters = m4Filters();
   var qs = '?sort_by=followers';
   Object.keys(filters).forEach(function(key) {
     if (filters[key]) qs += '&' + encodeURIComponent(key) + '=' + encodeURIComponent(filters[key]);
   });
-  return apiFetch('/influencers' + qs).then(function(r) { return r.json(); }).then(function(d) {
+  setM4FilterStatus('正在筛选...');
+  return apiFetch('/influencers' + qs).then(function(r) {
+    return r.json().then(function(data) { return { response: r, data: data }; });
+  }).then(function(result) {
+    if (requestSequence !== m4InfluencerRequestSequence) return lastInfAPI;
+    if (!result.response.ok) throw new Error(result.data.error || '网红列表加载失败');
+    var d = result.data;
     lastInfAPI = d.influencers || [];
     lastMatch = lastInfAPI;
     renderInfTable(lastInfAPI);
+    setM4FilterStatus('显示 ' + lastInfAPI.length + ' 条');
     return lastInfAPI;
   }).catch(function(e) {
+    if (requestSequence !== m4InfluencerRequestSequence) return lastInfAPI;
     lastInfAPI = [];
     lastMatch = [];
-    var c = document.getElementById('infTableContainer');
-    if (c) c.innerHTML = '<p style="text-align:center;padding:30px;opacity:.5">Load failed: ' + esc(e.message) + '</p>';
+    renderInfTable([], { message: '加载失败：' + (e.message || '未知错误') });
+    setM4FilterStatus('加载失败');
     return [];
   });
 }
-function matchInfluencers() { return loadInfluencersFromAPI(); }
+function matchInfluencers() {
+  m4InfluencerRequestSequence += 1;
+  setM4FilterStatus('正在筛选...');
+  if (m4InfluencerSearchTimer) clearTimeout(m4InfluencerSearchTimer);
+  m4InfluencerSearchTimer = setTimeout(function() {
+    m4InfluencerSearchTimer = null;
+    loadInfluencersFromAPI();
+  }, 220);
+}
 function fmtCount(n) {
   n = Number(n || 0);
   if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
   if (n >= 1000) return Math.round(n / 1000) + 'K';
   return String(n);
 }
-function renderInfTable(data) {
+
+function m4ColumnFilterInput(definition) {
+  var inputMode = definition.inputMode ? ' inputmode="' + definition.inputMode + '"' : '';
+  return '<input class="m4-column-filter" id="' + definition.elementId + '" data-filter-key="' + definition.key + '" aria-label="按 ' + esc(definition.label) + ' 筛选网红" autocomplete="off" maxlength="200" placeholder="' + esc(definition.placeholder) + '"' + inputMode + ' oninput="matchInfluencers()">';
+}
+
+function ensureInfluencerTableShell() {
   ensureM4TableStyles();
   var c = document.getElementById('infTableContainer');
-  if (!c) return;
-  if (!data || !data.length) { c.innerHTML = '<p style="text-align:center;padding:30px;opacity:.5">No influencers</p>'; return; }
-  var h = '<table class="m4-table"><thead><tr><th><label class="tm-checkbox-target"><input type="checkbox" id="selectAllInf" aria-label="全选网红" onchange="toggleAll(this)"></label></th><th>ID</th><th>KOL</th><th>Platform</th><th>Followers</th><th>Project</th><th>Product</th><th>Region</th><th>Type</th><th>Parent</th><th>Link</th><th>Deliverable</th><th>Cost</th><th>Action</th></tr></thead><tbody>';
-  data.forEach(function(inf) {
-    h += '<tr><td><label class="tm-checkbox-target"><input type="checkbox" class="infcb" aria-label="选择网红 ' + esc(inf.kol_handle || inf.id || '') + '" value="' + esc(inf.id || '') + '" onchange="syncInfluencerSelectionState()"></label></td>';
-    h += '<td>#' + esc(inf.id || '') + '</td>';
-    h += '<td><strong>' + esc(inf.kol_handle || '') + '</strong></td>';
-    h += '<td>' + esc(inf.platform || '-') + '</td>';
-    h += '<td>' + fmtCount(inf.followers) + '</td>';
-    h += '<td>' + esc(inf.project_name || '-') + '</td>';
-    h += '<td>' + esc(inf.product_name || '-') + '</td>';
-    h += '<td>' + esc(inf.region || '-') + '</td>';
-    h += '<td>' + esc(inf.influencer_type || inf.tags || inf.category || '-') + '</td>';
-    h += '<td>' + esc(inf.parent_record || '-') + '</td>';
-    h += '<td style="max-width:160px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(inf.profile_link || '-') + '</td>';
-    h += '<td style="max-width:150px">' + esc(inf.content_deliverable || inf.collab_type || '-') + '</td>';
-    h += '<td>$' + (inf.quoted_price || inf.cost_usd || 0) + '</td>';
-    h += '<td><button class="btn btn-sm btn-primary" onclick="startCollab(' + Number(inf.id || 0) + ')">下单</button></td></tr>';
+  if (!c) return null;
+  var body = c.querySelector('[data-role="influencer-results-body"]');
+  if (body) return body;
+
+  var labels = M4_COLUMN_FILTER_DEFINITIONS.map(function(definition) {
+    return '<th scope="col">' + esc(definition.label) + '</th>';
+  }).join('');
+  var filters = M4_COLUMN_FILTER_DEFINITIONS.map(function(definition) {
+    return '<th>' + m4ColumnFilterInput(definition) + '</th>';
+  }).join('');
+  c.innerHTML = '<table class="m4-table"><thead>' +
+    '<tr><th scope="col"><label class="tm-checkbox-target"><input type="checkbox" id="selectAllInf" aria-label="全选网红" onchange="toggleAll(this)"></label></th>' + labels + '<th scope="col">Action</th></tr>' +
+    '<tr class="m4-filter-row"><th aria-hidden="true"></th>' + filters + '<th aria-hidden="true"></th></tr>' +
+    '</thead><tbody data-role="influencer-results-body"></tbody></table>';
+  return c.querySelector('[data-role="influencer-results-body"]');
+}
+
+function setM4FilterStatus(message) {
+  var status = document.getElementById('m4FilterStatus');
+  if (status) status.textContent = message || '';
+}
+
+function m4SavedViewStorageKey() {
+  var userId = readPositiveInteger(CURRENT_USER && CURRENT_USER.id);
+  return userId === null ? '' : M4_SAVED_VIEW_STORAGE_PREFIX + userId;
+}
+
+function m4SavedViewFilterKeys() {
+  return Object.keys(M4_FILTER_ELEMENT_IDS).concat(M4_COLUMN_FILTER_DEFINITIONS.map(function(definition) {
+    return definition.key;
+  }));
+}
+
+function normalizeM4SavedViewFilters(filters) {
+  var normalized = {};
+  if (!filters || typeof filters !== 'object' || Array.isArray(filters)) return normalized;
+  m4SavedViewFilterKeys().forEach(function(key) {
+    var value = filters[key];
+    if (typeof value !== 'string' && typeof value !== 'number') return;
+    value = String(value).trim();
+    if (value && value.length <= 200) normalized[key] = value;
   });
-  h += '</tbody></table>';
-  c.innerHTML = h;
+  return normalized;
+}
+
+function readM4SavedViews() {
+  var storageKey = m4SavedViewStorageKey();
+  if (!storageKey) return [];
+  try {
+    var parsed = JSON.parse(localStorage.getItem(storageKey) || '[]');
+    if (!Array.isArray(parsed)) return [];
+    var names = {};
+    return parsed.filter(function(view) {
+      if (!view || typeof view.name !== 'string') return false;
+      var name = view.name.trim();
+      if (!name || name.length > 32 || names[name]) return false;
+      names[name] = true;
+      return true;
+    }).slice(0, 20).map(function(view) {
+      return {
+        name: view.name.trim(),
+        filters: normalizeM4SavedViewFilters(view.filters),
+        updated_at: typeof view.updated_at === 'string' ? view.updated_at : ''
+      };
+    });
+  } catch (error) {
+    return [];
+  }
+}
+
+function writeM4SavedViews(views) {
+  var storageKey = m4SavedViewStorageKey();
+  if (!storageKey) return false;
+  try {
+    localStorage.setItem(storageKey, JSON.stringify(views.slice(0, 20)));
+    return true;
+  } catch (error) {
+    return false;
+  }
+}
+
+function renderM4SavedViews(selectedName) {
+  var select = document.getElementById('m4SavedViewSelect');
+  if (!select) return;
+  var views = readM4SavedViews();
+  select.innerHTML = '<option value="">筛选视图</option>' + views.map(function(view) {
+    return '<option value="' + esc(view.name) + '">' + esc(view.name) + '</option>';
+  }).join('');
+  if (selectedName && views.some(function(view) { return view.name === selectedName; })) {
+    select.value = selectedName;
+  }
+  var deleteButton = document.getElementById('m4DeleteSavedView');
+  if (deleteButton) deleteButton.disabled = !select.value;
+}
+
+function setM4FilterValues(filters) {
+  ensureInfluencerTableShell();
+  filters = normalizeM4SavedViewFilters(filters);
+  Object.keys(M4_FILTER_ELEMENT_IDS).forEach(function(key) {
+    var element = document.getElementById(M4_FILTER_ELEMENT_IDS[key]);
+    if (element) element.value = filters[key] || '';
+  });
+  M4_COLUMN_FILTER_DEFINITIONS.forEach(function(definition) {
+    var element = document.getElementById(definition.elementId);
+    if (element) element.value = filters[definition.key] || '';
+  });
+}
+
+function saveM4SavedView() {
+  var nameInput = document.getElementById('m4SavedViewName');
+  var name = nameInput ? String(nameInput.value || '').trim() : '';
+  if (!name) {
+    toast('请输入视图名称', 'error');
+    if (nameInput) nameInput.focus();
+    return;
+  }
+  if (name.length > 32) {
+    toast('视图名称最多 32 个字符', 'error');
+    return;
+  }
+  var views = readM4SavedViews();
+  var existingIndex = views.findIndex(function(view) { return view.name === name; });
+  if (existingIndex === -1 && views.length >= 20) {
+    toast('每个账号最多保存 20 个筛选视图', 'error');
+    return;
+  }
+  if (existingIndex !== -1) views.splice(existingIndex, 1);
+  views.unshift({ name: name, filters: normalizeM4SavedViewFilters(m4Filters()), updated_at: new Date().toISOString() });
+  if (!writeM4SavedViews(views)) {
+    toast('筛选视图保存失败', 'error');
+    return;
+  }
+  renderM4SavedViews(name);
+  toast('筛选视图已保存');
+}
+
+function applyM4SavedView(name) {
+  name = String(name || '');
+  var deleteButton = document.getElementById('m4DeleteSavedView');
+  if (deleteButton) deleteButton.disabled = !name;
+  if (!name) return;
+  var view = readM4SavedViews().find(function(item) { return item.name === name; });
+  if (!view) return;
+  setM4FilterValues(view.filters);
+  var nameInput = document.getElementById('m4SavedViewName');
+  if (nameInput) nameInput.value = view.name;
+  loadInfluencersFromAPI();
+}
+
+function deleteM4SavedView() {
+  var select = document.getElementById('m4SavedViewSelect');
+  var name = select ? String(select.value || '') : '';
+  if (!name) return;
+  var views = readM4SavedViews().filter(function(view) { return view.name !== name; });
+  if (!writeM4SavedViews(views)) {
+    toast('筛选视图删除失败', 'error');
+    return;
+  }
+  var nameInput = document.getElementById('m4SavedViewName');
+  if (nameInput && nameInput.value === name) nameInput.value = '';
+  renderM4SavedViews();
+  toast('筛选视图已删除');
+}
+
+function clearM4Filters() {
+  if (m4InfluencerSearchTimer) {
+    clearTimeout(m4InfluencerSearchTimer);
+    m4InfluencerSearchTimer = null;
+  }
+  setM4FilterValues({});
+  var nameInput = document.getElementById('m4SavedViewName');
+  if (nameInput) nameInput.value = '';
+  renderM4SavedViews();
+  return loadInfluencersFromAPI();
+}
+
+function renderInfTable(data, options) {
+  options = options || {};
+  var selectedIds = getSelectedInfIds();
+  var selectedLookup = {};
+  selectedIds.forEach(function(id) { selectedLookup[id] = true; });
+  var body = ensureInfluencerTableShell();
+  if (!body) return;
+  if (!data || !data.length) {
+    body.innerHTML = '<tr class="m4-empty-row"><td colspan="14">' + esc(options.message || '没有符合条件的网红') + '</td></tr>';
+    syncInfluencerSelectionState();
+    return;
+  }
+  body.innerHTML = data.map(function(inf) {
+    var id = Number(inf.id || 0);
+    var checked = selectedLookup[id] ? ' checked' : '';
+    var row = '<tr><td><label class="tm-checkbox-target"><input type="checkbox" class="infcb" aria-label="选择网红 ' + esc(inf.kol_handle || inf.id || '') + '" value="' + esc(inf.id || '') + '" onchange="syncInfluencerSelectionState()"' + checked + '></label></td>';
+    row += '<td>#' + esc(inf.id || '') + '</td>';
+    row += '<td><strong>' + esc(inf.kol_handle || '') + '</strong></td>';
+    row += '<td>' + esc(inf.platform || '-') + '</td>';
+    row += '<td>' + fmtCount(inf.followers) + '</td>';
+    row += '<td>' + esc(inf.project_name || '-') + '</td>';
+    row += '<td>' + esc(inf.product_name || '-') + '</td>';
+    row += '<td>' + esc(inf.region || '-') + '</td>';
+    row += '<td>' + esc(inf.influencer_type || inf.tags || inf.category || '-') + '</td>';
+    row += '<td>' + esc(inf.parent_record || '-') + '</td>';
+    row += '<td title="' + esc(inf.profile_link || '') + '">' + esc(inf.profile_link || '-') + '</td>';
+    row += '<td>' + esc(inf.content_deliverable || inf.collab_type || '-') + '</td>';
+    row += '<td>$' + esc(inf.quoted_price || inf.cost_usd || 0) + '</td>';
+    row += '<td><button class="btn btn-sm btn-primary" type="button" onclick="startCollab(' + id + ')">下单</button></td></tr>';
+    return row;
+  }).join('');
   syncInfluencerSelectionState();
   if (window.TMAccessibility) window.TMAccessibility.refresh();
 }
@@ -9296,6 +9537,7 @@ function switchPage(id, options) {
     'generateProposal', 'updateProposalDraftFromEditor', 'getCurrentProposalDraft', 'downloadProposal', 'copyProposal', 'openProposalToInfluencers',
     'getEditedDemand', 'syncCurDemandFromAnalysis', 'handleDemandFile', 'analyzeDemandAI',
     'switchTab', 'matchInfluencers', 'smartMatch', 'handleUpload', 'handleDrop', 'openInfUploadModal', 'handleUploadModal', 'downloadInfTemplate', 'exportAll', 'exportFiltered', 'exportSelected',
+    'saveM4SavedView', 'applyM4SavedView', 'deleteM4SavedView', 'clearM4Filters',
     'toggleAll', 'syncInfluencerSelectionState', 'loadM4Campaigns', 'changeM4CampaignContext', 'startCollab', 'submitCollabOrder', 'closeCollabOrderModal', 'loadCollaborations', 'updateCollabStatus', 'runCampaignCollabAction', 'closeCampaignSettlementModal', 'submitCampaignSettlement',
     'initPerformanceMonitor', 'initPerformanceDashboard', 'refreshPerformanceMonitor', 'refreshPerformanceDashboard', 'changePerformanceCampaignContext', 'handlePerformanceTopMetricChange', 'refreshPerformanceReviewEvidence', 'generatePerformanceAiReviewDraft', 'loadPerformanceContents', 'loadPerformanceIntegrationPreview', 'loadPerformanceFeishuConnection', 'savePerformanceFeishuConnectionDraft', 'approvePerformanceFeishuConnectionDraft', 'createPerformanceContent', 'downloadPerformanceTemplate', 'handlePerformanceImport', 'handlePerformanceDrop', 'downloadPerformanceMetricsTemplate', 'handlePerformanceMetricsImport', 'handlePerformanceMetricsDrop', 'openPerformanceInputModal', 'closePerformanceInputModal', 'savePerformanceInput', 'loadPerformanceDashboard', 'loadPerformanceReviewEvidence', 'debouncedPerformanceContentSearch', 'exportPerformanceContents',
     'sendChat', 'clearChat', 'clearAIMemory', 'pushToFeishu', 'loadFeishuStatus', 'loadFeishuOutbox', 'testFeishuConnection', 'selectFeishuReconciliationDelivery', 'reconcileFeishuDelivery', 'selectFeishuRetryDelivery', 'retryFeishuDelivery',
