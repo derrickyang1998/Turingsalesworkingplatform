@@ -1,5 +1,28 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.8.8-customer-report-snapshot (Production Deployed, 2026-09-07) - Phase 7B.3d 客户复盘报告快照
+
+### 交付与范围 / Delivery And Scope
+- 效果看板新增客户安全版复盘预览与不可变快照：活动负责人或组织管理员可生成、预览并封存 `customer_safe_v1` 客户报告；成员可按既有活动权限读取已封存版本。
+- 报告固定为项目概况、数据汇总、对比、关键指标、优秀案例、问题复盘、优化建议七个章节，仅呈现已观测的数据。商业字段保持权限隔离并在客户版报告中明确不展示；AI 复盘引用必须来自已确认的活动范围知识。
+- 新增 schema `v13`、`customer_report_snapshots`、索引和禁止更新/删除触发器，封存结果按请求幂等且不可修改，保留报告合同、脱敏策略、指标快照、知识来源与创建血缘。
+- 本切片不生成或导出 PPT，不调用联网搜索、视频/媒体、DeepSeek、飞书、provider 或定时同步；生产验收也未写入真实客户、活动、报告或知识数据。
+
+### 定向验证、审查与上线 / Focused Verification, Review, And Deployment
+- 客户报告服务、路由、迁移、权限和前端合同定向矩阵 `55/55` 通过；迁移/安全矩阵 `269` 通过、`0` 失败、`10` 个环境跳过；发布回放/来源合同矩阵 `79` 通过、`0` 失败、`7` 个环境跳过。
+- 修复两次候选期阻断，均发生在生产切换之前且未修改生产：受约束的导入行号现使用安全有界替换；回放迁移链改为从实际注册表推导，避免静态版本数组滞后。
+- 独立 Code Reviewer 复审结论为 `APPROVE`。候选环境完成迁移演练、真实回放 `8/8`、发布守卫 `21/21`、部署浏览器烟测 `2/2`、Nginx 与容量校验后才切换。
+- 按新的发布节奏，普通独立功能在完成受影响检查、必要语法/契约检查和一次独立审查后立即上线；数据库迁移、鉴权/安全、共享运行时、外部写入或跨模块边界仍保留完整候选门禁。本切片属于迁移和权限边界变更，已按高风险路径发布。
+
+### 生产证据 / Production Evidence
+- 可恢复备份：`/root/turingmarket/backups/v060-crm-sales-workspace-20260907-152526`；备份 `SHA256SUMS` SHA-256 为 `308d630a490b9b67456ebe93593b8f94f698666c7956242e2c56f78fe03528bc`。
+- 公网 `/api/health` 为 `200` / `ok` 且 Parser ready；公网 `/performance-dashboard` 为 `200`。受保护的客户报告快照读取接口在未认证状态为 `401`。
+- PM2 `turingmarket` online；只读 SQLite 检查为 schema `v13`、`quick_check=ok`、外键异常 `0`，`customer_report_snapshots` 已存在。
+- 实现提交：`b7f0805`、`a365a4d`、`5fbce2c`、`9eafac1`；发布门禁修复：`76f651b`、`20299aa`。
+
+### 后续边界 / Next Boundaries
+- 下一独立功能可在已封存的客户报告之上增加客户版 PPT/导出或经授权的复盘交付流程；真实飞书投影、外部数据 provider 和视频内容/钩子/风格分析仍保持独立审批、数据来源验证和发布。
+
 ## v0.8.7-performance-ai-review-approval (Production Deployment Completed; Access Acceptance Pending, 2026-09-04) - Phase 7B.3c AI 复盘人工确认
 
 ### 交付与范围 / Delivery And Scope
