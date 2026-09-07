@@ -1,5 +1,29 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.8.10-customer-report-html-export (Production Deployed, 2026-09-08) - Phase 7B.3f 客户复盘 HTML 导出
+
+### 交付与范围 / Delivery And Scope
+- 效果看板的每个已封存客户复盘快照新增紧凑的“客户版 HTML”下载，与“查看”和“客户版 PPT”并列。活动负责人或组织管理员可下载；只读成员继续无权导出。
+- HTML 只从不可变 `customer_safe_v1` 快照生成固定七章节 UTF-8 文档。所有动态内容均转义，文档不包含脚本、外部资源、链接、表单或远程请求；响应强制附件下载、严格 CSP、`nosniff`、`no-store`、内容长度和确定性 ETag。
+- 导出接口只接受 64 字节上限内的纯空 JSON 对象 `{}`，非空对象、数组或缺失对象会在生成和审计前拒绝。成功导出只记录活动 ID、快照 ID、格式和来源报告哈希，不留存 HTML 成品。
+- 本切片不新增数据库迁移、外部服务、飞书写入、AI 调用或新页面，也未改变既有方案 PPT 与客户报告 PPT 的渲染、存储和回放路径。
+
+### 定向验证、审查与上线 / Focused Verification, Review, And Deployment
+- 受影响的客户报告交付、快照、性能路由、前端合同、请求边界和发布合同定向矩阵 `89/89` 通过；JavaScript 语法、定向凭据扫描、`git diff --check` 和本地部署预检通过。
+- 独立审查先发现 HTML 接口会忽略非空 JSON；修复为严格空对象合同并补齐冻结 64 字节上限后，审查者独立复跑 `26/26` 并给出 `APPROVE`。
+- 生产候选仍通过真实 Express 回放 `8/8`、发布守卫 `21/21`、内置浏览器烟测 `2/2`、迁移演练、容量和 Nginx 校验后切换。功能开发阶段未再运行无关平台矩阵。
+- 实现提交：`702fa68`、`4138c63`。
+
+### 生产证据 / Production Evidence
+- 可恢复备份：`/root/turingmarket/backups/v060-crm-sales-workspace-20260907-235054`；备份 `SHA256SUMS` SHA-256 为 `0ae92f4e559fa6b2018316c9ec374750d0b794bfa38df83cad9d2cd7f06f952b`。
+- 生产候选树 SHA-256 为 `49d619723aac1ad31b0a7411f1f45aa662694f96780fcf0c1c303d90c241c778`。公网 `/api/health` 与首页均为 `200`；匿名 HTML 导出接口为 `401`。
+- PM2 `turingmarket` online 且本次发布后重启计数为 `0`；Nginx 配置有效。SQLite 保持 schema `v14`、`quick_check=ok`、外键异常 `0`；冻结 `ppt.js` SHA-256 仍为 `f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e`。
+- 生产当前有 1 个活动但尚无客户报告快照，因此未伪造快照或客户成品执行真实下载；离线确定性渲染、权限、路由和生产受保护入口均已验证。
+
+### 后续边界 / Next Boundaries
+- 本次发布确认主要耗时来自每轮重新下载并构建解析器依赖缓存，单次约 `9m17s`。下一独立发布基础设施切片将评估按锁文件和可信身份复用已验证缓存，只在依赖变化时重建；该优化不得削弱候选隔离、哈希验证或回滚门禁。
+- 真实飞书投影仍因生产未配置飞书应用凭据、批准映射和一次性测试表而保持关闭；视频 provider 与内容分析继续等待明确数据来源和素材授权。
+
 ## v0.8.9-customer-report-ppt (Production Deployed, 2026-09-07) - Phase 7B.3e 客户复盘 PPT 交付
 
 ### 交付与范围 / Delivery And Scope
