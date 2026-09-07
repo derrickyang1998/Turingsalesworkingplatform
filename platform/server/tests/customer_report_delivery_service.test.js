@@ -260,6 +260,10 @@ test('does not classify structural report hashes as customer-visible phone conte
   const report = customerReport();
   report.evidence_snapshot_hash = '1'.repeat(64);
   report.lineage.current_evidence_snapshot_hash = '2'.repeat(64);
+  report.sections.project_overview.observation_window = {
+    min_observed_at: '2026-09-01T00:00:00.000Z',
+    max_observed_at: '2026-09-07T00:00:00.000Z'
+  };
   fixture.setReport(report);
 
   const result = fixture.service.generate(fixture.request());
@@ -345,4 +349,75 @@ test('does not delete a retained artifact adopted by another request before reau
     1
   );
   assert.equal(fixture.artifactStore.records.size, 1);
+});
+
+test('exports deterministic escaped customer-safe HTML without creating a retained artifact', (t) => {
+  const fixture = createFixture(t);
+  const report = customerReport();
+  report.title = 'September <script>alert(1)</script> & review';
+  report.sections.project_overview = {
+    campaign_name: 'Launch <North>',
+    content_count: 3,
+    platform_mix: ['YouTube', 'Instagram'],
+    observation_window: {
+      min_observed_at: '2026-09-01T00:00:00.000Z',
+      max_observed_at: '2026-09-07T00:00:00.000Z'
+    },
+    data_coverage: [{ metric: 'views', available_records: 3, total_records: 3 }]
+  };
+  report.sections.optimization_and_next_cycle.next_cycle_plan = 'Reuse <strong>opening</strong> & compare.';
+  fixture.setReport(report);
+
+  const first = fixture.service.exportHtml(fixture.request());
+  const second = fixture.service.exportHtml(fixture.request({ requestId: 'customer-report-html-request-0002' }));
+  const html = first.body.toString('utf8');
+
+  assert.equal(first.status, 200);
+  assert.equal(first.headers['Content-Type'], 'text/html; charset=utf-8');
+  assert.match(first.headers['Content-Disposition'], /customer-report-721\.html/);
+  assert.equal(first.headers['X-Content-Type-Options'], 'nosniff');
+  assert.match(first.headers['Content-Security-Policy'], /default-src 'none'/);
+  assert.equal(first.headers['Content-Length'], String(first.body.length));
+  assert.equal(first.headers.ETag, second.headers.ETag);
+  assert.deepEqual(first.body, second.body);
+  assert.match(html, /^<!doctype html>/i);
+  for (const heading of ['项目概况', '数据汇总', '平台与产品对比', '关键指标', '优秀案例', '数据边界与风险', '优化建议与下一周期']) {
+    assert.match(html, new RegExp(heading));
+  }
+  assert.match(html, /September &lt;script&gt;alert\(1\)&lt;\/script&gt; &amp; review/);
+  assert.match(html, /Reuse &lt;strong&gt;opening&lt;\/strong&gt; &amp; compare\./);
+  assert.doesNotMatch(html, /<script\b|<iframe\b|<form\b|\shref=|https?:\/\//i);
+  assert.doesNotMatch(html, /evidence_snapshot_hash|request_fingerprint|source_review|[a-f0-9]{64}/i);
+  assert.equal(
+    first.headers.ETag,
+    `"${crypto.createHash('sha256').update(first.body).digest('hex')}"`
+  );
+  assert.equal(fixture.renderedReports.length, 0);
+  assert.equal(fixture.artifactStore.records.size, 0);
+  assert.equal(fixture.db.prepare('SELECT COUNT(*) AS count FROM customer_report_ppt_artifacts').get().count, 0);
+  assert.equal(
+    fixture.db.prepare("SELECT COUNT(*) AS count FROM activity_log WHERE action='export_customer_report_html'").get().count,
+    2
+  );
+});
+
+test('HTML export inherits delivery authorization and rejects unsafe snapshot text', (t) => {
+  const fixture = createFixture(t);
+  assert.throws(
+    () => fixture.service.exportHtml(fixture.request({ user: { id: 999 } })),
+    (error) => error && error.code === 'CUSTOMER_REPORT_FORBIDDEN'
+  );
+
+  const unsafe = customerReport();
+  unsafe.sections.optimization_and_next_cycle.next_cycle_plan = 'Open https://private.example before sharing.';
+  fixture.setReport(unsafe);
+  assert.throws(
+    () => fixture.service.exportHtml(fixture.request()),
+    (error) => error instanceof CustomerReportDeliveryServiceError &&
+      error.code === 'CUSTOMER_REPORT_HTML_SOURCE_INVALID'
+  );
+  assert.equal(
+    fixture.db.prepare("SELECT COUNT(*) AS count FROM activity_log WHERE action='export_customer_report_html'").get().count,
+    0
+  );
 });

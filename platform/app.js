@@ -6639,6 +6639,8 @@ var performanceCustomerReportSnapshotDetailRequestSequence = 0;
 var activePerformanceCustomerReportSnapshotDetailRequest = null;
 var performanceCustomerReportPptDownloadGeneration = 0;
 var performanceCustomerReportPptDownloads = Object.create(null);
+var performanceCustomerReportHtmlDownloadGeneration = 0;
+var performanceCustomerReportHtmlDownloads = Object.create(null);
 var performanceIntegrationPreview = null;
 var performanceIntegrationRequestSequence = 0;
 var performanceFeishuConnection = null;
@@ -8050,6 +8052,8 @@ function invalidatePerformanceCustomerReportPreview(message) {
   activePerformanceCustomerReportSnapshotDetailRequest = null;
   performanceCustomerReportPptDownloadGeneration += 1;
   performanceCustomerReportPptDownloads = Object.create(null);
+  performanceCustomerReportHtmlDownloadGeneration += 1;
+  performanceCustomerReportHtmlDownloads = Object.create(null);
   performanceCustomerReportPreview = null;
   performanceCustomerReportSealRetry = { fingerprint: '', idempotencyKey: '' };
   renderPerformanceCustomerReportPreview(null);
@@ -8092,7 +8096,9 @@ function performanceCustomerReportErrorMessage(data, fallback) {
     CUSTOMER_REPORT_FORBIDDEN: '需由项目负责人或组织管理员操作客户复盘。',
     CUSTOMER_REPORT_INPUT_INVALID: '请检查客户复盘填写内容。',
     CUSTOMER_REPORT_IDEMPOTENCY_CONFLICT: '本次封存请求已发生变化，请重新预览后再试。',
-    CUSTOMER_REPORT_SNAPSHOT_NOT_FOUND: '未找到该客户复盘版本。'
+    CUSTOMER_REPORT_SNAPSHOT_NOT_FOUND: '未找到该客户复盘版本。',
+    CUSTOMER_REPORT_HTML_SOURCE_INVALID: '该封存版本未通过客户版 HTML 安全核验。',
+    CUSTOMER_REPORT_HTML_AUDIT_FAILED: '客户版 HTML 导出记录失败，请稍后重试。'
   };
   return messages[data && data.code] || fallback || '客户复盘请求失败。';
 }
@@ -8301,11 +8307,15 @@ function renderPerformanceCustomerReportSnapshots(snapshots, options) {
     var snapshot = item.data;
     var downloadKey = [AUTH_GENERATION, getPerformanceCampaignId(), item.id].join(':');
     var pptBusy = !!performanceCustomerReportPptDownloads[downloadKey];
+    var htmlBusy = !!performanceCustomerReportHtmlDownloads[downloadKey];
     return '<div class="tm-performance-customer-report-snapshot-row"><div class="tm-performance-customer-report-snapshot-summary"><strong>'
       + esc(snapshot.title || '客户复盘') + '</strong><span>' + esc(performanceDate(snapshot.created_at))
       + ' · ' + esc(performanceCustomerReportMetricLabel(snapshot.selected_metric)) + ' · '
       + esc(performanceAiReviewShortHash(snapshot.report_sha256)) + '</span></div>'
       + '<div class="tm-performance-customer-report-snapshot-actions"><button class="btn btn-outline btn-sm" type="button" onclick="loadPerformanceCustomerReportSnapshotDetail(' + item.id + ')">查看</button>'
+      + "<button class=\"btn btn-outline btn-sm\" type=\"button\" data-customer-report-html-id=\"" + item.id
+      + "\" onclick=\"downloadPerformanceCustomerReportHtml(" + item.id + ")\"" + (htmlBusy ? ' disabled aria-busy="true"' : '') + ">"
+      + (htmlBusy ? '正在准备...' : '客户版 HTML') + '</button>'
       + "<button class=\"btn btn-outline btn-sm\" type=\"button\" data-customer-report-ppt-id=\"" + item.id
       + "\" onclick=\"downloadPerformanceCustomerReportPpt(" + item.id + ")\"" + (pptBusy ? ' disabled aria-busy="true"' : '') + ">"
       + (pptBusy ? '正在准备...' : '客户版 PPT') + '</button></div></div>';
@@ -8320,6 +8330,17 @@ function setPerformanceCustomerReportPptBusy(snapshotId, busy) {
   Array.prototype.forEach.call(document.querySelectorAll(selector), function(button) {
     button.disabled = !!busy;
     button.textContent = busy ? '正在准备...' : '客户版 PPT';
+    button.setAttribute('aria-busy', busy ? 'true' : 'false');
+  });
+}
+
+function setPerformanceCustomerReportHtmlBusy(snapshotId, busy) {
+  var normalizedSnapshotId = performancePositiveId(snapshotId);
+  if (normalizedSnapshotId === null || typeof document === 'undefined') return;
+  var selector = '[data-customer-report-html-id="' + normalizedSnapshotId + '"]';
+  Array.prototype.forEach.call(document.querySelectorAll(selector), function(button) {
+    button.disabled = !!busy;
+    button.textContent = busy ? '正在准备...' : '客户版 HTML';
     button.setAttribute('aria-busy', busy ? 'true' : 'false');
   });
 }
@@ -8387,6 +8408,72 @@ async function downloadPerformanceCustomerReportPpt(snapshotId) {
     }
     if (performanceCustomerReportPptDownloadIsCurrent(context)) {
       setPerformanceCustomerReportPptBusy(normalizedSnapshotId, false);
+    }
+  }
+}
+
+function performanceCustomerReportHtmlDownloadIsCurrent(context) {
+  return Boolean(
+    context &&
+    context.authGeneration === AUTH_GENERATION &&
+    context.generation === performanceCustomerReportHtmlDownloadGeneration &&
+    context.campaignId === getPerformanceCampaignId() &&
+    context.snapshotId === performancePositiveId(context.snapshotId)
+  );
+}
+
+async function downloadPerformanceCustomerReportHtml(snapshotId) {
+  var campaignId = getPerformanceCampaignId();
+  var normalizedSnapshotId = performancePositiveId(snapshotId);
+  if (campaignId === null || normalizedSnapshotId === null) {
+    toast('请先选择推广活动。', 'error');
+    return null;
+  }
+  var key = [AUTH_GENERATION, campaignId, normalizedSnapshotId].join(':');
+  if (performanceCustomerReportHtmlDownloads[key]) return performanceCustomerReportHtmlDownloads[key];
+  var context = {
+    authGeneration: AUTH_GENERATION,
+    generation: performanceCustomerReportHtmlDownloadGeneration,
+    campaignId: campaignId,
+    snapshotId: normalizedSnapshotId
+  };
+  setPerformanceCustomerReportHtmlBusy(normalizedSnapshotId, true);
+  setPerformanceCustomerReportStatus('正在准备已封存客户版的 HTML...');
+  var request = (async function() {
+    try {
+      var response = await apiFetch('/campaigns/' + encodeURIComponent(campaignId)
+        + '/performance/customer-report-snapshots/' + encodeURIComponent(normalizedSnapshotId) + '/html', {
+          method: 'POST',
+          body: JSON.stringify({})
+        });
+      if (!response.ok) {
+        var errorData = await response.json().catch(function() { return {}; });
+        throw new Error(performanceCustomerReportErrorMessage(errorData, errorData.error));
+      }
+      var blob = await response.blob();
+      if (!performanceCustomerReportHtmlDownloadIsCurrent(context)) return null;
+      var contentType = response.headers.get('Content-Type') || 'text/html; charset=utf-8';
+      dlFile('customer-report-' + normalizedSnapshotId + '.html', blob, contentType);
+      setPerformanceCustomerReportStatus('客户版 HTML 已准备完成。');
+      toast('客户版 HTML 已下载。');
+      return true;
+    } catch (error) {
+      if (!performanceCustomerReportHtmlDownloadIsCurrent(context)) return null;
+      var message = error.message || '客户版 HTML 导出失败。';
+      setPerformanceCustomerReportStatus(message, 'error');
+      toast(message, 'error');
+      return null;
+    }
+  })();
+  performanceCustomerReportHtmlDownloads[key] = request;
+  try {
+    return await request;
+  } finally {
+    if (performanceCustomerReportHtmlDownloads[key] === request) {
+      delete performanceCustomerReportHtmlDownloads[key];
+    }
+    if (performanceCustomerReportHtmlDownloadIsCurrent(context)) {
+      setPerformanceCustomerReportHtmlBusy(normalizedSnapshotId, false);
     }
   }
 }

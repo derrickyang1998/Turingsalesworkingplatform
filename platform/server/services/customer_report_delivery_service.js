@@ -6,9 +6,11 @@ const path = require('node:path');
 const { PptArtifactStoreError } = require('./ppt_artifact_store');
 
 const CUSTOMER_REPORT_PPT_CONTRACT_VERSION = 'customer-report-ppt-v1';
+const CUSTOMER_REPORT_HTML_CONTRACT_VERSION = 'customer-report-html-v1';
 const CUSTOMER_REPORT_CONTRACT_VERSION = 'customer_safe_v1';
 const CUSTOMER_REPORT_REDACTION_POLICY_VERSION = 'customer-safe-v1';
 const PPT_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+const HTML_CONTENT_TYPE = 'text/html; charset=utf-8';
 const REQUIRED_SECTION_KEYS = Object.freeze([
   'project_overview',
   'data_summary',
@@ -18,6 +20,7 @@ const REQUIRED_SECTION_KEYS = Object.freeze([
   'data_limits_and_risks',
   'optimization_and_next_cycle'
 ]);
+const SAFE_REPORT_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})?)?$/;
 const UNSAFE_REPORT_TEXT = Object.freeze([
   /(?:https?|ftp):\/\//i,
   /\bwww\./i,
@@ -53,13 +56,17 @@ function plainObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-function positiveId(value, field) {
+function deliveryErrorCode(format, suffix) {
+  return `CUSTOMER_REPORT_${format === 'html' ? 'HTML' : 'PPT'}_${suffix}`;
+}
+
+function positiveId(value, field, format = 'ppt') {
   if (Number.isSafeInteger(value) && value > 0) return value;
   if (typeof value === 'string' && /^[1-9][0-9]{0,15}$/.test(value)) {
     const parsed = Number(value);
     if (Number.isSafeInteger(parsed) && String(parsed) === value) return parsed;
   }
-  throw serviceError(400, 'CUSTOMER_REPORT_PPT_INPUT_INVALID', `${field} is invalid.`, { field });
+  throw serviceError(400, deliveryErrorCode(format, 'INPUT_INVALID'), `${field} is invalid.`, { field });
 }
 
 function validHash(value) {
@@ -107,6 +114,7 @@ function customerVisibleStrings(report) {
 
 function hasUnsafeCustomerVisibleText(report) {
   return customerVisibleStrings(report).some((value) => (
+    !(SAFE_REPORT_DATE_PATTERN.test(value) && Number.isFinite(Date.parse(value))) &&
     UNSAFE_REPORT_TEXT.some((pattern) => pattern.test(value))
   ));
 }
@@ -140,6 +148,204 @@ function binaryHeaders(filename, artifact) {
     'Content-Disposition': `attachment; filename="${filename}"; filename*=UTF-8''${rfc5987Filename(filename)}`,
     'Content-Length': String(artifact.bytes),
     ETag: `"${artifact.sha256}"`,
+    'Cache-Control': 'private, max-age=0, no-store'
+  };
+}
+
+function escapeHtml(value) {
+  return String(value === undefined || value === null ? '' : value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function reportObject(value) {
+  return plainObject(value) ? value : {};
+}
+
+function reportList(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function displayText(value, fallback = '未提供') {
+  if (typeof value !== 'string' && typeof value !== 'number') return fallback;
+  const normalized = String(value).trim();
+  return normalized || fallback;
+}
+
+function displayNumber(value) {
+  if (typeof value === 'boolean' || value === null || value === undefined) return '未提供';
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 0) return '未提供';
+  const fixed = number.toFixed(2).replace(/\.00$/, '').replace(/(\.\d)0$/, '$1');
+  const parts = fixed.split('.');
+  parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return parts.join('.');
+}
+
+function displayMetric(metric, ratio = false) {
+  const source = reportObject(metric);
+  const number = Number(source.value);
+  if (source.status !== 'available' || !Number.isFinite(number) || number < 0) return '未提供';
+  if (ratio) return `${displayNumber(number * 100)}%`;
+  return displayNumber(number);
+}
+
+function displayDateRange(value) {
+  const source = reportObject(value);
+  const min = typeof source.min_observed_at === 'string' ? source.min_observed_at.slice(0, 10) : '';
+  const max = typeof source.max_observed_at === 'string' ? source.max_observed_at.slice(0, 10) : '';
+  if (!min && !max) return '未提供';
+  if (!min || min === max) return max || min;
+  return `${min} 至 ${max}`;
+}
+
+function htmlKeyValues(rows) {
+  return `<dl class="metrics">${rows.map(([label, value]) => (
+    `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`
+  )).join('')}</dl>`;
+}
+
+function htmlList(items, emptyText) {
+  const values = reportList(items).map((item) => displayText(item, '')).filter(Boolean);
+  if (!values.length) return `<p class="empty">${escapeHtml(emptyText)}</p>`;
+  return `<ul>${values.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`;
+}
+
+function htmlSection(title, body) {
+  return `<section><h2>${escapeHtml(title)}</h2>${body}</section>`;
+}
+
+function htmlComparisons(value) {
+  const comparisons = reportObject(value);
+  if (comparisons.status !== 'available') {
+    return `<p class="empty">${escapeHtml(displayText(comparisons.reason, '当前数据覆盖不足，暂不展示比较结论。'))}</p>`;
+  }
+  const rows = [];
+  for (const [key, dimension] of [['platforms', '平台'], ['products', '产品']]) {
+    for (const item of reportList(comparisons[key])) {
+      const source = reportObject(item);
+      rows.push([
+        dimension,
+        displayText(source.label),
+        `${displayNumber(source.content_count)} 条`,
+        displayMetric(source.selected_metric, comparisons.selected_metric === 'core_view_er')
+      ]);
+    }
+  }
+  if (!rows.length) return '<p class="empty">暂无可公开的比较维度。</p>';
+  return '<div class="table-wrap"><table><thead><tr><th>维度</th><th>分组</th><th>内容量</th><th>表现</th></tr></thead><tbody>' +
+    rows.map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join('')}</tr>`).join('') +
+    '</tbody></table></div>';
+}
+
+function htmlCases(value, selectedMetric) {
+  const cases = reportObject(value);
+  const rows = reportList(cases.cases).map((item, index) => {
+    const source = reportObject(item);
+    return [
+      displayText(source.reference, `案例 ${index + 1}`),
+      [displayText(source.platform, ''), displayText(source.product, '')].filter(Boolean).join(' · ') || '已确认内容',
+      displayMetric(source.selected_metric, selectedMetric === 'core_view_er')
+    ];
+  });
+  if (cases.status !== 'available' || !rows.length) return '<p class="empty">当前没有可公开的优秀案例。</p>';
+  return '<div class="table-wrap"><table><thead><tr><th>案例</th><th>范围</th><th>表现</th></tr></thead><tbody>' +
+    rows.map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join('')}</tr>`).join('') +
+    '</tbody></table></div>';
+}
+
+function renderCustomerReportHtml(source) {
+  const report = source.snapshot.report;
+  const sections = report.sections;
+  const overview = reportObject(sections.project_overview);
+  const summary = reportObject(sections.data_summary);
+  const observed = reportObject(summary.observed_metrics);
+  const indicators = reportObject(sections.key_indicators);
+  const selected = reportObject(indicators.selected_metric);
+  const limits = reportObject(sections.data_limits_and_risks);
+  const optimization = reportObject(sections.optimization_and_next_cycle);
+  const coverage = reportList(overview.data_coverage).map((item) => {
+    const row = reportObject(item);
+    return `${displayText(row.metric, '指标')}：${displayNumber(row.available_records)} / ${displayNumber(row.total_records)}`;
+  });
+  const sourceModes = reportList(limits.source_modes).map((item) => {
+    const row = reportObject(item);
+    return `${displayText(row.mode, '已登记来源')}：${displayNumber(row.count)} 条`;
+  });
+  const limitations = reportList(limits.limitations).map((item) => {
+    const row = reportObject(item);
+    return displayText(row.disclosure, displayText(row.code, '数据范围受限'));
+  });
+  const actions = reportList(optimization.optimization_actions).map((item) => displayText(item, '')).filter(Boolean);
+  const selectedMetricRatio = report.selected_metric === 'core_view_er';
+  const body = [
+    htmlSection('项目概况', htmlKeyValues([
+      ['项目', displayText(overview.campaign_name, '项目复盘')],
+      ['内容数量', `${displayNumber(overview.content_count)} 条`],
+      ['平台', reportList(overview.platform_mix).map((item) => displayText(item, '')).filter(Boolean).join(' · ') || '未提供'],
+      ['观测窗口', displayDateRange(overview.observation_window)]
+    ]) + htmlList(coverage, '暂无数据覆盖信息。')),
+    htmlSection('数据汇总', htmlKeyValues([
+      ['播放量', displayMetric(observed.views)],
+      ['点赞数', displayMetric(observed.likes)],
+      ['评论数', displayMetric(observed.comments)],
+      ['收藏数', displayMetric(observed.favorites)],
+      ['转发数', displayMetric(observed.shares)],
+      ['互动量', displayMetric(observed.interactions)],
+      ['互动率', displayMetric(observed.engagement_rate, true)]
+    ])),
+    htmlSection('平台与产品对比', htmlComparisons(sections.eligible_comparisons)),
+    htmlSection('关键指标', htmlKeyValues([
+      [displayText(selected.label, displayText(report.selected_metric, '关键指标')), displayMetric(selected, selectedMetricRatio)],
+      ['商业指标', displayText(reportObject(indicators.commercial).disclosure, '暂不包含')]
+    ]) + `<p class="note">${escapeHtml(displayText(selected.definition, '以客户已确认的数据口径为准。'))}</p>`),
+    htmlSection('优秀案例', htmlCases(sections.excellent_cases, report.selected_metric)),
+    htmlSection('数据边界与风险', htmlKeyValues([
+      ['观测窗口', displayDateRange(limits.observation_window)],
+      ['数据来源', sourceModes.join(' · ') || '未提供']
+    ]) + htmlList(limitations, '暂无额外数据边界说明。')),
+    htmlSection('优化建议与下一周期', '<h3>优化建议</h3>' +
+      htmlList(actions, '暂无优化建议。') +
+      `<h3>下一周期计划</h3><p class="plan">${escapeHtml(displayText(optimization.next_cycle_plan))}</p>`)
+  ].join('');
+  const title = displayText(report.title, '客户版项目复盘');
+  return '<!doctype html>\n' +
+    '<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
+    '<meta name="referrer" content="no-referrer"><title>' + escapeHtml(title) + '</title>' +
+    '<style>' +
+    ':root{color-scheme:light;font-family:Arial,"Microsoft YaHei",sans-serif;color:#1f2937;background:#fff}' +
+    '*{box-sizing:border-box}body{margin:0;background:#f8fafc;line-height:1.55}' +
+    'main{max-width:1040px;margin:0 auto;padding:40px 32px 56px;background:#fff;min-height:100vh}' +
+    'header{border-top:6px solid #2563eb;padding:28px 0 24px;border-bottom:1px solid #e2e8f0}' +
+    'h1{margin:0;color:#0f172a;font-size:32px;line-height:1.25;letter-spacing:0}' +
+    '.meta{margin:10px 0 0;color:#64748b;font-size:14px}.meta strong{color:#0f766e}' +
+    'section{padding:28px 0;border-bottom:1px solid #e2e8f0}h2{margin:0 0 18px;color:#0f172a;font-size:22px;letter-spacing:0}' +
+    'h3{margin:22px 0 10px;color:#334155;font-size:16px;letter-spacing:0}' +
+    '.metrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1px;margin:0;background:#e2e8f0;border:1px solid #e2e8f0}' +
+    '.metrics div{padding:14px 16px;background:#fff;min-width:0}.metrics dt{color:#64748b;font-size:13px}.metrics dd{margin:5px 0 0;color:#0f172a;font-weight:700;overflow-wrap:anywhere}' +
+    'ul{margin:16px 0 0;padding-left:22px}li+li{margin-top:7px}.note,.empty{color:#64748b}.plan{white-space:pre-wrap}' +
+    '.table-wrap{overflow-x:auto}table{width:100%;border-collapse:collapse}th,td{padding:11px 12px;border:1px solid #e2e8f0;text-align:left;overflow-wrap:anywhere}' +
+    'th{background:#f1f5f9;color:#334155;font-size:13px}footer{padding-top:24px;color:#64748b;font-size:12px;text-align:right}' +
+    '@media(max-width:640px){main{padding:24px 18px 40px}h1{font-size:26px}.metrics{grid-template-columns:1fr}}' +
+    '@media print{body{background:#fff}main{max-width:none;padding:16mm}section{break-inside:avoid}}' +
+    '</style></head><body><main><header><h1>' + escapeHtml(title) + '</h1>' +
+    `<p class="meta"><strong>客户版项目复盘</strong> · 已封存版本 #${source.snapshot.id}</p></header>` +
+    body + '<footer>TuringMarket · 客户版项目复盘</footer></main></body></html>\n';
+}
+
+function customerReportHtmlHeaders(filename, body) {
+  const sha256 = crypto.createHash('sha256').update(body).digest('hex');
+  return {
+    'Content-Type': HTML_CONTENT_TYPE,
+    'Content-Disposition': `attachment; filename="${filename}"; filename*=UTF-8''${rfc5987Filename(filename)}`,
+    'Content-Length': String(body.length),
+    'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; img-src 'none'; font-src 'none'; connect-src 'none'; script-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    'X-Content-Type-Options': 'nosniff',
+    'Referrer-Policy': 'no-referrer',
+    ETag: `"${sha256}"`,
     'Cache-Control': 'private, max-age=0, no-store'
   };
 }
@@ -183,19 +389,19 @@ function mapArtifactError(error, replay) {
   );
 }
 
-function assertSnapshotSource(delivery) {
+function assertSnapshotSource(delivery, format = 'ppt') {
   const context = delivery && delivery.context;
   const snapshot = delivery && delivery.snapshot;
   if (!context || !snapshot) {
-    throw serviceError(409, 'CUSTOMER_REPORT_PPT_SOURCE_INVALID', 'The customer report snapshot cannot be delivered.');
+    throw serviceError(409, deliveryErrorCode(format, 'SOURCE_INVALID'), 'The customer report snapshot cannot be delivered.');
   }
-  const organizationId = positiveId(context.organizationId, 'organization_id');
-  const campaignId = positiveId(context.campaignId, 'campaign_id');
-  const userId = positiveId(context.userId, 'user_id');
-  const snapshotId = positiveId(snapshot.id, 'snapshot_id');
+  const organizationId = positiveId(context.organizationId, 'organization_id', format);
+  const campaignId = positiveId(context.campaignId, 'campaign_id', format);
+  const userId = positiveId(context.userId, 'user_id', format);
+  const snapshotId = positiveId(snapshot.id, 'snapshot_id', format);
   const report = snapshot.report;
   if (!validHash(snapshot.report_sha256) || !plainObject(report)) {
-    throw serviceError(409, 'CUSTOMER_REPORT_PPT_SOURCE_INVALID', 'The customer report snapshot identity is invalid.');
+    throw serviceError(409, deliveryErrorCode(format, 'SOURCE_INVALID'), 'The customer report snapshot identity is invalid.');
   }
   if (
     report.contract_version !== CUSTOMER_REPORT_CONTRACT_VERSION ||
@@ -205,7 +411,7 @@ function assertSnapshotSource(delivery) {
     !plainObject(report.sections) ||
     REQUIRED_SECTION_KEYS.some((key) => !Object.prototype.hasOwnProperty.call(report.sections, key))
   ) {
-    throw serviceError(409, 'CUSTOMER_REPORT_PPT_SOURCE_INVALID', 'The customer report snapshot contract is invalid.');
+    throw serviceError(409, deliveryErrorCode(format, 'SOURCE_INVALID'), 'The customer report snapshot contract is invalid.');
   }
   let serialized;
   let reportHash;
@@ -213,10 +419,10 @@ function assertSnapshotSource(delivery) {
     serialized = JSON.stringify(report);
     reportHash = canonicalHash(report);
   } catch (_error) {
-    throw serviceError(409, 'CUSTOMER_REPORT_PPT_SOURCE_INVALID', 'The customer report snapshot cannot be verified.');
+    throw serviceError(409, deliveryErrorCode(format, 'SOURCE_INVALID'), 'The customer report snapshot cannot be verified.');
   }
   if (serialized.length > 524288 || reportHash !== snapshot.report_sha256 || hasUnsafeCustomerVisibleText(report)) {
-    throw serviceError(409, 'CUSTOMER_REPORT_PPT_SOURCE_INVALID', 'The customer report snapshot is outside the delivery scope.');
+    throw serviceError(409, deliveryErrorCode(format, 'SOURCE_INVALID'), 'The customer report snapshot is outside the delivery scope.');
   }
   return Object.freeze({
     context: Object.freeze({ organizationId, campaignId, userId }),
@@ -258,12 +464,12 @@ function createCustomerReportDeliveryService(db, options) {
   const tempDir = path.resolve(options.tempDir);
   const runPptGenerator = options.runPptGenerator;
 
-  function deliverySource(input) {
-    const campaignId = positiveId(input && input.campaignId, 'campaign_id');
-    const snapshotId = positiveId(input && input.snapshotId, 'snapshot_id');
+  function deliverySource(input, format = 'ppt') {
+    const campaignId = positiveId(input && input.campaignId, 'campaign_id', format);
+    const snapshotId = positiveId(input && input.snapshotId, 'snapshot_id', format);
     const user = input && input.user;
-    if (!user || positiveId(user.id, 'user_id') < 1) {
-      throw serviceError(401, 'CUSTOMER_REPORT_PPT_UNAUTHORIZED', 'An authenticated user is required.');
+    if (!user || positiveId(user.id, 'user_id', format) < 1) {
+      throw serviceError(401, deliveryErrorCode(format, 'UNAUTHORIZED'), 'An authenticated user is required.');
     }
     let delivery;
     try {
@@ -271,11 +477,11 @@ function createCustomerReportDeliveryService(db, options) {
     } catch (error) {
       if (error && error.name === 'CustomerReportSnapshotServiceError') throw error;
       if (error && Number.isSafeInteger(error.statusCode) && typeof error.code === 'string') throw error;
-      throw serviceError(500, 'CUSTOMER_REPORT_PPT_SOURCE_INVALID', 'Customer report delivery authorization could not be verified.');
+      throw serviceError(500, deliveryErrorCode(format, 'SOURCE_INVALID'), 'Customer report delivery authorization could not be verified.');
     }
-    const source = assertSnapshotSource(delivery);
+    const source = assertSnapshotSource(delivery, format);
     if (source.context.campaignId !== campaignId || source.snapshot.id !== snapshotId) {
-      throw serviceError(409, 'CUSTOMER_REPORT_PPT_SOURCE_INVALID', 'Customer report delivery scope is invalid.');
+      throw serviceError(409, deliveryErrorCode(format, 'SOURCE_INVALID'), 'Customer report delivery scope is invalid.');
     }
     return source;
   }
@@ -460,6 +666,40 @@ function createCustomerReportDeliveryService(db, options) {
     return Object.assign({}, result, { replayed: stored.artifact_cache_key !== artifact.cacheKey ? true : false });
   }
 
+  function exportHtml(input) {
+    const source = deliverySource(input, 'html');
+    let body;
+    try {
+      body = Buffer.from(renderCustomerReportHtml(source), 'utf8');
+    } catch (error) {
+      if (error instanceof CustomerReportDeliveryServiceError) throw error;
+      throw serviceError(409, 'CUSTOMER_REPORT_HTML_SOURCE_INVALID', 'The customer report snapshot cannot be rendered safely.');
+    }
+    try {
+      db.prepare(`
+        INSERT INTO activity_log (user_id,action,module,details,ip_address)
+        VALUES (?,?,?,?,NULL)
+      `).run(
+        source.context.userId,
+        'export_customer_report_html',
+        'performance',
+        JSON.stringify({
+          campaign_id: source.context.campaignId,
+          snapshot_id: source.snapshot.id,
+          format: CUSTOMER_REPORT_HTML_CONTRACT_VERSION,
+          report_sha256: source.snapshot.report_sha256
+        })
+      );
+    } catch (_error) {
+      throw serviceError(500, 'CUSTOMER_REPORT_HTML_AUDIT_FAILED', 'Customer report HTML export could not be recorded.');
+    }
+    return {
+      status: 200,
+      headers: customerReportHtmlHeaders(`customer-report-${source.snapshot.id}.html`, body),
+      body
+    };
+  }
+
   function runArtifactJanitor(input = {}) {
     const retainedCacheKeys = db.prepare(`
       SELECT artifact_cache_key
@@ -478,10 +718,11 @@ function createCustomerReportDeliveryService(db, options) {
     });
   }
 
-  return Object.freeze({ generate, runArtifactJanitor });
+  return Object.freeze({ generate, exportHtml, runArtifactJanitor });
 }
 
 module.exports = {
+  CUSTOMER_REPORT_HTML_CONTRACT_VERSION,
   CUSTOMER_REPORT_PPT_CONTRACT_VERSION,
   CustomerReportDeliveryServiceError,
   createCustomerReportDeliveryService

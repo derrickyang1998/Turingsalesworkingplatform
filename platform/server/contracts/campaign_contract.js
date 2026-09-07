@@ -1,6 +1,7 @@
 'use strict';
 
 const BODY_LIMITS = Object.freeze({
+  CAMPAIGN_EMPTY_CONTROL_JSON: 64,
   CAMPAIGN_CONTROL_JSON: 65_536,
   CAMPAIGN_REVIEW_JSON: 1_048_576,
   KNOWLEDGE_JSON: 1_048_576,
@@ -59,6 +60,13 @@ const controlJson = (id, method, pathTemplate) => definePolicy(
   pathTemplate,
   MEDIA_KINDS.JSON,
   BODY_LIMITS.CAMPAIGN_CONTROL_JSON
+);
+const emptyControlJson = (id, method, pathTemplate) => definePolicy(
+  id,
+  method,
+  pathTemplate,
+  MEDIA_KINDS.JSON,
+  BODY_LIMITS.CAMPAIGN_EMPTY_CONTROL_JSON
 );
 const knowledgeJson = (id, method, pathTemplate) => definePolicy(
   id,
@@ -213,6 +221,11 @@ const REQUEST_POLICIES = Object.freeze({
     'campaign.performance.customer-report-snapshot.detail',
     'GET',
     '/api/campaigns/:id/performance/customer-report-snapshots/:snapshotId'
+  ),
+  CAMPAIGN_PERFORMANCE_CUSTOMER_REPORT_HTML_EXPORT: emptyControlJson(
+    'campaign.performance.customer-report-html.export',
+    'POST',
+    '/api/campaigns/:id/performance/customer-report-snapshots/:snapshotId/html'
   ),
   CAMPAIGN_PERFORMANCE_CUSTOMER_REPORT_PPT_GENERATE: controlJson(
     'campaign.performance.customer-report-ppt.generate',

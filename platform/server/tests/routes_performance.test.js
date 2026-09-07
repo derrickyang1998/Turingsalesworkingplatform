@@ -166,6 +166,18 @@ function createFixture() {
         filePath: '/private/customer-report-81.pptx',
         replayed: false
       };
+    },
+    exportHtml(input) {
+      calls.push(['customer-report-html', input]);
+      return {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Content-Disposition': 'attachment; filename="customer-report-81.html"',
+          'Content-Security-Policy': "default-src 'none'"
+        },
+        body: Buffer.from('<!doctype html><title>Customer report</title>', 'utf8')
+      };
     }
   };
   registerPerformanceRoutes(app, {
@@ -240,6 +252,7 @@ test('registers campaign-scoped performance endpoints and forwards authenticated
     'POST /api/campaigns/:id/performance/contents/:contentId/manual-inputs',
     'POST /api/campaigns/:id/performance/customer-report-preview',
     'POST /api/campaigns/:id/performance/customer-report-snapshots',
+    'POST /api/campaigns/:id/performance/customer-report-snapshots/:snapshotId/html',
     'POST /api/campaigns/:id/performance/customer-report-snapshots/:snapshotId/ppt',
     'POST /api/campaigns/:id/performance/feishu-connection',
     'POST /api/campaigns/:id/performance/feishu-connection/approve',
@@ -354,11 +367,46 @@ test('routes customer report preview, immutable snapshots, and retained PPT deli
     requestId: 'customer-report-ppt-request'
   }]);
 
+  const html = invoke(
+    routes.get('POST /api/campaigns/:id/performance/customer-report-snapshots/:snapshotId/html'),
+    {
+      user: previewRequest.user,
+      params: { id: '7', snapshotId: '81' },
+      body: {},
+      requestId: 'customer-report-html-request'
+    }
+  );
+  assert.equal(html.statusCode, 200);
+  assert.equal(html.headers['Content-Type'], 'text/html; charset=utf-8');
+  assert.match(html.body.toString('utf8'), /Customer report/);
+  assert.deepEqual(calls[5], ['customer-report-html', {
+    user: previewRequest.user,
+    campaignId: '7',
+    snapshotId: '81',
+    requestId: 'customer-report-html-request'
+  }]);
+
+  const htmlCallCount = calls.length;
+  const invalidHtml = invoke(
+    routes.get('POST /api/campaigns/:id/performance/customer-report-snapshots/:snapshotId/html'),
+    {
+      user: previewRequest.user,
+      params: { id: '7', snapshotId: '81' },
+      body: { unexpected: true },
+      requestId: 'customer-report-html-invalid-request'
+    }
+  );
+  assert.equal(invalidHtml.statusCode, 400);
+  assert.equal(invalidHtml.body.code, 'INVALID_REQUEST_BODY');
+  assert.equal(invalidHtml.body.request_id, 'customer-report-html-invalid-request');
+  assert.equal(calls.length, htmlCallCount);
+
   for (const [name, id, method, pathTemplate, mediaKind] of [
     ['CAMPAIGN_PERFORMANCE_CUSTOMER_REPORT_PREVIEW', 'campaign.performance.customer-report-preview', 'POST', '/api/campaigns/:id/performance/customer-report-preview', campaignContract.MEDIA_KINDS.JSON],
     ['CAMPAIGN_PERFORMANCE_CUSTOMER_REPORT_SNAPSHOT_CREATE', 'campaign.performance.customer-report-snapshot.create', 'POST', '/api/campaigns/:id/performance/customer-report-snapshots', campaignContract.MEDIA_KINDS.JSON],
     ['CAMPAIGN_PERFORMANCE_CUSTOMER_REPORT_SNAPSHOT_LIST', 'campaign.performance.customer-report-snapshot.list', 'GET', '/api/campaigns/:id/performance/customer-report-snapshots', campaignContract.MEDIA_KINDS.EMPTY],
     ['CAMPAIGN_PERFORMANCE_CUSTOMER_REPORT_SNAPSHOT_DETAIL', 'campaign.performance.customer-report-snapshot.detail', 'GET', '/api/campaigns/:id/performance/customer-report-snapshots/:snapshotId', campaignContract.MEDIA_KINDS.EMPTY],
+    ['CAMPAIGN_PERFORMANCE_CUSTOMER_REPORT_HTML_EXPORT', 'campaign.performance.customer-report-html.export', 'POST', '/api/campaigns/:id/performance/customer-report-snapshots/:snapshotId/html', campaignContract.MEDIA_KINDS.JSON],
     ['CAMPAIGN_PERFORMANCE_CUSTOMER_REPORT_PPT_GENERATE', 'campaign.performance.customer-report-ppt.generate', 'POST', '/api/campaigns/:id/performance/customer-report-snapshots/:snapshotId/ppt', campaignContract.MEDIA_KINDS.JSON]
   ]) {
     const policy = campaignContract.REQUEST_POLICIES[name];
@@ -368,6 +416,10 @@ test('routes customer report preview, immutable snapshots, and retained PPT deli
     assert.equal(policy.pathTemplate, pathTemplate);
     assert.equal(policy.mediaKind, mediaKind);
   }
+  assert.equal(
+    campaignContract.REQUEST_POLICIES.CAMPAIGN_PERFORMANCE_CUSTOMER_REPORT_HTML_EXPORT.maxRawBytes,
+    campaignContract.BODY_LIMITS.CAMPAIGN_EMPTY_CONTROL_JSON
+  );
 
   customerReportSnapshotService.preview = () => {
     throw new CustomerReportSnapshotServiceError(
@@ -407,6 +459,7 @@ test('routes customer report preview, immutable snapshots, and retained PPT deli
   const serverSource = fs.readFileSync(path.resolve(__dirname, '..', 'server.js'), 'utf8');
   assert.match(serverSource, /'CAMPAIGN_PERFORMANCE_CUSTOMER_REPORT_PREVIEW'/);
   assert.match(serverSource, /'CAMPAIGN_PERFORMANCE_CUSTOMER_REPORT_SNAPSHOT_CREATE'/);
+  assert.match(serverSource, /'CAMPAIGN_PERFORMANCE_CUSTOMER_REPORT_HTML_EXPORT'/);
   assert.match(serverSource, /'CAMPAIGN_PERFORMANCE_CUSTOMER_REPORT_PPT_GENERATE'/);
 });
 

@@ -195,15 +195,21 @@ test('performance dashboard exposes a customer-safe preview, immutable snapshot,
   assert.match(appSource, /var activePerformanceCustomerReportRequest = null;/);
   assert.match(appSource, /var performanceCustomerReportSealRequestSequence = 0;/);
   assert.match(appSource, /var performanceCustomerReportPptDownloadGeneration = 0;/);
+  assert.match(appSource, /var performanceCustomerReportHtmlDownloadGeneration = 0;/);
   assert.match(appSource, /function invalidatePerformanceCustomerReportPreview\(/);
   assert.match(
     appSource,
     /function invalidatePerformanceCustomerReportPreview\([\s\S]*?performanceCustomerReportPptDownloadGeneration \+= 1;[\s\S]*?performanceCustomerReportPptDownloads = Object\.create\(null\);/
   );
+  assert.match(
+    appSource,
+    /function invalidatePerformanceCustomerReportPreview\([\s\S]*?performanceCustomerReportHtmlDownloadGeneration \+= 1;[\s\S]*?performanceCustomerReportHtmlDownloads = Object\.create\(null\);/
+  );
   assert.match(appSource, /async function generatePerformanceCustomerReportPreview\(\)/);
   assert.match(appSource, /async function sealPerformanceCustomerReportSnapshot\(\)/);
   assert.match(appSource, /async function loadPerformanceCustomerReportSnapshots\(\)/);
   assert.match(appSource, /async function downloadPerformanceCustomerReportPpt\(snapshotId\)/);
+  assert.match(appSource, /async function downloadPerformanceCustomerReportHtml\(snapshotId\)/);
   assert.match(
     appSource,
     /function performanceCustomerReportPptDownloadIsCurrent\([\s\S]*?context\.generation === performanceCustomerReportPptDownloadGeneration/
@@ -212,12 +218,22 @@ test('performance dashboard exposes a customer-safe preview, immutable snapshot,
     appSource,
     /async function downloadPerformanceCustomerReportPpt\([\s\S]*?generation: performanceCustomerReportPptDownloadGeneration/
   );
+  assert.match(
+    appSource,
+    /function performanceCustomerReportHtmlDownloadIsCurrent\([\s\S]*?context\.generation === performanceCustomerReportHtmlDownloadGeneration/
+  );
+  assert.match(
+    appSource,
+    /async function downloadPerformanceCustomerReportHtml\([\s\S]*?generation: performanceCustomerReportHtmlDownloadGeneration/
+  );
   assert.match(appSource, /function renderPerformanceCustomerReportPreview\(/);
   assert.match(appSource, /function renderPerformanceCustomerReportSnapshots\(/);
   assert.match(appSource, /performance\/customer-report-preview/);
   assert.match(appSource, /performance\/customer-report-snapshots/);
   assert.match(appSource, /customer-report-snapshots\/.*\/ppt/);
+  assert.match(appSource, /customer-report-snapshots\/.*\/html/);
   assert.match(appSource, /onclick=\\"downloadPerformanceCustomerReportPpt\(/);
+  assert.match(appSource, /onclick=\\"downloadPerformanceCustomerReportHtml\(/);
   assert.match(appSource, /response\.blob\(\)/);
   assert.match(appSource, /dlFile\('customer-report-'/);
   assert.match(appSource, /expected_evidence_snapshot_hash/);

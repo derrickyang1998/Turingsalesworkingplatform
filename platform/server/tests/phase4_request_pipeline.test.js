@@ -336,6 +336,7 @@ test('request contract freezes the exact raw-byte and multipart limits', () => {
   const { contract } = loadBoundary();
 
   assert.deepEqual(contract.BODY_LIMITS, {
+    CAMPAIGN_EMPTY_CONTROL_JSON: 64,
     CAMPAIGN_CONTROL_JSON: 65_536,
     CAMPAIGN_REVIEW_JSON: 1_048_576,
     KNOWLEDGE_JSON: 1_048_576,

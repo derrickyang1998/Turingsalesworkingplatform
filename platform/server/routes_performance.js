@@ -62,6 +62,13 @@ function sendPptResult(request, response, result) {
   });
 }
 
+function sendHtmlResult(response, result) {
+  for (const [name, value] of Object.entries(result.headers || {})) {
+    response.setHeader(name, value);
+  }
+  return response.status(result.status).send(result.body);
+}
+
 function authenticatedUserId(request) {
   return request.user && request.user.id;
 }
@@ -70,6 +77,23 @@ function requestHeader(request, name) {
   if (request && typeof request.get === 'function') return request.get(name);
   const headers = request && request.headers && typeof request.headers === 'object' ? request.headers : {};
   return headers[String(name || '').toLowerCase()] || null;
+}
+
+function requireEmptyJsonObject(request) {
+  const body = request && request.body;
+  if (
+    body === null ||
+    typeof body !== 'object' ||
+    Array.isArray(body) ||
+    Object.getPrototypeOf(body) !== Object.prototype ||
+    Object.keys(body).length !== 0
+  ) {
+    throw new CustomerReportDeliveryServiceError(
+      400,
+      'INVALID_REQUEST_BODY',
+      'Request body must be an empty JSON object.'
+    );
+  }
 }
 
 function registerPerformanceRoutes(app, options = {}) {
@@ -114,7 +138,9 @@ function registerPerformanceRoutes(app, options = {}) {
     throw new TypeError('A customer report snapshot service is required.');
   }
   const customerReportDeliveryService = options.customerReportDeliveryService;
-  if (!customerReportDeliveryService || typeof customerReportDeliveryService.generate !== 'function') {
+  if (!customerReportDeliveryService ||
+    typeof customerReportDeliveryService.generate !== 'function' ||
+    typeof customerReportDeliveryService.exportHtml !== 'function') {
     throw new TypeError('A customer report delivery service is required.');
   }
   const aiLimiter = typeof options.aiLimiter === 'function'
@@ -315,6 +341,20 @@ function registerPerformanceRoutes(app, options = {}) {
   app.post('/api/campaigns/:id/performance/customer-report-snapshots/:snapshotId/ppt', options.authMiddleware, (request, response) => {
     try {
       return sendPptResult(request, response, customerReportDeliveryService.generate({
+        user: request.user,
+        campaignId: request.params.id,
+        snapshotId: request.params.snapshotId,
+        requestId: requestId(request)
+      }));
+    } catch (error) {
+      return sendError(request, response, error);
+    }
+  });
+
+  app.post('/api/campaigns/:id/performance/customer-report-snapshots/:snapshotId/html', options.authMiddleware, (request, response) => {
+    try {
+      requireEmptyJsonObject(request);
+      return sendHtmlResult(response, customerReportDeliveryService.exportHtml({
         user: request.user,
         campaignId: request.params.id,
         snapshotId: request.params.snapshotId,
