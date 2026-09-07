@@ -854,6 +854,10 @@ test('influencer column filters cover every displayed data field and keep filter
     { filter_parent_record: 'COLUMN-777' },
     { filter_profile_link: 'column-target-video' },
     { filter_content_deliverable: 'dedicated field' },
+    { filter_cost_usd: '987' },
+    { filter_quoted_price: '3210' },
+    { filter_cpm: '12' },
+    { filter_cpv: '0.11' },
     { filter_cost: '3210' }
   ];
 
@@ -909,6 +913,10 @@ test('influencer column filters reject malformed or oversized values for list an
     { filter_id: 'not-an-id' },
     { filter_followers: '-1' },
     { filter_cost: 'NaN' },
+    { filter_cost_usd: '-1' },
+    { filter_quoted_price: '1e3' },
+    { filter_cpm: 'Infinity' },
+    { filter_cpv: '0.12345' },
     { filter_kol_handle: ['one', 'two'] },
     { filter_profile_link: 'x'.repeat(201) }
   ];
@@ -931,6 +939,48 @@ test('influencer column filters reject malformed or oversized values for list an
   assert.equal(invalidFilterContainer.statusCode, 400);
   assert.equal(invalidFilterContainer.payload.code, 'INVALID_INFLUENCER_FILTER');
 
+  db.close();
+});
+
+test('authenticated influencer saved-view routes persist account-scoped column workspaces', async () => {
+  const db = freshDb();
+  const routes = mountRoutes(db);
+  const columnOrder = [
+    'id','kol_handle','platform','followers','project_name','product_name','region','type',
+    'parent_record','profile_link','content_deliverable','cost_usd','quoted_price','cpm','cpv'
+  ];
+  const created = await invoke(routes, 'POST /api/influencer-views', {
+    user: { id: 2, role: 'user', username: 'tester' },
+    body: {
+      name: 'Commercial shortlist',
+      filters: { filter_quoted_price: '2500', filter_cpm: '33' },
+      visible_columns: columnOrder.filter(function(key) { return key !== 'parent_record'; }),
+      column_order: columnOrder
+    }
+  });
+  assert.equal(created.statusCode, 201);
+  assert.equal(created.payload.view.name, 'Commercial shortlist');
+
+  const ownerList = await invoke(routes, 'GET /api/influencer-views', {
+    user: { id: 2, role: 'user', username: 'tester' }
+  });
+  const peerList = await invoke(routes, 'GET /api/influencer-views', {
+    user: { id: 3, role: 'user', username: 'teammate' }
+  });
+  assert.equal(ownerList.payload.views.length, 1);
+  assert.deepEqual(peerList.payload, { views: [] });
+
+  const concealedDelete = await invoke(routes, 'DELETE /api/influencer-views/:id', {
+    user: { id: 3, role: 'user', username: 'teammate' },
+    params: { id: created.payload.view.id }
+  });
+  assert.equal(concealedDelete.statusCode, 404);
+  const removed = await invoke(routes, 'DELETE /api/influencer-views/:id', {
+    user: { id: 2, role: 'user', username: 'tester' },
+    params: { id: created.payload.view.id }
+  });
+  assert.equal(removed.statusCode, 200);
+  assert.equal(removed.payload.success, true);
   db.close();
 });
 
@@ -2089,6 +2139,8 @@ test('m4 frontend keeps import, feishu, and order-resource controls wired', () =
   assert.match(indexHtml, /id="filt_search"/);
   assert.match(indexHtml, /id="m4SavedViewSelect"/);
   assert.match(indexHtml, /id="m4SavedViewName"/);
+  assert.match(indexHtml, /id="m4ColumnWorkspaceButton"/);
+  assert.match(indexHtml, /id="m4ColumnWorkspace"/);
   assert.match(indexHtml, /onclick="saveM4SavedView\(\)"/);
   assert.match(indexHtml, /onclick="deleteM4SavedView\(\)"/);
   assert.match(indexHtml, /onclick="clearM4Filters\(\)"/);
@@ -2100,7 +2152,18 @@ test('m4 frontend keeps import, feishu, and order-resource controls wired', () =
   assert.match(appJs, /m4-table thead th\{position:sticky/);
   assert.match(appJs, /m4-table input\[type="checkbox"\]\{width:16px!important;height:16px!important/);
   assert.match(appJs, /var M4_COLUMN_FILTER_DEFINITIONS =/);
-  assert.match(appJs, /var M4_SAVED_VIEW_STORAGE_PREFIX = 'tm_m4_saved_views_v1:'/);
+  assert.match(appJs, /var M4_INFLUENCER_VIEW_API = '\/influencer-views'/);
+  assert.match(appJs, /key: 'quoted_price'/);
+  assert.match(appJs, /key: 'cpm'/);
+  assert.match(appJs, /key: 'cpv'/);
+  assert.match(appJs, /function loadM4SavedViews/);
+  assert.match(appJs, /var m4LegacyCostFilter = ''/);
+  assert.match(appJs, /filters\.filter_cost = m4LegacyCostFilter/);
+  assert.match(appJs, /var missingLegacyViews = legacyViews\.filter/);
+  assert.match(appJs, /var pendingLegacyViews = missingLegacyViews\.filter/);
+  assert.match(appJs, /function toggleM4ColumnWorkspace/);
+  assert.match(appJs, /function moveM4Column/);
+  assert.match(appJs, /function toggleM4ColumnVisibility/);
   assert.match(appJs, /var m4ActiveFilterOwnerUserId = null/);
   assert.match(appJs, /m4ActiveFilterOwnerUserId !== currentFilterOwnerUserId/);
   assert.match(appJs, /function ensureInfluencerTableShell/);
@@ -2115,6 +2178,7 @@ test('m4 frontend keeps import, feishu, and order-resource controls wired', () =
   assert.match(componentCss, /--m4-table-header-height: 40px/);
   assert.match(componentCss, /top: var\(--m4-table-header-height\)/);
   assert.match(componentCss, /\.m4-table \.m4-column-filter/);
+  assert.match(componentCss, /\.m4-column-workspace/);
   assert.match(appJs, /function handleDrop/);
   assert.match(appJs, /function openInfUploadModal/);
   assert.match(appJs, /function handleUploadModal/);

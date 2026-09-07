@@ -16,6 +16,10 @@ const {
   resolveResourceQuotedPrice,
   serializeCollaborationResource
 } = require('./services/collaboration_resource_contract');
+const {
+  InfluencerSavedViewError,
+  createInfluencerSavedViewService
+} = require('./services/influencer_saved_view_service');
 
 class InfluencerFilterError extends Error {
   constructor(message) {
@@ -171,6 +175,18 @@ function buildInfluencerSelect(filters, options = {}) {
     sql += ' AND COALESCE(NULLIF(quoted_price, 0), cost_usd, 0) = ?';
     params.push(cost);
   }
+  const dedicatedAmounts = [
+    ['filter_cost_usd', 'cost_usd'],
+    ['filter_quoted_price', 'quoted_price'],
+    ['filter_cpm', 'cpm'],
+    ['filter_cpv', 'cpv']
+  ];
+  dedicatedAmounts.forEach(function(definition) {
+    const value = influencerAmountFilter(filters, definition[0]);
+    if (value === null) return;
+    sql += ` AND COALESCE(${definition[1]}, 0) = ?`;
+    params.push(value);
+  });
   const minFollowers = influencerIntegerFilter(filters, 'min_followers');
   if (minFollowers !== null) {
     sql += ' AND followers >= ?';
@@ -200,6 +216,7 @@ module.exports = function(app, db, authMiddleware, options = {}) {
 
 const businessKnowledge = require('./services/business_knowledge_service');
 const influencerWorkflow = require('./services/influencer_workflow_service');
+const influencerSavedViews = options.influencerSavedViewService || createInfluencerSavedViewService(db);
 const campaignCollaboration = options.campaignCollaborationService;
 const feishuClient = options.feishuClient || createFeishuClient();
 const feishuBitableOutbox = options.feishuBitableOutboxService || createFeishuBitableOutboxService(db);
@@ -253,6 +270,42 @@ app.get('/api/influencers', authMiddleware, (req, res) => {
   } catch (error) {
     if (sendInfluencerFilterError(res, error)) return;
     res.status(500).json({ error: error.message });
+  }
+});
+
+function sendInfluencerViewError(res, error) {
+  if (!(error instanceof InfluencerSavedViewError)) return false;
+  res.status(error.statusCode).json({ error: error.message, code: error.code });
+  return true;
+}
+
+app.get('/api/influencer-views', authMiddleware, (req, res) => {
+  try {
+    res.json(influencerSavedViews.list({ userId: req.user.id }));
+  } catch (error) {
+    if (sendInfluencerViewError(res, error)) return;
+    res.status(500).json({ error: 'Saved views are unavailable.' });
+  }
+});
+
+app.post('/api/influencer-views', authMiddleware, (req, res) => {
+  try {
+    const result = influencerSavedViews.save({ userId: req.user.id, body: req.body });
+    res.status(result.status).json({ view: result.view });
+  } catch (error) {
+    if (sendInfluencerViewError(res, error)) return;
+    res.status(500).json({ error: 'Saved view could not be stored.' });
+  }
+});
+
+app.delete('/api/influencer-views/:id', authMiddleware, (req, res) => {
+  try {
+    const removed = influencerSavedViews.remove({ userId: req.user.id, viewId: req.params.id });
+    if (!removed) return res.status(404).json({ error: 'Saved view was not found.', code: 'INFLUENCER_VIEW_NOT_FOUND' });
+    return res.json({ success: true });
+  } catch (error) {
+    if (sendInfluencerViewError(res, error)) return;
+    return res.status(500).json({ error: 'Saved view could not be deleted.' });
   }
 });
 

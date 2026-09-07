@@ -21,6 +21,7 @@ platform/server/migrations/011_performance_feishu_connection_config.js text eol=
 platform/server/migrations/012_performance_ai_review_audit.js text eol=lf
 platform/server/migrations/013_customer_report_snapshot.js text eol=lf
 platform/server/migrations/014_customer_report_ppt_artifact.js text eol=lf
+platform/server/migrations/015_influencer_saved_views.js text eol=lf
 platform/server/migrations/baselines/legacy_v1.js text eol=lf
 platform/server/migrations/engines/v1.js text eol=lf
 platform/server/migrations/vendor/bcryptjs_v3_0_3.js text eol=lf

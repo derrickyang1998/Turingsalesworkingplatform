@@ -4324,20 +4324,34 @@ function ensureM4TableStyles() {
   style.textContent = '.m4-table{border-collapse:separate;border-spacing:0;min-width:1320px}.m4-table thead th{position:sticky;top:0;z-index:3;background:var(--surface);box-shadow:0 1px 0 var(--border)}.m4-table th:first-child,.m4-table td:first-child{width:42px;text-align:center}.m4-table input[type="checkbox"]{width:16px!important;height:16px!important;min-width:16px;margin:0;vertical-align:middle;accent-color:var(--tm-color-accent,#1a1a1a)}.m4-table tbody tr:hover{background:#fafaf9}';
   document.head.appendChild(style);
 }
-var M4_COLUMN_FILTER_DEFINITIONS = [
-  { key: 'filter_id', elementId: 'm4col_id', label: 'ID', placeholder: '精确 ID', inputMode: 'numeric' },
-  { key: 'filter_kol_handle', elementId: 'm4col_kol_handle', label: 'KOL', placeholder: '名称' },
-  { key: 'filter_platform', elementId: 'm4col_platform', label: 'Platform', placeholder: '平台' },
-  { key: 'filter_followers', elementId: 'm4col_followers', label: 'Followers', placeholder: '精确值', inputMode: 'numeric' },
-  { key: 'filter_project_name', elementId: 'm4col_project_name', label: 'Project', placeholder: '项目' },
-  { key: 'filter_product_name', elementId: 'm4col_product_name', label: 'Product', placeholder: '产品' },
-  { key: 'filter_region', elementId: 'm4col_region', label: 'Region', placeholder: '地区' },
-  { key: 'filter_type', elementId: 'm4col_type', label: 'Type', placeholder: '类型 / 标签' },
-  { key: 'filter_parent_record', elementId: 'm4col_parent_record', label: 'Parent', placeholder: '父记录' },
-  { key: 'filter_profile_link', elementId: 'm4col_profile_link', label: 'Link', placeholder: '链接' },
-  { key: 'filter_content_deliverable', elementId: 'm4col_content_deliverable', label: 'Deliverable', placeholder: '交付内容' },
-  { key: 'filter_cost', elementId: 'm4col_cost', label: 'Cost', placeholder: '精确金额', inputMode: 'decimal' }
+var M4_INFLUENCER_COLUMNS = [
+  { key: 'id', filterKey: 'filter_id', elementId: 'm4col_id', label: 'ID', placeholder: '精确 ID', inputMode: 'numeric', width: 76 },
+  { key: 'kol_handle', filterKey: 'filter_kol_handle', elementId: 'm4col_kol_handle', label: 'KOL', placeholder: '名称', width: 140 },
+  { key: 'platform', filterKey: 'filter_platform', elementId: 'm4col_platform', label: 'Platform', placeholder: '平台', width: 108 },
+  { key: 'followers', filterKey: 'filter_followers', elementId: 'm4col_followers', label: 'Followers', placeholder: '精确值', inputMode: 'numeric', width: 112 },
+  { key: 'project_name', filterKey: 'filter_project_name', elementId: 'm4col_project_name', label: 'Project', placeholder: '项目', width: 150 },
+  { key: 'product_name', filterKey: 'filter_product_name', elementId: 'm4col_product_name', label: 'Product', placeholder: '产品', width: 150 },
+  { key: 'region', filterKey: 'filter_region', elementId: 'm4col_region', label: 'Region', placeholder: '地区', width: 112 },
+  { key: 'type', filterKey: 'filter_type', elementId: 'm4col_type', label: 'Type', placeholder: '类型 / 标签', width: 140 },
+  { key: 'parent_record', filterKey: 'filter_parent_record', elementId: 'm4col_parent_record', label: 'Parent', placeholder: '父记录', width: 140 },
+  { key: 'profile_link', filterKey: 'filter_profile_link', elementId: 'm4col_profile_link', label: 'Link', placeholder: '链接', width: 210 },
+  { key: 'content_deliverable', filterKey: 'filter_content_deliverable', elementId: 'm4col_content_deliverable', label: 'Deliverable', placeholder: '交付内容', width: 170 },
+  { key: 'cost_usd', filterKey: 'filter_cost_usd', elementId: 'm4col_cost_usd', label: 'Cost', placeholder: '精确成本', inputMode: 'decimal', width: 110 },
+  { key: 'quoted_price', filterKey: 'filter_quoted_price', elementId: 'm4col_quoted_price', label: 'Quote', placeholder: '精确报价', inputMode: 'decimal', width: 110 },
+  { key: 'cpm', filterKey: 'filter_cpm', elementId: 'm4col_cpm', label: 'CPM', placeholder: '精确 CPM', inputMode: 'decimal', width: 96 },
+  { key: 'cpv', filterKey: 'filter_cpv', elementId: 'm4col_cpv', label: 'CPV', placeholder: '精确 CPV', inputMode: 'decimal', width: 96 }
 ];
+var M4_COLUMN_FILTER_DEFINITIONS = M4_INFLUENCER_COLUMNS.map(function(column) {
+  return {
+    key: column.filterKey,
+    elementId: column.elementId,
+    label: column.label,
+    placeholder: column.placeholder,
+    inputMode: column.inputMode
+  };
+});
+var M4_DEFAULT_COLUMN_ORDER = M4_INFLUENCER_COLUMNS.map(function(column) { return column.key; });
+var M4_INFLUENCER_VIEW_API = '/influencer-views';
 var M4_FILTER_ELEMENT_IDS = {
   search: 'filt_search',
   platform: 'filt_platform',
@@ -4347,6 +4361,12 @@ var M4_FILTER_ELEMENT_IDS = {
   tags: 'filt_tags'
 };
 var M4_SAVED_VIEW_STORAGE_PREFIX = 'tm_m4_saved_views_v1:';
+var m4SavedViews = [];
+var m4SavedViewsLoaded = false;
+var m4ColumnOrder = M4_DEFAULT_COLUMN_ORDER.slice();
+var m4VisibleColumns = M4_DEFAULT_COLUMN_ORDER.slice();
+var m4ColumnWorkspaceBindingsInstalled = false;
+var m4LegacyCostFilter = '';
 var m4InfluencerRequestSequence = 0;
 var m4InfluencerSearchTimer = null;
 var m4ActiveFilterOwnerUserId = null;
@@ -4454,11 +4474,18 @@ function syncM4CampaignContextFromWorkflow() {
 function initM4() {
   ensureM4TableStyles();
   ensureInfluencerTableShell();
+  ensureM4ColumnWorkspaceBindings();
   var currentFilterOwnerUserId = readPositiveInteger(CURRENT_USER && CURRENT_USER.id);
-  if (m4ActiveFilterOwnerUserId !== currentFilterOwnerUserId) setM4FilterValues({});
+  if (m4ActiveFilterOwnerUserId !== currentFilterOwnerUserId) {
+    m4SavedViews = [];
+    m4SavedViewsLoaded = false;
+    m4ColumnOrder = M4_DEFAULT_COLUMN_ORDER.slice();
+    m4VisibleColumns = M4_DEFAULT_COLUMN_ORDER.slice();
+    rebuildM4InfluencerTable({});
+  }
   m4ActiveFilterOwnerUserId = currentFilterOwnerUserId;
-  renderM4SavedViews();
-  Promise.all([loadInfluencersFromAPI(), loadM4Campaigns(), loadFeishuStatus()]).then(function() {
+  renderM4ColumnWorkspace();
+  Promise.all([loadM4SavedViews(), loadInfluencersFromAPI(), loadM4Campaigns(), loadFeishuStatus()]).then(function() {
     loadCollaborations();
     loadFeishuOutbox();
   });
@@ -4473,6 +4500,7 @@ function m4Filters() {
     var element = document.getElementById(definition.elementId);
     filters[definition.key] = element ? String(element.value || '').trim() : '';
   });
+  filters.filter_cost = m4LegacyCostFilter;
   return filters;
 }
 function loadInfluencersFromAPI() {
@@ -4503,7 +4531,8 @@ function loadInfluencersFromAPI() {
     return [];
   });
 }
-function matchInfluencers() {
+function matchInfluencers(clearLegacyCost) {
+  if (clearLegacyCost) m4LegacyCostFilter = '';
   m4InfluencerRequestSequence += 1;
   setM4FilterStatus('正在筛选...');
   if (m4InfluencerSearchTimer) clearTimeout(m4InfluencerSearchTimer);
@@ -4521,23 +4550,49 @@ function fmtCount(n) {
 
 function m4ColumnFilterInput(definition) {
   var inputMode = definition.inputMode ? ' inputmode="' + definition.inputMode + '"' : '';
-  return '<input class="m4-column-filter" id="' + definition.elementId + '" data-filter-key="' + definition.key + '" aria-label="按 ' + esc(definition.label) + ' 筛选网红" autocomplete="off" maxlength="200" placeholder="' + esc(definition.placeholder) + '"' + inputMode + ' oninput="matchInfluencers()">';
+  return '<input class="m4-column-filter" id="' + definition.elementId + '" data-filter-key="' + definition.key + '" aria-label="按 ' + esc(definition.label) + ' 筛选网红" autocomplete="off" maxlength="200" placeholder="' + esc(definition.placeholder) + '"' + inputMode + ' oninput="matchInfluencers(true)">';
 }
 
-function ensureInfluencerTableShell() {
+function m4ColumnByKey(key) {
+  return M4_INFLUENCER_COLUMNS.find(function(column) { return column.key === key; }) || null;
+}
+
+function orderedM4Columns() {
+  return m4ColumnOrder.map(m4ColumnByKey).filter(Boolean);
+}
+
+function m4ColumnClass(column) {
+  return m4VisibleColumns.indexOf(column.key) === -1 ? ' class="m4-column-hidden"' : '';
+}
+
+function m4TableMinimumWidth() {
+  return 132 + orderedM4Columns().reduce(function(total, column) {
+    return total + (m4VisibleColumns.indexOf(column.key) === -1 ? 0 : column.width);
+  }, 0);
+}
+
+function ensureInfluencerTableShell(rebuild) {
   ensureM4TableStyles();
   var c = document.getElementById('infTableContainer');
   if (!c) return null;
   var body = c.querySelector('[data-role="influencer-results-body"]');
-  if (body) return body;
+  if (body && !rebuild) return body;
 
-  var labels = M4_COLUMN_FILTER_DEFINITIONS.map(function(definition) {
-    return '<th scope="col">' + esc(definition.label) + '</th>';
+  var columns = orderedM4Columns();
+  var labels = columns.map(function(column) {
+    return '<th scope="col" data-column-key="' + esc(column.key) + '" style="width:' + column.width + 'px"' + m4ColumnClass(column) + '>' + esc(column.label) + '</th>';
   }).join('');
-  var filters = M4_COLUMN_FILTER_DEFINITIONS.map(function(definition) {
-    return '<th>' + m4ColumnFilterInput(definition) + '</th>';
+  var filters = columns.map(function(column) {
+    var definition = {
+      key: column.filterKey,
+      elementId: column.elementId,
+      label: column.label,
+      placeholder: column.placeholder,
+      inputMode: column.inputMode
+    };
+    return '<th data-column-key="' + esc(column.key) + '" style="width:' + column.width + 'px"' + m4ColumnClass(column) + '>' + m4ColumnFilterInput(definition) + '</th>';
   }).join('');
-  c.innerHTML = '<table class="m4-table"><thead>' +
+  c.innerHTML = '<table class="m4-table" style="min-width:' + m4TableMinimumWidth() + 'px"><thead>' +
     '<tr><th scope="col"><label class="tm-checkbox-target"><input type="checkbox" id="selectAllInf" aria-label="全选网红" onchange="toggleAll(this)"></label></th>' + labels + '<th scope="col">Action</th></tr>' +
     '<tr class="m4-filter-row"><th aria-hidden="true"></th>' + filters + '<th aria-hidden="true"></th></tr>' +
     '</thead><tbody data-role="influencer-results-body"></tbody></table>';
@@ -4557,7 +4612,7 @@ function m4SavedViewStorageKey() {
 function m4SavedViewFilterKeys() {
   return Object.keys(M4_FILTER_ELEMENT_IDS).concat(M4_COLUMN_FILTER_DEFINITIONS.map(function(definition) {
     return definition.key;
-  }));
+  })).concat(['filter_cost']);
 }
 
 function normalizeM4SavedViewFilters(filters) {
@@ -4572,7 +4627,33 @@ function normalizeM4SavedViewFilters(filters) {
   return normalized;
 }
 
-function readM4SavedViews() {
+function normalizeM4ColumnOrder(columnOrder) {
+  if (!Array.isArray(columnOrder) || columnOrder.length !== M4_DEFAULT_COLUMN_ORDER.length) {
+    return M4_DEFAULT_COLUMN_ORDER.slice();
+  }
+  var seen = {};
+  var normalized = [];
+  columnOrder.forEach(function(key) {
+    if (typeof key === 'string' && M4_DEFAULT_COLUMN_ORDER.indexOf(key) !== -1 && !seen[key]) {
+      seen[key] = true;
+      normalized.push(key);
+    }
+  });
+  return normalized.length === M4_DEFAULT_COLUMN_ORDER.length ? normalized : M4_DEFAULT_COLUMN_ORDER.slice();
+}
+
+function normalizeM4VisibleColumns(visibleColumns, columnOrder) {
+  var order = normalizeM4ColumnOrder(columnOrder);
+  if (!Array.isArray(visibleColumns)) return order.slice();
+  var visible = {};
+  visibleColumns.forEach(function(key) {
+    if (typeof key === 'string' && order.indexOf(key) !== -1) visible[key] = true;
+  });
+  var normalized = order.filter(function(key) { return visible[key]; });
+  return normalized.length ? normalized : order.slice();
+}
+
+function readLegacyM4SavedViews() {
   var storageKey = m4SavedViewStorageKey();
   if (!storageKey) return [];
   try {
@@ -4587,8 +4668,12 @@ function readM4SavedViews() {
       return true;
     }).slice(0, 20).map(function(view) {
       return {
+        id: null,
         name: view.name.trim(),
         filters: normalizeM4SavedViewFilters(view.filters),
+        visible_columns: M4_DEFAULT_COLUMN_ORDER.slice(),
+        column_order: M4_DEFAULT_COLUMN_ORDER.slice(),
+        row_version: 0,
         updated_at: typeof view.updated_at === 'string' ? view.updated_at : ''
       };
     });
@@ -4597,34 +4682,107 @@ function readM4SavedViews() {
   }
 }
 
-function writeM4SavedViews(views) {
-  var storageKey = m4SavedViewStorageKey();
-  if (!storageKey) return false;
+function normalizeM4SavedView(view) {
+  if (!view || typeof view !== 'object' || typeof view.name !== 'string') return null;
+  var id = readPositiveInteger(view.id);
+  var columnOrder = normalizeM4ColumnOrder(view.column_order);
+  return {
+    id: id,
+    name: view.name.trim(),
+    filters: normalizeM4SavedViewFilters(view.filters),
+    visible_columns: normalizeM4VisibleColumns(view.visible_columns, columnOrder),
+    column_order: columnOrder,
+    row_version: readPositiveInteger(view.row_version) || 0,
+    created_at: typeof view.created_at === 'string' ? view.created_at : '',
+    updated_at: typeof view.updated_at === 'string' ? view.updated_at : ''
+  };
+}
+
+async function importLegacyM4SavedViews(views) {
+  var imported = [];
+  for (var index = 0; index < views.length; index += 1) {
+    var legacyView = views[index];
+    try {
+      var response = await apiFetch(M4_INFLUENCER_VIEW_API, {
+        method: 'POST',
+        body: JSON.stringify({
+          name: legacyView.name,
+          filters: legacyView.filters,
+          visible_columns: legacyView.visible_columns,
+          column_order: legacyView.column_order
+        })
+      });
+      var data = await response.json();
+      if (response.ok && data.view) imported.push(data.view);
+    } catch (error) {}
+  }
+  return imported;
+}
+
+async function loadM4SavedViews(selectedId) {
+  var userId = readPositiveInteger(CURRENT_USER && CURRENT_USER.id);
+  if (userId === null) {
+    m4SavedViews = [];
+    m4SavedViewsLoaded = true;
+    renderM4SavedViews();
+    return [];
+  }
   try {
-    localStorage.setItem(storageKey, JSON.stringify(views.slice(0, 20)));
-    return true;
+    var response = await apiFetch(M4_INFLUENCER_VIEW_API);
+    var data = await response.json();
+    if (!response.ok) throw new Error(data.error || '筛选视图加载失败');
+    var views = Array.isArray(data.views) ? data.views.map(normalizeM4SavedView).filter(Boolean) : [];
+    var legacyViews = readLegacyM4SavedViews();
+    if (legacyViews.length && views.length < 20) {
+      var serverNames = {};
+      views.forEach(function(view) { serverNames[view.name.toLowerCase()] = true; });
+      var missingLegacyViews = legacyViews.filter(function(view) {
+        return !serverNames[view.name.toLowerCase()];
+      }).slice(0, 20 - views.length);
+      if (missingLegacyViews.length) {
+        var imported = await importLegacyM4SavedViews(missingLegacyViews);
+        var importedViews = imported.map(normalizeM4SavedView).filter(Boolean);
+        var importedNames = {};
+        importedViews.forEach(function(view) { importedNames[view.name.toLowerCase()] = true; });
+        var pendingLegacyViews = missingLegacyViews.filter(function(view) {
+          return !importedNames[view.name.toLowerCase()];
+        });
+        views = views.concat(importedViews, pendingLegacyViews);
+      }
+    }
+    m4SavedViews = views.slice(0, 20);
+    m4SavedViewsLoaded = true;
+    renderM4SavedViews(selectedId);
+    return m4SavedViews;
   } catch (error) {
-    return false;
+    m4SavedViews = readLegacyM4SavedViews();
+    m4SavedViewsLoaded = true;
+    renderM4SavedViews();
+    toast('服务端视图暂不可用，已使用本机缓存', 'error');
+    return m4SavedViews;
   }
 }
 
-function renderM4SavedViews(selectedName) {
+function renderM4SavedViews(selectedId) {
   var select = document.getElementById('m4SavedViewSelect');
   if (!select) return;
-  var views = readM4SavedViews();
-  select.innerHTML = '<option value="">筛选视图</option>' + views.map(function(view) {
-    return '<option value="' + esc(view.name) + '">' + esc(view.name) + '</option>';
+  select.innerHTML = '<option value="">筛选视图</option>' + m4SavedViews.map(function(view) {
+    return '<option value="' + esc(view.id === null ? 'legacy:' + view.name : view.id) + '">' + esc(view.name) + '</option>';
   }).join('');
-  if (selectedName && views.some(function(view) { return view.name === selectedName; })) {
-    select.value = selectedName;
+  if (selectedId !== undefined && selectedId !== null) {
+    var target = String(selectedId);
+    if (Array.prototype.some.call(select.options || [], function(option) { return option.value === target; })) {
+      select.value = target;
+    }
   }
   var deleteButton = document.getElementById('m4DeleteSavedView');
-  if (deleteButton) deleteButton.disabled = !select.value;
+  if (deleteButton) deleteButton.disabled = !select.value || String(select.value).indexOf('legacy:') === 0;
 }
 
 function setM4FilterValues(filters) {
   ensureInfluencerTableShell();
   filters = normalizeM4SavedViewFilters(filters);
+  m4LegacyCostFilter = filters.filter_cost || '';
   Object.keys(M4_FILTER_ELEMENT_IDS).forEach(function(key) {
     var element = document.getElementById(M4_FILTER_ELEMENT_IDS[key]);
     if (element) element.value = filters[key] || '';
@@ -4635,7 +4793,99 @@ function setM4FilterValues(filters) {
   });
 }
 
-function saveM4SavedView() {
+function rebuildM4InfluencerTable(filters) {
+  var currentFilters = filters || m4Filters();
+  ensureInfluencerTableShell(true);
+  setM4FilterValues(currentFilters);
+  renderInfTable(lastInfAPI || []);
+}
+
+function applyM4ColumnState(columnOrder, visibleColumns, filters) {
+  m4ColumnOrder = normalizeM4ColumnOrder(columnOrder);
+  m4VisibleColumns = normalizeM4VisibleColumns(visibleColumns, m4ColumnOrder);
+  rebuildM4InfluencerTable(filters);
+  renderM4ColumnWorkspace();
+}
+
+function renderM4ColumnWorkspace() {
+  var container = document.getElementById('m4ColumnWorkspace');
+  if (!container) return;
+  var columns = orderedM4Columns();
+  container.innerHTML = columns.map(function(column, index) {
+    var checked = m4VisibleColumns.indexOf(column.key) !== -1 ? ' checked' : '';
+    var upDisabled = index === 0 ? ' disabled' : '';
+    var downDisabled = index === columns.length - 1 ? ' disabled' : '';
+    return '<div class="m4-column-workspace-row">' +
+      '<label class="tm-checkbox-target"><input type="checkbox" aria-label="显示 ' + esc(column.label) + ' 列" onchange="toggleM4ColumnVisibility(\'' + column.key + '\',this.checked)"' + checked + '></label>' +
+      '<span class="m4-column-workspace-label">' + esc(column.label) + '</span>' +
+      '<button class="btn btn-outline m4-column-workspace-order" type="button" title="上移 ' + esc(column.label) + '" aria-label="上移 ' + esc(column.label) + '" onclick="moveM4Column(\'' + column.key + '\',-1)"' + upDisabled + '>&uarr;</button>' +
+      '<button class="btn btn-outline m4-column-workspace-order" type="button" title="下移 ' + esc(column.label) + '" aria-label="下移 ' + esc(column.label) + '" onclick="moveM4Column(\'' + column.key + '\',1)"' + downDisabled + '>&darr;</button>' +
+      '</div>';
+  }).join('') + '<div class="m4-column-workspace-footer"><button class="btn btn-outline btn-sm" type="button" onclick="resetM4Columns()">恢复默认列</button></div>';
+}
+
+function toggleM4ColumnWorkspace() {
+  var button = document.getElementById('m4ColumnWorkspaceButton');
+  var workspace = document.getElementById('m4ColumnWorkspace');
+  if (!button || !workspace) return;
+  var opening = workspace.classList.contains('hidden');
+  workspace.classList.toggle('hidden', !opening);
+  button.setAttribute('aria-expanded', opening ? 'true' : 'false');
+  if (opening) renderM4ColumnWorkspace();
+}
+
+function closeM4ColumnWorkspace() {
+  var button = document.getElementById('m4ColumnWorkspaceButton');
+  var workspace = document.getElementById('m4ColumnWorkspace');
+  if (!button || !workspace || workspace.classList.contains('hidden')) return;
+  workspace.classList.add('hidden');
+  button.setAttribute('aria-expanded', 'false');
+}
+
+function ensureM4ColumnWorkspaceBindings() {
+  if (m4ColumnWorkspaceBindingsInstalled || typeof document === 'undefined') return;
+  document.addEventListener('click', function(event) {
+    var wrap = document.querySelector('.m4-column-workspace-wrap');
+    if (wrap && !wrap.contains(event.target)) closeM4ColumnWorkspace();
+  });
+  document.addEventListener('keydown', function(event) {
+    if (event.key !== 'Escape') return;
+    var workspace = document.getElementById('m4ColumnWorkspace');
+    if (!workspace || workspace.classList.contains('hidden')) return;
+    closeM4ColumnWorkspace();
+    var button = document.getElementById('m4ColumnWorkspaceButton');
+    if (button) button.focus();
+  });
+  m4ColumnWorkspaceBindingsInstalled = true;
+}
+
+function toggleM4ColumnVisibility(key, visible) {
+  if (M4_DEFAULT_COLUMN_ORDER.indexOf(key) === -1) return;
+  var next = m4VisibleColumns.filter(function(columnKey) { return columnKey !== key; });
+  if (visible) next.push(key);
+  if (!next.length) {
+    toast('至少保留一列', 'error');
+    renderM4ColumnWorkspace();
+    return;
+  }
+  applyM4ColumnState(m4ColumnOrder, next);
+}
+
+function moveM4Column(key, direction) {
+  var index = m4ColumnOrder.indexOf(key);
+  var target = index + Number(direction || 0);
+  if (index < 0 || target < 0 || target >= m4ColumnOrder.length) return;
+  var next = m4ColumnOrder.slice();
+  var moved = next.splice(index, 1)[0];
+  next.splice(target, 0, moved);
+  applyM4ColumnState(next, m4VisibleColumns);
+}
+
+function resetM4Columns() {
+  applyM4ColumnState(M4_DEFAULT_COLUMN_ORDER, M4_DEFAULT_COLUMN_ORDER);
+}
+
+async function saveM4SavedView() {
   var nameInput = document.getElementById('m4SavedViewName');
   var name = nameInput ? String(nameInput.value || '').trim() : '';
   if (!name) {
@@ -4647,48 +4897,60 @@ function saveM4SavedView() {
     toast('视图名称最多 32 个字符', 'error');
     return;
   }
-  var views = readM4SavedViews();
-  var existingIndex = views.findIndex(function(view) { return view.name === name; });
-  if (existingIndex === -1 && views.length >= 20) {
+  var existing = m4SavedViews.find(function(view) { return view.name.toLowerCase() === name.toLowerCase(); });
+  if (!existing && m4SavedViews.length >= 20) {
     toast('每个账号最多保存 20 个筛选视图', 'error');
     return;
   }
-  if (existingIndex !== -1) views.splice(existingIndex, 1);
-  views.unshift({ name: name, filters: normalizeM4SavedViewFilters(m4Filters()), updated_at: new Date().toISOString() });
-  if (!writeM4SavedViews(views)) {
-    toast('筛选视图保存失败', 'error');
-    return;
+  try {
+    var response = await apiFetch(M4_INFLUENCER_VIEW_API, {
+      method: 'POST',
+      body: JSON.stringify({
+        name: name,
+        filters: normalizeM4SavedViewFilters(m4Filters()),
+        visible_columns: normalizeM4VisibleColumns(m4VisibleColumns, m4ColumnOrder),
+        column_order: normalizeM4ColumnOrder(m4ColumnOrder)
+      })
+    });
+    var data = await response.json();
+    if (!response.ok) throw new Error(data.error || '筛选视图保存失败');
+    await loadM4SavedViews(data.view && data.view.id);
+    toast('筛选视图已同步');
+  } catch (error) {
+    toast(error.message || '筛选视图保存失败', 'error');
   }
-  renderM4SavedViews(name);
-  toast('筛选视图已保存');
 }
 
 function applyM4SavedView(name) {
   name = String(name || '');
   var deleteButton = document.getElementById('m4DeleteSavedView');
-  if (deleteButton) deleteButton.disabled = !name;
+  if (deleteButton) deleteButton.disabled = !name || name.indexOf('legacy:') === 0;
   if (!name) return;
-  var view = readM4SavedViews().find(function(item) { return item.name === name; });
+  var view = m4SavedViews.find(function(item) {
+    return name.indexOf('legacy:') === 0 ? 'legacy:' + item.name === name : String(item.id) === name;
+  });
   if (!view) return;
-  setM4FilterValues(view.filters);
+  applyM4ColumnState(view.column_order, view.visible_columns, view.filters);
   var nameInput = document.getElementById('m4SavedViewName');
   if (nameInput) nameInput.value = view.name;
   loadInfluencersFromAPI();
 }
 
-function deleteM4SavedView() {
+async function deleteM4SavedView() {
   var select = document.getElementById('m4SavedViewSelect');
-  var name = select ? String(select.value || '') : '';
-  if (!name) return;
-  var views = readM4SavedViews().filter(function(view) { return view.name !== name; });
-  if (!writeM4SavedViews(views)) {
-    toast('筛选视图删除失败', 'error');
-    return;
+  var viewId = select ? readPositiveInteger(select.value) : null;
+  if (viewId === null) return;
+  try {
+    var response = await apiFetch(M4_INFLUENCER_VIEW_API + '/' + viewId, { method: 'DELETE' });
+    var data = await response.json();
+    if (!response.ok) throw new Error(data.error || '筛选视图删除失败');
+    var nameInput = document.getElementById('m4SavedViewName');
+    if (nameInput) nameInput.value = '';
+    await loadM4SavedViews();
+    toast('筛选视图已删除');
+  } catch (error) {
+    toast(error.message || '筛选视图删除失败', 'error');
   }
-  var nameInput = document.getElementById('m4SavedViewName');
-  if (nameInput && nameInput.value === name) nameInput.value = '';
-  renderM4SavedViews();
-  toast('筛选视图已删除');
 }
 
 function clearM4Filters() {
@@ -4703,6 +4965,35 @@ function clearM4Filters() {
   return loadInfluencersFromAPI();
 }
 
+function m4Money(value) {
+  var number = Number(value);
+  if (!Number.isFinite(number)) number = 0;
+  return '$' + number.toLocaleString('en-US', { maximumFractionDigits: 4 });
+}
+
+function renderM4InfluencerCell(column, inf) {
+  var value;
+  if (column.key === 'id') return '#' + esc(inf.id || '');
+  if (column.key === 'kol_handle') return '<strong>' + esc(inf.kol_handle || '') + '</strong>';
+  if (column.key === 'platform') return esc(inf.platform || '-');
+  if (column.key === 'followers') return fmtCount(inf.followers);
+  if (column.key === 'project_name') return esc(inf.project_name || '-');
+  if (column.key === 'product_name') return esc(inf.product_name || '-');
+  if (column.key === 'region') return esc(inf.region || '-');
+  if (column.key === 'type') return esc(inf.influencer_type || inf.tags || inf.category || '-');
+  if (column.key === 'parent_record') return esc(inf.parent_record || '-');
+  if (column.key === 'profile_link') {
+    value = inf.profile_link || '';
+    return '<span title="' + esc(value) + '">' + esc(value || '-') + '</span>';
+  }
+  if (column.key === 'content_deliverable') return esc(inf.content_deliverable || inf.collab_type || '-');
+  if (column.key === 'cost_usd') return m4Money(inf.cost_usd);
+  if (column.key === 'quoted_price') return m4Money(inf.quoted_price);
+  if (column.key === 'cpm') return m4Money(inf.cpm);
+  if (column.key === 'cpv') return m4Money(inf.cpv);
+  return '-';
+}
+
 function renderInfTable(data, options) {
   options = options || {};
   var selectedIds = getSelectedInfIds();
@@ -4711,7 +5002,7 @@ function renderInfTable(data, options) {
   var body = ensureInfluencerTableShell();
   if (!body) return;
   if (!data || !data.length) {
-    body.innerHTML = '<tr class="m4-empty-row"><td colspan="14">' + esc(options.message || '没有符合条件的网红') + '</td></tr>';
+    body.innerHTML = '<tr class="m4-empty-row"><td colspan="' + (M4_INFLUENCER_COLUMNS.length + 2) + '">' + esc(options.message || '没有符合条件的网红') + '</td></tr>';
     syncInfluencerSelectionState();
     return;
   }
@@ -4719,18 +5010,9 @@ function renderInfTable(data, options) {
     var id = Number(inf.id || 0);
     var checked = selectedLookup[id] ? ' checked' : '';
     var row = '<tr><td><label class="tm-checkbox-target"><input type="checkbox" class="infcb" aria-label="选择网红 ' + esc(inf.kol_handle || inf.id || '') + '" value="' + esc(inf.id || '') + '" onchange="syncInfluencerSelectionState()"' + checked + '></label></td>';
-    row += '<td>#' + esc(inf.id || '') + '</td>';
-    row += '<td><strong>' + esc(inf.kol_handle || '') + '</strong></td>';
-    row += '<td>' + esc(inf.platform || '-') + '</td>';
-    row += '<td>' + fmtCount(inf.followers) + '</td>';
-    row += '<td>' + esc(inf.project_name || '-') + '</td>';
-    row += '<td>' + esc(inf.product_name || '-') + '</td>';
-    row += '<td>' + esc(inf.region || '-') + '</td>';
-    row += '<td>' + esc(inf.influencer_type || inf.tags || inf.category || '-') + '</td>';
-    row += '<td>' + esc(inf.parent_record || '-') + '</td>';
-    row += '<td title="' + esc(inf.profile_link || '') + '">' + esc(inf.profile_link || '-') + '</td>';
-    row += '<td>' + esc(inf.content_deliverable || inf.collab_type || '-') + '</td>';
-    row += '<td>$' + esc(inf.quoted_price || inf.cost_usd || 0) + '</td>';
+    orderedM4Columns().forEach(function(column) {
+      row += '<td data-column-key="' + esc(column.key) + '" style="width:' + column.width + 'px"' + m4ColumnClass(column) + '>' + renderM4InfluencerCell(column, inf) + '</td>';
+    });
     row += '<td><button class="btn btn-sm btn-primary" type="button" onclick="startCollab(' + id + ')">下单</button></td></tr>';
     return row;
   }).join('');

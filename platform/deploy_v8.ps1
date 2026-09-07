@@ -33,10 +33,10 @@ $EXPECTED_PPT_SHA256 = "f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57
 $TRUSTED_SOURCE_GATE_RELATIVE_PATH = "server\scripts\trusted_production_source_gate.js"
 $TRUSTED_SOURCE_MANIFEST_RELATIVE_PATH = "server\scripts\trusted_production_source_manifest.json"
 $TRUSTED_RUNTIME_CONFIG_RELATIVE_PATH = "server\config\runtime_config.js"
-$EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "63210b31722957f7718214ce532765b6bd2fd728ec9d51fc1b617d57575c8cfd"
-$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "a888f612ce744664f75fa59e513a80073773e13e0812b298ebce4ec2268d1543"
+$EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "328928f4d5e5d5dc80868786b83577f38425c00e9428ab7f152a7fb8daa18ef0"
+$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "8ddb5c270e76a865ad6901ab8405ae361ee5dfee5d7f1d11070ddbd6b9ddcfb1"
 $EXPECTED_TRUSTED_RUNTIME_CONFIG_SHA256 = "76d43d3e811c6fa8daae987cc9eb2fff2dc8a8095f84b1cd309e4e214df94dcb"
-$EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256 = "513d7841956de5678fa6a85ffb70c649f5820881b651d811c3b30e95e76da2a2"
+$EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256 = "3fc6cb692123fb3027224e1d3a5b087acf48cd023b79386b3b28d69fcc49335b"
 $EXPECTED_TRUSTED_PARSER_VERIFIER_SHA256 = "7f9efaac02675b21e025891a400474cc7481c1adaf58c88bd8b356d5276f2eaa"
 $EXPECTED_TRUSTED_PUBLIC_GUARD_SHA256 = "d45fe8fcc01587aaa0e73eccfb9714c27801e232cb6c0effd6daedb703316d66"
 $EXPECTED_TRUSTED_MIGRATION_CLEANUP_HELPER_SHA256 = "d5f2befa902522dd9de3e9dd2397a99ee5e78ab1a1c6e526a27f14bb2829e1fa"
@@ -114,6 +114,7 @@ $FILES = @(
     "server\migrations\012_performance_ai_review_audit.js",
     "server\migrations\013_customer_report_snapshot.js",
     "server\migrations\014_customer_report_ppt_artifact.js",
+    "server\migrations\015_influencer_saved_views.js",
     "server\migrations\baselines\legacy_v1.js",
     "server\migrations\engines\v1.js",
     "server\migrations\vendor\bcryptjs_v3_0_3.js",
@@ -164,6 +165,7 @@ $FILES = @(
     "server\services\feishu_bitable_outbox_service.js",
     "server\services\file_ingest_service.js",
     "server\services\idempotency_service.js",
+    "server\services\influencer_saved_view_service.js",
     "server\services\influencer_workflow_service.js",
     "server\services\knowledge_service.js",
     "server\services\latest_ui_compat_service.js",
@@ -262,6 +264,8 @@ $FILES = @(
     "server\tests\frontend_event_binding_contract.test.js",
     "server\tests\frontend_navigation_contract.test.js",
     "server\tests\frontend_public_assets.test.js",
+    "server\tests\influencer_saved_view_migration.test.js",
+    "server\tests\influencer_saved_view_service.test.js",
     "server\tests\influencer_workflow.test.js",
     "server\tests\jwt_secret_startup.test.js",
     "server\tests\knowledge_archive_contract.test.js",
@@ -9580,7 +9584,7 @@ try {
   if (database.pragma('integrity_check', { simple: true }) !== 'ok') throw new Error('Candidate DB integrity_check failed');
   if (database.pragma('foreign_key_check').length !== 0) throw new Error('Candidate DB foreign_key_check failed');
   const version = database.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version;
-  if (Number(version) !== 14) throw new Error('Candidate migration target version mismatch');
+  if (Number(version) !== 15) throw new Error('Candidate migration target version mismatch');
   console.log('TM_SANITIZED_MIGRATION_COMPATIBILITY_OK');
 } finally {
   database.close();
@@ -11042,7 +11046,7 @@ if applied:
         if hashlib.sha256(handle.read()).hexdigest() != output_sha256:
             raise SystemExit('Trusted live database adoption stage digest is invalid')
 else:
-    if (report.get('sourceVersion') not in (1, 6, 7, 8, 9, 10, 11, 12, 13, 14) or
+    if (report.get('sourceVersion') not in (1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15) or
             report.get('targetVersion') != report.get('sourceVersion') or
             output_sha256 != expected_source_sha256 or
             report.get('baseTableCount') is not None or report.get('baseRowCount') is not None or

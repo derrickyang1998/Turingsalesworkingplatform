@@ -1030,12 +1030,12 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
 <div id="tab1-content">
   <div class="card">
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;align-items:center">
-      <input id="filt_search" aria-label="搜索网红 ID、名称、标签、链接或字段" placeholder="搜索ID / 网红 / 标签 / 链接 / 表头字段" oninput="matchInfluencers()" style="width:260px;font-size:12px">
-      <input id="filt_project" aria-label="按项目筛选网红" placeholder="项目" onchange="matchInfluencers()" style="width:80px;font-size:12px">
-      <input id="filt_product" aria-label="按推广产品筛选网红" placeholder="推广产品" onchange="matchInfluencers()" style="width:90px;font-size:12px">
-      <select id="filt_platform" aria-label="按平台筛选网红" style="width:auto;font-size:12px" onchange="matchInfluencers()"><option value="">全部平台</option><option>YouTube</option><option>TikTok</option><option>Instagram</option></select>
-      <select id="filt_region" aria-label="按国家或地区筛选网红" style="width:auto;font-size:12px" onchange="matchInfluencers()"><option value="">全部国家</option><option>US</option><option>DE</option><option>JP</option><option>KR</option><option>UK</option><option>FR</option></select>
-      <input id="filt_tags" aria-label="按标签筛选网红" placeholder="标签" onchange="matchInfluencers()" style="width:80px;font-size:12px">
+      <input id="filt_search" aria-label="搜索网红 ID、名称、标签、链接或字段" placeholder="搜索ID / 网红 / 标签 / 链接 / 表头字段" oninput="matchInfluencers(true)" style="width:260px;font-size:12px">
+      <input id="filt_project" aria-label="按项目筛选网红" placeholder="项目" onchange="matchInfluencers(true)" style="width:80px;font-size:12px">
+      <input id="filt_product" aria-label="按推广产品筛选网红" placeholder="推广产品" onchange="matchInfluencers(true)" style="width:90px;font-size:12px">
+      <select id="filt_platform" aria-label="按平台筛选网红" style="width:auto;font-size:12px" onchange="matchInfluencers(true)"><option value="">全部平台</option><option>YouTube</option><option>TikTok</option><option>Instagram</option></select>
+      <select id="filt_region" aria-label="按国家或地区筛选网红" style="width:auto;font-size:12px" onchange="matchInfluencers(true)"><option value="">全部国家</option><option>US</option><option>DE</option><option>JP</option><option>KR</option><option>UK</option><option>FR</option></select>
+      <input id="filt_tags" aria-label="按标签筛选网红" placeholder="标签" onchange="matchInfluencers(true)" style="width:80px;font-size:12px">
       <button class="btn btn-sm" onclick="matchInfluencers()">🔍 筛选</button>
       <span style="flex:1"></span>
       <button class="btn btn-sm" onclick="exportAll()">📥 导出全部</button>
@@ -1049,6 +1049,10 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
       <input id="m4SavedViewName" aria-label="网红筛选视图名称" maxlength="32" placeholder="视图名称">
       <button class="btn btn-outline btn-sm" type="button" onclick="saveM4SavedView()">保存视图</button>
       <button class="btn btn-outline btn-sm" id="m4DeleteSavedView" type="button" onclick="deleteM4SavedView()" disabled>删除视图</button>
+      <div class="m4-column-workspace-wrap">
+        <button class="btn btn-outline btn-sm" id="m4ColumnWorkspaceButton" type="button" aria-expanded="false" aria-controls="m4ColumnWorkspace" onclick="toggleM4ColumnWorkspace()">列设置</button>
+        <div class="m4-column-workspace hidden" id="m4ColumnWorkspace" role="dialog" aria-label="设置网红表格列"></div>
+      </div>
       <button class="btn btn-outline btn-sm" type="button" onclick="clearM4Filters()">清空筛选</button>
       <span id="m4FilterStatus" role="status" aria-live="polite">正在加载网红...</span>
     </div>
