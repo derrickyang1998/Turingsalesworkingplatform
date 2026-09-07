@@ -6626,6 +6626,17 @@ var performanceAiReviewRetry = { fingerprint: '', idempotencyKey: '' };
 var performanceAiReviewApprovalRequestSequence = 0;
 var activePerformanceAiReviewApprovalRequest = null;
 var performanceAiReviewApprovalRetry = { fingerprint: '', idempotencyKey: '' };
+var performanceCustomerReportPreview = null;
+var performanceCustomerReportRequestSequence = 0;
+var activePerformanceCustomerReportRequest = null;
+var performanceCustomerReportSealRequestSequence = 0;
+var activePerformanceCustomerReportSealRequest = null;
+var performanceCustomerReportSealRetry = { fingerprint: '', idempotencyKey: '' };
+var performanceCustomerReportSnapshots = [];
+var performanceCustomerReportSnapshotListRequestSequence = 0;
+var activePerformanceCustomerReportSnapshotListRequest = null;
+var performanceCustomerReportSnapshotDetailRequestSequence = 0;
+var activePerformanceCustomerReportSnapshotDetailRequest = null;
 var performanceIntegrationPreview = null;
 var performanceIntegrationRequestSequence = 0;
 var performanceFeishuConnection = null;
@@ -6669,6 +6680,11 @@ function invalidatePerformanceAiReviewDraft(message) {
   performanceAiReviewDraft = null;
   performanceAiReviewRetry = { fingerprint: '', idempotencyKey: '' };
   performanceAiReviewApprovalRetry = { fingerprint: '', idempotencyKey: '' };
+  if (typeof invalidatePerformanceCustomerReportPreview === 'function') {
+    invalidatePerformanceCustomerReportPreview(
+      performanceCustomerReportPreview && message ? '当前复盘依据已更新，请重新预览客户版。' : ''
+    );
+  }
   if (typeof renderPerformanceAiReviewDraft === 'function') renderPerformanceAiReviewDraft(null);
   if (message && typeof setPerformanceAiReviewStatus === 'function') setPerformanceAiReviewStatus(message);
   if (typeof setPerformanceAiReviewControlsBusy === 'function') setPerformanceAiReviewControlsBusy(false);
@@ -6747,6 +6763,7 @@ async function loadPerformanceCampaigns() {
 function changePerformanceCampaignContext(value) {
   invalidatePerformanceAiReviewDraft('活动已切换，请基于当前数据重新生成草稿。');
   performanceCampaignContextId = performancePositiveId(value);
+  preparePerformanceCustomerReportForm(true);
   syncPerformanceCampaignSelectors();
   var campaign = getPerformanceCampaignById(getPerformanceCampaignId());
   setPerformanceStatus(campaign ? ('当前活动：' + performanceCampaignLabel(campaign)) : '请选择推广活动。');
@@ -6754,6 +6771,7 @@ function changePerformanceCampaignContext(value) {
   loadPerformanceIntegrationPreview().then(function() { return loadPerformanceFeishuConnection(); });
   loadPerformanceDashboard();
   loadPerformanceReviewEvidence();
+  loadPerformanceCustomerReportSnapshots();
 }
 
 function refreshPerformanceMonitor() {
@@ -6767,7 +6785,12 @@ function refreshPerformanceMonitor() {
 function refreshPerformanceDashboard() {
   invalidatePerformanceAiReviewDraft('正在刷新当前活动数据，原草稿已作废。');
   return loadPerformanceCampaigns().then(function() {
-    return Promise.all([loadPerformanceDashboard(), loadPerformanceReviewEvidence()]);
+    preparePerformanceCustomerReportForm(false);
+    return Promise.all([
+      loadPerformanceDashboard(),
+      loadPerformanceReviewEvidence(),
+      loadPerformanceCustomerReportSnapshots()
+    ]);
   });
 }
 
@@ -6782,7 +6805,12 @@ function initPerformanceMonitor() {
 function initPerformanceDashboard() {
   invalidatePerformanceAiReviewDraft('正在核对当前活动的数据范围。');
   return loadPerformanceCampaigns().then(function() {
-    return Promise.all([loadPerformanceDashboard(), loadPerformanceReviewEvidence()]);
+    preparePerformanceCustomerReportForm(false);
+    return Promise.all([
+      loadPerformanceDashboard(),
+      loadPerformanceReviewEvidence(),
+      loadPerformanceCustomerReportSnapshots()
+    ]);
   });
 }
 
@@ -7931,6 +7959,9 @@ async function approvePerformanceAiReviewDraft() {
     performanceAiReviewApprovalRetry = { fingerprint: '', idempotencyKey: '' };
     performanceAiReviewDraft.approval = data;
     renderPerformanceAiReviewDraft(performanceAiReviewDraft);
+    preparePerformanceCustomerReportForm(false);
+    setPerformanceCustomerReportStatus('AI 复盘已确认，可预览客户版。');
+    loadPerformanceCustomerReportSnapshots();
     return data;
   } catch (error) {
     if (!performanceAiReviewApprovalIsCurrent(context)) return null;
@@ -7940,6 +7971,580 @@ async function approvePerformanceAiReviewDraft() {
   } finally {
     if (activePerformanceAiReviewApprovalRequest === context) activePerformanceAiReviewApprovalRequest = null;
     if (performanceAiReviewApprovalIsCurrent(context)) setPerformanceAiReviewApprovalBusy(false);
+  }
+}
+
+function performanceCustomerReportDefaultTitle() {
+  var campaign = getPerformanceCampaignById(getPerformanceCampaignId());
+  var name = campaign && typeof campaign.name === 'string' ? campaign.name.trim() : '';
+  return ((name || '项目').slice(0, 100) + ' 项目复盘').slice(0, 120);
+}
+
+function preparePerformanceCustomerReportForm(force) {
+  var title = document.getElementById('performanceCustomerReportTitle');
+  if (!title) return;
+  var campaignId = getPerformanceCampaignId();
+  var campaignKey = campaignId === null ? '' : String(campaignId);
+  if (!force && title.getAttribute('data-campaign-id') === campaignKey) return;
+  title.setAttribute('data-campaign-id', campaignKey);
+  title.value = performanceCustomerReportDefaultTitle();
+  var actions = document.getElementById('performanceCustomerReportActions');
+  var nextCyclePlan = document.getElementById('performanceCustomerReportNextCyclePlan');
+  if (actions) actions.value = '';
+  if (nextCyclePlan) nextCyclePlan.value = '';
+}
+
+function setPerformanceCustomerReportStatus(message, type) {
+  var element = document.getElementById('performanceCustomerReportStatus');
+  if (!element) return;
+  element.textContent = message || '';
+  element.style.color = type === 'error' ? 'var(--tm-color-danger)' : 'var(--tm-color-text-muted)';
+}
+
+function setPerformanceCustomerReportPreviewBusy(busy) {
+  var button = document.getElementById('performanceCustomerReportPreviewAction');
+  if (!button) return;
+  button.disabled = !!busy || !!activePerformanceCustomerReportSealRequest;
+  button.textContent = busy ? '正在生成...' : '预览客户版';
+  button.setAttribute('aria-busy', busy ? 'true' : 'false');
+}
+
+function setPerformanceCustomerReportSealBusy(busy) {
+  var button = document.getElementById('performanceCustomerReportSeal');
+  var previewButton = document.getElementById('performanceCustomerReportPreviewAction');
+  var title = document.getElementById('performanceCustomerReportTitle');
+  var actions = document.getElementById('performanceCustomerReportActions');
+  var nextCyclePlan = document.getElementById('performanceCustomerReportNextCyclePlan');
+  [title, actions, nextCyclePlan].forEach(function(control) {
+    if (control) control.disabled = !!busy;
+  });
+  if (previewButton) previewButton.disabled = !!busy || !!activePerformanceCustomerReportRequest;
+  if (!button) return;
+  button.disabled = !!busy || !performanceCustomerReportPreview;
+  button.textContent = busy ? '正在封存...' : '封存客户版';
+  button.setAttribute('aria-busy', busy ? 'true' : 'false');
+}
+
+function invalidatePerformanceCustomerReportPreview(message) {
+  performanceCustomerReportRequestSequence += 1;
+  if (activePerformanceCustomerReportRequest && activePerformanceCustomerReportRequest.controller) {
+    activePerformanceCustomerReportRequest.controller.abort();
+  }
+  activePerformanceCustomerReportRequest = null;
+  performanceCustomerReportSealRequestSequence += 1;
+  if (activePerformanceCustomerReportSealRequest && activePerformanceCustomerReportSealRequest.controller) {
+    activePerformanceCustomerReportSealRequest.controller.abort();
+  }
+  activePerformanceCustomerReportSealRequest = null;
+  performanceCustomerReportSnapshotListRequestSequence += 1;
+  if (activePerformanceCustomerReportSnapshotListRequest && activePerformanceCustomerReportSnapshotListRequest.controller) {
+    activePerformanceCustomerReportSnapshotListRequest.controller.abort();
+  }
+  activePerformanceCustomerReportSnapshotListRequest = null;
+  performanceCustomerReportSnapshotDetailRequestSequence += 1;
+  if (activePerformanceCustomerReportSnapshotDetailRequest && activePerformanceCustomerReportSnapshotDetailRequest.controller) {
+    activePerformanceCustomerReportSnapshotDetailRequest.controller.abort();
+  }
+  activePerformanceCustomerReportSnapshotDetailRequest = null;
+  performanceCustomerReportPreview = null;
+  performanceCustomerReportSealRetry = { fingerprint: '', idempotencyKey: '' };
+  renderPerformanceCustomerReportPreview(null);
+  setPerformanceCustomerReportPreviewBusy(false);
+  setPerformanceCustomerReportSealBusy(false);
+  if (message) setPerformanceCustomerReportStatus(message);
+}
+
+function performanceCustomerReportPayload() {
+  var actionsText = performanceTextValue('performanceCustomerReportActions');
+  return {
+    title: performanceTextValue('performanceCustomerReportTitle'),
+    optimization_actions: actionsText.split(/\r?\n/).map(function(value) {
+      return String(value || '').trim();
+    }).filter(Boolean),
+    next_cycle_plan: performanceTextValue('performanceCustomerReportNextCyclePlan')
+  };
+}
+
+function performanceCustomerReportPayloadFingerprint(payload) {
+  return JSON.stringify({
+    title: payload.title,
+    optimization_actions: payload.optimization_actions,
+    next_cycle_plan: payload.next_cycle_plan
+  });
+}
+
+function performanceCustomerReportInputError(payload) {
+  if (!payload.title) return '请填写报告标题。';
+  if (payload.optimization_actions.length > 5) return '优化建议最多保留 5 项。';
+  return '';
+}
+
+function performanceCustomerReportErrorMessage(data, fallback) {
+  var messages = {
+    CUSTOMER_REPORT_SOURCE_MISSING: '请先确认并归档当前活动的 AI 复盘。',
+    CUSTOMER_REPORT_SOURCE_CONFLICT: '当前活动存在多个待处理的复盘来源，请先完成内部核对。',
+    CUSTOMER_REPORT_SOURCE_INVALID: '当前 AI 复盘未通过客户版来源核验。',
+    CUSTOMER_REPORT_STALE_EVIDENCE: '当前数据已变化，请刷新复盘依据并重新预览客户版。',
+    CUSTOMER_REPORT_FORBIDDEN: '需由项目负责人或组织管理员操作客户复盘。',
+    CUSTOMER_REPORT_INPUT_INVALID: '请检查客户复盘填写内容。',
+    CUSTOMER_REPORT_IDEMPOTENCY_CONFLICT: '本次封存请求已发生变化，请重新预览后再试。',
+    CUSTOMER_REPORT_SNAPSHOT_NOT_FOUND: '未找到该客户复盘版本。'
+  };
+  return messages[data && data.code] || fallback || '客户复盘请求失败。';
+}
+
+function performanceCustomerReportPreviewIsCurrent(context) {
+  return Boolean(
+    context &&
+    context.sequence === performanceCustomerReportRequestSequence &&
+    context.authGeneration === AUTH_GENERATION &&
+    context.campaignId === getPerformanceCampaignId()
+  );
+}
+
+function performanceCustomerReportSealContextIsCurrent(context) {
+  return Boolean(
+    context &&
+    context.sequence === performanceCustomerReportSealRequestSequence &&
+    context.authGeneration === AUTH_GENERATION &&
+    context.campaignId === getPerformanceCampaignId()
+  );
+}
+
+function performanceCustomerReportSealIsCurrent(context) {
+  return Boolean(
+    performanceCustomerReportSealContextIsCurrent(context) &&
+    performanceCustomerReportPreview &&
+    performanceCustomerReportPreview.fingerprint === context.previewFingerprint
+  );
+}
+
+function performanceCustomerReportMetricLabel(metric) {
+  var labels = Object.assign({
+    favorites: '收藏数',
+    interactions: '互动量',
+    engagement_rate: '互动率'
+  }, performanceDashboardMetricLabels());
+  return labels[metric] || metric || '指标';
+}
+
+function performanceCustomerReportMetricText(metric, metricKey) {
+  if (!metric || metric.status !== 'available' || !Number.isFinite(Number(metric.value))) return '未提供';
+  return metricKey === 'core_view_er' || metricKey === 'engagement_rate'
+    ? performanceRate(metric)
+    : performanceCount(metric.value);
+}
+
+function performanceCustomerReportWindowText(windowValue) {
+  var range = windowValue || {};
+  var min = performanceDate(range.min_observed_at);
+  var max = performanceDate(range.max_observed_at);
+  if (min === '-' && max === '-') return '未提供';
+  return min === max || min === '-' ? max : (min + ' 至 ' + max);
+}
+
+function performanceCustomerReportKeyValueHtml(rows) {
+  var values = Array.isArray(rows) ? rows : [];
+  return '<div class="tm-performance-customer-report-key-values">' + values.map(function(row) {
+    return '<div><span>' + esc(row[0]) + '</span><strong>' + esc(row[1]) + '</strong></div>';
+  }).join('') + '</div>';
+}
+
+function performanceCustomerReportSectionHtml(title, body) {
+  return '<section class="tm-performance-customer-report-section"><h5>' + esc(title) + '</h5>' + body + '</section>';
+}
+
+function performanceCustomerReportComparisonHtml(comparisons) {
+  var source = comparisons || {};
+  if (source.status !== 'available') {
+    return '<div class="tm-performance-review-empty"><strong>暂不展示可比较结论</strong><span>'
+      + esc(source.reason || '当前数据覆盖不足。') + '</span></div>';
+  }
+  var rows = [];
+  ['platforms', 'products'].forEach(function(key) {
+    var type = key === 'platforms' ? '平台' : '产品';
+    (Array.isArray(source[key]) ? source[key] : []).forEach(function(item) {
+      rows.push([
+        type + ' · ' + (item.label || '未标注'),
+        Number(item.content_count || 0) + ' 条',
+        performanceCustomerReportMetricText(item.selected_metric, source.selected_metric)
+      ]);
+    });
+  });
+  if (!rows.length) return '<div class="tm-state-empty">暂无可公开的比较维度。</div>';
+  return '<div class="tm-performance-customer-report-comparisons">' + rows.map(function(row) {
+    return '<div><span>' + esc(row[0]) + '</span><span>' + esc(row[1]) + '</span><strong>' + esc(row[2]) + '</strong></div>';
+  }).join('') + '</div>';
+}
+
+function performanceCustomerReportCasesHtml(cases, selectedMetric) {
+  var source = cases || {};
+  var items = Array.isArray(source.cases) ? source.cases : [];
+  if (source.status !== 'available' || !items.length) {
+    return '<div class="tm-state-empty">当前没有可公开的优秀案例。</div>';
+  }
+  return '<div class="tm-performance-customer-report-case-list">' + items.map(function(item, index) {
+    var labels = [item.platform, item.product].filter(Boolean).join(' · ') || '已确认内容';
+    return '<div><span>' + esc(item.reference || ('案例 ' + (index + 1))) + '</span><span>' + esc(labels) + '</span><strong>'
+      + esc(performanceCustomerReportMetricText(item.selected_metric, selectedMetric)) + '</strong></div>';
+  }).join('') + '</div>';
+}
+
+function performanceCustomerReportLimitationsHtml(limits) {
+  var items = Array.isArray(limits) ? limits : [];
+  if (!items.length) return '<div class="tm-state-empty">暂无额外数据边界说明。</div>';
+  return '<ul class="tm-performance-customer-report-limits">' + items.map(function(item) {
+    return '<li>' + esc(item.disclosure || item.code || '数据范围受限') + '</li>';
+  }).join('') + '</ul>';
+}
+
+function renderPerformanceCustomerReportPreview(report, options) {
+  var container = document.getElementById('performanceCustomerReportPreview');
+  if (!container) return;
+  if (!report) {
+    container.innerHTML = '<div class="tm-state-empty">预览将基于已确认的 AI 复盘和当前数据快照生成。</div>';
+    return;
+  }
+  var sections = report.sections || {};
+  if (report.contract_version !== 'customer_safe_v1' || !sections || typeof sections !== 'object') {
+    container.innerHTML = '<div class="tm-state-error">客户复盘返回内容无效。</div>';
+    return;
+  }
+  var overview = sections.project_overview || {};
+  var dataSummary = sections.data_summary || {};
+  var observedMetrics = dataSummary.observed_metrics || {};
+  var keyIndicators = sections.key_indicators || {};
+  var selectedMetric = keyIndicators.selected_metric || {};
+  var limits = sections.data_limits_and_risks || {};
+  var optimization = sections.optimization_and_next_cycle || {};
+  var snapshot = options && options.snapshot || {};
+  var sealed = options && options.mode === 'sealed';
+  var coverage = Array.isArray(overview.data_coverage) ? overview.data_coverage : [];
+  var sourceModes = Array.isArray(limits.source_modes) ? limits.source_modes : [];
+  var actions = Array.isArray(optimization.optimization_actions) ? optimization.optimization_actions : [];
+  var overviewBody = performanceCustomerReportKeyValueHtml([
+    ['项目', overview.campaign_name || '项目复盘'],
+    ['内容数量', Number(overview.content_count || 0) + ' 条'],
+    ['平台', (Array.isArray(overview.platform_mix) ? overview.platform_mix : []).join(' · ') || '未提供'],
+    ['观测窗口', performanceCustomerReportWindowText(overview.observation_window)]
+  ]) + (coverage.length ? '<div class="tm-performance-customer-report-coverage">' + coverage.map(function(item) {
+    return '<span>' + esc(performanceCustomerReportMetricLabel(item.metric)) + ' '
+      + esc(Number(item.available_records || 0) + ' / ' + Number(item.total_records || 0)) + '</span>';
+  }).join('') + '</div>' : '');
+  var dataBody = performanceCustomerReportKeyValueHtml([
+    ['播放量', performanceCustomerReportMetricText(observedMetrics.views, 'views')],
+    ['点赞数', performanceCustomerReportMetricText(observedMetrics.likes, 'likes')],
+    ['评论数', performanceCustomerReportMetricText(observedMetrics.comments, 'comments')],
+    ['收藏数', performanceCustomerReportMetricText(observedMetrics.favorites, 'favorites')],
+    ['转发数', performanceCustomerReportMetricText(observedMetrics.shares, 'shares')],
+    ['互动量', performanceCustomerReportMetricText(observedMetrics.interactions, 'interactions')],
+    ['互动率', performanceCustomerReportMetricText(observedMetrics.engagement_rate, 'engagement_rate')]
+  ]);
+  var indicatorBody = performanceCustomerReportKeyValueHtml([
+    [selectedMetric.label || performanceCustomerReportMetricLabel(report.selected_metric), performanceCustomerReportMetricText(selectedMetric, report.selected_metric)],
+    ['商业指标', (keyIndicators.commercial && keyIndicators.commercial.disclosure) || '暂不包含']
+  ]) + (selectedMetric.definition ? '<p class="tm-metric-note">' + esc(selectedMetric.definition) + '</p>' : '');
+  var dataLimitsBody = performanceCustomerReportKeyValueHtml([
+    ['观测窗口', performanceCustomerReportWindowText(limits.observation_window)],
+    ['数据来源', sourceModes.map(function(item) {
+      return (item.mode || '已登记来源') + ' ' + Number(item.count || 0) + ' 条';
+    }).join(' · ') || '未提供']
+  ]) + performanceCustomerReportLimitationsHtml(limits.limitations);
+  var optimizationBody = (actions.length
+    ? '<ul class="tm-performance-customer-report-actions-list">' + actions.map(function(action) {
+      return '<li>' + esc(action) + '</li>';
+    }).join('') + '</ul>'
+    : '<div class="tm-state-empty">暂无优化建议。</div>')
+    + '<div class="tm-performance-customer-report-next-plan"><strong>下一周期计划</strong><div>'
+    + (optimization.next_cycle_plan ? renderSafeMarkdown(optimization.next_cycle_plan) : '未提供') + '</div></div>';
+  var snapshotLabel = sealed ? '已封存版本' : '客户版预览';
+  var snapshotMeta = sealed && snapshot.created_at
+    ? ('封存于 ' + performanceDate(snapshot.created_at))
+    : ('数据快照 ' + performanceAiReviewShortHash(report.evidence_snapshot_hash));
+  container.innerHTML = '<div class="tm-performance-customer-report-preview-heading"><div><strong>' + esc(report.title || '客户复盘')
+    + '</strong><span>' + esc(snapshotMeta) + '</span></div><span class="tm-performance-customer-report-status">'
+    + esc(snapshotLabel) + '</span></div>'
+    + performanceCustomerReportSectionHtml('项目概况', overviewBody)
+    + performanceCustomerReportSectionHtml('数据汇总', dataBody)
+    + performanceCustomerReportSectionHtml('平台与产品对比', performanceCustomerReportComparisonHtml(sections.eligible_comparisons))
+    + performanceCustomerReportSectionHtml('关键指标', indicatorBody)
+    + performanceCustomerReportSectionHtml('优秀案例', performanceCustomerReportCasesHtml(sections.excellent_cases, report.selected_metric))
+    + performanceCustomerReportSectionHtml('数据边界与风险', dataLimitsBody)
+    + performanceCustomerReportSectionHtml('优化建议与下一周期', optimizationBody);
+  if (window.TMAccessibility) window.TMAccessibility.refresh();
+}
+
+function renderPerformanceCustomerReportSnapshots(snapshots, options) {
+  var container = document.getElementById('performanceCustomerReportSnapshots');
+  if (!container) return;
+  if (options && options.loading) {
+    container.innerHTML = '<div class="tm-state-loading">正在加载已封存版本...</div>';
+    return;
+  }
+  if (options && options.error) {
+    container.innerHTML = '<div class="tm-state-error">' + esc(options.error) + '</div>';
+    return;
+  }
+  var rows = (Array.isArray(snapshots) ? snapshots : []).map(function(snapshot) {
+    var id = performancePositiveId(snapshot && snapshot.id);
+    return id === null ? null : { id: id, data: snapshot || {} };
+  }).filter(Boolean);
+  if (!rows.length) {
+    container.innerHTML = '<div class="tm-state-empty">当前活动暂无已封存的客户复盘版本。</div>';
+    return;
+  }
+  container.innerHTML = rows.map(function(item) {
+    var snapshot = item.data;
+    return '<div class="tm-performance-customer-report-snapshot-row"><div><strong>'
+      + esc(snapshot.title || '客户复盘') + '</strong><span>' + esc(performanceDate(snapshot.created_at))
+      + ' · ' + esc(performanceCustomerReportMetricLabel(snapshot.selected_metric)) + ' · '
+      + esc(performanceAiReviewShortHash(snapshot.report_sha256)) + '</span></div>'
+      + '<button class="btn btn-outline btn-sm" type="button" onclick="loadPerformanceCustomerReportSnapshotDetail(' + item.id + ')">查看</button></div>';
+  }).join('');
+  if (window.TMAccessibility) window.TMAccessibility.refresh();
+}
+
+async function generatePerformanceCustomerReportPreview() {
+  var campaignId = getPerformanceCampaignId();
+  if (campaignId === null) {
+    setPerformanceCustomerReportStatus('请先选择推广活动。', 'error');
+    return null;
+  }
+  if (activePerformanceCustomerReportRequest || activePerformanceCustomerReportSealRequest) return null;
+  var payload = performanceCustomerReportPayload();
+  var inputError = performanceCustomerReportInputError(payload);
+  if (inputError) {
+    setPerformanceCustomerReportStatus(inputError, 'error');
+    var target = document.getElementById(!payload.title ? 'performanceCustomerReportTitle' : 'performanceCustomerReportActions');
+    if (target) target.focus();
+    return null;
+  }
+  var controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  var context = {
+    sequence: ++performanceCustomerReportRequestSequence,
+    authGeneration: AUTH_GENERATION,
+    campaignId: campaignId,
+    controller: controller
+  };
+  activePerformanceCustomerReportRequest = context;
+  setPerformanceCustomerReportPreviewBusy(true);
+  setPerformanceCustomerReportStatus('正在核对已确认的复盘依据...');
+  var container = document.getElementById('performanceCustomerReportPreview');
+  if (container) container.innerHTML = '<div class="tm-state-loading">正在生成客户版预览...</div>';
+  try {
+    var response = await apiFetch('/campaigns/' + encodeURIComponent(campaignId) + '/performance/customer-report-preview', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Request-Id': createDemandAnalysisOperationId('performance-customer-report-preview-')
+      },
+      body: JSON.stringify(payload),
+      signal: controller ? controller.signal : undefined
+    });
+    var data = await response.json().catch(function() { return {}; });
+    if (!performanceCustomerReportPreviewIsCurrent(context)) return null;
+    if (!response.ok) throw new Error(performanceCustomerReportErrorMessage(data, data.error));
+    if (data.contract_version !== 'customer_safe_v1' || !/^[a-f0-9]{64}$/.test(String(data.evidence_snapshot_hash || ''))) {
+      throw new Error('客户复盘预览未通过边界核验。');
+    }
+    performanceCustomerReportPreview = {
+      report: data,
+      campaignId: campaignId,
+      fingerprint: performanceCustomerReportPayloadFingerprint(payload)
+    };
+    renderPerformanceCustomerReportPreview(data, { mode: 'preview' });
+    setPerformanceCustomerReportStatus('客户版预览已生成，确认无误后可封存。');
+    setPerformanceCustomerReportSealBusy(false);
+    return data;
+  } catch (error) {
+    if (!performanceCustomerReportPreviewIsCurrent(context)) return null;
+    if (error && error.name === 'AbortError') return null;
+    performanceCustomerReportPreview = null;
+    renderPerformanceCustomerReportPreview(null);
+    setPerformanceCustomerReportSealBusy(false);
+    setPerformanceCustomerReportStatus(error.message || '客户复盘预览生成失败。', 'error');
+    return null;
+  } finally {
+    if (activePerformanceCustomerReportRequest === context) activePerformanceCustomerReportRequest = null;
+    if (performanceCustomerReportPreviewIsCurrent(context)) setPerformanceCustomerReportPreviewBusy(false);
+  }
+}
+
+async function sealPerformanceCustomerReportSnapshot() {
+  var campaignId = getPerformanceCampaignId();
+  var preview = performanceCustomerReportPreview;
+  if (campaignId === null || !preview || preview.campaignId !== campaignId) {
+    setPerformanceCustomerReportStatus('请先生成当前活动的客户版预览。', 'error');
+    return null;
+  }
+  if (activePerformanceCustomerReportSealRequest || activePerformanceCustomerReportRequest) return null;
+  var payload = performanceCustomerReportPayload();
+  var inputError = performanceCustomerReportInputError(payload);
+  if (inputError) {
+    setPerformanceCustomerReportStatus(inputError, 'error');
+    return null;
+  }
+  var payloadFingerprint = performanceCustomerReportPayloadFingerprint(payload);
+  if (payloadFingerprint !== preview.fingerprint) {
+    setPerformanceCustomerReportStatus('客户复盘内容已变更，请重新预览后再封存。', 'error');
+    return null;
+  }
+  var evidenceHash = String(preview.report && preview.report.evidence_snapshot_hash || '');
+  if (!/^[a-f0-9]{64}$/.test(evidenceHash)) {
+    setPerformanceCustomerReportStatus('当前客户版预览缺少可核验的数据快照。', 'error');
+    return null;
+  }
+  var body = Object.assign({}, payload, { expected_evidence_snapshot_hash: evidenceHash });
+  var retryFingerprint = [AUTH_GENERATION, campaignId, preview.fingerprint, evidenceHash].join(':');
+  if (
+    performanceCustomerReportSealRetry.fingerprint !== retryFingerprint ||
+    !performanceCustomerReportSealRetry.idempotencyKey
+  ) {
+    performanceCustomerReportSealRetry = {
+      fingerprint: retryFingerprint,
+      idempotencyKey: createAiChatIdempotencyKey()
+    };
+  }
+  var controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  var context = {
+    sequence: ++performanceCustomerReportSealRequestSequence,
+    authGeneration: AUTH_GENERATION,
+    campaignId: campaignId,
+    previewFingerprint: preview.fingerprint,
+    controller: controller
+  };
+  activePerformanceCustomerReportSealRequest = context;
+  setPerformanceCustomerReportSealBusy(true);
+  setPerformanceCustomerReportStatus('正在封存客户版复盘...');
+  try {
+    var response = await apiFetch('/campaigns/' + encodeURIComponent(campaignId) + '/performance/customer-report-snapshots', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': performanceCustomerReportSealRetry.idempotencyKey,
+        'X-Request-Id': createDemandAnalysisOperationId('performance-customer-report-seal-')
+      },
+      body: JSON.stringify(body),
+      signal: controller ? controller.signal : undefined
+    });
+    var data = await response.json().catch(function() { return {}; });
+    if (!performanceCustomerReportSealIsCurrent(context)) return null;
+    if (!response.ok) throw new Error(performanceCustomerReportErrorMessage(data, data.error));
+    var snapshot = data.snapshot || {};
+    if (!snapshot.report || snapshot.report.contract_version !== 'customer_safe_v1') {
+      throw new Error('客户版封存结果未通过边界核验。');
+    }
+    performanceCustomerReportPreview = null;
+    performanceCustomerReportSealRetry = { fingerprint: '', idempotencyKey: '' };
+    renderPerformanceCustomerReportPreview(snapshot.report, { mode: 'sealed', snapshot: snapshot });
+    setPerformanceCustomerReportStatus(data.status === 'already_sealed' ? '客户版已封存，无需重复创建。' : '客户版已封存为历史记录。');
+    loadPerformanceCustomerReportSnapshots();
+    return data;
+  } catch (error) {
+    if (!performanceCustomerReportSealContextIsCurrent(context)) return null;
+    if (error && error.name === 'AbortError') return null;
+    setPerformanceCustomerReportStatus(error.message || '客户复盘封存失败。', 'error');
+    return null;
+  } finally {
+    if (activePerformanceCustomerReportSealRequest === context) activePerformanceCustomerReportSealRequest = null;
+    if (performanceCustomerReportSealContextIsCurrent(context)) setPerformanceCustomerReportSealBusy(false);
+  }
+}
+
+async function loadPerformanceCustomerReportSnapshots() {
+  var campaignId = getPerformanceCampaignId();
+  var requestSequence = ++performanceCustomerReportSnapshotListRequestSequence;
+  if (activePerformanceCustomerReportSnapshotListRequest && activePerformanceCustomerReportSnapshotListRequest.controller) {
+    activePerformanceCustomerReportSnapshotListRequest.controller.abort();
+  }
+  if (campaignId === null) {
+    performanceCustomerReportSnapshots = [];
+    renderPerformanceCustomerReportSnapshots([]);
+    return null;
+  }
+  var controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  var context = {
+    sequence: requestSequence,
+    authGeneration: AUTH_GENERATION,
+    campaignId: campaignId,
+    controller: controller
+  };
+  activePerformanceCustomerReportSnapshotListRequest = context;
+  renderPerformanceCustomerReportSnapshots(null, { loading: true });
+  try {
+    var response = await apiFetch('/campaigns/' + encodeURIComponent(campaignId) + '/performance/customer-report-snapshots', {
+      signal: controller ? controller.signal : undefined
+    });
+    var data = await response.json().catch(function() { return {}; });
+    var current = context.sequence === performanceCustomerReportSnapshotListRequestSequence &&
+      context.authGeneration === AUTH_GENERATION && context.campaignId === getPerformanceCampaignId();
+    if (!current) return null;
+    if (!response.ok) throw new Error(performanceCustomerReportErrorMessage(data, data.error));
+    performanceCustomerReportSnapshots = Array.isArray(data.snapshots) ? data.snapshots : [];
+    renderPerformanceCustomerReportSnapshots(performanceCustomerReportSnapshots);
+    return data;
+  } catch (error) {
+    var current = context.sequence === performanceCustomerReportSnapshotListRequestSequence &&
+      context.authGeneration === AUTH_GENERATION && context.campaignId === getPerformanceCampaignId();
+    if (!current || (error && error.name === 'AbortError')) return null;
+    renderPerformanceCustomerReportSnapshots([], { error: error.message || '已封存版本加载失败。' });
+    return null;
+  } finally {
+    if (activePerformanceCustomerReportSnapshotListRequest === context) {
+      activePerformanceCustomerReportSnapshotListRequest = null;
+    }
+  }
+}
+
+async function loadPerformanceCustomerReportSnapshotDetail(snapshotId) {
+  var campaignId = getPerformanceCampaignId();
+  var normalizedSnapshotId = performancePositiveId(snapshotId);
+  if (campaignId === null || normalizedSnapshotId === null) return null;
+  if (activePerformanceCustomerReportSealRequest) return null;
+  invalidatePerformanceCustomerReportPreview('');
+  var requestSequence = ++performanceCustomerReportSnapshotDetailRequestSequence;
+  if (activePerformanceCustomerReportSnapshotDetailRequest && activePerformanceCustomerReportSnapshotDetailRequest.controller) {
+    activePerformanceCustomerReportSnapshotDetailRequest.controller.abort();
+  }
+  var controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  var context = {
+    sequence: requestSequence,
+    authGeneration: AUTH_GENERATION,
+    campaignId: campaignId,
+    controller: controller
+  };
+  activePerformanceCustomerReportSnapshotDetailRequest = context;
+  setPerformanceCustomerReportStatus('正在加载已封存客户版...');
+  var container = document.getElementById('performanceCustomerReportPreview');
+  if (container) container.innerHTML = '<div class="tm-state-loading">正在加载已封存客户版...</div>';
+  try {
+    var response = await apiFetch('/campaigns/' + encodeURIComponent(campaignId)
+      + '/performance/customer-report-snapshots/' + encodeURIComponent(normalizedSnapshotId), {
+        signal: controller ? controller.signal : undefined
+      });
+    var data = await response.json().catch(function() { return {}; });
+    var current = context.sequence === performanceCustomerReportSnapshotDetailRequestSequence &&
+      context.authGeneration === AUTH_GENERATION && context.campaignId === getPerformanceCampaignId();
+    if (!current) return null;
+    if (!response.ok) throw new Error(performanceCustomerReportErrorMessage(data, data.error));
+    var snapshot = data.snapshot || {};
+    if (!snapshot.report || snapshot.report.contract_version !== 'customer_safe_v1') {
+      throw new Error('已封存客户版未通过边界核验。');
+    }
+    renderPerformanceCustomerReportPreview(snapshot.report, { mode: 'sealed', snapshot: snapshot });
+    setPerformanceCustomerReportStatus('正在查看已封存的客户版复盘。');
+    return data;
+  } catch (error) {
+    var current = context.sequence === performanceCustomerReportSnapshotDetailRequestSequence &&
+      context.authGeneration === AUTH_GENERATION && context.campaignId === getPerformanceCampaignId();
+    if (!current || (error && error.name === 'AbortError')) return null;
+    renderPerformanceCustomerReportPreview(null);
+    setPerformanceCustomerReportStatus(error.message || '已封存客户版加载失败。', 'error');
+    return null;
+  } finally {
+    if (activePerformanceCustomerReportSnapshotDetailRequest === context) {
+      activePerformanceCustomerReportSnapshotDetailRequest = null;
+    }
   }
 }
 

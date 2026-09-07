@@ -176,3 +176,40 @@ test('performance dashboard exposes an evidence-bound AI review draft with isola
   assert.match(componentStyles, /\.tm-performance-ai-review-references/);
   assert.match(serverSource, /CAMPAIGN_PERFORMANCE_AI_REVIEW_DRAFT/);
 });
+
+test('performance dashboard exposes a customer-safe preview and immutable snapshot flow', () => {
+  for (const id of [
+    'performanceCustomerReportTitle',
+    'performanceCustomerReportActions',
+    'performanceCustomerReportNextCyclePlan',
+    'performanceCustomerReportStatus',
+    'performanceCustomerReportPreview',
+    'performanceCustomerReportSeal',
+    'performanceCustomerReportSnapshots'
+  ]) {
+    assert.match(indexHtml, new RegExp('id="' + id + '"'));
+  }
+  assert.match(indexHtml, /onclick="generatePerformanceCustomerReportPreview\(\)"/);
+  assert.match(indexHtml, /onclick="sealPerformanceCustomerReportSnapshot\(\)"/);
+  assert.match(appSource, /var performanceCustomerReportRequestSequence = 0;/);
+  assert.match(appSource, /var activePerformanceCustomerReportRequest = null;/);
+  assert.match(appSource, /var performanceCustomerReportSealRequestSequence = 0;/);
+  assert.match(appSource, /function invalidatePerformanceCustomerReportPreview\(/);
+  assert.match(appSource, /async function generatePerformanceCustomerReportPreview\(\)/);
+  assert.match(appSource, /async function sealPerformanceCustomerReportSnapshot\(\)/);
+  assert.match(appSource, /async function loadPerformanceCustomerReportSnapshots\(\)/);
+  assert.match(appSource, /function renderPerformanceCustomerReportPreview\(/);
+  assert.match(appSource, /function renderPerformanceCustomerReportSnapshots\(/);
+  assert.match(appSource, /performance\/customer-report-preview/);
+  assert.match(appSource, /performance\/customer-report-snapshots/);
+  assert.match(appSource, /expected_evidence_snapshot_hash/);
+  assert.match(appSource, /'Idempotency-Key': performanceCustomerReportSealRetry\.idempotencyKey/);
+  assert.match(
+    appSource,
+    /function invalidatePerformanceAiReviewDraft\([\s\S]*?invalidatePerformanceCustomerReportPreview\(/
+  );
+  assert.match(componentStyles, /\.tm-performance-customer-report/);
+  assert.match(componentStyles, /\.tm-performance-customer-report-preview/);
+  assert.match(componentStyles, /\.tm-performance-customer-report-snapshots/);
+  assert.match(serverSource, /CAMPAIGN_PERFORMANCE_CUSTOMER_REPORT_SNAPSHOT_CREATE/);
+});

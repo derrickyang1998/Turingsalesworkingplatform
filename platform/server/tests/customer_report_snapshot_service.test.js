@@ -541,6 +541,18 @@ test('rejects unsafe operator text before it can enter a customer report', () =>
       () => fixture.snapshots.preview(chineseAmount),
       (error) => error instanceof CustomerReportSnapshotServiceError && error.code === 'CUSTOMER_REPORT_INPUT_INVALID'
     );
+    const chineseNumeralAmount = previewInput(fixture);
+    chineseNumeralAmount.body.optimization_actions = ['下期安排壹佰万元用于内容制作。'];
+    assert.throws(
+      () => fixture.snapshots.preview(chineseNumeralAmount),
+      (error) => error instanceof CustomerReportSnapshotServiceError && error.code === 'CUSTOMER_REPORT_INPUT_INVALID'
+    );
+    const transactionPrice = previewInput(fixture);
+    transactionPrice.body.title = '本期成交价为壹佰万元';
+    assert.throws(
+      () => fixture.snapshots.preview(transactionPrice),
+      (error) => error instanceof CustomerReportSnapshotServiceError && error.code === 'CUSTOMER_REPORT_INPUT_INVALID'
+    );
   } finally {
     fixture.db.close();
   }

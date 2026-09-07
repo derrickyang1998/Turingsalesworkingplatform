@@ -59,8 +59,9 @@ const UNSAFE_TEXT_PATTERNS = Object.freeze([
   /\b(?:USD|CNY|RMB|EUR|GBP|JPY|AUD|CAD)\s*\d/i,
   /\b\d+(?:\.\d+)?\s*(?:USD|CNY|RMB|EUR|GBP|JPY|AUD|CAD)\b/i,
   /\d+(?:\.\d+)?\s*(?:元|块|人民币|美元|美金|欧元|英镑|日元|万|千)/i,
+  /[零〇○一二两三四五六七八九十百千万亿兆壹贰叁肆伍陆柒捌玖拾佰仟萬億兆]+(?:[点\.][零〇○一二两三四五六七八九十百千万亿兆壹贰叁肆伍陆柒捌玖拾佰仟萬億兆]+)?\s*(?:元|圓|块|人民币|美元|美金|欧元|英镑|日元|港币|台币)/,
   /\b(?:CPM|CPC|CPE|CPI|CPS|CPV|ROI|ROAS|GMV|CTR|CVR|revenue|sales|cost|spend|budget|attributed[_\s-]?revenue)\b/i,
-  /(?:花费|成本|预算|费用|报价|回款|利润|佣金|投放|收入|销售额|转化金额|千次展示成本|单次点击成本|商业机密|机密|保密|内部|仅限内部)/,
+  /(?:花费|成本|预算|费用|报价|成交价|成交金额|成交额|交易额|售价|定价|单价|回款|利润|佣金|投放|收入|销售额|营收|转化金额|千次展示成本|单次点击成本|商业机密|机密|保密|内部|仅限内部)/,
   /\b(?:confidential|internal(?:\s+only)?|private)\b/i
 ]);
 

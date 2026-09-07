@@ -471,6 +471,282 @@ thead th {
   font-size: 13px;
 }
 
+.tm-performance-customer-report {
+  display: grid;
+  gap: var(--tm-space-3);
+  margin-top: var(--tm-space-4);
+  padding-top: var(--tm-space-4);
+  border-top: 1px solid var(--tm-color-border);
+}
+
+.tm-performance-customer-report-heading,
+.tm-performance-customer-report-actions,
+.tm-performance-customer-report-preview-heading,
+.tm-performance-customer-report-snapshots-heading,
+.tm-performance-customer-report-snapshot-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--tm-space-3);
+}
+
+.tm-performance-customer-report-heading {
+  align-items: flex-start;
+}
+
+.tm-performance-customer-report-heading h4,
+.tm-performance-customer-report-snapshots-heading h5,
+.tm-performance-customer-report-section h5 {
+  margin: 0;
+  color: var(--tm-color-text);
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.tm-performance-customer-report-heading .tm-metric-note {
+  margin: var(--tm-space-1) 0 0;
+}
+
+.tm-performance-customer-report-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--tm-space-3);
+}
+
+.tm-performance-customer-report-form > label {
+  display: grid;
+  gap: var(--tm-space-1);
+  min-width: 0;
+}
+
+.tm-performance-customer-report-form > label:first-child,
+.tm-performance-customer-report-actions {
+  grid-column: 1 / -1;
+}
+
+.tm-performance-customer-report-form input,
+.tm-performance-customer-report-form textarea {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.tm-performance-customer-report-form textarea {
+  min-height: 96px;
+  padding: var(--tm-space-2);
+  resize: vertical;
+  line-height: 1.55;
+}
+
+.tm-performance-customer-report-actions {
+  align-items: flex-end;
+}
+
+.tm-performance-customer-report-actions .tm-metric-note {
+  flex: 1 1 auto;
+  margin: 0;
+}
+
+.tm-performance-customer-report-preview {
+  display: grid;
+  gap: var(--tm-space-3);
+  min-width: 0;
+  margin-top: var(--tm-space-1);
+}
+
+.tm-performance-customer-report-preview-heading {
+  align-items: flex-start;
+  padding-bottom: var(--tm-space-3);
+  border-bottom: 1px solid var(--tm-color-border);
+}
+
+.tm-performance-customer-report-preview-heading > div {
+  display: grid;
+  gap: var(--tm-space-1);
+  min-width: 0;
+}
+
+.tm-performance-customer-report-preview-heading strong {
+  overflow-wrap: anywhere;
+  color: var(--tm-color-text);
+  font-size: 15px;
+}
+
+.tm-performance-customer-report-preview-heading span {
+  color: var(--tm-color-text-muted);
+  font-size: 12px;
+}
+
+.tm-performance-customer-report-status {
+  flex: 0 0 auto;
+  padding: 2px var(--tm-space-2);
+  border: 1px solid var(--tm-color-border);
+  border-radius: var(--tm-radius-compact);
+  color: var(--tm-color-text-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.tm-performance-customer-report-section {
+  display: grid;
+  gap: var(--tm-space-2);
+  min-width: 0;
+}
+
+.tm-performance-customer-report-section h5 {
+  font-size: 13px;
+}
+
+.tm-performance-customer-report-key-values {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--tm-space-2);
+}
+
+.tm-performance-customer-report-key-values > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.tm-performance-customer-report-key-values span,
+.tm-performance-customer-report-key-values strong {
+  overflow-wrap: anywhere;
+}
+
+.tm-performance-customer-report-key-values span {
+  color: var(--tm-color-text-muted);
+  font-size: 11px;
+}
+
+.tm-performance-customer-report-key-values strong {
+  color: var(--tm-color-text);
+  font-size: 13px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.tm-performance-customer-report-coverage,
+.tm-performance-customer-report-comparisons,
+.tm-performance-customer-report-case-list {
+  display: grid;
+  gap: var(--tm-space-1);
+}
+
+.tm-performance-customer-report-coverage {
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+}
+
+.tm-performance-customer-report-coverage span {
+  color: var(--tm-color-text-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.tm-performance-customer-report-comparisons > div,
+.tm-performance-customer-report-case-list > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: var(--tm-space-2);
+  align-items: baseline;
+  padding: var(--tm-space-2) 0;
+  border-bottom: 1px solid var(--tm-color-border);
+  font-size: 12px;
+}
+
+.tm-performance-customer-report-comparisons > div:last-child,
+.tm-performance-customer-report-case-list > div:last-child {
+  border-bottom: 0;
+}
+
+.tm-performance-customer-report-comparisons span,
+.tm-performance-customer-report-case-list span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--tm-color-text-muted);
+}
+
+.tm-performance-customer-report-comparisons span:first-child,
+.tm-performance-customer-report-case-list span:first-child {
+  color: var(--tm-color-text);
+}
+
+.tm-performance-customer-report-comparisons strong,
+.tm-performance-customer-report-case-list strong {
+  color: var(--tm-color-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.tm-performance-customer-report-limits,
+.tm-performance-customer-report-actions-list {
+  display: grid;
+  gap: var(--tm-space-1);
+  margin: 0;
+  padding-left: 20px;
+  color: var(--tm-color-text-muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.tm-performance-customer-report-next-plan {
+  display: grid;
+  gap: var(--tm-space-1);
+  color: var(--tm-color-text);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.tm-performance-customer-report-next-plan strong {
+  font-size: 12px;
+}
+
+.tm-performance-customer-report-snapshots {
+  display: grid;
+  gap: var(--tm-space-2);
+  padding-top: var(--tm-space-3);
+  border-top: 1px solid var(--tm-color-border);
+}
+
+.tm-performance-customer-report-snapshots-heading h5 {
+  font-size: 13px;
+}
+
+.tm-performance-customer-report-snapshot-list {
+  display: grid;
+  gap: var(--tm-space-1);
+}
+
+.tm-performance-customer-report-snapshot-row {
+  min-width: 0;
+  padding: var(--tm-space-2) 0;
+  border-bottom: 1px solid var(--tm-color-border);
+}
+
+.tm-performance-customer-report-snapshot-row:last-child {
+  border-bottom: 0;
+}
+
+.tm-performance-customer-report-snapshot-row > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.tm-performance-customer-report-snapshot-row strong,
+.tm-performance-customer-report-snapshot-row span {
+  overflow-wrap: anywhere;
+}
+
+.tm-performance-customer-report-snapshot-row strong {
+  color: var(--tm-color-text);
+  font-size: 13px;
+}
+
+.tm-performance-customer-report-snapshot-row span {
+  color: var(--tm-color-text-muted);
+  font-size: 12px;
+}
+
 .tm-performance-review-summary {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -1056,13 +1332,28 @@ thead th {
   }
 
   .tm-performance-ai-review-heading,
-  .tm-performance-ai-review-meta {
+  .tm-performance-ai-review-meta,
+  .tm-performance-customer-report-heading,
+  .tm-performance-customer-report-actions,
+  .tm-performance-customer-report-preview-heading,
+  .tm-performance-customer-report-snapshots-heading,
+  .tm-performance-customer-report-snapshot-row {
     align-items: stretch;
     flex-direction: column;
   }
 
   .tm-performance-ai-review-meta span:last-child {
     flex: 0 0 auto;
+  }
+
+  .tm-performance-customer-report-form,
+  .tm-performance-customer-report-key-values {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .tm-performance-customer-report-form > label:first-child,
+  .tm-performance-customer-report-actions {
+    grid-column: 1 / -1;
   }
 }
 
@@ -1110,6 +1401,13 @@ thead th {
     width: 100%;
   }
 
+  .tm-performance-customer-report-heading .btn,
+  .tm-performance-customer-report-actions .btn,
+  .tm-performance-customer-report-snapshots-heading .btn,
+  .tm-performance-customer-report-snapshot-row .btn {
+    width: 100%;
+  }
+
   .tm-performance-ai-review-references li {
     grid-template-columns: auto minmax(0, 1fr);
   }
@@ -1130,6 +1428,21 @@ thead th {
 
   .tm-performance-feishu-connection-status {
     text-align: left;
+  }
+
+  .tm-performance-customer-report-form,
+  .tm-performance-customer-report-key-values {
+    grid-template-columns: 1fr;
+  }
+
+  .tm-performance-customer-report-comparisons > div,
+  .tm-performance-customer-report-case-list > div {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .tm-performance-customer-report-comparisons span:nth-child(2),
+  .tm-performance-customer-report-case-list span:nth-child(2) {
+    grid-column: 1 / -1;
   }
 }
 

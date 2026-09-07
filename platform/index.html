@@ -1413,6 +1413,38 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
           <div class="tm-state-empty">确认当前数据范围后，可生成仅供内部确认的 AI 复盘草稿。</div>
         </div>
       </div>
+
+      <section class="tm-performance-customer-report" aria-labelledby="performanceCustomerReportHeading">
+        <div class="tm-performance-customer-report-heading">
+          <div>
+            <h4 id="performanceCustomerReportHeading">客户复盘</h4>
+            <p class="tm-metric-note">商业指标暂不包含在客户版复盘范围内。</p>
+          </div>
+          <button id="performanceCustomerReportPreviewAction" class="btn btn-outline btn-sm" type="button" onclick="generatePerformanceCustomerReportPreview()">预览客户版</button>
+        </div>
+        <p id="performanceCustomerReportStatus" class="tm-metric-note" role="status" aria-live="polite">需先确认并归档当前活动的 AI 复盘。</p>
+        <div class="tm-performance-customer-report-form">
+          <label for="performanceCustomerReportTitle"><span>报告标题</span><input id="performanceCustomerReportTitle" maxlength="120" autocomplete="off"></label>
+          <label for="performanceCustomerReportActions"><span>优化建议</span><textarea id="performanceCustomerReportActions" rows="4" maxlength="2000" placeholder="每行一项"></textarea></label>
+          <label for="performanceCustomerReportNextCyclePlan"><span>下一周期计划</span><textarea id="performanceCustomerReportNextCyclePlan" rows="4" maxlength="800"></textarea></label>
+          <div class="tm-performance-customer-report-actions">
+            <span class="tm-metric-note">预览确认后可封存为客户版历史记录。</span>
+            <button id="performanceCustomerReportSeal" class="btn btn-primary btn-sm" type="button" onclick="sealPerformanceCustomerReportSnapshot()" disabled>封存客户版</button>
+          </div>
+        </div>
+        <div id="performanceCustomerReportPreview" class="tm-performance-customer-report-preview" aria-live="polite">
+          <div class="tm-state-empty">预览将基于已确认的 AI 复盘和当前数据快照生成。</div>
+        </div>
+        <div class="tm-performance-customer-report-snapshots" aria-labelledby="performanceCustomerReportSnapshotsHeading">
+          <div class="tm-performance-customer-report-snapshots-heading">
+            <h5 id="performanceCustomerReportSnapshotsHeading">已封存版本</h5>
+            <button class="btn btn-outline btn-sm" type="button" onclick="loadPerformanceCustomerReportSnapshots()">刷新</button>
+          </div>
+          <div id="performanceCustomerReportSnapshots" class="tm-performance-customer-report-snapshot-list" aria-live="polite">
+            <div class="tm-state-empty">选择活动后加载已封存版本。</div>
+          </div>
+        </div>
+      </section>
     </section>
   </div>
 </div>
