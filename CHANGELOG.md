@@ -1,5 +1,27 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.8.11-performance-observation-history (Production Deployed, 2026-09-08) - Phase 7B.1g 单视频历史快照与阶段增量
+
+### 交付与范围 / Delivery And Scope
+- “内容监控”的既有数据录入弹窗新增按需展开的“历史快照”，按业务观测时间展示每次播放、展示、点赞、评论、收藏、转发、点击、转化和核心互动率，并支持有界游标分页与加载更多。
+- 新增受保护的 `GET /api/campaigns/:id/performance/contents/:contentId/observations`。只有前后快照都存在同一指标时才计算阶段增量；缺失值不补零，累计值下降标记为“数据回撤或修正”，修正说明继续按既有商业权限脱敏。
+- 翻页游标绑定首次查询水位，后续补录的历史数据不会插入当前翻页会话；时间统一为毫秒级 UTC，并兼容既有无毫秒记录的排序和重复导入识别。历史接口严格限制为计划内的八个计数指标及快照互动率。
+- 本切片不新增数据库迁移、页面、外部 provider、飞书写入、定时任务、AI 输入、客户报告或 PPT/HTML 改动；最新产品界面与冻结方案 PPT 保持不变。
+
+### 定向验证、审查与上线 / Focused Verification, Review, And Deployment
+- 受影响的性能服务、路由与前端合同 `50/50`、请求边界 `32/32`、发布合同 `37/37`，合计 `119/119` 通过；JavaScript 语法、定向凭据扫描、`git diff --check` 与本地发布预检通过。
+- 独立审查首轮拦下翻页水位、混合精度时间排序和历史字段白名单三项问题；逐项补测试和兼容修复后，复审结论为 `APPROVE`，无未关闭 Important/Critical。
+- 生产候选通过真实 Express 回放 `8/8`、发布守卫 `21/21`、内置浏览器烟测 `2/2`、迁移演练、容量与 Nginx 校验后切换。实现提交：`031a0a8`、`8205719`。
+
+### 生产证据 / Production Evidence
+- 可恢复备份：`/root/turingmarket/backups/v060-crm-sales-workspace-20260908-015011`；备份 `SHA256SUMS` SHA-256 为 `4f73e2cf081cd010191d454594d7262147fff06eac573d4a86f53de9d55200c2`，清单复验通过。
+- 生产候选树 SHA-256 为 `de354969bfd5483dd31031f4fe9da6d56550556487e4f5006cd21dee87b0a594`；六个受影响运行文件与已推送提交哈希一致，远端语法通过。
+- 公网 `/api/health` 与 `/performance-monitor` 为 `200`，匿名历史接口为 `401`；临时登录态的活动内历史接口为 `200` 且返回 `performance-observation-history-v1`，验收会话已删除。
+- PM2 `turingmarket` online 且重启计数 `0`，Nginx active。SQLite schema 保持 `v14`、`quick_check=ok`、外键异常 `0`；冻结 `ppt.js` SHA-256 仍为 `f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e`。
+
+### 后续边界 / Next Boundaries
+- 生产当前有 1 条监控内容但尚无指标观测，因此线上验收确认了真实空状态和受保护合同，没有伪造视频数据。下一功能优先修复商业字段四眼审批和“新草稿不得遮蔽已批准 KPI”；真实飞书投影、平台数据 provider 与媒体内容分析继续等待独立凭据和产品批准。
+
 ## v0.8.10-customer-report-html-export (Production Deployed, 2026-09-08) - Phase 7B.3f 客户复盘 HTML 导出
 
 ### 交付与范围 / Delivery And Scope

@@ -1,5 +1,7 @@
 # v0.8.11 Performance Observation History Plan / 单视频指标历史计划
 
+> **Status / 状态:** Production deployed and verified / 已上线并完成生产复验（2026-09-08）
+
 > **Cadence / 节奏:** One independently useful feature, affected-scope tests only, independent review, verified backup, immediate production deployment, and online smoke.
 
 ## Scope / 范围

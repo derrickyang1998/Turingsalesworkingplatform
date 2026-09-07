@@ -343,7 +343,7 @@ flowchart LR
 
 ### Phase 7B: Content Performance Data Foundation / 阶段 7B：内容效果数据底座
 
-**Releases / 版本：** `v0.8.1-performance-manual-foundation`, `v0.8.2-performance-collection-feishu`, `v0.8.3-performance-ai-review`
+**Releases / 版本：** `v0.8.1-performance-manual-foundation`, `v0.8.2-performance-collection-feishu`, `v0.8.3-performance-ai-review`; shipped patch slices through `v0.8.11-performance-observation-history` / 已发布补丁切片至 `v0.8.11-performance-observation-history`
 
 **Scheduling rule / 排期规则：**
 
