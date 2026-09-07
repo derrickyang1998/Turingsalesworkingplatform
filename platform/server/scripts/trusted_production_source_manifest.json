@@ -174,7 +174,7 @@
     },
     {
       "path": "server/scripts/sanitize_production_shape.js",
-      "sha256": "720c7dcd95db2c8dd4c1f70fcd97025c3a1cb76ab115b97d93b86744758b4bb1"
+      "sha256": "0be5c29c2601b3c8d6a66876ee2dfa7a565cc9e6deff9f7ca9103a28879a5555"
     },
     {
       "path": "server/scripts/trusted_parser_runtime_verifier.js",

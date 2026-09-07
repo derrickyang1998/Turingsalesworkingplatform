@@ -127,6 +127,10 @@ const BOUNDED_PROBABILITY_CONTEXTS = new Set([
   'customers.win_probability',
   'opportunities.win_probability'
 ]);
+// Constrained source-lineage fields must remain valid without preserving the original number.
+const BOUNDED_INTEGER_RANGES = Object.freeze({
+  'campaign_publications.source_row_number': Object.freeze({ minimum: 1, maximum: 1_000_000_000 })
+});
 const EQUALITY_GROUPS = Object.freeze([
   Object.freeze({
     name: 'knowledge-source-identity',
@@ -4309,8 +4313,9 @@ function rankMapFor(db, table, column, replacementDomain) {
     const replacementKeys = new Set();
     const probabilityContext = `${table}.${column}`;
     const probabilityDomain = BOUNDED_PROBABILITY_CONTEXTS.has(probabilityContext);
-    if (probabilityDomain && storageType !== 'integer') {
-      throw new Error(`${table}.${column} probability values must use integer storage`);
+    const boundedIntegerRange = BOUNDED_INTEGER_RANGES[probabilityContext] || null;
+    if ((probabilityDomain || boundedIntegerRange) && storageType !== 'integer') {
+      throw new Error(`${table}.${column} bounded values must use integer storage`);
     }
     const probabilityCandidates = probabilityDomain
       ? Array.from({ length: 101 }, (_value, index) => index)
@@ -4327,7 +4332,9 @@ function rankMapFor(db, table, column, replacementDomain) {
     )) {
       throw new Error(`${table}.${column} probability replacement domain is exhausted`);
     }
-    let integerCandidate = probabilityDomain ? 0 : replacementDomain ? 2_000_000_000_000_000 : 1;
+    let integerCandidate = probabilityDomain ? 0
+      : boundedIntegerRange ? boundedIntegerRange.minimum
+        : replacementDomain ? 2_000_000_000_000_000 : 1;
     let realNumerator = 1;
     const realDenominator = Math.max(1_000_003, values.length + 1);
     values.forEach((row, index) => {
@@ -4353,6 +4360,17 @@ function rankMapFor(db, table, column, replacementDomain) {
           );
         } else if (probabilityDomain) {
           replacement = availableProbabilityValues[index];
+        } else if (boundedIntegerRange) {
+          replacement = reserveTypedReplacement(
+            replacementDomain,
+            mappingKey,
+            storageType,
+            (attempt) => {
+              const candidate = integerCandidate + attempt;
+              return candidate <= boundedIntegerRange.maximum ? candidate : null;
+            }
+          );
+          integerCandidate = replacement + 1;
         } else {
           replacement = reserveTypedReplacement(
             replacementDomain,

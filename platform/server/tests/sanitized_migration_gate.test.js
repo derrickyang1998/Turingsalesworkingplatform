@@ -1425,6 +1425,77 @@ test('v12 sanitizer preserves the audit fingerprint link between AI review audit
   }
 });
 
+test('v12 sanitizer keeps campaign publication source row numbers bounded, source-disjoint, and equality-preserving', () => {
+  const fixture = migratedFixture('bounded-publication-source-row', 12);
+  const populated = populateCriticalReviewFixture(fixture);
+  const publications = [
+    { id: 881022, sourceRowNumber: 1 },
+    { id: 881023, sourceRowNumber: 2 },
+    { id: 881024, sourceRowNumber: 17 },
+    { id: 881025, sourceRowNumber: 1_000_000_000 },
+    { id: 881026, sourceRowNumber: 17 }
+  ];
+  try {
+    const insert = fixture.db.prepare(`
+      INSERT INTO campaign_publications (
+        id,org_id,campaign_id,canonical_identity,original_url,canonical_url,platform,
+        tags_json,custom_fields_json,search_payload_json,source_mode,mapping_version,
+        source_row_number,created_by
+      ) VALUES (?,?,?,?,?,?,?,'[]','{}','{}','csv_xlsx',?,?,?)
+    `);
+    for (const publication of publications) {
+      const suffix = String(publication.id);
+      insert.run(
+        publication.id,
+        populated.orgId,
+        populated.campaignId,
+        `youtube:bounded-publication-source-row-${suffix}`,
+        `https://example.invalid/watch/bounded-publication-source-row-${suffix}`,
+        `https://example.invalid/watch/bounded-publication-source-row-${suffix}`,
+        'youtube',
+        'sanitizer-v12',
+        publication.sourceRowNumber,
+        populated.userId
+      );
+    }
+    const sourceRowNumbers = new Set(fixture.db.prepare(`
+      SELECT source_row_number
+      FROM campaign_publications
+      WHERE source_row_number IS NOT NULL
+    `).all().map((row) => row.source_row_number));
+    fixture.db.close();
+    const outputPath = path.join(fixture.root, 'bounded-publication-source-row-sanitized.db');
+    sanitizer.sanitizeProductionShape({ sourcePath: fixture.dbPath, outputPath });
+    const sanitized = new Database(outputPath, { readonly: true, fileMustExist: true });
+    try {
+      const placeholders = publications.map(() => '?').join(',');
+      const rows = sanitized.prepare(`
+        SELECT id,source_row_number
+        FROM campaign_publications
+        WHERE id IN (${placeholders})
+        ORDER BY id
+      `).all(...publications.map((publication) => publication.id));
+      assert.equal(rows.length, publications.length);
+      const replacementBySource = new Map();
+      for (const row of rows) {
+        assert.ok(Number.isSafeInteger(row.source_row_number));
+        assert.ok(row.source_row_number >= 1 && row.source_row_number <= 1_000_000_000);
+        assert.equal(sourceRowNumbers.has(row.source_row_number), false);
+        const sourceRowNumber = publications.find((publication) => publication.id === row.id).sourceRowNumber;
+        const priorReplacement = replacementBySource.get(sourceRowNumber);
+        if (priorReplacement === undefined) replacementBySource.set(sourceRowNumber, row.source_row_number);
+        else assert.equal(row.source_row_number, priorReplacement);
+      }
+      assert.equal(replacementBySource.size, new Set(publications.map((publication) => publication.sourceRowNumber)).size);
+      assert.equal(new Set(replacementBySource.values()).size, replacementBySource.size);
+    } finally {
+      sanitized.close();
+    }
+  } finally {
+    closeAndRemove(fixture);
+  }
+});
+
 test('replacement domains stay globally disjoint across adversarial rows and typed JSON leaves', () => {
   const fixture = migratedFixture('global-replacement-domain');
   const populated = populateCriticalReviewFixture(fixture, {
@@ -1950,7 +2021,7 @@ test('secret-null fails closed for non-null data and malformed or partial output
   closeAndRemove(fixture);
 });
 
-test('campaign migration gate sanitizes populated managed v1 and verifies two exact restores through v12', () => {
+test('campaign migration gate sanitizes populated managed v1 and verifies two exact restores through v13', () => {
   const fixture = migratedFixture('twice', 1);
   const populated = populateManagedV1GateFixture(fixture);
   const sourceClassification = migrationService.classifyDatabase(fixture.db, {
@@ -1967,7 +2038,7 @@ test('campaign migration gate sanitizes populated managed v1 and verifies two ex
   assert.equal(report.format, 'tm-campaign-migration-gate-v1');
   assert.equal(report.runs, 2);
   assert.equal(report.sourceVersion, 1);
-  assert.equal(report.targetVersion, 12);
+  assert.equal(report.targetVersion, 13);
   assert.equal(report.preMigrationRestoreVerified, true);
   assert.equal(report.legacyPreservationVerified, true);
   const sanitizedPath = path.join(fixture.root, 'stage-preservation-sanitized.db');
