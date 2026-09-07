@@ -13,6 +13,8 @@ const { spawn } = require('node:child_process');
 
 const Database = require('better-sqlite3');
 const jwt = require('jsonwebtoken');
+const migrationService = require('../services/migration_service');
+const { REGISTERED_MIGRATIONS } = require('./verify_campaign_migration_gate');
 
 const GATE = 'phase4-task9-one-request-replay';
 const PROBE_PROTOCOL = 'tm-phase4-one-request-replay-probe-v1';
@@ -20,7 +22,10 @@ const TARGET_PATH = '/api/workflow/templates';
 const REQUEST_ID = 'phase4-one-request-replay-0001';
 const IDEMPOTENCY_KEY = 'phase4.one-request.replay.v1';
 const TEMPLATE_NAME = 'Phase 4 one-request replay proof';
-const CURRENT_PRODUCTION_MIGRATION_VERSIONS = Object.freeze([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+const CURRENT_PRODUCTION_MIGRATION_VERSIONS = Object.freeze([
+  ...migrationService.defaultMigrations(),
+  ...REGISTERED_MIGRATIONS
+].map((migration) => migration.version));
 const JWT_SECRET = crypto
   .createHash('sha256')
   .update('phase4-one-request-replay-isolated-fixture-v1')
