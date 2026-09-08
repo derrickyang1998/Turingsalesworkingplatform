@@ -4,6 +4,7 @@ const BODY_LIMITS = Object.freeze({
   CAMPAIGN_EMPTY_CONTROL_JSON: 64,
   CAMPAIGN_CONTROL_JSON: 65_536,
   CAMPAIGN_REVIEW_JSON: 1_048_576,
+  CONTRACT_DOCUMENT_JSON: 12_000_000,
   KNOWLEDGE_JSON: 1_048_576,
   EXISTING_DUAL_MODE_JSON: 52_428_800,
   KNOWLEDGE_USE_COMPAT: 16_384,
@@ -328,6 +329,23 @@ const REQUEST_POLICIES = Object.freeze({
     'collaboration.contract-confirm',
     'POST',
     '/api/collaborations/:id/contract-confirmations'
+  ),
+  COLLABORATION_CONTRACT_DOCUMENT_UPLOAD: definePolicy(
+    'collaboration.contract-document.upload',
+    'POST',
+    '/api/collaborations/:id/contract-documents',
+    MEDIA_KINDS.JSON,
+    BODY_LIMITS.CONTRACT_DOCUMENT_JSON
+  ),
+  COLLABORATION_CONTRACT_DOCUMENT_LIST: empty(
+    'collaboration.contract-document.list',
+    'GET',
+    '/api/collaborations/:id/contract-documents'
+  ),
+  COLLABORATION_CONTRACT_DOCUMENT_DOWNLOAD: empty(
+    'collaboration.contract-document.download',
+    'GET',
+    '/api/collaborations/:id/contract-documents/:documentId/download'
   ),
   LEGACY_KNOWLEDGE_CREATE: knowledgeDual(
     'legacy.knowledge.create',

@@ -2617,6 +2617,7 @@ test('signed contract confirmation route forwards the protected mutation contrac
   const body = {
     campaign_id: 41,
     expected_version: 2,
+    contract_document_id: 72,
     contract_reference: 'SIGNED-41',
     counterparty_name: 'Creator Studio',
     signed_at: '2026-09-07T10:00:00.000Z',
@@ -2648,6 +2649,92 @@ test('signed contract confirmation route forwards the protected mutation contrac
     requestId: 'campaign-link-request',
     idempotencyKey: 'route-contract-confirmation-0001',
     body
+  });
+  db.close();
+});
+
+test('contract document routes forward upload and enforce attachment-only download headers', async () => {
+  const db = freshDb();
+  const baseService = createCampaignCollaborationService(db);
+  const bytes = Buffer.from('%PDF-1.7\nroute fixture contract\n%%EOF\n', 'ascii');
+  const document = {
+    id: 73,
+    collaboration_id: 71,
+    original_filename: 'signed 合同.pdf',
+    media_type: 'application/pdf',
+    file_sha256: 'a'.repeat(64),
+    file_bytes: bytes.length,
+    uploaded_by: 2,
+    uploaded_by_name: 'Tester',
+    knowledge_entry_id: 74,
+    created_at: '2026-09-08 10:00:00'
+  };
+  const captured = [];
+  const routes = mountRoutes(db, {
+    campaignCollaborationService: Object.assign({}, baseService, {
+      uploadContractDocument(input) {
+        captured.push({ method: 'upload', input });
+        return { status: 201, body: { success: true, document } };
+      },
+      listContractDocuments(input) {
+        captured.push({ method: 'list', input });
+        return { collaboration_id: 71, documents: [document] };
+      },
+      downloadContractDocument(input) {
+        captured.push({ method: 'download', input });
+        return { document, bytes };
+      }
+    })
+  });
+  const body = {
+    campaign_id: 41,
+    expected_version: 2,
+    filename: 'signed 合同.pdf',
+    media_type: 'application/pdf',
+    content_base64: bytes.toString('base64')
+  };
+
+  const malformed = await invoke(routes, 'POST /api/collaborations/:id/contract-documents', {
+    params: { id: '071' },
+    body,
+    headers: { 'Idempotency-Key': 'route-contract-document-invalid-id' }
+  });
+  assert.equal(malformed.statusCode, 400);
+  assert.equal(malformed.payload.code, 'INVALID_COLLABORATION_ID');
+  assert.equal(captured.length, 0);
+
+  const uploaded = await invoke(routes, 'POST /api/collaborations/:id/contract-documents', {
+    params: { id: '71' },
+    body,
+    headers: { 'Idempotency-Key': 'route-contract-document-upload-0001' }
+  });
+  assert.equal(uploaded.statusCode, 201);
+  assert.equal(uploaded.payload.document.id, 73);
+  const listed = await invoke(routes, 'GET /api/collaborations/:id/contract-documents', {
+    params: { id: '71' }
+  });
+  assert.deepEqual(listed.payload.documents, [document]);
+  const downloaded = await invoke(routes, 'GET /api/collaborations/:id/contract-documents/:documentId/download', {
+    params: { id: '71', documentId: '73' }
+  });
+  assert.deepEqual(downloaded.body, bytes);
+  assert.equal(downloaded.headers['content-type'], 'application/pdf');
+  assert.equal(downloaded.headers['x-content-type-options'], 'nosniff');
+  assert.equal(downloaded.headers['cache-control'], 'private, no-store');
+  assert.match(downloaded.headers['content-disposition'], /^attachment; filename="contract-73\.pdf"; filename\*=UTF-8''/);
+  assert.equal(downloaded.headers['content-length'], String(bytes.length));
+  assert.deepEqual(captured.map((entry) => entry.method), ['upload', 'list', 'download']);
+  assert.deepEqual(captured[0].input, {
+    userId: 2,
+    collaborationId: 71,
+    requestId: 'campaign-link-request',
+    idempotencyKey: 'route-contract-document-upload-0001',
+    body
+  });
+  assert.deepEqual(captured[2].input, {
+    userId: 2,
+    collaborationId: 71,
+    documentId: 73
   });
   db.close();
 });

@@ -4,6 +4,19 @@
     'campaign-link-request';
 }
 
+function canonicalPositiveRouteId(value) {
+  const text = String(value || '');
+  if (!/^[1-9]\d*$/.test(text)) return null;
+  const parsed = Number(text);
+  return Number.isSafeInteger(parsed) && String(parsed) === text ? parsed : null;
+}
+
+function contractDocumentDisposition(document) {
+  const encoded = encodeURIComponent(document.original_filename)
+    .replace(/[!'()*]/g, (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`);
+  return `attachment; filename="contract-${document.id}.pdf"; filename*=UTF-8''${encoded}`;
+}
+
 const { createFeishuClient, FeishuClientError } = require('./feishu_client');
 const {
   FeishuBitableOutboxError,
@@ -419,6 +432,90 @@ app.get('/api/collaborations', authMiddleware, (req, res) => {
     campaignId: campaign_id,
     includeCampaignContext: include_campaign_context === '1' || include_campaign_context === 'true'
   }));
+});
+
+app.post('/api/collaborations/:id/contract-documents', authMiddleware, (req, res) => {
+  try {
+    const collaborationId = canonicalPositiveRouteId(req.params.id);
+    if (collaborationId === null) {
+      return res.status(400).json({
+        error: 'Collaboration id is invalid.',
+        code: 'INVALID_COLLABORATION_ID'
+      });
+    }
+    const result = campaignCollaboration.uploadContractDocument({
+      userId: req.user.id,
+      collaborationId,
+      requestId: collaborationRequestId(req),
+      idempotencyKey: req.get ? req.get('Idempotency-Key') : req.headers && req.headers['idempotency-key'],
+      body: req.body
+    });
+    res.status(result.status || 201).json(result.body);
+  } catch (error) {
+    const status = error.statusCode || error.status || 500;
+    const body = {
+      error: error.message || 'Contract document upload failed.',
+      code: error.code || 'INTERNAL_ERROR'
+    };
+    if (error.details !== undefined) body.details = error.details;
+    res.status(status).json(body);
+  }
+});
+
+app.get('/api/collaborations/:id/contract-documents', authMiddleware, (req, res) => {
+  try {
+    const collaborationId = canonicalPositiveRouteId(req.params.id);
+    if (collaborationId === null) {
+      return res.status(400).json({
+        error: 'Collaboration id is invalid.',
+        code: 'INVALID_COLLABORATION_ID'
+      });
+    }
+    res.json(campaignCollaboration.listContractDocuments({
+      userId: req.user.id,
+      collaborationId
+    }));
+  } catch (error) {
+    const status = error.statusCode || error.status || 500;
+    const body = {
+      error: error.message || 'Contract document list failed.',
+      code: error.code || 'INTERNAL_ERROR'
+    };
+    if (error.details !== undefined) body.details = error.details;
+    res.status(status).json(body);
+  }
+});
+
+app.get('/api/collaborations/:id/contract-documents/:documentId/download', authMiddleware, (req, res) => {
+  try {
+    const collaborationId = canonicalPositiveRouteId(req.params.id);
+    const documentId = canonicalPositiveRouteId(req.params.documentId);
+    if (collaborationId === null || documentId === null) {
+      return res.status(400).json({
+        error: 'Contract document id is invalid.',
+        code: 'INVALID_CONTRACT_DOCUMENT_ID'
+      });
+    }
+    const result = campaignCollaboration.downloadContractDocument({
+      userId: req.user.id,
+      collaborationId,
+      documentId
+    });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', contractDocumentDisposition(result.document));
+    res.setHeader('Content-Length', String(result.bytes.length));
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.send(result.bytes);
+  } catch (error) {
+    const status = error.statusCode || error.status || 500;
+    const body = {
+      error: error.message || 'Contract document download failed.',
+      code: error.code || 'INTERNAL_ERROR'
+    };
+    if (error.details !== undefined) body.details = error.details;
+    res.status(status).json(body);
+  }
 });
 
 app.post('/api/collaborations/:id/contract-confirmations', authMiddleware, (req, res) => {

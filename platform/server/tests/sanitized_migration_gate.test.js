@@ -11,6 +11,7 @@ const migrationService = require('../services/migration_service');
 const sqliteDigest = require('../services/sqlite_digest_service');
 const knowledgeService = require('../services/knowledge_service');
 const { createCampaignService } = require('../services/campaign_service');
+const { createCampaignCollaborationService } = require('../services/campaign_collaboration_service');
 const { buildCustomerIdentity } = require('../services/crm_contract');
 const sanitizer = require('../scripts/sanitize_production_shape');
 const migrationGate = require('../scripts/verify_campaign_migration_gate');
@@ -1075,7 +1076,7 @@ function compactSqliteClone(sourcePath, outputPath, mutate, options = {}) {
   return outputPath;
 }
 
-test('manifest declares exact managed v1 as primary and keeps isolated v6 through v15 profiles', () => {
+test('manifest declares exact managed v1 as primary and keeps isolated v6 through v16 profiles', () => {
   const v1Fixture = migratedFixture('manifest-v1-primary', 1);
   const v6Fixture = migratedFixture('manifest-v6-isolated', 6);
   const v7Fixture = migratedFixture('manifest-v7-isolated', 7);
@@ -1087,9 +1088,10 @@ test('manifest declares exact managed v1 as primary and keeps isolated v6 throug
   const v13Fixture = migratedFixture('manifest-v13-isolated', 13);
   const v14Fixture = migratedFixture('manifest-v14-isolated', 14);
   const v15Fixture = migratedFixture('manifest-v15-isolated', 15);
+  const v16Fixture = migratedFixture('manifest-v16-isolated', 16);
   try {
     assert.equal(manifest.schemaVersion, 1);
-    assert.deepEqual(manifest.exactProfiles.map((profile) => profile.schemaVersion), [6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
+    assert.deepEqual(manifest.exactProfiles.map((profile) => profile.schemaVersion), [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
     assert.equal(
       manifest.categories['sensitive-number'],
       'deterministic rank bucket preserving null/equality/cardinality'
@@ -1106,6 +1108,7 @@ test('manifest declares exact managed v1 as primary and keeps isolated v6 throug
     const v13Profile = sanitizer._testing.manifestProfileForVersion(manifest, 13);
     const v14Profile = sanitizer._testing.manifestProfileForVersion(manifest, 14);
     const v15Profile = sanitizer._testing.manifestProfileForVersion(manifest, 15);
+    const v16Profile = sanitizer._testing.manifestProfileForVersion(manifest, 16);
     assert.equal(v1Profile.schemaVersion, 1);
     assert.equal(v6Profile.schemaVersion, 6);
     assert.equal(v7Profile.schemaVersion, 7);
@@ -1117,6 +1120,7 @@ test('manifest declares exact managed v1 as primary and keeps isolated v6 throug
     assert.equal(v13Profile.schemaVersion, 13);
     assert.equal(v14Profile.schemaVersion, 14);
     assert.equal(v15Profile.schemaVersion, 15);
+    assert.equal(v16Profile.schemaVersion, 16);
     assert.equal(v1Profile.objects.length, sanitizer.actualInventory(v1Fixture.db).length);
     assert.equal(v6Profile.objects.length, sanitizer.actualInventory(v6Fixture.db).length);
     assert.equal(v7Profile.objects.length, sanitizer.actualInventory(v7Fixture.db).length);
@@ -1128,6 +1132,7 @@ test('manifest declares exact managed v1 as primary and keeps isolated v6 throug
     assert.equal(v13Profile.objects.length, sanitizer.actualInventory(v13Fixture.db).length);
     assert.equal(v14Profile.objects.length, sanitizer.actualInventory(v14Fixture.db).length);
     assert.equal(v15Profile.objects.length, sanitizer.actualInventory(v15Fixture.db).length);
+    assert.equal(v16Profile.objects.length, sanitizer.actualInventory(v16Fixture.db).length);
     for (const profile of [v1Profile, v6Profile, v7Profile, v8Profile]) {
       assert.equal(profile.jsonPolicy.preserveLeafTypes, true);
       assert.equal(
@@ -1151,6 +1156,7 @@ test('manifest declares exact managed v1 as primary and keeps isolated v6 throug
     assert.equal(v13Profile.semanticPolicies.structuralColumns.validatorVersion, 'tm-structural-policy-v8-customer-report-snapshot');
     assert.equal(v14Profile.semanticPolicies.structuralColumns.validatorVersion, 'tm-structural-policy-v9-customer-report-ppt-artifact');
     assert.equal(v15Profile.semanticPolicies.structuralColumns.validatorVersion, 'tm-structural-policy-v11-signed-collaboration');
+    assert.equal(v16Profile.semanticPolicies.structuralColumns.validatorVersion, 'tm-structural-policy-v12-contract-document-custody');
     assert.doesNotThrow(() => sanitizer.validateManifest(manifest, v1Fixture.db));
     assert.doesNotThrow(() => sanitizer.validateManifest(manifest, v6Fixture.db));
     assert.doesNotThrow(() => sanitizer.validateManifest(manifest, v7Fixture.db));
@@ -1162,6 +1168,7 @@ test('manifest declares exact managed v1 as primary and keeps isolated v6 throug
     assert.doesNotThrow(() => sanitizer.validateManifest(manifest, v13Fixture.db));
     assert.doesNotThrow(() => sanitizer.validateManifest(manifest, v14Fixture.db));
     assert.doesNotThrow(() => sanitizer.validateManifest(manifest, v15Fixture.db));
+    assert.doesNotThrow(() => sanitizer.validateManifest(manifest, v16Fixture.db));
   } finally {
     closeAndRemove(v1Fixture);
     closeAndRemove(v6Fixture);
@@ -1174,6 +1181,7 @@ test('manifest declares exact managed v1 as primary and keeps isolated v6 throug
     closeAndRemove(v13Fixture);
     closeAndRemove(v14Fixture);
     closeAndRemove(v15Fixture);
+    closeAndRemove(v16Fixture);
   }
 });
 
@@ -1523,6 +1531,97 @@ test('v14 sanitizer preserves customer report snapshot lineage for retained PPT 
     } finally {
       output.close();
     }
+  } finally {
+    closeAndRemove(fixture);
+  }
+});
+
+test('v16 sanitizer preserves inert PDF framing, filename constraints, byte length, and rebuilt digest', () => {
+  const fixture = migratedFixture('contract-document-pdf', 16);
+  try {
+    const populated = populateCriticalReviewFixture(fixture);
+    const influencerId = 881030;
+    const collaborationId = 881031;
+    fixture.db.prepare(`
+      INSERT INTO influencers (id,platform,kol_handle,profile_link,followers,is_active)
+      VALUES (?,'TikTok','@private-contract','https://private.invalid/contract',1000,1)
+    `).run(influencerId);
+    fixture.db.prepare(`
+      INSERT INTO collaborations (
+        id,influencer_id,user_id,status,proposal_notes,cost_quoted,row_version
+      ) VALUES (?, ?, ?, 'contract_sent', ?, 100, 1)
+    `).run(collaborationId, influencerId, populated.userId, JSON.stringify({
+      schema: 'turingmarket.collaboration-order.v2',
+      project_name: 'Private contract project',
+      product_name: 'Private contract product',
+      order_type: 'paid',
+      order_reference: 'PRIVATE-PO-1',
+      deliverable: 'Private deliverable',
+      creator_cost: 100,
+      client_quote: 150,
+      currency: 'USD',
+      margin_amount: 50,
+      payment_terms: 'net_30'
+    }));
+    fixture.db.prepare(`
+      INSERT INTO campaign_record_links (
+        org_id,campaign_id,record_type,bundle_id,record_id,relation_type,created_by,metadata_json
+      ) VALUES (?,?,'collaboration',?,?,'order',?,'{}')
+    `).run(
+      populated.orgId,
+      populated.campaignId,
+      sha256Text('private contract order link'),
+      String(collaborationId),
+      populated.userId
+    );
+    const originalFilename = 'private-signed-contract.pdf';
+    const originalBytes = Buffer.from(
+      '%PDF-1.7\n1 0 obj\n(Private signed contract content)\nendobj\n%%EOF\n',
+      'ascii'
+    );
+    const uploaded = createCampaignCollaborationService(fixture.db).uploadContractDocument({
+      userId: populated.userId,
+      collaborationId,
+      requestId: 'sanitizer-contract-document-request',
+      idempotencyKey: 'sanitizer-contract-document-upload',
+      body: {
+        campaign_id: populated.campaignId,
+        expected_version: 1,
+        filename: originalFilename,
+        media_type: 'application/pdf',
+        content_base64: originalBytes.toString('base64')
+      }
+    }).body.document;
+    fixture.db.close();
+
+    const outputPath = path.join(fixture.root, 'sanitized-contract-document.db');
+    assert.doesNotThrow(() => sanitizer.sanitizeProductionShape({
+      sourcePath: fixture.dbPath,
+      outputPath
+    }));
+    const output = new Database(outputPath, { readonly: true, fileMustExist: true });
+    try {
+      const row = output.prepare(`
+        SELECT original_filename,file_sha256,file_bytes,document_blob
+        FROM collaboration_contract_documents WHERE id=?
+      `).get(uploaded.id);
+      assert.ok(row);
+      assert.match(row.original_filename, /^[A-Za-z0-9-]+\.pdf$/);
+      assert.notEqual(row.original_filename, originalFilename);
+      assert.equal(row.file_bytes, originalBytes.length);
+      assert.equal(row.document_blob.length, originalBytes.length);
+      assert.notDeepEqual(row.document_blob, originalBytes);
+      assert.match(row.document_blob.subarray(0, 16).toString('latin1'), /^%PDF-1\.4\r?\n/);
+      assert.match(row.document_blob.subarray(-16).toString('latin1'), /%%EOF[\t \r\n]*$/);
+      assert.equal(row.file_sha256, crypto.createHash('sha256').update(row.document_blob).digest('hex'));
+      assert.equal(output.pragma('integrity_check', { simple: true }), 'ok');
+      assert.deepEqual(output.pragma('foreign_key_check'), []);
+    } finally {
+      output.close();
+    }
+    const sanitizedBytes = fs.readFileSync(outputPath);
+    assert.equal(sanitizedBytes.includes(Buffer.from(originalFilename, 'utf8')), false);
+    assert.equal(sanitizedBytes.includes(Buffer.from('Private signed contract content', 'ascii')), false);
   } finally {
     closeAndRemove(fixture);
   }
@@ -2124,7 +2223,7 @@ test('secret-null fails closed for non-null data and malformed or partial output
   closeAndRemove(fixture);
 });
 
-test('campaign migration gate sanitizes populated managed v1 and verifies two exact restores through v15', () => {
+test('campaign migration gate sanitizes populated managed v1 and verifies two exact restores through v16', () => {
   const fixture = migratedFixture('twice', 1);
   const populated = populateManagedV1GateFixture(fixture);
   const sourceClassification = migrationService.classifyDatabase(fixture.db, {
@@ -2141,7 +2240,7 @@ test('campaign migration gate sanitizes populated managed v1 and verifies two ex
   assert.equal(report.format, 'tm-campaign-migration-gate-v1');
   assert.equal(report.runs, 2);
   assert.equal(report.sourceVersion, 1);
-  assert.equal(report.targetVersion, 15);
+  assert.equal(report.targetVersion, 16);
   assert.equal(report.preMigrationRestoreVerified, true);
   assert.equal(report.legacyPreservationVerified, true);
   const sanitizedPath = path.join(fixture.root, 'stage-preservation-sanitized.db');

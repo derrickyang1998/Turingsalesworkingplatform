@@ -6423,6 +6423,92 @@ async function loadCollaborations(status) {
 function collabResource(collab) {
   try { return collab.proposal_notes ? JSON.parse(collab.proposal_notes) : {}; } catch (e) { return {}; }
 }
+function m4ContractDocuments(collab) {
+  return Array.isArray(collab && collab.contract_documents)
+    ? collab.contract_documents.filter(function(document) {
+        return readPositiveInteger(document && document.id) !== null;
+      })
+    : [];
+}
+function m4ContractDocumentFingerprint(bytes) {
+  var hashes = [0x811c9dc5, 0x9e3779b9, 0x85ebca6b, 0xc2b2ae35];
+  var primes = [0x01000193, 0x85ebca6b, 0xc2b2ae35, 0x27d4eb2d];
+  for (var index = 0; index < bytes.length; index += 1) {
+    var value = bytes[index];
+    for (var slot = 0; slot < hashes.length; slot += 1) {
+      hashes[slot] = Math.imul(hashes[slot] ^ ((value + index * (slot + 1)) & 0xff), primes[slot]) >>> 0;
+    }
+  }
+  return bytes.length.toString(16) + '-' + hashes.map(function(hash) {
+    return hash.toString(16).padStart(8, '0');
+  }).join('');
+}
+async function m4ReadContractDocumentFile(file) {
+  if (!file || typeof file.arrayBuffer !== 'function') throw new Error('请选择 PDF 合同文件。');
+  var filename = String(file.name || '').trim();
+  var mediaType = String(file.type || 'application/pdf').toLowerCase();
+  if (!/\.pdf$/i.test(filename) || mediaType !== 'application/pdf') throw new Error('仅支持 PDF 合同文件。');
+  if (!Number.isSafeInteger(Number(file.size)) || Number(file.size) < 32 || Number(file.size) > 8 * 1024 * 1024) {
+    throw new Error('合同 PDF 大小需在 32 B 至 8 MB 之间。');
+  }
+  var bytes = new Uint8Array(await file.arrayBuffer());
+  if (bytes.length !== Number(file.size)) throw new Error('合同文件读取不完整，请重新选择。');
+  var binary = '';
+  for (var offset = 0; offset < bytes.length; offset += 32768) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(offset, Math.min(offset + 32768, bytes.length)));
+  }
+  return {
+    filename: filename,
+    media_type: mediaType,
+    content_base64: btoa(binary),
+    content_fingerprint: m4ContractDocumentFingerprint(bytes)
+  };
+}
+async function uploadCampaignContractDocument(collab, file, idempotencyKey, preparedDocument) {
+  var encoded = preparedDocument || await m4ReadContractDocumentFile(file);
+  var response = await apiFetch('/collaborations/' + collab.id + '/contract-documents', {
+    method: 'POST',
+    headers: m4MutationHeaders('m4-contract-document-upload-', idempotencyKey),
+    body: JSON.stringify({
+      campaign_id: Number(collab.campaign_id),
+      expected_version: Number(collab.row_version),
+      filename: encoded.filename,
+      media_type: encoded.media_type,
+      content_base64: encoded.content_base64
+    })
+  });
+  var data = await response.json();
+  if (!response.ok) {
+    var error = new Error(data.error || '合同文件上传失败');
+    error.code = data.code;
+    throw error;
+  }
+  return data.document;
+}
+async function downloadCampaignContractDocument(collabId, documentId) {
+  var collab = findCollaborationById(collabId);
+  var documentMeta = m4ContractDocuments(collab).find(function(item) {
+    return Number(item.id) === Number(documentId);
+  });
+  try {
+    var response = await apiFetch('/collaborations/' + collabId + '/contract-documents/' + documentId + '/download');
+    if (!response.ok) {
+      var errorBody = await response.json();
+      throw new Error(errorBody.error || '合同文件下载失败');
+    }
+    var blob = await response.blob();
+    var href = URL.createObjectURL(blob);
+    var anchor = document.createElement('a');
+    anchor.href = href;
+    anchor.download = documentMeta && documentMeta.original_filename ? documentMeta.original_filename : ('contract-' + documentId + '.pdf');
+    anchor.style.display = 'none';
+    document.body.appendChild(anchor);
+    anchor.click();
+    setTimeout(function() { URL.revokeObjectURL(href); anchor.remove(); }, 0);
+  } catch (error) {
+    toast(error.message || '合同文件下载失败', 'error');
+  }
+}
 function collabRelations(collab) {
   return Array.isArray(collab && collab.active_relations) ? collab.active_relations : [];
 }
@@ -6470,16 +6556,22 @@ function renderCampaignCollabActions(collab) {
 function renderContractConfirmation(collab) {
   var confirmation = collab && collab.contract_confirmation;
   if (!confirmation) {
-    if (collab && collab.status === 'contract_sent') return '<div style="margin-top:6px;font-size:10px;opacity:.65">等待合同回签</div>';
-    return '';
+    var pendingDocuments = m4ContractDocuments(collab);
+    var pendingFiles = pendingDocuments.length ? '<div style="margin-top:5px">' + pendingDocuments.map(function(document) {
+      return '<button type="button" class="btn btn-sm btn-outline" title="下载 ' + esc(document.original_filename || '合同文件') + '" onclick="downloadCampaignContractDocument(' + collab.id + ',' + document.id + ')">下载合同</button>';
+    }).join(' ') + '</div>' : '';
+    if (collab && collab.status === 'contract_sent') return '<div style="margin-top:6px;font-size:10px;opacity:.65">等待合同回签</div>' + pendingFiles;
+    return pendingFiles;
   }
   var signedAt = String(confirmation.signed_at || '').replace('T', ' ').replace('.000Z', ' UTC');
   var confirmer = confirmation.confirmed_by_name || ('用户 #' + confirmation.confirmed_by);
+  var document = confirmation.document;
+  var download = document ? '<div style="margin-top:5px"><button type="button" class="btn btn-sm btn-outline" title="下载 ' + esc(document.original_filename || '合同文件') + '" onclick="downloadCampaignContractDocument(' + collab.id + ',' + document.id + ')">下载合同</button></div>' : '';
   return '<div style="margin-top:6px;font-size:10px;line-height:1.55">' +
     '<strong>已签约 · ' + esc(confirmation.contract_reference || '-') + '</strong><br>' +
     '签约方：' + esc(confirmation.counterparty_name || '-') + '<br>' +
     '签约时间：' + esc(signedAt || '-') + '<br>' +
-    '确认人：' + esc(confirmer) + '</div>';
+    '确认人：' + esc(confirmer) + download + '</div>';
 }
 function renderCollabCommercialTerms(collab, resource) {
   if (resource.schema !== 'turingmarket.collaboration-order.v2') {
@@ -6629,6 +6721,10 @@ function openCampaignContractConfirmationModal(collab) {
   overlay.className = 'modal-overlay';
   overlay.onclick = function(event) { if (event.target === overlay) closeCampaignContractConfirmationModal(); };
   var resource = collabResource(collab);
+  var documents = m4ContractDocuments(collab);
+  var documentOptions = documents.map(function(document) {
+    return '<option value="' + document.id + '">' + esc(document.original_filename || ('合同 #' + document.id)) + '</option>';
+  }).join('');
   var now = new Date();
   var defaultSignedAt = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
   overlay.innerHTML = '<div class="modal" id="campaignContractConfirmationDialog" role="dialog" aria-modal="true" aria-labelledby="campaignContractConfirmationTitle" onclick="event.stopPropagation()">' +
@@ -6639,6 +6735,10 @@ function openCampaignContractConfirmationModal(collab) {
     '<div><label>合同 / PO 编号</label><input id="contractReference" maxlength="160" value="' + esc(resource.order_reference || '') + '"></div>' +
     '<div><label>签约方</label><input id="contractCounterparty" maxlength="160" value="' + esc(collab.kol_handle || '') + '"></div>' +
     '<div><label>签约时间</label><input id="contractSignedAt" type="datetime-local" value="' + esc(defaultSignedAt) + '"></div>' +
+    '</div>' +
+    '<div class="form-grid" style="margin-top:10px">' +
+    '<div><label>已上传合同</label><select id="contractDocumentExisting"><option value="">上传新的 PDF</option>' + documentOptions + '</select></div>' +
+    '<div><label>合同 PDF（最大 8 MB）</label><input id="contractDocumentFile" type="file" accept="application/pdf,.pdf" title="选择已签署的 PDF 合同"></div>' +
     '</div>' +
     '<div style="margin-top:10px"><label>确认说明</label><textarea id="contractConfirmationNote" maxlength="500" rows="3" placeholder="填写签约文件或审批记录的核对来源"></textarea></div>' +
     '<div class="btn-group" style="justify-content:flex-end"><button type="button" class="btn btn-outline" onclick="closeCampaignContractConfirmationModal()">取消</button><button type="button" class="btn btn-primary" onclick="submitCampaignContractConfirmation()">确认签约</button></div>' +
@@ -6667,28 +6767,70 @@ async function submitCampaignContractConfirmation() {
   var counterpartyName = String(document.getElementById('contractCounterparty')?.value || '').trim();
   var signedAtValue = String(document.getElementById('contractSignedAt')?.value || '').trim();
   var confirmationNote = String(document.getElementById('contractConfirmationNote')?.value || '').trim();
+  var existingDocumentId = readPositiveInteger(document.getElementById('contractDocumentExisting')?.value);
+  var fileInput = document.getElementById('contractDocumentFile');
+  var file = fileInput && fileInput.files && fileInput.files.length ? fileInput.files[0] : null;
   var signedAtTimestamp = Date.parse(signedAtValue);
   if (!contractReference || contractReference.length > 160 || !counterpartyName || counterpartyName.length > 160 || !Number.isFinite(signedAtTimestamp) || signedAtTimestamp > Date.now() + 5 * 60 * 1000 || !confirmationNote || confirmationNote.length > 500) {
     toast('请完整填写有效的合同编号、签约方、签约时间和确认说明。', 'error');
     return;
   }
-  var body = {
-    campaign_id: Number(collab.campaign_id),
-    expected_version: Number(collab.row_version),
+  if (!file && existingDocumentId === null) {
+    toast('请选择已上传合同，或上传新的 PDF 合同。', 'error');
+    return;
+  }
+  if (!file && !m4ContractDocuments(collab).some(function(item) { return Number(item.id) === existingDocumentId; })) {
+    toast('所选合同文件已变化，请刷新后重试。', 'error');
+    return;
+  }
+  var preparedDocument = null;
+  if (file) {
+    try {
+      preparedDocument = await m4ReadContractDocumentFile(file);
+    } catch (error) {
+      toast(error.message || '合同文件读取失败', 'error');
+      return;
+    }
+  }
+  var intent = {
+    contract_document_id: file ? null : existingDocumentId,
+    filename: preparedDocument ? preparedDocument.filename : '',
+    file_bytes: file ? Number(file.size) : 0,
+    file_fingerprint: preparedDocument ? preparedDocument.content_fingerprint : '',
     contract_reference: contractReference,
     counterparty_name: counterpartyName,
     signed_at: new Date(signedAtTimestamp).toISOString(),
     confirmation_note: confirmationNote
   };
-  var mutationSlot = m4CollabMutationSlot(collab, body, 'contract-confirmation');
+  var mutationSlot = m4CollabMutationSlot(collab, intent, 'contract-confirmation');
   if (m4CollabMutationInFlight[mutationSlot]) {
     toast('签约确认正在提交，请勿重复点击。');
     return m4CollabMutationInFlight[mutationSlot];
   }
-  var request = Promise.resolve().then(function() {
+  var request = Promise.resolve().then(async function() {
+    var contractDocumentId = existingDocumentId;
+    if (file) {
+      var uploaded = await uploadCampaignContractDocument(
+        collab,
+        file,
+        m4CollabMutationOperationKey(mutationSlot + ':document', 'm4-contract-document-upload-'),
+        preparedDocument
+      );
+      contractDocumentId = readPositiveInteger(uploaded && uploaded.id);
+      if (contractDocumentId === null) throw new Error('合同文件上传结果无效，请刷新后重试。');
+    }
+    var body = {
+      campaign_id: Number(collab.campaign_id),
+      expected_version: Number(collab.row_version),
+      contract_document_id: contractDocumentId,
+      contract_reference: contractReference,
+      counterparty_name: counterpartyName,
+      signed_at: new Date(signedAtTimestamp).toISOString(),
+      confirmation_note: confirmationNote
+    };
     return apiFetch('/collaborations/' + collab.id + '/contract-confirmations', {
       method: 'POST',
-      headers: m4MutationHeaders('m4-contract-confirmation-', m4CollabMutationOperationKey(mutationSlot, 'm4-contract-confirmation-')),
+      headers: m4MutationHeaders('m4-contract-confirmation-', m4CollabMutationOperationKey(mutationSlot + ':confirmation', 'm4-contract-confirmation-')),
       body: JSON.stringify(body)
     });
   }).then(async function(response) {

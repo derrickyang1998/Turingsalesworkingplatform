@@ -105,7 +105,7 @@ function assertSelectedEntryAccess(db, opts, entryId) {
       access.status || access.statusCode || 403
     );
   }
-  if (!knowledge.isKnowledgeRetrievable(db, entryId)) {
+  if (!knowledge.isKnowledgeAiRetrievable(db, entryId)) {
     throw ragInputError(
       'KNOWLEDGE_NOT_RETRIEVABLE',
       'Selected knowledge is not an active reusable version.',
@@ -146,7 +146,8 @@ function buildLinkedRagContext(db, opts) {
     visibility: opts.visibility,
     business_type: opts.business_type,
     business_id: opts.business_id,
-    tags: opts.tags
+    tags: opts.tags,
+    ai_retrievable: true
   });
   const accepted = [];
   const acceptedChunkIds = new Set();
@@ -218,7 +219,8 @@ function buildRagContext(db, opts) {
     visibility: opts.visibility,
     business_type: opts.business_type,
     business_id: opts.business_id,
-    tags: opts.tags
+    tags: opts.tags,
+    ai_retrievable: true
   });
 
   const references = results.map(function(entry) {

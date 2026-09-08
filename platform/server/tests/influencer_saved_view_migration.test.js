@@ -92,5 +92,5 @@ test('migration 015 manifest and production registries expose schema version 15'
   assert.match(sanitizerSource, /version:\s*15,[\s\S]*name:\s*'015_influencer_saved_views'/);
   assert.match(trustedSource, /server\/migrations\/015_influencer_saved_views\.js/);
   assert.match(deploySource, /server\\migrations\\015_influencer_saved_views\.js/);
-  assert.match(trustedSource, /targetVersion:\s*15/);
+  assert.match(trustedSource, /targetVersion:\s*16/);
 });

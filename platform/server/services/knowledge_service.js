@@ -579,6 +579,20 @@ function isKnowledgeRetrievable(db, entryId) {
   `).get(numericId));
 }
 
+function metadataAllowsAiRetrieval(metadata) {
+  const parsed = typeof metadata === 'string' ? parseJson(metadata, {}) : (metadata || {});
+  return parsed.retrieval_eligible !== false;
+}
+
+function isKnowledgeAiRetrievable(db, entryId) {
+  const numericId = Number(entryId);
+  if (!Number.isSafeInteger(numericId) || numericId < 1 || !isKnowledgeRetrievable(db, numericId)) {
+    return false;
+  }
+  const row = db.prepare('SELECT metadata_json FROM knowledge_entries WHERE id=?').get(numericId);
+  return Boolean(row && metadataAllowsAiRetrieval(row.metadata_json));
+}
+
 function knowledgeGovernanceError(statusCode, code, message) {
   throw new KnowledgeGovernanceError(statusCode, code, message);
 }
@@ -3536,6 +3550,7 @@ function searchCampaignKnowledgeChunks(db, opts) {
      AND CAST(knowledge_chunks_fts.chunk_id AS INTEGER)=chunk.id
     WHERE knowledge_chunks_fts MATCH ?
       AND ${where.clause}
+      AND COALESCE(json_extract(entry.metadata_json,'$.retrieval_eligible'),1) <> 0
     ORDER BY
       ${where.governanceOrder} ASC,
       fts_rank ASC,
@@ -3691,6 +3706,11 @@ function searchKnowledge(db, opts) {
     }
     return entry;
   });
+  if (opts.ai_retrievable === true) {
+    entries = entries.filter(function(entry) {
+      return metadataAllowsAiRetrieval(entry.metadata);
+    });
+  }
   if (tags.length) {
     const wanted = tags.map(function(tag) { return tag.toLowerCase(); });
     entries = entries.filter(function(entry) {
@@ -3921,6 +3941,7 @@ module.exports = {
   governKnowledgeEntry,
   readKnowledgeGovernance,
   isKnowledgeRetrievable,
+  isKnowledgeAiRetrievable,
   knowledgeGovernanceSql,
   redactKnowledgeReferences,
   normalizeEntry,

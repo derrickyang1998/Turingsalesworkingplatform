@@ -76,10 +76,23 @@ function element(initial) {
 function createClientContext() {
   let operation = 0;
   let nextCollaborationId = 501;
+  let nextContractDocumentId = 801;
   const requests = [];
   const completedByKey = new Map();
   const rows = [];
   const appendedElements = [];
+  const contractBytes = Buffer.from('%PDF-1.7\nclient contract fixture\n%%EOF\n', 'ascii');
+  const contractFile = {
+    name: 'signed-contract.pdf',
+    type: 'application/pdf',
+    size: contractBytes.length,
+    async arrayBuffer() {
+      return contractBytes.buffer.slice(
+        contractBytes.byteOffset,
+        contractBytes.byteOffset + contractBytes.byteLength
+      );
+    }
+  };
   const elements = {
     m4CampaignContext: element(),
     m4CampaignContextStatus: element(),
@@ -102,7 +115,9 @@ function createClientContext() {
     contractReference: element({ value: 'SIGNED-501' }),
     contractCounterparty: element({ value: 'Creator Studio LLC' }),
     contractSignedAt: element({ value: '2026-09-07T10:00' }),
-    contractConfirmationNote: element({ value: 'Signed copy verified in the approved drive.' })
+    contractConfirmationNote: element({ value: 'Signed copy verified in the approved drive.' }),
+    contractDocumentExisting: element({ value: '' }),
+    contractDocumentFile: element({ files: [contractFile] })
   };
   const campaign = {
     id: 91,
@@ -121,7 +136,10 @@ function createClientContext() {
         active_relations: row.active_relations.slice(),
         contract_confirmation: row.contract_confirmation
           ? Object.assign({}, row.contract_confirmation)
-          : null
+          : null,
+        contract_documents: (row.contract_documents || []).map(function(document) {
+          return Object.assign({}, document);
+        })
       });
     });
   }
@@ -167,6 +185,7 @@ function createClientContext() {
       status: body.status,
       row_version: 1,
       active_relations: ['order'],
+      contract_documents: [],
       proposal_notes: JSON.stringify(resource),
       project_name: resource.project_name,
       product_name: resource.product_name,
@@ -186,6 +205,30 @@ function createClientContext() {
     return jsonResponse(201, response);
   }
 
+  function uploadContractDocument(url, options) {
+    const body = JSON.parse(options.body);
+    const collaborationId = Number(url.split('/')[2]);
+    const collaboration = rows.find(function(row) { return row.id === collaborationId; });
+    if (!collaboration || collaboration.row_version !== body.expected_version) {
+      return jsonResponse(409, { error: 'STALE_COLLABORATION_VERSION', code: 'STALE_COLLABORATION_VERSION' });
+    }
+    const bytes = Buffer.from(body.content_base64, 'base64');
+    const document = {
+      id: nextContractDocumentId++,
+      collaboration_id: collaborationId,
+      original_filename: body.filename,
+      media_type: body.media_type,
+      file_sha256: 'a'.repeat(64),
+      file_bytes: bytes.length,
+      uploaded_by: 9,
+      uploaded_by_name: 'Mina Chen',
+      knowledge_entry_id: 991,
+      created_at: '2026-09-08 09:00:00'
+    };
+    collaboration.contract_documents.push(document);
+    return jsonResponse(201, { success: true, document });
+  }
+
   function confirmContract(url, options) {
     const body = JSON.parse(options.body);
     const idempotencyKey = options.headers['Idempotency-Key'];
@@ -196,6 +239,10 @@ function createClientContext() {
     if (!collaboration || collaboration.row_version !== body.expected_version) {
       return jsonResponse(409, { error: 'STALE_COLLABORATION_VERSION' });
     }
+    const document = collaboration.contract_documents.find(function(item) {
+      return item.id === body.contract_document_id;
+    });
+    if (!document) return jsonResponse(409, { error: 'CONTRACT_DOCUMENT_REQUIRED' });
     collaboration.status = 'contracted';
     collaboration.row_version += 1;
     collaboration.contract_confirmation = {
@@ -206,7 +253,8 @@ function createClientContext() {
       confirmation_note: body.confirmation_note,
       confirmed_by: 9,
       confirmed_by_name: 'Mina Chen',
-      confirmed_at: '2026-09-08T09:00:00.000Z'
+      confirmed_at: '2026-09-08T09:00:00.000Z',
+      document: Object.assign({}, document)
     };
     const response = {
       success: true,
@@ -236,6 +284,7 @@ function createClientContext() {
     pendingPauseRelease: null,
     pauseNextUpdate: false,
     conflictNextContractAfterPersist: false,
+    btoa(value) { return Buffer.from(value, 'binary').toString('base64'); },
     document: {
       getElementById(id) { return elements[id] || appendedElements.find(function(item) { return item.id === id; }) || null; },
       createElement() { return element({ remove() {} }); },
@@ -286,6 +335,9 @@ function createClientContext() {
         }
         return createCollaboration(options);
       }
+      if (/^\/collaborations\/\d+\/contract-documents$/.test(url) && options.method === 'POST') {
+        return uploadContractDocument(url, options);
+      }
       if (/^\/collaborations\/\d+\/contract-confirmations$/.test(url) && options.method === 'POST') {
         if (context.conflictNextContractAfterPersist) {
           context.conflictNextContractAfterPersist = false;
@@ -310,7 +362,7 @@ function createClientContext() {
     }
   };
 
-  return { context, elements, requests, rows, appendedElements };
+  return { context, elements, requests, rows, appendedElements, contractBytes };
 }
 
 const m4Functions = [
@@ -337,6 +389,11 @@ const m4Functions = [
   'collabRelations',
   'isCampaignCollaboration',
   'collabResource',
+  'm4ContractDocuments',
+  'm4ContractDocumentFingerprint',
+  'm4ReadContractDocumentFile',
+  'uploadCampaignContractDocument',
+  'downloadCampaignContractDocument',
   'renderCollabRelationTags',
   'renderCampaignCollabActions',
   'renderContractConfirmation',
@@ -349,6 +406,18 @@ const m4Functions = [
   'submitCampaignContractConfirmation',
   'openCampaignSettlementModal'
 ];
+
+test('M4 contract document retry fingerprint distinguishes equal-size PDF contents', () => {
+  const { context } = createClientContext();
+  loadFunctions(context, m4Functions);
+  const first = new Uint8Array(Buffer.from('%PDF-1.7\ncontract-alpha\n%%EOF\n', 'ascii'));
+  const second = new Uint8Array(Buffer.from('%PDF-1.7\ncontract-bravo\n%%EOF\n', 'ascii'));
+  assert.equal(first.length, second.length);
+  assert.notEqual(
+    context.m4ContractDocumentFingerprint(first),
+    context.m4ContractDocumentFingerprint(second)
+  );
+});
 
 test('M4 campaign order holds duplicate clicks to one in-flight creation', async () => {
   const { context, requests, rows } = createClientContext();
@@ -555,7 +624,7 @@ test('M4 collaboration table distinguishes v2 commercial terms from historical q
 });
 
 test('M4 signed contract checkpoint gates v2 execution and persists entered evidence', async () => {
-  const { context, elements, requests, rows } = createClientContext();
+  const { context, elements, requests, rows, contractBytes } = createClientContext();
   context.COLLAB_ORDER_TYPE_LABELS = { paid: '付费合作' };
   context.COLLAB_RELATION_LABELS = { order: '下单' };
   context.STATUS_LABELS = {
@@ -578,6 +647,18 @@ test('M4 signed contract checkpoint gates v2 execution and persists entered evid
   context.pendingContractCollabId = created.id;
   await context.submitCampaignContractConfirmation();
 
+  const uploadRequest = requests.find(function(request) {
+    return request.url === '/collaborations/' + created.id + '/contract-documents';
+  });
+  assert.ok(uploadRequest);
+  assert.match(uploadRequest.options.headers['Idempotency-Key'], /^m4-contract-document-upload-/);
+  assert.deepEqual(JSON.parse(uploadRequest.options.body), {
+    campaign_id: 91,
+    expected_version: 1,
+    filename: 'signed-contract.pdf',
+    media_type: 'application/pdf',
+    content_base64: contractBytes.toString('base64')
+  });
   const confirmationRequest = requests.find(function(request) {
     return request.url === '/collaborations/' + created.id + '/contract-confirmations';
   });
@@ -586,6 +667,7 @@ test('M4 signed contract checkpoint gates v2 execution and persists entered evid
   assert.deepEqual(JSON.parse(confirmationRequest.options.body), {
     campaign_id: 91,
     expected_version: 1,
+    contract_document_id: 801,
     contract_reference: 'SIGNED-501',
     counterparty_name: 'Creator Studio LLC',
     signed_at: new Date('2026-09-07T10:00').toISOString(),
@@ -597,10 +679,51 @@ test('M4 signed contract checkpoint gates v2 execution and persists entered evid
   assert.match(context.renderContractConfirmation(created), /SIGNED-501/);
   assert.match(context.renderContractConfirmation(created), /Creator Studio LLC/);
   assert.match(context.renderContractConfirmation(created), /Mina Chen/);
+  assert.match(context.renderContractConfirmation(created), /下载合同/);
 
   context.renderCollabTable([created]);
   assert.match(elements.execTableContainer.innerHTML, /已签约/);
   assert.match(elements.execTableContainer.innerHTML, /SIGNED-501/);
+});
+
+test('M4 signed contract checkpoint can reuse an already uploaded PDF without uploading again', async () => {
+  const { context, elements, requests, rows } = createClientContext();
+  context.COLLAB_ORDER_TYPE_LABELS = { paid: '付费合作' };
+  context.COLLAB_RELATION_LABELS = { order: '下单' };
+  context.STATUS_LABELS = { confirmed: '已确认', contracted: '已签约' };
+  context.fmtCount = function(value) { return String(value || 0); };
+  loadFunctions(context, m4Functions);
+  await context.loadM4Campaigns();
+  await context.submitCollabOrder();
+  await context.loadCollaborations();
+  const existingDocument = {
+    id: 880,
+    collaboration_id: rows[0].id,
+    original_filename: 'previously-uploaded.pdf',
+    media_type: 'application/pdf',
+    file_sha256: 'b'.repeat(64),
+    file_bytes: 128,
+    uploaded_by: 9,
+    uploaded_by_name: 'Mina Chen',
+    knowledge_entry_id: 992,
+    created_at: '2026-09-08 08:00:00'
+  };
+  rows[0].contract_documents.push(existingDocument);
+  context.lastCollabRows[0].contract_documents.push(Object.assign({}, existingDocument));
+  elements.contractDocumentExisting.value = '880';
+  elements.contractDocumentFile.files = [];
+  context.pendingContractCollabId = rows[0].id;
+
+  await context.submitCampaignContractConfirmation();
+
+  assert.equal(requests.some(function(request) {
+    return /\/contract-documents$/.test(request.url);
+  }), false);
+  const confirmationRequest = requests.find(function(request) {
+    return /\/contract-confirmations$/.test(request.url);
+  });
+  assert.equal(JSON.parse(confirmationRequest.options.body).contract_document_id, 880);
+  assert.equal(rows[0].status, 'contracted');
 });
 
 test('M4 signed contract conflict reloads persisted evidence and closes the stale modal', async () => {

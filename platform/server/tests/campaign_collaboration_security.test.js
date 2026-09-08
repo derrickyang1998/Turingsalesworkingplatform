@@ -10,6 +10,7 @@ const { Worker } = require('node:worker_threads');
 const Database = require('better-sqlite3');
 
 const migrationService = require('../services/migration_service');
+const migration016 = require('../migrations/016_collaboration_contract_documents');
 const knowledgeService = require('../services/knowledge_service');
 const {
   DEFAULT_ORGANIZATION_CODE
@@ -62,6 +63,7 @@ function openCampaignDatabase(t) {
     rootDir: SERVER_ROOT,
     registeredMigrations: CAMPAIGN_MIGRATIONS
   }), { status: 'managed', currentVersion: 5 });
+  migration016.apply(db);
   return db;
 }
 
@@ -159,12 +161,30 @@ function contractConfirmationInput(overrides = {}) {
     body: {
       campaign_id: 7001,
       expected_version: 2,
+      contract_document_id: 1,
       contract_reference: 'SIGNED-7101',
       counterparty_name: 'Creator Management LLC',
       signed_at: '2026-09-07T10:00:00.000Z',
       confirmation_note: 'Signed PDF verified in the approved shared drive.'
     }
   }, overrides);
+}
+
+function uploadContractDocument(service, expectedVersion, suffix = '0001') {
+  const bytes = Buffer.from('%PDF-1.7\ncontract security fixture\n%%EOF\n', 'ascii');
+  return service.uploadContractDocument({
+    userId: 2,
+    collaborationId: 7101,
+    requestId: `contract-document-request-${suffix}`,
+    idempotencyKey: `contract-document-upload-${suffix}`,
+    body: {
+      campaign_id: 7001,
+      expected_version: expectedVersion,
+      filename: 'signed-contract.pdf',
+      media_type: 'application/pdf',
+      content_base64: bytes.toString('base64')
+    }
+  }).body.document;
 }
 
 function insertCampaignLink(db, {
@@ -620,8 +640,12 @@ test('signed contract confirmation is idempotent, immutable, and unlocks v2 exec
     }
   });
   assert.equal(sent.body.row_version, 3);
+  const contractDocument = uploadContractDocument(service, 3);
   const input = contractConfirmationInput({
-    body: Object.assign({}, contractConfirmationInput().body, { expected_version: 3 })
+    body: Object.assign({}, contractConfirmationInput().body, {
+      expected_version: 3,
+      contract_document_id: contractDocument.id
+    })
   });
 
   const confirmed = service.confirmContract(input);
@@ -635,6 +659,7 @@ test('signed contract confirmation is idempotent, immutable, and unlocks v2 exec
   assert.equal(confirmed.body.contract_confirmation.signed_at, '2026-09-07T10:00:00.000Z');
   assert.equal(confirmed.body.contract_confirmation.confirmation_note, 'Signed PDF verified in the approved shared drive.');
   assert.equal(confirmed.body.contract_confirmation.confirmed_by, 2);
+  assert.equal(confirmed.body.contract_confirmation.document.id, contractDocument.id);
   assert.match(confirmed.body.contract_confirmation.confirmed_at, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.000Z$/);
 
   const replay = service.confirmContract(input);
@@ -657,9 +682,11 @@ test('signed contract confirmation is idempotent, immutable, and unlocks v2 exec
   assert.equal(evidenceRows.length, 1);
   assert.doesNotMatch(evidenceRows[0].content, /SIGNED-7101|Creator Management|Signed PDF/);
   assert.deepEqual(JSON.parse(evidenceRows[0].metadata_json), {
-    schema_version: 1,
+    schema_version: 2,
     collaboration_id: 7101,
     row_version: 4,
+    contract_document_id: contractDocument.id,
+    contract_document_sha256: contractDocument.file_sha256,
     contract_reference: 'SIGNED-7101',
     counterparty_name: 'Creator Management LLC',
     signed_at: '2026-09-07T10:00:00.000Z',
@@ -673,7 +700,7 @@ test('signed contract confirmation is idempotent, immutable, and unlocks v2 exec
     FROM campaign_events
     WHERE event_type='link_attached' AND source='collaboration_link'
       AND json_extract(metadata_json,'$.record_type')='knowledge_entry'
-  `).get().count, 1);
+  `).get().count, 2);
   assert.equal(db.prepare(`
     SELECT COUNT(*) AS count
     FROM request_idempotency
@@ -768,6 +795,7 @@ test('contract confirmation rejects invalid evidence, stale versions, inaccessib
   seedFixture(db);
   setV2CollaborationResource(db, 7101);
   const service = createCampaignCollaborationService(db);
+  uploadContractDocument(service, 2);
   const baseline = collaborationWriteState(db);
 
   assert.throws(
@@ -843,6 +871,7 @@ test('contract confirmation rolls back status, evidence, links, events, archives
   seedFixture(db);
   setV2CollaborationResource(db, 7101);
   const service = createCampaignCollaborationService(db);
+  uploadContractDocument(service, 2);
   const baseline = collaborationWriteState(db);
   db.exec(`
     CREATE TRIGGER fail_contract_confirmation_evidence
@@ -865,6 +894,7 @@ test('contract confirmation rejects duplicate producer evidence instead of selec
   const fixture = seedFixture(db);
   setV2CollaborationResource(db, 7101);
   const service = createCampaignCollaborationService(db);
+  uploadContractDocument(service, 2);
   service.confirmContract(contractConfirmationInput());
 
   db.transaction(() => {

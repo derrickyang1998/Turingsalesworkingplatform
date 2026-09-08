@@ -117,6 +117,13 @@ const EXACT_PROFILE_MIGRATIONS = Object.freeze([
     sourcePath: 'migrations/015_influencer_saved_views.js',
     engineVersion: 1,
     dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
+  }),
+  Object.freeze({
+    version: 16,
+    name: '016_collaboration_contract_documents',
+    sourcePath: 'migrations/016_collaboration_contract_documents.js',
+    engineVersion: 1,
+    dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
   })
 ]);
 const FTS_MANIFEST = Object.freeze({
@@ -273,6 +280,10 @@ const DERIVED_REBUILDS = Object.freeze([
   'customers.normalized_identity_key',
   'customers.duplicate_enforced',
   'knowledge_chunks_fts'
+]);
+const V16_DERIVED_REBUILDS = Object.freeze([
+  ...DERIVED_REBUILDS,
+  'collaboration_contract_documents.file_sha256'
 ]);
 const V1_DERIVED_REBUILDS = Object.freeze([
   'knowledge_entries.source_hash',
@@ -673,6 +684,20 @@ const V15_MIGRATION_LEDGER = Object.freeze({
     'migrations/015_influencer_saved_views.js'
   ])
 });
+const V16_MIGRATION_LEDGER = Object.freeze({
+  name: Object.freeze([
+    ...V15_MIGRATION_LEDGER.name,
+    '016_collaboration_contract_documents'
+  ]),
+  checksum: Object.freeze([
+    ...V15_MIGRATION_LEDGER.checksum,
+    '9f273252da1976c0cacdb540475b30997a1b5a0d1cee14843be1a5cc9292c7ab'
+  ]),
+  sourcePath: Object.freeze([
+    ...V15_MIGRATION_LEDGER.sourcePath,
+    'migrations/016_collaboration_contract_documents.js'
+  ])
+});
 const STRUCTURAL_COLUMN_POLICY_V9 = Object.freeze(Object.assign(Object.create(null), STRUCTURAL_COLUMN_POLICY, {
   'feishu_bitable_outbox_retries.id': Object.freeze({ storage: 'integer', kind: 'integer' }),
   'feishu_bitable_outbox_retries.org_id': Object.freeze({ storage: 'integer', kind: 'integer' }),
@@ -929,6 +954,35 @@ const STRUCTURAL_POLICY_V15_SHA256 = crypto.createHash('sha256')
     columns: STRUCTURAL_COLUMN_POLICY_V15
   }), 'utf8')
   .digest('hex');
+const STRUCTURAL_COLUMN_POLICY_V16 = Object.freeze(Object.assign(Object.create(null), STRUCTURAL_COLUMN_POLICY_V15, {
+  'collaboration_contract_documents.id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'collaboration_contract_documents.org_id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'collaboration_contract_documents.campaign_id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'collaboration_contract_documents.collaboration_id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'collaboration_contract_documents.uploaded_by': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'collaboration_contract_documents.knowledge_entry_id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'collaboration_contract_documents.file_bytes': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'collaboration_contract_documents.media_type': Object.freeze({
+    storage: 'text', kind: 'enum', allowedValues: Object.freeze(['application/pdf'])
+  }),
+  'collaboration_contract_documents.created_at': Object.freeze({ storage: 'text', kind: 'timestamp' }),
+  'schema_migrations.name': Object.freeze({
+    storage: 'text', kind: 'migration-ledger', allowedValues: V16_MIGRATION_LEDGER.name
+  }),
+  'schema_migrations.checksum': Object.freeze({
+    storage: 'text', kind: 'migration-ledger', allowedValues: V16_MIGRATION_LEDGER.checksum
+  }),
+  'schema_migrations.source_path': Object.freeze({
+    storage: 'text', kind: 'migration-ledger', allowedValues: V16_MIGRATION_LEDGER.sourcePath
+  })
+}));
+const STRUCTURAL_POLICY_V16_VALIDATOR_VERSION = 'tm-structural-policy-v12-contract-document-custody';
+const STRUCTURAL_POLICY_V16_SHA256 = crypto.createHash('sha256')
+  .update(JSON.stringify({
+    validatorVersion: STRUCTURAL_POLICY_V16_VALIDATOR_VERSION,
+    columns: STRUCTURAL_COLUMN_POLICY_V16
+  }), 'utf8')
+  .digest('hex');
 
 const TRANSFORMATION_EXCLUDED_CLASSIFICATIONS = new Set([
   'structural',
@@ -1045,8 +1099,17 @@ const V15_SEMANTIC_POLICIES = Object.freeze({
     policySha256: STRUCTURAL_POLICY_V15_SHA256
   })
 });
+const V16_SEMANTIC_POLICIES = Object.freeze({
+  ...SEMANTIC_POLICIES,
+  structuralColumns: Object.freeze({
+    ...SEMANTIC_POLICIES.structuralColumns,
+    validatorVersion: STRUCTURAL_POLICY_V16_VALIDATOR_VERSION,
+    policySha256: STRUCTURAL_POLICY_V16_SHA256
+  })
+});
 
 function structuralColumnPolicyForVersion(schemaVersion) {
+  if (schemaVersion === 16) return STRUCTURAL_COLUMN_POLICY_V16;
   if (schemaVersion === 15) return STRUCTURAL_COLUMN_POLICY_V15;
   if (schemaVersion === 14) return STRUCTURAL_COLUMN_POLICY_V14;
   if (schemaVersion === 13) return STRUCTURAL_COLUMN_POLICY_V13;
@@ -1287,6 +1350,24 @@ function deterministicBlob(token, byteLength) {
   ).subarray(0, byteLength);
 }
 
+function deterministicInertPdf(token, byteLength) {
+  const header = Buffer.from('%PDF-1.4\n', 'ascii');
+  const trailer = Buffer.from('\n%%EOF\n', 'ascii');
+  if (!Number.isSafeInteger(byteLength) || byteLength < header.length + trailer.length + 1) {
+    throw new Error('contract document BLOB is too small for inert PDF framing');
+  }
+  const output = Buffer.alloc(byteLength, 0x20);
+  header.copy(output, 0);
+  output[header.length] = 0x25;
+  const bodyEnd = byteLength - trailer.length;
+  const seed = Buffer.from(`tm-sanitized-${token}`, 'ascii');
+  for (let offset = header.length + 1; offset < bodyEnd; offset += 1) {
+    output[offset] = seed[(offset - header.length - 1) % seed.length];
+  }
+  trailer.copy(output, bodyEnd);
+  return output;
+}
+
 function replacementAttemptToken(token, attempt) {
   if (attempt === 0) return token;
   return sha256(Buffer.from(`${token}\0${attempt}`, 'utf8'));
@@ -1522,6 +1603,15 @@ function profileContractForVersion(schemaVersion) {
       preservedAccounting: PRESERVED_ACCOUNTING
     });
   }
+  if (schemaVersion === 16) {
+    return Object.freeze({
+      semanticPolicies: V16_SEMANTIC_POLICIES,
+      equalityGroups: V14_EQUALITY_GROUPS,
+      referenceGroups: REFERENCE_GROUPS,
+      derivedRebuilds: V16_DERIVED_REBUILDS,
+      preservedAccounting: PRESERVED_ACCOUNTING
+    });
+  }
   throw new Error(`unsupported exact sanitization profile version ${schemaVersion}`);
 }
 
@@ -1541,16 +1631,16 @@ function assertManifestDocumentShape(manifest) {
   ) {
     throw new Error('malformed sanitization manifest header');
   }
-  if (!Array.isArray(manifest.exactProfiles) || manifest.exactProfiles.length !== 10) {
-    throw new Error('sanitization manifest must contain isolated exact v6 through v15 profiles');
+  if (!Array.isArray(manifest.exactProfiles) || manifest.exactProfiles.length !== 11) {
+    throw new Error('sanitization manifest must contain isolated exact v6 through v16 profiles');
   }
   const profileKeys = [
     'schemaVersion', 'semanticPolicies', 'equalityGroups', 'referenceGroups',
     'derivedRebuilds', 'objects'
   ];
   const versions = manifest.exactProfiles.map((profile) => profile.schemaVersion);
-  if (JSON.stringify(versions) !== JSON.stringify([6, 7, 8, 9, 10, 11, 12, 13, 14, 15])) {
-    throw new Error('sanitization manifest exact profiles must be ordered v6 through v15');
+  if (JSON.stringify(versions) !== JSON.stringify([6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16])) {
+    throw new Error('sanitization manifest exact profiles must be ordered v6 through v16');
   }
   for (const compatibilityProfile of manifest.exactProfiles) {
     if (!exactObjectKeys(compatibilityProfile, profileKeys)) {
@@ -1587,12 +1677,12 @@ function exactProfileClassification(db) {
   });
   if (
     classification.status !== 'managed'
-    || ![1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15].includes(classification.currentVersion)
+    || ![1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16].includes(classification.currentVersion)
   ) {
     const observed = classification.currentVersion === undefined || classification.currentVersion === null
       ? classification.status
       : classification.currentVersion;
-    throw new Error(`sanitization source must be an exact managed version 1 or version 6 through version 15 profile; got ${observed}`);
+    throw new Error(`sanitization source must be an exact managed version 1 or version 6 through version 16 profile; got ${observed}`);
   }
   return classification;
 }
@@ -4286,6 +4376,22 @@ function transformedValue(
       return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-${variant}${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
     });
   }
+  if (category === 'synthetic-text' && table === 'collaboration_contract_documents'
+      && column === 'original_filename' && storageType === 'text') {
+    return reserveTypedReplacement(replacementDomain, mappingKey, 'text', (attempt) => (
+      `tm-contract-${replacementAttemptToken(token, attempt).slice(0, 40)}.pdf`
+    ));
+  }
+  if (table === 'collaboration_contract_documents'
+      && column === 'document_blob' && storageType === 'blob') {
+    if (!Buffer.isBuffer(value)) throw new Error('contract document bytes lost BLOB storage');
+    return reserveTypedReplacement(
+      replacementDomain,
+      mappingKey,
+      'blob',
+      (attempt) => deterministicInertPdf(replacementAttemptToken(token, attempt), value.length)
+    );
+  }
   if (category === 'synthetic-text') return typePreservingReplacement(
     storageType, value, token,
     (_attempt, attemptToken) => `tmtext-${attemptToken.slice(0, 32)}`,
@@ -4887,8 +4993,28 @@ function rebuildCrmDerivedData(db) {
   rebuild.immediate();
 }
 
+function rebuildContractDocumentDigests(db) {
+  const present = db.prepare(`
+    SELECT 1 AS present
+    FROM sqlite_schema
+    WHERE type='table' AND name='collaboration_contract_documents'
+  `).get();
+  if (!present) return;
+  const update = db.prepare('UPDATE collaboration_contract_documents SET file_sha256=? WHERE id=?');
+  for (const row of db.prepare(`
+    SELECT id,document_blob
+    FROM collaboration_contract_documents
+    ORDER BY id
+  `).all()) {
+    if (!Buffer.isBuffer(row.document_blob)) {
+      throw new Error(`contract document ${row.id} lost BLOB storage during sanitization`);
+    }
+    update.run(sha256(row.document_blob), row.id);
+  }
+}
+
 function rebuildDerivedData(db, manifest) {
-  if (![1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15].includes(manifest.schemaVersion)) {
+  if (![1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16].includes(manifest.schemaVersion)) {
     throw new Error(`unsupported derived rebuild profile ${manifest.schemaVersion}`);
   }
   const hasKnowledge = db.prepare("SELECT 1 AS present FROM sqlite_schema WHERE type='table' AND name='knowledge_entries'").get();
@@ -4957,6 +5083,7 @@ function rebuildDerivedData(db, manifest) {
     rebuild.immediate();
   }
   if (manifest.schemaVersion >= 6) rebuildCrmDerivedData(db);
+  if (manifest.schemaVersion >= 16) rebuildContractDocumentDigests(db);
   rebuildCampaignWorkflowDispatchEvidence(db);
   sqliteDigest.rebuildKnowledgeChunksFts(db);
   sqliteDigest.verifyKnowledgeChunksFtsIntegrity(db, FTS_MANIFEST, { checkMainIntegrity: true });

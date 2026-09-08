@@ -339,6 +339,7 @@ test('request contract freezes the exact raw-byte and multipart limits', () => {
     CAMPAIGN_EMPTY_CONTROL_JSON: 64,
     CAMPAIGN_CONTROL_JSON: 65_536,
     CAMPAIGN_REVIEW_JSON: 1_048_576,
+    CONTRACT_DOCUMENT_JSON: 12_000_000,
     KNOWLEDGE_JSON: 1_048_576,
     EXISTING_DUAL_MODE_JSON: 52_428_800,
     KNOWLEDGE_USE_COMPAT: 16_384,
@@ -413,6 +414,46 @@ test('signed contract confirmation owns a bounded registered JSON policy', () =>
   );
   const serverSource = fs.readFileSync(serverPath, 'utf8');
   assert.match(serverSource, /'COLLABORATION_CONTRACT_CONFIRM'/);
+});
+
+test('contract document upload, list, and download own bounded registered policies', () => {
+  const { contract } = loadBoundary();
+  const upload = contract.REQUEST_POLICIES.COLLABORATION_CONTRACT_DOCUMENT_UPLOAD;
+  const list = contract.REQUEST_POLICIES.COLLABORATION_CONTRACT_DOCUMENT_LIST;
+  const download = contract.REQUEST_POLICIES.COLLABORATION_CONTRACT_DOCUMENT_DOWNLOAD;
+
+  assert.ok(upload);
+  assert.equal(upload.id, 'collaboration.contract-document.upload');
+  assert.equal(upload.method, 'POST');
+  assert.equal(upload.pathTemplate, '/api/collaborations/:id/contract-documents');
+  assert.equal(upload.mediaKind, contract.MEDIA_KINDS.JSON);
+  assert.equal(upload.maxRawBytes, contract.BODY_LIMITS.CONTRACT_DOCUMENT_JSON);
+  assert.equal(contract.BODY_LIMITS.CONTRACT_DOCUMENT_JSON, 12_000_000);
+  assert.ok(list);
+  assert.equal(list.id, 'collaboration.contract-document.list');
+  assert.equal(list.method, 'GET');
+  assert.equal(list.mediaKind, contract.MEDIA_KINDS.EMPTY);
+  assert.equal(download.id, 'collaboration.contract-document.download');
+  assert.equal(download.method, 'GET');
+  assert.equal(download.mediaKind, contract.MEDIA_KINDS.EMPTY);
+
+  const registry = contract.createRoutePolicyRegistry([upload, list, download]);
+  assert.equal(
+    registry.match('POST', '/api/collaborations/41/contract-documents').id,
+    'collaboration.contract-document.upload'
+  );
+  assert.equal(
+    registry.match('GET', '/api/collaborations/41/contract-documents').id,
+    'collaboration.contract-document.list'
+  );
+  assert.equal(
+    registry.match('GET', '/api/collaborations/41/contract-documents/73/download').id,
+    'collaboration.contract-document.download'
+  );
+  const serverSource = fs.readFileSync(serverPath, 'utf8');
+  assert.match(serverSource, /'COLLABORATION_CONTRACT_DOCUMENT_UPLOAD'/);
+  assert.match(serverSource, /'COLLABORATION_CONTRACT_DOCUMENT_LIST'/);
+  assert.match(serverSource, /'COLLABORATION_CONTRACT_DOCUMENT_DOWNLOAD'/);
 });
 
 test('batch performance metrics upload is an admitted multipart route in the shared parser inventory', () => {

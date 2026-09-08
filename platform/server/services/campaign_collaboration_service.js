@@ -94,12 +94,39 @@ const LINKED_CANCELLATION_KEYS = new Set([
 const CONTRACT_CONFIRMATION_KEYS = new Set([
   'campaign_id',
   'expected_version',
+  'contract_document_id',
   'contract_reference',
   'counterparty_name',
   'signed_at',
   'confirmation_note'
 ]);
+const CONTRACT_DOCUMENT_UPLOAD_KEYS = new Set([
+  'campaign_id',
+  'expected_version',
+  'filename',
+  'media_type',
+  'content_base64'
+]);
 const CONTRACT_FUTURE_TOLERANCE_MS = 5 * 60 * 1000;
+const CONTRACT_DOCUMENT_MIN_BYTES = 32;
+const CONTRACT_DOCUMENT_MAX_BYTES = 8 * 1024 * 1024;
+const CONTRACT_DOCUMENT_MAX_BASE64_BYTES = Math.ceil(CONTRACT_DOCUMENT_MAX_BYTES / 3) * 4;
+const CONTRACT_DOCUMENT_ACTIVE_NAMES = new Set([
+  '/JavaScript',
+  '/JS',
+  '/OpenAction',
+  '/AA',
+  '/Launch',
+  '/EmbeddedFile',
+  '/RichMedia',
+  '/XFA',
+  '/ObjStm',
+  '/SubmitForm',
+  '/ImportData',
+  '/GoToR',
+  '/Rendition',
+  '/Encrypt'
+].map((name) => name.toLowerCase()));
 
 class CampaignCollaborationServiceError extends Error {
   constructor(statusCode, code, message, details) {
@@ -246,13 +273,104 @@ function normalizedContractConfirmation(body) {
       field: 'expected_version'
     });
   }
+  if (!Number.isSafeInteger(body.contract_document_id) || body.contract_document_id < 1) {
+    throw serviceError(400, 'INVALID_CONTRACT_CONFIRMATION', 'Signed contract evidence is invalid.', {
+      field: 'contract_document_id'
+    });
+  }
   return Object.freeze({
     campaignId: body.campaign_id,
     expectedVersion: body.expected_version,
+    contractDocumentId: body.contract_document_id,
     contractReference: contractConfirmationText(body.contract_reference, 'contract_reference', 160),
     counterpartyName: contractConfirmationText(body.counterparty_name, 'counterparty_name', 160),
     signedAt: normalizedSignedAt(body.signed_at),
     confirmationNote: contractConfirmationText(body.confirmation_note, 'confirmation_note', 500)
+  });
+}
+
+function contractDocumentError(code, field) {
+  throw serviceError(400, code, 'Contract document is invalid.', field ? { field } : undefined);
+}
+
+function normalizedContractDocumentFilename(value) {
+  if (typeof value !== 'string') contractDocumentError('INVALID_CONTRACT_DOCUMENT', 'filename');
+  const normalized = value.trim();
+  if (
+    normalized.length < 5 || normalized.length > 180 ||
+    Buffer.byteLength(normalized, 'utf8') > 255 ||
+    !/\.pdf$/i.test(normalized) ||
+    /[\u0000-\u001f\u007f<>:"/\\|?*]/u.test(normalized)
+  ) {
+    contractDocumentError('INVALID_CONTRACT_DOCUMENT', 'filename');
+  }
+  return normalized;
+}
+
+function decodeCanonicalContractDocument(value) {
+  if (
+    typeof value !== 'string' || value.length < 4 ||
+    value.length > CONTRACT_DOCUMENT_MAX_BASE64_BYTES ||
+    value.length % 4 !== 0 ||
+    !/^[A-Za-z0-9+/]+={0,2}$/.test(value)
+  ) {
+    contractDocumentError('INVALID_CONTRACT_DOCUMENT', 'content_base64');
+  }
+  const bytes = Buffer.from(value, 'base64');
+  if (
+    bytes.length < CONTRACT_DOCUMENT_MIN_BYTES ||
+    bytes.length > CONTRACT_DOCUMENT_MAX_BYTES ||
+    bytes.toString('base64') !== value
+  ) {
+    contractDocumentError('INVALID_CONTRACT_DOCUMENT', 'content_base64');
+  }
+  return bytes;
+}
+
+function assertSafeContractPdf(bytes, errorCode = 'INVALID_CONTRACT_DOCUMENT') {
+  const prefix = bytes.subarray(0, Math.min(bytes.length, 16)).toString('latin1');
+  const suffix = bytes.subarray(Math.max(0, bytes.length - 1024)).toString('latin1');
+  if (!/^%PDF-(?:1\.[0-7]|2\.0)(?:\r?\n|\r)/.test(prefix) || !/%%EOF[\t \r\n]*$/.test(suffix)) {
+    contractDocumentError(errorCode, 'content_base64');
+  }
+  const names = bytes.toString('latin1').match(/\/(?:#[0-9A-Fa-f]{2}|[^\x00-\x20()<>{}\[\]\/\%#])+/g) || [];
+  const unsafe = names.some((name) => {
+    const decoded = name.replace(/#([0-9A-Fa-f]{2})/g, (_match, encoded) => (
+      String.fromCharCode(Number.parseInt(encoded, 16))
+    ));
+    return CONTRACT_DOCUMENT_ACTIVE_NAMES.has(decoded.toLowerCase());
+  });
+  if (unsafe) {
+    contractDocumentError('UNSAFE_CONTRACT_DOCUMENT', 'content_base64');
+  }
+}
+
+function normalizedContractDocumentUpload(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    contractDocumentError('INVALID_CONTRACT_DOCUMENT');
+  }
+  if (Object.keys(body).some((key) => !CONTRACT_DOCUMENT_UPLOAD_KEYS.has(key))) {
+    contractDocumentError('INVALID_CONTRACT_DOCUMENT');
+  }
+  if (!Number.isSafeInteger(body.campaign_id) || body.campaign_id < 1) {
+    contractDocumentError('INVALID_CONTRACT_DOCUMENT', 'campaign_id');
+  }
+  if (!Number.isSafeInteger(body.expected_version) || body.expected_version < 1) {
+    contractDocumentError('INVALID_CONTRACT_DOCUMENT', 'expected_version');
+  }
+  if (body.media_type !== 'application/pdf') {
+    contractDocumentError('INVALID_CONTRACT_DOCUMENT', 'media_type');
+  }
+  const filename = normalizedContractDocumentFilename(body.filename);
+  const bytes = decodeCanonicalContractDocument(body.content_base64);
+  assertSafeContractPdf(bytes);
+  return Object.freeze({
+    campaignId: body.campaign_id,
+    expectedVersion: body.expected_version,
+    filename,
+    mediaType: body.media_type,
+    bytes,
+    fileSha256: crypto.createHash('sha256').update(bytes).digest('hex')
   });
 }
 
@@ -407,6 +525,75 @@ function activeRelations(db, campaignId, collaborationId) {
   `).all(campaignId, String(collaborationId)).map((row) => row.relation_type);
 }
 
+function projectedContractDocument(row) {
+  return {
+    id: row.id,
+    collaboration_id: row.collaboration_id,
+    original_filename: row.original_filename,
+    media_type: row.media_type,
+    file_sha256: row.file_sha256,
+    file_bytes: row.file_bytes,
+    uploaded_by: row.uploaded_by,
+    uploaded_by_name: row.uploaded_by_name || null,
+    knowledge_entry_id: row.knowledge_entry_id,
+    created_at: row.created_at
+  };
+}
+
+function contractDocuments(db, campaignId, collaborationId) {
+  return db.prepare(`
+    SELECT
+      document.id,document.collaboration_id,document.original_filename,
+      document.media_type,document.file_sha256,document.file_bytes,
+      document.uploaded_by,document.knowledge_entry_id,document.created_at,
+      actor.display_name AS uploaded_by_name
+    FROM collaboration_contract_documents document
+    LEFT JOIN users actor ON actor.id=document.uploaded_by
+    WHERE document.campaign_id=? AND document.collaboration_id=?
+    ORDER BY document.created_at DESC,document.id DESC
+  `).all(campaignId, collaborationId).map(projectedContractDocument);
+}
+
+function contractDocumentRecord(db, campaignId, collaborationId, documentId, includeBytes = false) {
+  const row = db.prepare(`
+    SELECT
+      document.id,document.org_id,document.campaign_id,document.collaboration_id,
+      document.original_filename,document.media_type,document.file_sha256,
+      document.file_bytes,document.uploaded_by,document.knowledge_entry_id,
+      document.created_at,actor.display_name AS uploaded_by_name
+      ${includeBytes ? ',document.document_blob' : ''}
+    FROM collaboration_contract_documents document
+    LEFT JOIN users actor ON actor.id=document.uploaded_by
+    WHERE document.campaign_id=? AND document.collaboration_id=? AND document.id=?
+    LIMIT 1
+  `).get(campaignId, collaborationId, documentId);
+  return row || null;
+}
+
+function verifiedContractDocumentBytes(row) {
+  if (!row || !Buffer.isBuffer(row.document_blob) || row.document_blob.length !== row.file_bytes) {
+    throw serviceError(409, 'CONTRACT_DOCUMENT_CORRUPT', 'Contract document integrity verification failed.');
+  }
+  const actual = crypto.createHash('sha256').update(row.document_blob).digest();
+  const expected = Buffer.from(row.file_sha256, 'hex');
+  if (expected.length !== actual.length || !crypto.timingSafeEqual(actual, expected)) {
+    throw serviceError(409, 'CONTRACT_DOCUMENT_CORRUPT', 'Contract document integrity verification failed.');
+  }
+  try {
+    assertSafeContractPdf(row.document_blob, 'CONTRACT_DOCUMENT_CORRUPT');
+  } catch (error) {
+    if (error && error.code === 'UNSAFE_CONTRACT_DOCUMENT') {
+      throw serviceError(409, 'CONTRACT_DOCUMENT_CORRUPT', 'Contract document integrity verification failed.');
+    }
+    if (error && error.code === 'CONTRACT_DOCUMENT_CORRUPT') {
+      error.status = 409;
+      error.statusCode = 409;
+    }
+    throw error;
+  }
+  return row.document_blob;
+}
+
 function contractConfirmation(db, campaignId, collaborationId) {
   const rows = db.prepare(`
     SELECT
@@ -452,8 +639,9 @@ function contractConfirmation(db, campaignId, collaborationId) {
     throw serviceError(409, 'CAMPAIGN_EVIDENCE_IN_USE', 'Signed contract evidence is inconsistent.');
   }
   const expectedSourceId = `${collaborationId}:${metadata.row_version}`;
+  const schemaVersion = metadata.schema_version;
   if (
-    metadata.schema_version !== 1 || metadata.collaboration_id !== collaborationId ||
+    ![1, 2].includes(schemaVersion) || metadata.collaboration_id !== collaborationId ||
     !Number.isSafeInteger(metadata.row_version) || metadata.row_version < 1 ||
     !Number.isSafeInteger(metadata.confirmed_by) || metadata.confirmed_by < 1 ||
     metadata.retrieval_eligible !== false || signedAt !== metadata.signed_at ||
@@ -473,7 +661,28 @@ function contractConfirmation(db, campaignId, collaborationId) {
   ) {
     throw serviceError(409, 'CAMPAIGN_EVIDENCE_IN_USE', 'Signed contract evidence is inconsistent.');
   }
-  return {
+  let document = null;
+  if (schemaVersion === 2) {
+    if (
+      !Number.isSafeInteger(metadata.contract_document_id) || metadata.contract_document_id < 1 ||
+      typeof metadata.contract_document_sha256 !== 'string' ||
+      !/^[0-9a-f]{64}$/.test(metadata.contract_document_sha256)
+    ) {
+      throw serviceError(409, 'CAMPAIGN_EVIDENCE_IN_USE', 'Signed contract evidence is inconsistent.');
+    }
+    const documentRow = contractDocumentRecord(
+      db,
+      campaignId,
+      collaborationId,
+      metadata.contract_document_id,
+      false
+    );
+    if (!documentRow || documentRow.file_sha256 !== metadata.contract_document_sha256) {
+      throw serviceError(409, 'CAMPAIGN_EVIDENCE_IN_USE', 'Signed contract evidence is inconsistent.');
+    }
+    document = projectedContractDocument(documentRow);
+  }
+  const projection = {
     id: row.id,
     contract_reference: metadata.contract_reference,
     counterparty_name: metadata.counterparty_name,
@@ -483,6 +692,8 @@ function contractConfirmation(db, campaignId, collaborationId) {
     confirmed_by_name: row.confirmed_by_name || null,
     confirmed_at: metadata.confirmed_at
   };
+  if (document) projection.document = document;
+  return projection;
 }
 
 function insertLink(db, values) {
@@ -927,6 +1138,9 @@ function createCampaignCollaborationService(db) {
           active_relations: row.campaign_id === null
             ? []
             : activeRelations(db, row.campaign_id, row.id),
+          contract_documents: row.campaign_id === null
+            ? []
+            : contractDocuments(db, row.campaign_id, row.id),
           contract_confirmation: row.campaign_id === null
             ? null
             : contractConfirmation(db, row.campaign_id, row.id)
@@ -949,6 +1163,240 @@ function createCampaignCollaborationService(db) {
       throw serviceError(404, 'RECORD_NOT_FOUND', 'Collaboration was not found.');
     }
     return row;
+  }
+
+  function contractDocumentContext(userId, collaborationId, options = {}) {
+    if (!requireActiveActor(db, userId)) {
+      throw serviceError(404, 'RECORD_NOT_FOUND', 'Collaboration was not found.');
+    }
+    const custody = collaborationCustody(db, collaborationId);
+    const readableState = custody.classification === 'campaign_classified' &&
+      (custody.state === 'active' || (!options.write && custody.state === 'historical'));
+    if (!readableState || (options.campaignId && custody.campaignId !== options.campaignId)) {
+      throw serviceError(404, 'RECORD_NOT_FOUND', 'Collaboration was not found.');
+    }
+    let access;
+    try {
+      access = requireCampaignAccess(db, userId, custody.campaignId);
+    } catch (_error) {
+      throw serviceError(404, 'RECORD_NOT_FOUND', 'Collaboration was not found.');
+    }
+    if (options.write && !access.permissions.write) {
+      throw serviceError(
+        409,
+        access.campaign.operational_status === 'cancelled' ? 'CAMPAIGN_CANCELLED' : 'CAMPAIGN_ON_HOLD',
+        'Campaign is not writable.',
+        { operational_status: access.campaign.operational_status }
+      );
+    }
+    const current = db.prepare('SELECT * FROM collaborations WHERE id=?').get(collaborationId);
+    if (!current) throw serviceError(404, 'RECORD_NOT_FOUND', 'Collaboration was not found.');
+    return { access, custody, current };
+  }
+
+  function listContractDocuments(input) {
+    const userId = requirePositiveSafeId(input && input.userId, 'userId');
+    const collaborationId = requirePositiveSafeId(
+      input && input.collaborationId,
+      'collaborationId'
+    );
+    const context = contractDocumentContext(userId, collaborationId);
+    return {
+      campaign_id: context.custody.campaignId,
+      collaboration_id: collaborationId,
+      documents: contractDocuments(db, context.custody.campaignId, collaborationId)
+    };
+  }
+
+  function downloadContractDocument(input) {
+    const userId = requirePositiveSafeId(input && input.userId, 'userId');
+    const collaborationId = requirePositiveSafeId(
+      input && input.collaborationId,
+      'collaborationId'
+    );
+    const documentId = requirePositiveSafeId(input && input.documentId, 'documentId');
+    const context = contractDocumentContext(userId, collaborationId);
+    const row = contractDocumentRecord(
+      db,
+      context.custody.campaignId,
+      collaborationId,
+      documentId,
+      true
+    );
+    if (!row) throw serviceError(404, 'RECORD_NOT_FOUND', 'Contract document was not found.');
+    return {
+      document: projectedContractDocument(row),
+      bytes: verifiedContractDocumentBytes(row)
+    };
+  }
+
+  function uploadContractDocument(input) {
+    const userId = requirePositiveSafeId(input && input.userId, 'userId');
+    const collaborationId = requirePositiveSafeId(
+      input && input.collaborationId,
+      'collaborationId'
+    );
+    const body = input && input.body;
+    if (!body || typeof body !== 'object' || Array.isArray(body) ||
+        !Number.isSafeInteger(body.campaign_id) || body.campaign_id < 1) {
+      contractDocumentError('INVALID_CONTRACT_DOCUMENT', 'campaign_id');
+    }
+    const initialContext = contractDocumentContext(userId, collaborationId, {
+      write: true,
+      campaignId: body.campaign_id
+    });
+    const document = normalizedContractDocumentUpload(body);
+    const key = input.idempotencyKey;
+    if (typeof key !== 'string' || !/^[A-Za-z0-9._:-]{8,200}$/.test(key)) {
+      throw serviceError(400, 'IDEMPOTENCY_REQUIRED', 'Idempotency-Key is required.');
+    }
+    const hash = requestHash({
+      method: 'POST',
+      path: `/api/collaborations/${collaborationId}/contract-documents`,
+      campaignId: document.campaignId,
+      kind: 'json',
+      payload: {
+        campaign_id: document.campaignId,
+        expected_version: document.expectedVersion,
+        filename: document.filename,
+        media_type: document.mediaType,
+        file_sha256: document.fileSha256
+      }
+    });
+    const reservationInput = {
+      organizationId: initialContext.access.campaign.org_id,
+      actorUserId: userId,
+      campaignId: document.campaignId,
+      secondaryCampaignId: null,
+      resourceClaim: null,
+      scope: 'collaboration.update.linked',
+      key,
+      requestHash: hash,
+      expectedEventCount: 1,
+      operationTimeoutSeconds: 60
+    };
+
+    return db.transaction(() => {
+      const context = contractDocumentContext(userId, collaborationId, {
+        write: true,
+        campaignId: document.campaignId
+      });
+      let reservation = idempotencyService.recoverExpiredInTransaction(db, reservationInput);
+      if (reservation.state === 'absent') {
+        reservation = idempotencyService.reserveProcessingInTransaction(db, reservationInput);
+      }
+      if (reservation.state !== 'reserved') return idempotencyOutcome(reservation);
+      if (context.current.row_version !== document.expectedVersion) {
+        throw serviceError(409, 'STALE_COLLABORATION_VERSION', 'Collaboration version is stale.');
+      }
+      if (!['confirmed', 'contract_sent'].includes(context.current.status) ||
+          !v2CollaborationResource(context.current.proposal_notes)) {
+        throw serviceError(409, 'INVALID_COLLABORATION_TRANSITION', 'Contract document upload is not available from the current status.');
+      }
+      if (db.prepare(`
+        SELECT 1 AS present
+        FROM collaboration_contract_documents
+        WHERE collaboration_id=? AND file_sha256=?
+      `).get(collaborationId, document.fileSha256)) {
+        throw serviceError(409, 'CONTRACT_DOCUMENT_EXISTS', 'The same contract document was already uploaded.');
+      }
+      const maximum = db.prepare('SELECT COALESCE(MAX(id),0) AS id FROM collaboration_contract_documents').get().id;
+      if (!Number.isSafeInteger(maximum) || maximum >= SAFE_MAX) {
+        throw serviceError(409, 'ROW_VERSION_EXHAUSTED', 'Contract document identifier is exhausted.');
+      }
+      const documentId = maximum + 1;
+      const metadata = {
+        schema_version: 1,
+        collaboration_id: collaborationId,
+        document_id: documentId,
+        media_type: document.mediaType,
+        file_sha256: document.fileSha256,
+        file_bytes: document.bytes.length,
+        original_filename: document.filename,
+        uploaded_by: userId,
+        retrieval_eligible: false
+      };
+      const evidence = knowledgeService.writeCampaignKnowledgeInTransaction(db, {
+        organizationId: context.access.campaign.org_id,
+        campaignId: document.campaignId,
+        createdBy: userId,
+        entryType: 'collaboration_contract_document',
+        title: `Campaign file evidence #${collaborationId}-${documentId}`,
+        summary: `File evidence recorded for collaboration #${collaborationId}.`,
+        content: JSON.stringify({
+          collaboration_id: collaborationId,
+          checkpoint: 'contract_document',
+          file_recorded: true
+        }),
+        tags: ['campaign', 'collaboration', 'contract-document'],
+        sourceType: 'collaboration_contract_document',
+        sourceId: String(documentId),
+        visibility: 'team',
+        metadata
+      });
+      if (evidence.status !== 'created') {
+        throw serviceError(409, 'CAMPAIGN_EVIDENCE_IN_USE', 'Contract document evidence already exists.');
+      }
+      const evidenceLink = insertLink(db, {
+        orgId: context.access.campaign.org_id,
+        campaignId: document.campaignId,
+        userId,
+        recordType: 'knowledge_entry',
+        recordId: evidence.entry.id,
+        relationType: 'knowledge',
+        metadata: {
+          producer_type: 'collaboration_contract_document',
+          producer_id: collaborationId,
+          source_type: 'collaboration_contract_document',
+          source_id: String(documentId)
+        }
+      });
+      db.prepare(`
+        INSERT INTO collaboration_contract_documents (
+          id,org_id,campaign_id,collaboration_id,uploaded_by,knowledge_entry_id,
+          original_filename,media_type,file_sha256,file_bytes,document_blob
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?)
+      `).run(
+        documentId,
+        context.access.campaign.org_id,
+        document.campaignId,
+        collaborationId,
+        userId,
+        evidence.entry.id,
+        document.filename,
+        document.mediaType,
+        document.fileSha256,
+        document.bytes.length,
+        document.bytes
+      );
+      insertLinkAttachedEvent(db, {
+        orgId: context.access.campaign.org_id,
+        campaignId: document.campaignId,
+        userId,
+        recordType: 'knowledge_entry',
+        recordId: evidence.entry.id,
+        relationType: 'knowledge',
+        link: evidenceLink,
+        requestId: input.requestId,
+        auditFingerprint: reservation.auditFingerprint,
+        reason: 'Contract document uploaded'
+      });
+      knowledgeService.applyKnowledgeCapacityGaugePlanInTransaction(db, evidence.capacityGaugePlan);
+      const persisted = contractDocumentRecord(
+        db,
+        document.campaignId,
+        collaborationId,
+        documentId,
+        false
+      );
+      const response = {
+        success: true,
+        campaign_id: document.campaignId,
+        collaboration_id: collaborationId,
+        document: projectedContractDocument(persisted)
+      };
+      return completeJson(db, reservation, hash, 201, response);
+    }).immediate();
   }
 
   function updateLegacy(input) {
@@ -1102,6 +1550,17 @@ function createCampaignCollaborationService(db) {
       if (!v2CollaborationResource(current.proposal_notes)) {
         throw serviceError(409, 'INVALID_COLLABORATION_TRANSITION', 'Signed contract confirmation requires a version 2 order.');
       }
+      const documentRow = contractDocumentRecord(
+        db,
+        campaignId,
+        collaborationId,
+        confirmation.contractDocumentId,
+        true
+      );
+      if (!documentRow) {
+        throw serviceError(409, 'CONTRACT_DOCUMENT_REQUIRED', 'A contract document from this collaboration is required.');
+      }
+      verifiedContractDocumentBytes(documentRow);
       if (current.row_version === SAFE_MAX) {
         throw serviceError(409, 'ROW_VERSION_EXHAUSTED', 'Collaboration row version is exhausted.');
       }
@@ -1118,9 +1577,11 @@ function createCampaignCollaborationService(db) {
         SELECT replace(CURRENT_TIMESTAMP,' ','T') || '.000Z' AS now
       `).get().now;
       const metadata = {
-        schema_version: 1,
+        schema_version: 2,
         collaboration_id: collaborationId,
         row_version: confirmation.expectedVersion + 1,
+        contract_document_id: documentRow.id,
+        contract_document_sha256: documentRow.file_sha256,
         contract_reference: confirmation.contractReference,
         counterparty_name: confirmation.counterpartyName,
         signed_at: confirmation.signedAt,
@@ -1766,7 +2227,18 @@ function createCampaignCollaborationService(db) {
     };
   }
 
-  return Object.freeze({ confirmContract, createLinked, get, list, stats, updateLegacy, updateLinked });
+  return Object.freeze({
+    confirmContract,
+    createLinked,
+    downloadContractDocument,
+    get,
+    list,
+    listContractDocuments,
+    stats,
+    updateLegacy,
+    updateLinked,
+    uploadContractDocument
+  });
 }
 
 module.exports = {
