@@ -1,5 +1,28 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.8.19-content-review-checkpoint (Production Deployed, 2026-09-09) - Phase 7 M4 内容审核凭证关口
+
+### 交付与范围 / Delivery And Scope
+- 既有 M4 合作执行界面新增内容链接送审、独立通过/退回、重新提交、完整审核历史和发布门禁，不新增页面；历史已完成 v2 记录可显式补充送审凭证。
+- 每次提交与决定以只追加 Campaign 关联知识凭证保存，原始链接及说明仅进入受控元数据并标记 `retrieval_eligible:false`；通用 JSON、ingest 和上传入口均禁止伪造保留命名空间。
+- API 投影 `can_submit` 与 `can_decide`，M4 仅展示当前账号可执行操作；提交人不可自审，只有活动负责人或组织管理员可决定。
+- 审核历史改为分页校验并完整展示，不再受 40 条事件上限锁死。既有导入、筛选、保存视图、导出、飞书、商业条款、合同 PDF、AI/知识和冻结方案 PPT 保持不变。
+
+### 轻量验证、审查与上线 / Focused Verification, Review, And Deployment
+- 单功能定向矩阵 `54/54` 通过：服务 `7/7`、M4 `17/17`、请求边界 `20/20`、保留 JSON `3/3`、保留上传 `1/1`、路由 `1/1`、关键安全兼容 `5/5`；12 个受影响脚本语法、差异、定向密钥扫描、冻结 PPT 哈希和本地发布预检通过。
+- 独立审查发现并关闭命名空间抢占、历史展示不完整、40 条锁死、历史已完成 v2 无修复入口和权限按钮错误五项问题；聚焦复审最终为 `APPROVE`，无 P0-P2 未关闭项。
+- 生产候选通过真实 Express 回放 `8/8`、发布守卫 `21/21`、内置浏览器冒烟 `2/2`、迁移演练、解析器运行时、容量及 Nginx 校验。
+
+### 生产恢复与证据 / Production Recovery And Evidence
+- 发布运行 ID 为 `ea249bccf56042cf9f3dc1965e71e45f`；可恢复备份为 `/root/turingmarket/backups/v060-crm-sales-workspace-20260909-000619`，`SHA256SUMS` 共 `297` 项且复验通过，清单 SHA-256 为 `2f4779b8ecc9b2acdbb5f11906695e882a5e4a7154aa4062985e6279bbd555ab`。
+- 候选树、验收事实、回放证据和解析器证据 SHA-256 分别为 `5a34156667e2411d18945ba6a9e98d955ca8eda160d20f229725d64ba23a5781`、`f2b81e864e898452b4101cb138c5991db7d9bb11f59520d84bd5f3e410117c60`、`91f1bada0f4c25bbf24a0c24202beb43cd1ccbbc9fd9d690b0940d2d7c9e3564`、`249fe8907e0255874f40686084dbca1832d8643986687f3f6fe965012fc67c2d`。
+- 公网健康、首页和脚本为 `200`；管理员登录、全部 AI 对话审计、M4 列表、审核路由权限拒绝与注销通过。PM2 online、Nginx active；SQLite schema `v16`、迁移 `16/16`、`integrity_check=ok`、外键异常 `0`、活动会话 `0`。
+- 验收未创建真实内容审核凭证或飞书写入；冻结 `ppt.js` SHA-256 仍为 `f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e`。
+
+### 后续边界 / Next Boundaries
+- 内容审核凭证与发布门禁已上线；审核附件/批注、客户审核门户、电子签约、更完整发布保管、付款、结算和项目复盘继续按独立功能逐项发布。
+- 真实飞书投递与自动数据 provider 仍须使用获批生产配置和测试活动单独验收。
+
 ## v0.8.18-contract-document-custody (Production Deployed, 2026-09-08) - Phase 7 M4 合同文件保管
 
 ### 交付与范围 / Delivery And Scope
