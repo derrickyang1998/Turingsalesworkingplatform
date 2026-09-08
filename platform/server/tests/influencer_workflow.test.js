@@ -459,9 +459,13 @@ test('row-level influencer import counts blanks and rejects invalid rows without
   assert.equal(preview.sample[0].followers, 12500);
   assert.equal(preview.sample[0].created_at, '2026-07-03 00:00:00');
   assert.match(preview.error_report_csv, /^\uFEFFrow_number,field,code,message,source_row\r?\n/);
-  assert.match(preview.error_report_csv, /4,kol_handle,required/);
-  assert.match(preview.error_report_csv, /5,followers,invalid_number/);
-  assert.match(preview.error_report_csv, /6,created_at,invalid_date/);
+  assert.deepEqual(parseCsvRows(preview.error_report_csv).slice(1).map(function(row) {
+    return [Number(row[0]), JSON.parse(row[1])[0], JSON.parse(row[2])[0]];
+  }), [
+    [4, 'kol_handle', 'required'],
+    [5, 'followers', 'invalid_number'],
+    [6, 'created_at', 'invalid_date']
+  ]);
 
   const db = freshDb();
   const imported = influencerWorkflow.importInfluencerRows(db, rows, {
@@ -481,6 +485,76 @@ test('row-level influencer import counts blanks and rejects invalid rows without
   assert.equal(db.prepare('SELECT created_at FROM influencers WHERE import_batch=?')
     .get('guided-row-validation').created_at, '2026-07-03 00:00:00');
   db.close();
+});
+
+test('guided influencer error report writes one row with every error for each rejected source row', () => {
+  const sourceRow = {
+    Handle: '',
+    Followers: 'many',
+    Date: '2026-02-29',
+    Owner: 'error-report-owner'
+  };
+  const preview = influencerWorkflow.previewInfluencerImport([sourceRow], {
+    field_mapping: {
+      Handle: 'kol_handle',
+      Followers: 'followers',
+      Date: 'created_at',
+      Owner: 'reporter'
+    },
+    row_number_offset: 2
+  });
+
+  const reportRows = parseCsvRows(preview.error_report_csv);
+  assert.equal(reportRows.length, 2);
+  assert.deepEqual(reportRows[0], ['row_number', 'field', 'code', 'message', 'source_row']);
+  assert.equal(reportRows[1][0], '2');
+  assert.deepEqual(JSON.parse(reportRows[1][1]), ['kol_handle', 'followers', 'created_at']);
+  assert.deepEqual(JSON.parse(reportRows[1][2]), ['required', 'invalid_number', 'invalid_date']);
+  assert.deepEqual(JSON.parse(reportRows[1][3]), [
+    '网红频道名称不能为空',
+    '数值格式无效',
+    '日期格式无效'
+  ]);
+  assert.deepEqual(JSON.parse(reportRows[1][4]), sourceRow);
+});
+
+test('guided influencer import rejects oversized error reports before database or knowledge writes', () => {
+  const db = freshDb();
+  const oversizedSourceValue = 'private-source-value-' + '私'.repeat(6 * 1024 * 1024);
+  const rows = [{ Handle: '', Followers: 'many', Owner: oversizedSourceValue }];
+  const fieldMapping = {
+    Handle: 'kol_handle',
+    Followers: 'followers',
+    Owner: 'reporter'
+  };
+  const beforeInfluencers = db.prepare('SELECT COUNT(*) AS count FROM influencers').get().count;
+  const beforeKnowledge = db.prepare("SELECT COUNT(*) AS count FROM knowledge_entries WHERE source_type='influencer_import'").get().count;
+
+  try {
+    assert.throws(
+      () => influencerWorkflow.importInfluencerRows(db, rows, {
+        batch_id: 'guided-oversized-error-report',
+        data_source: 'upload',
+        user: { id: 2, role: 'user' },
+        field_mapping: fieldMapping,
+        row_number_offset: 2
+      }),
+      function(error) {
+        assert.equal(error.statusCode, 413);
+        assert.equal(error.code, 'INFLUENCER_IMPORT_ERROR_REPORT_TOO_LARGE');
+        assert.equal(error.message, 'Influencer import error report exceeds the size limit.');
+        assert.doesNotMatch(error.message, /private-source-value/);
+        return true;
+      }
+    );
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM influencers').get().count, beforeInfluencers);
+    assert.equal(
+      db.prepare("SELECT COUNT(*) AS count FROM knowledge_entries WHERE source_type='influencer_import'").get().count,
+      beforeKnowledge
+    );
+  } finally {
+    db.close();
+  }
 });
 
 test('guided influencer import accepts complete numeric formats and rejects contaminated or negative metrics', () => {
@@ -981,7 +1055,11 @@ test('guided influencer upload binds validation to one file and partially import
     assert.equal(confirmed.payload.row_errors.length, 100);
     assert.equal(confirmed.payload.row_errors_truncated, true);
     assert.match(confirmed.payload.error_report_csv, /^\uFEFFrow_number,field,code,message,source_row\r?\n/);
-    assert.match(confirmed.payload.error_report_csv, /107,kol_handle,required/);
+    const confirmedErrorRows = parseCsvRows(confirmed.payload.error_report_csv);
+    assert.equal(confirmedErrorRows.length, 106);
+    const finalErrorRow = confirmedErrorRows.find(function(row) { return row[0] === '107'; });
+    assert.deepEqual(JSON.parse(finalErrorRow[1]), ['kol_handle', 'followers']);
+    assert.deepEqual(JSON.parse(finalErrorRow[2]), ['required', 'invalid_number']);
     assert.match(confirmed.payload.batch, /^upload_[0-9a-f]{64}_[0-9a-f]{64}$/);
     assert.deepEqual(
       queryOne('SELECT kol_handle,followers,reporter,created_at FROM influencers WHERE import_batch=?', confirmed.payload.batch),

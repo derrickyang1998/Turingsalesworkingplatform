@@ -2,6 +2,7 @@ const crypto = require('node:crypto');
 const knowledgeService = require('./knowledge_service');
 
 const IMPORT_MAPPING_VERSION = 'influencer-guided-v1';
+const ERROR_REPORT_MAX_BYTES = 16 * 1024 * 1024;
 
 const TEMPLATE_HEADERS = [
   '日期',
@@ -403,19 +404,33 @@ function prepareMappedInfluencerRows(rows, options) {
 }
 
 function buildErrorReportCsv(rejectedRows) {
-  const lines = ['row_number,field,code,message,source_row'];
-  for (const rejected of rejectedRows) {
-    for (const error of rejected.errors) {
-      lines.push(csvLine([
-        error.row_number,
-        error.field,
-        error.code,
-        error.message,
-        JSON.stringify(rejected.source_row)
-      ]));
+  const chunks = [];
+  let byteCount = 0;
+
+  function append(chunk) {
+    const chunkBytes = Buffer.byteLength(chunk, 'utf8');
+    if (byteCount + chunkBytes > ERROR_REPORT_MAX_BYTES) {
+      const error = new Error('Influencer import error report exceeds the size limit.');
+      error.statusCode = 413;
+      error.code = 'INFLUENCER_IMPORT_ERROR_REPORT_TOO_LARGE';
+      throw error;
     }
+    chunks.push(chunk);
+    byteCount += chunkBytes;
   }
-  return '\uFEFF' + lines.join('\n') + '\n';
+
+  append('\uFEFFrow_number,field,code,message,source_row\n');
+  for (const rejected of rejectedRows) {
+    const errors = Array.isArray(rejected.errors) ? rejected.errors : [];
+    append(csvLine([
+      rejected.row_number,
+      JSON.stringify(errors.map(function(error) { return error.field; })),
+      JSON.stringify(errors.map(function(error) { return error.code; })),
+      JSON.stringify(errors.map(function(error) { return error.message; })),
+      JSON.stringify(rejected.source_row)
+    ]) + '\n');
+  }
+  return chunks.join('');
 }
 
 function previewInfluencerImport(rows, options) {
