@@ -199,7 +199,7 @@ function createClientContext() {
     getActiveCampaignId() { return 91; },
     getActiveDemandId() { return 17; },
     readPositiveInteger: positiveInteger,
-    esc(value) { return value === undefined || value === null ? '' : String(value); },
+    esc(value) { return String(value || ''); },
     createDemandAnalysisOperationId(prefix) {
       operation += 1;
       return prefix + operation;

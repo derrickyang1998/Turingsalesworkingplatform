@@ -6609,7 +6609,7 @@ function openCampaignSettlementModal(collab) {
     '<button type="button" class="modal-close" aria-label="关闭结算确认" title="关闭结算确认" onclick="closeCampaignSettlementModal()">&times;</button>' +
     '<h3 id="campaignSettlementDialogTitle">确认结算</h3>' +
     '<p style="font-size:12px;opacity:.65;margin-bottom:12px">' + esc(collab.kol_handle || '') + ' · ' + esc(collab.campaign_name || ('活动 #' + collab.campaign_id)) + '</p>' +
-    '<div><label>实际结算成本（' + esc(currency) + '，整数）</label><input id="settlementActualCost" type="number" min="0" step="1" value="' + esc(initialCost) + '"></div>' +
+    '<div><label>实际结算成本（' + esc(currency) + '，整数）</label><input id="settlementActualCost" type="number" min="0" step="1" value="' + esc(m4CommercialValueText(initialCost)) + '"></div>' +
     '<label style="display:flex;align-items:center;gap:8px;margin-top:14px;font-size:12px;text-transform:none;letter-spacing:0;opacity:1"><input id="settlementCostConfirmed" type="checkbox" style="width:16px;height:16px;min-width:16px">我已核对并确认实际结算成本</label>' +
     '<div class="btn-group" style="justify-content:flex-end"><button type="button" class="btn btn-outline" onclick="closeCampaignSettlementModal()">取消</button><button type="button" class="btn btn-primary" onclick="submitCampaignSettlement()">确认结算</button></div>' +
     '</div>';
