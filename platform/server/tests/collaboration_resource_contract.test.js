@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 
 const {
   COLLABORATION_ORDER_SCHEMA,
+  COLLABORATION_ORDER_V2_SCHEMA,
   normalizeCollaborationResource,
   serializeCollaborationResource,
   resolveResourceQuotedPrice
@@ -101,4 +102,102 @@ test('resource contract requires its explicit v1 schema', () => {
     () => normalizeCollaborationResource({ quoted_price: 1200 }),
     (error) => error && error.code === 'INVALID_RESOURCE_SCHEMA'
   );
+});
+
+test('normalizes a v2 commercial order and derives its positive margin', () => {
+  const resource = normalizeCollaborationResource({
+    schema: COLLABORATION_ORDER_V2_SCHEMA,
+    project_name: '  Autumn launch  ',
+    product_name: ' Portable power station ',
+    order_type: 'retainer',
+    order_reference: ' PO-502 ',
+    deliverable: ' Four short videos per month ',
+    creator_cost: '1200',
+    client_quote: '1800',
+    currency: 'USD',
+    payment_terms: 'net_30'
+  });
+
+  assert.deepEqual(resource, {
+    schema: COLLABORATION_ORDER_V2_SCHEMA,
+    project_name: 'Autumn launch',
+    product_name: 'Portable power station',
+    order_type: 'retainer',
+    order_reference: 'PO-502',
+    deliverable: 'Four short videos per month',
+    creator_cost: 1200,
+    client_quote: 1800,
+    currency: 'USD',
+    margin_amount: 600,
+    payment_terms: 'net_30'
+  });
+  assert.equal(resolveResourceQuotedPrice(resource, '1200'), 1200);
+});
+
+test('v2 commercial orders default required terms and retain a negative derived margin', () => {
+  assert.deepEqual(normalizeCollaborationResource({
+    schema: COLLABORATION_ORDER_V2_SCHEMA,
+    creator_cost: 1800,
+    client_quote: 1200
+  }), {
+    schema: COLLABORATION_ORDER_V2_SCHEMA,
+    project_name: '',
+    product_name: '',
+    order_type: 'paid',
+    order_reference: '',
+    deliverable: '',
+    creator_cost: 1800,
+    client_quote: 1200,
+    currency: 'CNY',
+    margin_amount: -600,
+    payment_terms: 'prepay_80_balance_20'
+  });
+});
+
+test('v2 commercial orders reject invalid terms, conflicting margin, and unsafe amounts', () => {
+  assert.throws(
+    () => normalizeCollaborationResource({
+      schema: COLLABORATION_ORDER_V2_SCHEMA,
+      creator_cost: 1,
+      client_quote: 2,
+      currency: 'usd'
+    }),
+    (error) => error && error.code === 'INVALID_RESOURCE_CURRENCY'
+  );
+  assert.throws(
+    () => normalizeCollaborationResource({
+      schema: COLLABORATION_ORDER_V2_SCHEMA,
+      creator_cost: 1,
+      client_quote: 2,
+      payment_terms: 'net_90'
+    }),
+    (error) => error && error.code === 'INVALID_RESOURCE_PAYMENT_TERMS'
+  );
+  assert.throws(
+    () => normalizeCollaborationResource({
+      schema: COLLABORATION_ORDER_V2_SCHEMA,
+      creator_cost: 1,
+      client_quote: 2,
+      margin_amount: 2
+    }),
+    (error) => error && error.code === 'RESOURCE_MARGIN_MISMATCH'
+  );
+  assert.throws(
+    () => normalizeCollaborationResource({
+      schema: COLLABORATION_ORDER_V2_SCHEMA,
+      creator_cost: Number.MAX_SAFE_INTEGER + 1,
+      client_quote: 0
+    }),
+    (error) => error && error.code === 'INVALID_RESOURCE_PRICE'
+  );
+});
+
+test('v2 commercial orders accept JavaScript-safe creator and client amounts', () => {
+  const resource = normalizeCollaborationResource({
+    schema: COLLABORATION_ORDER_V2_SCHEMA,
+    creator_cost: 0,
+    client_quote: Number.MAX_SAFE_INTEGER
+  });
+  assert.equal(resource.client_quote, Number.MAX_SAFE_INTEGER);
+  assert.equal(resource.margin_amount, Number.MAX_SAFE_INTEGER);
 });

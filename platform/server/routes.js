@@ -11,7 +11,7 @@ const {
 } = require('./services/feishu_bitable_outbox_service');
 const {
   CollaborationResourceContractError,
-  isV1CollaborationResourceInput,
+  isVersionedCollaborationResourceInput,
   normalizeCollaborationResource,
   resolveResourceQuotedPrice,
   serializeCollaborationResource
@@ -362,7 +362,7 @@ app.post('/api/collaborations', authMiddleware, (req, res) => {
     }
   }
   const { demand_id, influencer_id, status, proposal_notes, cost_quoted, notes, resource, timeline_start, timeline_end } = req.body;
-  const versionedResourceRequest = isV1CollaborationResourceInput(resource);
+  const versionedResourceRequest = isVersionedCollaborationResourceInput(resource);
   let resourcePayload = resource && typeof resource === 'object' ? resource : {};
   let resourceNotes = proposal_notes || (Object.keys(resourcePayload).length ? JSON.stringify(resourcePayload) : null);
   let quoted = cost_quoted !== undefined && cost_quoted !== null && cost_quoted !== ''

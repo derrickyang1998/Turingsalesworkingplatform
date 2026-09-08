@@ -7,7 +7,7 @@ const { requestHash } = require('./sqlite_digest_service');
 const {
   CollaborationResourceContractError,
   isCanonicalCollaborationResource,
-  isV1CollaborationResourceInput,
+  isVersionedCollaborationResourceInput,
   normalizeCollaborationResource,
   resolveResourceQuotedPrice,
   serializeCollaborationResource
@@ -857,7 +857,7 @@ function createCampaignCollaborationService(db) {
     const initialAccess = requireCampaignWrite(db, userId, campaignId);
     const rawResource = body.resource && typeof body.resource === 'object' ? body.resource : {};
     const hasLegacyResource = Object.keys(rawResource).length > 0;
-    const versionedResourceRequest = isV1CollaborationResourceInput(body.resource);
+    const versionedResourceRequest = isVersionedCollaborationResourceInput(body.resource);
     let resourcePayload = null;
     let proposalNotes = body.proposal_notes || (hasLegacyResource ? JSON.stringify(rawResource) : null);
     let costQuoted = body.cost_quoted !== undefined && body.cost_quoted !== null && body.cost_quoted !== ''

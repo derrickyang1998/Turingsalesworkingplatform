@@ -857,6 +857,134 @@ test('linked v1 resource retries are idempotent after whitespace normalization',
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM collaborations').get().count, 4);
 });
 
+test('linked v2 orders store canonical commercial terms, project creator cost, and archive every term', (t) => {
+  const db = openCampaignDatabase(t);
+  const fixture = seedFixture(db);
+  const service = createCampaignCollaborationService(db);
+  const created = service.createLinked({
+    userId: 2,
+    requestId: 'collaboration-v2-commercial-terms',
+    idempotencyKey: 'collaboration-v2-commercial-terms-0001',
+    body: {
+      campaign_id: 7001,
+      influencer_id: fixture.influencerId,
+      resource: {
+        schema: 'turingmarket.collaboration-order.v2',
+        project_name: ' Autumn launch ',
+        product_name: ' Portable power station ',
+        order_type: 'retainer',
+        order_reference: ' PO-V2-7001 ',
+        deliverable: ' Four short videos per month ',
+        creator_cost: '1200',
+        client_quote: '1800',
+        currency: 'USD',
+        payment_terms: 'net_30'
+      },
+      cost_quoted: 1200,
+      notes: 'Commercial terms approved'
+    }
+  });
+
+  const expectedResource = {
+    schema: 'turingmarket.collaboration-order.v2',
+    project_name: 'Autumn launch',
+    product_name: 'Portable power station',
+    order_type: 'retainer',
+    order_reference: 'PO-V2-7001',
+    deliverable: 'Four short videos per month',
+    creator_cost: 1200,
+    client_quote: 1800,
+    currency: 'USD',
+    margin_amount: 600,
+    payment_terms: 'net_30'
+  };
+  assert.equal(created.status, 201);
+  assert.deepEqual(JSON.parse(db.prepare('SELECT proposal_notes FROM collaborations WHERE id=?').get(created.body.id).proposal_notes), expectedResource);
+  assert.equal(db.prepare('SELECT cost_quoted FROM collaborations WHERE id=?').get(created.body.id).cost_quoted, 1200);
+  const archive = JSON.parse(db.prepare(`
+    SELECT content FROM knowledge_entries
+    WHERE source_type='campaign_collaboration' AND source_id=?
+  `).get(`${created.body.id}:1`).content);
+  assert.equal(archive.cost_quoted, 1200);
+  assert.deepEqual(archive.resource, expectedResource);
+});
+
+test('linked v2 order rejects a conflicting top-level creator cost before idempotency reservation', (t) => {
+  const db = openCampaignDatabase(t);
+  const fixture = seedFixture(db);
+  const service = createCampaignCollaborationService(db);
+  const before = collaborationWriteState(db);
+
+  assert.throws(
+    () => service.createLinked({
+      userId: 2,
+      requestId: 'collaboration-v2-creator-cost-conflict',
+      idempotencyKey: 'collaboration-v2-creator-cost-conflict-0001',
+      body: {
+        campaign_id: 7001,
+        influencer_id: fixture.influencerId,
+        resource: {
+          schema: 'turingmarket.collaboration-order.v2',
+          creator_cost: 1200,
+          client_quote: 1800
+        },
+        cost_quoted: 1000
+      }
+    }),
+    (error) => error && error.statusCode === 400 && error.code === 'RESOURCE_PRICE_MISMATCH'
+  );
+  assert.deepEqual(collaborationWriteState(db), before);
+});
+
+test('linked v2 order retries are idempotent after commercial-term whitespace normalization', (t) => {
+  const db = openCampaignDatabase(t);
+  const fixture = seedFixture(db);
+  const service = createCampaignCollaborationService(db);
+  const first = service.createLinked({
+    userId: 2,
+    requestId: 'collaboration-v2-whitespace-first',
+    idempotencyKey: 'collaboration-v2-whitespace-0001',
+    body: {
+      campaign_id: 7001,
+      influencer_id: fixture.influencerId,
+      resource: {
+        schema: 'turingmarket.collaboration-order.v2',
+        project_name: 'Autumn launch',
+        order_reference: 'PO-V2-WHITESPACE',
+        deliverable: 'One short video',
+        creator_cost: '1200',
+        client_quote: '1800',
+        currency: 'USD',
+        payment_terms: 'net_30'
+      },
+      cost_quoted: 1200
+    }
+  });
+  const replay = service.createLinked({
+    userId: 2,
+    requestId: 'collaboration-v2-whitespace-replay',
+    idempotencyKey: 'collaboration-v2-whitespace-0001',
+    body: {
+      campaign_id: 7001,
+      influencer_id: fixture.influencerId,
+      resource: {
+        schema: ' turingmarket.collaboration-order.v2 ',
+        project_name: '  Autumn launch  ',
+        order_reference: ' PO-V2-WHITESPACE ',
+        deliverable: ' One short video ',
+        creator_cost: 1200,
+        client_quote: 1800,
+        currency: ' USD ',
+        payment_terms: ' net_30 '
+      },
+      cost_quoted: '1200'
+    }
+  });
+
+  assert.deepEqual(replay, first);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM collaborations').get().count, 4);
+});
+
 test('collaboration list exposes campaign workspace context and filters to the selected campaign', (t) => {
   const db = openCampaignDatabase(t);
   const fixture = seedFixture(db);
