@@ -313,9 +313,9 @@ flowchart LR
 
 **Release / 版本：** `v0.8.0-influencer-execution-loop`
 
-**Latest accepted patch / 最新验收补丁：** `v0.8.14-m4-column-workspace` adds dedicated cost, client quote, CPM, and CPV columns and filters; account-synchronized saved views; column visibility and order; legacy local-view merge; and narrow-screen workspace containment. Production schema is `v15`. / `v0.8.14-m4-column-workspace` 已增加成本、客户报价、CPM、CPV 独立列与筛选、账号同步保存视图、列显示与顺序、旧本地视图增量合并及窄屏工作区边界；生产 schema 为 `v15`。
+**Latest accepted patch / 最新验收补丁：** `v0.8.15-guided-influencer-import-mapping` preserves the approved 20-column Chinese template and historical 19-column aliases, adds preview/mapping/hash-bound confirmation, imports valid rows without discarding them because of rejected rows, returns complete row-level error reports, and archives successful batches through the existing knowledge contract. Production schema remains `v15`. / `v0.8.15-guided-influencer-import-mapping` 保留已批准的 20 列中文模板和历史 19 列别名，增加预览、映射及文件哈希绑定确认；错误行不会导致有效行被丢弃，错误报告完整保留逐行问题，成功批次继续通过既有知识合同归档；生产 schema 保持 `v15`。
 
-**Open boundary / 未完成边界：** Field search, account-synchronized saved views, and column workspace management are accepted. Phase 7 remains open for guided import mapping, real configured Feishu delivery, and the complete collaboration execution, payment, settlement, and review lifecycle. / 字段检索、账号同步保存视图和列工作区已通过验收；阶段 7 仍需完成上传字段引导映射、真实配置飞书投递，以及完整合作执行、付款、结算与复盘生命周期。
+**Open boundary / 未完成边界：** Guided import mapping, field search, account-synchronized saved views, and column workspace management are accepted. Phase 7 remains open for real configured Feishu delivery and the complete collaboration execution, payment, settlement, and review lifecycle. / 引导式导入映射、字段检索、账号同步保存视图和列工作区已通过验收；阶段 7 仍需完成真实配置飞书投递，以及完整合作执行、付款、结算与复盘生命周期。
 
 **Primary files / 主要文件：**
 
@@ -326,7 +326,7 @@ flowchart LR
 
 **Work items / 工作项：**
 
-- [ ] **EN:** Preserve the approved 20-column Chinese upload contract and historical 19-column aliases; add user-guided field mapping and row-level import errors without discarding valid rows.<br>**中文：** 保留已批准的 20 列中文上传契约和历史 19 列别名，增加用户引导的字段映射和逐行导入错误，且不得丢弃有效行。
+- [x] **EN:** Preserve the approved 20-column Chinese upload contract and historical 19-column aliases; add user-guided field mapping and row-level import errors without discarding valid rows. Production accepted in `v0.8.15` on 2026-09-08.<br>**中文：** 保留已批准的 20 列中文上传契约和历史 19 列别名，增加用户引导的字段映射和逐行导入错误，且不得丢弃有效行；已于 2026-09-08 通过 `v0.8.15` 生产验收。
 - [x] **EN:** Add field-level search/filter support for every displayed influencer column, including ID, handle, tags, links, platform, country, project, product, deliverable, cost, quote, CPM, CPV, and parent record.<br>**中文：** 为所有展示的网红字段增加字段级搜索/筛选，包括 ID、账号、标签、链接、平台、国家、项目、产品、交付物、成本、报价、CPM、CPV 和父记录。
 - [x] **EN:** Add saved views, column visibility/order, bulk selection, export-before-filter, export-after-filter, and deterministic sticky-header/checkbox behavior.<br>**中文：** 增加保存视图、列显示/顺序、批量选择、筛选前导出、筛选后导出，以及确定性的粘性表头/复选框行为。
 - [ ] **EN:** Implement a Feishu provider interface supporting webhook and app/table API modes, encrypted server-side configuration, connection test, sync status, idempotency, retry, and actionable failure logs.<br>**中文：** 实现飞书服务接口，支持 Webhook 和应用/多维表格 API 模式、服务器端加密配置、连接测试、同步状态、幂等、重试和可执行的失败日志。
