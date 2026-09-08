@@ -89,7 +89,11 @@ function createClientContext() {
     orderType: element({ value: 'paid' }),
     orderReference: element({ value: 'PO-501' }),
     orderDeliverable: element({ value: 'One short video' }),
-    orderQuotedPrice: element({ value: '1200' }),
+    orderCreatorCost: element({ value: '800' }),
+    orderClientQuote: element({ value: '1200' }),
+    orderCurrency: element({ value: 'USD' }),
+    orderPaymentTerms: element({ value: 'net_30' }),
+    orderMarginPreview: element(),
     orderTimelineStart: element({ value: '2026-09-01' }),
     orderTimelineEnd: element({ value: '2026-09-10' }),
     orderNotes: element({ value: 'Client approved' })
@@ -98,6 +102,9 @@ function createClientContext() {
     id: 91,
     name: 'Autumn launch',
     product_name: 'Portable power station',
+    currency: 'USD',
+    customer: { id: 31, label: 'Northstar Energy' },
+    owner: { id: 9, label: 'Mina Chen' },
     lifecycle_state: 'demand_confirmed',
     operational_status: 'active'
   };
@@ -249,6 +256,7 @@ const m4Functions = [
   'getM4CampaignId',
   'getM4CampaignById',
   'm4CampaignLabel',
+  'm4CampaignCommercialContext',
   'renderM4CampaignContext',
   'loadM4Campaigns',
   'm4ActiveDemandId',
@@ -257,11 +265,17 @@ const m4Functions = [
   'm4CollabMutationSlot',
   'm4CollabCreateMutationSlot',
   'm4CollabMutationOperationKey',
+  'renderM4CommercialPreview',
   'submitCollabOrder',
   'loadCollaborations',
   'findCollaborationById',
   'collabRelations',
   'isCampaignCollaboration',
+  'collabResource',
+  'renderCollabRelationTags',
+  'renderCampaignCollabActions',
+  'renderCollabCommercialTerms',
+  'renderCollabTable',
   'submitCampaignCollabUpdate',
   'runCampaignCollabAction'
 ];
@@ -284,6 +298,121 @@ test('M4 campaign order holds duplicate clicks to one in-flight creation', async
   });
   assert.equal(createRequests.length, 1);
   assert.equal(rows.length, 1);
+});
+
+test('M4 commercial order builds v2 terms and projects creator cost to the historical field', async () => {
+  const { context, requests, rows } = createClientContext();
+  loadFunctions(context, m4Functions);
+  await context.loadM4Campaigns();
+
+  await context.submitCollabOrder();
+
+  const createRequest = requests.find(function(request) {
+    return request.url === '/collaborations' && request.options.method === 'POST';
+  });
+  const createBody = JSON.parse(createRequest.options.body);
+  assert.equal(createBody.cost_quoted, 800);
+  assert.deepEqual(createBody.resource, {
+    schema: 'turingmarket.collaboration-order.v2',
+    project_name: 'Campaign project',
+    product_name: 'Campaign product',
+    order_type: 'paid',
+    order_reference: 'PO-501',
+    deliverable: 'One short video',
+    creator_cost: 800,
+    client_quote: 1200,
+    currency: 'USD',
+    payment_terms: 'net_30'
+  });
+  assert.equal(rows[0].cost_quoted, 800);
+});
+
+test('M4 commercial order rejects invalid terms before it creates a request', async () => {
+  const { context, elements, requests } = createClientContext();
+  loadFunctions(context, m4Functions);
+  await context.loadM4Campaigns();
+  const toasts = [];
+  context.toast = function(message, type) { toasts.push({ message, type }); };
+
+  elements.orderCreatorCost.value = '3.5';
+  await context.submitCollabOrder();
+  elements.orderCreatorCost.value = '800';
+  elements.orderCurrency.value = 'usd';
+  await context.submitCollabOrder();
+  elements.orderCurrency.value = 'USD';
+  elements.orderPaymentTerms.value = 'pay_later';
+  await context.submitCollabOrder();
+
+  assert.equal(requests.filter(function(request) { return request.url === '/collaborations'; }).length, 0);
+  assert.equal(toasts.length, 3);
+});
+
+test('M4 commercial order previews margin and shows selected campaign customer and owner context', async () => {
+  const { context, elements } = createClientContext();
+  loadFunctions(context, m4Functions);
+  await context.loadM4Campaigns();
+
+  assert.match(elements.m4CampaignContextStatus.textContent, /客户：Northstar Energy/);
+  assert.match(elements.m4CampaignContextStatus.textContent, /负责人：Mina Chen/);
+  assert.match(context.m4CampaignCommercialContext(91), /客户：Northstar Energy/);
+  assert.match(context.m4CampaignCommercialContext(91), /负责人：Mina Chen/);
+
+  context.renderM4CommercialPreview();
+  assert.match(elements.orderMarginPreview.innerHTML, /毛利：USD 400/);
+  assert.match(elements.orderMarginPreview.innerHTML, /33\.3%/);
+  elements.orderClientQuote.value = '700';
+  context.renderM4CommercialPreview();
+  assert.match(elements.orderMarginPreview.innerHTML, /亏损/);
+  assert.match(elements.orderMarginPreview.innerHTML, /USD -100/);
+});
+
+test('M4 collaboration table distinguishes v2 commercial terms from historical quote rows', () => {
+  const { context, elements } = createClientContext();
+  context.COLLAB_ORDER_TYPE_LABELS = { paid: '付费合作' };
+  context.COLLAB_RELATION_LABELS = { order: '下单' };
+  context.STATUS_LABELS = { confirmed: '已确认下单' };
+  context.fmtCount = function(value) { return String(value || 0); };
+  loadFunctions(context, m4Functions);
+
+  context.renderCollabTable([
+    {
+      id: 501,
+      kol_handle: 'creator-a',
+      platform: 'YouTube',
+      followers: 10000,
+      campaign_id: 91,
+      campaign_name: 'Autumn launch',
+      status: 'confirmed',
+      row_version: 1,
+      active_relations: ['order'],
+      proposal_notes: JSON.stringify({
+        schema: 'turingmarket.collaboration-order.v2',
+        order_type: 'paid',
+        creator_cost: 800,
+        client_quote: 1200,
+        currency: 'USD',
+        payment_terms: 'net_30'
+      }),
+      cost_quoted: 800
+    },
+    {
+      id: 502,
+      kol_handle: 'creator-b',
+      platform: 'TikTok',
+      followers: 20000,
+      status: 'confirmed',
+      active_relations: [],
+      proposal_notes: JSON.stringify({ schema: 'turingmarket.collaboration-order.v1', quoted_price: 900 }),
+      cost_quoted: 900
+    }
+  ]);
+
+  assert.match(elements.execTableContainer.innerHTML, /商业条款/);
+  assert.match(elements.execTableContainer.innerHTML, /达人成本：USD 800/);
+  assert.match(elements.execTableContainer.innerHTML, /客户报价：USD 1200/);
+  assert.match(elements.execTableContainer.innerHTML, /毛利：USD 400/);
+  assert.match(elements.execTableContainer.innerHTML, /账期：Net 30/);
+  assert.match(elements.execTableContainer.innerHTML, /历史报价：\$900/);
 });
 
 test('M4 campaign order ignores a stale completion after a newer dialog intent begins', async () => {
@@ -391,14 +520,18 @@ test('M4 campaign workspace executes selector, linked order, lifecycle, and repl
   assert.equal(createBody.demand_id, 17);
   assert.equal(createBody.status, 'confirmed');
   assert.deepEqual(createBody.resource, {
-    schema: 'turingmarket.collaboration-order.v1',
+    schema: 'turingmarket.collaboration-order.v2',
     project_name: 'Campaign project',
     product_name: 'Campaign product',
     order_type: 'paid',
     order_reference: 'PO-501',
     deliverable: 'One short video',
-    quoted_price: 1200
+    creator_cost: 800,
+    client_quote: 1200,
+    currency: 'USD',
+    payment_terms: 'net_30'
   });
+  assert.equal(createBody.cost_quoted, 800);
   assert.match(createRequest.options.headers['Idempotency-Key'], /^m4-collaboration-create-/);
   assert.equal(rows.length, 1);
 

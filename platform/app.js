@@ -4395,6 +4395,14 @@ function m4CampaignLabel(campaign) {
   if (campaign.product_name) parts.push(campaign.product_name);
   return parts.join(' · ');
 }
+function m4CampaignCommercialContext(campaignId) {
+  var campaign = getM4CampaignById(campaignId);
+  if (!campaign) return '';
+  var parts = [];
+  if (campaign.customer && campaign.customer.label) parts.push('客户：' + campaign.customer.label);
+  if (campaign.owner && campaign.owner.label) parts.push('负责人：' + campaign.owner.label);
+  return parts.join(' · ');
+}
 function renderM4CampaignContext() {
   var status = document.getElementById('m4CampaignContextStatus');
   if (!status) return;
@@ -4405,6 +4413,8 @@ function renderM4CampaignContext() {
     return;
   }
   var parts = ['已关联 ' + (campaign ? m4CampaignLabel(campaign) : ('活动 #' + campaignId))];
+  var commercialContext = m4CampaignCommercialContext(campaignId);
+  if (commercialContext) parts.push(commercialContext);
   if (campaign && campaign.lifecycle_state) parts.push('阶段：' + campaign.lifecycle_state);
   if (campaign && campaign.operational_status) parts.push('状态：' + campaign.operational_status);
   parts.push('订单、执行、发布和结算将写入活动审计链路。');
@@ -6201,6 +6211,30 @@ function m4OrderCampaignText(campaignId) {
   var campaign = getM4CampaignById(campaignId);
   return campaign ? m4CampaignLabel(campaign) : '活动 #' + campaignId;
 }
+function m4OrderCurrency(campaignId) {
+  var campaign = getM4CampaignById(campaignId);
+  var currency = campaign && typeof campaign.currency === 'string' ? campaign.currency.trim() : '';
+  return /^[A-Z]{3}$/.test(currency) ? currency : 'USD';
+}
+function renderM4CommercialPreview() {
+  var target = document.getElementById('orderMarginPreview');
+  if (!target) return;
+  var creatorCostValue = String(document.getElementById('orderCreatorCost')?.value || '').trim();
+  var clientQuoteValue = String(document.getElementById('orderClientQuote')?.value || '').trim();
+  var creatorCost = Number(creatorCostValue);
+  var clientQuote = Number(clientQuoteValue);
+  var currency = String(document.getElementById('orderCurrency')?.value || '').trim();
+  if (!Number.isSafeInteger(creatorCost) || creatorCost < 0 || !Number.isSafeInteger(clientQuote) || clientQuote < 0) {
+    target.innerHTML = '<span style="font-size:12px;opacity:.65">请输入非负整数后预览毛利。</span>';
+    return;
+  }
+  var margin = clientQuote - creatorCost;
+  var percentage = clientQuote === 0 ? (margin === 0 ? '0.0' : '-') : ((margin / clientQuote) * 100).toFixed(1);
+  var loss = margin < 0;
+  target.innerHTML = '<strong style="color:' + (loss ? 'var(--danger, #b91c1c)' : 'inherit') + '">' +
+    (loss ? '亏损' : '毛利') + '：' + esc(currency || '---') + ' ' + margin + '</strong>' +
+    '<span style="margin-left:8px;font-size:12px;opacity:.7">' + percentage + '%</span>';
+}
 function startCollab(infId) {
   pendingCollabInfId = Number(infId);
   pendingCollabCreateIntentId = m4OperationId('m4-collaboration-create-intent-');
@@ -6208,7 +6242,10 @@ function startCollab(infId) {
   var campaignId = getM4CampaignId();
   var campaignContext = campaignId === null
     ? '未关联活动：本次会创建独立合作记录。'
-    : '已关联 ' + m4OrderCampaignText(campaignId) + '：订单会进入活动审计和知识库。';
+    : '已关联 ' + m4OrderCampaignText(campaignId) + (m4CampaignCommercialContext(campaignId) ? ' · ' + m4CampaignCommercialContext(campaignId) : '') + '：订单会进入活动审计和知识库。';
+  var creatorCost = inf && inf.cost_usd !== undefined && inf.cost_usd !== null && inf.cost_usd !== '' ? inf.cost_usd : '';
+  var clientQuote = inf && inf.quoted_price !== undefined && inf.quoted_price !== null && inf.quoted_price !== '' ? inf.quoted_price : creatorCost;
+  var currency = m4OrderCurrency(campaignId);
   var opener = document.activeElement;
   var existing = document.getElementById('collabOrderModal');
   if (existing) existing.remove();
@@ -6226,16 +6263,20 @@ function startCollab(infId) {
     '<div><label>推广产品</label><input id="orderProduct" value="' + esc(inf.product_name || '') + '"></div>' +
     '<div><label>资源类型</label><select id="orderType"><option value="paid">付费合作</option><option value="affiliate">联盟分佣</option><option value="gifting">寄样置换</option><option value="retainer">长期合作</option></select></div>' +
     '<div><label>合同 / PO 编号</label><input id="orderReference" placeholder="可选"></div>' +
-    '<div><label>对外报价（整数）</label><input id="orderQuotedPrice" type="number" min="0" step="1" value="' + esc(inf.quoted_price || inf.cost_usd || '') + '"></div>' +
-    '<div><label>初始状态</label><div style="padding:8px 0;font-size:12px">已确认下单</div></div>' +
+    '<div><label>达人成本（整数）</label><input id="orderCreatorCost" type="number" min="0" step="1" value="' + esc(creatorCost) + '" oninput="renderM4CommercialPreview()"></div>' +
+    '<div><label>客户报价（整数）</label><input id="orderClientQuote" type="number" min="0" step="1" value="' + esc(clientQuote) + '" oninput="renderM4CommercialPreview()"></div>' +
+    '<div><label>币种</label><input id="orderCurrency" maxlength="3" value="' + esc(currency) + '" style="text-transform:uppercase" oninput="renderM4CommercialPreview()"></div>' +
+    '<div><label>付款条件</label><select id="orderPaymentTerms"><option value="prepay_80_balance_20">预付 80%，尾款 20%</option><option value="full_prepayment">全额预付</option><option value="net_7">Net 7</option><option value="net_30">Net 30</option></select></div>' +
     '<div><label>开始时间</label><input id="orderTimelineStart" type="date"></div>' +
     '<div><label>结束时间</label><input id="orderTimelineEnd" type="date"></div>' +
     '</div>' +
+    '<div id="orderMarginPreview" aria-live="polite" style="min-height:20px;margin-top:10px;font-size:13px"></div>' +
     '<div style="margin-top:10px"><label>交付物</label><textarea id="orderDeliverable" rows="3">' + esc(inf.content_deliverable || inf.collab_type || '') + '</textarea></div>' +
     '<div style="margin-top:10px"><label>备注</label><textarea id="orderNotes" rows="3"></textarea></div>' +
     '<div class="btn-group" style="justify-content:flex-end"><button type="button" class="btn btn-outline" onclick="closeCollabOrderModal()">取消</button><button type="button" class="btn btn-primary" onclick="submitCollabOrder()">确认下单</button></div>' +
     '</div>';
   document.body.appendChild(overlay);
+  renderM4CommercialPreview();
   if (window.TMAccessibility) {
     window.TMAccessibility.openDialog(document.getElementById('collabOrderDialog'), opener, function() {
       closeCollabOrderModal(overlay);
@@ -6257,23 +6298,40 @@ function m4ActiveDemandId(campaignId) {
 async function submitCollabOrder() {
   if (!pendingCollabInfId) return;
   var campaignId = getM4CampaignId();
+  var creatorCostValue = String(document.getElementById('orderCreatorCost')?.value || '').trim();
+  var clientQuoteValue = String(document.getElementById('orderClientQuote')?.value || '').trim();
+  var creatorCost = Number(creatorCostValue);
+  var clientQuote = Number(clientQuoteValue);
+  var currency = String(document.getElementById('orderCurrency')?.value || '').trim();
+  var paymentTerms = String(document.getElementById('orderPaymentTerms')?.value || '').trim();
+  if (!creatorCostValue || !clientQuoteValue || !Number.isSafeInteger(creatorCost) || creatorCost < 0 || !Number.isSafeInteger(clientQuote) || clientQuote < 0) {
+    toast('达人成本和客户报价必须是非负整数。', 'error');
+    return;
+  }
+  if (!/^[A-Z]{3}$/.test(currency)) {
+    toast('币种必须为三个大写字母。', 'error');
+    return;
+  }
+  if (!['prepay_80_balance_20', 'full_prepayment', 'net_7', 'net_30'].includes(paymentTerms)) {
+    toast('付款条件无效。', 'error');
+    return;
+  }
   var resource = {
-    schema: 'turingmarket.collaboration-order.v1',
+    schema: 'turingmarket.collaboration-order.v2',
     project_name: document.getElementById('orderProject')?.value || '',
     product_name: document.getElementById('orderProduct')?.value || '',
     order_type: document.getElementById('orderType')?.value || 'paid',
     order_reference: document.getElementById('orderReference')?.value || '',
     deliverable: document.getElementById('orderDeliverable')?.value || '',
-    quoted_price: Number(document.getElementById('orderQuotedPrice')?.value || 0)
+    creator_cost: creatorCost,
+    client_quote: clientQuote,
+    currency: currency,
+    payment_terms: paymentTerms
   };
-  if (!Number.isSafeInteger(resource.quoted_price) || resource.quoted_price < 0) {
-    toast('对外报价必须是非负整数。', 'error');
-    return;
-  }
   var body = {
     influencer_id: pendingCollabInfId,
     status: 'confirmed',
-    cost_quoted: resource.quoted_price,
+    cost_quoted: resource.creator_cost,
     timeline_start: document.getElementById('orderTimelineStart')?.value || '',
     timeline_end: document.getElementById('orderTimelineEnd')?.value || '',
     notes: document.getElementById('orderNotes')?.value || ''
@@ -6382,11 +6440,32 @@ function renderCampaignCollabActions(collab) {
   }
   return actions.length ? '<div style="display:flex;gap:6px;flex-wrap:wrap">' + actions.join('') + '</div>' : '<span style="font-size:11px;opacity:.55">无需操作</span>';
 }
+function renderCollabCommercialTerms(collab, resource) {
+  if (resource.schema !== 'turingmarket.collaboration-order.v2') {
+    return '<span style="font-size:11px;opacity:.7">历史报价：$' + esc(collab.cost_quoted || resource.quoted_price || 0) + '</span>';
+  }
+  var currency = /^[A-Z]{3}$/.test(String(resource.currency || '')) ? resource.currency : '---';
+  var creatorCost = Number(resource.creator_cost);
+  var clientQuote = Number(resource.client_quote);
+  var margin = Number.isSafeInteger(Number(resource.margin_amount)) ? Number(resource.margin_amount) : clientQuote - creatorCost;
+  var paymentLabels = {
+    prepay_80_balance_20: '预付 80%，尾款 20%',
+    full_prepayment: '全额预付',
+    net_7: 'Net 7',
+    net_30: 'Net 30'
+  };
+  var paymentTerms = paymentLabels[resource.payment_terms] || resource.payment_terms || '-';
+  return '<div style="min-width:190px;font-size:11px;line-height:1.65">' +
+    '<strong>达人成本：' + esc(currency) + ' ' + esc(creatorCost) + '</strong><br>' +
+    '客户报价：' + esc(currency) + ' ' + esc(clientQuote) + '<br>' +
+    '<span style="color:' + (margin < 0 ? 'var(--danger, #b91c1c)' : 'inherit') + '">' + (margin < 0 ? '亏损' : '毛利') + '：' + esc(currency) + ' ' + esc(margin) + '</span><br>' +
+    '账期：' + esc(paymentTerms) + '</div>';
+}
 function renderCollabTable(data) {
   var c = document.getElementById('execTableContainer');
   if (!c) return;
   if (!data || !data.length) { c.innerHTML = '<p style="text-align:center;padding:30px;opacity:.5">暂无合作记录</p>'; return; }
-  var h = '<table class="m4-table"><thead><tr><th>KOL</th><th>活动 / 项目</th><th>合作资源</th><th>执行状态</th><th>阶段证据</th><th>报价</th><th>排期</th><th>合同 / PO</th><th>备注</th><th>操作</th></tr></thead><tbody>';
+  var h = '<table class="m4-table"><thead><tr><th>KOL</th><th>活动 / 项目</th><th>合作资源</th><th>执行状态</th><th>阶段证据</th><th>商业条款</th><th>排期</th><th>合同 / PO</th><th>备注</th><th>操作</th></tr></thead><tbody>';
   data.forEach(function(collab) {
     var resource = collabResource(collab);
     var project = resource.project_name || collab.project_name || '-';
@@ -6406,7 +6485,7 @@ function renderCollabTable(data) {
       h += '</select></td>';
     }
     h += '<td style="min-width:160px">' + (linked ? renderCollabRelationTags(collab) : '<span style="font-size:10px;opacity:.55">未接入活动</span>') + '</td>';
-    h += '<td>$' + (collab.cost_quoted || resource.quoted_price || 0) + '</td>';
+    h += '<td style="min-width:190px">' + renderCollabCommercialTerms(collab, resource) + '</td>';
     h += '<td style="font-size:10px">' + esc([collab.timeline_start || '', collab.timeline_end || ''].filter(Boolean).join(' -> ') || '-') + '</td>';
     h += '<td style="max-width:140px;font-size:10px">' + esc(resource.order_reference || '-') + '</td>';
     h += '<td style="max-width:140px;font-size:10px">' + esc(collab.notes || '-') + '</td>';
