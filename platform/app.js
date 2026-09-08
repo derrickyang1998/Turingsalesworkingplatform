@@ -5077,6 +5077,39 @@ var influencerImportValidation = null;
 var influencerImportValidatedMapping = '';
 var influencerImportErrorCsv = '';
 var influencerImportOpener = null;
+var influencerImportPreviewRequestSequence = 0;
+var activeInfluencerImportPreviewRequest = null;
+var influencerImportMappingFingerprint = '';
+
+function fingerprintInfluencerImportMapping(mapping) {
+  if (!mapping) return '';
+  return JSON.stringify(Object.keys(mapping).sort().map(function(source) {
+    return [source, mapping[source]];
+  }));
+}
+
+function currentInfluencerImportMappingFingerprint() {
+  var mapping = {};
+  document.querySelectorAll('.tm-influencer-map-select').forEach(function(select) {
+    mapping[select.dataset.source || ''] = select.value || 'ignore';
+  });
+  return fingerprintInfluencerImportMapping(mapping);
+}
+
+function invalidateInfluencerImportPreviewRequests() {
+  influencerImportPreviewRequestSequence += 1;
+  activeInfluencerImportPreviewRequest = null;
+}
+
+function influencerImportPreviewRequestIsCurrent(requestContext) {
+  return Boolean(
+    requestContext &&
+    activeInfluencerImportPreviewRequest === requestContext &&
+    requestContext.requestId === influencerImportPreviewRequestSequence &&
+    requestContext.file === retainedInfluencerImportFile &&
+    requestContext.mappingFingerprint === influencerImportMappingFingerprint
+  );
+}
 
 function setInfluencerImportState(state, message) {
   if (INFLUENCER_IMPORT_STATES.indexOf(state) === -1) return;
@@ -5163,6 +5196,8 @@ function collectInfluencerFieldMapping(showFeedback) {
 }
 
 function markInfluencerMappingDirty() {
+  influencerImportMappingFingerprint = currentInfluencerImportMappingFingerprint();
+  invalidateInfluencerImportPreviewRequests();
   influencerImportValidation = null;
   influencerImportValidatedMapping = '';
   collectInfluencerFieldMapping(true);
@@ -5171,14 +5206,30 @@ function markInfluencerMappingDirty() {
 
 async function requestInfluencerImportPreview(fieldMapping) {
   if (!retainedInfluencerImportFile) return;
+  var requestContext = {
+    requestId: influencerImportPreviewRequestSequence + 1,
+    file: retainedInfluencerImportFile,
+    mappingFingerprint: fingerprintInfluencerImportMapping(fieldMapping)
+  };
+  influencerImportPreviewRequestSequence = requestContext.requestId;
+  influencerImportMappingFingerprint = requestContext.mappingFingerprint;
+  activeInfluencerImportPreviewRequest = requestContext;
   setInfluencerImportState('parsing', fieldMapping ? '正在按当前映射校验数据...' : '正在解析文件并识别字段...');
   var fd = new FormData();
   fd.append('mode', 'preview');
   fd.append('mapping_version', INFLUENCER_IMPORT_MAPPING_VERSION);
   if (fieldMapping) fd.append('field_mapping', JSON.stringify(fieldMapping));
   fd.append('file', retainedInfluencerImportFile);
-  var response = await apiFetch('/influencers/upload', { method: 'POST', body: fd });
-  var data = await response.json();
+  var response;
+  var data;
+  try {
+    response = await apiFetch('/influencers/upload', { method: 'POST', body: fd });
+    data = await response.json();
+  } catch (error) {
+    if (!influencerImportPreviewRequestIsCurrent(requestContext)) return null;
+    throw error;
+  }
+  if (!influencerImportPreviewRequestIsCurrent(requestContext)) return null;
   if (!response.ok) throw new Error(data.error || '文件校验失败');
   influencerImportPreview = data;
   renderInfluencerImportMapping(data);
@@ -5189,6 +5240,7 @@ async function requestInfluencerImportPreview(fieldMapping) {
     setInfluencerImportState('mapping_dirty', '请完成必填字段映射后校验数据。');
     return;
   }
+  influencerImportMappingFingerprint = fingerprintInfluencerImportMapping(mapping);
   influencerImportValidation = data;
   influencerImportValidatedMapping = JSON.stringify(mapping);
   setInfluencerImportState('validated_ready', '校验完成，可以确认导入。');
@@ -5199,12 +5251,16 @@ async function beginInfluencerImport(file, opener) {
   var ext = (file.name.split('.').pop() || '').toLowerCase();
   openInfUploadModal(opener);
   if (['csv', 'json', 'xlsx'].indexOf(ext) === -1) {
+    invalidateInfluencerImportPreviewRequests();
     retainedInfluencerImportFile = null;
+    influencerImportMappingFingerprint = '';
     influencerImportValidation = null;
     setInfluencerImportState('fatal_error', '不支持 .' + ext + ' 文件，请使用 CSV、JSON 或 XLSX。');
     return;
   }
+  invalidateInfluencerImportPreviewRequests();
   retainedInfluencerImportFile = file;
+  influencerImportMappingFingerprint = '';
   influencerImportValidation = null;
   influencerImportValidatedMapping = '';
   var compactStatus = document.getElementById('uploadOK');
@@ -5314,7 +5370,9 @@ function downloadInfluencerImportErrors() {
   dlFile('influencer_import_errors.csv', influencerImportErrorCsv, 'text/csv;charset=utf-8');
 }
 function resetInfluencerImport() {
+  invalidateInfluencerImportPreviewRequests();
   retainedInfluencerImportFile = null;
+  influencerImportMappingFingerprint = '';
   influencerImportPreview = null;
   influencerImportValidation = null;
   influencerImportValidatedMapping = '';

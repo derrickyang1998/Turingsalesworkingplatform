@@ -93,6 +93,12 @@ const NUMERIC_IMPORT_FIELDS = new Set([
   'cpm',
   'cpv'
 ]);
+const NON_NEGATIVE_IMPORT_FIELDS = new Set([
+  'followers',
+  'avg_views_10',
+  'cpm',
+  'cpv'
+]);
 const TEMPLATE_TARGETS = [
   'created_at',
   'reporter',
@@ -179,10 +185,23 @@ function isBlankRow(row) {
   return !row || Object.values(row).every(isBlankValue);
 }
 
-function isValidNumericCell(value) {
-  if (isBlankValue(value)) return true;
-  if (typeof value === 'number') return Number.isFinite(value);
-  return /-?\d+(?:\.\d+)?/.test(String(value).replace(/,/g, ''));
+function parseGuidedNumericCell(value) {
+  if (isBlankValue(value)) return { valid: true, value: 0 };
+  if (typeof value === 'number') {
+    return Number.isFinite(value)
+      ? { valid: true, value }
+      : { valid: false, value: 0 };
+  }
+  const raw = String(value).trim();
+  const match = raw.match(/^(?:(USD|US\$|\$|￥)\s*)?([+-]?)(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)([KM])?(?:\s*(USD|US\$|\$|￥))?$/i);
+  if (!match || (match[1] && match[5])) return { valid: false, value: 0 };
+  let parsed = Number(match[3].replace(/,/g, ''));
+  if (match[2] === '-') parsed *= -1;
+  if (String(match[4] || '').toUpperCase() === 'K') parsed *= 1000;
+  if (String(match[4] || '').toUpperCase() === 'M') parsed *= 1000000;
+  return Number.isFinite(parsed)
+    ? { valid: true, value: parsed }
+    : { valid: false, value: 0 };
 }
 
 function importMappingError(message) {
@@ -352,8 +371,11 @@ function prepareMappedInfluencerRows(rows, options) {
       errors.push({ row_number: rowNumber, field: 'kol_handle', code: 'required', message: '网红频道名称不能为空' });
     }
     for (const field of NUMERIC_IMPORT_FIELDS) {
-      if (!isValidNumericCell(mapped[field])) {
+      const numericCell = parseGuidedNumericCell(mapped[field]);
+      if (!numericCell.valid) {
         errors.push({ row_number: rowNumber, field, code: 'invalid_number', message: '数值格式无效' });
+      } else if (NON_NEGATIVE_IMPORT_FIELDS.has(field) && numericCell.value < 0) {
+        errors.push({ row_number: rowNumber, field, code: 'negative_number', message: '该指标不能为负数' });
       }
     }
     const createdAt = normalizeImportDate(mapped.created_at);

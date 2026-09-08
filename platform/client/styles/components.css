@@ -1931,6 +1931,17 @@ thead th {
     padding: var(--tm-space-4);
   }
 
+  .tm-influencer-import-scroll {
+    max-height: none;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .tm-influencer-import-errors {
+    max-height: none;
+    overflow-y: visible;
+  }
+
   .tm-influencer-import-picker {
     align-items: stretch;
     flex-direction: column;

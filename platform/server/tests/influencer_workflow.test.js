@@ -483,6 +483,78 @@ test('row-level influencer import counts blanks and rejects invalid rows without
   db.close();
 });
 
+test('guided influencer import accepts complete numeric formats and rejects contaminated or negative metrics', () => {
+  const rows = [
+    {
+      Handle: '@valid_currency_formats',
+      Followers: '+1,234.5K',
+      Views: '2.5M',
+      Cost: 'USD -19',
+      Price: '2,400 US$',
+      CPM: '$12.50',
+      CPV: '0.08 USD'
+    },
+    {
+      Handle: '@valid_yuan_formats',
+      Followers: '1,000',
+      Views: '800',
+      Cost: '￥800',
+      Price: '$900',
+      CPM: 'US$ 12',
+      CPV: '￥0.05'
+    },
+    { Handle: '@mixed_text', Followers: 'abc123xyz' },
+    { Handle: '@trailing_text', Cost: 'USD 19oops' },
+    { Handle: '@multiple_decimals', Price: '1.2.3' },
+    { Handle: '@bad_grouping', Followers: '12,34' },
+    { Handle: '@scientific', Views: '1e3' },
+    { Handle: '@negative_followers', Followers: '-1' },
+    { Handle: '@negative_views', Views: '-2' },
+    { Handle: '@negative_cpm', CPM: '-3' },
+    { Handle: '@negative_cpv', CPV: '-0.4' }
+  ];
+  const fieldMapping = {
+    Handle: 'kol_handle',
+    Followers: 'followers',
+    Views: 'avg_views_10',
+    Cost: 'cost_usd',
+    Price: 'quoted_price',
+    CPM: 'cpm',
+    CPV: 'cpv'
+  };
+
+  const preview = influencerWorkflow.previewInfluencerImport(rows, {
+    field_mapping: fieldMapping,
+    row_number_offset: 2
+  });
+
+  assert.equal(preview.valid_count, 2);
+  assert.equal(preview.error_count, 9);
+  assert.equal(preview.sample[0].followers, 1234500);
+  assert.equal(preview.sample[0].avg_views_10, 2500000);
+  assert.equal(preview.sample[0].cost_usd, 19);
+  assert.equal(preview.sample[0].quoted_price, 2400);
+  assert.equal(preview.sample[0].cpm, 12.5);
+  assert.equal(preview.sample[0].cpv, 0.08);
+  assert.equal(preview.sample[1].cost_usd, 800);
+  assert.equal(preview.sample[1].quoted_price, 900);
+  assert.equal(preview.sample[1].cpm, 12);
+  assert.equal(preview.sample[1].cpv, 0.05);
+  assert.deepEqual(preview.row_errors.map(function(error) {
+    return [error.row_number, error.field, error.code];
+  }), [
+    [4, 'followers', 'invalid_number'],
+    [5, 'cost_usd', 'invalid_number'],
+    [6, 'quoted_price', 'invalid_number'],
+    [7, 'followers', 'invalid_number'],
+    [8, 'avg_views_10', 'invalid_number'],
+    [9, 'followers', 'negative_number'],
+    [10, 'avg_views_10', 'negative_number'],
+    [11, 'cpm', 'negative_number'],
+    [12, 'cpv', 'negative_number']
+  ]);
+});
+
 test('influencer import accepts the historical 19-column template aliases', async () => {
   const db = freshDb();
   const routes = mountRoutes(db);
@@ -2487,6 +2559,8 @@ test('m4 frontend keeps import, feishu, and order-resource controls wired', () =
   assert.match(componentCss, /\.m4-column-workspace/);
   assert.match(componentCss, /\.tm-influencer-import-scroll\s*\{[^}]*overflow-x:\s*auto/s);
   assert.match(componentCss, /@media\s*\(max-width:\s*720px\)[\s\S]*\.tm-influencer-import-dialog/);
+  assert.match(componentCss, /@media\s*\(max-width:\s*720px\)\s*\{[\s\S]*?\.tm-influencer-import-scroll\s*\{[^}]*max-height:\s*none[^}]*overflow-x:\s*auto[^}]*overflow-y:\s*hidden/s);
+  assert.match(componentCss, /@media\s*\(max-width:\s*720px\)\s*\{[\s\S]*?\.tm-influencer-import-errors\s*\{[^}]*max-height:\s*none[^}]*overflow-y:\s*visible/s);
   assert.match(appJs, /var INFLUENCER_IMPORT_STATES = Object\.freeze\(\[/);
   for (const state of [
     'idle', 'parsing', 'mapping_dirty', 'validated_ready',
@@ -2495,6 +2569,12 @@ test('m4 frontend keeps import, feishu, and order-resource controls wired', () =
     assert.match(appJs, new RegExp("'" + state + "'"), `guided import state ${state} must be explicit`);
   }
   assert.match(appJs, /var retainedInfluencerImportFile = null/);
+  assert.match(appJs, /var influencerImportPreviewRequestSequence = 0/);
+  assert.match(appJs, /function invalidateInfluencerImportPreviewRequests/);
+  assert.match(appJs, /function influencerImportPreviewRequestIsCurrent/);
+  assert.match(appJs, /requestContext\.file === retainedInfluencerImportFile/);
+  assert.match(appJs, /requestContext\.mappingFingerprint === influencerImportMappingFingerprint/);
+  assert.match(appJs, /if \(!influencerImportPreviewRequestIsCurrent\(requestContext\)\) return null/);
   assert.match(appJs, /function setInfluencerImportState/);
   assert.match(appJs, /function renderInfluencerImportMapping/);
   assert.match(appJs, /for="inf-map-/);
