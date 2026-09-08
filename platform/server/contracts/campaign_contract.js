@@ -362,6 +362,31 @@ const REQUEST_POLICIES = Object.freeze({
     'GET',
     '/api/collaborations/:id/content-reviews'
   ),
+  COLLABORATION_PAYMENT_RECORD: controlJson(
+    'collaboration.payment.record',
+    'POST',
+    '/api/collaborations/:id/payments'
+  ),
+  COLLABORATION_PAYMENT_LIST: empty(
+    'collaboration.payment.list',
+    'GET',
+    '/api/collaborations/:id/payments'
+  ),
+  COLLABORATION_PAYMENT_VOID: controlJson(
+    'collaboration.payment.void',
+    'POST',
+    '/api/collaborations/:id/payments/:paymentId/void'
+  ),
+  COLLABORATION_SETTLEMENT_SUBMIT: controlJson(
+    'collaboration.settlement.submit',
+    'POST',
+    '/api/collaborations/:id/settlement-submissions'
+  ),
+  COLLABORATION_SETTLEMENT_DECIDE: controlJson(
+    'collaboration.settlement.decide',
+    'POST',
+    '/api/collaborations/:id/settlement-decisions'
+  ),
   LEGACY_KNOWLEDGE_CREATE: knowledgeDual(
     'legacy.knowledge.create',
     '/api/knowledge'

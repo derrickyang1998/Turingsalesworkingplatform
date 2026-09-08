@@ -6158,6 +6158,8 @@ var pendingCollabInfId = null;
 var pendingCollabCreateIntentId = null;
 var pendingContractCollabId = null;
 var pendingContentReviewCollabId = null;
+var pendingPaymentCollabId = null;
+var pendingPaymentEntryId = null;
 var pendingSettlementCollabId = null;
 var m4CollabMutationOperations = {};
 var m4CollabMutationInFlight = {};
@@ -6447,6 +6449,49 @@ function m4ContentReviewStatusLabel(status) {
     changes_requested: '修改后重提'
   })[status] || '审核状态异常';
 }
+function m4PaymentSettlement(collab) {
+  var ledger = collab && collab.payment_settlement;
+  if (!ledger || typeof ledger !== 'object' || Array.isArray(ledger)) {
+    return {
+      status: 'not_started', currency: null,
+      expected_creator_cost: 0, expected_client_receipt: 0,
+      creator_payment_total: 0, client_receipt_total: 0,
+      creator_payment_remaining: 0, client_receipt_remaining: 0,
+      active_entry_count: 0, entries: [], current_submission: null,
+      latest_decision: null, events: [], can_record: false, can_submit: false, can_decide: false
+    };
+  }
+  return {
+    status: typeof ledger.status === 'string' ? ledger.status : 'not_started',
+    currency: typeof ledger.currency === 'string' ? ledger.currency : null,
+    expected_creator_cost: Number.isSafeInteger(Number(ledger.expected_creator_cost)) ? Number(ledger.expected_creator_cost) : 0,
+    expected_client_receipt: Number.isSafeInteger(Number(ledger.expected_client_receipt)) ? Number(ledger.expected_client_receipt) : 0,
+    creator_payment_total: Number.isSafeInteger(Number(ledger.creator_payment_total)) ? Number(ledger.creator_payment_total) : 0,
+    client_receipt_total: Number.isSafeInteger(Number(ledger.client_receipt_total)) ? Number(ledger.client_receipt_total) : 0,
+    creator_payment_remaining: Number.isSafeInteger(Number(ledger.creator_payment_remaining)) ? Number(ledger.creator_payment_remaining) : 0,
+    client_receipt_remaining: Number.isSafeInteger(Number(ledger.client_receipt_remaining)) ? Number(ledger.client_receipt_remaining) : 0,
+    active_entry_count: Number.isSafeInteger(Number(ledger.active_entry_count)) ? Number(ledger.active_entry_count) : 0,
+    entries: Array.isArray(ledger.entries) ? ledger.entries : [],
+    current_submission: ledger.current_submission && typeof ledger.current_submission === 'object' ? ledger.current_submission : null,
+    latest_decision: ledger.latest_decision && typeof ledger.latest_decision === 'object' ? ledger.latest_decision : null,
+    events: Array.isArray(ledger.events) ? ledger.events : [],
+    can_record: ledger.can_record === true,
+    can_submit: ledger.can_submit === true,
+    can_decide: ledger.can_decide === true
+  };
+}
+function m4PaymentSettlementStatusLabel(status) {
+  return ({
+    not_started: '尚未登记',
+    recording: '登记中',
+    ready: '可提交结算',
+    pending_review: '待独立审核',
+    changes_requested: '需调整后重提',
+    settled: '已结算',
+    legacy_settled: '历史已结算',
+    not_available: '不适用'
+  })[status] || '状态异常';
+}
 function m4SafeContentReviewUrl(value) {
   var raw = typeof value === 'string' ? value.trim() : '';
   if (!raw || raw.length > 2048 || /[\u0000-\u0020\u007f]/.test(raw)) return '';
@@ -6619,7 +6664,24 @@ function renderCampaignCollabActions(collab) {
       actions.push('<span style="font-size:10px;opacity:.65">请由活动成员补充送审凭证</span>');
     }
   } else if (collab.status === 'completed' && relationSet.publication && !relationSet.settlement) {
-    actions.push('<button type="button" class="btn btn-sm btn-primary" onclick="runCampaignCollabAction(' + collab.id + ',\'settlement\')">确认结算</button>');
+    if (!v2Order) {
+      actions.push('<button type="button" class="btn btn-sm btn-primary" onclick="runCampaignCollabAction(' + collab.id + ',\'settlement\')">确认结算</button>');
+    }
+  }
+  if (v2Order) {
+    var paymentSettlement = m4PaymentSettlement(collab);
+    if (paymentSettlement.can_record) {
+      actions.push('<button type="button" class="btn btn-sm btn-outline" onclick="runCampaignCollabAction(' + collab.id + ',\'payment\')">录入收付款</button>');
+    }
+    if (paymentSettlement.can_submit) {
+      actions.push('<button type="button" class="btn btn-sm btn-primary" onclick="runCampaignCollabAction(' + collab.id + ',\'settlement\')">提交结算</button>');
+    }
+    if (paymentSettlement.can_decide) {
+      actions.push('<button type="button" class="btn btn-sm btn-primary" onclick="runCampaignCollabAction(' + collab.id + ',\'settlement-decision\')">审核结算</button>');
+    }
+    if (paymentSettlement.status === 'pending_review' && !paymentSettlement.can_decide) {
+      actions.push('<span style="font-size:10px;opacity:.65">需另一位负责人或组织管理员审核结算</span>');
+    }
   }
   return actions.length ? '<div style="display:flex;gap:6px;flex-wrap:wrap">' + actions.join('') + '</div>' : '<span style="font-size:11px;opacity:.55">无需操作</span>';
 }
@@ -6703,6 +6765,25 @@ function renderContentReviewEvidence(collab) {
     '提交时间：' + esc(submittedAt || '-') + '<br>' +
     '提交说明：' + esc(submission.submission_note || '-') + contentLink + decisionEvidence + history + '</div>';
 }
+function renderPaymentSettlementEvidence(collab) {
+  var ledger = m4PaymentSettlement(collab);
+  if (ledger.status === 'not_available' || (ledger.status === 'not_started' && !ledger.can_record)) return '';
+  var currency = /^[A-Z]{3}$/.test(String(ledger.currency || '')) ? ledger.currency : '---';
+  var stateColor = ledger.status === 'settled' || ledger.status === 'legacy_settled'
+    ? 'var(--success, #0f7b3c)'
+    : ledger.status === 'changes_requested'
+      ? 'var(--danger, #b91c1c)'
+      : 'inherit';
+  var decision = ledger.latest_decision;
+  var decisionText = decision
+    ? '<br>审核：' + esc(decision.reviewed_by_name || ('用户 #' + decision.reviewed_by)) + ' · ' + esc(decision.review_note || '-')
+    : '';
+  return '<div style="margin-top:7px;padding-top:7px;border-top:1px solid var(--border);font-size:10px;line-height:1.6">' +
+    '<strong style="color:' + stateColor + '">' + esc(m4PaymentSettlementStatusLabel(ledger.status)) + '</strong><br>' +
+    '达人付款：' + esc(currency) + ' ' + esc(m4CommercialValueText(ledger.creator_payment_total)) + ' / ' + esc(m4CommercialValueText(ledger.expected_creator_cost)) + '<br>' +
+    '客户回款：' + esc(currency) + ' ' + esc(m4CommercialValueText(ledger.client_receipt_total)) + ' / ' + esc(m4CommercialValueText(ledger.expected_client_receipt)) + '<br>' +
+    esc(m4CommercialValueText(ledger.active_entry_count)) + ' 笔有效记录' + decisionText + '</div>';
+}
 function renderCollabCommercialTerms(collab, resource) {
   if (resource.schema !== 'turingmarket.collaboration-order.v2') {
     var historicalQuote = collab.cost_quoted;
@@ -6750,7 +6831,7 @@ function renderCollabTable(data) {
       Object.keys(STATUS_LABELS).forEach(function(key) { h += '<option value="' + key + '"' + (collab.status === key ? ' selected' : '') + '>' + STATUS_LABELS[key] + '</option>'; });
       h += '</select></td>';
     }
-    h += '<td style="min-width:180px">' + (linked ? renderCollabRelationTags(collab) + renderContractConfirmation(collab) + renderContentReviewEvidence(collab) : '<span style="font-size:10px;opacity:.55">未接入活动</span>') + '</td>';
+    h += '<td style="min-width:180px">' + (linked ? renderCollabRelationTags(collab) + renderContractConfirmation(collab) + renderContentReviewEvidence(collab) + renderPaymentSettlementEvidence(collab) : '<span style="font-size:10px;opacity:.55">未接入活动</span>') + '</td>';
     h += '<td style="min-width:190px">' + renderCollabCommercialTerms(collab, resource) + '</td>';
     h += '<td style="font-size:10px">' + esc([collab.timeline_start || '', collab.timeline_end || ''].filter(Boolean).join(' -> ') || '-') + '</td>';
     h += '<td style="max-width:140px;font-size:10px">' + esc(resource.order_reference || '-') + '</td>';
@@ -6812,8 +6893,24 @@ async function runCampaignCollabAction(collabId, action) {
     toast('请先刷新活动订单。', 'error');
     return;
   }
+  if (action === 'payment') {
+    openCampaignPaymentModal(collab);
+    return;
+  }
   if (action === 'settlement') {
     openCampaignSettlementModal(collab);
+    return;
+  }
+  if (action === 'payment') {
+    openCampaignPaymentModal(collab);
+    return;
+  }
+  if (action === 'settlement-decision') {
+    openCampaignSettlementDecisionModal(collab);
+    return;
+  }
+  if (action === 'settlement-decision') {
+    openCampaignSettlementDecisionModal(collab);
     return;
   }
   if (action === 'contract-confirmation') {
@@ -7192,6 +7289,161 @@ async function submitCampaignContentReviewDecision() {
     if (m4CollabMutationInFlight[mutationSlot] === request) delete m4CollabMutationInFlight[mutationSlot];
   }
 }
+function m4PaymentHistoryHtml(collab) {
+  var ledger = m4PaymentSettlement(collab);
+  if (!ledger.entries.length) return '<p style="font-size:12px;opacity:.6;margin:0">暂无收付款记录</p>';
+  return '<div style="max-height:220px;overflow:auto;border:1px solid var(--border);border-radius:var(--radius-sm)">' +
+    ledger.entries.slice().sort(function(left, right) { return Number(right.id) - Number(left.id); }).map(function(entry) {
+      var direction = entry.direction === 'creator_payment' ? '达人付款' : '客户回款';
+      var status = entry.status === 'voided' ? '已作废' : '有效';
+      var actor = entry.recorded_by_name || ('用户 #' + entry.recorded_by);
+      var voidAction = entry.can_void
+        ? '<button type="button" class="btn btn-sm btn-outline" title="作废该笔记录" onclick="voidCampaignPayment(' + Number(entry.id) + ')">作废</button>'
+        : '';
+      return '<div style="display:flex;justify-content:space-between;gap:12px;padding:9px 10px;border-bottom:1px solid var(--border);font-size:11px;line-height:1.55">' +
+        '<div><strong>' + esc(direction) + ' · ' + esc(ledger.currency || '---') + ' ' + esc(m4CommercialValueText(entry.amount)) + '</strong> · ' + esc(status) + '<br>' +
+        esc(entry.payment_reference || '-') + ' · ' + esc(entry.counterparty_name || '-') + '<br>' +
+        '<span style="opacity:.65">' + esc(actor) + ' · ' + esc(String(entry.paid_at || '').replace('T', ' ').replace('.000Z', ' UTC')) + '</span>' +
+        (entry.status === 'voided' ? '<br><span style="color:var(--danger, #b91c1c)">作废原因：' + esc(entry.void_reason || '-') + '</span>' : '') + '</div>' +
+        '<div>' + voidAction + '</div></div>';
+    }).join('') + '</div>';
+}
+function openCampaignPaymentModal(collab) {
+  var ledger = m4PaymentSettlement(collab);
+  if (!ledger.can_record) {
+    toast('当前订单暂不可录入收付款，请刷新后重试。', 'error');
+    return;
+  }
+  pendingPaymentCollabId = Number(collab.id);
+  pendingPaymentEntryId = null;
+  var existing = document.getElementById('campaignPaymentModal');
+  if (existing) existing.remove();
+  var now = new Date();
+  var defaultPaidAt = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  var overlay = document.createElement('div');
+  overlay.id = 'campaignPaymentModal';
+  overlay.className = 'modal-overlay';
+  overlay.onclick = function(event) { if (event.target === overlay) closeCampaignPaymentModal(); };
+  overlay.innerHTML = '<div class="modal" id="campaignPaymentDialog" role="dialog" aria-modal="true" aria-labelledby="campaignPaymentDialogTitle" onclick="event.stopPropagation()">' +
+    '<button type="button" class="modal-close" aria-label="关闭收付款登记" title="关闭收付款登记" onclick="closeCampaignPaymentModal()">&times;</button>' +
+    '<h3 id="campaignPaymentDialogTitle">录入收付款</h3>' +
+    '<p style="font-size:12px;opacity:.65;margin-bottom:12px">' + esc(collab.kol_handle || '') + ' · ' + esc(collab.campaign_name || ('活动 #' + collab.campaign_id)) + '</p>' +
+    '<div style="font-size:12px;line-height:1.6;padding:9px 10px;background:var(--surface2);border-radius:var(--radius-sm);margin-bottom:12px">' +
+    '达人付款：' + esc(ledger.currency || '---') + ' ' + esc(m4CommercialValueText(ledger.creator_payment_total)) + ' / ' + esc(m4CommercialValueText(ledger.expected_creator_cost)) + '<br>' +
+    '客户回款：' + esc(ledger.currency || '---') + ' ' + esc(m4CommercialValueText(ledger.client_receipt_total)) + ' / ' + esc(m4CommercialValueText(ledger.expected_client_receipt)) + '</div>' +
+    '<div style="margin-bottom:12px"><label>历史记录</label>' + m4PaymentHistoryHtml(collab) + '</div>' +
+    '<div class="grid grid-2">' +
+    '<div><label>方向</label><select id="paymentDirection"><option value="creator_payment">达人付款</option><option value="client_receipt">客户回款</option></select></div>' +
+    '<div><label>金额（' + esc(ledger.currency || '---') + '，整数）</label><input id="paymentAmount" type="number" min="1" step="1"></div>' +
+    '<div><label>到账 / 付款时间</label><input id="paymentPaidAt" type="datetime-local" value="' + esc(defaultPaidAt) + '"></div>' +
+    '<div><label>方式</label><select id="paymentMethod"><option value="bank_transfer">银行转账</option><option value="paypal">PayPal</option><option value="wise">Wise</option><option value="payoneer">Payoneer</option><option value="platform">平台支付</option><option value="other_manual">其他手工方式</option></select></div>' +
+    '<div><label>交易参考号</label><input id="paymentReference" maxlength="160"></div>' +
+    '<div><label>交易对方</label><input id="paymentCounterparty" maxlength="200"></div>' +
+    '<div><label>款项类型</label><select id="paymentTranche"><option value="deposit">预付款</option><option value="balance">尾款</option><option value="full">全款</option><option value="commission">佣金</option><option value="other">其他</option></select></div>' +
+    '</div>' +
+    '<div style="margin-top:10px"><label>登记说明</label><textarea id="paymentNote" maxlength="1000" rows="3"></textarea></div>' +
+    '<div class="btn-group" style="justify-content:flex-end"><button type="button" class="btn btn-outline" onclick="closeCampaignPaymentModal()">取消</button><button type="button" class="btn btn-primary" onclick="submitCampaignPayment()">保存记录</button></div>' +
+    '</div>';
+  document.body.appendChild(overlay);
+  if (window.TMAccessibility) window.TMAccessibility.openDialog(document.getElementById('campaignPaymentDialog'), document.activeElement, closeCampaignPaymentModal);
+}
+function closeCampaignPaymentModal() {
+  var overlay = document.getElementById('campaignPaymentModal');
+  var dialog = overlay && typeof overlay.querySelector === 'function' ? overlay.querySelector('#campaignPaymentDialog') : null;
+  if (dialog && window.TMAccessibility) window.TMAccessibility.closeDialog(dialog);
+  if (overlay) overlay.remove();
+  pendingPaymentCollabId = null;
+  pendingPaymentEntryId = null;
+}
+async function submitCampaignPayment() {
+  var collab = findCollaborationById(pendingPaymentCollabId);
+  if (!isCampaignCollaboration(collab) || !m4PaymentSettlement(collab).can_record) {
+    toast('订单状态已变化，请刷新后重试。', 'error');
+    return;
+  }
+  var amount = Number(document.getElementById('paymentAmount')?.value);
+  var paidAtValue = String(document.getElementById('paymentPaidAt')?.value || '').trim();
+  var paidAtDate = new Date(paidAtValue);
+  var paymentReference = String(document.getElementById('paymentReference')?.value || '').trim();
+  var counterpartyName = String(document.getElementById('paymentCounterparty')?.value || '').trim();
+  var paymentNote = String(document.getElementById('paymentNote')?.value || '').trim();
+  if (!Number.isSafeInteger(amount) || amount < 1) { toast('金额必须为正整数。', 'error'); return; }
+  if (!paidAtValue || !Number.isFinite(paidAtDate.getTime())) { toast('请选择有效的交易时间。', 'error'); return; }
+  if (!paymentReference || !counterpartyName || !paymentNote) { toast('请完整填写交易参考号、交易对方和登记说明。', 'error'); return; }
+  var intent = {
+    direction: document.getElementById('paymentDirection')?.value || '',
+    amount: amount,
+    paid_at: paidAtDate.toISOString(),
+    payment_method: document.getElementById('paymentMethod')?.value || '',
+    payment_reference: paymentReference,
+    counterparty_name: counterpartyName,
+    tranche: document.getElementById('paymentTranche')?.value || '',
+    payment_note: paymentNote
+  };
+  var mutationSlot = m4CollabMutationSlot(collab, intent, 'payment-record');
+  if (m4CollabMutationInFlight[mutationSlot]) { toast('收付款正在保存，请勿重复点击。'); return m4CollabMutationInFlight[mutationSlot]; }
+  var request = apiFetch('/collaborations/' + collab.id + '/payments', {
+    method: 'POST',
+    headers: m4MutationHeaders('m4-payment-record-', m4CollabMutationOperationKey(mutationSlot, 'm4-payment-record-')),
+    body: JSON.stringify(Object.assign({
+      campaign_id: Number(collab.campaign_id),
+      expected_version: Number(collab.row_version)
+    }, intent))
+  }).then(async function(response) {
+    var data = await response.json();
+    if (!response.ok) { var error = new Error(data.error || '收付款保存失败'); error.code = data.code; throw error; }
+    return data;
+  });
+  m4CollabMutationInFlight[mutationSlot] = request;
+  try {
+    await request;
+    closeCampaignPaymentModal();
+    toast('收付款记录已保存');
+    await loadCollaborations();
+  } catch (error) {
+    toast(error.message || '收付款保存失败', 'error');
+    if (error.code === 'STALE_COLLABORATION_VERSION' || error.code === 'PAYMENT_EVIDENCE_EXISTS') await loadCollaborations();
+  } finally {
+    if (m4CollabMutationInFlight[mutationSlot] === request) delete m4CollabMutationInFlight[mutationSlot];
+  }
+}
+async function voidCampaignPayment(paymentId) {
+  var collab = findCollaborationById(pendingPaymentCollabId);
+  var ledger = m4PaymentSettlement(collab);
+  var entry = ledger.entries.find(function(item) { return Number(item.id) === Number(paymentId); });
+  if (!isCampaignCollaboration(collab) || !entry || entry.can_void !== true) { toast('该记录当前不可作废。', 'error'); return; }
+  var reason = typeof window.prompt === 'function' ? String(window.prompt('请输入作废原因') || '').trim() : '';
+  if (!reason || Array.from(reason).length > 1000) { toast('请填写 1 至 1000 个字符的作废原因。', 'error'); return; }
+  pendingPaymentEntryId = Number(paymentId);
+  var intent = { payment_entry_id: Number(paymentId), void_reason: reason };
+  var mutationSlot = m4CollabMutationSlot(collab, intent, 'payment-void');
+  if (m4CollabMutationInFlight[mutationSlot]) { toast('作废操作正在提交，请勿重复点击。'); return m4CollabMutationInFlight[mutationSlot]; }
+  var request = apiFetch('/collaborations/' + collab.id + '/payments/' + Number(paymentId) + '/void', {
+    method: 'POST',
+    headers: m4MutationHeaders('m4-payment-void-', m4CollabMutationOperationKey(mutationSlot, 'm4-payment-void-')),
+    body: JSON.stringify({
+      campaign_id: Number(collab.campaign_id),
+      expected_version: Number(collab.row_version),
+      void_reason: reason
+    })
+  }).then(async function(response) {
+    var data = await response.json();
+    if (!response.ok) { var error = new Error(data.error || '作废失败'); error.code = data.code; throw error; }
+    return data;
+  });
+  m4CollabMutationInFlight[mutationSlot] = request;
+  try {
+    await request;
+    closeCampaignPaymentModal();
+    toast('收付款记录已作废');
+    await loadCollaborations();
+  } catch (error) {
+    toast(error.message || '作废失败', 'error');
+    if (error.code === 'STALE_COLLABORATION_VERSION') await loadCollaborations();
+  } finally {
+    if (m4CollabMutationInFlight[mutationSlot] === request) delete m4CollabMutationInFlight[mutationSlot];
+  }
+}
 function openCampaignSettlementModal(collab) {
   pendingSettlementCollabId = Number(collab.id);
   var existing = document.getElementById('campaignSettlementModal');
@@ -7201,66 +7453,170 @@ function openCampaignSettlementModal(collab) {
   overlay.className = 'modal-overlay';
   overlay.onclick = function(event) { if (event.target === overlay) closeCampaignSettlementModal(); };
   var resource = collabResource(collab);
-  var currency = resource.schema === 'turingmarket.collaboration-order.v2' && /^[A-Z]{3}$/.test(String(resource.currency || ''))
-    ? resource.currency
-    : 'USD';
-  var initialCost = collab.cost_actual !== undefined && collab.cost_actual !== null
-    ? collab.cost_actual
-    : (collab.cost_quoted !== undefined && collab.cost_quoted !== null ? collab.cost_quoted : 0);
+  var ledger = m4PaymentSettlement(collab);
+  var isV2 = resource.schema === 'turingmarket.collaboration-order.v2';
+  var currency = isV2 && /^[A-Z]{3}$/.test(String(resource.currency || '')) ? resource.currency : 'USD';
+  var bodyHtml;
+  if (isV2) {
+    var hasVariance = ledger.creator_payment_total !== ledger.expected_creator_cost || ledger.client_receipt_total !== ledger.expected_client_receipt;
+    var zeroValue = ledger.active_entry_count === 0 && ledger.expected_creator_cost === 0 && ledger.expected_client_receipt === 0;
+    bodyHtml = '<div style="font-size:12px;line-height:1.65;padding:9px 10px;background:var(--surface2);border-radius:var(--radius-sm);margin-bottom:12px">' +
+      '达人付款：' + esc(currency) + ' ' + esc(m4CommercialValueText(ledger.creator_payment_total)) + ' / ' + esc(m4CommercialValueText(ledger.expected_creator_cost)) + '<br>' +
+      '客户回款：' + esc(currency) + ' ' + esc(m4CommercialValueText(ledger.client_receipt_total)) + ' / ' + esc(m4CommercialValueText(ledger.expected_client_receipt)) + '<br>' +
+      '有效记录：' + esc(m4CommercialValueText(ledger.active_entry_count)) + ' 笔</div>' +
+      '<div><label>结算说明</label><textarea id="settlementNote" maxlength="1000" rows="4"></textarea></div>' +
+      (hasVariance ? '<div style="margin-top:10px"><label>差异说明</label><textarea id="settlementVarianceReason" maxlength="1000" rows="3" placeholder="说明实付 / 实收与订单金额不一致的原因"></textarea></div>' : '<input id="settlementVarianceReason" type="hidden" value="">') +
+      (zeroValue ? '<div style="margin-top:10px"><label>零金额说明</label><textarea id="settlementZeroValueReason" maxlength="1000" rows="3"></textarea></div>' : '<input id="settlementZeroValueReason" type="hidden" value="">');
+  } else {
+    var initialCost = collab.cost_actual !== undefined && collab.cost_actual !== null ? collab.cost_actual : (collab.cost_quoted || 0);
+    bodyHtml = '<div><label>实际结算成本（' + esc(currency) + '，整数）</label><input id="settlementActualCost" type="number" min="0" step="1" value="' + esc(m4CommercialValueText(initialCost)) + '"></div>' +
+      '<label style="display:flex;align-items:center;gap:8px;margin-top:14px;font-size:12px;text-transform:none;letter-spacing:0;opacity:1"><input id="settlementCostConfirmed" type="checkbox" style="width:16px;height:16px;min-width:16px">我已核对并确认实际结算成本</label>';
+  }
   overlay.innerHTML = '<div class="modal" id="campaignSettlementDialog" role="dialog" aria-modal="true" aria-labelledby="campaignSettlementDialogTitle" onclick="event.stopPropagation()">' +
-    '<button type="button" class="modal-close" aria-label="关闭结算确认" title="关闭结算确认" onclick="closeCampaignSettlementModal()">&times;</button>' +
-    '<h3 id="campaignSettlementDialogTitle">确认结算</h3>' +
+    '<button type="button" class="modal-close" aria-label="关闭结算提交" title="关闭结算提交" onclick="closeCampaignSettlementModal()">&times;</button>' +
+    '<h3 id="campaignSettlementDialogTitle">' + (isV2 ? '提交结算' : '确认结算') + '</h3>' +
     '<p style="font-size:12px;opacity:.65;margin-bottom:12px">' + esc(collab.kol_handle || '') + ' · ' + esc(collab.campaign_name || ('活动 #' + collab.campaign_id)) + '</p>' +
-    '<div><label>实际结算成本（' + esc(currency) + '，整数）</label><input id="settlementActualCost" type="number" min="0" step="1" value="' + esc(m4CommercialValueText(initialCost)) + '"></div>' +
-    '<label style="display:flex;align-items:center;gap:8px;margin-top:14px;font-size:12px;text-transform:none;letter-spacing:0;opacity:1"><input id="settlementCostConfirmed" type="checkbox" style="width:16px;height:16px;min-width:16px">我已核对并确认实际结算成本</label>' +
-    '<div class="btn-group" style="justify-content:flex-end"><button type="button" class="btn btn-outline" onclick="closeCampaignSettlementModal()">取消</button><button type="button" class="btn btn-primary" onclick="submitCampaignSettlement()">确认结算</button></div>' +
+    bodyHtml +
+    '<div class="btn-group" style="justify-content:flex-end"><button type="button" class="btn btn-outline" onclick="closeCampaignSettlementModal()">取消</button><button type="button" class="btn btn-primary" onclick="submitCampaignSettlement()">' + (isV2 ? '提交审核' : '确认结算') + '</button></div>' +
     '</div>';
   document.body.appendChild(overlay);
   if (window.TMAccessibility) window.TMAccessibility.openDialog(document.getElementById('campaignSettlementDialog'), document.activeElement, closeCampaignSettlementModal);
 }
 function closeCampaignSettlementModal() {
   var overlay = document.getElementById('campaignSettlementModal');
-  var dialog = overlay ? overlay.querySelector('#campaignSettlementDialog') : null;
+  var dialog = overlay && typeof overlay.querySelector === 'function' ? overlay.querySelector('#campaignSettlementDialog') : null;
   if (dialog && window.TMAccessibility) window.TMAccessibility.closeDialog(dialog);
   if (overlay) overlay.remove();
   pendingSettlementCollabId = null;
 }
 async function submitCampaignSettlement() {
   var collab = findCollaborationById(pendingSettlementCollabId);
-  var cost = Number(document.getElementById('settlementActualCost')?.value);
-  var confirmed = document.getElementById('settlementCostConfirmed')?.checked === true;
-  if (!Number.isSafeInteger(cost) || cost < 0) {
-    toast('实际结算成本必须是非负整数。', 'error');
+  if (!isCampaignCollaboration(collab)) { toast('活动订单已变化，请刷新后重试。', 'error'); return; }
+  var resource = collabResource(collab);
+  if (resource.schema !== 'turingmarket.collaboration-order.v2') {
+    var cost = Number(document.getElementById('settlementActualCost')?.value);
+    var confirmed = document.getElementById('settlementCostConfirmed')?.checked === true;
+    if (!Number.isSafeInteger(cost) || cost < 0) { toast('实际结算成本必须是非负整数。', 'error'); return; }
+    if (!confirmed) { toast('请先确认实际结算成本。', 'error'); return; }
+    var patch = { status: 'completed', campaign_relation: 'settlement', cost_actual: cost, confirm_cost_actual: true, reason: '从下单工作台确认结算成本' };
+    try {
+      await submitCampaignCollabUpdate(collab, patch, 'settlement');
+      closeCampaignSettlementModal();
+      toast('活动订单已完成结算');
+      await loadCollaborations();
+    } catch (error) { toast(error.message, 'error'); await loadCollaborations(); }
     return;
   }
-  if (!confirmed) {
-    toast('请先确认实际结算成本。', 'error');
-    return;
-  }
-  if (!isCampaignCollaboration(collab)) {
-    toast('活动订单已变化，请刷新后重试。', 'error');
-    return;
-  }
-  var patch = {
-    status: 'completed',
-    campaign_relation: 'settlement',
-    cost_actual: cost,
-    confirm_cost_actual: true,
-    reason: '从下单工作台确认结算成本'
-  };
-  var mutationSlot = m4CollabMutationSlot(collab, patch, 'settlement');
-  if (m4CollabMutationInFlight[mutationSlot]) {
-    toast('结算正在提交，请勿重复点击。');
-    return;
-  }
+  var ledger = m4PaymentSettlement(collab);
+  if (!ledger.can_submit) { toast('当前付款凭证尚未达到提交条件。', 'error'); return; }
+  var settlementNote = String(document.getElementById('settlementNote')?.value || '').trim();
+  var varianceReason = String(document.getElementById('settlementVarianceReason')?.value || '').trim();
+  var zeroValueReason = String(document.getElementById('settlementZeroValueReason')?.value || '').trim();
+  var hasVariance = ledger.creator_payment_total !== ledger.expected_creator_cost || ledger.client_receipt_total !== ledger.expected_client_receipt;
+  var zeroValue = ledger.active_entry_count === 0 && ledger.expected_creator_cost === 0 && ledger.expected_client_receipt === 0;
+  if (!settlementNote || Array.from(settlementNote).length > 1000) { toast('请填写 1 至 1000 个字符的结算说明。', 'error'); return; }
+  if (hasVariance && !varianceReason) { toast('金额存在差异，请填写差异说明。', 'error'); return; }
+  if (zeroValue && !zeroValueReason) { toast('零金额订单必须填写说明。', 'error'); return; }
+  var intent = { settlement_note: settlementNote, variance_reason: varianceReason, zero_value_reason: zeroValueReason };
+  var mutationSlot = m4CollabMutationSlot(collab, intent, 'settlement-submit');
+  if (m4CollabMutationInFlight[mutationSlot]) { toast('结算正在提交，请勿重复点击。'); return m4CollabMutationInFlight[mutationSlot]; }
+  var body = { campaign_id: Number(collab.campaign_id), expected_version: Number(collab.row_version), settlement_note: settlementNote };
+  if (varianceReason) body.variance_reason = varianceReason;
+  if (zeroValueReason) body.zero_value_reason = zeroValueReason;
+  var request = apiFetch('/collaborations/' + collab.id + '/settlement-submissions', {
+    method: 'POST',
+    headers: m4MutationHeaders('m4-settlement-submit-', m4CollabMutationOperationKey(mutationSlot, 'm4-settlement-submit-')),
+    body: JSON.stringify(body)
+  }).then(async function(response) {
+    var data = await response.json();
+    if (!response.ok) { var error = new Error(data.error || '结算提交失败'); error.code = data.code; throw error; }
+    return data;
+  });
+  m4CollabMutationInFlight[mutationSlot] = request;
   try {
-    await submitCampaignCollabUpdate(collab, patch, 'settlement');
+    await request;
     closeCampaignSettlementModal();
-    toast('活动订单已完成结算');
-    loadCollaborations();
+    toast('结算已提交，等待独立审核');
+    await loadCollaborations();
   } catch (error) {
-    toast(error.message, 'error');
-    loadCollaborations();
+    toast(error.message || '结算提交失败', 'error');
+    if (error.code === 'STALE_COLLABORATION_VERSION') await loadCollaborations();
+  } finally {
+    if (m4CollabMutationInFlight[mutationSlot] === request) delete m4CollabMutationInFlight[mutationSlot];
+  }
+}
+function openCampaignSettlementDecisionModal(collab) {
+  var ledger = m4PaymentSettlement(collab);
+  if (!ledger.can_decide || !ledger.current_submission) { toast('当前没有可审核的结算。', 'error'); return; }
+  pendingSettlementCollabId = Number(collab.id);
+  var existing = document.getElementById('campaignSettlementDecisionModal');
+  if (existing) existing.remove();
+  var submission = ledger.current_submission;
+  var overlay = document.createElement('div');
+  overlay.id = 'campaignSettlementDecisionModal';
+  overlay.className = 'modal-overlay';
+  overlay.onclick = function(event) { if (event.target === overlay) closeCampaignSettlementDecisionModal(); };
+  overlay.innerHTML = '<div class="modal" id="campaignSettlementDecisionDialog" role="dialog" aria-modal="true" aria-labelledby="campaignSettlementDecisionTitle" onclick="event.stopPropagation()">' +
+    '<button type="button" class="modal-close" aria-label="关闭结算审核" title="关闭结算审核" onclick="closeCampaignSettlementDecisionModal()">&times;</button>' +
+    '<h3 id="campaignSettlementDecisionTitle">审核结算</h3>' +
+    '<p style="font-size:12px;opacity:.65;margin-bottom:12px">' + esc(collab.kol_handle || '') + ' · ' + esc(collab.campaign_name || ('活动 #' + collab.campaign_id)) + '</p>' +
+    '<div style="font-size:12px;line-height:1.65;padding:9px 10px;background:var(--surface2);border-radius:var(--radius-sm)">' +
+    '达人付款：' + esc(submission.currency || ledger.currency || '---') + ' ' + esc(m4CommercialValueText(submission.creator_payment_total)) + '<br>' +
+    '客户回款：' + esc(submission.currency || ledger.currency || '---') + ' ' + esc(m4CommercialValueText(submission.client_receipt_total)) + '<br>' +
+    '提交人：' + esc(submission.submitted_by_name || ('用户 #' + submission.submitted_by)) + '<br>' +
+    '结算说明：' + esc(submission.settlement_note || '-') +
+    (submission.variance_reason ? '<br>差异说明：' + esc(submission.variance_reason) : '') + '</div>' +
+    '<div style="margin-top:12px"><label>审核结论</label><select id="settlementDecision"><option value="approved">通过并结算</option><option value="changes_requested">退回调整</option></select></div>' +
+    '<div style="margin-top:10px"><label>审核说明</label><textarea id="settlementDecisionNote" maxlength="1000" rows="4"></textarea></div>' +
+    '<div class="btn-group" style="justify-content:flex-end"><button type="button" class="btn btn-outline" onclick="closeCampaignSettlementDecisionModal()">取消</button><button type="button" class="btn btn-primary" onclick="submitCampaignSettlementDecision()">确认审核</button></div>' +
+    '</div>';
+  document.body.appendChild(overlay);
+  if (window.TMAccessibility) window.TMAccessibility.openDialog(document.getElementById('campaignSettlementDecisionDialog'), document.activeElement, closeCampaignSettlementDecisionModal);
+}
+function closeCampaignSettlementDecisionModal() {
+  var overlay = document.getElementById('campaignSettlementDecisionModal');
+  var dialog = overlay && typeof overlay.querySelector === 'function' ? overlay.querySelector('#campaignSettlementDecisionDialog') : null;
+  if (dialog && window.TMAccessibility) window.TMAccessibility.closeDialog(dialog);
+  if (overlay) overlay.remove();
+  pendingSettlementCollabId = null;
+}
+async function submitCampaignSettlementDecision() {
+  var collab = findCollaborationById(pendingSettlementCollabId);
+  var ledger = m4PaymentSettlement(collab);
+  if (!isCampaignCollaboration(collab) || !ledger.can_decide || !ledger.current_submission) { toast('待审核结算已变化，请刷新后重试。', 'error'); return; }
+  var decision = String(document.getElementById('settlementDecision')?.value || '').trim();
+  var reviewNote = String(document.getElementById('settlementDecisionNote')?.value || '').trim();
+  if (!['approved', 'changes_requested'].includes(decision)) { toast('请选择有效的审核结论。', 'error'); return; }
+  if (!reviewNote || Array.from(reviewNote).length > 1000) { toast('请填写 1 至 1000 个字符的审核说明。', 'error'); return; }
+  var intent = { submission_entry_id: Number(ledger.current_submission.id), decision: decision, review_note: reviewNote };
+  var mutationSlot = m4CollabMutationSlot(collab, intent, 'settlement-decision');
+  if (m4CollabMutationInFlight[mutationSlot]) { toast('结算审核正在提交，请勿重复点击。'); return m4CollabMutationInFlight[mutationSlot]; }
+  var request = apiFetch('/collaborations/' + collab.id + '/settlement-decisions', {
+    method: 'POST',
+    headers: m4MutationHeaders('m4-settlement-decision-', m4CollabMutationOperationKey(mutationSlot, 'm4-settlement-decision-')),
+    body: JSON.stringify({
+      campaign_id: Number(collab.campaign_id),
+      expected_version: Number(collab.row_version),
+      submission_entry_id: Number(ledger.current_submission.id),
+      decision: decision,
+      review_note: reviewNote
+    })
+  }).then(async function(response) {
+    var data = await response.json();
+    if (!response.ok) { var error = new Error(data.error || '结算审核失败'); error.code = data.code; throw error; }
+    return data;
+  });
+  m4CollabMutationInFlight[mutationSlot] = request;
+  try {
+    await request;
+    closeCampaignSettlementDecisionModal();
+    toast(decision === 'approved' ? '结算审核已通过' : '结算已退回调整');
+    await loadCollaborations();
+  } catch (error) {
+    toast(error.message || '结算审核失败', 'error');
+    if (error.code === 'STALE_COLLABORATION_VERSION' || error.code === 'SETTLEMENT_INDEPENDENT_REVIEW_REQUIRED') await loadCollaborations();
+  } finally {
+    if (m4CollabMutationInFlight[mutationSlot] === request) delete m4CollabMutationInFlight[mutationSlot];
   }
 }
 // ===== M5: AI ASSISTANT (v8.0) =====
@@ -10821,7 +11177,7 @@ function switchPage(id, options) {
     'getEditedDemand', 'syncCurDemandFromAnalysis', 'handleDemandFile', 'analyzeDemandAI',
     'switchTab', 'matchInfluencers', 'smartMatch', 'handleUpload', 'handleDrop', 'openInfUploadModal', 'closeInfUploadModal', 'handleUploadModal', 'handleInfluencerModalDrop', 'validateInfluencerImportMapping', 'confirmInfluencerImport', 'downloadInfluencerImportErrors', 'downloadInfTemplate', 'exportAll', 'exportFiltered', 'exportSelected',
     'saveM4SavedView', 'applyM4SavedView', 'deleteM4SavedView', 'clearM4Filters',
-    'toggleAll', 'syncInfluencerSelectionState', 'loadM4Campaigns', 'changeM4CampaignContext', 'startCollab', 'submitCollabOrder', 'closeCollabOrderModal', 'loadCollaborations', 'updateCollabStatus', 'runCampaignCollabAction', 'closeCampaignContractConfirmationModal', 'submitCampaignContractConfirmation', 'closeCampaignContentReviewModal', 'submitCampaignContentReview', 'closeCampaignContentReviewDecisionModal', 'submitCampaignContentReviewDecision', 'closeCampaignSettlementModal', 'submitCampaignSettlement',
+    'toggleAll', 'syncInfluencerSelectionState', 'loadM4Campaigns', 'changeM4CampaignContext', 'startCollab', 'submitCollabOrder', 'closeCollabOrderModal', 'loadCollaborations', 'updateCollabStatus', 'runCampaignCollabAction', 'closeCampaignContractConfirmationModal', 'submitCampaignContractConfirmation', 'closeCampaignContentReviewModal', 'submitCampaignContentReview', 'closeCampaignContentReviewDecisionModal', 'submitCampaignContentReviewDecision', 'openCampaignPaymentModal', 'closeCampaignPaymentModal', 'submitCampaignPayment', 'voidCampaignPayment', 'closeCampaignSettlementModal', 'submitCampaignSettlement', 'openCampaignSettlementDecisionModal', 'closeCampaignSettlementDecisionModal', 'submitCampaignSettlementDecision',
     'initPerformanceMonitor', 'initPerformanceDashboard', 'refreshPerformanceMonitor', 'refreshPerformanceDashboard', 'changePerformanceCampaignContext', 'handlePerformanceTopMetricChange', 'refreshPerformanceReviewEvidence', 'generatePerformanceAiReviewDraft', 'loadPerformanceContents', 'loadPerformanceIntegrationPreview', 'loadPerformanceFeishuConnection', 'savePerformanceFeishuConnectionDraft', 'approvePerformanceFeishuConnectionDraft', 'createPerformanceContent', 'downloadPerformanceTemplate', 'handlePerformanceImport', 'handlePerformanceDrop', 'downloadPerformanceMetricsTemplate', 'handlePerformanceMetricsImport', 'handlePerformanceMetricsDrop', 'openPerformanceInputModal', 'closePerformanceInputModal', 'savePerformanceInput', 'loadPerformanceDashboard', 'loadPerformanceReviewEvidence', 'debouncedPerformanceContentSearch', 'exportPerformanceContents',
     'sendChat', 'clearChat', 'clearAIMemory', 'pushToFeishu', 'loadFeishuStatus', 'loadFeishuOutbox', 'testFeishuConnection', 'selectFeishuReconciliationDelivery', 'reconcileFeishuDelivery', 'selectFeishuRetryDelivery', 'retryFeishuDelivery',
     'switchAdminTab', 'loadAdminDashboard', 'loadAdminUsers', 'adminAddUser', 'adminCreateInvite', 'adminResetPw',

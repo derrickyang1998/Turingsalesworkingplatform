@@ -3102,3 +3102,134 @@ test('m4 frontend keeps import, feishu, and order-resource controls wired', () =
     assert.match(inlineHandlerBlock, new RegExp("'" + name + "'"), `${name} must remain exported for inline handlers`);
   }
 });
+
+test('payment and settlement routes forward the financial checkpoint contracts', async () => {
+  const db = freshDb();
+  const baseService = createCampaignCollaborationService(db);
+  const captured = [];
+  const paymentSettlement = {
+    status: 'recording',
+    currency: 'USD',
+    creator_payment_total: 40,
+    client_receipt_total: 150,
+    entries: [],
+    current_submission: null,
+    latest_decision: null
+  };
+  const routes = mountRoutes(db, {
+    campaignCollaborationService: Object.assign({}, baseService, {
+      recordPayment(input) {
+        captured.push({ method: 'record', input });
+        return { status: 201, body: { success: true, payment_settlement: paymentSettlement } };
+      },
+      listPayments(input) {
+        captured.push({ method: 'list', input });
+        return { collaboration_id: 71, payment_settlement: paymentSettlement };
+      },
+      voidPayment(input) {
+        captured.push({ method: 'void', input });
+        return { status: 201, body: { success: true, payment_settlement: paymentSettlement } };
+      },
+      submitSettlement(input) {
+        captured.push({ method: 'submit', input });
+        return { status: 201, body: { success: true, payment_settlement: { ...paymentSettlement, status: 'pending_review' } } };
+      },
+      decideSettlement(input) {
+        captured.push({ method: 'decide', input });
+        return { status: 201, body: { success: true, payment_settlement: { ...paymentSettlement, status: 'settled' } } };
+      }
+    })
+  });
+  const recordBody = {
+    campaign_id: 41,
+    expected_version: 8,
+    direction: 'creator_payment',
+    amount: 40,
+    paid_at: '2026-09-08T12:00:00.000Z',
+    payment_method: 'bank_transfer',
+    payment_reference: 'CREATOR-ROUTE-8201',
+    counterparty_name: 'Creator Studio LLC',
+    tranche: 'deposit',
+    payment_note: 'Creator deposit verified.'
+  };
+  const voidBody = {
+    campaign_id: 41,
+    expected_version: 9,
+    void_reason: 'Reference assigned to the wrong tranche.'
+  };
+  const submissionBody = {
+    campaign_id: 41,
+    expected_version: 10,
+    settlement_note: 'Active payments reconciled.'
+  };
+  const decisionBody = {
+    campaign_id: 41,
+    expected_version: 11,
+    submission_entry_id: 91,
+    decision: 'approved',
+    review_note: 'Independent financial review completed.'
+  };
+
+  const malformed = await invoke(routes, 'POST /api/collaborations/:id/payments', {
+    params: { id: '071' },
+    body: recordBody,
+    headers: { 'Idempotency-Key': 'route-payment-invalid-id' }
+  });
+  assert.equal(malformed.statusCode, 400);
+  assert.equal(malformed.payload.code, 'INVALID_COLLABORATION_ID');
+  assert.equal(captured.length, 0);
+
+  const recorded = await invoke(routes, 'POST /api/collaborations/:id/payments', {
+    params: { id: '71' },
+    body: recordBody,
+    headers: { 'Idempotency-Key': 'route-payment-record-0001' }
+  });
+  assert.equal(recorded.statusCode, 201);
+  const listed = await invoke(routes, 'GET /api/collaborations/:id/payments', {
+    params: { id: '71' }
+  });
+  assert.equal(listed.payload.payment_settlement.creator_payment_total, 40);
+  const voided = await invoke(routes, 'POST /api/collaborations/:id/payments/:paymentId/void', {
+    params: { id: '71', paymentId: '91' },
+    body: voidBody,
+    headers: { 'Idempotency-Key': 'route-payment-void-0001' }
+  });
+  assert.equal(voided.statusCode, 201);
+  const submitted = await invoke(routes, 'POST /api/collaborations/:id/settlement-submissions', {
+    params: { id: '71' },
+    body: submissionBody,
+    headers: { 'Idempotency-Key': 'route-settlement-submit-0001' }
+  });
+  assert.equal(submitted.payload.payment_settlement.status, 'pending_review');
+  const decided = await invoke(routes, 'POST /api/collaborations/:id/settlement-decisions', {
+    params: { id: '71' },
+    body: decisionBody,
+    headers: { 'Idempotency-Key': 'route-settlement-decision-0001' }
+  });
+  assert.equal(decided.payload.payment_settlement.status, 'settled');
+
+  assert.deepEqual(captured.map((entry) => entry.method), ['record', 'list', 'void', 'submit', 'decide']);
+  assert.deepEqual(captured[0].input, {
+    userId: 2,
+    collaborationId: 71,
+    requestId: 'campaign-link-request',
+    idempotencyKey: 'route-payment-record-0001',
+    body: recordBody
+  });
+  assert.deepEqual(captured[2].input, {
+    userId: 2,
+    collaborationId: 71,
+    paymentId: 91,
+    requestId: 'campaign-link-request',
+    idempotencyKey: 'route-payment-void-0001',
+    body: voidBody
+  });
+  assert.deepEqual(captured[4].input, {
+    userId: 2,
+    collaborationId: 71,
+    requestId: 'campaign-link-request',
+    idempotencyKey: 'route-settlement-decision-0001',
+    body: decisionBody
+  });
+  db.close();
+});

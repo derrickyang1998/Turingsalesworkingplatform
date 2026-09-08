@@ -1926,6 +1926,20 @@ test('linked knowledge rejects reserved deep and oversized inputs before mutatio
       }),
       await jsonRequest(fixture.server, '/api/knowledge', {
         token: fixture.token,
+        idempotencyKey: 'wave2-reserved-payment-source',
+        body: knowledgeBody(fixture.campaignId, 'reserved-payment-source', {
+          source_type: 'collaboration_payment_settlement'
+        })
+      }),
+      await jsonRequest(fixture.server, '/api/knowledge', {
+        token: fixture.token,
+        idempotencyKey: 'wave2-reserved-payment-entry',
+        body: knowledgeBody(fixture.campaignId, 'reserved-payment-entry', {
+          entry_type: 'collaboration_payment_settlement'
+        })
+      }),
+      await jsonRequest(fixture.server, '/api/knowledge', {
+        token: fixture.token,
         idempotencyKey: 'wave2-deep-metadata',
         body: knowledgeBody(fixture.campaignId, 'deep-metadata', { metadata: nested })
       }),
@@ -1944,6 +1958,8 @@ test('linked knowledge rejects reserved deep and oversized inputs before mutatio
       { status: 400, code: 'INVALID_CAMPAIGN_INPUT' },
       { status: 400, code: 'INVALID_CAMPAIGN_INPUT' },
       { status: 400, code: 'INVALID_CAMPAIGN_INPUT' },
+      { status: 400, code: 'INVALID_CAMPAIGN_INPUT' },
+      { status: 400, code: 'INVALID_CAMPAIGN_INPUT' },
       { status: 413, code: 'KNOWLEDGE_ENTRY_TOO_LARGE' }
     ]);
     assert.deepEqual(fixture.db.prepare(`
@@ -1952,13 +1968,15 @@ test('linked knowledge rejects reserved deep and oversized inputs before mutatio
           WHERE source_id IN (
             'reserved-source','reserved-contract-source','reserved-contract-entry',
             'reserved-content-review-source','reserved-content-review-entry',
+            'reserved-payment-source','reserved-payment-entry',
             'deep-metadata','oversized-response'
           )) AS entries,
         (SELECT COUNT(*) FROM request_idempotency
           WHERE idempotency_key IN (
             'wave2-reserved-source','wave2-reserved-contract-source',
             'wave2-reserved-contract-entry','wave2-reserved-content-review-source',
-            'wave2-reserved-content-review-entry','wave2-deep-metadata','wave2-oversized-response'
+            'wave2-reserved-content-review-entry','wave2-reserved-payment-source',
+            'wave2-reserved-payment-entry','wave2-deep-metadata','wave2-oversized-response'
           )) AS ledgers
     `).get(), { entries: 0, ledgers: 0 });
   } finally {

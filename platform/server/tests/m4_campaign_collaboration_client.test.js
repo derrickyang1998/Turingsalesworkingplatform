@@ -50,6 +50,9 @@ function loadFunctions(context, names) {
     'var pendingCollabCreateIntentId = null;',
     'var pendingContractCollabId = null;',
     'var pendingContentReviewCollabId = null;',
+    'var pendingPaymentCollabId = null;',
+    'var pendingPaymentEntryId = null;',
+    'var pendingSettlementCollabId = null;',
     'var m4CollabMutationOperations = {};',
     'var m4CollabMutationInFlight = {};'
   ].join('\n'), context);
@@ -123,7 +126,20 @@ function createClientContext() {
     contentReviewVersion: element({ value: 'V1 client review' }),
     contentReviewSubmissionNote: element({ value: 'Opening hook and product demo are ready for review.' }),
     contentReviewDecision: element({ value: 'approved' }),
-    contentReviewDecisionNote: element({ value: 'Hook, claims, CTA, and brand safety are approved.' })
+    contentReviewDecisionNote: element({ value: 'Hook, claims, CTA, and brand safety are approved.' }),
+    paymentDirection: element({ value: 'creator_payment' }),
+    paymentAmount: element({ value: '800' }),
+    paymentPaidAt: element({ value: '2026-09-08T12:00' }),
+    paymentMethod: element({ value: 'bank_transfer' }),
+    paymentReference: element({ value: 'CREATOR-CLIENT-501' }),
+    paymentCounterparty: element({ value: 'Creator Studio LLC' }),
+    paymentTranche: element({ value: 'full' }),
+    paymentNote: element({ value: 'Payment verified by the campaign operator.' }),
+    settlementNote: element({ value: 'Receipts and creator payments reconciled.' }),
+    settlementVarianceReason: element({ value: '' }),
+    settlementZeroValueReason: element({ value: '' }),
+    settlementDecision: element({ value: 'approved' }),
+    settlementDecisionNote: element({ value: 'Independent financial review completed.' })
   };
   const campaign = {
     id: 91,
@@ -148,6 +164,9 @@ function createClientContext() {
         }),
         content_review: row.content_review
           ? JSON.parse(JSON.stringify(row.content_review))
+          : null,
+        payment_settlement: row.payment_settlement
+          ? JSON.parse(JSON.stringify(row.payment_settlement))
           : null
       });
     });
@@ -203,6 +222,24 @@ function createClientContext() {
         current_submission: null,
         latest_decision: null,
         events: []
+      },
+      payment_settlement: {
+        status: 'not_started',
+        currency: resource.currency,
+        expected_creator_cost: resource.creator_cost,
+        expected_client_receipt: resource.client_quote,
+        creator_payment_total: 0,
+        client_receipt_total: 0,
+        creator_payment_remaining: resource.creator_cost,
+        client_receipt_remaining: resource.client_quote,
+        active_entry_count: 0,
+        entries: [],
+        current_submission: null,
+        latest_decision: null,
+        events: [],
+        can_record: false,
+        can_submit: false,
+        can_decide: false
       },
       proposal_notes: JSON.stringify(resource),
       project_name: resource.project_name,
@@ -524,6 +561,8 @@ const m4Functions = [
   'collabResource',
   'm4ContentReview',
   'm4ContentReviewStatusLabel',
+  'm4PaymentSettlement',
+  'm4PaymentSettlementStatusLabel',
   'm4SafeContentReviewUrl',
   'm4ContractDocuments',
   'm4ContractDocumentFingerprint',
@@ -534,6 +573,7 @@ const m4Functions = [
   'renderCampaignCollabActions',
   'renderContractConfirmation',
   'renderContentReviewEvidence',
+  'renderPaymentSettlementEvidence',
   'renderCollabCommercialTerms',
   'renderCollabTable',
   'submitCampaignCollabUpdate',
@@ -547,8 +587,78 @@ const m4Functions = [
   'openCampaignContentReviewDecisionModal',
   'closeCampaignContentReviewDecisionModal',
   'submitCampaignContentReviewDecision',
-  'openCampaignSettlementModal'
+  'openCampaignPaymentModal',
+  'closeCampaignPaymentModal',
+  'submitCampaignPayment',
+  'voidCampaignPayment',
+  'openCampaignSettlementModal',
+  'closeCampaignSettlementModal',
+  'submitCampaignSettlement',
+  'openCampaignSettlementDecisionModal',
+  'closeCampaignSettlementDecisionModal',
+  'submitCampaignSettlementDecision'
 ];
+
+test('M4 renders compact financial evidence and only server-projected checkpoint actions', () => {
+  const { context } = createClientContext();
+  context.COLLAB_ORDER_TYPE_LABELS = { paid: '付费合作' };
+  context.COLLAB_RELATION_LABELS = { order: '下单', execution: '执行', publication: '发布', settlement: '结算' };
+  context.STATUS_LABELS = { completed: '已完成' };
+  loadFunctions(context, m4Functions);
+  const collaboration = {
+    id: 501,
+    campaign_id: 91,
+    campaign_name: 'Autumn launch',
+    kol_handle: '@creator',
+    status: 'completed',
+    row_version: 8,
+    proposal_notes: JSON.stringify({
+      schema: 'turingmarket.collaboration-order.v2',
+      creator_cost: 800,
+      client_quote: 1200,
+      currency: 'USD'
+    }),
+    active_relations: ['order', 'execution', 'publication'],
+    payment_settlement: {
+      status: 'ready',
+      currency: 'USD',
+      expected_creator_cost: 800,
+      expected_client_receipt: 1200,
+      creator_payment_total: 800,
+      client_receipt_total: 1200,
+      creator_payment_remaining: 0,
+      client_receipt_remaining: 0,
+      active_entry_count: 2,
+      entries: [],
+      current_submission: null,
+      latest_decision: null,
+      can_record: true,
+      can_submit: true,
+      can_decide: false
+    }
+  };
+
+  const actions = context.renderCampaignCollabActions(collaboration);
+  assert.match(actions, /录入收付款/);
+  assert.match(actions, /提交结算/);
+  assert.doesNotMatch(actions, /确认结算/);
+  const evidence = context.renderPaymentSettlementEvidence(collaboration);
+  assert.match(evidence, /达人付款：USD 800 \/ 800/);
+  assert.match(evidence, /客户回款：USD 1200 \/ 1200/);
+  assert.match(evidence, /2 笔有效记录/);
+
+  collaboration.payment_settlement = {
+    ...collaboration.payment_settlement,
+    status: 'pending_review',
+    can_record: false,
+    can_submit: false,
+    can_decide: true,
+    current_submission: { id: 92 }
+  };
+  const reviewActions = context.renderCampaignCollabActions(collaboration);
+  assert.match(reviewActions, /审核结算/);
+  assert.doesNotMatch(reviewActions, /录入收付款|提交结算/);
+});
 
 test('M4 contract document retry fingerprint distinguishes equal-size PDF contents', () => {
   const { context } = createClientContext();
@@ -646,7 +756,7 @@ test('M4 currency input, preview, and submit normalize lowercase codes to upperc
   assert.equal(JSON.parse(request.options.body).resource.currency, 'EUR');
 });
 
-test('M4 settlement labels v2 currency, defaults historical rows to USD, and preserves actual zero', () => {
+test('M4 settlement submission labels v2 ledger currency while historical rows keep direct USD confirmation', () => {
   const { context, appendedElements } = createClientContext();
   loadFunctions(context, m4Functions);
 
@@ -656,11 +766,17 @@ test('M4 settlement labels v2 currency, defaults historical rows to USD, and pre
     campaign_name: 'Launch',
     kol_handle: '@creator',
     proposal_notes: JSON.stringify({ schema: 'turingmarket.collaboration-order.v2', currency: 'EUR' }),
+    payment_settlement: {
+      status: 'ready', currency: 'EUR', expected_creator_cost: 0, expected_client_receipt: 0,
+      creator_payment_total: 0, client_receipt_total: 0, active_entry_count: 0,
+      entries: [], can_record: true, can_submit: true, can_decide: false
+    },
     cost_actual: 0,
     cost_quoted: 800
   });
-  assert.match(appendedElements.at(-1).innerHTML, /实际结算成本（EUR，整数）/);
-  assert.match(appendedElements.at(-1).innerHTML, /value="0"/);
+  assert.match(appendedElements.at(-1).innerHTML, /<h3[^>]*>提交结算<\/h3>/);
+  assert.match(appendedElements.at(-1).innerHTML, /达人付款：EUR 0 \/ 0/);
+  assert.match(appendedElements.at(-1).innerHTML, /零金额说明/);
 
   context.openCampaignSettlementModal({
     id: 502,

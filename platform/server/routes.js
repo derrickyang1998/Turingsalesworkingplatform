@@ -629,6 +629,114 @@ app.post('/api/collaborations/:id/content-review-decisions', authMiddleware, (re
   }
 });
 
+app.post('/api/collaborations/:id/payments', authMiddleware, (req, res) => {
+  try {
+    const collaborationId = canonicalPositiveRouteId(req.params.id);
+    if (collaborationId === null) {
+      return res.status(400).json({ error: 'Collaboration id is invalid.', code: 'INVALID_COLLABORATION_ID' });
+    }
+    const result = campaignCollaboration.recordPayment({
+      userId: req.user.id,
+      collaborationId,
+      requestId: collaborationRequestId(req),
+      idempotencyKey: req.get ? req.get('Idempotency-Key') : req.headers && req.headers['idempotency-key'],
+      body: req.body
+    });
+    res.status(result.status || 201).json(result.body);
+  } catch (error) {
+    const status = error.statusCode || error.status || 500;
+    const body = { error: error.message || 'Payment recording failed.', code: error.code || 'INTERNAL_ERROR' };
+    if (error.details !== undefined) body.details = error.details;
+    res.status(status).json(body);
+  }
+});
+
+app.get('/api/collaborations/:id/payments', authMiddleware, (req, res) => {
+  try {
+    const collaborationId = canonicalPositiveRouteId(req.params.id);
+    if (collaborationId === null) {
+      return res.status(400).json({ error: 'Collaboration id is invalid.', code: 'INVALID_COLLABORATION_ID' });
+    }
+    res.json(campaignCollaboration.listPayments({
+      userId: req.user.id,
+      collaborationId
+    }));
+  } catch (error) {
+    const status = error.statusCode || error.status || 500;
+    const body = { error: error.message || 'Payment history failed.', code: error.code || 'INTERNAL_ERROR' };
+    if (error.details !== undefined) body.details = error.details;
+    res.status(status).json(body);
+  }
+});
+
+app.post('/api/collaborations/:id/payments/:paymentId/void', authMiddleware, (req, res) => {
+  try {
+    const collaborationId = canonicalPositiveRouteId(req.params.id);
+    const paymentId = canonicalPositiveRouteId(req.params.paymentId);
+    if (collaborationId === null || paymentId === null) {
+      return res.status(400).json({ error: 'Payment evidence id is invalid.', code: 'INVALID_PAYMENT_ID' });
+    }
+    const result = campaignCollaboration.voidPayment({
+      userId: req.user.id,
+      collaborationId,
+      paymentId,
+      requestId: collaborationRequestId(req),
+      idempotencyKey: req.get ? req.get('Idempotency-Key') : req.headers && req.headers['idempotency-key'],
+      body: req.body
+    });
+    res.status(result.status || 201).json(result.body);
+  } catch (error) {
+    const status = error.statusCode || error.status || 500;
+    const body = { error: error.message || 'Payment void failed.', code: error.code || 'INTERNAL_ERROR' };
+    if (error.details !== undefined) body.details = error.details;
+    res.status(status).json(body);
+  }
+});
+
+app.post('/api/collaborations/:id/settlement-submissions', authMiddleware, (req, res) => {
+  try {
+    const collaborationId = canonicalPositiveRouteId(req.params.id);
+    if (collaborationId === null) {
+      return res.status(400).json({ error: 'Collaboration id is invalid.', code: 'INVALID_COLLABORATION_ID' });
+    }
+    const result = campaignCollaboration.submitSettlement({
+      userId: req.user.id,
+      collaborationId,
+      requestId: collaborationRequestId(req),
+      idempotencyKey: req.get ? req.get('Idempotency-Key') : req.headers && req.headers['idempotency-key'],
+      body: req.body
+    });
+    res.status(result.status || 201).json(result.body);
+  } catch (error) {
+    const status = error.statusCode || error.status || 500;
+    const body = { error: error.message || 'Settlement submission failed.', code: error.code || 'INTERNAL_ERROR' };
+    if (error.details !== undefined) body.details = error.details;
+    res.status(status).json(body);
+  }
+});
+
+app.post('/api/collaborations/:id/settlement-decisions', authMiddleware, (req, res) => {
+  try {
+    const collaborationId = canonicalPositiveRouteId(req.params.id);
+    if (collaborationId === null) {
+      return res.status(400).json({ error: 'Collaboration id is invalid.', code: 'INVALID_COLLABORATION_ID' });
+    }
+    const result = campaignCollaboration.decideSettlement({
+      userId: req.user.id,
+      collaborationId,
+      requestId: collaborationRequestId(req),
+      idempotencyKey: req.get ? req.get('Idempotency-Key') : req.headers && req.headers['idempotency-key'],
+      body: req.body
+    });
+    res.status(result.status || 201).json(result.body);
+  } catch (error) {
+    const status = error.statusCode || error.status || 500;
+    const body = { error: error.message || 'Settlement decision failed.', code: error.code || 'INTERNAL_ERROR' };
+    if (error.details !== undefined) body.details = error.details;
+    res.status(status).json(body);
+  }
+});
+
 app.put('/api/collaborations/:id', authMiddleware, (req, res) => {
   try {
     const request = {

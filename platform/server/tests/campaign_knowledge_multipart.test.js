@@ -827,7 +827,9 @@ test('multipart knowledge rejects reserved content review namespaces before pers
     const completion = createLifecycle(admission);
     for (const [label, body] of [
       ['reserved-review-source', { source_type: 'collaboration_content_review' }],
-      ['reserved-review-entry', { entry_type: 'collaboration_content_review' }]
+      ['reserved-review-entry', { entry_type: 'collaboration_content_review' }],
+      ['reserved-payment-source', { source_type: 'collaboration_payment_settlement' }],
+      ['reserved-payment-entry', { entry_type: 'collaboration_payment_settlement' }]
     ]) {
       assert.throws(
         () => finalizer({

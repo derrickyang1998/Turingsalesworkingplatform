@@ -34,6 +34,7 @@ const RESERVED_KNOWLEDGE_SOURCE_TYPES = new Set([
   'campaign_review',
   'collaboration_contract_confirmation',
   'collaboration_content_review',
+  'collaboration_payment_settlement',
   'campaign_workflow_reconciliation',
   'campaign_workflow_log'
 ]);
@@ -43,6 +44,7 @@ const RESERVED_KNOWLEDGE_ENTRY_TYPES = new Set([
   'campaign_review',
   'collaboration_contract_confirmation',
   'collaboration_content_review',
+  'collaboration_payment_settlement',
   'campaign_workflow'
 ]);
 const DEMAND_FIELDS = Object.freeze([

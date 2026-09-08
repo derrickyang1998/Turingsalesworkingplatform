@@ -499,6 +499,41 @@ test('content review submission, decision, and history own bounded registered po
   assert.match(serverSource, /'COLLABORATION_CONTENT_REVIEW_LIST'/);
 });
 
+test('payment ledger and settlement mutations own bounded registered policies', () => {
+  const { contract } = loadBoundary();
+  const policyNames = [
+    'COLLABORATION_PAYMENT_RECORD',
+    'COLLABORATION_PAYMENT_LIST',
+    'COLLABORATION_PAYMENT_VOID',
+    'COLLABORATION_SETTLEMENT_SUBMIT',
+    'COLLABORATION_SETTLEMENT_DECIDE'
+  ];
+  const policies = policyNames.map((name) => contract.REQUEST_POLICIES[name]);
+  assert.equal(policies.every(Boolean), true);
+  assert.deepEqual(
+    policies.map((policy) => [policy.id, policy.method, policy.pathTemplate, policy.mediaKind]),
+    [
+      ['collaboration.payment.record', 'POST', '/api/collaborations/:id/payments', contract.MEDIA_KINDS.JSON],
+      ['collaboration.payment.list', 'GET', '/api/collaborations/:id/payments', contract.MEDIA_KINDS.EMPTY],
+      ['collaboration.payment.void', 'POST', '/api/collaborations/:id/payments/:paymentId/void', contract.MEDIA_KINDS.JSON],
+      ['collaboration.settlement.submit', 'POST', '/api/collaborations/:id/settlement-submissions', contract.MEDIA_KINDS.JSON],
+      ['collaboration.settlement.decide', 'POST', '/api/collaborations/:id/settlement-decisions', contract.MEDIA_KINDS.JSON]
+    ]
+  );
+  for (const policy of policies.filter((item) => item.method === 'POST')) {
+    assert.equal(policy.maxRawBytes, contract.BODY_LIMITS.CAMPAIGN_CONTROL_JSON);
+  }
+  const registry = contract.createRoutePolicyRegistry(policies);
+  assert.equal(registry.match('POST', '/api/collaborations/41/payments').id, 'collaboration.payment.record');
+  assert.equal(registry.match('GET', '/api/collaborations/41/payments').id, 'collaboration.payment.list');
+  assert.equal(registry.match('POST', '/api/collaborations/41/payments/91/void').id, 'collaboration.payment.void');
+  assert.equal(registry.match('POST', '/api/collaborations/41/settlement-submissions').id, 'collaboration.settlement.submit');
+  assert.equal(registry.match('POST', '/api/collaborations/41/settlement-decisions').id, 'collaboration.settlement.decide');
+
+  const serverSource = fs.readFileSync(serverPath, 'utf8');
+  for (const name of policyNames) assert.match(serverSource, new RegExp(`'${name}'`));
+});
+
 test('batch performance metrics upload is an admitted multipart route in the shared parser inventory', () => {
   const { contract } = loadBoundary();
   const policy = contract.REQUEST_POLICIES.SHARED_PERFORMANCE_METRICS_UPLOAD;

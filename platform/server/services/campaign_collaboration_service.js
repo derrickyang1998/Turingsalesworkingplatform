@@ -120,6 +120,47 @@ const CONTENT_REVIEW_DECISION_KEYS = new Set([
   'decision',
   'review_note'
 ]);
+const PAYMENT_RECORD_KEYS = new Set([
+  'campaign_id',
+  'expected_version',
+  'direction',
+  'amount',
+  'paid_at',
+  'payment_method',
+  'payment_reference',
+  'counterparty_name',
+  'tranche',
+  'payment_note'
+]);
+const PAYMENT_VOID_KEYS = new Set([
+  'campaign_id',
+  'expected_version',
+  'void_reason'
+]);
+const SETTLEMENT_SUBMISSION_KEYS = new Set([
+  'campaign_id',
+  'expected_version',
+  'settlement_note',
+  'variance_reason',
+  'zero_value_reason'
+]);
+const SETTLEMENT_DECISION_KEYS = new Set([
+  'campaign_id',
+  'expected_version',
+  'submission_entry_id',
+  'decision',
+  'review_note'
+]);
+const PAYMENT_DIRECTIONS = Object.freeze(['client_receipt', 'creator_payment']);
+const PAYMENT_METHODS = Object.freeze([
+  'bank_transfer',
+  'paypal',
+  'wise',
+  'payoneer',
+  'platform',
+  'other_manual'
+]);
+const PAYMENT_TRANCHES = Object.freeze(['deposit', 'balance', 'full', 'commission', 'other']);
 const CONTRACT_FUTURE_TOLERANCE_MS = 5 * 60 * 1000;
 const CONTRACT_DOCUMENT_MIN_BYTES = 32;
 const CONTRACT_DOCUMENT_MAX_BYTES = 8 * 1024 * 1024;
@@ -463,6 +504,113 @@ function normalizedContentReviewDecision(body) {
     expectedVersion: body.expected_version,
     decision: body.decision,
     reviewNote: contentReviewText(body.review_note, 'review_note', 1000, true)
+  });
+}
+
+function paymentSettlementError(field, message = 'Payment or settlement evidence is invalid.') {
+  throw serviceError(400, 'INVALID_PAYMENT_SETTLEMENT', message, field ? { field } : undefined);
+}
+
+function paymentSettlementText(value, field, maxLength, options = {}) {
+  if (typeof value !== 'string' || Buffer.from(value, 'utf8').toString('utf8') !== value) {
+    paymentSettlementError(field);
+  }
+  const normalized = value.trim();
+  const forbidden = options.multiline
+    ? /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u
+    : /[\u0000-\u001f\u007f]/u;
+  if (
+    (!options.optional && !normalized) ||
+    Array.from(normalized).length > maxLength ||
+    forbidden.test(normalized)
+  ) {
+    paymentSettlementError(field);
+  }
+  return normalized || null;
+}
+
+function canonicalUtcTimestamp(value, field) {
+  if (
+    typeof value !== 'string' ||
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.000Z$/.test(value) ||
+    !Number.isFinite(Date.parse(value)) ||
+    new Date(value).toISOString() !== value
+  ) {
+    paymentSettlementError(field);
+  }
+  return value;
+}
+
+function normalizedPaymentRecord(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) paymentSettlementError();
+  if (Object.keys(body).some((key) => !PAYMENT_RECORD_KEYS.has(key))) paymentSettlementError();
+  if (!Number.isSafeInteger(body.campaign_id) || body.campaign_id < 1) paymentSettlementError('campaign_id');
+  if (!Number.isSafeInteger(body.expected_version) || body.expected_version < 1) paymentSettlementError('expected_version');
+  if (!PAYMENT_DIRECTIONS.includes(body.direction)) paymentSettlementError('direction');
+  if (!Number.isSafeInteger(body.amount) || body.amount < 1) paymentSettlementError('amount');
+  if (!PAYMENT_METHODS.includes(body.payment_method)) paymentSettlementError('payment_method');
+  if (!PAYMENT_TRANCHES.includes(body.tranche)) paymentSettlementError('tranche');
+  return Object.freeze({
+    campaignId: body.campaign_id,
+    expectedVersion: body.expected_version,
+    direction: body.direction,
+    amount: body.amount,
+    paidAt: canonicalUtcTimestamp(body.paid_at, 'paid_at'),
+    paymentMethod: body.payment_method,
+    paymentReference: paymentSettlementText(body.payment_reference, 'payment_reference', 160),
+    counterpartyName: paymentSettlementText(body.counterparty_name, 'counterparty_name', 200),
+    tranche: body.tranche,
+    paymentNote: paymentSettlementText(body.payment_note, 'payment_note', 1000, { multiline: true })
+  });
+}
+
+function normalizedPaymentVoid(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) paymentSettlementError();
+  if (Object.keys(body).some((key) => !PAYMENT_VOID_KEYS.has(key))) paymentSettlementError();
+  if (!Number.isSafeInteger(body.campaign_id) || body.campaign_id < 1) paymentSettlementError('campaign_id');
+  if (!Number.isSafeInteger(body.expected_version) || body.expected_version < 1) paymentSettlementError('expected_version');
+  return Object.freeze({
+    campaignId: body.campaign_id,
+    expectedVersion: body.expected_version,
+    voidReason: paymentSettlementText(body.void_reason, 'void_reason', 1000, { multiline: true })
+  });
+}
+
+function normalizedSettlementSubmission(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) paymentSettlementError();
+  if (Object.keys(body).some((key) => !SETTLEMENT_SUBMISSION_KEYS.has(key))) paymentSettlementError();
+  if (!Number.isSafeInteger(body.campaign_id) || body.campaign_id < 1) paymentSettlementError('campaign_id');
+  if (!Number.isSafeInteger(body.expected_version) || body.expected_version < 1) paymentSettlementError('expected_version');
+  return Object.freeze({
+    campaignId: body.campaign_id,
+    expectedVersion: body.expected_version,
+    settlementNote: paymentSettlementText(body.settlement_note, 'settlement_note', 1000, { multiline: true }),
+    varianceReason: paymentSettlementText(body.variance_reason || '', 'variance_reason', 1000, {
+      multiline: true,
+      optional: true
+    }),
+    zeroValueReason: paymentSettlementText(body.zero_value_reason || '', 'zero_value_reason', 1000, {
+      multiline: true,
+      optional: true
+    })
+  });
+}
+
+function normalizedSettlementDecision(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) paymentSettlementError();
+  if (Object.keys(body).some((key) => !SETTLEMENT_DECISION_KEYS.has(key))) paymentSettlementError();
+  if (!Number.isSafeInteger(body.campaign_id) || body.campaign_id < 1) paymentSettlementError('campaign_id');
+  if (!Number.isSafeInteger(body.expected_version) || body.expected_version < 1) paymentSettlementError('expected_version');
+  if (!Number.isSafeInteger(body.submission_entry_id) || body.submission_entry_id < 1) {
+    paymentSettlementError('submission_entry_id');
+  }
+  if (!['approved', 'changes_requested'].includes(body.decision)) paymentSettlementError('decision');
+  return Object.freeze({
+    campaignId: body.campaign_id,
+    expectedVersion: body.expected_version,
+    submissionEntryId: body.submission_entry_id,
+    decision: body.decision,
+    reviewNote: paymentSettlementText(body.review_note, 'review_note', 1000, { multiline: true })
   });
 }
 
@@ -999,6 +1147,404 @@ function projectContentReviewCapabilities(access, userId, current, relations, re
   };
 }
 
+function paymentEvidenceError() {
+  throw serviceError(409, 'CAMPAIGN_EVIDENCE_IN_USE', 'Payment and settlement evidence is inconsistent.');
+}
+
+function paymentFingerprint(value) {
+  return crypto.createHash('sha256').update(JSON.stringify({
+    direction: value.direction,
+    amount: value.amount,
+    currency: value.currency,
+    paid_at: value.paid_at,
+    payment_method: value.payment_method,
+    payment_reference: value.payment_reference,
+    counterparty_name: value.counterparty_name,
+    tranche: value.tranche
+  }), 'utf8').digest('hex');
+}
+
+function activePaymentsDigest(entries) {
+  const canonical = entries
+    .filter((entry) => entry.status === 'active')
+    .sort((left, right) => left.id - right.id)
+    .map((entry) => ({
+      id: entry.id,
+      direction: entry.direction,
+      amount: entry.amount,
+      currency: entry.currency,
+      paid_at: entry.paid_at,
+      payment_method: entry.payment_method,
+      payment_reference: entry.payment_reference,
+      counterparty_name: entry.counterparty_name,
+      tranche: entry.tranche,
+      recorded_by: entry.recorded_by,
+      fingerprint: entry.fingerprint
+    }));
+  return crypto.createHash('sha256').update(JSON.stringify(canonical), 'utf8').digest('hex');
+}
+
+function paymentSettlementHistory(db, campaignId, collaborationId, resource, relations) {
+  const pageStatement = db.prepare(`
+    SELECT
+      entry.id,entry.source_id,entry.business_type,entry.business_id,entry.created_by,
+      entry.visibility,entry.metadata_json,
+      link.org_id,link.created_by AS link_created_by,link.metadata_json AS link_metadata_json,
+      campaign.org_id AS campaign_org_id,actor.display_name AS actor_name
+    FROM campaign_record_links link
+    JOIN knowledge_entries entry
+      ON entry.id=CAST(link.record_id AS INTEGER)
+     AND entry.source_type='collaboration_payment_settlement'
+     AND entry.entry_type='collaboration_payment_settlement'
+    JOIN campaigns campaign ON campaign.id=link.campaign_id
+    LEFT JOIN users actor ON actor.id=json_extract(entry.metadata_json,'$.actor_user_id')
+    WHERE link.campaign_id=?
+      AND link.record_type='knowledge_entry'
+      AND link.relation_type='knowledge'
+      AND link.revoked_at IS NULL
+      AND json_extract(entry.metadata_json,'$.collaboration_id')=?
+      AND entry.id>?
+    ORDER BY entry.id
+    LIMIT 200
+  `);
+  const rows = [];
+  let cursor = 0;
+  while (true) {
+    const page = pageStatement.all(campaignId, collaborationId, cursor);
+    rows.push(...page);
+    if (page.length < 200) break;
+    const nextCursor = page[page.length - 1].id;
+    if (!Number.isSafeInteger(nextCursor) || nextCursor <= cursor) paymentEvidenceError();
+    cursor = nextCursor;
+  }
+
+  const relationSet = new Set(Array.isArray(relations) ? relations : []);
+  if (!resource) {
+    if (rows.length > 0) paymentEvidenceError();
+    return {
+      status: relationSet.has('settlement') ? 'legacy_settled' : 'not_available',
+      currency: null,
+      expected_creator_cost: null,
+      expected_client_receipt: null,
+      creator_payment_total: 0,
+      client_receipt_total: 0,
+      creator_payment_remaining: null,
+      client_receipt_remaining: null,
+      active_entry_count: 0,
+      entries: [],
+      current_submission: null,
+      latest_decision: null,
+      events: []
+    };
+  }
+
+  const entries = [];
+  const byId = new Map();
+  const events = [];
+  let currentSubmission = null;
+  let latestDecision = null;
+  let pendingSubmission = null;
+  let terminalApproval = false;
+  let previousRowVersion = 0;
+  for (const row of rows) {
+    let metadata;
+    let linkMetadata;
+    try {
+      metadata = JSON.parse(row.metadata_json);
+      linkMetadata = JSON.parse(row.link_metadata_json);
+    } catch (_error) {
+      paymentEvidenceError();
+    }
+    const action = metadata && metadata.action;
+    const expectedSourceId = `${collaborationId}:${metadata && metadata.row_version}:${action}`;
+    if (
+      terminalApproval || metadata.schema_version !== 1 ||
+      metadata.collaboration_id !== collaborationId ||
+      !Number.isSafeInteger(metadata.row_version) || metadata.row_version < 1 ||
+      metadata.row_version <= previousRowVersion ||
+      !Number.isSafeInteger(metadata.actor_user_id) || metadata.actor_user_id < 1 ||
+      metadata.retrieval_eligible !== false ||
+      typeof metadata.recorded_at !== 'string' ||
+      !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.000Z$/.test(metadata.recorded_at) ||
+      !Number.isFinite(Date.parse(metadata.recorded_at)) ||
+      String(row.source_id) !== expectedSourceId ||
+      row.business_type !== 'campaign' || String(row.business_id) !== String(campaignId) ||
+      row.visibility !== 'team' || row.created_by !== metadata.actor_user_id ||
+      row.link_created_by !== metadata.actor_user_id || row.org_id !== row.campaign_org_id ||
+      !linkMetadata || linkMetadata.producer_type !== 'collaboration_payment_settlement' ||
+      linkMetadata.producer_id !== collaborationId ||
+      linkMetadata.source_type !== 'collaboration_payment_settlement' ||
+      String(linkMetadata.source_id) !== expectedSourceId
+    ) {
+      paymentEvidenceError();
+    }
+    previousRowVersion = metadata.row_version;
+
+    if (action === 'payment_recorded') {
+      if (pendingSubmission) paymentEvidenceError();
+      let normalized;
+      try {
+        normalized = normalizedPaymentRecord({
+          campaign_id: campaignId,
+          expected_version: Math.max(1, metadata.row_version - 1),
+          direction: metadata.direction,
+          amount: metadata.amount,
+          paid_at: metadata.paid_at,
+          payment_method: metadata.payment_method,
+          payment_reference: metadata.payment_reference,
+          counterparty_name: metadata.counterparty_name,
+          tranche: metadata.tranche,
+          payment_note: metadata.payment_note
+        });
+      } catch (_error) {
+        paymentEvidenceError();
+      }
+      const entry = {
+        id: row.id,
+        action,
+        status: 'active',
+        row_version: metadata.row_version,
+        direction: normalized.direction,
+        amount: normalized.amount,
+        currency: metadata.currency,
+        paid_at: normalized.paidAt,
+        payment_method: normalized.paymentMethod,
+        payment_reference: normalized.paymentReference,
+        counterparty_name: normalized.counterpartyName,
+        tranche: normalized.tranche,
+        payment_note: normalized.paymentNote,
+        fingerprint: metadata.payment_fingerprint,
+        recorded_by: metadata.actor_user_id,
+        recorded_by_name: row.actor_name || null,
+        recorded_at: metadata.recorded_at,
+        voided_by: null,
+        voided_by_name: null,
+        voided_at: null,
+        void_reason: null
+      };
+      if (
+        metadata.currency !== resource.currency ||
+        typeof entry.fingerprint !== 'string' ||
+        entry.fingerprint !== paymentFingerprint(entry) ||
+        entries.some((candidate) => candidate.status === 'active' && (
+          candidate.fingerprint === entry.fingerprint ||
+          (candidate.direction === entry.direction && candidate.payment_reference === entry.payment_reference)
+        ))
+      ) {
+        paymentEvidenceError();
+      }
+      entries.push(entry);
+      byId.set(entry.id, entry);
+      events.push({
+        id: row.id,
+        action,
+        row_version: metadata.row_version,
+        payment_entry_id: row.id,
+        actor_user_id: metadata.actor_user_id,
+        actor_name: row.actor_name || null,
+        recorded_at: metadata.recorded_at
+      });
+      continue;
+    }
+
+    if (action === 'payment_voided') {
+      if (pendingSubmission || !Number.isSafeInteger(metadata.payment_entry_id)) paymentEvidenceError();
+      const target = byId.get(metadata.payment_entry_id);
+      let voidReason;
+      try {
+        voidReason = paymentSettlementText(metadata.void_reason, 'void_reason', 1000, { multiline: true });
+      } catch (_error) {
+        paymentEvidenceError();
+      }
+      if (!target || target.status !== 'active' || metadata.payment_fingerprint !== target.fingerprint) {
+        paymentEvidenceError();
+      }
+      target.status = 'voided';
+      target.voided_by = metadata.actor_user_id;
+      target.voided_by_name = row.actor_name || null;
+      target.voided_at = metadata.recorded_at;
+      target.void_reason = voidReason;
+      events.push({
+        id: row.id,
+        action,
+        row_version: metadata.row_version,
+        payment_entry_id: target.id,
+        actor_user_id: metadata.actor_user_id,
+        actor_name: row.actor_name || null,
+        recorded_at: metadata.recorded_at
+      });
+      continue;
+    }
+
+    if (action === 'settlement_submitted') {
+      if (pendingSubmission) paymentEvidenceError();
+      const active = entries.filter((entry) => entry.status === 'active');
+      const creatorTotal = active
+        .filter((entry) => entry.direction === 'creator_payment')
+        .reduce((sum, entry) => sum + entry.amount, 0);
+      const clientTotal = active
+        .filter((entry) => entry.direction === 'client_receipt')
+        .reduce((sum, entry) => sum + entry.amount, 0);
+      const activeIds = active.map((entry) => entry.id).sort((left, right) => left - right);
+      const recorderIds = Array.from(new Set(active.map((entry) => entry.recorded_by))).sort((left, right) => left - right);
+      let settlementNote;
+      let varianceReason;
+      let zeroValueReason;
+      try {
+        settlementNote = paymentSettlementText(metadata.settlement_note, 'settlement_note', 1000, { multiline: true });
+        varianceReason = paymentSettlementText(metadata.variance_reason || '', 'variance_reason', 1000, {
+          multiline: true,
+          optional: true
+        });
+        zeroValueReason = paymentSettlementText(metadata.zero_value_reason || '', 'zero_value_reason', 1000, {
+          multiline: true,
+          optional: true
+        });
+      } catch (_error) {
+        paymentEvidenceError();
+      }
+      if (
+        metadata.currency !== resource.currency ||
+        metadata.expected_creator_cost !== resource.creator_cost ||
+        metadata.expected_client_receipt !== resource.client_quote ||
+        metadata.creator_payment_total !== creatorTotal ||
+        metadata.client_receipt_total !== clientTotal ||
+        metadata.payment_digest !== activePaymentsDigest(active) ||
+        JSON.stringify(metadata.active_payment_entry_ids) !== JSON.stringify(activeIds) ||
+        JSON.stringify(metadata.recorder_user_ids) !== JSON.stringify(recorderIds)
+      ) {
+        paymentEvidenceError();
+      }
+      currentSubmission = {
+        id: row.id,
+        action,
+        row_version: metadata.row_version,
+        payment_digest: metadata.payment_digest,
+        active_payment_entry_ids: activeIds,
+        recorder_user_ids: recorderIds,
+        currency: resource.currency,
+        expected_creator_cost: resource.creator_cost,
+        expected_client_receipt: resource.client_quote,
+        creator_payment_total: creatorTotal,
+        client_receipt_total: clientTotal,
+        settlement_note: settlementNote,
+        variance_reason: varianceReason,
+        zero_value_reason: zeroValueReason,
+        submitted_by: metadata.actor_user_id,
+        submitted_by_name: row.actor_name || null,
+        submitted_at: metadata.recorded_at
+      };
+      latestDecision = null;
+      pendingSubmission = currentSubmission;
+      events.push(currentSubmission);
+      continue;
+    }
+
+    if (!['settlement_approved', 'settlement_changes_requested'].includes(action) || !pendingSubmission) {
+      paymentEvidenceError();
+    }
+    let reviewNote;
+    try {
+      reviewNote = paymentSettlementText(metadata.review_note, 'review_note', 1000, { multiline: true });
+    } catch (_error) {
+      paymentEvidenceError();
+    }
+    if (
+      metadata.submission_entry_id !== pendingSubmission.id ||
+      metadata.payment_digest !== pendingSubmission.payment_digest ||
+      metadata.actor_user_id === pendingSubmission.submitted_by ||
+      pendingSubmission.recorder_user_ids.includes(metadata.actor_user_id)
+    ) {
+      paymentEvidenceError();
+    }
+    latestDecision = {
+      id: row.id,
+      action,
+      row_version: metadata.row_version,
+      submission_entry_id: pendingSubmission.id,
+      payment_digest: pendingSubmission.payment_digest,
+      review_note: reviewNote,
+      reviewed_by: metadata.actor_user_id,
+      reviewed_by_name: row.actor_name || null,
+      reviewed_at: metadata.recorded_at
+    };
+    events.push(latestDecision);
+    pendingSubmission = null;
+    if (action === 'settlement_approved') terminalApproval = true;
+  }
+
+  const activeEntries = entries.filter((entry) => entry.status === 'active');
+  const creatorTotal = activeEntries
+    .filter((entry) => entry.direction === 'creator_payment')
+    .reduce((sum, entry) => sum + entry.amount, 0);
+  const clientTotal = activeEntries
+    .filter((entry) => entry.direction === 'client_receipt')
+    .reduce((sum, entry) => sum + entry.amount, 0);
+  if (terminalApproval !== relationSet.has('settlement')) {
+    if (!(rows.length === 0 && relationSet.has('settlement'))) paymentEvidenceError();
+  }
+  let status = 'not_started';
+  if (rows.length === 0 && relationSet.has('settlement')) status = 'legacy_settled';
+  else if (terminalApproval) status = 'settled';
+  else if (pendingSubmission) status = 'pending_review';
+  else if (latestDecision && latestDecision.action === 'settlement_changes_requested') status = 'changes_requested';
+  else if (activeEntries.length > 0) status = relationSet.has('publication') ? 'ready' : 'recording';
+
+  return {
+    status,
+    currency: resource.currency,
+    expected_creator_cost: resource.creator_cost,
+    expected_client_receipt: resource.client_quote,
+    creator_payment_total: creatorTotal,
+    client_receipt_total: clientTotal,
+    creator_payment_remaining: resource.creator_cost - creatorTotal,
+    client_receipt_remaining: resource.client_quote - clientTotal,
+    active_entry_count: activeEntries.length,
+    entries,
+    current_submission: currentSubmission,
+    latest_decision: latestDecision,
+    events
+  };
+}
+
+function projectPaymentSettlementCapabilities(db, access, userId, campaignId, current, relations, history) {
+  const relationSet = new Set(Array.isArray(relations) ? relations : []);
+  const resource = v2CollaborationResource(current && current.proposal_notes);
+  const writable = Boolean(access && access.permissions && access.permissions.write);
+  const pending = history.status === 'pending_review';
+  const closed = relationSet.has('settlement') || ['settled', 'legacy_settled'].includes(history.status);
+  const contractReady = Boolean(
+    contractConfirmation(db, campaignId, current.id) ||
+    relationSet.has('execution') || relationSet.has('publication')
+  );
+  const recordStage = ['contracted', 'live', 'content_review', 'completed'].includes(current.status);
+  const canRecord = Boolean(resource && writable && contractReady && recordStage && !pending && !closed);
+  const creatorReady = history.creator_payment_total > 0 || history.expected_creator_cost === 0;
+  const canSubmit = Boolean(
+    resource && writable && current.status === 'completed' && relationSet.has('publication') &&
+    !pending && !closed && creatorReady
+  );
+  const recorderIds = history.current_submission && history.current_submission.recorder_user_ids || [];
+  const canDecide = Boolean(
+    resource && writable && pending && ['owner', 'org_admin'].includes(access.role) &&
+    history.current_submission && history.current_submission.submitted_by !== userId &&
+    !recorderIds.includes(userId)
+  );
+  return {
+    ...history,
+    can_record: canRecord,
+    can_submit: canSubmit,
+    can_decide: canDecide,
+    entries: history.entries.map((entry) => ({
+      ...entry,
+      can_void: Boolean(
+        canRecord && entry.status === 'active' &&
+        (entry.recorded_by === userId || ['owner', 'org_admin'].includes(access.role))
+      )
+    }))
+  };
+}
+
 function insertLink(db, values) {
   const bundleId = values.bundleId || crypto.randomBytes(32).toString('hex');
   const result = db.prepare(`
@@ -1444,7 +1990,8 @@ function createCampaignCollaborationService(db) {
               active_relations: [],
               contract_documents: [],
               contract_confirmation: null,
-              content_review: null
+              content_review: null,
+              payment_settlement: null
             };
           }
           const relations = activeRelations(db, row.campaign_id, row.id);
@@ -1454,6 +2001,14 @@ function createCampaignCollaborationService(db) {
             accessByCampaign.set(row.campaign_id, access);
           }
           const review = contentReviewHistory(db, row.campaign_id, row.id, row.content_url);
+          const resource = v2CollaborationResource(row.proposal_notes);
+          const paymentSettlement = paymentSettlementHistory(
+            db,
+            row.campaign_id,
+            row.id,
+            resource,
+            relations
+          );
           return {
             ...row,
             active_relations: relations,
@@ -1465,6 +2020,15 @@ function createCampaignCollaborationService(db) {
               row,
               relations,
               review
+            ),
+            payment_settlement: projectPaymentSettlementCapabilities(
+              db,
+              access,
+              userId,
+              row.campaign_id,
+              row,
+              relations,
+              paymentSettlement
             )
           };
         })
@@ -1560,6 +2124,39 @@ function createCampaignCollaborationService(db) {
     };
   }
 
+  function listPayments(input) {
+    const userId = requirePositiveSafeId(input && input.userId, 'userId');
+    const collaborationId = requirePositiveSafeId(
+      input && input.collaborationId,
+      'collaborationId'
+    );
+    const context = contractDocumentContext(userId, collaborationId);
+    const relations = activeRelations(db, context.custody.campaignId, collaborationId);
+    const resource = v2CollaborationResource(context.current.proposal_notes);
+    const history = paymentSettlementHistory(
+      db,
+      context.custody.campaignId,
+      collaborationId,
+      resource,
+      relations
+    );
+    return {
+      campaign_id: context.custody.campaignId,
+      collaboration_id: collaborationId,
+      status: context.current.status,
+      row_version: context.current.row_version,
+      payment_settlement: projectPaymentSettlementCapabilities(
+        db,
+        context.access,
+        userId,
+        context.custody.campaignId,
+        context.current,
+        relations,
+        history
+      )
+    };
+  }
+
   function persistContentReviewEvidence(values) {
     const sourceId = `${values.collaborationId}:${values.rowVersion}:${values.action}`;
     const evidence = knowledgeService.writeCampaignKnowledgeInTransaction(db, {
@@ -1612,6 +2209,758 @@ function createCampaignCollaborationService(db) {
     });
     knowledgeService.applyKnowledgeCapacityGaugePlanInTransaction(db, evidence.capacityGaugePlan);
     return evidence;
+  }
+
+  function persistPaymentSettlementEvidence(values) {
+    const sourceId = `${values.collaborationId}:${values.rowVersion}:${values.action}`;
+    const evidence = knowledgeService.writeCampaignKnowledgeInTransaction(db, {
+      organizationId: values.orgId,
+      campaignId: values.campaignId,
+      createdBy: values.userId,
+      entryType: 'collaboration_payment_settlement',
+      title: `Payment settlement checkpoint #${values.collaborationId}-${values.rowVersion}`,
+      summary: `Protected financial evidence recorded for collaboration #${values.collaborationId}.`,
+      content: JSON.stringify({
+        collaboration_id: values.collaborationId,
+        checkpoint: 'payment_settlement',
+        action: values.action,
+        evidence_recorded: true
+      }),
+      tags: ['campaign', 'collaboration', 'payment-settlement'],
+      sourceType: 'collaboration_payment_settlement',
+      sourceId,
+      visibility: 'team',
+      metadata: values.metadata
+    });
+    if (evidence.status !== 'created') {
+      throw serviceError(409, 'CAMPAIGN_EVIDENCE_IN_USE', 'Payment and settlement evidence already exists.');
+    }
+    const evidenceLink = insertLink(db, {
+      orgId: values.orgId,
+      campaignId: values.campaignId,
+      userId: values.userId,
+      recordType: 'knowledge_entry',
+      recordId: evidence.entry.id,
+      relationType: 'knowledge',
+      metadata: {
+        producer_type: 'collaboration_payment_settlement',
+        producer_id: values.collaborationId,
+        source_type: 'collaboration_payment_settlement',
+        source_id: sourceId
+      }
+    });
+    if (values.emitLinkEvent !== false) {
+      insertLinkAttachedEvent(db, {
+        orgId: values.orgId,
+        campaignId: values.campaignId,
+        userId: values.userId,
+        recordType: 'knowledge_entry',
+        recordId: evidence.entry.id,
+        relationType: 'knowledge',
+        link: evidenceLink,
+        requestId: values.requestId,
+        auditFingerprint: values.auditFingerprint,
+        reason: values.reason
+      });
+    }
+    knowledgeService.applyKnowledgeCapacityGaugePlanInTransaction(db, evidence.capacityGaugePlan);
+    return evidence;
+  }
+
+  function recordPayment(input) {
+    const userId = requirePositiveSafeId(input && input.userId, 'userId');
+    const collaborationId = requirePositiveSafeId(
+      input && input.collaborationId,
+      'collaborationId'
+    );
+    const payment = normalizedPaymentRecord(input && input.body);
+    const initialContext = contractDocumentContext(userId, collaborationId, {
+      write: true,
+      campaignId: payment.campaignId
+    });
+    const key = input.idempotencyKey;
+    if (typeof key !== 'string' || !/^[A-Za-z0-9._:-]{8,200}$/.test(key)) {
+      throw serviceError(400, 'IDEMPOTENCY_REQUIRED', 'Idempotency-Key is required.');
+    }
+    const payload = {
+      campaign_id: payment.campaignId,
+      expected_version: payment.expectedVersion,
+      direction: payment.direction,
+      amount: payment.amount,
+      paid_at: payment.paidAt,
+      payment_method: payment.paymentMethod,
+      payment_reference: payment.paymentReference,
+      counterparty_name: payment.counterpartyName,
+      tranche: payment.tranche,
+      payment_note: payment.paymentNote
+    };
+    const hash = requestHash({
+      method: 'POST',
+      path: `/api/collaborations/${collaborationId}/payments`,
+      campaignId: payment.campaignId,
+      kind: 'json',
+      payload
+    });
+    const reservationInput = {
+      organizationId: initialContext.access.campaign.org_id,
+      actorUserId: userId,
+      campaignId: payment.campaignId,
+      secondaryCampaignId: null,
+      resourceClaim: null,
+      scope: 'collaboration.update.linked',
+      key,
+      requestHash: hash,
+      expectedEventCount: 1,
+      operationTimeoutSeconds: 60
+    };
+
+    return db.transaction(() => {
+      const context = contractDocumentContext(userId, collaborationId, {
+        write: true,
+        campaignId: payment.campaignId
+      });
+      let reservation = idempotencyService.recoverExpiredInTransaction(db, reservationInput);
+      if (reservation.state === 'absent') {
+        reservation = idempotencyService.reserveProcessingInTransaction(db, reservationInput);
+      }
+      if (reservation.state !== 'reserved') return idempotencyOutcome(reservation);
+      const current = context.current;
+      if (current.row_version !== payment.expectedVersion) {
+        throw serviceError(409, 'STALE_COLLABORATION_VERSION', 'Collaboration version is stale.');
+      }
+      const resource = v2CollaborationResource(current.proposal_notes);
+      if (!resource) {
+        throw serviceError(409, 'INVALID_COLLABORATION_TRANSITION', 'Payment evidence requires a version 2 order.');
+      }
+      const relations = activeRelations(db, payment.campaignId, collaborationId);
+      const contractReady = Boolean(
+        contractConfirmation(db, payment.campaignId, collaborationId) ||
+        relations.includes('execution') || relations.includes('publication')
+      );
+      if (
+        !contractReady || !['contracted', 'live', 'content_review', 'completed'].includes(current.status) ||
+        relations.includes('settlement')
+      ) {
+        throw serviceError(409, 'INVALID_COLLABORATION_TRANSITION', 'Payment recording is unavailable from the current stage.');
+      }
+      const history = paymentSettlementHistory(
+        db,
+        payment.campaignId,
+        collaborationId,
+        resource,
+        relations
+      );
+      if (history.status === 'pending_review') {
+        throw serviceError(409, 'SETTLEMENT_REVIEW_PENDING', 'Payment recording is locked during settlement review.');
+      }
+      const candidate = {
+        direction: payment.direction,
+        amount: payment.amount,
+        currency: resource.currency,
+        paid_at: payment.paidAt,
+        payment_method: payment.paymentMethod,
+        payment_reference: payment.paymentReference,
+        counterparty_name: payment.counterpartyName,
+        tranche: payment.tranche
+      };
+      const fingerprint = paymentFingerprint(candidate);
+      const conflict = history.entries.find((entry) => entry.status === 'active' && (
+        entry.fingerprint === fingerprint ||
+        (entry.direction === payment.direction && entry.payment_reference === payment.paymentReference)
+      ));
+      if (conflict) {
+        throw serviceError(409, 'PAYMENT_EVIDENCE_EXISTS', 'The payment reference or fingerprint is already active.', {
+          payment_entry_id: conflict.id
+        });
+      }
+      if (current.row_version === SAFE_MAX) {
+        throw serviceError(409, 'ROW_VERSION_EXHAUSTED', 'Collaboration row version is exhausted.');
+      }
+      const rowVersion = payment.expectedVersion + 1;
+      const update = db.prepare(`
+        UPDATE collaborations
+        SET row_version=row_version+1,updated_at=CURRENT_TIMESTAMP
+        WHERE id=? AND row_version=?
+      `).run(collaborationId, payment.expectedVersion);
+      if (update.changes !== 1) {
+        throw serviceError(409, 'STALE_COLLABORATION_VERSION', 'Collaboration version is stale.');
+      }
+      const recordedAt = db.prepare(`
+        SELECT replace(CURRENT_TIMESTAMP,' ','T') || '.000Z' AS now
+      `).get().now;
+      persistPaymentSettlementEvidence({
+        orgId: context.access.campaign.org_id,
+        campaignId: payment.campaignId,
+        collaborationId,
+        userId,
+        rowVersion,
+        action: 'payment_recorded',
+        metadata: {
+          schema_version: 1,
+          collaboration_id: collaborationId,
+          row_version: rowVersion,
+          action: 'payment_recorded',
+          direction: payment.direction,
+          amount: payment.amount,
+          currency: resource.currency,
+          paid_at: payment.paidAt,
+          payment_method: payment.paymentMethod,
+          payment_reference: payment.paymentReference,
+          counterparty_name: payment.counterpartyName,
+          tranche: payment.tranche,
+          payment_note: payment.paymentNote,
+          payment_fingerprint: fingerprint,
+          actor_user_id: userId,
+          recorded_at: recordedAt,
+          retrieval_eligible: false
+        },
+        requestId: input.requestId,
+        auditFingerprint: reservation.auditFingerprint,
+        reason: payment.direction === 'creator_payment' ? 'Creator payment recorded' : 'Client receipt recorded'
+      });
+      const paymentHistory = paymentSettlementHistory(
+        db,
+        payment.campaignId,
+        collaborationId,
+        resource,
+        relations
+      );
+      const response = {
+        success: true,
+        campaign_id: payment.campaignId,
+        collaboration_id: collaborationId,
+        status: current.status,
+        row_version: rowVersion,
+        active_relations: relations,
+        payment_settlement: projectPaymentSettlementCapabilities(
+          db,
+          context.access,
+          userId,
+          payment.campaignId,
+          { ...current, row_version: rowVersion },
+          relations,
+          paymentHistory
+        )
+      };
+      return completeJson(db, reservation, hash, 201, response);
+    }).immediate();
+  }
+
+  function voidPayment(input) {
+    const userId = requirePositiveSafeId(input && input.userId, 'userId');
+    const collaborationId = requirePositiveSafeId(
+      input && input.collaborationId,
+      'collaborationId'
+    );
+    const paymentId = requirePositiveSafeId(input && input.paymentId, 'paymentId');
+    const voidInput = normalizedPaymentVoid(input && input.body);
+    const initialContext = contractDocumentContext(userId, collaborationId, {
+      write: true,
+      campaignId: voidInput.campaignId
+    });
+    const key = input.idempotencyKey;
+    if (typeof key !== 'string' || !/^[A-Za-z0-9._:-]{8,200}$/.test(key)) {
+      throw serviceError(400, 'IDEMPOTENCY_REQUIRED', 'Idempotency-Key is required.');
+    }
+    const payload = {
+      campaign_id: voidInput.campaignId,
+      expected_version: voidInput.expectedVersion,
+      void_reason: voidInput.voidReason
+    };
+    const hash = requestHash({
+      method: 'POST',
+      path: `/api/collaborations/${collaborationId}/payments/${paymentId}/void`,
+      campaignId: voidInput.campaignId,
+      kind: 'json',
+      payload
+    });
+    const reservationInput = {
+      organizationId: initialContext.access.campaign.org_id,
+      actorUserId: userId,
+      campaignId: voidInput.campaignId,
+      secondaryCampaignId: null,
+      resourceClaim: null,
+      scope: 'collaboration.update.linked',
+      key,
+      requestHash: hash,
+      expectedEventCount: 1,
+      operationTimeoutSeconds: 60
+    };
+
+    return db.transaction(() => {
+      const context = contractDocumentContext(userId, collaborationId, {
+        write: true,
+        campaignId: voidInput.campaignId
+      });
+      let reservation = idempotencyService.recoverExpiredInTransaction(db, reservationInput);
+      if (reservation.state === 'absent') {
+        reservation = idempotencyService.reserveProcessingInTransaction(db, reservationInput);
+      }
+      if (reservation.state !== 'reserved') return idempotencyOutcome(reservation);
+      const current = context.current;
+      if (current.row_version !== voidInput.expectedVersion) {
+        throw serviceError(409, 'STALE_COLLABORATION_VERSION', 'Collaboration version is stale.');
+      }
+      const resource = v2CollaborationResource(current.proposal_notes);
+      const relations = activeRelations(db, voidInput.campaignId, collaborationId);
+      if (!resource || relations.includes('settlement')) {
+        throw serviceError(409, 'INVALID_COLLABORATION_TRANSITION', 'Payment void is unavailable from the current stage.');
+      }
+      const history = paymentSettlementHistory(
+        db,
+        voidInput.campaignId,
+        collaborationId,
+        resource,
+        relations
+      );
+      if (history.status === 'pending_review') {
+        throw serviceError(409, 'SETTLEMENT_REVIEW_PENDING', 'Payment changes are locked during settlement review.');
+      }
+      const payment = history.entries.find((entry) => entry.id === paymentId && entry.status === 'active');
+      if (!payment) {
+        throw serviceError(404, 'RECORD_NOT_FOUND', 'Active payment evidence was not found.');
+      }
+      if (payment.recorded_by !== userId && !['owner', 'org_admin'].includes(context.access.role)) {
+        throw serviceError(403, 'PAYMENT_VOID_FORBIDDEN', 'Only the recorder, campaign owner, or organization administrator may void this evidence.');
+      }
+      if (current.row_version === SAFE_MAX) {
+        throw serviceError(409, 'ROW_VERSION_EXHAUSTED', 'Collaboration row version is exhausted.');
+      }
+      const rowVersion = voidInput.expectedVersion + 1;
+      const update = db.prepare(`
+        UPDATE collaborations
+        SET row_version=row_version+1,updated_at=CURRENT_TIMESTAMP
+        WHERE id=? AND row_version=?
+      `).run(collaborationId, voidInput.expectedVersion);
+      if (update.changes !== 1) {
+        throw serviceError(409, 'STALE_COLLABORATION_VERSION', 'Collaboration version is stale.');
+      }
+      const recordedAt = db.prepare(`
+        SELECT replace(CURRENT_TIMESTAMP,' ','T') || '.000Z' AS now
+      `).get().now;
+      persistPaymentSettlementEvidence({
+        orgId: context.access.campaign.org_id,
+        campaignId: voidInput.campaignId,
+        collaborationId,
+        userId,
+        rowVersion,
+        action: 'payment_voided',
+        metadata: {
+          schema_version: 1,
+          collaboration_id: collaborationId,
+          row_version: rowVersion,
+          action: 'payment_voided',
+          payment_entry_id: payment.id,
+          payment_fingerprint: payment.fingerprint,
+          void_reason: voidInput.voidReason,
+          actor_user_id: userId,
+          recorded_at: recordedAt,
+          retrieval_eligible: false
+        },
+        requestId: input.requestId,
+        auditFingerprint: reservation.auditFingerprint,
+        reason: 'Payment evidence voided'
+      });
+      const paymentHistory = paymentSettlementHistory(
+        db,
+        voidInput.campaignId,
+        collaborationId,
+        resource,
+        relations
+      );
+      const response = {
+        success: true,
+        campaign_id: voidInput.campaignId,
+        collaboration_id: collaborationId,
+        status: current.status,
+        row_version: rowVersion,
+        active_relations: relations,
+        payment_settlement: projectPaymentSettlementCapabilities(
+          db,
+          context.access,
+          userId,
+          voidInput.campaignId,
+          { ...current, row_version: rowVersion },
+          relations,
+          paymentHistory
+        )
+      };
+      return completeJson(db, reservation, hash, 201, response);
+    }).immediate();
+  }
+
+  function submitSettlement(input) {
+    const userId = requirePositiveSafeId(input && input.userId, 'userId');
+    const collaborationId = requirePositiveSafeId(
+      input && input.collaborationId,
+      'collaborationId'
+    );
+    const submission = normalizedSettlementSubmission(input && input.body);
+    const initialContext = contractDocumentContext(userId, collaborationId, {
+      write: true,
+      campaignId: submission.campaignId
+    });
+    const key = input.idempotencyKey;
+    if (typeof key !== 'string' || !/^[A-Za-z0-9._:-]{8,200}$/.test(key)) {
+      throw serviceError(400, 'IDEMPOTENCY_REQUIRED', 'Idempotency-Key is required.');
+    }
+    const payload = {
+      campaign_id: submission.campaignId,
+      expected_version: submission.expectedVersion,
+      settlement_note: submission.settlementNote,
+      variance_reason: submission.varianceReason,
+      zero_value_reason: submission.zeroValueReason
+    };
+    const hash = requestHash({
+      method: 'POST',
+      path: `/api/collaborations/${collaborationId}/settlement-submissions`,
+      campaignId: submission.campaignId,
+      kind: 'json',
+      payload
+    });
+    const reservationInput = {
+      organizationId: initialContext.access.campaign.org_id,
+      actorUserId: userId,
+      campaignId: submission.campaignId,
+      secondaryCampaignId: null,
+      resourceClaim: null,
+      scope: 'collaboration.update.linked',
+      key,
+      requestHash: hash,
+      expectedEventCount: 1,
+      operationTimeoutSeconds: 60
+    };
+
+    return db.transaction(() => {
+      const context = contractDocumentContext(userId, collaborationId, {
+        write: true,
+        campaignId: submission.campaignId
+      });
+      let reservation = idempotencyService.recoverExpiredInTransaction(db, reservationInput);
+      if (reservation.state === 'absent') {
+        reservation = idempotencyService.reserveProcessingInTransaction(db, reservationInput);
+      }
+      if (reservation.state !== 'reserved') return idempotencyOutcome(reservation);
+      const current = context.current;
+      if (current.row_version !== submission.expectedVersion) {
+        throw serviceError(409, 'STALE_COLLABORATION_VERSION', 'Collaboration version is stale.');
+      }
+      const resource = v2CollaborationResource(current.proposal_notes);
+      if (!resource) {
+        throw serviceError(409, 'INVALID_COLLABORATION_TRANSITION', 'Settlement requires a version 2 order.');
+      }
+      const relations = activeRelations(db, submission.campaignId, collaborationId);
+      if (
+        current.status !== 'completed' || !relations.includes('publication') ||
+        relations.includes('settlement')
+      ) {
+        throw serviceError(409, 'SETTLEMENT_PUBLICATION_REQUIRED', 'Approved publication is required before settlement review.');
+      }
+      const history = paymentSettlementHistory(
+        db,
+        submission.campaignId,
+        collaborationId,
+        resource,
+        relations
+      );
+      if (history.status === 'pending_review') {
+        throw serviceError(409, 'SETTLEMENT_REVIEW_PENDING', 'A settlement submission is already pending review.');
+      }
+      const active = history.entries.filter((entry) => entry.status === 'active');
+      if (history.creator_payment_total === 0 && resource.creator_cost > 0) {
+        throw serviceError(409, 'CREATOR_PAYMENT_REQUIRED', 'At least one creator payment is required before settlement.');
+      }
+      const variance = history.creator_payment_total !== resource.creator_cost ||
+        history.client_receipt_total !== resource.client_quote;
+      if (variance && !submission.varianceReason) {
+        throw serviceError(400, 'SETTLEMENT_VARIANCE_REASON_REQUIRED', 'A variance reason is required for mismatched totals.');
+      }
+      if (
+        active.length === 0 && resource.creator_cost === 0 && resource.client_quote === 0 &&
+        !submission.zeroValueReason
+      ) {
+        throw serviceError(400, 'SETTLEMENT_ZERO_VALUE_REASON_REQUIRED', 'A zero-value reason is required.');
+      }
+      if (current.row_version === SAFE_MAX) {
+        throw serviceError(409, 'ROW_VERSION_EXHAUSTED', 'Collaboration row version is exhausted.');
+      }
+      const rowVersion = submission.expectedVersion + 1;
+      const update = db.prepare(`
+        UPDATE collaborations
+        SET row_version=row_version+1,updated_at=CURRENT_TIMESTAMP
+        WHERE id=? AND row_version=?
+      `).run(collaborationId, submission.expectedVersion);
+      if (update.changes !== 1) {
+        throw serviceError(409, 'STALE_COLLABORATION_VERSION', 'Collaboration version is stale.');
+      }
+      const recordedAt = db.prepare(`
+        SELECT replace(CURRENT_TIMESTAMP,' ','T') || '.000Z' AS now
+      `).get().now;
+      const digest = activePaymentsDigest(active);
+      const activeIds = active.map((entry) => entry.id).sort((left, right) => left - right);
+      const recorderIds = Array.from(new Set(active.map((entry) => entry.recorded_by)))
+        .sort((left, right) => left - right);
+      persistPaymentSettlementEvidence({
+        orgId: context.access.campaign.org_id,
+        campaignId: submission.campaignId,
+        collaborationId,
+        userId,
+        rowVersion,
+        action: 'settlement_submitted',
+        metadata: {
+          schema_version: 1,
+          collaboration_id: collaborationId,
+          row_version: rowVersion,
+          action: 'settlement_submitted',
+          currency: resource.currency,
+          expected_creator_cost: resource.creator_cost,
+          expected_client_receipt: resource.client_quote,
+          creator_payment_total: history.creator_payment_total,
+          client_receipt_total: history.client_receipt_total,
+          payment_digest: digest,
+          active_payment_entry_ids: activeIds,
+          recorder_user_ids: recorderIds,
+          settlement_note: submission.settlementNote,
+          variance_reason: submission.varianceReason,
+          zero_value_reason: submission.zeroValueReason,
+          actor_user_id: userId,
+          recorded_at: recordedAt,
+          retrieval_eligible: false
+        },
+        requestId: input.requestId,
+        auditFingerprint: reservation.auditFingerprint,
+        reason: 'Settlement submitted for independent review'
+      });
+      const paymentHistory = paymentSettlementHistory(
+        db,
+        submission.campaignId,
+        collaborationId,
+        resource,
+        relations
+      );
+      const response = {
+        success: true,
+        campaign_id: submission.campaignId,
+        collaboration_id: collaborationId,
+        status: current.status,
+        row_version: rowVersion,
+        active_relations: relations,
+        payment_settlement: projectPaymentSettlementCapabilities(
+          db,
+          context.access,
+          userId,
+          submission.campaignId,
+          { ...current, row_version: rowVersion },
+          relations,
+          paymentHistory
+        )
+      };
+      return completeJson(db, reservation, hash, 201, response);
+    }).immediate();
+  }
+
+  function decideSettlement(input) {
+    const userId = requirePositiveSafeId(input && input.userId, 'userId');
+    const collaborationId = requirePositiveSafeId(
+      input && input.collaborationId,
+      'collaborationId'
+    );
+    const decision = normalizedSettlementDecision(input && input.body);
+    const initialContext = contractDocumentContext(userId, collaborationId, {
+      write: true,
+      campaignId: decision.campaignId
+    });
+    const key = input.idempotencyKey;
+    if (typeof key !== 'string' || !/^[A-Za-z0-9._:-]{8,200}$/.test(key)) {
+      throw serviceError(400, 'IDEMPOTENCY_REQUIRED', 'Idempotency-Key is required.');
+    }
+    const payload = {
+      campaign_id: decision.campaignId,
+      expected_version: decision.expectedVersion,
+      submission_entry_id: decision.submissionEntryId,
+      decision: decision.decision,
+      review_note: decision.reviewNote
+    };
+    const hash = requestHash({
+      method: 'POST',
+      path: `/api/collaborations/${collaborationId}/settlement-decisions`,
+      campaignId: decision.campaignId,
+      kind: 'json',
+      payload
+    });
+    const reservationInput = {
+      organizationId: initialContext.access.campaign.org_id,
+      actorUserId: userId,
+      campaignId: decision.campaignId,
+      secondaryCampaignId: null,
+      resourceClaim: null,
+      scope: 'collaboration.update.linked',
+      key,
+      requestHash: hash,
+      expectedEventCount: 1,
+      operationTimeoutSeconds: 60
+    };
+
+    return db.transaction(() => {
+      const context = contractDocumentContext(userId, collaborationId, {
+        write: true,
+        campaignId: decision.campaignId
+      });
+      let reservation = idempotencyService.recoverExpiredInTransaction(db, reservationInput);
+      if (reservation.state === 'absent') {
+        reservation = idempotencyService.reserveProcessingInTransaction(db, reservationInput);
+      }
+      if (reservation.state !== 'reserved') return idempotencyOutcome(reservation);
+      const current = context.current;
+      if (current.row_version !== decision.expectedVersion) {
+        throw serviceError(409, 'STALE_COLLABORATION_VERSION', 'Collaboration version is stale.');
+      }
+      const resource = v2CollaborationResource(current.proposal_notes);
+      const relations = activeRelations(db, decision.campaignId, collaborationId);
+      if (
+        !resource || current.status !== 'completed' || !relations.includes('publication') ||
+        relations.includes('settlement')
+      ) {
+        throw serviceError(409, 'INVALID_COLLABORATION_TRANSITION', 'Settlement decision is unavailable from the current stage.');
+      }
+      const history = paymentSettlementHistory(
+        db,
+        decision.campaignId,
+        collaborationId,
+        resource,
+        relations
+      );
+      if (
+        history.status !== 'pending_review' || !history.current_submission ||
+        history.current_submission.id !== decision.submissionEntryId || history.latest_decision
+      ) {
+        throw serviceError(409, 'INVALID_COLLABORATION_TRANSITION', 'There is no matching settlement submission to review.');
+      }
+      if (
+        history.current_submission.submitted_by === userId ||
+        history.current_submission.recorder_user_ids.includes(userId)
+      ) {
+        throw serviceError(409, 'SETTLEMENT_INDEPENDENT_REVIEW_REQUIRED', 'Settlement requires a reviewer independent from submission and payment recording.');
+      }
+      if (!['owner', 'org_admin'].includes(context.access.role)) {
+        throw serviceError(403, 'SETTLEMENT_DECISION_FORBIDDEN', 'Only the campaign owner or organization administrator may review settlement.');
+      }
+      if (history.current_submission.payment_digest !== activePaymentsDigest(history.entries)) {
+        paymentEvidenceError();
+      }
+      if (current.row_version === SAFE_MAX) {
+        throw serviceError(409, 'ROW_VERSION_EXHAUSTED', 'Collaboration row version is exhausted.');
+      }
+      const rowVersion = decision.expectedVersion + 1;
+      const approved = decision.decision === 'approved';
+      const update = db.prepare(`
+        UPDATE collaborations
+        SET cost_actual=CASE WHEN ?=1 THEN ? ELSE cost_actual END,
+            cost_actual_confirmed=CASE WHEN ?=1 THEN 1 ELSE cost_actual_confirmed END,
+            row_version=row_version+1,updated_at=CURRENT_TIMESTAMP
+        WHERE id=? AND row_version=?
+      `).run(
+        approved ? 1 : 0,
+        history.creator_payment_total,
+        approved ? 1 : 0,
+        collaborationId,
+        decision.expectedVersion
+      );
+      if (update.changes !== 1) {
+        throw serviceError(409, 'STALE_COLLABORATION_VERSION', 'Collaboration version is stale.');
+      }
+      const recordedAt = db.prepare(`
+        SELECT replace(CURRENT_TIMESTAMP,' ','T') || '.000Z' AS now
+      `).get().now;
+      const action = approved ? 'settlement_approved' : 'settlement_changes_requested';
+      persistPaymentSettlementEvidence({
+        orgId: context.access.campaign.org_id,
+        campaignId: decision.campaignId,
+        collaborationId,
+        userId,
+        rowVersion,
+        action,
+        metadata: {
+          schema_version: 1,
+          collaboration_id: collaborationId,
+          row_version: rowVersion,
+          action,
+          submission_entry_id: history.current_submission.id,
+          payment_digest: history.current_submission.payment_digest,
+          review_note: decision.reviewNote,
+          actor_user_id: userId,
+          recorded_at: recordedAt,
+          retrieval_eligible: false
+        },
+        requestId: input.requestId,
+        auditFingerprint: reservation.auditFingerprint,
+        reason: approved ? 'Settlement approved' : 'Settlement changes requested',
+        emitLinkEvent: !approved
+      });
+      if (approved) {
+        const bundle = activeCollaborationBundle(db, decision.campaignId, collaborationId);
+        if (!bundle) paymentEvidenceError();
+        const settlementLink = insertLink(db, {
+          orgId: context.access.campaign.org_id,
+          campaignId: decision.campaignId,
+          userId,
+          recordType: 'collaboration',
+          recordId: collaborationId,
+          relationType: 'settlement',
+          bundleId: bundle.bundleId,
+          metadata: {
+            approved_by: userId,
+            approved_at: recordedAt,
+            submission_entry_id: history.current_submission.id,
+            payment_digest: history.current_submission.payment_digest
+          }
+        });
+        insertLinkAttachedEvent(db, {
+          orgId: context.access.campaign.org_id,
+          campaignId: decision.campaignId,
+          userId,
+          collaborationId,
+          relationType: 'settlement',
+          link: settlementLink,
+          requestId: input.requestId,
+          auditFingerprint: reservation.auditFingerprint,
+          reason: 'Independent settlement approval'
+        });
+      }
+      collaborationArchive(db, {
+        orgId: context.access.campaign.org_id,
+        campaignId: decision.campaignId,
+        userId,
+        collaborationId,
+        campaignRelation: approved ? 'settlement' : null
+      });
+      const nextRelations = activeRelations(db, decision.campaignId, collaborationId);
+      const paymentHistory = paymentSettlementHistory(
+        db,
+        decision.campaignId,
+        collaborationId,
+        resource,
+        nextRelations
+      );
+      const response = {
+        success: true,
+        campaign_id: decision.campaignId,
+        collaboration_id: collaborationId,
+        status: current.status,
+        row_version: rowVersion,
+        active_relations: nextRelations,
+        payment_settlement: projectPaymentSettlementCapabilities(
+          db,
+          context.access,
+          userId,
+          decision.campaignId,
+          { ...current, row_version: rowVersion, cost_actual: approved ? history.creator_payment_total : current.cost_actual },
+          nextRelations,
+          paymentHistory
+        )
+      };
+      return completeJson(db, reservation, hash, 201, response);
+    }).immediate();
   }
 
   function submitContentReview(input) {
@@ -2618,6 +3967,13 @@ function createCampaignCollaborationService(db) {
         throw serviceError(409, 'RESOURCE_QUOTE_LOCKED', 'A confirmed resource order locks its quoted price.');
       }
       const v2Resource = v2CollaborationResource(current.proposal_notes);
+      if (v2Resource && body.campaign_relation === 'settlement') {
+        throw serviceError(
+          409,
+          'SETTLEMENT_CHECKPOINT_REQUIRED',
+          'Version 2 orders must be settled through the payment checkpoint.'
+        );
+      }
       if (v2Resource && Object.hasOwn(body, 'content_url')) {
         throw serviceError(409, 'CONTENT_REVIEW_ENDPOINT_REQUIRED', 'Content URLs must be submitted through the content review checkpoint.');
       }
@@ -2976,16 +4332,21 @@ function createCampaignCollaborationService(db) {
     confirmContract,
     createLinked,
     decideContentReview,
+    decideSettlement,
     downloadContractDocument,
     get,
     list,
     listContentReviews,
     listContractDocuments,
+    listPayments,
+    recordPayment,
     stats,
     submitContentReview,
+    submitSettlement,
     updateLegacy,
     updateLinked,
-    uploadContractDocument
+    uploadContractDocument,
+    voidPayment
   });
 }
 
