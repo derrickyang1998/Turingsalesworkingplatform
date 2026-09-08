@@ -260,7 +260,7 @@
     },
     {
       "path": "server/systemd/turingmarket-parser.manifest.json",
-      "sha256": "d05316c54e456c85936773789908d332f09c8d668e7613022cb0a401809dc857"
+      "sha256": "ddf02acd3832b38b465fb8fef16398ea00c0fbcf8cdc6011c8889626f6e8e021"
     },
     {
       "path": "server/systemd/turingmarket-parser.slice",
