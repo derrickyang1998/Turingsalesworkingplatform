@@ -265,6 +265,10 @@ const m4Functions = [
   'm4CollabMutationSlot',
   'm4CollabCreateMutationSlot',
   'm4CollabMutationOperationKey',
+  'm4OrderCurrency',
+  'm4OrderCommercialDefaults',
+  'm4OrderCommercialControls',
+  'm4CommercialValueText',
   'renderM4CommercialPreview',
   'submitCollabOrder',
   'loadCollaborations',
@@ -360,6 +364,15 @@ test('M4 commercial order previews margin and shows selected campaign customer a
   context.renderM4CommercialPreview();
   assert.match(elements.orderMarginPreview.innerHTML, /毛利：USD 400/);
   assert.match(elements.orderMarginPreview.innerHTML, /33\.3%/);
+  elements.orderCreatorCost.value = '';
+  elements.orderClientQuote.value = '';
+  context.renderM4CommercialPreview();
+  assert.match(elements.orderMarginPreview.innerHTML, /请输入非负整数后预览毛利/);
+  elements.orderCreatorCost.value = '800';
+  elements.orderClientQuote.value = '0';
+  context.renderM4CommercialPreview();
+  assert.match(elements.orderMarginPreview.innerHTML, /毛利率不可计算/);
+  assert.doesNotMatch(elements.orderMarginPreview.innerHTML, /-%/);
   elements.orderClientQuote.value = '700';
   context.renderM4CommercialPreview();
   assert.match(elements.orderMarginPreview.innerHTML, /亏损/);
@@ -413,6 +426,54 @@ test('M4 collaboration table distinguishes v2 commercial terms from historical q
   assert.match(elements.execTableContainer.innerHTML, /毛利：USD 400/);
   assert.match(elements.execTableContainer.innerHTML, /账期：Net 30/);
   assert.match(elements.execTableContainer.innerHTML, /历史报价：\$900/);
+  assert.match(context.renderCollabCommercialTerms(
+    { cost_quoted: 0 },
+    {
+      schema: 'turingmarket.collaboration-order.v2',
+      creator_cost: 0,
+      client_quote: 0,
+      currency: 'USD',
+      payment_terms: 'full_prepayment'
+    }
+  ), /达人成本：USD 0/);
+  assert.match(context.renderCollabCommercialTerms(
+    { cost_quoted: 0 },
+    { schema: 'turingmarket.collaboration-order.v1', quoted_price: 0 }
+  ), /历史报价：\$0/);
+});
+
+test('M4 commercial controls preserve zero defaults and choose campaign currency safely', () => {
+  const { context } = createClientContext();
+  loadFunctions(context, m4Functions);
+  context.m4Campaigns = [{ id: 91, currency: 'EUR' }];
+
+  assert.deepEqual(JSON.parse(JSON.stringify(context.m4OrderCommercialDefaults({ cost_usd: 0 }, 91))), {
+    creatorCost: 0,
+    clientQuote: 0,
+    currency: 'EUR'
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(context.m4OrderCommercialDefaults({ cost_usd: 300 }, 91))), {
+    creatorCost: 300,
+    clientQuote: 300,
+    currency: 'EUR'
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(context.m4OrderCommercialDefaults({ cost_usd: 300, quoted_price: 500 }, 91))), {
+    creatorCost: 300,
+    clientQuote: 500,
+    currency: 'EUR'
+  });
+
+  context.m4Campaigns = [{ id: 91, currency: 'eur' }];
+  assert.equal(context.m4OrderCommercialDefaults({ cost_usd: 0 }, 91).currency, 'USD');
+  context.m4Campaigns = [{ id: 91 }];
+  assert.equal(context.m4OrderCommercialDefaults({ cost_usd: 0 }, 91).currency, 'USD');
+
+  context.m4Campaigns = [{ id: 91, currency: 'EUR' }];
+  const controls = context.m4OrderCommercialControls({ cost_usd: 0 }, 91);
+  assert.match(controls, /id="orderCreatorCost"[^>]*value="0"/);
+  assert.match(controls, /id="orderClientQuote"[^>]*value="0"/);
+  assert.match(controls, /id="orderCurrency"[^>]*value="EUR"/);
+  assert.match(controls, /id="orderPaymentTerms"/);
 });
 
 test('M4 campaign order ignores a stale completion after a newer dialog intent begins', async () => {

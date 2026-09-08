@@ -6216,11 +6216,30 @@ function m4OrderCurrency(campaignId) {
   var currency = campaign && typeof campaign.currency === 'string' ? campaign.currency.trim() : '';
   return /^[A-Z]{3}$/.test(currency) ? currency : 'USD';
 }
+function m4OrderCommercialDefaults(influencer, campaignId) {
+  var creatorCost = influencer && influencer.cost_usd !== undefined && influencer.cost_usd !== null && influencer.cost_usd !== '' ? influencer.cost_usd : '';
+  var clientQuote = influencer && influencer.quoted_price !== undefined && influencer.quoted_price !== null && influencer.quoted_price !== '' ? influencer.quoted_price : creatorCost;
+  return { creatorCost: creatorCost, clientQuote: clientQuote, currency: m4OrderCurrency(campaignId) };
+}
+function m4CommercialValueText(value) {
+  return value === undefined || value === null ? '' : String(value);
+}
+function m4OrderCommercialControls(influencer, campaignId) {
+  var defaults = m4OrderCommercialDefaults(influencer, campaignId);
+  return '<div><label>达人成本（整数）</label><input id="orderCreatorCost" type="number" min="0" step="1" value="' + esc(m4CommercialValueText(defaults.creatorCost)) + '" oninput="renderM4CommercialPreview()"></div>' +
+    '<div><label>客户报价（整数）</label><input id="orderClientQuote" type="number" min="0" step="1" value="' + esc(m4CommercialValueText(defaults.clientQuote)) + '" oninput="renderM4CommercialPreview()"></div>' +
+    '<div><label>币种</label><input id="orderCurrency" maxlength="3" value="' + esc(defaults.currency) + '" style="text-transform:uppercase" oninput="renderM4CommercialPreview()"></div>' +
+    '<div><label>付款条件</label><select id="orderPaymentTerms"><option value="prepay_80_balance_20">预付 80%，尾款 20%</option><option value="full_prepayment">全额预付</option><option value="net_7">Net 7</option><option value="net_30">Net 30</option></select></div>';
+}
 function renderM4CommercialPreview() {
   var target = document.getElementById('orderMarginPreview');
   if (!target) return;
-  var creatorCostValue = String(document.getElementById('orderCreatorCost')?.value || '').trim();
-  var clientQuoteValue = String(document.getElementById('orderClientQuote')?.value || '').trim();
+  var creatorCostValue = m4CommercialValueText(document.getElementById('orderCreatorCost')?.value).trim();
+  var clientQuoteValue = m4CommercialValueText(document.getElementById('orderClientQuote')?.value).trim();
+  if (!creatorCostValue || !clientQuoteValue) {
+    target.innerHTML = '<span style="font-size:12px;opacity:.65">请输入非负整数后预览毛利。</span>';
+    return;
+  }
   var creatorCost = Number(creatorCostValue);
   var clientQuote = Number(clientQuoteValue);
   var currency = String(document.getElementById('orderCurrency')?.value || '').trim();
@@ -6229,11 +6248,11 @@ function renderM4CommercialPreview() {
     return;
   }
   var margin = clientQuote - creatorCost;
-  var percentage = clientQuote === 0 ? (margin === 0 ? '0.0' : '-') : ((margin / clientQuote) * 100).toFixed(1);
+  var marginRate = clientQuote === 0 ? '毛利率不可计算' : ((margin / clientQuote) * 100).toFixed(1) + '%';
   var loss = margin < 0;
   target.innerHTML = '<strong style="color:' + (loss ? 'var(--danger, #b91c1c)' : 'inherit') + '">' +
     (loss ? '亏损' : '毛利') + '：' + esc(currency || '---') + ' ' + margin + '</strong>' +
-    '<span style="margin-left:8px;font-size:12px;opacity:.7">' + percentage + '%</span>';
+    '<span style="margin-left:8px;font-size:12px;opacity:.7">' + marginRate + '</span>';
 }
 function startCollab(infId) {
   pendingCollabInfId = Number(infId);
@@ -6243,9 +6262,6 @@ function startCollab(infId) {
   var campaignContext = campaignId === null
     ? '未关联活动：本次会创建独立合作记录。'
     : '已关联 ' + m4OrderCampaignText(campaignId) + (m4CampaignCommercialContext(campaignId) ? ' · ' + m4CampaignCommercialContext(campaignId) : '') + '：订单会进入活动审计和知识库。';
-  var creatorCost = inf && inf.cost_usd !== undefined && inf.cost_usd !== null && inf.cost_usd !== '' ? inf.cost_usd : '';
-  var clientQuote = inf && inf.quoted_price !== undefined && inf.quoted_price !== null && inf.quoted_price !== '' ? inf.quoted_price : creatorCost;
-  var currency = m4OrderCurrency(campaignId);
   var opener = document.activeElement;
   var existing = document.getElementById('collabOrderModal');
   if (existing) existing.remove();
@@ -6263,10 +6279,7 @@ function startCollab(infId) {
     '<div><label>推广产品</label><input id="orderProduct" value="' + esc(inf.product_name || '') + '"></div>' +
     '<div><label>资源类型</label><select id="orderType"><option value="paid">付费合作</option><option value="affiliate">联盟分佣</option><option value="gifting">寄样置换</option><option value="retainer">长期合作</option></select></div>' +
     '<div><label>合同 / PO 编号</label><input id="orderReference" placeholder="可选"></div>' +
-    '<div><label>达人成本（整数）</label><input id="orderCreatorCost" type="number" min="0" step="1" value="' + esc(creatorCost) + '" oninput="renderM4CommercialPreview()"></div>' +
-    '<div><label>客户报价（整数）</label><input id="orderClientQuote" type="number" min="0" step="1" value="' + esc(clientQuote) + '" oninput="renderM4CommercialPreview()"></div>' +
-    '<div><label>币种</label><input id="orderCurrency" maxlength="3" value="' + esc(currency) + '" style="text-transform:uppercase" oninput="renderM4CommercialPreview()"></div>' +
-    '<div><label>付款条件</label><select id="orderPaymentTerms"><option value="prepay_80_balance_20">预付 80%，尾款 20%</option><option value="full_prepayment">全额预付</option><option value="net_7">Net 7</option><option value="net_30">Net 30</option></select></div>' +
+    m4OrderCommercialControls(inf, campaignId) +
     '<div><label>开始时间</label><input id="orderTimelineStart" type="date"></div>' +
     '<div><label>结束时间</label><input id="orderTimelineEnd" type="date"></div>' +
     '</div>' +
@@ -6298,8 +6311,8 @@ function m4ActiveDemandId(campaignId) {
 async function submitCollabOrder() {
   if (!pendingCollabInfId) return;
   var campaignId = getM4CampaignId();
-  var creatorCostValue = String(document.getElementById('orderCreatorCost')?.value || '').trim();
-  var clientQuoteValue = String(document.getElementById('orderClientQuote')?.value || '').trim();
+  var creatorCostValue = m4CommercialValueText(document.getElementById('orderCreatorCost')?.value).trim();
+  var clientQuoteValue = m4CommercialValueText(document.getElementById('orderClientQuote')?.value).trim();
   var creatorCost = Number(creatorCostValue);
   var clientQuote = Number(clientQuoteValue);
   var currency = String(document.getElementById('orderCurrency')?.value || '').trim();
@@ -6442,7 +6455,10 @@ function renderCampaignCollabActions(collab) {
 }
 function renderCollabCommercialTerms(collab, resource) {
   if (resource.schema !== 'turingmarket.collaboration-order.v2') {
-    return '<span style="font-size:11px;opacity:.7">历史报价：$' + esc(collab.cost_quoted || resource.quoted_price || 0) + '</span>';
+    var historicalQuote = collab.cost_quoted;
+    if (historicalQuote === undefined || historicalQuote === null || historicalQuote === '') historicalQuote = resource.quoted_price;
+    if (historicalQuote === undefined || historicalQuote === null || historicalQuote === '') historicalQuote = 0;
+    return '<span style="font-size:11px;opacity:.7">历史报价：$' + esc(m4CommercialValueText(historicalQuote)) + '</span>';
   }
   var currency = /^[A-Z]{3}$/.test(String(resource.currency || '')) ? resource.currency : '---';
   var creatorCost = Number(resource.creator_cost);
@@ -6456,9 +6472,9 @@ function renderCollabCommercialTerms(collab, resource) {
   };
   var paymentTerms = paymentLabels[resource.payment_terms] || resource.payment_terms || '-';
   return '<div style="min-width:190px;font-size:11px;line-height:1.65">' +
-    '<strong>达人成本：' + esc(currency) + ' ' + esc(creatorCost) + '</strong><br>' +
-    '客户报价：' + esc(currency) + ' ' + esc(clientQuote) + '<br>' +
-    '<span style="color:' + (margin < 0 ? 'var(--danger, #b91c1c)' : 'inherit') + '">' + (margin < 0 ? '亏损' : '毛利') + '：' + esc(currency) + ' ' + esc(margin) + '</span><br>' +
+    '<strong>达人成本：' + esc(currency) + ' ' + esc(m4CommercialValueText(creatorCost)) + '</strong><br>' +
+    '客户报价：' + esc(currency) + ' ' + esc(m4CommercialValueText(clientQuote)) + '<br>' +
+    '<span style="color:' + (margin < 0 ? 'var(--danger, #b91c1c)' : 'inherit') + '">' + (margin < 0 ? '亏损' : '毛利') + '：' + esc(currency) + ' ' + esc(m4CommercialValueText(margin)) + '</span><br>' +
     '账期：' + esc(paymentTerms) + '</div>';
 }
 function renderCollabTable(data) {
