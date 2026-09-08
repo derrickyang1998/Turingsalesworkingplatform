@@ -1176,6 +1176,30 @@ test('legacy knowledge omission rejects reserved campaign namespaces before pers
       await jsonRequest(fixture.server, '/api/knowledge', {
         token: fixture.token,
         body: {
+          entry_type: 'note',
+          title: 'Reserved content review source type',
+          summary: 'Must not fabricate content review evidence',
+          content: 'Must not fabricate content review evidence',
+          tags: ['legacy'],
+          source_type: 'collaboration_content_review',
+          source_id: 'legacy-reserved-content-review-source'
+        }
+      }),
+      await jsonRequest(fixture.server, '/api/knowledge/ingest', {
+        token: fixture.token,
+        body: {
+          entry_type: 'collaboration_content_review',
+          title: 'Reserved content review entry type',
+          summary: 'Must not fabricate content review evidence',
+          content: 'Must not fabricate content review evidence',
+          tags: ['legacy'],
+          source_type: 'manual_upload',
+          source_id: 'legacy-reserved-content-review-entry'
+        }
+      }),
+      await jsonRequest(fixture.server, '/api/knowledge', {
+        token: fixture.token,
+        body: {
           type: 'campaign_review',
           title: 'Reserved legacy type alias',
           summary: 'Must not fabricate internal evidence',
@@ -1262,6 +1286,8 @@ test('legacy knowledge omission rejects reserved campaign namespaces before pers
         'legacy-reserved-entry',
         'legacy-reserved-contract-source',
         'legacy-reserved-contract-entry',
+        'legacy-reserved-content-review-source',
+        'legacy-reserved-content-review-entry',
         'legacy-reserved-type-alias',
         'legacy-reserved-source-array',
         'legacy-reserved-entry-array',
@@ -1886,6 +1912,20 @@ test('linked knowledge rejects reserved deep and oversized inputs before mutatio
       }),
       await jsonRequest(fixture.server, '/api/knowledge', {
         token: fixture.token,
+        idempotencyKey: 'wave2-reserved-content-review-source',
+        body: knowledgeBody(fixture.campaignId, 'reserved-content-review-source', {
+          source_type: 'collaboration_content_review'
+        })
+      }),
+      await jsonRequest(fixture.server, '/api/knowledge', {
+        token: fixture.token,
+        idempotencyKey: 'wave2-reserved-content-review-entry',
+        body: knowledgeBody(fixture.campaignId, 'reserved-content-review-entry', {
+          entry_type: 'collaboration_content_review'
+        })
+      }),
+      await jsonRequest(fixture.server, '/api/knowledge', {
+        token: fixture.token,
         idempotencyKey: 'wave2-deep-metadata',
         body: knowledgeBody(fixture.campaignId, 'deep-metadata', { metadata: nested })
       }),
@@ -1902,6 +1942,8 @@ test('linked knowledge rejects reserved deep and oversized inputs before mutatio
       { status: 400, code: 'INVALID_CAMPAIGN_INPUT' },
       { status: 400, code: 'INVALID_CAMPAIGN_INPUT' },
       { status: 400, code: 'INVALID_CAMPAIGN_INPUT' },
+      { status: 400, code: 'INVALID_CAMPAIGN_INPUT' },
+      { status: 400, code: 'INVALID_CAMPAIGN_INPUT' },
       { status: 413, code: 'KNOWLEDGE_ENTRY_TOO_LARGE' }
     ]);
     assert.deepEqual(fixture.db.prepare(`
@@ -1909,12 +1951,14 @@ test('linked knowledge rejects reserved deep and oversized inputs before mutatio
         (SELECT COUNT(*) FROM knowledge_entries
           WHERE source_id IN (
             'reserved-source','reserved-contract-source','reserved-contract-entry',
+            'reserved-content-review-source','reserved-content-review-entry',
             'deep-metadata','oversized-response'
           )) AS entries,
         (SELECT COUNT(*) FROM request_idempotency
           WHERE idempotency_key IN (
             'wave2-reserved-source','wave2-reserved-contract-source',
-            'wave2-reserved-contract-entry','wave2-deep-metadata','wave2-oversized-response'
+            'wave2-reserved-contract-entry','wave2-reserved-content-review-source',
+            'wave2-reserved-content-review-entry','wave2-deep-metadata','wave2-oversized-response'
           )) AS ledgers
     `).get(), { entries: 0, ledgers: 0 });
   } finally {

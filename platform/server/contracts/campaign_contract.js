@@ -347,6 +347,21 @@ const REQUEST_POLICIES = Object.freeze({
     'GET',
     '/api/collaborations/:id/contract-documents/:documentId/download'
   ),
+  COLLABORATION_CONTENT_REVIEW_SUBMIT: controlJson(
+    'collaboration.content-review.submit',
+    'POST',
+    '/api/collaborations/:id/content-reviews'
+  ),
+  COLLABORATION_CONTENT_REVIEW_DECIDE: controlJson(
+    'collaboration.content-review.decide',
+    'POST',
+    '/api/collaborations/:id/content-review-decisions'
+  ),
+  COLLABORATION_CONTENT_REVIEW_LIST: empty(
+    'collaboration.content-review.list',
+    'GET',
+    '/api/collaborations/:id/content-reviews'
+  ),
   LEGACY_KNOWLEDGE_CREATE: knowledgeDual(
     'legacy.knowledge.create',
     '/api/knowledge'

@@ -2739,6 +2739,96 @@ test('contract document routes forward upload and enforce attachment-only downlo
   db.close();
 });
 
+test('content review routes forward submission, decision, and history contracts', async () => {
+  const db = freshDb();
+  const baseService = createCampaignCollaborationService(db);
+  const captured = [];
+  const contentReview = {
+    status: 'pending',
+    publication_ready: false,
+    current_submission: { content_version: 'V1 client review' },
+    latest_decision: null,
+    events: []
+  };
+  const routes = mountRoutes(db, {
+    campaignCollaborationService: Object.assign({}, baseService, {
+      submitContentReview(input) {
+        captured.push({ method: 'submit', input });
+        return { status: 201, body: { success: true, status: 'content_review', content_review: contentReview } };
+      },
+      decideContentReview(input) {
+        captured.push({ method: 'decide', input });
+        return { status: 201, body: { success: true, status: 'content_review', content_review: { ...contentReview, status: 'approved' } } };
+      },
+      listContentReviews(input) {
+        captured.push({ method: 'list', input });
+        return { collaboration_id: 71, content_review: contentReview };
+      }
+    })
+  });
+  const submissionBody = {
+    campaign_id: 41,
+    expected_version: 5,
+    content_url: 'https://video.example.com/drafts/launch-v1',
+    content_version: 'V1 client review',
+    submission_note: 'Opening hook is ready for review.'
+  };
+  const decisionBody = {
+    campaign_id: 41,
+    expected_version: 6,
+    decision: 'approved',
+    review_note: 'Brand safety and claims are approved.'
+  };
+
+  const malformed = await invoke(routes, 'POST /api/collaborations/:id/content-reviews', {
+    params: { id: '071' },
+    body: submissionBody,
+    headers: { 'Idempotency-Key': 'route-content-review-invalid-id' }
+  });
+  assert.equal(malformed.statusCode, 400);
+  assert.equal(malformed.payload.code, 'INVALID_COLLABORATION_ID');
+  assert.equal(captured.length, 0);
+
+  const submitted = await invoke(routes, 'POST /api/collaborations/:id/content-reviews', {
+    params: { id: '71' },
+    body: submissionBody,
+    headers: { 'Idempotency-Key': 'route-content-review-submit-0001' }
+  });
+  assert.equal(submitted.statusCode, 201);
+  assert.equal(submitted.payload.content_review.status, 'pending');
+  const listed = await invoke(routes, 'GET /api/collaborations/:id/content-reviews', {
+    params: { id: '71' }
+  });
+  assert.equal(listed.payload.content_review.status, 'pending');
+  const decided = await invoke(routes, 'POST /api/collaborations/:id/content-review-decisions', {
+    params: { id: '71' },
+    body: decisionBody,
+    headers: { 'Idempotency-Key': 'route-content-review-decision-0001' }
+  });
+  assert.equal(decided.statusCode, 201);
+  assert.equal(decided.payload.content_review.status, 'approved');
+  assert.deepEqual(captured.map((entry) => entry.method), ['submit', 'list', 'decide']);
+  assert.deepEqual(captured[0].input, {
+    userId: 2,
+    collaborationId: 71,
+    requestId: 'campaign-link-request',
+    idempotencyKey: 'route-content-review-submit-0001',
+    body: submissionBody
+  });
+  assert.deepEqual(captured[1].input, {
+    userId: 2,
+    collaborationId: 71
+  });
+  assert.deepEqual(captured[2].input, {
+    userId: 2,
+    collaborationId: 71,
+    requestId: 'campaign-link-request',
+    idempotencyKey: 'route-content-review-decision-0001',
+    body: decisionBody
+  });
+  db.close();
+});
+
 test('collaboration list exposes resource fields and status updates persist', async () => {
   const db = freshDb();
   const routes = mountRoutes(db);

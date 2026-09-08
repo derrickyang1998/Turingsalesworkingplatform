@@ -107,6 +107,19 @@ const CONTRACT_DOCUMENT_UPLOAD_KEYS = new Set([
   'media_type',
   'content_base64'
 ]);
+const CONTENT_REVIEW_SUBMISSION_KEYS = new Set([
+  'campaign_id',
+  'expected_version',
+  'content_url',
+  'content_version',
+  'submission_note'
+]);
+const CONTENT_REVIEW_DECISION_KEYS = new Set([
+  'campaign_id',
+  'expected_version',
+  'decision',
+  'review_note'
+]);
 const CONTRACT_FUTURE_TOLERANCE_MS = 5 * 60 * 1000;
 const CONTRACT_DOCUMENT_MIN_BYTES = 32;
 const CONTRACT_DOCUMENT_MAX_BYTES = 8 * 1024 * 1024;
@@ -371,6 +384,85 @@ function normalizedContractDocumentUpload(body) {
     mediaType: body.media_type,
     bytes,
     fileSha256: crypto.createHash('sha256').update(bytes).digest('hex')
+  });
+}
+
+function contentReviewError(field, message = 'Content review evidence is invalid.') {
+  throw serviceError(400, 'INVALID_CONTENT_REVIEW', message, field ? { field } : undefined);
+}
+
+function contentReviewText(value, field, maxLength, multiline) {
+  if (typeof value !== 'string' || Buffer.from(value, 'utf8').toString('utf8') !== value) {
+    contentReviewError(field);
+  }
+  const normalized = value.trim();
+  const forbidden = multiline
+    ? /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u
+    : /[\u0000-\u001f\u007f]/u;
+  if (!normalized || Array.from(normalized).length > maxLength || forbidden.test(normalized)) {
+    contentReviewError(field);
+  }
+  return normalized;
+}
+
+function normalizedContentReviewUrl(value) {
+  const raw = contentReviewText(value, 'content_url', 2048, false);
+  let parsed;
+  try {
+    parsed = new URL(raw);
+  } catch (_error) {
+    contentReviewError('content_url');
+  }
+  if (
+    parsed.protocol !== 'https:' || parsed.username || parsed.password ||
+    !parsed.hostname || parsed.href.length > 2048
+  ) {
+    contentReviewError('content_url');
+  }
+  return parsed.href;
+}
+
+function normalizedContentReviewSubmission(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) contentReviewError();
+  if (Object.keys(body).some((key) => !CONTENT_REVIEW_SUBMISSION_KEYS.has(key))) {
+    contentReviewError();
+  }
+  if (!Number.isSafeInteger(body.campaign_id) || body.campaign_id < 1) {
+    contentReviewError('campaign_id');
+  }
+  if (!Number.isSafeInteger(body.expected_version) || body.expected_version < 1) {
+    contentReviewError('expected_version');
+  }
+  const contentUrl = normalizedContentReviewUrl(body.content_url);
+  return Object.freeze({
+    campaignId: body.campaign_id,
+    expectedVersion: body.expected_version,
+    contentUrl,
+    contentUrlSha256: crypto.createHash('sha256').update(contentUrl, 'utf8').digest('hex'),
+    contentVersion: contentReviewText(body.content_version, 'content_version', 80, false),
+    submissionNote: contentReviewText(body.submission_note, 'submission_note', 1000, true)
+  });
+}
+
+function normalizedContentReviewDecision(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) contentReviewError();
+  if (Object.keys(body).some((key) => !CONTENT_REVIEW_DECISION_KEYS.has(key))) {
+    contentReviewError();
+  }
+  if (!Number.isSafeInteger(body.campaign_id) || body.campaign_id < 1) {
+    contentReviewError('campaign_id');
+  }
+  if (!Number.isSafeInteger(body.expected_version) || body.expected_version < 1) {
+    contentReviewError('expected_version');
+  }
+  if (!['approved', 'changes_requested'].includes(body.decision)) {
+    contentReviewError('decision');
+  }
+  return Object.freeze({
+    campaignId: body.campaign_id,
+    expectedVersion: body.expected_version,
+    decision: body.decision,
+    reviewNote: contentReviewText(body.review_note, 'review_note', 1000, true)
   });
 }
 
@@ -694,6 +786,217 @@ function contractConfirmation(db, campaignId, collaborationId) {
   };
   if (document) projection.document = document;
   return projection;
+}
+
+function contentReviewEvidenceError() {
+  throw serviceError(409, 'CAMPAIGN_EVIDENCE_IN_USE', 'Content review evidence is inconsistent.');
+}
+
+function contentReviewHistory(db, campaignId, collaborationId, currentContentUrl) {
+  const pageStatement = db.prepare(`
+    SELECT
+      entry.id,entry.source_id,entry.business_type,entry.business_id,entry.created_by,
+      entry.visibility,entry.metadata_json,entry.created_at,
+      link.org_id,link.created_by AS link_created_by,link.metadata_json AS link_metadata_json,
+      campaign.org_id AS campaign_org_id,actor.display_name AS actor_name
+    FROM campaign_record_links link
+    JOIN knowledge_entries entry
+      ON entry.id=CAST(link.record_id AS INTEGER)
+     AND entry.source_type='collaboration_content_review'
+     AND entry.entry_type='collaboration_content_review'
+    JOIN campaigns campaign ON campaign.id=link.campaign_id
+    LEFT JOIN users actor ON actor.id=json_extract(entry.metadata_json,'$.actor_user_id')
+    WHERE link.campaign_id=?
+      AND link.record_type='knowledge_entry'
+      AND link.relation_type='knowledge'
+      AND link.revoked_at IS NULL
+      AND json_extract(entry.metadata_json,'$.collaboration_id')=?
+      AND entry.id>?
+    ORDER BY entry.id
+    LIMIT 200
+  `);
+  const rows = [];
+  let cursor = 0;
+  while (true) {
+    const page = pageStatement.all(campaignId, collaborationId, cursor);
+    rows.push(...page);
+    if (page.length < 200) break;
+    const nextCursor = page[page.length - 1].id;
+    if (!Number.isSafeInteger(nextCursor) || nextCursor <= cursor) {
+      contentReviewEvidenceError();
+    }
+    cursor = nextCursor;
+  }
+
+  const events = [];
+  let expected = 'submitted';
+  let currentSubmission = null;
+  let latestDecision = null;
+  let previousRowVersion = 0;
+  let terminalApproval = false;
+  for (const row of rows) {
+    let metadata;
+    let linkMetadata;
+    try {
+      metadata = JSON.parse(row.metadata_json);
+      linkMetadata = JSON.parse(row.link_metadata_json);
+    } catch (_error) {
+      contentReviewEvidenceError();
+    }
+    const action = metadata && metadata.action;
+    const expectedSourceId = `${collaborationId}:${metadata && metadata.row_version}:${action}`;
+    if (
+      terminalApproval || metadata.schema_version !== 1 ||
+      metadata.collaboration_id !== collaborationId ||
+      !Number.isSafeInteger(metadata.row_version) || metadata.row_version < 1 ||
+      metadata.row_version <= previousRowVersion ||
+      !Number.isSafeInteger(metadata.actor_user_id) || metadata.actor_user_id < 1 ||
+      metadata.retrieval_eligible !== false ||
+      typeof metadata.recorded_at !== 'string' ||
+      !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.000Z$/.test(metadata.recorded_at) ||
+      !Number.isFinite(Date.parse(metadata.recorded_at)) ||
+      String(row.source_id) !== expectedSourceId ||
+      row.business_type !== 'campaign' || String(row.business_id) !== String(campaignId) ||
+      row.visibility !== 'team' || row.created_by !== metadata.actor_user_id ||
+      row.link_created_by !== metadata.actor_user_id || row.org_id !== row.campaign_org_id ||
+      !linkMetadata || linkMetadata.producer_type !== 'collaboration_content_review' ||
+      linkMetadata.producer_id !== collaborationId ||
+      linkMetadata.source_type !== 'collaboration_content_review' ||
+      String(linkMetadata.source_id) !== expectedSourceId
+    ) {
+      contentReviewEvidenceError();
+    }
+    previousRowVersion = metadata.row_version;
+
+    if (action === 'submitted') {
+      if (expected !== 'submitted') contentReviewEvidenceError();
+      let contentUrl;
+      let contentVersion;
+      let submissionNote;
+      try {
+        contentUrl = normalizedContentReviewUrl(metadata.content_url);
+        contentVersion = contentReviewText(metadata.content_version, 'content_version', 80, false);
+        submissionNote = contentReviewText(metadata.submission_note, 'submission_note', 1000, true);
+      } catch (_error) {
+        contentReviewEvidenceError();
+      }
+      const digest = crypto.createHash('sha256').update(contentUrl, 'utf8').digest('hex');
+      if (
+        contentUrl !== metadata.content_url || metadata.content_url_sha256 !== digest ||
+        contentVersion !== metadata.content_version || submissionNote !== metadata.submission_note
+      ) {
+        contentReviewEvidenceError();
+      }
+      currentSubmission = {
+        id: row.id,
+        action,
+        row_version: metadata.row_version,
+        content_url: contentUrl,
+        content_url_sha256: digest,
+        content_version: contentVersion,
+        submission_note: submissionNote,
+        submitted_by: metadata.actor_user_id,
+        submitted_by_name: row.actor_name || null,
+        submitted_at: metadata.recorded_at
+      };
+      events.push(currentSubmission);
+      latestDecision = null;
+      expected = 'decision';
+      continue;
+    }
+
+    if (!['approved', 'changes_requested'].includes(action) || expected !== 'decision' || !currentSubmission) {
+      contentReviewEvidenceError();
+    }
+    let reviewNote;
+    let contentVersion;
+    try {
+      reviewNote = contentReviewText(metadata.review_note, 'review_note', 1000, true);
+      contentVersion = contentReviewText(metadata.content_version, 'content_version', 80, false);
+    } catch (_error) {
+      contentReviewEvidenceError();
+    }
+    if (
+      metadata.submission_entry_id !== currentSubmission.id ||
+      metadata.content_url_sha256 !== currentSubmission.content_url_sha256 ||
+      contentVersion !== currentSubmission.content_version ||
+      contentVersion !== metadata.content_version || reviewNote !== metadata.review_note ||
+      metadata.actor_user_id === currentSubmission.submitted_by
+    ) {
+      contentReviewEvidenceError();
+    }
+    latestDecision = {
+      id: row.id,
+      action,
+      row_version: metadata.row_version,
+      submission_entry_id: metadata.submission_entry_id,
+      content_url_sha256: metadata.content_url_sha256,
+      content_version: contentVersion,
+      review_note: reviewNote,
+      reviewed_by: metadata.actor_user_id,
+      reviewed_by_name: row.actor_name || null,
+      reviewed_at: metadata.recorded_at
+    };
+    events.push(latestDecision);
+    if (action === 'approved') {
+      terminalApproval = true;
+      expected = 'terminal';
+    } else {
+      expected = 'submitted';
+    }
+  }
+
+  let status = 'not_submitted';
+  if (currentSubmission) status = latestDecision ? latestDecision.action : 'pending';
+  let publicationReady = false;
+  if (status === 'approved' && currentSubmission && latestDecision) {
+    let normalizedCurrent;
+    try {
+      normalizedCurrent = normalizedContentReviewUrl(currentContentUrl);
+    } catch (_error) {
+      contentReviewEvidenceError();
+    }
+    const currentDigest = crypto.createHash('sha256').update(normalizedCurrent, 'utf8').digest('hex');
+    if (
+      normalizedCurrent !== currentContentUrl ||
+      currentDigest !== latestDecision.content_url_sha256 ||
+      latestDecision.submission_entry_id !== currentSubmission.id
+    ) {
+      contentReviewEvidenceError();
+    }
+    publicationReady = true;
+  }
+  return {
+    status,
+    publication_ready: publicationReady,
+    current_submission: currentSubmission,
+    latest_decision: latestDecision,
+    events
+  };
+}
+
+function projectContentReviewCapabilities(access, userId, current, relations, review) {
+  const relationSet = new Set(Array.isArray(relations) ? relations : []);
+  const reviewStageOpen = relationSet.has('order') && relationSet.has('execution') &&
+    !relationSet.has('publication') && !relationSet.has('settlement');
+  const writable = Boolean(access && access.permissions && access.permissions.write);
+  const isV2 = v2CollaborationResource(current && current.proposal_notes);
+  const canSubmit = Boolean(writable && isV2 && reviewStageOpen && (
+    (current.status === 'live' && ['not_submitted', 'changes_requested'].includes(review.status)) ||
+    (current.status === 'content_review' && review.status === 'not_submitted') ||
+    (current.status === 'completed' && review.status === 'not_submitted')
+  ));
+  const canDecide = Boolean(
+    writable && isV2 && reviewStageOpen && current.status === 'content_review' &&
+    review.status === 'pending' && review.current_submission && !review.latest_decision &&
+    ['owner', 'org_admin'].includes(access.role) &&
+    review.current_submission.submitted_by !== userId
+  );
+  return {
+    ...review,
+    can_submit: canSubmit,
+    can_decide: canDecide
+  };
 }
 
 function insertLink(db, values) {
@@ -1132,19 +1435,39 @@ function createCampaignCollaborationService(db) {
       ORDER BY collaboration.updated_at DESC
       LIMIT 200
     `).all(...params);
+    const accessByCampaign = new Map();
     const collaborations = includeCampaignContext
-      ? rows.map((row) => ({
-          ...row,
-          active_relations: row.campaign_id === null
-            ? []
-            : activeRelations(db, row.campaign_id, row.id),
-          contract_documents: row.campaign_id === null
-            ? []
-            : contractDocuments(db, row.campaign_id, row.id),
-          contract_confirmation: row.campaign_id === null
-            ? null
-            : contractConfirmation(db, row.campaign_id, row.id)
-        }))
+      ? rows.map((row) => {
+          if (row.campaign_id === null) {
+            return {
+              ...row,
+              active_relations: [],
+              contract_documents: [],
+              contract_confirmation: null,
+              content_review: null
+            };
+          }
+          const relations = activeRelations(db, row.campaign_id, row.id);
+          let access = accessByCampaign.get(row.campaign_id);
+          if (!access) {
+            access = requireCampaignAccess(db, userId, row.campaign_id);
+            accessByCampaign.set(row.campaign_id, access);
+          }
+          const review = contentReviewHistory(db, row.campaign_id, row.id, row.content_url);
+          return {
+            ...row,
+            active_relations: relations,
+            contract_documents: contractDocuments(db, row.campaign_id, row.id),
+            contract_confirmation: contractConfirmation(db, row.campaign_id, row.id),
+            content_review: projectContentReviewCapabilities(
+              access,
+              userId,
+              row,
+              relations,
+              review
+            )
+          };
+        })
       : rows;
     return { collaborations };
   }
@@ -1206,6 +1529,403 @@ function createCampaignCollaborationService(db) {
       collaboration_id: collaborationId,
       documents: contractDocuments(db, context.custody.campaignId, collaborationId)
     };
+  }
+
+  function listContentReviews(input) {
+    const userId = requirePositiveSafeId(input && input.userId, 'userId');
+    const collaborationId = requirePositiveSafeId(
+      input && input.collaborationId,
+      'collaborationId'
+    );
+    const context = contractDocumentContext(userId, collaborationId);
+    const relations = activeRelations(db, context.custody.campaignId, collaborationId);
+    const review = contentReviewHistory(
+      db,
+      context.custody.campaignId,
+      collaborationId,
+      context.current.content_url
+    );
+    return {
+      campaign_id: context.custody.campaignId,
+      collaboration_id: collaborationId,
+      status: context.current.status,
+      row_version: context.current.row_version,
+      content_review: projectContentReviewCapabilities(
+        context.access,
+        userId,
+        context.current,
+        relations,
+        review
+      )
+    };
+  }
+
+  function persistContentReviewEvidence(values) {
+    const sourceId = `${values.collaborationId}:${values.rowVersion}:${values.action}`;
+    const evidence = knowledgeService.writeCampaignKnowledgeInTransaction(db, {
+      organizationId: values.orgId,
+      campaignId: values.campaignId,
+      createdBy: values.userId,
+      entryType: 'collaboration_content_review',
+      title: `Content review checkpoint #${values.collaborationId}-${values.rowVersion}`,
+      summary: `Content review evidence recorded for collaboration #${values.collaborationId}.`,
+      content: JSON.stringify({
+        collaboration_id: values.collaborationId,
+        checkpoint: 'content_review',
+        action: values.action,
+        evidence_recorded: true
+      }),
+      tags: ['campaign', 'collaboration', 'content-review'],
+      sourceType: 'collaboration_content_review',
+      sourceId,
+      visibility: 'team',
+      metadata: values.metadata
+    });
+    if (evidence.status !== 'created') {
+      throw serviceError(409, 'CAMPAIGN_EVIDENCE_IN_USE', 'Content review evidence already exists.');
+    }
+    const evidenceLink = insertLink(db, {
+      orgId: values.orgId,
+      campaignId: values.campaignId,
+      userId: values.userId,
+      recordType: 'knowledge_entry',
+      recordId: evidence.entry.id,
+      relationType: 'knowledge',
+      metadata: {
+        producer_type: 'collaboration_content_review',
+        producer_id: values.collaborationId,
+        source_type: 'collaboration_content_review',
+        source_id: sourceId
+      }
+    });
+    insertLinkAttachedEvent(db, {
+      orgId: values.orgId,
+      campaignId: values.campaignId,
+      userId: values.userId,
+      recordType: 'knowledge_entry',
+      recordId: evidence.entry.id,
+      relationType: 'knowledge',
+      link: evidenceLink,
+      requestId: values.requestId,
+      auditFingerprint: values.auditFingerprint,
+      reason: values.reason
+    });
+    knowledgeService.applyKnowledgeCapacityGaugePlanInTransaction(db, evidence.capacityGaugePlan);
+    return evidence;
+  }
+
+  function submitContentReview(input) {
+    const userId = requirePositiveSafeId(input && input.userId, 'userId');
+    const collaborationId = requirePositiveSafeId(
+      input && input.collaborationId,
+      'collaborationId'
+    );
+    const submission = normalizedContentReviewSubmission(input && input.body);
+    const initialContext = contractDocumentContext(userId, collaborationId, {
+      write: true,
+      campaignId: submission.campaignId
+    });
+    const key = input.idempotencyKey;
+    if (typeof key !== 'string' || !/^[A-Za-z0-9._:-]{8,200}$/.test(key)) {
+      throw serviceError(400, 'IDEMPOTENCY_REQUIRED', 'Idempotency-Key is required.');
+    }
+    const payload = {
+      campaign_id: submission.campaignId,
+      expected_version: submission.expectedVersion,
+      content_url: submission.contentUrl,
+      content_version: submission.contentVersion,
+      submission_note: submission.submissionNote
+    };
+    const hash = requestHash({
+      method: 'POST',
+      path: `/api/collaborations/${collaborationId}/content-reviews`,
+      campaignId: submission.campaignId,
+      kind: 'json',
+      payload
+    });
+    const reservationInput = {
+      organizationId: initialContext.access.campaign.org_id,
+      actorUserId: userId,
+      campaignId: submission.campaignId,
+      secondaryCampaignId: null,
+      resourceClaim: null,
+      scope: 'collaboration.update.linked',
+      key,
+      requestHash: hash,
+      expectedEventCount: 1,
+      operationTimeoutSeconds: 60
+    };
+
+    return db.transaction(() => {
+      const context = contractDocumentContext(userId, collaborationId, {
+        write: true,
+        campaignId: submission.campaignId
+      });
+      let reservation = idempotencyService.recoverExpiredInTransaction(db, reservationInput);
+      if (reservation.state === 'absent') {
+        reservation = idempotencyService.reserveProcessingInTransaction(db, reservationInput);
+      }
+      if (reservation.state !== 'reserved') return idempotencyOutcome(reservation);
+
+      const current = context.current;
+      if (current.row_version !== submission.expectedVersion) {
+        throw serviceError(409, 'STALE_COLLABORATION_VERSION', 'Collaboration version is stale.');
+      }
+      if (!v2CollaborationResource(current.proposal_notes)) {
+        throw serviceError(409, 'INVALID_COLLABORATION_TRANSITION', 'Content review requires a version 2 order.');
+      }
+      const relations = activeRelations(db, submission.campaignId, collaborationId);
+      if (
+        !relations.includes('order') || !relations.includes('execution') ||
+        relations.includes('publication') || relations.includes('settlement')
+      ) {
+        throw serviceError(409, 'INVALID_COLLABORATION_TRANSITION', 'Content review is unavailable from the current campaign stage.');
+      }
+      const history = contentReviewHistory(
+        db,
+        submission.campaignId,
+        collaborationId,
+        current.content_url
+      );
+      const initialSubmission = current.status === 'live' && history.status === 'not_submitted';
+      const legacySubmission = current.status === 'content_review' && history.status === 'not_submitted';
+      const resubmission = current.status === 'live' && history.status === 'changes_requested';
+      const historicalCompletedSubmission = current.status === 'completed' && history.status === 'not_submitted';
+      if (!initialSubmission && !legacySubmission && !resubmission && !historicalCompletedSubmission) {
+        throw serviceError(409, 'INVALID_COLLABORATION_TRANSITION', 'Content review submission is unavailable from the current status.');
+      }
+      if (current.row_version === SAFE_MAX) {
+        throw serviceError(409, 'ROW_VERSION_EXHAUSTED', 'Collaboration row version is exhausted.');
+      }
+      const rowVersion = submission.expectedVersion + 1;
+      const update = db.prepare(`
+        UPDATE collaborations
+        SET status='content_review',content_url=?,row_version=row_version+1,updated_at=CURRENT_TIMESTAMP
+        WHERE id=? AND row_version=?
+      `).run(submission.contentUrl, collaborationId, submission.expectedVersion);
+      if (update.changes !== 1) {
+        throw serviceError(409, 'STALE_COLLABORATION_VERSION', 'Collaboration version is stale.');
+      }
+      const recordedAt = db.prepare(`
+        SELECT replace(CURRENT_TIMESTAMP,' ','T') || '.000Z' AS now
+      `).get().now;
+      persistContentReviewEvidence({
+        orgId: context.access.campaign.org_id,
+        campaignId: submission.campaignId,
+        collaborationId,
+        userId,
+        rowVersion,
+        action: 'submitted',
+        metadata: {
+          schema_version: 1,
+          collaboration_id: collaborationId,
+          row_version: rowVersion,
+          action: 'submitted',
+          content_url: submission.contentUrl,
+          content_url_sha256: submission.contentUrlSha256,
+          content_version: submission.contentVersion,
+          submission_note: submission.submissionNote,
+          actor_user_id: userId,
+          recorded_at: recordedAt,
+          retrieval_eligible: false
+        },
+        requestId: input.requestId,
+        auditFingerprint: reservation.auditFingerprint,
+        reason: 'Content submitted for review'
+      });
+      collaborationArchive(db, {
+        orgId: context.access.campaign.org_id,
+        campaignId: submission.campaignId,
+        userId,
+        collaborationId,
+        campaignRelation: null
+      });
+      const contentReview = contentReviewHistory(
+        db,
+        submission.campaignId,
+        collaborationId,
+        submission.contentUrl
+      );
+      const response = {
+        success: true,
+        campaign_id: submission.campaignId,
+        collaboration_id: collaborationId,
+        status: 'content_review',
+        row_version: rowVersion,
+        active_relations: relations,
+        content_review: projectContentReviewCapabilities(
+          context.access,
+          userId,
+          {
+            ...current,
+            status: 'content_review',
+            row_version: rowVersion,
+            content_url: submission.contentUrl
+          },
+          relations,
+          contentReview
+        )
+      };
+      return completeJson(db, reservation, hash, 201, response);
+    }).immediate();
+  }
+
+  function decideContentReview(input) {
+    const userId = requirePositiveSafeId(input && input.userId, 'userId');
+    const collaborationId = requirePositiveSafeId(
+      input && input.collaborationId,
+      'collaborationId'
+    );
+    const decision = normalizedContentReviewDecision(input && input.body);
+    const initialContext = contractDocumentContext(userId, collaborationId, {
+      write: true,
+      campaignId: decision.campaignId
+    });
+    if (!['owner', 'org_admin'].includes(initialContext.access.role)) {
+      throw serviceError(403, 'CONTENT_REVIEW_DECISION_FORBIDDEN', 'Only the campaign owner or organization administrator may review content.');
+    }
+    const key = input.idempotencyKey;
+    if (typeof key !== 'string' || !/^[A-Za-z0-9._:-]{8,200}$/.test(key)) {
+      throw serviceError(400, 'IDEMPOTENCY_REQUIRED', 'Idempotency-Key is required.');
+    }
+    const payload = {
+      campaign_id: decision.campaignId,
+      expected_version: decision.expectedVersion,
+      decision: decision.decision,
+      review_note: decision.reviewNote
+    };
+    const hash = requestHash({
+      method: 'POST',
+      path: `/api/collaborations/${collaborationId}/content-review-decisions`,
+      campaignId: decision.campaignId,
+      kind: 'json',
+      payload
+    });
+    const reservationInput = {
+      organizationId: initialContext.access.campaign.org_id,
+      actorUserId: userId,
+      campaignId: decision.campaignId,
+      secondaryCampaignId: null,
+      resourceClaim: null,
+      scope: 'collaboration.update.linked',
+      key,
+      requestHash: hash,
+      expectedEventCount: 1,
+      operationTimeoutSeconds: 60
+    };
+
+    return db.transaction(() => {
+      const context = contractDocumentContext(userId, collaborationId, {
+        write: true,
+        campaignId: decision.campaignId
+      });
+      if (!['owner', 'org_admin'].includes(context.access.role)) {
+        throw serviceError(403, 'CONTENT_REVIEW_DECISION_FORBIDDEN', 'Only the campaign owner or organization administrator may review content.');
+      }
+      let reservation = idempotencyService.recoverExpiredInTransaction(db, reservationInput);
+      if (reservation.state === 'absent') {
+        reservation = idempotencyService.reserveProcessingInTransaction(db, reservationInput);
+      }
+      if (reservation.state !== 'reserved') return idempotencyOutcome(reservation);
+
+      const current = context.current;
+      if (current.row_version !== decision.expectedVersion) {
+        throw serviceError(409, 'STALE_COLLABORATION_VERSION', 'Collaboration version is stale.');
+      }
+      if (current.status !== 'content_review' || !v2CollaborationResource(current.proposal_notes)) {
+        throw serviceError(409, 'INVALID_COLLABORATION_TRANSITION', 'Content review decision is unavailable from the current status.');
+      }
+      const relations = activeRelations(db, decision.campaignId, collaborationId);
+      if (
+        !relations.includes('order') || !relations.includes('execution') ||
+        relations.includes('publication') || relations.includes('settlement')
+      ) {
+        throw serviceError(409, 'INVALID_COLLABORATION_TRANSITION', 'Content review decision is unavailable from the current campaign stage.');
+      }
+      const history = contentReviewHistory(
+        db,
+        decision.campaignId,
+        collaborationId,
+        current.content_url
+      );
+      if (history.status !== 'pending' || !history.current_submission || history.latest_decision) {
+        throw serviceError(409, 'INVALID_COLLABORATION_TRANSITION', 'There is no pending content submission to review.');
+      }
+      if (history.current_submission.submitted_by === userId) {
+        throw serviceError(409, 'CONTENT_REVIEW_SELF_APPROVAL', 'Content submissions require an independent reviewer.');
+      }
+      if (current.row_version === SAFE_MAX) {
+        throw serviceError(409, 'ROW_VERSION_EXHAUSTED', 'Collaboration row version is exhausted.');
+      }
+      const rowVersion = decision.expectedVersion + 1;
+      const nextStatus = decision.decision === 'approved' ? 'content_review' : 'live';
+      const update = db.prepare(`
+        UPDATE collaborations
+        SET status=?,row_version=row_version+1,updated_at=CURRENT_TIMESTAMP
+        WHERE id=? AND row_version=?
+      `).run(nextStatus, collaborationId, decision.expectedVersion);
+      if (update.changes !== 1) {
+        throw serviceError(409, 'STALE_COLLABORATION_VERSION', 'Collaboration version is stale.');
+      }
+      const recordedAt = db.prepare(`
+        SELECT replace(CURRENT_TIMESTAMP,' ','T') || '.000Z' AS now
+      `).get().now;
+      persistContentReviewEvidence({
+        orgId: context.access.campaign.org_id,
+        campaignId: decision.campaignId,
+        collaborationId,
+        userId,
+        rowVersion,
+        action: decision.decision,
+        metadata: {
+          schema_version: 1,
+          collaboration_id: collaborationId,
+          row_version: rowVersion,
+          action: decision.decision,
+          submission_entry_id: history.current_submission.id,
+          content_url_sha256: history.current_submission.content_url_sha256,
+          content_version: history.current_submission.content_version,
+          review_note: decision.reviewNote,
+          actor_user_id: userId,
+          recorded_at: recordedAt,
+          retrieval_eligible: false
+        },
+        requestId: input.requestId,
+        auditFingerprint: reservation.auditFingerprint,
+        reason: decision.decision === 'approved'
+          ? 'Content review approved'
+          : 'Content changes requested'
+      });
+      collaborationArchive(db, {
+        orgId: context.access.campaign.org_id,
+        campaignId: decision.campaignId,
+        userId,
+        collaborationId,
+        campaignRelation: null
+      });
+      const contentReview = contentReviewHistory(
+        db,
+        decision.campaignId,
+        collaborationId,
+        current.content_url
+      );
+      const response = {
+        success: true,
+        campaign_id: decision.campaignId,
+        collaboration_id: collaborationId,
+        status: nextStatus,
+        row_version: rowVersion,
+        active_relations: relations,
+        content_review: projectContentReviewCapabilities(
+          context.access,
+          userId,
+          { ...current, status: nextStatus, row_version: rowVersion },
+          relations,
+          contentReview
+        )
+      };
+      return completeJson(db, reservation, hash, 201, response);
+    }).immediate();
   }
 
   function downloadContractDocument(input) {
@@ -1897,6 +2617,10 @@ function createCampaignCollaborationService(db) {
       if (Object.hasOwn(body, 'cost_quoted') && isCanonicalCollaborationResource(current.proposal_notes)) {
         throw serviceError(409, 'RESOURCE_QUOTE_LOCKED', 'A confirmed resource order locks its quoted price.');
       }
+      const v2Resource = v2CollaborationResource(current.proposal_notes);
+      if (v2Resource && Object.hasOwn(body, 'content_url')) {
+        throw serviceError(409, 'CONTENT_REVIEW_ENDPOINT_REQUIRED', 'Content URLs must be submitted through the content review checkpoint.');
+      }
       if (current.row_version === SAFE_MAX) {
         throw serviceError(409, 'ROW_VERSION_EXHAUSTED', 'Collaboration row version is exhausted.');
       }
@@ -2008,6 +2732,21 @@ function createCampaignCollaborationService(db) {
         throw serviceError(409, 'INVALID_COLLABORATION_TRANSITION', 'Collaboration transition is invalid.');
       }
       if (
+        v2Resource &&
+        nextStatus === 'content_review' &&
+        current.status !== 'content_review'
+      ) {
+        throw serviceError(409, 'CONTENT_REVIEW_ENDPOINT_REQUIRED', 'Content must be submitted through the content review checkpoint.');
+      }
+      if (
+        v2Resource &&
+        nextStatus === 'completed' &&
+        current.status !== 'completed' &&
+        body.campaign_relation !== 'publication'
+      ) {
+        throw serviceError(409, 'CONTENT_REVIEW_REQUIRED', 'Approved content review evidence is required before publication.');
+      }
+      if (
         nextStatus === 'contracted' &&
         current.status !== 'contracted'
       ) {
@@ -2023,6 +2762,12 @@ function createCampaignCollaborationService(db) {
       const costChanged = Object.hasOwn(body, 'cost_actual') && body.cost_actual !== current.cost_actual;
       const relations = activeRelations(db, campaignId, collaborationId);
       const relation = body.campaign_relation;
+      if (relation === 'publication' && v2Resource) {
+        const review = contentReviewHistory(db, campaignId, collaborationId, current.content_url);
+        if (!review.publication_ready) {
+          throw serviceError(409, 'CONTENT_REVIEW_REQUIRED', 'Approved content review evidence is required before publication.');
+        }
+      }
       if (relation && relations.includes(relation)) {
         throw serviceError(409, 'INVALID_COLLABORATION_TRANSITION', 'Collaboration relation is invalid.');
       }
@@ -2230,11 +2975,14 @@ function createCampaignCollaborationService(db) {
   return Object.freeze({
     confirmContract,
     createLinked,
+    decideContentReview,
     downloadContractDocument,
     get,
     list,
+    listContentReviews,
     listContractDocuments,
     stats,
+    submitContentReview,
     updateLegacy,
     updateLinked,
     uploadContractDocument

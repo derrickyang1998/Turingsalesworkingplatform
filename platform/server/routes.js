@@ -549,6 +549,86 @@ app.post('/api/collaborations/:id/contract-confirmations', authMiddleware, (req,
   }
 });
 
+app.post('/api/collaborations/:id/content-reviews', authMiddleware, (req, res) => {
+  try {
+    const collaborationId = canonicalPositiveRouteId(req.params.id);
+    if (collaborationId === null) {
+      return res.status(400).json({
+        error: 'Collaboration id is invalid.',
+        code: 'INVALID_COLLABORATION_ID'
+      });
+    }
+    const result = campaignCollaboration.submitContentReview({
+      userId: req.user.id,
+      collaborationId,
+      requestId: collaborationRequestId(req),
+      idempotencyKey: req.get ? req.get('Idempotency-Key') : req.headers && req.headers['idempotency-key'],
+      body: req.body
+    });
+    res.status(result.status || 201).json(result.body);
+  } catch (error) {
+    const status = error.statusCode || error.status || 500;
+    const body = {
+      error: error.message || 'Content review submission failed.',
+      code: error.code || 'INTERNAL_ERROR'
+    };
+    if (error.details !== undefined) body.details = error.details;
+    res.status(status).json(body);
+  }
+});
+
+app.get('/api/collaborations/:id/content-reviews', authMiddleware, (req, res) => {
+  try {
+    const collaborationId = canonicalPositiveRouteId(req.params.id);
+    if (collaborationId === null) {
+      return res.status(400).json({
+        error: 'Collaboration id is invalid.',
+        code: 'INVALID_COLLABORATION_ID'
+      });
+    }
+    res.json(campaignCollaboration.listContentReviews({
+      userId: req.user.id,
+      collaborationId
+    }));
+  } catch (error) {
+    const status = error.statusCode || error.status || 500;
+    const body = {
+      error: error.message || 'Content review history failed.',
+      code: error.code || 'INTERNAL_ERROR'
+    };
+    if (error.details !== undefined) body.details = error.details;
+    res.status(status).json(body);
+  }
+});
+
+app.post('/api/collaborations/:id/content-review-decisions', authMiddleware, (req, res) => {
+  try {
+    const collaborationId = canonicalPositiveRouteId(req.params.id);
+    if (collaborationId === null) {
+      return res.status(400).json({
+        error: 'Collaboration id is invalid.',
+        code: 'INVALID_COLLABORATION_ID'
+      });
+    }
+    const result = campaignCollaboration.decideContentReview({
+      userId: req.user.id,
+      collaborationId,
+      requestId: collaborationRequestId(req),
+      idempotencyKey: req.get ? req.get('Idempotency-Key') : req.headers && req.headers['idempotency-key'],
+      body: req.body
+    });
+    res.status(result.status || 201).json(result.body);
+  } catch (error) {
+    const status = error.statusCode || error.status || 500;
+    const body = {
+      error: error.message || 'Content review decision failed.',
+      code: error.code || 'INTERNAL_ERROR'
+    };
+    if (error.details !== undefined) body.details = error.details;
+    res.status(status).json(body);
+  }
+});
+
 app.put('/api/collaborations/:id', authMiddleware, (req, res) => {
   try {
     const request = {

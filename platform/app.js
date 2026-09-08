@@ -6157,6 +6157,7 @@ async function pushToFeishu() {
 var pendingCollabInfId = null;
 var pendingCollabCreateIntentId = null;
 var pendingContractCollabId = null;
+var pendingContentReviewCollabId = null;
 var pendingSettlementCollabId = null;
 var m4CollabMutationOperations = {};
 var m4CollabMutationInFlight = {};
@@ -6423,6 +6424,40 @@ async function loadCollaborations(status) {
 function collabResource(collab) {
   try { return collab.proposal_notes ? JSON.parse(collab.proposal_notes) : {}; } catch (e) { return {}; }
 }
+function m4ContentReview(collab) {
+  var review = collab && collab.content_review;
+  if (!review || typeof review !== 'object' || Array.isArray(review)) {
+    return { status: 'not_submitted', publication_ready: false, can_submit: false, can_decide: false, current_submission: null, latest_decision: null, events: [] };
+  }
+  return {
+    status: typeof review.status === 'string' ? review.status : 'not_submitted',
+    publication_ready: review.publication_ready === true,
+    can_submit: review.can_submit === true,
+    can_decide: review.can_decide === true,
+    current_submission: review.current_submission && typeof review.current_submission === 'object' ? review.current_submission : null,
+    latest_decision: review.latest_decision && typeof review.latest_decision === 'object' ? review.latest_decision : null,
+    events: Array.isArray(review.events) ? review.events : []
+  };
+}
+function m4ContentReviewStatusLabel(status) {
+  return ({
+    not_submitted: '未提交审核',
+    pending: '待负责人审核',
+    approved: '内容已通过',
+    changes_requested: '修改后重提'
+  })[status] || '审核状态异常';
+}
+function m4SafeContentReviewUrl(value) {
+  var raw = typeof value === 'string' ? value.trim() : '';
+  if (!raw || raw.length > 2048 || /[\u0000-\u0020\u007f]/.test(raw)) return '';
+  try {
+    var parsed = new URL(raw);
+    if (parsed.protocol !== 'https:' || parsed.username || parsed.password || !parsed.hostname) return '';
+    return parsed.href;
+  } catch (error) {
+    return '';
+  }
+}
 function m4ContractDocuments(collab) {
   return Array.isArray(collab && collab.contract_documents)
     ? collab.contract_documents.filter(function(document) {
@@ -6543,11 +6578,46 @@ function renderCampaignCollabActions(collab) {
   } else if (collab.status === 'contracted') {
     actions.push('<button type="button" class="btn btn-sm btn-primary" onclick="runCampaignCollabAction(' + collab.id + ',\'execution\')">开始执行</button>');
   } else if (collab.status === 'live') {
-    actions.push('<button type="button" class="btn btn-sm btn-primary" onclick="runCampaignCollabAction(' + collab.id + ',\'review\')">进入内容审核</button>');
+    var liveReview = m4ContentReview(collab);
+    if (!v2Order || liveReview.can_submit) {
+      actions.push('<button type="button" class="btn btn-sm btn-primary" onclick="runCampaignCollabAction(' + collab.id + ',\'review\')">' + (v2Order && liveReview.status === 'changes_requested' ? '重新提交审核' : '提交内容审核') + '</button>');
+    } else {
+      actions.push('<span style="font-size:10px;opacity:.65">当前账号暂无送审权限</span>');
+    }
   } else if (collab.status === 'content_review') {
-    actions.push('<button type="button" class="btn btn-sm btn-primary" onclick="runCampaignCollabAction(' + collab.id + ',\'publication\')">确认发布</button>');
+    var review = m4ContentReview(collab);
+    if (!v2Order) {
+      actions.push('<button type="button" class="btn btn-sm btn-primary" onclick="runCampaignCollabAction(' + collab.id + ',\'publication\')">确认发布</button>');
+    } else if (review.status === 'not_submitted') {
+      if (review.can_submit) {
+        actions.push('<button type="button" class="btn btn-sm btn-primary" onclick="runCampaignCollabAction(' + collab.id + ',\'review\')">补充送审凭证</button>');
+      } else {
+        actions.push('<span style="font-size:10px;opacity:.65">当前账号暂无送审权限</span>');
+      }
+    } else if (review.status === 'pending') {
+      if (review.can_decide) {
+        actions.push('<button type="button" class="btn btn-sm btn-primary" onclick="runCampaignCollabAction(' + collab.id + ',\'review-decision\')">审核内容</button>');
+      } else {
+        actions.push('<span style="font-size:10px;opacity:.65">需另一位负责人或组织管理员审核</span>');
+      }
+    } else if (review.status === 'approved' && review.publication_ready) {
+      actions.push('<button type="button" class="btn btn-sm btn-primary" onclick="runCampaignCollabAction(' + collab.id + ',\'publication\')">确认发布</button>');
+    }
   } else if (collab.status === 'completed' && relationSet.execution && !relationSet.publication) {
-    actions.push('<button type="button" class="btn btn-sm btn-primary" onclick="runCampaignCollabAction(' + collab.id + ',\'publication\')">确认发布</button>');
+    var completedReview = m4ContentReview(collab);
+    if (!v2Order) {
+      actions.push('<button type="button" class="btn btn-sm btn-primary" onclick="runCampaignCollabAction(' + collab.id + ',\'publication\')">确认发布</button>');
+    } else if (completedReview.status === 'not_submitted' && completedReview.can_submit) {
+      actions.push('<button type="button" class="btn btn-sm btn-primary" onclick="runCampaignCollabAction(' + collab.id + ',\'review\')">补充送审凭证</button>');
+    } else if (completedReview.status === 'pending' && completedReview.can_decide) {
+      actions.push('<button type="button" class="btn btn-sm btn-primary" onclick="runCampaignCollabAction(' + collab.id + ',\'review-decision\')">审核内容</button>');
+    } else if (completedReview.status === 'pending') {
+      actions.push('<span style="font-size:10px;opacity:.65">需另一位负责人或组织管理员审核</span>');
+    } else if (completedReview.status === 'approved' && completedReview.publication_ready) {
+      actions.push('<button type="button" class="btn btn-sm btn-primary" onclick="runCampaignCollabAction(' + collab.id + ',\'publication\')">确认发布</button>');
+    } else {
+      actions.push('<span style="font-size:10px;opacity:.65">请由活动成员补充送审凭证</span>');
+    }
   } else if (collab.status === 'completed' && relationSet.publication && !relationSet.settlement) {
     actions.push('<button type="button" class="btn btn-sm btn-primary" onclick="runCampaignCollabAction(' + collab.id + ',\'settlement\')">确认结算</button>');
   }
@@ -6572,6 +6642,66 @@ function renderContractConfirmation(collab) {
     '签约方：' + esc(confirmation.counterparty_name || '-') + '<br>' +
     '签约时间：' + esc(signedAt || '-') + '<br>' +
     '确认人：' + esc(confirmer) + download + '</div>';
+}
+function renderContentReviewEvidence(collab) {
+  var review = m4ContentReview(collab);
+  if (review.status === 'not_submitted' || !review.current_submission) return '';
+  var submission = review.current_submission;
+  var decision = review.latest_decision;
+  var safeUrl = m4SafeContentReviewUrl(submission.content_url);
+  var submitter = submission.submitted_by_name || ('用户 #' + submission.submitted_by);
+  var submittedAt = String(submission.submitted_at || '').replace('T', ' ').replace('.000Z', ' UTC');
+  var headerColor = review.status === 'approved'
+    ? 'var(--success, #0f7b3c)'
+    : review.status === 'changes_requested'
+      ? 'var(--danger, #b91c1c)'
+      : 'inherit';
+  var contentLink = safeUrl
+    ? '<a class="btn btn-sm btn-outline" style="margin-top:5px" href="' + esc(safeUrl) + '" target="_blank" rel="noopener noreferrer" title="在新窗口查看送审内容">查看内容</a>'
+    : '';
+  var decisionEvidence = '';
+  if (decision) {
+    var reviewer = decision.reviewed_by_name || ('用户 #' + decision.reviewed_by);
+    var reviewedAt = String(decision.reviewed_at || '').replace('T', ' ').replace('.000Z', ' UTC');
+    decisionEvidence = '<div style="margin-top:5px;padding-top:5px;border-top:1px solid var(--border)">' +
+      '审核人：' + esc(reviewer) + '<br>' +
+      '审核时间：' + esc(reviewedAt || '-') + '<br>' +
+      '审核说明：' + esc(decision.review_note || '-') + '</div>';
+  }
+  var historyEvents = review.events.slice().sort(function(left, right) {
+    var leftVersion = Number(left && left.row_version) || 0;
+    var rightVersion = Number(right && right.row_version) || 0;
+    if (leftVersion !== rightVersion) return leftVersion - rightVersion;
+    return (Number(left && left.id) || 0) - (Number(right && right.id) || 0);
+  });
+  var historyItems = historyEvents.map(function(event) {
+    if (event && event.action === 'submitted') {
+      var eventSubmitter = event.submitted_by_name || ('用户 #' + event.submitted_by);
+      var eventSubmittedAt = String(event.submitted_at || '').replace('T', ' ').replace('.000Z', ' UTC');
+      var eventUrl = m4SafeContentReviewUrl(event.content_url);
+      var eventLink = eventUrl
+        ? '<br><a href="' + esc(eventUrl) + '" target="_blank" rel="noopener noreferrer">查看该版本内容</a>'
+        : '';
+      return '<li style="margin:0 0 7px"><strong>提交 · ' + esc(event.content_version || '-') + '</strong><br>' +
+        '操作人：' + esc(eventSubmitter) + ' · ' + esc(eventSubmittedAt || '-') + '<br>' +
+        '说明：' + esc(event.submission_note || '-') + eventLink + '</li>';
+    }
+    var eventReviewer = event && (event.reviewed_by_name || ('用户 #' + event.reviewed_by));
+    var eventReviewedAt = String(event && event.reviewed_at || '').replace('T', ' ').replace('.000Z', ' UTC');
+    var eventAction = event && event.action === 'approved' ? '审核通过' : '要求修改';
+    return '<li style="margin:0 0 7px"><strong>' + esc(eventAction) + '</strong><br>' +
+      '操作人：' + esc(eventReviewer || '-') + ' · ' + esc(eventReviewedAt || '-') + '<br>' +
+      '说明：' + esc(event && event.review_note || '-') + '</li>';
+  }).join('');
+  var history = historyItems
+    ? '<details style="margin-top:7px"><summary style="cursor:pointer">完整审核历史 (' + historyEvents.length + ')</summary>' +
+      '<ol style="margin:7px 0 0;padding-left:20px;max-height:220px;overflow:auto">' + historyItems + '</ol></details>'
+    : '';
+  return '<div style="margin-top:7px;font-size:10px;line-height:1.55">' +
+    '<strong style="color:' + headerColor + '">' + esc(m4ContentReviewStatusLabel(review.status)) + ' · ' + esc(submission.content_version || '-') + '</strong><br>' +
+    '提交人：' + esc(submitter) + '<br>' +
+    '提交时间：' + esc(submittedAt || '-') + '<br>' +
+    '提交说明：' + esc(submission.submission_note || '-') + contentLink + decisionEvidence + history + '</div>';
 }
 function renderCollabCommercialTerms(collab, resource) {
   if (resource.schema !== 'turingmarket.collaboration-order.v2') {
@@ -6620,7 +6750,7 @@ function renderCollabTable(data) {
       Object.keys(STATUS_LABELS).forEach(function(key) { h += '<option value="' + key + '"' + (collab.status === key ? ' selected' : '') + '>' + STATUS_LABELS[key] + '</option>'; });
       h += '</select></td>';
     }
-    h += '<td style="min-width:180px">' + (linked ? renderCollabRelationTags(collab) + renderContractConfirmation(collab) : '<span style="font-size:10px;opacity:.55">未接入活动</span>') + '</td>';
+    h += '<td style="min-width:180px">' + (linked ? renderCollabRelationTags(collab) + renderContractConfirmation(collab) + renderContentReviewEvidence(collab) : '<span style="font-size:10px;opacity:.55">未接入活动</span>') + '</td>';
     h += '<td style="min-width:190px">' + renderCollabCommercialTerms(collab, resource) + '</td>';
     h += '<td style="font-size:10px">' + esc([collab.timeline_start || '', collab.timeline_end || ''].filter(Boolean).join(' -> ') || '-') + '</td>';
     h += '<td style="max-width:140px;font-size:10px">' + esc(resource.order_reference || '-') + '</td>';
@@ -6688,6 +6818,14 @@ async function runCampaignCollabAction(collabId, action) {
   }
   if (action === 'contract-confirmation') {
     openCampaignContractConfirmationModal(collab);
+    return;
+  }
+  if (action === 'review' && collabResource(collab).schema === 'turingmarket.collaboration-order.v2') {
+    openCampaignContentReviewModal(collab);
+    return;
+  }
+  if (action === 'review-decision') {
+    openCampaignContentReviewDecisionModal(collab);
     return;
   }
   var actions = {
@@ -6858,6 +6996,197 @@ async function submitCampaignContractConfirmation() {
         closeCampaignContractConfirmationModal();
         toast('签约证据已同步，可以继续执行');
       }
+    }
+  } finally {
+    if (m4CollabMutationInFlight[mutationSlot] === request) delete m4CollabMutationInFlight[mutationSlot];
+  }
+}
+function openCampaignContentReviewModal(collab) {
+  var review = m4ContentReview(collab);
+  pendingContentReviewCollabId = Number(collab.id);
+  var existing = document.getElementById('campaignContentReviewModal');
+  if (existing) existing.remove();
+  var overlay = document.createElement('div');
+  overlay.id = 'campaignContentReviewModal';
+  overlay.className = 'modal-overlay';
+  overlay.onclick = function(event) { if (event.target === overlay) closeCampaignContentReviewModal(); };
+  var previous = review.current_submission || {};
+  overlay.innerHTML = '<div class="modal" id="campaignContentReviewDialog" role="dialog" aria-modal="true" aria-labelledby="campaignContentReviewTitle" onclick="event.stopPropagation()">' +
+    '<button type="button" class="modal-close" aria-label="关闭内容送审" title="关闭内容送审" onclick="closeCampaignContentReviewModal()">&times;</button>' +
+    '<h3 id="campaignContentReviewTitle">' + (review.status === 'changes_requested' ? '重新提交内容审核' : '提交内容审核') + '</h3>' +
+    '<p style="font-size:12px;opacity:.65;margin-bottom:12px">' + esc(collab.kol_handle || '') + ' · ' + esc(collab.campaign_name || ('活动 #' + collab.campaign_id)) + '</p>' +
+    '<div><label>内容链接</label><input id="contentReviewUrl" type="url" maxlength="2048" placeholder="https://" value="' + esc(previous.content_url || collab.content_url || '') + '"></div>' +
+    '<div style="margin-top:10px"><label>内容版本</label><input id="contentReviewVersion" maxlength="80" placeholder="例如：V2 客户审核版" value="' + esc(previous.content_version || '') + '"></div>' +
+    '<div style="margin-top:10px"><label>提交说明</label><textarea id="contentReviewSubmissionNote" maxlength="1000" rows="4" placeholder="填写本次版本的调整内容和需重点审核事项"></textarea></div>' +
+    '<div class="btn-group" style="justify-content:flex-end"><button type="button" class="btn btn-outline" onclick="closeCampaignContentReviewModal()">取消</button><button type="button" class="btn btn-primary" onclick="submitCampaignContentReview()">提交审核</button></div>' +
+    '</div>';
+  document.body.appendChild(overlay);
+  if (window.TMAccessibility) {
+    window.TMAccessibility.openDialog(document.getElementById('campaignContentReviewDialog'), document.activeElement, closeCampaignContentReviewModal);
+  }
+}
+function closeCampaignContentReviewModal() {
+  var overlay = document.getElementById('campaignContentReviewModal');
+  var dialog = overlay && typeof overlay.querySelector === 'function'
+    ? overlay.querySelector('#campaignContentReviewDialog')
+    : document.getElementById('campaignContentReviewDialog');
+  if (dialog && window.TMAccessibility) window.TMAccessibility.closeDialog(dialog);
+  if (overlay) overlay.remove();
+  pendingContentReviewCollabId = null;
+}
+async function submitCampaignContentReview() {
+  var collab = findCollaborationById(pendingContentReviewCollabId);
+  if (!isCampaignCollaboration(collab) || collabResource(collab).schema !== 'turingmarket.collaboration-order.v2') {
+    toast('活动订单已变化，请刷新后重试。', 'error');
+    return;
+  }
+  var contentUrl = m4SafeContentReviewUrl(document.getElementById('contentReviewUrl')?.value || '');
+  var contentVersion = String(document.getElementById('contentReviewVersion')?.value || '').trim();
+  var submissionNote = String(document.getElementById('contentReviewSubmissionNote')?.value || '').trim();
+  if (!contentUrl) {
+    toast('请输入有效的 HTTPS 内容链接。', 'error');
+    return;
+  }
+  if (!contentVersion || Array.from(contentVersion).length > 80) {
+    toast('请填写 1 至 80 个字符的内容版本。', 'error');
+    return;
+  }
+  if (!submissionNote || Array.from(submissionNote).length > 1000) {
+    toast('请填写 1 至 1000 个字符的提交说明。', 'error');
+    return;
+  }
+  var intent = {
+    content_url: contentUrl,
+    content_version: contentVersion,
+    submission_note: submissionNote
+  };
+  var mutationSlot = m4CollabMutationSlot(collab, intent, 'content-review-submit');
+  if (m4CollabMutationInFlight[mutationSlot]) {
+    toast('内容审核正在提交，请勿重复点击。');
+    return m4CollabMutationInFlight[mutationSlot];
+  }
+  var request = apiFetch('/collaborations/' + collab.id + '/content-reviews', {
+    method: 'POST',
+    headers: m4MutationHeaders('m4-content-review-submit-', m4CollabMutationOperationKey(mutationSlot, 'm4-content-review-submit-')),
+    body: JSON.stringify({
+      campaign_id: Number(collab.campaign_id),
+      expected_version: Number(collab.row_version),
+      content_url: contentUrl,
+      content_version: contentVersion,
+      submission_note: submissionNote
+    })
+  }).then(async function(response) {
+    var data = await response.json();
+    if (!response.ok) {
+      var error = new Error(data.error || '内容审核提交失败');
+      error.code = data.code;
+      throw error;
+    }
+    return data;
+  });
+  m4CollabMutationInFlight[mutationSlot] = request;
+  try {
+    await request;
+    closeCampaignContentReviewModal();
+    toast('内容已提交审核');
+    await loadCollaborations();
+  } catch (error) {
+    toast(error.message || '内容审核提交失败', 'error');
+    if (error.code === 'STALE_COLLABORATION_VERSION') await loadCollaborations();
+  } finally {
+    if (m4CollabMutationInFlight[mutationSlot] === request) delete m4CollabMutationInFlight[mutationSlot];
+  }
+}
+function openCampaignContentReviewDecisionModal(collab) {
+  var review = m4ContentReview(collab);
+  if (review.status !== 'pending' || !review.current_submission) {
+    toast('当前没有待审核的内容版本。', 'error');
+    return;
+  }
+  pendingContentReviewCollabId = Number(collab.id);
+  var existing = document.getElementById('campaignContentReviewDecisionModal');
+  if (existing) existing.remove();
+  var submission = review.current_submission;
+  var safeUrl = m4SafeContentReviewUrl(submission.content_url);
+  var overlay = document.createElement('div');
+  overlay.id = 'campaignContentReviewDecisionModal';
+  overlay.className = 'modal-overlay';
+  overlay.onclick = function(event) { if (event.target === overlay) closeCampaignContentReviewDecisionModal(); };
+  overlay.innerHTML = '<div class="modal" id="campaignContentReviewDecisionDialog" role="dialog" aria-modal="true" aria-labelledby="campaignContentReviewDecisionTitle" onclick="event.stopPropagation()">' +
+    '<button type="button" class="modal-close" aria-label="关闭内容审核" title="关闭内容审核" onclick="closeCampaignContentReviewDecisionModal()">&times;</button>' +
+    '<h3 id="campaignContentReviewDecisionTitle">审核内容</h3>' +
+    '<p style="font-size:12px;opacity:.65;margin-bottom:12px">' + esc(collab.kol_handle || '') + ' · ' + esc(submission.content_version || '-') + '</p>' +
+    (safeUrl ? '<a class="btn btn-sm btn-outline" href="' + esc(safeUrl) + '" target="_blank" rel="noopener noreferrer" title="在新窗口查看送审内容">查看送审内容</a>' : '') +
+    '<div style="margin-top:10px;font-size:12px;line-height:1.6">提交说明：' + esc(submission.submission_note || '-') + '</div>' +
+    '<div style="margin-top:12px"><label>审核结论</label><select id="contentReviewDecision"><option value="approved">通过</option><option value="changes_requested">修改后重提</option></select></div>' +
+    '<div style="margin-top:10px"><label>审核说明</label><textarea id="contentReviewDecisionNote" maxlength="1000" rows="4" placeholder="填写通过依据或需修改的具体事项"></textarea></div>' +
+    '<div class="btn-group" style="justify-content:flex-end"><button type="button" class="btn btn-outline" onclick="closeCampaignContentReviewDecisionModal()">取消</button><button type="button" class="btn btn-primary" onclick="submitCampaignContentReviewDecision()">确认审核</button></div>' +
+    '</div>';
+  document.body.appendChild(overlay);
+  if (window.TMAccessibility) {
+    window.TMAccessibility.openDialog(document.getElementById('campaignContentReviewDecisionDialog'), document.activeElement, closeCampaignContentReviewDecisionModal);
+  }
+}
+function closeCampaignContentReviewDecisionModal() {
+  var overlay = document.getElementById('campaignContentReviewDecisionModal');
+  var dialog = overlay && typeof overlay.querySelector === 'function'
+    ? overlay.querySelector('#campaignContentReviewDecisionDialog')
+    : document.getElementById('campaignContentReviewDecisionDialog');
+  if (dialog && window.TMAccessibility) window.TMAccessibility.closeDialog(dialog);
+  if (overlay) overlay.remove();
+  pendingContentReviewCollabId = null;
+}
+async function submitCampaignContentReviewDecision() {
+  var collab = findCollaborationById(pendingContentReviewCollabId);
+  var review = m4ContentReview(collab);
+  if (!isCampaignCollaboration(collab) || review.status !== 'pending' || !review.current_submission) {
+    toast('待审核内容已变化，请刷新后重试。', 'error');
+    return;
+  }
+  var decision = String(document.getElementById('contentReviewDecision')?.value || '').trim();
+  var reviewNote = String(document.getElementById('contentReviewDecisionNote')?.value || '').trim();
+  if (!['approved', 'changes_requested'].includes(decision)) {
+    toast('请选择有效的审核结论。', 'error');
+    return;
+  }
+  if (!reviewNote || Array.from(reviewNote).length > 1000) {
+    toast('请填写 1 至 1000 个字符的审核说明。', 'error');
+    return;
+  }
+  var intent = { decision: decision, review_note: reviewNote };
+  var mutationSlot = m4CollabMutationSlot(collab, intent, 'content-review-decision');
+  if (m4CollabMutationInFlight[mutationSlot]) {
+    toast('审核结论正在提交，请勿重复点击。');
+    return m4CollabMutationInFlight[mutationSlot];
+  }
+  var request = apiFetch('/collaborations/' + collab.id + '/content-review-decisions', {
+    method: 'POST',
+    headers: m4MutationHeaders('m4-content-review-decision-', m4CollabMutationOperationKey(mutationSlot, 'm4-content-review-decision-')),
+    body: JSON.stringify({
+      campaign_id: Number(collab.campaign_id),
+      expected_version: Number(collab.row_version),
+      decision: decision,
+      review_note: reviewNote
+    })
+  }).then(async function(response) {
+    var data = await response.json();
+    if (!response.ok) {
+      var error = new Error(data.error || '内容审核失败');
+      error.code = data.code;
+      throw error;
+    }
+    return data;
+  });
+  m4CollabMutationInFlight[mutationSlot] = request;
+  try {
+    await request;
+    closeCampaignContentReviewDecisionModal();
+    toast(decision === 'approved' ? '内容审核已通过，可以确认发布' : '修改意见已提交，等待重新送审');
+    await loadCollaborations();
+  } catch (error) {
+    toast(error.message || '内容审核失败', 'error');
+    if (error.code === 'STALE_COLLABORATION_VERSION' || error.code === 'CONTENT_REVIEW_SELF_APPROVAL') {
+      await loadCollaborations();
     }
   } finally {
     if (m4CollabMutationInFlight[mutationSlot] === request) delete m4CollabMutationInFlight[mutationSlot];
@@ -10492,7 +10821,7 @@ function switchPage(id, options) {
     'getEditedDemand', 'syncCurDemandFromAnalysis', 'handleDemandFile', 'analyzeDemandAI',
     'switchTab', 'matchInfluencers', 'smartMatch', 'handleUpload', 'handleDrop', 'openInfUploadModal', 'closeInfUploadModal', 'handleUploadModal', 'handleInfluencerModalDrop', 'validateInfluencerImportMapping', 'confirmInfluencerImport', 'downloadInfluencerImportErrors', 'downloadInfTemplate', 'exportAll', 'exportFiltered', 'exportSelected',
     'saveM4SavedView', 'applyM4SavedView', 'deleteM4SavedView', 'clearM4Filters',
-    'toggleAll', 'syncInfluencerSelectionState', 'loadM4Campaigns', 'changeM4CampaignContext', 'startCollab', 'submitCollabOrder', 'closeCollabOrderModal', 'loadCollaborations', 'updateCollabStatus', 'runCampaignCollabAction', 'closeCampaignSettlementModal', 'submitCampaignSettlement',
+    'toggleAll', 'syncInfluencerSelectionState', 'loadM4Campaigns', 'changeM4CampaignContext', 'startCollab', 'submitCollabOrder', 'closeCollabOrderModal', 'loadCollaborations', 'updateCollabStatus', 'runCampaignCollabAction', 'closeCampaignContractConfirmationModal', 'submitCampaignContractConfirmation', 'closeCampaignContentReviewModal', 'submitCampaignContentReview', 'closeCampaignContentReviewDecisionModal', 'submitCampaignContentReviewDecision', 'closeCampaignSettlementModal', 'submitCampaignSettlement',
     'initPerformanceMonitor', 'initPerformanceDashboard', 'refreshPerformanceMonitor', 'refreshPerformanceDashboard', 'changePerformanceCampaignContext', 'handlePerformanceTopMetricChange', 'refreshPerformanceReviewEvidence', 'generatePerformanceAiReviewDraft', 'loadPerformanceContents', 'loadPerformanceIntegrationPreview', 'loadPerformanceFeishuConnection', 'savePerformanceFeishuConnectionDraft', 'approvePerformanceFeishuConnectionDraft', 'createPerformanceContent', 'downloadPerformanceTemplate', 'handlePerformanceImport', 'handlePerformanceDrop', 'downloadPerformanceMetricsTemplate', 'handlePerformanceMetricsImport', 'handlePerformanceMetricsDrop', 'openPerformanceInputModal', 'closePerformanceInputModal', 'savePerformanceInput', 'loadPerformanceDashboard', 'loadPerformanceReviewEvidence', 'debouncedPerformanceContentSearch', 'exportPerformanceContents',
     'sendChat', 'clearChat', 'clearAIMemory', 'pushToFeishu', 'loadFeishuStatus', 'loadFeishuOutbox', 'testFeishuConnection', 'selectFeishuReconciliationDelivery', 'reconcileFeishuDelivery', 'selectFeishuRetryDelivery', 'retryFeishuDelivery',
     'switchAdminTab', 'loadAdminDashboard', 'loadAdminUsers', 'adminAddUser', 'adminCreateInvite', 'adminResetPw',

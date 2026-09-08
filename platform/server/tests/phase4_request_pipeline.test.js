@@ -456,6 +456,49 @@ test('contract document upload, list, and download own bounded registered polici
   assert.match(serverSource, /'COLLABORATION_CONTRACT_DOCUMENT_DOWNLOAD'/);
 });
 
+test('content review submission, decision, and history own bounded registered policies', () => {
+  const { contract } = loadBoundary();
+  const submit = contract.REQUEST_POLICIES.COLLABORATION_CONTENT_REVIEW_SUBMIT;
+  const decide = contract.REQUEST_POLICIES.COLLABORATION_CONTENT_REVIEW_DECIDE;
+  const list = contract.REQUEST_POLICIES.COLLABORATION_CONTENT_REVIEW_LIST;
+
+  assert.ok(submit);
+  assert.equal(submit.id, 'collaboration.content-review.submit');
+  assert.equal(submit.method, 'POST');
+  assert.equal(submit.pathTemplate, '/api/collaborations/:id/content-reviews');
+  assert.equal(submit.mediaKind, contract.MEDIA_KINDS.JSON);
+  assert.equal(submit.maxRawBytes, contract.BODY_LIMITS.CAMPAIGN_CONTROL_JSON);
+  assert.ok(decide);
+  assert.equal(decide.id, 'collaboration.content-review.decide');
+  assert.equal(decide.method, 'POST');
+  assert.equal(decide.pathTemplate, '/api/collaborations/:id/content-review-decisions');
+  assert.equal(decide.mediaKind, contract.MEDIA_KINDS.JSON);
+  assert.equal(decide.maxRawBytes, contract.BODY_LIMITS.CAMPAIGN_CONTROL_JSON);
+  assert.ok(list);
+  assert.equal(list.id, 'collaboration.content-review.list');
+  assert.equal(list.method, 'GET');
+  assert.equal(list.pathTemplate, '/api/collaborations/:id/content-reviews');
+  assert.equal(list.mediaKind, contract.MEDIA_KINDS.EMPTY);
+
+  const registry = contract.createRoutePolicyRegistry([submit, decide, list]);
+  assert.equal(
+    registry.match('POST', '/api/collaborations/41/content-reviews').id,
+    'collaboration.content-review.submit'
+  );
+  assert.equal(
+    registry.match('POST', '/api/collaborations/41/content-review-decisions').id,
+    'collaboration.content-review.decide'
+  );
+  assert.equal(
+    registry.match('GET', '/api/collaborations/41/content-reviews').id,
+    'collaboration.content-review.list'
+  );
+  const serverSource = fs.readFileSync(serverPath, 'utf8');
+  assert.match(serverSource, /'COLLABORATION_CONTENT_REVIEW_SUBMIT'/);
+  assert.match(serverSource, /'COLLABORATION_CONTENT_REVIEW_DECIDE'/);
+  assert.match(serverSource, /'COLLABORATION_CONTENT_REVIEW_LIST'/);
+});
+
 test('batch performance metrics upload is an admitted multipart route in the shared parser inventory', () => {
   const { contract } = loadBoundary();
   const policy = contract.REQUEST_POLICIES.SHARED_PERFORMANCE_METRICS_UPLOAD;

@@ -49,6 +49,7 @@ function loadFunctions(context, names) {
     'var pendingCollabInfId = 700;',
     'var pendingCollabCreateIntentId = null;',
     'var pendingContractCollabId = null;',
+    'var pendingContentReviewCollabId = null;',
     'var m4CollabMutationOperations = {};',
     'var m4CollabMutationInFlight = {};'
   ].join('\n'), context);
@@ -117,7 +118,12 @@ function createClientContext() {
     contractSignedAt: element({ value: '2026-09-07T10:00' }),
     contractConfirmationNote: element({ value: 'Signed copy verified in the approved drive.' }),
     contractDocumentExisting: element({ value: '' }),
-    contractDocumentFile: element({ files: [contractFile] })
+    contractDocumentFile: element({ files: [contractFile] }),
+    contentReviewUrl: element({ value: 'https://video.example.com/drafts/launch-v1' }),
+    contentReviewVersion: element({ value: 'V1 client review' }),
+    contentReviewSubmissionNote: element({ value: 'Opening hook and product demo are ready for review.' }),
+    contentReviewDecision: element({ value: 'approved' }),
+    contentReviewDecisionNote: element({ value: 'Hook, claims, CTA, and brand safety are approved.' })
   };
   const campaign = {
     id: 91,
@@ -139,7 +145,10 @@ function createClientContext() {
           : null,
         contract_documents: (row.contract_documents || []).map(function(document) {
           return Object.assign({}, document);
-        })
+        }),
+        content_review: row.content_review
+          ? JSON.parse(JSON.stringify(row.content_review))
+          : null
       });
     });
   }
@@ -186,6 +195,15 @@ function createClientContext() {
       row_version: 1,
       active_relations: ['order'],
       contract_documents: [],
+      content_review: {
+        status: 'not_submitted',
+        publication_ready: false,
+        can_submit: false,
+        can_decide: false,
+        current_submission: null,
+        latest_decision: null,
+        events: []
+      },
       proposal_notes: JSON.stringify(resource),
       project_name: resource.project_name,
       product_name: resource.product_name,
@@ -268,12 +286,106 @@ function createClientContext() {
     return jsonResponse(201, response);
   }
 
+  function submitContentReview(url, options) {
+    const body = JSON.parse(options.body);
+    const idempotencyKey = options.headers['Idempotency-Key'];
+    const replayKey = url + ':' + idempotencyKey;
+    if (completedByKey.has(replayKey)) return jsonResponse(201, completedByKey.get(replayKey));
+    const collaborationId = Number(url.split('/')[2]);
+    const collaboration = rows.find(function(row) { return row.id === collaborationId; });
+    if (!collaboration || collaboration.row_version !== body.expected_version) {
+      return jsonResponse(409, { error: 'STALE_COLLABORATION_VERSION', code: 'STALE_COLLABORATION_VERSION' });
+    }
+    collaboration.status = 'content_review';
+    collaboration.content_url = body.content_url;
+    collaboration.row_version += 1;
+    const submission = {
+      id: 1001,
+      action: 'submitted',
+      row_version: collaboration.row_version,
+      content_url: body.content_url,
+      content_version: body.content_version,
+      submission_note: body.submission_note,
+      submitted_by: 22,
+      submitted_by_name: 'Campaign Operator',
+      submitted_at: '2026-09-08T10:00:00.000Z'
+    };
+    collaboration.content_review = {
+      status: 'pending',
+      publication_ready: false,
+      can_submit: false,
+      can_decide: true,
+      current_submission: submission,
+      latest_decision: null,
+      events: [submission]
+    };
+    const response = {
+      success: true,
+      campaign_id: collaboration.campaign_id,
+      collaboration_id: collaboration.id,
+      status: collaboration.status,
+      row_version: collaboration.row_version,
+      active_relations: collaboration.active_relations.slice(),
+      content_review: JSON.parse(JSON.stringify(collaboration.content_review))
+    };
+    completedByKey.set(replayKey, response);
+    return jsonResponse(201, response);
+  }
+
+  function decideContentReview(url, options) {
+    const body = JSON.parse(options.body);
+    const idempotencyKey = options.headers['Idempotency-Key'];
+    const replayKey = url + ':' + idempotencyKey;
+    if (completedByKey.has(replayKey)) return jsonResponse(201, completedByKey.get(replayKey));
+    const collaborationId = Number(url.split('/')[2]);
+    const collaboration = rows.find(function(row) { return row.id === collaborationId; });
+    if (!collaboration || collaboration.row_version !== body.expected_version) {
+      return jsonResponse(409, { error: 'STALE_COLLABORATION_VERSION', code: 'STALE_COLLABORATION_VERSION' });
+    }
+    const submission = collaboration.content_review && collaboration.content_review.current_submission;
+    if (!submission) return jsonResponse(409, { error: 'INVALID_COLLABORATION_TRANSITION' });
+    collaboration.status = body.decision === 'approved' ? 'content_review' : 'live';
+    collaboration.row_version += 1;
+    const decision = {
+      id: 1002,
+      action: body.decision,
+      row_version: collaboration.row_version,
+      submission_entry_id: submission.id,
+      content_version: submission.content_version,
+      review_note: body.review_note,
+      reviewed_by: 9,
+      reviewed_by_name: 'Mina Chen',
+      reviewed_at: '2026-09-08T11:00:00.000Z'
+    };
+    collaboration.content_review = {
+      status: body.decision,
+      publication_ready: body.decision === 'approved',
+      can_submit: body.decision === 'changes_requested',
+      can_decide: false,
+      current_submission: submission,
+      latest_decision: decision,
+      events: collaboration.content_review.events.concat([decision])
+    };
+    const response = {
+      success: true,
+      campaign_id: collaboration.campaign_id,
+      collaboration_id: collaboration.id,
+      status: collaboration.status,
+      row_version: collaboration.row_version,
+      active_relations: collaboration.active_relations.slice(),
+      content_review: JSON.parse(JSON.stringify(collaboration.content_review))
+    };
+    completedByKey.set(replayKey, response);
+    return jsonResponse(201, response);
+  }
+
   const context = {
     m4Campaigns: [],
     m4CampaignContextId: null,
     lastCollabRows: [],
     pendingCollabInfId: 700,
     pendingContractCollabId: null,
+    pendingContentReviewCollabId: null,
     m4CollabMutationOperations: {},
     m4CollabMutationInFlight: {},
     pendingCreateRelease: null,
@@ -284,6 +396,7 @@ function createClientContext() {
     pendingPauseRelease: null,
     pauseNextUpdate: false,
     conflictNextContractAfterPersist: false,
+    URL,
     btoa(value) { return Buffer.from(value, 'binary').toString('base64'); },
     document: {
       getElementById(id) { return elements[id] || appendedElements.find(function(item) { return item.id === id; }) || null; },
@@ -294,7 +407,13 @@ function createClientContext() {
     getActiveCampaignId() { return 91; },
     getActiveDemandId() { return 17; },
     readPositiveInteger: positiveInteger,
-    esc(value) { return String(value || ''); },
+    esc(value) {
+      return String(value || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    },
     createDemandAnalysisOperationId(prefix) {
       operation += 1;
       return prefix + operation;
@@ -349,6 +468,20 @@ function createClientContext() {
         }
         return confirmContract(url, options);
       }
+      if (/^\/collaborations\/\d+\/content-reviews$/.test(url) && options.method === 'POST') {
+        return submitContentReview(url, options);
+      }
+      if (/^\/collaborations\/\d+\/content-review-decisions$/.test(url) && options.method === 'POST') {
+        return decideContentReview(url, options);
+      }
+      if (/^\/collaborations\/\d+\/content-reviews$/.test(url) && (!options.method || options.method === 'GET')) {
+        const collaborationId = Number(url.split('/')[2]);
+        const collaboration = rows.find(function(row) { return row.id === collaborationId; });
+        return jsonResponse(200, {
+          collaboration_id: collaborationId,
+          content_review: collaboration ? JSON.parse(JSON.stringify(collaboration.content_review)) : null
+        });
+      }
       if (url.indexOf('/collaborations/') === 0 && options.method === 'PUT') {
         if (context.pauseNextUpdate) {
           context.pauseNextUpdate = false;
@@ -389,6 +522,9 @@ const m4Functions = [
   'collabRelations',
   'isCampaignCollaboration',
   'collabResource',
+  'm4ContentReview',
+  'm4ContentReviewStatusLabel',
+  'm4SafeContentReviewUrl',
   'm4ContractDocuments',
   'm4ContractDocumentFingerprint',
   'm4ReadContractDocumentFile',
@@ -397,6 +533,7 @@ const m4Functions = [
   'renderCollabRelationTags',
   'renderCampaignCollabActions',
   'renderContractConfirmation',
+  'renderContentReviewEvidence',
   'renderCollabCommercialTerms',
   'renderCollabTable',
   'submitCampaignCollabUpdate',
@@ -404,6 +541,12 @@ const m4Functions = [
   'openCampaignContractConfirmationModal',
   'closeCampaignContractConfirmationModal',
   'submitCampaignContractConfirmation',
+  'openCampaignContentReviewModal',
+  'closeCampaignContentReviewModal',
+  'submitCampaignContentReview',
+  'openCampaignContentReviewDecisionModal',
+  'closeCampaignContentReviewDecisionModal',
+  'submitCampaignContentReviewDecision',
   'openCampaignSettlementModal'
 ];
 
@@ -621,6 +764,135 @@ test('M4 collaboration table distinguishes v2 commercial terms from historical q
     { cost_quoted: 0 },
     { schema: 'turingmarket.collaboration-order.v1', quoted_price: 0 }
   ), /历史报价：\$0/);
+});
+
+test('M4 content review actions and evidence gate publication by the latest review state', () => {
+  const { context } = createClientContext();
+  context.COLLAB_RELATION_LABELS = { order: '下单', execution: '执行' };
+  context.COLLAB_ORDER_TYPE_LABELS = { paid: '付费合作' };
+  loadFunctions(context, m4Functions);
+  const collaboration = {
+    id: 501,
+    campaign_id: 91,
+    status: 'content_review',
+    row_version: 4,
+    active_relations: ['order', 'execution'],
+    proposal_notes: JSON.stringify({ schema: 'turingmarket.collaboration-order.v2' }),
+    content_review: {
+      status: 'pending',
+      publication_ready: false,
+      can_submit: false,
+      can_decide: true,
+      current_submission: {
+        id: 1001,
+        content_url: 'https://video.example.com/drafts/launch-v1',
+        content_version: 'V1 client review',
+        submission_note: 'Review the opening hook.',
+        submitted_by: 22,
+        submitted_by_name: 'Campaign Operator',
+        submitted_at: '2026-09-08T10:00:00.000Z'
+      },
+      latest_decision: null,
+      events: [
+        {
+          id: 999,
+          action: 'submitted',
+          row_version: 2,
+          content_url: 'https://video.example.com/drafts/launch-v0',
+          content_version: 'V0 <script>alert(1)</script>',
+          submission_note: 'Old <img src=x onerror=alert(1)> draft.',
+          submitted_by: 22,
+          submitted_by_name: 'Campaign <Operator>',
+          submitted_at: '2026-09-08T08:00:00.000Z'
+        },
+        {
+          id: 1000,
+          action: 'changes_requested',
+          row_version: 3,
+          content_version: 'V0 <script>alert(1)</script>',
+          review_note: 'Remove <script>alert(2)</script>.',
+          reviewed_by: 9,
+          reviewed_by_name: 'Mina <Reviewer>',
+          reviewed_at: '2026-09-08T09:00:00.000Z'
+        },
+        {
+          id: 1001,
+          action: 'submitted',
+          row_version: 4,
+          content_url: 'https://video.example.com/drafts/launch-v1',
+          content_version: 'V1 client review',
+          submission_note: 'Review the opening hook.',
+          submitted_by: 22,
+          submitted_by_name: 'Campaign Operator',
+          submitted_at: '2026-09-08T10:00:00.000Z'
+        }
+      ]
+    }
+  };
+
+  const pendingActions = context.renderCampaignCollabActions(collaboration);
+  assert.match(pendingActions, /审核内容/);
+  assert.doesNotMatch(pendingActions, /确认发布/);
+  const pendingEvidence = context.renderContentReviewEvidence(collaboration);
+  assert.match(pendingEvidence, /待负责人审核/);
+  assert.match(pendingEvidence, /V1 client review/);
+  assert.match(pendingEvidence, /Campaign Operator/);
+  assert.match(pendingEvidence, /rel="noopener noreferrer"/);
+  assert.match(pendingEvidence, /完整审核历史 \(3\)/);
+  assert.match(pendingEvidence, /V0 &lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+  assert.match(pendingEvidence, /Remove &lt;script&gt;alert\(2\)&lt;\/script&gt;/);
+  assert.doesNotMatch(pendingEvidence, /<script>/);
+  assert.doesNotMatch(pendingEvidence, /<img src=x/);
+
+  collaboration.content_review.status = 'approved';
+  collaboration.content_review.publication_ready = true;
+  collaboration.content_review.latest_decision = {
+    reviewed_by: 9,
+    reviewed_by_name: 'Mina Chen',
+    reviewed_at: '2026-09-08T11:00:00.000Z',
+    review_note: 'Approved for publication.'
+  };
+  assert.match(context.renderCampaignCollabActions(collaboration), /确认发布/);
+  assert.match(context.renderContentReviewEvidence(collaboration), /Approved for publication/);
+
+  collaboration.status = 'live';
+  collaboration.content_review.status = 'changes_requested';
+  collaboration.content_review.publication_ready = false;
+  collaboration.content_review.can_submit = true;
+  assert.match(context.renderCampaignCollabActions(collaboration), /重新提交审核/);
+
+  collaboration.status = 'content_review';
+  collaboration.content_review = {
+    status: 'not_submitted',
+    publication_ready: false,
+    can_submit: true,
+    can_decide: false,
+    current_submission: null,
+    latest_decision: null,
+    events: []
+  };
+  assert.match(context.renderCampaignCollabActions(collaboration), /补充送审凭证/);
+
+  collaboration.status = 'completed';
+  assert.match(context.renderCampaignCollabActions(collaboration), /补充送审凭证/);
+
+  collaboration.status = 'content_review';
+  collaboration.content_review = {
+    status: 'pending',
+    publication_ready: false,
+    can_submit: false,
+    can_decide: false,
+    current_submission: {
+      id: 1001,
+      submitted_by: 22,
+      content_url: 'https://video.example.com/drafts/launch-v1',
+      content_version: 'V1 client review'
+    },
+    latest_decision: null,
+    events: []
+  };
+  assert.doesNotMatch(context.renderCampaignCollabActions(collaboration), /审核内容/);
+  assert.match(context.renderCampaignCollabActions(collaboration), /需另一位负责人或组织管理员审核/);
 });
 
 test('M4 signed contract checkpoint gates v2 execution and persists entered evidence', async () => {
@@ -939,8 +1211,15 @@ test('M4 campaign workspace executes selector, linked order, lifecycle, and repl
   assert.equal(rows[0].row_version, 3);
 
   await context.loadCollaborations();
-  await context.runCampaignCollabAction(created.id, 'review');
+  context.pendingContentReviewCollabId = created.id;
+  await context.submitCampaignContentReview();
   assert.equal(rows[0].status, 'content_review');
+  assert.equal(rows[0].content_review.status, 'pending');
+  assert.equal(rows[0].content_review.current_submission.content_version, 'V1 client review');
+  context.pendingContentReviewCollabId = created.id;
+  await context.submitCampaignContentReviewDecision();
+  assert.equal(rows[0].content_review.status, 'approved');
+  assert.equal(rows[0].content_review.publication_ready, true);
   await context.runCampaignCollabAction(created.id, 'publication');
   assert.equal(rows[0].status, 'completed');
   assert.deepEqual(rows[0].active_relations, ['order', 'execution', 'publication']);

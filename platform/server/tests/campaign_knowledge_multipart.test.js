@@ -811,3 +811,48 @@ test('campaign archive source conflict rolls back the second multipart attempt',
     db.close();
   }
 });
+
+test('multipart knowledge rejects reserved content review namespaces before persistence', () => {
+  const db = openDatabase();
+  try {
+    const context = createContext(db);
+    const service = createCampaignLinkService(db);
+    const admission = createAdmission(db, context, 'reserved-review-namespace');
+    const finalizer = createFinalizer(
+      service,
+      context,
+      admission,
+      'reserved-review-namespace'
+    );
+    const completion = createLifecycle(admission);
+    for (const [label, body] of [
+      ['reserved-review-source', { source_type: 'collaboration_content_review' }],
+      ['reserved-review-entry', { entry_type: 'collaboration_content_review' }]
+    ]) {
+      assert.throws(
+        () => finalizer({
+          body: knowledgeBody(context, label, body),
+          rows: 0,
+          lifecycle: completion.lifecycle
+        }),
+        (error) => error && error.code === 'INVALID_CAMPAIGN_INPUT'
+      );
+      assert.equal(completion.calls(), 0);
+    }
+    assert.deepEqual(admissionState(db, admission), {
+      state: 'processing',
+      response_kind: null,
+      status_code: null
+    });
+    assert.deepEqual(businessState(db), {
+      entries: 0,
+      chunks: 0,
+      fts: 0,
+      links: 0,
+      events: 0,
+      linkedLedgers: 0
+    });
+  } finally {
+    db.close();
+  }
+});
