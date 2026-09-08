@@ -472,7 +472,7 @@ const STRUCTURAL_COLUMN_POLICY = freezeStructuralColumnPolicy({
     'campaigns.operational_status': Object.freeze(['active', 'on_hold', 'cancelled']),
     'collaborations.status': Object.freeze([
       'proposed', 'contacted', 'negotiating', 'confirmed', 'contract_sent',
-      'contracted', 'live', 'content_review', 'completed', 'cancelled'
+      'live', 'content_review', 'completed', 'cancelled'
     ]),
     'crm_audit_events.event_type': Object.freeze([
       'crm_backfill_quarantined', 'crm_legacy_stage_unclassified', 'crm_legacy_duplicate_collision',
@@ -901,6 +901,12 @@ const STRUCTURAL_POLICY_V14_SHA256 = crypto.createHash('sha256')
   }), 'utf8')
   .digest('hex');
 const STRUCTURAL_COLUMN_POLICY_V15 = Object.freeze(Object.assign(Object.create(null), STRUCTURAL_COLUMN_POLICY_V14, {
+  'collaborations.status': Object.freeze({
+    storage: 'text', kind: 'enum', allowedValues: Object.freeze([
+      'proposed', 'contacted', 'negotiating', 'confirmed', 'contract_sent',
+      'contracted', 'live', 'content_review', 'completed', 'cancelled'
+    ])
+  }),
   'influencer_saved_views.id': Object.freeze({ storage: 'integer', kind: 'integer' }),
   'influencer_saved_views.user_id': Object.freeze({ storage: 'integer', kind: 'integer' }),
   'influencer_saved_views.row_version': Object.freeze({ storage: 'integer', kind: 'integer' }),
@@ -916,7 +922,7 @@ const STRUCTURAL_COLUMN_POLICY_V15 = Object.freeze(Object.assign(Object.create(n
     storage: 'text', kind: 'migration-ledger', allowedValues: V15_MIGRATION_LEDGER.sourcePath
   })
 }));
-const STRUCTURAL_POLICY_V15_VALIDATOR_VERSION = 'tm-structural-policy-v10-influencer-saved-views';
+const STRUCTURAL_POLICY_V15_VALIDATOR_VERSION = 'tm-structural-policy-v11-signed-collaboration';
 const STRUCTURAL_POLICY_V15_SHA256 = crypto.createHash('sha256')
   .update(JSON.stringify({
     validatorVersion: STRUCTURAL_POLICY_V15_VALIDATOR_VERSION,
@@ -5973,6 +5979,7 @@ module.exports = {
     createEphemeralIdentity,
     createRunJournal,
     manifestProfileForVersion,
+    structuralColumnPolicyForVersion,
     jsonColumnPolicy,
     assertStructuralValueAllowed,
     launchIsolatedWorker,

@@ -180,11 +180,11 @@
     },
     {
       "path": "server/scripts/sanitization_manifest.json",
-      "sha256": "33bf817141ff2f2c0bbb09aa94c789461f3347d478cbe5b67a1d84772bf3886a"
+      "sha256": "8f3feeac590be2dc4b1ab566724cd945b3ca6b20338cbad6c1772a903b810107"
     },
     {
       "path": "server/scripts/sanitize_production_shape.js",
-      "sha256": "bc6a961f55d167b4a724253fd7e92369aaf17b2cd593039fb8157de985ab3acb"
+      "sha256": "d2afce322940bd0f3b7078fa20e4150faff9ec340cb64a625bfc640ac81f0033"
     },
     {
       "path": "server/scripts/trusted_parser_runtime_verifier.js",

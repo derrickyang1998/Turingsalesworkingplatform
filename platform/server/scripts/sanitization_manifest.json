@@ -64205,8 +64205,8 @@
         "structuralColumns": {
           "mode": "frozen-exact-table-column-policy",
           "unknownText": "transform-or-reject",
-          "validatorVersion": "tm-structural-policy-v10-influencer-saved-views",
-          "policySha256": "cdb591f0ea5bdfcde12326fcbf81afe2961fdeb83838f83e215f3e7f9628f485"
+          "validatorVersion": "tm-structural-policy-v11-signed-collaboration",
+          "policySha256": "ee9b4d269b7123e2a306c77b25de93397c9e670d21e5d1d7498539d4488ee330"
         }
       },
       "equalityGroups": [

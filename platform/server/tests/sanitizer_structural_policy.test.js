@@ -44,11 +44,31 @@ function structuralTextColumns() {
     .map((column) => `${object.name}.${column.name}`));
 }
 
-test('signed collaboration status remains a preserved structural value', () => {
+test('signed collaboration status is preserved only by the schema 15 structural policy', () => {
+  assert.throws(
+    () => sanitizer._testing.assertStructuralValueAllowed(
+      'collaborations.status',
+      'contracted',
+      'text',
+      sanitizer._testing.structuralColumnPolicyForVersion(14)
+    ),
+    /outside the closed allowlist/i
+  );
   assert.doesNotThrow(() => sanitizer._testing.assertStructuralValueAllowed(
     'collaborations.status',
-    'contracted'
+    'contracted',
+    'text',
+    sanitizer._testing.structuralColumnPolicyForVersion(15)
   ));
+});
+
+test('schema 15 sanitization manifest pins the signed collaboration structural policy', () => {
+  const fixture = openMigratedFixture('signed-collaboration-policy', 15);
+  try {
+    assert.doesNotThrow(() => sanitizer.validateManifest(manifestDocument, fixture.db));
+  } finally {
+    closeFixture(fixture);
+  }
 });
 
 test('every preserved structural text column has a closed exact-column validator that rejects its canary', () => {
