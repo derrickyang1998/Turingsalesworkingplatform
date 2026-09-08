@@ -1,5 +1,27 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.8.16-collaboration-commercial-terms (Production Deployed, 2026-09-08) - Phase 7 M4 合作商业条款
+
+### 交付与范围 / Delivery And Scope
+- M4 合作下单新增版本化商业条款：网红成本、客户报价、币种、服务毛利和付款条件分别保存；毛利由后端统一计算，前端不再自行决定财务结果。
+- 新合同保持不可变并继续投影到历史 `cost_quoted` 字段，因此旧订单、旧接口和既有列表仍可读取；关联活动和独立下单两条路径使用同一校验规则，非法保留字段会在任何写入或资源预占前拒绝。
+- 汇总接口按币种返回 `costByCurrency`。单币种时继续给出总成本及币种；混合币种时总成本返回空值，避免把不同币种直接相加。现有 M4 界面、导入/搜索/导出/飞书入口、AI/知识链路和冻结方案 PPT 均保持不变。
+
+### 轻量验证、审查与上线 / Focused Verification, Review, And Deployment
+- 按新的单功能发布节奏执行：受影响控制器与合同矩阵 `101/101` 通过，零值展示修正矩阵 `12/12` 通过；JavaScript 语法、差异、定向密钥扫描、PPT 哈希和部署预检均通过。
+- 独立代码审查确认兼容顺序、零值、币种隔离和服务端计算边界均已关闭，最终结论为 `APPROVE`，无未解决高风险问题。实现及修正提交：`98df478`、`d742137`、`4a5f6f7`、`96cebc1`、`06b5c99`、`da75940`。
+- 生产发布运行 ID 为 `a5fbbcc4f3d04d4982285d20987299b5`；候选真实 Express 回放 `8/8`、发布守卫 `21/21`、内置浏览器冒烟 `2/2` 均通过。公网健康、管理员登录、合作列表和多币种汇总合同已在线验证。
+
+### 生产恢复与证据 / Production Recovery And Evidence
+- 首次切换前检查发现历史 FTS 投影少一条且解析器容量不足，因此未把该候选接受为生产版本。知识索引重建至 `914/914`、旧版本恢复后，清理 `14` 份未被引用的历史解析器实验副本，释放 `3,681,824,768` 字节，再执行正式发布；没有业务数据丢失。
+- 正式可恢复备份为 `/root/turingmarket/backups/v060-crm-sales-workspace-20260908-142825`，`SHA256SUMS` 共 `296` 项，清单 SHA-256 为 `238b185436218b6727e0635d2abc7c6d6f520b95d86c5a8b0f2814cde0295b10`；候选树 SHA-256 为 `5460c48354e0f245ae4edbfcefbfb10e63a70bf140760323f176a9bdbcdc262f`。
+- 生产 schema 保持 `v15`，SQLite `quick_check=ok`、外键异常 `0`；PM2 `turingmarket` online，Nginx 目标保持 `/etc/nginx/sites-available/turingmarket`。管理员凭据按用户要求完成带备份和审计的恢复，公开记录不保存密码。
+- 冻结 `ppt.js` SHA-256 仍为 `f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e`。
+
+### 后续边界 / Next Boundaries
+- 当前切片只完成合作商业条款合同；谈判、签约、内容审核、发布、付款、结算和复盘的完整状态台账继续拆为独立功能，完成一个即执行聚焦验证、一次独立审查、备份、生产部署和线上核心路径冒烟。
+- 真实飞书外部写入仍须在生产配置和获批测试活动具备后单独验收，不为测试目的写入真实客户活动。
+
 ## v0.8.15-guided-influencer-import-mapping (Production Deployed, 2026-09-08) - Phase 7 M4 引导式网红导入
 
 ### 交付与范围 / Delivery And Scope
