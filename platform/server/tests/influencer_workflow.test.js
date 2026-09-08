@@ -341,6 +341,148 @@ test('Task 9 approved upload headers match the UTF-8 service constant and contra
   assert.deepEqual(contractHeaders, influencerWorkflow.TEMPLATE_HEADERS);
 });
 
+test('guided influencer import suggests exact workbook headers and historical aliases deterministically', () => {
+  const expectedWorkbookMapping = {
+    '日期': 'created_at',
+    '提报人': 'reporter',
+    '项目&客户': 'project_name',
+    '推广产品': 'product_name',
+    '是否重复': 'is_duplicate',
+    '网红频道名称': 'kol_handle',
+    '网红粉丝量': 'followers',
+    '网红频道链接': 'profile_link',
+    '社媒平台': 'platform',
+    '国家': 'region',
+    '网红类型': 'influencer_type',
+    '近10个视频均播': 'avg_views_10',
+    '网红成本价格（折算美元）': 'cost_usd',
+    '网红交付物（植入-完播等信息）': 'content_deliverable',
+    'Turing备注': 'brand_collab_history',
+    '对外商务报价（美元）': 'quoted_price',
+    '网红联系方式': 'contact_email',
+    'CPM（自动计算）': 'cpm',
+    'CPV(自动计算)': 'cpv',
+    '父记录': 'parent_record'
+  };
+  const row = Object.fromEntries(influencerWorkflow.TEMPLATE_HEADERS.map(function(header, index) {
+    return [header, `sample-${index + 1}`];
+  }));
+  Object.assign(row, {
+    '日期': '2026-07-03',
+    '网红粉丝量': '12000',
+    '近10个视频均播': '8000',
+    '网红成本价格（折算美元）': '1200',
+    '对外商务报价（美元）': '1800',
+    'CPM（自动计算）': '15',
+    'CPV(自动计算)': '0.03'
+  });
+  const aliasRow = {
+    Handle: '@alias_creator',
+    '标签': 'outdoor',
+    '成本价': '1200',
+    '邮箱': 'creator@example.com',
+    cpm: '15',
+    cpv: '0.03',
+    '__EMPTY': 'unnamed value',
+    '未识别字段': 'unknown value'
+  };
+
+  const preview = influencerWorkflow.previewInfluencerImport([row]);
+  const suggestions = Object.fromEntries(preview.columns.map(function(column) {
+    return [column.source, column.suggested_target];
+  }));
+  const aliasPreview = influencerWorkflow.previewInfluencerImport([aliasRow]);
+  const aliasSuggestions = Object.fromEntries(aliasPreview.columns.map(function(column) {
+    return [column.source, column.suggested_target];
+  }));
+
+  assert.equal(influencerWorkflow.IMPORT_MAPPING_VERSION, 'influencer-guided-v1');
+  assert.equal(Object.isFrozen(influencerWorkflow.IMPORT_FIELD_DEFINITIONS), true);
+  assert.deepEqual(
+    Object.fromEntries(influencerWorkflow.TEMPLATE_HEADERS.map(function(header) {
+      return [header, suggestions[header]];
+    })),
+    expectedWorkbookMapping
+  );
+  assert.equal(aliasSuggestions['标签'], 'influencer_type');
+  assert.equal(aliasSuggestions['成本价'], 'cost_usd');
+  assert.equal(aliasSuggestions['邮箱'], 'contact_email');
+  assert.equal(aliasSuggestions.cpm, 'cpm');
+  assert.equal(aliasSuggestions.cpv, 'cpv');
+  assert.equal(aliasSuggestions.__EMPTY, 'ignore');
+  assert.equal(aliasSuggestions['未识别字段'], 'ignore');
+  assert.deepEqual(preview.columns[0], {
+    source: '日期',
+    position: 1,
+    suggested_target: 'created_at',
+    samples: ['2026-07-03']
+  });
+  assert.equal(preview.columns.every(function(column) { return column.samples.length <= 3; }), true);
+});
+
+test('row-level influencer import counts blanks and rejects invalid rows without dropping valid rows', () => {
+  const rows = [
+    { Date: '2026-07-03', Handle: '@valid_creator', Followers: '12.5K', Email: 'valid@example.com' },
+    { Date: '', Handle: '', Followers: '', Email: '' },
+    { Date: '2026-07-04', Handle: '', Followers: '900', Email: 'missing@example.com' },
+    { Date: '2026-07-05', Handle: '@invalid_followers', Followers: 'many', Email: 'invalid@example.com' },
+    { Date: '2026-02-29', Handle: '@invalid_date', Followers: '800', Email: 'date@example.com' }
+  ];
+  const fieldMapping = {
+    Date: 'created_at',
+    Handle: 'kol_handle',
+    Followers: 'followers',
+    Email: 'contact_email'
+  };
+
+  const preview = influencerWorkflow.previewInfluencerImport(rows, {
+    field_mapping: fieldMapping,
+    row_number_offset: 2
+  });
+
+  assert.equal(preview.mapping_version, 'influencer-guided-v1');
+  assert.equal(preview.row_count, 5);
+  assert.equal(preview.blank_count, 1);
+  assert.equal(preview.valid_count, 1);
+  assert.equal(preview.error_count, 3);
+  assert.equal(preview.warning_count, 0);
+  assert.deepEqual(preview.row_errors.map(function(error) {
+    return [error.row_number, error.field, error.code];
+  }), [
+    [4, 'kol_handle', 'required'],
+    [5, 'followers', 'invalid_number'],
+    [6, 'created_at', 'invalid_date']
+  ]);
+  assert.equal(preview.row_errors_truncated, false);
+  assert.equal(preview.sample.length, 1);
+  assert.equal(preview.sample[0].kol_handle, '@valid_creator');
+  assert.equal(preview.sample[0].followers, 12500);
+  assert.equal(preview.sample[0].created_at, '2026-07-03 00:00:00');
+  assert.match(preview.error_report_csv, /^\uFEFFrow_number,field,code,message,source_row\r?\n/);
+  assert.match(preview.error_report_csv, /4,kol_handle,required/);
+  assert.match(preview.error_report_csv, /5,followers,invalid_number/);
+  assert.match(preview.error_report_csv, /6,created_at,invalid_date/);
+
+  const db = freshDb();
+  const imported = influencerWorkflow.importInfluencerRows(db, rows, {
+    batch_id: 'guided-row-validation',
+    data_source: 'upload',
+    user: { id: 2, role: 'user' },
+    field_mapping: fieldMapping,
+    row_number_offset: 2
+  });
+  assert.equal(imported.imported, 1);
+  assert.equal(imported.skipped, 4);
+  assert.equal(imported.blank_count, 1);
+  assert.equal(imported.error_count, 3);
+  assert.deepEqual(imported.row_errors, preview.row_errors);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM influencers WHERE import_batch=?')
+    .get('guided-row-validation').count, 1);
+  assert.equal(db.prepare('SELECT created_at FROM influencers WHERE import_batch=?')
+    .get('guided-row-validation').created_at, '2026-07-03 00:00:00');
+  db.close();
+});
+
 test('influencer import accepts the historical 19-column template aliases', async () => {
   const db = freshDb();
   const routes = mountRoutes(db);
@@ -656,6 +798,155 @@ test('influencer upload route imports a multipart CSV through the real server', 
     assert.equal(inf.cpv, 0.07);
     assert.equal(inf.parent_record, 'UPLOAD-PARENT');
     db.close();
+  });
+});
+
+test('guided influencer upload binds validation to one file and partially imports only validated rows', async () => {
+  await withTempServer(async ({ baseUrl, token, dbPath }) => {
+    const Database = require('better-sqlite3');
+    const rejected = Array.from({ length: 105 }, function(_, index) {
+      return {
+        '日期': '2026-07-04',
+        '网红频道名称': '',
+        '网红粉丝量': 'not-a-number',
+        '邮箱': `rejected-${index}@example.com`,
+        '未识别字段': `owner-${index}`
+      };
+    });
+    const source = JSON.stringify([
+      {
+        '日期': '2026-07-03',
+        '网红频道名称': '@guided_valid',
+        '网红粉丝量': '12500',
+        '邮箱': 'valid@example.com',
+        '未识别字段': 'Fixture Owner'
+      },
+      ...rejected,
+      { '日期': '', '网红频道名称': '', '网红粉丝量': '', '邮箱': '', '未识别字段': '' }
+    ]);
+    const alternateSource = JSON.stringify([{
+      '日期': '2026-07-03',
+      '网红频道名称': '@different_file',
+      '网红粉丝量': '9000',
+      '邮箱': 'different@example.com',
+      '未识别字段': 'Other Owner'
+    }]);
+
+    async function upload(fields, content = source) {
+      const form = new FormData();
+      Object.entries(fields).forEach(function(entry) { form.append(entry[0], entry[1]); });
+      form.append('file', new Blob([content], { type: 'application/json' }), 'guided.json');
+      const response = await fetch(baseUrl + '/api/influencers/upload', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + token },
+        body: form
+      });
+      const text = await response.text();
+      return { response, text, payload: JSON.parse(text) };
+    }
+
+    function queryOne(sql, parameter) {
+      const database = new Database(dbPath);
+      try {
+        return parameter === undefined ? database.prepare(sql).get() : database.prepare(sql).get(parameter);
+      } finally {
+        database.close();
+      }
+    }
+    const beforeInfluencers = queryOne('SELECT COUNT(*) AS count FROM influencers').count;
+    const beforeKnowledge = queryOne("SELECT COUNT(*) AS count FROM knowledge_entries WHERE source_type='influencer_import'").count;
+
+    const initial = await upload({
+      mode: 'preview',
+      mapping_version: 'influencer-guided-v1'
+    });
+    assert.equal(initial.response.status, 200, initial.text);
+    assert.match(initial.payload.file_sha256, /^[0-9a-f]{64}$/);
+    assert.equal(initial.payload.valid_count, 1);
+    assert.equal(initial.payload.error_count, 105);
+    assert.equal(initial.payload.blank_count, 1);
+    assert.equal(initial.payload.row_errors.length, 100);
+    assert.equal(initial.payload.row_errors_truncated, true);
+    assert.equal(queryOne('SELECT COUNT(*) AS count FROM influencers').count, beforeInfluencers);
+    assert.equal(queryOne("SELECT COUNT(*) AS count FROM knowledge_entries WHERE source_type='influencer_import'").count, beforeKnowledge);
+
+    const initialMapping = Object.fromEntries(initial.payload.columns.map(function(column) {
+      return [column.source, column.suggested_target];
+    }));
+    const wrongFile = await upload({
+      mode: 'import',
+      mapping_version: 'influencer-guided-v1',
+      field_mapping: JSON.stringify(initialMapping),
+      expected_file_sha256: initial.payload.file_sha256
+    }, alternateSource);
+    assert.equal(wrongFile.response.status, 400, wrongFile.text);
+    assert.equal(wrongFile.payload.code, 'INFLUENCER_UPLOAD_FILE_CHANGED');
+
+    const finalMapping = { ...initialMapping, '未识别字段': 'reporter' };
+    const revalidated = await upload({
+      mode: 'preview',
+      mapping_version: 'influencer-guided-v1',
+      field_mapping: JSON.stringify(finalMapping)
+    });
+    assert.equal(revalidated.response.status, 200, revalidated.text);
+    assert.equal(revalidated.payload.file_sha256, initial.payload.file_sha256);
+    assert.equal(
+      revalidated.payload.columns.find(function(column) { return column.source === '未识别字段'; }).suggested_target,
+      'reporter'
+    );
+
+    const confirmed = await upload({
+      mode: 'import',
+      mapping_version: 'influencer-guided-v1',
+      field_mapping: JSON.stringify(finalMapping),
+      expected_file_sha256: revalidated.payload.file_sha256
+    });
+    assert.equal(confirmed.response.status, 200, confirmed.text);
+    assert.equal(confirmed.payload.imported, 1);
+    assert.equal(confirmed.payload.skipped, 106);
+    assert.equal(confirmed.payload.error_count, 105);
+    assert.equal(confirmed.payload.blank_count, 1);
+    assert.equal(confirmed.payload.row_errors.length, 100);
+    assert.equal(confirmed.payload.row_errors_truncated, true);
+    assert.match(confirmed.payload.error_report_csv, /^\uFEFFrow_number,field,code,message,source_row\r?\n/);
+    assert.match(confirmed.payload.error_report_csv, /107,kol_handle,required/);
+    assert.match(confirmed.payload.batch, /^upload_[0-9a-f]{64}_[0-9a-f]{64}$/);
+    assert.deepEqual(
+      queryOne('SELECT kol_handle,followers,reporter,created_at FROM influencers WHERE import_batch=?', confirmed.payload.batch),
+      {
+        kol_handle: '@guided_valid',
+        followers: 12500,
+        reporter: 'Fixture Owner',
+        created_at: '2026-07-03 00:00:00'
+      }
+    );
+    assert.equal(queryOne("SELECT COUNT(*) AS count FROM knowledge_entries WHERE source_type='influencer_import'").count, beforeKnowledge + 1);
+  });
+});
+
+test('guided influencer upload rejects duplicate and unknown mapping targets', async () => {
+  await withTempServer(async ({ baseUrl, token }) => {
+    const csv = 'Handle,Followers,Other\n@mapping_test,1000,value\n';
+    async function preview(fieldMapping) {
+      const form = new FormData();
+      form.append('mode', 'preview');
+      form.append('mapping_version', 'influencer-guided-v1');
+      form.append('field_mapping', JSON.stringify(fieldMapping));
+      form.append('file', new Blob([csv], { type: 'text/csv;charset=utf-8' }), 'mapping.csv');
+      const response = await fetch(baseUrl + '/api/influencers/upload', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + token },
+        body: form
+      });
+      return { response, payload: await response.json() };
+    }
+
+    const duplicate = await preview({ Handle: 'kol_handle', Followers: 'followers', Other: 'followers' });
+    assert.equal(duplicate.response.status, 400);
+    assert.equal(duplicate.payload.code, 'INVALID_FIELD_MAPPING');
+    const unknown = await preview({ Handle: 'kol_handle', Followers: 'followers', Other: 'unreviewed_target' });
+    assert.equal(unknown.response.status, 400);
+    assert.equal(unknown.payload.code, 'INVALID_FIELD_MAPPING');
   });
 });
 
@@ -2144,7 +2435,22 @@ test('m4 frontend keeps import, feishu, and order-resource controls wired', () =
   assert.match(indexHtml, /onclick="saveM4SavedView\(\)"/);
   assert.match(indexHtml, /onclick="deleteM4SavedView\(\)"/);
   assert.match(indexHtml, /onclick="clearM4Filters\(\)"/);
+  assert.match(indexHtml, /id="infFile"[^>]*accept="\.csv,\.json,\.xlsx"/);
   assert.match(indexHtml, /id="infFileModal" accept="\.csv,\.json,\.xlsx"/);
+  assert.doesNotMatch(indexHtml, /id="infFile(?:Modal)?"[^>]*accept="[^"]*\.xls(?:[,\"])/);
+  assert.match(indexHtml, /id="infUploadModal"[^>]*onclick="if\(event\.target===this\)closeInfUploadModal\(\)"/);
+  assert.match(indexHtml, /id="infGuidedStatus"[^>]*role="status"[^>]*aria-live="polite"/);
+  assert.match(indexHtml, /id="infMappingFeedback"[^>]*role="status"[^>]*aria-live="assertive"/);
+  assert.match(indexHtml, /id="infImportValidCount"/);
+  assert.match(indexHtml, /id="infImportErrorCount"/);
+  assert.match(indexHtml, /id="infImportWarningCount"/);
+  assert.match(indexHtml, /id="infImportBlankCount"/);
+  assert.match(indexHtml, /id="infMappingRows"/);
+  assert.match(indexHtml, /id="infImportRowErrors"/);
+  assert.match(indexHtml, /id="infImportErrorDownload"[^>]*onclick="downloadInfluencerImportErrors\(\)"/);
+  assert.match(indexHtml, /id="infImportValidate"[^>]*onclick="validateInfluencerImportMapping\(\)"[^>]*>校验数据</);
+  assert.match(indexHtml, /id="infImportConfirm"[^>]*onclick="confirmInfluencerImport\(\)"[^>]*>确认导入</);
+  assert.match(indexHtml, /id="infImportCancel"[^>]*onclick="closeInfUploadModal\(\)"[^>]*>取消</);
   assert.match(indexHtml, /id="feishuConnectionStatus"/);
   assert.match(indexHtml, /id="feishuDeliveryStatus"/);
   assert.match(indexHtml, /id="feishuStatusRefresh"/);
@@ -2179,6 +2485,36 @@ test('m4 frontend keeps import, feishu, and order-resource controls wired', () =
   assert.match(componentCss, /top: var\(--m4-table-header-height\)/);
   assert.match(componentCss, /\.m4-table \.m4-column-filter/);
   assert.match(componentCss, /\.m4-column-workspace/);
+  assert.match(componentCss, /\.tm-influencer-import-scroll\s*\{[^}]*overflow-x:\s*auto/s);
+  assert.match(componentCss, /@media\s*\(max-width:\s*720px\)[\s\S]*\.tm-influencer-import-dialog/);
+  assert.match(appJs, /var INFLUENCER_IMPORT_STATES = Object\.freeze\(\[/);
+  for (const state of [
+    'idle', 'parsing', 'mapping_dirty', 'validated_ready',
+    'importing', 'success', 'partial_success', 'fatal_error'
+  ]) {
+    assert.match(appJs, new RegExp("'" + state + "'"), `guided import state ${state} must be explicit`);
+  }
+  assert.match(appJs, /var retainedInfluencerImportFile = null/);
+  assert.match(appJs, /function setInfluencerImportState/);
+  assert.match(appJs, /function renderInfluencerImportMapping/);
+  assert.match(appJs, /for="inf-map-/);
+  assert.match(appJs, /class="tm-influencer-map-select"/);
+  assert.match(appJs, /column\.position/);
+  assert.match(appJs, /column\.samples/);
+  assert.match(appJs, /function markInfluencerMappingDirty/);
+  assert.match(appJs, /setInfluencerImportState\('mapping_dirty'/);
+  assert.match(appJs, /function validateInfluencerImportMapping/);
+  assert.match(appJs, /function confirmInfluencerImport/);
+  assert.match(appJs, /fd\.append\('mode', 'preview'\)/);
+  assert.match(appJs, /fd\.append\('mode', 'import'\)/);
+  assert.match(appJs, /fd\.append\('expected_file_sha256', influencerImportValidation\.file_sha256\)/);
+  assert.match(appJs, /row_errors\.slice\(0, 100\)/);
+  assert.match(appJs, /function downloadInfluencerImportErrors/);
+  assert.match(appJs, /error_report_csv/);
+  assert.match(appJs, /function resetInfluencerImport/);
+  assert.match(appJs, /resetInfluencerImport\(\)/);
+  assert.match(appJs, /TMAccessibility\.openDialog\(dialog, opener, closeInfUploadModal\)/);
+  assert.match(appJs, /TMAccessibility\.closeDialog\(dialog\)/);
   assert.match(appJs, /function handleDrop/);
   assert.match(appJs, /function openInfUploadModal/);
   assert.match(appJs, /function handleUploadModal/);

@@ -315,7 +315,7 @@ const UPLOAD_ROUTES = Object.freeze([
     'parser.influencer-upload',
     '/api/influencers/upload',
     'parser.influencer-upload.admission',
-    ['batch_id'],
+    ['batch_id', 'mode', 'mapping_version', 'field_mapping', 'expected_file_sha256'],
     ['.csv', '.json', '.xlsx']
   ),
   routePolicy(

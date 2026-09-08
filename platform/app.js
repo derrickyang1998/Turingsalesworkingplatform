@@ -163,6 +163,7 @@ async function doLogout() {
     });
   } catch (e) {}
   if (typeof invalidateAiChatRequests === 'function') invalidateAiChatRequests();
+  if (typeof resetInfluencerImport === 'function') resetInfluencerImport();
   currentAIConversationId = null;
   if (typeof resetCampaignPptArtifactState === 'function') resetCampaignPptArtifactState();
   AUTH_TOKEN = ''; CURRENT_USER = null; CURRENT_AUTH_CONTEXT = null; CURRENT_CRM_TEAM_ID = null; AUTH_GENERATION += 1;
@@ -5058,47 +5059,284 @@ function exportInf(mode, ids) {
     toast('Export done');
   }).catch(function(e) { toast(e.message || 'Export failed', 'error'); });
 }
-async function importInfluencerFile(file, statusEl) {
-  if (!file) return;
-  var ext = (file.name.split('.').pop() || '').toLowerCase();
-  if (['csv', 'json', 'xlsx', 'xls'].indexOf(ext) === -1) {
-    if (statusEl) statusEl.innerHTML = '<span style="color:#d94641">Unsupported file type: .' + esc(ext) + '</span>';
+var INFLUENCER_IMPORT_MAPPING_VERSION = 'influencer-guided-v1';
+var INFLUENCER_IMPORT_STATES = Object.freeze([
+  'idle',
+  'parsing',
+  'mapping_dirty',
+  'validated_ready',
+  'importing',
+  'success',
+  'partial_success',
+  'fatal_error'
+]);
+var influencerImportState = 'idle';
+var retainedInfluencerImportFile = null;
+var influencerImportPreview = null;
+var influencerImportValidation = null;
+var influencerImportValidatedMapping = '';
+var influencerImportErrorCsv = '';
+var influencerImportOpener = null;
+
+function setInfluencerImportState(state, message) {
+  if (INFLUENCER_IMPORT_STATES.indexOf(state) === -1) return;
+  influencerImportState = state;
+  var dialog = document.getElementById('influencerUploadDialog');
+  var status = document.getElementById('infGuidedStatus');
+  var validateButton = document.getElementById('infImportValidate');
+  var confirmButton = document.getElementById('infImportConfirm');
+  if (dialog) dialog.dataset.importState = state;
+  if (status && message !== undefined) status.textContent = message;
+  if (validateButton) {
+    validateButton.disabled = !retainedInfluencerImportFile || state === 'parsing' || state === 'importing';
+  }
+  if (confirmButton) confirmButton.disabled = state !== 'validated_ready';
+}
+
+function renderInfluencerImportSummary(data) {
+  var summary = document.getElementById('infImportSummary');
+  if (!summary) return;
+  summary.hidden = !data;
+  if (!data) return;
+  document.getElementById('infImportValidCount').textContent = String(data.valid_count !== undefined ? data.valid_count : data.imported || 0);
+  document.getElementById('infImportErrorCount').textContent = String(data.error_count || 0);
+  document.getElementById('infImportWarningCount').textContent = String(data.warning_count || 0);
+  document.getElementById('infImportBlankCount').textContent = String(data.blank_count || 0);
+}
+
+function renderInfluencerImportErrors(data) {
+  var panel = document.getElementById('infImportErrorsPanel');
+  var body = document.getElementById('infImportRowErrors');
+  var download = document.getElementById('infImportErrorDownload');
+  var rowErrors = data && Array.isArray(data.row_errors) ? data.row_errors.slice(0, 100) : [];
+  if (body) {
+    body.innerHTML = rowErrors.map(function(error) {
+      return '<tr><td>' + esc(error.row_number || '') + '</td><td>' + esc(error.field || '') + '</td><td>' + esc(error.message || error.code || '') + '</td></tr>';
+    }).join('');
+  }
+  if (panel) panel.hidden = rowErrors.length === 0;
+  influencerImportErrorCsv = data && data.error_count > 0 && data.error_report_csv ? data.error_report_csv : '';
+  if (download) download.hidden = !influencerImportErrorCsv;
+}
+
+function renderInfluencerImportMapping(data) {
+  var panel = document.getElementById('infMappingPanel');
+  var body = document.getElementById('infMappingRows');
+  if (!panel || !body || !data) return;
+  var fields = Array.isArray(data.fields) ? data.fields : [];
+  body.innerHTML = (data.columns || []).map(function(column, index) {
+    var selectId = 'inf-map-' + index;
+    var options = ['<option value="ignore">忽略</option>'].concat(fields.map(function(field) {
+      var selected = field.key === column.suggested_target ? ' selected' : '';
+      var required = field.required ? ' *' : '';
+      return '<option value="' + esc(field.key) + '"' + selected + '>' + esc(field.label + required) + '</option>';
+    })).join('');
+    var samples = (column.samples || []).map(function(value) { return esc(value); }).join(' / ') || '-';
+    return '<tr><td>' + esc(column.position) + '</td><td><strong>' + esc(column.source || '(未命名)') + '</strong><small>' + samples + '</small></td>' +
+      '<td><label class="sr-only" for="inf-map-' + index + '">映射 ' + esc(column.source || ('第 ' + column.position + ' 列')) + '</label>' +
+      '<select id="' + selectId + '" class="tm-influencer-map-select" data-source="' + esc(column.source) + '" onchange="markInfluencerMappingDirty()">' + options + '</select></td></tr>';
+  }).join('');
+  panel.hidden = false;
+}
+
+function collectInfluencerFieldMapping(showFeedback) {
+  var feedback = document.getElementById('infMappingFeedback');
+  var mapping = {};
+  var claimed = {};
+  var duplicate = '';
+  document.querySelectorAll('.tm-influencer-map-select').forEach(function(select) {
+    var source = select.dataset.source || '';
+    var target = select.value || 'ignore';
+    mapping[source] = target;
+    if (target !== 'ignore') {
+      if (claimed[target]) duplicate = target;
+      claimed[target] = source;
+    }
+  });
+  var message = duplicate
+    ? '每个导入字段只能映射一次。'
+    : claimed.kol_handle
+      ? ''
+      : '必须选择一个网红频道名称字段。';
+  if (feedback && showFeedback !== false) feedback.textContent = message;
+  return message ? null : mapping;
+}
+
+function markInfluencerMappingDirty() {
+  influencerImportValidation = null;
+  influencerImportValidatedMapping = '';
+  collectInfluencerFieldMapping(true);
+  setInfluencerImportState('mapping_dirty', '字段映射已更改，请重新校验数据。');
+}
+
+async function requestInfluencerImportPreview(fieldMapping) {
+  if (!retainedInfluencerImportFile) return;
+  setInfluencerImportState('parsing', fieldMapping ? '正在按当前映射校验数据...' : '正在解析文件并识别字段...');
+  var fd = new FormData();
+  fd.append('mode', 'preview');
+  fd.append('mapping_version', INFLUENCER_IMPORT_MAPPING_VERSION);
+  if (fieldMapping) fd.append('field_mapping', JSON.stringify(fieldMapping));
+  fd.append('file', retainedInfluencerImportFile);
+  var response = await apiFetch('/influencers/upload', { method: 'POST', body: fd });
+  var data = await response.json();
+  if (!response.ok) throw new Error(data.error || '文件校验失败');
+  influencerImportPreview = data;
+  renderInfluencerImportMapping(data);
+  renderInfluencerImportSummary(data);
+  renderInfluencerImportErrors(data);
+  var mapping = collectInfluencerFieldMapping(true);
+  if (!mapping) {
+    setInfluencerImportState('mapping_dirty', '请完成必填字段映射后校验数据。');
     return;
   }
-  if (statusEl) statusEl.innerHTML = '<span>Uploading ' + esc(file.name) + '...</span>';
-  var fd = new FormData();
-  fd.append('file', file);
-  fd.append('batch_id', file.name);
+  influencerImportValidation = data;
+  influencerImportValidatedMapping = JSON.stringify(mapping);
+  setInfluencerImportState('validated_ready', '校验完成，可以确认导入。');
+}
+
+async function beginInfluencerImport(file, opener) {
+  if (!file) return;
+  var ext = (file.name.split('.').pop() || '').toLowerCase();
+  openInfUploadModal(opener);
+  if (['csv', 'json', 'xlsx'].indexOf(ext) === -1) {
+    retainedInfluencerImportFile = null;
+    influencerImportValidation = null;
+    setInfluencerImportState('fatal_error', '不支持 .' + ext + ' 文件，请使用 CSV、JSON 或 XLSX。');
+    return;
+  }
+  retainedInfluencerImportFile = file;
+  influencerImportValidation = null;
+  influencerImportValidatedMapping = '';
+  var compactStatus = document.getElementById('uploadOK');
+  if (compactStatus) compactStatus.textContent = '正在校验 ' + file.name;
   try {
-    var r = await apiFetch('/influencers/upload', { method: 'POST', body: fd });
-    var d = await r.json();
-    if (!r.ok) throw new Error(d.error || 'Upload failed');
-    if (statusEl) statusEl.innerHTML = '<span style="color:#0f7b3c">Imported ' + (d.imported || 0) + ', skipped ' + (d.skipped || 0) + '</span>';
-    showInfPreview(d.sample || []);
-    await loadInfluencersFromAPI();
-    toast('Imported ' + (d.imported || 0));
-  } catch (e) {
-    if (statusEl) statusEl.innerHTML = '<span style="color:#d94641">' + esc(e.message) + '</span>';
-    toast(e.message, 'error');
+    await requestInfluencerImportPreview();
+  } catch (error) {
+    setInfluencerImportState('fatal_error', error.message || '文件校验失败');
+    if (compactStatus) compactStatus.textContent = error.message || '文件校验失败';
   }
 }
+
 function handleUpload(e) {
   var file = e && e.target && e.target.files ? e.target.files[0] : null;
-  importInfluencerFile(file, document.getElementById('uploadOK'));
+  beginInfluencerImport(file, e && e.currentTarget);
   if (e && e.target) e.target.value = '';
 }
 function handleDrop(event) {
+  if (event) event.preventDefault();
   var file = event && event.dataTransfer && event.dataTransfer.files ? event.dataTransfer.files[0] : null;
-  importInfluencerFile(file, document.getElementById('uploadOK'));
+  beginInfluencerImport(file, event && event.currentTarget);
 }
-function openInfUploadModal() {
-  var modal = document.getElementById('infUploadModal');
-  if (modal) modal.style.display = 'flex';
+function openInfUploadModal(opener) {
+  var overlay = document.getElementById('infUploadModal');
+  var dialog = document.getElementById('influencerUploadDialog');
+  if (!overlay || !dialog) return;
+  var wasHidden = overlay.hidden || overlay.style.display === 'none';
+  opener = opener || document.activeElement;
+  influencerImportOpener = opener;
+  overlay.hidden = false;
+  overlay.inert = false;
+  overlay.removeAttribute('aria-hidden');
+  overlay.style.display = 'flex';
+  if (wasHidden && window.TMAccessibility) window.TMAccessibility.openDialog(dialog, opener, closeInfUploadModal);
+}
+function closeInfUploadModal() {
+  var overlay = document.getElementById('infUploadModal');
+  var dialog = document.getElementById('influencerUploadDialog');
+  if (dialog && window.TMAccessibility) window.TMAccessibility.closeDialog(dialog);
+  if (overlay) {
+    overlay.style.display = 'none';
+    overlay.hidden = true;
+    overlay.inert = true;
+    overlay.setAttribute('aria-hidden', 'true');
+  }
+  resetInfluencerImport();
 }
 function handleUploadModal(event) {
   var file = event && event.target && event.target.files ? event.target.files[0] : null;
-  importInfluencerFile(file, document.getElementById('infModalStatus'));
+  beginInfluencerImport(file, event && event.currentTarget);
   if (event && event.target) event.target.value = '';
+}
+function handleInfluencerModalDrop(event) {
+  if (event) event.preventDefault();
+  var file = event && event.dataTransfer && event.dataTransfer.files ? event.dataTransfer.files[0] : null;
+  beginInfluencerImport(file, document.getElementById('infModalDropZone'));
+}
+async function validateInfluencerImportMapping() {
+  var mapping = collectInfluencerFieldMapping(true);
+  if (!mapping || !retainedInfluencerImportFile) return;
+  try {
+    await requestInfluencerImportPreview(mapping);
+  } catch (error) {
+    setInfluencerImportState('fatal_error', error.message || '文件校验失败');
+  }
+}
+async function confirmInfluencerImport() {
+  var mapping = collectInfluencerFieldMapping(true);
+  if (!mapping || !retainedInfluencerImportFile || !influencerImportValidation) return;
+  if (influencerImportState !== 'validated_ready' || JSON.stringify(mapping) !== influencerImportValidatedMapping) {
+    markInfluencerMappingDirty();
+    return;
+  }
+  setInfluencerImportState('importing', '正在导入已通过校验的数据...');
+  var fd = new FormData();
+  fd.append('mode', 'import');
+  fd.append('mapping_version', INFLUENCER_IMPORT_MAPPING_VERSION);
+  fd.append('field_mapping', JSON.stringify(mapping));
+  fd.append('expected_file_sha256', influencerImportValidation.file_sha256);
+  fd.append('file', retainedInfluencerImportFile);
+  try {
+    var response = await apiFetch('/influencers/upload', { method: 'POST', body: fd });
+    var data = await response.json();
+    if (!response.ok) throw new Error(data.error || '导入失败');
+    renderInfluencerImportSummary(data);
+    renderInfluencerImportErrors(data);
+    showInfPreview(data.sample || []);
+    await loadInfluencersFromAPI();
+    var resultText = '已导入 ' + (data.imported || 0) + ' 条，跳过 ' + (data.skipped || 0) + ' 条。';
+    var compactStatus = document.getElementById('uploadOK');
+    var modalStatus = document.getElementById('infModalStatus');
+    if (compactStatus) compactStatus.textContent = resultText;
+    if (modalStatus) modalStatus.textContent = resultText;
+    retainedInfluencerImportFile = null;
+    influencerImportValidation = null;
+    influencerImportValidatedMapping = '';
+    var finalState = data.error_count > 0 || data.blank_count > 0 ? 'partial_success' : 'success';
+    setInfluencerImportState(finalState, resultText);
+    toast(resultText);
+  } catch (error) {
+    setInfluencerImportState('fatal_error', error.message || '导入失败');
+    toast(error.message || '导入失败', 'error');
+  }
+}
+function downloadInfluencerImportErrors() {
+  if (!influencerImportErrorCsv) return;
+  dlFile('influencer_import_errors.csv', influencerImportErrorCsv, 'text/csv;charset=utf-8');
+}
+function resetInfluencerImport() {
+  retainedInfluencerImportFile = null;
+  influencerImportPreview = null;
+  influencerImportValidation = null;
+  influencerImportValidatedMapping = '';
+  influencerImportErrorCsv = '';
+  influencerImportOpener = null;
+  var modalFile = document.getElementById('infFileModal');
+  var tabFile = document.getElementById('infFile');
+  var mappingPanel = document.getElementById('infMappingPanel');
+  var errorsPanel = document.getElementById('infImportErrorsPanel');
+  var summary = document.getElementById('infImportSummary');
+  var feedback = document.getElementById('infMappingFeedback');
+  var modalStatus = document.getElementById('infModalStatus');
+  var download = document.getElementById('infImportErrorDownload');
+  if (modalFile) modalFile.value = '';
+  if (tabFile) tabFile.value = '';
+  if (mappingPanel) mappingPanel.hidden = true;
+  if (errorsPanel) errorsPanel.hidden = true;
+  if (summary) summary.hidden = true;
+  if (feedback) feedback.textContent = '';
+  if (modalStatus) modalStatus.textContent = '';
+  if (download) download.hidden = true;
+  setInfluencerImportState('idle', '请选择文件。');
 }
 function importInfluencers(rows) {
   if (!rows || !rows.length) return;
@@ -9818,7 +10056,7 @@ function switchPage(id, options) {
     'initM3', 'goAnalyze', 'goGenerate', 'goStep3', 'resetDemand', 'updSteps', 'selTmpl', 'updateTemplateSelectionUI',
     'generateProposal', 'updateProposalDraftFromEditor', 'getCurrentProposalDraft', 'downloadProposal', 'copyProposal', 'openProposalToInfluencers',
     'getEditedDemand', 'syncCurDemandFromAnalysis', 'handleDemandFile', 'analyzeDemandAI',
-    'switchTab', 'matchInfluencers', 'smartMatch', 'handleUpload', 'handleDrop', 'openInfUploadModal', 'handleUploadModal', 'downloadInfTemplate', 'exportAll', 'exportFiltered', 'exportSelected',
+    'switchTab', 'matchInfluencers', 'smartMatch', 'handleUpload', 'handleDrop', 'openInfUploadModal', 'closeInfUploadModal', 'handleUploadModal', 'handleInfluencerModalDrop', 'validateInfluencerImportMapping', 'confirmInfluencerImport', 'downloadInfluencerImportErrors', 'downloadInfTemplate', 'exportAll', 'exportFiltered', 'exportSelected',
     'saveM4SavedView', 'applyM4SavedView', 'deleteM4SavedView', 'clearM4Filters',
     'toggleAll', 'syncInfluencerSelectionState', 'loadM4Campaigns', 'changeM4CampaignContext', 'startCollab', 'submitCollabOrder', 'closeCollabOrderModal', 'loadCollaborations', 'updateCollabStatus', 'runCampaignCollabAction', 'closeCampaignSettlementModal', 'submitCampaignSettlement',
     'initPerformanceMonitor', 'initPerformanceDashboard', 'refreshPerformanceMonitor', 'refreshPerformanceDashboard', 'changePerformanceCampaignContext', 'handlePerformanceTopMetricChange', 'refreshPerformanceReviewEvidence', 'generatePerformanceAiReviewDraft', 'loadPerformanceContents', 'loadPerformanceIntegrationPreview', 'loadPerformanceFeishuConnection', 'savePerformanceFeishuConnectionDraft', 'approvePerformanceFeishuConnectionDraft', 'createPerformanceContent', 'downloadPerformanceTemplate', 'handlePerformanceImport', 'handlePerformanceDrop', 'downloadPerformanceMetricsTemplate', 'handlePerformanceMetricsImport', 'handlePerformanceMetricsDrop', 'openPerformanceInputModal', 'closePerformanceInputModal', 'savePerformanceInput', 'loadPerformanceDashboard', 'loadPerformanceReviewEvidence', 'debouncedPerformanceContentSearch', 'exportPerformanceContents',

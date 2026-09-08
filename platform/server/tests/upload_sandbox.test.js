@@ -304,6 +304,47 @@ test('canonical multipart hash conflicts when field value, bytes, MIME, or basen
   assert.equal(new Set([baseline, ...hashes]).size, hashes.length + 1);
 });
 
+test('influencer multipart mapping fields enter the canonical request identity', async () => {
+  const route = matchUploadRoute('POST', '/api/influencers/upload');
+  async function digest(fields, boundary) {
+    const multipart = await decodeMultipartBody({
+      route,
+      contentType: `multipart/form-data; boundary=${boundary}`,
+      rawBody: multipartBody(boundary, [
+        ...fields.map(function(entry) { return { name: entry[0], value: entry[1] }; }),
+        {
+          file: true,
+          name: 'file',
+          filename: 'influencers.csv',
+          mime: 'text/csv',
+          value: 'Handle,Followers\n@canonical,1000\n'
+        }
+      ])
+    });
+    return hashMultipartRequest({
+      method: 'POST',
+      path: '/api/influencers/upload',
+      multipart
+    });
+  }
+
+  const baseFields = [
+    ['mode', 'import'],
+    ['mapping_version', 'influencer-guided-v1'],
+    ['field_mapping', '{"Handle":"kol_handle","Followers":"followers"}'],
+    ['expected_file_sha256', 'a'.repeat(64)]
+  ];
+  const baseline = await digest(baseFields, 'tm-influencer-mapping-base');
+  const hashes = [];
+  for (let index = 0; index < baseFields.length; index += 1) {
+    const changed = baseFields.map(function(entry) { return [...entry]; });
+    changed[index][1] += '-changed';
+    hashes.push(await digest(changed, `tm-influencer-mapping-${index}`));
+  }
+
+  assert.equal(new Set([baseline, ...hashes]).size, hashes.length + 1);
+});
+
 test('multipart decoder rejects extension and MIME that disagree with magic bytes', async () => {
   const route = matchUploadRoute('POST', '/api/knowledge/upload');
   for (const item of [

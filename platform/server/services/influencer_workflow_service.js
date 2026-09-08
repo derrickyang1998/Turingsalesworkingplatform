@@ -1,6 +1,8 @@
 const crypto = require('node:crypto');
 const knowledgeService = require('./knowledge_service');
 
+const IMPORT_MAPPING_VERSION = 'influencer-guided-v1';
+
 const TEMPLATE_HEADERS = [
   '日期',
   '提报人',
@@ -52,6 +54,83 @@ const FIELD_ALIASES = {
   parent_record: ['父记录', 'Parent Record', 'parent_record', 'Parent']
 };
 
+const IMPORT_FIELD_DEFINITIONS = Object.freeze([
+  ['created_at', '日期', 'date', false],
+  ['reporter', '提报人', 'text', false],
+  ['project_name', '项目&客户', 'text', false],
+  ['product_name', '推广产品', 'text', false],
+  ['is_duplicate', '是否重复', 'boolean', false],
+  ['kol_handle', '网红频道名称', 'text', true],
+  ['followers', '网红粉丝量', 'number', false],
+  ['profile_link', '网红频道链接', 'url', false],
+  ['platform', '社媒平台', 'text', false],
+  ['region', '国家', 'text', false],
+  ['influencer_type', '网红类型', 'text', false],
+  ['avg_views_10', '近10个视频均播', 'number', false],
+  ['cost_usd', '网红成本价格（折算美元）', 'number', false],
+  ['content_deliverable', '网红交付物（植入-完播等信息）', 'text', false],
+  ['brand_collab_history', 'Turing备注', 'text', false],
+  ['quoted_price', '对外商务报价（美元）', 'number', false],
+  ['contact_email', '网红联系方式', 'contact', false],
+  ['cpm', 'CPM（自动计算）', 'number', false],
+  ['cpv', 'CPV(自动计算)', 'number', false],
+  ['parent_record', '父记录', 'text', false]
+].map(function(definition) {
+  return Object.freeze({
+    key: definition[0],
+    label: definition[1],
+    type: definition[2],
+    required: definition[3]
+  });
+}));
+
+const IMPORT_TARGETS = new Set(IMPORT_FIELD_DEFINITIONS.map(function(field) { return field.key; }));
+const NUMERIC_IMPORT_FIELDS = new Set([
+  'followers',
+  'avg_views_10',
+  'cost_usd',
+  'quoted_price',
+  'cpm',
+  'cpv'
+]);
+const TEMPLATE_TARGETS = [
+  'created_at',
+  'reporter',
+  'project_name',
+  'product_name',
+  'is_duplicate',
+  'kol_handle',
+  'followers',
+  'profile_link',
+  'platform',
+  'region',
+  'influencer_type',
+  'avg_views_10',
+  'cost_usd',
+  'content_deliverable',
+  'brand_collab_history',
+  'quoted_price',
+  'contact_email',
+  'cpm',
+  'cpv',
+  'parent_record'
+];
+const SUGGESTION_OVERRIDES = Object.freeze(Object.assign(
+  Object.fromEntries(TEMPLATE_HEADERS.map(function(header, index) {
+    return [header, TEMPLATE_TARGETS[index]];
+  })),
+  {
+    '标签': 'influencer_type',
+    Tag: 'influencer_type',
+    Tags: 'influencer_type',
+    tags: 'influencer_type',
+    '成本价': 'cost_usd',
+    '邮箱': 'contact_email',
+    cpm: 'cpm',
+    cpv: 'cpv'
+  }
+));
+
 function normalizeKey(key) {
   return String(key || '').replace(/^\uFEFF/, '').trim().toLowerCase().replace(/[\s._\-()/（）]+/g, '');
 }
@@ -90,6 +169,265 @@ function parseNumber(value) {
   if (/\d\s*K\b/i.test(upper)) n *= 1000;
   if (/\d\s*M\b/i.test(upper)) n *= 1000000;
   return n;
+}
+
+function isBlankValue(value) {
+  return value === undefined || value === null || String(value).trim() === '';
+}
+
+function isBlankRow(row) {
+  return !row || Object.values(row).every(isBlankValue);
+}
+
+function isValidNumericCell(value) {
+  if (isBlankValue(value)) return true;
+  if (typeof value === 'number') return Number.isFinite(value);
+  return /-?\d+(?:\.\d+)?/.test(String(value).replace(/,/g, ''));
+}
+
+function importMappingError(message) {
+  const error = new Error(message);
+  error.statusCode = 400;
+  error.code = 'INVALID_FIELD_MAPPING';
+  return error;
+}
+
+function collectSourceColumns(rows) {
+  const columns = [];
+  const seen = new Set();
+  for (const row of rows || []) {
+    for (const source of Object.keys(row || {})) {
+      if (seen.has(source)) continue;
+      seen.add(source);
+      columns.push(source);
+    }
+  }
+  return columns;
+}
+
+function suggestedTarget(source) {
+  const raw = String(source || '').replace(/^\uFEFF/, '').trim();
+  if (!raw || /^__EMPTY(?:_\d+)?$/i.test(raw)) return 'ignore';
+  if (Object.prototype.hasOwnProperty.call(SUGGESTION_OVERRIDES, raw)) {
+    return SUGGESTION_OVERRIDES[raw];
+  }
+  for (const target of TEMPLATE_TARGETS) {
+    const aliases = target === 'created_at' ? ['Date', 'date', '日期'] : (FIELD_ALIASES[target] || []);
+    if (aliases.some(function(alias) { return normalizeKey(alias) === normalizeKey(raw); })) {
+      return target;
+    }
+  }
+  return 'ignore';
+}
+
+function automaticFieldMapping(columns) {
+  const mapping = {};
+  const claimed = new Set();
+  for (const source of columns) {
+    const target = suggestedTarget(source);
+    if (target === 'ignore' || claimed.has(target)) {
+      mapping[source] = 'ignore';
+      continue;
+    }
+    mapping[source] = target;
+    claimed.add(target);
+  }
+  return mapping;
+}
+
+function validateFieldMapping(rows, fieldMapping, options) {
+  options = options || {};
+  const sources = collectSourceColumns(rows);
+  const sourceSet = new Set(sources);
+  if (!fieldMapping || typeof fieldMapping !== 'object' || Array.isArray(fieldMapping)) {
+    throw importMappingError('Field mapping must be an object');
+  }
+  const mapping = {};
+  const claimed = new Set();
+  for (const source of Object.keys(fieldMapping)) {
+    if (!sourceSet.has(source)) throw importMappingError('Field mapping contains an unknown source column');
+    const target = fieldMapping[source];
+    if (typeof target !== 'string' || (target !== 'ignore' && !IMPORT_TARGETS.has(target))) {
+      throw importMappingError('Field mapping contains an unknown target field');
+    }
+    if (target !== 'ignore' && claimed.has(target)) {
+      throw importMappingError('Field mapping contains duplicate target fields');
+    }
+    mapping[source] = target;
+    if (target !== 'ignore') claimed.add(target);
+  }
+  for (const source of sources) {
+    if (!Object.prototype.hasOwnProperty.call(mapping, source)) mapping[source] = 'ignore';
+  }
+  if (options.requireHandle !== false && !claimed.has('kol_handle')) {
+    throw importMappingError('Field mapping must include exactly one KOL handle source');
+  }
+  return mapping;
+}
+
+function mappedSourceRow(row, fieldMapping) {
+  const mapped = {};
+  for (const source of Object.keys(fieldMapping)) {
+    const target = fieldMapping[source];
+    if (target !== 'ignore') mapped[target] = row[source];
+  }
+  return mapped;
+}
+
+function normalizeImportDate(value) {
+  if (isBlankValue(value)) return '';
+  if (value instanceof Date) {
+    if (!Number.isFinite(value.getTime())) return null;
+    return value.toISOString().slice(0, 10) + ' 00:00:00';
+  }
+  const raw = String(value).trim();
+  const match = raw.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:(?:T|\s)\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})?)?$/);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) return null;
+  return [
+    String(year).padStart(4, '0'),
+    String(month).padStart(2, '0'),
+    String(day).padStart(2, '0')
+  ].join('-') + ' 00:00:00';
+}
+
+function rowWarnings(mapped, rowNumber) {
+  const warnings = [];
+  const profileLink = String(mapped.profile_link || '').trim();
+  if (profileLink) {
+    try {
+      const parsed = new URL(profileLink);
+      if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('unsupported protocol');
+    } catch (error) {
+      warnings.push({ row_number: rowNumber, field: 'profile_link', code: 'format_warning', message: '链接格式可能无效' });
+    }
+  }
+  const contact = String(mapped.contact_email || '').trim();
+  if (contact && contact.includes('@') && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contact)) {
+    warnings.push({ row_number: rowNumber, field: 'contact_email', code: 'format_warning', message: '联系方式格式可能无效' });
+  }
+  const platform = String(mapped.platform || '').trim();
+  if (platform.length > 100) {
+    warnings.push({ row_number: rowNumber, field: 'platform', code: 'format_warning', message: '平台名称过长' });
+  }
+  return warnings;
+}
+
+function prepareMappedInfluencerRows(rows, options) {
+  options = options || {};
+  rows = Array.isArray(rows) ? rows : [];
+  const columns = collectSourceColumns(rows);
+  const explicitMapping = options.field_mapping !== undefined;
+  const proposedMapping = explicitMapping ? options.field_mapping : automaticFieldMapping(columns);
+  const fieldMapping = validateFieldMapping(rows, proposedMapping, {
+    requireHandle: explicitMapping || columns.some(function(source) {
+      return proposedMapping[source] === 'kol_handle';
+    })
+  });
+  const rowNumberOffset = Number.isSafeInteger(options.row_number_offset)
+    ? options.row_number_offset
+    : 1;
+  const validRows = [];
+  const blankRows = [];
+  const rejectedRows = [];
+  const warnings = [];
+
+  rows.forEach(function(row, index) {
+    const rowNumber = index + rowNumberOffset;
+    if (isBlankRow(row)) {
+      blankRows.push({ row_number: rowNumber, source_row: row || {} });
+      return;
+    }
+    const mapped = mappedSourceRow(row || {}, fieldMapping);
+    const errors = [];
+    if (isBlankValue(mapped.kol_handle)) {
+      errors.push({ row_number: rowNumber, field: 'kol_handle', code: 'required', message: '网红频道名称不能为空' });
+    }
+    for (const field of NUMERIC_IMPORT_FIELDS) {
+      if (!isValidNumericCell(mapped[field])) {
+        errors.push({ row_number: rowNumber, field, code: 'invalid_number', message: '数值格式无效' });
+      }
+    }
+    const createdAt = normalizeImportDate(mapped.created_at);
+    if (createdAt === null) {
+      errors.push({ row_number: rowNumber, field: 'created_at', code: 'invalid_date', message: '日期格式无效' });
+    }
+    if (errors.length) {
+      rejectedRows.push({ row_number: rowNumber, source_row: row || {}, errors });
+      return;
+    }
+    const normalized = normalizeInfluencerRow(mapped);
+    normalized.created_at = createdAt;
+    validRows.push(normalized);
+    warnings.push.apply(warnings, rowWarnings(mapped, rowNumber));
+  });
+
+  return {
+    columns,
+    fieldMapping,
+    validRows,
+    blankRows,
+    rejectedRows,
+    warnings
+  };
+}
+
+function buildErrorReportCsv(rejectedRows) {
+  const lines = ['row_number,field,code,message,source_row'];
+  for (const rejected of rejectedRows) {
+    for (const error of rejected.errors) {
+      lines.push(csvLine([
+        error.row_number,
+        error.field,
+        error.code,
+        error.message,
+        JSON.stringify(rejected.source_row)
+      ]));
+    }
+  }
+  return '\uFEFF' + lines.join('\n') + '\n';
+}
+
+function previewInfluencerImport(rows, options) {
+  options = options || {};
+  rows = Array.isArray(rows) ? rows : [];
+  const prepared = prepareMappedInfluencerRows(rows, options);
+  const allErrors = prepared.rejectedRows.flatMap(function(rejected) { return rejected.errors; });
+  return {
+    mapping_version: IMPORT_MAPPING_VERSION,
+    fields: IMPORT_FIELD_DEFINITIONS,
+    columns: prepared.columns.map(function(source, index) {
+      const samples = [];
+      for (const row of rows) {
+        if (samples.length >= 3) break;
+        const value = row && row[source];
+        if (!isBlankValue(value) && !samples.includes(String(value))) samples.push(String(value));
+      }
+      return {
+        source,
+        position: index + 1,
+        suggested_target: prepared.fieldMapping[source],
+        samples
+      };
+    }),
+    row_count: rows.length,
+    blank_count: prepared.blankRows.length,
+    valid_count: prepared.validRows.length,
+    error_count: prepared.rejectedRows.length,
+    warning_count: prepared.warnings.length,
+    row_errors: allErrors.slice(0, 100),
+    row_errors_truncated: allErrors.length > 100,
+    error_report_csv: buildErrorReportCsv(prepared.rejectedRows),
+    sample: prepared.validRows.slice(0, 10)
+  };
 }
 
 function parseBoolean(value) {
@@ -184,19 +522,47 @@ function importInfluencerRows(db, rows, opts) {
     err.statusCode = 400;
     throw err;
   }
-  const insert = db.prepare(`INSERT INTO influencers (platform, kol_handle, profile_link, followers, avg_views_10, avg_engagement, category, sub_category, region, language, content_style, collab_type, cost_usd, cpm, brand_collab_history, contact_email, project_name, product_name, reporter, tags, quoted_price, content_deliverable, is_duplicate, import_batch, data_source, influencer_type, cpv, parent_record) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  const guided = opts.field_mapping !== undefined;
+  const insert = db.prepare(`INSERT INTO influencers (platform, kol_handle, profile_link, followers, avg_views_10, avg_engagement, category, sub_category, region, language, content_style, collab_type, cost_usd, cpm, brand_collab_history, contact_email, project_name, product_name, reporter, tags, quoted_price, content_deliverable, is_duplicate, import_batch, data_source, influencer_type, cpv, parent_record${guided ? ', created_at' : ''}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?${guided ? ', COALESCE(?, CURRENT_TIMESTAMP)' : ''})`);
   let skipped = 0;
+  let blankCount = 0;
+  let errorCount = 0;
+  let rowErrors = [];
+  let rowErrorsTruncated = false;
+  let errorReportCsv = '';
+  let warningCount = 0;
+  let rowWarnings = [];
   const normalizedRows = [];
   const skippedRows = [];
   const batch = opts.batch_id || opts.batch || 'import_' + Date.now();
-  for (let index = 0; index < rows.length; index++) {
-    const normalized = normalizeInfluencerRow(rows[index]);
-    if (!normalized.kol_handle) {
-      skipped++;
-      skippedRows.push({ index: index + 1, reason: 'missing_kol_handle' });
-      continue;
+  if (opts.field_mapping !== undefined) {
+    const prepared = prepareMappedInfluencerRows(rows, opts);
+    normalizedRows.push.apply(normalizedRows, prepared.validRows);
+    blankCount = prepared.blankRows.length;
+    errorCount = prepared.rejectedRows.length;
+    skipped = blankCount + errorCount;
+    const allErrors = prepared.rejectedRows.flatMap(function(rejected) { return rejected.errors; });
+    rowErrors = allErrors.slice(0, 100);
+    rowErrorsTruncated = allErrors.length > rowErrors.length;
+    errorReportCsv = buildErrorReportCsv(prepared.rejectedRows);
+    warningCount = prepared.warnings.length;
+    rowWarnings = prepared.warnings.slice(0, 100);
+    for (const blank of prepared.blankRows) {
+      skippedRows.push({ index: blank.row_number, reason: 'blank_row' });
     }
-    normalizedRows.push(normalized);
+    for (const rejected of prepared.rejectedRows) {
+      skippedRows.push({ index: rejected.row_number, reason: rejected.errors[0].code });
+    }
+  } else {
+    for (let index = 0; index < rows.length; index++) {
+      const normalized = normalizeInfluencerRow(rows[index]);
+      if (!normalized.kol_handle) {
+        skipped++;
+        skippedRows.push({ index: index + 1, reason: 'missing_kol_handle' });
+        continue;
+      }
+      normalizedRows.push(normalized);
+    }
   }
   const rowsSha256 = crypto.createHash('sha256')
     .update(Buffer.from(JSON.stringify(normalizedRows), 'utf8'))
@@ -235,7 +601,7 @@ function importInfluencerRows(db, rows, opts) {
       throw influencerBatchConflict('Influencer batch archive status is invalid');
     }
     for (const normalized of normalizedRows) {
-      insert.run(
+      const values = [
         normalized.platform,
         normalized.kol_handle,
         normalized.profile_link,
@@ -264,7 +630,9 @@ function importInfluencerRows(db, rows, opts) {
         normalized.influencer_type,
         normalized.cpv,
         normalized.parent_record
-      );
+      ];
+      if (guided) values.push(normalized.created_at || null);
+      insert.run(...values);
       imported++;
     }
   });
@@ -278,6 +646,15 @@ function importInfluencerRows(db, rows, opts) {
     sample: normalizedRows.slice(0, 10),
     knowledge_entry_id: archiveResult && archiveResult.entry && archiveResult.entry.id
   };
+  if (opts.field_mapping !== undefined) {
+    result.blank_count = blankCount;
+    result.error_count = errorCount;
+    result.warning_count = warningCount;
+    result.row_errors = rowErrors;
+    result.row_errors_truncated = rowErrorsTruncated;
+    result.row_warnings = rowWarnings;
+    result.error_report_csv = errorReportCsv;
+  }
   Object.defineProperty(result, 'replayed', {
     configurable: false,
     enumerable: false,
@@ -374,8 +751,11 @@ function queryInfluencers(db, opts) {
 }
 
 module.exports = {
+  IMPORT_MAPPING_VERSION,
+  IMPORT_FIELD_DEFINITIONS,
   TEMPLATE_HEADERS,
   normalizeInfluencerRow,
+  previewInfluencerImport,
   importInfluencerRows,
   buildInfluencerCsv,
   buildTemplateCsv,

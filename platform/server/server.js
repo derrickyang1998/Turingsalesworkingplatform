@@ -110,7 +110,7 @@ const UPLOAD_SANDBOX_SPOOL_ROOT = path.resolve(
   process.env.UPLOAD_SANDBOX_SPOOL_ROOT || '/var/lib/turingmarket-parser/jobs'
 );
 const RELEASE_PINNED_UPLOAD_MANIFEST_SHA256 =
-  '7c12f7f325a0c9be8af37ce3d6eff6a5b47f37dac2264fc9ee67d7be1594e7d7';
+  'd05316c54e456c85936773789908d332f09c8d668e7613022cb0a401809dc857';
 const UPLOAD_SANDBOX_SELF_TEST_RUNNER =
   '/usr/local/libexec/turingmarket/upload_sandbox_self_test';
 const REQUIRED_UPLOAD_SANDBOX_SELF_TESTS = Object.freeze([
@@ -1746,6 +1746,62 @@ app.post('/api/knowledge/upload', authMiddleware, async (req, res) => {
   }
 });
 
+function influencerUploadError(code, message) {
+  const error = new Error(message);
+  error.statusCode = 400;
+  error.code = code;
+  return error;
+}
+
+function canonicalJsonObject(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  return Object.fromEntries(Object.keys(value).sort().map(function(key) {
+    return [key, canonicalJsonObject(value[key])];
+  }));
+}
+
+function parseInfluencerUploadMode(body) {
+  body = body || {};
+  const mode = String(body.mode || '').trim();
+  if (!mode) {
+    if (body.mapping_version || body.field_mapping || body.expected_file_sha256) {
+      throw influencerUploadError('INVALID_FIELD_MAPPING', 'Guided upload fields require a mode');
+    }
+    return { guided: false, mode: 'legacy', fieldMapping: null };
+  }
+  if (!['preview', 'import'].includes(mode)) {
+    throw influencerUploadError('INVALID_FIELD_MAPPING', 'Guided upload mode is invalid');
+  }
+  if (String(body.mapping_version || '') !== influencerWorkflow.IMPORT_MAPPING_VERSION) {
+    throw influencerUploadError('INVALID_FIELD_MAPPING', 'Guided upload mapping version is invalid');
+  }
+  let fieldMapping;
+  if (body.field_mapping !== undefined) {
+    if (Buffer.byteLength(String(body.field_mapping), 'utf8') > 16 * 1024) {
+      throw influencerUploadError('INVALID_FIELD_MAPPING', 'Field mapping exceeds the size limit');
+    }
+    try {
+      fieldMapping = JSON.parse(body.field_mapping);
+    } catch (error) {
+      throw influencerUploadError('INVALID_FIELD_MAPPING', 'Field mapping JSON is invalid');
+    }
+  }
+  if (mode === 'import' && fieldMapping === undefined) {
+    throw influencerUploadError('INVALID_FIELD_MAPPING', 'Confirmed import requires a field mapping');
+  }
+  return { guided: true, mode, fieldMapping };
+}
+
+function assertInfluencerUploadFile(file, expectedSha256) {
+  const expected = String(expectedSha256 || '').trim();
+  if (!/^[0-9a-f]{64}$/.test(expected) || !file || expected !== file.sha256) {
+    throw influencerUploadError(
+      'INFLUENCER_UPLOAD_FILE_CHANGED',
+      'The selected file changed after validation. Validate it again before importing.'
+    );
+  }
+}
+
 app.post('/api/influencers/upload', authMiddleware, async (req, res) => {
   const requestSignal = requestUploadSignal(req);
   try {
@@ -1758,6 +1814,7 @@ app.post('/api/influencers/upload', authMiddleware, async (req, res) => {
       assertLeaseOwned: () => renewUploadAdmissionLease(admission),
       assertAuthorized: () => assertUploadAuthorityFresh(authority),
       finalize(parsed, lifecycle) {
+        const guided = parseInfluencerUploadMode(req.body);
         return db.transaction(() => {
           const current = authority.readFresh(db);
           const data = parsed && parsed.data ? parsed.data : {};
@@ -1766,19 +1823,44 @@ app.post('/api/influencers/upload', authMiddleware, async (req, res) => {
             error.statusCode = 400;
             throw error;
           }
+          if (guided.mode === 'preview') {
+            const previewOptions = { row_number_offset: 2 };
+            if (guided.fieldMapping !== undefined) previewOptions.field_mapping = guided.fieldMapping;
+            const preview = influencerWorkflow.previewInfluencerImport(data.rows, previewOptions);
+            lifecycle.completeAdmissionInTransaction(db);
+            return Object.assign({
+              parser: data.parser,
+              warning: sandboxWarning(data),
+              file_sha256: req.file.sha256
+            }, preview);
+          }
+          if (guided.mode === 'import') {
+            assertInfluencerUploadFile(req.file, req.body.expected_file_sha256);
+          }
           const requestedBatchId = String(req.body.batch_id || '').trim();
-          const uploadBatchId = requestedBatchId && requestedBatchId !== req.file.originalname
+          let uploadBatchId = requestedBatchId && requestedBatchId !== req.file.originalname
             ? requestedBatchId
             : `upload_${req.file.sha256}`;
-          const imported = influencerWorkflow.importInfluencerRows(db, data.rows, {
+          const importOptions = {
             batch_id: uploadBatchId,
             user: current.user,
             data_source: 'upload'
-          });
+          };
+          if (guided.guided && guided.fieldMapping !== undefined) {
+            const mappingSha256 = crypto.createHash('sha256')
+              .update(Buffer.from(JSON.stringify(canonicalJsonObject(guided.fieldMapping)), 'utf8'))
+              .digest('hex');
+            uploadBatchId = `upload_${req.file.sha256}_${mappingSha256}`;
+            importOptions.batch_id = uploadBatchId;
+            importOptions.field_mapping = guided.fieldMapping;
+            importOptions.row_number_offset = 2;
+          }
+          const imported = influencerWorkflow.importInfluencerRows(db, data.rows, importOptions);
           lifecycle.completeAdmissionInTransaction(db);
           return Object.assign({
             parser: data.parser,
-            warning: sandboxWarning(data)
+            warning: sandboxWarning(data),
+            file_sha256: req.file.sha256
           }, imported);
         }).immediate();
       }
