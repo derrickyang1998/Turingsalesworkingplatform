@@ -1,5 +1,30 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.8.18-contract-document-custody (Production Deployed, 2026-09-08) - Phase 7 M4 合同文件保管
+
+### 交付与范围 / Delivery And Scope
+- M4 既有合作执行界面新增已签合同 PDF 上传、清单和下载，不新增或替换页面。合同文档按合作记录和 Campaign 隔离，仅活动团队成员及管理员可读取，越权请求统一返回不可枚举的 `404`。
+- schema `v16` 新增只追加的 `collaboration_contract_documents`：保存安全文件名、大小、SHA-256、上传者和时间；每个合作最多 5 份 PDF，同一文件摘要拒绝重复，单文件限制为 32 B 至 8 MiB。
+- PDF 必须满足规范 base64、文件头和结尾约束，并拒绝 JavaScript、OpenAction、AA、XFA、ObjStm 等主动内容。下载固定为附件并启用 `no-store`、`nosniff`。
+- 新版 v2 已签合同确认必须绑定同 Campaign 的合同文档 ID 与 SHA-256；历史 v1 凭证继续可读。合同原始字节永不进入知识库或 RAG，通用凭证也明确标记 `retrieval_eligible:false`。
+- M4 最新导入、搜索、筛选、列工作区、导出、飞书入口、AI/知识链路和冻结方案 PPT 均保持不变。
+
+### 轻量验证、审查与上线 / Focused Verification, Review, And Deployment
+- 按单功能轻量节奏执行：迁移/服务 `7/7`、M4 客户端 `16/16`、AI/知识 `8/8`、知识治理 `10/10`、PDF 结构约束 `24` 通过且 `1` 个 Linux 环境项跳过、schema 精确性 `15/15`、发布合同 `37/37`、可信来源 `3/3` 通过；JavaScript 语法、差异、定向密钥扫描、冻结 PPT 哈希和本地发布预检通过。
+- 独立审查发现并关闭 PDF 约束、RAG 排除、团队读取、主动内容绕过、schema 回放断言及前端重试碰撞六项问题；最终结论为 `APPROVE`，无 P0-P2 未关闭项。
+- 首个远端候选因真实 Express 回放仍只期望迁移 `1..15` 而在切换前停止，生产未被修改；断言更新为 `1..16` 后，正式候选通过回放 `8/8`、发布守卫 `21/21`、内置浏览器冒烟 `2/2`、迁移演练、解析器运行时及 Nginx 校验。
+
+### 生产恢复与证据 / Production Recovery And Evidence
+- 正式发布运行 ID 为 `0f0c2c80edcf43c08ce83e996f5b94ac`；可恢复备份为 `/root/turingmarket/backups/v060-crm-sales-workspace-20260908-212127`，`SHA256SUMS` 共 `296` 项且复验通过，清单 SHA-256 为 `5bdc921281adb0d294368890e0b98ffc81bba6b2c2992566f5240f281f74febb`。
+- 候选树 SHA-256 为 `c0c226657a8592d354def8360efd7f670bca7a080004a0d976a029de475e32ab`；验收事实、回放证据、解析器证据和解析器运行时 SHA-256 分别为 `2f408f2519f93825497f45b05b3959ffae24aa0341a3959ac1cc0cd943633ae6`、`b0927bebf0f98b04c48e72dab54ea649d52d5c8df767c35fd722855ac436e673`、`48a0afd8e357445b232c8786f1fd3977e1f7e80a5fabac3a1d2df7dbe2061d78`、`04630b2ee928ba8031a4ea5ce6435519161c19e05884813e5ec623d12adb38ce`。
+- 公网 `/api/health`、首页和 `/app.js` 返回 `200`；PM2 online、Nginx active。管理员登录、身份读取、全部 AI 对话审计、M4 合作列表、异常合同路由拒绝和注销均通过线上验证。
+- SQLite schema 为 `v16`，迁移记录 `16/16`、`integrity_check=ok`、外键异常 `0`、验收会话 `0`。本轮未创建真实合同文件或飞书写入；冻结 `ppt.js` SHA-256 仍为 `f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e`。
+
+### 后续边界 / Next Boundaries
+- 已签合同 PDF 上传与不可变保管已上线；电子签约、内容审核、发布、付款、结算和复盘继续作为独立功能逐项开发，完成一项即定向验证、独立审查、备份、当轮上线和线上核心路径验收。
+- 当前发布剩余主要耗时来自可信解析器依赖缓存重建。后续基础设施切片只在锁文件、运行时身份、平台和权限完全一致时复用缓存，否则继续重建。
+- 真实飞书外部写入仍须在获批生产配置和测试活动具备后单独验收，不为测试目的写入真实客户数据。
+
 ## v0.8.17-signed-contract-checkpoint (Production Deployed, 2026-09-08) - Phase 7 M4 已签合同凭证关口
 
 ### 交付与范围 / Delivery And Scope
