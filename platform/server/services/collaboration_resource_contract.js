@@ -185,6 +185,7 @@ function normalizeOrderFields(input, schema) {
 }
 
 function normalizeV1CollaborationResource(input) {
+  const orderFields = normalizeOrderFields(input, COLLABORATION_ORDER_SCHEMA);
   const quotedPrice = normalizeAmount(
     input.quoted_price === undefined ? input.price : input.quoted_price,
     input.quoted_price === undefined ? 'price' : 'quoted_price',
@@ -201,7 +202,7 @@ function normalizeV1CollaborationResource(input) {
   }
 
   const resource = {
-    ...normalizeOrderFields(input, COLLABORATION_ORDER_SCHEMA),
+    ...orderFields,
     quoted_price: quotedPrice
   };
   const extensions = normalizeExtensions(input, V1_CORE_RESOURCE_FIELDS, new Set(['price']));

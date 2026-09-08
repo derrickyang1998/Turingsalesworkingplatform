@@ -66,6 +66,17 @@ test('resource contract rejects an invalid type, nested extension, and unsafe pr
   );
 });
 
+test('v1 resource validation keeps order type precedence over an invalid price', () => {
+  assert.throws(
+    () => normalizeCollaborationResource({
+      schema: COLLABORATION_ORDER_SCHEMA,
+      order_type: 'barter',
+      quoted_price: -1
+    }),
+    (error) => error && error.code === 'INVALID_RESOURCE_TYPE'
+  );
+});
+
 test('resource quote remains authoritative and rejects a conflicting top-level quote', () => {
   const resource = normalizeCollaborationResource({ schema: COLLABORATION_ORDER_SCHEMA, quoted_price: 3200 });
   assert.equal(resolveResourceQuotedPrice(resource, undefined), 3200);
