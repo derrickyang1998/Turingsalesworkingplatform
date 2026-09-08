@@ -2141,6 +2141,91 @@ test('collaboration order creation stores the selected resource definition', asy
   db.close();
 });
 
+test('standalone v2 collaboration stores canonical commercial terms and creator-cost projection', async () => {
+  const db = freshDb();
+  const routes = mountRoutes(db);
+  const influencerId = insertInfluencer(db, {
+    platform: 'Instagram',
+    kol_handle: '@standalone_v2_order',
+    profile_link: 'https://example.com/standalone-v2-order'
+  });
+
+  const result = await invoke(routes, 'POST /api/collaborations', {
+    body: {
+      influencer_id: influencerId,
+      status: 'confirmed',
+      resource: {
+        schema: 'turingmarket.collaboration-order.v2',
+        project_name: ' Launch ',
+        product_name: ' Power station ',
+        order_type: 'paid',
+        order_reference: ' PO-STANDALONE-V2 ',
+        deliverable: ' One reel ',
+        creator_cost: '800',
+        client_quote: '1200',
+        currency: 'EUR',
+        payment_terms: 'net_30'
+      },
+      cost_quoted: 800
+    }
+  });
+
+  assert.equal(result.statusCode, 200);
+  const stored = db.prepare('SELECT proposal_notes,cost_quoted FROM collaborations WHERE id=?').get(result.payload.id);
+  assert.equal(stored.cost_quoted, 800);
+  assert.deepEqual(JSON.parse(stored.proposal_notes), {
+    schema: 'turingmarket.collaboration-order.v2',
+    project_name: 'Launch',
+    product_name: 'Power station',
+    order_type: 'paid',
+    order_reference: 'PO-STANDALONE-V2',
+    deliverable: 'One reel',
+    creator_cost: 800,
+    client_quote: 1200,
+    currency: 'EUR',
+    margin_amount: 400,
+    payment_terms: 'net_30'
+  });
+  db.close();
+});
+
+test('standalone creation rejects reserved v2 proposal notes without side effects', async () => {
+  const db = freshDb();
+  const routes = mountRoutes(db);
+  const influencerId = insertInfluencer(db, {
+    platform: 'TikTok',
+    kol_handle: '@standalone_v2_bypass',
+    profile_link: 'https://example.com/standalone-v2-bypass'
+  });
+  const before = {
+    collaborations: db.prepare('SELECT COUNT(*) AS count FROM collaborations').get().count,
+    activity: db.prepare('SELECT COUNT(*) AS count FROM activity_log').get().count,
+    knowledge: db.prepare('SELECT COUNT(*) AS count FROM knowledge_entries').get().count
+  };
+
+  const result = await invoke(routes, 'POST /api/collaborations', {
+    body: {
+      influencer_id: influencerId,
+      proposal_notes: JSON.stringify({
+        schema: 'turingmarket.collaboration-order.v2',
+        creator_cost: 800,
+        client_quote: 1200,
+        currency: 'EUR'
+      }),
+      cost_quoted: 1
+    }
+  });
+
+  assert.equal(result.statusCode, 400);
+  assert.equal(result.payload.code, 'RESOURCE_V2_REQUIRES_RESOURCE');
+  assert.deepEqual({
+    collaborations: db.prepare('SELECT COUNT(*) AS count FROM collaborations').get().count,
+    activity: db.prepare('SELECT COUNT(*) AS count FROM activity_log').get().count,
+    knowledge: db.prepare('SELECT COUNT(*) AS count FROM knowledge_entries').get().count
+  }, before);
+  db.close();
+});
+
 test('collaboration resource rejects invalid types before inserting a record', async () => {
   const db = freshDb();
   const routes = mountRoutes(db);
@@ -2469,7 +2554,9 @@ test('global collaboration list and stats conceal another owner before materiali
     byStatus: [{ status: 'completed', count: 1 }],
     totalActive: 0,
     totalCompleted: 1,
-    totalCost: 200
+    totalCost: 200,
+    totalCostCurrency: 'USD',
+    costByCurrency: [{ currency: 'USD', totalCost: 200 }]
   });
 
   db.close();
@@ -2703,7 +2790,10 @@ test('m4 frontend keeps import, feishu, and order-resource controls wired', () =
   assert.match(appJs, /<th>合同 \/ PO<\/th>/);
   assert.match(appJs, /resource\.order_reference \|\| '-'/);
   assert.match(appJs, /collab\.notes \|\| '-'/);
-  assert.match(appJs, /id="orderQuotedPrice" type="number" min="0" step="1"/);
+  assert.match(appJs, /id="orderCreatorCost" type="number" min="0" step="1"/);
+  assert.match(appJs, /id="orderClientQuote" type="number" min="0" step="1"/);
+  assert.match(appJs, /id="orderCurrency" maxlength="3"/);
+  assert.match(appJs, /id="orderPaymentTerms"/);
 
   const m4SingletonNames = [
     'downloadInfTemplate',

@@ -293,6 +293,20 @@ function createCollaborationWorker(workerData) {
   return { worker, ready, result };
 }
 
+test('collaboration stats return an explicit empty currency breakdown when no rows are visible', (t) => {
+  const db = openCampaignDatabase(t);
+  const service = createCampaignCollaborationService(db);
+
+  assert.deepEqual(service.stats({ userId: 2 }).stats, {
+    byStatus: [],
+    totalActive: 0,
+    totalCompleted: 0,
+    totalCost: 0,
+    totalCostCurrency: null,
+    costByCurrency: []
+  });
+});
+
 test('global collaboration reads conceal IDs before list and stats aggregation', (t) => {
   const db = openCampaignDatabase(t);
   const fixture = seedFixture(db);
@@ -306,7 +320,9 @@ test('global collaboration reads conceal IDs before list and stats aggregation',
     byStatus: [{ status: 'confirmed', count: 1 }],
     totalActive: 1,
     totalCompleted: 0,
-    totalCost: 200
+    totalCost: 200,
+    totalCostCurrency: 'USD',
+    costByCurrency: [{ currency: 'USD', totalCost: 200 }]
   });
 
   db.prepare(`
@@ -378,7 +394,9 @@ test('object-visible active, moved, and revoke-only collaborations require curre
     byStatus: [{ status: 'confirmed', count: 1 }],
     totalActive: 1,
     totalCompleted: 0,
-    totalCost: 100
+    totalCost: 100,
+    totalCostCurrency: 'USD',
+    costByCurrency: [{ currency: 'USD', totalCost: 100 }]
   });
   for (const collaborationId of [7201, 7202, 7203]) {
     assert.throws(
@@ -416,6 +434,41 @@ test('object-visible active, moved, and revoke-only collaborations require curre
       error.details.campaign_id === restricted.campaignId
     )
   );
+});
+
+test('collaboration stats group costs by currency without adding mixed currencies', (t) => {
+  const db = openCampaignDatabase(t);
+  const fixture = seedFixture(db);
+  const service = createCampaignCollaborationService(db);
+  db.prepare(`
+    INSERT INTO collaborations (
+      id,influencer_id,user_id,status,proposal_notes,cost_quoted,cost_actual,row_version
+    ) VALUES (7205,?,3,'confirmed',?,50,NULL,1)
+  `).run(fixture.influencerId, JSON.stringify({
+    schema: 'turingmarket.collaboration-order.v2',
+    project_name: '',
+    product_name: '',
+    order_type: 'paid',
+    order_reference: '',
+    deliverable: '',
+    creator_cost: 50,
+    client_quote: 75,
+    currency: 'EUR',
+    margin_amount: 25,
+    payment_terms: 'net_30'
+  }));
+
+  assert.deepEqual(service.stats({ userId: 3 }).stats, {
+    byStatus: [{ status: 'confirmed', count: 2 }],
+    totalActive: 2,
+    totalCompleted: 0,
+    totalCost: null,
+    totalCostCurrency: null,
+    costByCurrency: [
+      { currency: 'EUR', totalCost: 50 },
+      { currency: 'USD', totalCost: 200 }
+    ]
+  });
 });
 
 test('ambiguous active collaboration custody is concealed without campaign ID disclosure', (t) => {
@@ -932,6 +985,34 @@ test('linked v2 order rejects a conflicting top-level creator cost before idempo
       }
     }),
     (error) => error && error.statusCode === 400 && error.code === 'RESOURCE_PRICE_MISMATCH'
+  );
+  assert.deepEqual(collaborationWriteState(db), before);
+});
+
+test('linked creation rejects reserved v2 proposal notes before any write or reservation', (t) => {
+  const db = openCampaignDatabase(t);
+  const fixture = seedFixture(db);
+  const service = createCampaignCollaborationService(db);
+  const before = collaborationWriteState(db);
+
+  assert.throws(
+    () => service.createLinked({
+      userId: 2,
+      requestId: 'collaboration-v2-proposal-notes-bypass',
+      idempotencyKey: 'collaboration-v2-proposal-notes-bypass-0001',
+      body: {
+        campaign_id: 7001,
+        influencer_id: fixture.influencerId,
+        proposal_notes: JSON.stringify({
+          schema: 'turingmarket.collaboration-order.v2',
+          creator_cost: 1200,
+          client_quote: 1800,
+          currency: 'EUR'
+        }),
+        cost_quoted: 1
+      }
+    }),
+    (error) => error && error.statusCode === 400 && error.code === 'RESOURCE_V2_REQUIRES_RESOURCE'
   );
   assert.deepEqual(collaborationWriteState(db), before);
 });

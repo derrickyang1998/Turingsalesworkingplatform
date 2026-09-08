@@ -11,6 +11,8 @@ const {
 } = require('./services/feishu_bitable_outbox_service');
 const {
   CollaborationResourceContractError,
+  isReservedV2ProposalNotes,
+  isV2CollaborationResourceInput,
   isVersionedCollaborationResourceInput,
   normalizeCollaborationResource,
   resolveResourceQuotedPrice,
@@ -362,6 +364,12 @@ app.post('/api/collaborations', authMiddleware, (req, res) => {
     }
   }
   const { demand_id, influencer_id, status, proposal_notes, cost_quoted, notes, resource, timeline_start, timeline_end } = req.body;
+  if (isReservedV2ProposalNotes(proposal_notes) && !isV2CollaborationResourceInput(resource)) {
+    return res.status(400).json({
+      error: 'Version 2 collaboration orders must be supplied through resource.',
+      code: 'RESOURCE_V2_REQUIRES_RESOURCE'
+    });
+  }
   const versionedResourceRequest = isVersionedCollaborationResourceInput(resource);
   let resourcePayload = resource && typeof resource === 'object' ? resource : {};
   let resourceNotes = proposal_notes || (Object.keys(resourcePayload).length ? JSON.stringify(resourcePayload) : null);

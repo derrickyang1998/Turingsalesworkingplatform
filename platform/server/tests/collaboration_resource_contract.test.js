@@ -6,10 +6,24 @@ const assert = require('node:assert/strict');
 const {
   COLLABORATION_ORDER_SCHEMA,
   COLLABORATION_ORDER_V2_SCHEMA,
+  isReservedV2ProposalNotes,
   normalizeCollaborationResource,
   serializeCollaborationResource,
   resolveResourceQuotedPrice
 } = require('../services/collaboration_resource_contract');
+
+test('reserved v2 proposal notes detection is exact and never throws', () => {
+  assert.equal(isReservedV2ProposalNotes(JSON.stringify({
+    schema: COLLABORATION_ORDER_V2_SCHEMA,
+    creator_cost: 1
+  })), true);
+  assert.equal(isReservedV2ProposalNotes(`  ${JSON.stringify({ schema: COLLABORATION_ORDER_V2_SCHEMA })}  `), true);
+  assert.equal(isReservedV2ProposalNotes(JSON.stringify({ schema: ` ${COLLABORATION_ORDER_V2_SCHEMA} ` })), false);
+  assert.equal(isReservedV2ProposalNotes(JSON.stringify({ schema: COLLABORATION_ORDER_SCHEMA })), false);
+  assert.equal(isReservedV2ProposalNotes(JSON.stringify({ schema: 'legacy.v0' })), false);
+  assert.equal(isReservedV2ProposalNotes('{not-json'), false);
+  assert.equal(isReservedV2ProposalNotes(null), false);
+});
 
 test('normalizes a collaboration resource into the v1 order contract', () => {
   const resource = normalizeCollaborationResource({

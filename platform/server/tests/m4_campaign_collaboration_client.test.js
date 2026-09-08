@@ -78,6 +78,7 @@ function createClientContext() {
   const requests = [];
   const completedByKey = new Map();
   const rows = [];
+  const appendedElements = [];
   const elements = {
     m4CampaignContext: element(),
     m4CampaignContextStatus: element(),
@@ -190,12 +191,15 @@ function createClientContext() {
     pendingPauseRelease: null,
     pauseNextUpdate: false,
     document: {
-      getElementById(id) { return elements[id] || null; }
+      getElementById(id) { return elements[id] || appendedElements.find(function(item) { return item.id === id; }) || null; },
+      createElement() { return element({ remove() {} }); },
+      body: { appendChild(item) { appendedElements.push(item); } },
+      activeElement: null
     },
     getActiveCampaignId() { return 91; },
     getActiveDemandId() { return 17; },
     readPositiveInteger: positiveInteger,
-    esc(value) { return String(value || ''); },
+    esc(value) { return value === undefined || value === null ? '' : String(value); },
     createDemandAnalysisOperationId(prefix) {
       operation += 1;
       return prefix + operation;
@@ -249,7 +253,7 @@ function createClientContext() {
     }
   };
 
-  return { context, elements, requests, rows };
+  return { context, elements, requests, rows, appendedElements };
 }
 
 const m4Functions = [
@@ -281,7 +285,8 @@ const m4Functions = [
   'renderCollabCommercialTerms',
   'renderCollabTable',
   'submitCampaignCollabUpdate',
-  'runCampaignCollabAction'
+  'runCampaignCollabAction',
+  'openCampaignSettlementModal'
 ];
 
 test('M4 campaign order holds duplicate clicks to one in-flight creation', async () => {
@@ -341,7 +346,7 @@ test('M4 commercial order rejects invalid terms before it creates a request', as
   elements.orderCreatorCost.value = '3.5';
   await context.submitCollabOrder();
   elements.orderCreatorCost.value = '800';
-  elements.orderCurrency.value = 'usd';
+  elements.orderCurrency.value = 'US';
   await context.submitCollabOrder();
   elements.orderCurrency.value = 'USD';
   elements.orderPaymentTerms.value = 'pay_later';
@@ -349,6 +354,52 @@ test('M4 commercial order rejects invalid terms before it creates a request', as
 
   assert.equal(requests.filter(function(request) { return request.url === '/collaborations'; }).length, 0);
   assert.equal(toasts.length, 3);
+});
+
+test('M4 currency input, preview, and submit normalize lowercase codes to uppercase', async () => {
+  const { context, elements, requests } = createClientContext();
+  loadFunctions(context, m4Functions);
+  await context.loadM4Campaigns();
+
+  assert.match(context.m4OrderCommercialControls({ cost_usd: 800 }, 91), /oninput="this\.value=this\.value\.toUpperCase\(\);renderM4CommercialPreview\(\)"/);
+  elements.orderCurrency.value = 'usd';
+  context.renderM4CommercialPreview();
+  assert.equal(elements.orderCurrency.value, 'USD');
+  assert.match(elements.orderMarginPreview.innerHTML, /毛利：USD 400/);
+
+  elements.orderCurrency.value = 'eur';
+  await context.submitCollabOrder();
+  const request = requests.find(function(item) { return item.url === '/collaborations' && item.options.method === 'POST'; });
+  assert.equal(JSON.parse(request.options.body).resource.currency, 'EUR');
+});
+
+test('M4 settlement labels v2 currency, defaults historical rows to USD, and preserves actual zero', () => {
+  const { context, appendedElements } = createClientContext();
+  loadFunctions(context, m4Functions);
+
+  context.openCampaignSettlementModal({
+    id: 501,
+    campaign_id: 91,
+    campaign_name: 'Launch',
+    kol_handle: '@creator',
+    proposal_notes: JSON.stringify({ schema: 'turingmarket.collaboration-order.v2', currency: 'EUR' }),
+    cost_actual: 0,
+    cost_quoted: 800
+  });
+  assert.match(appendedElements.at(-1).innerHTML, /实际结算成本（EUR，整数）/);
+  assert.match(appendedElements.at(-1).innerHTML, /value="0"/);
+
+  context.openCampaignSettlementModal({
+    id: 502,
+    campaign_id: 91,
+    campaign_name: 'Legacy',
+    kol_handle: '@legacy',
+    proposal_notes: 'legacy note',
+    cost_actual: null,
+    cost_quoted: 900
+  });
+  assert.match(appendedElements.at(-1).innerHTML, /实际结算成本（USD，整数）/);
+  assert.match(appendedElements.at(-1).innerHTML, /value="900"/);
 });
 
 test('M4 commercial order previews margin and shows selected campaign customer and owner context', async () => {

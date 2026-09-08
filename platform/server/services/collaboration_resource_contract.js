@@ -123,6 +123,16 @@ function isVersionedCollaborationResourceInput(value) {
   return isV1CollaborationResourceInput(value) || isV2CollaborationResourceInput(value);
 }
 
+function isReservedV2ProposalNotes(value) {
+  if (typeof value !== 'string') return false;
+  try {
+    const parsed = JSON.parse(value);
+    return isPlainObject(parsed) && parsed.schema === COLLABORATION_ORDER_V2_SCHEMA;
+  } catch (error) {
+    return false;
+  }
+}
+
 function normalizeExtensionValue(value, field) {
   if (typeof value === 'string') {
     const normalized = value.trim();
@@ -292,6 +302,7 @@ module.exports = {
   isV1CollaborationResourceInput,
   isV2CollaborationResourceInput,
   isVersionedCollaborationResourceInput,
+  isReservedV2ProposalNotes,
   normalizeCollaborationResource,
   resolveResourceQuotedPrice,
   serializeCollaborationResource,

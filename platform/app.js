@@ -6228,7 +6228,7 @@ function m4OrderCommercialControls(influencer, campaignId) {
   var defaults = m4OrderCommercialDefaults(influencer, campaignId);
   return '<div><label>达人成本（整数）</label><input id="orderCreatorCost" type="number" min="0" step="1" value="' + esc(m4CommercialValueText(defaults.creatorCost)) + '" oninput="renderM4CommercialPreview()"></div>' +
     '<div><label>客户报价（整数）</label><input id="orderClientQuote" type="number" min="0" step="1" value="' + esc(m4CommercialValueText(defaults.clientQuote)) + '" oninput="renderM4CommercialPreview()"></div>' +
-    '<div><label>币种</label><input id="orderCurrency" maxlength="3" value="' + esc(defaults.currency) + '" style="text-transform:uppercase" oninput="renderM4CommercialPreview()"></div>' +
+    '<div><label>币种</label><input id="orderCurrency" maxlength="3" value="' + esc(defaults.currency) + '" style="text-transform:uppercase" oninput="this.value=this.value.toUpperCase();renderM4CommercialPreview()"></div>' +
     '<div><label>付款条件</label><select id="orderPaymentTerms"><option value="prepay_80_balance_20">预付 80%，尾款 20%</option><option value="full_prepayment">全额预付</option><option value="net_7">Net 7</option><option value="net_30">Net 30</option></select></div>';
 }
 function renderM4CommercialPreview() {
@@ -6242,7 +6242,9 @@ function renderM4CommercialPreview() {
   }
   var creatorCost = Number(creatorCostValue);
   var clientQuote = Number(clientQuoteValue);
-  var currency = String(document.getElementById('orderCurrency')?.value || '').trim();
+  var currencyInput = document.getElementById('orderCurrency');
+  var currency = String(currencyInput?.value || '').trim().toUpperCase();
+  if (currencyInput) currencyInput.value = currency;
   if (!Number.isSafeInteger(creatorCost) || creatorCost < 0 || !Number.isSafeInteger(clientQuote) || clientQuote < 0) {
     target.innerHTML = '<span style="font-size:12px;opacity:.65">请输入非负整数后预览毛利。</span>';
     return;
@@ -6315,7 +6317,7 @@ async function submitCollabOrder() {
   var clientQuoteValue = m4CommercialValueText(document.getElementById('orderClientQuote')?.value).trim();
   var creatorCost = Number(creatorCostValue);
   var clientQuote = Number(clientQuoteValue);
-  var currency = String(document.getElementById('orderCurrency')?.value || '').trim();
+  var currency = String(document.getElementById('orderCurrency')?.value || '').trim().toUpperCase();
   var paymentTerms = String(document.getElementById('orderPaymentTerms')?.value || '').trim();
   if (!creatorCostValue || !clientQuoteValue || !Number.isSafeInteger(creatorCost) || creatorCost < 0 || !Number.isSafeInteger(clientQuote) || clientQuote < 0) {
     toast('达人成本和客户报价必须是非负整数。', 'error');
@@ -6596,12 +6598,18 @@ function openCampaignSettlementModal(collab) {
   overlay.id = 'campaignSettlementModal';
   overlay.className = 'modal-overlay';
   overlay.onclick = function(event) { if (event.target === overlay) closeCampaignSettlementModal(); };
-  var initialCost = collab.cost_actual || collab.cost_quoted || 0;
+  var resource = collabResource(collab);
+  var currency = resource.schema === 'turingmarket.collaboration-order.v2' && /^[A-Z]{3}$/.test(String(resource.currency || ''))
+    ? resource.currency
+    : 'USD';
+  var initialCost = collab.cost_actual !== undefined && collab.cost_actual !== null
+    ? collab.cost_actual
+    : (collab.cost_quoted !== undefined && collab.cost_quoted !== null ? collab.cost_quoted : 0);
   overlay.innerHTML = '<div class="modal" id="campaignSettlementDialog" role="dialog" aria-modal="true" aria-labelledby="campaignSettlementDialogTitle" onclick="event.stopPropagation()">' +
     '<button type="button" class="modal-close" aria-label="关闭结算确认" title="关闭结算确认" onclick="closeCampaignSettlementModal()">&times;</button>' +
     '<h3 id="campaignSettlementDialogTitle">确认结算</h3>' +
     '<p style="font-size:12px;opacity:.65;margin-bottom:12px">' + esc(collab.kol_handle || '') + ' · ' + esc(collab.campaign_name || ('活动 #' + collab.campaign_id)) + '</p>' +
-    '<div><label>实际结算成本（整数）</label><input id="settlementActualCost" type="number" min="0" step="1" value="' + esc(initialCost) + '"></div>' +
+    '<div><label>实际结算成本（' + esc(currency) + '，整数）</label><input id="settlementActualCost" type="number" min="0" step="1" value="' + esc(initialCost) + '"></div>' +
     '<label style="display:flex;align-items:center;gap:8px;margin-top:14px;font-size:12px;text-transform:none;letter-spacing:0;opacity:1"><input id="settlementCostConfirmed" type="checkbox" style="width:16px;height:16px;min-width:16px">我已核对并确认实际结算成本</label>' +
     '<div class="btn-group" style="justify-content:flex-end"><button type="button" class="btn btn-outline" onclick="closeCampaignSettlementModal()">取消</button><button type="button" class="btn btn-primary" onclick="submitCampaignSettlement()">确认结算</button></div>' +
     '</div>';

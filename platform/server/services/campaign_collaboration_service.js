@@ -7,6 +7,8 @@ const { requestHash } = require('./sqlite_digest_service');
 const {
   CollaborationResourceContractError,
   isCanonicalCollaborationResource,
+  isReservedV2ProposalNotes,
+  isV2CollaborationResourceInput,
   isVersionedCollaborationResourceInput,
   normalizeCollaborationResource,
   resolveResourceQuotedPrice,
@@ -853,6 +855,13 @@ function createCampaignCollaborationService(db) {
     if (body.status !== undefined && body.status !== 'confirmed') {
       throw serviceError(409, 'INVALID_COLLABORATION_TRANSITION', 'Linked collaborations start confirmed.');
     }
+    if (isReservedV2ProposalNotes(body.proposal_notes) && !isV2CollaborationResourceInput(body.resource)) {
+      throw serviceError(
+        400,
+        'RESOURCE_V2_REQUIRES_RESOURCE',
+        'Version 2 collaboration orders must be supplied through resource.'
+      );
+    }
     const campaignId = body.campaign_id;
     const initialAccess = requireCampaignWrite(db, userId, campaignId);
     const rawResource = body.resource && typeof body.resource === 'object' ? body.resource : {};
@@ -1319,7 +1328,14 @@ function createCampaignCollaborationService(db) {
     const userId = requirePositiveSafeId(input && input.userId, 'userId');
     if (!requireActiveActor(db, userId)) {
       return {
-        stats: { byStatus: [], totalActive: 0, totalCompleted: 0, totalCost: 0 }
+        stats: {
+          byStatus: [],
+          totalActive: 0,
+          totalCompleted: 0,
+          totalCost: 0,
+          totalCostCurrency: null,
+          costByCurrency: []
+        }
       };
     }
     const scope = authorizedCollaborationScope(userId);
@@ -1344,13 +1360,39 @@ function createCampaignCollaborationService(db) {
       JOIN collaborations collaboration ON collaboration.id=authorized.id
       WHERE collaboration.status='completed'
     `).get(...scope.params).count;
-    const totalCost = db.prepare(`
+    const costRows = db.prepare(`
       WITH ${scope.sql}
-      SELECT COALESCE(SUM(COALESCE(collaboration.cost_actual,collaboration.cost_quoted)),0) AS total
+      SELECT collaboration.proposal_notes,collaboration.cost_actual,collaboration.cost_quoted
       FROM authorized_collaborations authorized
       JOIN collaborations collaboration ON collaboration.id=authorized.id
-    `).get(...scope.params).total;
-    return { stats: { byStatus, totalActive, totalCompleted, totalCost } };
+    `).all(...scope.params);
+    const totals = new Map();
+    costRows.forEach((row) => {
+      let currency = 'USD';
+      try {
+        const resource = JSON.parse(row.proposal_notes || 'null');
+        if (
+          resource &&
+          resource.schema === 'turingmarket.collaboration-order.v2' &&
+          /^[A-Z]{3}$/.test(resource.currency || '')
+        ) {
+          currency = resource.currency;
+        }
+      } catch (error) {}
+      const rawCost = row.cost_actual !== null && row.cost_actual !== undefined
+        ? row.cost_actual
+        : row.cost_quoted;
+      const cost = typeof rawCost === 'number' && Number.isFinite(rawCost) ? rawCost : 0;
+      totals.set(currency, (totals.get(currency) || 0) + cost);
+    });
+    const costByCurrency = Array.from(totals, ([currency, totalCost]) => ({ currency, totalCost }))
+      .sort((left, right) => left.currency.localeCompare(right.currency));
+    const singleCurrency = costByCurrency.length === 1 ? costByCurrency[0] : null;
+    const totalCost = singleCurrency ? singleCurrency.totalCost : (costByCurrency.length ? null : 0);
+    const totalCostCurrency = singleCurrency ? singleCurrency.currency : null;
+    return {
+      stats: { byStatus, totalActive, totalCompleted, totalCost, totalCostCurrency, costByCurrency }
+    };
   }
 
   return Object.freeze({ createLinked, get, list, stats, updateLegacy, updateLinked });
