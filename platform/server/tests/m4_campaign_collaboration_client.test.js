@@ -48,6 +48,7 @@ function loadFunctions(context, names) {
     'var lastCollabRows = [];',
     'var pendingCollabInfId = 700;',
     'var pendingCollabCreateIntentId = null;',
+    'var pendingContractCollabId = null;',
     'var m4CollabMutationOperations = {};',
     'var m4CollabMutationInFlight = {};'
   ].join('\n'), context);
@@ -97,7 +98,11 @@ function createClientContext() {
     orderMarginPreview: element(),
     orderTimelineStart: element({ value: '2026-09-01' }),
     orderTimelineEnd: element({ value: '2026-09-10' }),
-    orderNotes: element({ value: 'Client approved' })
+    orderNotes: element({ value: 'Client approved' }),
+    contractReference: element({ value: 'SIGNED-501' }),
+    contractCounterparty: element({ value: 'Creator Studio LLC' }),
+    contractSignedAt: element({ value: '2026-09-07T10:00' }),
+    contractConfirmationNote: element({ value: 'Signed copy verified in the approved drive.' })
   };
   const campaign = {
     id: 91,
@@ -112,7 +117,12 @@ function createClientContext() {
 
   function cloneRows() {
     return rows.map(function(row) {
-      return Object.assign({}, row, { active_relations: row.active_relations.slice() });
+      return Object.assign({}, row, {
+        active_relations: row.active_relations.slice(),
+        contract_confirmation: row.contract_confirmation
+          ? Object.assign({}, row.contract_confirmation)
+          : null
+      });
     });
   }
 
@@ -176,11 +186,46 @@ function createClientContext() {
     return jsonResponse(201, response);
   }
 
+  function confirmContract(url, options) {
+    const body = JSON.parse(options.body);
+    const idempotencyKey = options.headers['Idempotency-Key'];
+    const replayKey = url + ':' + idempotencyKey;
+    if (completedByKey.has(replayKey)) return jsonResponse(201, completedByKey.get(replayKey));
+    const collaborationId = Number(url.split('/')[2]);
+    const collaboration = rows.find(function(row) { return row.id === collaborationId; });
+    if (!collaboration || collaboration.row_version !== body.expected_version) {
+      return jsonResponse(409, { error: 'STALE_COLLABORATION_VERSION' });
+    }
+    collaboration.status = 'contracted';
+    collaboration.row_version += 1;
+    collaboration.contract_confirmation = {
+      id: 901,
+      contract_reference: body.contract_reference,
+      counterparty_name: body.counterparty_name,
+      signed_at: new Date(body.signed_at).toISOString(),
+      confirmation_note: body.confirmation_note,
+      confirmed_by: 9,
+      confirmed_by_name: 'Mina Chen',
+      confirmed_at: '2026-09-08T09:00:00.000Z'
+    };
+    const response = {
+      success: true,
+      campaign_id: collaboration.campaign_id,
+      status: collaboration.status,
+      row_version: collaboration.row_version,
+      active_relations: collaboration.active_relations.slice(),
+      contract_confirmation: Object.assign({}, collaboration.contract_confirmation)
+    };
+    completedByKey.set(replayKey, response);
+    return jsonResponse(201, response);
+  }
+
   const context = {
     m4Campaigns: [],
     m4CampaignContextId: null,
     lastCollabRows: [],
     pendingCollabInfId: 700,
+    pendingContractCollabId: null,
     m4CollabMutationOperations: {},
     m4CollabMutationInFlight: {},
     pendingCreateRelease: null,
@@ -190,6 +235,7 @@ function createClientContext() {
     failNextCreateAfterPersist: false,
     pendingPauseRelease: null,
     pauseNextUpdate: false,
+    conflictNextContractAfterPersist: false,
     document: {
       getElementById(id) { return elements[id] || appendedElements.find(function(item) { return item.id === id; }) || null; },
       createElement() { return element({ remove() {} }); },
@@ -240,6 +286,17 @@ function createClientContext() {
         }
         return createCollaboration(options);
       }
+      if (/^\/collaborations\/\d+\/contract-confirmations$/.test(url) && options.method === 'POST') {
+        if (context.conflictNextContractAfterPersist) {
+          context.conflictNextContractAfterPersist = false;
+          confirmContract(url, options);
+          return jsonResponse(409, {
+            error: 'Signed contract was already confirmed.',
+            code: 'CONTRACT_ALREADY_CONFIRMED'
+          });
+        }
+        return confirmContract(url, options);
+      }
       if (url.indexOf('/collaborations/') === 0 && options.method === 'PUT') {
         if (context.pauseNextUpdate) {
           context.pauseNextUpdate = false;
@@ -282,10 +339,14 @@ const m4Functions = [
   'collabResource',
   'renderCollabRelationTags',
   'renderCampaignCollabActions',
+  'renderContractConfirmation',
   'renderCollabCommercialTerms',
   'renderCollabTable',
   'submitCampaignCollabUpdate',
   'runCampaignCollabAction',
+  'openCampaignContractConfirmationModal',
+  'closeCampaignContractConfirmationModal',
+  'submitCampaignContractConfirmation',
   'openCampaignSettlementModal'
 ];
 
@@ -493,6 +554,86 @@ test('M4 collaboration table distinguishes v2 commercial terms from historical q
   ), /历史报价：\$0/);
 });
 
+test('M4 signed contract checkpoint gates v2 execution and persists entered evidence', async () => {
+  const { context, elements, requests, rows } = createClientContext();
+  context.COLLAB_ORDER_TYPE_LABELS = { paid: '付费合作' };
+  context.COLLAB_RELATION_LABELS = { order: '下单' };
+  context.STATUS_LABELS = {
+    confirmed: '已确认',
+    contract_sent: '合同待回签',
+    contracted: '已签约'
+  };
+  context.fmtCount = function(value) { return String(value || 0); };
+  loadFunctions(context, m4Functions);
+  await context.loadM4Campaigns();
+  await context.submitCollabOrder();
+  await context.loadCollaborations();
+
+  const created = rows[0];
+  const confirmedActions = context.renderCampaignCollabActions(created);
+  assert.match(confirmedActions, /登记合同已发/);
+  assert.match(confirmedActions, /确认已签约/);
+  assert.doesNotMatch(confirmedActions, /开始执行/);
+
+  context.pendingContractCollabId = created.id;
+  await context.submitCampaignContractConfirmation();
+
+  const confirmationRequest = requests.find(function(request) {
+    return request.url === '/collaborations/' + created.id + '/contract-confirmations';
+  });
+  assert.ok(confirmationRequest);
+  assert.match(confirmationRequest.options.headers['Idempotency-Key'], /^m4-contract-confirmation-/);
+  assert.deepEqual(JSON.parse(confirmationRequest.options.body), {
+    campaign_id: 91,
+    expected_version: 1,
+    contract_reference: 'SIGNED-501',
+    counterparty_name: 'Creator Studio LLC',
+    signed_at: new Date('2026-09-07T10:00').toISOString(),
+    confirmation_note: 'Signed copy verified in the approved drive.'
+  });
+  assert.equal(created.status, 'contracted');
+  assert.equal(created.row_version, 2);
+  assert.match(context.renderCampaignCollabActions(created), /开始执行/);
+  assert.match(context.renderContractConfirmation(created), /SIGNED-501/);
+  assert.match(context.renderContractConfirmation(created), /Creator Studio LLC/);
+  assert.match(context.renderContractConfirmation(created), /Mina Chen/);
+
+  context.renderCollabTable([created]);
+  assert.match(elements.execTableContainer.innerHTML, /已签约/);
+  assert.match(elements.execTableContainer.innerHTML, /SIGNED-501/);
+});
+
+test('M4 signed contract conflict reloads persisted evidence and closes the stale modal', async () => {
+  const { context, requests, rows } = createClientContext();
+  context.COLLAB_ORDER_TYPE_LABELS = { paid: '付费合作' };
+  context.COLLAB_RELATION_LABELS = { order: '下单' };
+  context.STATUS_LABELS = { confirmed: '已确认', contracted: '已签约' };
+  context.fmtCount = function(value) { return String(value || 0); };
+  loadFunctions(context, m4Functions);
+  await context.loadM4Campaigns();
+  await context.submitCollabOrder();
+  await context.loadCollaborations();
+  context.pendingContractCollabId = rows[0].id;
+  const toasts = [];
+  context.toast = function(message, type) { toasts.push({ message, type }); };
+  let closeCalls = 0;
+  context.closeCampaignContractConfirmationModal = function() {
+    closeCalls += 1;
+    context.pendingContractCollabId = null;
+  };
+  context.conflictNextContractAfterPersist = true;
+
+  await context.submitCampaignContractConfirmation();
+
+  assert.equal(requests.filter(function(request) {
+    return /\/contract-confirmations$/.test(request.url);
+  }).length, 1, JSON.stringify(toasts));
+  assert.equal(rows[0].status, 'contracted');
+  assert.ok(rows[0].contract_confirmation);
+  assert.equal(closeCalls, 1);
+  assert.equal(context.pendingContractCollabId, null);
+});
+
 test('M4 commercial controls preserve zero defaults and choose campaign currency safely', () => {
   const { context } = createClientContext();
   loadFunctions(context, m4Functions);
@@ -653,13 +794,18 @@ test('M4 campaign workspace executes selector, linked order, lifecycle, and repl
   };
   const created = Object.assign({}, rows[0], { active_relations: rows[0].active_relations.slice() });
   assert.ok(created);
+  context.pendingContractCollabId = created.id;
+  await context.submitCampaignContractConfirmation();
+  assert.equal(rows[0].status, 'contracted');
+  assert.equal(rows[0].row_version, 2);
+  const contracted = Object.assign({}, rows[0], { active_relations: rows[0].active_relations.slice() });
   const executionPatch = {
     status: 'live',
     campaign_relation: 'execution',
     reason: '从下单工作台确认开始执行'
   };
-  const executed = await context.submitCampaignCollabUpdate(created, executionPatch, 'execution');
-  const replay = await context.submitCampaignCollabUpdate(created, executionPatch, 'execution');
+  const executed = await context.submitCampaignCollabUpdate(contracted, executionPatch, 'execution');
+  const replay = await context.submitCampaignCollabUpdate(contracted, executionPatch, 'execution');
   assert.deepEqual(replay, executed);
   const executionRequests = requests.filter(function(request) {
     return request.url === '/collaborations/' + created.id && request.options.method === 'PUT';
@@ -667,7 +813,7 @@ test('M4 campaign workspace executes selector, linked order, lifecycle, and repl
   assert.equal(executionRequests.length, 2);
   assert.equal(executionRequests[0].options.headers['Idempotency-Key'], executionRequests[1].options.headers['Idempotency-Key']);
   assert.notEqual(executionRequests[0].options.headers['X-Request-Id'], executionRequests[1].options.headers['X-Request-Id']);
-  assert.equal(rows[0].row_version, 2);
+  assert.equal(rows[0].row_version, 3);
 
   await context.loadCollaborations();
   await context.runCampaignCollabAction(created.id, 'review');

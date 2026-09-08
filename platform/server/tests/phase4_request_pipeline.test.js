@@ -395,6 +395,26 @@ test('request contract freezes the exact raw-byte and multipart limits', () => {
   }
 });
 
+test('signed contract confirmation owns a bounded registered JSON policy', () => {
+  const { contract } = loadBoundary();
+  const policy = contract.REQUEST_POLICIES.COLLABORATION_CONTRACT_CONFIRM;
+
+  assert.ok(policy);
+  assert.equal(policy.id, 'collaboration.contract-confirm');
+  assert.equal(policy.method, 'POST');
+  assert.equal(policy.pathTemplate, '/api/collaborations/:id/contract-confirmations');
+  assert.equal(policy.mediaKind, contract.MEDIA_KINDS.JSON);
+  assert.equal(policy.maxRawBytes, contract.BODY_LIMITS.CAMPAIGN_CONTROL_JSON);
+
+  const registry = contract.createRoutePolicyRegistry([policy]);
+  assert.equal(
+    registry.match('POST', '/api/collaborations/41/contract-confirmations').id,
+    'collaboration.contract-confirm'
+  );
+  const serverSource = fs.readFileSync(serverPath, 'utf8');
+  assert.match(serverSource, /'COLLABORATION_CONTRACT_CONFIRM'/);
+});
+
 test('batch performance metrics upload is an admitted multipart route in the shared parser inventory', () => {
   const { contract } = loadBoundary();
   const policy = contract.REQUEST_POLICIES.SHARED_PERFORMANCE_METRICS_UPLOAD;

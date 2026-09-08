@@ -10,6 +10,7 @@ const { Worker } = require('node:worker_threads');
 const Database = require('better-sqlite3');
 
 const migrationService = require('../services/migration_service');
+const knowledgeService = require('../services/knowledge_service');
 const {
   DEFAULT_ORGANIZATION_CODE
 } = require('../services/organization_access_service');
@@ -125,6 +126,45 @@ function seedFixture(db) {
     ) VALUES (?,?, 'collaboration', ?, '7101', 'order', 2, '{}')
   `).run(orgId, 7001, sha256('collaboration-security-order'));
   return { orgId, teamId, influencerId: Number(influencerId) };
+}
+
+function setV2CollaborationResource(db, collaborationId, overrides = {}) {
+  const resource = Object.assign({
+    schema: 'turingmarket.collaboration-order.v2',
+    project_name: 'Signed contract launch',
+    product_name: 'Portable power station',
+    order_type: 'paid',
+    order_reference: 'PO-7101',
+    deliverable: 'One dedicated video',
+    creator_cost: 100,
+    client_quote: 150,
+    currency: 'USD',
+    margin_amount: 50,
+    payment_terms: 'net_30'
+  }, overrides);
+  db.prepare(`
+    UPDATE collaborations
+    SET proposal_notes=?,cost_quoted=?,status='confirmed',row_version=1
+    WHERE id=?
+  `).run(JSON.stringify(resource), resource.creator_cost, collaborationId);
+  return resource;
+}
+
+function contractConfirmationInput(overrides = {}) {
+  return Object.assign({
+    userId: 2,
+    collaborationId: 7101,
+    requestId: 'contract-confirmation-request-0001',
+    idempotencyKey: 'contract-confirmation-0001',
+    body: {
+      campaign_id: 7001,
+      expected_version: 2,
+      contract_reference: 'SIGNED-7101',
+      counterparty_name: 'Creator Management LLC',
+      signed_at: '2026-09-07T10:00:00.000Z',
+      confirmation_note: 'Signed PDF verified in the approved shared drive.'
+    }
+  }, overrides);
 }
 
 function insertCampaignLink(db, {
@@ -560,6 +600,322 @@ test('collaboration detail and legacy update conceal inaccessible IDs and refuse
     FROM collaborations
     WHERE id=7101
   `).get(), before);
+});
+
+test('signed contract confirmation is idempotent, immutable, and unlocks v2 execution', (t) => {
+  const db = openCampaignDatabase(t);
+  seedFixture(db);
+  setV2CollaborationResource(db, 7101);
+  const service = createCampaignCollaborationService(db);
+  const sent = service.updateLinked({
+    userId: 2,
+    collaborationId: 7101,
+    requestId: 'contract-dispatch-request',
+    idempotencyKey: 'contract-dispatch-0001',
+    body: {
+      campaign_id: 7001,
+      expected_version: 2,
+      reason: 'Contract sent for signature',
+      status: 'contract_sent'
+    }
+  });
+  assert.equal(sent.body.row_version, 3);
+  const input = contractConfirmationInput({
+    body: Object.assign({}, contractConfirmationInput().body, { expected_version: 3 })
+  });
+
+  const confirmed = service.confirmContract(input);
+  assert.equal(confirmed.status, 201);
+  assert.equal(confirmed.body.success, true);
+  assert.equal(confirmed.body.status, 'contracted');
+  assert.equal(confirmed.body.row_version, 4);
+  assert.deepEqual(confirmed.body.active_relations, ['order']);
+  assert.equal(confirmed.body.contract_confirmation.contract_reference, 'SIGNED-7101');
+  assert.equal(confirmed.body.contract_confirmation.counterparty_name, 'Creator Management LLC');
+  assert.equal(confirmed.body.contract_confirmation.signed_at, '2026-09-07T10:00:00.000Z');
+  assert.equal(confirmed.body.contract_confirmation.confirmation_note, 'Signed PDF verified in the approved shared drive.');
+  assert.equal(confirmed.body.contract_confirmation.confirmed_by, 2);
+  assert.match(confirmed.body.contract_confirmation.confirmed_at, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.000Z$/);
+
+  const replay = service.confirmContract(input);
+  assert.deepEqual(replay, confirmed);
+  const reloaded = service.list({
+    userId: 2,
+    campaignId: 7001,
+    includeCampaignContext: true
+  }).collaborations.find((row) => row.id === 7101);
+  assert.deepEqual(reloaded.contract_confirmation, confirmed.body.contract_confirmation);
+  assert.deepEqual(
+    db.prepare('SELECT status,row_version FROM collaborations WHERE id=7101').get(),
+    { status: 'contracted', row_version: 4 }
+  );
+  const evidenceRows = db.prepare(`
+    SELECT content,metadata_json
+    FROM knowledge_entries
+    WHERE source_type='collaboration_contract_confirmation'
+  `).all();
+  assert.equal(evidenceRows.length, 1);
+  assert.doesNotMatch(evidenceRows[0].content, /SIGNED-7101|Creator Management|Signed PDF/);
+  assert.deepEqual(JSON.parse(evidenceRows[0].metadata_json), {
+    schema_version: 1,
+    collaboration_id: 7101,
+    row_version: 4,
+    contract_reference: 'SIGNED-7101',
+    counterparty_name: 'Creator Management LLC',
+    signed_at: '2026-09-07T10:00:00.000Z',
+    confirmation_note: 'Signed PDF verified in the approved shared drive.',
+    confirmed_by: 2,
+    confirmed_at: confirmed.body.contract_confirmation.confirmed_at,
+    retrieval_eligible: false
+  });
+  assert.equal(db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM campaign_events
+    WHERE event_type='link_attached' AND source='collaboration_link'
+      AND json_extract(metadata_json,'$.record_type')='knowledge_entry'
+  `).get().count, 1);
+  assert.equal(db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM request_idempotency
+    WHERE scope='collaboration.update.linked' AND state='completed'
+      AND idempotency_key='contract-confirmation-0001'
+  `).get().count, 1);
+
+  const execution = service.updateLinked({
+    userId: 2,
+    collaborationId: 7101,
+    requestId: 'contracted-execution-request',
+    idempotencyKey: 'contracted-execution-0001',
+    body: {
+      campaign_id: 7001,
+      expected_version: 4,
+      reason: 'Signed contract verified before execution',
+      status: 'live',
+      campaign_relation: 'execution'
+    }
+  });
+  assert.equal(execution.body.row_version, 5);
+  assert.deepEqual(execution.body.active_relations, ['order', 'execution']);
+});
+
+test('v2 execution requires the signed contract checkpoint without affecting historical order contracts', (t) => {
+  const db = openCampaignDatabase(t);
+  seedFixture(db);
+  setV2CollaborationResource(db, 7101);
+  const service = createCampaignCollaborationService(db);
+  const before = collaborationWriteState(db);
+
+  assert.throws(
+    () => service.updateLinked({
+      userId: 2,
+      collaborationId: 7101,
+      requestId: 'unsigned-v2-execution',
+      idempotencyKey: 'unsigned-v2-execution-0001',
+      body: {
+        campaign_id: 7001,
+        expected_version: 2,
+        reason: 'Attempt to skip contract confirmation',
+        status: 'live',
+        campaign_relation: 'execution'
+      }
+    }),
+    (error) => error && error.code === 'CONTRACT_CONFIRMATION_REQUIRED'
+  );
+  assert.deepEqual(collaborationWriteState(db), before);
+
+  db.prepare('UPDATE collaborations SET proposal_notes=? WHERE id=7101').run(JSON.stringify({
+    schema: 'turingmarket.collaboration-order.v2',
+    creator_cost: 'invalid'
+  }));
+  const noncanonicalBefore = collaborationWriteState(db);
+  assert.throws(
+    () => service.updateLinked({
+      userId: 2,
+      collaborationId: 7101,
+      requestId: 'noncanonical-v2-execution',
+      idempotencyKey: 'noncanonical-v2-execution-0001',
+      body: {
+        campaign_id: 7001,
+        expected_version: 3,
+        reason: 'Reserved v2 data must fail closed',
+        status: 'live',
+        campaign_relation: 'execution'
+      }
+    }),
+    (error) => error && error.code === 'CONTRACT_CONFIRMATION_REQUIRED'
+  );
+  assert.deepEqual(collaborationWriteState(db), noncanonicalBefore);
+
+  db.prepare("UPDATE collaborations SET proposal_notes=NULL WHERE id=7101").run();
+  const legacy = service.updateLinked({
+    userId: 2,
+    collaborationId: 7101,
+    requestId: 'legacy-execution-compatible',
+    idempotencyKey: 'legacy-execution-compatible-0001',
+    body: {
+      campaign_id: 7001,
+      expected_version: 4,
+      reason: 'Historical order remains compatible',
+      status: 'live',
+      campaign_relation: 'execution'
+    }
+  });
+  assert.equal(legacy.body.row_version, 5);
+});
+
+test('contract confirmation rejects invalid evidence, stale versions, inaccessible records, and second confirmations atomically', (t) => {
+  const db = openCampaignDatabase(t);
+  seedFixture(db);
+  setV2CollaborationResource(db, 7101);
+  const service = createCampaignCollaborationService(db);
+  const baseline = collaborationWriteState(db);
+
+  assert.throws(
+    () => service.confirmContract(contractConfirmationInput({
+      body: Object.assign({}, contractConfirmationInput().body, {
+        contract_reference: '',
+        signed_at: '2999-01-01T00:00:00.000Z'
+      })
+    })),
+    (error) => error && error.code === 'INVALID_CONTRACT_CONFIRMATION'
+  );
+  assert.deepEqual(collaborationWriteState(db), baseline);
+
+  for (const [index, signedAt] of [
+    '2026-02-30T10:00:00.000Z',
+    '2026-01-01T24:00:00.000Z'
+  ].entries()) {
+    assert.throws(
+      () => service.confirmContract(contractConfirmationInput({
+        idempotencyKey: `contract-confirmation-invalid-calendar-000${index}`,
+        body: Object.assign({}, contractConfirmationInput().body, { signed_at: signedAt })
+      })),
+      (error) => error && error.code === 'INVALID_CONTRACT_CONFIRMATION' && error.details.field === 'signed_at'
+    );
+    assert.deepEqual(collaborationWriteState(db), baseline);
+  }
+
+  assert.throws(
+    () => service.confirmContract(contractConfirmationInput({
+      idempotencyKey: 'contract-confirmation-local-time-0001',
+      body: Object.assign({}, contractConfirmationInput().body, {
+        signed_at: '2026-09-07T10:00'
+      })
+    })),
+    (error) => error && error.code === 'INVALID_CONTRACT_CONFIRMATION' && error.details.field === 'signed_at'
+  );
+  assert.deepEqual(collaborationWriteState(db), baseline);
+
+  assert.throws(
+    () => service.confirmContract(contractConfirmationInput({
+      userId: 3,
+      idempotencyKey: 'contract-confirmation-hidden-0001',
+      body: { campaign_id: 7001 }
+    })),
+    (error) => error && error.code === 'RECORD_NOT_FOUND'
+  );
+  assert.deepEqual(collaborationWriteState(db), baseline);
+
+  assert.throws(
+    () => service.confirmContract(contractConfirmationInput({
+      idempotencyKey: 'contract-confirmation-stale-0001',
+      body: Object.assign({}, contractConfirmationInput().body, { expected_version: 3 })
+    })),
+    (error) => error && error.code === 'STALE_COLLABORATION_VERSION'
+  );
+  assert.deepEqual(collaborationWriteState(db), baseline);
+
+  service.confirmContract(contractConfirmationInput());
+  const afterConfirmation = collaborationWriteState(db);
+  assert.throws(
+    () => service.confirmContract(contractConfirmationInput({
+      requestId: 'contract-confirmation-request-0002',
+      idempotencyKey: 'contract-confirmation-0002',
+      body: Object.assign({}, contractConfirmationInput().body, { expected_version: 3 })
+    })),
+    (error) => error && error.code === 'CONTRACT_ALREADY_CONFIRMED'
+  );
+  assert.deepEqual(collaborationWriteState(db), afterConfirmation);
+});
+
+test('contract confirmation rolls back status, evidence, links, events, archives, and ledger on evidence failure', (t) => {
+  const db = openCampaignDatabase(t);
+  seedFixture(db);
+  setV2CollaborationResource(db, 7101);
+  const service = createCampaignCollaborationService(db);
+  const baseline = collaborationWriteState(db);
+  db.exec(`
+    CREATE TRIGGER fail_contract_confirmation_evidence
+    BEFORE INSERT ON knowledge_entries
+    WHEN NEW.source_type='collaboration_contract_confirmation'
+    BEGIN
+      SELECT RAISE(ABORT,'injected contract evidence failure');
+    END
+  `);
+
+  assert.throws(
+    () => service.confirmContract(contractConfirmationInput()),
+    /injected contract evidence failure/
+  );
+  assert.deepEqual(collaborationWriteState(db), baseline);
+});
+
+test('contract confirmation rejects duplicate producer evidence instead of selecting an arbitrary record', (t) => {
+  const db = openCampaignDatabase(t);
+  const fixture = seedFixture(db);
+  setV2CollaborationResource(db, 7101);
+  const service = createCampaignCollaborationService(db);
+  service.confirmContract(contractConfirmationInput());
+
+  db.transaction(() => {
+    const sourceId = '7101:999';
+    const duplicate = knowledgeService.writeCampaignKnowledgeInTransaction(db, {
+      organizationId: fixture.orgId,
+      campaignId: 7001,
+      createdBy: 2,
+      entryType: 'collaboration_contract_confirmation',
+      title: 'Duplicate signed contract checkpoint',
+      summary: 'Duplicate evidence used to verify cardinality fencing.',
+      content: JSON.stringify({ collaboration_id: 7101, checkpoint: 'signed_contract' }),
+      tags: ['campaign', 'collaboration', 'contract'],
+      sourceType: 'collaboration_contract_confirmation',
+      sourceId,
+      visibility: 'team',
+      metadata: {
+        schema_version: 1,
+        collaboration_id: 7101,
+        row_version: 999,
+        contract_reference: 'DUPLICATE-7101',
+        counterparty_name: 'Duplicate Studio',
+        signed_at: '2026-09-07T11:00:00.000Z',
+        confirmation_note: 'Duplicate evidence must not be selected.',
+        confirmed_by: 2,
+        confirmed_at: '2026-09-08T07:00:00.000Z',
+        retrieval_eligible: false
+      }
+    });
+    db.prepare(`
+      INSERT INTO campaign_record_links (
+        org_id,campaign_id,record_type,bundle_id,record_id,relation_type,created_by,metadata_json
+      ) VALUES (?,7001,'knowledge_entry',?,?,'knowledge',2,?)
+    `).run(
+      fixture.orgId,
+      sha256('duplicate-contract-confirmation-link'),
+      String(duplicate.entry.id),
+      JSON.stringify({
+        producer_type: 'collaboration_contract_confirmation',
+        producer_id: 7101,
+        source_type: 'collaboration_contract_confirmation',
+        source_id: sourceId
+      })
+    );
+    knowledgeService.applyKnowledgeCapacityGaugePlanInTransaction(db, duplicate.capacityGaugePlan);
+  }).immediate();
+
+  assert.throws(
+    () => service.list({ userId: 2, campaignId: 7001, includeCampaignContext: true }),
+    (error) => error && error.code === 'CAMPAIGN_EVIDENCE_IN_USE'
+  );
 });
 
 test('linked create and update reject unknown fields before reservation or mutation', (t) => {
@@ -1179,6 +1535,49 @@ test('linked update adopts an authorized never-classified collaboration as the o
   `).get().count, 1);
 });
 
+test('linked update rejects a caller-asserted contracted v2 row without checkpoint evidence', (t) => {
+  const db = openCampaignDatabase(t);
+  const fixture = seedFixture(db);
+  const service = createCampaignCollaborationService(db);
+  db.prepare(`
+    INSERT INTO collaborations (
+      id,influencer_id,user_id,status,cost_quoted,cost_actual,row_version,
+      cost_actual_confirmed,proposal_notes
+    ) VALUES (7110,?,2,'contracted',100,100,1,0,?)
+  `).run(fixture.influencerId, JSON.stringify({
+    schema: 'turingmarket.collaboration-order.v2',
+    project_name: 'Caller asserted contract',
+    product_name: 'Portable power station',
+    order_type: 'paid',
+    order_reference: 'UNVERIFIED-7110',
+    deliverable: 'One dedicated video',
+    creator_cost: 100,
+    client_quote: 150,
+    currency: 'USD',
+    margin_amount: 50,
+    payment_terms: 'net_30'
+  }));
+  const before = collaborationWriteState(db);
+
+  assert.throws(
+    () => service.updateLinked({
+      userId: 2,
+      collaborationId: 7110,
+      requestId: 'collaboration-unverified-contract-adoption',
+      idempotencyKey: 'collaboration-unverified-contract-adoption-0001',
+      body: {
+        campaign_id: 7001,
+        expected_version: 1,
+        reason: 'Attempt to adopt unverified signed order',
+        status: 'live',
+        campaign_relation: 'order'
+      }
+    }),
+    (error) => error && error.code === 'INVALID_COLLABORATION_TRANSITION'
+  );
+  assert.deepEqual(collaborationWriteState(db), before);
+});
+
 test('new settlement alias requires exact request-local status, cost, and confirmation', (t) => {
   const db = openCampaignDatabase(t);
   seedFixture(db);
@@ -1480,7 +1879,7 @@ test('ordered-stage collaboration cancellation atomically cancels the campaign a
       id,influencer_id,user_id,status,cost_quoted,cost_actual,row_version,cost_actual_confirmed
     ) VALUES (?,?,?,?,100,100,1,?)
   `);
-  insert.run(7111, fixture.influencerId, 2, 'live', 0);
+  insert.run(7111, fixture.influencerId, 2, 'contracted', 0);
   insert.run(7112, fixture.influencerId, 2, 'confirmed', 0);
   insert.run(7113, fixture.influencerId, 2, 'completed', 1);
   const targetBundle = sha256('collaboration-cascade-target');

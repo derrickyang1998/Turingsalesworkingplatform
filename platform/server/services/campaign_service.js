@@ -56,6 +56,7 @@ const NONTERMINAL_COLLABORATION_STATUSES = Object.freeze([
   'negotiating',
   'confirmed',
   'contract_sent',
+  'contracted',
   'live',
   'content_review'
 ]);

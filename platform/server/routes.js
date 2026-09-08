@@ -421,6 +421,37 @@ app.get('/api/collaborations', authMiddleware, (req, res) => {
   }));
 });
 
+app.post('/api/collaborations/:id/contract-confirmations', authMiddleware, (req, res) => {
+  try {
+    const collaborationIdText = String(req.params.id || '');
+    const collaborationId = /^[1-9]\d*$/.test(collaborationIdText)
+      ? Number(collaborationIdText)
+      : null;
+    if (!Number.isSafeInteger(collaborationId)) {
+      return res.status(400).json({
+        error: 'Collaboration id is invalid.',
+        code: 'INVALID_COLLABORATION_ID'
+      });
+    }
+    const result = campaignCollaboration.confirmContract({
+      userId: req.user.id,
+      collaborationId,
+      requestId: collaborationRequestId(req),
+      idempotencyKey: req.get ? req.get('Idempotency-Key') : req.headers && req.headers['idempotency-key'],
+      body: req.body
+    });
+    res.status(result.status || 201).json(result.body);
+  } catch (error) {
+    const status = error.statusCode || error.status || 500;
+    const body = {
+      error: error.message || 'Signed contract confirmation failed.',
+      code: error.code || 'INTERNAL_ERROR'
+    };
+    if (error.details !== undefined) body.details = error.details;
+    res.status(status).json(body);
+  }
+});
+
 app.put('/api/collaborations/:id', authMiddleware, (req, res) => {
   try {
     const request = {

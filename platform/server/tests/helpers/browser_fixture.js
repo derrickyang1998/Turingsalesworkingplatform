@@ -431,7 +431,7 @@ function collaborationStatsFromFixture(fixture) {
   return {
     stats: {
       byStatus,
-      totalActive: fixture.collaborations.filter((row) => ['proposed', 'contacted', 'negotiating', 'confirmed', 'contract_sent', 'live', 'content_review'].includes(row.status)).length,
+      totalActive: fixture.collaborations.filter((row) => ['proposed', 'contacted', 'negotiating', 'confirmed', 'contract_sent', 'contracted', 'live', 'content_review'].includes(row.status)).length,
       totalCompleted: fixture.collaborations.filter((row) => row.status === 'completed').length,
       totalCost: fixture.collaborations.reduce((sum, row) => sum + Number(row.cost_actual || row.cost_quoted || 0), 0)
     }

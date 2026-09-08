@@ -2595,6 +2595,63 @@ test('global collaboration update conceals another owner and leaves the row unch
   db.close();
 });
 
+test('signed contract confirmation route forwards the protected mutation contract', async () => {
+  const db = freshDb();
+  const baseService = createCampaignCollaborationService(db);
+  let captured;
+  const routes = mountRoutes(db, {
+    campaignCollaborationService: Object.assign({}, baseService, {
+      confirmContract(input) {
+        captured = input;
+        return {
+          status: 201,
+          body: {
+            success: true,
+            status: 'contracted',
+            row_version: 3
+          }
+        };
+      }
+    })
+  });
+  const body = {
+    campaign_id: 41,
+    expected_version: 2,
+    contract_reference: 'SIGNED-41',
+    counterparty_name: 'Creator Studio',
+    signed_at: '2026-09-07T10:00:00.000Z',
+    confirmation_note: 'Signed copy verified.'
+  };
+  const malformed = await invoke(routes, 'POST /api/collaborations/:id/contract-confirmations', {
+    params: { id: '07' },
+    body,
+    headers: { 'Idempotency-Key': 'route-contract-confirmation-invalid-id' }
+  });
+  assert.equal(malformed.statusCode, 400);
+  assert.equal(malformed.payload.code, 'INVALID_COLLABORATION_ID');
+  assert.equal(captured, undefined);
+
+  const result = await invoke(routes, 'POST /api/collaborations/:id/contract-confirmations', {
+    params: { id: '73' },
+    body,
+    headers: {
+      'Idempotency-Key': 'route-contract-confirmation-0001',
+      'X-Request-Id': 'route-contract-confirmation-request'
+    }
+  });
+
+  assert.equal(result.statusCode, 201);
+  assert.equal(result.payload.status, 'contracted');
+  assert.deepEqual(captured, {
+    userId: 2,
+    collaborationId: 73,
+    requestId: 'campaign-link-request',
+    idempotencyKey: 'route-contract-confirmation-0001',
+    body
+  });
+  db.close();
+});
+
 test('collaboration list exposes resource fields and status updates persist', async () => {
   const db = freshDb();
   const routes = mountRoutes(db);
@@ -2661,6 +2718,9 @@ test('m4 frontend keeps import, feishu, and order-resource controls wired', () =
   const componentCss = fs.readFileSync(path.join(repoRoot, 'platform', 'client', 'styles', 'components.css'), 'utf8');
 
   assert.match(indexHtml, /id="collabFilter"/);
+  assert.match(indexHtml, /<option value="contract_sent">合同待回签<\/option>/);
+  assert.match(indexHtml, /<option value="contracted">已签约<\/option>/);
+  assert.match(indexHtml, /<option value="content_review">内容审核<\/option>/);
   assert.match(indexHtml, /id="collabStatsBar"/);
   assert.match(indexHtml, /id="m4CampaignContext"/);
   assert.match(indexHtml, /id="m4CampaignContextStatus"/);

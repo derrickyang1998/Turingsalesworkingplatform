@@ -472,7 +472,7 @@ const STRUCTURAL_COLUMN_POLICY = freezeStructuralColumnPolicy({
     'campaigns.operational_status': Object.freeze(['active', 'on_hold', 'cancelled']),
     'collaborations.status': Object.freeze([
       'proposed', 'contacted', 'negotiating', 'confirmed', 'contract_sent',
-      'live', 'content_review', 'completed', 'cancelled'
+      'contracted', 'live', 'content_review', 'completed', 'cancelled'
     ]),
     'crm_audit_events.event_type': Object.freeze([
       'crm_backfill_quarantined', 'crm_legacy_stage_unclassified', 'crm_legacy_duplicate_collision',

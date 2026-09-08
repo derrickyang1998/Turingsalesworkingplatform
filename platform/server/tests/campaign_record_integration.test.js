@@ -1152,6 +1152,30 @@ test('legacy knowledge omission rejects reserved campaign namespaces before pers
       await jsonRequest(fixture.server, '/api/knowledge', {
         token: fixture.token,
         body: {
+          entry_type: 'note',
+          title: 'Reserved contract source type',
+          summary: 'Must not fabricate signed contract evidence',
+          content: 'Must not fabricate signed contract evidence',
+          tags: ['legacy'],
+          source_type: 'collaboration_contract_confirmation',
+          source_id: 'legacy-reserved-contract-source'
+        }
+      }),
+      await jsonRequest(fixture.server, '/api/knowledge/ingest', {
+        token: fixture.token,
+        body: {
+          entry_type: 'collaboration_contract_confirmation',
+          title: 'Reserved contract entry type',
+          summary: 'Must not fabricate signed contract evidence',
+          content: 'Must not fabricate signed contract evidence',
+          tags: ['legacy'],
+          source_type: 'manual_upload',
+          source_id: 'legacy-reserved-contract-entry'
+        }
+      }),
+      await jsonRequest(fixture.server, '/api/knowledge', {
+        token: fixture.token,
+        body: {
           type: 'campaign_review',
           title: 'Reserved legacy type alias',
           summary: 'Must not fabricate internal evidence',
@@ -1236,6 +1260,8 @@ test('legacy knowledge omission rejects reserved campaign namespaces before pers
       WHERE source_id IN (
         'legacy-reserved-source',
         'legacy-reserved-entry',
+        'legacy-reserved-contract-source',
+        'legacy-reserved-contract-entry',
         'legacy-reserved-type-alias',
         'legacy-reserved-source-array',
         'legacy-reserved-entry-array',
@@ -1846,6 +1872,20 @@ test('linked knowledge rejects reserved deep and oversized inputs before mutatio
       }),
       await jsonRequest(fixture.server, '/api/knowledge', {
         token: fixture.token,
+        idempotencyKey: 'wave2-reserved-contract-source',
+        body: knowledgeBody(fixture.campaignId, 'reserved-contract-source', {
+          source_type: 'collaboration_contract_confirmation'
+        })
+      }),
+      await jsonRequest(fixture.server, '/api/knowledge', {
+        token: fixture.token,
+        idempotencyKey: 'wave2-reserved-contract-entry',
+        body: knowledgeBody(fixture.campaignId, 'reserved-contract-entry', {
+          entry_type: 'collaboration_contract_confirmation'
+        })
+      }),
+      await jsonRequest(fixture.server, '/api/knowledge', {
+        token: fixture.token,
         idempotencyKey: 'wave2-deep-metadata',
         body: knowledgeBody(fixture.campaignId, 'deep-metadata', { metadata: nested })
       }),
@@ -1860,15 +1900,21 @@ test('linked knowledge rejects reserved deep and oversized inputs before mutatio
     assert.deepEqual(attempts.map(responseSummary), [
       { status: 400, code: 'INVALID_CAMPAIGN_INPUT' },
       { status: 400, code: 'INVALID_CAMPAIGN_INPUT' },
+      { status: 400, code: 'INVALID_CAMPAIGN_INPUT' },
+      { status: 400, code: 'INVALID_CAMPAIGN_INPUT' },
       { status: 413, code: 'KNOWLEDGE_ENTRY_TOO_LARGE' }
     ]);
     assert.deepEqual(fixture.db.prepare(`
       SELECT
         (SELECT COUNT(*) FROM knowledge_entries
-          WHERE source_id IN ('reserved-source','deep-metadata','oversized-response')) AS entries,
+          WHERE source_id IN (
+            'reserved-source','reserved-contract-source','reserved-contract-entry',
+            'deep-metadata','oversized-response'
+          )) AS entries,
         (SELECT COUNT(*) FROM request_idempotency
           WHERE idempotency_key IN (
-            'wave2-reserved-source','wave2-deep-metadata','wave2-oversized-response'
+            'wave2-reserved-source','wave2-reserved-contract-source',
+            'wave2-reserved-contract-entry','wave2-deep-metadata','wave2-oversized-response'
           )) AS ledgers
     `).get(), { entries: 0, ledgers: 0 });
   } finally {

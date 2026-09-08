@@ -2899,6 +2899,7 @@ test('POST campaign cancel atomically revokes collaboration bundles and cancels 
     'negotiating',
     'confirmed',
     'contract_sent',
+    'contracted',
     'live',
     'content_review'
   ];

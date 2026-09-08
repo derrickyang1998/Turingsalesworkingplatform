@@ -25,6 +25,7 @@ const ACTIVE_STATUSES = Object.freeze([
   'negotiating',
   'confirmed',
   'contract_sent',
+  'contracted',
   'live',
   'content_review'
 ]);
@@ -34,6 +35,7 @@ const CANCELLABLE_STATUSES = Object.freeze([
   'negotiating',
   'confirmed',
   'contract_sent',
+  'contracted',
   'live',
   'content_review'
 ]);
@@ -89,6 +91,15 @@ const LINKED_CANCELLATION_KEYS = new Set([
   'reason',
   'action'
 ]);
+const CONTRACT_CONFIRMATION_KEYS = new Set([
+  'campaign_id',
+  'expected_version',
+  'contract_reference',
+  'counterparty_name',
+  'signed_at',
+  'confirmation_note'
+]);
+const CONTRACT_FUTURE_TOLERANCE_MS = 5 * 60 * 1000;
 
 class CampaignCollaborationServiceError extends Error {
   constructor(statusCode, code, message, details) {
@@ -160,6 +171,89 @@ function assertAllowedKeys(body, allowedKeys, message) {
 
 function isCanonicalCost(value) {
   return Number.isSafeInteger(value) && value >= 0;
+}
+
+function v2CollaborationResource(value) {
+  if (typeof value !== 'string') return null;
+  try {
+    const parsed = JSON.parse(value);
+    return isV2CollaborationResourceInput(parsed)
+      ? normalizeCollaborationResource(parsed)
+      : null;
+  } catch (error) {
+    return null;
+  }
+}
+
+function contractConfirmationText(value, field, maxLength) {
+  if (typeof value !== 'string') {
+    throw serviceError(400, 'INVALID_CONTRACT_CONFIRMATION', 'Signed contract evidence is invalid.', { field });
+  }
+  const normalized = value.trim();
+  if (!normalized || normalized.length > maxLength) {
+    throw serviceError(400, 'INVALID_CONTRACT_CONFIRMATION', 'Signed contract evidence is invalid.', {
+      field,
+      max_length: maxLength
+    });
+  }
+  return normalized;
+}
+
+function normalizedSignedAt(value, enforceNotFuture = true) {
+  const raw = contractConfirmationText(value, 'signed_at', 40);
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?(Z|([+-])(\d{2}):(\d{2}))$/.exec(raw);
+  if (!match) {
+    throw serviceError(400, 'INVALID_CONTRACT_CONFIRMATION', 'Signed contract evidence is invalid.', {
+      field: 'signed_at'
+    });
+  }
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const hour = Number(match[4]);
+  const minute = Number(match[5]);
+  const second = match[6] === undefined ? 0 : Number(match[6]);
+  const offsetHour = match[10] === undefined ? 0 : Number(match[10]);
+  const offsetMinute = match[11] === undefined ? 0 : Number(match[11]);
+  const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const monthDays = [31, leapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  if (
+    year < 1 || month < 1 || month > 12 || day < 1 || day > monthDays[month - 1] ||
+    hour > 23 || minute > 59 || second > 59 || offsetHour > 23 || offsetMinute > 59
+  ) {
+    throw serviceError(400, 'INVALID_CONTRACT_CONFIRMATION', 'Signed contract evidence is invalid.', {
+      field: 'signed_at'
+    });
+  }
+  const timestamp = Date.parse(raw);
+  if (
+    !Number.isFinite(timestamp) ||
+    (enforceNotFuture && timestamp > Date.now() + CONTRACT_FUTURE_TOLERANCE_MS)
+  ) {
+    throw serviceError(400, 'INVALID_CONTRACT_CONFIRMATION', 'Signed contract evidence is invalid.', {
+      field: 'signed_at'
+    });
+  }
+  return new Date(timestamp).toISOString();
+}
+
+function normalizedContractConfirmation(body) {
+  if (Object.keys(body).some((key) => !CONTRACT_CONFIRMATION_KEYS.has(key))) {
+    throw serviceError(400, 'INVALID_CONTRACT_CONFIRMATION', 'Signed contract evidence is invalid.');
+  }
+  if (!Number.isSafeInteger(body.expected_version) || body.expected_version < 1) {
+    throw serviceError(400, 'INVALID_CONTRACT_CONFIRMATION', 'Signed contract evidence is invalid.', {
+      field: 'expected_version'
+    });
+  }
+  return Object.freeze({
+    campaignId: body.campaign_id,
+    expectedVersion: body.expected_version,
+    contractReference: contractConfirmationText(body.contract_reference, 'contract_reference', 160),
+    counterpartyName: contractConfirmationText(body.counterparty_name, 'counterparty_name', 160),
+    signedAt: normalizedSignedAt(body.signed_at),
+    confirmationNote: contractConfirmationText(body.confirmation_note, 'confirmation_note', 500)
+  });
 }
 
 function authorizedCollaborationScope(userId) {
@@ -313,6 +407,84 @@ function activeRelations(db, campaignId, collaborationId) {
   `).all(campaignId, String(collaborationId)).map((row) => row.relation_type);
 }
 
+function contractConfirmation(db, campaignId, collaborationId) {
+  const rows = db.prepare(`
+    SELECT
+      entry.id,entry.source_id,entry.business_type,entry.business_id,entry.created_by,
+      entry.visibility,entry.metadata_json,entry.created_at,
+      link.org_id,link.created_by AS link_created_by,link.metadata_json AS link_metadata_json,
+      campaign.org_id AS campaign_org_id,actor.display_name AS confirmed_by_name
+    FROM campaign_record_links link
+    JOIN knowledge_entries entry
+      ON entry.id=CAST(link.record_id AS INTEGER)
+     AND entry.source_type='collaboration_contract_confirmation'
+     AND entry.entry_type='collaboration_contract_confirmation'
+    JOIN campaigns campaign ON campaign.id=link.campaign_id
+    LEFT JOIN users actor
+      ON actor.id=json_extract(entry.metadata_json,'$.confirmed_by')
+    WHERE link.campaign_id=?
+      AND link.record_type='knowledge_entry'
+      AND link.relation_type='knowledge'
+      AND link.revoked_at IS NULL
+      AND json_extract(entry.metadata_json,'$.collaboration_id')=?
+    ORDER BY entry.id DESC
+    LIMIT 2
+  `).all(campaignId, collaborationId);
+  if (!rows.length) return null;
+  if (rows.length !== 1) {
+    throw serviceError(409, 'CAMPAIGN_EVIDENCE_IN_USE', 'Signed contract evidence is inconsistent.');
+  }
+  const row = rows[0];
+  let metadata;
+  let linkMetadata;
+  try {
+    metadata = JSON.parse(row.metadata_json);
+    linkMetadata = JSON.parse(row.link_metadata_json);
+  } catch (error) {
+    throw serviceError(409, 'CAMPAIGN_EVIDENCE_IN_USE', 'Signed contract evidence is inconsistent.');
+  }
+  let signedAt;
+  let confirmedAt;
+  try {
+    signedAt = normalizedSignedAt(metadata.signed_at, false);
+    confirmedAt = normalizedSignedAt(metadata.confirmed_at, false);
+  } catch (error) {
+    throw serviceError(409, 'CAMPAIGN_EVIDENCE_IN_USE', 'Signed contract evidence is inconsistent.');
+  }
+  const expectedSourceId = `${collaborationId}:${metadata.row_version}`;
+  if (
+    metadata.schema_version !== 1 || metadata.collaboration_id !== collaborationId ||
+    !Number.isSafeInteger(metadata.row_version) || metadata.row_version < 1 ||
+    !Number.isSafeInteger(metadata.confirmed_by) || metadata.confirmed_by < 1 ||
+    metadata.retrieval_eligible !== false || signedAt !== metadata.signed_at ||
+    typeof metadata.confirmed_at !== 'string' || confirmedAt !== metadata.confirmed_at ||
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.000Z$/.test(metadata.confirmed_at) ||
+    typeof metadata.contract_reference !== 'string' || !metadata.contract_reference.trim() || metadata.contract_reference.length > 160 ||
+    typeof metadata.counterparty_name !== 'string' || !metadata.counterparty_name.trim() || metadata.counterparty_name.length > 160 ||
+    typeof metadata.confirmation_note !== 'string' || !metadata.confirmation_note.trim() || metadata.confirmation_note.length > 500 ||
+    String(row.source_id) !== expectedSourceId || row.business_type !== 'campaign' ||
+    String(row.business_id) !== String(campaignId) || row.visibility !== 'team' ||
+    row.created_by !== metadata.confirmed_by || row.link_created_by !== metadata.confirmed_by ||
+    row.org_id !== row.campaign_org_id ||
+    !linkMetadata || linkMetadata.producer_type !== 'collaboration_contract_confirmation' ||
+    linkMetadata.producer_id !== collaborationId ||
+    linkMetadata.source_type !== 'collaboration_contract_confirmation' ||
+    String(linkMetadata.source_id) !== expectedSourceId
+  ) {
+    throw serviceError(409, 'CAMPAIGN_EVIDENCE_IN_USE', 'Signed contract evidence is inconsistent.');
+  }
+  return {
+    id: row.id,
+    contract_reference: metadata.contract_reference,
+    counterparty_name: metadata.counterparty_name,
+    signed_at: metadata.signed_at,
+    confirmation_note: metadata.confirmation_note,
+    confirmed_by: metadata.confirmed_by,
+    confirmed_by_name: row.confirmed_by_name || null,
+    confirmed_at: metadata.confirmed_at
+  };
+}
+
 function insertLink(db, values) {
   const bundleId = values.bundleId || crypto.randomBytes(32).toString('hex');
   const result = db.prepare(`
@@ -413,6 +585,8 @@ function collaborationCustody(db, collaborationId) {
 }
 
 function insertLinkAttachedEvent(db, values) {
+  const recordType = values.recordType || 'collaboration';
+  const recordId = values.recordId || values.collaborationId;
   db.prepare(`
     INSERT INTO campaign_events (
       org_id,campaign_id,event_type,previous_state,next_state,actor_user_id,
@@ -423,8 +597,8 @@ function insertLinkAttachedEvent(db, values) {
     JSON.stringify({
       bundle_id: values.link.bundleId,
       relation_types: [values.relationType],
-      record_type: 'collaboration',
-      record_id: String(values.collaborationId),
+      record_type: recordType,
+      record_id: String(recordId),
       link_ids: [values.link.id]
     }),
     values.requestId || null,
@@ -510,7 +684,7 @@ function updateCollaborationCancelled(db, values) {
     UPDATE collaborations
     SET status='cancelled',row_version=row_version+1,updated_at=CURRENT_TIMESTAMP
     WHERE id=? AND row_version=?
-      AND status IN ('proposed','contacted','negotiating','confirmed','contract_sent','live','content_review')
+      AND status IN ('proposed','contacted','negotiating','confirmed','contract_sent','contracted','live','content_review')
   `).run(values.collaborationId, values.expectedVersion);
   if (update.changes !== 1) {
     throw serviceError(
@@ -557,7 +731,7 @@ function cancelCampaignCascade(db, values) {
      AND link.campaign_id=?
      AND link.relation_type IN ('order','execution','publication','settlement')
      AND link.revoked_at IS NULL
-    WHERE collaboration.status IN ('proposed','contacted','negotiating','confirmed','contract_sent','live','content_review')
+    WHERE collaboration.status IN ('proposed','contacted','negotiating','confirmed','contract_sent','contracted','live','content_review')
     GROUP BY collaboration.id,collaboration.row_version
     ORDER BY collaboration.id
   `).all(values.campaignId);
@@ -752,7 +926,10 @@ function createCampaignCollaborationService(db) {
           ...row,
           active_relations: row.campaign_id === null
             ? []
-            : activeRelations(db, row.campaign_id, row.id)
+            : activeRelations(db, row.campaign_id, row.id),
+          contract_confirmation: row.campaign_id === null
+            ? null
+            : contractConfirmation(db, row.campaign_id, row.id)
         }))
       : rows;
     return { collaborations };
@@ -839,6 +1016,186 @@ function createCampaignCollaborationService(db) {
         throw serviceError(409, 'ROW_VERSION_EXHAUSTED', 'Collaboration row version is exhausted.');
       }
       return { current, collaboration: get({ userId, collaborationId }) };
+    }).immediate();
+  }
+
+  function confirmContract(input) {
+    const userId = requirePositiveSafeId(input && input.userId, 'userId');
+    const collaborationId = requirePositiveSafeId(
+      input && input.collaborationId,
+      'collaborationId'
+    );
+    const body = input && input.body && typeof input.body === 'object' && !Array.isArray(input.body)
+      ? input.body
+      : null;
+    if (!body || !Number.isSafeInteger(body.campaign_id) || body.campaign_id < 1) {
+      throw serviceError(400, 'INVALID_CONTRACT_CONFIRMATION', 'Signed contract evidence is invalid.', {
+        field: 'campaign_id'
+      });
+    }
+    if (!requireActiveActor(db, userId)) {
+      throw serviceError(404, 'RECORD_NOT_FOUND', 'Collaboration was not found.');
+    }
+    get({ userId, collaborationId });
+    const campaignId = body.campaign_id;
+    const initialCustody = collaborationCustody(db, collaborationId);
+    if (
+      initialCustody.classification !== 'campaign_classified' ||
+      initialCustody.state !== 'active' ||
+      initialCustody.campaignId !== campaignId
+    ) {
+      throw serviceError(404, 'RECORD_NOT_FOUND', 'Collaboration was not found.');
+    }
+    const initialAccess = requireCampaignWrite(db, userId, campaignId);
+    const confirmation = normalizedContractConfirmation(body);
+    const key = input.idempotencyKey;
+    if (typeof key !== 'string' || !/^[A-Za-z0-9._:-]{8,200}$/.test(key)) {
+      throw serviceError(400, 'IDEMPOTENCY_REQUIRED', 'Idempotency-Key is required.');
+    }
+    const hash = requestHash({
+      method: 'POST',
+      path: `/api/collaborations/${collaborationId}/contract-confirmations`,
+      campaignId,
+      kind: 'json',
+      payload: body
+    });
+    const reservationInput = {
+      organizationId: initialAccess.campaign.org_id,
+      actorUserId: userId,
+      campaignId,
+      secondaryCampaignId: null,
+      resourceClaim: null,
+      scope: 'collaboration.update.linked',
+      key,
+      requestHash: hash,
+      expectedEventCount: 1,
+      operationTimeoutSeconds: 60
+    };
+
+    return db.transaction(() => {
+      const access = requireCampaignWrite(db, userId, campaignId);
+      get({ userId, collaborationId });
+      const custody = collaborationCustody(db, collaborationId);
+      if (
+        custody.classification !== 'campaign_classified' ||
+        custody.state !== 'active' ||
+        custody.campaignId !== campaignId
+      ) {
+        throw serviceError(404, 'RECORD_NOT_FOUND', 'Collaboration was not found.');
+      }
+      let reservation = idempotencyService.recoverExpiredInTransaction(db, reservationInput);
+      if (reservation.state === 'absent') {
+        reservation = idempotencyService.reserveProcessingInTransaction(db, reservationInput);
+      }
+      if (reservation.state !== 'reserved') return idempotencyOutcome(reservation);
+
+      const current = db.prepare('SELECT * FROM collaborations WHERE id=?').get(collaborationId);
+      if (contractConfirmation(db, campaignId, collaborationId)) {
+        throw serviceError(409, 'CONTRACT_ALREADY_CONFIRMED', 'Signed contract was already confirmed.');
+      }
+      if (current.row_version !== confirmation.expectedVersion) {
+        throw serviceError(409, 'STALE_COLLABORATION_VERSION', 'Collaboration version is stale.');
+      }
+      if (!['confirmed', 'contract_sent'].includes(current.status)) {
+        throw serviceError(409, 'INVALID_COLLABORATION_TRANSITION', 'Signed contract confirmation is not available from the current status.');
+      }
+      if (!v2CollaborationResource(current.proposal_notes)) {
+        throw serviceError(409, 'INVALID_COLLABORATION_TRANSITION', 'Signed contract confirmation requires a version 2 order.');
+      }
+      if (current.row_version === SAFE_MAX) {
+        throw serviceError(409, 'ROW_VERSION_EXHAUSTED', 'Collaboration row version is exhausted.');
+      }
+
+      const update = db.prepare(`
+        UPDATE collaborations
+        SET status='contracted',row_version=row_version+1,updated_at=CURRENT_TIMESTAMP
+        WHERE id=? AND row_version=?
+      `).run(collaborationId, confirmation.expectedVersion);
+      if (update.changes !== 1) {
+        throw serviceError(409, 'STALE_COLLABORATION_VERSION', 'Collaboration version is stale.');
+      }
+      const confirmedAt = db.prepare(`
+        SELECT replace(CURRENT_TIMESTAMP,' ','T') || '.000Z' AS now
+      `).get().now;
+      const metadata = {
+        schema_version: 1,
+        collaboration_id: collaborationId,
+        row_version: confirmation.expectedVersion + 1,
+        contract_reference: confirmation.contractReference,
+        counterparty_name: confirmation.counterpartyName,
+        signed_at: confirmation.signedAt,
+        confirmation_note: confirmation.confirmationNote,
+        confirmed_by: userId,
+        confirmed_at: confirmedAt,
+        retrieval_eligible: false
+      };
+      const evidenceContent = JSON.stringify({
+        collaboration_id: collaborationId,
+        checkpoint: 'signed_contract',
+        status: 'contracted',
+        evidence_recorded: true
+      });
+      const evidence = knowledgeService.writeCampaignKnowledgeInTransaction(db, {
+        organizationId: access.campaign.org_id,
+        campaignId,
+        createdBy: userId,
+        entryType: 'collaboration_contract_confirmation',
+        title: `Signed contract checkpoint #${collaborationId}`,
+        summary: `Signed contract evidence recorded for collaboration #${collaborationId}.`,
+        content: evidenceContent,
+        tags: ['campaign', 'collaboration', 'contract'],
+        sourceType: 'collaboration_contract_confirmation',
+        sourceId: `${collaborationId}:${confirmation.expectedVersion + 1}`,
+        visibility: 'team',
+        metadata
+      });
+      if (evidence.status !== 'created') {
+        throw serviceError(409, 'CAMPAIGN_EVIDENCE_IN_USE', 'Signed contract evidence already exists.');
+      }
+      const evidenceLink = insertLink(db, {
+        orgId: access.campaign.org_id,
+        campaignId,
+        userId,
+        recordType: 'knowledge_entry',
+        recordId: evidence.entry.id,
+        relationType: 'knowledge',
+        metadata: {
+          producer_type: 'collaboration_contract_confirmation',
+          producer_id: collaborationId,
+          source_type: 'collaboration_contract_confirmation',
+          source_id: `${collaborationId}:${confirmation.expectedVersion + 1}`
+        }
+      });
+      insertLinkAttachedEvent(db, {
+        orgId: access.campaign.org_id,
+        campaignId,
+        userId,
+        recordType: 'knowledge_entry',
+        recordId: evidence.entry.id,
+        relationType: 'knowledge',
+        link: evidenceLink,
+        requestId: input.requestId,
+        auditFingerprint: reservation.auditFingerprint,
+        reason: 'Signed contract confirmed'
+      });
+      knowledgeService.applyKnowledgeCapacityGaugePlanInTransaction(db, evidence.capacityGaugePlan);
+      collaborationArchive(db, {
+        orgId: access.campaign.org_id,
+        campaignId,
+        userId,
+        collaborationId,
+        campaignRelation: null
+      });
+      const persisted = contractConfirmation(db, campaignId, collaborationId);
+      const response = {
+        success: true,
+        campaign_id: campaignId,
+        status: 'contracted',
+        row_version: confirmation.expectedVersion + 1,
+        active_relations: activeRelations(db, campaignId, collaborationId),
+        contract_confirmation: persisted
+      };
+      return completeJson(db, reservation, hash, 201, response);
     }).immediate();
   }
 
@@ -1179,14 +1536,28 @@ function createCampaignCollaborationService(db) {
       }
       const nextStatus = body.status === undefined ? current.status : body.status;
       const allowed = {
-        confirmed: ['confirmed', 'contract_sent', 'live'],
-        contract_sent: ['contract_sent', 'live'],
+        confirmed: ['confirmed', 'contract_sent', 'contracted', 'live'],
+        contract_sent: ['contract_sent', 'contracted', 'live'],
+        contracted: ['contracted', 'live'],
         live: ['live', 'content_review', 'completed'],
         content_review: ['content_review', 'completed'],
         completed: ['completed']
       };
       if (!allowed[current.status] || !allowed[current.status].includes(nextStatus)) {
         throw serviceError(409, 'INVALID_COLLABORATION_TRANSITION', 'Collaboration transition is invalid.');
+      }
+      if (
+        nextStatus === 'contracted' &&
+        current.status !== 'contracted'
+      ) {
+        throw serviceError(409, 'INVALID_COLLABORATION_TRANSITION', 'Signed contracts must be confirmed through the contract checkpoint.');
+      }
+      if (
+        nextStatus === 'live' &&
+        ['confirmed', 'contract_sent'].includes(current.status) &&
+        isReservedV2ProposalNotes(current.proposal_notes)
+      ) {
+        throw serviceError(409, 'CONTRACT_CONFIRMATION_REQUIRED', 'Signed contract confirmation is required before execution.');
       }
       const costChanged = Object.hasOwn(body, 'cost_actual') && body.cost_actual !== current.cost_actual;
       const relations = activeRelations(db, campaignId, collaborationId);
@@ -1395,7 +1766,7 @@ function createCampaignCollaborationService(db) {
     };
   }
 
-  return Object.freeze({ createLinked, get, list, stats, updateLegacy, updateLinked });
+  return Object.freeze({ confirmContract, createLinked, get, list, stats, updateLegacy, updateLinked });
 }
 
 module.exports = {

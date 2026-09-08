@@ -324,6 +324,11 @@ const REQUEST_POLICIES = Object.freeze({
     'PUT',
     '/api/collaborations/:id'
   ),
+  COLLABORATION_CONTRACT_CONFIRM: controlJson(
+    'collaboration.contract-confirm',
+    'POST',
+    '/api/collaborations/:id/contract-confirmations'
+  ),
   LEGACY_KNOWLEDGE_CREATE: knowledgeDual(
     'legacy.knowledge.create',
     '/api/knowledge'

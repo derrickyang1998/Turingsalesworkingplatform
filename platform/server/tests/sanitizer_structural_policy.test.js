@@ -44,6 +44,13 @@ function structuralTextColumns() {
     .map((column) => `${object.name}.${column.name}`));
 }
 
+test('signed collaboration status remains a preserved structural value', () => {
+  assert.doesNotThrow(() => sanitizer._testing.assertStructuralValueAllowed(
+    'collaborations.status',
+    'contracted'
+  ));
+});
+
 test('every preserved structural text column has a closed exact-column validator that rejects its canary', () => {
   const fixture = openMigratedFixture('closed-text');
   try {

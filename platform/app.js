@@ -6156,6 +6156,7 @@ async function pushToFeishu() {
 }
 var pendingCollabInfId = null;
 var pendingCollabCreateIntentId = null;
+var pendingContractCollabId = null;
 var pendingSettlementCollabId = null;
 var m4CollabMutationOperations = {};
 var m4CollabMutationInFlight = {};
@@ -6388,7 +6389,7 @@ async function submitCollabOrder() {
     if (createMutationSlot && m4CollabMutationInFlight[createMutationSlot] === request) delete m4CollabMutationInFlight[createMutationSlot];
   }
 }
-var STATUS_LABELS = { proposed: '待提案', contacted: '已建联', negotiating: '谈判中', confirmed: '已确认', contract_sent: '合同已发', live: '执行中', content_review: '内容审核', completed: '已完成', cancelled: '已取消' };
+var STATUS_LABELS = { proposed: '待提案', contacted: '已建联', negotiating: '谈判中', confirmed: '已确认', contract_sent: '合同待回签', contracted: '已签约', live: '执行中', content_review: '内容审核', completed: '已完成', cancelled: '已取消' };
 var COLLAB_RELATION_LABELS = { order: '下单', execution: '执行', publication: '发布', settlement: '结算' };
 var COLLAB_ORDER_TYPE_LABELS = { paid: '付费合作', affiliate: '联盟分佣', gifting: '寄样置换', retainer: '长期合作' };
 async function loadCollaborations(status) {
@@ -6438,11 +6439,22 @@ function renderCollabRelationTags(collab) {
 function renderCampaignCollabActions(collab) {
   var relationSet = {};
   collabRelations(collab).forEach(function(relation) { relationSet[relation] = true; });
+  var v2Order = collabResource(collab).schema === 'turingmarket.collaboration-order.v2';
   var actions = [];
   if (collab.status === 'confirmed') {
-    actions.push('<button type="button" class="btn btn-sm" onclick="runCampaignCollabAction(' + collab.id + ',\'contract\')">合同已发</button>');
-    actions.push('<button type="button" class="btn btn-sm btn-primary" onclick="runCampaignCollabAction(' + collab.id + ',\'execution\')">开始执行</button>');
+    actions.push('<button type="button" class="btn btn-sm" onclick="runCampaignCollabAction(' + collab.id + ',\'contract\')">登记合同已发</button>');
+    if (v2Order) {
+      actions.push('<button type="button" class="btn btn-sm btn-primary" onclick="runCampaignCollabAction(' + collab.id + ',\'contract-confirmation\')">确认已签约</button>');
+    } else {
+      actions.push('<button type="button" class="btn btn-sm btn-primary" onclick="runCampaignCollabAction(' + collab.id + ',\'execution\')">开始执行</button>');
+    }
   } else if (collab.status === 'contract_sent') {
+    if (v2Order) {
+      actions.push('<button type="button" class="btn btn-sm btn-primary" onclick="runCampaignCollabAction(' + collab.id + ',\'contract-confirmation\')">确认已签约</button>');
+    } else {
+      actions.push('<button type="button" class="btn btn-sm btn-primary" onclick="runCampaignCollabAction(' + collab.id + ',\'execution\')">开始执行</button>');
+    }
+  } else if (collab.status === 'contracted') {
     actions.push('<button type="button" class="btn btn-sm btn-primary" onclick="runCampaignCollabAction(' + collab.id + ',\'execution\')">开始执行</button>');
   } else if (collab.status === 'live') {
     actions.push('<button type="button" class="btn btn-sm btn-primary" onclick="runCampaignCollabAction(' + collab.id + ',\'review\')">进入内容审核</button>');
@@ -6454,6 +6466,20 @@ function renderCampaignCollabActions(collab) {
     actions.push('<button type="button" class="btn btn-sm btn-primary" onclick="runCampaignCollabAction(' + collab.id + ',\'settlement\')">确认结算</button>');
   }
   return actions.length ? '<div style="display:flex;gap:6px;flex-wrap:wrap">' + actions.join('') + '</div>' : '<span style="font-size:11px;opacity:.55">无需操作</span>';
+}
+function renderContractConfirmation(collab) {
+  var confirmation = collab && collab.contract_confirmation;
+  if (!confirmation) {
+    if (collab && collab.status === 'contract_sent') return '<div style="margin-top:6px;font-size:10px;opacity:.65">等待合同回签</div>';
+    return '';
+  }
+  var signedAt = String(confirmation.signed_at || '').replace('T', ' ').replace('.000Z', ' UTC');
+  var confirmer = confirmation.confirmed_by_name || ('用户 #' + confirmation.confirmed_by);
+  return '<div style="margin-top:6px;font-size:10px;line-height:1.55">' +
+    '<strong>已签约 · ' + esc(confirmation.contract_reference || '-') + '</strong><br>' +
+    '签约方：' + esc(confirmation.counterparty_name || '-') + '<br>' +
+    '签约时间：' + esc(signedAt || '-') + '<br>' +
+    '确认人：' + esc(confirmer) + '</div>';
 }
 function renderCollabCommercialTerms(collab, resource) {
   if (resource.schema !== 'turingmarket.collaboration-order.v2') {
@@ -6502,7 +6528,7 @@ function renderCollabTable(data) {
       Object.keys(STATUS_LABELS).forEach(function(key) { h += '<option value="' + key + '"' + (collab.status === key ? ' selected' : '') + '>' + STATUS_LABELS[key] + '</option>'; });
       h += '</select></td>';
     }
-    h += '<td style="min-width:160px">' + (linked ? renderCollabRelationTags(collab) : '<span style="font-size:10px;opacity:.55">未接入活动</span>') + '</td>';
+    h += '<td style="min-width:180px">' + (linked ? renderCollabRelationTags(collab) + renderContractConfirmation(collab) : '<span style="font-size:10px;opacity:.55">未接入活动</span>') + '</td>';
     h += '<td style="min-width:190px">' + renderCollabCommercialTerms(collab, resource) + '</td>';
     h += '<td style="font-size:10px">' + esc([collab.timeline_start || '', collab.timeline_end || ''].filter(Boolean).join(' -> ') || '-') + '</td>';
     h += '<td style="max-width:140px;font-size:10px">' + esc(resource.order_reference || '-') + '</td>';
@@ -6568,6 +6594,10 @@ async function runCampaignCollabAction(collabId, action) {
     openCampaignSettlementModal(collab);
     return;
   }
+  if (action === 'contract-confirmation') {
+    openCampaignContractConfirmationModal(collab);
+    return;
+  }
   var actions = {
     contract: { status: 'contract_sent', reason: '从下单工作台确认合同已发' },
     execution: { status: 'live', campaign_relation: 'execution', reason: '从下单工作台确认开始执行' },
@@ -6588,6 +6618,107 @@ async function runCampaignCollabAction(collabId, action) {
   } catch (error) {
     toast(error.message, 'error');
     loadCollaborations();
+  }
+}
+function openCampaignContractConfirmationModal(collab) {
+  pendingContractCollabId = Number(collab.id);
+  var existing = document.getElementById('campaignContractConfirmationModal');
+  if (existing) existing.remove();
+  var overlay = document.createElement('div');
+  overlay.id = 'campaignContractConfirmationModal';
+  overlay.className = 'modal-overlay';
+  overlay.onclick = function(event) { if (event.target === overlay) closeCampaignContractConfirmationModal(); };
+  var resource = collabResource(collab);
+  var now = new Date();
+  var defaultSignedAt = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  overlay.innerHTML = '<div class="modal" id="campaignContractConfirmationDialog" role="dialog" aria-modal="true" aria-labelledby="campaignContractConfirmationTitle" onclick="event.stopPropagation()">' +
+    '<button type="button" class="modal-close" aria-label="关闭签约确认" title="关闭签约确认" onclick="closeCampaignContractConfirmationModal()">&times;</button>' +
+    '<h3 id="campaignContractConfirmationTitle">确认已签约</h3>' +
+    '<p style="font-size:12px;opacity:.65;margin-bottom:12px">' + esc(collab.kol_handle || '') + ' · ' + esc(collab.campaign_name || ('活动 #' + collab.campaign_id)) + '</p>' +
+    '<div class="form-grid">' +
+    '<div><label>合同 / PO 编号</label><input id="contractReference" maxlength="160" value="' + esc(resource.order_reference || '') + '"></div>' +
+    '<div><label>签约方</label><input id="contractCounterparty" maxlength="160" value="' + esc(collab.kol_handle || '') + '"></div>' +
+    '<div><label>签约时间</label><input id="contractSignedAt" type="datetime-local" value="' + esc(defaultSignedAt) + '"></div>' +
+    '</div>' +
+    '<div style="margin-top:10px"><label>确认说明</label><textarea id="contractConfirmationNote" maxlength="500" rows="3" placeholder="填写签约文件或审批记录的核对来源"></textarea></div>' +
+    '<div class="btn-group" style="justify-content:flex-end"><button type="button" class="btn btn-outline" onclick="closeCampaignContractConfirmationModal()">取消</button><button type="button" class="btn btn-primary" onclick="submitCampaignContractConfirmation()">确认签约</button></div>' +
+    '</div>';
+  document.body.appendChild(overlay);
+  if (window.TMAccessibility) {
+    window.TMAccessibility.openDialog(document.getElementById('campaignContractConfirmationDialog'), document.activeElement, closeCampaignContractConfirmationModal);
+  }
+}
+function closeCampaignContractConfirmationModal() {
+  var overlay = document.getElementById('campaignContractConfirmationModal');
+  var dialog = overlay && typeof overlay.querySelector === 'function'
+    ? overlay.querySelector('#campaignContractConfirmationDialog')
+    : document.getElementById('campaignContractConfirmationDialog');
+  if (dialog && window.TMAccessibility) window.TMAccessibility.closeDialog(dialog);
+  if (overlay) overlay.remove();
+  pendingContractCollabId = null;
+}
+async function submitCampaignContractConfirmation() {
+  var collab = findCollaborationById(pendingContractCollabId);
+  if (!isCampaignCollaboration(collab)) {
+    toast('活动订单已变化，请刷新后重试。', 'error');
+    return;
+  }
+  var contractReference = String(document.getElementById('contractReference')?.value || '').trim();
+  var counterpartyName = String(document.getElementById('contractCounterparty')?.value || '').trim();
+  var signedAtValue = String(document.getElementById('contractSignedAt')?.value || '').trim();
+  var confirmationNote = String(document.getElementById('contractConfirmationNote')?.value || '').trim();
+  var signedAtTimestamp = Date.parse(signedAtValue);
+  if (!contractReference || contractReference.length > 160 || !counterpartyName || counterpartyName.length > 160 || !Number.isFinite(signedAtTimestamp) || signedAtTimestamp > Date.now() + 5 * 60 * 1000 || !confirmationNote || confirmationNote.length > 500) {
+    toast('请完整填写有效的合同编号、签约方、签约时间和确认说明。', 'error');
+    return;
+  }
+  var body = {
+    campaign_id: Number(collab.campaign_id),
+    expected_version: Number(collab.row_version),
+    contract_reference: contractReference,
+    counterparty_name: counterpartyName,
+    signed_at: new Date(signedAtTimestamp).toISOString(),
+    confirmation_note: confirmationNote
+  };
+  var mutationSlot = m4CollabMutationSlot(collab, body, 'contract-confirmation');
+  if (m4CollabMutationInFlight[mutationSlot]) {
+    toast('签约确认正在提交，请勿重复点击。');
+    return m4CollabMutationInFlight[mutationSlot];
+  }
+  var request = Promise.resolve().then(function() {
+    return apiFetch('/collaborations/' + collab.id + '/contract-confirmations', {
+      method: 'POST',
+      headers: m4MutationHeaders('m4-contract-confirmation-', m4CollabMutationOperationKey(mutationSlot, 'm4-contract-confirmation-')),
+      body: JSON.stringify(body)
+    });
+  }).then(async function(response) {
+    var data = await response.json();
+    if (!response.ok) {
+      var error = new Error(data.error || '签约确认失败');
+      error.code = data.code;
+      throw error;
+    }
+    return data;
+  });
+  m4CollabMutationInFlight[mutationSlot] = request;
+  try {
+    await request;
+    closeCampaignContractConfirmationModal();
+    toast('签约证据已归档，可以开始执行');
+    await loadCollaborations();
+  } catch (error) {
+    toast(error.message, 'error');
+    if (error.code === 'STALE_COLLABORATION_VERSION' || error.code === 'CONTRACT_ALREADY_CONFIRMED') {
+      var conflictedCollaborationId = pendingContractCollabId;
+      await loadCollaborations();
+      var refreshedCollaboration = findCollaborationById(conflictedCollaborationId);
+      if (refreshedCollaboration && refreshedCollaboration.contract_confirmation) {
+        closeCampaignContractConfirmationModal();
+        toast('签约证据已同步，可以继续执行');
+      }
+    }
+  } finally {
+    if (m4CollabMutationInFlight[mutationSlot] === request) delete m4CollabMutationInFlight[mutationSlot];
   }
 }
 function openCampaignSettlementModal(collab) {
