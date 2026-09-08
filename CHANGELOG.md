@@ -1,5 +1,28 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.8.17-signed-contract-checkpoint (Production Deployed, 2026-09-08) - Phase 7 M4 已签合同凭证关口
+
+### 交付与范围 / Delivery And Scope
+- M4 合作执行在既有最新界面内新增“合同待回签”阶段和已签合同确认入口；确认时记录合同/采购单编号、签约对方、签署时间和确认说明，并把不可变凭证归档到对应 Campaign 的知识库。
+- `collaboration.resource.v2` 合作订单只有存在有效已签凭证时才能从已确认状态进入 `contracted`，并且只有 `contracted` 才能进入 `live`；历史 v1 订单及既有 `live`/`completed` 数据保持兼容。
+- 合同凭证的检索正文只包含通用结论，敏感合同字段保存在受控元数据中并标记为不可参与 RAG 检索；管理员审计、幂等、业务事件和权限策略沿用既有链路。
+- 最新 M4 壳层、导入/搜索/筛选/导出/飞书入口、AI/知识链路及冻结方案 PPT 均未替换。数据库 schema 保持 `v15`，本功能无迁移。
+
+### 轻量验证、审查与上线 / Focused Verification, Review, And Deployment
+- 按已批准的单功能发布节奏执行：功能合同矩阵 `21/21`、结构脱敏合同 `1/1`、可信来源合同 `3/3` 通过；部署策略修正后新鲜定向矩阵 `7/7` 通过。JavaScript 语法、差异、定向密钥扫描、冻结 PPT 哈希和本地发布预检均通过。
+- 首次候选在切换前被可信生产来源门禁拒绝，原因是新阶段被误加到历史 schema 的冻结结构策略。本轮用版本化策略修正为仅 schema v15 接受 `contracted`，并以 v14 拒绝/v15 接受测试固定边界；独立复审最终结论为 `APPROVE`，无未关闭发现。
+- 正式生产候选通过真实 Express 回放 `8/8`、发布守卫 `21/21` 和内置浏览器冒烟 `2/2`。这些生产强制门禁因涉及发布信任与恢复安全而保留，不代表恢复每轮完整平台回归。
+
+### 生产恢复与证据 / Production Recovery And Evidence
+- 正式发布运行 ID 为 `4dc1fa55e228436f97e3a5031969d875`；可恢复备份为 `/root/turingmarket/backups/v060-crm-sales-workspace-20260908-174124`，`SHA256SUMS` 共 `296` 项且全部复验通过，清单 SHA-256 为 `6f2c3bc8e7b226be198a819e0ac3888b88c13ded94efc14bfdc890616e3d7479`。
+- 候选树 SHA-256 为 `4f09be5fed90d92df7b7bd1b9904ce7660b3b6ce63b278735f952ce040e64794`；已接受解析器运行时 SHA-256 保持 `04630b2ee928ba8031a4ea5ce6435519161c19e05884813e5ec623d12adb38ce`。
+- 公网与回环 `/api/health`、M4 均返回 `200`；PM2 `turingmarket` online，Nginx 校验通过。管理员登录、全部 AI 对话审计读取、既有 3 条合作记录的合同凭证投影和异常合同路由拒绝均已在线验证，验收会话已注销。
+- SQLite schema 为 `v15`，迁移记录 `15/15`、`integrity_check=ok`、外键异常 `0`。本轮未创建真实合同凭证，也未写入真实客户活动或飞书；冻结 `ppt.js` SHA-256 仍为 `f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e`。
+
+### 后续边界 / Next Boundaries
+- 已签合同凭证关口现已上线；合同文件上传/电子签约、内容审核、发布、付款、结算和复盘仍按独立功能逐项开发，完成一项即执行定向验证、独立审查、可恢复备份、当轮上线和线上核心路径验收。
+- 真实飞书外部写入仍须在生产配置和获批测试活动具备后单独验收，不为测试目的写入真实客户数据。
+
 ## v0.8.16-collaboration-commercial-terms (Production Deployed, 2026-09-08) - Phase 7 M4 合作商业条款
 
 ### 交付与范围 / Delivery And Scope
