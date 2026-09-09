@@ -4374,6 +4374,8 @@ var m4ActiveFilterOwnerUserId = null;
 var m4Campaigns = [];
 var m4CampaignContextId = null;
 var lastCollabRows = [];
+var m4CampaignCloseoutOperation = null;
+var m4CampaignCloseoutInFlight = null;
 function getM4CampaignId() {
   if (m4CampaignContextId === 0) return null;
   if (readPositiveInteger(m4CampaignContextId) !== null) return readPositiveInteger(m4CampaignContextId);
@@ -4403,11 +4405,34 @@ function m4CampaignCommercialContext(campaignId) {
   if (campaign.owner && campaign.owner.label) parts.push('负责人：' + campaign.owner.label);
   return parts.join(' · ');
 }
+function m4CampaignCloseoutActionState(campaign) {
+  if (!campaign) {
+    return { enabled: false, label: '选择活动后复盘', hint: '请先选择需要结案的活动' };
+  }
+  if (campaign.operational_status !== 'active') {
+    return { enabled: false, label: '活动已停用', hint: '停用或取消的活动不能归档复盘' };
+  }
+  if (campaign.lifecycle_state === 'reviewed') {
+    return { enabled: false, label: '复盘已归档', hint: '该活动已经完成结案复盘' };
+  }
+  if (campaign.lifecycle_state === 'settled') {
+    return { enabled: true, label: '结案复盘', hint: '归档复盘并完成项目结案' };
+  }
+  return { enabled: false, label: '结算后复盘', hint: '活动完成结算后才可归档复盘' };
+}
 function renderM4CampaignContext() {
   var status = document.getElementById('m4CampaignContextStatus');
-  if (!status) return;
   var campaignId = getM4CampaignId();
   var campaign = getM4CampaignById(campaignId);
+  var reviewAction = document.getElementById('m4CampaignReviewAction');
+  var reviewState = m4CampaignCloseoutActionState(campaign);
+  if (reviewAction) {
+    reviewAction.disabled = !reviewState.enabled;
+    reviewAction.textContent = reviewState.label;
+    reviewAction.title = reviewState.hint;
+    reviewAction.setAttribute('aria-disabled', reviewState.enabled ? 'false' : 'true');
+  }
+  if (!status) return;
   if (campaignId === null) {
     status.textContent = '当前会创建独立合作记录。选择活动后，下单、执行、发布和结算会自动沉淀到同一活动与知识库。';
     return;
@@ -4419,6 +4444,262 @@ function renderM4CampaignContext() {
   if (campaign && campaign.operational_status) parts.push('状态：' + campaign.operational_status);
   parts.push('订单、执行、发布和结算将写入活动审计链路。');
   status.textContent = parts.join(' · ');
+}
+function m4CampaignCloseoutSnapshot(campaignId) {
+  var id = readPositiveInteger(campaignId);
+  var campaign = getM4CampaignById(id);
+  var rows = (lastCollabRows || []).filter(function(collaboration) {
+    return readPositiveInteger(collaboration && collaboration.campaign_id) === id;
+  });
+  var completed = rows.filter(function(collaboration) {
+    return collaboration && collaboration.status === 'completed';
+  }).length;
+  var approvedLedgers = rows.map(function(collaboration) {
+    return m4PaymentSettlement(collaboration);
+  }).filter(function(ledger) {
+    return ledger.status === 'approved' || ledger.status === 'legacy_settled';
+  });
+  return {
+    collaboration_count: rows.length,
+    completed_count: completed,
+    settled_count: approvedLedgers.length,
+    currency: campaign && /^[A-Z]{3}$/.test(String(campaign.currency || ''))
+      ? String(campaign.currency)
+      : 'USD',
+    creator_payment_total: approvedLedgers.reduce(function(total, ledger) {
+      var amount = Number(ledger.creator_payment_total);
+      return total + (Number.isSafeInteger(amount) ? amount : 0);
+    }, 0),
+    client_receipt_total: approvedLedgers.reduce(function(total, ledger) {
+      var amount = Number(ledger.client_receipt_total);
+      return total + (Number.isSafeInteger(amount) ? amount : 0);
+    }, 0)
+  };
+}
+function m4CampaignCloseoutContent(fields, snapshot) {
+  var lines = [
+    '## 执行快照',
+    '- 合作资源：' + snapshot.collaboration_count,
+    '- 已发布/完成：' + snapshot.completed_count,
+    '- 已结算：' + snapshot.settled_count,
+    '- 达人付款：' + snapshot.currency + ' ' + snapshot.creator_payment_total,
+    '- 客户回款：' + snapshot.currency + ' ' + snapshot.client_receipt_total,
+    '',
+    '## 项目成果',
+    fields.outcomes,
+    '',
+    '## 可复用方法',
+    fields.methods,
+    '',
+    '## 问题与根因',
+    fields.issues,
+    '',
+    '## 下一步行动',
+    fields.actions
+  ];
+  if (fields.report_reference) {
+    lines.push('', '## 客户交付关联', fields.report_reference);
+  }
+  return lines.join('\n');
+}
+function openM4CampaignCloseoutReview() {
+  if (m4CampaignCloseoutInFlight) {
+    toast('项目复盘正在归档，请稍候。');
+    return;
+  }
+  var campaign = getM4CampaignById(getM4CampaignId());
+  var actionState = m4CampaignCloseoutActionState(campaign);
+  if (!actionState.enabled) {
+    toast(actionState.hint, 'error');
+    return;
+  }
+  var existing = document.getElementById('m4CampaignCloseoutModal');
+  if (existing) existing.remove();
+  m4CampaignCloseoutOperation = null;
+  var overlay = document.createElement('div');
+  overlay.id = 'm4CampaignCloseoutModal';
+  overlay.className = 'modal-overlay';
+  overlay.onclick = function(event) {
+    if (event.target === overlay) closeM4CampaignCloseoutReview();
+  };
+  overlay.innerHTML = '<div class="modal" id="m4CampaignCloseoutDialog" role="dialog" aria-modal="true" aria-labelledby="m4CampaignCloseoutDialogTitle" onclick="event.stopPropagation()" style="width:720px;max-width:92vw">' +
+    '<button type="button" class="modal-close" aria-label="关闭项目结案复盘" title="关闭项目结案复盘" onclick="closeM4CampaignCloseoutReview()">&times;</button>' +
+    '<h3 id="m4CampaignCloseoutDialogTitle">项目结案复盘</h3>' +
+    '<p id="m4CampaignCloseoutCampaign" style="font-size:12px;opacity:.65;margin-bottom:14px"></p>' +
+    '<div class="grid grid-2">' +
+    '<div><label for="m4CampaignCloseoutTitle">知识标题</label><input id="m4CampaignCloseoutTitle" maxlength="200"></div>' +
+    '<div><label for="m4CampaignCloseoutVisibility">知识可见性</label><select id="m4CampaignCloseoutVisibility"><option value="team">团队共享</option><option value="private">仅自己</option></select></div>' +
+    '</div>' +
+    '<div style="margin-top:10px"><label for="m4CampaignCloseoutSummary">管理摘要</label><textarea id="m4CampaignCloseoutSummary" maxlength="1000" rows="3" placeholder="用一段话总结项目结果与核心判断"></textarea></div>' +
+    '<div class="grid grid-2" style="margin-top:10px">' +
+    '<div><label for="m4CampaignCloseoutOutcomes">项目成果</label><textarea id="m4CampaignCloseoutOutcomes" maxlength="8000" rows="4" placeholder="目标完成情况、关键数据与客户结果"></textarea></div>' +
+    '<div><label for="m4CampaignCloseoutMethods">可复用方法</label><textarea id="m4CampaignCloseoutMethods" maxlength="8000" rows="4" placeholder="可在下一次推广中复用的内容和执行方法"></textarea></div>' +
+    '<div><label for="m4CampaignCloseoutIssues">问题与根因</label><textarea id="m4CampaignCloseoutIssues" maxlength="8000" rows="4" placeholder="效果不佳或执行偏差及其原因"></textarea></div>' +
+    '<div><label for="m4CampaignCloseoutActions">下一步行动</label><textarea id="m4CampaignCloseoutActions" maxlength="8000" rows="4" placeholder="后续优化、负责人和建议动作"></textarea></div>' +
+    '</div>' +
+    '<div style="margin-top:10px"><label for="m4CampaignCloseoutReportRef">客户复盘报告关联（可选）</label><input id="m4CampaignCloseoutReportRef" maxlength="500" placeholder="报告名称、版本或平台内引用"></div>' +
+    '<p style="font-size:11px;line-height:1.55;color:var(--text2);margin-top:12px">确认后将归档到知识库并把活动标记为已复盘。收付款参考号不会写入复盘知识。</p>' +
+    '<div class="btn-group" style="justify-content:flex-end"><button type="button" class="btn btn-outline" onclick="closeM4CampaignCloseoutReview()">取消</button><button type="button" class="btn btn-primary" id="m4CampaignCloseoutSubmit" onclick="submitM4CampaignCloseoutReview()">确认归档并结案</button></div>' +
+    '</div>';
+  document.body.appendChild(overlay);
+  var title = document.getElementById('m4CampaignCloseoutTitle');
+  var campaignLabel = document.getElementById('m4CampaignCloseoutCampaign');
+  if (title) title.value = (campaign.name || ('活动 #' + campaign.id)) + ' 项目复盘';
+  if (campaignLabel) campaignLabel.textContent = m4CampaignLabel(campaign);
+  if (window.TMAccessibility) {
+    window.TMAccessibility.openDialog(
+      document.getElementById('m4CampaignCloseoutDialog'),
+      document.activeElement,
+      closeM4CampaignCloseoutReview
+    );
+  }
+}
+function closeM4CampaignCloseoutReview(force) {
+  if (m4CampaignCloseoutInFlight && force !== true) {
+    toast('项目复盘正在归档，请稍候。');
+    return;
+  }
+  var overlay = document.getElementById('m4CampaignCloseoutModal');
+  var dialog = overlay && typeof overlay.querySelector === 'function'
+    ? overlay.querySelector('#m4CampaignCloseoutDialog')
+    : null;
+  if (dialog && window.TMAccessibility) window.TMAccessibility.closeDialog(dialog);
+  if (overlay) overlay.remove();
+}
+async function submitM4CampaignCloseoutReview() {
+  if (m4CampaignCloseoutInFlight) return m4CampaignCloseoutInFlight;
+  var campaignId = getM4CampaignId();
+  var campaign = getM4CampaignById(campaignId);
+  var actionState = m4CampaignCloseoutActionState(campaign);
+  if (!actionState.enabled) {
+    toast(actionState.hint, 'error');
+    return;
+  }
+  var fields = {
+    title: String(document.getElementById('m4CampaignCloseoutTitle')?.value || '').trim(),
+    summary: String(document.getElementById('m4CampaignCloseoutSummary')?.value || '').trim(),
+    outcomes: String(document.getElementById('m4CampaignCloseoutOutcomes')?.value || '').trim(),
+    methods: String(document.getElementById('m4CampaignCloseoutMethods')?.value || '').trim(),
+    issues: String(document.getElementById('m4CampaignCloseoutIssues')?.value || '').trim(),
+    actions: String(document.getElementById('m4CampaignCloseoutActions')?.value || '').trim(),
+    report_reference: String(document.getElementById('m4CampaignCloseoutReportRef')?.value || '').trim(),
+    visibility: String(document.getElementById('m4CampaignCloseoutVisibility')?.value || 'team')
+  };
+  var missing = [
+    ['title', '知识标题'],
+    ['summary', '管理摘要'],
+    ['outcomes', '项目成果'],
+    ['methods', '可复用方法'],
+    ['issues', '问题与根因'],
+    ['actions', '下一步行动']
+  ].find(function(item) { return !fields[item[0]]; });
+  if (missing) {
+    toast('请填写' + missing[1] + '。', 'error');
+    return;
+  }
+  if (fields.visibility !== 'team' && fields.visibility !== 'private') {
+    toast('知识可见性无效，请重新选择。', 'error');
+    return;
+  }
+  var snapshot = m4CampaignCloseoutSnapshot(campaignId);
+  var signature = JSON.stringify({
+    campaign_id: campaignId,
+    expected_version: Number(campaign.row_version),
+    fields: fields,
+    snapshot: snapshot
+  });
+  if (!m4CampaignCloseoutOperation || m4CampaignCloseoutOperation.signature !== signature) {
+    m4CampaignCloseoutOperation = {
+      signature: signature,
+      reviewKey: m4OperationId('m4-campaign-review-'),
+      transitionKey: m4OperationId('m4-campaign-reviewed-')
+    };
+  }
+  var operation = m4CampaignCloseoutOperation;
+  var submitButton = document.getElementById('m4CampaignCloseoutSubmit');
+  if (submitButton) {
+    submitButton.disabled = true;
+    submitButton.textContent = '正在归档...';
+  }
+  m4CampaignCloseoutInFlight = (async function() {
+    try {
+      var reviewResponse = await apiFetch('/campaigns/' + campaignId + '/reviews', {
+        method: 'POST',
+        headers: {
+          'Idempotency-Key': operation.reviewKey,
+          'X-Request-Id': m4OperationId('m4-campaign-review-request-')
+        },
+        body: JSON.stringify({
+          expected_version: Number(campaign.row_version),
+          title: fields.title,
+          summary: fields.summary,
+          content: m4CampaignCloseoutContent(fields, snapshot),
+          tags: [],
+          visibility: fields.visibility,
+          reason: '项目结案复盘已人工确认'
+        })
+      });
+      var reviewData = await reviewResponse.json();
+      var transitionVersion;
+      if (reviewResponse.ok) {
+        transitionVersion = Number(reviewData.campaign && reviewData.campaign.row_version);
+      } else if (reviewData.code === 'RECORD_ALREADY_LINKED') {
+        await loadM4Campaigns();
+        campaign = getM4CampaignById(campaignId);
+        if (campaign && campaign.lifecycle_state === 'reviewed') {
+          toast('该活动已经完成结案复盘');
+          m4CampaignCloseoutOperation = null;
+          closeM4CampaignCloseoutReview(true);
+          return reviewData;
+        }
+        transitionVersion = Number(campaign && campaign.row_version);
+      } else {
+        if (reviewData.code === 'STALE_CAMPAIGN_VERSION' || reviewData.code === 'STALE_CAMPAIGN_STATE') {
+          await loadM4Campaigns();
+        }
+        throw new Error(reviewData.error || '复盘归档失败');
+      }
+      if (!Number.isSafeInteger(transitionVersion) || transitionVersion < 1) {
+        throw new Error('活动版本无效，请刷新后重试');
+      }
+      var transitionResponse = await apiFetch('/campaigns/' + campaignId + '/transitions', {
+        method: 'POST',
+        headers: {
+          'Idempotency-Key': operation.transitionKey,
+          'X-Request-Id': m4OperationId('m4-campaign-reviewed-request-')
+        },
+        body: JSON.stringify({
+          expected_state: 'settled',
+          expected_version: transitionVersion,
+          next_state: 'reviewed',
+          reason: '项目结案复盘已人工确认并归档'
+        })
+      });
+      var transitionData = await transitionResponse.json();
+      if (!transitionResponse.ok) {
+        await loadM4Campaigns();
+        var refreshed = getM4CampaignById(campaignId);
+        if (!refreshed || refreshed.lifecycle_state !== 'reviewed') {
+          throw new Error(transitionData.error || '项目结案失败');
+        }
+      }
+      await loadM4Campaigns();
+      toast('项目复盘已归档，活动已结案');
+      m4CampaignCloseoutOperation = null;
+      closeM4CampaignCloseoutReview(true);
+      return transitionData;
+    } catch (error) {
+      toast(error.message || '项目复盘归档失败', 'error');
+      return null;
+    } finally {
+      m4CampaignCloseoutInFlight = null;
+      if (submitButton) {
+        submitButton.disabled = false;
+        submitButton.textContent = '确认归档并结案';
+      }
+    }
+  })();
+  return m4CampaignCloseoutInFlight;
 }
 async function loadM4Campaigns() {
   var select = document.getElementById('m4CampaignContext');
@@ -11177,7 +11458,7 @@ function switchPage(id, options) {
     'getEditedDemand', 'syncCurDemandFromAnalysis', 'handleDemandFile', 'analyzeDemandAI',
     'switchTab', 'matchInfluencers', 'smartMatch', 'handleUpload', 'handleDrop', 'openInfUploadModal', 'closeInfUploadModal', 'handleUploadModal', 'handleInfluencerModalDrop', 'validateInfluencerImportMapping', 'confirmInfluencerImport', 'downloadInfluencerImportErrors', 'downloadInfTemplate', 'exportAll', 'exportFiltered', 'exportSelected',
     'saveM4SavedView', 'applyM4SavedView', 'deleteM4SavedView', 'clearM4Filters',
-    'toggleAll', 'syncInfluencerSelectionState', 'loadM4Campaigns', 'changeM4CampaignContext', 'startCollab', 'submitCollabOrder', 'closeCollabOrderModal', 'loadCollaborations', 'updateCollabStatus', 'runCampaignCollabAction', 'closeCampaignContractConfirmationModal', 'submitCampaignContractConfirmation', 'closeCampaignContentReviewModal', 'submitCampaignContentReview', 'closeCampaignContentReviewDecisionModal', 'submitCampaignContentReviewDecision', 'openCampaignPaymentModal', 'closeCampaignPaymentModal', 'submitCampaignPayment', 'voidCampaignPayment', 'closeCampaignSettlementModal', 'submitCampaignSettlement', 'openCampaignSettlementDecisionModal', 'closeCampaignSettlementDecisionModal', 'submitCampaignSettlementDecision',
+    'toggleAll', 'syncInfluencerSelectionState', 'loadM4Campaigns', 'changeM4CampaignContext', 'openM4CampaignCloseoutReview', 'closeM4CampaignCloseoutReview', 'submitM4CampaignCloseoutReview', 'startCollab', 'submitCollabOrder', 'closeCollabOrderModal', 'loadCollaborations', 'updateCollabStatus', 'runCampaignCollabAction', 'closeCampaignContractConfirmationModal', 'submitCampaignContractConfirmation', 'closeCampaignContentReviewModal', 'submitCampaignContentReview', 'closeCampaignContentReviewDecisionModal', 'submitCampaignContentReviewDecision', 'openCampaignPaymentModal', 'closeCampaignPaymentModal', 'submitCampaignPayment', 'voidCampaignPayment', 'closeCampaignSettlementModal', 'submitCampaignSettlement', 'openCampaignSettlementDecisionModal', 'closeCampaignSettlementDecisionModal', 'submitCampaignSettlementDecision',
     'initPerformanceMonitor', 'initPerformanceDashboard', 'refreshPerformanceMonitor', 'refreshPerformanceDashboard', 'changePerformanceCampaignContext', 'handlePerformanceTopMetricChange', 'refreshPerformanceReviewEvidence', 'generatePerformanceAiReviewDraft', 'loadPerformanceContents', 'loadPerformanceIntegrationPreview', 'loadPerformanceFeishuConnection', 'savePerformanceFeishuConnectionDraft', 'approvePerformanceFeishuConnectionDraft', 'createPerformanceContent', 'downloadPerformanceTemplate', 'handlePerformanceImport', 'handlePerformanceDrop', 'downloadPerformanceMetricsTemplate', 'handlePerformanceMetricsImport', 'handlePerformanceMetricsDrop', 'openPerformanceInputModal', 'closePerformanceInputModal', 'savePerformanceInput', 'loadPerformanceDashboard', 'loadPerformanceReviewEvidence', 'debouncedPerformanceContentSearch', 'exportPerformanceContents',
     'sendChat', 'clearChat', 'clearAIMemory', 'pushToFeishu', 'loadFeishuStatus', 'loadFeishuOutbox', 'testFeishuConnection', 'selectFeishuReconciliationDelivery', 'reconcileFeishuDelivery', 'selectFeishuRetryDelivery', 'retryFeishuDelivery',
     'switchAdminTab', 'loadAdminDashboard', 'loadAdminUsers', 'adminAddUser', 'adminCreateInvite', 'adminResetPw',

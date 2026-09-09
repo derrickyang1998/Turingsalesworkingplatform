@@ -540,6 +540,7 @@ const m4Functions = [
   'getM4CampaignById',
   'm4CampaignLabel',
   'm4CampaignCommercialContext',
+  'm4CampaignCloseoutActionState',
   'renderM4CampaignContext',
   'loadM4Campaigns',
   'm4ActiveDemandId',
