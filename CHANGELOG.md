@@ -1,5 +1,29 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.8.20-payment-settlement-checkpoint (Production Deployed, 2026-09-09) - Phase 7 M4 收付款凭证与四眼结算
+
+### 交付与范围 / Delivery And Scope
+- 在既有 M4 合作执行界面内新增客户回款、达人付款、分笔金额、支付方式、参考号、对方名称、款项批次、备注、冲销记录和完整历史，不新增或替换页面。
+- 新版 v2 合作在签约后可登记收付款；只有已完成内容审核和发布、且存在达人付款凭证时才可提交结算。金额与订单不一致时必须说明差异，零金额场景必须说明原因。
+- 财务提交人及所有有效付款记录人均不得审核同一结算；只有 Campaign 负责人或组织管理员可独立通过或退回。通过后系统以有效达人付款总额原子写入实际成本并建立既有 `settlement` 关系。
+- 所有收付款、冲销、提交和审核均以只追加 Campaign 关联知识凭证保存，并标记 `retrieval_eligible:false`；通用知识入口不能伪造 `collaboration_payment_settlement` 保留命名空间。
+- v2 订单无法再通过旧合作更新接口直接写实际成本或绕过结算关口；历史 v1/未关联合作继续保持原有行为。导入、筛选、列工作区、导出、飞书、AI/知识、方案和冻结 PPT 保持不变。
+
+### 轻量验证、审查与上线 / Focused Verification, Review, And Deployment
+- 发布前受影响矩阵 `148/148` 通过；独立审查发现并关闭一项 v2 实际成本旧接口绕过问题，修复后的付款/合作安全/M4 聚焦矩阵 `55/55` 通过，复审最终为 `APPROVE`。
+- 变更 JavaScript 语法、差异格式、定向密钥扫描、冻结 PPT 哈希和两次本地发布预检通过；生产候选通过真实 Express 回放 `8/8`、发布守卫 `21/21`、浏览器冒烟 `2/2`、迁移演练、解析器及 Nginx 门禁。
+
+### 生产恢复与证据 / Production Recovery And Evidence
+- 发布运行 ID 为 `bfc4e44c466241a2988bb95bea01e80e`；可恢复备份为 `/root/turingmarket/backups/v060-crm-sales-workspace-20260909-105724`，`SHA256SUMS` 共 `297` 项且复验通过，清单 SHA-256 为 `a1cc1ae00ccecd75d54ccedadc80931d87ce18248dfb6759e22897557607d76d`。
+- 候选树、验收事实、回放证据和解析器证据 SHA-256 分别为 `82f8d751f499286f9cd39d101d53abbea56f8a7a5fab54c9aed954f39d5778a7`、`86771ad9e85e98fe7e1b951a6d14cc82bf70e8ddbc7b7794705eff1bf5b256fa`、`417d99395c76ee080cd8fcb91964f00898cec57aa8014c1b3a23c461b85145d5`、`86a0667137d4dcbb2631ac1cb141eaa7407b26652172e2334d035eda0e28062c`。
+- 公网健康、首页和脚本为 `200`；管理员登录、身份、全部 AI 对话审计、M4 合作读取、新接口匿名 `401`、无关联历史记录受控 `404`、注销及会话撤销通过。六个变更运行文件与本地哈希一致，PM2 online 且重启计数 `0`，Nginx active。
+- 生产事务内完成 `3` 条有效收付款、`5` 条不可检索财务凭证、自审拒绝和独立结算通过；随后整笔回滚，验收残留 `0`。SQLite 迁移 `16/16`、`integrity_check=ok`、外键异常 `0`、活动会话 `0`。
+- 本轮未保留虚假客户、活动、网红、合作、付款或结算记录，也未执行真实飞书写入；冻结 `ppt.js` SHA-256 仍为 `f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e`。
+
+### 后续边界 / Next Boundaries
+- 基础人工收付款台账与四眼结算已上线；支付平台自动回单、财务对账导入、审批附件、电子签约、更完整发布保管和项目复盘继续按独立功能逐项发布。
+- 真实飞书投递与自动数据 provider 仍须使用获批生产配置和测试活动单独验收。
+
 ## v0.8.19-content-review-checkpoint (Production Deployed, 2026-09-09) - Phase 7 M4 内容审核凭证关口
 
 ### 交付与范围 / Delivery And Scope
