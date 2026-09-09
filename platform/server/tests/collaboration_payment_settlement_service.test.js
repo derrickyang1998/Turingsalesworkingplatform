@@ -431,7 +431,7 @@ test('payment corrections append a void event and reject duplicate active refere
   );
 });
 
-test('campaign-linked v2 orders cannot bypass the financial checkpoint through the legacy settlement patch', (t) => {
+test('campaign-linked v2 orders cannot bypass the financial checkpoint through legacy cost or settlement patches', (t) => {
   const db = openDatabase(t);
   const fixture = seedFixture(db);
   const service = createCampaignCollaborationService(db);
@@ -470,6 +470,27 @@ test('campaign-linked v2 orders cannot bypass the financial checkpoint through t
   );
   const before = db.prepare('SELECT cost_actual,cost_actual_confirmed,row_version FROM collaborations WHERE id=?')
     .get(fixture.collaborationId);
+
+  assert.throws(
+    () => service.updateLinked({
+      userId: fixture.operatorId,
+      collaborationId: fixture.collaborationId,
+      requestId: 'payment-legacy-cost-request-0001',
+      idempotencyKey: 'payment-legacy-cost-0001',
+      body: {
+        campaign_id: fixture.campaignId,
+        expected_version: before.row_version,
+        reason: 'Attempt to alter actual cost outside the financial checkpoint.',
+        cost_actual: 999
+      }
+    }),
+    (error) => error && error.code === 'SETTLEMENT_CHECKPOINT_REQUIRED'
+  );
+  assert.deepEqual(
+    db.prepare('SELECT cost_actual,cost_actual_confirmed,row_version FROM collaborations WHERE id=?')
+      .get(fixture.collaborationId),
+    before
+  );
 
   assert.throws(
     () => service.updateLinked({

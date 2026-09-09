@@ -3967,11 +3967,17 @@ function createCampaignCollaborationService(db) {
         throw serviceError(409, 'RESOURCE_QUOTE_LOCKED', 'A confirmed resource order locks its quoted price.');
       }
       const v2Resource = v2CollaborationResource(current.proposal_notes);
-      if (v2Resource && body.campaign_relation === 'settlement') {
+      if (
+        v2Resource &&
+        (
+          body.campaign_relation === 'settlement' ||
+          Object.hasOwn(body, 'cost_actual')
+        )
+      ) {
         throw serviceError(
           409,
           'SETTLEMENT_CHECKPOINT_REQUIRED',
-          'Version 2 orders must be settled through the payment checkpoint.'
+          'Version 2 actual costs and settlements must use the payment checkpoint.'
         );
       }
       if (v2Resource && Object.hasOwn(body, 'content_url')) {
