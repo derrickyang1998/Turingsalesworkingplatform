@@ -1,5 +1,28 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.8.24-performance-feishu-snapshot-export (Production Deployed, 2026-09-10) - 已批准飞书字段的效果快照导出
+
+### 交付与范围 / Delivery And Scope
+- 在既有内容监控飞书连接面板增加“下载当前效果快照 CSV”，不新增页面或替换最新界面；按钮明确显示当前已批准映射版本，待审草稿不会改变导出字段。
+- 后端只读取当前活动已批准的字段映射，并在一个 SQLite 读事务中取得完整当前效果快照；不再按分页拼接，超过一页的数据也具有同一读取边界，并校验总数和内容编号唯一性。
+- 导出仅包含已有最新观测值的视频；缺失字段保持为空、未观测视频不伪造为 0。CSV 使用 UTF-8 BOM，并处理换行、引号、空字符和表格公式注入。
+- 导出继续受活动管理权限和登录鉴权约束。本版本只生成可供飞书导入的投影文件，不执行真实飞书写入、provider 抓取或定时同步。
+
+### 聚焦验证、审查与上线 / Focused Verification, Review, And Deployment
+- 按单功能节奏完成投影、人工效果服务、路由、请求合同和既有面板的受影响矩阵 `91/91`；分页外 101 条快照、重复成员拒绝、跨活动下载失效、批准版本提示和部署清单均有定向覆盖。
+- JavaScript 语法、差异格式、定向凭据扫描和本地发布预检通过。独立复审确认跨活动旧下载、分页快照不稳定及待审草稿/已批准导出歧义三项 P2 均已关闭，结论为 `PASS`。
+- 标准生产候选完成真实 Express 回放 `8/8`、发布守卫 `21/21`、内置浏览器冒烟 `2/2`、迁移演练、解析器缓存复用、Nginx 和最终验收。
+
+### 生产证据 / Production Evidence
+- 生产运行 ID 为 `6fa57d30566241118639599a07b95d42`，候选 `v060-crm-sales-workspace-20260910-191704` 完成 `DEPLOY_OK`，候选 SHA-256 为 `583764c2f974484fdfb22491ecf117bcbf928a4dd3559320d351cfc943d7543f`。
+- 可恢复备份为 `/root/turingmarket/backups/v060-crm-sales-workspace-20260910-191704`；初始清单 302 项、切换快照 35 项，清单 SHA-256 分别为 `5303ee2e9cd30a63745a4e39d0ae0ac463c9514ac717f6d5ceb4192d58ce0e19` 与 `cd79934de0b622b4bedc0f3f072fd2200519d1f9d43c9a3916761a4ce1ae48c9`。
+- 公网 `/api/health`、首页和 `app.js` 均为 `200`，新导出接口匿名访问为 `401`；管理员登录、身份读取和注销通过。PM2 online 且重启计数 `0`，Nginx active；SQLite 迁移 `17/17`、`quick_check=ok`、外键异常 `0`。
+- 线上投影服务与本地 SHA-256 均为 `3ba681eb374b52a8cfbadbd09dc74ca498a94baff99a01fbc215a6d8116e7246`；冻结 `ppt.js` 仍为 `f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e`。
+
+### 后续边界 / Next Boundaries
+- 下一独立功能为效果刷新队列与数据新鲜度状态；随后接入首个经批准的数据 provider，再在生产飞书配置齐备后把同一投影合同接入真实幂等同步。
+- 继续执行“单功能定向验证、一次独立审查、备份后立即上线”；完整回归保留给阶段收口及迁移、鉴权、共享运行时或真实外部写入等高风险变更。
+
 ## v0.8.23-publication-performance-handoff (Production Deployed, 2026-09-10) - 发布凭证保管与视频效果追踪衔接
 
 ### 交付与范围 / Delivery And Scope

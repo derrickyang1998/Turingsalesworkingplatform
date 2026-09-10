@@ -1,8 +1,10 @@
 # TuringMarket Phase 7B Content Performance Intelligence And Client Review / TuringMarket 阶段 7B 内容效果智能与客户复盘
 
-**Status / 状态：** In Review. Product direction is approved for the roadmap; implementation is released slice by slice only after each slice's decision and entry gates pass. / 评审中。产品方向已批准纳入路线图；只有每个切片的决策和进入门禁通过后，才逐切片进入实施。
+**Status / 状态：** Active incremental production delivery. Manual performance, commercial approval, AI review, immutable customer reports/PPT, and the approved Feishu snapshot export are online through `v0.8.24`; scheduled provider collection and live Feishu synchronization remain pending their own gates. / 正在按增量方式持续生产交付。人工效果、商业复核、AI 复盘、不可变客户报告/PPT 及已批准飞书快照导出已上线至 `v0.8.24`；定时 provider 采集与真实飞书同步仍等待各自门禁。
 
-**Target releases / 目标版本：** `v0.8.1-performance-manual-foundation`, `v0.8.2-performance-collection-feishu`, `v0.8.3-performance-ai-review`
+**Target releases / 目标版本：** `v0.8.1-performance-manual-foundation`, `v0.8.2-performance-collection-feishu`, `v0.8.3-performance-ai-review`, with independently deployed production patches through `v0.8.24-performance-feishu-snapshot-export` / 独立生产补丁已发布至 `v0.8.24-performance-feishu-snapshot-export`
+
+**Current production checkpoint / 当前生产检查点：** `v0.8.24` uses the campaign's approved mapping to export one stable, permission-protected current-performance CSV. Pending drafts do not alter export fields, missing values remain unknown, and no external Feishu write occurs. The next approved slice is the performance refresh queue and visible freshness state, followed by one explicitly approved provider. / `v0.8.24` 已按活动批准映射导出稳定、受权限保护的当前效果 CSV；待审草稿不改变导出字段，缺失值保持未知，也不执行真实飞书写入。下一批准切片为效果刷新队列与可见新鲜度状态，随后接入一个明确批准的数据 provider。
 
 **Product owner intent / 产品目标：** Turn campaign publication links, recurring performance data, manual commercial inputs, Feishu projection, AI diagnosis, knowledge growth, and customer review PPT into one auditable operating loop. / 将项目内容链接、周期性效果数据、人工商业数据、飞书投影、AI 诊断、知识成长和客户复盘 PPT 串成一个可审计的运营闭环。
 

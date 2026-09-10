@@ -353,9 +353,9 @@ flowchart LR
 
 ### Phase 7B: Content Performance Data Foundation / 阶段 7B：内容效果数据底座
 
-**Releases / 版本：** `v0.8.1-performance-manual-foundation`, `v0.8.2-performance-collection-feishu`, `v0.8.3-performance-ai-review`; shipped patch slices through `v0.8.12-performance-commercial-four-eyes` / 已发布补丁切片至 `v0.8.12-performance-commercial-four-eyes`
+**Releases / 版本：** `v0.8.1-performance-manual-foundation`, `v0.8.2-performance-collection-feishu`, `v0.8.3-performance-ai-review`; shipped patch slices through `v0.8.24-performance-feishu-snapshot-export` / 已发布补丁切片至 `v0.8.24-performance-feishu-snapshot-export`
 
-**Latest accepted slice / 最新验收切片：** `v0.8.12` separates commercial submission from approval, forbids self-approval, keeps the last approved KPI baseline active while a replacement draft is pending, and binds aggregate financial lineage to every approved version. Production schema remains `v14`. / `v0.8.12` 已拆分商业数据提交与批准、禁止自批，并在新草稿待复核期间继续使用上一已批准 KPI 基线；项目财务汇总绑定全部已批准版本血缘，生产 schema 保持 `v14`。
+**Latest accepted slice / 最新验收切片：** `v0.8.24` exports the current observed performance snapshot through the campaign's approved Feishu field mapping, uses one atomic SQLite read boundary beyond list pagination, and keeps pending drafts, missing values, and unobserved content from changing or fabricating output. Production schema remains `v17`; live Feishu writes and automatic providers remain disabled. / `v0.8.24` 已按活动批准的飞书字段映射导出当前效果快照，使用一个 SQLite 原子读取边界覆盖列表分页之外的数据，并确保待审草稿、缺失值和未观测内容不会改变或伪造输出。生产 schema 保持 `v17`；真实飞书写入和自动 provider 仍未启用。
 
 **Scheduling rule / 排期规则：**
 
@@ -374,9 +374,10 @@ flowchart LR
 - [x] **EN:** Add campaign-controlled manual inputs for spend, client charge, clicks, conversions, orders, attributed revenue, and currency with append-only version history, distinct approval, and audit ownership.<br>**中文：** 增加活动范围内的花费、客户报价、点击、转化、订单、归因收入和币种手工输入，并保留只追加版本历史、独立复核与操作人审计。
 - [ ] **EN:** Treat the linked Phase 7B detailed specification as the normative KPI contract. It defines Core/Extended/Impression ER comparability, visible cost bases, total campaign cost, ROI as `(attributed revenue - total campaign cost) / total campaign cost`, ROAS as `attributed revenue / paid-media spend`, gross margin as `(client charge - total campaign cost) / client charge`, approval/FX/attribution requirements, and unknown handling. No alternate formula may be implemented from this summary.<br>**中文：** 以关联的阶段 7B 详细规格作为唯一权威 KPI 契约，包含核心/扩展/曝光互动率可比规则、可见成本口径、项目总成本、ROI“归因收入减项目总成本后除以项目总成本”、ROAS“归因收入除以付费媒体花费”、毛利率“客户报价减项目总成本后除以客户报价”，以及批准/汇率/归因和未知值规则；不得依据本摘要实现另一套公式。
 - [ ] **EN:** Implement an idempotent Feishu Bitable outbox with project/table mapping, batch upsert, retry, dead-letter status, last-success watermark, and platform-visible failure recovery.<br>**中文：** 实现幂等飞书多维表格 Outbox，支持项目/表格映射、批量更新或新增、重试、死信状态、最近成功水位和平台内可见的失败恢复。
+- [x] **EN:** Export an approved campaign Feishu field projection from one stable current-performance snapshot, without treating pending drafts or missing metrics as authoritative and without performing an external write.<br>**中文：** 从一个稳定的当前效果快照导出已批准活动飞书字段投影，不把待审草稿或缺失指标当作权威值，也不执行外部写入。
 - [ ] **EN:** Keep normalized snapshots and confirmed manual inputs as structured campaign lineage, not general methodology results; only human-approved conclusions become retrievable campaign knowledge, and organization-wide promotion requires a second approval, dedupe, and supersession handling.<br>**中文：** 将标准化快照和已确认人工输入保留为结构化项目血缘而非通用方法论结果；只有人工确认结论才进入可检索项目知识，晋升组织方法论还需二次批准、去重和替代处理。
-- [ ] **EN:** Deliver two distinct routes: Content Monitor for link, collection, manual-input, and exception operations; Performance Dashboard for KPI overview, Top-content ranking, trends, creator/platform/product contribution, data quality, and customer review.<br>**中文：** 交付两个独立路由：内容监控负责链接、采集、人工字段和异常操作；数据看板负责 KPI 总览、Top 内容排行、趋势、达人/平台/产品贡献、数据质量和客户复盘。
-- [ ] **EN:** Add evidence-backed AI best/weak content analysis, human approval, reusable methodology, improvement actions, immutable report snapshots, and customer-safe report/PPT generation.<br>**中文：** 增加有证据的 AI 最佳/较弱内容分析、人工批准、可复用方法论、改进动作、不可变报告快照和面向客户的报告/PPT 生成。
+- [x] **EN:** Deliver two distinct routes: Content Monitor for link, collection, manual-input, and exception operations; Performance Dashboard for KPI overview, Top-content ranking, trends, creator/platform/product contribution, data quality, and customer review.<br>**中文：** 交付两个独立路由：内容监控负责链接、采集、人工字段和异常操作；数据看板负责 KPI 总览、Top 内容排行、趋势、达人/平台/产品贡献、数据质量和客户复盘。
+- [x] **EN:** Add evidence-backed AI best/weak content analysis, human approval, reusable methodology, improvement actions, immutable report snapshots, and customer-safe report/PPT generation.<br>**中文：** 增加有证据的 AI 最佳/较弱内容分析、人工批准、可复用方法论、改进动作、不可变报告快照和面向客户的报告/PPT 生成。
 
 **Slice exit criteria / 切片退出标准：**
 
