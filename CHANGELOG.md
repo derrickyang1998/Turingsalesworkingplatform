@@ -1,5 +1,29 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.8.22-parser-build-cache (Production Deployed, 2026-09-10) - 解析器发布提速与安全刷新
+
+### 交付与范围 / Delivery And Scope
+- 发布链新增两层 root 所有、内容寻址缓存：完整密封解析器运行时及原始构建证据，以及 npm/Python 依赖闭包；精确命中完整运行时后不再重复下载依赖或执行离线构建。
+- 缓存命中必须通过规范可信输入、构建器/校验器/清单摘要、完整构建边界证据、root-only 元数据和全树重新测量；安装、自检、生产验收、切换及回滚保持原有门禁。
+- 异常缓存原子隔离；中断遗留 staging 仅在确认对应临时单元不活动后隔离，活动单元、未知名称、不安全根目录或目标歧义均失败关闭且不删除。
+- 针对已核实的 Python 3.14 与 glibc 安全包更新，明确刷新解析器身份为 `7c280e80546627a82f29010a160ad1aa720c2ca03b447b0328d610b90b82023c`、3,476 文件、435 目录、640,587,874 字节；不自动接受未来主机漂移。
+
+### 聚焦验证、审查与上线 / Focused Verification, Review, And Deployment
+- 定向发布合同 `38/38`、发布加固 `58/58`（3 项原生 Linux 跳过）、可信来源 `32/32`、解析器运行时 `54/54`（16 项原生 Linux 跳过）及启动 `5/5` 通过；PowerShell/Bash/JavaScript/JSON 语法、密钥扫描、哈希链、冻结 PPT、差异检查和本地发布预检通过。
+- 独立审查发现并关闭依赖 staging 根目录归属及中断遗留恢复两项阻塞；补充合同并修复后复审为 `APPROVE`。
+- 可选广域 `phase4_server_integration` 仍为 `31/34`，3 项为既有测试夹具预期漂移；本轮受影响的解析器清单与启动断言通过，未修改业务路由或服务。
+
+### 生产证据 / Production Evidence
+- 受保护候选 `v060-crm-sales-workspace-20260910-134314` 与运行 `3f653ae178ef499fb531711c9022fa29` 完成 `DEPLOY_OK`；真实回放 `8/8`、发布守卫 `21/21`、浏览器冒烟 `2/2`、迁移演练、解析器、容量、Nginx 和最终验收全部通过。
+- 可恢复备份为 `/root/turingmarket/backups/v060-crm-sales-workspace-20260910-134314`；初始 `SHA256SUMS` 297 项及切换快照 35 项均复验通过，清单摘要分别为 `e4226252dc4ff4c2a8977f3d896d9c7e78cbd874e146db15374267c9ac1be5fc` 与 `cee43c65c8783e767931c79a6db3f56a29a719e5e39c797a992238fead34767b`。
+- 首轮依赖获取用时 94.141 秒、离线运行时构建用时 69.748 秒；两层缓存均成功建立。线上精确输入重算、证据绑定和实时全树复核输出 `PARSER_RUNTIME_CACHE_NEXT_RELEASE_ELIGIBLE`，下一真实功能发布可直接命中完整运行时缓存。
+- 公网健康、首页与脚本均为 `200`；PM2 online 且重启 `0`，Nginx active，监听保持 `127.0.0.1:3002`。SQLite `quick_check=ok`、外键异常 `0`、迁移 `16/16`、知识分块/FTS `914/914`，冻结 PPT 哈希保持不变。
+
+### 发布节奏 / Delivery Cadence
+- 普通功能只运行受影响测试、必要语法/合同、一次独立审查、可验证备份和线上核心路径验收，功能完成即在当轮上线；阶段收口及认证、迁移、共享运行时、外部写入或跨模块高风险变更才扩大验证。
+- 不为单独输出缓存命中标记执行第二次无业务价值的生产切换；下一项真实功能发布记录首次运行态 `PARSER_RUNTIME_CACHE_REUSED` 证据。
+
+
 ## v0.8.21-campaign-closeout-review (Production Deployed, 2026-09-10) - Phase 7 M4 项目结案复盘
 
 ### 交付与范围 / Delivery And Scope

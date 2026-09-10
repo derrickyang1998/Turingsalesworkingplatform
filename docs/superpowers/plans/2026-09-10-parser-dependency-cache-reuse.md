@@ -150,7 +150,7 @@ Run the two focused Node test files plus deployment hardening tests, syntax-chec
 - Create: `archive/versions/2026-09-10-v0.8.22-parser-dependency-cache-production.md`
 - Modify: `C:\Users\29272\Documents\在线商务平台\TuringMarket-开发进度.html`
 - Create: `D:\主盘\图灵集市\图灵商务平台开发\01-版本归档\2026-09-10-v0.8.22-parser-dependency-cache-production.md`
-- Modify: `D:\主盘\图灵集市\图灵商务平台开发\CHANGELOG.md`
+- Modify: `D:\主盘\图灵集市\图灵商务平台开发\01-版本归档\CHANGELOG.md`
 
 **Interfaces:**
 - Consumes: reviewed Task 2 commit and the existing guarded `platform/deploy_v8.ps1` workflow.
@@ -160,18 +160,18 @@ Run the two focused Node test files plus deployment hardening tests, syntax-chec
 
 Give a fresh reviewer the complete diff from the pre-slice base. Block deployment on every Critical or Important finding, fix through the implementer, rerun affected tests, and obtain an explicit clean re-review.
 
-- [ ] **Step 2: Create and verify the rollback point**
+- [x] **Step 2: Create and verify the rollback point**
 
 Run the existing guarded backup path, verify its complete SHA-256 manifest, record the database digest without exposing data, and confirm the current runtime snapshot can be restored before production mutation.
 
-- [ ] **Step 3: Deploy the cache miss and patched runtime**
+- [x] **Step 3: Deploy the cache miss and patched runtime**
 
 Run `platform/deploy_v8.ps1` from the authoritative clean branch. Require `PARSER_DEPENDENCY_CACHE_BUILT`, `PARSER_RUNTIME_CACHE_BUILT`, the deliberately refreshed runtime identity, parser-aware health, successful acceptance evidence, PM2 online, Nginx active, database integrity, and no unexpected migration.
 
-- [ ] **Step 4: Prove the cache hit path without business mutation**
+- [x] **Step 4: Prove the persisted cache is eligible for the next feature release**
 
-Run a second unchanged guarded candidate only through parser preparation and its pre-mutation gates, require `PARSER_RUNTIME_CACHE_REUSED` and the absence of dependency-fetch/build execution, capture elapsed time, then stop and clean the candidate before writer acquisition or production mutation. Confirm public health remains `200` throughout.
+To follow the approved one-feature/one-deploy cadence, do not create a redundant second production cutover. After the first guarded deployment, recompute the runtime cache key from the exact live manifest, verifier, builder, source-artifact digest, and runtime projection; require the canonical cache binding and complete build evidence to match, freshly remeasure both the installed and cached trees, and require both staging directories to be empty. Record `PARSER_RUNTIME_CACHE_NEXT_RELEASE_ELIGIBLE`; the next actual feature deployment is the first operational `PARSER_RUNTIME_CACHE_REUSED` proof. / 为遵守已批准的“一功能一上线”节奏，不额外执行无业务价值的第二次生产切换；首次受保护发布后，使用线上精确清单、校验器、构建器、来源摘要和运行时投影重算缓存键，校验规范绑定与完整构建证据，重新测量已安装树和缓存树，并确认两层 staging 为空。记录 `PARSER_RUNTIME_CACHE_NEXT_RELEASE_ELIGIBLE`；下一项真实功能发布将给出首次运行态 `PARSER_RUNTIME_CACHE_REUSED` 证据。
 
-- [ ] **Step 5: Synchronize and publish records**
+- [x] **Step 5: Synchronize and publish records**
 
 Write one bilingual release record with root cause, cache key/evidence facts, first-run build time, second-run reuse time, runtime identity, backup path, online health, and reviewer verdict. Copy identical record bytes to repository archive and Obsidian, update both changelogs and the progress dashboard, commit, push GitHub, and verify local `HEAD` equals the remote branch head.
