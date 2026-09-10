@@ -78,6 +78,19 @@ function createFixture() {
     },
     getDashboard(input) { calls.push(['dashboard', input]); return { records: { total: 0 } }; }
   };
+  const freshnessService = {
+    getQueue(input) {
+      calls.push(['freshness-queue', input]);
+      return {
+        contract_version: 'performance-freshness-queue-v1',
+        campaign_id: 7,
+        summary: { total: 0, actionable: 0 },
+        queue: { total: 0, limit: 100, truncated: false },
+        items: [],
+        provider: { status: 'not_configured', dispatch_available: false }
+      };
+    }
+  };
   const feishuConnectionService = {
     getConnection(input) {
       calls.push(['feishu-connection-get', input]);
@@ -214,6 +227,7 @@ function createFixture() {
   registerPerformanceRoutes(app, {
     authMiddleware(_request, _response, next) { next(); },
     service,
+    freshnessService,
     feishuConnectionService,
     feishuProjectionService,
     aiReviewService,
@@ -224,6 +238,7 @@ function createFixture() {
     routes,
     calls,
     service,
+    freshnessService,
     feishuConnectionService,
     feishuProjectionService,
     aiReviewService,
@@ -280,6 +295,7 @@ test('registers campaign-scoped performance endpoints and forwards authenticated
     'GET /api/campaigns/:id/performance/feishu-connection',
     'GET /api/campaigns/:id/performance/feishu-projection-preview',
     'GET /api/campaigns/:id/performance/feishu-projection-preview/export',
+    'GET /api/campaigns/:id/performance/freshness-queue',
     'GET /api/campaigns/:id/performance/integration-preview',
     'GET /api/campaigns/:id/performance/review-evidence',
     'POST /api/campaigns/:id/performance/ai-review-draft',
@@ -311,6 +327,31 @@ test('registers campaign-scoped performance endpoints and forwards authenticated
     campaignId: '7',
     body: request.body
   }]);
+});
+
+test('returns the provider-independent freshness queue through a read-only campaign contract', () => {
+  const { routes, calls } = createFixture();
+  const response = invoke(routes.get('GET /api/campaigns/:id/performance/freshness-queue'), {
+    user: { id: 9 },
+    params: { id: '7' },
+    query: { ignored: 'value' },
+    requestId: 'freshness-request'
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.request_id, 'freshness-request');
+  assert.equal(response.body.provider.dispatch_available, false);
+  assert.deepEqual(calls[0], ['freshness-queue', { userId: 9, campaignId: '7' }]);
+
+  const policy = campaignContract.REQUEST_POLICIES.CAMPAIGN_PERFORMANCE_FRESHNESS_QUEUE;
+  assert.ok(policy);
+  assert.equal(policy.id, 'campaign.performance.freshness-queue');
+  assert.equal(policy.method, 'GET');
+  assert.equal(policy.pathTemplate, '/api/campaigns/:id/performance/freshness-queue');
+  assert.equal(policy.mediaKind, campaignContract.MEDIA_KINDS.EMPTY);
+
+  const serverSource = fs.readFileSync(path.resolve(__dirname, '..', 'server.js'), 'utf8');
+  assert.match(serverSource, /'CAMPAIGN_PERFORMANCE_FRESHNESS_QUEUE'/);
 });
 
 test('previews and exports the approved Feishu performance projection', () => {

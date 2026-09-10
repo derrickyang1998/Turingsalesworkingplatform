@@ -113,6 +113,32 @@ test('performance monitor offers both current-filter and full-campaign CSV expor
   assert.match(appSource, /dlFile\('content_performance_' \+ scope \+ '\.csv'/);
 });
 
+test('performance monitor shows a campaign-scoped freshness queue without pretending an external refresh ran', () => {
+  assert.match(indexHtml, /id="performanceFreshnessQueue"/);
+  assert.match(indexHtml, /id="performanceFreshnessSummary"/);
+  assert.match(indexHtml, /数据新鲜度与待更新清单/);
+  assert.match(appSource, /var performanceFreshnessRequestSequence = 0;/);
+  assert.match(appSource, /async function loadPerformanceFreshnessQueue\(\)/);
+  assert.match(appSource, /function renderPerformanceFreshnessQueue\(/);
+  assert.match(appSource, /function openPerformanceFreshnessInput\(/);
+  assert.match(appSource, /performance\/freshness-queue/);
+  assert.match(appSource, /provider\.dispatch_available/);
+  assert.match(appSource, /当前未接入自动采集/);
+  assert.match(appSource, /openPerformanceFreshnessInput\(/);
+  assert.match(appSource, /performanceContents\.push\(item\.content\)/);
+  assert.match(
+    appSource,
+    /requestSequence !== performanceFreshnessRequestSequence \|\| campaignId !== getPerformanceCampaignId\(\)/
+  );
+  assert.match(
+    appSource,
+    /function changePerformanceCampaignContext\(value\) \{[\s\S]*?performanceFreshnessRequestSequence \+= 1;[\s\S]*?performanceCampaignContextId = performancePositiveId\(value\);/
+  );
+  assert.match(componentStyles, /\.tm-performance-freshness/);
+  assert.match(componentStyles, /\.tm-performance-freshness-row/);
+  assert.match(serverSource, /CAMPAIGN_PERFORMANCE_FRESHNESS_QUEUE/);
+});
+
 test('performance monitor exposes a collapsed, campaign-scoped integration preview without dispatch controls', () => {
   assert.match(indexHtml, /id="performanceIntegrationPreview"/);
   assert.match(indexHtml, /id="performanceIntegrationStatus"/);

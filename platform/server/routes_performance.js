@@ -21,6 +21,7 @@ const {
   PerformanceFeishuProjectionServiceError,
   createPerformanceFeishuProjectionService
 } = require('./services/performance_feishu_projection_service');
+const { createPerformanceFreshnessService } = require('./services/performance_freshness_service');
 
 function requestId(request) {
   return request.requestId ||
@@ -112,6 +113,12 @@ function registerPerformanceRoutes(app, options = {}) {
   if (!service || typeof service.listContents !== 'function' || typeof service.getObservationHistory !== 'function' || typeof service.getIntegrationPreview !== 'function' || typeof service.exportContents !== 'function' || typeof service.getDashboard !== 'function' || typeof service.getReviewEvidence !== 'function') {
     throw new TypeError('A performance manual service is required.');
   }
+  const freshnessService = options.freshnessService || createPerformanceFreshnessService({
+    performanceService: service
+  });
+  if (!freshnessService || typeof freshnessService.getQueue !== 'function') {
+    throw new TypeError('A performance freshness service is required.');
+  }
   const feishuConnectionService = options.feishuConnectionService ||
     createPerformanceFeishuConnectionService(options.db);
   if (!feishuConnectionService ||
@@ -165,6 +172,17 @@ function registerPerformanceRoutes(app, options = {}) {
         userId: authenticatedUserId(request),
         campaignId: request.params.id,
         query: request.query || {}
+      }));
+    } catch (error) {
+      return sendError(request, response, error);
+    }
+  });
+
+  app.get('/api/campaigns/:id/performance/freshness-queue', options.authMiddleware, (request, response) => {
+    try {
+      return sendResult(request, response, freshnessService.getQueue({
+        userId: authenticatedUserId(request),
+        campaignId: request.params.id
       }));
     } catch (error) {
       return sendError(request, response, error);

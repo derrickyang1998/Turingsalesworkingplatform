@@ -9108,6 +9108,8 @@ var performanceExportInFlight = null;
 var performanceObservationHistoryRequestSequence = 0;
 var activePerformanceObservationHistoryRequest = null;
 var performanceObservationHistoryState = null;
+var performanceFreshnessQueue = null;
+var performanceFreshnessRequestSequence = 0;
 
 function performancePositiveId(value) {
   return typeof readPositiveInteger === 'function' ? readPositiveInteger(value) : null;
@@ -9227,12 +9229,14 @@ async function loadPerformanceCampaigns() {
 function changePerformanceCampaignContext(value) {
   invalidatePerformanceAiReviewDraft('活动已切换，请基于当前数据重新生成草稿。');
   invalidatePerformanceFeishuSnapshotExport();
+  performanceFreshnessRequestSequence += 1;
   performanceCampaignContextId = performancePositiveId(value);
   preparePerformanceCustomerReportForm(true);
   syncPerformanceCampaignSelectors();
   var campaign = getPerformanceCampaignById(getPerformanceCampaignId());
   setPerformanceStatus(campaign ? ('当前活动：' + performanceCampaignLabel(campaign)) : '请选择推广活动。');
   loadPerformanceContents();
+  loadPerformanceFreshnessQueue();
   loadPerformanceIntegrationPreview().then(function() { return loadPerformanceFeishuConnection(); });
   loadPerformanceDashboard();
   loadPerformanceReviewEvidence();
@@ -9241,7 +9245,7 @@ function changePerformanceCampaignContext(value) {
 
 function refreshPerformanceMonitor() {
   return loadPerformanceCampaigns().then(function() {
-    return Promise.all([loadPerformanceContents(), loadPerformanceIntegrationPreview()]).then(function() {
+    return Promise.all([loadPerformanceContents(), loadPerformanceFreshnessQueue(), loadPerformanceIntegrationPreview()]).then(function() {
       return loadPerformanceFeishuConnection();
     });
   });
@@ -9261,7 +9265,7 @@ function refreshPerformanceDashboard() {
 
 function initPerformanceMonitor() {
   return loadPerformanceCampaigns().then(function() {
-    return Promise.all([loadPerformanceContents(), loadPerformanceIntegrationPreview()]).then(function() {
+    return Promise.all([loadPerformanceContents(), loadPerformanceFreshnessQueue(), loadPerformanceIntegrationPreview()]).then(function() {
       return loadPerformanceFeishuConnection();
     });
   });
@@ -9291,7 +9295,150 @@ function refreshPerformanceReviewEvidence() {
 
 async function refreshPerformanceInsightsAfterMutation() {
   invalidatePerformanceAiReviewDraft('内容数据已更新，请基于最新快照重新生成草稿。');
-  await Promise.all([loadPerformanceDashboard(), loadPerformanceReviewEvidence()]);
+  await Promise.all([loadPerformanceFreshnessQueue(), loadPerformanceDashboard(), loadPerformanceReviewEvidence()]);
+}
+
+function performanceFreshnessStateLabel(value) {
+  var labels = {
+    stale: '已超时',
+    unobserved: '待首次录入',
+    date_required: '缺少发布日期',
+    data_issue: '时间数据异常',
+    due: '到期待更新'
+  };
+  return labels[value] || value || '待核对';
+}
+
+function performanceFreshnessReasonLabel(value) {
+  var labels = {
+    freshness_sla_missed: '已超过当前更新频率的两倍时限',
+    first_observation_required: '尚无任何效果数据快照',
+    published_at_required: '需要补充发布日期后才能计算更新节奏',
+    published_at_invalid: '发布日期格式无法识别',
+    observed_at_invalid: '最近数据更新时间格式无法识别',
+    observed_at_in_future: '最近数据更新时间晚于当前时间',
+    observation_precedes_publication: '最近数据更新时间早于发布日期',
+    scheduled_update_due: '已到当前阶段的计划更新时间'
+  };
+  return labels[value] || '需要核对当前数据';
+}
+
+function performanceFreshnessPercent(value) {
+  var number = Number(value);
+  return Number.isFinite(number) ? (number * 100).toFixed(number >= 0.1 ? 0 : 1) + '%' : '-';
+}
+
+function performanceSafeExternalUrl(value) {
+  if (typeof value !== 'string' || !value.trim()) return '';
+  try {
+    var parsed = new URL(value.trim());
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? parsed.href : '';
+  } catch (error) {
+    return '';
+  }
+}
+
+function renderPerformanceFreshnessQueue(data) {
+  performanceFreshnessQueue = data || null;
+  var container = document.getElementById('performanceFreshnessQueue');
+  var summaryContainer = document.getElementById('performanceFreshnessSummary');
+  var status = document.getElementById('performanceFreshnessStatus');
+  if (!container || !summaryContainer) return;
+  if (!data) {
+    summaryContainer.innerHTML = '';
+    container.innerHTML = '<div class="tm-state-empty">选择推广活动后显示待更新内容。</div>';
+    if (status) status.textContent = '选择推广活动后核对更新节奏。';
+    return;
+  }
+  var summary = data.summary || {};
+  var queue = data.queue || {};
+  var provider = data.provider || {};
+  var capabilities = data.capabilities || {};
+  performanceCapabilities = Object.assign({}, performanceCapabilities || {}, capabilities);
+  summaryContainer.innerHTML = [
+    ['待更新', summary.actionable],
+    ['已超时', summary.stale],
+    ['尚未录入', summary.unobserved],
+    ['数据覆盖', performanceFreshnessPercent(summary.observation_coverage)]
+  ].map(function(item) {
+    return '<div><span>' + esc(item[0]) + '</span><strong>' + esc(item[1] === undefined ? 0 : item[1]) + '</strong></div>';
+  }).join('');
+  var providerNote = provider.status === 'not_configured' && provider.dispatch_available === false
+    ? '当前未接入自动采集；清单会在手工录入或批量更新后自动重算。'
+    : '更新来源状态已加载。';
+  if (status) status.textContent = providerNote;
+  var items = Array.isArray(data.items) ? data.items : [];
+  if (!items.length) {
+    container.innerHTML = '<div class="tm-state-empty">当前没有待更新内容。</div>';
+    return;
+  }
+  var rows = items.map(function(item) {
+    var title = item.creator_name || item.product || item.original_url || ('内容 #' + item.publication_id);
+    var safeUrl = performanceSafeExternalUrl(item.original_url);
+    var timing = item.last_observed_at
+      ? ('上次：' + performanceDate(item.last_observed_at) + (item.next_due_at ? ' · 应更新：' + performanceDate(item.next_due_at) : ''))
+      : (item.published_at ? '发布：' + performanceDate(item.published_at) : '发布日期待补充');
+    var action = item.manual_update_available && capabilities.can_request_manual_update && item.state !== 'date_required'
+      ? '<button class="btn btn-outline btn-sm" type="button" onclick="openPerformanceFreshnessInput(' + Number(item.publication_id) + ')">补录指标</button>'
+      : '';
+    return '<div class="tm-performance-freshness-row">'
+      + '<span class="tm-performance-freshness-state is-' + esc(item.state || 'unknown') + '">' + esc(performanceFreshnessStateLabel(item.state)) + '</span>'
+      + '<div class="tm-performance-freshness-content">' + (safeUrl
+        ? '<a href="' + esc(safeUrl) + '" target="_blank" rel="noopener noreferrer">' + esc(title) + '</a>'
+        : '<strong>' + esc(title) + '</strong>')
+      + '<span>' + esc(performanceFreshnessReasonLabel(item.reason_code)) + ' · ' + esc(timing) + '</span></div>'
+      + action + '</div>';
+  }).join('');
+  container.innerHTML = rows + (queue.truncated
+    ? '<p class="tm-performance-freshness-footnote">当前显示前 ' + Number(queue.limit || items.length) + ' 条，共 ' + Number(queue.total || items.length) + ' 条待更新。</p>'
+    : '');
+  if (window.TMAccessibility) window.TMAccessibility.refresh();
+}
+
+function openPerformanceFreshnessInput(publicationId) {
+  var normalizedId = performancePositiveId(publicationId);
+  var items = performanceFreshnessQueue && Array.isArray(performanceFreshnessQueue.items)
+    ? performanceFreshnessQueue.items
+    : [];
+  var item = items.find(function(candidate) {
+    return Number(candidate && candidate.publication_id) === normalizedId;
+  });
+  if (normalizedId === null || !item || !item.content) {
+    toast('待更新清单已变化，请先更新状态。', 'error');
+    return;
+  }
+  var existingIndex = performanceContents.findIndex(function(content) {
+    return Number(content && content.id) === normalizedId;
+  });
+  if (existingIndex >= 0) performanceContents[existingIndex] = item.content;
+  else performanceContents.push(item.content);
+  openPerformanceInputModal(normalizedId);
+}
+
+async function loadPerformanceFreshnessQueue() {
+  var campaignId = getPerformanceCampaignId();
+  var container = document.getElementById('performanceFreshnessQueue');
+  var status = document.getElementById('performanceFreshnessStatus');
+  var requestSequence = ++performanceFreshnessRequestSequence;
+  if (campaignId === null) {
+    renderPerformanceFreshnessQueue(null);
+    return null;
+  }
+  if (status) status.textContent = '正在核对数据更新时间...';
+  if (container) container.innerHTML = '<div class="tm-state-loading">正在生成待更新清单...</div>';
+  try {
+    var response = await apiFetch('/campaigns/' + encodeURIComponent(campaignId) + '/performance/freshness-queue');
+    var data = await response.json();
+    if (requestSequence !== performanceFreshnessRequestSequence || campaignId !== getPerformanceCampaignId()) return null;
+    if (!response.ok) throw new Error(data.error || '数据新鲜度加载失败');
+    renderPerformanceFreshnessQueue(data);
+    return data;
+  } catch (error) {
+    if (requestSequence !== performanceFreshnessRequestSequence || campaignId !== getPerformanceCampaignId()) return null;
+    if (status) status.textContent = error.message || '数据新鲜度加载失败';
+    if (container) container.innerHTML = '<div class="tm-state-error">' + esc(error.message || '数据新鲜度加载失败') + '</div>';
+    return null;
+  }
 }
 
 function performanceTextValue(id) {
@@ -11831,7 +11978,7 @@ function switchPage(id, options) {
     'switchTab', 'matchInfluencers', 'smartMatch', 'handleUpload', 'handleDrop', 'openInfUploadModal', 'closeInfUploadModal', 'handleUploadModal', 'handleInfluencerModalDrop', 'validateInfluencerImportMapping', 'confirmInfluencerImport', 'downloadInfluencerImportErrors', 'downloadInfTemplate', 'exportAll', 'exportFiltered', 'exportSelected',
     'saveM4SavedView', 'applyM4SavedView', 'deleteM4SavedView', 'clearM4Filters',
     'toggleAll', 'syncInfluencerSelectionState', 'loadM4Campaigns', 'changeM4CampaignContext', 'openM4CampaignCloseoutReview', 'closeM4CampaignCloseoutReview', 'submitM4CampaignCloseoutReview', 'startCollab', 'submitCollabOrder', 'closeCollabOrderModal', 'loadCollaborations', 'updateCollabStatus', 'runCampaignCollabAction', 'closeCampaignContractConfirmationModal', 'submitCampaignContractConfirmation', 'closeCampaignContentReviewModal', 'submitCampaignContentReview', 'closeCampaignContentReviewDecisionModal', 'submitCampaignContentReviewDecision', 'renderCampaignPublicationRows', 'syncCampaignPublicationDraftRows', 'addCampaignPublicationRow', 'removeCampaignPublicationRow', 'openCampaignPublicationModal', 'closeCampaignPublicationModal', 'submitCampaignPublicationConfirmation', 'openCollaborationPerformanceTracking', 'openCampaignPaymentModal', 'closeCampaignPaymentModal', 'submitCampaignPayment', 'voidCampaignPayment', 'closeCampaignSettlementModal', 'submitCampaignSettlement', 'openCampaignSettlementDecisionModal', 'closeCampaignSettlementDecisionModal', 'submitCampaignSettlementDecision',
-    'initPerformanceMonitor', 'initPerformanceDashboard', 'refreshPerformanceMonitor', 'refreshPerformanceDashboard', 'changePerformanceCampaignContext', 'handlePerformanceTopMetricChange', 'refreshPerformanceReviewEvidence', 'generatePerformanceAiReviewDraft', 'loadPerformanceContents', 'loadPerformanceIntegrationPreview', 'loadPerformanceFeishuConnection', 'savePerformanceFeishuConnectionDraft', 'approvePerformanceFeishuConnectionDraft', 'downloadPerformanceFeishuSnapshot', 'createPerformanceContent', 'downloadPerformanceTemplate', 'handlePerformanceImport', 'handlePerformanceDrop', 'downloadPerformanceMetricsTemplate', 'handlePerformanceMetricsImport', 'handlePerformanceMetricsDrop', 'openPerformanceInputModal', 'closePerformanceInputModal', 'savePerformanceInput', 'loadPerformanceDashboard', 'loadPerformanceReviewEvidence', 'debouncedPerformanceContentSearch', 'exportPerformanceContents',
+    'initPerformanceMonitor', 'initPerformanceDashboard', 'refreshPerformanceMonitor', 'refreshPerformanceDashboard', 'changePerformanceCampaignContext', 'handlePerformanceTopMetricChange', 'refreshPerformanceReviewEvidence', 'generatePerformanceAiReviewDraft', 'loadPerformanceContents', 'loadPerformanceFreshnessQueue', 'openPerformanceFreshnessInput', 'loadPerformanceIntegrationPreview', 'loadPerformanceFeishuConnection', 'savePerformanceFeishuConnectionDraft', 'approvePerformanceFeishuConnectionDraft', 'downloadPerformanceFeishuSnapshot', 'createPerformanceContent', 'downloadPerformanceTemplate', 'handlePerformanceImport', 'handlePerformanceDrop', 'downloadPerformanceMetricsTemplate', 'handlePerformanceMetricsImport', 'handlePerformanceMetricsDrop', 'openPerformanceInputModal', 'closePerformanceInputModal', 'savePerformanceInput', 'loadPerformanceDashboard', 'loadPerformanceReviewEvidence', 'debouncedPerformanceContentSearch', 'exportPerformanceContents',
     'sendChat', 'clearChat', 'clearAIMemory', 'pushToFeishu', 'loadFeishuStatus', 'loadFeishuOutbox', 'testFeishuConnection', 'selectFeishuReconciliationDelivery', 'reconcileFeishuDelivery', 'selectFeishuRetryDelivery', 'retryFeishuDelivery',
     'switchAdminTab', 'loadAdminDashboard', 'loadAdminUsers', 'adminAddUser', 'adminCreateInvite', 'adminResetPw',
     'wfUndo', 'wfRedo', 'wfClearCanvas', 'wfSaveTemplate', 'wfPublishTemplate', 'wfResetTaskFilters', 'wfLoadTasks', 'wfLoadInstances',

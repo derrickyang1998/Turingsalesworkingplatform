@@ -1274,6 +1274,146 @@ thead th {
   font-size: 12px;
 }
 
+.tm-performance-freshness {
+  display: grid;
+  gap: var(--tm-space-3);
+  margin-top: var(--tm-space-3);
+  padding: var(--tm-space-3) 0;
+  border-top: 1px solid var(--tm-color-border);
+  border-bottom: 1px solid var(--tm-color-border);
+}
+
+.tm-performance-freshness-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--tm-space-3);
+}
+
+.tm-performance-freshness-heading h4 {
+  margin: 0;
+  color: var(--tm-color-text);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.tm-performance-freshness-heading .tm-metric-note {
+  margin: var(--tm-space-1) 0 0;
+}
+
+.tm-performance-freshness-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--tm-space-2);
+}
+
+.tm-performance-freshness-summary > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--tm-space-2);
+  min-width: 0;
+  padding: var(--tm-space-2) 0;
+  border-bottom: 1px solid var(--tm-color-border);
+}
+
+.tm-performance-freshness-summary span {
+  color: var(--tm-color-text-muted);
+  font-size: 11px;
+}
+
+.tm-performance-freshness-summary strong {
+  color: var(--tm-color-text);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.tm-performance-freshness-queue {
+  display: grid;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.tm-performance-freshness-row {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr) auto;
+  gap: var(--tm-space-3);
+  align-items: center;
+  min-width: 0;
+  padding: var(--tm-space-2) 0;
+  border-bottom: 1px solid var(--tm-color-border);
+}
+
+.tm-performance-freshness-row:last-child {
+  border-bottom: 0;
+}
+
+.tm-performance-freshness-state {
+  color: var(--tm-color-text-muted);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.tm-performance-freshness-state.is-stale,
+.tm-performance-freshness-state.is-data_issue {
+  color: var(--tm-color-danger);
+}
+
+.tm-performance-freshness-state.is-due,
+.tm-performance-freshness-state.is-unobserved,
+.tm-performance-freshness-state.is-date_required {
+  color: var(--tm-color-warning, #9a6700);
+}
+
+.tm-performance-freshness-content {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.tm-performance-freshness-content a,
+.tm-performance-freshness-content strong {
+  display: block;
+  overflow: hidden;
+  color: var(--tm-color-text);
+  font-size: 12px;
+  font-weight: 650;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tm-performance-freshness-content a:hover {
+  color: var(--tm-color-accent-hover);
+  text-decoration: underline;
+}
+
+.tm-performance-freshness-content span,
+.tm-performance-freshness-footnote {
+  color: var(--tm-color-text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.tm-performance-freshness-footnote {
+  margin: var(--tm-space-2) 0 0;
+}
+
+@media (max-width: 760px) {
+  .tm-performance-freshness-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .tm-performance-freshness-row {
+    grid-template-columns: 80px minmax(0, 1fr);
+  }
+
+  .tm-performance-freshness-row .btn {
+    grid-column: 2;
+    justify-self: start;
+  }
+}
+
 .tm-performance-filters {
   display: grid;
   grid-template-columns: minmax(220px, 1fr) minmax(130px, 180px) minmax(130px, 180px);
