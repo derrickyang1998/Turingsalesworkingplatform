@@ -802,7 +802,7 @@ function serializePublication(row, capabilities) {
   const output = {
     id: row.id,
     campaign_id: row.campaign_id,
-    original_url: row.original_url,
+    original_url: row.lifecycle_effective_url || row.original_url,
     canonical_url: row.canonical_url,
     canonical_identity: row.canonical_identity,
     platform: row.platform,
@@ -815,6 +815,10 @@ function serializePublication(row, capabilities) {
     source_mode: row.source_mode,
     published_at: row.published_at,
     created_at: row.created_at,
+    lifecycle_managed: Boolean(row.lifecycle_custody_id),
+    publication_custody_id: row.lifecycle_custody_id || null,
+    publication_version: row.lifecycle_version_number || null,
+    tracking_status: row.lifecycle_tracking_state === 'paused' ? 'paused' : 'active',
     latest_observation: latestObservation,
     metrics: apiMetrics(metrics, capabilities.can_view_commercial)
   };
@@ -1236,6 +1240,10 @@ function createPerformanceManualService(db, options = {}) {
     throw new TypeError('A SQLite database is required.');
   }
   const getCampaignAccess = options.getCampaignAccess || defaultGetCampaignAccess;
+  const lifecycleAvailable = Boolean(db.prepare(`
+    SELECT 1 FROM sqlite_schema
+    WHERE type='table' AND name='collaboration_publication_lifecycle_versions'
+  `).get());
 
   function requireAccess(userIdValue, campaignIdValue, mode) {
     const userId = canonicalId(userIdValue);
@@ -1326,7 +1334,69 @@ function createPerformanceManualService(db, options = {}) {
   }
 
   function currentRows(context, query, paged) {
-    const where = ['publication.org_id=?', 'publication.campaign_id=?'];
+    const effectiveUrlExpression = lifecycleAvailable
+      ? 'COALESCE(lifecycle_version.effective_url,publication.original_url)'
+      : 'publication.original_url';
+    const lifecycleProjection = lifecycleAvailable ? `
+        lifecycle_custody.id AS lifecycle_custody_id,
+        COALESCE(lifecycle_version.lifecycle_version,
+          CASE WHEN lifecycle_custody.id IS NOT NULL THEN 1 ELSE NULL END
+        ) AS lifecycle_version_number,
+        COALESCE(lifecycle_version.tracking_state,'active') AS lifecycle_tracking_state,
+        COALESCE(lifecycle_version.effective_url,publication.original_url) AS lifecycle_effective_url`
+      : `NULL AS lifecycle_custody_id,
+        NULL AS lifecycle_version_number,
+        NULL AS lifecycle_tracking_state,
+        publication.original_url AS lifecycle_effective_url`;
+    const lifecycleJoins = lifecycleAvailable ? `
+      LEFT JOIN collaboration_publication_custody lifecycle_custody
+        ON lifecycle_custody.org_id=publication.org_id
+       AND lifecycle_custody.campaign_id=publication.campaign_id
+       AND COALESCE((
+          SELECT current_version.publication_id
+          FROM collaboration_publication_lifecycle_versions current_version
+          WHERE current_version.custody_id=lifecycle_custody.id
+          ORDER BY current_version.lifecycle_version DESC LIMIT 1
+        ),lifecycle_custody.publication_id)=publication.id
+      LEFT JOIN collaboration_publication_lifecycle_versions lifecycle_version
+        ON lifecycle_version.id=(
+          SELECT current_version.id
+          FROM collaboration_publication_lifecycle_versions current_version
+          WHERE current_version.custody_id=lifecycle_custody.id
+          ORDER BY current_version.lifecycle_version DESC LIMIT 1
+        )` : '';
+    const where = [
+      'publication.org_id=?',
+      'publication.campaign_id=?'
+    ];
+    if (lifecycleAvailable) {
+      where.push(`(
+        NOT EXISTS (
+          SELECT 1 FROM collaboration_publication_custody managed
+          WHERE managed.org_id=publication.org_id
+            AND managed.campaign_id=publication.campaign_id
+            AND (
+              managed.publication_id=publication.id OR EXISTS (
+                SELECT 1 FROM collaboration_publication_lifecycle_versions historical
+                WHERE historical.custody_id=managed.id
+                  AND historical.publication_id=publication.id
+              )
+            )
+        )
+        OR EXISTS (
+          SELECT 1 FROM collaboration_publication_custody current_custody
+          LEFT JOIN collaboration_publication_lifecycle_versions current_version
+            ON current_version.id=(
+              SELECT candidate.id FROM collaboration_publication_lifecycle_versions candidate
+              WHERE candidate.custody_id=current_custody.id
+              ORDER BY candidate.lifecycle_version DESC LIMIT 1
+            )
+          WHERE current_custody.org_id=publication.org_id
+            AND current_custody.campaign_id=publication.campaign_id
+            AND COALESCE(current_version.publication_id,current_custody.publication_id)=publication.id
+        )
+      )`);
+    }
     const params = [context.access.campaign.org_id, context.campaignId];
     if (query.platform) {
       where.push('publication.platform=?');
@@ -1339,7 +1409,8 @@ function createPerformanceManualService(db, options = {}) {
     if (query.q) {
       const needle = '%' + query.q.toLowerCase() + '%';
       where.push(`(
-        lower(publication.original_url) LIKE ? OR lower(publication.canonical_url) LIKE ? OR
+        lower(${effectiveUrlExpression}) LIKE ? OR
+        lower(publication.canonical_url) LIKE ? OR
         lower(coalesce(publication.creator_id,'')) LIKE ? OR lower(coalesce(publication.creator_name,'')) LIKE ? OR
         lower(coalesce(publication.product,'')) LIKE ? OR lower(publication.tags_json) LIKE ? OR
         lower(publication.search_payload_json) LIKE ?
@@ -1354,7 +1425,12 @@ function createPerformanceManualService(db, options = {}) {
       where.push('publication.id=?');
       params.push(contentId);
     }
-    const total = db.prepare(`SELECT COUNT(*) AS count FROM campaign_publications publication WHERE ${where.join(' AND ')}`)
+    const total = db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM campaign_publications publication
+      ${lifecycleJoins}
+      WHERE ${where.join(' AND ')}
+    `)
       .get(...params).count;
     const limitClause = paged ? ' LIMIT ? OFFSET ?' : '';
     const listParams = paged ? [...params, query.limit, query.offset] : params;
@@ -1374,8 +1450,10 @@ function createPerformanceManualService(db, options = {}) {
         approved_manual.created_by AS approved_manual_created_by,
         approved_manual.created_at AS approved_manual_created_at,
         approved_manual.approved_by AS approved_manual_approved_by,
-        approved_manual.approved_at AS approved_manual_approved_at
+        approved_manual.approved_at AS approved_manual_approved_at,
+        ${lifecycleProjection}
       FROM campaign_publications publication
+      ${lifecycleJoins}
       LEFT JOIN performance_metric_observations observation ON observation.id=(
         SELECT current_observation.id
         FROM performance_metric_observations current_observation
@@ -1417,6 +1495,43 @@ function createPerformanceManualService(db, options = {}) {
     `).get(contentId, context.access.campaign.org_id, context.campaignId);
     if (!row) throw serviceError(404, 'PERFORMANCE_CONTENT_NOT_FOUND', 'Content was not found.');
     return contentId;
+  }
+
+  function assertMetricTrackingOpen(context, contentId) {
+    if (!lifecycleAvailable) return;
+    const lifecycle = db.prepare(`
+      SELECT
+        custody.id AS custody_id,
+        COALESCE(current_version.publication_id,custody.publication_id) AS current_publication_id,
+        COALESCE(current_version.tracking_state,'active') AS tracking_state
+      FROM campaign_publications publication
+      LEFT JOIN collaboration_publication_custody custody
+        ON custody.org_id=publication.org_id
+       AND custody.campaign_id=publication.campaign_id
+       AND (
+         custody.publication_id=publication.id OR EXISTS (
+           SELECT 1 FROM collaboration_publication_lifecycle_versions historical
+           WHERE historical.custody_id=custody.id
+             AND historical.publication_id=publication.id
+         )
+       )
+      LEFT JOIN collaboration_publication_lifecycle_versions current_version
+        ON current_version.id=(
+          SELECT candidate.id FROM collaboration_publication_lifecycle_versions candidate
+          WHERE candidate.custody_id=custody.id
+          ORDER BY candidate.lifecycle_version DESC LIMIT 1
+        )
+      WHERE publication.id=? AND publication.org_id=? AND publication.campaign_id=?
+    `).get(contentId, context.access.campaign.org_id, context.campaignId);
+    if (!lifecycle) {
+      throw serviceError(404, 'PERFORMANCE_CONTENT_NOT_FOUND', 'Content was not found.');
+    }
+    if (lifecycle.custody_id && Number(lifecycle.current_publication_id) !== contentId) {
+      throw serviceError(409, 'PERFORMANCE_CONTENT_SUPERSEDED', 'Superseded publication versions cannot receive new metrics.');
+    }
+    if (lifecycle.tracking_state === 'paused') {
+      throw serviceError(409, 'PERFORMANCE_TRACKING_PAUSED', 'Paused publication tracking cannot receive new metrics.');
+    }
   }
 
   function createContent(input) {
@@ -1496,8 +1611,9 @@ function createPerformanceManualService(db, options = {}) {
       const identities = prepared.drafts.map((draft) => draft.canonical_identity);
       const placeholders = identities.map(() => '?').join(',');
       db.prepare(`
-        SELECT canonical_identity FROM campaign_publications
-        WHERE org_id=? AND campaign_id=? AND canonical_identity IN (${placeholders})
+        SELECT publication.canonical_identity FROM campaign_publications publication
+        WHERE publication.org_id=? AND publication.campaign_id=?
+          AND publication.canonical_identity IN (${placeholders})
       `).all(context.access.campaign.org_id, context.campaignId, ...identities)
         .forEach((row) => existing.add(row.canonical_identity));
     }
@@ -1628,10 +1744,12 @@ function createPerformanceManualService(db, options = {}) {
       const identities = [...new Set(candidates.map((candidate) => candidate.row.canonical_identity))];
       const placeholders = identities.map(() => '?').join(',');
       const publications = db.prepare(`
-        SELECT id,canonical_identity FROM campaign_publications
-        WHERE org_id=? AND campaign_id=? AND canonical_identity IN (${placeholders})
+        SELECT publication.id,publication.canonical_identity
+        FROM campaign_publications publication
+        WHERE publication.org_id=? AND publication.campaign_id=?
+          AND publication.canonical_identity IN (${placeholders})
       `).all(context.access.campaign.org_id, context.campaignId, ...identities);
-      const publicationByIdentity = new Map(publications.map((publication) => [publication.canonical_identity, publication.id]));
+      const publicationByIdentity = new Map(publications.map((publication) => [publication.canonical_identity, publication]));
       const findExact = db.prepare(`
         SELECT id FROM performance_metric_observations
         WHERE org_id=? AND campaign_id=? AND publication_id=? AND source_mode='csv_xlsx'
@@ -1644,12 +1762,24 @@ function createPerformanceManualService(db, options = {}) {
         ) VALUES (?,?,?,?,?,?,?,?)
       `);
       candidates.forEach((candidate) => {
-        const publicationId = publicationByIdentity.get(candidate.row.canonical_identity);
-        if (!publicationId) {
+        const publication = publicationByIdentity.get(candidate.row.canonical_identity);
+        if (!publication) {
           rows[candidate.row.index] = metricImportRowError(
             candidate.row,
             'PERFORMANCE_METRIC_IMPORT_CONTENT_NOT_FOUND',
             'Metric import can only update content already monitored in this campaign.'
+          );
+          return;
+        }
+        const publicationId = publication.id;
+        try {
+          assertMetricTrackingOpen(context, publicationId);
+        } catch (error) {
+          if (!(error instanceof PerformanceManualServiceError)) throw error;
+          rows[candidate.row.index] = metricImportRowError(
+            candidate.row,
+            error.code || 'PERFORMANCE_METRIC_IMPORT_ROW_INVALID',
+            error.message || 'Publication tracking is unavailable.'
           );
           return;
         }
@@ -1737,6 +1867,7 @@ function createPerformanceManualService(db, options = {}) {
       );
     }
     const contentId = publicationById(preliminary, input && input.contentId);
+    if (observation) assertMetricTrackingOpen(preliminary, contentId);
     const outcome = db.transaction(() => {
       let observationId = null;
       let manualInputId = null;

@@ -392,6 +392,21 @@ const REQUEST_POLICIES = Object.freeze({
     'POST',
     '/api/collaborations/:id/publication-confirmations'
   ),
+  COLLABORATION_PUBLICATION_CORRECT: controlJson(
+    'collaboration.publication.correct',
+    'POST',
+    '/api/collaborations/:id/publication-corrections'
+  ),
+  COLLABORATION_PUBLICATION_TRACKING: controlJson(
+    'collaboration.publication.tracking',
+    'POST',
+    '/api/collaborations/:id/publication-tracking-events'
+  ),
+  COLLABORATION_PUBLICATION_HISTORY: empty(
+    'collaboration.publication.history',
+    'GET',
+    '/api/collaborations/:id/publication-history'
+  ),
   COLLABORATION_PAYMENT_RECORD: controlJson(
     'collaboration.payment.record',
     'POST',

@@ -4344,7 +4344,18 @@ function ensureM4TableStyles() {
     '.m4-lifecycle-stage.is-active .m4-lifecycle-dot{background:var(--tm-color-accent,#2563eb);border-color:var(--tm-color-accent,#2563eb);box-shadow:0 0 0 3px rgba(37,99,235,.14)}' +
     '.m4-lifecycle-stage.is-attention{color:var(--danger,#b91c1c);font-weight:700}' +
     '.m4-lifecycle-stage.is-attention .m4-lifecycle-dot,.m4-lifecycle-stage.is-stopped .m4-lifecycle-dot{background:var(--danger,#b91c1c);border-color:var(--danger,#b91c1c);box-shadow:0 0 0 3px rgba(185,28,28,.12)}' +
-    '.m4-lifecycle-stage.is-stopped{color:var(--danger,#b91c1c);font-weight:700}';
+    '.m4-lifecycle-stage.is-stopped{color:var(--danger,#b91c1c);font-weight:700}' +
+    '.m4-publication-item{padding:7px 0;border-top:1px solid var(--border)}' +
+    '.m4-publication-item:first-child{border-top:0}' +
+    '.m4-publication-head{display:flex;align-items:center;justify-content:space-between;gap:6px}' +
+    '.m4-publication-status{display:inline-flex;align-items:center;min-height:20px;padding:2px 6px;border:1px solid var(--border);border-radius:6px;font-size:9px;white-space:nowrap}' +
+    '.m4-publication-status.is-paused{color:var(--warning,#9a6700);background:#fff8e6}' +
+    '.m4-publication-status.is-active{color:var(--success,#0f7b3c);background:#edf8f1}' +
+    '.m4-publication-actions{display:flex;gap:5px;flex-wrap:wrap;margin-top:6px}' +
+    '.m4-publication-actions .btn{min-height:26px;padding:3px 7px;font-size:9px}' +
+    '.m4-publication-history{margin-top:6px;font-size:9px;color:var(--text2,#64748b)}' +
+    '.m4-confirm-row{display:flex;align-items:flex-start;gap:8px;margin-top:12px;font-size:11px;line-height:1.45}' +
+    '.m4-confirm-row input[type="checkbox"]{width:16px!important;height:16px!important;min-width:16px;margin:0;accent-color:var(--tm-color-accent,#2563eb)}';
   document.head.appendChild(style);
 }
 var M4_INFLUENCER_COLUMNS = [
@@ -6477,6 +6488,7 @@ var pendingContractCollabId = null;
 var pendingContentReviewCollabId = null;
 var pendingPublicationCollabId = null;
 var pendingPublicationDraftRows = [];
+var pendingPublicationLifecycle = null;
 var pendingPaymentCollabId = null;
 var pendingPaymentEntryId = null;
 var pendingSettlementCollabId = null;
@@ -7197,8 +7209,11 @@ function m4PerformanceTracking(collab) {
   var items = rawItems.map(function(item) {
     var publicationId = readPositiveInteger(item && item.publication_id);
     if (publicationId === null) return null;
+    var versionNumber = readPositiveInteger(item && (item.lifecycle_version || item.version_number)) || 1;
+    var trackingStatus = item && item.tracking_status === 'paused' ? 'paused' : 'active';
+    var historyCount = readPositiveInteger(item && item.history_count) || 1;
     return {
-      registration: item.registration === 'existing' ? 'existing' : 'created',
+      registration: ['existing', 'created', 'corrected'].includes(item.registration) ? item.registration : 'created',
       custody_id: readPositiveInteger(item.custody_id),
       publication_id: publicationId,
       deliverable_key: typeof item.deliverable_key === 'string' ? item.deliverable_key : '',
@@ -7207,9 +7222,16 @@ function m4PerformanceTracking(collab) {
       published_at: typeof item.published_at === 'string' ? item.published_at : '',
       confirmed_at: typeof item.confirmed_at === 'string'
         ? item.confirmed_at
-        : (typeof item.handed_off_at === 'string' ? item.handed_off_at : '')
+        : (typeof item.handed_off_at === 'string' ? item.handed_off_at : ''),
+      lifecycle_version: versionNumber,
+      version_number: versionNumber,
+      tracking_status: trackingStatus,
+      history_count: historyCount,
+      can_correct: item.can_correct === true,
+      can_pause: item.can_pause === true,
+      can_resume: item.can_resume === true
     };
-  }).filter(Boolean);
+  }).filter(function(item) { return item && item.custody_id !== null; });
   if (!items.length || items.length > 20) return null;
   return {
     status: 'tracked',
@@ -7218,18 +7240,39 @@ function m4PerformanceTracking(collab) {
     items: items
   };
 }
+function m4PublicationTrackingItem(collab, custodyId) {
+  var tracking = m4PerformanceTracking(collab);
+  var normalizedCustodyId = readPositiveInteger(custodyId);
+  if (!tracking || normalizedCustodyId === null) return null;
+  return tracking.items.find(function(item) { return item.custody_id === normalizedCustodyId; }) || null;
+}
 function renderPerformanceTrackingEvidence(collab) {
   var tracking = m4PerformanceTracking(collab);
   if (tracking) {
     var itemLines = tracking.items.map(function(item) {
-      return '<span style="display:block">' +
-        esc(item.deliverable_key || ('内容-' + item.publication_id)) + ' · 内容 #' +
-        esc(item.publication_id) + ' · ' + esc(item.platform || '自定义平台') + '</span>';
+      var paused = item.tracking_status === 'paused';
+      var actionButtons = '';
+      if (item.can_correct) {
+        actionButtons += '<button type="button" class="btn btn-outline" title="保留旧版本并登记新的公开链接" onclick="openCampaignPublicationCorrectionModal(' + Number(collab.id) + ',' + item.custody_id + ')">纠正链接</button>';
+      }
+      if (item.can_pause || item.can_resume) {
+        actionButtons += '<button type="button" class="btn btn-outline" title="' + (paused ? '恢复指标更新和待办队列' : '停止指标更新并移出待办队列') + '" onclick="openCampaignPublicationTrackingModal(' + Number(collab.id) + ',' + item.custody_id + ')">' +
+          (paused ? '恢复追踪' : '暂停追踪') + '</button>';
+      }
+      actionButtons += '<button type="button" class="btn btn-outline" title="查看不可篡改的发布版本记录" onclick="openCampaignPublicationHistoryModal(' + Number(collab.id) + ',' + item.custody_id + ')">历史记录</button>';
+      var safeUrl = /^https:\/\//i.test(item.original_url) ? item.original_url : '';
+      return '<div class="m4-publication-item">' +
+        '<div class="m4-publication-head"><strong>' + esc(item.deliverable_key || ('内容-' + item.publication_id)) +
+        '</strong><span class="m4-publication-status is-' + (paused ? 'paused' : 'active') + '">' +
+        (paused ? '已暂停' : '追踪中') + '</span></div>' +
+        '<span style="display:block;opacity:.72">内容 #' + esc(item.publication_id) + ' · ' +
+        esc(item.platform || '自定义平台') + '</span>' +
+        (safeUrl ? '<a href="' + esc(safeUrl) + '" target="_blank" rel="noopener noreferrer" style="display:block;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(safeUrl) + '</a>' : '') +
+        '<div class="m4-publication-history">版本 ' + esc(item.lifecycle_version) + ' · 共 ' + esc(item.history_count) + ' 条记录</div>' +
+        '<div class="m4-publication-actions">' + actionButtons + '</div></div>';
     }).join('');
     return '<div style="margin-top:7px;padding-top:7px;border-top:1px solid var(--border);font-size:10px;line-height:1.6">' +
-      '<strong style="color:var(--success, #0f7b3c)">已加入效果追踪 · ' + esc(tracking.publication_count) + ' 条</strong>' +
-      itemLines +
-      '<span style="opacity:.65">等待录入或同步最新视频指标</span></div>';
+      '<strong>效果追踪 · ' + esc(tracking.publication_count) + ' 条</strong>' + itemLines + '</div>';
   }
   if (collabRelations(collab).includes('publication')) {
     return '<div style="margin-top:7px;padding-top:7px;border-top:1px solid var(--border);font-size:10px;line-height:1.6;color:var(--warning, #9a6700)">' +
@@ -7253,6 +7296,254 @@ function openCollaborationPerformanceTracking(collaborationId) {
   if (platform) platform.value = '';
   if (tag) tag.value = '';
   switchPage('performance-monitor');
+}
+async function openCampaignPublicationHistoryModal(collaborationId, custodyId) {
+  var collab = findCollaborationById(collaborationId);
+  var item = m4PublicationTrackingItem(collab, custodyId);
+  var campaignId = readPositiveInteger(collab && collab.campaign_id);
+  if (!isCampaignCollaboration(collab) || !item || campaignId === null) {
+    toast('发布记录已变化，请刷新后重试。', 'error');
+    return;
+  }
+  pendingPublicationLifecycle = {
+    mode: 'history',
+    collaboration_id: Number(collab.id),
+    campaign_id: campaignId,
+    custody_id: item.custody_id,
+    next_cursor: null
+  };
+  var existing = document.getElementById('campaignPublicationLifecycleModal');
+  if (existing) existing.remove();
+  var overlay = document.createElement('div');
+  overlay.id = 'campaignPublicationLifecycleModal';
+  overlay.className = 'modal-overlay';
+  overlay.onclick = function(event) { if (event.target === overlay) closeCampaignPublicationLifecycleModal(); };
+  overlay.innerHTML = '<div class="modal" id="campaignPublicationLifecycleDialog" role="dialog" aria-modal="true" aria-labelledby="campaignPublicationLifecycleTitle" onclick="event.stopPropagation()">' +
+    '<button type="button" class="modal-close" aria-label="关闭发布历史" title="关闭发布历史" onclick="closeCampaignPublicationLifecycleModal()">&times;</button>' +
+    '<h3 id="campaignPublicationLifecycleTitle">发布历史</h3>' +
+    '<p style="font-size:12px;opacity:.68;margin-bottom:12px">' + esc(item.deliverable_key || ('内容 #' + item.publication_id)) + ' · 共 ' + esc(item.history_count) + ' 条记录</p>' +
+    '<div id="publicationLifecycleHistoryBody" style="font-size:12px;line-height:1.65">正在读取...</div>' +
+    '<div class="btn-group" style="justify-content:flex-end"><button id="publicationLifecycleHistoryMore" type="button" class="btn btn-outline" style="display:none" onclick="loadCampaignPublicationHistoryPage()">加载更早记录</button><button type="button" class="btn btn-primary" onclick="closeCampaignPublicationLifecycleModal()">关闭</button></div>' +
+    '</div>';
+  document.body.appendChild(overlay);
+  if (window.TMAccessibility) {
+    window.TMAccessibility.openDialog(document.getElementById('campaignPublicationLifecycleDialog'), document.activeElement, closeCampaignPublicationLifecycleModal);
+  }
+  await loadCampaignPublicationHistoryPage(true);
+}
+async function loadCampaignPublicationHistoryPage(reset) {
+  var pending = pendingPublicationLifecycle;
+  if (!pending || pending.mode !== 'history') return;
+  var bodyElement = document.getElementById('publicationLifecycleHistoryBody');
+  var moreButton = document.getElementById('publicationLifecycleHistoryMore');
+  if (moreButton) moreButton.disabled = true;
+  try {
+    var query = '?campaign_id=' + encodeURIComponent(pending.campaign_id) +
+      '&custody_id=' + encodeURIComponent(pending.custody_id) + '&limit=20';
+    if (!reset && pending.next_cursor) query += '&before_version=' + encodeURIComponent(pending.next_cursor);
+    var response = await apiFetch('/collaborations/' + pending.collaboration_id + '/publication-history' + query);
+    var data = await response.json();
+    if (!response.ok) throw new Error(data.error || '发布历史读取失败');
+    var items = Array.isArray(data.items) ? data.items : [];
+    var list = items.map(function(version) {
+      var actionLabels = { confirmed: '确认发布', corrected: '纠正链接', paused: '暂停追踪', resumed: '恢复追踪' };
+      var safeUrl = /^https:\/\//i.test(String(version.original_url || '')) ? version.original_url : '';
+      return '<li style="margin-bottom:10px"><strong>版本 ' + esc(version.lifecycle_version || '-') + ' · ' +
+        esc(actionLabels[version.action] || version.action || '-') + (version.is_current ? ' · 当前' : '') + '</strong><br>' +
+        '内容 #' + esc(version.publication_id || '-') + ' · ' + esc(version.recorded_at || '-') +
+        (safeUrl ? '<br><a href="' + esc(safeUrl) + '" target="_blank" rel="noopener noreferrer">' + esc(safeUrl) + '</a>' : '') +
+        (version.reason ? '<br>' + esc(version.reason) : '') + '</li>';
+    }).join('');
+    if (bodyElement) {
+      if (reset) bodyElement.innerHTML = '<ol style="margin:0;padding-left:20px">' + list + '</ol>';
+      else {
+        var existingList = bodyElement.querySelector && bodyElement.querySelector('ol');
+        if (existingList) existingList.insertAdjacentHTML('beforeend', list);
+      }
+    }
+    pending.next_cursor = readPositiveInteger(data.next_cursor);
+    if (moreButton) moreButton.style.display = pending.next_cursor ? '' : 'none';
+  } catch (error) {
+    if (bodyElement) bodyElement.textContent = error.message || '发布历史读取失败';
+  } finally {
+    if (moreButton) moreButton.disabled = false;
+  }
+}
+function openCampaignPublicationCorrectionModal(collaborationId, custodyId) {
+  var collab = findCollaborationById(collaborationId);
+  var item = m4PublicationTrackingItem(collab, custodyId);
+  if (!isCampaignCollaboration(collab) || !item) {
+    toast('发布记录已变化，请刷新后重试。', 'error');
+    return;
+  }
+  if (!item.can_correct) {
+    toast('当前账号或项目状态不允许纠正发布链接。', 'error');
+    return;
+  }
+  pendingPublicationLifecycle = {
+    mode: 'correction',
+    collaboration_id: Number(collab.id),
+    custody_id: item.custody_id
+  };
+  var existing = document.getElementById('campaignPublicationLifecycleModal');
+  if (existing) existing.remove();
+  var overlay = document.createElement('div');
+  overlay.id = 'campaignPublicationLifecycleModal';
+  overlay.className = 'modal-overlay';
+  overlay.onclick = function(event) { if (event.target === overlay) closeCampaignPublicationLifecycleModal(); };
+  overlay.innerHTML = '<div class="modal" id="campaignPublicationLifecycleDialog" role="dialog" aria-modal="true" aria-labelledby="campaignPublicationLifecycleTitle" onclick="event.stopPropagation()">' +
+    '<button type="button" class="modal-close" aria-label="关闭发布链接纠正" title="关闭发布链接纠正" onclick="closeCampaignPublicationLifecycleModal()">&times;</button>' +
+    '<h3 id="campaignPublicationLifecycleTitle">纠正发布链接</h3>' +
+    '<p style="font-size:12px;opacity:.68;margin-bottom:12px">' + esc(item.deliverable_key || ('内容 #' + item.publication_id)) + ' · 当前版本 ' + esc(item.version_number) + '</p>' +
+    '<div><label>新的公开链接</label><input id="publicationLifecycleUrl" type="url" maxlength="2048" placeholder="https://" value="' + esc(item.original_url || '') + '"></div>' +
+    '<div style="margin-top:10px"><label>发布时间</label><input id="publicationLifecyclePublishedAt" type="datetime-local" value="' + esc(String(item.published_at || '').slice(0, 16)) + '"></div>' +
+    '<div style="margin-top:10px"><label>纠正原因</label><textarea id="publicationLifecycleReason" maxlength="500" rows="3" placeholder="说明为什么需要更换公开链接"></textarea></div>' +
+    '<label class="m4-confirm-row"><input id="publicationLifecycleSameContent" type="checkbox"><span>确认该变更属于已审核交付：链接别名将沿用原数据，内容替换将从新内容开始统计，旧版本都会保留。</span></label>' +
+    '<div class="btn-group" style="justify-content:flex-end"><button type="button" class="btn btn-outline" onclick="closeCampaignPublicationLifecycleModal()">取消</button><button type="button" class="btn btn-primary" onclick="submitCampaignPublicationLifecycle()">登记新版本</button></div>' +
+    '</div>';
+  document.body.appendChild(overlay);
+  if (window.TMAccessibility) {
+    window.TMAccessibility.openDialog(document.getElementById('campaignPublicationLifecycleDialog'), document.activeElement, closeCampaignPublicationLifecycleModal);
+  }
+}
+function openCampaignPublicationTrackingModal(collaborationId, custodyId) {
+  var collab = findCollaborationById(collaborationId);
+  var item = m4PublicationTrackingItem(collab, custodyId);
+  if (!isCampaignCollaboration(collab) || !item) {
+    toast('发布记录已变化，请刷新后重试。', 'error');
+    return;
+  }
+  var action = item.tracking_status === 'paused' ? 'resumed' : 'paused';
+  if ((action === 'paused' && !item.can_pause) || (action === 'resumed' && !item.can_resume)) {
+    toast('当前账号或项目状态不允许调整追踪。', 'error');
+    return;
+  }
+  pendingPublicationLifecycle = {
+    mode: 'tracking',
+    action: action,
+    collaboration_id: Number(collab.id),
+    custody_id: item.custody_id
+  };
+  var existing = document.getElementById('campaignPublicationLifecycleModal');
+  if (existing) existing.remove();
+  var overlay = document.createElement('div');
+  overlay.id = 'campaignPublicationLifecycleModal';
+  overlay.className = 'modal-overlay';
+  overlay.onclick = function(event) { if (event.target === overlay) closeCampaignPublicationLifecycleModal(); };
+  var isResume = action === 'resumed';
+  overlay.innerHTML = '<div class="modal" id="campaignPublicationLifecycleDialog" role="dialog" aria-modal="true" aria-labelledby="campaignPublicationLifecycleTitle" onclick="event.stopPropagation()">' +
+    '<button type="button" class="modal-close" aria-label="关闭追踪状态调整" title="关闭追踪状态调整" onclick="closeCampaignPublicationLifecycleModal()">&times;</button>' +
+    '<h3 id="campaignPublicationLifecycleTitle">' + (isResume ? '恢复效果追踪' : '暂停效果追踪') + '</h3>' +
+    '<p style="font-size:12px;opacity:.68;margin-bottom:12px">' + esc(item.deliverable_key || ('内容 #' + item.publication_id)) + ' · 内容 #' + esc(item.publication_id) + '</p>' +
+    '<div><label>' + (isResume ? '恢复原因' : '暂停原因') + '</label><textarea id="publicationLifecycleReason" maxlength="500" rows="4" placeholder="填写本次状态调整的业务原因"></textarea></div>' +
+    '<p style="font-size:11px;line-height:1.5;opacity:.68;margin-top:10px">' + (isResume ? '恢复后可继续录入指标，并重新进入数据更新队列。' : '暂停后记录仍可查看，但不能录入新指标，也不会出现在数据更新队列。') + '</p>' +
+    '<div class="btn-group" style="justify-content:flex-end"><button type="button" class="btn btn-outline" onclick="closeCampaignPublicationLifecycleModal()">取消</button><button type="button" class="btn btn-primary" onclick="submitCampaignPublicationLifecycle()">' + (isResume ? '确认恢复' : '确认暂停') + '</button></div>' +
+    '</div>';
+  document.body.appendChild(overlay);
+  if (window.TMAccessibility) {
+    window.TMAccessibility.openDialog(document.getElementById('campaignPublicationLifecycleDialog'), document.activeElement, closeCampaignPublicationLifecycleModal);
+  }
+}
+function closeCampaignPublicationLifecycleModal() {
+  var overlay = document.getElementById('campaignPublicationLifecycleModal');
+  var dialog = overlay && typeof overlay.querySelector === 'function'
+    ? overlay.querySelector('#campaignPublicationLifecycleDialog')
+    : document.getElementById('campaignPublicationLifecycleDialog');
+  if (dialog && window.TMAccessibility) window.TMAccessibility.closeDialog(dialog);
+  if (overlay) overlay.remove();
+  pendingPublicationLifecycle = null;
+}
+async function submitCampaignPublicationLifecycle() {
+  var pending = pendingPublicationLifecycle;
+  var collab = findCollaborationById(pending && pending.collaboration_id);
+  var item = m4PublicationTrackingItem(collab, pending && pending.custody_id);
+  var campaignId = readPositiveInteger(collab && collab.campaign_id);
+  var expectedVersion = readPositiveInteger(item && item.lifecycle_version);
+  if (!pending || !isCampaignCollaboration(collab) || !item || campaignId === null || expectedVersion === null) {
+    toast('发布记录已变化，请刷新后重试。', 'error');
+    return;
+  }
+  var reason = String(document.getElementById('publicationLifecycleReason')?.value || '').trim();
+  if (!reason || Array.from(reason).length > 500) {
+    toast('请填写 1 至 500 个字符的原因。', 'error');
+    return;
+  }
+  var endpoint;
+  var body;
+  if (pending.mode === 'correction') {
+    var url = m4SafeContentReviewUrl(document.getElementById('publicationLifecycleUrl')?.value || '');
+    var publishedAtValue = String(document.getElementById('publicationLifecyclePublishedAt')?.value || '').trim();
+    var publishedAt = publishedAtValue ? new Date(publishedAtValue) : null;
+    var sameContent = document.getElementById('publicationLifecycleSameContent');
+    if (!url || url === item.original_url) {
+      toast('请输入与当前版本不同的有效 HTTPS 公开链接。', 'error');
+      return;
+    }
+    if (!publishedAt || !Number.isFinite(publishedAt.getTime())) {
+      toast('请选择有效的发布时间。', 'error');
+      return;
+    }
+    if (!sameContent || sameContent.checked !== true) {
+      toast('请确认该链接变更属于已审核交付。', 'error');
+      return;
+    }
+    endpoint = '/collaborations/' + collab.id + '/publication-corrections';
+    body = {
+      campaign_id: campaignId,
+      expected_version: expectedVersion,
+      custody_id: item.custody_id,
+      url: url,
+      published_at: publishedAt.toISOString(),
+      correction_reason: reason,
+      same_content_confirmed: true
+    };
+  } else if (pending.mode === 'tracking' && ['paused', 'resumed'].includes(pending.action)) {
+    endpoint = '/collaborations/' + collab.id + '/publication-tracking-events';
+    body = {
+      campaign_id: campaignId,
+      expected_version: expectedVersion,
+      custody_id: item.custody_id,
+      action: pending.action,
+      reason: reason
+    };
+  } else {
+    toast('发布操作无效，请刷新后重试。', 'error');
+    return;
+  }
+  var intent = Object.assign({}, body);
+  var mutationSlot = m4CollabMutationSlot(collab, intent, 'publication-' + pending.mode);
+  if (m4CollabMutationInFlight[mutationSlot]) {
+    toast('发布记录正在更新，请勿重复点击。');
+    return m4CollabMutationInFlight[mutationSlot];
+  }
+  var request = apiFetch(endpoint, {
+    method: 'POST',
+    headers: m4MutationHeaders('m4-publication-lifecycle-', m4CollabMutationOperationKey(mutationSlot, 'm4-publication-lifecycle-')),
+    body: JSON.stringify(body)
+  }).then(async function(response) {
+    var data = await response.json();
+    if (!response.ok) {
+      var error = new Error(data.error || '发布记录更新失败');
+      error.code = data.code;
+      throw error;
+    }
+    return data;
+  });
+  m4CollabMutationInFlight[mutationSlot] = request;
+  try {
+    var result = await request;
+    collab.row_version = result.row_version;
+    collab.performance_tracking = result.performance_tracking;
+    closeCampaignPublicationLifecycleModal();
+    await loadCollaborations();
+    toast(pending.mode === 'correction' ? '新链接版本已登记，旧版本已保留' : (pending.action === 'paused' ? '效果追踪已暂停' : '效果追踪已恢复'));
+    return result;
+  } catch (error) {
+    toast(error.message || '发布记录更新失败', 'error');
+    throw error;
+  } finally {
+    if (m4CollabMutationInFlight[mutationSlot] === request) delete m4CollabMutationInFlight[mutationSlot];
+  }
 }
 function renderCollabCommercialTerms(collab, resource) {
   if (resource.schema !== 'turingmarket.collaboration-order.v2') {
@@ -12191,7 +12482,7 @@ function switchPage(id, options) {
     'getEditedDemand', 'syncCurDemandFromAnalysis', 'handleDemandFile', 'analyzeDemandAI',
     'switchTab', 'matchInfluencers', 'smartMatch', 'handleUpload', 'handleDrop', 'openInfUploadModal', 'closeInfUploadModal', 'handleUploadModal', 'handleInfluencerModalDrop', 'validateInfluencerImportMapping', 'confirmInfluencerImport', 'downloadInfluencerImportErrors', 'downloadInfTemplate', 'exportAll', 'exportFiltered', 'exportSelected',
     'saveM4SavedView', 'applyM4SavedView', 'deleteM4SavedView', 'clearM4Filters',
-    'toggleAll', 'syncInfluencerSelectionState', 'loadM4Campaigns', 'changeM4CampaignContext', 'openM4CampaignCloseoutReview', 'closeM4CampaignCloseoutReview', 'submitM4CampaignCloseoutReview', 'startCollab', 'submitCollabOrder', 'closeCollabOrderModal', 'loadCollaborations', 'updateCollabStatus', 'runCampaignCollabAction', 'closeCampaignContractConfirmationModal', 'submitCampaignContractConfirmation', 'closeCampaignContentReviewModal', 'submitCampaignContentReview', 'closeCampaignContentReviewDecisionModal', 'submitCampaignContentReviewDecision', 'renderCampaignPublicationRows', 'syncCampaignPublicationDraftRows', 'addCampaignPublicationRow', 'removeCampaignPublicationRow', 'openCampaignPublicationModal', 'closeCampaignPublicationModal', 'submitCampaignPublicationConfirmation', 'openCollaborationPerformanceTracking', 'openCampaignPaymentModal', 'closeCampaignPaymentModal', 'submitCampaignPayment', 'voidCampaignPayment', 'closeCampaignSettlementModal', 'submitCampaignSettlement', 'openCampaignSettlementDecisionModal', 'closeCampaignSettlementDecisionModal', 'submitCampaignSettlementDecision',
+    'toggleAll', 'syncInfluencerSelectionState', 'loadM4Campaigns', 'changeM4CampaignContext', 'openM4CampaignCloseoutReview', 'closeM4CampaignCloseoutReview', 'submitM4CampaignCloseoutReview', 'startCollab', 'submitCollabOrder', 'closeCollabOrderModal', 'loadCollaborations', 'updateCollabStatus', 'runCampaignCollabAction', 'closeCampaignContractConfirmationModal', 'submitCampaignContractConfirmation', 'closeCampaignContentReviewModal', 'submitCampaignContentReview', 'closeCampaignContentReviewDecisionModal', 'submitCampaignContentReviewDecision', 'renderCampaignPublicationRows', 'syncCampaignPublicationDraftRows', 'addCampaignPublicationRow', 'removeCampaignPublicationRow', 'openCampaignPublicationModal', 'closeCampaignPublicationModal', 'submitCampaignPublicationConfirmation', 'openCollaborationPerformanceTracking', 'openCampaignPublicationHistoryModal', 'loadCampaignPublicationHistoryPage', 'openCampaignPaymentModal', 'closeCampaignPaymentModal', 'submitCampaignPayment', 'voidCampaignPayment', 'closeCampaignSettlementModal', 'submitCampaignSettlement', 'openCampaignSettlementDecisionModal', 'closeCampaignSettlementDecisionModal', 'submitCampaignSettlementDecision',
     'initPerformanceMonitor', 'initPerformanceDashboard', 'refreshPerformanceMonitor', 'refreshPerformanceDashboard', 'changePerformanceCampaignContext', 'handlePerformanceTopMetricChange', 'refreshPerformanceReviewEvidence', 'generatePerformanceAiReviewDraft', 'loadPerformanceContents', 'loadPerformanceFreshnessQueue', 'openPerformanceFreshnessInput', 'loadPerformanceIntegrationPreview', 'loadPerformanceFeishuConnection', 'savePerformanceFeishuConnectionDraft', 'approvePerformanceFeishuConnectionDraft', 'downloadPerformanceFeishuSnapshot', 'createPerformanceContent', 'downloadPerformanceTemplate', 'handlePerformanceImport', 'handlePerformanceDrop', 'downloadPerformanceMetricsTemplate', 'handlePerformanceMetricsImport', 'handlePerformanceMetricsDrop', 'openPerformanceInputModal', 'closePerformanceInputModal', 'savePerformanceInput', 'loadPerformanceDashboard', 'loadPerformanceReviewEvidence', 'debouncedPerformanceContentSearch', 'exportPerformanceContents',
     'sendChat', 'clearChat', 'clearAIMemory', 'pushToFeishu', 'loadFeishuStatus', 'loadFeishuOutbox', 'testFeishuConnection', 'selectFeishuReconciliationDelivery', 'reconcileFeishuDelivery', 'selectFeishuRetryDelivery', 'retryFeishuDelivery',
     'switchAdminTab', 'loadAdminDashboard', 'loadAdminUsers', 'adminAddUser', 'adminCreateInvite', 'adminResetPw',

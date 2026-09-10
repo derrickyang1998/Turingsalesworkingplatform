@@ -681,6 +681,93 @@ app.post('/api/collaborations/:id/publication-confirmations', authMiddleware, (r
   }
 });
 
+app.post('/api/collaborations/:id/publication-corrections', authMiddleware, (req, res) => {
+  try {
+    const collaborationId = canonicalPositiveRouteId(req.params.id);
+    if (collaborationId === null) {
+      return res.status(400).json({
+        error: 'Collaboration id is invalid.',
+        code: 'INVALID_COLLABORATION_ID'
+      });
+    }
+    const result = campaignCollaboration.correctPublication({
+      userId: req.user.id,
+      collaborationId,
+      requestId: collaborationRequestId(req),
+      idempotencyKey: req.get ? req.get('Idempotency-Key') : req.headers && req.headers['idempotency-key'],
+      body: req.body
+    });
+    res.status(result.status || 201).json(result.body);
+  } catch (error) {
+    const status = error.statusCode || error.status || 500;
+    const body = {
+      error: error.message || 'Publication correction failed.',
+      code: error.code || 'INTERNAL_ERROR'
+    };
+    if (error.details !== undefined) body.details = error.details;
+    res.status(status).json(body);
+  }
+});
+
+app.post('/api/collaborations/:id/publication-tracking-events', authMiddleware, (req, res) => {
+  try {
+    const collaborationId = canonicalPositiveRouteId(req.params.id);
+    if (collaborationId === null) {
+      return res.status(400).json({
+        error: 'Collaboration id is invalid.',
+        code: 'INVALID_COLLABORATION_ID'
+      });
+    }
+    const result = campaignCollaboration.changePublicationTracking({
+      userId: req.user.id,
+      collaborationId,
+      requestId: collaborationRequestId(req),
+      idempotencyKey: req.get ? req.get('Idempotency-Key') : req.headers && req.headers['idempotency-key'],
+      body: req.body
+    });
+    res.status(result.status || 201).json(result.body);
+  } catch (error) {
+    const status = error.statusCode || error.status || 500;
+    const body = {
+      error: error.message || 'Publication tracking change failed.',
+      code: error.code || 'INTERNAL_ERROR'
+    };
+    if (error.details !== undefined) body.details = error.details;
+    res.status(status).json(body);
+  }
+});
+
+app.get('/api/collaborations/:id/publication-history', authMiddleware, (req, res) => {
+  try {
+    const collaborationId = canonicalPositiveRouteId(req.params.id);
+    const campaignId = canonicalPositiveRouteId(req.query && req.query.campaign_id);
+    const custodyId = canonicalPositiveRouteId(req.query && req.query.custody_id);
+    if (collaborationId === null || campaignId === null || custodyId === null) {
+      return res.status(400).json({
+        error: 'Collaboration, campaign, or custody id is invalid.',
+        code: 'INVALID_PUBLICATION_HISTORY'
+      });
+    }
+    const result = campaignCollaboration.listPublicationHistory({
+      userId: req.user.id,
+      collaborationId,
+      campaignId,
+      custodyId,
+      limit: req.query && req.query.limit,
+      beforeVersion: req.query && req.query.before_version
+    });
+    res.json(result);
+  } catch (error) {
+    const status = error.statusCode || error.status || 500;
+    const body = {
+      error: error.message || 'Publication history failed.',
+      code: error.code || 'INTERNAL_ERROR'
+    };
+    if (error.details !== undefined) body.details = error.details;
+    res.status(status).json(body);
+  }
+});
+
 app.post('/api/collaborations/:id/payments', authMiddleware, (req, res) => {
   try {
     const collaborationId = canonicalPositiveRouteId(req.params.id);

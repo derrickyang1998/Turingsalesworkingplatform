@@ -518,6 +518,48 @@ test('publication confirmation owns a bounded registered policy', () => {
   assert.match(serverSource, /'COLLABORATION_PUBLICATION_CONFIRM'/);
 });
 
+test('publication correction, tracking, and history own bounded registered policies', () => {
+  const { contract } = loadBoundary();
+  const correction = contract.REQUEST_POLICIES.COLLABORATION_PUBLICATION_CORRECT;
+  const tracking = contract.REQUEST_POLICIES.COLLABORATION_PUBLICATION_TRACKING;
+  const history = contract.REQUEST_POLICIES.COLLABORATION_PUBLICATION_HISTORY;
+  assert.ok(correction);
+  assert.ok(tracking);
+  assert.ok(history);
+  assert.equal(correction.id, 'collaboration.publication.correct');
+  assert.equal(correction.method, 'POST');
+  assert.equal(correction.pathTemplate, '/api/collaborations/:id/publication-corrections');
+  assert.equal(correction.mediaKind, contract.MEDIA_KINDS.JSON);
+  assert.equal(correction.maxRawBytes, contract.BODY_LIMITS.CAMPAIGN_CONTROL_JSON);
+  assert.equal(tracking.id, 'collaboration.publication.tracking');
+  assert.equal(tracking.method, 'POST');
+  assert.equal(tracking.pathTemplate, '/api/collaborations/:id/publication-tracking-events');
+  assert.equal(tracking.mediaKind, contract.MEDIA_KINDS.JSON);
+  assert.equal(tracking.maxRawBytes, contract.BODY_LIMITS.CAMPAIGN_CONTROL_JSON);
+  assert.equal(history.id, 'collaboration.publication.history');
+  assert.equal(history.method, 'GET');
+  assert.equal(history.pathTemplate, '/api/collaborations/:id/publication-history');
+  assert.equal(history.mediaKind, contract.MEDIA_KINDS.EMPTY);
+
+  const registry = contract.createRoutePolicyRegistry([correction, tracking, history]);
+  assert.equal(
+    registry.match('POST', '/api/collaborations/41/publication-corrections').id,
+    'collaboration.publication.correct'
+  );
+  assert.equal(
+    registry.match('POST', '/api/collaborations/41/publication-tracking-events').id,
+    'collaboration.publication.tracking'
+  );
+  assert.equal(
+    registry.match('GET', '/api/collaborations/41/publication-history').id,
+    'collaboration.publication.history'
+  );
+  const serverSource = fs.readFileSync(serverPath, 'utf8');
+  assert.match(serverSource, /'COLLABORATION_PUBLICATION_CORRECT'/);
+  assert.match(serverSource, /'COLLABORATION_PUBLICATION_TRACKING'/);
+  assert.match(serverSource, /'COLLABORATION_PUBLICATION_HISTORY'/);
+});
+
 test('payment ledger and settlement mutations own bounded registered policies', () => {
   const { contract } = loadBoundary();
   const policyNames = [

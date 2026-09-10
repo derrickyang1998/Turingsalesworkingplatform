@@ -218,6 +218,8 @@ test('keeps full-dataset summary counts separate from the actionable queue', () 
 
   assert.deepEqual(result.summary, {
     total: 7,
+    monitored_total: 7,
+    paused: 0,
     current: 1,
     due: 1,
     stale: 1,

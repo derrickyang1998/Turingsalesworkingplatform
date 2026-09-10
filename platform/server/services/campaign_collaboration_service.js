@@ -125,6 +125,22 @@ const PUBLICATION_CONFIRMATION_KEYS = new Set([
   'expected_version',
   'publications'
 ]);
+const PUBLICATION_CORRECTION_KEYS = new Set([
+  'campaign_id',
+  'expected_version',
+  'custody_id',
+  'url',
+  'published_at',
+  'correction_reason',
+  'same_content_confirmed'
+]);
+const PUBLICATION_TRACKING_KEYS = new Set([
+  'campaign_id',
+  'expected_version',
+  'custody_id',
+  'action',
+  'reason'
+]);
 const PAYMENT_RECORD_KEYS = new Set([
   'campaign_id',
   'expected_version',
@@ -1948,7 +1964,11 @@ function createCampaignCollaborationService(db, options = {}) {
     publicationHandoffService &&
     (
       typeof publicationHandoffService.confirmBatch !== 'function' ||
+      typeof publicationHandoffService.correct !== 'function' ||
+      typeof publicationHandoffService.changeTracking !== 'function' ||
+      typeof publicationHandoffService.history !== 'function' ||
       typeof publicationHandoffService.prepare !== 'function' ||
+      typeof publicationHandoffService.prepareCorrection !== 'function' ||
       typeof publicationHandoffService.project !== 'function'
     )
   ) {
@@ -2048,7 +2068,10 @@ function createCampaignCollaborationService(db, options = {}) {
               ? publicationHandoffService.project({
                 orgId: access.campaign.org_id,
                 campaignId: row.campaign_id,
-                collaborationId: row.id
+                collaborationId: row.id,
+                writable: Boolean(
+                  access.permissions.write && row.status === 'completed' && relations.includes('publication')
+                )
               })
               : null,
             payment_settlement: projectPaymentSettlementCapabilities(
@@ -3589,6 +3612,261 @@ function createCampaignCollaborationService(db, options = {}) {
     }).immediate();
   }
 
+  function correctPublication(input) {
+    const userId = requirePositiveSafeId(input && input.userId, 'userId');
+    const collaborationId = requirePositiveSafeId(input && input.collaborationId, 'collaborationId');
+    const body = input && input.body;
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      throw serviceError(400, 'INVALID_PUBLICATION_CORRECTION', 'Publication correction body is invalid.');
+    }
+    for (const key of Object.keys(body)) {
+      if (!PUBLICATION_CORRECTION_KEYS.has(key)) {
+        throw serviceError(400, 'INVALID_PUBLICATION_CORRECTION', 'Publication correction body is invalid.', { field: key });
+      }
+    }
+    if (
+      !Number.isSafeInteger(body.campaign_id) || body.campaign_id < 1 ||
+      !Number.isSafeInteger(body.expected_version) || body.expected_version < 1 ||
+      !Number.isSafeInteger(body.custody_id) || body.custody_id < 1 ||
+      body.same_content_confirmed !== true
+    ) {
+      throw serviceError(400, 'INVALID_PUBLICATION_CORRECTION', 'Campaign, lifecycle version, custody, and correction confirmation are required.');
+    }
+    if (!publicationHandoffService) {
+      throw serviceError(503, 'PUBLICATION_TRACKING_UNAVAILABLE', 'Publication tracking is unavailable.');
+    }
+    const prepared = publicationHandoffService.prepareCorrection({
+      campaignId: body.campaign_id,
+      correction: {
+        url: body.url,
+        published_at: body.published_at,
+        correction_reason: body.correction_reason
+      }
+    });
+    const initialContext = contractDocumentContext(userId, collaborationId, {
+      write: true,
+      campaignId: body.campaign_id
+    });
+    const key = input.idempotencyKey;
+    if (typeof key !== 'string' || !/^[A-Za-z0-9._:-]{8,200}$/.test(key)) {
+      throw serviceError(400, 'IDEMPOTENCY_REQUIRED', 'Idempotency-Key is required.');
+    }
+    const payload = {
+      campaign_id: body.campaign_id,
+      expected_version: body.expected_version,
+      custody_id: body.custody_id,
+      url: prepared.url,
+      published_at: prepared.publishedAt,
+      correction_reason: prepared.correctionReason,
+      same_content_confirmed: true
+    };
+    const hash = requestHash({
+      method: 'POST',
+      path: `/api/collaborations/${collaborationId}/publication-corrections`,
+      campaignId: body.campaign_id,
+      kind: 'json',
+      payload
+    });
+    const reservationInput = {
+      organizationId: initialContext.access.campaign.org_id,
+      actorUserId: userId,
+      campaignId: body.campaign_id,
+      secondaryCampaignId: null,
+      resourceClaim: null,
+      scope: 'collaboration.update.linked',
+      key,
+      requestHash: hash,
+      expectedEventCount: 1,
+      operationTimeoutSeconds: 60
+    };
+
+    return db.transaction(() => {
+      const context = contractDocumentContext(userId, collaborationId, {
+        write: true,
+        campaignId: body.campaign_id
+      });
+      let reservation = idempotencyService.recoverExpiredInTransaction(db, reservationInput);
+      if (reservation.state === 'absent') {
+        reservation = idempotencyService.reserveProcessingInTransaction(db, reservationInput);
+      }
+      if (reservation.state !== 'reserved') return idempotencyOutcome(reservation);
+      const current = context.current;
+      const relations = activeRelations(db, body.campaign_id, collaborationId);
+      if (current.status !== 'completed' || !relations.includes('publication')) {
+        throw serviceError(409, 'INVALID_COLLABORATION_TRANSITION', 'Publication correction requires a completed publication handoff.');
+      }
+      const changed = publicationHandoffService.correct({
+        orgId: context.access.campaign.org_id,
+        campaignId: body.campaign_id,
+        collaborationId,
+        custodyId: body.custody_id,
+        actorUserId: userId,
+        expectedLifecycleVersion: body.expected_version,
+        collaborationRowVersionObserved: current.row_version,
+        prepared
+      });
+      insertLinkAttachedEvent(db, {
+        orgId: context.access.campaign.org_id,
+        campaignId: body.campaign_id,
+        userId,
+        collaborationId,
+        recordType: 'knowledge_entry',
+        recordId: changed.evidence.knowledgeEntryId,
+        relationType: 'knowledge',
+        link: changed.evidence,
+        requestId: input.requestId,
+        auditFingerprint: reservation.auditFingerprint,
+        reason: prepared.correctionReason
+      });
+      return completeJson(db, reservation, hash, 201, {
+        success: true,
+        campaign_id: body.campaign_id,
+        collaboration_id: collaborationId,
+        status: 'completed',
+        row_version: current.row_version,
+        lifecycle_version: changed.lifecycleVersion,
+        active_relations: relations,
+        performance_tracking: changed.projection
+      });
+    }).immediate();
+  }
+
+  function changePublicationTracking(input) {
+    const userId = requirePositiveSafeId(input && input.userId, 'userId');
+    const collaborationId = requirePositiveSafeId(input && input.collaborationId, 'collaborationId');
+    const body = input && input.body;
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      throw serviceError(400, 'INVALID_PUBLICATION_TRACKING', 'Publication tracking body is invalid.');
+    }
+    for (const key of Object.keys(body)) {
+      if (!PUBLICATION_TRACKING_KEYS.has(key)) {
+        throw serviceError(400, 'INVALID_PUBLICATION_TRACKING', 'Publication tracking body is invalid.', { field: key });
+      }
+    }
+    if (
+      !Number.isSafeInteger(body.campaign_id) || body.campaign_id < 1 ||
+      !Number.isSafeInteger(body.expected_version) || body.expected_version < 1 ||
+      !Number.isSafeInteger(body.custody_id) || body.custody_id < 1 ||
+      !['paused', 'resumed'].includes(body.action) ||
+      typeof body.reason !== 'string' || !body.reason.trim() || body.reason.trim().length > 500 ||
+      /[\u0000-\u001f\u007f]/.test(body.reason.trim())
+    ) {
+      throw serviceError(400, 'INVALID_PUBLICATION_TRACKING', 'Campaign, version, custody, action, and reason are required.');
+    }
+    if (!publicationHandoffService) {
+      throw serviceError(503, 'PUBLICATION_TRACKING_UNAVAILABLE', 'Publication tracking is unavailable.');
+    }
+    const reason = body.reason.trim();
+    const initialContext = contractDocumentContext(userId, collaborationId, {
+      write: true,
+      campaignId: body.campaign_id
+    });
+    const key = input.idempotencyKey;
+    if (typeof key !== 'string' || !/^[A-Za-z0-9._:-]{8,200}$/.test(key)) {
+      throw serviceError(400, 'IDEMPOTENCY_REQUIRED', 'Idempotency-Key is required.');
+    }
+    const payload = {
+      campaign_id: body.campaign_id,
+      expected_version: body.expected_version,
+      custody_id: body.custody_id,
+      action: body.action,
+      reason
+    };
+    const hash = requestHash({
+      method: 'POST',
+      path: `/api/collaborations/${collaborationId}/publication-tracking-events`,
+      campaignId: body.campaign_id,
+      kind: 'json',
+      payload
+    });
+    const reservationInput = {
+      organizationId: initialContext.access.campaign.org_id,
+      actorUserId: userId,
+      campaignId: body.campaign_id,
+      secondaryCampaignId: null,
+      resourceClaim: null,
+      scope: 'collaboration.update.linked',
+      key,
+      requestHash: hash,
+      expectedEventCount: 1,
+      operationTimeoutSeconds: 60
+    };
+
+    return db.transaction(() => {
+      const context = contractDocumentContext(userId, collaborationId, {
+        write: true,
+        campaignId: body.campaign_id
+      });
+      let reservation = idempotencyService.recoverExpiredInTransaction(db, reservationInput);
+      if (reservation.state === 'absent') {
+        reservation = idempotencyService.reserveProcessingInTransaction(db, reservationInput);
+      }
+      if (reservation.state !== 'reserved') return idempotencyOutcome(reservation);
+      const current = context.current;
+      const relations = activeRelations(db, body.campaign_id, collaborationId);
+      if (current.status !== 'completed' || !relations.includes('publication')) {
+        throw serviceError(409, 'INVALID_COLLABORATION_TRANSITION', 'Publication tracking control requires a completed publication handoff.');
+      }
+      const changed = publicationHandoffService.changeTracking({
+        orgId: context.access.campaign.org_id,
+        campaignId: body.campaign_id,
+        collaborationId,
+        custodyId: body.custody_id,
+        actorUserId: userId,
+        expectedLifecycleVersion: body.expected_version,
+        collaborationRowVersionObserved: current.row_version,
+        action: body.action,
+        reason
+      });
+      insertLinkAttachedEvent(db, {
+        orgId: context.access.campaign.org_id,
+        campaignId: body.campaign_id,
+        userId,
+        collaborationId,
+        recordType: 'knowledge_entry',
+        recordId: changed.evidence.knowledgeEntryId,
+        relationType: 'knowledge',
+        link: changed.evidence,
+        requestId: input.requestId,
+        auditFingerprint: reservation.auditFingerprint,
+        reason
+      });
+      return completeJson(db, reservation, hash, 201, {
+        success: true,
+        campaign_id: body.campaign_id,
+        collaboration_id: collaborationId,
+        status: 'completed',
+        row_version: current.row_version,
+        lifecycle_version: changed.lifecycleVersion,
+        active_relations: relations,
+        performance_tracking: changed.projection
+      });
+    }).immediate();
+  }
+
+  function listPublicationHistory(input) {
+    const userId = requirePositiveSafeId(input && input.userId, 'userId');
+    const collaborationId = requirePositiveSafeId(input && input.collaborationId, 'collaborationId');
+    const campaignId = requirePositiveSafeId(input && input.campaignId, 'campaignId');
+    const custodyId = requirePositiveSafeId(input && input.custodyId, 'custodyId');
+    if (!publicationHandoffService) {
+      throw serviceError(503, 'PUBLICATION_TRACKING_UNAVAILABLE', 'Publication tracking is unavailable.');
+    }
+    const context = contractDocumentContext(userId, collaborationId, { campaignId });
+    const relations = activeRelations(db, campaignId, collaborationId);
+    if (!relations.includes('publication')) {
+      throw serviceError(404, 'RECORD_NOT_FOUND', 'Publication history was not found.');
+    }
+    return publicationHandoffService.history({
+      orgId: context.access.campaign.org_id,
+      campaignId,
+      collaborationId,
+      custodyId,
+      limit: input && input.limit,
+      beforeVersion: input && input.beforeVersion
+    });
+  }
+
   function downloadContractDocument(input) {
     const userId = requirePositiveSafeId(input && input.userId, 'userId');
     const collaborationId = requirePositiveSafeId(
@@ -4654,9 +4932,11 @@ function createCampaignCollaborationService(db, options = {}) {
   }
 
   return Object.freeze({
+    changePublicationTracking,
     closeoutSnapshot,
     confirmContract,
     confirmPublication,
+    correctPublication,
     createLinked,
     decideContentReview,
     decideSettlement,
@@ -4666,6 +4946,7 @@ function createCampaignCollaborationService(db, options = {}) {
     listContentReviews,
     listContractDocuments,
     listPayments,
+    listPublicationHistory,
     recordPayment,
     stats,
     submitContentReview,

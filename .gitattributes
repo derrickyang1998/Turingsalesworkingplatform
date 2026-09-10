@@ -24,6 +24,7 @@ platform/server/migrations/014_customer_report_ppt_artifact.js text eol=lf
 platform/server/migrations/015_influencer_saved_views.js text eol=lf
 platform/server/migrations/016_collaboration_contract_documents.js text eol=lf
 platform/server/migrations/017_collaboration_publication_custody.js text eol=lf
+platform/server/migrations/018_collaboration_publication_lifecycle.js text eol=lf
 platform/server/migrations/baselines/legacy_v1.js text eol=lf
 platform/server/migrations/engines/v1.js text eol=lf
 platform/server/migrations/vendor/bcryptjs_v3_0_3.js text eol=lf

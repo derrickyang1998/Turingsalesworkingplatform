@@ -152,7 +152,8 @@ function createPerformanceFreshnessService(options = {}) {
       userId: input.userId,
       campaignId: input.campaignId
     });
-    const contents = Array.isArray(snapshot.items) ? snapshot.items : [];
+    const allContents = Array.isArray(snapshot.items) ? snapshot.items.filter(Boolean) : [];
+    const contents = allContents.filter((content) => content.tracking_status !== 'paused');
     const assessed = contents.map((content) => assessContentFreshness(content, nowMs));
     const contentsById = new Map(contents.map((content) => [Number(content.id), content]));
     const stateNames = [
@@ -171,7 +172,9 @@ function createPerformanceFreshnessService(options = {}) {
     const nextDueTimes = assessed.map((item) => timestampMs(item.next_due_at)).filter((value) => value !== null);
     const successTimes = assessed.map((item) => timestampMs(item.last_observed_at)).filter((value) => value !== null && value <= nowMs);
     const summary = {
-      total: contents.length,
+      total: allContents.length,
+      monitored_total: contents.length,
+      paused: allContents.length - contents.length,
       current: counts.current,
       due: counts.due,
       stale: counts.stale,

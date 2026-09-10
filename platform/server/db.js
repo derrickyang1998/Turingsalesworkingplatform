@@ -119,6 +119,13 @@ const db = migrationService.openMigratedDatabase(DB_PATH, {
       sourcePath: 'migrations/017_collaboration_publication_custody.js',
       engineVersion: 1,
       dependencies: ['migrations/vendor/bcryptjs_v3_0_3.js']
+    },
+    {
+      version: 18,
+      name: '018_collaboration_publication_lifecycle',
+      sourcePath: 'migrations/018_collaboration_publication_lifecycle.js',
+      engineVersion: 1,
+      dependencies: ['migrations/vendor/bcryptjs_v3_0_3.js']
     }
   ]
 });

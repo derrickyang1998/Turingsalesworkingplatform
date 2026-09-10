@@ -131,6 +131,13 @@ const EXACT_PROFILE_MIGRATIONS = Object.freeze([
     sourcePath: 'migrations/017_collaboration_publication_custody.js',
     engineVersion: 1,
     dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
+  }),
+  Object.freeze({
+    version: 18,
+    name: '018_collaboration_publication_lifecycle',
+    sourcePath: 'migrations/018_collaboration_publication_lifecycle.js',
+    engineVersion: 1,
+    dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
   })
 ]);
 const FTS_MANIFEST = Object.freeze({
@@ -295,6 +302,10 @@ const V16_DERIVED_REBUILDS = Object.freeze([
 const V17_DERIVED_REBUILDS = Object.freeze([
   ...V16_DERIVED_REBUILDS,
   'collaboration_publication_custody.final_url_sha256'
+]);
+const V18_DERIVED_REBUILDS = Object.freeze([
+  ...V17_DERIVED_REBUILDS,
+  'collaboration_publication_lifecycle_versions.effective_url_sha256'
 ]);
 const V1_DERIVED_REBUILDS = Object.freeze([
   'knowledge_entries.source_hash',
@@ -723,6 +734,20 @@ const V17_MIGRATION_LEDGER = Object.freeze({
     'migrations/017_collaboration_publication_custody.js'
   ])
 });
+const V18_MIGRATION_LEDGER = Object.freeze({
+  name: Object.freeze([
+    ...V17_MIGRATION_LEDGER.name,
+    '018_collaboration_publication_lifecycle'
+  ]),
+  checksum: Object.freeze([
+    ...V17_MIGRATION_LEDGER.checksum,
+    '71349852d36b5f00e1755c53f2e7d628ef7d72420bd2370699fa84bf4354cd3c'
+  ]),
+  sourcePath: Object.freeze([
+    ...V17_MIGRATION_LEDGER.sourcePath,
+    'migrations/018_collaboration_publication_lifecycle.js'
+  ])
+});
 const STRUCTURAL_COLUMN_POLICY_V9 = Object.freeze(Object.assign(Object.create(null), STRUCTURAL_COLUMN_POLICY, {
   'feishu_bitable_outbox_retries.id': Object.freeze({ storage: 'integer', kind: 'integer' }),
   'feishu_bitable_outbox_retries.org_id': Object.freeze({ storage: 'integer', kind: 'integer' }),
@@ -1042,6 +1067,55 @@ const STRUCTURAL_POLICY_V17_SHA256 = crypto.createHash('sha256')
     columns: STRUCTURAL_COLUMN_POLICY_V17
   }), 'utf8')
   .digest('hex');
+const STRUCTURAL_COLUMN_POLICY_V18 = Object.freeze(Object.assign(Object.create(null), STRUCTURAL_COLUMN_POLICY_V17, {
+  'collaboration_publication_lifecycle_versions.id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'collaboration_publication_lifecycle_versions.org_id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'collaboration_publication_lifecycle_versions.campaign_id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'collaboration_publication_lifecycle_versions.collaboration_id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'collaboration_publication_lifecycle_versions.custody_id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'collaboration_publication_lifecycle_versions.lifecycle_version': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'collaboration_publication_lifecycle_versions.previous_version_id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'collaboration_publication_lifecycle_versions.publication_id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'collaboration_publication_lifecycle_versions.knowledge_entry_id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'collaboration_publication_lifecycle_versions.collaboration_row_version_observed': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'collaboration_publication_lifecycle_versions.acted_by': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'collaboration_publication_lifecycle_versions.action': Object.freeze({
+    storage: 'text', kind: 'enum', allowedValues: Object.freeze(['corrected', 'paused', 'resumed'])
+  }),
+  'collaboration_publication_lifecycle_versions.tracking_state': Object.freeze({
+    storage: 'text', kind: 'enum', allowedValues: Object.freeze(['active', 'paused'])
+  }),
+  'collaboration_publication_lifecycle_versions.platform': Object.freeze({
+    storage: 'text', kind: 'enum',
+    allowedValues: Object.freeze(['tiktok', 'instagram', 'youtube', 'facebook', 'x', 'manual', 'custom'])
+  }),
+  'collaboration_publication_lifecycle_versions.correction_kind': Object.freeze({
+    storage: 'text', kind: 'enum', allowedValues: Object.freeze(['url_alias', 'content_replacement'])
+  }),
+  'collaboration_publication_lifecycle_versions.registration_mode': Object.freeze({
+    storage: 'text', kind: 'enum',
+    allowedValues: Object.freeze(['reused_current', 'created', 'existing', 'reused_history'])
+  }),
+  'collaboration_publication_lifecycle_versions.effective_published_at': Object.freeze({ storage: 'text', kind: 'timestamp' }),
+  'collaboration_publication_lifecycle_versions.acted_at': Object.freeze({ storage: 'text', kind: 'timestamp' }),
+  'collaboration_publication_lifecycle_versions.created_at': Object.freeze({ storage: 'text', kind: 'timestamp' }),
+  'schema_migrations.name': Object.freeze({
+    storage: 'text', kind: 'migration-ledger', allowedValues: V18_MIGRATION_LEDGER.name
+  }),
+  'schema_migrations.checksum': Object.freeze({
+    storage: 'text', kind: 'migration-ledger', allowedValues: V18_MIGRATION_LEDGER.checksum
+  }),
+  'schema_migrations.source_path': Object.freeze({
+    storage: 'text', kind: 'migration-ledger', allowedValues: V18_MIGRATION_LEDGER.sourcePath
+  })
+}));
+const STRUCTURAL_POLICY_V18_VALIDATOR_VERSION = 'tm-structural-policy-v14-publication-lifecycle';
+const STRUCTURAL_POLICY_V18_SHA256 = crypto.createHash('sha256')
+  .update(JSON.stringify({
+    validatorVersion: STRUCTURAL_POLICY_V18_VALIDATOR_VERSION,
+    columns: STRUCTURAL_COLUMN_POLICY_V18
+  }), 'utf8')
+  .digest('hex');
 
 const TRANSFORMATION_EXCLUDED_CLASSIFICATIONS = new Set([
   'structural',
@@ -1174,8 +1248,17 @@ const V17_SEMANTIC_POLICIES = Object.freeze({
     policySha256: STRUCTURAL_POLICY_V17_SHA256
   })
 });
+const V18_SEMANTIC_POLICIES = Object.freeze({
+  ...SEMANTIC_POLICIES,
+  structuralColumns: Object.freeze({
+    ...SEMANTIC_POLICIES.structuralColumns,
+    validatorVersion: STRUCTURAL_POLICY_V18_VALIDATOR_VERSION,
+    policySha256: STRUCTURAL_POLICY_V18_SHA256
+  })
+});
 
 function structuralColumnPolicyForVersion(schemaVersion) {
+  if (schemaVersion === 18) return STRUCTURAL_COLUMN_POLICY_V18;
   if (schemaVersion === 17) return STRUCTURAL_COLUMN_POLICY_V17;
   if (schemaVersion === 16) return STRUCTURAL_COLUMN_POLICY_V16;
   if (schemaVersion === 15) return STRUCTURAL_COLUMN_POLICY_V15;
@@ -1689,6 +1772,15 @@ function profileContractForVersion(schemaVersion) {
       preservedAccounting: PRESERVED_ACCOUNTING
     });
   }
+  if (schemaVersion === 18) {
+    return Object.freeze({
+      semanticPolicies: V18_SEMANTIC_POLICIES,
+      equalityGroups: V14_EQUALITY_GROUPS,
+      referenceGroups: REFERENCE_GROUPS,
+      derivedRebuilds: V18_DERIVED_REBUILDS,
+      preservedAccounting: PRESERVED_ACCOUNTING
+    });
+  }
   throw new Error(`unsupported exact sanitization profile version ${schemaVersion}`);
 }
 
@@ -1708,16 +1800,16 @@ function assertManifestDocumentShape(manifest) {
   ) {
     throw new Error('malformed sanitization manifest header');
   }
-  if (!Array.isArray(manifest.exactProfiles) || manifest.exactProfiles.length !== 12) {
-    throw new Error('sanitization manifest must contain isolated exact v6 through v17 profiles');
+  if (!Array.isArray(manifest.exactProfiles) || manifest.exactProfiles.length !== 13) {
+    throw new Error('sanitization manifest must contain isolated exact v6 through v18 profiles');
   }
   const profileKeys = [
     'schemaVersion', 'semanticPolicies', 'equalityGroups', 'referenceGroups',
     'derivedRebuilds', 'objects'
   ];
   const versions = manifest.exactProfiles.map((profile) => profile.schemaVersion);
-  if (JSON.stringify(versions) !== JSON.stringify([6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17])) {
-    throw new Error('sanitization manifest exact profiles must be ordered v6 through v17');
+  if (JSON.stringify(versions) !== JSON.stringify([6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18])) {
+    throw new Error('sanitization manifest exact profiles must be ordered v6 through v18');
   }
   for (const compatibilityProfile of manifest.exactProfiles) {
     if (!exactObjectKeys(compatibilityProfile, profileKeys)) {
@@ -1754,12 +1846,12 @@ function exactProfileClassification(db) {
   });
   if (
     classification.status !== 'managed'
-    || ![1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17].includes(classification.currentVersion)
+    || ![1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18].includes(classification.currentVersion)
   ) {
     const observed = classification.currentVersion === undefined || classification.currentVersion === null
       ? classification.status
       : classification.currentVersion;
-    throw new Error(`sanitization source must be an exact managed version 1 or version 6 through version 17 profile; got ${observed}`);
+    throw new Error(`sanitization source must be an exact managed version 1 or version 6 through version 18 profile; got ${observed}`);
   }
   return classification;
 }
@@ -5091,24 +5183,44 @@ function rebuildContractDocumentDigests(db) {
 }
 
 function rebuildCollaborationPublicationDigests(db) {
-  const present = db.prepare(`
+  const custodyPresent = db.prepare(`
     SELECT 1 AS present
     FROM sqlite_schema
     WHERE type='table' AND name='collaboration_publication_custody'
   `).get();
-  if (!present) return;
-  const update = db.prepare('UPDATE collaboration_publication_custody SET final_url_sha256=? WHERE id=?');
-  for (const row of db.prepare(`
-    SELECT id,confirmed_url
-    FROM collaboration_publication_custody
-    ORDER BY id
-  `).all()) {
-    update.run(sha256(Buffer.from(row.confirmed_url, 'utf8')), row.id);
+  if (custodyPresent) {
+    const updateCustody = db.prepare('UPDATE collaboration_publication_custody SET final_url_sha256=? WHERE id=?');
+    for (const row of db.prepare(`
+      SELECT id,confirmed_url
+      FROM collaboration_publication_custody
+      ORDER BY id
+    `).all()) {
+      updateCustody.run(sha256(Buffer.from(row.confirmed_url, 'utf8')), row.id);
+    }
+  }
+  const lifecyclePresent = db.prepare(`
+    SELECT 1 AS present
+    FROM sqlite_schema
+    WHERE type='table' AND name='collaboration_publication_lifecycle_versions'
+  `).get();
+  if (lifecyclePresent) {
+    const updateLifecycle = db.prepare(`
+      UPDATE collaboration_publication_lifecycle_versions
+      SET effective_url_sha256=?
+      WHERE id=?
+    `);
+    for (const row of db.prepare(`
+      SELECT id,effective_url
+      FROM collaboration_publication_lifecycle_versions
+      ORDER BY id
+    `).all()) {
+      updateLifecycle.run(sha256(Buffer.from(row.effective_url, 'utf8')), row.id);
+    }
   }
 }
 
 function rebuildDerivedData(db, manifest) {
-  if (![1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17].includes(manifest.schemaVersion)) {
+  if (![1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18].includes(manifest.schemaVersion)) {
     throw new Error(`unsupported derived rebuild profile ${manifest.schemaVersion}`);
   }
   const hasKnowledge = db.prepare("SELECT 1 AS present FROM sqlite_schema WHERE type='table' AND name='knowledge_entries'").get();

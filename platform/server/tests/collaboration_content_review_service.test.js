@@ -10,6 +10,7 @@ const migrationService = require('../services/migration_service');
 const knowledgeService = require('../services/knowledge_service');
 const { createCampaignCollaborationService } = require('../services/campaign_collaboration_service');
 const { createPerformanceManualService } = require('../services/performance_manual_service');
+const { createPerformanceFreshnessService } = require('../services/performance_freshness_service');
 const {
   createCollaborationPublicationHandoffService
 } = require('../services/collaboration_publication_handoff_service');
@@ -31,7 +32,8 @@ const MIGRATION_NAMES = Object.freeze([
   '014_customer_report_ppt_artifact',
   '015_influencer_saved_views',
   '016_collaboration_contract_documents',
-  '017_collaboration_publication_custody'
+  '017_collaboration_publication_custody',
+  '018_collaboration_publication_lifecycle'
 ]);
 const MIGRATIONS = Object.freeze(MIGRATION_NAMES.map((name, index) => Object.freeze({
   version: index + 2,
@@ -52,7 +54,7 @@ function openDatabase(t) {
   assert.deepEqual(migrationService.runMigrations(db, {
     rootDir: SERVER_ROOT,
     registeredMigrations: MIGRATIONS
-  }), { status: 'managed', currentVersion: 17 });
+  }), { status: 'managed', currentVersion: 18 });
   return db;
 }
 
@@ -360,7 +362,14 @@ test('approved review unlocks explicit multi-deliverable publication confirmatio
         original_url: 'https://youtu.be/dQw4w9WgXcQ?utm_source=creator',
         published_at: '2026-09-08T11:45:00.000Z',
         confirmed_at: '2026-09-08T12:00:00.000Z',
-        source: 'collaboration_publication'
+        source: 'collaboration_publication',
+        lifecycle_version: 1,
+        version_number: 1,
+        tracking_status: 'active',
+        history_count: 1,
+        can_correct: true,
+        can_pause: true,
+        can_resume: false
       },
       {
         registration: 'created',
@@ -371,7 +380,14 @@ test('approved review unlocks explicit multi-deliverable publication confirmatio
         original_url: 'https://www.instagram.com/reel/C1234567890/',
         published_at: '2026-09-08T11:50:00.000Z',
         confirmed_at: '2026-09-08T12:00:00.000Z',
-        source: 'collaboration_publication'
+        source: 'collaboration_publication',
+        lifecycle_version: 1,
+        version_number: 1,
+        tracking_status: 'active',
+        history_count: 1,
+        can_correct: true,
+        can_pause: true,
+        can_resume: false
       }
     ]
   });
@@ -422,6 +438,16 @@ test('approved review unlocks explicit multi-deliverable publication confirmatio
     includeCampaignContext: true
   }).collaborations[0];
   assert.deepEqual(listed.performance_tracking, published.body.performance_tracking);
+  db.prepare("UPDATE campaigns SET operational_status='on_hold' WHERE id=?").run(fixture.campaignId);
+  const held = service.list({
+    userId: fixture.submitterId,
+    campaignId: fixture.campaignId,
+    includeCampaignContext: true
+  }).collaborations[0];
+  assert.ok(held.performance_tracking.items.every((item) => (
+    item.can_correct === false && item.can_pause === false && item.can_resume === false
+  )));
+  db.prepare("UPDATE campaigns SET operational_status='active' WHERE id=?").run(fixture.campaignId);
   assert.equal(service.list({
     userId: fixture.outsiderId,
     campaignId: fixture.campaignId,
@@ -761,4 +787,320 @@ test('content review evidence tampering fails closed before list or publication'
     })),
     (error) => error && error.code === 'CAMPAIGN_EVIDENCE_IN_USE'
   );
+});
+
+function establishPublicationLifecycle(db) {
+  const fixture = seedFixture(db);
+  const service = collaborationServiceWithPerformanceHandoff(db);
+  service.submitContentReview(submissionInput(fixture));
+  service.decideContentReview(decisionInput(fixture));
+  const published = service.confirmPublication(publicationInput(fixture));
+  return { fixture, service, published };
+}
+
+test('same-content URL alias creates a lifecycle version without replacing the tracked publication', (t) => {
+  const db = openDatabase(t);
+  const { fixture, service, published } = establishPublicationLifecycle(db);
+  const baseline = published.body.performance_tracking.items[0];
+  const performance = createPerformanceManualService(db);
+  performance.recordManualInput({
+    userId: fixture.submitterId,
+    campaignId: fixture.campaignId,
+    contentId: baseline.publication_id,
+    body: { observation: { views: 120 }, correction_reason: 'Baseline alias test.' }
+  });
+  const publicationCount = db.prepare('SELECT COUNT(*) AS count FROM campaign_publications').get().count;
+
+  const corrected = service.correctPublication({
+    userId: fixture.submitterId,
+    collaborationId: fixture.collaborationId,
+    requestId: 'publication-alias-correction-request',
+    idempotencyKey: 'publication-alias-correction',
+    body: {
+      campaign_id: fixture.campaignId,
+      expected_version: 1,
+      custody_id: baseline.custody_id,
+      url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ&feature=share',
+      published_at: '2026-09-08T11:45:00.000Z',
+      correction_reason: 'Normalized the creator sharing URL without changing the video.',
+      same_content_confirmed: true
+    }
+  });
+
+  const current = corrected.body.performance_tracking.items.find((item) => item.custody_id === baseline.custody_id);
+  assert.equal(corrected.body.row_version, 7);
+  assert.equal(corrected.body.lifecycle_version, 2);
+  assert.equal(current.lifecycle_version, 2);
+  assert.equal(current.publication_id, baseline.publication_id);
+  assert.equal(current.original_url, 'https://www.youtube.com/watch?v=dQw4w9WgXcQ&feature=share');
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM campaign_publications').get().count, publicationCount);
+  const performanceListing = performance.listContents({
+    userId: fixture.submitterId,
+    campaignId: fixture.campaignId,
+    query: {}
+  });
+  const aliasedContent = performanceListing.items.find((item) => item.id === baseline.publication_id);
+  assert.equal(aliasedContent.original_url, 'https://www.youtube.com/watch?v=dQw4w9WgXcQ&feature=share');
+  assert.equal(aliasedContent.latest_observation.views, 120);
+  assert.equal(performance.listContents({
+    userId: fixture.submitterId,
+    campaignId: fixture.campaignId,
+    query: { q: 'feature=share' }
+  }).total, 1);
+  const version = db.prepare(`
+    SELECT correction_kind,registration_mode FROM collaboration_publication_lifecycle_versions
+    WHERE custody_id=? AND lifecycle_version=2
+  `).get(baseline.custody_id);
+  assert.deepEqual(version, { correction_kind: 'url_alias', registration_mode: 'reused_current' });
+});
+
+test('publication correction preserves immutable history and only the current version reaches performance totals', (t) => {
+  const db = openDatabase(t);
+  const { fixture, service, published } = establishPublicationLifecycle(db);
+  const baseline = published.body.performance_tracking.items[0];
+  const performance = createPerformanceManualService(db);
+  performance.recordManualInput({
+    userId: fixture.submitterId,
+    campaignId: fixture.campaignId,
+    contentId: baseline.publication_id,
+    body: { observation: { views: 100 }, correction_reason: 'Baseline before replacement.' }
+  });
+
+  const corrected = service.correctPublication({
+    userId: fixture.submitterId,
+    collaborationId: fixture.collaborationId,
+    requestId: 'publication-correction-request-0001',
+    idempotencyKey: 'publication-correction-0001',
+    body: {
+      campaign_id: fixture.campaignId,
+      expected_version: 1,
+      custody_id: baseline.custody_id,
+      url: 'https://www.youtube.com/watch?v=9bZkp7q19f0',
+      published_at: '2026-09-08T13:00:00.000Z',
+      correction_reason: 'Creator replaced the final public link after upload processing.',
+      same_content_confirmed: true
+    }
+  });
+
+  assert.equal(corrected.status, 201);
+  assert.equal(corrected.body.row_version, 7);
+  assert.equal(corrected.body.lifecycle_version, 2);
+  const current = corrected.body.performance_tracking.items.find((item) => (
+    item.custody_id === baseline.custody_id
+  ));
+  assert.ok(current);
+  assert.notEqual(current.publication_id, baseline.publication_id);
+  assert.equal(current.version_number, 2);
+  assert.equal(current.tracking_status, 'active');
+  assert.equal(current.history_count, 2);
+  const history = service.listPublicationHistory({
+    userId: fixture.submitterId,
+    collaborationId: fixture.collaborationId,
+    campaignId: fixture.campaignId,
+    custodyId: baseline.custody_id,
+    limit: 20
+  });
+  assert.deepEqual(history.items.map((version) => ({
+    lifecycle_version: version.lifecycle_version,
+    publication_id: version.publication_id,
+    is_current: version.is_current
+  })), [
+    { lifecycle_version: 2, publication_id: current.publication_id, is_current: true },
+    { lifecycle_version: 1, publication_id: baseline.publication_id, is_current: false }
+  ]);
+
+  const listed = performance.listContents({
+    userId: fixture.submitterId,
+    campaignId: fixture.campaignId,
+    query: {}
+  });
+  assert.equal(listed.total, 2);
+  assert.equal(listed.items.some((item) => item.id === baseline.publication_id), false);
+  assert.equal(listed.items.some((item) => item.id === current.publication_id), true);
+  assert.throws(
+    () => performance.recordManualInput({
+      userId: fixture.submitterId,
+      campaignId: fixture.campaignId,
+      contentId: baseline.publication_id,
+      body: { observation: { views: 100 }, correction_reason: 'Should be rejected.' }
+    }),
+    (error) => error && error.code === 'PERFORMANCE_CONTENT_SUPERSEDED'
+  );
+  assert.throws(
+    () => db.prepare(`
+      INSERT INTO performance_metric_observations (
+        org_id,campaign_id,publication_id,source_mode,metrics_json,observed_at,created_by
+      ) VALUES (?,?,?,'manual','{"views":101}','2026-09-09T11:59:00.000Z',?)
+    `).run(fixture.orgId, fixture.campaignId, baseline.publication_id, fixture.submitterId),
+    /publication metrics tracking is paused or publication is not current/
+  );
+
+  const paused = service.changePublicationTracking({
+    userId: fixture.submitterId,
+    collaborationId: fixture.collaborationId,
+    requestId: 'publication-tracking-pause-request-0001',
+    idempotencyKey: 'publication-tracking-pause-0001',
+    body: {
+      campaign_id: fixture.campaignId,
+      expected_version: 2,
+      custody_id: baseline.custody_id,
+      action: 'paused',
+      reason: 'Client requested a temporary reporting hold.'
+    }
+  });
+  assert.equal(paused.body.row_version, 7);
+  assert.equal(paused.body.lifecycle_version, 3);
+  const pausedItem = paused.body.performance_tracking.items.find((item) => item.custody_id === baseline.custody_id);
+  assert.equal(pausedItem.tracking_status, 'paused');
+
+  const pausedList = performance.listContents({
+    userId: fixture.submitterId,
+    campaignId: fixture.campaignId,
+    query: {}
+  });
+  assert.equal(pausedList.items.find((item) => item.id === current.publication_id).tracking_status, 'paused');
+  assert.throws(
+    () => performance.recordManualInput({
+      userId: fixture.submitterId,
+      campaignId: fixture.campaignId,
+      contentId: current.publication_id,
+      body: { observation: { views: 200 }, correction_reason: 'Should be blocked while paused.' }
+    }),
+    (error) => error && error.code === 'PERFORMANCE_TRACKING_PAUSED'
+  );
+  assert.throws(
+    () => db.prepare(`
+      INSERT INTO performance_metric_observations (
+        org_id,campaign_id,publication_id,source_mode,metrics_json,observed_at,created_by
+      ) VALUES (?,?,?,'manual','{"views":201}','2026-09-09T12:01:00.000Z',?)
+    `).run(fixture.orgId, fixture.campaignId, current.publication_id, fixture.submitterId),
+    /publication metrics tracking is paused or publication is not current/
+  );
+
+  const freshness = createPerformanceFreshnessService({
+    performanceService: performance,
+    now: () => new Date('2026-09-09T12:00:00.000Z')
+  }).getQueue({ userId: fixture.submitterId, campaignId: fixture.campaignId });
+  assert.equal(freshness.items.some((item) => item.publication_id === current.publication_id), false);
+  assert.equal(freshness.summary.total, 2);
+  assert.equal(freshness.summary.monitored_total, 1);
+  assert.equal(freshness.summary.paused, 1);
+
+  const resumed = service.changePublicationTracking({
+    userId: fixture.submitterId,
+    collaborationId: fixture.collaborationId,
+    requestId: 'publication-tracking-resume-request-0001',
+    idempotencyKey: 'publication-tracking-resume-0001',
+    body: {
+      campaign_id: fixture.campaignId,
+      expected_version: 3,
+      custody_id: baseline.custody_id,
+      action: 'resumed',
+      reason: 'Client reporting hold was lifted.'
+    }
+  });
+  assert.equal(resumed.body.row_version, 7);
+  assert.equal(resumed.body.lifecycle_version, 4);
+  assert.equal(
+    resumed.body.performance_tracking.items.find((item) => item.custody_id === baseline.custody_id).tracking_status,
+    'active'
+  );
+  const accepted = performance.recordManualInput({
+    userId: fixture.submitterId,
+    campaignId: fixture.campaignId,
+    contentId: current.publication_id,
+    body: { observation: { views: 300 }, correction_reason: 'Tracking resumed.' }
+  });
+  assert.equal(accepted.observation.views, 300);
+
+  const restored = service.correctPublication({
+    userId: fixture.submitterId,
+    collaborationId: fixture.collaborationId,
+    requestId: 'publication-correction-return-request',
+    idempotencyKey: 'publication-correction-return',
+    body: {
+      campaign_id: fixture.campaignId,
+      expected_version: 4,
+      custody_id: baseline.custody_id,
+      url: baseline.original_url,
+      published_at: baseline.published_at,
+      correction_reason: 'Creator restored the originally approved video.',
+      same_content_confirmed: true
+    }
+  });
+  assert.equal(restored.body.row_version, 7);
+  assert.equal(restored.body.lifecycle_version, 5);
+  const restoredItem = restored.body.performance_tracking.items.find((item) => item.custody_id === baseline.custody_id);
+  assert.equal(restoredItem.publication_id, baseline.publication_id);
+  assert.equal(restoredItem.tracking_status, 'active');
+  const restoredList = performance.listContents({
+    userId: fixture.submitterId,
+    campaignId: fixture.campaignId,
+    query: {}
+  });
+  assert.equal(restoredList.items.some((item) => item.id === current.publication_id), false);
+  assert.equal(
+    restoredList.items.find((item) => item.id === baseline.publication_id).latest_observation.views,
+    100
+  );
+});
+
+test('paused custody stays paused through correction and lifecycle writes are idempotent and authorized', (t) => {
+  const db = openDatabase(t);
+  const { fixture, service, published } = establishPublicationLifecycle(db);
+  const baseline = published.body.performance_tracking.items[0];
+  service.changePublicationTracking({
+    userId: fixture.submitterId,
+    collaborationId: fixture.collaborationId,
+    requestId: 'publication-pre-correction-pause-request',
+    idempotencyKey: 'publication-pre-correction-pause',
+    body: {
+      campaign_id: fixture.campaignId,
+      expected_version: 1,
+      custody_id: baseline.custody_id,
+      action: 'paused',
+      reason: 'Pause before link correction.'
+    }
+  });
+  const correctionInput = {
+    userId: fixture.submitterId,
+    collaborationId: fixture.collaborationId,
+    requestId: 'publication-correction-paused-request',
+    idempotencyKey: 'publication-correction-paused',
+    body: {
+      campaign_id: fixture.campaignId,
+      expected_version: 2,
+      custody_id: baseline.custody_id,
+      url: 'https://www.youtube.com/watch?v=3JZ_D3ELwOQ',
+      published_at: '2026-09-08T14:00:00.000Z',
+      correction_reason: 'Corrected a creator-side replacement URL.',
+      same_content_confirmed: true
+    }
+  };
+  const corrected = service.correctPublication(correctionInput);
+  const replayed = service.correctPublication({
+    ...correctionInput,
+    requestId: 'publication-correction-paused-replay'
+  });
+  assert.deepEqual(replayed, corrected);
+  assert.equal(corrected.body.row_version, 7);
+  assert.equal(corrected.body.lifecycle_version, 3);
+  assert.equal(
+    corrected.body.performance_tracking.items.find((item) => item.custody_id === baseline.custody_id).tracking_status,
+    'paused'
+  );
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM collaboration_publication_lifecycle_versions').get().count, 2);
+
+  const beforeUnauthorized = {
+    lifecycle: db.prepare('SELECT COUNT(*) AS count FROM collaboration_publication_lifecycle_versions').get().count,
+    publications: db.prepare('SELECT COUNT(*) AS count FROM campaign_publications').get().count
+  };
+  assert.throws(
+    () => service.correctPublication({ ...correctionInput, userId: fixture.outsiderId }),
+    (error) => error && error.code === 'RECORD_NOT_FOUND'
+  );
+  assert.deepEqual({
+    lifecycle: db.prepare('SELECT COUNT(*) AS count FROM collaboration_publication_lifecycle_versions').get().count,
+    publications: db.prepare('SELECT COUNT(*) AS count FROM campaign_publications').get().count
+  }, beforeUnauthorized);
 });

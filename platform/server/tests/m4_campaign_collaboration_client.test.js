@@ -52,6 +52,7 @@ function loadFunctions(context, names) {
     'var pendingContentReviewCollabId = null;',
     'var pendingPublicationCollabId = null;',
     'var pendingPublicationDraftRows = [];',
+    'var pendingPublicationLifecycle = null;',
     'var pendingPaymentCollabId = null;',
     'var pendingPaymentEntryId = null;',
     'var pendingSettlementCollabId = null;',
@@ -87,6 +88,7 @@ function createClientContext() {
   const requests = [];
   const completedByKey = new Map();
   const rows = [];
+  const publicationHistoryByCustody = new Map();
   const appendedElements = [];
   const contractBytes = Buffer.from('%PDF-1.7\nclient contract fixture\n%%EOF\n', 'ascii');
   const contractFile = {
@@ -138,6 +140,10 @@ function createClientContext() {
     publicationUrl_0: element({ value: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' }),
     publicationPublishedAt_0: element({ value: '2026-09-08T11:45' }),
     publicationNote_0: element({ value: 'Final public deliverable verified.' }),
+    publicationLifecycleUrl: element({ value: 'https://www.youtube.com/watch?v=9bZkp7q19f0' }),
+    publicationLifecyclePublishedAt: element({ value: '2026-09-08T13:00' }),
+    publicationLifecycleReason: element({ value: 'Creator replaced the final public link.' }),
+    publicationLifecycleSameContent: element({ checked: true }),
     paymentDirection: element({ value: 'creator_payment' }),
     paymentAmount: element({ value: '800' }),
     paymentPaidAt: element({ value: '2026-09-08T12:00' }),
@@ -464,25 +470,149 @@ function createClientContext() {
       campaign_id: collaboration.campaign_id,
       publication_count: body.publications.length,
       items: body.publications.map(function(item, index) {
+        const publicationId = 9901 + index;
         return {
           registration: index === 0 ? 'created' : 'existing',
           custody_id: 8800 + index,
-          publication_id: 9901 + index,
+          publication_id: publicationId,
           deliverable_key: item.deliverable_key,
           platform: item.url.indexOf('youtube') >= 0 ? 'youtube' : 'custom',
           original_url: item.url,
           published_at: item.published_at,
           confirmed_at: '2026-09-08T12:00:00.000Z',
-          source: 'collaboration_publication'
+          source: 'collaboration_publication',
+          lifecycle_version: 1,
+          version_number: 1,
+          tracking_status: 'active',
+          history_count: 1,
+          can_correct: true,
+          can_pause: true,
+          can_resume: false
         };
       })
     };
+    collaboration.performance_tracking.items.forEach(function(item) {
+      publicationHistoryByCustody.set(item.custody_id, [{
+        lifecycle_version: 1,
+        publication_id: item.publication_id,
+        original_url: item.original_url,
+        published_at: item.published_at,
+        recorded_at: item.confirmed_at,
+        action: 'confirmed',
+        tracking_status: 'active',
+        reason: null,
+        is_current: true
+      }]);
+    });
     const response = {
       success: true,
       campaign_id: collaboration.campaign_id,
       collaboration_id: collaboration.id,
       status: collaboration.status,
       row_version: collaboration.row_version,
+      active_relations: collaboration.active_relations.slice(),
+      performance_tracking: JSON.parse(JSON.stringify(collaboration.performance_tracking))
+    };
+    completedByKey.set(replayKey, response);
+    return jsonResponse(201, response);
+  }
+
+  function correctPublication(url, options) {
+    const body = JSON.parse(options.body);
+    const idempotencyKey = options.headers['Idempotency-Key'];
+    const replayKey = url + ':' + idempotencyKey;
+    if (completedByKey.has(replayKey)) return jsonResponse(201, completedByKey.get(replayKey));
+    const collaborationId = Number(url.split('/')[2]);
+    const collaboration = rows.find(function(row) { return row.id === collaborationId; });
+    if (!collaboration || !collaboration.performance_tracking) {
+      return jsonResponse(404, { error: 'PUBLICATION_CUSTODY_NOT_FOUND', code: 'PUBLICATION_CUSTODY_NOT_FOUND' });
+    }
+    const item = collaboration.performance_tracking.items.find(function(candidate) {
+      return candidate.custody_id === body.custody_id;
+    });
+    if (!item) return jsonResponse(404, { error: 'PUBLICATION_CUSTODY_NOT_FOUND', code: 'PUBLICATION_CUSTODY_NOT_FOUND' });
+    if (item.lifecycle_version !== body.expected_version) {
+      return jsonResponse(409, { error: 'STALE_PUBLICATION_LIFECYCLE_VERSION', code: 'STALE_PUBLICATION_LIFECYCLE_VERSION' });
+    }
+    item.publication_id += 1000;
+    item.original_url = body.url;
+    item.published_at = body.published_at;
+    item.confirmed_at = '2026-09-08T13:05:00.000Z';
+    item.registration = 'corrected';
+    item.source = 'collaboration_publication_correction';
+    item.lifecycle_version += 1;
+    item.version_number += 1;
+    item.history_count += 1;
+    const history = publicationHistoryByCustody.get(item.custody_id) || [];
+    history.forEach(function(version) { version.is_current = false; });
+    history.unshift({
+      lifecycle_version: item.lifecycle_version,
+      publication_id: item.publication_id,
+      original_url: item.original_url,
+      published_at: item.published_at,
+      recorded_at: item.confirmed_at,
+      action: 'corrected',
+      tracking_status: item.tracking_status,
+      reason: body.correction_reason,
+      is_current: true
+    });
+    publicationHistoryByCustody.set(item.custody_id, history);
+    const response = {
+      success: true,
+      campaign_id: collaboration.campaign_id,
+      collaboration_id: collaboration.id,
+      status: collaboration.status,
+      row_version: collaboration.row_version,
+      lifecycle_version: item.lifecycle_version,
+      active_relations: collaboration.active_relations.slice(),
+      performance_tracking: JSON.parse(JSON.stringify(collaboration.performance_tracking))
+    };
+    completedByKey.set(replayKey, response);
+    return jsonResponse(201, response);
+  }
+
+  function changePublicationTracking(url, options) {
+    const body = JSON.parse(options.body);
+    const idempotencyKey = options.headers['Idempotency-Key'];
+    const replayKey = url + ':' + idempotencyKey;
+    if (completedByKey.has(replayKey)) return jsonResponse(201, completedByKey.get(replayKey));
+    const collaborationId = Number(url.split('/')[2]);
+    const collaboration = rows.find(function(row) { return row.id === collaborationId; });
+    if (!collaboration || !collaboration.performance_tracking) {
+      return jsonResponse(404, { error: 'PUBLICATION_CUSTODY_NOT_FOUND', code: 'PUBLICATION_CUSTODY_NOT_FOUND' });
+    }
+    const item = collaboration.performance_tracking.items.find(function(candidate) {
+      return candidate.custody_id === body.custody_id;
+    });
+    if (!item) return jsonResponse(404, { error: 'PUBLICATION_CUSTODY_NOT_FOUND', code: 'PUBLICATION_CUSTODY_NOT_FOUND' });
+    if (item.lifecycle_version !== body.expected_version) {
+      return jsonResponse(409, { error: 'STALE_PUBLICATION_LIFECYCLE_VERSION', code: 'STALE_PUBLICATION_LIFECYCLE_VERSION' });
+    }
+    item.tracking_status = body.action === 'paused' ? 'paused' : 'active';
+    item.can_pause = item.tracking_status === 'active';
+    item.can_resume = item.tracking_status === 'paused';
+    item.lifecycle_version += 1;
+    item.version_number = item.lifecycle_version;
+    item.history_count += 1;
+    const history = publicationHistoryByCustody.get(item.custody_id) || [];
+    history.forEach(function(version) { version.is_current = false; });
+    history.unshift({
+      lifecycle_version: item.lifecycle_version,
+      publication_id: item.publication_id,
+      action: body.action,
+      tracking_status: item.tracking_status,
+      reason: body.reason,
+      recorded_at: '2026-09-08T13:10:00.000Z',
+      is_current: true
+    });
+    publicationHistoryByCustody.set(item.custody_id, history);
+    const response = {
+      success: true,
+      campaign_id: collaboration.campaign_id,
+      collaboration_id: collaboration.id,
+      status: collaboration.status,
+      row_version: collaboration.row_version,
+      lifecycle_version: item.lifecycle_version,
       active_relations: collaboration.active_relations.slice(),
       performance_tracking: JSON.parse(JSON.stringify(collaboration.performance_tracking))
     };
@@ -499,6 +629,7 @@ function createClientContext() {
     pendingContentReviewCollabId: null,
     pendingPublicationCollabId: null,
     pendingPublicationDraftRows: [],
+    pendingPublicationLifecycle: null,
     m4CollabMutationOperations: {},
     m4CollabMutationInFlight: {},
     pendingCreateRelease: null,
@@ -591,6 +722,25 @@ function createClientContext() {
       if (/^\/collaborations\/\d+\/publication-confirmations$/.test(url) && options.method === 'POST') {
         return confirmPublication(url, options);
       }
+      if (/^\/collaborations\/\d+\/publication-corrections$/.test(url) && options.method === 'POST') {
+        return correctPublication(url, options);
+      }
+      if (/^\/collaborations\/\d+\/publication-tracking-events$/.test(url) && options.method === 'POST') {
+        return changePublicationTracking(url, options);
+      }
+      if (/^\/collaborations\/\d+\/publication-history\?/.test(url) && (!options.method || options.method === 'GET')) {
+        const parsed = new URL(url, 'https://turingmarket.test');
+        const custodyId = Number(parsed.searchParams.get('custody_id'));
+        const history = publicationHistoryByCustody.get(custodyId) || [];
+        return jsonResponse(200, {
+          campaign_id: Number(parsed.searchParams.get('campaign_id')),
+          collaboration_id: Number(parsed.pathname.split('/')[2]),
+          custody_id: custodyId,
+          total: history.length,
+          items: JSON.parse(JSON.stringify(history)),
+          next_cursor: null
+        });
+      }
       if (/^\/collaborations\/\d+\/content-reviews$/.test(url) && (!options.method || options.method === 'GET')) {
         const collaborationId = Number(url.split('/')[2]);
         const collaboration = rows.find(function(row) { return row.id === collaborationId; });
@@ -657,8 +807,15 @@ const m4Functions = [
   'renderContractConfirmation',
   'renderContentReviewEvidence',
   'm4PerformanceTracking',
+  'm4PublicationTrackingItem',
   'renderPerformanceTrackingEvidence',
   'openCollaborationPerformanceTracking',
+  'openCampaignPublicationHistoryModal',
+  'loadCampaignPublicationHistoryPage',
+  'openCampaignPublicationCorrectionModal',
+  'openCampaignPublicationTrackingModal',
+  'closeCampaignPublicationLifecycleModal',
+  'submitCampaignPublicationLifecycle',
   'renderPaymentSettlementEvidence',
   'renderCollabCommercialTerms',
   'renderCollabTable',
@@ -864,7 +1021,13 @@ test('M4 renders a truthful compact lifecycle rail from server-projected checkpo
     status: 'tracked',
     campaign_id: 91,
     publication_count: 1,
-    items: [{ publication_id: 9901 }]
+    items: [{
+      custody_id: 8800,
+      publication_id: 9901,
+      lifecycle_version: 1,
+      history_count: 1,
+      tracking_status: 'active'
+    }]
   };
   collaboration.payment_settlement = {
     ...collaboration.payment_settlement,
@@ -930,7 +1093,7 @@ test('M4 renders multiple tracked deliverables safely and opens the campaign mon
   };
   context.lastCollabRows = [collaboration];
   const evidence = context.renderPerformanceTrackingEvidence(collaboration);
-  assert.match(evidence, /已加入效果追踪 · 2 条/);
+  assert.match(evidence, /效果追踪 · 2 条/);
   assert.match(evidence, /main-video/);
   assert.match(evidence, /&lt;img src=x onerror=alert\(1\)&gt;/);
   assert.match(evidence, /&lt;script&gt;alert\(2\)&lt;\/script&gt;/);
@@ -1658,7 +1821,7 @@ test('M4 campaign workspace executes selector, linked order, lifecycle, and repl
 
   await context.loadCollaborations();
   const trackedEvidence = context.renderPerformanceTrackingEvidence(rows[0]);
-  assert.match(trackedEvidence, /已加入效果追踪/);
+  assert.match(trackedEvidence, /效果追踪/);
   assert.match(trackedEvidence, /内容 #9901/);
   assert.match(context.renderCampaignCollabActions(rows[0]), /查看监控/);
   const openedPages = [];
@@ -1669,6 +1832,63 @@ test('M4 campaign workspace executes selector, linked order, lifecycle, and repl
   assert.equal(elements.performanceContentPlatform.value, '');
   assert.equal(elements.performanceContentTag.value, '');
   assert.deepEqual(openedPages, ['performance-monitor']);
+
+  assert.match(trackedEvidence, /追踪中/);
+  assert.match(trackedEvidence, /纠正链接/);
+  assert.match(trackedEvidence, /暂停追踪/);
+  context.openCampaignPublicationCorrectionModal(rows[0].id, rows[0].performance_tracking.items[0].custody_id);
+  assert.equal(context.pendingPublicationLifecycle.mode, 'correction');
+  elements.publicationLifecycleUrl.value = 'https://www.youtube.com/watch?v=9bZkp7q19f0';
+  elements.publicationLifecyclePublishedAt.value = '2026-09-08T13:00';
+  elements.publicationLifecycleReason.value = 'Creator replaced the final public link.';
+  elements.publicationLifecycleSameContent.checked = true;
+  await context.submitCampaignPublicationLifecycle();
+  const correctionRequest = requests.find(function(request) {
+    return request.url === '/collaborations/' + created.id + '/publication-corrections';
+  });
+  assert.ok(correctionRequest);
+  assert.deepEqual(JSON.parse(correctionRequest.options.body), {
+    campaign_id: 91,
+    expected_version: 1,
+    custody_id: 8800,
+    url: 'https://www.youtube.com/watch?v=9bZkp7q19f0',
+    published_at: new Date('2026-09-08T13:00').toISOString(),
+    correction_reason: 'Creator replaced the final public link.',
+    same_content_confirmed: true
+  });
+  assert.equal(rows[0].row_version, 6);
+  assert.equal(rows[0].performance_tracking.items[0].lifecycle_version, 2);
+  assert.equal(rows[0].performance_tracking.items[0].version_number, 2);
+  assert.equal(rows[0].performance_tracking.items[0].history_count, 2);
+
+  await context.openCampaignPublicationHistoryModal(rows[0].id, 8800);
+  const historyRequest = requests.find(function(request) {
+    return request.url.indexOf('/collaborations/' + created.id + '/publication-history?') === 0;
+  });
+  assert.ok(historyRequest);
+  assert.match(historyRequest.url, /campaign_id=91/);
+  assert.match(historyRequest.url, /custody_id=8800/);
+
+  elements.publicationLifecycleReason.value = 'Client requested a temporary reporting hold.';
+  context.openCampaignPublicationTrackingModal(rows[0].id, 8800);
+  assert.equal(context.pendingPublicationLifecycle.action, 'paused');
+  await context.submitCampaignPublicationLifecycle();
+  const pauseRequest = requests.find(function(request) {
+    return request.url === '/collaborations/' + created.id + '/publication-tracking-events';
+  });
+  assert.ok(pauseRequest);
+  assert.deepEqual(JSON.parse(pauseRequest.options.body), {
+    campaign_id: 91,
+    expected_version: 2,
+    custody_id: 8800,
+    action: 'paused',
+    reason: 'Client requested a temporary reporting hold.'
+  });
+  assert.equal(rows[0].performance_tracking.items[0].tracking_status, 'paused');
+  const pausedEvidence = context.renderPerformanceTrackingEvidence(rows[0]);
+  assert.match(pausedEvidence, /已暂停/);
+  assert.match(pausedEvidence, /恢复追踪/);
+  assert.match(pausedEvidence, /版本 3/);
 
   const settlement = Object.assign({}, rows[0], { active_relations: rows[0].active_relations.slice() });
   const settlementPatch = {
