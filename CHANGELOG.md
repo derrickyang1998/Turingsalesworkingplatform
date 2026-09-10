@@ -1,5 +1,29 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.8.26-performance-collection-history (Production Deployed, 2026-09-10) - 效果数据更新历史
+
+### 交付与范围 / Delivery And Scope
+- 在既有内容监控的新鲜度区域增加紧凑、可折叠的“最近更新记录”，展示内容导入、指标批量补录和人工指标补录的成功、部分完成、失败及时间，不新增页面或替换最新产品壳层。
+- 新增受 Campaign 权限约束的只读接口 `GET /api/campaigns/:id/performance/collection-runs`，从既有只追加审计记录投影安全汇总；不返回文件哈希、映射名称、服务商响应、凭据或内部诊断。
+- 兼容 Express 5 空原型查询对象，拒绝未知查询字段；人工补录记录必须再次通过当前组织与活动的内容归属核验，异常计数明确显示失败，不会误报成功或泄露跨活动内容编号。
+- 审计读取固定为最近 25,000 条系统记录，活动更新历史固定为最近 5,000 条；接口与页面均披露截断状态，避免把有限窗口误认为完整历史。
+- 本版本不增加调度器、自动采集、社交数据 provider、真实飞书写入或数据库迁移，不改变 AI、知识库、方案和冻结 PPT 行为。
+
+### 聚焦验证、审查与上线 / Focused Verification, Review, And Deployment
+- 受影响服务、路由、前端行为及既有效果合同 `37/37`，请求流水线归属 `2/2`，定向发布清单 `1/1`；JavaScript 语法、差异格式及本地发布预检均通过。
+- 独立审查发现并关闭 Express 5 查询兼容、审计读取边界、异常审计语义、跨活动内容投影、未知 HTTP 查询和截断提示问题；最终结论为 `PASS`，无剩余上线阻断。
+- 正式候选完成真实 Express 回放 `8/8`、发布守卫 `21/21`、内置浏览器冒烟 `2/2`、迁移演练、解析器运行时复用、Nginx 与最终验收。
+
+### 生产证据 / Production Evidence
+- 生产运行 ID 为 `840d9ef230ce40a0a9d0a060a0257757`，候选 `v060-crm-sales-workspace-20260910-223654` 完成 `DEPLOY_OK`，候选 SHA-256 为 `6b0f3714da544c15e40c11f419d496ed19a0a2c1f682d7e1caa1079851f99872`。
+- 可恢复备份为 `/root/turingmarket/backups/v060-crm-sales-workspace-20260910-223654`；初始清单 `307/307`、切换快照 `35/35` 均复验通过，清单 SHA-256 分别为 `2891080be6d3f4816f269647e5a3dacd3719bbf24741478cd627f0a6e5005a8f` 与 `306a906fb9448e7383d35890334c4ec1d55a3b5cb229616f189f7cd64947ab03`。
+- 公网首页、健康、脚本与样式为 `200` 且公开资产禁用旧缓存；新接口匿名访问为 `401`，管理员真实活动读取为 `200`，返回 `performance-collection-runs-v1`、自动 provider 未启用且无不安全字段。
+- PM2 online 且重启计数 `0`，Nginx active；SQLite 迁移 `17/17`、`quick_check=ok`、外键异常 `0`。线上核心文件与本地 SHA-256 一致，冻结 `ppt.js` 仍为 `f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e`。
+
+### 后续边界 / Next Boundaries
+- 下一切片仍为一个明确批准的社交数据 provider 与调度执行；Tavily 只承担 AI 联网搜索，不作为视频指标数据源。真实飞书幂等写入继续等待独立生产配置和外部写入门禁。
+- 普通功能按受影响测试、一次独立审查、可验证备份、当轮上线和线上功能冒烟执行；完整回归只在阶段收口或迁移、鉴权、共享基础设施、外部写入等高风险变更时运行。
+
 ## v0.8.25-performance-freshness-update-queue (Production Deployed, 2026-09-10) - 效果新鲜度与更新队列
 
 ### 交付与范围 / Delivery And Scope
