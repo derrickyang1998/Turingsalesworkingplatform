@@ -124,6 +124,13 @@ const EXACT_PROFILE_MIGRATIONS = Object.freeze([
     sourcePath: 'migrations/016_collaboration_contract_documents.js',
     engineVersion: 1,
     dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
+  }),
+  Object.freeze({
+    version: 17,
+    name: '017_collaboration_publication_custody',
+    sourcePath: 'migrations/017_collaboration_publication_custody.js',
+    engineVersion: 1,
+    dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
   })
 ]);
 const FTS_MANIFEST = Object.freeze({
@@ -284,6 +291,10 @@ const DERIVED_REBUILDS = Object.freeze([
 const V16_DERIVED_REBUILDS = Object.freeze([
   ...DERIVED_REBUILDS,
   'collaboration_contract_documents.file_sha256'
+]);
+const V17_DERIVED_REBUILDS = Object.freeze([
+  ...V16_DERIVED_REBUILDS,
+  'collaboration_publication_custody.final_url_sha256'
 ]);
 const V1_DERIVED_REBUILDS = Object.freeze([
   'knowledge_entries.source_hash',
@@ -698,6 +709,20 @@ const V16_MIGRATION_LEDGER = Object.freeze({
     'migrations/016_collaboration_contract_documents.js'
   ])
 });
+const V17_MIGRATION_LEDGER = Object.freeze({
+  name: Object.freeze([
+    ...V16_MIGRATION_LEDGER.name,
+    '017_collaboration_publication_custody'
+  ]),
+  checksum: Object.freeze([
+    ...V16_MIGRATION_LEDGER.checksum,
+    '5a8475d7beb3599970b4dcdb36455f65e54eb375f9273ae54be45f6c872a02b3'
+  ]),
+  sourcePath: Object.freeze([
+    ...V16_MIGRATION_LEDGER.sourcePath,
+    'migrations/017_collaboration_publication_custody.js'
+  ])
+});
 const STRUCTURAL_COLUMN_POLICY_V9 = Object.freeze(Object.assign(Object.create(null), STRUCTURAL_COLUMN_POLICY, {
   'feishu_bitable_outbox_retries.id': Object.freeze({ storage: 'integer', kind: 'integer' }),
   'feishu_bitable_outbox_retries.org_id': Object.freeze({ storage: 'integer', kind: 'integer' }),
@@ -983,6 +1008,40 @@ const STRUCTURAL_POLICY_V16_SHA256 = crypto.createHash('sha256')
     columns: STRUCTURAL_COLUMN_POLICY_V16
   }), 'utf8')
   .digest('hex');
+const STRUCTURAL_COLUMN_POLICY_V17 = Object.freeze(Object.assign(Object.create(null), STRUCTURAL_COLUMN_POLICY_V16, {
+  'collaboration_publication_custody.id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'collaboration_publication_custody.org_id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'collaboration_publication_custody.campaign_id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'collaboration_publication_custody.collaboration_id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'collaboration_publication_custody.publication_id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'collaboration_publication_custody.review_submission_entry_id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'collaboration_publication_custody.review_decision_entry_id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'collaboration_publication_custody.publication_relation_link_id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'collaboration_publication_custody.knowledge_entry_id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'collaboration_publication_custody.confirmed_by': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'collaboration_publication_custody.registration_mode': Object.freeze({
+    storage: 'text', kind: 'enum', allowedValues: Object.freeze(['created', 'existing'])
+  }),
+  'collaboration_publication_custody.confirmed_at': Object.freeze({ storage: 'text', kind: 'timestamp' }),
+  'collaboration_publication_custody.published_at': Object.freeze({ storage: 'text', kind: 'timestamp' }),
+  'collaboration_publication_custody.created_at': Object.freeze({ storage: 'text', kind: 'timestamp' }),
+  'schema_migrations.name': Object.freeze({
+    storage: 'text', kind: 'migration-ledger', allowedValues: V17_MIGRATION_LEDGER.name
+  }),
+  'schema_migrations.checksum': Object.freeze({
+    storage: 'text', kind: 'migration-ledger', allowedValues: V17_MIGRATION_LEDGER.checksum
+  }),
+  'schema_migrations.source_path': Object.freeze({
+    storage: 'text', kind: 'migration-ledger', allowedValues: V17_MIGRATION_LEDGER.sourcePath
+  })
+}));
+const STRUCTURAL_POLICY_V17_VALIDATOR_VERSION = 'tm-structural-policy-v13-publication-custody';
+const STRUCTURAL_POLICY_V17_SHA256 = crypto.createHash('sha256')
+  .update(JSON.stringify({
+    validatorVersion: STRUCTURAL_POLICY_V17_VALIDATOR_VERSION,
+    columns: STRUCTURAL_COLUMN_POLICY_V17
+  }), 'utf8')
+  .digest('hex');
 
 const TRANSFORMATION_EXCLUDED_CLASSIFICATIONS = new Set([
   'structural',
@@ -1107,8 +1166,17 @@ const V16_SEMANTIC_POLICIES = Object.freeze({
     policySha256: STRUCTURAL_POLICY_V16_SHA256
   })
 });
+const V17_SEMANTIC_POLICIES = Object.freeze({
+  ...SEMANTIC_POLICIES,
+  structuralColumns: Object.freeze({
+    ...SEMANTIC_POLICIES.structuralColumns,
+    validatorVersion: STRUCTURAL_POLICY_V17_VALIDATOR_VERSION,
+    policySha256: STRUCTURAL_POLICY_V17_SHA256
+  })
+});
 
 function structuralColumnPolicyForVersion(schemaVersion) {
+  if (schemaVersion === 17) return STRUCTURAL_COLUMN_POLICY_V17;
   if (schemaVersion === 16) return STRUCTURAL_COLUMN_POLICY_V16;
   if (schemaVersion === 15) return STRUCTURAL_COLUMN_POLICY_V15;
   if (schemaVersion === 14) return STRUCTURAL_COLUMN_POLICY_V14;
@@ -1612,6 +1680,15 @@ function profileContractForVersion(schemaVersion) {
       preservedAccounting: PRESERVED_ACCOUNTING
     });
   }
+  if (schemaVersion === 17) {
+    return Object.freeze({
+      semanticPolicies: V17_SEMANTIC_POLICIES,
+      equalityGroups: V14_EQUALITY_GROUPS,
+      referenceGroups: REFERENCE_GROUPS,
+      derivedRebuilds: V17_DERIVED_REBUILDS,
+      preservedAccounting: PRESERVED_ACCOUNTING
+    });
+  }
   throw new Error(`unsupported exact sanitization profile version ${schemaVersion}`);
 }
 
@@ -1631,16 +1708,16 @@ function assertManifestDocumentShape(manifest) {
   ) {
     throw new Error('malformed sanitization manifest header');
   }
-  if (!Array.isArray(manifest.exactProfiles) || manifest.exactProfiles.length !== 11) {
-    throw new Error('sanitization manifest must contain isolated exact v6 through v16 profiles');
+  if (!Array.isArray(manifest.exactProfiles) || manifest.exactProfiles.length !== 12) {
+    throw new Error('sanitization manifest must contain isolated exact v6 through v17 profiles');
   }
   const profileKeys = [
     'schemaVersion', 'semanticPolicies', 'equalityGroups', 'referenceGroups',
     'derivedRebuilds', 'objects'
   ];
   const versions = manifest.exactProfiles.map((profile) => profile.schemaVersion);
-  if (JSON.stringify(versions) !== JSON.stringify([6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16])) {
-    throw new Error('sanitization manifest exact profiles must be ordered v6 through v16');
+  if (JSON.stringify(versions) !== JSON.stringify([6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17])) {
+    throw new Error('sanitization manifest exact profiles must be ordered v6 through v17');
   }
   for (const compatibilityProfile of manifest.exactProfiles) {
     if (!exactObjectKeys(compatibilityProfile, profileKeys)) {
@@ -1677,12 +1754,12 @@ function exactProfileClassification(db) {
   });
   if (
     classification.status !== 'managed'
-    || ![1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16].includes(classification.currentVersion)
+    || ![1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17].includes(classification.currentVersion)
   ) {
     const observed = classification.currentVersion === undefined || classification.currentVersion === null
       ? classification.status
       : classification.currentVersion;
-    throw new Error(`sanitization source must be an exact managed version 1 or version 6 through version 16 profile; got ${observed}`);
+    throw new Error(`sanitization source must be an exact managed version 1 or version 6 through version 17 profile; got ${observed}`);
   }
   return classification;
 }
@@ -5013,8 +5090,25 @@ function rebuildContractDocumentDigests(db) {
   }
 }
 
+function rebuildCollaborationPublicationDigests(db) {
+  const present = db.prepare(`
+    SELECT 1 AS present
+    FROM sqlite_schema
+    WHERE type='table' AND name='collaboration_publication_custody'
+  `).get();
+  if (!present) return;
+  const update = db.prepare('UPDATE collaboration_publication_custody SET final_url_sha256=? WHERE id=?');
+  for (const row of db.prepare(`
+    SELECT id,confirmed_url
+    FROM collaboration_publication_custody
+    ORDER BY id
+  `).all()) {
+    update.run(sha256(Buffer.from(row.confirmed_url, 'utf8')), row.id);
+  }
+}
+
 function rebuildDerivedData(db, manifest) {
-  if (![1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16].includes(manifest.schemaVersion)) {
+  if (![1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17].includes(manifest.schemaVersion)) {
     throw new Error(`unsupported derived rebuild profile ${manifest.schemaVersion}`);
   }
   const hasKnowledge = db.prepare("SELECT 1 AS present FROM sqlite_schema WHERE type='table' AND name='knowledge_entries'").get();
@@ -5084,6 +5178,7 @@ function rebuildDerivedData(db, manifest) {
   }
   if (manifest.schemaVersion >= 6) rebuildCrmDerivedData(db);
   if (manifest.schemaVersion >= 16) rebuildContractDocumentDigests(db);
+  if (manifest.schemaVersion >= 17) rebuildCollaborationPublicationDigests(db);
   rebuildCampaignWorkflowDispatchEvidence(db);
   sqliteDigest.rebuildKnowledgeChunksFts(db);
   sqliteDigest.verifyKnowledgeChunksFtsIntegrity(db, FTS_MANIFEST, { checkMainIntegrity: true });

@@ -75,6 +75,9 @@ const {
   createPerformanceManualService,
   createPerformanceAiReviewService
 } = require('./services/performance_manual_service');
+const {
+  createCollaborationPublicationHandoffService
+} = require('./services/collaboration_publication_handoff_service');
 const { createCustomerReportSnapshotService } = require('./services/customer_report_snapshot_service');
 const { createPerformanceFeishuConnectionService } = require('./services/performance_feishu_connection_service');
 const registerCampaignRoutes = require('./routes_campaigns');
@@ -172,8 +175,11 @@ const campaignPptService = createCampaignPptService(db, {
     }
   }
 });
-const campaignCollaborationService = createCampaignCollaborationService(db);
 const performanceManualService = createPerformanceManualService(db);
+const collaborationPublicationHandoffService = createCollaborationPublicationHandoffService(db);
+const campaignCollaborationService = createCampaignCollaborationService(db, {
+  publicationHandoffService: collaborationPublicationHandoffService
+});
 const performanceAiReviewService = createPerformanceAiReviewService(db, {
   performanceService: performanceManualService,
   aiService
@@ -267,6 +273,7 @@ const phase4PolicyNames = [
   'COLLABORATION_CONTENT_REVIEW_SUBMIT',
   'COLLABORATION_CONTENT_REVIEW_DECIDE',
   'COLLABORATION_CONTENT_REVIEW_LIST',
+  'COLLABORATION_PUBLICATION_CONFIRM',
   'COLLABORATION_PAYMENT_RECORD',
   'COLLABORATION_PAYMENT_LIST',
   'COLLABORATION_PAYMENT_VOID',

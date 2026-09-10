@@ -33,10 +33,10 @@ $EXPECTED_PPT_SHA256 = "f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57
 $TRUSTED_SOURCE_GATE_RELATIVE_PATH = "server\scripts\trusted_production_source_gate.js"
 $TRUSTED_SOURCE_MANIFEST_RELATIVE_PATH = "server\scripts\trusted_production_source_manifest.json"
 $TRUSTED_RUNTIME_CONFIG_RELATIVE_PATH = "server\config\runtime_config.js"
-$EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "a66f5e7240cfe390373f5621a92c925a364ad7b221dc93f691a4c2a5e5394f41"
-$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "9c695de85f572399e541872a0349e576613f7fda5d14940898a317d7d6eb9c4b"
+$EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "73a587f3d907c2eba13640233005093885ac0050d32de4bc724540cee2f28c74"
+$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "7500a5cb3eb0dd48b18fa258e247910ec1e9040d22ff6690b27840b7fd645018"
 $EXPECTED_TRUSTED_RUNTIME_CONFIG_SHA256 = "76d43d3e811c6fa8daae987cc9eb2fff2dc8a8095f84b1cd309e4e214df94dcb"
-$EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256 = "f87df1f9c529bba2a0b9514efebf81771a7407815e2a2fbbed67314d6d141fc4"
+$EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256 = "52f25063c85eae1c138ef72afd6cb8bd729d32f33f59c8ebed0a4fa72f81ad16"
 $EXPECTED_TRUSTED_PARSER_VERIFIER_SHA256 = "7f9efaac02675b21e025891a400474cc7481c1adaf58c88bd8b356d5276f2eaa"
 $EXPECTED_TRUSTED_PUBLIC_GUARD_SHA256 = "d45fe8fcc01587aaa0e73eccfb9714c27801e232cb6c0effd6daedb703316d66"
 $EXPECTED_TRUSTED_MIGRATION_CLEANUP_HELPER_SHA256 = "d5f2befa902522dd9de3e9dd2397a99ee5e78ab1a1c6e526a27f14bb2829e1fa"
@@ -116,6 +116,7 @@ $FILES = @(
     "server\migrations\014_customer_report_ppt_artifact.js",
     "server\migrations\015_influencer_saved_views.js",
     "server\migrations\016_collaboration_contract_documents.js",
+    "server\migrations\017_collaboration_publication_custody.js",
     "server\migrations\baselines\legacy_v1.js",
     "server\migrations\engines\v1.js",
     "server\migrations\vendor\bcryptjs_v3_0_3.js",
@@ -154,6 +155,7 @@ $FILES = @(
     "server\services\campaign_ppt_service.js",
     "server\services\campaign_service.js",
     "server\services\campaign_workflow_service.js",
+    "server\services\collaboration_publication_handoff_service.js",
     "server\services\collaboration_resource_contract.js",
     "server\services\customer_report_snapshot_service.js",
     "server\services\customer_report_delivery_service.js",
@@ -241,6 +243,8 @@ $FILES = @(
     "server\tests\campaign_workflow_reassignment_and_reads.test.js",
     "server\tests\campaign_workflow_reconciliation.test.js",
     "server\tests\campaign_workflow_task_controls.test.js",
+    "server\tests\collaboration_content_review_service.test.js",
+    "server\tests\collaboration_publication_custody_migration.test.js",
     "server\tests\cutover_capacity.test.js",
     "server\tests\credential_rotation.test.js",
     "server\tests\crm_contract.test.js",
@@ -276,6 +280,7 @@ $FILES = @(
     "server\tests\legacy_production_adoption.test.js",
     "server\tests\migration_gate_exactness.test.js",
     "server\tests\migration_service.test.js",
+    "server\tests\m4_campaign_collaboration_client.test.js",
     "server\tests\obsidian_and_business_knowledge.test.js",
     "server\tests\organization_access_context.test.js",
     "server\tests\organization_campaign_access.test.js",
@@ -10146,7 +10151,7 @@ try {
   if (database.pragma('integrity_check', { simple: true }) !== 'ok') throw new Error('Candidate DB integrity_check failed');
   if (database.pragma('foreign_key_check').length !== 0) throw new Error('Candidate DB foreign_key_check failed');
   const version = database.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version;
-  if (Number(version) !== 16) throw new Error('Candidate migration target version mismatch');
+  if (Number(version) !== 17) throw new Error('Candidate migration target version mismatch');
   console.log('TM_SANITIZED_MIGRATION_COMPATIBILITY_OK');
 } finally {
   database.close();
@@ -11608,7 +11613,7 @@ if applied:
         if hashlib.sha256(handle.read()).hexdigest() != output_sha256:
             raise SystemExit('Trusted live database adoption stage digest is invalid')
 else:
-    if (report.get('sourceVersion') not in (1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16) or
+    if (report.get('sourceVersion') not in (1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17) or
             report.get('targetVersion') != report.get('sourceVersion') or
             output_sha256 != expected_source_sha256 or
             report.get('baseTableCount') is not None or report.get('baseRowCount') is not None or

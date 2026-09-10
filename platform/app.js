@@ -6453,6 +6453,8 @@ var pendingCollabInfId = null;
 var pendingCollabCreateIntentId = null;
 var pendingContractCollabId = null;
 var pendingContentReviewCollabId = null;
+var pendingPublicationCollabId = null;
+var pendingPublicationDraftRows = [];
 var pendingPaymentCollabId = null;
 var pendingPaymentEntryId = null;
 var pendingSettlementCollabId = null;
@@ -6724,13 +6726,14 @@ function collabResource(collab) {
 function m4ContentReview(collab) {
   var review = collab && collab.content_review;
   if (!review || typeof review !== 'object' || Array.isArray(review)) {
-    return { status: 'not_submitted', publication_ready: false, can_submit: false, can_decide: false, current_submission: null, latest_decision: null, events: [] };
+    return { status: 'not_submitted', publication_ready: false, can_submit: false, can_decide: false, can_publish: false, current_submission: null, latest_decision: null, events: [] };
   }
   return {
     status: typeof review.status === 'string' ? review.status : 'not_submitted',
     publication_ready: review.publication_ready === true,
     can_submit: review.can_submit === true,
     can_decide: review.can_decide === true,
+    can_publish: review.can_publish === true,
     current_submission: review.current_submission && typeof review.current_submission === 'object' ? review.current_submission : null,
     latest_decision: review.latest_decision && typeof review.latest_decision === 'object' ? review.latest_decision : null,
     events: Array.isArray(review.events) ? review.events : []
@@ -6940,8 +6943,10 @@ function renderCampaignCollabActions(collab) {
       } else {
         actions.push('<span style="font-size:10px;opacity:.65">需另一位负责人或组织管理员审核</span>');
       }
-    } else if (review.status === 'approved' && review.publication_ready) {
+    } else if (review.status === 'approved' && review.publication_ready && review.can_publish) {
       actions.push('<button type="button" class="btn btn-sm btn-primary" onclick="runCampaignCollabAction(' + collab.id + ',\'publication\')">确认发布</button>');
+    } else if (review.status === 'approved' && review.publication_ready) {
+      actions.push('<span style="font-size:10px;opacity:.65">当前账号暂无发布确认权限</span>');
     }
   } else if (collab.status === 'completed' && relationSet.execution && !relationSet.publication) {
     var completedReview = m4ContentReview(collab);
@@ -6953,7 +6958,7 @@ function renderCampaignCollabActions(collab) {
       actions.push('<button type="button" class="btn btn-sm btn-primary" onclick="runCampaignCollabAction(' + collab.id + ',\'review-decision\')">审核内容</button>');
     } else if (completedReview.status === 'pending') {
       actions.push('<span style="font-size:10px;opacity:.65">需另一位负责人或组织管理员审核</span>');
-    } else if (completedReview.status === 'approved' && completedReview.publication_ready) {
+    } else if (completedReview.status === 'approved' && completedReview.publication_ready && completedReview.can_publish) {
       actions.push('<button type="button" class="btn btn-sm btn-primary" onclick="runCampaignCollabAction(' + collab.id + ',\'publication\')">确认发布</button>');
     } else {
       actions.push('<span style="font-size:10px;opacity:.65">请由活动成员补充送审凭证</span>');
@@ -6977,6 +6982,9 @@ function renderCampaignCollabActions(collab) {
     if (paymentSettlement.status === 'pending_review' && !paymentSettlement.can_decide) {
       actions.push('<span style="font-size:10px;opacity:.65">需另一位负责人或组织管理员审核结算</span>');
     }
+  }
+  if (m4PerformanceTracking(collab)) {
+    actions.push('<button type="button" class="btn btn-sm btn-outline" title="打开这条视频的内容监控" onclick="openCollaborationPerformanceTracking(' + collab.id + ')">查看监控</button>');
   }
   return actions.length ? '<div style="display:flex;gap:6px;flex-wrap:wrap">' + actions.join('') + '</div>' : '<span style="font-size:11px;opacity:.55">无需操作</span>';
 }
@@ -7079,6 +7087,70 @@ function renderPaymentSettlementEvidence(collab) {
     '客户回款：' + esc(currency) + ' ' + esc(m4CommercialValueText(ledger.client_receipt_total)) + ' / ' + esc(m4CommercialValueText(ledger.expected_client_receipt)) + '<br>' +
     esc(m4CommercialValueText(ledger.active_entry_count)) + ' 笔有效记录' + decisionText + '</div>';
 }
+function m4PerformanceTracking(collab) {
+  var tracking = collab && collab.performance_tracking;
+  if (!tracking || tracking.status !== 'tracked') return null;
+  var rawItems = Array.isArray(tracking.items) ? tracking.items : [tracking];
+  var items = rawItems.map(function(item) {
+    var publicationId = readPositiveInteger(item && item.publication_id);
+    if (publicationId === null) return null;
+    return {
+      registration: item.registration === 'existing' ? 'existing' : 'created',
+      custody_id: readPositiveInteger(item.custody_id),
+      publication_id: publicationId,
+      deliverable_key: typeof item.deliverable_key === 'string' ? item.deliverable_key : '',
+      platform: typeof item.platform === 'string' ? item.platform : '',
+      original_url: typeof item.original_url === 'string' ? item.original_url : '',
+      published_at: typeof item.published_at === 'string' ? item.published_at : '',
+      confirmed_at: typeof item.confirmed_at === 'string'
+        ? item.confirmed_at
+        : (typeof item.handed_off_at === 'string' ? item.handed_off_at : '')
+    };
+  }).filter(Boolean);
+  if (!items.length || items.length > 20) return null;
+  return {
+    status: 'tracked',
+    campaign_id: readPositiveInteger(tracking.campaign_id),
+    publication_count: items.length,
+    items: items
+  };
+}
+function renderPerformanceTrackingEvidence(collab) {
+  var tracking = m4PerformanceTracking(collab);
+  if (tracking) {
+    var itemLines = tracking.items.map(function(item) {
+      return '<span style="display:block">' +
+        esc(item.deliverable_key || ('内容-' + item.publication_id)) + ' · 内容 #' +
+        esc(item.publication_id) + ' · ' + esc(item.platform || '自定义平台') + '</span>';
+    }).join('');
+    return '<div style="margin-top:7px;padding-top:7px;border-top:1px solid var(--border);font-size:10px;line-height:1.6">' +
+      '<strong style="color:var(--success, #0f7b3c)">已加入效果追踪 · ' + esc(tracking.publication_count) + ' 条</strong>' +
+      itemLines +
+      '<span style="opacity:.65">等待录入或同步最新视频指标</span></div>';
+  }
+  if (collabRelations(collab).includes('publication')) {
+    return '<div style="margin-top:7px;padding-top:7px;border-top:1px solid var(--border);font-size:10px;line-height:1.6;color:var(--warning, #9a6700)">' +
+      '<strong>发布已确认 · 监控登记待核对</strong></div>';
+  }
+  return '';
+}
+function openCollaborationPerformanceTracking(collaborationId) {
+  var collab = findCollaborationById(collaborationId);
+  var tracking = m4PerformanceTracking(collab);
+  var campaignId = readPositiveInteger(collab && collab.campaign_id);
+  if (!tracking || campaignId === null) {
+    toast('这条合作尚未完成效果追踪登记，请刷新后重试。', 'error');
+    return;
+  }
+  performanceCampaignContextId = campaignId;
+  var search = document.getElementById('performanceContentSearch');
+  var platform = document.getElementById('performanceContentPlatform');
+  var tag = document.getElementById('performanceContentTag');
+  if (search) search.value = tracking.items.length === 1 ? tracking.items[0].original_url : '';
+  if (platform) platform.value = '';
+  if (tag) tag.value = '';
+  switchPage('performance-monitor');
+}
 function renderCollabCommercialTerms(collab, resource) {
   if (resource.schema !== 'turingmarket.collaboration-order.v2') {
     var historicalQuote = collab.cost_quoted;
@@ -7126,7 +7198,7 @@ function renderCollabTable(data) {
       Object.keys(STATUS_LABELS).forEach(function(key) { h += '<option value="' + key + '"' + (collab.status === key ? ' selected' : '') + '>' + STATUS_LABELS[key] + '</option>'; });
       h += '</select></td>';
     }
-    h += '<td style="min-width:180px">' + (linked ? renderCollabRelationTags(collab) + renderContractConfirmation(collab) + renderContentReviewEvidence(collab) + renderPaymentSettlementEvidence(collab) : '<span style="font-size:10px;opacity:.55">未接入活动</span>') + '</td>';
+    h += '<td style="min-width:180px">' + (linked ? renderCollabRelationTags(collab) + renderContractConfirmation(collab) + renderContentReviewEvidence(collab) + renderPerformanceTrackingEvidence(collab) + renderPaymentSettlementEvidence(collab) : '<span style="font-size:10px;opacity:.55">未接入活动</span>') + '</td>';
     h += '<td style="min-width:190px">' + renderCollabCommercialTerms(collab, resource) + '</td>';
     h += '<td style="font-size:10px">' + esc([collab.timeline_start || '', collab.timeline_end || ''].filter(Boolean).join(' -> ') || '-') + '</td>';
     h += '<td style="max-width:140px;font-size:10px">' + esc(resource.order_reference || '-') + '</td>';
@@ -7220,6 +7292,10 @@ async function runCampaignCollabAction(collabId, action) {
     openCampaignContentReviewDecisionModal(collab);
     return;
   }
+  if (action === 'publication' && collabResource(collab).schema === 'turingmarket.collaboration-order.v2') {
+    openCampaignPublicationModal(collab);
+    return;
+  }
   var actions = {
     contract: { status: 'contract_sent', reason: '从下单工作台确认合同已发' },
     execution: { status: 'live', campaign_relation: 'execution', reason: '从下单工作台确认开始执行' },
@@ -7234,11 +7310,19 @@ async function runCampaignCollabAction(collabId, action) {
     return m4CollabMutationInFlight[mutationSlot];
   }
   try {
-    await submitCampaignCollabUpdate(collab, patch, action);
-    toast('活动订单已更新');
+    var result = await submitCampaignCollabUpdate(collab, patch, action);
+    if (action === 'publication' && result && result.performance_tracking) {
+      toast(result.performance_tracking.registration === 'existing'
+        ? '发布已确认，视频已在内容监控中'
+        : '发布已确认，视频已加入内容监控');
+    } else {
+      toast('活动订单已更新');
+    }
     loadCollaborations();
   } catch (error) {
-    toast(error.message, 'error');
+    toast(action === 'publication'
+      ? '确认发布失败，未加入内容监控：' + error.message
+      : error.message, 'error');
     loadCollaborations();
   }
 }
@@ -7527,6 +7611,200 @@ function closeCampaignContentReviewDecisionModal() {
   if (dialog && window.TMAccessibility) window.TMAccessibility.closeDialog(dialog);
   if (overlay) overlay.remove();
   pendingContentReviewCollabId = null;
+}
+function renderCampaignPublicationRows() {
+  var container = document.getElementById('publicationDeliverableRows');
+  if (!container) return;
+  container.innerHTML = pendingPublicationDraftRows.map(function(row, index) {
+    var removeButton = pendingPublicationDraftRows.length > 1
+      ? '<button type="button" class="btn btn-sm btn-outline" title="移除这条发布链接" onclick="removeCampaignPublicationRow(' + index + ')">移除</button>'
+      : '';
+    return '<div style="padding:12px 0;border-bottom:1px solid var(--border)">' +
+      '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px"><strong style="font-size:12px">发布内容 ' + (index + 1) + '</strong>' + removeButton + '</div>' +
+      '<div class="form-grid" style="grid-template-columns:minmax(150px,.8fr) minmax(260px,1.7fr)">' +
+      '<div><label>交付项标识</label><input id="publicationDeliverableKey_' + index + '" maxlength="80" placeholder="例如：youtube-main" value="' + esc(row.deliverableKey || '') + '"></div>' +
+      '<div><label>最终公开链接</label><input id="publicationUrl_' + index + '" type="url" maxlength="2048" placeholder="https://" value="' + esc(row.url || '') + '"></div>' +
+      '<div><label>发布时间</label><input id="publicationPublishedAt_' + index + '" type="datetime-local" value="' + esc(row.publishedAt || '') + '"></div>' +
+      '<div><label>备注（可选）</label><input id="publicationNote_' + index + '" maxlength="500" placeholder="例如：品牌账号已验收" value="' + esc(row.note || '') + '"></div>' +
+      '</div></div>';
+  }).join('');
+}
+function syncCampaignPublicationDraftRows() {
+  pendingPublicationDraftRows = pendingPublicationDraftRows.map(function(row, index) {
+    var key = document.getElementById('publicationDeliverableKey_' + index);
+    var url = document.getElementById('publicationUrl_' + index);
+    var publishedAt = document.getElementById('publicationPublishedAt_' + index);
+    var note = document.getElementById('publicationNote_' + index);
+    return {
+      deliverableKey: key ? String(key.value || '').trim().toLowerCase() : row.deliverableKey,
+      url: url ? String(url.value || '').trim() : row.url,
+      publishedAt: publishedAt ? String(publishedAt.value || '').trim() : row.publishedAt,
+      note: note ? String(note.value || '').trim() : row.note
+    };
+  });
+  return pendingPublicationDraftRows;
+}
+function addCampaignPublicationRow() {
+  syncCampaignPublicationDraftRows();
+  if (pendingPublicationDraftRows.length >= 20) {
+    toast('单次最多确认 20 条发布内容。', 'error');
+    return;
+  }
+  var now = new Date();
+  var localPublishedAt = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  pendingPublicationDraftRows.push({
+    deliverableKey: 'deliverable-' + (pendingPublicationDraftRows.length + 1),
+    url: '',
+    publishedAt: localPublishedAt,
+    note: ''
+  });
+  renderCampaignPublicationRows();
+}
+function removeCampaignPublicationRow(index) {
+  syncCampaignPublicationDraftRows();
+  if (pendingPublicationDraftRows.length <= 1) return;
+  if (!Number.isSafeInteger(Number(index)) || Number(index) < 0 || Number(index) >= pendingPublicationDraftRows.length) return;
+  pendingPublicationDraftRows.splice(Number(index), 1);
+  renderCampaignPublicationRows();
+}
+function openCampaignPublicationModal(collab) {
+  var review = m4ContentReview(collab);
+  if (!isCampaignCollaboration(collab) || review.status !== 'approved' || !review.publication_ready || !review.can_publish) {
+    toast('请先完成并通过内容审核。', 'error');
+    return;
+  }
+  pendingPublicationCollabId = Number(collab.id);
+  var now = new Date();
+  var localPublishedAt = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  pendingPublicationDraftRows = [{
+    deliverableKey: 'deliverable-1',
+    url: '',
+    publishedAt: localPublishedAt,
+    note: ''
+  }];
+  var existing = document.getElementById('campaignPublicationModal');
+  if (existing) existing.remove();
+  var overlay = document.createElement('div');
+  overlay.id = 'campaignPublicationModal';
+  overlay.className = 'modal-overlay';
+  overlay.onclick = function(event) { if (event.target === overlay) closeCampaignPublicationModal(); };
+  overlay.innerHTML = '<div class="modal" id="campaignPublicationDialog" role="dialog" aria-modal="true" aria-labelledby="campaignPublicationTitle" onclick="event.stopPropagation()" style="max-width:780px">' +
+    '<button type="button" class="modal-close" aria-label="关闭发布确认" title="关闭发布确认" onclick="closeCampaignPublicationModal()">&times;</button>' +
+    '<h3 id="campaignPublicationTitle">确认最终发布链接</h3>' +
+    '<p style="font-size:12px;opacity:.65;margin-bottom:10px">' + esc(collab.kol_handle || '') + ' · ' + esc(collab.campaign_name || ('活动 #' + collab.campaign_id)) + '</p>' +
+    '<p style="font-size:11px;line-height:1.6;margin-bottom:8px">仅填写已公开可访问的最终链接。确认后将自动加入该活动的视频效果追踪。</p>' +
+    '<div id="publicationDeliverableRows"></div>' +
+    '<div class="btn-group" style="justify-content:space-between;align-items:center;margin-top:12px">' +
+    '<button type="button" class="btn btn-outline" onclick="addCampaignPublicationRow()">添加一条</button>' +
+    '<div style="display:flex;gap:8px"><button type="button" class="btn btn-outline" onclick="closeCampaignPublicationModal()">取消</button><button type="button" class="btn btn-primary" onclick="submitCampaignPublicationConfirmation()">确认发布并追踪</button></div>' +
+    '</div></div>';
+  document.body.appendChild(overlay);
+  renderCampaignPublicationRows();
+  if (window.TMAccessibility) {
+    window.TMAccessibility.openDialog(document.getElementById('campaignPublicationDialog'), document.activeElement, closeCampaignPublicationModal);
+  }
+}
+function closeCampaignPublicationModal() {
+  var overlay = document.getElementById('campaignPublicationModal');
+  var dialog = overlay && typeof overlay.querySelector === 'function'
+    ? overlay.querySelector('#campaignPublicationDialog')
+    : document.getElementById('campaignPublicationDialog');
+  if (dialog && window.TMAccessibility) window.TMAccessibility.closeDialog(dialog);
+  if (overlay) overlay.remove();
+  pendingPublicationCollabId = null;
+  pendingPublicationDraftRows = [];
+}
+async function submitCampaignPublicationConfirmation() {
+  var collab = findCollaborationById(pendingPublicationCollabId);
+  var review = m4ContentReview(collab);
+  if (!isCampaignCollaboration(collab) || review.status !== 'approved' || !review.publication_ready || !review.can_publish) {
+    toast('发布条件已变化，请刷新后重试。', 'error');
+    return;
+  }
+  syncCampaignPublicationDraftRows();
+  if (!pendingPublicationDraftRows.length || pendingPublicationDraftRows.length > 20) {
+    toast('请填写 1 至 20 条发布内容。', 'error');
+    return;
+  }
+  var seenKeys = {};
+  var seenUrls = {};
+  var publications = [];
+  for (var index = 0; index < pendingPublicationDraftRows.length; index += 1) {
+    var row = pendingPublicationDraftRows[index];
+    var deliverableKey = String(row.deliverableKey || '').trim().toLowerCase();
+    if (!/^[a-z0-9](?:[a-z0-9._-]{0,78}[a-z0-9])?$/.test(deliverableKey)) {
+      toast('第 ' + (index + 1) + ' 条交付项标识格式不正确。', 'error');
+      return;
+    }
+    if (seenKeys[deliverableKey]) {
+      toast('交付项标识不能重复。', 'error');
+      return;
+    }
+    var url = m4SafeContentReviewUrl(row.url);
+    if (!url) {
+      toast('第 ' + (index + 1) + ' 条必须填写有效的 HTTPS 最终公开链接。', 'error');
+      return;
+    }
+    if (seenUrls[url]) {
+      toast('最终公开链接不能重复。', 'error');
+      return;
+    }
+    var timestamp = new Date(row.publishedAt);
+    if (!row.publishedAt || !Number.isFinite(timestamp.getTime())) {
+      toast('第 ' + (index + 1) + ' 条发布时间无效。', 'error');
+      return;
+    }
+    var note = String(row.note || '').trim();
+    if (Array.from(note).length > 500) {
+      toast('第 ' + (index + 1) + ' 条备注不能超过 500 个字符。', 'error');
+      return;
+    }
+    seenKeys[deliverableKey] = true;
+    seenUrls[url] = true;
+    publications.push({
+      deliverable_key: deliverableKey,
+      url: url,
+      published_at: timestamp.toISOString(),
+      note: note
+    });
+  }
+  var intent = { publications: publications };
+  var mutationSlot = m4CollabMutationSlot(collab, intent, 'publication-confirmation');
+  if (m4CollabMutationInFlight[mutationSlot]) {
+    toast('发布确认正在提交，请勿重复点击。');
+    return m4CollabMutationInFlight[mutationSlot];
+  }
+  var request = apiFetch('/collaborations/' + collab.id + '/publication-confirmations', {
+    method: 'POST',
+    headers: m4MutationHeaders('m4-publication-confirmation-', m4CollabMutationOperationKey(mutationSlot, 'm4-publication-confirmation-')),
+    body: JSON.stringify({
+      campaign_id: Number(collab.campaign_id),
+      expected_version: Number(collab.row_version),
+      publications: publications
+    })
+  }).then(async function(response) {
+    var data = await response.json();
+    if (!response.ok) {
+      var error = new Error(data.error || '发布确认失败');
+      error.code = data.code;
+      throw error;
+    }
+    return data;
+  });
+  m4CollabMutationInFlight[mutationSlot] = request;
+  try {
+    var result = await request;
+    var tracking = result && result.performance_tracking;
+    closeCampaignPublicationModal();
+    toast('发布已确认，' + ((tracking && tracking.publication_count) || publications.length) + ' 条内容已加入效果追踪');
+    await loadCollaborations();
+    return result;
+  } catch (error) {
+    toast('确认发布失败，未加入内容监控：' + (error.message || '请稍后重试'), 'error');
+    if (error.code === 'STALE_COLLABORATION_VERSION') await loadCollaborations();
+  } finally {
+    if (m4CollabMutationInFlight[mutationSlot] === request) delete m4CollabMutationInFlight[mutationSlot];
+  }
 }
 async function submitCampaignContentReviewDecision() {
   var collab = findCollaborationById(pendingContentReviewCollabId);
@@ -11472,7 +11750,7 @@ function switchPage(id, options) {
     'getEditedDemand', 'syncCurDemandFromAnalysis', 'handleDemandFile', 'analyzeDemandAI',
     'switchTab', 'matchInfluencers', 'smartMatch', 'handleUpload', 'handleDrop', 'openInfUploadModal', 'closeInfUploadModal', 'handleUploadModal', 'handleInfluencerModalDrop', 'validateInfluencerImportMapping', 'confirmInfluencerImport', 'downloadInfluencerImportErrors', 'downloadInfTemplate', 'exportAll', 'exportFiltered', 'exportSelected',
     'saveM4SavedView', 'applyM4SavedView', 'deleteM4SavedView', 'clearM4Filters',
-    'toggleAll', 'syncInfluencerSelectionState', 'loadM4Campaigns', 'changeM4CampaignContext', 'openM4CampaignCloseoutReview', 'closeM4CampaignCloseoutReview', 'submitM4CampaignCloseoutReview', 'startCollab', 'submitCollabOrder', 'closeCollabOrderModal', 'loadCollaborations', 'updateCollabStatus', 'runCampaignCollabAction', 'closeCampaignContractConfirmationModal', 'submitCampaignContractConfirmation', 'closeCampaignContentReviewModal', 'submitCampaignContentReview', 'closeCampaignContentReviewDecisionModal', 'submitCampaignContentReviewDecision', 'openCampaignPaymentModal', 'closeCampaignPaymentModal', 'submitCampaignPayment', 'voidCampaignPayment', 'closeCampaignSettlementModal', 'submitCampaignSettlement', 'openCampaignSettlementDecisionModal', 'closeCampaignSettlementDecisionModal', 'submitCampaignSettlementDecision',
+    'toggleAll', 'syncInfluencerSelectionState', 'loadM4Campaigns', 'changeM4CampaignContext', 'openM4CampaignCloseoutReview', 'closeM4CampaignCloseoutReview', 'submitM4CampaignCloseoutReview', 'startCollab', 'submitCollabOrder', 'closeCollabOrderModal', 'loadCollaborations', 'updateCollabStatus', 'runCampaignCollabAction', 'closeCampaignContractConfirmationModal', 'submitCampaignContractConfirmation', 'closeCampaignContentReviewModal', 'submitCampaignContentReview', 'closeCampaignContentReviewDecisionModal', 'submitCampaignContentReviewDecision', 'renderCampaignPublicationRows', 'syncCampaignPublicationDraftRows', 'addCampaignPublicationRow', 'removeCampaignPublicationRow', 'openCampaignPublicationModal', 'closeCampaignPublicationModal', 'submitCampaignPublicationConfirmation', 'openCollaborationPerformanceTracking', 'openCampaignPaymentModal', 'closeCampaignPaymentModal', 'submitCampaignPayment', 'voidCampaignPayment', 'closeCampaignSettlementModal', 'submitCampaignSettlement', 'openCampaignSettlementDecisionModal', 'closeCampaignSettlementDecisionModal', 'submitCampaignSettlementDecision',
     'initPerformanceMonitor', 'initPerformanceDashboard', 'refreshPerformanceMonitor', 'refreshPerformanceDashboard', 'changePerformanceCampaignContext', 'handlePerformanceTopMetricChange', 'refreshPerformanceReviewEvidence', 'generatePerformanceAiReviewDraft', 'loadPerformanceContents', 'loadPerformanceIntegrationPreview', 'loadPerformanceFeishuConnection', 'savePerformanceFeishuConnectionDraft', 'approvePerformanceFeishuConnectionDraft', 'createPerformanceContent', 'downloadPerformanceTemplate', 'handlePerformanceImport', 'handlePerformanceDrop', 'downloadPerformanceMetricsTemplate', 'handlePerformanceMetricsImport', 'handlePerformanceMetricsDrop', 'openPerformanceInputModal', 'closePerformanceInputModal', 'savePerformanceInput', 'loadPerformanceDashboard', 'loadPerformanceReviewEvidence', 'debouncedPerformanceContentSearch', 'exportPerformanceContents',
     'sendChat', 'clearChat', 'clearAIMemory', 'pushToFeishu', 'loadFeishuStatus', 'loadFeishuOutbox', 'testFeishuConnection', 'selectFeishuReconciliationDelivery', 'reconcileFeishuDelivery', 'selectFeishuRetryDelivery', 'retryFeishuDelivery',
     'switchAdminTab', 'loadAdminDashboard', 'loadAdminUsers', 'adminAddUser', 'adminCreateInvite', 'adminResetPw',

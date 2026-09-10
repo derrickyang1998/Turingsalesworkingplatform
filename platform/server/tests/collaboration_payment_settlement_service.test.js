@@ -9,6 +9,7 @@ const Database = require('better-sqlite3');
 const migrationService = require('../services/migration_service');
 const knowledgeService = require('../services/knowledge_service');
 const { createCampaignCollaborationService } = require('../services/campaign_collaboration_service');
+const { createCollaborationPublicationHandoffService } = require('../services/collaboration_publication_handoff_service');
 
 const SERVER_ROOT = path.resolve(__dirname, '..');
 const MIGRATION_NAMES = Object.freeze([
@@ -26,7 +27,8 @@ const MIGRATION_NAMES = Object.freeze([
   '013_customer_report_snapshot',
   '014_customer_report_ppt_artifact',
   '015_influencer_saved_views',
-  '016_collaboration_contract_documents'
+  '016_collaboration_contract_documents',
+  '017_collaboration_publication_custody'
 ]);
 const MIGRATIONS = Object.freeze(MIGRATION_NAMES.map((name, index) => Object.freeze({
   version: index + 2,
@@ -47,8 +49,16 @@ function openDatabase(t) {
   assert.deepEqual(migrationService.runMigrations(db, {
     rootDir: SERVER_ROOT,
     registeredMigrations: MIGRATIONS
-  }), { status: 'managed', currentVersion: 16 });
+  }), { status: 'managed', currentVersion: 17 });
   return db;
+}
+
+function createService(db) {
+  return createCampaignCollaborationService(db, {
+    publicationHandoffService: createCollaborationPublicationHandoffService(db, {
+      now: () => '2026-09-08T12:00:00.000Z'
+    })
+  });
 }
 
 function insertUser(db, id, username, displayName) {
@@ -212,7 +222,7 @@ function recordInput(fixture, expectedVersion, direction, amount, reference, ove
 test('manual receipts and creator payments require independent approval and settle the exact active digest', (t) => {
   const db = openDatabase(t);
   const fixture = seedFixture(db);
-  const service = createCampaignCollaborationService(db);
+  const service = createService(db);
   assert.equal(signContract(service, fixture).body.row_version, 2);
 
   const receiptInput = recordInput(fixture, 2, 'client_receipt', 150, 'CLIENT-RECEIPT-8201');
@@ -271,7 +281,7 @@ test('manual receipts and creator payments require independent approval and sett
       review_note: 'Content is approved for publication.'
     }
   });
-  const publication = service.updateLinked({
+  const publication = service.confirmPublication({
     userId: fixture.operatorId,
     collaborationId: fixture.collaborationId,
     requestId: 'payment-publication-request-0001',
@@ -279,9 +289,12 @@ test('manual receipts and creator payments require independent approval and sett
     body: {
       campaign_id: fixture.campaignId,
       expected_version: approvedReview.body.row_version,
-      reason: 'Approved creator video was published.',
-      status: 'completed',
-      campaign_relation: 'publication'
+      publications: [{
+        deliverable_key: 'dedicated-video-1',
+        url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+        published_at: '2026-09-08T11:45:00.000Z',
+        note: 'Approved creator video was published.'
+      }]
     }
   });
 
@@ -389,7 +402,7 @@ test('manual receipts and creator payments require independent approval and sett
 test('payment corrections append a void event and reject duplicate active references', (t) => {
   const db = openDatabase(t);
   const fixture = seedFixture(db);
-  const service = createCampaignCollaborationService(db);
+  const service = createService(db);
   signContract(service, fixture);
   const recorded = service.recordPayment(recordInput(
     fixture,
@@ -453,7 +466,7 @@ test('payment corrections append a void event and reject duplicate active refere
 test('campaign-linked v2 orders cannot bypass the financial checkpoint through legacy cost or settlement patches', (t) => {
   const db = openDatabase(t);
   const fixture = seedFixture(db);
-  const service = createCampaignCollaborationService(db);
+  const service = createService(db);
   signContract(service, fixture);
   const bundleId = db.prepare(`
     SELECT bundle_id FROM campaign_record_links

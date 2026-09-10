@@ -653,6 +653,34 @@ app.post('/api/collaborations/:id/content-review-decisions', authMiddleware, (re
   }
 });
 
+app.post('/api/collaborations/:id/publication-confirmations', authMiddleware, (req, res) => {
+  try {
+    const collaborationId = canonicalPositiveRouteId(req.params.id);
+    if (collaborationId === null) {
+      return res.status(400).json({
+        error: 'Collaboration id is invalid.',
+        code: 'INVALID_COLLABORATION_ID'
+      });
+    }
+    const result = campaignCollaboration.confirmPublication({
+      userId: req.user.id,
+      collaborationId,
+      requestId: collaborationRequestId(req),
+      idempotencyKey: req.get ? req.get('Idempotency-Key') : req.headers && req.headers['idempotency-key'],
+      body: req.body
+    });
+    res.status(result.status || 201).json(result.body);
+  } catch (error) {
+    const status = error.statusCode || error.status || 500;
+    const body = {
+      error: error.message || 'Publication confirmation failed.',
+      code: error.code || 'INTERNAL_ERROR'
+    };
+    if (error.details !== undefined) body.details = error.details;
+    res.status(status).json(body);
+  }
+});
+
 app.post('/api/collaborations/:id/payments', authMiddleware, (req, res) => {
   try {
     const collaborationId = canonicalPositiveRouteId(req.params.id);

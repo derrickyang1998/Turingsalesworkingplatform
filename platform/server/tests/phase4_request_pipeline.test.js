@@ -499,6 +499,25 @@ test('content review submission, decision, and history own bounded registered po
   assert.match(serverSource, /'COLLABORATION_CONTENT_REVIEW_LIST'/);
 });
 
+test('publication confirmation owns a bounded registered policy', () => {
+  const { contract } = loadBoundary();
+  const policy = contract.REQUEST_POLICIES.COLLABORATION_PUBLICATION_CONFIRM;
+  assert.ok(policy);
+  assert.equal(policy.id, 'collaboration.publication.confirm');
+  assert.equal(policy.method, 'POST');
+  assert.equal(policy.pathTemplate, '/api/collaborations/:id/publication-confirmations');
+  assert.equal(policy.mediaKind, contract.MEDIA_KINDS.JSON);
+  assert.equal(policy.maxRawBytes, contract.BODY_LIMITS.CAMPAIGN_CONTROL_JSON);
+
+  const registry = contract.createRoutePolicyRegistry([policy]);
+  assert.equal(
+    registry.match('POST', '/api/collaborations/41/publication-confirmations').id,
+    'collaboration.publication.confirm'
+  );
+  const serverSource = fs.readFileSync(serverPath, 'utf8');
+  assert.match(serverSource, /'COLLABORATION_PUBLICATION_CONFIRM'/);
+});
+
 test('payment ledger and settlement mutations own bounded registered policies', () => {
   const { contract } = loadBoundary();
   const policyNames = [

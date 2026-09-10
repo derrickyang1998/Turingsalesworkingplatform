@@ -50,9 +50,12 @@ function loadFunctions(context, names) {
     'var pendingCollabCreateIntentId = null;',
     'var pendingContractCollabId = null;',
     'var pendingContentReviewCollabId = null;',
+    'var pendingPublicationCollabId = null;',
+    'var pendingPublicationDraftRows = [];',
     'var pendingPaymentCollabId = null;',
     'var pendingPaymentEntryId = null;',
     'var pendingSettlementCollabId = null;',
+    'var performanceCampaignContextId = null;',
     'var m4CollabMutationOperations = {};',
     'var m4CollabMutationInFlight = {};'
   ].join('\n'), context);
@@ -103,6 +106,9 @@ function createClientContext() {
     collabFilter: element(),
     collabStatsBar: element(),
     execTableContainer: element(),
+    performanceContentSearch: element({ value: 'old search' }),
+    performanceContentPlatform: element({ value: 'youtube' }),
+    performanceContentTag: element({ value: 'old tag' }),
     orderProject: element({ value: 'Campaign project' }),
     orderProduct: element({ value: 'Campaign product' }),
     orderType: element({ value: 'paid' }),
@@ -127,6 +133,11 @@ function createClientContext() {
     contentReviewSubmissionNote: element({ value: 'Opening hook and product demo are ready for review.' }),
     contentReviewDecision: element({ value: 'approved' }),
     contentReviewDecisionNote: element({ value: 'Hook, claims, CTA, and brand safety are approved.' }),
+    publicationDeliverableRows: element(),
+    publicationDeliverableKey_0: element({ value: 'dedicated-video-1' }),
+    publicationUrl_0: element({ value: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' }),
+    publicationPublishedAt_0: element({ value: '2026-09-08T11:45' }),
+    publicationNote_0: element({ value: 'Final public deliverable verified.' }),
     paymentDirection: element({ value: 'creator_payment' }),
     paymentAmount: element({ value: '800' }),
     paymentPaidAt: element({ value: '2026-09-08T12:00' }),
@@ -167,6 +178,9 @@ function createClientContext() {
           : null,
         payment_settlement: row.payment_settlement
           ? JSON.parse(JSON.stringify(row.payment_settlement))
+          : null,
+        performance_tracking: row.performance_tracking
+          ? Object.assign({}, row.performance_tracking)
           : null
       });
     });
@@ -185,6 +199,18 @@ function createClientContext() {
     if (body.campaign_relation && !collaboration.active_relations.includes(body.campaign_relation)) {
       collaboration.active_relations.push(body.campaign_relation);
     }
+    if (body.campaign_relation === 'publication') {
+      collaboration.performance_tracking = {
+        status: 'tracked',
+        registration: 'created',
+        publication_id: 9901,
+        platform: 'custom',
+        original_url: collaboration.content_review.current_submission.content_url,
+        published_at: '2026-09-08T12:00:00.000Z',
+        handed_off_at: '2026-09-08 12:00:00',
+        source: 'collaboration_publication'
+      };
+    }
     if (Object.hasOwn(body, 'cost_actual')) collaboration.cost_actual = body.cost_actual;
     collaboration.row_version += 1;
     const response = {
@@ -193,6 +219,7 @@ function createClientContext() {
       row_version: collaboration.row_version,
       active_relations: collaboration.active_relations.slice()
     };
+    if (collaboration.performance_tracking) response.performance_tracking = Object.assign({}, collaboration.performance_tracking);
     completedByKey.set(replayKey, response);
     return jsonResponse(200, response);
   }
@@ -219,6 +246,7 @@ function createClientContext() {
         publication_ready: false,
         can_submit: false,
         can_decide: false,
+        can_publish: false,
         current_submission: null,
         latest_decision: null,
         events: []
@@ -352,6 +380,7 @@ function createClientContext() {
       publication_ready: false,
       can_submit: false,
       can_decide: true,
+      can_publish: false,
       current_submission: submission,
       latest_decision: null,
       events: [submission]
@@ -399,6 +428,7 @@ function createClientContext() {
       publication_ready: body.decision === 'approved',
       can_submit: body.decision === 'changes_requested',
       can_decide: false,
+      can_publish: body.decision === 'approved',
       current_submission: submission,
       latest_decision: decision,
       events: collaboration.content_review.events.concat([decision])
@@ -416,6 +446,50 @@ function createClientContext() {
     return jsonResponse(201, response);
   }
 
+  function confirmPublication(url, options) {
+    const body = JSON.parse(options.body);
+    const idempotencyKey = options.headers['Idempotency-Key'];
+    const replayKey = url + ':' + idempotencyKey;
+    if (completedByKey.has(replayKey)) return jsonResponse(201, completedByKey.get(replayKey));
+    const collaborationId = Number(url.split('/')[2]);
+    const collaboration = rows.find(function(row) { return row.id === collaborationId; });
+    if (!collaboration || collaboration.row_version !== body.expected_version) {
+      return jsonResponse(409, { error: 'STALE_COLLABORATION_VERSION', code: 'STALE_COLLABORATION_VERSION' });
+    }
+    collaboration.status = 'completed';
+    collaboration.row_version += 1;
+    if (!collaboration.active_relations.includes('publication')) collaboration.active_relations.push('publication');
+    collaboration.performance_tracking = {
+      status: 'tracked',
+      campaign_id: collaboration.campaign_id,
+      publication_count: body.publications.length,
+      items: body.publications.map(function(item, index) {
+        return {
+          registration: index === 0 ? 'created' : 'existing',
+          custody_id: 8800 + index,
+          publication_id: 9901 + index,
+          deliverable_key: item.deliverable_key,
+          platform: item.url.indexOf('youtube') >= 0 ? 'youtube' : 'custom',
+          original_url: item.url,
+          published_at: item.published_at,
+          confirmed_at: '2026-09-08T12:00:00.000Z',
+          source: 'collaboration_publication'
+        };
+      })
+    };
+    const response = {
+      success: true,
+      campaign_id: collaboration.campaign_id,
+      collaboration_id: collaboration.id,
+      status: collaboration.status,
+      row_version: collaboration.row_version,
+      active_relations: collaboration.active_relations.slice(),
+      performance_tracking: JSON.parse(JSON.stringify(collaboration.performance_tracking))
+    };
+    completedByKey.set(replayKey, response);
+    return jsonResponse(201, response);
+  }
+
   const context = {
     m4Campaigns: [],
     m4CampaignContextId: null,
@@ -423,6 +497,8 @@ function createClientContext() {
     pendingCollabInfId: 700,
     pendingContractCollabId: null,
     pendingContentReviewCollabId: null,
+    pendingPublicationCollabId: null,
+    pendingPublicationDraftRows: [],
     m4CollabMutationOperations: {},
     m4CollabMutationInFlight: {},
     pendingCreateRelease: null,
@@ -456,6 +532,7 @@ function createClientContext() {
       return prefix + operation;
     },
     toast() {},
+    switchPage() {},
     switchTab() {},
     closeCollabOrderModal() {},
     renderCollabTable() {},
@@ -510,6 +587,9 @@ function createClientContext() {
       }
       if (/^\/collaborations\/\d+\/content-review-decisions$/.test(url) && options.method === 'POST') {
         return decideContentReview(url, options);
+      }
+      if (/^\/collaborations\/\d+\/publication-confirmations$/.test(url) && options.method === 'POST') {
+        return confirmPublication(url, options);
       }
       if (/^\/collaborations\/\d+\/content-reviews$/.test(url) && (!options.method || options.method === 'GET')) {
         const collaborationId = Number(url.split('/')[2]);
@@ -574,6 +654,9 @@ const m4Functions = [
   'renderCampaignCollabActions',
   'renderContractConfirmation',
   'renderContentReviewEvidence',
+  'm4PerformanceTracking',
+  'renderPerformanceTrackingEvidence',
+  'openCollaborationPerformanceTracking',
   'renderPaymentSettlementEvidence',
   'renderCollabCommercialTerms',
   'renderCollabTable',
@@ -588,6 +671,13 @@ const m4Functions = [
   'openCampaignContentReviewDecisionModal',
   'closeCampaignContentReviewDecisionModal',
   'submitCampaignContentReviewDecision',
+  'renderCampaignPublicationRows',
+  'syncCampaignPublicationDraftRows',
+  'addCampaignPublicationRow',
+  'removeCampaignPublicationRow',
+  'openCampaignPublicationModal',
+  'closeCampaignPublicationModal',
+  'submitCampaignPublicationConfirmation',
   'openCampaignPaymentModal',
   'closeCampaignPaymentModal',
   'submitCampaignPayment',
@@ -659,6 +749,56 @@ test('M4 renders compact financial evidence and only server-projected checkpoint
   const reviewActions = context.renderCampaignCollabActions(collaboration);
   assert.match(reviewActions, /审核结算/);
   assert.doesNotMatch(reviewActions, /录入收付款|提交结算/);
+});
+
+test('M4 renders multiple tracked deliverables safely and opens the campaign monitor without stale filters', () => {
+  const { context, elements } = createClientContext();
+  loadFunctions(context, m4Functions);
+  const collaboration = {
+    id: 711,
+    campaign_id: 91,
+    active_relations: ['order', 'execution', 'publication'],
+    performance_tracking: {
+      status: 'tracked',
+      campaign_id: 91,
+      publication_count: 2,
+      items: [
+        {
+          registration: 'created',
+          custody_id: 881,
+          publication_id: 991,
+          deliverable_key: 'main-video',
+          platform: 'youtube',
+          original_url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
+        },
+        {
+          registration: 'existing',
+          custody_id: 882,
+          publication_id: 992,
+          deliverable_key: '<img src=x onerror=alert(1)>',
+          platform: '<script>alert(2)</script>',
+          original_url: 'https://www.instagram.com/reel/C1234567890/'
+        }
+      ]
+    }
+  };
+  context.lastCollabRows = [collaboration];
+  const evidence = context.renderPerformanceTrackingEvidence(collaboration);
+  assert.match(evidence, /已加入效果追踪 · 2 条/);
+  assert.match(evidence, /main-video/);
+  assert.match(evidence, /&lt;img src=x onerror=alert\(1\)&gt;/);
+  assert.match(evidence, /&lt;script&gt;alert\(2\)&lt;\/script&gt;/);
+  assert.doesNotMatch(evidence, /<img src=x/);
+  assert.doesNotMatch(evidence, /<script>/);
+
+  const opened = [];
+  context.switchPage = function(page) { opened.push(page); };
+  context.openCollaborationPerformanceTracking(collaboration.id);
+  assert.equal(context.performanceCampaignContextId, 91);
+  assert.equal(elements.performanceContentSearch.value, '');
+  assert.equal(elements.performanceContentPlatform.value, '');
+  assert.equal(elements.performanceContentTag.value, '');
+  assert.deepEqual(opened, ['performance-monitor']);
 });
 
 test('M4 contract document retry fingerprint distinguishes equal-size PDF contents', () => {
@@ -963,6 +1103,7 @@ test('M4 content review actions and evidence gate publication by the latest revi
 
   collaboration.content_review.status = 'approved';
   collaboration.content_review.publication_ready = true;
+  collaboration.content_review.can_publish = true;
   collaboration.content_review.latest_decision = {
     reviewed_by: 9,
     reviewed_by_name: 'Mina Chen',
@@ -1338,10 +1479,51 @@ test('M4 campaign workspace executes selector, linked order, lifecycle, and repl
   assert.equal(rows[0].content_review.status, 'approved');
   assert.equal(rows[0].content_review.publication_ready, true);
   await context.runCampaignCollabAction(created.id, 'publication');
+  assert.equal(context.pendingPublicationCollabId, created.id);
+  assert.equal(context.pendingPublicationDraftRows.length, 1);
+  assert.equal(context.pendingPublicationDraftRows[0].url, '');
+  assert.notEqual(context.pendingPublicationDraftRows[0].url, rows[0].content_review.current_submission.content_url);
+  elements.publicationDeliverableKey_0.value = 'dedicated-video-1';
+  elements.publicationUrl_0.value = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
+  elements.publicationPublishedAt_0.value = '2026-09-08T11:45';
+  elements.publicationNote_0.value = 'Final public deliverable verified.';
+  await context.submitCampaignPublicationConfirmation();
   assert.equal(rows[0].status, 'completed');
   assert.deepEqual(rows[0].active_relations, ['order', 'execution', 'publication']);
+  assert.equal(rows[0].performance_tracking.items[0].publication_id, 9901);
+  const publicationRequest = requests.find(function(request) {
+    return request.url === '/collaborations/' + created.id + '/publication-confirmations';
+  });
+  assert.ok(publicationRequest);
+  assert.equal(requests.some(function(request) {
+    return request.url === '/collaborations/' + created.id && request.options.method === 'PUT' &&
+      JSON.parse(request.options.body).campaign_relation === 'publication';
+  }), false);
+  assert.deepEqual(JSON.parse(publicationRequest.options.body), {
+    campaign_id: 91,
+    expected_version: 5,
+    publications: [{
+      deliverable_key: 'dedicated-video-1',
+      url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+      published_at: new Date('2026-09-08T11:45').toISOString(),
+      note: 'Final public deliverable verified.'
+    }]
+  });
 
   await context.loadCollaborations();
+  const trackedEvidence = context.renderPerformanceTrackingEvidence(rows[0]);
+  assert.match(trackedEvidence, /已加入效果追踪/);
+  assert.match(trackedEvidence, /内容 #9901/);
+  assert.match(context.renderCampaignCollabActions(rows[0]), /查看监控/);
+  const openedPages = [];
+  context.switchPage = function(page) { openedPages.push(page); };
+  context.openCollaborationPerformanceTracking(rows[0].id);
+  assert.equal(context.performanceCampaignContextId, rows[0].campaign_id);
+  assert.equal(elements.performanceContentSearch.value, rows[0].performance_tracking.items[0].original_url);
+  assert.equal(elements.performanceContentPlatform.value, '');
+  assert.equal(elements.performanceContentTag.value, '');
+  assert.deepEqual(openedPages, ['performance-monitor']);
+
   const settlement = Object.assign({}, rows[0], { active_relations: rows[0].active_relations.slice() });
   const settlementPatch = {
     status: 'completed',

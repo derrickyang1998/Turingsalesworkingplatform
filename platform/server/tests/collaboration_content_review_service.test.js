@@ -9,6 +9,10 @@ const Database = require('better-sqlite3');
 const migrationService = require('../services/migration_service');
 const knowledgeService = require('../services/knowledge_service');
 const { createCampaignCollaborationService } = require('../services/campaign_collaboration_service');
+const { createPerformanceManualService } = require('../services/performance_manual_service');
+const {
+  createCollaborationPublicationHandoffService
+} = require('../services/collaboration_publication_handoff_service');
 
 const SERVER_ROOT = path.resolve(__dirname, '..');
 const MIGRATION_NAMES = Object.freeze([
@@ -26,7 +30,8 @@ const MIGRATION_NAMES = Object.freeze([
   '013_customer_report_snapshot',
   '014_customer_report_ppt_artifact',
   '015_influencer_saved_views',
-  '016_collaboration_contract_documents'
+  '016_collaboration_contract_documents',
+  '017_collaboration_publication_custody'
 ]);
 const MIGRATIONS = Object.freeze(MIGRATION_NAMES.map((name, index) => Object.freeze({
   version: index + 2,
@@ -47,7 +52,7 @@ function openDatabase(t) {
   assert.deepEqual(migrationService.runMigrations(db, {
     rootDir: SERVER_ROOT,
     registeredMigrations: MIGRATIONS
-  }), { status: 'managed', currentVersion: 16 });
+  }), { status: 'managed', currentVersion: 17 });
   return db;
 }
 
@@ -185,6 +190,42 @@ function decisionInput(fixture, overrides = {}) {
   };
 }
 
+function publicationInput(fixture, overrides = {}) {
+  return {
+    userId: fixture.submitterId,
+    collaborationId: fixture.collaborationId,
+    requestId: overrides.requestId || 'publication-confirmation-request-0001',
+    idempotencyKey: overrides.idempotencyKey || 'publication-confirmation-0001',
+    body: {
+      campaign_id: fixture.campaignId,
+      expected_version: 6,
+      publications: [
+        {
+          deliverable_key: 'youtube-main',
+          url: 'https://youtu.be/dQw4w9WgXcQ?utm_source=creator',
+          published_at: '2026-09-08T11:45:00.000Z',
+          note: 'Final public YouTube deliverable.'
+        },
+        {
+          deliverable_key: 'instagram-cutdown',
+          url: 'https://www.instagram.com/reel/C1234567890/',
+          published_at: '2026-09-08T11:50:00.000Z',
+          note: 'Final public Instagram cutdown.'
+        }
+      ],
+      ...(overrides.body || {})
+    }
+  };
+}
+
+function collaborationServiceWithPerformanceHandoff(db) {
+  return createCampaignCollaborationService(db, {
+    publicationHandoffService: createCollaborationPublicationHandoffService(db, {
+      now: () => '2026-09-08T12:00:00.000Z'
+    })
+  });
+}
+
 function reviewWriteState(db, fixture) {
   return {
     collaboration: db.prepare(`
@@ -212,10 +253,35 @@ function reviewWriteState(db, fixture) {
   };
 }
 
-test('content review submission and independent approval are replay-safe, RAG-excluded, and unlock v2 publication', (t) => {
+function publicationWriteState(db, fixture) {
+  return {
+    collaboration: db.prepare(`
+      SELECT status,row_version,content_url
+      FROM collaborations WHERE id=?
+    `).get(fixture.collaborationId),
+    publications: db.prepare('SELECT COUNT(*) AS count FROM campaign_publications').get().count,
+    custody: db.prepare('SELECT COUNT(*) AS count FROM collaboration_publication_custody').get().count,
+    lineage: db.prepare(`
+      SELECT COUNT(*) AS count FROM knowledge_entries
+      WHERE source_type='campaign_publication_handoff'
+    `).get().count,
+    publicationLinks: db.prepare(`
+      SELECT COUNT(*) AS count FROM campaign_record_links
+      WHERE campaign_id=? AND record_type='collaboration'
+        AND record_id=? AND relation_type='publication' AND revoked_at IS NULL
+    `).get(fixture.campaignId, String(fixture.collaborationId)).count,
+    reservations: db.prepare(`
+      SELECT COUNT(*) AS count FROM request_idempotency
+      WHERE scope='collaboration.update.linked'
+        AND idempotency_key LIKE 'publication-confirmation-%'
+    `).get().count
+  };
+}
+
+test('approved review unlocks explicit multi-deliverable publication confirmation without reusing the review URL', (t) => {
   const db = openDatabase(t);
   const fixture = seedFixture(db);
-  const service = createCampaignCollaborationService(db);
+  const service = collaborationServiceWithPerformanceHandoff(db);
   const submitted = service.submitContentReview(submissionInput(fixture));
 
   assert.equal(submitted.status, 201);
@@ -225,6 +291,7 @@ test('content review submission and independent approval are replay-safe, RAG-ex
   assert.equal(submitted.body.content_review.publication_ready, false);
   assert.equal(submitted.body.content_review.can_submit, false);
   assert.equal(submitted.body.content_review.can_decide, false);
+  assert.equal(submitted.body.content_review.can_publish, false);
   assert.equal(submitted.body.content_review.current_submission.content_version, 'V1 client review');
   assert.equal(submitted.body.content_review.current_submission.content_url, 'https://video.example.com/drafts/launch-v1');
   assert.deepEqual(service.submitContentReview(submissionInput(fixture)), submitted);
@@ -247,30 +314,238 @@ test('content review submission and independent approval are replay-safe, RAG-ex
   assert.equal(approved.body.content_review.publication_ready, true);
   assert.equal(approved.body.content_review.can_submit, false);
   assert.equal(approved.body.content_review.can_decide, false);
+  assert.equal(approved.body.content_review.can_publish, true);
   assert.equal(approved.body.content_review.latest_decision.reviewed_by_name, 'Review Owner');
   assert.deepEqual(service.decideContentReview(decisionInput(fixture)), approved);
 
-  const published = service.updateLinked({
+  assert.throws(
+    () => service.updateLinked({
+      userId: fixture.submitterId,
+      collaborationId: fixture.collaborationId,
+      requestId: 'content-review-publish-bypass-request-0001',
+      idempotencyKey: 'content-review-publish-bypass-0001',
+      body: {
+        campaign_id: fixture.campaignId,
+        expected_version: 6,
+        reason: 'The generic endpoint must not infer a final public URL.',
+        status: 'completed',
+        campaign_relation: 'publication'
+      }
+    }),
+    (error) => error && error.code === 'PUBLICATION_CONFIRMATION_ENDPOINT_REQUIRED'
+  );
+
+  const existingContent = createPerformanceManualService(db).createContent({
     userId: fixture.submitterId,
-    collaborationId: fixture.collaborationId,
-    requestId: 'content-review-publish-request-0001',
-    idempotencyKey: 'content-review-publish-0001',
+    campaignId: fixture.campaignId,
     body: {
-      campaign_id: fixture.campaignId,
-      expected_version: 6,
-      reason: 'Approved content URL was verified as published.',
-      status: 'completed',
-      campaign_relation: 'publication'
+      url: 'https://youtu.be/dQw4w9WgXcQ?utm_source=creator',
+      creator_id: String(fixture.influencerId)
     }
-  });
+  }).content;
+  const published = service.confirmPublication(publicationInput(fixture));
   assert.equal(published.body.row_version, 7);
   assert.deepEqual(published.body.active_relations, ['order', 'execution', 'publication']);
+  assert.deepEqual(published.body.performance_tracking, {
+    status: 'tracked',
+    campaign_id: fixture.campaignId,
+    publication_count: 2,
+    items: [
+      {
+        registration: 'existing',
+        custody_id: 1,
+        publication_id: existingContent.id,
+        deliverable_key: 'youtube-main',
+        platform: 'youtube',
+        original_url: 'https://youtu.be/dQw4w9WgXcQ?utm_source=creator',
+        published_at: '2026-09-08T11:45:00.000Z',
+        confirmed_at: '2026-09-08T12:00:00.000Z',
+        source: 'collaboration_publication'
+      },
+      {
+        registration: 'created',
+        custody_id: 2,
+        publication_id: 2,
+        deliverable_key: 'instagram-cutdown',
+        platform: 'instagram',
+        original_url: 'https://www.instagram.com/reel/C1234567890/',
+        published_at: '2026-09-08T11:50:00.000Z',
+        confirmed_at: '2026-09-08T12:00:00.000Z',
+        source: 'collaboration_publication'
+      }
+    ]
+  });
+  assert.deepEqual(service.confirmPublication(publicationInput(fixture, {
+    requestId: 'publication-confirmation-replay-request-0002'
+  })), published);
+
+  const publications = db.prepare('SELECT * FROM campaign_publications ORDER BY id').all();
+  assert.equal(publications.length, 2);
+  assert.equal(publications[1].source_mode, 'manual');
+  assert.equal(publications[1].mapping_version, 'phase7-publication-confirmation-v1');
+  assert.equal(publications[1].creator_id, String(fixture.influencerId));
+  assert.equal(publications[1].creator_name, '@content-review');
+  assert.equal(publications[1].product, 'Portable power station');
+  assert.equal(JSON.parse(publications[1].custom_fields_json).collaboration_id, fixture.collaborationId);
+  assert.equal(JSON.parse(publications[1].custom_fields_json).deliverable_key, 'instagram-cutdown');
+  assert.equal(publications.some((row) => row.original_url === 'https://video.example.com/drafts/launch-v1'), false);
+
+  const custody = db.prepare(`
+    SELECT deliverable_key,publication_id,registration_mode,review_submission_entry_id,
+      review_decision_entry_id,knowledge_entry_id
+    FROM collaboration_publication_custody
+    ORDER BY id
+  `).all();
+  assert.deepEqual(custody.map((row) => row.deliverable_key), ['youtube-main', 'instagram-cutdown']);
+  assert.deepEqual(custody.map((row) => row.registration_mode), ['existing', 'created']);
+  assert.ok(custody.every((row) => row.review_submission_entry_id === approved.body.content_review.current_submission.id));
+  assert.ok(custody.every((row) => row.review_decision_entry_id === approved.body.content_review.latest_decision.id));
+
+  const lineage = db.prepare(`
+    SELECT id,metadata_json FROM knowledge_entries
+    WHERE source_type='campaign_publication_handoff'
+    ORDER BY id
+  `).all();
+  assert.equal(lineage.length, 2);
+  for (const entry of lineage) {
+    const metadata = JSON.parse(entry.metadata_json);
+    assert.equal(metadata.collaboration_id, fixture.collaborationId);
+    assert.equal(metadata.review_submission_entry_id, approved.body.content_review.current_submission.id);
+    assert.equal(metadata.review_decision_entry_id, approved.body.content_review.latest_decision.id);
+    assert.equal(metadata.retrieval_eligible, false);
+    assert.equal(knowledgeService.isKnowledgeAiRetrievable(db, entry.id), false);
+  }
+
+  const listed = service.list({
+    userId: fixture.submitterId,
+    campaignId: fixture.campaignId,
+    includeCampaignContext: true
+  }).collaborations[0];
+  assert.deepEqual(listed.performance_tracking, published.body.performance_tracking);
+  assert.equal(service.list({
+    userId: fixture.outsiderId,
+    campaignId: fixture.campaignId,
+    includeCampaignContext: true
+  }).collaborations.length, 0);
+  assert.throws(
+    () => db.prepare("UPDATE collaboration_publication_custody SET publication_note='changed' WHERE id=1").run(),
+    /append-only/
+  );
+  assert.throws(
+    () => db.prepare('DELETE FROM collaboration_publication_custody WHERE id=1').run(),
+    /append-only/
+  );
+
+  assert.throws(
+    () => createPerformanceManualService(db).createContent({
+      userId: fixture.submitterId,
+      campaignId: fixture.campaignId,
+      body: { url: 'https://www.instagram.com/reel/C1234567890/' }
+    }),
+    (error) => error && error.code === 'PERFORMANCE_CONTENT_DUPLICATE'
+  );
+});
+
+test('publication handoff refuses to bind tracked content owned by another creator', (t) => {
+  const db = openDatabase(t);
+  const fixture = seedFixture(db);
+  const service = collaborationServiceWithPerformanceHandoff(db);
+  service.submitContentReview(submissionInput(fixture));
+  service.decideContentReview(decisionInput(fixture));
+  createPerformanceManualService(db).createContent({
+    userId: fixture.submitterId,
+    campaignId: fixture.campaignId,
+    body: {
+      url: 'https://youtu.be/dQw4w9WgXcQ?utm_source=creator',
+      creator_id: String(fixture.influencerId + 1)
+    }
+  });
+  const before = publicationWriteState(db, fixture);
+
+  assert.throws(
+    () => service.confirmPublication(publicationInput(fixture, {
+      requestId: 'publication-confirmation-creator-conflict-request',
+      idempotencyKey: 'publication-confirmation-creator-conflict'
+    })),
+    (error) => error && error.code === 'PERFORMANCE_CONTENT_CREATOR_CONFLICT'
+  );
+  assert.deepEqual(publicationWriteState(db, fixture), before);
+});
+
+test('publication handoff failure rolls back collaboration, relation, archive, and tracked content atomically', (t) => {
+  const db = openDatabase(t);
+  const fixture = seedFixture(db);
+  const service = collaborationServiceWithPerformanceHandoff(db);
+  service.submitContentReview(submissionInput(fixture));
+  service.decideContentReview(decisionInput(fixture));
+  const before = reviewWriteState(db, fixture);
+  db.exec(`
+    CREATE TRIGGER fail_publication_handoff_lineage
+    BEFORE INSERT ON knowledge_entries
+    WHEN NEW.source_type='campaign_publication_handoff'
+    BEGIN SELECT RAISE(ABORT,'injected publication handoff failure'); END
+  `);
+
+  assert.throws(
+    () => service.confirmPublication(publicationInput(fixture, {
+      requestId: 'publication-confirmation-rollback-request',
+      idempotencyKey: 'publication-confirmation-rollback'
+    })),
+    /injected publication handoff failure/
+  );
+  assert.deepEqual(reviewWriteState(db, fixture), before);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM campaign_publications').get().count, 0);
+  assert.equal(db.prepare(`
+    SELECT COUNT(*) AS count FROM campaign_record_links
+    WHERE campaign_id=? AND record_type='collaboration'
+      AND record_id=? AND relation_type='publication' AND revoked_at IS NULL
+  `).get(fixture.campaignId, String(fixture.collaborationId)).count, 0);
+});
+
+test('publication confirmation rejects malformed, duplicate, stale, and unauthorized final links atomically', (t) => {
+  const db = openDatabase(t);
+  const fixture = seedFixture(db);
+  const service = collaborationServiceWithPerformanceHandoff(db);
+  service.submitContentReview(submissionInput(fixture));
+  service.decideContentReview(decisionInput(fixture));
+  const baseline = publicationWriteState(db, fixture);
+  const valid = publicationInput(fixture).body.publications[0];
+  const invalidBodies = [
+    { publications: [] },
+    { publications: Array.from({ length: 21 }, (_unused, index) => ({ ...valid, deliverable_key: `item-${index + 1}`, url: `https://www.youtube.com/watch?v=item${String(index + 1).padStart(7, '0')}` })) },
+    { publications: [valid, { ...valid }] },
+    { publications: [valid, { ...valid, deliverable_key: 'second-deliverable' }] },
+    { publications: [{ ...valid, deliverable_key: 'Invalid Key' }] },
+    { publications: [{ ...valid, url: 'http://www.youtube.com/watch?v=dQw4w9WgXcQ' }] },
+    { publications: [{ ...valid, published_at: '2026-09-08 11:45' }] },
+    { publications: [{ ...valid, unexpected: true }] },
+    { publications: [valid], unexpected: true },
+    { expected_version: 5, publications: [valid] }
+  ];
+  invalidBodies.forEach((body, index) => {
+    assert.throws(
+      () => service.confirmPublication(publicationInput(fixture, {
+        idempotencyKey: `publication-confirmation-invalid-${String(index).padStart(4, '0')}`,
+        body
+      })),
+      (error) => error && ['INVALID_PUBLICATION_CONFIRMATION', 'STALE_COLLABORATION_VERSION'].includes(error.code)
+    );
+    assert.deepEqual(publicationWriteState(db, fixture), baseline);
+  });
+  assert.throws(
+    () => service.confirmPublication({
+      ...publicationInput(fixture, { idempotencyKey: 'publication-confirmation-outsider' }),
+      userId: fixture.outsiderId
+    }),
+    (error) => error && error.code === 'RECORD_NOT_FOUND'
+  );
+  assert.deepEqual(publicationWriteState(db, fixture), baseline);
 });
 
 test('changes requested returns v2 execution to live and the next submission requires a new approval', (t) => {
   const db = openDatabase(t);
   const fixture = seedFixture(db);
-  const service = createCampaignCollaborationService(db);
+  const service = collaborationServiceWithPerformanceHandoff(db);
   service.submitContentReview(submissionInput(fixture));
   const rejected = service.decideContentReview(decisionInput(fixture, {
     idempotencyKey: 'content-review-changes-0001',
@@ -299,19 +574,11 @@ test('changes requested returns v2 execution to live and the next submission req
   assert.equal(resubmitted.body.content_review.events.length, 3);
 
   assert.throws(
-    () => service.updateLinked({
-      userId: fixture.submitterId,
-      collaborationId: fixture.collaborationId,
-      requestId: 'content-review-premature-publish',
-      idempotencyKey: 'content-review-premature-publish-0001',
-      body: {
-        campaign_id: fixture.campaignId,
-        expected_version: 7,
-        reason: 'Attempt publication before the latest approval.',
-        status: 'completed',
-        campaign_relation: 'publication'
-      }
-    }),
+    () => service.confirmPublication(publicationInput(fixture, {
+      requestId: 'publication-confirmation-premature-request',
+      idempotencyKey: 'publication-confirmation-premature',
+      body: { expected_version: 7 }
+    })),
     (error) => error && error.code === 'CONTENT_REVIEW_REQUIRED'
   );
   assert.equal(service.listContentReviews({
@@ -464,7 +731,7 @@ test('content review rolls back collaboration, evidence, links, events, and idem
 test('content review evidence tampering fails closed before list or publication', (t) => {
   const db = openDatabase(t);
   const fixture = seedFixture(db);
-  const service = createCampaignCollaborationService(db);
+  const service = collaborationServiceWithPerformanceHandoff(db);
   service.submitContentReview(submissionInput(fixture));
   service.decideContentReview(decisionInput(fixture));
   const decision = db.prepare(`
@@ -488,19 +755,10 @@ test('content review evidence tampering fails closed before list or publication'
     (error) => error && error.code === 'CAMPAIGN_EVIDENCE_IN_USE'
   );
   assert.throws(
-    () => service.updateLinked({
-      userId: fixture.submitterId,
-      collaborationId: fixture.collaborationId,
-      requestId: 'content-review-tampered-publish',
-      idempotencyKey: 'content-review-tampered-publish-0001',
-      body: {
-        campaign_id: fixture.campaignId,
-        expected_version: 6,
-        reason: 'Tampered evidence must not unlock publication.',
-        status: 'completed',
-        campaign_relation: 'publication'
-      }
-    }),
+    () => service.confirmPublication(publicationInput(fixture, {
+      requestId: 'publication-confirmation-tampered-request',
+      idempotencyKey: 'publication-confirmation-tampered'
+    })),
     (error) => error && error.code === 'CAMPAIGN_EVIDENCE_IN_USE'
   );
 });

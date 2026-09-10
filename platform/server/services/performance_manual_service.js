@@ -1301,7 +1301,7 @@ function createPerformanceManualService(db, options = {}) {
         draft.canonical_identity,
         draft.original_url,
         draft.canonical_url,
-        draft.platform || 'custom',
+        draft.platform === 'custom_manual' ? 'custom' : (draft.platform || 'custom'),
         draft.platform_content_id || null,
         draft.creator_id || null,
         draft.creator_name || null,

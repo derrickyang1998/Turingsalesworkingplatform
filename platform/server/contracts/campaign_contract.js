@@ -367,6 +367,11 @@ const REQUEST_POLICIES = Object.freeze({
     'GET',
     '/api/collaborations/:id/content-reviews'
   ),
+  COLLABORATION_PUBLICATION_CONFIRM: controlJson(
+    'collaboration.publication.confirm',
+    'POST',
+    '/api/collaborations/:id/publication-confirmations'
+  ),
   COLLABORATION_PAYMENT_RECORD: controlJson(
     'collaboration.payment.record',
     'POST',
