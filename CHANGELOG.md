@@ -1,5 +1,28 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.8.29-youtube-provider-collection (Production Deployed, 2026-09-11) - YouTube 官方数据采集与配额保管
+
+### 交付与范围 / Delivery And Scope
+- 在现有内容监控工作区接入服务端 YouTube Data API provider，采集公开视频播放、点赞和评论；provider 不提供的收藏/转发明确留空，点击、花费、收入、ROI/ROAS 继续由人工或经批准业务数据提供。
+- 保留最新产品壳层，在原有新鲜度区域增加 provider 状态、受控采集、来源标签和运行历史；生产未配置 YouTube key 时明确禁用采集与调度，人工导入和效果看板不受影响。
+- 新增有界批量采集、超时重试、五分钟人工冷却、用户/组织/共享 provider 日限额，并在外部请求前将持久领取与最坏情况配额预留写入同一即时事务；默认共享限额为每日 9,000 单位，单条最多预留 3 单位。
+- schema v19 新增只追加采集运行、provider 观测、配额预留和短期领取记录；运行、观测和配额预留受禁止更新/删除触发器保护。provider 数据仅在时间更新时覆盖人工值，标准快照、历史、看板、导出、复核与飞书投影共享同一来源链。
+
+### 聚焦验证、审查与上线 / Focused Verification, Review, And Deployment
+- 功能聚焦测试 `96` 项、真实请求重放 `8/8`、迁移精确性 `15/15`、可信 v7→v19 双轮脱敏迁移、v19 sanitizer 合同、JavaScript 语法 `28` 项、可信来源哈希 `62` 项、凭据扫描和本地发布预检均通过。
+- 独立代码与数据审查关闭领取、配额、run_key、sanitizer、原始重试证据和来源链问题，最终均为 `APPROVE`。线上 Express 5 空原型查询兼容修复另通过路由测试 `18/18`、语法、预检、凭据扫描及独立复审。
+- 首次候选因 schema v18 固定断言在生产变更前停止；修正后下一候选因容量门禁停止，仅删除 3 个经验证的过期 Playwright 构建缓存并回收 `1,738,517,815` 字节。最终候选通过回放、发布守卫、浏览器冒烟、迁移演练、解析器运行时复用、Nginx 和最终验收。
+
+### 生产证据 / Production Evidence
+- 最终生产运行 ID 为 `dba3f416d20f4ed2bc4ee74d18e82d0c`，候选 `v060-crm-sales-workspace-20260911-063145` 完成 `DEPLOY_OK`；候选 SHA-256 为 `c75d81c6dc7be3a5c9ca431f3380b16e21f8272ce0a4fde2caca6eda498624c1`。
+- 可恢复备份为 `/root/turingmarket/backups/v060-crm-sales-workspace-20260911-063145`；初始清单 317 项、切换快照 35 项均复验通过，清单 SHA-256 分别为 `6b002e1c3684e1bf04016c873866b8874b7dc9609c63a6e72733efee29d088ed` 与 `10f3b1ebe7a8ba9d8e75d1e3ae9bcadacdadb05a1f64b7db639ebdf1ef6b04b2`。
+- 公网健康、首页及资产为 `200`，PM2 online 且重启计数 `0`，Nginx active；SQLite 迁移链精确为 `1-19`、`quick_check=ok`、外键异常 `0`，四张 provider 表和不可变触发器存在。
+- 管理员登录、身份、活动、新鲜度、内容、效果看板、采集历史、复核证据、飞书连接、注销和撤销令牌拒绝均通过。生产未配置 YouTube key，provider 按预期为 `not_configured` 并受控返回 `503`，未创建 provider 或业务数据；飞书投影因尚无已批准生产配置按预期返回 `409`。
+
+### 交付节奏与下一边界 / Delivery Cadence And Next Boundary
+- 普通功能按“受影响测试 + 必要语法/合同 + 一次独立审查 + 可验证备份 + 当轮生产部署 + 线上功能冒烟”执行；完整测试只在阶段收口或迁移、鉴权、共享基础设施、真实外部写入等高风险变更时运行。
+- 启用真实采集前需另行配置受控的 YouTube 生产 key，并在获批活动上验收；Tavily 继续仅用于 AI 联网搜索。下一独立切片为真实幂等飞书写入或 AI 视频内容分析。
+
 ## v0.8.28-publication-lifecycle-custody (Production Deployed, 2026-09-11) - 发布纠错与追踪生命周期保管
 
 ### 交付与范围 / Delivery And Scope
