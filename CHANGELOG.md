@@ -1,5 +1,27 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.8.23-publication-performance-handoff (Production Deployed, 2026-09-10) - 发布凭证保管与视频效果追踪衔接
+
+### 交付与范围 / Delivery And Scope
+- 在既有 M4 合作执行界面内新增最终发布确认，不新增页面或替换最新壳层；一次可登记 1-20 条明确的交付物编号、最终公开链接、发布时间和备注，内容审核草稿链接不会被当作正式发布链接复用。
+- schema v17 新增只追加的 `collaboration_publication_custody`，把合作、交付物、审核提交与批准、Campaign 发布关系、效果监控内容和不可检索知识凭证串联成不可变证据链。
+- 同活动已有的规范化视频记录仅在尚未绑定且 `creator_id` 与本次合作网红一致时复用；跨交付物重复、跨达人误绑定和通用合作更新接口绕过均明确拒绝。
+- 服务端投影 `can_publish`，前端只向具备权限且已通过审核的合作展示发布操作；确认后在合作行直接显示多链接监控状态并可进入现有内容效果看板。AI、飞书外部写入和冻结方案 PPT 均未改动。
+
+### 聚焦验证、审查与上线 / Focused Verification, Review, And Deployment
+- 按单功能节奏执行：发布/审核服务最新 `10/10`、迁移与关联结算 `5/5`、M4/请求合同/发布合同受影响检查通过；变更 JavaScript 语法、差异格式、定向密钥扫描、冻结 PPT 哈希和本地发布预检通过。
+- 独立审查发现既有监控内容缺少网红归属校验；补充 `creator_id` 冲突门禁和原子回滚用例后复审为 `APPROVE`，无未关闭 P0-P2。
+- 首个候选因真实回放仍只接受迁移 1-16 而在生产切换前停止，线上未被修改；断言更新并定向通过后，正式候选完成真实回放 `8/8`、发布守卫 `21/21`、浏览器冒烟 `2/2`、迁移演练和 Nginx 验证。
+
+### 生产证据 / Production Evidence
+- 生产运行 ID 为 `97d1b77ab63b43918483a3edd1544f2a`，候选 `v060-crm-sales-workspace-20260910-172113` 完成 `DEPLOY_OK`，候选 SHA-256 为 `0ab75d602bdcf44a444ee7a59b73aec675b912725d10bac57414c1e6a41798c0`；本次首次实际输出 `PARSER_RUNTIME_CACHE_REUSED`。
+- 可恢复备份为 `/root/turingmarket/backups/v060-crm-sales-workspace-20260910-172113`；初始清单 297 项、切换快照 35 项，清单 SHA-256 分别为 `8b72d031c5e8eb2c1b1aa2ef3e618ca044ce48f4a72a8b508a2fb633a01a32d4` 与 `902816e7f530126ee0f767e260322cc81b1b59bd5ff236e1b00c6359ff790aef`。
+- 公网健康、首页和 `app.js` 均为 `200`，新发布确认接口匿名访问为 `401`；PM2 online 且重启计数 `0`，Nginx active。SQLite 迁移 `17/17`、`quick_check=ok`、外键异常 `0`，新保管表及 4 个触发器存在，知识分块/FTS 为 `914/914`。
+- 线上核心代码与本地 SHA-256 一致；冻结 `ppt.js` 仍为 `f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e`，最新 M3/M4、CRM、AI/知识、飞书降级路径和报告能力未回退。
+
+### 后续边界 / Next Boundaries
+- 继续采用“一个功能完成即上线”的轻量节奏；下一切片优先推进电子签约、自动支付回单/对账、真实飞书投影或视频内容 AI 分析，外部真实写入仍需独立配置与验收。
+
 ## v0.8.22-parser-build-cache (Production Deployed, 2026-09-10) - 解析器发布提速与安全刷新
 
 ### 交付与范围 / Delivery And Scope
