@@ -1,5 +1,28 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.8.25-performance-freshness-update-queue (Production Deployed, 2026-09-10) - 效果新鲜度与更新队列
+
+### 交付与范围 / Delivery And Scope
+- 在既有内容监控“已监控内容”区域增加紧凑的新鲜度概览和更新队列，不新增页面、不替换最新产品壳层；运营人员可直接从队列进入原有人工指标补录流程。
+- 后端基于活动完整效果投影计算 `current`、`due`、`stale`、`unobserved`、`date_required`、`data_issue`、`not_started` 和 `monitoring_complete`，并按发布后 6 小时、12 小时、24 小时、每周及 180 天停止规则生成确定性排期。
+- 更新队列继承既有 Campaign 权限、字段脱敏和完整快照边界；即使目标内容不在当前筛选后的前 100 行，前端也会先取得其权威快照再打开补录，不会错绑其他活动或内容。
+- 自动 provider 继续诚实显示 `not_configured`，不伪造最近成功或下次运行时间；本版本未启用外部抓取、定时任务、飞书写入或数据库迁移。
+
+### 聚焦验证、审查与上线 / Focused Verification, Review, And Deployment
+- 按单功能节奏完成新鲜度服务、路由、既有效果合同、前端行为和请求流水线受影响矩阵 `59/59`；JavaScript 语法、差异格式、定向凭据扫描、冻结 PPT 哈希及本地发布预检通过。
+- 两次独立复审均为 `PASS`。首轮指出的外部链接协议门禁和 provider 时间来源歧义已修复；最终无未关闭 P0-P2。
+- 正式候选完成真实 Express 回放 `8/8`、发布守卫 `21/21`、内置浏览器冒烟 `2/2`、迁移演练、解析器缓存复用、Nginx 与最终验收。
+
+### 生产证据 / Production Evidence
+- 生产运行 ID 为 `86b2f1b93e5341f49022c57e66d2bc54`，候选 `v060-crm-sales-workspace-20260910-205839` 完成 `DEPLOY_OK`，候选 SHA-256 为 `c9de61c1057b4121120f8206d131501eebeeb2789cca2a4629dd1e49e815584c`。
+- 可恢复备份为 `/root/turingmarket/backups/v060-crm-sales-workspace-20260910-205839`；初始清单 304 项、切换快照 35 项，清单 SHA-256 分别为 `83c022bd5248140f3d5240c1173a0f4c68b101fe7b20e5e3503ad212dd728c97` 与 `96585b9c0a6da39b914096e491f4c9a42f74bc9787ba1ac3b86d5cb750f9bbd0`。
+- 公网首页和健康接口为 `200`，新接口匿名访问为 `401`；管理员登录及活动 `1` 的真实更新队列读取均为 `200`，返回 `performance-freshness-queue-v1`、1 条可执行内容，provider 保持未配置。
+- PM2 online 且重启计数 `0`，Nginx active；SQLite 迁移 `17/17`、`integrity_check=ok`、外键异常 `0`。线上核心文件与本地 SHA-256 一致，冻结 `ppt.js` 仍为 `f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e`。
+
+### 发布事件与后续边界 / Release Incident And Next Boundaries
+- 首次候选在生产切换前因磁盘可用空间低于解析器安全阈值而停止，现网未被修改；清理失败候选备份及系统日志/包缓存后回收 `668,880,896` 字节，第二候选完整通过。后续发布将提前执行容量检查，减少无效候选等待。
+- 下一独立功能为一个明确批准的数据 provider 与调度/运行历史；真实飞书幂等写入仍等待生产配置和独立外部写入门禁。普通功能继续采用受影响测试、一次独立审查、备份后当轮上线。
+
 ## v0.8.24-performance-feishu-snapshot-export (Production Deployed, 2026-09-10) - 已批准飞书字段的效果快照导出
 
 ### 交付与范围 / Delivery And Scope
