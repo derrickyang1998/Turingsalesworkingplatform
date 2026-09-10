@@ -22,6 +22,10 @@ const {
   createPerformanceFeishuProjectionService
 } = require('./services/performance_feishu_projection_service');
 const { createPerformanceFreshnessService } = require('./services/performance_freshness_service');
+const {
+  PerformanceCollectionRunServiceError,
+  createPerformanceCollectionRunService
+} = require('./services/performance_collection_run_service');
 
 function requestId(request) {
   return request.requestId ||
@@ -33,6 +37,7 @@ function sendError(request, response, error) {
   const known = error instanceof PerformanceManualServiceError ||
     error instanceof PerformanceFeishuConnectionServiceError ||
     error instanceof PerformanceFeishuProjectionServiceError ||
+    error instanceof PerformanceCollectionRunServiceError ||
     error instanceof PerformanceAiReviewServiceError ||
     error instanceof CustomerReportSnapshotServiceError ||
     error instanceof CustomerReportDeliveryServiceError;
@@ -119,6 +124,11 @@ function registerPerformanceRoutes(app, options = {}) {
   if (!freshnessService || typeof freshnessService.getQueue !== 'function') {
     throw new TypeError('A performance freshness service is required.');
   }
+  const collectionRunService = options.collectionRunService ||
+    createPerformanceCollectionRunService(options.db);
+  if (!collectionRunService || typeof collectionRunService.listRuns !== 'function') {
+    throw new TypeError('A performance collection run service is required.');
+  }
   const feishuConnectionService = options.feishuConnectionService ||
     createPerformanceFeishuConnectionService(options.db);
   if (!feishuConnectionService ||
@@ -183,6 +193,18 @@ function registerPerformanceRoutes(app, options = {}) {
       return sendResult(request, response, freshnessService.getQueue({
         userId: authenticatedUserId(request),
         campaignId: request.params.id
+      }));
+    } catch (error) {
+      return sendError(request, response, error);
+    }
+  });
+
+  app.get('/api/campaigns/:id/performance/collection-runs', options.authMiddleware, (request, response) => {
+    try {
+      return sendResult(request, response, collectionRunService.listRuns({
+        userId: authenticatedUserId(request),
+        campaignId: request.params.id,
+        query: request.query || {}
       }));
     } catch (error) {
       return sendError(request, response, error);

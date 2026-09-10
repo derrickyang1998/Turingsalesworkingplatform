@@ -188,6 +188,11 @@ const REQUEST_POLICIES = Object.freeze({
     'GET',
     '/api/campaigns/:id/performance/freshness-queue'
   ),
+  CAMPAIGN_PERFORMANCE_COLLECTION_RUNS: empty(
+    'campaign.performance.collection-runs',
+    'GET',
+    '/api/campaigns/:id/performance/collection-runs'
+  ),
   CAMPAIGN_PERFORMANCE_OBSERVATION_HISTORY: empty(
     'campaign.performance.observation-history',
     'GET',

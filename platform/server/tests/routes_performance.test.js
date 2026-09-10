@@ -13,6 +13,7 @@ const {
 const { PerformanceFeishuConnectionServiceError } = require('../services/performance_feishu_connection_service');
 const { CustomerReportSnapshotServiceError } = require('../services/customer_report_snapshot_service');
 const { CustomerReportDeliveryServiceError } = require('../services/customer_report_delivery_service');
+const { PerformanceCollectionRunServiceError } = require('../services/performance_collection_run_service');
 const campaignContract = require('../contracts/campaign_contract');
 
 function createResponse() {
@@ -88,6 +89,28 @@ function createFixture() {
         queue: { total: 0, limit: 100, truncated: false },
         items: [],
         provider: { status: 'not_configured', dispatch_available: false }
+      };
+    }
+  };
+  const collectionRunService = {
+    listRuns(input) {
+      calls.push(['collection-runs', input]);
+      const unsupported = Object.keys(input.query || {}).find((key) => key !== 'limit');
+      if (unsupported) {
+        throw new PerformanceCollectionRunServiceError(
+          400,
+          'PERFORMANCE_COLLECTION_RUN_QUERY_INVALID',
+          'Query contains an unsupported field.',
+          { field: unsupported }
+        );
+      }
+      return {
+        contract_version: 'performance-collection-runs-v1',
+        campaign_id: 7,
+        summary: { total: 0, succeeded: 0, partial: 0, failed: 0, latest_completed_at: null },
+        items: [],
+        page: { limit: 12, returned: 0, has_more: false },
+        capabilities: { can_view: true, diagnostics_level: 'summary' }
       };
     }
   };
@@ -228,6 +251,7 @@ function createFixture() {
     authMiddleware(_request, _response, next) { next(); },
     service,
     freshnessService,
+    collectionRunService,
     feishuConnectionService,
     feishuProjectionService,
     aiReviewService,
@@ -239,6 +263,7 @@ function createFixture() {
     calls,
     service,
     freshnessService,
+    collectionRunService,
     feishuConnectionService,
     feishuProjectionService,
     aiReviewService,
@@ -286,6 +311,7 @@ async function invokeAsync(handlers, request) {
 test('registers campaign-scoped performance endpoints and forwards authenticated context', () => {
   const { routes, calls } = createFixture();
   assert.deepEqual([...routes.keys()].sort(), [
+    'GET /api/campaigns/:id/performance/collection-runs',
     'GET /api/campaigns/:id/performance/contents',
     'GET /api/campaigns/:id/performance/contents/:contentId/observations',
     'GET /api/campaigns/:id/performance/contents/export',
@@ -327,6 +353,49 @@ test('registers campaign-scoped performance endpoints and forwards authenticated
     campaignId: '7',
     body: request.body
   }]);
+});
+
+test('returns safe collection-run summaries through the campaign read contract', () => {
+  const { routes, calls } = createFixture();
+  const response = invoke(routes.get('GET /api/campaigns/:id/performance/collection-runs'), {
+    user: { id: 9 },
+    params: { id: '7' },
+    query: { limit: '12' },
+    requestId: 'collection-runs-request'
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.contract_version, 'performance-collection-runs-v1');
+  assert.equal(response.body.request_id, 'collection-runs-request');
+  assert.deepEqual(calls[0], ['collection-runs', {
+    userId: 9,
+    campaignId: '7',
+    query: { limit: '12' }
+  }]);
+
+  const policy = campaignContract.REQUEST_POLICIES.CAMPAIGN_PERFORMANCE_COLLECTION_RUNS;
+  assert.ok(policy);
+  assert.equal(policy.id, 'campaign.performance.collection-runs');
+  assert.equal(policy.method, 'GET');
+  assert.equal(policy.pathTemplate, '/api/campaigns/:id/performance/collection-runs');
+  assert.equal(policy.mediaKind, campaignContract.MEDIA_KINDS.EMPTY);
+
+  const serverSource = fs.readFileSync(path.resolve(__dirname, '..', 'server.js'), 'utf8');
+  assert.match(serverSource, /'CAMPAIGN_PERFORMANCE_COLLECTION_RUNS'/);
+});
+
+test('rejects unsupported collection-run filters at the HTTP boundary', () => {
+  const { routes } = createFixture();
+  const response = invoke(routes.get('GET /api/campaigns/:id/performance/collection-runs'), {
+    user: { id: 9 },
+    params: { id: '7' },
+    query: { provider: 'tiktok' },
+    requestId: 'collection-runs-invalid-query'
+  });
+
+  assert.equal(response.statusCode, 400);
+  assert.equal(response.body.code, 'PERFORMANCE_COLLECTION_RUN_QUERY_INVALID');
+  assert.deepEqual(response.body.details, { field: 'provider' });
 });
 
 test('returns the provider-independent freshness queue through a read-only campaign contract', () => {

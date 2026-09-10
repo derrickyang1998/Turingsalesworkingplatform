@@ -7,6 +7,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const appSource = fs.readFileSync(path.resolve(__dirname, '..', '..', 'app.js'), 'utf8');
+const indexSource = fs.readFileSync(path.resolve(__dirname, '..', '..', 'index.html'), 'utf8');
 
 function extractFunction(name) {
   const pattern = new RegExp('(?:async )?function ' + name + '\\([^)]*\\) \\{[\\s\\S]*?\\n\\}');
@@ -75,6 +76,44 @@ test('a stale freshness response cannot overwrite the newly selected campaign', 
   campaignId = 8;
   context.performanceFreshnessRequestSequence += 1;
   resolveJson({ campaign_id: 7, summary: {} });
+  await request;
+
+  assert.deepEqual(renders, []);
+});
+
+test('collection run history stays inside the existing monitor and exposes no provider dispatch control', () => {
+  assert.match(indexSource, /id="performanceCollectionRunSummary"/);
+  assert.match(indexSource, /id="performanceCollectionRuns"/);
+  assert.match(indexSource, /onclick="refreshPerformanceUpdateStatus\(\)"/);
+  assert.doesNotMatch(indexSource, /data-performance-collection-action="dispatch"/);
+  assert.match(appSource, /performance\/collection-runs\?limit=12/);
+  assert.match(appSource, /audit_scan_truncated/);
+  assert.match(appSource, /history_window_truncated/);
+  assert.match(appSource, /较早记录未纳入/);
+});
+
+test('a stale collection-run response cannot overwrite the newly selected campaign', async () => {
+  let campaignId = 7;
+  let resolveJson;
+  const renders = [];
+  const pendingJson = new Promise((resolve) => { resolveJson = resolve; });
+  const element = { innerHTML: '', textContent: '' };
+  const context = {
+    performanceCollectionRunRequestSequence: 0,
+    getPerformanceCampaignId() { return campaignId; },
+    document: { getElementById() { return element; } },
+    apiFetch: async () => ({ ok: true, json: async () => pendingJson }),
+    renderPerformanceCollectionRuns(data) { renders.push(data); },
+    encodeURIComponent,
+    Error
+  };
+  vm.createContext(context);
+  vm.runInContext(extractFunction('loadPerformanceCollectionRuns'), context);
+
+  const request = context.loadPerformanceCollectionRuns();
+  campaignId = 8;
+  context.performanceCollectionRunRequestSequence += 1;
+  resolveJson({ campaign_id: 7, summary: {}, items: [] });
   await request;
 
   assert.deepEqual(renders, []);

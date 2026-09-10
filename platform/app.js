@@ -9110,6 +9110,8 @@ var activePerformanceObservationHistoryRequest = null;
 var performanceObservationHistoryState = null;
 var performanceFreshnessQueue = null;
 var performanceFreshnessRequestSequence = 0;
+var performanceCollectionRuns = null;
+var performanceCollectionRunRequestSequence = 0;
 
 function performancePositiveId(value) {
   return typeof readPositiveInteger === 'function' ? readPositiveInteger(value) : null;
@@ -9230,6 +9232,7 @@ function changePerformanceCampaignContext(value) {
   invalidatePerformanceAiReviewDraft('活动已切换，请基于当前数据重新生成草稿。');
   invalidatePerformanceFeishuSnapshotExport();
   performanceFreshnessRequestSequence += 1;
+  performanceCollectionRunRequestSequence += 1;
   performanceCampaignContextId = performancePositiveId(value);
   preparePerformanceCustomerReportForm(true);
   syncPerformanceCampaignSelectors();
@@ -9237,6 +9240,7 @@ function changePerformanceCampaignContext(value) {
   setPerformanceStatus(campaign ? ('当前活动：' + performanceCampaignLabel(campaign)) : '请选择推广活动。');
   loadPerformanceContents();
   loadPerformanceFreshnessQueue();
+  loadPerformanceCollectionRuns();
   loadPerformanceIntegrationPreview().then(function() { return loadPerformanceFeishuConnection(); });
   loadPerformanceDashboard();
   loadPerformanceReviewEvidence();
@@ -9245,7 +9249,7 @@ function changePerformanceCampaignContext(value) {
 
 function refreshPerformanceMonitor() {
   return loadPerformanceCampaigns().then(function() {
-    return Promise.all([loadPerformanceContents(), loadPerformanceFreshnessQueue(), loadPerformanceIntegrationPreview()]).then(function() {
+    return Promise.all([loadPerformanceContents(), loadPerformanceFreshnessQueue(), loadPerformanceCollectionRuns(), loadPerformanceIntegrationPreview()]).then(function() {
       return loadPerformanceFeishuConnection();
     });
   });
@@ -9265,7 +9269,7 @@ function refreshPerformanceDashboard() {
 
 function initPerformanceMonitor() {
   return loadPerformanceCampaigns().then(function() {
-    return Promise.all([loadPerformanceContents(), loadPerformanceFreshnessQueue(), loadPerformanceIntegrationPreview()]).then(function() {
+    return Promise.all([loadPerformanceContents(), loadPerformanceFreshnessQueue(), loadPerformanceCollectionRuns(), loadPerformanceIntegrationPreview()]).then(function() {
       return loadPerformanceFeishuConnection();
     });
   });
@@ -9295,7 +9299,7 @@ function refreshPerformanceReviewEvidence() {
 
 async function refreshPerformanceInsightsAfterMutation() {
   invalidatePerformanceAiReviewDraft('内容数据已更新，请基于最新快照重新生成草稿。');
-  await Promise.all([loadPerformanceFreshnessQueue(), loadPerformanceDashboard(), loadPerformanceReviewEvidence()]);
+  await Promise.all([loadPerformanceFreshnessQueue(), loadPerformanceCollectionRuns(), loadPerformanceDashboard(), loadPerformanceReviewEvidence()]);
 }
 
 function performanceFreshnessStateLabel(value) {
@@ -9439,6 +9443,115 @@ async function loadPerformanceFreshnessQueue() {
     if (container) container.innerHTML = '<div class="tm-state-error">' + esc(error.message || '数据新鲜度加载失败') + '</div>';
     return null;
   }
+}
+
+function performanceCollectionOperationLabel(value) {
+  var labels = {
+    metric_import: '批量指标更新',
+    content_import: '内容批量导入',
+    manual_metric_update: '单条指标补录'
+  };
+  return labels[value] || '数据更新';
+}
+
+function performanceCollectionStatusLabel(value) {
+  var labels = {
+    succeeded: '成功',
+    partial: '部分完成',
+    failed: '失败'
+  };
+  return labels[value] || '待核对';
+}
+
+function renderPerformanceCollectionRuns(data) {
+  performanceCollectionRuns = data || null;
+  var container = document.getElementById('performanceCollectionRuns');
+  var summaryContainer = document.getElementById('performanceCollectionRunSummary');
+  var status = document.getElementById('performanceCollectionRunStatus');
+  if (!container || !summaryContainer) return;
+  if (!data) {
+    summaryContainer.innerHTML = '';
+    container.innerHTML = '<div class="tm-state-empty">选择推广活动后加载记录。</div>';
+    if (status) status.textContent = '选择推广活动后加载记录。';
+    return;
+  }
+  var summary = data.summary || {};
+  summaryContainer.innerHTML = [
+    ['全部', summary.total],
+    ['成功', summary.succeeded],
+    ['部分完成', summary.partial],
+    ['失败', summary.failed]
+  ].map(function(item) {
+    return '<div><span>' + esc(item[0]) + '</span><strong>' + esc(item[1] === undefined ? 0 : item[1]) + '</strong></div>';
+  }).join('');
+  if (status) {
+    var source = data.source || {};
+    var statusText = summary.latest_completed_at
+      ? '最近完成：' + performanceDate(summary.latest_completed_at)
+      : '暂无更新记录。';
+    if (source.history_window_truncated && Number(source.history_window_limit) > 0) {
+      statusText += ' · 汇总最近 ' + Number(source.history_window_limit) + ' 次';
+    }
+    if (source.audit_scan_truncated && Number(source.audit_scan_limit) > 0) {
+      statusText += ' · 仅检查最近 ' + Number(source.audit_scan_limit) + ' 条系统记录，较早记录未纳入';
+    }
+    status.textContent = statusText;
+  }
+  var items = Array.isArray(data.items) ? data.items : [];
+  if (!items.length) {
+    container.innerHTML = '<div class="tm-state-empty">'
+      + (data.source && data.source.audit_scan_truncated
+        ? '当前扫描范围内暂无更新记录，较早记录未纳入。'
+        : '暂无更新记录。')
+      + '</div>';
+    return;
+  }
+  container.innerHTML = items.map(function(item) {
+    var counts = item.counts || {};
+    var countText = item.operation === 'manual_metric_update'
+      ? '1 条内容'
+      : '成功 ' + Number(counts.succeeded || 0) + ' · 重复 ' + Number(counts.duplicate || 0) + ' · 失败 ' + Number(counts.failed || 0);
+    var source = item.source_mode === 'manual' ? '手工录入' : 'CSV / XLSX';
+    return '<div class="tm-performance-collection-run-row">'
+      + '<span class="tm-performance-collection-run-state is-' + esc(item.status || 'unknown') + '">'
+      + esc(performanceCollectionStatusLabel(item.status)) + '</span>'
+      + '<div class="tm-performance-collection-run-content"><strong>'
+      + esc(performanceCollectionOperationLabel(item.operation)) + '</strong><span>'
+      + esc(source + ' · ' + countText) + '</span></div>'
+      + '<time datetime="' + esc(item.completed_at || '') + '">' + esc(performanceDate(item.completed_at)) + '</time>'
+      + '</div>';
+  }).join('');
+  if (window.TMAccessibility) window.TMAccessibility.refresh();
+}
+
+async function loadPerformanceCollectionRuns() {
+  var campaignId = getPerformanceCampaignId();
+  var container = document.getElementById('performanceCollectionRuns');
+  var status = document.getElementById('performanceCollectionRunStatus');
+  var requestSequence = ++performanceCollectionRunRequestSequence;
+  if (campaignId === null) {
+    renderPerformanceCollectionRuns(null);
+    return null;
+  }
+  if (status) status.textContent = '正在加载更新记录...';
+  if (container) container.innerHTML = '<div class="tm-state-loading">正在加载更新记录...</div>';
+  try {
+    var response = await apiFetch('/campaigns/' + encodeURIComponent(campaignId) + '/performance/collection-runs?limit=12');
+    var data = await response.json();
+    if (requestSequence !== performanceCollectionRunRequestSequence || campaignId !== getPerformanceCampaignId()) return null;
+    if (!response.ok) throw new Error(data.error || '更新记录加载失败');
+    renderPerformanceCollectionRuns(data);
+    return data;
+  } catch (error) {
+    if (requestSequence !== performanceCollectionRunRequestSequence || campaignId !== getPerformanceCampaignId()) return null;
+    if (status) status.textContent = error.message || '更新记录加载失败';
+    if (container) container.innerHTML = '<div class="tm-state-error">' + esc(error.message || '更新记录加载失败') + '</div>';
+    return null;
+  }
+}
+
+function refreshPerformanceUpdateStatus() {
+  return Promise.all([loadPerformanceFreshnessQueue(), loadPerformanceCollectionRuns()]);
 }
 
 function performanceTextValue(id) {

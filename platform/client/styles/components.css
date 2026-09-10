@@ -1399,6 +1399,88 @@ thead th {
   margin: var(--tm-space-2) 0 0;
 }
 
+.tm-performance-collection-runs {
+  padding-top: var(--tm-space-2);
+  border-top: 1px solid var(--tm-color-border);
+}
+
+.tm-performance-collection-runs > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--tm-space-3);
+  min-height: 32px;
+  color: var(--tm-color-text);
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.tm-performance-collection-runs > summary .tm-metric-note {
+  margin: 0;
+  font-weight: 400;
+}
+
+.tm-performance-collection-run-list {
+  display: grid;
+  max-height: 280px;
+  overflow: auto;
+}
+
+.tm-performance-collection-run-row {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr) auto;
+  gap: var(--tm-space-3);
+  align-items: center;
+  min-width: 0;
+  padding: var(--tm-space-2) 0;
+  border-bottom: 1px solid var(--tm-color-border);
+}
+
+.tm-performance-collection-run-row:last-child {
+  border-bottom: 0;
+}
+
+.tm-performance-collection-run-state {
+  color: var(--tm-color-success, #176c43);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.tm-performance-collection-run-state.is-partial {
+  color: var(--tm-color-warning, #9a6700);
+}
+
+.tm-performance-collection-run-state.is-failed {
+  color: var(--tm-color-danger);
+}
+
+.tm-performance-collection-run-content {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.tm-performance-collection-run-content strong {
+  overflow: hidden;
+  color: var(--tm-color-text);
+  font-size: 12px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tm-performance-collection-run-content span,
+.tm-performance-collection-run-row time {
+  color: var(--tm-color-text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.tm-performance-collection-run-row time {
+  white-space: nowrap;
+}
+
 @media (max-width: 760px) {
   .tm-performance-freshness-summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1411,6 +1493,20 @@ thead th {
   .tm-performance-freshness-row .btn {
     grid-column: 2;
     justify-self: start;
+  }
+
+  .tm-performance-collection-runs > summary {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .tm-performance-collection-run-row {
+    grid-template-columns: 80px minmax(0, 1fr);
+  }
+
+  .tm-performance-collection-run-row time {
+    grid-column: 2;
   }
 }
 

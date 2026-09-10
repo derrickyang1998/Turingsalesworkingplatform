@@ -81,6 +81,7 @@ const {
 const { createCustomerReportSnapshotService } = require('./services/customer_report_snapshot_service');
 const { createPerformanceFeishuConnectionService } = require('./services/performance_feishu_connection_service');
 const { createPerformanceFeishuProjectionService } = require('./services/performance_feishu_projection_service');
+const { createPerformanceCollectionRunService } = require('./services/performance_collection_run_service');
 const registerCampaignRoutes = require('./routes_campaigns');
 const registerPerformanceRoutes = require('./routes_performance');
 const {
@@ -177,6 +178,7 @@ const campaignPptService = createCampaignPptService(db, {
   }
 });
 const performanceManualService = createPerformanceManualService(db);
+const performanceCollectionRunService = createPerformanceCollectionRunService(db);
 const collaborationPublicationHandoffService = createCollaborationPublicationHandoffService(db);
 const campaignCollaborationService = createCampaignCollaborationService(db, {
   publicationHandoffService: collaborationPublicationHandoffService
@@ -248,6 +250,7 @@ const phase4PolicyNames = [
   'CAMPAIGN_KNOWLEDGE_DETAIL',
   'CAMPAIGN_PERFORMANCE_CONTENT_LIST',
   'CAMPAIGN_PERFORMANCE_FRESHNESS_QUEUE',
+  'CAMPAIGN_PERFORMANCE_COLLECTION_RUNS',
   'CAMPAIGN_PERFORMANCE_OBSERVATION_HISTORY',
   'CAMPAIGN_PERFORMANCE_DASHBOARD',
   'CAMPAIGN_PERFORMANCE_REVIEW_EVIDENCE',
@@ -1610,6 +1613,7 @@ registerCampaignRoutes(app, db);
 registerPerformanceRoutes(app, {
   authMiddleware,
   service: performanceManualService,
+  collectionRunService: performanceCollectionRunService,
   feishuConnectionService: performanceFeishuConnectionService,
   feishuProjectionService: performanceFeishuProjectionService,
   aiReviewService: performanceAiReviewService,

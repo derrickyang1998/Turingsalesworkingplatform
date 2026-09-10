@@ -1325,12 +1325,22 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
             <h4 id="performanceFreshnessTitle">数据新鲜度与待更新清单</h4>
             <p id="performanceFreshnessStatus" class="tm-metric-note" role="status" aria-live="polite">选择推广活动后核对更新节奏。</p>
           </div>
-          <button class="btn btn-outline btn-sm" type="button" onclick="loadPerformanceFreshnessQueue()">更新状态</button>
+          <button class="btn btn-outline btn-sm" type="button" onclick="refreshPerformanceUpdateStatus()">更新状态</button>
         </div>
         <div id="performanceFreshnessSummary" class="tm-performance-freshness-summary"></div>
         <div id="performanceFreshnessQueue" class="tm-performance-freshness-queue">
           <div class="tm-state-empty">选择推广活动后显示待更新内容。</div>
         </div>
+        <details class="tm-performance-collection-runs" open>
+          <summary>
+            <span>最近更新记录</span>
+            <span id="performanceCollectionRunStatus" class="tm-metric-note" role="status" aria-live="polite">选择推广活动后加载记录。</span>
+          </summary>
+          <div id="performanceCollectionRunSummary" class="tm-performance-freshness-summary"></div>
+          <div id="performanceCollectionRuns" class="tm-performance-collection-run-list">
+            <div class="tm-state-empty">选择推广活动后加载记录。</div>
+          </div>
+        </details>
       </section>
       <div class="tm-performance-filters" aria-label="内容筛选">
         <input id="performanceContentSearch" type="search" aria-label="搜索视频链接、达人、产品或标签" placeholder="搜索链接、达人、产品或标签" oninput="debouncedPerformanceContentSearch()">
