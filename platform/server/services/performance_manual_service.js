@@ -2003,6 +2003,19 @@ function createPerformanceManualService(db, options = {}) {
     };
   }
 
+  function getProjectionSnapshot(input) {
+    const context = requireAccess(input && input.userId, input && input.campaignId, 'view');
+    return db.transaction(() => {
+      const current = currentRows(context, normalizeQuery({}), false);
+      return {
+        consistency: 'sqlite_read_transaction',
+        items: current.rows.map((row) => serializePublication(row, context.capabilities)),
+        total: current.total,
+        capabilities: context.capabilities
+      };
+    }).deferred();
+  }
+
   function getIntegrationPreview(input) {
     const context = requireAccess(input && input.userId, input && input.campaignId, 'view');
     const canViewCommercial = context.capabilities.can_view_commercial;
@@ -2285,6 +2298,7 @@ function createPerformanceManualService(db, options = {}) {
     approveManualInput,
     getObservationHistory,
     listContents,
+    getProjectionSnapshot,
     getIntegrationPreview,
     exportContents,
     getDashboard: dashboard,

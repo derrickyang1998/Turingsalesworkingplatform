@@ -154,6 +154,25 @@ test('performance monitor exposes a permission-aware Feishu connection configura
   assert.match(serverSource, /CAMPAIGN_PERFORMANCE_FEISHU_CONNECTION_APPROVE/);
 });
 
+test('an approved Feishu mapping can export the current observed snapshot from the existing connection panel', () => {
+  assert.match(appSource, /function downloadPerformanceFeishuSnapshot\(\)/);
+  assert.match(appSource, /function invalidatePerformanceFeishuSnapshotExport\(\)/);
+  assert.match(appSource, /function performanceFeishuSnapshotExportIsCurrent\(context\)/);
+  assert.match(appSource, /performance\/feishu-projection-preview\/export/);
+  assert.match(appSource, /data-performance-feishu-action="snapshot-export"/);
+  assert.match(appSource, /下载当前效果快照 CSV/);
+  assert.match(appSource, /未录入效果数据的视频不会被填为 0/);
+  assert.match(appSource, /下载始终使用已批准版本 v/);
+  assert.match(appSource, /if \(!performanceFeishuSnapshotExportIsCurrent\(context\)\) return null;/);
+  assert.match(appSource, /apiFetch\([^\n]+feishu-projection-preview\/export[^\n]+signal: context\.abortController\.signal/);
+  assert.match(
+    appSource,
+    /function changePerformanceCampaignContext\(value\) \{[\s\S]*?invalidatePerformanceFeishuSnapshotExport\(\);[\s\S]*?performanceCampaignContextId = performancePositiveId\(value\);/
+  );
+  assert.match(serverSource, /createPerformanceFeishuProjectionService/);
+  assert.match(serverSource, /feishuProjectionService/);
+});
+
 test('performance dashboard exposes metadata-only review evidence with a stale-response guard', () => {
   assert.match(indexHtml, /id="performanceReviewEvidence"/);
   assert.match(indexHtml, /id="performanceReviewStatus"/);

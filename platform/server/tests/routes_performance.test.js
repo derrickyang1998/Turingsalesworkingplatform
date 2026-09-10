@@ -106,6 +106,25 @@ function createFixture() {
       };
     }
   };
+  const feishuProjectionService = {
+    preview(input) {
+      calls.push(['feishu-projection-preview', input]);
+      return {
+        contract_version: 'performance-feishu-projection-preview-v1',
+        campaign_id: 7,
+        snapshot: { source_total: 2, record_count: 1, excluded_without_observation: 1 },
+        records: [{ fields: { '视频链接': 'https://example.test/video' } }]
+      };
+    },
+    exportCsv(input) {
+      calls.push(['feishu-projection-export', input]);
+      return {
+        filename: 'performance_campaign_7_feishu_snapshot_2026-09-10.csv',
+        csv: '\ufeff视频链接\r\nhttps://example.test/video\r\n',
+        record_count: 1
+      };
+    }
+  };
   const aiReviewService = {
     async createDraft(input) {
       calls.push(['ai-review-draft', input]);
@@ -196,6 +215,7 @@ function createFixture() {
     authMiddleware(_request, _response, next) { next(); },
     service,
     feishuConnectionService,
+    feishuProjectionService,
     aiReviewService,
     customerReportSnapshotService,
     customerReportDeliveryService
@@ -205,6 +225,7 @@ function createFixture() {
     calls,
     service,
     feishuConnectionService,
+    feishuProjectionService,
     aiReviewService,
     customerReportSnapshotService,
     customerReportDeliveryService
@@ -257,6 +278,8 @@ test('registers campaign-scoped performance endpoints and forwards authenticated
     'GET /api/campaigns/:id/performance/customer-report-snapshots/:snapshotId',
     'GET /api/campaigns/:id/performance/dashboard',
     'GET /api/campaigns/:id/performance/feishu-connection',
+    'GET /api/campaigns/:id/performance/feishu-projection-preview',
+    'GET /api/campaigns/:id/performance/feishu-projection-preview/export',
     'GET /api/campaigns/:id/performance/integration-preview',
     'GET /api/campaigns/:id/performance/review-evidence',
     'POST /api/campaigns/:id/performance/ai-review-draft',
@@ -288,6 +311,32 @@ test('registers campaign-scoped performance endpoints and forwards authenticated
     campaignId: '7',
     body: request.body
   }]);
+});
+
+test('previews and exports the approved Feishu performance projection', () => {
+  const { routes, calls } = createFixture();
+  const preview = invoke(routes.get('GET /api/campaigns/:id/performance/feishu-projection-preview'), {
+    user: { id: 9 },
+    params: { id: '7' },
+    requestId: 'projection-preview'
+  });
+  assert.equal(preview.statusCode, 200);
+  assert.equal(preview.body.snapshot.record_count, 1);
+  assert.equal(preview.body.request_id, 'projection-preview');
+
+  const exported = invoke(routes.get('GET /api/campaigns/:id/performance/feishu-projection-preview/export'), {
+    user: { id: 9 },
+    params: { id: '7' },
+    requestId: 'projection-export'
+  });
+  assert.equal(exported.statusCode, 200);
+  assert.equal(exported.headers['Content-Type'], 'text/csv;charset=utf-8');
+  assert.match(exported.headers['Content-Disposition'], /performance_campaign_7_feishu_snapshot_2026-09-10\.csv/);
+  assert.match(exported.body, /https:\/\/example\.test\/video/);
+  assert.deepEqual(calls, [
+    ['feishu-projection-preview', { userId: 9, campaignId: '7' }],
+    ['feishu-projection-export', { userId: 9, campaignId: '7' }]
+  ]);
 });
 
 test('routes commercial approval through a distinct protected campaign contract', () => {

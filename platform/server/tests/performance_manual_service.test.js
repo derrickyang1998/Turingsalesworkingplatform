@@ -99,6 +99,31 @@ function confirmedCommercialInput() {
   };
 }
 
+test('returns one atomic projection snapshot containing more than one list page', () => {
+  const { db, service } = createFixture();
+  try {
+    assert.equal(typeof service.getProjectionSnapshot, 'function');
+    for (let index = 1; index <= 101; index += 1) {
+      service.createContent({
+        userId: 1,
+        campaignId: 7,
+        body: { url: `https://www.youtube.com/watch?v=${String(index).padStart(11, '0')}` }
+      });
+    }
+
+    const snapshot = service.getProjectionSnapshot({ userId: 1, campaignId: 7 });
+
+    assert.equal(snapshot.total, 101);
+    assert.equal(snapshot.items.length, 101);
+    const ids = snapshot.items.map((item) => item.id);
+    assert.equal(new Set(ids).size, 101);
+    assert.deepEqual(ids.slice().sort((left, right) => left - right), Array.from({ length: 101 }, (_value, index) => index + 1));
+    assert.equal(snapshot.consistency, 'sqlite_read_transaction');
+  } finally {
+    db.close();
+  }
+});
+
 function addComparableReviewData(service, options = {}) {
   const strongest = addCanonicalVideo(service);
   const weakest = service.createContent({

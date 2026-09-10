@@ -163,6 +163,7 @@ async function doLogout() {
     });
   } catch (e) {}
   if (typeof invalidateAiChatRequests === 'function') invalidateAiChatRequests();
+  if (typeof invalidatePerformanceFeishuSnapshotExport === 'function') invalidatePerformanceFeishuSnapshotExport();
   if (typeof resetInfluencerImport === 'function') resetInfluencerImport();
   currentAIConversationId = null;
   if (typeof resetCampaignPptArtifactState === 'function') resetCampaignPptArtifactState();
@@ -177,6 +178,7 @@ function handleAuthExpired(message) {
   }
   closeCustomerDetail();
   if (typeof invalidateAiChatRequests === 'function') invalidateAiChatRequests();
+  if (typeof invalidatePerformanceFeishuSnapshotExport === 'function') invalidatePerformanceFeishuSnapshotExport();
   currentAIConversationId = null;
   if (typeof resetCampaignPptArtifactState === 'function') resetCampaignPptArtifactState();
   AUTH_TOKEN = '';
@@ -9099,6 +9101,8 @@ var performanceIntegrationRequestSequence = 0;
 var performanceFeishuConnection = null;
 var performanceFeishuConnectionRequestSequence = 0;
 var performanceFeishuConnectionSaveInFlight = false;
+var performanceFeishuSnapshotExportRequestSequence = 0;
+var activePerformanceFeishuSnapshotExport = null;
 var performanceSearchTimer = null;
 var performanceExportInFlight = null;
 var performanceObservationHistoryRequestSequence = 0;
@@ -9222,6 +9226,7 @@ async function loadPerformanceCampaigns() {
 
 function changePerformanceCampaignContext(value) {
   invalidatePerformanceAiReviewDraft('活动已切换，请基于当前数据重新生成草稿。');
+  invalidatePerformanceFeishuSnapshotExport();
   performanceCampaignContextId = performancePositiveId(value);
   preparePerformanceCustomerReportForm(true);
   syncPerformanceCampaignSelectors();
@@ -9465,6 +9470,9 @@ function renderPerformanceFeishuConnection(connection) {
       + '" value="' + esc(target) + '" maxlength="100"></label></div>';
   }).join('');
   var disabled = performanceFeishuConnectionSaveInFlight ? ' disabled' : '';
+  var snapshotAction = active && active.status === 'approved'
+    ? '<button class="btn btn-outline btn-sm" type="button" data-performance-feishu-action="snapshot-export" onclick="downloadPerformanceFeishuSnapshot()"' + disabled + '>下载当前效果快照 CSV · 已批准 v' + Number(active.version || 0) + '</button>'
+    : '';
   html += '<div class="tm-performance-feishu-connection-form">'
     + '<div class="tm-performance-feishu-connection-fields">'
     + '<label>飞书多维表格 App Token<input id="performanceFeishuConnectionAppToken" type="text" value="'
@@ -9476,11 +9484,13 @@ function renderPerformanceFeishuConnection(connection) {
     + '</div>'
     + '<div><h4 class="tm-performance-integration-heading">可配置的公开指标字段</h4>'
     + '<div class="tm-performance-feishu-connection-mapping">' + mappingHtml + '</div></div>'
+    + (snapshotAction ? '<p class="tm-performance-integration-note">下载始终使用已批准版本 v' + Number(active.version || 0) + '，待审草稿不会改变导出字段。快照仅包含已有最新观测值的视频；未录入效果数据的视频不会被填为 0。</p>' : '')
     + '<div class="tm-performance-feishu-connection-actions">'
     + '<button class="btn btn-primary btn-sm" type="button" data-performance-feishu-action="save" onclick="savePerformanceFeishuConnectionDraft()"' + disabled + '>保存草稿</button>'
     + (canApprove && draft && draft.id
       ? '<button class="btn btn-outline btn-sm" type="button" data-performance-feishu-action="approve" onclick="approvePerformanceFeishuConnectionDraft()"' + disabled + '>批准当前草稿</button>'
       : '')
+    + snapshotAction
     + '</div></div>';
   container.innerHTML = html + '</div>';
   if (window.TMAccessibility) window.TMAccessibility.refresh();
@@ -9599,6 +9609,76 @@ async function loadPerformanceFeishuConnection() {
     if (requestSequence !== performanceFeishuConnectionRequestSequence || campaignId !== getPerformanceCampaignId()) return null;
     if (container) container.innerHTML = '<div class="tm-state-error">' + esc(error.message || '连接配置加载失败') + '</div>';
     return null;
+  }
+}
+
+function performanceFeishuSnapshotExportIsCurrent(context) {
+  return Boolean(
+    context &&
+    activePerformanceFeishuSnapshotExport === context &&
+    context.invalidated !== true &&
+    context.campaignId === getPerformanceCampaignId()
+  );
+}
+
+function invalidatePerformanceFeishuSnapshotExport() {
+  var context = activePerformanceFeishuSnapshotExport;
+  if (!context) return;
+  context.invalidated = true;
+  if (context.abortController) context.abortController.abort();
+  if (activePerformanceFeishuSnapshotExport === context) activePerformanceFeishuSnapshotExport = null;
+  setPerformanceFeishuConnectionBusy(false);
+}
+
+async function downloadPerformanceFeishuSnapshot() {
+  var campaignId = getPerformanceCampaignId();
+  if (campaignId === null) {
+    toast('请先选择推广活动。', 'error');
+    return null;
+  }
+  if (activePerformanceFeishuSnapshotExport) {
+    if (activePerformanceFeishuSnapshotExport.campaignId === campaignId) {
+      return activePerformanceFeishuSnapshotExport.promise;
+    }
+    invalidatePerformanceFeishuSnapshotExport();
+  }
+  var context = {
+    sequence: ++performanceFeishuSnapshotExportRequestSequence,
+    campaignId: campaignId,
+    invalidated: false,
+    abortController: typeof AbortController === 'function' ? new AbortController() : null,
+    promise: null
+  };
+  setPerformanceFeishuConnectionBusy(true);
+  var request = (async function() {
+    try {
+      var response = await apiFetch('/campaigns/' + encodeURIComponent(campaignId) + '/performance/feishu-projection-preview/export', context.abortController ? { signal: context.abortController.signal } : {});
+      if (!performanceFeishuSnapshotExportIsCurrent(context)) return null;
+      if (!response.ok) {
+        var errorData = null;
+        try { errorData = await response.json(); } catch (error) {}
+        throw new Error(errorData && errorData.error || '飞书效果快照生成失败');
+      }
+      var blob = await response.blob();
+      if (!performanceFeishuSnapshotExportIsCurrent(context)) return null;
+      dlFile('performance_feishu_snapshot.csv', blob, 'text/csv;charset=utf-8');
+      toast('已按批准的飞书字段映射导出当前效果快照。');
+      return true;
+    } catch (error) {
+      if (!performanceFeishuSnapshotExportIsCurrent(context) || error && error.name === 'AbortError') return null;
+      toast(error.message || '飞书效果快照生成失败', 'error');
+      return null;
+    }
+  })();
+  context.promise = request;
+  activePerformanceFeishuSnapshotExport = context;
+  try {
+    return await request;
+  } finally {
+    if (activePerformanceFeishuSnapshotExport === context) {
+      activePerformanceFeishuSnapshotExport = null;
+      setPerformanceFeishuConnectionBusy(false);
+    }
   }
 }
 
@@ -11751,7 +11831,7 @@ function switchPage(id, options) {
     'switchTab', 'matchInfluencers', 'smartMatch', 'handleUpload', 'handleDrop', 'openInfUploadModal', 'closeInfUploadModal', 'handleUploadModal', 'handleInfluencerModalDrop', 'validateInfluencerImportMapping', 'confirmInfluencerImport', 'downloadInfluencerImportErrors', 'downloadInfTemplate', 'exportAll', 'exportFiltered', 'exportSelected',
     'saveM4SavedView', 'applyM4SavedView', 'deleteM4SavedView', 'clearM4Filters',
     'toggleAll', 'syncInfluencerSelectionState', 'loadM4Campaigns', 'changeM4CampaignContext', 'openM4CampaignCloseoutReview', 'closeM4CampaignCloseoutReview', 'submitM4CampaignCloseoutReview', 'startCollab', 'submitCollabOrder', 'closeCollabOrderModal', 'loadCollaborations', 'updateCollabStatus', 'runCampaignCollabAction', 'closeCampaignContractConfirmationModal', 'submitCampaignContractConfirmation', 'closeCampaignContentReviewModal', 'submitCampaignContentReview', 'closeCampaignContentReviewDecisionModal', 'submitCampaignContentReviewDecision', 'renderCampaignPublicationRows', 'syncCampaignPublicationDraftRows', 'addCampaignPublicationRow', 'removeCampaignPublicationRow', 'openCampaignPublicationModal', 'closeCampaignPublicationModal', 'submitCampaignPublicationConfirmation', 'openCollaborationPerformanceTracking', 'openCampaignPaymentModal', 'closeCampaignPaymentModal', 'submitCampaignPayment', 'voidCampaignPayment', 'closeCampaignSettlementModal', 'submitCampaignSettlement', 'openCampaignSettlementDecisionModal', 'closeCampaignSettlementDecisionModal', 'submitCampaignSettlementDecision',
-    'initPerformanceMonitor', 'initPerformanceDashboard', 'refreshPerformanceMonitor', 'refreshPerformanceDashboard', 'changePerformanceCampaignContext', 'handlePerformanceTopMetricChange', 'refreshPerformanceReviewEvidence', 'generatePerformanceAiReviewDraft', 'loadPerformanceContents', 'loadPerformanceIntegrationPreview', 'loadPerformanceFeishuConnection', 'savePerformanceFeishuConnectionDraft', 'approvePerformanceFeishuConnectionDraft', 'createPerformanceContent', 'downloadPerformanceTemplate', 'handlePerformanceImport', 'handlePerformanceDrop', 'downloadPerformanceMetricsTemplate', 'handlePerformanceMetricsImport', 'handlePerformanceMetricsDrop', 'openPerformanceInputModal', 'closePerformanceInputModal', 'savePerformanceInput', 'loadPerformanceDashboard', 'loadPerformanceReviewEvidence', 'debouncedPerformanceContentSearch', 'exportPerformanceContents',
+    'initPerformanceMonitor', 'initPerformanceDashboard', 'refreshPerformanceMonitor', 'refreshPerformanceDashboard', 'changePerformanceCampaignContext', 'handlePerformanceTopMetricChange', 'refreshPerformanceReviewEvidence', 'generatePerformanceAiReviewDraft', 'loadPerformanceContents', 'loadPerformanceIntegrationPreview', 'loadPerformanceFeishuConnection', 'savePerformanceFeishuConnectionDraft', 'approvePerformanceFeishuConnectionDraft', 'downloadPerformanceFeishuSnapshot', 'createPerformanceContent', 'downloadPerformanceTemplate', 'handlePerformanceImport', 'handlePerformanceDrop', 'downloadPerformanceMetricsTemplate', 'handlePerformanceMetricsImport', 'handlePerformanceMetricsDrop', 'openPerformanceInputModal', 'closePerformanceInputModal', 'savePerformanceInput', 'loadPerformanceDashboard', 'loadPerformanceReviewEvidence', 'debouncedPerformanceContentSearch', 'exportPerformanceContents',
     'sendChat', 'clearChat', 'clearAIMemory', 'pushToFeishu', 'loadFeishuStatus', 'loadFeishuOutbox', 'testFeishuConnection', 'selectFeishuReconciliationDelivery', 'reconcileFeishuDelivery', 'selectFeishuRetryDelivery', 'retryFeishuDelivery',
     'switchAdminTab', 'loadAdminDashboard', 'loadAdminUsers', 'adminAddUser', 'adminCreateInvite', 'adminResetPw',
     'wfUndo', 'wfRedo', 'wfClearCanvas', 'wfSaveTemplate', 'wfPublishTemplate', 'wfResetTaskFilters', 'wfLoadTasks', 'wfLoadInstances',

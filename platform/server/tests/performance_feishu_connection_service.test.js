@@ -226,7 +226,7 @@ test('database protects configured projection history from arbitrary mutation or
   }
 });
 
-test('checksum-bound migration replay reaches schema version 11 with the connection configuration table', (t) => {
+test('checksum-bound migration replay reaches the current schema with the connection configuration table', (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-performance-feishu-connection-migration-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const db = migrationService.openMigratedDatabase(path.join(root, 'connection.db'), {
@@ -234,7 +234,8 @@ test('checksum-bound migration replay reaches schema version 11 with the connect
     registeredMigrations: migrationGate.REGISTERED_MIGRATIONS
   });
   try {
-    assert.equal(db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version, 11);
+    const expectedVersion = migrationGate.REGISTERED_MIGRATIONS.at(-1).version;
+    assert.equal(db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version, expectedVersion);
     assert.ok(db.prepare("SELECT 1 AS present FROM sqlite_schema WHERE type='table' AND name='performance_feishu_projection_configs'").get());
   } finally {
     db.close();

@@ -248,6 +248,16 @@ const REQUEST_POLICIES = Object.freeze({
     'GET',
     '/api/campaigns/:id/performance/feishu-connection'
   ),
+  CAMPAIGN_PERFORMANCE_FEISHU_PROJECTION_PREVIEW: empty(
+    'campaign.performance.feishu-projection-preview',
+    'GET',
+    '/api/campaigns/:id/performance/feishu-projection-preview'
+  ),
+  CAMPAIGN_PERFORMANCE_FEISHU_PROJECTION_EXPORT: empty(
+    'campaign.performance.feishu-projection-export',
+    'GET',
+    '/api/campaigns/:id/performance/feishu-projection-preview/export'
+  ),
   CAMPAIGN_PERFORMANCE_CONTENT_CREATE: controlJson(
     'campaign.performance.content.create',
     'POST',

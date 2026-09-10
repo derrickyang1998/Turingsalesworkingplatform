@@ -17,6 +17,10 @@ const {
   PerformanceFeishuConnectionServiceError,
   createPerformanceFeishuConnectionService
 } = require('./services/performance_feishu_connection_service');
+const {
+  PerformanceFeishuProjectionServiceError,
+  createPerformanceFeishuProjectionService
+} = require('./services/performance_feishu_projection_service');
 
 function requestId(request) {
   return request.requestId ||
@@ -27,6 +31,7 @@ function requestId(request) {
 function sendError(request, response, error) {
   const known = error instanceof PerformanceManualServiceError ||
     error instanceof PerformanceFeishuConnectionServiceError ||
+    error instanceof PerformanceFeishuProjectionServiceError ||
     error instanceof PerformanceAiReviewServiceError ||
     error instanceof CustomerReportSnapshotServiceError ||
     error instanceof CustomerReportDeliveryServiceError;
@@ -114,6 +119,13 @@ function registerPerformanceRoutes(app, options = {}) {
     typeof feishuConnectionService.createDraft !== 'function' ||
     typeof feishuConnectionService.approveDraft !== 'function') {
     throw new TypeError('A performance Feishu connection service is required.');
+  }
+  const feishuProjectionService = options.feishuProjectionService ||
+    createPerformanceFeishuProjectionService({ performanceService: service, feishuConnectionService });
+  if (!feishuProjectionService ||
+    typeof feishuProjectionService.preview !== 'function' ||
+    typeof feishuProjectionService.exportCsv !== 'function') {
+    throw new TypeError('A performance Feishu projection service is required.');
   }
   const aiReviewService = options.aiReviewService || createPerformanceAiReviewService(options.db, {
     performanceService: service,
@@ -215,6 +227,31 @@ function registerPerformanceRoutes(app, options = {}) {
         userId: authenticatedUserId(request),
         campaignId: request.params.id
       }));
+    } catch (error) {
+      return sendError(request, response, error);
+    }
+  });
+
+  app.get('/api/campaigns/:id/performance/feishu-projection-preview', options.authMiddleware, (request, response) => {
+    try {
+      return sendResult(request, response, feishuProjectionService.preview({
+        userId: authenticatedUserId(request),
+        campaignId: request.params.id
+      }));
+    } catch (error) {
+      return sendError(request, response, error);
+    }
+  });
+
+  app.get('/api/campaigns/:id/performance/feishu-projection-preview/export', options.authMiddleware, (request, response) => {
+    try {
+      const exported = feishuProjectionService.exportCsv({
+        userId: authenticatedUserId(request),
+        campaignId: request.params.id
+      });
+      response.setHeader('Content-Type', 'text/csv;charset=utf-8');
+      response.setHeader('Content-Disposition', `attachment; filename="${exported.filename}"`);
+      return response.send(exported.csv);
     } catch (error) {
       return sendError(request, response, error);
     }
