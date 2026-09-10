@@ -4324,7 +4324,27 @@ function ensureM4TableStyles() {
   if (document.getElementById('m4TableStickyStyles')) return;
   var style = document.createElement('style');
   style.id = 'm4TableStickyStyles';
-  style.textContent = '.m4-table{border-collapse:separate;border-spacing:0;min-width:1320px}.m4-table thead th{position:sticky;top:0;z-index:3;background:var(--surface);box-shadow:0 1px 0 var(--border)}.m4-table th:first-child,.m4-table td:first-child{width:42px;text-align:center}.m4-table input[type="checkbox"]{width:16px!important;height:16px!important;min-width:16px;margin:0;vertical-align:middle;accent-color:var(--tm-color-accent,#1a1a1a)}.m4-table tbody tr:hover{background:#fafaf9}';
+  style.textContent = '.m4-table{border-collapse:separate;border-spacing:0;min-width:1480px}' +
+    '.m4-table thead th{position:sticky;top:0;z-index:3;background:var(--surface);box-shadow:0 1px 0 var(--border)}' +
+    '.m4-table th:first-child,.m4-table td:first-child{width:42px;text-align:center}' +
+    '.m4-table input[type="checkbox"]{width:16px!important;height:16px!important;min-width:16px;margin:0;vertical-align:middle;accent-color:var(--tm-color-accent,#1a1a1a)}' +
+    '.m4-table tbody tr:hover{background:#fafaf9}' +
+    '.m4-lifecycle{width:300px;min-width:300px}' +
+    '.m4-lifecycle-summary{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:10px;line-height:1.4}' +
+    '.m4-lifecycle-summary strong{font-size:11px}' +
+    '.m4-lifecycle-count{color:var(--text2,#64748b);white-space:nowrap}' +
+    '.m4-lifecycle-track{display:grid;grid-template-columns:repeat(7,minmax(34px,1fr));gap:2px;margin-top:9px}' +
+    '.m4-lifecycle-stage{position:relative;display:grid;grid-template-rows:10px auto;justify-items:center;gap:4px;min-width:0;color:var(--text2,#64748b);font-size:9px;line-height:1.2;text-align:center}' +
+    '.m4-lifecycle-stage:before{content:"";position:absolute;top:4px;left:-52%;width:104%;height:2px;background:var(--border);z-index:0}' +
+    '.m4-lifecycle-stage:first-child:before{display:none}' +
+    '.m4-lifecycle-dot{position:relative;z-index:1;width:9px;height:9px;border:2px solid var(--border);border-radius:50%;background:var(--surface)}' +
+    '.m4-lifecycle-stage.is-complete{color:var(--success,#0f7b3c)}' +
+    '.m4-lifecycle-stage.is-complete:before,.m4-lifecycle-stage.is-complete .m4-lifecycle-dot{background:var(--success,#0f7b3c);border-color:var(--success,#0f7b3c)}' +
+    '.m4-lifecycle-stage.is-active{color:var(--tm-color-accent,#2563eb);font-weight:700}' +
+    '.m4-lifecycle-stage.is-active .m4-lifecycle-dot{background:var(--tm-color-accent,#2563eb);border-color:var(--tm-color-accent,#2563eb);box-shadow:0 0 0 3px rgba(37,99,235,.14)}' +
+    '.m4-lifecycle-stage.is-attention{color:var(--danger,#b91c1c);font-weight:700}' +
+    '.m4-lifecycle-stage.is-attention .m4-lifecycle-dot,.m4-lifecycle-stage.is-stopped .m4-lifecycle-dot{background:var(--danger,#b91c1c);border-color:var(--danger,#b91c1c);box-shadow:0 0 0 3px rgba(185,28,28,.12)}' +
+    '.m4-lifecycle-stage.is-stopped{color:var(--danger,#b91c1c);font-weight:700}';
   document.head.appendChild(style);
 }
 var M4_INFLUENCER_COLUMNS = [
@@ -6895,6 +6915,87 @@ function collabRelations(collab) {
 function isCampaignCollaboration(collab) {
   return readPositiveInteger(collab && collab.campaign_id) !== null;
 }
+function m4CollabLifecycleStages(collab) {
+  var relations = collabRelations(collab);
+  var v2Order = collabResource(collab).schema === 'turingmarket.collaboration-order.v2';
+  var hasOrder = relations.includes('order') || isCampaignCollaboration(collab);
+  var hasExecution = relations.includes('execution');
+  var hasPublication = relations.includes('publication');
+  var hasSettlement = relations.includes('settlement');
+  var review = m4ContentReview(collab);
+  var tracking = m4PerformanceTracking(collab);
+  var settlement = m4PaymentSettlement(collab);
+  var status = String(collab && collab.status || '');
+  var reviewReached = !!review.current_submission || review.events.length > 0 || review.status !== 'not_submitted';
+  var publicationComplete = hasPublication || !!tracking;
+  var executionComplete = publicationComplete || reviewReached || status === 'content_review' || status === 'completed';
+  var contractComplete = !!(collab && collab.contract_confirmation) ||
+    (!v2Order && ['contracted', 'live', 'content_review', 'completed'].includes(status));
+  var reviewState = review.status === 'approved' || publicationComplete
+    ? 'complete'
+    : review.status === 'changes_requested'
+      ? 'attention'
+      : review.status === 'pending' || status === 'content_review'
+        ? 'active'
+        : 'pending';
+  var settlementState = hasSettlement || ['settled', 'legacy_settled'].includes(settlement.status)
+    ? 'complete'
+    : settlement.status === 'changes_requested'
+      ? 'attention'
+      : hasPublication && (settlement.can_record || settlement.can_submit || settlement.can_decide || ['recording', 'ready', 'pending_review'].includes(settlement.status))
+        ? 'active'
+        : 'pending';
+  var stages = [
+    { key: 'order', label: '下单', state: hasOrder ? 'complete' : 'pending' },
+    { key: 'contract', label: '签约', state: contractComplete ? 'complete' : hasOrder ? 'active' : 'pending' },
+    { key: 'execution', label: '执行', state: executionComplete ? 'complete' : status === 'live' && (hasExecution || !v2Order) && contractComplete ? 'active' : 'pending' },
+    { key: 'review', label: '审核', state: reviewState },
+    { key: 'publication', label: '发布', state: publicationComplete ? 'complete' : review.publication_ready ? 'active' : 'pending' },
+    { key: 'tracking', label: '追踪', state: tracking ? 'complete' : hasPublication ? 'active' : 'pending' },
+    { key: 'settlement', label: '结算', state: settlementState }
+  ];
+  if (status === 'cancelled') {
+    var stopped = false;
+    stages.forEach(function(stage) {
+      if (stage.state === 'complete') return;
+      stage.state = stopped ? 'pending' : 'stopped';
+      stopped = true;
+    });
+  }
+  return stages;
+}
+function renderCollabLifecycle(collab) {
+  var stages = m4CollabLifecycleStages(collab);
+  var completeCount = stages.filter(function(stage) { return stage.state === 'complete'; }).length;
+  var current = stages.find(function(stage) { return stage.state === 'attention'; }) ||
+    stages.find(function(stage) { return stage.state === 'stopped'; }) ||
+    stages.find(function(stage) { return stage.state === 'active'; }) ||
+    stages.find(function(stage) { return stage.state === 'pending'; });
+  var currentText = String(collab && collab.status || '') === 'cancelled'
+    ? '已取消'
+    : completeCount === stages.length
+    ? '全部完成'
+    : current.state === 'attention'
+      ? current.label + '需修改'
+      : '当前' + current.label;
+  var stageHtml = stages.map(function(stage) {
+    var stateLabel = stage.state === 'complete'
+      ? '已完成'
+      : stage.state === 'active'
+        ? '进行中'
+      : stage.state === 'attention'
+          ? '需处理'
+          : stage.state === 'stopped'
+            ? '已终止'
+          : '未开始';
+    return '<span class="m4-lifecycle-stage is-' + stage.state + '" title="' + esc(stage.label + '：' + stateLabel) + '">' +
+      '<span class="m4-lifecycle-dot" aria-hidden="true"></span><span>' + esc(stage.label) + '</span></span>';
+  }).join('');
+  return '<div class="m4-lifecycle" aria-label="履约进度：' + esc(currentText) + '">' +
+    '<div class="m4-lifecycle-summary"><strong>' + esc(STATUS_LABELS[collab.status] || collab.status || '-') +
+    '</strong><span class="m4-lifecycle-count">' + completeCount + '/' + stages.length + ' 已完成 · 版本 ' + esc(collab.row_version || '-') + '</span></div>' +
+    '<div class="m4-lifecycle-track">' + stageHtml + '</div></div>';
+}
 function renderCollabRelationTags(collab) {
   var relations = collabRelations(collab);
   if (!relations.length) return '<span style="font-size:10px;opacity:.55">未关联</span>';
@@ -7181,7 +7282,7 @@ function renderCollabTable(data) {
   var c = document.getElementById('execTableContainer');
   if (!c) return;
   if (!data || !data.length) { c.innerHTML = '<p style="text-align:center;padding:30px;opacity:.5">暂无合作记录</p>'; return; }
-  var h = '<table class="m4-table"><thead><tr><th>KOL</th><th>活动 / 项目</th><th>合作资源</th><th>执行状态</th><th>阶段证据</th><th>商业条款</th><th>排期</th><th>合同 / PO</th><th>备注</th><th>操作</th></tr></thead><tbody>';
+  var h = '<table class="m4-table"><thead><tr><th>KOL</th><th>活动 / 项目</th><th>合作资源</th><th>履约进度</th><th>阶段证据</th><th>商业条款</th><th>排期</th><th>合同 / PO</th><th>备注</th><th>操作</th></tr></thead><tbody>';
   data.forEach(function(collab) {
     var resource = collabResource(collab);
     var project = resource.project_name || collab.project_name || '-';
@@ -7194,7 +7295,7 @@ function renderCollabTable(data) {
     h += '<td><strong>' + esc(campaignText) + '</strong><br><span style="font-size:10px;opacity:.6">' + esc(project) + ' / ' + esc(product) + '</span></td>';
     h += '<td style="min-width:180px"><strong>' + esc(resourceType) + '</strong><br><span style="font-size:10px;opacity:.6">' + esc(deliverable) + '</span></td>';
     if (linked) {
-      h += '<td><strong>' + esc(STATUS_LABELS[collab.status] || collab.status || '-') + '</strong><br><span style="font-size:10px;opacity:.55">版本 ' + esc(collab.row_version || '-') + '</span></td>';
+      h += '<td>' + renderCollabLifecycle(collab) + '</td>';
     } else {
       h += '<td><select id="st_' + collab.id + '" onchange="updateCollabStatus(' + collab.id + ')" style="width:auto;font-size:11px">';
       Object.keys(STATUS_LABELS).forEach(function(key) { h += '<option value="' + key + '"' + (collab.status === key ? ' selected' : '') + '>' + STATUS_LABELS[key] + '</option>'; });

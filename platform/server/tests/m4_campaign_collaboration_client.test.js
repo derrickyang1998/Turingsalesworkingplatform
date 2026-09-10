@@ -644,6 +644,8 @@ const m4Functions = [
   'm4ContentReviewStatusLabel',
   'm4PaymentSettlement',
   'm4PaymentSettlementStatusLabel',
+  'm4CollabLifecycleStages',
+  'renderCollabLifecycle',
   'm4SafeContentReviewUrl',
   'm4ContractDocuments',
   'm4ContractDocumentFingerprint',
@@ -689,6 +691,11 @@ const m4Functions = [
   'closeCampaignSettlementDecisionModal',
   'submitCampaignSettlementDecision'
 ];
+
+test('M4 lifecycle rail uses an existing text token with a readable fallback', () => {
+  assert.doesNotMatch(appSource, /\.m4-lifecycle[^']*var\(--muted\)/);
+  assert.match(appSource, /\.m4-lifecycle-count\{color:var\(--text2,#[0-9a-f]{6}\)/i);
+});
 
 test('M4 renders compact financial evidence and only server-projected checkpoint actions', () => {
   const { context } = createClientContext();
@@ -749,6 +756,145 @@ test('M4 renders compact financial evidence and only server-projected checkpoint
   const reviewActions = context.renderCampaignCollabActions(collaboration);
   assert.match(reviewActions, /审核结算/);
   assert.doesNotMatch(reviewActions, /录入收付款|提交结算/);
+});
+
+test('M4 renders a truthful compact lifecycle rail from server-projected checkpoint evidence', () => {
+  const { context } = createClientContext();
+  context.STATUS_LABELS = {
+    live: '执行中',
+    content_review: '内容审核',
+    completed: '已完成'
+  };
+  loadFunctions(context, m4Functions);
+  const collaboration = {
+    id: 501,
+    campaign_id: 91,
+    status: 'live',
+    row_version: 6,
+    active_relations: ['order', 'execution'],
+    contract_confirmation: { id: 801 },
+    content_review: {
+      status: 'not_submitted',
+      publication_ready: false,
+      can_submit: true,
+      can_decide: false,
+      can_publish: false,
+      current_submission: null,
+      latest_decision: null,
+      events: []
+    },
+    performance_tracking: null,
+    payment_settlement: {
+      status: 'not_started',
+      can_record: false,
+      can_submit: false,
+      can_decide: false,
+      current_submission: null,
+      latest_decision: null,
+      entries: []
+    }
+  };
+
+  assert.equal(
+    JSON.stringify(context.m4CollabLifecycleStages(collaboration).map(function(stage) {
+      return [stage.key, stage.state];
+    })),
+    JSON.stringify([
+      ['order', 'complete'],
+      ['contract', 'complete'],
+      ['execution', 'active'],
+      ['review', 'pending'],
+      ['publication', 'pending'],
+      ['tracking', 'pending'],
+      ['settlement', 'pending']
+    ])
+  );
+  const liveRail = context.renderCollabLifecycle(collaboration);
+  assert.match(liveRail, /执行中/);
+  assert.match(liveRail, /2\/7 已完成/);
+  assert.match(liveRail, /履约进度：当前执行/);
+  assert.match(liveRail, /m4-lifecycle-stage is-active/);
+
+  collaboration.status = 'content_review';
+  collaboration.content_review = {
+    ...collaboration.content_review,
+    status: 'changes_requested',
+    current_submission: { id: 901 }
+  };
+  const revisionStages = context.m4CollabLifecycleStages(collaboration);
+  assert.equal(revisionStages.find(function(stage) { return stage.key === 'execution'; }).state, 'complete');
+  assert.equal(revisionStages.find(function(stage) { return stage.key === 'review'; }).state, 'attention');
+  assert.match(context.renderCollabLifecycle(collaboration), /履约进度：审核需修改/);
+  assert.match(context.renderCollabLifecycle(collaboration), /m4-lifecycle-stage is-attention/);
+
+  collaboration.status = 'cancelled';
+  collaboration.active_relations = [];
+  collaboration.content_review = {
+    ...collaboration.content_review,
+    status: 'not_submitted',
+    current_submission: null
+  };
+  assert.equal(
+    JSON.stringify(context.m4CollabLifecycleStages(collaboration).map(function(stage) {
+      return [stage.key, stage.state];
+    })),
+    JSON.stringify([
+      ['order', 'complete'],
+      ['contract', 'complete'],
+      ['execution', 'stopped'],
+      ['review', 'pending'],
+      ['publication', 'pending'],
+      ['tracking', 'pending'],
+      ['settlement', 'pending']
+    ])
+  );
+  const cancelledRail = context.renderCollabLifecycle(collaboration);
+  assert.match(cancelledRail, /履约进度：已取消/);
+  assert.match(cancelledRail, /m4-lifecycle-stage is-stopped/);
+  assert.doesNotMatch(cancelledRail, /m4-lifecycle-stage is-active/);
+
+  collaboration.status = 'completed';
+  collaboration.active_relations = ['order', 'execution', 'publication', 'settlement'];
+  collaboration.content_review = {
+    ...collaboration.content_review,
+    status: 'approved',
+    publication_ready: true
+  };
+  collaboration.performance_tracking = {
+    status: 'tracked',
+    campaign_id: 91,
+    publication_count: 1,
+    items: [{ publication_id: 9901 }]
+  };
+  collaboration.payment_settlement = {
+    ...collaboration.payment_settlement,
+    status: 'settled'
+  };
+  const completedRail = context.renderCollabLifecycle(collaboration);
+  assert.match(completedRail, /7\/7 已完成/);
+  assert.match(completedRail, /履约进度：全部完成/);
+  assert.equal((completedRail.match(/m4-lifecycle-stage is-complete/g) || []).length, 7);
+});
+
+test('M4 lifecycle rail keeps legacy live collaborations in execution without v2 contract evidence', () => {
+  const { context } = createClientContext();
+  context.STATUS_LABELS = { live: '执行中' };
+  loadFunctions(context, m4Functions);
+  const stages = context.m4CollabLifecycleStages({
+    id: 601,
+    campaign_id: 91,
+    status: 'live',
+    row_version: 3,
+    proposal_notes: JSON.stringify({ project_name: 'Historical order' }),
+    active_relations: ['order', 'execution'],
+    contract_confirmation: null,
+    content_review: null,
+    performance_tracking: null,
+    payment_settlement: null
+  });
+  assert.equal(stages.find(function(stage) { return stage.key === 'order'; }).state, 'complete');
+  assert.equal(stages.find(function(stage) { return stage.key === 'contract'; }).state, 'complete');
+  assert.equal(stages.find(function(stage) { return stage.key === 'execution'; }).state, 'active');
 });
 
 test('M4 renders multiple tracked deliverables safely and opens the campaign monitor without stale filters', () => {
