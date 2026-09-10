@@ -534,6 +534,29 @@ test('payment ledger and settlement mutations own bounded registered policies', 
   for (const name of policyNames) assert.match(serverSource, new RegExp(`'${name}'`));
 });
 
+test('campaign closeout snapshot owns a bodyless registered request policy', () => {
+  const { contract } = loadBoundary();
+  const policy = contract.REQUEST_POLICIES.CAMPAIGN_COLLABORATION_CLOSEOUT_SNAPSHOT;
+  assert.ok(policy);
+  assert.deepEqual(
+    [policy.id, policy.method, policy.pathTemplate, policy.mediaKind, policy.maxRawBytes],
+    [
+      'campaign.collaboration.closeout-snapshot',
+      'GET',
+      '/api/campaigns/:id/collaboration-closeout-snapshot',
+      contract.MEDIA_KINDS.EMPTY,
+      0
+    ]
+  );
+  const registry = contract.createRoutePolicyRegistry([policy]);
+  assert.equal(
+    registry.match('GET', '/api/campaigns/41/collaboration-closeout-snapshot').id,
+    'campaign.collaboration.closeout-snapshot'
+  );
+  const serverSource = fs.readFileSync(serverPath, 'utf8');
+  assert.match(serverSource, /'CAMPAIGN_COLLABORATION_CLOSEOUT_SNAPSHOT'/);
+});
+
 test('batch performance metrics upload is an admitted multipart route in the shared parser inventory', () => {
   const { contract } = loadBoundary();
   const policy = contract.REQUEST_POLICIES.SHARED_PERFORMANCE_METRICS_UPLOAD;

@@ -9,14 +9,14 @@
 - Only a selected, active, `settled` campaign exposes an enabled `结案复盘` command; `reviewed` campaigns show a completed state and earlier states explain that settlement is required first. / 仅已选择、启用且处于 `settled` 的活动可执行“结案复盘”；`reviewed` 显示完成状态，更早阶段提示需先完成结算。
 - The existing-style accessible dialog captures title, executive summary, outcomes, reusable methods, problems/root causes, next actions, optional client-report reference, and private/team visibility. / 沿用现有无障碍弹窗，采集标题、总结、成果、可复用方法、问题与根因、下一步行动、可选客户报告引用及个人/团队可见性。
 - Human confirmation first calls `POST /api/campaigns/:id/reviews`, then advances the returned campaign version through `POST /api/campaigns/:id/transitions` to `reviewed`. / 人工确认后先调用复盘归档接口，再以返回的活动版本调用状态推进接口进入 `reviewed`。
-- The knowledge content uses deterministic headings and includes a compact execution snapshot derived from the currently loaded campaign collaborations. Sensitive payment references are never copied. / 知识内容使用固定章节，并包含由当前合作记录派生的精简执行快照；不复制敏感收付款凭证号。
+- The knowledge content uses deterministic headings and a server-authoritative, permission-scoped snapshot of every active Campaign collaboration, independent of current UI filters or list pagination. The snapshot fails explicitly above 5,000 collaborations instead of silently truncating, and sensitive payment references are never copied. / 知识内容使用固定章节和服务端权威、受权限约束的全部有效活动合作快照，不受当前界面筛选或列表分页影响；超过 5,000 条合作时明确失败而不静默截断，且不复制敏感收付款凭证号。
 - Stable idempotency keys, duplicate-click locking, reload on stale state, and recovery from an already-created review keep interrupted two-step completion replayable. / 使用稳定幂等键、防重复点击、过期状态刷新，以及已归档复盘后的继续结案机制，确保两步流程可恢复。
 
 ## Delivery / 交付
 
 1. Add failing focused client tests for action state, payload composition, request order, version handoff, and recovery.
 2. Implement the smallest M4 UI/client change needed to pass those tests.
-3. Run only the affected M4 client, Campaign API, static security, and JavaScript syntax checks; widen only if a shared contract fails.
+3. Run only the affected M4 client, Campaign API/contract, permission, payment-summary, static security, and JavaScript syntax checks; widen only if a shared contract fails or the slice crosses a broad-risk boundary.
 4. Obtain one independent code review, resolve blockers, back up production, deploy immediately, and run authenticated production acceptance with transaction-safe cleanup.
 5. Update the roadmap, changelog, bilingual version records, Obsidian archive, GitHub, and the external progress dashboard.
 

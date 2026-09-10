@@ -3233,3 +3233,45 @@ test('payment and settlement routes forward the financial checkpoint contracts',
   });
   db.close();
 });
+
+test('campaign closeout snapshot route validates and forwards its permission-scoped contract', async () => {
+  const db = freshDb();
+  const baseService = createCampaignCollaborationService(db);
+  const captured = [];
+  const snapshot = {
+    campaign_id: 71,
+    verified: true,
+    source: 'campaign_collaboration_ledger',
+    collaboration_count: 1,
+    completed_count: 1,
+    settled_count: 1,
+    v2_settled_count: 1,
+    legacy_settled_count: 0,
+    currency: 'USD',
+    creator_payment_total: 100,
+    client_receipt_total: 150
+  };
+  const routes = mountRoutes(db, {
+    campaignCollaborationService: Object.assign({}, baseService, {
+      closeoutSnapshot(input) {
+        captured.push(input);
+        return snapshot;
+      }
+    })
+  });
+
+  const malformed = await invoke(routes, 'GET /api/campaigns/:id/collaboration-closeout-snapshot', {
+    params: { id: '071' }
+  });
+  assert.equal(malformed.statusCode, 400);
+  assert.equal(malformed.payload.code, 'INVALID_CAMPAIGN_ID');
+  assert.equal(captured.length, 0);
+
+  const result = await invoke(routes, 'GET /api/campaigns/:id/collaboration-closeout-snapshot', {
+    params: { id: '71' }
+  });
+  assert.equal(result.statusCode, 200);
+  assert.deepEqual(result.payload, snapshot);
+  assert.deepEqual(captured, [{ userId: 2, campaignId: 71 }]);
+  db.close();
+});

@@ -130,6 +130,55 @@ function seedFixture(db) {
   return { orgId, teamId, influencerId: Number(influencerId) };
 }
 
+test('campaign closeout snapshot is permission-scoped and counts every linked collaboration beyond the list cap', (t) => {
+  const db = openCampaignDatabase(t);
+  const fixture = seedFixture(db);
+  const insertCollaboration = db.prepare(`
+    INSERT INTO collaborations (
+      id,influencer_id,user_id,status,cost_quoted,cost_actual,row_version
+    ) VALUES (?,?,?,?,0,NULL,1)
+  `);
+  for (let index = 0; index < 205; index += 1) {
+    const collaborationId = 7200 + index;
+    insertCollaboration.run(
+      collaborationId,
+      fixture.influencerId,
+      2,
+      index % 2 === 0 ? 'completed' : 'confirmed'
+    );
+    insertCampaignLink(db, {
+      orgId: fixture.orgId,
+      collaborationId,
+      relationType: 'order',
+      bundleId: sha256(`closeout-snapshot-${collaborationId}`)
+    });
+  }
+  db.prepare(`
+    UPDATE campaigns
+    SET lifecycle_state='settled',currency='USD'
+    WHERE id=7001
+  `).run();
+  const service = createCampaignCollaborationService(db);
+
+  assert.deepEqual(service.closeoutSnapshot({ userId: 2, campaignId: 7001 }), {
+    campaign_id: 7001,
+    verified: true,
+    source: 'campaign_collaboration_ledger',
+    collaboration_count: 206,
+    completed_count: 103,
+    settled_count: 0,
+    v2_settled_count: 0,
+    legacy_settled_count: 0,
+    currency: 'USD',
+    creator_payment_total: 0,
+    client_receipt_total: 0
+  });
+  assert.throws(
+    () => service.closeoutSnapshot({ userId: 4, campaignId: 7001 }),
+    (error) => error.code === 'CAMPAIGN_NOT_FOUND' && error.statusCode === 404
+  );
+});
+
 function setV2CollaborationResource(db, collaborationId, overrides = {}) {
   const resource = Object.assign({
     schema: 'turingmarket.collaboration-order.v2',

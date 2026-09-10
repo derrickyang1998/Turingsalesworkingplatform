@@ -287,6 +287,11 @@ const REQUEST_POLICIES = Object.freeze({
     MEDIA_KINDS.JSON,
     BODY_LIMITS.CAMPAIGN_REVIEW_JSON
   ),
+  CAMPAIGN_COLLABORATION_CLOSEOUT_SNAPSHOT: empty(
+    'campaign.collaboration.closeout-snapshot',
+    'GET',
+    '/api/campaigns/:id/collaboration-closeout-snapshot'
+  ),
   // Compatibility export retained for server.js policy registration. The
   // approved bridge owns the existing frozen generator endpoint, not a new
   // campaign-scoped URL.

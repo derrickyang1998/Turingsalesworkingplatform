@@ -365,6 +365,25 @@ test('manual receipts and creator payments require independent approval and sett
     assert.equal(knowledgeService.isKnowledgeAiRetrievable(db, entry.id), false);
     assert.doesNotMatch(`${entry.title}\n${entry.summary}\n${entry.content}`, /CLIENT-RECEIPT|CREATOR-DEPOSIT|Creator Studio|Payment Brand/);
   });
+
+  db.prepare("UPDATE campaigns SET lifecycle_state='settled',currency='USD' WHERE id=?")
+    .run(fixture.campaignId);
+  assert.deepEqual(service.closeoutSnapshot({
+    userId: fixture.operatorId,
+    campaignId: fixture.campaignId
+  }), {
+    campaign_id: fixture.campaignId,
+    verified: true,
+    source: 'campaign_collaboration_ledger',
+    collaboration_count: 1,
+    completed_count: 1,
+    settled_count: 1,
+    v2_settled_count: 1,
+    legacy_settled_count: 0,
+    currency: 'USD',
+    creator_payment_total: 100,
+    client_receipt_total: 150
+  });
 });
 
 test('payment corrections append a void event and reject duplicate active references', (t) => {

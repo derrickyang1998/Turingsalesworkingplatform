@@ -161,6 +161,7 @@ const PAYMENT_METHODS = Object.freeze([
   'other_manual'
 ]);
 const PAYMENT_TRANCHES = Object.freeze(['deposit', 'balance', 'full', 'commission', 'other']);
+const CLOSEOUT_SNAPSHOT_MAX_COLLABORATIONS = 5000;
 const CONTRACT_FUTURE_TOLERANCE_MS = 5 * 60 * 1000;
 const CONTRACT_DOCUMENT_MIN_BYTES = 32;
 const CONTRACT_DOCUMENT_MAX_BYTES = 8 * 1024 * 1024;
@@ -2034,6 +2035,100 @@ function createCampaignCollaborationService(db) {
         })
       : rows;
     return { collaborations };
+  }
+
+  function closeoutSnapshot(input) {
+    const userId = requirePositiveSafeId(input && input.userId, 'userId');
+    const campaignId = requirePositiveSafeId(input && input.campaignId, 'campaignId');
+    if (!requireActiveActor(db, userId)) {
+      throw serviceError(404, 'CAMPAIGN_NOT_FOUND', 'Campaign access is unavailable.');
+    }
+    const access = requireCampaignWrite(db, userId, campaignId);
+    if (!['settled', 'reviewed'].includes(access.campaign.lifecycle_state)) {
+      throw serviceError(
+        409,
+        'CAMPAIGN_NOT_SETTLED',
+        'Campaign must be settled before closeout review.',
+        { lifecycle_state: access.campaign.lifecycle_state }
+      );
+    }
+    const rows = db.prepare(`
+      SELECT
+        collaboration.id,collaboration.status,collaboration.cost_actual_confirmed,
+        collaboration.proposal_notes
+      FROM collaborations collaboration
+      JOIN campaign_record_links link
+        ON link.record_type='collaboration'
+       AND link.record_id=CAST(collaboration.id AS TEXT)
+       AND link.campaign_id=?
+       AND link.relation_type IN ('order','execution','publication','settlement')
+       AND link.revoked_at IS NULL
+      WHERE collaboration.status<>'cancelled'
+      GROUP BY
+        collaboration.id,collaboration.status,collaboration.cost_actual_confirmed,
+        collaboration.proposal_notes
+      ORDER BY collaboration.id
+      LIMIT ?
+    `).all(campaignId, CLOSEOUT_SNAPSHOT_MAX_COLLABORATIONS + 1);
+    if (rows.length > CLOSEOUT_SNAPSHOT_MAX_COLLABORATIONS) {
+      throw serviceError(
+        413,
+        'CAMPAIGN_CLOSEOUT_SNAPSHOT_TOO_LARGE',
+        'Campaign has too many collaborations for one closeout snapshot.',
+        { maximum: CLOSEOUT_SNAPSHOT_MAX_COLLABORATIONS }
+      );
+    }
+    const campaignCurrency = /^[A-Z]{3}$/.test(String(access.campaign.currency || ''))
+      ? String(access.campaign.currency)
+      : null;
+    let currency = campaignCurrency;
+    let completedCount = 0;
+    let settledCount = 0;
+    let v2SettledCount = 0;
+    let legacySettledCount = 0;
+    let creatorPaymentTotal = 0;
+    let clientReceiptTotal = 0;
+    for (const row of rows) {
+      if (row.status === 'completed') completedCount += 1;
+      const relations = activeRelations(db, campaignId, row.id);
+      if (!relations.includes('settlement')) continue;
+      const resource = v2CollaborationResource(row.proposal_notes);
+      const history = paymentSettlementHistory(db, campaignId, row.id, resource, relations);
+      if (row.status !== 'completed' || row.cost_actual_confirmed !== 1) {
+        paymentEvidenceError();
+      }
+      if (resource) {
+        if (history.status !== 'settled') paymentEvidenceError();
+        if (currency !== null && resource.currency !== currency) {
+          throw serviceError(
+            409,
+            'CAMPAIGN_CLOSEOUT_CURRENCY_CONFLICT',
+            'Campaign closeout snapshot contains mixed currencies.'
+          );
+        }
+        currency = currency || resource.currency;
+        creatorPaymentTotal += history.creator_payment_total;
+        clientReceiptTotal += history.client_receipt_total;
+        v2SettledCount += 1;
+      } else {
+        if (history.status !== 'legacy_settled') paymentEvidenceError();
+        legacySettledCount += 1;
+      }
+      settledCount += 1;
+    }
+    return {
+      campaign_id: campaignId,
+      verified: true,
+      source: 'campaign_collaboration_ledger',
+      collaboration_count: rows.length,
+      completed_count: completedCount,
+      settled_count: settledCount,
+      v2_settled_count: v2SettledCount,
+      legacy_settled_count: legacySettledCount,
+      currency: currency || 'USD',
+      creator_payment_total: creatorPaymentTotal,
+      client_receipt_total: clientReceiptTotal
+    };
   }
 
   function get(input) {
@@ -4335,6 +4430,7 @@ function createCampaignCollaborationService(db) {
   }
 
   return Object.freeze({
+    closeoutSnapshot,
     confirmContract,
     createLinked,
     decideContentReview,

@@ -4445,36 +4445,45 @@ function renderM4CampaignContext() {
   parts.push('订单、执行、发布和结算将写入活动审计链路。');
   status.textContent = parts.join(' · ');
 }
-function m4CampaignCloseoutSnapshot(campaignId) {
-  var id = readPositiveInteger(campaignId);
-  var campaign = getM4CampaignById(id);
-  var rows = (lastCollabRows || []).filter(function(collaboration) {
-    return readPositiveInteger(collaboration && collaboration.campaign_id) === id;
-  });
-  var completed = rows.filter(function(collaboration) {
-    return collaboration && collaboration.status === 'completed';
-  }).length;
-  var approvedLedgers = rows.map(function(collaboration) {
-    return m4PaymentSettlement(collaboration);
-  }).filter(function(ledger) {
-    return ledger.status === 'approved' || ledger.status === 'legacy_settled';
-  });
+function m4CampaignCloseoutSnapshot(payload, campaignId) {
+  var expectedCampaignId = readPositiveInteger(campaignId);
+  var integerFields = [
+    'collaboration_count',
+    'completed_count',
+    'settled_count',
+    'v2_settled_count',
+    'legacy_settled_count',
+    'creator_payment_total',
+    'client_receipt_total'
+  ];
+  var valid = payload && typeof payload === 'object' &&
+    payload.verified === true &&
+    payload.source === 'campaign_collaboration_ledger' &&
+    readPositiveInteger(payload.campaign_id) === expectedCampaignId &&
+    /^[A-Z]{3}$/.test(String(payload.currency || '')) &&
+    integerFields.every(function(field) {
+      return Number.isSafeInteger(payload[field]) && payload[field] >= 0;
+    }) &&
+    payload.completed_count <= payload.collaboration_count &&
+    payload.settled_count <= payload.completed_count &&
+    payload.v2_settled_count + payload.legacy_settled_count === payload.settled_count;
+  if (!valid) throw new Error('项目执行快照校验失败，请刷新后重试');
   return {
-    collaboration_count: rows.length,
-    completed_count: completed,
-    settled_count: approvedLedgers.length,
-    currency: campaign && /^[A-Z]{3}$/.test(String(campaign.currency || ''))
-      ? String(campaign.currency)
-      : 'USD',
-    creator_payment_total: approvedLedgers.reduce(function(total, ledger) {
-      var amount = Number(ledger.creator_payment_total);
-      return total + (Number.isSafeInteger(amount) ? amount : 0);
-    }, 0),
-    client_receipt_total: approvedLedgers.reduce(function(total, ledger) {
-      var amount = Number(ledger.client_receipt_total);
-      return total + (Number.isSafeInteger(amount) ? amount : 0);
-    }, 0)
+    collaboration_count: payload.collaboration_count,
+    completed_count: payload.completed_count,
+    settled_count: payload.settled_count,
+    v2_settled_count: payload.v2_settled_count,
+    legacy_settled_count: payload.legacy_settled_count,
+    currency: payload.currency,
+    creator_payment_total: payload.creator_payment_total,
+    client_receipt_total: payload.client_receipt_total
   };
+}
+async function loadM4CampaignCloseoutSnapshot(campaignId) {
+  var response = await apiFetch('/campaigns/' + campaignId + '/collaboration-closeout-snapshot');
+  var data = await response.json();
+  if (!response.ok) throw new Error(data.error || '项目执行快照加载失败');
+  return m4CampaignCloseoutSnapshot(data, campaignId);
 }
 function m4CampaignCloseoutContent(fields, snapshot) {
   var lines = [
@@ -4499,6 +4508,9 @@ function m4CampaignCloseoutContent(fields, snapshot) {
   ];
   if (fields.report_reference) {
     lines.push('', '## 客户交付关联', fields.report_reference);
+  }
+  if (snapshot.legacy_settled_count > 0) {
+    lines.push('', '备注：' + snapshot.legacy_settled_count + ' 条历史结算记录不包含新版分笔收付款凭证。');
   }
   return lines.join('\n');
 }
@@ -4601,12 +4613,10 @@ async function submitM4CampaignCloseoutReview() {
     toast('知识可见性无效，请重新选择。', 'error');
     return;
   }
-  var snapshot = m4CampaignCloseoutSnapshot(campaignId);
   var signature = JSON.stringify({
     campaign_id: campaignId,
     expected_version: Number(campaign.row_version),
-    fields: fields,
-    snapshot: snapshot
+    fields: fields
   });
   if (!m4CampaignCloseoutOperation || m4CampaignCloseoutOperation.signature !== signature) {
     m4CampaignCloseoutOperation = {
@@ -4623,6 +4633,10 @@ async function submitM4CampaignCloseoutReview() {
   }
   m4CampaignCloseoutInFlight = (async function() {
     try {
+      if (!operation.snapshot) {
+        operation.snapshot = await loadM4CampaignCloseoutSnapshot(campaignId);
+      }
+      var snapshot = operation.snapshot;
       var reviewResponse = await apiFetch('/campaigns/' + campaignId + '/reviews', {
         method: 'POST',
         headers: {

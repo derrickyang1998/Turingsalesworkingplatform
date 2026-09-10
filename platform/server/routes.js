@@ -434,6 +434,30 @@ app.get('/api/collaborations', authMiddleware, (req, res) => {
   }));
 });
 
+app.get('/api/campaigns/:id/collaboration-closeout-snapshot', authMiddleware, (req, res) => {
+  try {
+    const campaignId = canonicalPositiveRouteId(req.params.id);
+    if (campaignId === null) {
+      return res.status(400).json({
+        error: 'Campaign id is invalid.',
+        code: 'INVALID_CAMPAIGN_ID'
+      });
+    }
+    return res.json(campaignCollaboration.closeoutSnapshot({
+      userId: req.user.id,
+      campaignId
+    }));
+  } catch (error) {
+    const status = error.statusCode || error.status || 500;
+    const body = {
+      error: error.message || 'Campaign closeout snapshot failed.',
+      code: error.code || 'INTERNAL_ERROR'
+    };
+    if (error.details !== undefined) body.details = error.details;
+    return res.status(status).json(body);
+  }
+});
+
 app.post('/api/collaborations/:id/contract-documents', authMiddleware, (req, res) => {
   try {
     const collaborationId = canonicalPositiveRouteId(req.params.id);

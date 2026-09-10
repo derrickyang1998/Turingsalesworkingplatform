@@ -64,6 +64,7 @@ function createContext(options) {
   let closed = 0;
   let loads = 0;
   let operation = 0;
+  let reviewAttempts = 0;
   const campaign = {
     id: 91,
     name: 'Autumn launch',
@@ -74,6 +75,19 @@ function createContext(options) {
     currency: 'USD',
     customer: { id: 31, label: 'Northstar Energy' },
     owner: { id: 9, label: 'Mina Chen' }
+  };
+  const closeoutSnapshot = {
+    campaign_id: 91,
+    verified: true,
+    source: 'campaign_collaboration_ledger',
+    collaboration_count: 2,
+    completed_count: 2,
+    settled_count: 1,
+    v2_settled_count: 1,
+    legacy_settled_count: 0,
+    currency: 'USD',
+    creator_payment_total: 800,
+    client_receipt_total: 1200
   };
   const elements = {
     m4CampaignContext: element({ value: '91' }),
@@ -123,7 +137,19 @@ function createContext(options) {
     renderM4CampaignContext() {},
     async apiFetch(url, requestOptions) {
       requests.push({ url, options: requestOptions || {} });
+      if (url === '/campaigns/91/collaboration-closeout-snapshot') {
+        if (options && options.pauseSnapshot) {
+          return new Promise(function(resolve) {
+            context.releaseSnapshot = function() { resolve(jsonResponse(200, closeoutSnapshot)); };
+          });
+        }
+        return jsonResponse(200, closeoutSnapshot);
+      }
       if (url === '/campaigns/91/reviews') {
+        reviewAttempts += 1;
+        if (options && options.loseReviewResponseOnce && reviewAttempts === 1) {
+          throw new Error('review response was lost');
+        }
         if (options && options.reviewAlreadyLinked) {
           return jsonResponse(409, {
             code: 'RECORD_ALREADY_LINKED',
@@ -192,35 +218,21 @@ test('human-confirmed closeout archives structured knowledge before advancing th
     'm4CampaignLabel',
     'm4CampaignCloseoutActionState',
     'm4OperationId',
-    'm4PaymentSettlement',
     'm4CampaignCloseoutSnapshot',
+    'loadM4CampaignCloseoutSnapshot',
     'm4CampaignCloseoutContent',
     'submitM4CampaignCloseoutReview'
   ]);
   context.m4Campaigns = [campaign];
-  context.lastCollabRows = [
-    {
-      id: 701,
-      campaign_id: 91,
-      status: 'completed',
-      payment_reference: 'MUST-NOT-ARCHIVE',
-      payment_settlement: {
-        status: 'approved',
-        currency: 'USD',
-        creator_payment_total: 800,
-        client_receipt_total: 1200
-      }
-    },
-    { id: 702, campaign_id: 91, status: 'completed', payment_settlement: { status: 'not_submitted' } }
-  ];
 
   await context.submitM4CampaignCloseoutReview();
 
-  assert.equal(requests.length, 2);
-  assert.equal(requests[0].url, '/campaigns/91/reviews');
-  assert.equal(requests[1].url, '/campaigns/91/transitions');
-  const reviewBody = JSON.parse(requests[0].options.body);
-  const transitionBody = JSON.parse(requests[1].options.body);
+  assert.equal(requests.length, 3);
+  assert.equal(requests[0].url, '/campaigns/91/collaboration-closeout-snapshot');
+  assert.equal(requests[1].url, '/campaigns/91/reviews');
+  assert.equal(requests[2].url, '/campaigns/91/transitions');
+  const reviewBody = JSON.parse(requests[1].options.body);
+  const transitionBody = JSON.parse(requests[2].options.body);
   assert.equal(reviewBody.expected_version, 7);
   assert.equal(reviewBody.visibility, 'team');
   assert.deepEqual(reviewBody.tags, []);
@@ -231,18 +243,17 @@ test('human-confirmed closeout archives structured knowledge before advancing th
   assert.match(reviewBody.content, /## 可复用方法/);
   assert.match(reviewBody.content, /## 问题与根因/);
   assert.match(reviewBody.content, /客户复盘报告 v3/);
-  assert.doesNotMatch(reviewBody.content, /MUST-NOT-ARCHIVE/);
   assert.deepEqual(transitionBody, {
     expected_state: 'settled',
     expected_version: 8,
     next_state: 'reviewed',
     reason: '项目结案复盘已人工确认并归档'
   });
-  assert.ok(requests[0].options.headers['Idempotency-Key']);
   assert.ok(requests[1].options.headers['Idempotency-Key']);
+  assert.ok(requests[2].options.headers['Idempotency-Key']);
   assert.notEqual(
-    requests[0].options.headers['Idempotency-Key'],
-    requests[1].options.headers['Idempotency-Key']
+    requests[1].options.headers['Idempotency-Key'],
+    requests[2].options.headers['Idempotency-Key']
   );
   assert.equal(elements.m4CampaignCloseoutSubmit.disabled, false);
   assert.equal(fixture.getClosed(), 1);
@@ -258,8 +269,8 @@ test('an already archived review resumes at the lifecycle transition without dup
     'm4CampaignLabel',
     'm4CampaignCloseoutActionState',
     'm4OperationId',
-    'm4PaymentSettlement',
     'm4CampaignCloseoutSnapshot',
+    'loadM4CampaignCloseoutSnapshot',
     'm4CampaignCloseoutContent',
     'submitM4CampaignCloseoutReview'
   ]);
@@ -268,10 +279,96 @@ test('an already archived review resumes at the lifecycle transition without dup
 
   await context.submitM4CampaignCloseoutReview();
 
-  assert.equal(requests.length, 2);
-  assert.equal(requests[0].url, '/campaigns/91/reviews');
-  assert.equal(requests[1].url, '/campaigns/91/transitions');
-  assert.equal(JSON.parse(requests[1].options.body).expected_version, 8);
+  assert.equal(requests.length, 3);
+  assert.equal(requests[0].url, '/campaigns/91/collaboration-closeout-snapshot');
+  assert.equal(requests[1].url, '/campaigns/91/reviews');
+  assert.equal(requests[2].url, '/campaigns/91/transitions');
+  assert.equal(JSON.parse(requests[2].options.body).expected_version, 8);
   assert.equal(fixture.getLoads(), 2);
+  assert.equal(fixture.getClosed(), 1);
+});
+
+test('duplicate closeout clicks share one pending authoritative snapshot request', async () => {
+  const fixture = createContext({ pauseSnapshot: true });
+  const { context, requests, campaign } = fixture;
+  loadFunctions(context, [
+    'getM4CampaignId',
+    'getM4CampaignById',
+    'm4CampaignLabel',
+    'm4CampaignCloseoutActionState',
+    'm4OperationId',
+    'm4CampaignCloseoutSnapshot',
+    'loadM4CampaignCloseoutSnapshot',
+    'm4CampaignCloseoutContent',
+    'submitM4CampaignCloseoutReview'
+  ]);
+  context.m4Campaigns = [campaign];
+
+  const first = context.submitM4CampaignCloseoutReview();
+  const second = context.submitM4CampaignCloseoutReview();
+  await Promise.resolve();
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].url, '/campaigns/91/collaboration-closeout-snapshot');
+  context.releaseSnapshot();
+  await Promise.all([first, second]);
+
+  assert.deepEqual(
+    requests.map((request) => request.url),
+    [
+      '/campaigns/91/collaboration-closeout-snapshot',
+      '/campaigns/91/reviews',
+      '/campaigns/91/transitions'
+    ]
+  );
+});
+
+test('incomplete closeout content is rejected before any request starts', async () => {
+  const fixture = createContext();
+  const { context, requests, elements, toasts, campaign } = fixture;
+  loadFunctions(context, [
+    'getM4CampaignId',
+    'getM4CampaignById',
+    'm4CampaignCloseoutActionState',
+    'submitM4CampaignCloseoutReview'
+  ]);
+  context.m4Campaigns = [campaign];
+  elements.m4CampaignCloseoutSummary.value = '   ';
+
+  await context.submitM4CampaignCloseoutReview();
+
+  assert.equal(requests.length, 0);
+  assert.deepEqual(toasts.at(-1), { message: '请填写管理摘要。', tone: 'error' });
+});
+
+test('a lost review response retries with the same evidence and idempotency key', async () => {
+  const fixture = createContext({ loseReviewResponseOnce: true });
+  const { context, requests, campaign } = fixture;
+  loadFunctions(context, [
+    'getM4CampaignId',
+    'getM4CampaignById',
+    'm4CampaignLabel',
+    'm4CampaignCloseoutActionState',
+    'm4OperationId',
+    'm4CampaignCloseoutSnapshot',
+    'loadM4CampaignCloseoutSnapshot',
+    'm4CampaignCloseoutContent',
+    'submitM4CampaignCloseoutReview'
+  ]);
+  context.m4Campaigns = [campaign];
+
+  assert.equal(await context.submitM4CampaignCloseoutReview(), null);
+  await context.submitM4CampaignCloseoutReview();
+
+  assert.deepEqual(
+    requests.map((request) => request.url),
+    [
+      '/campaigns/91/collaboration-closeout-snapshot',
+      '/campaigns/91/reviews',
+      '/campaigns/91/reviews',
+      '/campaigns/91/transitions'
+    ]
+  );
+  assert.equal(requests[1].options.headers['Idempotency-Key'], requests[2].options.headers['Idempotency-Key']);
+  assert.equal(requests.filter((request) => request.url.endsWith('collaboration-closeout-snapshot')).length, 1);
   assert.equal(fixture.getClosed(), 1);
 });
