@@ -105,7 +105,7 @@ test('deployment browser stays separate from the frozen Playwright baseline', ()
 test('deployment browser smoke keeps candidate code read-only and writes only Playwright artifacts', () => {
   const deploy = read('platform/deploy_v8.ps1');
   const config = read('platform/server/tests/deployment-browser-smoke.config.js');
-  const gateMatch = deploy.match(/<<'TM_UNPRIVILEGED_GATE'\r?\n([\s\S]*?)\r?\nTM_UNPRIVILEGED_GATE/);
+  const gateMatch = deploy.match(/<<'TM_UNPRIVILEGED_GATE'[^\r\n]*\r?\n([\s\S]*?)\r?\nTM_UNPRIVILEGED_GATE/);
   assert.ok(gateMatch, 'offline unprivileged gate must exist');
   const gate = gateMatch[1];
 
@@ -1301,7 +1301,7 @@ test('candidate verification cannot read production data and runs candidate code
   const deploy = read('platform/deploy_v8.ps1');
   const trustedGate = read('platform/server/scripts/trusted_production_source_gate.js');
   const trustedVerifier = read('platform/server/scripts/verify_campaign_migration_gate.js');
-  const gateMatch = deploy.match(/<<'TM_UNPRIVILEGED_GATE'\r?\n([\s\S]*?)\r?\nTM_UNPRIVILEGED_GATE/);
+  const gateMatch = deploy.match(/<<'TM_UNPRIVILEGED_GATE'[^\r\n]*\r?\n([\s\S]*?)\r?\nTM_UNPRIVILEGED_GATE/);
   const dependencyMatch = deploy.match(/<<'TM_DEPENDENCY_STAGE'\r?\n([\s\S]*?)\r?\nTM_DEPENDENCY_STAGE/);
   const dependencyBuildMatch = deploy.match(/<<'TM_DEPENDENCY_BUILD'\r?\n([\s\S]*?)\r?\nTM_DEPENDENCY_BUILD/);
   const candidateMatch = deploy.match(/\$candidateGate\s*=\s*@'\r?\n([\s\S]*?)\r?\n'@/);
@@ -1386,7 +1386,7 @@ test('networked npm dependency stages use the reachable integrity-locked registr
 
 test('unprivileged candidate validation runs bounded release proofs instead of developer regression suites', () => {
   const deploy = read('platform/deploy_v8.ps1');
-  const gateMatch = deploy.match(/<<'TM_UNPRIVILEGED_GATE'\r?\n([\s\S]*?)\r?\nTM_UNPRIVILEGED_GATE/);
+  const gateMatch = deploy.match(/<<'TM_UNPRIVILEGED_GATE'[^\r\n]*\r?\n([\s\S]*?)\r?\nTM_UNPRIVILEGED_GATE/);
   assert.ok(gateMatch, 'offline unprivileged gate must exist');
   const gate = gateMatch[1];
 
@@ -1472,13 +1472,13 @@ test('candidate dependency and offline gates are filesystem-confined transient s
   assert.doesNotMatch(offline, /runuser|unshare/);
   assert.match(deploy, /DependencyStatus=\$\?[\s\S]*?drain_gate_unit "\$DependencyUnit"[\s\S]*?kill_gate_processes "dependency staging"/);
   assert.match(deploy, /DependencyBuildStatus=\$\?[\s\S]*?drain_gate_unit "\$DependencyBuildUnit"[\s\S]*?kill_gate_processes "dependency build"/);
-  assert.match(deploy, /GateStatus=\$\?[\s\S]*?drain_gate_unit "\$OfflineGateUnit"[\s\S]*?kill_gate_processes "offline candidate validation"/);
+  assert.match(deploy, /GateStatus=\$\{PIPESTATUS\[0\]\}[\s\S]*?drain_gate_unit "\$OfflineGateUnit"[\s\S]*?kill_gate_processes "offline candidate validation"/);
   assert.match(deploy, /CANDIDATE_VALIDATION_SHA256_BEFORE[\s\S]*?CANDIDATE_VALIDATION_SHA256_AFTER[\s\S]*?CANDIDATE_READONLY_RECHECK_OK/);
 });
 
 test('unprivileged gate uses only variables explicitly passed through env -i', () => {
   const deploy = read('platform/deploy_v8.ps1');
-  const match = deploy.match(/<<'TM_UNPRIVILEGED_GATE'\r?\n([\s\S]*?)\r?\nTM_UNPRIVILEGED_GATE/);
+  const match = deploy.match(/<<'TM_UNPRIVILEGED_GATE'[^\r\n]*\r?\n([\s\S]*?)\r?\nTM_UNPRIVILEGED_GATE/);
   assert.ok(match, 'unprivileged gate heredoc must exist');
   const gate = match[1];
   const envBoundary = deploy.slice(deploy.lastIndexOf('timeout --signal=KILL', match.index), match.index);
@@ -1521,12 +1521,12 @@ test('candidate lifecycle rejects directory substitution and clears network-stag
   assert.match(candidateGate, /DependencyStatus=\$\?[\s\S]*?kill_gate_processes "dependency staging"[\s\S]*?\[ "\$DependencyStatus" != "0" \]/);
   assert.match(candidateGate, /DependencyBuildStatus=\$\?[\s\S]*?kill_gate_processes "dependency build"[\s\S]*?\[ "\$DependencyBuildStatus" != "0" \]/);
   assert.ok(candidateGate.indexOf('kill_gate_processes "dependency build"') < candidateGate.indexOf('systemd-run --quiet --wait --pipe --unit="$OfflineGateUnit"'));
-  assert.match(candidateGate, /GateStatus=\$\?[\s\S]*?kill_gate_processes "offline candidate validation"/);
+  assert.match(candidateGate, /GateStatus=\$\{PIPESTATUS\[0\]\}[\s\S]*?kill_gate_processes "offline candidate validation"/);
 });
 
 test('unprivileged nginx gate derives a socket listener while root validates the original config', () => {
   const deploy = read('platform/deploy_v8.ps1');
-  const match = deploy.match(/<<'TM_UNPRIVILEGED_GATE'\r?\n([\s\S]*?)\r?\nTM_UNPRIVILEGED_GATE/);
+  const match = deploy.match(/<<'TM_UNPRIVILEGED_GATE'[^\r\n]*\r?\n([\s\S]*?)\r?\nTM_UNPRIVILEGED_GATE/);
   assert.ok(match, 'unprivileged gate heredoc must exist');
   const gate = match[1];
   const gateSetup = deploy.slice(deploy.lastIndexOf('validate_gate_identity', match.index), match.index);

@@ -34,7 +34,7 @@ $TRUSTED_SOURCE_GATE_RELATIVE_PATH = "server\scripts\trusted_production_source_g
 $TRUSTED_SOURCE_MANIFEST_RELATIVE_PATH = "server\scripts\trusted_production_source_manifest.json"
 $TRUSTED_RUNTIME_CONFIG_RELATIVE_PATH = "server\config\runtime_config.js"
 $EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "a66f5e7240cfe390373f5621a92c925a364ad7b221dc93f691a4c2a5e5394f41"
-$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "2c08a3467e1aba89e7a1fba48d4fb8bf17178ac9bc856fb019b4128d12fd11d3"
+$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "9c695de85f572399e541872a0349e576613f7fda5d14940898a317d7d6eb9c4b"
 $EXPECTED_TRUSTED_RUNTIME_CONFIG_SHA256 = "76d43d3e811c6fa8daae987cc9eb2fff2dc8a8095f84b1cd309e4e214df94dcb"
 $EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256 = "f87df1f9c529bba2a0b9514efebf81771a7407815e2a2fbbed67314d6d141fc4"
 $EXPECTED_TRUSTED_PARSER_VERIFIER_SHA256 = "7f9efaac02675b21e025891a400474cc7481c1adaf58c88bd8b356d5276f2eaa"
@@ -53,7 +53,7 @@ $TRUSTED_SOURCE_MANIFEST_REMOTE_PATH = "$TRUSTED_SOURCE_INSTALL_ROOT/trusted_pro
 $TRUSTED_SOURCE_BUNDLE_REMOTE_PATH = "$TRUSTED_SOURCE_INSTALL_ROOT/bundles/$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256"
 $TRUSTED_SOURCE_RUNTIME_REMOTE_PATH = "$TRUSTED_SOURCE_INSTALL_ROOT/runtime/$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256"
 $CANDIDATE_GATE_TIMEOUT_SECONDS = 7200
-$PARSER_RUNTIME_BYTES = 640592293
+$PARSER_RUNTIME_BYTES = 640587874
 $PARSER_STARTUP_TIMEOUT_SECONDS = 180
 $PUBLIC_GUARD_TIMEOUT_SECONDS = 120
 $ACCEPTED_FINALIZE_PUBLIC_GUARD_TIMEOUT_SECONDS = 7200
@@ -3021,8 +3021,6 @@ ExpectedTrustedMigrationVerifierSha256="__TRUSTED_MIGRATION_VERIFIER_SHA256__"
 ExpectedTrustedParserVerifierSha256="__TRUSTED_PARSER_VERIFIER_SHA256__"
 ParserApplianceRoot="$LockDir/parser-appliance"
 ParserSourceRoot="$ParserApplianceRoot/source"
-ParserDependencyCache="$ParserApplianceRoot/dependency-cache"
-ParserDependencyCacheStage="$ParserApplianceRoot/dependency-cache.stage"
 ParserRuntimeStage="$ParserApplianceRoot/runtime.stage"
 ParserEvidence="$ParserApplianceRoot/runtime.evidence.json"
 ParserChecksums="$ParserApplianceRoot/runtime.sha256"
@@ -3031,8 +3029,27 @@ ParserBuild="$ParserApplianceRoot/build-runtime"
 ParserCapacityPlanner="$ParserApplianceRoot/check-cutover-capacity"
 ParserTrustedVerifier="$TrustedSourceBundle/server/scripts/trusted_parser_runtime_verifier.js"
 ParserTrustedManifest="$TrustedSourceBundle/server/systemd/turingmarket-parser.manifest.json"
+ParserCacheRoot=/var/lib/turingmarket-gate/parser-cache/v1
+ParserRuntimeCacheRoot="$ParserCacheRoot/runtime"
+ParserRuntimeCacheEntries="$ParserRuntimeCacheRoot/entries"
+ParserRuntimeCacheStaging="$ParserRuntimeCacheRoot/staging"
+ParserRuntimeCacheQuarantine="$ParserRuntimeCacheRoot/quarantine"
+ParserDependencyCacheRoot="$ParserCacheRoot/dependencies"
+ParserDependencyCacheEntries="$ParserDependencyCacheRoot/entries"
+ParserDependencyCacheStaging="$ParserDependencyCacheRoot/staging"
+ParserDependencyCacheQuarantine="$ParserDependencyCacheRoot/quarantine"
+ParserRuntimeCacheEntry=''
+ParserRuntimeCacheObject=''
+ParserRuntimeCacheEvidence=''
+ParserRuntimeCacheBinding=''
+ParserRuntimeCacheStage=''
+ParserDependencyCacheEntry=''
+ParserDependencyCache=''
+ParserDependencyCacheEvidence=''
+ParserDependencyCacheStage=''
 ParserRuntimeBytes=__PARSER_RUNTIME_BYTES__
 ParserRequiredBytes=$((ParserRuntimeBytes * 4 + 536870912))
+ParserCacheRequiredBytes=$((ParserRuntimeBytes * 2 + 536870912))
 
 case "$ReleaseRoot" in
   "$CandidateRoot"/v060-crm-sales-workspace-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]) ;;
@@ -3075,8 +3092,6 @@ test "$(sha256sum "$TrustedSourceManifest" | awk '{print $1}')" = "$ExpectedTrus
 
 test ! -e "$ParserApplianceRoot"
 install -d -o root -g root -m 0700 "$ParserApplianceRoot" "$ParserSourceRoot"
-test ! -e "$ParserDependencyCache"
-test ! -e "$ParserDependencyCacheStage"
 test ! -e "$ParserRuntimeStage"
 test ! -e "$ParserEvidence"
 test ! -e "$ParserChecksums"
@@ -3186,66 +3201,568 @@ BackupAvailableBytes="$(df --output=avail -B1 "$BackupParent" | awk 'NR == 2 { p
 test "$CandidateAvailableBytes" -ge "$ParserRequiredBytes"
 test "$BackupAvailableBytes" -ge "$ParserRequiredBytes"
 
-install -d -o "$GateUser" -g "$GateUser" -m 0700 \
-  "$ParserDependencyCacheStage" \
-  "$ParserDependencyCacheStage/npm" \
-  "$ParserDependencyCacheStage/python"
-ParserCacheUnit="turingmarket-parser-cache-$(basename "$ReleaseRoot").service"
-ParserCacheCompletionMarker="$ParserDependencyCacheStage/.fetch-complete"
-test ! -e "$ParserCacheCompletionMarker"
-cleanup_parser_cache_unit() {
-  systemctl kill --kill-who=all --signal=KILL "$ParserCacheUnit" >/dev/null 2>&1 || true
-  systemctl stop "$ParserCacheUnit" >/dev/null 2>&1 || true
-  systemctl reset-failed "$ParserCacheUnit" >/dev/null 2>&1 || true
+ExpectedRuntimeFacts="$(python3 - "$ParserSourceRoot/systemd/turingmarket-parser.manifest.json" "$ParserRuntimeBytes" <<'PY'
+import hashlib
+import json
+import re
+import sys
+with open(sys.argv[1], encoding='utf-8') as handle:
+    manifest = json.load(handle)
+runtime = manifest.get('runtime_tree', {})
+if (runtime.get('bytes') != int(sys.argv[2]) or runtime.get('files') != 3476 or
+        runtime.get('directories') != 435 or
+        runtime.get('format') != 'tm-parser-runtime-tree-v1' or
+        not re.fullmatch(r'[0-9a-f]{64}', runtime.get('sha256', ''))):
+    raise SystemExit('parser runtime manifest identity is invalid')
+projection = {key: runtime[key] for key in ('format', 'sha256', 'files', 'directories', 'bytes')}
+source = json.dumps(manifest.get('artifacts'), sort_keys=True, separators=(',', ':')).encode('ascii')
+print('\t'.join((
+    runtime['sha256'],
+    json.dumps(projection, sort_keys=True, separators=(',', ':')),
+    hashlib.sha256(source).hexdigest(),
+)))
+PY
+)"
+IFS=$'\t' read -r ExpectedRuntimeSha256 ExpectedRuntimeProjection ExpectedSourceArtifactsSha256 <<< "$ExpectedRuntimeFacts"
+[[ "$ExpectedRuntimeSha256" =~ ^[0-9a-f]{64}$ ]]
+[[ "$ExpectedSourceArtifactsSha256" =~ ^[0-9a-f]{64}$ ]]
+
+ensure_parser_cache_directory() {
+  local Directory="$1"
+  case "$Directory" in "$ParserCacheRoot"|"$ParserCacheRoot"/*) ;; *) return 1 ;; esac
+  if [ -e "$Directory" ] || [ -L "$Directory" ]; then
+    test -d "$Directory"
+    test ! -L "$Directory"
+    test "$(realpath -e "$Directory")" = "$Directory"
+    test "$(stat -c '%U:%G:%a' "$Directory")" = 'root:root:700'
+  else
+    install -d -o root -g root -m 0700 "$Directory"
+  fi
 }
-trap cleanup_parser_cache_unit EXIT
-set +e
-systemd-run --quiet --wait --collect \
-  --unit="$ParserCacheUnit" \
-  --service-type=exec \
-  --property="User=$GateUser" \
-  --property="Group=$GateUser" \
-  --property="SupplementaryGroups=" \
-  --property="PrivateNetwork=no" \
-  --property="PrivateMounts=yes" \
-  --property="PrivateDevices=yes" \
-  --property="PrivateTmp=yes" \
-  --property="ProtectSystem=strict" \
-  --property="ProtectHome=yes" \
-  --property="ProtectProc=invisible" \
-  --property="ProcSubset=pid" \
-  --property="NoNewPrivileges=yes" \
-  --property="CapabilityBoundingSet=" \
-  --property="AmbientCapabilities=" \
-  --property="RestrictNamespaces=yes" \
-  --property="RestrictSUIDSGID=yes" \
-  --property="LockPersonality=yes" \
-  --property="RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6" \
-  --property="IPAddressDeny=0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 127.0.0.0/8 169.254.0.0/16 172.16.0.0/12 192.0.0.0/24 192.0.2.0/24 192.88.99.0/24 192.168.0.0/16 198.18.0.0/15 198.51.100.0/24 203.0.113.0/24 224.0.0.0/4 240.0.0.0/4 ::/128 ::1/128 ::ffff:0:0/96 2001:db8::/32 fc00::/7 fe80::/10 ff00::/8" \
-  --property="IPAddressAllow=127.0.0.53/32 127.0.0.54/32" \
-  --property="UMask=0077" \
-  --property="KeyringMode=private" \
-  --property="InaccessiblePaths=-/root -/etc/turingmarket -/etc/credstore -/etc/credstore.encrypted -/run/credentials -/run/secrets -/var/lib/turingmarket" \
-  --property="BindReadOnlyPaths=$ParserSourceRoot:/parser-source" \
-  --property="BindPaths=$ParserDependencyCacheStage:/parser-cache" \
-  --property="ReadWritePaths=/parser-cache" \
-  --property="RuntimeMaxSec=60m" \
-  --property="TimeoutStopSec=5" \
-  -- /usr/bin/env -i \
-    HOME=/tmp \
-    PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-    PIP_CONFIG_FILE=/dev/null \
-    PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/ \
-    PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    PIP_NO_INPUT=1 \
-    npm_config_userconfig=/dev/null \
-    npm_config_globalconfig=/tmp/turingmarket-parser-global.npmrc \
-    npm_config_update_notifier=false \
-    npm_config_audit=false \
-    npm_config_fund=false \
-    npm_config_registry=https://registry.npmmirror.com \
-    npm_config_replace_registry_host=always \
-    bash --noprofile --norc -c '
+
+initialize_parser_cache_roots() {
+  python3 - <<'PY'
+import os
+import stat
+
+for path in ('/var', '/var/lib', '/var/lib/turingmarket-gate'):
+    value = os.lstat(path)
+    if (not stat.S_ISDIR(value.st_mode) or stat.S_ISLNK(value.st_mode) or
+            value.st_uid != 0 or value.st_gid != 0 or stat.S_IMODE(value.st_mode) & 0o022):
+        raise SystemExit('unsafe parser cache ancestor')
+PY
+  ensure_parser_cache_directory "$ParserCacheRoot"
+  ensure_parser_cache_directory "$ParserRuntimeCacheRoot"
+  ensure_parser_cache_directory "$ParserRuntimeCacheEntries"
+  ensure_parser_cache_directory "$ParserRuntimeCacheStaging"
+  ensure_parser_cache_directory "$ParserRuntimeCacheQuarantine"
+  ensure_parser_cache_directory "$ParserDependencyCacheRoot"
+  ensure_parser_cache_directory "$ParserDependencyCacheEntries"
+  ensure_parser_cache_directory "$ParserDependencyCacheStaging"
+  ensure_parser_cache_directory "$ParserDependencyCacheQuarantine"
+  python3 - "$ParserCacheRoot" <<'PY'
+import os
+import stat
+import sys
+
+root = sys.argv[1]
+expected = {
+    root: {'runtime', 'dependencies'},
+    os.path.join(root, 'runtime'): {'entries', 'staging', 'quarantine'},
+    os.path.join(root, 'dependencies'): {'entries', 'staging', 'quarantine'},
+}
+device = os.lstat(root).st_dev
+for path, children in expected.items():
+    value = os.lstat(path)
+    if (not stat.S_ISDIR(value.st_mode) or stat.S_ISLNK(value.st_mode) or
+            value.st_uid != 0 or value.st_gid != 0 or stat.S_IMODE(value.st_mode) != 0o700 or
+            value.st_dev != device or set(os.listdir(path)) != children):
+        raise SystemExit('parser cache control tree is unsafe')
+for layer in ('runtime', 'dependencies'):
+    for child in ('entries', 'staging', 'quarantine'):
+        path = os.path.join(root, layer, child)
+        value = os.lstat(path)
+        if (not stat.S_ISDIR(value.st_mode) or stat.S_ISLNK(value.st_mode) or
+                value.st_uid != 0 or value.st_gid != 0 or stat.S_IMODE(value.st_mode) != 0o700 or
+                value.st_dev != device):
+            raise SystemExit('parser cache lifecycle directory is unsafe')
+PY
+}
+initialize_parser_cache_roots
+
+quarantine_stale_parser_cache_stages() {
+  local Layer StagingRoot QuarantineRoot Stage Name Target UnitState
+  for Layer in runtime dependencies; do
+    if [ "$Layer" = runtime ]; then
+      StagingRoot="$ParserRuntimeCacheStaging"
+      QuarantineRoot="$ParserRuntimeCacheQuarantine"
+    else
+      StagingRoot="$ParserDependencyCacheStaging"
+      QuarantineRoot="$ParserDependencyCacheQuarantine"
+    fi
+    while IFS= read -r -d '' Stage; do
+      Name="$(basename "$Stage")"
+      case "$Name" in
+        v060-crm-sales-workspace-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]) ;;
+        *) echo "Parser cache staging entry is ambiguous" >&2; return 1 ;;
+      esac
+      if [ "$Layer" = dependencies ]; then
+        UnitState="$(systemctl show --property=ActiveState --value "turingmarket-parser-cache-$Name.service" 2>/dev/null || true)"
+        case "$UnitState" in ''|inactive|failed) ;; *) echo "Parser cache staging unit is still active" >&2; return 1 ;; esac
+      fi
+      Target="$QuarantineRoot/interrupted-$Name-before-$(basename "$ReleaseRoot")"
+      test ! -e "$Target"
+      test ! -L "$Target"
+      mv -T -- "$Stage" "$Target"
+      sync -f "$StagingRoot"
+      sync -f "$QuarantineRoot"
+      if [ "$Layer" = dependencies ]; then
+        systemctl reset-failed "turingmarket-parser-cache-$Name.service" >/dev/null 2>&1 || true
+      fi
+      printf '%s\n' "PARSER_CACHE_STALE_STAGE_QUARANTINED $Layer $Name"
+    done < <(find "$StagingRoot" -mindepth 1 -maxdepth 1 -print0)
+    test -z "$(find "$StagingRoot" -mindepth 1 -maxdepth 1 -print -quit)"
+  done
+}
+quarantine_stale_parser_cache_stages
+
+assert_parser_cache_entry() {
+  local Entry="$1" ObjectName="$2" StrictContentModes="$3"
+  shift 3
+  python3 - "$Entry" "$ObjectName" "$StrictContentModes" "$@" <<'PY'
+import os
+import stat
+import sys
+
+entry, object_name, strict_modes, *evidence_names = sys.argv[1:]
+if os.path.realpath(entry) != entry:
+    raise SystemExit('parser cache entry path is not canonical')
+entry_value = os.lstat(entry)
+if (not stat.S_ISDIR(entry_value.st_mode) or stat.S_ISLNK(entry_value.st_mode) or
+        entry_value.st_uid != 0 or entry_value.st_gid != 0 or
+        stat.S_IMODE(entry_value.st_mode) != 0o555):
+    raise SystemExit('parser cache entry root is unsafe')
+if set(os.listdir(entry)) != {object_name, *evidence_names}:
+    raise SystemExit('parser cache entry inventory mismatch')
+device = entry_value.st_dev
+for name in evidence_names:
+    path = os.path.join(entry, name)
+    value = os.lstat(path)
+    if (not stat.S_ISREG(value.st_mode) or stat.S_ISLNK(value.st_mode) or
+            value.st_uid != 0 or value.st_gid != 0 or value.st_nlink != 1 or
+            stat.S_IMODE(value.st_mode) != 0o444 or value.st_dev != device or
+            os.listxattr(path, follow_symlinks=False)):
+        raise SystemExit('parser cache evidence is unsafe')
+object_root = os.path.join(entry, object_name)
+root_value = os.lstat(object_root)
+expected_root_mode = 0o555 if strict_modes == 'true' else stat.S_IMODE(root_value.st_mode)
+if (not stat.S_ISDIR(root_value.st_mode) or stat.S_ISLNK(root_value.st_mode) or
+        root_value.st_uid != 0 or root_value.st_gid != 0 or root_value.st_dev != device or
+        stat.S_IMODE(root_value.st_mode) != expected_root_mode or
+        stat.S_IMODE(root_value.st_mode) & 0o022 or
+        os.listxattr(object_root, follow_symlinks=False)):
+    raise SystemExit('parser cache object root is unsafe')
+for current, directories, files in os.walk(object_root, topdown=True, followlinks=False):
+    for name in directories:
+        path = os.path.join(current, name)
+        value = os.lstat(path)
+        expected_mode = 0o555 if strict_modes == 'true' else stat.S_IMODE(value.st_mode)
+        if (not stat.S_ISDIR(value.st_mode) or stat.S_ISLNK(value.st_mode) or
+                value.st_uid != 0 or value.st_gid != 0 or value.st_dev != device or
+                stat.S_IMODE(value.st_mode) != expected_mode or
+                stat.S_IMODE(value.st_mode) & 0o022 or os.listxattr(path, follow_symlinks=False)):
+            raise SystemExit('parser cache object directory is unsafe')
+    for name in files:
+        path = os.path.join(current, name)
+        value = os.lstat(path)
+        expected_mode = 0o444 if strict_modes == 'true' else stat.S_IMODE(value.st_mode)
+        if (not stat.S_ISREG(value.st_mode) or stat.S_ISLNK(value.st_mode) or
+                value.st_uid != 0 or value.st_gid != 0 or value.st_nlink != 1 or
+                value.st_dev != device or stat.S_IMODE(value.st_mode) != expected_mode or
+                stat.S_IMODE(value.st_mode) & 0o022 or os.listxattr(path, follow_symlinks=False)):
+            raise SystemExit('parser cache object file is unsafe')
+PY
+}
+
+read_parser_evidence_file() {
+  python3 - "$1" <<'PY'
+import json
+import os
+import stat
+import sys
+
+path = sys.argv[1]
+descriptor = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+try:
+    value = os.fstat(descriptor)
+    if (not stat.S_ISREG(value.st_mode) or value.st_uid != 0 or value.st_gid != 0 or
+            stat.S_IMODE(value.st_mode) != 0o444 or value.st_nlink != 1 or
+            value.st_size < 2 or value.st_size > 1048576 or os.listxattr(descriptor)):
+        raise SystemExit('parser evidence metadata is unsafe')
+    chunks = []
+    while True:
+        chunk = os.read(descriptor, 65536)
+        if not chunk:
+            break
+        chunks.append(chunk)
+finally:
+    os.close(descriptor)
+raw = b''.join(chunks)
+try:
+    observed = json.loads(raw.decode('ascii'))
+except (UnicodeDecodeError, json.JSONDecodeError):
+    raise SystemExit('parser evidence JSON is invalid')
+canonical = (json.dumps(observed, sort_keys=True, separators=(',', ':')) + '\n').encode('ascii')
+if raw != canonical:
+    raise SystemExit('parser evidence JSON is not canonical')
+os.write(1, raw)
+PY
+}
+
+ParserRuntimeCacheInputs="$(
+  TM_EXPECTED_BUILDER_SHA256="$(sha256sum "$ParserBuild" | awk '{print $1}')" \
+  TM_EXPECTED_MANIFEST_SHA256="$ExpectedParserManifestSha256" \
+  TM_EXPECTED_VERIFIER_SHA256="$ExpectedTrustedParserVerifierSha256" \
+  TM_EXPECTED_RUNTIME="$ExpectedRuntimeProjection" \
+  TM_EXPECTED_SOURCE_ARTIFACTS_SHA256="$ExpectedSourceArtifactsSha256" \
+  python3 - <<'PY'
+import json
+import os
+
+value = {
+    'builder_sha256': os.environ['TM_EXPECTED_BUILDER_SHA256'],
+    'format': 'tm-parser-runtime-cache-input-v1',
+    'manifest_sha256': os.environ['TM_EXPECTED_MANIFEST_SHA256'],
+    'runtime_tree': json.loads(os.environ['TM_EXPECTED_RUNTIME']),
+    'source_artifacts_sha256': os.environ['TM_EXPECTED_SOURCE_ARTIFACTS_SHA256'],
+    'verifier_sha256': os.environ['TM_EXPECTED_VERIFIER_SHA256'],
+}
+print(json.dumps(value, sort_keys=True, separators=(',', ':')))
+PY
+)"
+ParserRuntimeCacheKey="$(printf '%s' "$ParserRuntimeCacheInputs" | sha256sum | awk '{print $1}')"
+[[ "$ParserRuntimeCacheKey" =~ ^[0-9a-f]{64}$ ]]
+ParserRuntimeCacheEntry="$ParserRuntimeCacheEntries/$ParserRuntimeCacheKey"
+ParserRuntimeCacheObject="$ParserRuntimeCacheEntry/runtime-root"
+ParserRuntimeCacheEvidence="$ParserRuntimeCacheEntry/runtime.evidence.json"
+ParserRuntimeCacheBinding="$ParserRuntimeCacheEntry/cache.evidence.json"
+
+NodeBinary="$(realpath -e /usr/bin/node)"
+PythonBinary="$(realpath -e /usr/bin/python3)"
+LibcBinary="$(ldd "$PythonBinary" | awk '$1 == "libc.so.6" && $3 ~ /^\// {print $3; exit}')"
+LibcBinary="$(realpath -e "$LibcBinary")"
+ParserDependencyCacheInputs="$(python3 - \
+  "$(sha256sum "$ParserSourceRoot/parser-runtime/package-lock.json" | awk '{print $1}')" \
+  "$(sha256sum "$ParserSourceRoot/parser-runtime/requirements.lock" | awk '{print $1}')" \
+  "$(sha256sum "$ParserSourceRoot/parser-runtime/pip-cacert.crt" | awk '{print $1}')" \
+  "$ExpectedTrustedParserVerifierSha256" \
+  "$(uname -s)" "$(uname -m)" "$(dpkg --print-architecture)" \
+  "$(/usr/bin/node --version)" "$(/usr/bin/node -p 'process.versions.modules')" \
+  "$(sha256sum "$NodeBinary" | awk '{print $1}')" "$(npm --version)" \
+  "$(/usr/bin/python3 -c 'import platform; print(platform.python_version())')" \
+  "$(/usr/bin/python3 -c 'import sys; print(sys.implementation.cache_tag)')" \
+  "$(/usr/bin/python3 -c 'import sysconfig; print(sysconfig.get_platform())')" \
+  "$(sha256sum "$PythonBinary" | awk '{print $1}')" "$(/usr/bin/python3 -m pip --version)" \
+  "$(sha256sum "$LibcBinary" | awk '{print $1}')" <<'PY'
+import json
+import re
+import sys
+
+(package_lock, requirements_lock, pip_cacert, verifier, os_name, architecture,
+ dpkg_architecture, node_version, node_abi, node_binary, npm_version,
+ python_version, python_cache_tag, python_platform, python_binary, pip_version,
+ libc_sha256) = sys.argv[1:]
+for name, value in {
+    'package_lock_sha256': package_lock,
+    'requirements_lock_sha256': requirements_lock,
+    'pip_cacert_sha256': pip_cacert,
+    'verifier_sha256': verifier,
+    'node_binary_sha256': node_binary,
+    'python_binary_sha256': python_binary,
+    'libc_sha256': libc_sha256,
+}.items():
+    if not re.fullmatch(r'[0-9a-f]{64}', value):
+        raise SystemExit(f'invalid parser dependency cache input: {name}')
+value = {
+    'format': 'tm-parser-dependency-cache-input-v1',
+    'package_lock_sha256': package_lock,
+    'pip_cacert_sha256': pip_cacert,
+    'platform': {
+        'architecture': architecture,
+        'dpkg_architecture': dpkg_architecture,
+        'libc_sha256': libc_sha256,
+        'node_abi': node_abi,
+        'node_binary_sha256': node_binary,
+        'node_version': node_version,
+        'npm_version': npm_version,
+        'os': os_name,
+        'pip_version': pip_version,
+        'python_binary_sha256': python_binary,
+        'python_cache_tag': python_cache_tag,
+        'python_platform': python_platform,
+        'python_version': python_version,
+    },
+    'requirements_lock_sha256': requirements_lock,
+    'verifier_sha256': verifier,
+}
+print(json.dumps(value, sort_keys=True, separators=(',', ':')))
+PY
+)"
+ParserDependencyCacheKey="$(printf '%s' "$ParserDependencyCacheInputs" | sha256sum | awk '{print $1}')"
+[[ "$ParserDependencyCacheKey" =~ ^[0-9a-f]{64}$ ]]
+ParserDependencyCacheEntry="$ParserDependencyCacheEntries/$ParserDependencyCacheKey"
+ParserDependencyCache="$ParserDependencyCacheEntry/object"
+ParserDependencyCacheEvidence="$ParserDependencyCacheEntry/evidence.json"
+
+validate_parser_build_evidence() {
+  local RuntimeRoot="$1" EvidencePath="$2" BuildEvidenceJson RootInspection
+  test -f "$EvidencePath"
+  test ! -L "$EvidencePath"
+  test "$(stat -c '%U:%G:%a:%h' "$EvidencePath")" = 'root:root:444:1'
+  BuildEvidenceJson="$(read_parser_evidence_file "$EvidencePath")"
+  RootInspection="$(/usr/bin/node "$ParserTrustedVerifier" measure-runtime --root "$RuntimeRoot" --require-root-ownership true)"
+  TM_PARSER_BUILD_EVIDENCE="$BuildEvidenceJson" \
+  TM_ROOT_INSPECTION="$RootInspection" \
+  TM_EXPECTED_MANIFEST_SHA256="$ExpectedParserManifestSha256" \
+  TM_EXPECTED_VERIFIER_SHA256="$ExpectedTrustedParserVerifierSha256" \
+  TM_EXPECTED_RUNTIME="$ExpectedRuntimeProjection" \
+  TM_EXPECTED_SOURCE_ARTIFACTS_SHA256="$ExpectedSourceArtifactsSha256" \
+  python3 - <<'PY'
+import hashlib
+import json
+import os
+
+observed = json.loads(os.environ['TM_PARSER_BUILD_EVIDENCE'])
+root = json.loads(os.environ['TM_ROOT_INSPECTION'])
+expected_runtime = json.loads(os.environ['TM_EXPECTED_RUNTIME'])
+required = {'format', 'manifest_sha256', 'verifier_sha256', 'runtime_tree', 'build_boundary'}
+boundary_required = {
+    'format', 'source_artifacts_sha256', 'build_unit', 'build_unit_properties',
+    'build_unit_properties_sha256', 'build_unit_stopped', 'build_unit_collected',
+    'network_isolation', 'mount_isolation', 'credential_isolation', 'build_parent_inaccessible'
+}
+boundary = observed.get('build_boundary', {})
+properties = boundary.get('build_unit_properties')
+properties_digest = hashlib.sha256(
+    json.dumps(properties, sort_keys=True, separators=(',', ':')).encode('ascii')
+).hexdigest() if isinstance(properties, dict) else ''
+if (set(observed) != required or observed.get('format') != 'tm-parser-runtime-build-evidence-v2' or
+        observed.get('manifest_sha256') != os.environ['TM_EXPECTED_MANIFEST_SHA256'] or
+        observed.get('verifier_sha256') != os.environ['TM_EXPECTED_VERIFIER_SHA256'] or
+        observed.get('runtime_tree') != expected_runtime or root != expected_runtime or
+        set(boundary) != boundary_required or
+        boundary.get('format') != 'tm-parser-build-boundary-v1' or
+        boundary.get('source_artifacts_sha256') != os.environ['TM_EXPECTED_SOURCE_ARTIFACTS_SHA256'] or
+        boundary.get('build_unit') != 'turingmarket-parser-build.service' or
+        properties_digest != boundary.get('build_unit_properties_sha256') or
+        any(boundary.get(name) is not True for name in (
+            'build_unit_stopped', 'build_unit_collected', 'network_isolation', 'mount_isolation',
+            'credential_isolation', 'build_parent_inaccessible'
+        ))):
+    raise SystemExit('parser build evidence does not match the release manifest: build unit properties SHA-256 mismatch')
+PY
+}
+
+validate_runtime_cache_binding() {
+  local Entry="$1" RuntimeRoot="$2" BuildEvidencePath="$3" BindingPath="$4"
+  local RuntimeTree BuildEvidenceSha256 RuntimeCacheBindingJson
+  RuntimeTree="$(/usr/bin/node "$ParserTrustedVerifier" measure-runtime --root "$RuntimeRoot" --require-root-ownership true)"
+  BuildEvidenceSha256="$(sha256sum "$BuildEvidencePath" | awk '{print $1}')"
+  RuntimeCacheBindingJson="$(read_parser_evidence_file "$BindingPath")"
+  TM_RUNTIME_CACHE_BINDING="$RuntimeCacheBindingJson" \
+  TM_RUNTIME_CACHE_INPUTS="$ParserRuntimeCacheInputs" \
+  TM_RUNTIME_CACHE_KEY="$ParserRuntimeCacheKey" \
+  TM_RUNTIME_CACHE_TREE="$RuntimeTree" \
+  TM_RUNTIME_BUILD_EVIDENCE_SHA256="$BuildEvidenceSha256" \
+  python3 - <<'PY'
+import hashlib
+import json
+import os
+
+observed = json.loads(os.environ['TM_RUNTIME_CACHE_BINDING'])
+expected = {
+    'build_evidence_sha256': os.environ['TM_RUNTIME_BUILD_EVIDENCE_SHA256'],
+    'cache_key': os.environ['TM_RUNTIME_CACHE_KEY'],
+    'format': 'tm-parser-runtime-cache-evidence-v1',
+    'inputs': json.loads(os.environ['TM_RUNTIME_CACHE_INPUTS']),
+    'tree': json.loads(os.environ['TM_RUNTIME_CACHE_TREE']),
+}
+if observed != expected:
+    raise SystemExit('runtime cache evidence mismatch')
+PY
+}
+
+quarantine_parser_runtime_cache() {
+  local Target="$ParserRuntimeCacheQuarantine/$ParserRuntimeCacheKey-$(basename "$ReleaseRoot")"
+  test ! -e "$Target"
+  test ! -L "$Target"
+  if [ -e "$ParserRuntimeCacheEntry" ] || [ -L "$ParserRuntimeCacheEntry" ]; then
+    mv -T -- "$ParserRuntimeCacheEntry" "$Target"
+    sync -f "$ParserRuntimeCacheEntries"
+    sync -f "$ParserRuntimeCacheQuarantine"
+  fi
+}
+
+reuse_parser_runtime_cache() {
+  test -d "$ParserRuntimeCacheEntry" || return 1
+  test ! -L "$ParserRuntimeCacheEntry" || return 1
+  assert_parser_cache_entry "$ParserRuntimeCacheEntry" runtime-root false \
+    runtime.evidence.json cache.evidence.json || return 1
+  ParserRuntimeCacheEvidenceJson="$(read_parser_evidence_file "$ParserRuntimeCacheEvidence")" || return 1
+  ParserRuntimeCacheObserved="$(/usr/bin/node "$ParserTrustedVerifier" measure-runtime --root "$ParserRuntimeCacheObject" --require-root-ownership true)" || return 1
+  TM_PARSER_RUNTIME_CACHE_EVIDENCE="$ParserRuntimeCacheEvidenceJson" \
+  TM_PARSER_RUNTIME_CACHE_OBSERVED="$ParserRuntimeCacheObserved" \
+  TM_EXPECTED_RUNTIME="$ExpectedRuntimeProjection" \
+  python3 - <<'PY' || return 1
+import json
+import os
+if (json.loads(os.environ['TM_PARSER_RUNTIME_CACHE_EVIDENCE']).get('runtime_tree') !=
+        json.loads(os.environ['TM_EXPECTED_RUNTIME']) or
+        json.loads(os.environ['TM_PARSER_RUNTIME_CACHE_OBSERVED']) !=
+        json.loads(os.environ['TM_EXPECTED_RUNTIME'])):
+    raise SystemExit('runtime cache identity mismatch')
+PY
+  validate_parser_build_evidence "$ParserRuntimeCacheObject" "$ParserRuntimeCacheEvidence" || return 1
+  validate_runtime_cache_binding "$ParserRuntimeCacheEntry" "$ParserRuntimeCacheObject" \
+    "$ParserRuntimeCacheEvidence" "$ParserRuntimeCacheBinding" || return 1
+}
+
+stage_parser_runtime_cache() {
+  test ! -e "$ParserRuntimeStage"
+  test ! -L "$ParserRuntimeStage"
+  cp -a --reflink=auto -- "$ParserRuntimeCacheObject" "$ParserRuntimeStage"
+  install -o root -g root -m 0444 -- "$ParserRuntimeCacheEvidence" "$ParserEvidence"
+  validate_parser_build_evidence "$ParserRuntimeStage" "$ParserEvidence"
+}
+
+quarantine_parser_dependency_cache() {
+  local Target="$ParserDependencyCacheQuarantine/$ParserDependencyCacheKey-$(basename "$ReleaseRoot")"
+  test ! -e "$Target"
+  test ! -L "$Target"
+  if [ -e "$ParserDependencyCacheEntry" ] || [ -L "$ParserDependencyCacheEntry" ]; then
+    mv -T -- "$ParserDependencyCacheEntry" "$Target"
+    sync -f "$ParserDependencyCacheEntries"
+    sync -f "$ParserDependencyCacheQuarantine"
+  fi
+}
+
+reuse_parser_dependency_cache() {
+  test -d "$ParserDependencyCacheEntry" || return 1
+  test ! -L "$ParserDependencyCacheEntry" || return 1
+  assert_parser_cache_entry "$ParserDependencyCacheEntry" object true evidence.json || return 1
+  test "$(stat -c '%U:%G:%a:%h' "$ParserDependencyCacheEvidence")" = 'root:root:444:1' || return 1
+  test -z "$(find "$ParserDependencyCache" -xdev \( ! -uid 0 -o ! -gid 0 -o -perm /022 \) -print -quit)" || return 1
+  ParserDependencyCacheEvidenceJson="$(read_parser_evidence_file "$ParserDependencyCacheEvidence")" || return 1
+  ParserDependencyCacheObserved="$(/usr/bin/node "$ParserTrustedVerifier" measure-runtime --root "$ParserDependencyCache" --require-root-ownership true)" || return 1
+  TM_PARSER_CACHE_EVIDENCE="$ParserDependencyCacheEvidenceJson" \
+  TM_PARSER_CACHE_INPUTS="$ParserDependencyCacheInputs" \
+  TM_PARSER_CACHE_KEY="$ParserDependencyCacheKey" \
+  TM_PARSER_CACHE_TREE="$ParserDependencyCacheObserved" \
+  python3 - <<'PY' || return 1
+import json
+import os
+
+observed = json.loads(os.environ['TM_PARSER_CACHE_EVIDENCE'])
+expected = {
+    'cache_key': os.environ['TM_PARSER_CACHE_KEY'],
+    'format': 'tm-parser-dependency-cache-evidence-v1',
+    'inputs': json.loads(os.environ['TM_PARSER_CACHE_INPUTS']),
+    'policy': {
+        'directory_mode': '0555', 'file_mode': '0444', 'file_nlink': 1,
+        'gid': 0, 'same_device': True, 'uid': 0,
+    },
+    'tree': json.loads(os.environ['TM_PARSER_CACHE_TREE']),
+}
+if observed != expected:
+    raise SystemExit('parser dependency cache evidence mismatch')
+PY
+}
+
+remove_parser_cache_stage() {
+  local Stage="$1" Parent="$2"
+  test -n "$Stage"
+  case "$Stage" in "$Parent"/v060-crm-sales-workspace-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]) ;; *) return 1 ;; esac
+  test "$(realpath -e "$Parent")" = "$Parent"
+  if [ -L "$Stage" ]; then
+    rm -f -- "$Stage"
+  elif [ -d "$Stage" ]; then
+    rm -rf --one-file-system -- "$Stage"
+  elif [ -e "$Stage" ]; then
+    rm -f -- "$Stage"
+  fi
+}
+
+prepare_parser_dependency_cache() {
+  if reuse_parser_dependency_cache; then
+    printf '%s\n' 'PARSER_DEPENDENCY_CACHE_REUSED'
+    return
+  fi
+  quarantine_parser_dependency_cache
+  ParserDependencyCacheStage="$ParserDependencyCacheStaging/$(basename "$ReleaseRoot")"
+  test ! -e "$ParserDependencyCacheStage"
+  test ! -L "$ParserDependencyCacheStage"
+  install -d -o "$GateUser" -g "$GateUser" -m 0700 \
+    "$ParserDependencyCacheStage" \
+    "$ParserDependencyCacheStage/object" \
+    "$ParserDependencyCacheStage/object/npm" \
+    "$ParserDependencyCacheStage/object/python"
+  ParserCacheUnit="turingmarket-parser-cache-$(basename "$ReleaseRoot").service"
+  ParserCacheCompletionMarker="$ParserDependencyCacheStage/object/.fetch-complete"
+  test ! -e "$ParserCacheCompletionMarker"
+  cleanup_parser_cache_unit() {
+    systemctl kill --kill-who=all --signal=KILL "$ParserCacheUnit" >/dev/null 2>&1 || true
+    systemctl stop "$ParserCacheUnit" >/dev/null 2>&1 || true
+    systemctl reset-failed "$ParserCacheUnit" >/dev/null 2>&1 || true
+    remove_parser_cache_stage "$ParserDependencyCacheStage" "$ParserDependencyCacheStaging" || true
+  }
+  trap cleanup_parser_cache_unit EXIT
+  set +e
+  systemd-run --quiet --wait --collect \
+    --unit="$ParserCacheUnit" \
+    --service-type=exec \
+    --property="User=$GateUser" \
+    --property="Group=$GateUser" \
+    --property="SupplementaryGroups=" \
+    --property="PrivateNetwork=no" \
+    --property="PrivateMounts=yes" \
+    --property="PrivateDevices=yes" \
+    --property="PrivateTmp=yes" \
+    --property="ProtectSystem=strict" \
+    --property="ProtectHome=yes" \
+    --property="ProtectProc=invisible" \
+    --property="ProcSubset=pid" \
+    --property="NoNewPrivileges=yes" \
+    --property="CapabilityBoundingSet=" \
+    --property="AmbientCapabilities=" \
+    --property="RestrictNamespaces=yes" \
+    --property="RestrictSUIDSGID=yes" \
+    --property="LockPersonality=yes" \
+    --property="RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6" \
+    --property="IPAddressDeny=0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 127.0.0.0/8 169.254.0.0/16 172.16.0.0/12 192.0.0.0/24 192.0.2.0/24 192.88.99.0/24 192.168.0.0/16 198.18.0.0/15 198.51.100.0/24 203.0.113.0/24 224.0.0.0/4 240.0.0.0/4 ::/128 ::1/128 ::ffff:0:0/96 2001:db8::/32 fc00::/7 fe80::/10 ff00::/8" \
+    --property="IPAddressAllow=127.0.0.53/32 127.0.0.54/32" \
+    --property="UMask=0077" \
+    --property="KeyringMode=private" \
+    --property="InaccessiblePaths=-/root -/etc/turingmarket -/etc/credstore -/etc/credstore.encrypted -/run/credentials -/run/secrets -/var/lib/turingmarket" \
+    --property="BindReadOnlyPaths=$ParserSourceRoot:/parser-source" \
+    --property="BindPaths=$ParserDependencyCacheStage/object:/parser-cache" \
+    --property="ReadWritePaths=/parser-cache" \
+    --property="RuntimeMaxSec=60m" \
+    --property="TimeoutStopSec=5" \
+    -- /usr/bin/env -i \
+      HOME=/tmp \
+      PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+      PIP_CONFIG_FILE=/dev/null \
+      PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/ \
+      PIP_DISABLE_PIP_VERSION_CHECK=1 \
+      PIP_NO_INPUT=1 \
+      npm_config_userconfig=/dev/null \
+      npm_config_globalconfig=/tmp/turingmarket-parser-global.npmrc \
+      npm_config_update_notifier=false \
+      npm_config_audit=false \
+      npm_config_fund=false \
+      npm_config_registry=https://registry.npmmirror.com \
+      npm_config_replace_registry_host=always \
+      bash --noprofile --norc -c '
 set -euo pipefail
 install -d -m 0700 /parser-cache/npm /parser-cache/python /tmp/parser-npm
 install -m 0600 /dev/null /tmp/turingmarket-parser-global.npmrc
@@ -3260,97 +3777,141 @@ python3 -m pip download --require-hashes --only-binary=:all: --no-deps \
   --dest /parser-cache/python -r /parser-source/parser-runtime/requirements.lock
 printf "%s\n" "PARSER_DEPENDENCY_CACHE_READY" > /parser-cache/.fetch-complete
 '
-ParserCacheStatus="$?"
-set -e
-if [ "$ParserCacheStatus" -ne 0 ]; then
-  echo "Parser dependency cache unit failed with status $ParserCacheStatus" >&2
-  exit "$ParserCacheStatus"
-fi
-if ! test -f "$ParserCacheCompletionMarker" ||
-   test -L "$ParserCacheCompletionMarker" ||
-   ! test "$(stat -c '%U:%G:%a:%h' "$ParserCacheCompletionMarker")" = "$GateUser:$GateUser:600:1" ||
-   ! test "$(cat "$ParserCacheCompletionMarker")" = 'PARSER_DEPENDENCY_CACHE_READY'; then
-  echo "Parser dependency cache completion proof is missing or invalid" >&2
-  exit 1
-fi
-rm -f -- "$ParserCacheCompletionMarker"
-cleanup_parser_cache_unit
-trap - EXIT
-chown -R root:root "$ParserDependencyCacheStage"
-find "$ParserDependencyCacheStage" -xdev -type d -exec chmod 0555 {} +
-find "$ParserDependencyCacheStage" -xdev -type f -exec chmod 0444 {} +
-mv -T -- "$ParserDependencyCacheStage" "$ParserDependencyCache"
-sync -f "$ParserDependencyCache"
-sync -f "$ParserApplianceRoot"
-
-ExpectedRuntimeSha256="$(python3 - "$ParserSourceRoot/systemd/turingmarket-parser.manifest.json" <<'PY'
-import json
-import re
-import sys
-with open(sys.argv[1], encoding='utf-8') as handle:
-    manifest = json.load(handle)
-runtime = manifest.get('runtime_tree', {})
-if runtime.get('bytes') != 640592293 or not re.fullmatch(r'[0-9a-f]{64}', runtime.get('sha256', '')):
-    raise SystemExit('parser runtime manifest identity is invalid')
-print(runtime['sha256'])
-PY
-)"
-export TM_UPLOAD_SANDBOX_PROVISION_DIAGNOSTIC=1
-BuildEvidence="$(
-  "$ParserBuild" \
-    --source-root "$ParserSourceRoot" \
-    --output-root "$ParserRuntimeStage" \
-    --dependency-cache-root "$ParserDependencyCache" \
-    --trusted-verifier "$ParserTrustedVerifier" \
-    --expected-verifier-sha256 "$ExpectedTrustedParserVerifierSha256" \
-    --expected-manifest-sha256 "$ExpectedParserManifestSha256" \
-    --expected-sha256 "$ExpectedRuntimeSha256" \
-    --json
-)"
-TM_PARSER_BUILD_EVIDENCE="$BuildEvidence" python3 - "$ParserSourceRoot/systemd/turingmarket-parser.manifest.json" <<'PY'
-import hashlib
+  ParserCacheStatus="$?"
+  set -e
+  if [ "$ParserCacheStatus" -ne 0 ]; then
+    echo "Parser dependency cache unit failed with status $ParserCacheStatus" >&2
+    exit "$ParserCacheStatus"
+  fi
+  if ! test -f "$ParserCacheCompletionMarker" ||
+     test -L "$ParserCacheCompletionMarker" ||
+     ! test "$(stat -c '%U:%G:%a:%h' "$ParserCacheCompletionMarker")" = "$GateUser:$GateUser:600:1" ||
+     ! test "$(cat "$ParserCacheCompletionMarker")" = 'PARSER_DEPENDENCY_CACHE_READY'; then
+    echo "Parser dependency cache completion proof is missing or invalid" >&2
+    exit 1
+  fi
+  rm -f -- "$ParserCacheCompletionMarker"
+  systemctl reset-failed "$ParserCacheUnit" >/dev/null 2>&1 || true
+  chown -R root:root "$ParserDependencyCacheStage/object"
+  chown root:root "$ParserDependencyCacheStage"
+  find "$ParserDependencyCacheStage/object" -xdev -type d -exec chmod 0555 {} +
+  find "$ParserDependencyCacheStage/object" -xdev -type f -exec chmod 0444 {} +
+  ParserDependencyCacheObserved="$(/usr/bin/node "$ParserTrustedVerifier" measure-runtime --root "$ParserDependencyCacheStage/object" --require-root-ownership true)"
+  TM_PARSER_CACHE_INPUTS="$ParserDependencyCacheInputs" \
+  TM_PARSER_CACHE_KEY="$ParserDependencyCacheKey" \
+  TM_PARSER_CACHE_TREE="$ParserDependencyCacheObserved" \
+  python3 - <<'PY' > "$ParserDependencyCacheStage/evidence.json"
 import json
 import os
-import sys
-with open(sys.argv[1], encoding='utf-8') as handle:
-    manifest = json.load(handle)
-observed = json.loads(os.environ['TM_PARSER_BUILD_EVIDENCE'])
-expected = manifest['runtime_tree']
-projection = {key: expected[key] for key in ('format', 'sha256', 'files', 'directories', 'bytes')}
-required = {'format', 'manifest_sha256', 'verifier_sha256', 'runtime_tree', 'build_boundary'}
-boundary_required = {
-    'format', 'source_artifacts_sha256', 'build_unit', 'build_unit_properties',
-    'build_unit_properties_sha256',
-    'build_unit_stopped', 'build_unit_collected', 'network_isolation', 'mount_isolation',
-    'credential_isolation', 'build_parent_inaccessible'
+value = {
+    'cache_key': os.environ['TM_PARSER_CACHE_KEY'],
+    'format': 'tm-parser-dependency-cache-evidence-v1',
+    'inputs': json.loads(os.environ['TM_PARSER_CACHE_INPUTS']),
+    'policy': {
+        'directory_mode': '0555', 'file_mode': '0444', 'file_nlink': 1,
+        'gid': 0, 'same_device': True, 'uid': 0,
+    },
+    'tree': json.loads(os.environ['TM_PARSER_CACHE_TREE']),
 }
-boundary = observed.get('build_boundary', {})
-properties = boundary.get('build_unit_properties')
-properties_digest = hashlib.sha256(
-    json.dumps(properties, sort_keys=True, separators=(',', ':')).encode('ascii')
-).hexdigest() if isinstance(properties, dict) else ''
-if (set(observed) != required or observed.get('format') != 'tm-parser-runtime-build-evidence-v2' or
-        observed.get('runtime_tree') != projection or set(boundary) != boundary_required or
-        properties_digest != boundary.get('build_unit_properties_sha256') or
-        any(boundary.get(name) is not True for name in (
-            'build_unit_stopped', 'build_unit_collected', 'network_isolation', 'mount_isolation',
-            'credential_isolation', 'build_parent_inaccessible'
-        ))):
-    raise SystemExit('parser build evidence does not match the release manifest: build unit properties SHA-256 mismatch')
+print(json.dumps(value, sort_keys=True, separators=(',', ':')))
 PY
+  chown root:root "$ParserDependencyCacheStage/evidence.json"
+  chmod 0444 "$ParserDependencyCacheStage/evidence.json"
+  chmod 0555 "$ParserDependencyCacheStage"
+  assert_parser_cache_entry "$ParserDependencyCacheStage" object true evidence.json
+  sync -f "$ParserDependencyCacheStage/object"
+  sync -f "$ParserDependencyCacheStage/evidence.json"
+  sync -f "$ParserDependencyCacheStage"
+  mv -T -- "$ParserDependencyCacheStage" "$ParserDependencyCacheEntry"
+  ParserDependencyCacheStage=''
+  sync -f "$ParserDependencyCacheEntries"
+  trap - EXIT
+  ParserDependencyCache="$ParserDependencyCacheEntry/object"
+  ParserDependencyCacheEvidence="$ParserDependencyCacheEntry/evidence.json"
+  reuse_parser_dependency_cache
+  printf '%s\n' 'PARSER_DEPENDENCY_CACHE_BUILT'
+}
 
-RootInspection="$(/usr/bin/node "$ParserTrustedVerifier" measure-runtime --root "$ParserRuntimeStage" --require-root-ownership true)"
-TM_ROOT_INSPECTION="$RootInspection" TM_PARSER_BUILD_EVIDENCE="$BuildEvidence" python3 - <<'PY'
-import hashlib
+publish_parser_runtime_cache() {
+  ParserRuntimeCacheStage="$ParserRuntimeCacheStaging/$(basename "$ReleaseRoot")"
+  test ! -e "$ParserRuntimeCacheStage"
+  test ! -L "$ParserRuntimeCacheStage"
+  cleanup_parser_runtime_cache_stage() {
+    remove_parser_cache_stage "$ParserRuntimeCacheStage" "$ParserRuntimeCacheStaging" || true
+  }
+  trap cleanup_parser_runtime_cache_stage EXIT
+  install -d -o root -g root -m 0700 "$ParserRuntimeCacheStage"
+  cp -a --reflink=auto -- "$ParserRuntimeStage" "$ParserRuntimeCacheStage/runtime-root"
+  install -o root -g root -m 0444 -- "$ParserEvidence" "$ParserRuntimeCacheStage/runtime.evidence.json"
+  RuntimeCacheTree="$(/usr/bin/node "$ParserTrustedVerifier" measure-runtime --root "$ParserRuntimeCacheStage/runtime-root" --require-root-ownership true)"
+  RuntimeBuildEvidenceSha256="$(sha256sum "$ParserRuntimeCacheStage/runtime.evidence.json" | awk '{print $1}')"
+  TM_RUNTIME_CACHE_INPUTS="$ParserRuntimeCacheInputs" \
+  TM_RUNTIME_CACHE_KEY="$ParserRuntimeCacheKey" \
+  TM_RUNTIME_CACHE_TREE="$RuntimeCacheTree" \
+  TM_RUNTIME_BUILD_EVIDENCE_SHA256="$RuntimeBuildEvidenceSha256" \
+  python3 - <<'PY' > "$ParserRuntimeCacheStage/cache.evidence.json"
 import json
 import os
-if json.loads(os.environ['TM_ROOT_INSPECTION']) != json.loads(os.environ['TM_PARSER_BUILD_EVIDENCE'])['runtime_tree']:
-    raise SystemExit('sealed parser runtime differs from trusted build evidence')
+value = {
+    'build_evidence_sha256': os.environ['TM_RUNTIME_BUILD_EVIDENCE_SHA256'],
+    'cache_key': os.environ['TM_RUNTIME_CACHE_KEY'],
+    'format': 'tm-parser-runtime-cache-evidence-v1',
+    'inputs': json.loads(os.environ['TM_RUNTIME_CACHE_INPUTS']),
+    'tree': json.loads(os.environ['TM_RUNTIME_CACHE_TREE']),
+}
+print(json.dumps(value, sort_keys=True, separators=(',', ':')))
 PY
+  chown root:root "$ParserRuntimeCacheStage/cache.evidence.json"
+  chmod 0444 "$ParserRuntimeCacheStage/cache.evidence.json"
+  chmod 0555 "$ParserRuntimeCacheStage"
+  assert_parser_cache_entry "$ParserRuntimeCacheStage" runtime-root false \
+    runtime.evidence.json cache.evidence.json
+  validate_parser_build_evidence "$ParserRuntimeCacheStage/runtime-root" \
+    "$ParserRuntimeCacheStage/runtime.evidence.json"
+  validate_runtime_cache_binding "$ParserRuntimeCacheStage" \
+    "$ParserRuntimeCacheStage/runtime-root" "$ParserRuntimeCacheStage/runtime.evidence.json" \
+    "$ParserRuntimeCacheStage/cache.evidence.json"
+  sync -f "$ParserRuntimeCacheStage/runtime-root"
+  sync -f "$ParserRuntimeCacheStage/runtime.evidence.json"
+  sync -f "$ParserRuntimeCacheStage/cache.evidence.json"
+  sync -f "$ParserRuntimeCacheStage"
+  mv -T -- "$ParserRuntimeCacheStage" "$ParserRuntimeCacheEntry"
+  ParserRuntimeCacheStage=''
+  sync -f "$ParserRuntimeCacheEntries"
+  trap - EXIT
+}
 
-printf '%s\n' "$BuildEvidence" > "$ParserEvidence.next"
-chmod 0444 "$ParserEvidence.next"
-mv "$ParserEvidence.next" "$ParserEvidence"
+if reuse_parser_runtime_cache; then
+  stage_parser_runtime_cache
+  printf '%s\n' 'PARSER_RUNTIME_CACHE_REUSED'
+else
+  CacheAvailableBytes="$(df --output=avail -B1 "$ParserCacheRoot" | awk 'NR == 2 { print $1 }')"
+  test "$CacheAvailableBytes" -ge "$ParserCacheRequiredBytes"
+  quarantine_parser_runtime_cache
+  prepare_parser_dependency_cache
+  export TM_UPLOAD_SANDBOX_PROVISION_DIAGNOSTIC=1
+  BuildEvidence="$(
+    "$ParserBuild" \
+      --source-root "$ParserSourceRoot" \
+      --output-root "$ParserRuntimeStage" \
+      --dependency-cache-root "$ParserDependencyCache" \
+      --trusted-verifier "$ParserTrustedVerifier" \
+      --expected-verifier-sha256 "$ExpectedTrustedParserVerifierSha256" \
+      --expected-manifest-sha256 "$ExpectedParserManifestSha256" \
+      --expected-sha256 "$ExpectedRuntimeSha256" \
+      --json
+  )"
+  printf '%s\n' "$BuildEvidence" > "$ParserEvidence.next"
+  chmod 0444 "$ParserEvidence.next"
+  mv "$ParserEvidence.next" "$ParserEvidence"
+  validate_parser_build_evidence "$ParserRuntimeStage" "$ParserEvidence"
+  publish_parser_runtime_cache
+  printf '%s\n' 'PARSER_RUNTIME_CACHE_BUILT'
+fi
+
+BuildEvidence="$(cat "$ParserEvidence")"
+validate_parser_build_evidence "$ParserRuntimeStage" "$ParserEvidence"
+
 (
   cd "$ParserRuntimeStage"
   find . -xdev -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum
@@ -12392,7 +12953,7 @@ const readProductionSystemdProperties = parserStartup.createProductionSystemdPro
 
 (async () => {
   const verified = await uploadSandbox.verifyCheckedInArtifacts({
-    expectedManifestSha256: 'ddf02acd3832b38b465fb8fef16398ea00c0fbcf8cdc6011c8889626f6e8e021'
+    expectedManifestSha256: '2bb63e7919ea036a17396773da7ad524ea22bd46ac202f4dc454747a5b3f1771'
   });
   process.stdout.write('APPLICATION_PARSER_CHECKED_IN_OK\n');
 

@@ -524,7 +524,6 @@ test('v0.6 deploy seals the parser appliance under the root-only lifecycle befor
     'TrustedSourceBundle="__TRUSTED_SOURCE_BUNDLE__"',
     'ParserApplianceRoot="$LockDir/parser-appliance"',
     'ParserSourceRoot="$ParserApplianceRoot/source"',
-    'ParserDependencyCache="$ParserApplianceRoot/dependency-cache"',
     'ParserRuntimeStage="$ParserApplianceRoot/runtime.stage"',
     'ParserEvidence="$ParserApplianceRoot/runtime.evidence.json"',
     'ParserChecksums="$ParserApplianceRoot/runtime.sha256"',
@@ -532,6 +531,9 @@ test('v0.6 deploy seals the parser appliance under the root-only lifecycle befor
     'ParserBuild="$ParserApplianceRoot/build-runtime"',
     'ParserTrustedVerifier="$TrustedSourceBundle/server/scripts/trusted_parser_runtime_verifier.js"',
     'ParserTrustedManifest="$TrustedSourceBundle/server/systemd/turingmarket-parser.manifest.json"',
+    'ParserCacheRoot=/var/lib/turingmarket-gate/parser-cache/v1',
+    'ParserDependencyCacheRoot="$ParserCacheRoot/dependencies"',
+    'ParserDependencyCacheEntries="$ParserDependencyCacheRoot/entries"',
     'sha256sum --check --status "$LockDir/upload.sha256"',
     'candidate-tree.sha256',
     '"$TrustedSourceGate" stage',
@@ -556,7 +558,8 @@ test('v0.6 deploy seals the parser appliance under the root-only lifecycle befor
     'chmod 0444',
     'PARSER_RUNTIME_CANDIDATE_READY'
   ], 'parser candidate preparation');
-  assert.match(preparation, /640592293/);
+  assert.match(deploy, /\$PARSER_RUNTIME_BYTES\s*=\s*640587874/);
+  assert.match(preparation, /ParserRuntimeBytes=__PARSER_RUNTIME_BYTES__/);
   assert.match(preparation, /ParserRequiredBytes/);
   assert.match(preparation, /test -f "\$TrustedSource"/);
   assert.match(preparation, /test ! -L "\$TrustedSource"/);
@@ -621,7 +624,7 @@ test('v0.6 parser dependency fetch uses the accelerated mirror and proves comple
     /printf "%s\\n" "PARSER_DEPENDENCY_CACHE_READY" > \/parser-cache\/\.fetch-complete/
   );
   const transientFetchMatch = preparation.match(
-    /systemd-run --quiet --wait --collect([\s\S]*?)\r?\n'\r?\nParserCacheStatus=/
+    /systemd-run --quiet --wait --collect([\s\S]*?)\r?\n'\r?\n\s*ParserCacheStatus=/
   );
   assert.ok(transientFetchMatch, 'parser dependency fetch command must remain one transient unit');
   const transientFetch = transientFetchMatch[1];
@@ -639,8 +642,105 @@ test('v0.6 parser dependency fetch uses the accelerated mirror and proves comple
     "test \"$(stat -c '%U:%G:%a:%h' \"$ParserCacheCompletionMarker\")\" = \"$GateUser:$GateUser:600:1\"",
     "test \"$(cat \"$ParserCacheCompletionMarker\")\" = 'PARSER_DEPENDENCY_CACHE_READY'",
     'rm -f -- "$ParserCacheCompletionMarker"',
-    'chown -R root:root "$ParserDependencyCacheStage"'
+    'chown -R root:root "$ParserDependencyCacheStage/object"'
   ], 'parser dependency fetch completion proof');
+});
+
+test('v0.6 parser build caches are content-addressed, remeasured, and rebuilt on mismatch', () => {
+  const deploy = read('platform', 'deploy_v8.ps1');
+  const preparation = sourceBetween(
+    deploy,
+    'function Invoke-RemoteParserCandidatePreparation {',
+    'function Invoke-RemoteBackup {',
+    'parser candidate preparation function'
+  );
+
+  assert.match(preparation, /ParserCacheRoot=\/var\/lib\/turingmarket-gate\/parser-cache\/v1/);
+  assert.match(preparation, /ParserRuntimeCacheRoot="\$ParserCacheRoot\/runtime"/);
+  assert.match(preparation, /ParserDependencyCacheRoot="\$ParserCacheRoot\/dependencies"/);
+  assert.match(preparation, /ParserRuntimeCacheEntries="\$ParserRuntimeCacheRoot\/entries"/);
+  assert.match(preparation, /ParserDependencyCacheEntries="\$ParserDependencyCacheRoot\/entries"/);
+  for (const input of [
+    'builder_sha256',
+    'package_lock_sha256',
+    'requirements_lock_sha256',
+    'pip_cacert_sha256',
+    'verifier_sha256',
+    'manifest_sha256',
+    'platform'
+  ]) {
+    assert.match(preparation, new RegExp(input));
+  }
+  assert.match(preparation, /tm-parser-runtime-cache-input-v1/);
+  assert.match(preparation, /tm-parser-dependency-cache-input-v1/);
+  assert.match(preparation, /tm-parser-dependency-cache-evidence-v1/);
+  assert.match(preparation, /measure-runtime --root "\$ParserRuntimeCacheObject" --require-root-ownership true/);
+  assert.match(preparation, /measure-runtime --root "\$ParserDependencyCache" --require-root-ownership true/);
+  assert.match(preparation, /PARSER_RUNTIME_CACHE_REUSED/);
+  assert.match(preparation, /PARSER_RUNTIME_CACHE_BUILT/);
+  assert.match(preparation, /PARSER_DEPENDENCY_CACHE_REUSED/);
+  assert.match(preparation, /PARSER_DEPENDENCY_CACHE_BUILT/);
+  assert.match(preparation, /ParserRuntimeCacheQuarantine/);
+  assert.match(preparation, /ParserDependencyCacheQuarantine/);
+  assert.match(preparation, /quarantine_stale_parser_cache_stages/);
+  assert.match(preparation, /PARSER_CACHE_STALE_STAGE_QUARANTINED/);
+  assert.match(preparation, /Parser cache staging unit is still active/);
+  assert.match(preparation, /mv -T -- "\$ParserRuntimeCacheEntry"/);
+  assert.match(preparation, /mv -T -- "\$ParserDependencyCacheEntry"/);
+  assert.match(preparation, /stat -c '%U:%G:%a:%h' "\$ParserDependencyCacheEvidence"/);
+  assert.match(preparation, /root:root:444:1/);
+  assert.match(preparation, /find "\$ParserDependencyCache" -xdev \\\( ! -uid 0 -o ! -gid 0 -o -perm \/022 \\\)/);
+  assert.match(preparation, /--dependency-cache-root "\$ParserDependencyCache"/);
+  assertOrdered(preparation, [
+    'chown -R root:root "$ParserDependencyCacheStage/object"',
+    'chown root:root "$ParserDependencyCacheStage"',
+    'chmod 0555 "$ParserDependencyCacheStage"',
+    'assert_parser_cache_entry "$ParserDependencyCacheStage" object true evidence.json'
+  ], 'fresh dependency cache root sealing');
+  assertOrdered(preparation, [
+    'initialize_parser_cache_roots',
+    'quarantine_stale_parser_cache_stages',
+    'PARSER_CACHE_STALE_STAGE_QUARANTINED',
+    'ParserRuntimeCacheInputs='
+  ], 'interrupted cache staging recovery');
+
+  assertOrdered(preparation, [
+    'ParserRuntimeCacheEvidenceJson="$(read_parser_evidence_file "$ParserRuntimeCacheEvidence")"',
+    'measure-runtime --root "$ParserRuntimeCacheObject" --require-root-ownership true',
+    'TM_PARSER_RUNTIME_CACHE_EVIDENCE="$ParserRuntimeCacheEvidenceJson"',
+    'stage_parser_runtime_cache',
+    'PARSER_RUNTIME_CACHE_REUSED'
+  ], 'parser runtime cache reuse authorization');
+  assertOrdered(preparation, [
+    'ParserDependencyCacheEvidenceJson="$(read_parser_evidence_file "$ParserDependencyCacheEvidence")"',
+    'measure-runtime --root "$ParserDependencyCache" --require-root-ownership true',
+    'TM_PARSER_CACHE_EVIDENCE="$ParserDependencyCacheEvidenceJson"',
+    'PARSER_DEPENDENCY_CACHE_REUSED'
+  ], 'parser dependency cache reuse authorization');
+  assertOrdered(preparation, [
+    'quarantine_parser_dependency_cache',
+    'ParserDependencyCacheStage="$ParserDependencyCacheStaging/$(basename "$ReleaseRoot")"',
+    'systemd-run --quiet --wait --collect',
+    'PARSER_DEPENDENCY_CACHE_BUILT'
+  ], 'parser dependency cache mismatch rebuild');
+  assertOrdered(preparation, [
+    'if reuse_parser_runtime_cache; then',
+    'PARSER_RUNTIME_CACHE_REUSED',
+    'else',
+    'test "$CacheAvailableBytes" -ge "$ParserCacheRequiredBytes"',
+    'prepare_parser_dependency_cache',
+    '"$ParserBuild"',
+    'publish_parser_runtime_cache',
+    'PARSER_RUNTIME_CACHE_BUILT'
+  ], 'runtime cache hit bypasses dependency fetch and runtime build');
+
+  const transientFetchMatch = preparation.match(
+    /systemd-run --quiet --wait --collect([\s\S]*?)\r?\n'\r?\n\s*ParserCacheStatus=/
+  );
+  assert.ok(transientFetchMatch, 'parser dependency fetch must remain one transient unit');
+  assert.match(transientFetchMatch[1], /User=\$GateUser/);
+  assert.match(transientFetchMatch[1], /InaccessiblePaths=-\/root/);
+  assert.match(transientFetchMatch[1], /BindReadOnlyPaths=\$ParserSourceRoot:\/parser-source/);
 });
 
 test('v0.6 root parser control plane uses only the independently pinned verifier', () => {
