@@ -387,6 +387,31 @@ test('registers campaign-scoped performance endpoints and forwards authenticated
   }]);
 });
 
+test('normalizes Express null-prototype queries before performance read services', () => {
+  const { routes, calls } = createFixture();
+  const query = Object.assign(Object.create(null), { q: 'creator', limit: '20', top_metric: 'views' });
+
+  const contents = invoke(routes.get('GET /api/campaigns/:id/performance/contents'), {
+    user: { id: 9 },
+    params: { id: '7' },
+    query,
+    requestId: 'contents-query-request'
+  });
+  const dashboard = invoke(routes.get('GET /api/campaigns/:id/performance/dashboard'), {
+    user: { id: 9 },
+    params: { id: '7' },
+    query,
+    requestId: 'dashboard-query-request'
+  });
+
+  assert.equal(contents.statusCode, 200);
+  assert.equal(dashboard.statusCode, 200);
+  for (const call of calls) {
+    assert.equal(Object.getPrototypeOf(call[1].query), Object.prototype);
+    assert.deepEqual(call[1].query, { q: 'creator', limit: '20', top_metric: 'views' });
+  }
+});
+
 test('returns safe collection-run summaries through the campaign read contract', () => {
   const { routes, calls } = createFixture();
   const response = invoke(routes.get('GET /api/campaigns/:id/performance/collection-runs'), {

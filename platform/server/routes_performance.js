@@ -36,6 +36,12 @@ function requestId(request) {
     'performance-request';
 }
 
+function plainRequestQuery(request) {
+  const query = request && request.query;
+  if (!query || typeof query !== 'object' || Array.isArray(query)) return query || {};
+  return Object.fromEntries(Object.entries(query));
+}
+
 function sendError(request, response, error) {
   const known = error instanceof PerformanceManualServiceError ||
     error instanceof PerformanceFeishuConnectionServiceError ||
@@ -191,7 +197,7 @@ function registerPerformanceRoutes(app, options = {}) {
       return sendResult(request, response, service.listContents({
         userId: authenticatedUserId(request),
         campaignId: request.params.id,
-        query: request.query || {}
+        query: plainRequestQuery(request)
       }));
     } catch (error) {
       return sendError(request, response, error);
@@ -265,7 +271,7 @@ function registerPerformanceRoutes(app, options = {}) {
 
   app.get('/api/campaigns/:id/performance/contents/export', options.authMiddleware, (request, response) => {
     try {
-      const query = Object.assign({}, request.query || {});
+      const query = plainRequestQuery(request);
       const scope = query.scope;
       delete query.scope;
       const exported = service.exportContents({
@@ -416,7 +422,7 @@ function registerPerformanceRoutes(app, options = {}) {
       return sendResult(request, response, service.getDashboard({
         userId: authenticatedUserId(request),
         campaignId: request.params.id,
-        query: request.query || {}
+        query: plainRequestQuery(request)
       }));
     } catch (error) {
       return sendError(request, response, error);
