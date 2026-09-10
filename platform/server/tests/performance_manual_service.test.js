@@ -3,13 +3,14 @@ const assert = require('node:assert/strict');
 const Database = require('better-sqlite3');
 
 const migration = require('../migrations/010_performance_manual_foundation');
+const providerMigration = require('../migrations/019_performance_provider_collection');
 const {
   PerformanceManualServiceError,
   createPerformanceManualService,
   createPerformanceAiReviewService
 } = require('../services/performance_manual_service');
 
-function createFixture() {
+function createFixture(options = {}) {
   const db = new Database(':memory:');
   db.pragma('foreign_keys = ON');
   db.exec(`
@@ -43,6 +44,7 @@ function createFixture() {
     VALUES (1,1,'org_admin','active'),(1,2,'member','active'),(1,3,'org_admin','active');
   `);
   migration.apply(db);
+  if (options.withProvider) providerMigration.apply(db);
 
   function getCampaignAccess(_database, input) {
     if (Number(input.campaignId) !== 7) {
@@ -68,6 +70,105 @@ function createFixture() {
     service: createPerformanceManualService(db, { getCampaignAccess })
   };
 }
+
+test('projects provider observations into current content and combined history without masking manual data', () => {
+  const { db, service } = createFixture({ withProvider: true });
+  try {
+    const content = addCanonicalVideo(service);
+    service.recordManualInput({
+      userId: 1,
+      campaignId: 7,
+      contentId: content.id,
+      body: {
+        observation: {
+          views: 100,
+          likes: 8,
+          comments: 2,
+          observed_at: '2026-09-10T12:00:00.000Z'
+        }
+      }
+    });
+    const runId = Number(db.prepare(`
+      INSERT INTO performance_provider_collection_runs (
+        org_id,campaign_id,provider,run_key,trigger_mode,requested_by,status,
+        counts_json,item_results_json,scheduled_for,started_at,completed_at
+      ) VALUES (1,7,'youtube',?,'manual',1,'succeeded',?,?,?, ?,?)
+    `).run(
+      'a'.repeat(64),
+      JSON.stringify({ total: 1, succeeded: 1, failed: 0 }),
+      JSON.stringify([]),
+      '2026-09-11T03:00:00.000Z',
+      '2026-09-11T03:00:00.000Z',
+      '2026-09-11T03:00:01.000Z'
+    ).lastInsertRowid);
+    db.prepare(`
+      INSERT INTO performance_provider_observations (
+        run_id,org_id,campaign_id,publication_id,provider,provider_content_id,
+        metrics_json,availability_json,observed_at,payload_sha256,created_by
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?)
+    `).run(
+      runId,
+      1,
+      7,
+      content.id,
+      'youtube',
+      'dQw4w9WgXcQ',
+      JSON.stringify({ views: 120, likes: 10, comments: 3 }),
+      JSON.stringify({
+        views: { available: true },
+        likes: { available: true },
+        comments: { available: true },
+        saves: { available: false, reason_code: 'provider_metric_unavailable' },
+        shares: { available: false, reason_code: 'provider_metric_unavailable' }
+      }),
+      '2026-09-11T03:00:00.000Z',
+      'b'.repeat(64),
+      1
+    );
+
+    const current = service.listContents({ userId: 1, campaignId: 7, query: {} }).items[0];
+    assert.equal(current.latest_observation.source_mode, 'provider');
+    assert.equal(current.latest_observation.provider, 'youtube');
+    assert.equal(current.latest_observation.views, 120);
+    assert.equal(current.latest_observation.availability.saves.available, false);
+    assert.equal(current.metrics.core_view_er.auditLineage[0].type, 'performance_provider_observation');
+
+    const dashboard = service.getDashboard({ userId: 1, campaignId: 7, query: {} });
+    assert.equal(dashboard.metrics.core_view_er.auditLineage[0].type, 'performance_provider_observation');
+    assert.equal(dashboard.metrics.core_view_er.auditLineage[0].observation_id, current.latest_observation.id);
+    const review = service.getReviewEvidence({
+      userId: 1,
+      campaignId: 7,
+      query: { top_metric: 'views' }
+    });
+    assert.deepEqual(review.analysis.external_collection, {
+      status: 'included',
+      provider: 'youtube',
+      current_observations: 1
+    });
+
+    const first = service.getObservationHistory({
+      userId: 1,
+      campaignId: 7,
+      contentId: content.id,
+      query: { limit: 1 }
+    });
+    assert.equal(first.items[0].source_mode, 'provider');
+    assert.equal(first.items[0].provider, 'youtube');
+    assert.equal(first.page.has_more, true);
+    const second = service.getObservationHistory({
+      userId: 1,
+      campaignId: 7,
+      contentId: content.id,
+      query: { limit: 1, cursor: first.page.next_cursor }
+    });
+    assert.equal(second.items[0].source_mode, 'manual');
+    assert.equal(second.items[0].metrics.views, 100);
+    assert.equal(second.page.has_more, false);
+  } finally {
+    db.close();
+  }
+});
 
 function addCanonicalVideo(service) {
   return service.createContent({

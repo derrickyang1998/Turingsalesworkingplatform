@@ -1301,6 +1301,14 @@ thead th {
   margin: var(--tm-space-1) 0 0;
 }
 
+.tm-performance-freshness-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--tm-space-2);
+  flex-wrap: wrap;
+}
+
 .tm-performance-freshness-summary {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1488,6 +1496,15 @@ thead th {
 
   .tm-performance-freshness-row {
     grid-template-columns: 80px minmax(0, 1fr);
+  }
+
+  .tm-performance-freshness-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .tm-performance-freshness-actions {
+    justify-content: flex-start;
   }
 
   .tm-performance-freshness-row .btn {

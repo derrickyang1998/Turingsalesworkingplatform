@@ -82,6 +82,12 @@ const { createCustomerReportSnapshotService } = require('./services/customer_rep
 const { createPerformanceFeishuConnectionService } = require('./services/performance_feishu_connection_service');
 const { createPerformanceFeishuProjectionService } = require('./services/performance_feishu_projection_service');
 const { createPerformanceCollectionRunService } = require('./services/performance_collection_run_service');
+const { createPerformanceFreshnessService } = require('./services/performance_freshness_service');
+const { createYouTubeDataApiClient } = require('./services/youtube_data_api_client');
+const {
+  createPerformanceProviderCollectionService,
+  startPerformanceProviderScheduler
+} = require('./services/performance_provider_collection_service');
 const registerCampaignRoutes = require('./routes_campaigns');
 const registerPerformanceRoutes = require('./routes_performance');
 const {
@@ -178,7 +184,23 @@ const campaignPptService = createCampaignPptService(db, {
   }
 });
 const performanceManualService = createPerformanceManualService(db);
-const performanceCollectionRunService = createPerformanceCollectionRunService(db);
+const performanceProviderSchedulerEnabled = Boolean(process.env.YOUTUBE_DATA_API_KEY) &&
+  process.env.PERFORMANCE_PROVIDER_SCHEDULER_ENABLED !== 'false';
+const youtubeDataApiClient = createYouTubeDataApiClient({
+  apiKey: process.env.YOUTUBE_DATA_API_KEY || ''
+});
+const performanceProviderCollectionService = createPerformanceProviderCollectionService(db, {
+  providerClient: youtubeDataApiClient,
+  performanceService: performanceManualService,
+  schedulerEnabled: performanceProviderSchedulerEnabled
+});
+const performanceFreshnessService = createPerformanceFreshnessService({
+  performanceService: performanceManualService,
+  providerStatusService: performanceProviderCollectionService
+});
+const performanceCollectionRunService = createPerformanceCollectionRunService(db, {
+  providerStatusService: performanceProviderCollectionService
+});
 const collaborationPublicationHandoffService = createCollaborationPublicationHandoffService(db);
 const campaignCollaborationService = createCampaignCollaborationService(db, {
   publicationHandoffService: collaborationPublicationHandoffService
@@ -251,6 +273,7 @@ const phase4PolicyNames = [
   'CAMPAIGN_PERFORMANCE_CONTENT_LIST',
   'CAMPAIGN_PERFORMANCE_FRESHNESS_QUEUE',
   'CAMPAIGN_PERFORMANCE_COLLECTION_RUNS',
+  'CAMPAIGN_PERFORMANCE_PROVIDER_REFRESH',
   'CAMPAIGN_PERFORMANCE_OBSERVATION_HISTORY',
   'CAMPAIGN_PERFORMANCE_DASHBOARD',
   'CAMPAIGN_PERFORMANCE_REVIEW_EVIDENCE',
@@ -1616,7 +1639,9 @@ registerCampaignRoutes(app, db);
 registerPerformanceRoutes(app, {
   authMiddleware,
   service: performanceManualService,
+  freshnessService: performanceFreshnessService,
   collectionRunService: performanceCollectionRunService,
+  providerCollectionService: performanceProviderCollectionService,
   feishuConnectionService: performanceFeishuConnectionService,
   feishuProjectionService: performanceFeishuProjectionService,
   aiReviewService: performanceAiReviewService,
@@ -2516,6 +2541,13 @@ function stopCustomerReportPptJanitor() {
   if (customerReportPptJanitor) clearInterval(customerReportPptJanitor);
 }
 
+let performanceProviderScheduler = null;
+function stopPerformanceProviderScheduler() {
+  if (!performanceProviderScheduler) return;
+  performanceProviderScheduler.stop();
+  performanceProviderScheduler = null;
+}
+
 let httpServer = null;
 let shutdownStarted = false;
 function shutdownServer(signal) {
@@ -2523,6 +2555,7 @@ function shutdownServer(signal) {
   shutdownStarted = true;
   stopCampaignPptJanitor();
   stopCustomerReportPptJanitor();
+  stopPerformanceProviderScheduler();
   if (!httpServer) {
     process.exit(1);
     return;
@@ -2636,6 +2669,17 @@ async function bootstrapServer() {
     customerReportPptJanitor.unref();
   }
 
+  if (performanceProviderSchedulerEnabled) {
+    performanceProviderScheduler = startPerformanceProviderScheduler(
+      performanceProviderCollectionService,
+      {
+        onError(error) {
+          console.error('Performance provider scheduler tick failed', error);
+        }
+      }
+    );
+  }
+
   const workflowEngine = require('./workflow_engine');
   workflowEngine.initEngine();
   const { startCampaignWorkflowDispatcher } = require('./services/campaign_workflow_service');
@@ -2647,6 +2691,7 @@ async function bootstrapServer() {
   httpServer.once('close', () => {
     stopCampaignPptJanitor();
     stopCustomerReportPptJanitor();
+    stopPerformanceProviderScheduler();
   });
   process.once('SIGTERM', () => shutdownServer('SIGTERM'));
   process.once('SIGINT', () => shutdownServer('SIGINT'));
@@ -2655,6 +2700,7 @@ async function bootstrapServer() {
 bootstrapServer().catch((error) => {
   stopCampaignPptJanitor();
   stopCustomerReportPptJanitor();
+  stopPerformanceProviderScheduler();
   console.error('Server startup failed', error);
   process.exitCode = 1;
 });

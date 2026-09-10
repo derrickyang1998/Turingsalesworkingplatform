@@ -113,9 +113,10 @@ test('performance monitor offers both current-filter and full-campaign CSV expor
   assert.match(appSource, /dlFile\('content_performance_' \+ scope \+ '\.csv'/);
 });
 
-test('performance monitor shows a campaign-scoped freshness queue without pretending an external refresh ran', () => {
+test('performance monitor shows a campaign-scoped freshness queue and controlled YouTube refresh', () => {
   assert.match(indexHtml, /id="performanceFreshnessQueue"/);
   assert.match(indexHtml, /id="performanceFreshnessSummary"/);
+  assert.match(indexHtml, /id="performanceProviderRefresh"[^>]+onclick="runPerformanceProviderRefresh\(\)"[^>]+disabled/);
   assert.match(indexHtml, /数据新鲜度与待更新清单/);
   assert.match(appSource, /var performanceFreshnessRequestSequence = 0;/);
   assert.match(appSource, /async function loadPerformanceFreshnessQueue\(\)/);
@@ -123,7 +124,12 @@ test('performance monitor shows a campaign-scoped freshness queue without preten
   assert.match(appSource, /function openPerformanceFreshnessInput\(/);
   assert.match(appSource, /performance\/freshness-queue/);
   assert.match(appSource, /provider\.dispatch_available/);
-  assert.match(appSource, /当前未接入自动采集/);
+  assert.match(appSource, /YouTube 自动采集尚未配置/);
+  assert.match(appSource, /async function runPerformanceProviderRefresh\(\)/);
+  assert.match(appSource, /performance\/provider-refresh/);
+  assert.match(appSource, /'Idempotency-Key': performanceProviderRefreshRetry\.idempotencyKey/);
+  assert.match(appSource, /body: JSON\.stringify\(\{\}\)/);
+  assert.match(appSource, /requestSequence !== performanceProviderRefreshRequestSequence \|\| campaignId !== getPerformanceCampaignId\(\)/);
   assert.match(appSource, /openPerformanceFreshnessInput\(/);
   assert.match(appSource, /performanceContents\.push\(item\.content\)/);
   assert.match(

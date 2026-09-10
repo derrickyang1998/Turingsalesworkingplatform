@@ -190,6 +190,52 @@ test('keeps manual observation timing provider-neutral', () => {
   assert.equal(result.schedule.next_due_at, new Date(Date.parse(NOW) + (3 * 60 * 60 * 1000)).toISOString());
 });
 
+test('projects configured provider status into the freshness response without changing queue timing', () => {
+  const providerCalls = [];
+  const service = createPerformanceFreshnessService({
+    performanceService: {
+      getProjectionSnapshot() {
+        return {
+          consistency: 'sqlite_read_transaction',
+          total: 1,
+          items: [{
+            id: 1,
+            platform: 'youtube',
+            published_at: isoHoursBefore(48),
+            latest_observation: { observed_at: isoHoursBefore(7), source_mode: 'provider' }
+          }],
+          capabilities: { can_view: true, can_manage_content: true }
+        };
+      }
+    },
+    providerStatusService: {
+      getCampaignStatus(input) {
+        providerCalls.push(input);
+        return {
+          provider: 'youtube',
+          status: 'ready',
+          configured: true,
+          dispatch_available: true,
+          scheduler_enabled: true,
+          last_success_at: isoHoursBefore(7),
+          next_due_at: null,
+          metric_availability: { saves: { available: false } }
+        };
+      }
+    },
+    now: () => NOW
+  });
+
+  const result = service.getQueue({ userId: 1, campaignId: 7 });
+
+  assert.deepEqual(providerCalls, [{ userId: 1, campaignId: 7 }]);
+  assert.equal(result.provider.status, 'ready');
+  assert.equal(result.provider.dispatch_available, true);
+  assert.equal(result.provider.scheduler_enabled, true);
+  assert.equal(result.provider.next_due_at, result.schedule.next_due_at);
+  assert.equal(result.items[0].state, 'due');
+});
+
 test('keeps full-dataset summary counts separate from the actionable queue', () => {
   const items = [
     { id: 1, published_at: null, latest_observation: null },

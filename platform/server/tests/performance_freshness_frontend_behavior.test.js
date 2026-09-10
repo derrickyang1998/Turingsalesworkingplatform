@@ -81,12 +81,17 @@ test('a stale freshness response cannot overwrite the newly selected campaign', 
   assert.deepEqual(renders, []);
 });
 
-test('collection run history stays inside the existing monitor and exposes no provider dispatch control', () => {
+test('collection run history and permission-aware provider refresh stay inside the existing monitor', () => {
   assert.match(indexSource, /id="performanceCollectionRunSummary"/);
   assert.match(indexSource, /id="performanceCollectionRuns"/);
   assert.match(indexSource, /onclick="refreshPerformanceUpdateStatus\(\)"/);
+  assert.match(indexSource, /id="performanceProviderRefresh"[^>]+onclick="runPerformanceProviderRefresh\(\)"[^>]+disabled/);
   assert.doesNotMatch(indexSource, /data-performance-collection-action="dispatch"/);
   assert.match(appSource, /performance\/collection-runs\?limit=12/);
+  assert.match(appSource, /performance\/provider-refresh/);
+  assert.match(appSource, /'Idempotency-Key': performanceProviderRefreshRetry\.idempotencyKey/);
+  assert.match(appSource, /body: JSON\.stringify\(\{\}\)/);
+  assert.match(appSource, /provider\.dispatch_available !== true/);
   assert.match(appSource, /audit_scan_truncated/);
   assert.match(appSource, /history_window_truncated/);
   assert.match(appSource, /较早记录未纳入/);

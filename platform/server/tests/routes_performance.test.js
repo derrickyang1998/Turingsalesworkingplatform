@@ -14,6 +14,7 @@ const { PerformanceFeishuConnectionServiceError } = require('../services/perform
 const { CustomerReportSnapshotServiceError } = require('../services/customer_report_snapshot_service');
 const { CustomerReportDeliveryServiceError } = require('../services/customer_report_delivery_service');
 const { PerformanceCollectionRunServiceError } = require('../services/performance_collection_run_service');
+const { PerformanceProviderCollectionServiceError } = require('../services/performance_provider_collection_service');
 const campaignContract = require('../contracts/campaign_contract');
 
 function createResponse() {
@@ -111,6 +112,34 @@ function createFixture() {
         items: [],
         page: { limit: 12, returned: 0, has_more: false },
         capabilities: { can_view: true, diagnostics_level: 'summary' }
+      };
+    }
+  };
+  const providerCollectionService = {
+    getCampaignStatus(input) {
+      calls.push(['provider-status', input]);
+      return { provider: 'youtube', status: 'ready', dispatch_available: true };
+    },
+    async runCampaign(input) {
+      calls.push(['provider-refresh', input]);
+      if (!input.idempotencyKey) {
+        throw new PerformanceProviderCollectionServiceError(
+          400,
+          'PERFORMANCE_PROVIDER_IDEMPOTENCY_KEY_INVALID',
+          'A valid Idempotency-Key is required.'
+        );
+      }
+      return {
+        contract_version: 'performance-provider-collection-v1',
+        replayed: false,
+        run: {
+          id: 51,
+          provider: 'youtube',
+          trigger_mode: 'manual',
+          status: 'succeeded',
+          counts: { total: 1, succeeded: 1, failed: 0 }
+        },
+        observations: [{ publication_id: 13, provider: 'youtube', metrics: { views: 100 } }]
       };
     }
   };
@@ -252,6 +281,7 @@ function createFixture() {
     service,
     freshnessService,
     collectionRunService,
+    providerCollectionService,
     feishuConnectionService,
     feishuProjectionService,
     aiReviewService,
@@ -264,6 +294,7 @@ function createFixture() {
     service,
     freshnessService,
     collectionRunService,
+    providerCollectionService,
     feishuConnectionService,
     feishuProjectionService,
     aiReviewService,
@@ -335,7 +366,8 @@ test('registers campaign-scoped performance endpoints and forwards authenticated
     'POST /api/campaigns/:id/performance/feishu-connection',
     'POST /api/campaigns/:id/performance/feishu-connection/approve',
     'POST /api/campaigns/:id/performance/import',
-    'POST /api/campaigns/:id/performance/manual-inputs/:inputId/approve'
+    'POST /api/campaigns/:id/performance/manual-inputs/:inputId/approve',
+    'POST /api/campaigns/:id/performance/provider-refresh'
   ]);
 
   const request = {
@@ -421,6 +453,69 @@ test('returns the provider-independent freshness queue through a read-only campa
 
   const serverSource = fs.readFileSync(path.resolve(__dirname, '..', 'server.js'), 'utf8');
   assert.match(serverSource, /'CAMPAIGN_PERFORMANCE_FRESHNESS_QUEUE'/);
+});
+
+test('starts one idempotent YouTube refresh through the campaign performance contract', async () => {
+  const { routes, calls } = createFixture();
+  const response = await invokeAsync(
+    routes.get('POST /api/campaigns/:id/performance/provider-refresh'),
+    {
+      user: { id: 9 },
+      params: { id: '7' },
+      body: {},
+      headers: { 'idempotency-key': 'provider-refresh-00000009' },
+      requestId: 'provider-refresh-request'
+    }
+  );
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.request_id, 'provider-refresh-request');
+  assert.equal(response.body.run.provider, 'youtube');
+  assert.equal(response.body.run.status, 'succeeded');
+  assert.deepEqual(calls, [[
+    'provider-refresh',
+    {
+      userId: 9,
+      campaignId: '7',
+      triggerMode: 'manual',
+      idempotencyKey: 'provider-refresh-00000009'
+    }
+  ]]);
+
+  const policy = campaignContract.REQUEST_POLICIES.CAMPAIGN_PERFORMANCE_PROVIDER_REFRESH;
+  assert.ok(policy);
+  assert.equal(policy.id, 'campaign.performance.provider-refresh');
+  assert.equal(policy.method, 'POST');
+  assert.equal(policy.pathTemplate, '/api/campaigns/:id/performance/provider-refresh');
+  assert.equal(policy.mediaKind, campaignContract.MEDIA_KINDS.JSON);
+
+  const serverSource = fs.readFileSync(path.resolve(__dirname, '..', 'server.js'), 'utf8');
+  assert.match(serverSource, /'CAMPAIGN_PERFORMANCE_PROVIDER_REFRESH'/);
+});
+
+test('normalizes provider refresh failures without exposing provider internals', async () => {
+  const { routes, providerCollectionService } = createFixture();
+  providerCollectionService.runCampaign = async () => {
+    throw new PerformanceProviderCollectionServiceError(
+      503,
+      'PERFORMANCE_PROVIDER_NOT_CONFIGURED',
+      'YouTube data collection is not configured.'
+    );
+  };
+  const response = await invokeAsync(
+    routes.get('POST /api/campaigns/:id/performance/provider-refresh'),
+    {
+      user: { id: 9 },
+      params: { id: '7' },
+      body: {},
+      headers: { 'idempotency-key': 'provider-refresh-00000010' },
+      requestId: 'provider-refresh-unconfigured'
+    }
+  );
+
+  assert.equal(response.statusCode, 503);
+  assert.equal(response.body.code, 'PERFORMANCE_PROVIDER_NOT_CONFIGURED');
+  assert.equal(response.body.error, 'YouTube data collection is not configured.');
 });
 
 test('previews and exports the approved Feishu performance projection', () => {

@@ -1325,7 +1325,10 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
             <h4 id="performanceFreshnessTitle">数据新鲜度与待更新清单</h4>
             <p id="performanceFreshnessStatus" class="tm-metric-note" role="status" aria-live="polite">选择推广活动后核对更新节奏。</p>
           </div>
-          <button class="btn btn-outline btn-sm" type="button" onclick="refreshPerformanceUpdateStatus()">更新状态</button>
+          <div class="tm-performance-freshness-actions">
+            <button class="btn btn-outline btn-sm" type="button" onclick="refreshPerformanceUpdateStatus()">刷新状态</button>
+            <button id="performanceProviderRefresh" class="btn btn-primary btn-sm" type="button" onclick="runPerformanceProviderRefresh()" disabled>采集 YouTube 数据</button>
+          </div>
         </div>
         <div id="performanceFreshnessSummary" class="tm-performance-freshness-summary"></div>
         <div id="performanceFreshnessQueue" class="tm-performance-freshness-queue">

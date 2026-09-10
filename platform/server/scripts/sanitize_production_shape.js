@@ -138,6 +138,13 @@ const EXACT_PROFILE_MIGRATIONS = Object.freeze([
     sourcePath: 'migrations/018_collaboration_publication_lifecycle.js',
     engineVersion: 1,
     dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
+  }),
+  Object.freeze({
+    version: 19,
+    name: '019_performance_provider_collection',
+    sourcePath: 'migrations/019_performance_provider_collection.js',
+    engineVersion: 1,
+    dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
   })
 ]);
 const FTS_MANIFEST = Object.freeze({
@@ -228,6 +235,29 @@ const V14_EQUALITY_GROUPS = Object.freeze([
     mode: 'owner-snapshot-value-partition'
   })
 ]);
+const V19_EQUALITY_GROUPS = Object.freeze([
+  ...V14_EQUALITY_GROUPS,
+  Object.freeze({
+    name: 'youtube-provider-content-identity',
+    owner: 'campaign_publications.platform_content_id',
+    members: Object.freeze([
+      'campaign_publications.platform_content_id',
+      'performance_provider_observations.provider_content_id',
+      'performance_provider_collection_runs.item_results_json#/*/provider_content_id'
+    ]),
+    mode: 'owner-snapshot-value-partition'
+  }),
+  Object.freeze({
+    name: 'youtube-provider-run-key',
+    owner: 'performance_provider_quota_reservations.run_key',
+    members: Object.freeze([
+      'performance_provider_quota_reservations.run_key',
+      'performance_provider_collection_claims.run_key',
+      'performance_provider_collection_runs.run_key'
+    ]),
+    mode: 'owner-snapshot-value-partition'
+  })
+]);
 const REFERENCE_GROUPS = Object.freeze([
   Object.freeze({
     name: 'campaign-knowledge-record-id',
@@ -306,6 +336,10 @@ const V17_DERIVED_REBUILDS = Object.freeze([
 const V18_DERIVED_REBUILDS = Object.freeze([
   ...V17_DERIVED_REBUILDS,
   'collaboration_publication_lifecycle_versions.effective_url_sha256'
+]);
+const V19_DERIVED_REBUILDS = Object.freeze([
+  ...V18_DERIVED_REBUILDS,
+  'performance_provider_observations.payload_sha256'
 ]);
 const V1_DERIVED_REBUILDS = Object.freeze([
   'knowledge_entries.source_hash',
@@ -748,6 +782,20 @@ const V18_MIGRATION_LEDGER = Object.freeze({
     'migrations/018_collaboration_publication_lifecycle.js'
   ])
 });
+const V19_MIGRATION_LEDGER = Object.freeze({
+  name: Object.freeze([
+    ...V18_MIGRATION_LEDGER.name,
+    '019_performance_provider_collection'
+  ]),
+  checksum: Object.freeze([
+    ...V18_MIGRATION_LEDGER.checksum,
+    '10786f4f70bea08b92e8b7444779e1c783a4d1661964ed1a558e0544711d6f74'
+  ]),
+  sourcePath: Object.freeze([
+    ...V18_MIGRATION_LEDGER.sourcePath,
+    'migrations/019_performance_provider_collection.js'
+  ])
+});
 const STRUCTURAL_COLUMN_POLICY_V9 = Object.freeze(Object.assign(Object.create(null), STRUCTURAL_COLUMN_POLICY, {
   'feishu_bitable_outbox_retries.id': Object.freeze({ storage: 'integer', kind: 'integer' }),
   'feishu_bitable_outbox_retries.org_id': Object.freeze({ storage: 'integer', kind: 'integer' }),
@@ -1116,6 +1164,85 @@ const STRUCTURAL_POLICY_V18_SHA256 = crypto.createHash('sha256')
     columns: STRUCTURAL_COLUMN_POLICY_V18
   }), 'utf8')
   .digest('hex');
+const STRUCTURAL_COLUMN_POLICY_V19 = Object.freeze(Object.assign(Object.create(null), STRUCTURAL_COLUMN_POLICY_V18, {
+  'performance_provider_collection_claims.id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'performance_provider_collection_claims.org_id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'performance_provider_collection_claims.campaign_id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'performance_provider_collection_claims.requested_by': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'performance_provider_collection_claims.requested_items': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'performance_provider_collection_claims.reserved_quota_units': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'performance_provider_collection_claims.provider': Object.freeze({
+    storage: 'text', kind: 'enum', allowedValues: Object.freeze(['youtube'])
+  }),
+  'performance_provider_collection_claims.trigger_mode': Object.freeze({
+    storage: 'text', kind: 'enum', allowedValues: Object.freeze(['manual', 'scheduled'])
+  }),
+  'performance_provider_collection_claims.lease_until': Object.freeze({ storage: 'text', kind: 'timestamp' }),
+  'performance_provider_collection_claims.created_at': Object.freeze({ storage: 'text', kind: 'timestamp' }),
+  'performance_provider_quota_reservations.id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'performance_provider_quota_reservations.org_id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'performance_provider_quota_reservations.campaign_id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'performance_provider_quota_reservations.requested_by': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'performance_provider_quota_reservations.requested_items': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'performance_provider_quota_reservations.reserved_quota_units': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'performance_provider_quota_reservations.provider': Object.freeze({
+    storage: 'text', kind: 'enum', allowedValues: Object.freeze(['youtube'])
+  }),
+  'performance_provider_quota_reservations.trigger_mode': Object.freeze({
+    storage: 'text', kind: 'enum', allowedValues: Object.freeze(['manual', 'scheduled'])
+  }),
+  'performance_provider_quota_reservations.created_at': Object.freeze({ storage: 'text', kind: 'timestamp' }),
+  'performance_provider_collection_runs.id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'performance_provider_collection_runs.org_id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'performance_provider_collection_runs.campaign_id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'performance_provider_collection_runs.requested_by': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'performance_provider_collection_runs.provider': Object.freeze({
+    storage: 'text', kind: 'enum', allowedValues: Object.freeze(['youtube'])
+  }),
+  'performance_provider_collection_runs.trigger_mode': Object.freeze({
+    storage: 'text', kind: 'enum', allowedValues: Object.freeze(['manual', 'scheduled'])
+  }),
+  'performance_provider_collection_runs.status': Object.freeze({
+    storage: 'text', kind: 'enum', allowedValues: Object.freeze(['succeeded', 'partial', 'failed'])
+  }),
+  'performance_provider_collection_runs.safe_error_category': Object.freeze({
+    storage: 'text', kind: 'enum', allowedValues: Object.freeze([
+      'item_failure', 'quota_exceeded', 'rate_limited', 'provider_timeout',
+      'content_not_found', 'provider_forbidden', 'provider_response_invalid', 'provider_unavailable'
+    ])
+  }),
+  'performance_provider_collection_runs.scheduled_for': Object.freeze({ storage: 'text', kind: 'timestamp' }),
+  'performance_provider_collection_runs.started_at': Object.freeze({ storage: 'text', kind: 'timestamp' }),
+  'performance_provider_collection_runs.completed_at': Object.freeze({ storage: 'text', kind: 'timestamp' }),
+  'performance_provider_collection_runs.created_at': Object.freeze({ storage: 'text', kind: 'timestamp' }),
+  'performance_provider_observations.id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'performance_provider_observations.run_id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'performance_provider_observations.org_id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'performance_provider_observations.campaign_id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'performance_provider_observations.publication_id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'performance_provider_observations.created_by': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'performance_provider_observations.provider': Object.freeze({
+    storage: 'text', kind: 'enum', allowedValues: Object.freeze(['youtube'])
+  }),
+  'performance_provider_observations.observed_at': Object.freeze({ storage: 'text', kind: 'timestamp' }),
+  'performance_provider_observations.created_at': Object.freeze({ storage: 'text', kind: 'timestamp' }),
+  'schema_migrations.name': Object.freeze({
+    storage: 'text', kind: 'migration-ledger', allowedValues: V19_MIGRATION_LEDGER.name
+  }),
+  'schema_migrations.checksum': Object.freeze({
+    storage: 'text', kind: 'migration-ledger', allowedValues: V19_MIGRATION_LEDGER.checksum
+  }),
+  'schema_migrations.source_path': Object.freeze({
+    storage: 'text', kind: 'migration-ledger', allowedValues: V19_MIGRATION_LEDGER.sourcePath
+  })
+}));
+const STRUCTURAL_POLICY_V19_VALIDATOR_VERSION = 'tm-structural-policy-v16-performance-provider-lease';
+const STRUCTURAL_POLICY_V19_SHA256 = crypto.createHash('sha256')
+  .update(JSON.stringify({
+    validatorVersion: STRUCTURAL_POLICY_V19_VALIDATOR_VERSION,
+    columns: STRUCTURAL_COLUMN_POLICY_V19
+  }), 'utf8')
+  .digest('hex');
 
 const TRANSFORMATION_EXCLUDED_CLASSIFICATIONS = new Set([
   'structural',
@@ -1256,8 +1383,24 @@ const V18_SEMANTIC_POLICIES = Object.freeze({
     policySha256: STRUCTURAL_POLICY_V18_SHA256
   })
 });
+const V19_SEMANTIC_POLICIES = Object.freeze({
+  ...SEMANTIC_POLICIES,
+  replacementSentinels: Object.freeze({
+    ...SEMANTIC_POLICIES.replacementSentinels,
+    allowedClassifications: Object.freeze({
+      ...SEMANTIC_POLICIES.replacementSentinels.allowedClassifications,
+      'tmtext-': Object.freeze(['synthetic-text', 'json-leaves'])
+    })
+  }),
+  structuralColumns: Object.freeze({
+    ...SEMANTIC_POLICIES.structuralColumns,
+    validatorVersion: STRUCTURAL_POLICY_V19_VALIDATOR_VERSION,
+    policySha256: STRUCTURAL_POLICY_V19_SHA256
+  })
+});
 
 function structuralColumnPolicyForVersion(schemaVersion) {
+  if (schemaVersion === 19) return STRUCTURAL_COLUMN_POLICY_V19;
   if (schemaVersion === 18) return STRUCTURAL_COLUMN_POLICY_V18;
   if (schemaVersion === 17) return STRUCTURAL_COLUMN_POLICY_V17;
   if (schemaVersion === 16) return STRUCTURAL_COLUMN_POLICY_V16;
@@ -1305,7 +1448,7 @@ const SECRET_NAMES = new Set([
 const DIGEST_NAMES = new Set([
   'source_hash', 'source_identity_sha256', 'content_sha256', 'entry_content_sha256',
   'chunk_content_sha256', 'request_hash', 'audit_fingerprint', 'response_sha256',
-  'template_checksum', 'bundle_id', 'artifact_cache_key'
+  'template_checksum', 'bundle_id', 'artifact_cache_key', 'run_key'
 ]);
 
 const DERIVED_NAMES = new Set([
@@ -1325,7 +1468,7 @@ const WORKFLOW_NODE_REFERENCE_COLUMNS = new Set([
   'workflow_tasks.node_id',
   'workflow_timers.node_id'
 ]);
-const EQUALITY_GROUP_BY_COLUMN = new Map(V14_EQUALITY_GROUPS.flatMap((group) => (
+const EQUALITY_GROUP_BY_COLUMN = new Map(V19_EQUALITY_GROUPS.flatMap((group) => (
   group.members.map((member) => [member, group.name])
 )));
 
@@ -1781,6 +1924,15 @@ function profileContractForVersion(schemaVersion) {
       preservedAccounting: PRESERVED_ACCOUNTING
     });
   }
+  if (schemaVersion === 19) {
+    return Object.freeze({
+      semanticPolicies: V19_SEMANTIC_POLICIES,
+      equalityGroups: V19_EQUALITY_GROUPS,
+      referenceGroups: REFERENCE_GROUPS,
+      derivedRebuilds: V19_DERIVED_REBUILDS,
+      preservedAccounting: PRESERVED_ACCOUNTING
+    });
+  }
   throw new Error(`unsupported exact sanitization profile version ${schemaVersion}`);
 }
 
@@ -1800,16 +1952,16 @@ function assertManifestDocumentShape(manifest) {
   ) {
     throw new Error('malformed sanitization manifest header');
   }
-  if (!Array.isArray(manifest.exactProfiles) || manifest.exactProfiles.length !== 13) {
-    throw new Error('sanitization manifest must contain isolated exact v6 through v18 profiles');
+  if (!Array.isArray(manifest.exactProfiles) || manifest.exactProfiles.length !== 14) {
+    throw new Error('sanitization manifest must contain isolated exact v6 through v19 profiles');
   }
   const profileKeys = [
     'schemaVersion', 'semanticPolicies', 'equalityGroups', 'referenceGroups',
     'derivedRebuilds', 'objects'
   ];
   const versions = manifest.exactProfiles.map((profile) => profile.schemaVersion);
-  if (JSON.stringify(versions) !== JSON.stringify([6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18])) {
-    throw new Error('sanitization manifest exact profiles must be ordered v6 through v18');
+  if (JSON.stringify(versions) !== JSON.stringify([6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19])) {
+    throw new Error('sanitization manifest exact profiles must be ordered v6 through v19');
   }
   for (const compatibilityProfile of manifest.exactProfiles) {
     if (!exactObjectKeys(compatibilityProfile, profileKeys)) {
@@ -1846,12 +1998,12 @@ function exactProfileClassification(db) {
   });
   if (
     classification.status !== 'managed'
-    || ![1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18].includes(classification.currentVersion)
+    || ![1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19].includes(classification.currentVersion)
   ) {
     const observed = classification.currentVersion === undefined || classification.currentVersion === null
       ? classification.status
       : classification.currentVersion;
-    throw new Error(`sanitization source must be an exact managed version 1 or version 6 through version 18 profile; got ${observed}`);
+    throw new Error(`sanitization source must be an exact managed version 1 or version 6 through version 19 profile; got ${observed}`);
   }
   return classification;
 }
@@ -1911,6 +2063,41 @@ function manifestFromInventory(inventory, schemaVersion = 1) {
 }
 
 function jsonColumnPolicy(table, column) {
+  if (table === 'performance_provider_collection_runs' && column === 'counts_json') {
+    return {
+      mode: 'closed',
+      allowedPaths: ['/', '/total', '/succeeded', '/failed'],
+      leafPolicy: 'type-preserving-synthetic'
+    };
+  }
+  if (table === 'performance_provider_collection_runs' && column === 'item_results_json') {
+    return {
+      mode: 'closed',
+      allowedPaths: [
+        '/', '/*', '/*/publication_id', '/*/provider_content_id', '/*/status',
+        '/*/attempts', '/*/safe_error_category', '/*/observed_at'
+      ],
+      leafPolicy: 'type-preserving-synthetic'
+    };
+  }
+  if (table === 'performance_provider_observations' && column === 'metrics_json') {
+    return {
+      mode: 'closed',
+      allowedPaths: ['/', '/views', '/likes', '/comments'],
+      leafPolicy: 'bounded-nonnegative-integer'
+    };
+  }
+  if (table === 'performance_provider_observations' && column === 'availability_json') {
+    const fields = ['views', 'likes', 'comments', 'saves', 'shares', 'clicks', 'revenue', 'cost'];
+    return {
+      mode: 'closed',
+      allowedPaths: [
+        '/',
+        ...fields.flatMap((field) => [`/${field}`, `/${field}/available`, `/${field}/reason_code`])
+      ],
+      leafPolicy: 'structural-availability'
+    };
+  }
   if (column === 'tags_json') {
     return { mode: 'closed', allowedPaths: ['/', '/*'], leafPolicy: 'synthetic-string' };
   }
@@ -4355,6 +4542,15 @@ function workflowJsonRelationshipRole(context, pointer) {
 }
 
 function structuralJsonLeaf(context, pointer) {
+  if (context === 'performance_provider_collection_runs.counts_json') {
+    return /^\/(?:total|succeeded|failed)$/.test(pointer);
+  }
+  if (context === 'performance_provider_collection_runs.item_results_json') {
+    return /^\/\d+\/(?:publication_id|status|attempts|safe_error_category|observed_at)$/.test(pointer);
+  }
+  if (context === 'performance_provider_observations.availability_json') {
+    return /^\/(?:views|likes|comments|saves|shares|clicks|revenue|cost)\/(?:available|reason_code)$/.test(pointer);
+  }
   if (context === 'workflow_templates.nodes') {
     return /^\/\d+\/type$/.test(pointer)
       || /^\/\d+\/config\/(?:assignee_id|assignee_role|due_hours)$/.test(pointer);
@@ -4435,12 +4631,51 @@ function transformJson(
     if (relationship === 'edge') return workflowEdgeToken(value, replacementDomain);
     if (structuralJsonLeaf(context, pointer)) return value;
   }
+  if (context === 'performance_provider_collection_runs.item_results_json'
+      && /^\/\d+\/provider_content_id$/.test(pointer)) {
+    const storageType = logicalStorageType(value);
+    if (storageType !== 'text') throw new Error(`provider content identity must remain text at ${context}${pointer}`);
+    const equalityGroup = EQUALITY_GROUP_BY_COLUMN.get(
+      'performance_provider_collection_runs.item_results_json#/*/provider_content_id'
+    );
+    if (!equalityGroup) throw new Error('provider content identity equality group is missing');
+    const sourceKey = valueStorageKey(storageType, value);
+    const replacementToken = stableToken('equality', equalityGroup, 'value', storageFrame(value, storageType));
+    return typePreservingReplacement(
+      storageType,
+      value,
+      replacementToken,
+      (_attempt, attemptToken) => `tmtext-${attemptToken.slice(0, 32)}`,
+      undefined,
+      replacementDomain,
+      `synthetic-text\0${equalityGroup}\0${sourceKey}`
+    );
+  }
   if (structuralJsonLeaf(context, pointer)) {
     return value;
   }
   const storageType = logicalStorageType(value);
   const mappingKey = `json-leaf\0${context}\0${pointer}\0${logicalValueKey(value, storageType)}`;
   const token = tokenFor(`${pointer}\0${String(value)}`);
+  if (context === 'performance_provider_observations.metrics_json'
+      && /^\/(?:views|likes|comments)$/.test(pointer)
+      && storageType === 'integer'
+      && Number.isSafeInteger(value)
+      && value >= 0) {
+    const ranges = {
+      '/views': [10_000_000, 1_000_000],
+      '/likes': [100_000, 100_000],
+      '/comments': [10_000, 10_000]
+    };
+    const [base, spread] = ranges[pointer];
+    const seed = Number.parseInt(token.slice(0, 12), 16) % spread;
+    return reserveTypedReplacement(
+      replacementDomain,
+      mappingKey,
+      'integer',
+      (attempt) => base + seed + attempt
+    );
+  }
   if (typeof value === 'string') {
     return reserveTypedReplacement(
       replacementDomain,
@@ -4491,6 +4726,13 @@ function transformedValue(
   }
   if (category === 'secret-synthetic' && table === 'feishu_bitable_outbox'
       && column === 'reservation_token' && storageType === 'text') {
+    return reserveTypedReplacement(
+      replacementDomain, mappingKey, 'text',
+      (attempt) => replacementAttemptToken(token, attempt)
+    );
+  }
+  if (category === 'secret-synthetic' && table === 'performance_provider_collection_claims'
+      && column === 'lease_token' && storageType === 'text') {
     return reserveTypedReplacement(
       replacementDomain, mappingKey, 'text',
       (attempt) => replacementAttemptToken(token, attempt)
@@ -4561,11 +4803,20 @@ function transformedValue(
       (attempt) => deterministicInertPdf(replacementAttemptToken(token, attempt), value.length)
     );
   }
-  if (category === 'synthetic-text') return typePreservingReplacement(
-    storageType, value, token,
+  if (category === 'synthetic-text') {
+    const equalityGroup = EQUALITY_GROUP_BY_COLUMN.get(`${table}.${column}`);
+    const replacementToken = equalityGroup
+      ? stableToken('equality', equalityGroup, 'value', storageFrame(value, storageType))
+      : token;
+    const syntheticMappingKey = equalityGroup
+      ? `synthetic-text\0${equalityGroup}\0${sourceKey}`
+      : mappingKey;
+    return typePreservingReplacement(
+    storageType, value, replacementToken,
     (_attempt, attemptToken) => `tmtext-${attemptToken.slice(0, 32)}`,
-    undefined, replacementDomain, mappingKey
-  );
+    undefined, replacementDomain, syntheticMappingKey
+    );
+  }
   if (category === 'dependent-digest') {
     const equalityGroup = EQUALITY_GROUP_BY_COLUMN.get(`${table}.${column}`);
     const digest = equalityGroup
@@ -4894,6 +5145,9 @@ function sanitizeBaseTables(db, manifest, options = {}) {
       }
     }
     if (options.secretProbes) scrubSecretCopiesInPlace(db, manifest, options.secretProbes);
+    if ((manifest.derivedRebuilds || []).includes('performance_provider_observations.payload_sha256')) {
+      rebuildPerformanceProviderObservationDigests(db);
+    }
   });
   transaction.immediate();
   if (options.restoreTriggers !== false) {
@@ -5219,8 +5473,36 @@ function rebuildCollaborationPublicationDigests(db) {
   }
 }
 
+function rebuildPerformanceProviderObservationDigests(db) {
+  const present = db.prepare(`
+    SELECT 1 AS present
+    FROM sqlite_schema
+    WHERE type='table' AND name='performance_provider_observations'
+  `).get();
+  if (!present) return;
+  const update = db.prepare(`
+    UPDATE performance_provider_observations
+    SET payload_sha256=?
+    WHERE id=?
+  `);
+  for (const row of db.prepare(`
+    SELECT id,provider,provider_content_id,metrics_json,availability_json,observed_at
+    FROM performance_provider_observations
+    ORDER BY id
+  `).all()) {
+    const payload = JSON.stringify({
+      provider: row.provider,
+      provider_content_id: row.provider_content_id,
+      metrics: JSON.parse(row.metrics_json),
+      availability: JSON.parse(row.availability_json),
+      observed_at: row.observed_at
+    });
+    update.run(sha256(payload), row.id);
+  }
+}
+
 function rebuildDerivedData(db, manifest) {
-  if (![1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18].includes(manifest.schemaVersion)) {
+  if (![1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19].includes(manifest.schemaVersion)) {
     throw new Error(`unsupported derived rebuild profile ${manifest.schemaVersion}`);
   }
   const hasKnowledge = db.prepare("SELECT 1 AS present FROM sqlite_schema WHERE type='table' AND name='knowledge_entries'").get();
@@ -5838,6 +6120,10 @@ function sentinelPrefix(value, prefixes) {
 function jsonSentinelPositionAllowed(prefix, context, pointer, columnPolicy, keyPosition) {
   if (keyPosition) return prefix === 'tmkey-' && columnPolicy.mode === 'dynamic-sanitized';
   const relationship = workflowJsonRelationshipRole(context, pointer);
+  if (prefix === 'tmtext-') {
+    return context === 'performance_provider_collection_runs.item_results_json'
+      && /^\/\d+\/provider_content_id$/.test(pointer);
+  }
   if (prefix === 'tm-node-') return relationship === 'node';
   if (prefix === 'tm-edge-') return relationship === 'edge';
   if (prefix === 'tmjson-') return relationship === null && !structuralJsonLeaf(context, pointer);

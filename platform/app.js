@@ -9504,6 +9504,9 @@ var performanceFreshnessQueue = null;
 var performanceFreshnessRequestSequence = 0;
 var performanceCollectionRuns = null;
 var performanceCollectionRunRequestSequence = 0;
+var performanceProviderRefreshRequestSequence = 0;
+var performanceProviderRefreshInFlight = false;
+var performanceProviderRefreshRetry = { campaignId: null, idempotencyKey: '' };
 
 function performancePositiveId(value) {
   return typeof readPositiveInteger === 'function' ? readPositiveInteger(value) : null;
@@ -9625,6 +9628,9 @@ function changePerformanceCampaignContext(value) {
   invalidatePerformanceFeishuSnapshotExport();
   performanceFreshnessRequestSequence += 1;
   performanceCollectionRunRequestSequence += 1;
+  performanceProviderRefreshRequestSequence += 1;
+  performanceProviderRefreshInFlight = false;
+  performanceProviderRefreshRetry = { campaignId: null, idempotencyKey: '' };
   performanceCampaignContextId = performancePositiveId(value);
   preparePerformanceCustomerReportForm(true);
   syncPerformanceCampaignSelectors();
@@ -9744,6 +9750,7 @@ function renderPerformanceFreshnessQueue(data) {
     summaryContainer.innerHTML = '';
     container.innerHTML = '<div class="tm-state-empty">选择推广活动后显示待更新内容。</div>';
     if (status) status.textContent = '选择推广活动后核对更新节奏。';
+    syncPerformanceProviderRefreshButton({ status: 'not_configured', dispatch_available: false });
     return;
   }
   var summary = data.summary || {};
@@ -9759,10 +9766,13 @@ function renderPerformanceFreshnessQueue(data) {
   ].map(function(item) {
     return '<div><span>' + esc(item[0]) + '</span><strong>' + esc(item[1] === undefined ? 0 : item[1]) + '</strong></div>';
   }).join('');
-  var providerNote = provider.status === 'not_configured' && provider.dispatch_available === false
-    ? '当前未接入自动采集；清单会在手工录入或批量更新后自动重算。'
-    : '更新来源状态已加载。';
+  var providerNote = provider.status === 'not_configured'
+    ? 'YouTube 自动采集尚未配置；手工录入和批量更新可继续使用。'
+    : (provider.status === 'degraded'
+      ? 'YouTube 最近一次采集未全部成功，可重试；现有数据不会被覆盖。'
+      : ('YouTube 官方数据已接入' + (provider.scheduler_enabled ? '，系统会按更新节奏自动采集。' : '，可手动采集。')));
   if (status) status.textContent = providerNote;
+  syncPerformanceProviderRefreshButton(provider);
   var items = Array.isArray(data.items) ? data.items : [];
   if (!items.length) {
     container.innerHTML = '<div class="tm-state-empty">当前没有待更新内容。</div>';
@@ -9841,7 +9851,8 @@ function performanceCollectionOperationLabel(value) {
   var labels = {
     metric_import: '批量指标更新',
     content_import: '内容批量导入',
-    manual_metric_update: '单条指标补录'
+    manual_metric_update: '单条指标补录',
+    provider_refresh: 'YouTube 数据采集'
   };
   return labels[value] || '数据更新';
 }
@@ -9902,8 +9913,14 @@ function renderPerformanceCollectionRuns(data) {
     var counts = item.counts || {};
     var countText = item.operation === 'manual_metric_update'
       ? '1 条内容'
-      : '成功 ' + Number(counts.succeeded || 0) + ' · 重复 ' + Number(counts.duplicate || 0) + ' · 失败 ' + Number(counts.failed || 0);
-    var source = item.source_mode === 'manual' ? '手工录入' : 'CSV / XLSX';
+      : (item.source_mode === 'provider'
+        ? '成功 ' + Number(counts.succeeded || 0) + ' · 失败 ' + Number(counts.failed || 0)
+        : '成功 ' + Number(counts.succeeded || 0) + ' · 重复 ' + Number(counts.duplicate || 0) + ' · 失败 ' + Number(counts.failed || 0));
+    var source = item.source_mode === 'manual'
+      ? '手工录入'
+      : (item.source_mode === 'provider'
+        ? ('YouTube API · ' + (item.trigger_mode === 'scheduled' ? '自动' : '手动'))
+        : 'CSV / XLSX');
     return '<div class="tm-performance-collection-run-row">'
       + '<span class="tm-performance-collection-run-state is-' + esc(item.status || 'unknown') + '">'
       + esc(performanceCollectionStatusLabel(item.status)) + '</span>'
@@ -9944,6 +9961,70 @@ async function loadPerformanceCollectionRuns() {
 
 function refreshPerformanceUpdateStatus() {
   return Promise.all([loadPerformanceFreshnessQueue(), loadPerformanceCollectionRuns()]);
+}
+
+function syncPerformanceProviderRefreshButton(provider) {
+  var button = document.getElementById('performanceProviderRefresh');
+  if (!button) return;
+  provider = provider || (performanceFreshnessQueue && performanceFreshnessQueue.provider) || {};
+  button.disabled = performanceProviderRefreshInFlight || provider.dispatch_available !== true;
+  button.textContent = performanceProviderRefreshInFlight ? '采集中...' : '采集 YouTube 数据';
+  button.title = provider.status === 'not_configured'
+    ? '需要由管理员在服务端配置 YouTube Data API 密钥'
+    : (provider.dispatch_available === true ? '读取当前活动内已登记的 YouTube 视频公开指标' : '仅活动负责人或管理员可执行');
+}
+
+async function runPerformanceProviderRefresh() {
+  if (performanceProviderRefreshInFlight) return null;
+  var campaignId = getPerformanceCampaignId();
+  if (campaignId === null) {
+    toast('请先选择推广活动。', 'error');
+    return null;
+  }
+  var provider = performanceFreshnessQueue && performanceFreshnessQueue.provider || {};
+  if (provider.dispatch_available !== true) {
+    toast(provider.status === 'not_configured' ? 'YouTube 自动采集尚未配置。' : '当前账号不能执行平台采集。', 'error');
+    return null;
+  }
+  if (performanceProviderRefreshRetry.campaignId !== campaignId || !performanceProviderRefreshRetry.idempotencyKey) {
+    performanceProviderRefreshRetry = {
+      campaignId: campaignId,
+      idempotencyKey: createAiChatIdempotencyKey().replace(/^ai-chat-/, 'performance-provider-')
+    };
+  }
+  var requestSequence = ++performanceProviderRefreshRequestSequence;
+  performanceProviderRefreshInFlight = true;
+  syncPerformanceProviderRefreshButton(provider);
+  var status = document.getElementById('performanceFreshnessStatus');
+  if (status) status.textContent = '正在读取 YouTube 公开指标...';
+  try {
+    var response = await apiFetch('/campaigns/' + encodeURIComponent(campaignId) + '/performance/provider-refresh', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': performanceProviderRefreshRetry.idempotencyKey
+      },
+      body: JSON.stringify({})
+    });
+    var data = await response.json();
+    if (requestSequence !== performanceProviderRefreshRequestSequence || campaignId !== getPerformanceCampaignId()) return null;
+    if (!response.ok) throw new Error(data.error || 'YouTube 数据采集失败');
+    performanceProviderRefreshRetry = { campaignId: null, idempotencyKey: '' };
+    var counts = data.run && data.run.counts || {};
+    toast('YouTube 数据采集完成：成功 ' + Number(counts.succeeded || 0) + '，失败 ' + Number(counts.failed || 0) + '。', counts.failed ? 'error' : 'success');
+    await refreshPerformanceInsightsAfterMutation();
+    return data;
+  } catch (error) {
+    if (requestSequence !== performanceProviderRefreshRequestSequence || campaignId !== getPerformanceCampaignId()) return null;
+    if (status) status.textContent = error.message || 'YouTube 数据采集失败';
+    toast(error.message || 'YouTube 数据采集失败', 'error');
+    return null;
+  } finally {
+    if (requestSequence === performanceProviderRefreshRequestSequence) {
+      performanceProviderRefreshInFlight = false;
+      syncPerformanceProviderRefreshButton();
+    }
+  }
 }
 
 function performanceTextValue(id) {
@@ -12483,7 +12564,7 @@ function switchPage(id, options) {
     'switchTab', 'matchInfluencers', 'smartMatch', 'handleUpload', 'handleDrop', 'openInfUploadModal', 'closeInfUploadModal', 'handleUploadModal', 'handleInfluencerModalDrop', 'validateInfluencerImportMapping', 'confirmInfluencerImport', 'downloadInfluencerImportErrors', 'downloadInfTemplate', 'exportAll', 'exportFiltered', 'exportSelected',
     'saveM4SavedView', 'applyM4SavedView', 'deleteM4SavedView', 'clearM4Filters',
     'toggleAll', 'syncInfluencerSelectionState', 'loadM4Campaigns', 'changeM4CampaignContext', 'openM4CampaignCloseoutReview', 'closeM4CampaignCloseoutReview', 'submitM4CampaignCloseoutReview', 'startCollab', 'submitCollabOrder', 'closeCollabOrderModal', 'loadCollaborations', 'updateCollabStatus', 'runCampaignCollabAction', 'closeCampaignContractConfirmationModal', 'submitCampaignContractConfirmation', 'closeCampaignContentReviewModal', 'submitCampaignContentReview', 'closeCampaignContentReviewDecisionModal', 'submitCampaignContentReviewDecision', 'renderCampaignPublicationRows', 'syncCampaignPublicationDraftRows', 'addCampaignPublicationRow', 'removeCampaignPublicationRow', 'openCampaignPublicationModal', 'closeCampaignPublicationModal', 'submitCampaignPublicationConfirmation', 'openCollaborationPerformanceTracking', 'openCampaignPublicationHistoryModal', 'loadCampaignPublicationHistoryPage', 'openCampaignPaymentModal', 'closeCampaignPaymentModal', 'submitCampaignPayment', 'voidCampaignPayment', 'closeCampaignSettlementModal', 'submitCampaignSettlement', 'openCampaignSettlementDecisionModal', 'closeCampaignSettlementDecisionModal', 'submitCampaignSettlementDecision',
-    'initPerformanceMonitor', 'initPerformanceDashboard', 'refreshPerformanceMonitor', 'refreshPerformanceDashboard', 'changePerformanceCampaignContext', 'handlePerformanceTopMetricChange', 'refreshPerformanceReviewEvidence', 'generatePerformanceAiReviewDraft', 'loadPerformanceContents', 'loadPerformanceFreshnessQueue', 'openPerformanceFreshnessInput', 'loadPerformanceIntegrationPreview', 'loadPerformanceFeishuConnection', 'savePerformanceFeishuConnectionDraft', 'approvePerformanceFeishuConnectionDraft', 'downloadPerformanceFeishuSnapshot', 'createPerformanceContent', 'downloadPerformanceTemplate', 'handlePerformanceImport', 'handlePerformanceDrop', 'downloadPerformanceMetricsTemplate', 'handlePerformanceMetricsImport', 'handlePerformanceMetricsDrop', 'openPerformanceInputModal', 'closePerformanceInputModal', 'savePerformanceInput', 'loadPerformanceDashboard', 'loadPerformanceReviewEvidence', 'debouncedPerformanceContentSearch', 'exportPerformanceContents',
+    'initPerformanceMonitor', 'initPerformanceDashboard', 'refreshPerformanceMonitor', 'refreshPerformanceDashboard', 'changePerformanceCampaignContext', 'handlePerformanceTopMetricChange', 'refreshPerformanceReviewEvidence', 'generatePerformanceAiReviewDraft', 'loadPerformanceContents', 'loadPerformanceFreshnessQueue', 'openPerformanceFreshnessInput', 'refreshPerformanceUpdateStatus', 'runPerformanceProviderRefresh', 'loadPerformanceIntegrationPreview', 'loadPerformanceFeishuConnection', 'savePerformanceFeishuConnectionDraft', 'approvePerformanceFeishuConnectionDraft', 'downloadPerformanceFeishuSnapshot', 'createPerformanceContent', 'downloadPerformanceTemplate', 'handlePerformanceImport', 'handlePerformanceDrop', 'downloadPerformanceMetricsTemplate', 'handlePerformanceMetricsImport', 'handlePerformanceMetricsDrop', 'openPerformanceInputModal', 'closePerformanceInputModal', 'savePerformanceInput', 'loadPerformanceDashboard', 'loadPerformanceReviewEvidence', 'debouncedPerformanceContentSearch', 'exportPerformanceContents',
     'sendChat', 'clearChat', 'clearAIMemory', 'pushToFeishu', 'loadFeishuStatus', 'loadFeishuOutbox', 'testFeishuConnection', 'selectFeishuReconciliationDelivery', 'reconcileFeishuDelivery', 'selectFeishuRetryDelivery', 'retryFeishuDelivery',
     'switchAdminTab', 'loadAdminDashboard', 'loadAdminUsers', 'adminAddUser', 'adminCreateInvite', 'adminResetPw',
     'wfUndo', 'wfRedo', 'wfClearCanvas', 'wfSaveTemplate', 'wfPublishTemplate', 'wfResetTaskFilters', 'wfLoadTasks', 'wfLoadInstances',

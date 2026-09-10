@@ -26,6 +26,9 @@ const {
   PerformanceCollectionRunServiceError,
   createPerformanceCollectionRunService
 } = require('./services/performance_collection_run_service');
+const {
+  PerformanceProviderCollectionServiceError
+} = require('./services/performance_provider_collection_service');
 
 function requestId(request) {
   return request.requestId ||
@@ -38,6 +41,7 @@ function sendError(request, response, error) {
     error instanceof PerformanceFeishuConnectionServiceError ||
     error instanceof PerformanceFeishuProjectionServiceError ||
     error instanceof PerformanceCollectionRunServiceError ||
+    error instanceof PerformanceProviderCollectionServiceError ||
     error instanceof PerformanceAiReviewServiceError ||
     error instanceof CustomerReportSnapshotServiceError ||
     error instanceof CustomerReportDeliveryServiceError;
@@ -129,6 +133,12 @@ function registerPerformanceRoutes(app, options = {}) {
   if (!collectionRunService || typeof collectionRunService.listRuns !== 'function') {
     throw new TypeError('A performance collection run service is required.');
   }
+  const providerCollectionService = options.providerCollectionService;
+  if (!providerCollectionService ||
+    typeof providerCollectionService.getCampaignStatus !== 'function' ||
+    typeof providerCollectionService.runCampaign !== 'function') {
+    throw new TypeError('A performance provider collection service is required.');
+  }
   const feishuConnectionService = options.feishuConnectionService ||
     createPerformanceFeishuConnectionService(options.db);
   if (!feishuConnectionService ||
@@ -206,6 +216,28 @@ function registerPerformanceRoutes(app, options = {}) {
         campaignId: request.params.id,
         query: request.query || {}
       }));
+    } catch (error) {
+      return sendError(request, response, error);
+    }
+  });
+
+  app.post('/api/campaigns/:id/performance/provider-refresh', options.authMiddleware, async (request, response) => {
+    try {
+      if (!request.body || typeof request.body !== 'object' || Array.isArray(request.body) ||
+        Object.getPrototypeOf(request.body) !== Object.prototype || Object.keys(request.body).length !== 0) {
+        throw new PerformanceProviderCollectionServiceError(
+          400,
+          'PERFORMANCE_PROVIDER_REQUEST_INVALID',
+          'Request body must be an empty JSON object.'
+        );
+      }
+      const result = await providerCollectionService.runCampaign({
+        userId: authenticatedUserId(request),
+        campaignId: request.params.id,
+        triggerMode: 'manual',
+        idempotencyKey: requestHeader(request, 'Idempotency-Key')
+      });
+      return sendResult(request, response, result);
     } catch (error) {
       return sendError(request, response, error);
     }

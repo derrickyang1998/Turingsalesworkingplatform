@@ -330,14 +330,23 @@ function observationHistoryCursor(value) {
       { field: 'cursor' }
     );
   }
-  if (
-    !isPlainObject(parsed) ||
-    Object.keys(parsed).sort().join(',') !== 'id,observed_at,watermark_id' ||
-    !Number.isSafeInteger(parsed.id) || parsed.id <= 0 ||
-    !Number.isSafeInteger(parsed.watermark_id) || parsed.watermark_id < parsed.id ||
-    !isStrictIsoTimestamp(parsed.observed_at) ||
-    canonicalIsoTimestamp(parsed.observed_at) !== parsed.observed_at
-  ) {
+  const commonValid = isPlainObject(parsed) &&
+    Number.isSafeInteger(parsed.id) && parsed.id > 0 &&
+    isStrictIsoTimestamp(parsed.observed_at) &&
+    canonicalIsoTimestamp(parsed.observed_at) === parsed.observed_at;
+  const legacyValid = commonValid &&
+    Object.keys(parsed).sort().join(',') === 'id,observed_at,watermark_id' &&
+    Number.isSafeInteger(parsed.watermark_id) && parsed.watermark_id >= parsed.id;
+  const combinedValid = commonValid &&
+    Object.keys(parsed).sort().join(',') === 'id,observed_at,source,version,watermark_manual_id,watermark_provider_id' &&
+    parsed.version === 2 &&
+    (parsed.source === 'stored' || parsed.source === 'provider') &&
+    Number.isSafeInteger(parsed.watermark_manual_id) && parsed.watermark_manual_id >= 0 &&
+    Number.isSafeInteger(parsed.watermark_provider_id) && parsed.watermark_provider_id >= 0 &&
+    (parsed.source === 'stored'
+      ? parsed.watermark_manual_id >= parsed.id
+      : parsed.watermark_provider_id >= parsed.id);
+  if (!legacyValid && !combinedValid) {
     throw serviceError(
       400,
       'PERFORMANCE_OBSERVATION_HISTORY_INVALID',
@@ -345,18 +354,39 @@ function observationHistoryCursor(value) {
       { field: 'cursor' }
     );
   }
+  if (legacyValid) {
+    return {
+      version: 1,
+      id: parsed.id,
+      observedAt: parsed.observed_at,
+      watermarkId: parsed.watermark_id
+    };
+  }
   return {
+    version: 2,
     id: parsed.id,
     observedAt: parsed.observed_at,
-    watermarkId: parsed.watermark_id
+    source: parsed.source,
+    watermarkManualId: parsed.watermark_manual_id,
+    watermarkProviderId: parsed.watermark_provider_id
   };
 }
 
-function observationHistoryCursorToken(item, watermarkId) {
+function observationHistoryCursorToken(item, watermark) {
+  if (watermark && typeof watermark === 'object') {
+    return Buffer.from(JSON.stringify({
+      version: 2,
+      id: item.id,
+      source: item.storage_source,
+      observed_at: item.observed_at,
+      watermark_manual_id: watermark.manual,
+      watermark_provider_id: watermark.provider
+    }), 'utf8').toString('base64url');
+  }
   return Buffer.from(JSON.stringify({
     id: item.id,
     observed_at: item.observed_at,
-    watermark_id: watermarkId
+    watermark_id: watermark
   }), 'utf8').toString('base64url');
 }
 
@@ -753,6 +783,9 @@ function calculateRowMetrics(row) {
     commercial: rowCommercialToMetricInput(row),
     costBasis: 'total_campaign_cost',
     auditLineage: row && row.observation_id ? [{
+      type: row.observation_storage_source === 'provider'
+        ? 'performance_provider_observation'
+        : 'performance_metric_observation',
       observation_id: row.observation_id,
       publication_id: row.id,
       observed_at: row.observed_at
@@ -796,6 +829,10 @@ function serializePublication(row, capabilities) {
     source_mode: row.observation_source_mode,
     ...safeJson(row.metrics_json, {})
   };
+  if (latestObservation && row.observation_storage_source === 'provider') {
+    latestObservation.provider = row.observation_provider;
+    latestObservation.availability = safeJson(row.observation_availability_json, {});
+  }
   if (latestObservation && capabilities.can_view_commercial) {
     latestObservation.correction_reason = row.observation_correction_reason;
   }
@@ -869,7 +906,8 @@ function reviewObservationReference(content) {
   return {
     id: observation.id,
     observed_at: observation.observed_at,
-    source_mode: observation.source_mode
+    source_mode: observation.source_mode,
+    provider: observation.provider || null
   };
 }
 
@@ -1244,6 +1282,10 @@ function createPerformanceManualService(db, options = {}) {
     SELECT 1 FROM sqlite_schema
     WHERE type='table' AND name='collaboration_publication_lifecycle_versions'
   `).get());
+  const providerObservationsAvailable = Boolean(db.prepare(`
+    SELECT 1 FROM sqlite_schema
+    WHERE type='table' AND name='performance_provider_observations'
+  `).get());
 
   function requireAccess(userIdValue, campaignIdValue, mode) {
     const userId = canonicalId(userIdValue);
@@ -1439,6 +1481,7 @@ function createPerformanceManualService(db, options = {}) {
         publication.*,
         observation.id AS observation_id,observation.source_mode AS observation_source_mode,
         observation.metrics_json,observation.observed_at,
+        observation.created_at AS observation_created_at,
         observation.correction_reason AS observation_correction_reason,
         manual.id AS manual_id,manual.commercial_json,manual.approval_state,
         manual.correction_reason AS manual_correction_reason,
@@ -1482,6 +1525,47 @@ function createPerformanceManualService(db, options = {}) {
       WHERE ${where.join(' AND ')}
       ORDER BY publication.created_at DESC,publication.id DESC${limitClause}
     `).all(...listParams);
+    if (providerObservationsAvailable && rows.length > 0) {
+      const publicationIds = rows.map((row) => Number(row.id));
+      const publicationPlaceholders = publicationIds.map(() => '?').join(',');
+      const latestProviderRows = db.prepare(`
+        SELECT observation.*
+        FROM performance_provider_observations observation
+        WHERE observation.org_id=? AND observation.campaign_id=?
+          AND observation.publication_id IN (${publicationPlaceholders})
+          AND observation.id=(
+            SELECT candidate.id
+            FROM performance_provider_observations candidate
+            WHERE candidate.org_id=observation.org_id
+              AND candidate.campaign_id=observation.campaign_id
+              AND candidate.publication_id=observation.publication_id
+            ORDER BY julianday(candidate.observed_at) DESC,candidate.id DESC LIMIT 1
+          )
+      `).all(context.access.campaign.org_id, context.campaignId, ...publicationIds);
+      const providerByPublication = new Map(latestProviderRows.map((row) => [Number(row.publication_id), row]));
+      rows.forEach((row) => {
+        const provider = providerByPublication.get(Number(row.id));
+        if (!provider) return;
+        const storedObserved = Date.parse(row.observed_at || '');
+        const providerObserved = Date.parse(provider.observed_at || '');
+        const storedCreated = Date.parse(row.observation_created_at || '');
+        const providerCreated = Date.parse(provider.created_at || '');
+        const useProvider = !Number.isFinite(storedObserved) || providerObserved > storedObserved ||
+          (providerObserved === storedObserved && (
+            !Number.isFinite(storedCreated) || providerCreated >= storedCreated
+          ));
+        if (!useProvider) return;
+        row.observation_id = Number(provider.id);
+        row.observation_storage_source = 'provider';
+        row.observation_source_mode = 'provider';
+        row.observation_provider = provider.provider;
+        row.observation_availability_json = provider.availability_json;
+        row.metrics_json = provider.metrics_json;
+        row.observed_at = provider.observed_at;
+        row.observation_created_at = provider.created_at;
+        row.observation_correction_reason = null;
+      });
+    }
     return { total, rows };
   }
 
@@ -2047,42 +2131,114 @@ function createPerformanceManualService(db, options = {}) {
     assertOnlyKeys(query, ['limit', 'cursor'], 'PERFORMANCE_OBSERVATION_HISTORY_INVALID');
     const limit = observationHistoryLimit(query.limit);
     const cursor = observationHistoryCursor(query.cursor);
-    const watermarkId = cursor
-      ? cursor.watermarkId
-      : Number(db.prepare(`
-        SELECT COALESCE(MAX(id),0) AS id
-        FROM performance_metric_observations
-        WHERE org_id=? AND campaign_id=? AND publication_id=?
-      `).get(
+    const useCombinedHistory = providerObservationsAvailable && (!cursor || cursor.version === 2);
+    let watermark;
+    let rows;
+    if (useCombinedHistory) {
+      watermark = cursor ? {
+        manual: cursor.watermarkManualId,
+        provider: cursor.watermarkProviderId
+      } : {
+        manual: Number(db.prepare(`
+          SELECT COALESCE(MAX(id),0) AS id FROM performance_metric_observations
+          WHERE org_id=? AND campaign_id=? AND publication_id=?
+        `).get(context.access.campaign.org_id, context.campaignId, contentId).id),
+        provider: Number(db.prepare(`
+          SELECT COALESCE(MAX(id),0) AS id FROM performance_provider_observations
+          WHERE org_id=? AND campaign_id=? AND publication_id=?
+        `).get(context.access.campaign.org_id, context.campaignId, contentId).id)
+      };
+      const cursorClause = cursor ? `
+        WHERE (
+          julianday(observed_at)<julianday(?) OR (
+            julianday(observed_at)=julianday(?) AND (
+              source_rank<? OR (source_rank=? AND id<?)
+            )
+          )
+        )` : '';
+      const params = [
         context.access.campaign.org_id,
         context.campaignId,
-        contentId
-      ).id);
-    const cursorClause = cursor
-      ? ' AND (julianday(observation.observed_at)<julianday(?) OR (julianday(observation.observed_at)=julianday(?) AND observation.id<?))'
-      : '';
-    const params = [
-      context.access.campaign.org_id,
-      context.campaignId,
-      contentId,
-      watermarkId
-    ];
-    if (cursor) params.push(cursor.observedAt, cursor.observedAt, cursor.id);
-    params.push(limit + 1);
-    const rows = db.prepare(`
-      SELECT
-        observation.id,observation.source_mode,observation.metrics_json,
-        observation.observed_at,observation.correction_reason,observation.created_at
-      FROM performance_metric_observations observation
-      WHERE observation.org_id=? AND observation.campaign_id=?
-        AND observation.publication_id=? AND observation.id<=?${cursorClause}
-      ORDER BY julianday(observation.observed_at) DESC,observation.id DESC
-      LIMIT ?
-    `).all(...params);
+        contentId,
+        watermark.manual,
+        context.access.campaign.org_id,
+        context.campaignId,
+        contentId,
+        watermark.provider
+      ];
+      if (cursor) {
+        const sourceRank = cursor.source === 'provider' ? 1 : 0;
+        params.push(cursor.observedAt, cursor.observedAt, sourceRank, sourceRank, cursor.id);
+      }
+      params.push(limit + 1);
+      rows = db.prepare(`
+        WITH observations AS (
+          SELECT
+            observation.id,'stored' AS storage_source,0 AS source_rank,
+            observation.source_mode,NULL AS provider,NULL AS availability_json,
+            observation.metrics_json,observation.observed_at,
+            observation.correction_reason,observation.created_at
+          FROM performance_metric_observations observation
+          WHERE observation.org_id=? AND observation.campaign_id=?
+            AND observation.publication_id=? AND observation.id<=?
+          UNION ALL
+          SELECT
+            observation.id,'provider' AS storage_source,1 AS source_rank,
+            'provider' AS source_mode,observation.provider,observation.availability_json,
+            observation.metrics_json,observation.observed_at,
+            NULL AS correction_reason,observation.created_at
+          FROM performance_provider_observations observation
+          WHERE observation.org_id=? AND observation.campaign_id=?
+            AND observation.publication_id=? AND observation.id<=?
+        )
+        SELECT * FROM observations${cursorClause}
+        ORDER BY julianday(observed_at) DESC,source_rank DESC,id DESC
+        LIMIT ?
+      `).all(...params);
+    } else {
+      const watermarkId = cursor
+        ? cursor.watermarkId
+        : Number(db.prepare(`
+          SELECT COALESCE(MAX(id),0) AS id
+          FROM performance_metric_observations
+          WHERE org_id=? AND campaign_id=? AND publication_id=?
+        `).get(
+          context.access.campaign.org_id,
+          context.campaignId,
+          contentId
+        ).id);
+      watermark = watermarkId;
+      const cursorClause = cursor
+        ? ' AND (julianday(observation.observed_at)<julianday(?) OR (julianday(observation.observed_at)=julianday(?) AND observation.id<?))'
+        : '';
+      const params = [
+        context.access.campaign.org_id,
+        context.campaignId,
+        contentId,
+        watermarkId
+      ];
+      if (cursor) params.push(cursor.observedAt, cursor.observedAt, cursor.id);
+      params.push(limit + 1);
+      rows = db.prepare(`
+        SELECT
+          observation.id,'stored' AS storage_source,0 AS source_rank,
+          observation.source_mode,NULL AS provider,NULL AS availability_json,
+          observation.metrics_json,observation.observed_at,
+          observation.correction_reason,observation.created_at
+        FROM performance_metric_observations observation
+        WHERE observation.org_id=? AND observation.campaign_id=?
+          AND observation.publication_id=? AND observation.id<=?${cursorClause}
+        ORDER BY julianday(observation.observed_at) DESC,observation.id DESC
+        LIMIT ?
+      `).all(...params);
+    }
     const snapshots = rows.map((row) => ({
       id: Number(row.id),
+      storage_source: row.storage_source,
       observed_at: canonicalIsoTimestamp(row.observed_at),
       source_mode: row.source_mode,
+      provider: row.provider,
+      availability: safeJson(row.availability_json, {}),
       metrics: observationHistoryMetrics(row.metrics_json),
       created_at: row.created_at,
       correction_reason: row.correction_reason
@@ -2095,9 +2251,16 @@ function createPerformanceManualService(db, options = {}) {
         metrics: snapshot.metrics,
         deltas: observationHistoryDeltas(snapshot, snapshots[index + 1] || null),
         comparison: {
-          previous_observation_id: snapshots[index + 1] ? snapshots[index + 1].id : null
+          previous_observation_id: snapshots[index + 1] ? snapshots[index + 1].id : null,
+          previous_observation_source_mode: snapshots[index + 1]
+            ? snapshots[index + 1].source_mode
+            : null
         }
       };
+      if (snapshot.provider) {
+        item.provider = snapshot.provider;
+        item.availability = snapshot.availability;
+      }
       if (context.capabilities.can_view_commercial && snapshot.correction_reason) {
         item.correction_reason = snapshot.correction_reason;
       }
@@ -2114,7 +2277,7 @@ function createPerformanceManualService(db, options = {}) {
         limit,
         has_more: hasMore,
         next_cursor: hasMore && returned.length
-          ? observationHistoryCursorToken(returned[returned.length - 1], watermarkId)
+          ? observationHistoryCursorToken(snapshots[returned.length - 1], watermark)
           : null
       },
       capabilities: context.capabilities
@@ -2300,7 +2463,9 @@ function createPerformanceManualService(db, options = {}) {
     const observations = rows
       .filter((row) => row.observation_id !== null && row.observation_id !== undefined)
       .map((row) => ({
-        type: 'performance_metric_observation',
+        type: row.observation_storage_source === 'provider'
+          ? 'performance_provider_observation'
+          : 'performance_metric_observation',
         publication_id: Number(row.id),
         observation_id: Number(row.observation_id),
         observed_at: row.observed_at
@@ -2374,6 +2539,9 @@ function createPerformanceManualService(db, options = {}) {
     const records = Object.assign({}, dashboardResult.records);
     if (!context.capabilities.can_view_commercial) delete records.confirmed_commercial;
     const rankings = buildReviewRankings(contents, query.topMetric);
+    const providerObservationCount = contents.filter((content) => (
+      content.latest_observation && content.latest_observation.provider === 'youtube'
+    )).length;
     return {
       contract_version: REVIEW_EVIDENCE_CONTRACT_VERSION,
       campaign_id: context.campaignId,
@@ -2403,10 +2571,16 @@ function createPerformanceManualService(db, options = {}) {
           status: 'not_collected',
           reason: 'authorized_media_access_required'
         },
-        external_collection: {
-          status: 'not_connected',
-          reason: 'provider_not_enabled'
-        },
+        external_collection: providerObservationCount > 0
+          ? {
+            status: 'included',
+            provider: 'youtube',
+            current_observations: providerObservationCount
+          }
+          : {
+            status: 'not_observed',
+            current_observations: 0
+          },
         causal_diagnosis: {
           status: 'not_available',
           reason: 'media_evidence_not_collected'

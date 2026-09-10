@@ -1076,7 +1076,7 @@ function compactSqliteClone(sourcePath, outputPath, mutate, options = {}) {
   return outputPath;
 }
 
-test('manifest declares exact managed v1 as primary and keeps isolated v6 through v18 profiles', () => {
+test('manifest declares exact managed v1 as primary and keeps isolated v6 through v19 profiles', () => {
   const v1Fixture = migratedFixture('manifest-v1-primary', 1);
   const v6Fixture = migratedFixture('manifest-v6-isolated', 6);
   const v7Fixture = migratedFixture('manifest-v7-isolated', 7);
@@ -1091,9 +1091,10 @@ test('manifest declares exact managed v1 as primary and keeps isolated v6 throug
   const v16Fixture = migratedFixture('manifest-v16-isolated', 16);
   const v17Fixture = migratedFixture('manifest-v17-isolated', 17);
   const v18Fixture = migratedFixture('manifest-v18-isolated', 18);
+  const v19Fixture = migratedFixture('manifest-v19-isolated', 19);
   try {
     assert.equal(manifest.schemaVersion, 1);
-    assert.deepEqual(manifest.exactProfiles.map((profile) => profile.schemaVersion), [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]);
+    assert.deepEqual(manifest.exactProfiles.map((profile) => profile.schemaVersion), [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]);
     assert.equal(
       manifest.categories['sensitive-number'],
       'deterministic rank bucket preserving null/equality/cardinality'
@@ -1113,6 +1114,7 @@ test('manifest declares exact managed v1 as primary and keeps isolated v6 throug
     const v16Profile = sanitizer._testing.manifestProfileForVersion(manifest, 16);
     const v17Profile = sanitizer._testing.manifestProfileForVersion(manifest, 17);
     const v18Profile = sanitizer._testing.manifestProfileForVersion(manifest, 18);
+    const v19Profile = sanitizer._testing.manifestProfileForVersion(manifest, 19);
     assert.equal(v1Profile.schemaVersion, 1);
     assert.equal(v6Profile.schemaVersion, 6);
     assert.equal(v7Profile.schemaVersion, 7);
@@ -1127,6 +1129,7 @@ test('manifest declares exact managed v1 as primary and keeps isolated v6 throug
     assert.equal(v16Profile.schemaVersion, 16);
     assert.equal(v17Profile.schemaVersion, 17);
     assert.equal(v18Profile.schemaVersion, 18);
+    assert.equal(v19Profile.schemaVersion, 19);
     assert.equal(v1Profile.objects.length, sanitizer.actualInventory(v1Fixture.db).length);
     assert.equal(v6Profile.objects.length, sanitizer.actualInventory(v6Fixture.db).length);
     assert.equal(v7Profile.objects.length, sanitizer.actualInventory(v7Fixture.db).length);
@@ -1141,6 +1144,7 @@ test('manifest declares exact managed v1 as primary and keeps isolated v6 throug
     assert.equal(v16Profile.objects.length, sanitizer.actualInventory(v16Fixture.db).length);
     assert.equal(v17Profile.objects.length, sanitizer.actualInventory(v17Fixture.db).length);
     assert.equal(v18Profile.objects.length, sanitizer.actualInventory(v18Fixture.db).length);
+    assert.equal(v19Profile.objects.length, sanitizer.actualInventory(v19Fixture.db).length);
     for (const profile of [v1Profile, v6Profile, v7Profile, v8Profile]) {
       assert.equal(profile.jsonPolicy.preserveLeafTypes, true);
       assert.equal(
@@ -1167,6 +1171,7 @@ test('manifest declares exact managed v1 as primary and keeps isolated v6 throug
     assert.equal(v16Profile.semanticPolicies.structuralColumns.validatorVersion, 'tm-structural-policy-v12-contract-document-custody');
     assert.equal(v17Profile.semanticPolicies.structuralColumns.validatorVersion, 'tm-structural-policy-v13-publication-custody');
     assert.equal(v18Profile.semanticPolicies.structuralColumns.validatorVersion, 'tm-structural-policy-v14-publication-lifecycle');
+    assert.equal(v19Profile.semanticPolicies.structuralColumns.validatorVersion, 'tm-structural-policy-v16-performance-provider-lease');
     assert.doesNotThrow(() => sanitizer.validateManifest(manifest, v1Fixture.db));
     assert.doesNotThrow(() => sanitizer.validateManifest(manifest, v6Fixture.db));
     assert.doesNotThrow(() => sanitizer.validateManifest(manifest, v7Fixture.db));
@@ -1181,6 +1186,7 @@ test('manifest declares exact managed v1 as primary and keeps isolated v6 throug
     assert.doesNotThrow(() => sanitizer.validateManifest(manifest, v16Fixture.db));
     assert.doesNotThrow(() => sanitizer.validateManifest(manifest, v17Fixture.db));
     assert.doesNotThrow(() => sanitizer.validateManifest(manifest, v18Fixture.db));
+    assert.doesNotThrow(() => sanitizer.validateManifest(manifest, v19Fixture.db));
   } finally {
     closeAndRemove(v1Fixture);
     closeAndRemove(v6Fixture);
@@ -1196,6 +1202,192 @@ test('manifest declares exact managed v1 as primary and keeps isolated v6 throug
     closeAndRemove(v16Fixture);
     closeAndRemove(v17Fixture);
     closeAndRemove(v18Fixture);
+    closeAndRemove(v19Fixture);
+  }
+});
+
+test('v19 sanitizer preserves provider JSON contracts and rebuilds observation evidence', () => {
+  const fixture = migratedFixture('provider-contract-evidence-v19', 19);
+  const populated = populateCriticalReviewFixture(fixture);
+  const publicationId = 881030;
+  const sourceContentId = 'privateVideo123';
+  const metrics = { views: 12000, likes: 340, comments: 18 };
+  const availability = {
+    views: { available: true },
+    likes: { available: true },
+    comments: { available: true },
+    saves: { available: false, reason_code: 'provider_metric_unavailable' },
+    shares: { available: false, reason_code: 'provider_metric_unavailable' },
+    clicks: { available: false, reason_code: 'manual_input_required' },
+    revenue: { available: false, reason_code: 'manual_input_required' },
+    cost: { available: false, reason_code: 'manual_input_required' }
+  };
+  const observedAt = '2026-09-11T03:00:00.000Z';
+  const originalPayload = JSON.stringify({
+    provider: 'youtube',
+    provider_content_id: sourceContentId,
+    metrics,
+    availability,
+    observed_at: observedAt
+  });
+  try {
+    fixture.db.prepare(`
+      INSERT INTO campaign_publications (
+        id,org_id,campaign_id,canonical_identity,original_url,canonical_url,platform,
+        platform_content_id,tags_json,custom_fields_json,search_payload_json,source_mode,
+        mapping_version,source_row_number,created_by
+      ) VALUES (?,?,?,?,?,?,?,?,'[]','{}','{}','manual','sanitizer-v19',1,?)
+    `).run(
+      publicationId,
+      populated.orgId,
+      populated.campaignId,
+      `youtube:${sourceContentId}`,
+      `https://www.youtube.com/watch?v=${sourceContentId}`,
+      `https://www.youtube.com/watch?v=${sourceContentId}`,
+      'youtube',
+      sourceContentId,
+      populated.userId
+    );
+    const runId = Number(fixture.db.prepare(`
+      INSERT INTO performance_provider_collection_runs (
+        org_id,campaign_id,provider,run_key,trigger_mode,requested_by,status,
+        counts_json,item_results_json,safe_error_category,scheduled_for,started_at,completed_at
+      ) VALUES (?,?, 'youtube',?,'manual',?,'succeeded',?,?,NULL,?,?,?)
+    `).run(
+      populated.orgId,
+      populated.campaignId,
+      'a'.repeat(64),
+      populated.userId,
+      JSON.stringify({ total: 1, succeeded: 1, failed: 0 }),
+      JSON.stringify([{
+        publication_id: publicationId,
+        provider_content_id: sourceContentId,
+        status: 'succeeded',
+        attempts: 1,
+        safe_error_category: null,
+        observed_at: observedAt
+      }]),
+      observedAt,
+      observedAt,
+      observedAt
+    ).lastInsertRowid);
+    fixture.db.prepare(`
+      INSERT INTO performance_provider_observations (
+        run_id,org_id,campaign_id,publication_id,provider,provider_content_id,
+        metrics_json,availability_json,observed_at,payload_sha256,created_by
+      ) VALUES (?,?,?,?, 'youtube',?,?,?,?,?,?)
+    `).run(
+      runId,
+      populated.orgId,
+      populated.campaignId,
+      publicationId,
+      sourceContentId,
+      JSON.stringify(metrics),
+      JSON.stringify(availability),
+      observedAt,
+      sha256Text(originalPayload),
+      populated.userId
+    );
+    fixture.db.prepare(`
+      INSERT INTO performance_provider_collection_claims (
+        org_id,campaign_id,provider,run_key,trigger_mode,requested_by,
+        requested_items,reserved_quota_units,lease_token,lease_until
+      ) VALUES (?,?,'youtube',?,'manual',?,1,3,?,?)
+    `).run(
+      populated.orgId,
+      populated.campaignId,
+      'b'.repeat(64),
+      populated.userId,
+      'c'.repeat(64),
+      '2026-09-11T03:10:00.000Z'
+    );
+    const insertQuotaReservation = fixture.db.prepare(`
+      INSERT INTO performance_provider_quota_reservations (
+        org_id,campaign_id,provider,run_key,trigger_mode,requested_by,
+        requested_items,reserved_quota_units,created_at
+      ) VALUES (?,?,'youtube',?,'manual',?,1,3,?)
+    `);
+    insertQuotaReservation.run(
+      populated.orgId,
+      populated.campaignId,
+      'a'.repeat(64),
+      populated.userId,
+      observedAt
+    );
+    insertQuotaReservation.run(
+      populated.orgId,
+      populated.campaignId,
+      'b'.repeat(64),
+      populated.userId,
+      observedAt
+    );
+    fixture.db.close();
+
+    const outputPath = path.join(fixture.root, 'provider-contract-evidence-v19-sanitized.db');
+    sanitizer.sanitizeProductionShape({ sourcePath: fixture.dbPath, outputPath });
+    const output = new Database(outputPath, { readonly: true, fileMustExist: true });
+    try {
+      const run = output.prepare(`
+        SELECT run_key,counts_json,item_results_json
+        FROM performance_provider_collection_runs WHERE id=?
+      `).get(runId);
+      const observation = output.prepare(`
+        SELECT provider,provider_content_id,metrics_json,availability_json,observed_at,payload_sha256
+        FROM performance_provider_observations WHERE run_id=?
+      `).get(runId);
+      const publication = output.prepare('SELECT platform_content_id FROM campaign_publications WHERE id=?')
+        .get(publicationId);
+      const claim = output.prepare(`
+        SELECT run_key,lease_token,lease_until
+        FROM performance_provider_collection_claims
+      `).get();
+      const quotaReservations = output.prepare(`
+        SELECT run_key,requested_items,reserved_quota_units,created_at
+        FROM performance_provider_quota_reservations
+        ORDER BY id
+      `).all();
+      assert.deepEqual(JSON.parse(run.counts_json), { total: 1, succeeded: 1, failed: 0 });
+      assert.deepEqual(Object.keys(JSON.parse(run.item_results_json)[0]).sort(), [
+        'attempts', 'observed_at', 'provider_content_id', 'publication_id', 'safe_error_category', 'status'
+      ]);
+      const sanitizedMetrics = JSON.parse(observation.metrics_json);
+      assert.deepEqual(Object.keys(sanitizedMetrics).sort(), ['comments', 'likes', 'views']);
+      assert.notDeepEqual(sanitizedMetrics, metrics);
+      assert.deepEqual(JSON.parse(observation.availability_json), availability);
+      assert.equal(observation.provider_content_id, publication.platform_content_id);
+      assert.equal(JSON.parse(run.item_results_json)[0].provider_content_id, observation.provider_content_id);
+      assert.notEqual(observation.provider_content_id, sourceContentId);
+      const rebuiltPayload = JSON.stringify({
+        provider: observation.provider,
+        provider_content_id: observation.provider_content_id,
+        metrics: sanitizedMetrics,
+        availability: JSON.parse(observation.availability_json),
+        observed_at: observation.observed_at
+      });
+      assert.equal(observation.payload_sha256, sha256Text(rebuiltPayload));
+      assert.notEqual(observation.payload_sha256, sha256Text(originalPayload));
+      assert.match(claim.run_key, /^[0-9a-f]{64}$/);
+      assert.notEqual(claim.run_key, 'b'.repeat(64));
+      assert.match(claim.lease_token, /^[0-9a-f]{64}$/);
+      assert.notEqual(claim.lease_token, 'c'.repeat(64));
+      assert.equal(claim.lease_until, '2026-09-11T03:10:00.000Z');
+      assert.equal(quotaReservations.length, 2);
+      assert.equal(quotaReservations[0].run_key, run.run_key);
+      assert.equal(quotaReservations[1].run_key, claim.run_key);
+      assert.notEqual(quotaReservations[0].run_key, quotaReservations[1].run_key);
+      for (const quotaReservation of quotaReservations) {
+        assert.match(quotaReservation.run_key, /^[0-9a-f]{64}$/);
+        assert.equal(quotaReservation.requested_items, 1);
+        assert.equal(quotaReservation.reserved_quota_units, 3);
+        assert.equal(quotaReservation.created_at, observedAt);
+      }
+      assert.equal(output.pragma('integrity_check', { simple: true }), 'ok');
+      assert.deepEqual(output.pragma('foreign_key_check'), []);
+    } finally {
+      output.close();
+    }
+  } finally {
+    closeAndRemove(fixture);
   }
 });
 
@@ -2237,7 +2429,7 @@ test('secret-null fails closed for non-null data and malformed or partial output
   closeAndRemove(fixture);
 });
 
-test('campaign migration gate sanitizes populated managed v1 and verifies two exact restores through v18', () => {
+test('campaign migration gate sanitizes populated managed v1 and verifies two exact restores through v19', () => {
   const fixture = migratedFixture('twice', 1);
   const populated = populateManagedV1GateFixture(fixture);
   const sourceClassification = migrationService.classifyDatabase(fixture.db, {
@@ -2254,7 +2446,7 @@ test('campaign migration gate sanitizes populated managed v1 and verifies two ex
   assert.equal(report.format, 'tm-campaign-migration-gate-v1');
   assert.equal(report.runs, 2);
   assert.equal(report.sourceVersion, 1);
-  assert.equal(report.targetVersion, 18);
+  assert.equal(report.targetVersion, 19);
   assert.equal(report.preMigrationRestoreVerified, true);
   assert.equal(report.legacyPreservationVerified, true);
   const sanitizedPath = path.join(fixture.root, 'stage-preservation-sanitized.db');

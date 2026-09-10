@@ -11,7 +11,8 @@ const PUBLICATION_LOOKUP_CHUNK = 400;
 const COLLECTION_ACTIONS = Object.freeze([
   'performance_content_import',
   'performance_metric_import',
-  'performance_manual_input'
+  'performance_manual_input',
+  'performance_provider_collection'
 ]);
 
 class PerformanceCollectionRunServiceError extends Error {
@@ -133,9 +134,47 @@ function manualRun(row, details, authorizedPublicationIds) {
   };
 }
 
-function projectRun(row, campaignId, authorizedPublicationIds) {
+function providerRun(db, row, details, context) {
+  const runId = positiveId(details.provider_run_id);
+  if (runId === null || details.provider !== 'youtube') return null;
+  const providerTable = db.prepare(
+    "SELECT 1 AS present FROM sqlite_schema WHERE type='table' AND name='performance_provider_collection_runs'"
+  ).get();
+  if (!providerTable) return null;
+  const provider = db.prepare(`
+    SELECT id,provider,trigger_mode,status,counts_json,safe_error_category,completed_at
+    FROM performance_provider_collection_runs
+    WHERE id=? AND org_id=? AND campaign_id=? AND provider='youtube'
+  `).get(runId, context.access.campaign.org_id, context.campaignId);
+  if (!provider) return null;
+  const counts = safeJson(provider.counts_json);
+  const succeeded = counts && strictCount(counts.succeeded);
+  const failed = counts && strictCount(counts.failed);
+  const total = counts && strictCount(counts.total);
+  if (
+    succeeded === null || failed === null || total === null ||
+    total !== succeeded + failed ||
+    !['succeeded', 'partial', 'failed'].includes(provider.status)
+  ) return null;
+  return {
+    id: Number(row.id),
+    provider_run_id: Number(provider.id),
+    operation: 'provider_refresh',
+    scope: 'campaign',
+    publication_id: null,
+    source_mode: 'provider',
+    provider: provider.provider,
+    trigger_mode: provider.trigger_mode,
+    status: provider.status,
+    counts: { total, succeeded, duplicate: 0, failed },
+    safe_error_category: provider.safe_error_category || null,
+    completed_at: canonicalTimestamp(provider.completed_at)
+  };
+}
+
+function projectRun(db, row, context, authorizedPublicationIds) {
   const details = safeJson(row && row.details);
-  if (!details || positiveId(details.campaign_id) !== campaignId) return null;
+  if (!details || positiveId(details.campaign_id) !== context.campaignId) return null;
   if (row.action === 'performance_content_import') {
     return importRun(row, details, 'content_import');
   }
@@ -144,6 +183,9 @@ function projectRun(row, campaignId, authorizedPublicationIds) {
   }
   if (row.action === 'performance_manual_input') {
     return manualRun(row, details, authorizedPublicationIds);
+  }
+  if (row.action === 'performance_provider_collection') {
+    return providerRun(db, row, details, context);
   }
   return null;
 }
@@ -173,6 +215,7 @@ function createPerformanceCollectionRunService(db, options = {}) {
     throw new TypeError('A SQLite database is required.');
   }
   const getCampaignAccess = options.getCampaignAccess || defaultGetCampaignAccess;
+  const providerStatusService = options.providerStatusService || null;
 
   function requireAccess(userIdValue, campaignIdValue) {
     const userId = positiveId(userIdValue);
@@ -232,7 +275,7 @@ function createPerformanceCollectionRunService(db, options = {}) {
     const windowRows = rows.slice(0, MAX_HISTORY_ROWS);
     const authorizedPublicationIds = authorizedManualPublicationIds(db, windowRows, context);
     const projected = windowRows
-      .map((row) => projectRun(row, context.campaignId, authorizedPublicationIds))
+      .map((row) => projectRun(db, row, context, authorizedPublicationIds))
       .filter(Boolean);
     const items = projected.slice(0, limit);
     const summary = projected.reduce((result, item) => {
@@ -241,12 +284,15 @@ function createPerformanceCollectionRunService(db, options = {}) {
       return result;
     }, { total: 0, succeeded: 0, partial: 0, failed: 0 });
     summary.latest_completed_at = projected.length ? projected[0].completed_at : null;
+    const providerStatus = providerStatusService && typeof providerStatusService.getCampaignStatus === 'function'
+      ? providerStatusService.getCampaignStatus({ userId: context.userId, campaignId: context.campaignId })
+      : null;
     return {
       contract_version: COLLECTION_RUN_CONTRACT_VERSION,
       campaign_id: context.campaignId,
       source: {
         mode: 'audit_projection',
-        provider_dispatch_available: false,
+        provider_dispatch_available: Boolean(providerStatus && providerStatus.dispatch_available),
         audit_scan_limit: MAX_ACTIVITY_SCAN_ROWS,
         audit_scan_truncated: auditScanTruncated,
         history_window_limit: MAX_HISTORY_ROWS,

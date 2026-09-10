@@ -193,6 +193,11 @@ const REQUEST_POLICIES = Object.freeze({
     'GET',
     '/api/campaigns/:id/performance/collection-runs'
   ),
+  CAMPAIGN_PERFORMANCE_PROVIDER_REFRESH: emptyControlJson(
+    'campaign.performance.provider-refresh',
+    'POST',
+    '/api/campaigns/:id/performance/provider-refresh'
+  ),
   CAMPAIGN_PERFORMANCE_OBSERVATION_HISTORY: empty(
     'campaign.performance.observation-history',
     'GET',

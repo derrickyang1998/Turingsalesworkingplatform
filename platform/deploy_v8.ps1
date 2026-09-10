@@ -33,10 +33,10 @@ $EXPECTED_PPT_SHA256 = "f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57
 $TRUSTED_SOURCE_GATE_RELATIVE_PATH = "server\scripts\trusted_production_source_gate.js"
 $TRUSTED_SOURCE_MANIFEST_RELATIVE_PATH = "server\scripts\trusted_production_source_manifest.json"
 $TRUSTED_RUNTIME_CONFIG_RELATIVE_PATH = "server\config\runtime_config.js"
-$EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "eb4608f3c47d1f909cc09617bb9c1a993eb010924567e771af89cd5da107ba08"
-$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "2f320f52822e8bbc07fceeb722679bb182d2fc3349497d55d6c4fc8ab3c4d47f"
+$EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "2632b6994c62e13ccc174bfde07ad95281dac9fc2174a6bcf75528a10d52475a"
+$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "ea20bd00ce1788867156284a0d600494acc6213a9010f7833045b1acb5742a4a"
 $EXPECTED_TRUSTED_RUNTIME_CONFIG_SHA256 = "76d43d3e811c6fa8daae987cc9eb2fff2dc8a8095f84b1cd309e4e214df94dcb"
-$EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256 = "5b71b24c5a4cd5fb8847014b8be4acac797ab7a0a4eb7ce9fa064be0fc262cc8"
+$EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256 = "490fc5942f2375d29205ae177755a08f4fb6fa9138c54a8783e3c6d52ca941ac"
 $EXPECTED_TRUSTED_PARSER_VERIFIER_SHA256 = "7f9efaac02675b21e025891a400474cc7481c1adaf58c88bd8b356d5276f2eaa"
 $EXPECTED_TRUSTED_PUBLIC_GUARD_SHA256 = "d45fe8fcc01587aaa0e73eccfb9714c27801e232cb6c0effd6daedb703316d66"
 $EXPECTED_TRUSTED_MIGRATION_CLEANUP_HELPER_SHA256 = "d5f2befa902522dd9de3e9dd2397a99ee5e78ab1a1c6e526a27f14bb2829e1fa"
@@ -118,6 +118,7 @@ $FILES = @(
     "server\migrations\016_collaboration_contract_documents.js",
     "server\migrations\017_collaboration_publication_custody.js",
     "server\migrations\018_collaboration_publication_lifecycle.js",
+    "server\migrations\019_performance_provider_collection.js",
     "server\migrations\baselines\legacy_v1.js",
     "server\migrations\engines\v1.js",
     "server\migrations\vendor\bcryptjs_v3_0_3.js",
@@ -186,6 +187,7 @@ $FILES = @(
     "server\services\performance_freshness_service.js",
     "server\services\performance_manual_service.js",
     "server\services\performance_metrics_service.js",
+    "server\services\performance_provider_collection_service.js",
     "server\services\ppt_artifact_store.js",
     "server\services\public_assets_service.js",
     "server\services\publication_identity_service.js",
@@ -194,6 +196,7 @@ $FILES = @(
     "server\services\upload_sandbox_service.js",
     "server\services\vault_export_service.js",
     "server\services\web_search_service.js",
+    "server\services\youtube_data_api_client.js",
     "server\scripts\adopt_legacy_production_v1.js",
     "server\scripts\bootstrap_production_browser_state.js",
     "server\scripts\bootstrap_production_runtime.sh",
@@ -299,6 +302,8 @@ $FILES = @(
     "server\tests\performance_freshness_service.test.js",
     "server\tests\performance_manual_service.test.js",
     "server\tests\performance_metrics_service.test.js",
+    "server\tests\performance_provider_collection_migration.test.js",
+    "server\tests\performance_provider_collection_service.test.js",
     "server\tests\routes_performance.test.js",
     "server\tests\phase4_nginx_ingress.test.js",
     "server\tests\phase4_request_pipeline.test.js",
@@ -321,6 +326,7 @@ $FILES = @(
     "server\tests\upload_sandbox_self_test.test.js",
     "server\tests\verify_campaign_migration_gate.test.js",
     "server\tests\verify_phase4_one_request_replay.test.js",
+    "server\tests\youtube_data_api_client.test.js",
     "server\tests\browser-baseline.config.js",
     "server\tests\browser-baseline.spec.js",
     "server\tests\deployment-browser-smoke.config.js",

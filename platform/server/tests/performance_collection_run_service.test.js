@@ -27,6 +27,17 @@ function createFixture() {
       org_id INTEGER NOT NULL,
       campaign_id INTEGER NOT NULL
     );
+    CREATE TABLE performance_provider_collection_runs (
+      id INTEGER PRIMARY KEY,
+      org_id INTEGER NOT NULL,
+      campaign_id INTEGER NOT NULL,
+      provider TEXT NOT NULL,
+      trigger_mode TEXT NOT NULL,
+      status TEXT NOT NULL,
+      counts_json TEXT NOT NULL,
+      safe_error_category TEXT,
+      completed_at TEXT NOT NULL
+    );
     INSERT INTO campaign_publications (id,org_id,campaign_id) VALUES (42,3,7),(77,4,8);
   `);
   const service = createPerformanceCollectionRunService(db, {
@@ -153,6 +164,41 @@ test('projects safe campaign-scoped collection history from existing performance
     assert.equal(result.source.history_window_truncated, false);
     assert.doesNotMatch(JSON.stringify(result), /private-mapping-name|bbbbbbbbbbbbbbbb/);
     assert.doesNotMatch(JSON.stringify(result), /"publication_id":77/);
+  } finally {
+    db.close();
+  }
+});
+
+test('validates and projects a provider collection run from its immutable ledger record', () => {
+  const { db, service } = createFixture();
+  try {
+    db.prepare(`
+      INSERT INTO performance_provider_collection_runs (
+        id,org_id,campaign_id,provider,trigger_mode,status,counts_json,safe_error_category,completed_at
+      ) VALUES (50,3,7,'youtube','scheduled','partial',?,'item_failure','2026-09-10T10:09:00.000Z')
+    `).run(JSON.stringify({ total: 3, succeeded: 2, failed: 1 }));
+    insertLog(db, 19, 'performance_provider_collection', {
+      campaign_id: 7,
+      provider: 'youtube',
+      provider_run_id: 50,
+      counts: { total: 999, succeeded: 999, failed: 0 },
+      status: 'succeeded'
+    }, '2026-09-10 10:09:01');
+
+    const result = service.listRuns({ userId: 9, campaignId: 7, query: {} });
+
+    assert.equal(result.items[0].operation, 'provider_refresh');
+    assert.equal(result.items[0].source_mode, 'provider');
+    assert.equal(result.items[0].provider, 'youtube');
+    assert.equal(result.items[0].trigger_mode, 'scheduled');
+    assert.equal(result.items[0].status, 'partial');
+    assert.deepEqual(result.items[0].counts, {
+      total: 3,
+      succeeded: 2,
+      duplicate: 0,
+      failed: 1
+    });
+    assert.equal(result.items[0].safe_error_category, 'item_failure');
   } finally {
     db.close();
   }

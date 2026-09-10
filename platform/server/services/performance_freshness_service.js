@@ -144,6 +144,10 @@ function createPerformanceFreshnessService(options = {}) {
     throw new TypeError('A performance projection service is required.');
   }
   const now = typeof options.now === 'function' ? options.now : () => new Date();
+  const providerStatusService = options.providerStatusService || null;
+  if (providerStatusService && typeof providerStatusService.getCampaignStatus !== 'function') {
+    throw new TypeError('Provider status service is invalid.');
+  }
 
   function getQueue(input = {}) {
     const nowMs = timestampMs(now());
@@ -189,6 +193,21 @@ function createPerformanceFreshnessService(options = {}) {
       within_sla: counts.current + counts.due,
       outside_sla: counts.stale + counts.unobserved + counts.date_required + counts.data_issue
     };
+    const schedule = {
+      latest_observation_at: successTimes.length ? iso(Math.max(...successTimes)) : null,
+      next_due_at: nextDueTimes.length ? iso(Math.min(...nextDueTimes)) : null
+    };
+    const provider = providerStatusService
+      ? providerStatusService.getCampaignStatus({
+          userId: input.userId,
+          campaignId: input.campaignId
+        })
+      : {
+          status: 'not_configured',
+          dispatch_available: false,
+          last_success_at: null,
+          next_due_at: null
+        };
     return {
       contract_version: FRESHNESS_CONTRACT_VERSION,
       campaign_id: Number(input.campaignId),
@@ -206,16 +225,12 @@ function createPerformanceFreshnessService(options = {}) {
           { maximum_publication_age_hours: 4320, cadence_hours: 168 }
         ]
       },
-      provider: {
-        status: 'not_configured',
-        dispatch_available: false,
-        last_success_at: null,
-        next_due_at: null
-      },
-      schedule: {
-        latest_observation_at: successTimes.length ? iso(Math.max(...successTimes)) : null,
-        next_due_at: nextDueTimes.length ? iso(Math.min(...nextDueTimes)) : null
-      },
+      provider: Object.assign({}, provider, {
+        next_due_at: provider && provider.configured === true
+          ? (provider.next_due_at || schedule.next_due_at)
+          : null
+      }),
+      schedule,
       summary,
       queue: {
         total: actionable.length,
