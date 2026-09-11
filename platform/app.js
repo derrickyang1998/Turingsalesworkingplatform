@@ -9141,15 +9141,157 @@ function renderAdminRecentActivity(rows) {
     return '<div style="display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid #eee;font-size:12px"><span><strong>' + esc(a.display_name || '-') + '</strong> ' + esc(a.action || '-') + ' <span style="opacity:.55">' + esc(a.module || '') + '</span></span><span style="opacity:.5;white-space:nowrap">' + esc((a.created_at || '').substring(0, 16)) + '</span></div>';
   }).join('');
 }
-function loadAdminUsers() {
-  apiFetch('/admin/users').then(function(r) { return r.json(); }).then(function(d) { renderAdminUserTable(d.users||[]); }).catch(function(e) {});
+var adminUserPageCursors = [null];
+var adminUserPageIndex = 0;
+var adminUserNextCursor = null;
+var adminUserPageLoading = false;
+var adminUserRefreshPending = false;
+var adminUserFilterSignature = '';
+function buildAdminUserQuery(cursor) {
+  var search = document.getElementById('ad_userSearch');
+  var status = document.getElementById('ad_userStatus');
+  var role = document.getElementById('ad_userRole');
+  var query = ['limit=50'];
+  var searchValue = search ? String(search.value || '').trim() : '';
+  var statusValue = status ? String(status.value || '').trim() : '';
+  var roleValue = role ? String(role.value || '').trim() : '';
+  if (searchValue) query.push('q=' + encodeURIComponent(searchValue));
+  if (statusValue) query.push('status=' + encodeURIComponent(statusValue));
+  if (roleValue) query.push('role=' + encodeURIComponent(roleValue));
+  var parsedCursor = Number(cursor);
+  if (Number.isSafeInteger(parsedCursor) && parsedCursor > 0) query.push('cursor=' + parsedCursor);
+  return '?' + query.join('&');
 }
 function renderAdminUserTable(users) {
   var tbody = document.getElementById('ad_userTableBody');
   if (!tbody) return;
+  if (!users.length) {
+    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;opacity:.55;padding:24px">暂无匹配用户</td></tr>';
+    return;
+  }
   tbody.innerHTML = users.map(function(u) {
-    return '<tr><td><strong>' + esc(u.username) + '</strong></td><td>' + esc(u.display_name) + '</td><td>' + esc(u.department||'-') + '</td><td>' + u.role + '</td><td>' + (u.api_quota||0).toLocaleString() + '</td><td>' + (u.last_login||'').substring(0,10) + '</td><td>' + (u.is_active ? '<span style="color:#0f7b3c">Active</span>' : '<span style="color:#d94641">Inactive</span>') + '</td><td><button class="btn btn-xs" onclick="adminResetPw('+u.id+')">Reset</button> <button class="btn btn-xs" onclick="toggleUserActive('+u.id+','+(u.is_active?0:1)+')">'+(u.is_active?'Disable':'Enable')+'</button></td></tr>';
+    var organizations = Array.isArray(u.organizations) ? u.organizations : [];
+    var organizationHtml = organizations.length ? organizations.map(function(organization) {
+      var active = organization.status === 'active';
+      return '<div style="margin-bottom:5px"><strong>' + esc(organization.name || organization.code || '-') + '</strong>'
+        + '<div style="font-size:11px;opacity:.6">' + esc(organization.role_code || '-') + ' · ' + (active ? '有效' : '已撤销') + '</div></div>';
+    }).join('') : '<span style="opacity:.5">未分配</span>';
+    var teamRows = [];
+    organizations.forEach(function(organization) {
+      var teams = Array.isArray(organization.teams) ? organization.teams : [];
+      teams.forEach(function(team) {
+        teamRows.push('<div style="margin-bottom:5px"><strong>' + esc(team.name || team.code || '-') + '</strong>'
+          + '<div style="font-size:11px;opacity:.6">' + esc(organization.name || organization.code || '-') + ' · '
+          + esc(team.role_code || '-') + ' · ' + (team.status === 'active' ? '有效' : '已撤销') + '</div></div>');
+      });
+    });
+    var teamHtml = teamRows.length ? teamRows.join('') : '<span style="opacity:.5">未分配</span>';
+    var accessRoles = Array.isArray(u.access_roles) ? u.access_roles : [];
+    var accessLabels = {
+      platform_admin: '平台管理员',
+      org_admin: '组织管理员',
+      team_lead: '团队负责人',
+      member: '成员'
+    };
+    var accessHtml = accessRoles.length ? accessRoles.map(function(role) {
+      return '<span style="display:inline-block;margin:0 4px 4px 0;padding:2px 6px;border:1px solid #dfe5ef;border-radius:6px;font-size:10px;white-space:nowrap">' + esc(accessLabels[role] || role) + '</span>';
+    }).join('') : '<span style="opacity:.5">无有效权益</span>';
+    var id = Number(u.id);
+    var safeId = Number.isSafeInteger(id) && id > 0 ? id : 0;
+    var active = Number(u.is_active) === 1;
+    var quota = Number(u.api_quota);
+    var quotaText = Number.isFinite(quota) && quota >= 0 ? quota.toLocaleString() : '0';
+    return '<tr><td><strong>' + esc(u.display_name || u.username || '-') + '</strong>'
+      + '<div style="font-size:11px;opacity:.58">' + esc(u.username || '-') + '</div>'
+      + '<div style="font-size:11px;opacity:.58">' + esc(u.email || '-') + '</div></td>'
+      + '<td><div style="margin-bottom:4px">' + esc(u.role === 'admin' ? '管理员' : '普通用户') + '</div>' + accessHtml + '</td>'
+      + '<td>' + organizationHtml + '</td><td>' + teamHtml + '</td>'
+      + '<td>' + esc(u.department || '-') + '</td><td>' + esc(quotaText) + '</td>'
+      + '<td style="white-space:nowrap">' + esc(String(u.last_login || '').substring(0, 16) || '-') + '</td>'
+      + '<td><span style="color:' + (active ? '#0f7b3c' : '#d94641') + '">' + (active ? '启用' : '停用') + '</span></td>'
+      + '<td style="white-space:nowrap"><button type="button" class="btn btn-xs" onclick="adminResetPw(' + safeId + ')">重置密码</button> '
+      + '<button type="button" class="btn btn-xs" onclick="toggleUserActive(' + safeId + ',' + (active ? 0 : 1) + ')">' + (active ? '停用' : '启用') + '</button></td></tr>';
   }).join('');
+}
+function updateAdminUserPager(page) {
+  var previous = document.getElementById('ad_userPrevious');
+  var next = document.getElementById('ad_userNext');
+  var label = document.getElementById('ad_userPageLabel');
+  if (page) {
+    var nextCursor = Number(page.next_cursor);
+    adminUserNextCursor = page.has_more && Number.isSafeInteger(nextCursor) && nextCursor > 0
+      ? nextCursor
+      : null;
+  }
+  if (previous) previous.disabled = adminUserPageLoading || adminUserPageIndex <= 0;
+  if (next) next.disabled = adminUserPageLoading || !adminUserNextCursor;
+  if (label) label.textContent = '第 ' + (adminUserPageIndex + 1) + ' 页';
+}
+function loadAdminUsers(cursor, preservePage, targetPageIndex) {
+  var tbody = document.getElementById('ad_userTableBody');
+  var status = document.getElementById('ad_userStatusText');
+  if (!tbody) return Promise.resolve([]);
+  if (adminUserPageLoading) {
+    if (preservePage !== true) adminUserRefreshPending = true;
+    return Promise.resolve([]);
+  }
+  var requestedPageIndex = adminUserPageIndex;
+  if (preservePage !== true) {
+    adminUserPageCursors = [null];
+    adminUserPageIndex = 0;
+    adminUserNextCursor = null;
+    cursor = null;
+    requestedPageIndex = 0;
+  } else if (Number.isSafeInteger(targetPageIndex) && targetPageIndex >= 0) {
+    requestedPageIndex = targetPageIndex;
+  }
+  var requestSignature = buildAdminUserQuery(null);
+  adminUserPageLoading = true;
+  updateAdminUserPager();
+  if (status) status.textContent = '正在加载用户目录...';
+  return apiFetch('/admin/users' + buildAdminUserQuery(cursor)).then(function(response) {
+    return response.json().then(function(data) {
+      if (!response.ok) throw new Error(data.error || '用户目录加载失败');
+      return data;
+    });
+  }).then(function(data) {
+    if (adminUserRefreshPending || requestSignature !== buildAdminUserQuery(null)) return [];
+    if (requestedPageIndex > adminUserPageIndex) {
+      adminUserPageCursors = adminUserPageCursors.slice(0, requestedPageIndex);
+      adminUserPageCursors[requestedPageIndex] = Number(cursor);
+    }
+    adminUserPageIndex = requestedPageIndex;
+    adminUserFilterSignature = requestSignature;
+    var users = Array.isArray(data.users) ? data.users : [];
+    renderAdminUserTable(users);
+    updateAdminUserPager(data.page || {});
+    if (status) status.textContent = '已加载 ' + users.length + ' 位用户';
+    return users;
+  }).catch(function(error) {
+    if (!adminUserRefreshPending && requestSignature === buildAdminUserQuery(null) && status) {
+      status.textContent = error.message || '用户目录加载失败';
+    }
+    return [];
+  }).then(function(users) {
+    var shouldRefresh = adminUserRefreshPending || requestSignature !== buildAdminUserQuery(null);
+    adminUserRefreshPending = false;
+    adminUserPageLoading = false;
+    updateAdminUserPager();
+    if (shouldRefresh) return loadAdminUsers();
+    return users;
+  });
+}
+function adminUserNextPage() {
+  if (adminUserPageLoading || !adminUserNextCursor) return Promise.resolve([]);
+  if (adminUserFilterSignature !== buildAdminUserQuery(null)) return loadAdminUsers();
+  var nextIndex = adminUserPageIndex + 1;
+  return loadAdminUsers(adminUserNextCursor, true, nextIndex);
+}
+function adminUserPreviousPage() {
+  if (adminUserPageLoading || adminUserPageIndex <= 0) return Promise.resolve([]);
+  if (adminUserFilterSignature !== buildAdminUserQuery(null)) return loadAdminUsers();
+  var previousIndex = adminUserPageIndex - 1;
+  return loadAdminUsers(adminUserPageCursors[previousIndex], true, previousIndex);
 }
 var adminSelectedOrganizationId = null;
 var adminOrganizationsById = {};
@@ -9436,12 +9578,27 @@ function loadAdminAIAuditUsers() {
   var select = document.getElementById('ad_aiAuditUser');
   if (!select) return Promise.resolve([]);
   if (adminAIAuditUsersPromise) return adminAIAuditUsersPromise;
-  var request = apiFetch('/admin/users').then(function(r) {
-    if (!r.ok) throw new Error('API:' + r.status);
-    return r.json();
-  }).then(function(d) {
+  function fetchPage(cursor, users, seenCursors) {
+    var url = '/admin/users?limit=100';
+    if (cursor) url += '&cursor=' + cursor;
+    return apiFetch(url).then(function(r) {
+      if (!r.ok) throw new Error('API:' + r.status);
+      return r.json();
+    }).then(function(d) {
+      var pageUsers = Array.isArray(d.users) ? d.users : [];
+      users = users.concat(pageUsers);
+      var page = d.page && typeof d.page === 'object' ? d.page : {};
+      if (!page.has_more) return users;
+      var nextCursor = Number(page.next_cursor);
+      if (!Number.isSafeInteger(nextCursor) || nextCursor < 1 || seenCursors[String(nextCursor)]) {
+        throw new Error('用户目录分页游标无效');
+      }
+      seenCursors[String(nextCursor)] = true;
+      return fetchPage(nextCursor, users, seenCursors);
+    });
+  }
+  var request = fetchPage(null, [], {}).then(function(users) {
     var selected = select.value;
-    var users = d.users || [];
     select.innerHTML = '<option value="">全部用户</option>' + users.map(function(u) {
       var label = u.display_name || u.username || ('User #' + u.id);
       return '<option value="' + esc(u.id) + '">' + esc(label) + '</option>';
@@ -13528,7 +13685,7 @@ function switchPage(id, options) {
     'toggleAll', 'syncInfluencerSelectionState', 'loadM4Campaigns', 'changeM4CampaignContext', 'openM4CampaignCloseoutReview', 'closeM4CampaignCloseoutReview', 'submitM4CampaignCloseoutReview', 'startCollab', 'submitCollabOrder', 'closeCollabOrderModal', 'loadCollaborations', 'updateCollabStatus', 'runCampaignCollabAction', 'closeCampaignContractConfirmationModal', 'submitCampaignContractConfirmation', 'closeCampaignContentReviewModal', 'submitCampaignContentReview', 'closeCampaignContentReviewDecisionModal', 'submitCampaignContentReviewDecision', 'renderCampaignPublicationRows', 'syncCampaignPublicationDraftRows', 'addCampaignPublicationRow', 'removeCampaignPublicationRow', 'openCampaignPublicationModal', 'closeCampaignPublicationModal', 'submitCampaignPublicationConfirmation', 'openCollaborationPerformanceTracking', 'openCampaignPublicationHistoryModal', 'loadCampaignPublicationHistoryPage', 'openCampaignPaymentModal', 'closeCampaignPaymentModal', 'submitCampaignPayment', 'voidCampaignPayment', 'closeCampaignSettlementModal', 'submitCampaignSettlement', 'openCampaignSettlementDecisionModal', 'closeCampaignSettlementDecisionModal', 'submitCampaignSettlementDecision',
     'initPerformanceMonitor', 'initPerformanceDashboard', 'refreshPerformanceMonitor', 'refreshPerformanceDashboard', 'changePerformanceCampaignContext', 'handlePerformanceTopMetricChange', 'refreshPerformanceReviewEvidence', 'generatePerformanceAiReviewDraft', 'loadPerformanceContents', 'loadPerformanceFreshnessQueue', 'openPerformanceFreshnessInput', 'refreshPerformanceUpdateStatus', 'runPerformanceProviderRefresh', 'loadPerformanceIntegrationPreview', 'loadPerformanceFeishuConnection', 'savePerformanceFeishuConnectionDraft', 'approvePerformanceFeishuConnectionDraft', 'downloadPerformanceFeishuSnapshot', 'createPerformanceContent', 'downloadPerformanceTemplate', 'handlePerformanceImport', 'handlePerformanceDrop', 'downloadPerformanceMetricsTemplate', 'handlePerformanceMetricsImport', 'handlePerformanceMetricsDrop', 'openPerformanceInputModal', 'closePerformanceInputModal', 'savePerformanceInput', 'loadPerformanceDashboard', 'loadPerformanceReviewEvidence', 'debouncedPerformanceContentSearch', 'exportPerformanceContents',
     'sendChat', 'clearChat', 'clearAIMemory', 'pushToFeishu', 'loadFeishuStatus', 'loadFeishuOutbox', 'testFeishuConnection', 'selectFeishuReconciliationDelivery', 'reconcileFeishuDelivery', 'selectFeishuRetryDelivery', 'retryFeishuDelivery',
-    'switchAdminTab', 'loadAdminDashboard', 'loadAdminUsers', 'loadAdminOrganizations', 'selectAdminOrganization', 'loadAdminOrganizationMembers', 'adminOrganizationNextPage', 'adminOrganizationPreviousPage', 'adminOrganizationMemberNextPage', 'adminOrganizationMemberPreviousPage', 'adminAddUser', 'adminCreateInvite', 'adminResetPw',
+    'switchAdminTab', 'loadAdminDashboard', 'loadAdminUsers', 'adminUserNextPage', 'adminUserPreviousPage', 'loadAdminOrganizations', 'selectAdminOrganization', 'loadAdminOrganizationMembers', 'adminOrganizationNextPage', 'adminOrganizationPreviousPage', 'adminOrganizationMemberNextPage', 'adminOrganizationMemberPreviousPage', 'adminAddUser', 'adminCreateInvite', 'adminResetPw',
     'wfUndo', 'wfRedo', 'wfClearCanvas', 'wfSaveTemplate', 'wfPublishTemplate', 'wfResetTaskFilters', 'wfLoadTasks', 'wfLoadInstances',
     'showRelatedBrands', 'closeBrandRelModal'
   ];

@@ -19,6 +19,10 @@ function openFixture() {
       display_name TEXT NOT NULL,
       role TEXT NOT NULL,
       department TEXT,
+      email TEXT,
+      api_quota INTEGER NOT NULL,
+      created_at TEXT NOT NULL,
+      last_login TEXT,
       is_active INTEGER NOT NULL
     ) STRICT;
     CREATE TABLE organizations (
@@ -70,11 +74,11 @@ function openFixture() {
       FOREIGN KEY(user_id) REFERENCES users(id)
     ) STRICT;
 
-    INSERT INTO users (id,username,display_name,role,department,is_active) VALUES
-      (1,'derrick','Derrick Admin','admin','Management',1),
-      (2,'alice','Alice Zhang','user','Sales',1),
-      (3,'bob','Bob Chen','user','Creative',0),
-      (4,'carol','Carol Wu','user','Operations',1);
+    INSERT INTO users (id,username,display_name,role,department,email,api_quota,created_at,last_login,is_active) VALUES
+      (1,'derrick','Derrick Admin','admin','Management','derrick@example.com',200000,'2025-12-01 00:00:00','2026-09-10 08:00:00',1),
+      (2,'alice','Alice Zhang','user','Sales','alice@example.com',50000,'2026-01-02 00:00:00','2026-09-09 08:00:00',1),
+      (3,'bob','Bob Chen','user','Creative','bob@example.com',50000,'2026-01-03 00:00:00',NULL,0),
+      (4,'carol','Carol Wu','user','Operations','carol@example.com',50000,'2026-02-03 00:00:00','2026-09-08 08:00:00',1);
     INSERT INTO organizations (id,code,name,created_at) VALUES
       (10,'alpha-market','Alpha Market','2026-01-01 00:00:00'),
       (20,'beta-labs','Beta Labs','2026-02-01 00:00:00');
@@ -216,6 +220,66 @@ test('member directory keeps multi-team roles, supports status and team search, 
   }
 });
 
+test('user entitlement directory searches stable roles, paginates, and audits only filter names', () => {
+  const db = openFixture();
+  try {
+    const service = createAdminTenantDirectoryService(db);
+    const first = service.listUsers({
+      actor: admin(),
+      requestId: 'tenant-users-1',
+      ipAddress: '127.0.0.1',
+      query: { q: 'alpha', role: 'team_lead', status: 'active', limit: '1' }
+    });
+    assert.equal(first.users.length, 1);
+    assert.equal(first.users[0].id, 1);
+    assert.deepEqual(first.users[0].access_roles, ['platform_admin', 'org_admin', 'team_lead']);
+    assert.deepEqual(first.users[0].organizations.map((organization) => ({
+      id: organization.id,
+      role: organization.role_code,
+      status: organization.status,
+      teams: organization.teams.map((team) => [team.id, team.role_code, team.status])
+    })), [
+      { id: 10, role: 'org_admin', status: 'active', teams: [[101, 'team_lead', 'active']] },
+      { id: 20, role: 'org_admin', status: 'active', teams: [[201, 'team_lead', 'active']] }
+    ]);
+    assert.deepEqual(first.page, { limit: 1, next_cursor: 1, has_more: true });
+
+    const second = service.listUsers({
+      actor: admin(),
+      requestId: 'tenant-users-2',
+      query: { q: 'alpha', role: 'team_lead', status: 'active', limit: 1, cursor: 1 }
+    });
+    assert.deepEqual(second.users.map((user) => user.id), [2]);
+    assert.deepEqual(second.users[0].access_roles, ['team_lead', 'member']);
+    assert.deepEqual(second.page, { limit: 1, next_cursor: null, has_more: false });
+
+    const inactive = service.listUsers({
+      actor: admin(),
+      requestId: 'tenant-users-inactive',
+      query: { q: 'bob@example.com', status: 'inactive' }
+    });
+    assert.deepEqual(inactive.users.map((user) => user.id), [3]);
+    assert.equal(inactive.users[0].organizations[0].status, 'revoked');
+
+    const audit = db.prepare(`
+      SELECT action,module,details,ip_address
+      FROM activity_log
+      WHERE action='admin_list_users'
+      ORDER BY id LIMIT 1
+    `).get();
+    assert.equal(audit.module, 'tenant_admin');
+    assert.equal(audit.ip_address, '127.0.0.1');
+    const details = JSON.parse(audit.details);
+    assert.deepEqual(details.filter_names, ['limit', 'q', 'role', 'status']);
+    assert.deepEqual(details.target_user_ids, [1]);
+    assert.deepEqual(details.target_organization_ids, [10, 20]);
+    assert.equal(audit.details.includes('alpha'), false);
+    assert.equal(Object.hasOwn(details, 'filter_sha256'), false);
+  } finally {
+    db.close();
+  }
+});
+
 test('directory rejects non-admin and malformed filters without creating an audit row', () => {
   const db = openFixture();
   try {
@@ -245,6 +309,16 @@ test('directory rejects non-admin and malformed filters without creating an audi
       (error) => error instanceof AdminTenantDirectoryServiceError &&
         error.statusCode === 400 && error.code === 'INVALID_TENANT_DIRECTORY_FILTER'
     );
+    for (const query of [
+      { status: 'disabled' },
+      { role: 'owner' }
+    ]) {
+      assert.throws(
+        () => service.listUsers({ actor: admin(), query }),
+        (error) => error instanceof AdminTenantDirectoryServiceError &&
+          error.statusCode === 400 && error.code === 'INVALID_TENANT_DIRECTORY_FILTER'
+      );
+    }
     assert.equal(db.prepare('SELECT COUNT(*) AS count FROM activity_log').get().count, 0);
   } finally {
     db.close();
@@ -270,6 +344,11 @@ test('directory fails closed when privileged read audit persistence is unavailab
         error.statusCode === 500 && error.code === 'AUDIT_PERSISTENCE_FAILED'
     );
     assert.equal(result, undefined);
+    assert.throws(
+      () => service.listUsers({ actor: admin(), query: {} }),
+      (error) => error instanceof AdminTenantDirectoryServiceError &&
+        error.statusCode === 500 && error.code === 'AUDIT_PERSISTENCE_FAILED'
+    );
   } finally {
     db.close();
   }

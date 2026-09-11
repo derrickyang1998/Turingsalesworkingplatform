@@ -173,7 +173,7 @@ test('admin AI audit loads the user directory and renders campaign, reference, a
     Promise,
     async apiFetch(url) {
       calls.push(url);
-      if (url === '/admin/users') {
+      if (url === '/admin/users?limit=100') {
         return response(200, {
           users: [{ id: 22, username: 'owner', display_name: 'Owner <One>' }]
         });
@@ -233,7 +233,7 @@ test('admin AI audit loads the user directory and renders campaign, reference, a
   await context.loadAdminAIAudit();
 
   assert.match(elements.ad_aiAuditUser.innerHTML, /Owner &lt;One&gt;/);
-  assert.equal(calls[0], '/admin/users');
+  assert.equal(calls[0], '/admin/users?limit=100');
   assert.match(calls[1], /^\/ai\/conversations\?/);
   const params = new URLSearchParams(calls[1].split('?')[1]);
   assert.equal(params.get('user_id'), '22');
@@ -366,7 +366,7 @@ test('admin AI audit refreshes its user directory after in-app user changes', as
     esc: escapeHtml,
     Promise,
     async apiFetch(url) {
-      assert.equal(url, '/admin/users');
+      assert.equal(url, '/admin/users?limit=100');
       calls += 1;
       return response(200, {
         users: calls === 1
@@ -381,5 +381,43 @@ test('admin AI audit refreshes its user directory after in-app user changes', as
 
   assert.equal(calls, 2);
   assert.doesNotMatch(select.innerHTML, /First user/);
+  assert.match(select.innerHTML, /Second user/);
+});
+
+test('admin AI audit user filter follows every entitlement-directory cursor', async () => {
+  const select = { value: '', innerHTML: '' };
+  const calls = [];
+  const context = loadFunctions({
+    adminAIAuditUsersPromise: null,
+    document: {
+      getElementById(id) { return id === 'ad_aiAuditUser' ? select : null; }
+    },
+    esc: escapeHtml,
+    Promise,
+    Error,
+    Number,
+    Set,
+    async apiFetch(url) {
+      calls.push(url);
+      if (url.endsWith('cursor=22')) {
+        return response(200, {
+          users: [{ id: 23, username: 'second', display_name: 'Second user' }],
+          page: { limit: 100, next_cursor: null, has_more: false }
+        });
+      }
+      return response(200, {
+        users: [{ id: 22, username: 'first', display_name: 'First user' }],
+        page: { limit: 100, next_cursor: 22, has_more: true }
+      });
+    }
+  }, ['loadAdminAIAuditUsers']);
+
+  const users = await context.loadAdminAIAuditUsers();
+  assert.deepEqual(Array.from(users, (user) => user.id), [22, 23]);
+  assert.deepEqual(calls, [
+    '/admin/users?limit=100',
+    '/admin/users?limit=100&cursor=22'
+  ]);
+  assert.match(select.innerHTML, /First user/);
   assert.match(select.innerHTML, /Second user/);
 });

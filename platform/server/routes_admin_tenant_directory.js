@@ -53,6 +53,20 @@ function registerAdminTenantDirectoryRoutes(app, db, options = {}) {
     throw new TypeError('Tenant directory routes require authentication middleware.');
   }
 
+  app.get('/api/admin/users', authMiddleware, adminOnly, (request, response) => {
+    try {
+      const result = service.listUsers({
+        actor: request.user,
+        requestId: requestId(request),
+        ipAddress: request.ip,
+        query: plainQuery(request)
+      });
+      return response.json(Object.assign({}, result, { request_id: requestId(request) }));
+    } catch (error) {
+      return sendError(request, response, error);
+    }
+  });
+
   app.get('/api/admin/organizations', authMiddleware, adminOnly, (request, response) => {
     try {
       const result = service.listOrganizations({

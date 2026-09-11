@@ -1747,22 +1747,47 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
 <!-- Users Tab -->
 <div id="admin-tab-users" style="display:none">
   <div class="card">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-      <h3 style="margin:0">👥 Team Members</h3>
-      <div style="display:flex;gap:6px">
-        <button class="btn btn-sm" onclick="adminCreateInvite()">🔗 Generate Invite</button>
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap">
+      <div>
+        <h3 style="margin:0">用户与权限</h3>
+        <div id="ad_userStatusText" style="font-size:11px;opacity:.58;margin-top:4px">等待加载用户目录</div>
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <button type="button" class="btn btn-sm btn-outline" onclick="adminCreateInvite()">生成邀请码</button>
+        <button type="button" class="btn btn-sm btn-outline" onclick="loadAdminUsers()">刷新</button>
       </div>
     </div>
-    <div class="table-container" style="max-height:400px;overflow-y:auto">
-      <table><thead><tr><th>Username</th><th>Name</th><th>Department</th><th>Role</th><th>Quota</th><th>Last Login</th><th>Status</th><th>Action</th></tr></thead>
+    <div style="display:flex;gap:8px;align-items:end;margin-bottom:12px;flex-wrap:wrap">
+      <input id="ad_userSearch" aria-label="搜索用户" placeholder="搜索姓名、账号、邮箱、部门、组织或团队" onkeydown="if(event.key==='Enter')loadAdminUsers()" style="font-size:12px;flex:1 1 300px;min-width:0">
+      <select id="ad_userStatus" aria-label="用户状态" style="font-size:12px;flex:0 1 160px" onchange="loadAdminUsers()">
+        <option value="">全部状态</option>
+        <option value="active">启用</option>
+        <option value="inactive">停用</option>
+      </select>
+      <select id="ad_userRole" aria-label="权限角色" style="font-size:12px;flex:0 1 190px" onchange="loadAdminUsers()">
+        <option value="">全部角色</option>
+        <option value="platform_admin">平台管理员</option>
+        <option value="org_admin">组织管理员</option>
+        <option value="team_lead">团队负责人</option>
+        <option value="member">成员</option>
+      </select>
+      <button type="button" class="btn btn-sm btn-primary" onclick="loadAdminUsers()">查询</button>
+    </div>
+    <div class="table-container" style="max-height:460px;overflow:auto;position:relative">
+      <table><thead style="position:sticky;top:0;z-index:1;background:#fff"><tr><th>用户</th><th>平台角色</th><th>组织与角色</th><th>团队与角色</th><th>部门</th><th>配额</th><th>最近登录</th><th>状态</th><th>操作</th></tr></thead>
         <tbody id="ad_userTableBody"></tbody>
       </table>
     </div>
-    <div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-      <input id="ad_newUsername" placeholder="Username" style="width:120px;font-size:12px">
-      <input id="ad_newDisplay" placeholder="Display Name" style="width:120px;font-size:12px">
-      <select id="ad_newDept" style="font-size:12px"><option value="">Dept</option><option>商务一部</option><option>商务二部</option><option>商务三部</option><option>运营部</option><option>红人组</option><option>策略组</option></select>
-      <button class="btn btn-sm btn-primary" onclick="adminAddUser()">+ Add User</button>
+    <div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;margin-top:12px;min-height:30px">
+      <button id="ad_userPrevious" type="button" class="btn btn-sm btn-outline" onclick="adminUserPreviousPage()" disabled>上一页</button>
+      <span id="ad_userPageLabel" style="min-width:58px;text-align:center;font-size:12px;opacity:.65">第 1 页</span>
+      <button id="ad_userNext" type="button" class="btn btn-sm btn-outline" onclick="adminUserNextPage()" disabled>下一页</button>
+    </div>
+    <div style="margin-top:14px;padding-top:14px;border-top:1px solid #eee;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <input id="ad_newUsername" aria-label="新用户账号" placeholder="用户账号" style="width:130px;font-size:12px">
+      <input id="ad_newDisplay" aria-label="新用户姓名" placeholder="显示姓名" style="width:130px;font-size:12px">
+      <select id="ad_newDept" aria-label="新用户部门" style="font-size:12px"><option value="">选择部门</option><option>商务一部</option><option>商务二部</option><option>商务三部</option><option>运营部</option><option>红人组</option><option>策略组</option></select>
+      <button type="button" class="btn btn-sm btn-primary" onclick="adminAddUser()">新增用户</button>
       <span id="ad_inviteResult" style="font-size:11px;opacity:.7"></span>
     </div>
   </div>

@@ -6,6 +6,8 @@ const MAX_QUERY_LENGTH = 120;
 const MAX_REQUEST_ID_LENGTH = 120;
 const MAX_IP_ADDRESS_LENGTH = 128;
 const MEMBER_STATUSES = new Set(['active', 'revoked']);
+const USER_STATUSES = new Set(['active', 'inactive']);
+const USER_ACCESS_ROLES = new Set(['platform_admin', 'org_admin', 'team_lead', 'member']);
 
 class AdminTenantDirectoryServiceError extends Error {
   constructor(statusCode, code, message) {
@@ -62,6 +64,26 @@ function memberStatus(value) {
   if (value === undefined || value === null || value === '') return '';
   if (typeof value !== 'string' || !MEMBER_STATUSES.has(value)) {
     throw serviceError(400, 'INVALID_TENANT_DIRECTORY_FILTER', 'status must be active or revoked.');
+  }
+  return value;
+}
+
+function userStatus(value) {
+  if (value === undefined || value === null || value === '') return '';
+  if (typeof value !== 'string' || !USER_STATUSES.has(value)) {
+    throw serviceError(400, 'INVALID_TENANT_DIRECTORY_FILTER', 'status must be active or inactive.');
+  }
+  return value;
+}
+
+function userAccessRole(value) {
+  if (value === undefined || value === null || value === '') return '';
+  if (typeof value !== 'string' || !USER_ACCESS_ROLES.has(value)) {
+    throw serviceError(
+      400,
+      'INVALID_TENANT_DIRECTORY_FILTER',
+      'role must be platform_admin, org_admin, team_lead, or member.'
+    );
   }
   return value;
 }
@@ -141,6 +163,250 @@ function persistReadAudit(db, input) {
       'Tenant directory read audit could not be persisted.'
     );
   }
+}
+
+function listUsers(db, options) {
+  const query = readQuery(options);
+  const q = boundedQuery(query.q);
+  const status = userStatus(query.status);
+  const role = userAccessRole(query.role);
+  const limit = boundedLimit(query.limit);
+  const cursor = optionalPositiveInteger(query.cursor, 'cursor');
+  const names = filterNames(query, ['q', 'status', 'role', 'limit', 'cursor']);
+
+  return db.transaction(() => {
+    const actorUserId = assertPlatformAdmin(db, options && options.actor);
+    const rows = db.prepare(`
+      SELECT
+        user.id,
+        user.username,
+        user.display_name,
+        user.role,
+        user.department,
+        user.email,
+        user.api_quota,
+        user.created_at,
+        user.last_login,
+        user.is_active
+      FROM users user
+      WHERE (? IS NULL OR user.id>?)
+        AND (
+          ?='' OR
+          instr(lower(user.username),lower(?))>0 OR
+          instr(lower(user.display_name),lower(?))>0 OR
+          instr(lower(COALESCE(user.department,'')),lower(?))>0 OR
+          instr(lower(COALESCE(user.email,'')),lower(?))>0 OR
+          instr(lower(COALESCE(user.role,'')),lower(?))>0 OR
+          EXISTS (
+            SELECT 1
+            FROM organization_memberships membership
+            JOIN organizations organization ON organization.id=membership.org_id
+            WHERE membership.user_id=user.id
+              AND (
+                instr(lower(organization.code),lower(?))>0 OR
+                instr(lower(organization.name),lower(?))>0 OR
+                instr(lower(membership.role_code),lower(?))>0
+              )
+          ) OR
+          EXISTS (
+            SELECT 1
+            FROM team_memberships membership
+            JOIN teams team
+              ON team.org_id=membership.org_id
+             AND team.id=membership.team_id
+            WHERE membership.user_id=user.id
+              AND (
+                instr(lower(team.code),lower(?))>0 OR
+                instr(lower(team.name),lower(?))>0 OR
+                instr(lower(membership.role_code),lower(?))>0
+              )
+          )
+        )
+        AND (
+          ?='' OR
+          (?='active' AND user.is_active=1) OR
+          (?='inactive' AND user.is_active=0)
+        )
+        AND (
+          ?='' OR
+          (?='platform_admin' AND user.role='admin') OR
+          (?='org_admin' AND EXISTS (
+            SELECT 1
+            FROM organization_memberships membership
+            WHERE membership.user_id=user.id
+              AND membership.status='active'
+              AND membership.role_code='org_admin'
+          )) OR
+          (?='team_lead' AND EXISTS (
+            SELECT 1
+            FROM team_memberships membership
+            JOIN organization_memberships organization_membership
+              ON organization_membership.org_id=membership.org_id
+             AND organization_membership.user_id=membership.user_id
+             AND organization_membership.status='active'
+            WHERE membership.user_id=user.id
+              AND membership.status='active'
+              AND membership.role_code='team_lead'
+          )) OR
+          (?='member' AND (
+            EXISTS (
+              SELECT 1
+              FROM organization_memberships membership
+              WHERE membership.user_id=user.id
+                AND membership.status='active'
+                AND membership.role_code='member'
+            ) OR
+            EXISTS (
+              SELECT 1
+              FROM team_memberships membership
+              JOIN organization_memberships organization_membership
+                ON organization_membership.org_id=membership.org_id
+               AND organization_membership.user_id=membership.user_id
+               AND organization_membership.status='active'
+              WHERE membership.user_id=user.id
+                AND membership.status='active'
+                AND membership.role_code='member'
+            )
+          ))
+        )
+      ORDER BY user.id
+      LIMIT ?
+    `).all(
+      cursor, cursor,
+      q, q, q, q, q, q,
+      q, q, q,
+      q, q, q,
+      status, status, status,
+      role, role, role, role, role,
+      limit + 1
+    );
+    const hasMore = rows.length > limit;
+    const selectedRows = rows.slice(0, limit);
+    const userIds = selectedRows.map((row) => row.id);
+    const organizationsByUser = new Map(userIds.map((userId) => [userId, []]));
+    const organizationByUserAndId = new Map();
+
+    if (userIds.length) {
+      const placeholders = userIds.map(() => '?').join(',');
+      const organizationRows = db.prepare(`
+        SELECT
+          membership.user_id,
+          organization.id,
+          organization.code,
+          organization.name,
+          membership.role_code,
+          membership.status,
+          membership.created_at,
+          membership.revoked_at
+        FROM organization_memberships membership
+        JOIN organizations organization ON organization.id=membership.org_id
+        WHERE membership.user_id IN (${placeholders})
+        ORDER BY membership.user_id,organization.id
+      `).all(...userIds);
+      for (const membership of organizationRows) {
+        const organization = {
+          id: membership.id,
+          code: membership.code,
+          name: membership.name,
+          role_code: membership.role_code,
+          status: membership.status,
+          created_at: membership.created_at,
+          revoked_at: membership.revoked_at,
+          teams: []
+        };
+        organizationsByUser.get(membership.user_id).push(organization);
+        organizationByUserAndId.set(`${membership.user_id}:${membership.id}`, organization);
+      }
+
+      const teamRows = db.prepare(`
+        SELECT
+          membership.user_id,
+          membership.org_id,
+          team.id,
+          team.code,
+          team.name,
+          membership.role_code,
+          membership.status,
+          membership.created_at,
+          membership.revoked_at
+        FROM team_memberships membership
+        JOIN teams team
+          ON team.org_id=membership.org_id
+         AND team.id=membership.team_id
+        WHERE membership.user_id IN (${placeholders})
+        ORDER BY membership.user_id,membership.org_id,team.id
+      `).all(...userIds);
+      for (const membership of teamRows) {
+        const organization = organizationByUserAndId.get(
+          `${membership.user_id}:${membership.org_id}`
+        );
+        if (!organization) continue;
+        organization.teams.push({
+          id: membership.id,
+          code: membership.code,
+          name: membership.name,
+          role_code: membership.role_code,
+          status: membership.status,
+          created_at: membership.created_at,
+          revoked_at: membership.revoked_at
+        });
+      }
+    }
+
+    const users = selectedRows.map((row) => {
+      const organizations = organizationsByUser.get(row.id) || [];
+      const accessRoles = [];
+      if (row.role === 'admin') accessRoles.push('platform_admin');
+      if (organizations.some((organization) => (
+        organization.status === 'active' && organization.role_code === 'org_admin'
+      ))) accessRoles.push('org_admin');
+      if (organizations.some((organization) => (
+        organization.status === 'active' && organization.teams.some((team) => (
+          team.status === 'active' && team.role_code === 'team_lead'
+        ))
+      ))) accessRoles.push('team_lead');
+      if (organizations.some((organization) => (
+        organization.status === 'active' && (
+          organization.role_code === 'member' || organization.teams.some((team) => (
+            team.status === 'active' && team.role_code === 'member'
+          ))
+        )
+      ))) accessRoles.push('member');
+      return {
+        id: row.id,
+        username: row.username,
+        display_name: row.display_name,
+        role: row.role,
+        department: row.department,
+        email: row.email,
+        api_quota: row.api_quota,
+        created_at: row.created_at,
+        last_login: row.last_login,
+        is_active: row.is_active,
+        access_roles: accessRoles,
+        organizations
+      };
+    });
+    const nextCursor = hasMore ? users[users.length - 1].id : null;
+    const organizationIds = Array.from(new Set(users.flatMap((user) => (
+      user.organizations.map((organization) => organization.id)
+    )))).sort((left, right) => left - right);
+    persistReadAudit(db, {
+      actorUserId,
+      action: 'admin_list_users',
+      requestId: options && options.requestId,
+      ipAddress: options && options.ipAddress,
+      filterNames: names,
+      organizationIds,
+      userIds,
+      resultCount: users.length,
+      nextCursor
+    });
+    return {
+      users,
+      page: { limit, next_cursor: nextCursor, has_more: hasMore }
+    };
+  }).immediate();
 }
 
 function listOrganizations(db, options) {
@@ -369,6 +635,9 @@ function createAdminTenantDirectoryService(db) {
     throw new TypeError('A SQLite database is required.');
   }
   return Object.freeze({
+    listUsers(options) {
+      return listUsers(db, options || {});
+    },
     listOrganizations(options) {
       return listOrganizations(db, options || {});
     },

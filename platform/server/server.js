@@ -1455,11 +1455,6 @@ app.get('/api/admin/overview', authMiddleware, adminOnly, (req, res) => {
 });
 
 // ===== USER MANAGEMENT (Admin) =====
-app.get('/api/admin/users', authMiddleware, adminOnly, (req, res) => {
-  const users = db.prepare('SELECT id, username, display_name, role, department, email, api_quota, created_at, last_login, is_active FROM users ORDER BY department, id').all();
-  res.json({ users });
-});
-
 app.post('/api/admin/users', authMiddleware, adminOnly, (req, res) => {
   const { username, display_name, role, department, email } = req.body;
   if (!username) return res.status(400).json({ error: 'Username required' });

@@ -90,6 +90,172 @@ test('existing admin control room exposes the organization directory as a routed
   assert.match(appSource, /\['overview','users','organizations','knowledge','ai-audit','tokens'\]/);
 });
 
+test('existing users tab exposes searchable entitlement filters and stable paging controls', () => {
+  for (const id of [
+    'ad_userSearch',
+    'ad_userStatus',
+    'ad_userRole',
+    'ad_userTableBody',
+    'ad_userPrevious',
+    'ad_userNext',
+    'ad_userPageLabel',
+    'ad_userStatusText'
+  ]) {
+    assert.match(indexSource, new RegExp(`id=["']${id}["']`));
+  }
+});
+
+test('user entitlement directory encodes filters, escapes role projections, and pages without duplicate requests', async () => {
+  const elements = {
+    ad_userSearch: { value: 'Alpha & Sales' },
+    ad_userStatus: { value: 'active' },
+    ad_userRole: { value: 'team_lead' },
+    ad_userTableBody: { innerHTML: '' },
+    ad_userPrevious: { disabled: false },
+    ad_userNext: { disabled: false },
+    ad_userPageLabel: { textContent: '' },
+    ad_userStatusText: { textContent: '' }
+  };
+  const calls = [];
+  let releaseNextPage = null;
+  const context = loadFunctions({
+    adminUserPageCursors: [null],
+    adminUserPageIndex: 0,
+    adminUserNextCursor: null,
+    adminUserPageLoading: false,
+    adminUserRefreshPending: false,
+    adminUserFilterSignature: '',
+    document: { getElementById(id) { return elements[id] || null; } },
+    encodeURIComponent,
+    esc,
+    Promise,
+    Error,
+    apiFetch(url) {
+      calls.push(url);
+      const cursor = new URLSearchParams(url.split('?')[1] || '').get('cursor');
+      const result = response(200, {
+        users: [{
+          id: cursor ? 2 : 1,
+          username: cursor ? 'alice' : 'derrick<script>',
+          display_name: cursor ? 'Alice' : 'Derrick & Co',
+          department: 'Sales',
+          email: cursor ? 'alice@example.com' : 'derrick@example.com',
+          role: cursor ? 'user' : 'admin',
+          api_quota: 50000,
+          last_login: '2026-09-10 08:00:00',
+          is_active: 1,
+          access_roles: cursor ? ['team_lead', 'member'] : ['platform_admin', 'org_admin'],
+          organizations: [{
+            id: 10,
+            code: 'alpha',
+            name: cursor ? 'Alpha' : 'Alpha <Market>',
+            role_code: cursor ? 'member' : 'org_admin',
+            status: 'active',
+            teams: [{ id: 101, code: 'sales', name: 'Sales <A>', role_code: 'team_lead', status: 'active' }]
+          }]
+        }],
+        page: cursor
+          ? { limit: 50, next_cursor: null, has_more: false }
+          : { limit: 50, next_cursor: 1, has_more: true }
+      });
+      if (cursor) return new Promise((resolve) => { releaseNextPage = () => resolve(result); });
+      return Promise.resolve(result);
+    }
+  }, [
+    'buildAdminUserQuery',
+    'renderAdminUserTable',
+    'updateAdminUserPager',
+    'loadAdminUsers',
+    'adminUserNextPage',
+    'adminUserPreviousPage'
+  ]);
+
+  assert.equal(context.buildAdminUserQuery(19),
+    '?limit=50&q=Alpha%20%26%20Sales&status=active&role=team_lead&cursor=19');
+  await context.loadAdminUsers();
+  assert.match(calls[0], /^\/admin\/users\?limit=50&q=Alpha%20%26%20Sales&status=active&role=team_lead$/);
+  assert.match(elements.ad_userTableBody.innerHTML, /derrick&lt;script&gt;/);
+  assert.match(elements.ad_userTableBody.innerHTML, /Alpha &lt;Market&gt;/);
+  assert.match(elements.ad_userTableBody.innerHTML, /Sales &lt;A&gt;/);
+  assert.doesNotMatch(elements.ad_userTableBody.innerHTML, /<script>/i);
+  assert.equal(elements.ad_userPageLabel.textContent, '第 1 页');
+  assert.equal(elements.ad_userStatusText.textContent, '已加载 1 位用户');
+
+  const next = context.adminUserNextPage();
+  const duplicate = context.adminUserNextPage();
+  assert.equal(calls.length, 2);
+  await duplicate;
+  releaseNextPage();
+  await next;
+  assert.match(calls[1], /cursor=1/);
+  assert.equal(elements.ad_userPageLabel.textContent, '第 2 页');
+  await context.adminUserPreviousPage();
+  assert.doesNotMatch(calls[calls.length - 1], /cursor=/);
+  assert.equal(elements.ad_userPageLabel.textContent, '第 1 页');
+});
+
+test('user directory queues a current-page refresh while an older request is in flight', async () => {
+  const elements = {
+    ad_userSearch: { value: '' },
+    ad_userStatus: { value: '' },
+    ad_userRole: { value: '' },
+    ad_userTableBody: { innerHTML: '' },
+    ad_userPrevious: { disabled: false },
+    ad_userNext: { disabled: false },
+    ad_userPageLabel: { textContent: '' },
+    ad_userStatusText: { textContent: '' }
+  };
+  const calls = [];
+  let releaseFirst = null;
+  const context = loadFunctions({
+    adminUserPageCursors: [null],
+    adminUserPageIndex: 0,
+    adminUserNextCursor: null,
+    adminUserPageLoading: false,
+    adminUserRefreshPending: false,
+    adminUserFilterSignature: '',
+    document: { getElementById(id) { return elements[id] || null; } },
+    encodeURIComponent,
+    esc,
+    Promise,
+    Error,
+    apiFetch(url) {
+      calls.push(url);
+      const body = {
+        users: [{
+          id: calls.length,
+          username: calls.length === 1 ? 'stale-user' : 'current-user',
+          display_name: calls.length === 1 ? 'Stale User' : 'Current User',
+          role: 'user',
+          is_active: 1,
+          access_roles: ['member'],
+          organizations: []
+        }],
+        page: { limit: 50, next_cursor: null, has_more: false }
+      };
+      if (calls.length === 1) {
+        return new Promise((resolve) => { releaseFirst = () => resolve(response(200, body)); });
+      }
+      return Promise.resolve(response(200, body));
+    }
+  }, [
+    'buildAdminUserQuery',
+    'renderAdminUserTable',
+    'updateAdminUserPager',
+    'loadAdminUsers'
+  ]);
+
+  const first = context.loadAdminUsers();
+  await context.loadAdminUsers();
+  assert.equal(calls.length, 1);
+  releaseFirst();
+  await first;
+  assert.equal(calls.length, 2);
+  assert.doesNotMatch(elements.ad_userTableBody.innerHTML, /stale-user/);
+  assert.match(elements.ad_userTableBody.innerHTML, /current-user/);
+  assert.equal(elements.ad_userStatusText.textContent, '已加载 1 位用户');
+});
+
 test('organization directory query builders encode search, status, cursor, and bounded page size', () => {
   const values = {
     ad_organizationSearch: 'Alpha & Sales',

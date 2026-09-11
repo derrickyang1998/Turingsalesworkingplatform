@@ -815,6 +815,48 @@ test('production user writers synchronize identity state and protect the user di
     });
     assert.equal(memberLogin.response.status, 200, memberLogin.text);
 
+    const anonymousEntitlementDirectory = await jsonRequest(
+      server.baseUrl,
+      '/api/admin/users?limit=1'
+    );
+    assert.equal(anonymousEntitlementDirectory.response.status, 401);
+    const forbiddenEntitlementDirectory = await jsonRequest(
+      server.baseUrl,
+      '/api/admin/users?limit=1',
+      { token: memberLogin.body.token }
+    );
+    assert.equal(forbiddenEntitlementDirectory.response.status, 403);
+    const entitlementDirectory = await jsonRequest(
+      server.baseUrl,
+      '/api/admin/users?q=identity-user&status=active&role=member&limit=10',
+      { token: adminLogin.body.token }
+    );
+    assert.equal(entitlementDirectory.response.status, 200, entitlementDirectory.text);
+    assert.deepEqual(entitlementDirectory.body.users.map((user) => user.id), [createdUserId]);
+    assert.equal(entitlementDirectory.body.users[0].access_roles.includes('member'), true);
+    assert.equal(entitlementDirectory.body.users[0].organizations.length, 1);
+    assert.deepEqual(entitlementDirectory.body.page, {
+      limit: 10,
+      next_cursor: null,
+      has_more: false
+    });
+    inspection = new Database(server.dbPath, { readonly: true });
+    try {
+      const audit = inspection.prepare(`
+        SELECT details
+        FROM activity_log
+        WHERE action='admin_list_users' AND module='tenant_admin'
+        ORDER BY id DESC LIMIT 1
+      `).get();
+      assert.ok(audit);
+      const details = JSON.parse(audit.details);
+      assert.deepEqual(details.filter_names, ['limit', 'q', 'role', 'status']);
+      assert.deepEqual(details.target_user_ids, [createdUserId]);
+      assert.equal(audit.details.includes('identity-user'), false);
+    } finally {
+      inspection.close();
+    }
+
     const promoted = await jsonRequest(
       server.baseUrl,
       `/api/admin/users/${createdUserId}`,

@@ -675,7 +675,36 @@ function apiResponseFor(request, fixture, recorder) {
       request_id: 'fixture-tenant-directory-members'
     });
   }
-  if (method === 'GET' && apiPath === '/admin/users') return ok({ users: fixture.users });
+  if (method === 'GET' && apiPath === '/admin/users') {
+    return ok({
+      users: fixture.users.map((user, index) => Object.assign({}, user, {
+        email: user.email || `${user.username}@fixture.example`,
+        access_roles: user.role === 'admin'
+          ? ['platform_admin', 'org_admin', 'team_lead']
+          : ['member'],
+        organizations: [{
+          id: 1,
+          code: 'fixture-organization',
+          name: 'Fixture Organization',
+          role_code: user.role === 'admin' ? 'org_admin' : 'member',
+          status: 'active',
+          created_at: FROZEN_ISO,
+          revoked_at: null,
+          teams: [{
+            id: 1,
+            code: 'fixture-team',
+            name: 'Fixture Team',
+            role_code: index === 0 ? 'team_lead' : 'member',
+            status: 'active',
+            created_at: FROZEN_ISO,
+            revoked_at: null
+          }]
+        }]
+      })),
+      page: { limit: 50, next_cursor: null, has_more: false },
+      request_id: 'fixture-user-entitlement-directory'
+    });
+  }
   if (method === 'POST' && apiPath === '/admin/invites') return ok({ code: 'FIXTURE-INVITE' });
   if (method === 'POST' && /^\/admin\/users\/reset-password\/\d+$/.test(apiPath)) return ok({ temporary_password: 'fixture-reset-password' });
   if (['POST', 'PUT', 'DELETE'].includes(method) && /^\/admin\/users(?:\/\d+)?$/.test(apiPath)) return ok({ success: true });

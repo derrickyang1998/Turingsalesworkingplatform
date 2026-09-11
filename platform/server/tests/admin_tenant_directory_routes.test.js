@@ -17,6 +17,10 @@ function harness(overrides = {}) {
     }
   };
   const service = Object.assign({
+    listUsers(input) {
+      calls.push(['listUsers', input]);
+      return { users: [], page: { limit: 50, next_cursor: null, has_more: false } };
+    },
     listOrganizations(input) {
       calls.push(['listOrganizations', input]);
       return { organizations: [], page: { limit: 50, next_cursor: null, has_more: false } };
@@ -70,9 +74,10 @@ function harness(overrides = {}) {
 test('tenant directory routes require platform admin and pass only server-owned actor context', async () => {
   const h = harness();
   assert.deepEqual([...h.routes.keys()].sort(), [
+    'GET /api/admin/users',
     'GET /api/admin/organizations',
     'GET /api/admin/organizations/:organizationId/members'
-  ]);
+  ].sort());
 
   const denied = await h.invoke('GET /api/admin/organizations', {
     user: { id: 2, role: 'user' },
@@ -81,13 +86,26 @@ test('tenant directory routes require platform admin and pass only server-owned 
   assert.equal(denied.statusCode, 403);
   assert.equal(h.calls.length, 0);
 
+  const users = await h.invoke('GET /api/admin/users', {
+    query: { q: 'alice', status: 'active', role: 'team_lead', limit: '25' },
+    requestId: 'user-directory-request'
+  });
+  assert.equal(users.statusCode, 200);
+  assert.equal(users.payload.request_id, 'user-directory-request');
+  assert.deepEqual(h.calls[0][1], {
+    actor: { id: 1, role: 'admin' },
+    requestId: 'user-directory-request',
+    ipAddress: '127.0.0.1',
+    query: { q: 'alice', status: 'active', role: 'team_lead', limit: '25' }
+  });
+
   const listed = await h.invoke('GET /api/admin/organizations', {
     query: { q: 'alpha', limit: '25', role: 'owner' },
     requestId: 'route-request'
   });
   assert.equal(listed.statusCode, 200);
   assert.equal(listed.payload.request_id, 'route-request');
-  assert.deepEqual(h.calls[0][1], {
+  assert.deepEqual(h.calls[1][1], {
     actor: { id: 1, role: 'admin' },
     requestId: 'route-request',
     ipAddress: '127.0.0.1',
@@ -100,7 +118,7 @@ test('tenant directory routes require platform admin and pass only server-owned 
     requestId: 'route-request'
   });
   assert.equal(members.statusCode, 200);
-  assert.equal(h.calls[1][1].organizationId, '10');
+  assert.equal(h.calls[2][1].organizationId, '10');
 });
 
 test('tenant directory routes preserve typed service errors and request IDs', async () => {
