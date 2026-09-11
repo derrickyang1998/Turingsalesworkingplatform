@@ -33,6 +33,9 @@ const {
   PerformanceContentAnalysisServiceError,
   createPerformanceContentAnalysisService
 } = require('./services/performance_content_analysis_service');
+const {
+  OrganizationMethodologyServiceError
+} = require('./services/organization_methodology_service');
 
 function requestId(request) {
   return request.requestId ||
@@ -54,6 +57,8 @@ function sendError(request, response, error) {
     error instanceof PerformanceProviderCollectionServiceError ||
     error instanceof PerformanceAiReviewServiceError ||
     error instanceof PerformanceContentAnalysisServiceError ||
+    error instanceof OrganizationMethodologyServiceError ||
+    (error && error.name === 'IdempotencyServiceError') ||
     error instanceof CustomerReportSnapshotServiceError ||
     error instanceof CustomerReportDeliveryServiceError;
   const status = known ? error.statusCode : 500;
@@ -187,6 +192,15 @@ function registerPerformanceRoutes(app, options = {}) {
     typeof contentAnalysisService.approveDraft !== 'function'
   ) {
     throw new TypeError('A performance content analysis service is required.');
+  }
+  const organizationMethodologyService = options.organizationMethodologyService;
+  if (
+    !organizationMethodologyService ||
+    typeof organizationMethodologyService.listPromotions !== 'function' ||
+    typeof organizationMethodologyService.requestPromotion !== 'function' ||
+    typeof organizationMethodologyService.decidePromotion !== 'function'
+  ) {
+    throw new TypeError('An organization methodology service is required.');
   }
   const customerReportSnapshotService = options.customerReportSnapshotService ||
     createCustomerReportSnapshotService(options.db, { performanceService: service });
@@ -457,6 +471,52 @@ function registerPerformanceRoutes(app, options = {}) {
       return sendError(request, response, error);
     }
   });
+
+  app.get('/api/campaigns/:id/performance/methodology-promotions', options.authMiddleware, (request, response) => {
+    try {
+      return sendResult(request, response, organizationMethodologyService.listPromotions({
+        user: request.user,
+        campaignId: request.params.id
+      }));
+    } catch (error) {
+      return sendError(request, response, error);
+    }
+  });
+
+  app.post('/api/campaigns/:id/performance/methodology-promotion-requests', options.authMiddleware, (request, response) => {
+    try {
+      return sendResult(request, response, organizationMethodologyService.requestPromotion({
+        user: request.user,
+        campaignId: request.params.id,
+        body: request.body,
+        idempotencyKey: requestHeader(request, 'Idempotency-Key'),
+        requestId: requestId(request),
+        ipAddress: request.ip
+      }));
+    } catch (error) {
+      return sendError(request, response, error);
+    }
+  });
+
+  app.post(
+    '/api/campaigns/:id/performance/methodology-promotion-requests/:requestId/decision',
+    options.authMiddleware,
+    (request, response) => {
+      try {
+        return sendResult(request, response, organizationMethodologyService.decidePromotion({
+          user: request.user,
+          campaignId: request.params.id,
+          promotionRequestId: request.params.requestId,
+          body: request.body,
+          idempotencyKey: requestHeader(request, 'Idempotency-Key'),
+          requestId: requestId(request),
+          ipAddress: request.ip
+        }));
+      } catch (error) {
+        return sendError(request, response, error);
+      }
+    }
+  );
 
   app.get('/api/campaigns/:id/performance/customer-report-snapshots', options.authMiddleware, (request, response) => {
     try {

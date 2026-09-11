@@ -213,6 +213,21 @@ const REQUEST_POLICIES = Object.freeze({
     'GET',
     '/api/campaigns/:id/performance/review-evidence'
   ),
+  CAMPAIGN_PERFORMANCE_METHODOLOGY_LIST: empty(
+    'campaign.performance.methodology.list',
+    'GET',
+    '/api/campaigns/:id/performance/methodology-promotions'
+  ),
+  CAMPAIGN_PERFORMANCE_METHODOLOGY_REQUEST: controlJson(
+    'campaign.performance.methodology.request',
+    'POST',
+    '/api/campaigns/:id/performance/methodology-promotion-requests'
+  ),
+  CAMPAIGN_PERFORMANCE_METHODOLOGY_DECIDE: controlJson(
+    'campaign.performance.methodology.decide',
+    'POST',
+    '/api/campaigns/:id/performance/methodology-promotion-requests/:requestId/decision'
+  ),
   CAMPAIGN_PERFORMANCE_AI_REVIEW_DRAFT: controlJson(
     'campaign.performance.ai-review-draft',
     'POST',

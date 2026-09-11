@@ -145,6 +145,13 @@ const EXACT_PROFILE_MIGRATIONS = Object.freeze([
     sourcePath: 'migrations/019_performance_provider_collection.js',
     engineVersion: 1,
     dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
+  }),
+  Object.freeze({
+    version: 20,
+    name: '020_organization_methodology_promotion',
+    sourcePath: 'migrations/020_organization_methodology_promotion.js',
+    engineVersion: 1,
+    dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
   })
 ]);
 const FTS_MANIFEST = Object.freeze({
@@ -340,6 +347,10 @@ const V18_DERIVED_REBUILDS = Object.freeze([
 const V19_DERIVED_REBUILDS = Object.freeze([
   ...V18_DERIVED_REBUILDS,
   'performance_provider_observations.payload_sha256'
+]);
+const V20_DERIVED_REBUILDS = Object.freeze([
+  ...V19_DERIVED_REBUILDS,
+  'organization_methodology_promotion_requests.dedupe_sha256'
 ]);
 const V1_DERIVED_REBUILDS = Object.freeze([
   'knowledge_entries.source_hash',
@@ -796,6 +807,20 @@ const V19_MIGRATION_LEDGER = Object.freeze({
     'migrations/019_performance_provider_collection.js'
   ])
 });
+const V20_MIGRATION_LEDGER = Object.freeze({
+  name: Object.freeze([
+    ...V19_MIGRATION_LEDGER.name,
+    '020_organization_methodology_promotion'
+  ]),
+  checksum: Object.freeze([
+    ...V19_MIGRATION_LEDGER.checksum,
+    '7a9ace99630086fbb5b1554d995c4fe251e1611f77710a08c20a7cb37818b914'
+  ]),
+  sourcePath: Object.freeze([
+    ...V19_MIGRATION_LEDGER.sourcePath,
+    'migrations/020_organization_methodology_promotion.js'
+  ])
+});
 const STRUCTURAL_COLUMN_POLICY_V9 = Object.freeze(Object.assign(Object.create(null), STRUCTURAL_COLUMN_POLICY, {
   'feishu_bitable_outbox_retries.id': Object.freeze({ storage: 'integer', kind: 'integer' }),
   'feishu_bitable_outbox_retries.org_id': Object.freeze({ storage: 'integer', kind: 'integer' }),
@@ -1243,6 +1268,50 @@ const STRUCTURAL_POLICY_V19_SHA256 = crypto.createHash('sha256')
     columns: STRUCTURAL_COLUMN_POLICY_V19
   }), 'utf8')
   .digest('hex');
+const STRUCTURAL_COLUMN_POLICY_V20 = Object.freeze(Object.assign(Object.create(null), STRUCTURAL_COLUMN_POLICY_V19, {
+  'organization_knowledge_custody.knowledge_entry_id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'organization_knowledge_custody.org_id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'organization_knowledge_custody.custody_type': Object.freeze({
+    storage: 'text', kind: 'enum', allowedValues: Object.freeze(['methodology'])
+  }),
+  'organization_knowledge_custody.created_by': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'organization_knowledge_custody.created_at': Object.freeze({ storage: 'text', kind: 'timestamp' }),
+  'organization_methodology_promotion_requests.id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'organization_methodology_promotion_requests.org_id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'organization_methodology_promotion_requests.source_campaign_id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'organization_methodology_promotion_requests.source_knowledge_entry_id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'organization_methodology_promotion_requests.requested_by': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'organization_methodology_promotion_requests.first_approved_by': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'organization_methodology_promotion_requests.expected_governance_version': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'organization_methodology_promotion_requests.supersedes_knowledge_entry_id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'organization_methodology_promotion_requests.created_at': Object.freeze({ storage: 'text', kind: 'timestamp' }),
+  'organization_methodology_promotion_decisions.id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'organization_methodology_promotion_decisions.request_id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'organization_methodology_promotion_decisions.org_id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'organization_methodology_promotion_decisions.decision': Object.freeze({
+    storage: 'text', kind: 'enum', allowedValues: Object.freeze(['approved', 'rejected'])
+  }),
+  'organization_methodology_promotion_decisions.decided_by': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'organization_methodology_promotion_decisions.target_knowledge_entry_id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'organization_methodology_promotion_decisions.supersedes_knowledge_entry_id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'organization_methodology_promotion_decisions.created_at': Object.freeze({ storage: 'text', kind: 'timestamp' }),
+  'schema_migrations.name': Object.freeze({
+    storage: 'text', kind: 'migration-ledger', allowedValues: V20_MIGRATION_LEDGER.name
+  }),
+  'schema_migrations.checksum': Object.freeze({
+    storage: 'text', kind: 'migration-ledger', allowedValues: V20_MIGRATION_LEDGER.checksum
+  }),
+  'schema_migrations.source_path': Object.freeze({
+    storage: 'text', kind: 'migration-ledger', allowedValues: V20_MIGRATION_LEDGER.sourcePath
+  })
+}));
+const STRUCTURAL_POLICY_V20_VALIDATOR_VERSION = 'tm-structural-policy-v17-organization-methodology';
+const STRUCTURAL_POLICY_V20_SHA256 = crypto.createHash('sha256')
+  .update(JSON.stringify({
+    validatorVersion: STRUCTURAL_POLICY_V20_VALIDATOR_VERSION,
+    columns: STRUCTURAL_COLUMN_POLICY_V20
+  }), 'utf8')
+  .digest('hex');
 
 const TRANSFORMATION_EXCLUDED_CLASSIFICATIONS = new Set([
   'structural',
@@ -1398,8 +1467,17 @@ const V19_SEMANTIC_POLICIES = Object.freeze({
     policySha256: STRUCTURAL_POLICY_V19_SHA256
   })
 });
+const V20_SEMANTIC_POLICIES = Object.freeze({
+  ...V19_SEMANTIC_POLICIES,
+  structuralColumns: Object.freeze({
+    ...V19_SEMANTIC_POLICIES.structuralColumns,
+    validatorVersion: STRUCTURAL_POLICY_V20_VALIDATOR_VERSION,
+    policySha256: STRUCTURAL_POLICY_V20_SHA256
+  })
+});
 
 function structuralColumnPolicyForVersion(schemaVersion) {
+  if (schemaVersion === 20) return STRUCTURAL_COLUMN_POLICY_V20;
   if (schemaVersion === 19) return STRUCTURAL_COLUMN_POLICY_V19;
   if (schemaVersion === 18) return STRUCTURAL_COLUMN_POLICY_V18;
   if (schemaVersion === 17) return STRUCTURAL_COLUMN_POLICY_V17;
@@ -1448,7 +1526,7 @@ const SECRET_NAMES = new Set([
 const DIGEST_NAMES = new Set([
   'source_hash', 'source_identity_sha256', 'content_sha256', 'entry_content_sha256',
   'chunk_content_sha256', 'request_hash', 'audit_fingerprint', 'response_sha256',
-  'template_checksum', 'bundle_id', 'artifact_cache_key', 'run_key'
+  'template_checksum', 'bundle_id', 'artifact_cache_key', 'run_key', 'dedupe_sha256'
 ]);
 
 const DERIVED_NAMES = new Set([
@@ -1498,6 +1576,18 @@ function typedDigestInteger(value) {
 function rebuiltKnowledgeSourceIdentity(row, custody) {
   if (row.source_identity_sha256 === null) return null;
   const privateOwner = row.visibility === 'private' ? String(row.created_by) : '';
+  if (
+    row.business_type === 'organization' &&
+    row.source_type === 'organization_performance_methodology'
+  ) {
+    return framedSha256([
+      'tm-knowledge-organization-source-v1',
+      String(row.business_id),
+      row.source_type,
+      String(row.source_id),
+      row.entry_type
+    ]);
+  }
   if (custody) {
     return framedSha256([
       'tm-knowledge-source-v1',
@@ -1933,6 +2023,15 @@ function profileContractForVersion(schemaVersion) {
       preservedAccounting: PRESERVED_ACCOUNTING
     });
   }
+  if (schemaVersion === 20) {
+    return Object.freeze({
+      semanticPolicies: V20_SEMANTIC_POLICIES,
+      equalityGroups: V19_EQUALITY_GROUPS,
+      referenceGroups: REFERENCE_GROUPS,
+      derivedRebuilds: V20_DERIVED_REBUILDS,
+      preservedAccounting: PRESERVED_ACCOUNTING
+    });
+  }
   throw new Error(`unsupported exact sanitization profile version ${schemaVersion}`);
 }
 
@@ -1952,16 +2051,16 @@ function assertManifestDocumentShape(manifest) {
   ) {
     throw new Error('malformed sanitization manifest header');
   }
-  if (!Array.isArray(manifest.exactProfiles) || manifest.exactProfiles.length !== 14) {
-    throw new Error('sanitization manifest must contain isolated exact v6 through v19 profiles');
+  if (!Array.isArray(manifest.exactProfiles) || manifest.exactProfiles.length !== 15) {
+    throw new Error('sanitization manifest must contain isolated exact v6 through v20 profiles');
   }
   const profileKeys = [
     'schemaVersion', 'semanticPolicies', 'equalityGroups', 'referenceGroups',
     'derivedRebuilds', 'objects'
   ];
   const versions = manifest.exactProfiles.map((profile) => profile.schemaVersion);
-  if (JSON.stringify(versions) !== JSON.stringify([6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19])) {
-    throw new Error('sanitization manifest exact profiles must be ordered v6 through v19');
+  if (JSON.stringify(versions) !== JSON.stringify([6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20])) {
+    throw new Error('sanitization manifest exact profiles must be ordered v6 through v20');
   }
   for (const compatibilityProfile of manifest.exactProfiles) {
     if (!exactObjectKeys(compatibilityProfile, profileKeys)) {
@@ -1998,12 +2097,12 @@ function exactProfileClassification(db) {
   });
   if (
     classification.status !== 'managed'
-    || ![1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19].includes(classification.currentVersion)
+    || ![1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20].includes(classification.currentVersion)
   ) {
     const observed = classification.currentVersion === undefined || classification.currentVersion === null
       ? classification.status
       : classification.currentVersion;
-    throw new Error(`sanitization source must be an exact managed version 1 or version 6 through version 19 profile; got ${observed}`);
+    throw new Error(`sanitization source must be an exact managed version 1 or version 6 through version 20 profile; got ${observed}`);
   }
   return classification;
 }
@@ -2063,6 +2162,16 @@ function manifestFromInventory(inventory, schemaVersion = 1) {
 }
 
 function jsonColumnPolicy(table, column) {
+  if (table === 'organization_methodology_promotion_requests' && column === 'dimensions_json') {
+    return {
+      mode: 'closed',
+      allowedPaths: [
+        '/', '/schema_version', '/product', '/category', '/platform',
+        '/audience', '/hypothesis', '/method'
+      ],
+      leafPolicy: 'type-preserving-synthetic'
+    };
+  }
   if (table === 'performance_provider_collection_runs' && column === 'counts_json') {
     return {
       mode: 'closed',
@@ -4542,6 +4651,9 @@ function workflowJsonRelationshipRole(context, pointer) {
 }
 
 function structuralJsonLeaf(context, pointer) {
+  if (context === 'organization_methodology_promotion_requests.dimensions_json') {
+    return pointer === '/schema_version';
+  }
   if (context === 'performance_provider_collection_runs.counts_json') {
     return /^\/(?:total|succeeded|failed)$/.test(pointer);
   }
@@ -5501,8 +5613,32 @@ function rebuildPerformanceProviderObservationDigests(db) {
   }
 }
 
+function rebuildOrganizationMethodologyDigests(db) {
+  const present = db.prepare(`
+    SELECT 1 AS present
+    FROM sqlite_schema
+    WHERE type='table' AND name='organization_methodology_promotion_requests'
+  `).get();
+  if (!present) return;
+  const update = db.prepare(`
+    UPDATE organization_methodology_promotion_requests
+    SET dedupe_sha256=?
+    WHERE id=?
+  `);
+  for (const row of db.prepare(`
+    SELECT id,org_id,dimensions_json
+    FROM organization_methodology_promotion_requests
+    ORDER BY id
+  `).all()) {
+    update.run(
+      sha256(`tm-organization-methodology-dedupe-v2\n${row.org_id}\n${row.dimensions_json}`),
+      row.id
+    );
+  }
+}
+
 function rebuildDerivedData(db, manifest) {
-  if (![1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19].includes(manifest.schemaVersion)) {
+  if (![1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20].includes(manifest.schemaVersion)) {
     throw new Error(`unsupported derived rebuild profile ${manifest.schemaVersion}`);
   }
   const hasKnowledge = db.prepare("SELECT 1 AS present FROM sqlite_schema WHERE type='table' AND name='knowledge_entries'").get();
@@ -5573,6 +5709,7 @@ function rebuildDerivedData(db, manifest) {
   if (manifest.schemaVersion >= 6) rebuildCrmDerivedData(db);
   if (manifest.schemaVersion >= 16) rebuildContractDocumentDigests(db);
   if (manifest.schemaVersion >= 17) rebuildCollaborationPublicationDigests(db);
+  if (manifest.schemaVersion >= 20) rebuildOrganizationMethodologyDigests(db);
   rebuildCampaignWorkflowDispatchEvidence(db);
   sqliteDigest.rebuildKnowledgeChunksFts(db);
   sqliteDigest.verifyKnowledgeChunksFtsIntegrity(db, FTS_MANIFEST, { checkMainIntegrity: true });

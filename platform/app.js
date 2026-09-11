@@ -9002,15 +9002,22 @@ function renderKnowledgeGovernanceActions(entry) {
   var version = readPositiveInteger(governance.governance_version);
   if (id === null || version === null) return '';
   var buttons = [];
+  var promotion = entry.methodology_promotion || null;
+  if (promotion) {
+    var promotionLabel = promotion.status === 'pending' ? '待组织复核'
+      : promotion.status === 'rejected' ? '组织复核未通过'
+        : '已纳入组织方法论';
+    buttons.push('<button type="button" class="btn btn-xs" disabled title="请在对应活动的效果看板完成组织方法论复核">' + esc(promotionLabel) + '</button>');
+  }
   if (governance.is_current && governance.quality_state === 'candidate') {
-    buttons.push('<button type="button" class="btn btn-xs" onclick="adminGovernKnowledge(' + id + ',\'confirm\',' + version + ')">确认</button>');
-    buttons.push('<button type="button" class="btn btn-xs" onclick="adminGovernKnowledge(' + id + ',\'reject\',' + version + ')">拒绝</button>');
+    buttons.push('<button type="button" class="btn btn-xs" title="确认该知识可用于检索" onclick="adminGovernKnowledge(' + id + ',\'confirm\',' + version + ')">确认</button>');
+    buttons.push('<button type="button" class="btn btn-xs" title="拒绝该知识进入检索" onclick="adminGovernKnowledge(' + id + ',\'reject\',' + version + ')">拒绝</button>');
   } else if (governance.is_current && governance.quality_state === 'confirmed') {
-    buttons.push('<button type="button" class="btn btn-xs" onclick="adminGovernKnowledge(' + id + ',\'reject\',' + version + ')">撤回</button>');
+    buttons.push('<button type="button" class="btn btn-xs" title="撤回该知识的检索资格" onclick="adminGovernKnowledge(' + id + ',\'reject\',' + version + ')">撤回</button>');
   }
   if (governance.is_current) {
-    buttons.push('<button type="button" class="btn btn-xs" onclick="adminGovernKnowledge(' + id + ',\'set_retention\',' + version + ')">保留期</button>');
-    buttons.push('<button type="button" class="btn btn-xs" onclick="adminGovernKnowledge(' + id + ',\'supersede\',' + version + ')">替代版本</button>');
+    buttons.push('<button type="button" class="btn btn-xs" title="设置知识的长期或定期保留策略" onclick="adminGovernKnowledge(' + id + ',\'set_retention\',' + version + ')">保留期</button>');
+    buttons.push('<button type="button" class="btn btn-xs" title="将另一条已确认知识设为该条目的新版本" onclick="adminGovernKnowledge(' + id + ',\'supersede\',' + version + ')">替代版本</button>');
   }
   return buttons.length
     ? '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">' + buttons.join('') + '</div>'
@@ -9492,6 +9499,10 @@ var performanceContentAnalysisRetry = { fingerprint: '', idempotencyKey: '' };
 var performanceContentAnalysisApprovalRequestSequence = 0;
 var activePerformanceContentAnalysisApprovalRequest = null;
 var performanceContentAnalysisApprovalRetry = { fingerprint: '', idempotencyKey: '' };
+var performanceMethodologyData = null;
+var performanceMethodologyRequestSequence = 0;
+var performanceMethodologyMutationInFlight = false;
+var performanceMethodologyRetry = { fingerprint: '', idempotencyKey: '' };
 var performanceCustomerReportPreview = null;
 var performanceCustomerReportRequestSequence = 0;
 var activePerformanceCustomerReportRequest = null;
@@ -9706,6 +9717,7 @@ function changePerformanceCampaignContext(value) {
   loadPerformanceDashboard();
   loadPerformanceReviewEvidence();
   loadPerformanceContentAnalysisOptions();
+  loadPerformanceMethodologyPromotions();
   loadPerformanceCustomerReportSnapshots();
 }
 
@@ -9726,6 +9738,7 @@ function refreshPerformanceDashboard() {
       loadPerformanceDashboard(),
       loadPerformanceReviewEvidence(),
       loadPerformanceContentAnalysisOptions(),
+      loadPerformanceMethodologyPromotions(),
       loadPerformanceCustomerReportSnapshots()
     ]);
   });
@@ -9748,6 +9761,7 @@ function initPerformanceDashboard() {
       loadPerformanceDashboard(),
       loadPerformanceReviewEvidence(),
       loadPerformanceContentAnalysisOptions(),
+      loadPerformanceMethodologyPromotions(),
       loadPerformanceCustomerReportSnapshots()
     ]);
   });
@@ -9766,7 +9780,7 @@ function refreshPerformanceReviewEvidence() {
 async function refreshPerformanceInsightsAfterMutation() {
   invalidatePerformanceAiReviewDraft('内容数据已更新，请基于最新快照重新生成草稿。');
   invalidatePerformanceContentAnalysisDraft('内容数据已更新，原分析已作废。');
-  await Promise.all([loadPerformanceFreshnessQueue(), loadPerformanceCollectionRuns(), loadPerformanceDashboard(), loadPerformanceReviewEvidence(), loadPerformanceContentAnalysisOptions()]);
+  await Promise.all([loadPerformanceFreshnessQueue(), loadPerformanceCollectionRuns(), loadPerformanceDashboard(), loadPerformanceReviewEvidence(), loadPerformanceContentAnalysisOptions(), loadPerformanceMethodologyPromotions()]);
 }
 
 function performanceFreshnessStateLabel(value) {
@@ -11571,6 +11585,7 @@ async function approvePerformanceAiReviewDraft() {
     renderPerformanceAiReviewDraft(performanceAiReviewDraft);
     preparePerformanceCustomerReportForm(false);
     setPerformanceCustomerReportStatus('AI 复盘已确认，可预览客户版。');
+    loadPerformanceMethodologyPromotions();
     loadPerformanceCustomerReportSnapshots();
     return data;
   } catch (error) {
@@ -11979,6 +11994,7 @@ async function approvePerformanceContentAnalysisDraft() {
     performanceContentAnalysisPendingEvidence = null;
     clearPerformanceContentAnalysisTransientEvidence();
     renderPerformanceContentAnalysisDraft(performanceContentAnalysisDraft);
+    loadPerformanceMethodologyPromotions();
     return data;
   } catch (error) {
     if (!performanceContentAnalysisApprovalIsCurrent(context)) return null;
@@ -11988,6 +12004,204 @@ async function approvePerformanceContentAnalysisDraft() {
   } finally {
     if (activePerformanceContentAnalysisApprovalRequest === context) activePerformanceContentAnalysisApprovalRequest = null;
     if (performanceContentAnalysisApprovalIsCurrent(context)) setPerformanceContentAnalysisApprovalBusy(false);
+  }
+}
+
+function setPerformanceMethodologyStatus(message, type) {
+  var element = document.getElementById('performanceMethodologyStatus');
+  if (!element) return;
+  element.textContent = message || '';
+  element.style.color = type === 'error' ? 'var(--tm-color-danger)' : 'var(--tm-color-text-muted)';
+}
+
+function setPerformanceMethodologyBusy(busy) {
+  performanceMethodologyMutationInFlight = !!busy;
+  var panel = document.getElementById('performanceMethodologyPanel');
+  if (!panel) return;
+  panel.querySelectorAll('[data-methodology-action]').forEach(function(button) {
+    button.disabled = !!busy;
+  });
+}
+
+function performanceMethodologyStatusLabel(value) {
+  return {
+    pending: '等待二次复核',
+    promoted: '已纳入组织方法论',
+    deduplicated: '已合并同类方法',
+    superseded: '已替代旧方法',
+    rejected: '未通过复核'
+  }[value] || '待处理';
+}
+
+function performanceMethodologySourceLabel(value) {
+  return value === 'performance_content_analysis_confirmation' ? '内容证据结论' : 'AI 效果复盘';
+}
+
+function performanceMethodologySourceActions(source) {
+  var promotion = source && source.promotion;
+  var entryId = performancePositiveId(source && source.knowledge_entry_id);
+  var version = performancePositiveId(source && source.governance_version);
+  if (promotion) {
+    if (promotion.status === 'pending') {
+      if (promotion.can_decide) {
+        return '<div class="tm-performance-methodology-actions">'
+          + '<button class="btn btn-outline btn-sm" type="button" data-methodology-action onclick="decidePerformanceMethodologyPromotion(' + promotion.promotion_request_id + ',\'rejected\')">拒绝</button>'
+          + '<button class="btn btn-primary btn-sm" type="button" data-methodology-action onclick="decidePerformanceMethodologyPromotion(' + promotion.promotion_request_id + ',\'approved\')">批准纳入</button>'
+          + '</div>';
+      }
+      return '<p>需另一位组织管理员复核；申请人与首次确认人不能完成第二次批准。</p>';
+    }
+    return '<div class="tm-performance-methodology-meta"><span class="tm-performance-methodology-state">'
+      + esc(performanceMethodologyStatusLabel(promotion.status)) + '</span>'
+      + (promotion.target_knowledge_entry_id ? '<span>组织知识 #' + esc(promotion.target_knowledge_entry_id) + '</span>' : '')
+      + '</div>';
+  }
+  if (source && source.can_request && entryId !== null && version !== null) {
+    return '<div class="tm-performance-methodology-actions"><button class="btn btn-primary btn-sm" type="button" data-methodology-action onclick="requestPerformanceMethodologyPromotion(' + entryId + ',' + version + ')">申请组织复用</button></div>';
+  }
+  return '<p>当前账号不能提交该结论。</p>';
+}
+
+function renderPerformanceMethodologyPromotions(data) {
+  performanceMethodologyData = data || null;
+  var sourceContainer = document.getElementById('performanceMethodologySources');
+  var currentContainer = document.getElementById('performanceMethodologyCurrent');
+  if (!sourceContainer || !currentContainer) return;
+  if (!data) {
+    sourceContainer.innerHTML = '<div class="tm-state-empty">暂无可申请结论。</div>';
+    currentContainer.innerHTML = '<div class="tm-state-empty">暂无组织方法论。</div>';
+    return;
+  }
+  var sources = Array.isArray(data.sources) ? data.sources : [];
+  var methods = Array.isArray(data.current_methods) ? data.current_methods : [];
+  sourceContainer.innerHTML = sources.length ? sources.map(function(source) {
+    var promotion = source.promotion || null;
+    return '<div class="tm-performance-methodology-item">'
+      + '<strong>' + esc(source.title || ('项目结论 #' + source.knowledge_entry_id)) + '</strong>'
+      + '<p>' + esc(source.summary || '暂无摘要') + '</p>'
+      + '<div class="tm-performance-methodology-meta"><span>' + esc(performanceMethodologySourceLabel(source.source_type)) + '</span>'
+      + '<span>知识 #' + esc(source.knowledge_entry_id) + '</span>'
+      + '<span>' + esc(promotion ? performanceMethodologyStatusLabel(promotion.status) : '已完成首次人工确认') + '</span></div>'
+      + performanceMethodologySourceActions(source)
+      + '</div>';
+  }).join('') : '<div class="tm-state-empty">先确认并归档 AI 复盘或内容证据结论，才能申请组织复用。</div>';
+  currentContainer.innerHTML = methods.length ? methods.map(function(method) {
+    return '<div class="tm-performance-methodology-item">'
+      + '<strong>' + esc(method.title || ('组织方法 #' + method.knowledge_entry_id)) + '</strong>'
+      + '<p>' + esc(method.summary || '暂无摘要') + '</p>'
+      + '<div class="tm-performance-methodology-meta"><span>知识 #' + esc(method.knowledge_entry_id) + '</span>'
+      + '<span>版本 v' + esc(method.version_no || 1) + '</span><span>可供组织内项目 AI 复盘检索</span></div>'
+      + '</div>';
+  }).join('') : '<div class="tm-state-empty">尚无通过独立复核的组织方法论。</div>';
+  setPerformanceMethodologyBusy(performanceMethodologyMutationInFlight);
+  if (window.TMAccessibility) window.TMAccessibility.refresh();
+}
+
+async function loadPerformanceMethodologyPromotions() {
+  var campaignId = getPerformanceCampaignId();
+  var requestSequence = ++performanceMethodologyRequestSequence;
+  if (campaignId === null) {
+    renderPerformanceMethodologyPromotions(null);
+    setPerformanceMethodologyStatus('选择活动后加载可申请结论。');
+    return null;
+  }
+  setPerformanceMethodologyStatus('正在核对组织方法论状态...');
+  try {
+    var response = await apiFetch('/campaigns/' + encodeURIComponent(campaignId) + '/performance/methodology-promotions');
+    var data = await response.json().catch(function() { return {}; });
+    if (requestSequence !== performanceMethodologyRequestSequence || campaignId !== getPerformanceCampaignId()) return null;
+    if (!response.ok) throw new Error(data.error || '组织方法论加载失败');
+    renderPerformanceMethodologyPromotions(data);
+    var pending = (data.requests || []).filter(function(item) { return item.status === 'pending'; }).length;
+    setPerformanceMethodologyStatus(pending ? ('有 ' + pending + ' 项等待独立复核。') : '组织方法论状态已更新。');
+    return data;
+  } catch (error) {
+    if (requestSequence !== performanceMethodologyRequestSequence || campaignId !== getPerformanceCampaignId()) return null;
+    renderPerformanceMethodologyPromotions(null);
+    setPerformanceMethodologyStatus(error.message || '组织方法论加载失败', 'error');
+    return null;
+  }
+}
+
+function performanceMethodologyIdempotencyKey(prefix) {
+  return createAiChatIdempotencyKey().replace(/^ai-chat-/, prefix + '-');
+}
+
+async function requestPerformanceMethodologyPromotion(entryId, expectedVersion) {
+  var campaignId = getPerformanceCampaignId();
+  entryId = performancePositiveId(entryId);
+  expectedVersion = performancePositiveId(expectedVersion);
+  if (campaignId === null || entryId === null || expectedVersion === null || performanceMethodologyMutationInFlight) return null;
+  var reason = prompt('填写申请组织复用的原因', '该结论已完成项目内人工确认，建议纳入组织方法论。');
+  if (reason === null || !reason.trim()) return null;
+  var supersedes = prompt('如需替代已有组织方法论，请填写其知识 ID；否则留空。', '');
+  if (supersedes === null) return null;
+  var supersedesId = supersedes.trim() ? performancePositiveId(supersedes.trim()) : null;
+  if (supersedes.trim() && supersedesId === null) {
+    setPerformanceMethodologyStatus('待替代的知识 ID 无效。', 'error');
+    return null;
+  }
+  var fingerprint = ['request', AUTH_GENERATION, campaignId, entryId, expectedVersion, reason.trim(), supersedesId || ''].join(':');
+  if (performanceMethodologyRetry.fingerprint !== fingerprint) {
+    performanceMethodologyRetry = { fingerprint: fingerprint, idempotencyKey: performanceMethodologyIdempotencyKey('methodology-request') };
+  }
+  setPerformanceMethodologyBusy(true);
+  setPerformanceMethodologyStatus('正在提交组织复用申请...');
+  try {
+    var response = await apiFetch('/campaigns/' + encodeURIComponent(campaignId) + '/performance/methodology-promotion-requests', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': performanceMethodologyRetry.idempotencyKey },
+      body: JSON.stringify({
+        source_knowledge_entry_id: entryId,
+        expected_governance_version: expectedVersion,
+        reason: reason.trim(),
+        supersedes_knowledge_entry_id: supersedesId
+      })
+    });
+    var data = await response.json().catch(function() { return {}; });
+    if (campaignId !== getPerformanceCampaignId()) return null;
+    if (!response.ok) throw new Error(data.error || '组织复用申请失败');
+    performanceMethodologyRetry = { fingerprint: '', idempotencyKey: '' };
+    toast('晋升申请已提交，等待另一位组织管理员审批。');
+    return loadPerformanceMethodologyPromotions();
+  } catch (error) {
+    if (campaignId === getPerformanceCampaignId()) setPerformanceMethodologyStatus(error.message || '组织复用申请失败', 'error');
+    return null;
+  } finally {
+    setPerformanceMethodologyBusy(false);
+  }
+}
+
+async function decidePerformanceMethodologyPromotion(requestId, decision) {
+  var campaignId = getPerformanceCampaignId();
+  requestId = performancePositiveId(requestId);
+  if (campaignId === null || requestId === null || ['approved', 'rejected'].indexOf(decision) < 0 || performanceMethodologyMutationInFlight) return null;
+  var defaultReason = decision === 'approved' ? '独立复核通过，可供同组织后续项目复用。' : '独立复核未通过，暂不纳入组织方法论。';
+  var reason = prompt(decision === 'approved' ? '填写批准依据' : '填写拒绝原因', defaultReason);
+  if (reason === null || !reason.trim()) return null;
+  var fingerprint = ['decision', AUTH_GENERATION, campaignId, requestId, decision, reason.trim()].join(':');
+  if (performanceMethodologyRetry.fingerprint !== fingerprint) {
+    performanceMethodologyRetry = { fingerprint: fingerprint, idempotencyKey: performanceMethodologyIdempotencyKey('methodology-decision') };
+  }
+  setPerformanceMethodologyBusy(true);
+  setPerformanceMethodologyStatus(decision === 'approved' ? '正在批准并建立组织知识...' : '正在记录复核结果...');
+  try {
+    var response = await apiFetch('/campaigns/' + encodeURIComponent(campaignId) + '/performance/methodology-promotion-requests/' + encodeURIComponent(requestId) + '/decision', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': performanceMethodologyRetry.idempotencyKey },
+      body: JSON.stringify({ decision: decision, reason: reason.trim() })
+    });
+    var data = await response.json().catch(function() { return {}; });
+    if (campaignId !== getPerformanceCampaignId()) return null;
+    if (!response.ok) throw new Error(data.error || '组织方法论复核失败');
+    performanceMethodologyRetry = { fingerprint: '', idempotencyKey: '' };
+    toast(decision === 'approved' ? '组织方法论已通过独立复核。' : '已记录未通过复核。');
+    return loadPerformanceMethodologyPromotions();
+  } catch (error) {
+    if (campaignId === getPerformanceCampaignId()) setPerformanceMethodologyStatus(error.message || '组织方法论复核失败', 'error');
+    return null;
+  } finally {
+    setPerformanceMethodologyBusy(false);
   }
 }
 

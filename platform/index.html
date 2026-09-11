@@ -1487,6 +1487,32 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
         </div>
       </section>
 
+      <section id="performanceMethodologyPanel" class="tm-performance-methodology" aria-labelledby="performanceMethodologyTitle">
+        <div class="tm-performance-methodology-heading">
+          <div>
+            <h4 id="performanceMethodologyTitle">组织方法论</h4>
+            <p class="tm-metric-note">已人工确认的项目复盘可提交组织复用；必须由另一位组织管理员独立复核。</p>
+          </div>
+          <button class="btn btn-outline btn-sm" type="button" onclick="loadPerformanceMethodologyPromotions()">刷新</button>
+        </div>
+        <p class="tm-metric-note">平台支持管理员只能审计，不能代替组织管理员审批。</p>
+        <p id="performanceMethodologyStatus" class="tm-metric-note" role="status" aria-live="polite">选择活动后加载可申请结论。</p>
+        <div class="tm-performance-methodology-columns">
+          <div>
+            <h5>当前项目结论</h5>
+            <div id="performanceMethodologySources" class="tm-performance-methodology-list" aria-live="polite">
+              <div class="tm-state-empty">暂无可申请结论。</div>
+            </div>
+          </div>
+          <div>
+            <h5>组织已确认方法</h5>
+            <div id="performanceMethodologyCurrent" class="tm-performance-methodology-list" aria-live="polite">
+              <div class="tm-state-empty">暂无组织方法论。</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <section class="tm-performance-customer-report" aria-labelledby="performanceCustomerReportHeading">
         <div class="tm-performance-customer-report-heading">
           <div>

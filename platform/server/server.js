@@ -16,6 +16,9 @@ const crypto = require('crypto');
 const childProcess = require('child_process');
 const db = require('./db');
 const knowledgeService = require('./services/knowledge_service');
+const {
+  createOrganizationMethodologyService
+} = require('./services/organization_methodology_service');
 const aiService = require('./services/ai_service');
 const idempotency = require('./services/idempotency_service');
 const uploadAdmissionIdempotency = Object.freeze({
@@ -216,6 +219,7 @@ const performanceContentAnalysisService = createPerformanceContentAnalysisServic
   performanceService: performanceManualService,
   aiService
 });
+const organizationMethodologyService = createOrganizationMethodologyService(db);
 const customerReportSnapshotService = createCustomerReportSnapshotService(db, {
   performanceService: performanceManualService
 });
@@ -284,6 +288,9 @@ const phase4PolicyNames = [
   'CAMPAIGN_PERFORMANCE_OBSERVATION_HISTORY',
   'CAMPAIGN_PERFORMANCE_DASHBOARD',
   'CAMPAIGN_PERFORMANCE_REVIEW_EVIDENCE',
+  'CAMPAIGN_PERFORMANCE_METHODOLOGY_LIST',
+  'CAMPAIGN_PERFORMANCE_METHODOLOGY_REQUEST',
+  'CAMPAIGN_PERFORMANCE_METHODOLOGY_DECIDE',
   'CAMPAIGN_PERFORMANCE_AI_REVIEW_DRAFT',
   'CAMPAIGN_PERFORMANCE_AI_REVIEW_APPROVE',
   'CAMPAIGN_PERFORMANCE_CONTENT_ANALYSIS_DRAFT',
@@ -1655,6 +1662,7 @@ registerPerformanceRoutes(app, {
   feishuProjectionService: performanceFeishuProjectionService,
   aiReviewService: performanceAiReviewService,
   contentAnalysisService: performanceContentAnalysisService,
+  organizationMethodologyService,
   customerReportSnapshotService,
   customerReportDeliveryService,
   aiLimiter,

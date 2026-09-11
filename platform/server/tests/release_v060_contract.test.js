@@ -219,7 +219,7 @@ test('cutover uses reload-convergent Nginx verification before its public route 
   assert.doesNotMatch(publicEnablement, /expect_stylesheet\(\)/);
 });
 
-test('current deploy inventory ships schema v19 and its focused regression', () => {
+test('current deploy inventory ships schema v20 and its focused regression', () => {
   const files = powerShellArrayEntries(read('platform', 'deploy_v8.ps1'), 'FILES');
   for (const required of [
     'server/migrations/006_crm_sales_workspace.js',
@@ -235,6 +235,7 @@ test('current deploy inventory ships schema v19 and its focused regression', () 
     'server/migrations/017_collaboration_publication_custody.js',
     'server/migrations/018_collaboration_publication_lifecycle.js',
     'server/migrations/019_performance_provider_collection.js',
+    'server/migrations/020_organization_methodology_promotion.js',
     'server/services/crm_contract.js',
     'server/services/crm_customer_service.js',
     'server/services/crm_query_service.js',
@@ -245,6 +246,7 @@ test('current deploy inventory ships schema v19 and its focused regression', () 
     'server/services/performance_feishu_connection_service.js',
     'server/services/performance_manual_service.js',
     'server/services/performance_provider_collection_service.js',
+    'server/services/organization_methodology_service.js',
     'server/services/youtube_data_api_client.js',
     'server/services/collaboration_publication_handoff_service.js',
     'server/services/customer_report_snapshot_service.js',
@@ -272,6 +274,8 @@ test('current deploy inventory ships schema v19 and its focused regression', () 
     'server/tests/performance_manual_service.test.js',
     'server/tests/performance_provider_collection_migration.test.js',
     'server/tests/performance_provider_collection_service.test.js',
+    'server/tests/organization_methodology_promotion_migration.test.js',
+    'server/tests/organization_methodology_service.test.js',
     'server/tests/youtube_data_api_client.test.js',
     'server/tests/routes_performance.test.js',
     'server/tests/performance_frontend_contract.test.js',
@@ -282,7 +286,7 @@ test('current deploy inventory ships schema v19 and its focused regression', () 
   }
 });
 
-test('current trusted source and sanitization contracts accept exact v1 and v6 through v19 sources', () => {
+test('current trusted source and sanitization contracts accept exact v1 and v6 through v20 sources', () => {
   const trustedManifest = JSON.parse(read(
     'platform', 'server', 'scripts', 'trusted_production_source_manifest.json'
   ));
@@ -292,14 +296,14 @@ test('current trusted source and sanitization contracts accept exact v1 and v6 t
   const trustedPaths = new Set(trustedManifest.files.map((entry) => entry.path));
 
   assert.deepEqual(trustedManifest.migrationContract, {
-    acceptedSourceVersions: [1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19],
-    targetVersion: 19,
+    acceptedSourceVersions: [1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
+    targetVersion: 20,
     runs: 2,
     deterministicAppendTables: ['activity_log']
   });
   assert.deepEqual(
     sanitizationManifest.exactProfiles.map((profile) => profile.schemaVersion),
-    [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+    [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
   );
   for (const required of [
     'server/migrations/006_crm_sales_workspace.js',
@@ -316,6 +320,7 @@ test('current trusted source and sanitization contracts accept exact v1 and v6 t
     'server/migrations/017_collaboration_publication_custody.js',
     'server/migrations/018_collaboration_publication_lifecycle.js',
     'server/migrations/019_performance_provider_collection.js',
+    'server/migrations/020_organization_methodology_promotion.js',
     'server/services/crm_contract.js',
     'server/services/crm_customer_service.js',
     'server/services/crm_query_service.js',
@@ -342,6 +347,10 @@ test('v0.6 trusted bytes have exact LF rules and release records exist', () => {
     'platform/server/migrations/017_collaboration_publication_custody.js',
     'platform/server/migrations/018_collaboration_publication_lifecycle.js',
     'platform/server/migrations/019_performance_provider_collection.js',
+    'platform/server/migrations/020_organization_methodology_promotion.js',
+    'platform/server/services/organization_methodology_service.js',
+    'platform/server/tests/organization_methodology_promotion_migration.test.js',
+    'platform/server/tests/organization_methodology_service.test.js',
     'platform/server/services/performance_provider_collection_service.js',
     'platform/server/services/youtube_data_api_client.js',
     'platform/server/tests/performance_provider_collection_migration.test.js',
@@ -382,7 +391,7 @@ test('v0.6 release records match the trusted-source and parser self-test contrac
     'archive', 'versions', '2026-08-11-v0.6.0-crm-sales-workspace.md'
   );
 
-  assert.equal(trustedManifest.files.length, 62);
+  assert.equal(trustedManifest.files.length, 63);
   assert.equal(parserManifest.required_self_tests.length, 21);
   assert.match(versionRecord, /Trusted source: 49 SHA-256-pinned files/);
   assert.match(archiveRecord, /trusted-source manifest now pins 49 files/i);

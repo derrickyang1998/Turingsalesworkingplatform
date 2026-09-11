@@ -1627,10 +1627,14 @@ test('generates an evidence-bound AI review draft without sending commercial or 
     assert.equal(requests[0].archiveSummary, false);
     assert.equal(requests[0].source_module, 'performance_review');
     assert.equal(requests[0].entry_type, 'performance_review_methodology');
-    assert.equal(requests[0].source_type, 'performance_review_methodology');
+    assert.deepEqual(requests[0].source_types, [
+      'performance_review_methodology',
+      'organization_performance_methodology'
+    ]);
+    assert.equal(Object.hasOwn(requests[0], 'source_type'), false);
     assert.equal(requests[0].quality_state, 'confirmed');
-    assert.equal(requests[0].business_type, 'campaign');
-    assert.equal(requests[0].business_id, '7');
+    assert.equal(Object.hasOwn(requests[0], 'business_type'), false);
+    assert.equal(Object.hasOwn(requests[0], 'business_id'), false);
     assert.equal(Object.hasOwn(requests[0], 'knowledge_entry_ids'), false);
     assert.doesNotMatch(requests[0].message, /confirmed_commercial|creator_fee|attributed_revenue|\"roi\"|\"roas\"/i);
     assert.doesNotMatch(requests[0].message, /https?:\/\//i);

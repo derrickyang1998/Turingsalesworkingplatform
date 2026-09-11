@@ -33,10 +33,10 @@ $EXPECTED_PPT_SHA256 = "f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57
 $TRUSTED_SOURCE_GATE_RELATIVE_PATH = "server\scripts\trusted_production_source_gate.js"
 $TRUSTED_SOURCE_MANIFEST_RELATIVE_PATH = "server\scripts\trusted_production_source_manifest.json"
 $TRUSTED_RUNTIME_CONFIG_RELATIVE_PATH = "server\config\runtime_config.js"
-$EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "2632b6994c62e13ccc174bfde07ad95281dac9fc2174a6bcf75528a10d52475a"
-$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "9ad491625c76690faccc8db47ffc7809f9c90d0e18351aa6adf1abeefeae5c5c"
+$EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "af1566005f0024d5c28906404df025ba9eda1a5707104d3de676bae04b2c01ea"
+$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "22a8396501d33902bcb372ab13c7ce9dfa97245850c5b47eed433dc93b982e95"
 $EXPECTED_TRUSTED_RUNTIME_CONFIG_SHA256 = "76d43d3e811c6fa8daae987cc9eb2fff2dc8a8095f84b1cd309e4e214df94dcb"
-$EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256 = "490fc5942f2375d29205ae177755a08f4fb6fa9138c54a8783e3c6d52ca941ac"
+$EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256 = "abbfe5c87b1bcce8661a1c06fab3046648fb33828072c6775d5b5a9bbdccca35"
 $EXPECTED_TRUSTED_PARSER_VERIFIER_SHA256 = "7f9efaac02675b21e025891a400474cc7481c1adaf58c88bd8b356d5276f2eaa"
 $EXPECTED_TRUSTED_PUBLIC_GUARD_SHA256 = "d45fe8fcc01587aaa0e73eccfb9714c27801e232cb6c0effd6daedb703316d66"
 $EXPECTED_TRUSTED_MIGRATION_CLEANUP_HELPER_SHA256 = "d5f2befa902522dd9de3e9dd2397a99ee5e78ab1a1c6e526a27f14bb2829e1fa"
@@ -119,6 +119,7 @@ $FILES = @(
     "server\migrations\017_collaboration_publication_custody.js",
     "server\migrations\018_collaboration_publication_lifecycle.js",
     "server\migrations\019_performance_provider_collection.js",
+    "server\migrations\020_organization_methodology_promotion.js",
     "server\migrations\baselines\legacy_v1.js",
     "server\migrations\engines\v1.js",
     "server\migrations\vendor\bcryptjs_v3_0_3.js",
@@ -178,6 +179,7 @@ $FILES = @(
     "server\services\migration_service.js",
     "server\services\obsidian_ingest_service.js",
     "server\services\organization_access_service.js",
+    "server\services\organization_methodology_service.js",
     "server\services\parser_startup_service.js",
     "server\services\path_policy_service.js",
     "server\services\performance_content_import_service.js",
@@ -305,6 +307,8 @@ $FILES = @(
     "server\tests\performance_metrics_service.test.js",
     "server\tests\performance_provider_collection_migration.test.js",
     "server\tests\performance_provider_collection_service.test.js",
+    "server\tests\organization_methodology_promotion_migration.test.js",
+    "server\tests\organization_methodology_service.test.js",
     "server\tests\routes_performance.test.js",
     "server\tests\phase4_nginx_ingress.test.js",
     "server\tests\phase4_request_pipeline.test.js",

@@ -1521,6 +1521,7 @@ async function handleLinkedChat(db, opts, linked) {
       : opts.knowledge_entry_ids,
     entry_type: opts.entry_type,
     source_type: opts.source_type,
+    source_types: opts.source_types,
     quality_state: opts.quality_state,
     visibility: opts.visibility,
     business_type: opts.business_type,

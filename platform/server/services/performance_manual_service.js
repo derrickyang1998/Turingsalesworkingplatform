@@ -3611,10 +3611,11 @@ function createPerformanceAiReviewService(db, options = {}) {
         campaign_id: evidence.campaign_id,
         // Only curated, human-confirmed performance methodology is eligible for linked RAG here.
         entry_type: 'performance_review_methodology',
-        source_type: 'performance_review_methodology',
+        source_types: [
+          'performance_review_methodology',
+          'organization_performance_methodology'
+        ],
         quality_state: 'confirmed',
-        business_type: 'campaign',
-        business_id: String(evidence.campaign_id),
         allowWeb: false,
         summaryVisibility: 'private',
         knowledgeLimit: 5,
@@ -3968,6 +3969,12 @@ function createPerformanceAiReviewService(db, options = {}) {
         JSON.stringify({ source: 'performance_ai_review_confirmation' })
       );
       knowledge.applyKnowledgeCapacityGaugePlanInTransaction(db, written.capacityGaugePlan);
+      knowledge.confirmKnowledgeInTransaction(db, {
+        entryId: Number(written.entry.id),
+        expectedVersion: 1,
+        reviewedBy: user.id,
+        reason: '项目负责人已人工确认效果复盘结论。'
+      });
       const result = aiReviewApprovalResult('confirmed', written.entry, approvalState);
       writeApprovalAudit(user, approvalState, Number(written.entry.id), result.status);
       return result;

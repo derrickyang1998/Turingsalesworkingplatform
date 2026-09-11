@@ -229,6 +229,28 @@ test('performance dashboard exposes metadata-only review evidence with a stale-r
   assert.match(serverSource, /CAMPAIGN_PERFORMANCE_REVIEW_EVIDENCE/);
 });
 
+test('performance dashboard manages two-person organization methodology promotion in place', () => {
+  assert.match(indexHtml, /id="performanceMethodologyPanel"/);
+  assert.match(indexHtml, /id="performanceMethodologyStatus"/);
+  assert.match(indexHtml, /id="performanceMethodologySources"/);
+  assert.match(indexHtml, /id="performanceMethodologyCurrent"/);
+  assert.match(appSource, /var performanceMethodologyRequestSequence = 0;/);
+  assert.match(appSource, /async function loadPerformanceMethodologyPromotions\(\)/);
+  assert.match(appSource, /function renderPerformanceMethodologyPromotions\(/);
+  assert.match(appSource, /async function requestPerformanceMethodologyPromotion\(/);
+  assert.match(appSource, /async function decidePerformanceMethodologyPromotion\(/);
+  assert.match(appSource, /performance\/methodology-promotions/);
+  assert.match(appSource, /performance\/methodology-promotion-requests/);
+  assert.match(appSource, /methodology-promotion-requests\/.*\/decision/);
+  assert.match(appSource, /需另一位组织管理员复核/);
+  assert.match(indexHtml, /平台支持管理员只能审计/);
+  assert.match(componentStyles, /\.tm-performance-methodology/);
+  assert.match(componentStyles, /\.tm-performance-methodology-item/);
+  assert.match(serverSource, /CAMPAIGN_PERFORMANCE_METHODOLOGY_LIST/);
+  assert.match(serverSource, /organizationMethodologyService/);
+  assert.doesNotMatch(appSource, /\/knowledge\/.*methodology-promotion/);
+});
+
 test('performance dashboard exposes an evidence-bound AI review draft with isolated stale-response protection', () => {
   assert.match(indexHtml, /id="performanceAiReviewGenerate"/);
   assert.match(indexHtml, /id="performanceAiReviewStatus"/);

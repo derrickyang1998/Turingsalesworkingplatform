@@ -13,6 +13,9 @@ const {
 const {
   PerformanceContentAnalysisServiceError
 } = require('../services/performance_content_analysis_service');
+const {
+  OrganizationMethodologyServiceError
+} = require('../services/organization_methodology_service');
 const { PerformanceFeishuConnectionServiceError } = require('../services/performance_feishu_connection_service');
 const { CustomerReportSnapshotServiceError } = require('../services/customer_report_snapshot_service');
 const { CustomerReportDeliveryServiceError } = require('../services/customer_report_delivery_service');
@@ -253,6 +256,36 @@ function createFixture() {
       };
     }
   };
+  const organizationMethodologyService = {
+    listPromotions(input) {
+      calls.push(['methodology-list', input]);
+      return {
+        contract_version: 'organization-methodology-promotion-v2',
+        campaign_id: 7,
+        capabilities: { can_request: true, can_decide: true },
+        sources: [],
+        requests: [],
+        current_methods: []
+      };
+    },
+    requestPromotion(input) {
+      calls.push(['methodology-request', input]);
+      return {
+        contract_version: 'organization-methodology-promotion-v2',
+        status: 'pending',
+        promotion_request_id: 91
+      };
+    },
+    decidePromotion(input) {
+      calls.push(['methodology-decision', input]);
+      return {
+        contract_version: 'organization-methodology-promotion-v2',
+        status: 'approved',
+        promotion_request_id: 91,
+        target_knowledge_entry_id: 92
+      };
+    }
+  };
   const customerReportSnapshotService = {
     preview(input) {
       calls.push(['customer-report-preview', input]);
@@ -320,6 +353,7 @@ function createFixture() {
     feishuProjectionService,
     aiReviewService,
     contentAnalysisService,
+    organizationMethodologyService,
     customerReportSnapshotService,
     customerReportDeliveryService
   });
@@ -334,6 +368,7 @@ function createFixture() {
     feishuProjectionService,
     aiReviewService,
     contentAnalysisService,
+    organizationMethodologyService,
     customerReportSnapshotService,
     customerReportDeliveryService
   };
@@ -390,6 +425,7 @@ test('registers campaign-scoped performance endpoints and forwards authenticated
     'GET /api/campaigns/:id/performance/feishu-projection-preview/export',
     'GET /api/campaigns/:id/performance/freshness-queue',
     'GET /api/campaigns/:id/performance/integration-preview',
+    'GET /api/campaigns/:id/performance/methodology-promotions',
     'GET /api/campaigns/:id/performance/review-evidence',
     'POST /api/campaigns/:id/performance/ai-review-draft',
     'POST /api/campaigns/:id/performance/ai-review-draft/approve',
@@ -405,6 +441,8 @@ test('registers campaign-scoped performance endpoints and forwards authenticated
     'POST /api/campaigns/:id/performance/feishu-connection/approve',
     'POST /api/campaigns/:id/performance/import',
     'POST /api/campaigns/:id/performance/manual-inputs/:inputId/approve',
+    'POST /api/campaigns/:id/performance/methodology-promotion-requests',
+    'POST /api/campaigns/:id/performance/methodology-promotion-requests/:requestId/decision',
     'POST /api/campaigns/:id/performance/provider-refresh'
   ]);
 
@@ -423,6 +461,95 @@ test('registers campaign-scoped performance endpoints and forwards authenticated
     campaignId: '7',
     body: request.body
   }]);
+});
+
+test('exposes campaign-scoped organization methodology request and independent decision routes', () => {
+  const { routes, calls, organizationMethodologyService } = createFixture();
+  const user = { id: 9, role: 'org_admin' };
+  const listResponse = invoke(
+    routes.get('GET /api/campaigns/:id/performance/methodology-promotions'),
+    { user, params: { id: '7' }, requestId: 'methodology-list-request' }
+  );
+  assert.equal(listResponse.statusCode, 200);
+  assert.equal(listResponse.body.contract_version, 'organization-methodology-promotion-v2');
+  assert.deepEqual(calls.shift(), ['methodology-list', { user, campaignId: '7' }]);
+
+  const requestBody = {
+    source_knowledge_entry_id: 33,
+    expected_governance_version: 2,
+    reason: '申请组织级复用。',
+    supersedes_knowledge_entry_id: null
+  };
+  const requestResponse = invoke(
+    routes.get('POST /api/campaigns/:id/performance/methodology-promotion-requests'),
+    {
+      user,
+      params: { id: '7' },
+      body: requestBody,
+      headers: { 'idempotency-key': 'methodology-request-key-12345678' },
+      phase4Request: { requestId: 'methodology-request-id' },
+      ip: '203.0.113.10'
+    }
+  );
+  assert.equal(requestResponse.body.status, 'pending');
+  assert.deepEqual(calls.shift(), ['methodology-request', {
+    user,
+    campaignId: '7',
+    body: requestBody,
+    idempotencyKey: 'methodology-request-key-12345678',
+    requestId: 'methodology-request-id',
+    ipAddress: '203.0.113.10'
+  }]);
+
+  const decisionBody = { decision: 'approved', reason: '独立复核通过。' };
+  const decisionResponse = invoke(
+    routes.get('POST /api/campaigns/:id/performance/methodology-promotion-requests/:requestId/decision'),
+    {
+      user,
+      params: { id: '7', requestId: '91' },
+      body: decisionBody,
+      headers: { 'idempotency-key': 'methodology-decision-key-12345678' },
+      phase4Request: { requestId: 'methodology-decision-id' },
+      ip: '203.0.113.11'
+    }
+  );
+  assert.equal(decisionResponse.body.status, 'approved');
+  assert.deepEqual(calls.shift(), ['methodology-decision', {
+    user,
+    campaignId: '7',
+    promotionRequestId: '91',
+    body: decisionBody,
+    idempotencyKey: 'methodology-decision-key-12345678',
+    requestId: 'methodology-decision-id',
+    ipAddress: '203.0.113.11'
+  }]);
+
+  const listPolicy = campaignContract.REQUEST_POLICIES.CAMPAIGN_PERFORMANCE_METHODOLOGY_LIST;
+  const requestPolicy = campaignContract.REQUEST_POLICIES.CAMPAIGN_PERFORMANCE_METHODOLOGY_REQUEST;
+  const decisionPolicy = campaignContract.REQUEST_POLICIES.CAMPAIGN_PERFORMANCE_METHODOLOGY_DECIDE;
+  assert.equal(listPolicy.pathTemplate, '/api/campaigns/:id/performance/methodology-promotions');
+  assert.equal(requestPolicy.mediaKind, campaignContract.MEDIA_KINDS.JSON);
+  assert.equal(decisionPolicy.pathTemplate, '/api/campaigns/:id/performance/methodology-promotion-requests/:requestId/decision');
+
+  organizationMethodologyService.decidePromotion = () => {
+    throw new OrganizationMethodologyServiceError(
+      403,
+      'ORGANIZATION_METHODOLOGY_SECOND_APPROVER_REQUIRED',
+      'A different organization administrator must make the second decision.'
+    );
+  };
+  const forbidden = invoke(
+    routes.get('POST /api/campaigns/:id/performance/methodology-promotion-requests/:requestId/decision'),
+    {
+      user,
+      params: { id: '7', requestId: '91' },
+      body: decisionBody,
+      headers: { 'idempotency-key': 'methodology-decision-key-87654321' },
+      requestId: 'methodology-forbidden'
+    }
+  );
+  assert.equal(forbidden.statusCode, 403);
+  assert.equal(forbidden.body.code, 'ORGANIZATION_METHODOLOGY_SECOND_APPROVER_REQUIRED');
 });
 
 test('normalizes Express null-prototype queries before performance read services', () => {

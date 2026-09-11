@@ -1262,6 +1262,12 @@ function createPerformanceContentAnalysisService(db, options = {}) {
         JSON.stringify({ source: 'performance_content_analysis_confirmation' })
       );
       knowledge.applyKnowledgeCapacityGaugePlanInTransaction(db, written.capacityGaugePlan);
+      knowledge.confirmKnowledgeInTransaction(db, {
+        entryId: Number(written.entry.id),
+        expectedVersion: 1,
+        reviewedBy: user.id,
+        reason: '项目负责人已人工确认内容证据分析结论。'
+      });
       const result = approvalResult('confirmed', written.entry, state);
       writeApprovalAudit(state, Number(written.entry.id), result.status);
       idempotency.completeJsonInTransaction(db, {

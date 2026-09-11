@@ -33,9 +33,10 @@
       16,
       17,
       18,
-      19
+      19,
+      20
     ],
-    "targetVersion": 19,
+    "targetVersion": 20,
     "runs": 2,
     "deterministicAppendTables": [
       "activity_log"
@@ -119,6 +120,10 @@
       "sha256": "fe6d14a89d974a479152db64698bc1574bccd9b5a20dda8334df06b889d3c2e9"
     },
     {
+      "path": "server/migrations/020_organization_methodology_promotion.js",
+      "sha256": "0ad3660ee59b3a03579d14f881bacab2fc1763f043bbfd06b5ee59bbfa562b3b"
+    },
+    {
       "path": "server/migrations/baselines/legacy_v1.js",
       "sha256": "13e631ca7e2aef57e39f7dbc38e6f03e2d5323a11f38c6ce31239d793911812c"
     },
@@ -200,11 +205,11 @@
     },
     {
       "path": "server/scripts/sanitization_manifest.json",
-      "sha256": "11c74bce1d173d374253a31db197be14010c04abfffecfe81422f76361e8f030"
+      "sha256": "cce3647cacd6e146ac18eb903b83fb504d3da261713896d3a9afb4767f46a45c"
     },
     {
       "path": "server/scripts/sanitize_production_shape.js",
-      "sha256": "32b3c641e7ae27f13cd1c1516b21148d0cb7ce7a504ee7362d1a90d6d884d704"
+      "sha256": "223a9cfb6551600aeeb21ea944a0607ab5820fa8abf0585d608eac8d76e7269e"
     },
     {
       "path": "server/scripts/trusted_parser_runtime_verifier.js",
@@ -216,7 +221,7 @@
     },
     {
       "path": "server/scripts/verify_campaign_migration_gate.js",
-      "sha256": "490fc5942f2375d29205ae177755a08f4fb6fa9138c54a8783e3c6d52ca941ac"
+      "sha256": "abbfe5c87b1bcce8661a1c06fab3046648fb33828072c6775d5b5a9bbdccca35"
     },
     {
       "path": "server/services/campaign_access_service.js",
@@ -248,7 +253,7 @@
     },
     {
       "path": "server/services/idempotency_service.js",
-      "sha256": "b0dca489f7af38e379346ba0d6db1e63739083179f69ba7684ab644b9122cf15"
+      "sha256": "e979708bf1a0e77d56f472b88a50a588c9a13761a95ea9164cc90fc4cf01259a"
     },
     {
       "path": "server/services/file_ingest_service.js",
@@ -256,7 +261,7 @@
     },
     {
       "path": "server/services/knowledge_service.js",
-      "sha256": "56be9529937bf14d78740aa71ab7f987a5b7efc57941949448c96f57dc42e69c"
+      "sha256": "47c7aab4b471d5d17aa5a26ab18e8be273a4e48b9334c819a178715b968a3eab"
     },
     {
       "path": "server/services/migration_service.js",
