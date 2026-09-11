@@ -1458,6 +1458,35 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
         </div>
       </div>
 
+      <section class="tm-performance-content-analysis" aria-labelledby="performanceContentAnalysisTitle">
+        <div class="tm-performance-content-analysis-heading">
+          <div>
+            <h4 id="performanceContentAnalysisTitle">授权内容证据分析</h4>
+            <p class="tm-metric-note">原始文本仅用于本次分析；长期保存证据哈希、AI 结论和人工确认结果。</p>
+          </div>
+          <button id="performanceContentAnalysisGenerate" class="btn btn-primary btn-sm" type="button" onclick="generatePerformanceContentAnalysisDraft()">分析选中内容</button>
+        </div>
+        <div class="tm-performance-content-analysis-form">
+          <label for="performanceContentAnalysisContent"><span>项目内容</span><select id="performanceContentAnalysisContent"><option value="">加载内容中...</option></select></label>
+          <label for="performanceContentAnalysisAcquisitionMode"><span>证据来源</span><select id="performanceContentAnalysisAcquisitionMode"><option value="client_supplied">客户提供</option><option value="creator_supplied">达人提供</option></select></label>
+          <label class="tm-performance-content-analysis-rights" for="performanceContentAnalysisRightsBasis"><span>授权依据</span><input id="performanceContentAnalysisRightsBasis" maxlength="500" autocomplete="off" placeholder="记录授权人、通道或批准依据"></label>
+          <label class="tm-performance-content-analysis-wide" for="performanceContentAnalysisTranscript"><span>字幕 / 口播稿</span><textarea id="performanceContentAnalysisTranscript" rows="5" maxlength="12000"></textarea></label>
+          <label class="tm-performance-content-analysis-wide" for="performanceContentAnalysisCaption"><span>视频文案</span><textarea id="performanceContentAnalysisCaption" rows="3" maxlength="4000"></textarea></label>
+          <label for="performanceContentAnalysisHookNotes"><span>开场钩子观察</span><textarea id="performanceContentAnalysisHookNotes" rows="3" maxlength="2000"></textarea></label>
+          <label for="performanceContentAnalysisVisualNotes"><span>画面观察</span><textarea id="performanceContentAnalysisVisualNotes" rows="3" maxlength="3000"></textarea></label>
+          <label for="performanceContentAnalysisStyleNotes"><span>风格观察</span><textarea id="performanceContentAnalysisStyleNotes" rows="3" maxlength="2000"></textarea></label>
+          <label for="performanceContentAnalysisCtaNotes"><span>CTA 观察</span><textarea id="performanceContentAnalysisCtaNotes" rows="3" maxlength="2000"></textarea></label>
+        </div>
+        <label class="tm-performance-content-analysis-attestation" for="performanceContentAnalysisRightsConfirmed">
+          <input id="performanceContentAnalysisRightsConfirmed" type="checkbox">
+          <span>我已确认当前项目可使用上述文本证据进行 AI 分析</span>
+        </label>
+        <p id="performanceContentAnalysisStatus" class="tm-metric-note" role="status" aria-live="polite">选择内容并填写已授权证据。</p>
+        <div id="performanceContentAnalysisDraft" class="tm-performance-content-analysis-body" aria-live="polite">
+          <div class="tm-state-empty">尚未生成内容证据分析。</div>
+        </div>
+      </section>
+
       <section class="tm-performance-customer-report" aria-labelledby="performanceCustomerReportHeading">
         <div class="tm-performance-customer-report-heading">
           <div>

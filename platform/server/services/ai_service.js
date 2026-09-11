@@ -1026,6 +1026,27 @@ function linkedRequestHash(message, linked, ragContext, opts) {
   });
 }
 
+function linkedProviderUserMessage(opts, persistedMessage) {
+  const value = ownValue(opts, 'provider_user_message') !== undefined
+    ? opts.provider_user_message
+    : ownValue(opts, 'providerUserMessage');
+  if (value === undefined) return persistedMessage;
+  if (
+    String(opts && opts.source_module || '') !== 'performance_content_analysis' ||
+    typeof value !== 'string' ||
+    !value.trim() ||
+    value.length > 48000 ||
+    value.includes('\u0000')
+  ) {
+    throw serviceError(
+      500,
+      'AI_INTERNAL_PROVIDER_MESSAGE_INVALID',
+      'Internal AI provider input is invalid.'
+    );
+  }
+  return value.trim();
+}
+
 function reservationDispositionError(disposition) {
   if (disposition.state === 'conflict') {
     return serviceError(disposition.statusCode || 409, disposition.code || 'IDEMPOTENCY_KEY_REUSED', 'Idempotency key conflicts with an earlier request.');
@@ -1483,6 +1504,7 @@ function persistLinkedChat(db, opts) {
 
 async function handleLinkedChat(db, opts, linked) {
   const message = String(opts.message || '').trim();
+  const providerUserMessage = linkedProviderUserMessage(opts, message);
   const retrievalQuery = String(opts.ragQuery || message).trim() || message;
   const webQuery = String(opts.webQuery || retrievalQuery).trim() || retrievalQuery;
   const user = opts.user;
@@ -1573,7 +1595,7 @@ async function handleLinkedChat(db, opts, linked) {
       });
       completion = await awaitWithAbort(provider.complete({
         messages: [{ role: 'system', content: systemPrompt }]
-          .concat(history, [{ role: 'user', content: message }]),
+          .concat(history, [{ role: 'user', content: providerUserMessage }]),
         temperature: opts.temperature,
         max_tokens: clampMaxTokens(opts.max_tokens),
         model: opts.model,

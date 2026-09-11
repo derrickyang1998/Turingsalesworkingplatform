@@ -263,6 +263,48 @@ test('performance dashboard exposes an evidence-bound AI review draft with isola
   assert.match(serverSource, /CAMPAIGN_PERFORMANCE_AI_REVIEW_DRAFT/);
 });
 
+test('performance dashboard adds authorized content evidence analysis without changing the existing review path', () => {
+  for (const id of [
+    'performanceContentAnalysisContent',
+    'performanceContentAnalysisAcquisitionMode',
+    'performanceContentAnalysisRightsBasis',
+    'performanceContentAnalysisRightsConfirmed',
+    'performanceContentAnalysisTranscript',
+    'performanceContentAnalysisHookNotes',
+    'performanceContentAnalysisVisualNotes',
+    'performanceContentAnalysisGenerate',
+    'performanceContentAnalysisStatus',
+    'performanceContentAnalysisDraft'
+  ]) {
+    assert.match(indexHtml, new RegExp('id="' + id + '"'));
+  }
+  assert.match(indexHtml, /onclick="generatePerformanceContentAnalysisDraft\(\)"/);
+  assert.match(indexHtml, /原始文本仅用于本次分析/);
+  assert.doesNotMatch(indexHtml, /approved_public_access/);
+  assert.match(appSource, /var performanceContentAnalysisDraft = null;/);
+  assert.match(appSource, /var performanceContentAnalysisPendingEvidence = null;/);
+  assert.match(appSource, /function invalidatePerformanceContentAnalysisDraft\(/);
+  assert.match(appSource, /async function generatePerformanceContentAnalysisDraft\(\)/);
+  assert.match(appSource, /async function approvePerformanceContentAnalysisDraft\(\)/);
+  assert.match(appSource, /performance\/content-analysis-draft/);
+  assert.match(appSource, /performance\/content-analysis-draft\/approve/);
+  assert.match(appSource, /'Idempotency-Key': performanceContentAnalysisRetry\.idempotencyKey/);
+  assert.match(appSource, /rights_confirmed: rightsConfirmed/);
+  assert.match(appSource, /evidence: performanceContentAnalysisPendingEvidence/);
+  assert.match(appSource, /performanceContentAnalysisPendingEvidence = JSON\.parse\(JSON\.stringify\(body\)\)/);
+  assert.match(appSource, /performanceContentAnalysisInputBody\(\)[^\n]+performanceContentAnalysisPendingEvidence/);
+  assert.match(appSource, /performance_reference/);
+  assert.match(appSource, /YouTube API/);
+  assert.match(appSource, /function doLogout\(\)[\s\S]*?invalidatePerformanceContentAnalysisDraft\('', true\)/);
+  assert.match(appSource, /function handleAuthExpired\(message\)[\s\S]*?invalidatePerformanceContentAnalysisDraft\('', true\)/);
+  assert.match(appSource, /raw_storage[^\n]+not_retained/);
+  assert.match(componentStyles, /\.tm-performance-content-analysis/);
+  assert.match(componentStyles, /\.tm-performance-content-analysis-form/);
+  assert.match(serverSource, /createPerformanceContentAnalysisService/);
+  assert.match(serverSource, /CAMPAIGN_PERFORMANCE_CONTENT_ANALYSIS_DRAFT/);
+  assert.match(serverSource, /CAMPAIGN_PERFORMANCE_CONTENT_ANALYSIS_APPROVE/);
+});
+
 test('performance dashboard exposes a customer-safe preview, immutable snapshot, and customer PPT delivery flow', () => {
   for (const id of [
     'performanceCustomerReportTitle',

@@ -108,6 +108,7 @@ const SCOPES = new Set([
   'knowledge.ingest.linked',
   'knowledge.upload.linked',
   'knowledge.use.linked',
+  'performance.content-analysis.approve',
   PERFORMANCE_AI_REVIEW_SCOPE,
   'ai.conversation.continue.linked',
   'parser.knowledge-upload.admission',

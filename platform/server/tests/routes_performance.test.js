@@ -10,6 +10,9 @@ const {
   PerformanceManualServiceError,
   PerformanceAiReviewServiceError
 } = require('../services/performance_manual_service');
+const {
+  PerformanceContentAnalysisServiceError
+} = require('../services/performance_content_analysis_service');
 const { PerformanceFeishuConnectionServiceError } = require('../services/performance_feishu_connection_service');
 const { CustomerReportSnapshotServiceError } = require('../services/customer_report_snapshot_service');
 const { CustomerReportDeliveryServiceError } = require('../services/customer_report_delivery_service');
@@ -219,6 +222,37 @@ function createFixture() {
       };
     }
   };
+  const contentAnalysisService = {
+    async createDraft(input) {
+      calls.push(['content-analysis-draft', input]);
+      return {
+        contract_version: 'performance-content-analysis-draft-v1',
+        campaign_id: 7,
+        content_id: 13,
+        status: 'generated',
+        evidence: {
+          evidence_hash: 'd'.repeat(64),
+          context_snapshot_hash: 'e'.repeat(64),
+          raw_storage: 'not_retained'
+        },
+        draft: 'Content analysis [CONTENT-13-TRANSCRIPT]',
+        ai: { conversation_id: 71, message_id: 72 }
+      };
+    },
+    approveDraft(input) {
+      calls.push(['content-analysis-approve', input]);
+      return {
+        contract_version: 'performance-content-analysis-approval-v1',
+        status: 'confirmed',
+        campaign_id: 7,
+        content_id: 13,
+        conversation_id: 71,
+        message_id: 72,
+        knowledge_entry_id: 73,
+        evidence_hash: 'd'.repeat(64)
+      };
+    }
+  };
   const customerReportSnapshotService = {
     preview(input) {
       calls.push(['customer-report-preview', input]);
@@ -285,6 +319,7 @@ function createFixture() {
     feishuConnectionService,
     feishuProjectionService,
     aiReviewService,
+    contentAnalysisService,
     customerReportSnapshotService,
     customerReportDeliveryService
   });
@@ -298,6 +333,7 @@ function createFixture() {
     feishuConnectionService,
     feishuProjectionService,
     aiReviewService,
+    contentAnalysisService,
     customerReportSnapshotService,
     customerReportDeliveryService
   };
@@ -357,6 +393,8 @@ test('registers campaign-scoped performance endpoints and forwards authenticated
     'GET /api/campaigns/:id/performance/review-evidence',
     'POST /api/campaigns/:id/performance/ai-review-draft',
     'POST /api/campaigns/:id/performance/ai-review-draft/approve',
+    'POST /api/campaigns/:id/performance/content-analysis-draft',
+    'POST /api/campaigns/:id/performance/content-analysis-draft/approve',
     'POST /api/campaigns/:id/performance/contents',
     'POST /api/campaigns/:id/performance/contents/:contentId/manual-inputs',
     'POST /api/campaigns/:id/performance/customer-report-preview',
@@ -915,6 +953,90 @@ test('creates a campaign-scoped AI review draft through the protected JSON reque
   assert.equal(invalid.statusCode, 422);
   assert.equal(invalid.body.code, 'PERFORMANCE_AI_REVIEW_INVALID');
   assert.equal(invalid.body.request_id, 'ai-review-request-id');
+});
+
+test('creates and confirms authorized content analysis through protected JSON contracts', async () => {
+  const { routes, calls, contentAnalysisService } = createFixture();
+  const draftRequest = {
+    user: { id: 9, role: 'member' },
+    params: { id: '7' },
+    body: {
+      content_id: 13,
+      acquisition_mode: 'client_supplied',
+      rights_basis: '客户授权项目复盘',
+      rights_confirmed: true,
+      transcript: '开头提出问题，随后演示解法。'
+    },
+    headers: { 'idempotency-key': 'content-analysis-draft-route-0001' },
+    phase4Request: { requestId: 'content-analysis-draft-route-request-0001' }
+  };
+  const drafted = await invokeAsync(
+    routes.get('POST /api/campaigns/:id/performance/content-analysis-draft'),
+    draftRequest
+  );
+  assert.equal(drafted.statusCode, 200);
+  assert.equal(drafted.body.status, 'generated');
+  assert.equal(drafted.body.request_id, 'content-analysis-draft-route-request-0001');
+  assert.deepEqual(calls[0], ['content-analysis-draft', {
+    user: draftRequest.user,
+    campaignId: '7',
+    body: draftRequest.body,
+    idempotencyKey: 'content-analysis-draft-route-0001',
+    requestId: 'content-analysis-draft-route-request-0001'
+  }]);
+
+  const draftPolicy = campaignContract.REQUEST_POLICIES.CAMPAIGN_PERFORMANCE_CONTENT_ANALYSIS_DRAFT;
+  assert.ok(draftPolicy);
+  assert.equal(draftPolicy.method, 'POST');
+  assert.equal(draftPolicy.pathTemplate, '/api/campaigns/:id/performance/content-analysis-draft');
+  assert.equal(draftPolicy.mediaKind, campaignContract.MEDIA_KINDS.JSON);
+
+  const approveRequest = {
+    user: { id: 9, role: 'org_admin' },
+    params: { id: '7' },
+    body: {
+      conversation_id: 71,
+      message_id: 72,
+      expected_evidence_hash: 'd'.repeat(64),
+      expected_context_snapshot_hash: 'e'.repeat(64),
+      edited_draft: 'Content analysis [CONTENT-13-TRANSCRIPT]',
+      visibility: 'team'
+    },
+    headers: { 'idempotency-key': 'content-analysis-approval-route-0001' },
+    phase4Request: { requestId: 'content-analysis-approval-route-request-0001' }
+  };
+  const approved = await invokeAsync(
+    routes.get('POST /api/campaigns/:id/performance/content-analysis-draft/approve'),
+    approveRequest
+  );
+  assert.equal(approved.statusCode, 200);
+  assert.equal(approved.body.status, 'confirmed');
+  assert.equal(approved.body.request_id, 'content-analysis-approval-route-request-0001');
+  assert.deepEqual(calls[1], ['content-analysis-approve', {
+    user: approveRequest.user,
+    campaignId: '7',
+    body: approveRequest.body,
+    idempotencyKey: 'content-analysis-approval-route-0001',
+    requestId: 'content-analysis-approval-route-request-0001'
+  }]);
+
+  const approvePolicy = campaignContract.REQUEST_POLICIES.CAMPAIGN_PERFORMANCE_CONTENT_ANALYSIS_APPROVE;
+  assert.ok(approvePolicy);
+  assert.equal(approvePolicy.pathTemplate, '/api/campaigns/:id/performance/content-analysis-draft/approve');
+
+  contentAnalysisService.createDraft = async () => {
+    throw new PerformanceContentAnalysisServiceError(
+      400,
+      'PERFORMANCE_CONTENT_ANALYSIS_RIGHTS_REQUIRED',
+      'Rights confirmation is required.'
+    );
+  };
+  const rejected = await invokeAsync(
+    routes.get('POST /api/campaigns/:id/performance/content-analysis-draft'),
+    draftRequest
+  );
+  assert.equal(rejected.statusCode, 400);
+  assert.equal(rejected.body.code, 'PERFORMANCE_CONTENT_ANALYSIS_RIGHTS_REQUIRED');
 });
 
 test('returns campaign-scoped review evidence through a read-only request contract', () => {

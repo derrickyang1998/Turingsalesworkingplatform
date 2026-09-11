@@ -76,6 +76,9 @@ const {
   createPerformanceAiReviewService
 } = require('./services/performance_manual_service');
 const {
+  createPerformanceContentAnalysisService
+} = require('./services/performance_content_analysis_service');
+const {
   createCollaborationPublicationHandoffService
 } = require('./services/collaboration_publication_handoff_service');
 const { createCustomerReportSnapshotService } = require('./services/customer_report_snapshot_service');
@@ -209,6 +212,10 @@ const performanceAiReviewService = createPerformanceAiReviewService(db, {
   performanceService: performanceManualService,
   aiService
 });
+const performanceContentAnalysisService = createPerformanceContentAnalysisService(db, {
+  performanceService: performanceManualService,
+  aiService
+});
 const customerReportSnapshotService = createCustomerReportSnapshotService(db, {
   performanceService: performanceManualService
 });
@@ -279,6 +286,8 @@ const phase4PolicyNames = [
   'CAMPAIGN_PERFORMANCE_REVIEW_EVIDENCE',
   'CAMPAIGN_PERFORMANCE_AI_REVIEW_DRAFT',
   'CAMPAIGN_PERFORMANCE_AI_REVIEW_APPROVE',
+  'CAMPAIGN_PERFORMANCE_CONTENT_ANALYSIS_DRAFT',
+  'CAMPAIGN_PERFORMANCE_CONTENT_ANALYSIS_APPROVE',
   'CAMPAIGN_PERFORMANCE_CUSTOMER_REPORT_PREVIEW',
   'CAMPAIGN_PERFORMANCE_CUSTOMER_REPORT_SNAPSHOT_CREATE',
   'CAMPAIGN_PERFORMANCE_CUSTOMER_REPORT_SNAPSHOT_LIST',
@@ -1645,6 +1654,7 @@ registerPerformanceRoutes(app, {
   feishuConnectionService: performanceFeishuConnectionService,
   feishuProjectionService: performanceFeishuProjectionService,
   aiReviewService: performanceAiReviewService,
+  contentAnalysisService: performanceContentAnalysisService,
   customerReportSnapshotService,
   customerReportDeliveryService,
   aiLimiter,

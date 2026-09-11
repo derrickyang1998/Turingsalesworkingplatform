@@ -16,6 +16,9 @@ const {
   createPerformanceManualService,
   createPerformanceAiReviewService
 } = require('../services/performance_manual_service');
+const {
+  createPerformanceContentAnalysisService
+} = require('../services/performance_content_analysis_service');
 
 const SERVER_ROOT = path.resolve(__dirname, '..');
 const MIGRATIONS = Object.freeze([
@@ -358,6 +361,325 @@ function successfulProvider(calls, answer = 'deterministic linked answer') {
     }
   };
 }
+
+function contentAnalysisProtocol(contentId, observationId) {
+  const performanceEvidenceId = `PERF-${contentId}-OBS-${observationId}`;
+  return JSON.stringify({
+    contract_version: 1,
+    findings: [
+      {
+        dimension: 'hook',
+        conclusion: '开头先展示用户痛点，再给出产品解法。',
+        evidence_ids: [`CONTENT-${contentId}-HOOK`, performanceEvidenceId],
+        confidence: 'medium'
+      },
+      {
+        dimension: 'content',
+        conclusion: '字幕按问题、证据和结果组织信息。',
+        evidence_ids: [`CONTENT-${contentId}-TRANSCRIPT`, performanceEvidenceId],
+        confidence: 'high'
+      }
+    ],
+    reuse: [{
+      recommendation: '复用“痛点在先”的信息顺序。',
+      evidence_ids: [`CONTENT-${contentId}-HOOK`, performanceEvidenceId],
+      confidence: 'medium'
+    }],
+    test: [{
+      recommendation: '测试在开头同时展示结果画面。',
+      evidence_ids: [`CONTENT-${contentId}-VISUAL`, performanceEvidenceId],
+      confidence: 'low'
+    }],
+    avoid: [{
+      recommendation: '避免在开头堆叠过多产品参数。',
+      evidence_ids: [`CONTENT-${contentId}-TRANSCRIPT`, performanceEvidenceId],
+      confidence: 'medium'
+    }],
+    actions: [{
+      recommendation: '下一条内容对比两种开头顺序。',
+      priority: 'high',
+      expected_kpi: 'core_view_er',
+      evidence_ids: [`CONTENT-${contentId}-HOOK`, performanceEvidenceId]
+    }],
+    caveats: ['结论仅基于用户提供的字幕和人工观察。'],
+    human_confirmation: 'required'
+  });
+}
+
+test('transient provider input is restricted to the authorized content-analysis module', async () => {
+  const db = openDatabase();
+  try {
+    const fixture = createCampaignFixture(db);
+    let providerCalls = 0;
+    await assert.rejects(ai.handleChat(db, {
+      user: fixture.user,
+      campaign_id: fixture.campaignId,
+      source_module: 'caller-controlled-source-module',
+      message: 'Persist this safe message.',
+      provider_user_message: 'TRANSIENT_SECRET_MUST_NOT_BE_ACCEPTED',
+      idempotencyKey: 'linked-provider-override-rejected-0001',
+      allowWeb: false,
+      provider: {
+        async complete() {
+          providerCalls += 1;
+          return { content: 'must not run' };
+        }
+      }
+    }), (error) => error && error.code === 'AI_INTERNAL_PROVIDER_MESSAGE_INVALID');
+    assert.equal(providerCalls, 0);
+    assert.equal(db.prepare(`
+      SELECT COUNT(*) AS count FROM ai_messages
+      WHERE content LIKE '%TRANSIENT_SECRET_MUST_NOT_BE_ACCEPTED%'
+    `).get().count, 0);
+  } finally {
+    db.close();
+  }
+});
+
+test('authorized content analysis sends transient evidence to AI without retaining raw evidence', async () => {
+  const db = openDatabase();
+  try {
+    const fixture = createCampaignFixture(db);
+    const performanceService = createPerformanceManualService(db);
+    const content = performanceService.createContent({
+      userId: fixture.userId,
+      campaignId: fixture.campaignId,
+      body: {
+        url: 'https://www.youtube.com/watch?v=R1g2H3i4J5K',
+        creator_name: 'Evidence Creator',
+        product: 'Evidence Product'
+      }
+    }).content;
+    performanceService.recordManualInput({
+      userId: fixture.userId,
+      campaignId: fixture.campaignId,
+      contentId: content.id,
+      body: { observation: { views: 6400, likes: 320, comments: 48 } }
+    });
+    const observationId = performanceService.getProjectionSnapshot({
+      userId: fixture.userId,
+      campaignId: fixture.campaignId
+    }).items[0].latest_observation.id;
+    const providerCalls = [];
+    const rawTranscript = 'TRANSIENT_EVIDENCE_4f78 开场先问用户是否也遇到了空间不足的问题。';
+    const rawHook = 'TRANSIENT_HOOK_52aa 前三秒展示小空间痛点和改造后结果。';
+    const rawVisual = 'TRANSIENT_VISUAL_9c0b 画面从使用前切换到使用后。';
+    const service = createPerformanceContentAnalysisService(db, {
+      performanceService,
+      aiService: {
+        handleChat(database, input) {
+          return ai.handleChat(database, Object.assign({}, input, {
+            provider: successfulProvider(providerCalls, contentAnalysisProtocol(content.id, observationId))
+          }));
+        }
+      }
+    });
+
+    const generated = await service.createDraft({
+      user: fixture.user,
+      campaignId: fixture.campaignId,
+      idempotencyKey: 'performance-content-analysis-draft-0001',
+      requestId: 'performance-content-analysis-draft-request-0001',
+      body: {
+        content_id: content.id,
+        acquisition_mode: 'client_supplied',
+        rights_basis: '客户在项目群中明确授权本次内容复盘',
+        rights_confirmed: true,
+        transcript: rawTranscript,
+        hook_notes: rawHook,
+        visual_notes: rawVisual
+      }
+    });
+
+    assert.equal(generated.status, 'generated');
+    assert.equal(generated.contract_version, 'performance-content-analysis-draft-v1');
+    assert.equal(generated.content_id, content.id);
+    assert.match(generated.evidence.evidence_hash, /^[a-f0-9]{64}$/);
+    assert.equal(generated.evidence.raw_storage, 'not_retained');
+    assert.deepEqual(generated.evidence.types, ['hook_notes', 'transcript', 'visual_notes']);
+    assert.equal(generated.evidence.performance_reference.id, `PERF-${content.id}-OBS-${observationId}`);
+    assert.equal(generated.evidence.performance_reference.observation_id, observationId);
+    assert.equal(generated.evidence.performance_reference.storage_source, 'manual');
+    assert.match(generated.draft, new RegExp(`\\[CONTENT-${content.id}-HOOK\\]`));
+    assert.match(generated.draft, new RegExp(`\\[PERF-${content.id}-OBS-${observationId}\\]`));
+    assert.equal(providerCalls.length, 1);
+    const providerUserMessage = providerCalls[0].messages[providerCalls[0].messages.length - 1].content;
+    assert.match(providerUserMessage, /TRANSIENT_EVIDENCE_4f78/);
+    assert.match(providerUserMessage, /TRANSIENT_HOOK_52aa/);
+    assert.match(providerUserMessage, /TRANSIENT_VISUAL_9c0b/);
+
+    const storedMessages = db.prepare(`
+      SELECT role,content FROM ai_messages WHERE conversation_id=? ORDER BY id
+    `).all(generated.ai.conversation_id);
+    assert.equal(storedMessages.length, 2);
+    assert.doesNotMatch(storedMessages[0].content, /TRANSIENT_EVIDENCE_4f78|TRANSIENT_HOOK_52aa|TRANSIENT_VISUAL_9c0b/);
+    assert.match(storedMessages[0].content, new RegExp(generated.evidence.evidence_hash));
+    assert.match(storedMessages[0].content, new RegExp(generated.evidence.context_snapshot_hash));
+    const retained = db.prepare(`
+      SELECT response_json FROM request_idempotency WHERE idempotency_key=?
+    `).get('performance-content-analysis-draft-0001');
+    assert.ok(retained);
+    assert.doesNotMatch(retained.response_json, /TRANSIENT_EVIDENCE_4f78|TRANSIENT_HOOK_52aa|TRANSIENT_VISUAL_9c0b/);
+  } finally {
+    db.close();
+  }
+});
+
+test('authorized content analysis requires rights, enforces evidence dimensions, and archives one approved result', async () => {
+  const db = openDatabase();
+  try {
+    const fixture = createCampaignFixture(db);
+    const performanceService = createPerformanceManualService(db);
+    const content = performanceService.createContent({
+      userId: fixture.userId,
+      campaignId: fixture.campaignId,
+      body: {
+        url: 'https://www.youtube.com/watch?v=S1t2U3v4W5X',
+        creator_name: 'Approval Creator',
+        product: 'Approval Product'
+      }
+    }).content;
+    performanceService.recordManualInput({
+      userId: fixture.userId,
+      campaignId: fixture.campaignId,
+      contentId: content.id,
+      body: { observation: { views: 2100, likes: 84, comments: 21 } }
+    });
+    const observationId = performanceService.getProjectionSnapshot({
+      userId: fixture.userId,
+      campaignId: fixture.campaignId
+    }).items[0].latest_observation.id;
+    let providerCalls = 0;
+    const service = createPerformanceContentAnalysisService(db, {
+      performanceService,
+      aiService: {
+        handleChat(database, input) {
+          providerCalls += 1;
+          return ai.handleChat(database, Object.assign({}, input, {
+            provider: successfulProvider([], contentAnalysisProtocol(content.id, observationId))
+          }));
+        }
+      }
+    });
+    const baseBody = {
+      content_id: content.id,
+      acquisition_mode: 'creator_supplied',
+      rights_basis: '达人通过项目交付通道授权内部复盘',
+      rights_confirmed: true,
+      transcript: '开场提出用户问题，随后演示产品解法和使用结果，并在结尾明确下一步行动。',
+      hook_notes: '前三秒展示用户痛点。',
+      visual_notes: '展示使用前后对比。'
+    };
+
+    await assert.rejects(service.createDraft({
+      user: fixture.user,
+      campaignId: fixture.campaignId,
+      idempotencyKey: 'performance-content-analysis-rights-0001',
+      body: Object.assign({}, baseBody, { rights_confirmed: false })
+    }), (error) => error && error.code === 'PERFORMANCE_CONTENT_ANALYSIS_RIGHTS_REQUIRED');
+    assert.equal(providerCalls, 0);
+
+    await assert.rejects(service.createDraft({
+      user: fixture.user,
+      campaignId: fixture.campaignId,
+      idempotencyKey: 'performance-content-analysis-public-access-0001',
+      body: Object.assign({}, baseBody, { acquisition_mode: 'approved_public_access' })
+    }), (error) => error && error.code === 'PERFORMANCE_CONTENT_ANALYSIS_INPUT_INVALID');
+    assert.equal(providerCalls, 0);
+
+    const generated = await service.createDraft({
+      user: fixture.user,
+      campaignId: fixture.campaignId,
+      idempotencyKey: 'performance-content-analysis-draft-0002',
+      requestId: 'performance-content-analysis-draft-request-0002',
+      body: baseBody
+    });
+    assert.equal(generated.status, 'generated');
+
+    const editedDraft = `${generated.draft}\n\n人工确认：下一周按建议开展 A/B 测试。`;
+    const approvalInput = {
+      user: fixture.user,
+      campaignId: fixture.campaignId,
+      idempotencyKey: 'performance-content-analysis-approval-0001',
+      requestId: 'performance-content-analysis-approval-request-0001',
+      body: {
+        conversation_id: generated.ai.conversation_id,
+        message_id: generated.ai.message_id,
+        expected_evidence_hash: generated.evidence.evidence_hash,
+        expected_context_snapshot_hash: generated.evidence.context_snapshot_hash,
+        evidence: baseBody,
+        edited_draft: editedDraft,
+        visibility: 'team'
+      }
+    };
+
+    assert.throws(() => service.approveDraft(Object.assign({}, approvalInput, {
+      body: Object.assign({}, approvalInput.body, {
+        evidence: Object.assign({}, baseBody, { transcript: `${baseBody.transcript} 篡改` })
+      })
+    })), (error) => error && error.code === 'PERFORMANCE_CONTENT_ANALYSIS_SNAPSHOT_MISMATCH');
+
+    assert.throws(() => service.approveDraft(Object.assign({}, approvalInput, {
+      body: Object.assign({}, approvalInput.body, {
+        edited_draft: `${editedDraft}\n\n联网资料证明该钩子直接带来了销售增长。`
+      })
+    })), (error) => error && error.code === 'PERFORMANCE_CONTENT_ANALYSIS_UNSUPPORTED_CLAIM');
+
+    const shiftedEvidenceLeak = Array.from(baseBody.transcript.replace(/\s+/g, '')).slice(1, 25).join('');
+    assert.equal(Array.from(shiftedEvidenceLeak).length, 24);
+    assert.throws(() => service.approveDraft(Object.assign({}, approvalInput, {
+      body: Object.assign({}, approvalInput.body, {
+        edited_draft: `${editedDraft}\n\n${shiftedEvidenceLeak}`
+      })
+    })), (error) => error && error.code === 'PERFORMANCE_CONTENT_ANALYSIS_RAW_EVIDENCE_RETAINED');
+
+    const approved = service.approveDraft(approvalInput);
+    assert.equal(approved.status, 'confirmed');
+    assert.equal(approved.content_id, content.id);
+    assert.equal(approved.evidence_hash, generated.evidence.evidence_hash);
+
+    const entry = db.prepare(`
+      SELECT entry_type,source_type,content,visibility,metadata_json
+      FROM knowledge_entries WHERE id=?
+    `).get(approved.knowledge_entry_id);
+    assert.equal(entry.entry_type, 'campaign_performance_review');
+    assert.equal(entry.source_type, 'performance_content_analysis_confirmation');
+    assert.equal(entry.content, editedDraft);
+    assert.equal(entry.visibility, 'team');
+    assert.doesNotMatch(entry.metadata_json, /开场提出用户问题|前三秒展示用户痛点/);
+    const metadata = JSON.parse(entry.metadata_json);
+    assert.equal(metadata.evidence.raw_storage, 'not_retained');
+    assert.equal(metadata.evidence.acquisition_mode, 'creator_supplied');
+    assert.equal(metadata.evidence.evidence_hash, generated.evidence.evidence_hash);
+    assert.deepEqual(metadata.evidence.types, ['hook_notes', 'transcript', 'visual_notes']);
+    assert.equal(metadata.evidence.performance_reference.observation_id, observationId);
+    assert.equal(metadata.evidence.performance_reference.storage_source, 'manual');
+
+    const replayed = service.approveDraft(approvalInput);
+    assert.deepEqual(replayed, approved);
+    assert.equal(db.prepare(`
+      SELECT COUNT(*) AS count FROM knowledge_entries
+      WHERE source_type='performance_content_analysis_confirmation'
+    `).get().count, 1);
+    assert.equal(db.prepare(`
+      SELECT COUNT(*) AS count FROM activity_log
+      WHERE module='performance_content_analysis' AND action='confirm_performance_content_analysis'
+    `).get().count, 1);
+    const approvalLedger = db.prepare(`
+      SELECT state,response_json FROM request_idempotency
+      WHERE scope='performance.content-analysis.approve' AND idempotency_key=?
+    `).get(approvalInput.idempotencyKey);
+    assert.equal(approvalLedger.state, 'completed');
+    assert.deepEqual(JSON.parse(approvalLedger.response_json), approved);
+    assert.doesNotMatch(approvalLedger.response_json, /开场提出用户问题|前三秒展示用户痛点/);
+
+    assert.throws(() => service.approveDraft(Object.assign({}, approvalInput, {
+      body: Object.assign({}, approvalInput.body, { visibility: 'private' })
+    })), (error) => error && error.code === 'IDEMPOTENCY_KEY_REUSED');
+  } finally {
+    db.close();
+  }
+});
 
 test('performance AI review replays its persisted server-rendered envelope for the same idempotency key', async () => {
   const db = openDatabase();

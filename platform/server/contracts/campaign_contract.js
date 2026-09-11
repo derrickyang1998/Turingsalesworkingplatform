@@ -223,6 +223,16 @@ const REQUEST_POLICIES = Object.freeze({
     'POST',
     '/api/campaigns/:id/performance/ai-review-draft/approve'
   ),
+  CAMPAIGN_PERFORMANCE_CONTENT_ANALYSIS_DRAFT: controlJson(
+    'campaign.performance.content-analysis-draft',
+    'POST',
+    '/api/campaigns/:id/performance/content-analysis-draft'
+  ),
+  CAMPAIGN_PERFORMANCE_CONTENT_ANALYSIS_APPROVE: controlJson(
+    'campaign.performance.content-analysis-draft.approve',
+    'POST',
+    '/api/campaigns/:id/performance/content-analysis-draft/approve'
+  ),
   CAMPAIGN_PERFORMANCE_CUSTOMER_REPORT_PREVIEW: controlJson(
     'campaign.performance.customer-report-preview',
     'POST',

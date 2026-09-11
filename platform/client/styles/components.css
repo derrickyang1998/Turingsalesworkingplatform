@@ -611,6 +611,127 @@ thead th {
   font-size: 13px;
 }
 
+.tm-performance-content-analysis {
+  display: grid;
+  gap: var(--tm-space-3);
+  margin-top: var(--tm-space-4);
+  padding-top: var(--tm-space-4);
+  border-top: 1px solid var(--tm-color-border);
+}
+
+.tm-performance-content-analysis-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--tm-space-3);
+}
+
+.tm-performance-content-analysis-heading > div {
+  min-width: 0;
+}
+
+.tm-performance-content-analysis-heading h4 {
+  margin: 0 0 var(--tm-space-1);
+  color: var(--tm-color-text);
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.tm-performance-content-analysis-heading .btn {
+  flex: 0 0 auto;
+}
+
+.tm-performance-content-analysis-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--tm-space-3);
+}
+
+.tm-performance-content-analysis-form label {
+  display: grid;
+  align-content: start;
+  gap: var(--tm-space-1);
+  min-width: 0;
+  color: var(--tm-color-text-muted);
+  font-size: 12px;
+}
+
+.tm-performance-content-analysis-form input,
+.tm-performance-content-analysis-form select,
+.tm-performance-content-analysis-form textarea {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  color: var(--tm-color-text);
+  background: var(--tm-color-surface);
+  border: 1px solid var(--tm-color-border);
+  border-radius: var(--tm-radius-sm, 4px);
+}
+
+.tm-performance-content-analysis-form input,
+.tm-performance-content-analysis-form select {
+  min-height: 34px;
+  padding: 0 var(--tm-space-2);
+}
+
+.tm-performance-content-analysis-form textarea {
+  min-height: 84px;
+  padding: var(--tm-space-2);
+  resize: vertical;
+  line-height: 1.55;
+}
+
+.tm-performance-content-analysis-rights,
+.tm-performance-content-analysis-wide {
+  grid-column: 1 / -1;
+}
+
+.tm-performance-content-analysis-attestation {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--tm-space-2);
+  width: fit-content;
+  max-width: 100%;
+  color: var(--tm-color-text);
+  font-size: 12px;
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+.tm-performance-content-analysis-attestation input {
+  width: 16px;
+  min-width: 16px;
+  height: 16px;
+  margin: 1px 0 0;
+  padding: 0;
+  flex: 0 0 16px;
+}
+
+.tm-performance-content-analysis-attestation span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.tm-performance-content-analysis-body {
+  min-width: 0;
+}
+
+.tm-performance-content-analysis-evidence {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--tm-space-2);
+  margin-top: var(--tm-space-3);
+  color: var(--tm-color-text-muted);
+  font-size: 12px;
+}
+
+.tm-performance-content-analysis-evidence span {
+  padding: 3px 7px;
+  border: 1px solid var(--tm-color-border);
+  border-radius: var(--tm-radius-sm, 4px);
+  background: var(--tm-color-surface-subtle, #f7f7f5);
+}
+
 .tm-performance-customer-report {
   display: grid;
   gap: var(--tm-space-3);
@@ -1920,6 +2041,7 @@ thead th {
 
   .tm-performance-ai-review-heading,
   .tm-performance-ai-review-meta,
+  .tm-performance-content-analysis-heading,
   .tm-performance-customer-report-heading,
   .tm-performance-customer-report-actions,
   .tm-performance-customer-report-preview-heading,
@@ -1967,6 +2089,7 @@ thead th {
   .tm-performance-feishu-connection-fields,
   .tm-performance-form-grid,
   .tm-performance-mapping-grid,
+  .tm-performance-content-analysis-form,
   .tm-performance-metric-grid,
   .tm-performance-review-summary,
   .tm-performance-review-ranking-grid,
@@ -1985,6 +2108,10 @@ thead th {
   }
 
   .tm-performance-ai-review-heading .btn {
+    width: 100%;
+  }
+
+  .tm-performance-content-analysis-heading .btn {
     width: 100%;
   }
 

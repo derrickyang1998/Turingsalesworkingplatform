@@ -34,7 +34,7 @@ $TRUSTED_SOURCE_GATE_RELATIVE_PATH = "server\scripts\trusted_production_source_g
 $TRUSTED_SOURCE_MANIFEST_RELATIVE_PATH = "server\scripts\trusted_production_source_manifest.json"
 $TRUSTED_RUNTIME_CONFIG_RELATIVE_PATH = "server\config\runtime_config.js"
 $EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "2632b6994c62e13ccc174bfde07ad95281dac9fc2174a6bcf75528a10d52475a"
-$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "ea20bd00ce1788867156284a0d600494acc6213a9010f7833045b1acb5742a4a"
+$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "9ad491625c76690faccc8db47ffc7809f9c90d0e18351aa6adf1abeefeae5c5c"
 $EXPECTED_TRUSTED_RUNTIME_CONFIG_SHA256 = "76d43d3e811c6fa8daae987cc9eb2fff2dc8a8095f84b1cd309e4e214df94dcb"
 $EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256 = "490fc5942f2375d29205ae177755a08f4fb6fa9138c54a8783e3c6d52ca941ac"
 $EXPECTED_TRUSTED_PARSER_VERIFIER_SHA256 = "7f9efaac02675b21e025891a400474cc7481c1adaf58c88bd8b356d5276f2eaa"
@@ -181,6 +181,7 @@ $FILES = @(
     "server\services\parser_startup_service.js",
     "server\services\path_policy_service.js",
     "server\services\performance_content_import_service.js",
+    "server\services\performance_content_analysis_service.js",
     "server\services\performance_collection_run_service.js",
     "server\services\performance_feishu_connection_service.js",
     "server\services\performance_feishu_projection_service.js",

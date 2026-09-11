@@ -29,6 +29,10 @@ const {
 const {
   PerformanceProviderCollectionServiceError
 } = require('./services/performance_provider_collection_service');
+const {
+  PerformanceContentAnalysisServiceError,
+  createPerformanceContentAnalysisService
+} = require('./services/performance_content_analysis_service');
 
 function requestId(request) {
   return request.requestId ||
@@ -49,6 +53,7 @@ function sendError(request, response, error) {
     error instanceof PerformanceCollectionRunServiceError ||
     error instanceof PerformanceProviderCollectionServiceError ||
     error instanceof PerformanceAiReviewServiceError ||
+    error instanceof PerformanceContentAnalysisServiceError ||
     error instanceof CustomerReportSnapshotServiceError ||
     error instanceof CustomerReportDeliveryServiceError;
   const status = known ? error.statusCode : 500;
@@ -170,6 +175,18 @@ function registerPerformanceRoutes(app, options = {}) {
     typeof aiReviewService.approveDraft !== 'function'
   ) {
     throw new TypeError('A performance AI review service is required.');
+  }
+  const contentAnalysisService = options.contentAnalysisService ||
+    createPerformanceContentAnalysisService(options.db, {
+      performanceService: service,
+      aiService: options.aiService
+    });
+  if (
+    !contentAnalysisService ||
+    typeof contentAnalysisService.createDraft !== 'function' ||
+    typeof contentAnalysisService.approveDraft !== 'function'
+  ) {
+    throw new TypeError('A performance content analysis service is required.');
   }
   const customerReportSnapshotService = options.customerReportSnapshotService ||
     createCustomerReportSnapshotService(options.db, { performanceService: service });
@@ -543,6 +560,45 @@ function registerPerformanceRoutes(app, options = {}) {
     async (request, response) => {
       try {
         const result = await aiReviewService.approveDraft({
+          user: request.user,
+          campaignId: request.params.id,
+          body: request.body,
+          idempotencyKey: requestHeader(request, 'Idempotency-Key'),
+          requestId: requestId(request)
+        });
+        return sendResult(request, response, result);
+      } catch (error) {
+        return sendError(request, response, error);
+      }
+    }
+  );
+
+  app.post(
+    '/api/campaigns/:id/performance/content-analysis-draft',
+    options.authMiddleware,
+    aiLimiter,
+    async (request, response) => {
+      try {
+        const result = await contentAnalysisService.createDraft({
+          user: request.user,
+          campaignId: request.params.id,
+          body: request.body,
+          idempotencyKey: requestHeader(request, 'Idempotency-Key'),
+          requestId: requestId(request)
+        });
+        return sendResult(request, response, result);
+      } catch (error) {
+        return sendError(request, response, error);
+      }
+    }
+  );
+
+  app.post(
+    '/api/campaigns/:id/performance/content-analysis-draft/approve',
+    options.authMiddleware,
+    (request, response) => {
+      try {
+        const result = contentAnalysisService.approveDraft({
           user: request.user,
           campaignId: request.params.id,
           body: request.body,
