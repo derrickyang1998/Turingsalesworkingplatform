@@ -1,5 +1,28 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.9.0-admin-tenant-directory (Production Deployed, 2026-09-11) - 管理员组织目录
+
+### 交付与范围 / Delivery And Scope
+- 在现有管理控制室增加“组织”页签，提供组织目录与成员目录的只读检索、状态筛选和游标分页；沿用最新产品壳层，不新建替代后台，也不修改 CRM、M3/M4、AI、知识库和冻结方案 PPT 行为。
+- 组织列表展示团队数、有效成员数和已撤销成员数；成员列表展示平台角色、组织角色、状态及多团队角色，支持按组织、成员、平台角色和组织角色检索。
+- 新增管理员专用接口 `GET /api/admin/organizations` 与 `GET /api/admin/organizations/:organizationId/members`；普通用户和匿名请求均不能读取跨组织目录。
+- 每次目录读取与检索均在同一事务写入 `tenant_admin` 审计，记录安全的筛选字段名、结果数量和游标状态，不保存原始检索词或可逆摘要；审计失败时整个读取失败。
+
+### 聚焦验证、审查与上线 / Focused Verification, Review, And Deployment
+- 功能服务、路由与管理台契约 `11/11`，受影响导航/静态合同 `17/17`，权限、CRM 与组织相关回归 `85/85` 通过；JavaScript 语法、差异格式、凭据扫描、发布清单与本地发布预检通过。
+- 独立代码审查与安全审查关闭请求标识、敏感检索证据、平台角色检索、游标暴露和分页竞态问题；最终均为 `APPROVE`，无剩余 P0/P1/P2/P3。
+- 首次候选因远端备份目录容量不足在生产变更前停止，线上未被修改；清理已验证且不受保护的过期备份后，最终候选通过迁移回放、发布守卫和内置浏览器冒烟 `2/2` 并完成切换。
+
+### 生产证据 / Production Evidence
+- 生产运行 ID `a526f7f245104883acaa1183b1d8c147`，候选 `v060-crm-sales-workspace-20260911-132807` 完成 `DEPLOY_OK`；候选 SHA-256 为 `593c75472c9a2ed597ac61b6653eeae7dc81229811f4e88c32db66be1d056566`，可信发布源 SHA-256 为 `3a7f32b4491a2fbe457c82dd66eaff4647944d6aadb61dcb37a1f78c0a90f651`。
+- 可恢复备份为 `/root/turingmarket/backups/v060-crm-sales-workspace-20260911-132807`；初始清单 `322` 项、切换快照 `35` 项逐项复验通过，清单 SHA-256 分别为 `038e0f69e38c8392114ab9cbb7d6e543ebca940e63ea8b944a568541b0706138` 与 `d33b35e062981aa966ad2e4c5cfda92d25df104de63278e8ade39dd6289f13ce`。
+- 公网健康与管理台组织页通过；匿名访问返回 `401`，管理员登录、组织检索、成员检索、注销和撤销令牌拒绝通过。真实读取生成了三条不含原始筛选值的独立审计记录。
+- PM2 `online` 且重启数 `0`，Nginx `active`；schema 保持 `v20`，`quick_check=ok`、外键异常 `0`、退出后活动会话 `0`，线上核心资源与本地摘要一致，冻结 `ppt.js` 未变化。
+
+### 交付节奏与下一边界 / Delivery Cadence And Next Boundary
+- 普通功能继续执行受影响测试、必要语法/合同与密钥检查、一次独立审查、可验证备份、当轮生产上线和线上功能冒烟；迁移、鉴权、共享基础设施、外部写入、大范围变更及阶段收口按风险保留较完整门禁。
+- Phase 8 下一独立切片继续完善管理员用户与权限治理；同时把生产备份容量与保留策略加固作为运维优先项，避免过期备份再次阻断发布。
+
 ## v0.8.31-organization-methodology-promotion (Production Deployed, 2026-09-11) - 组织方法论晋升
 
 ### 交付与范围 / Delivery And Scope
