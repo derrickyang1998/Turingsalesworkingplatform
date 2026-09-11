@@ -170,9 +170,9 @@ test('current release locks the v0.7 branch while retaining the v0.6 shell and f
   assert.match(deploy, /20260702-v916-kb-bridge-client-cn/);
   assert.match(deploy, /20260702v916kbbridge/);
   assert.match(deploy, /f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e/);
-  assert.match(deploy, /if \(Number\(version\) !== 19\) throw new Error\('Candidate migration target version mismatch'\)/);
+  assert.match(deploy, /if \(Number\(version\) !== 20\) throw new Error\('Candidate migration target version mismatch'\)/);
   assert.doesNotMatch(deploy, /if \(Number\(version\) !== 18\) throw new Error\('Candidate migration target version mismatch'\)/);
-  assert.match(deploy, /report\.get\('sourceVersion'\) not in \(1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19\)/);
+  assert.match(deploy, /report\.get\('sourceVersion'\) not in \(1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20\)/);
   assert.doesNotMatch(deploy, /report\.get\('sourceVersion'\) not in \(1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18\) or/);
   assert.match(server, /const CUSTOMER_REPORT_PPT_CACHE_NAMESPACE = 'customer-reports'/);
   assert.match(server, /reservedRootDirectories: \[CUSTOMER_REPORT_PPT_CACHE_NAMESPACE\]/);
