@@ -313,9 +313,9 @@ flowchart LR
 
 **Release / 版本：** `v0.8.0-influencer-execution-loop`
 
-**Latest accepted patch / 最新验收补丁：** `v0.8.27-collaboration-lifecycle-rail` adds a compact seven-stage order-to-settlement rail inside the existing M4 collaboration table. It uses current server projections, preserves legacy live orders, marks cancelled work as stopped, and leaves the approved product shell, APIs, AI/knowledge, Feishu degradation path, proposal/PPT behavior, and production schema `v17` unchanged. / `v0.8.27-collaboration-lifecycle-rail` 在既有 M4 合作表格内增加从下单到结算的七阶段紧凑轨道，复用现有服务端投影、兼容历史执行订单、明确显示取消停止；已批准产品壳层、API、AI/知识、飞书降级路径、方案/PPT 行为及生产 schema `v17` 均保持不变。
+**Latest accepted patch / 最新验收补丁：** `v0.8.28-publication-lifecycle-custody` adds audited final-link correction, tracking pause/resume, and immutable publication history inside the existing M4 collaboration table while preserving the current product shell and frozen proposal PPT. / `v0.8.28-publication-lifecycle-custody` 已在既有 M4 合作表格内增加最终链接纠错、追踪暂停/恢复与不可变发布历史，并保留当前产品壳层和冻结方案 PPT。
 
-**Open boundary / 未完成边界：** Guided import mapping, field search, account-synchronized saved views, column workspace management, collaboration commercial terms, signed-contract/PDF custody, content-review/publication gating, manual payment/four-eyes settlement, campaign closeout review, and unified lifecycle visibility are accepted. Phase 7 remains open for audited publication correction/pause/resume, e-signature, review attachments/customer portals, automated payment-provider receipts and reconciliation, and real configured Feishu delivery. / 引导式导入映射、字段检索、账号同步保存视图、列工作区、合作商业条款、签约/PDF 保管、内容审核/发布门禁、人工收付款/四眼结算、项目结案复盘及统一履约可视化已通过验收；阶段 7 仍需完成带审计的发布纠错/暂停/恢复、电子签约、审核附件/客户门户、自动支付回单与对账及真实配置飞书投递。
+**Open boundary / 未完成边界：** Guided import mapping, field search, account-synchronized saved views, column workspace management, collaboration commercial terms, signed-contract/PDF custody, content-review/publication gating, audited publication correction/pause/resume, manual payment/four-eyes settlement, campaign closeout review, and unified lifecycle visibility are accepted. Phase 7 remains open for e-signature, review attachments/customer portals, automated payment-provider receipts and reconciliation, and real configured Feishu delivery. / 引导式导入映射、字段检索、账号同步保存视图、列工作区、合作商业条款、签约/PDF 保管、内容审核/发布门禁、带审计的发布纠错/暂停/恢复、人工收付款/四眼结算、项目结案复盘及统一履约可视化已通过验收；阶段 7 仍需完成电子签约、审核附件/客户门户、自动支付回单与对账及真实配置飞书投递。
 
 **Primary files / 主要文件：**
 
@@ -354,9 +354,9 @@ flowchart LR
 
 ### Phase 7B: Content Performance Data Foundation / 阶段 7B：内容效果数据底座
 
-**Releases / 版本：** `v0.8.1-performance-manual-foundation`, `v0.8.2-performance-collection-feishu`, `v0.8.3-performance-ai-review`; shipped patch slices through `v0.8.26-performance-collection-history` / 已发布补丁切片至 `v0.8.26-performance-collection-history`
+**Releases / 版本：** `v0.8.1-performance-manual-foundation`, `v0.8.2-performance-collection-feishu`, `v0.8.3-performance-ai-review`; shipped patch slices through `v0.8.30-authorized-content-evidence-analysis` / 已发布补丁切片至 `v0.8.30-authorized-content-evidence-analysis`
 
-**Latest accepted slice / 最新验收切片：** `v0.8.26` adds a safe provider-neutral collection/update history to the existing Content Monitor, projected from current append-only audit evidence with campaign authorization, bounded database work, explicit truncation disclosure, and no secret-bearing provider detail. Production schema remains `v17`; live Feishu writes, provider adapters, scheduling, and automatic collection remain disabled. / `v0.8.26` 已在既有内容监控增加安全的服务商无关采集/更新历史，基于当前只追加审计证据、活动权限、有界数据库读取和明确截断提示生成，且不暴露含密钥的平台细节。生产 schema 保持 `v17`；真实飞书写入、平台适配器、调度和自动采集仍未启用。
+**Latest accepted slice / 最新验收切片：** `v0.8.30` adds rights-gated, transient-text content evidence analysis to the existing Performance Dashboard. Findings must cite both authorized content evidence and an immutable performance snapshot; only the human-confirmed conclusion is archived as Campaign knowledge. `v0.8.29` already shipped the controlled YouTube provider foundation, but live collection remains disabled until a production key is configured. Production schema remains `v19`; raw-media fetching, public-page evidence acquisition, organization-wide methodology promotion, and real Feishu writes remain disabled. / `v0.8.30` 已在现有效果数据看板增加授权约束的瞬时文本内容证据分析，结论必须同时引用内容证据与不可变效果快照，且仅将人工确认结论归档为 Campaign 知识。`v0.8.29` 已交付受控 YouTube provider 底座，但配置生产 key 前真实采集继续禁用。生产 schema 保持 `v19`；原始媒体抓取、公开页面证据采集、组织级方法论晋升和真实飞书写入仍未启用。
 
 **Scheduling rule / 排期规则：**
 
@@ -381,6 +381,7 @@ flowchart LR
 - [ ] **EN:** Keep normalized snapshots and confirmed manual inputs as structured campaign lineage, not general methodology results; only human-approved conclusions become retrievable campaign knowledge, and organization-wide promotion requires a second approval, dedupe, and supersession handling.<br>**中文：** 将标准化快照和已确认人工输入保留为结构化项目血缘而非通用方法论结果；只有人工确认结论才进入可检索项目知识，晋升组织方法论还需二次批准、去重和替代处理。
 - [x] **EN:** Deliver two distinct routes: Content Monitor for link, collection, manual-input, and exception operations; Performance Dashboard for KPI overview, Top-content ranking, trends, creator/platform/product contribution, data quality, and customer review.<br>**中文：** 交付两个独立路由：内容监控负责链接、采集、人工字段和异常操作；数据看板负责 KPI 总览、Top 内容排行、趋势、达人/平台/产品贡献、数据质量和客户复盘。
 - [x] **EN:** Add evidence-backed AI best/weak content analysis, human approval, reusable methodology, improvement actions, immutable report snapshots, and customer-safe report/PPT generation.<br>**中文：** 增加有证据的 AI 最佳/较弱内容分析、人工批准、可复用方法论、改进动作、不可变报告快照和面向客户的报告/PPT 生成。
+- [x] **EN:** Add rights-attested client/creator text evidence analysis with transient raw-input handling, dual content/performance citations, owner/admin confirmation, idempotent replay, and Campaign knowledge archival. Production accepted in `v0.8.30` on 2026-09-11.<br>**中文：** 增加客户/达人授权文本证据分析，包含原文瞬时处理、内容与效果双引用、负责人/组织管理员确认、幂等重放及 Campaign 知识归档；已于 2026-09-11 通过 `v0.8.30` 生产验收。
 
 **Slice exit criteria / 切片退出标准：**
 
