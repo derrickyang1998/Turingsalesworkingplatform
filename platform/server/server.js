@@ -96,6 +96,7 @@ const {
 } = require('./services/performance_provider_collection_service');
 const registerCampaignRoutes = require('./routes_campaigns');
 const registerPerformanceRoutes = require('./routes_performance');
+const registerAdminTenantDirectoryRoutes = require('./routes_admin_tenant_directory');
 const {
   createCampaignPptBridgeHandler
 } = registerCampaignRoutes;
@@ -1651,6 +1652,7 @@ app.post('/api/proposal/generate-ppt', authMiddleware, (req, res) => {
 require('./routes')(app, db, authMiddleware, { campaignCollaborationService });
 require('./routes_feishu')(app, { db, authMiddleware, adminOnly });
 require('./routes_customers')(app, db, authMiddleware);
+registerAdminTenantDirectoryRoutes(app, db, { authMiddleware, adminOnly });
 registerCampaignRoutes(app, db);
 registerPerformanceRoutes(app, {
   authMiddleware,

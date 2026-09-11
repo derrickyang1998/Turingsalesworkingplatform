@@ -8899,9 +8899,10 @@ function clearChat() {
 function clearAIMemory() { if (!confirm('Clear memory?')) return; aiMemory = {}; saveAIMemory(); toast('Memory cleared'); }
 // ===== ADMIN (v8.0) =====
 function switchAdminTab(tab, options) { options = options || {}; if (!options.skipHistory && window.TMNavigation) { window.TMNavigation.navigate('admin', { substate: { tab: tab }, user: CURRENT_USER }); return; }
-  ['overview','users','knowledge','ai-audit','tokens'].forEach(function(t) { var el = document.getElementById('admin-tab-' + t); if (el) el.style.display = t === tab ? 'block' : 'none'; });
+  ['overview','users','organizations','knowledge','ai-audit','tokens'].forEach(function(t) { var el = document.getElementById('admin-tab-' + t); if (el) el.style.display = t === tab ? 'block' : 'none'; });
   if (tab === 'overview') loadAdminDashboard();
   if (tab === 'users') loadAdminUsers();
+  if (tab === 'organizations') loadAdminOrganizations();
   if (tab === 'knowledge') loadKnowledgeBase();
   if (tab === 'ai-audit') { loadAdminAIAuditUsers(); loadAdminAIAudit(); }
   if (tab === 'tokens') loadAdminTokens();
@@ -9149,6 +9150,275 @@ function renderAdminUserTable(users) {
   tbody.innerHTML = users.map(function(u) {
     return '<tr><td><strong>' + esc(u.username) + '</strong></td><td>' + esc(u.display_name) + '</td><td>' + esc(u.department||'-') + '</td><td>' + u.role + '</td><td>' + (u.api_quota||0).toLocaleString() + '</td><td>' + (u.last_login||'').substring(0,10) + '</td><td>' + (u.is_active ? '<span style="color:#0f7b3c">Active</span>' : '<span style="color:#d94641">Inactive</span>') + '</td><td><button class="btn btn-xs" onclick="adminResetPw('+u.id+')">Reset</button> <button class="btn btn-xs" onclick="toggleUserActive('+u.id+','+(u.is_active?0:1)+')">'+(u.is_active?'Disable':'Enable')+'</button></td></tr>';
   }).join('');
+}
+var adminSelectedOrganizationId = null;
+var adminOrganizationsById = {};
+var adminOrganizationLoadSequence = 0;
+var adminOrganizationMemberLoadSequence = 0;
+var adminOrganizationPageCursors = [null];
+var adminOrganizationPageIndex = 0;
+var adminOrganizationNextCursor = null;
+var adminOrganizationPageLoading = false;
+var adminOrganizationFilterSignature = '';
+var adminOrganizationMemberPageCursors = [null];
+var adminOrganizationMemberPageIndex = 0;
+var adminOrganizationMemberNextCursor = null;
+var adminOrganizationMemberPageLoading = false;
+var adminOrganizationMemberFilterSignature = '';
+function buildAdminOrganizationQuery(cursor) {
+  var search = document.getElementById('ad_organizationSearch');
+  var query = ['limit=50'];
+  var value = search ? String(search.value || '').trim() : '';
+  if (value) query.push('q=' + encodeURIComponent(value));
+  var parsedCursor = Number(cursor);
+  if (Number.isSafeInteger(parsedCursor) && parsedCursor > 0) query.push('cursor=' + parsedCursor);
+  return '?' + query.join('&');
+}
+function buildAdminOrganizationMemberQuery(cursor) {
+  var search = document.getElementById('ad_organizationMemberSearch');
+  var status = document.getElementById('ad_organizationMemberStatus');
+  var query = ['limit=50'];
+  var searchValue = search ? String(search.value || '').trim() : '';
+  var statusValue = status ? String(status.value || '').trim() : '';
+  if (searchValue) query.push('q=' + encodeURIComponent(searchValue));
+  if (statusValue) query.push('status=' + encodeURIComponent(statusValue));
+  var parsedCursor = Number(cursor);
+  if (Number.isSafeInteger(parsedCursor) && parsedCursor > 0) query.push('cursor=' + parsedCursor);
+  return '?' + query.join('&');
+}
+function renderAdminOrganizations(organizations) {
+  var container = document.getElementById('ad_organizationList');
+  if (!container) return;
+  adminOrganizationsById = {};
+  if (!organizations.length) {
+    container.innerHTML = '<p style="font-size:12px;opacity:.55">暂无匹配组织</p>';
+    return;
+  }
+  organizations.forEach(function(organization) {
+    adminOrganizationsById[String(organization.id)] = organization;
+  });
+  container.innerHTML = '<table><thead><tr><th>组织</th><th>团队</th><th>有效成员</th><th>已撤销</th><th>操作</th></tr></thead><tbody>'
+    + organizations.map(function(organization) {
+      var id = Number(organization.id);
+      var safeId = Number.isSafeInteger(id) && id > 0 ? id : 0;
+      return '<tr><td><strong>' + esc(organization.name || '-') + '</strong><div style="font-size:11px;opacity:.55">' + esc(organization.code || '-') + '</div></td>'
+        + '<td>' + (Number(organization.team_count) || 0) + '</td>'
+        + '<td>' + (Number(organization.active_member_count) || 0) + '</td>'
+        + '<td>' + (Number(organization.revoked_member_count) || 0) + '</td>'
+        + '<td><button type="button" class="btn btn-xs" onclick="selectAdminOrganization(' + safeId + ')">查看成员</button></td></tr>';
+    }).join('') + '</tbody></table>';
+}
+function renderAdminOrganizationMembers(members) {
+  var container = document.getElementById('ad_organizationMembers');
+  if (!container) return;
+  if (!members.length) {
+    container.innerHTML = '<p style="font-size:12px;opacity:.55">暂无匹配成员</p>';
+    return;
+  }
+  container.innerHTML = '<table><thead><tr><th>成员</th><th>部门</th><th>平台角色</th><th>组织角色</th><th>状态</th><th>团队归属</th></tr></thead><tbody>'
+    + members.map(function(member) {
+      var teams = Array.isArray(member.teams) && member.teams.length
+        ? member.teams.map(function(team) {
+            return '<div style="margin-bottom:4px"><strong>' + esc(team.name || team.code || '-') + '</strong>'
+              + '<div style="font-size:11px;opacity:.58">' + esc(team.role_code || '-') + ' · ' + esc(team.status || '-') + '</div></div>';
+          }).join('')
+        : '<span style="opacity:.5">未分配</span>';
+      var active = member.membership_status === 'active';
+      return '<tr><td><strong>' + esc(member.display_name || member.username || '-') + '</strong><div style="font-size:11px;opacity:.55">' + esc(member.username || '-') + '</div></td>'
+        + '<td>' + esc(member.department || '-') + '</td>'
+        + '<td>' + esc(member.platform_role || '-') + '</td>'
+        + '<td>' + esc(member.organization_role || '-') + '</td>'
+        + '<td><span style="color:' + (active ? '#0f7b3c' : '#d94641') + '">' + (active ? '有效' : '已撤销') + '</span></td>'
+        + '<td>' + teams + '</td></tr>';
+    }).join('') + '</tbody></table>';
+}
+function updateAdminOrganizationPager(page) {
+  var previous = document.getElementById('ad_organizationPrevious');
+  var next = document.getElementById('ad_organizationNext');
+  var label = document.getElementById('ad_organizationPageLabel');
+  if (page) {
+    var nextCursor = Number(page.next_cursor);
+    adminOrganizationNextCursor = page.has_more && Number.isSafeInteger(nextCursor) && nextCursor > 0
+      ? nextCursor
+      : null;
+  }
+  if (previous) previous.disabled = adminOrganizationPageLoading || adminOrganizationPageIndex <= 0;
+  if (next) next.disabled = adminOrganizationPageLoading || !adminOrganizationNextCursor;
+  if (label) label.textContent = '第 ' + (adminOrganizationPageIndex + 1) + ' 页';
+}
+function updateAdminOrganizationMemberPager(page) {
+  var previous = document.getElementById('ad_organizationMemberPrevious');
+  var next = document.getElementById('ad_organizationMemberNext');
+  var label = document.getElementById('ad_organizationMemberPageLabel');
+  if (page) {
+    var nextCursor = Number(page.next_cursor);
+    adminOrganizationMemberNextCursor = page.has_more && Number.isSafeInteger(nextCursor) && nextCursor > 0
+      ? nextCursor
+      : null;
+  }
+  if (previous) previous.disabled = adminOrganizationMemberPageLoading || adminOrganizationMemberPageIndex <= 0;
+  if (next) next.disabled = adminOrganizationMemberPageLoading || !adminOrganizationMemberNextCursor;
+  if (label) label.textContent = '第 ' + (adminOrganizationMemberPageIndex + 1) + ' 页';
+}
+function loadAdminOrganizations(cursor, preservePage, targetPageIndex) {
+  var container = document.getElementById('ad_organizationList');
+  if (!container) return Promise.resolve([]);
+  var requestedPageIndex = adminOrganizationPageIndex;
+  if (preservePage !== true) {
+    adminOrganizationPageCursors = [null];
+    adminOrganizationPageIndex = 0;
+    adminOrganizationNextCursor = null;
+    cursor = null;
+    requestedPageIndex = 0;
+  } else if (Number.isSafeInteger(targetPageIndex) && targetPageIndex >= 0) {
+    requestedPageIndex = targetPageIndex;
+  }
+  var requestSignature = buildAdminOrganizationQuery(null);
+  var sequence = ++adminOrganizationLoadSequence;
+  adminOrganizationPageLoading = true;
+  updateAdminOrganizationPager();
+  if (preservePage !== true) container.innerHTML = '<p style="font-size:12px;opacity:.55">正在加载组织目录...</p>';
+  return apiFetch('/admin/organizations' + buildAdminOrganizationQuery(cursor)).then(function(response) {
+    return response.json().then(function(data) {
+      if (!response.ok) throw new Error(data.error || '组织目录加载失败');
+      return data;
+    });
+  }).then(function(data) {
+    if (sequence !== adminOrganizationLoadSequence) return [];
+    if (requestSignature !== buildAdminOrganizationQuery(null)) {
+      adminOrganizationPageLoading = false;
+      return loadAdminOrganizations();
+    }
+    if (requestedPageIndex > adminOrganizationPageIndex) {
+      adminOrganizationPageCursors = adminOrganizationPageCursors.slice(0, requestedPageIndex);
+      adminOrganizationPageCursors[requestedPageIndex] = Number(cursor);
+    }
+    adminOrganizationPageIndex = requestedPageIndex;
+    adminOrganizationFilterSignature = requestSignature;
+    adminOrganizationPageLoading = false;
+    var organizations = Array.isArray(data.organizations) ? data.organizations : [];
+    updateAdminOrganizationPager(data.page || {});
+    renderAdminOrganizations(organizations);
+    if (!organizations.length) {
+      adminSelectedOrganizationId = null;
+      adminOrganizationMemberPageCursors = [null];
+      adminOrganizationMemberPageIndex = 0;
+      adminOrganizationMemberNextCursor = null;
+      updateAdminOrganizationMemberPager({ has_more: false, next_cursor: null });
+      var name = document.getElementById('ad_selectedOrganizationName');
+      var members = document.getElementById('ad_organizationMembers');
+      if (name) name.textContent = '请选择组织';
+      if (members) members.innerHTML = '<p style="font-size:12px;opacity:.55">选择左侧组织查看成员归属。</p>';
+      return organizations;
+    }
+    var selected = adminOrganizationsById[String(adminSelectedOrganizationId)];
+    return selectAdminOrganization(selected ? selected.id : organizations[0].id).then(function() {
+      return organizations;
+    });
+  }).catch(function(error) {
+    if (sequence === adminOrganizationLoadSequence) {
+      adminOrganizationPageLoading = false;
+      updateAdminOrganizationPager();
+      if (preservePage !== true) {
+        container.innerHTML = '<p style="font-size:12px;color:#b42318">' + esc(error.message || '组织目录加载失败') + '</p>';
+      }
+    }
+    return [];
+  });
+}
+function selectAdminOrganization(organizationId) {
+  var parsed = Number(organizationId);
+  if (!Number.isSafeInteger(parsed) || parsed < 1) return Promise.resolve([]);
+  var organization = adminOrganizationsById[String(parsed)];
+  if (!organization) return Promise.resolve([]);
+  adminSelectedOrganizationId = parsed;
+  var name = document.getElementById('ad_selectedOrganizationName');
+  if (name) name.textContent = organization.name || organization.code || ('组织 #' + parsed);
+  return loadAdminOrganizationMembers();
+}
+function loadAdminOrganizationMembers(cursor, preservePage, targetPageIndex) {
+  var container = document.getElementById('ad_organizationMembers');
+  if (!container) return Promise.resolve([]);
+  var requestedPageIndex = adminOrganizationMemberPageIndex;
+  if (preservePage !== true) {
+    adminOrganizationMemberPageCursors = [null];
+    adminOrganizationMemberPageIndex = 0;
+    adminOrganizationMemberNextCursor = null;
+    cursor = null;
+    requestedPageIndex = 0;
+  } else if (Number.isSafeInteger(targetPageIndex) && targetPageIndex >= 0) {
+    requestedPageIndex = targetPageIndex;
+  }
+  var organizationId = Number(adminSelectedOrganizationId);
+  if (!Number.isSafeInteger(organizationId) || organizationId < 1) {
+    adminOrganizationMemberPageLoading = false;
+    container.innerHTML = '<p style="font-size:12px;opacity:.55">选择左侧组织查看成员归属。</p>';
+    updateAdminOrganizationMemberPager({ has_more: false, next_cursor: null });
+    return Promise.resolve([]);
+  }
+  var requestSignature = organizationId + '|' + buildAdminOrganizationMemberQuery(null);
+  var sequence = ++adminOrganizationMemberLoadSequence;
+  adminOrganizationMemberPageLoading = true;
+  updateAdminOrganizationMemberPager();
+  if (preservePage !== true) container.innerHTML = '<p style="font-size:12px;opacity:.55">正在加载成员...</p>';
+  return apiFetch('/admin/organizations/' + organizationId + '/members' + buildAdminOrganizationMemberQuery(cursor)).then(function(response) {
+    return response.json().then(function(data) {
+      if (!response.ok) throw new Error(data.error || '组织成员加载失败');
+      return data;
+    });
+  }).then(function(data) {
+    if (sequence !== adminOrganizationMemberLoadSequence || organizationId !== adminSelectedOrganizationId) return [];
+    if (requestSignature !== organizationId + '|' + buildAdminOrganizationMemberQuery(null)) {
+      adminOrganizationMemberPageLoading = false;
+      return loadAdminOrganizationMembers();
+    }
+    if (requestedPageIndex > adminOrganizationMemberPageIndex) {
+      adminOrganizationMemberPageCursors = adminOrganizationMemberPageCursors.slice(0, requestedPageIndex);
+      adminOrganizationMemberPageCursors[requestedPageIndex] = Number(cursor);
+    }
+    adminOrganizationMemberPageIndex = requestedPageIndex;
+    adminOrganizationMemberFilterSignature = requestSignature;
+    adminOrganizationMemberPageLoading = false;
+    var members = Array.isArray(data.members) ? data.members : [];
+    updateAdminOrganizationMemberPager(data.page || {});
+    renderAdminOrganizationMembers(members);
+    return members;
+  }).catch(function(error) {
+    if (sequence === adminOrganizationMemberLoadSequence) {
+      adminOrganizationMemberPageLoading = false;
+      updateAdminOrganizationMemberPager();
+      if (preservePage !== true) {
+        container.innerHTML = '<p style="font-size:12px;color:#b42318">' + esc(error.message || '组织成员加载失败') + '</p>';
+      }
+    }
+    return [];
+  });
+}
+function adminOrganizationNextPage() {
+  if (adminOrganizationPageLoading || !adminOrganizationNextCursor) return Promise.resolve([]);
+  if (adminOrganizationFilterSignature !== buildAdminOrganizationQuery(null)) return loadAdminOrganizations();
+  var nextIndex = adminOrganizationPageIndex + 1;
+  return loadAdminOrganizations(adminOrganizationNextCursor, true, nextIndex);
+}
+function adminOrganizationPreviousPage() {
+  if (adminOrganizationPageLoading || adminOrganizationPageIndex <= 0) return Promise.resolve([]);
+  if (adminOrganizationFilterSignature !== buildAdminOrganizationQuery(null)) return loadAdminOrganizations();
+  var previousIndex = adminOrganizationPageIndex - 1;
+  return loadAdminOrganizations(adminOrganizationPageCursors[previousIndex], true, previousIndex);
+}
+function adminOrganizationMemberNextPage() {
+  if (adminOrganizationMemberPageLoading || !adminOrganizationMemberNextCursor) return Promise.resolve([]);
+  var signature = Number(adminSelectedOrganizationId) + '|' + buildAdminOrganizationMemberQuery(null);
+  if (adminOrganizationMemberFilterSignature !== signature) return loadAdminOrganizationMembers();
+  var nextIndex = adminOrganizationMemberPageIndex + 1;
+  return loadAdminOrganizationMembers(adminOrganizationMemberNextCursor, true, nextIndex);
+}
+function adminOrganizationMemberPreviousPage() {
+  if (adminOrganizationMemberPageLoading || adminOrganizationMemberPageIndex <= 0) return Promise.resolve([]);
+  var signature = Number(adminSelectedOrganizationId) + '|' + buildAdminOrganizationMemberQuery(null);
+  if (adminOrganizationMemberFilterSignature !== signature) return loadAdminOrganizationMembers();
+  var previousIndex = adminOrganizationMemberPageIndex - 1;
+  return loadAdminOrganizationMembers(adminOrganizationMemberPageCursors[previousIndex], true, previousIndex);
 }
 function loadAdminTokens() {
   apiFetch('/token-usage').then(function(r) { return r.json(); }).then(function(d) {
@@ -13172,7 +13442,7 @@ const TM_NAVIGATION_APP = (function() {
   }
 
   function visibleAdminTab() {
-    var tabs = ['overview','users','knowledge','ai-audit','tokens'];
+    var tabs = ['overview','users','organizations','knowledge','ai-audit','tokens'];
     for (var i = 0; i < tabs.length; i++) {
       var el = document.getElementById('admin-tab-' + tabs[i]);
       if (el && el.style.display !== 'none') return tabs[i];
@@ -13258,7 +13528,7 @@ function switchPage(id, options) {
     'toggleAll', 'syncInfluencerSelectionState', 'loadM4Campaigns', 'changeM4CampaignContext', 'openM4CampaignCloseoutReview', 'closeM4CampaignCloseoutReview', 'submitM4CampaignCloseoutReview', 'startCollab', 'submitCollabOrder', 'closeCollabOrderModal', 'loadCollaborations', 'updateCollabStatus', 'runCampaignCollabAction', 'closeCampaignContractConfirmationModal', 'submitCampaignContractConfirmation', 'closeCampaignContentReviewModal', 'submitCampaignContentReview', 'closeCampaignContentReviewDecisionModal', 'submitCampaignContentReviewDecision', 'renderCampaignPublicationRows', 'syncCampaignPublicationDraftRows', 'addCampaignPublicationRow', 'removeCampaignPublicationRow', 'openCampaignPublicationModal', 'closeCampaignPublicationModal', 'submitCampaignPublicationConfirmation', 'openCollaborationPerformanceTracking', 'openCampaignPublicationHistoryModal', 'loadCampaignPublicationHistoryPage', 'openCampaignPaymentModal', 'closeCampaignPaymentModal', 'submitCampaignPayment', 'voidCampaignPayment', 'closeCampaignSettlementModal', 'submitCampaignSettlement', 'openCampaignSettlementDecisionModal', 'closeCampaignSettlementDecisionModal', 'submitCampaignSettlementDecision',
     'initPerformanceMonitor', 'initPerformanceDashboard', 'refreshPerformanceMonitor', 'refreshPerformanceDashboard', 'changePerformanceCampaignContext', 'handlePerformanceTopMetricChange', 'refreshPerformanceReviewEvidence', 'generatePerformanceAiReviewDraft', 'loadPerformanceContents', 'loadPerformanceFreshnessQueue', 'openPerformanceFreshnessInput', 'refreshPerformanceUpdateStatus', 'runPerformanceProviderRefresh', 'loadPerformanceIntegrationPreview', 'loadPerformanceFeishuConnection', 'savePerformanceFeishuConnectionDraft', 'approvePerformanceFeishuConnectionDraft', 'downloadPerformanceFeishuSnapshot', 'createPerformanceContent', 'downloadPerformanceTemplate', 'handlePerformanceImport', 'handlePerformanceDrop', 'downloadPerformanceMetricsTemplate', 'handlePerformanceMetricsImport', 'handlePerformanceMetricsDrop', 'openPerformanceInputModal', 'closePerformanceInputModal', 'savePerformanceInput', 'loadPerformanceDashboard', 'loadPerformanceReviewEvidence', 'debouncedPerformanceContentSearch', 'exportPerformanceContents',
     'sendChat', 'clearChat', 'clearAIMemory', 'pushToFeishu', 'loadFeishuStatus', 'loadFeishuOutbox', 'testFeishuConnection', 'selectFeishuReconciliationDelivery', 'reconcileFeishuDelivery', 'selectFeishuRetryDelivery', 'retryFeishuDelivery',
-    'switchAdminTab', 'loadAdminDashboard', 'loadAdminUsers', 'adminAddUser', 'adminCreateInvite', 'adminResetPw',
+    'switchAdminTab', 'loadAdminDashboard', 'loadAdminUsers', 'loadAdminOrganizations', 'selectAdminOrganization', 'loadAdminOrganizationMembers', 'adminOrganizationNextPage', 'adminOrganizationPreviousPage', 'adminOrganizationMemberNextPage', 'adminOrganizationMemberPreviousPage', 'adminAddUser', 'adminCreateInvite', 'adminResetPw',
     'wfUndo', 'wfRedo', 'wfClearCanvas', 'wfSaveTemplate', 'wfPublishTemplate', 'wfResetTaskFilters', 'wfLoadTasks', 'wfLoadInstances',
     'showRelatedBrands', 'closeBrandRelModal'
   ];

@@ -56,7 +56,7 @@
 
   var CRM_VIEWS = ['pipeline', 'seapool', 'opportunities'];
   var M4_TABS = ['tab1', 'tab2', 'tab3'];
-  var ADMIN_TABS = ['overview', 'users', 'knowledge', 'ai-audit', 'tokens'];
+  var ADMIN_TABS = ['overview', 'users', 'organizations', 'knowledge', 'ai-audit', 'tokens'];
   var activeUser = null;
   var popstateBound = false;
 

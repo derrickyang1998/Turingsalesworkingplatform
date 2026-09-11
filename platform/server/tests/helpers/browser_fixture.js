@@ -640,6 +640,41 @@ function apiResponseFor(request, fixture, recorder) {
   if (method === 'POST' && apiPath.startsWith('/admin/knowledge/')) return ok({ success: true, imported: 1 });
 
   if (method === 'GET' && apiPath === '/admin/overview') return ok({ stats: fixture.admin.overview });
+  if (method === 'GET' && apiPath === '/admin/organizations') {
+    return ok({
+      organizations: [{
+        id: 1,
+        code: 'fixture-organization',
+        name: 'Fixture Organization',
+        created_at: FROZEN_ISO,
+        team_count: 1,
+        active_member_count: fixture.users.length,
+        revoked_member_count: 0
+      }],
+      page: { limit: 50, next_cursor: null, has_more: false },
+      request_id: 'fixture-tenant-directory'
+    });
+  }
+  if (method === 'GET' && apiPath === '/admin/organizations/1/members') {
+    return ok({
+      organization: { id: 1, code: 'fixture-organization', name: 'Fixture Organization', created_at: FROZEN_ISO },
+      members: fixture.users.map((user) => ({
+        user_id: user.id,
+        username: user.username,
+        display_name: user.display_name,
+        department: user.department || '',
+        platform_role: user.role,
+        is_active: user.is_active,
+        organization_role: user.role === 'admin' ? 'owner' : 'member',
+        membership_status: 'active',
+        membership_created_at: FROZEN_ISO,
+        membership_revoked_at: null,
+        teams: []
+      })),
+      page: { limit: 50, next_cursor: null, has_more: false },
+      request_id: 'fixture-tenant-directory-members'
+    });
+  }
   if (method === 'GET' && apiPath === '/admin/users') return ok({ users: fixture.users });
   if (method === 'POST' && apiPath === '/admin/invites') return ok({ code: 'FIXTURE-INVITE' });
   if (method === 'POST' && /^\/admin\/users\/reset-password\/\d+$/.test(apiPath)) return ok({ temporary_password: 'fixture-reset-password' });

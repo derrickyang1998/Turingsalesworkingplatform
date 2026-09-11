@@ -51,12 +51,17 @@ test('deployment browser smoke restores authenticated CRM, influencer, and admin
     ['/m0', 'm0'],
     ['/m0-detail?view=pipeline', 'm0-detail'],
     ['/m4?tab=tab1', 'm4'],
-    ['/admin?tab=overview', 'admin']
+    ['/admin?tab=overview', 'admin'],
+    ['/admin?tab=organizations', 'admin']
   ];
   for (const [route, pageId] of routes) {
     await page.goto(route, { waitUntil: 'domcontentloaded' });
     await expect(page.locator('#app')).toBeVisible();
     await expect(page.locator(`#page-${pageId}`)).toBeVisible();
+    if (route === '/admin?tab=organizations') {
+      await expect(page.locator('#admin-tab-organizations')).toBeVisible();
+      await expect(page.locator('#ad_organizationList')).toContainText('Fixture Organization');
+    }
     await waitForBaselineReady(page);
   }
 });

@@ -1709,6 +1709,7 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
   <div style="display:flex;gap:8px">
     <button class="btn btn-sm" onclick="switchAdminTab('overview')">📊 概览</button>
     <button class="btn btn-sm" onclick="switchAdminTab('users')">👥 用户</button>
+    <button type="button" class="btn btn-sm" onclick="switchAdminTab('organizations')">组织</button>
     <button class="btn btn-sm" onclick="switchAdminTab('knowledge')">📚 知识库</button>
     <button class="btn btn-sm" onclick="switchAdminTab('ai-audit')">🤖 AI对话</button>
     <button class="btn btn-sm" onclick="switchAdminTab('tokens')">🔋 Token</button>
@@ -1763,6 +1764,48 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
       <select id="ad_newDept" style="font-size:12px"><option value="">Dept</option><option>商务一部</option><option>商务二部</option><option>商务三部</option><option>运营部</option><option>红人组</option><option>策略组</option></select>
       <button class="btn btn-sm btn-primary" onclick="adminAddUser()">+ Add User</button>
       <span id="ad_inviteResult" style="font-size:11px;opacity:.7"></span>
+    </div>
+  </div>
+</div>
+
+<!-- Organizations Tab -->
+<div id="admin-tab-organizations" style="display:none">
+  <div class="grid grid-2">
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+        <h3 style="margin:0">组织目录</h3>
+        <button type="button" class="btn btn-sm btn-outline" onclick="loadAdminOrganizations()">刷新</button>
+      </div>
+      <input id="ad_organizationSearch" aria-label="搜索组织" placeholder="搜索组织、成员或团队" onkeydown="if(event.key==='Enter')loadAdminOrganizations()" style="font-size:12px;margin-bottom:12px">
+      <div id="ad_organizationList" class="table-container" style="max-height:460px;overflow:auto;position:relative"></div>
+      <div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;margin-top:12px;min-height:30px">
+        <button id="ad_organizationPrevious" type="button" class="btn btn-sm btn-outline" onclick="adminOrganizationPreviousPage()" disabled>上一页</button>
+        <span id="ad_organizationPageLabel" style="min-width:58px;text-align:center;font-size:12px;opacity:.65">第 1 页</span>
+        <button id="ad_organizationNext" type="button" class="btn btn-sm btn-outline" onclick="adminOrganizationNextPage()" disabled>下一页</button>
+      </div>
+    </div>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+        <h3 style="margin:0">成员与团队</h3>
+        <strong id="ad_selectedOrganizationName" style="font-size:12px;opacity:.65">请选择组织</strong>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px">
+        <input id="ad_organizationMemberSearch" aria-label="搜索组织成员" placeholder="搜索成员、部门、角色或团队" onkeydown="if(event.key==='Enter')loadAdminOrganizationMembers()" style="font-size:12px">
+        <select id="ad_organizationMemberStatus" aria-label="按成员状态筛选" onchange="loadAdminOrganizationMembers()" style="font-size:12px;max-width:140px">
+          <option value="">全部状态</option>
+          <option value="active">有效</option>
+          <option value="revoked">已撤销</option>
+        </select>
+        <button type="button" class="btn btn-sm btn-outline" onclick="loadAdminOrganizationMembers()">筛选</button>
+      </div>
+      <div id="ad_organizationMembers" class="table-container" style="max-height:460px;overflow:auto;position:relative">
+        <p style="font-size:12px;opacity:.55">选择左侧组织查看成员归属。</p>
+      </div>
+      <div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;margin-top:12px;min-height:30px">
+        <button id="ad_organizationMemberPrevious" type="button" class="btn btn-sm btn-outline" onclick="adminOrganizationMemberPreviousPage()" disabled>上一页</button>
+        <span id="ad_organizationMemberPageLabel" style="min-width:58px;text-align:center;font-size:12px;opacity:.65">第 1 页</span>
+        <button id="ad_organizationMemberNext" type="button" class="btn btn-sm btn-outline" onclick="adminOrganizationMemberNextPage()" disabled>下一页</button>
+      </div>
     </div>
   </div>
 </div>
