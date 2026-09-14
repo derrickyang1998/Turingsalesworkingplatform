@@ -8,7 +8,7 @@ Updated / 更新日期：2026-09-11
 - Current production delivery branch / 当前生产交付分支：`codex/v0.7.0-ai-knowledge-proposal-ppt-loop-production`
 - Guarded Phase 6 incremental release branch / 第 6 阶段受控增量发布分支：`codex/v0.7.0-ai-knowledge-proposal-ppt-loop-production`
 - Phase 4 development base / 第 4 阶段开发基线：`5960ade03e1bd605ee4bfbe877baa09bc6482083`
-- Current production source / 当前生产源码：`0c8e0b359d68ff47c4071e63d70d016de5533869` (`v0.9.0-admin-tenant-directory`)
+- Current production source / 当前生产源码：`e169e5b2b4151eef165ed192b77759db5b3d0a3b` (`v0.9.1-audited-user-entitlement-directory`)
 - Backend / 后端：Node.js 20 + Express 5
 - Database / 数据库：SQLite through `better-sqlite3`
 - PM2 / 进程：`platform/ecosystem.config.js` -> `server/server.js`, process name `turingmarket`
@@ -19,13 +19,13 @@ This checkout consolidates the latest CRM, AI conversation, knowledge base, infl
 
 ## Current Production Status / 当前生产状态
 
-- Release / 版本：`v0.9.0-admin-tenant-directory`, deployed and verified on `2026-09-11` / 已于 `2026-09-11` 部署并验收。
-- Production run / 生产运行：`a526f7f245104883acaa1183b1d8c147`; backup / 备份：`/root/turingmarket/backups/v060-crm-sales-workspace-20260911-132807`。
+- Release / 版本：`v0.9.1-audited-user-entitlement-directory`, deployed and verified on `2026-09-11` / 已于 `2026-09-11` 部署并验收。
+- Production run / 生产运行：`2c6111a51de6404fbe61095fbe02d854`; backup / 备份：`/root/turingmarket/backups/v060-crm-sales-workspace-20260911-145403`。
 - Runtime / 运行状态：PM2 `online`, restart count `0`; Nginx `active`; `/api/health` returns `200`; parser ready / PM2 在线且无重启，Nginx 正常，健康接口与解析器正常。
 - Database / 数据库：schema `v20`, `quick_check=ok`, foreign-key violations `0`; this release has no migration / schema `v20`、完整性正常、外键异常为零，本版无迁移。
-- Phase 8 first slice / 第 8 阶段首个切片：the existing Admin Control Room now has a searchable read-only organization/member directory with mandatory `tenant_admin` audit. Normal users cannot read cross-tenant data. / 现有管理控制室已增加可检索的只读组织与成员目录，并强制写入 `tenant_admin` 审计；普通用户不能跨租户读取。
+- Phase 8 current slices / 第 8 阶段当前切片：the existing Admin Control Room now has searchable organization/member and user-entitlement directories. User reads aggregate platform, organization, and team roles with mandatory redacted `tenant_admin` audit; normal users cannot read them. / 现有管理控制室已具备组织/成员与用户权益目录；用户读取聚合平台、组织和团队角色并强制写入脱敏 `tenant_admin` 审计，普通用户不能读取。
 - Product boundary / 产品边界：the accepted v0.6 shell, CRM, M3/M4, AI/knowledge, proposal, and frozen PPT remain intact. / 已验收的 v0.6 产品壳层、CRM、M3/M4、AI/知识、方案与冻结 PPT 均保持不变。
-- Full evidence / 完整证据：`docs/version-records/2026-09-11-v0.9.0-admin-tenant-directory-production.md`。
+- Full evidence / 完整证据：`docs/version-records/2026-09-11-v0.9.1-audited-user-entitlement-directory-production.md`。
 
 `v0.6.0-crm-sales-workspace` contains the accepted Phase 5 CRM implementation and the upgraded schema-6 release contract. It MUST NOT be described as production until independent release review, GitHub push, verified backup, guarded deployment, remote runtime/API/UI/access acceptance, and rollback evidence all pass. / `v0.6.0-crm-sales-workspace` 已包含通过验收的第 5 阶段 CRM 实现及 schema-6 发布合同；独立发布复审、GitHub 推送、可校验备份、受控部署、远端运行时/API/UI/权限验收与回滚证据全部通过前，不得称为生产版本。
 
@@ -122,7 +122,7 @@ Manual rollback / 手工回滚：
 
 The same restore function is used by automatic and manual rollback. Phase 4 rejects code-only rollback: manual restore requires `-RollbackBackup`, `-RestoreDatabase`, and `-ConfirmDataLoss`; automatic post-mutation recovery always selects the same database/cache path. Every manifest is verified, SQLite and `PPT_CACHE_DIR` are restored as one unit, stale SQLite sidecars are removed, and every session is deleted before PM2 starts with `SERVER_HOST=127.0.0.1`. `-PreserveSessions` is always rejected. / 自动与手工回滚共用同一数据库与缓存恢复函数；手工恢复必须显式提供备份、恢复数据库及确认数据丢失，且始终在 PM2 启动前撤销全部会话。
 
-Production runs the accepted v0.6 product shell and frozen PPT renderer with all accepted Phase 6 and Phase 7 slices plus the first Phase 8 tenant-governance slice, on schema v20. The current production feature source is `0c8e0b359d68ff47c4071e63d70d016de5533869`, backed by two independent `APPROVE` reviews, a verified production backup, and authenticated online acceptance. The next candidate is the next independent Phase 8 user/role-governance slice. / 生产当前运行已验收的 v0.6 产品壳层与冻结 PPT renderer，并叠加全部已验收的阶段 6、阶段 7 及首个阶段 8 多租户治理切片，数据库为 schema v20；当前生产功能源码为 `0c8e0b359d68ff47c4071e63d70d016de5533869`，具备两项独立 `APPROVE`、可验证生产备份和登录态线上验收。下一候选为阶段 8 的下一项用户/角色治理切片。
+Production runs the accepted v0.6 product shell and frozen PPT renderer with all accepted Phase 6 and Phase 7 slices plus the Phase 8 organization/member and audited user-entitlement directories, on schema v20. The current production feature source is `e169e5b2b4151eef165ed192b77759db5b3d0a3b`, backed by independent `APPROVE` review, a verified production backup, and authenticated online acceptance. The next candidate is a bounded Phase 8 module/action permission-policy slice. / 生产当前运行已验收的 v0.6 产品壳层与冻结 PPT renderer，并叠加全部已验收的阶段 6、阶段 7，以及阶段 8 的组织/成员目录和可审计用户权益目录，数据库为 schema v20；当前生产功能源码为 `e169e5b2b4151eef165ed192b77759db5b3d0a3b`，具备独立 `APPROVE`、可验证生产备份和登录态线上验收。下一候选为有界的阶段 8 模块/操作权限策略切片。
 
 ## Security And Secrets / 安全与密钥
 
