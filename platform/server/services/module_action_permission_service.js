@@ -30,10 +30,14 @@ function isPlainObject(value) {
 
 function requestPrincipal(value) {
   if (!isPlainObject(value)) return null;
-  const id = value.id;
-  const role = value.role;
-  if (!Number.isSafeInteger(id) || id < 1 || typeof role !== 'string') return null;
-  return { id, role };
+  try {
+    const id = value.id;
+    const role = value.role;
+    if (!Number.isSafeInteger(id) || id < 1 || typeof role !== 'string') return null;
+    return { id, role };
+  } catch {
+    return null;
+  }
 }
 
 function projectRoles(db, user) {
@@ -75,15 +79,27 @@ function createModuleActionPermissionService(db) {
   }
 
   function authorize(input) {
-    if (!isPlainObject(input)) return denied('MALFORMED_REQUEST');
-    if (!Object.hasOwn(POLICY, input.module)) return denied('UNKNOWN_MODULE');
-    const modulePolicy = POLICY[input.module];
-    if (!Object.hasOwn(modulePolicy, input.action)) return denied('UNKNOWN_ACTION');
-    const allowedRoles = modulePolicy[input.action];
+    let requested;
+    let allowedRoles;
+    try {
+      if (!isPlainObject(input)) return denied('MALFORMED_REQUEST');
+      const module = input.module;
+      const action = input.action;
+      const principal = input.principal;
+      if (typeof module !== 'string' || typeof action !== 'string') {
+        return denied('MALFORMED_REQUEST');
+      }
+      if (!Object.hasOwn(POLICY, module)) return denied('UNKNOWN_MODULE');
+      const modulePolicy = POLICY[module];
+      if (!Object.hasOwn(modulePolicy, action)) return denied('UNKNOWN_ACTION');
+      allowedRoles = modulePolicy[action];
 
-    const requested = requestPrincipal(input.principal);
-    if (!requested) return denied('MALFORMED_PRINCIPAL');
-    if (!REQUEST_ROLE_VOCABULARY.has(requested.role)) return denied('UNKNOWN_ROLE');
+      requested = requestPrincipal(principal);
+      if (!requested) return denied('MALFORMED_PRINCIPAL');
+      if (!REQUEST_ROLE_VOCABULARY.has(requested.role)) return denied('UNKNOWN_ROLE');
+    } catch {
+      return denied('MALFORMED_REQUEST');
+    }
 
     try {
       const liveUser = db.prepare(`

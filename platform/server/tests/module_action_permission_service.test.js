@@ -148,6 +148,78 @@ test('denies unknown module and action vocabulary', () => {
   }
 });
 
+test('fails closed without coercing malformed module and action values', () => {
+  const { db, service } = createFixture();
+  try {
+    const principal = { id: 1, role: 'admin' };
+    const cases = [
+      ['array module', { module: ['platform_administration'], action: 'manage' }],
+      ['array action', { module: 'platform_administration', action: ['manage'] }],
+      ['boxed module', { module: new String('platform_administration'), action: 'manage' }],
+      ['boxed action', { module: 'platform_administration', action: new String('manage') }],
+      ['toString module', { module: { toString: () => 'platform_administration' }, action: 'manage' }],
+      ['toString action', { module: 'platform_administration', action: { toString: () => 'manage' } }]
+    ];
+
+    for (const [label, fields] of cases) {
+      assert.doesNotThrow(() => {
+        assert.deepEqual(service.authorize({ principal, ...fields }), {
+          allowed: false,
+          code: 'MALFORMED_REQUEST'
+        });
+      }, label);
+    }
+  } finally {
+    db.close();
+  }
+});
+
+test('fails closed when request or principal property getters throw', () => {
+  const { db, service } = createFixture();
+  try {
+    function throwingGetter(property) {
+      const value = {};
+      Object.defineProperty(value, property, {
+        enumerable: true,
+        get() {
+          throw new Error(property + ' getter must not escape');
+        }
+      });
+      return value;
+    }
+
+    const validPrincipal = { id: 1, role: 'admin' };
+    const requestCases = [
+      ['module getter', Object.assign(throwingGetter('module'), { action: 'manage', principal: validPrincipal })],
+      ['action getter', Object.assign(throwingGetter('action'), { module: 'platform_administration', principal: validPrincipal })],
+      ['principal getter', Object.assign(throwingGetter('principal'), { module: 'platform_administration', action: 'manage' })]
+    ];
+    for (const [label, input] of requestCases) {
+      assert.doesNotThrow(() => {
+        assert.deepEqual(service.authorize(input), {
+          allowed: false,
+          code: 'MALFORMED_REQUEST'
+        });
+      }, label);
+    }
+
+    for (const property of ['id', 'role']) {
+      assert.doesNotThrow(() => {
+        assert.deepEqual(service.authorize({
+          module: 'platform_administration',
+          action: 'manage',
+          principal: throwingGetter(property)
+        }), {
+          allowed: false,
+          code: 'MALFORMED_PRINCIPAL'
+        });
+      }, 'principal ' + property + ' getter');
+    }
+  } finally {
+    db.close();
+  }
+});
+
 test('projects only server-derived organization and team roles and ignores reserved or injected grants', () => {
   const { db, service } = createFixture();
   try {
