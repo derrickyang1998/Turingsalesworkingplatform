@@ -1,6 +1,6 @@
 # TuringMarket Engineering Handoff / 图灵商务平台工程交接
 
-Updated / 更新日期：2026-09-11
+Updated / 更新日期：2026-09-14
 
 ## Authoritative Baseline / 权威基线
 
@@ -21,7 +21,8 @@ This checkout consolidates the latest CRM, AI conversation, knowledge base, infl
 
 - Release / 版本：`v0.9.1-audited-user-entitlement-directory`, deployed and verified on `2026-09-11` / 已于 `2026-09-11` 部署并验收。
 - Production run / 生产运行：`2c6111a51de6404fbe61095fbe02d854`; backup / 备份：`/root/turingmarket/backups/v060-crm-sales-workspace-20260911-145403`。
-- Runtime / 运行状态：PM2 `online`, restart count `0`; Nginx `active`; `/api/health` returns `200`; parser ready / PM2 在线且无重启，Nginx 正常，健康接口与解析器正常。
+- Acceptance-time runtime / 验收时运行状态：on `2026-09-11`, PM2 was `online` with restart count `0`, Nginx was `active`, `/api/health` returned `200`, and the parser was ready / `2026-09-11` 验收时 PM2 在线且无重启，Nginx、健康接口与解析器正常。
+- Current reachability / 当前可达性：on `2026-09-14`, the authoritative production IP timed out on ports `22`, `80`, and `443`; SSH and public health cannot currently be reverified. Restore or confirm the ECS instance/public IP/security policy before the next deployment. `agent.turingmarket.ai` resolves to a separate Nuxt application whose host does not accept the current deployment key and MUST NOT be treated as this Express + SQLite production target. / `2026-09-14` 权威生产 IP 的 `22`、`80`、`443` 端口均超时，当前无法复验 SSH 与公网健康；下次发布前必须恢复或确认 ECS 实例、公网 IP 与安全策略。`agent.turingmarket.ai` 是另一套 Nuxt 应用，其主机不接受当前部署密钥，不得视为本 Express + SQLite 项目的替代生产目标。
 - Database / 数据库：schema `v20`, `quick_check=ok`, foreign-key violations `0`; this release has no migration / schema `v20`、完整性正常、外键异常为零，本版无迁移。
 - Phase 8 current slices / 第 8 阶段当前切片：the existing Admin Control Room now has searchable organization/member and user-entitlement directories. User reads aggregate platform, organization, and team roles with mandatory redacted `tenant_admin` audit; normal users cannot read them. / 现有管理控制室已具备组织/成员与用户权益目录；用户读取聚合平台、组织和团队角色并强制写入脱敏 `tenant_admin` 审计，普通用户不能读取。
 - Product boundary / 产品边界：the accepted v0.6 shell, CRM, M3/M4, AI/knowledge, proposal, and frozen PPT remain intact. / 已验收的 v0.6 产品壳层、CRM、M3/M4、AI/知识、方案与冻结 PPT 均保持不变。
