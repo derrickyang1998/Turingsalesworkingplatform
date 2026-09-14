@@ -1,6 +1,6 @@
 # TuringMarket Engineering Handoff / 图灵商务平台工程交接
 
-Updated / 更新日期：2026-09-14
+Updated / 更新日期：2026-09-15
 
 ## Authoritative Baseline / 权威基线
 
@@ -27,6 +27,10 @@ This checkout consolidates the latest CRM, AI conversation, knowledge base, infl
 - Phase 8 current slices / 第 8 阶段当前切片：the existing Admin Control Room now has searchable organization/member and user-entitlement directories. User reads aggregate platform, organization, and team roles with mandatory redacted `tenant_admin` audit; normal users cannot read them. / 现有管理控制室已具备组织/成员与用户权益目录；用户读取聚合平台、组织和团队角色并强制写入脱敏 `tenant_admin` 审计，普通用户不能读取。
 - Product boundary / 产品边界：the accepted v0.6 shell, CRM, M3/M4, AI/knowledge, proposal, and frozen PPT remain intact. / 已验收的 v0.6 产品壳层、CRM、M3/M4、AI/知识、方案与冻结 PPT 均保持不变。
 - Full evidence / 完整证据：`docs/version-records/2026-09-11-v0.9.1-audited-user-entitlement-directory-production.md`。
+- Reviewed release candidate / 已审查候选：`v0.9.2-module-action-permission-foundation`, feature commit `a857d022a4f8360e811f545247ca3ba54422404b`, hardening commit `cc23692905b16451e624584de75f6aeb46090dc9`, final independent review `APPROVE` / 功能与加固提交如上，独立复审最终通过。
+- Candidate behavior / 候选行为：the central server-side policy now enforces the existing `adminOnly` gate from live database facts and a closed `platform_administration.manage` vocabulary while preserving the exact 403 contract; company owner and read-only remain reserved and unassignable on schema v20 / 中央服务端策略以实时数据库事实和封闭词表接管现有管理员入口并保留原 403 合同；schema v20 下企业所有者和只读角色仍保留但不可分配。
+- Candidate evidence / 候选证据：focused authorization, tenant-directory, real Express, and deployment-contract checks passed `17/17`; local deploy preflight and final independent review passed. Production backup, remote candidate gate, deployment, and online acceptance are pending because ports `22`, `80`, and `443` remain unreachable / 聚焦验证 `17/17`、本地发布预检和独立复审通过；因生产端口仍不可达，生产备份、远端候选门禁、部署和线上验收待执行。
+- Candidate record / 候选记录：`docs/version-records/2026-09-15-v0.9.2-module-action-permission-foundation-release-candidate.md`。
 
 `v0.6.0-crm-sales-workspace` contains the accepted Phase 5 CRM implementation and the upgraded schema-6 release contract. It MUST NOT be described as production until independent release review, GitHub push, verified backup, guarded deployment, remote runtime/API/UI/access acceptance, and rollback evidence all pass. / `v0.6.0-crm-sales-workspace` 已包含通过验收的第 5 阶段 CRM 实现及 schema-6 发布合同；独立发布复审、GitHub 推送、可校验备份、受控部署、远端运行时/API/UI/权限验收与回滚证据全部通过前，不得称为生产版本。
 
@@ -123,7 +127,7 @@ Manual rollback / 手工回滚：
 
 The same restore function is used by automatic and manual rollback. Phase 4 rejects code-only rollback: manual restore requires `-RollbackBackup`, `-RestoreDatabase`, and `-ConfirmDataLoss`; automatic post-mutation recovery always selects the same database/cache path. Every manifest is verified, SQLite and `PPT_CACHE_DIR` are restored as one unit, stale SQLite sidecars are removed, and every session is deleted before PM2 starts with `SERVER_HOST=127.0.0.1`. `-PreserveSessions` is always rejected. / 自动与手工回滚共用同一数据库与缓存恢复函数；手工恢复必须显式提供备份、恢复数据库及确认数据丢失，且始终在 PM2 启动前撤销全部会话。
 
-Production runs the accepted v0.6 product shell and frozen PPT renderer with all accepted Phase 6 and Phase 7 slices plus the Phase 8 organization/member and audited user-entitlement directories, on schema v20. The current production feature source is `e169e5b2b4151eef165ed192b77759db5b3d0a3b`, backed by independent `APPROVE` review, a verified production backup, and authenticated online acceptance. The next candidate is a bounded Phase 8 module/action permission-policy slice. / 生产当前运行已验收的 v0.6 产品壳层与冻结 PPT renderer，并叠加全部已验收的阶段 6、阶段 7，以及阶段 8 的组织/成员目录和可审计用户权益目录，数据库为 schema v20；当前生产功能源码为 `e169e5b2b4151eef165ed192b77759db5b3d0a3b`，具备独立 `APPROVE`、可验证生产备份和登录态线上验收。下一候选为有界的阶段 8 模块/操作权限策略切片。
+Production runs the accepted v0.6 product shell and frozen PPT renderer with all accepted Phase 6 and Phase 7 slices plus the Phase 8 organization/member and audited user-entitlement directories, on schema v20. The current production feature source remains `e169e5b2b4151eef165ed192b77759db5b3d0a3b`, backed by independent `APPROVE` review, a verified production backup, and authenticated online acceptance. The reviewed next candidate is `v0.9.2-module-action-permission-foundation` at `cc23692905b16451e624584de75f6aeb46090dc9`; it is not production until the unreachable host recovers and the guarded backup, remote gate, deployment, and online acceptance complete. / 生产当前运行已验收的 v0.6 产品壳层与冻结 PPT renderer，并叠加全部已验收的阶段 6、阶段 7，以及阶段 8 的组织/成员目录和可审计用户权益目录，数据库为 schema v20；当前生产功能源码仍为 `e169e5b2b4151eef165ed192b77759db5b3d0a3b`。下一候选 `v0.9.2-module-action-permission-foundation` 已在 `cc23692905b16451e624584de75f6aeb46090dc9` 完成复审，但生产主机恢复并完成受控备份、远端门禁、部署和线上验收前不得称为生产版本。
 
 ## Security And Secrets / 安全与密钥
 

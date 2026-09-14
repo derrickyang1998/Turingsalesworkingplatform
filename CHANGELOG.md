@@ -1,5 +1,23 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.9.2-module-action-permission-foundation (Release Candidate, Production Pending, 2026-09-15) - 模块/操作权限策略底座
+
+### 交付与范围 / Delivery And Scope
+- 新增服务端中央权限策略服务，以封闭的模块/操作词表和实时数据库身份事实作出默认拒绝决策；现有 `adminOnly` 管理员入口已改由该服务执行，普通用户、失活账号、缺失账号、请求角色与实时角色不一致时均拒绝。
+- 当前切片只启用 `platform_administration.manage`，并从现有稳定编码投影平台管理员、组织管理员、团队负责人和成员；schema v20 尚不能权威表示企业所有者与只读角色，因此两者保持不可分配且不能由浏览器字段、活动负责人或成员状态推断。
+- 保持原有管理员拒绝合同 `403 { error: 'Admin only' }`，不改变登录响应、管理台 UI、CRM、M3/M4、AI/知识库、网红、飞书、工作流、导出或冻结 PPT。
+- 发布清单已包含新运行时服务与聚焦测试，远端候选门禁会显式运行权限测试，避免本地通过但线上缺少服务或漏测。
+
+### 聚焦验证与独立审查 / Focused Verification And Independent Review
+- 权限边界、管理员目录、真实 Express 管理员/普通用户集成和发布清单共 `17/17` 通过；JavaScript 语法、差异格式、本地受控发布预检和聚焦凭据扫描通过，冻结 `ppt.js` SHA-256 保持 `f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e`。
+- 独立审查首次发现 1 个 P2：数组、包装字符串或可转换对象可能命中合法策略键，异常 getter 可能逃逸默认拒绝边界。修复提交 `cc23692905b16451e624584de75f6aeb46090dc9` 增加严格原始字符串校验和异常读取保护，新增用例后复审为 `APPROVE`，无剩余 P0-P3。
+- 功能实现提交为 `a857d022a4f8360e811f545247ca3ba54422404b`，安全修复提交为 `cc23692905b16451e624584de75f6aeb46090dc9`；schema 保持 `v20`，本版无数据库迁移。
+
+### 生产状态 / Production Status
+- 该版本目前是已审查、可发布候选，不得描述为已上线。`2026-09-15` 复测权威生产 IP 的 `22`、`80`、`443` 仍全部超时，无法执行生产备份、远端候选门禁、受控切换和登录态线上验收。
+- 最近一次已验收生产版本继续是 `v0.9.1`，生产功能源码为 `e169e5b2b4151eef165ed192b77759db5b3d0a3b`；`agent.turingmarket.ai` 仍是另一套 Nuxt 应用，不作为本 Express + SQLite 平台的替代部署目标。
+- 主机恢复后直接执行：连通性确认 -> 可验证备份 -> 受控候选门禁 -> 部署 -> 管理员登录与普通用户拒绝冒烟 -> PM2/Nginx/SQLite 验收，再把本记录升级为 Production Deployed。
+
 ## v0.9.1-audited-user-entitlement-directory (Production Deployed, 2026-09-11) - 可审计用户权益目录
 
 ### 交付与范围 / Delivery And Scope
