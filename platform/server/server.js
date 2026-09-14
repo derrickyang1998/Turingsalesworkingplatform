@@ -59,6 +59,12 @@ const publicAssets = require('./services/public_assets_service');
 const credentialRotation = require('./services/credential_rotation_service');
 const organizationAccess = require('./services/organization_access_service');
 const {
+  createModuleActionPermissionService,
+  PLATFORM_ADMINISTRATION_MODULE,
+  PLATFORM_ADMINISTRATION_MANAGE_ACTION
+} = require('./services/module_action_permission_service');
+const moduleActionPermissionService = createModuleActionPermissionService(db);
+const {
   createProductionSystemdPropertyReader,
   productionSelfTestEnvironment,
   verifyInstalledControlArtifacts
@@ -543,7 +549,12 @@ function authMiddleware(req, res, next) {
 }
 
 function adminOnly(req, res, next) {
-  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+  const decision = moduleActionPermissionService.authorize({
+    principal: req.user,
+    module: PLATFORM_ADMINISTRATION_MODULE,
+    action: PLATFORM_ADMINISTRATION_MANAGE_ACTION
+  });
+  if (!decision.allowed) return res.status(403).json({ error: 'Admin only' });
   next();
 }
 

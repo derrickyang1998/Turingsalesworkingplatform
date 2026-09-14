@@ -179,6 +179,7 @@ $FILES = @(
     "server\services\latest_ui_compat_service.js",
     "server\services\llm_service.js",
     "server\services\migration_service.js",
+    "server\services\module_action_permission_service.js",
     "server\services\obsidian_ingest_service.js",
     "server\services\organization_access_service.js",
     "server\services\organization_methodology_service.js",
@@ -296,6 +297,7 @@ $FILES = @(
     "server\tests\legacy_production_adoption.test.js",
     "server\tests\migration_gate_exactness.test.js",
     "server\tests\migration_service.test.js",
+    "server\tests\module_action_permission_service.test.js",
     "server\tests\m4_campaign_collaboration_client.test.js",
     "server\tests\obsidian_and_business_knowledge.test.js",
     "server\tests\organization_access_context.test.js",
@@ -10190,6 +10192,7 @@ cd "$CANDIDATE_DIR"
 NODE_ENV=test TM_DISABLE_DOTENV=1 node server/scripts/verify_phase4_one_request_replay.js
 NODE_ENV=test TM_DISABLE_DOTENV=1 node --test server/tests/verify_phase4_one_request_replay.test.js
 node --test server/tests/release_replay_gate.test.js
+node --test server/tests/module_action_permission_service.test.js
 install -d -m 0700 "$TEST_ROOT/browser-smoke"
 TM_DEPLOYMENT_SMOKE_ROOT="$TEST_ROOT/browser-smoke" \
 TM_DEPLOYMENT_SMOKE_PORT=43188 node node_modules/playwright-deploy/cli.js test -c server/tests/deployment-browser-smoke.config.js

@@ -597,7 +597,8 @@ test('Task 12 deploy inventory includes every client asset and bounded remote-ga
     'server/tests/helpers/browser_fixture.js',
     'server/tests/helpers/safe_fixture_paths.js',
     'server/tests/deployment-browser-smoke.config.js',
-    'server/tests/deployment-browser-smoke.spec.js'
+    'server/tests/deployment-browser-smoke.spec.js',
+    'server/tests/module_action_permission_service.test.js'
   ]) {
     assert.equal(fileSet.has(file), true, `${file} must support remote verification`);
   }
@@ -3056,6 +3057,7 @@ test('Task 12 remote deploy gate runs bounded replay tests and exact route/stati
   assert.match(candidateGate, /node server\/scripts\/verify_phase4_one_request_replay\.js/);
   assert.match(candidateGate, /node --test server\/tests\/verify_phase4_one_request_replay\.test\.js/);
   assert.match(candidateGate, /node --test server\/tests\/release_replay_gate\.test\.js/);
+  assert.match(candidateGate, /node --test server\/tests\/module_action_permission_service\.test\.js/);
   assert.doesNotMatch(candidateGate, /tests\/\*\.test\.js/);
   assert.doesNotMatch(deploy, /npm test -- --test-concurrency=1/);
   assert.ok(
