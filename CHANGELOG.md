@@ -1,6 +1,6 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
-## v0.9.2-module-action-permission-foundation (Release Candidate, Production Pending, 2026-09-15) - 模块/操作权限策略底座
+## v0.9.2-module-action-permission-foundation (Production Deployed, 2026-09-15) - 模块/操作权限策略底座
 
 ### 交付与范围 / Delivery And Scope
 - 新增服务端中央权限策略服务，以封闭的模块/操作词表和实时数据库身份事实作出默认拒绝决策；现有 `adminOnly` 管理员入口已改由该服务执行，普通用户、失活账号、缺失账号、请求角色与实时角色不一致时均拒绝。
@@ -14,9 +14,14 @@
 - 功能实现提交为 `a857d022a4f8360e811f545247ca3ba54422404b`，安全修复提交为 `cc23692905b16451e624584de75f6aeb46090dc9`；schema 保持 `v20`，本版无数据库迁移。
 
 ### 生产状态 / Production Status
-- 该版本目前是已审查、可发布候选，不得描述为已上线。`2026-09-15` 复测权威生产 IP 的 `22`、`80`、`443` 仍全部超时，无法执行生产备份、远端候选门禁、受控切换和登录态线上验收。
-- 最近一次已验收生产版本继续是 `v0.9.1`，生产功能源码为 `e169e5b2b4151eef165ed192b77759db5b3d0a3b`；`agent.turingmarket.ai` 仍是另一套 Nuxt 应用，不作为本 Express + SQLite 平台的替代部署目标。
-- 主机恢复后直接执行：连通性确认 -> 可验证备份 -> 受控候选门禁 -> 部署 -> 管理员登录与普通用户拒绝冒烟 -> PM2/Nginx/SQLite 验收，再把本记录升级为 Production Deployed。
+- 通过本机受控代理恢复权威生产通道后，运行 `30e8cafd9c9041e4a82a8b93726c4849` 完成远端候选门禁、受控切换并明确返回 `DEPLOY_OK`；可信源码 SHA-256 为 `7232eed9fe8043b82bfba8091225ba9517dafb353c8e6ac43e848d89871b633c`，候选树 SHA-256 为 `e80fe61f4e442f12aaae3187b4017db70fe3331fccfa95e31b3b14dda65d6f6c`。
+- 可恢复备份为 `/root/turingmarket/backups/v060-crm-sales-workspace-20260915-135244`；初始清单 `327` 项、切换快照 `35` 项复验通过，清单 SHA-256 分别为 `c18ae78f4add78d5e80abeb0ec313cf98bee48750ea06c360ae51278b83ed612` 与 `0244e6d253734f971cc863c13d6bc38c5416e81fa63e550e4fe9b28b1579ad3c`。
+- 远端权限测试 `6/6`、真实请求重放 `8/8`、发布守卫 `21/21`、浏览器冒烟 `2/2` 通过；公网健康为 `200` 且解析器 ready。管理员 `derrick` 登录、目录读取、注销和撤销令牌拒绝通过，实时普通用户即使携带伪造管理员声明仍返回精确 `403 { error: 'Admin only' }`。
+- PM2 `online`、重启数 `0`、PID `38776`，Nginx `active`；schema `v20`、`quick_check=ok`、外键异常 `0`、活动会话 `0`。线上权限服务、`server.js` 和冻结 `ppt.js` SHA-256 均与本地一致。
+
+### 下一边界 / Next Boundary
+- 下一独立切片持久化组织范围的企业所有者与只读角色，再逐个业务模块接入命名权限；不在同一版本混入套餐、配额、所有权转移或界面改版。
+- 继续执行“一项功能 -> 受影响验证 -> 独立审查 -> 可验证备份 -> 当轮上线 -> 线上冒烟”；鉴权、迁移、共享基础设施与外部写入仍按风险保留必要门禁。
 
 ## v0.9.1-audited-user-entitlement-directory (Production Deployed, 2026-09-11) - 可审计用户权益目录
 
