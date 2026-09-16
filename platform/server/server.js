@@ -103,6 +103,11 @@ const {
 const registerCampaignRoutes = require('./routes_campaigns');
 const registerPerformanceRoutes = require('./routes_performance');
 const registerAdminTenantDirectoryRoutes = require('./routes_admin_tenant_directory');
+const registerOrganizationGovernanceRoutes = require('./routes_organization_governance');
+const {
+  createOrganizationGovernanceService
+} = require('./services/organization_governance_service');
+const organizationGovernanceService = createOrganizationGovernanceService(db);
 const {
   createCampaignPptBridgeHandler
 } = registerCampaignRoutes;
@@ -523,12 +528,28 @@ function authenticateRequest(req) {
       return { ok: false, error: 'Organization access unavailable' };
     }
 
+    const accessProjection = organizationGovernanceService.projectUserAccess({
+      userId: user.id,
+      organizationId: scope.authContext.organization.id
+    });
+    user.access_roles = accessProjection.access_roles;
+    user.organization_access = accessProjection.organization_access;
+    const authContext = {
+      organization: {
+        ...scope.authContext.organization,
+        access_mode: accessProjection.organization_access.access_mode,
+        effective_role: accessProjection.organization_access.effective_role,
+        is_company_owner: accessProjection.organization_access.is_company_owner
+      },
+      teams: scope.authContext.teams
+    };
+
     req.user = user;
-    req.authContext = scope.authContext;
+    req.authContext = authContext;
     return {
       ok: true,
       user,
-      authContext: scope.authContext
+      authContext
     };
   } catch(e) {
     return { ok: false, error: 'Invalid token' };
@@ -557,6 +578,33 @@ function adminOnly(req, res, next) {
   if (!decision.allowed) return res.status(403).json({ error: 'Admin only' });
   next();
 }
+
+const READ_ONLY_GUARDED_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+function readOnlyMutationGuard(req, res, next) {
+  if (!READ_ONLY_GUARDED_METHODS.has(req.method)) return next();
+  if (req.path === '/auth/login' || req.path === '/auth/logout') return next();
+  const authentication = authenticateRequest(req);
+  if (!authentication.ok) return next();
+  if (authentication.user.role === 'admin' && (
+    req.path === '/admin' ||
+    req.path.startsWith('/admin/') ||
+    req.path === '/organization-governance' ||
+    req.path.startsWith('/organization-governance/')
+  )) return next();
+  if (authentication.user.organization_access.access_mode !== 'read_only') return next();
+  const requestId = req.requestId ||
+    req.phase4Request && req.phase4Request.requestId ||
+    identityRequestId(req) ||
+    crypto.randomUUID();
+  return res.status(403).json({
+    error: '当前组织权限为只读，无法执行写入操作。',
+    code: 'ORGANIZATION_READ_ONLY',
+    request_id: requestId
+  });
+}
+
+app.use('/api', readOnlyMutationGuard);
 
 function boolParam(value, defaultValue) {
   if (value === undefined || value === null || value === '') return defaultValue;
@@ -1181,6 +1229,19 @@ app.post('/api/auth/login', (req, res) => {
   if (!organizationScope.ok) {
     return res.status(401).json({ error: 'Organization access unavailable' });
   }
+  const accessProjection = organizationGovernanceService.projectUserAccess({
+    userId: user.id,
+    organizationId: organizationScope.authContext.organization.id
+  });
+  const projectedAuthContext = {
+    organization: {
+      ...organizationScope.authContext.organization,
+      access_mode: accessProjection.organization_access.access_mode,
+      effective_role: accessProjection.organization_access.effective_role,
+      is_company_owner: accessProjection.organization_access.is_company_owner
+    },
+    teams: organizationScope.authContext.teams
+  };
 
   // Create session
   const token = jwt.sign({ userId: user.id, role: user.role, jti: crypto.randomUUID() }, JWT_SECRET, { expiresIn: TOKEN_EXPIRY });
@@ -1199,9 +1260,11 @@ app.post('/api/auth/login', (req, res) => {
       display_name: user.display_name,
       role: user.role,
       department: user.department,
-      api_quota: user.api_quota
+      api_quota: user.api_quota,
+      access_roles: accessProjection.access_roles,
+      organization_access: accessProjection.organization_access
     },
-    auth_context: organizationScope.authContext
+    auth_context: projectedAuthContext
   });
 });
 
@@ -1659,6 +1722,10 @@ require('./routes')(app, db, authMiddleware, { campaignCollaborationService });
 require('./routes_feishu')(app, { db, authMiddleware, adminOnly });
 require('./routes_customers')(app, db, authMiddleware);
 registerAdminTenantDirectoryRoutes(app, db, { authMiddleware, adminOnly });
+registerOrganizationGovernanceRoutes(app, db, {
+  authMiddleware,
+  service: organizationGovernanceService
+});
 registerCampaignRoutes(app, db);
 registerPerformanceRoutes(app, {
   authMiddleware,

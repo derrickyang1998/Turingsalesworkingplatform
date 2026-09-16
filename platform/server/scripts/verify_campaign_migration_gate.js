@@ -14,8 +14,8 @@ const REPORT_VERSION = 'tm-campaign-migration-gate-v1';
 const PRESERVATION_REPORT_VERSION = 'tm-campaign-migration-preservation-v1';
 const LEGACY_TOPOLOGY_FORMAT = 'tm-legacy-topology-subset-v1';
 const REQUIRED_SOURCE_VERSION = 1;
-const REQUIRED_TARGET_VERSION = 20;
-const SUPPORTED_SOURCE_VERSIONS = new Set([REQUIRED_SOURCE_VERSION, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]);
+const REQUIRED_TARGET_VERSION = 21;
+const SUPPORTED_SOURCE_VERSIONS = new Set([REQUIRED_SOURCE_VERSION, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]);
 const DEFAULT_FROZEN_MIGRATION_TIMESTAMP = '2040-01-02 03:04:05';
 const EXCLUDED_PRESERVATION_TABLES = new Set(['schema_migrations', 'sqlite_sequence']);
 const DETERMINISTIC_APPEND_TABLES = new Set(['activity_log']);
@@ -151,6 +151,13 @@ const REGISTERED_MIGRATIONS = Object.freeze([
     version: 20,
     name: '020_organization_methodology_promotion',
     sourcePath: 'migrations/020_organization_methodology_promotion.js',
+    engineVersion: 1,
+    dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
+  }),
+  Object.freeze({
+    version: 21,
+    name: '021_organization_role_governance',
+    sourcePath: 'migrations/021_organization_role_governance.js',
     engineVersion: 1,
     dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
   })

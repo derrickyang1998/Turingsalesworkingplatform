@@ -140,6 +140,13 @@ const db = migrationService.openMigratedDatabase(DB_PATH, {
       sourcePath: 'migrations/020_organization_methodology_promotion.js',
       engineVersion: 1,
       dependencies: ['migrations/vendor/bcryptjs_v3_0_3.js']
+    },
+    {
+      version: 21,
+      name: '021_organization_role_governance',
+      sourcePath: 'migrations/021_organization_role_governance.js',
+      engineVersion: 1,
+      dependencies: ['migrations/vendor/bcryptjs_v3_0_3.js']
     }
   ]
 });

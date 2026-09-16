@@ -39,6 +39,15 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);letter-spaci
 .nav-item .nav-icon{font-size:16px;width:22px;text-align:center}
 .admin-only{display:none!important}
 .admin-only.visible{display:flex!important}
+.governance-only{display:none!important}
+.governance-only.visible{display:flex!important}
+.platform-admin-only{display:none!important}
+.platform-admin-only.visible{display:inline-flex!important}
+.tm-read-only-banner{margin:0 0 16px;padding:10px 12px;border:1px solid #d8d8d4;border-left:3px solid var(--text);border-radius:6px;background:#f5f5f2;font-size:12px;color:#444}
+.tm-read-only-banner[hidden]{display:none!important}
+.tm-member-access-control{display:grid;grid-template-columns:minmax(112px,1fr) minmax(90px,.8fr) auto;gap:6px;align-items:center;min-width:330px}
+.tm-member-access-control select{font-size:11px;padding:6px 8px;min-width:0}
+.tm-member-access-note{font-size:11px;color:#666;line-height:1.45}
 .sidebar-footer{padding:12px 20px;font-size:10px;opacity:.4;margin-top:auto;border-top:1px solid var(--border)}
 main{flex:1;overflow-y:auto;padding:32px 36px}
 .page{display:none}
@@ -529,6 +538,7 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
   .tm-filter-top,.tm-filter-actions{align-items:stretch;flex-direction:column}
   .tm-scope-tabs{display:grid;grid-template-columns:1fr;align-self:stretch}
   .tm-filter-main{grid-template-columns:1fr}
+  .tm-member-access-control{grid-template-columns:1fr;min-width:220px}
   .auth-card{width:calc(100vw - 32px);padding:38px 28px}
 }
 </style>
@@ -577,10 +587,11 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
 	    <div class="nav-item" data-page="workflow-templates" onclick="switchPage('workflow-templates')"><span class="nav-icon">📋</span> 流程模板</div>
 	    <div class="nav-item" data-page="workflow-instances" onclick="switchPage('workflow-instances')"><span class="nav-icon">⚡</span> 流程实例</div>
 	    <div class="nav-item" data-page="workflow-tasks" onclick="switchPage('workflow-tasks')"><span class="nav-icon">📌</span> 我的待办</div>
-	    <div class="nav-item admin-only" data-page="admin" onclick="switchPage('admin')"><span class="nav-icon">🛡️</span> 管理控制室</div>
+    <div class="nav-item governance-only" data-page="admin" onclick="switchPage('admin')"><span class="nav-icon">管</span> 组织与成员</div>
     <div class="sidebar-footer" id="sidebarFooter"></div>
   </nav>
   <main id="mainContent" tabindex="-1">
+    <div id="ad_readOnlyBanner" class="tm-read-only-banner" hidden role="status">此成员只能查看已获授权的数据，不能提交或修改任何业务内容。</div>
 
 
 
@@ -1705,14 +1716,14 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
 <!-- ADMIN DASHBOARD (v8.0) -->
 <div class="page" id="page-admin">
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-  <h2 style="margin:0">🛡️ 管理控制室</h2>
+  <h2 id="adminPageTitle" style="margin:0">组织与成员</h2>
   <div style="display:flex;gap:8px">
-    <button class="btn btn-sm" onclick="switchAdminTab('overview')">📊 概览</button>
-    <button class="btn btn-sm" onclick="switchAdminTab('users')">👥 用户</button>
-    <button type="button" class="btn btn-sm" onclick="switchAdminTab('organizations')">组织</button>
-    <button class="btn btn-sm" onclick="switchAdminTab('knowledge')">📚 知识库</button>
-    <button class="btn btn-sm" onclick="switchAdminTab('ai-audit')">🤖 AI对话</button>
-    <button class="btn btn-sm" onclick="switchAdminTab('tokens')">🔋 Token</button>
+    <button class="btn btn-sm platform-admin-only" onclick="switchAdminTab('overview')">概览</button>
+    <button class="btn btn-sm platform-admin-only" onclick="switchAdminTab('users')">用户</button>
+    <button type="button" class="btn btn-sm" onclick="switchAdminTab('organizations')">组织与成员</button>
+    <button class="btn btn-sm platform-admin-only" onclick="switchAdminTab('knowledge')">知识库</button>
+    <button class="btn btn-sm platform-admin-only" onclick="switchAdminTab('ai-audit')">AI 对话</button>
+    <button class="btn btn-sm platform-admin-only" onclick="switchAdminTab('tokens')">Token</button>
   </div>
 </div>
 
@@ -1811,7 +1822,10 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
     </div>
     <div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap">
-        <h3 style="margin:0">成员与团队</h3>
+        <div>
+          <h3 style="margin:0">成员管理</h3>
+          <div id="ad_selectedOrganizationOwner" class="tm-member-access-note">企业所有者：待选择组织</div>
+        </div>
         <strong id="ad_selectedOrganizationName" style="font-size:12px;opacity:.65">请选择组织</strong>
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px">

@@ -715,10 +715,30 @@ test('login and auth me preserve the user object and add current auth context', 
       'id',
       'code',
       'name',
-      'role_code'
+      'role_code',
+      'access_mode',
+      'effective_role',
+      'is_company_owner'
     ]);
     assert.equal(login.body.auth_context.organization.code, 'turingmarket-default');
     assert.equal(login.body.auth_context.organization.role_code, 'org_admin');
+    assert.equal(login.body.auth_context.organization.access_mode, 'read_write');
+    assert.equal(login.body.auth_context.organization.effective_role, 'company_owner');
+    assert.equal(login.body.auth_context.organization.is_company_owner, true);
+    assert.deepEqual(login.body.user.access_roles, [
+      'platform_admin',
+      'company_owner',
+      'administrator',
+      'manager',
+      'member'
+    ]);
+    assert.deepEqual(login.body.user.organization_access, {
+      organization_id: login.body.auth_context.organization.id,
+      membership_status: 'active',
+      access_mode: 'read_write',
+      effective_role: 'company_owner',
+      is_company_owner: true
+    });
     assert.equal(Array.isArray(login.body.auth_context.teams), true);
     assert.equal(login.body.auth_context.teams.length > 0, true);
     for (const team of login.body.auth_context.teams) {
@@ -736,6 +756,175 @@ test('login and auth me preserve the user object and add current auth context', 
     assert.equal(me.response.status, 200);
     assert.deepEqual(me.body.user, login.body.user);
     assert.deepEqual(me.body.auth_context, login.body.auth_context);
+  } finally {
+    await server.close();
+  }
+});
+
+test('read-only access is live, revokes old sessions, permits GET, blocks all business writes, and exempts logout', {
+  timeout: 30000
+}, async () => {
+  const server = await startTestServer('tm-organization-read-only-');
+  try {
+    const adminLogin = await jsonRequest(server.baseUrl, '/api/auth/login', {
+      method: 'POST',
+      body: { username: 'admin', password: 'AdminTest1!Secure' }
+    });
+    assert.equal(adminLogin.response.status, 200, adminLogin.text + '\n' + server.output());
+
+    const created = await jsonRequest(server.baseUrl, '/api/admin/users', {
+      method: 'POST',
+      token: adminLogin.body.token,
+      body: {
+        username: 'readonly-http-user',
+        password: 'ReadOnlyHttp1!Safe',
+        display_name: 'Read Only HTTP User',
+        role: 'user',
+        department: 'Readonly'
+      }
+    });
+    assert.equal(created.response.status, 200, created.text);
+    const userId = Number(created.body.id);
+
+    const firstLogin = await jsonRequest(server.baseUrl, '/api/auth/login', {
+      method: 'POST',
+      body: { username: 'readonly-http-user', password: 'ReadOnlyHttp1!Safe' }
+    });
+    assert.equal(firstLogin.response.status, 200, firstLogin.text);
+
+    const inspection = new Database(server.dbPath, { readonly: true });
+    const organizationId = inspection.prepare(
+      "SELECT id FROM organizations WHERE code='turingmarket-default'"
+    ).get().id;
+    inspection.close();
+
+    const changed = await jsonRequest(
+      server.baseUrl,
+      `/api/organization-governance/organizations/${organizationId}/members/${userId}`,
+      {
+        method: 'PATCH',
+        token: adminLogin.body.token,
+        headers: { 'X-Request-Id': 'set-read-only-request' },
+        body: { access_role: 'read_only' }
+      }
+    );
+    assert.equal(changed.response.status, 200, changed.text);
+
+    const revokedSession = await jsonRequest(server.baseUrl, '/api/auth/me', {
+      token: firstLogin.body.token
+    });
+    assert.equal(revokedSession.response.status, 401);
+
+    const readOnlyLogin = await jsonRequest(server.baseUrl, '/api/auth/login', {
+      method: 'POST',
+      body: { username: 'readonly-http-user', password: 'ReadOnlyHttp1!Safe' }
+    });
+    assert.equal(readOnlyLogin.response.status, 200, readOnlyLogin.text);
+    assert.deepEqual(readOnlyLogin.body.user.access_roles, ['read_only']);
+    assert.equal(readOnlyLogin.body.user.organization_access.access_mode, 'read_only');
+
+    const readable = await jsonRequest(server.baseUrl, '/api/demands', {
+      token: readOnlyLogin.body.token
+    });
+    assert.equal(readable.response.status, 200, readable.text);
+
+    const writes = [
+      ['POST', '/api/demands', { brand_name: 'blocked' }],
+      ['PUT', `/api/admin/users/${userId}`, { display_name: 'blocked' }],
+      ['PATCH', `/api/organization-governance/organizations/${organizationId}/members/${userId}`, { access_role: 'member' }],
+      ['DELETE', `/api/admin/users/${userId}`, undefined]
+    ];
+    for (const [method, requestPath, body] of writes) {
+      const requestId = `read-only-${method.toLowerCase()}-request`;
+      const options = {
+        method,
+        token: readOnlyLogin.body.token,
+        headers: { 'X-Request-Id': requestId }
+      };
+      if (body !== undefined) options.body = body;
+      const rejected = await jsonRequest(server.baseUrl, requestPath, options);
+      assert.equal(rejected.response.status, 403, `${method} ${requestPath}: ${rejected.text}`);
+      assert.deepEqual(rejected.body, {
+        error: '当前组织权限为只读，无法执行写入操作。',
+        code: 'ORGANIZATION_READ_ONLY',
+        request_id: requestId
+      });
+    }
+
+    const logout = await jsonRequest(server.baseUrl, '/api/auth/logout', {
+      method: 'POST',
+      token: readOnlyLogin.body.token
+    });
+    assert.equal(logout.response.status, 200, logout.text);
+    assert.deepEqual(logout.body, { success: true });
+  } finally {
+    await server.close();
+  }
+});
+
+test('read-only platform administrators retain recovery access while business writes stay blocked', {
+  timeout: 30000
+}, async () => {
+  const server = await startTestServer('tm-platform-admin-recovery-');
+  try {
+    const adminLogin = await jsonRequest(server.baseUrl, '/api/auth/login', {
+      method: 'POST',
+      body: { username: 'admin', password: 'AdminTest1!Secure' }
+    });
+    assert.equal(adminLogin.response.status, 200, adminLogin.text + '\n' + server.output());
+
+    const createdAdmin = await jsonRequest(server.baseUrl, '/api/admin/users', {
+      method: 'POST',
+      token: adminLogin.body.token,
+      body: {
+        username: 'readonly-platform-admin',
+        password: 'ReadOnlyPlatform1!Safe',
+        display_name: 'Read Only Platform Admin',
+        role: 'admin',
+        department: 'Leadership'
+      }
+    });
+    assert.equal(createdAdmin.response.status, 200, createdAdmin.text);
+    const platformAdminId = Number(createdAdmin.body.id);
+
+    const mutation = new Database(server.dbPath);
+    mutation.prepare(`
+      UPDATE organization_member_policy
+      SET access_mode='read_only',updated_at=CURRENT_TIMESTAMP
+      WHERE user_id=?
+    `).run(platformAdminId);
+    mutation.close();
+
+    const recoveryLogin = await jsonRequest(server.baseUrl, '/api/auth/login', {
+      method: 'POST',
+      body: { username: 'readonly-platform-admin', password: 'ReadOnlyPlatform1!Safe' }
+    });
+    assert.equal(recoveryLogin.response.status, 200, recoveryLogin.text);
+    assert.equal(recoveryLogin.body.user.role, 'admin');
+    assert.equal(recoveryLogin.body.user.organization_access.access_mode, 'read_only');
+
+    const recoveryWrite = await jsonRequest(server.baseUrl, '/api/admin/users', {
+      method: 'POST',
+      token: recoveryLogin.body.token,
+      headers: { 'X-Request-Id': 'platform-admin-recovery-write' },
+      body: {
+        username: 'recovered-user',
+        password: 'RecoveredUser1!Safe',
+        display_name: 'Recovered User',
+        role: 'user',
+        department: 'Recovery'
+      }
+    });
+    assert.equal(recoveryWrite.response.status, 200, recoveryWrite.text);
+
+    const businessWrite = await jsonRequest(server.baseUrl, '/api/demands', {
+      method: 'POST',
+      token: recoveryLogin.body.token,
+      headers: { 'X-Request-Id': 'platform-admin-business-write' },
+      body: { brand_name: 'blocked' }
+    });
+    assert.equal(businessWrite.response.status, 403, businessWrite.text);
+    assert.equal(businessWrite.body.code, 'ORGANIZATION_READ_ONLY');
   } finally {
     await server.close();
   }

@@ -15,14 +15,14 @@
     { id: 'workflow-templates', icon: '模', label: '流程模板' },
     { id: 'workflow-instances', icon: '实', label: '流程实例' },
     { id: 'workflow-tasks', icon: '待', label: '我的待办' },
-    { id: 'admin', icon: '管', label: '管理控制室', adminOnly: true }
+    { id: 'admin', icon: '管', label: '组织与成员', governanceOnly: true }
   ];
 
   var NAV_GROUP_BY_START_PAGE = {
     m0: { label: '客户经营' },
     m2: { label: '方案与执行' },
     'workflow-designer': { label: '流程协作' },
-    admin: { label: '系统管理', adminOnly: true }
+    admin: { label: '系统管理', governanceOnly: true }
   };
 
   var SIMPLE_PATH_BY_PAGE = {
@@ -83,6 +83,13 @@
 
   function isAdmin(user) {
     return !!(user && user.role === 'admin');
+  }
+
+  function hasGovernanceAccess(user) {
+    if (isAdmin(user)) return true;
+    if (!user || !Array.isArray(user.access_roles)) return false;
+    return user.access_roles.indexOf('company_owner') !== -1 ||
+      user.access_roles.indexOf('administrator') !== -1;
   }
 
   function searchParamsFromLocation(locationLike) {
@@ -159,10 +166,14 @@
 
   function normalizeStateForUser(rawState, user) {
     if (!rawState || !rawState.pageId) return fallbackState();
-    if (rawState.pageId === 'admin' && !isAdmin(user)) return fallbackState();
+    if (rawState.pageId === 'admin' && !hasGovernanceAccess(user)) return fallbackState();
+    var normalizedSubstate = copySubstate(rawState.substate);
+    if (rawState.pageId === 'admin' && !isAdmin(user)) {
+      normalizedSubstate = { tab: 'organizations' };
+    }
     return state(
       rawState.pageId,
-      copySubstate(rawState.substate),
+      normalizedSubstate,
       isAdmin(user) ? rawState.preview : null
     );
   }
@@ -197,6 +208,7 @@
           var groupLabel = document.createElement('div');
           groupLabel.className = 'nav-group-label';
           if (group.adminOnly) groupLabel.className += ' admin-only';
+          if (group.governanceOnly) groupLabel.className += ' governance-only';
           groupLabel.textContent = group.label;
           insertBeforeFooter(groupLabel);
         }
@@ -204,6 +216,7 @@
         var el = document.createElement('a');
         el.className = 'nav-item';
         if (page.adminOnly) el.className += ' admin-only';
+        if (page.governanceOnly) el.className += ' governance-only';
         if (page.id === 'm0') {
           el.className += ' active';
           el.setAttribute('aria-current', 'page');

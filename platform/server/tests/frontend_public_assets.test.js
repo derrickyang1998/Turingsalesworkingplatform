@@ -1930,7 +1930,7 @@ test('navigation registry is owned by navigation.js without legacy app anchors',
     ["m0", "客户看板"],
     ["m0-detail", "客户明细"],
     ["m4", "网红匹配 & 执行管理"],
-    ["admin", "管理控制室"]
+    ["admin", "组织与成员"]
   ].forEach(([pageId, label]) => {
     assert.match(navigationJs, new RegExp(`id:\\s*'${pageId}'[\\s\\S]*?label:\\s*'${label}'`));
   });

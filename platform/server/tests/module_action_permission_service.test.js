@@ -42,16 +42,35 @@ function createFixture() {
       status TEXT NOT NULL,
       PRIMARY KEY (org_id, team_id, user_id)
     ) STRICT;
+    CREATE TABLE organization_member_policy (
+      org_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      access_mode TEXT NOT NULL,
+      PRIMARY KEY (org_id, user_id)
+    ) STRICT;
+    CREATE TABLE organization_authority (
+      org_id INTEGER PRIMARY KEY,
+      owner_user_id INTEGER NOT NULL
+    ) STRICT;
     INSERT INTO users (id, role, is_active) VALUES
       (1, 'admin', 1),
       (2, 'user', 1),
       (3, 'admin', 0),
-      (4, 'user', 1);
+      (4, 'user', 1),
+      (5, 'admin', 1);
     INSERT INTO organization_memberships (org_id, user_id, role_code, status) VALUES
       (10, 1, 'org_admin', 'active'),
       (10, 2, 'org_admin', 'active'),
       (10, 3, 'org_admin', 'active'),
-      (10, 4, 'member', 'active');
+      (10, 4, 'member', 'active'),
+      (10, 5, 'org_admin', 'active');
+    INSERT INTO organization_member_policy (org_id,user_id,access_mode) VALUES
+      (10,1,'read_write'),
+      (10,2,'read_write'),
+      (10,3,'read_write'),
+      (10,4,'read_write'),
+      (10,5,'read_only');
+    INSERT INTO organization_authority (org_id,owner_user_id) VALUES (10,1);
     INSERT INTO team_memberships (org_id, team_id, user_id, role_code, status) VALUES
       (10, 100, 1, 'team_lead', 'active'),
       (10, 100, 2, 'team_lead', 'active'),
@@ -84,7 +103,23 @@ test('allows the declared platform administration action for an active live plat
       code: 'ALLOWED',
       principal: {
         user_id: 1,
-        roles: ['platform_admin', 'administrator', 'manager', 'member']
+        roles: ['platform_admin', 'company_owner', 'administrator', 'manager', 'member']
+      }
+    });
+  } finally {
+    db.close();
+  }
+});
+
+test('keeps platform administration manage allowed for a live platform admin with read-only organization access', () => {
+  const { db, service } = createFixture();
+  try {
+    assert.deepEqual(service.authorize(platformAdminRequest({ id: 5, role: 'admin' })), {
+      allowed: true,
+      code: 'ALLOWED',
+      principal: {
+        user_id: 5,
+        roles: ['platform_admin', 'read_only']
       }
     });
   } finally {

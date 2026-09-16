@@ -73,6 +73,45 @@ function rememberAuthContext(authContext) {
   return CURRENT_AUTH_CONTEXT;
 }
 
+function currentUserAccessRoles() {
+  return CURRENT_USER && Array.isArray(CURRENT_USER.access_roles)
+    ? CURRENT_USER.access_roles.filter(function(role) { return typeof role === 'string'; })
+    : [];
+}
+
+function currentUserIsPlatformAdministrator() {
+  return !!(CURRENT_USER && CURRENT_USER.role === 'admin');
+}
+
+function currentUserHasGovernanceAccess() {
+  if (currentUserIsPlatformAdministrator()) return true;
+  var roles = currentUserAccessRoles();
+  return roles.indexOf('company_owner') !== -1 || roles.indexOf('administrator') !== -1;
+}
+
+function currentUserIsReadOnly() {
+  return currentUserAccessRoles().indexOf('read_only') !== -1 ||
+    !!(CURRENT_USER && CURRENT_USER.access_profile && CURRENT_USER.access_profile.read_only === true);
+}
+
+function applyCurrentUserRolePresentation() {
+  var platformAdmin = currentUserIsPlatformAdministrator();
+  var governanceAccess = currentUserHasGovernanceAccess();
+  document.querySelectorAll('.admin-only').forEach(function(element) {
+    element.classList.toggle('visible', platformAdmin);
+  });
+  document.querySelectorAll('.governance-only').forEach(function(element) {
+    element.classList.toggle('visible', governanceAccess);
+  });
+  document.querySelectorAll('.platform-admin-only').forEach(function(element) {
+    element.classList.toggle('visible', platformAdmin);
+  });
+  var banner = document.getElementById('ad_readOnlyBanner');
+  if (banner) banner.hidden = !currentUserIsReadOnly();
+  var heading = document.getElementById('adminPageTitle');
+  if (heading) heading.textContent = platformAdmin ? '管理控制室' : '组织与成员';
+}
+
 function syncCrmTeamSelector() {
   var selector = document.getElementById('crmTeamSelect');
   if (!selector) return;
@@ -133,9 +172,7 @@ async function doLogin() {
     localStorage.setItem('tm_user', JSON.stringify(CURRENT_USER));
     document.getElementById('authOverlay').style.display = 'none';
     document.getElementById('app').style.display = 'flex';
-    if (CURRENT_USER.role === 'admin') {
-      document.querySelectorAll('.admin-only').forEach(el => el.classList.add('visible'));
-    }
+    applyCurrentUserRolePresentation();
     curCustomerScope = CURRENT_USER.role === 'admin' ? 'all' : 'my';
     updateCustomerScopeTabs();
     try { await initApp(); if (window.TMNavigation) window.TMNavigation.restore(CURRENT_USER); } catch(e2) { console.error(e2); }
@@ -2048,9 +2085,7 @@ async function loadSeaPool() {
         rememberAuthContext(d.auth_context || d.authContext || (d.user && d.user.auth_context));
         document.getElementById('authOverlay').style.display = 'none';
         document.getElementById('app').style.display = 'flex';
-        if (CURRENT_USER.role === 'admin') {
-          document.querySelectorAll('.admin-only').forEach(el => el.classList.add('visible'));
-        }
+        applyCurrentUserRolePresentation();
         curCustomerScope = CURRENT_USER.role === 'admin' ? 'all' : 'my';
         updateCustomerScopeTabs();
         await initApp(); if (window.TMNavigation) window.TMNavigation.restore(CURRENT_USER);
@@ -8898,7 +8933,7 @@ function clearChat() {
 }
 function clearAIMemory() { if (!confirm('Clear memory?')) return; aiMemory = {}; saveAIMemory(); toast('Memory cleared'); }
 // ===== ADMIN (v8.0) =====
-function switchAdminTab(tab, options) { options = options || {}; if (!options.skipHistory && window.TMNavigation) { window.TMNavigation.navigate('admin', { substate: { tab: tab }, user: CURRENT_USER }); return; }
+function switchAdminTab(tab, options) { options = options || {}; if (!currentUserIsPlatformAdministrator() && tab !== 'organizations') tab = 'organizations'; if (!options.skipHistory && window.TMNavigation) { window.TMNavigation.navigate('admin', { substate: { tab: tab }, user: CURRENT_USER }); return; }
   ['overview','users','organizations','knowledge','ai-audit','tokens'].forEach(function(t) { var el = document.getElementById('admin-tab-' + t); if (el) el.style.display = t === tab ? 'block' : 'none'; });
   if (tab === 'overview') loadAdminDashboard();
   if (tab === 'users') loadAdminUsers();
@@ -9343,12 +9378,37 @@ function renderAdminOrganizations(organizations) {
     + organizations.map(function(organization) {
       var id = Number(organization.id);
       var safeId = Number.isSafeInteger(id) && id > 0 ? id : 0;
-      return '<tr><td><strong>' + esc(organization.name || '-') + '</strong><div style="font-size:11px;opacity:.55">' + esc(organization.code || '-') + '</div></td>'
+      var owner = organization.company_owner;
+      var ownerName = owner && (owner.display_name || owner.username)
+        ? (owner.display_name || owner.username)
+        : '尚未设置';
+      return '<tr><td><strong>' + esc(organization.name || '-') + '</strong><div style="font-size:11px;opacity:.55">' + esc(organization.code || '-') + '</div><div class="tm-member-access-note">企业所有者：' + esc(ownerName) + '</div></td>'
         + '<td>' + (Number(organization.team_count) || 0) + '</td>'
         + '<td>' + (Number(organization.active_member_count) || 0) + '</td>'
         + '<td>' + (Number(organization.revoked_member_count) || 0) + '</td>'
         + '<td><button type="button" class="btn btn-xs" onclick="selectAdminOrganization(' + safeId + ')">查看成员</button></td></tr>';
     }).join('') + '</tbody></table>';
+}
+function adminGovernanceRoleLabel(role) {
+  var labels = {
+    platform_admin: '平台管理员',
+    company_owner: '企业所有者',
+    administrator: '组织管理员',
+    manager: '经理',
+    member: '成员',
+    read_only: '只读'
+  };
+  return labels[role] || '成员';
+}
+function effectiveAdminOrganizationMemberRole(member) {
+  if (member && typeof member.effective_role === 'string') return member.effective_role;
+  if (member && member.is_company_owner === true) return 'company_owner';
+  if (member && member.access_mode === 'read_only') return 'read_only';
+  if (member && member.organization_role === 'org_admin') return 'administrator';
+  if (member && Array.isArray(member.teams) && member.teams.some(function(team) {
+    return team && team.status === 'active' && team.role_code === 'team_lead';
+  })) return 'manager';
+  return 'member';
 }
 function renderAdminOrganizationMembers(members) {
   var container = document.getElementById('ad_organizationMembers');
@@ -9357,7 +9417,7 @@ function renderAdminOrganizationMembers(members) {
     container.innerHTML = '<p style="font-size:12px;opacity:.55">暂无匹配成员</p>';
     return;
   }
-  container.innerHTML = '<table><thead><tr><th>成员</th><th>部门</th><th>平台角色</th><th>组织角色</th><th>状态</th><th>团队归属</th></tr></thead><tbody>'
+  container.innerHTML = '<table><thead><tr><th>成员</th><th>部门</th><th>当前角色</th><th>状态</th><th>团队归属</th><th>成员权限</th></tr></thead><tbody>'
     + members.map(function(member) {
       var teams = Array.isArray(member.teams) && member.teams.length
         ? member.teams.map(function(team) {
@@ -9366,13 +9426,85 @@ function renderAdminOrganizationMembers(members) {
           }).join('')
         : '<span style="opacity:.5">未分配</span>';
       var active = member.membership_status === 'active';
+      var userId = Number(member.user_id);
+      var safeUserId = Number.isSafeInteger(userId) && userId > 0 ? userId : 0;
+      var role = effectiveAdminOrganizationMemberRole(member);
+      var allowed = member.allowed_actions && typeof member.allowed_actions === 'object'
+        ? member.allowed_actions
+        : {};
+      var roleOptions = ['administrator', 'manager', 'member', 'read_only'].map(function(option) {
+        return '<option value="' + option + '"' + (option === role ? ' selected' : '') + '>'
+          + adminGovernanceRoleLabel(option) + '</option>';
+      }).join('');
+      var statusOptions = '<option value="active"' + (active ? ' selected' : '') + '>有效</option>'
+        + '<option value="revoked"' + (!active ? ' selected' : '') + '>已撤销</option>';
+      var accessControl;
+      if (member.is_company_owner === true || role === 'company_owner') {
+        accessControl = '<div class="tm-member-access-note"><strong>企业所有者</strong><br>企业所有者不可在此变更。本版本暂不支持所有权转移。</div>';
+      } else if (safeUserId && (allowed.change_role || allowed.change_status)) {
+        accessControl = '<div class="tm-member-access-control">'
+          + '<select id="ad_memberRole_' + safeUserId + '" aria-label="成员角色"' + (allowed.change_role ? '' : ' disabled') + '>' + roleOptions + '</select>'
+          + '<select id="ad_memberStatus_' + safeUserId + '" aria-label="成员状态"' + (allowed.change_status ? '' : ' disabled') + '>' + statusOptions + '</select>'
+          + '<button type="button" class="btn btn-xs btn-primary" onclick="saveAdminOrganizationMember(' + safeUserId + ')">保存</button>'
+          + '</div>';
+      } else {
+        accessControl = '<span class="tm-member-access-note">仅查看</span>';
+      }
+      if (safeUserId && allowed.initialize_owner) {
+        accessControl += '<div style="margin-top:6px"><button type="button" class="btn btn-xs btn-outline" onclick="initializeAdminOrganizationOwner(' + safeUserId + ')">设为企业所有者</button></div>';
+      }
       return '<tr><td><strong>' + esc(member.display_name || member.username || '-') + '</strong><div style="font-size:11px;opacity:.55">' + esc(member.username || '-') + '</div></td>'
         + '<td>' + esc(member.department || '-') + '</td>'
-        + '<td>' + esc(member.platform_role || '-') + '</td>'
-        + '<td>' + esc(member.organization_role || '-') + '</td>'
+        + '<td><strong>' + esc(adminGovernanceRoleLabel(role)) + '</strong><div class="tm-member-access-note">' + esc(member.platform_role === 'admin' ? '平台管理员' : (member.organization_role || '-')) + '</div></td>'
         + '<td><span style="color:' + (active ? '#0f7b3c' : '#d94641') + '">' + (active ? '有效' : '已撤销') + '</span></td>'
-        + '<td>' + teams + '</td></tr>';
+        + '<td>' + teams + '</td><td>' + accessControl + '</td></tr>';
     }).join('') + '</tbody></table>';
+}
+async function saveAdminOrganizationMember(userId) {
+  var organizationId = Number(adminSelectedOrganizationId);
+  var parsedUserId = Number(userId);
+  var role = document.getElementById('ad_memberRole_' + parsedUserId);
+  var status = document.getElementById('ad_memberStatus_' + parsedUserId);
+  if (!Number.isSafeInteger(organizationId) || organizationId < 1 ||
+      !Number.isSafeInteger(parsedUserId) || parsedUserId < 1 || !role || !status) return false;
+  try {
+    var response = await apiFetch('/organization-governance/organizations/' + organizationId + '/members/' + parsedUserId, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        access_role: String(role.value || ''),
+        membership_status: String(status.value || '')
+      })
+    });
+    var data = await response.json();
+    if (!response.ok) throw new Error(data.error || '成员权限保存失败');
+    toast('成员权限已更新');
+    await loadAdminOrganizationMembers();
+    return true;
+  } catch (error) {
+    toast(error.message || '成员权限保存失败', 'error');
+    return false;
+  }
+}
+async function initializeAdminOrganizationOwner(userId) {
+  var organizationId = Number(adminSelectedOrganizationId);
+  var parsedUserId = Number(userId);
+  if (!Number.isSafeInteger(organizationId) || organizationId < 1 ||
+      !Number.isSafeInteger(parsedUserId) || parsedUserId < 1) return false;
+  if (typeof confirm === 'function' && !confirm('企业所有者设置后本版本不可转移，确认继续？')) return false;
+  try {
+    var response = await apiFetch('/organization-governance/organizations/' + organizationId + '/owner/initialize', {
+      method: 'POST',
+      body: JSON.stringify({ user_id: parsedUserId })
+    });
+    var data = await response.json();
+    if (!response.ok) throw new Error(data.error || '企业所有者设置失败');
+    toast('企业所有者已设置');
+    await loadAdminOrganizations();
+    return true;
+  } catch (error) {
+    toast(error.message || '企业所有者设置失败', 'error');
+    return false;
+  }
 }
 function updateAdminOrganizationPager(page) {
   var previous = document.getElementById('ad_organizationPrevious');
@@ -9420,7 +9552,7 @@ function loadAdminOrganizations(cursor, preservePage, targetPageIndex) {
   adminOrganizationPageLoading = true;
   updateAdminOrganizationPager();
   if (preservePage !== true) container.innerHTML = '<p style="font-size:12px;opacity:.55">正在加载组织目录...</p>';
-  return apiFetch('/admin/organizations' + buildAdminOrganizationQuery(cursor)).then(function(response) {
+  return apiFetch('/organization-governance/organizations' + buildAdminOrganizationQuery(cursor)).then(function(response) {
     return response.json().then(function(data) {
       if (!response.ok) throw new Error(data.error || '组织目录加载失败');
       return data;
@@ -9448,8 +9580,10 @@ function loadAdminOrganizations(cursor, preservePage, targetPageIndex) {
       adminOrganizationMemberNextCursor = null;
       updateAdminOrganizationMemberPager({ has_more: false, next_cursor: null });
       var name = document.getElementById('ad_selectedOrganizationName');
+      var owner = document.getElementById('ad_selectedOrganizationOwner');
       var members = document.getElementById('ad_organizationMembers');
       if (name) name.textContent = '请选择组织';
+      if (owner) owner.textContent = '企业所有者：待选择组织';
       if (members) members.innerHTML = '<p style="font-size:12px;opacity:.55">选择左侧组织查看成员归属。</p>';
       return organizations;
     }
@@ -9476,6 +9610,11 @@ function selectAdminOrganization(organizationId) {
   adminSelectedOrganizationId = parsed;
   var name = document.getElementById('ad_selectedOrganizationName');
   if (name) name.textContent = organization.name || organization.code || ('组织 #' + parsed);
+  var owner = document.getElementById('ad_selectedOrganizationOwner');
+  var ownerRecord = organization.company_owner;
+  if (owner) owner.textContent = '企业所有者：' + (ownerRecord && (ownerRecord.display_name || ownerRecord.username)
+    ? (ownerRecord.display_name || ownerRecord.username)
+    : '尚未设置');
   return loadAdminOrganizationMembers();
 }
 function loadAdminOrganizationMembers(cursor, preservePage, targetPageIndex) {
@@ -9503,7 +9642,7 @@ function loadAdminOrganizationMembers(cursor, preservePage, targetPageIndex) {
   adminOrganizationMemberPageLoading = true;
   updateAdminOrganizationMemberPager();
   if (preservePage !== true) container.innerHTML = '<p style="font-size:12px;opacity:.55">正在加载成员...</p>';
-  return apiFetch('/admin/organizations/' + organizationId + '/members' + buildAdminOrganizationMemberQuery(cursor)).then(function(response) {
+  return apiFetch('/organization-governance/organizations/' + organizationId + '/members' + buildAdminOrganizationMemberQuery(cursor)).then(function(response) {
     return response.json().then(function(data) {
       if (!response.ok) throw new Error(data.error || '组织成员加载失败');
       return data;
@@ -13685,7 +13824,7 @@ function switchPage(id, options) {
     'toggleAll', 'syncInfluencerSelectionState', 'loadM4Campaigns', 'changeM4CampaignContext', 'openM4CampaignCloseoutReview', 'closeM4CampaignCloseoutReview', 'submitM4CampaignCloseoutReview', 'startCollab', 'submitCollabOrder', 'closeCollabOrderModal', 'loadCollaborations', 'updateCollabStatus', 'runCampaignCollabAction', 'closeCampaignContractConfirmationModal', 'submitCampaignContractConfirmation', 'closeCampaignContentReviewModal', 'submitCampaignContentReview', 'closeCampaignContentReviewDecisionModal', 'submitCampaignContentReviewDecision', 'renderCampaignPublicationRows', 'syncCampaignPublicationDraftRows', 'addCampaignPublicationRow', 'removeCampaignPublicationRow', 'openCampaignPublicationModal', 'closeCampaignPublicationModal', 'submitCampaignPublicationConfirmation', 'openCollaborationPerformanceTracking', 'openCampaignPublicationHistoryModal', 'loadCampaignPublicationHistoryPage', 'openCampaignPaymentModal', 'closeCampaignPaymentModal', 'submitCampaignPayment', 'voidCampaignPayment', 'closeCampaignSettlementModal', 'submitCampaignSettlement', 'openCampaignSettlementDecisionModal', 'closeCampaignSettlementDecisionModal', 'submitCampaignSettlementDecision',
     'initPerformanceMonitor', 'initPerformanceDashboard', 'refreshPerformanceMonitor', 'refreshPerformanceDashboard', 'changePerformanceCampaignContext', 'handlePerformanceTopMetricChange', 'refreshPerformanceReviewEvidence', 'generatePerformanceAiReviewDraft', 'loadPerformanceContents', 'loadPerformanceFreshnessQueue', 'openPerformanceFreshnessInput', 'refreshPerformanceUpdateStatus', 'runPerformanceProviderRefresh', 'loadPerformanceIntegrationPreview', 'loadPerformanceFeishuConnection', 'savePerformanceFeishuConnectionDraft', 'approvePerformanceFeishuConnectionDraft', 'downloadPerformanceFeishuSnapshot', 'createPerformanceContent', 'downloadPerformanceTemplate', 'handlePerformanceImport', 'handlePerformanceDrop', 'downloadPerformanceMetricsTemplate', 'handlePerformanceMetricsImport', 'handlePerformanceMetricsDrop', 'openPerformanceInputModal', 'closePerformanceInputModal', 'savePerformanceInput', 'loadPerformanceDashboard', 'loadPerformanceReviewEvidence', 'debouncedPerformanceContentSearch', 'exportPerformanceContents',
     'sendChat', 'clearChat', 'clearAIMemory', 'pushToFeishu', 'loadFeishuStatus', 'loadFeishuOutbox', 'testFeishuConnection', 'selectFeishuReconciliationDelivery', 'reconcileFeishuDelivery', 'selectFeishuRetryDelivery', 'retryFeishuDelivery',
-    'switchAdminTab', 'loadAdminDashboard', 'loadAdminUsers', 'adminUserNextPage', 'adminUserPreviousPage', 'loadAdminOrganizations', 'selectAdminOrganization', 'loadAdminOrganizationMembers', 'adminOrganizationNextPage', 'adminOrganizationPreviousPage', 'adminOrganizationMemberNextPage', 'adminOrganizationMemberPreviousPage', 'adminAddUser', 'adminCreateInvite', 'adminResetPw',
+    'switchAdminTab', 'loadAdminDashboard', 'loadAdminUsers', 'adminUserNextPage', 'adminUserPreviousPage', 'loadAdminOrganizations', 'selectAdminOrganization', 'loadAdminOrganizationMembers', 'adminOrganizationNextPage', 'adminOrganizationPreviousPage', 'adminOrganizationMemberNextPage', 'adminOrganizationMemberPreviousPage', 'saveAdminOrganizationMember', 'initializeAdminOrganizationOwner', 'adminAddUser', 'adminCreateInvite', 'adminResetPw',
     'wfUndo', 'wfRedo', 'wfClearCanvas', 'wfSaveTemplate', 'wfPublishTemplate', 'wfResetTaskFilters', 'wfLoadTasks', 'wfLoadInstances',
     'showRelatedBrands', 'closeBrandRelModal'
   ];

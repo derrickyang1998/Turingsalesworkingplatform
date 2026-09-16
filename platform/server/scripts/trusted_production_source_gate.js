@@ -67,6 +67,7 @@ const REQUIRED_BUNDLE_FILES = Object.freeze([
   'server/migrations/018_collaboration_publication_lifecycle.js',
   'server/migrations/019_performance_provider_collection.js',
   'server/migrations/020_organization_methodology_promotion.js',
+  'server/migrations/021_organization_role_governance.js',
   'server/migrations/baselines/legacy_v1.js',
   'server/migrations/engines/v1.js',
   'server/migrations/vendor/bcryptjs_v3_0_3.js',
@@ -131,8 +132,8 @@ const EXPECTED_ENTRYPOINTS = Object.freeze({
 });
 
 const EXPECTED_MIGRATION_CONTRACT = Object.freeze({
-  acceptedSourceVersions: Object.freeze([1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]),
-  targetVersion: 20,
+  acceptedSourceVersions: Object.freeze([1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]),
+  targetVersion: 21,
   runs: 2,
   deterministicAppendTables: Object.freeze(['activity_log'])
 });

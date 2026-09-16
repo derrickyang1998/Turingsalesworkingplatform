@@ -1,0 +1,730 @@
+'use strict';
+
+const { types: utilTypes } = require('node:util');
+
+const ACCESS_ROLES = new Set(['administrator', 'manager', 'member', 'read_only']);
+const MEMBERSHIP_STATUSES = new Set(['active', 'revoked']);
+const ROLE_ORDER = Object.freeze([
+  'platform_admin',
+  'company_owner',
+  'administrator',
+  'manager',
+  'member',
+  'read_only'
+]);
+const MAX_LIMIT = 100;
+const MAX_QUERY_LENGTH = 120;
+
+class OrganizationGovernanceServiceError extends Error {
+  constructor(status, code, message) {
+    super(message);
+    this.name = 'OrganizationGovernanceServiceError';
+    this.status = status;
+    this.code = code;
+  }
+}
+
+function serviceError(status, code, message) {
+  return new OrganizationGovernanceServiceError(status, code, message);
+}
+
+function isPlainObject(value) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value) || utilTypes.isProxy(value)) return false;
+  try {
+    return Object.getPrototypeOf(value) === Object.prototype;
+  } catch {
+    return false;
+  }
+}
+
+function isQueryObject(value) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value) || utilTypes.isProxy(value)) return false;
+  try {
+    const prototype = Object.getPrototypeOf(value);
+    return prototype === Object.prototype || prototype === null;
+  } catch {
+    return false;
+  }
+}
+
+function boundedQuery(value) {
+  if (value === undefined || value === null || value === '') return '';
+  if (typeof value !== 'string') {
+    throw serviceError(400, 'INVALID_ORGANIZATION_GOVERNANCE_INPUT', 'q 必须是字符串。');
+  }
+  const normalized = value.trim();
+  if (normalized.length > MAX_QUERY_LENGTH) {
+    throw serviceError(400, 'INVALID_ORGANIZATION_GOVERNANCE_INPUT', `q 不能超过 ${MAX_QUERY_LENGTH} 个字符。`);
+  }
+  return normalized;
+}
+
+function memberStatus(value) {
+  if (value === undefined || value === null || value === '') return '';
+  if (typeof value !== 'string' || !MEMBERSHIP_STATUSES.has(value)) {
+    throw serviceError(400, 'INVALID_ORGANIZATION_GOVERNANCE_INPUT', 'status 必须是 active 或 revoked。');
+  }
+  return value;
+}
+
+function positiveInteger(value, label) {
+  if (Number.isSafeInteger(value) && value > 0) return value;
+  if (typeof value === 'string' && /^[1-9][0-9]{0,15}$/.test(value)) {
+    const parsed = Number(value);
+    if (Number.isSafeInteger(parsed) && String(parsed) === value) return parsed;
+  }
+  throw serviceError(400, 'INVALID_ORGANIZATION_GOVERNANCE_INPUT', `${label} 必须是有效的正整数。`);
+}
+
+function boundedLimit(value) {
+  if (value === undefined || value === null || value === '') return 50;
+  const limit = positiveInteger(value, 'limit');
+  if (limit > MAX_LIMIT) {
+    throw serviceError(400, 'INVALID_ORGANIZATION_GOVERNANCE_INPUT', `limit 不能超过 ${MAX_LIMIT}。`);
+  }
+  return limit;
+}
+
+function optionalCursor(value) {
+  if (value === undefined || value === null || value === '') return null;
+  return positiveInteger(value, 'cursor');
+}
+
+function requestQuery(options) {
+  const query = options && options.query;
+  return isQueryObject(query) ? query : {};
+}
+
+function normalizedRequestId(value) {
+  return typeof value === 'string' && value.length >= 1 && value.length <= 120 &&
+    !/[\u0000-\u001f\u007f]/.test(value)
+    ? value
+    : null;
+}
+
+function normalizedIpAddress(value) {
+  return typeof value === 'string' && value.length >= 1 && value.length <= 128 &&
+    !/[\u0000-\u001f\u007f]/.test(value)
+    ? value
+    : null;
+}
+
+function readUser(db, userId) {
+  return db.prepare(`
+    SELECT id,username,display_name,role,department,is_active
+    FROM users
+    WHERE id=?
+  `).get(userId);
+}
+
+function readOrganization(db, organizationId) {
+  return db.prepare(`
+    SELECT id,code,name,created_at
+    FROM organizations
+    WHERE id=?
+  `).get(organizationId);
+}
+
+function membershipProjection(db, user, organizationId) {
+  const membership = db.prepare(`
+    SELECT
+      membership.role_code,
+      membership.status,
+      policy.access_mode,
+      CASE WHEN authority.owner_user_id=membership.user_id THEN 1 ELSE 0 END AS is_company_owner
+    FROM organization_memberships membership
+    JOIN organization_member_policy policy
+      ON policy.org_id=membership.org_id AND policy.user_id=membership.user_id
+    LEFT JOIN organization_authority authority ON authority.org_id=membership.org_id
+    WHERE membership.org_id=? AND membership.user_id=?
+  `).get(organizationId, user.id);
+  if (!membership) return null;
+  const teams = db.prepare(`
+    SELECT team.id,team.code,team.name,membership.role_code,membership.status
+    FROM team_memberships membership
+    JOIN teams team ON team.org_id=membership.org_id AND team.id=membership.team_id
+    WHERE membership.org_id=? AND membership.user_id=?
+    ORDER BY team.id
+  `).all(organizationId, user.id);
+  return {
+    ...membership,
+    is_company_owner: membership.is_company_owner === 1,
+    teams
+  };
+}
+
+function accessRolesFor(user, projection) {
+  const roles = new Set();
+  if (user && user.is_active === 1 && user.role === 'admin') roles.add('platform_admin');
+  if (!user || user.is_active !== 1 || !projection || projection.status !== 'active') {
+    return ROLE_ORDER.filter((role) => roles.has(role));
+  }
+  if (projection.access_mode === 'read_only') {
+    roles.add('read_only');
+    return ROLE_ORDER.filter((role) => roles.has(role));
+  }
+  if (projection.is_company_owner) roles.add('company_owner');
+  if (projection.role_code === 'org_admin') roles.add('administrator');
+  if (projection.teams.some((team) => team.status === 'active' && team.role_code === 'team_lead')) {
+    roles.add('manager');
+  }
+  roles.add('member');
+  return ROLE_ORDER.filter((role) => roles.has(role));
+}
+
+function effectiveRole(accessRoles) {
+  for (const role of [
+    'company_owner',
+    'read_only',
+    'platform_admin',
+    'administrator',
+    'manager',
+    'member'
+  ]) {
+    if (accessRoles.includes(role)) return role;
+  }
+  return null;
+}
+
+function projectUserAccess(db, options) {
+  const userId = positiveInteger(options && options.userId, 'userId');
+  const organizationId = positiveInteger(options && options.organizationId, 'organizationId');
+  const user = readUser(db, userId);
+  if (!user) {
+    throw serviceError(404, 'USER_NOT_FOUND', '用户不存在。');
+  }
+  const projection = membershipProjection(db, user, organizationId);
+  if (!projection) {
+    throw serviceError(404, 'ORGANIZATION_MEMBERSHIP_NOT_FOUND', '组织成员不存在。');
+  }
+  const accessRoles = accessRolesFor(user, projection);
+  return {
+    access_roles: accessRoles,
+    organization_access: {
+      organization_id: organizationId,
+      membership_status: projection.status,
+      access_mode: projection.access_mode,
+      effective_role: effectiveRole(accessRoles),
+      is_company_owner: projection.is_company_owner
+    }
+  };
+}
+
+function liveActor(db, actor) {
+  let actorId;
+  try {
+    actorId = positiveInteger(actor && actor.id, 'actor.id');
+  } catch {
+    throw serviceError(403, 'ORGANIZATION_GOVERNANCE_FORBIDDEN', '无权访问组织治理功能。');
+  }
+  const user = readUser(db, actorId);
+  if (!user || user.is_active !== 1) {
+    throw serviceError(403, 'ORGANIZATION_GOVERNANCE_FORBIDDEN', '无权访问组织治理功能。');
+  }
+  return user;
+}
+
+function actorScope(db, actor, organizationId) {
+  const user = liveActor(db, actor);
+  if (user.role === 'admin') return { kind: 'platform_admin', user };
+  const projection = membershipProjection(db, user, organizationId);
+  if (!projection || projection.status !== 'active' || projection.access_mode === 'read_only') {
+    throw serviceError(403, 'ORGANIZATION_GOVERNANCE_FORBIDDEN', '无权访问该组织的治理信息。');
+  }
+  if (projection.is_company_owner) return { kind: 'company_owner', user, projection };
+  if (projection.role_code === 'org_admin') return { kind: 'administrator', user, projection };
+  throw serviceError(403, 'ORGANIZATION_GOVERNANCE_FORBIDDEN', '无权访问该组织的治理信息。');
+}
+
+function visibleOrganizationIds(db, actor) {
+  const user = liveActor(db, actor);
+  if (user.role === 'admin') return { kind: 'platform_admin', user, ids: null };
+  const rows = db.prepare(`
+    SELECT membership.org_id
+    FROM organization_memberships membership
+    JOIN organization_member_policy policy
+      ON policy.org_id=membership.org_id AND policy.user_id=membership.user_id
+    LEFT JOIN organization_authority authority ON authority.org_id=membership.org_id
+    WHERE membership.user_id=?
+      AND membership.status='active'
+      AND policy.access_mode='read_write'
+      AND (authority.owner_user_id=membership.user_id OR membership.role_code='org_admin')
+    ORDER BY membership.org_id
+  `).all(user.id);
+  if (rows.length === 0) {
+    throw serviceError(403, 'ORGANIZATION_GOVERNANCE_FORBIDDEN', '无权访问组织治理功能。');
+  }
+  return { kind: 'scoped', user, ids: rows.map((row) => row.org_id) };
+}
+
+function ownerSummary(db, organizationId) {
+  const row = db.prepare(`
+    SELECT user.id AS user_id,user.username,user.display_name
+    FROM organization_authority authority
+    JOIN users user ON user.id=authority.owner_user_id
+    WHERE authority.org_id=?
+  `).get(organizationId);
+  return row || null;
+}
+
+function persistAudit(db, input) {
+  const details = {
+    schema_version: 1,
+    actor_user_id: input.actorUserId,
+    organization_id: input.organizationId === undefined ? null : input.organizationId,
+    subject_user_id: input.subjectUserId === undefined ? null : input.subjectUserId,
+    request_id: normalizedRequestId(input.requestId),
+    changed_fields: input.changedFields || [],
+    result_count: input.resultCount === undefined ? null : input.resultCount,
+    next_cursor: input.nextCursor === undefined ? null : input.nextCursor
+  };
+  if (input.before !== undefined) details.before = input.before;
+  if (input.after !== undefined) details.after = input.after;
+  try {
+    db.prepare(`
+      INSERT INTO activity_log (user_id,action,module,details,ip_address)
+      VALUES (?,?,'organization_governance',?,?)
+    `).run(
+      input.actorUserId,
+      input.action,
+      JSON.stringify(details),
+      normalizedIpAddress(input.ipAddress)
+    );
+  } catch (_error) {
+    throw serviceError(500, 'AUDIT_PERSISTENCE_FAILED', '组织治理审计写入失败。');
+  }
+}
+
+function listOrganizations(db, options) {
+  const query = requestQuery(options);
+  const q = boundedQuery(query.q);
+  const limit = boundedLimit(query.limit);
+  const cursor = optionalCursor(query.cursor);
+  return db.transaction(() => {
+    const scope = visibleOrganizationIds(db, options && options.actor);
+    const visibleClause = scope.ids === null
+      ? ''
+      : `AND organization.id IN (${scope.ids.map(() => '?').join(',')})`;
+    const parameters = [cursor, cursor, q, q, q, ...(scope.ids || []), limit + 1];
+    const rows = db.prepare(`
+      SELECT
+        organization.id,
+        organization.code,
+        organization.name,
+        organization.created_at,
+        (SELECT COUNT(*) FROM teams team WHERE team.org_id=organization.id) AS team_count,
+        (SELECT COUNT(*) FROM organization_memberships membership
+          WHERE membership.org_id=organization.id AND membership.status='active') AS active_member_count,
+        (SELECT COUNT(*) FROM organization_memberships membership
+          WHERE membership.org_id=organization.id AND membership.status='revoked') AS revoked_member_count
+      FROM organizations organization
+      WHERE (? IS NULL OR organization.id>?)
+        AND (
+          ?='' OR
+          instr(lower(organization.code),lower(?))>0 OR
+          instr(lower(organization.name),lower(?))>0
+        )
+        ${visibleClause}
+      ORDER BY organization.id
+      LIMIT ?
+    `).all(...parameters);
+    const hasMore = rows.length > limit;
+    const organizations = rows.slice(0, limit).map((row) => {
+      const companyOwner = ownerSummary(db, row.id);
+      return {
+        id: row.id,
+        code: row.code,
+        name: row.name,
+        created_at: row.created_at,
+        team_count: Number(row.team_count),
+        active_member_count: Number(row.active_member_count),
+        revoked_member_count: Number(row.revoked_member_count),
+        company_owner: companyOwner,
+        allowed_actions: {
+          initialize_owner: scope.kind === 'platform_admin' && companyOwner === null
+        }
+      };
+    });
+    const nextCursor = hasMore ? organizations[organizations.length - 1].id : null;
+    persistAudit(db, {
+      actorUserId: scope.user.id,
+      action: 'organization_governance_list_organizations',
+      requestId: options && options.requestId,
+      ipAddress: options && options.ipAddress,
+      resultCount: organizations.length,
+      nextCursor
+    });
+    return {
+      organizations,
+      page: { limit, next_cursor: nextCursor, has_more: hasMore }
+    };
+  }).immediate();
+}
+
+function canChangeTarget(scope, target) {
+  if (target.is_company_owner || target.platform_role === 'admin') return false;
+  if (scope.kind === 'platform_admin' || scope.kind === 'company_owner') return true;
+  return scope.kind === 'administrator' &&
+    target.organization_role !== 'org_admin';
+}
+
+function listMembers(db, options) {
+  const organizationId = positiveInteger(options && options.organizationId, 'organizationId');
+  const query = requestQuery(options);
+  const q = boundedQuery(query.q);
+  const status = memberStatus(query.status);
+  const limit = boundedLimit(query.limit);
+  const cursor = optionalCursor(query.cursor);
+  return db.transaction(() => {
+    const organization = readOrganization(db, organizationId);
+    if (!organization) throw serviceError(404, 'ORGANIZATION_NOT_FOUND', '组织不存在。');
+    const scope = actorScope(db, options && options.actor, organizationId);
+    const companyOwner = ownerSummary(db, organizationId);
+    const rows = db.prepare(`
+      SELECT
+        membership.user_id,
+        user.username,
+        user.display_name,
+        user.department,
+        user.role AS platform_role,
+        user.is_active,
+        membership.role_code AS organization_role,
+        membership.status AS membership_status,
+        policy.access_mode,
+        CASE WHEN authority.owner_user_id=membership.user_id THEN 1 ELSE 0 END AS is_company_owner
+      FROM organization_memberships membership
+      JOIN users user ON user.id=membership.user_id
+      JOIN organization_member_policy policy
+        ON policy.org_id=membership.org_id AND policy.user_id=membership.user_id
+      LEFT JOIN organization_authority authority ON authority.org_id=membership.org_id
+       WHERE membership.org_id=? AND (? IS NULL OR membership.user_id>?)
+        AND (
+          ?='' OR
+          instr(lower(user.username),lower(?))>0 OR
+          instr(lower(user.display_name),lower(?))>0 OR
+          instr(lower(COALESCE(user.department,'')),lower(?))>0 OR
+          instr(lower(user.role),lower(?))>0 OR
+          instr(lower(membership.role_code),lower(?))>0 OR
+          instr(lower(policy.access_mode),lower(?))>0 OR
+          EXISTS (
+            SELECT 1
+            FROM team_memberships team_membership
+            JOIN teams team
+              ON team.org_id=team_membership.org_id
+             AND team.id=team_membership.team_id
+            WHERE team_membership.org_id=membership.org_id
+              AND team_membership.user_id=membership.user_id
+              AND (
+                instr(lower(team.code),lower(?))>0 OR
+                instr(lower(team.name),lower(?))>0 OR
+                instr(lower(team_membership.role_code),lower(?))>0
+              )
+          )
+        )
+        AND (?='' OR membership.status=?)
+       ORDER BY membership.user_id
+       LIMIT ?
+    `).all(
+      organizationId,
+      cursor,
+      cursor,
+      q,
+      q,
+      q,
+      q,
+      q,
+      q,
+      q,
+      q,
+      q,
+      q,
+      status,
+      status,
+      limit + 1
+    );
+    const hasMore = rows.length > limit;
+    const selected = rows.slice(0, limit);
+    const members = selected.map((row) => {
+      const user = {
+        id: row.user_id,
+        role: row.platform_role,
+        is_active: row.is_active
+      };
+      const projection = membershipProjection(db, user, organizationId);
+      const accessRoles = accessRolesFor(user, projection);
+      const target = {
+        platform_role: row.platform_role,
+        organization_role: row.organization_role,
+        is_company_owner: row.is_company_owner === 1
+      };
+      const changeAllowed = canChangeTarget(scope, target);
+      const initializeAllowed = scope.kind === 'platform_admin' &&
+        companyOwner === null &&
+        row.is_active === 1 &&
+        row.membership_status === 'active' &&
+        row.access_mode === 'read_write';
+      return {
+        user_id: row.user_id,
+        username: row.username,
+        display_name: row.display_name,
+        department: row.department,
+        platform_role: row.platform_role,
+        is_active: row.is_active,
+        organization_role: row.organization_role,
+        membership_status: row.membership_status,
+        access_mode: row.access_mode,
+        effective_role: effectiveRole(accessRoles),
+        is_company_owner: target.is_company_owner,
+        teams: projection.teams.map((team) => ({
+          id: team.id,
+          code: team.code,
+          name: team.name,
+          role_code: team.role_code,
+          status: team.status
+        })),
+        allowed_actions: {
+          change_role: changeAllowed,
+          change_status: changeAllowed,
+          initialize_owner: initializeAllowed
+        }
+      };
+    });
+    const nextCursor = hasMore ? members[members.length - 1].user_id : null;
+    persistAudit(db, {
+      actorUserId: scope.user.id,
+      action: 'organization_governance_list_members',
+      organizationId,
+      requestId: options && options.requestId,
+      ipAddress: options && options.ipAddress,
+      resultCount: members.length,
+      nextCursor
+    });
+    return {
+      organization: {
+        id: organization.id,
+        code: organization.code,
+        name: organization.name,
+        company_owner: companyOwner
+      },
+      members,
+      page: { limit, next_cursor: nextCursor, has_more: hasMore }
+    };
+  }).immediate();
+}
+
+function exactBody(value, keys) {
+  if (!isPlainObject(value)) return null;
+  const actual = Object.keys(value).sort();
+  const allowed = new Set(keys);
+  if (actual.some((key) => !allowed.has(key))) return null;
+  for (const key of actual) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (!descriptor || !Object.hasOwn(descriptor, 'value')) return null;
+  }
+  return value;
+}
+
+function validateOwnerBody(value) {
+  const body = exactBody(value, ['user_id']);
+  if (!body || Object.keys(body).length !== 1 || !Number.isSafeInteger(body.user_id) || body.user_id < 1) {
+    throw serviceError(400, 'INVALID_ORGANIZATION_GOVERNANCE_BODY', '请求内容格式无效。');
+  }
+  return { user_id: body.user_id };
+}
+
+function validateMemberBody(value) {
+  const body = exactBody(value, ['access_role', 'membership_status']);
+  if (!body || Object.keys(body).length < 1) {
+    throw serviceError(400, 'INVALID_ORGANIZATION_GOVERNANCE_BODY', '请求内容格式无效。');
+  }
+  if (Object.hasOwn(body, 'access_role') &&
+      (typeof body.access_role !== 'string' || !ACCESS_ROLES.has(body.access_role))) {
+    throw serviceError(400, 'INVALID_ORGANIZATION_GOVERNANCE_BODY', 'access_role 无效。');
+  }
+  if (Object.hasOwn(body, 'membership_status') &&
+      (typeof body.membership_status !== 'string' || !MEMBERSHIP_STATUSES.has(body.membership_status))) {
+    throw serviceError(400, 'INVALID_ORGANIZATION_GOVERNANCE_BODY', 'membership_status 无效。');
+  }
+  const normalized = {};
+  if (Object.hasOwn(body, 'access_role')) normalized.access_role = body.access_role;
+  if (Object.hasOwn(body, 'membership_status')) normalized.membership_status = body.membership_status;
+  return normalized;
+}
+
+function initializeOwner(db, options) {
+  const organizationId = positiveInteger(options && options.organizationId, 'organizationId');
+  const body = validateOwnerBody(options && options.body);
+  return db.transaction(() => {
+    const actorUser = liveActor(db, options && options.actor);
+    if (actorUser.role !== 'admin') {
+      throw serviceError(403, 'PLATFORM_ADMIN_REQUIRED', '仅平台管理员可以初始化公司所有者。');
+    }
+    const scope = { kind: 'platform_admin', user: actorUser };
+    if (!readOrganization(db, organizationId)) {
+      throw serviceError(404, 'ORGANIZATION_NOT_FOUND', '组织不存在。');
+    }
+    if (ownerSummary(db, organizationId)) {
+      throw serviceError(409, 'COMPANY_OWNER_ALREADY_INITIALIZED', '公司所有者已初始化，本版本不可替换。');
+    }
+    const candidate = db.prepare(`
+      SELECT membership.user_id
+      FROM organization_memberships membership
+      JOIN organization_member_policy policy
+        ON policy.org_id=membership.org_id AND policy.user_id=membership.user_id
+      JOIN users user ON user.id=membership.user_id
+      WHERE membership.org_id=? AND membership.user_id=?
+        AND membership.status='active'
+        AND policy.access_mode='read_write'
+        AND user.is_active=1
+    `).get(organizationId, body.user_id);
+    if (!candidate) {
+      throw serviceError(409, 'COMPANY_OWNER_CANDIDATE_INELIGIBLE', '公司所有者必须是活跃且可写的本组织成员。');
+    }
+    db.prepare(`
+      INSERT INTO organization_authority (org_id,owner_user_id,created_by)
+      VALUES (?,?,?)
+    `).run(organizationId, body.user_id, scope.user.id);
+    db.prepare('DELETE FROM sessions WHERE user_id=?').run(body.user_id);
+    persistAudit(db, {
+      actorUserId: scope.user.id,
+      action: 'organization_owner_initialized',
+      organizationId,
+      subjectUserId: body.user_id,
+      requestId: options && options.requestId,
+      ipAddress: options && options.ipAddress,
+      changedFields: ['company_owner'],
+      before: { company_owner: null },
+      after: { company_owner_user_id: body.user_id }
+    });
+    return { changed: true };
+  }).immediate();
+}
+
+function memberState(db, organizationId, userId) {
+  const row = db.prepare(`
+    SELECT membership.role_code,membership.status,membership.revoked_at,policy.access_mode
+    FROM organization_memberships membership
+    JOIN organization_member_policy policy
+      ON policy.org_id=membership.org_id AND policy.user_id=membership.user_id
+    WHERE membership.org_id=? AND membership.user_id=?
+  `).get(organizationId, userId);
+  if (!row) return null;
+  return {
+    organization_role: row.role_code,
+    membership_status: row.status,
+    access_mode: row.access_mode
+  };
+}
+
+function updateMember(db, options) {
+  const organizationId = positiveInteger(options && options.organizationId, 'organizationId');
+  const userId = positiveInteger(options && options.userId, 'userId');
+  const body = validateMemberBody(options && options.body);
+  return db.transaction(() => {
+    if (!readOrganization(db, organizationId)) {
+      throw serviceError(404, 'ORGANIZATION_NOT_FOUND', '组织不存在。');
+    }
+    const scope = actorScope(db, options && options.actor, organizationId);
+    const user = readUser(db, userId);
+    const projection = user && membershipProjection(db, user, organizationId);
+    if (!user || !projection) {
+      throw serviceError(404, 'ORGANIZATION_MEMBERSHIP_NOT_FOUND', '组织成员不存在。');
+    }
+    const target = {
+      platform_role: user.role,
+      organization_role: projection.role_code,
+      is_company_owner: projection.is_company_owner
+    };
+    if (target.is_company_owner) {
+      throw serviceError(409, 'COMPANY_OWNER_IMMUTABLE', '公司所有者在本版本不可修改、撤销或替换。');
+    }
+    if (!canChangeTarget(scope, target)) {
+      throw serviceError(403, 'ORGANIZATION_MEMBER_CHANGE_FORBIDDEN', '无权修改该组织成员。');
+    }
+
+    if (body.access_role === 'manager') {
+      const activeTeam = db.prepare(`
+        SELECT 1 AS present
+        FROM team_memberships
+        WHERE org_id=? AND user_id=? AND status='active'
+        LIMIT 1
+      `).get(organizationId, userId);
+      if (!activeTeam) {
+        throw serviceError(409, 'MANAGER_TEAM_REQUIRED', '成员至少需要归属一个有效团队后才能设为经理。');
+      }
+    }
+
+    const before = memberState(db, organizationId, userId);
+    if (body.access_role) {
+      const organizationRole = body.access_role === 'administrator' ? 'org_admin' : 'member';
+      const teamRole = body.access_role === 'manager' ? 'team_lead' : 'member';
+      const accessMode = body.access_role === 'read_only' ? 'read_only' : 'read_write';
+      db.prepare(`
+        UPDATE organization_memberships SET role_code=? WHERE org_id=? AND user_id=?
+      `).run(organizationRole, organizationId, userId);
+      db.prepare(`
+        UPDATE team_memberships SET role_code=? WHERE org_id=? AND user_id=?
+      `).run(teamRole, organizationId, userId);
+      db.prepare(`
+        UPDATE organization_member_policy
+        SET access_mode=?,updated_at=CURRENT_TIMESTAMP
+        WHERE org_id=? AND user_id=?
+      `).run(accessMode, organizationId, userId);
+    }
+    if (body.membership_status) {
+      const revokedAt = body.membership_status === 'revoked' ?
+        db.prepare("SELECT strftime('%Y-%m-%d %H:%M:%S','now') AS value").get().value :
+        null;
+      db.prepare(`
+        UPDATE organization_memberships
+        SET status=?,revoked_at=?
+        WHERE org_id=? AND user_id=?
+      `).run(body.membership_status, revokedAt, organizationId, userId);
+    }
+    const after = memberState(db, organizationId, userId);
+    const changedFields = Object.keys(after).filter((key) => before[key] !== after[key]).sort();
+    if (changedFields.length > 0) db.prepare('DELETE FROM sessions WHERE user_id=?').run(userId);
+    persistAudit(db, {
+      actorUserId: scope.user.id,
+      action: 'organization_member_updated',
+      organizationId,
+      subjectUserId: userId,
+      requestId: options && options.requestId,
+      ipAddress: options && options.ipAddress,
+      changedFields,
+      before,
+      after
+    });
+    return { changed: changedFields.length > 0 };
+  }).immediate();
+}
+
+function createOrganizationGovernanceService(db) {
+  if (!db || typeof db.prepare !== 'function' || typeof db.transaction !== 'function') {
+    throw new TypeError('A SQLite database is required.');
+  }
+  return Object.freeze({
+    projectUserAccess(options) {
+      return projectUserAccess(db, options || {});
+    },
+    listOrganizations(options) {
+      return listOrganizations(db, options || {});
+    },
+    listMembers(options) {
+      return listMembers(db, options || {});
+    },
+    initializeOwner(options) {
+      return initializeOwner(db, options || {});
+    },
+    updateMember(options) {
+      return updateMember(db, options || {});
+    }
+  });
+}
+
+module.exports = {
+  OrganizationGovernanceServiceError,
+  createOrganizationGovernanceService,
+  validateMemberBody,
+  validateOwnerBody
+};

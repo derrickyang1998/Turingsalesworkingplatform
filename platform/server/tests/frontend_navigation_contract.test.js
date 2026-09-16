@@ -8,6 +8,12 @@ const platformRoot = path.join(__dirname, '..', '..');
 const navigationPath = path.join(platformRoot, 'client', 'core', 'navigation.js');
 
 const adminUser = { id: 1, role: 'admin', display_name: 'Admin' };
+const ownerUser = {
+  id: 3,
+  role: 'user',
+  display_name: 'Owner',
+  access_roles: ['company_owner', 'administrator', 'member']
+};
 const normalUser = { id: 2, role: 'user', display_name: 'User' };
 
 class ClassList {
@@ -361,22 +367,23 @@ test('navigation rebuild preserves the registry as canonical anchors with groupe
     ['workflow-templates', '/workflow-templates', '<span class="nav-icon" aria-hidden="true">模</span> 流程模板', false],
     ['workflow-instances', '/workflow-instances', '<span class="nav-icon" aria-hidden="true">实</span> 流程实例', false],
     ['workflow-tasks', '/tasks', '<span class="nav-icon" aria-hidden="true">待</span> 我的待办', false],
-    ['admin', '/admin?tab=overview', '<span class="nav-icon" aria-hidden="true">管</span> 管理控制室', true]
+    ['admin', '/admin?tab=overview', '<span class="nav-icon" aria-hidden="true">管</span> 组织与成员', true]
   ];
 
   assert.equal(navItems.length, expected.length);
-  expected.forEach(([pageId, href, html, adminOnly], index) => {
+  expected.forEach(([pageId, href, html, governanceOnly], index) => {
     assert.equal(navItems[index].tagName, 'A');
     assert.equal(navItems[index].getAttribute('data-page'), pageId);
     assert.equal(navItems[index].getAttribute('href'), href);
     assert.equal(navItems[index].innerHTML, html);
-    assert.equal(navItems[index].classList.contains('admin-only'), adminOnly);
+    assert.equal(navItems[index].classList.contains('governance-only'), governanceOnly);
+    assert.equal(navItems[index].classList.contains('admin-only'), false);
   });
   assert.deepEqual(
     document.querySelectorAll('.nav-group-label').map((group) => group.textContent),
     ['客户经营', '方案与执行', '流程协作', '系统管理']
   );
-  assert.equal(document.querySelectorAll('.nav-group-label').at(-1).classList.contains('admin-only'), true);
+  assert.equal(document.querySelectorAll('.nav-group-label').at(-1).classList.contains('governance-only'), true);
 });
 
 test('navigation intercepts only unmodified primary clicks and preserves native new-context behavior', () => {
@@ -477,6 +484,17 @@ test('restore role-gates admin and kb routes before rendering and gates preview 
   assert.deepEqual(plain(adminContext.lastNavigationEvent().detail.state.substate), { tab: 'users' });
   assert.deepEqual(adminContext.historyCalls.map((call) => [call.method, call.url]), [
     ['replaceState', '/admin?tab=users&preview=v030']
+  ]);
+
+  const ownerContext = loadNavigation('/admin', '?tab=users&preview=v030');
+  ownerContext.nav.restore(ownerUser);
+  assert.equal(ownerContext.document.getElementById('page-admin').style.display, 'block');
+  assert.equal(ownerContext.document.documentElement.dataset.tmPreview, undefined);
+  assert.deepEqual(plain(ownerContext.lastNavigationEvent().detail.state.substate), {
+    tab: 'organizations'
+  });
+  assert.deepEqual(ownerContext.historyCalls.map((call) => [call.method, call.url]), [
+    ['replaceState', '/admin?tab=organizations']
   ]);
 
   const userContext = loadNavigation('/kb', '?preview=v030');

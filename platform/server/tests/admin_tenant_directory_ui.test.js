@@ -310,7 +310,7 @@ test('organization directory renders escaped organization and membership project
     Error,
     apiFetch(url) {
       calls.push(url);
-      if (url.startsWith('/admin/organizations/10/members')) {
+      if (url.startsWith('/organization-governance/organizations/10/members')) {
         return Promise.resolve(response(200, {
           organization: { id: 10, code: 'alpha', name: 'Alpha <Market>' },
           members: [{
@@ -342,6 +342,8 @@ test('organization directory renders escaped organization and membership project
     'buildAdminOrganizationQuery',
     'buildAdminOrganizationMemberQuery',
     'renderAdminOrganizations',
+    'adminGovernanceRoleLabel',
+    'effectiveAdminOrganizationMemberRole',
     'renderAdminOrganizationMembers',
     'updateAdminOrganizationPager',
     'updateAdminOrganizationMemberPager',
@@ -355,11 +357,11 @@ test('organization directory renders escaped organization and membership project
   ]);
 
   await context.loadAdminOrganizations();
-  assert.match(calls[0], /^\/admin\/organizations\?/);
+  assert.match(calls[0], /^\/organization-governance\/organizations\?/);
   assert.match(elements.ad_organizationList.innerHTML, /Alpha &lt;Market&gt;/);
   assert.doesNotMatch(elements.ad_organizationList.innerHTML, /Alpha <Market>/);
   assert.equal(context.adminSelectedOrganizationId, 10);
-  assert.match(calls[1], /^\/admin\/organizations\/10\/members\?/);
+  assert.match(calls[1], /^\/organization-governance\/organizations\/10\/members\?/);
   assert.match(elements.ad_organizationMembers.innerHTML, /alice&lt;script&gt;/);
   assert.match(elements.ad_organizationMembers.innerHTML, /Sales &lt;A&gt;/);
   assert.doesNotMatch(elements.ad_organizationMembers.innerHTML, /<script>/i);
@@ -464,6 +466,8 @@ test('organization and member paging controls request every cursor and can retur
     'buildAdminOrganizationQuery',
     'buildAdminOrganizationMemberQuery',
     'renderAdminOrganizations',
+    'adminGovernanceRoleLabel',
+    'effectiveAdminOrganizationMemberRole',
     'renderAdminOrganizationMembers',
     'updateAdminOrganizationPager',
     'updateAdminOrganizationMemberPager',
@@ -508,17 +512,17 @@ test('organization and member paging controls request every cursor and can retur
   elements.ad_organizationMemberSearch.value = '';
 
   delayOrganizationPage = true;
-  const organizationCallsBefore = calls.filter((url) => /^\/admin\/organizations\?/.test(url)).length;
+  const organizationCallsBefore = calls.filter((url) => /^\/organization-governance\/organizations\?/.test(url)).length;
   const nextPage = context.adminOrganizationNextPage();
   const duplicateNextPage = context.adminOrganizationNextPage();
-  assert.equal(calls.filter((url) => /^\/admin\/organizations\?/.test(url)).length, organizationCallsBefore + 1);
+  assert.equal(calls.filter((url) => /^\/organization-governance\/organizations\?/.test(url)).length, organizationCallsBefore + 1);
   await duplicateNextPage;
   releaseOrganizationPage();
   await nextPage;
-  assert.match(calls.find((url) => /\/admin\/organizations\?[^#]*cursor=10/.test(url)), /cursor=10/);
+  assert.match(calls.find((url) => /\/organization-governance\/organizations\?[^#]*cursor=10/.test(url)), /cursor=10/);
   assert.equal(elements.ad_organizationPageLabel.textContent, '第 2 页');
   await context.adminOrganizationPreviousPage();
-  assert.equal(calls[calls.length - 2].includes('/admin/organizations?limit=50'), true);
+  assert.equal(calls[calls.length - 2].includes('/organization-governance/organizations?limit=50'), true);
   assert.equal(elements.ad_organizationPageLabel.textContent, '第 1 页');
 
   rejectOrganizationPage = true;
@@ -529,8 +533,131 @@ test('organization and member paging controls request every cursor and can retur
 
   elements.ad_organizationSearch.value = 'new filter';
   await context.adminOrganizationNextPage();
-  const organizationCalls = calls.filter((url) => /^\/admin\/organizations\?/.test(url));
+  const organizationCalls = calls.filter((url) => /^\/organization-governance\/organizations\?/.test(url));
   assert.match(organizationCalls[organizationCalls.length - 1], /q=new%20filter/);
   assert.doesNotMatch(organizationCalls[organizationCalls.length - 1], /cursor=/);
   assert.equal(elements.ad_organizationPageLabel.textContent, '第 1 页');
+});
+
+test('organization governance renders authoritative roles and persists only server-approved member changes', async () => {
+  const governanceSource = indexSource + '\n' + appSource;
+  for (const text of [
+    '企业所有者',
+    '组织管理员',
+    '经理',
+    '成员',
+    '只读',
+    '此成员只能查看已获授权的数据，不能提交或修改任何业务内容。'
+  ]) {
+    assert.match(governanceSource, new RegExp(text));
+  }
+  assert.match(indexSource, /class=["'][^"']*platform-admin-only/);
+  assert.match(indexSource, /id=["']ad_readOnlyBanner["']/);
+
+  const elements = {
+    ad_organizationMembers: { innerHTML: '' },
+    ad_memberRole_2: { value: 'read_only' },
+    ad_memberStatus_2: { value: 'active' }
+  };
+  const calls = [];
+  let refreshes = 0;
+  const context = loadFunctions({
+    adminSelectedOrganizationId: 10,
+    document: { getElementById(id) { return elements[id] || null; } },
+    esc,
+    Promise,
+    Error,
+    JSON,
+    toast() {},
+    loadAdminOrganizationMembers() {
+      refreshes += 1;
+      return Promise.resolve([]);
+    },
+    apiFetch(url, options) {
+      calls.push({ url, options });
+      return Promise.resolve(response(200, { success: true }));
+    }
+  }, [
+    'adminGovernanceRoleLabel',
+    'effectiveAdminOrganizationMemberRole',
+    'renderAdminOrganizationMembers',
+    'saveAdminOrganizationMember'
+  ]);
+
+  context.renderAdminOrganizationMembers([{
+    user_id: 2,
+    username: 'alice<script>',
+    display_name: 'Alice & Co',
+    department: 'Sales',
+    platform_role: 'user',
+    organization_role: 'member',
+    membership_status: 'active',
+    access_mode: 'read_write',
+    effective_role: 'manager',
+    is_company_owner: false,
+    allowed_actions: { change_role: true, change_status: true, initialize_owner: false },
+    teams: [{ id: 101, code: 'sales', name: 'Sales <A>', role_code: 'team_lead', status: 'active' }]
+  }, {
+    user_id: 1,
+    username: 'derrick',
+    display_name: 'Derrick',
+    department: 'Management',
+    platform_role: 'admin',
+    organization_role: 'org_admin',
+    membership_status: 'active',
+    access_mode: 'read_write',
+    effective_role: 'company_owner',
+    is_company_owner: true,
+    allowed_actions: { change_role: false, change_status: false, initialize_owner: false },
+    teams: []
+  }]);
+
+  assert.match(elements.ad_organizationMembers.innerHTML, /Alice &amp; Co/);
+  assert.match(elements.ad_organizationMembers.innerHTML, /alice&lt;script&gt;/);
+  assert.match(elements.ad_organizationMembers.innerHTML, /Sales &lt;A&gt;/);
+  assert.match(elements.ad_organizationMembers.innerHTML, /id="ad_memberRole_2"/);
+  assert.match(elements.ad_organizationMembers.innerHTML, />经理<\/option>/);
+  assert.match(elements.ad_organizationMembers.innerHTML, /企业所有者/);
+  assert.doesNotMatch(elements.ad_organizationMembers.innerHTML, /id="ad_memberRole_1"/);
+
+  await context.saveAdminOrganizationMember(2);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, '/organization-governance/organizations/10/members/2');
+  assert.equal(calls[0].options.method, 'PATCH');
+  assert.deepEqual(JSON.parse(calls[0].options.body), {
+    access_role: 'read_only',
+    membership_status: 'active'
+  });
+  assert.equal(refreshes, 1);
+});
+
+test('failed organization governance writes keep the current member projection on screen', async () => {
+  const elements = {
+    ad_memberRole_2: { value: 'administrator' },
+    ad_memberStatus_2: { value: 'active' }
+  };
+  let refreshes = 0;
+  const messages = [];
+  const context = loadFunctions({
+    adminSelectedOrganizationId: 10,
+    document: { getElementById(id) { return elements[id] || null; } },
+    Promise,
+    Error,
+    JSON,
+    toast(message) { messages.push(message); },
+    loadAdminOrganizationMembers() {
+      refreshes += 1;
+      return Promise.resolve([]);
+    },
+    apiFetch() {
+      return Promise.resolve(response(403, {
+        error: '你只能管理本组织的成员和角色。',
+        code: 'ORGANIZATION_GOVERNANCE_FORBIDDEN'
+      }));
+    }
+  }, ['saveAdminOrganizationMember']);
+
+  await context.saveAdminOrganizationMember(2);
+  assert.equal(refreshes, 0);
+  assert.deepEqual(messages, ['你只能管理本组织的成员和角色。']);
 });
