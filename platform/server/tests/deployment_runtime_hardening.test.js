@@ -102,6 +102,15 @@ test('deployment browser stays separate from the frozen Playwright baseline', ()
   assert.equal(lock.packages['node_modules/playwright-deploy'].version, '1.61.1');
 });
 
+test('deployment browser fixture covers organization governance reads', () => {
+  const fixture = read('platform/server/tests/helpers/browser_fixture.js');
+
+  assert.match(fixture, /'\/organization-governance\/organizations'/);
+  assert.match(fixture, /'\/organization-governance\/organizations\/1\/members'/);
+  assert.match(fixture, /company_owner:\s*\{/);
+  assert.match(fixture, /effective_role:\s*user\.role === 'admin' \? 'company_owner' : 'member'/);
+});
+
 test('deployment browser smoke keeps candidate code read-only and writes only Playwright artifacts', () => {
   const deploy = read('platform/deploy_v8.ps1');
   const config = read('platform/server/tests/deployment-browser-smoke.config.js');

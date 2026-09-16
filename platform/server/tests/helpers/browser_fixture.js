@@ -640,7 +640,7 @@ function apiResponseFor(request, fixture, recorder) {
   if (method === 'POST' && apiPath.startsWith('/admin/knowledge/')) return ok({ success: true, imported: 1 });
 
   if (method === 'GET' && apiPath === '/admin/overview') return ok({ stats: fixture.admin.overview });
-  if (method === 'GET' && apiPath === '/admin/organizations') {
+  if (method === 'GET' && ['/admin/organizations', '/organization-governance/organizations'].includes(apiPath)) {
     return ok({
       organizations: [{
         id: 1,
@@ -649,13 +649,18 @@ function apiResponseFor(request, fixture, recorder) {
         created_at: FROZEN_ISO,
         team_count: 1,
         active_member_count: fixture.users.length,
-        revoked_member_count: 0
+        revoked_member_count: 0,
+        company_owner: {
+          user_id: fixture.auth.admin.user.id,
+          username: fixture.auth.admin.user.username,
+          display_name: fixture.auth.admin.user.display_name
+        }
       }],
       page: { limit: 50, next_cursor: null, has_more: false },
       request_id: 'fixture-tenant-directory'
     });
   }
-  if (method === 'GET' && apiPath === '/admin/organizations/1/members') {
+  if (method === 'GET' && ['/admin/organizations/1/members', '/organization-governance/organizations/1/members'].includes(apiPath)) {
     return ok({
       organization: { id: 1, code: 'fixture-organization', name: 'Fixture Organization', created_at: FROZEN_ISO },
       members: fixture.users.map((user) => ({
@@ -665,11 +670,19 @@ function apiResponseFor(request, fixture, recorder) {
         department: user.department || '',
         platform_role: user.role,
         is_active: user.is_active,
-        organization_role: user.role === 'admin' ? 'owner' : 'member',
+        organization_role: user.role === 'admin' ? 'org_admin' : 'member',
+        effective_role: user.role === 'admin' ? 'company_owner' : 'member',
+        access_mode: 'standard',
+        is_company_owner: user.role === 'admin',
         membership_status: 'active',
         membership_created_at: FROZEN_ISO,
         membership_revoked_at: null,
-        teams: []
+        teams: [],
+        allowed_actions: {
+          change_role: user.role !== 'admin',
+          change_status: user.role !== 'admin',
+          initialize_owner: false
+        }
       })),
       page: { limit: 50, next_cursor: null, has_more: false },
       request_id: 'fixture-tenant-directory-members'
