@@ -63,20 +63,26 @@ function createFixture() {
       (10, 2, 'org_admin', 'active'),
       (10, 3, 'org_admin', 'active'),
       (10, 4, 'member', 'active'),
-      (10, 5, 'org_admin', 'active');
+      (10, 5, 'org_admin', 'active'),
+      (20, 2, 'org_admin', 'active'),
+      (20, 4, 'member', 'active');
     INSERT INTO organization_member_policy (org_id,user_id,access_mode) VALUES
       (10,1,'read_write'),
       (10,2,'read_write'),
       (10,3,'read_write'),
       (10,4,'read_write'),
-      (10,5,'read_only');
-    INSERT INTO organization_authority (org_id,owner_user_id) VALUES (10,1);
+      (10,5,'read_only'),
+      (20,2,'read_only'),
+      (20,4,'read_write');
+    INSERT INTO organization_authority (org_id,owner_user_id) VALUES (10,1),(20,4);
     INSERT INTO team_memberships (org_id, team_id, user_id, role_code, status) VALUES
       (10, 100, 1, 'team_lead', 'active'),
       (10, 100, 2, 'team_lead', 'active'),
       (10, 101, 2, 'member', 'active'),
       (10, 100, 3, 'team_lead', 'active'),
-      (10, 101, 4, 'member', 'active');
+      (10, 101, 4, 'member', 'active'),
+      (20, 200, 2, 'team_lead', 'active'),
+      (20, 200, 4, 'member', 'active');
   `);
   const { createModuleActionPermissionService } = loadService();
   return {
@@ -90,6 +96,15 @@ function platformAdminRequest(principal) {
     principal,
     module: 'platform_administration',
     action: 'manage'
+  };
+}
+
+function crmCustomerRequest(principal, organizationId, action) {
+  return {
+    principal,
+    organizationId,
+    module: 'crm.customer',
+    action
   };
 }
 
@@ -274,9 +289,134 @@ test('projects only server-derived organization and team roles and ignores reser
       code: 'ACTION_FORBIDDEN',
       principal: {
         user_id: 2,
+        roles: ['administrator', 'manager', 'member', 'read_only']
+      }
+    });
+  } finally {
+    db.close();
+  }
+});
+
+test('evaluates CRM customer permissions inside the requested organization without role bleed', () => {
+  const { db, service } = createFixture();
+  try {
+    const writable = service.authorize(crmCustomerRequest({ id: 2, role: 'user' }, 10, 'update'));
+    assert.deepEqual(writable, {
+      allowed: true,
+      code: 'ALLOWED',
+      principal: {
+        user_id: 2,
+        organization_id: 10,
         roles: ['administrator', 'manager', 'member']
       }
     });
+
+    const readOnlyRead = service.authorize(crmCustomerRequest({ id: 2, role: 'user' }, 20, 'read'));
+    assert.deepEqual(readOnlyRead, {
+      allowed: true,
+      code: 'ALLOWED',
+      principal: {
+        user_id: 2,
+        organization_id: 20,
+        roles: ['read_only']
+      }
+    });
+
+    const readOnlyWrite = service.authorize(crmCustomerRequest({ id: 2, role: 'user' }, 20, 'update'));
+    assert.deepEqual(readOnlyWrite, {
+      allowed: false,
+      code: 'ACTION_FORBIDDEN',
+      principal: {
+        user_id: 2,
+        organization_id: 20,
+        roles: ['read_only']
+      }
+    });
+  } finally {
+    db.close();
+  }
+});
+
+test('grants CRM customer actions to live organization roles but not to an unrelated platform role', () => {
+  const { db, service } = createFixture();
+  try {
+    assert.equal(
+      service.authorize(crmCustomerRequest({ id: 4, role: 'user' }, 20, 'update')).allowed,
+      true,
+      'company owner can update customers in the owned organization'
+    );
+    assert.equal(
+      service.authorize(crmCustomerRequest({ id: 4, role: 'user' }, 10, 'create')).allowed,
+      true,
+      'writable organization member can create customers'
+    );
+    assert.deepEqual(
+      service.authorize(crmCustomerRequest({ id: 1, role: 'admin' }, 20, 'read')),
+      {
+        allowed: false,
+        code: 'ACTION_FORBIDDEN',
+        principal: {
+          user_id: 1,
+          organization_id: 20,
+          roles: ['platform_admin']
+        }
+      },
+      'platform role alone does not grant tenant business data access'
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('projects the exact allowed CRM customer actions for server-rendered controls', () => {
+  const { db, service } = createFixture();
+  try {
+    assert.deepEqual(service.projectModuleAccess({
+      principal: { id: 2, role: 'user' },
+      organizationId: 10,
+      module: 'crm.customer'
+    }), {
+      allowed: true,
+      code: 'ALLOWED',
+      principal: {
+        user_id: 2,
+        organization_id: 10,
+        roles: ['administrator', 'manager', 'member']
+      },
+      actions: ['read', 'create', 'update']
+    });
+    assert.deepEqual(service.projectModuleAccess({
+      principal: { id: 2, role: 'user' },
+      organizationId: 20,
+      module: 'crm.customer'
+    }), {
+      allowed: true,
+      code: 'ALLOWED',
+      principal: {
+        user_id: 2,
+        organization_id: 20,
+        roles: ['read_only']
+      },
+      actions: ['read']
+    });
+  } finally {
+    db.close();
+  }
+});
+
+test('fails closed when a tenant-scoped CRM permission omits or corrupts organization identity', () => {
+  const { db, service } = createFixture();
+  try {
+    for (const [organizationId, code] of [
+      [undefined, 'ORGANIZATION_SCOPE_REQUIRED'],
+      [null, 'MALFORMED_ORGANIZATION'],
+      ['10', 'MALFORMED_ORGANIZATION'],
+      [0, 'MALFORMED_ORGANIZATION']
+    ]) {
+      const request = crmCustomerRequest({ id: 2, role: 'user' }, organizationId, 'read');
+      if (organizationId === undefined) delete request.organizationId;
+      assert.deepEqual(service.authorize(request), { allowed: false, code });
+    }
   } finally {
     db.close();
   }

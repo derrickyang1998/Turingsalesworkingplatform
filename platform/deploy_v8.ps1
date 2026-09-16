@@ -34,7 +34,7 @@ $TRUSTED_SOURCE_GATE_RELATIVE_PATH = "server\scripts\trusted_production_source_g
 $TRUSTED_SOURCE_MANIFEST_RELATIVE_PATH = "server\scripts\trusted_production_source_manifest.json"
 $TRUSTED_RUNTIME_CONFIG_RELATIVE_PATH = "server\config\runtime_config.js"
 $EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "09fe1a37c361ef57b3a89f5fe8d6e09d8893fbe6227c96fc594eae35b2accd67"
-$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "f4f7a080410685bbe941ffa75cc3761f3be6599bd201eb009653b84a21868f0c"
+$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "ca5080cca28d285be5fb58d9b811e7d9300c4c8ebb4f8554d8243adae37a92a7"
 $EXPECTED_TRUSTED_RUNTIME_CONFIG_SHA256 = "76d43d3e811c6fa8daae987cc9eb2fff2dc8a8095f84b1cd309e4e214df94dcb"
 $EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256 = "44c1b5cd46b65f0bdc09107a6fc94cfd6cba6e44e9f31ad0c65c82dbef8d284b"
 $EXPECTED_TRUSTED_PARSER_VERIFIER_SHA256 = "7f9efaac02675b21e025891a400474cc7481c1adaf58c88bd8b356d5276f2eaa"
@@ -10199,6 +10199,9 @@ NODE_ENV=test TM_DISABLE_DOTENV=1 node server/scripts/verify_phase4_one_request_
 NODE_ENV=test TM_DISABLE_DOTENV=1 node --test server/tests/verify_phase4_one_request_replay.test.js
 node --test server/tests/release_replay_gate.test.js
 node --test server/tests/module_action_permission_service.test.js
+node --test \
+  server/tests/crm_phase5_http.test.js \
+  server/tests/customer_workspace_ui.test.js
 install -d -m 0700 "$TEST_ROOT/browser-smoke"
 TM_DEPLOYMENT_SMOKE_ROOT="$TEST_ROOT/browser-smoke" \
 TM_DEPLOYMENT_SMOKE_PORT=43188 node node_modules/playwright-deploy/cli.js test -c server/tests/deployment-browser-smoke.config.js

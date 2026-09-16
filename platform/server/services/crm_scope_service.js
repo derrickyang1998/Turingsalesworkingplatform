@@ -106,6 +106,21 @@ function deepFreeze(value) {
   return value;
 }
 
+function organizationOwner(db, organizationId, actorUserId) {
+  const authorityTable = db.prepare(`
+    SELECT 1 AS present
+    FROM sqlite_schema
+    WHERE type='table' AND name='organization_authority'
+    LIMIT 1
+  `).get();
+  if (!authorityTable) return false;
+  return Boolean(db.prepare(`
+    SELECT 1 AS present
+    FROM organization_authority
+    WHERE org_id=? AND owner_user_id=?
+  `).get(organizationId, actorUserId));
+}
+
 function resolveCrmAccessContext(db, options) {
   const input = snapshotPlainOptions(options, [
     'actorUserId',
@@ -184,6 +199,7 @@ function resolveCrmAccessContext(db, options) {
     mappedTeams.push({ id: teamId.value, role_code: teamRole.value });
   }
 
+  const isCompanyOwner = organizationOwner(db, organizationId.value, input.actorUserId);
   return deepFreeze({
     actor_user_id: input.actorUserId,
     organization: {
@@ -194,6 +210,7 @@ function resolveCrmAccessContext(db, options) {
     teams: mappedTeams,
     team_ids: mappedTeams.map((team) => team.id),
     is_org_admin: organizationRole.value === 'org_admin',
+    is_company_owner: isCompanyOwner,
     time_zone: TIME_ZONE
   });
 }
@@ -207,11 +224,13 @@ function snapshotContext(context) {
   const teamsProperty = dataProperty(context, 'teams');
   const teamIdsProperty = dataProperty(context, 'team_ids');
   const adminProperty = dataProperty(context, 'is_org_admin');
+  const ownerProperty = dataProperty(context, 'is_company_owner');
   const timeZoneProperty = dataProperty(context, 'time_zone');
   if (
     !actor.ok || !positiveSafeInteger(actor.value) ||
     !organizationProperty.ok || !teamsProperty.ok || !teamIdsProperty.ok ||
     !adminProperty.ok || typeof adminProperty.value !== 'boolean' ||
+    !ownerProperty.ok || typeof ownerProperty.value !== 'boolean' ||
     !timeZoneProperty.ok || timeZoneProperty.value !== TIME_ZONE
   ) {
     throw invalidScope();
@@ -239,17 +258,23 @@ function snapshotContext(context) {
     throw invalidScope();
   }
   const copiedTeamIds = [];
+  let canUseTeamScope = false;
   for (let index = 0; index < teams.length; index += 1) {
     const team = teams[index];
     if (!team || typeof team !== 'object' || Array.isArray(team) || utilTypes.isProxy(team)) {
       throw invalidScope();
     }
     const teamId = dataProperty(team, 'id');
+    const teamRole = dataProperty(team, 'role_code');
     if (
       !teamId.ok || !positiveSafeInteger(teamId.value) ||
+      !teamRole.ok || typeof teamRole.value !== 'string' ||
       teamIds[index] !== teamId.value || copiedTeamIds.includes(teamId.value)
     ) {
       throw invalidScope();
+    }
+    if (teamRole.value === 'team_lead' || teamRole.value === 'manager') {
+      canUseTeamScope = true;
     }
     copiedTeamIds.push(teamId.value);
   }
@@ -257,18 +282,22 @@ function snapshotContext(context) {
     actorUserId: actor.value,
     organizationId: organizationId.value,
     teamIds: copiedTeamIds,
-    isOrgAdmin: adminProperty.value
+    isOrgAdmin: adminProperty.value,
+    isCompanyOwner: ownerProperty.value,
+    canUseTeamScope
   };
 }
 
 function effectiveScope(context, requestedScope) {
+  const organizationWide = context.isOrgAdmin || context.isCompanyOwner;
   if (requestedScope === null || requestedScope === undefined) {
-    return context.isOrgAdmin ? 'organization' : 'my';
+    return organizationWide ? 'organization' : 'my';
   }
   if (typeof requestedScope !== 'string' || !ALLOWED_SCOPES.has(requestedScope)) {
     throw invalidScope();
   }
-  if (requestedScope === 'organization' && !context.isOrgAdmin) throw forbiddenScope();
+  if (requestedScope === 'organization' && !organizationWide) throw forbiddenScope();
+  if (requestedScope === 'team' && !organizationWide && !context.canUseTeamScope) throw forbiddenScope();
   return requestedScope;
 }
 

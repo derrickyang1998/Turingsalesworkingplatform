@@ -126,6 +126,8 @@ function makeHarness(options) {
   const settings = options || {};
   const routes = new Map();
   const calls = [];
+  const permissionCalls = [];
+  const permissionAuditEvents = [];
   const app = {};
   for (const method of ['get', 'post', 'put', 'delete']) {
     app[method] = function register(path) {
@@ -193,10 +195,29 @@ function makeHarness(options) {
       throw new Error(`CRM_SQL_BYPASS:${String(property)}`);
     }
   });
+  const moduleActionPermissionService = settings.moduleActionPermissionService || {
+    authorize(input) {
+      permissionCalls.push(input);
+      return {
+        allowed: true,
+        code: 'ALLOWED',
+        principal: {
+          user_id: input.principal.id,
+          organization_id: input.organizationId,
+          roles: ['member']
+        }
+      };
+    }
+  };
+  const crmPermissionAudit = settings.crmPermissionAudit || function crmPermissionAudit(event) {
+    permissionAuditEvents.push(event);
+  };
   const authMiddleware = function authMiddleware(_req, _res, next) { return next(); };
   require('../routes_customers')(app, db, authMiddleware, {
     crmQueryService,
-    crmCustomerService
+    crmCustomerService,
+    moduleActionPermissionService,
+    crmPermissionAudit
   });
 
   async function invoke(key, request) {
@@ -232,7 +253,7 @@ function makeHarness(options) {
     return { statusCode, payload, contentType };
   }
 
-  return { calls, invoke, routes };
+  return { calls, permissionCalls, permissionAuditEvents, invoke, routes };
 }
 
 function openDetailHttpFixture(t) {
@@ -299,9 +320,9 @@ function openDetailHttpFixture(t) {
       ) VALUES (?,?,?,?,?,?)
     `).run(orgId, userId, roleCode, status, FIXED_AT, status === 'active' ? null : FIXED_AT);
   }
-  for (const [orgId, teamId, userId, status] of [
+  for (const [orgId, teamId, userId, status, roleCode] of [
     [501, 601, 101, 'active'],
-    [501, 601, 102, 'active'],
+    [501, 601, 102, 'active', 'team_lead'],
     [501, 602, 103, 'active'],
     [501, 601, 104, 'active'],
     [501, 601, 105, 'revoked'],
@@ -311,7 +332,7 @@ function openDetailHttpFixture(t) {
       INSERT INTO team_memberships (
         org_id,team_id,user_id,role_code,status,created_at,revoked_at
       ) VALUES (?,?,?,?,?,?,?)
-    `).run(orgId, teamId, userId, 'member', status, FIXED_AT, status === 'active' ? null : FIXED_AT);
+    `).run(orgId, teamId, userId, roleCode || 'member', status, FIXED_AT, status === 'active' ? null : FIXED_AT);
   }
 
   for (const fixture of [
@@ -355,6 +376,10 @@ function lastCall(harness, method) {
 test('crm http: customer list normalizes aliases and preserves canonical metadata', async () => {
   const harness = makeHarness();
   const response = await harness.invoke('GET /api/customers', {
+    authContext: {
+      organization: { id: 501, code: 'http-org', role_code: 'org_admin' },
+      teams: [{ id: 601, role_code: 'team_lead' }]
+    },
     query: {
       scope: 'all',
       stage: 'proposal',
@@ -534,6 +559,10 @@ test('crm http: sea pool and stats use canonical query services and keep UI alia
 test('crm http: dashboard and opportunity list preserve canonical and legacy envelopes', async () => {
   const harness = makeHarness();
   const dashboard = await harness.invoke('GET /api/customers/dashboard', {
+    authContext: {
+      organization: { id: 501, code: 'http-org', role_code: 'member' },
+      teams: [{ id: 601, role_code: 'team_lead' }]
+    },
     query: { scope: 'team', status: 'active' }
   });
   assert.equal(dashboard.statusCode, 200);
@@ -841,7 +870,13 @@ test('crm http: invalid identifiers and conflicting read aliases fail before ser
 test('crm http: legacy CRM dashboard aliases share the scoped S3 dashboard adapter', async () => {
   const harness = makeHarness();
   for (const key of ['GET /api/dashboard/sales', 'GET /api/dashboard/stats']) {
-    const response = await harness.invoke(key, { query: { scope: 'team' } });
+    const response = await harness.invoke(key, {
+      authContext: {
+        organization: { id: 501, code: 'http-org', role_code: 'member' },
+        teams: [{ id: 601, role_code: 'team_lead' }]
+      },
+      query: { scope: 'team' }
+    });
     assert.equal(response.statusCode, 200);
     assert.equal(response.payload.customers.total, 3);
     assert.equal(response.payload.opportunities.open_amount, 12500);
@@ -876,4 +911,168 @@ test('crm http: legacy unscoped sales target and performance endpoints fail clos
     assert.equal(response.payload.code, 'CRM_SALES_SCOPE_UNAVAILABLE');
   }
   assert.equal(harness.calls.length, 0);
+});
+
+test('crm http: customer routes enforce the named action before dispatching business services', async () => {
+  const harness = makeHarness();
+  const cases = [
+    ['GET /api/customers', {}, 'read'],
+    ['GET /api/customers/:id/detail', { params: { id: '41' } }, 'read'],
+    ['POST /api/customers', { body: { brand_name: 'Acme', team_id: 601 } }, 'create'],
+    ['POST /api/leads/:id/convert', { params: { id: '31' }, body: { team_id: 601 } }, 'create'],
+    ['PUT /api/customers/:id', { params: { id: '41' }, body: { brand_name: 'Acme Next' } }, 'update'],
+    ['POST /api/customers/:id/archive-result', {
+      params: { id: '41' },
+      body: { artifact_type: 'note', title: 'Follow-up', content: 'Bounded note' }
+    }, 'update'],
+    ['POST /api/customers/:id/claim', { params: { id: '41' } }, 'update'],
+    ['POST /api/customers/:id/return', {
+      params: { id: '41' },
+      body: { reason_code: 'capacity_rebalance' }
+    }, 'update']
+  ];
+
+  for (const [route, request, action] of cases) {
+    harness.permissionCalls.length = 0;
+    const response = await harness.invoke(route, request);
+    assert.equal(response.statusCode, 200, route);
+    assert.deepEqual(harness.permissionCalls, [{
+      principal: { id: 101, role: 'user' },
+      organizationId: 501,
+      module: 'crm.customer',
+      action
+    }], route);
+  }
+});
+
+test('crm http: denied customer permission is audited and stops before request validation or service dispatch', async () => {
+  const permissionCalls = [];
+  const auditEvents = [];
+  const harness = makeHarness({
+    moduleActionPermissionService: {
+      authorize(input) {
+        permissionCalls.push(input);
+        return {
+          allowed: false,
+          code: 'ACTION_FORBIDDEN',
+          principal: {
+            user_id: input.principal.id,
+            organization_id: input.organizationId,
+            roles: ['read_only']
+          }
+        };
+      }
+    },
+    crmPermissionAudit(event) {
+      auditEvents.push(event);
+    }
+  });
+
+  const response = await harness.invoke('PUT /api/customers/:id', {
+    params: { id: 'not-a-customer-id' },
+    body: { brand_name: 'must not be parsed' },
+    requestId: 'crm-permission-denied-request'
+  });
+
+  assert.equal(response.statusCode, 403);
+  assert.equal(response.contentType, 'application/problem+json');
+  assert.equal(response.payload.code, 'CRM_PERMISSION_FORBIDDEN');
+  assert.equal(response.payload.request_id, 'crm-permission-denied-request');
+  assert.equal(harness.calls.length, 0);
+  assert.equal(permissionCalls.length, 1);
+  assert.deepEqual(auditEvents, [{
+    actor_user_id: 101,
+    organization_id: 501,
+    permission: 'crm.customer.update',
+    outcome: 'denied',
+    reason_code: 'ACTION_FORBIDDEN',
+    request_id: 'crm-permission-denied-request',
+    target_type: 'customer',
+    target_id: null,
+    ip_address: '127.0.0.1'
+  }]);
+});
+
+test('crm http: organization-wide reads record bounded audit evidence without search content', async () => {
+  const auditEvents = [];
+  const harness = makeHarness({
+    moduleActionPermissionService: {
+      authorize(input) {
+        return {
+          allowed: true,
+          code: 'ALLOWED',
+          principal: {
+            user_id: input.principal.id,
+            organization_id: input.organizationId,
+            roles: ['administrator', 'member']
+          }
+        };
+      }
+    },
+    crmPermissionAudit(event) {
+      auditEvents.push(event);
+    }
+  });
+
+  const response = await harness.invoke('GET /api/customers', {
+    authContext: {
+      organization: { id: 501, code: 'http-org', role_code: 'org_admin' },
+      teams: [{ id: 601, role_code: 'team_lead' }]
+    },
+    query: { scope: 'all', search: 'private customer phrase' },
+    requestId: 'crm-organization-read-request'
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(auditEvents, [{
+    actor_user_id: 101,
+    organization_id: 501,
+    permission: 'crm.customer.read',
+    outcome: 'allowed',
+    reason_code: 'ALLOWED',
+    request_id: 'crm-organization-read-request',
+    target_type: 'customer',
+    target_id: null,
+    ip_address: '127.0.0.1',
+    scope: 'organization'
+  }]);
+  assert.doesNotMatch(JSON.stringify(auditEvents), /private customer phrase/);
+});
+
+test('crm http: members cannot widen customer reads to team or organization scope', async () => {
+  const auditEvents = [];
+  const harness = makeHarness({
+    crmPermissionAudit(event) {
+      auditEvents.push(event);
+    }
+  });
+
+  for (const scope of ['team', 'all']) {
+    const response = await harness.invoke('GET /api/customers', {
+      query: { scope },
+      requestId: `crm-scope-${scope}-request`
+    });
+    assert.equal(response.statusCode, 403, scope);
+    assert.equal(response.payload.code, 'CRM_SCOPE_FORBIDDEN', scope);
+  }
+  assert.equal(harness.calls.length, 0);
+  assert.deepEqual(auditEvents.map((event) => ({
+    outcome: event.outcome,
+    reason_code: event.reason_code,
+    scope: event.scope
+  })), [
+    { outcome: 'denied', reason_code: 'CRM_SCOPE_FORBIDDEN', scope: 'team' },
+    { outcome: 'denied', reason_code: 'CRM_SCOPE_FORBIDDEN', scope: 'organization' }
+  ]);
+
+  harness.calls.length = 0;
+  const manager = await harness.invoke('GET /api/customers', {
+    authContext: {
+      organization: { id: 501, code: 'http-org', role_code: 'member' },
+      teams: [{ id: 601, role_code: 'team_lead' }]
+    },
+    query: { scope: 'team' }
+  });
+  assert.equal(manager.statusCode, 200);
+  assert.equal(harness.calls.filter((call) => call.method === 'listCustomers').length, 1);
 });

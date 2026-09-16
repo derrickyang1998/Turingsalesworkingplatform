@@ -672,7 +672,7 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
   </div>
   <div class="tm-filter-actions">
     <button class="btn btn-sm" onclick="switchPage('m0')">客户看板</button>
-    <button class="btn btn-primary btn-sm" onclick="openAddCustomer()">+ 新增客户</button>
+    <button id="crmCreateCustomerHeroButton" class="btn btn-primary btn-sm" data-crm-action="create" onclick="openAddCustomer()">+ 新增客户</button>
   </div>
 </div>
 
@@ -688,8 +688,8 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
   <div class="tm-filter-top">
      <div class="tm-scope-tabs" id="customerScopeTabs">
        <button class="btn btn-sm cust-scope-btn active" data-scope="my" onclick="setCustomerScope('my')">我的客户</button>
-       <button class="btn btn-sm cust-scope-btn" data-scope="team" onclick="setCustomerScope('team')">团队客户</button>
-       <button class="btn btn-sm cust-scope-btn admin-only" data-scope="all" onclick="setCustomerScope('all')">全部客户</button>
+       <button id="customerScopeTeam" class="btn btn-sm cust-scope-btn" data-scope="team" onclick="setCustomerScope('team')">团队客户</button>
+       <button id="customerScopeOrganization" class="btn btn-sm cust-scope-btn" data-scope="all" onclick="setCustomerScope('all')">全部客户</button>
      </div>
      <label class="tm-team-selector" for="crmTeamSelect">当前团队
        <select id="crmTeamSelect" onchange="selectCrmTeam(this.value)" aria-label="选择当前 CRM 团队">
@@ -697,7 +697,7 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
        </select>
      </label>
     <div class="tm-filter-actions">
-      <button class="btn btn-primary btn-sm" onclick="openAddCustomer()">+ 新增客户</button>
+      <button id="crmCreateCustomerButton" class="btn btn-primary btn-sm" data-crm-action="create" onclick="openAddCustomer()">+ 新增客户</button>
       <button class="btn btn-sm" onclick="switchCrmView('seapool')">公海池</button>
     </div>
   </div>

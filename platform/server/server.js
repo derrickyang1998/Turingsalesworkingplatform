@@ -61,9 +61,24 @@ const organizationAccess = require('./services/organization_access_service');
 const {
   createModuleActionPermissionService,
   PLATFORM_ADMINISTRATION_MODULE,
-  PLATFORM_ADMINISTRATION_MANAGE_ACTION
+  PLATFORM_ADMINISTRATION_MANAGE_ACTION,
+  CRM_CUSTOMER_MODULE
 } = require('./services/module_action_permission_service');
 const moduleActionPermissionService = createModuleActionPermissionService(db);
+
+function projectModulePermissions(principal, organizationId) {
+  const crmCustomerAccess = moduleActionPermissionService.projectModuleAccess({
+    principal,
+    organizationId,
+    module: CRM_CUSTOMER_MODULE
+  });
+  if (!crmCustomerAccess.allowed) {
+    throw new Error('Module permissions unavailable');
+  }
+  return {
+    [CRM_CUSTOMER_MODULE]: crmCustomerAccess.actions.slice()
+  };
+}
 const {
   createProductionSystemdPropertyReader,
   productionSelfTestEnvironment,
@@ -534,6 +549,7 @@ function authenticateRequest(req) {
     });
     user.access_roles = accessProjection.access_roles;
     user.organization_access = accessProjection.organization_access;
+    user.module_permissions = projectModulePermissions(user, scope.authContext.organization.id);
     const authContext = {
       organization: {
         ...scope.authContext.organization,
@@ -1242,6 +1258,7 @@ app.post('/api/auth/login', (req, res) => {
     },
     teams: organizationScope.authContext.teams
   };
+  const modulePermissions = projectModulePermissions(user, organizationScope.authContext.organization.id);
 
   // Create session
   const token = jwt.sign({ userId: user.id, role: user.role, jti: crypto.randomUUID() }, JWT_SECRET, { expiresIn: TOKEN_EXPIRY });
@@ -1262,7 +1279,8 @@ app.post('/api/auth/login', (req, res) => {
       department: user.department,
       api_quota: user.api_quota,
       access_roles: accessProjection.access_roles,
-      organization_access: accessProjection.organization_access
+      organization_access: accessProjection.organization_access,
+      module_permissions: modulePermissions
     },
     auth_context: projectedAuthContext
   });
@@ -1720,7 +1738,7 @@ app.post('/api/proposal/generate-ppt', authMiddleware, (req, res) => {
 // ===== INFLUENCER & COLLABORATION ROUTES =====
 require('./routes')(app, db, authMiddleware, { campaignCollaborationService });
 require('./routes_feishu')(app, { db, authMiddleware, adminOnly });
-require('./routes_customers')(app, db, authMiddleware);
+require('./routes_customers')(app, db, authMiddleware, { moduleActionPermissionService });
 registerAdminTenantDirectoryRoutes(app, db, { authMiddleware, adminOnly });
 registerOrganizationGovernanceRoutes(app, db, {
   authMiddleware,

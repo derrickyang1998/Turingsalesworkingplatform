@@ -693,7 +693,11 @@ function getCustomerDetail(db, rawOptions) {
       if (Object.hasOwn(options, key)) queryOptions[key] = options[key];
     }
     const state = prepareQueryState(db, queryOptions, { decodeCursor: false });
-    const detailScopes = state.context.is_org_admin ? ['organization'] : ['team', 'my'];
+    const organizationWide = state.context.is_org_admin || state.context.is_company_owner;
+    const teamWide = state.context.teams.some((team) => (
+      team.role_code === 'team_lead' || team.role_code === 'manager'
+    ));
+    const detailScopes = organizationWide ? ['organization'] : (teamWide ? ['team', 'my'] : ['my']);
     let scope = null;
     let customerRow = null;
     for (const candidateScope of detailScopes) {
@@ -781,7 +785,11 @@ function getOpportunityDetail(db, rawOptions) {
       if (Object.hasOwn(options, key)) queryOptions[key] = options[key];
     }
     const state = prepareQueryState(db, queryOptions, { decodeCursor: false });
-    const detailScopes = state.context.is_org_admin ? ['organization'] : ['team', 'my'];
+    const organizationWide = state.context.is_org_admin || state.context.is_company_owner;
+    const teamWide = state.context.teams.some((team) => (
+      team.role_code === 'team_lead' || team.role_code === 'manager'
+    ));
+    const detailScopes = organizationWide ? ['organization'] : (teamWide ? ['team', 'my'] : ['my']);
     let scope = null;
     let opportunityRow = null;
     for (const candidateScope of detailScopes) {

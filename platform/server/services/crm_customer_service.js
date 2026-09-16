@@ -2459,6 +2459,23 @@ function mapFailure(error) {
   return mutationError('CRM_MUTATION_FAILED');
 }
 
+function currentWritePolicyDecision(db, context, input, operation) {
+  const policyTable = db.prepare(`
+    SELECT 1 AS present
+    FROM sqlite_schema
+    WHERE type='table' AND name='organization_member_policy'
+    LIMIT 1
+  `).get();
+  if (!policyTable) return null;
+  const policy = db.prepare(`
+    SELECT access_mode
+    FROM organization_member_policy
+    WHERE org_id=? AND user_id=?
+  `).get(context.organization.id, context.actor_user_id);
+  if (policy && policy.access_mode === 'read_write') return null;
+  return forbiddenDecision(db, context, input, operationLabel(operation, input.command));
+}
+
 function runCommand(db, operation, options) {
   const input = snapshotCall(operation, options);
   let outcome;
@@ -2471,6 +2488,8 @@ function runCommand(db, operation, options) {
         if (isScopeFailure(error)) return notFoundDecision();
         throw error;
       }
+      const policyDenied = currentWritePolicyDecision(db, context, input, operation);
+      if (policyDenied) return policyDenied;
       return authorizeCustomerCommand(db, context, input, operation);
     });
     outcome = transaction.immediate();

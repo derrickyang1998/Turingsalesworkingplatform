@@ -8,6 +8,32 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
   const businessKnowledge = require('./services/business_knowledge_service');
   const crmAccess = require('./services/crm_access_service');
   const { CUSTOMER_LIFECYCLE_REGISTRY } = require('./services/crm_contract');
+  const {
+    createModuleActionPermissionService,
+    CRM_CUSTOMER_MODULE,
+    CRM_CUSTOMER_READ_ACTION,
+    CRM_CUSTOMER_CREATE_ACTION,
+    CRM_CUSTOMER_UPDATE_ACTION
+  } = require('./services/module_action_permission_service');
+  const moduleActionPermissionService = options.moduleActionPermissionService ||
+    createModuleActionPermissionService(db);
+  if (!moduleActionPermissionService || typeof moduleActionPermissionService.authorize !== 'function') {
+    throw new TypeError('module action permission service must expose authorize');
+  }
+  const crmPermissionAudit = options.crmPermissionAudit || function writeCrmPermissionAudit(event) {
+    const details = { ...event };
+    delete details.ip_address;
+    db.prepare(`
+      INSERT INTO activity_log (user_id,action,module,details,ip_address)
+      VALUES (?,?,?,?,?)
+    `).run(
+      event.actor_user_id,
+      event.outcome === 'allowed' ? 'crm_permission_allowed' : 'crm_permission_denied',
+      'crm_permission',
+      JSON.stringify(details),
+      event.ip_address || null
+    );
+  };
 
   const SAFE_IDENTIFIER = /^[A-Za-z0-9._:/-]+$/;
   const CUSTOMER_PROFILE_FIELDS = Object.freeze([
@@ -85,6 +111,8 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
     'CRM_SCOPE_INVALID',
     'CRM_SCOPE_FORBIDDEN',
     'CRM_SCOPE_NOT_FOUND',
+    'CRM_PERMISSION_FORBIDDEN',
+    'CRM_PERMISSION_AUDIT_FAILED',
     'CRM_MUTATION_INVALID',
     'CRM_CUSTOMER_NOT_FOUND',
     'CRM_CHILD_NOT_FOUND',
@@ -109,6 +137,8 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
     CRM_SCOPE_INVALID: 'CRM organization context is not valid',
     CRM_SCOPE_FORBIDDEN: 'CRM scope is not allowed',
     CRM_SCOPE_NOT_FOUND: 'CRM organization context was not found',
+    CRM_PERMISSION_FORBIDDEN: 'CRM customer permission is not allowed',
+    CRM_PERMISSION_AUDIT_FAILED: 'CRM permission audit could not be recorded',
     CRM_MUTATION_INVALID: 'CRM mutation command is not valid',
     CRM_CUSTOMER_NOT_FOUND: 'CRM customer was not found',
     CRM_CHILD_NOT_FOUND: 'CRM child record was not found',
@@ -379,14 +409,15 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
         code === 'CRM_FILTER_INVALID' || code === 'CRM_CURSOR_INVALID' ||
         code === 'CRM_IDENTITY_INVALID' || code === 'CRM_SCOPE_INVALID' ||
         code === 'CRM_MUTATION_INVALID') return 400;
-    if (code === 'CRM_SCOPE_FORBIDDEN' || code === 'CRM_CUSTOMER_FORBIDDEN') return 403;
+    if (code === 'CRM_SCOPE_FORBIDDEN' || code === 'CRM_CUSTOMER_FORBIDDEN' ||
+        code === 'CRM_PERMISSION_FORBIDDEN') return 403;
     if (code === 'CRM_SCOPE_NOT_FOUND' || code === 'CRM_CUSTOMER_NOT_FOUND' ||
         code === 'CRM_CHILD_NOT_FOUND') return 404;
     if (code === 'CRM_CUSTOMER_DUPLICATE' || code === 'CRM_CUSTOMER_CONFLICT' ||
         code === 'CRM_PUBLIC_POOL_UNAVAILABLE' ||
         code === 'CRM_CUSTODY_CONFLICT' || code === 'CRM_TRANSITION_INVALID' ||
         code === 'CRM_HARD_DELETE_UNAVAILABLE' || code === 'CRM_SALES_SCOPE_UNAVAILABLE') return 409;
-    if (code === 'CRM_STORAGE_BUSY') return 503;
+    if (code === 'CRM_STORAGE_BUSY' || code === 'CRM_PERMISSION_AUDIT_FAILED') return 503;
     if (code === 'CRM_MUTATION_FAILED' || code === 'CRM_QUERY_FAILED') return 500;
     return 500;
   }
@@ -448,6 +479,123 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
       }
     };
   }
+
+  function safePermissionTargetId(req, parameterName) {
+    if (!parameterName || !req.params) return null;
+    const value = req.params[parameterName];
+    if (Number.isSafeInteger(value) && value > 0) return value;
+    if (typeof value !== 'string' || !/^[1-9]\d*$/.test(value)) return null;
+    const parsed = Number(value);
+    return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+  }
+
+  function normalizedRequestedCustomerScope(req) {
+    const requested = req.query && req.query.scope;
+    if (requested === 'all') return 'organization';
+    if (requested === 'organization' || requested === 'team' || requested === 'my' || requested === 'public_pool') {
+      return requested;
+    }
+    if (requested !== undefined && requested !== null && requested !== '') return null;
+    const authContext = req.authContext && typeof req.authContext === 'object' ? req.authContext : {};
+    const organization = authContext.organization && typeof authContext.organization === 'object'
+      ? authContext.organization
+      : {};
+    return organization.is_company_owner === true || organization.role_code === 'org_admin'
+      ? 'organization'
+      : 'my';
+  }
+
+  function canUseRequestedCustomerScope(req, scope) {
+    if (scope === null || scope === 'my' || scope === 'public_pool') return true;
+    const authContext = req.authContext && typeof req.authContext === 'object' ? req.authContext : {};
+    const organization = authContext.organization && typeof authContext.organization === 'object'
+      ? authContext.organization
+      : {};
+    const organizationWide = organization.is_company_owner === true || organization.role_code === 'org_admin';
+    if (scope === 'organization') return organizationWide;
+    if (scope !== 'team') return false;
+    if (organizationWide) return true;
+    const teams = Array.isArray(authContext.teams) ? authContext.teams : [];
+    return teams.some((team) => team && (
+      team.role_code === 'team_lead' || team.role_code === 'manager'
+    ));
+  }
+
+  function permissionAuditEvent(req, action, decision, options) {
+    const context = serviceContext(req);
+    const settings = options || {};
+    const event = {
+      actor_user_id: context.actorUserId,
+      organization_id: context.organizationId,
+      permission: `${CRM_CUSTOMER_MODULE}.${action}`,
+      outcome: decision.allowed ? 'allowed' : 'denied',
+      reason_code: decision.code,
+      request_id: context.requestId,
+      target_type: settings.targetType || 'customer',
+      target_id: safePermissionTargetId(req, settings.targetParam),
+      ip_address: req.ip || null
+    };
+    if (action === CRM_CUSTOMER_READ_ACTION) {
+      const scope = normalizedRequestedCustomerScope(req);
+      if (scope === 'organization' || scope === 'team') event.scope = scope;
+    }
+    return event;
+  }
+
+  function shouldAuditAllowedPermission(action, event) {
+    return action === CRM_CUSTOMER_READ_ACTION && event.scope === 'organization';
+  }
+
+  function requireCrmCustomerPermission(action, settings) {
+    return function crmCustomerPermissionMiddleware(req, res, next) {
+      const context = serviceContext(req);
+      const decision = moduleActionPermissionService.authorize({
+        principal: req.user,
+        organizationId: context.organizationId,
+        module: CRM_CUSTOMER_MODULE,
+        action
+      });
+      let effectiveDecision = decision;
+      if (action === CRM_CUSTOMER_READ_ACTION && decision.allowed) {
+        const scope = normalizedRequestedCustomerScope(req);
+        if (!canUseRequestedCustomerScope(req, scope)) {
+          effectiveDecision = {
+            allowed: false,
+            code: 'CRM_SCOPE_FORBIDDEN',
+            principal: decision.principal
+          };
+        }
+      }
+      const event = permissionAuditEvent(req, action, effectiveDecision, settings);
+      try {
+        if (!effectiveDecision.allowed || shouldAuditAllowedPermission(action, event)) {
+          crmPermissionAudit(event);
+        }
+      } catch {
+        return sendProblem(res, req, new CrmHttpError('CRM_PERMISSION_AUDIT_FAILED', 503));
+      }
+      if (!effectiveDecision.allowed) {
+        if (effectiveDecision.code === 'CRM_SCOPE_FORBIDDEN') {
+          return sendProblem(res, req, new CrmHttpError('CRM_SCOPE_FORBIDDEN', 403));
+        }
+        return sendProblem(res, req, new CrmHttpError('CRM_PERMISSION_FORBIDDEN', 403));
+      }
+      req.crmCustomerPermission = effectiveDecision;
+      return next();
+    };
+  }
+
+  const requireCrmCustomerRead = requireCrmCustomerPermission(CRM_CUSTOMER_READ_ACTION, {
+    targetType: 'customer',
+    targetParam: 'id'
+  });
+  const requireCrmCustomerCreate = requireCrmCustomerPermission(CRM_CUSTOMER_CREATE_ACTION, {
+    targetType: 'customer'
+  });
+  const requireCrmCustomerUpdate = requireCrmCustomerPermission(CRM_CUSTOMER_UPDATE_ACTION, {
+    targetType: 'customer',
+    targetParam: 'id'
+  });
 
   function callMutation(serviceMethod, req, command) {
     return crmCustomerService[serviceMethod](db, {
@@ -664,7 +812,7 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
     }
   });
 
-  app.post('/api/leads/:id/convert', authMiddleware, crmHandler((req, res) => {
+  app.post('/api/leads/:id/convert', authMiddleware, requireCrmCustomerCreate, crmHandler((req, res) => {
     const body = plainRecord(req.body || {});
     const requestedOwner = ownValue(body, 'assigned_to');
     const requestedTeam = ownValue(body, 'team_id');
@@ -681,24 +829,24 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
     return res.json(callMutation('createOrUpdateCustomer', req, command));
   }));
 
-  app.get('/api/customers', authMiddleware, crmHandler((req, res) => {
+  app.get('/api/customers', authMiddleware, requireCrmCustomerRead, crmHandler((req, res) => {
     const result = callQuery('listCustomers', req, readCanonicalFilter(req.query, 'customer'));
     return res.json({ ...result, customers: result.items, stages: STAGE_LABELS });
   }));
 
-  app.get('/api/customers/stats', authMiddleware, crmHandler((req, res) => {
+  app.get('/api/customers/stats', authMiddleware, requireCrmCustomerRead, crmHandler((req, res) => {
     return res.json(statsResponse(req, readCanonicalFilter(req.query, 'customer')));
   }));
 
-  app.get('/api/customers/:id/detail', authMiddleware, crmHandler((req, res) => {
+  app.get('/api/customers/:id/detail', authMiddleware, requireCrmCustomerRead, crmHandler((req, res) => {
     return res.json(callCustomerDetail(req));
   }));
 
-  app.post('/api/customers', authMiddleware, crmHandler((req, res) => {
+  app.post('/api/customers', authMiddleware, requireCrmCustomerCreate, crmHandler((req, res) => {
     return res.json(callMutation('createOrUpdateCustomer', req, customerCreateCommand(req)));
   }));
 
-  app.post('/api/customers/:id/archive-result', authMiddleware, crmHandler((req, res) => {
+  app.post('/api/customers/:id/archive-result', authMiddleware, requireCrmCustomerUpdate, crmHandler((req, res) => {
     const body = plainRecord(req.body || {});
     const command = {
       customerId: positiveInteger(req.params.id),
@@ -707,7 +855,7 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
     return res.json(callMutation('archiveCustomerResult', req, command));
   }));
 
-  app.put('/api/customers/:id', authMiddleware, crmHandler((req, res) => {
+  app.put('/api/customers/:id', authMiddleware, requireCrmCustomerUpdate, crmHandler((req, res) => {
     return res.json(callMutation('createOrUpdateCustomer', req, customerUpdateCommand(req)));
   }));
 
@@ -715,7 +863,7 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
     return sendProblem(res, req, new CrmHttpError('CRM_HARD_DELETE_UNAVAILABLE', 409));
   });
 
-  app.post('/api/customers/:id/assign', authMiddleware, crmHandler((req, res) => {
+  app.post('/api/customers/:id/assign', authMiddleware, requireCrmCustomerUpdate, crmHandler((req, res) => {
     const body = plainRecord(req.body || {});
     const action = ownValue(body, 'action');
     if (action.present && action.value === 'claim') {
@@ -743,11 +891,11 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
     return res.json(callMutation('mutateCustomerCustody', req, command));
   }));
 
-  app.post('/api/customers/:id/return-pool', authMiddleware, crmHandler((req, res) => {
+  app.post('/api/customers/:id/return-pool', authMiddleware, requireCrmCustomerUpdate, crmHandler((req, res) => {
     return res.json(callMutation('mutateCustomerCustody', req, releaseCommand(req)));
   }));
 
-  app.post('/api/customers/:id/return', authMiddleware, crmHandler((req, res) => {
+  app.post('/api/customers/:id/return', authMiddleware, requireCrmCustomerUpdate, crmHandler((req, res) => {
     return res.json(callMutation('mutateCustomerCustody', req, releaseCommand(req)));
   }));
 
@@ -781,7 +929,7 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
   app.post('/api/sales-targets', authMiddleware, unavailableSalesScope);
   app.get('/api/sales-performance', authMiddleware, unavailableSalesScope);
 
-  app.get('/api/customers/sea-pool', authMiddleware, crmHandler((req, res) => {
+  app.get('/api/customers/sea-pool', authMiddleware, requireCrmCustomerRead, crmHandler((req, res) => {
     const filter = readCanonicalFilter(req.query, 'customer');
     if (Object.prototype.hasOwnProperty.call(filter, 'scope') && filter.scope !== 'public_pool') {
       throw invalidHttp();
@@ -791,7 +939,7 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
     return res.json({ ...result, customers: result.items });
   }));
 
-  app.post('/api/customers/:id/claim', authMiddleware, crmHandler((req, res) => {
+  app.post('/api/customers/:id/claim', authMiddleware, requireCrmCustomerUpdate, crmHandler((req, res) => {
     const body = plainRecord(req.body || {});
     const requestedTeam = ownValue(body, 'team_id');
     const command = {
@@ -802,7 +950,7 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
     return res.json(callMutation('mutateCustomerCustody', req, command));
   }));
 
-  app.get('/api/customers/dashboard', authMiddleware, crmHandler((req, res) => {
+  app.get('/api/customers/dashboard', authMiddleware, requireCrmCustomerRead, crmHandler((req, res) => {
     const result = callQuery('getCrmDashboard', req, readCanonicalFilter(req.query, 'customer'));
     return res.json({ ...result, stages: STAGE_LABELS });
   }));
@@ -812,8 +960,8 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
     return res.json(result);
   }
 
-  app.get('/api/dashboard/sales', authMiddleware, crmHandler(legacyDashboardAlias));
-  app.get('/api/dashboard/stats', authMiddleware, crmHandler(legacyDashboardAlias));
+  app.get('/api/dashboard/sales', authMiddleware, requireCrmCustomerRead, crmHandler(legacyDashboardAlias));
+  app.get('/api/dashboard/stats', authMiddleware, requireCrmCustomerRead, crmHandler(legacyDashboardAlias));
 
   app.post('/api/customers/:customerId/contacts', authMiddleware, crmHandler((req, res) => {
     const body = plainRecord(req.body || {});

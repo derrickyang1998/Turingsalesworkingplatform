@@ -94,6 +94,60 @@ function currentUserIsReadOnly() {
     !!(CURRENT_USER && CURRENT_USER.access_profile && CURRENT_USER.access_profile.read_only === true);
 }
 
+function currentUserHasCrmPermission(action) {
+  var permissions = CURRENT_USER && CURRENT_USER.module_permissions;
+  var actions = permissions && Array.isArray(permissions['crm.customer'])
+    ? permissions['crm.customer']
+    : [];
+  return actions.indexOf(action) !== -1;
+}
+
+function currentUserCanUseCrmScope(scope) {
+  if (!currentUserHasCrmPermission('read')) return false;
+  if (scope === 'my' || scope === 'public_pool') return true;
+  var organization = CURRENT_AUTH_CONTEXT && CURRENT_AUTH_CONTEXT.organization;
+  var organizationWide = !!(organization && (
+    organization.is_company_owner === true ||
+    organization.role_code === 'org_admin'
+  ));
+  if (scope === 'organization') return organizationWide;
+  if (scope !== 'team') return false;
+  if (organizationWide) return true;
+  var teams = CURRENT_AUTH_CONTEXT && Array.isArray(CURRENT_AUTH_CONTEXT.teams)
+    ? CURRENT_AUTH_CONTEXT.teams
+    : [];
+  return teams.some(function(team) {
+    return team.role_code === 'team_lead' || team.role_code === 'manager';
+  });
+}
+
+function rejectCrmBrowserAction(message) {
+  if (typeof toast === 'function') toast(message || '当前账号没有此客户操作权限', 'error');
+  return false;
+}
+
+function applyCrmPermissionPresentation() {
+  var canCreate = currentUserHasCrmPermission('create');
+  var canUseTeamScope = currentUserCanUseCrmScope('team');
+  var canUseOrganizationScope = currentUserCanUseCrmScope('organization');
+  document.querySelectorAll('[data-crm-action="create"]').forEach(function(element) {
+    element.hidden = !canCreate;
+  });
+  var teamScope = document.getElementById('customerScopeTeam');
+  if (teamScope) teamScope.hidden = !canUseTeamScope;
+  var organizationScope = document.getElementById('customerScopeOrganization');
+  if (organizationScope) organizationScope.hidden = !canUseOrganizationScope;
+  var teamSelector = document.querySelector('#page-m0-detail .tm-team-selector');
+  if (teamSelector) teamSelector.hidden = !(canCreate || canUseTeamScope);
+  if (
+    (curCustomerScope === 'all' && !canUseOrganizationScope) ||
+    (curCustomerScope === 'team' && !canUseTeamScope)
+  ) {
+    curCustomerScope = 'my';
+  }
+  updateCustomerScopeTabs();
+}
+
 function applyCurrentUserRolePresentation() {
   var platformAdmin = currentUserIsPlatformAdministrator();
   var governanceAccess = currentUserHasGovernanceAccess();
@@ -110,6 +164,7 @@ function applyCurrentUserRolePresentation() {
   if (banner) banner.hidden = !currentUserIsReadOnly();
   var heading = document.getElementById('adminPageTitle');
   if (heading) heading.textContent = platformAdmin ? '管理控制室' : '组织与成员';
+  applyCrmPermissionPresentation();
 }
 
 function syncCrmTeamSelector() {
@@ -173,7 +228,7 @@ async function doLogin() {
     document.getElementById('authOverlay').style.display = 'none';
     document.getElementById('app').style.display = 'flex';
     applyCurrentUserRolePresentation();
-    curCustomerScope = CURRENT_USER.role === 'admin' ? 'all' : 'my';
+    curCustomerScope = currentUserCanUseCrmScope('organization') ? 'all' : 'my';
     updateCustomerScopeTabs();
     try { await initApp(); if (window.TMNavigation) window.TMNavigation.restore(CURRENT_USER); } catch(e2) { console.error(e2); }
   } catch (e) { showLoginError('Network error: ' + e.message) }
@@ -1183,6 +1238,11 @@ function filterCustomers(stage) {
 }
 
 function setCustomerScope(scope) {
+  var capability = scope === 'all' ? 'organization' : scope;
+  if (!currentUserCanUseCrmScope(capability)) {
+    rejectCrmBrowserAction('当前账号没有此客户范围的查看权限');
+    return;
+  }
   curCustomerScope = scope || 'my';
   updateCustomerScopeTabs();
   if (curCrmView !== 'pipeline') switchCrmView('pipeline');
@@ -1198,16 +1258,19 @@ function updateCustomerScopeTabs() {
 function renderCustomerTable(data) {
   var tbody = document.getElementById('custTableBody');
   if (!data || !data.length) { tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:30px;opacity:.5">暂无客户数据，点击"新增客户"开始</td></tr>'; return; }
+  var canUpdate = currentUserHasCrmPermission('update');
   var h = '';
   data.forEach(function(c) {
     h += '<tr style="cursor:pointer" onclick="openCustomerDetail(' + c.id + ')"><td><strong>' + esc(c.brand_name || '-') + '</strong></td>';
     h += '<td>' + esc(c.company_name || '-') + '</td>';
     h += '<td>' + esc(c.industry || '-') + '</td>';
     h += '<td>';
-    if (Object.prototype.hasOwnProperty.call(CUST_STAGES, c.stage)) {
+    if (Object.prototype.hasOwnProperty.call(CUST_STAGES, c.stage) && canUpdate) {
       h += '<select onclick="event.stopPropagation()" data-previous-value="' + esc(c.stage || 'lead') + '" onchange="changeCustomerStage(' + c.id + ', this.value, this)" style="width:auto;font-size:11px">';
       Object.keys(CUST_STAGES).forEach(function(k) { h += '<option value="' + k + '"' + (c.stage === k ? ' selected' : '') + '>' + CUST_STAGES[k] + '</option>'; });
       h += '</select>';
+    } else if (Object.prototype.hasOwnProperty.call(CUST_STAGES, c.stage)) {
+      h += '<span class="legacy-stage-readonly" title="当前账号仅可查看">' + esc(CUST_STAGES[c.stage]) + '</span>';
     } else {
       h += '<span class="legacy-stage-readonly" title="历史阶段只读">' + esc(c.stage || '历史阶段') + '</span>';
     }
@@ -1216,12 +1279,17 @@ function renderCustomerTable(data) {
     h += '<td style="font-size:11px">' + (c.opportunity_value ? '¥' + Number(c.opportunity_value).toLocaleString() : esc(c.budget_estimate || '-')) + '</td>';
     h += '<td style="font-size:10px;opacity:.6">' + esc(c.assigned_to_name || c.created_by_name || c.source || '-') + '</td>';
     h += '<td style="font-size:10px;opacity:.6">' + (c.updated_at ? c.updated_at.substring(0, 10) : '-') + '</td>';
-    h += '<td><button class="btn btn-sm" onclick="event.stopPropagation();openCustomerDetail(' + c.id + ')">详情</button> <button class="btn btn-sm" onclick="event.stopPropagation();editCustomer(' + c.id + ')">编辑</button></td></tr>';
+    h += '<td><button class="btn btn-sm" onclick="event.stopPropagation();openCustomerDetail(' + c.id + ')">详情</button>';
+    h += canUpdate
+      ? ' <button class="btn btn-sm" onclick="event.stopPropagation();editCustomer(' + c.id + ')">编辑</button>'
+      : ' <span class="crm-control-unavailable" title="当前账号仅可查看">只读</span>';
+    h += '</td></tr>';
   });
   tbody.innerHTML = h;
 }
 
 function showAddCustomer() {
+  if (!currentUserHasCrmPermission('create')) return rejectCrmBrowserAction();
   document.getElementById('custEditId').value = '';
   document.getElementById('addCustomerTitle').textContent = '新增客户';
   ['custBrand','custCompany','custIndustry','custContact','custContactInfo','custSource','custBudget','custNotes'].forEach(function(id) { var el = document.getElementById(id); if (el) el.value = ''; });
@@ -1229,6 +1297,7 @@ function showAddCustomer() {
 }
 
 function openAddCustomer() {
+  if (!currentUserHasCrmPermission('create')) return rejectCrmBrowserAction();
   document.getElementById('custModalTitle').textContent = '新增客户';
   document.getElementById('custEditId').value = '';
   ['custBrand','custCompany','custContact','custContactInfo','custIndustry','custSource','custBudget','custNotes'].forEach(function(id) { var el = document.getElementById(id); if (el) el.value = ''; });
@@ -1243,6 +1312,7 @@ function openAddCustomer() {
 function closeCustModal() { document.getElementById('custModal').style.display = 'none'; }
 function dismissDup() { document.getElementById('dupWarning').style.display = 'none'; }
 function editCustomer(id) {
+  if (!currentUserHasCrmPermission('update')) return rejectCrmBrowserAction();
   var c = customersCache.find(function(x) { return x.id === id; });
   if (!c) return;
   document.getElementById('custEditId').value = c.id;
@@ -1267,9 +1337,13 @@ function editCustomer(id) {
 }
 
 async function saveCustomer() {
+  var editId = document.getElementById('custEditId').value;
+  if (!currentUserHasCrmPermission(editId ? 'update' : 'create')) {
+    rejectCrmBrowserAction();
+    return;
+  }
   var brand = document.getElementById('custBrand').value.trim();
   if (!brand) { toast('请填写品牌名称', 'error'); return; }
-  var editId = document.getElementById('custEditId').value;
   var body = {
     brand_name: brand,
     company_name: document.getElementById('custCompany').value.trim(),
@@ -1317,6 +1391,11 @@ async function changeCustomerStage(id, newStage, selectEl) {
   var previousStage = selectEl && typeof selectEl.getAttribute === 'function'
     ? selectEl.getAttribute('data-previous-value')
     : null;
+  if (!currentUserHasCrmPermission('update')) {
+    if (selectEl && previousStage !== null) selectEl.value = previousStage;
+    rejectCrmBrowserAction();
+    return;
+  }
   try {
     var body;
     if (typeof collectCustomerTransitionEvidence === 'function') {
@@ -1860,9 +1939,13 @@ function renderCustomerSidebar(d) {
   html += '<div class="field"><span class="field-label">预算</span><span class="field-value">' + esc(c.budget_estimate || '-') + '</span></div>';
   html += '<div class="field"><span class="field-label">备注</span><span class="field-value">' + esc(c.notes || '-') + '</span></div></div>';
   html += '<div class="sidebar-section" style="display:flex;gap:8px;flex-wrap:wrap">';
-  if (c.is_public == 1) html += '<button class="btn btn-primary btn-sm" onclick="claimCustomer(' + c.id + ', true)">📥 认领客户</button>';
-  else html += '<button class="btn btn-outline btn-sm" onclick="returnToPool(' + c.id + ', true)">🌊 释放到公海</button>';
-  html += '<button class="btn btn-outline btn-sm" onclick="editCustomer(' + c.id + ');closeCustomerDetail()">✏️ 编辑</button>';
+  if (currentUserHasCrmPermission('update')) {
+    if (c.is_public == 1) html += '<button class="btn btn-primary btn-sm" onclick="claimCustomer(' + c.id + ', true)">📥 认领客户</button>';
+    else html += '<button class="btn btn-outline btn-sm" onclick="returnToPool(' + c.id + ', true)">🌊 释放到公海</button>';
+    html += '<button class="btn btn-outline btn-sm" onclick="editCustomer(' + c.id + ');closeCustomerDetail()">✏️ 编辑</button>';
+  } else {
+    html += '<span class="crm-control-unavailable" title="当前账号仅可查看">客户资料只读</span>';
+  }
   html += '<button class="btn btn-sm btn-primary" onclick="showOppModal(' + c.id + ')">💼 新增商机</button>';
   html += '<span class="crm-control-unavailable" title="硬删除已禁用">客户硬删除不可用</span></div>';
   html += '<div class="sidebar-section"><h4>下一步动作</h4><div style="display:flex;gap:8px;flex-wrap:wrap">';
@@ -1917,6 +2000,7 @@ function showOpportunityDetail(id) {
 }
 
 async function claimCustomer(id, closeDetailOnSuccess) {
+  if (!currentUserHasCrmPermission('update')) return rejectCrmBrowserAction();
   try {
     var teamId = typeof getSelectedCrmTeamId === 'function' ? getSelectedCrmTeamId() : null;
     if (!teamId) { toast('请选择可用团队', 'error'); return; }
@@ -1929,6 +2013,7 @@ async function claimCustomer(id, closeDetailOnSuccess) {
   } catch (e) { toast('认领失败: ' + e.message, 'error'); }
 }
 async function returnToPool(id, closeDetailOnSuccess) {
+  if (!currentUserHasCrmPermission('update')) return rejectCrmBrowserAction();
   try {
     var reason = typeof collectCustomerReleaseReason === 'function' ? await collectCustomerReleaseReason(id) : null;
     if (!reason) return;
@@ -2063,7 +2148,7 @@ async function loadSeaPool() {
     var spT=document.getElementById('seaPoolTable'); if(!spT)return;
     var h='<table><thead><tr><th>品牌</th><th>公司</th><th>行业</th><th>最后更新</th><th>操作</th></tr></thead><tbody>';
     if(!customers.length) h+='<tr><td colspan="5" style="text-align:center;padding:30px;opacity:.5">🌊 公海池暂无客户</td></tr>';
-    else customers.forEach(function(c){h+='<tr><td><strong>'+(c.brand_name||'')+'</strong></td><td>'+(c.company_name||'')+'</td><td>'+(c.industry||'')+'</td><td style="font-size:11px;opacity:.6">'+(c.updated_at||'').substring(0,10)+'</td><td><button class="btn btn-sm btn-primary" onclick="claimCustomer('+c.id+')">认领</button></td></tr>';});
+    else customers.forEach(function(c){h+='<tr><td><strong>'+esc(c.brand_name||'')+'</strong></td><td>'+esc(c.company_name||'')+'</td><td>'+esc(c.industry||'')+'</td><td style="font-size:11px;opacity:.6">'+esc((c.updated_at||'').substring(0,10))+'</td><td>'+(currentUserHasCrmPermission('update')?'<button class="btn btn-sm btn-primary" onclick="claimCustomer('+c.id+')">认领</button>':'<span class="crm-control-unavailable" title="当前账号仅可查看">只读</span>')+'</td></tr>';});
     h+='</tbody></table>'; spT.innerHTML=h;
     var poolTab=document.getElementById('m0_seapoolTabCount'); if(poolTab)poolTab.textContent=customers.length;
     var pool=document.getElementById('m0_poolCount'); if(pool)pool.textContent=customers.length;
@@ -2086,7 +2171,7 @@ async function loadSeaPool() {
         document.getElementById('authOverlay').style.display = 'none';
         document.getElementById('app').style.display = 'flex';
         applyCurrentUserRolePresentation();
-        curCustomerScope = CURRENT_USER.role === 'admin' ? 'all' : 'my';
+        curCustomerScope = currentUserCanUseCrmScope('organization') ? 'all' : 'my';
         updateCustomerScopeTabs();
         await initApp(); if (window.TMNavigation) window.TMNavigation.restore(CURRENT_USER);
         return;

@@ -59,3 +59,45 @@ test('customer navigation initializes board and detail views independently', () 
   assert.match(appJs, /await loadCustomers\(\)/);
   assert.match(indexHtml, /ppt\.js\?v=20260702v916kbbridge/);
 });
+
+test('customer workspace projects server-approved CRM actions into existing controls', () => {
+  const detail = pageSection('page-m0-detail');
+  assert.match(detail, /id="customerScopeTeam"[^>]*data-scope="team"/);
+  assert.match(detail, /id="customerScopeOrganization"[^>]*data-scope="all"/);
+  assert.match(detail, /id="crmCreateCustomerButton"[^>]*onclick="openAddCustomer\(\)"/);
+  assert.match(appJs, /function currentUserHasCrmPermission\(action\)/);
+  assert.match(appJs, /CURRENT_USER && CURRENT_USER\.module_permissions/);
+  assert.match(appJs, /permissions\['crm\.customer'\]/);
+  assert.match(appJs, /function applyCrmPermissionPresentation\(\)/);
+  assert.match(appJs, /currentUserHasCrmPermission\('create'\)/);
+  assert.match(appJs, /currentUserHasCrmPermission\('update'\)/);
+  assert.match(appJs, /currentUserCanUseCrmScope\('organization'\)/);
+  assert.match(appJs, /currentUserCanUseCrmScope\('team'\)/);
+});
+
+test('customer write entry points fail closed in the browser when the server projection denies update', () => {
+  for (const functionName of [
+    'showAddCustomer',
+    'openAddCustomer',
+    'editCustomer',
+    'saveCustomer',
+    'changeCustomerStage',
+    'claimCustomer',
+    'returnToPool'
+  ]) {
+    const start = appJs.indexOf(`function ${functionName}(`);
+    assert.notEqual(start, -1, `missing ${functionName}`);
+    const next = appJs.indexOf('\nfunction ', start + 10);
+    const body = appJs.slice(start, next === -1 ? appJs.length : next);
+    const action = functionName === 'showAddCustomer' || functionName === 'openAddCustomer'
+      ? 'create'
+      : functionName === 'saveCustomer'
+        ? null
+        : 'update';
+    if (action) {
+      assert.match(body, new RegExp(`currentUserHasCrmPermission\\('${action}'\\)`), functionName);
+    } else {
+      assert.match(body, /currentUserHasCrmPermission\(editId \? 'update' : 'create'\)/, functionName);
+    }
+  }
+});

@@ -739,6 +739,9 @@ test('login and auth me preserve the user object and add current auth context', 
       effective_role: 'company_owner',
       is_company_owner: true
     });
+    assert.deepEqual(login.body.user.module_permissions, {
+      'crm.customer': ['read', 'create', 'update']
+    });
     assert.equal(Array.isArray(login.body.auth_context.teams), true);
     assert.equal(login.body.auth_context.teams.length > 0, true);
     for (const team of login.body.auth_context.teams) {
@@ -822,14 +825,23 @@ test('read-only access is live, revokes old sessions, permits GET, blocks all bu
     assert.equal(readOnlyLogin.response.status, 200, readOnlyLogin.text);
     assert.deepEqual(readOnlyLogin.body.user.access_roles, ['read_only']);
     assert.equal(readOnlyLogin.body.user.organization_access.access_mode, 'read_only');
+    assert.deepEqual(readOnlyLogin.body.user.module_permissions, {
+      'crm.customer': ['read']
+    });
 
     const readable = await jsonRequest(server.baseUrl, '/api/demands', {
       token: readOnlyLogin.body.token
     });
     assert.equal(readable.response.status, 200, readable.text);
 
+    const readableCustomers = await jsonRequest(server.baseUrl, '/api/customers?scope=my', {
+      token: readOnlyLogin.body.token
+    });
+    assert.equal(readableCustomers.response.status, 200, readableCustomers.text);
+
     const writes = [
       ['POST', '/api/demands', { brand_name: 'blocked' }],
+      ['POST', '/api/customers', { brand_name: 'blocked', team_id: readOnlyLogin.body.auth_context.teams[0].id }],
       ['PUT', `/api/admin/users/${userId}`, { display_name: 'blocked' }],
       ['PATCH', `/api/organization-governance/organizations/${organizationId}/members/${userId}`, { access_role: 'member' }],
       ['DELETE', `/api/admin/users/${userId}`, undefined]

@@ -752,6 +752,52 @@ test('authorization: owner and organization admin reach customer profile mutatio
   assert.equal(db.inTransaction, false);
 });
 
+test('authorization: live read-only policy blocks direct service writes inside the mutation transaction', (t) => {
+  const db = openFixture(t);
+  db.exec(`
+    CREATE TABLE organization_member_policy (
+      org_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      access_mode TEXT NOT NULL,
+      PRIMARY KEY (org_id,user_id)
+    ) STRICT;
+    INSERT INTO organization_member_policy (org_id,user_id,access_mode)
+    SELECT org_id,user_id,'read_write'
+    FROM organization_memberships;
+  `);
+  db.prepare(`
+    UPDATE organization_member_policy
+    SET access_mode='read_only'
+    WHERE org_id=? AND user_id=?
+  `).run(IDS.orgA, IDS.ownerA);
+  const before = db.prepare('SELECT brand_name FROM customers WHERE id=?').get(IDS.ownedA);
+
+  const error = captureError(() => service.createOrUpdateCustomer(
+    db,
+    customerUpdate(IDS.ownerA, IDS.ownedA)
+  ));
+
+  assert.deepEqual(publicError(error), {
+    code: 'CRM_CUSTOMER_FORBIDDEN',
+    status: 403,
+    title: 'CRM customer mutation is not allowed',
+    details: null
+  });
+  assert.deepEqual(
+    db.prepare('SELECT brand_name FROM customers WHERE id=?').get(IDS.ownedA),
+    before
+  );
+  const audit = db.prepare(`
+    SELECT event_type,metadata_json
+    FROM crm_audit_events
+    WHERE request_id='mutation-request'
+    ORDER BY id DESC
+    LIMIT 1
+  `).get();
+  assert.equal(audit.event_type, 'mutation_denied');
+  assert.equal(JSON.parse(audit.metadata_json).operation, 'customer_update');
+});
+
 test('authorization: transferred originator has no retained profile authority', (t) => {
   const db = openFixture(t);
   const error = captureError(() => service.createOrUpdateCustomer(

@@ -93,12 +93,12 @@ function insertOrganizationMembership(db, orgId, userId, roleCode = 'member', st
   `).run(orgId, userId, roleCode, status, FIXED_AT, status === 'active' ? null : FIXED_AT);
 }
 
-function insertTeamMembership(db, orgId, teamId, userId, status = 'active') {
+function insertTeamMembership(db, orgId, teamId, userId, status = 'active', roleCode = 'member') {
   db.prepare(`
     INSERT INTO team_memberships (
       org_id,team_id,user_id,role_code,status,created_at,revoked_at
     ) VALUES (?,?,?,?,?,?,?)
-  `).run(orgId, teamId, userId, 'member', status, FIXED_AT, status === 'active' ? null : FIXED_AT);
+  `).run(orgId, teamId, userId, roleCode, status, FIXED_AT, status === 'active' ? null : FIXED_AT);
 }
 
 function insertCustomer(db, {
@@ -259,15 +259,22 @@ function openFixture(t) {
   insertOrganizationMembership(db, IDS.orgA, IDS.revokedMemberA, 'member', 'revoked');
   insertOrganizationMembership(db, IDS.orgB, IDS.outsiderB);
 
-  for (const [teamId, userId] of [
+  for (const [teamId, userId, roleCode] of [
     [IDS.teamA1, IDS.ownerA],
-    [IDS.teamA1, IDS.teammateA],
+    [IDS.teamA1, IDS.teammateA, 'team_lead'],
     [IDS.teamA1, IDS.orgAdminA],
-    [IDS.teamA2, IDS.ownerA2],
+    [IDS.teamA2, IDS.ownerA2, 'team_lead'],
     [IDS.teamA2, IDS.originatorA2],
-    [IDS.teamB1, IDS.outsiderB]
+    [IDS.teamB1, IDS.outsiderB, 'team_lead']
   ]) {
-    insertTeamMembership(db, teamId === IDS.teamB1 ? IDS.orgB : IDS.orgA, teamId, userId);
+    insertTeamMembership(
+      db,
+      teamId === IDS.teamB1 ? IDS.orgB : IDS.orgA,
+      teamId,
+      userId,
+      'active',
+      roleCode || 'member'
+    );
   }
   insertTeamMembership(db, IDS.orgA, IDS.teamA1, IDS.inactiveOwnerA, 'revoked');
 
@@ -403,7 +410,30 @@ test('scope context defaults members to my and org admins to organization', (t) 
   assert.equal(member.is_org_admin, false);
   assert.equal(orgAdmin.is_org_admin, true);
   assert.equal(compileCustomerScope(member).scope, 'my');
+  assert.throws(
+    () => compileCustomerScope(member, 'team'),
+    (error) => error && error.code === 'CRM_SCOPE_FORBIDDEN'
+  );
   assert.equal(compileCustomerScope(orgAdmin).scope, 'organization');
+});
+
+test('company owner retains organization customer scope with a member role', (t) => {
+  const db = openFixture(t);
+  db.exec(`
+    CREATE TABLE organization_authority (
+      org_id INTEGER PRIMARY KEY,
+      owner_user_id INTEGER NOT NULL
+    ) STRICT;
+  `);
+  db.prepare('INSERT INTO organization_authority (org_id,owner_user_id) VALUES (?,?)')
+    .run(IDS.orgA, IDS.ownerA);
+
+  const owner = contextFor(db, IDS.ownerA);
+
+  assert.equal(owner.organization.role_code, 'member');
+  assert.equal(owner.is_org_admin, false);
+  assert.equal(owner.is_company_owner, true);
+  assert.equal(compileCustomerScope(owner).scope, 'organization');
 });
 
 test('owner team organization public and quarantine visibility is fail closed', (t) => {
@@ -436,7 +466,7 @@ test('owner team organization public and quarantine visibility is fail closed', 
   ]);
 });
 
-test('customer detail is team-readable and returns one bounded immutable aggregate', (t) => {
+test('customer detail is team-lead-readable and returns one bounded immutable aggregate', (t) => {
   const db = openFixture(t);
   db.prepare(`
     UPDATE customers
@@ -533,6 +563,20 @@ test('customer detail is team-readable and returns one bounded immutable aggrega
   assert.equal(Object.isFrozen(detail.activity[0]), true);
   assert.throws(() => { detail.opportunities[0].name = 'mutated'; }, TypeError);
   assert.throws(() => { detail.activity[0].notes = 'mutated'; }, TypeError);
+});
+
+test('ordinary members cannot widen customer detail reads to teammates by id', (t) => {
+  const db = openFixture(t);
+
+  assert.throws(
+    () => getCustomerDetail(db, {
+      actorUserId: IDS.ownerA,
+      organizationId: IDS.orgA,
+      customerId: IDS.teammateOwnedA,
+      requestId: 'detail-member-team-leak'
+    }),
+    (error) => error && error.code === 'CRM_CUSTOMER_NOT_FOUND'
+  );
 });
 
 test('customer detail conceals public quarantine other-team other-org and absent records', (t) => {

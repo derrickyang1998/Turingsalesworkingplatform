@@ -2,6 +2,10 @@
 
 const PLATFORM_ADMINISTRATION_MODULE = 'platform_administration';
 const PLATFORM_ADMINISTRATION_MANAGE_ACTION = 'manage';
+const CRM_CUSTOMER_MODULE = 'crm.customer';
+const CRM_CUSTOMER_READ_ACTION = 'read';
+const CRM_CUSTOMER_CREATE_ACTION = 'create';
+const CRM_CUSTOMER_UPDATE_ACTION = 'update';
 const REQUEST_ROLE_VOCABULARY = new Set(['admin', 'user']);
 const ROLE_ORDER = Object.freeze([
   'platform_admin',
@@ -14,8 +18,30 @@ const ROLE_ORDER = Object.freeze([
 const POLICY = Object.freeze({
   [PLATFORM_ADMINISTRATION_MODULE]: Object.freeze({
     [PLATFORM_ADMINISTRATION_MANAGE_ACTION]: Object.freeze(['platform_admin'])
+  }),
+  [CRM_CUSTOMER_MODULE]: Object.freeze({
+    [CRM_CUSTOMER_READ_ACTION]: Object.freeze([
+      'company_owner',
+      'administrator',
+      'manager',
+      'member',
+      'read_only'
+    ]),
+    [CRM_CUSTOMER_CREATE_ACTION]: Object.freeze([
+      'company_owner',
+      'administrator',
+      'manager',
+      'member'
+    ]),
+    [CRM_CUSTOMER_UPDATE_ACTION]: Object.freeze([
+      'company_owner',
+      'administrator',
+      'manager',
+      'member'
+    ])
   })
 });
+const ORGANIZATION_SCOPED_MODULES = new Set([CRM_CUSTOMER_MODULE]);
 
 function denied(code) {
   return { allowed: false, code };
@@ -42,10 +68,11 @@ function requestPrincipal(value) {
   }
 }
 
-function projectRoles(db, user) {
+function projectRoles(db, user, organizationId) {
   const roles = new Set();
   if (user.role === 'admin') roles.add('platform_admin');
 
+  const scoped = Number.isSafeInteger(organizationId) && organizationId > 0;
   const organizationMemberships = db.prepare(`
     SELECT
       membership.org_id,
@@ -58,7 +85,8 @@ function projectRoles(db, user) {
     LEFT JOIN organization_authority authority ON authority.org_id=membership.org_id
     WHERE membership.user_id=?
       AND membership.status='active'
-  `).all(user.id);
+      ${scoped ? 'AND membership.org_id=?' : ''}
+  `).all(...(scoped ? [user.id, organizationId] : [user.id]));
   if (organizationMemberships.some((membership) => membership.access_mode === 'read_only')) {
     roles.add('read_only');
   }
@@ -86,7 +114,8 @@ function projectRoles(db, user) {
       AND team_membership.status='active'
       AND organization_membership.status='active'
       AND policy.access_mode='read_write'
-  `).all(user.id);
+      ${scoped ? 'AND team_membership.org_id=?' : ''}
+  `).all(...(scoped ? [user.id, organizationId] : [user.id]));
   if (teamMemberships.length > 0) roles.add('member');
   if (teamMemberships.some((membership) => membership.role_code === 'team_lead')) {
     roles.add('manager');
@@ -100,21 +129,27 @@ function createModuleActionPermissionService(db) {
     throw new TypeError('database must expose prepare');
   }
 
-  function authorize(input) {
+  function projectModuleAccess(input) {
     let requested;
-    let allowedRoles;
+    let module;
+    let organizationId = null;
     try {
       if (!isPlainObject(input)) return denied('MALFORMED_REQUEST');
-      const module = input.module;
-      const action = input.action;
+      module = input.module;
       const principal = input.principal;
-      if (typeof module !== 'string' || typeof action !== 'string') {
+      if (typeof module !== 'string') {
         return denied('MALFORMED_REQUEST');
       }
       if (!Object.hasOwn(POLICY, module)) return denied('UNKNOWN_MODULE');
-      const modulePolicy = POLICY[module];
-      if (!Object.hasOwn(modulePolicy, action)) return denied('UNKNOWN_ACTION');
-      allowedRoles = modulePolicy[action];
+      if (ORGANIZATION_SCOPED_MODULES.has(module)) {
+        if (!Object.hasOwn(input, 'organizationId')) {
+          return denied('ORGANIZATION_SCOPE_REQUIRED');
+        }
+        organizationId = input.organizationId;
+        if (!Number.isSafeInteger(organizationId) || organizationId < 1) {
+          return denied('MALFORMED_ORGANIZATION');
+        }
+      }
 
       requested = requestPrincipal(principal);
       if (!requested) return denied('MALFORMED_PRINCIPAL');
@@ -136,23 +171,61 @@ function createModuleActionPermissionService(db) {
 
       const principal = {
         user_id: liveUser.id,
-        roles: projectRoles(db, liveUser)
+        ...(organizationId === null ? {} : { organization_id: organizationId }),
+        roles: projectRoles(db, liveUser, organizationId)
       };
-      const allowed = allowedRoles.some((role) => principal.roles.includes(role));
-      return allowed
-        ? { allowed: true, code: 'ALLOWED', principal }
-        : { allowed: false, code: 'ACTION_FORBIDDEN', principal };
+      const actions = Object.entries(POLICY[module])
+        .filter(([, allowedRoles]) => allowedRoles.some((role) => principal.roles.includes(role)))
+        .map(([action]) => action);
+      return { allowed: true, code: 'ALLOWED', principal, actions };
     } catch {
       return denied('AUTHORITATIVE_FACTS_UNAVAILABLE');
     }
   }
 
-  return Object.freeze({ authorize });
+  function authorize(input) {
+    let module;
+    let action;
+    let projectionInput;
+    try {
+      if (!isPlainObject(input)) return denied('MALFORMED_REQUEST');
+      module = input.module;
+      action = input.action;
+      const principal = input.principal;
+      if (typeof module !== 'string' || typeof action !== 'string') {
+        return denied('MALFORMED_REQUEST');
+      }
+      if (!Object.hasOwn(POLICY, module)) return denied('UNKNOWN_MODULE');
+      if (!Object.hasOwn(POLICY[module], action)) return denied('UNKNOWN_ACTION');
+      projectionInput = { module, principal };
+      if (ORGANIZATION_SCOPED_MODULES.has(module)) {
+        if (!Object.hasOwn(input, 'organizationId')) {
+          return denied('ORGANIZATION_SCOPE_REQUIRED');
+        }
+        projectionInput.organizationId = input.organizationId;
+      }
+    } catch {
+      return denied('MALFORMED_REQUEST');
+    }
+
+    const projection = projectModuleAccess(projectionInput);
+    if (!projection.allowed) return projection;
+    const allowed = projection.actions.includes(action);
+    return allowed
+      ? { allowed: true, code: 'ALLOWED', principal: projection.principal }
+      : { allowed: false, code: 'ACTION_FORBIDDEN', principal: projection.principal };
+  }
+
+  return Object.freeze({ authorize, projectModuleAccess });
 }
 
 module.exports = {
   PLATFORM_ADMINISTRATION_MODULE,
   PLATFORM_ADMINISTRATION_MANAGE_ACTION,
+  CRM_CUSTOMER_MODULE,
+  CRM_CUSTOMER_READ_ACTION,
+  CRM_CUSTOMER_CREATE_ACTION,
+  CRM_CUSTOMER_UPDATE_ACTION,
   POLICY,
   createModuleActionPermissionService
 };

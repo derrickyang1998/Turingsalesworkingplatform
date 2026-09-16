@@ -272,7 +272,7 @@ test('public files and admin APIs do not expose the legacy default password', ()
   });
 });
 
-test('crm customer detail is team-readable while mutations remain owner-scoped', () => {
+test('crm customer detail requires team leadership while mutations remain owner-scoped', () => {
   const db = freshDb();
   const routes = mountCustomerRoutes(db);
   const owner = { id: 2, role: 'user' };
@@ -313,6 +313,12 @@ test('crm customer detail is team-readable while mutations remain owner-scoped',
     owner.id
   ).lastInsertRowid;
 
+  assert.equal(invoke(routes, 'GET /api/customers/:id/detail', { user: other, params: { id: customerId } }).statusCode, 404);
+  db.prepare(`
+    UPDATE team_memberships
+    SET role_code='team_lead'
+    WHERE org_id=? AND team_id=? AND user_id=?
+  `).run(scope.orgId, scope.teamId, other.id);
   assert.equal(invoke(routes, 'GET /api/customers/:id/detail', { user: other, params: { id: customerId } }).statusCode, 200);
   assert.equal(invoke(routes, 'PUT /api/customers/:id', { user: other, params: { id: customerId }, body: { notes: 'unauthorized' } }).statusCode, 403);
   const leakedPrivateList = invoke(routes, 'GET /api/customers', { user: other, query: { scope: 'my' } });
@@ -766,6 +772,11 @@ test('crm customer stats aggregate opportunity value within caller scope', () =>
   for (const userId of [ownerA, teammateB, emptyD]) {
     insertTeamMembership.run(defaultScope.orgId, defaultScope.teamId, userId);
   }
+  db.prepare(`
+    UPDATE team_memberships
+    SET role_code='team_lead'
+    WHERE org_id=? AND team_id=? AND user_id=?
+  `).run(defaultScope.orgId, defaultScope.teamId, ownerA);
   insertTeamMembership.run(defaultScope.orgId, outsiderTeamId, outsiderC);
 
   const insertCustomer = db.prepare(`
