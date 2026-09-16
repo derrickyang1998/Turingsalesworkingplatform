@@ -1,5 +1,27 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.9.4-crm-customer-role-permissions (Production Deployed, 2026-09-16) - CRM 客户角色权限
+
+### 交付与范围 / Delivery And Scope
+- 将中央模块/操作权限接入 `crm.customer`，由实时组织与团队身份决定 `read`、`create`、`update`；登录和 `/api/auth/me` 向现有前端投影允许操作，浏览器不能自行扩大权限。
+- 企业所有者和组织管理员可读取组织客户，经理可读取团队客户，普通成员只能读取本人客户与公海；成员和经理请求更大范围时返回 `403`，纯平台管理员身份不能绕过租户边界。
+- 客户列表、详情、统计、看板、公海、线索转客户、创建、更新、认领、退回、分配和方案归档均接入命名权限；现有客户看板/客户明细双页面在原界面中隐藏或禁用无权控件。
+- 本版不扩展商机、联系人和任务的模块权限，不修改 schema，不替换 CRM、M3/M4、AI/知识库、网红、飞书、工作流、导出或冻结 PPT。
+
+### 轻量验证与独立审查 / Lightweight Verification And Independent Review
+- 受影响权限/HTTP/UI `40/40`、CRM 范围 `32/32`、安全与访问 `15/15`、客户命令 `78/78`、真实登录/只读集成 `2/2`、发布合同 `38/38`、可信发布源 `32/32` 通过；JavaScript 语法、差异、聚焦凭据扫描和本地发布预检通过。
+- 首轮独立审查发现普通成员详情范围放宽和归档结果缺少更新权限两项问题，均以失败用例修复；功能复审与发布门禁修复复审均为 `APPROVE`，无剩余发布阻断。
+- 生产候选通过远端权限测试 `11/11`、CRM/UI `29/29` 和 Chromium `2/2`。一次 v21 无迁移发布因门禁仍固定 v20 而自动回滚；修正并回归后最终发布成功。
+
+### 生产状态 / Production Status
+- 功能提交 `695b0c561f1e5eb0596ab91683718fe05c871f79`、发布门禁修复 `09f63ddfd7916a7e86275252139d14dabfe06155` 已推送 GitHub；生产运行 ID `1bf1cac695d34555aa2792f4859a6f6d` 返回 `DEPLOY_OK`。
+- 可信源码 SHA-256 为 `441a8cc86d5215e8f839cf19fb4fd81c999051ddaf0c7be683c1549222d4cd76`，候选树 SHA-256 为 `86bcd0b7edbe72d7c497ece65e25f14e964ef1b8b7ad60b7cde585273e79e1ee`；可恢复备份为 `/root/turingmarket/backups/v060-crm-sales-workspace-20260916-194030`。
+- 线上管理员组织范围 `200`；普通成员本人范围 `200`、团队/组织范围 `403`；经理团队范围 `200`、组织范围 `403`；只读角色读取 `200`、写入 `403 ORGANIZATION_READ_ONLY`。临时账号已停用，组织/团队有效成员关系与会话均为 `0`。
+- schema 保持 `v21`、`quick_check=ok`、外键异常 `0`；PM2 `online`、重启 `0`、PID `280147`，Nginx `active`，公网与回环均为 `200`，权限允许/拒绝审计已落库，关键线上文件哈希与评审版本一致。
+
+### 下一边界 / Next Boundary
+- 继续执行“一功能一上线”：普通功能仅跑受影响验证、一次独立审查、可恢复备份和线上冒烟；鉴权、schema、共享基础设施与真实外部写入按风险保留必要扩展门禁。
+
 ## v0.9.3-organization-role-governance (Production Deployed, 2026-09-16) - 组织角色治理
 
 ### 交付与范围 / Delivery And Scope
