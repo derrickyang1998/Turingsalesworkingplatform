@@ -1,6 +1,6 @@
 # TuringMarket Engineering Handoff / 图灵商务平台工程交接
 
-Updated / 更新日期：2026-09-15
+Updated / 更新日期：2026-09-16
 
 ## Authoritative Baseline / 权威基线
 
@@ -28,6 +28,8 @@ This checkout consolidates the latest CRM, AI conversation, knowledge base, infl
 - Online authorization / 线上权限：administrator login/directory/logout/revocation passed; a live ordinary user carrying a forged administrator claim was denied with exact HTTP `403 { error: 'Admin only' }`, and the temporary session was removed / 管理员与普通用户实时权限边界通过，临时会话已清除。
 - Product boundary / 产品边界：the accepted v0.6 shell, CRM, M3/M4, AI/knowledge, proposal, and frozen PPT remain intact. / 已验收的 v0.6 产品壳层、CRM、M3/M4、AI/知识、方案与冻结 PPT 均保持不变。
 - Full evidence / 完整证据：`docs/version-records/2026-09-15-v0.9.2-module-action-permission-foundation-production.md`。
+- Reviewed next release / 已审查下一版本：`v0.9.3-organization-role-governance` at `0b5004046e0b91f8cec4a02f6f1fdb05d7afa803` persists company-owner/read-only facts in schema v21, adds scoped member governance and a live read-only write barrier. It is a release candidate only until guarded deployment and authenticated online acceptance complete. / v0.9.3 已持久化企业所有者/只读事实并增加组织成员治理与实时只读写入拦截；受控部署和线上验收完成前仅为候选。
+- Candidate evidence / 候选证据：`docs/version-records/2026-09-16-v0.9.3-organization-role-governance-release-candidate.md`。
 
 `v0.6.0-crm-sales-workspace` contains the accepted Phase 5 CRM implementation and the upgraded schema-6 release contract. It MUST NOT be described as production until independent release review, GitHub push, verified backup, guarded deployment, remote runtime/API/UI/access acceptance, and rollback evidence all pass. / `v0.6.0-crm-sales-workspace` 已包含通过验收的第 5 阶段 CRM 实现及 schema-6 发布合同；独立发布复审、GitHub 推送、可校验备份、受控部署、远端运行时/API/UI/权限验收与回滚证据全部通过前，不得称为生产版本。
 
@@ -124,7 +126,7 @@ Manual rollback / 手工回滚：
 
 The same restore function is used by automatic and manual rollback. Phase 4 rejects code-only rollback: manual restore requires `-RollbackBackup`, `-RestoreDatabase`, and `-ConfirmDataLoss`; automatic post-mutation recovery always selects the same database/cache path. Every manifest is verified, SQLite and `PPT_CACHE_DIR` are restored as one unit, stale SQLite sidecars are removed, and every session is deleted before PM2 starts with `SERVER_HOST=127.0.0.1`. `-PreserveSessions` is always rejected. / 自动与手工回滚共用同一数据库与缓存恢复函数；手工恢复必须显式提供备份、恢复数据库及确认数据丢失，且始终在 PM2 启动前撤销全部会话。
 
-Production runs the accepted v0.6 product shell and frozen PPT renderer with all accepted Phase 6 and Phase 7 slices plus the Phase 8 organization/member directory, audited user-entitlement directory, and module/action permission foundation, on schema v20. The current production feature source is `cc23692905b16451e624584de75f6aeb46090dc9`, backed by independent `APPROVE` review, verified backup `/root/turingmarket/backups/v060-crm-sales-workspace-20260915-135244`, guarded run `30e8cafd9c9041e4a82a8b93726c4849`, and authenticated online acceptance. Company-owner/read-only persistence is the next isolated Phase 8 slice. / 生产当前运行已验收的 v0.6 产品壳层与冻结 PPT renderer，并叠加全部已验收的阶段 6、阶段 7，以及阶段 8 的组织/成员目录、可审计用户权益目录和模块/操作权限底座，数据库为 schema v20；当前生产功能源码为 `cc23692905b16451e624584de75f6aeb46090dc9`，并具备独立复审、可验证备份、受控发布和登录态线上验收。下一独立切片为企业所有者/只读角色持久化。
+Production remains on the accepted v0.9.2 source and schema v20 until the reviewed v0.9.3 candidate completes guarded deployment. The candidate preserves the accepted v0.6 product shell and frozen PPT renderer while adding schema v21 organization authority/member policy, scoped governance, and live read-only enforcement. / 生产在 v0.9.3 受控部署完成前仍保持 v0.9.2/schema v20；候选保留已验收产品壳层与冻结 PPT，仅增加 schema v21 组织权威、成员策略、范围治理和实时只读强制。
 
 ## Security And Secrets / 安全与密钥
 
