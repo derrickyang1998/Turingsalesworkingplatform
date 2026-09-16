@@ -1,6 +1,6 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
-## v0.9.3-organization-role-governance (Release Candidate, 2026-09-16) - 组织角色治理
+## v0.9.3-organization-role-governance (Production Deployed, 2026-09-16) - 组织角色治理
 
 ### 交付与范围 / Delivery And Scope
 - schema v21 新增不可变企业所有者与成员读写策略，在不修改既有平台、组织和团队角色枚举的前提下，权威投影平台管理员、企业所有者、组织管理员、经理、成员和只读角色。
@@ -11,10 +11,17 @@
 ### 验证与发布状态 / Verification And Release Status
 - 最终治理矩阵 `22/22`、真实鉴权与只读集成 `4/4`、前端治理/导航 `17/17`、公开资源 `128/128` 通过；schema/可信发布门禁 `295` 项中 `285` 通过、`10` 项平台条件跳过、失败为零。
 - JavaScript 语法、差异、聚焦凭据检查和本地受控发布预检通过；独立代码/安全审查为 `APPROVE`，无 P0-P2。
-- 功能提交 `0b5004046e0b91f8cec4a02f6f1fdb05d7afa803` 已推送 GitHub。当前仍是候选版本，生产基线保持 v0.9.2/schema v20；完成可验证备份、受控 v21 切换和线上验收前不得标记为生产。
+- 功能提交 `0b5004046e0b91f8cec4a02f6f1fdb05d7afa803`、schema v21 门禁修复 `cd9b16c` 和浏览器夹具修复 `e7b906a` 已推送 GitHub；独立代码/安全审查为 `APPROVE`，无 P0-P2。
+- 前两个候选分别被旧 schema v20 固定断言和缺少新治理读取接口的浏览器夹具在生产变更前拦截，均只清理候选且生产未修改。第三个候选通过真实 Express 重放 `8/8`、发布守卫 `21/21`、模块策略 `7/7`、部署浏览器冒烟 `2/2`、迁移、解析器、容量、Nginx 与最终公网验收。
+
+### 生产状态 / Production Status
+- 生产运行 ID `22d1e0f15c8c43979a0938ef05cae929` 明确返回 `DEPLOY_OK`；可信源码 SHA-256 为 `043768b485c83d794d1c643422e9dd8add869f33bcf3e2d991c0a3b7309105db`，候选树 SHA-256 为 `dee47f472a031724edfd921c4fd4ad5c8997a464687d351e9f4360048f3c23ec`。
+- 可恢复备份为 `/root/turingmarket/backups/v060-crm-sales-workspace-20260916-124142`；初始清单 `329` 项、切换快照 `35` 项独立复验通过，清单 SHA-256 分别为 `3eabda3080370ad8d8ac3463590cb075c24aca206c69f7219decb509d1a16518` 与 `ccdd541d108b21b9bf328589a27135f8219c9379bdc7934f5f3d242ca2dc7685`。
+- 线上 schema `v21`、`quick_check=ok`、外键异常 `0`、组织成员/策略 `21:21`、企业所有者 `1`、活动会话 `0`；PM2 `online`、重启 `0`、PID `143842`，Nginx `active`，公网与回环健康均为 `200`。
+- 管理员 `derrick` 登录、组织/21 名成员读取、所有者投影、筛选、注销及令牌撤销通过；临时普通成员切为只读后旧会话被撤销，GET 为 `200`、业务 POST 精确返回 `403 ORGANIZATION_READ_ONLY`，随后已注销并停用。最新界面、CRM、M3/M4、AI/知识库、网红、飞书、工作流、导出和冻结 PPT 哈希保持不变。
 
 ### 下一边界 / Next Boundary
-- 本候选通过生产验收后，再以单独版本接入一个有界模块/操作权限或设计所有权转移；继续执行“一功能一上线”，普通功能不重复本次迁移级重验证。
+- 后续以单独版本接入一个有界模块/操作权限或设计所有权转移；继续执行“一功能一上线”。普通功能使用受影响测试与线上冒烟，鉴权、数据库迁移、共享基础设施和外部写入继续按风险保留必要门禁。
 
 ## v0.9.2-module-action-permission-foundation (Production Deployed, 2026-09-15) - 模块/操作权限策略底座
 
