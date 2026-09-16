@@ -24,6 +24,13 @@ function appNavigationApplySection() {
   return appJs.slice(start, end);
 }
 
+function appFunction(functionName) {
+  const start = appJs.indexOf(`function ${functionName}(`);
+  assert.notEqual(start, -1, `missing ${functionName}`);
+  const next = appJs.indexOf('\nfunction ', start + 10);
+  return appJs.slice(start, next === -1 ? appJs.length : next);
+}
+
 test('customer workspace exposes separate board and detail pages', () => {
   assert.match(indexHtml, /id="page-m0"/);
   assert.match(indexHtml, /id="page-m0-detail"/);
@@ -100,4 +107,31 @@ test('customer write entry points fail closed in the browser when the server pro
       assert.match(body, /currentUserHasCrmPermission\(editId \? 'update' : 'create'\)/, functionName);
     }
   }
+});
+
+test('opportunity controls consume server-projected create and update actions', () => {
+  assert.match(indexHtml, /onclick="saveOpportunity\(\)"[^>]*data-crm-opportunity-action="create"/);
+  assert.match(appJs, /function currentUserHasCrmOpportunityPermission\(action\)/);
+  assert.match(appJs, /permissions\['crm\.opportunity'\]/);
+
+  const presentation = appFunction('applyCrmPermissionPresentation');
+  assert.match(presentation, /\[data-crm-opportunity-action\]/);
+  assert.match(presentation, /currentUserHasCrmOpportunityPermission\(action\)/);
+
+  const sidebar = appFunction('renderCustomerSidebar');
+  assert.match(sidebar, /currentUserHasCrmOpportunityPermission\('create'\)/);
+
+  assert.match(appFunction('showOppModal'), /currentUserHasCrmOpportunityPermission\('create'\)/);
+  assert.match(
+    appFunction('saveOpportunity'),
+    /currentUserHasCrmOpportunityPermission\(editId \? 'update' : 'create'\)/
+  );
+  assert.match(appFunction('editOpportunity'), /currentUserHasCrmOpportunityPermission\('update'\)/);
+});
+
+test('opportunity table rows expose edit behavior only with update permission', () => {
+  const loadOpportunities = appFunction('loadOpportunities');
+  assert.match(loadOpportunities, /currentUserHasCrmOpportunityPermission\('update'\)/);
+  assert.match(loadOpportunities, /canUpdateOpportunity \?[^;]*editOpportunity/);
+  assert.doesNotMatch(loadOpportunities, /<tr data-opp-id="'\+o\.id\+'" style="cursor:pointer" onclick="editOpportunity/);
 });

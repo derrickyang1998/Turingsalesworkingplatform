@@ -917,7 +917,6 @@ test('crm http: customer routes enforce the named action before dispatching busi
   const harness = makeHarness();
   const cases = [
     ['GET /api/customers', {}, 'read'],
-    ['GET /api/customers/:id/detail', { params: { id: '41' } }, 'read'],
     ['POST /api/customers', { body: { brand_name: 'Acme', team_id: 601 } }, 'create'],
     ['POST /api/leads/:id/convert', { params: { id: '31' }, body: { team_id: 601 } }, 'create'],
     ['PUT /api/customers/:id', { params: { id: '41' }, body: { brand_name: 'Acme Next' } }, 'update'],
@@ -943,6 +942,104 @@ test('crm http: customer routes enforce the named action before dispatching busi
       action
     }], route);
   }
+});
+
+test('crm http: opportunity routes and embedded customer detail enforce named actions in order', async () => {
+  const harness = makeHarness();
+  const cases = [
+    ['GET /api/opportunities', {}, 'read'],
+    ['GET /api/opportunities/:id/detail', { params: { id: '71' } }, 'read'],
+    ['POST /api/opportunities', {
+      body: { customer_id: 41, name: 'Launch' }
+    }, 'create'],
+    ['PUT /api/opportunities/:id', {
+      params: { id: '71' },
+      body: { customer_id: 41, name: 'Launch v2' }
+    }, 'update']
+  ];
+
+  for (const [route, request, action] of cases) {
+    harness.permissionCalls.length = 0;
+    const response = await harness.invoke(route, request);
+    assert.equal(response.statusCode, 200, route);
+    assert.deepEqual(harness.permissionCalls, [{
+      principal: { id: 101, role: 'user' },
+      organizationId: 501,
+      module: 'crm.opportunity',
+      action
+    }], route);
+  }
+
+  harness.permissionCalls.length = 0;
+  const detail = await harness.invoke('GET /api/customers/:id/detail', {
+    params: { id: '41' }
+  });
+  assert.equal(detail.statusCode, 200);
+  assert.deepEqual(harness.permissionCalls, [
+    {
+      principal: { id: 101, role: 'user' },
+      organizationId: 501,
+      module: 'crm.customer',
+      action: 'read'
+    },
+    {
+      principal: { id: 101, role: 'user' },
+      organizationId: 501,
+      module: 'crm.opportunity',
+      action: 'read'
+    }
+  ]);
+});
+
+test('crm http: denied opportunity update is audited before parsing or service dispatch', async () => {
+  const permissionCalls = [];
+  const auditEvents = [];
+  const harness = makeHarness({
+    moduleActionPermissionService: {
+      authorize(input) {
+        permissionCalls.push(input);
+        return {
+          allowed: false,
+          code: 'ACTION_FORBIDDEN',
+          principal: {
+            user_id: input.principal.id,
+            organization_id: input.organizationId,
+            roles: ['read_only']
+          }
+        };
+      }
+    },
+    crmPermissionAudit(event) {
+      auditEvents.push(event);
+    }
+  });
+
+  const response = await harness.invoke('PUT /api/opportunities/:id', {
+    params: { id: '71' },
+    body: { customer_id: 'not-a-customer-id' },
+    requestId: 'crm-opportunity-permission-denied'
+  });
+
+  assert.equal(response.statusCode, 403);
+  assert.equal(response.payload.code, 'CRM_PERMISSION_FORBIDDEN');
+  assert.equal(harness.calls.length, 0);
+  assert.deepEqual(permissionCalls, [{
+    principal: { id: 101, role: 'user' },
+    organizationId: 501,
+    module: 'crm.opportunity',
+    action: 'update'
+  }]);
+  assert.deepEqual(auditEvents, [{
+    actor_user_id: 101,
+    organization_id: 501,
+    permission: 'crm.opportunity.update',
+    outcome: 'denied',
+    reason_code: 'ACTION_FORBIDDEN',
+    request_id: 'crm-opportunity-permission-denied',
+    target_type: 'opportunity',
+    target_id: 71,
+    ip_address: '127.0.0.1'
+  }]);
 });
 
 test('crm http: denied customer permission is audited and stops before request validation or service dispatch', async () => {
@@ -1075,4 +1172,78 @@ test('crm http: members cannot widen customer reads to team or organization scop
   });
   assert.equal(manager.statusCode, 200);
   assert.equal(harness.calls.filter((call) => call.method === 'listCustomers').length, 1);
+});
+
+test('crm http: opportunity reads audit organization scope without query content', async () => {
+  const auditEvents = [];
+  const harness = makeHarness({
+    crmPermissionAudit(event) {
+      auditEvents.push(event);
+    }
+  });
+
+  const response = await harness.invoke('GET /api/opportunities', {
+    authContext: {
+      organization: { id: 501, code: 'http-org', role_code: 'org_admin' },
+      teams: [{ id: 601, role_code: 'team_lead' }]
+    },
+    query: { scope: 'all', search: 'private opportunity phrase' },
+    requestId: 'crm-opportunity-organization-read'
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(auditEvents, [{
+    actor_user_id: 101,
+    organization_id: 501,
+    permission: 'crm.opportunity.read',
+    outcome: 'allowed',
+    reason_code: 'ALLOWED',
+    request_id: 'crm-opportunity-organization-read',
+    target_type: 'opportunity',
+    target_id: null,
+    ip_address: '127.0.0.1',
+    scope: 'organization'
+  }]);
+  assert.doesNotMatch(JSON.stringify(auditEvents), /private opportunity phrase/);
+});
+
+test('crm http: members cannot widen opportunity reads to team or organization scope', async () => {
+  const auditEvents = [];
+  const harness = makeHarness({
+    crmPermissionAudit(event) {
+      auditEvents.push(event);
+    }
+  });
+
+  for (const scope of ['team', 'all']) {
+    const response = await harness.invoke('GET /api/opportunities', {
+      query: { scope },
+      requestId: `crm-opportunity-scope-${scope}`
+    });
+    assert.equal(response.statusCode, 403, scope);
+    assert.equal(response.payload.code, 'CRM_SCOPE_FORBIDDEN', scope);
+  }
+  assert.equal(harness.calls.length, 0);
+  assert.deepEqual(auditEvents.map((event) => ({
+    permission: event.permission,
+    target_type: event.target_type,
+    outcome: event.outcome,
+    reason_code: event.reason_code,
+    scope: event.scope
+  })), [
+    {
+      permission: 'crm.opportunity.read',
+      target_type: 'opportunity',
+      outcome: 'denied',
+      reason_code: 'CRM_SCOPE_FORBIDDEN',
+      scope: 'team'
+    },
+    {
+      permission: 'crm.opportunity.read',
+      target_type: 'opportunity',
+      outcome: 'denied',
+      reason_code: 'CRM_SCOPE_FORBIDDEN',
+      scope: 'organization'
+    }
+  ]);
 });

@@ -6,6 +6,10 @@ const CRM_CUSTOMER_MODULE = 'crm.customer';
 const CRM_CUSTOMER_READ_ACTION = 'read';
 const CRM_CUSTOMER_CREATE_ACTION = 'create';
 const CRM_CUSTOMER_UPDATE_ACTION = 'update';
+const CRM_OPPORTUNITY_MODULE = 'crm.opportunity';
+const CRM_OPPORTUNITY_READ_ACTION = 'read';
+const CRM_OPPORTUNITY_CREATE_ACTION = 'create';
+const CRM_OPPORTUNITY_UPDATE_ACTION = 'update';
 const REQUEST_ROLE_VOCABULARY = new Set(['admin', 'user']);
 const ROLE_ORDER = Object.freeze([
   'platform_admin',
@@ -39,9 +43,33 @@ const POLICY = Object.freeze({
       'manager',
       'member'
     ])
+  }),
+  [CRM_OPPORTUNITY_MODULE]: Object.freeze({
+    [CRM_OPPORTUNITY_READ_ACTION]: Object.freeze([
+      'company_owner',
+      'administrator',
+      'manager',
+      'member',
+      'read_only'
+    ]),
+    [CRM_OPPORTUNITY_CREATE_ACTION]: Object.freeze([
+      'company_owner',
+      'administrator',
+      'manager',
+      'member'
+    ]),
+    [CRM_OPPORTUNITY_UPDATE_ACTION]: Object.freeze([
+      'company_owner',
+      'administrator',
+      'manager',
+      'member'
+    ])
   })
 });
-const ORGANIZATION_SCOPED_MODULES = new Set([CRM_CUSTOMER_MODULE]);
+const ORGANIZATION_SCOPED_MODULES = new Set([
+  CRM_CUSTOMER_MODULE,
+  CRM_OPPORTUNITY_MODULE
+]);
 
 function denied(code) {
   return { allowed: false, code };
@@ -226,6 +254,10 @@ module.exports = {
   CRM_CUSTOMER_READ_ACTION,
   CRM_CUSTOMER_CREATE_ACTION,
   CRM_CUSTOMER_UPDATE_ACTION,
+  CRM_OPPORTUNITY_MODULE,
+  CRM_OPPORTUNITY_READ_ACTION,
+  CRM_OPPORTUNITY_CREATE_ACTION,
+  CRM_OPPORTUNITY_UPDATE_ACTION,
   POLICY,
   createModuleActionPermissionService
 };

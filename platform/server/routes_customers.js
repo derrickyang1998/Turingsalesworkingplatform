@@ -13,7 +13,11 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
     CRM_CUSTOMER_MODULE,
     CRM_CUSTOMER_READ_ACTION,
     CRM_CUSTOMER_CREATE_ACTION,
-    CRM_CUSTOMER_UPDATE_ACTION
+    CRM_CUSTOMER_UPDATE_ACTION,
+    CRM_OPPORTUNITY_MODULE,
+    CRM_OPPORTUNITY_READ_ACTION,
+    CRM_OPPORTUNITY_CREATE_ACTION,
+    CRM_OPPORTUNITY_UPDATE_ACTION
   } = require('./services/module_action_permission_service');
   const moduleActionPermissionService = options.moduleActionPermissionService ||
     createModuleActionPermissionService(db);
@@ -521,13 +525,13 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
     ));
   }
 
-  function permissionAuditEvent(req, action, decision, options) {
+  function permissionAuditEvent(req, module, action, decision, options) {
     const context = serviceContext(req);
     const settings = options || {};
     const event = {
       actor_user_id: context.actorUserId,
       organization_id: context.organizationId,
-      permission: `${CRM_CUSTOMER_MODULE}.${action}`,
+      permission: `${module}.${action}`,
       outcome: decision.allowed ? 'allowed' : 'denied',
       reason_code: decision.code,
       request_id: context.requestId,
@@ -535,28 +539,28 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
       target_id: safePermissionTargetId(req, settings.targetParam),
       ip_address: req.ip || null
     };
-    if (action === CRM_CUSTOMER_READ_ACTION) {
+    if (settings.applyScopeRules === true) {
       const scope = normalizedRequestedCustomerScope(req);
       if (scope === 'organization' || scope === 'team') event.scope = scope;
     }
     return event;
   }
 
-  function shouldAuditAllowedPermission(action, event) {
-    return action === CRM_CUSTOMER_READ_ACTION && event.scope === 'organization';
+  function shouldAuditAllowedPermission(event) {
+    return event.scope === 'organization';
   }
 
-  function requireCrmCustomerPermission(action, settings) {
-    return function crmCustomerPermissionMiddleware(req, res, next) {
+  function requireCrmPermission(module, action, settings) {
+    return function crmPermissionMiddleware(req, res, next) {
       const context = serviceContext(req);
       const decision = moduleActionPermissionService.authorize({
         principal: req.user,
         organizationId: context.organizationId,
-        module: CRM_CUSTOMER_MODULE,
+        module,
         action
       });
       let effectiveDecision = decision;
-      if (action === CRM_CUSTOMER_READ_ACTION && decision.allowed) {
+      if (settings.applyScopeRules === true && decision.allowed) {
         const scope = normalizedRequestedCustomerScope(req);
         if (!canUseRequestedCustomerScope(req, scope)) {
           effectiveDecision = {
@@ -566,9 +570,9 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
           };
         }
       }
-      const event = permissionAuditEvent(req, action, effectiveDecision, settings);
+      const event = permissionAuditEvent(req, module, action, effectiveDecision, settings);
       try {
-        if (!effectiveDecision.allowed || shouldAuditAllowedPermission(action, event)) {
+        if (!effectiveDecision.allowed || shouldAuditAllowedPermission(event)) {
           crmPermissionAudit(event);
         }
       } catch {
@@ -580,22 +584,39 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
         }
         return sendProblem(res, req, new CrmHttpError('CRM_PERMISSION_FORBIDDEN', 403));
       }
-      req.crmCustomerPermission = effectiveDecision;
+      if (module === CRM_CUSTOMER_MODULE) req.crmCustomerPermission = effectiveDecision;
+      if (module === CRM_OPPORTUNITY_MODULE) req.crmOpportunityPermission = effectiveDecision;
       return next();
     };
   }
 
-  const requireCrmCustomerRead = requireCrmCustomerPermission(CRM_CUSTOMER_READ_ACTION, {
+  const requireCrmCustomerRead = requireCrmPermission(CRM_CUSTOMER_MODULE, CRM_CUSTOMER_READ_ACTION, {
     targetType: 'customer',
-    targetParam: 'id'
+    targetParam: 'id',
+    applyScopeRules: true
   });
-  const requireCrmCustomerCreate = requireCrmCustomerPermission(CRM_CUSTOMER_CREATE_ACTION, {
+  const requireCrmCustomerCreate = requireCrmPermission(CRM_CUSTOMER_MODULE, CRM_CUSTOMER_CREATE_ACTION, {
     targetType: 'customer'
   });
-  const requireCrmCustomerUpdate = requireCrmCustomerPermission(CRM_CUSTOMER_UPDATE_ACTION, {
+  const requireCrmCustomerUpdate = requireCrmPermission(CRM_CUSTOMER_MODULE, CRM_CUSTOMER_UPDATE_ACTION, {
     targetType: 'customer',
     targetParam: 'id'
   });
+  const requireCrmOpportunityRead = requireCrmPermission(
+    CRM_OPPORTUNITY_MODULE,
+    CRM_OPPORTUNITY_READ_ACTION,
+    { targetType: 'opportunity', targetParam: 'id', applyScopeRules: true }
+  );
+  const requireCrmOpportunityCreate = requireCrmPermission(
+    CRM_OPPORTUNITY_MODULE,
+    CRM_OPPORTUNITY_CREATE_ACTION,
+    { targetType: 'opportunity' }
+  );
+  const requireCrmOpportunityUpdate = requireCrmPermission(
+    CRM_OPPORTUNITY_MODULE,
+    CRM_OPPORTUNITY_UPDATE_ACTION,
+    { targetType: 'opportunity', targetParam: 'id' }
+  );
 
   function callMutation(serviceMethod, req, command) {
     return crmCustomerService[serviceMethod](db, {
@@ -838,7 +859,7 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
     return res.json(statsResponse(req, readCanonicalFilter(req.query, 'customer')));
   }));
 
-  app.get('/api/customers/:id/detail', authMiddleware, requireCrmCustomerRead, crmHandler((req, res) => {
+  app.get('/api/customers/:id/detail', authMiddleware, requireCrmCustomerRead, requireCrmOpportunityRead, crmHandler((req, res) => {
     return res.json(callCustomerDetail(req));
   }));
 
@@ -899,21 +920,21 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
     return res.json(callMutation('mutateCustomerCustody', req, releaseCommand(req)));
   }));
 
-  app.get('/api/opportunities', authMiddleware, crmHandler((req, res) => {
+  app.get('/api/opportunities', authMiddleware, requireCrmOpportunityRead, crmHandler((req, res) => {
     const result = callQuery('listOpportunities', req, readCanonicalFilter(req.query, 'opportunity'));
     const rows = result.items.map((item) => ({ ...item, brand_name: item.customer_brand_name }));
     return res.json({ ...result, opportunities: rows, rows });
   }));
 
-  app.get('/api/opportunities/:id/detail', authMiddleware, crmHandler((req, res) => {
+  app.get('/api/opportunities/:id/detail', authMiddleware, requireCrmOpportunityRead, crmHandler((req, res) => {
     return res.json(callOpportunityDetail(req));
   }));
 
-  app.post('/api/opportunities', authMiddleware, crmHandler((req, res) => {
+  app.post('/api/opportunities', authMiddleware, requireCrmOpportunityCreate, crmHandler((req, res) => {
     return res.json(callMutation('createOrUpdateOpportunity', req, opportunityCreateCommand(req)));
   }));
 
-  app.put('/api/opportunities/:id', authMiddleware, crmHandler((req, res) => {
+  app.put('/api/opportunities/:id', authMiddleware, requireCrmOpportunityUpdate, crmHandler((req, res) => {
     return res.json(callMutation('createOrUpdateOpportunity', req, opportunityUpdateCommand(req)));
   }));
 

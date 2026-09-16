@@ -108,6 +108,15 @@ function crmCustomerRequest(principal, organizationId, action) {
   };
 }
 
+function crmOpportunityRequest(principal, organizationId, action) {
+  return {
+    principal,
+    organizationId,
+    module: 'crm.opportunity',
+    action
+  };
+}
+
 test('allows the declared platform administration action for an active live platform admin', () => {
   const { db, service } = createFixture();
   try {
@@ -414,6 +423,74 @@ test('fails closed when a tenant-scoped CRM permission omits or corrupts organiz
       [0, 'MALFORMED_ORGANIZATION']
     ]) {
       const request = crmCustomerRequest({ id: 2, role: 'user' }, organizationId, 'read');
+      if (organizationId === undefined) delete request.organizationId;
+      assert.deepEqual(service.authorize(request), { allowed: false, code });
+    }
+  } finally {
+    db.close();
+  }
+});
+
+test('projects exact CRM opportunity actions for writable, read-only, and unrelated platform roles', () => {
+  const { db, service } = createFixture();
+  try {
+    assert.deepEqual(service.projectModuleAccess({
+      principal: { id: 2, role: 'user' },
+      organizationId: 10,
+      module: 'crm.opportunity'
+    }), {
+      allowed: true,
+      code: 'ALLOWED',
+      principal: {
+        user_id: 2,
+        organization_id: 10,
+        roles: ['administrator', 'manager', 'member']
+      },
+      actions: ['read', 'create', 'update']
+    });
+    assert.deepEqual(service.projectModuleAccess({
+      principal: { id: 2, role: 'user' },
+      organizationId: 20,
+      module: 'crm.opportunity'
+    }), {
+      allowed: true,
+      code: 'ALLOWED',
+      principal: {
+        user_id: 2,
+        organization_id: 20,
+        roles: ['read_only']
+      },
+      actions: ['read']
+    });
+    assert.deepEqual(service.projectModuleAccess({
+      principal: { id: 1, role: 'admin' },
+      organizationId: 20,
+      module: 'crm.opportunity'
+    }), {
+      allowed: true,
+      code: 'ALLOWED',
+      principal: {
+        user_id: 1,
+        organization_id: 20,
+        roles: ['platform_admin']
+      },
+      actions: []
+    });
+  } finally {
+    db.close();
+  }
+});
+
+test('fails closed when CRM opportunity permission scope is missing or malformed', () => {
+  const { db, service } = createFixture();
+  try {
+    for (const [organizationId, code] of [
+      [undefined, 'ORGANIZATION_SCOPE_REQUIRED'],
+      [null, 'MALFORMED_ORGANIZATION'],
+      ['10', 'MALFORMED_ORGANIZATION'],
+      [0, 'MALFORMED_ORGANIZATION']
+    ]) {
+      const request = crmOpportunityRequest({ id: 2, role: 'user' }, organizationId, 'read');
       if (organizationId === undefined) delete request.organizationId;
       assert.deepEqual(service.authorize(request), { allowed: false, code });
     }

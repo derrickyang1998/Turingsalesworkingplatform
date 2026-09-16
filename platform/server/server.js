@@ -62,7 +62,8 @@ const {
   createModuleActionPermissionService,
   PLATFORM_ADMINISTRATION_MODULE,
   PLATFORM_ADMINISTRATION_MANAGE_ACTION,
-  CRM_CUSTOMER_MODULE
+  CRM_CUSTOMER_MODULE,
+  CRM_OPPORTUNITY_MODULE
 } = require('./services/module_action_permission_service');
 const moduleActionPermissionService = createModuleActionPermissionService(db);
 
@@ -72,11 +73,17 @@ function projectModulePermissions(principal, organizationId) {
     organizationId,
     module: CRM_CUSTOMER_MODULE
   });
-  if (!crmCustomerAccess.allowed) {
+  const crmOpportunityAccess = moduleActionPermissionService.projectModuleAccess({
+    principal,
+    organizationId,
+    module: CRM_OPPORTUNITY_MODULE
+  });
+  if (!crmCustomerAccess.allowed || !crmOpportunityAccess.allowed) {
     throw new Error('Module permissions unavailable');
   }
   return {
-    [CRM_CUSTOMER_MODULE]: crmCustomerAccess.actions.slice()
+    [CRM_CUSTOMER_MODULE]: crmCustomerAccess.actions.slice(),
+    [CRM_OPPORTUNITY_MODULE]: crmOpportunityAccess.actions.slice()
   };
 }
 const {

@@ -102,6 +102,14 @@ function currentUserHasCrmPermission(action) {
   return actions.indexOf(action) !== -1;
 }
 
+function currentUserHasCrmOpportunityPermission(action) {
+  var permissions = CURRENT_USER && CURRENT_USER.module_permissions;
+  var actions = permissions && Array.isArray(permissions['crm.opportunity'])
+    ? permissions['crm.opportunity']
+    : [];
+  return actions.indexOf(action) !== -1;
+}
+
 function currentUserCanUseCrmScope(scope) {
   if (!currentUserHasCrmPermission('read')) return false;
   if (scope === 'my' || scope === 'public_pool') return true;
@@ -132,6 +140,10 @@ function applyCrmPermissionPresentation() {
   var canUseOrganizationScope = currentUserCanUseCrmScope('organization');
   document.querySelectorAll('[data-crm-action="create"]').forEach(function(element) {
     element.hidden = !canCreate;
+  });
+  document.querySelectorAll('[data-crm-opportunity-action]').forEach(function(element) {
+    var action = element.getAttribute('data-crm-opportunity-action');
+    element.hidden = !currentUserHasCrmOpportunityPermission(action);
   });
   var teamScope = document.getElementById('customerScopeTeam');
   if (teamScope) teamScope.hidden = !canUseTeamScope;
@@ -1946,7 +1958,9 @@ function renderCustomerSidebar(d) {
   } else {
     html += '<span class="crm-control-unavailable" title="当前账号仅可查看">客户资料只读</span>';
   }
-  html += '<button class="btn btn-sm btn-primary" onclick="showOppModal(' + c.id + ')">💼 新增商机</button>';
+  if (currentUserHasCrmOpportunityPermission('create')) {
+    html += '<button class="btn btn-sm btn-primary" onclick="showOppModal(' + c.id + ')">💼 新增商机</button>';
+  }
   html += '<span class="crm-control-unavailable" title="硬删除已禁用">客户硬删除不可用</span></div>';
   html += '<div class="sidebar-section"><h4>下一步动作</h4><div style="display:flex;gap:8px;flex-wrap:wrap">';
   html += '<button class="btn btn-sm btn-outline" onclick="openWorkflowFromCustomer(\'m1\')">🔎 品牌洞察</button>';
@@ -2034,11 +2048,13 @@ async function loadOpportunities() {
     var tbody=document.getElementById('oppTableBody'); if(!tbody) return;
     if(!rows.length){tbody.innerHTML='<tr><td colspan="7" style="text-align:center;padding:30px;opacity:.5">暂无商机</td></tr>';return}
     var sl={discovery:'需求分析',qualification:'资格确认',proposal:'方案报价','negotiation':'谈判中',won:'已赢单',lost:'已输单'};
-    var h=''; for(var i=0;i<rows.length;i++){var o=rows[i]; h+='<tr data-opp-id="'+o.id+'" style="cursor:pointer" onclick="editOpportunity('+o.id+')"><td><strong>'+esc(o.name)+'</strong></td><td>'+(o.brand_name||'-')+'</td><td>¥'+(o.value||0).toLocaleString()+'</td><td><span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;background:'+(o.stage==='won'?'#e8f5e9':o.stage==='lost'?'#fbe9e7':'#fff3e0')+'">'+(sl[o.stage]||o.stage)+'</span></td><td>'+(o.win_probability||0)+'%</td><td style="font-size:11px">'+(o.expected_close_date||'-')+'</td><td><span class="crm-control-unavailable" title="硬删除已禁用">硬删除不可用</span></td></tr>'; }
+    var canUpdateOpportunity = currentUserHasCrmOpportunityPermission('update');
+    var h=''; for(var i=0;i<rows.length;i++){var o=rows[i]; var rowAction=canUpdateOpportunity ? ' style="cursor:pointer" onclick="editOpportunity('+o.id+')"' : ''; h+='<tr data-opp-id="'+o.id+'"'+rowAction+'><td><strong>'+esc(o.name)+'</strong></td><td>'+(o.brand_name||'-')+'</td><td>¥'+(o.value||0).toLocaleString()+'</td><td><span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;background:'+(o.stage==='won'?'#e8f5e9':o.stage==='lost'?'#fbe9e7':'#fff3e0')+'">'+(sl[o.stage]||o.stage)+'</span></td><td>'+(o.win_probability||0)+'%</td><td style="font-size:11px">'+(o.expected_close_date||'-')+'</td><td><span class="crm-control-unavailable" title="硬删除已禁用">硬删除不可用</span></td></tr>'; }
     tbody.innerHTML=h; var cnt=document.getElementById('oppCount'); if(cnt)cnt.textContent=rows.length+' 条商机';
   } catch(e){ var tbe=document.getElementById('oppTableBody'); if(tbe)tbe.innerHTML='<tr><td colspan="7" style="text-align:center;padding:30px;color:#d94641">加载失败: '+esc(e.message)+'</td></tr>'; }
 }
 function showOppModal(cid) {
+  if (!currentUserHasCrmOpportunityPermission('create')) return rejectCrmBrowserAction();
   currentOppCustomerId = cid;
   currentOppOriginalStage = null;
   document.getElementById('oppEditId').value = '';
@@ -2053,11 +2069,18 @@ function showOppModal(cid) {
     var el = document.getElementById(id);
     if (el) el.value = '';
   });
+  var saveButton = document.querySelector('#oppModalOverlay [data-crm-opportunity-action]');
+  if (saveButton) {
+    saveButton.setAttribute('data-crm-opportunity-action', 'create');
+    saveButton.hidden = false;
+  }
   document.getElementById('oppModalTitle').textContent = '新增商机';
   document.getElementById('oppModalOverlay').style.display = 'flex';
 }
 function closeOppModal() { document.getElementById('oppModalOverlay').style.display='none'; }
 async function saveOpportunity() {
+  var editId=document.getElementById('oppEditId')?.value;
+  if (!currentUserHasCrmOpportunityPermission(editId ? 'update' : 'create')) return rejectCrmBrowserAction();
   var name=document.getElementById('oppName').value.trim(); if(!name){toast('请输入商机名称','error');return}
   var customerId=currentOppCustomerId||document.getElementById('oppCustomerId').value; if(!customerId){toast('未指定客户，请从客户详情页创建商机','error');return}
   var stage = document.getElementById('oppStage').value;
@@ -2065,7 +2088,6 @@ async function saveOpportunity() {
   var probability = probabilityInput === '' ? 50 : Number(probabilityInput);
   if (!Number.isFinite(probability)) probability = 50;
   var body={customer_id:parseInt(customerId)||customerId,name:name,value:Number(document.getElementById('oppValue').value)||0,win_probability:probability,product_name:document.getElementById('oppProduct').value.trim(),channel_type:document.getElementById('oppChannel').value.trim(),expected_close_date:document.getElementById('oppCloseDate').value||null,decision_chain:document.getElementById('oppDecisionChain')?.value.trim()||'',loss_reason:document.getElementById('oppLossReason')?.value.trim()||'',notes:document.getElementById('oppNotes').value.trim()};
-  var editId=document.getElementById('oppEditId')?.value;
   if (editId && currentOppOriginalStage && stage !== currentOppOriginalStage) {
     var transitionEvidence = typeof collectOpportunityTransitionEvidence === 'function'
       ? await collectOpportunityTransitionEvidence(editId, currentOppOriginalStage, stage)
@@ -2107,6 +2129,7 @@ async function collectOpportunityTransitionEvidence(opportunityId, fromStage, to
   });
 }
 async function editOpportunity(id) {
+  if (!currentUserHasCrmOpportunityPermission('update')) return rejectCrmBrowserAction();
   try {
     var detailResponse = await apiFetch('/opportunities/' + encodeURIComponent(id) + '/detail');
     await requireSuccessfulCustomerMutation(detailResponse, '商机详情加载失败');
@@ -2135,6 +2158,11 @@ async function editOpportunity(id) {
     document.getElementById('oppDecisionChain').value = opp.decision_chain || '';
     document.getElementById('oppLossReason').value = opp.loss_reason || '';
     document.getElementById('oppNotes').value = opp.notes || '';
+    var saveButton = document.querySelector('#oppModalOverlay [data-crm-opportunity-action]');
+    if (saveButton) {
+      saveButton.setAttribute('data-crm-opportunity-action', 'update');
+      saveButton.hidden = false;
+    }
     document.getElementById('oppModalTitle').textContent = '编辑商机: ' + opp.name;
     document.getElementById('oppModalOverlay').style.display = 'flex';
   } catch (e) {

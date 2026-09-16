@@ -740,7 +740,8 @@ test('login and auth me preserve the user object and add current auth context', 
       is_company_owner: true
     });
     assert.deepEqual(login.body.user.module_permissions, {
-      'crm.customer': ['read', 'create', 'update']
+      'crm.customer': ['read', 'create', 'update'],
+      'crm.opportunity': ['read', 'create', 'update']
     });
     assert.equal(Array.isArray(login.body.auth_context.teams), true);
     assert.equal(login.body.auth_context.teams.length > 0, true);
@@ -826,7 +827,8 @@ test('read-only access is live, revokes old sessions, permits GET, blocks all bu
     assert.deepEqual(readOnlyLogin.body.user.access_roles, ['read_only']);
     assert.equal(readOnlyLogin.body.user.organization_access.access_mode, 'read_only');
     assert.deepEqual(readOnlyLogin.body.user.module_permissions, {
-      'crm.customer': ['read']
+      'crm.customer': ['read'],
+      'crm.opportunity': ['read']
     });
 
     const readable = await jsonRequest(server.baseUrl, '/api/demands', {
