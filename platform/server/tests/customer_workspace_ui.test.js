@@ -53,6 +53,132 @@ function escapeHtml(value) {
     .replace(/'/g, '&#039;');
 }
 
+function createContactRefreshRaceHarness() {
+  const elements = {};
+  const document = {
+    activeElement: null,
+    getElementById: (id) => elements[id] || null
+  };
+  const customerDetailDialog = {
+    id: 'customerDetailDialog',
+    contains(node) { return node === elements.customerContactSection; }
+  };
+  const contactDialog = {
+    id: 'contactDialog',
+    dataset: { requestGeneration: '0' },
+    setAttribute() {},
+    focus() { document.activeElement = this; }
+  };
+  const contactName = {
+    value: '',
+    focus() { document.activeElement = this; }
+  };
+  const detailFocus = {
+    id: 'detail-focus',
+    isConnected: true,
+    focus() { document.activeElement = this; }
+  };
+  Object.assign(elements, {
+    contactModalOverlay: {
+      hidden: true,
+      inert: true,
+      style: {},
+      removeAttribute() {},
+      setAttribute() {}
+    },
+    contactDialog,
+    customerDetailDialog,
+    contactModalTitle: { textContent: '' },
+    contactEditId: { value: '' },
+    contactCustomerId: { value: '' },
+    contactName,
+    contactRole: { value: '' },
+    contactEmail: { value: '' },
+    contactPhone: { value: '' },
+    contactIsPreferred: { checked: false },
+    contactSaveButton: {
+      hidden: false,
+      disabled: false,
+      textContent: '保存',
+      setAttribute(name, value) { this[name] = value; }
+    },
+    customerContactSection: detailFocus
+  });
+
+  const dialogStack = [customerDetailDialog];
+  const accessibility = {
+    activeDialog: customerDetailDialog,
+    openDialog(dialog) {
+      dialogStack.push(dialog);
+      this.activeDialog = dialog;
+      if (dialog === contactDialog) contactName.focus();
+      else detailFocus.focus();
+    },
+    closeDialog(dialog) {
+      const index = dialogStack.lastIndexOf(dialog);
+      if (index !== -1) dialogStack.splice(index, 1);
+      this.activeDialog = dialogStack[dialogStack.length - 1] || null;
+      detailFocus.focus();
+    }
+  };
+  document.activeElement = detailFocus;
+
+  let releaseDetail = null;
+  let renderCount = 0;
+  const globals = {
+    _lastCustomerDetailData: null,
+    currentUserHasCrmContactPermission: () => true,
+    rejectCrmBrowserAction: () => false,
+    document,
+    window: { TMAccessibility: accessibility },
+    showConfirm: async () => true,
+    apiFetch: async (url) => {
+      if (url === '/customers/41/detail') {
+        return new Promise((resolve) => {
+          releaseDetail = () => resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({
+              customer: { id: 41, brand_name: 'Refresh result' },
+              contacts: [],
+              opportunities: [],
+              activity: []
+            })
+          });
+        });
+      }
+      return { ok: true, status: 200 };
+    },
+    renderCustomerSidebar() {
+      renderCount += 1;
+      elements.customerContactSection = {
+        id: 'refreshed-contact-section',
+        isConnected: true,
+        focus() { document.activeElement = this; }
+      };
+      accessibility.openDialog(customerDetailDialog);
+      elements.customerContactSection.focus();
+    },
+    toast() {}
+  };
+
+  return {
+    elements,
+    document,
+    accessibility,
+    dialogStack,
+    globals,
+    renderCount: () => renderCount,
+    async waitForDetailRequest() {
+      while (!releaseDetail) await new Promise((resolve) => setImmediate(resolve));
+    },
+    releaseDetail() {
+      assert.equal(typeof releaseDetail, 'function');
+      releaseDetail();
+    }
+  };
+}
+
 test('customer workspace exposes separate board and detail pages', () => {
   assert.match(indexHtml, /id="page-m0"/);
   assert.match(indexHtml, /id="page-m0-detail"/);
@@ -700,7 +826,7 @@ test('contact create and update use exact endpoints and await refreshed detail a
               }
             };
             events.push('refresh-complete');
-            resolve();
+            resolve(true);
           };
         }),
         toast: (message, type) => events.push(`toast:${type || 'success'}:${message}`)
@@ -810,6 +936,52 @@ test('an older Alice save cannot close or refresh a reopened Bob contact draft',
   assert.equal(elements.contactSaveButton.textContent, '保存');
   assert.equal(refreshed, 0);
   assert.equal(closeCount, 1);
+});
+
+test('contact save refresh abandons before render when Bob opens during the detail fetch', async () => {
+  const harness = createContactRefreshRaceHarness();
+  const { requireSuccessfulCustomerMutation, openCustomerDetail, setContactDialogMode,
+    openContactDialog, closeContactDialog, showAddContact, saveCustomerContact } = evaluateAppFunctions(
+    [
+      'requireSuccessfulCustomerMutation',
+      'openCustomerDetail',
+      'setContactDialogMode',
+      'openContactDialog',
+      'closeContactDialog',
+      'showAddContact',
+      'saveCustomerContact'
+    ],
+    harness.globals
+  );
+
+  showAddContact(41);
+  harness.elements.contactName.value = 'Alice';
+  const aliceSave = saveCustomerContact();
+  await harness.waitForDetailRequest();
+
+  showAddContact(41);
+  harness.elements.contactName.value = 'Bob';
+  const bobGeneration = harness.elements.contactDialog.dataset.requestGeneration;
+  assert.deepEqual(harness.dialogStack, [
+    harness.elements.customerDetailDialog,
+    harness.elements.contactDialog
+  ]);
+  assert.equal(harness.accessibility.activeDialog, harness.elements.contactDialog);
+  assert.equal(harness.document.activeElement, harness.elements.contactName);
+
+  harness.releaseDetail();
+  await aliceSave;
+
+  assert.equal(harness.renderCount(), 0);
+  assert.equal(harness.elements.contactModalOverlay.hidden, false);
+  assert.equal(harness.elements.contactName.value, 'Bob');
+  assert.equal(harness.elements.contactDialog.dataset.requestGeneration, bobGeneration);
+  assert.deepEqual(harness.dialogStack, [
+    harness.elements.customerDetailDialog,
+    harness.elements.contactDialog
+  ]);
+  assert.equal(harness.accessibility.activeDialog, harness.elements.contactDialog);
+  assert.equal(harness.document.activeElement, harness.elements.contactName);
 });
 
 test('non-success contact save response stays open and never refreshes detail', async () => {
@@ -937,6 +1109,49 @@ test('an older archive response cannot refresh or steal focus from a newly opene
   assert.equal(document.activeElement, elements.contactName);
 });
 
+test('contact archive refresh abandons before render when Bob opens during the detail fetch', async () => {
+  const harness = createContactRefreshRaceHarness();
+  const { requireSuccessfulCustomerMutation, openCustomerDetail, setContactDialogMode,
+    openContactDialog, showAddContact, archiveCustomerContact } = evaluateAppFunctions(
+    [
+      'requireSuccessfulCustomerMutation',
+      'openCustomerDetail',
+      'setContactDialogMode',
+      'openContactDialog',
+      'showAddContact',
+      'archiveCustomerContact'
+    ],
+    harness.globals
+  );
+
+  const archivePromise = archiveCustomerContact(41, 7);
+  await harness.waitForDetailRequest();
+
+  showAddContact(41);
+  harness.elements.contactName.value = 'Bob';
+  const bobGeneration = harness.elements.contactDialog.dataset.requestGeneration;
+  assert.deepEqual(harness.dialogStack, [
+    harness.elements.customerDetailDialog,
+    harness.elements.contactDialog
+  ]);
+  assert.equal(harness.accessibility.activeDialog, harness.elements.contactDialog);
+  assert.equal(harness.document.activeElement, harness.elements.contactName);
+
+  harness.releaseDetail();
+  await archivePromise;
+
+  assert.equal(harness.renderCount(), 0);
+  assert.equal(harness.elements.contactModalOverlay.hidden, false);
+  assert.equal(harness.elements.contactName.value, 'Bob');
+  assert.equal(harness.elements.contactDialog.dataset.requestGeneration, bobGeneration);
+  assert.deepEqual(harness.dialogStack, [
+    harness.elements.customerDetailDialog,
+    harness.elements.contactDialog
+  ]);
+  assert.equal(harness.accessibility.activeDialog, harness.elements.contactDialog);
+  assert.equal(harness.document.activeElement, harness.elements.contactName);
+});
+
 test('contact archive confirms soft deletion, uses the archive endpoint, and awaits detail refresh', async () => {
   const confirmations = [];
   const events = [];
@@ -980,7 +1195,7 @@ test('contact archive confirms soft deletion, uses the archive endpoint, and awa
             }
           };
           events.push('refresh-complete');
-          resolve();
+          resolve(true);
         };
       }),
       toast: (message) => events.push(`toast:${message}`)

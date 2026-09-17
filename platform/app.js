@@ -1662,14 +1662,19 @@ function showConfirm(title, msg) {
   });
 }
 
-async function openCustomerDetail(id) {
+async function openCustomerDetail(id, options) {
   try { var r = await apiFetch('/customers/' + id + '/detail');
     await requireSuccessfulCustomerMutation(r, '客户详情加载失败');
     var d = await r.json();
-    if (!d.customer) { toast('客户不存在', 'error'); return; }
+    if (!d.customer) { toast('客户不存在', 'error'); return false; }
+    var applyGuard = options && typeof options.applyGuard === 'function'
+      ? options.applyGuard
+      : null;
+    if (applyGuard && applyGuard(d) !== true) return false;
     _lastCustomerDetailData = d;
     renderCustomerSidebar(d);
-  } catch(e) { toast('加载失败: ' + e.message, 'error'); }
+    return true;
+  } catch(e) { toast('加载失败: ' + e.message, 'error'); return false; }
 }
 function closeCustomerDetail() {
   var dialog = document.getElementById('customerDetailDialog');
@@ -2256,10 +2261,20 @@ async function saveCustomerContact() {
     if (!requestOwnsCurrentDraft()) return true;
     toast(contactId ? '联系人已更新' : '联系人已创建');
     closeContactDialog();
-    await openCustomerDetail(customerId);
+    var refreshDialog = document.getElementById('contactDialog');
+    var refreshGeneration = refreshDialog ? String(refreshDialog.dataset.requestGeneration || '') : '';
+    function refreshOwnsDialogGeneration() {
+      var currentDialog = document.getElementById('contactDialog');
+      return !!currentDialog && currentDialog === refreshDialog &&
+        String(currentDialog.dataset.requestGeneration || '') === refreshGeneration;
+    }
+    var refreshApplied = await openCustomerDetail(customerId, {
+      applyGuard: refreshOwnsDialogGeneration
+    });
     var contactSection = document.getElementById('customerContactSection');
     var customerDetailDialog = document.getElementById('customerDetailDialog');
-    if (contactSection && typeof contactSection.focus === 'function' && contactSection.isConnected !== false &&
+    if (refreshApplied === true && refreshOwnsDialogGeneration() &&
+        contactSection && typeof contactSection.focus === 'function' && contactSection.isConnected !== false &&
         (!customerDetailDialog || typeof customerDetailDialog.contains !== 'function' || customerDetailDialog.contains(contactSection))) {
       contactSection.focus();
     }
@@ -2304,10 +2319,20 @@ async function archiveCustomerContact(customerId, contactId) {
     await requireSuccessfulCustomerMutation(response, '联系人归档失败');
     if (!requestOwnsContactDialogGeneration()) return true;
     toast('联系人已归档');
-    await openCustomerDetail(numericCustomerId);
+    var refreshDialog = document.getElementById('contactDialog');
+    var refreshGeneration = refreshDialog ? String(refreshDialog.dataset.requestGeneration || '') : '';
+    function refreshOwnsDialogGeneration() {
+      var currentDialog = document.getElementById('contactDialog');
+      return !!currentDialog && currentDialog === refreshDialog &&
+        String(currentDialog.dataset.requestGeneration || '') === refreshGeneration;
+    }
+    var refreshApplied = await openCustomerDetail(numericCustomerId, {
+      applyGuard: refreshOwnsDialogGeneration
+    });
     var contactSection = document.getElementById('customerContactSection');
     var customerDetailDialog = document.getElementById('customerDetailDialog');
-    if (contactSection && typeof contactSection.focus === 'function' && contactSection.isConnected !== false &&
+    if (refreshApplied === true && refreshOwnsDialogGeneration() &&
+        contactSection && typeof contactSection.focus === 'function' && contactSection.isConnected !== false &&
         (!customerDetailDialog || typeof customerDetailDialog.contains !== 'function' || customerDetailDialog.contains(contactSection))) {
       contactSection.focus();
     }
