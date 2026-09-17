@@ -1306,3 +1306,148 @@ test('crm http: members cannot widen opportunity reads to team or organization s
     }
   ]);
 });
+
+test('crm http: customer detail requires embedded contact read before detail dispatch', async () => {
+  const permissionCalls = [];
+  const auditEvents = [];
+  const harness = makeHarness({
+    moduleActionPermissionService: {
+      authorize(input) {
+        permissionCalls.push(input);
+        if (input.module === 'crm.contact') {
+          return {
+            allowed: false,
+            code: 'ACTION_FORBIDDEN',
+            principal: {
+              user_id: input.principal.id,
+              organization_id: input.organizationId,
+              roles: ['read_only']
+            }
+          };
+        }
+        return {
+          allowed: true,
+          code: 'ALLOWED',
+          principal: {
+            user_id: input.principal.id,
+            organization_id: input.organizationId,
+            roles: ['member']
+          }
+        };
+      }
+    },
+    crmPermissionAudit(event) {
+      auditEvents.push(event);
+    }
+  });
+
+  const response = await harness.invoke('GET /api/customers/:id/detail', {
+    params: { id: '41' },
+    requestId: 'embedded-contact-read-denied'
+  });
+
+  assert.equal(response.statusCode, 403);
+  assert.equal(response.payload.code, 'CRM_PERMISSION_FORBIDDEN');
+  assert.equal(harness.calls.filter((call) => call.method === 'getCustomerDetail').length, 0);
+  assert.deepEqual(permissionCalls.map((call) => `${call.module}.${call.action}`), [
+    'crm.customer.read',
+    'crm.opportunity.read',
+    'crm.contact.read'
+  ]);
+  assert.deepEqual(auditEvents, [{
+    actor_user_id: 101,
+    organization_id: 501,
+    permission: 'crm.contact.read',
+    outcome: 'denied',
+    reason_code: 'ACTION_FORBIDDEN',
+    request_id: 'embedded-contact-read-denied',
+    target_type: 'customer',
+    target_id: 41,
+    ip_address: '127.0.0.1'
+  }]);
+});
+
+test('crm http: contact create, update, and archive use named permissions before command parsing', async () => {
+  const permissionCalls = [];
+  const auditEvents = [];
+  const harness = makeHarness({
+    moduleActionPermissionService: {
+      authorize(input) {
+        permissionCalls.push(input);
+        return {
+          allowed: false,
+          code: 'ACTION_FORBIDDEN',
+          principal: {
+            user_id: input.principal.id,
+            organization_id: input.organizationId,
+            roles: ['read_only']
+          }
+        };
+      }
+    },
+    crmPermissionAudit(event) {
+      auditEvents.push(event);
+    }
+  });
+  const cases = [
+    ['POST /api/customers/:customerId/contacts', { customerId: 'not-a-customer-id' }, 'create', null],
+    ['PUT /api/customers/:customerId/contacts/:contactId', {
+      customerId: '41', contactId: '081'
+    }, 'update', null],
+    ['POST /api/customers/:customerId/contacts/:contactId/archive', {
+      customerId: '41', contactId: '81'
+    }, 'update', 81]
+  ];
+
+  for (const [route, params, action, targetId] of cases) {
+    const requestId = `contact-${action}-${targetId === null ? 'invalid' : targetId}`;
+    const response = await harness.invoke(route, {
+      params,
+      body: { name: 'must not be parsed', unexpected: 'private body value' },
+      requestId
+    });
+    assert.equal(response.statusCode, 403, route);
+    assert.equal(response.payload.code, 'CRM_PERMISSION_FORBIDDEN', route);
+  }
+
+  assert.equal(harness.calls.length, 0);
+  assert.deepEqual(permissionCalls.map((call) => ({
+    module: call.module,
+    action: call.action,
+    organizationId: call.organizationId
+  })), [
+    { module: 'crm.contact', action: 'create', organizationId: 501 },
+    { module: 'crm.contact', action: 'update', organizationId: 501 },
+    { module: 'crm.contact', action: 'update', organizationId: 501 }
+  ]);
+  assert.deepEqual(auditEvents.map((event) => ({
+    permission: event.permission,
+    outcome: event.outcome,
+    reason_code: event.reason_code,
+    target_type: event.target_type,
+    target_id: event.target_id
+  })), [
+    {
+      permission: 'crm.contact.create',
+      outcome: 'denied',
+      reason_code: 'ACTION_FORBIDDEN',
+      target_type: 'contact',
+      target_id: null
+    },
+    {
+      permission: 'crm.contact.update',
+      outcome: 'denied',
+      reason_code: 'ACTION_FORBIDDEN',
+      target_type: 'contact',
+      target_id: null
+    },
+    {
+      permission: 'crm.contact.update',
+      outcome: 'denied',
+      reason_code: 'ACTION_FORBIDDEN',
+      target_type: 'contact',
+      target_id: 81
+    }
+  ]);
+  assert.doesNotMatch(JSON.stringify(auditEvents), /not-a-customer-id|081|private body value/);
+});

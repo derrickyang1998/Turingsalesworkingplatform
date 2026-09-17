@@ -117,6 +117,15 @@ function crmOpportunityRequest(principal, organizationId, action) {
   };
 }
 
+function crmContactRequest(principal, organizationId, action) {
+  return {
+    principal,
+    organizationId,
+    module: 'crm.contact',
+    action
+  };
+}
+
 test('allows the declared platform administration action for an active live platform admin', () => {
   const { db, service } = createFixture();
   try {
@@ -491,6 +500,100 @@ test('fails closed when CRM opportunity permission scope is missing or malformed
       [0, 'MALFORMED_ORGANIZATION']
     ]) {
       const request = crmOpportunityRequest({ id: 2, role: 'user' }, organizationId, 'read');
+      if (organizationId === undefined) delete request.organizationId;
+      assert.deepEqual(service.authorize(request), { allowed: false, code });
+    }
+  } finally {
+    db.close();
+  }
+});
+
+test('projects exact CRM contact actions for writable, read-only, and platform-admin-only principals', () => {
+  const { db, service } = createFixture();
+  try {
+    assert.deepEqual(service.projectModuleAccess({
+      principal: { id: 2, role: 'user' },
+      organizationId: 10,
+      module: 'crm.contact'
+    }), {
+      allowed: true,
+      code: 'ALLOWED',
+      principal: {
+        user_id: 2,
+        organization_id: 10,
+        roles: ['administrator', 'manager', 'member']
+      },
+      actions: ['read', 'create', 'update']
+    });
+    assert.deepEqual(service.projectModuleAccess({
+      principal: { id: 2, role: 'user' },
+      organizationId: 20,
+      module: 'crm.contact'
+    }), {
+      allowed: true,
+      code: 'ALLOWED',
+      principal: {
+        user_id: 2,
+        organization_id: 20,
+        roles: ['read_only']
+      },
+      actions: ['read']
+    });
+    assert.deepEqual(service.projectModuleAccess({
+      principal: { id: 1, role: 'admin' },
+      organizationId: 20,
+      module: 'crm.contact'
+    }), {
+      allowed: true,
+      code: 'ALLOWED',
+      principal: {
+        user_id: 1,
+        organization_id: 20,
+        roles: ['platform_admin']
+      },
+      actions: []
+    });
+  } finally {
+    db.close();
+  }
+});
+
+test('authorizes CRM contact read and writes by action while failing closed without a valid organization scope', () => {
+  const { db, service } = createFixture();
+  try {
+    assert.equal(
+      service.authorize(crmContactRequest({ id: 2, role: 'user' }, 10, 'read')).allowed,
+      true
+    );
+    assert.equal(
+      service.authorize(crmContactRequest({ id: 2, role: 'user' }, 10, 'create')).allowed,
+      true
+    );
+    assert.equal(
+      service.authorize(crmContactRequest({ id: 2, role: 'user' }, 10, 'update')).allowed,
+      true
+    );
+    for (const action of ['create', 'update']) {
+      assert.deepEqual(
+        service.authorize(crmContactRequest({ id: 2, role: 'user' }, 20, action)),
+        {
+          allowed: false,
+          code: 'ACTION_FORBIDDEN',
+          principal: {
+            user_id: 2,
+            organization_id: 20,
+            roles: ['read_only']
+          }
+        }
+      );
+    }
+    for (const [organizationId, code] of [
+      [undefined, 'ORGANIZATION_SCOPE_REQUIRED'],
+      [null, 'MALFORMED_ORGANIZATION'],
+      ['10', 'MALFORMED_ORGANIZATION'],
+      [0, 'MALFORMED_ORGANIZATION']
+    ]) {
+      const request = crmContactRequest({ id: 2, role: 'user' }, organizationId, 'read');
       if (organizationId === undefined) delete request.organizationId;
       assert.deepEqual(service.authorize(request), { allowed: false, code });
     }

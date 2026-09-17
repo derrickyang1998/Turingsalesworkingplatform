@@ -2849,20 +2849,32 @@ test('aggregate child: contact create update and archive keep PII out of evidenc
   assert.equal(rearchive.code, 'CRM_TRANSITION_INVALID');
 });
 
-test('aggregate child: contact preferred conflict composite identity and root authority are bounded', (t) => {
+test('aggregate child: selecting a primary contact atomically replaces the prior active primary', (t) => {
   const db = openFixture(t);
   insertContact(db, { id: IDS.contactA, customerId: IDS.ownedA, isPreferred: 1 });
   insertContact(db, { id: IDS.contactOtherCustomer, customerId: IDS.transferredA });
-  const activityCount = db.prepare('SELECT COUNT(*) AS count FROM customer_activity').get().count;
 
-  const conflict = captureError(() => service.mutateCustomerContact(db, contactMutation(IDS.ownerA, {
+  const created = service.mutateCustomerContact(db, contactMutation(IDS.ownerA, {
     action: 'create',
     customerId: IDS.ownedA,
     values: { name: 'Another preferred contact', is_preferred: 1 }
-  }, { requestId: 'contact-preferred-conflict' })));
-  assert.equal(conflict.code, 'CRM_MUTATION_INVALID');
-  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM crm_audit_events WHERE request_id='contact-preferred-conflict'").get().count, 0);
-  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM customer_activity').get().count, activityCount);
+  }, { requestId: 'contact-primary-replacement' }));
+  assert.equal(created.action, 'created');
+  assert.equal(created.record.is_preferred, true);
+  assert.deepEqual(db.prepare(`
+    SELECT id,is_preferred,archived_at
+    FROM customer_contacts
+    WHERE org_id=? AND customer_id=?
+    ORDER BY id
+  `).all(IDS.orgA, IDS.ownedA), [
+    { id: IDS.contactA, is_preferred: 0, archived_at: null },
+    { id: created.record.id, is_preferred: 1, archived_at: null }
+  ]);
+  assert.equal(db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM customer_contacts
+    WHERE org_id=? AND customer_id=? AND archived_at IS NULL AND is_preferred=1
+  `).get(IDS.orgA, IDS.ownedA).count, 1);
 
   for (const contactId of [IDS.contactOtherCustomer, 79999]) {
     const missing = captureError(() => service.mutateCustomerContact(db, contactMutation(IDS.ownerA, {

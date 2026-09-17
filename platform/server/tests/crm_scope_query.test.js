@@ -183,6 +183,41 @@ function insertOpportunity(db, {
   );
 }
 
+function insertContact(db, {
+  id,
+  customerId = IDS.ownedA,
+  orgId = IDS.orgA,
+  name = `Contact ${id}`,
+  role = null,
+  email = null,
+  phone = null,
+  isPreferred = 0,
+  createdBy = IDS.ownerA,
+  createdAt = FIXED_AT,
+  updatedAt = FIXED_AT,
+  archivedAt = null
+}) {
+  db.prepare(`
+    INSERT INTO customer_contacts (
+      id,org_id,customer_id,name,role,email,phone,is_preferred,
+      created_by,created_at,updated_at,archived_at
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+  `).run(
+    id,
+    orgId,
+    customerId,
+    name,
+    role,
+    email,
+    phone,
+    isPreferred,
+    createdBy,
+    createdAt,
+    updatedAt,
+    archivedAt
+  );
+}
+
 function insertFilterCustomer(db, id, overrides = {}) {
   const values = {
     id,
@@ -652,6 +687,64 @@ test('customer detail bounds high-cardinality opportunity collections', (t) => {
   assert.deepEqual(detail.meta.opportunities, { limit: 100, has_more: true });
   assert.equal(detail.opportunities[0].id, 50100);
   assert.equal(detail.opportunities[99].id, 50001);
+});
+
+test('customer detail embeds active contacts primary-first with bounded metadata and no archived records', (t) => {
+  const db = openFixture(t);
+  insertContact(db, {
+    id: 30001,
+    name: 'Secondary first by id',
+    role: 'Operations',
+    email: 'secondary@example.invalid',
+    phone: '+1-555-0101'
+  });
+  insertContact(db, {
+    id: 30003,
+    name: 'Primary contact',
+    role: 'Executive sponsor',
+    email: 'primary@example.invalid',
+    phone: '+1-555-0103',
+    isPreferred: 1
+  });
+  insertContact(db, {
+    id: 30002,
+    name: 'Secondary second by id',
+    email: 'secondary-two@example.invalid'
+  });
+  insertContact(db, {
+    id: 30004,
+    name: 'Archived contact must be omitted',
+    archivedAt: '2026-08-10 00:00:00'
+  });
+  for (let index = 0; index < 100; index += 1) {
+    insertContact(db, {
+      id: 30100 + index,
+      name: `Bounded contact ${index}`
+    });
+  }
+
+  const detail = getCustomerDetail(db, {
+    actorUserId: IDS.ownerA,
+    organizationId: IDS.orgA,
+    customerId: IDS.ownedA,
+    requestId: 'detail-active-contacts'
+  });
+
+  assert.equal(detail.contacts.length, 100);
+  assert.deepEqual(detail.contacts.slice(0, 3).map((contact) => contact.id), [30003, 30001, 30002]);
+  assert.equal(detail.contacts.some((contact) => contact.id === 30004), false);
+  assert.deepEqual(detail.contacts[0], {
+    id: 30003,
+    customer_id: IDS.ownedA,
+    name: 'Primary contact',
+    role: 'Executive sponsor',
+    email: 'primary@example.invalid',
+    phone: '+1-555-0103',
+    is_preferred: true
+  });
+  assert.deepEqual(detail.meta.contacts, { limit: 100, has_more: true });
+  assert.equal(Object.isFrozen(detail.contacts), true);
+  assert.equal(Object.isFrozen(detail.contacts[0]), true);
 });
 
 test('opportunity detail resolves a recently updated target outside the bounded customer aggregate', (t) => {

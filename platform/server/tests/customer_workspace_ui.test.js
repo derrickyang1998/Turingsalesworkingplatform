@@ -141,6 +141,41 @@ test('opportunity controls consume server-projected create and update actions', 
   assert.match(appFunction('editOpportunity'), /currentUserHasCrmOpportunityPermission\('update'\)/);
 });
 
+test('customer detail keeps the contact workflow embedded and consumes only server-projected contact actions', () => {
+  assert.doesNotMatch(indexHtml, /id="page-contacts"/);
+  assert.match(indexHtml, /id="contactDialog"[^>]*role="dialog"/);
+  assert.match(indexHtml, /id="contactName"[^>]*required/);
+  assert.match(indexHtml, /data-crm-contact-action="create"/);
+  assert.match(appJs, /function currentUserHasCrmContactPermission\(action\)/);
+  assert.match(appJs, /permissions\['crm\.contact'\]/);
+
+  const presentation = appFunction('applyCrmPermissionPresentation');
+  assert.match(presentation, /\[data-crm-contact-action\]/);
+  assert.match(presentation, /currentUserHasCrmContactPermission\(action\)/);
+
+  const sidebar = appFunction('renderCustomerSidebar');
+  assert.match(sidebar, /联系人\s*\(\$\{contacts\.length\}\)/);
+  assert.match(sidebar, /detail\.contacts/);
+  assert.match(sidebar, /currentUserHasCrmContactPermission\('create'\)/);
+  assert.match(sidebar, /currentUserHasCrmContactPermission\('update'\)/);
+  assert.match(sidebar, /esc\(contact\.name/);
+  assert.match(sidebar, /esc\(contact\.role/);
+  assert.match(sidebar, /esc\(contact\.email/);
+  assert.match(sidebar, /esc\(contact\.phone/);
+  assert.match(sidebar, /encodeURIComponent\(contact\.email/);
+  assert.match(sidebar, /encodeURIComponent\(contact\.phone/);
+
+  assert.match(appFunction('showContactModal'), /currentUserHasCrmContactPermission\('create'\)/);
+  assert.match(
+    appFunction('saveContact'),
+    /currentUserHasCrmContactPermission\(contactEditId \? 'update' : 'create'\)/
+  );
+  assert.match(appFunction('editContact'), /currentUserHasCrmContactPermission\('update'\)/);
+  assert.match(appFunction('archiveContact'), /currentUserHasCrmContactPermission\('update'\)/);
+  assert.match(appFunction('archiveContact'), /confirm\(/);
+  assert.match(appFunction('archiveContact'), /openCustomerDetail\(customerId\)/);
+});
+
 test('opportunity table exposes focusable view actions and permission-gated edit buttons', () => {
   const loadOpportunities = appFunction('loadOpportunities');
   assert.match(loadOpportunities, /currentUserHasCrmOpportunityPermission\('update'\)/);

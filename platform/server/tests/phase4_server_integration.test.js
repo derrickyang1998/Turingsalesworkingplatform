@@ -626,6 +626,47 @@ async function createReadOnlyOpportunityUser(server, suffix) {
   return login;
 }
 
+async function createReadOnlyContactUser(server, suffix) {
+  const adminLogin = await jsonRequest(server.baseUrl, '/api/auth/login', {
+    method: 'POST',
+    body: { username: 'admin', password: 'AdminTest1!Secure' }
+  });
+  assert.equal(adminLogin.response.status, 200, adminLogin.text + '\n' + server.output());
+
+  const username = `readonly-contact-${suffix}`;
+  const password = 'ReadOnlyContact1!Safe';
+  const created = await jsonRequest(server.baseUrl, '/api/admin/users', {
+    method: 'POST',
+    token: adminLogin.body.token,
+    body: {
+      username,
+      password,
+      display_name: `Read Only Contact ${suffix}`,
+      role: 'user',
+      department: 'Sales'
+    }
+  });
+  assert.equal(created.response.status, 200, created.text);
+
+  const setup = new Database(server.dbPath);
+  try {
+    setup.prepare(`
+      UPDATE organization_member_policy
+      SET access_mode='read_only',updated_at=CURRENT_TIMESTAMP
+      WHERE user_id=?
+    `).run(Number(created.body.id));
+  } finally {
+    setup.close();
+  }
+
+  const login = await jsonRequest(server.baseUrl, '/api/auth/login', {
+    method: 'POST',
+    body: { username, password }
+  });
+  assert.equal(login.response.status, 200, login.text);
+  return login;
+}
+
 async function runTestServerToExit(prefix, envOverrides = {}, timeoutMs = 15000) {
   const port = await reservePort();
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
@@ -1102,6 +1143,150 @@ test('opportunity named permission ingress lets writable malformed JSON reach th
           Authorization: `Bearer ${login.body.token}`,
           'Content-Type': 'application/json',
           'X-Request-Id': `opportunity-writable-${method.toLowerCase()}-malformed`
+        },
+        body: '{'
+      });
+      const body = await response.json();
+      assert.equal(response.status, 400, `${method} ${requestPath}`);
+      assert.equal(body.code, 'INVALID_REQUEST_BODY');
+    }
+  } finally {
+    await server.close();
+  }
+});
+
+test('contact named permission ingress denies malformed JSON before parsing across canonical and variant paths', {
+  timeout: 30000
+}, async () => {
+  const server = await startTestServer('tm-contact-permission-ingress-denied-');
+  try {
+    const login = await createReadOnlyContactUser(server, 'denied');
+    const cases = [
+      ['POST', '/api/customers/41/contacts', 'create', null],
+      ['PUT', '/api/customers/41/contacts/81', 'update', 81],
+      ['POST', '/api/customers/41/contacts/81/archive', 'archive', 81],
+      ['POST', '/api/customers/41/contacts/', 'create-trailing-slash', null],
+      ['PUT', '/api/customers/41/contacts/81/', 'update-trailing-slash', 81],
+      ['POST', '/api/customers/41/contacts/81/archive/', 'archive-trailing-slash', 81],
+      ['POST', '/API/CUSTOMERS/41/CONTACTS', 'create-case-variant', null],
+      ['PUT', '/API/CUSTOMERS/41/CONTACTS/81', 'update-case-variant', 81],
+      ['POST', '/API/CUSTOMERS/41/CONTACTS/81/ARCHIVE', 'archive-case-variant', 81],
+      ['PUT', '/api/customers/not-a-customer-id/contacts/81', 'update-invalid-customer', 81],
+      ['PUT', '/api/customers/041/contacts/81', 'update-noncanonical-customer', 81],
+      ['POST', '/api/customers/41/contacts/not-a-contact-id/archive', 'archive-invalid-contact', null],
+      ['POST', '/api/customers/41/contacts/081/archive', 'archive-noncanonical-contact', null]
+    ];
+
+    for (const [method, requestPath, label, targetId] of cases) {
+      const requestId = `contact-${label}-malformed-json`;
+      const response = await fetch(server.baseUrl + requestPath, {
+        method,
+        headers: {
+          Authorization: `Bearer ${login.body.token}`,
+          'Content-Type': 'application/json',
+          'X-Request-Id': requestId
+        },
+        body: '{'
+      });
+      const body = await response.json();
+      assert.equal(response.status, 403, `${method} ${requestPath}`);
+      assert.equal(body.code, 'CRM_PERMISSION_FORBIDDEN');
+      assert.equal(body.request_id, requestId);
+      assert.equal(targetId === null || Number.isSafeInteger(targetId), true);
+    }
+
+    const inspection = new Database(server.dbPath, { readonly: true });
+    try {
+      const rows = inspection.prepare(`
+        SELECT details
+        FROM activity_log
+        WHERE action='crm_permission_denied' AND module='crm_permission'
+        ORDER BY id
+      `).all().map((row) => JSON.parse(row.details));
+      assert.deepEqual(rows.map((row) => ({
+        permission: row.permission,
+        outcome: row.outcome,
+        reason_code: row.reason_code,
+        request_id: row.request_id,
+        target_type: row.target_type,
+        target_id: row.target_id
+      })), cases.map(([, , label, targetId]) => ({
+        permission: `crm.contact.${label.startsWith('create') ? 'create' : 'update'}`,
+        outcome: 'denied',
+        reason_code: 'ACTION_FORBIDDEN',
+        request_id: `contact-${label}-malformed-json`,
+        target_type: 'contact',
+        target_id: targetId
+      })));
+      assert.doesNotMatch(JSON.stringify(rows), /not-a-customer-id|041|not-a-contact-id|081/);
+    } finally {
+      inspection.close();
+    }
+  } finally {
+    await server.close();
+  }
+});
+
+test('contact named permission ingress fails closed when audit persistence fails before malformed JSON parsing', {
+  timeout: 30000
+}, async () => {
+  const server = await startTestServer('tm-contact-permission-ingress-audit-failure-');
+  try {
+    const login = await createReadOnlyContactUser(server, 'audit-failure');
+    const setup = new Database(server.dbPath);
+    try {
+      setup.exec(`
+        CREATE TRIGGER fail_contact_permission_audit
+        BEFORE INSERT ON activity_log
+        WHEN NEW.module='crm_permission'
+        BEGIN
+          SELECT RAISE(ABORT,'forced contact permission audit failure');
+        END
+      `);
+    } finally {
+      setup.close();
+    }
+
+    const response = await fetch(server.baseUrl + '/API/CUSTOMERS/41/CONTACTS/not-an-id', {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${login.body.token}`,
+        'Content-Type': 'application/json',
+        'X-Request-Id': 'contact-audit-failure-malformed-json'
+      },
+      body: '{'
+    });
+    const body = await response.json();
+    assert.equal(response.status, 503);
+    assert.equal(body.code, 'CRM_PERMISSION_AUDIT_FAILED');
+    assert.equal(body.request_id, 'contact-audit-failure-malformed-json');
+  } finally {
+    await server.close();
+  }
+});
+
+test('contact named permission ingress lets writable malformed JSON reach the Phase4 parser', {
+  timeout: 30000
+}, async () => {
+  const server = await startTestServer('tm-contact-permission-ingress-writable-');
+  try {
+    const login = await jsonRequest(server.baseUrl, '/api/auth/login', {
+      method: 'POST',
+      body: { username: 'admin', password: 'AdminTest1!Secure' }
+    });
+    assert.equal(login.response.status, 200, login.text + '\n' + server.output());
+
+    for (const [method, requestPath] of [
+      ['POST', '/api/customers/41/contacts'],
+      ['PUT', '/API/CUSTOMERS/41/CONTACTS/81'],
+      ['POST', '/api/customers/41/contacts/not-an-id/archive']
+    ]) {
+      const response = await fetch(server.baseUrl + requestPath, {
+        method,
+        headers: {
+          Authorization: `Bearer ${login.body.token}`,
+          'Content-Type': 'application/json',
+          'X-Request-Id': `contact-writable-${method.toLowerCase()}-malformed`
         },
         body: '{'
       });
