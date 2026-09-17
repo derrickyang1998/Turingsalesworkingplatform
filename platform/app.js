@@ -110,6 +110,14 @@ function currentUserHasCrmOpportunityPermission(action) {
   return actions.indexOf(action) !== -1;
 }
 
+function currentUserHasCrmContactPermission(action) {
+  var permissions = CURRENT_USER && CURRENT_USER.module_permissions;
+  var actions = permissions && Array.isArray(permissions['crm.contact'])
+    ? permissions['crm.contact']
+    : [];
+  return actions.indexOf(action) !== -1;
+}
+
 function currentUserCanUseCrmScope(scope) {
   if (!currentUserHasCrmPermission('read')) return false;
   if (scope === 'my' || scope === 'public_pool') return true;
@@ -144,6 +152,10 @@ function applyCrmPermissionPresentation() {
   document.querySelectorAll('[data-crm-opportunity-action]').forEach(function(element) {
     var action = element.getAttribute('data-crm-opportunity-action');
     element.hidden = !currentUserHasCrmOpportunityPermission(action);
+  });
+  document.querySelectorAll('[data-crm-contact-action]').forEach(function(element) {
+    var action = element.getAttribute('data-crm-contact-action');
+    element.hidden = !currentUserHasCrmContactPermission(action);
   });
   var teamScope = document.getElementById('customerScopeTeam');
   if (teamScope) teamScope.hidden = !canUseTeamScope;
@@ -1941,6 +1953,79 @@ async function saveCurrentProposal() {
     await archiveCustomerArtifact('proposal', (curDemand?.brand || activeWorkflowContext?.brand || '客户') + ' 红人营销方案', lastProp, activeWorkflowContext);
   } catch(e) { toast('保存方案失败: ' + e.message, 'error'); }
 }
+function renderCustomerContacts(customerId, contacts) {
+  contacts = Array.isArray(contacts) ? contacts : [];
+  var numericCustomerId = Number(customerId);
+  var safeCustomerId = Number.isInteger(numericCustomerId) && numericCustomerId > 0
+    ? numericCustomerId
+    : null;
+  var canCreate = currentUserHasCrmContactPermission('create');
+  var canUpdate = currentUserHasCrmContactPermission('update');
+  var html = '<div class="sidebar-section customer-contact-section">';
+  html += '<h4>联系人 (' + contacts.length + ')</h4>';
+  html += '<div style="display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-bottom:8px">';
+  if (canCreate && safeCustomerId) {
+    html += '<button type="button" class="btn btn-primary btn-sm" onclick="showAddContact(' + safeCustomerId + ')">+ 新增</button>';
+  }
+  if (!canCreate && !canUpdate) {
+    html += '<span class="crm-control-unavailable" title="当前账号没有新增、编辑或归档联系人权限">联系人只读</span>';
+  } else if (!canCreate) {
+    html += '<span class="crm-control-unavailable" title="当前账号没有新增联系人权限">无法新增</span>';
+  }
+  html += '</div>';
+
+  if (!contacts.length) {
+    html += '<p style="font-size:12px;color:var(--text2);margin:0">暂无联系人</p></div>';
+    return html;
+  }
+
+  contacts.forEach(function(contact) {
+    contact = contact && typeof contact === 'object' ? contact : {};
+    var numericContactId = Number(contact.id);
+    var safeContactId = Number.isInteger(numericContactId) && numericContactId > 0
+      ? numericContactId
+      : null;
+    var rawName = String(contact.name || '-');
+    var rawRole = String(contact.role || '-');
+    var rawEmail = String(contact.email || '').trim();
+    var rawPhone = String(contact.phone || '').trim();
+    var contactName = esc(rawName);
+    var contactRole = esc(rawRole);
+    var contactEmail = rawEmail ? esc(rawEmail) : '-';
+    var contactPhone = rawPhone ? esc(rawPhone) : '-';
+    var avatarText = esc(rawName.trim().charAt(0).toUpperCase() || '-');
+    html += '<div class="contact-card">';
+    html += '<div class="cc-avatar" aria-hidden="true">' + avatarText + '</div>';
+    html += '<div class="cc-info">';
+    html += '<div class="cc-name">' + contactName;
+    if (contact.is_preferred === true) {
+      html += ' <span style="font-size:10px;color:#0f7b3c;font-weight:600">主联系人</span>';
+    }
+    html += '</div>';
+    html += '<div class="cc-title">角色: ' + contactRole + '</div>';
+    html += '<div style="font-size:11px;line-height:1.6;word-break:break-all">邮箱: ';
+    html += rawEmail
+      ? '<a href="mailto:' + encodeURIComponent(rawEmail) + '">' + contactEmail + '</a>'
+      : contactEmail;
+    html += '</div>';
+    html += '<div style="font-size:11px;line-height:1.6;word-break:break-all">电话: ';
+    html += rawPhone
+      ? '<a href="tel:' + encodeURIComponent(rawPhone) + '">' + contactPhone + '</a>'
+      : contactPhone;
+    html += '</div>';
+    html += '</div>';
+    html += '<div style="display:flex;align-items:center;gap:4px;flex-shrink:0">';
+    if (canUpdate && safeCustomerId && safeContactId) {
+      html += '<button type="button" class="btn btn-sm btn-outline" title="编辑联系人" onclick="editCustomerContact(' + safeCustomerId + ', ' + safeContactId + ')">编辑</button>';
+      html += '<button type="button" class="btn btn-sm btn-outline" title="归档联系人" onclick="archiveCustomerContact(' + safeCustomerId + ', ' + safeContactId + ')">归档</button>';
+    } else if (!canUpdate) {
+      html += '<span class="crm-control-unavailable" title="当前账号没有编辑或归档联系人权限">不可编辑或归档</span>';
+    }
+    html += '</div></div>';
+  });
+  html += '</div>';
+  return html;
+}
 function renderCustomerSidebar(d) {
   var c = d.customer;
   var html = '<div class="sidebar-section"><h4>基本信息</h4>';
@@ -1952,6 +2037,7 @@ function renderCustomerSidebar(d) {
   html += '<div class="field"><span class="field-label">来源</span><span class="field-value">' + esc(c.source || '-') + '</span></div>';
   html += '<div class="field"><span class="field-label">预算</span><span class="field-value">' + esc(c.budget_estimate || '-') + '</span></div>';
   html += '<div class="field"><span class="field-label">备注</span><span class="field-value">' + esc(c.notes || '-') + '</span></div></div>';
+  html += renderCustomerContacts(c.id, d.contacts || []);
   html += '<div class="sidebar-section" style="display:flex;gap:8px;flex-wrap:wrap">';
   if (currentUserHasCrmPermission('update')) {
     if (c.is_public == 1) html += '<button class="btn btn-primary btn-sm" onclick="claimCustomer(' + c.id + ', true)">📥 认领客户</button>';
@@ -2003,6 +2089,176 @@ function renderCustomerSidebar(d) {
 }
 
 var _lastCustomerDetailData = null;
+var contactDialogOpener = null;
+function setContactDialogMode(mode) {
+  mode = mode === 'update' ? 'update' : 'create';
+  var dialog = document.getElementById('contactDialog');
+  var title = document.getElementById('contactModalTitle');
+  var saveButton = document.getElementById('contactSaveButton');
+  if (dialog) dialog.dataset.mode = mode;
+  if (title) title.textContent = mode === 'update' ? '编辑联系人' : '新增联系人';
+  if (saveButton) {
+    saveButton.setAttribute('data-crm-contact-action', mode);
+    saveButton.hidden = !currentUserHasCrmContactPermission(mode);
+    saveButton.disabled = false;
+    saveButton.textContent = '保存';
+  }
+}
+function openContactDialog() {
+  var overlay = document.getElementById('contactModalOverlay');
+  var dialog = document.getElementById('contactDialog');
+  if (!overlay || !dialog) return;
+  contactDialogOpener = document.activeElement;
+  overlay.hidden = false;
+  overlay.inert = false;
+  overlay.removeAttribute('aria-hidden');
+  overlay.style.display = 'flex';
+  if (window.TMAccessibility) {
+    window.TMAccessibility.openDialog(dialog, contactDialogOpener, function() { closeContactDialog(); });
+  } else {
+    dialog.setAttribute('tabindex', '-1');
+    dialog.focus();
+  }
+}
+function closeContactDialog() {
+  var overlay = document.getElementById('contactModalOverlay');
+  var dialog = document.getElementById('contactDialog');
+  if (dialog && window.TMAccessibility) window.TMAccessibility.closeDialog(dialog);
+  if (overlay) {
+    overlay.style.display = 'none';
+    overlay.hidden = true;
+    overlay.inert = true;
+    overlay.setAttribute('aria-hidden', 'true');
+  }
+  if (!window.TMAccessibility && contactDialogOpener && typeof contactDialogOpener.focus === 'function') {
+    contactDialogOpener.focus();
+  }
+  contactDialogOpener = null;
+}
+function showAddContact(customerId) {
+  if (!currentUserHasCrmContactPermission('create')) return rejectCrmBrowserAction();
+  var numericCustomerId = Number(customerId);
+  if (!Number.isInteger(numericCustomerId) || numericCustomerId <= 0) {
+    toast('未指定有效客户', 'error');
+    return false;
+  }
+  document.getElementById('contactEditId').value = '';
+  document.getElementById('contactCustomerId').value = numericCustomerId;
+  document.getElementById('contactName').value = '';
+  document.getElementById('contactRole').value = '';
+  document.getElementById('contactEmail').value = '';
+  document.getElementById('contactPhone').value = '';
+  document.getElementById('contactIsPreferred').checked = false;
+  setContactDialogMode('create');
+  openContactDialog();
+  return true;
+}
+function editCustomerContact(customerId, contactId) {
+  if (!currentUserHasCrmContactPermission('update')) return rejectCrmBrowserAction();
+  var numericCustomerId = Number(customerId);
+  var numericContactId = Number(contactId);
+  var contacts = _lastCustomerDetailData && Array.isArray(_lastCustomerDetailData.contacts)
+    ? _lastCustomerDetailData.contacts
+    : [];
+  var contact = contacts.find(function(item) {
+    return Number(item && item.id) === numericContactId &&
+      (!item.customer_id || Number(item.customer_id) === numericCustomerId);
+  });
+  if (!Number.isInteger(numericCustomerId) || numericCustomerId <= 0 ||
+      !Number.isInteger(numericContactId) || numericContactId <= 0 || !contact) {
+    toast('联系人数据未找到', 'error');
+    return false;
+  }
+  document.getElementById('contactEditId').value = numericContactId;
+  document.getElementById('contactCustomerId').value = numericCustomerId;
+  document.getElementById('contactName').value = contact.name || '';
+  document.getElementById('contactRole').value = contact.role || '';
+  document.getElementById('contactEmail').value = contact.email || '';
+  document.getElementById('contactPhone').value = contact.phone || '';
+  document.getElementById('contactIsPreferred').checked = contact.is_preferred === true;
+  setContactDialogMode('update');
+  openContactDialog();
+  return true;
+}
+async function saveCustomerContact() {
+  var editId = document.getElementById('contactEditId').value;
+  var action = editId ? 'update' : 'create';
+  if (!currentUserHasCrmContactPermission(action)) return rejectCrmBrowserAction();
+  var customerId = Number(document.getElementById('contactCustomerId').value);
+  var contactId = editId ? Number(editId) : null;
+  if (!Number.isInteger(customerId) || customerId <= 0 ||
+      (editId && (!Number.isInteger(contactId) || contactId <= 0))) {
+    toast('联系人所属客户无效', 'error');
+    return false;
+  }
+  var name = document.getElementById('contactName').value.trim();
+  if (!name) {
+    toast('请输入联系人姓名', 'error');
+    return false;
+  }
+  var payload = {
+    name: name,
+    role: document.getElementById('contactRole').value.trim(),
+    email: document.getElementById('contactEmail').value.trim(),
+    phone: document.getElementById('contactPhone').value.trim(),
+    is_preferred: document.getElementById('contactIsPreferred').checked === true
+  };
+  var url = '/customers/' + encodeURIComponent(String(customerId)) + '/contacts';
+  if (contactId) url += '/' + encodeURIComponent(String(contactId));
+  var saveButton = document.getElementById('contactSaveButton');
+  if (saveButton) {
+    saveButton.disabled = true;
+    saveButton.textContent = '保存中...';
+  }
+  try {
+    var response = await apiFetch(url, {
+      method: contactId ? 'PUT' : 'POST',
+      body: JSON.stringify(payload)
+    });
+    await requireSuccessfulCustomerMutation(response, contactId ? '联系人更新失败' : '联系人创建失败');
+    toast(contactId ? '联系人已更新' : '联系人已创建');
+    closeContactDialog();
+    await openCustomerDetail(customerId);
+    return true;
+  } catch (e) {
+    toast('保存失败: ' + e.message, 'error');
+    return false;
+  } finally {
+    if (saveButton) {
+      saveButton.disabled = false;
+      saveButton.textContent = '保存';
+    }
+  }
+}
+async function archiveCustomerContact(customerId, contactId) {
+  if (!currentUserHasCrmContactPermission('update')) return rejectCrmBrowserAction();
+  var numericCustomerId = Number(customerId);
+  var numericContactId = Number(contactId);
+  if (!Number.isInteger(numericCustomerId) || numericCustomerId <= 0 ||
+      !Number.isInteger(numericContactId) || numericContactId <= 0) {
+    toast('联系人数据无效', 'error');
+    return false;
+  }
+  var confirmed = await showConfirm(
+    '归档联系人',
+    '确认归档该联系人？归档后不会永久删除，历史记录仍会保留。'
+  );
+  if (!confirmed) return false;
+  try {
+    var response = await apiFetch(
+      '/customers/' + encodeURIComponent(String(numericCustomerId)) +
+        '/contacts/' + encodeURIComponent(String(numericContactId)) + '/archive',
+      { method: 'POST' }
+    );
+    await requireSuccessfulCustomerMutation(response, '联系人归档失败');
+    toast('联系人已归档');
+    await openCustomerDetail(numericCustomerId);
+    return true;
+  } catch (e) {
+    toast('归档失败: ' + e.message, 'error');
+    return false;
+  }
+}
 function showOpportunityDetail(id) {
   var opp = null;
   if (_lastCustomerDetailData && _lastCustomerDetailData.opportunities) opp = _lastCustomerDetailData.opportunities.find(function(o){return o.id==id});
@@ -13981,7 +14237,7 @@ function switchPage(id, options) {
   var names = [
     'doLogin', 'doLogout', 'switchPage', 'apiFetch', 'toast', 'esc',
     'openAddCustomer', 'showAddCustomer', 'closeCustModal', 'dismissDup', 'saveCustomer', 'filterCustomers', 'setCustomerScope', 'switchCrmView',
-    'closeCustomerDetail', 'loadOpportunities', 'viewOpportunity', 'editOpportunity', 'showOppModal', 'closeOppModal', 'saveOpportunity',
+    'closeCustomerDetail', 'showAddContact', 'editCustomerContact', 'archiveCustomerContact', 'saveCustomerContact', 'closeContactDialog', 'loadOpportunities', 'viewOpportunity', 'editOpportunity', 'showOppModal', 'closeOppModal', 'saveOpportunity',
     'generateAIStrategy', 'updateStrategy', 'searchNewBrand', 'exportBrandCSV', 'filterBrands', 'filterByTreeTag',
     'selectBrand', 'selectBrandByName', 'openBrandSocialSearch', 'copyBrandBriefToDemand',
     'initM3', 'goAnalyze', 'goGenerate', 'goStep3', 'resetDemand', 'updSteps', 'selTmpl', 'updateTemplateSelectionUI',

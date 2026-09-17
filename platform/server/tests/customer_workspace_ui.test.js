@@ -43,6 +43,15 @@ function evaluateAppFunctions(functionNames, globals) {
   return sandbox.__functions;
 }
 
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
 test('customer workspace exposes separate board and detail pages', () => {
   assert.match(indexHtml, /id="page-m0"/);
   assert.match(indexHtml, /id="page-m0-detail"/);
@@ -289,4 +298,475 @@ test('failed customer detail response does not enter the not-found state', async
   assert.equal(messages.some((message) => message.includes('客户不存在')), false);
   assert.equal(messages.some((message) => message.includes('加载失败')), true);
   assert.equal(messages.some((message) => message.includes('CRM_PERMISSION_FORBIDDEN')), true);
+});
+
+test('contact permissions use only the exact server-projected crm.contact actions', () => {
+  const { currentUserHasCrmContactPermission } = evaluateAppFunctions(
+    ['currentUserHasCrmContactPermission'],
+    {
+      CURRENT_USER: {
+        role: 'admin',
+        access_roles: ['company_owner'],
+        module_permissions: {
+          'crm.customer': ['read', 'create', 'update'],
+          'crm.opportunity': ['read', 'create', 'update'],
+          'crm.contact': ['read']
+        }
+      }
+    }
+  );
+
+  assert.equal(currentUserHasCrmContactPermission('read'), true);
+  assert.equal(currentUserHasCrmContactPermission('create'), false);
+  assert.equal(currentUserHasCrmContactPermission('update'), false);
+});
+
+test('customer sidebar renders compact escaped contacts immediately after basic information', () => {
+  const title = { textContent: '' };
+  const body = { innerHTML: '' };
+  const overlay = { hidden: true, style: {} };
+  const sidebar = {
+    hidden: true,
+    inert: true,
+    classList: { add() {} },
+    removeAttribute() {}
+  };
+  const dialog = {};
+  const elements = {
+    custDetailTitle: title,
+    custDetailBody: body,
+    custDetailOverlay: overlay,
+    custDetailSidebar: sidebar,
+    customerDetailDialog: dialog
+  };
+  const { renderCustomerContacts, renderCustomerSidebar } = evaluateAppFunctions(
+    ['renderCustomerContacts', 'renderCustomerSidebar'],
+    {
+      CUST_STAGES: { lead: '线索' },
+      currentUserHasCrmPermission: () => false,
+      currentUserHasCrmOpportunityPermission: () => false,
+      currentUserHasCrmContactPermission: () => true,
+      document: {
+        activeElement: { id: 'detail-opener' },
+        getElementById: (id) => elements[id] || null
+      },
+      esc: escapeHtml,
+      window: { TMAccessibility: { openDialog() {} } }
+    }
+  );
+
+  renderCustomerSidebar({
+    customer: {
+      id: 41,
+      brand_name: 'Acme',
+      company_name: 'Acme Ltd',
+      industry: 'Retail',
+      contact_person: 'Legacy owner',
+      stage: 'lead',
+      source: 'manual',
+      notes: 'Notes'
+    },
+    contacts: [{
+      id: 7,
+      customer_id: 41,
+      name: '<img src=x onerror=alert(1)>',
+      role: 'VP <script>alert(2)</script>',
+      email: 'alex"<tag>@example.invalid',
+      phone: '+86 <555>',
+      is_preferred: true
+    }],
+    opportunities: [],
+    activity: []
+  });
+
+  assert.ok(body.innerHTML.indexOf('基本信息') < body.innerHTML.indexOf('customer-contact-section'));
+  assert.match(body.innerHTML, /<h4>联系人 \(1\)<\/h4>/);
+  assert.match(body.innerHTML, /contact-card/);
+  assert.match(body.innerHTML, /主联系人/);
+  assert.match(body.innerHTML, /&lt;img src=x onerror=alert\(1\)&gt;/);
+  assert.match(body.innerHTML, /VP &lt;script&gt;alert\(2\)&lt;\/script&gt;/);
+  assert.match(body.innerHTML, /alex&quot;&lt;tag&gt;@example\.invalid/);
+  assert.match(body.innerHTML, /\+86 &lt;555&gt;/);
+  assert.match(body.innerHTML, /href="mailto:alex%22%3Ctag%3E%40example\.invalid"/);
+  assert.match(body.innerHTML, /href="tel:%2B86%20%3C555%3E"/);
+  assert.doesNotMatch(body.innerHTML, /<img\b|<script\b|href="javascript:/i);
+});
+
+test('contact section has a complete empty state and independently gates create versus update controls', () => {
+  let actions = [];
+  const { renderCustomerContacts } = evaluateAppFunctions(
+    ['renderCustomerContacts'],
+    {
+      currentUserHasCrmContactPermission: (action) => actions.includes(action),
+      esc: escapeHtml
+    }
+  );
+
+  const readOnly = renderCustomerContacts(41, []);
+  assert.match(readOnly, /联系人 \(0\)/);
+  assert.match(readOnly, /暂无联系人/);
+  assert.match(readOnly, /联系人只读/);
+  assert.match(readOnly, /title="当前账号没有新增、编辑或归档联系人权限"/);
+  assert.doesNotMatch(readOnly, /showAddContact|editCustomerContact|archiveCustomerContact/);
+
+  actions = ['read', 'create'];
+  const createOnly = renderCustomerContacts(41, [{
+    id: 7,
+    name: 'Alex',
+    role: null,
+    email: null,
+    phone: null,
+    is_preferred: false
+  }]);
+  assert.match(createOnly, /showAddContact\(41\)/);
+  assert.doesNotMatch(createOnly, /editCustomerContact|archiveCustomerContact/);
+  assert.match(createOnly, /不可编辑或归档/);
+
+  actions = ['read', 'update'];
+  const updateOnly = renderCustomerContacts(41, [{
+    id: 7,
+    name: 'Alex',
+    role: null,
+    email: null,
+    phone: null,
+    is_preferred: false
+  }]);
+  assert.doesNotMatch(updateOnly, /showAddContact/);
+  assert.match(updateOnly, /editCustomerContact\(41, 7\)/);
+  assert.match(updateOnly, /archiveCustomerContact\(41, 7\)/);
+});
+
+test('contact dialog is accessible, uses normal checkbox sizing, and exposes explicit create/edit state', () => {
+  const start = indexHtml.indexOf('id="contactModalOverlay"');
+  assert.notEqual(start, -1, 'missing contact modal overlay');
+  const end = indexHtml.indexOf('<!-- CRM transition evidence -->', start);
+  assert.notEqual(end, -1, 'missing contact modal boundary');
+  const contactDialog = indexHtml.slice(start, end);
+
+  assert.match(contactDialog, /hidden inert aria-hidden="true"/);
+  assert.match(contactDialog, /id="contactDialog"[^>]*role="dialog"[^>]*aria-modal="true"[^>]*aria-labelledby="contactModalTitle"/);
+  assert.match(contactDialog, /<label for="contactName">姓名/);
+  assert.match(contactDialog, /id="contactName"[^>]*required[^>]*aria-required="true"/);
+  assert.match(contactDialog, /id="contactRole"/);
+  assert.match(contactDialog, /id="contactEmail"[^>]*type="email"/);
+  assert.match(contactDialog, /id="contactPhone"[^>]*type="tel"/);
+  assert.match(contactDialog, /id="contactIsPreferred"[^>]*type="checkbox"/);
+  assert.doesNotMatch(contactDialog, /id="contactIsPreferred"[^>]*style="[^"]*(?:width|height)/);
+
+  const setMode = appFunction('setContactDialogMode');
+  assert.match(setMode, /dialog\.dataset\.mode\s*=\s*mode/);
+  assert.match(setMode, /mode === 'update'/);
+  assert.match(appFunction('showAddContact'), /setContactDialogMode\('create'\)/);
+  assert.match(appFunction('editCustomerContact'), /setContactDialogMode\('update'\)/);
+  assert.match(appFunction('openContactDialog'), /TMAccessibility\.openDialog/);
+  assert.match(appFunction('closeContactDialog'), /TMAccessibility\.closeDialog/);
+});
+
+test('contact browser handlers reject every unauthorized write before dialog, confirmation, or fetch', async () => {
+  let rejected = 0;
+  let externalCalls = 0;
+  const { showAddContact, editCustomerContact, saveCustomerContact, archiveCustomerContact } = evaluateAppFunctions(
+    ['showAddContact', 'editCustomerContact', 'saveCustomerContact', 'archiveCustomerContact'],
+    {
+      currentUserHasCrmContactPermission: () => false,
+      rejectCrmBrowserAction: () => { rejected += 1; return false; },
+      document: { getElementById: () => ({ value: '' }) },
+      openContactDialog: () => { externalCalls += 1; },
+      apiFetch: async () => { externalCalls += 1; return { ok: true }; },
+      showConfirm: async () => { externalCalls += 1; return true; }
+    }
+  );
+
+  showAddContact(41);
+  editCustomerContact(41, 7);
+  await saveCustomerContact();
+  await archiveCustomerContact(41, 7);
+
+  assert.equal(rejected, 4);
+  assert.equal(externalCalls, 0);
+});
+
+test('contact dialog delegates focus and Escape dismissal to TMAccessibility in create and edit modes', () => {
+  const calls = [];
+  const opener = { focus: () => calls.push('fallback-focus') };
+  const overlay = {
+    hidden: true,
+    inert: true,
+    style: {},
+    removeAttribute(name) { calls.push(`overlay-remove:${name}`); },
+    setAttribute(name, value) { calls.push(`overlay-set:${name}:${value}`); }
+  };
+  const dialog = { dataset: {}, setAttribute() {}, focus: () => calls.push('dialog-focus') };
+  const elements = {
+    contactModalOverlay: overlay,
+    contactDialog: dialog,
+    contactModalTitle: { textContent: '' },
+    contactEditId: { value: '' },
+    contactCustomerId: { value: '' },
+    contactName: { value: '' },
+    contactRole: { value: '' },
+    contactEmail: { value: '' },
+    contactPhone: { value: '' },
+    contactIsPreferred: { checked: false },
+    contactSaveButton: {
+      hidden: false,
+      disabled: false,
+      setAttribute(name, value) { this[name] = value; }
+    }
+  };
+  let dismiss = null;
+  const globals = {
+    contactDialogOpener: null,
+    _lastCustomerDetailData: {
+      customer: { id: 41 },
+      contacts: [{
+        id: 7,
+        customer_id: 41,
+        name: 'Alex',
+        role: 'Buyer',
+        email: 'alex@example.invalid',
+        phone: '+86 555',
+        is_preferred: true
+      }]
+    },
+    currentUserHasCrmContactPermission: () => true,
+    rejectCrmBrowserAction: () => false,
+    document: {
+      activeElement: opener,
+      getElementById: (id) => elements[id] || null
+    },
+    window: {
+      TMAccessibility: {
+        openDialog(receivedDialog, receivedOpener, onDismiss) {
+          assert.equal(receivedDialog, dialog);
+          assert.equal(receivedOpener, opener);
+          dismiss = onDismiss;
+          calls.push('open');
+        },
+        closeDialog(receivedDialog) {
+          assert.equal(receivedDialog, dialog);
+          calls.push('close');
+        }
+      }
+    }
+  };
+  const {
+    setContactDialogMode,
+    openContactDialog,
+    closeContactDialog,
+    showAddContact,
+    editCustomerContact
+  } = evaluateAppFunctions(
+    [
+      'setContactDialogMode',
+      'openContactDialog',
+      'closeContactDialog',
+      'showAddContact',
+      'editCustomerContact'
+    ],
+    globals
+  );
+
+  showAddContact(41);
+  assert.equal(dialog.dataset.mode, 'create');
+  assert.equal(elements.contactModalTitle.textContent, '新增联系人');
+  assert.equal(elements.contactEditId.value, '');
+  assert.equal(typeof dismiss, 'function');
+  dismiss();
+  assert.equal(overlay.hidden, true);
+
+  editCustomerContact(41, 7);
+  assert.equal(dialog.dataset.mode, 'update');
+  assert.equal(elements.contactModalTitle.textContent, '编辑联系人');
+  assert.equal(elements.contactEditId.value, 7);
+  assert.equal(elements.contactName.value, 'Alex');
+  assert.equal(elements.contactIsPreferred.checked, true);
+  closeContactDialog();
+  assert.deepEqual(calls.filter((call) => call === 'open' || call === 'close'), ['open', 'close', 'open', 'close']);
+});
+
+test('contact create and update use exact endpoints and await refreshed detail after success', async () => {
+  for (const scenario of [
+    {
+      editId: '',
+      expectedAction: 'create',
+      expectedUrl: '/customers/41/contacts',
+      expectedMethod: 'POST'
+    },
+    {
+      editId: '7',
+      expectedAction: 'update',
+      expectedUrl: '/customers/41/contacts/7',
+      expectedMethod: 'PUT'
+    }
+  ]) {
+    const events = [];
+    let finishRefresh = null;
+    let saveSettled = false;
+    const elements = {
+      contactEditId: { value: scenario.editId },
+      contactCustomerId: { value: '41' },
+      contactName: { value: '  Alex  ' },
+      contactRole: { value: ' Buyer ' },
+      contactEmail: { value: ' alex@example.invalid ' },
+      contactPhone: { value: ' +86 555 ' },
+      contactIsPreferred: { checked: true },
+      contactSaveButton: { disabled: false, textContent: '保存' }
+    };
+    let request = null;
+    const { requireSuccessfulCustomerMutation, saveCustomerContact } = evaluateAppFunctions(
+      ['requireSuccessfulCustomerMutation', 'saveCustomerContact'],
+      {
+        currentUserHasCrmContactPermission: (action) => {
+          assert.equal(action, scenario.expectedAction);
+          return true;
+        },
+        rejectCrmBrowserAction: () => false,
+        document: { getElementById: (id) => elements[id] || null },
+        apiFetch: async (url, options) => {
+          request = { url, options };
+          events.push('request');
+          return { ok: true, status: 200 };
+        },
+        closeContactDialog: () => events.push('close'),
+        openCustomerDetail: (customerId) => new Promise((resolve) => {
+          events.push(`refresh:${customerId}`);
+          finishRefresh = () => {
+            events.push('refresh-complete');
+            resolve();
+          };
+        }),
+        toast: (message, type) => events.push(`toast:${type || 'success'}:${message}`)
+      }
+    );
+
+    const savePromise = saveCustomerContact().then(() => { saveSettled = true; });
+    while (!finishRefresh) await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(request.url, scenario.expectedUrl);
+    assert.equal(request.options.method, scenario.expectedMethod);
+    assert.deepEqual(JSON.parse(request.options.body), {
+      name: 'Alex',
+      role: 'Buyer',
+      email: 'alex@example.invalid',
+      phone: '+86 555',
+      is_preferred: true
+    });
+    assert.ok(events.indexOf('close') < events.indexOf('refresh:41'));
+    assert.equal(saveSettled, false);
+    finishRefresh();
+    await savePromise;
+    assert.ok(events.indexOf('refresh:41') < events.indexOf('refresh-complete'));
+  }
+});
+
+test('non-success contact save response stays open and never refreshes detail', async () => {
+  const messages = [];
+  let closed = 0;
+  let refreshed = 0;
+  const elements = {
+    contactEditId: { value: '' },
+    contactCustomerId: { value: '41' },
+    contactName: { value: 'Alex' },
+    contactRole: { value: '' },
+    contactEmail: { value: '' },
+    contactPhone: { value: '' },
+    contactIsPreferred: { checked: false },
+    contactSaveButton: { disabled: false, textContent: '保存' }
+  };
+  const { requireSuccessfulCustomerMutation, saveCustomerContact } = evaluateAppFunctions(
+    ['requireSuccessfulCustomerMutation', 'saveCustomerContact'],
+    {
+      currentUserHasCrmContactPermission: () => true,
+      rejectCrmBrowserAction: () => false,
+      document: { getElementById: (id) => elements[id] || null },
+      apiFetch: async () => ({
+        ok: false,
+        status: 422,
+        json: async () => ({ code: 'CRM_CONTACT_INVALID' })
+      }),
+      closeContactDialog: () => { closed += 1; },
+      openCustomerDetail: async () => { refreshed += 1; },
+      toast: (message) => messages.push(message)
+    }
+  );
+
+  await saveCustomerContact();
+
+  assert.equal(closed, 0);
+  assert.equal(refreshed, 0);
+  assert.equal(messages.some((message) => message.includes('CRM_CONTACT_INVALID')), true);
+  assert.equal(messages.some((message) => message.includes('HTTP 422')), true);
+});
+
+test('contact archive confirms soft deletion, uses the archive endpoint, and awaits detail refresh', async () => {
+  const confirmations = [];
+  const events = [];
+  let allowArchive = false;
+  let finishRefresh = null;
+  let archiveSettled = false;
+  const { requireSuccessfulCustomerMutation, archiveCustomerContact } = evaluateAppFunctions(
+    ['requireSuccessfulCustomerMutation', 'archiveCustomerContact'],
+    {
+      currentUserHasCrmContactPermission: (action) => action === 'update',
+      rejectCrmBrowserAction: () => false,
+      showConfirm: async (title, message) => {
+        confirmations.push({ title, message });
+        return allowArchive;
+      },
+      apiFetch: async (url, options) => {
+        events.push(`request:${options.method}:${url}`);
+        return { ok: true, status: 200 };
+      },
+      openCustomerDetail: (customerId) => new Promise((resolve) => {
+        events.push(`refresh:${customerId}`);
+        finishRefresh = () => {
+          events.push('refresh-complete');
+          resolve();
+        };
+      }),
+      toast: (message) => events.push(`toast:${message}`)
+    }
+  );
+
+  await archiveCustomerContact(41, 7);
+  assert.deepEqual(events, []);
+  assert.match(confirmations[0].title, /归档/);
+  assert.match(confirmations[0].message, /归档/);
+  assert.match(confirmations[0].message, /不会永久删除/);
+
+  allowArchive = true;
+  const archivePromise = archiveCustomerContact(41, 7).then(() => { archiveSettled = true; });
+  while (!finishRefresh) await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(archiveSettled, false);
+  assert.deepEqual(events, [
+    'request:POST:/customers/41/contacts/7/archive',
+    'toast:联系人已归档',
+    'refresh:41'
+  ]);
+  finishRefresh();
+  await archivePromise;
+  assert.deepEqual(events, [
+    'request:POST:/customers/41/contacts/7/archive',
+    'toast:联系人已归档',
+    'refresh:41',
+    'refresh-complete'
+  ]);
+});
+
+test('contact inline controls are included in the global export contract', () => {
+  const start = appJs.indexOf('(function exposeInlineHandlers()');
+  assert.notEqual(start, -1, 'missing exposeInlineHandlers');
+  const end = appJs.indexOf('})();', start);
+  const inlineHandlerBlock = appJs.slice(start, end);
+
+  for (const handler of [
+    'showAddContact',
+    'editCustomerContact',
+    'archiveCustomerContact',
+    'saveCustomerContact',
+    'closeContactDialog'
+  ]) {
+    assert.match(inlineHandlerBlock, new RegExp(`'${handler}'`));
+  }
 });

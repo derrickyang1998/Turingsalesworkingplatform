@@ -2017,6 +2017,32 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
   </div>
 </div>
 
+<!-- Contact Modal -->
+<div class="modal-overlay" id="contactModalOverlay" style="display:none" hidden inert aria-hidden="true" onclick="if(event.target===this)closeContactDialog()">
+  <div class="modal" id="contactDialog" role="dialog" aria-modal="true" aria-labelledby="contactModalTitle" style="width:460px;max-width:calc(100vw - 32px)">
+    <button type="button" class="modal-close" aria-label="关闭联系人编辑" title="关闭联系人编辑" onclick="closeContactDialog()">&times;</button>
+    <h3 id="contactModalTitle">新增联系人</h3>
+    <input type="hidden" id="contactEditId">
+    <input type="hidden" id="contactCustomerId">
+    <label for="contactName">姓名 <span aria-hidden="true">*</span></label>
+    <input id="contactName" autocomplete="name" required aria-required="true" placeholder="输入联系人姓名">
+    <label for="contactRole">角色</label>
+    <input id="contactRole" autocomplete="organization-title" placeholder="例如：采购负责人">
+    <label for="contactEmail">Email</label>
+    <input id="contactEmail" type="email" autocomplete="email" placeholder="name@example.com">
+    <label for="contactPhone">电话</label>
+    <input id="contactPhone" type="tel" autocomplete="tel" placeholder="输入联系电话">
+    <label for="contactIsPreferred" style="display:flex;align-items:center;gap:8px;margin-top:10px">
+      <span class="tm-checkbox-target"><input id="contactIsPreferred" type="checkbox"></span>
+      <span>设为主联系人</span>
+    </label>
+    <div class="btn-group" style="margin-top:16px">
+      <button class="btn btn-primary" type="button" id="contactSaveButton" data-crm-contact-action="create" onclick="saveCustomerContact()">保存</button>
+      <button class="btn btn-outline" type="button" onclick="closeContactDialog()">取消</button>
+    </div>
+  </div>
+</div>
+
 <!-- CRM transition evidence -->
 <div class="modal-overlay" id="crmEvidenceOverlay" style="display:none" hidden inert aria-hidden="true" onclick="if(event.target===this)cancelCrmEvidenceDialog()">
   <div class="modal" id="crmEvidenceDialog" role="dialog" aria-modal="true" aria-labelledby="crmEvidenceTitle" style="width:460px;max-width:92vw">
