@@ -2079,14 +2079,22 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
     <button type="button" class="modal-close" aria-label="关闭任务创建" title="关闭任务创建" onclick="closeTaskDialog()">&times;</button>
     <h3 id="taskModalTitle">新建跟进任务</h3>
     <input type="hidden" id="taskCustomerId">
+    <input type="hidden" id="taskId">
     <input type="hidden" id="taskOwnerUserId">
     <input type="hidden" id="taskTeamId">
+    <input type="hidden" id="taskExpectedUpdatedAt">
+    <input type="hidden" id="taskExpectedOwnerUserId">
+    <input type="hidden" id="taskExpectedTeamId">
     <label for="taskTitle">任务标题 <span aria-hidden="true">*</span></label>
     <input id="taskTitle" maxlength="240" required aria-required="true" placeholder="例如：确认客户预算与排期">
     <label for="taskDueAt">截止时间 <span aria-hidden="true">*</span></label>
     <input id="taskDueAt" type="datetime-local" required aria-required="true">
     <label for="taskDescription">任务说明</label>
     <textarea id="taskDescription" maxlength="4000" rows="4" placeholder="补充交付要求、联系人或下一步动作"></textarea>
+    <div id="taskAssigneeField" hidden>
+      <label for="taskAssigneeUserId">负责人</label>
+      <select id="taskAssigneeUserId"></select>
+    </div>
     <div class="btn-group" style="margin-top:16px">
       <button class="btn btn-primary" type="button" id="taskSaveButton" data-crm-task-action="create" onclick="saveCustomerTask()">创建任务</button>
       <button class="btn btn-outline" type="button" onclick="closeTaskDialog()">取消</button>

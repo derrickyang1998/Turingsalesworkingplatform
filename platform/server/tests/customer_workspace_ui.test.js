@@ -621,7 +621,8 @@ test('customer task section escapes content and independently gates create versu
     title: '<script>alert(2)</script>',
     description: 'Follow <b>carefully</b>',
     due_at: '2099-02-01 09:00:00',
-    status: 'open'
+    status: 'open',
+    can_update: true
   }, {
     id: 92,
     customer_id: 41,
@@ -644,6 +645,7 @@ test('customer task section escapes content and independently gates create versu
   actions = ['read', 'create', 'update'];
   const writable = renderCustomerTasks(41, { owner_user_id: 7, team_id: 8 }, tasks);
   assert.match(writable, /showAddCustomerTask\(41\)/);
+  assert.match(writable, /showEditCustomerTask\(41, 91\)/);
   assert.match(writable, /completeCustomerTask\(41, 91\)/);
   assert.match(writable, /cancelCustomerTask\(41, 91\)/);
   assert.doesNotMatch(writable, /completeCustomerTask\(41, 92\)|cancelCustomerTask\(41, 92\)/);
@@ -755,6 +757,200 @@ test('task create sends the canonical assignment and refreshes the same customer
     source: 'manual',
     description: 'Share the final timeline.'
   });
+});
+
+test('task edit loads current-team candidates and sends the exact seven-field PUT payload', async () => {
+  const requests = [];
+  let focused = 0;
+  const elements = {
+    taskCustomerId: { value: '' }, taskId: { value: '' }, taskOwnerUserId: { value: '' },
+    taskTeamId: { value: '' }, taskExpectedUpdatedAt: { value: '' },
+    taskExpectedOwnerUserId: { value: '' }, taskExpectedTeamId: { value: '' },
+    taskTitle: { value: '' }, taskDueAt: { value: '' }, taskDescription: { value: '' },
+    taskAssigneeField: { hidden: true },
+    taskAssigneeUserId: { value: '', disabled: false, innerHTML: '' },
+    taskModalTitle: { textContent: '' },
+    taskDialog: { dataset: { requestGeneration: '4' } },
+    taskSaveButton: { dataset: { crmTaskAction: 'create' }, disabled: false, textContent: '' },
+    customerTaskSection: { focus() { focused += 1; } }
+  };
+  const detail = {
+    customer: { id: 41 },
+    tasks: [{
+      id: 91, status: 'open', can_update: true, owner_user_id: 7, team_id: 8,
+      title: 'Original', description: 'Draft', due_at: '2099-02-01 09:30:00',
+      updated_at: '2026-09-18 01:00:00'
+    }]
+  };
+  const globals = {
+    _lastCustomerDetailData: detail,
+    currentUserHasCrmTaskPermission: () => true,
+    rejectCrmBrowserAction: () => false,
+    document: { getElementById: (id) => elements[id] || null },
+    openTaskDialog: () => {}, closeTaskDialog: () => {},
+    esc: escapeHtml,
+    apiFetch: async (url, options) => {
+      requests.push({ url, options });
+      if (!options) return {
+        ok: true, status: 200,
+        json: async () => ({ items: [{ user_id: 7, display_name: 'Alice' }, { user_id: 9, display_name: 'Bob' }] })
+      };
+      return { ok: true, status: 200 };
+    },
+    requireSuccessfulCustomerMutation: async () => {},
+    openCustomerDetail: async () => true,
+    toast() {}
+  };
+  const { showEditCustomerTask, crmTaskTimestampFromInput, saveCustomerTask } = evaluateAppFunctions(
+    ['showEditCustomerTask', 'crmTaskTimestampFromInput', 'saveCustomerTask'], globals
+  );
+
+  assert.equal(await showEditCustomerTask(41, 91), true);
+  assert.equal(elements.taskAssigneeField.hidden, false);
+  assert.equal(elements.taskTitle.value, 'Original');
+  assert.match(elements.taskAssigneeUserId.innerHTML, /Alice/);
+  elements.taskAssigneeUserId.value = '9';
+  elements.taskDescription.value = '';
+  assert.equal(await saveCustomerTask(), true);
+  assert.equal(requests[1].url, '/customers/41/tasks/91');
+  assert.equal(requests[1].options.method, 'PUT');
+  assert.deepEqual(JSON.parse(requests[1].options.body), {
+    title: 'Original', description: null, due_at: '2099-02-01 09:30:00', owner_user_id: 9,
+    expected_updated_at: '2026-09-18 01:00:00', expected_owner_user_id: 7, expected_team_id: 8
+  });
+  assert.equal(focused, 1);
+});
+
+test('task edit conflict refreshes the CAS snapshot and candidates without replacing the draft', async () => {
+  const requests = [];
+  const messages = [];
+  const elements = {
+    taskCustomerId: { value: '41' }, taskId: { value: '91' }, taskOwnerUserId: { value: '7' },
+    taskTeamId: { value: '8' }, taskExpectedUpdatedAt: { value: '2026-09-18 01:00:00' },
+    taskExpectedOwnerUserId: { value: '7' }, taskExpectedTeamId: { value: '8' },
+    taskTitle: { value: 'Keep my title' }, taskDueAt: { value: '2099-02-02T10:45' },
+    taskDescription: { value: 'Keep my description' },
+    taskAssigneeUserId: { value: '10', disabled: false, innerHTML: '' },
+    taskDialog: { dataset: { requestGeneration: '7' } },
+    taskSaveButton: { dataset: { crmTaskAction: 'update' }, disabled: false, textContent: '保存修改' }
+  };
+  const staleDetail = {
+    customer: { id: 41 },
+    tasks: [{
+      id: 91, status: 'open', can_update: true, owner_user_id: 7, team_id: 8,
+      title: 'Old title', due_at: '2099-02-01 09:30:00', updated_at: '2026-09-18 01:00:00'
+    }]
+  };
+  const freshDetail = {
+    customer: { id: 41 },
+    tasks: [{
+      id: 91, status: 'open', can_update: true, owner_user_id: 9, team_id: 8,
+      title: 'Other editor title', due_at: '2099-02-01 09:30:00', updated_at: '2026-09-18 01:01:00'
+    }]
+  };
+  const { requireSuccessfulCustomerMutation, openCustomerDetail, crmTaskTimestampFromInput, saveCustomerTask } = evaluateAppFunctions(
+    ['requireSuccessfulCustomerMutation', 'openCustomerDetail', 'crmTaskTimestampFromInput', 'saveCustomerTask'],
+    {
+      customerDetailRequestGeneration: 0,
+      _lastCustomerDetailData: staleDetail,
+      currentUserHasCrmTaskPermission: () => true,
+      rejectCrmBrowserAction: () => false,
+      document: { getElementById: (id) => elements[id] || null },
+      apiFetch: async (url, options) => {
+        requests.push({ url, options });
+        if (options && options.method === 'PUT') {
+          return { ok: false, status: 409, json: async () => ({ code: 'CRM_TASK_CONFLICT' }) };
+        }
+        if (url === '/customers/41/detail') {
+          return { ok: true, status: 200, json: async () => freshDetail };
+        }
+        return {
+          ok: true, status: 200,
+          json: async () => ({ items: [
+            { user_id: 9, display_name: 'Bob' },
+            { user_id: 10, display_name: 'Carol' }
+          ] })
+        };
+      },
+      renderCustomerSidebar() {},
+      esc: escapeHtml,
+      toast: (message, type) => messages.push({ message, type })
+    }
+  );
+
+  assert.equal(await saveCustomerTask(), false);
+  assert.deepEqual(requests.map((request) => request.url), [
+    '/customers/41/tasks/91',
+    '/customers/41/detail',
+    '/customers/41/tasks/91/assignee-candidates'
+  ]);
+  assert.equal(elements.taskTitle.value, 'Keep my title');
+  assert.equal(elements.taskDueAt.value, '2099-02-02T10:45');
+  assert.equal(elements.taskDescription.value, 'Keep my description');
+  assert.equal(elements.taskExpectedUpdatedAt.value, '2026-09-18 01:01:00');
+  assert.equal(elements.taskExpectedOwnerUserId.value, 9);
+  assert.equal(elements.taskExpectedTeamId.value, 8);
+  assert.equal(elements.taskAssigneeUserId.value, '10');
+  assert.match(elements.taskAssigneeUserId.innerHTML, /Carol/);
+  assert.equal(elements.taskSaveButton.disabled, false);
+  assert.equal(messages.some(({ message }) => message.includes('核对后重试')), true);
+});
+
+test('task save refresh cannot render or steal focus after another task dialog opens', async () => {
+  let releaseDetail = null;
+  let renderCount = 0;
+  let focusCount = 0;
+  const elements = {
+    taskCustomerId: { value: '41' }, taskId: { value: '91' }, taskOwnerUserId: { value: '7' },
+    taskTeamId: { value: '8' }, taskExpectedUpdatedAt: { value: '2026-09-18 01:00:00' },
+    taskExpectedOwnerUserId: { value: '7' }, taskExpectedTeamId: { value: '8' },
+    taskTitle: { value: 'Saved title' }, taskDueAt: { value: '2099-02-02T10:45' },
+    taskDescription: { value: '' }, taskAssigneeUserId: { value: '7' },
+    taskDialog: { dataset: { requestGeneration: '4' } },
+    taskSaveButton: { dataset: { crmTaskAction: 'update' }, disabled: false, textContent: '保存修改' },
+    customerTaskSection: { isConnected: true, focus() { focusCount += 1; } },
+    customerDetailDialog: { contains: () => true }
+  };
+  const detail = {
+    customer: { id: 41 },
+    tasks: [{ id: 91, status: 'open', can_update: true, owner_user_id: 7, team_id: 8 }]
+  };
+  const { requireSuccessfulCustomerMutation, openCustomerDetail, crmTaskTimestampFromInput, saveCustomerTask } = evaluateAppFunctions(
+    ['requireSuccessfulCustomerMutation', 'openCustomerDetail', 'crmTaskTimestampFromInput', 'saveCustomerTask'],
+    {
+      customerDetailRequestGeneration: 0,
+      _lastCustomerDetailData: detail,
+      currentUserHasCrmTaskPermission: () => true,
+      rejectCrmBrowserAction: () => false,
+      document: { getElementById: (id) => elements[id] || null },
+      apiFetch: async (url, options) => {
+        if (options && options.method === 'PUT') return { ok: true, status: 200 };
+        return new Promise((resolve) => {
+          releaseDetail = () => resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({ customer: { id: 41 }, tasks: [] })
+          });
+        });
+      },
+      closeTaskDialog: () => {
+        elements.taskDialog.dataset.requestGeneration = String(
+          Number(elements.taskDialog.dataset.requestGeneration) + 1
+        );
+      },
+      renderCustomerSidebar: () => { renderCount += 1; },
+      toast() {}
+    }
+  );
+
+  const savePromise = saveCustomerTask();
+  while (!releaseDetail) await new Promise((resolve) => setImmediate(resolve));
+  elements.taskDialog.dataset.requestGeneration = String(Number(elements.taskDialog.dataset.requestGeneration) + 1);
+  releaseDetail();
+
+  assert.equal(await savePromise, true);
+  assert.equal(renderCount, 0);
+  assert.equal(focusCount, 0);
 });
 
 test('task completion and cancellation use exact endpoints and refresh the same detail', async () => {

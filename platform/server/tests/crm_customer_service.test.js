@@ -3028,6 +3028,160 @@ test('aggregate child: task creation validates assignment and exact opportunity 
   assert.equal(invalidAssignment.code, 'CRM_MUTATION_INVALID');
 });
 
+test('aggregate child: task candidates and update stay authorized, same-team, atomic, and conflict-safe', (t) => {
+  const db = openFixture(t);
+  db.exec(`
+    CREATE TABLE organization_member_policy (
+      org_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      access_mode TEXT NOT NULL,
+      PRIMARY KEY (org_id,user_id)
+    ) STRICT;
+    INSERT INTO organization_member_policy (org_id,user_id,access_mode)
+    SELECT org_id,user_id,'read_write'
+    FROM organization_memberships
+    WHERE status='active' AND revoked_at IS NULL;
+  `);
+  insertCrmTask(db, {
+    id: IDS.taskDirect,
+    customerId: IDS.ownedA,
+    ownerUserId: IDS.ownerA
+  });
+
+  db.prepare(`
+    UPDATE organization_member_policy
+    SET access_mode='read_only'
+    WHERE org_id=? AND user_id=?
+  `).run(IDS.orgA, IDS.teammateA);
+
+  const candidates = service.mutateCrmTask(db, taskMutation(IDS.ownerA, {
+    action: 'candidates',
+    customerId: IDS.ownedA,
+    taskId: IDS.taskDirect
+  }, { requestId: 'task-candidates-owner' }));
+  assert.deepEqual(candidates, {
+    items: [
+      { user_id: IDS.orgAdminA, display_name: 'mutation-org-admin-a' },
+      { user_id: IDS.ownerA, display_name: 'mutation-owner-a' }
+    ]
+  });
+
+  const readOnlyTarget = captureError(() => service.mutateCrmTask(db, taskMutation(IDS.ownerA, {
+    action: 'update',
+    customerId: IDS.ownedA,
+    taskId: IDS.taskDirect,
+    values: {
+      title: 'Must not assign read-only member',
+      description: null,
+      due_at: FUTURE_AT,
+      owner_user_id: IDS.teammateA,
+      expected_updated_at: FIXED_AT,
+      expected_owner_user_id: IDS.ownerA,
+      expected_team_id: IDS.teamA1
+    }
+  }, { requestId: 'task-update-read-only-target' })));
+  assert.equal(readOnlyTarget.code, 'CRM_MUTATION_INVALID');
+  db.prepare(`
+    UPDATE organization_member_policy
+    SET access_mode='read_write'
+    WHERE org_id=? AND user_id=?
+  `).run(IDS.orgA, IDS.teammateA);
+
+  const beforeInvalidDueAt = db.prepare('SELECT * FROM crm_tasks WHERE id=?').get(IDS.taskDirect);
+  const invalidDueAt = captureError(() => service.mutateCrmTask(db, taskMutation(IDS.ownerA, {
+    action: 'update',
+    customerId: IDS.ownedA,
+    taskId: IDS.taskDirect,
+    values: {
+      title: 'Must reject null due time',
+      description: null,
+      due_at: null,
+      owner_user_id: IDS.ownerA,
+      expected_updated_at: FIXED_AT,
+      expected_owner_user_id: IDS.ownerA,
+      expected_team_id: IDS.teamA1
+    }
+  }, { requestId: 'task-update-null-due-at' })));
+  assert.equal(invalidDueAt.code, 'CRM_MUTATION_INVALID');
+  assert.equal(invalidDueAt.status, 400);
+  assert.deepEqual(db.prepare('SELECT * FROM crm_tasks WHERE id=?').get(IDS.taskDirect), beforeInvalidDueAt);
+  assert.equal(db.prepare(`
+    SELECT COUNT(*) AS count FROM crm_audit_events WHERE request_id='task-update-null-due-at'
+  `).get().count, 0);
+
+  const updated = service.mutateCrmTask(db, taskMutation(IDS.ownerA, {
+    action: 'update',
+    customerId: IDS.ownedA,
+    taskId: IDS.taskDirect,
+    values: {
+      title: '  Confirm revised launch timing  ',
+      description: 'Share the approved calendar.',
+      due_at: '2099-02-01 09:30:00',
+      owner_user_id: IDS.teammateA,
+      expected_updated_at: FIXED_AT,
+      expected_owner_user_id: IDS.ownerA,
+      expected_team_id: IDS.teamA1
+    }
+  }, { requestId: 'task-update-owner' }));
+  assert.equal(updated.action, 'updated');
+  assert.equal(updated.record.owner_user_id, IDS.teammateA);
+  assert.equal(updated.record.team_id, IDS.teamA1);
+  assert.notEqual(updated.record.updated_at, FIXED_AT);
+  assert.deepEqual(db.prepare(`
+    SELECT title,description,due_at,owner_user_id,team_id,status,updated_at
+    FROM crm_tasks WHERE id=?
+  `).get(IDS.taskDirect), {
+    title: 'Confirm revised launch timing',
+    description: 'Share the approved calendar.',
+    due_at: '2099-02-01 09:30:00',
+    owner_user_id: IDS.teammateA,
+    team_id: IDS.teamA1,
+    status: 'open',
+    updated_at: updated.record.updated_at
+  });
+  const audit = db.prepare(`
+    SELECT metadata_json FROM crm_audit_events
+    WHERE request_id='task-update-owner' AND event_type='task_updated'
+  `).get();
+  assert.deepEqual(JSON.parse(audit.metadata_json), {
+    changed_fields: ['description', 'due_at', 'owner_user_id', 'title'],
+    from_owner_user_id: IDS.ownerA,
+    to_owner_user_id: IDS.teammateA
+  });
+  assert.equal(audit.metadata_json.includes('Confirm revised'), false);
+  assert.equal(audit.metadata_json.includes('approved calendar'), false);
+
+  const stale = captureError(() => service.mutateCrmTask(db, taskMutation(IDS.ownerA, {
+    action: 'update',
+    customerId: IDS.ownedA,
+    taskId: IDS.taskDirect,
+    values: {
+      title: 'Stale overwrite',
+      description: null,
+      due_at: FUTURE_AT,
+      owner_user_id: IDS.ownerA,
+      expected_updated_at: FIXED_AT,
+      expected_owner_user_id: IDS.ownerA,
+      expected_team_id: IDS.teamA1
+    }
+  }, { requestId: 'task-update-stale' })));
+  assert.equal(stale.code, 'CRM_TASK_CONFLICT');
+  assert.equal(db.prepare('SELECT title FROM crm_tasks WHERE id=?').get(IDS.taskDirect).title, 'Confirm revised launch timing');
+
+  insertCrmTask(db, {
+    id: IDS.taskCompleted,
+    customerId: IDS.ownedA,
+    ownerUserId: IDS.ownerA,
+    status: 'completed'
+  });
+  const terminalCandidates = captureError(() => service.mutateCrmTask(db, taskMutation(IDS.ownerA, {
+    action: 'candidates',
+    customerId: IDS.ownedA,
+    taskId: IDS.taskCompleted
+  }, { requestId: 'task-candidates-terminal' })));
+  assert.equal(terminalCandidates.code, 'CRM_TASK_CONFLICT');
+});
+
 test('aggregate child: task completion and cancellation derive actors and enforce child authority', (t) => {
   const db = openFixture(t);
   insertCrmTask(db, { id: IDS.taskDirect, customerId: IDS.ownedA, ownerUserId: IDS.ownerA });

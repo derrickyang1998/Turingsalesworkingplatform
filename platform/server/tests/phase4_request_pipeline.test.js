@@ -32,6 +32,7 @@ const CRM_CONTROL_POLICIES = Object.freeze([
   ['CRM_CONTACT_UPDATE', 'crm.contact.update', 'PUT', '/api/customers/:customerId/contacts/:contactId'],
   ['CRM_CONTACT_ARCHIVE', 'crm.contact.archive', 'POST', '/api/customers/:customerId/contacts/:contactId/archive'],
   ['CRM_TASK_CREATE', 'crm.task.create', 'POST', '/api/customers/:customerId/tasks'],
+  ['CRM_TASK_UPDATE', 'crm.task.update', 'PUT', '/api/customers/:customerId/tasks/:taskId'],
   ['CRM_TASK_COMPLETE', 'crm.task.complete', 'POST', '/api/customers/:customerId/tasks/:taskId/complete'],
   ['CRM_TASK_CANCEL', 'crm.task.cancel', 'POST', '/api/customers/:customerId/tasks/:taskId/cancel'],
   ['CRM_CUSTOMER_ACTIVITY', 'crm.customer.activity', 'POST', '/api/customers/:id/activity']

@@ -557,6 +557,16 @@ const REQUEST_POLICIES = Object.freeze({
     'POST',
     '/api/customers/:customerId/tasks'
   ),
+  CRM_TASK_ASSIGNEE_CANDIDATES: empty(
+    'crm.task.assignee-candidates',
+    'GET',
+    '/api/customers/:customerId/tasks/:taskId/assignee-candidates'
+  ),
+  CRM_TASK_UPDATE: controlJson(
+    'crm.task.update',
+    'PUT',
+    '/api/customers/:customerId/tasks/:taskId'
+  ),
   CRM_TASK_COMPLETE: controlJson(
     'crm.task.complete',
     'POST',

@@ -1090,7 +1090,10 @@ async function requireSuccessfulCustomerMutation(response, fallbackMessage) {
   }
   if (!message) message = String(fallbackMessage || '请求失败').slice(0, 300);
   if (status) message += ' (HTTP ' + status + ')';
-  throw new Error(message);
+  var error = new Error(message);
+  error.status = status;
+  error.code = payload && typeof payload.code === 'string' ? payload.code : '';
+  throw error;
 }
 
 // ===== APP INIT =====
@@ -1683,7 +1686,7 @@ async function openCustomerDetail(id, options) {
       : null;
     if (applyGuard && applyGuard(d) !== true) return false;
     _lastCustomerDetailData = d;
-    renderCustomerSidebar(d);
+    if (!options || options.render !== false) renderCustomerSidebar(d);
     return true;
   } catch(e) {
     if (requestGeneration === customerDetailRequestGeneration) toast('加载失败: ' + e.message, 'error');
@@ -2098,8 +2101,9 @@ function renderCustomerTasks(customerId, customer, tasks, taskMeta) {
     if (task.description) html += '<p class="customer-task-description">' + esc(task.description) + '</p>';
     if (task.completion_note) html += '<p class="customer-task-completion">完成说明：' + esc(task.completion_note) + '</p>';
     html += '</div>';
-    if (status === 'open' && canUpdate && safeCustomerId && safeTaskId) {
+    if (status === 'open' && canUpdate && task.can_update === true && safeCustomerId && safeTaskId) {
       html += '<div class="customer-task-actions">';
+      html += '<button type="button" class="btn btn-sm btn-outline" title="编辑任务" onclick="showEditCustomerTask(' + safeCustomerId + ', ' + safeTaskId + ')">编辑</button>';
       html += '<button type="button" class="btn btn-sm btn-primary" onclick="completeCustomerTask(' + safeCustomerId + ', ' + safeTaskId + ')">完成</button>';
       html += '<button type="button" class="btn btn-sm btn-outline" onclick="cancelCustomerTask(' + safeCustomerId + ', ' + safeTaskId + ')">取消</button>';
       html += '</div>';
@@ -2242,13 +2246,88 @@ function showAddCustomerTask(customerId) {
   document.getElementById('taskTitle').value = '';
   document.getElementById('taskDueAt').value = defaultDueAt;
   document.getElementById('taskDescription').value = '';
+  document.getElementById('taskId').value = '';
+  document.getElementById('taskExpectedUpdatedAt').value = '';
+  document.getElementById('taskExpectedOwnerUserId').value = '';
+  document.getElementById('taskExpectedTeamId').value = '';
+  var assigneeField = document.getElementById('taskAssigneeField');
+  if (assigneeField) assigneeField.hidden = true;
+  var titleElement = document.getElementById('taskModalTitle');
+  if (titleElement) titleElement.textContent = '新建跟进任务';
   var saveButton = document.getElementById('taskSaveButton');
   if (saveButton) {
+    if (saveButton.dataset) saveButton.dataset.crmTaskAction = 'create';
     saveButton.disabled = false;
     saveButton.textContent = '创建任务';
   }
   openTaskDialog();
   return true;
+}
+
+async function showEditCustomerTask(customerId, taskId) {
+  if (!currentUserHasCrmTaskPermission('update')) return rejectCrmBrowserAction();
+  var numericCustomerId = Number(customerId);
+  var numericTaskId = Number(taskId);
+  var detail = _lastCustomerDetailData;
+  var tasks = detail && Array.isArray(detail.tasks) ? detail.tasks : [];
+  var task = tasks.find(function(item) { return Number(item && item.id) === numericTaskId; });
+  if (!Number.isInteger(numericCustomerId) || numericCustomerId <= 0 ||
+      !Number.isInteger(numericTaskId) || numericTaskId <= 0 ||
+      !detail || !detail.customer || Number(detail.customer.id) !== numericCustomerId ||
+      !task || task.status !== 'open' || task.can_update !== true) {
+    return rejectCrmBrowserAction();
+  }
+  document.getElementById('taskCustomerId').value = numericCustomerId;
+  document.getElementById('taskId').value = numericTaskId;
+  document.getElementById('taskOwnerUserId').value = task.owner_user_id;
+  document.getElementById('taskTeamId').value = task.team_id;
+  document.getElementById('taskExpectedUpdatedAt').value = task.updated_at;
+  document.getElementById('taskExpectedOwnerUserId').value = task.owner_user_id;
+  document.getElementById('taskExpectedTeamId').value = task.team_id;
+  document.getElementById('taskTitle').value = task.title || '';
+  document.getElementById('taskDueAt').value = String(task.due_at || '').replace(' ', 'T').slice(0, 16);
+  document.getElementById('taskDescription').value = task.description || '';
+  var assigneeField = document.getElementById('taskAssigneeField');
+  var assigneeSelect = document.getElementById('taskAssigneeUserId');
+  if (assigneeField) assigneeField.hidden = false;
+  if (assigneeSelect) {
+    assigneeSelect.disabled = true;
+    assigneeSelect.innerHTML = '<option value="">加载中...</option>';
+  }
+  var modalTitle = document.getElementById('taskModalTitle');
+  if (modalTitle) modalTitle.textContent = '编辑跟进任务';
+  var saveButton = document.getElementById('taskSaveButton');
+  if (saveButton) {
+    if (saveButton.dataset) saveButton.dataset.crmTaskAction = 'update';
+    saveButton.disabled = true;
+    saveButton.textContent = '保存修改';
+  }
+  openTaskDialog();
+  var dialog = document.getElementById('taskDialog');
+  var requestGeneration = dialog ? String(dialog.dataset.requestGeneration || '') : '';
+  try {
+    var response = await apiFetch('/customers/' + encodeURIComponent(String(numericCustomerId)) +
+      '/tasks/' + encodeURIComponent(String(numericTaskId)) + '/assignee-candidates');
+    await requireSuccessfulCustomerMutation(response, '负责人候选加载失败');
+    var data = await response.json();
+    var currentDialog = document.getElementById('taskDialog');
+    if (!currentDialog || currentDialog !== dialog ||
+        String(currentDialog.dataset.requestGeneration || '') !== requestGeneration) return false;
+    var items = data && Array.isArray(data.items) ? data.items : [];
+    assigneeSelect.innerHTML = items.map(function(item) {
+      return '<option value="' + Number(item.user_id) + '">' + esc(item.display_name || '') + '</option>';
+    }).join('');
+    assigneeSelect.value = String(task.owner_user_id);
+    assigneeSelect.disabled = false;
+    if (saveButton) saveButton.disabled = false;
+    return true;
+  } catch (e) {
+    var activeDialog = document.getElementById('taskDialog');
+    if (activeDialog === dialog && String(activeDialog.dataset.requestGeneration || '') === requestGeneration) {
+      toast('候选负责人加载失败: ' + e.message, 'error');
+    }
+    return false;
+  }
 }
 
 function crmTaskTimestampFromInput(value) {
@@ -2258,9 +2337,13 @@ function crmTaskTimestampFromInput(value) {
 }
 
 async function saveCustomerTask() {
-  if (!currentUserHasCrmTaskPermission('create')) return rejectCrmBrowserAction();
+  var saveButton = document.getElementById('taskSaveButton');
+  var editing = !!(saveButton && saveButton.dataset && saveButton.dataset.crmTaskAction === 'update');
+  if (!currentUserHasCrmTaskPermission(editing ? 'update' : 'create')) return rejectCrmBrowserAction();
   var customerId = Number(document.getElementById('taskCustomerId').value);
-  var ownerUserId = Number(document.getElementById('taskOwnerUserId').value);
+  var ownerUserId = Number(editing
+    ? document.getElementById('taskAssigneeUserId').value
+    : document.getElementById('taskOwnerUserId').value);
   var teamId = Number(document.getElementById('taskTeamId').value);
   var title = document.getElementById('taskTitle').value.trim();
   var dueAt = crmTaskTimestampFromInput(document.getElementById('taskDueAt').value);
@@ -2281,48 +2364,131 @@ async function saveCustomerTask() {
   }
   var dialog = document.getElementById('taskDialog');
   var requestGeneration = dialog ? String(dialog.dataset.requestGeneration || '') : '';
-  var saveButton = document.getElementById('taskSaveButton');
+  var keepSaveDisabled = false;
+  function requestOwnsTaskDialogGeneration() {
+    var currentDialog = document.getElementById('taskDialog');
+    return !!currentDialog && currentDialog === dialog &&
+      String(currentDialog.dataset.requestGeneration || '') === requestGeneration;
+  }
   if (saveButton) {
     saveButton.disabled = true;
-    saveButton.textContent = '创建中...';
+    saveButton.textContent = editing ? '保存中...' : '创建中...';
   }
   try {
     var payload = {
       owner_user_id: ownerUserId,
-      team_id: teamId,
       title: title,
-      due_at: dueAt,
-      source: 'manual'
+      due_at: dueAt
     };
-    if (description) payload.description = description;
-    var response = await apiFetch('/customers/' + encodeURIComponent(String(customerId)) + '/tasks', {
-      method: 'POST',
+    var taskId = editing ? Number(document.getElementById('taskId').value) : null;
+    if (editing) {
+      payload.description = description || null;
+      payload.expected_updated_at = document.getElementById('taskExpectedUpdatedAt').value;
+      payload.expected_owner_user_id = Number(document.getElementById('taskExpectedOwnerUserId').value);
+      payload.expected_team_id = Number(document.getElementById('taskExpectedTeamId').value);
+    } else {
+      payload.team_id = teamId;
+      payload.source = 'manual';
+      if (description) payload.description = description;
+    }
+    var response = await apiFetch('/customers/' + encodeURIComponent(String(customerId)) + '/tasks' +
+      (editing ? '/' + encodeURIComponent(String(taskId)) : ''), {
+      method: editing ? 'PUT' : 'POST',
       body: JSON.stringify(payload)
     });
-    await requireSuccessfulCustomerMutation(response, '任务创建失败');
-    var currentDialog = document.getElementById('taskDialog');
-    if (!currentDialog || currentDialog !== dialog ||
-        String(currentDialog.dataset.requestGeneration || '') !== requestGeneration) return true;
-    toast('跟进任务已创建');
+    await requireSuccessfulCustomerMutation(response, editing ? '任务更新失败' : '任务创建失败');
+    if (!requestOwnsTaskDialogGeneration()) return true;
+    toast(editing ? '跟进任务已更新' : '跟进任务已创建');
     closeTaskDialog();
+    var refreshDialog = document.getElementById('taskDialog');
+    var refreshGeneration = refreshDialog ? String(refreshDialog.dataset.requestGeneration || '') : '';
+    function refreshOwnsTaskDialogGeneration() {
+      var currentDialog = document.getElementById('taskDialog');
+      return !!currentDialog && currentDialog === refreshDialog &&
+        String(currentDialog.dataset.requestGeneration || '') === refreshGeneration;
+    }
     var refreshApplied = await openCustomerDetail(customerId, {
-      applyGuard: function() {
-        return !!(_lastCustomerDetailData && _lastCustomerDetailData.customer &&
-          Number(_lastCustomerDetailData.customer.id) === customerId);
-      }
+      applyGuard: refreshOwnsTaskDialogGeneration
     });
     var taskSection = document.getElementById('customerTaskSection');
-    if (refreshApplied === true && taskSection && typeof taskSection.focus === 'function') taskSection.focus();
+    var customerDetailDialog = document.getElementById('customerDetailDialog');
+    if (refreshApplied === true && refreshOwnsTaskDialogGeneration() &&
+        taskSection && typeof taskSection.focus === 'function' && taskSection.isConnected !== false &&
+        (!customerDetailDialog || typeof customerDetailDialog.contains !== 'function' ||
+          customerDetailDialog.contains(taskSection))) {
+      taskSection.focus();
+    }
     return true;
   } catch (e) {
-    toast('创建失败: ' + e.message, 'error');
+    if (!requestOwnsTaskDialogGeneration()) return false;
+    if (editing && (e.code === 'CRM_TASK_CONFLICT' || e.status === 409)) {
+      keepSaveDisabled = true;
+      var draftOwnerUserId = ownerUserId;
+      var taskId = Number(document.getElementById('taskId').value);
+      var detailApplied = await openCustomerDetail(customerId, {
+        render: false,
+        applyGuard: function(data) {
+          return requestOwnsTaskDialogGeneration() && data && data.customer &&
+            Number(data.customer.id) === customerId;
+        }
+      });
+      if (!detailApplied || !requestOwnsTaskDialogGeneration()) return false;
+      var latestTasks = _lastCustomerDetailData && Array.isArray(_lastCustomerDetailData.tasks)
+        ? _lastCustomerDetailData.tasks
+        : [];
+      var latestTask = latestTasks.find(function(item) { return Number(item && item.id) === taskId; });
+      if (!latestTask || latestTask.status !== 'open' || latestTask.can_update !== true) {
+        toast('任务状态或权限已变化，当前草稿已保留但不能继续提交', 'error');
+        return false;
+      }
+      document.getElementById('taskOwnerUserId').value = latestTask.owner_user_id;
+      document.getElementById('taskTeamId').value = latestTask.team_id;
+      document.getElementById('taskExpectedUpdatedAt').value = latestTask.updated_at;
+      document.getElementById('taskExpectedOwnerUserId').value = latestTask.owner_user_id;
+      document.getElementById('taskExpectedTeamId').value = latestTask.team_id;
+      var assigneeSelect = document.getElementById('taskAssigneeUserId');
+      if (assigneeSelect) {
+        assigneeSelect.disabled = true;
+        assigneeSelect.innerHTML = '<option value="">加载中...</option>';
+      }
+      try {
+        var candidatesResponse = await apiFetch('/customers/' + encodeURIComponent(String(customerId)) +
+          '/tasks/' + encodeURIComponent(String(taskId)) + '/assignee-candidates');
+        await requireSuccessfulCustomerMutation(candidatesResponse, '负责人候选加载失败');
+        var candidatesData = await candidatesResponse.json();
+        if (!requestOwnsTaskDialogGeneration()) return false;
+        var candidates = candidatesData && Array.isArray(candidatesData.items) ? candidatesData.items : [];
+        if (!assigneeSelect || !candidates.length) {
+          if (assigneeSelect) assigneeSelect.innerHTML = '<option value="">当前团队暂无可改派成员</option>';
+          toast('任务已同步，但当前团队暂无可改派成员', 'error');
+          return false;
+        }
+        assigneeSelect.innerHTML = candidates.map(function(item) {
+          return '<option value="' + Number(item.user_id) + '">' + esc(item.display_name || '') + '</option>';
+        }).join('');
+        var candidateIds = candidates.map(function(item) { return Number(item.user_id); });
+        var nextOwnerUserId = candidateIds.includes(draftOwnerUserId)
+          ? draftOwnerUserId
+          : (candidateIds.includes(Number(latestTask.owner_user_id))
+            ? Number(latestTask.owner_user_id)
+            : candidateIds[0]);
+        assigneeSelect.value = String(nextOwnerUserId);
+        assigneeSelect.disabled = false;
+        keepSaveDisabled = false;
+        toast('任务已被其他人更新，已同步最新状态，请核对后重试', 'error');
+      } catch (candidateError) {
+        if (requestOwnsTaskDialogGeneration()) {
+          toast('任务已同步，但候选负责人加载失败: ' + candidateError.message, 'error');
+        }
+      }
+    } else {
+      toast((editing ? '更新失败: ' : '创建失败: ') + e.message, 'error');
+    }
     return false;
   } finally {
-    var activeDialog = document.getElementById('taskDialog');
-    if (saveButton && activeDialog === dialog &&
-        String(activeDialog.dataset.requestGeneration || '') === requestGeneration) {
-      saveButton.disabled = false;
-      saveButton.textContent = '创建任务';
+    if (saveButton && requestOwnsTaskDialogGeneration()) {
+      saveButton.disabled = keepSaveDisabled;
+      saveButton.textContent = editing ? '保存修改' : '创建任务';
     }
   }
 }

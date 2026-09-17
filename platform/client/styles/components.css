@@ -2628,6 +2628,15 @@ thead th {
   justify-content: flex-end;
 }
 
+#taskAssigneeField[hidden] {
+  display: none;
+}
+
+#taskAssigneeUserId {
+  width: 100%;
+  min-height: 40px;
+}
+
 @media (max-width: 480px) {
   .customer-task-heading,
   .customer-task-card {

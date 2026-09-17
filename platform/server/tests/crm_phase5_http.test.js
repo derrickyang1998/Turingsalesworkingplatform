@@ -424,7 +424,8 @@ test('crm http: customer detail uses the scoped query service without direct SQL
     actorUserId: 101,
     organizationId: 501,
     requestId: 'http-request',
-    customerId: 41
+    customerId: 41,
+    taskUpdateAllowed: true
   });
 });
 
@@ -1004,6 +1005,12 @@ test('crm http: opportunity routes and embedded customer detail enforce named ac
       organizationId: 501,
       module: 'crm.task',
       action: 'read'
+    },
+    {
+      principal: { id: 101, role: 'user' },
+      organizationId: 501,
+      module: 'crm.task',
+      action: 'update'
     }
   ]);
 });
@@ -1811,4 +1818,90 @@ test('crm http: task create, complete, and cancel use named permissions before c
     }
   ]);
   assert.doesNotMatch(JSON.stringify(auditEvents), /not-a-customer-id|091|private body value/);
+});
+
+test('crm http: task candidates and strict update use update permission and bounded commands', async () => {
+  const harness = makeHarness();
+  const candidates = await harness.invoke(
+    'GET /api/customers/:customerId/tasks/:taskId/assignee-candidates',
+    { params: { customerId: '41', taskId: '91' } }
+  );
+  assert.equal(candidates.statusCode, 200);
+  assert.deepEqual(lastCall(harness, 'mutateCrmTask').input.command, {
+    action: 'candidates', customerId: 41, taskId: 91
+  });
+
+  const body = {
+    title: 'Follow up',
+    description: null,
+    due_at: '2099-02-01 09:30:00',
+    owner_user_id: 102,
+    expected_updated_at: FIXED_AT,
+    expected_owner_user_id: 101,
+    expected_team_id: 601
+  };
+  const updated = await harness.invoke('PUT /api/customers/:customerId/tasks/:taskId', {
+    params: { customerId: '41', taskId: '91' }, body
+  });
+  assert.equal(updated.statusCode, 200);
+  assert.deepEqual(lastCall(harness, 'mutateCrmTask').input.command, {
+    action: 'update', customerId: 41, taskId: 91, values: body
+  });
+  assert.deepEqual(harness.permissionCalls.slice(-2).map((call) => ({
+    module: call.module, action: call.action
+  })), [
+    { module: 'crm.task', action: 'update' },
+    { module: 'crm.task', action: 'update' }
+  ]);
+
+  const { description: _description, ...missingBody } = body;
+  const missing = await harness.invoke('PUT /api/customers/:customerId/tasks/:taskId', {
+    params: { customerId: '41', taskId: '91' }, body: missingBody
+  });
+  assert.equal(missing.statusCode, 400);
+  const unknown = await harness.invoke('PUT /api/customers/:customerId/tasks/:taskId', {
+    params: { customerId: '41', taskId: '91' }, body: { ...body, status: 'completed' }
+  });
+  assert.equal(unknown.statusCode, 400);
+  const callsBeforeNullDueAt = harness.calls.length;
+  const nullDueAt = await harness.invoke('PUT /api/customers/:customerId/tasks/:taskId', {
+    params: { customerId: '41', taskId: '91' }, body: { ...body, due_at: null }
+  });
+  assert.equal(nullDueAt.statusCode, 400);
+  assert.equal(harness.calls.length, callsBeforeNullDueAt);
+});
+
+test('crm http: stale task snapshots serialize as a bounded task conflict', async () => {
+  const harness = makeHarness({
+    crmCustomerService: {
+      mutateCrmTask() {
+        const error = new Error('private stale task values');
+        Object.assign(error, {
+          name: 'CrmMutationError',
+          code: 'CRM_TASK_CONFLICT',
+          status: 409,
+          title: 'CRM task changed',
+          details: null
+        });
+        throw error;
+      }
+    }
+  });
+  const response = await harness.invoke('PUT /api/customers/:customerId/tasks/:taskId', {
+    params: { customerId: '41', taskId: '91' },
+    body: {
+      title: 'Follow up',
+      description: null,
+      due_at: '2099-02-01 09:30:00',
+      owner_user_id: 102,
+      expected_updated_at: FIXED_AT,
+      expected_owner_user_id: 101,
+      expected_team_id: 601
+    }
+  });
+  assert.equal(response.statusCode, 409);
+  assert.equal(response.contentType, 'application/problem+json');
+  assert.equal(response.payload.code, 'CRM_TASK_CONFLICT');
+  assert.equal(response.payload.title, 'CRM task changed');
+  assert.doesNotMatch(JSON.stringify(response.payload), /private stale task values/i);
 });

@@ -34,7 +34,7 @@ $TRUSTED_SOURCE_GATE_RELATIVE_PATH = "server\scripts\trusted_production_source_g
 $TRUSTED_SOURCE_MANIFEST_RELATIVE_PATH = "server\scripts\trusted_production_source_manifest.json"
 $TRUSTED_RUNTIME_CONFIG_RELATIVE_PATH = "server\config\runtime_config.js"
 $EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "572bbe86e1528b64c17a855c51001984391a6c4f836ead2668d63c66fb58826d"
-$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "896b71500714fc8615b2c5807f55b76abac204117da14b139c7ea6fe277d6eb8"
+$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "c4f9038c1eec269333b2b099562fbf51fccc11b6a2eb4c448fa71fe807077f6b"
 $EXPECTED_TRUSTED_RUNTIME_CONFIG_SHA256 = "76d43d3e811c6fa8daae987cc9eb2fff2dc8a8095f84b1cd309e4e214df94dcb"
 $EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256 = "0c97c943a9371b73ef1c8ed1a1dc02c0986f4ae43dbc56fa0748f438cef3f337"
 $EXPECTED_TRUSTED_PARSER_VERIFIER_SHA256 = "7f9efaac02675b21e025891a400474cc7481c1adaf58c88bd8b356d5276f2eaa"
@@ -11652,7 +11652,7 @@ if applied:
         if hashlib.sha256(handle.read()).hexdigest() != output_sha256:
             raise SystemExit('Trusted live database adoption stage digest is invalid')
 else:
-    if (report.get('sourceVersion') not in (1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21) or
+    if (report.get('sourceVersion') not in (1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22) or
             report.get('targetVersion') != report.get('sourceVersion') or
             output_sha256 != expected_source_sha256 or
             report.get('baseTableCount') is not None or report.get('baseRowCount') is not None or

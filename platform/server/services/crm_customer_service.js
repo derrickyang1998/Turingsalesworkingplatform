@@ -180,7 +180,10 @@ const VALUE_KEYS = Object.freeze({
     'description',
     'due_at',
     'source',
-    'completion_note'
+    'completion_note',
+    'expected_updated_at',
+    'expected_owner_user_id',
+    'expected_team_id'
   ])
 });
 
@@ -208,6 +211,7 @@ const AUDIT_METADATA_KEYS = Object.freeze({
   contact_updated: Object.freeze(['changed_fields']),
   contact_archived: Object.freeze(['changed_fields']),
   task_created: Object.freeze(['opportunity_id', 'owner_user_id', 'team_id']),
+  task_updated: Object.freeze(['changed_fields', 'from_owner_user_id', 'to_owner_user_id']),
   task_completed: Object.freeze(['from_status', 'to_status']),
   task_cancelled: Object.freeze(['from_status', 'to_status']),
   customer_result_archived: Object.freeze([
@@ -260,6 +264,7 @@ const ERROR_DEFINITIONS = Object.freeze({
   CRM_CUSTOMER_CONFLICT: Object.freeze({ status: 409, title: 'CRM customer changed' }),
   CRM_PUBLIC_POOL_UNAVAILABLE: Object.freeze({ status: 409, title: 'CRM public-pool customer is unavailable' }),
   CRM_CUSTODY_CONFLICT: Object.freeze({ status: 409, title: 'CRM customer custody changed' }),
+  CRM_TASK_CONFLICT: Object.freeze({ status: 409, title: 'CRM task changed' }),
   CRM_TRANSITION_INVALID: Object.freeze({ status: 409, title: 'CRM transition is not allowed' }),
   CRM_STORAGE_BUSY: Object.freeze({ status: 503, title: 'CRM storage is temporarily unavailable', retryable: true }),
   CRM_MUTATION_FAILED: Object.freeze({ status: 500, title: 'CRM mutation failed' })
@@ -1794,6 +1799,10 @@ function taskSuccessResult(task, action, input) {
     record: {
       id: task.id,
       customer_id: task.customer_id,
+      ...(action === 'updated' ? {
+        owner_user_id: task.owner_user_id,
+        team_id: task.team_id
+      } : {}),
       status: task.status,
       updated_at: task.updated_at
     },
@@ -1817,7 +1826,12 @@ function writeTaskEvidence(db, context, input, customer, task, eventType, metada
 function canonicalTaskCreate(command) {
   if (Object.hasOwn(command, 'taskId') || !command.values) throw invalidMutation();
   const values = command.values;
-  if (Object.hasOwn(values, 'completion_note')) throw invalidMutation();
+  if (
+    Object.hasOwn(values, 'completion_note') ||
+    Object.hasOwn(values, 'expected_updated_at') ||
+    Object.hasOwn(values, 'expected_owner_user_id') ||
+    Object.hasOwn(values, 'expected_team_id')
+  ) throw invalidMutation();
   if (!positiveSafeInteger(values.owner_user_id) || !positiveSafeInteger(values.team_id)) {
     throw invalidMutation();
   }
@@ -1876,6 +1890,115 @@ function canCloseTask(context, customer, task) {
   );
 }
 
+function canUpdateTask(context, customer, task) {
+  return canCloseTask(context, customer, task);
+}
+
+function organizationMemberPolicyAvailable(db) {
+  return Boolean(db.prepare(`
+    SELECT 1 AS available FROM sqlite_master
+    WHERE type='table' AND name='organization_member_policy'
+  `).get());
+}
+
+function taskAssigneeCandidates(db, organizationId, teamId) {
+  const policyJoin = organizationMemberPolicyAvailable(db)
+    ? `JOIN organization_member_policy policy
+         ON policy.org_id=om.org_id AND policy.user_id=om.user_id
+        AND policy.access_mode='read_write'`
+    : '';
+  return db.prepare(`
+    SELECT u.id AS user_id,u.display_name
+    FROM team_memberships tm
+    JOIN organization_memberships om
+      ON om.org_id=tm.org_id AND om.user_id=tm.user_id
+    JOIN users u ON u.id=om.user_id
+    ${policyJoin}
+    WHERE tm.org_id=? AND tm.team_id=?
+      AND tm.status='active' AND tm.revoked_at IS NULL
+      AND om.status='active' AND om.revoked_at IS NULL
+      AND u.is_active=1
+    ORDER BY u.display_name ASC,u.id ASC
+  `).all(organizationId, teamId).map((row) => ({
+    user_id: row.user_id,
+    display_name: row.display_name
+  }));
+}
+
+function readTaskAssigneeCandidates(db, context, input, customer, task) {
+  if (Object.hasOwn(input.command, 'values')) throw invalidMutation();
+  if (!canUpdateTask(context, customer, task)) {
+    return forbiddenDecision(db, context, input, 'customer_task_candidates');
+  }
+  if (task.status !== 'open') throw mutationError('CRM_TASK_CONFLICT');
+  return deepFreeze({
+    items: taskAssigneeCandidates(db, context.organization.id, task.team_id)
+  });
+}
+
+function canonicalTaskUpdate(command) {
+  const required = [
+    'title', 'description', 'due_at', 'owner_user_id',
+    'expected_updated_at', 'expected_owner_user_id', 'expected_team_id'
+  ];
+  if (!command.values || Object.keys(command.values).sort().join('\n') !== required.slice().sort().join('\n')) {
+    throw invalidMutation();
+  }
+  const values = command.values;
+  if (!positiveSafeInteger(values.owner_user_id) ||
+      !positiveSafeInteger(values.expected_owner_user_id) ||
+      !positiveSafeInteger(values.expected_team_id)) throw invalidMutation();
+  const dueAt = canonicalTimestamp(values.due_at);
+  const expectedUpdatedAt = canonicalTimestamp(values.expected_updated_at);
+  if (dueAt === null || expectedUpdatedAt === null) throw invalidMutation();
+  return Object.freeze({
+    title: canonicalBoundedText(values.title, 240, true),
+    description: canonicalBoundedText(values.description, 4000),
+    due_at: dueAt,
+    owner_user_id: values.owner_user_id,
+    expected_updated_at: expectedUpdatedAt,
+    expected_owner_user_id: values.expected_owner_user_id,
+    expected_team_id: values.expected_team_id
+  });
+}
+
+function updateTask(db, context, input, customer, task) {
+  if (!canUpdateTask(context, customer, task)) {
+    return forbiddenDecision(db, context, input, 'customer_task_update');
+  }
+  const values = canonicalTaskUpdate(input.command);
+  if (task.status !== 'open') throw mutationError('CRM_TASK_CONFLICT');
+  if (!taskAssigneeCandidates(db, context.organization.id, task.team_id)
+    .some((candidate) => candidate.user_id === values.owner_user_id)) {
+    throw invalidMutation();
+  }
+  const changedFields = ['title', 'description', 'due_at', 'owner_user_id']
+    .filter((field) => task[field] !== values[field])
+    .sort();
+  const updated = db.prepare(`
+    UPDATE crm_tasks
+    SET title=?,description=?,due_at=?,owner_user_id=?,
+        updated_at=CASE
+          WHEN CURRENT_TIMESTAMP > updated_at THEN CURRENT_TIMESTAMP
+          ELSE datetime(updated_at,'+1 second')
+        END
+    WHERE id=? AND org_id=? AND customer_id=? AND status='open'
+      AND updated_at IS ? AND owner_user_id=? AND team_id=?
+  `).run(
+    values.title, values.description, values.due_at, values.owner_user_id,
+    task.id, context.organization.id, customer.id,
+    values.expected_updated_at, values.expected_owner_user_id, values.expected_team_id
+  );
+  if (updated.changes !== 1) throw mutationError('CRM_TASK_CONFLICT');
+  const stored = readTask(db, context.organization.id, customer.id, task.id);
+  writeTaskEvidence(db, context, input, customer, stored, 'task_updated', {
+    changed_fields: changedFields,
+    from_owner_user_id: task.owner_user_id,
+    to_owner_user_id: stored.owner_user_id
+  });
+  return taskSuccessResult(stored, 'updated', input);
+}
+
 function closeTask(db, context, input, customer, task) {
   if (!canCloseTask(context, customer, task)) {
     return forbiddenDecision(db, context, input, `customer_task_${input.command.action}`);
@@ -1918,10 +2041,14 @@ function closeTask(db, context, input, customer, task) {
 
 function mutateTask(db, context, input, customer) {
   if (input.command.action === 'create') return createTask(db, context, input, customer);
-  if (input.command.action !== 'complete' && input.command.action !== 'cancel') throw invalidMutation();
+  if (!['candidates', 'update', 'complete', 'cancel'].includes(input.command.action)) throw invalidMutation();
   if (!positiveSafeInteger(input.command.taskId)) throw invalidMutation();
   const task = readTask(db, context.organization.id, customer.id, input.command.taskId);
   if (!task) return { error: mutationError('CRM_CHILD_NOT_FOUND') };
+  if (input.command.action === 'candidates') {
+    return readTaskAssigneeCandidates(db, context, input, customer, task);
+  }
+  if (input.command.action === 'update') return updateTask(db, context, input, customer, task);
   return closeTask(db, context, input, customer, task);
 }
 
@@ -2389,10 +2516,8 @@ function authorizeCustomerCommand(db, context, input, operation) {
     throw invalidMutation();
   }
 
-  const closingTask = operation === 'task' && (
-    command.action === 'complete' || command.action === 'cancel'
-  );
-  if (closingTask) {
+  const protectedTask = operation === 'task' && command.action !== 'create';
+  if (protectedTask) {
     if (custody !== 'owned') return forbiddenDecision(db, context, input, label);
     return mutateTask(db, context, input, customer);
   }

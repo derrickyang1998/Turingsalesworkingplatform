@@ -185,7 +185,8 @@ function prepareQueryState(db, rawOptions, { decodeCursor = true } = {}) {
     'organizationId',
     'organizationCode',
     'requestId',
-    'filter'
+    'filter',
+    'taskUpdateAllowed'
   ]);
   if (!options) throw invalidContext();
   const contextOptions = { actorUserId: options.actorUserId };
@@ -515,7 +516,7 @@ function mapContactRow(row) {
   };
 }
 
-function mapTaskRow(row) {
+function mapTaskRow(row, canUpdate) {
   return {
     id: row.id,
     customer_id: row.customer_id,
@@ -532,7 +533,8 @@ function mapTaskRow(row) {
     completed_by: row.completed_by,
     completion_note: row.completion_note,
     created_at: row.created_at,
-    updated_at: row.updated_at
+    updated_at: row.updated_at,
+    can_update: canUpdate === true
   };
 }
 
@@ -719,7 +721,8 @@ function getCustomerDetail(db, rawOptions) {
       'organizationId',
       'organizationCode',
       'requestId',
-      'customerId'
+      'customerId',
+      'taskUpdateAllowed'
     ]);
     if (!options || !positiveSafeInteger(options.customerId)) throw invalidContext();
 
@@ -819,6 +822,7 @@ function getCustomerDetail(db, rawOptions) {
     );
     const tasksHaveMore = taskRows.length > CUSTOMER_DETAIL_TASK_LIMIT;
     const tasks = taskRows.slice(0, CUSTOMER_DETAIL_TASK_LIMIT);
+    const routeAllowsTaskUpdate = options.taskUpdateAllowed === true;
     const activity = db.prepare(`
       SELECT
         a.id,
@@ -845,7 +849,13 @@ function getCustomerDetail(db, rawOptions) {
       customer: mapCustomerDetailRow(customerRow),
       opportunities: opportunities.map(mapOpportunityDetailRow),
       contacts: contacts.map(mapContactRow),
-      tasks: tasks.map(mapTaskRow),
+      tasks: tasks.map((task) => mapTaskRow(task, routeAllowsTaskUpdate && customerRow.custody === 'owned' && (
+        task.status === 'open' && positiveSafeInteger(task.team_id) && (
+          state.context.is_org_admin === true ||
+          customerRow.owner_user_id === state.context.actor_user_id ||
+          task.owner_user_id === state.context.actor_user_id
+        )
+      ))),
       activity: activity.map(mapActivityRow),
       meta: {
         request_id: Object.hasOwn(options, 'requestId') ? options.requestId : null,

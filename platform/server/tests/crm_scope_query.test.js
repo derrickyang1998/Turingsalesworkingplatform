@@ -712,6 +712,22 @@ test('organization admin may inspect a same-organization quarantined customer de
     contacts: { limit: 100, has_more: false },
     tasks: { limit: 100, has_more: false }
   });
+
+  insertCrmTask(db, {
+    id: 33005,
+    customerId: IDS.nullTeamA,
+    teamId: IDS.teamA1,
+    ownerUserId: IDS.ownerA,
+    title: 'Quarantined customer task'
+  });
+  const detailWithTask = getCustomerDetail(db, {
+    actorUserId: IDS.orgAdminA,
+    organizationId: IDS.orgA,
+    customerId: IDS.nullTeamA,
+    requestId: 'detail-org-admin-task-projection',
+    taskUpdateAllowed: true
+  });
+  assert.equal(detailWithTask.tasks[0].can_update, false);
 });
 
 test('customer detail bounds high-cardinality opportunity collections', (t) => {
@@ -849,8 +865,29 @@ test('customer detail embeds tenant-scoped tasks open-first with bounded owner m
     completed_by: null,
     completion_note: null,
     created_at: FIXED_AT,
-    updated_at: FIXED_AT
+    updated_at: FIXED_AT,
+    can_update: false
   });
+  const writableDetail = getCustomerDetail(db, {
+    actorUserId: IDS.ownerA,
+    organizationId: IDS.orgA,
+    customerId: IDS.ownedA,
+    requestId: 'detail-customer-tasks-writable',
+    taskUpdateAllowed: true
+  });
+  assert.deepEqual(
+    writableDetail.tasks.map((task) => [task.id, task.can_update]),
+    [[33002, true], [33001, true], [33003, false]]
+  );
+  db.prepare('UPDATE crm_tasks SET team_id=NULL WHERE id=?').run(33001);
+  const unassignedTaskDetail = getCustomerDetail(db, {
+    actorUserId: IDS.ownerA,
+    organizationId: IDS.orgA,
+    customerId: IDS.ownedA,
+    requestId: 'detail-customer-task-without-team',
+    taskUpdateAllowed: true
+  });
+  assert.equal(unassignedTaskDetail.tasks.find((task) => task.id === 33001).can_update, false);
   assert.equal(detail.tasks[2].completion_note, 'Shared with the client.');
   assert.deepEqual(detail.meta.tasks, { limit: 100, has_more: false });
   assert.equal(Object.isFrozen(detail.tasks), true);

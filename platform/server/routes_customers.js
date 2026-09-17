@@ -87,6 +87,10 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
     'source',
     'completion_note'
   ]);
+  const TASK_UPDATE_FIELDS = Object.freeze([
+    'title', 'description', 'due_at', 'owner_user_id',
+    'expected_updated_at', 'expected_owner_user_id', 'expected_team_id'
+  ]);
   const CANONICAL_FILTER_FIELDS = Object.freeze([
     'scope',
     'owner_id',
@@ -133,6 +137,7 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
     'CRM_CUSTOMER_CONFLICT',
     'CRM_PUBLIC_POOL_UNAVAILABLE',
     'CRM_CUSTODY_CONFLICT',
+    'CRM_TASK_CONFLICT',
     'CRM_TRANSITION_INVALID',
     'CRM_STORAGE_BUSY',
     'CRM_MUTATION_FAILED',
@@ -159,6 +164,7 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
     CRM_CUSTOMER_CONFLICT: 'CRM customer changed',
     CRM_PUBLIC_POOL_UNAVAILABLE: 'CRM public-pool customer is unavailable',
     CRM_CUSTODY_CONFLICT: 'CRM customer custody changed',
+    CRM_TASK_CONFLICT: 'CRM task changed',
     CRM_TRANSITION_INVALID: 'CRM transition is not allowed',
     CRM_STORAGE_BUSY: 'CRM storage is temporarily unavailable',
     CRM_MUTATION_FAILED: 'CRM mutation failed',
@@ -433,7 +439,8 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
         code === 'CRM_CHILD_NOT_FOUND') return 404;
     if (code === 'CRM_CUSTOMER_DUPLICATE' || code === 'CRM_CUSTOMER_CONFLICT' ||
         code === 'CRM_PUBLIC_POOL_UNAVAILABLE' ||
-        code === 'CRM_CUSTODY_CONFLICT' || code === 'CRM_TRANSITION_INVALID' ||
+        code === 'CRM_CUSTODY_CONFLICT' || code === 'CRM_TASK_CONFLICT' ||
+        code === 'CRM_TRANSITION_INVALID' ||
         code === 'CRM_HARD_DELETE_UNAVAILABLE' || code === 'CRM_SALES_SCOPE_UNAVAILABLE') return 409;
     if (code === 'CRM_STORAGE_BUSY' || code === 'CRM_PERMISSION_AUDIT_FAILED') return 503;
     if (code === 'CRM_MUTATION_FAILED' || code === 'CRM_QUERY_FAILED') return 500;
@@ -711,7 +718,8 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
     delete context.correlationId;
     return crmQueryService.getCustomerDetail(db, {
       ...context,
-      customerId: positiveInteger(req.params.id)
+      customerId: positiveInteger(req.params.id),
+      taskUpdateAllowed: req.crmTaskUpdateAllowed === true
     });
   }
 
@@ -941,6 +949,16 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
     requireEmbeddedCrmOpportunityRead,
     requireEmbeddedCrmContactRead,
     requireEmbeddedCrmTaskRead,
+    function projectCrmTaskUpdatePermission(req, _res, next) {
+      const context = serviceContext(req);
+      req.crmTaskUpdateAllowed = moduleActionPermissionService.authorize({
+        principal: req.user,
+        organizationId: context.organizationId,
+        module: CRM_TASK_MODULE,
+        action: CRM_TASK_UPDATE_ACTION
+      }).allowed === true;
+      return next();
+    },
     crmHandler((req, res) => {
       return res.json(callCustomerDetail(req));
     })
@@ -1105,6 +1123,36 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
       values: projectValues(body, TASK_VALUE_FIELDS, { due_at: compatibleTimestamp })
     };
     return res.json(callMutation('mutateCrmTask', req, command));
+  }));
+
+  app.get('/api/customers/:customerId/tasks/:taskId/assignee-candidates', authMiddleware, requireCrmTaskUpdate, crmHandler((req, res) => {
+    return res.json(callMutation('mutateCrmTask', req, {
+      action: 'candidates',
+      customerId: positiveInteger(req.params.customerId),
+      taskId: positiveInteger(req.params.taskId)
+    }));
+  }));
+
+  app.put('/api/customers/:customerId/tasks/:taskId', authMiddleware, requireCrmTaskUpdate, crmHandler((req, res) => {
+    const body = plainRecord(req.body || {});
+    if (Object.keys(body).sort().join('\n') !== TASK_UPDATE_FIELDS.slice().sort().join('\n')) {
+      throw invalidHttp();
+    }
+    return res.json(callMutation('mutateCrmTask', req, {
+      action: 'update',
+      customerId: positiveInteger(req.params.customerId),
+      taskId: positiveInteger(req.params.taskId),
+      values: projectValues(body, TASK_UPDATE_FIELDS, {
+        due_at(value) {
+          if (value === null) throw invalidHttp();
+          return compatibleTimestamp(value);
+        },
+        expected_updated_at(value) {
+          if (value === null) throw invalidHttp();
+          return compatibleTimestamp(value);
+        }
+      })
+    }));
   }));
 
   function taskCloseCommand(req, action) {
