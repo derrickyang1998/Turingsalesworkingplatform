@@ -1384,6 +1384,14 @@ const STRUCTURAL_POLICY_V21_SHA256 = crypto.createHash('sha256')
   }), 'utf8')
   .digest('hex');
 const STRUCTURAL_COLUMN_POLICY_V22 = Object.freeze(Object.assign(Object.create(null), STRUCTURAL_COLUMN_POLICY_V21, {
+  'crm_audit_events.event_type': Object.freeze({
+    storage: 'text',
+    kind: 'enum',
+    allowedValues: Object.freeze([
+      ...STRUCTURAL_COLUMN_POLICY_V21['crm_audit_events.event_type'].allowedValues,
+      'task_updated'
+    ])
+  }),
   'organization_authority.updated_by': Object.freeze({ storage: 'integer', kind: 'integer' }),
   'organization_authority.updated_at': Object.freeze({ storage: 'text', kind: 'timestamp' }),
   'organization_authority.version': Object.freeze({ storage: 'integer', kind: 'integer' }),
@@ -1397,7 +1405,7 @@ const STRUCTURAL_COLUMN_POLICY_V22 = Object.freeze(Object.assign(Object.create(n
     storage: 'text', kind: 'migration-ledger', allowedValues: V22_MIGRATION_LEDGER.sourcePath
   })
 }));
-const STRUCTURAL_POLICY_V22_VALIDATOR_VERSION = 'tm-structural-policy-v19-organization-ownership-transfer';
+const STRUCTURAL_POLICY_V22_VALIDATOR_VERSION = 'tm-structural-policy-v20-task-update-audit';
 const STRUCTURAL_POLICY_V22_SHA256 = crypto.createHash('sha256')
   .update(JSON.stringify({
     validatorVersion: STRUCTURAL_POLICY_V22_VALIDATOR_VERSION,

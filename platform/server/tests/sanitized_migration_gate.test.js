@@ -1193,7 +1193,7 @@ test('manifest declares exact managed v1 as primary and keeps isolated v6 throug
     assert.equal(v19Profile.semanticPolicies.structuralColumns.validatorVersion, 'tm-structural-policy-v16-performance-provider-lease');
     assert.equal(v20Profile.semanticPolicies.structuralColumns.validatorVersion, 'tm-structural-policy-v17-organization-methodology');
     assert.equal(v21Profile.semanticPolicies.structuralColumns.validatorVersion, 'tm-structural-policy-v18-organization-role-governance');
-    assert.equal(v22Profile.semanticPolicies.structuralColumns.validatorVersion, 'tm-structural-policy-v19-organization-ownership-transfer');
+    assert.equal(v22Profile.semanticPolicies.structuralColumns.validatorVersion, 'tm-structural-policy-v20-task-update-audit');
     assert.doesNotThrow(() => sanitizer.validateManifest(manifest, v1Fixture.db));
     assert.doesNotThrow(() => sanitizer.validateManifest(manifest, v6Fixture.db));
     assert.doesNotThrow(() => sanitizer.validateManifest(manifest, v7Fixture.db));

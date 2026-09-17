@@ -121436,8 +121436,8 @@
         "structuralColumns": {
           "mode": "frozen-exact-table-column-policy",
           "unknownText": "transform-or-reject",
-          "validatorVersion": "tm-structural-policy-v19-organization-ownership-transfer",
-          "policySha256": "a08daa53a655d8796216a27a852ec58f6b6769307867451525f141eeefc1ef19"
+          "validatorVersion": "tm-structural-policy-v20-task-update-audit",
+          "policySha256": "cee2c974e4765ebf11dc9107ebfacadc6b553c728680092670245bc33fe40649"
         }
       },
       "equalityGroups": [

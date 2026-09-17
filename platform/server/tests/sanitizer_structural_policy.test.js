@@ -62,6 +62,36 @@ test('signed collaboration status is preserved only by the schema 15 structural 
   ));
 });
 
+test('schema 22 structural policy preserves task update audit events', () => {
+  for (const schemaVersion of [1, ...Array.from({ length: 16 }, (_value, index) => index + 6)]) {
+    assert.throws(
+      () => sanitizer._testing.assertStructuralValueAllowed(
+        'crm_audit_events.event_type',
+        'task_updated',
+        'text',
+        sanitizer._testing.structuralColumnPolicyForVersion(schemaVersion)
+      ),
+      /outside the closed allowlist/i,
+      `schema v${schemaVersion} must remain closed to task_updated`
+    );
+  }
+  assert.doesNotThrow(() => sanitizer._testing.assertStructuralValueAllowed(
+    'crm_audit_events.event_type',
+    'task_updated',
+    'text',
+    sanitizer._testing.structuralColumnPolicyForVersion(22)
+  ));
+  assert.throws(
+    () => sanitizer._testing.assertStructuralValueAllowed(
+      'crm_audit_events.event_type',
+      'task_reclassified',
+      'text',
+      sanitizer._testing.structuralColumnPolicyForVersion(22)
+    ),
+    /outside the closed allowlist/i
+  );
+});
+
 test('schema 15 sanitization manifest pins the signed collaboration structural policy', () => {
   const fixture = openMigratedFixture('signed-collaboration-policy', 15);
   try {
