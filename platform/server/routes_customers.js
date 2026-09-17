@@ -145,7 +145,7 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
     CRM_SCOPE_INVALID: 'CRM organization context is not valid',
     CRM_SCOPE_FORBIDDEN: 'CRM scope is not allowed',
     CRM_SCOPE_NOT_FOUND: 'CRM organization context was not found',
-    CRM_PERMISSION_FORBIDDEN: 'CRM permission is not allowed',
+    CRM_PERMISSION_FORBIDDEN: 'CRM customer permission is not allowed',
     CRM_PERMISSION_AUDIT_FAILED: 'CRM permission audit could not be recorded',
     CRM_MUTATION_INVALID: 'CRM mutation command is not valid',
     CRM_CUSTOMER_NOT_FOUND: 'CRM customer was not found',
@@ -164,13 +164,16 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
     CRM_HTTP_FAILED: 'CRM request failed'
   });
 
+  const CONTACT_PERMISSION_FORBIDDEN_TITLE = 'CRM permission is not allowed';
+
   class CrmHttpError extends Error {
-    constructor(code, status) {
-      super(ERROR_TITLES[code] || ERROR_TITLES.CRM_HTTP_FAILED);
+    constructor(code, status, title) {
+      const resolvedTitle = title || ERROR_TITLES[code] || ERROR_TITLES.CRM_HTTP_FAILED;
+      super(resolvedTitle);
       this.name = 'CrmHttpError';
       this.code = code;
       this.status = status;
-      this.title = ERROR_TITLES[code] || ERROR_TITLES.CRM_HTTP_FAILED;
+      this.title = resolvedTitle;
     }
   }
 
@@ -225,9 +228,12 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
   }
 
   function requestId(req) {
-    return safeRequestIdentifier(req.requestId, 120) ||
-      safeRequestIdentifier(req.phase4Request && req.phase4Request.requestId, 120) ||
-      `crm-${randomUUID()}`;
+    const existingRequestId = safeRequestIdentifier(req.requestId, 120) ||
+      safeRequestIdentifier(req.phase4Request && req.phase4Request.requestId, 120);
+    if (existingRequestId) return existingRequestId;
+    const generatedRequestId = `crm-${randomUUID()}`;
+    req.requestId = generatedRequestId;
+    return generatedRequestId;
   }
 
   function serviceContext(req) {
@@ -462,7 +468,9 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
     const code = KNOWN_ERROR_CODES.has(candidateCode) ? candidateCode : 'CRM_HTTP_FAILED';
     const status = problemStatus(code);
     const currentRequestId = requestId(req);
-    const title = ERROR_TITLES[code] || ERROR_TITLES.CRM_HTTP_FAILED;
+    const title = error instanceof CrmHttpError
+      ? error.title
+      : ERROR_TITLES[code] || ERROR_TITLES.CRM_HTTP_FAILED;
     const body = {
       type: `https://api.turingmarket.example/problems/${code.toLowerCase().replace(/_/g, '-')}`,
       title,
@@ -586,7 +594,11 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
         if (effectiveDecision.code === 'CRM_SCOPE_FORBIDDEN') {
           return sendProblem(res, req, new CrmHttpError('CRM_SCOPE_FORBIDDEN', 403));
         }
-        return sendProblem(res, req, new CrmHttpError('CRM_PERMISSION_FORBIDDEN', 403));
+        return sendProblem(
+          res,
+          req,
+          new CrmHttpError('CRM_PERMISSION_FORBIDDEN', 403, settings.permissionForbiddenTitle)
+        );
       }
       if (module === CRM_CUSTOMER_MODULE) req.crmCustomerPermission = effectiveDecision;
       if (module === CRM_OPPORTUNITY_MODULE) req.crmOpportunityPermission = effectiveDecision;
@@ -630,17 +642,26 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
   const requireEmbeddedCrmContactRead = requireCrmPermission(
     CRM_CONTACT_MODULE,
     CRM_CONTACT_READ_ACTION,
-    { targetType: 'customer', targetParam: 'id', applyScopeRules: true }
+    {
+      targetType: 'customer',
+      targetParam: 'id',
+      applyScopeRules: true,
+      permissionForbiddenTitle: CONTACT_PERMISSION_FORBIDDEN_TITLE
+    }
   );
   const requireCrmContactCreate = requireCrmPermission(
     CRM_CONTACT_MODULE,
     CRM_CONTACT_CREATE_ACTION,
-    { targetType: 'contact' }
+    { targetType: 'contact', permissionForbiddenTitle: CONTACT_PERMISSION_FORBIDDEN_TITLE }
   );
   const requireCrmContactUpdate = requireCrmPermission(
     CRM_CONTACT_MODULE,
     CRM_CONTACT_UPDATE_ACTION,
-    { targetType: 'contact', targetParam: 'contactId' }
+    {
+      targetType: 'contact',
+      targetParam: 'contactId',
+      permissionForbiddenTitle: CONTACT_PERMISSION_FORBIDDEN_TITLE
+    }
   );
 
   function callMutation(serviceMethod, req, command) {

@@ -562,12 +562,14 @@ function earlyCrmMutation(req) {
   return earlyOpportunityMutation(req) || earlyContactMutation(req);
 }
 
-function sendEarlyCrmPermissionProblem(res, requestId, code) {
+function sendEarlyCrmPermissionProblem(res, requestId, code, module) {
   const auditFailure = code === 'CRM_PERMISSION_AUDIT_FAILED';
   const status = auditFailure ? 503 : 403;
   const title = auditFailure
     ? 'CRM permission audit could not be recorded'
-    : 'CRM permission is not allowed';
+    : module === CRM_CONTACT_MODULE
+      ? 'CRM permission is not allowed'
+      : 'CRM customer permission is not allowed';
   if (typeof res.type === 'function') res.type('application/problem+json');
   return res.status(status).json({
     type: `https://api.turingmarket.example/problems/${code.toLowerCase().replace(/_/g, '-')}`,
@@ -607,9 +609,19 @@ function earlyCrmMutationGuard(req, res, next) {
       ip_address: req.ip || null
     });
   } catch {
-    return sendEarlyCrmPermissionProblem(res, requestId, 'CRM_PERMISSION_AUDIT_FAILED');
+    return sendEarlyCrmPermissionProblem(
+      res,
+      requestId,
+      'CRM_PERMISSION_AUDIT_FAILED',
+      mutation.module
+    );
   }
-  return sendEarlyCrmPermissionProblem(res, requestId, 'CRM_PERMISSION_FORBIDDEN');
+  return sendEarlyCrmPermissionProblem(
+    res,
+    requestId,
+    'CRM_PERMISSION_FORBIDDEN',
+    mutation.module
+  );
 }
 
 app.use(earlyCrmMutationGuard);

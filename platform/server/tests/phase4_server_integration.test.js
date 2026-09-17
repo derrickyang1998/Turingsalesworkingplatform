@@ -993,7 +993,7 @@ test('opportunity named permission ingress denies read-only malformed JSON befor
       const body = await response.json();
       assert.equal(response.status, 403, `${method} ${requestPath}`);
       assert.equal(body.code, 'CRM_PERMISSION_FORBIDDEN');
-      assert.equal(body.title, 'CRM permission is not allowed');
+      assert.equal(body.title, 'CRM customer permission is not allowed');
       assert.equal(body.request_id, requestId);
     }
 

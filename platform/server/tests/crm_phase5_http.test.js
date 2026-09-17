@@ -11,6 +11,7 @@ const realCrmQueryService = require('../services/crm_query_service');
 
 const SERVER_ROOT = path.resolve(__dirname, '..');
 const FIXED_AT = '2026-08-10 00:00:00';
+const GENERATED_CRM_REQUEST_ID = /^crm-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const REGISTERED_MIGRATIONS = Object.freeze([
   ['002_campaign_business_spine', 'campaign_business_spine'],
   ['003_campaign_workflow_dispatch_evidence', 'campaign_workflow_dispatch_evidence'],
@@ -231,7 +232,7 @@ function makeHarness(options) {
       query: input.query || {},
       body: input.body || {},
       headers: Object.assign({ 'x-correlation-id': 'http-correlation' }, input.headers || {}),
-      requestId: input.requestId || 'http-request',
+      requestId: Object.hasOwn(input, 'requestId') ? input.requestId : 'http-request',
       ip: '127.0.0.1'
     };
     let statusCode = 200;
@@ -1022,6 +1023,7 @@ test('crm http: denied opportunity update is audited before business command par
 
   assert.equal(response.statusCode, 403);
   assert.equal(response.payload.code, 'CRM_PERMISSION_FORBIDDEN');
+  assert.equal(response.payload.title, 'CRM customer permission is not allowed');
   assert.equal(harness.calls.length, 0);
   assert.deepEqual(permissionCalls, [{
     principal: { id: 101, role: 'user' },
@@ -1083,6 +1085,7 @@ test('crm http: denied embedded opportunity read audits the customer target befo
 
   assert.equal(response.statusCode, 403);
   assert.equal(response.payload.code, 'CRM_PERMISSION_FORBIDDEN');
+  assert.equal(response.payload.title, 'CRM customer permission is not allowed');
   assert.equal(harness.calls.filter((call) => call.method === 'getCustomerDetail').length, 0);
   assert.deepEqual(permissionCalls.map((call) => `${call.module}.${call.action}`), [
     'crm.customer.read',
@@ -1133,6 +1136,7 @@ test('crm http: denied customer permission is audited and stops before request v
   assert.equal(response.statusCode, 403);
   assert.equal(response.contentType, 'application/problem+json');
   assert.equal(response.payload.code, 'CRM_PERMISSION_FORBIDDEN');
+  assert.equal(response.payload.title, 'CRM customer permission is not allowed');
   assert.equal(response.payload.request_id, 'crm-permission-denied-request');
   assert.equal(harness.calls.length, 0);
   assert.equal(permissionCalls.length, 1);
@@ -1348,6 +1352,7 @@ test('crm http: customer detail requires embedded contact read before detail dis
 
   assert.equal(response.statusCode, 403);
   assert.equal(response.payload.code, 'CRM_PERMISSION_FORBIDDEN');
+  assert.equal(response.payload.title, 'CRM permission is not allowed');
   assert.equal(harness.calls.filter((call) => call.method === 'getCustomerDetail').length, 0);
   assert.equal(permissionCalls.length, 3);
   assert.deepEqual(
@@ -1365,6 +1370,184 @@ test('crm http: customer detail requires embedded contact read before detail dis
     target_id: 41,
     ip_address: '127.0.0.1'
   }]);
+});
+
+test('crm http: generated request id correlates embedded detail audits and contact denial response', async () => {
+  const auditEvents = [];
+  const harness = makeHarness({
+    moduleActionPermissionService: {
+      authorize(input) {
+        return {
+          allowed: input.module !== 'crm.contact',
+          code: input.module === 'crm.contact' ? 'ACTION_FORBIDDEN' : 'ALLOWED',
+          principal: {
+            user_id: input.principal.id,
+            organization_id: input.organizationId,
+            roles: ['administrator', 'member']
+          }
+        };
+      }
+    },
+    crmPermissionAudit(event) {
+      auditEvents.push(event);
+    }
+  });
+
+  const response = await harness.invoke('GET /api/customers/:id/detail', {
+    authContext: {
+      organization: { id: 501, code: 'http-org', role_code: 'org_admin' },
+      teams: [{ id: 601, role_code: 'team_lead' }]
+    },
+    params: { id: '41' },
+    query: { scope: 'all', search: 'denied-secret-query' },
+    body: { password: 'denied-secret-password' },
+    headers: {
+      authorization: 'Bearer denied-secret-token',
+      'x-api-key': 'denied-secret-key'
+    },
+    requestId: null
+  });
+
+  assert.equal(response.statusCode, 403);
+  assert.equal(response.payload.code, 'CRM_PERMISSION_FORBIDDEN');
+  assert.equal(response.payload.title, 'CRM permission is not allowed');
+  assert.match(response.payload.request_id, GENERATED_CRM_REQUEST_ID);
+  const correlatedRequestId = response.payload.request_id;
+  assert.deepEqual(auditEvents, [
+    {
+      actor_user_id: 101,
+      organization_id: 501,
+      permission: 'crm.customer.read',
+      outcome: 'allowed',
+      reason_code: 'ALLOWED',
+      request_id: correlatedRequestId,
+      target_type: 'customer',
+      target_id: 41,
+      ip_address: '127.0.0.1',
+      scope: 'organization'
+    },
+    {
+      actor_user_id: 101,
+      organization_id: 501,
+      permission: 'crm.opportunity.read',
+      outcome: 'allowed',
+      reason_code: 'ALLOWED',
+      request_id: correlatedRequestId,
+      target_type: 'customer',
+      target_id: 41,
+      ip_address: '127.0.0.1',
+      scope: 'organization'
+    },
+    {
+      actor_user_id: 101,
+      organization_id: 501,
+      permission: 'crm.contact.read',
+      outcome: 'denied',
+      reason_code: 'ACTION_FORBIDDEN',
+      request_id: correlatedRequestId,
+      target_type: 'customer',
+      target_id: 41,
+      ip_address: '127.0.0.1',
+      scope: 'organization'
+    }
+  ]);
+  assert.doesNotMatch(
+    JSON.stringify(auditEvents),
+    /denied-secret-query|denied-secret-password|denied-secret-token|denied-secret-key/
+  );
+});
+
+test('crm http: generated request id correlates organization detail audits and success response', async () => {
+  const auditEvents = [];
+  const detailInputs = [];
+  const harness = makeHarness({
+    crmQueryService: {
+      getCustomerDetail(_db, input) {
+        detailInputs.push(input);
+        const detail = canonicalCustomerDetail();
+        return {
+          ...detail,
+          meta: { ...detail.meta, request_id: input.requestId, scope: 'organization' }
+        };
+      }
+    },
+    moduleActionPermissionService: {
+      authorize(input) {
+        return {
+          allowed: true,
+          code: 'ALLOWED',
+          principal: {
+            user_id: input.principal.id,
+            organization_id: input.organizationId,
+            roles: ['administrator', 'member']
+          }
+        };
+      }
+    },
+    crmPermissionAudit(event) {
+      auditEvents.push(event);
+    }
+  });
+
+  const response = await harness.invoke('GET /api/customers/:id/detail', {
+    authContext: {
+      organization: { id: 501, code: 'http-org', role_code: 'org_admin' },
+      teams: [{ id: 601, role_code: 'team_lead' }]
+    },
+    params: { id: '41' },
+    query: { scope: 'all', search: 'success-secret-query' },
+    body: { api_key: 'success-secret-body-key' },
+    headers: { authorization: 'Bearer success-secret-token' },
+    requestId: null
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(detailInputs.length, 1);
+  assert.match(response.payload.meta.request_id, GENERATED_CRM_REQUEST_ID);
+  const correlatedRequestId = response.payload.meta.request_id;
+  assert.equal(detailInputs[0].requestId, correlatedRequestId);
+  assert.deepEqual(auditEvents, [
+    {
+      actor_user_id: 101,
+      organization_id: 501,
+      permission: 'crm.customer.read',
+      outcome: 'allowed',
+      reason_code: 'ALLOWED',
+      request_id: correlatedRequestId,
+      target_type: 'customer',
+      target_id: 41,
+      ip_address: '127.0.0.1',
+      scope: 'organization'
+    },
+    {
+      actor_user_id: 101,
+      organization_id: 501,
+      permission: 'crm.opportunity.read',
+      outcome: 'allowed',
+      reason_code: 'ALLOWED',
+      request_id: correlatedRequestId,
+      target_type: 'customer',
+      target_id: 41,
+      ip_address: '127.0.0.1',
+      scope: 'organization'
+    },
+    {
+      actor_user_id: 101,
+      organization_id: 501,
+      permission: 'crm.contact.read',
+      outcome: 'allowed',
+      reason_code: 'ALLOWED',
+      request_id: correlatedRequestId,
+      target_type: 'customer',
+      target_id: 41,
+      ip_address: '127.0.0.1',
+      scope: 'organization'
+    }
+  ]);
+  assert.doesNotMatch(
+    JSON.stringify(auditEvents),
+    /success-secret-query|success-secret-body-key|success-secret-token/
+  );
 });
 
 test('crm http: contact create, update, and archive use named permissions before command parsing', async () => {
@@ -1408,6 +1591,7 @@ test('crm http: contact create, update, and archive use named permissions before
     });
     assert.equal(response.statusCode, 403, route);
     assert.equal(response.payload.code, 'CRM_PERMISSION_FORBIDDEN', route);
+    assert.equal(response.payload.title, 'CRM permission is not allowed', route);
   }
 
   assert.equal(harness.calls.length, 0);
