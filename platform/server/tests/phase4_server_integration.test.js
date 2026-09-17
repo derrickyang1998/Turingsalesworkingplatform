@@ -668,6 +668,48 @@ async function createReadOnlyContactUser(server, suffix) {
   return login;
 }
 
+async function createReadOnlyTaskUser(server, suffix) {
+  const adminLogin = await jsonRequest(server.baseUrl, '/api/auth/login', {
+    method: 'POST',
+    body: { username: 'admin', password: 'AdminTest1!Secure' }
+  });
+  assert.equal(adminLogin.response.status, 200, adminLogin.text + '\n' + server.output());
+
+  const username = `readonly-task-${suffix}`;
+  const password = 'ReadOnlyTask1!Safe';
+  const created = await jsonRequest(server.baseUrl, '/api/admin/users', {
+    method: 'POST',
+    token: adminLogin.body.token,
+    body: {
+      username,
+      password,
+      display_name: `Read Only Task ${suffix}`,
+      role: 'user',
+      department: 'Sales'
+    }
+  });
+  assert.equal(created.response.status, 200, created.text);
+
+  const setup = new Database(server.dbPath);
+  try {
+    setup.prepare(`
+      UPDATE organization_member_policy
+      SET access_mode='read_only',updated_at=CURRENT_TIMESTAMP
+      WHERE user_id=?
+    `).run(Number(created.body.id));
+  } finally {
+    setup.close();
+  }
+
+  const login = await jsonRequest(server.baseUrl, '/api/auth/login', {
+    method: 'POST',
+    body: { username, password }
+  });
+  assert.equal(login.response.status, 200, login.text);
+  assert.deepEqual(login.body.user.module_permissions['crm.task'], ['read']);
+  return login;
+}
+
 async function runTestServerToExit(prefix, envOverrides = {}, timeoutMs = 15000) {
   const port = await reservePort();
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
@@ -826,7 +868,8 @@ test('login and auth me preserve the user object and add current auth context', 
     assert.deepEqual(login.body.user.module_permissions, {
       'crm.customer': ['read', 'create', 'update'],
       'crm.opportunity': ['read', 'create', 'update'],
-      'crm.contact': ['read', 'create', 'update']
+      'crm.contact': ['read', 'create', 'update'],
+      'crm.task': ['read', 'create', 'update']
     });
     assert.equal(Array.isArray(login.body.auth_context.teams), true);
     assert.equal(login.body.auth_context.teams.length > 0, true);
@@ -914,7 +957,8 @@ test('read-only access is live, revokes old sessions, permits GET, blocks all bu
     assert.deepEqual(readOnlyLogin.body.user.module_permissions, {
       'crm.customer': ['read'],
       'crm.opportunity': ['read'],
-      'crm.contact': ['read']
+      'crm.contact': ['read'],
+      'crm.task': ['read']
     });
 
     const readable = await jsonRequest(server.baseUrl, '/api/demands', {
@@ -3850,6 +3894,120 @@ test('demand and proposal routes authorize classified rows before search, order,
     assert.deepEqual(proposals.body.proposals.map((row) => row.id), [fixture.accessible_proposal_id]);
   } finally {
     if (fixtureDb) fixtureDb.close();
+    await server.close();
+  }
+});
+
+test('task named permission ingress denies read-only malformed JSON before parsing and audits each action', {
+  timeout: 30000
+}, async () => {
+  const server = await startTestServer('tm-task-permission-ingress-');
+  try {
+    const login = await createReadOnlyTaskUser(server, 'denied');
+    const cases = [
+      ['POST', '/api/customers/41/tasks', 'create', null],
+      ['POST', '/api/customers/41/tasks/91/complete', 'complete', 91],
+      ['POST', '/api/customers/41/tasks/91/cancel', 'cancel', 91],
+      ['POST', '/api/customers/41/tasks/', 'create-trailing-slash', null],
+      ['POST', '/API/CUSTOMERS/41/TASKS/91/COMPLETE', 'complete-case-variant', 91],
+      ['POST', '/api/customers/41/tasks/not-an-id/cancel', 'cancel-invalid-id', null],
+      ['POST', '/api/customers/41/tasks/091/complete', 'complete-noncanonical-id', null]
+    ];
+
+    for (const [method, requestPath, label] of cases) {
+      const requestId = `task-${label}-malformed-json`;
+      const response = await fetch(server.baseUrl + requestPath, {
+        method,
+        headers: {
+          Authorization: `Bearer ${login.body.token}`,
+          'Content-Type': 'application/json',
+          'X-Request-Id': requestId
+        },
+        body: '{'
+      });
+      const body = await response.json();
+      assert.equal(response.status, 403, `${method} ${requestPath}`);
+      assert.equal(body.code, 'CRM_PERMISSION_FORBIDDEN');
+      assert.equal(body.title, 'CRM permission is not allowed');
+      assert.equal(body.request_id, requestId);
+    }
+
+    const inspection = new Database(server.dbPath, { readonly: true });
+    try {
+      const rows = inspection.prepare(`
+        SELECT details
+        FROM activity_log
+        WHERE action='crm_permission_denied' AND module='crm_permission'
+        ORDER BY id
+      `).all().map((row) => JSON.parse(row.details));
+      assert.deepEqual(rows, cases.map(([, , label, targetId]) => ({
+        actor_user_id: Number(login.body.user.id),
+        organization_id: Number(login.body.auth_context.organization.id),
+        permission: `crm.task.${label.startsWith('create') ? 'create' : 'update'}`,
+        outcome: 'denied',
+        reason_code: 'ACTION_FORBIDDEN',
+        request_id: `task-${label}-malformed-json`,
+        target_type: 'task',
+        target_id: targetId
+      })));
+    } finally {
+      inspection.close();
+    }
+
+    const writable = await jsonRequest(server.baseUrl, '/api/auth/login', {
+      method: 'POST',
+      body: { username: 'admin', password: 'AdminTest1!Secure' }
+    });
+    assert.equal(writable.response.status, 200, writable.text + '\n' + server.output());
+    for (const requestPath of [
+      '/api/customers/41/tasks',
+      '/API/CUSTOMERS/41/TASKS/91/COMPLETE',
+      '/api/customers/41/tasks/not-an-id/cancel'
+    ]) {
+      const response = await fetch(server.baseUrl + requestPath, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${writable.body.token}`,
+          'Content-Type': 'application/json',
+          'X-Request-Id': 'task-writable-malformed-json'
+        },
+        body: '{'
+      });
+      const body = await response.json();
+      assert.equal(response.status, 400, requestPath);
+      assert.equal(body.code, 'INVALID_REQUEST_BODY');
+    }
+  } finally {
+    await server.close();
+  }
+});
+
+test('task permission denial closes an authenticated slow unread request body', {
+  timeout: 30000
+}, async () => {
+  const server = await startTestServer('tm-task-permission-slow-body-');
+  try {
+    const login = await createReadOnlyTaskUser(server, 'slow-body');
+    const port = Number(new URL(server.baseUrl).port);
+    const startedAt = Date.now();
+    const response = await rawExchange(port, [
+      'POST /api/customers/41/tasks HTTP/1.1',
+      'Host: 127.0.0.1',
+      `Authorization: Bearer ${login.body.token}`,
+      'Content-Type: application/json',
+      'Content-Length: 65536',
+      'X-Request-Id: task-permission-slow-body',
+      'Connection: keep-alive',
+      '',
+      ''
+    ].join('\r\n'));
+
+    assert.equal(Date.now() - startedAt < 1000, true);
+    assert.match(response, /^HTTP\/1\.1 403\b/);
+    assert.match(response, /\r\nConnection: close\r\n/i);
+    assert.match(response, /"code":"CRM_PERMISSION_FORBIDDEN"/);
+    assert.match(response, /"request_id":"task-permission-slow-body"/);
+  } finally {
     await server.close();
   }
 });

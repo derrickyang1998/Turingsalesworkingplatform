@@ -68,7 +68,10 @@ const {
   CRM_OPPORTUNITY_UPDATE_ACTION,
   CRM_CONTACT_MODULE,
   CRM_CONTACT_CREATE_ACTION,
-  CRM_CONTACT_UPDATE_ACTION
+  CRM_CONTACT_UPDATE_ACTION,
+  CRM_TASK_MODULE,
+  CRM_TASK_CREATE_ACTION,
+  CRM_TASK_UPDATE_ACTION
 } = require('./services/module_action_permission_service');
 const moduleActionPermissionService = createModuleActionPermissionService(db);
 
@@ -88,13 +91,24 @@ function projectModulePermissions(principal, organizationId) {
     organizationId,
     module: CRM_CONTACT_MODULE
   });
-  if (!crmCustomerAccess.allowed || !crmOpportunityAccess.allowed || !crmContactAccess.allowed) {
+  const crmTaskAccess = moduleActionPermissionService.projectModuleAccess({
+    principal,
+    organizationId,
+    module: CRM_TASK_MODULE
+  });
+  if (
+    !crmCustomerAccess.allowed ||
+    !crmOpportunityAccess.allowed ||
+    !crmContactAccess.allowed ||
+    !crmTaskAccess.allowed
+  ) {
     throw new Error('Module permissions unavailable');
   }
   return {
     [CRM_CUSTOMER_MODULE]: crmCustomerAccess.actions.slice(),
     [CRM_OPPORTUNITY_MODULE]: crmOpportunityAccess.actions.slice(),
-    [CRM_CONTACT_MODULE]: crmContactAccess.actions.slice()
+    [CRM_CONTACT_MODULE]: crmContactAccess.actions.slice(),
+    [CRM_TASK_MODULE]: crmTaskAccess.actions.slice()
   };
 }
 const {
@@ -558,18 +572,53 @@ function earlyContactMutation(req) {
   };
 }
 
-function earlyCrmMutation(req) {
-  return earlyOpportunityMutation(req) || earlyContactMutation(req);
+function earlyTaskMutation(req) {
+  if (req.method !== 'POST') return null;
+  const closeMatch = /^\/api\/customers\/[^/]+\/tasks\/([^/]+)\/(complete|cancel)\/?$/i.exec(req.path);
+  if (closeMatch) {
+    return {
+      module: CRM_TASK_MODULE,
+      action: CRM_TASK_UPDATE_ACTION,
+      targetType: 'task',
+      targetId: canonicalEarlyTargetId(closeMatch[1])
+    };
+  }
+  if (!/^\/api\/customers\/[^/]+\/tasks\/?$/i.test(req.path)) return null;
+  return {
+    module: CRM_TASK_MODULE,
+    action: CRM_TASK_CREATE_ACTION,
+    targetType: 'task',
+    targetId: null
+  };
 }
 
-function sendEarlyCrmPermissionProblem(res, requestId, code, module) {
+function earlyCrmMutation(req) {
+  return earlyOpportunityMutation(req) || earlyContactMutation(req) || earlyTaskMutation(req);
+}
+
+function closeUnreadCrmRequestAfterResponse(req, res) {
+  if (!req || req.complete === true) return;
+  if (typeof res.setHeader === 'function') res.setHeader('Connection', 'close');
+  res.shouldKeepAlive = false;
+  if (typeof res.once !== 'function') return;
+  res.once('finish', () => {
+    if (!req.complete && req.socket && !req.socket.destroyed) {
+      setImmediate(() => {
+        if (req.socket && !req.socket.destroyed) req.socket.destroy();
+      });
+    }
+  });
+}
+
+function sendEarlyCrmPermissionProblem(req, res, requestId, code, module) {
   const auditFailure = code === 'CRM_PERMISSION_AUDIT_FAILED';
   const status = auditFailure ? 503 : 403;
   const title = auditFailure
     ? 'CRM permission audit could not be recorded'
-    : module === CRM_CONTACT_MODULE
+    : (module === CRM_CONTACT_MODULE || module === CRM_TASK_MODULE)
       ? 'CRM permission is not allowed'
       : 'CRM customer permission is not allowed';
+  closeUnreadCrmRequestAfterResponse(req, res);
   if (typeof res.type === 'function') res.type('application/problem+json');
   return res.status(status).json({
     type: `https://api.turingmarket.example/problems/${code.toLowerCase().replace(/_/g, '-')}`,
@@ -610,6 +659,7 @@ function earlyCrmMutationGuard(req, res, next) {
     });
   } catch {
     return sendEarlyCrmPermissionProblem(
+      req,
       res,
       requestId,
       'CRM_PERMISSION_AUDIT_FAILED',
@@ -617,6 +667,7 @@ function earlyCrmMutationGuard(req, res, next) {
     );
   }
   return sendEarlyCrmPermissionProblem(
+    req,
     res,
     requestId,
     'CRM_PERMISSION_FORBIDDEN',

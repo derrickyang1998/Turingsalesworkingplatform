@@ -14,6 +14,10 @@ const CRM_CONTACT_MODULE = 'crm.contact';
 const CRM_CONTACT_READ_ACTION = 'read';
 const CRM_CONTACT_CREATE_ACTION = 'create';
 const CRM_CONTACT_UPDATE_ACTION = 'update';
+const CRM_TASK_MODULE = 'crm.task';
+const CRM_TASK_READ_ACTION = 'read';
+const CRM_TASK_CREATE_ACTION = 'create';
+const CRM_TASK_UPDATE_ACTION = 'update';
 const REQUEST_ROLE_VOCABULARY = new Set(['admin', 'user']);
 const ROLE_ORDER = Object.freeze([
   'platform_admin',
@@ -89,12 +93,34 @@ const POLICY = Object.freeze({
       'manager',
       'member'
     ])
+  }),
+  [CRM_TASK_MODULE]: Object.freeze({
+    [CRM_TASK_READ_ACTION]: Object.freeze([
+      'company_owner',
+      'administrator',
+      'manager',
+      'member',
+      'read_only'
+    ]),
+    [CRM_TASK_CREATE_ACTION]: Object.freeze([
+      'company_owner',
+      'administrator',
+      'manager',
+      'member'
+    ]),
+    [CRM_TASK_UPDATE_ACTION]: Object.freeze([
+      'company_owner',
+      'administrator',
+      'manager',
+      'member'
+    ])
   })
 });
 const ORGANIZATION_SCOPED_MODULES = new Set([
   CRM_CUSTOMER_MODULE,
   CRM_OPPORTUNITY_MODULE,
-  CRM_CONTACT_MODULE
+  CRM_CONTACT_MODULE,
+  CRM_TASK_MODULE
 ]);
 
 function denied(code) {
@@ -288,6 +314,10 @@ module.exports = {
   CRM_CONTACT_READ_ACTION,
   CRM_CONTACT_CREATE_ACTION,
   CRM_CONTACT_UPDATE_ACTION,
+  CRM_TASK_MODULE,
+  CRM_TASK_READ_ACTION,
+  CRM_TASK_CREATE_ACTION,
+  CRM_TASK_UPDATE_ACTION,
   POLICY,
   createModuleActionPermissionService
 };

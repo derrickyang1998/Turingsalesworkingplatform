@@ -21,7 +21,10 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
     CRM_CONTACT_MODULE,
     CRM_CONTACT_READ_ACTION,
     CRM_CONTACT_CREATE_ACTION,
-    CRM_CONTACT_UPDATE_ACTION
+    CRM_CONTACT_UPDATE_ACTION,
+    CRM_TASK_MODULE,
+    CRM_TASK_CREATE_ACTION,
+    CRM_TASK_UPDATE_ACTION
   } = require('./services/module_action_permission_service');
   const moduleActionPermissionService = options.moduleActionPermissionService ||
     createModuleActionPermissionService(db);
@@ -603,6 +606,7 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
       if (module === CRM_CUSTOMER_MODULE) req.crmCustomerPermission = effectiveDecision;
       if (module === CRM_OPPORTUNITY_MODULE) req.crmOpportunityPermission = effectiveDecision;
       if (module === CRM_CONTACT_MODULE) req.crmContactPermission = effectiveDecision;
+      if (module === CRM_TASK_MODULE) req.crmTaskPermission = effectiveDecision;
       return next();
     };
   }
@@ -660,6 +664,20 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
     {
       targetType: 'contact',
       targetParam: 'contactId',
+      permissionForbiddenTitle: CONTACT_PERMISSION_FORBIDDEN_TITLE
+    }
+  );
+  const requireCrmTaskCreate = requireCrmPermission(
+    CRM_TASK_MODULE,
+    CRM_TASK_CREATE_ACTION,
+    { targetType: 'task', permissionForbiddenTitle: CONTACT_PERMISSION_FORBIDDEN_TITLE }
+  );
+  const requireCrmTaskUpdate = requireCrmPermission(
+    CRM_TASK_MODULE,
+    CRM_TASK_UPDATE_ACTION,
+    {
+      targetType: 'task',
+      targetParam: 'taskId',
       permissionForbiddenTitle: CONTACT_PERMISSION_FORBIDDEN_TITLE
     }
   );
@@ -1067,7 +1085,7 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
     return res.json(callMutation('mutateCustomerContact', req, command));
   }));
 
-  app.post('/api/customers/:customerId/tasks', authMiddleware, crmHandler((req, res) => {
+  app.post('/api/customers/:customerId/tasks', authMiddleware, requireCrmTaskCreate, crmHandler((req, res) => {
     const body = plainRecord(req.body || {});
     const command = {
       action: 'create',
@@ -1089,11 +1107,11 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
     return command;
   }
 
-  app.post('/api/customers/:customerId/tasks/:taskId/complete', authMiddleware, crmHandler((req, res) => {
+  app.post('/api/customers/:customerId/tasks/:taskId/complete', authMiddleware, requireCrmTaskUpdate, crmHandler((req, res) => {
     return res.json(callMutation('mutateCrmTask', req, taskCloseCommand(req, 'complete')));
   }));
 
-  app.post('/api/customers/:customerId/tasks/:taskId/cancel', authMiddleware, crmHandler((req, res) => {
+  app.post('/api/customers/:customerId/tasks/:taskId/cancel', authMiddleware, requireCrmTaskUpdate, crmHandler((req, res) => {
     return res.json(callMutation('mutateCrmTask', req, taskCloseCommand(req, 'cancel')));
   }));
 

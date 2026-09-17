@@ -1647,3 +1647,97 @@ test('crm http: contact create, update, and archive use named permissions before
   ]);
   assert.doesNotMatch(JSON.stringify(auditEvents), /not-a-customer-id|081|private body value/);
 });
+
+test('crm http: task create, complete, and cancel use named permissions before command parsing', async () => {
+  const permissionCalls = [];
+  const auditEvents = [];
+  const harness = makeHarness({
+    moduleActionPermissionService: {
+      authorize(input) {
+        permissionCalls.push(input);
+        return {
+          allowed: false,
+          code: 'ACTION_FORBIDDEN',
+          principal: {
+            user_id: input.principal.id,
+            organization_id: input.organizationId,
+            roles: ['read_only']
+          }
+        };
+      }
+    },
+    crmPermissionAudit(event) {
+      auditEvents.push(event);
+    }
+  });
+  const cases = [
+    ['POST /api/customers/:customerId/tasks', {
+      customerId: 'not-a-customer-id'
+    }, 'create', null],
+    ['POST /api/customers/:customerId/tasks/:taskId/complete', {
+      customerId: '41', taskId: '091'
+    }, 'update', null],
+    ['POST /api/customers/:customerId/tasks/:taskId/cancel', {
+      customerId: '41', taskId: '91'
+    }, 'update', 91]
+  ];
+
+  for (const [route, params, action, targetId] of cases) {
+    const requestId = `task-${action}-${targetId === null ? 'invalid' : targetId}`;
+    const response = await harness.invoke(route, {
+      params,
+      body: { title: 'must not be parsed', unexpected: 'private body value' },
+      requestId
+    });
+    assert.equal(response.statusCode, 403, route);
+    assert.equal(response.payload.code, 'CRM_PERMISSION_FORBIDDEN', route);
+    assert.equal(response.payload.title, 'CRM permission is not allowed', route);
+  }
+
+  assert.equal(harness.calls.length, 0);
+  assert.deepEqual(permissionCalls.map((call) => ({
+    module: call.module,
+    action: call.action,
+    organizationId: call.organizationId
+  })), [
+    { module: 'crm.task', action: 'create', organizationId: 501 },
+    { module: 'crm.task', action: 'update', organizationId: 501 },
+    { module: 'crm.task', action: 'update', organizationId: 501 }
+  ]);
+  assert.deepEqual(auditEvents, [
+    {
+      actor_user_id: 101,
+      organization_id: 501,
+      permission: 'crm.task.create',
+      outcome: 'denied',
+      reason_code: 'ACTION_FORBIDDEN',
+      request_id: 'task-create-invalid',
+      target_type: 'task',
+      target_id: null,
+      ip_address: '127.0.0.1'
+    },
+    {
+      actor_user_id: 101,
+      organization_id: 501,
+      permission: 'crm.task.update',
+      outcome: 'denied',
+      reason_code: 'ACTION_FORBIDDEN',
+      request_id: 'task-update-invalid',
+      target_type: 'task',
+      target_id: null,
+      ip_address: '127.0.0.1'
+    },
+    {
+      actor_user_id: 101,
+      organization_id: 501,
+      permission: 'crm.task.update',
+      outcome: 'denied',
+      reason_code: 'ACTION_FORBIDDEN',
+      request_id: 'task-update-91',
+      target_type: 'task',
+      target_id: 91,
+      ip_address: '127.0.0.1'
+    }
+  ]);
+  assert.doesNotMatch(JSON.stringify(auditEvents), /not-a-customer-id|091|private body value/);
+});
