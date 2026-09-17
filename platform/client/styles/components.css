@@ -2514,6 +2514,133 @@ thead th {
   }
 }
 
+.customer-task-section {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.customer-task-heading,
+.customer-task-heading-actions,
+.customer-task-title-row,
+.customer-task-meta,
+.customer-task-actions {
+  display: flex;
+  align-items: center;
+}
+
+.customer-task-heading {
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.customer-task-heading h4 {
+  margin: 0;
+}
+
+.customer-task-heading-actions,
+.customer-task-actions {
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.customer-task-card {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.customer-task-card:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.customer-task-main {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.customer-task-title-row {
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.customer-task-title {
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.customer-task-status {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--surface2);
+  color: var(--text2);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.customer-task-open .customer-task-status {
+  background: #eaf2ff;
+  color: #245fb8;
+}
+
+.customer-task-completed .customer-task-status {
+  background: #e8f7ee;
+  color: #147342;
+}
+
+.customer-task-meta {
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-top: 5px;
+  color: var(--text2);
+  font-size: 11px;
+}
+
+.customer-task-description,
+.customer-task-completion,
+.customer-task-empty,
+.customer-task-limit {
+  margin: 6px 0 0;
+  color: var(--text2);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.customer-task-completion {
+  color: #147342;
+}
+
+.customer-task-limit {
+  margin: -4px 0 8px;
+}
+
+.customer-task-actions {
+  flex: 0 0 auto;
+  justify-content: flex-end;
+}
+
+@media (max-width: 480px) {
+  .customer-task-heading,
+  .customer-task-card {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .customer-task-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+}
+
 .modal-close,
 .wf-modal-close {
   min-width: 36px;

@@ -250,7 +250,7 @@
     },
     {
       "path": "server/services/crm_query_service.js",
-      "sha256": "bb5035cf2a06f5f498c7cb8ed95f7c2ddd8d86fc12d62cad69c3a97e282848a4"
+      "sha256": "15029919129ec66b716bc28823c7b8835cef786c554a2ee69273ac750e6f84b6"
     },
     {
       "path": "server/services/crm_scope_service.js",

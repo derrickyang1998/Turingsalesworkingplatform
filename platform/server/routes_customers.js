@@ -23,6 +23,7 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
     CRM_CONTACT_CREATE_ACTION,
     CRM_CONTACT_UPDATE_ACTION,
     CRM_TASK_MODULE,
+    CRM_TASK_READ_ACTION,
     CRM_TASK_CREATE_ACTION,
     CRM_TASK_UPDATE_ACTION
   } = require('./services/module_action_permission_service');
@@ -672,6 +673,16 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
     CRM_TASK_CREATE_ACTION,
     { targetType: 'task', permissionForbiddenTitle: CONTACT_PERMISSION_FORBIDDEN_TITLE }
   );
+  const requireEmbeddedCrmTaskRead = requireCrmPermission(
+    CRM_TASK_MODULE,
+    CRM_TASK_READ_ACTION,
+    {
+      targetType: 'customer',
+      targetParam: 'id',
+      applyScopeRules: true,
+      permissionForbiddenTitle: CONTACT_PERMISSION_FORBIDDEN_TITLE
+    }
+  );
   const requireCrmTaskUpdate = requireCrmPermission(
     CRM_TASK_MODULE,
     CRM_TASK_UPDATE_ACTION,
@@ -929,6 +940,7 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
     requireCrmCustomerRead,
     requireEmbeddedCrmOpportunityRead,
     requireEmbeddedCrmContactRead,
+    requireEmbeddedCrmTaskRead,
     crmHandler((req, res) => {
       return res.json(callCustomerDetail(req));
     })

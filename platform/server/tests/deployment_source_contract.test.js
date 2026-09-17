@@ -297,7 +297,7 @@ test('Phase 4 docs lock public assets, preview, build markers, backup, rollback,
     'bounded release replay tests must be documented');
   assert.match(source, /Full non-browser regression[\s\S]*phase closeout/i,
     'phase-closeout regression policy must be documented');
-  assert.doesNotMatch(source, /(?:tvly|sk)-[A-Za-z0-9_-]{12,}|BEGIN (?:RSA |OPENSSH )?PRIVATE KEY/);
+  assert.doesNotMatch(source, /(?<![A-Za-z0-9_-])(?:tvly|sk)-[A-Za-z0-9_-]{12,}|BEGIN (?:RSA |OPENSSH )?PRIVATE KEY/);
 });
 
 test('Phase 4 deploy source guards the exact branch and locked build contract', () => {

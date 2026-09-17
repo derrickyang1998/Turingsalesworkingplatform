@@ -118,6 +118,14 @@ function currentUserHasCrmContactPermission(action) {
   return actions.indexOf(action) !== -1;
 }
 
+function currentUserHasCrmTaskPermission(action) {
+  var permissions = CURRENT_USER && CURRENT_USER.module_permissions;
+  var actions = permissions && Array.isArray(permissions['crm.task'])
+    ? permissions['crm.task']
+    : [];
+  return actions.indexOf(action) !== -1;
+}
+
 function currentUserCanUseCrmScope(scope) {
   if (!currentUserHasCrmPermission('read')) return false;
   if (scope === 'my' || scope === 'public_pool') return true;
@@ -2038,6 +2046,70 @@ function renderCustomerContacts(customerId, contacts) {
   html += '</div>';
   return html;
 }
+
+function renderCustomerTasks(customerId, customer, tasks, taskMeta) {
+  tasks = Array.isArray(tasks) ? tasks : [];
+  customer = customer && typeof customer === 'object' ? customer : {};
+  taskMeta = taskMeta && typeof taskMeta === 'object' ? taskMeta : {};
+  var numericCustomerId = Number(customerId);
+  var safeCustomerId = Number.isInteger(numericCustomerId) && numericCustomerId > 0
+    ? numericCustomerId
+    : null;
+  var ownerUserId = Number(customer.owner_user_id || customer.assigned_to);
+  var teamId = Number(customer.team_id);
+  var hasAssignment = Number.isInteger(ownerUserId) && ownerUserId > 0 &&
+    Number.isInteger(teamId) && teamId > 0;
+  var canCreate = currentUserHasCrmTaskPermission('create');
+  var canUpdate = currentUserHasCrmTaskPermission('update');
+  var statusLabels = { open: '待处理', completed: '已完成', cancelled: '已取消' };
+  var html = '<div class="sidebar-section customer-task-section" id="customerTaskSection" tabindex="-1" aria-labelledby="customerTaskSectionTitle">';
+  html += '<div class="customer-task-heading"><h4 id="customerTaskSectionTitle">跟进任务 (' + tasks.length + ')</h4><div class="customer-task-heading-actions">';
+  if (canCreate && safeCustomerId && hasAssignment) {
+    html += '<button type="button" class="btn btn-primary btn-sm" onclick="showAddCustomerTask(' + safeCustomerId + ')">新建任务</button>';
+  } else if (canCreate && !hasAssignment) {
+    html += '<span class="crm-control-unavailable" title="客户需要先完成认领和团队归属">认领后可新建</span>';
+  }
+  if (!canCreate && !canUpdate) {
+    html += '<span class="crm-control-unavailable" title="当前账号只能查看跟进任务">任务只读</span>';
+  } else if (!canCreate) {
+    html += '<span class="crm-control-unavailable" title="当前账号没有新建跟进任务权限">无法新建</span>';
+  }
+  html += '</div></div>';
+  if (taskMeta.has_more === true) {
+    html += '<p class="customer-task-limit">当前显示最近 100 条任务</p>';
+  }
+  if (!tasks.length) {
+    html += '<p class="customer-task-empty">暂无跟进任务</p></div>';
+    return html;
+  }
+  tasks.forEach(function(task) {
+    task = task && typeof task === 'object' ? task : {};
+    var numericTaskId = Number(task.id);
+    var safeTaskId = Number.isInteger(numericTaskId) && numericTaskId > 0 ? numericTaskId : null;
+    var status = Object.hasOwn(statusLabels, task.status) ? task.status : 'cancelled';
+    var dueAt = String(task.due_at || '').slice(0, 16) || '-';
+    var owner = String(task.owner_display_name || '').trim();
+    if (!owner && Number(task.owner_user_id) > 0) owner = '用户 #' + Number(task.owner_user_id);
+    html += '<article class="customer-task-card customer-task-' + status + '">';
+    html += '<div class="customer-task-main"><div class="customer-task-title-row">';
+    html += '<strong class="customer-task-title">' + esc(task.title || '-') + '</strong>';
+    html += '<span class="customer-task-status">' + statusLabels[status] + '</span></div>';
+    html += '<div class="customer-task-meta"><span>截止 ' + esc(dueAt) + '</span><span>负责人 ' + esc(owner || '-') + '</span></div>';
+    if (task.description) html += '<p class="customer-task-description">' + esc(task.description) + '</p>';
+    if (task.completion_note) html += '<p class="customer-task-completion">完成说明：' + esc(task.completion_note) + '</p>';
+    html += '</div>';
+    if (status === 'open' && canUpdate && safeCustomerId && safeTaskId) {
+      html += '<div class="customer-task-actions">';
+      html += '<button type="button" class="btn btn-sm btn-primary" onclick="completeCustomerTask(' + safeCustomerId + ', ' + safeTaskId + ')">完成</button>';
+      html += '<button type="button" class="btn btn-sm btn-outline" onclick="cancelCustomerTask(' + safeCustomerId + ', ' + safeTaskId + ')">取消</button>';
+      html += '</div>';
+    }
+    html += '</article>';
+  });
+  html += '</div>';
+  return html;
+}
+
 function renderCustomerSidebar(d) {
   var c = d.customer;
   var html = '<div class="sidebar-section"><h4>基本信息</h4>';
@@ -2050,6 +2122,7 @@ function renderCustomerSidebar(d) {
   html += '<div class="field"><span class="field-label">预算</span><span class="field-value">' + esc(c.budget_estimate || '-') + '</span></div>';
   html += '<div class="field"><span class="field-label">备注</span><span class="field-value">' + esc(c.notes || '-') + '</span></div></div>';
   html += renderCustomerContacts(c.id, d.contacts || []);
+  html += renderCustomerTasks(c.id, c, d.tasks || [], d.meta && d.meta.tasks);
   html += '<div class="sidebar-section" style="display:flex;gap:8px;flex-wrap:wrap">';
   if (currentUserHasCrmPermission('update')) {
     if (c.is_public == 1) html += '<button class="btn btn-primary btn-sm" onclick="claimCustomer(' + c.id + ', true)">📥 认领客户</button>';
@@ -2102,6 +2175,218 @@ function renderCustomerSidebar(d) {
 
 var _lastCustomerDetailData = null;
 var contactDialogOpener = null;
+var taskDialogOpener = null;
+
+function openTaskDialog() {
+  var overlay = document.getElementById('taskModalOverlay');
+  var dialog = document.getElementById('taskDialog');
+  if (!overlay || !dialog) return;
+  var currentGeneration = Number(dialog.dataset.requestGeneration || 0);
+  dialog.dataset.requestGeneration = String(
+    Number.isSafeInteger(currentGeneration) && currentGeneration >= 0 ? currentGeneration + 1 : 1
+  );
+  taskDialogOpener = document.activeElement;
+  overlay.hidden = false;
+  overlay.inert = false;
+  overlay.removeAttribute('aria-hidden');
+  overlay.style.display = 'flex';
+  if (window.TMAccessibility) {
+    window.TMAccessibility.openDialog(dialog, taskDialogOpener, function() { closeTaskDialog(); });
+  } else {
+    dialog.setAttribute('tabindex', '-1');
+    dialog.focus();
+  }
+}
+
+function closeTaskDialog() {
+  var overlay = document.getElementById('taskModalOverlay');
+  var dialog = document.getElementById('taskDialog');
+  if (dialog) {
+    var currentGeneration = Number(dialog.dataset.requestGeneration || 0);
+    dialog.dataset.requestGeneration = String(
+      Number.isSafeInteger(currentGeneration) && currentGeneration >= 0 ? currentGeneration + 1 : 1
+    );
+  }
+  if (dialog && window.TMAccessibility) window.TMAccessibility.closeDialog(dialog);
+  if (overlay) {
+    overlay.style.display = 'none';
+    overlay.hidden = true;
+    overlay.inert = true;
+    overlay.setAttribute('aria-hidden', 'true');
+  }
+  if (!window.TMAccessibility && taskDialogOpener && typeof taskDialogOpener.focus === 'function') {
+    taskDialogOpener.focus();
+  }
+  taskDialogOpener = null;
+}
+
+function showAddCustomerTask(customerId) {
+  if (!currentUserHasCrmTaskPermission('create')) return rejectCrmBrowserAction();
+  var numericCustomerId = Number(customerId);
+  var customer = _lastCustomerDetailData && _lastCustomerDetailData.customer;
+  var ownerUserId = Number(customer && (customer.owner_user_id || customer.assigned_to));
+  var teamId = Number(customer && customer.team_id);
+  if (!Number.isInteger(numericCustomerId) || numericCustomerId <= 0 ||
+      !customer || Number(customer.id) !== numericCustomerId ||
+      !Number.isInteger(ownerUserId) || ownerUserId <= 0 ||
+      !Number.isInteger(teamId) || teamId <= 0) {
+    toast('请先认领客户并确认团队归属', 'error');
+    return false;
+  }
+  var defaultDueAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  defaultDueAt = new Date(defaultDueAt.getTime() - defaultDueAt.getTimezoneOffset() * 60000)
+    .toISOString().slice(0, 16);
+  document.getElementById('taskCustomerId').value = numericCustomerId;
+  document.getElementById('taskOwnerUserId').value = ownerUserId;
+  document.getElementById('taskTeamId').value = teamId;
+  document.getElementById('taskTitle').value = '';
+  document.getElementById('taskDueAt').value = defaultDueAt;
+  document.getElementById('taskDescription').value = '';
+  var saveButton = document.getElementById('taskSaveButton');
+  if (saveButton) {
+    saveButton.disabled = false;
+    saveButton.textContent = '创建任务';
+  }
+  openTaskDialog();
+  return true;
+}
+
+function crmTaskTimestampFromInput(value) {
+  var normalized = String(value || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(normalized)) return null;
+  return normalized.replace('T', ' ') + ':00';
+}
+
+async function saveCustomerTask() {
+  if (!currentUserHasCrmTaskPermission('create')) return rejectCrmBrowserAction();
+  var customerId = Number(document.getElementById('taskCustomerId').value);
+  var ownerUserId = Number(document.getElementById('taskOwnerUserId').value);
+  var teamId = Number(document.getElementById('taskTeamId').value);
+  var title = document.getElementById('taskTitle').value.trim();
+  var dueAt = crmTaskTimestampFromInput(document.getElementById('taskDueAt').value);
+  var description = document.getElementById('taskDescription').value.trim();
+  if (!Number.isInteger(customerId) || customerId <= 0 ||
+      !Number.isInteger(ownerUserId) || ownerUserId <= 0 ||
+      !Number.isInteger(teamId) || teamId <= 0) {
+    toast('任务所属客户或负责人无效', 'error');
+    return false;
+  }
+  if (!title) {
+    toast('请输入任务标题', 'error');
+    return false;
+  }
+  if (!dueAt) {
+    toast('请选择有效截止时间', 'error');
+    return false;
+  }
+  var dialog = document.getElementById('taskDialog');
+  var requestGeneration = dialog ? String(dialog.dataset.requestGeneration || '') : '';
+  var saveButton = document.getElementById('taskSaveButton');
+  if (saveButton) {
+    saveButton.disabled = true;
+    saveButton.textContent = '创建中...';
+  }
+  try {
+    var payload = {
+      owner_user_id: ownerUserId,
+      team_id: teamId,
+      title: title,
+      due_at: dueAt,
+      source: 'manual'
+    };
+    if (description) payload.description = description;
+    var response = await apiFetch('/customers/' + encodeURIComponent(String(customerId)) + '/tasks', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+    await requireSuccessfulCustomerMutation(response, '任务创建失败');
+    var currentDialog = document.getElementById('taskDialog');
+    if (!currentDialog || currentDialog !== dialog ||
+        String(currentDialog.dataset.requestGeneration || '') !== requestGeneration) return true;
+    toast('跟进任务已创建');
+    closeTaskDialog();
+    var refreshApplied = await openCustomerDetail(customerId, {
+      applyGuard: function() {
+        return !!(_lastCustomerDetailData && _lastCustomerDetailData.customer &&
+          Number(_lastCustomerDetailData.customer.id) === customerId);
+      }
+    });
+    var taskSection = document.getElementById('customerTaskSection');
+    if (refreshApplied === true && taskSection && typeof taskSection.focus === 'function') taskSection.focus();
+    return true;
+  } catch (e) {
+    toast('创建失败: ' + e.message, 'error');
+    return false;
+  } finally {
+    var activeDialog = document.getElementById('taskDialog');
+    if (saveButton && activeDialog === dialog &&
+        String(activeDialog.dataset.requestGeneration || '') === requestGeneration) {
+      saveButton.disabled = false;
+      saveButton.textContent = '创建任务';
+    }
+  }
+}
+
+async function mutateCustomerTaskStatus(customerId, taskId, action) {
+  var numericCustomerId = Number(customerId);
+  var numericTaskId = Number(taskId);
+  if (!Number.isInteger(numericCustomerId) || numericCustomerId <= 0 ||
+      !Number.isInteger(numericTaskId) || numericTaskId <= 0) {
+    toast('任务数据无效', 'error');
+    return false;
+  }
+  var tasks = _lastCustomerDetailData && Array.isArray(_lastCustomerDetailData.tasks)
+    ? _lastCustomerDetailData.tasks
+    : [];
+  var task = tasks.find(function(item) {
+    return Number(item && item.id) === numericTaskId && item.status === 'open';
+  });
+  if (!task || !_lastCustomerDetailData.customer ||
+      Number(_lastCustomerDetailData.customer.id) !== numericCustomerId) {
+    toast('待处理任务未找到，请刷新后重试', 'error');
+    return false;
+  }
+  var completing = action === 'complete';
+  var confirmed = await showConfirm(
+    completing ? '完成任务' : '取消任务',
+    completing ? '确认将该任务标记为已完成？' : '确认取消该任务？历史记录仍会保留。'
+  );
+  if (!confirmed) return false;
+  try {
+    var response = await apiFetch(
+      '/customers/' + encodeURIComponent(String(numericCustomerId)) +
+        '/tasks/' + encodeURIComponent(String(numericTaskId)) + '/' + action,
+      { method: 'POST', body: JSON.stringify({}) }
+    );
+    await requireSuccessfulCustomerMutation(response, completing ? '任务完成失败' : '任务取消失败');
+    if (!_lastCustomerDetailData || !_lastCustomerDetailData.customer ||
+        Number(_lastCustomerDetailData.customer.id) !== numericCustomerId) return true;
+    toast(completing ? '任务已完成' : '任务已取消');
+    var refreshApplied = await openCustomerDetail(numericCustomerId, {
+      applyGuard: function() {
+        return !!(_lastCustomerDetailData && _lastCustomerDetailData.customer &&
+          Number(_lastCustomerDetailData.customer.id) === numericCustomerId);
+      }
+    });
+    var taskSection = document.getElementById('customerTaskSection');
+    if (refreshApplied === true && taskSection && typeof taskSection.focus === 'function') taskSection.focus();
+    return true;
+  } catch (e) {
+    toast((completing ? '完成失败: ' : '取消失败: ') + e.message, 'error');
+    return false;
+  }
+}
+
+async function completeCustomerTask(customerId, taskId) {
+  if (!currentUserHasCrmTaskPermission('update')) return rejectCrmBrowserAction();
+  return mutateCustomerTaskStatus(customerId, taskId, 'complete');
+}
+
+async function cancelCustomerTask(customerId, taskId) {
+  if (!currentUserHasCrmTaskPermission('update')) return rejectCrmBrowserAction();
+  return mutateCustomerTaskStatus(customerId, taskId, 'cancel');
+}
+
 function setContactDialogMode(mode) {
   mode = mode === 'update' ? 'update' : 'create';
   var dialog = document.getElementById('contactDialog');

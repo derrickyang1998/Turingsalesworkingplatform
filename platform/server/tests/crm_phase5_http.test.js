@@ -90,11 +90,15 @@ function canonicalCustomerDetail() {
   return {
     customer: { id: 41, brand_name: 'Acme', stage: 'lead', custody: 'owned' },
     opportunities: [{ id: 71, customer_id: 41, name: 'Launch' }],
+    contacts: [],
+    tasks: [{ id: 91, customer_id: 41, title: 'Follow up', status: 'open' }],
     activity: [{ id: 81, customer_id: 41, action: 'follow_up' }],
     meta: {
       request_id: 'http-request',
       scope: 'team',
-      opportunities: { limit: 100, has_more: false }
+      opportunities: { limit: 100, has_more: false },
+      contacts: { limit: 100, has_more: false },
+      tasks: { limit: 100, has_more: false }
     }
   };
 }
@@ -994,6 +998,12 @@ test('crm http: opportunity routes and embedded customer detail enforce named ac
       organizationId: 501,
       module: 'crm.contact',
       action: 'read'
+    },
+    {
+      principal: { id: 101, role: 'user' },
+      organizationId: 501,
+      module: 'crm.task',
+      action: 'read'
     }
   ]);
 });
@@ -1378,6 +1388,55 @@ test('crm http: customer detail requires embedded contact read before detail dis
   }]);
 });
 
+test('crm http: customer detail requires embedded task read before detail dispatch', async () => {
+  const permissionCalls = [];
+  const auditEvents = [];
+  const harness = makeHarness({
+    moduleActionPermissionService: {
+      authorize(input) {
+        permissionCalls.push(input);
+        return {
+          allowed: input.module !== 'crm.task',
+          code: input.module === 'crm.task' ? 'ACTION_FORBIDDEN' : 'ALLOWED',
+          principal: {
+            user_id: input.principal.id,
+            organization_id: input.organizationId,
+            roles: input.module === 'crm.task' ? ['read_only'] : ['member']
+          }
+        };
+      }
+    },
+    crmPermissionAudit(event) {
+      auditEvents.push(event);
+    }
+  });
+
+  const response = await harness.invoke('GET /api/customers/:id/detail', {
+    params: { id: '41' },
+    requestId: 'embedded-task-read-denied'
+  });
+
+  assert.equal(response.statusCode, 403);
+  assert.equal(response.payload.code, 'CRM_PERMISSION_FORBIDDEN');
+  assert.equal(response.payload.title, 'CRM permission is not allowed');
+  assert.equal(harness.calls.filter((call) => call.method === 'getCustomerDetail').length, 0);
+  assert.deepEqual(
+    permissionCalls.map((call) => `${call.module}.${call.action}`),
+    ['crm.customer.read', 'crm.opportunity.read', 'crm.contact.read', 'crm.task.read']
+  );
+  assert.deepEqual(auditEvents[auditEvents.length - 1], {
+    actor_user_id: 101,
+    organization_id: 501,
+    permission: 'crm.task.read',
+    outcome: 'denied',
+    reason_code: 'ACTION_FORBIDDEN',
+    request_id: 'embedded-task-read-denied',
+    target_type: 'customer',
+    target_id: 41,
+    ip_address: '127.0.0.1'
+  });
+});
+
 test('crm http: generated request id correlates embedded detail audits and contact denial response', async () => {
   const auditEvents = [];
   const harness = makeHarness({
@@ -1541,6 +1600,18 @@ test('crm http: generated request id correlates organization detail audits and s
       actor_user_id: 101,
       organization_id: 501,
       permission: 'crm.contact.read',
+      outcome: 'allowed',
+      reason_code: 'ALLOWED',
+      request_id: correlatedRequestId,
+      target_type: 'customer',
+      target_id: 41,
+      ip_address: '127.0.0.1',
+      scope: 'organization'
+    },
+    {
+      actor_user_id: 101,
+      organization_id: 501,
+      permission: 'crm.task.read',
       outcome: 'allowed',
       reason_code: 'ALLOWED',
       request_id: correlatedRequestId,

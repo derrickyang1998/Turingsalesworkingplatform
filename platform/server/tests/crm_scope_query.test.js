@@ -218,6 +218,49 @@ function insertContact(db, {
   );
 }
 
+function insertCrmTask(db, {
+  id,
+  customerId = IDS.ownedA,
+  orgId = IDS.orgA,
+  teamId = IDS.teamA1,
+  ownerUserId = IDS.ownerA,
+  opportunityId = null,
+  title = `Task ${id}`,
+  description = null,
+  dueAt = '2099-01-01 00:00:00',
+  status = 'open',
+  completedAt = null,
+  completedBy = null,
+  completionNote = null,
+  createdAt = FIXED_AT,
+  updatedAt = FIXED_AT
+}) {
+  db.prepare(`
+    INSERT INTO crm_tasks (
+      id,org_id,team_id,customer_id,opportunity_id,owner_user_id,title,
+      description,due_at,status,source,completed_at,completed_by,
+      completion_note,created_by,created_at,updated_at
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,'manual',?,?,?,?,?,?)
+  `).run(
+    id,
+    orgId,
+    teamId,
+    customerId,
+    opportunityId,
+    ownerUserId,
+    title,
+    description,
+    dueAt,
+    status,
+    completedAt,
+    completedBy,
+    completionNote,
+    ownerUserId,
+    createdAt,
+    updatedAt
+  );
+}
+
 function insertFilterCustomer(db, id, overrides = {}) {
   const values = {
     id,
@@ -588,11 +631,13 @@ test('customer detail is team-lead-readable and returns one bounded immutable ag
     request_id: 'detail-teammate',
     scope: 'team',
     opportunities: { limit: 100, has_more: false },
-    contacts: { limit: 100, has_more: false }
+    contacts: { limit: 100, has_more: false },
+    tasks: { limit: 100, has_more: false }
   });
   assert.equal(Object.isFrozen(detail), true);
   assert.equal(Object.isFrozen(detail.customer), true);
   assert.equal(Object.isFrozen(detail.opportunities), true);
+  assert.equal(Object.isFrozen(detail.tasks), true);
   assert.equal(Object.isFrozen(detail.activity), true);
   assert.equal(Object.isFrozen(detail.meta), true);
   assert.equal(Object.isFrozen(detail.opportunities[0]), true);
@@ -664,7 +709,8 @@ test('organization admin may inspect a same-organization quarantined customer de
     request_id: 'detail-org-admin',
     scope: 'organization',
     opportunities: { limit: 100, has_more: false },
-    contacts: { limit: 100, has_more: false }
+    contacts: { limit: 100, has_more: false },
+    tasks: { limit: 100, has_more: false }
   });
 });
 
@@ -747,6 +793,91 @@ test('customer detail embeds active contacts primary-first with bounded metadata
   assert.deepEqual(detail.meta.contacts, { limit: 100, has_more: true });
   assert.equal(Object.isFrozen(detail.contacts), true);
   assert.equal(Object.isFrozen(detail.contacts[0]), true);
+});
+
+test('customer detail embeds tenant-scoped tasks open-first with bounded owner metadata', (t) => {
+  const db = openFixture(t);
+  insertCrmTask(db, {
+    id: 33001,
+    title: 'Later open task',
+    description: 'Follow up after proposal review.',
+    dueAt: '2099-03-01 09:00:00'
+  });
+  insertCrmTask(db, {
+    id: 33002,
+    title: 'Earlier open task',
+    dueAt: '2099-02-01 09:00:00',
+    ownerUserId: IDS.teammateA
+  });
+  insertCrmTask(db, {
+    id: 33003,
+    title: 'Completed task',
+    dueAt: '2099-01-01 09:00:00',
+    status: 'completed',
+    completedAt: '2026-08-09 01:00:00',
+    completedBy: IDS.ownerA,
+    completionNote: 'Shared with the client.',
+    updatedAt: '2026-08-09 01:00:00'
+  });
+  insertCrmTask(db, {
+    id: 33004,
+    customerId: IDS.transferredA,
+    title: 'Other customer task'
+  });
+
+  const detail = getCustomerDetail(db, {
+    actorUserId: IDS.ownerA,
+    organizationId: IDS.orgA,
+    customerId: IDS.ownedA,
+    requestId: 'detail-customer-tasks'
+  });
+
+  assert.deepEqual(detail.tasks.map((task) => task.id), [33002, 33001, 33003]);
+  assert.deepEqual(detail.tasks[0], {
+    id: 33002,
+    customer_id: IDS.ownedA,
+    opportunity_id: null,
+    owner_user_id: IDS.teammateA,
+    owner_display_name: 'scope-teammate-a',
+    team_id: IDS.teamA1,
+    title: 'Earlier open task',
+    description: null,
+    due_at: '2099-02-01 09:00:00',
+    status: 'open',
+    source: 'manual',
+    completed_at: null,
+    completed_by: null,
+    completion_note: null,
+    created_at: FIXED_AT,
+    updated_at: FIXED_AT
+  });
+  assert.equal(detail.tasks[2].completion_note, 'Shared with the client.');
+  assert.deepEqual(detail.meta.tasks, { limit: 100, has_more: false });
+  assert.equal(Object.isFrozen(detail.tasks), true);
+  assert.equal(Object.isFrozen(detail.tasks[0]), true);
+  assert.throws(() => { detail.tasks[0].title = 'mutated'; }, TypeError);
+});
+
+test('customer detail bounds high-cardinality task collections', (t) => {
+  const db = openFixture(t);
+  for (let index = 0; index < 101; index += 1) {
+    insertCrmTask(db, {
+      id: 34000 + index,
+      title: `Bounded task ${index}`,
+      dueAt: `2099-01-${String((index % 28) + 1).padStart(2, '0')} 09:00:00`
+    });
+  }
+
+  const detail = getCustomerDetail(db, {
+    actorUserId: IDS.ownerA,
+    organizationId: IDS.orgA,
+    customerId: IDS.ownedA,
+    requestId: 'detail-bounded-tasks'
+  });
+
+  assert.equal(detail.tasks.length, 100);
+  assert.deepEqual(detail.meta.tasks, { limit: 100, has_more: true });
+  assert.equal(detail.tasks.every((task) => task.customer_id === IDS.ownedA), true);
 });
 
 test('opportunity detail resolves a recently updated target outside the bounded customer aggregate', (t) => {

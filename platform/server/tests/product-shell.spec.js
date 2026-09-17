@@ -462,6 +462,73 @@ test('keeps closed customer detail drawers out of the accessibility tree and res
   await expectRuntimeClean(page);
 });
 
+test('keeps the customer task workspace operable and bounded across desktop and mobile', async ({ page }) => {
+  await boot(page, { path: '/m0-detail?view=pipeline' });
+  await page.evaluate(() => {
+    CURRENT_USER.module_permissions = Object.assign({}, CURRENT_USER.module_permissions, {
+      'crm.task': ['read', 'create', 'update']
+    });
+    const detail = {
+      customer: {
+        id: 903,
+        brand_name: 'Task workspace fixture',
+        stage: 'lead',
+        is_public: 0,
+        owner_user_id: 11,
+        assigned_to: 11,
+        team_id: 21
+      },
+      contacts: [],
+      tasks: [{
+        id: 91,
+        customer_id: 903,
+        owner_user_id: 11,
+        owner_display_name: 'Fixture owner',
+        title: 'Confirm the final influencer launch timeline without truncating operational context',
+        description: 'A'.repeat(300),
+        due_at: '2099-02-01 09:30:00',
+        status: 'open'
+      }],
+      opportunities: [],
+      activity: [],
+      meta: { tasks: { limit: 100, has_more: false } }
+    };
+    _lastCustomerDetailData = detail;
+    renderCustomerSidebar(detail);
+  });
+
+  const section = page.locator('#customerTaskSection');
+  await expect(section).toBeVisible();
+  await expect(section.getByText('跟进任务 (1)')).toBeVisible();
+  await expect(section.getByRole('button', { name: '新建任务' })).toBeVisible();
+  await expect(section.getByRole('button', { name: '完成' })).toBeVisible();
+  await expect(section.getByRole('button', { name: '取消' })).toBeVisible();
+  const geometry = await section.evaluate((element) => {
+    const box = element.getBoundingClientRect();
+    return {
+      left: box.left,
+      right: box.right,
+      viewportWidth: innerWidth,
+      documentScrollWidth: document.documentElement.scrollWidth,
+      documentClientWidth: document.documentElement.clientWidth
+    };
+  });
+  expect(geometry.left).toBeGreaterThanOrEqual(-1);
+  expect(geometry.right).toBeLessThanOrEqual(geometry.viewportWidth + 1);
+  expect(geometry.documentScrollWidth).toBeLessThanOrEqual(geometry.documentClientWidth + 1);
+
+  await section.getByRole('button', { name: '新建任务' }).click();
+  const dialog = page.locator('#taskDialog');
+  await expect(dialog).toBeVisible();
+  expect(await dialog.evaluate((element) => element.contains(document.activeElement))).toBe(true);
+  const dialogBox = await dialog.boundingBox();
+  expect(dialogBox.x).toBeGreaterThanOrEqual(-1);
+  expect(dialogBox.x + dialogBox.width).toBeLessThanOrEqual(page.viewportSize().width + 1);
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await expectRuntimeClean(page);
+});
+
 test('session expiry dismisses an active customer dialog before focusing interactive login', async ({ page }) => {
   await boot(page, { path: '/m0-detail?view=pipeline', expireNextApi: { method: 'GET', path: '/health' } });
   await page.locator('#page-m0-detail button').first().focus();

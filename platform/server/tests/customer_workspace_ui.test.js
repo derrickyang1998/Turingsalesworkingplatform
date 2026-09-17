@@ -511,6 +511,26 @@ test('contact permissions use only the exact server-projected crm.contact action
   assert.equal(currentUserHasCrmContactPermission('update'), false);
 });
 
+test('task permissions use only the exact server-projected crm.task actions', () => {
+  const { currentUserHasCrmTaskPermission } = evaluateAppFunctions(
+    ['currentUserHasCrmTaskPermission'],
+    {
+      CURRENT_USER: {
+        role: 'admin',
+        access_roles: ['company_owner'],
+        module_permissions: {
+          'crm.customer': ['read', 'create', 'update'],
+          'crm.task': ['read']
+        }
+      }
+    }
+  );
+
+  assert.equal(currentUserHasCrmTaskPermission('read'), true);
+  assert.equal(currentUserHasCrmTaskPermission('create'), false);
+  assert.equal(currentUserHasCrmTaskPermission('update'), false);
+});
+
 test('customer sidebar renders compact escaped contacts immediately after basic information', () => {
   const title = { textContent: '' };
   const body = { innerHTML: '' };
@@ -529,13 +549,14 @@ test('customer sidebar renders compact escaped contacts immediately after basic 
     custDetailSidebar: sidebar,
     customerDetailDialog: dialog
   };
-  const { renderCustomerContacts, renderCustomerSidebar } = evaluateAppFunctions(
-    ['renderCustomerContacts', 'renderCustomerSidebar'],
+  const { renderCustomerContacts, renderCustomerTasks, renderCustomerSidebar } = evaluateAppFunctions(
+    ['renderCustomerContacts', 'renderCustomerTasks', 'renderCustomerSidebar'],
     {
       CUST_STAGES: { lead: '线索' },
       currentUserHasCrmPermission: () => false,
       currentUserHasCrmOpportunityPermission: () => false,
       currentUserHasCrmContactPermission: () => true,
+      currentUserHasCrmTaskPermission: () => true,
       document: {
         activeElement: { id: 'detail-opener' },
         getElementById: (id) => elements[id] || null
@@ -565,6 +586,7 @@ test('customer sidebar renders compact escaped contacts immediately after basic 
       phone: '+86 <555>',
       is_preferred: true
     }],
+    tasks: [],
     opportunities: [],
     activity: []
   });
@@ -580,6 +602,208 @@ test('customer sidebar renders compact escaped contacts immediately after basic 
   assert.match(body.innerHTML, /href="mailto:alex%22%3Ctag%3E%40example\.invalid"/);
   assert.match(body.innerHTML, /href="tel:%2B86%20%3C555%3E"/);
   assert.doesNotMatch(body.innerHTML, /<img\b|<script\b|href="javascript:/i);
+});
+
+test('customer task section escapes content and independently gates create versus update controls', () => {
+  let actions = ['read'];
+  const { renderCustomerTasks } = evaluateAppFunctions(
+    ['renderCustomerTasks'],
+    {
+      currentUserHasCrmTaskPermission: (action) => actions.includes(action),
+      esc: escapeHtml
+    }
+  );
+  const tasks = [{
+    id: 91,
+    customer_id: 41,
+    owner_user_id: 7,
+    owner_display_name: '<img src=x onerror=alert(1)>',
+    title: '<script>alert(2)</script>',
+    description: 'Follow <b>carefully</b>',
+    due_at: '2099-02-01 09:00:00',
+    status: 'open'
+  }, {
+    id: 92,
+    customer_id: 41,
+    owner_user_id: 7,
+    owner_display_name: 'Alex',
+    title: 'Completed task',
+    description: null,
+    due_at: '2099-01-01 09:00:00',
+    status: 'completed'
+  }];
+
+  const readOnly = renderCustomerTasks(41, { owner_user_id: 7, team_id: 8 }, tasks);
+  assert.match(readOnly, /跟进任务 \(2\)/);
+  assert.match(readOnly, /任务只读/);
+  assert.match(readOnly, /&lt;script&gt;alert\(2\)&lt;\/script&gt;/);
+  assert.match(readOnly, /&lt;img src=x onerror=alert\(1\)&gt;/);
+  assert.match(readOnly, /Follow &lt;b&gt;carefully&lt;\/b&gt;/);
+  assert.doesNotMatch(readOnly, /showAddCustomerTask|completeCustomerTask|cancelCustomerTask|<script\b|<img\b/i);
+
+  actions = ['read', 'create', 'update'];
+  const writable = renderCustomerTasks(41, { owner_user_id: 7, team_id: 8 }, tasks);
+  assert.match(writable, /showAddCustomerTask\(41\)/);
+  assert.match(writable, /completeCustomerTask\(41, 91\)/);
+  assert.match(writable, /cancelCustomerTask\(41, 91\)/);
+  assert.doesNotMatch(writable, /completeCustomerTask\(41, 92\)|cancelCustomerTask\(41, 92\)/);
+
+  const empty = renderCustomerTasks(41, { owner_user_id: 7, team_id: 8 }, []);
+  assert.match(empty, /暂无跟进任务/);
+});
+
+test('task dialog is accessible and task cards remain bounded on mobile', () => {
+  const start = indexHtml.indexOf('id="taskModalOverlay"');
+  assert.notEqual(start, -1, 'missing task modal overlay');
+  const end = indexHtml.indexOf('<!-- CRM transition evidence -->', start);
+  assert.notEqual(end, -1, 'missing task modal boundary');
+  const taskDialog = indexHtml.slice(start, end);
+
+  assert.match(taskDialog, /hidden inert aria-hidden="true"/);
+  assert.match(taskDialog, /id="taskDialog"[^>]*role="dialog"[^>]*aria-modal="true"[^>]*aria-labelledby="taskModalTitle"/);
+  assert.match(taskDialog, /<label for="taskTitle">任务标题/);
+  assert.match(taskDialog, /id="taskTitle"[^>]*required[^>]*aria-required="true"/);
+  assert.match(taskDialog, /id="taskDueAt"[^>]*type="datetime-local"[^>]*required/);
+  assert.match(taskDialog, /id="taskDescription"/);
+  assert.match(appFunction('openTaskDialog'), /TMAccessibility\.openDialog/);
+  assert.match(appFunction('closeTaskDialog'), /TMAccessibility\.closeDialog/);
+  assert.match(componentsCss, /\.customer-task-section\s*\{[^}]*min-width:\s*0[^}]*max-width:\s*100%[^}]*\}/);
+  assert.match(componentsCss, /\.customer-task-card\s*\{[^}]*min-width:\s*0[^}]*overflow-wrap:\s*anywhere[^}]*\}/);
+  assert.match(componentsCss, /@media\s*\(max-width:\s*480px\)[\s\S]*?\.customer-task-actions\s*\{[^}]*width:\s*100%[^}]*\}/);
+});
+
+test('task browser handlers reject unauthorized writes before dialog, confirmation, or fetch', async () => {
+  let rejected = 0;
+  let externalCalls = 0;
+  const {
+    showAddCustomerTask,
+    saveCustomerTask,
+    completeCustomerTask,
+    cancelCustomerTask
+  } = evaluateAppFunctions(
+    ['showAddCustomerTask', 'saveCustomerTask', 'completeCustomerTask', 'cancelCustomerTask'],
+    {
+      currentUserHasCrmTaskPermission: () => false,
+      rejectCrmBrowserAction: () => { rejected += 1; return false; },
+      document: { getElementById: () => ({ value: '' }) },
+      openTaskDialog: () => { externalCalls += 1; },
+      apiFetch: async () => { externalCalls += 1; return { ok: true }; },
+      showConfirm: async () => { externalCalls += 1; return true; }
+    }
+  );
+
+  showAddCustomerTask(41);
+  await saveCustomerTask();
+  await completeCustomerTask(41, 91);
+  await cancelCustomerTask(41, 91);
+
+  assert.equal(rejected, 4);
+  assert.equal(externalCalls, 0);
+});
+
+test('task create sends the canonical assignment and refreshes the same customer detail', async () => {
+  const requests = [];
+  let closed = 0;
+  let refreshed = 0;
+  let focused = 0;
+  const elements = {
+    taskCustomerId: { value: '41' },
+    taskOwnerUserId: { value: '7' },
+    taskTeamId: { value: '8' },
+    taskTitle: { value: 'Confirm launch timing' },
+    taskDueAt: { value: '2099-02-01T09:30' },
+    taskDescription: { value: 'Share the final timeline.' },
+    taskDialog: { dataset: { requestGeneration: '3' } },
+    taskSaveButton: { disabled: false, textContent: '创建任务' },
+    customerTaskSection: { focus() { focused += 1; } }
+  };
+  const { crmTaskTimestampFromInput, saveCustomerTask } = evaluateAppFunctions(
+    ['crmTaskTimestampFromInput', 'saveCustomerTask'],
+    {
+      _lastCustomerDetailData: { customer: { id: 41 } },
+      currentUserHasCrmTaskPermission: () => true,
+      rejectCrmBrowserAction: () => false,
+      document: { getElementById: (id) => elements[id] || null },
+      apiFetch: async (url, options) => {
+        requests.push({ url, options });
+        return { ok: true, status: 200 };
+      },
+      requireSuccessfulCustomerMutation: async () => {},
+      closeTaskDialog: () => { closed += 1; },
+      openCustomerDetail: async (customerId, options) => {
+        assert.equal(customerId, 41);
+        assert.equal(options.applyGuard(), true);
+        refreshed += 1;
+        return true;
+      },
+      toast() {}
+    }
+  );
+
+  assert.equal(await saveCustomerTask(), true);
+  assert.equal(closed, 1);
+  assert.equal(refreshed, 1);
+  assert.equal(focused, 1);
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].url, '/customers/41/tasks');
+  assert.equal(requests[0].options.method, 'POST');
+  assert.deepEqual(JSON.parse(requests[0].options.body), {
+    owner_user_id: 7,
+    team_id: 8,
+    title: 'Confirm launch timing',
+    due_at: '2099-02-01 09:30:00',
+    source: 'manual',
+    description: 'Share the final timeline.'
+  });
+});
+
+test('task completion and cancellation use exact endpoints and refresh the same detail', async () => {
+  const requests = [];
+  let confirmations = 0;
+  let refreshed = 0;
+  const detail = {
+    customer: { id: 41 },
+    tasks: [{ id: 91, customer_id: 41, status: 'open' }]
+  };
+  const elements = { customerTaskSection: { focus() {} } };
+  const globals = {
+    _lastCustomerDetailData: detail,
+    currentUserHasCrmTaskPermission: () => true,
+    rejectCrmBrowserAction: () => false,
+    showConfirm: async () => { confirmations += 1; return true; },
+    apiFetch: async (url, options) => {
+      requests.push({ url, options });
+      return { ok: true, status: 200 };
+    },
+    requireSuccessfulCustomerMutation: async () => {},
+    openCustomerDetail: async (customerId, options) => {
+      assert.equal(customerId, 41);
+      assert.equal(options.applyGuard(), true);
+      refreshed += 1;
+      return true;
+    },
+    document: { getElementById: (id) => elements[id] || null },
+    toast() {}
+  };
+  const {
+    mutateCustomerTaskStatus,
+    completeCustomerTask,
+    cancelCustomerTask
+  } = evaluateAppFunctions(
+    ['mutateCustomerTaskStatus', 'completeCustomerTask', 'cancelCustomerTask'],
+    globals
+  );
+  globals.mutateCustomerTaskStatus = mutateCustomerTaskStatus;
+
+  assert.equal(await completeCustomerTask(41, 91), true);
+  assert.equal(await cancelCustomerTask(41, 91), true);
+  assert.equal(confirmations, 2);
+  assert.equal(refreshed, 2);
+  assert.deepEqual(requests.map((request) => request.url), [
+    '/customers/41/tasks/91/complete',
+    '/customers/41/tasks/91/cancel'
+  ]);
+  assert.equal(requests.every((request) => request.options.method === 'POST'), true);
 });
 
 test('contact section has a complete empty state and independently gates create versus update controls', () => {

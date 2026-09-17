@@ -36,6 +36,7 @@ const APPLIED_FILTER_KEYS = Object.freeze([
 ]);
 const CUSTOMER_DETAIL_OPPORTUNITY_LIMIT = 100;
 const CUSTOMER_DETAIL_CONTACT_LIMIT = 100;
+const CUSTOMER_DETAIL_TASK_LIMIT = 100;
 
 class CrmQueryError extends Error {
   constructor(cause) {
@@ -514,6 +515,27 @@ function mapContactRow(row) {
   };
 }
 
+function mapTaskRow(row) {
+  return {
+    id: row.id,
+    customer_id: row.customer_id,
+    opportunity_id: row.opportunity_id,
+    owner_user_id: row.owner_user_id,
+    owner_display_name: row.owner_display_name,
+    team_id: row.team_id,
+    title: row.title,
+    description: row.description,
+    due_at: row.due_at,
+    status: row.status,
+    source: row.source,
+    completed_at: row.completed_at,
+    completed_by: row.completed_by,
+    completion_note: row.completion_note,
+    created_at: row.created_at,
+    updated_at: row.updated_at
+  };
+}
+
 function opportunityProjection() {
   return `
     o.id,
@@ -757,6 +779,46 @@ function getCustomerDetail(db, rawOptions) {
     );
     const contactsHaveMore = contactRows.length > CUSTOMER_DETAIL_CONTACT_LIMIT;
     const contacts = contactRows.slice(0, CUSTOMER_DETAIL_CONTACT_LIMIT);
+    const taskRows = db.prepare(`
+      SELECT
+        t.id,
+        t.customer_id,
+        t.opportunity_id,
+        t.owner_user_id,
+        t.team_id,
+        t.title,
+        t.description,
+        t.due_at,
+        t.status,
+        t.source,
+        t.completed_at,
+        t.completed_by,
+        t.completion_note,
+        t.created_at,
+        t.updated_at,
+        owner_user.display_name AS owner_display_name
+      FROM crm_tasks t
+      LEFT JOIN organization_memberships owner_membership
+        ON owner_membership.org_id=t.org_id
+       AND owner_membership.user_id=t.owner_user_id
+       AND owner_membership.status='active'
+      LEFT JOIN users owner_user
+        ON owner_user.id=owner_membership.user_id
+       AND owner_user.is_active=1
+      WHERE t.org_id=? AND t.customer_id=?
+      ORDER BY
+        CASE WHEN t.status='open' THEN 0 ELSE 1 END ASC,
+        CASE WHEN t.status='open' THEN t.due_at END ASC,
+        CASE WHEN t.status<>'open' THEN t.updated_at END DESC,
+        t.id DESC
+      LIMIT ?
+    `).all(
+      state.context.organization.id,
+      options.customerId,
+      CUSTOMER_DETAIL_TASK_LIMIT + 1
+    );
+    const tasksHaveMore = taskRows.length > CUSTOMER_DETAIL_TASK_LIMIT;
+    const tasks = taskRows.slice(0, CUSTOMER_DETAIL_TASK_LIMIT);
     const activity = db.prepare(`
       SELECT
         a.id,
@@ -783,6 +845,7 @@ function getCustomerDetail(db, rawOptions) {
       customer: mapCustomerDetailRow(customerRow),
       opportunities: opportunities.map(mapOpportunityDetailRow),
       contacts: contacts.map(mapContactRow),
+      tasks: tasks.map(mapTaskRow),
       activity: activity.map(mapActivityRow),
       meta: {
         request_id: Object.hasOwn(options, 'requestId') ? options.requestId : null,
@@ -794,6 +857,10 @@ function getCustomerDetail(db, rawOptions) {
         contacts: {
           limit: CUSTOMER_DETAIL_CONTACT_LIMIT,
           has_more: contactsHaveMore
+        },
+        tasks: {
+          limit: CUSTOMER_DETAIL_TASK_LIMIT,
+          has_more: tasksHaveMore
         }
       }
     });
