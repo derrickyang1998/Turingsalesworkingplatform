@@ -584,6 +584,48 @@ async function startTestServer(prefix, envOverrides = {}) {
   };
 }
 
+async function createReadOnlyOpportunityUser(server, suffix) {
+  const adminLogin = await jsonRequest(server.baseUrl, '/api/auth/login', {
+    method: 'POST',
+    body: { username: 'admin', password: 'AdminTest1!Secure' }
+  });
+  assert.equal(adminLogin.response.status, 200, adminLogin.text + '\n' + server.output());
+
+  const username = `readonly-opportunity-${suffix}`;
+  const password = 'ReadOnlyOpportunity1!Safe';
+  const created = await jsonRequest(server.baseUrl, '/api/admin/users', {
+    method: 'POST',
+    token: adminLogin.body.token,
+    body: {
+      username,
+      password,
+      display_name: `Read Only Opportunity ${suffix}`,
+      role: 'user',
+      department: 'Sales'
+    }
+  });
+  assert.equal(created.response.status, 200, created.text);
+
+  const setup = new Database(server.dbPath);
+  try {
+    setup.prepare(`
+      UPDATE organization_member_policy
+      SET access_mode='read_only',updated_at=CURRENT_TIMESTAMP
+      WHERE user_id=?
+    `).run(Number(created.body.id));
+  } finally {
+    setup.close();
+  }
+
+  const login = await jsonRequest(server.baseUrl, '/api/auth/login', {
+    method: 'POST',
+    body: { username, password }
+  });
+  assert.equal(login.response.status, 200, login.text);
+  assert.deepEqual(login.body.user.module_permissions['crm.opportunity'], ['read']);
+  return login;
+}
+
 async function runTestServerToExit(prefix, envOverrides = {}, timeoutMs = 15000) {
   const port = await reservePort();
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
@@ -871,6 +913,164 @@ test('read-only access is live, revokes old sessions, permits GET, blocks all bu
     });
     assert.equal(logout.response.status, 200, logout.text);
     assert.deepEqual(logout.body, { success: true });
+  } finally {
+    await server.close();
+  }
+});
+
+test('opportunity named permission ingress denies read-only malformed JSON before body parsing and audits each action', {
+  timeout: 30000
+}, async () => {
+  const server = await startTestServer('tm-opportunity-permission-ingress-denied-');
+  try {
+    const login = await createReadOnlyOpportunityUser(server, 'denied');
+    const cases = [
+      ['POST', '/api/opportunities', 'create', null],
+      ['PUT', '/api/opportunities/71', 'update', 71],
+      ['POST', '/api/opportunities/', 'create-trailing-slash', null],
+      ['PUT', '/api/opportunities/71/', 'update-trailing-slash', 71]
+    ];
+
+    for (const [method, requestPath, action] of cases) {
+      const requestId = `opportunity-${action}-malformed-json`;
+      const response = await fetch(server.baseUrl + requestPath, {
+        method,
+        headers: {
+          Authorization: `Bearer ${login.body.token}`,
+          'Content-Type': 'application/json',
+          'X-Request-Id': requestId
+        },
+        body: '{'
+      });
+      const body = await response.json();
+      assert.equal(response.status, 403, `${method} ${requestPath}`);
+      assert.equal(body.code, 'CRM_PERMISSION_FORBIDDEN');
+      assert.equal(body.request_id, requestId);
+    }
+
+    const inspection = new Database(server.dbPath, { readonly: true });
+    try {
+      const rows = inspection.prepare(`
+        SELECT details
+        FROM activity_log
+        WHERE action='crm_permission_denied' AND module='crm_permission'
+        ORDER BY id
+      `).all().map((row) => JSON.parse(row.details));
+      assert.deepEqual(rows.map((row) => ({
+        permission: row.permission,
+        outcome: row.outcome,
+        reason_code: row.reason_code,
+        request_id: row.request_id,
+        target_type: row.target_type,
+        target_id: row.target_id
+      })), [
+        {
+          permission: 'crm.opportunity.create',
+          outcome: 'denied',
+          reason_code: 'ACTION_FORBIDDEN',
+          request_id: 'opportunity-create-malformed-json',
+          target_type: 'opportunity',
+          target_id: null
+        },
+        {
+          permission: 'crm.opportunity.update',
+          outcome: 'denied',
+          reason_code: 'ACTION_FORBIDDEN',
+          request_id: 'opportunity-update-malformed-json',
+          target_type: 'opportunity',
+          target_id: 71
+        },
+        {
+          permission: 'crm.opportunity.create',
+          outcome: 'denied',
+          reason_code: 'ACTION_FORBIDDEN',
+          request_id: 'opportunity-create-trailing-slash-malformed-json',
+          target_type: 'opportunity',
+          target_id: null
+        },
+        {
+          permission: 'crm.opportunity.update',
+          outcome: 'denied',
+          reason_code: 'ACTION_FORBIDDEN',
+          request_id: 'opportunity-update-trailing-slash-malformed-json',
+          target_type: 'opportunity',
+          target_id: 71
+        }
+      ]);
+    } finally {
+      inspection.close();
+    }
+  } finally {
+    await server.close();
+  }
+});
+
+test('opportunity named permission ingress fails closed on audit persistence before malformed JSON parsing', {
+  timeout: 30000
+}, async () => {
+  const server = await startTestServer('tm-opportunity-permission-ingress-audit-failure-');
+  try {
+    const login = await createReadOnlyOpportunityUser(server, 'audit-failure');
+    const setup = new Database(server.dbPath);
+    try {
+      setup.exec(`
+        CREATE TRIGGER fail_opportunity_permission_audit
+        BEFORE INSERT ON activity_log
+        WHEN NEW.module='crm_permission'
+        BEGIN
+          SELECT RAISE(ABORT,'forced opportunity permission audit failure');
+        END
+      `);
+    } finally {
+      setup.close();
+    }
+
+    const response = await fetch(server.baseUrl + '/api/opportunities', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${login.body.token}`,
+        'Content-Type': 'application/json',
+        'X-Request-Id': 'opportunity-audit-failure-malformed-json'
+      },
+      body: '{'
+    });
+    const body = await response.json();
+    assert.equal(response.status, 503);
+    assert.equal(body.code, 'CRM_PERMISSION_AUDIT_FAILED');
+    assert.equal(body.request_id, 'opportunity-audit-failure-malformed-json');
+  } finally {
+    await server.close();
+  }
+});
+
+test('opportunity named permission ingress lets writable malformed JSON reach the Phase4 parser', {
+  timeout: 30000
+}, async () => {
+  const server = await startTestServer('tm-opportunity-permission-ingress-writable-');
+  try {
+    const login = await jsonRequest(server.baseUrl, '/api/auth/login', {
+      method: 'POST',
+      body: { username: 'admin', password: 'AdminTest1!Secure' }
+    });
+    assert.equal(login.response.status, 200, login.text + '\n' + server.output());
+
+    for (const [method, requestPath] of [
+      ['POST', '/api/opportunities'],
+      ['PUT', '/api/opportunities/71']
+    ]) {
+      const response = await fetch(server.baseUrl + requestPath, {
+        method,
+        headers: {
+          Authorization: `Bearer ${login.body.token}`,
+          'Content-Type': 'application/json',
+          'X-Request-Id': `opportunity-writable-${method.toLowerCase()}-malformed`
+        },
+        body: '{'
+      });
+      const body = await response.json();
+      assert.equal(response.status, 400, `${method} ${requestPath}`);
+      assert.equal(body.code, 'INVALID_REQUEST_BODY');
+    }
   } finally {
     await server.close();
   }

@@ -991,7 +991,7 @@ test('crm http: opportunity routes and embedded customer detail enforce named ac
   ]);
 });
 
-test('crm http: denied opportunity update is audited before parsing or service dispatch', async () => {
+test('crm http: denied opportunity update is audited before business command parsing or service dispatch', async () => {
   const permissionCalls = [];
   const auditEvents = [];
   const harness = makeHarness({
@@ -1038,6 +1038,65 @@ test('crm http: denied opportunity update is audited before parsing or service d
     request_id: 'crm-opportunity-permission-denied',
     target_type: 'opportunity',
     target_id: 71,
+    ip_address: '127.0.0.1'
+  }]);
+});
+
+test('crm http: denied embedded opportunity read audits the customer target before detail dispatch', async () => {
+  const permissionCalls = [];
+  const auditEvents = [];
+  const harness = makeHarness({
+    moduleActionPermissionService: {
+      authorize(input) {
+        permissionCalls.push(input);
+        if (input.module === 'crm.customer') {
+          return {
+            allowed: true,
+            code: 'ALLOWED',
+            principal: {
+              user_id: input.principal.id,
+              organization_id: input.organizationId,
+              roles: ['member']
+            }
+          };
+        }
+        return {
+          allowed: false,
+          code: 'ACTION_FORBIDDEN',
+          principal: {
+            user_id: input.principal.id,
+            organization_id: input.organizationId,
+            roles: ['member']
+          }
+        };
+      }
+    },
+    crmPermissionAudit(event) {
+      auditEvents.push(event);
+    }
+  });
+
+  const response = await harness.invoke('GET /api/customers/:id/detail', {
+    params: { id: '41' },
+    requestId: 'embedded-opportunity-read-denied'
+  });
+
+  assert.equal(response.statusCode, 403);
+  assert.equal(response.payload.code, 'CRM_PERMISSION_FORBIDDEN');
+  assert.equal(harness.calls.filter((call) => call.method === 'getCustomerDetail').length, 0);
+  assert.deepEqual(permissionCalls.map((call) => `${call.module}.${call.action}`), [
+    'crm.customer.read',
+    'crm.opportunity.read'
+  ]);
+  assert.deepEqual(auditEvents, [{
+    actor_user_id: 101,
+    organization_id: 501,
+    permission: 'crm.opportunity.read',
+    outcome: 'denied',
+    reason_code: 'ACTION_FORBIDDEN',
+    request_id: 'embedded-opportunity-read-denied',
+    target_type: 'customer',
+    target_id: 41,
     ip_address: '127.0.0.1'
   }]);
 });

@@ -63,7 +63,9 @@ const {
   PLATFORM_ADMINISTRATION_MODULE,
   PLATFORM_ADMINISTRATION_MANAGE_ACTION,
   CRM_CUSTOMER_MODULE,
-  CRM_OPPORTUNITY_MODULE
+  CRM_OPPORTUNITY_MODULE,
+  CRM_OPPORTUNITY_CREATE_ACTION,
+  CRM_OPPORTUNITY_UPDATE_ACTION
 } = require('./services/module_action_permission_service');
 const moduleActionPermissionService = createModuleActionPermissionService(db);
 
@@ -473,6 +475,86 @@ function campaignLinkedSharedWorkflowOwner(request, policy) {
     return true;
   }
 }
+
+function writeCrmPermissionAudit(event) {
+  const details = { ...event };
+  delete details.ip_address;
+  db.prepare(`
+    INSERT INTO activity_log (user_id,action,module,details,ip_address)
+    VALUES (?,?,?,?,?)
+  `).run(
+    event.actor_user_id,
+    event.outcome === 'allowed' ? 'crm_permission_allowed' : 'crm_permission_denied',
+    'crm_permission',
+    JSON.stringify(details),
+    event.ip_address || null
+  );
+}
+
+function earlyOpportunityMutation(req) {
+  if (req.method === 'POST' && /^\/api\/opportunities\/?$/.test(req.path)) {
+    return { action: CRM_OPPORTUNITY_CREATE_ACTION, targetId: null };
+  }
+  if (req.method !== 'PUT') return null;
+  const match = /^\/api\/opportunities\/([1-9]\d*)\/?$/.exec(req.path);
+  if (!match) return null;
+  const targetId = Number(match[1]);
+  if (!Number.isSafeInteger(targetId) || targetId < 1) return null;
+  return { action: CRM_OPPORTUNITY_UPDATE_ACTION, targetId };
+}
+
+function sendEarlyCrmPermissionProblem(res, requestId, code) {
+  const auditFailure = code === 'CRM_PERMISSION_AUDIT_FAILED';
+  const status = auditFailure ? 503 : 403;
+  const title = auditFailure
+    ? 'CRM permission audit could not be recorded'
+    : 'CRM customer permission is not allowed';
+  if (typeof res.type === 'function') res.type('application/problem+json');
+  return res.status(status).json({
+    type: `https://api.turingmarket.example/problems/${code.toLowerCase().replace(/_/g, '-')}`,
+    title,
+    status,
+    code,
+    request_id: requestId,
+    instance: `urn:turingmarket:request:${requestId}`
+  });
+}
+
+function earlyCrmOpportunityMutationGuard(req, res, next) {
+  const mutation = earlyOpportunityMutation(req);
+  if (!mutation) return next();
+  const authentication = authenticateRequest(req);
+  if (!authentication.ok) return next();
+  const organizationId = authentication.authContext.organization.id;
+  const decision = moduleActionPermissionService.authorize({
+    principal: authentication.user,
+    organizationId,
+    module: CRM_OPPORTUNITY_MODULE,
+    action: mutation.action
+  });
+  if (decision.allowed) return next();
+
+  const requestId = identityRequestId(req) || crypto.randomUUID();
+  try {
+    writeCrmPermissionAudit({
+      actor_user_id: authentication.user.id,
+      organization_id: organizationId,
+      permission: `${CRM_OPPORTUNITY_MODULE}.${mutation.action}`,
+      outcome: 'denied',
+      reason_code: decision.code,
+      request_id: requestId,
+      target_type: 'opportunity',
+      target_id: mutation.targetId,
+      ip_address: req.ip || null
+    });
+  } catch {
+    return sendEarlyCrmPermissionProblem(res, requestId, 'CRM_PERMISSION_AUDIT_FAILED');
+  }
+  return sendEarlyCrmPermissionProblem(res, requestId, 'CRM_PERMISSION_FORBIDDEN');
+}
+
+app.use(earlyCrmOpportunityMutationGuard);
+
 function legacyJsonMediaType(req) {
   const value = req.headers && req.headers['content-type'];
   return (
@@ -1745,7 +1827,10 @@ app.post('/api/proposal/generate-ppt', authMiddleware, (req, res) => {
 // ===== INFLUENCER & COLLABORATION ROUTES =====
 require('./routes')(app, db, authMiddleware, { campaignCollaborationService });
 require('./routes_feishu')(app, { db, authMiddleware, adminOnly });
-require('./routes_customers')(app, db, authMiddleware, { moduleActionPermissionService });
+require('./routes_customers')(app, db, authMiddleware, {
+  moduleActionPermissionService,
+  crmPermissionAudit: writeCrmPermissionAudit
+});
 registerAdminTenantDirectoryRoutes(app, db, { authMiddleware, adminOnly });
 registerOrganizationGovernanceRoutes(app, db, {
   authMiddleware,

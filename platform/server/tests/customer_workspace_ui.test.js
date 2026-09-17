@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const vm = require('node:vm');
 
 const repoRoot = path.resolve(__dirname, '..', '..', '..');
 const indexHtml = fs.readFileSync(path.join(repoRoot, 'platform', 'index.html'), 'utf8');
@@ -25,10 +26,21 @@ function appNavigationApplySection() {
 }
 
 function appFunction(functionName) {
-  const start = appJs.indexOf(`function ${functionName}(`);
-  assert.notEqual(start, -1, `missing ${functionName}`);
+  const functionStart = appJs.indexOf(`function ${functionName}(`);
+  assert.notEqual(functionStart, -1, `missing ${functionName}`);
+  const start = appJs.slice(functionStart - 6, functionStart) === 'async '
+    ? functionStart - 6
+    : functionStart;
   const next = appJs.indexOf('\nfunction ', start + 10);
   return appJs.slice(start, next === -1 ? appJs.length : next);
+}
+
+function evaluateAppFunctions(functionNames, globals) {
+  const sandbox = { ...globals };
+  const source = functionNames.map(appFunction).join('\n')
+    + `\nthis.__functions = { ${functionNames.join(', ')} };`;
+  vm.runInNewContext(source, sandbox);
+  return sandbox.__functions;
 }
 
 test('customer workspace exposes separate board and detail pages', () => {
@@ -129,9 +141,152 @@ test('opportunity controls consume server-projected create and update actions', 
   assert.match(appFunction('editOpportunity'), /currentUserHasCrmOpportunityPermission\('update'\)/);
 });
 
-test('opportunity table rows expose edit behavior only with update permission', () => {
+test('opportunity table exposes focusable view actions and permission-gated edit buttons', () => {
   const loadOpportunities = appFunction('loadOpportunities');
   assert.match(loadOpportunities, /currentUserHasCrmOpportunityPermission\('update'\)/);
-  assert.match(loadOpportunities, /canUpdateOpportunity \?[^;]*editOpportunity/);
-  assert.doesNotMatch(loadOpportunities, /<tr data-opp-id="'\+o\.id\+'" style="cursor:pointer" onclick="editOpportunity/);
+  assert.match(loadOpportunities, /<button type="button"[^>]*onclick="viewOpportunity\('/);
+  assert.match(loadOpportunities, /if\s*\(canUpdateOpportunity\)[\s\S]*?<button type="button"[^>]*onclick="editOpportunity\('/);
+  assert.doesNotMatch(loadOpportunities, /<tr[^>]*onclick=/);
+  assert.doesNotMatch(loadOpportunities, /<tr[^>]*cursor:pointer/);
+});
+
+test('opportunity list escapes every server-controlled text value before writing innerHTML', () => {
+  const loadOpportunities = appFunction('loadOpportunities');
+  assert.match(loadOpportunities, /var opportunityName\s*=\s*esc\(o\.name\s*\|\|\s*''\)/);
+  assert.match(loadOpportunities, /var opportunityBrand\s*=\s*esc\(o\.brand_name\s*\|\|\s*'-'\)/);
+  assert.match(loadOpportunities, /var opportunityStage\s*=\s*esc\(sl\[o\.stage\]\s*\|\|\s*o\.stage\s*\|\|\s*'-'\)/);
+  assert.match(loadOpportunities, /var opportunityCloseDate\s*=\s*esc\(o\.expected_close_date\s*\|\|\s*'-'\)/);
+  assert.doesNotMatch(loadOpportunities, /\+\(o\.brand_name\|\|'-'\)\+/);
+  assert.doesNotMatch(loadOpportunities, /\+\(sl\[o\.stage\]\|\|o\.stage\)\+/);
+  assert.doesNotMatch(loadOpportunities, /\+\(o\.expected_close_date\|\|'-'\)\+/);
+});
+
+test('opportunity list cannot inject markup through any server-controlled cell', async () => {
+  const opportunityTable = { innerHTML: '' };
+  const elements = {
+    oppStageFilter: { value: '' },
+    oppCustomerFilter: { value: '' },
+    oppTableBody: opportunityTable,
+    oppCount: { textContent: '' }
+  };
+  const marker = '<img src=x onerror=alert(1)>';
+  const { loadOpportunities } = evaluateAppFunctions(
+    ['requireSuccessfulCustomerMutation', 'loadOpportunities'],
+    {
+      apiFetch: async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          opportunities: [{
+            id: 17,
+            name: marker,
+            brand_name: marker,
+            value: marker,
+            stage: marker,
+            win_probability: marker,
+            expected_close_date: marker
+          }]
+        })
+      }),
+      currentUserHasCrmOpportunityPermission: () => true,
+      document: { getElementById: (id) => elements[id] || null },
+      esc: (value) => String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;')
+    }
+  );
+
+  await loadOpportunities();
+
+  assert.doesNotMatch(opportunityTable.innerHTML, /<img\b/i);
+  assert.match(opportunityTable.innerHTML, /&lt;img/);
+});
+
+test('opportunity modal supports accessible read-only view and restores create or edit state', () => {
+  const viewOpportunity = appFunction('viewOpportunity');
+  assert.doesNotMatch(viewOpportunity, /currentUserHasCrmOpportunityPermission\('update'\)/);
+  assert.match(viewOpportunity, /setOpportunityModalMode\('view'\)/);
+  assert.match(viewOpportunity, /openOpportunityDialog\(\)/);
+
+  const setMode = appFunction('setOpportunityModalMode');
+  assert.match(setMode, /var viewOnly\s*=\s*mode === 'view'/);
+  assert.match(setMode, /field\.disabled\s*=\s*viewOnly/);
+  assert.match(setMode, /saveButton\.hidden\s*=\s*viewOnly/);
+
+  assert.match(appFunction('showOppModal'), /setOpportunityModalMode\('create'\)/);
+  assert.match(appFunction('editOpportunity'), /setOpportunityModalMode\('update'\)/);
+
+  const openDialog = appFunction('openOpportunityDialog');
+  assert.match(openDialog, /TMAccessibility\.openDialog/);
+  assert.match(openDialog, /dialog\.focus\(\)/);
+  const closeDialog = appFunction('closeOppModal');
+  assert.match(closeDialog, /TMAccessibility\.closeDialog/);
+  assert.match(closeDialog, /opportunityDialogOpener\.focus\(\)/);
+});
+
+test('opportunity row inline handlers are included in the global export contract', () => {
+  const start = appJs.indexOf('(function exposeInlineHandlers()');
+  assert.notEqual(start, -1, 'missing exposeInlineHandlers');
+  const end = appJs.indexOf('})();', start);
+  assert.notEqual(end, -1, 'missing exposeInlineHandlers terminator');
+  const inlineHandlerBlock = appJs.slice(start, end);
+
+  assert.match(inlineHandlerBlock, /'viewOpportunity'/);
+  assert.match(inlineHandlerBlock, /'editOpportunity'/);
+});
+
+test('failed opportunity response does not enter the empty-list state', async () => {
+  const opportunityTable = { innerHTML: '' };
+  const elements = {
+    oppStageFilter: { value: '' },
+    oppCustomerFilter: { value: '' },
+    oppTableBody: opportunityTable,
+    oppCount: { textContent: '' }
+  };
+  const { loadOpportunities } = evaluateAppFunctions(
+    ['requireSuccessfulCustomerMutation', 'loadOpportunities'],
+    {
+      apiFetch: async () => ({
+        ok: false,
+        status: 403,
+        json: async () => ({ code: 'CRM_PERMISSION_FORBIDDEN' })
+      }),
+      currentUserHasCrmOpportunityPermission: () => false,
+      document: { getElementById: (id) => elements[id] || null },
+      esc: (value) => String(value)
+    }
+  );
+
+  await loadOpportunities();
+
+  assert.doesNotMatch(opportunityTable.innerHTML, /暂无商机/);
+  assert.match(opportunityTable.innerHTML, /加载失败/);
+  assert.match(opportunityTable.innerHTML, /CRM_PERMISSION_FORBIDDEN/);
+});
+
+test('failed customer detail response does not enter the not-found state', async () => {
+  const messages = [];
+  let renderCount = 0;
+  const { openCustomerDetail } = evaluateAppFunctions(
+    ['requireSuccessfulCustomerMutation', 'openCustomerDetail'],
+    {
+      apiFetch: async () => ({
+        ok: false,
+        status: 403,
+        json: async () => ({ code: 'CRM_PERMISSION_FORBIDDEN' })
+      }),
+      toast: (message) => messages.push(message),
+      renderCustomerSidebar: () => { renderCount += 1; }
+    }
+  );
+
+  await openCustomerDetail(41);
+
+  assert.equal(renderCount, 0);
+  assert.equal(messages.some((message) => message.includes('客户不存在')), false);
+  assert.equal(messages.some((message) => message.includes('加载失败')), true);
+  assert.equal(messages.some((message) => message.includes('CRM_PERMISSION_FORBIDDEN')), true);
 });

@@ -607,6 +607,11 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
     CRM_OPPORTUNITY_READ_ACTION,
     { targetType: 'opportunity', targetParam: 'id', applyScopeRules: true }
   );
+  const requireEmbeddedCrmOpportunityRead = requireCrmPermission(
+    CRM_OPPORTUNITY_MODULE,
+    CRM_OPPORTUNITY_READ_ACTION,
+    { targetType: 'customer', targetParam: 'id', applyScopeRules: true }
+  );
   const requireCrmOpportunityCreate = requireCrmPermission(
     CRM_OPPORTUNITY_MODULE,
     CRM_OPPORTUNITY_CREATE_ACTION,
@@ -859,7 +864,7 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
     return res.json(statsResponse(req, readCanonicalFilter(req.query, 'customer')));
   }));
 
-  app.get('/api/customers/:id/detail', authMiddleware, requireCrmCustomerRead, requireCrmOpportunityRead, crmHandler((req, res) => {
+  app.get('/api/customers/:id/detail', authMiddleware, requireCrmCustomerRead, requireEmbeddedCrmOpportunityRead, crmHandler((req, res) => {
     return res.json(callCustomerDetail(req));
   }));
 
