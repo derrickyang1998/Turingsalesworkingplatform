@@ -39,6 +39,16 @@ function harness(overrides = {}) {
       calls.push(['initializeOwner', input]);
       return { changed: true };
     },
+    transferOwner(input) {
+      calls.push(['transferOwner', input]);
+      return {
+        changed: true,
+        organization_id: 20,
+        previous_owner_user_id: 2,
+        owner: { user_id: 4, username: 'manager', display_name: 'Manager', version: 2 },
+        reauthentication_required: false
+      };
+    },
     updateMember(input) {
       calls.push(['updateMember', input]);
       return { changed: true };
@@ -84,7 +94,8 @@ test('registers only the approved governance endpoints and preserves exact GET s
     'GET /api/organization-governance/organizations',
     'GET /api/organization-governance/organizations/:organizationId/members',
     'PATCH /api/organization-governance/organizations/:organizationId/members/:userId',
-    'POST /api/organization-governance/organizations/:organizationId/owner/initialize'
+    'POST /api/organization-governance/organizations/:organizationId/owner/initialize',
+    'POST /api/organization-governance/organizations/:organizationId/owner/transfer'
   ].sort());
 
   const organizations = await h.invoke('GET /api/organization-governance/organizations', {
@@ -169,6 +180,64 @@ test('accepts only exact owner initialization and member patch bodies', async ()
     const result = await h.invoke(
       'PATCH /api/organization-governance/organizations/:organizationId/members/:userId',
       { params: { organizationId: '20', userId: '4' }, body }
+    );
+    assert.equal(result.statusCode, 400);
+    assert.equal(result.payload.code, 'INVALID_ORGANIZATION_GOVERNANCE_BODY');
+  }
+  assert.equal(h.calls.length, acceptedCallCount);
+});
+
+test('accepts only the exact ownership transfer contract and returns the transfer projection', async () => {
+  const h = harness();
+  const body = {
+    new_owner_user_id: 4,
+    expected_owner_user_id: 2,
+    expected_version: 1,
+    confirmation_username: 'manager',
+    reason: 'Transfer regional operating responsibility'
+  };
+  const transferred = await h.invoke(
+    'POST /api/organization-governance/organizations/:organizationId/owner/transfer',
+    { params: { organizationId: '20' }, body }
+  );
+  assert.deepEqual(transferred, {
+    statusCode: 200,
+    payload: {
+      success: true,
+      transfer: {
+        changed: true,
+        organization_id: 20,
+        previous_owner_user_id: 2,
+        owner: { user_id: 4, username: 'manager', display_name: 'Manager', version: 2 },
+        reauthentication_required: false
+      },
+      request_id: 'governance-route-request'
+    }
+  });
+  assert.deepEqual(h.calls[0], ['transferOwner', {
+    actor: { id: 1, role: 'admin' },
+    requestId: 'governance-route-request',
+    ipAddress: '127.0.0.1',
+    organizationId: '20',
+    body
+  }]);
+
+  const acceptedCallCount = h.calls.length;
+  for (const invalidBody of [
+    undefined,
+    null,
+    {},
+    { ...body, unexpected: true },
+    { ...body, new_owner_user_id: '4' },
+    { ...body, expected_owner_user_id: 0 },
+    { ...body, expected_version: 0 },
+    { ...body, confirmation_username: '' },
+    { ...body, reason: 'short' },
+    Object.assign(Object.create(null), body)
+  ]) {
+    const result = await h.invoke(
+      'POST /api/organization-governance/organizations/:organizationId/owner/transfer',
+      { params: { organizationId: '20' }, body: invalidBody }
     );
     assert.equal(result.statusCode, 400);
     assert.equal(result.payload.code, 'INVALID_ORGANIZATION_GOVERNANCE_BODY');

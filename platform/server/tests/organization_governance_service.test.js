@@ -71,7 +71,10 @@ function openFixture() {
       org_id INTEGER PRIMARY KEY,
       owner_user_id INTEGER NOT NULL,
       created_by INTEGER NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_by INTEGER NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      version INTEGER NOT NULL DEFAULT 1
     ) STRICT;
     CREATE TABLE sessions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -118,9 +121,11 @@ function openFixture() {
     INSERT INTO organization_member_policy (org_id,user_id,access_mode)
       SELECT org_id,user_id,CASE WHEN org_id=10 AND user_id=6 THEN 'read_only' ELSE 'read_write' END
       FROM organization_memberships;
-    INSERT INTO organization_authority (org_id,owner_user_id,created_by) VALUES
-      (10,1,1),
-      (20,2,1);
+    INSERT INTO organization_authority (
+      org_id,owner_user_id,created_by,updated_by,version
+    ) VALUES
+      (10,1,1,1,1),
+      (20,2,1,1,1);
     INSERT INTO teams (id,org_id,code,name) VALUES
       (101,10,'alpha-main','Alpha Main'),
       (201,20,'beta-main','Beta Main');
@@ -136,6 +141,7 @@ function openFixture() {
       (20,201,4,'team_lead','active',NULL),
       (20,201,5,'member','active',NULL);
     INSERT INTO sessions (user_id,token,expires_at) VALUES
+      (2,'session-2','2030-01-01 00:00:00'),
       (3,'session-3','2030-01-01 00:00:00'),
       (4,'session-4','2030-01-01 00:00:00'),
       (5,'session-5','2030-01-01 00:00:00');
@@ -225,13 +231,15 @@ test('lists only authorized organizations and members with contract fields and a
     assert.deepEqual(target.allowed_actions, {
       change_role: true,
       change_status: true,
-      initialize_owner: false
+      initialize_owner: false,
+      transfer_owner: true
     });
     const owner = members.members.find((member) => member.user_id === 2);
     assert.deepEqual(owner.allowed_actions, {
       change_role: false,
       change_status: false,
-      initialize_owner: false
+      initialize_owner: false,
+      transfer_owner: false
     });
 
     assert.throws(
@@ -414,7 +422,8 @@ test('protects platform administrators and rejects manager assignment without a 
     assert.deepEqual(ownerView.members[0].allowed_actions, {
       change_role: false,
       change_status: false,
-      initialize_owner: false
+      initialize_owner: false,
+      transfer_owner: true
     });
   } finally {
     db.close();
@@ -500,8 +509,12 @@ test('initializes an unowned organization only once for an eligible member and r
     });
     assert.equal(initialized.changed, true);
     assert.deepEqual(
-      db.prepare('SELECT owner_user_id,created_by FROM organization_authority WHERE org_id=30').get(),
-      { owner_user_id: 5, created_by: 1 }
+      db.prepare(`
+        SELECT owner_user_id,created_by,updated_by,version
+        FROM organization_authority
+        WHERE org_id=30
+      `).get(),
+      { owner_user_id: 5, created_by: 1, updated_by: 1, version: 1 }
     );
     assert.equal(db.prepare('SELECT COUNT(*) AS count FROM sessions WHERE user_id=5').get().count, 0);
 
@@ -519,6 +532,256 @@ test('initializes an unowned organization only once for an eligible member and r
       }),
       (error) => error && error.code === 'PLATFORM_ADMIN_REQUIRED'
     );
+  } finally {
+    db.close();
+  }
+});
+
+test('transfers ownership atomically with compare-and-swap, audit lineage, and session revocation', () => {
+  const db = openFixture();
+  try {
+    const { createOrganizationGovernanceService } = loadService();
+    const service = createOrganizationGovernanceService(db);
+
+    const result = service.transferOwner({
+      actor: actor(2),
+      organizationId: 20,
+      body: {
+        new_owner_user_id: 3,
+        expected_owner_user_id: 2,
+        expected_version: 1,
+        confirmation_username: 'administrator',
+        reason: 'Transfer regional operating responsibility'
+      },
+      requestId: 'transfer-owner',
+      ipAddress: '127.0.0.1'
+    });
+
+    assert.deepEqual(result, {
+      changed: true,
+      organization_id: 20,
+      previous_owner_user_id: 2,
+      owner: {
+        user_id: 3,
+        username: 'administrator',
+        display_name: 'Organization Admin',
+        version: 2
+      },
+      reauthentication_required: true
+    });
+    assert.deepEqual(
+      db.prepare(`
+        SELECT owner_user_id,created_by,updated_by,version
+        FROM organization_authority
+        WHERE org_id=20
+      `).get(),
+      { owner_user_id: 3, created_by: 1, updated_by: 2, version: 2 }
+    );
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM sessions WHERE user_id IN (2,3)').get().count, 0);
+
+    const audit = db.prepare(`
+      SELECT user_id,action,module,details,ip_address
+      FROM activity_log
+      WHERE action='organization_owner_transferred'
+    `).get();
+    assert.equal(audit.user_id, 2);
+    assert.equal(audit.module, 'organization_governance');
+    assert.equal(audit.ip_address, '127.0.0.1');
+    const details = JSON.parse(audit.details);
+    assert.equal(details.organization_id, 20);
+    assert.equal(details.subject_user_id, 3);
+    assert.equal(details.reason, 'Transfer regional operating responsibility');
+    assert.equal(details.previous_owner_username, 'owner');
+    assert.equal(details.new_owner_username, 'administrator');
+    assert.deepEqual(details.before, { company_owner_user_id: 2, version: 1 });
+    assert.deepEqual(details.after, { company_owner_user_id: 3, version: 2 });
+
+    assert.throws(
+      () => service.transferOwner({
+        actor: actor(2), organizationId: 20,
+        body: {
+          new_owner_user_id: 4,
+          expected_owner_user_id: 3,
+          expected_version: 2,
+          confirmation_username: 'manager',
+          reason: 'Former owner cannot transfer after handover'
+        }
+      }),
+      (error) => error && error.code === 'ORGANIZATION_OWNER_TRANSFER_FORBIDDEN'
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('rejects stale, ineligible, unconfirmed, same-owner, and unauthorized ownership transfers', () => {
+  const db = openFixture();
+  try {
+    const { createOrganizationGovernanceService } = loadService();
+    const service = createOrganizationGovernanceService(db);
+    const valid = {
+      new_owner_user_id: 3,
+      expected_owner_user_id: 2,
+      expected_version: 1,
+      confirmation_username: 'administrator',
+      reason: 'Transfer regional operating responsibility'
+    };
+
+    const cases = [
+      [actor(3), valid, 'ORGANIZATION_OWNER_TRANSFER_FORBIDDEN'],
+      [actor(5), valid, 'ORGANIZATION_OWNER_TRANSFER_FORBIDDEN'],
+      [actor(2), { ...valid, expected_version: 2 }, 'ORGANIZATION_OWNER_TRANSFER_STALE'],
+      [actor(2), { ...valid, confirmation_username: 'wrong-user' }, 'ORGANIZATION_OWNER_CONFIRMATION_MISMATCH'],
+      [actor(2), {
+        ...valid,
+        new_owner_user_id: 2,
+        confirmation_username: 'owner'
+      }, 'ORGANIZATION_OWNER_UNCHANGED'],
+      [actor(2), {
+        ...valid,
+        new_owner_user_id: 6,
+        confirmation_username: 'readonly'
+      }, 'COMPANY_OWNER_CANDIDATE_INELIGIBLE'],
+      [actor(2), {
+        ...valid,
+        new_owner_user_id: 8,
+        confirmation_username: 'inactive'
+      }, 'COMPANY_OWNER_CANDIDATE_INELIGIBLE'],
+      [actor(2), {
+        ...valid,
+        new_owner_user_id: 7,
+        confirmation_username: 'alpha-admin'
+      }, 'COMPANY_OWNER_CANDIDATE_INELIGIBLE']
+    ];
+    for (const [transferActor, body, code] of cases) {
+      assert.throws(
+        () => service.transferOwner({ actor: transferActor, organizationId: 20, body }),
+        (error) => error && error.code === code
+      );
+    }
+
+    const platformResult = service.transferOwner({
+      actor: actor(1, 'admin'),
+      organizationId: 20,
+      body: valid,
+      requestId: 'platform-transfer'
+    });
+    assert.equal(platformResult.reauthentication_required, false);
+  } finally {
+    db.close();
+  }
+});
+
+test('compare-and-swap allows only one transfer from the same authority snapshot', () => {
+  const db = openFixture();
+  try {
+    const { createOrganizationGovernanceService } = loadService();
+    const service = createOrganizationGovernanceService(db);
+    service.transferOwner({
+      actor: actor(1, 'admin'),
+      organizationId: 20,
+      body: {
+        new_owner_user_id: 3,
+        expected_owner_user_id: 2,
+        expected_version: 1,
+        confirmation_username: 'administrator',
+        reason: 'First transfer wins the authority snapshot'
+      },
+      requestId: 'first-cas-transfer'
+    });
+    assert.throws(
+      () => service.transferOwner({
+        actor: actor(1, 'admin'),
+        organizationId: 20,
+        body: {
+          new_owner_user_id: 4,
+          expected_owner_user_id: 2,
+          expected_version: 1,
+          confirmation_username: 'manager',
+          reason: 'Second transfer uses the stale authority snapshot'
+        },
+        requestId: 'second-cas-transfer'
+      }),
+      (error) => error && error.code === 'ORGANIZATION_OWNER_TRANSFER_STALE'
+    );
+    assert.deepEqual(
+      db.prepare('SELECT owner_user_id,version FROM organization_authority WHERE org_id=20').get(),
+      { owner_user_id: 3, version: 2 }
+    );
+    assert.equal(
+      db.prepare("SELECT COUNT(*) AS count FROM activity_log WHERE action='organization_owner_transferred'").get().count,
+      1
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('platform administrator becoming the new owner must reauthenticate', () => {
+  const db = openFixture();
+  try {
+    const { createOrganizationGovernanceService } = loadService();
+    const service = createOrganizationGovernanceService(db);
+    db.exec(`
+      INSERT INTO organization_memberships (org_id,user_id,role_code,status)
+      VALUES (20,1,'org_admin','active');
+      INSERT INTO organization_member_policy (org_id,user_id,access_mode)
+      VALUES (20,1,'read_write');
+      INSERT INTO sessions (user_id,token,expires_at)
+      VALUES (1,'session-1','2030-01-01 00:00:00');
+    `);
+
+    const result = service.transferOwner({
+      actor: actor(1, 'admin'),
+      organizationId: 20,
+      body: {
+        new_owner_user_id: 1,
+        expected_owner_user_id: 2,
+        expected_version: 1,
+        confirmation_username: 'platform',
+        reason: 'Platform administrator assumes company ownership'
+      },
+      requestId: 'platform-admin-becomes-owner'
+    });
+    assert.equal(result.reauthentication_required, true);
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM sessions WHERE user_id IN (1,2)').get().count, 0);
+  } finally {
+    db.close();
+  }
+});
+
+test('rolls back ownership, sessions, and version when transfer audit persistence fails', () => {
+  const db = openFixture();
+  try {
+    const { createOrganizationGovernanceService } = loadService();
+    const service = createOrganizationGovernanceService(db);
+    db.exec(`
+      CREATE TRIGGER reject_owner_transfer_audit
+      BEFORE INSERT ON activity_log
+      WHEN NEW.action='organization_owner_transferred'
+      BEGIN SELECT RAISE(ABORT,'synthetic transfer audit failure'); END;
+    `);
+
+    assert.throws(
+      () => service.transferOwner({
+        actor: actor(2),
+        organizationId: 20,
+        body: {
+          new_owner_user_id: 3,
+          expected_owner_user_id: 2,
+          expected_version: 1,
+          confirmation_username: 'administrator',
+          reason: 'Transfer regional operating responsibility'
+        },
+        requestId: 'atomic-transfer-audit'
+      }),
+      (error) => error && error.code === 'AUDIT_PERSISTENCE_FAILED'
+    );
+    assert.deepEqual(
+      db.prepare('SELECT owner_user_id,updated_by,version FROM organization_authority WHERE org_id=20').get(),
+      { owner_user_id: 2, updated_by: 1, version: 1 }
+    );
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM sessions WHERE user_id IN (2,3)').get().count, 2);
   } finally {
     db.close();
   }

@@ -9,6 +9,9 @@ const migrationService = require('../services/migration_service');
 const migrationGate = require('../scripts/verify_campaign_migration_gate');
 
 const SERVER_ROOT = path.resolve(__dirname, '..');
+const MIGRATIONS_THROUGH_V21 = migrationGate.REGISTERED_MIGRATIONS.filter(
+  (registered) => registered.version <= 21
+);
 
 function loadMigration() {
   try {
@@ -67,7 +70,7 @@ test('migration 021 upgrades v20 deterministically without changing membership r
 
     migrationService.runMigrations(db, {
       rootDir: SERVER_ROOT,
-      registeredMigrations: migrationGate.REGISTERED_MIGRATIONS
+      registeredMigrations: MIGRATIONS_THROUGH_V21
     });
 
     assert.equal(db.prepare('SELECT max(version) AS version FROM schema_migrations').get().version, 21);
@@ -116,7 +119,7 @@ test('migration 021 upgrades v20 deterministically without changing membership r
 
     assert.doesNotThrow(() => migrationService.runMigrations(db, {
       rootDir: SERVER_ROOT,
-      registeredMigrations: migrationGate.REGISTERED_MIGRATIONS
+      registeredMigrations: MIGRATIONS_THROUGH_V21
     }));
     assert.equal(
       db.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version=21").get().count,
@@ -133,7 +136,7 @@ test('migration 021 database guards keep the owner active, read-write, unique, a
   try {
     migrationService.runMigrations(db, {
       rootDir: SERVER_ROOT,
-      registeredMigrations: migrationGate.REGISTERED_MIGRATIONS
+      registeredMigrations: MIGRATIONS_THROUGH_V21
     });
 
     assert.throws(

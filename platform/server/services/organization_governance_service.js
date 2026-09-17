@@ -259,7 +259,7 @@ function visibleOrganizationIds(db, actor) {
 
 function ownerSummary(db, organizationId) {
   const row = db.prepare(`
-    SELECT user.id AS user_id,user.username,user.display_name
+    SELECT user.id AS user_id,user.username,user.display_name,authority.version
     FROM organization_authority authority
     JOIN users user ON user.id=authority.owner_user_id
     WHERE authority.org_id=?
@@ -280,6 +280,11 @@ function persistAudit(db, input) {
   };
   if (input.before !== undefined) details.before = input.before;
   if (input.after !== undefined) details.after = input.after;
+  if (input.reason !== undefined) details.reason = input.reason;
+  if (input.previousOwnerUsername !== undefined) {
+    details.previous_owner_username = input.previousOwnerUsername;
+  }
+  if (input.newOwnerUsername !== undefined) details.new_owner_username = input.newOwnerUsername;
   try {
     db.prepare(`
       INSERT INTO activity_log (user_id,action,module,details,ip_address)
@@ -463,6 +468,12 @@ function listMembers(db, options) {
         row.is_active === 1 &&
         row.membership_status === 'active' &&
         row.access_mode === 'read_write';
+      const transferAllowed = companyOwner !== null &&
+        (scope.kind === 'platform_admin' || scope.kind === 'company_owner') &&
+        target.is_company_owner === false &&
+        row.is_active === 1 &&
+        row.membership_status === 'active' &&
+        row.access_mode === 'read_write';
       return {
         user_id: row.user_id,
         username: row.username,
@@ -485,7 +496,8 @@ function listMembers(db, options) {
         allowed_actions: {
           change_role: changeAllowed,
           change_status: changeAllowed,
-          initialize_owner: initializeAllowed
+          initialize_owner: initializeAllowed,
+          transfer_owner: transferAllowed
         }
       };
     });
@@ -551,6 +563,48 @@ function validateMemberBody(value) {
   return normalized;
 }
 
+function validateOwnerTransferBody(value) {
+  const keys = [
+    'confirmation_username',
+    'expected_owner_user_id',
+    'expected_version',
+    'new_owner_user_id',
+    'reason'
+  ];
+  const body = exactBody(value, keys);
+  if (!body || Object.keys(body).length !== keys.length) {
+    throw serviceError(400, 'INVALID_ORGANIZATION_GOVERNANCE_BODY', '请求内容格式无效。');
+  }
+  for (const key of ['new_owner_user_id', 'expected_owner_user_id', 'expected_version']) {
+    if (!Number.isSafeInteger(body[key]) || body[key] < 1) {
+      throw serviceError(400, 'INVALID_ORGANIZATION_GOVERNANCE_BODY', '请求内容格式无效。');
+    }
+  }
+  if (
+    typeof body.confirmation_username !== 'string' ||
+    body.confirmation_username.length < 1 ||
+    body.confirmation_username.length > 120 ||
+    /[\u0000-\u001f\u007f]/.test(body.confirmation_username)
+  ) {
+    throw serviceError(400, 'INVALID_ORGANIZATION_GOVERNANCE_BODY', '请求内容格式无效。');
+  }
+  if (typeof body.reason !== 'string') {
+    throw serviceError(400, 'INVALID_ORGANIZATION_GOVERNANCE_BODY', '请求内容格式无效。');
+  }
+  const reason = body.reason.trim();
+  const reasonLength = [...reason].length;
+  if (reasonLength < 8 || reasonLength > 500 || /[\u0000-\u001f\u007f]/.test(reason)) {
+    throw serviceError(400, 'INVALID_ORGANIZATION_GOVERNANCE_BODY', '请求内容格式无效。');
+  }
+  return {
+    new_owner_user_id: body.new_owner_user_id,
+    expected_owner_user_id: body.expected_owner_user_id,
+    expected_version: body.expected_version,
+    confirmation_username: body.confirmation_username,
+    reason
+  };
+}
+
 function initializeOwner(db, options) {
   const organizationId = positiveInteger(options && options.organizationId, 'organizationId');
   const body = validateOwnerBody(options && options.body);
@@ -581,9 +635,11 @@ function initializeOwner(db, options) {
       throw serviceError(409, 'COMPANY_OWNER_CANDIDATE_INELIGIBLE', '公司所有者必须是活跃且可写的本组织成员。');
     }
     db.prepare(`
-      INSERT INTO organization_authority (org_id,owner_user_id,created_by)
-      VALUES (?,?,?)
-    `).run(organizationId, body.user_id, scope.user.id);
+      INSERT INTO organization_authority (
+        org_id,owner_user_id,created_by,created_at,updated_by,updated_at,version
+      )
+      VALUES (?,?,?,CURRENT_TIMESTAMP,?,CURRENT_TIMESTAMP,1)
+    `).run(organizationId, body.user_id, scope.user.id, scope.user.id);
     db.prepare('DELETE FROM sessions WHERE user_id=?').run(body.user_id);
     persistAudit(db, {
       actorUserId: scope.user.id,
@@ -597,6 +653,113 @@ function initializeOwner(db, options) {
       after: { company_owner_user_id: body.user_id }
     });
     return { changed: true };
+  }).immediate();
+}
+
+function transferOwner(db, options) {
+  const organizationId = positiveInteger(options && options.organizationId, 'organizationId');
+  const body = validateOwnerTransferBody(options && options.body);
+  return db.transaction(() => {
+    if (!readOrganization(db, organizationId)) {
+      throw serviceError(404, 'ORGANIZATION_NOT_FOUND', '组织不存在。');
+    }
+    const actorUser = liveActor(db, options && options.actor);
+    const current = db.prepare(`
+      SELECT
+        authority.owner_user_id,
+        authority.version,
+        owner.username AS owner_username
+      FROM organization_authority authority
+      JOIN users owner ON owner.id=authority.owner_user_id
+      WHERE authority.org_id=?
+    `).get(organizationId);
+    if (!current) {
+      throw serviceError(409, 'COMPANY_OWNER_NOT_INITIALIZED', '请先初始化企业所有者。');
+    }
+    if (actorUser.role !== 'admin' && actorUser.id !== current.owner_user_id) {
+      throw serviceError(403, 'ORGANIZATION_OWNER_TRANSFER_FORBIDDEN', '仅平台管理员或当前企业所有者可以转移所有权。');
+    }
+    if (
+      body.expected_owner_user_id !== current.owner_user_id ||
+      body.expected_version !== current.version
+    ) {
+      throw serviceError(409, 'ORGANIZATION_OWNER_TRANSFER_STALE', '企业所有权已发生变化，请刷新后重试。');
+    }
+    if (body.new_owner_user_id === current.owner_user_id) {
+      throw serviceError(409, 'ORGANIZATION_OWNER_UNCHANGED', '新企业所有者不能与当前所有者相同。');
+    }
+    const candidate = db.prepare(`
+      SELECT user.id AS user_id,user.username,user.display_name
+      FROM organization_memberships membership
+      JOIN organization_member_policy policy
+        ON policy.org_id=membership.org_id AND policy.user_id=membership.user_id
+      JOIN users user ON user.id=membership.user_id
+      WHERE membership.org_id=? AND membership.user_id=?
+        AND membership.status='active'
+        AND policy.access_mode='read_write'
+        AND user.is_active=1
+    `).get(organizationId, body.new_owner_user_id);
+    if (!candidate) {
+      throw serviceError(409, 'COMPANY_OWNER_CANDIDATE_INELIGIBLE', '企业所有者必须是活跃且可写的本组织成员。');
+    }
+    if (body.confirmation_username !== candidate.username) {
+      throw serviceError(409, 'ORGANIZATION_OWNER_CONFIRMATION_MISMATCH', '确认账号与目标成员不一致。');
+    }
+
+    const update = db.prepare(`
+      UPDATE organization_authority
+      SET
+        owner_user_id=?,
+        updated_by=?,
+        updated_at=CURRENT_TIMESTAMP,
+        version=version+1
+      WHERE org_id=? AND owner_user_id=? AND version=?
+    `).run(
+      candidate.user_id,
+      actorUser.id,
+      organizationId,
+      body.expected_owner_user_id,
+      body.expected_version
+    );
+    if (update.changes !== 1) {
+      throw serviceError(409, 'ORGANIZATION_OWNER_TRANSFER_STALE', '企业所有权已发生变化，请刷新后重试。');
+    }
+    const nextVersion = body.expected_version + 1;
+    db.prepare('DELETE FROM sessions WHERE user_id IN (?,?)')
+      .run(current.owner_user_id, candidate.user_id);
+    persistAudit(db, {
+      actorUserId: actorUser.id,
+      action: 'organization_owner_transferred',
+      organizationId,
+      subjectUserId: candidate.user_id,
+      requestId: options && options.requestId,
+      ipAddress: options && options.ipAddress,
+      changedFields: ['company_owner', 'authority_version'],
+      before: {
+        company_owner_user_id: current.owner_user_id,
+        version: current.version
+      },
+      after: {
+        company_owner_user_id: candidate.user_id,
+        version: nextVersion
+      },
+      reason: body.reason,
+      previousOwnerUsername: current.owner_username,
+      newOwnerUsername: candidate.username
+    });
+    return {
+      changed: true,
+      organization_id: organizationId,
+      previous_owner_user_id: current.owner_user_id,
+      owner: {
+        user_id: candidate.user_id,
+        username: candidate.username,
+        display_name: candidate.display_name,
+        version: nextVersion
+      },
+      reauthentication_required:
+        actorUser.id === current.owner_user_id || actorUser.id === candidate.user_id
+    };
   }).immediate();
 }
 
@@ -716,6 +879,9 @@ function createOrganizationGovernanceService(db) {
     initializeOwner(options) {
       return initializeOwner(db, options || {});
     },
+    transferOwner(options) {
+      return transferOwner(db, options || {});
+    },
     updateMember(options) {
       return updateMember(db, options || {});
     }
@@ -726,5 +892,6 @@ module.exports = {
   OrganizationGovernanceServiceError,
   createOrganizationGovernanceService,
   validateMemberBody,
-  validateOwnerBody
+  validateOwnerBody,
+  validateOwnerTransferBody
 };

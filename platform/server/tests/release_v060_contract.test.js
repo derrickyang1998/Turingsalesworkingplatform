@@ -219,7 +219,7 @@ test('cutover uses reload-convergent Nginx verification before its public route 
   assert.doesNotMatch(publicEnablement, /expect_stylesheet\(\)/);
 });
 
-test('current deploy inventory ships schema v21 organization governance and its focused regressions', () => {
+test('current deploy inventory ships schema v22 ownership transfer and its focused regressions', () => {
   const files = powerShellArrayEntries(read('platform', 'deploy_v8.ps1'), 'FILES');
   for (const required of [
     'server/migrations/006_crm_sales_workspace.js',
@@ -237,6 +237,7 @@ test('current deploy inventory ships schema v21 organization governance and its 
     'server/migrations/019_performance_provider_collection.js',
     'server/migrations/020_organization_methodology_promotion.js',
     'server/migrations/021_organization_role_governance.js',
+    'server/migrations/022_organization_ownership_transfer.js',
     'server/services/crm_contract.js',
     'server/services/crm_customer_service.js',
     'server/services/crm_query_service.js',
@@ -282,6 +283,7 @@ test('current deploy inventory ships schema v21 organization governance and its 
     'server/tests/organization_governance_migration.test.js',
     'server/tests/organization_governance_service.test.js',
     'server/tests/organization_governance_routes.test.js',
+    'server/tests/organization_ownership_transfer_migration.test.js',
     'server/tests/youtube_data_api_client.test.js',
     'server/tests/routes_performance.test.js',
     'server/tests/performance_frontend_contract.test.js',
@@ -292,7 +294,7 @@ test('current deploy inventory ships schema v21 organization governance and its 
   }
 });
 
-test('current trusted source and sanitization contracts accept exact v1 and v6 through v21 sources', () => {
+test('current trusted source and sanitization contracts accept exact v1 and v6 through v22 sources', () => {
   const trustedManifest = JSON.parse(read(
     'platform', 'server', 'scripts', 'trusted_production_source_manifest.json'
   ));
@@ -302,14 +304,14 @@ test('current trusted source and sanitization contracts accept exact v1 and v6 t
   const trustedPaths = new Set(trustedManifest.files.map((entry) => entry.path));
 
   assert.deepEqual(trustedManifest.migrationContract, {
-    acceptedSourceVersions: [1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21],
-    targetVersion: 21,
+    acceptedSourceVersions: [1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22],
+    targetVersion: 22,
     runs: 2,
     deterministicAppendTables: ['activity_log']
   });
   assert.deepEqual(
     sanitizationManifest.exactProfiles.map((profile) => profile.schemaVersion),
-    [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]
+    [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]
   );
   for (const required of [
     'server/migrations/006_crm_sales_workspace.js',
@@ -328,6 +330,7 @@ test('current trusted source and sanitization contracts accept exact v1 and v6 t
     'server/migrations/019_performance_provider_collection.js',
     'server/migrations/020_organization_methodology_promotion.js',
     'server/migrations/021_organization_role_governance.js',
+    'server/migrations/022_organization_ownership_transfer.js',
     'server/services/crm_contract.js',
     'server/services/crm_customer_service.js',
     'server/services/crm_query_service.js',
@@ -356,12 +359,14 @@ test('v0.6 trusted bytes have exact LF rules and release records exist', () => {
     'platform/server/migrations/019_performance_provider_collection.js',
     'platform/server/migrations/020_organization_methodology_promotion.js',
     'platform/server/migrations/021_organization_role_governance.js',
+    'platform/server/migrations/022_organization_ownership_transfer.js',
     'platform/server/services/organization_methodology_service.js',
     'platform/server/services/organization_governance_service.js',
     'platform/server/routes_organization_governance.js',
     'platform/server/tests/organization_governance_migration.test.js',
     'platform/server/tests/organization_governance_service.test.js',
     'platform/server/tests/organization_governance_routes.test.js',
+    'platform/server/tests/organization_ownership_transfer_migration.test.js',
     'platform/server/tests/organization_methodology_promotion_migration.test.js',
     'platform/server/tests/organization_methodology_service.test.js',
     'platform/server/services/performance_provider_collection_service.js',
@@ -404,7 +409,7 @@ test('v0.6 release records match the trusted-source and parser self-test contrac
     'archive', 'versions', '2026-08-11-v0.6.0-crm-sales-workspace.md'
   );
 
-  assert.equal(trustedManifest.files.length, 64);
+  assert.equal(trustedManifest.files.length, 65);
   assert.equal(parserManifest.required_self_tests.length, 21);
   assert.match(versionRecord, /Trusted source: 49 SHA-256-pinned files/);
   assert.match(archiveRecord, /trusted-source manifest now pins 49 files/i);

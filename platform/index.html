@@ -48,6 +48,12 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);letter-spaci
 .tm-member-access-control{display:grid;grid-template-columns:minmax(112px,1fr) minmax(90px,.8fr) auto;gap:6px;align-items:center;min-width:330px}
 .tm-member-access-control select{font-size:11px;padding:6px 8px;min-width:0}
 .tm-member-access-note{font-size:11px;color:#666;line-height:1.45}
+.tm-owner-transfer-summary{display:grid;grid-template-columns:1fr auto 1fr;gap:10px;align-items:center;padding:12px;border:1px solid var(--border);border-radius:8px;background:#fafaf9;margin-bottom:16px}
+.tm-owner-transfer-person{min-width:0}
+.tm-owner-transfer-person strong,.tm-owner-transfer-person span{display:block;overflow-wrap:anywhere}
+.tm-owner-transfer-person span{font-size:11px;color:#777;margin-top:2px}
+.tm-owner-transfer-arrow{font-size:18px;color:#777}
+.tm-owner-transfer-warning{padding:10px 12px;border-left:3px solid var(--red);background:#fff7f6;color:#7a2925;font-size:12px;line-height:1.5;margin-bottom:14px}
 .sidebar-footer{padding:12px 20px;font-size:10px;opacity:.4;margin-top:auto;border-top:1px solid var(--border)}
 main{flex:1;overflow-y:auto;padding:32px 36px}
 .page{display:none}
@@ -1918,6 +1924,30 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
 </div>
 </div>
 </main>
+</div>
+
+<!-- Organization Ownership Transfer Modal -->
+<div class="modal-overlay" id="ad_ownerTransferOverlay" style="display:none" hidden inert aria-hidden="true" onclick="if(event.target===this)closeAdminOrganizationOwnerTransfer()">
+  <div class="modal" id="ad_ownerTransferDialog" role="dialog" aria-modal="true" aria-labelledby="ad_ownerTransferTitle" onclick="event.stopPropagation()" style="width:min(520px,92vw)">
+    <button type="button" class="modal-close" aria-label="关闭所有权转移" title="关闭所有权转移" onclick="closeAdminOrganizationOwnerTransfer()">&times;</button>
+    <h3 id="ad_ownerTransferTitle">转移企业所有权</h3>
+    <p class="tm-member-access-note" style="margin:-8px 0 12px">当前组织：<strong id="ad_ownerTransferOrganization">-</strong></p>
+    <div class="tm-owner-transfer-summary">
+      <div class="tm-owner-transfer-person"><span>当前所有者</span><strong id="ad_ownerTransferCurrentOwner">-</strong></div>
+      <span class="tm-owner-transfer-arrow" aria-hidden="true">→</span>
+      <div class="tm-owner-transfer-person"><span>新所有者</span><strong id="ad_ownerTransferTarget">-</strong></div>
+    </div>
+    <div class="tm-owner-transfer-warning">转移后，原所有者与新所有者的全部登录会话都会失效。原所有者仍保留现有组织成员角色。</div>
+    <label for="ad_ownerTransferReason">转移原因</label>
+    <textarea id="ad_ownerTransferReason" rows="3" maxlength="500" placeholder="请说明职责交接原因（至少 8 个字符）" oninput="updateAdminOrganizationOwnerTransferSubmit()"></textarea>
+    <label for="ad_ownerTransferConfirmation" style="margin-top:12px">输入目标账号以确认</label>
+    <input id="ad_ownerTransferConfirmation" autocomplete="off" spellcheck="false" oninput="updateAdminOrganizationOwnerTransferSubmit()">
+    <div id="ad_ownerTransferStatus" role="status" aria-live="polite" style="min-height:20px;margin-top:8px;font-size:11px;color:#666"></div>
+    <div class="btn-group" style="justify-content:flex-end">
+      <button type="button" class="btn btn-sm btn-outline" onclick="closeAdminOrganizationOwnerTransfer()">取消</button>
+      <button type="button" class="btn btn-sm btn-danger" id="ad_ownerTransferSubmit" onclick="submitAdminOrganizationOwnerTransfer()" disabled>确认转移</button>
+    </div>
+  </div>
 </div>
 
 <!-- Influencer Upload Modal -->

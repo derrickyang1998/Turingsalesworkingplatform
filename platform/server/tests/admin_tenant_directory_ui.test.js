@@ -82,7 +82,16 @@ test('existing admin control room exposes the organization directory as a routed
     'ad_organizationPageLabel',
     'ad_organizationMemberPrevious',
     'ad_organizationMemberNext',
-    'ad_organizationMemberPageLabel'
+    'ad_organizationMemberPageLabel',
+    'ad_ownerTransferOverlay',
+    'ad_ownerTransferDialog',
+    'ad_ownerTransferOrganization',
+    'ad_ownerTransferCurrentOwner',
+    'ad_ownerTransferTarget',
+    'ad_ownerTransferReason',
+    'ad_ownerTransferConfirmation',
+    'ad_ownerTransferSubmit',
+    'ad_ownerTransferStatus'
   ]) {
     assert.match(indexSource, new RegExp(`id=["']${id}["']`));
   }
@@ -595,7 +604,12 @@ test('organization governance renders authoritative roles and persists only serv
     access_mode: 'read_write',
     effective_role: 'manager',
     is_company_owner: false,
-    allowed_actions: { change_role: true, change_status: true, initialize_owner: false },
+    allowed_actions: {
+      change_role: true,
+      change_status: true,
+      initialize_owner: false,
+      transfer_owner: true
+    },
     teams: [{ id: 101, code: 'sales', name: 'Sales <A>', role_code: 'team_lead', status: 'active' }]
   }, {
     user_id: 1,
@@ -608,7 +622,12 @@ test('organization governance renders authoritative roles and persists only serv
     access_mode: 'read_write',
     effective_role: 'company_owner',
     is_company_owner: true,
-    allowed_actions: { change_role: false, change_status: false, initialize_owner: false },
+    allowed_actions: {
+      change_role: false,
+      change_status: false,
+      initialize_owner: false,
+      transfer_owner: false
+    },
     teams: []
   }]);
 
@@ -618,6 +637,7 @@ test('organization governance renders authoritative roles and persists only serv
   assert.match(elements.ad_organizationMembers.innerHTML, /id="ad_memberRole_2"/);
   assert.match(elements.ad_organizationMembers.innerHTML, />经理<\/option>/);
   assert.match(elements.ad_organizationMembers.innerHTML, /企业所有者/);
+  assert.match(elements.ad_organizationMembers.innerHTML, /openAdminOrganizationOwnerTransfer\(2\)/);
   assert.doesNotMatch(elements.ad_organizationMembers.innerHTML, /id="ad_memberRole_1"/);
 
   await context.saveAdminOrganizationMember(2);
@@ -629,6 +649,150 @@ test('organization governance renders authoritative roles and persists only serv
     membership_status: 'active'
   });
   assert.equal(refreshes, 1);
+});
+
+test('ownership transfer confirmation posts the authority snapshot and handles self-transfer reauthentication', async () => {
+  const elements = {
+    ad_ownerTransferReason: { value: 'Transfer regional operating responsibility' },
+    ad_ownerTransferConfirmation: { value: 'administrator' },
+    ad_ownerTransferSubmit: { disabled: true },
+    ad_ownerTransferStatus: { textContent: '' }
+  };
+  const calls = [];
+  const messages = [];
+  let closed = 0;
+  let reauthenticated = 0;
+  const context = loadFunctions({
+    adminOwnerTransferSnapshot: {
+      organizationId: 20,
+      expectedOwnerUserId: 2,
+      expectedVersion: 1,
+      targetUserId: 3,
+      targetUsername: 'administrator'
+    },
+    adminOwnerTransferSubmitting: false,
+    CURRENT_USER: { id: 2, role: 'user' },
+    document: { getElementById(id) { return elements[id] || null; } },
+    Promise,
+    Error,
+    JSON,
+    String,
+    Number,
+    toast(message) { messages.push(message); },
+    closeAdminOrganizationOwnerTransfer() { closed += 1; },
+    handleAuthExpired() { reauthenticated += 1; },
+    loadAdminOrganizations() { throw new Error('self-transfer must not refresh with a revoked session'); },
+    apiFetch(url, options) {
+      calls.push({ url, options });
+      return Promise.resolve(response(200, {
+        success: true,
+        transfer: {
+          changed: true,
+          organization_id: 20,
+          previous_owner_user_id: 2,
+          owner: {
+            user_id: 3,
+            username: 'administrator',
+            display_name: 'Organization Admin',
+            version: 2
+          },
+          reauthentication_required: true
+        }
+      }));
+    }
+  }, [
+    'updateAdminOrganizationOwnerTransferSubmit',
+    'submitAdminOrganizationOwnerTransfer'
+  ]);
+
+  assert.equal(context.updateAdminOrganizationOwnerTransferSubmit(), true);
+  assert.equal(elements.ad_ownerTransferSubmit.disabled, false);
+  const result = await context.submitAdminOrganizationOwnerTransfer();
+  assert.equal(result, true);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, '/organization-governance/organizations/20/owner/transfer');
+  assert.equal(calls[0].options.method, 'POST');
+  assert.deepEqual(JSON.parse(calls[0].options.body), {
+    new_owner_user_id: 3,
+    expected_owner_user_id: 2,
+    expected_version: 1,
+    confirmation_username: 'administrator',
+    reason: 'Transfer regional operating responsibility'
+  });
+  assert.equal(closed, 1);
+  assert.equal(reauthenticated, 1);
+  assert.deepEqual(messages, ['企业所有权已转移']);
+});
+
+test('platform-admin ownership transfer refreshes the organization projection without forcing reauthentication', async () => {
+  const elements = {
+    ad_ownerTransferReason: { value: 'Transfer regional operating responsibility' },
+    ad_ownerTransferConfirmation: { value: 'administrator' },
+    ad_ownerTransferSubmit: { disabled: true },
+    ad_ownerTransferStatus: { textContent: '' }
+  };
+  let refreshes = 0;
+  let reauthenticated = 0;
+  const context = loadFunctions({
+    adminOwnerTransferSnapshot: {
+      organizationId: 20,
+      expectedOwnerUserId: 2,
+      expectedVersion: 1,
+      targetUserId: 3,
+      targetUsername: 'administrator'
+    },
+    adminOwnerTransferSubmitting: false,
+    document: { getElementById(id) { return elements[id] || null; } },
+    Promise,
+    Error,
+    JSON,
+    String,
+    Number,
+    toast() {},
+    closeAdminOrganizationOwnerTransfer() {},
+    handleAuthExpired() { reauthenticated += 1; },
+    async loadAdminOrganizations() { refreshes += 1; },
+    apiFetch() {
+      return Promise.resolve(response(200, {
+        success: true,
+        transfer: { reauthentication_required: false }
+      }));
+    }
+  }, [
+    'updateAdminOrganizationOwnerTransferSubmit',
+    'submitAdminOrganizationOwnerTransfer'
+  ]);
+
+  assert.equal(await context.submitAdminOrganizationOwnerTransfer(), true);
+  assert.equal(refreshes, 1);
+  assert.equal(reauthenticated, 0);
+});
+
+test('ownership transfer confirmation remains disabled until reason and exact username are present', () => {
+  const elements = {
+    ad_ownerTransferReason: { value: 'short' },
+    ad_ownerTransferConfirmation: { value: 'administrator ' },
+    ad_ownerTransferSubmit: { disabled: false },
+    ad_ownerTransferStatus: { textContent: '' }
+  };
+  const context = loadFunctions({
+    adminOwnerTransferSnapshot: { targetUsername: 'administrator' },
+    adminOwnerTransferSubmitting: false,
+    document: { getElementById(id) { return elements[id] || null; } },
+    String
+  }, ['updateAdminOrganizationOwnerTransferSubmit']);
+
+  assert.equal(context.updateAdminOrganizationOwnerTransferSubmit(), false);
+  assert.equal(elements.ad_ownerTransferSubmit.disabled, true);
+  assert.match(elements.ad_ownerTransferStatus.textContent, /至少 8 个字符/);
+
+  elements.ad_ownerTransferReason.value = 'Transfer operating responsibility';
+  assert.equal(context.updateAdminOrganizationOwnerTransferSubmit(), false);
+  assert.match(elements.ad_ownerTransferStatus.textContent, /完整输入目标账号/);
+
+  elements.ad_ownerTransferConfirmation.value = 'administrator';
+  assert.equal(context.updateAdminOrganizationOwnerTransferSubmit(), true);
+  assert.equal(elements.ad_ownerTransferSubmit.disabled, false);
 });
 
 test('failed organization governance writes keep the current member projection on screen', async () => {

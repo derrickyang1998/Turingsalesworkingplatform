@@ -10129,6 +10129,9 @@ function adminUserPreviousPage() {
 }
 var adminSelectedOrganizationId = null;
 var adminOrganizationsById = {};
+var adminOrganizationMembersById = {};
+var adminOwnerTransferSnapshot = null;
+var adminOwnerTransferSubmitting = false;
 var adminOrganizationLoadSequence = 0;
 var adminOrganizationMemberLoadSequence = 0;
 var adminOrganizationPageCursors = [null];
@@ -10212,10 +10215,14 @@ function effectiveAdminOrganizationMemberRole(member) {
 function renderAdminOrganizationMembers(members) {
   var container = document.getElementById('ad_organizationMembers');
   if (!container) return;
+  adminOrganizationMembersById = {};
   if (!members.length) {
     container.innerHTML = '<p style="font-size:12px;opacity:.55">暂无匹配成员</p>';
     return;
   }
+  members.forEach(function(member) {
+    adminOrganizationMembersById[String(member.user_id)] = member;
+  });
   container.innerHTML = '<table><thead><tr><th>成员</th><th>部门</th><th>当前角色</th><th>状态</th><th>团队归属</th><th>成员权限</th></tr></thead><tbody>'
     + members.map(function(member) {
       var teams = Array.isArray(member.teams) && member.teams.length
@@ -10239,7 +10246,7 @@ function renderAdminOrganizationMembers(members) {
         + '<option value="revoked"' + (!active ? ' selected' : '') + '>已撤销</option>';
       var accessControl;
       if (member.is_company_owner === true || role === 'company_owner') {
-        accessControl = '<div class="tm-member-access-note"><strong>企业所有者</strong><br>企业所有者不可在此变更。本版本暂不支持所有权转移。</div>';
+        accessControl = '<div class="tm-member-access-note"><strong>企业所有者</strong><br>如需交接，请在新所有者所在行发起转移。</div>';
       } else if (safeUserId && (allowed.change_role || allowed.change_status)) {
         accessControl = '<div class="tm-member-access-control">'
           + '<select id="ad_memberRole_' + safeUserId + '" aria-label="成员角色"' + (allowed.change_role ? '' : ' disabled') + '>' + roleOptions + '</select>'
@@ -10251,6 +10258,9 @@ function renderAdminOrganizationMembers(members) {
       }
       if (safeUserId && allowed.initialize_owner) {
         accessControl += '<div style="margin-top:6px"><button type="button" class="btn btn-xs btn-outline" onclick="initializeAdminOrganizationOwner(' + safeUserId + ')">设为企业所有者</button></div>';
+      }
+      if (safeUserId && allowed.transfer_owner) {
+        accessControl += '<div style="margin-top:6px"><button type="button" class="btn btn-xs btn-danger" onclick="openAdminOrganizationOwnerTransfer(' + safeUserId + ')">转移所有权</button></div>';
       }
       return '<tr><td><strong>' + esc(member.display_name || member.username || '-') + '</strong><div style="font-size:11px;opacity:.55">' + esc(member.username || '-') + '</div></td>'
         + '<td>' + esc(member.department || '-') + '</td>'
@@ -10302,6 +10312,141 @@ async function initializeAdminOrganizationOwner(userId) {
     return true;
   } catch (error) {
     toast(error.message || '企业所有者设置失败', 'error');
+    return false;
+  }
+}
+function openAdminOrganizationOwnerTransfer(userId) {
+  var organizationId = Number(adminSelectedOrganizationId);
+  var parsedUserId = Number(userId);
+  var organization = adminOrganizationsById[String(organizationId)];
+  var target = adminOrganizationMembersById[String(parsedUserId)];
+  var owner = organization && organization.company_owner;
+  var allowed = target && target.allowed_actions;
+  if (
+    !Number.isSafeInteger(organizationId) || organizationId < 1 ||
+    !Number.isSafeInteger(parsedUserId) || parsedUserId < 1 ||
+    !organization || !owner || !Number.isSafeInteger(Number(owner.user_id)) ||
+    !Number.isSafeInteger(Number(owner.version)) || Number(owner.version) < 1 ||
+    !target || !allowed || allowed.transfer_owner !== true
+  ) {
+    toast('当前成员不可接收企业所有权，请刷新后重试', 'error');
+    return false;
+  }
+  adminOwnerTransferSnapshot = {
+    organizationId: organizationId,
+    expectedOwnerUserId: Number(owner.user_id),
+    expectedVersion: Number(owner.version),
+    targetUserId: parsedUserId,
+    targetUsername: String(target.username || '')
+  };
+  adminOwnerTransferSubmitting = false;
+  var overlay = document.getElementById('ad_ownerTransferOverlay');
+  var dialog = document.getElementById('ad_ownerTransferDialog');
+  var organizationName = document.getElementById('ad_ownerTransferOrganization');
+  var currentOwner = document.getElementById('ad_ownerTransferCurrentOwner');
+  var targetOwner = document.getElementById('ad_ownerTransferTarget');
+  var reason = document.getElementById('ad_ownerTransferReason');
+  var confirmation = document.getElementById('ad_ownerTransferConfirmation');
+  var status = document.getElementById('ad_ownerTransferStatus');
+  if (!overlay || !dialog || !reason || !confirmation) return false;
+  if (organizationName) organizationName.textContent = organization.name || organization.code || '-';
+  if (currentOwner) {
+    currentOwner.textContent = (owner.display_name || owner.username || '-') + ' · ' + (owner.username || '-');
+  }
+  if (targetOwner) {
+    targetOwner.textContent = (target.display_name || target.username || '-') + ' · ' + (target.username || '-');
+  }
+  reason.value = '';
+  confirmation.value = '';
+  confirmation.placeholder = '请输入 ' + adminOwnerTransferSnapshot.targetUsername;
+  if (status) status.textContent = '填写原因并完整输入目标账号后可确认。';
+  overlay.hidden = false;
+  overlay.inert = false;
+  overlay.setAttribute('aria-hidden', 'false');
+  overlay.style.display = 'flex';
+  updateAdminOrganizationOwnerTransferSubmit();
+  var opener = document.activeElement;
+  if (window.TMAccessibility) {
+    window.TMAccessibility.openDialog(dialog, opener, closeAdminOrganizationOwnerTransfer);
+  } else {
+    dialog.setAttribute('tabindex', '-1');
+    dialog.focus();
+  }
+  return true;
+}
+function closeAdminOrganizationOwnerTransfer(force) {
+  if (adminOwnerTransferSubmitting && force !== true) return false;
+  var overlay = document.getElementById('ad_ownerTransferOverlay');
+  var dialog = document.getElementById('ad_ownerTransferDialog');
+  if (dialog && window.TMAccessibility) window.TMAccessibility.closeDialog(dialog);
+  if (overlay) {
+    overlay.style.display = 'none';
+    overlay.hidden = true;
+    overlay.inert = true;
+    overlay.setAttribute('aria-hidden', 'true');
+  }
+  adminOwnerTransferSnapshot = null;
+  adminOwnerTransferSubmitting = false;
+  return true;
+}
+function updateAdminOrganizationOwnerTransferSubmit() {
+  var reason = document.getElementById('ad_ownerTransferReason');
+  var confirmation = document.getElementById('ad_ownerTransferConfirmation');
+  var submit = document.getElementById('ad_ownerTransferSubmit');
+  var status = document.getElementById('ad_ownerTransferStatus');
+  var snapshot = adminOwnerTransferSnapshot;
+  var reasonValue = reason ? String(reason.value || '').trim() : '';
+  var confirmationValue = confirmation ? String(confirmation.value || '') : '';
+  var reasonLength = Array.from(reasonValue).length;
+  var validReason = reasonLength >= 8 && reasonLength <= 500 && !/[\u0000-\u001f\u007f]/.test(reasonValue);
+  var validConfirmation = !!snapshot && confirmationValue === snapshot.targetUsername;
+  var valid = !adminOwnerTransferSubmitting && validReason && validConfirmation;
+  if (submit) submit.disabled = !valid;
+  if (status && !adminOwnerTransferSubmitting) {
+    if (!validReason) status.textContent = '转移原因至少 8 个字符，且不能包含控制字符。';
+    else if (!validConfirmation) status.textContent = '请完整输入目标账号 ' + (snapshot ? snapshot.targetUsername : '') + '。';
+    else status.textContent = '确认后，双方登录会话将立即失效。';
+  }
+  return valid;
+}
+async function submitAdminOrganizationOwnerTransfer() {
+  if (!updateAdminOrganizationOwnerTransferSubmit()) return false;
+  var snapshot = adminOwnerTransferSnapshot;
+  var reason = document.getElementById('ad_ownerTransferReason');
+  var confirmation = document.getElementById('ad_ownerTransferConfirmation');
+  var submit = document.getElementById('ad_ownerTransferSubmit');
+  var status = document.getElementById('ad_ownerTransferStatus');
+  if (!snapshot || !reason || !confirmation) return false;
+  adminOwnerTransferSubmitting = true;
+  if (submit) submit.disabled = true;
+  if (status) status.textContent = '正在转移企业所有权...';
+  try {
+    var response = await apiFetch('/organization-governance/organizations/' + snapshot.organizationId + '/owner/transfer', {
+      method: 'POST',
+      body: JSON.stringify({
+        new_owner_user_id: snapshot.targetUserId,
+        expected_owner_user_id: snapshot.expectedOwnerUserId,
+        expected_version: snapshot.expectedVersion,
+        confirmation_username: String(confirmation.value || ''),
+        reason: String(reason.value || '').trim()
+      })
+    });
+    var data = await response.json();
+    if (!response.ok) throw new Error(data.error || '企业所有权转移失败');
+    var transfer = data && data.transfer ? data.transfer : {};
+    closeAdminOrganizationOwnerTransfer(true);
+    toast('企业所有权已转移');
+    if (transfer.reauthentication_required === true) {
+      handleAuthExpired('企业所有权已转移，请重新登录以刷新权限。');
+      return true;
+    }
+    await loadAdminOrganizations();
+    return true;
+  } catch (error) {
+    adminOwnerTransferSubmitting = false;
+    updateAdminOrganizationOwnerTransferSubmit();
+    if (status) status.textContent = error.message || '企业所有权转移失败';
+    toast(error.message || '企业所有权转移失败', 'error');
     return false;
   }
 }
@@ -14623,7 +14768,7 @@ function switchPage(id, options) {
     'toggleAll', 'syncInfluencerSelectionState', 'loadM4Campaigns', 'changeM4CampaignContext', 'openM4CampaignCloseoutReview', 'closeM4CampaignCloseoutReview', 'submitM4CampaignCloseoutReview', 'startCollab', 'submitCollabOrder', 'closeCollabOrderModal', 'loadCollaborations', 'updateCollabStatus', 'runCampaignCollabAction', 'closeCampaignContractConfirmationModal', 'submitCampaignContractConfirmation', 'closeCampaignContentReviewModal', 'submitCampaignContentReview', 'closeCampaignContentReviewDecisionModal', 'submitCampaignContentReviewDecision', 'renderCampaignPublicationRows', 'syncCampaignPublicationDraftRows', 'addCampaignPublicationRow', 'removeCampaignPublicationRow', 'openCampaignPublicationModal', 'closeCampaignPublicationModal', 'submitCampaignPublicationConfirmation', 'openCollaborationPerformanceTracking', 'openCampaignPublicationHistoryModal', 'loadCampaignPublicationHistoryPage', 'openCampaignPaymentModal', 'closeCampaignPaymentModal', 'submitCampaignPayment', 'voidCampaignPayment', 'closeCampaignSettlementModal', 'submitCampaignSettlement', 'openCampaignSettlementDecisionModal', 'closeCampaignSettlementDecisionModal', 'submitCampaignSettlementDecision',
     'initPerformanceMonitor', 'initPerformanceDashboard', 'refreshPerformanceMonitor', 'refreshPerformanceDashboard', 'changePerformanceCampaignContext', 'handlePerformanceTopMetricChange', 'refreshPerformanceReviewEvidence', 'generatePerformanceAiReviewDraft', 'loadPerformanceContents', 'loadPerformanceFreshnessQueue', 'openPerformanceFreshnessInput', 'refreshPerformanceUpdateStatus', 'runPerformanceProviderRefresh', 'loadPerformanceIntegrationPreview', 'loadPerformanceFeishuConnection', 'savePerformanceFeishuConnectionDraft', 'approvePerformanceFeishuConnectionDraft', 'downloadPerformanceFeishuSnapshot', 'createPerformanceContent', 'downloadPerformanceTemplate', 'handlePerformanceImport', 'handlePerformanceDrop', 'downloadPerformanceMetricsTemplate', 'handlePerformanceMetricsImport', 'handlePerformanceMetricsDrop', 'openPerformanceInputModal', 'closePerformanceInputModal', 'savePerformanceInput', 'loadPerformanceDashboard', 'loadPerformanceReviewEvidence', 'debouncedPerformanceContentSearch', 'exportPerformanceContents',
     'sendChat', 'clearChat', 'clearAIMemory', 'pushToFeishu', 'loadFeishuStatus', 'loadFeishuOutbox', 'testFeishuConnection', 'selectFeishuReconciliationDelivery', 'reconcileFeishuDelivery', 'selectFeishuRetryDelivery', 'retryFeishuDelivery',
-    'switchAdminTab', 'loadAdminDashboard', 'loadAdminUsers', 'adminUserNextPage', 'adminUserPreviousPage', 'loadAdminOrganizations', 'selectAdminOrganization', 'loadAdminOrganizationMembers', 'adminOrganizationNextPage', 'adminOrganizationPreviousPage', 'adminOrganizationMemberNextPage', 'adminOrganizationMemberPreviousPage', 'saveAdminOrganizationMember', 'initializeAdminOrganizationOwner', 'adminAddUser', 'adminCreateInvite', 'adminResetPw',
+    'switchAdminTab', 'loadAdminDashboard', 'loadAdminUsers', 'adminUserNextPage', 'adminUserPreviousPage', 'loadAdminOrganizations', 'selectAdminOrganization', 'loadAdminOrganizationMembers', 'adminOrganizationNextPage', 'adminOrganizationPreviousPage', 'adminOrganizationMemberNextPage', 'adminOrganizationMemberPreviousPage', 'saveAdminOrganizationMember', 'initializeAdminOrganizationOwner', 'openAdminOrganizationOwnerTransfer', 'closeAdminOrganizationOwnerTransfer', 'updateAdminOrganizationOwnerTransferSubmit', 'submitAdminOrganizationOwnerTransfer', 'adminAddUser', 'adminCreateInvite', 'adminResetPw',
     'wfUndo', 'wfRedo', 'wfClearCanvas', 'wfSaveTemplate', 'wfPublishTemplate', 'wfResetTaskFilters', 'wfLoadTasks', 'wfLoadInstances',
     'showRelatedBrands', 'closeBrandRelModal'
   ];

@@ -5,7 +5,8 @@ const {
   OrganizationGovernanceServiceError,
   createOrganizationGovernanceService,
   validateMemberBody,
-  validateOwnerBody
+  validateOwnerBody,
+  validateOwnerTransferBody
 } = require('./services/organization_governance_service');
 
 function requestId(request) {
@@ -105,6 +106,25 @@ function registerOrganizationGovernanceRoutes(app, db, options = {}) {
           body
         });
         return response.json({ success: true, request_id: id });
+      } catch (error) {
+        return sendError(response, id, error);
+      }
+    }
+  );
+
+  app.post(
+    '/api/organization-governance/organizations/:organizationId/owner/transfer',
+    authMiddleware,
+    (request, response) => {
+      const id = requestId(request);
+      try {
+        const body = validateOwnerTransferBody(request.body);
+        const transfer = service.transferOwner({
+          ...inputContext(request, id),
+          organizationId: request.params.organizationId,
+          body
+        });
+        return response.json({ success: true, transfer, request_id: id });
       } catch (error) {
         return sendError(response, id, error);
       }

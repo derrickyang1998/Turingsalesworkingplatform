@@ -33,10 +33,10 @@ $EXPECTED_PPT_SHA256 = "f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57
 $TRUSTED_SOURCE_GATE_RELATIVE_PATH = "server\scripts\trusted_production_source_gate.js"
 $TRUSTED_SOURCE_MANIFEST_RELATIVE_PATH = "server\scripts\trusted_production_source_manifest.json"
 $TRUSTED_RUNTIME_CONFIG_RELATIVE_PATH = "server\config\runtime_config.js"
-$EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "09fe1a37c361ef57b3a89f5fe8d6e09d8893fbe6227c96fc594eae35b2accd67"
-$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "5f962c8f0ea8b2af310e7453aea75658dc18db1a52e040b0c899add85925550e"
+$EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "572bbe86e1528b64c17a855c51001984391a6c4f836ead2668d63c66fb58826d"
+$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "0f6db333b2c252443da3730dcb9a0a118e44ba8656c5bbe4edeca3b5214f6418"
 $EXPECTED_TRUSTED_RUNTIME_CONFIG_SHA256 = "76d43d3e811c6fa8daae987cc9eb2fff2dc8a8095f84b1cd309e4e214df94dcb"
-$EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256 = "44c1b5cd46b65f0bdc09107a6fc94cfd6cba6e44e9f31ad0c65c82dbef8d284b"
+$EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256 = "dec577e3ac91848fa875425d2dc3277c7589b9fe11a43f6dccb75f0584a6dbb4"
 $EXPECTED_TRUSTED_PARSER_VERIFIER_SHA256 = "7f9efaac02675b21e025891a400474cc7481c1adaf58c88bd8b356d5276f2eaa"
 $EXPECTED_TRUSTED_PUBLIC_GUARD_SHA256 = "d45fe8fcc01587aaa0e73eccfb9714c27801e232cb6c0effd6daedb703316d66"
 $EXPECTED_TRUSTED_MIGRATION_CLEANUP_HELPER_SHA256 = "d5f2befa902522dd9de3e9dd2397a99ee5e78ab1a1c6e526a27f14bb2829e1fa"
@@ -121,6 +121,7 @@ $FILES = @(
     "server\migrations\019_performance_provider_collection.js",
     "server\migrations\020_organization_methodology_promotion.js",
     "server\migrations\021_organization_role_governance.js",
+    "server\migrations\022_organization_ownership_transfer.js",
     "server\migrations\baselines\legacy_v1.js",
     "server\migrations\engines\v1.js",
     "server\migrations\vendor\bcryptjs_v3_0_3.js",
@@ -322,6 +323,7 @@ $FILES = @(
     "server\tests\organization_governance_migration.test.js",
     "server\tests\organization_governance_service.test.js",
     "server\tests\organization_governance_routes.test.js",
+    "server\tests\organization_ownership_transfer_migration.test.js",
     "server\tests\routes_performance.test.js",
     "server\tests\phase4_nginx_ingress.test.js",
     "server\tests\phase4_request_pipeline.test.js",
