@@ -159,6 +159,20 @@ function readAdminResetAudits(dbPath) {
   }
 }
 
+function readActivityAudits(dbPath, action) {
+  const db = new Database(dbPath, { readonly: true });
+  try {
+    return db.prepare(`
+      SELECT user_id, action, module, details, ip_address
+      FROM activity_log
+      WHERE action = ?
+      ORDER BY id
+    `).all(action);
+  } finally {
+    db.close();
+  }
+}
+
 function readUserByUsername(dbPath, username) {
   const db = new Database(dbPath, { readonly: true });
   try {
@@ -741,6 +755,160 @@ test('admin reset route rejects weak passwords, revokes the old token, supports 
     }
 
     if (failures.length) assert.fail(failures.join('\n'));
+  } finally {
+    await stopChild(child);
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('admin reset route protects platform administrators and current company owners without mutating credentials or sessions', { timeout: 30000 }, async () => {
+  const port = await reservePort();
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-protected-account-reset-'));
+  const dbPath = path.join(tempDir, 'test.db');
+  const outputChunks = [];
+  const adminPassword = 'AdminTest1!Secure';
+  const peerAdminPassword = 'PeerAdmin1!Secure';
+  const memberPassword = 'OwnerMember1!Secure';
+  const formerOwnerPassword = 'FormerOwner2!Secure';
+  const child = spawn(process.execPath, [serverEntry], {
+    cwd: platformRoot,
+    env: credentialServerEnv(tempDir, {
+      NODE_ENV: 'test',
+      PORT: String(port),
+      DB_PATH: dbPath,
+      JWT_SECRET: TEST_JWT_SECRET,
+      DEFAULT_ADMIN_USERNAME: 'admin',
+      DEFAULT_ADMIN_PASSWORD: adminPassword,
+      USER_PASSWORD_ZHANGWEI: memberPassword
+    }),
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+  child.stdout.on('data', (chunk) => outputChunks.push(chunk.toString()));
+  child.stderr.on('data', (chunk) => outputChunks.push(chunk.toString()));
+
+  try {
+    const baseUrl = `http://127.0.0.1:${port}`;
+    await waitForHealth(baseUrl, child, () => outputChunks.join(''));
+    const adminLogin = await jsonRequest(baseUrl, '/api/auth/login', {
+      method: 'POST',
+      body: { username: 'admin', password: adminPassword }
+    });
+    assert.equal(adminLogin.status, 200, adminLogin.text);
+    const adminId = adminLogin.body.user.id;
+    const adminToken = adminLogin.body.token;
+
+    const peerAdminCreate = await jsonRequest(baseUrl, '/api/admin/users', {
+      method: 'POST',
+      token: adminToken,
+      body: {
+        username: 'peer-reset-admin',
+        display_name: 'Peer Reset Admin',
+        role: 'admin',
+        password: peerAdminPassword
+      }
+    });
+    assert.equal(peerAdminCreate.status, 200, peerAdminCreate.text);
+    const peerAdminLogin = await jsonRequest(baseUrl, '/api/auth/login', {
+      method: 'POST',
+      body: { username: 'peer-reset-admin', password: peerAdminPassword }
+    });
+    assert.equal(peerAdminLogin.status, 200, peerAdminLogin.text);
+    const memberLogin = await jsonRequest(baseUrl, '/api/auth/login', {
+      method: 'POST',
+      body: { username: 'zhangwei', password: memberPassword }
+    });
+    assert.equal(memberLogin.status, 200, memberLogin.text);
+
+    const peerAdminId = peerAdminLogin.body.user.id;
+    const memberId = memberLogin.body.user.id;
+    const ownershipDb = new Database(dbPath);
+    try {
+      ownershipDb.prepare(`
+        UPDATE organization_authority
+        SET owner_user_id=?,updated_by=?,updated_at=datetime(updated_at,'+1 second'),version=version+1
+      `).run(memberId, adminId);
+    } finally {
+      ownershipDb.close();
+    }
+
+    const before = {
+      admin: readUserByUsername(dbPath, 'admin'),
+      peerAdmin: readUserByUsername(dbPath, 'peer-reset-admin'),
+      owner: readUserByUsername(dbPath, 'zhangwei'),
+      adminSessions: readUserSessionCount(dbPath, adminId),
+      peerAdminSessions: readUserSessionCount(dbPath, peerAdminId),
+      ownerSessions: readUserSessionCount(dbPath, memberId)
+    };
+    const protectedCases = [
+      ['self platform administrator', adminId, null],
+      ['peer platform administrator', peerAdminId, 'PeerReplacement2!Secure'],
+      ['company owner', memberId, 'OwnerReplacement2!Secure']
+    ];
+    for (const [label, targetId, password] of protectedCases) {
+      const requestOptions = {
+        method: 'POST',
+        token: adminToken
+      };
+      if (password !== null) requestOptions.body = { password };
+      const rejected = await jsonRequest(baseUrl, `/api/admin/users/reset-password/${targetId}`, requestOptions);
+      assert.equal(rejected.status, 409, `${label}: ${rejected.text}`);
+      assert.equal(rejected.body.code, 'PROTECTED_ACCOUNT_RESET_REQUIRES_BREAK_GLASS', label);
+      if (password !== null) assert.equal(JSON.stringify(rejected.body).includes(password), false, label);
+    }
+
+    assert.equal(readUserByUsername(dbPath, 'admin').password_hash, before.admin.password_hash);
+    assert.equal(readUserByUsername(dbPath, 'peer-reset-admin').password_hash, before.peerAdmin.password_hash);
+    assert.equal(readUserByUsername(dbPath, 'zhangwei').password_hash, before.owner.password_hash);
+    assert.equal(readUserSessionCount(dbPath, adminId), before.adminSessions);
+    assert.equal(readUserSessionCount(dbPath, peerAdminId), before.peerAdminSessions);
+    assert.equal(readUserSessionCount(dbPath, memberId), before.ownerSessions);
+    assert.equal(readAdminResetAudits(dbPath).length, 0);
+    assert.equal(readActivityAudits(dbPath, 'credential_rotation').length, 0);
+    const deniedAudits = readActivityAudits(dbPath, 'admin_reset_password_denied');
+    assert.equal(deniedAudits.length, 3);
+    deniedAudits.forEach(function(audit) {
+      assert.equal(audit.user_id, adminId);
+      assert.equal(audit.module, 'security');
+      const details = JSON.parse(audit.details);
+      assert.equal(details.actorUserId, adminId);
+      assert.equal([adminId, peerAdminId, memberId].includes(details.targetUserId), true);
+      assert.equal(details.reasonCode, 'PROTECTED_ACCOUNT_RESET_REQUIRES_BREAK_GLASS');
+      assertNoSecretLeak(details, protectedCases.map((item) => item[2]));
+    });
+
+    const restoreDb = new Database(dbPath);
+    try {
+      restoreDb.prepare(`
+        UPDATE organization_authority
+        SET owner_user_id=?,updated_by=?,updated_at=datetime(updated_at,'+1 second'),version=version+1
+      `).run(adminId, adminId);
+    } finally {
+      restoreDb.close();
+    }
+    const formerOwnerReset = await jsonRequest(baseUrl, `/api/admin/users/reset-password/${memberId}`, {
+      method: 'POST',
+      token: adminToken,
+      body: { password: formerOwnerPassword }
+    });
+    assert.equal(formerOwnerReset.status, 200, formerOwnerReset.text);
+    assert.equal(readUserSessionCount(dbPath, memberId), 0);
+    assert.equal(bcrypt.compareSync(formerOwnerPassword, readUserByUsername(dbPath, 'zhangwei').password_hash), true);
+    assert.equal(readAdminResetAudits(dbPath).length, 1);
+    assert.equal(readActivityAudits(dbPath, 'credential_rotation').length, 1);
+
+    const deactivateFormerOwner = await jsonRequest(baseUrl, `/api/admin/users/${memberId}`, {
+      method: 'PUT',
+      token: adminToken,
+      body: { is_active: 0 }
+    });
+    assert.equal(deactivateFormerOwner.status, 200, deactivateFormerOwner.text);
+    const inactiveReset = await jsonRequest(baseUrl, `/api/admin/users/reset-password/${memberId}`, {
+      method: 'POST',
+      token: adminToken
+    });
+    assert.equal(inactiveReset.status, 404, inactiveReset.text);
+    assert.equal(readAdminResetAudits(dbPath).length, 1);
+    assert.equal(readActivityAudits(dbPath, 'credential_rotation').length, 1);
   } finally {
     await stopChild(child);
     fs.rmSync(tempDir, { recursive: true, force: true });

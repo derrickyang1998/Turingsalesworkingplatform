@@ -11046,7 +11046,20 @@ function loadAdminAIConversation(id) {
   });
 }
 function toggleUserActive(id, active) { apiFetch('/admin/users/'+id, {method:'PUT', body:JSON.stringify({is_active:active})}).then(function() { loadAdminUsers(); toast(active?'Activated':'Deactivated'); }).catch(function(e) { toast('Failed','error'); }); }
-function adminResetPw(id) { apiFetch('/admin/users/reset-password/'+id, {method:'POST'}).then(function(r) { return r.json(); }).then(function(d) { toast(d.temporary_password ? ('Temporary password: ' + d.temporary_password) : (d.message || 'Password reset')); }).catch(function(e) { toast('Failed','error'); }); }
+async function adminResetPw(id) {
+  try {
+    var response = await apiFetch('/admin/users/reset-password/' + id, { method: 'POST' });
+    var data = await response.json();
+    if (!response.ok) throw new Error(data.error || '密码重置失败');
+    toast(data.temporary_password
+      ? ('Temporary password: ' + data.temporary_password)
+      : (data.message || 'Password reset'));
+    return data;
+  } catch (error) {
+    toast(error.message || '密码重置失败', 'error');
+    return null;
+  }
+}
 function adminCreateInvite() { apiFetch('/admin/invites', {method:'POST'}).then(function(r){return r.json();}).then(function(d) { var el = document.getElementById('ad_inviteResult'); if (el) el.textContent = 'Code: ' + d.code; toast('Invite: '+d.code); }).catch(function(e) { toast('Failed','error'); }); }
 
 

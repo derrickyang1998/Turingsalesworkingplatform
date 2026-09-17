@@ -68,6 +68,25 @@ function response(status, body) {
   };
 }
 
+test('admin password reset surfaces protected-account failures instead of reporting success', async () => {
+  const toasts = [];
+  const context = loadFunctions({
+    apiFetch() {
+      return Promise.resolve(response(409, {
+        error: '受保护账号需要使用凭据恢复流程',
+        code: 'PROTECTED_ACCOUNT_RESET_REQUIRES_BREAK_GLASS'
+      }));
+    },
+    toast(message, type) { toasts.push([message, type]); },
+    Error,
+    Promise
+  }, ['adminResetPw']);
+
+  const result = await context.adminResetPw(7);
+  assert.equal(result, null);
+  assert.deepEqual(toasts, [['受保护账号需要使用凭据恢复流程', 'error']]);
+});
+
 test('existing admin control room exposes the organization directory as a routed tab', () => {
   assert.match(indexSource, /switchAdminTab\(['"]organizations['"]\)[^>]*>[^<]*组织/);
   for (const id of [

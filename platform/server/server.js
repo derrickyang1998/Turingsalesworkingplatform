@@ -1829,21 +1829,53 @@ app.delete('/api/admin/users/:id', authMiddleware, adminOnly, (req, res) => {
   }
 });
 
+const PROTECTED_ACCOUNT_RESET_CODE = 'PROTECTED_ACCOUNT_RESET_REQUIRES_BREAK_GLASS';
+
 app.post('/api/admin/users/reset-password/:id', authMiddleware, adminOnly, (req, res) => {
   if (!campaignContract.isCanonicalSafeIntegerPathSegment(req.params.id)) {
     return res.status(400).json({ error: 'Invalid user id' });
   }
   const targetUserId = Number(req.params.id);
-  const target = db.prepare('SELECT id, username FROM users WHERE id = ? AND is_active = 1').get(targetUserId);
-  if (!target) return res.status(404).json({ error: 'User not found' });
-
   const hasSuppliedPassword = Object.prototype.hasOwnProperty.call(req.body || {}, 'password');
-  const temporaryPassword = hasSuppliedPassword
-    ? String(req.body.password || '')
-    : credentialRotation.generateTemporaryPassword();
+  const suppliedPassword = hasSuppliedPassword ? String(req.body.password || '') : '';
+  let temporaryPassword = '';
 
   try {
     const resetTransaction = db.transaction(function() {
+      const target = db.prepare(`
+        SELECT
+          users.id,
+          users.username,
+          users.role,
+          CASE WHEN EXISTS (
+            SELECT 1 FROM organization_authority authority
+            WHERE authority.owner_user_id=users.id
+          ) THEN 1 ELSE 0 END AS is_company_owner
+        FROM users
+        WHERE users.id=? AND users.is_active=1
+      `).get(targetUserId);
+      if (!target) return { outcome: 'not_found' };
+
+      const protectedClass = target.role === 'admin'
+        ? 'platform_admin'
+        : (target.is_company_owner === 1 ? 'company_owner' : null);
+      if (protectedClass) {
+        const deniedAuditIp = redactSecretValue(req.ip, suppliedPassword);
+        db.prepare(`
+          INSERT INTO activity_log (user_id, action, module, details, ip_address)
+          VALUES (?, ?, ?, ?, ?)
+        `).run(req.user.id, 'admin_reset_password_denied', 'security', JSON.stringify({
+          actorUserId: req.user.id,
+          targetUserId: Number(target.id),
+          reasonCode: PROTECTED_ACCOUNT_RESET_CODE,
+          protectedClass
+        }), deniedAuditIp);
+        return { outcome: 'protected' };
+      }
+
+      temporaryPassword = hasSuppliedPassword
+        ? suppliedPassword
+        : credentialRotation.generateTemporaryPassword();
       const auditIp = redactSecretValue(req.ip, temporaryPassword);
       const result = credentialRotation.rotateUserPasswords(db, {
         actorUserId: req.user.id,
@@ -1863,9 +1895,19 @@ app.post('/api/admin/users/reset-password/:id', authMiddleware, adminOnly, (req,
         sessionsRevoked: result.sessionsRevoked
       }), auditIp);
 
-      return result;
+      return { outcome: 'reset', result };
     });
-    const result = resetTransaction();
+    const operation = resetTransaction.immediate();
+    if (operation.outcome === 'not_found') {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    if (operation.outcome === 'protected') {
+      return res.status(409).json({
+        error: 'Protected accounts require the credential recovery process.',
+        code: PROTECTED_ACCOUNT_RESET_CODE
+      });
+    }
+    const result = operation.result;
 
     res.json({
       success: true,
