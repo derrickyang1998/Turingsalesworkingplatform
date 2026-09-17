@@ -121437,7 +121437,7 @@
           "mode": "frozen-exact-table-column-policy",
           "unknownText": "transform-or-reject",
           "validatorVersion": "tm-structural-policy-v19-organization-ownership-transfer",
-          "policySha256": "3e689a53c7d6a4a5cdce7bf53cf910b354748dbd3e485eb06f5d9533cbb850aa"
+          "policySha256": "a08daa53a655d8796216a27a852ec58f6b6769307867451525f141eeefc1ef19"
         }
       },
       "equalityGroups": [

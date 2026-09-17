@@ -856,7 +856,7 @@ const V22_MIGRATION_LEDGER = Object.freeze({
   ]),
   checksum: Object.freeze([
     ...V21_MIGRATION_LEDGER.checksum,
-    '06f10ac5f330c58b83cf78e67b813dd6738901c49d0c06ce1f23a4e0461cefca'
+    'd277a95d3dffff0e1325fae90fc5d61625309d6664ea5e768d4b13d0ac3d3235'
   ]),
   sourcePath: Object.freeze([
     ...V21_MIGRATION_LEDGER.sourcePath,

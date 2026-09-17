@@ -1,6 +1,6 @@
 'use strict';
 
-const TABLE_SQL = `CREATE TABLE organization_authority_v22 (
+const TABLE_SQL = `CREATE TABLE organization_authority (
   org_id INTEGER PRIMARY KEY CHECK(org_id BETWEEN 1 AND 9007199254740991),
   owner_user_id INTEGER NOT NULL CHECK(owner_user_id BETWEEN 1 AND 9007199254740991),
   created_by INTEGER NOT NULL CHECK(created_by BETWEEN 1 AND 9007199254740991),
@@ -8,7 +8,8 @@ const TABLE_SQL = `CREATE TABLE organization_authority_v22 (
     strftime('%Y-%m-%d %H:%M:%S',created_at) IS NOT NULL
     AND strftime('%Y-%m-%d %H:%M:%S',created_at)=created_at
   ),
-  updated_by INTEGER NOT NULL CHECK(updated_by BETWEEN 1 AND 9007199254740991),
+  updated_by INTEGER NOT NULL REFERENCES users(id) ON UPDATE RESTRICT ON DELETE RESTRICT
+    CHECK(updated_by BETWEEN 1 AND 9007199254740991),
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP CHECK(
     strftime('%Y-%m-%d %H:%M:%S',updated_at) IS NOT NULL
     AND strftime('%Y-%m-%d %H:%M:%S',updated_at)=updated_at
@@ -17,8 +18,7 @@ const TABLE_SQL = `CREATE TABLE organization_authority_v22 (
   FOREIGN KEY(org_id) REFERENCES organizations(id) ON UPDATE RESTRICT ON DELETE RESTRICT,
   FOREIGN KEY(org_id,owner_user_id) REFERENCES organization_memberships(org_id,user_id)
     ON UPDATE RESTRICT ON DELETE RESTRICT,
-  FOREIGN KEY(created_by) REFERENCES users(id) ON UPDATE RESTRICT ON DELETE RESTRICT,
-  FOREIGN KEY(updated_by) REFERENCES users(id) ON UPDATE RESTRICT ON DELETE RESTRICT
+  FOREIGN KEY(created_by) REFERENCES users(id) ON UPDATE RESTRICT ON DELETE RESTRICT
 ) STRICT, WITHOUT ROWID`;
 
 const INDEX_SQL = Object.freeze({
@@ -202,8 +202,12 @@ const migration = {
         throw new Error(`022 requires ${name}`);
       }
     }
-    if (db.prepare("SELECT 1 AS present FROM sqlite_schema WHERE name='organization_authority_v22'").get()) {
-      throw new Error('partial 022 object exists: organization_authority_v22');
+    if (db.prepare(`
+      SELECT 1 AS present
+      FROM sqlite_schema
+      WHERE name IN ('organization_authority_v21','organization_authority_v22')
+    `).get()) {
+      throw new Error('partial 022 organization authority object exists');
     }
     const columns = db.prepare('PRAGMA table_info(organization_authority)').all().map((column) => column.name);
     if (JSON.stringify(columns) !== JSON.stringify(['org_id', 'owner_user_id', 'created_by', 'created_at'])) {
@@ -220,15 +224,16 @@ const migration = {
     db.exec(REPLACED_OBJECTS.map((name) => (
       name.startsWith('idx_') ? `DROP INDEX ${name}` : `DROP TRIGGER ${name}`
     )).join(';\n') + ';');
-    db.exec(`${TABLE_SQL};
-      INSERT INTO organization_authority_v22 (
+    db.exec(`
+      ALTER TABLE organization_authority RENAME TO organization_authority_v21;
+      ${TABLE_SQL};
+      INSERT INTO organization_authority (
         org_id,owner_user_id,created_by,created_at,updated_by,updated_at,version
       )
       SELECT org_id,owner_user_id,created_by,created_at,created_by,created_at,1
-      FROM organization_authority
+      FROM organization_authority_v21
       ORDER BY org_id;
-      DROP TABLE organization_authority;
-      ALTER TABLE organization_authority_v22 RENAME TO organization_authority;
+      DROP TABLE organization_authority_v21;
     `);
     db.exec([
       ...Object.values(INDEX_SQL),

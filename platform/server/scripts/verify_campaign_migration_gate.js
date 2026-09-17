@@ -171,6 +171,24 @@ const REGISTERED_MIGRATIONS = Object.freeze([
 ]);
 const APPROVED_TARGET_TOPOLOGY_REPLACEMENTS = Object.freeze([
   Object.freeze({
+    type: 'table',
+    name: 'organization_authority',
+    tblName: 'organization_authority',
+    sqlSha256: 'a310f2f297e9f6550f93c81182ea0d1b8087d62ca23bb022bc994916c012c7da'
+  }),
+  Object.freeze({
+    type: 'trigger',
+    name: 'organization_authority_no_update',
+    tblName: 'organization_authority',
+    sqlSha256: '92af24c62aafeed0289c1329f80373f8b615d20f52eb8d4cd948c813eeeec31d'
+  }),
+  Object.freeze({
+    type: 'trigger',
+    name: 'organization_authority_scope_insert',
+    tblName: 'organization_authority',
+    sqlSha256: 'c35e57ebf0e804893d9e8d56db0cdeccba9e4a8b638be47cb2fd83c680f52ba6'
+  }),
+  Object.freeze({
     type: 'trigger',
     name: 'request_idempotency_legal_transition',
     tblName: 'request_idempotency',

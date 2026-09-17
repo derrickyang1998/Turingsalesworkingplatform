@@ -131,7 +131,7 @@
     },
     {
       "path": "server/migrations/022_organization_ownership_transfer.js",
-      "sha256": "4238305df2d007cd79dae56aeba9c9944dd82502a4fc412f05913d09149d3d56"
+      "sha256": "ec59695ae8e2a30f50a8a189ad810e1a4b70004a04cb8478d9efe57194344572"
     },
     {
       "path": "server/migrations/baselines/legacy_v1.js",
@@ -215,11 +215,11 @@
     },
     {
       "path": "server/scripts/sanitization_manifest.json",
-      "sha256": "e075fd3279542b77c9d1a2bce140d0179936300fad7da06285565185193b5864"
+      "sha256": "4c140ccc4fda072af740f0d8fef4643fd156c7ecd6b7517443e865b1cf1f6887"
     },
     {
       "path": "server/scripts/sanitize_production_shape.js",
-      "sha256": "3cc5c36a194c1617fc32d6aab43a65eae87b25177f2a970a4e846cc7849db7a7"
+      "sha256": "516fcbb6cf5d9ce25a9c38bb675f06b8dc16644dc0a21b195d1bfdee8b4108bb"
     },
     {
       "path": "server/scripts/trusted_parser_runtime_verifier.js",
@@ -231,7 +231,7 @@
     },
     {
       "path": "server/scripts/verify_campaign_migration_gate.js",
-      "sha256": "dec577e3ac91848fa875425d2dc3277c7589b9fe11a43f6dccb75f0584a6dbb4"
+      "sha256": "0c97c943a9371b73ef1c8ed1a1dc02c0986f4ae43dbc56fa0748f438cef3f337"
     },
     {
       "path": "server/services/campaign_access_service.js",

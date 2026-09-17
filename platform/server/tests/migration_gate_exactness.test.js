@@ -164,6 +164,24 @@ test('migration verifier upgrades the production predecessor version 20 to versi
   assert.equal(sha256File(fixture.databasePath), sourceSha256);
 });
 
+test('migration verifier upgrades the current production predecessor version 21 to version 22', (t) => {
+  const fixture = createFixture(t, 'v21-to-v22', 21);
+  const sourceSha256 = sha256File(fixture.databasePath);
+
+  const report = migrationGate.verifySanitizedMigrationCopy({
+    sanitizedPath: fixture.databasePath,
+    sourceVersion: 21,
+    workDir: path.join(fixture.root, 'work')
+  });
+
+  assert.equal(report.sourceVersion, 21);
+  assert.equal(report.targetVersion, 22);
+  assert.equal(report.runs, 2);
+  assert.equal(report.preMigrationRestoreVerified, true);
+  assert.equal(report.legacyPreservationVerified, true);
+  assert.equal(sha256File(fixture.databasePath), sourceSha256);
+});
+
 test('migration gate permits only the checksum-bound v12 request transition trigger replacement', (t) => {
   const fixture = createFixture(t, 'v12-transition-trigger', 11);
   const db = new Database(fixture.databasePath);

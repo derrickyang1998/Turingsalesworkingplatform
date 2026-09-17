@@ -119,6 +119,10 @@ test('migration 022 preserves ownership lineage and installs deterministic trans
       `).get(),
       { wr: 1, strict: 1 }
     );
+    assert.match(
+      db.prepare("SELECT sql FROM sqlite_schema WHERE type='table' AND name='organization_authority'").get().sql,
+      /^CREATE TABLE organization_authority \(/
+    );
     assert.deepEqual(
       db.prepare(`
         SELECT name
