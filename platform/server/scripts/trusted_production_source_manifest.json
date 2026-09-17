@@ -246,11 +246,11 @@
     },
     {
       "path": "server/services/crm_customer_service.js",
-      "sha256": "de3a73d7a9060e27adb5c6619f0ab9efa4cb34ba1e996c39fab77a2b04a39bfb"
+      "sha256": "09ae06e6c9d99af4d8cdd191f1e53a2f283467e24e51bd176ee187efdd1138e3"
     },
     {
       "path": "server/services/crm_query_service.js",
-      "sha256": "52bd7c60a3154abe6889357c7e500854ada9131d0e4f7c658b2caf08d396b542"
+      "sha256": "bb5035cf2a06f5f498c7cb8ed95f7c2ddd8d86fc12d62cad69c3a97e282848a4"
     },
     {
       "path": "server/services/crm_scope_service.js",
