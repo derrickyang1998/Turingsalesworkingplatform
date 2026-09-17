@@ -1,5 +1,29 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.9.7-crm-task-role-permissions (Production Deployed, 2026-09-17) - CRM 任务角色权限
+
+### 交付与范围 / Delivery And Scope
+- 将中央模块/操作权限扩展到 `crm.task` 的 `read`、`create`、`update`；企业所有者、组织管理员、经理和成员可读建改，只读角色仅可读，纯平台管理员身份不能绕过租户边界。
+- 既有任务创建、完成和取消路由接入命名权限，完成与取消归为更新；大小写变体、尾斜杠和非法 ID 在请求体解析前处理，拒绝审计只保存有界字段。
+- 对未读请求体的提前拒绝设置连接关闭，并在响应结束后释放未完成连接，避免慢请求持续占用应用连接。
+- 登录和 `/api/auth/me` 投影实时任务权限；本版不增加任务读取接口或界面，不修改 schema、客户看板/明细、M3/M4、AI/知识库、网红、飞书、工作流、导出或冻结 PPT。
+
+### 轻量验证与独立审查 / Lightweight Verification And Independent Review
+- 权限与 CRM HTTP `49/49`、真实服务角色/入口/慢请求 `4/4`、任务生命周期/请求管线 `8/8`、既有联系人/商机入口 `5/5` 通过；语法、差异、UTF-8、定向凭据、冻结 PPT 哈希及本地发布预检通过。
+- 独立审查发现 1 项 P2：提前拒绝后未读慢请求体可能继续占用连接；原始套接字 RED 用例复现并修复后，终审为 `APPROVE`，无剩余 P1/P2。
+- 源码提交 `a6537f755b4b9653c512ba76f73ad693ba406ceb` 已在部署前推送 GitHub。
+
+### 生产状态 / Production Status
+- 生产运行 `6348ff7e68664b328fe6e7109b2c65f6` 返回 `DEPLOY_OK`；可信源码 SHA-256 为 `78ab771cb831eec8266539ef23fcd7dc9f134b4f1c1d142a29bc1fb3a8316a26`，候选树 SHA-256 为 `c80ed0e141640c2a71ab1e55eb3e8b955eb36ffab5117957e7bb7290bcd95755`。
+- 可恢复备份为 `/root/turingmarket/backups/v060-crm-sales-workspace-20260917-210912`；初始 `335` 项和切换 `35` 项清单全部通过，数据库备份 SHA-256 为 `dbba409604b8b150c42352b3ebd7f536b0ab187763786fad6280dbca5c50f8a4`。
+- 线上管理员任务权限为读/建/改，只读角色仅可读；创建、完成、取消非法写入均在解析前返回 `403 CRM_PERMISSION_FORBIDDEN`，慢请求在 `4 ms` 内关闭，四条拒绝审计不含请求体、路径、令牌或密码。
+- 管理员在既有合成客户下创建并取消任务 `1`；临时账号已停用，有效组织/团队关系和会话均为 `0`。schema `v21`、`quick_check=ok`、外键异常 `0`。
+- PM2 `online`、重启 `0`、PID `433401`，Nginx `active`，公网健康、`/m0` 与 `/m0-detail` 均为 `200`；冻结 `ppt.js` 哈希保持不变。
+
+### 下一边界 / Next Boundary
+- 下一版单独补齐任务读取模型及现有客户明细中的权限感知任务控件，或另行设计所有权转移；不捆绑权益、配额或 Phase 7/7B 外部写入。
+- 继续“一功能一上线”：普通功能只跑受影响验证和一次独立审查，备份验证后当轮部署并完成线上核心路径冒烟。
+
 ## v0.9.6-crm-contact-role-permissions (Production Deployed, 2026-09-17) - CRM 联系人角色权限
 
 ### 交付与范围 / Delivery And Scope
