@@ -10186,7 +10186,7 @@ try {
   if (database.pragma('integrity_check', { simple: true }) !== 'ok') throw new Error('Candidate DB integrity_check failed');
   if (database.pragma('foreign_key_check').length !== 0) throw new Error('Candidate DB foreign_key_check failed');
   const version = database.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version;
-  if (Number(version) !== 21) throw new Error('Candidate migration target version mismatch');
+  if (Number(version) !== 22) throw new Error('Candidate migration target version mismatch');
   console.log('TM_SANITIZED_MIGRATION_COMPATIBILITY_OK');
 } finally {
   database.close();
