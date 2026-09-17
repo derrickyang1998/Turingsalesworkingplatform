@@ -374,3 +374,25 @@ git diff --check
 - 残余风险：按最终指令未运行含 3 个已知无关基线失败的完整 `phase4_server_integration.test.js`，仅运行覆盖本轮真实 HTTP、登录和只读行为的 5 项聚焦模式；本轮限定门禁全部 GREEN。
 
 修复实现提交：由包含本报告的 Git commit 记录（recorded by the enclosing Git commit）。
+
+## Fix Round 2/5 后端复审边界修复
+
+独立后端复审发现早期权限守卫的路径匹配范围小于 Express/Phase4 实际路由范围：大小写变体与非规范商机 ID 可能先进入原始 JSON 解析。
+
+RED：
+
+```powershell
+node --test --test-name-pattern "opportunity named permission ingress" tests/phase4_server_integration.test.js
+```
+
+输出摘要：退出码 1；3 项中 1 通过、2 失败。`POST /API/OPPORTUNITIES` 返回 400 而非命名权限 403，大小写变体非法 ID 的强制审计失败返回 400 而非 503。
+
+GREEN：
+
+```powershell
+node --test --test-name-pattern "opportunity named permission ingress" tests/phase4_server_integration.test.js
+```
+
+输出摘要：退出码 0；3/3 通过。守卫现在与 Express 路由保持大小写不敏感，并覆盖所有单段 `:id`；仅规范正整数进入 `target_id`，非法或非规范 ID 以 `null` 写入有界审计，不记录原始路径片段。
+
+本轮只修改 `platform/server/server.js`、`platform/server/tests/phase4_server_integration.test.js` 与本报告；未扩展业务功能、schema、PPT 或部署范围。

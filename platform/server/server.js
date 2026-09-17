@@ -492,14 +492,15 @@ function writeCrmPermissionAudit(event) {
 }
 
 function earlyOpportunityMutation(req) {
-  if (req.method === 'POST' && /^\/api\/opportunities\/?$/.test(req.path)) {
+  if (req.method === 'POST' && /^\/api\/opportunities\/?$/i.test(req.path)) {
     return { action: CRM_OPPORTUNITY_CREATE_ACTION, targetId: null };
   }
   if (req.method !== 'PUT') return null;
-  const match = /^\/api\/opportunities\/([1-9]\d*)\/?$/.exec(req.path);
+  const match = /^\/api\/opportunities\/([^/]+)\/?$/i.exec(req.path);
   if (!match) return null;
-  const targetId = Number(match[1]);
-  if (!Number.isSafeInteger(targetId) || targetId < 1) return null;
+  const targetId = /^[1-9]\d*$/.test(match[1]) && Number.isSafeInteger(Number(match[1]))
+    ? Number(match[1])
+    : null;
   return { action: CRM_OPPORTUNITY_UPDATE_ACTION, targetId };
 }
 

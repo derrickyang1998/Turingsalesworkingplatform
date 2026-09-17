@@ -928,7 +928,11 @@ test('opportunity named permission ingress denies read-only malformed JSON befor
       ['POST', '/api/opportunities', 'create', null],
       ['PUT', '/api/opportunities/71', 'update', 71],
       ['POST', '/api/opportunities/', 'create-trailing-slash', null],
-      ['PUT', '/api/opportunities/71/', 'update-trailing-slash', 71]
+      ['PUT', '/api/opportunities/71/', 'update-trailing-slash', 71],
+      ['POST', '/API/OPPORTUNITIES', 'create-case-variant', null],
+      ['PUT', '/API/OPPORTUNITIES/71', 'update-case-variant', 71],
+      ['PUT', '/api/opportunities/not-an-id', 'update-invalid-id', null],
+      ['PUT', '/api/opportunities/071', 'update-noncanonical-id', null]
     ];
 
     for (const [method, requestPath, action] of cases) {
@@ -995,6 +999,38 @@ test('opportunity named permission ingress denies read-only malformed JSON befor
           request_id: 'opportunity-update-trailing-slash-malformed-json',
           target_type: 'opportunity',
           target_id: 71
+        },
+        {
+          permission: 'crm.opportunity.create',
+          outcome: 'denied',
+          reason_code: 'ACTION_FORBIDDEN',
+          request_id: 'opportunity-create-case-variant-malformed-json',
+          target_type: 'opportunity',
+          target_id: null
+        },
+        {
+          permission: 'crm.opportunity.update',
+          outcome: 'denied',
+          reason_code: 'ACTION_FORBIDDEN',
+          request_id: 'opportunity-update-case-variant-malformed-json',
+          target_type: 'opportunity',
+          target_id: 71
+        },
+        {
+          permission: 'crm.opportunity.update',
+          outcome: 'denied',
+          reason_code: 'ACTION_FORBIDDEN',
+          request_id: 'opportunity-update-invalid-id-malformed-json',
+          target_type: 'opportunity',
+          target_id: null
+        },
+        {
+          permission: 'crm.opportunity.update',
+          outcome: 'denied',
+          reason_code: 'ACTION_FORBIDDEN',
+          request_id: 'opportunity-update-noncanonical-id-malformed-json',
+          target_type: 'opportunity',
+          target_id: null
         }
       ]);
     } finally {
@@ -1025,8 +1061,8 @@ test('opportunity named permission ingress fails closed on audit persistence bef
       setup.close();
     }
 
-    const response = await fetch(server.baseUrl + '/api/opportunities', {
-      method: 'POST',
+    const response = await fetch(server.baseUrl + '/API/OPPORTUNITIES/not-an-id', {
+      method: 'PUT',
       headers: {
         Authorization: `Bearer ${login.body.token}`,
         'Content-Type': 'application/json',
@@ -1056,7 +1092,9 @@ test('opportunity named permission ingress lets writable malformed JSON reach th
 
     for (const [method, requestPath] of [
       ['POST', '/api/opportunities'],
-      ['PUT', '/api/opportunities/71']
+      ['PUT', '/api/opportunities/71'],
+      ['POST', '/API/OPPORTUNITIES'],
+      ['PUT', '/API/OPPORTUNITIES/not-an-id']
     ]) {
       const response = await fetch(server.baseUrl + requestPath, {
         method,
