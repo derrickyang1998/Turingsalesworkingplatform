@@ -1662,10 +1662,13 @@ function showConfirm(title, msg) {
   });
 }
 
+var customerDetailRequestGeneration = 0;
 async function openCustomerDetail(id, options) {
+  var requestGeneration = ++customerDetailRequestGeneration;
   try { var r = await apiFetch('/customers/' + id + '/detail');
     await requireSuccessfulCustomerMutation(r, '客户详情加载失败');
     var d = await r.json();
+    if (requestGeneration !== customerDetailRequestGeneration) return false;
     if (!d.customer) { toast('客户不存在', 'error'); return false; }
     var applyGuard = options && typeof options.applyGuard === 'function'
       ? options.applyGuard
@@ -1674,9 +1677,13 @@ async function openCustomerDetail(id, options) {
     _lastCustomerDetailData = d;
     renderCustomerSidebar(d);
     return true;
-  } catch(e) { toast('加载失败: ' + e.message, 'error'); return false; }
+  } catch(e) {
+    if (requestGeneration === customerDetailRequestGeneration) toast('加载失败: ' + e.message, 'error');
+    return false;
+  }
 }
 function closeCustomerDetail() {
+  customerDetailRequestGeneration += 1;
   var dialog = document.getElementById('customerDetailDialog');
   if (dialog && window.TMAccessibility) window.TMAccessibility.closeDialog(dialog);
   var overlays = [document.getElementById('custDetailOverlay'), document.getElementById('customerDetailOverlay')];

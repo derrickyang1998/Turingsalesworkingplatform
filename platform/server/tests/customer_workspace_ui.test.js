@@ -126,6 +126,7 @@ function createContactRefreshRaceHarness() {
   let releaseDetail = null;
   let renderCount = 0;
   const globals = {
+    customerDetailRequestGeneration: 0,
     _lastCustomerDetailData: null,
     currentUserHasCrmContactPermission: () => true,
     rejectCrmBrowserAction: () => false,
@@ -409,6 +410,8 @@ test('failed customer detail response does not enter the not-found state', async
   const { openCustomerDetail } = evaluateAppFunctions(
     ['requireSuccessfulCustomerMutation', 'openCustomerDetail'],
     {
+      customerDetailRequestGeneration: 0,
+      _lastCustomerDetailData: null,
       apiFetch: async () => ({
         ok: false,
         status: 403,
@@ -425,6 +428,66 @@ test('failed customer detail response does not enter the not-found state', async
   assert.equal(messages.some((message) => message.includes('客户不存在')), false);
   assert.equal(messages.some((message) => message.includes('加载失败')), true);
   assert.equal(messages.some((message) => message.includes('CRM_PERMISSION_FORBIDDEN')), true);
+});
+
+test('an older customer detail response cannot overwrite a newer customer', async () => {
+  const pending = new Map();
+  const renderedCustomerIds = [];
+  const { openCustomerDetail } = evaluateAppFunctions(
+    ['requireSuccessfulCustomerMutation', 'openCustomerDetail'],
+    {
+      customerDetailRequestGeneration: 0,
+      _lastCustomerDetailData: null,
+      apiFetch: (url) => new Promise((resolve) => pending.set(url, resolve)),
+      toast() {},
+      renderCustomerSidebar: (data) => renderedCustomerIds.push(data.customer.id)
+    }
+  );
+
+  const olderRequest = openCustomerDetail(41);
+  const newerRequest = openCustomerDetail(42);
+  pending.get('/customers/42/detail')({
+    ok: true,
+    status: 200,
+    json: async () => ({ customer: { id: 42 } })
+  });
+  assert.equal(await newerRequest, true);
+  pending.get('/customers/41/detail')({
+    ok: true,
+    status: 200,
+    json: async () => ({ customer: { id: 41 } })
+  });
+
+  assert.equal(await olderRequest, false);
+  assert.deepEqual(renderedCustomerIds, [42]);
+});
+
+test('closing customer detail invalidates its pending response', async () => {
+  let releaseDetail = null;
+  let renderCount = 0;
+  const { openCustomerDetail, closeCustomerDetail } = evaluateAppFunctions(
+    ['requireSuccessfulCustomerMutation', 'openCustomerDetail', 'closeCustomerDetail'],
+    {
+      customerDetailRequestGeneration: 0,
+      _lastCustomerDetailData: null,
+      apiFetch: () => new Promise((resolve) => { releaseDetail = resolve; }),
+      document: { getElementById: () => null },
+      window: {},
+      toast() {},
+      renderCustomerSidebar: () => { renderCount += 1; }
+    }
+  );
+
+  const pendingRequest = openCustomerDetail(41);
+  closeCustomerDetail();
+  releaseDetail({
+    ok: true,
+    status: 200,
+    json: async () => ({ customer: { id: 41 } })
+  });
+
+  assert.equal(await pendingRequest, false);
+  assert.equal(renderCount, 0);
 });
 
 test('contact permissions use only the exact server-projected crm.contact actions', () => {
