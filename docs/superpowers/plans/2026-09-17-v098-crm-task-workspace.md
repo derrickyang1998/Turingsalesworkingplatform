@@ -24,8 +24,8 @@
 - [x] Implement exact server-projected browser permission checks and the in-drawer task controls.
 - [x] Run only affected tests plus syntax, diff, credential, UTF-8, and frozen-PPT checks.
 - [x] Complete independent code review and close all P1/P2 findings.
-- [ ] Commit and push source, create a verified production backup, deploy immediately, and run authenticated online smoke tests.
-- [ ] Synchronize changelog, handoff, repository record, Obsidian archive, GitHub, and the visual progress board.
+- [x] Commit and push source, create a verified production backup, deploy immediately, and run authenticated online smoke tests.
+- [x] Synchronize changelog, handoff, repository record, Obsidian archive, GitHub, and the visual progress board.
 
 ## Acceptance
 

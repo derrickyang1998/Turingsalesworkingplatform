@@ -1,5 +1,30 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.9.8-crm-task-workspace (Production Deployed, 2026-09-17) - CRM 客户任务工作区
+
+### 交付与范围 / Delivery And Scope
+- 客户详情聚合增加同组织任务列表，最多返回 100 条，并提供负责人、状态、截止时间、说明、完成证据和 `meta.tasks`；待处理任务按截止时间优先，已关闭任务按更新时间排列。
+- 客户详情在原有客户、商机、联系人读取权限之外增加 `crm.task.read`；现有组织、团队和客户范围仍是权威边界。
+- 现有客户明细抽屉增加任务空态、上限提示、任务卡片及按 `crm.task.create/update` 显示的新建、完成、取消控件；新建默认沿用客户负责人和团队，成功后刷新同一详情并防止陈旧响应覆盖。
+- 本版不新增替代页面、不修改 schema，不改动 M3/M4、AI/知识库、网红、飞书、工作流、导出及冻结 PPT。
+
+### 轻量验证与独立审查 / Lightweight Verification And Independent Review
+- 查询、HTTP、UI、产品壳层、安全、发布来源和公开资源定向测试分别通过 `35/35`、`34/34`、`37/37`、`39/39`、`15/15`、`57/57`、`128/128`；三种桌面/手机浏览器视图 `3/3` 通过。
+- JavaScript 语法、差异、定向凭据扫描、发布预检和冻结 PPT 摘要通过；独立审查无 P1/P2，建议发布。
+- 生产源码提交 `a8f7a5d3e7b76e19c9a260362e48a003f635fbe4` 已在部署前推送 GitHub。
+
+### 生产状态 / Production Status
+- 生产运行 `f581f681ac804e37b2133867a3ef2e5a` 返回 `DEPLOY_OK`；可信源码 SHA-256 为 `b05a1d02afe1ac87fa745ad84528d3c7b76d455cf9a85705581b6ef0b0d0bb5d`，候选树 SHA-256 为 `d2bcc371dbd8c9987bef3b60dc4b8f58d0e14bc7cbeffeb37626cfb04bcc3735`。
+- 可恢复备份为 `/root/turingmarket/backups/v060-crm-sales-workspace-20260917-224610`；初始 `335` 项和切换 `35` 项清单、数据库摘要均复验通过。
+- 公网健康、`/m0` 与 `/m0-detail` 均为 `200`；管理员任务权限为读/建/改。在客户 `23` 下创建任务 `2`、`3`，详情返回 `limit=100`，两条任务最终分别为已完成和已取消。
+- 真实生产 Chromium 在桌面与 320px 手机视图显示任务区且无横向溢出；schema `v21`、`quick_check=ok`、外键异常 `0`、活动会话 `0`。
+- PM2 `online`、重启 `0`、PID `471571`，Nginx `active`，Parser ready；冻结 `ppt.js` 哈希保持不变。
+
+### 下一边界 / Next Boundary
+- 后续继续“一功能一上线”；任务改派/编辑与组织所有权转移保持独立切片，下一版只选择一个有界能力。
+- 普通功能继续采用受影响测试与一次独立审查；完整矩阵只在阶段收口或高风险边界触发。
+
+
 ## v0.9.7-crm-task-role-permissions (Production Deployed, 2026-09-17) - CRM 任务角色权限
 
 ### 交付与范围 / Delivery And Scope

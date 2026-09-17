@@ -8,7 +8,7 @@ Updated / 更新日期：2026-09-17
 - Current production delivery branch / 当前生产交付分支：`codex/v0.7.0-ai-knowledge-proposal-ppt-loop-production`
 - Guarded Phase 6 incremental release branch / 第 6 阶段受控增量发布分支：`codex/v0.7.0-ai-knowledge-proposal-ppt-loop-production`
 - Phase 4 development base / 第 4 阶段开发基线：`5960ade03e1bd605ee4bfbe877baa09bc6482083`
-- Current production source / 当前生产源码：`a6537f755b4b9653c512ba76f73ad693ba406ceb` (`v0.9.7-crm-task-role-permissions`)
+- Current production source / 当前生产源码：`a8f7a5d3e7b76e19c9a260362e48a003f635fbe4` (`v0.9.8-crm-task-workspace`)
 - Backend / 后端：Node.js 20 + Express 5
 - Database / 数据库：SQLite through `better-sqlite3`
 - PM2 / 进程：`platform/ecosystem.config.js` -> `server/server.js`, process name `turingmarket`
@@ -19,15 +19,15 @@ This checkout consolidates the latest CRM, AI conversation, knowledge base, infl
 
 ## Current Production Status / 当前生产状态
 
-- Release / 版本：`v0.9.7-crm-task-role-permissions`, deployed and verified on `2026-09-17` / 已于 `2026-09-17` 部署并验收。
-- Production run / 生产运行：`6348ff7e68664b328fe6e7109b2c65f6`; backup / 备份：`/root/turingmarket/backups/v060-crm-sales-workspace-20260917-210912`；candidate SHA-256 / 候选摘要：`c80ed0e141640c2a71ab1e55eb3e8b955eb36ffab5117957e7bb7290bcd95755`。
-- Acceptance-time runtime / 验收时运行状态：PM2 `online`, restart count `0`, PID `433401`; Nginx `active`; public `/api/health`, `/m0`, and `/m0-detail` `200`; parser ready / PM2 在线且无重启，Nginx、公网健康、客户看板、客户明细及解析器正常。
+- Release / 版本：`v0.9.8-crm-task-workspace`, deployed and verified on `2026-09-17` / 已于 `2026-09-17` 部署并验收。
+- Production run / 生产运行：`f581f681ac804e37b2133867a3ef2e5a`; backup / 备份：`/root/turingmarket/backups/v060-crm-sales-workspace-20260917-224610`；candidate SHA-256 / 候选摘要：`d2bcc371dbd8c9987bef3b60dc4b8f58d0e14bc7cbeffeb37626cfb04bcc3735`。
+- Acceptance-time runtime / 验收时运行状态：PM2 `online`, restart count `0`, PID `471571`; Nginx `active`; public `/api/health`, `/m0`, and `/m0-detail` `200`; parser ready; production Chromium desktop/mobile passed / PM2 在线且无重启，Nginx、公网健康、客户看板、客户明细、解析器及生产桌面/手机浏览器验收正常。
 - Current reachability / 当前可达性：the authoritative host is reachable through the local SOCKS path `127.0.0.1:10808`; SSH alias `turingmarket-production-via-local-proxy` and proxied HTTP were verified. Direct local routing may still time out, so retain the proxy path for subsequent releases. `agent.turingmarket.ai` remains a separate Nuxt application and is not this production target. / 权威主机已通过本机 SOCKS 通道恢复 SSH 与 HTTP；后续发布保留该代理路径，另一 Nuxt 应用仍不得作为替代生产目标。
 - Database / 数据库：schema `v21`, `quick_check=ok`, foreign-key violations `0`, governance tables/triggers present, membership/policy parity `21:21`, assigned owner count `1`, active sessions `0` / schema v21、完整性与外键正常、治理表和触发器存在、成员策略一一对应、企业所有者已确定且活动会话为零。
-- Phase 8 current slices / 第 8 阶段当前切片：the fail-closed module/action foundation, authoritative company-owner/read-only facts, scoped member governance, and live read-only barrier remain active. `crm.customer`, `crm.opportunity`, `crm.contact`, and `crm.task` now project exact `read/create/update` actions; task create/complete/cancel are protected, while task read UI remains a separate slice. Ownership transfer and remaining modules stay separate. / 默认拒绝权限底座、企业所有者/只读权威事实、成员治理和实时只读拦截保持有效；客户、商机、联系人和任务均已投影精确读/建/改，任务创建/完成/取消已受保护，任务读取界面仍为独立切片。
-- Online authorization / 线上权限：administrator task projection is `read,create,update`; read-only projects only `read`. Malformed create/complete/cancel writes return pre-parser `403 CRM_PERMISSION_FORBIDDEN`; a slow unread body is closed promptly and audits remain bounded. One synthetic task is retained as cancelled release evidence; the temporary user is inactive with zero active organization/team memberships and sessions. Existing contact and opportunity behavior remains accepted. / 管理员任务权限为读建改，只读角色仅可读；三类非法写入均在解析前拒绝，慢请求及时关闭且审计有界；一条合成任务以取消状态保留，临时账号已停用且有效关系和会话清零，既有联系人和商机能力保持验收状态。
+- Phase 8 current slices / 第 8 阶段当前切片：the fail-closed module/action foundation, authoritative company-owner/read-only facts, scoped member governance, and live read-only barrier remain active. `crm.customer`, `crm.opportunity`, `crm.contact`, and `crm.task` project exact `read/create/update` actions; the existing customer-detail drawer now includes the tenant-scoped task read model and permission-aware controls. Task reassignment/editing, ownership transfer, and remaining modules stay separate. / 默认拒绝权限底座、企业所有者/只读权威事实、成员治理和实时只读拦截保持有效；客户、商机、联系人和任务均投影精确读/建/改，现有客户明细抽屉已接入租户范围任务读取与权限感知控件，任务改派/编辑、所有权转移和其余模块继续分离。
+- Online authorization / 线上权限：administrator task projection is exactly `read,create,update`; customer detail returns a bounded same-organization task list protected by `crm.task.read`. Production tasks `2` and `3` were created on customer `23`, rendered in the live UI, then completed and cancelled. Existing read-only policy remains read-only and affected local/candidate checks passed. / 管理员任务权限精确为读建改；客户详情返回受任务读取权限保护的同组织有界任务列表。线上任务 2、3 已在客户 23 下创建、界面显示并分别完成和取消；既有只读策略保持只读，受影响本地/候选检查通过。
 - Product boundary / 产品边界：the accepted v0.6 shell, CRM, M3/M4, AI/knowledge, proposal, and frozen PPT remain intact. / 已验收的 v0.6 产品壳层、CRM、M3/M4、AI/知识、方案与冻结 PPT 均保持不变。
-- Full evidence / 完整证据：`docs/version-records/2026-09-17-v0.9.7-crm-task-role-permissions-production.md`。
+- Full evidence / 完整证据：`docs/version-records/2026-09-17-v0.9.8-crm-task-workspace-production.md`。
 
 `v0.6.0-crm-sales-workspace` contains the accepted Phase 5 CRM implementation and the upgraded schema-6 release contract. It MUST NOT be described as production until independent release review, GitHub push, verified backup, guarded deployment, remote runtime/API/UI/access acceptance, and rollback evidence all pass. / `v0.6.0-crm-sales-workspace` 已包含通过验收的第 5 阶段 CRM 实现及 schema-6 发布合同；独立发布复审、GitHub 推送、可校验备份、受控部署、远端运行时/API/UI/权限验收与回滚证据全部通过前，不得称为生产版本。
 
