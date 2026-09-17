@@ -1961,8 +1961,8 @@ function renderCustomerContacts(customerId, contacts) {
     : null;
   var canCreate = currentUserHasCrmContactPermission('create');
   var canUpdate = currentUserHasCrmContactPermission('update');
-  var html = '<div class="sidebar-section customer-contact-section">';
-  html += '<h4>联系人 (' + contacts.length + ')</h4>';
+  var html = '<div class="sidebar-section customer-contact-section" id="customerContactSection" tabindex="-1" aria-labelledby="customerContactSectionTitle">';
+  html += '<h4 id="customerContactSectionTitle">联系人 (' + contacts.length + ')</h4>';
   html += '<div style="display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-bottom:8px">';
   if (canCreate && safeCustomerId) {
     html += '<button type="button" class="btn btn-primary btn-sm" onclick="showAddContact(' + safeCustomerId + ')">+ 新增</button>';
@@ -2014,7 +2014,7 @@ function renderCustomerContacts(customerId, contacts) {
       : contactPhone;
     html += '</div>';
     html += '</div>';
-    html += '<div style="display:flex;align-items:center;gap:4px;flex-shrink:0">';
+    html += '<div class="customer-contact-actions">';
     if (canUpdate && safeCustomerId && safeContactId) {
       html += '<button type="button" class="btn btn-sm btn-outline" title="编辑联系人" onclick="editCustomerContact(' + safeCustomerId + ', ' + safeContactId + ')">编辑</button>';
       html += '<button type="button" class="btn btn-sm btn-outline" title="归档联系人" onclick="archiveCustomerContact(' + safeCustomerId + ', ' + safeContactId + ')">归档</button>';
@@ -2108,6 +2108,10 @@ function openContactDialog() {
   var overlay = document.getElementById('contactModalOverlay');
   var dialog = document.getElementById('contactDialog');
   if (!overlay || !dialog) return;
+  var currentGeneration = Number(dialog.dataset.requestGeneration || 0);
+  dialog.dataset.requestGeneration = String(
+    Number.isSafeInteger(currentGeneration) && currentGeneration >= 0 ? currentGeneration + 1 : 1
+  );
   contactDialogOpener = document.activeElement;
   overlay.hidden = false;
   overlay.inert = false;
@@ -2123,6 +2127,12 @@ function openContactDialog() {
 function closeContactDialog() {
   var overlay = document.getElementById('contactModalOverlay');
   var dialog = document.getElementById('contactDialog');
+  if (dialog) {
+    var currentGeneration = Number(dialog.dataset.requestGeneration || 0);
+    dialog.dataset.requestGeneration = String(
+      Number.isSafeInteger(currentGeneration) && currentGeneration >= 0 ? currentGeneration + 1 : 1
+    );
+  }
   if (dialog && window.TMAccessibility) window.TMAccessibility.closeDialog(dialog);
   if (overlay) {
     overlay.style.display = 'none';
@@ -2203,6 +2213,33 @@ async function saveCustomerContact() {
     phone: document.getElementById('contactPhone').value.trim(),
     is_preferred: document.getElementById('contactIsPreferred').checked === true
   };
+  var dialog = document.getElementById('contactDialog');
+  var requestGeneration = dialog ? String(dialog.dataset.requestGeneration || '') : '';
+  var requestSnapshot = {
+    action: action,
+    customerId: String(document.getElementById('contactCustomerId').value),
+    editId: String(editId),
+    name: payload.name,
+    role: payload.role,
+    email: payload.email,
+    phone: payload.phone,
+    isPreferred: payload.is_preferred
+  };
+  function requestOwnsDialogGeneration() {
+    var currentDialog = document.getElementById('contactDialog');
+    return !!currentDialog && currentDialog === dialog &&
+      String(currentDialog.dataset.requestGeneration || '') === requestGeneration;
+  }
+  function requestOwnsCurrentDraft() {
+    if (!requestOwnsDialogGeneration() || dialog.dataset.mode !== requestSnapshot.action) return false;
+    return String(document.getElementById('contactCustomerId').value) === requestSnapshot.customerId &&
+      String(document.getElementById('contactEditId').value) === requestSnapshot.editId &&
+      document.getElementById('contactName').value.trim() === requestSnapshot.name &&
+      document.getElementById('contactRole').value.trim() === requestSnapshot.role &&
+      document.getElementById('contactEmail').value.trim() === requestSnapshot.email &&
+      document.getElementById('contactPhone').value.trim() === requestSnapshot.phone &&
+      (document.getElementById('contactIsPreferred').checked === true) === requestSnapshot.isPreferred;
+  }
   var url = '/customers/' + encodeURIComponent(String(customerId)) + '/contacts';
   if (contactId) url += '/' + encodeURIComponent(String(contactId));
   var saveButton = document.getElementById('contactSaveButton');
@@ -2216,15 +2253,22 @@ async function saveCustomerContact() {
       body: JSON.stringify(payload)
     });
     await requireSuccessfulCustomerMutation(response, contactId ? '联系人更新失败' : '联系人创建失败');
+    if (!requestOwnsCurrentDraft()) return true;
     toast(contactId ? '联系人已更新' : '联系人已创建');
     closeContactDialog();
     await openCustomerDetail(customerId);
+    var contactSection = document.getElementById('customerContactSection');
+    var customerDetailDialog = document.getElementById('customerDetailDialog');
+    if (contactSection && typeof contactSection.focus === 'function' && contactSection.isConnected !== false &&
+        (!customerDetailDialog || typeof customerDetailDialog.contains !== 'function' || customerDetailDialog.contains(contactSection))) {
+      contactSection.focus();
+    }
     return true;
   } catch (e) {
-    toast('保存失败: ' + e.message, 'error');
+    if (requestOwnsCurrentDraft()) toast('保存失败: ' + e.message, 'error');
     return false;
   } finally {
-    if (saveButton) {
+    if (saveButton && requestOwnsDialogGeneration()) {
       saveButton.disabled = false;
       saveButton.textContent = '保存';
     }
@@ -2244,6 +2288,13 @@ async function archiveCustomerContact(customerId, contactId) {
     '确认归档该联系人？归档后不会永久删除，历史记录仍会保留。'
   );
   if (!confirmed) return false;
+  var contactDialog = document.getElementById('contactDialog');
+  var requestGeneration = contactDialog ? String(contactDialog.dataset.requestGeneration || '') : '';
+  function requestOwnsContactDialogGeneration() {
+    var currentDialog = document.getElementById('contactDialog');
+    return !!currentDialog && currentDialog === contactDialog &&
+      String(currentDialog.dataset.requestGeneration || '') === requestGeneration;
+  }
   try {
     var response = await apiFetch(
       '/customers/' + encodeURIComponent(String(numericCustomerId)) +
@@ -2251,8 +2302,15 @@ async function archiveCustomerContact(customerId, contactId) {
       { method: 'POST' }
     );
     await requireSuccessfulCustomerMutation(response, '联系人归档失败');
+    if (!requestOwnsContactDialogGeneration()) return true;
     toast('联系人已归档');
     await openCustomerDetail(numericCustomerId);
+    var contactSection = document.getElementById('customerContactSection');
+    var customerDetailDialog = document.getElementById('customerDetailDialog');
+    if (contactSection && typeof contactSection.focus === 'function' && contactSection.isConnected !== false &&
+        (!customerDetailDialog || typeof customerDetailDialog.contains !== 'function' || customerDetailDialog.contains(contactSection))) {
+      contactSection.focus();
+    }
     return true;
   } catch (e) {
     toast('归档失败: ' + e.message, 'error');

@@ -2474,6 +2474,46 @@ thead th {
   display: none;
 }
 
+.customer-contact-section {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.customer-contact-section .contact-card {
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+
+.customer-contact-section .contact-card .cc-avatar {
+  flex: 0 0 36px;
+}
+
+.customer-contact-section .contact-card .cc-info {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  flex: 1 1 180px;
+  max-width: 100%;
+}
+
+.customer-contact-section .customer-contact-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  max-width: 100%;
+  gap: 4px;
+  margin-left: auto;
+}
+
+@media (max-width: 480px) {
+  .customer-contact-section .customer-contact-actions {
+    flex: 1 1 100%;
+    padding-left: 46px;
+  }
+}
+
 .modal-close,
 .wf-modal-close {
   min-width: 36px;

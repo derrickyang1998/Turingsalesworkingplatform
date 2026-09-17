@@ -8,6 +8,7 @@ const repoRoot = path.resolve(__dirname, '..', '..', '..');
 const indexHtml = fs.readFileSync(path.join(repoRoot, 'platform', 'index.html'), 'utf8');
 const appJs = fs.readFileSync(path.join(repoRoot, 'platform', 'app.js'), 'utf8');
 const navigationJs = fs.readFileSync(path.join(repoRoot, 'platform', 'client', 'core', 'navigation.js'), 'utf8');
+const componentsCss = fs.readFileSync(path.join(repoRoot, 'platform', 'client', 'styles', 'components.css'), 'utf8');
 
 function pageSection(id) {
   const marker = `id="${id}"`;
@@ -380,7 +381,7 @@ test('customer sidebar renders compact escaped contacts immediately after basic 
   });
 
   assert.ok(body.innerHTML.indexOf('基本信息') < body.innerHTML.indexOf('customer-contact-section'));
-  assert.match(body.innerHTML, /<h4>联系人 \(1\)<\/h4>/);
+  assert.match(body.innerHTML, /<h4[^>]*>联系人 \(1\)<\/h4>/);
   assert.match(body.innerHTML, /contact-card/);
   assert.match(body.innerHTML, /主联系人/);
   assert.match(body.innerHTML, /&lt;img src=x onerror=alert\(1\)&gt;/);
@@ -434,6 +435,47 @@ test('contact section has a complete empty state and independently gates create 
   assert.doesNotMatch(updateOnly, /showAddContact/);
   assert.match(updateOnly, /editCustomerContact\(41, 7\)/);
   assert.match(updateOnly, /archiveCustomerContact\(41, 7\)/);
+});
+
+test('contact cards contain legal 200-character names and roles at 320px without horizontal overflow', () => {
+  const longName = 'N'.repeat(200);
+  const longRole = 'R'.repeat(200);
+  const { renderCustomerContacts } = evaluateAppFunctions(
+    ['renderCustomerContacts'],
+    {
+      currentUserHasCrmContactPermission: () => true,
+      esc: escapeHtml
+    }
+  );
+
+  const rendered = renderCustomerContacts(41, [{
+    id: 7,
+    name: longName,
+    role: longRole,
+    email: null,
+    phone: null,
+    is_preferred: false
+  }]);
+
+  assert.match(rendered, new RegExp(longName));
+  assert.match(rendered, new RegExp(longRole));
+  assert.match(rendered, /class="customer-contact-actions"/);
+  assert.match(
+    componentsCss,
+    /\.customer-contact-section \.contact-card\s*\{[^}]*min-width:\s*0[^}]*flex-wrap:\s*wrap[^}]*\}/
+  );
+  assert.match(
+    componentsCss,
+    /\.customer-contact-section \.contact-card \.cc-info\s*\{[^}]*min-width:\s*0[^}]*overflow-wrap:\s*anywhere[^}]*\}/
+  );
+  assert.match(
+    componentsCss,
+    /\.customer-contact-section \.customer-contact-actions\s*\{[^}]*flex-wrap:\s*wrap[^}]*max-width:\s*100%[^}]*\}/
+  );
+  assert.match(
+    componentsCss,
+    /@media\s*\(max-width:\s*480px\)[\s\S]*?\.customer-contact-section \.customer-contact-actions\s*\{[^}]*flex:\s*1 1 100%[^}]*\}/
+  );
 });
 
 test('contact dialog is accessible, uses normal checkbox sizing, and exposes explicit create/edit state', () => {
@@ -603,6 +645,7 @@ test('contact create and update use exact endpoints and await refreshed detail a
     const events = [];
     let finishRefresh = null;
     let saveSettled = false;
+    const oldOpener = { isConnected: true };
     const elements = {
       contactEditId: { value: scenario.editId },
       contactCustomerId: { value: '41' },
@@ -611,7 +654,20 @@ test('contact create and update use exact endpoints and await refreshed detail a
       contactEmail: { value: ' alex@example.invalid ' },
       contactPhone: { value: ' +86 555 ' },
       contactIsPreferred: { checked: true },
-      contactSaveButton: { disabled: false, textContent: '保存' }
+      contactSaveButton: { disabled: false, textContent: '保存' },
+      contactDialog: {
+        dataset: {
+          mode: scenario.expectedAction,
+          requestGeneration: '1'
+        }
+      },
+      customerDetailDialog: {
+        contains(node) { return node === elements.customerContactSection; }
+      }
+    };
+    const document = {
+      activeElement: oldOpener,
+      getElementById: (id) => elements[id] || null
     };
     let request = null;
     const { requireSuccessfulCustomerMutation, saveCustomerContact } = evaluateAppFunctions(
@@ -622,16 +678,27 @@ test('contact create and update use exact endpoints and await refreshed detail a
           return true;
         },
         rejectCrmBrowserAction: () => false,
-        document: { getElementById: (id) => elements[id] || null },
+        document,
         apiFetch: async (url, options) => {
           request = { url, options };
           events.push('request');
           return { ok: true, status: 200 };
         },
-        closeContactDialog: () => events.push('close'),
+        closeContactDialog: () => {
+          document.activeElement = oldOpener;
+          events.push('close');
+        },
         openCustomerDetail: (customerId) => new Promise((resolve) => {
           events.push(`refresh:${customerId}`);
           finishRefresh = () => {
+            oldOpener.isConnected = false;
+            elements.customerContactSection = {
+              isConnected: true,
+              focus() {
+                document.activeElement = this;
+                events.push('focus:contacts');
+              }
+            };
             events.push('refresh-complete');
             resolve();
           };
@@ -657,7 +724,92 @@ test('contact create and update use exact endpoints and await refreshed detail a
     finishRefresh();
     await savePromise;
     assert.ok(events.indexOf('refresh:41') < events.indexOf('refresh-complete'));
+    assert.ok(events.indexOf('refresh-complete') < events.indexOf('focus:contacts'));
+    assert.equal(elements.customerDetailDialog.contains(document.activeElement), true);
   }
+});
+
+test('an older Alice save cannot close or refresh a reopened Bob contact draft', async () => {
+  const dialog = { dataset: {}, setAttribute() {}, focus() {} };
+  const overlay = {
+    hidden: true,
+    inert: true,
+    style: {},
+    removeAttribute() {},
+    setAttribute() {}
+  };
+  const elements = {
+    contactModalOverlay: overlay,
+    contactDialog: dialog,
+    contactModalTitle: { textContent: '' },
+    contactEditId: { value: '' },
+    contactCustomerId: { value: '' },
+    contactName: { value: '' },
+    contactRole: { value: '' },
+    contactEmail: { value: '' },
+    contactPhone: { value: '' },
+    contactIsPreferred: { checked: false },
+    contactSaveButton: {
+      hidden: false,
+      disabled: false,
+      textContent: '保存',
+      setAttribute(name, value) { this[name] = value; }
+    }
+  };
+  let releaseAlice = null;
+  let refreshed = 0;
+  let closeCount = 0;
+  const { requireSuccessfulCustomerMutation, setContactDialogMode, openContactDialog,
+    closeContactDialog, showAddContact, saveCustomerContact } = evaluateAppFunctions(
+    [
+      'requireSuccessfulCustomerMutation',
+      'setContactDialogMode',
+      'openContactDialog',
+      'closeContactDialog',
+      'showAddContact',
+      'saveCustomerContact'
+    ],
+    {
+      currentUserHasCrmContactPermission: () => true,
+      rejectCrmBrowserAction: () => false,
+      document: {
+        activeElement: { focus() {} },
+        getElementById: (id) => elements[id] || null
+      },
+      window: {
+        TMAccessibility: {
+          openDialog() {},
+          closeDialog() { closeCount += 1; }
+        }
+      },
+      apiFetch: () => new Promise((resolve) => {
+        releaseAlice = () => resolve({ ok: true, status: 200 });
+      }),
+      openCustomerDetail: async () => { refreshed += 1; },
+      toast() {}
+    }
+  );
+
+  showAddContact(41);
+  elements.contactName.value = 'Alice';
+  const aliceSave = saveCustomerContact();
+  while (!releaseAlice) await new Promise((resolve) => setImmediate(resolve));
+
+  closeContactDialog();
+  showAddContact(41);
+  elements.contactName.value = 'Bob';
+  assert.equal(overlay.hidden, false);
+  assert.equal(elements.contactSaveButton.disabled, false);
+
+  releaseAlice();
+  await aliceSave;
+
+  assert.equal(overlay.hidden, false);
+  assert.equal(elements.contactName.value, 'Bob');
+  assert.equal(elements.contactSaveButton.disabled, false);
+  assert.equal(elements.contactSaveButton.textContent, '保存');
+  assert.equal(refreshed, 0);
+  assert.equal(closeCount, 1);
 });
 
 test('non-success contact save response stays open and never refreshes detail', async () => {
@@ -672,7 +824,8 @@ test('non-success contact save response stays open and never refreshes detail', 
     contactEmail: { value: '' },
     contactPhone: { value: '' },
     contactIsPreferred: { checked: false },
-    contactSaveButton: { disabled: false, textContent: '保存' }
+    contactSaveButton: { disabled: false, textContent: '保存' },
+    contactDialog: { dataset: { mode: 'create', requestGeneration: '1' } }
   };
   const { requireSuccessfulCustomerMutation, saveCustomerContact } = evaluateAppFunctions(
     ['requireSuccessfulCustomerMutation', 'saveCustomerContact'],
@@ -699,12 +852,108 @@ test('non-success contact save response stays open and never refreshes detail', 
   assert.equal(messages.some((message) => message.includes('HTTP 422')), true);
 });
 
+test('an older archive response cannot refresh or steal focus from a newly opened contact draft', async () => {
+  const dialog = { dataset: { requestGeneration: '0' }, setAttribute() {}, focus() {} };
+  const overlay = {
+    hidden: true,
+    inert: true,
+    style: {},
+    removeAttribute() {},
+    setAttribute() {}
+  };
+  const elements = {
+    contactModalOverlay: overlay,
+    contactDialog: dialog,
+    contactModalTitle: { textContent: '' },
+    contactEditId: { value: '' },
+    contactCustomerId: { value: '' },
+    contactName: { value: '' },
+    contactRole: { value: '' },
+    contactEmail: { value: '' },
+    contactPhone: { value: '' },
+    contactIsPreferred: { checked: false },
+    contactSaveButton: {
+      hidden: false,
+      disabled: false,
+      textContent: '保存',
+      setAttribute(name, value) { this[name] = value; }
+    },
+    customerDetailDialog: {
+      contains(node) { return node === elements.customerContactSection; }
+    }
+  };
+  const document = {
+    activeElement: { id: 'archive-opener' },
+    getElementById: (id) => elements[id] || null
+  };
+  let releaseArchive = null;
+  let refreshed = 0;
+  const { requireSuccessfulCustomerMutation, setContactDialogMode, openContactDialog,
+    showAddContact, archiveCustomerContact } = evaluateAppFunctions(
+    [
+      'requireSuccessfulCustomerMutation',
+      'setContactDialogMode',
+      'openContactDialog',
+      'showAddContact',
+      'archiveCustomerContact'
+    ],
+    {
+      currentUserHasCrmContactPermission: () => true,
+      rejectCrmBrowserAction: () => false,
+      document,
+      window: {
+        TMAccessibility: {
+          openDialog() { document.activeElement = elements.contactName; }
+        }
+      },
+      showConfirm: async () => true,
+      apiFetch: () => new Promise((resolve) => {
+        releaseArchive = () => resolve({ ok: true, status: 200 });
+      }),
+      openCustomerDetail: async () => {
+        refreshed += 1;
+        elements.customerContactSection = {
+          isConnected: true,
+          focus() { document.activeElement = this; }
+        };
+      },
+      toast() {}
+    }
+  );
+
+  const archivePromise = archiveCustomerContact(41, 7);
+  while (!releaseArchive) await new Promise((resolve) => setImmediate(resolve));
+
+  showAddContact(41);
+  elements.contactName.value = 'Bob';
+  assert.equal(document.activeElement, elements.contactName);
+
+  releaseArchive();
+  await archivePromise;
+
+  assert.equal(refreshed, 0);
+  assert.equal(overlay.hidden, false);
+  assert.equal(elements.contactName.value, 'Bob');
+  assert.equal(document.activeElement, elements.contactName);
+});
+
 test('contact archive confirms soft deletion, uses the archive endpoint, and awaits detail refresh', async () => {
   const confirmations = [];
   const events = [];
   let allowArchive = false;
   let finishRefresh = null;
   let archiveSettled = false;
+  const oldOpener = { isConnected: true };
+  const elements = {
+    contactDialog: { dataset: { requestGeneration: '0' } },
+    customerDetailDialog: {
+      contains(node) { return node === elements.customerContactSection; }
+    }
+  };
+  const document = {
+    activeElement: oldOpener,
+    getElementById: (id) => elements[id] || null
+  };
   const { requireSuccessfulCustomerMutation, archiveCustomerContact } = evaluateAppFunctions(
     ['requireSuccessfulCustomerMutation', 'archiveCustomerContact'],
     {
@@ -718,9 +967,18 @@ test('contact archive confirms soft deletion, uses the archive endpoint, and awa
         events.push(`request:${options.method}:${url}`);
         return { ok: true, status: 200 };
       },
+      document,
       openCustomerDetail: (customerId) => new Promise((resolve) => {
         events.push(`refresh:${customerId}`);
         finishRefresh = () => {
+          oldOpener.isConnected = false;
+          elements.customerContactSection = {
+            isConnected: true,
+            focus() {
+              document.activeElement = this;
+              events.push('focus:contacts');
+            }
+          };
           events.push('refresh-complete');
           resolve();
         };
@@ -750,8 +1008,10 @@ test('contact archive confirms soft deletion, uses the archive endpoint, and awa
     'request:POST:/customers/41/contacts/7/archive',
     'toast:联系人已归档',
     'refresh:41',
-    'refresh-complete'
+    'refresh-complete',
+    'focus:contacts'
   ]);
+  assert.equal(elements.customerDetailDialog.contains(document.activeElement), true);
 });
 
 test('contact inline controls are included in the global export contract', () => {
