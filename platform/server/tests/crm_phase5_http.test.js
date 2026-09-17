@@ -988,6 +988,12 @@ test('crm http: opportunity routes and embedded customer detail enforce named ac
       organizationId: 501,
       module: 'crm.opportunity',
       action: 'read'
+    },
+    {
+      principal: { id: 101, role: 'user' },
+      organizationId: 501,
+      module: 'crm.contact',
+      action: 'read'
     }
   ]);
 });
