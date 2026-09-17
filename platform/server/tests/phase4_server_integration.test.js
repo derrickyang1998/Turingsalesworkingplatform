@@ -664,6 +664,7 @@ async function createReadOnlyContactUser(server, suffix) {
     body: { username, password }
   });
   assert.equal(login.response.status, 200, login.text);
+  assert.deepEqual(login.body.user.module_permissions['crm.contact'], ['read']);
   return login;
 }
 
@@ -824,7 +825,8 @@ test('login and auth me preserve the user object and add current auth context', 
     });
     assert.deepEqual(login.body.user.module_permissions, {
       'crm.customer': ['read', 'create', 'update'],
-      'crm.opportunity': ['read', 'create', 'update']
+      'crm.opportunity': ['read', 'create', 'update'],
+      'crm.contact': ['read', 'create', 'update']
     });
     assert.equal(Array.isArray(login.body.auth_context.teams), true);
     assert.equal(login.body.auth_context.teams.length > 0, true);
@@ -911,7 +913,8 @@ test('read-only access is live, revokes old sessions, permits GET, blocks all bu
     assert.equal(readOnlyLogin.body.user.organization_access.access_mode, 'read_only');
     assert.deepEqual(readOnlyLogin.body.user.module_permissions, {
       'crm.customer': ['read'],
-      'crm.opportunity': ['read']
+      'crm.opportunity': ['read'],
+      'crm.contact': ['read']
     });
 
     const readable = await jsonRequest(server.baseUrl, '/api/demands', {
@@ -990,6 +993,7 @@ test('opportunity named permission ingress denies read-only malformed JSON befor
       const body = await response.json();
       assert.equal(response.status, 403, `${method} ${requestPath}`);
       assert.equal(body.code, 'CRM_PERMISSION_FORBIDDEN');
+      assert.equal(body.title, 'CRM permission is not allowed');
       assert.equal(body.request_id, requestId);
     }
 
@@ -1191,7 +1195,27 @@ test('contact named permission ingress denies malformed JSON before parsing acro
       const body = await response.json();
       assert.equal(response.status, 403, `${method} ${requestPath}`);
       assert.equal(body.code, 'CRM_PERMISSION_FORBIDDEN');
+      assert.equal(body.title, 'CRM permission is not allowed');
       assert.equal(body.request_id, requestId);
+    }
+
+    for (const [method, requestPath, label] of [
+      ['POST', '/api/customers/41/contacts/81', 'create'],
+      ['PUT', '/api/customers/41/contacts/81/extra', 'update'],
+      ['POST', '/api/customers/41/contacts/81/archive/extra', 'archive']
+    ]) {
+      const response = await fetch(server.baseUrl + requestPath, {
+        method,
+        headers: {
+          Authorization: `Bearer ${login.body.token}`,
+          'Content-Type': 'application/json',
+          'X-Request-Id': `contact-extra-segment-${label}`
+        },
+        body: '{'
+      });
+      const text = await response.text();
+      assert.equal(response.status, 400, `${method} ${requestPath}`);
+      assert.doesNotMatch(text, /CRM_PERMISSION_FORBIDDEN/);
     }
 
     const inspection = new Database(server.dbPath, { readonly: true });

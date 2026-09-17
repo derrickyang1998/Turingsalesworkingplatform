@@ -17,7 +17,11 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
     CRM_OPPORTUNITY_MODULE,
     CRM_OPPORTUNITY_READ_ACTION,
     CRM_OPPORTUNITY_CREATE_ACTION,
-    CRM_OPPORTUNITY_UPDATE_ACTION
+    CRM_OPPORTUNITY_UPDATE_ACTION,
+    CRM_CONTACT_MODULE,
+    CRM_CONTACT_READ_ACTION,
+    CRM_CONTACT_CREATE_ACTION,
+    CRM_CONTACT_UPDATE_ACTION
   } = require('./services/module_action_permission_service');
   const moduleActionPermissionService = options.moduleActionPermissionService ||
     createModuleActionPermissionService(db);
@@ -141,7 +145,7 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
     CRM_SCOPE_INVALID: 'CRM organization context is not valid',
     CRM_SCOPE_FORBIDDEN: 'CRM scope is not allowed',
     CRM_SCOPE_NOT_FOUND: 'CRM organization context was not found',
-    CRM_PERMISSION_FORBIDDEN: 'CRM customer permission is not allowed',
+    CRM_PERMISSION_FORBIDDEN: 'CRM permission is not allowed',
     CRM_PERMISSION_AUDIT_FAILED: 'CRM permission audit could not be recorded',
     CRM_MUTATION_INVALID: 'CRM mutation command is not valid',
     CRM_CUSTOMER_NOT_FOUND: 'CRM customer was not found',
@@ -586,6 +590,7 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
       }
       if (module === CRM_CUSTOMER_MODULE) req.crmCustomerPermission = effectiveDecision;
       if (module === CRM_OPPORTUNITY_MODULE) req.crmOpportunityPermission = effectiveDecision;
+      if (module === CRM_CONTACT_MODULE) req.crmContactPermission = effectiveDecision;
       return next();
     };
   }
@@ -621,6 +626,21 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
     CRM_OPPORTUNITY_MODULE,
     CRM_OPPORTUNITY_UPDATE_ACTION,
     { targetType: 'opportunity', targetParam: 'id' }
+  );
+  const requireEmbeddedCrmContactRead = requireCrmPermission(
+    CRM_CONTACT_MODULE,
+    CRM_CONTACT_READ_ACTION,
+    { targetType: 'customer', targetParam: 'id', applyScopeRules: true }
+  );
+  const requireCrmContactCreate = requireCrmPermission(
+    CRM_CONTACT_MODULE,
+    CRM_CONTACT_CREATE_ACTION,
+    { targetType: 'contact' }
+  );
+  const requireCrmContactUpdate = requireCrmPermission(
+    CRM_CONTACT_MODULE,
+    CRM_CONTACT_UPDATE_ACTION,
+    { targetType: 'contact', targetParam: 'contactId' }
   );
 
   function callMutation(serviceMethod, req, command) {
@@ -864,9 +884,16 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
     return res.json(statsResponse(req, readCanonicalFilter(req.query, 'customer')));
   }));
 
-  app.get('/api/customers/:id/detail', authMiddleware, requireCrmCustomerRead, requireEmbeddedCrmOpportunityRead, crmHandler((req, res) => {
-    return res.json(callCustomerDetail(req));
-  }));
+  app.get(
+    '/api/customers/:id/detail',
+    authMiddleware,
+    requireCrmCustomerRead,
+    requireEmbeddedCrmOpportunityRead,
+    requireEmbeddedCrmContactRead,
+    crmHandler((req, res) => {
+      return res.json(callCustomerDetail(req));
+    })
+  );
 
   app.post('/api/customers', authMiddleware, requireCrmCustomerCreate, crmHandler((req, res) => {
     return res.json(callMutation('createOrUpdateCustomer', req, customerCreateCommand(req)));
@@ -989,7 +1016,7 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
   app.get('/api/dashboard/sales', authMiddleware, requireCrmCustomerRead, crmHandler(legacyDashboardAlias));
   app.get('/api/dashboard/stats', authMiddleware, requireCrmCustomerRead, crmHandler(legacyDashboardAlias));
 
-  app.post('/api/customers/:customerId/contacts', authMiddleware, crmHandler((req, res) => {
+  app.post('/api/customers/:customerId/contacts', authMiddleware, requireCrmContactCreate, crmHandler((req, res) => {
     const body = plainRecord(req.body || {});
     const command = {
       action: 'create',
@@ -999,7 +1026,7 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
     return res.json(callMutation('mutateCustomerContact', req, command));
   }));
 
-  app.put('/api/customers/:customerId/contacts/:contactId', authMiddleware, crmHandler((req, res) => {
+  app.put('/api/customers/:customerId/contacts/:contactId', authMiddleware, requireCrmContactUpdate, crmHandler((req, res) => {
     const body = plainRecord(req.body || {});
     const command = {
       action: 'update',
@@ -1010,7 +1037,7 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
     return res.json(callMutation('mutateCustomerContact', req, command));
   }));
 
-  app.post('/api/customers/:customerId/contacts/:contactId/archive', authMiddleware, crmHandler((req, res) => {
+  app.post('/api/customers/:customerId/contacts/:contactId/archive', authMiddleware, requireCrmContactUpdate, crmHandler((req, res) => {
     const command = {
       action: 'archive',
       customerId: positiveInteger(req.params.customerId),

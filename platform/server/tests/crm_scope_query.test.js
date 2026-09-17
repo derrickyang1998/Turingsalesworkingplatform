@@ -587,7 +587,8 @@ test('customer detail is team-lead-readable and returns one bounded immutable ag
   assert.deepEqual(detail.meta, {
     request_id: 'detail-teammate',
     scope: 'team',
-    opportunities: { limit: 100, has_more: false }
+    opportunities: { limit: 100, has_more: false },
+    contacts: { limit: 100, has_more: false }
   });
   assert.equal(Object.isFrozen(detail), true);
   assert.equal(Object.isFrozen(detail.customer), true);
@@ -662,7 +663,8 @@ test('organization admin may inspect a same-organization quarantined customer de
   assert.deepEqual(detail.meta, {
     request_id: 'detail-org-admin',
     scope: 'organization',
-    opportunities: { limit: 100, has_more: false }
+    opportunities: { limit: 100, has_more: false },
+    contacts: { limit: 100, has_more: false }
   });
 });
 

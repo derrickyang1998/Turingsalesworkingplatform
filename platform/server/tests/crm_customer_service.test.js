@@ -2816,6 +2816,7 @@ test('aggregate child: contact create update and archive keep PII out of evidenc
     record: {
       id: createdRow.id,
       customer_id: IDS.ownedA,
+      is_preferred: true,
       archived_at: null,
       updated_at: createdRow.updated_at
     },

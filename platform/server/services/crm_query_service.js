@@ -35,6 +35,7 @@ const APPLIED_FILTER_KEYS = Object.freeze([
   'as_of'
 ]);
 const CUSTOMER_DETAIL_OPPORTUNITY_LIMIT = 100;
+const CUSTOMER_DETAIL_CONTACT_LIMIT = 100;
 
 class CrmQueryError extends Error {
   constructor(cause) {
@@ -501,6 +502,18 @@ function mapCustomerDetailRow(row) {
   };
 }
 
+function mapContactRow(row) {
+  return {
+    id: row.id,
+    customer_id: row.customer_id,
+    name: row.name,
+    role: row.role,
+    email: row.email,
+    phone: row.phone,
+    is_preferred: row.is_preferred === 1
+  };
+}
+
 function opportunityProjection() {
   return `
     o.id,
@@ -731,6 +744,19 @@ function getCustomerDetail(db, rawOptions) {
     );
     const opportunitiesHaveMore = opportunityRows.length > CUSTOMER_DETAIL_OPPORTUNITY_LIMIT;
     const opportunities = opportunityRows.slice(0, CUSTOMER_DETAIL_OPPORTUNITY_LIMIT);
+    const contactRows = db.prepare(`
+      SELECT id,customer_id,name,role,email,phone,is_preferred
+      FROM customer_contacts
+      WHERE org_id=? AND customer_id=? AND archived_at IS NULL
+      ORDER BY is_preferred DESC,id ASC
+      LIMIT ?
+    `).all(
+      state.context.organization.id,
+      options.customerId,
+      CUSTOMER_DETAIL_CONTACT_LIMIT + 1
+    );
+    const contactsHaveMore = contactRows.length > CUSTOMER_DETAIL_CONTACT_LIMIT;
+    const contacts = contactRows.slice(0, CUSTOMER_DETAIL_CONTACT_LIMIT);
     const activity = db.prepare(`
       SELECT
         a.id,
@@ -756,6 +782,7 @@ function getCustomerDetail(db, rawOptions) {
     return deepFreeze({
       customer: mapCustomerDetailRow(customerRow),
       opportunities: opportunities.map(mapOpportunityDetailRow),
+      contacts: contacts.map(mapContactRow),
       activity: activity.map(mapActivityRow),
       meta: {
         request_id: Object.hasOwn(options, 'requestId') ? options.requestId : null,
@@ -763,6 +790,10 @@ function getCustomerDetail(db, rawOptions) {
         opportunities: {
           limit: CUSTOMER_DETAIL_OPPORTUNITY_LIMIT,
           has_more: opportunitiesHaveMore
+        },
+        contacts: {
+          limit: CUSTOMER_DETAIL_CONTACT_LIMIT,
+          has_more: contactsHaveMore
         }
       }
     });

@@ -1638,11 +1638,21 @@ function contactSuccessResult(contact, action, input) {
     record: {
       id: contact.id,
       customer_id: contact.customer_id,
+      is_preferred: contact.is_preferred === 1,
       archived_at: contact.archived_at,
       updated_at: contact.updated_at
     },
     meta: { request_id: input.requestId, correlation_id: input.correlationId }
   });
+}
+
+function demoteOtherPreferredContacts(db, organizationId, customerId, contactId) {
+  db.prepare(`
+    UPDATE customer_contacts
+    SET is_preferred=0,updated_at=CURRENT_TIMESTAMP
+    WHERE org_id=? AND customer_id=? AND archived_at IS NULL
+      AND is_preferred=1 AND id<>?
+  `).run(organizationId, customerId, contactId);
 }
 
 function writeContactEvidence(db, context, input, customer, contact, eventType, changedFields) {
@@ -1660,6 +1670,9 @@ function writeContactEvidence(db, context, input, customer, contact, eventType, 
 
 function createContact(db, context, input, customer) {
   const final = contactFinalState(input.command, null);
+  if (final.values.is_preferred === 1) {
+    demoteOtherPreferredContacts(db, context.organization.id, customer.id, 0);
+  }
   let inserted;
   try {
     inserted = db.prepare(`
@@ -1690,6 +1703,9 @@ function createContact(db, context, input, customer) {
 function updateContact(db, context, input, customer, contact) {
   if (contact.archived_at !== null) throw invalidTransition();
   const final = contactFinalState(input.command, contact);
+  if (final.values.is_preferred === 1) {
+    demoteOtherPreferredContacts(db, context.organization.id, customer.id, contact.id);
+  }
   let updated;
   try {
     updated = db.prepare(`
