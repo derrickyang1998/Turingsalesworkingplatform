@@ -1,6 +1,6 @@
 # TuringMarket Engineering Handoff / 图灵商务平台工程交接
 
-Updated / 更新日期：2026-09-16
+Updated / 更新日期：2026-09-17
 
 ## Authoritative Baseline / 权威基线
 
@@ -8,7 +8,7 @@ Updated / 更新日期：2026-09-16
 - Current production delivery branch / 当前生产交付分支：`codex/v0.7.0-ai-knowledge-proposal-ppt-loop-production`
 - Guarded Phase 6 incremental release branch / 第 6 阶段受控增量发布分支：`codex/v0.7.0-ai-knowledge-proposal-ppt-loop-production`
 - Phase 4 development base / 第 4 阶段开发基线：`5960ade03e1bd605ee4bfbe877baa09bc6482083`
-- Current production source / 当前生产源码：`09f63ddfd7916a7e86275252139d14dabfe06155` (`v0.9.4-crm-customer-role-permissions`)
+- Current production source / 当前生产源码：`a4a91cf7341fc7623bd4bf0329c6d5fa8abd6d94` (`v0.9.5-crm-opportunity-role-permissions`)
 - Backend / 后端：Node.js 20 + Express 5
 - Database / 数据库：SQLite through `better-sqlite3`
 - PM2 / 进程：`platform/ecosystem.config.js` -> `server/server.js`, process name `turingmarket`
@@ -19,15 +19,15 @@ This checkout consolidates the latest CRM, AI conversation, knowledge base, infl
 
 ## Current Production Status / 当前生产状态
 
-- Release / 版本：`v0.9.4-crm-customer-role-permissions`, deployed and verified on `2026-09-16` / 已于 `2026-09-16` 部署并验收。
-- Production run / 生产运行：`1bf1cac695d34555aa2792f4859a6f6d`; backup / 备份：`/root/turingmarket/backups/v060-crm-sales-workspace-20260916-194030`；candidate SHA-256 / 候选摘要：`86bcd0b7edbe72d7c497ece65e25f14e964ef1b8b7ad60b7cde585273e79e1ee`。
-- Acceptance-time runtime / 验收时运行状态：PM2 `online`, restart count `0`, PID `280147`; Nginx `active`; public and loopback `/api/health` `200`; parser ready / PM2 在线且无重启，Nginx、公网与回环健康接口及解析器正常。
+- Release / 版本：`v0.9.5-crm-opportunity-role-permissions`, deployed and verified on `2026-09-17` / 已于 `2026-09-17` 部署并验收。
+- Production run / 生产运行：`e35726dff0d348c7968e4e3c640f3d8a`; backup / 备份：`/root/turingmarket/backups/v060-crm-sales-workspace-20260917-145108`；candidate SHA-256 / 候选摘要：`ef3c4297997bcbfb85b090997f463ae1bdfe1b6c41252efc7178d5731cf19b46`。
+- Acceptance-time runtime / 验收时运行状态：PM2 `online`, restart count `0`, PID `323254`; Nginx `active`; public and loopback `/api/health` `200`; parser ready / PM2 在线且无重启，Nginx、公网与回环健康接口及解析器正常。
 - Current reachability / 当前可达性：the authoritative host is reachable through the local SOCKS path `127.0.0.1:10808`; SSH alias `turingmarket-production-via-local-proxy` and proxied HTTP were verified. Direct local routing may still time out, so retain the proxy path for subsequent releases. `agent.turingmarket.ai` remains a separate Nuxt application and is not this production target. / 权威主机已通过本机 SOCKS 通道恢复 SSH 与 HTTP；后续发布保留该代理路径，另一 Nuxt 应用仍不得作为替代生产目标。
 - Database / 数据库：schema `v21`, `quick_check=ok`, foreign-key violations `0`, governance tables/triggers present, membership/policy parity `21:21`, assigned owner count `1`, active sessions `0` / schema v21、完整性与外键正常、治理表和触发器存在、成员策略一一对应、企业所有者已确定且活动会话为零。
-- Phase 8 current slices / 第 8 阶段当前切片：the fail-closed module/action foundation, authoritative company-owner/read-only facts, scoped member governance, and the live read-only barrier remain active. `crm.customer` now adopts exact `read/create/update` actions and organization/team/member scope boundaries. Ownership transfer and the remaining modules stay separate. / 默认拒绝权限底座、企业所有者/只读权威事实、成员治理和实时只读拦截保持有效；`crm.customer` 已接入精确读/建/改权限及组织/团队/个人范围，所有权转移和其余模块继续独立发布。
-- Online authorization / 线上权限：administrator organization reads returned `200`; ordinary-member team/organization widening returned `403`; manager team reads returned `200` while organization widening returned `403`; read-only customer reads returned `200` and writes returned exact `403 ORGANIZATION_READ_ONLY`. The temporary account was deactivated and its active memberships and sessions are zero. / 管理员、普通成员、经理和只读角色的线上范围矩阵、写入拒绝、停用及会话清理均已通过。
+- Phase 8 current slices / 第 8 阶段当前切片：the fail-closed module/action foundation, authoritative company-owner/read-only facts, scoped member governance, and the live read-only barrier remain active. Both `crm.customer` and `crm.opportunity` now adopt exact `read/create/update` actions and tenant scope boundaries. Contacts, tasks, ownership transfer, and the remaining modules stay separate. / 默认拒绝权限底座、企业所有者/只读权威事实、成员治理和实时只读拦截保持有效；`crm.customer` 与 `crm.opportunity` 均已接入精确读/建/改及租户范围，联系人、任务、所有权转移和其余模块继续独立发布。
+- Online authorization / 线上权限：administrator opportunity projection and list reads returned `200`; ordinary-member personal reads returned `200` while team/organization widening returned `403`; writable malformed JSON reached `400 INVALID_REQUEST_BODY`; read-only opportunity reads returned `200`, while case-variant create and invalid-ID update returned exact `403 CRM_PERMISSION_FORBIDDEN` before parsing and produced bounded audit rows. Both temporary users were deactivated with zero active organization/team memberships and sessions. / 管理员、普通成员和只读角色的线上商机权限、范围、解析顺序、审计、停用及会话清理均已通过。
 - Product boundary / 产品边界：the accepted v0.6 shell, CRM, M3/M4, AI/knowledge, proposal, and frozen PPT remain intact. / 已验收的 v0.6 产品壳层、CRM、M3/M4、AI/知识、方案与冻结 PPT 均保持不变。
-- Full evidence / 完整证据：`docs/version-records/2026-09-16-v0.9.4-crm-customer-role-permissions-production.md`。
+- Full evidence / 完整证据：`docs/version-records/2026-09-17-v0.9.5-crm-opportunity-role-permissions-production.md`。
 
 `v0.6.0-crm-sales-workspace` contains the accepted Phase 5 CRM implementation and the upgraded schema-6 release contract. It MUST NOT be described as production until independent release review, GitHub push, verified backup, guarded deployment, remote runtime/API/UI/access acceptance, and rollback evidence all pass. / `v0.6.0-crm-sales-workspace` 已包含通过验收的第 5 阶段 CRM 实现及 schema-6 发布合同；独立发布复审、GitHub 推送、可校验备份、受控部署、远端运行时/API/UI/权限验收与回滚证据全部通过前，不得称为生产版本。
 
@@ -124,7 +124,7 @@ Manual rollback / 手工回滚：
 
 The same restore function is used by automatic and manual rollback. Phase 4 rejects code-only rollback: manual restore requires `-RollbackBackup`, `-RestoreDatabase`, and `-ConfirmDataLoss`; automatic post-mutation recovery always selects the same database/cache path. Every manifest is verified, SQLite and `PPT_CACHE_DIR` are restored as one unit, stale SQLite sidecars are removed, and every session is deleted before PM2 starts with `SERVER_HOST=127.0.0.1`. `-PreserveSessions` is always rejected. / 自动与手工回滚共用同一数据库与缓存恢复函数；手工恢复必须显式提供备份、恢复数据库及确认数据丢失，且始终在 PM2 启动前撤销全部会话。
 
-Production runs accepted v0.9.4 on schema v21. The release preserves the accepted v0.6 product shell and frozen PPT renderer while applying exact customer permissions and tenant scopes to CRM. Subsequent ordinary slices use affected tests plus independent review and immediate online smoke; authentication, schema, shared infrastructure, and external-write changes retain risk-triggered gates. / 生产现运行已验收的 v0.9.4/schema v21，保留既有产品壳层与冻结 PPT，并将精确客户权限和租户范围接入 CRM；后续普通切片采用受影响测试、独立审查和当轮线上冒烟，高风险边界继续保留必要门禁。
+Production runs accepted v0.9.5 on schema v21. The release preserves the accepted v0.6 product shell and frozen PPT renderer while applying exact customer and opportunity permissions, tenant scopes, pre-parser denial audit, and permission-aware opportunity controls to CRM. Subsequent ordinary slices use affected tests plus independent review and immediate online smoke; authentication, schema, shared infrastructure, and external-write changes retain risk-triggered gates. / 生产现运行已验收的 v0.9.5/schema v21，保留既有产品壳层与冻结 PPT，并将精确客户/商机权限、租户范围、解析前拒绝审计和权限感知商机控件接入 CRM；后续普通切片采用受影响测试、独立审查和当轮线上冒烟，高风险边界继续保留必要门禁。
 
 ## Security And Secrets / 安全与密钥
 

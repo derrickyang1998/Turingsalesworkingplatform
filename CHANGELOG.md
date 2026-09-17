@@ -1,5 +1,27 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.9.5-crm-opportunity-role-permissions (Production Deployed, 2026-09-17) - CRM 商机角色权限
+
+### 交付与范围 / Delivery And Scope
+- 将中央模块/操作权限扩展到 `crm.opportunity` 的 `read`、`create`、`update`，由实时组织角色和团队事实决定；企业所有者、组织管理员、经理和成员可读建改，只读角色仅可读，纯平台管理员身份不能绕过租户边界。
+- 商机列表、详情、创建、更新及客户详情内嵌商机均接入服务端命名权限；拒绝和组织级读取写入有界审计，写入失败时失效关闭。
+- 现有 CRM 界面保留：所有可读角色均使用真实“查看”按钮，只对有更新权限的角色显示“编辑”；查看态禁用字段并隐藏保存，商机表格所有服务端文本在写入 HTML 前转义，非成功响应不再伪装为空数据。
+- 本版不修改 schema，不扩展联系人、任务、所有权转移、套餐或配额，不替换 M3/M4、AI/知识库、网红、飞书、工作流、导出和冻结 PPT。
+
+### 轻量验证与独立审查 / Lightweight Verification And Independent Review
+- 本地受影响权限/HTTP/UI 测试 `55/55`、真实登录/只读/商机权限顺序测试 `5/5` 通过；JavaScript 语法、差异、聚焦凭据、UTF-8/乱码、冻结 PPT 哈希与本地发布预检通过。
+- 首轮独立审查发现请求体解析顺序、存储型 XSS、只读详情入口、键盘可访问性和错误状态处理问题；修复后后端复审又发现大小写及非规范 ID 路由边界，补充 RED/GREEN 真实 HTTP 用例后最终后端与前端均为 `APPROVE`，无剩余 HIGH/MEDIUM/P1/P2 阻断。
+- 生产候选通过远端中央权限 `13/13`、CRM/UI `42/42`、Chromium `2/2`、可信迁移演练、Nginx 与最终公网发布门禁。
+
+### 生产状态 / Production Status
+- 生产源码 `a4a91cf7341fc7623bd4bf0329c6d5fa8abd6d94` 已推送 GitHub；生产运行 `e35726dff0d348c7968e4e3c640f3d8a` 返回 `DEPLOY_OK`，可信源码 SHA-256 为 `949afb55224565a9ddca9871e0145c124bfe44bb7f66d053fa00c8914599b7ed`，候选树 SHA-256 为 `ef3c4297997bcbfb85b090997f463ae1bdfe1b6c41252efc7178d5731cf19b46`。
+- 可恢复备份为 `/root/turingmarket/backups/v060-crm-sales-workspace-20260917-145108`，数据库摘要复验通过；schema `v21`、`quick_check=ok`、外键异常 `0`。
+- 线上管理员商机读/建/改投影和列表读取为 `200`；普通成员读取 `200`、团队/组织扩权 `403`、坏 JSON 在通过权限后返回 `400 INVALID_REQUEST_BODY`；只读角色读取 `200`，大小写创建路径与非法 ID 更新路径均在解析前返回 `403 CRM_PERMISSION_FORBIDDEN` 并写入有界审计。
+- 两个临时账号均已停用，有效组织/团队关系及活动会话为 `0`；PM2 `online`、重启 `0`、PID `323254`，Nginx `active`，公网健康、`/m0` 与 `/m0-detail` 均为 `200`，冻结 `ppt.js` 哈希保持不变。
+
+### 下一边界 / Next Boundary
+- 继续执行“一功能一上线”；下一权限切片单独选择联系人、任务或所有权转移，不与本版合并。普通功能继续只跑受影响验证和一次独立审查，高风险边界保留必要扩展门禁。
+
 ## v0.9.4-crm-customer-role-permissions (Production Deployed, 2026-09-16) - CRM 客户角色权限
 
 ### 交付与范围 / Delivery And Scope
