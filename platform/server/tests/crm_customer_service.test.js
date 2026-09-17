@@ -2849,7 +2849,7 @@ test('aggregate child: contact create update and archive keep PII out of evidenc
   assert.equal(rearchive.code, 'CRM_TRANSITION_INVALID');
 });
 
-test('aggregate child: selecting a primary contact atomically replaces the prior active primary', (t) => {
+test('aggregate child: primary contact replacement promotes existing contacts and rolls back forced failures', (t) => {
   const db = openFixture(t);
   insertContact(db, { id: IDS.contactA, customerId: IDS.ownedA, isPreferred: 1 });
   insertContact(db, { id: IDS.contactOtherCustomer, customerId: IDS.transferredA });
@@ -2875,6 +2875,48 @@ test('aggregate child: selecting a primary contact atomically replaces the prior
     FROM customer_contacts
     WHERE org_id=? AND customer_id=? AND archived_at IS NULL AND is_preferred=1
   `).get(IDS.orgA, IDS.ownedA).count, 1);
+
+  const promoted = service.mutateCustomerContact(db, contactMutation(IDS.ownerA, {
+    action: 'update',
+    customerId: IDS.ownedA,
+    contactId: IDS.contactA,
+    values: { is_preferred: true }
+  }, { requestId: 'contact-primary-existing-secondary' }));
+  assert.equal(promoted.action, 'updated');
+  assert.deepEqual(db.prepare(`
+    SELECT id,is_preferred,archived_at
+    FROM customer_contacts
+    WHERE org_id=? AND customer_id=?
+    ORDER BY id
+  `).all(IDS.orgA, IDS.ownedA), [
+    { id: IDS.contactA, is_preferred: 1, archived_at: null },
+    { id: created.record.id, is_preferred: 0, archived_at: null }
+  ]);
+
+  db.exec(`
+    CREATE TRIGGER fail_contact_primary_promotion
+    AFTER UPDATE ON customer_contacts
+    WHEN NEW.id=${created.record.id} AND NEW.is_preferred=1
+    BEGIN
+      SELECT RAISE(ABORT,'forced contact primary promotion failure');
+    END
+  `);
+  const forcedFailure = captureError(() => service.mutateCustomerContact(db, contactMutation(IDS.ownerA, {
+    action: 'update',
+    customerId: IDS.ownedA,
+    contactId: created.record.id,
+    values: { is_preferred: true }
+  }, { requestId: 'contact-primary-promotion-rollback' })));
+  assert.ok(forcedFailure);
+  assert.deepEqual(db.prepare(`
+    SELECT id,is_preferred,archived_at
+    FROM customer_contacts
+    WHERE org_id=? AND customer_id=?
+    ORDER BY id
+  `).all(IDS.orgA, IDS.ownedA), [
+    { id: IDS.contactA, is_preferred: 1, archived_at: null },
+    { id: created.record.id, is_preferred: 0, archived_at: null }
+  ]);
 
   for (const contactId of [IDS.contactOtherCustomer, 79999]) {
     const missing = captureError(() => service.mutateCustomerContact(db, contactMutation(IDS.ownerA, {

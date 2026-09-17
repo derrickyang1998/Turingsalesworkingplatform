@@ -1177,7 +1177,7 @@ test('contact named permission ingress denies malformed JSON before parsing acro
       ['POST', '/api/customers/41/contacts/081/archive', 'archive-noncanonical-contact', null]
     ];
 
-    for (const [method, requestPath, label, targetId] of cases) {
+    for (const [method, requestPath, label] of cases) {
       const requestId = `contact-${label}-malformed-json`;
       const response = await fetch(server.baseUrl + requestPath, {
         method,
@@ -1192,7 +1192,6 @@ test('contact named permission ingress denies malformed JSON before parsing acro
       assert.equal(response.status, 403, `${method} ${requestPath}`);
       assert.equal(body.code, 'CRM_PERMISSION_FORBIDDEN');
       assert.equal(body.request_id, requestId);
-      assert.equal(targetId === null || Number.isSafeInteger(targetId), true);
     }
 
     const inspection = new Database(server.dbPath, { readonly: true });
@@ -1203,14 +1202,9 @@ test('contact named permission ingress denies malformed JSON before parsing acro
         WHERE action='crm_permission_denied' AND module='crm_permission'
         ORDER BY id
       `).all().map((row) => JSON.parse(row.details));
-      assert.deepEqual(rows.map((row) => ({
-        permission: row.permission,
-        outcome: row.outcome,
-        reason_code: row.reason_code,
-        request_id: row.request_id,
-        target_type: row.target_type,
-        target_id: row.target_id
-      })), cases.map(([, , label, targetId]) => ({
+      assert.deepEqual(rows, cases.map(([, , label, targetId]) => ({
+        actor_user_id: Number(login.body.user.id),
+        organization_id: Number(login.body.auth_context.organization.id),
         permission: `crm.contact.${label.startsWith('create') ? 'create' : 'update'}`,
         outcome: 'denied',
         reason_code: 'ACTION_FORBIDDEN',
@@ -1218,9 +1212,41 @@ test('contact named permission ingress denies malformed JSON before parsing acro
         target_type: 'contact',
         target_id: targetId
       })));
-      assert.doesNotMatch(JSON.stringify(rows), /not-a-customer-id|041|not-a-contact-id|081/);
     } finally {
       inspection.close();
+    }
+
+    const writableServer = await startTestServer('tm-contact-permission-ingress-writable-');
+    try {
+      const writableLogin = await jsonRequest(writableServer.baseUrl, '/api/auth/login', {
+        method: 'POST',
+        body: { username: 'admin', password: 'AdminTest1!Secure' }
+      });
+      assert.equal(
+        writableLogin.response.status,
+        200,
+        writableLogin.text + '\n' + writableServer.output()
+      );
+      for (const [method, requestPath] of [
+        ['POST', '/api/customers/41/contacts'],
+        ['PUT', '/API/CUSTOMERS/41/CONTACTS/81'],
+        ['POST', '/api/customers/41/contacts/not-an-id/archive']
+      ]) {
+        const response = await fetch(writableServer.baseUrl + requestPath, {
+          method,
+          headers: {
+            Authorization: `Bearer ${writableLogin.body.token}`,
+            'Content-Type': 'application/json',
+            'X-Request-Id': `contact-writable-${method.toLowerCase()}-malformed`
+          },
+          body: '{'
+        });
+        const body = await response.json();
+        assert.equal(response.status, 400, `${method} ${requestPath}`);
+        assert.equal(body.code, 'INVALID_REQUEST_BODY');
+      }
+    } finally {
+      await writableServer.close();
     }
   } finally {
     await server.close();
@@ -1260,40 +1286,6 @@ test('contact named permission ingress fails closed when audit persistence fails
     assert.equal(response.status, 503);
     assert.equal(body.code, 'CRM_PERMISSION_AUDIT_FAILED');
     assert.equal(body.request_id, 'contact-audit-failure-malformed-json');
-  } finally {
-    await server.close();
-  }
-});
-
-test('contact named permission ingress lets writable malformed JSON reach the Phase4 parser', {
-  timeout: 30000
-}, async () => {
-  const server = await startTestServer('tm-contact-permission-ingress-writable-');
-  try {
-    const login = await jsonRequest(server.baseUrl, '/api/auth/login', {
-      method: 'POST',
-      body: { username: 'admin', password: 'AdminTest1!Secure' }
-    });
-    assert.equal(login.response.status, 200, login.text + '\n' + server.output());
-
-    for (const [method, requestPath] of [
-      ['POST', '/api/customers/41/contacts'],
-      ['PUT', '/API/CUSTOMERS/41/CONTACTS/81'],
-      ['POST', '/api/customers/41/contacts/not-an-id/archive']
-    ]) {
-      const response = await fetch(server.baseUrl + requestPath, {
-        method,
-        headers: {
-          Authorization: `Bearer ${login.body.token}`,
-          'Content-Type': 'application/json',
-          'X-Request-Id': `contact-writable-${method.toLowerCase()}-malformed`
-        },
-        body: '{'
-      });
-      const body = await response.json();
-      assert.equal(response.status, 400, `${method} ${requestPath}`);
-      assert.equal(body.code, 'INVALID_REQUEST_BODY');
-    }
   } finally {
     await server.close();
   }

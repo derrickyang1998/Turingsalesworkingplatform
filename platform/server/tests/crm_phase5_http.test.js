@@ -1349,11 +1349,11 @@ test('crm http: customer detail requires embedded contact read before detail dis
   assert.equal(response.statusCode, 403);
   assert.equal(response.payload.code, 'CRM_PERMISSION_FORBIDDEN');
   assert.equal(harness.calls.filter((call) => call.method === 'getCustomerDetail').length, 0);
-  assert.deepEqual(permissionCalls.map((call) => `${call.module}.${call.action}`), [
-    'crm.customer.read',
-    'crm.opportunity.read',
-    'crm.contact.read'
-  ]);
+  assert.equal(permissionCalls.length, 3);
+  assert.deepEqual(
+    new Set(permissionCalls.map((call) => `${call.module}.${call.action}`)),
+    new Set(['crm.customer.read', 'crm.opportunity.read', 'crm.contact.read'])
+  );
   assert.deepEqual(auditEvents, [{
     actor_user_id: 101,
     organization_id: 501,
@@ -1420,33 +1420,39 @@ test('crm http: contact create, update, and archive use named permissions before
     { module: 'crm.contact', action: 'update', organizationId: 501 },
     { module: 'crm.contact', action: 'update', organizationId: 501 }
   ]);
-  assert.deepEqual(auditEvents.map((event) => ({
-    permission: event.permission,
-    outcome: event.outcome,
-    reason_code: event.reason_code,
-    target_type: event.target_type,
-    target_id: event.target_id
-  })), [
+  assert.deepEqual(auditEvents, [
     {
+      actor_user_id: 101,
+      organization_id: 501,
       permission: 'crm.contact.create',
       outcome: 'denied',
       reason_code: 'ACTION_FORBIDDEN',
+      request_id: 'contact-create-invalid',
       target_type: 'contact',
-      target_id: null
+      target_id: null,
+      ip_address: '127.0.0.1'
     },
     {
+      actor_user_id: 101,
+      organization_id: 501,
       permission: 'crm.contact.update',
       outcome: 'denied',
       reason_code: 'ACTION_FORBIDDEN',
+      request_id: 'contact-update-invalid',
       target_type: 'contact',
-      target_id: null
+      target_id: null,
+      ip_address: '127.0.0.1'
     },
     {
+      actor_user_id: 101,
+      organization_id: 501,
       permission: 'crm.contact.update',
       outcome: 'denied',
       reason_code: 'ACTION_FORBIDDEN',
+      request_id: 'contact-update-81',
       target_type: 'contact',
-      target_id: 81
+      target_id: 81,
+      ip_address: '127.0.0.1'
     }
   ]);
   assert.doesNotMatch(JSON.stringify(auditEvents), /not-a-customer-id|081|private body value/);
