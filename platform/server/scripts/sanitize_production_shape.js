@@ -940,7 +940,7 @@ const V26_MIGRATION_LEDGER = Object.freeze({
   ]),
   checksum: Object.freeze([
     ...V25_MIGRATION_LEDGER.checksum,
-    '183dbc35acd30b808a77d8b7b43eb9226d1c5128ee30c7678b21577087b4c9ba'
+    '1c7e70f5c2a2b432215407ceb1f6178943b0e847f308b65b4157659c47897bfb'
   ]),
   sourcePath: Object.freeze([
     ...V25_MIGRATION_LEDGER.sourcePath,

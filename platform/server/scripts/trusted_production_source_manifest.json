@@ -151,7 +151,7 @@
     },
     {
       "path": "server/migrations/026_token_usage_tenant_ownership.js",
-      "sha256": "e110f20d9c01466894baf38ba9ef6b402f9c6d9ac693042e88bba9de2dcecea1"
+      "sha256": "5ed753364f7f1456969b18347b919b9caca3dca3a5ebd86f8c9502d872ff081b"
     },
     {
       "path": "server/migrations/baselines/legacy_v1.js",
@@ -255,11 +255,11 @@
     },
     {
       "path": "server/scripts/sanitization_manifest.json",
-      "sha256": "87d8b79b6b1b0cf8d285826588e4cc94f71bf921144305c54f4e063c3e136e68"
+      "sha256": "7c822fc0d928f58e4e1839b97d7f27676c011ce7525a3e7fc31daa11d8a1a274"
     },
     {
       "path": "server/scripts/sanitize_production_shape.js",
-      "sha256": "ffc6c7593110ff5d5a89f893bb7a2e134d4276465af02f8f133b4bbab34d9023"
+      "sha256": "c2c159e36065125dfbc209e89372af7e23d3843ccf345bccbbdf6f7194806ab8"
     },
     {
       "path": "server/scripts/trusted_parser_runtime_verifier.js",

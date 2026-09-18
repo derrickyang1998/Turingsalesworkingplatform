@@ -104,6 +104,7 @@ test('runtime token writers are centralized and admin UI opts into audited globa
   assert.doesNotMatch(serverSource, /body\.prompt_tokens/);
   const migration = require('../migrations/026_token_usage_tenant_ownership');
   assert.equal(migration.version, 26);
+  assert.ok(migration.schemaManifest.triggers.token_usage_no_replace_insert);
   assert.ok(migration.schemaManifest.triggers.token_usage_no_update);
   assert.ok(migration.schemaManifest.triggers.token_usage_no_delete);
   assert.equal(typeof migrationService.runMigrations, 'function');

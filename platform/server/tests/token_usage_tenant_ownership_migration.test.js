@@ -128,6 +128,13 @@ test('migration 026 backfills the sole organization and installs immutable tenan
     assert.equal(db.prepare('SELECT org_id FROM token_usage WHERE id=?').get(formerMemberUsageId).org_id, 1);
     assert.throws(() => db.prepare('UPDATE token_usage SET total_tokens=8 WHERE id=?').run(usageId), /append-only/i);
     assert.throws(() => db.prepare('DELETE FROM token_usage WHERE id=?').run(usageId), /append-only/i);
+    db.pragma('recursive_triggers = OFF');
+    assert.throws(() => db.prepare(`
+      INSERT OR REPLACE INTO token_usage (
+        id,org_id,user_id,model,prompt_tokens,completion_tokens,total_tokens,endpoint
+      ) VALUES (?,1,1,'replacement-model',1,1,2,'ai_chat')
+    `).run(usageId), /append-only/i);
+    db.pragma('recursive_triggers = ON');
     assert.throws(() => db.prepare(`
       INSERT INTO token_usage (org_id,user_id,model,prompt_tokens,completion_tokens,total_tokens,endpoint)
       VALUES (2,1,'fixture-model',1,1,2,'ai_chat')

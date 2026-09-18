@@ -55,6 +55,11 @@ WHEN NEW.org_id IS NULL
     WHERE org_id=NEW.org_id AND user_id=NEW.user_id AND status='active'
   )
 BEGIN SELECT RAISE(ABORT,'token usage organization ownership is invalid'); END`,
+  token_usage_no_replace_insert: `CREATE TRIGGER token_usage_no_replace_insert
+BEFORE INSERT ON token_usage
+WHEN NEW.id IS NOT NULL
+  AND EXISTS (SELECT 1 FROM token_usage WHERE id=NEW.id)
+BEGIN SELECT RAISE(ABORT,'token usage ledger is append-only'); END`,
   token_usage_no_update: `CREATE TRIGGER token_usage_no_update
 BEFORE UPDATE ON token_usage
 BEGIN SELECT RAISE(ABORT,'token usage ledger is append-only'); END`,
@@ -237,6 +242,7 @@ const migration = {
     const newObjectNames = [
       ...Object.keys(INDEX_SQL),
       'token_usage_scope_insert',
+      'token_usage_no_replace_insert',
       'token_usage_no_update',
       'token_usage_no_delete'
     ];

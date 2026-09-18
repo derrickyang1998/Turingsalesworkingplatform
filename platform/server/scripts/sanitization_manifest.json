@@ -157335,7 +157335,7 @@
           "mode": "frozen-exact-table-column-policy",
           "unknownText": "transform-or-reject",
           "validatorVersion": "tm-structural-policy-v24-token-usage-tenant-ownership",
-          "policySha256": "cf86829a692c44973117387394d5b7de9a3b7438f467e9ede0ade52c88b5b70f"
+          "policySha256": "9fdf449f907b7b6a3f8336e4e1370d02a225c96c0a284c8f7185c0f2bcfd1be4"
         }
       },
       "equalityGroups": [
