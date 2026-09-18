@@ -73,7 +73,8 @@ const {
   CRM_TASK_CREATE_ACTION,
   CRM_TASK_UPDATE_ACTION,
   CAMPAIGN_PERFORMANCE_MODULE,
-  CAMPAIGN_CUSTOMER_REPORT_MODULE
+  CAMPAIGN_CUSTOMER_REPORT_MODULE,
+  INFLUENCER_DATA_MODULE
 } = require('./services/module_action_permission_service');
 const moduleActionPermissionService = createModuleActionPermissionService(db);
 
@@ -108,13 +109,19 @@ function projectModulePermissions(principal, organizationId) {
     organizationId,
     module: CAMPAIGN_CUSTOMER_REPORT_MODULE
   });
+  const influencerDataAccess = moduleActionPermissionService.projectModuleAccess({
+    principal,
+    organizationId,
+    module: INFLUENCER_DATA_MODULE
+  });
   if (
     !crmCustomerAccess.allowed ||
     !crmOpportunityAccess.allowed ||
     !crmContactAccess.allowed ||
     !crmTaskAccess.allowed ||
     !campaignPerformanceAccess.allowed ||
-    !campaignCustomerReportAccess.allowed
+    !campaignCustomerReportAccess.allowed ||
+    !influencerDataAccess.allowed
   ) {
     throw new Error('Module permissions unavailable');
   }
@@ -124,7 +131,8 @@ function projectModulePermissions(principal, organizationId) {
     [CRM_CONTACT_MODULE]: crmContactAccess.actions.slice(),
     [CRM_TASK_MODULE]: crmTaskAccess.actions.slice(),
     [CAMPAIGN_PERFORMANCE_MODULE]: campaignPerformanceAccess.actions.slice(),
-    [CAMPAIGN_CUSTOMER_REPORT_MODULE]: campaignCustomerReportAccess.actions.slice()
+    [CAMPAIGN_CUSTOMER_REPORT_MODULE]: campaignCustomerReportAccess.actions.slice(),
+    [INFLUENCER_DATA_MODULE]: influencerDataAccess.actions.slice()
   };
 }
 const {
@@ -563,6 +571,21 @@ function writeCustomerReportExportAudit(event) {
   );
 }
 
+function writeInfluencerDataExportAudit(event) {
+  const details = { ...event };
+  delete details.ip_address;
+  db.prepare(`
+    INSERT INTO activity_log (user_id,action,module,details,ip_address)
+    VALUES (?,?,?,?,?)
+  `).run(
+    event.actor_user_id,
+    event.outcome === 'exported' ? 'influencer_data_exported' : 'influencer_data_export_denied',
+    INFLUENCER_DATA_MODULE,
+    JSON.stringify(details),
+    event.ip_address || null
+  );
+}
+
 function canonicalEarlyTargetId(value) {
   if (typeof value !== 'string' || !/^[1-9]\d*$/.test(value)) return null;
   const id = Number(value);
@@ -857,9 +880,14 @@ function adminOnly(req, res, next) {
 
 const READ_ONLY_GUARDED_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
+function namedPermissionOwnsReadOnlyDecision(req) {
+  return req.method === 'POST' && /^\/influencers\/export\/?$/i.test(req.path);
+}
+
 function readOnlyMutationGuard(req, res, next) {
   if (!READ_ONLY_GUARDED_METHODS.has(req.method)) return next();
   if (req.path === '/auth/login' || req.path === '/auth/logout') return next();
+  if (namedPermissionOwnsReadOnlyDecision(req)) return next();
   const authentication = authenticateRequest(req);
   if (!authentication.ok) return next();
   if (authentication.user.role === 'admin' && (
@@ -2038,7 +2066,11 @@ app.post('/api/proposal/generate-ppt', authMiddleware, (req, res) => {
 
 
 // ===== INFLUENCER & COLLABORATION ROUTES =====
-require('./routes')(app, db, authMiddleware, { campaignCollaborationService });
+require('./routes')(app, db, authMiddleware, {
+  campaignCollaborationService,
+  moduleActionPermissionService,
+  influencerDataExportAudit: writeInfluencerDataExportAudit
+});
 require('./routes_feishu')(app, { db, authMiddleware, adminOnly });
 require('./routes_customers')(app, db, authMiddleware, {
   moduleActionPermissionService,

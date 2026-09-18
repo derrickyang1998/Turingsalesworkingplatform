@@ -24,7 +24,10 @@
         "role": "admin",
         "department": "Baseline QA",
         "email": "admin@example.invalid",
-        "api_quota": 100000
+        "api_quota": 100000,
+        "module_permissions": {
+          "influencer.data": ["export"]
+        }
       }
     },
     "user": {

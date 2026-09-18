@@ -726,6 +726,46 @@ test.describe('Task 9 M4 workflow', () => {
     await installFixtureApi(page, { fixture });
   });
 
+  test('influencer export permission controls all, filtered, and selected downloads', async ({ page }) => {
+    await openM4(page, 'tab1');
+    const exportButtons = page.locator('[data-influencer-export-action="export"]');
+    await expect(exportButtons).toHaveCount(3);
+    for (let index = 0; index < 3; index += 1) {
+      await expect(exportButtons.nth(index)).toBeVisible();
+      await expect(exportButtons.nth(index)).toBeEnabled();
+    }
+
+    const allDownloadPromise = page.waitForEvent('download');
+    await page.locator('button[onclick="exportAll()"]').click();
+    const allCsv = await readDownloadCsv(await allDownloadPromise, 'permission-all');
+    expectApprovedCsv(allCsv);
+    expect(allCsv).toContain('FixtureCreator');
+    expect(allCsv).toContain('SampleCreator');
+
+    await page.locator('#filt_search').fill('401');
+    await expect(page.locator('#infTableContainer tbody tr')).toHaveCount(1);
+    const filteredDownloadPromise = page.waitForEvent('download');
+    await page.locator('button[onclick="exportFiltered()"]').click();
+    const filteredCsv = await readDownloadCsv(await filteredDownloadPromise, 'permission-filtered');
+    expectApprovedCsv(filteredCsv);
+    expect(filteredCsv).toContain('FixtureCreator');
+    expect(filteredCsv).not.toContain('SampleCreator');
+
+    await page.locator('.m4-table .infcb').first().check();
+    const selectedDownloadPromise = page.waitForEvent('download');
+    await page.locator('button[onclick="exportSelected()"]').click();
+    const selectedCsv = await readDownloadCsv(await selectedDownloadPromise, 'permission-selected');
+    expectApprovedCsv(selectedCsv);
+    expect(selectedCsv).toContain('FixtureCreator');
+    expect(selectedCsv).not.toContain('SampleCreator');
+
+    await installBaselineAuthState(page, fixture.auth.user);
+    await page.goto('/m4?tab=tab1', { waitUntil: 'domcontentloaded' });
+    await page.locator('#app').waitFor({ state: 'visible' });
+    await waitForBaselineReady(page);
+    await expect(page.locator('[data-influencer-export-action="export"]:visible')).toHaveCount(0);
+  });
+
   test('admin runs query-aware list, import, export, Feishu, order, and status flows', async ({ page }) => {
     await openM4(page, 'tab1');
 

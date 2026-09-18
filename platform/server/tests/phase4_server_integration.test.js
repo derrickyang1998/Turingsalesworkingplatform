@@ -871,7 +871,8 @@ test('login and auth me preserve the user object and add current auth context', 
       'crm.contact': ['read', 'create', 'update'],
       'crm.task': ['read', 'create', 'update'],
       'campaign.performance': ['export'],
-      'campaign.customer_report': ['export']
+      'campaign.customer_report': ['export'],
+      'influencer.data': ['export']
     });
     assert.equal(Array.isArray(login.body.auth_context.teams), true);
     assert.equal(login.body.auth_context.teams.length > 0, true);
@@ -890,6 +891,62 @@ test('login and auth me preserve the user object and add current auth context', 
     assert.equal(me.response.status, 200);
     assert.deepEqual(me.body.user, login.body.user);
     assert.deepEqual(me.body.auth_context, login.body.auth_context);
+  } finally {
+    await server.close();
+  }
+});
+
+test('authenticated HTTP influencer export uses production permission wiring and persists bounded audit evidence', {
+  timeout: 30000
+}, async () => {
+  const server = await startTestServer('tm-influencer-export-permission-');
+  try {
+    const login = await jsonRequest(server.baseUrl, '/api/auth/login', {
+      method: 'POST',
+      body: { username: 'admin', password: 'AdminTest1!Secure' }
+    });
+    assert.equal(login.response.status, 200, login.text + '\n' + server.output());
+    assert.deepEqual(login.body.user.module_permissions['influencer.data'], ['export']);
+
+    const response = await fetch(`${server.baseUrl}/api/influencers/export`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${login.body.token}`,
+        'Content-Type': 'application/json',
+        'X-Request-Id': 'http-influencer-export'
+      },
+      body: JSON.stringify({ mode: 'selected', ids: [] })
+    });
+    const csv = await response.text();
+    assert.equal(response.status, 200, csv + '\n' + server.output());
+    assert.equal(response.headers.get('content-type').startsWith('text/csv'), true);
+    assert.equal(response.headers.get('content-disposition'), 'attachment; filename=influencers_export.csv');
+    assert.equal(csv.includes('网红频道名称'), true);
+
+    const inspection = new Database(server.dbPath, { readonly: true });
+    const auditRow = inspection.prepare(`
+      SELECT user_id,module,details,ip_address
+      FROM activity_log
+      WHERE action='influencer_data_exported'
+      ORDER BY id DESC
+      LIMIT 1
+    `).get();
+    inspection.close();
+    assert.equal(auditRow.user_id, login.body.user.id);
+    assert.equal(auditRow.module, 'influencer.data');
+    assert.equal(typeof auditRow.ip_address, 'string');
+    assert.deepEqual(JSON.parse(auditRow.details), {
+      actor_user_id: login.body.user.id,
+      organization_id: login.body.auth_context.organization.id,
+      permission: 'influencer.data.export',
+      outcome: 'exported',
+      reason_code: 'ALLOWED',
+      request_id: 'http-influencer-export',
+      target_type: 'influencer_dataset',
+      target_id: null,
+      export_kind: 'selected',
+      record_count: 0
+    });
   } finally {
     await server.close();
   }
@@ -990,7 +1047,8 @@ test('read-only access is live, revokes old sessions, permits GET, blocks all bu
       'crm.contact': ['read'],
       'crm.task': ['read'],
       'campaign.performance': [],
-      'campaign.customer_report': []
+      'campaign.customer_report': [],
+      'influencer.data': []
     });
 
     const readable = await jsonRequest(server.baseUrl, '/api/demands', {
@@ -1047,6 +1105,25 @@ test('read-only access is live, revokes old sessions, permits GET, blocks all bu
       );
     }
 
+    const influencerExportRejected = await jsonRequest(
+      server.baseUrl,
+      '/api/influencers/export',
+      {
+        method: 'POST',
+        token: readOnlyLogin.body.token,
+        headers: { 'X-Request-Id': 'read-only-influencer-export' },
+        body: { mode: 'filtered', filters: { search: 'must-not-be-audited' } }
+      }
+    );
+    assert.equal(influencerExportRejected.response.status, 403, influencerExportRejected.text);
+    assert.deepEqual(influencerExportRejected.body, {
+      error: 'Influencer data export is forbidden.',
+      code: 'INFLUENCER_EXPORT_FORBIDDEN',
+      request_id: 'read-only-influencer-export'
+    });
+    assert.equal(influencerExportRejected.response.headers.has('content-disposition'), false);
+    assert.equal(influencerExportRejected.response.headers.get('content-type').includes('text/csv'), false);
+
     const auditInspection = new Database(server.dbPath, { readonly: true });
     const exportAudits = auditInspection.prepare(`
       SELECT details
@@ -1058,6 +1135,12 @@ test('read-only access is live, revokes old sessions, permits GET, blocks all bu
       SELECT details
       FROM activity_log
       WHERE action='customer_report_export_denied' AND module='campaign.customer_report'
+      ORDER BY id
+    `).all().map((row) => JSON.parse(row.details));
+    const influencerExportAudits = auditInspection.prepare(`
+      SELECT details
+      FROM activity_log
+      WHERE action='influencer_data_export_denied' AND module='influencer.data'
       ORDER BY id
     `).all().map((row) => JSON.parse(row.details));
     auditInspection.close();
@@ -1091,6 +1174,18 @@ test('read-only access is live, revokes old sessions, permits GET, blocks all bu
     ]);
     assert.equal(JSON.stringify(exportAudits).includes('must-not-be-audited'), false);
     assert.deepEqual(customerReportExportAudits, []);
+    assert.deepEqual(influencerExportAudits, [{
+      actor_user_id: userId,
+      organization_id: organizationId,
+      permission: 'influencer.data.export',
+      outcome: 'denied',
+      reason_code: 'ACTION_FORBIDDEN',
+      request_id: 'read-only-influencer-export',
+      target_type: 'influencer_dataset',
+      target_id: null,
+      export_kind: 'filtered'
+    }]);
+    assert.equal(JSON.stringify(influencerExportAudits).includes('must-not-be-audited'), false);
 
     const writes = [
       ['POST', '/api/demands', { brand_name: 'blocked' }],
@@ -2679,7 +2774,14 @@ test('collaboration routes use the injected singleton and one request-id fallbac
     authMiddleware,
     {
       campaignCollaborationService,
-      feishuBitableOutboxService: Object.freeze({})
+      feishuBitableOutboxService: Object.freeze({}),
+      influencerSavedViewService: Object.freeze({}),
+      moduleActionPermissionService: {
+        authorize() {
+          return { allowed: true, code: 'ALLOWED' };
+        }
+      },
+      influencerDataExportAudit() {}
     }
   );
 

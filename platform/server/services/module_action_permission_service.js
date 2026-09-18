@@ -22,6 +22,8 @@ const CAMPAIGN_PERFORMANCE_MODULE = 'campaign.performance';
 const CAMPAIGN_PERFORMANCE_EXPORT_ACTION = 'export';
 const CAMPAIGN_CUSTOMER_REPORT_MODULE = 'campaign.customer_report';
 const CAMPAIGN_CUSTOMER_REPORT_EXPORT_ACTION = 'export';
+const INFLUENCER_DATA_MODULE = 'influencer.data';
+const INFLUENCER_DATA_EXPORT_ACTION = 'export';
 const REQUEST_ROLE_VOCABULARY = new Set(['admin', 'user']);
 const ROLE_ORDER = Object.freeze([
   'platform_admin',
@@ -134,6 +136,14 @@ const POLICY = Object.freeze({
       'manager',
       'member'
     ])
+  }),
+  [INFLUENCER_DATA_MODULE]: Object.freeze({
+    [INFLUENCER_DATA_EXPORT_ACTION]: Object.freeze([
+      'company_owner',
+      'administrator',
+      'manager',
+      'member'
+    ])
   })
 });
 const ORGANIZATION_SCOPED_MODULES = new Set([
@@ -142,7 +152,8 @@ const ORGANIZATION_SCOPED_MODULES = new Set([
   CRM_CONTACT_MODULE,
   CRM_TASK_MODULE,
   CAMPAIGN_PERFORMANCE_MODULE,
-  CAMPAIGN_CUSTOMER_REPORT_MODULE
+  CAMPAIGN_CUSTOMER_REPORT_MODULE,
+  INFLUENCER_DATA_MODULE
 ]);
 
 function denied(code) {
@@ -344,6 +355,8 @@ module.exports = {
   CAMPAIGN_PERFORMANCE_EXPORT_ACTION,
   CAMPAIGN_CUSTOMER_REPORT_MODULE,
   CAMPAIGN_CUSTOMER_REPORT_EXPORT_ACTION,
+  INFLUENCER_DATA_MODULE,
+  INFLUENCER_DATA_EXPORT_ACTION,
   POLICY,
   createModuleActionPermissionService
 };

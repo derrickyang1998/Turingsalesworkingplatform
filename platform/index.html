@@ -1056,9 +1056,9 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
       <input id="filt_tags" aria-label="按标签筛选网红" placeholder="标签" onchange="matchInfluencers(true)" style="width:80px;font-size:12px">
       <button class="btn btn-sm" onclick="matchInfluencers()">🔍 筛选</button>
       <span style="flex:1"></span>
-      <button class="btn btn-sm" onclick="exportAll()">📥 导出全部</button>
-      <button class="btn btn-sm" onclick="exportFiltered()">📥 导出筛选</button>
-      <button class="btn btn-sm" onclick="exportSelected()">📥 导出选中</button>
+      <button class="btn btn-sm" data-influencer-export-action="export" onclick="exportAll()">📥 导出全部</button>
+      <button class="btn btn-sm" data-influencer-export-action="export" onclick="exportFiltered()">📥 导出筛选</button>
+      <button class="btn btn-sm" data-influencer-export-action="export" onclick="exportSelected()">📥 导出选中</button>
     </div>
     <div class="m4-view-toolbar" aria-label="网红筛选视图">
       <select id="m4SavedViewSelect" aria-label="选择已保存的网红筛选视图" onchange="applyM4SavedView(this.value)">

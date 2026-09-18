@@ -360,7 +360,8 @@ thead th {
 }
 
 .tm-performance-list-actions .btn[hidden],
-[data-performance-feishu-action="snapshot-export"][hidden] {
+[data-performance-feishu-action="snapshot-export"][hidden],
+[data-influencer-export-action="export"][hidden] {
   display: none !important;
 }
 

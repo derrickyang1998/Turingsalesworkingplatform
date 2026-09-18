@@ -35,6 +35,10 @@ const {
   InfluencerSavedViewError,
   createInfluencerSavedViewService
 } = require('./services/influencer_saved_view_service');
+const {
+  INFLUENCER_DATA_MODULE,
+  INFLUENCER_DATA_EXPORT_ACTION
+} = require('./services/module_action_permission_service');
 
 class InfluencerFilterError extends Error {
   constructor(message) {
@@ -233,8 +237,119 @@ const businessKnowledge = require('./services/business_knowledge_service');
 const influencerWorkflow = require('./services/influencer_workflow_service');
 const influencerSavedViews = options.influencerSavedViewService || createInfluencerSavedViewService(db);
 const campaignCollaboration = options.campaignCollaborationService;
+const moduleActionPermissionService = options.moduleActionPermissionService;
+const influencerDataExportAudit = options.influencerDataExportAudit;
 const feishuClient = options.feishuClient || createFeishuClient();
 const feishuBitableOutbox = options.feishuBitableOutboxService || createFeishuBitableOutboxService(db);
+
+if (!moduleActionPermissionService || typeof moduleActionPermissionService.authorize !== 'function') {
+  throw new TypeError('moduleActionPermissionService must expose authorize');
+}
+if (typeof influencerDataExportAudit !== 'function') {
+  throw new TypeError('influencerDataExportAudit must be a function');
+}
+
+function influencerExportPositiveInteger(value) {
+  if (typeof value === 'number') {
+    return Number.isSafeInteger(value) && value > 0 ? value : null;
+  }
+  if (typeof value !== 'string' || !/^[1-9]\d*$/.test(value)) return null;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && String(parsed) === value ? parsed : null;
+}
+
+function influencerExportBoundedText(value, fallback, maxLength) {
+  return typeof value === 'string' && value.length > 0
+    ? value.slice(0, maxLength)
+    : fallback;
+}
+
+function influencerExportOrganizationId(request) {
+  return request && request.authContext && request.authContext.organization
+    ? request.authContext.organization.id
+    : undefined;
+}
+
+function influencerExportKind(request) {
+  const mode = request && request.body && request.body.mode;
+  return mode === 'selected' || mode === 'filtered' ? mode : 'all';
+}
+
+function influencerExportRequestId(request) {
+  const header = request && request.headers && request.headers['x-request-id'];
+  return influencerExportBoundedText(
+    request && request.requestId || request && request.phase4Request && request.phase4Request.requestId || header,
+    'influencer-export-request',
+    120
+  );
+}
+
+function influencerExportAuditEvent(request, decision, outcome, recordCount) {
+  const event = {
+    actor_user_id: influencerExportPositiveInteger(request && request.user && request.user.id),
+    organization_id: influencerExportPositiveInteger(influencerExportOrganizationId(request)),
+    permission: `${INFLUENCER_DATA_MODULE}.${INFLUENCER_DATA_EXPORT_ACTION}`,
+    outcome,
+    reason_code: influencerExportBoundedText(
+      decision && decision.code,
+      'PERMISSION_DECISION_INVALID',
+      80
+    ),
+    request_id: influencerExportRequestId(request),
+    target_type: 'influencer_dataset',
+    target_id: null,
+    export_kind: influencerExportKind(request),
+    ip_address: influencerExportBoundedText(request && request.ip, null, 255)
+  };
+  if (outcome === 'exported') event.record_count = Number.isSafeInteger(recordCount) && recordCount >= 0
+    ? recordCount
+    : 0;
+  return event;
+}
+
+function sendInfluencerExportError(request, response, status, code, message) {
+  return response.status(status).json({
+    error: message,
+    code,
+    request_id: influencerExportRequestId(request)
+  });
+}
+
+function requireInfluencerDataExport(request, response, next) {
+  let decision;
+  try {
+    decision = moduleActionPermissionService.authorize({
+      principal: request.user,
+      organizationId: influencerExportOrganizationId(request),
+      module: INFLUENCER_DATA_MODULE,
+      action: INFLUENCER_DATA_EXPORT_ACTION
+    });
+  } catch (_error) {
+    decision = { allowed: false, code: 'AUTHORITATIVE_FACTS_UNAVAILABLE' };
+  }
+  if (decision && decision.allowed === true) {
+    request.influencerDataExportPermission = decision;
+    return next();
+  }
+  try {
+    influencerDataExportAudit(influencerExportAuditEvent(request, decision, 'denied'));
+  } catch (_error) {
+    return sendInfluencerExportError(
+      request,
+      response,
+      503,
+      'INFLUENCER_EXPORT_AUDIT_UNAVAILABLE',
+      'Influencer export audit is unavailable.'
+    );
+  }
+  return sendInfluencerExportError(
+    request,
+    response,
+    403,
+    'INFLUENCER_EXPORT_FORBIDDEN',
+    'Influencer data export is forbidden.'
+  );
+}
 
 function feishuCampaignId(value) {
   if (Number.isSafeInteger(value) && value > 0) return value;
@@ -1258,7 +1373,7 @@ app.post('/api/campaigns/:id/feishu-deliveries/:deliveryId/retry', authMiddlewar
   }
 });
 
-app.post('/api/influencers/export', authMiddleware, (req, res) => {
+app.post('/api/influencers/export', authMiddleware, requireInfluencerDataExport, (req, res) => {
   try {
     const { mode, ids, filters } = req.body;
     let sql;
@@ -1283,6 +1398,22 @@ app.post('/api/influencers/export', authMiddleware, (req, res) => {
     }
     const influencers = db.prepare(sql).all(...params);
     const csv = influencerWorkflow.buildInfluencerCsv(influencers);
+    try {
+      influencerDataExportAudit(influencerExportAuditEvent(
+        req,
+        req.influencerDataExportPermission,
+        'exported',
+        influencers.length
+      ));
+    } catch (_error) {
+      return sendInfluencerExportError(
+        req,
+        res,
+        503,
+        'INFLUENCER_EXPORT_AUDIT_UNAVAILABLE',
+        'Influencer export audit is unavailable.'
+      );
+    }
     res.setHeader('Content-Type', 'text/csv;charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename=influencers_export.csv');
     res.send(csv);

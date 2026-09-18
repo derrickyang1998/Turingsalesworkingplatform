@@ -11,6 +11,9 @@ const influencerWorkflow = require('../services/influencer_workflow_service');
 const {
   createCampaignCollaborationService
 } = require('../services/campaign_collaboration_service');
+const {
+  createModuleActionPermissionService
+} = require('../services/module_action_permission_service');
 const task9HeaderContractPath = path.join(__dirname, 'fixtures', 'task-9-upload-header-contract.json');
 const TEST_JWT_SECRET = 'kGoVXFMo4jD81r9d8FIGM6HbN7xQ9pM74x1un3PVF48';
 const CHILD_ENV_ALLOWLIST = Object.freeze([
@@ -258,9 +261,21 @@ function mountRoutes(db, options) {
   });
   const authMiddleware = function(req, res, next) { return next(); };
   const campaignCollaborationService = createCampaignCollaborationService(db);
+  const moduleActionPermissionService = options && options.moduleActionPermissionService
+    ? options.moduleActionPermissionService
+    : createModuleActionPermissionService(db);
+  const influencerDataExportAudit = options && options.influencerDataExportAudit
+    ? options.influencerDataExportAudit
+    : function() {};
+  const organization = db.prepare("SELECT id FROM organizations WHERE code='turingmarket-default'").get();
+  routes.__defaultOrganizationId = organization && Number(organization.id);
   const routesModule = path.resolve(__dirname, '../routes.js');
   delete require.cache[routesModule];
-  require(routesModule)(app, db, authMiddleware, Object.assign({ campaignCollaborationService }, options || {}));
+  require(routesModule)(app, db, authMiddleware, Object.assign({
+    campaignCollaborationService,
+    moduleActionPermissionService,
+    influencerDataExportAudit
+  }, options || {}));
   return routes;
 }
 
@@ -306,6 +321,7 @@ async function invoke(routes, key, opts) {
     query: opts.query || {},
     body: opts.body || {},
     headers: opts.headers || {},
+    authContext: opts.authContext || { organization: { id: routes.__defaultOrganizationId } },
     get: function(name) {
       const target = String(name || '').toLowerCase();
       const key = Object.keys(this.headers).find(function(headerName) { return String(headerName).toLowerCase() === target; });
@@ -1531,6 +1547,122 @@ test('influencer export uses approved headers and mirrors active list filtering 
   );
   assert.ok(alphaId);
 
+  db.close();
+});
+
+test('influencer export enforces the named permission and records bounded denial evidence', async () => {
+  const db = freshDb();
+  const calls = [];
+  const routes = mountRoutes(db, {
+    moduleActionPermissionService: {
+      authorize(input) {
+        calls.push(['permission', input]);
+        return {
+          allowed: false,
+          code: 'ACTION_FORBIDDEN',
+          principal: { user_id: 2, organization_id: 10, roles: ['read_only'] }
+        };
+      }
+    },
+    influencerDataExportAudit(event) {
+      calls.push(['audit', event]);
+    }
+  });
+  const denied = await invoke(routes, 'POST /api/influencers/export', {
+    body: { mode: 'filtered', filters: { search: 'must-not-be-audited' } },
+    headers: { 'x-request-id': 'influencer-export-denied' },
+    authContext: { organization: { id: 10 } }
+  });
+
+  assert.equal(denied.statusCode, 403);
+  assert.equal(denied.payload.code, 'INFLUENCER_EXPORT_FORBIDDEN');
+  assert.equal(denied.payload.request_id, 'influencer-export-denied');
+  assert.equal(denied.body, undefined);
+  assert.deepEqual(denied.headers, {});
+  assert.deepEqual(calls[0], ['permission', {
+    principal: { id: 2, role: 'user', username: 'tester' },
+    organizationId: 10,
+    module: 'influencer.data',
+    action: 'export'
+  }]);
+  assert.deepEqual(calls[1], ['audit', {
+    actor_user_id: 2,
+    organization_id: 10,
+    permission: 'influencer.data.export',
+    outcome: 'denied',
+    reason_code: 'ACTION_FORBIDDEN',
+    request_id: 'influencer-export-denied',
+    target_type: 'influencer_dataset',
+    target_id: null,
+    export_kind: 'filtered',
+    ip_address: '127.0.0.1'
+  }]);
+  assert.equal(JSON.stringify(calls).includes('must-not-be-audited'), false);
+  db.close();
+});
+
+test('influencer export audits completed rows and fails closed when audit storage is unavailable', async () => {
+  const db = freshDb();
+  insertInfluencer(db, {
+    platform: 'YouTube',
+    kol_handle: '@permission_export',
+    profile_link: 'https://example.com/permission-export',
+    followers: 12345,
+    data_source: 'test'
+  });
+  const completedAudits = [];
+  const allow = {
+    authorize() {
+      return {
+        allowed: true,
+        code: 'ALLOWED',
+        principal: { user_id: 2, organization_id: 10, roles: ['member'] }
+      };
+    }
+  };
+  const allowedRoutes = mountRoutes(db, {
+    moduleActionPermissionService: allow,
+    influencerDataExportAudit(event) { completedAudits.push(event); }
+  });
+  const allowed = await invoke(allowedRoutes, 'POST /api/influencers/export', {
+    body: { mode: 'selected', ids: [] },
+    headers: { 'x-request-id': 'influencer-export-complete' },
+    authContext: { organization: { id: 10 } }
+  });
+  assert.equal(allowed.statusCode, 200);
+  assertApprovedCsvHeaders(allowed.body);
+  assert.deepEqual(completedAudits, [{
+    actor_user_id: 2,
+    organization_id: 10,
+    permission: 'influencer.data.export',
+    outcome: 'exported',
+    reason_code: 'ALLOWED',
+    request_id: 'influencer-export-complete',
+    target_type: 'influencer_dataset',
+    target_id: null,
+    export_kind: 'selected',
+    ip_address: '127.0.0.1',
+    record_count: 0
+  }]);
+
+  for (const decision of [
+    { allowed: false, code: 'ACTION_FORBIDDEN' },
+    { allowed: true, code: 'ALLOWED', principal: { user_id: 2, organization_id: 10, roles: ['member'] } }
+  ]) {
+    const routes = mountRoutes(db, {
+      moduleActionPermissionService: { authorize() { return decision; } },
+      influencerDataExportAudit() { throw new Error('audit unavailable'); }
+    });
+    const result = await invoke(routes, 'POST /api/influencers/export', {
+      body: { mode: 'all' },
+      authContext: { organization: { id: 10 } }
+    });
+    assert.equal(result.statusCode, 503);
+    assert.equal(result.payload.code, 'INFLUENCER_EXPORT_AUDIT_UNAVAILABLE');
+    assert.equal(result.payload.request_id, 'influencer-export-request');
+    assert.equal(result.body, undefined);
+    assert.deepEqual(result.headers, {});
+  }
   db.close();
 });
 
@@ -2893,6 +3025,10 @@ test('m4 frontend keeps import, feishu, and order-resource controls wired', () =
   const indexHtml = fs.readFileSync(path.join(repoRoot, 'platform', 'index.html'), 'utf8');
   const appJs = fs.readFileSync(path.join(repoRoot, 'platform', 'app.js'), 'utf8');
   const componentCss = fs.readFileSync(path.join(repoRoot, 'platform', 'client', 'styles', 'components.css'), 'utf8');
+  const browserFixture = JSON.parse(fs.readFileSync(
+    path.join(repoRoot, 'platform', 'server', 'tests', 'fixtures', 'browser-baseline-data.json'),
+    'utf8'
+  ));
 
   assert.match(indexHtml, /id="collabFilter"/);
   assert.match(indexHtml, /<option value="contract_sent">合同待回签<\/option>/);
@@ -2906,6 +3042,7 @@ test('m4 frontend keeps import, feishu, and order-resource controls wired', () =
   assert.match(indexHtml, /id="m4SavedViewName"/);
   assert.match(indexHtml, /id="m4ColumnWorkspaceButton"/);
   assert.match(indexHtml, /id="m4ColumnWorkspace"/);
+  assert.equal((indexHtml.match(/data-influencer-export-action="export"/g) || []).length, 3);
   assert.match(indexHtml, /onclick="saveM4SavedView\(\)"/);
   assert.match(indexHtml, /onclick="deleteM4SavedView\(\)"/);
   assert.match(indexHtml, /onclick="clearM4Filters\(\)"/);
@@ -2959,6 +3096,7 @@ test('m4 frontend keeps import, feishu, and order-resource controls wired', () =
   assert.match(componentCss, /top: var\(--m4-table-header-height\)/);
   assert.match(componentCss, /\.m4-table \.m4-column-filter/);
   assert.match(componentCss, /\.m4-column-workspace/);
+  assert.match(componentCss, /\[data-influencer-export-action="export"\]\[hidden\]\s*\{[^}]*display:\s*none\s*!important/s);
   assert.match(componentCss, /\.tm-influencer-import-scroll\s*\{[^}]*overflow-x:\s*auto/s);
   assert.match(componentCss, /@media\s*\(max-width:\s*720px\)[\s\S]*\.tm-influencer-import-dialog/);
   assert.match(componentCss, /@media\s*\(max-width:\s*720px\)\s*\{[\s\S]*?\.tm-influencer-import-scroll\s*\{[^}]*max-height:\s*none[^}]*overflow-x:\s*auto[^}]*overflow-y:\s*hidden/s);
@@ -3009,6 +3147,13 @@ test('m4 frontend keeps import, feishu, and order-resource controls wired', () =
   assert.match(appJs, /function loadFeishuStatus/);
   assert.match(appJs, /function loadFeishuOutbox/);
   assert.match(appJs, /function testFeishuConnection/);
+  assert.match(appJs, /function currentUserHasInfluencerDataPermission\(action\)/);
+  assert.match(appJs, /permissions\['influencer\.data'\]/);
+  assert.match(appJs, /function applyInfluencerExportPermissionPresentation\(\)/);
+  assert.match(appJs, /applyCurrentUserRolePresentation\(\)[\s\S]*?applyInfluencerExportPermissionPresentation\(\)/);
+  assert.match(appJs, /function exportSelected\(\)\s*\{\s*var ids = getSelectedInfIds\(\);/);
+  assert.match(appJs, /function exportInf\(mode, ids\)[\s\S]*?if \(!currentUserHasInfluencerDataPermission\('export'\)\)/);
+  assert.deepEqual(browserFixture.auth.admin.user.module_permissions['influencer.data'], ['export']);
   assert.match(appJs, /campaign_id: campaignId/);
   assert.match(appJs, /d\.message \|\| 'CSV fallback downloaded\.'/);
   assert.match(appJs, /CURRENT_USER && CURRENT_USER\.role === 'admin'/);

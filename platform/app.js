@@ -142,6 +142,14 @@ function currentUserHasCustomerReportPermission(action) {
   return actions.indexOf(action) !== -1;
 }
 
+function currentUserHasInfluencerDataPermission(action) {
+  var permissions = CURRENT_USER && CURRENT_USER.module_permissions;
+  var actions = permissions && Array.isArray(permissions['influencer.data'])
+    ? permissions['influencer.data']
+    : [];
+  return actions.indexOf(action) !== -1;
+}
+
 function currentUserCanUseCrmScope(scope) {
   if (!currentUserHasCrmPermission('read')) return false;
   if (scope === 'my' || scope === 'public_pool') return true;
@@ -221,6 +229,15 @@ function applyCustomerReportExportPermissionPresentation() {
   });
 }
 
+function applyInfluencerExportPermissionPresentation() {
+  var canExport = currentUserHasInfluencerDataPermission('export');
+  document.querySelectorAll('[data-influencer-export-action="export"]').forEach(function(element) {
+    element.hidden = !canExport;
+    element.disabled = !canExport;
+    element.title = canExport ? '' : '当前账号没有网红数据导出权限';
+  });
+}
+
 function applyCurrentUserRolePresentation() {
   var platformAdmin = currentUserIsPlatformAdministrator();
   var governanceAccess = currentUserHasGovernanceAccess();
@@ -240,6 +257,7 @@ function applyCurrentUserRolePresentation() {
   applyCrmPermissionPresentation();
   applyPerformanceExportPermissionPresentation();
   applyCustomerReportExportPermissionPresentation();
+  applyInfluencerExportPermissionPresentation();
 }
 
 function syncCrmTeamSelector() {
@@ -6438,6 +6456,10 @@ function exportSelected() {
   return exportInf('selected', ids);
 }
 function exportInf(mode, ids) {
+  if (!currentUserHasInfluencerDataPermission('export')) {
+    toast('当前账号没有网红数据导出权限。', 'error');
+    return null;
+  }
   var body = { mode: mode };
   if (mode === 'selected' && ids) body.ids = ids;
   if (mode === 'filtered') body.filters = m4Filters();
