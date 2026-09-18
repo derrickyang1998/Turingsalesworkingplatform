@@ -359,6 +359,11 @@ thead th {
   justify-content: flex-end;
 }
 
+.tm-performance-list-actions .btn[hidden],
+[data-performance-feishu-action="snapshot-export"][hidden] {
+  display: none !important;
+}
+
 .tm-performance-heading {
   align-items: flex-start;
 }

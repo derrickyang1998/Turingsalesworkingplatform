@@ -123,6 +123,14 @@ test('performance monitor offers both current-filter and full-campaign CSV expor
     appSource,
     /async function exportPerformanceContents\(scope\)[\s\S]*?if \(!currentUserHasCampaignPerformancePermission\('export'\)\)/
   );
+  assert.match(
+    componentStyles,
+    /\.tm-performance-list-actions \.btn\[hidden\][\s\S]*?display:\s*none\s*!important/
+  );
+  assert.match(
+    componentStyles,
+    /\[data-performance-feishu-action="snapshot-export"\]\[hidden\][\s\S]*?display:\s*none\s*!important/
+  );
 });
 
 test('performance monitor shows a campaign-scoped freshness queue and controlled YouTube refresh', () => {
