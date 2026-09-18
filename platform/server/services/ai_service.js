@@ -856,11 +856,25 @@ function positiveId(value) {
 
 function requireKnowledgeOrganizationContext(db, opts) {
   if (!knowledge.hasKnowledgeOrganizationOwnership(db)) return null;
-  const organizationId = positiveId(
+  let organizationId = positiveId(
     ownValue(opts, 'organizationId') === undefined
       ? opts && opts.user && opts.user.__active_organization_id
       : opts.organizationId
   );
+  if (organizationId === null) {
+    const userId = positiveId(opts && opts.user && opts.user.id);
+    if (userId !== null) {
+      const memberships = db.prepare(`
+        SELECT membership.org_id
+        FROM organization_memberships membership
+        JOIN organizations organization ON organization.id=membership.org_id
+        WHERE membership.user_id=? AND membership.status='active'
+        ORDER BY membership.org_id
+        LIMIT 2
+      `).all(userId);
+      if (memberships.length === 1) organizationId = memberships[0].org_id;
+    }
+  }
   if (organizationId === null) {
     throw serviceError(
       403,
@@ -1376,7 +1390,10 @@ function persistLinkedChat(db, opts) {
   return db.transaction(() => {
     assertProviderContextActive(opts.providerContext);
     const access = requireLinkedCampaignAccess(db, opts.user.id, opts.linked.campaignId);
-    if (Number(access.campaign.org_id) !== opts.organizationId) {
+    if (
+      opts.organizationId !== null &&
+      Number(access.campaign.org_id) !== opts.organizationId
+    ) {
       throw serviceError(404, 'CAMPAIGN_NOT_FOUND', 'Campaign is unavailable in the active organization.');
     }
     if (typeof opts.validateBeforePersist === 'function') {
@@ -1553,7 +1570,10 @@ async function handleLinkedChat(db, opts, linked) {
   const webQuery = String(opts.webQuery || retrievalQuery).trim() || retrievalQuery;
   const user = opts.user;
   const linkedAccess = requireLinkedCampaignAccess(db, user.id, linked.campaignId);
-  if (Number(linkedAccess.campaign.org_id) !== opts.organizationId) {
+  if (
+    opts.organizationId !== null &&
+    Number(linkedAccess.campaign.org_id) !== opts.organizationId
+  ) {
     throw serviceError(404, 'CAMPAIGN_NOT_FOUND', 'Campaign is unavailable in the active organization.');
   }
   if (linked.conversationId !== null) {
@@ -2629,7 +2649,10 @@ function promoteMessageToKnowledge(db, opts) {
         resultVisibility = existing.visibility || visibility;
       } else if (campaignId !== null) {
         const access = requireLinkedCampaignAccess(db, actor.id, campaignId);
-        if (Number(access.campaign.org_id) !== organizationId) {
+        if (
+          organizationId !== null &&
+          Number(access.campaign.org_id) !== organizationId
+        ) {
           throw serviceError(404, 'CAMPAIGN_NOT_FOUND', 'Campaign is unavailable in the active organization.');
         }
         const archived = archiveLinkedChatSummary(db, {

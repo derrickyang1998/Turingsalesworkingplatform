@@ -507,6 +507,25 @@ function resolveKnowledgeOrganizationId(db, options, settings) {
       LIMIT 2
     `).all(userId);
     if (memberships.length === 1) return memberships[0].org_id;
+  } else {
+    const organizations = db.prepare(`
+      SELECT id
+      FROM organizations
+      ORDER BY id
+      LIMIT 2
+    `).all();
+    if (organizations.length === 1) {
+      const creatorId = knowledgeOrganizationId(
+        input.created_by === undefined ? input.createdBy : input.created_by
+      );
+      if (creatorId === null) return organizations[0].id;
+      const membership = db.prepare(`
+        SELECT 1 AS present
+        FROM organization_memberships
+        WHERE org_id=? AND user_id=? AND status='active'
+      `).get(organizations[0].id, creatorId);
+      if (membership) return organizations[0].id;
+    }
   }
   throw new Error('Knowledge organization context is required');
 }

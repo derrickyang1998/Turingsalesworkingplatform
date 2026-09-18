@@ -1253,10 +1253,12 @@ test('knowledge search and category plans use the set-wise current-custody proje
     knowledge.listKnowledgeCategories(db, { user });
     knowledge.searchKnowledge(db, {
       q: 'Indexed custody needle',
-      user: { id: context.userId, role: 'admin' }
+      user: { id: context.userId, role: 'admin' },
+      adminAuditGlobal: true
     });
     knowledge.listKnowledgeCategories(db, {
-      user: { id: context.userId, role: 'admin' }
+      user: { id: context.userId, role: 'admin' },
+      adminAuditGlobal: true
     });
     db.prepare = originalPrepare;
 
