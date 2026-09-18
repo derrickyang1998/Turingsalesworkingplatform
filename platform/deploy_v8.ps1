@@ -123,6 +123,7 @@ $FILES = @(
     "server\migrations\021_organization_role_governance.js",
     "server\migrations\022_organization_ownership_transfer.js",
     "server\migrations\023_influencer_tenant_ownership.js",
+    "server\migrations\024_knowledge_tenant_ownership.js",
     "server\migrations\baselines\legacy_v1.js",
     "server\migrations\engines\v1.js",
     "server\migrations\vendor\bcryptjs_v3_0_3.js",
@@ -327,6 +328,8 @@ $FILES = @(
     "server\tests\organization_governance_routes.test.js",
     "server\tests\organization_ownership_transfer_migration.test.js",
     "server\tests\influencer_tenant_ownership_migration.test.js",
+    "server\tests\knowledge_tenant_ownership_migration.test.js",
+    "server\tests\knowledge_tenant_release_gate_inventory.test.js",
     "server\tests\routes_performance.test.js",
     "server\tests\phase4_nginx_ingress.test.js",
     "server\tests\phase4_request_pipeline.test.js",
@@ -10657,7 +10660,7 @@ try {
   if (database.pragma('integrity_check', { simple: true }) !== 'ok') throw new Error('Candidate DB integrity_check failed');
   if (database.pragma('foreign_key_check').length !== 0) throw new Error('Candidate DB foreign_key_check failed');
   const version = database.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version;
-  if (Number(version) !== 23) throw new Error('Candidate migration target version mismatch');
+  if (Number(version) !== 24) throw new Error('Candidate migration target version mismatch');
   console.log('TM_SANITIZED_MIGRATION_COMPATIBILITY_OK');
 } finally {
   database.close();
@@ -12126,7 +12129,7 @@ if applied:
         if hashlib.sha256(handle.read()).hexdigest() != output_sha256:
             raise SystemExit('Trusted live database adoption stage digest is invalid')
 else:
-    if (report.get('sourceVersion') not in (1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23) or
+    if (report.get('sourceVersion') not in (1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24) or
             report.get('targetVersion') != report.get('sourceVersion') or
             output_sha256 != expected_source_sha256 or
             report.get('baseTableCount') is not None or report.get('baseRowCount') is not None or

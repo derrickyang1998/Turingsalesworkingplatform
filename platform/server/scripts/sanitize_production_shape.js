@@ -173,6 +173,13 @@ const EXACT_PROFILE_MIGRATIONS = Object.freeze([
     sourcePath: 'migrations/023_influencer_tenant_ownership.js',
     engineVersion: 1,
     dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
+  }),
+  Object.freeze({
+    version: 24,
+    name: '024_knowledge_tenant_ownership',
+    sourcePath: 'migrations/024_knowledge_tenant_ownership.js',
+    engineVersion: 1,
+    dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
   })
 ]);
 const FTS_MANIFEST = Object.freeze({
@@ -6899,6 +6906,7 @@ module.exports = {
   DEFAULT_WORKER_DEADLINE_MS,
   DEFAULT_WORKER_KILL_OBSERVATION_MS,
   DEFAULT_WORKER_TERMINATION_GRACE_MS,
+  EXACT_PROFILE_MIGRATIONS,
   FTS_MANIFEST,
   MANIFEST_VERSION,
   REPORT_VERSION,
