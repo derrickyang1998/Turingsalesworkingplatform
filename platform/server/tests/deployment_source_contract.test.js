@@ -354,6 +354,11 @@ test('Task 12 local deploy preflight executes under Windows PowerShell 5.1 witho
   assert.match(deploy, /-InputText\s+"set -euo pipefail`r`n"/);
   assert.match(deploy, /\$transportResult\s*=\s*Invoke-NativeWithUtf8Input[\s\S]*?-CaptureOutput/);
   assert.match(deploy, /TRANSPORT_OK/);
+  assert.match(
+    deploy,
+    /\$deploymentActionPlan = Assert-LocalReleaseSource\s+Assert-ImmutableDeploymentActionPlan -DeploymentPlan \$deploymentActionPlan\s+\}\s+\r?\n\s*if \(\$ValidateLocalOnly\)/,
+    'local-only and production modes must validate the final captured plan before diverging'
+  );
   const expectedBranch = deploy.match(/\$EXPECTED_BRANCH\s*=\s*"([^"]+)"/);
   assert.ok(expectedBranch, 'deploy script must declare its authoritative branch');
   const currentBranch = spawnSync('git', ['-C', repoRoot, 'branch', '--show-current'], {
@@ -2418,6 +2423,33 @@ Write-Output 'PINNED_INPUT_COMMAND_BOUNDARY_OK'
 `);
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.match(result.stdout, /PINNED_INPUT_COMMAND_BOUNDARY_OK/);
+});
+
+test('successful pinned native input emits no task result objects into its caller pipeline', {
+  skip: process.platform !== 'win32'
+}, () => {
+  const nodeLiteral = `'${process.execPath.replace(/'/g, "''")}'`;
+  const result = runPowerShellFunctionHarness([
+    'Initialize-PinnedDeploymentTypes',
+    'Convert-ToNativeArgument',
+    'Stop-NativePinnedInputProcess',
+    'Invoke-NativeWithPinnedInput'
+  ], `
+Initialize-PinnedDeploymentTypes
+$payload = [Text.Encoding]::UTF8.GetBytes('silent-success')
+$record = [PinnedDeploymentActionRecord]::new(
+  'Fixture', 'payload.txt', 'C:\\fixture\\payload.txt', 'payload.txt',
+  [PinnedDeploymentFileIdentity]::Sha256($payload), $false, $true, $payload
+)
+$unexpected = @(Invoke-NativeWithPinnedInput -Record $record -FileName ${nodeLiteral} \`
+  -ArgumentList @('-e', 'process.stdin.resume()') -FailureMessage 'Silent success fixture' -TimeoutSeconds 5)
+if ($unexpected.Count -ne 0) {
+  throw ('Pinned native input leaked pipeline objects: ' + (($unexpected | ForEach-Object { $_.GetType().FullName }) -join ','))
+}
+Write-Output 'PINNED_INPUT_SILENT_SUCCESS_OK'
+`);
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /PINNED_INPUT_SILENT_SUCCESS_OK/);
 });
 
 test('candidate bundle upload opens one SSH transport for the immutable plan', {

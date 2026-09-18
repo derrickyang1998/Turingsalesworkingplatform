@@ -8691,7 +8691,7 @@ function Invoke-NativeWithPinnedInput {
             if ($remainingMilliseconds -le 0 -or -not $writeTask.Wait($remainingMilliseconds)) {
                 throw "$FailureMessage timed out during pinned input transfer after $TimeoutSeconds second(s)."
             }
-            $writeTask.GetAwaiter().GetResult()
+            [void]$writeTask.GetAwaiter().GetResult()
             $process.StandardInput.Close()
 
             $remainingMilliseconds = [int][Math]::Floor(($deadlineUtc - [DateTime]::UtcNow).TotalMilliseconds)
@@ -9303,6 +9303,7 @@ if ($RestoreDatabase -and -not $ConfirmDataLoss) {
 
 if (-not $RecoverInterruptedDeployment -and -not $rollbackRequested) {
     $deploymentActionPlan = Assert-LocalReleaseSource
+    Assert-ImmutableDeploymentActionPlan -DeploymentPlan $deploymentActionPlan
 }
 
 if ($ValidateLocalOnly) {
