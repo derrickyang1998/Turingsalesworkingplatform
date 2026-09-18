@@ -2404,10 +2404,11 @@ test('one immutable action-plan identity feeds backup, hash, preparation, and up
     '$uploadChecksums = Get-DeploymentPlanChecksumManifest -DeploymentPlan $deploymentActionPlan',
     '$remotePathManifest = Get-DeploymentPlanRemotePathManifest -DeploymentPlan $deploymentActionPlan',
     'Invoke-RemoteBackup -BackupPath $backupDir -DeploymentPlan $deploymentActionPlan',
-    'foreach ($record in $deploymentActionPlan.Records)',
-    'Invoke-PinnedDeploymentUpload -Record $record -RemoteRoot $remoteReleaseRoot'
+    'Invoke-PinnedDeploymentBundleUpload',
+    '-DeploymentPlan $deploymentActionPlan',
+    '-RemoteRoot $remoteReleaseRoot'
   ]) {
-    assert.ok(deploy.indexOf(action) > planOffset, `${action} must consume the sealed plan`);
+    assert.ok(deploy.indexOf(action, planOffset) > planOffset, `${action} must consume the sealed plan`);
   }
   assert.match(deploy, /\$deploymentSourceSha256 = \(\$deploymentActionPlan\.Identity -split ':', 2\)\[1\]/);
 });
@@ -3010,6 +3011,7 @@ const PINNED_ACTION_PLAN_FUNCTIONS = [
   'Get-CanonicalLocalUploadFile',
   'New-ImmutableDeploymentActionPlan',
   'Convert-ToNativeArgument',
+  'Stop-NativePinnedInputProcess',
   'Invoke-NativeWithPinnedInput'
 ];
 
@@ -3049,8 +3051,8 @@ foreach ($entry in $parserEntries) {
 
   assert.match(
     read(deployScriptPath),
-    /foreach \(\$record in \$deploymentActionPlan\.Records\)\s*\{\s*Invoke-PinnedDeploymentUpload -Record \$record -RemoteRoot \$remoteReleaseRoot/s,
-    'every immutable deployment-plan record must be copied to the remote release'
+    /Invoke-PinnedDeploymentBundleUpload\s+`\r?\n\s*-DeploymentPlan \$deploymentActionPlan\s+`\r?\n\s*-RemoteRoot \$remoteReleaseRoot/,
+    'the complete immutable deployment plan must cross one remote bundle boundary'
   );
 });
 
@@ -3161,7 +3163,7 @@ test('backup, hashing, preparation, and every upload consume only the sealed act
   assert.match(deploy, /Invoke-RemoteBackup -BackupPath \$backupDir -DeploymentPlan \$deploymentActionPlan/);
   assert.match(deploy, /Get-DeploymentPlanChecksumManifest -DeploymentPlan \$deploymentActionPlan/);
   assert.match(deploy, /Get-DeploymentPlanRemotePathManifest -DeploymentPlan \$deploymentActionPlan/);
-  assert.match(deploy, /foreach \(\$record in \$deploymentActionPlan\.Records\)\s*\{\s*Invoke-PinnedDeploymentUpload/s);
+  assert.match(deploy, /Invoke-PinnedDeploymentBundleUpload\s+`\r?\n\s*-DeploymentPlan \$deploymentActionPlan/);
   assert.doesNotMatch(deploy, /\$uploadInventory\b|\$hashInventory\b|\$backupInventory\b/);
 });
 
@@ -3368,7 +3370,10 @@ test('one immutable action plan supplies backup, attestation, checksum, upload, 
   assert.match(deploy, /\$uploadChecksums = Get-DeploymentPlanChecksumManifest -DeploymentPlan \$deploymentActionPlan/);
   assert.match(deploy, /\$remotePathManifest = Get-DeploymentPlanRemotePathManifest -DeploymentPlan \$deploymentActionPlan/);
 
-  const uploadStart = deploy.indexOf('foreach ($record in $deploymentActionPlan.Records)');
+  const uploadStart = deploy.indexOf(
+    'Invoke-PinnedDeploymentBundleUpload',
+    deploy.indexOf('$deploymentActionPlan = Assert-LocalReleaseSource')
+  );
   const uploadVerification = deploy.indexOf('sha256sum --check --status "$LockDir/upload.sha256"', uploadStart);
   const trustedStageCall = deploy.indexOf('Stage-RemoteTrustedProductionSourceBundle', uploadVerification);
   const cleanupInstallCall = deploy.indexOf('Install-RemoteMigrationGateCleanup', trustedStageCall);
@@ -3381,15 +3386,16 @@ test('one immutable action plan supplies backup, attestation, checksum, upload, 
   );
 
   const uploadCalls = deploy.match(
-    /Invoke-PinnedDeploymentUpload -Record \$record -RemoteRoot \$remoteReleaseRoot/g
+    /Invoke-PinnedDeploymentBundleUpload\s+`\r?\n\s*-DeploymentPlan \$deploymentActionPlan/g
   ) || [];
-  assert.equal(uploadCalls.length, 1, 'every plan record must cross one pinned upload action boundary');
-  const pinnedUploadStart = deploy.indexOf('function Invoke-PinnedDeploymentUpload');
+  assert.equal(uploadCalls.length, 1, 'the complete plan must cross exactly one pinned bundle upload boundary');
+  const pinnedUploadStart = deploy.indexOf('function Invoke-PinnedDeploymentBundleUpload');
   const pinnedUploadEnd = deploy.indexOf('function Assert-TrustedProductionSourceArtifacts', pinnedUploadStart);
   const pinnedUpload = deploy.slice(pinnedUploadStart, pinnedUploadEnd);
-  assert.match(pinnedUpload, /ExpectedSha256=\$expectedSha256Literal/);
+  assert.match(pinnedUpload, /expected_digest = read_exact\(stream, 32, 'file digest'\)/);
+  assert.match(pinnedUpload, /incoming_digest = consume_payload\(stream, payload_length, output_descriptor\)/);
   assert.ok(
-    pinnedUpload.indexOf('sha256sum "`$Temporary"') < pinnedUpload.indexOf('mv -f "`$Temporary" "`$Target"'),
+    pinnedUpload.indexOf('incoming_digest != expected_digest') < pinnedUpload.indexOf('os.replace('),
     'the exact streamed bytes must match the pinned hash before the candidate target is replaced'
   );
   assert.doesNotMatch(deploy, /\bInvoke-SecureCopy\b/);

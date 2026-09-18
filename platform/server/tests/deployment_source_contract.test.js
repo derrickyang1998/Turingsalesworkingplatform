@@ -46,6 +46,31 @@ function sha256Buffer(buffer) {
   return crypto.createHash('sha256').update(buffer).digest('hex');
 }
 
+function buildCandidateUploadBundle(records, identity = 'f'.repeat(64)) {
+  const parts = [Buffer.from('TMCB0001', 'ascii')];
+  const count = Buffer.alloc(4);
+  count.writeUInt32BE(records.length);
+  parts.push(count, Buffer.from(identity, 'hex'));
+  for (const record of records) {
+    const remotePath = Buffer.from(record.path, 'utf8');
+    const payload = Buffer.from(record.payload);
+    const pathLength = Buffer.alloc(4);
+    const payloadLength = Buffer.alloc(8);
+    pathLength.writeUInt32BE(remotePath.length);
+    payloadLength.writeBigUInt64BE(BigInt(payload.length));
+    const digest = Buffer.from(record.sha256 || sha256Buffer(payload), 'hex');
+    parts.push(pathLength, payloadLength, digest, remotePath, payload);
+  }
+  parts.push(Buffer.from('TMCBEND1', 'ascii'), Buffer.from(identity, 'hex'));
+  return Buffer.concat(parts);
+}
+
+function candidateUploadExtractorSource(deploy) {
+  const match = deploy.match(/\$candidateBundleExtractor\s*=\s*@'\r?\n([\s\S]*?)\r?\n'@/);
+  assert.ok(match, 'candidate bundle extractor must exist as a literal Python program');
+  return match[1];
+}
+
 function hereDocBody(source, marker) {
   const expression = new RegExp(`node <<'${marker}'\\r?\\n([\\s\\S]*?)\\r?\\n${marker}`);
   const match = source.match(expression);
@@ -2181,23 +2206,44 @@ test('Task 12 deploy validates an isolated candidate and atomically exchanges it
   assert.match(deploy, /\$remoteCandidateDir\s*=\s*"\$remoteReleaseRoot\/platform"/);
   const pinnedInputMatch = deploy.match(/function Invoke-NativeWithPinnedInput[\s\S]*?(?=function Assert-ImmutableDeploymentActionPlan)/);
   assert.ok(pinnedInputMatch, 'pinned native-input function must exist');
-  assert.match(pinnedInputMatch[0], /\$Record\.CopyTo\(\$process\.StandardInput\.BaseStream\)/);
-  const uploadMatch = deploy.match(/function Invoke-PinnedDeploymentUpload[\s\S]*?(?=function Assert-TrustedProductionSourceArtifacts)/);
-  assert.ok(uploadMatch, 'pinned deployment upload function must exist');
+  assert.match(pinnedInputMatch[0], /\$Record\.CopyTo\(\$pinnedInput\)/);
+  assert.match(pinnedInputMatch[0], /\$Record -isnot \[PinnedDeploymentActionRecord\][\s\S]*?\$Record -isnot \[ImmutableDeploymentActionPlan\]/);
+  assert.match(pinnedInputMatch[0], /\$commandLineLength = \$startInfo\.FileName\.Length \+ 1 \+ \$nativeArguments\.Length/);
+  assert.match(pinnedInputMatch[0], /\$commandLineLength -ge 30000/);
+  assert.match(pinnedInputMatch[0], /WriteAsync\([\s\S]*?\$writeTask\.Wait\(\$remainingMilliseconds\)/);
+  assert.match(
+    pinnedInputMatch[0],
+    /finally\s*\{[\s\S]*?Stop-NativePinnedInputProcess -Process \$process -FailureMessage \$FailureMessage[\s\S]*?\$process\.Dispose\(\)/,
+    'every incomplete native input operation must terminate and reap its child before returning'
+  );
+  const uploadMatch = deploy.match(/function Invoke-PinnedDeploymentBundleUpload[\s\S]*?(?=function Assert-TrustedProductionSourceArtifacts)/);
+  assert.ok(uploadMatch, 'pinned deployment bundle upload function must exist');
   const upload = uploadMatch[0];
-  assert.match(upload, /\$Record -isnot \[PinnedDeploymentActionRecord\]/);
-  assert.ok(upload.includes("if ($Record.RemoteRelativePath -notmatch '^[A-Za-z0-9._/@-]+$' -or $Record.RemoteRelativePath -match '(^|/)\\.\\.?(/|$)') {"));
-  assert.ok(upload.includes("if ($Record.ExpectedSha256 -notmatch '^[0-9a-f]{64}$') {"));
-  assert.ok(upload.includes(`$remotePath = "$($RemoteRoot.TrimEnd('/'))/$($Record.RemoteRelativePath)"`));
-  assert.match(upload, /Invoke-NativeWithPinnedInput\s+`\r?\n\s*-Record \$Record\s+`/);
+  assert.match(upload, /\$DeploymentPlan -isnot \[ImmutableDeploymentActionPlan\]/);
+  assert.match(upload, /\$expectedIdentity\s*=\s*\$identityParts\[1\]/);
+  assert.match(upload, /ExpectedIdentity=__EXPECTED_IDENTITY__/);
+  assert.match(upload, /ExpectedRecordCount=__EXPECTED_RECORD_COUNT__/);
+  assert.match(upload, /python3 -c/);
+  assert.match(upload, /Invoke-NativeWithPinnedInput\s+`\r?\n\s*-Record \$DeploymentPlan\s+`/);
+  assert.match(upload, /Candidate pinned bundle upload retry/);
+  assert.match(upload, /TM_PINNED_INPUT_PROCESS_UNREAPED:\*'[\s\S]*?throw/);
+  assert.match(upload, /O_NOFOLLOW/);
+  assert.match(upload, /os\.replace\([\s\S]*?src_dir_fd=[\s\S]*?dst_dir_fd=[\s\S]*?\)/);
+  assert.match(upload, /os\.fsync/);
+  assert.match(upload, /hashlib\.sha256/);
+  assert.match(upload, /TMCB0001/);
+  assert.match(upload, /TMCBEND1/);
+  assert.match(upload, /\.uploading-/);
   assert.doesNotMatch(upload, /\bSourcePath\b|\bscp(?:\.exe)?\b/i);
   assert.doesNotMatch(
     upload,
     /\b(?:Get-Content|Copy-Item|Get-Item|Resolve-Path)\b|\[(?:System\.)?IO\.File\]::(?:Open|OpenRead|ReadAllBytes|ReadAllText)\b|\bNew-Object\s+(?:System\.)?IO\.FileStream\b/i
   );
-  assert.match(deploy, /foreach \(\$record in \$deploymentActionPlan\.Records\) \{\s*Invoke-PinnedDeploymentUpload -Record \$record -RemoteRoot \$remoteReleaseRoot\s*\}/);
+  assert.match(deploy, /Invoke-PinnedDeploymentBundleUpload\s+`\r?\n\s*-DeploymentPlan \$deploymentActionPlan\s+`\r?\n\s*-RemoteRoot \$remoteReleaseRoot/);
+  assert.doesNotMatch(deploy, /foreach \(\$record in \$deploymentActionPlan\.Records\) \{\s*Invoke-PinnedDeployment/);
+  assert.doesNotMatch(deploy, /function Invoke-PinnedDeploymentUpload\b/);
   assert.doesNotMatch(upload, /\$REMOTE_DIR\b/);
-  assert.doesNotMatch(deploy, /Invoke-PinnedDeploymentUpload\s+-Record\s+\$\w+\s+-RemoteRoot\s+\$REMOTE_DIR\b/);
+  assert.doesNotMatch(deploy, /Invoke-PinnedDeploymentBundleUpload\s+-DeploymentPlan\s+\$\w+\s+-RemoteRoot\s+\$REMOTE_DIR\b/);
   assert.match(deploy, /renameat2/);
   assert.match(deploy, /RENAME_EXCHANGE/);
   assert.match(deploy, /pm2 stop turingmarket[\s\S]*?renameat2[\s\S]*?restart_pm2_from_ecosystem_exactly/);
@@ -2206,6 +2252,405 @@ test('Task 12 deploy validates an isolated candidate and atomically exchanges it
   assert.match(deploy, /install -m 0600 "\$SCHEMA_DB" "\$SCHEMA_RUNTIME_DB"/);
   assert.match(deploy, /DB_PATH="\$SCHEMA_RUNTIME_DB"/);
   assert.match(deploy, /\^\[A-Za-z0-9\]\[A-Za-z0-9\.-\]\{0,252\}\$/);
+});
+
+test('candidate upload plan emits one deterministic identity-validated binary stream', {
+  skip: process.platform !== 'win32'
+}, () => {
+  const result = runPowerShellFunctionHarness([
+    'Initialize-PinnedDeploymentTypes',
+    'Get-ExactDeploymentInventoryIdentity'
+  ], String.raw`
+Initialize-PinnedDeploymentTypes
+$alpha = [Text.Encoding]::UTF8.GetBytes('alpha-payload')
+$beta = [byte[]]@(0, 1, 2, 3, 254, 255)
+$first = [PinnedDeploymentActionRecord]::new(
+  'Platform', 'docs/alpha.txt', 'C:\fixture\alpha.txt', 'platform/docs/alpha.txt',
+  [PinnedDeploymentFileIdentity]::Sha256($alpha), $false, $true, $alpha
+)
+$second = [PinnedDeploymentActionRecord]::new(
+  'RootRelative', 'root.bin', 'C:\fixture\root.bin', 'root.bin',
+  [PinnedDeploymentFileIdentity]::Sha256($beta), $false, $true, $beta
+)
+$identityEntries = @(
+  ('Platform|docs/alpha.txt|platform/docs/alpha.txt|0|1|' + $first.ExpectedSha256 + '|' + $first.ByteLength),
+  ('RootRelative|root.bin|root.bin|0|1|' + $second.ExpectedSha256 + '|' + $second.ByteLength)
+)
+$identity = Get-ExactDeploymentInventoryIdentity -Entries $identityEntries -Label 'fixture plan'
+$plan = [ImmutableDeploymentActionPlan]::new(
+  [PinnedDeploymentActionRecord[]]@($first, $second),
+  $identity
+)
+$identityRejected = $false
+try {
+  $null = [ImmutableDeploymentActionPlan]::new(
+    [PinnedDeploymentActionRecord[]]@($first, $second),
+    ('2:' + ('f' * 64))
+  )
+}
+catch {
+  $identityRejected = $_.Exception.Message -match 'identity does not match'
+}
+if (-not $identityRejected) { throw 'Mismatched action-plan identity was accepted' }
+$stream = [IO.MemoryStream]::new()
+try {
+  $plan.CopyTo($stream)
+  Write-Output ('IDENTITY=' + $identity)
+  Write-Output ('BUNDLE=' + [Convert]::ToBase64String($stream.ToArray()))
+}
+finally {
+  $stream.Dispose()
+}
+`);
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const identity = result.stdout.match(/IDENTITY=2:([0-9a-f]{64})/)?.[1];
+  assert.ok(identity, result.stdout);
+  const encoded = result.stdout.match(/BUNDLE=([A-Za-z0-9+/=]+)/)?.[1];
+  assert.ok(encoded, result.stdout);
+  const bundle = Buffer.from(encoded, 'base64');
+  let offset = 0;
+  const take = (length) => {
+    const value = bundle.subarray(offset, offset + length);
+    assert.equal(value.length, length, `bundle truncated at ${offset}`);
+    offset += length;
+    return value;
+  };
+  assert.equal(take(8).toString('ascii'), 'TMCB0001');
+  assert.equal(take(4).readUInt32BE(), 2);
+  assert.equal(take(32).toString('hex'), identity);
+  for (const expected of [
+    { path: 'platform/docs/alpha.txt', payload: Buffer.from('alpha-payload') },
+    { path: 'root.bin', payload: Buffer.from([0, 1, 2, 3, 254, 255]) }
+  ]) {
+    const pathLength = take(4).readUInt32BE();
+    const payloadLength = take(8).readBigUInt64BE();
+    const digest = take(32).toString('hex');
+    assert.equal(take(pathLength).toString('utf8'), expected.path);
+    assert.equal(payloadLength, BigInt(expected.payload.length));
+    assert.equal(take(Number(payloadLength)).equals(expected.payload), true);
+    assert.equal(digest, sha256Buffer(expected.payload));
+  }
+  assert.equal(take(8).toString('ascii'), 'TMCBEND1');
+  assert.equal(take(32).toString('hex'), identity);
+  assert.equal(offset, bundle.length);
+});
+
+test('pinned native input timeout covers stalled writes and reaps the child before returning', {
+  skip: process.platform !== 'win32'
+}, () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-pinned-input-timeout-'));
+  const idleScript = path.join(root, 'idle-without-stdin.js');
+  const pidFile = path.join(root, 'child.pid');
+  const psLiteral = (value) => `'${value.replace(/'/g, "''")}'`;
+  fs.writeFileSync(
+    idleScript,
+    "const fs=require('node:fs');fs.writeFileSync(process.argv[2],String(process.pid));setTimeout(()=>process.exit(0),4000);",
+    'utf8'
+  );
+  try {
+    const result = runPowerShellFunctionHarness([
+      'Initialize-PinnedDeploymentTypes',
+      'Convert-ToNativeArgument',
+      'Stop-NativePinnedInputProcess',
+      'Invoke-NativeWithPinnedInput'
+    ], `
+Initialize-PinnedDeploymentTypes
+$payload = New-Object byte[] (4 * 1024 * 1024)
+$record = [PinnedDeploymentActionRecord]::new(
+  'Fixture', 'payload.bin', 'C:\\fixture\\payload.bin', 'payload.bin',
+  [PinnedDeploymentFileIdentity]::Sha256($payload), $false, $true, $payload
+)
+$watch = [Diagnostics.Stopwatch]::StartNew()
+$timedOut = $false
+try {
+  Invoke-NativeWithPinnedInput -Record $record -FileName ${psLiteral(process.execPath)} \`
+    -ArgumentList @(${psLiteral(idleScript)}, ${psLiteral(pidFile)}) \`
+    -FailureMessage 'Pinned stalled-writer fixture' -TimeoutSeconds 1
+}
+catch {
+  if ($_.Exception.Message -notmatch 'timed out during pinned input transfer') { throw }
+  $timedOut = $true
+}
+finally {
+  $watch.Stop()
+}
+if (-not $timedOut) { throw 'Stalled pinned input did not time out' }
+if ($watch.ElapsedMilliseconds -ge 3500) { throw "Pinned input timeout was not enforced during write: $($watch.ElapsedMilliseconds)ms" }
+if (-not (Test-Path -LiteralPath ${psLiteral(pidFile)} -PathType Leaf)) { throw 'Fixture child did not publish its PID' }
+$childId = [int](Get-Content -LiteralPath ${psLiteral(pidFile)} -Raw)
+if ($null -ne (Get-Process -Id $childId -ErrorAction SilentlyContinue)) {
+  throw 'Pinned input child survived the timeout return'
+}
+Write-Output 'PINNED_INPUT_TIMEOUT_REAP_OK'
+`);
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, /PINNED_INPUT_TIMEOUT_REAP_OK/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('pinned native input rejects a final Windows command line beyond its guarded boundary', {
+  skip: process.platform !== 'win32'
+}, () => {
+  const result = runPowerShellFunctionHarness([
+    'Initialize-PinnedDeploymentTypes',
+    'Convert-ToNativeArgument',
+    'Stop-NativePinnedInputProcess',
+    'Invoke-NativeWithPinnedInput'
+  ], String.raw`
+Initialize-PinnedDeploymentTypes
+$payload = [byte[]]@(1)
+$record = [PinnedDeploymentActionRecord]::new(
+  'Fixture', 'payload.bin', 'C:\fixture\payload.bin', 'payload.bin',
+  [PinnedDeploymentFileIdentity]::Sha256($payload), $false, $true, $payload
+)
+$rejected = $false
+try {
+  Invoke-NativeWithPinnedInput -Record $record -FileName 'node.exe' -ArgumentList @(('x' * 30000)) -FailureMessage 'Oversized argv fixture' -TimeoutSeconds 1
+}
+catch {
+  if ($_.Exception.Message -notmatch 'command line exceeds the guarded Windows process boundary') { throw }
+  $rejected = $true
+}
+if (-not $rejected) { throw 'Oversized final command line was accepted' }
+Write-Output 'PINNED_INPUT_COMMAND_BOUNDARY_OK'
+`);
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /PINNED_INPUT_COMMAND_BOUNDARY_OK/);
+});
+
+test('candidate bundle upload opens one SSH transport for the immutable plan', {
+  skip: process.platform !== 'win32'
+}, () => {
+  const result = runPowerShellFunctionHarness([
+    'Initialize-PinnedDeploymentTypes',
+    'Get-ExactDeploymentInventoryIdentity',
+    'Convert-ToBashSingleQuotedLiteral',
+    'Invoke-PinnedDeploymentBundleUpload'
+  ], String.raw`
+Initialize-PinnedDeploymentTypes
+$script:deploymentRunId = 'fixture-run'
+$script:SSH_KEY = 'C:\fixture\deploy-key'
+$script:SERVER = 'example.invalid'
+$script:Calls = New-Object 'Collections.Generic.List[object]'
+function Invoke-NativeWithPinnedInput {
+  param($Record, $FileName, $ArgumentList, $FailureMessage, $TimeoutSeconds)
+  if ($Record -isnot [ImmutableDeploymentActionPlan]) { throw 'Expected immutable plan input' }
+  $script:Calls.Add([pscustomobject]@{
+    FileName = $FileName
+    Arguments = @($ArgumentList)
+    FailureMessage = $FailureMessage
+  })
+}
+$payload = [Text.Encoding]::UTF8.GetBytes('payload')
+$record = [PinnedDeploymentActionRecord]::new(
+  'Platform', 'app.js', 'C:\fixture\app.js', 'platform/app.js',
+  [PinnedDeploymentFileIdentity]::Sha256($payload), $false, $true, $payload
+)
+$identityEntry = 'Platform|app.js|platform/app.js|0|1|' + $record.ExpectedSha256 + '|' + $record.ByteLength
+$identity = Get-ExactDeploymentInventoryIdentity -Entries @($identityEntry) -Label 'fixture plan'
+$plan = [ImmutableDeploymentActionPlan]::new([PinnedDeploymentActionRecord[]]@($record), $identity)
+Invoke-PinnedDeploymentBundleUpload -DeploymentPlan $plan -RemoteRoot '/root/turingmarket/releases/fixture'
+if ($script:Calls.Count -ne 1) { throw "Expected one SSH call; got $($script:Calls.Count)" }
+$call = $script:Calls[0]
+if ($call.FileName -ne 'ssh') { throw 'Expected SSH transport' }
+if ($call.Arguments[-1] -notmatch "ReleaseRoot='/root/turingmarket/releases/fixture'") { throw 'Remote root was not pinned' }
+if ($call.Arguments[-1] -notmatch "ExpectedRecordCount='1'") { throw 'Record count was not pinned' }
+if ($call.Arguments[-1].Length -ge 30000) { throw 'Remote command exceeds the Windows process argument safety bound' }
+Write-Output 'SINGLE_PINNED_BUNDLE_TRANSPORT_OK'
+`);
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /SINGLE_PINNED_BUNDLE_TRANSPORT_OK/);
+});
+
+test('candidate bundle upload retries with byte-identical pinned input and no source reopen', {
+  skip: process.platform !== 'win32'
+}, () => {
+  const result = runPowerShellFunctionHarness([
+    'Initialize-PinnedDeploymentTypes',
+    'Get-ExactDeploymentInventoryIdentity',
+    'Convert-ToBashSingleQuotedLiteral',
+    'Invoke-PinnedDeploymentBundleUpload'
+  ], String.raw`
+Initialize-PinnedDeploymentTypes
+$script:deploymentRunId = 'fixture-retry'
+$script:SSH_KEY = 'C:\fixture\deploy-key'
+$script:SERVER = 'example.invalid'
+$script:Attempts = 0
+$script:Streams = New-Object 'Collections.Generic.List[string]'
+function Start-Sleep { param([int]$Seconds) }
+function Invoke-NativeWithPinnedInput {
+  param($Record, $FileName, $ArgumentList, $FailureMessage, $TimeoutSeconds)
+  $stream = [IO.MemoryStream]::new()
+  try {
+    $Record.CopyTo($stream)
+    $script:Streams.Add([Convert]::ToBase64String($stream.ToArray()))
+  }
+  finally {
+    $stream.Dispose()
+  }
+  $script:Attempts++
+  if ($script:Attempts -eq 1) { throw 'fixture transport reset' }
+}
+$payload = [Text.Encoding]::UTF8.GetBytes('retry-payload')
+$record = [PinnedDeploymentActionRecord]::new(
+  'Platform', 'app.js', 'C:\fixture\app.js', 'platform/app.js',
+  [PinnedDeploymentFileIdentity]::Sha256($payload), $false, $true, $payload
+)
+$identityEntry = 'Platform|app.js|platform/app.js|0|1|' + $record.ExpectedSha256 + '|' + $record.ByteLength
+$identity = Get-ExactDeploymentInventoryIdentity -Entries @($identityEntry) -Label 'fixture retry plan'
+$plan = [ImmutableDeploymentActionPlan]::new(
+  [PinnedDeploymentActionRecord[]]@($record),
+  $identity
+)
+Invoke-PinnedDeploymentBundleUpload -DeploymentPlan $plan -RemoteRoot '/root/turingmarket/releases/retry'
+if ($script:Attempts -ne 2) { throw "Expected two attempts; got $script:Attempts" }
+if ($script:Streams.Count -ne 2 -or $script:Streams[0] -cne $script:Streams[1]) {
+  throw 'Retry stream did not preserve exact pinned bytes'
+}
+Write-Output 'PINNED_BUNDLE_RETRY_IDENTITY_OK'
+`);
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /PINNED_BUNDLE_RETRY_IDENTITY_OK/);
+});
+
+test('candidate bundle extractor is idempotent and rejects malformed streams and unsafe filesystem targets', {
+  skip: !rootLinuxAvailable()
+}, () => {
+  const extractor = candidateUploadExtractorSource(read(deployPath));
+  const identity = 'a'.repeat(64);
+  const success = buildCandidateUploadBundle([
+    { path: 'platform/docs/alpha.txt', payload: Buffer.from('alpha') },
+    { path: 'root-file.bin', payload: Buffer.from([0, 1, 2, 3, 254, 255]) }
+  ], identity);
+  const traversal = buildCandidateUploadBundle([
+    { path: '../escape', payload: Buffer.from('escape') }
+  ], identity);
+  const symlink = buildCandidateUploadBundle([
+    { path: 'platform/docs/link.txt', payload: Buffer.from('link-escape') }
+  ], identity);
+  const digestMismatch = buildCandidateUploadBundle([
+    { path: 'platform/mismatch.txt', payload: Buffer.from('mismatch'), sha256: '0'.repeat(64) }
+  ], identity);
+  const duplicatePath = buildCandidateUploadBundle([
+    { path: 'platform/duplicate.txt', payload: Buffer.from('first') },
+    { path: 'platform/duplicate.txt', payload: Buffer.from('second') }
+  ], identity);
+  const targetLink = buildCandidateUploadBundle([
+    { path: 'platform/target-link.txt', payload: Buffer.from('target-link') }
+  ], identity);
+  const targetHardlink = buildCandidateUploadBundle([
+    { path: 'platform/target-hardlink.txt', payload: Buffer.from('target-hardlink') }
+  ], identity);
+  const writableParent = buildCandidateUploadBundle([
+    { path: 'platform/docs/writable.txt', payload: Buffer.from('writable-parent') }
+  ], identity);
+  const staleTemporary = buildCandidateUploadBundle([
+    { path: 'platform/stale.txt', payload: Buffer.from('stale-temporary') }
+  ], identity);
+  const existingWrongDigest = buildCandidateUploadBundle([
+    { path: 'platform/existing.txt', payload: Buffer.from('expected-new-content') }
+  ], identity);
+  const badTrailer = Buffer.from(success);
+  badTrailer[badTrailer.length - 40] ^= 0xff;
+  const trailingBytes = Buffer.concat([success, Buffer.from([0])]);
+  const oversizedPayload = buildCandidateUploadBundle([
+    { path: 'platform/oversized.txt', payload: Buffer.alloc(0) }
+  ], identity);
+  oversizedPayload.writeBigUInt64BE((16n * 1024n * 1024n * 1024n) + 1n, 48);
+  const truncated = success.subarray(0, success.length - 41);
+  const harness = `
+set -euo pipefail
+Root="$(mktemp -d)"
+Outside="$(mktemp -d)"
+trap 'rm -rf "$Root" "$Outside"' EXIT
+Extractor="$(printf '%s' '${Buffer.from(extractor).toString('base64')}' | base64 -d)"
+run_bundle() {
+  local Encoded="$1" Target="$2" Count="$3" ExpectedIdentity="${identity}"
+  if [ "$#" -ge 4 ]; then ExpectedIdentity="$4"; fi
+  printf '%s' "$Encoded" | base64 -d | python3 -c "$Extractor" "$Target" "$ExpectedIdentity" "$Count" fixture-run
+}
+mkdir -p "$Root/success"
+run_bundle '${success.toString('base64')}' "$Root/success" 2
+run_bundle '${success.toString('base64')}' "$Root/success" 2
+test "$(cat "$Root/success/platform/docs/alpha.txt")" = alpha
+test "$(stat -c '%a' "$Root/success/platform/docs/alpha.txt")" = 600
+test "$(sha256sum "$Root/success/root-file.bin" | awk '{print $1}')" = '${sha256Buffer(Buffer.from([0, 1, 2, 3, 254, 255]))}'
+
+mkdir -p "$Root/traversal"
+if run_bundle '${traversal.toString('base64')}' "$Root/traversal" 1; then exit 21; fi
+test ! -e "$Root/escape"
+
+mkdir -p "$Root/symlink/platform"
+ln -s "$Outside" "$Root/symlink/platform/docs"
+if run_bundle '${symlink.toString('base64')}' "$Root/symlink" 1; then exit 22; fi
+test ! -e "$Outside/link.txt"
+
+mkdir -p "$Root/mismatch"
+if run_bundle '${digestMismatch.toString('base64')}' "$Root/mismatch" 1; then exit 23; fi
+test ! -e "$Root/mismatch/platform/mismatch.txt"
+
+mkdir -p "$Root/truncated"
+if run_bundle '${truncated.toString('base64')}' "$Root/truncated" 2; then exit 24; fi
+test ! -e "$Root/truncated/root-file.bin"
+
+mkdir -p "$Root/duplicate"
+if run_bundle '${duplicatePath.toString('base64')}' "$Root/duplicate" 2; then exit 25; fi
+test "$(cat "$Root/duplicate/platform/duplicate.txt")" = first
+
+mkdir -p "$Root/wrong-count"
+if run_bundle '${success.toString('base64')}' "$Root/wrong-count" 1; then exit 26; fi
+test -z "$(find "$Root/wrong-count" -mindepth 1 -print -quit)"
+
+mkdir -p "$Root/wrong-identity"
+if run_bundle '${success.toString('base64')}' "$Root/wrong-identity" 2 '${'b'.repeat(64)}'; then exit 27; fi
+test -z "$(find "$Root/wrong-identity" -mindepth 1 -print -quit)"
+
+mkdir -p "$Root/bad-trailer"
+if run_bundle '${badTrailer.toString('base64')}' "$Root/bad-trailer" 2; then exit 28; fi
+
+mkdir -p "$Root/trailing-bytes"
+if run_bundle '${trailingBytes.toString('base64')}' "$Root/trailing-bytes" 2; then exit 29; fi
+
+mkdir -p "$Root/oversized"
+if run_bundle '${oversizedPayload.toString('base64')}' "$Root/oversized" 1; then exit 30; fi
+test ! -e "$Root/oversized/platform/oversized.txt"
+
+mkdir -p "$Root/target-link/platform"
+printf original > "$Outside/target-link.txt"
+ln -s "$Outside/target-link.txt" "$Root/target-link/platform/target-link.txt"
+if run_bundle '${targetLink.toString('base64')}' "$Root/target-link" 1; then exit 31; fi
+test "$(cat "$Outside/target-link.txt")" = original
+
+mkdir -p "$Root/target-hardlink/platform"
+printf original > "$Outside/target-hardlink.txt"
+chmod 0600 "$Outside/target-hardlink.txt"
+ln "$Outside/target-hardlink.txt" "$Root/target-hardlink/platform/target-hardlink.txt"
+if run_bundle '${targetHardlink.toString('base64')}' "$Root/target-hardlink" 1; then exit 32; fi
+test "$(cat "$Outside/target-hardlink.txt")" = original
+
+mkdir -p "$Root/writable-parent/platform"
+chmod 0777 "$Root/writable-parent/platform"
+if run_bundle '${writableParent.toString('base64')}' "$Root/writable-parent" 1; then exit 33; fi
+test ! -e "$Root/writable-parent/platform/docs/writable.txt"
+
+mkdir -p "$Root/stale-temporary/platform"
+printf original > "$Outside/stale.txt"
+ln -s "$Outside/stale.txt" "$Root/stale-temporary/platform/stale.txt.uploading-fixture-run"
+if run_bundle '${staleTemporary.toString('base64')}' "$Root/stale-temporary" 1; then exit 34; fi
+test "$(cat "$Outside/stale.txt")" = original
+
+mkdir -p "$Root/existing-wrong/platform"
+printf preserved > "$Root/existing-wrong/platform/existing.txt"
+chmod 0600 "$Root/existing-wrong/platform/existing.txt"
+if run_bundle '${existingWrongDigest.toString('base64')}' "$Root/existing-wrong" 1; then exit 35; fi
+test "$(cat "$Root/existing-wrong/platform/existing.txt")" = preserved
+printf 'CANDIDATE_BUNDLE_EXTRACTOR_OK\n'
+`;
+  const result = runRootLinuxScript(harness);
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /CANDIDATE_BUNDLE_EXTRACTOR_OK/);
 });
 
 test('production replay reuses the server JWT runtime contract before database or request work', () => {

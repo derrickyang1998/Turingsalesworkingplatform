@@ -8278,6 +8278,8 @@ public sealed class PinnedDeploymentActionRecord
 
 public sealed class ImmutableDeploymentActionPlan
 {
+    private static readonly byte[] BundleMagic = Encoding.ASCII.GetBytes("TMCB0001");
+    private static readonly byte[] BundleTrailer = Encoding.ASCII.GetBytes("TMCBEND1");
     private readonly ReadOnlyCollection<PinnedDeploymentActionRecord> records;
     private readonly Dictionary<string, PinnedDeploymentActionRecord> byRemotePath;
 
@@ -8297,7 +8299,10 @@ public sealed class ImmutableDeploymentActionPlan
                 throw new ArgumentException("Action plan contains a duplicate remote path.", "actionRecords");
             byRemotePath.Add(record.RemoteRelativePath, record);
         }
-        Identity = identity;
+        string computedIdentity = ComputeIdentity(recordCopy);
+        if (!String.Equals(identity, computedIdentity, StringComparison.Ordinal))
+            throw new ArgumentException("Action plan identity does not match its pinned records.", "identity");
+        Identity = computedIdentity;
     }
 
     public PinnedDeploymentActionRecord GetByRemoteRelativePath(string remoteRelativePath)
@@ -8306,6 +8311,108 @@ public sealed class ImmutableDeploymentActionPlan
         if (!byRemotePath.TryGetValue(remoteRelativePath, out record))
             throw new InvalidOperationException("Pinned deployment action is missing: " + remoteRelativePath);
         return record;
+    }
+
+    private static byte[] ParseSha256(string value, string label)
+    {
+        if (String.IsNullOrEmpty(value) || value.Length != 64)
+            throw new InvalidOperationException(label + " must be one lowercase SHA-256 value.");
+        byte[] result = new byte[32];
+        for (int index = 0; index < result.Length; index++)
+        {
+            string pair = value.Substring(index * 2, 2);
+            byte parsed;
+            if (!Byte.TryParse(pair, System.Globalization.NumberStyles.AllowHexSpecifier,
+                System.Globalization.CultureInfo.InvariantCulture, out parsed) || pair != pair.ToLowerInvariant())
+                throw new InvalidOperationException(label + " must be one lowercase SHA-256 value.");
+            result[index] = parsed;
+        }
+        return result;
+    }
+
+    private static string ComputeIdentity(PinnedDeploymentActionRecord[] actionRecords)
+    {
+        List<string> entries = new List<string>(actionRecords.Length);
+        foreach (PinnedDeploymentActionRecord record in actionRecords)
+        {
+            entries.Add(
+                record.InventoryKind + "|" +
+                record.SourceRelativePath + "|" +
+                record.RemoteRelativePath + "|" +
+                (record.RequiredPublicAsset ? "1" : "0") + "|" +
+                (record.IncludedInBackup ? "1" : "0") + "|" +
+                record.ExpectedSha256 + "|" +
+                record.ByteLength.ToString(System.Globalization.CultureInfo.InvariantCulture)
+            );
+        }
+        entries.Sort(StringComparer.Ordinal);
+        StringBuilder identityBuilder = new StringBuilder();
+        UTF8Encoding utf8 = new UTF8Encoding(false, true);
+        foreach (string entry in entries)
+        {
+            identityBuilder.Append(utf8.GetByteCount(entry).ToString(
+                System.Globalization.CultureInfo.InvariantCulture));
+            identityBuilder.Append(':').Append(entry).Append('\n');
+        }
+        byte[] identityBytes = utf8.GetBytes(identityBuilder.ToString());
+        byte[] digest;
+        using (SHA256 hasher = SHA256.Create())
+            digest = hasher.ComputeHash(identityBytes);
+        StringBuilder hexadecimal = new StringBuilder(64);
+        foreach (byte value in digest)
+            hexadecimal.Append(value.ToString("x2", System.Globalization.CultureInfo.InvariantCulture));
+        return entries.Count.ToString(System.Globalization.CultureInfo.InvariantCulture) + ":" + hexadecimal.ToString();
+    }
+
+    private static void WriteUInt32BigEndian(Stream destination, uint value)
+    {
+        byte[] bytes = new byte[] {
+            (byte)(value >> 24), (byte)(value >> 16), (byte)(value >> 8), (byte)value
+        };
+        destination.Write(bytes, 0, bytes.Length);
+    }
+
+    private static void WriteUInt64BigEndian(Stream destination, ulong value)
+    {
+        byte[] bytes = new byte[8];
+        for (int index = 7; index >= 0; index--)
+        {
+            bytes[index] = (byte)(value & 0xff);
+            value >>= 8;
+        }
+        destination.Write(bytes, 0, bytes.Length);
+    }
+
+    public void CopyTo(Stream destination)
+    {
+        if (destination == null) throw new ArgumentNullException("destination");
+        if (!destination.CanWrite) throw new InvalidOperationException("Candidate bundle destination is not writable.");
+        string[] identityParts = (Identity ?? String.Empty).Split(new char[] { ':' }, 2);
+        int declaredCount;
+        if (identityParts.Length != 2 || !Int32.TryParse(identityParts[0], out declaredCount) ||
+            declaredCount != records.Count)
+            throw new InvalidOperationException("Candidate bundle plan identity count mismatch.");
+        byte[] identitySha256 = ParseSha256(identityParts[1], "Candidate bundle plan identity");
+
+        destination.Write(BundleMagic, 0, BundleMagic.Length);
+        WriteUInt32BigEndian(destination, checked((uint)records.Count));
+        destination.Write(identitySha256, 0, identitySha256.Length);
+        UTF8Encoding utf8 = new UTF8Encoding(false, true);
+        foreach (PinnedDeploymentActionRecord record in records)
+        {
+            byte[] remotePath = utf8.GetBytes(record.RemoteRelativePath);
+            if (remotePath.Length == 0 || remotePath.Length > 4096)
+                throw new InvalidOperationException("Candidate bundle remote path length is invalid.");
+            WriteUInt32BigEndian(destination, checked((uint)remotePath.Length));
+            WriteUInt64BigEndian(destination, checked((ulong)record.ByteLength));
+            byte[] expectedSha256 = ParseSha256(record.ExpectedSha256, "Candidate bundle record SHA-256");
+            destination.Write(expectedSha256, 0, expectedSha256.Length);
+            destination.Write(remotePath, 0, remotePath.Length);
+            record.CopyTo(destination);
+        }
+        destination.Write(BundleTrailer, 0, BundleTrailer.Length);
+        destination.Write(identitySha256, 0, identitySha256.Length);
+        destination.Flush();
     }
 }
 
@@ -8493,6 +8600,38 @@ function New-ImmutableDeploymentActionPlan {
     return [ImmutableDeploymentActionPlan]::new($records.ToArray(), $identity)
 }
 
+function Stop-NativePinnedInputProcess {
+    param(
+        [Parameter(Mandatory = $true)][Diagnostics.Process]$Process,
+        [Parameter(Mandatory = $true)][string]$FailureMessage
+    )
+
+    $killError = $null
+    try {
+        if (-not $Process.HasExited) {
+            $Process.Kill()
+        }
+    }
+    catch {
+        $killError = $_
+    }
+
+    $reaped = $false
+    try {
+        $reaped = $Process.WaitForExit(5000)
+        if ($reaped) {
+            $Process.WaitForExit()
+        }
+    }
+    catch {
+        throw "TM_PINNED_INPUT_PROCESS_UNREAPED: $FailureMessage could not verify native process termination."
+    }
+    if (-not $reaped -or -not $Process.HasExited) {
+        $killDetail = if ($null -ne $killError) { " Kill failed: $($killError.Exception.Message)" } else { '' }
+        throw "TM_PINNED_INPUT_PROCESS_UNREAPED: $FailureMessage left a native process running.$killDetail"
+    }
+}
+
 function Invoke-NativeWithPinnedInput {
     param(
         [Parameter(Mandatory = $true)][object]$Record,
@@ -8503,8 +8642,11 @@ function Invoke-NativeWithPinnedInput {
     )
 
     Initialize-PinnedDeploymentTypes
-    if ($Record -isnot [PinnedDeploymentActionRecord]) {
-        throw "$FailureMessage did not receive a pinned deployment action record."
+    if (
+        $Record -isnot [PinnedDeploymentActionRecord] -and
+        $Record -isnot [ImmutableDeploymentActionPlan]
+    ) {
+        throw "$FailureMessage did not receive a pinned deployment input."
     }
     $startInfo = New-Object Diagnostics.ProcessStartInfo
     $startInfo.FileName = $FileName
@@ -8514,34 +8656,64 @@ function Invoke-NativeWithPinnedInput {
             Convert-ToNativeArgument $nativeArgument
         }
     )
-    $startInfo.Arguments = $nativeArgumentParts -join ' '
+    $nativeArguments = $nativeArgumentParts -join ' '
+    $commandLineLength = $startInfo.FileName.Length + 1 + $nativeArguments.Length
+    if ($commandLineLength -ge 30000) {
+        throw "$FailureMessage native command line exceeds the guarded Windows process boundary."
+    }
+    $startInfo.Arguments = $nativeArguments
     $startInfo.UseShellExecute = $false
     $startInfo.CreateNoWindow = $true
     $startInfo.RedirectStandardInput = $true
-    $process = New-Object Diagnostics.Process
-    $process.StartInfo = $startInfo
+    $pinnedInput = [IO.MemoryStream]::new()
     try {
-        if (-not $process.Start()) {
-            throw "$FailureMessage could not start the native process."
+        $Record.CopyTo($pinnedInput)
+        if ($pinnedInput.Length -gt [int]::MaxValue) {
+            throw "$FailureMessage pinned input exceeds the supported native stream boundary."
         }
+        $process = New-Object Diagnostics.Process
+        $process.StartInfo = $startInfo
+        $started = $false
+        $reaped = $false
         try {
-            $Record.CopyTo($process.StandardInput.BaseStream)
+            if (-not $process.Start()) {
+                throw "$FailureMessage could not start the native process."
+            }
+            $started = $true
+            $deadlineUtc = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+            $pinnedBuffer = $pinnedInput.GetBuffer()
+            $writeTask = $process.StandardInput.BaseStream.WriteAsync(
+                $pinnedBuffer,
+                0,
+                [int]$pinnedInput.Length
+            )
+            $remainingMilliseconds = [int][Math]::Floor(($deadlineUtc - [DateTime]::UtcNow).TotalMilliseconds)
+            if ($remainingMilliseconds -le 0 -or -not $writeTask.Wait($remainingMilliseconds)) {
+                throw "$FailureMessage timed out during pinned input transfer after $TimeoutSeconds second(s)."
+            }
+            $writeTask.GetAwaiter().GetResult()
+            $process.StandardInput.Close()
+
+            $remainingMilliseconds = [int][Math]::Floor(($deadlineUtc - [DateTime]::UtcNow).TotalMilliseconds)
+            if ($remainingMilliseconds -le 0 -or -not $process.WaitForExit($remainingMilliseconds)) {
+                throw "$FailureMessage timed out after $TimeoutSeconds second(s)."
+            }
+            $process.WaitForExit()
+            $reaped = $true
+            if ($process.ExitCode -ne 0) {
+                throw "$FailureMessage (exit code $($process.ExitCode))."
+            }
         }
         finally {
-            $process.StandardInput.Close()
-        }
-        if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
-            try { $process.Kill() } catch { }
-            [void]$process.WaitForExit(5000)
-            throw "$FailureMessage timed out after $TimeoutSeconds second(s)."
-        }
-        $process.WaitForExit()
-        if ($process.ExitCode -ne 0) {
-            throw "$FailureMessage (exit code $($process.ExitCode))."
+            try { $process.StandardInput.Close() } catch { }
+            if ($started -and -not $reaped) {
+                Stop-NativePinnedInputProcess -Process $process -FailureMessage $FailureMessage
+            }
+            $process.Dispose()
         }
     }
     finally {
-        $process.Dispose()
+        $pinnedInput.Dispose()
     }
 }
 
@@ -8589,50 +8761,317 @@ function Convert-ToBashSingleQuotedLiteral {
     return "'" + $Value + "'"
 }
 
-function Invoke-PinnedDeploymentUpload {
+function Invoke-PinnedDeploymentBundleUpload {
     param(
-        [Parameter(Mandatory = $true)][object]$Record,
+        [Parameter(Mandatory = $true)][object]$DeploymentPlan,
         [Parameter(Mandatory = $true)][string]$RemoteRoot
     )
 
     Initialize-PinnedDeploymentTypes
-    if ($Record -isnot [PinnedDeploymentActionRecord]) {
-        throw 'Candidate upload requires a pinned deployment action record.'
+    if ($DeploymentPlan -isnot [ImmutableDeploymentActionPlan]) {
+        throw 'Candidate upload requires one immutable deployment action plan.'
     }
-    if ($Record.RemoteRelativePath -notmatch '^[A-Za-z0-9._/@-]+$' -or $Record.RemoteRelativePath -match '(^|/)\.\.?(/|$)') {
-        throw "Candidate upload record has an invalid remote path: $($Record.RemoteRelativePath)"
+    $identityParts = @(([string]$DeploymentPlan.Identity) -split ':', 2)
+    if (
+        $identityParts.Count -ne 2 -or
+        $identityParts[0] -cne [string]$DeploymentPlan.Records.Count -or
+        $identityParts[1] -notmatch '^[0-9a-f]{64}$'
+    ) {
+        throw 'Candidate upload plan identity is invalid.'
     }
-    if ($Record.ExpectedSha256 -notmatch '^[0-9a-f]{64}$') {
-        throw "Candidate upload record has an invalid pinned SHA-256: $($Record.RemoteRelativePath)"
+    if ($DeploymentPlan.Records.Count -le 0) {
+        throw 'Candidate upload plan must contain at least one pinned file.'
     }
-    $remotePath = "$($RemoteRoot.TrimEnd('/'))/$($Record.RemoteRelativePath)"
-    $temporaryPath = "$remotePath.uploading-$deploymentRunId"
-    $remotePathLiteral = Convert-ToBashSingleQuotedLiteral $remotePath
-    $temporaryPathLiteral = Convert-ToBashSingleQuotedLiteral $temporaryPath
-    $expectedSha256Literal = Convert-ToBashSingleQuotedLiteral $Record.ExpectedSha256
-    $remoteCommand = @"
+    if ($deploymentRunId -notmatch '^[A-Za-z0-9._-]{1,64}$') {
+        throw 'Candidate upload run identifier is invalid.'
+    }
+
+    $expectedIdentity = $identityParts[1]
+    $expectedRecordCount = [string]$DeploymentPlan.Records.Count
+    $candidateBundleExtractor = @'
+import hashlib
+import os
+import re
+import stat
+import struct
+import sys
+
+MAGIC = b'TMCB0001'
+TRAILER = b'TMCBEND1'
+PATH_PATTERN = re.compile(r'^[A-Za-z0-9._/@-]+$')
+MAX_PATH_BYTES = 4096
+MAX_FILE_BYTES = 16 * 1024 * 1024 * 1024
+
+
+def reject(message):
+    raise RuntimeError(message)
+
+
+def read_exact(stream, length, label):
+    chunks = []
+    remaining = length
+    while remaining:
+        chunk = stream.read(min(1024 * 1024, remaining))
+        if not chunk:
+            reject('Candidate bundle truncated while reading ' + label)
+        chunks.append(chunk)
+        remaining -= len(chunk)
+    return b''.join(chunks)
+
+
+def write_all(descriptor, payload):
+    view = memoryview(payload)
+    while view:
+        written = os.write(descriptor, view)
+        if written <= 0:
+            reject('Candidate bundle file write made no progress')
+        view = view[written:]
+
+
+def validate_directory(descriptor, label):
+    metadata = os.fstat(descriptor)
+    if not stat.S_ISDIR(metadata.st_mode):
+        reject(label + ' is not a directory')
+    if metadata.st_uid != 0 or metadata.st_gid != 0 or stat.S_IMODE(metadata.st_mode) & 0o022:
+        reject(label + ' ownership or mode is unsafe')
+
+
+def open_parent(root_descriptor, segments):
+    current = os.dup(root_descriptor)
+    try:
+        for segment in segments:
+            try:
+                os.mkdir(segment, 0o700, dir_fd=current)
+                os.fsync(current)
+            except FileExistsError:
+                pass
+            child = os.open(
+                segment,
+                os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                dir_fd=current,
+            )
+            validate_directory(child, 'Candidate bundle directory')
+            os.close(current)
+            current = child
+        return current
+    except BaseException:
+        os.close(current)
+        raise
+
+
+def hash_existing_file(parent_descriptor, name):
+    descriptor = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=parent_descriptor)
+    try:
+        metadata = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid != 0
+            or metadata.st_gid != 0
+            or stat.S_IMODE(metadata.st_mode) != 0o600
+            or metadata.st_nlink != 1
+        ):
+            reject('Existing candidate bundle target is unsafe')
+        digest = hashlib.sha256()
+        while True:
+            chunk = os.read(descriptor, 1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+        return digest.digest()
+    finally:
+        os.close(descriptor)
+
+
+def consume_payload(stream, length, output_descriptor):
+    digest = hashlib.sha256()
+    remaining = length
+    while remaining:
+        chunk = stream.read(min(1024 * 1024, remaining))
+        if not chunk:
+            reject('Candidate bundle truncated while reading file payload')
+        digest.update(chunk)
+        if output_descriptor is not None:
+            write_all(output_descriptor, chunk)
+        remaining -= len(chunk)
+    return digest.digest()
+
+
+root_argument, expected_identity, expected_count_raw, run_id = sys.argv[1:]
+if not re.fullmatch(r'[0-9a-f]{64}', expected_identity):
+    reject('Candidate bundle expected identity is invalid')
+if not re.fullmatch(r'[A-Za-z0-9._-]{1,64}', run_id):
+    reject('Candidate bundle run identifier is invalid')
+try:
+    expected_count = int(expected_count_raw)
+except ValueError:
+    reject('Candidate bundle expected record count is invalid')
+if expected_count <= 0 or expected_count > 100000:
+    reject('Candidate bundle expected record count is out of bounds')
+
+root = os.path.abspath(root_argument)
+if root != root_argument or os.path.realpath(root) != root:
+    reject('Candidate bundle root is not canonical')
+root_descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+try:
+    validate_directory(root_descriptor, 'Candidate bundle root')
+    stream = sys.stdin.buffer
+    if read_exact(stream, len(MAGIC), 'magic') != MAGIC:
+        reject('Candidate bundle magic mismatch')
+    record_count = struct.unpack('>I', read_exact(stream, 4, 'record count'))[0]
+    if record_count != expected_count:
+        reject('Candidate bundle record count mismatch')
+    identity = read_exact(stream, 32, 'plan identity').hex()
+    if identity != expected_identity:
+        reject('Candidate bundle plan identity mismatch')
+
+    seen_paths = set()
+    for _ in range(record_count):
+        path_length = struct.unpack('>I', read_exact(stream, 4, 'path length'))[0]
+        payload_length = struct.unpack('>Q', read_exact(stream, 8, 'payload length'))[0]
+        expected_digest = read_exact(stream, 32, 'file digest')
+        if path_length <= 0 or path_length > MAX_PATH_BYTES:
+            reject('Candidate bundle path length is invalid')
+        if payload_length > MAX_FILE_BYTES:
+            reject('Candidate bundle payload length is invalid')
+        try:
+            relative_path = read_exact(stream, path_length, 'remote path').decode('utf-8', 'strict')
+        except UnicodeDecodeError:
+            reject('Candidate bundle remote path is not UTF-8')
+        segments = relative_path.split('/')
+        if (
+            not PATH_PATTERN.fullmatch(relative_path)
+            or relative_path.startswith('/')
+            or any(segment in ('', '.', '..') for segment in segments)
+            or relative_path in seen_paths
+        ):
+            reject('Candidate bundle remote path is unsafe')
+        seen_paths.add(relative_path)
+
+        parent_descriptor = open_parent(root_descriptor, segments[:-1])
+        name = segments[-1]
+        temporary_name = name + '.uploading-' + run_id
+        output_descriptor = None
+        temporary_created = False
+        try:
+            try:
+                existing_digest = hash_existing_file(parent_descriptor, name)
+                if existing_digest != expected_digest:
+                    reject('Existing candidate bundle target digest mismatch')
+            except FileNotFoundError:
+                try:
+                    temporary_metadata = os.stat(
+                        temporary_name,
+                        dir_fd=parent_descriptor,
+                        follow_symlinks=False,
+                    )
+                except FileNotFoundError:
+                    temporary_metadata = None
+                if temporary_metadata is not None:
+                    if (
+                        not stat.S_ISREG(temporary_metadata.st_mode)
+                        or temporary_metadata.st_uid != 0
+                        or temporary_metadata.st_gid != 0
+                        or temporary_metadata.st_nlink != 1
+                    ):
+                        reject('Candidate bundle temporary target is unsafe')
+                    os.unlink(temporary_name, dir_fd=parent_descriptor)
+                    os.fsync(parent_descriptor)
+                output_descriptor = os.open(
+                    temporary_name,
+                    os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                    0o600,
+                    dir_fd=parent_descriptor,
+                )
+                temporary_created = True
+
+            incoming_digest = consume_payload(stream, payload_length, output_descriptor)
+            if incoming_digest != expected_digest:
+                reject('Candidate bundle incoming payload digest mismatch')
+            if output_descriptor is not None:
+                os.fsync(output_descriptor)
+                metadata = os.fstat(output_descriptor)
+                if (
+                    not stat.S_ISREG(metadata.st_mode)
+                    or metadata.st_uid != 0
+                    or metadata.st_gid != 0
+                    or stat.S_IMODE(metadata.st_mode) != 0o600
+                    or metadata.st_nlink != 1
+                ):
+                    reject('Candidate bundle temporary file metadata is unsafe')
+                os.close(output_descriptor)
+                output_descriptor = None
+                os.replace(
+                    temporary_name,
+                    name,
+                    src_dir_fd=parent_descriptor,
+                    dst_dir_fd=parent_descriptor,
+                )
+                temporary_created = False
+                os.fsync(parent_descriptor)
+        except BaseException:
+            if output_descriptor is not None:
+                os.close(output_descriptor)
+            if temporary_created:
+                try:
+                    os.unlink(temporary_name, dir_fd=parent_descriptor)
+                    os.fsync(parent_descriptor)
+                except FileNotFoundError:
+                    pass
+            raise
+        finally:
+            os.close(parent_descriptor)
+
+    if read_exact(stream, len(TRAILER), 'trailer') != TRAILER:
+        reject('Candidate bundle trailer mismatch')
+    if read_exact(stream, 32, 'trailing identity').hex() != expected_identity:
+        reject('Candidate bundle trailing identity mismatch')
+    if stream.read(1) != b'':
+        reject('Candidate bundle contains trailing bytes')
+    os.fsync(root_descriptor)
+finally:
+    os.close(root_descriptor)
+
+print('CANDIDATE_PINNED_BUNDLE_OK ' + str(expected_count))
+'@
+    $extractorBytes = [Text.UTF8Encoding]::new($false, $true).GetBytes($candidateBundleExtractor)
+    $extractorBase64 = [Convert]::ToBase64String($extractorBytes)
+    $remoteCommand = @'
 set -euo pipefail
-Target=$remotePathLiteral
-Temporary=$temporaryPathLiteral
-ExpectedSha256=$expectedSha256Literal
-test -d "`$(dirname "`$Target")"
-if [ -f "`$Target" ] && [ ! -L "`$Target" ] && \
-   test "`$(sha256sum "`$Target" | awk '{print `$1}')" = "`$ExpectedSha256"; then
-  rm -f -- "`$Temporary"
-  exit 0
-fi
-test ! -L "`$Target"
-rm -f -- "`$Temporary"
-cat > "`$Temporary"
-chmod 0600 "`$Temporary"
-test "`$(sha256sum "`$Temporary" | awk '{print `$1}')" = "`$ExpectedSha256"
-mv -f "`$Temporary" "`$Target"
-"@
+ReleaseRoot=__RELEASE_ROOT__
+ExpectedIdentity=__EXPECTED_IDENTITY__
+ExpectedRecordCount=__EXPECTED_RECORD_COUNT__
+RunId=__RUN_ID__
+ExtractorBase64=__EXTRACTOR_BASE64__
+test -d "$ReleaseRoot"
+test ! -L "$ReleaseRoot"
+python3 -c "$(printf '%s' "$ExtractorBase64" | base64 --decode)" \
+  "$ReleaseRoot" "$ExpectedIdentity" "$ExpectedRecordCount" "$RunId"
+'@
+    $remoteCommand = $remoteCommand.Replace(
+        '__RELEASE_ROOT__',
+        (Convert-ToBashSingleQuotedLiteral $RemoteRoot.TrimEnd('/'))
+    )
+    $remoteCommand = $remoteCommand.Replace(
+        '__EXPECTED_IDENTITY__',
+        (Convert-ToBashSingleQuotedLiteral $expectedIdentity)
+    )
+    $remoteCommand = $remoteCommand.Replace(
+        '__EXPECTED_RECORD_COUNT__',
+        (Convert-ToBashSingleQuotedLiteral $expectedRecordCount)
+    )
+    $remoteCommand = $remoteCommand.Replace(
+        '__RUN_ID__',
+        (Convert-ToBashSingleQuotedLiteral $deploymentRunId)
+    )
+    $remoteCommand = $remoteCommand.Replace(
+        '__EXTRACTOR_BASE64__',
+        (Convert-ToBashSingleQuotedLiteral $extractorBase64)
+    )
     $maxAttempts = 4
     for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
         try {
             Invoke-NativeWithPinnedInput `
-                -Record $Record `
+                -Record $DeploymentPlan `
                 -FileName 'ssh' `
                 -ArgumentList @(
                     '-i', $SSH_KEY,
@@ -8645,15 +9084,18 @@ mv -f "`$Temporary" "`$Target"
                     "root@${SERVER}",
                     $remoteCommand
                 ) `
-                -FailureMessage "Candidate pinned upload failed: $($Record.RemoteRelativePath)"
+                -FailureMessage 'Candidate pinned bundle upload failed'
             return
         }
         catch {
+            if ($_.Exception.Message -like 'TM_PINNED_INPUT_PROCESS_UNREAPED:*') {
+                throw
+            }
             if ($attempt -ge $maxAttempts) {
                 throw
             }
             $delaySeconds = [Math]::Min(8, 2 * $attempt)
-            Write-Host "Candidate pinned upload retry $attempt/$maxAttempts after transport failure: $($Record.RemoteRelativePath)"
+            Write-Host "Candidate pinned bundle upload retry $attempt/$maxAttempts after transport failure"
             Start-Sleep -Seconds $delaySeconds
         }
     }
@@ -8969,9 +9411,9 @@ rm -f "$ReleaseRoot/.deploy-v030-paths"
     $prepareScript = $prepareScript.Replace('__REMOTE_PATHS__', $remotePathManifest)
     Invoke-RemoteBash -Script $prepareScript -FailureMessage "Remote candidate preparation failed" -RequireDeploymentLock
 
-    foreach ($record in $deploymentActionPlan.Records) {
-        Invoke-PinnedDeploymentUpload -Record $record -RemoteRoot $remoteReleaseRoot
-    }
+    Invoke-PinnedDeploymentBundleUpload `
+        -DeploymentPlan $deploymentActionPlan `
+        -RemoteRoot $remoteReleaseRoot
 
     $verifyUploadScript = @'
 set -euo pipefail

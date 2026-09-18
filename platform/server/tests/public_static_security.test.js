@@ -211,9 +211,9 @@ test('guarded deploy keeps production host external and SSH host checking enable
   const deployWithoutLoopback = deploy
     .replace(/--property="IPAddress(?:Deny|Allow)=[^"]*"/g, '')
     .replace(/\b127\.0\.0\.1\b/g, '');
-  const uploadStart = deploy.indexOf('function Invoke-PinnedDeploymentUpload');
+  const uploadStart = deploy.indexOf('function Invoke-PinnedDeploymentBundleUpload');
   const uploadEnd = deploy.indexOf('function Assert-TrustedProductionSourceArtifacts');
-  assert.ok(uploadStart !== -1 && uploadEnd > uploadStart, 'pinned upload helper must exist');
+  assert.ok(uploadStart !== -1 && uploadEnd > uploadStart, 'pinned bundle upload helper must exist');
   const pinnedUpload = deploy.slice(uploadStart, uploadEnd);
 
   assert.match(deploy, /\$SERVER\s*=\s*\$env:TURINGMARKET_SERVER\b/);

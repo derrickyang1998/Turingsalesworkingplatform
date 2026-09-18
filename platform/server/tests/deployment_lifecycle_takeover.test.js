@@ -91,7 +91,7 @@ test('Phase 4 lifecycle metadata is atomic, durable, root-only, and complete bef
   assert.match(enter, /chown root:root/);
   assert.match(enter, /mv .*run\.json\.next.*run\.json/);
   assert.ok(main.indexOf('Enter-RemoteDeploymentLock') < main.indexOf('Invoke-RemoteBackup'));
-  assert.ok(main.indexOf('Enter-RemoteDeploymentLock') < main.indexOf('Invoke-PinnedDeploymentUpload'));
+  assert.ok(main.indexOf('Enter-RemoteDeploymentLock') < main.indexOf('Invoke-PinnedDeploymentBundleUpload'));
 });
 
 test('Phase 4 serializes lifecycle and production operations with a non-inherited flock fence', () => {
