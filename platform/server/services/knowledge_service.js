@@ -469,6 +469,14 @@ function hasKnowledgeOrganizationOwnership(db) {
   `).get());
 }
 
+function hasConversationOrganizationOwnership(db) {
+  return Boolean(db.prepare(`
+    SELECT 1 AS present
+    FROM pragma_table_info('ai_conversations')
+    WHERE name='org_id'
+  `).get());
+}
+
 function knowledgeOrganizationId(value) {
   const parsed = typeof value === 'string' && /^[1-9][0-9]*$/.test(value)
     ? Number(value)
@@ -1690,6 +1698,26 @@ function organizationKnowledgeUsage(db, organizationId, defaultOrganizationId) {
   const organizationCustodyAbsent = hasOrganizationKnowledgeCustody(db)
     ? 'AND organization_custody.knowledge_entry_id IS NULL'
     : '';
+  const capacityReferenceSql = hasConversationOrganizationOwnership(db)
+    ? `SELECT reference.id
+       FROM ai_references reference
+       JOIN ai_messages message ON message.id=reference.message_id
+       JOIN ai_conversations conversation ON conversation.id=message.conversation_id
+       WHERE conversation.org_id=@scopeId`
+    : `SELECT reference.id
+       FROM ai_references reference
+       JOIN ai_messages message ON message.id=reference.message_id
+       JOIN ai_conversations conversation ON conversation.id=message.conversation_id
+       LEFT JOIN campaigns campaign ON campaign.id=reference.campaign_id
+       LEFT JOIN scope_members conversation_membership
+         ON conversation_membership.user_id=conversation.user_id
+       WHERE (
+         reference.campaign_id IS NOT NULL
+         AND campaign.org_id=@scopeId
+       ) OR (
+         reference.campaign_id IS NULL
+         AND conversation_membership.user_id IS NOT NULL
+       )`;
   return normalizedCapacityUsage(db.prepare(`
     WITH
     ${KNOWLEDGE_CUSTODY_CTE},
@@ -1722,20 +1750,7 @@ function organizationKnowledgeUsage(db, organizationId, defaultOrganizationId) {
         )
     ),
     capacity_references AS (
-      SELECT reference.id
-      FROM ai_references reference
-      JOIN ai_messages message ON message.id=reference.message_id
-      JOIN ai_conversations conversation ON conversation.id=message.conversation_id
-      LEFT JOIN campaigns campaign ON campaign.id=reference.campaign_id
-      LEFT JOIN scope_members conversation_membership
-        ON conversation_membership.user_id=conversation.user_id
-      WHERE (
-        reference.campaign_id IS NOT NULL
-        AND campaign.org_id=@scopeId
-      ) OR (
-        reference.campaign_id IS NULL
-        AND conversation_membership.user_id IS NOT NULL
-      )
+      ${capacityReferenceSql}
     )
     SELECT
       (SELECT COUNT(*) FROM capacity_entries) AS entries,
@@ -1802,6 +1817,32 @@ function campaignOrganizationKnowledgeUsage(
     return [scope.scopeType, scope.scopeId];
   });
   params.push(defaultOrganizationId);
+  const organizationReferenceProjection = hasConversationOrganizationOwnership(db)
+    ? `SELECT 'organization',request.scope_id,organization_reference.id
+       FROM requested_scopes request
+       JOIN ai_conversations conversation ON conversation.org_id=request.scope_id
+       JOIN ai_messages message ON message.conversation_id=conversation.id
+       JOIN ai_references organization_reference ON organization_reference.message_id=message.id
+       WHERE request.scope_type='organization'`
+    : `SELECT 'organization',request.scope_id,organization_reference.id
+       FROM requested_scopes request
+       CROSS JOIN campaigns organization_campaign
+       CROSS JOIN ai_references organization_reference
+       WHERE request.scope_type='organization'
+         AND organization_campaign.org_id=request.scope_id
+         AND organization_reference.campaign_id=organization_campaign.id
+
+       UNION ALL
+
+       SELECT 'organization',member.org_id,member_reference.id
+       FROM scope_members member
+       CROSS JOIN ai_conversations conversation
+       CROSS JOIN ai_messages message
+       CROSS JOIN ai_references member_reference
+       WHERE conversation.user_id=member.user_id
+         AND message.conversation_id=conversation.id
+         AND member_reference.message_id=message.id
+         AND member_reference.campaign_id IS NULL`;
   const rows = db.prepare(`
     WITH
     requested_scopes(scope_type,scope_id) AS (VALUES ${valuesSql}),
@@ -1938,25 +1979,7 @@ function campaignOrganizationKnowledgeUsage(
 
       UNION ALL
 
-      SELECT 'organization',request.scope_id,organization_reference.id
-      FROM requested_scopes request
-      CROSS JOIN campaigns organization_campaign
-      CROSS JOIN ai_references organization_reference
-      WHERE request.scope_type='organization'
-        AND organization_campaign.org_id=request.scope_id
-        AND organization_reference.campaign_id=organization_campaign.id
-
-      UNION ALL
-
-      SELECT 'organization',member.org_id,member_reference.id
-      FROM scope_members member
-      CROSS JOIN ai_conversations conversation
-      CROSS JOIN ai_messages message
-      CROSS JOIN ai_references member_reference
-      WHERE conversation.user_id=member.user_id
-        AND message.conversation_id=conversation.id
-        AND member_reference.message_id=message.id
-        AND member_reference.campaign_id IS NULL
+      ${organizationReferenceProjection}
     ),
     entry_usage AS MATERIALIZED (
       SELECT

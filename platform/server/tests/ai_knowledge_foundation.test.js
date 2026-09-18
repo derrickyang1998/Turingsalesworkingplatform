@@ -193,6 +193,10 @@ test('ai service persists conversations and restricts non-admin visibility', asy
   const db = freshDb();
   const knowledge = require('../services/knowledge_service');
   const ai = require('../services/ai_service');
+  const organizationId = db.prepare(
+    "SELECT id FROM organizations WHERE code='turingmarket-default'"
+  ).get().id;
+  const memberAuth = { organization: { id: organizationId, role_code: 'member' } };
 
   knowledge.ingestKnowledge(db, {
     title: '方案确认流程',
@@ -205,6 +209,7 @@ test('ai service persists conversations and restricts non-admin visibility', asy
 
   const response = await ai.handleChat(db, {
     user: { id: 2, role: 'user' },
+    organizationId,
     message: '生成 PPT 前要注意什么？',
     provider: {
       complete: async ({ messages }) => ({
@@ -242,7 +247,11 @@ test('ai service persists conversations and restricts non-admin visibility', asy
   assert.equal(assistantMetadata.cost_snapshot.status, 'priced');
   assert.equal(assistantMetadata.cost_snapshot.total_cost_nano_usd, 6628);
 
-  const detail = ai.getConversation(db, { id: response.conversation_id, user: { id: 2, role: 'user' } });
+  const detail = ai.getConversation(db, {
+    id: response.conversation_id,
+    user: { id: 2, role: 'user' },
+    authContext: memberAuth
+  });
   assert.deepEqual(detail.messages[1].run.cost_projection, response.cost_projection);
   assert.deepEqual(detail.run_summary.cost_summary, {
     status: 'priced',
@@ -252,11 +261,21 @@ test('ai service persists conversations and restricts non-admin visibility', asy
     total_cost_nano_usd: 6628
   });
 
-  const own = ai.listConversations(db, { user: { id: 2, role: 'user' } });
+  const own = ai.listConversations(db, {
+    user: { id: 2, role: 'user' },
+    authContext: memberAuth
+  });
   assert.equal(own.length, 1);
-  const other = ai.listConversations(db, { user: { id: 3, role: 'user' } });
+  const other = ai.listConversations(db, {
+    user: { id: 3, role: 'user' },
+    authContext: { organization: { id: organizationId, role_code: 'member' } }
+  });
   assert.equal(other.length, 0);
-  const admin = ai.listConversations(db, { user: { id: 1, role: 'admin' } });
+  const admin = ai.listConversations(db, {
+    user: { id: 1, role: 'admin' },
+    authContext: { organization: { id: organizationId, role_code: 'org_admin' } },
+    adminAuditGlobal: true
+  });
   assert.equal(admin.length, 1);
 
   db.close();

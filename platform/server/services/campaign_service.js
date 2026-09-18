@@ -98,6 +98,14 @@ function canonicalId(value) {
     : null;
 }
 
+function hasTableColumn(db, tableName, columnName) {
+  return Boolean(db.prepare(`
+    SELECT 1 AS present
+    FROM pragma_table_info(?)
+    WHERE name=?
+  `).get(tableName, columnName));
+}
+
 function boundedInteger(value, fallback, minimum, maximum, label) {
   if (value === undefined) return fallback;
   if (typeof value !== 'string' || !/^(?:0|[1-9][0-9]*)$/.test(value)) {
@@ -2238,7 +2246,8 @@ function candidateSqlDefinition(relationType, {
   actor,
   userId,
   campaignId,
-  governance
+  governance,
+  conversationOrganizationOwned
 }) {
   const unclassified = `
     NOT EXISTS (
@@ -2350,7 +2359,7 @@ function candidateSqlDefinition(relationType, {
             NULL AS status,
             NULL AS row_version
           FROM ai_conversations target
-          WHERE (
+          WHERE ${conversationOrganizationOwned ? 'target.org_id=@orgId AND' : ''} (
             @platformAdmin=1
             OR target.user_id=@userId
             OR (
@@ -2505,7 +2514,8 @@ function listCampaignLinkCandidates(db, input) {
     actor,
     userId,
     campaignId,
-    governance: knowledgeService.knowledgeGovernanceSql(db, 'target', 'governance')
+    governance: knowledgeService.knowledgeGovernanceSql(db, 'target', 'governance'),
+    conversationOrganizationOwned: hasTableColumn(db, 'ai_conversations', 'org_id')
   });
   const sql = candidateQuerySql(definition);
   const params = { ...definition.params, q };
@@ -2647,8 +2657,11 @@ function workspaceTargetRows(db, references) {
   }
   const targets = new Map();
   for (const [recordType, ids] of idsByType) {
+    const selectSql = recordType === 'ai_conversation' && hasTableColumn(db, 'ai_conversations', 'org_id')
+      ? `SELECT id,user_id,visibility,title,org_id FROM ai_conversations`
+      : WORKSPACE_TARGET_SELECTS[recordType];
     const rows = db.prepare(`
-      ${WORKSPACE_TARGET_SELECTS[recordType]}
+      ${selectSql}
       WHERE id IN (
         SELECT CAST(value AS INTEGER)
         FROM json_each(?)
@@ -2753,8 +2766,12 @@ function workspaceTargetVisible({
     case 'influencer':
       return target.is_active === 1 && target.org_id === campaignAccess.campaign.org_id;
     case 'collaboration':
-    case 'ai_conversation':
       return platformAdmin || orgAdmin || actorOwns;
+    case 'ai_conversation':
+      return (
+        (!Object.hasOwn(target, 'org_id') || target.org_id === campaignAccess.campaign.org_id) &&
+        (platformAdmin || orgAdmin || actorOwns)
+      );
     case 'workflow_instance':
       return (
         target.org_id === campaignAccess.campaign.org_id &&

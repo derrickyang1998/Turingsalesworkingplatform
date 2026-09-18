@@ -2859,6 +2859,7 @@ app.get('/api/ai/conversations', authMiddleware, (req, res) => {
     const conversations = aiService.listConversations(db, {
       user: req.user,
       authContext: req.authContext,
+      adminAuditGlobal: req.query.admin_audit === 'global',
       requestId: campaignLinkRequestId(req),
       q: req.query.q || '',
       user_id: req.query.user_id,
@@ -2881,6 +2882,7 @@ app.get('/api/ai/conversations/:id', authMiddleware, (req, res) => {
       id: req.params.id,
       user: req.user,
       authContext: req.authContext,
+      adminAuditGlobal: req.query.admin_audit === 'global',
       requestId: campaignLinkRequestId(req)
     });
     if (!conversation) return res.status(404).json({ error: 'Conversation not found' });
@@ -2949,6 +2951,7 @@ app.post('/api/ai/proposal-draft', authMiddleware, aiLimiter, aiQuotaGuard, asyn
       ? aiService.verifyDemandAnalysisAuditContext(db, {
           user: req.user,
           authContext: req.authContext,
+          organizationId: req.authContext.organization.id,
           requestId: campaignLinkRequestId(req),
           campaign_id: body.campaign_id,
           conversation_id: body.demand_analysis_conversation_id,
@@ -3122,6 +3125,7 @@ app.post('/api/ai/ppt-outline', authMiddleware, aiLimiter, aiQuotaGuard, async (
       ? aiService.verifyDemandAnalysisAuditContext(db, {
           user: req.user,
           authContext: req.authContext,
+          organizationId: req.authContext.organization.id,
           requestId: campaignLinkRequestId(req),
           campaign_id: body.campaign_id,
           conversation_id: body.demand_analysis_conversation_id,
@@ -3132,6 +3136,7 @@ app.post('/api/ai/ppt-outline', authMiddleware, aiLimiter, aiQuotaGuard, async (
       ? aiService.verifyProposalDraftAuditContext(db, {
           user: req.user,
           authContext: req.authContext,
+          organizationId: req.authContext.organization.id,
           requestId: campaignLinkRequestId(req),
           campaign_id: body.campaign_id,
           conversation_id: body.proposal_conversation_id,

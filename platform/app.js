@@ -10988,7 +10988,7 @@ function buildAdminAIAuditQuery() {
   if (dateFrom && dateTo && dateFrom > dateTo) {
     throw new Error('Start date must not be later than end date.');
   }
-  var query = ['limit=100'];
+  var query = ['limit=100', 'admin_audit=global'];
   fields.forEach(function(field) {
     if (field[1]) query.push(field[0] + '=' + encodeURIComponent(field[1]));
   });
@@ -11122,7 +11122,7 @@ function loadAdminAIConversation(id) {
   var detail = document.getElementById('ad_aiAuditDetail');
   if (!detail) return;
   detail.innerHTML = '<div style="background:#fafafa;border:1px solid #eee;border-radius:8px;padding:16px"><p style="opacity:.5;font-size:12px">正在加载详情...</p></div>';
-  apiFetch('/ai/conversations/' + id).then(function(r) {
+  apiFetch('/ai/conversations/' + id + '?admin_audit=global').then(function(r) {
     if (!r.ok) throw new Error('API:' + r.status);
     return r.json();
   }).then(function(d) {

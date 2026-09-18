@@ -103,6 +103,7 @@ test('admin AI audit query includes every selected filter and blocks reversed da
   const query = context.buildAdminAIAuditQuery();
   const params = new URLSearchParams(query);
   assert.equal(params.get('limit'), '100');
+  assert.equal(params.get('admin_audit'), 'global');
   assert.equal(params.get('q'), 'source evidence');
   assert.equal(params.get('user_id'), '22');
   assert.equal(params.get('source_module'), 'assistant');
@@ -258,7 +259,7 @@ test('admin AI audit detail renders the backend run projection without trusting 
     esc: escapeHtml,
     Promise,
     async apiFetch(url) {
-      assert.equal(url, '/ai/conversations/41');
+      assert.equal(url, '/ai/conversations/41?admin_audit=global');
       return response(200, {
         conversation: {
           id: 41,

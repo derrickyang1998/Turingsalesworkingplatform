@@ -19,8 +19,23 @@ const SUMMARY_PROMOTION_MIN_ANSWER_LENGTH = 240;
 const PERFORMANCE_REVIEW_IDEMPOTENCY_CONTRACT = 'performance-ai-review-draft-v1';
 const aiCostSqlDatabases = new WeakSet();
 
-function canAccessConversation(user, conversation) {
-  return user && conversation && (user.role === 'admin' || Number(conversation.user_id) === Number(user.id));
+function hasConversationOrganizationOwnership(db) {
+  return Boolean(db.prepare(`
+    SELECT 1 AS present
+    FROM pragma_table_info('ai_conversations')
+    WHERE name='org_id'
+  `).get());
+}
+
+function canAccessConversation(user, conversation, organizationId) {
+  if (!user || !conversation) return false;
+  if (Object.prototype.hasOwnProperty.call(conversation, 'org_id')) {
+    const activeOrganizationId = positiveId(organizationId);
+    if (activeOrganizationId === null || Number(conversation.org_id) !== activeOrganizationId) {
+      return false;
+    }
+  }
+  return user.role === 'admin' || Number(conversation.user_id) === Number(user.id);
 }
 
 function makeTitle(message) {
@@ -127,20 +142,33 @@ function completionCostSnapshot(completion, model) {
 function ensureConversation(db, opts) {
   opts = opts || {};
   const user = opts.user;
+  const organizationOwned = hasConversationOrganizationOwnership(db);
+  const organizationId = organizationOwned ? positiveId(opts.organizationId) : null;
+  if (organizationOwned && organizationId === null) {
+    throw new Error('Active organization context is required for AI conversations');
+  }
   if (opts.conversation_id) {
     const conversation = db.prepare('SELECT * FROM ai_conversations WHERE id = ?').get(opts.conversation_id);
-    if (!canAccessConversation(user, conversation)) throw new Error('Conversation not found or forbidden');
+    if (!canAccessConversation(user, conversation, organizationId)) {
+      throw new Error('Conversation not found or forbidden');
+    }
     return conversation;
   }
-  const result = db.prepare(`
-    INSERT INTO ai_conversations (user_id, title, visibility, source_module)
-    VALUES (?, ?, ?, ?)
-  `).run(
+  const values = [
     user.id,
     makeTitle(opts.message),
     opts.visibility || 'private',
     opts.source_module || 'assistant'
-  );
+  ];
+  const result = organizationOwned
+    ? db.prepare(`
+        INSERT INTO ai_conversations (user_id,title,visibility,source_module,org_id)
+        VALUES (?,?,?,?,?)
+      `).run(...values, organizationId)
+    : db.prepare(`
+        INSERT INTO ai_conversations (user_id,title,visibility,source_module)
+        VALUES (?,?,?,?)
+      `).run(...values);
   return db.prepare('SELECT * FROM ai_conversations WHERE id = ?').get(result.lastInsertRowid);
 }
 
@@ -960,6 +988,9 @@ function resolveLinkedContext(db, opts) {
       ? { linked: false, campaignId: null, conversationId: null, initialLink: false }
       : { linked: true, campaignId: requestedCampaignId, conversationId: null, initialLink: true };
   }
+  if (hasConversationOrganizationOwnership(db)) {
+    requireLinkedConversationAccess(db, opts.user, conversationId, opts.organizationId);
+  }
   const resolution = resolveConversationCampaign(db, {
     conversationId,
     requestedCampaignId
@@ -994,9 +1025,9 @@ function requireLinkedCampaignAccess(db, userId, campaignId) {
   );
 }
 
-function requireLinkedConversationAccess(db, user, conversationId) {
+function requireLinkedConversationAccess(db, user, conversationId, organizationId) {
   const conversation = db.prepare('SELECT * FROM ai_conversations WHERE id=?').get(conversationId);
-  if (!canAccessConversation(user, conversation)) {
+  if (!canAccessConversation(user, conversation, organizationId)) {
     throw serviceError(404, 'RECORD_NOT_FOUND', 'Conversation was not found.');
   }
   return conversation;
@@ -1408,17 +1439,28 @@ function persistLinkedChat(db, opts) {
     let conversation;
     let link = null;
     if (opts.linked.conversationId !== null) {
-      conversation = requireLinkedConversationAccess(db, opts.user, opts.linked.conversationId);
+      conversation = requireLinkedConversationAccess(
+        db,
+        opts.user,
+        opts.linked.conversationId,
+        opts.organizationId
+      );
     } else {
-      const created = db.prepare(`
-        INSERT INTO ai_conversations (user_id,title,visibility,source_module)
-        VALUES (?,?,?,?)
-      `).run(
+      const values = [
         opts.user.id,
         makeTitle(opts.message),
         opts.visibility || 'private',
         opts.source_module || 'assistant'
-      );
+      ];
+      const created = hasConversationOrganizationOwnership(db)
+        ? db.prepare(`
+            INSERT INTO ai_conversations (user_id,title,visibility,source_module,org_id)
+            VALUES (?,?,?,?,?)
+          `).run(...values, access.campaign.org_id)
+        : db.prepare(`
+            INSERT INTO ai_conversations (user_id,title,visibility,source_module)
+            VALUES (?,?,?,?)
+          `).run(...values);
       conversation = db.prepare('SELECT * FROM ai_conversations WHERE id=?').get(created.lastInsertRowid);
     }
     if (opts.linked.initialLink) {
@@ -1577,7 +1619,7 @@ async function handleLinkedChat(db, opts, linked) {
     throw serviceError(404, 'CAMPAIGN_NOT_FOUND', 'Campaign is unavailable in the active organization.');
   }
   if (linked.conversationId !== null) {
-    requireLinkedConversationAccess(db, user, linked.conversationId);
+    requireLinkedConversationAccess(db, user, linked.conversationId, opts.organizationId);
   }
   const ragContext = rag.buildLinkedRagContext(db, {
     query: retrievalQuery,
@@ -1836,7 +1878,23 @@ function resolveConversationReadActor(db, opts) {
   `).get(userId);
   if (!user) return null;
   const suppliedAuthContext = ownValue(opts, 'authContext');
-  const authOrganization = readAuthOrganization(suppliedAuthContext);
+  let authOrganization = readAuthOrganization(suppliedAuthContext);
+  if (!authOrganization) {
+    const derivedOrganizationId = positiveId(ownValue(opts, 'organizationId'));
+    if (derivedOrganizationId !== null) {
+      const membership = db.prepare(`
+        SELECT role_code
+        FROM organization_memberships
+        WHERE org_id=? AND user_id=? AND status='active'
+      `).get(derivedOrganizationId, userId);
+      if (membership) {
+        authOrganization = {
+          id: derivedOrganizationId,
+          roleCode: membership.role_code === 'org_admin' ? 'org_admin' : 'member'
+        };
+      }
+    }
+  }
   let organizationAdmin = false;
   if (authOrganization && authOrganization.roleCode === 'org_admin') {
     organizationAdmin = Boolean(db.prepare(`
@@ -1845,20 +1903,44 @@ function resolveConversationReadActor(db, opts) {
       WHERE org_id=? AND user_id=? AND role_code='org_admin' AND status='active'
     `).get(authOrganization.id, userId));
   }
+  const platformAdminRole = user.role === 'admin';
+  const platformAdmin = platformAdminRole && opts.adminAuditGlobal === true;
   return {
     id: userId,
-    platformAdmin: user.role === 'admin',
+    platformAdmin,
+    platformAdminRole,
     organizationAdmin,
     organizationId: organizationAdmin ? authOrganization.id : null,
     authOrganizationId: authOrganization ? authOrganization.id : null,
-    privileged: user.role === 'admin' || organizationAdmin
+    privileged: platformAdmin || organizationAdmin
   };
 }
 
-function authorizedConversationProjection(actor) {
+function authorizedConversationProjection(db, actor) {
   const collectionAccess = buildCollectionAccessPredicate('ai_conversations', {
     userId: actor.id
   });
+  const organizationOwned = hasConversationOrganizationOwnership(db);
+  const legacyOwnerScopeCte = organizationOwned ? '' : `
+      conversation_owner_scope AS MATERIALIZED (
+        SELECT membership.user_id,MIN(membership.org_id) AS org_id
+        FROM organization_memberships membership
+        WHERE membership.status='active'
+        GROUP BY membership.user_id
+        HAVING COUNT(DISTINCT membership.org_id)=1
+      ),`;
+  const organizationExpression = organizationOwned
+    ? 'conversation.org_id'
+    : `CASE
+            WHEN link_stats.conversation_id IS NULL THEN owner_scope.org_id
+            ELSE campaign_scope.org_id
+          END`;
+  const legacyOwnerScopeJoin = organizationOwned ? '' : `
+        LEFT JOIN conversation_owner_scope owner_scope
+          ON owner_scope.user_id=conversation.user_id`;
+  const ownerOrganizationPredicate = organizationOwned
+    ? 'AND access_scope.__organization_id=?'
+    : '';
   const authOrganizationId = actor.authOrganizationId || -1;
   const organizationId = actor.organizationId || -1;
   const platformAdmin = actor.platformAdmin ? 1 : 0;
@@ -1897,21 +1979,12 @@ function authorizedConversationProjection(actor) {
         FROM ranked_conversation_links
         WHERE custody_rank=1 AND active_link_count<=1
       ),
-      conversation_owner_scope AS MATERIALIZED (
-        SELECT membership.user_id,MIN(membership.org_id) AS org_id
-        FROM organization_memberships membership
-        WHERE membership.status='active'
-        GROUP BY membership.user_id
-        HAVING COUNT(DISTINCT membership.org_id)=1
-      ),
+      ${legacyOwnerScopeCte}
       conversation_access_scope AS MATERIALIZED (
         SELECT
           conversation.id AS conversation_id,
           conversation.user_id AS conversation_user_id,
-          CASE
-            WHEN link_stats.conversation_id IS NULL THEN owner_scope.org_id
-            ELSE campaign_scope.org_id
-          END AS __organization_id,
+          ${organizationExpression} AS __organization_id,
           campaign_scope.campaign_id AS __campaign_id,
           CASE
             WHEN link_stats.conversation_id IS NULL THEN 1
@@ -1958,8 +2031,7 @@ function authorizedConversationProjection(actor) {
           ON link_stats.conversation_id=conversation.id
         LEFT JOIN campaign_scope
           ON campaign_scope.conversation_id=conversation.id
-        LEFT JOIN conversation_owner_scope owner_scope
-          ON owner_scope.user_id=conversation.user_id
+        ${legacyOwnerScopeJoin}
       ),
       authorized_conversation_ids AS MATERIALIZED (
         SELECT
@@ -1975,6 +2047,7 @@ function authorizedConversationProjection(actor) {
             ?=1
             OR (
               access_scope.conversation_user_id=?
+              ${ownerOrganizationPredicate}
               AND access_scope.__campaign_allowed=1
             )
             OR (
@@ -2009,6 +2082,7 @@ function authorizedConversationProjection(actor) {
       organizationId,
       platformAdmin,
       actor.id,
+      ...(organizationOwned ? [authOrganizationId] : []),
       organizationAdmin,
       organizationId
     ]
@@ -2151,6 +2225,7 @@ function nextAiAuditDate(value) {
 function stripConversationReadMetadata(row) {
   const projected = { ...row };
   projected.campaign_id = positiveId(projected.__campaign_id);
+  delete projected.org_id;
   delete projected.__organization_id;
   delete projected.__campaign_id;
   delete projected.__custody_valid;
@@ -2408,7 +2483,7 @@ function persistPrivilegedConversationReadAudit(db, actor, opts, values) {
 }
 
 function readAuthorizedConversation(db, actor, conversationId) {
-  const projection = authorizedConversationProjection(actor);
+  const projection = authorizedConversationProjection(db, actor);
   return db.prepare(`
     ${projection.cte}
     SELECT *
@@ -2580,7 +2655,10 @@ function promoteMessageToKnowledge(db, opts) {
       const conversation = readAuthorizedConversation(db, actor, conversationId);
       if (
         !conversation ||
-        (!actor.platformAdmin && Number(conversation.user_id) !== actor.id)
+        (
+          organizationId !== null &&
+          Number(conversation.__organization_id) !== organizationId
+        )
       ) {
         throw serviceError(404, 'RECORD_NOT_FOUND', 'Conversation was not found.');
       }
@@ -2724,7 +2802,7 @@ function listConversations(db, opts) {
   return db.transaction(() => {
     const actor = resolveConversationReadActor(db, opts);
     if (!actor) return [];
-    const projection = authorizedConversationProjection(actor);
+    const projection = authorizedConversationProjection(db, actor);
     const filters = conversationListFilters(opts, actor);
     const rows = db.prepare(`
       ${projection.cte},
@@ -3025,6 +3103,28 @@ function verifyCampaignAiAuditContext(db, opts, contract) {
       contract.invalidCode,
       contract.invalidMessage
     );
+  }
+
+  if (db && typeof db.prepare === 'function' && hasConversationOrganizationOwnership(db)) {
+    const suppliedOrganizationId = ownValue(opts, 'organizationId');
+    const authOrganization = readAuthOrganization(opts.authContext);
+    const organizationId = positiveId(
+      suppliedOrganizationId === undefined
+        ? authOrganization && authOrganization.id
+        : suppliedOrganizationId
+    );
+    const ownership = organizationId === null ? null : db.prepare(`
+      SELECT 1 AS allowed
+      FROM ai_conversations
+      WHERE id=? AND org_id=?
+    `).get(conversationId, organizationId);
+    if (!ownership) {
+      throw serviceError(
+        400,
+        contract.invalidCode,
+        contract.invalidMessage
+      );
+    }
   }
 
   const getConversationFn = typeof opts.getConversationFn === 'function'

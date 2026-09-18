@@ -38,9 +38,10 @@
       21,
       22,
       23,
-      24
+      24,
+      25
     ],
-    "targetVersion": 24,
+    "targetVersion": 25,
     "runs": 2,
     "deterministicAppendTables": [
       "activity_log"
@@ -144,6 +145,10 @@
       "sha256": "d35ed2ec1785e36377e71267eb92b57dc191b50e4ab85ac2a286a610040fd1ef"
     },
     {
+      "path": "server/migrations/025_ai_conversation_tenant_ownership.js",
+      "sha256": "e04b212b176624a6c3c2abe6ee55d221b3b7d44e12624137c521e4c64bad444e"
+    },
+    {
       "path": "server/migrations/baselines/legacy_v1.js",
       "sha256": "13e631ca7e2aef57e39f7dbc38e6f03e2d5323a11f38c6ce31239d793911812c"
     },
@@ -165,7 +170,7 @@
     },
     {
       "path": "server/db.js",
-      "sha256": "c8d46feb60a356ffe70299cb0b5e3eda97e229aa7a1be6dc9462638b84f9abbd"
+      "sha256": "73f1767bfa1713c3a065fad382bfdf3fa8b476719a2f74bfeb0caeb123e07abc"
     },
     {
       "path": "server/package-lock.json",
@@ -245,11 +250,11 @@
     },
     {
       "path": "server/scripts/sanitization_manifest.json",
-      "sha256": "4420efc3d2940c18949a27ebd967a9ebdc96eca70cfac140f13dc1ee461d2a19"
+      "sha256": "979393a920dce684c8c73ab89c948979256347a0769768eceb9c978367143905"
     },
     {
       "path": "server/scripts/sanitize_production_shape.js",
-      "sha256": "35d8d00cd4b90b36f5d9d16cf98aa356359d7c07b72293f8bc0aacf170e75eb2"
+      "sha256": "7fb3c0596e68f68692a6b78d951c46907c054896a889b8c59f19b4a0514e8f86"
     },
     {
       "path": "server/scripts/trusted_parser_runtime_verifier.js",
@@ -261,7 +266,7 @@
     },
     {
       "path": "server/scripts/verify_campaign_migration_gate.js",
-      "sha256": "aa10e1d71b862c90d81b31d7232bbfb934eb0e02050d8338bb2654aa4775ba3e"
+      "sha256": "635de915a266b5ccc2d1857b28c32dbc1d2e6c9115fb32edfebb3e0fcd05423d"
     },
     {
       "path": "server/routes.js",
@@ -301,7 +306,7 @@
     },
     {
       "path": "server/server.js",
-      "sha256": "13d6356281c0ce7d770a5844337c4202773fc5713a93bbe8be28f6c244ca90f2"
+      "sha256": "108c2c1742a488bdf0ac1f02f3ecd19a9be0bdea0fbf9af62626de5a9717b6c8"
     },
     {
       "path": "server/workflow_engine.js",
@@ -317,7 +322,7 @@
     },
     {
       "path": "server/services/ai_service.js",
-      "sha256": "d68bdafda71a25dda839d08aafc82ba85776723edb8a5a9c8cdff12443e39900"
+      "sha256": "69fa2df44ab5bb9c7a0ee37156b91c61a9c30f2bcd89effddcee2ad765276373"
     },
     {
       "path": "server/services/business_knowledge_service.js",
@@ -325,7 +330,7 @@
     },
     {
       "path": "server/services/campaign_access_service.js",
-      "sha256": "8d85b59e81e955b37bdbed003c692ee81812229d730d1d3ed7d5238464558361"
+      "sha256": "135bd8b73aca7c15189429a3c92f26b234359ad0aaf1b33191524c71961cb849"
     },
     {
       "path": "server/services/campaign_collaboration_service.js",
@@ -341,7 +346,7 @@
     },
     {
       "path": "server/services/campaign_service.js",
-      "sha256": "7edcadca8b3f4b973739542e3c692b7e02d516f32a249cd7132da8047c2a81a7"
+      "sha256": "19d994268a297fa8d5fa73e458fb6134e757676cb30c79688bac1f3f192b19df"
     },
     {
       "path": "server/services/campaign_workflow_service.js",
@@ -413,7 +418,7 @@
     },
     {
       "path": "server/services/knowledge_service.js",
-      "sha256": "25531b1768755a907556da7ef09bcba5fe1889f36af817e85996f0df84fafc42"
+      "sha256": "5e9a4e6f8d58d8fd7341019c1089c6011ec7e40808731b90bef779b8dcc23dbb"
     },
     {
       "path": "server/services/latest_ui_compat_service.js",

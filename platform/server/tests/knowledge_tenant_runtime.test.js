@@ -450,7 +450,7 @@ test('Campaign and organization knowledge writers persist their authoritative or
   ]);
 });
 
-test('AI summary and manual promotion write and reuse only inside the active organization', async () => {
+test('AI summary and manual promotion reject cross-organization reparenting', async () => {
   const db = freshDb();
   const { defaultOrgId, secondOrgId } = installTask1RuntimeShape(db);
   const ai = require('../services/ai_service');
@@ -476,16 +476,18 @@ test('AI summary and manual promotion write and reuse only inside the active org
     provider
   });
 
-  const promotedInSecond = ai.promoteMessageToKnowledge(db, {
+  assert.throws(() => ai.promoteMessageToKnowledge(db, {
     user: { id: 1, role: 'admin' },
+    authContext: { organization: { id: secondOrgId, role_code: 'org_admin' } },
     organizationId: secondOrgId,
     conversation_id: generated.conversation_id,
     message_id: generated.message_id,
     visibility: 'private',
     requestId: 'tenant-runtime-promotion-second'
-  });
+  }), (error) => error && error.statusCode === 404 && error.code === 'RECORD_NOT_FOUND');
   const promotedInDefault = ai.promoteMessageToKnowledge(db, {
     user: { id: 1, role: 'admin' },
+    authContext: { organization: { id: defaultOrgId, role_code: 'org_admin' } },
     organizationId: defaultOrgId,
     conversation_id: generated.conversation_id,
     message_id: generated.message_id,
@@ -493,21 +495,16 @@ test('AI summary and manual promotion write and reuse only inside the active org
     requestId: 'tenant-runtime-promotion-default'
   });
 
-  assert.notEqual(promotedInSecond.knowledge_entry_id, promotedInDefault.knowledge_entry_id);
+  assert.notEqual(promotedInDefault.knowledge_entry_id, generated.archived_summary_id);
   assert.deepEqual(db.prepare(`
     SELECT id,org_id,source_type
     FROM knowledge_entries
-    WHERE id IN (?,?,?)
+    WHERE id IN (?,?)
     ORDER BY id
-  `).all(
-    generated.archived_summary_id,
-    promotedInSecond.knowledge_entry_id,
-    promotedInDefault.knowledge_entry_id
-  ), [
+  `).all(generated.archived_summary_id, promotedInDefault.knowledge_entry_id), [
     { id: generated.archived_summary_id, org_id: defaultOrgId, source_type: 'ai_message' },
-    { id: promotedInSecond.knowledge_entry_id, org_id: secondOrgId, source_type: 'ai_selected_message' },
     { id: promotedInDefault.knowledge_entry_id, org_id: defaultOrgId, source_type: 'ai_selected_message' }
-  ].sort((left, right) => left.id - right.id));
+  ]);
 });
 
 test('platform-admin conversation audit projects cross-org references without enabling org-admin access', () => {
@@ -585,9 +582,9 @@ test('platform-admin conversation audit projects cross-org references without en
     LIMIT 1
   `).get(crossOrganization.id);
   const conversationId = Number(labeledWrite('conversation insert', () => db.prepare(`
-    INSERT INTO ai_conversations (user_id,title,visibility,source_module)
-    VALUES (?,'Cross organization audit conversation','private','assistant')
-  `).run(organizationAdminId)).lastInsertRowid);
+    INSERT INTO ai_conversations (user_id,title,visibility,source_module,org_id)
+    VALUES (?,'Cross organization audit conversation','private','assistant',?)
+  `).run(organizationAdminId, secondOrgId)).lastInsertRowid);
   const messageId = Number(labeledWrite('assistant message insert', () => db.prepare(`
     INSERT INTO ai_messages (
       conversation_id,user_id,role,content,model,metadata_json
@@ -620,6 +617,7 @@ test('platform-admin conversation audit projects cross-org references without en
     id: conversationId,
     user: { id: 1, role: 'admin' },
     authContext: { organization: { id: defaultOrgId, role_code: 'org_admin' } },
+    adminAuditGlobal: true,
     requestId: 'tenant-runtime-platform-admin-audit'
   });
   assert.equal(platformAdmin.messages[0].references[0].entry_id, crossOrganization.id);
@@ -631,12 +629,7 @@ test('platform-admin conversation audit projects cross-org references without en
     authContext: { organization: { id: defaultOrgId, role_code: 'org_admin' } },
     requestId: 'tenant-runtime-organization-admin-read'
   });
-  assert.deepEqual(organizationAdmin.messages[0].references, [{
-    citation_label: 'KB-1',
-    access_state: 'missing'
-  }]);
-  assert.equal(JSON.stringify(organizationAdmin).includes('audit snippet'), false);
-  assert.equal(JSON.stringify(organizationAdmin).includes(snapshot.title), false);
+  assert.equal(organizationAdmin, null);
 });
 
 test('business producers persist only their authenticated or entity-owned organization', () => {

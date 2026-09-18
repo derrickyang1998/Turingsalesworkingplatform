@@ -486,7 +486,8 @@ test('AI conversation reads enforce owner object access, bounded admins, and act
     const platformRows = ai.listConversations(db, secureRead(
       fixture.platformAdmin,
       fixture.platformAdminAuth,
-      'platform-admin-list'
+      'platform-admin-list',
+      { adminAuditGlobal: true }
     ));
     assert.deepEqual(
       new Set(platformRows.map((row) => row.id)),
@@ -496,7 +497,7 @@ test('AI conversation reads enforce owner object access, bounded admins, and act
       fixture.platformAdmin,
       fixture.platformAdminAuth,
       'platform-cross-org-detail',
-      { id: crossOrg }
+      { id: crossOrg, adminAuditGlobal: true }
     )).id, crossOrg);
 
     const staleOrgAdminContext = fixture.orgAdminAuth;
@@ -589,7 +590,10 @@ test('legacy conversation signatures preserve unclassified reads but reauthorize
       user: spoofedAdminOwner
     }), null);
 
-    const platformRows = ai.listConversations(db, { user: fixture.platformAdmin });
+    const platformRows = ai.listConversations(db, {
+      user: fixture.platformAdmin,
+      adminAuditGlobal: true
+    });
     assert.deepEqual(new Set(platformRows.map((row) => row.id)), new Set([
       unlinked,
       accessibleLinked,
@@ -598,7 +602,8 @@ test('legacy conversation signatures preserve unclassified reads but reauthorize
     ]));
     assert.equal(ai.getConversation(db, {
       id: crossOrgLinked,
-      user: fixture.platformAdmin
+      user: fixture.platformAdmin,
+      adminAuditGlobal: true
     }).messages[0].content, 'legacy-cross-org-linked-body');
   } finally {
     db.close();

@@ -1599,6 +1599,10 @@ test('a platform admin can curate an authorized linked answer without losing its
 
     const promoted = ai.promoteMessageToKnowledge(db, {
       user: admin,
+      authContext: {
+        organization: { id: fixture.orgId, role_code: 'org_admin' }
+      },
+      organizationId: fixture.orgId,
       conversation_id: chat.conversation_id,
       message_id: chat.message_id,
       visibility: 'private',

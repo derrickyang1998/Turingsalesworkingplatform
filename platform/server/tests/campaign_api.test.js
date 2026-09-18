@@ -3599,10 +3599,11 @@ test('campaign workspace conceals a legacy shortlist link whose influencer belon
       INSERT INTO organizations (id,code,name)
       VALUES (?,?,?)
     `).run(foreignOrganizationId, 'workspace-foreign-org', 'Workspace Foreign Organization');
-    const foreignInfluencerId = Number(db.prepare(`
-      INSERT INTO influencers (platform,kol_handle,is_active,org_id)
-      VALUES ('TikTok','@workspace_foreign_creator',1,?)
-    `).run(foreignOrganizationId).lastInsertRowid);
+    const foreignInfluencerId = 940500;
+    db.prepare(`
+      INSERT INTO influencers (id,platform,kol_handle,is_active,org_id)
+      VALUES (?,'TikTok','@workspace_foreign_creator',1,?)
+    `).run(foreignInfluencerId, foreignOrganizationId);
     db.prepare(`
       INSERT INTO campaign_record_links (
         org_id,campaign_id,record_type,bundle_id,record_id,relation_type,

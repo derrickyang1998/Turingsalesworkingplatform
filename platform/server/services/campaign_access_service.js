@@ -5,6 +5,14 @@ const {
 } = require('./organization_access_service');
 
 const SAFE_MAX = Number.MAX_SAFE_INTEGER;
+
+function hasTableColumn(db, tableName, columnName) {
+  return Boolean(db.prepare(`
+    SELECT 1 AS present
+    FROM pragma_table_info(?)
+    WHERE name=?
+  `).get(tableName, columnName));
+}
 const RECORD_RELATIONS = Object.freeze({
   demand: Object.freeze(['demand']),
   proposal: Object.freeze(['proposal', 'ppt']),
@@ -885,7 +893,7 @@ function targetRow(db, recordType, recordId) {
       `).get(recordId);
     case 'ai_conversation':
       return db.prepare(`
-        SELECT id,user_id,visibility
+        SELECT id,user_id,visibility${hasTableColumn(db, 'ai_conversations', 'org_id') ? ',org_id' : ''}
         FROM ai_conversations
         WHERE id=?
       `).get(recordId);
@@ -967,11 +975,20 @@ function targetPermissions(db, {
         manageable: target.is_active === 1 && sameOrganization
       };
     case 'collaboration':
-    case 'ai_conversation':
       return {
         visible: platformAdmin || orgAdmin || actorOwns,
         manageable: platformAdmin || orgAdmin || actorOwns
       };
+    case 'ai_conversation': {
+      const sameOrganization = (
+        !Object.hasOwn(target, 'org_id') ||
+        target.org_id === campaignAccess.campaign.org_id
+      );
+      return {
+        visible: sameOrganization && (platformAdmin || orgAdmin || actorOwns),
+        manageable: sameOrganization && (platformAdmin || orgAdmin || actorOwns)
+      };
+    }
     case 'workflow_instance': {
       const sameCampaign = (
         target.org_id === campaignAccess.campaign.org_id &&

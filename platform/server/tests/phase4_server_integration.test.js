@@ -852,11 +852,19 @@ async function seedPrivilegedAiReadFixture(server, label) {
   const fixtureDb = new Database(server.dbPath);
   let conversationId;
   try {
+    const organization = fixtureDb.prepare(`
+      SELECT org_id
+      FROM organization_memberships
+      WHERE user_id=? AND status='active'
+      ORDER BY org_id
+      LIMIT 1
+    `).get(created.body.id);
+    assert.ok(organization);
     const result = fixtureDb.prepare(`
       INSERT INTO ai_conversations (
-        user_id,title,visibility,source_module,created_at,updated_at
-      ) VALUES (?,?,'private','assistant',datetime('now'),datetime('now'))
-    `).run(created.body.id, `AI read route ${label}`);
+        user_id,title,visibility,source_module,org_id,created_at,updated_at
+      ) VALUES (?,?,'private','assistant',?,datetime('now'),datetime('now'))
+    `).run(created.body.id, `AI read route ${label}`, organization.org_id);
     conversationId = Number(result.lastInsertRowid);
     fixtureDb.prepare(`
       INSERT INTO ai_messages (
