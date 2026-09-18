@@ -176,6 +176,7 @@ $FILES = @(
     "server\services\feishu_bitable_outbox_service.js",
     "server\services\file_ingest_service.js",
     "server\services\idempotency_service.js",
+    "server\services\influencer_data_import_permission_service.js",
     "server\services\influencer_saved_view_service.js",
     "server\services\influencer_workflow_service.js",
     "server\services\knowledge_service.js",

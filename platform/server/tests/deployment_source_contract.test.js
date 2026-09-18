@@ -628,6 +628,7 @@ test('Task 12 deploy inventory includes every client asset and bounded remote-ga
     'server/tests/helpers/safe_fixture_paths.js',
     'server/tests/deployment-browser-smoke.config.js',
     'server/tests/deployment-browser-smoke.spec.js',
+    'server/services/influencer_data_import_permission_service.js',
     'server/tests/module_action_permission_service.test.js'
   ]) {
     assert.equal(fileSet.has(file), true, `${file} must support remote verification`);
