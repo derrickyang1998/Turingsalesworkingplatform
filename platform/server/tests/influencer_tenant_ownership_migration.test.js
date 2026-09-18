@@ -310,6 +310,43 @@ test('migration 023 rejects missing, unknown, and reassigned influencer ownershi
   }
 });
 
+test('migration 023 recognizes one sanitized default-organization fingerprint', () => {
+  const migration = loadMigration();
+  const db = openV22();
+  try {
+    seedLegacyRows(db);
+    const immutableTrigger = db.prepare(`
+      SELECT sql FROM sqlite_schema
+      WHERE type='trigger' AND name='organizations_code_immutable'
+    `).get().sql;
+    db.exec('DROP TRIGGER organizations_code_immutable');
+    db.prepare(`
+      UPDATE organizations
+      SET code=?,name=?
+      WHERE id=(SELECT MIN(id) FROM organizations)
+    `).run(
+      'tm-inert-secret-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      'tmtext-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+    );
+    db.exec(immutableTrigger);
+    const influencerCount = db.prepare('SELECT COUNT(*) AS count FROM influencers').get().count;
+
+    migrationService.runMigrations(db, {
+      rootDir: SERVER_ROOT,
+      registeredMigrations: migrationsThroughV23(migration)
+    });
+
+    assert.equal(
+      db.prepare('SELECT COUNT(*) AS count FROM influencers WHERE org_id=1').get().count,
+      influencerCount
+    );
+    assert.equal(db.pragma('integrity_check', { simple: true }), 'ok');
+    assert.deepEqual(db.pragma('foreign_key_check'), []);
+  } finally {
+    db.close();
+  }
+});
+
 test('migration 023 fails closed when the default organization is unavailable', () => {
   const migration = loadMigration();
   const db = openV22();

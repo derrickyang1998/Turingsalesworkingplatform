@@ -136,7 +136,7 @@
     },
     {
       "path": "server/migrations/023_influencer_tenant_ownership.js",
-      "sha256": "4a31fc6718361edc30985282d5fceb2893e32ddca0dde2ff7001ff675a9f0e38"
+      "sha256": "304754aeb1d2e242e00ef773a4d249001fc96ee8567ddda1d646d4802483bedb"
     },
     {
       "path": "server/migrations/baselines/legacy_v1.js",
@@ -220,11 +220,11 @@
     },
     {
       "path": "server/scripts/sanitization_manifest.json",
-      "sha256": "c1cce1deef4f6582a485ae7c209fc498cf47be2110e116af893007b8e5f77442"
+      "sha256": "8e0c7adf2a2b14651fc0170a56efd8017e61c45cbef6be8491d096f9051085c7"
     },
     {
       "path": "server/scripts/sanitize_production_shape.js",
-      "sha256": "d425642d847e740dd18515cef6f2747039c0934df59ff0a01d02edd0572ced96"
+      "sha256": "44b9f2d9ea0cadf6dd892bc9997909dd41f9c50d123b137a51b084202eb66a55"
     },
     {
       "path": "server/scripts/trusted_parser_runtime_verifier.js",

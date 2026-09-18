@@ -130398,7 +130398,7 @@
           "mode": "frozen-exact-table-column-policy",
           "unknownText": "transform-or-reject",
           "validatorVersion": "tm-structural-policy-v21-influencer-tenant-ownership",
-          "policySha256": "c29b303989f50cee4f15046f6896ff8f780c71e6fc6ffc0981e4756489df480c"
+          "policySha256": "9f7be19e49842a0f4dab7a0e9b328bffefe518f86cb5436a5a433173c30dcf09"
         }
       },
       "equalityGroups": [

@@ -97,6 +97,31 @@ function legacyProjection(db) {
   return { count: rows.length, sha256: hash.digest('hex') };
 }
 
+function resolveDefaultOrganizationId(db) {
+  const organizations = db.prepare(`
+    SELECT id,code,name,created_at
+    FROM organizations
+    ORDER BY id
+  `).all();
+  const namedDefault = organizations.filter((organization) => (
+    organization.code === 'turingmarket-default'
+  ));
+  if (namedDefault.length === 1) return namedDefault[0].id;
+  if (namedDefault.length > 1 || organizations.length === 0) {
+    throw new Error('023 requires one unique default organization');
+  }
+
+  const sanitizedDefault = organizations.filter((organization) => (
+    /^tm-inert-secret-[0-9a-f]{64}$/.test(organization.code) &&
+    /^tmtext-[0-9a-f]{32}$/.test(organization.name) &&
+    organization.created_at === '1970-01-01 00:00:00'
+  ));
+  if (sanitizedDefault.length !== 1 || sanitizedDefault[0].id !== organizations[0].id) {
+    throw new Error('023 requires one unique default organization');
+  }
+  return sanitizedDefault[0].id;
+}
+
 const migration = {
   version: 23,
   name: '023_influencer_tenant_ownership',
@@ -133,21 +158,14 @@ const migration = {
       throw new Error('partial 023 influencer ownership object exists');
     }
 
-    const defaultOrganizations = db.prepare(`
-      SELECT id FROM organizations
-      WHERE code='turingmarket-default'
-      ORDER BY id
-    `).all();
-    if (defaultOrganizations.length !== 1) {
-      throw new Error('023 requires one unique default organization');
-    }
+    const defaultOrganizationId = resolveDefaultOrganizationId(db);
 
     const before = legacyProjection(db);
     db.exec(`
       ALTER TABLE influencers
       ADD COLUMN org_id INTEGER REFERENCES organizations(id) ON UPDATE RESTRICT ON DELETE RESTRICT;
     `);
-    db.prepare('UPDATE influencers SET org_id=? WHERE org_id IS NULL').run(defaultOrganizations[0].id);
+    db.prepare('UPDATE influencers SET org_id=? WHERE org_id IS NULL').run(defaultOrganizationId);
     db.exec([
       ...Object.values(INDEX_SQL),
       ...Object.values(TRIGGER_SQL)
