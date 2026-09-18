@@ -161,6 +161,13 @@ const db = migrationService.openMigratedDatabase(DB_PATH, {
       sourcePath: 'migrations/023_influencer_tenant_ownership.js',
       engineVersion: 1,
       dependencies: ['migrations/vendor/bcryptjs_v3_0_3.js']
+    },
+    {
+      version: 24,
+      name: '024_knowledge_tenant_ownership',
+      sourcePath: 'migrations/024_knowledge_tenant_ownership.js',
+      engineVersion: 1,
+      dependencies: ['migrations/vendor/bcryptjs_v3_0_3.js']
     }
   ]
 });
