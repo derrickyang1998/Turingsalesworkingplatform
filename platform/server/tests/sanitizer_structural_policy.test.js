@@ -92,6 +92,27 @@ test('schema 22 structural policy preserves task update audit events', () => {
   );
 });
 
+test('schema 23 sanitization manifest treats influencer organization ownership as structural', () => {
+  const fixture = openMigratedFixture('influencer-tenant-ownership-policy', 23);
+  try {
+    const profile = sanitizer._testing.manifestProfileForVersion(manifestDocument, 23);
+    const influencer = profile.objects.find((object) => object.name === 'influencers');
+    const organizationId = influencer.columns.find((column) => column.name === 'org_id');
+    assert.deepEqual({
+      classification: organizationId.classification,
+      foreignKey: organizationId.foreignKey,
+      declaredType: organizationId.declaredType
+    }, {
+      classification: 'structural',
+      foreignKey: true,
+      declaredType: 'INTEGER'
+    });
+    assert.doesNotThrow(() => sanitizer.validateManifest(manifestDocument, fixture.db));
+  } finally {
+    closeFixture(fixture);
+  }
+});
+
 test('schema 15 sanitization manifest pins the signed collaboration structural policy', () => {
   const fixture = openMigratedFixture('signed-collaboration-policy', 15);
   try {

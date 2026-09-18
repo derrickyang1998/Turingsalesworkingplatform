@@ -108,8 +108,30 @@ function archiveBrand(db, brand, user) {
   }, user);
 }
 
-function archiveInfluencer(db, influencer, user) {
+function archiveInfluencer(db, influencer, user, options) {
   influencer = influencer || {};
+  const organizationId = options && options.organizationId;
+  if (Number.isSafeInteger(organizationId) && organizationId > 0 && db.inTransaction === true) {
+    try {
+      const result = knowledgeService.writeOrganizationKnowledgeInTransaction(db, {
+        organizationId,
+        createdBy: user && user.id,
+        entryType: 'influencer_profile',
+        sourceType: 'influencer_profile',
+        sourceId: influencer.id || influencer.kol_handle,
+        title: 'Influencer profile: ' + (influencer.kol_handle || influencer.id || 'untitled'),
+        summary: compact([influencer.platform, influencer.kol_handle, influencer.category, influencer.region, influencer.followers].filter(Boolean).join(' / '), 240),
+        content: stringifyRecord(influencer),
+        tags: cleanTags(['influencer', influencer.platform, influencer.category, influencer.region, influencer.tags]),
+        visibility: 'team',
+        metadata: { module: 'influencer', organization_id: organizationId }
+      });
+      knowledgeService.applyKnowledgeCapacityGaugePlanInTransaction(db, result.capacityGaugePlan);
+      return result;
+    } catch (_error) {
+      return null;
+    }
+  }
   return safeIngest(db, {
     title: 'Influencer profile: ' + (influencer.kol_handle || influencer.id || 'untitled'),
     summary: compact([influencer.platform, influencer.kol_handle, influencer.category, influencer.region, influencer.followers].filter(Boolean).join(' / '), 240),

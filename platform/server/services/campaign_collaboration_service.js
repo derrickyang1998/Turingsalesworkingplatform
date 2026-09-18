@@ -636,7 +636,10 @@ function normalizedSettlementDecision(body) {
   });
 }
 
-function authorizedCollaborationScope(userId) {
+function authorizedCollaborationScope(userId, organizationId) {
+  const tenantOrganizationId = organizationId === undefined || organizationId === null
+    ? null
+    : requirePositiveSafeId(organizationId, 'organizationId');
   const campaignAccess = buildCollectionAccessPredicate(
     'collaboration_stats',
     { userId }
@@ -694,21 +697,30 @@ function authorizedCollaborationScope(userId) {
       authorized_collaborations AS (
         SELECT collaboration.id,campaign_scope.campaign_id AS custody_campaign_id
         FROM collaborations collaboration
+        JOIN influencers influencer_scope ON influencer_scope.id=collaboration.influencer_id
         LEFT JOIN classified_records classification
           ON classification.record_id=CAST(collaboration.id AS TEXT)
         LEFT JOIN campaign_scope
           ON campaign_scope.record_id=CAST(collaboration.id AS TEXT)
         WHERE ${collaborationObjectPredicate()}
+          ${tenantOrganizationId === null ? '' : 'AND influencer_scope.org_id=?'}
           AND (
             classification.record_id IS NULL
             OR (
               campaign_scope.record_id IS NOT NULL
+              AND influencer_scope.org_id=campaign_scope.org_id
               AND ${campaignAccess.sql}
             )
           )
       )
     `,
-    params: [userId, userId, userId, ...campaignAccess.params]
+    params: [
+      userId,
+      userId,
+      userId,
+      ...(tenantOrganizationId === null ? [] : [tenantOrganizationId]),
+      ...campaignAccess.params
+    ]
   };
 }
 
@@ -722,8 +734,8 @@ function legacyCollaborationColumns(alias) {
     influencer.content_deliverable, influencer.quoted_price`;
 }
 
-function readAuthorizedCollaboration(db, userId, collaborationId, includeCustody) {
-  const scope = authorizedCollaborationScope(userId);
+function readAuthorizedCollaboration(db, userId, collaborationId, includeCustody, organizationId) {
+  const scope = authorizedCollaborationScope(userId, organizationId);
   const custodyProjection = includeCustody
     ? ', authorized.custody_campaign_id AS __custody_campaign_id'
     : '';
@@ -1977,6 +1989,7 @@ function createCampaignCollaborationService(db, options = {}) {
 
   function list(input) {
     const userId = requirePositiveSafeId(input && input.userId, 'userId');
+    const organizationId = requirePositiveSafeId(input && input.organizationId, 'organizationId');
     if (!requireActiveActor(db, userId)) return { collaborations: [] };
     const rawCampaignId = input && input.campaignId;
     const campaignId = rawCampaignId === undefined || rawCampaignId === null || rawCampaignId === ''
@@ -1987,7 +2000,7 @@ function createCampaignCollaborationService(db, options = {}) {
     }
     const includeCampaignContext = campaignId !== null ||
       input && (input.includeCampaignContext === true || input.includeCampaignContext === '1' || input.includeCampaignContext === 'true');
-    const scope = authorizedCollaborationScope(userId);
+    const scope = authorizedCollaborationScope(userId, organizationId);
     const conditions = [];
     const params = [...scope.params];
     if (input.status) {
@@ -2109,6 +2122,7 @@ function createCampaignCollaborationService(db, options = {}) {
         collaboration.id,collaboration.status,collaboration.cost_actual_confirmed,
         collaboration.proposal_notes
       FROM collaborations collaboration
+      JOIN influencers influencer ON influencer.id=collaboration.influencer_id
       JOIN campaign_record_links link
         ON link.record_type='collaboration'
        AND link.record_id=CAST(collaboration.id AS TEXT)
@@ -2116,12 +2130,13 @@ function createCampaignCollaborationService(db, options = {}) {
        AND link.relation_type IN ('order','execution','publication','settlement')
        AND link.revoked_at IS NULL
       WHERE collaboration.status<>'cancelled'
+        AND influencer.org_id=?
       GROUP BY
         collaboration.id,collaboration.status,collaboration.cost_actual_confirmed,
         collaboration.proposal_notes
       ORDER BY collaboration.id
       LIMIT ?
-    `).all(campaignId, CLOSEOUT_SNAPSHOT_MAX_COLLABORATIONS + 1);
+    `).all(campaignId, access.campaign.org_id, CLOSEOUT_SNAPSHOT_MAX_COLLABORATIONS + 1);
     if (rows.length > CLOSEOUT_SNAPSHOT_MAX_COLLABORATIONS) {
       throw serviceError(
         413,
@@ -2185,6 +2200,7 @@ function createCampaignCollaborationService(db, options = {}) {
 
   function get(input) {
     const userId = requirePositiveSafeId(input && input.userId, 'userId');
+    const organizationId = requirePositiveSafeId(input && input.organizationId, 'organizationId');
     const collaborationId = requirePositiveSafeId(
       input && input.collaborationId,
       'collaborationId'
@@ -2192,7 +2208,13 @@ function createCampaignCollaborationService(db, options = {}) {
     if (!requireActiveActor(db, userId)) {
       throw serviceError(404, 'RECORD_NOT_FOUND', 'Collaboration was not found.');
     }
-    const row = readAuthorizedCollaboration(db, userId, collaborationId, false);
+    const row = readAuthorizedCollaboration(
+      db,
+      userId,
+      collaborationId,
+      false,
+      organizationId
+    );
     if (!row) {
       throw serviceError(404, 'RECORD_NOT_FOUND', 'Collaboration was not found.');
     }
@@ -2223,7 +2245,12 @@ function createCampaignCollaborationService(db, options = {}) {
         { operational_status: access.campaign.operational_status }
       );
     }
-    const current = db.prepare('SELECT * FROM collaborations WHERE id=?').get(collaborationId);
+    const current = db.prepare(`
+      SELECT collaboration.*
+      FROM collaborations collaboration
+      JOIN influencers influencer ON influencer.id=collaboration.influencer_id
+      WHERE collaboration.id=? AND influencer.org_id=?
+    `).get(collaborationId, access.campaign.org_id);
     if (!current) throw serviceError(404, 'RECORD_NOT_FOUND', 'Collaboration was not found.');
     return { access, custody, current };
   }
@@ -3573,8 +3600,8 @@ function createCampaignCollaborationService(db, options = {}) {
       const influencer = db.prepare(`
         SELECT influencer.id,influencer.kol_handle
         FROM influencers influencer
-        WHERE influencer.id=?
-      `).get(current.influencer_id);
+        WHERE influencer.id=? AND influencer.org_id=?
+      `).get(current.influencer_id, context.access.campaign.org_id);
       if (!influencer) {
         throw serviceError(409, 'CAMPAIGN_EVIDENCE_IN_USE', 'Collaboration influencer evidence is inconsistent.');
       }
@@ -4060,6 +4087,7 @@ function createCampaignCollaborationService(db, options = {}) {
 
   function updateLegacy(input) {
     const userId = requirePositiveSafeId(input && input.userId, 'userId');
+    const organizationId = requirePositiveSafeId(input && input.organizationId, 'organizationId');
     const collaborationId = requirePositiveSafeId(
       input && input.collaborationId,
       'collaborationId'
@@ -4075,7 +4103,8 @@ function createCampaignCollaborationService(db, options = {}) {
         db,
         userId,
         collaborationId,
-        true
+        true,
+        organizationId
       );
       if (!authorized) {
         throw serviceError(404, 'RECORD_NOT_FOUND', 'Collaboration was not found.');
@@ -4122,12 +4151,20 @@ function createCampaignCollaborationService(db, options = {}) {
       if (update.changes !== 1) {
         throw serviceError(409, 'ROW_VERSION_EXHAUSTED', 'Collaboration row version is exhausted.');
       }
-      return { current, collaboration: get({ userId, collaborationId }) };
+      return {
+        current,
+        collaboration: get({
+          userId,
+          collaborationId,
+          organizationId: input && input.organizationId
+        })
+      };
     }).immediate();
   }
 
   function confirmContract(input) {
     const userId = requirePositiveSafeId(input && input.userId, 'userId');
+    const organizationId = requirePositiveSafeId(input && input.organizationId, 'organizationId');
     const collaborationId = requirePositiveSafeId(
       input && input.collaborationId,
       'collaborationId'
@@ -4143,7 +4180,7 @@ function createCampaignCollaborationService(db, options = {}) {
     if (!requireActiveActor(db, userId)) {
       throw serviceError(404, 'RECORD_NOT_FOUND', 'Collaboration was not found.');
     }
-    get({ userId, collaborationId });
+    get({ userId, organizationId, collaborationId });
     const campaignId = body.campaign_id;
     const initialCustody = collaborationCustody(db, collaborationId);
     if (
@@ -4154,6 +4191,9 @@ function createCampaignCollaborationService(db, options = {}) {
       throw serviceError(404, 'RECORD_NOT_FOUND', 'Collaboration was not found.');
     }
     const initialAccess = requireCampaignWrite(db, userId, campaignId);
+    if (initialAccess.campaign.org_id !== organizationId) {
+      throw serviceError(404, 'RECORD_NOT_FOUND', 'Collaboration was not found.');
+    }
     const confirmation = normalizedContractConfirmation(body);
     const key = input.idempotencyKey;
     if (typeof key !== 'string' || !/^[A-Za-z0-9._:-]{8,200}$/.test(key)) {
@@ -4181,7 +4221,10 @@ function createCampaignCollaborationService(db, options = {}) {
 
     return db.transaction(() => {
       const access = requireCampaignWrite(db, userId, campaignId);
-      get({ userId, collaborationId });
+      if (access.campaign.org_id !== organizationId) {
+        throw serviceError(404, 'RECORD_NOT_FOUND', 'Collaboration was not found.');
+      }
+      get({ userId, organizationId, collaborationId });
       const custody = collaborationCustody(db, collaborationId);
       if (
         custody.classification !== 'campaign_classified' ||
@@ -4321,6 +4364,7 @@ function createCampaignCollaborationService(db, options = {}) {
 
   function createLinked(input) {
     const userId = requirePositiveSafeId(input && input.userId, 'userId');
+    const organizationId = requirePositiveSafeId(input && input.organizationId, 'organizationId');
     const body = input && input.body && typeof input.body === 'object' ? input.body : null;
     if (!body) {
       throw serviceError(400, 'INVALID_CAMPAIGN_INPUT', 'campaign_id and influencer_id are required.');
@@ -4341,6 +4385,9 @@ function createCampaignCollaborationService(db, options = {}) {
     }
     const campaignId = body.campaign_id;
     const initialAccess = requireCampaignWrite(db, userId, campaignId);
+    if (initialAccess.campaign.org_id !== organizationId) {
+      throw serviceError(404, 'CAMPAIGN_NOT_FOUND', 'Campaign was not found.');
+    }
     const rawResource = body.resource && typeof body.resource === 'object' ? body.resource : {};
     const hasLegacyResource = Object.keys(rawResource).length > 0;
     const versionedResourceRequest = isVersionedCollaborationResourceInput(body.resource);
@@ -4402,12 +4449,18 @@ function createCampaignCollaborationService(db, options = {}) {
     };
     return db.transaction(() => {
       const access = requireCampaignWrite(db, userId, campaignId);
+      if (access.campaign.org_id !== organizationId) {
+        throw serviceError(404, 'CAMPAIGN_NOT_FOUND', 'Campaign was not found.');
+      }
       let reservation = idempotencyService.recoverExpiredInTransaction(db, reservationInput);
       if (reservation.state === 'absent') {
         reservation = idempotencyService.reserveProcessingInTransaction(db, reservationInput);
       }
       if (reservation.state !== 'reserved') return idempotencyOutcome(reservation);
-      const influencer = db.prepare('SELECT id FROM influencers WHERE id=? AND is_active=1').get(body.influencer_id);
+      const influencer = db.prepare(`
+        SELECT id FROM influencers
+        WHERE id=? AND org_id=? AND is_active=1
+      `).get(body.influencer_id, access.campaign.org_id);
       if (!influencer) throw serviceError(404, 'RECORD_NOT_FOUND', 'Influencer was not found.');
       const result = db.prepare(`
         INSERT INTO collaborations (demand_id,influencer_id,user_id,status,proposal_notes,cost_quoted,notes,timeline_start,timeline_end,row_version,cost_actual_confirmed)
@@ -4459,6 +4512,7 @@ function createCampaignCollaborationService(db, options = {}) {
 
   function updateLinked(input) {
     const userId = requirePositiveSafeId(input && input.userId, 'userId');
+    const organizationId = requirePositiveSafeId(input && input.organizationId, 'organizationId');
     const collaborationId = requirePositiveSafeId(input && input.collaborationId, 'collaborationId');
     const body = input && input.body && typeof input.body === 'object' ? input.body : null;
     if (!body) {
@@ -4522,7 +4576,10 @@ function createCampaignCollaborationService(db, options = {}) {
     const initialAccess = cancellation
       ? requireCampaignAccess(db, userId, campaignId)
       : requireCampaignWrite(db, userId, campaignId);
-    get({ userId, collaborationId });
+    if (initialAccess.campaign.org_id !== organizationId) {
+      throw serviceError(404, 'RECORD_NOT_FOUND', 'Collaboration was not found.');
+    }
+    get({ userId, organizationId, collaborationId });
     const initialCustody = collaborationCustody(db, collaborationId);
     if (
       initialCustody.classification === 'campaign_classified' &&
@@ -4540,7 +4597,10 @@ function createCampaignCollaborationService(db, options = {}) {
     };
     return db.transaction(() => {
       const access = requireCampaignAccess(db, userId, campaignId);
-      get({ userId, collaborationId });
+      if (access.campaign.org_id !== organizationId) {
+        throw serviceError(404, 'RECORD_NOT_FOUND', 'Collaboration was not found.');
+      }
+      get({ userId, organizationId, collaborationId });
       const preReservationCustody = collaborationCustody(db, collaborationId);
       if (
         preReservationCustody.classification === 'campaign_classified' &&
@@ -4862,6 +4922,7 @@ function createCampaignCollaborationService(db, options = {}) {
 
   function stats(input) {
     const userId = requirePositiveSafeId(input && input.userId, 'userId');
+    const organizationId = requirePositiveSafeId(input && input.organizationId, 'organizationId');
     if (!requireActiveActor(db, userId)) {
       return {
         stats: {
@@ -4874,7 +4935,7 @@ function createCampaignCollaborationService(db, options = {}) {
         }
       };
     }
-    const scope = authorizedCollaborationScope(userId);
+    const scope = authorizedCollaborationScope(userId, organizationId);
     const byStatus = db.prepare(`
       WITH ${scope.sql}
       SELECT collaboration.status,COUNT(*) AS count

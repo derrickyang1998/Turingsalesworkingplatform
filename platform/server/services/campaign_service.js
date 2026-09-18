@@ -955,14 +955,17 @@ function guardTargetExists(db, link) {
   const query = {
     demand: 'SELECT 1 FROM demands WHERE id=?',
     proposal: 'SELECT 1 FROM proposals WHERE id=?',
-    influencer: 'SELECT 1 FROM influencers WHERE id=? AND is_active=1',
+    influencer: 'SELECT 1 FROM influencers WHERE id=? AND org_id=? AND is_active=1',
     collaboration: `
       SELECT 1 FROM collaborations
       WHERE id=? AND status<>'cancelled'
     `,
     knowledge_entry: 'SELECT 1 FROM knowledge_entries WHERE id=?'
   }[link.record_type];
-  return Boolean(query && db.prepare(query).get(Number(link.record_id)));
+  if (!query) return false;
+  return Boolean(link.record_type === 'influencer'
+    ? db.prepare(query).get(Number(link.record_id), link.org_id)
+    : db.prepare(query).get(Number(link.record_id)));
 }
 
 function relationGuardMet(db, campaignId, relation) {
@@ -991,7 +994,7 @@ function relationGuardMet(db, campaignId, relation) {
     `).get(campaignId));
   }
   const rows = db.prepare(`
-    SELECT record_type,record_id
+    SELECT record_type,record_id,org_id
     FROM campaign_record_links
     WHERE campaign_id=? AND relation_type=? AND revoked_at IS NULL
     ORDER BY id
@@ -2314,7 +2317,7 @@ function candidateSqlDefinition(relationType, {
       };
     case 'shortlist':
       return {
-        params: {},
+        params: { orgId: access.campaign.org_id },
         sql: `
           SELECT
             target.id,
@@ -2325,7 +2328,7 @@ function candidateSqlDefinition(relationType, {
             NULL AS status,
             NULL AS row_version
           FROM influencers target
-          WHERE target.is_active=1
+          WHERE target.org_id=@orgId AND target.is_active=1
         `
       };
     case 'ai_run':
@@ -2435,6 +2438,7 @@ function candidateSqlDefinition(relationType, {
           JOIN influencers influencer ON influencer.id=target.influencer_id
           LEFT JOIN custody ON custody.target_id=target.id
           WHERE target.status<>'cancelled'
+            AND influencer.org_id=@orgId
             AND (
               @platformAdmin=1
               OR target.user_id=@userId
@@ -2612,7 +2616,7 @@ const WORKSPACE_TARGET_SELECTS = Object.freeze({
     FROM proposals
   `,
   influencer: `
-    SELECT id,is_active,kol_handle
+    SELECT id,is_active,kol_handle,org_id
     FROM influencers
   `,
   collaboration: `
@@ -2747,7 +2751,7 @@ function workspaceTargetVisible({
     case 'proposal':
       return platformAdmin || actorOwns;
     case 'influencer':
-      return target.is_active === 1;
+      return target.is_active === 1 && target.org_id === campaignAccess.campaign.org_id;
     case 'collaboration':
     case 'ai_conversation':
       return platformAdmin || orgAdmin || actorOwns;

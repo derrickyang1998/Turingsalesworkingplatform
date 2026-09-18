@@ -3125,6 +3125,7 @@ test('collaboration routes use the injected singleton and one request-id fallbac
   registered['POST /api/collaborations'].at(-1)({
     body: { campaign_id: 81, influencer_id: 82 },
     user: { id: 9 },
+    authContext: { organization: { id: 1 } },
     phase4Request: { requestId: 'collaboration-create-phase4' },
     headers: { 'idempotency-key': 'collaboration-create-key' },
     get(name) { return name === 'Idempotency-Key' ? 'collaboration-create-key' : undefined; }
@@ -3137,6 +3138,7 @@ test('collaboration routes use the injected singleton and one request-id fallbac
     body: { campaign_id: 81, expected_version: 1, reason: 'Route contract' },
     params: { id: '7001' },
     user: { id: 9 },
+    authContext: { organization: { id: 1 } },
     requestId: 'collaboration-update-top-level',
     phase4Request: { requestId: 'collaboration-update-phase4' },
     headers: { 'idempotency-key': 'collaboration-update-key' },
@@ -3146,16 +3148,19 @@ test('collaboration routes use the injected singleton and one request-id fallbac
   assert.deepEqual(updateResponse.body, { success: true });
   assert.deepEqual(calls.map(({ method, input }) => ({
     method,
+    organizationId: input.organizationId,
     requestId: input.requestId,
     idempotencyKey: input.idempotencyKey
   })), [
     {
       method: 'createLinked',
+      organizationId: 1,
       requestId: 'collaboration-create-phase4',
       idempotencyKey: 'collaboration-create-key'
     },
     {
       method: 'updateLinked',
+      organizationId: 1,
       requestId: 'collaboration-update-top-level',
       idempotencyKey: 'collaboration-update-key'
     }

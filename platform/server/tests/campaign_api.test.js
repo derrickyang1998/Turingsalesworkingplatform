@@ -13,6 +13,7 @@ const knowledge = require('../services/knowledge_service');
 const idempotency = require('../services/idempotency_service');
 const sqliteDigest = require('../services/sqlite_digest_service');
 const migrationVerifier = require('../scripts/verify_campaign_migration_gate');
+const influencerTenantMigration = require('../migrations/023_influencer_tenant_ownership');
 const {
   createCampaignService
 } = require('../services/campaign_service');
@@ -3461,14 +3462,15 @@ test('campaign link candidates bound authorization and pagination SQL work at vo
 
 test('GET campaign workspace returns exact grouped links events and empty deferred dispatches', async (t) => {
   const db = openV2Database();
+  influencerTenantMigration.apply(db);
   const context = createCampaignContext(db);
   const demandId = 940401;
   const collaborationId = 950401;
   const influencerHandle = '@workspace-route-candidate-940401';
   const influencerId = Number(db.prepare(`
-    INSERT INTO influencers (platform,kol_handle,is_active)
-    VALUES ('YouTube',?,1)
-  `).run(influencerHandle).lastInsertRowid);
+    INSERT INTO influencers (platform,kol_handle,is_active,org_id)
+    VALUES ('YouTube',?,1,?)
+  `).run(influencerHandle, context.orgId).lastInsertRowid);
   db.prepare(`
     INSERT INTO demands (id,user_id,brand_name,product_name,status,data_json)
     VALUES (?,?,'Workspace Brand','Workspace Product','confirmed','{}')
@@ -3587,9 +3589,54 @@ test('GET campaign workspace returns exact grouped links events and empty deferr
   });
 });
 
+test('campaign workspace conceals a legacy shortlist link whose influencer belongs to another organization', () => {
+  const db = openV2Database();
+  try {
+    influencerTenantMigration.apply(db);
+    const context = createCampaignContext(db);
+    const foreignOrganizationId = 940499;
+    db.prepare(`
+      INSERT INTO organizations (id,code,name)
+      VALUES (?,?,?)
+    `).run(foreignOrganizationId, 'workspace-foreign-org', 'Workspace Foreign Organization');
+    const foreignInfluencerId = Number(db.prepare(`
+      INSERT INTO influencers (platform,kol_handle,is_active,org_id)
+      VALUES ('TikTok','@workspace_foreign_creator',1,?)
+    `).run(foreignOrganizationId).lastInsertRowid);
+    db.prepare(`
+      INSERT INTO campaign_record_links (
+        org_id,campaign_id,record_type,bundle_id,record_id,relation_type,
+        created_by,metadata_json
+      ) VALUES (?,?,'influencer',?,?,'shortlist',?,'{}')
+    `).run(
+      context.orgId,
+      context.campaignId,
+      sha256('workspace-foreign-influencer-link'),
+      String(foreignInfluencerId),
+      context.userId
+    );
+
+    const workspace = createCampaignService(db).getCampaignWorkspace({
+      userId: context.userId,
+      campaignId: context.campaignId,
+      query: {}
+    });
+    assert.deepEqual(workspace.active_links.shortlist, [{
+      relation_type: 'shortlist',
+      access_state: 'restricted',
+      restricted_count: 1
+    }]);
+    assert.equal(JSON.stringify(workspace).includes(String(foreignInfluencerId)), false);
+    assert.equal(JSON.stringify(workspace).includes('@workspace_foreign_creator'), false);
+  } finally {
+    db.close();
+  }
+});
+
 test('campaign workspace bounds link and event materialization at volume', () => {
   const db = openV2Database();
   try {
+    influencerTenantMigration.apply(db);
     const context = createCampaignContext(db);
     const count = 250;
     const influencerBase = 960000;
@@ -3604,14 +3651,15 @@ test('campaign workspace bounds link and event materialization at volume', () =>
         FROM fixture_rows
         WHERE value < @count
       )
-      INSERT INTO influencers (id,platform,kol_handle,is_active)
+      INSERT INTO influencers (id,platform,kol_handle,is_active,org_id)
       SELECT
         @influencerBase + value,
         'YouTube',
         '@workspace-volume-' || value,
-        1
+        1,
+        @orgId
       FROM fixture_rows
-    `).run({ count, influencerBase });
+    `).run({ count, influencerBase, orgId: context.orgId });
     db.prepare(`
       WITH RECURSIVE fixture_rows(value) AS (
         SELECT 1

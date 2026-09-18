@@ -2544,6 +2544,7 @@ app.post('/api/influencers/upload', authMiddleware, async (req, res) => {
           const importOptions = {
             batch_id: uploadBatchId,
             user: current.user,
+            organizationId: current.identity.organizationId,
             data_source: 'upload',
             onPersist(stats) {
               persistInfluencerImportAudit(

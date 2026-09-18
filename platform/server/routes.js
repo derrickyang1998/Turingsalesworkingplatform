@@ -50,6 +50,15 @@ class InfluencerFilterError extends Error {
   }
 }
 
+class InfluencerTenantError extends Error {
+  constructor() {
+    super('Influencer organization context is unavailable.');
+    this.name = 'InfluencerTenantError';
+    this.code = 'INFLUENCER_ORGANIZATION_CONTEXT_REQUIRED';
+    this.statusCode = 403;
+  }
+}
+
 const INFLUENCER_FILTER_TEXT_LIMIT = 200;
 
 function influencerFilterObject(value) {
@@ -100,10 +109,21 @@ function influencerAmountFilter(filters, name) {
   return parsed;
 }
 
+function positiveInfluencerOrganizationId(raw) {
+  if (Number.isSafeInteger(raw) && raw > 0) return raw;
+  if (typeof raw === 'string' && /^[1-9]\d*$/.test(raw)) {
+    const parsed = Number(raw);
+    if (Number.isSafeInteger(parsed) && String(parsed) === raw) return parsed;
+  }
+  return null;
+}
+
 function buildInfluencerSelect(filters, options = {}) {
   filters = influencerFilterObject(filters);
-  let sql = 'SELECT * FROM influencers WHERE is_active = 1';
-  const params = [];
+  const organizationId = positiveInfluencerOrganizationId(options.organizationId);
+  if (organizationId === null) throw new InfluencerTenantError();
+  let sql = 'SELECT * FROM influencers WHERE org_id = ? AND is_active = 1';
+  const params = [organizationId];
   const exactText = [
     ['platform', 'platform'],
     ['category', 'category'],
@@ -228,6 +248,21 @@ function buildInfluencerSelect(filters, options = {}) {
 
 function sendInfluencerFilterError(res, error) {
   if (!(error instanceof InfluencerFilterError)) return false;
+  res.status(error.statusCode).json({ error: error.message, code: error.code });
+  return true;
+}
+
+function influencerOrganizationId(request) {
+  const raw = request && request.authContext && request.authContext.organization
+    ? request.authContext.organization.id
+    : null;
+  const parsed = positiveInfluencerOrganizationId(raw);
+  if (parsed !== null) return parsed;
+  throw new InfluencerTenantError();
+}
+
+function sendInfluencerTenantError(res, error) {
+  if (!(error instanceof InfluencerTenantError)) return false;
   res.status(error.statusCode).json({ error: error.message, code: error.code });
   return true;
 }
@@ -454,10 +489,13 @@ function requiresFeishuReconciliation(failure) {
 // ===== INFLUENCER ROUTES =====
 app.get('/api/influencers', authMiddleware, (req, res) => {
   try {
-    const query = buildInfluencerSelect(req.query);
+    const query = buildInfluencerSelect(req.query, {
+      organizationId: influencerOrganizationId(req)
+    });
     const influencers = db.prepare(query.sql).all(...query.params);
     res.json({ influencers, total: influencers.length });
   } catch (error) {
+    if (sendInfluencerTenantError(res, error)) return;
     if (sendInfluencerFilterError(res, error)) return;
     res.status(500).json({ error: error.message });
   }
@@ -502,16 +540,17 @@ app.delete('/api/influencer-views/:id', authMiddleware, (req, res) => {
 app.post('/api/influencers', authMiddleware, requireInfluencerDataImport('manual'), (req, res) => {
   try {
     const input = req.body || {};
+    const organizationId = influencerOrganizationId(req);
     const created = db.transaction(function() {
       const result = db.prepare(`
         INSERT INTO influencers (
           platform,kol_handle,profile_link,followers,avg_views_10,avg_engagement,
           category,sub_category,region,language,content_style,collab_type,cost_usd,
-          cost_range_min,cost_range_max,cpm,brand_collab_history,contact_email
+          cost_range_min,cost_range_max,cpm,brand_collab_history,contact_email,org_id
         ) VALUES (
           @platform,@kol_handle,@profile_link,@followers,@avg_views_10,@avg_engagement,
           @category,@sub_category,@region,@language,@content_style,@collab_type,@cost_usd,
-          @cost_range_min,@cost_range_max,@cpm,@brand_collab_history,@contact_email
+          @cost_range_min,@cost_range_max,@cpm,@brand_collab_history,@contact_email,@org_id
         )
       `).run({
         platform: input.platform || null,
@@ -531,10 +570,12 @@ app.post('/api/influencers', authMiddleware, requireInfluencerDataImport('manual
         cost_range_max: input.cost_range_max ?? null,
         cpm: input.cpm ?? null,
         brand_collab_history: input.brand_collab_history || null,
-        contact_email: input.contact_email || null
+        contact_email: input.contact_email || null,
+        org_id: organizationId
       });
-      const influencer = db.prepare('SELECT * FROM influencers WHERE id = ?').get(result.lastInsertRowid);
-      businessKnowledge.archiveInfluencer(db, influencer, req.user);
+      const influencer = db.prepare('SELECT * FROM influencers WHERE id = ? AND org_id = ?')
+        .get(result.lastInsertRowid, organizationId);
+      businessKnowledge.archiveInfluencer(db, influencer, req.user, { organizationId });
       persistInfluencerImportAudit(
         req,
         influencerDataImportPermission.auditEvent(
@@ -554,33 +595,39 @@ app.post('/api/influencers', authMiddleware, requireInfluencerDataImport('manual
     }).immediate();
     return res.json(created);
   } catch (error) {
+    if (sendInfluencerTenantError(res, error)) return;
     return sendInfluencerImportError(req, res, error);
   }
 });
 
 app.post('/api/influencers/match', authMiddleware, (req, res) => {
-  const { category, platform, region, min_followers, max_followers } = req.body;
-  let sql = 'SELECT * FROM influencers WHERE is_active = 1';
-  const params = [];
-  if (category) { sql += ' AND category = ?'; params.push(category); }
-  if (platform) { sql += ' AND platform = ?'; params.push(platform); }
-  if (region) { sql += ' AND region = ?'; params.push(region); }
-  if (min_followers) { sql += ' AND followers >= ?'; params.push(parseInt(min_followers)); }
-  if (max_followers) { sql += ' AND followers <= ?'; params.push(parseInt(max_followers)); }
-  const all = db.prepare(sql).all(...params);
-  const scored = all.map(inf => {
-    let score = 0;
-    if (inf.avg_engagement) score += Math.min(inf.avg_engagement, 10) * 8;
-    if (inf.followers) score += Math.min(Math.log10(inf.followers) * 10, 40);
-    if (inf.avg_views_10) score += Math.min(Math.log10(inf.avg_views_10) * 5, 20);
-    if (inf.cpm && inf.cpm < 50) score += 15;
-    else if (inf.cpm && inf.cpm < 100) score += 8;
-    if (inf.brand_collab_history && inf.brand_collab_history.length > 0) score += 10;
-    score = Math.round(score);
-    return { ...inf, match_score: score };
-  });
-  scored.sort((a, b) => b.match_score - a.match_score);
-  res.json({ matches: scored.slice(0, 30) });
+  try {
+    const { category, platform, region, min_followers, max_followers } = req.body;
+    let sql = 'SELECT * FROM influencers WHERE org_id = ? AND is_active = 1';
+    const params = [influencerOrganizationId(req)];
+    if (category) { sql += ' AND category = ?'; params.push(category); }
+    if (platform) { sql += ' AND platform = ?'; params.push(platform); }
+    if (region) { sql += ' AND region = ?'; params.push(region); }
+    if (min_followers) { sql += ' AND followers >= ?'; params.push(parseInt(min_followers)); }
+    if (max_followers) { sql += ' AND followers <= ?'; params.push(parseInt(max_followers)); }
+    const all = db.prepare(sql).all(...params);
+    const scored = all.map(inf => {
+      let score = 0;
+      if (inf.avg_engagement) score += Math.min(inf.avg_engagement, 10) * 8;
+      if (inf.followers) score += Math.min(Math.log10(inf.followers) * 10, 40);
+      if (inf.avg_views_10) score += Math.min(Math.log10(inf.avg_views_10) * 5, 20);
+      if (inf.cpm && inf.cpm < 50) score += 15;
+      else if (inf.cpm && inf.cpm < 100) score += 8;
+      if (inf.brand_collab_history && inf.brand_collab_history.length > 0) score += 10;
+      score = Math.round(score);
+      return { ...inf, match_score: score };
+    });
+    scored.sort((a, b) => b.match_score - a.match_score);
+    res.json({ matches: scored.slice(0, 30) });
+  } catch (error) {
+    if (sendInfluencerTenantError(res, error)) return;
+    res.status(500).json({ error: 'Influencer matching is unavailable.' });
+  }
 });
 
 // ===== COLLABORATION ROUTES =====
@@ -589,6 +636,7 @@ app.post('/api/collaborations', authMiddleware, (req, res) => {
     try {
       const result = campaignCollaboration.createLinked({
         userId: req.user.id,
+        organizationId: influencerOrganizationId(req),
         requestId: collaborationRequestId(req),
         idempotencyKey: req.get ? req.get('Idempotency-Key') : req.headers && req.headers['idempotency-key'],
         body: req.body
@@ -640,6 +688,23 @@ app.post('/api/collaborations', authMiddleware, (req, res) => {
   const resourceNoteFallback = typeof resourceFallbacks.notes === 'string' ? resourceFallbacks.notes : '';
   const resourceTimelineStart = typeof resourceFallbacks.timeline_start === 'string' ? resourceFallbacks.timeline_start : null;
   const resourceTimelineEnd = typeof resourceFallbacks.timeline_end === 'string' ? resourceFallbacks.timeline_end : null;
+  let organizationId;
+  try {
+    organizationId = influencerOrganizationId(req);
+  } catch (error) {
+    if (sendInfluencerTenantError(res, error)) return;
+    throw error;
+  }
+  const ownedInfluencer = db.prepare(`
+    SELECT id FROM influencers
+    WHERE id=? AND org_id=? AND is_active=1
+  `).get(influencer_id, organizationId);
+  if (!ownedInfluencer) {
+    return res.status(404).json({
+      error: 'Influencer not found.',
+      code: 'INFLUENCER_NOT_FOUND'
+    });
+  }
   const result = db.prepare('INSERT INTO collaborations (demand_id, influencer_id, user_id, status, proposal_notes, cost_quoted, notes, timeline_start, timeline_end) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
     demand_id, influencer_id, req.user.id, status || 'proposed', resourceNotes, quoted || 0, notes || resourceNoteFallback || '', timeline_start || resourceTimelineStart, timeline_end || resourceTimelineEnd
   );
@@ -652,6 +717,7 @@ app.get('/api/collaborations', authMiddleware, (req, res) => {
   const { status, demand_id, campaign_id, include_campaign_context } = req.query;
   res.json(campaignCollaboration.list({
     userId: req.user.id,
+    organizationId: influencerOrganizationId(req),
     status,
     demandId: demand_id,
     campaignId: campaign_id,
@@ -781,6 +847,7 @@ app.post('/api/collaborations/:id/contract-confirmations', authMiddleware, (req,
     }
     const result = campaignCollaboration.confirmContract({
       userId: req.user.id,
+      organizationId: influencerOrganizationId(req),
       collaborationId,
       requestId: collaborationRequestId(req),
       idempotencyKey: req.get ? req.get('Idempotency-Key') : req.headers && req.headers['idempotency-key'],
@@ -1105,6 +1172,7 @@ app.put('/api/collaborations/:id', authMiddleware, (req, res) => {
   try {
     const request = {
       userId: req.user.id,
+      organizationId: influencerOrganizationId(req),
       collaborationId: Number(req.params.id),
       requestId: collaborationRequestId(req),
       idempotencyKey: req.get ? req.get('Idempotency-Key') : req.headers && req.headers['idempotency-key'],
@@ -1127,7 +1195,10 @@ app.put('/api/collaborations/:id', authMiddleware, (req, res) => {
 });
 
 app.get('/api/collaborations/stats', authMiddleware, (req, res) => {
-  res.json(campaignCollaboration.stats({ userId: req.user.id }));
+  res.json(campaignCollaboration.stats({
+    userId: req.user.id,
+    organizationId: influencerOrganizationId(req)
+  }));
 });
 
 // ===== V8.1: INFLUENCER IMPORT/EXPORT =====
@@ -1144,6 +1215,7 @@ app.post('/api/influencers/import', authMiddleware, requireInfluencerDataImport(
     const result = influencerWorkflow.importInfluencerRows(db, rows, {
       batch_id,
       user: req.user,
+      organizationId: influencerOrganizationId(req),
       data_source: 'import',
       onPersist(stats) {
         persistInfluencerImportAudit(
@@ -1165,6 +1237,7 @@ app.post('/api/influencers/import', authMiddleware, requireInfluencerDataImport(
     });
     res.json(result);
   } catch (e) {
+    if (sendInfluencerTenantError(res, e)) return;
     const statusCode = e.statusCode || e.status || 500;
     if (statusCode < 500) {
       return res.status(statusCode).json({
@@ -1180,7 +1253,10 @@ app.post('/api/influencers/import', authMiddleware, requireInfluencerDataImport(
 app.post('/api/influencers/feishu/sync', authMiddleware, async (req, res) => {
   try {
     const ids = Array.isArray(req.body.ids) ? req.body.ids.map(Number).filter(Boolean) : [];
-    const rows = ids.length ? influencerWorkflow.queryInfluencers(db, { ids }) : [];
+    const rows = ids.length ? influencerWorkflow.queryInfluencers(db, {
+      ids,
+      organizationId: influencerOrganizationId(req)
+    }) : [];
     if (!rows.length) return res.status(400).json({ error: 'No influencers selected' });
     const csv = influencerWorkflow.buildInfluencerCsv(rows);
     const records = rows.map(function(row, index) {
@@ -1321,6 +1397,7 @@ app.post('/api/influencers/feishu/sync', authMiddleware, async (req, res) => {
     writeFeishuSyncAudit(req, 'feishu_sync', { mode: result.mode, synced: result.synced });
     res.json({ configured: true, synced: result.synced, records: result.records });
   } catch (e) {
+    if (sendInfluencerTenantError(res, e)) return;
     const failure = feishuFailure(e);
     writeFeishuSyncAudit(req, 'feishu_sync_failed', { code: failure.code });
     res.status(failure.statusCode).json({ error: failure.message, code: failure.code });
@@ -1514,8 +1591,8 @@ app.post('/api/influencers/export', authMiddleware, requireInfluencerDataExport,
     let sql;
     let params;
     if (mode === 'selected') {
-      sql = 'SELECT * FROM influencers WHERE is_active = 1';
-      params = [];
+      sql = 'SELECT * FROM influencers WHERE org_id = ? AND is_active = 1';
+      params = [influencerOrganizationId(req)];
       const selectedIds = Array.isArray(ids)
         ? ids.map(Number).filter(function(id) { return Number.isInteger(id) && id > 0; })
         : [];
@@ -1527,7 +1604,10 @@ app.post('/api/influencers/export', authMiddleware, requireInfluencerDataExport,
       }
       sql += ' ORDER BY followers DESC';
     } else {
-      const query = buildInfluencerSelect(mode === 'filtered' ? filters : {}, { limit: false });
+      const query = buildInfluencerSelect(mode === 'filtered' ? filters : {}, {
+        limit: false,
+        organizationId: influencerOrganizationId(req)
+      });
       sql = query.sql;
       params = query.params;
     }
@@ -1553,6 +1633,7 @@ app.post('/api/influencers/export', authMiddleware, requireInfluencerDataExport,
     res.setHeader('Content-Disposition', 'attachment; filename=influencers_export.csv');
     res.send(csv);
   } catch (e) {
+    if (sendInfluencerTenantError(res, e)) return;
     if (sendInfluencerFilterError(res, e)) return;
     res.status(500).json({ error: e.message });
   }

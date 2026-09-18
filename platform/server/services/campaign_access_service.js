@@ -873,7 +873,7 @@ function targetRow(db, recordType, recordId) {
       `).get(recordId);
     case 'influencer':
       return db.prepare(`
-        SELECT id,is_active
+        SELECT id,is_active,org_id
         FROM influencers
         WHERE id=?
       `).get(recordId);
@@ -961,9 +961,10 @@ function targetPermissions(db, {
         manageable: platformAdmin || actorOwns
       };
     case 'influencer':
+      const sameOrganization = target.org_id === campaignAccess.campaign.org_id;
       return {
-        visible: target.is_active === 1,
-        manageable: target.is_active === 1
+        visible: target.is_active === 1 && sameOrganization,
+        manageable: target.is_active === 1 && sameOrganization
       };
     case 'collaboration':
     case 'ai_conversation':
@@ -1170,7 +1171,22 @@ function buildCollectionAccessPredicate(scope, options) {
   const input = snapshotPlainOptions(options, ['userId']);
   const userId = input === null ? null : canonicalId(input.userId);
   if (userId === null) throw new TypeError('userId must be a positive safe integer');
-  if (scope === 'influencer_library') return { sql: '1=1', params: [] };
+  if (scope === 'influencer_library') {
+    return {
+      sql: `EXISTS (
+        SELECT 1
+        FROM users influencer_access_user
+        JOIN organization_memberships influencer_access_membership
+          ON influencer_access_membership.user_id=influencer_access_user.id
+         AND influencer_access_membership.org_id=influencer.org_id
+         AND influencer_access_membership.status='active'
+        WHERE influencer_access_user.id=?
+          AND typeof(influencer_access_user.is_active)='integer'
+          AND influencer_access_user.is_active=1
+      )`,
+      params: [userId]
+    };
+  }
   if (scope === 'campaigns') {
     return {
       sql: campaignPredicate('access_user', 'campaign'),

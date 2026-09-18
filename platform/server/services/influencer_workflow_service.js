@@ -506,14 +506,25 @@ function normalizeInfluencerRow(row) {
   return normalized;
 }
 
-function archiveImportKnowledge(db, rows, stats, batch, rowsSha256, user) {
+function organizationId(value) {
+  const parsed = typeof value === 'string' && /^[1-9]\d*$/.test(value)
+    ? Number(value)
+    : value;
+  if (!Number.isSafeInteger(parsed) || parsed < 1) {
+    const error = new Error('Influencer organization context is required');
+    error.statusCode = 403;
+    error.code = 'INFLUENCER_ORGANIZATION_CONTEXT_REQUIRED';
+    throw error;
+  }
+  return parsed;
+}
+
+function archiveImportKnowledge(db, rows, stats, batch, rowsSha256, user, orgId, useLegacyIdentity) {
   const sample = (rows || []).slice(0, 20);
   const projectNames = Array.from(new Set(rows.map(function(row) { return row.project_name || ''; }).filter(Boolean))).slice(0, 20);
   const productNames = Array.from(new Set(rows.map(function(row) { return row.product_name || ''; }).filter(Boolean))).slice(0, 20);
   const importedTags = Array.from(new Set(rows.map(function(row) { return row.tags || row.category || ''; }).filter(Boolean))).slice(0, 30);
-  return knowledgeService.ingestBusinessArtifact(db, {
-    artifactType: 'influencer_batch',
-    artifactState: 'ingested',
+  const shared = {
     title: '网红导入批次：' + batch,
     summary: '导入 ' + stats.imported + ' 条网红数据，跳过 ' + stats.skipped + ' 条。项目：' + (projectNames.join('、') || '-'),
     content: [
@@ -528,12 +539,8 @@ function archiveImportKnowledge(db, rows, stats, batch, rowsSha256, user) {
       JSON.stringify(sample, null, 2)
     ].join('\n'),
     sourceId: batch,
-    visibility: 'team',
     tags: ['influencer', 'import'].concat(importedTags.slice(0, 10)),
-    businessType: 'influencer',
-    businessId: batch,
     createdBy: user && user.id,
-    actorRole: user && user.role,
     metadata: {
       imported: stats.imported,
       skipped: stats.skipped,
@@ -542,6 +549,44 @@ function archiveImportKnowledge(db, rows, stats, batch, rowsSha256, user) {
       projectNames,
       productNames
     }
+  };
+  if (!useLegacyIdentity) {
+    const result = knowledgeService.writeOrganizationKnowledgeInTransaction(db, {
+      organizationId: orgId,
+      createdBy: shared.createdBy,
+      entryType: 'influencer_batch',
+      sourceType: 'influencer_import',
+      sourceId: shared.sourceId,
+      title: shared.title,
+      summary: shared.summary,
+      content: shared.content,
+      tags: shared.tags,
+      visibility: 'team',
+      metadata: {
+        artifact_contract: 'tm-business-artifact-v1',
+        artifact_state: 'ingested',
+        artifact_type: 'influencer_batch',
+        organization_id: orgId,
+        ...shared.metadata
+      }
+    });
+    knowledgeService.applyKnowledgeCapacityGaugePlanInTransaction(db, result.capacityGaugePlan);
+    return result;
+  }
+  return knowledgeService.ingestBusinessArtifact(db, {
+    artifactType: 'influencer_batch',
+    artifactState: 'ingested',
+    title: shared.title,
+    summary: shared.summary,
+    content: shared.content,
+    sourceId: shared.sourceId,
+    visibility: 'team',
+    tags: shared.tags,
+    businessType: 'influencer',
+    businessId: batch,
+    createdBy: shared.createdBy,
+    actorRole: user && user.role,
+    metadata: shared.metadata
   });
 }
 
@@ -553,6 +598,7 @@ function influencerBatchConflict(message) {
 
 function importInfluencerRows(db, rows, opts) {
   opts = opts || {};
+  const orgId = organizationId(opts.organizationId);
   rows = Array.isArray(rows) ? rows : [];
   if (!rows.length) {
     const err = new Error('No rows provided');
@@ -560,7 +606,7 @@ function importInfluencerRows(db, rows, opts) {
     throw err;
   }
   const guided = opts.field_mapping !== undefined;
-  const insert = db.prepare(`INSERT INTO influencers (platform, kol_handle, profile_link, followers, avg_views_10, avg_engagement, category, sub_category, region, language, content_style, collab_type, cost_usd, cpm, brand_collab_history, contact_email, project_name, product_name, reporter, tags, quoted_price, content_deliverable, is_duplicate, import_batch, data_source, influencer_type, cpv, parent_record${guided ? ', created_at' : ''}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?${guided ? ', COALESCE(?, CURRENT_TIMESTAMP)' : ''})`);
+  const insert = db.prepare(`INSERT INTO influencers (platform, kol_handle, profile_link, followers, avg_views_10, avg_engagement, category, sub_category, region, language, content_style, collab_type, cost_usd, cpm, brand_collab_history, contact_email, project_name, product_name, reporter, tags, quoted_price, content_deliverable, is_duplicate, import_batch, data_source, influencer_type, cpv, parent_record, org_id${guided ? ', created_at' : ''}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?${guided ? ', COALESCE(?, CURRENT_TIMESTAMP)' : ''})`);
   let skipped = 0;
   let blankCount = 0;
   let errorCount = 0;
@@ -624,18 +670,31 @@ function importInfluencerRows(db, rows, opts) {
     });
   }
   const doImport = db.transaction(function() {
+    const existingRowsBeforeArchive = db.prepare(`
+      SELECT COUNT(*) AS count FROM influencers
+      WHERE org_id=? AND import_batch=?
+    `).get(orgId, batch).count;
+    const legacyArchiveExists = existingRowsBeforeArchive > 0 && Boolean(db.prepare(`
+      SELECT 1 AS present FROM knowledge_entries
+      WHERE source_type='influencer_import' AND source_id=?
+        AND business_type<>'organization'
+      LIMIT 1
+    `).get(batch));
     archiveResult = archiveImportKnowledge(
       db,
       normalizedRows,
       archiveStats,
       batch,
       rowsSha256,
-      opts.user || {}
+      opts.user || {},
+      orgId,
+      legacyArchiveExists
     );
     if (archiveResult.status === 'exact_existing' || archiveResult.status === 'reused') {
       const existingRows = db.prepare(`
-        SELECT COUNT(*) AS count FROM influencers WHERE import_batch=?
-      `).get(batch).count;
+        SELECT COUNT(*) AS count FROM influencers
+        WHERE org_id=? AND import_batch=?
+      `).get(orgId, batch).count;
       if (existingRows !== normalizedRows.length) {
         throw influencerBatchConflict(
           'Influencer batch archive and imported rows are inconsistent'
@@ -677,7 +736,8 @@ function importInfluencerRows(db, rows, opts) {
         opts.data_source || 'import',
         normalized.influencer_type,
         normalized.cpv,
-        normalized.parent_record
+        normalized.parent_record,
+        orgId
       ];
       if (guided) values.push(normalized.created_at || null);
       insert.run(...values);
@@ -789,8 +849,9 @@ function buildTemplateCsv() {
 
 function queryInfluencers(db, opts) {
   opts = opts || {};
-  let sql = 'SELECT * FROM influencers WHERE is_active = 1';
-  const params = [];
+  const orgId = organizationId(opts.organizationId);
+  let sql = 'SELECT * FROM influencers WHERE org_id = ? AND is_active = 1';
+  const params = [orgId];
   if (opts.ids && opts.ids.length) {
     sql += ' AND id IN (' + opts.ids.map(function() { return '?'; }).join(',') + ')';
     params.push.apply(params, opts.ids);
@@ -809,5 +870,6 @@ module.exports = {
   buildInfluencerCsv,
   buildTemplateCsv,
   queryInfluencers,
-  influencerToTemplateRow
+  influencerToTemplateRow,
+  _testing: Object.freeze({ archiveImportKnowledge })
 };

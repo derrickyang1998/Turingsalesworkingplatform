@@ -7,6 +7,7 @@ const path = require('node:path');
 const Database = require('better-sqlite3');
 
 const migrationService = require('../services/migration_service');
+const migration023 = require('../migrations/023_influencer_tenant_ownership');
 const knowledgeService = require('../services/knowledge_service');
 const { createCampaignCollaborationService } = require('../services/campaign_collaboration_service');
 const { createCollaborationPublicationHandoffService } = require('../services/collaboration_publication_handoff_service');
@@ -28,7 +29,8 @@ const MIGRATION_NAMES = Object.freeze([
   '014_customer_report_ppt_artifact',
   '015_influencer_saved_views',
   '016_collaboration_contract_documents',
-  '017_collaboration_publication_custody'
+  '017_collaboration_publication_custody',
+  '018_collaboration_publication_lifecycle'
 ]);
 const MIGRATIONS = Object.freeze(MIGRATION_NAMES.map((name, index) => Object.freeze({
   version: index + 2,
@@ -49,7 +51,8 @@ function openDatabase(t) {
   assert.deepEqual(migrationService.runMigrations(db, {
     rootDir: SERVER_ROOT,
     registeredMigrations: MIGRATIONS
-  }), { status: 'managed', currentVersion: 17 });
+  }), { status: 'managed', currentVersion: 18 });
+  migration023.apply(db);
   return db;
 }
 
@@ -138,9 +141,9 @@ function seedFixture(db) {
     fixture.teamId
   );
   db.prepare(`
-    INSERT INTO influencers (id,platform,kol_handle,profile_link,followers,is_active)
-    VALUES (?,'TikTok','@payment-checkpoint','https://example.invalid/payment-checkpoint',1000,1)
-  `).run(fixture.influencerId);
+    INSERT INTO influencers (id,platform,kol_handle,profile_link,followers,is_active,org_id)
+    VALUES (?,'TikTok','@payment-checkpoint','https://example.invalid/payment-checkpoint',1000,1,?)
+  `).run(fixture.influencerId, orgId);
   db.prepare(`
     INSERT INTO collaborations (
       id,influencer_id,user_id,status,proposal_notes,cost_quoted,row_version
@@ -182,6 +185,7 @@ function signContract(service, fixture) {
   }).body.document;
   return service.confirmContract({
     userId: fixture.operatorId,
+    organizationId: fixture.orgId,
     collaborationId: fixture.collaborationId,
     requestId: 'payment-contract-confirm-request-0001',
     idempotencyKey: 'payment-contract-confirm-0001',
@@ -244,7 +248,9 @@ test('manual receipts and creator payments require independent approval and sett
   assert.equal(deposit.body.payment_settlement.creator_payment_remaining, 60);
 
   const execution = service.updateLinked({
+    organizationId: fixture.orgId,
     userId: fixture.operatorId,
+    organizationId: fixture.orgId,
     collaborationId: fixture.collaborationId,
     requestId: 'payment-execution-request-0001',
     idempotencyKey: 'payment-execution-0001',
@@ -505,6 +511,7 @@ test('campaign-linked v2 orders cannot bypass the financial checkpoint through l
 
   assert.throws(
     () => service.updateLinked({
+    organizationId: fixture.orgId,
       userId: fixture.operatorId,
       collaborationId: fixture.collaborationId,
       requestId: 'payment-legacy-cost-request-0001',
@@ -526,6 +533,7 @@ test('campaign-linked v2 orders cannot bypass the financial checkpoint through l
 
   assert.throws(
     () => service.updateLinked({
+    organizationId: fixture.orgId,
       userId: fixture.operatorId,
       collaborationId: fixture.collaborationId,
       requestId: 'payment-legacy-settlement-request-0001',

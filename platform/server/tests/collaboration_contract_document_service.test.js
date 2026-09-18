@@ -8,6 +8,7 @@ const path = require('node:path');
 const Database = require('better-sqlite3');
 
 const migrationService = require('../services/migration_service');
+const migration023 = require('../migrations/023_influencer_tenant_ownership');
 const knowledgeService = require('../services/knowledge_service');
 const ragService = require('../services/rag_service');
 const { createCampaignCollaborationService } = require('../services/campaign_collaboration_service');
@@ -50,6 +51,7 @@ function openDatabase(t) {
     rootDir: SERVER_ROOT,
     registeredMigrations: MIGRATIONS
   }), { status: 'managed', currentVersion: 16 });
+  migration023.apply(db);
   return db;
 }
 
@@ -109,8 +111,8 @@ function seedFixture(db) {
     )
   `).run(fixture);
   db.prepare(`
-    INSERT INTO influencers (id,platform,kol_handle,profile_link,followers,is_active)
-    VALUES (@influencerId,'TikTok','@contract-service','https://example.invalid/contract-service',1000,1)
+    INSERT INTO influencers (id,platform,kol_handle,profile_link,followers,is_active,org_id)
+    VALUES (@influencerId,'TikTok','@contract-service','https://example.invalid/contract-service',1000,1,@orgId)
   `).run(fixture);
   db.prepare(`
     INSERT INTO collaborations (
@@ -351,6 +353,7 @@ test('signed confirmation binds one same-campaign PDF and exposes immutable sche
   const uploaded = service.uploadContractDocument(uploadInput(fixture)).body.document;
   const confirmationInput = {
     userId: fixture.userId,
+    organizationId: fixture.orgId,
     collaborationId: fixture.collaborationId,
     requestId: 'contract-confirmation-document-request-0001',
     idempotencyKey: 'contract-confirmation-document-0001',
@@ -398,6 +401,7 @@ test('signed confirmation requires a document owned by the same collaboration', 
   assert.throws(
     () => service.confirmContract({
       userId: fixture.userId,
+      organizationId: fixture.orgId,
       collaborationId: fixture.collaborationId,
       requestId: 'contract-confirmation-missing-document',
       idempotencyKey: 'contract-confirmation-missing-document-0001',
@@ -408,6 +412,7 @@ test('signed confirmation requires a document owned by the same collaboration', 
   assert.throws(
     () => service.confirmContract({
       userId: fixture.userId,
+      organizationId: fixture.orgId,
       collaborationId: fixture.collaborationId,
       requestId: 'contract-confirmation-unknown-document',
       idempotencyKey: 'contract-confirmation-unknown-document-0001',

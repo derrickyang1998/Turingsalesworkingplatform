@@ -1817,11 +1817,22 @@ describe('RED group 5: bound collection predicates', () => {
       );
     }
 
+    const influencerPredicate = buildCollectionAccessPredicate('influencer_library', {
+      userId: identity.ownerId
+    });
+    assert.match(influencerPredicate.sql, /influencer\.org_id/);
+    assert.equal(influencerPredicate.sql.includes(String(identity.ownerId)), false);
     assert.deepEqual(
-      buildCollectionAccessPredicate('influencer_library', {
-        userId: identity.ownerId
-      }),
-      { sql: '1=1', params: [] }
+      db.prepare(`
+        WITH influencer(id,org_id) AS (
+          VALUES (1,1),(2,2)
+        )
+        SELECT id
+        FROM influencer
+        WHERE ${influencerPredicate.sql}
+        ORDER BY id
+      `).all(...influencerPredicate.params).map((row) => row.id),
+      [1]
     );
     assert.throws(
       () => buildCollectionAccessPredicate('unknown_collection', {

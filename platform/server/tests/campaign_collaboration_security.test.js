@@ -11,6 +11,7 @@ const Database = require('better-sqlite3');
 
 const migrationService = require('../services/migration_service');
 const migration016 = require('../migrations/016_collaboration_contract_documents');
+const migration023 = require('../migrations/023_influencer_tenant_ownership');
 const knowledgeService = require('../services/knowledge_service');
 const {
   DEFAULT_ORGANIZATION_CODE
@@ -64,6 +65,7 @@ function openCampaignDatabase(t) {
     registeredMigrations: CAMPAIGN_MIGRATIONS
   }), { status: 'managed', currentVersion: 5 });
   migration016.apply(db);
+  migration023.apply(db);
   return db;
 }
 
@@ -78,9 +80,9 @@ function seedFixture(db) {
   `).all(orgId);
   const teamId = teams.find((row) => row.userId === 2).teamId;
   const influencerId = db.prepare(`
-    INSERT INTO influencers (platform,kol_handle,profile_link,followers,is_active)
-    VALUES ('TikTok','@collaboration-security','https://example.invalid/security',1000,1)
-  `).run().lastInsertRowid;
+    INSERT INTO influencers (platform,kol_handle,profile_link,followers,is_active,org_id)
+    VALUES ('TikTok','@collaboration-security','https://example.invalid/security',1000,1,?)
+  `).run(orgId).lastInsertRowid;
   db.prepare(`
     INSERT INTO customers (
       id,brand_name,company_name,stage,source,created_by,assigned_to,is_public
@@ -204,6 +206,7 @@ function setV2CollaborationResource(db, collaborationId, overrides = {}) {
 function contractConfirmationInput(overrides = {}) {
   return Object.assign({
     userId: 2,
+    organizationId: 1,
     collaborationId: 7101,
     requestId: 'contract-confirmation-request-0001',
     idempotencyKey: 'contract-confirmation-0001',
@@ -307,6 +310,7 @@ function collaborationWriteState(db, collaborationId = 7101) {
 
 function establishSettlementAlias(service, keyPrefix) {
   service.updateLinked({
+    organizationId: 1,
     userId: 2,
     collaborationId: 7101,
     requestId: `${keyPrefix}-execution`,
@@ -320,6 +324,7 @@ function establishSettlementAlias(service, keyPrefix) {
     }
   });
   service.updateLinked({
+    organizationId: 1,
     userId: 2,
     collaborationId: 7101,
     requestId: `${keyPrefix}-publication`,
@@ -333,6 +338,7 @@ function establishSettlementAlias(service, keyPrefix) {
     }
   });
   return service.updateLinked({
+    organizationId: 1,
     userId: 2,
     collaborationId: 7101,
     requestId: `${keyPrefix}-settlement`,
@@ -405,8 +411,10 @@ function createCollaborationWorker(workerData) {
 test('collaboration stats return an explicit empty currency breakdown when no rows are visible', (t) => {
   const db = openCampaignDatabase(t);
   const service = createCampaignCollaborationService(db);
+  const organizationId = db.prepare('SELECT id FROM organizations WHERE code=?')
+    .get(DEFAULT_ORGANIZATION_CODE).id;
 
-  assert.deepEqual(service.stats({ userId: 2 }).stats, {
+  assert.deepEqual(service.stats({ userId: 2, organizationId }).stats, {
     byStatus: [],
     totalActive: 0,
     totalCompleted: 0,
@@ -422,10 +430,10 @@ test('global collaboration reads conceal IDs before list and stats aggregation',
   const service = createCampaignCollaborationService(db);
 
   assert.deepEqual(
-    service.list({ userId: 3 }).collaborations.map((row) => row.id).sort((a, b) => a - b),
+    service.list({ userId: 3, organizationId: fixture.orgId }).collaborations.map((row) => row.id).sort((a, b) => a - b),
     [7102]
   );
-  assert.deepEqual(service.stats({ userId: 3 }).stats, {
+  assert.deepEqual(service.stats({ userId: 3, organizationId: fixture.orgId }).stats, {
     byStatus: [{ status: 'confirmed', count: 1 }],
     totalActive: 1,
     totalCompleted: 0,
@@ -440,13 +448,13 @@ test('global collaboration reads conceal IDs before list and stats aggregation',
     WHERE org_id=? AND user_id=3
   `).run(fixture.orgId);
   assert.deepEqual(
-    service.list({ userId: 3 }).collaborations.map((row) => row.id).sort((a, b) => a - b),
+    service.list({ userId: 3, organizationId: fixture.orgId }).collaborations.map((row) => row.id).sort((a, b) => a - b),
     [7101, 7102]
   );
-  assert.equal(service.stats({ userId: 3 }).stats.totalCost, 300);
+  assert.equal(service.stats({ userId: 3, organizationId: fixture.orgId }).stats.totalCost, 300);
 
   assert.deepEqual(
-    service.list({ userId: 1 }).collaborations.map((row) => row.id).sort((a, b) => a - b),
+    service.list({ userId: 1, organizationId: fixture.orgId }).collaborations.map((row) => row.id).sort((a, b) => a - b),
     [7101, 7102, 7103]
   );
 });
@@ -496,10 +504,10 @@ test('object-visible active, moved, and revoke-only collaborations require curre
   revokeCampaignLink(db, revokeOnly, 3, '2026-07-03 00:00:00');
 
   assert.deepEqual(
-    service.list({ userId: 2 }).collaborations.map((row) => row.id),
+    service.list({ userId: 2, organizationId: fixture.orgId }).collaborations.map((row) => row.id),
     [7101]
   );
-  assert.deepEqual(service.stats({ userId: 2 }).stats, {
+  assert.deepEqual(service.stats({ userId: 2, organizationId: fixture.orgId }).stats, {
     byStatus: [{ status: 'confirmed', count: 1 }],
     totalActive: 1,
     totalCompleted: 0,
@@ -509,12 +517,13 @@ test('object-visible active, moved, and revoke-only collaborations require curre
   });
   for (const collaborationId of [7201, 7202, 7203]) {
     assert.throws(
-      () => service.get({ userId: 2, collaborationId }),
+      () => service.get({ userId: 2, organizationId: fixture.orgId, collaborationId }),
       (error) => error && error.code === 'RECORD_NOT_FOUND' && error.details === undefined
     );
     assert.throws(
       () => service.updateLegacy({
         userId: 2,
+        organizationId: fixture.orgId,
         collaborationId,
         body: { notes: 'Must remain concealed' }
       }),
@@ -527,13 +536,14 @@ test('object-visible active, moved, and revoke-only collaborations require curre
     VALUES (?,?,2,'member','active')
   `).run(fixture.orgId, restricted.teamId);
   assert.deepEqual(
-    service.list({ userId: 2 }).collaborations.map((row) => row.id).sort((left, right) => left - right),
+    service.list({ userId: 2, organizationId: fixture.orgId }).collaborations.map((row) => row.id).sort((left, right) => left - right),
     [7101, 7201, 7202, 7203]
   );
-  assert.equal(service.stats({ userId: 2 }).stats.totalCost, 136);
+  assert.equal(service.stats({ userId: 2, organizationId: fixture.orgId }).stats.totalCost, 136);
   assert.throws(
     () => service.updateLegacy({
       userId: 2,
+      organizationId: fixture.orgId,
       collaborationId: 7202,
       body: { notes: 'Campaign context still required' }
     }),
@@ -567,7 +577,7 @@ test('collaboration stats group costs by currency without adding mixed currencie
     payment_terms: 'net_30'
   }));
 
-  assert.deepEqual(service.stats({ userId: 3 }).stats, {
+  assert.deepEqual(service.stats({ userId: 3, organizationId: fixture.orgId }).stats, {
     byStatus: [{ status: 'confirmed', count: 2 }],
     totalActive: 2,
     totalCompleted: 0,
@@ -610,17 +620,18 @@ test('ambiguous active collaboration custody is concealed without campaign ID di
   });
 
   assert.deepEqual(
-    service.list({ userId: 2 }).collaborations.map((row) => row.id),
+    service.list({ userId: 2, organizationId: fixture.orgId }).collaborations.map((row) => row.id),
     [7101]
   );
-  assert.equal(service.stats({ userId: 2 }).stats.totalCost, 100);
+  assert.equal(service.stats({ userId: 2, organizationId: fixture.orgId }).stats.totalCost, 100);
   assert.throws(
-    () => service.get({ userId: 2, collaborationId: 7204 }),
+    () => service.get({ userId: 2, organizationId: fixture.orgId, collaborationId: 7204 }),
     (error) => error && error.code === 'RECORD_NOT_FOUND' && error.details === undefined
   );
   assert.throws(
     () => service.updateLegacy({
       userId: 2,
+      organizationId: fixture.orgId,
       collaborationId: 7204,
       body: { notes: 'Never disclose either campaign' }
     }),
@@ -630,7 +641,7 @@ test('ambiguous active collaboration custody is concealed without campaign ID di
 
 test('collaboration detail and legacy update conceal inaccessible IDs and refuse classified fallback', (t) => {
   const db = openCampaignDatabase(t);
-  seedFixture(db);
+  const fixture = seedFixture(db);
   const service = createCampaignCollaborationService(db);
   const before = db.prepare(`
     SELECT status,cost_actual,row_version
@@ -639,12 +650,13 @@ test('collaboration detail and legacy update conceal inaccessible IDs and refuse
   `).get();
 
   assert.throws(
-    () => service.get({ userId: 3, collaborationId: 7101 }),
+    () => service.get({ userId: 3, organizationId: fixture.orgId, collaborationId: 7101 }),
     (error) => error && error.code === 'RECORD_NOT_FOUND'
   );
   assert.throws(
     () => service.updateLegacy({
       userId: 3,
+      organizationId: fixture.orgId,
       collaborationId: 7101,
       body: { status: 'completed' }
     }),
@@ -659,6 +671,7 @@ test('collaboration detail and legacy update conceal inaccessible IDs and refuse
   assert.throws(
     () => service.updateLegacy({
       userId: 2,
+      organizationId: fixture.orgId,
       collaborationId: 7101,
       body: { status: 'completed' }
     }),
@@ -673,10 +686,11 @@ test('collaboration detail and legacy update conceal inaccessible IDs and refuse
 
 test('signed contract confirmation is idempotent, immutable, and unlocks v2 execution', (t) => {
   const db = openCampaignDatabase(t);
-  seedFixture(db);
+  const fixture = seedFixture(db);
   setV2CollaborationResource(db, 7101);
   const service = createCampaignCollaborationService(db);
   const sent = service.updateLinked({
+    organizationId: 1,
     userId: 2,
     collaborationId: 7101,
     requestId: 'contract-dispatch-request',
@@ -715,6 +729,7 @@ test('signed contract confirmation is idempotent, immutable, and unlocks v2 exec
   assert.deepEqual(replay, confirmed);
   const reloaded = service.list({
     userId: 2,
+    organizationId: fixture.orgId,
     campaignId: 7001,
     includeCampaignContext: true
   }).collaborations.find((row) => row.id === 7101);
@@ -758,6 +773,7 @@ test('signed contract confirmation is idempotent, immutable, and unlocks v2 exec
   `).get().count, 1);
 
   const execution = service.updateLinked({
+    organizationId: 1,
     userId: 2,
     collaborationId: 7101,
     requestId: 'contracted-execution-request',
@@ -783,6 +799,7 @@ test('v2 execution requires the signed contract checkpoint without affecting his
 
   assert.throws(
     () => service.updateLinked({
+    organizationId: 1,
       userId: 2,
       collaborationId: 7101,
       requestId: 'unsigned-v2-execution',
@@ -806,6 +823,7 @@ test('v2 execution requires the signed contract checkpoint without affecting his
   const noncanonicalBefore = collaborationWriteState(db);
   assert.throws(
     () => service.updateLinked({
+    organizationId: 1,
       userId: 2,
       collaborationId: 7101,
       requestId: 'noncanonical-v2-execution',
@@ -824,6 +842,7 @@ test('v2 execution requires the signed contract checkpoint without affecting his
 
   db.prepare("UPDATE collaborations SET proposal_notes=NULL WHERE id=7101").run();
   const legacy = service.updateLinked({
+    organizationId: 1,
     userId: 2,
     collaborationId: 7101,
     requestId: 'legacy-execution-compatible',
@@ -992,7 +1011,12 @@ test('contract confirmation rejects duplicate producer evidence instead of selec
   }).immediate();
 
   assert.throws(
-    () => service.list({ userId: 2, campaignId: 7001, includeCampaignContext: true }),
+    () => service.list({
+      userId: 2,
+      organizationId: fixture.orgId,
+      campaignId: 7001,
+      includeCampaignContext: true
+    }),
     (error) => error && error.code === 'CAMPAIGN_EVIDENCE_IN_USE'
   );
 });
@@ -1009,6 +1033,7 @@ test('linked create and update reject unknown fields before reservation or mutat
   for (const [index, extra] of createExtras.entries()) {
     assert.throws(
       () => service.createLinked({
+    organizationId: 1,
         userId: 2,
         requestId: `collaboration-create-unknown-${index}`,
         idempotencyKey: `collaboration-create-unknown-000${index}`,
@@ -1031,6 +1056,7 @@ test('linked create and update reject unknown fields before reservation or mutat
   for (const [index, extra] of updateExtras.entries()) {
     assert.throws(
       () => service.updateLinked({
+    organizationId: 1,
         userId: 2,
         collaborationId: 7101,
         requestId: `collaboration-update-unknown-${index}`,
@@ -1057,6 +1083,7 @@ test('linked collaboration creation is idempotent and commits its order evidence
     .get('@collaboration-security').id;
   const input = {
     userId: 2,
+    organizationId: 1,
     requestId: 'collaboration-create-test',
     idempotencyKey: 'collaboration-create-0001',
     body: {
@@ -1139,6 +1166,7 @@ test('linked collaboration creation stores the canonical resource order contract
   const service = createCampaignCollaborationService(db);
 
   const created = service.createLinked({
+    organizationId: 1,
     userId: 2,
     requestId: 'collaboration-resource-contract',
     idempotencyKey: 'collaboration-resource-contract-0001',
@@ -1195,6 +1223,7 @@ test('linked collaboration resource rejects a conflicting price before a reserva
 
   assert.throws(
     () => service.createLinked({
+    organizationId: 1,
       userId: 2,
       requestId: 'collaboration-resource-mismatch',
       idempotencyKey: 'collaboration-resource-mismatch-0001',
@@ -1215,6 +1244,7 @@ test('canonical linked resource orders lock their quoted price after creation', 
   const fixture = seedFixture(db);
   const service = createCampaignCollaborationService(db);
   const created = service.createLinked({
+    organizationId: 1,
     userId: 2,
     requestId: 'collaboration-resource-lock-create',
     idempotencyKey: 'collaboration-resource-lock-create-0001',
@@ -1232,6 +1262,7 @@ test('canonical linked resource orders lock their quoted price after creation', 
 
   assert.throws(
     () => service.updateLinked({
+    organizationId: 1,
       userId: 2,
       collaborationId: created.body.id,
       requestId: 'collaboration-resource-lock-update',
@@ -1256,6 +1287,7 @@ test('linked resource and proposal notes conflict before an idempotency reservat
 
   assert.throws(
     () => service.createLinked({
+    organizationId: 1,
       userId: 2,
       requestId: 'collaboration-resource-proposal-conflict',
       idempotencyKey: 'collaboration-resource-proposal-conflict-0001',
@@ -1276,6 +1308,7 @@ test('linked legacy resource keeps its historical proposal-note path', (t) => {
   const fixture = seedFixture(db);
   const service = createCampaignCollaborationService(db);
   const created = service.createLinked({
+    organizationId: 1,
     userId: 2,
     requestId: 'linked-legacy-schema-resource',
     idempotencyKey: 'linked-legacy-schema-resource-0001',
@@ -1305,6 +1338,7 @@ test('linked v1 resource retries are idempotent after whitespace normalization',
   const fixture = seedFixture(db);
   const service = createCampaignCollaborationService(db);
   const first = service.createLinked({
+    organizationId: 1,
     userId: 2,
     requestId: 'collaboration-resource-whitespace-first',
     idempotencyKey: 'collaboration-resource-whitespace-0001',
@@ -1323,6 +1357,7 @@ test('linked v1 resource retries are idempotent after whitespace normalization',
     }
   });
   const replay = service.createLinked({
+    organizationId: 1,
     userId: 2,
     requestId: 'collaboration-resource-whitespace-replay',
     idempotencyKey: 'collaboration-resource-whitespace-0001',
@@ -1350,6 +1385,7 @@ test('linked v2 orders store canonical commercial terms, project creator cost, a
   const fixture = seedFixture(db);
   const service = createCampaignCollaborationService(db);
   const created = service.createLinked({
+    organizationId: 1,
     userId: 2,
     requestId: 'collaboration-v2-commercial-terms',
     idempotencyKey: 'collaboration-v2-commercial-terms-0001',
@@ -1405,6 +1441,7 @@ test('linked v2 order rejects a conflicting top-level creator cost before idempo
 
   assert.throws(
     () => service.createLinked({
+    organizationId: 1,
       userId: 2,
       requestId: 'collaboration-v2-creator-cost-conflict',
       idempotencyKey: 'collaboration-v2-creator-cost-conflict-0001',
@@ -1432,6 +1469,7 @@ test('linked creation rejects reserved v2 proposal notes before any write or res
 
   assert.throws(
     () => service.createLinked({
+    organizationId: 1,
       userId: 2,
       requestId: 'collaboration-v2-proposal-notes-bypass',
       idempotencyKey: 'collaboration-v2-proposal-notes-bypass-0001',
@@ -1457,6 +1495,7 @@ test('linked v2 order retries are idempotent after commercial-term whitespace no
   const fixture = seedFixture(db);
   const service = createCampaignCollaborationService(db);
   const first = service.createLinked({
+    organizationId: 1,
     userId: 2,
     requestId: 'collaboration-v2-whitespace-first',
     idempotencyKey: 'collaboration-v2-whitespace-0001',
@@ -1477,6 +1516,7 @@ test('linked v2 order retries are idempotent after commercial-term whitespace no
     }
   });
   const replay = service.createLinked({
+    organizationId: 1,
     userId: 2,
     requestId: 'collaboration-v2-whitespace-replay',
     idempotencyKey: 'collaboration-v2-whitespace-0001',
@@ -1507,7 +1547,11 @@ test('collaboration list exposes campaign workspace context and filters to the s
   const service = createCampaignCollaborationService(db);
   const restricted = seedRestrictedCampaign(db, fixture);
 
-  const selected = service.list({ userId: 2, campaignId: 7001 });
+  const selected = service.list({
+    userId: 2,
+    organizationId: fixture.orgId,
+    campaignId: 7001
+  });
   assert.equal(selected.collaborations.length, 1);
   const collaboration = selected.collaborations[0];
   assert.deepEqual({
@@ -1532,7 +1576,11 @@ test('collaboration list exposes campaign workspace context and filters to the s
     active_relations: ['order']
   });
 
-  const restrictedSelection = service.list({ userId: 2, campaignId: restricted.campaignId });
+  const restrictedSelection = service.list({
+    userId: 2,
+    organizationId: fixture.orgId,
+    campaignId: restricted.campaignId
+  });
   assert.deepEqual(restrictedSelection, { collaborations: [] });
 });
 
@@ -1542,6 +1590,7 @@ test('linked update fences stale versions and replays the final authorized trans
   const service = createCampaignCollaborationService(db);
   const input = {
     userId: 2,
+    organizationId: 1,
     collaborationId: 7101,
     requestId: 'collaboration-update-test',
     idempotencyKey: 'collaboration-update-0001',
@@ -1554,6 +1603,7 @@ test('linked update fences stale versions and replays the final authorized trans
   });
   assert.deepEqual(service.updateLinked(input), result);
   assert.throws(() => service.updateLinked({
+    organizationId: 1,
     ...input,
     idempotencyKey: 'collaboration-update-0002',
     body: { ...input.body, expected_version: 1, status: 'completed' }
@@ -1571,6 +1621,7 @@ test('linked update adopts an authorized never-classified collaboration as the o
   `).run(fixture.influencerId);
   const input = {
     userId: 2,
+    organizationId: 1,
     collaborationId: 7110,
     requestId: 'collaboration-adoption-test',
     idempotencyKey: 'collaboration-adoption-0001',
@@ -1640,6 +1691,7 @@ test('linked update rejects a caller-asserted contracted v2 row without checkpoi
 
   assert.throws(
     () => service.updateLinked({
+    organizationId: 1,
       userId: 2,
       collaborationId: 7110,
       requestId: 'collaboration-unverified-contract-adoption',
@@ -1663,6 +1715,7 @@ test('new settlement alias requires exact request-local status, cost, and confir
   const service = createCampaignCollaborationService(db);
 
   assert.equal(service.updateLinked({
+    organizationId: 1,
     userId: 2,
     collaborationId: 7101,
     requestId: 'collaboration-execution-test',
@@ -1676,6 +1729,7 @@ test('new settlement alias requires exact request-local status, cost, and confir
     }
   }).body.row_version, 2);
   assert.equal(service.updateLinked({
+    organizationId: 1,
     userId: 2,
     collaborationId: 7101,
     requestId: 'collaboration-publication-test',
@@ -1707,6 +1761,7 @@ test('new settlement alias requires exact request-local status, cost, and confir
   for (const [index, invalid] of invalidSettlementBodies.entries()) {
     assert.throws(
       () => service.updateLinked({
+    organizationId: 1,
         userId: 2,
         collaborationId: 7101,
         requestId: `collaboration-settlement-invalid-${index}`,
@@ -1725,6 +1780,7 @@ test('new settlement alias requires exact request-local status, cost, and confir
   }
   assert.throws(
     () => service.updateLinked({
+    organizationId: 1,
       userId: 2,
       collaborationId: 7101,
       requestId: 'collaboration-settlement-noncanonical',
@@ -1744,6 +1800,7 @@ test('new settlement alias requires exact request-local status, cost, and confir
   assert.deepEqual(collaborationWriteState(db), beforeInvalidSettlement);
 
   const settled = service.updateLinked({
+    organizationId: 1,
     userId: 2,
     collaborationId: 7101,
     requestId: 'collaboration-settlement-test',
@@ -1793,6 +1850,7 @@ test('pre-settled collaboration cost edit is accepted and clears confirmation', 
   establishSettlementAlias(service, 'collaboration-pre-settlement');
   const before = collaborationWriteState(db);
   const preSettlementEdit = service.updateLinked({
+    organizationId: 1,
     userId: 2,
     collaborationId: 7101,
     requestId: 'collaboration-pre-settlement-cost-edit',
@@ -1826,6 +1884,7 @@ for (const lifecycleState of ['settled', 'reviewed']) {
     const before = collaborationWriteState(db);
     const missingConfirmationInput = {
       userId: 2,
+      organizationId: 1,
       collaborationId: 7101,
       requestId: `collaboration-${lifecycleState}-reconfirm-required`,
       idempotencyKey: `collaboration-${lifecycleState}-reconfirm-0001`,
@@ -1867,6 +1926,7 @@ for (const lifecycleState of ['settled', 'reviewed']) {
     });
 
     const reconfirmed = service.updateLinked({
+    organizationId: 1,
       ...missingConfirmationInput,
       idempotencyKey: `collaboration-${lifecycleState}-reconfirm-0002`,
       body: {
@@ -1890,6 +1950,7 @@ test('collaboration cancellation requires hold and revokes its complete active a
   const service = createCampaignCollaborationService(db);
   const activeCancellation = {
     userId: 2,
+    organizationId: 1,
     collaborationId: 7101,
     requestId: 'collaboration-cancel-active',
     idempotencyKey: 'collaboration-cancel-active-0001',
@@ -1996,6 +2057,7 @@ test('ordered-stage collaboration cancellation atomically cancels the campaign a
   `).run();
   const input = {
     userId: 2,
+    organizationId: 1,
     collaborationId: 7111,
     requestId: 'collaboration-cascade-cancel',
     idempotencyKey: 'collaboration-cascade-0001',
@@ -2071,6 +2133,8 @@ test('real BEGIN IMMEDIATE workers serialize collaboration version races to one 
       rootDir: SERVER_ROOT,
       registeredMigrations: CAMPAIGN_MIGRATIONS
     }), { status: 'managed', currentVersion: 5 });
+    migration016.apply(setup);
+    migration023.apply(setup);
     setup.pragma('journal_mode = WAL');
     seedFixture(setup);
     setup.close();
@@ -2082,6 +2146,7 @@ test('real BEGIN IMMEDIATE workers serialize collaboration version races to one 
         dbPath,
         input: {
           userId: 2,
+          organizationId: 1,
           collaborationId: 7101,
           requestId: `collaboration-race-${index}`,
           idempotencyKey: `collaboration-race-000${index + 1}`,

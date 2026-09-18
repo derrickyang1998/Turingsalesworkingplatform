@@ -11,6 +11,8 @@ const influencerWorkflow = require('../services/influencer_workflow_service');
 const {
   createCampaignCollaborationService
 } = require('../services/campaign_collaboration_service');
+const { createCampaignService } = require('../services/campaign_service');
+const { getTargetAccess } = require('../services/campaign_access_service');
 const {
   createModuleActionPermissionService
 } = require('../services/module_action_permission_service');
@@ -99,6 +101,13 @@ function assertApprovedCsvHeaders(csv) {
 }
 
 function insertInfluencer(db, row) {
+  if (
+    db.prepare("SELECT 1 AS present FROM pragma_table_info('influencers') WHERE name='org_id'").get() &&
+    !Object.hasOwn(row, 'org_id')
+  ) {
+    const organization = db.prepare("SELECT id FROM organizations WHERE code='turingmarket-default'").get();
+    row = Object.assign({ org_id: organization.id }, row);
+  }
   const fields = Object.keys(row);
   const placeholders = fields.map(function() { return '?'; }).join(', ');
   const result = db.prepare(
@@ -354,11 +363,210 @@ async function invoke(routes, key, opts) {
   return { statusCode, payload, body, headers };
 }
 
+function createSecondOrganization(db, userId) {
+  db.prepare("INSERT INTO organizations (id,code,name) VALUES (2,'tenant-two','Tenant Two')").run();
+  db.prepare(`
+    INSERT INTO organization_memberships (org_id,user_id,role_code,status)
+    VALUES (2,?,'org_admin','active')
+  `).run(userId);
+  return 2;
+}
+
 test('Task 9 approved upload headers match the UTF-8 service constant and contract file', () => {
   const contractHeaders = parseTask9HeaderContract();
 
   assert.equal(contractHeaders.length, 20);
   assert.deepEqual(contractHeaders, influencerWorkflow.TEMPLATE_HEADERS);
+});
+
+test('influencer routes isolate list, match, import, export, and Feishu selection by organization', async (t) => {
+  const db = freshDb();
+  t.after(() => db.close());
+  const routes = mountRoutes(db);
+  const defaultOrganizationId = routes.__defaultOrganizationId;
+  const secondOrganizationId = createSecondOrganization(db, 1);
+  const admin = db.prepare('SELECT id,username,role FROM users WHERE id=1').get();
+  const defaultContext = { organization: { id: defaultOrganizationId } };
+  const secondContext = { organization: { id: secondOrganizationId } };
+
+  const defaultId = insertInfluencer(db, {
+    org_id: defaultOrganizationId,
+    platform: 'TikTok',
+    kol_handle: '@tenant_one_only',
+    region: 'tenant-one-region',
+    is_active: 1
+  });
+  const secondId = insertInfluencer(db, {
+    org_id: secondOrganizationId,
+    platform: 'TikTok',
+    kol_handle: '@tenant_two_only',
+    region: 'tenant-two-region',
+    is_active: 1
+  });
+
+  const defaultList = await invoke(routes, 'GET /api/influencers', {
+    user: admin,
+    authContext: defaultContext,
+    query: { search: 'tenant_' }
+  });
+  assert.equal(defaultList.statusCode, 200);
+  assert.deepEqual(defaultList.payload.influencers.map((row) => row.id), [defaultId]);
+
+  const secondList = await invoke(routes, 'GET /api/influencers', {
+    user: admin,
+    authContext: secondContext,
+    query: { search: 'tenant_' }
+  });
+  assert.equal(secondList.statusCode, 200);
+  assert.deepEqual(secondList.payload.influencers.map((row) => row.id), [secondId]);
+
+  const match = await invoke(routes, 'POST /api/influencers/match', {
+    user: admin,
+    authContext: secondContext,
+    body: { platform: 'TikTok' }
+  });
+  assert.equal(match.statusCode, 200);
+  assert.ok(match.payload.matches.some((row) => row.id === secondId));
+  assert.equal(match.payload.matches.some((row) => row.id === defaultId), false);
+
+  const batchId = 'same-visible-batch';
+  const defaultImport = await invoke(routes, 'POST /api/influencers/import', {
+    user: admin,
+    authContext: defaultContext,
+    body: { batch_id: batchId, rows: [{ Platform: 'YouTube', 'KOL Handle': '@batch_one' }] }
+  });
+  const secondImport = await invoke(routes, 'POST /api/influencers/import', {
+    user: admin,
+    authContext: secondContext,
+    body: { batch_id: batchId, rows: [{ Platform: 'YouTube', 'KOL Handle': '@batch_two' }] }
+  });
+  assert.equal(defaultImport.statusCode, 200);
+  assert.equal(secondImport.statusCode, 200);
+  assert.deepEqual(
+    db.prepare(`
+      SELECT org_id,kol_handle FROM influencers
+      WHERE import_batch=?
+      ORDER BY org_id
+    `).all(batchId),
+    [
+      { org_id: defaultOrganizationId, kol_handle: '@batch_one' },
+      { org_id: secondOrganizationId, kol_handle: '@batch_two' }
+    ]
+  );
+
+  const crossExport = await invoke(routes, 'POST /api/influencers/export', {
+    user: admin,
+    authContext: defaultContext,
+    body: { mode: 'selected', ids: [secondId] }
+  });
+  assert.equal(crossExport.statusCode, 200);
+  assert.equal(parseCsvRows(crossExport.body).length, 1);
+
+  const crossFeishu = await invoke(routes, 'POST /api/influencers/feishu/sync', {
+    user: admin,
+    authContext: defaultContext,
+    body: { ids: [secondId] }
+  });
+  assert.equal(crossFeishu.statusCode, 400);
+  assert.equal(crossFeishu.payload.error, 'No influencers selected');
+
+  assert.deepEqual(
+    influencerWorkflow.queryInfluencers(db, {
+      organizationId: secondOrganizationId,
+      ids: [defaultId, secondId]
+    }).map((row) => row.id),
+    [secondId]
+  );
+});
+
+test('campaign shortlist and linked order conceal influencers owned by another organization', (t) => {
+  const db = freshDb();
+  t.after(() => db.close());
+  const defaultOrganizationId = db.prepare("SELECT id FROM organizations WHERE code='turingmarket-default'").get().id;
+  const secondOrganizationId = createSecondOrganization(db, 1);
+  const campaignId = createFeishuOutboxCampaign(db, 810, 1);
+  const ownInfluencerId = insertInfluencer(db, {
+    org_id: defaultOrganizationId,
+    platform: 'TikTok',
+    kol_handle: '@campaign_tenant_one',
+    is_active: 1
+  });
+  const foreignInfluencerId = insertInfluencer(db, {
+    org_id: secondOrganizationId,
+    platform: 'TikTok',
+    kol_handle: '@campaign_tenant_two',
+    is_active: 1
+  });
+
+  const foreignAccess = getTargetAccess(db, {
+    userId: 1,
+    campaignId,
+    recordType: 'influencer',
+    recordId: foreignInfluencerId,
+    relationType: 'shortlist',
+    intent: 'attach'
+  });
+  assert.equal(foreignAccess.ok, false);
+  assert.equal(foreignAccess.status, 404);
+  assert.equal(foreignAccess.code, 'RECORD_NOT_FOUND');
+
+  const campaignService = createCampaignService(db);
+  const candidates = campaignService.listCampaignLinkCandidates({
+    userId: 1,
+    campaignId,
+    query: { relation_type: 'shortlist', q: 'campaign_tenant' }
+  });
+  assert.deepEqual(candidates.items.map((item) => item.record_id), [String(ownInfluencerId)]);
+
+  const collaborationService = createCampaignCollaborationService(db);
+  assert.throws(
+    () => collaborationService.createLinked({
+      userId: 1,
+      organizationId: defaultOrganizationId,
+      requestId: 'cross-org-linked-order',
+      idempotencyKey: 'cross-org-linked-order-0001',
+      body: { campaign_id: campaignId, influencer_id: foreignInfluencerId }
+    }),
+    (error) => error && error.statusCode === 404 && error.code === 'RECORD_NOT_FOUND'
+  );
+  assert.equal(
+    db.prepare('SELECT COUNT(*) AS count FROM collaborations WHERE influencer_id=?').get(foreignInfluencerId).count,
+    0
+  );
+
+  const insertStandalone = db.prepare(`
+    INSERT INTO collaborations (influencer_id,user_id,status,cost_quoted,row_version)
+    VALUES (?,1,'proposed',?,1)
+  `);
+  const ownCollaborationId = Number(insertStandalone.run(ownInfluencerId, 100).lastInsertRowid);
+  const foreignCollaborationId = Number(insertStandalone.run(foreignInfluencerId, 200).lastInsertRowid);
+  const visibleCollaborations = collaborationService.list({
+    userId: 1,
+    organizationId: defaultOrganizationId
+  }).collaborations;
+  assert.equal(visibleCollaborations.some((row) => row.id === ownCollaborationId), true);
+  assert.equal(visibleCollaborations.some((row) => row.id === foreignCollaborationId), false);
+  assert.equal(collaborationService.stats({
+    userId: 1,
+    organizationId: defaultOrganizationId
+  }).stats.totalActive, 1);
+  assert.throws(
+    () => collaborationService.get({
+      userId: 1,
+      organizationId: defaultOrganizationId,
+      collaborationId: foreignCollaborationId
+    }),
+    (error) => error && error.statusCode === 404 && error.code === 'RECORD_NOT_FOUND'
+  );
+  assert.throws(
+    () => collaborationService.updateLegacy({
+      userId: 1,
+      organizationId: defaultOrganizationId,
+      collaborationId: foreignCollaborationId,
+      body: { notes: 'Cross-organization write must remain concealed.' }
+    }),
+    (error) => error && error.statusCode === 404 && error.code === 'RECORD_NOT_FOUND'
+  );
 });
 
 test('guided influencer import suggests exact workbook headers and historical aliases deterministically', () => {
@@ -488,10 +696,12 @@ test('row-level influencer import counts blanks and rejects invalid rows without
   ]);
 
   const db = freshDb();
+  const organizationId = db.prepare("SELECT id FROM organizations WHERE code='turingmarket-default'").get().id;
   const imported = influencerWorkflow.importInfluencerRows(db, rows, {
     batch_id: 'guided-row-validation',
     data_source: 'upload',
     user: { id: 2, role: 'user' },
+    organizationId,
     field_mapping: fieldMapping,
     row_number_offset: 2
   });
@@ -540,6 +750,7 @@ test('guided influencer error report writes one row with every error for each re
 
 test('guided influencer import rejects oversized error reports before database or knowledge writes', () => {
   const db = freshDb();
+  const organizationId = db.prepare("SELECT id FROM organizations WHERE code='turingmarket-default'").get().id;
   const oversizedSourceValue = 'private-source-value-' + '私'.repeat(6 * 1024 * 1024);
   const rows = [{ Handle: '', Followers: 'many', Owner: oversizedSourceValue }];
   const fieldMapping = {
@@ -556,6 +767,7 @@ test('guided influencer import rejects oversized error reports before database o
         batch_id: 'guided-oversized-error-report',
         data_source: 'upload',
         user: { id: 2, role: 'user' },
+        organizationId,
         field_mapping: fieldMapping,
         row_number_offset: 2
       }),
@@ -849,20 +1061,21 @@ test('influencer import success audit commits atomically with rows and knowledge
     moduleActionPermissionService: allow,
     influencerDataImportAudit(event) { completedAudits.push(event); }
   });
+  const organizationId = routes.__defaultOrganizationId;
   const imported = await invoke(routes, 'POST /api/influencers/import', {
     body: {
       batch_id: 'permission-import-success',
       rows: [{ '网红频道名称': '@permission_import_success' }]
     },
     headers: { 'x-request-id': 'influencer-import-success' },
-    authContext: { organization: { id: 10 } }
+    authContext: { organization: { id: organizationId } }
   });
 
   assert.equal(imported.statusCode, 200);
   assert.equal(imported.payload.imported, 1);
   assert.deepEqual(completedAudits, [{
     actor_user_id: 2,
-    organization_id: 10,
+    organization_id: organizationId,
     permission: 'influencer.data.import',
     outcome: 'imported',
     reason_code: 'ALLOWED',
@@ -887,7 +1100,7 @@ test('influencer import success audit commits atomically with rows and knowledge
       rows: [{ '网红频道名称': '@permission_import_audit_rollback' }]
     },
     headers: { 'x-request-id': 'influencer-import-audit-rollback' },
-    authContext: { organization: { id: 10 } }
+    authContext: { organization: { id: organizationId } }
   });
   assert.equal(failed.statusCode, 503);
   assert.equal(failed.payload.code, 'INFLUENCER_IMPORT_AUDIT_UNAVAILABLE');
@@ -915,6 +1128,7 @@ test('manual influencer create rolls back its row and knowledge when success aud
     },
     influencerDataImportAudit() { throw new Error('audit unavailable'); }
   });
+  const organizationId = routes.__defaultOrganizationId;
   const result = await invoke(routes, 'POST /api/influencers', {
     body: {
       platform: 'YouTube',
@@ -922,7 +1136,7 @@ test('manual influencer create rolls back its row and knowledge when success aud
       profile_link: 'https://example.com/manual-import-audit-rollback'
     },
     headers: { 'x-request-id': 'influencer-manual-audit-rollback' },
-    authContext: { organization: { id: 10 } }
+    authContext: { organization: { id: organizationId } }
   });
 
   assert.equal(result.statusCode, 503);
@@ -2028,10 +2242,15 @@ test('feishu sync endpoint degrades to a downloadable payload when webhook is no
   delete process.env.FEISHU_WEBHOOK;
   const db = freshDb();
   const routes = mountRoutes(db);
-  const id = db.prepare(`
-    INSERT INTO influencers (platform, kol_handle, profile_link, followers, region, tags, data_source)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run('YouTube', '@feishu_ready', 'https://example.com/f', 90000, 'US', 'tech', 'test').lastInsertRowid;
+  const id = insertInfluencer(db, {
+    platform: 'YouTube',
+    kol_handle: '@feishu_ready',
+    profile_link: 'https://example.com/f',
+    followers: 90000,
+    region: 'US',
+    tags: 'tech',
+    data_source: 'test'
+  });
 
   const result = await invoke(routes, 'POST /api/influencers/feishu/sync', {
     body: { ids: [id] }
@@ -2524,10 +2743,17 @@ test('campaign-scoped Bitable retry sends one exact stored snapshot and replays 
 test('collaboration order creation stores the selected resource definition', async () => {
   const db = freshDb();
   const routes = mountRoutes(db);
-  const influencerId = db.prepare(`
-    INSERT INTO influencers (platform, kol_handle, profile_link, followers, project_name, product_name, content_deliverable, quoted_price, data_source)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run('TikTok', '@order_creator', 'https://example.com/o', 100000, 'Existing Project', 'Existing Product', 'Short video', 2100, 'test').lastInsertRowid;
+  const influencerId = insertInfluencer(db, {
+    platform: 'TikTok',
+    kol_handle: '@order_creator',
+    profile_link: 'https://example.com/o',
+    followers: 100000,
+    project_name: 'Existing Project',
+    product_name: 'Existing Product',
+    content_deliverable: 'Short video',
+    quoted_price: 2100,
+    data_source: 'test'
+  });
 
   const result = await invoke(routes, 'POST /api/collaborations', {
     body: {
@@ -3083,6 +3309,7 @@ test('signed contract confirmation route forwards the protected mutation contrac
   assert.equal(result.payload.status, 'contracted');
   assert.deepEqual(captured, {
     userId: 2,
+    organizationId: 1,
     collaborationId: 73,
     requestId: 'campaign-link-request',
     idempotencyKey: 'route-contract-confirmation-0001',

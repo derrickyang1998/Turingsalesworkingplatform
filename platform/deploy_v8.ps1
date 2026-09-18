@@ -33,10 +33,10 @@ $EXPECTED_PPT_SHA256 = "f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57
 $TRUSTED_SOURCE_GATE_RELATIVE_PATH = "server\scripts\trusted_production_source_gate.js"
 $TRUSTED_SOURCE_MANIFEST_RELATIVE_PATH = "server\scripts\trusted_production_source_manifest.json"
 $TRUSTED_RUNTIME_CONFIG_RELATIVE_PATH = "server\config\runtime_config.js"
-$EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "572bbe86e1528b64c17a855c51001984391a6c4f836ead2668d63c66fb58826d"
-$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "71d69fdd1baa83a8e8cbbef4c79d281e352eb2e0fcf924541b0e4331389c7262"
+$EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "41fdef69825e2a6c701e18c9df5a959ed2b6a9aa6198ec1da69f3d9023688902"
+$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "70189ae6acf2917edd4e1b095eedeacfe084ed93a3c765fb9c68f21b24a8c67e"
 $EXPECTED_TRUSTED_RUNTIME_CONFIG_SHA256 = "76d43d3e811c6fa8daae987cc9eb2fff2dc8a8095f84b1cd309e4e214df94dcb"
-$EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256 = "0c97c943a9371b73ef1c8ed1a1dc02c0986f4ae43dbc56fa0748f438cef3f337"
+$EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256 = "7d13f0f4c97698ea9785084db069ddf38c85af2b794d4b81e73e9c9fdc67e59c"
 $EXPECTED_TRUSTED_PARSER_VERIFIER_SHA256 = "7f9efaac02675b21e025891a400474cc7481c1adaf58c88bd8b356d5276f2eaa"
 $EXPECTED_TRUSTED_PUBLIC_GUARD_SHA256 = "d45fe8fcc01587aaa0e73eccfb9714c27801e232cb6c0effd6daedb703316d66"
 $EXPECTED_TRUSTED_MIGRATION_CLEANUP_HELPER_SHA256 = "d5f2befa902522dd9de3e9dd2397a99ee5e78ab1a1c6e526a27f14bb2829e1fa"
@@ -122,6 +122,7 @@ $FILES = @(
     "server\migrations\020_organization_methodology_promotion.js",
     "server\migrations\021_organization_role_governance.js",
     "server\migrations\022_organization_ownership_transfer.js",
+    "server\migrations\023_influencer_tenant_ownership.js",
     "server\migrations\baselines\legacy_v1.js",
     "server\migrations\engines\v1.js",
     "server\migrations\vendor\bcryptjs_v3_0_3.js",
@@ -325,6 +326,7 @@ $FILES = @(
     "server\tests\organization_governance_service.test.js",
     "server\tests\organization_governance_routes.test.js",
     "server\tests\organization_ownership_transfer_migration.test.js",
+    "server\tests\influencer_tenant_ownership_migration.test.js",
     "server\tests\routes_performance.test.js",
     "server\tests\phase4_nginx_ingress.test.js",
     "server\tests\phase4_request_pipeline.test.js",
@@ -10655,7 +10657,7 @@ try {
   if (database.pragma('integrity_check', { simple: true }) !== 'ok') throw new Error('Candidate DB integrity_check failed');
   if (database.pragma('foreign_key_check').length !== 0) throw new Error('Candidate DB foreign_key_check failed');
   const version = database.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version;
-  if (Number(version) !== 22) throw new Error('Candidate migration target version mismatch');
+  if (Number(version) !== 23) throw new Error('Candidate migration target version mismatch');
   console.log('TM_SANITIZED_MIGRATION_COMPATIBILITY_OK');
 } finally {
   database.close();
@@ -12124,7 +12126,7 @@ if applied:
         if hashlib.sha256(handle.read()).hexdigest() != output_sha256:
             raise SystemExit('Trusted live database adoption stage digest is invalid')
 else:
-    if (report.get('sourceVersion') not in (1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22) or
+    if (report.get('sourceVersion') not in (1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23) or
             report.get('targetVersion') != report.get('sourceVersion') or
             output_sha256 != expected_source_sha256 or
             report.get('baseTableCount') is not None or report.get('baseRowCount') is not None or

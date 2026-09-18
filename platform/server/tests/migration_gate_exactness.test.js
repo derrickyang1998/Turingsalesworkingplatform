@@ -85,7 +85,7 @@ test('migration verifier accepts a populated sanitized version 1 source and reac
   });
 
   assert.equal(report.sourceVersion, 1);
-  assert.equal(report.targetVersion, 22);
+  assert.equal(report.targetVersion, 23);
   assert.equal(report.runs, 2);
   assert.equal(report.preMigrationRestoreVerified, true);
   assert.equal(report.legacyPreservationVerified, true);
@@ -103,7 +103,7 @@ test('migration verifier accepts a populated managed version 9 source and upgrad
   });
 
   assert.equal(report.sourceVersion, 9);
-  assert.equal(report.targetVersion, 22);
+  assert.equal(report.targetVersion, 23);
   assert.equal(report.runs, 2);
   assert.equal(report.preMigrationRestoreVerified, true);
   assert.equal(report.legacyPreservationVerified, true);
@@ -121,7 +121,7 @@ test('migration verifier upgrades an existing managed version 10 source to versi
   });
 
   assert.equal(report.sourceVersion, 10);
-  assert.equal(report.targetVersion, 22);
+  assert.equal(report.targetVersion, 23);
   assert.equal(report.runs, 2);
   assert.equal(report.preMigrationRestoreVerified, true);
   assert.equal(report.legacyPreservationVerified, true);
@@ -139,7 +139,7 @@ test('migration verifier upgrades an existing managed version 11 source to versi
   });
 
   assert.equal(report.sourceVersion, 11);
-  assert.equal(report.targetVersion, 22);
+  assert.equal(report.targetVersion, 23);
   assert.equal(report.runs, 2);
   assert.equal(report.preMigrationRestoreVerified, true);
   assert.equal(report.legacyPreservationVerified, true);
@@ -157,25 +157,25 @@ test('migration verifier upgrades the production predecessor version 20 to versi
   });
 
   assert.equal(report.sourceVersion, 20);
-  assert.equal(report.targetVersion, 22);
+  assert.equal(report.targetVersion, 23);
   assert.equal(report.runs, 2);
   assert.equal(report.preMigrationRestoreVerified, true);
   assert.equal(report.legacyPreservationVerified, true);
   assert.equal(sha256File(fixture.databasePath), sourceSha256);
 });
 
-test('migration verifier upgrades the current production predecessor version 21 to version 22', (t) => {
-  const fixture = createFixture(t, 'v21-to-v22', 21);
+test('migration verifier upgrades the current production predecessor version 22 to version 23', (t) => {
+  const fixture = createFixture(t, 'v22-to-v23', 22);
   const sourceSha256 = sha256File(fixture.databasePath);
 
   const report = migrationGate.verifySanitizedMigrationCopy({
     sanitizedPath: fixture.databasePath,
-    sourceVersion: 21,
+    sourceVersion: 22,
     workDir: path.join(fixture.root, 'work')
   });
 
-  assert.equal(report.sourceVersion, 21);
-  assert.equal(report.targetVersion, 22);
+  assert.equal(report.sourceVersion, 22);
+  assert.equal(report.targetVersion, 23);
   assert.equal(report.runs, 2);
   assert.equal(report.preMigrationRestoreVerified, true);
   assert.equal(report.legacyPreservationVerified, true);
@@ -231,7 +231,7 @@ test('migration verifier preserves an existing activity_log allocator across det
   });
 
   assert.equal(report.sourceVersion, 1);
-  assert.equal(report.targetVersion, 22);
+  assert.equal(report.targetVersion, 23);
   assert.equal(report.legacyPreservationVerified, true);
 });
 

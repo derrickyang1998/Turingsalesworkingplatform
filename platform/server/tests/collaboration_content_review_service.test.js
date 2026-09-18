@@ -7,6 +7,7 @@ const path = require('node:path');
 const Database = require('better-sqlite3');
 
 const migrationService = require('../services/migration_service');
+const migration023 = require('../migrations/023_influencer_tenant_ownership');
 const knowledgeService = require('../services/knowledge_service');
 const { createCampaignCollaborationService } = require('../services/campaign_collaboration_service');
 const { createPerformanceManualService } = require('../services/performance_manual_service');
@@ -55,6 +56,7 @@ function openDatabase(t) {
     rootDir: SERVER_ROOT,
     registeredMigrations: MIGRATIONS
   }), { status: 'managed', currentVersion: 18 });
+  migration023.apply(db);
   return db;
 }
 
@@ -135,9 +137,9 @@ function seedFixture(db) {
     fixture.teamId
   );
   db.prepare(`
-    INSERT INTO influencers (id,platform,kol_handle,profile_link,followers,is_active)
-    VALUES (?,'TikTok','@content-review','https://example.invalid/content-review',1000,1)
-  `).run(fixture.influencerId);
+    INSERT INTO influencers (id,platform,kol_handle,profile_link,followers,is_active,org_id)
+    VALUES (?,'TikTok','@content-review','https://example.invalid/content-review',1000,1,?)
+  `).run(fixture.influencerId, orgId);
   db.prepare(`
     INSERT INTO collaborations (
       id,influencer_id,user_id,status,proposal_notes,cost_quoted,row_version
@@ -323,6 +325,7 @@ test('approved review unlocks explicit multi-deliverable publication confirmatio
   assert.throws(
     () => service.updateLinked({
       userId: fixture.submitterId,
+      organizationId: fixture.orgId,
       collaborationId: fixture.collaborationId,
       requestId: 'content-review-publish-bypass-request-0001',
       idempotencyKey: 'content-review-publish-bypass-0001',
@@ -434,6 +437,7 @@ test('approved review unlocks explicit multi-deliverable publication confirmatio
 
   const listed = service.list({
     userId: fixture.submitterId,
+    organizationId: fixture.orgId,
     campaignId: fixture.campaignId,
     includeCampaignContext: true
   }).collaborations[0];
@@ -441,6 +445,7 @@ test('approved review unlocks explicit multi-deliverable publication confirmatio
   db.prepare("UPDATE campaigns SET operational_status='on_hold' WHERE id=?").run(fixture.campaignId);
   const held = service.list({
     userId: fixture.submitterId,
+    organizationId: fixture.orgId,
     campaignId: fixture.campaignId,
     includeCampaignContext: true
   }).collaborations[0];
@@ -450,6 +455,7 @@ test('approved review unlocks explicit multi-deliverable publication confirmatio
   db.prepare("UPDATE campaigns SET operational_status='active' WHERE id=?").run(fixture.campaignId);
   assert.equal(service.list({
     userId: fixture.outsiderId,
+    organizationId: fixture.orgId,
     campaignId: fixture.campaignId,
     includeCampaignContext: true
   }).collaborations.length, 0);
@@ -494,6 +500,32 @@ test('publication handoff refuses to bind tracked content owned by another creat
       idempotencyKey: 'publication-confirmation-creator-conflict'
     })),
     (error) => error && error.code === 'PERFORMANCE_CONTENT_CREATOR_CONFLICT'
+  );
+  assert.deepEqual(publicationWriteState(db, fixture), before);
+});
+
+test('publication confirmation rejects a collaboration whose influencer ownership conflicts with the campaign', (t) => {
+  const db = openDatabase(t);
+  const fixture = seedFixture(db);
+  const service = collaborationServiceWithPerformanceHandoff(db);
+  service.submitContentReview(submissionInput(fixture));
+  service.decideContentReview(decisionInput(fixture));
+  const foreignOrganizationId = 819099;
+  db.prepare(`
+    INSERT INTO organizations (id,code,name)
+    VALUES (?,?,?)
+  `).run(foreignOrganizationId, 'publication-foreign-org', 'Publication Foreign Organization');
+  db.exec('DROP TRIGGER influencers_org_scope_update');
+  db.prepare('UPDATE influencers SET org_id=? WHERE id=?')
+    .run(foreignOrganizationId, fixture.influencerId);
+  const before = publicationWriteState(db, fixture);
+
+  assert.throws(
+    () => service.confirmPublication(publicationInput(fixture, {
+      requestId: 'publication-confirmation-cross-org-request',
+      idempotencyKey: 'publication-confirmation-cross-org'
+    })),
+    (error) => error && error.code === 'RECORD_NOT_FOUND' && error.details === undefined
   );
   assert.deepEqual(publicationWriteState(db, fixture), before);
 });
