@@ -1,5 +1,27 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.9.20-token-usage-tenant-ownership (Production Deployed, 2026-09-19) - Token 用量租户归属
+
+### 交付与范围 / Delivery And Scope
+- schema 升级至 v26，为 `token_usage` 增加组织归属；126 条历史记录均完成确定性回填，空归属为 0。多组织下无法由权威绩效审计事实确定归属时迁移失败关闭，只有恰好单组织的旧库可使用兼容回填。
+- 所有可信服务端 AI 用量写入同时绑定活动组织与用户；用户配额按组织+用户计算，普通读取只返回当前组织当前用户记录，平台管理员只有通过显式 `admin_audit=global` 才能查看跨组织聚合，并写入审计日志。
+- 客户端 `POST /api/token-usage` 已关闭并稳定返回 `410 TOKEN_USAGE_CLIENT_REPORTING_DISABLED`；数据库触发器禁止更新、删除及 `INSERT OR REPLACE` 替换现有账本行，避免客户端伪报或覆盖历史用量。
+- 管理控制室 Token 用量视图使用显式全局审计入口并显示组织；保留最新产品壳层、CRM、M3/M4、AI/知识库、方案、报告和冻结 PPT，未做界面回退。`ppt.js` SHA-256 继续保持 `f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e`。
+
+### 轻量验证与独立审查 / Lightweight Verification And Independent Review
+- Token 核心服务/路由回归 `22/22`、v25→v26 重放 `1/1`、Campaign 迁移门禁 `3/3`、可信清单 `1/1`、v1→v26 迁移 `1/1` 及本地发布预检通过；受控候选通过远端 `76/76` 和 Chromium `2/2`。
+- 本版涉及 schema、租户权威及共享发布基础设施，因此保留必要迁移/候选门禁；没有追加与功能无关的全量测试。已知旧基线中 `.gitattributes` 缺少 migration 025 精确 EOL 规则及旧清单数量断言漂移，均未通过扩大本版范围处理。
+- 独立审查首轮发现两个 P1：预发布保留清理被中断时可能遗留全局隔离目录、未完成备份可能占用 10/20 保留配额。发布控制器增加 `backup-ready.json`、全清单复验、只统计完整备份、20 个硬上限及同运行恢复后，复审结论为 `GO`，无开放 P0/P1。
+
+### 生产状态 / Production Status
+- 实现提交 `b4d6ba076f5010689ed70573e4c6a662c109ed0e`、账本替换保护 `875f3d1`、预门禁保留清理 `4cfe373` 和可恢复保留控制 `0504141c1df025cfaa6d08661d829a5f9face87f` 已在生产变更前推送 GitHub。
+- 正式运行 `a3602d90516a4ed8b6befd2c9d3fee8d` 返回 `DEPLOY_OK` 与 `RETENTION_CLEANUP_OK`；可信源码 SHA-256 为 `286b80ac12c84a8370de483e8d7fcbc64482b8a3a13d5b9805a36ca5feb82c8b`，候选树为 `c1a05f282562165876b416771cc291810d248b17e6ee5fd4c7e0d83f8f16b936`。
+- 可验证备份为 `/root/turingmarket/backups/v060-crm-sales-workspace-20260919-063108`；`backup-ready.json` 已绑定数据库与 347 项初始清单，初始清单 SHA-256 为 `72e7461cd66bea1df89457f0dea0a0917ffb3a9ec0960905255f5e1b06dc9b55`，35 项切换清单 SHA-256 为 `ce4796ebce8e8e35ebc52c9ecd4e97d42d349a7394dabeaa57a546522d4157fd`，完整校验通过。
+- 公网健康 `200` 且解析器 ready，PM2 在线且重启次数 0；schema v26、SQLite `quick_check=ok`、外键异常 0。126 条 token 记录空组织归属为 0，三个不可篡改触发器齐全；管理员登录、全局审计读取、客户端写入 410 和退出均通过，验收后活动会话为 0。
+
+### 后续节奏 / Delivery Cadence
+- 继续“一功能一上线”：普通功能只执行受影响测试、必要安全检查和一次独立审查，通过可验证备份后立即部署并做线上定向验收；阶段收口或 schema、租户权威、鉴权、共享基础设施、真实外部写入等风险边界才触发扩展门禁。
+
 ## v0.9.19-ai-conversation-tenant-ownership (Production Deployed, 2026-09-19) - AI 对话租户归属
 
 ### 交付与范围 / Delivery And Scope
