@@ -46,6 +46,44 @@ function sha256Buffer(buffer) {
   return crypto.createHash('sha256').update(buffer).digest('hex');
 }
 
+function writeRetentionBackupFixture(target, name, { ready = false } = {}) {
+  const files = new Map([
+    ['database/turingmarket.db', Buffer.from(`database:${name}\n`)],
+    ['files.requested', Buffer.from('app.js\n')],
+    ['nginx/turingmarket.conf', Buffer.from('server { listen 80; }\n')],
+    ['root-files.requested', Buffer.from('CHANGELOG.md\n')],
+    ['root-node-modules.measurement', Buffer.from('1:1\n')],
+    ['server-node_modules.tgz', Buffer.from(`server-modules:${name}\n`)],
+    ['evidence.txt', Buffer.from(`${name}\n`)]
+  ]);
+  const databaseSha256 = sha256Buffer(files.get('database/turingmarket.db'));
+  files.set('database.sha256', Buffer.from(`${databaseSha256}  database/turingmarket.db\n`));
+  for (const [relative, payload] of files) {
+    const destination = path.join(target, ...relative.split('/'));
+    fs.mkdirSync(path.dirname(destination), { recursive: true });
+    fs.writeFileSync(destination, payload, { mode: 0o600 });
+  }
+  const manifest = [...files.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([relative, payload]) => `${sha256Buffer(payload)}  ./${relative}\n`)
+    .join('');
+  const manifestPath = path.join(target, 'SHA256SUMS');
+  fs.writeFileSync(manifestPath, manifest, { mode: 0o600 });
+  if (ready) {
+    const proof = {
+      backupName: name,
+      databaseSha256,
+      format: 'tm-deployment-backup-ready-v1',
+      manifestSha256: sha256(manifestPath)
+    };
+    fs.writeFileSync(
+      path.join(target, 'backup-ready.json'),
+      `${JSON.stringify(proof)}\n`,
+      { mode: 0o600 }
+    );
+  }
+}
+
 function buildCandidateUploadBundle(records, identity = 'f'.repeat(64)) {
   const parts = [Buffer.from('TMCB0001', 'ascii')];
   const count = Buffer.alloc(4);
@@ -3079,6 +3117,7 @@ $script:ProbeFails = $false
 $script:RestoreFails = $false
 $script:RestoreFailuresRemaining = 0
 $script:CleanupFails = $false
+$script:RetentionFails = $false
 $script:WriterEnterFails = $false
 $script:AcceptanceStateOverride = $null
 function Get-RemoteDeploymentPhase {
@@ -3126,6 +3165,7 @@ function Invoke-RemoteAcceptedFinalize {
 function Invoke-RemoteRetentionCleanup {
   param([string]$BackupPath, [string]$ReleaseRoot)
   $script:Actions.Add('retention')
+  if ($script:RetentionFails) { throw 'retention failed' }
 }
 function Invoke-RemoteTrustedSourceInputSweep {
   $script:Actions.Add('source-sweep')
@@ -3151,6 +3191,7 @@ function Reset-Case {
   $script:RestoreFails = $false
   $script:RestoreFailuresRemaining = 0
   $script:CleanupFails = $false
+  $script:RetentionFails = $false
   $script:WriterEnterFails = $false
   $script:AcceptanceStateOverride = $null
 }
@@ -3163,7 +3204,7 @@ foreach ($phase in @('locked', 'candidate-ready')) {
   Reset-Case
   $script:Phase = $phase
   Invoke-DeploymentFailureRecovery -BackupPath 'backups/v060-crm-sales-workspace-20260714-120000' -ReleaseRoot '/var/lib/turingmarket-gate/releases/test' -BackupCreated $true
-  Assert-Actions 'source-sweep,writer-enter,control-restore,cleanup,exit'
+  Assert-Actions 'source-sweep,writer-enter,control-restore,retention,cleanup,exit'
 }
 Reset-Case
 $script:Phase = 'cutover-complete'
@@ -3234,7 +3275,15 @@ $script:CleanupFails = $true
 $threw = $false
 try { Invoke-DeploymentFailureRecovery -BackupPath 'x' -ReleaseRoot 'y' -BackupCreated $true } catch { $threw = $true }
 if (-not $threw) { throw 'Cleanup failure must fail closed' }
-Assert-Actions 'source-sweep,writer-enter,control-restore,cleanup'
+Assert-Actions 'source-sweep,writer-enter,control-restore,retention,cleanup'
+
+Reset-Case
+$script:Phase = 'candidate-ready'
+$script:RetentionFails = $true
+$threw = $false
+try { Invoke-DeploymentFailureRecovery -BackupPath 'x' -ReleaseRoot 'y' -BackupCreated $true } catch { $threw = $true }
+if (-not $threw) { throw 'Retention recovery failure must keep the deployment locked' }
+Assert-Actions 'source-sweep,writer-enter,control-restore,retention'
 
 Reset-Case
 $script:SweepFails = $true
@@ -3428,7 +3477,7 @@ test('Phase 4 retention cleanup keeps a rollback floor and removes only validate
     const name = `v060-crm-sales-workspace-202601${String(index + 1).padStart(2, '0')}-120000`;
     const target = path.join(backupRoot, name);
     fs.mkdirSync(target);
-    fs.writeFileSync(path.join(target, 'evidence.txt'), name);
+    writeRetentionBackupFixture(target, name, { ready: index === 0 });
     const modified = new Date(now - (40 * 24 * 60 * 60 * 1000) - index * 60_000);
     fs.utimesSync(target, modified, modified);
     backupNames.push(name);
@@ -3479,14 +3528,25 @@ test('Phase 4 retention cleanup keeps a rollback floor and removes only validate
 
 test('Phase 4 retention caps fresh backups before parser candidate preparation', (t) => {
   const deploy = read(deployPath);
-  assert.match(
-    deploy,
-    /Invoke-RemoteBackup -BackupPath \$backupDir[\s\S]*?Invoke-RemoteRetentionCleanup -BackupPath \$backupDir -ReleaseRoot \$remoteReleaseRoot[\s\S]*?Install-RemoteMigrationGateCleanup[\s\S]*?Invoke-RemoteParserCandidatePreparation/
+  const backupCall = deploy.indexOf('Invoke-RemoteBackup -BackupPath $backupDir');
+  const backupReady = deploy.indexOf('$backupCreated = $true', backupCall);
+  const retentionCall = deploy.indexOf(
+    'Invoke-RemoteRetentionCleanup -BackupPath $backupDir -ReleaseRoot $remoteReleaseRoot',
+    backupReady
   );
-  assert.match(
+  const cleanupInstall = deploy.indexOf('Install-RemoteMigrationGateCleanup', retentionCall);
+  const candidateGate = deploy.indexOf('$candidateGate = @\'', cleanupInstall);
+  const parserCall = deploy.indexOf('Invoke-RemoteParserCandidatePreparation', candidateGate);
+  assert.ok(backupCall >= 0 && backupReady > backupCall);
+  assert.ok(retentionCall > backupReady && cleanupInstall > retentionCall);
+  assert.ok(candidateGate > cleanupInstall && parserCall > candidateGate);
+  const parserPreparation = functionSource(
     deploy,
-    /Invoke-RemoteParserCandidatePreparation[\s\S]*?exec 2>&1[\s\S]*?-CaptureOutput -SurfaceFailureOutput/
+    'Invoke-RemoteParserCandidatePreparation',
+    'Invoke-RemoteBackup'
   );
+  assert.match(parserPreparation, /exec 2>&1/);
+  assert.match(parserPreparation, /-CaptureOutput -SurfaceFailureOutput/);
 
   const python = ['python', 'python3'].find((command) => (
     spawnSync(command, ['--version'], { encoding: 'utf8' }).status === 0
@@ -3505,13 +3565,18 @@ test('Phase 4 retention caps fresh backups before parser candidate preparation',
     const name = `v060-crm-sales-workspace-202609${String(index + 1).padStart(2, '0')}-120000`;
     const target = path.join(backupRoot, name);
     fs.mkdirSync(target);
-    fs.writeFileSync(path.join(target, 'evidence.txt'), name);
+    writeRetentionBackupFixture(target, name, { ready: index === 0 });
     const modified = new Date(now - index * 60_000);
     fs.utimesSync(target, modified, modified);
     backupNames.push(name);
   }
+  const incompleteName = 'v060-crm-sales-workspace-20260925-110000';
+  const incompleteBackup = path.join(backupRoot, incompleteName);
+  fs.mkdirSync(incompleteBackup);
+  fs.writeFileSync(path.join(incompleteBackup, 'partial.txt'), 'incomplete');
+  fs.utimesSync(incompleteBackup, new Date(now + 60_000), new Date(now + 60_000));
   const currentBackup = path.join(backupRoot, backupNames[0]);
-  const activeRelease = path.join(candidateRoot, 'v060-crm-sales-workspace-20260925-120000');
+  const activeRelease = path.join(candidateRoot, 'v060-crm-sales-workspace-20260926-120000');
   fs.mkdirSync(activeRelease);
 
   const scriptPath = path.join(directory, 'retention.py');
@@ -3534,8 +3599,28 @@ test('Phase 4 retention caps fresh backups before parser candidate preparation',
   const remainingBackups = fs.readdirSync(backupRoot)
     .filter((name) => /^v060-crm-sales-workspace-/.test(name));
   assert.equal(remainingBackups.length, 20);
+  assert.equal(fs.existsSync(incompleteBackup), false);
   assert.equal(fs.existsSync(currentBackup), true);
   assert.equal(fs.existsSync(activeRelease), true);
+
+  const repeated = spawnSync(python, [
+    scriptPath,
+    backupRoot,
+    candidateRoot,
+    currentBackup,
+    activeRelease,
+    String(ownerUid),
+    String(ownerUid)
+  ], {
+    encoding: 'utf8',
+    timeout: 30_000
+  });
+  assert.equal(repeated.status, 0, repeated.stderr || repeated.stdout);
+  assert.match(repeated.stdout, /RETENTION_CLEANUP_OK/);
+  assert.equal(
+    fs.readdirSync(backupRoot).filter((name) => /^v060-crm-sales-workspace-/.test(name)).length,
+    20
+  );
 });
 
 test('Phase 4 executable manual rollback requires database restore consent before acquiring the remote lock', {

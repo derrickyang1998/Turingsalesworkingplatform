@@ -4492,12 +4492,35 @@ fi
 find . -type f ! -name SHA256SUMS -print0 | LC_ALL=C sort -z | xargs -0 sha256sum > SHA256SUMS
 sha256sum --check --status SHA256SUMS
 ManifestSha="$(sha256sum SHA256SUMS | awk '{print $1}')"
-python3 - "$RemoteRoot/.deploy-v030.lock/run.json" "__LOCK_TOKEN__" "$ManifestSha" <<'PY'
+DatabaseSha="$(awk 'NR == 1 { print $1 }' database.sha256)"
+python3 - "$RemoteRoot/.deploy-v030.lock/run.json" "__LOCK_TOKEN__" "$ManifestSha" "$BackupAbsolute" "$DatabaseSha" <<'PY'
 import json
 import os
+import re
 import sys
 
-target, expectedOwner, manifestSha = sys.argv[1:]
+target, expectedOwner, manifestSha, backupAbsolute, databaseSha = sys.argv[1:]
+if not re.fullmatch(r'[0-9a-f]{64}', manifestSha) or not re.fullmatch(r'[0-9a-f]{64}', databaseSha):
+    raise SystemExit('Backup completion identity is invalid')
+readyPath = os.path.join(backupAbsolute, 'backup-ready.json')
+ready = {
+    'backupName': os.path.basename(backupAbsolute),
+    'databaseSha256': databaseSha,
+    'format': 'tm-deployment-backup-ready-v1',
+    'manifestSha256': manifestSha,
+}
+readyBytes = (json.dumps(ready, sort_keys=True, separators=(',', ':')) + '\n').encode('ascii')
+readyDescriptor = os.open(readyPath, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+try:
+    os.write(readyDescriptor, readyBytes)
+    os.fsync(readyDescriptor)
+finally:
+    os.close(readyDescriptor)
+backupDirectory = os.open(backupAbsolute, os.O_RDONLY | os.O_DIRECTORY)
+try:
+    os.fsync(backupDirectory)
+finally:
+    os.close(backupDirectory)
 with open(target, encoding='utf-8') as handle:
     metadata = json.load(handle)
 if metadata.get('ownerToken') != expectedOwner or metadata.get('backupReady') is not False:
@@ -7620,8 +7643,11 @@ python3 - \
   "$GateUid" \
   "$MarkerRoot" \
   "$LockDir" <<'TM_RETENTION_CLEANUP'
+import functools
+import hashlib
 import json
 import os
+import posixpath
 import re
 import stat
 import sys
@@ -7745,12 +7771,116 @@ def noFollowDelete(target, expectedDevice, allowedOwners):
     os.rmdir(target)
     fsyncDirectory(parent)
 
+def readStrictBytes(path, expectedOwner, maximumBytes):
+    metadata = strictRegular(path, expectedOwner)
+    if metadata.st_size < 1 or metadata.st_size > maximumBytes:
+        raise RuntimeError(f'Retention metadata size is invalid: {path}')
+    flags = os.O_RDONLY | getattr(os, 'O_CLOEXEC', 0) | getattr(os, 'O_NOFOLLOW', 0)
+    descriptor = os.open(path, flags)
+    try:
+        opened = os.fstat(descriptor)
+        if (opened.st_dev, opened.st_ino, opened.st_size) != (metadata.st_dev, metadata.st_ino, metadata.st_size):
+            raise RuntimeError(f'Retention metadata changed while opening: {path}')
+        chunks = []
+        while True:
+            chunk = os.read(descriptor, 1024 * 1024)
+            if not chunk:
+                break
+            chunks.append(chunk)
+    finally:
+        os.close(descriptor)
+    payload = b''.join(chunks)
+    if len(payload) != metadata.st_size:
+        raise RuntimeError(f'Retention metadata changed while reading: {path}')
+    return payload
+
+def sha256StrictFile(path, expectedOwner, expectedDevice):
+    metadata = os.lstat(path)
+    if (stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode) or
+            metadata.st_uid != expectedOwner or metadata.st_nlink != 1 or
+            (os.name != 'nt' and metadata.st_dev != expectedDevice)):
+        raise RuntimeError(f'Backup manifest entry is unsafe: {path}')
+    flags = os.O_RDONLY | getattr(os, 'O_CLOEXEC', 0) | getattr(os, 'O_NOFOLLOW', 0)
+    descriptor = os.open(path, flags)
+    digest = hashlib.sha256()
+    try:
+        opened = os.fstat(descriptor)
+        if (opened.st_dev, opened.st_ino, opened.st_size) != (metadata.st_dev, metadata.st_ino, metadata.st_size):
+            raise RuntimeError(f'Backup manifest entry changed while opening: {path}')
+        while True:
+            chunk = os.read(descriptor, 1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+    finally:
+        os.close(descriptor)
+    return digest.hexdigest()
+
+@functools.lru_cache(maxsize=None)
+def committedBackupProof(backupPath, expectedDevice):
+    try:
+        manifestPath = os.path.join(backupPath, 'SHA256SUMS')
+        manifestBytes = readStrictBytes(manifestPath, rootUid, 64 * 1024 * 1024)
+        entries = {}
+        for rawLine in manifestBytes.splitlines():
+            match = re.fullmatch(rb'([0-9a-f]{64})  (.+)', rawLine)
+            if match is None:
+                return False
+            relative = match.group(2).decode('utf-8')
+            if not relative.startswith('./'):
+                return False
+            normalized = relative[2:]
+            if (not normalized or normalized.startswith('/') or
+                    posixpath.normpath(normalized) != normalized or
+                    normalized in entries):
+                return False
+            entries[normalized] = match.group(1).decode('ascii')
+        required = {
+            'database.sha256',
+            'database/turingmarket.db',
+            'files.requested',
+            'nginx/turingmarket.conf',
+            'root-files.requested',
+            'root-node-modules.measurement',
+            'server-node_modules.tgz',
+        }
+        if not required.issubset(entries):
+            return False
+        for relative, expectedSha256 in entries.items():
+            absolute = os.path.join(backupPath, *relative.split('/'))
+            if os.path.commonpath([backupPath, os.path.abspath(absolute)]) != backupPath:
+                return False
+            if sha256StrictFile(absolute, rootUid, expectedDevice) != expectedSha256:
+                return False
+        databaseSha256 = entries['database/turingmarket.db']
+        databaseProof = readStrictBytes(os.path.join(backupPath, 'database.sha256'), rootUid, 512)
+        if databaseProof != f'{databaseSha256}  database/turingmarket.db\n'.encode('ascii'):
+            return False
+        readyPath = os.path.join(backupPath, 'backup-ready.json')
+        if os.path.lexists(readyPath):
+            readyBytes = readStrictBytes(readyPath, rootUid, 4096)
+            ready = json.loads(readyBytes.decode('ascii'))
+            expectedReady = {
+                'backupName': os.path.basename(backupPath),
+                'databaseSha256': databaseSha256,
+                'format': 'tm-deployment-backup-ready-v1',
+                'manifestSha256': hashlib.sha256(manifestBytes).hexdigest(),
+            }
+            canonicalReady = (json.dumps(ready, sort_keys=True, separators=(',', ':')) + '\n').encode('ascii')
+            if ready != expectedReady or readyBytes != canonicalReady:
+                return False
+        return True
+    except (OSError, UnicodeError, ValueError, json.JSONDecodeError, RuntimeError):
+        return False
+
 backupRoot, backupDevice = canonicalRoot(backupRoot, rootUid)
 candidateRoot, candidateDevice = canonicalRoot(candidateRoot, rootUid)
 currentBackup = os.path.abspath(currentBackup)
 if os.path.dirname(currentBackup) != backupRoot or not backupName.fullmatch(os.path.basename(currentBackup)):
     raise RuntimeError('Current backup is outside the retention root')
 validateTree(currentBackup, backupDevice, {rootUid})
+if not committedBackupProof(currentBackup, backupDevice):
+    raise RuntimeError('Current backup does not have a complete rollback proof')
 activeRelease = os.path.abspath(activeRelease)
 if os.path.dirname(activeRelease) != candidateRoot or not candidateName.fullmatch(os.path.basename(activeRelease)):
     raise RuntimeError('Active release path is invalid')
@@ -7765,6 +7895,8 @@ def protectBackupReference(relativePath, source):
     if os.path.dirname(absolute) != backupRoot or not os.path.isdir(absolute) or os.path.islink(absolute):
         raise RuntimeError(f'Missing or unsafe protected backup from {source}')
     validateTree(absolute, backupDevice, {rootUid})
+    if not committedBackupProof(absolute, backupDevice):
+        raise RuntimeError(f'Protected backup is not a complete rollback point from {source}')
     protectedBackups.add(absolute)
 
 def protectCandidateReference(value, source):
@@ -7809,13 +7941,26 @@ if lockDir and os.path.lexists(lockDir):
 
 backups = matchingDirectories(backupRoot, backupName, {rootUid})
 backups.sort(key=lambda item: (item[1].st_mtime_ns, os.path.basename(item[0])), reverse=True)
-retainedBackups = {path for path, _metadata in backups[:backupKeepCount]} | protectedBackups
+verifiedBackups = []
+invalidBackups = []
 for path, metadata in backups:
+    if len(verifiedBackups) >= backupHardCapCount and path not in protectedBackups:
+        continue
+    validateTree(path, backupDevice, {rootUid})
+    if committedBackupProof(path, backupDevice):
+        verifiedBackups.append((path, metadata))
+    else:
+        invalidBackups.append(path)
+verifiedBackups.sort(key=lambda item: (item[1].st_mtime_ns, os.path.basename(item[0])), reverse=True)
+if not protectedBackups.issubset({path for path, _metadata in verifiedBackups}):
+    raise RuntimeError('A protected backup is missing from the verified rollback set')
+retainedBackups = {path for path, _metadata in verifiedBackups[:backupKeepCount]} | protectedBackups
+for path, metadata in verifiedBackups:
     if now - metadata.st_mtime <= backupMaxAgeSeconds:
         retainedBackups.add(path)
 if len(retainedBackups) > backupHardCapCount:
     rollbackFloor = {path for path, _metadata in backups[:backupKeepCount]} | protectedBackups
-    for path, _metadata in reversed(backups):
+    for path, _metadata in reversed(verifiedBackups):
         if len(retainedBackups) <= backupHardCapCount:
             break
         if path in retainedBackups and path not in rollbackFloor:
@@ -7946,6 +8091,8 @@ report = {
     'protectedBackups': sorted(os.path.basename(path) for path in protectedBackups),
     'protectedCandidates': sorted(os.path.basename(path) for path in protectedCandidates),
     'removedBackups': sorted(operation['name'] for operation in journal['operations'] if operation['kind'] == 'backup'),
+    'invalidBackups': sorted(os.path.basename(path) for path in invalidBackups),
+    'verifiedBackups': sorted(os.path.basename(path) for path, _metadata in verifiedBackups),
     'removedCandidates': sorted(operation['name'] for operation in journal['operations'] if operation['kind'] == 'candidate'),
     'resumedQuarantines': sorted(set(resumedQuarantines)),
 }
@@ -8041,6 +8188,7 @@ function Invoke-DeploymentFailureRecovery {
             Write-Host "Production was not mutated; candidate cleanup only." -ForegroundColor Yellow
             if ($BackupCreated) {
                 Restore-RemoteMigrationGateCleanupControl -BackupPath $BackupPath
+                Invoke-RemoteRetentionCleanup -BackupPath $BackupPath -ReleaseRoot $ReleaseRoot
             }
             Invoke-RemoteCandidateCleanup -ReleaseRoot $ReleaseRoot
         }
@@ -8050,6 +8198,7 @@ function Invoke-DeploymentFailureRecovery {
                 throw "Candidate-ready recovery requires the completed deployment backup."
             }
             Restore-RemoteMigrationGateCleanupControl -BackupPath $BackupPath
+            Invoke-RemoteRetentionCleanup -BackupPath $BackupPath -ReleaseRoot $ReleaseRoot
             Invoke-RemoteCandidateCleanup -ReleaseRoot $ReleaseRoot
         }
         'cutover-complete' {

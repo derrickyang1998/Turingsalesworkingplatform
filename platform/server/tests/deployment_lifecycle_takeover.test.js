@@ -2,6 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -15,6 +16,41 @@ const thisTestPath = path.join(platformRoot, 'server', 'tests', 'deployment_life
 
 function read(filePath) {
   return fs.readFileSync(filePath, 'utf8');
+}
+
+function writeRetentionBackupFixture(target, name, { ready = false } = {}) {
+  const files = new Map([
+    ['database/turingmarket.db', Buffer.from(`database:${name}\n`)],
+    ['files.requested', Buffer.from('app.js\n')],
+    ['nginx/turingmarket.conf', Buffer.from('server { listen 80; }\n')],
+    ['root-files.requested', Buffer.from('CHANGELOG.md\n')],
+    ['root-node-modules.measurement', Buffer.from('1:1\n')],
+    ['server-node_modules.tgz', Buffer.from(`server-modules:${name}\n`)],
+    ['evidence.txt', Buffer.from(`${name}\n`)]
+  ]);
+  const digest = (payload) => crypto.createHash('sha256').update(payload).digest('hex');
+  const databaseSha256 = digest(files.get('database/turingmarket.db'));
+  files.set('database.sha256', Buffer.from(`${databaseSha256}  database/turingmarket.db\n`));
+  for (const [relative, payload] of files) {
+    const destination = path.join(target, ...relative.split('/'));
+    fs.mkdirSync(path.dirname(destination), { recursive: true, mode: 0o700 });
+    fs.writeFileSync(destination, payload, { mode: 0o600 });
+  }
+  const manifest = [...files.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([relative, payload]) => `${digest(payload)}  ./${relative}\n`)
+    .join('');
+  const manifestPath = path.join(target, 'SHA256SUMS');
+  fs.writeFileSync(manifestPath, manifest, { mode: 0o600 });
+  if (ready) {
+    const proof = {
+      backupName: name,
+      databaseSha256,
+      format: 'tm-deployment-backup-ready-v1',
+      manifestSha256: digest(fs.readFileSync(manifestPath))
+    };
+    fs.writeFileSync(path.join(target, 'backup-ready.json'), `${JSON.stringify(proof)}\n`, { mode: 0o600 });
+  }
 }
 
 function functionSource(source, name, nextName) {
@@ -1550,6 +1586,7 @@ test('Phase 4 retention unlinks stale candidate symlinks without following their
   const result = runBashSync(['--noprofile', '--norc', '-s'], {
     input: `
 set -eEuo pipefail
+umask 077
 root="$(mktemp -d)"
 trap 'rm -rf -- "$root"' EXIT
 backup_root="$root/backups"
@@ -1558,8 +1595,18 @@ current_backup="$backup_root/v060-crm-sales-workspace-20260825-120000"
 stale_candidate="$candidate_root/v060-crm-sales-workspace-20260820-120000"
 active_release="$candidate_root/v060-crm-sales-workspace-20260825-130000"
 outside="$root/outside-retention.txt"
-mkdir -p "$current_backup" "$stale_candidate"
-printf 'backup\n' > "$current_backup/evidence.txt"
+mkdir -p "$current_backup/database" "$current_backup/nginx" "$stale_candidate"
+printf 'database\n' > "$current_backup/database/turingmarket.db"
+printf 'app.js\n' > "$current_backup/files.requested"
+printf 'server { listen 80; }\n' > "$current_backup/nginx/turingmarket.conf"
+printf 'CHANGELOG.md\n' > "$current_backup/root-files.requested"
+printf '1:1\n' > "$current_backup/root-node-modules.measurement"
+printf 'server modules\n' > "$current_backup/server-node_modules.tgz"
+(
+  cd "$current_backup"
+  sha256sum database/turingmarket.db > database.sha256
+  find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+)
 printf 'candidate\n' > "$stale_candidate/evidence.txt"
 printf 'must remain\n' > "$outside"
 ln -s "$outside" "$stale_candidate/external-link"
@@ -1607,7 +1654,7 @@ test('Phase 4 retention resumes a quarantined deletion and preserves every durab
     const name = `v060-crm-sales-workspace-202601${String(index + 1).padStart(2, '0')}-120000`;
     const target = path.join(backupRoot, name);
     fs.mkdirSync(target);
-    fs.writeFileSync(path.join(target, 'evidence.txt'), name);
+    writeRetentionBackupFixture(target, name, { ready: index === 0 });
     const modified = new Date(now - (40 * 24 * 60 * 60 * 1000) - index * 60_000);
     fs.utimesSync(target, modified, modified);
     backups.push(target);
@@ -1616,11 +1663,11 @@ test('Phase 4 retention resumes a quarantined deletion and preserves every durab
   fs.writeFileSync(path.join(markerRoot, 'current-accepted.json'), JSON.stringify({
     schemaVersion: 1,
     backupPath: relativeBackup(backups[13])
-  }));
+  }), { mode: 0o600 });
   fs.writeFileSync(path.join(markerRoot, 'last-good.json'), JSON.stringify({
     schemaVersion: 1,
     backupPath: relativeBackup(backups[12])
-  }));
+  }), { mode: 0o600 });
 
   const liveCandidate = path.join(candidateRoot, 'v060-crm-sales-workspace-20260729-120000');
   const staleCandidate = path.join(candidateRoot, 'v060-crm-sales-workspace-20260701-120000');
@@ -1633,7 +1680,7 @@ test('Phase 4 retention resumes a quarantined deletion and preserves every durab
     backupPath: relativeBackup(backups[11]),
     releaseRoot: liveCandidate,
     quarantinePath: null
-  }));
+  }), { mode: 0o600 });
   fs.mkdirSync(path.join(lockRoot, 'restore-v050'));
 
   const scriptPath = path.join(root, 'retention.py');
