@@ -37,9 +37,10 @@
       20,
       21,
       22,
-      23
+      23,
+      24
     ],
-    "targetVersion": 23,
+    "targetVersion": 24,
     "runs": 2,
     "deterministicAppendTables": [
       "activity_log"
@@ -139,6 +140,10 @@
       "sha256": "304754aeb1d2e242e00ef773a4d249001fc96ee8567ddda1d646d4802483bedb"
     },
     {
+      "path": "server/migrations/024_knowledge_tenant_ownership.js",
+      "sha256": "d35ed2ec1785e36377e71267eb92b57dc191b50e4ab85ac2a286a610040fd1ef"
+    },
+    {
       "path": "server/migrations/baselines/legacy_v1.js",
       "sha256": "13e631ca7e2aef57e39f7dbc38e6f03e2d5323a11f38c6ce31239d793911812c"
     },
@@ -149,6 +154,18 @@
     {
       "path": "server/migrations/vendor/bcryptjs_v3_0_3.js",
       "sha256": "ed01b52b436504d8bb7086d93fee4bd8edbb22d8ed88e1b456e0c604f30e79c4"
+    },
+    {
+      "path": "server/config/runtime_config.js",
+      "sha256": "e689e251f313c48b4f27279b1ef44639e3c1a68bb3c255f6ddfa86cabbfaa27d"
+    },
+    {
+      "path": "server/contracts/campaign_contract.js",
+      "sha256": "d57556ae072b7d28f6368ff14f6aa917361decdffaf5339219792e86e122429b"
+    },
+    {
+      "path": "server/db.js",
+      "sha256": "c8d46feb60a356ffe70299cb0b5e3eda97e229aa7a1be6dc9462638b84f9abbd"
     },
     {
       "path": "server/package-lock.json",
@@ -187,6 +204,14 @@
       "sha256": "69db3140f8d08f2754df0b13d9ba728db5117539a507faabd4088c74b89ee3c8"
     },
     {
+      "path": "server/feishu_client.js",
+      "sha256": "88504e378b1aa083d02fdbe46ec7885591a44a5ec5abe28455ec38b679d7709c"
+    },
+    {
+      "path": "server/middleware/phase4_request_pipeline.js",
+      "sha256": "929f3de433a3fba7af69ff29ebe22fb95c21dde06182c8e8d5331eb74218ebc3"
+    },
+    {
       "path": "server/ocr_document_text.py",
       "sha256": "917d5b14872eeb3a7b628d80cc70dbab46a79ef632e031fa599f15e0840e1a0a"
     },
@@ -220,11 +245,11 @@
     },
     {
       "path": "server/scripts/sanitization_manifest.json",
-      "sha256": "8e0c7adf2a2b14651fc0170a56efd8017e61c45cbef6be8491d096f9051085c7"
+      "sha256": "4420efc3d2940c18949a27ebd967a9ebdc96eca70cfac140f13dc1ee461d2a19"
     },
     {
       "path": "server/scripts/sanitize_production_shape.js",
-      "sha256": "44b9f2d9ea0cadf6dd892bc9997909dd41f9c50d123b137a51b084202eb66a55"
+      "sha256": "35d8d00cd4b90b36f5d9d16cf98aa356359d7c07b72293f8bc0aacf170e75eb2"
     },
     {
       "path": "server/scripts/trusted_parser_runtime_verifier.js",
@@ -236,15 +261,103 @@
     },
     {
       "path": "server/scripts/verify_campaign_migration_gate.js",
-      "sha256": "7d13f0f4c97698ea9785084db069ddf38c85af2b794d4b81e73e9c9fdc67e59c"
+      "sha256": "7b84cda0f3d3ce25897101088a1b89b7c5bab0f9cffe459f666b0ba8bee13797"
+    },
+    {
+      "path": "server/routes.js",
+      "sha256": "746c3f7592a4c9d783df35a2bc01e7bfa541bfd3b1474a0fa17aba2181d27838"
+    },
+    {
+      "path": "server/routes_admin_tenant_directory.js",
+      "sha256": "828e8b4dd23ed40500da1640d4fc7083d5ff88bee997c64365b9a5e1fc5b4789"
+    },
+    {
+      "path": "server/routes_brands.js",
+      "sha256": "8226d47905f6e255d238daf23c1af31aed8d40ca40f1e2bf054f38610e746937"
+    },
+    {
+      "path": "server/routes_campaigns.js",
+      "sha256": "b5c92ecc4942e8b9766da8e812b18dfe1e8a80e22b6428cbc087632460cefc07"
+    },
+    {
+      "path": "server/routes_customers.js",
+      "sha256": "d2e2f90cea5d550b092401a4e2f3b59db79d41c032a8106b402f1f2737305a8d"
+    },
+    {
+      "path": "server/routes_feishu.js",
+      "sha256": "df489eaaa1e9465c7e5ac3228317314fa181c984493ca30f5c29038f42e8aeea"
+    },
+    {
+      "path": "server/routes_organization_governance.js",
+      "sha256": "fec34edb1c0c23636cf25685baa190d0946fc0c33a91ad629f42b970ce53e3b9"
+    },
+    {
+      "path": "server/routes_performance.js",
+      "sha256": "cc6b0eeed2a77b46dd72d9bb0d13c39e4790ceca3bd92243e416282f0a66ba03"
+    },
+    {
+      "path": "server/routes_workflow.js",
+      "sha256": "3f5c0442ddd0f7dd05b8c64ad2114e9fd3d31c2d7c635fc1c4ad6cf976885fe8"
+    },
+    {
+      "path": "server/server.js",
+      "sha256": "13d6356281c0ce7d770a5844337c4202773fc5713a93bbe8be28f6c244ca90f2"
+    },
+    {
+      "path": "server/workflow_engine.js",
+      "sha256": "56ae8dd9d337cd199faff620714a2b968820dedde6771e76e64ccb4e55915f2c"
+    },
+    {
+      "path": "server/services/admin_tenant_directory_service.js",
+      "sha256": "23b2478748f63f58e4a0dd13932b10d2bf966b75cdfaf5cdda2810346825616b"
+    },
+    {
+      "path": "server/services/ai_cost_service.js",
+      "sha256": "101a87a0574f2bc037e5c75bfb84e581c5ef2190041cc8edb16218c179e83acc"
+    },
+    {
+      "path": "server/services/ai_service.js",
+      "sha256": "d68bdafda71a25dda839d08aafc82ba85776723edb8a5a9c8cdff12443e39900"
+    },
+    {
+      "path": "server/services/business_knowledge_service.js",
+      "sha256": "27378cd8f234278bc1610c5468f23caff654ee0a5682528d362a0b364c73de36"
     },
     {
       "path": "server/services/campaign_access_service.js",
       "sha256": "8d85b59e81e955b37bdbed003c692ee81812229d730d1d3ed7d5238464558361"
     },
     {
+      "path": "server/services/campaign_collaboration_service.js",
+      "sha256": "4ab6b932f78668db011b025d34115ff6e4fbe384eedaaab026976e55d1b73129"
+    },
+    {
+      "path": "server/services/campaign_link_service.js",
+      "sha256": "60ad01ae5f0fff398694c2e2608fda7ee98988cce7209ef2a6edf9744c02f885"
+    },
+    {
+      "path": "server/services/campaign_ppt_service.js",
+      "sha256": "cbd7fcf65178412deb84be1dd5c6d938b9b0589641d6d3ad2775a2c6f7cf6c39"
+    },
+    {
+      "path": "server/services/campaign_service.js",
+      "sha256": "7edcadca8b3f4b973739542e3c692b7e02d516f32a249cd7132da8047c2a81a7"
+    },
+    {
       "path": "server/services/campaign_workflow_service.js",
       "sha256": "ff67e787adfb649bef04b96842dc2209fb2dabcfd7df48b6bc2c8a0ee2d9bb57"
+    },
+    {
+      "path": "server/services/collaboration_publication_handoff_service.js",
+      "sha256": "1273875c21d862c139fe5c1ea41208945a7af8ef0f19ce4a7e8aced6c5a4b336"
+    },
+    {
+      "path": "server/services/collaboration_resource_contract.js",
+      "sha256": "0957c5bddd3a31385481fe4c0148bab4f2e87abe8ea7d826cfc6226a651e18a2"
+    },
+    {
+      "path": "server/services/credential_rotation_service.js",
+      "sha256": "07c65017407466d047dcdf4fa42c5798ca3c98cf626d726d87bf1a5c5134e3f4"
     },
     {
       "path": "server/services/crm_access_service.js",
@@ -256,7 +369,7 @@
     },
     {
       "path": "server/services/crm_customer_service.js",
-      "sha256": "2a8393ef0603e30cbafe1e8d67e839d56757ca07b99ea07e728f992a6c3d6265"
+      "sha256": "1a29fbf722c9eb378af8535a879012fa9fba8e6c8cfacfb4b93f7da8a8d7c5d7"
     },
     {
       "path": "server/services/crm_query_service.js",
@@ -267,6 +380,18 @@
       "sha256": "22c1913e56434e6244de6c53fc540c549365ed685fec32a51f47eeebae8f5a46"
     },
     {
+      "path": "server/services/customer_report_delivery_service.js",
+      "sha256": "055248e7cff21d9bfda83aaed89653e4e3930274d033df7f122b13a114099017"
+    },
+    {
+      "path": "server/services/customer_report_snapshot_service.js",
+      "sha256": "cd9fe5fc2838c1b3b608a5dd37406ad5377cf20e6f97b2f19655a242c21d7bbb"
+    },
+    {
+      "path": "server/services/feishu_bitable_outbox_service.js",
+      "sha256": "ff0b4eeef26f6e6b1edfbedf89ee619ccb5d772cc583aae1b4aaed93f4c2a17c"
+    },
+    {
       "path": "server/services/idempotency_service.js",
       "sha256": "e979708bf1a0e77d56f472b88a50a588c9a13761a95ea9164cc90fc4cf01259a"
     },
@@ -275,16 +400,112 @@
       "sha256": "9fbb756a1109939da1c9cb5e3e7b77b0175ec2a9ea602d500a5f293f97f99c70"
     },
     {
+      "path": "server/services/influencer_data_import_permission_service.js",
+      "sha256": "0fd0c8c76dc42c44dc4cf93e211d0db64634bbc0aaae083a43500921980c5699"
+    },
+    {
+      "path": "server/services/influencer_saved_view_service.js",
+      "sha256": "de13d800b4ee3dc7404e137b9ef7c56b292f4871cc2ad479cf93cbf80f75c81b"
+    },
+    {
+      "path": "server/services/influencer_workflow_service.js",
+      "sha256": "cff4890081b11117038adc6d3f8312d45f3b75622886cc305f480576b0145ce8"
+    },
+    {
       "path": "server/services/knowledge_service.js",
-      "sha256": "47c7aab4b471d5d17aa5a26ab18e8be273a4e48b9334c819a178715b968a3eab"
+      "sha256": "25531b1768755a907556da7ef09bcba5fe1889f36af817e85996f0df84fafc42"
+    },
+    {
+      "path": "server/services/latest_ui_compat_service.js",
+      "sha256": "7ce222c62346b34b8977500b1bd76d16e8bc2a2c4632d3978f06f27599149847"
+    },
+    {
+      "path": "server/services/llm_service.js",
+      "sha256": "b6e9cdb9c258e4271995d2eba4d43cc6ee3b6f19fdabac791d54926d8452e9a6"
     },
     {
       "path": "server/services/migration_service.js",
       "sha256": "4c447505f16e6fab80683eefe9a5d30012d3ed725efee7db66ef5e2573f939af"
     },
     {
+      "path": "server/services/module_action_permission_service.js",
+      "sha256": "ab4bd531c5763f2999c9d5bab3617d67336279bd55cb087c3524237dec3638a7"
+    },
+    {
+      "path": "server/services/obsidian_ingest_service.js",
+      "sha256": "714cedbbad29ca8db3fc28ddf63aa3367bfafc46ff325f26998b4116c47da6dd"
+    },
+    {
       "path": "server/services/organization_access_service.js",
       "sha256": "a6a4b7d681e7da163bcf026c5fae9f93a125ef9f6604307f4c51c3bfe8a91505"
+    },
+    {
+      "path": "server/services/organization_governance_service.js",
+      "sha256": "b54278e9d67fd1f18edd848d01b3418f9504704b6886a0b4eaefd00f34e69d60"
+    },
+    {
+      "path": "server/services/organization_methodology_service.js",
+      "sha256": "d02cfc600fb381726af879c7545f1ac964787ccfd687a7885af77a5e88abc0f4"
+    },
+    {
+      "path": "server/services/parser_startup_service.js",
+      "sha256": "3a78dd3fdf6bac0604f6b69e3199ff8342868dfa3658c74a68c0e6edc8a7aa56"
+    },
+    {
+      "path": "server/services/path_policy_service.js",
+      "sha256": "dc5944a0e3887dfd82b9e0f05addef89d0c9edfd4048c5cf43a6aa78225e0b65"
+    },
+    {
+      "path": "server/services/performance_collection_run_service.js",
+      "sha256": "35b3b12b18df478c305e43268f8e07f5a4645a2fe1b3f28e24ff1f6893b7f169"
+    },
+    {
+      "path": "server/services/performance_content_import_service.js",
+      "sha256": "97b4d6e792645c144365468a0fdbc57a7f86adda40be77634541cd6c526ec806"
+    },
+    {
+      "path": "server/services/performance_content_analysis_service.js",
+      "sha256": "65182d986c667bfa800d480ff79d6067b6ffbd7605aa3aee26f4091111dd47b5"
+    },
+    {
+      "path": "server/services/performance_feishu_connection_service.js",
+      "sha256": "23e015160af51e41ecc9e210160790b898b15fdf6c95baa4e92db2dacb473812"
+    },
+    {
+      "path": "server/services/performance_feishu_projection_service.js",
+      "sha256": "3ba681eb374b52a8cfbadbd09dc74ca498a94baff99a01fbc215a6d8116e7246"
+    },
+    {
+      "path": "server/services/performance_freshness_service.js",
+      "sha256": "64096ef3f05cca8b3bb60c34c655198230283d73cc3d194a15b1aed39edfcf31"
+    },
+    {
+      "path": "server/services/performance_manual_service.js",
+      "sha256": "3989d02802bf11edc9c0deecf5fcb751b0d0a75caaf807b0f5767763c0b7d1e8"
+    },
+    {
+      "path": "server/services/performance_metrics_service.js",
+      "sha256": "e0e4b964f37d19c94a288da7e3b955f1c06a63808d57c1cb30c2166bd996a352"
+    },
+    {
+      "path": "server/services/performance_provider_collection_service.js",
+      "sha256": "b8f9a1be5b91cb7af2501cf4f23e9b7580167bfea80e5313bd43899bd62a2202"
+    },
+    {
+      "path": "server/services/ppt_artifact_store.js",
+      "sha256": "61518665eef26a3d98ef0d84b968c0c3e5cafa45fc5b592cf4079b310e24583d"
+    },
+    {
+      "path": "server/services/public_assets_service.js",
+      "sha256": "9fc652a7f25e4ab3134b41f5ef03f4705de64b3e4dea629ecc560eb680d77e90"
+    },
+    {
+      "path": "server/services/publication_identity_service.js",
+      "sha256": "7c646db4c1bc759785a0f1ff11d55b83fc4a216ad2508601da1286c92d4cf095"
+    },
+    {
+      "path": "server/services/rag_service.js",
+      "sha256": "e21ec39a3bc334fd4d77ab014df0258f4593904bd9f81c238d8a638eb6a67c31"
     },
     {
       "path": "server/services/sqlite_digest_service.js",
@@ -293,6 +514,18 @@
     {
       "path": "server/services/upload_sandbox_service.js",
       "sha256": "6da2f7d2f49c5d1ac1bf17ce392aa873136a42b94ccdbe81cb9eeba82824d0cd"
+    },
+    {
+      "path": "server/services/vault_export_service.js",
+      "sha256": "f3268b1a01ef2d2163bfa5c257eda6d1053eeb22bf9924b107a87b8e1ff391a9"
+    },
+    {
+      "path": "server/services/web_search_service.js",
+      "sha256": "11ae7025f8341803b0088eb0d6ed0e9b24403fdd13d88788c894850fbea7e17a"
+    },
+    {
+      "path": "server/services/youtube_data_api_client.js",
+      "sha256": "c6de039f09ebeaac80e968385b9ffc8f5cf37cd2b6858d3eb46470c1e2ef23f2"
     },
     {
       "path": "server/systemd/turingmarket-gate-cleanup.service",

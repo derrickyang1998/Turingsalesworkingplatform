@@ -113,6 +113,27 @@ test('schema 23 sanitization manifest treats influencer organization ownership a
   }
 });
 
+test('schema 24 sanitization manifest treats knowledge organization ownership as structural', () => {
+  const fixture = openMigratedFixture('knowledge-tenant-ownership-policy', 24);
+  try {
+    const profile = sanitizer._testing.manifestProfileForVersion(manifestDocument, 24);
+    const knowledgeEntries = profile.objects.find((object) => object.name === 'knowledge_entries');
+    const organizationId = knowledgeEntries.columns.find((column) => column.name === 'org_id');
+    assert.deepEqual({
+      classification: organizationId.classification,
+      foreignKey: organizationId.foreignKey,
+      declaredType: organizationId.declaredType
+    }, {
+      classification: 'structural',
+      foreignKey: true,
+      declaredType: 'INTEGER'
+    });
+    assert.doesNotThrow(() => sanitizer.validateManifest(manifestDocument, fixture.db));
+  } finally {
+    closeFixture(fixture);
+  }
+});
+
 test('schema 15 sanitization manifest pins the signed collaboration structural policy', () => {
   const fixture = openMigratedFixture('signed-collaboration-policy', 15);
   try {

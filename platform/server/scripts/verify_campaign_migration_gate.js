@@ -19,6 +19,7 @@ const SUPPORTED_SOURCE_VERSIONS = new Set([REQUIRED_SOURCE_VERSION, 6, 7, 8, 9, 
 const DEFAULT_FROZEN_MIGRATION_TIMESTAMP = '2040-01-02 03:04:05';
 const EXCLUDED_PRESERVATION_TABLES = new Set(['schema_migrations', 'sqlite_sequence']);
 const DETERMINISTIC_APPEND_TABLES = new Set(['activity_log']);
+const APPROVED_TARGET_DERIVED_REBUILD_TABLES = new Set(['knowledge_capacity_gauges']);
 
 const REGISTERED_MIGRATIONS = Object.freeze([
   Object.freeze({
@@ -207,6 +208,114 @@ const APPROVED_TARGET_TOPOLOGY_REPLACEMENTS = Object.freeze([
     name: 'request_idempotency_legal_transition',
     tblName: 'request_idempotency',
     sqlSha256: '806401a3d8a9b3ee20f98c4d429904264e504de4f7c8aa897aacc49a750b7ba8'
+  }),
+  Object.freeze({
+    type: 'index',
+    name: 'idx_knowledge_source_hash',
+    tblName: 'knowledge_entries',
+    sqlSha256: '5ceb4592f43caac455fc6d1bd67fb3df36c4eba2e872cd176d0deec06bfbf470'
+  }),
+  Object.freeze({
+    type: 'index',
+    name: 'ux_knowledge_campaign_review_source',
+    tblName: 'knowledge_entries',
+    sqlSha256: '6443212cd4dab6a7afa48a750e5c6a63be3b37b3f0c03046afda8498de221983'
+  }),
+  Object.freeze({
+    type: 'index',
+    name: 'ux_knowledge_source_identity',
+    tblName: 'knowledge_entries',
+    sqlSha256: '9f5fb12e6c186ed1200f8eadff02412daa7f38eff098f20524c6ca13f5dfd16b'
+  }),
+  Object.freeze({
+    type: 'table',
+    name: 'knowledge_entries',
+    tblName: 'knowledge_entries',
+    sqlSha256: '96914e053701c81daa90d86ce9fc291352aa7239d0061881f2a4dc3f39b8f524'
+  }),
+  Object.freeze({
+    type: 'trigger',
+    name: 'knowledge_entries_no_replace_insert',
+    tblName: 'knowledge_entries',
+    sqlSha256: '9a0d59d8eba6a9b698e9020da6bc8a04834e72d70fef4d39254957bcee6e76d1'
+  }),
+  Object.freeze({
+    type: 'trigger',
+    name: 'organization_knowledge_custody_capacity_insert',
+    tblName: 'organization_knowledge_custody',
+    sqlSha256: '0b10ffe9d3b48127ceefac6ca4ba650cbcc9be5960009d5c31c5ed34bd337689'
+  }),
+  Object.freeze({
+    type: 'trigger',
+    name: 'trg_task7_current_custody_delete',
+    tblName: 'knowledge_current_custody',
+    sqlSha256: 'ee9f6e6f2b882f436606565625594f6a6a6a1ed93e3a8f99887d93f45e185f34'
+  }),
+  Object.freeze({
+    type: 'trigger',
+    name: 'trg_task7_current_custody_insert',
+    tblName: 'knowledge_current_custody',
+    sqlSha256: 'd8dd4a24d75b20e6a4a7e670caa6ebadcd731cbb93dcd6e049b4122512ba4a55'
+  }),
+  Object.freeze({
+    type: 'trigger',
+    name: 'trg_task7_knowledge_chunk_delete',
+    tblName: 'knowledge_chunks',
+    sqlSha256: '73da523db5d877b1951f9e74473c07db5828a80a3e62cf9f2e3436b5e6b4a7fa'
+  }),
+  Object.freeze({
+    type: 'trigger',
+    name: 'trg_task7_knowledge_chunk_insert',
+    tblName: 'knowledge_chunks',
+    sqlSha256: '904de0a7c31e45a4d341c45815ab8ef892e93e9d2c2793655ac1679043de49c2'
+  }),
+  Object.freeze({
+    type: 'trigger',
+    name: 'trg_task7_knowledge_chunk_payload_update',
+    tblName: 'knowledge_chunks',
+    sqlSha256: '81c53ebc553392c952637a8f96b92c24d205dc7c0d000349c2c5ddca30e524af'
+  }),
+  Object.freeze({
+    type: 'trigger',
+    name: 'trg_task7_knowledge_entry_delete',
+    tblName: 'knowledge_entries',
+    sqlSha256: '3703e20e08e99fc832536e65ed36a6b4faac2b84ab1ccc7ad91a0959b379dfc3'
+  }),
+  Object.freeze({
+    type: 'trigger',
+    name: 'trg_task7_knowledge_entry_insert',
+    tblName: 'knowledge_entries',
+    sqlSha256: 'cd0cbc6329299badf6cb0f1429cb48797837b54af60341997df24695e3eb5e71'
+  }),
+  Object.freeze({
+    type: 'trigger',
+    name: 'trg_task7_knowledge_entry_payload_update',
+    tblName: 'knowledge_entries',
+    sqlSha256: 'eb57cb3918d540254b19af66995692d8e8a5056b33379a03ed44e3a119c3440b'
+  }),
+  Object.freeze({
+    type: 'trigger',
+    name: 'trg_task7_membership_delete',
+    tblName: 'organization_memberships',
+    sqlSha256: 'c4f20ee0aeac639a91ad37a0ee979cc09cd252adda72be240ade52e964040464'
+  }),
+  Object.freeze({
+    type: 'trigger',
+    name: 'trg_task7_membership_insert',
+    tblName: 'organization_memberships',
+    sqlSha256: 'e991b42fee470899f6fd725376780b87b0252944ec4e2dc6821fc7b654cbb2e2'
+  }),
+  Object.freeze({
+    type: 'trigger',
+    name: 'trg_task7_reference_delete',
+    tblName: 'ai_references',
+    sqlSha256: '3f6eb7f4c4e195e4b2c9a372fe9e84e37c3cc28ef043809b516c1b67bffa6921'
+  }),
+  Object.freeze({
+    type: 'trigger',
+    name: 'trg_task7_reference_insert',
+    tblName: 'ai_references',
+    sqlSha256: 'e25e5b5d8c3108661de7e80033c7fca512f385fe38ae3522b144c7ec376c054e'
   })
 ]);
 
@@ -811,6 +920,12 @@ function assertLegacyLogicalShapePreserved(db, snapshot, options = {}) {
         throw new Error(`legacy preservation relationship drift for ${expected.name}`);
       }
     }
+    if (
+      options.approvedDerivedRebuilds === true
+      && APPROVED_TARGET_DERIVED_REBUILD_TABLES.has(expected.name)
+    ) {
+      continue;
+    }
     if (allowsDeterministicAppend ? actual.rowCount < expected.rowCount : actual.rowCount !== expected.rowCount) {
       throw new Error(`legacy preservation row count drift for ${expected.name}`);
     }
@@ -983,13 +1098,19 @@ function migrateAndVerify(databasePath, legacySnapshot, sourceVersion, options =
     migrationService.runMigrations(db, migrationOptions());
     if (db.pragma('integrity_check', { simple: true }) !== 'ok') throw new Error('migration integrity_check failed');
     if (db.pragma('foreign_key_check').length) throw new Error('migration foreign_key_check failed');
-    assertLegacyLogicalShapePreserved(db, legacySnapshot, { approvedTopologyReplacements: true });
+    assertLegacyLogicalShapePreserved(db, legacySnapshot, {
+      approvedDerivedRebuilds: sourceVersion < REQUIRED_TARGET_VERSION,
+      approvedTopologyReplacements: true
+    });
     verifyFtsCanaries(db);
     const first = sqliteDigest.databaseDigest(db, sanitizer.FTS_MANIFEST);
     migrationService.runMigrations(db, migrationOptions());
     if (db.pragma('integrity_check', { simple: true }) !== 'ok') throw new Error('migration rerun integrity_check failed');
     if (db.pragma('foreign_key_check').length) throw new Error('migration rerun foreign_key_check failed');
-    assertLegacyLogicalShapePreserved(db, legacySnapshot, { approvedTopologyReplacements: true });
+    assertLegacyLogicalShapePreserved(db, legacySnapshot, {
+      approvedDerivedRebuilds: sourceVersion < REQUIRED_TARGET_VERSION,
+      approvedTopologyReplacements: true
+    });
     verifyFtsCanaries(db);
     const rerun = sqliteDigest.databaseDigest(db, sanitizer.FTS_MANIFEST);
     assertDigestEqual(first, rerun, 'migration no-op rerun');
