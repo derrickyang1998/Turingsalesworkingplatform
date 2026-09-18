@@ -3060,6 +3060,7 @@ function Invoke-RemoteParserCandidatePreparation {
     Assert-RollbackBackupPath -BackupPath $BackupPath
     $remoteScript = @'
 set -euo pipefail
+exec 2>&1
 RemoteRoot="__REMOTE_ROOT__"
 CandidateRoot="__CANDIDATE_ROOT__"
 ReleaseRoot="__RELEASE_ROOT__"
@@ -3996,7 +3997,10 @@ printf '%s\n' 'PARSER_RUNTIME_CANDIDATE_READY'
     $remoteScript = $remoteScript.Replace('__TRUSTED_MIGRATION_VERIFIER_SHA256__', $EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256)
     $remoteScript = $remoteScript.Replace('__TRUSTED_PARSER_VERIFIER_SHA256__', $EXPECTED_TRUSTED_PARSER_VERIFIER_SHA256)
     $remoteScript = $remoteScript.Replace('__PARSER_RUNTIME_BYTES__', $PARSER_RUNTIME_BYTES.ToString())
-    Invoke-RemoteBash -Script $remoteScript -FailureMessage "Remote parser candidate preparation failed" -TimeoutSeconds $CANDIDATE_GATE_TIMEOUT_SECONDS -RequireDeploymentLock
+    $parserPreparationOutput = Invoke-RemoteBash -Script $remoteScript -FailureMessage "Remote parser candidate preparation failed" -TimeoutSeconds $CANDIDATE_GATE_TIMEOUT_SECONDS -RequireDeploymentLock -CaptureOutput -SurfaceFailureOutput
+    if (-not [string]::IsNullOrWhiteSpace($parserPreparationOutput)) {
+        Write-Host $parserPreparationOutput
+    }
 }
 
 function Invoke-RemoteBackup {
@@ -7629,6 +7633,7 @@ lockDir = sys.argv[8] if len(sys.argv) > 8 else None
 rootUid = int(rootUidRaw)
 gateUid = int(gateUidRaw)
 backupKeepCount = 10
+backupHardCapCount = 20
 backupMaxAgeSeconds = 30 * 24 * 60 * 60
 candidateMaxAgeSeconds = 24 * 60 * 60
 backupName = re.compile(r'^v060-crm-sales-workspace-[0-9]{8}-[0-9]{6}$')
@@ -7808,6 +7813,13 @@ retainedBackups = {path for path, _metadata in backups[:backupKeepCount]} | prot
 for path, metadata in backups:
     if now - metadata.st_mtime <= backupMaxAgeSeconds:
         retainedBackups.add(path)
+if len(retainedBackups) > backupHardCapCount:
+    rollbackFloor = {path for path, _metadata in backups[:backupKeepCount]} | protectedBackups
+    for path, _metadata in reversed(backups):
+        if len(retainedBackups) <= backupHardCapCount:
+            break
+        if path in retainedBackups and path not in rollbackFloor:
+            retainedBackups.remove(path)
 removedBackups = [path for path, _metadata in backups if path not in retainedBackups]
 
 candidates = matchingDirectories(candidateRoot, candidateName, {rootUid, gateUid})
@@ -7926,6 +7938,7 @@ report = {
     'schemaVersion': 1,
     'policy': {
         'backupKeepCount': backupKeepCount,
+        'backupHardCapCount': backupHardCapCount,
         'backupMaxAgeSeconds': backupMaxAgeSeconds,
         'candidateMaxAgeSeconds': candidateMaxAgeSeconds,
     },
@@ -9452,6 +9465,7 @@ sha256sum --check --status "$LockDir/upload.sha256"
     Stage-RemoteTrustedProductionSourceBundle -ReleaseRoot $remoteReleaseRoot -CandidateDir $remoteCandidateDir
     Invoke-RemoteBackup -BackupPath $backupDir -DeploymentPlan $deploymentActionPlan
     $backupCreated = $true
+    Invoke-RemoteRetentionCleanup -BackupPath $backupDir -ReleaseRoot $remoteReleaseRoot
     Install-RemoteMigrationGateCleanup
 
 $candidateGate = @'

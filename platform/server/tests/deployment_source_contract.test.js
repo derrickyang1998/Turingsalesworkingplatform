@@ -3403,6 +3403,7 @@ test('Phase 4 retention cleanup keeps a rollback floor and removes only validate
   assert.match(deploy, /function Invoke-RemoteRetentionCleanup/);
   assert.match(deploy, /TM_RETENTION_CLEANUP/);
   assert.match(deploy, /backupKeepCount\s*=\s*10/);
+  assert.match(deploy, /backupHardCapCount\s*=\s*20/);
   assert.match(deploy, /backupMaxAgeSeconds\s*=\s*30 \* 24 \* 60 \* 60/);
   assert.match(deploy, /candidateMaxAgeSeconds\s*=\s*24 \* 60 \* 60/);
   assert.match(deploy, /retention-report\.json/);
@@ -3468,11 +3469,73 @@ test('Phase 4 retention cleanup keeps a rollback floor and removes only validate
   assert.equal(report.schemaVersion, 1);
   assert.deepEqual(report.policy, {
     backupKeepCount: 10,
+    backupHardCapCount: 20,
     backupMaxAgeSeconds: 30 * 24 * 60 * 60,
     candidateMaxAgeSeconds: 24 * 60 * 60
   });
   assert.equal(report.removedBackups.length, 2);
   assert.deepEqual(report.removedCandidates, [path.basename(staleCandidate)]);
+});
+
+test('Phase 4 retention caps fresh backups before parser candidate preparation', (t) => {
+  const deploy = read(deployPath);
+  assert.match(
+    deploy,
+    /Invoke-RemoteBackup -BackupPath \$backupDir[\s\S]*?Invoke-RemoteRetentionCleanup -BackupPath \$backupDir -ReleaseRoot \$remoteReleaseRoot[\s\S]*?Install-RemoteMigrationGateCleanup[\s\S]*?Invoke-RemoteParserCandidatePreparation/
+  );
+  assert.match(
+    deploy,
+    /Invoke-RemoteParserCandidatePreparation[\s\S]*?exec 2>&1[\s\S]*?-CaptureOutput -SurfaceFailureOutput/
+  );
+
+  const python = ['python', 'python3'].find((command) => (
+    spawnSync(command, ['--version'], { encoding: 'utf8' }).status === 0
+  ));
+  if (!python) return t.skip('Python is unavailable');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-retention-hard-cap-'));
+  const backupRoot = path.join(directory, 'backups');
+  const candidateRoot = path.join(directory, 'releases');
+  fs.mkdirSync(backupRoot);
+  fs.mkdirSync(candidateRoot);
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true, maxRetries: 3 }));
+
+  const now = Date.now();
+  const backupNames = [];
+  for (let index = 0; index < 24; index += 1) {
+    const name = `v060-crm-sales-workspace-202609${String(index + 1).padStart(2, '0')}-120000`;
+    const target = path.join(backupRoot, name);
+    fs.mkdirSync(target);
+    fs.writeFileSync(path.join(target, 'evidence.txt'), name);
+    const modified = new Date(now - index * 60_000);
+    fs.utimesSync(target, modified, modified);
+    backupNames.push(name);
+  }
+  const currentBackup = path.join(backupRoot, backupNames[0]);
+  const activeRelease = path.join(candidateRoot, 'v060-crm-sales-workspace-20260925-120000');
+  fs.mkdirSync(activeRelease);
+
+  const scriptPath = path.join(directory, 'retention.py');
+  fs.writeFileSync(scriptPath, shellHereDocBody(deploy, 'TM_RETENTION_CLEANUP'));
+  const ownerUid = typeof process.getuid === 'function' ? process.getuid() : 0;
+  const result = spawnSync(python, [
+    scriptPath,
+    backupRoot,
+    candidateRoot,
+    currentBackup,
+    activeRelease,
+    String(ownerUid),
+    String(ownerUid)
+  ], {
+    encoding: 'utf8',
+    timeout: 30_000
+  });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /RETENTION_CLEANUP_OK/);
+  const remainingBackups = fs.readdirSync(backupRoot)
+    .filter((name) => /^v060-crm-sales-workspace-/.test(name));
+  assert.equal(remainingBackups.length, 20);
+  assert.equal(fs.existsSync(currentBackup), true);
+  assert.equal(fs.existsSync(activeRelease), true);
 });
 
 test('Phase 4 executable manual rollback requires database restore consent before acquiring the remote lock', {
