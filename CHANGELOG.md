@@ -1,5 +1,27 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.9.19-ai-conversation-tenant-ownership (Production Deployed, 2026-09-19) - AI 对话租户归属
+
+### 交付与范围 / Delivery And Scope
+- schema 升级至 v25，为 `ai_conversations` 增加不可变 `org_id`；历史对话按 Campaign、已归档知识、结构化业务引用和旧数字知识引用确定性回填，单组织旧库可兼容回填，多组织未解析或归属冲突则失败关闭。
+- 普通用户只能创建、续写、查询和归档当前组织内自己的 AI 对话；平台管理员只有在显式 `admin_audit=global` 审计入口才可查看全平台对话、消息、知识引用与联网来源。
+- 对话续写、摘要入库、Campaign 候选/工作台/目标关联、方案草稿与 PPT 审计均校验实时活动组织；数据库触发器阻止跨组织消息、引用、Campaign 关联及对话替换或换绑。
+- API 不返回内部 `org_id`；最新产品界面仅追加显式全局审计参数，未改版、未回退 M3/M4、AI/知识、方案/报告或冻结 PPT。`ppt.js` SHA-256 继续保持 `f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e`。
+
+### 轻量验证与独立审查 / Lightweight Verification And Independent Review
+- 核心回归 `48/48`、Campaign 定向 `14/14`、方案/PPT `13/13`、知识租户兼容 `2/2`、迁移门禁 `4/4`、AI 手工/摘要 `8/8`、Phase 4 AI HTTP `3/3`、最终租户/审计/清单 `26/26` 及完整重放 `8/8` 通过。
+- 受控候选通过生产副本 v24→v25 迁移演练、远端 `76/76`、Nginx/只读门禁及 Chromium `2/2`；本版因 schema、鉴权和租户权威变更保留必要风险门禁，未重复无关全量套件。
+- 独立终审结论 `PRE-DEPLOY GO`，无 P0-P2；首次候选因重放测试仍断言 schema 仅到 v24 而在生产变更前停止，一行断言修复经独立复审 `GO`、本地 `8/8` 后才重新发布。
+
+### 生产状态 / Production Status
+- 实现提交 `08c1f86bc103bfdeaec5cd61c492a6e0c302fddf` 与发布断言修复 `6266a2818b9c805ccc2e0135d79b3c94413221db` 已先推送 GitHub；正式运行 `b4fddb142b9b469f9c734a956009f900` 返回 `DEPLOY_OK` 与 `RETENTION_CLEANUP_OK`。
+- 已校验备份为 `/root/turingmarket/backups/v060-crm-sales-workspace-20260919-040753`；初始 `343` 项和切换 `35` 项清单均完整通过，清单 SHA-256 分别为 `32503d511e34d944a71433b7f2826d8cd7aeadd73ee0012a4a3d9ea64c80dad5` 与 `4638ea3c9f07cb08e66578d16ac35913d4c2751b8c3746fabd60efdfe9a5fd55`。
+- 公网健康为 `200` 且解析器 ready，PM2 在线、重启次数 0，Nginx 正常；schema v25、SQLite `quick_check=ok`、外键异常 0。生产 34 个对话、68 条消息、257 条引用均完成组织归属，空归属、消息归属错配、非法 Campaign/结构化引用均为 0。
+- 经 Nginx 验证普通组织列表、显式管理员全局列表、对话明细、知识搜索和退出；回包无 `org_id` 泄漏，管理员全局列表/查看操作已写入审计，验收后活动会话为 0。
+
+### 后续节奏 / Delivery Cadence
+- 继续“一功能一上线”：普通功能仅执行受影响测试、必要安全检查和一次独立审查，完成可验证备份后立即部署并做线上定向验收；schema、租户权威、鉴权、共享基础设施及真实外部写入仍触发必要扩展门禁。
+
 ## v0.9.18-knowledge-tenant-isolation (Production Deployed, 2026-09-19) - 知识库租户隔离
 
 ### 交付与范围 / Delivery And Scope
