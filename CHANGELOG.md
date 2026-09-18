@@ -1,5 +1,26 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.9.17-influencer-tenant-isolation (Production Deployed, 2026-09-18) - 网红数据租户隔离
+
+### 交付与范围 / Delivery And Scope
+- schema 升级至 v23，为 `influencers` 增加 `org_id`、默认组织确定性回填、三个组织索引及失败关闭的新增/更新触发器；生产 4,786 条历史网红全部归属组织 1，空归属和未知归属均为 0。
+- M4 列表、搜索、匹配、手工新增、JSON/上传导入、重放、导出及飞书选择全部按实时认证组织隔离；Campaign 候选、工作台、关联合作单、发布凭证和历史合作路径也强制组织一致。
+- 保留最新界面、导入模板/映射/筛选/保存视图、飞书降级、AI/知识库、方案/报告及冻结 PPT；`app.js` 本地/线上摘要一致，`ppt.js` SHA-256 仍为 `f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e`。
+
+### 验证与独立审查 / Verification And Independent Review
+- 网红主流程 `62/62`、合作安全组合 `35/35`、内容/合同/付款 `21/21`、迁移 `5/5`、脱敏 profile `1/1`、v22→v23 精确门禁 `1/1`、可信来源选定门禁 `3/3` 和本地发布预检通过；线上已部署代码跨组织冒烟 `2/2`。
+- 独立 code reviewer 对脱敏默认组织识别、失败关闭和完整哈希链复核后返回 `APPROVE`，无 Critical/Important 问题。
+- 本版属于 schema/租户权威高风险边界，因此保留部署内置迁移、脱敏、备份、远端 `76/76` 和 Chromium `2/2` 硬门禁；未额外运行无关本地全量套件。
+
+### 生产状态 / Production Status
+- 功能提交 `6e70032f3bca55d772c193f6fa43e837a2a42a58` 与兼容修复 `b25f53361e21acb5c32e2655249098837630cecb` 已在生产变更前推送 GitHub；受控运行 `7f0d59666fc1434491d4655a4aff5f56` 返回 `DEPLOY_OK` 与 `RETENTION_CLEANUP_OK`。
+- 首次运行 `20260918-213449` 在生产变更前因脱敏默认组织不可识别而安全停止并恢复控制面；修复、测试和独立复审后才重试，未形成半部署状态。
+- 已校验备份为 `/root/turingmarket/backups/v060-crm-sales-workspace-20260918-221444`；初始 `338` 项和切换 `35` 项清单完整通过，清单 SHA-256 分别为 `740fb2e7e14e31f9466fff85c32122b9abeecd5d735c51dd073f276c785b4a05` 与 `9f8ac5d8ea954ba9acb8f23b9db279c8ee7f4de98bebb85ccef26a6c56a099bb`。
+- 公网健康为 `200` 且解析器 ready，PM2 在线、重启次数 0，Nginx 正常；schema v23、SQLite 完整性 `ok`、外键异常 0、索引/触发器齐全。
+
+### 后续节奏 / Delivery Cadence
+- 继续“一功能一上线”：普通功能只跑精确受影响测试、必要安全门禁和一次独立审查，通过可验证备份后立即部署并做线上定向验收；繁重套件继续仅由阶段收口或 schema、租户权威、鉴权、共享基础设施、真实外部写入等风险边界触发。
+
 ## v0.9.16-influencer-data-import-permission (Production Deployed, 2026-09-18) - 网红数据导入权限
 
 ### 交付与范围 / Delivery And Scope
