@@ -3058,6 +3058,8 @@ test('Task 12 remote deploy gate runs bounded replay tests and exact route/stati
   assert.match(candidateGate, /node --test server\/tests\/verify_phase4_one_request_replay\.test\.js/);
   assert.match(candidateGate, /node --test server\/tests\/release_replay_gate\.test\.js/);
   assert.match(candidateGate, /node --test server\/tests\/module_action_permission_service\.test\.js/);
+  assert.match(candidateGate, /server\/tests\/routes_performance\.test\.js/);
+  assert.match(candidateGate, /server\/tests\/performance_frontend_contract\.test\.js/);
   assert.doesNotMatch(candidateGate, /tests\/\*\.test\.js/);
   assert.doesNotMatch(deploy, /npm test -- --test-concurrency=1/);
   assert.ok(

@@ -135,6 +135,15 @@ function crmTaskRequest(principal, organizationId, action) {
   };
 }
 
+function campaignPerformanceRequest(principal, organizationId, action) {
+  return {
+    principal,
+    organizationId,
+    module: 'campaign.performance',
+    action
+  };
+}
+
 test('allows the declared platform administration action for an active live platform admin', () => {
   const { db, service } = createFixture();
   try {
@@ -684,6 +693,97 @@ test('projects and authorizes exact CRM task actions for writable and read-only 
       [0, 'MALFORMED_ORGANIZATION']
     ]) {
       const request = crmTaskRequest({ id: 2, role: 'user' }, organizationId, 'read');
+      if (organizationId === undefined) delete request.organizationId;
+      assert.deepEqual(service.authorize(request), { allowed: false, code });
+    }
+  } finally {
+    db.close();
+  }
+});
+
+test('projects and authorizes campaign performance export only for writable tenant roles', () => {
+  const { db, service } = createFixture();
+  try {
+    db.exec(`
+      INSERT INTO users (id, role, is_active) VALUES
+        (6, 'user', 1),
+        (7, 'user', 1),
+        (8, 'user', 1),
+        (9, 'user', 1);
+      INSERT INTO organization_memberships (org_id, user_id, role_code, status) VALUES
+        (10, 6, 'member', 'active'),
+        (10, 7, 'org_admin', 'active'),
+        (10, 8, 'member', 'active'),
+        (30, 9, 'member', 'active');
+      INSERT INTO organization_member_policy (org_id,user_id,access_mode) VALUES
+        (10,6,'read_write'),
+        (10,7,'read_write'),
+        (10,8,'read_write'),
+        (30,9,'read_write');
+      INSERT INTO organization_authority (org_id,owner_user_id) VALUES (30,9);
+      INSERT INTO team_memberships (org_id, team_id, user_id, role_code, status)
+        VALUES (10,102,6,'team_lead','active');
+    `);
+    assert.deepEqual(service.projectModuleAccess({
+      principal: { id: 2, role: 'user' },
+      organizationId: 10,
+      module: 'campaign.performance'
+    }), {
+      allowed: true,
+      code: 'ALLOWED',
+      principal: {
+        user_id: 2,
+        organization_id: 10,
+        roles: ['administrator', 'manager', 'member']
+      },
+      actions: ['export']
+    });
+    for (const [userId, organizationId, roles] of [
+      [6, 10, ['manager', 'member']],
+      [7, 10, ['administrator', 'member']],
+      [8, 10, ['member']],
+      [9, 30, ['company_owner', 'member']]
+    ]) {
+      assert.deepEqual(
+        service.authorize(campaignPerformanceRequest({ id: userId, role: 'user' }, organizationId, 'export')),
+        {
+          allowed: true,
+          code: 'ALLOWED',
+          principal: { user_id: userId, organization_id: organizationId, roles }
+        }
+      );
+    }
+    assert.deepEqual(
+      service.authorize(campaignPerformanceRequest({ id: 2, role: 'user' }, 20, 'export')),
+      {
+        allowed: false,
+        code: 'ACTION_FORBIDDEN',
+        principal: {
+          user_id: 2,
+          organization_id: 20,
+          roles: ['read_only']
+        }
+      }
+    );
+    assert.deepEqual(
+      service.authorize(campaignPerformanceRequest({ id: 1, role: 'admin' }, 20, 'export')),
+      {
+        allowed: false,
+        code: 'ACTION_FORBIDDEN',
+        principal: {
+          user_id: 1,
+          organization_id: 20,
+          roles: ['platform_admin']
+        }
+      }
+    );
+    for (const [organizationId, code] of [
+      [undefined, 'ORGANIZATION_SCOPE_REQUIRED'],
+      [null, 'MALFORMED_ORGANIZATION'],
+      ['10', 'MALFORMED_ORGANIZATION'],
+      [0, 'MALFORMED_ORGANIZATION']
+    ]) {
+      const request = campaignPerformanceRequest({ id: 2, role: 'user' }, organizationId, 'export');
       if (organizationId === undefined) delete request.organizationId;
       assert.deepEqual(service.authorize(request), { allowed: false, code });
     }

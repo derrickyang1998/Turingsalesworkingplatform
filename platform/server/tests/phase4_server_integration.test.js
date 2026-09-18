@@ -869,7 +869,8 @@ test('login and auth me preserve the user object and add current auth context', 
       'crm.customer': ['read', 'create', 'update'],
       'crm.opportunity': ['read', 'create', 'update'],
       'crm.contact': ['read', 'create', 'update'],
-      'crm.task': ['read', 'create', 'update']
+      'crm.task': ['read', 'create', 'update'],
+      'campaign.performance': ['export']
     });
     assert.equal(Array.isArray(login.body.auth_context.teams), true);
     assert.equal(login.body.auth_context.teams.length > 0, true);
@@ -924,10 +925,38 @@ test('read-only access is live, revokes old sessions, permits GET, blocks all bu
     });
     assert.equal(firstLogin.response.status, 200, firstLogin.text);
 
-    const inspection = new Database(server.dbPath, { readonly: true });
+    const campaignId = 879903;
+    const inspection = new Database(server.dbPath);
     const organizationId = inspection.prepare(
       "SELECT id FROM organizations WHERE code='turingmarket-default'"
     ).get().id;
+    const teamId = Number(firstLogin.body.auth_context.teams[0].id);
+    inspection.transaction(() => {
+      inspection.prepare(`
+        INSERT INTO customers (id,brand_name,company_name,stage,source,created_by,assigned_to)
+        VALUES (879901,'Readonly export brand','Readonly export company','qualified','test',?,?)
+      `).run(userId, userId);
+      inspection.prepare(`
+        INSERT INTO opportunities (
+          id,customer_id,name,stage,value,win_probability,product_name,
+          channel_type,created_by
+        ) VALUES (879902,879901,'Readonly export opportunity','proposal',1,50,'Test','influencer',?)
+      `).run(userId);
+      inspection.prepare(`
+        INSERT INTO campaigns (
+          id,org_id,name,customer_id,opportunity_id,owner_user_id,team_id,
+          lifecycle_state,operational_status,row_version
+        ) VALUES (?,?,?,?,?,?,?,'lead','active',1)
+      `).run(
+        campaignId,
+        organizationId,
+        'Readonly export campaign',
+        879901,
+        879902,
+        userId,
+        teamId
+      );
+    })();
     inspection.close();
 
     const changed = await jsonRequest(
@@ -958,7 +987,8 @@ test('read-only access is live, revokes old sessions, permits GET, blocks all bu
       'crm.customer': ['read'],
       'crm.opportunity': ['read'],
       'crm.contact': ['read'],
-      'crm.task': ['read']
+      'crm.task': ['read'],
+      'campaign.performance': []
     });
 
     const readable = await jsonRequest(server.baseUrl, '/api/demands', {
@@ -970,6 +1000,62 @@ test('read-only access is live, revokes old sessions, permits GET, blocks all bu
       token: readOnlyLogin.body.token
     });
     assert.equal(readableCustomers.response.status, 200, readableCustomers.text);
+
+    for (const [suffix, requestId] of [
+      ['contents/export?scope=all&q=must-not-be-audited', 'read-only-content-export'],
+      ['feishu-projection-preview/export?q=must-not-be-audited', 'read-only-feishu-export']
+    ]) {
+      const rejected = await jsonRequest(
+        server.baseUrl,
+        `/api/campaigns/${campaignId}/performance/${suffix}`,
+        {
+          token: readOnlyLogin.body.token,
+          headers: { 'X-Request-Id': requestId }
+        }
+      );
+      assert.equal(rejected.response.status, 403, rejected.text);
+      assert.equal(rejected.body.code, 'PERFORMANCE_EXPORT_FORBIDDEN');
+      assert.equal(rejected.response.headers.get('content-type').includes('text/csv'), false);
+      assert.equal(rejected.response.headers.has('content-disposition'), false);
+    }
+
+    const auditInspection = new Database(server.dbPath, { readonly: true });
+    const exportAudits = auditInspection.prepare(`
+      SELECT details
+      FROM activity_log
+      WHERE action='performance_export_denied' AND module='campaign.performance'
+      ORDER BY id
+    `).all().map((row) => JSON.parse(row.details));
+    auditInspection.close();
+    assert.deepEqual(exportAudits.map((event) => ({
+      permission: event.permission,
+      outcome: event.outcome,
+      reason_code: event.reason_code,
+      request_id: event.request_id,
+      target_type: event.target_type,
+      target_id: event.target_id,
+      export_kind: event.export_kind
+    })), [
+      {
+        permission: 'campaign.performance.export',
+        outcome: 'denied',
+        reason_code: 'ACTION_FORBIDDEN',
+        request_id: 'read-only-content-export',
+        target_type: 'campaign',
+        target_id: campaignId,
+        export_kind: 'content_csv'
+      },
+      {
+        permission: 'campaign.performance.export',
+        outcome: 'denied',
+        reason_code: 'ACTION_FORBIDDEN',
+        request_id: 'read-only-feishu-export',
+        target_type: 'campaign',
+        target_id: campaignId,
+        export_kind: 'feishu_snapshot_csv'
+      }
+    ]);
+    assert.equal(JSON.stringify(exportAudits).includes('must-not-be-audited'), false);
 
     const writes = [
       ['POST', '/api/demands', { brand_name: 'blocked' }],

@@ -10202,6 +10202,9 @@ NODE_ENV=test TM_DISABLE_DOTENV=1 node --test server/tests/verify_phase4_one_req
 node --test server/tests/release_replay_gate.test.js
 node --test server/tests/module_action_permission_service.test.js
 node --test \
+  server/tests/routes_performance.test.js \
+  server/tests/performance_frontend_contract.test.js
+node --test \
   server/tests/crm_phase5_http.test.js \
   server/tests/customer_workspace_ui.test.js
 install -d -m 0700 "$TEST_ROOT/browser-smoke"

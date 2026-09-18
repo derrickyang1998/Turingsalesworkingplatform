@@ -36,6 +36,10 @@ const {
 const {
   OrganizationMethodologyServiceError
 } = require('./services/organization_methodology_service');
+const {
+  CAMPAIGN_PERFORMANCE_MODULE,
+  CAMPAIGN_PERFORMANCE_EXPORT_ACTION
+} = require('./services/module_action_permission_service');
 
 function requestId(request) {
   return request.requestId ||
@@ -102,6 +106,52 @@ function sendHtmlResult(response, result) {
 
 function authenticatedUserId(request) {
   return request.user && request.user.id;
+}
+
+function positiveIntegerOrNull(value) {
+  if (typeof value === 'number') {
+    return Number.isSafeInteger(value) && value > 0 ? value : null;
+  }
+  if (typeof value !== 'string' || !/^[1-9]\d*$/.test(value)) return null;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && String(parsed) === value ? parsed : null;
+}
+
+function boundedAuditText(value, fallback, maxLength) {
+  return typeof value === 'string' && value.length > 0
+    ? value.slice(0, maxLength)
+    : fallback;
+}
+
+function performanceExportOrganizationId(request) {
+  return request && request.authContext && request.authContext.organization
+    ? request.authContext.organization.id
+    : undefined;
+}
+
+function performanceExportAuditEvent(request, decision, exportKind, outcome, recordCount) {
+  const event = {
+    actor_user_id: positiveIntegerOrNull(authenticatedUserId(request)),
+    organization_id: positiveIntegerOrNull(performanceExportOrganizationId(request)),
+    permission: `${CAMPAIGN_PERFORMANCE_MODULE}.${CAMPAIGN_PERFORMANCE_EXPORT_ACTION}`,
+    outcome,
+    reason_code: boundedAuditText(decision && decision.code, 'PERMISSION_DECISION_INVALID', 80),
+    request_id: boundedAuditText(requestId(request), 'performance-request', 120),
+    target_type: 'campaign',
+    target_id: positiveIntegerOrNull(request && request.params && request.params.id),
+    export_kind: exportKind,
+    ip_address: boundedAuditText(request && request.ip, null, 255)
+  };
+  if (Number.isSafeInteger(recordCount) && recordCount >= 0) event.record_count = recordCount;
+  return event;
+}
+
+function sendPerformanceExportError(request, response, statusCode, code, message) {
+  return response.status(statusCode).json({
+    error: message,
+    code,
+    request_id: requestId(request)
+  });
 }
 
 function requestHeader(request, name) {
@@ -219,9 +269,58 @@ function registerPerformanceRoutes(app, options = {}) {
     typeof customerReportDeliveryService.exportHtml !== 'function') {
     throw new TypeError('A customer report delivery service is required.');
   }
+  const moduleActionPermissionService = options.moduleActionPermissionService;
+  if (!moduleActionPermissionService || typeof moduleActionPermissionService.authorize !== 'function') {
+    throw new TypeError('A module action permission service is required.');
+  }
+  const performanceExportAudit = options.performanceExportAudit;
+  if (typeof performanceExportAudit !== 'function') {
+    throw new TypeError('A performance export audit writer is required.');
+  }
   const aiLimiter = typeof options.aiLimiter === 'function'
     ? options.aiLimiter
     : (_request, _response, next) => next();
+
+  function requirePerformanceExport(exportKind) {
+    return function performanceExportPermissionMiddleware(request, response, next) {
+      let decision;
+      try {
+        decision = moduleActionPermissionService.authorize({
+          principal: request.user,
+          organizationId: performanceExportOrganizationId(request),
+          module: CAMPAIGN_PERFORMANCE_MODULE,
+          action: CAMPAIGN_PERFORMANCE_EXPORT_ACTION
+        });
+      } catch {
+        decision = { allowed: false, code: 'AUTHORITATIVE_FACTS_UNAVAILABLE' };
+      }
+      if (decision && decision.allowed === true) {
+        request.performanceExportPermission = decision;
+        return next();
+      }
+      try {
+        performanceExportAudit(performanceExportAuditEvent(request, decision, exportKind, 'denied'));
+      } catch {
+        return sendPerformanceExportError(
+          request,
+          response,
+          503,
+          'PERFORMANCE_EXPORT_AUDIT_UNAVAILABLE',
+          'Performance export audit is unavailable.'
+        );
+      }
+      return sendPerformanceExportError(
+        request,
+        response,
+        403,
+        'PERFORMANCE_EXPORT_FORBIDDEN',
+        'Performance export is forbidden.'
+      );
+    };
+  }
+
+  const requireContentCsvExport = requirePerformanceExport('content_csv');
+  const requireFeishuSnapshotCsvExport = requirePerformanceExport('feishu_snapshot_csv');
 
   app.get('/api/campaigns/:id/performance/contents', options.authMiddleware, (request, response) => {
     try {
@@ -300,24 +399,29 @@ function registerPerformanceRoutes(app, options = {}) {
     }
   );
 
-  app.get('/api/campaigns/:id/performance/contents/export', options.authMiddleware, (request, response) => {
-    try {
-      const query = plainRequestQuery(request);
-      const scope = query.scope;
-      delete query.scope;
-      const exported = service.exportContents({
-        userId: authenticatedUserId(request),
-        campaignId: request.params.id,
-        scope,
-        query
-      });
-      response.setHeader('Content-Type', 'text/csv;charset=utf-8');
-      response.setHeader('Content-Disposition', `attachment; filename="${exported.filename}"`);
-      return response.send(exported.csv);
-    } catch (error) {
-      return sendError(request, response, error);
+  app.get(
+    '/api/campaigns/:id/performance/contents/export',
+    options.authMiddleware,
+    requireContentCsvExport,
+    (request, response) => {
+      try {
+        const query = plainRequestQuery(request);
+        const scope = query.scope;
+        delete query.scope;
+        const exported = service.exportContents({
+          userId: authenticatedUserId(request),
+          campaignId: request.params.id,
+          scope,
+          query
+        });
+        response.setHeader('Content-Type', 'text/csv;charset=utf-8');
+        response.setHeader('Content-Disposition', `attachment; filename="${exported.filename}"`);
+        return response.send(exported.csv);
+      } catch (error) {
+        return sendError(request, response, error);
+      }
     }
-  });
+  );
 
   app.get('/api/campaigns/:id/performance/integration-preview', options.authMiddleware, (request, response) => {
     try {
@@ -352,19 +456,41 @@ function registerPerformanceRoutes(app, options = {}) {
     }
   });
 
-  app.get('/api/campaigns/:id/performance/feishu-projection-preview/export', options.authMiddleware, (request, response) => {
-    try {
-      const exported = feishuProjectionService.exportCsv({
-        userId: authenticatedUserId(request),
-        campaignId: request.params.id
-      });
-      response.setHeader('Content-Type', 'text/csv;charset=utf-8');
-      response.setHeader('Content-Disposition', `attachment; filename="${exported.filename}"`);
-      return response.send(exported.csv);
-    } catch (error) {
-      return sendError(request, response, error);
+  app.get(
+    '/api/campaigns/:id/performance/feishu-projection-preview/export',
+    options.authMiddleware,
+    requireFeishuSnapshotCsvExport,
+    (request, response) => {
+      try {
+        const exported = feishuProjectionService.exportCsv({
+          userId: authenticatedUserId(request),
+          campaignId: request.params.id
+        });
+        try {
+          performanceExportAudit(performanceExportAuditEvent(
+            request,
+            request.performanceExportPermission,
+            'feishu_snapshot_csv',
+            'exported',
+            exported.record_count
+          ));
+        } catch {
+          return sendPerformanceExportError(
+            request,
+            response,
+            503,
+            'PERFORMANCE_EXPORT_AUDIT_UNAVAILABLE',
+            'Performance export audit is unavailable.'
+          );
+        }
+        response.setHeader('Content-Type', 'text/csv;charset=utf-8');
+        response.setHeader('Content-Disposition', `attachment; filename="${exported.filename}"`);
+        return response.send(exported.csv);
+      } catch (error) {
+        return sendError(request, response, error);
+      }
     }
-  });
+  );
 
   app.post('/api/campaigns/:id/performance/feishu-connection', options.authMiddleware, (request, response) => {
     try {

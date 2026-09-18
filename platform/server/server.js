@@ -71,7 +71,8 @@ const {
   CRM_CONTACT_UPDATE_ACTION,
   CRM_TASK_MODULE,
   CRM_TASK_CREATE_ACTION,
-  CRM_TASK_UPDATE_ACTION
+  CRM_TASK_UPDATE_ACTION,
+  CAMPAIGN_PERFORMANCE_MODULE
 } = require('./services/module_action_permission_service');
 const moduleActionPermissionService = createModuleActionPermissionService(db);
 
@@ -96,11 +97,17 @@ function projectModulePermissions(principal, organizationId) {
     organizationId,
     module: CRM_TASK_MODULE
   });
+  const campaignPerformanceAccess = moduleActionPermissionService.projectModuleAccess({
+    principal,
+    organizationId,
+    module: CAMPAIGN_PERFORMANCE_MODULE
+  });
   if (
     !crmCustomerAccess.allowed ||
     !crmOpportunityAccess.allowed ||
     !crmContactAccess.allowed ||
-    !crmTaskAccess.allowed
+    !crmTaskAccess.allowed ||
+    !campaignPerformanceAccess.allowed
   ) {
     throw new Error('Module permissions unavailable');
   }
@@ -108,7 +115,8 @@ function projectModulePermissions(principal, organizationId) {
     [CRM_CUSTOMER_MODULE]: crmCustomerAccess.actions.slice(),
     [CRM_OPPORTUNITY_MODULE]: crmOpportunityAccess.actions.slice(),
     [CRM_CONTACT_MODULE]: crmContactAccess.actions.slice(),
-    [CRM_TASK_MODULE]: crmTaskAccess.actions.slice()
+    [CRM_TASK_MODULE]: crmTaskAccess.actions.slice(),
+    [CAMPAIGN_PERFORMANCE_MODULE]: campaignPerformanceAccess.actions.slice()
   };
 }
 const {
@@ -341,6 +349,7 @@ const phase4PolicyNames = [
   'CAMPAIGN_KNOWLEDGE_LIST',
   'CAMPAIGN_KNOWLEDGE_DETAIL',
   'CAMPAIGN_PERFORMANCE_CONTENT_LIST',
+  'CAMPAIGN_PERFORMANCE_CONTENT_EXPORT',
   'CAMPAIGN_PERFORMANCE_FRESHNESS_QUEUE',
   'CAMPAIGN_PERFORMANCE_COLLECTION_RUNS',
   'CAMPAIGN_PERFORMANCE_PROVIDER_REFRESH',
@@ -511,6 +520,21 @@ function writeCrmPermissionAudit(event) {
     event.actor_user_id,
     event.outcome === 'allowed' ? 'crm_permission_allowed' : 'crm_permission_denied',
     'crm_permission',
+    JSON.stringify(details),
+    event.ip_address || null
+  );
+}
+
+function writePerformanceExportAudit(event) {
+  const details = { ...event };
+  delete details.ip_address;
+  db.prepare(`
+    INSERT INTO activity_log (user_id,action,module,details,ip_address)
+    VALUES (?,?,?,?,?)
+  `).run(
+    event.actor_user_id,
+    event.outcome === 'exported' ? 'performance_exported' : 'performance_export_denied',
+    'campaign.performance',
     JSON.stringify(details),
     event.ip_address || null
   );
@@ -2016,6 +2040,8 @@ registerPerformanceRoutes(app, {
   organizationMethodologyService,
   customerReportSnapshotService,
   customerReportDeliveryService,
+  moduleActionPermissionService,
+  performanceExportAudit: writePerformanceExportAudit,
   aiLimiter,
   aiQuotaGuard
 });

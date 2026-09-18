@@ -126,6 +126,14 @@ function currentUserHasCrmTaskPermission(action) {
   return actions.indexOf(action) !== -1;
 }
 
+function currentUserHasCampaignPerformancePermission(action) {
+  var permissions = CURRENT_USER && CURRENT_USER.module_permissions;
+  var actions = permissions && Array.isArray(permissions['campaign.performance'])
+    ? permissions['campaign.performance']
+    : [];
+  return actions.indexOf(action) !== -1;
+}
+
 function currentUserCanUseCrmScope(scope) {
   if (!currentUserHasCrmPermission('read')) return false;
   if (scope === 'my' || scope === 'public_pool') return true;
@@ -180,6 +188,21 @@ function applyCrmPermissionPresentation() {
   updateCustomerScopeTabs();
 }
 
+function applyPerformanceExportPermissionPresentation() {
+  var canExport = currentUserHasCampaignPerformancePermission('export');
+  ['performanceExportFiltered', 'performanceExportAll'].forEach(function(id) {
+    var button = document.getElementById(id);
+    if (button) {
+      button.hidden = !canExport;
+      button.disabled = !canExport;
+      button.title = canExport ? '' : '当前账号没有效果数据导出权限';
+    }
+  });
+  document.querySelectorAll('[data-performance-feishu-action="snapshot-export"]').forEach(function(element) {
+    element.hidden = !canExport;
+  });
+}
+
 function applyCurrentUserRolePresentation() {
   var platformAdmin = currentUserIsPlatformAdministrator();
   var governanceAccess = currentUserHasGovernanceAccess();
@@ -197,6 +220,7 @@ function applyCurrentUserRolePresentation() {
   var heading = document.getElementById('adminPageTitle');
   if (heading) heading.textContent = platformAdmin ? '管理控制室' : '组织与成员';
   applyCrmPermissionPresentation();
+  applyPerformanceExportPermissionPresentation();
 }
 
 function syncCrmTeamSelector() {
@@ -11975,7 +11999,7 @@ function renderPerformanceFeishuConnection(connection) {
       + '" value="' + esc(target) + '" maxlength="100"></label></div>';
   }).join('');
   var disabled = performanceFeishuConnectionSaveInFlight ? ' disabled' : '';
-  var snapshotAction = active && active.status === 'approved'
+  var snapshotAction = active && active.status === 'approved' && currentUserHasCampaignPerformancePermission('export')
     ? '<button class="btn btn-outline btn-sm" type="button" data-performance-feishu-action="snapshot-export" onclick="downloadPerformanceFeishuSnapshot()"' + disabled + '>下载当前效果快照 CSV · 已批准 v' + Number(active.version || 0) + '</button>'
     : '';
   html += '<div class="tm-performance-feishu-connection-form">'
@@ -12136,6 +12160,10 @@ function invalidatePerformanceFeishuSnapshotExport() {
 }
 
 async function downloadPerformanceFeishuSnapshot() {
+  if (!currentUserHasCampaignPerformancePermission('export')) {
+    toast('当前账号没有效果数据导出权限。', 'error');
+    return null;
+  }
   var campaignId = getPerformanceCampaignId();
   if (campaignId === null) {
     toast('请先选择推广活动。', 'error');
@@ -12188,13 +12216,21 @@ async function downloadPerformanceFeishuSnapshot() {
 }
 
 function setPerformanceExportBusy(busy) {
+  var canExport = currentUserHasCampaignPerformancePermission('export');
   ['performanceExportFiltered', 'performanceExportAll'].forEach(function(id) {
     var button = document.getElementById(id);
-    if (button) button.disabled = Boolean(busy);
+    if (button) {
+      button.hidden = !canExport;
+      button.disabled = !canExport || Boolean(busy);
+    }
   });
 }
 
 async function exportPerformanceContents(scope) {
+  if (!currentUserHasCampaignPerformancePermission('export')) {
+    toast('当前账号没有效果数据导出权限。', 'error');
+    return null;
+  }
   var campaignId = getPerformanceCampaignId();
   if (campaignId === null) {
     toast('请先选择推广活动。', 'error');

@@ -183,6 +183,11 @@ const REQUEST_POLICIES = Object.freeze({
     'GET',
     '/api/campaigns/:id/performance/contents'
   ),
+  CAMPAIGN_PERFORMANCE_CONTENT_EXPORT: empty(
+    'campaign.performance.content.export',
+    'GET',
+    '/api/campaigns/:id/performance/contents/export'
+  ),
   CAMPAIGN_PERFORMANCE_FRESHNESS_QUEUE: empty(
     'campaign.performance.freshness-queue',
     'GET',

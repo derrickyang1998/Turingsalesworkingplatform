@@ -37,13 +37,31 @@ function createResponse() {
   };
 }
 
-function createFixture() {
+function createFixture(options = {}) {
   const routes = new Map();
   const app = {
     get(path, ...handlers) { routes.set(`GET ${path}`, handlers); },
     post(path, ...handlers) { routes.set(`POST ${path}`, handlers); }
   };
   const calls = [];
+  const moduleActionPermissionService = options.moduleActionPermissionService || {
+    authorize(input) {
+      calls.push(['performance-export-permission', input]);
+      return options.permissionDecision || {
+        allowed: true,
+        code: 'ALLOWED',
+        principal: {
+          user_id: Number(input.principal && input.principal.id),
+          organization_id: Number(input.organizationId),
+          roles: ['member']
+        }
+      };
+    }
+  };
+  const performanceExportAudit = options.performanceExportAudit || function audit(event) {
+    calls.push(['performance-export-audit', event]);
+    if (options.permissionAuditFailure) throw new Error('audit unavailable');
+  };
   const service = {
     listContents(input) { calls.push(['list', input]); return { items: [], total: 0 }; },
     createContent(input) { calls.push(['create', input]); return { content: { id: 1 } }; },
@@ -355,7 +373,9 @@ function createFixture() {
     contentAnalysisService,
     organizationMethodologyService,
     customerReportSnapshotService,
-    customerReportDeliveryService
+    customerReportDeliveryService,
+    moduleActionPermissionService,
+    performanceExportAudit
   });
   return {
     routes,
@@ -370,7 +390,9 @@ function createFixture() {
     contentAnalysisService,
     organizationMethodologyService,
     customerReportSnapshotService,
-    customerReportDeliveryService
+    customerReportDeliveryService,
+    moduleActionPermissionService,
+    performanceExportAudit
   };
 }
 
@@ -720,7 +742,8 @@ test('previews and exports the approved Feishu performance projection', () => {
   assert.equal(preview.body.request_id, 'projection-preview');
 
   const exported = invoke(routes.get('GET /api/campaigns/:id/performance/feishu-projection-preview/export'), {
-    user: { id: 9 },
+    user: { id: 9, role: 'user' },
+    authContext: { organization: { id: 10 } },
     params: { id: '7' },
     requestId: 'projection-export'
   });
@@ -730,8 +753,141 @@ test('previews and exports the approved Feishu performance projection', () => {
   assert.match(exported.body, /https:\/\/example\.test\/video/);
   assert.deepEqual(calls, [
     ['feishu-projection-preview', { userId: 9, campaignId: '7' }],
-    ['feishu-projection-export', { userId: 9, campaignId: '7' }]
+    ['performance-export-permission', {
+      principal: { id: 9, role: 'user' },
+      organizationId: 10,
+      module: 'campaign.performance',
+      action: 'export'
+    }],
+    ['feishu-projection-export', { userId: 9, campaignId: '7' }],
+    ['performance-export-audit', {
+      actor_user_id: 9,
+      organization_id: 10,
+      permission: 'campaign.performance.export',
+      outcome: 'exported',
+      reason_code: 'ALLOWED',
+      request_id: 'projection-export',
+      target_type: 'campaign',
+      target_id: 7,
+      export_kind: 'feishu_snapshot_csv',
+      record_count: 1,
+      ip_address: null
+    }]
   ]);
+});
+
+test('denies both performance CSV downloads before exporters run and records bounded evidence', () => {
+  const { routes, calls } = createFixture({
+    permissionDecision: {
+      allowed: false,
+      code: 'ACTION_FORBIDDEN',
+      principal: { user_id: 9, organization_id: 10, roles: ['read_only'] }
+    }
+  });
+  const baseRequest = {
+    user: { id: 9, role: 'user' },
+    authContext: { organization: { id: 10 } },
+    params: { id: '7' },
+    query: { q: 'must-not-be-audited', scope: 'all' },
+    ip: '203.0.113.9'
+  };
+
+  const content = invoke(routes.get('GET /api/campaigns/:id/performance/contents/export'), {
+    ...baseRequest,
+    requestId: 'content-export-denied'
+  });
+  const feishu = invoke(routes.get('GET /api/campaigns/:id/performance/feishu-projection-preview/export'), {
+    ...baseRequest,
+    requestId: 'feishu-export-denied'
+  });
+
+  for (const response of [content, feishu]) {
+    assert.equal(response.statusCode, 403);
+    assert.equal(response.body.code, 'PERFORMANCE_EXPORT_FORBIDDEN');
+    assert.deepEqual(response.headers, {});
+  }
+  assert.equal(calls.some(([name]) => name === 'export' || name === 'feishu-projection-export'), false);
+  const audits = calls.filter(([name]) => name === 'performance-export-audit').map(([, event]) => event);
+  assert.deepEqual(audits, [
+    {
+      actor_user_id: 9,
+      organization_id: 10,
+      permission: 'campaign.performance.export',
+      outcome: 'denied',
+      reason_code: 'ACTION_FORBIDDEN',
+      request_id: 'content-export-denied',
+      target_type: 'campaign',
+      target_id: 7,
+      export_kind: 'content_csv',
+      ip_address: '203.0.113.9'
+    },
+    {
+      actor_user_id: 9,
+      organization_id: 10,
+      permission: 'campaign.performance.export',
+      outcome: 'denied',
+      reason_code: 'ACTION_FORBIDDEN',
+      request_id: 'feishu-export-denied',
+      target_type: 'campaign',
+      target_id: 7,
+      export_kind: 'feishu_snapshot_csv',
+      ip_address: '203.0.113.9'
+    }
+  ]);
+  assert.equal(JSON.stringify(audits).includes('must-not-be-audited'), false);
+});
+
+test('does not preserve non-canonical campaign ids in performance export denial audits', () => {
+  const { routes, calls } = createFixture({
+    permissionDecision: { allowed: false, code: 'ACTION_FORBIDDEN' }
+  });
+  const response = invoke(routes.get('GET /api/campaigns/:id/performance/contents/export'), {
+    user: { id: 9, role: 'user' },
+    authContext: { organization: { id: 10 } },
+    params: { id: '7.0' },
+    query: {},
+    requestId: 'non-canonical-campaign-id'
+  });
+
+  assert.equal(response.statusCode, 403);
+  const audit = calls.find(([name]) => name === 'performance-export-audit')[1];
+  assert.equal(audit.target_id, null);
+});
+
+test('fails closed before performance export when denial audit is unavailable', () => {
+  const { routes, calls } = createFixture({
+    permissionDecision: { allowed: false, code: 'ACTION_FORBIDDEN' },
+    permissionAuditFailure: true
+  });
+  const response = invoke(routes.get('GET /api/campaigns/:id/performance/contents/export'), {
+    user: { id: 9, role: 'user' },
+    authContext: { organization: { id: 10 } },
+    params: { id: '7' },
+    query: { scope: 'all' },
+    requestId: 'content-export-audit-failed'
+  });
+
+  assert.equal(response.statusCode, 503);
+  assert.equal(response.body.code, 'PERFORMANCE_EXPORT_AUDIT_UNAVAILABLE');
+  assert.deepEqual(response.headers, {});
+  assert.equal(calls.some(([name]) => name === 'export'), false);
+});
+
+test('fails closed before Feishu CSV headers when the allowed export audit is unavailable', () => {
+  const { routes, calls } = createFixture({ permissionAuditFailure: true });
+  const response = invoke(routes.get('GET /api/campaigns/:id/performance/feishu-projection-preview/export'), {
+    user: { id: 9, role: 'user' },
+    authContext: { organization: { id: 10 } },
+    params: { id: '7' },
+    query: {},
+    requestId: 'feishu-export-success-audit-failed'
+  });
+
+  assert.equal(response.statusCode, 503);
+  assert.equal(response.body.code, 'PERFORMANCE_EXPORT_AUDIT_UNAVAILABLE');
+  assert.deepEqual(response.headers, {});
+  assert.equal(calls.some(([name]) => name === 'feishu-projection-export'), true);
+  assert.equal(calls.some(([name]) => name === 'performance-export-audit'), true);
 });
 
 test('routes commercial approval through a distinct protected campaign contract', () => {
@@ -1311,7 +1467,8 @@ test('returns known performance errors with a stable request identifier', () => 
 test('streams scoped performance CSV exports without serializing the CSV as JSON', () => {
   const { routes, calls } = createFixture();
   const response = invoke(routes.get('GET /api/campaigns/:id/performance/contents/export'), {
-    user: { id: 9 },
+    user: { id: 9, role: 'user' },
+    authContext: { organization: { id: 10 } },
     params: { id: '7' },
     query: { q: 'creator', tag: 'launch', scope: 'filtered' },
     requestId: 'request-export'
@@ -1321,10 +1478,27 @@ test('streams scoped performance CSV exports without serializing the CSV as JSON
   assert.equal(response.headers['Content-Type'], 'text/csv;charset=utf-8');
   assert.equal(response.headers['Content-Disposition'], 'attachment; filename="performance_campaign_7_filtered_export.csv"');
   assert.match(response.body, /^\ufeff视频链接/);
-  assert.deepEqual(calls[0], ['export', {
-    userId: 9,
-    campaignId: '7',
-    scope: 'filtered',
-    query: { q: 'creator', tag: 'launch' }
-  }]);
+  assert.deepEqual(calls, [
+    ['performance-export-permission', {
+      principal: { id: 9, role: 'user' },
+      organizationId: 10,
+      module: 'campaign.performance',
+      action: 'export'
+    }],
+    ['export', {
+      userId: 9,
+      campaignId: '7',
+      scope: 'filtered',
+      query: { q: 'creator', tag: 'launch' }
+    }]
+  ]);
+
+  const policy = campaignContract.REQUEST_POLICIES.CAMPAIGN_PERFORMANCE_CONTENT_EXPORT;
+  assert.ok(policy);
+  assert.equal(policy.id, 'campaign.performance.content.export');
+  assert.equal(policy.method, 'GET');
+  assert.equal(policy.pathTemplate, '/api/campaigns/:id/performance/contents/export');
+  assert.equal(policy.mediaKind, campaignContract.MEDIA_KINDS.EMPTY);
+  const serverSource = fs.readFileSync(path.resolve(__dirname, '..', 'server.js'), 'utf8');
+  assert.match(serverSource, /'CAMPAIGN_PERFORMANCE_CONTENT_EXPORT'/);
 });

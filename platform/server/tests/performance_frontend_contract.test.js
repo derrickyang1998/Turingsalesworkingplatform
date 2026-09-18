@@ -111,6 +111,18 @@ test('performance monitor offers both current-filter and full-campaign CSV expor
   assert.match(appSource, /params\.set\('scope', scope\)/);
   assert.match(appSource, /performance\/contents\/export\?/);
   assert.match(appSource, /dlFile\('content_performance_' \+ scope \+ '\.csv'/);
+  assert.match(appSource, /function currentUserHasCampaignPerformancePermission\(action\)/);
+  assert.match(appSource, /permissions\['campaign\.performance'\]/);
+  assert.match(appSource, /function applyPerformanceExportPermissionPresentation\(\)/);
+  assert.match(appSource, /applyCurrentUserRolePresentation\(\)[\s\S]*?applyPerformanceExportPermissionPresentation\(\)/);
+  assert.match(
+    appSource,
+    /function setPerformanceExportBusy\(busy\)[\s\S]*?button\.disabled = !canExport \|\| Boolean\(busy\)/
+  );
+  assert.match(
+    appSource,
+    /async function exportPerformanceContents\(scope\)[\s\S]*?if \(!currentUserHasCampaignPerformancePermission\('export'\)\)/
+  );
 });
 
 test('performance monitor shows a campaign-scoped freshness queue and controlled YouTube refresh', () => {
@@ -190,6 +202,14 @@ test('an approved Feishu mapping can export the current observed snapshot from t
   assert.match(appSource, /function downloadPerformanceFeishuSnapshot\(\)/);
   assert.match(appSource, /function invalidatePerformanceFeishuSnapshotExport\(\)/);
   assert.match(appSource, /function performanceFeishuSnapshotExportIsCurrent\(context\)/);
+  assert.match(
+    appSource,
+    /var snapshotAction = active && active\.status === 'approved' && currentUserHasCampaignPerformancePermission\('export'\)/
+  );
+  assert.match(
+    appSource,
+    /async function downloadPerformanceFeishuSnapshot\(\)[\s\S]*?if \(!currentUserHasCampaignPerformancePermission\('export'\)\)/
+  );
   assert.match(appSource, /performance\/feishu-projection-preview\/export/);
   assert.match(appSource, /data-performance-feishu-action="snapshot-export"/);
   assert.match(appSource, /下载当前效果快照 CSV/);
