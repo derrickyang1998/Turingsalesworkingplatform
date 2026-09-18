@@ -267,6 +267,9 @@ function mountRoutes(db, options) {
   const influencerDataExportAudit = options && options.influencerDataExportAudit
     ? options.influencerDataExportAudit
     : function() {};
+  const influencerDataImportAudit = options && options.influencerDataImportAudit
+    ? options.influencerDataImportAudit
+    : function() {};
   const organization = db.prepare("SELECT id FROM organizations WHERE code='turingmarket-default'").get();
   routes.__defaultOrganizationId = organization && Number(organization.id);
   const routesModule = path.resolve(__dirname, '../routes.js');
@@ -274,7 +277,8 @@ function mountRoutes(db, options) {
   require(routesModule)(app, db, authMiddleware, Object.assign({
     campaignCollaborationService,
     moduleActionPermissionService,
-    influencerDataExportAudit
+    influencerDataExportAudit,
+    influencerDataImportAudit
   }, options || {}));
   return routes;
 }
@@ -733,16 +737,256 @@ test('influencer import rolls back business rows when required knowledge archiva
     body: {
       batch_id: 'required-archive-rollback',
       rows: [{ '网红频道名称': '@required_archive_rollback' }]
-    }
+    },
+    headers: { 'x-request-id': 'required-archive-rollback' }
   });
   assert.equal(result.statusCode, 500);
-  assert.match(result.payload.error, /injected required influencer archive failure/);
+  assert.deepEqual(result.payload, {
+    error: 'Influencer import failed.',
+    code: 'INFLUENCER_IMPORT_FAILED',
+    request_id: 'required-archive-rollback'
+  });
+  assert.equal(JSON.stringify(result).includes('injected required influencer archive failure'), false);
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM influencers').get().count, before);
   assert.equal(db.prepare(`
     SELECT COUNT(*) AS count FROM knowledge_entries
     WHERE source_type='influencer_import' AND source_id='required-archive-rollback'
   `).get().count, 0);
 
+  db.close();
+});
+
+test('influencer create and JSON import require the named import permission and record bounded denial evidence', async () => {
+  const db = freshDb();
+  const calls = [];
+  const routes = mountRoutes(db, {
+    moduleActionPermissionService: {
+      authorize(input) {
+        calls.push(['permission', input]);
+        return {
+          allowed: false,
+          code: 'ACTION_FORBIDDEN',
+          principal: { user_id: 2, organization_id: 10, roles: ['read_only'] }
+        };
+      }
+    },
+    influencerDataImportAudit(event) {
+      calls.push(['audit', event]);
+    }
+  });
+  const before = db.prepare('SELECT COUNT(*) AS count FROM influencers').get().count;
+
+  for (const [route, body, importKind, requestId] of [
+    [
+      'POST /api/influencers',
+      { kol_handle: '@must-not-be-audited-manual', profile_link: 'https://example.com/private-manual' },
+      'manual',
+      'influencer-manual-denied'
+    ],
+    [
+      'POST /api/influencers/import',
+      { rows: [{ '网红频道名称': '@must-not-be-audited-json' }], batch_id: 'private-batch' },
+      'json',
+      'influencer-json-denied'
+    ]
+  ]) {
+    const denied = await invoke(routes, route, {
+      body,
+      headers: { 'x-request-id': requestId },
+      authContext: { organization: { id: 10 } }
+    });
+    assert.deepEqual(denied, {
+      statusCode: 403,
+      payload: {
+        error: 'Influencer data import is forbidden.',
+        code: 'INFLUENCER_IMPORT_FORBIDDEN',
+        request_id: requestId
+      },
+      body: undefined,
+      headers: {}
+    });
+    const permissionCall = calls.at(-2);
+    const auditCall = calls.at(-1);
+    assert.deepEqual(permissionCall, ['permission', {
+      principal: { id: 2, role: 'user', username: 'tester' },
+      organizationId: 10,
+      module: 'influencer.data',
+      action: 'import'
+    }]);
+    assert.deepEqual(auditCall, ['audit', {
+      actor_user_id: 2,
+      organization_id: 10,
+      permission: 'influencer.data.import',
+      outcome: 'denied',
+      reason_code: 'ACTION_FORBIDDEN',
+      request_id: requestId,
+      target_type: 'influencer_dataset',
+      target_id: null,
+      import_kind: importKind,
+      ip_address: '127.0.0.1'
+    }]);
+  }
+
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM influencers').get().count, before);
+  assert.equal(JSON.stringify(calls).includes('must-not-be-audited'), false);
+  assert.equal(JSON.stringify(calls).includes('private-batch'), false);
+  db.close();
+});
+
+test('influencer import success audit commits atomically with rows and knowledge', async () => {
+  const db = freshDb();
+  const completedAudits = [];
+  const allow = {
+    authorize() {
+      return {
+        allowed: true,
+        code: 'ALLOWED',
+        principal: { user_id: 2, organization_id: 10, roles: ['member'] }
+      };
+    }
+  };
+  const routes = mountRoutes(db, {
+    moduleActionPermissionService: allow,
+    influencerDataImportAudit(event) { completedAudits.push(event); }
+  });
+  const imported = await invoke(routes, 'POST /api/influencers/import', {
+    body: {
+      batch_id: 'permission-import-success',
+      rows: [{ '网红频道名称': '@permission_import_success' }]
+    },
+    headers: { 'x-request-id': 'influencer-import-success' },
+    authContext: { organization: { id: 10 } }
+  });
+
+  assert.equal(imported.statusCode, 200);
+  assert.equal(imported.payload.imported, 1);
+  assert.deepEqual(completedAudits, [{
+    actor_user_id: 2,
+    organization_id: 10,
+    permission: 'influencer.data.import',
+    outcome: 'imported',
+    reason_code: 'ALLOWED',
+    request_id: 'influencer-import-success',
+    target_type: 'influencer_dataset',
+    target_id: null,
+    import_kind: 'json',
+    ip_address: '127.0.0.1',
+    record_count: 1,
+    skipped_count: 0,
+    total_count: 1,
+    replayed: false
+  }]);
+
+  const failedRoutes = mountRoutes(db, {
+    moduleActionPermissionService: allow,
+    influencerDataImportAudit() { throw new Error('audit unavailable'); }
+  });
+  const failed = await invoke(failedRoutes, 'POST /api/influencers/import', {
+    body: {
+      batch_id: 'permission-import-audit-rollback',
+      rows: [{ '网红频道名称': '@permission_import_audit_rollback' }]
+    },
+    headers: { 'x-request-id': 'influencer-import-audit-rollback' },
+    authContext: { organization: { id: 10 } }
+  });
+  assert.equal(failed.statusCode, 503);
+  assert.equal(failed.payload.code, 'INFLUENCER_IMPORT_AUDIT_UNAVAILABLE');
+  assert.equal(failed.payload.request_id, 'influencer-import-audit-rollback');
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM influencers WHERE import_batch=?')
+    .get('permission-import-audit-rollback').count, 0);
+  assert.equal(db.prepare(`
+    SELECT COUNT(*) AS count FROM knowledge_entries
+    WHERE source_type='influencer_import' AND source_id=?
+  `).get('permission-import-audit-rollback').count, 0);
+  db.close();
+});
+
+test('manual influencer create rolls back its row and knowledge when success audit storage fails', async () => {
+  const db = freshDb();
+  const routes = mountRoutes(db, {
+    moduleActionPermissionService: {
+      authorize() {
+        return {
+          allowed: true,
+          code: 'ALLOWED',
+          principal: { user_id: 2, organization_id: 10, roles: ['member'] }
+        };
+      }
+    },
+    influencerDataImportAudit() { throw new Error('audit unavailable'); }
+  });
+  const result = await invoke(routes, 'POST /api/influencers', {
+    body: {
+      platform: 'YouTube',
+      kol_handle: '@manual_import_audit_rollback',
+      profile_link: 'https://example.com/manual-import-audit-rollback'
+    },
+    headers: { 'x-request-id': 'influencer-manual-audit-rollback' },
+    authContext: { organization: { id: 10 } }
+  });
+
+  assert.equal(result.statusCode, 503);
+  assert.equal(result.payload.code, 'INFLUENCER_IMPORT_AUDIT_UNAVAILABLE');
+  assert.equal(result.payload.request_id, 'influencer-manual-audit-rollback');
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM influencers WHERE kol_handle=?')
+    .get('@manual_import_audit_rollback').count, 0);
+  assert.equal(db.prepare(`
+    SELECT COUNT(*) AS count FROM knowledge_entries
+    WHERE source_type='influencer_profile' AND title LIKE '%manual_import_audit_rollback%'
+  `).get().count, 0);
+  db.close();
+});
+
+test('manual and JSON influencer import conceal unknown storage failures', async () => {
+  const db = freshDb();
+  db.exec(`
+    CREATE TRIGGER test_fail_unknown_influencer_storage
+    BEFORE INSERT ON influencers
+    BEGIN SELECT RAISE(ABORT,'private influencer storage detail'); END
+  `);
+  const routes = mountRoutes(db, {
+    moduleActionPermissionService: {
+      authorize() {
+        return {
+          allowed: true,
+          code: 'ALLOWED',
+          principal: { user_id: 2, organization_id: 10, roles: ['member'] }
+        };
+      }
+    }
+  });
+
+  const manual = await invoke(routes, 'POST /api/influencers', {
+    body: { kol_handle: '@concealed_manual_failure' },
+    headers: { 'x-request-id': 'concealed-manual-failure' },
+    authContext: { organization: { id: 10 } }
+  });
+  assert.deepEqual(manual.payload, {
+    error: 'Influencer import failed.',
+    code: 'INFLUENCER_IMPORT_FAILED',
+    request_id: 'concealed-manual-failure'
+  });
+  assert.equal(manual.statusCode, 500);
+
+  const json = await invoke(routes, 'POST /api/influencers/import', {
+    body: {
+      batch_id: 'concealed-json-failure',
+      rows: [{ '网红频道名称': '@concealed_json_failure' }]
+    },
+    headers: { 'x-request-id': 'concealed-json-failure' },
+    authContext: { organization: { id: 10 } }
+  });
+  assert.deepEqual(json.payload, {
+    error: 'Influencer import failed.',
+    code: 'INFLUENCER_IMPORT_FAILED',
+    request_id: 'concealed-json-failure'
+  });
+  assert.equal(json.statusCode, 500);
+  assert.equal(JSON.stringify([manual, json]).includes('private influencer storage detail'), false);
+  assert.equal(db.prepare(`
+    SELECT COUNT(*) AS count FROM influencers
+    WHERE kol_handle IN ('@concealed_manual_failure','@concealed_json_failure')
+  `).get().count, 0);
   db.close();
 });
 
@@ -959,7 +1203,69 @@ test('influencer upload route imports a multipart CSV through the real server', 
     assert.equal(inf.cpm, 38);
     assert.equal(inf.cpv, 0.07);
     assert.equal(inf.parent_record, 'UPLOAD-PARENT');
+    const audit = db.prepare(`
+      SELECT details FROM activity_log
+      WHERE action='influencer_data_imported' AND module='influencer.data'
+      ORDER BY id DESC LIMIT 1
+    `).get();
+    assert.ok(audit);
+    const evidence = JSON.parse(audit.details);
+    assert.equal(evidence.permission, 'influencer.data.import');
+    assert.equal(evidence.outcome, 'imported');
+    assert.equal(evidence.import_kind, 'upload');
+    assert.equal(evidence.record_count, 1);
+    assert.equal(evidence.skipped_count, 0);
+    assert.equal(evidence.total_count, 1);
+    assert.equal(evidence.replayed, false);
+    assert.equal(JSON.stringify(evidence).includes('@upload_route_kol'), false);
     db.close();
+  });
+});
+
+test('influencer upload rolls back rows and knowledge when completed audit storage fails', async () => {
+  await withTempServer(async ({ baseUrl, token, dbPath }) => {
+    const Database = require('better-sqlite3');
+    const setup = new Database(dbPath);
+    const beforeInfluencers = setup.prepare('SELECT COUNT(*) AS count FROM influencers').get().count;
+    const beforeKnowledge = setup.prepare(`
+      SELECT COUNT(*) AS count FROM knowledge_entries WHERE source_type='influencer_import'
+    `).get().count;
+    setup.exec(`
+      CREATE TRIGGER test_fail_completed_influencer_import_audit
+      BEFORE INSERT ON activity_log
+      WHEN NEW.action='influencer_data_imported'
+      BEGIN SELECT RAISE(ABORT,'injected completed influencer import audit failure'); END
+    `);
+    setup.close();
+
+    const csv = [
+      'KOL Handle,Platform,Followers,Link,Project',
+      '@upload_audit_rollback,TikTok,1000,https://example.com/upload-audit-rollback,Audit Rollback'
+    ].join('\n');
+    const form = new FormData();
+    form.append('batch_id', 'upload-audit-rollback');
+    form.append('file', new Blob([csv], { type: 'text/csv;charset=utf-8' }), 'upload-audit-rollback.csv');
+    const response = await fetch(baseUrl + '/api/influencers/upload', {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer ' + token,
+        'X-Request-Id': 'influencer-upload-audit-rollback'
+      },
+      body: form
+    });
+    const payload = await response.json();
+    assert.equal(response.status, 503);
+    assert.equal(payload.code, 'INFLUENCER_IMPORT_AUDIT_UNAVAILABLE');
+    assert.equal(payload.request_id, 'influencer-upload-audit-rollback');
+
+    const inspection = new Database(dbPath, { readonly: true });
+    assert.equal(inspection.prepare('SELECT COUNT(*) AS count FROM influencers').get().count, beforeInfluencers);
+    assert.equal(inspection.prepare(`
+      SELECT COUNT(*) AS count FROM knowledge_entries WHERE source_type='influencer_import'
+    `).get().count, beforeKnowledge);
+    assert.equal(inspection.prepare('SELECT COUNT(*) AS count FROM influencers WHERE kol_handle=?')
+      .get('@upload_audit_rollback').count, 0);
+    inspection.close();
   });
 });
 
@@ -3043,11 +3349,12 @@ test('m4 frontend keeps import, feishu, and order-resource controls wired', () =
   assert.match(indexHtml, /id="m4ColumnWorkspaceButton"/);
   assert.match(indexHtml, /id="m4ColumnWorkspace"/);
   assert.equal((indexHtml.match(/data-influencer-export-action="export"/g) || []).length, 3);
+  assert.equal((indexHtml.match(/data-influencer-import-action="import"/g) || []).length, 8);
   assert.match(indexHtml, /onclick="saveM4SavedView\(\)"/);
   assert.match(indexHtml, /onclick="deleteM4SavedView\(\)"/);
   assert.match(indexHtml, /onclick="clearM4Filters\(\)"/);
   assert.match(indexHtml, /id="infFile"[^>]*accept="\.csv,\.json,\.xlsx"/);
-  assert.match(indexHtml, /id="infFileModal" accept="\.csv,\.json,\.xlsx"/);
+  assert.match(indexHtml, /id="infFileModal"[^>]*accept="\.csv,\.json,\.xlsx"/);
   assert.doesNotMatch(indexHtml, /id="infFile(?:Modal)?"[^>]*accept="[^"]*\.xls(?:[,\"])/);
   assert.match(indexHtml, /id="infUploadModal"[^>]*onclick="if\(event\.target===this\)closeInfUploadModal\(\)"/);
   assert.match(indexHtml, /id="infGuidedStatus"[^>]*role="status"[^>]*aria-live="polite"/);
@@ -3096,7 +3403,8 @@ test('m4 frontend keeps import, feishu, and order-resource controls wired', () =
   assert.match(componentCss, /top: var\(--m4-table-header-height\)/);
   assert.match(componentCss, /\.m4-table \.m4-column-filter/);
   assert.match(componentCss, /\.m4-column-workspace/);
-  assert.match(componentCss, /\[data-influencer-export-action="export"\]\[hidden\]\s*\{[^}]*display:\s*none\s*!important/s);
+  assert.match(componentCss, /\[data-influencer-export-action="export"\]\[hidden\],/);
+  assert.match(componentCss, /\[data-influencer-import-action="import"\]\[hidden\]\s*\{[^}]*display:\s*none\s*!important/s);
   assert.match(componentCss, /\.tm-influencer-import-scroll\s*\{[^}]*overflow-x:\s*auto/s);
   assert.match(componentCss, /@media\s*\(max-width:\s*720px\)[\s\S]*\.tm-influencer-import-dialog/);
   assert.match(componentCss, /@media\s*\(max-width:\s*720px\)\s*\{[\s\S]*?\.tm-influencer-import-scroll\s*\{[^}]*max-height:\s*none[^}]*overflow-x:\s*auto[^}]*overflow-y:\s*hidden/s);
@@ -3150,10 +3458,15 @@ test('m4 frontend keeps import, feishu, and order-resource controls wired', () =
   assert.match(appJs, /function currentUserHasInfluencerDataPermission\(action\)/);
   assert.match(appJs, /permissions\['influencer\.data'\]/);
   assert.match(appJs, /function applyInfluencerExportPermissionPresentation\(\)/);
-  assert.match(appJs, /applyCurrentUserRolePresentation\(\)[\s\S]*?applyInfluencerExportPermissionPresentation\(\)/);
+  assert.match(appJs, /function applyInfluencerImportPermissionPresentation\(\)/);
+  assert.match(appJs, /applyCurrentUserRolePresentation\(\)[\s\S]*?applyInfluencerExportPermissionPresentation\(\)[\s\S]*?applyInfluencerImportPermissionPresentation\(\)/);
+  assert.match(appJs, /function openInfUploadModal\(opener\)[\s\S]*?currentUserHasInfluencerDataPermission\('import'\)/);
+  assert.match(appJs, /async function requestInfluencerImportPreview\(fieldMapping\)[\s\S]*?currentUserHasInfluencerDataPermission\('import'\)/);
+  assert.match(appJs, /async function confirmInfluencerImport\(\)[\s\S]*?currentUserHasInfluencerDataPermission\('import'\)/);
+  assert.match(appJs, /function importInfluencers\(rows\)[\s\S]*?currentUserHasInfluencerDataPermission\('import'\)/);
   assert.match(appJs, /function exportSelected\(\)\s*\{\s*var ids = getSelectedInfIds\(\);/);
   assert.match(appJs, /function exportInf\(mode, ids\)[\s\S]*?if \(!currentUserHasInfluencerDataPermission\('export'\)\)/);
-  assert.deepEqual(browserFixture.auth.admin.user.module_permissions['influencer.data'], ['export']);
+  assert.deepEqual(browserFixture.auth.admin.user.module_permissions['influencer.data'], ['export', 'import']);
   assert.match(appJs, /campaign_id: campaignId/);
   assert.match(appJs, /d\.message \|\| 'CSV fallback downloaded\.'/);
   assert.match(appJs, /CURRENT_USER && CURRENT_USER\.role === 'admin'/);

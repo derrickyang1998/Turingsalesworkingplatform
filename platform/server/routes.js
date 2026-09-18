@@ -39,6 +39,7 @@ const {
   INFLUENCER_DATA_MODULE,
   INFLUENCER_DATA_EXPORT_ACTION
 } = require('./services/module_action_permission_service');
+const influencerDataImportPermission = require('./services/influencer_data_import_permission_service');
 
 class InfluencerFilterError extends Error {
   constructor(message) {
@@ -239,6 +240,7 @@ const influencerSavedViews = options.influencerSavedViewService || createInfluen
 const campaignCollaboration = options.campaignCollaborationService;
 const moduleActionPermissionService = options.moduleActionPermissionService;
 const influencerDataExportAudit = options.influencerDataExportAudit;
+const influencerDataImportAudit = options.influencerDataImportAudit;
 const feishuClient = options.feishuClient || createFeishuClient();
 const feishuBitableOutbox = options.feishuBitableOutboxService || createFeishuBitableOutboxService(db);
 
@@ -247,6 +249,9 @@ if (!moduleActionPermissionService || typeof moduleActionPermissionService.autho
 }
 if (typeof influencerDataExportAudit !== 'function') {
   throw new TypeError('influencerDataExportAudit must be a function');
+}
+if (typeof influencerDataImportAudit !== 'function') {
+  throw new TypeError('influencerDataImportAudit must be a function');
 }
 
 function influencerExportPositiveInteger(value) {
@@ -351,6 +356,61 @@ function requireInfluencerDataExport(request, response, next) {
   );
 }
 
+function sendInfluencerImportError(request, response, error) {
+  const statusCode = error.statusCode || 500;
+  const controlled = typeof error.code === 'string' && error.code.startsWith('INFLUENCER_');
+  return response.status(statusCode).json({
+    error: controlled && error.message ? error.message : 'Influencer import failed.',
+    code: controlled ? error.code : 'INFLUENCER_IMPORT_FAILED',
+    request_id: error.requestId || influencerDataImportPermission.requestId(request)
+  });
+}
+
+function persistInfluencerImportAudit(request, event) {
+  try {
+    influencerDataImportAudit(event);
+  } catch (_error) {
+    throw influencerDataImportPermission.error(
+      request,
+      503,
+      'INFLUENCER_IMPORT_AUDIT_UNAVAILABLE',
+      'Influencer import audit is unavailable.'
+    );
+  }
+}
+
+function requireInfluencerDataImport(importKind) {
+  return function(request, response, next) {
+    const decision = influencerDataImportPermission.authorize(
+      moduleActionPermissionService,
+      request
+    );
+    if (decision.allowed === true) {
+      request.influencerDataImportPermission = decision;
+      request.influencerDataImportKind = importKind;
+      return next();
+    }
+    try {
+      persistInfluencerImportAudit(
+        request,
+        influencerDataImportPermission.auditEvent(request, decision, 'denied', { importKind })
+      );
+    } catch (error) {
+      return sendInfluencerImportError(request, response, error);
+    }
+    return sendInfluencerImportError(
+      request,
+      response,
+      influencerDataImportPermission.error(
+        request,
+        403,
+        'INFLUENCER_IMPORT_FORBIDDEN',
+        'Influencer data import is forbidden.'
+      )
+    );
+  };
+}
+
 function feishuCampaignId(value) {
   if (Number.isSafeInteger(value) && value > 0) return value;
   if (typeof value === 'string' && /^[1-9][0-9]{0,15}$/.test(value)) {
@@ -439,13 +499,63 @@ app.delete('/api/influencer-views/:id', authMiddleware, (req, res) => {
   }
 });
 
-app.post('/api/influencers', authMiddleware, (req, res) => {
-  const { platform, kol_handle, profile_link, followers, avg_views_10, avg_engagement, category, sub_category, region, language, content_style, collab_type, cost_usd, cost_range_min, cost_range_max, cpm, brand_collab_history, contact_email } = req.body;
-  const result = db.prepare(`INSERT INTO influencers (platform, kol_handle, profile_link, followers, avg_views_10, avg_engagement, category, sub_category, region, language, content_style, collab_type, cost_usd, cost_range_min, cost_range_max, cpm, brand_collab_history, contact_email) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
-    platform, kol_handle, profile_link, followers || 0, avg_views_10 || 0, avg_engagement || 0, category, sub_category, region, language, content_style, collab_type || 'Dedicated', cost_usd || 0, cost_range_min, cost_range_max, cpm, brand_collab_history, contact_email
-  );
-  businessKnowledge.archiveInfluencer(db, db.prepare('SELECT * FROM influencers WHERE id = ?').get(result.lastInsertRowid), req.user);
-  res.json({ id: result.lastInsertRowid });
+app.post('/api/influencers', authMiddleware, requireInfluencerDataImport('manual'), (req, res) => {
+  try {
+    const input = req.body || {};
+    const created = db.transaction(function() {
+      const result = db.prepare(`
+        INSERT INTO influencers (
+          platform,kol_handle,profile_link,followers,avg_views_10,avg_engagement,
+          category,sub_category,region,language,content_style,collab_type,cost_usd,
+          cost_range_min,cost_range_max,cpm,brand_collab_history,contact_email
+        ) VALUES (
+          @platform,@kol_handle,@profile_link,@followers,@avg_views_10,@avg_engagement,
+          @category,@sub_category,@region,@language,@content_style,@collab_type,@cost_usd,
+          @cost_range_min,@cost_range_max,@cpm,@brand_collab_history,@contact_email
+        )
+      `).run({
+        platform: input.platform || null,
+        kol_handle: input.kol_handle || null,
+        profile_link: input.profile_link || null,
+        followers: input.followers || 0,
+        avg_views_10: input.avg_views_10 || 0,
+        avg_engagement: input.avg_engagement || 0,
+        category: input.category || null,
+        sub_category: input.sub_category || null,
+        region: input.region || null,
+        language: input.language || null,
+        content_style: input.content_style || null,
+        collab_type: input.collab_type || 'Dedicated',
+        cost_usd: input.cost_usd || 0,
+        cost_range_min: input.cost_range_min ?? null,
+        cost_range_max: input.cost_range_max ?? null,
+        cpm: input.cpm ?? null,
+        brand_collab_history: input.brand_collab_history || null,
+        contact_email: input.contact_email || null
+      });
+      const influencer = db.prepare('SELECT * FROM influencers WHERE id = ?').get(result.lastInsertRowid);
+      businessKnowledge.archiveInfluencer(db, influencer, req.user);
+      persistInfluencerImportAudit(
+        req,
+        influencerDataImportPermission.auditEvent(
+          req,
+          req.influencerDataImportPermission,
+          'imported',
+          {
+            importKind: 'manual',
+            recordCount: 1,
+            skippedCount: 0,
+            totalCount: 1,
+            replayed: false
+          }
+        )
+      );
+      return { id: result.lastInsertRowid };
+    }).immediate();
+    return res.json(created);
+  } catch (error) {
+    return sendInfluencerImportError(req, res, error);
+  }
 });
 
 app.post('/api/influencers/match', authMiddleware, (req, res) => {
@@ -1028,17 +1138,42 @@ app.get('/api/influencers/template', authMiddleware, (req, res) => {
   res.send(csv);
 });
 
-app.post('/api/influencers/import', authMiddleware, (req, res) => {
+app.post('/api/influencers/import', authMiddleware, requireInfluencerDataImport('json'), (req, res) => {
   try {
     const { rows, batch_id } = req.body;
     const result = influencerWorkflow.importInfluencerRows(db, rows, {
       batch_id,
       user: req.user,
-      data_source: 'import'
+      data_source: 'import',
+      onPersist(stats) {
+        persistInfluencerImportAudit(
+          req,
+          influencerDataImportPermission.auditEvent(
+            req,
+            req.influencerDataImportPermission,
+            'imported',
+            {
+              importKind: 'json',
+              recordCount: stats.imported,
+              skippedCount: stats.skipped,
+              totalCount: stats.total,
+              replayed: stats.replayed
+            }
+          )
+        );
+      }
     });
     res.json(result);
   } catch (e) {
-    res.status(e.statusCode || 500).json({ error: e.message });
+    const statusCode = e.statusCode || e.status || 500;
+    if (statusCode < 500) {
+      return res.status(statusCode).json({
+        error: e.message || 'Influencer import request is invalid.',
+        code: e.code || 'INFLUENCER_IMPORT_INVALID',
+        request_id: influencerDataImportPermission.requestId(req)
+      });
+    }
+    return sendInfluencerImportError(req, res, e);
   }
 });
 

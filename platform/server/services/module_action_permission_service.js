@@ -24,6 +24,7 @@ const CAMPAIGN_CUSTOMER_REPORT_MODULE = 'campaign.customer_report';
 const CAMPAIGN_CUSTOMER_REPORT_EXPORT_ACTION = 'export';
 const INFLUENCER_DATA_MODULE = 'influencer.data';
 const INFLUENCER_DATA_EXPORT_ACTION = 'export';
+const INFLUENCER_DATA_IMPORT_ACTION = 'import';
 const REQUEST_ROLE_VOCABULARY = new Set(['admin', 'user']);
 const ROLE_ORDER = Object.freeze([
   'platform_admin',
@@ -139,6 +140,12 @@ const POLICY = Object.freeze({
   }),
   [INFLUENCER_DATA_MODULE]: Object.freeze({
     [INFLUENCER_DATA_EXPORT_ACTION]: Object.freeze([
+      'company_owner',
+      'administrator',
+      'manager',
+      'member'
+    ]),
+    [INFLUENCER_DATA_IMPORT_ACTION]: Object.freeze([
       'company_owner',
       'administrator',
       'manager',
@@ -357,6 +364,7 @@ module.exports = {
   CAMPAIGN_CUSTOMER_REPORT_EXPORT_ACTION,
   INFLUENCER_DATA_MODULE,
   INFLUENCER_DATA_EXPORT_ACTION,
+  INFLUENCER_DATA_IMPORT_ACTION,
   POLICY,
   createModuleActionPermissionService
 };

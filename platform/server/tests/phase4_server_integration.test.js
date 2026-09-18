@@ -534,6 +534,79 @@ Module._load = function(request, parent, isMain) {
   return preloadPath;
 }
 
+function writeInfluencerUploadReadOnlyDowngradePreload(rootDir) {
+  const preloadPath = path.join(rootDir, 'influencer-upload-read-only-preload.js');
+  const source = `'use strict';
+const path = require('node:path');
+const Module = require('node:module');
+const originalLoad = Module._load;
+
+Module._load = function(request, parent, isMain) {
+  const loaded = originalLoad.call(this, request, parent, isMain);
+  const parentName = path.basename(parent && parent.filename ? parent.filename : '');
+  if (request !== './services/upload_sandbox_service' || parentName !== 'server.js') {
+    return loaded;
+  }
+  return {
+    ...loaded,
+    createUploadSandboxService(options) {
+      const service = loaded.createUploadSandboxService(options);
+      return {
+        ...service,
+        async processUpload(input) {
+          let authorizationChecks = 0;
+          return service.processUpload({
+            ...input,
+            async assertAuthorized() {
+              authorizationChecks += 1;
+              if (authorizationChecks === 2) {
+                options.db.prepare(\`
+                  UPDATE organization_member_policy
+                  SET access_mode='read_only',updated_at=CURRENT_TIMESTAMP
+                  WHERE user_id=(SELECT id FROM users WHERE username='upload-downgrade-member')
+                \`).run();
+              }
+              return input.assertAuthorized();
+            }
+          });
+        }
+      };
+    }
+  };
+};
+`;
+  fs.writeFileSync(preloadPath, source);
+  return preloadPath;
+}
+
+function writeJwtVerifyProbePreload(rootDir) {
+  const preloadPath = path.join(rootDir, 'jwt-verify-probe-preload.js');
+  const eventPath = path.join(rootDir, 'jwt-verify-events.jsonl');
+  const source = `'use strict';
+const fs = require('node:fs');
+const path = require('node:path');
+const Module = require('node:module');
+const originalLoad = Module._load;
+const eventPath = ${JSON.stringify(eventPath)};
+
+Module._load = function(request, parent, isMain) {
+  const loaded = originalLoad.call(this, request, parent, isMain);
+  const parentName = path.basename(parent && parent.filename ? parent.filename : '');
+  if (request !== 'jsonwebtoken' || parentName !== 'server.js') return loaded;
+  return {
+    ...loaded,
+    verify() {
+      const verified = loaded.verify.apply(loaded, arguments);
+      fs.appendFileSync(eventPath, JSON.stringify({ event: 'jwt_verified' }) + '\\n');
+      return verified;
+    }
+  };
+};
+`;
+  fs.writeFileSync(preloadPath, source);
+  return { preloadPath, eventPath };
+}
+
 function readProbeEvents(eventPath) {
   if (!fs.existsSync(eventPath)) return [];
   return fs.readFileSync(eventPath, 'utf8')
@@ -872,7 +945,7 @@ test('login and auth me preserve the user object and add current auth context', 
       'crm.task': ['read', 'create', 'update'],
       'campaign.performance': ['export'],
       'campaign.customer_report': ['export'],
-      'influencer.data': ['export']
+      'influencer.data': ['export', 'import']
     });
     assert.equal(Array.isArray(login.body.auth_context.teams), true);
     assert.equal(login.body.auth_context.teams.length > 0, true);
@@ -906,7 +979,7 @@ test('authenticated HTTP influencer export uses production permission wiring and
       body: { username: 'admin', password: 'AdminTest1!Secure' }
     });
     assert.equal(login.response.status, 200, login.text + '\n' + server.output());
-    assert.deepEqual(login.body.user.module_permissions['influencer.data'], ['export']);
+    assert.deepEqual(login.body.user.module_permissions['influencer.data'], ['export', 'import']);
 
     const response = await fetch(`${server.baseUrl}/api/influencers/export`, {
       method: 'POST',
@@ -1343,6 +1416,254 @@ test('opportunity named permission ingress denies read-only malformed JSON befor
     }
   } finally {
     await server.close();
+  }
+});
+
+test('influencer import permission ingress denies read-only JSON and upload bodies before parsing with bounded audit', {
+  timeout: 30000
+}, async () => {
+  const server = await startTestServer('tm-influencer-import-permission-ingress-');
+  try {
+    for (const [requestPath, authorization, requestId] of [
+      ['/api/influencers', null, 'influencer-manual-unauthenticated'],
+      ['/api/influencers/import', 'Bearer invalid-token', 'influencer-json-invalid-token']
+    ]) {
+      const headers = {
+        'Content-Type': 'application/json',
+        'X-Request-Id': requestId
+      };
+      if (authorization) headers.Authorization = authorization;
+      const response = await fetch(server.baseUrl + requestPath, {
+        method: 'POST',
+        headers,
+        body: '{'
+      });
+      assert.equal(response.status, 401, requestPath);
+      assert.deepEqual(await response.json(), {
+        error: 'Authentication required.',
+        code: 'AUTHENTICATION_REQUIRED',
+        request_id: requestId
+      });
+    }
+
+    const login = await createReadOnlyOpportunityUser(server, 'influencer-import');
+    assert.deepEqual(login.body.user.module_permissions['influencer.data'], []);
+
+    for (const [requestPath, requestId] of [
+      ['/api/influencers', 'influencer-manual-ingress-denied'],
+      ['/api/influencers/import', 'influencer-json-ingress-denied']
+    ]) {
+      const response = await fetch(server.baseUrl + requestPath, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${login.body.token}`,
+          'Content-Type': 'application/json',
+          'X-Request-Id': requestId
+        },
+        body: '{'
+      });
+      const body = await response.json();
+      assert.equal(response.status, 403, requestPath);
+      assert.deepEqual(body, {
+        error: 'Influencer data import is forbidden.',
+        code: 'INFLUENCER_IMPORT_FORBIDDEN',
+        request_id: requestId
+      });
+    }
+
+    const port = Number(new URL(server.baseUrl).port);
+    const startedAt = Date.now();
+    const uploadResponse = await rawExchange(port, [
+      'POST /api/influencers/upload HTTP/1.1',
+      'Host: 127.0.0.1',
+      `Authorization: Bearer ${login.body.token}`,
+      'Content-Type: multipart/form-data; boundary=tm-import-permission',
+      'Content-Length: 65536',
+      'X-Request-Id: influencer-upload-ingress-denied',
+      'Connection: keep-alive',
+      '',
+      ''
+    ].join('\r\n'));
+    assert.equal(Date.now() - startedAt < 1000, true);
+    assert.match(uploadResponse, /^HTTP\/1\.1 403\b/);
+    assert.match(uploadResponse, /\r\nConnection: close\r\n/i);
+    assert.match(uploadResponse, /"code":"INFLUENCER_IMPORT_FORBIDDEN"/);
+    assert.match(uploadResponse, /"request_id":"influencer-upload-ingress-denied"/);
+
+    const inspection = new Database(server.dbPath);
+    try {
+      const audits = inspection.prepare(`
+        SELECT details
+        FROM activity_log
+        WHERE action='influencer_data_import_denied' AND module='influencer.data'
+        ORDER BY id
+      `).all().map((row) => JSON.parse(row.details));
+      assert.deepEqual(audits.map((event) => ({
+        permission: event.permission,
+        outcome: event.outcome,
+        reason_code: event.reason_code,
+        request_id: event.request_id,
+        target_type: event.target_type,
+        target_id: event.target_id,
+        import_kind: event.import_kind
+      })), [
+        {
+          permission: 'influencer.data.import',
+          outcome: 'denied',
+          reason_code: 'ACTION_FORBIDDEN',
+          request_id: 'influencer-manual-ingress-denied',
+          target_type: 'influencer_dataset',
+          target_id: null,
+          import_kind: 'manual'
+        },
+        {
+          permission: 'influencer.data.import',
+          outcome: 'denied',
+          reason_code: 'ACTION_FORBIDDEN',
+          request_id: 'influencer-json-ingress-denied',
+          target_type: 'influencer_dataset',
+          target_id: null,
+          import_kind: 'json'
+        },
+        {
+          permission: 'influencer.data.import',
+          outcome: 'denied',
+          reason_code: 'ACTION_FORBIDDEN',
+          request_id: 'influencer-upload-ingress-denied',
+          target_type: 'influencer_dataset',
+          target_id: null,
+          import_kind: 'upload'
+        }
+      ]);
+      assert.equal(JSON.stringify(audits).includes('tm-import-permission'), false);
+
+      inspection.exec(`
+        CREATE TRIGGER test_fail_influencer_import_denial_audit
+        BEFORE INSERT ON activity_log
+        WHEN NEW.action='influencer_data_import_denied'
+        BEGIN SELECT RAISE(ABORT,'injected influencer import audit failure'); END
+      `);
+    } finally {
+      inspection.close();
+    }
+
+    const auditFailure = await fetch(server.baseUrl + '/api/influencers/import', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${login.body.token}`,
+        'Content-Type': 'application/json',
+        'X-Request-Id': 'influencer-import-audit-failed'
+      },
+      body: '{'
+    });
+    assert.equal(auditFailure.status, 503);
+    assert.deepEqual(await auditFailure.json(), {
+      error: 'Influencer import audit is unavailable.',
+      code: 'INFLUENCER_IMPORT_AUDIT_UNAVAILABLE',
+      request_id: 'influencer-import-audit-failed'
+    });
+  } finally {
+    await server.close();
+  }
+});
+
+test('influencer JSON import reauthenticates after a slow body before persistence', {
+  timeout: 30000
+}, async () => {
+  const probeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-influencer-json-auth-probe-'));
+  const probe = writeJwtVerifyProbePreload(probeRoot);
+  const server = await startTestServer('tm-influencer-json-session-revocation-', {
+    NODE_OPTIONS: nodeOptionsWithPreload(probe.preloadPath)
+  });
+  let socket;
+  try {
+    const login = await jsonRequest(server.baseUrl, '/api/auth/login', {
+      method: 'POST',
+      body: { username: 'admin', password: 'AdminTest1!Secure' }
+    });
+    assert.equal(login.response.status, 200, login.text + '\n' + server.output());
+
+    const body = JSON.stringify({
+      batch_id: 'slow-json-session-revocation',
+      rows: [{ '网红频道名称': '@slow_json_session_revocation' }],
+      padding: 'x'.repeat(32768)
+    });
+    const port = Number(new URL(server.baseUrl).port);
+    const chunks = [];
+    let resolveResponse;
+    let rejectResponse;
+    const responsePromise = new Promise((resolve, reject) => {
+      resolveResponse = resolve;
+      rejectResponse = reject;
+    });
+    socket = net.createConnection({ host: '127.0.0.1', port });
+    const timer = setTimeout(() => {
+      socket.destroy();
+      rejectResponse(new Error('slow influencer JSON exchange timed out'));
+    }, 3000);
+    socket.on('data', (chunk) => chunks.push(chunk));
+    socket.on('end', () => {
+      clearTimeout(timer);
+      resolveResponse(Buffer.concat(chunks).toString('utf8'));
+    });
+    socket.on('error', (error) => {
+      clearTimeout(timer);
+      rejectResponse(error);
+    });
+    await new Promise((resolve, reject) => {
+      socket.once('error', reject);
+      socket.once('connect', () => {
+        socket.write([
+          'POST /api/influencers/import HTTP/1.1',
+          'Host: 127.0.0.1',
+          `Authorization: Bearer ${login.body.token}`,
+          'Content-Type: application/json',
+          `Content-Length: ${Buffer.byteLength(body, 'utf8')}`,
+          'X-Request-Id: influencer-slow-json-session-revocation',
+          'Connection: close',
+          '',
+          ''
+        ].join('\r\n'));
+        socket.write(body.slice(0, 64));
+        resolve();
+      });
+    });
+
+    const verifyDeadline = Date.now() + 2000;
+    while (!fs.existsSync(probe.eventPath) && Date.now() < verifyDeadline) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(fs.existsSync(probe.eventPath), true, 'early JWT verification did not complete');
+    assert.equal(readProbeEvents(probe.eventPath).length, 1);
+    const mutation = new Database(server.dbPath);
+    try {
+      mutation.prepare('DELETE FROM sessions WHERE token=?').run(login.body.token);
+    } finally {
+      mutation.close();
+    }
+    socket.end(body.slice(64));
+    const response = await responsePromise;
+    assert.match(response, /^HTTP\/1\.1 401\b/);
+    assert.match(response, /Session expired/);
+    assert.equal(readProbeEvents(probe.eventPath).length, 2);
+
+    const inspection = new Database(server.dbPath, { readonly: true });
+    try {
+      assert.equal(inspection.prepare(`
+        SELECT COUNT(*) AS count FROM influencers
+        WHERE import_batch='slow-json-session-revocation'
+      `).get().count, 0);
+      assert.equal(inspection.prepare(`
+        SELECT COUNT(*) AS count FROM knowledge_entries
+        WHERE source_type='influencer_import' AND source_id='slow-json-session-revocation'
+      `).get().count, 0);
+    } finally {
+      inspection.close();
+    }
+  } finally {
+    if (socket && !socket.destroyed) socket.destroy();
+    await server.close();
+    fs.rmSync(probeRoot, { recursive: true, force: true });
   }
 });
 
@@ -2781,7 +3102,8 @@ test('collaboration routes use the injected singleton and one request-id fallbac
           return { allowed: true, code: 'ALLOWED' };
         }
       },
-      influencerDataExportAudit() {}
+      influencerDataExportAudit() {},
+      influencerDataImportAudit() {}
     }
   );
 
@@ -2893,6 +3215,7 @@ test('influencer upload commits its legacy envelope and parser admission in one 
     );
     assert.equal(uploaded.response.status, 200, uploaded.text + '\n' + server.output());
     assert.deepEqual(Object.keys(uploaded.body), [
+      'file_sha256',
       'imported',
       'skipped',
       'total',
@@ -2901,6 +3224,7 @@ test('influencer upload commits its legacy envelope and parser admission in one 
       'sample',
       'knowledge_entry_id'
     ]);
+    assert.match(uploaded.body.file_sha256, /^[0-9a-f]{64}$/);
     assert.equal(uploaded.body.imported, 1);
     assert.equal(uploaded.body.batch, 'influencer-sandbox-batch');
 
@@ -3326,6 +3650,207 @@ test('upload final authorization re-reads the live session before business persi
   } finally {
     await server.close();
     fs.rmSync(probeRoot, { recursive: true, force: true });
+  }
+});
+
+test('influencer upload reauthorizes the named import action after parsing and audits a live read-only downgrade', {
+  timeout: 30000
+}, async () => {
+  const probeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-influencer-upload-read-only-'));
+  const preloadPath = writeInfluencerUploadReadOnlyDowngradePreload(probeRoot);
+  const server = await startTestServer('tm-influencer-upload-read-only-server-', {
+    NODE_OPTIONS: nodeOptionsWithPreload(preloadPath)
+  });
+  try {
+    const login = await jsonRequest(server.baseUrl, '/api/auth/login', {
+      method: 'POST',
+      body: { username: 'admin', password: 'AdminTest1!Secure' }
+    });
+    assert.equal(login.response.status, 200, login.text + '\n' + server.output());
+    const created = await jsonRequest(server.baseUrl, '/api/admin/users', {
+      method: 'POST',
+      token: login.body.token,
+      body: {
+        username: 'upload-downgrade-member',
+        password: 'UploadDowngrade1!Safe',
+        display_name: 'Upload Downgrade Member',
+        role: 'user',
+        department: 'Influencer'
+      }
+    });
+    assert.equal(created.response.status, 200, created.text);
+    const memberLogin = await jsonRequest(server.baseUrl, '/api/auth/login', {
+      method: 'POST',
+      body: {
+        username: 'upload-downgrade-member',
+        password: 'UploadDowngrade1!Safe'
+      }
+    });
+    assert.equal(memberLogin.response.status, 200, memberLogin.text);
+    assert.deepEqual(memberLogin.body.user.module_permissions['influencer.data'], ['export', 'import']);
+
+    const uploaded = await multipartRequest(server.baseUrl, '/api/influencers/upload', {
+      token: memberLogin.body.token,
+      headers: { 'X-Request-Id': 'influencer-upload-live-read-only' },
+      fields: { batch_id: 'influencer-upload-live-read-only' },
+      file: {
+        name: 'live-read-only.csv',
+        type: 'text/csv',
+        bytes: Buffer.from('KOL Handle,Platform\n@live_read_only,TikTok', 'utf8')
+      }
+    });
+    assert.equal(uploaded.response.status, 403, uploaded.text + '\n' + server.output());
+    assert.deepEqual(uploaded.body, {
+      error: 'Influencer data import is forbidden.',
+      code: 'INFLUENCER_IMPORT_FORBIDDEN',
+      request_id: 'influencer-upload-live-read-only'
+    });
+
+    const inspection = new Database(server.dbPath, { readonly: true });
+    try {
+      assert.equal(inspection.prepare(`
+        SELECT COUNT(*) AS count FROM influencers
+        WHERE import_batch='influencer-upload-live-read-only'
+      `).get().count, 0);
+      assert.equal(inspection.prepare('SELECT COUNT(*) AS count FROM sessions').get().count, 2);
+      assert.equal(inspection.prepare(`
+        SELECT state FROM request_idempotency
+        WHERE scope='parser.influencer-upload.admission'
+      `).get().state, 'failed');
+      const audit = JSON.parse(inspection.prepare(`
+        SELECT details FROM activity_log
+        WHERE action='influencer_data_import_denied'
+        ORDER BY id DESC LIMIT 1
+      `).get().details);
+      assert.equal(audit.permission, 'influencer.data.import');
+      assert.equal(audit.outcome, 'denied');
+      assert.equal(audit.reason_code, 'ACTION_FORBIDDEN');
+      assert.equal(audit.import_kind, 'upload');
+      assert.equal(audit.request_id, 'influencer-upload-live-read-only');
+    } finally {
+      inspection.close();
+    }
+  } finally {
+    await server.close();
+    fs.rmSync(probeRoot, { recursive: true, force: true });
+  }
+});
+
+test('influencer upload preview audit failure rolls back admission and returns a bounded error', {
+  timeout: 30000
+}, async () => {
+  const server = await startTestServer('tm-influencer-preview-audit-failure-');
+  try {
+    const login = await jsonRequest(server.baseUrl, '/api/auth/login', {
+      method: 'POST',
+      body: { username: 'admin', password: 'AdminTest1!Secure' }
+    });
+    assert.equal(login.response.status, 200, login.text + '\n' + server.output());
+    const setup = new Database(server.dbPath);
+    try {
+      setup.exec(`
+        CREATE TRIGGER test_fail_influencer_preview_audit
+        BEFORE INSERT ON activity_log
+        WHEN NEW.action='influencer_data_import_previewed'
+        BEGIN SELECT RAISE(ABORT,'private preview audit storage detail'); END
+      `);
+    } finally {
+      setup.close();
+    }
+
+    const uploaded = await multipartRequest(server.baseUrl, '/api/influencers/upload', {
+      token: login.body.token,
+      headers: { 'X-Request-Id': 'influencer-preview-audit-failure' },
+      fields: {
+        mode: 'preview',
+        mapping_version: 'influencer-guided-v1'
+      },
+      file: {
+        name: 'preview-audit.csv',
+        type: 'text/csv',
+        bytes: Buffer.from('KOL Handle,Platform\n@preview_audit,TikTok', 'utf8')
+      }
+    });
+    assert.equal(uploaded.response.status, 503, uploaded.text + '\n' + server.output());
+    assert.deepEqual(uploaded.body, {
+      error: 'Influencer import audit is unavailable.',
+      code: 'INFLUENCER_IMPORT_AUDIT_UNAVAILABLE',
+      request_id: 'influencer-preview-audit-failure'
+    });
+    assert.doesNotMatch(uploaded.text, /private preview audit storage detail/);
+
+    const inspection = new Database(server.dbPath, { readonly: true });
+    try {
+      assert.equal(inspection.prepare(`
+        SELECT COUNT(*) AS count FROM activity_log
+        WHERE action='influencer_data_import_previewed'
+      `).get().count, 0);
+      assert.equal(inspection.prepare(`
+        SELECT state FROM request_idempotency
+        WHERE scope='parser.influencer-upload.admission'
+      `).get().state, 'failed');
+    } finally {
+      inspection.close();
+    }
+  } finally {
+    await server.close();
+  }
+});
+
+test('influencer upload conceals unknown persistence failures', {
+  timeout: 30000
+}, async () => {
+  const server = await startTestServer('tm-influencer-upload-concealed-failure-');
+  try {
+    const login = await jsonRequest(server.baseUrl, '/api/auth/login', {
+      method: 'POST',
+      body: { username: 'admin', password: 'AdminTest1!Secure' }
+    });
+    assert.equal(login.response.status, 200, login.text + '\n' + server.output());
+    const setup = new Database(server.dbPath);
+    try {
+      setup.exec(`
+        CREATE TRIGGER test_fail_unknown_influencer_upload_storage
+        BEFORE INSERT ON influencers
+        BEGIN SELECT RAISE(ABORT,'private upload persistence detail'); END
+      `);
+    } finally {
+      setup.close();
+    }
+
+    const uploaded = await multipartRequest(server.baseUrl, '/api/influencers/upload', {
+      token: login.body.token,
+      headers: { 'X-Request-Id': 'influencer-upload-concealed-failure' },
+      fields: { batch_id: 'influencer-upload-concealed-failure' },
+      file: {
+        name: 'concealed-failure.csv',
+        type: 'text/csv',
+        bytes: Buffer.from('KOL Handle,Platform\n@concealed_upload_failure,TikTok', 'utf8')
+      }
+    });
+    assert.equal(uploaded.response.status, 500, uploaded.text + '\n' + server.output());
+    assert.deepEqual(uploaded.body, {
+      error: 'Influencer import failed.',
+      code: 'INFLUENCER_IMPORT_FAILED',
+      request_id: 'influencer-upload-concealed-failure'
+    });
+    assert.doesNotMatch(uploaded.text, /private upload persistence detail/);
+
+    const inspection = new Database(server.dbPath, { readonly: true });
+    try {
+      assert.equal(inspection.prepare(`
+        SELECT COUNT(*) AS count FROM influencers
+        WHERE import_batch='influencer-upload-concealed-failure'
+      `).get().count, 0);
+      assert.equal(inspection.prepare(`
+        SELECT state FROM request_idempotency
+        WHERE scope='parser.influencer-upload.admission'
+      `).get().state, 'failed');
+    } finally {
+      inspection.close();
+    }
+  } finally {
+    await server.close();
   }
 });
 

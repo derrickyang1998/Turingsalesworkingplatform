@@ -613,6 +613,16 @@ function importInfluencerRows(db, rows, opts) {
   let archiveResult;
   let imported = 0;
   let replayed = false;
+  function persistImportEvidence() {
+    if (typeof opts.onPersist !== 'function') return;
+    opts.onPersist({
+      imported,
+      skipped,
+      total: rows.length,
+      replayed,
+      knowledge_entry_id: archiveResult && archiveResult.entry && archiveResult.entry.id
+    });
+  }
   const doImport = db.transaction(function() {
     archiveResult = archiveImportKnowledge(
       db,
@@ -632,6 +642,7 @@ function importInfluencerRows(db, rows, opts) {
         );
       }
       replayed = true;
+      persistImportEvidence();
       return;
     }
     if (archiveResult.status !== 'created') {
@@ -672,6 +683,7 @@ function importInfluencerRows(db, rows, opts) {
       insert.run(...values);
       imported++;
     }
+    persistImportEvidence();
   });
   doImport.immediate();
   const result = {

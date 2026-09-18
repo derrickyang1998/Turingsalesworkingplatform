@@ -1,6 +1,7 @@
 'use strict';
 
 const fs = require('node:fs');
+const crypto = require('node:crypto');
 const os = require('node:os');
 const path = require('node:path');
 const {
@@ -382,6 +383,24 @@ function csvFromUploadRequest(request) {
   return csv.trim() + '\n';
 }
 
+function multipartTextField(request, fieldName) {
+  const body = request.postDataBuffer();
+  if (!body) return '';
+  const text = body.toString('utf8');
+  const pattern = new RegExp(`name="${fieldName}"\\r?\\n\\r?\\n([^\\r\\n]*)`);
+  const match = pattern.exec(text);
+  return match ? match[1] : '';
+}
+
+function sourceRowsFromCsv(csv) {
+  const rows = parseCsvRows(csv);
+  if (rows.length < 2) return [];
+  const headers = rows[0];
+  return rows.slice(1).map((values) => Object.fromEntries(
+    headers.map((header, index) => [header, values[index] || ''])
+  ));
+}
+
 function fixtureInfluencerFromTemplateRow(values, fixture) {
   const nextId = Math.max(0, ...fixture.influencers.map((row) => Number(row.id) || 0)) + 1;
   return {
@@ -570,7 +589,22 @@ function apiResponseFor(request, fixture, recorder) {
     return jsonResponse({ error: 'Feishu connection test is not configured.', code: 'FEISHU_TEST_NOT_CONFIGURED' }, 409);
   }
   if (method === 'POST' && apiPath === '/influencers/upload') {
-    const imported = importInfluencersFromCsv(fixture, csvFromUploadRequest(request));
+    const csv = csvFromUploadRequest(request);
+    const mode = multipartTextField(request, 'mode');
+    if (mode === 'preview') {
+      let fieldMapping;
+      const encodedMapping = multipartTextField(request, 'field_mapping');
+      if (encodedMapping) fieldMapping = JSON.parse(encodedMapping);
+      const preview = influencerWorkflow.previewInfluencerImport(sourceRowsFromCsv(csv), {
+        row_number_offset: 2,
+        ...(fieldMapping ? { field_mapping: fieldMapping } : {})
+      });
+      return ok({
+        ...preview,
+        file_sha256: crypto.createHash('sha256').update(Buffer.from(csv, 'utf8')).digest('hex')
+      });
+    }
+    const imported = importInfluencersFromCsv(fixture, csv);
     return ok({ success: true, imported: imported.length, skipped: 0, sample: imported.slice(0, 5) });
   }
   if (method === 'POST' && apiPath === '/influencers/import') {

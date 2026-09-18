@@ -26,7 +26,7 @@
         "email": "admin@example.invalid",
         "api_quota": 100000,
         "module_permissions": {
-          "influencer.data": ["export"]
+          "influencer.data": ["export", "import"]
         }
       }
     },

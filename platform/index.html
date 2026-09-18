@@ -1109,7 +1109,7 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
     <div class="card">
       <h3>📤 网红数据导入</h3>
       <p style="font-size:12px;opacity:.6;margin-bottom:16px">支持 CSV / JSON / XLSX（旧 XLS 请另存为 XLSX）格式，拖拽或点击上传</p>
-      <div class="file-upload" id="infDropZone" data-file-input="infFile" role="button" tabindex="0" aria-label="打开网红数据导入" onclick="openInfUploadModal(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openInfUploadModal(this)}"
+      <div class="file-upload" id="infDropZone" data-file-input="infFile" data-influencer-import-action="import" role="button" tabindex="0" aria-label="打开网红数据导入" onclick="openInfUploadModal(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openInfUploadModal(this)}"
            ondragover="event.preventDefault();this.style.borderColor='#1a1a1a';this.style.background='#f5f5f4'"
            ondragleave="event.preventDefault();this.style.borderColor='';this.style.background=''"
            ondrop="event.preventDefault();this.style.borderColor='';this.style.background='';handleDrop(event)">
@@ -1117,10 +1117,10 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
         <div class="upload-text">拖拽文件到此处或点击上传</div>
         <div style="font-size:11px;opacity:.4;margin-top:4px">CSV / JSON / XLSX</div>
       </div>
-      <input type="file" id="infFile" aria-label="选择网红数据文件" accept=".csv,.json,.xlsx" style="display:none" onchange="handleUpload(event)">
+      <input type="file" id="infFile" data-influencer-import-action="import" aria-label="选择网红数据文件" accept=".csv,.json,.xlsx" style="display:none" onchange="handleUpload(event)">
       <div style="display:flex;gap:6px;margin-top:8px">
         <button class="btn btn-outline btn-sm" onclick="downloadInfTemplate()">📋 下载模板</button>
-        <button class="btn btn-outline btn-sm" type="button" onclick="openInfUploadModal(this)">📂 浏览文件上传</button>
+        <button class="btn btn-outline btn-sm" type="button" data-influencer-import-action="import" onclick="openInfUploadModal(this)">📂 浏览文件上传</button>
         <span id="uploadOK" role="status" aria-live="polite" style="font-size:11px;opacity:.6;align-self:center"></span>
       </div>
       <div id="infPreview" style="margin-top:12px;max-height:120px;overflow-y:auto;font-size:11px"></div>
@@ -1956,9 +1956,9 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
     <button type="button" class="modal-close" aria-label="关闭网红数据导入" title="关闭网红数据导入" onclick="closeInfUploadModal()">&times;</button>
     <h3 id="influencerUploadDialogTitle">网红数据导入</h3>
     <p class="tm-influencer-import-note">支持 CSV、JSON、XLSX。旧版 XLS 请先另存为 XLSX。</p>
-    <div class="tm-influencer-import-picker" id="infModalDropZone" ondragover="event.preventDefault()" ondrop="handleInfluencerModalDrop(event)">
-      <input type="file" id="infFileModal" accept=".csv,.json,.xlsx" aria-label="选择网红数据文件" style="display:none" onchange="handleUploadModal(event)">
-      <button class="btn btn-primary" type="button" onclick="document.getElementById('infFileModal').click()">选择文件</button>
+    <div class="tm-influencer-import-picker" id="infModalDropZone" data-influencer-import-action="import" ondragover="event.preventDefault()" ondrop="handleInfluencerModalDrop(event)">
+      <input type="file" id="infFileModal" data-influencer-import-action="import" accept=".csv,.json,.xlsx" aria-label="选择网红数据文件" style="display:none" onchange="handleUploadModal(event)">
+      <button class="btn btn-primary" type="button" data-influencer-import-action="import" onclick="document.getElementById('infFileModal').click()">选择文件</button>
       <span>或拖拽文件到此区域</span>
     </div>
     <div id="infGuidedStatus" role="status" aria-live="polite" class="tm-influencer-import-status">请选择文件。</div>
@@ -1989,8 +1989,8 @@ tbody tr:hover td{background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.07)}
       <button class="btn btn-outline btn-sm" type="button" id="infImportErrorDownload" onclick="downloadInfluencerImportErrors()" hidden>下载完整错误 CSV</button>
       <span class="tm-influencer-import-action-spacer"></span>
       <button class="btn btn-outline btn-sm" type="button" id="infImportCancel" onclick="closeInfUploadModal()">取消</button>
-      <button class="btn btn-outline btn-sm" type="button" id="infImportValidate" onclick="validateInfluencerImportMapping()" disabled>校验数据</button>
-      <button class="btn btn-primary btn-sm" type="button" id="infImportConfirm" onclick="confirmInfluencerImport()" disabled>确认导入</button>
+      <button class="btn btn-outline btn-sm" type="button" id="infImportValidate" data-influencer-import-action="import" onclick="validateInfluencerImportMapping()" disabled>校验数据</button>
+      <button class="btn btn-primary btn-sm" type="button" id="infImportConfirm" data-influencer-import-action="import" onclick="confirmInfluencerImport()" disabled>确认导入</button>
     </div>
   </div>
 </div>

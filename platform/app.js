@@ -238,6 +238,35 @@ function applyInfluencerExportPermissionPresentation() {
   });
 }
 
+function rejectInfluencerImportAction() {
+  if (typeof toast === 'function') toast('当前账号没有网红数据导入权限。', 'error');
+  return false;
+}
+
+function applyInfluencerImportPermissionPresentation() {
+  var canImport = currentUserHasInfluencerDataPermission('import');
+  document.querySelectorAll('[data-influencer-import-action="import"]').forEach(function(element) {
+    element.hidden = !canImport;
+    if (!canImport) {
+      element.disabled = true;
+    } else if (element.id !== 'infImportValidate' && element.id !== 'infImportConfirm') {
+      element.disabled = false;
+    }
+    if (canImport) {
+      element.removeAttribute('aria-disabled');
+    } else {
+      element.setAttribute('aria-disabled', 'true');
+    }
+    element.title = canImport ? '' : '当前账号没有网红数据导入权限';
+  });
+  if (!canImport) {
+    var overlay = document.getElementById('infUploadModal');
+    if (overlay && !overlay.hidden) closeInfUploadModal();
+  } else if (typeof setInfluencerImportState === 'function') {
+    setInfluencerImportState(influencerImportState);
+  }
+}
+
 function applyCurrentUserRolePresentation() {
   var platformAdmin = currentUserIsPlatformAdministrator();
   var governanceAccess = currentUserHasGovernanceAccess();
@@ -258,6 +287,7 @@ function applyCurrentUserRolePresentation() {
   applyPerformanceExportPermissionPresentation();
   applyCustomerReportExportPermissionPresentation();
   applyInfluencerExportPermissionPresentation();
+  applyInfluencerImportPermissionPresentation();
 }
 
 function syncCrmTeamSelector() {
@@ -6530,12 +6560,13 @@ function setInfluencerImportState(state, message) {
   var status = document.getElementById('infGuidedStatus');
   var validateButton = document.getElementById('infImportValidate');
   var confirmButton = document.getElementById('infImportConfirm');
+  var canImport = currentUserHasInfluencerDataPermission('import');
   if (dialog) dialog.dataset.importState = state;
   if (status && message !== undefined) status.textContent = message;
   if (validateButton) {
-    validateButton.disabled = !retainedInfluencerImportFile || state === 'parsing' || state === 'importing';
+    validateButton.disabled = !canImport || !retainedInfluencerImportFile || state === 'parsing' || state === 'importing';
   }
-  if (confirmButton) confirmButton.disabled = state !== 'validated_ready';
+  if (confirmButton) confirmButton.disabled = !canImport || state !== 'validated_ready';
 }
 
 function renderInfluencerImportSummary(data) {
@@ -6617,6 +6648,10 @@ function markInfluencerMappingDirty() {
 }
 
 async function requestInfluencerImportPreview(fieldMapping) {
+  if (!currentUserHasInfluencerDataPermission('import')) {
+    rejectInfluencerImportAction();
+    return null;
+  }
   if (!retainedInfluencerImportFile) return;
   var requestContext = {
     requestId: influencerImportPreviewRequestSequence + 1,
@@ -6659,6 +6694,7 @@ async function requestInfluencerImportPreview(fieldMapping) {
 }
 
 async function beginInfluencerImport(file, opener) {
+  if (!currentUserHasInfluencerDataPermission('import')) return rejectInfluencerImportAction();
   if (!file) return;
   var ext = (file.name.split('.').pop() || '').toLowerCase();
   openInfUploadModal(opener);
@@ -6696,6 +6732,7 @@ function handleDrop(event) {
   beginInfluencerImport(file, event && event.currentTarget);
 }
 function openInfUploadModal(opener) {
+  if (!currentUserHasInfluencerDataPermission('import')) return rejectInfluencerImportAction();
   var overlay = document.getElementById('infUploadModal');
   var dialog = document.getElementById('influencerUploadDialog');
   if (!overlay || !dialog) return;
@@ -6740,6 +6777,7 @@ async function validateInfluencerImportMapping() {
   }
 }
 async function confirmInfluencerImport() {
+  if (!currentUserHasInfluencerDataPermission('import')) return rejectInfluencerImportAction();
   var mapping = collectInfluencerFieldMapping(true);
   if (!mapping || !retainedInfluencerImportFile || !influencerImportValidation) return;
   if (influencerImportState !== 'validated_ready' || JSON.stringify(mapping) !== influencerImportValidatedMapping) {
@@ -6809,6 +6847,7 @@ function resetInfluencerImport() {
   setInfluencerImportState('idle', '请选择文件。');
 }
 function importInfluencers(rows) {
+  if (!currentUserHasInfluencerDataPermission('import')) return rejectInfluencerImportAction();
   if (!rows || !rows.length) return;
   apiFetch('/influencers/import', { method: 'POST', body: JSON.stringify({ rows: rows }) }).then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); }).then(function(result) {
     if (!result.ok) throw new Error(result.data.error || 'Import failed');

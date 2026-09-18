@@ -882,7 +882,7 @@ test('projects and authorizes customer report export only for writable tenant ro
   }
 });
 
-test('projects and authorizes influencer data export only for writable tenant roles', () => {
+test('projects and authorizes influencer data export and import only for writable tenant roles', () => {
   const { db, service } = createFixture();
   try {
     db.exec(`
@@ -909,70 +909,72 @@ test('projects and authorizes influencer data export only for writable tenant ro
         organization_id: 10,
         roles: ['administrator', 'manager', 'member']
       },
-      actions: ['export']
+      actions: ['export', 'import']
     });
-    assert.deepEqual(
-      service.authorize(influencerDataRequest({ id: 4, role: 'user' }, 20, 'export')),
-      {
-        allowed: true,
-        code: 'ALLOWED',
-        principal: {
-          user_id: 4,
-          organization_id: 20,
-          roles: ['company_owner', 'member']
-        }
-      }
-    );
-    for (const [userId, roles] of [
-      [16, ['manager', 'member']],
-      [17, ['member']]
-    ]) {
+    for (const action of ['export', 'import']) {
       assert.deepEqual(
-        service.authorize(influencerDataRequest({ id: userId, role: 'user' }, 10, 'export')),
+        service.authorize(influencerDataRequest({ id: 4, role: 'user' }, 20, action)),
         {
           allowed: true,
           code: 'ALLOWED',
           principal: {
-            user_id: userId,
-            organization_id: 10,
-            roles
+            user_id: 4,
+            organization_id: 20,
+            roles: ['company_owner', 'member']
           }
         }
       );
-    }
-    assert.deepEqual(
-      service.authorize(influencerDataRequest({ id: 2, role: 'user' }, 20, 'export')),
-      {
-        allowed: false,
-        code: 'ACTION_FORBIDDEN',
-        principal: {
-          user_id: 2,
-          organization_id: 20,
-          roles: ['read_only']
-        }
+      for (const [userId, roles] of [
+        [16, ['manager', 'member']],
+        [17, ['member']]
+      ]) {
+        assert.deepEqual(
+          service.authorize(influencerDataRequest({ id: userId, role: 'user' }, 10, action)),
+          {
+            allowed: true,
+            code: 'ALLOWED',
+            principal: {
+              user_id: userId,
+              organization_id: 10,
+              roles
+            }
+          }
+        );
       }
-    );
-    assert.deepEqual(
-      service.authorize(influencerDataRequest({ id: 1, role: 'admin' }, 20, 'export')),
-      {
-        allowed: false,
-        code: 'ACTION_FORBIDDEN',
-        principal: {
-          user_id: 1,
-          organization_id: 20,
-          roles: ['platform_admin']
+      assert.deepEqual(
+        service.authorize(influencerDataRequest({ id: 2, role: 'user' }, 20, action)),
+        {
+          allowed: false,
+          code: 'ACTION_FORBIDDEN',
+          principal: {
+            user_id: 2,
+            organization_id: 20,
+            roles: ['read_only']
+          }
         }
+      );
+      assert.deepEqual(
+        service.authorize(influencerDataRequest({ id: 1, role: 'admin' }, 20, action)),
+        {
+          allowed: false,
+          code: 'ACTION_FORBIDDEN',
+          principal: {
+            user_id: 1,
+            organization_id: 20,
+            roles: ['platform_admin']
+          }
+        }
+      );
+      for (const [organizationId, code] of [
+        [undefined, 'ORGANIZATION_SCOPE_REQUIRED'],
+        [null, 'MALFORMED_ORGANIZATION'],
+        ['10', 'MALFORMED_ORGANIZATION'],
+        [0, 'MALFORMED_ORGANIZATION']
+      ]) {
+        const request = influencerDataRequest({ id: 2, role: 'user' }, organizationId, action);
+        if (organizationId === undefined) delete request.organizationId;
+        assert.deepEqual(service.authorize(request), { allowed: false, code });
       }
-    );
-    for (const [organizationId, code] of [
-      [undefined, 'ORGANIZATION_SCOPE_REQUIRED'],
-      [null, 'MALFORMED_ORGANIZATION'],
-      ['10', 'MALFORMED_ORGANIZATION'],
-      [0, 'MALFORMED_ORGANIZATION']
-    ]) {
-      const request = influencerDataRequest({ id: 2, role: 'user' }, organizationId, 'export');
-      if (organizationId === undefined) delete request.organizationId;
-      assert.deepEqual(service.authorize(request), { allowed: false, code });
     }
   } finally {
     db.close();

@@ -766,6 +766,28 @@ test.describe('Task 9 M4 workflow', () => {
     await expect(page.locator('[data-influencer-export-action="export"]:visible')).toHaveCount(0);
   });
 
+  test('influencer import permission hides every upload entry while preserving template download', async ({ page }) => {
+    await openM4(page, 'tab3');
+    await expect(page.locator('[data-influencer-import-action="import"]')).toHaveCount(8);
+    await expect(page.locator('#infDropZone')).toBeVisible();
+    await page.locator('#tab3-content button[onclick="openInfUploadModal(this)"]').click();
+    await expect(page.locator('#infUploadModal')).toBeVisible();
+    await expect(page.locator('#infImportValidate')).toBeDisabled();
+    await expect(page.locator('#infImportConfirm')).toBeDisabled();
+    await page.evaluate(() => window.closeInfUploadModal());
+
+    await installBaselineAuthState(page, fixture.auth.user);
+    await page.goto('/m4?tab=tab3', { waitUntil: 'domcontentloaded' });
+    await page.locator('#app').waitFor({ state: 'visible' });
+    await waitForBaselineReady(page);
+    await expect(page.locator('[data-influencer-import-action="import"]:visible')).toHaveCount(0);
+    await expect(page.locator('#tab3-content button[onclick="downloadInfTemplate()"]')).toBeVisible();
+    await expect(page.locator('#infUploadModal')).toBeHidden();
+    const directResult = await page.evaluate(() => window.openInfUploadModal());
+    expect(directResult).toBe(false);
+    await expect(page.locator('#infUploadModal')).toBeHidden();
+  });
+
   test('admin runs query-aware list, import, export, Feishu, order, and status flows', async ({ page }) => {
     await openM4(page, 'tab1');
 
@@ -831,7 +853,7 @@ test.describe('Task 9 M4 workflow', () => {
     expect(feishuCsv).toContain('FixtureCreator');
     await expect(page.locator('#feishuStatus')).toContainText(/Fallback|CSV|未配置|manual/i);
 
-    await page.locator('#tab3-content button[onclick="openInfUploadModal()"]').click();
+    await page.locator('#tab3-content button[data-influencer-import-action="import"]').click();
     await expect(page.locator('#infUploadModal')).toBeVisible();
     const uploadCsv = '\uFEFF' + influencerWorkflow.TEMPLATE_HEADERS.join(',') + '\n' + [
       '2026-07-13',
@@ -860,6 +882,9 @@ test.describe('Task 9 M4 workflow', () => {
       mimeType: 'text/csv',
       buffer: Buffer.from(uploadCsv, 'utf8')
     });
+    await expect(page.locator('#infGuidedStatus')).toContainText(/校验完成|validated/i);
+    await expect(page.locator('#infImportConfirm')).toBeEnabled();
+    await page.locator('#infImportConfirm').click();
     await expect(page.locator('#infModalStatus')).toContainText(/Imported|导入|uploaded/i);
     await page.evaluate(() => {
       const modal = document.getElementById('infUploadModal');
@@ -872,12 +897,16 @@ test.describe('Task 9 M4 workflow', () => {
 
     await page.locator('#filt_search').fill('401');
     await expect(page.locator('#infTableContainer tbody tr')).toHaveCount(1);
+    await expect(page.locator('#infTableContainer')).toContainText('FixtureCreator');
+    await expect(page.locator('#infTableContainer')).not.toContainText('@browser_import');
     await page.locator('#infTableContainer tbody tr').first().getByRole('button', { name: '下单' }).click();
     await expect(page.locator('#collabOrderModal')).toBeVisible();
     await expect(page.locator('#orderProject')).toHaveValue('Fixture Launch');
     await expect(page.locator('#orderProduct')).toHaveValue('Fixture Device');
     await expect(page.locator('#orderDeliverable')).toHaveValue('1 dedicated video');
-    await expect(page.locator('#orderQuotedPrice')).toHaveValue('3000');
+    await expect(page.locator('#orderCreatorCost')).toHaveValue('2500');
+    await expect(page.locator('#orderClientQuote')).toHaveValue('3000');
+    await expect(page.locator('#orderCurrency')).toHaveValue('USD');
     await page.locator('#orderTimelineStart').fill('2026-07-20');
     await page.locator('#orderTimelineEnd').fill('2026-07-30');
     await page.locator('#orderNotes').fill('Task 9 browser order');

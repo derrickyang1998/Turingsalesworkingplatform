@@ -361,7 +361,8 @@ thead th {
 
 .tm-performance-list-actions .btn[hidden],
 [data-performance-feishu-action="snapshot-export"][hidden],
-[data-influencer-export-action="export"][hidden] {
+[data-influencer-export-action="export"][hidden],
+[data-influencer-import-action="import"][hidden] {
   display: none !important;
 }
 

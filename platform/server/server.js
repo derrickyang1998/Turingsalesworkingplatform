@@ -76,6 +76,7 @@ const {
   CAMPAIGN_CUSTOMER_REPORT_MODULE,
   INFLUENCER_DATA_MODULE
 } = require('./services/module_action_permission_service');
+const influencerDataImportPermission = require('./services/influencer_data_import_permission_service');
 const moduleActionPermissionService = createModuleActionPermissionService(db);
 
 function projectModulePermissions(principal, organizationId) {
@@ -586,6 +587,28 @@ function writeInfluencerDataExportAudit(event) {
   );
 }
 
+function writeInfluencerDataImportAudit(event) {
+  const actions = {
+    denied: 'influencer_data_import_denied',
+    previewed: 'influencer_data_import_previewed',
+    imported: 'influencer_data_imported'
+  };
+  const action = actions[event && event.outcome];
+  if (!action) throw new TypeError('Influencer import audit outcome is invalid');
+  const details = { ...event };
+  delete details.ip_address;
+  db.prepare(`
+    INSERT INTO activity_log (user_id,action,module,details,ip_address)
+    VALUES (?,?,?,?,?)
+  `).run(
+    event.actor_user_id,
+    action,
+    INFLUENCER_DATA_MODULE,
+    JSON.stringify(details),
+    event.ip_address || null
+  );
+}
+
 function canonicalEarlyTargetId(value) {
   if (typeof value !== 'string' || !/^[1-9]\d*$/.test(value)) return null;
   const id = Number(value);
@@ -668,7 +691,7 @@ function earlyCrmMutation(req) {
   return earlyOpportunityMutation(req) || earlyContactMutation(req) || earlyTaskMutation(req);
 }
 
-function closeUnreadCrmRequestAfterResponse(req, res) {
+function closeUnreadRequestAfterResponse(req, res) {
   if (!req || req.complete === true) return;
   if (typeof res.setHeader === 'function') res.setHeader('Connection', 'close');
   res.shouldKeepAlive = false;
@@ -690,7 +713,7 @@ function sendEarlyCrmPermissionProblem(req, res, requestId, code, module) {
     : (module === CRM_CONTACT_MODULE || module === CRM_TASK_MODULE)
       ? 'CRM permission is not allowed'
       : 'CRM customer permission is not allowed';
-  closeUnreadCrmRequestAfterResponse(req, res);
+  closeUnreadRequestAfterResponse(req, res);
   if (typeof res.type === 'function') res.type('application/problem+json');
   return res.status(status).json({
     type: `https://api.turingmarket.example/problems/${code.toLowerCase().replace(/_/g, '-')}`,
@@ -748,6 +771,79 @@ function earlyCrmMutationGuard(req, res, next) {
 }
 
 app.use(earlyCrmMutationGuard);
+
+function earlyInfluencerImportKind(req) {
+  if (req.method !== 'POST') return null;
+  if (/^\/api\/influencers\/?$/i.test(req.path)) return 'manual';
+  if (/^\/api\/influencers\/import\/?$/i.test(req.path)) return 'json';
+  if (/^\/api\/influencers\/upload\/?$/i.test(req.path)) return 'upload';
+  return null;
+}
+
+function sendEarlyInfluencerImportProblem(req, res, statusCode, code, message) {
+  closeUnreadRequestAfterResponse(req, res);
+  return res.status(statusCode).json({
+    error: message,
+    code,
+    request_id: influencerDataImportPermission.requestId(req)
+  });
+}
+
+function earlyInfluencerImportGuard(req, res, next) {
+  const importKind = earlyInfluencerImportKind(req);
+  if (!importKind) return next();
+  const authentication = authenticateRequest(req);
+  if (!authentication.ok) {
+    return sendEarlyInfluencerImportProblem(
+      req,
+      res,
+      401,
+      'AUTHENTICATION_REQUIRED',
+      'Authentication required.'
+    );
+  }
+  const organizationId = authentication.authContext.organization.id;
+  const decision = influencerDataImportPermission.authorize(
+    moduleActionPermissionService,
+    req,
+    { principal: authentication.user, organizationId }
+  );
+  if (decision.allowed === true) {
+    req.influencerDataImportPermission = decision;
+    delete req.user;
+    delete req.authContext;
+    return next();
+  }
+  try {
+    writeInfluencerDataImportAudit(influencerDataImportPermission.auditEvent(
+      req,
+      decision,
+      'denied',
+      {
+        importKind,
+        actorUserId: authentication.user.id,
+        organizationId
+      }
+    ));
+  } catch (_error) {
+    return sendEarlyInfluencerImportProblem(
+      req,
+      res,
+      503,
+      'INFLUENCER_IMPORT_AUDIT_UNAVAILABLE',
+      'Influencer import audit is unavailable.'
+    );
+  }
+  return sendEarlyInfluencerImportProblem(
+    req,
+    res,
+    403,
+    'INFLUENCER_IMPORT_FORBIDDEN',
+    'Influencer data import is forbidden.'
+  );
+}
+
+app.use(earlyInfluencerImportGuard);
 
 function legacyJsonMediaType(req) {
   const value = req.headers && req.headers['content-type'];
@@ -881,7 +977,10 @@ function adminOnly(req, res, next) {
 const READ_ONLY_GUARDED_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 function namedPermissionOwnsReadOnlyDecision(req) {
-  return req.method === 'POST' && /^\/influencers\/export\/?$/i.test(req.path);
+  return req.method === 'POST' && (
+    /^\/influencers\/export\/?$/i.test(req.path) ||
+    /^\/influencers(?:\/(?:import|upload))?\/?$/i.test(req.path)
+  );
 }
 
 function readOnlyMutationGuard(req, res, next) {
@@ -1341,6 +1440,9 @@ function legacyUploadError(res, error) {
     error: error && error.message ? error.message : 'Upload request failed.'
   };
   if (error && typeof error.code === 'string' && error.code.length > 0) body.code = error.code;
+  if (error && typeof error.requestId === 'string' && error.requestId.length > 0) {
+    body.request_id = error.requestId;
+  }
   return res.status(status).json(body);
 }
 
@@ -2069,7 +2171,8 @@ app.post('/api/proposal/generate-ppt', authMiddleware, (req, res) => {
 require('./routes')(app, db, authMiddleware, {
   campaignCollaborationService,
   moduleActionPermissionService,
-  influencerDataExportAudit: writeInfluencerDataExportAudit
+  influencerDataExportAudit: writeInfluencerDataExportAudit,
+  influencerDataImportAudit: writeInfluencerDataImportAudit
 });
 require('./routes_feishu')(app, { db, authMiddleware, adminOnly });
 require('./routes_customers')(app, db, authMiddleware, {
@@ -2265,6 +2368,78 @@ function influencerUploadError(code, message) {
   return error;
 }
 
+function sendInfluencerUploadError(request, response, error) {
+  const status = Number.isSafeInteger(error && error.statusCode)
+    ? error.statusCode
+    : Number.isSafeInteger(error && error.status)
+      ? error.status
+      : 500;
+  if (status < 500) return legacyUploadError(response, error);
+  const requestId = error && error.requestId || influencerDataImportPermission.requestId(request);
+  const knownFailures = {
+    INFLUENCER_IMPORT_AUDIT_UNAVAILABLE: 'Influencer import audit is unavailable.',
+    UPLOAD_SANDBOX_NOT_READY: 'Upload service is unavailable.',
+    IDEMPOTENCY_STORAGE_CAPACITY_EXCEEDED: 'Upload service capacity is unavailable.',
+    UPLOAD_SANDBOX_CLEANUP_FAILED: 'Upload cleanup failed.',
+    AUDIT_PERSISTENCE_FAILED: 'Upload audit is unavailable.'
+  };
+  const code = error && typeof error.code === 'string' ? error.code : '';
+  if (Object.hasOwn(knownFailures, code)) {
+    return response.status(status).json({
+      error: knownFailures[code],
+      code,
+      request_id: requestId
+    });
+  }
+  return response.status(500).json({
+    error: 'Influencer import failed.',
+    code: 'INFLUENCER_IMPORT_FAILED',
+    request_id: requestId
+  });
+}
+
+function persistInfluencerImportAudit(request, event) {
+  try {
+    writeInfluencerDataImportAudit(event);
+  } catch (_error) {
+    throw influencerDataImportPermission.error(
+      request,
+      503,
+      'INFLUENCER_IMPORT_AUDIT_UNAVAILABLE',
+      'Influencer import audit is unavailable.'
+    );
+  }
+}
+
+function assertInfluencerImportPermissionFresh(request, current, importKind) {
+  const decision = influencerDataImportPermission.authorize(
+    moduleActionPermissionService,
+    request,
+    {
+      principal: current.user,
+      organizationId: current.identity.organizationId
+    }
+  );
+  if (decision.allowed === true) {
+    request.influencerDataImportPermission = decision;
+    return decision;
+  }
+  persistInfluencerImportAudit(
+    request,
+    influencerDataImportPermission.auditEvent(request, decision, 'denied', {
+      importKind,
+      actorUserId: current.user.id,
+      organizationId: current.identity.organizationId
+    })
+  );
+  throw influencerDataImportPermission.error(
+    request,
+    403,
+    'INFLUENCER_IMPORT_FORBIDDEN',
+    'Influencer data import is forbidden.'
+  );
+}
+
 function canonicalJsonObject(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
   return Object.fromEntries(Object.keys(value).sort().map(function(key) {
@@ -2327,8 +2502,9 @@ app.post('/api/influencers/upload', authMiddleware, async (req, res) => {
       assertAuthorized: () => assertUploadAuthorityFresh(authority),
       finalize(parsed, lifecycle) {
         const guided = parseInfluencerUploadMode(req.body);
+        const current = authority.readFresh(db);
+        const importPermission = assertInfluencerImportPermissionFresh(req, current, 'upload');
         return db.transaction(() => {
-          const current = authority.readFresh(db);
           const data = parsed && parsed.data ? parsed.data : {};
           if (!Array.isArray(data.rows) || data.rows.length === 0) {
             const error = new Error('No table rows found in uploaded file');
@@ -2339,6 +2515,18 @@ app.post('/api/influencers/upload', authMiddleware, async (req, res) => {
             const previewOptions = { row_number_offset: 2 };
             if (guided.fieldMapping !== undefined) previewOptions.field_mapping = guided.fieldMapping;
             const preview = influencerWorkflow.previewInfluencerImport(data.rows, previewOptions);
+            persistInfluencerImportAudit(
+              req,
+              influencerDataImportPermission.auditEvent(req, importPermission, 'previewed', {
+                importKind: 'upload',
+                actorUserId: current.user.id,
+                organizationId: current.identity.organizationId,
+                recordCount: preview.valid_count,
+                skippedCount: preview.blank_count + preview.error_count,
+                totalCount: preview.row_count,
+                replayed: false
+              })
+            );
             lifecycle.completeAdmissionInTransaction(db);
             return Object.assign({
               parser: data.parser,
@@ -2356,7 +2544,21 @@ app.post('/api/influencers/upload', authMiddleware, async (req, res) => {
           const importOptions = {
             batch_id: uploadBatchId,
             user: current.user,
-            data_source: 'upload'
+            data_source: 'upload',
+            onPersist(stats) {
+              persistInfluencerImportAudit(
+                req,
+                influencerDataImportPermission.auditEvent(req, importPermission, 'imported', {
+                  importKind: 'upload',
+                  actorUserId: current.user.id,
+                  organizationId: current.identity.organizationId,
+                  recordCount: stats.imported,
+                  skippedCount: stats.skipped,
+                  totalCount: stats.total,
+                  replayed: stats.replayed
+                })
+              );
+            }
           };
           if (guided.guided && guided.fieldMapping !== undefined) {
             const mappingSha256 = crypto.createHash('sha256')
@@ -2379,7 +2581,7 @@ app.post('/api/influencers/upload', authMiddleware, async (req, res) => {
     });
     return res.json(result);
   } catch (error) {
-    return legacyUploadError(res, error);
+    return sendInfluencerUploadError(req, res, error);
   } finally {
     requestSignal.dispose();
   }
