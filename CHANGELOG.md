@@ -1,5 +1,33 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.9.14-customer-report-export-permission (Production Deployed, 2026-09-18) - 客户报告导出权限
+
+### 交付与范围 / Delivery And Scope
+- 新增组织范围动作权限 `campaign.customer_report.export`，保护客户报告快照的动态 HTML 与 PPTX 导出；企业所有者、管理员、经理及可写成员允许导出，只读成员和仅具平台管理员身份但不具备租户角色的账号失败关闭。
+- 未授权请求在客户报告交付服务和附件生成前返回 `403 CUSTOMER_REPORT_EXPORT_FORBIDDEN`；审计不可用时返回 `503 CUSTOMER_REPORT_EXPORT_AUDIT_UNAVAILABLE`，两类失败均不返回附件头或报告字节。
+- 成功与拒绝结果写入字段有界的 `activity_log`，仅记录操作者、组织、权限、结果、原因码、请求标识、快照/活动标识、导出类型和 IP，不保存报告正文、客户数据、请求体或凭据。
+- 登录与 `/api/auth/me` 投影该动作权限；现有 HTML/PPTX 按钮按权限隐藏或禁用，直接调用前端导出函数也会在发起网络请求前拒绝。既有预览、封存、列表、详情、报告模板和 Campaign 快照归属规则保持不变。
+- 本版不修改 schema，不执行真实飞书写入，不替换最新客户双页面、M3/M4、AI/知识库、网红执行、方案或冻结 PPT。
+
+### 风险定向验证与独立审查 / Risk-Focused Verification And Independent Review
+- 权限与客户报告聚焦测试 `61/61`、登录/只读集成 `2/2`、受影响客户报告/权限/公开资产矩阵 `212/212`、最终 HTML/PPTX 审计顺序与失败关闭复核 `4/4` 全部通过。
+- JavaScript 语法、`git diff --check`、本地部署预检、定向密钥/乱码扫描和冻结 PPT SHA-256 均通过；远端候选门禁 `76/76`、部署 Chromium 冒烟 `2/2`。
+- 首轮独立审查给出 `APPROVE_WITH_NOTES`，指出 PPTX 审计失败与 `sendFile` 顺序需要更精确的测试证据；补齐 HTML/PPTX 允许/拒绝矩阵、空响应头及未发送文件断言后，独立终审为 `APPROVE`，无开放发现。
+- 实现提交为 `579b019521b9b8b7fdba17d864ff7453510185bd`，已在正式部署前推送 GitHub。
+
+### 生产状态 / Production Status
+- 受控运行 `a3c5cc049e3b4e2995e7390ea2195dc9` 返回 `DEPLOY_OK` 与 `RETENTION_CLEANUP_OK`；可信源码 SHA-256 为 `b448bb77b241aa193acb244d808fb17331bd69f967cc51fd8dc5cde19857257a`，候选树 SHA-256 为 `7610719e5c17f777558bf43856579c73528f481625c6bf0b971009f5966c9d18`，接纳事实 SHA-256 为 `dbc7316d9dfcdc5ce2e1e84539c9f766ce8c1e2810b431d9f3b393da3aeff1cc`。
+- 可恢复备份为 `/root/turingmarket/backups/v060-crm-sales-workspace-20260918-144928`；初始 `337` 项清单和切换 `35` 项清单均通过 `sha256sum --check`，清单文件 SHA-256 分别为 `79212a67f4e5b71680b9b7997f2d563dc2bc07591e4e6b0cbd0d6818a1fb68da` 与 `1451fde03caa34f2dc358cbf3111ca8002b64a8581cce8f95fbd316d704438f4`。
+- 管理员权限投影包含 `campaign.customer_report: ["export"]`；生产暂无客户报告快照，因此 HTML/PPTX 授权请求到达既有归属服务后均按预期返回无附件的 `404 CUSTOMER_REPORT_SNAPSHOT_NOT_FOUND`，未伪造业务报告数据。
+- 临时只读成员权限投影为空，两个导出端点均被现有全局只读写保护提前拒绝为无附件的 `403 ORGANIZATION_READ_ONLY`；这保留了更早、更严格的组织只读门禁。验收账号已停用，验收会话已清理。
+- 公网 `/api/health` 为 `200` 且解析器 ready；schema `v22`、`quick_check=ok`、外键异常 `0`、活动会话 `0`，PM2 在线且重启次数 `0`，Nginx 与 pm2-root active，部署锁不存在。生产快照与本轮客户报告审计均为 `0`，与上述无真实快照验收边界一致。
+- 冻结 `ppt.js` SHA-256 保持 `f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e`，最新界面和既有产品能力未回退。
+
+### 后续节奏 / Delivery Cadence
+- 开发计划固定为“一功能一上线”：普通独立功能完成精确受影响测试、必要语法/合同/密钥检查、一次独立批准和可验证备份后，在同一开发轮立即部署生产并执行线上定向验收。
+- 繁重全量测试不作为普通功能默认步骤；仅阶段收口，或认证/会话、授权架构、schema、租户权威、共享部署基础设施、真实外部写入和无法界定影响范围时按风险扩展。
+- 下一切片继续 Phase 8 的一个独立模块权限，不捆绑套餐、配额或外部写入。
+
 ## v0.9.13-pinned-candidate-bundle-upload (Production Deployed, 2026-09-18) - 单连接候选包上传
 
 ### 交付与范围 / Delivery And Scope
