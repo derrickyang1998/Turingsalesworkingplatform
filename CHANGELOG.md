@@ -1,5 +1,31 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.9.16-influencer-data-import-permission (Production Deployed, 2026-09-18) - 网红数据导入权限
+
+### 交付与范围 / Delivery And Scope
+- 新增组织范围操作者动作权限 `influencer.data.import`，保护网红手工新增、JSON 导入以及上传预览/确认导入/兼容导入入口；企业所有者、组织管理员、经理及可写成员允许导入，只读成员和仅具平台管理员身份但无租户导入角色的账号失败关闭。
+- JSON 与手工入口在请求体解析前完成早期门禁；通过早期门禁后清除临时身份缓存，由正式会话鉴权重新校验，避免慢请求期间角色降级被旧授权绕过。上传入口在 multipart 解析后、持久化前重新执行命名权限检查。
+- 新增字段有界的 `influencer_data_import_denied`、`influencer_data_import_previewed` 与 `influencer_data_imported` 审计；不记录上传行、文件名、来源正文或字段映射。审计失败时失败关闭，正式导入的数据、知识归档和成功审计在同一事务内提交。
+- 登录与 `/api/auth/me` 投影该权限；M4 八个导入控件按权限隐藏/禁用，直接函数调用在网络请求前拒绝，下载模板继续可用。修复手工新增旧 SQL 占位符不一致，并统一隐藏未知导入 `5xx` 内部错误。
+- 当前 `influencers` 主表仍是无 `org_id` 的共享全局资源。本版本限制操作者导入动作，不宣称行级租户隔离；schema、网红表头、筛选、导出、保存视图、飞书、合作下单、最新界面、AI/知识库、方案和冻结 PPT 均保持不变。
+
+### 轻量验证与独立审查 / Lightweight Verification And Independent Review
+- 权限策略 `19/19`、Phase 4 定向集成 `11/11`、慢 JSON 会话重验 `1/1`、选择性回归 `4/4`、前端六场景 `6/6` 及发布文件合同 `1/1` 通过；手工/JSON/上传的允许、拒绝、审计失败、事务和脱敏错误路径完成定向验证。
+- JavaScript 语法、`git diff --check`、定向密钥扫描及两次本地发布预检通过；远端候选门禁 `76/76`、部署 Chromium 冒烟 `2/2`。按一功能一上线节奏未重复繁重全量回归。
+- 独立审查先阻断匿名 JSON 解析顺序、未知 `5xx` 泄漏、缺失降级/预览审计失败覆盖及慢 JSON 身份缓存窗口；逐项修复并补测后终审 `APPROVE`。部署清单补丁另经独立复审 `APPROVE`。
+- 功能提交 `971cc4ade6a9f3afb6698e2e617749c2edd994f4` 与部署清单修复 `1ffebb215d46cae60b99b58d82045897a002d4ea` 均已推送 GitHub。
+
+### 生产状态 / Production Status
+- 受控运行 `a86fc82caead46eaadbd19fe875e1b51` 返回 `DEPLOY_OK` 与 `RETENTION_CLEANUP_OK`；可信源码 SHA-256 为 `628f8453289d2c3d087cf144c28f8118f69954edb1f1a7cd9392613165aae75f`，候选树 SHA-256 为 `294de366e16567f8d4b984bccfaf05e00819b434fe96e517445b8410a8935a7f`，验收事实 SHA-256 为 `2bf019d4e4d74480e9cae3de34a770b169e86fff3d1cb1aa40af9eadb989a537`。
+- 可恢复备份为 `/root/turingmarket/backups/v060-crm-sales-workspace-20260918-185009`；初始 `337` 项清单 SHA-256 `134fdecc3617dd26bf904109bb7d321b62be5e98837341c4010ffd9062b98562`，切换 `35` 项清单 SHA-256 `27deccae8a0bfa411f35058161732da9b043f7d3bbaf2b16fa4790fa950c81eb`，两份清单均完整校验通过。
+- 第一次候选因新权限服务未进入固定部署清单而在生产变更前停止，恢复仅清理候选并恢复控制面，生产未被修改；补齐清单与精确合同测试后才执行正式发布。
+- 生产管理员权限投影包含 `influencer.data: ["export", "import"]`；multipart 预览返回 `200`、有效行 `1`、业务写入 `0`，并保存 `previewed / ALLOWED` 有界审计。M4 导入页八个控件可见可用，上传弹窗和文件选择器正常，无页面错误。
+- 公网 `/api/health` 为 `200` 且解析器 ready；schema `v22`、`quick_check=ok`、外键异常 `0`、会话 `0`，PM2 在线且重启次数 `0`，Nginx 与 pm2-root active，发布锁与 writer 锁均不存在。十个受影响运行时/发布文件本地与远端 SHA-256 一致，冻结 PPT 摘要未改变。
+
+### 后续节奏 / Delivery Cadence
+- 继续“一功能一上线”：普通功能只执行精确受影响测试、必要语法/合同/敏感信息检查、一次独立审查、可验证备份与线上定向验收；繁重全量测试仅由阶段收口或认证/会话、授权架构、schema、租户权威、共享基础设施、真实外部写入及无法界定风险触发。
+- 下一版本继续一个独立有用的 Phase 8 权限能力；网红 `org_id` 归属迁移、行级租户隔离、套餐权益、配额与真实外部写入继续分离审查和上线。
+
 ## v0.9.15-influencer-data-export-permission (Production Deployed, 2026-09-18) - 网红数据导出权限
 
 ### 交付与范围 / Delivery And Scope
