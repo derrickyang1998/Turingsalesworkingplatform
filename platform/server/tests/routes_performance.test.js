@@ -47,7 +47,9 @@ function createFixture(options = {}) {
   const moduleActionPermissionService = options.moduleActionPermissionService || {
     authorize(input) {
       calls.push(['performance-export-permission', input]);
-      return options.permissionDecision || {
+      return (input.module === 'campaign.customer_report'
+        ? options.customerReportPermissionDecision
+        : options.permissionDecision) || {
         allowed: true,
         code: 'ALLOWED',
         principal: {
@@ -61,6 +63,10 @@ function createFixture(options = {}) {
   const performanceExportAudit = options.performanceExportAudit || function audit(event) {
     calls.push(['performance-export-audit', event]);
     if (options.permissionAuditFailure) throw new Error('audit unavailable');
+  };
+  const customerReportExportAudit = options.customerReportExportAudit || function audit(event) {
+    calls.push(['customer-report-export-audit', event]);
+    if (options.customerReportPermissionAuditFailure) throw new Error('audit unavailable');
   };
   const service = {
     listContents(input) { calls.push(['list', input]); return { items: [], total: 0 }; },
@@ -375,7 +381,8 @@ function createFixture(options = {}) {
     customerReportSnapshotService,
     customerReportDeliveryService,
     moduleActionPermissionService,
-    performanceExportAudit
+    performanceExportAudit,
+    customerReportExportAudit
   });
   return {
     routes,
@@ -392,7 +399,8 @@ function createFixture(options = {}) {
     customerReportSnapshotService,
     customerReportDeliveryService,
     moduleActionPermissionService,
-    performanceExportAudit
+    performanceExportAudit,
+    customerReportExportAudit
   };
 }
 
@@ -1043,7 +1051,7 @@ test('routes customer report preview, immutable snapshots, and retained PPT deli
     delivered.headers['Content-Type'],
     'application/vnd.openxmlformats-officedocument.presentationml.presentation'
   );
-  assert.deepEqual(calls[4], ['customer-report-ppt', {
+  assert.deepEqual(calls.find(([name]) => name === 'customer-report-ppt'), ['customer-report-ppt', {
     user: previewRequest.user,
     campaignId: '7',
     snapshotId: '81',
@@ -1062,14 +1070,14 @@ test('routes customer report preview, immutable snapshots, and retained PPT deli
   assert.equal(html.statusCode, 200);
   assert.equal(html.headers['Content-Type'], 'text/html; charset=utf-8');
   assert.match(html.body.toString('utf8'), /Customer report/);
-  assert.deepEqual(calls[5], ['customer-report-html', {
+  assert.deepEqual(calls.find(([name]) => name === 'customer-report-html'), ['customer-report-html', {
     user: previewRequest.user,
     campaignId: '7',
     snapshotId: '81',
     requestId: 'customer-report-html-request'
   }]);
 
-  const htmlCallCount = calls.length;
+  const htmlCallCount = calls.filter(([name]) => name === 'customer-report-html').length;
   const invalidHtml = invoke(
     routes.get('POST /api/campaigns/:id/performance/customer-report-snapshots/:snapshotId/html'),
     {
@@ -1082,7 +1090,7 @@ test('routes customer report preview, immutable snapshots, and retained PPT deli
   assert.equal(invalidHtml.statusCode, 400);
   assert.equal(invalidHtml.body.code, 'INVALID_REQUEST_BODY');
   assert.equal(invalidHtml.body.request_id, 'customer-report-html-invalid-request');
-  assert.equal(calls.length, htmlCallCount);
+  assert.equal(calls.filter(([name]) => name === 'customer-report-html').length, htmlCallCount);
 
   for (const [name, id, method, pathTemplate, mediaKind] of [
     ['CAMPAIGN_PERFORMANCE_CUSTOMER_REPORT_PREVIEW', 'campaign.performance.customer-report-preview', 'POST', '/api/campaigns/:id/performance/customer-report-preview', campaignContract.MEDIA_KINDS.JSON],
@@ -1144,6 +1152,146 @@ test('routes customer report preview, immutable snapshots, and retained PPT deli
   assert.match(serverSource, /'CAMPAIGN_PERFORMANCE_CUSTOMER_REPORT_SNAPSHOT_CREATE'/);
   assert.match(serverSource, /'CAMPAIGN_PERFORMANCE_CUSTOMER_REPORT_HTML_EXPORT'/);
   assert.match(serverSource, /'CAMPAIGN_PERFORMANCE_CUSTOMER_REPORT_PPT_GENERATE'/);
+});
+
+test('requires the customer report export action and audits completed HTML and PPT delivery', () => {
+  const { routes, calls } = createFixture();
+  const deliveries = [
+    ['ppt', 'pptx', 'customer-report-ppt'],
+    ['html', 'html', 'customer-report-html']
+  ];
+
+  for (const [suffix, exportKind, serviceCall] of deliveries) {
+    const callStart = calls.length;
+    const response = invoke(
+      routes.get(`POST /api/campaigns/:id/performance/customer-report-snapshots/:snapshotId/${suffix}`),
+      {
+        user: { id: 9, role: 'user' },
+        authContext: { organization: { id: 10 } },
+        params: { id: '7', snapshotId: '81' },
+        body: {},
+        requestId: `customer-report-${suffix}-permission`,
+        ip: '203.0.113.21'
+      }
+    );
+
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(
+      calls.slice(callStart).map(([name]) => name),
+      ['performance-export-permission', serviceCall, 'customer-report-export-audit']
+    );
+    const permissionCall = calls.find(([name, input]) =>
+      name === 'performance-export-permission' &&
+      input.module === 'campaign.customer_report' &&
+      input.action === 'export'
+    );
+    assert.deepEqual(permissionCall, ['performance-export-permission', {
+      principal: { id: 9, role: 'user' },
+      organizationId: 10,
+      module: 'campaign.customer_report',
+      action: 'export'
+    }]);
+    assert.equal(calls.some(([name]) => name === serviceCall), true);
+    assert.deepEqual(
+      calls.find(([name, event]) =>
+        name === 'customer-report-export-audit' && event.export_kind === exportKind
+      ),
+      ['customer-report-export-audit', {
+        actor_user_id: 9,
+        organization_id: 10,
+        permission: 'campaign.customer_report.export',
+        outcome: 'exported',
+        reason_code: 'ALLOWED',
+        request_id: `customer-report-${suffix}-permission`,
+        target_type: 'customer_report_snapshot',
+        target_id: 81,
+        campaign_id: 7,
+        export_kind: exportKind,
+        ip_address: '203.0.113.21'
+      }]
+    );
+  }
+});
+
+test('denies customer report HTML and PPT before delivery and records bounded evidence', () => {
+  const deliveries = [
+    ['ppt', 'pptx', 'customer-report-ppt'],
+    ['html', 'html', 'customer-report-html']
+  ];
+
+  for (const [suffix, exportKind, serviceCall] of deliveries) {
+    const { routes, calls } = createFixture({
+      customerReportPermissionDecision: { allowed: false, code: 'ACTION_FORBIDDEN' }
+    });
+    const response = invoke(
+      routes.get(`POST /api/campaigns/:id/performance/customer-report-snapshots/:snapshotId/${suffix}`),
+      {
+        user: { id: 9, role: 'user', password_hash: 'must-not-be-audited' },
+        authContext: { organization: { id: 10 } },
+        params: { id: '7', snapshotId: '81' },
+        body: { secret: 'must-not-be-audited' },
+        requestId: `customer-report-${suffix}-denied`,
+        ip: '203.0.113.22'
+      }
+    );
+
+    assert.equal(response.statusCode, 403);
+    assert.equal(response.body.code, 'CUSTOMER_REPORT_EXPORT_FORBIDDEN');
+    assert.deepEqual(response.headers, {});
+    assert.equal(calls.some(([name]) => name === serviceCall), false);
+    const audit = calls.find(([name]) => name === 'customer-report-export-audit')[1];
+    assert.deepEqual(audit, {
+      actor_user_id: 9,
+      organization_id: 10,
+      permission: 'campaign.customer_report.export',
+      outcome: 'denied',
+      reason_code: 'ACTION_FORBIDDEN',
+      request_id: `customer-report-${suffix}-denied`,
+      target_type: 'customer_report_snapshot',
+      target_id: 81,
+      campaign_id: 7,
+      export_kind: exportKind,
+      ip_address: '203.0.113.22'
+    });
+    assert.equal(JSON.stringify(audit).includes('must-not-be-audited'), false);
+  }
+});
+
+test('fails closed without customer report bytes when export audit storage is unavailable', () => {
+  for (const [suffix, serviceCall] of [
+    ['html', 'customer-report-html'],
+    ['ppt', 'customer-report-ppt']
+  ]) {
+    for (const permissionDecision of [
+      { allowed: false, code: 'ACTION_FORBIDDEN' },
+      { allowed: true, code: 'ALLOWED', principal: { user_id: 9, organization_id: 10, roles: ['member'] } }
+    ]) {
+      const { routes, calls } = createFixture({
+        customerReportPermissionDecision: permissionDecision,
+        customerReportPermissionAuditFailure: true
+      });
+      const response = invoke(
+        routes.get(`POST /api/campaigns/:id/performance/customer-report-snapshots/:snapshotId/${suffix}`),
+        {
+          user: { id: 9, role: 'user' },
+          authContext: { organization: { id: 10 } },
+          params: { id: '7', snapshotId: '81' },
+          body: {},
+          requestId: `customer-report-${suffix}-audit-unavailable`
+        }
+      );
+
+      assert.equal(response.statusCode, 503);
+      assert.equal(response.body.code, 'CUSTOMER_REPORT_EXPORT_AUDIT_UNAVAILABLE');
+      assert.deepEqual(response.headers, {});
+      assert.equal(response.filePath, undefined);
+      assert.equal(calls.some(([name]) => name === 'customer-report-export-audit'), true);
+      assert.equal(
+        calls.some(([name]) => name === serviceCall),
+        permissionDecision.allowed === true
+      );
+    }
+  }
 });
 
 test('confirms a campaign-scoped AI review draft through the protected JSON request contract', async () => {

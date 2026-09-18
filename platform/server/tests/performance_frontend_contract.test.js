@@ -388,6 +388,26 @@ test('performance dashboard exposes a customer-safe preview, immutable snapshot,
   assert.match(appSource, /async function loadPerformanceCustomerReportSnapshots\(\)/);
   assert.match(appSource, /async function downloadPerformanceCustomerReportPpt\(snapshotId\)/);
   assert.match(appSource, /async function downloadPerformanceCustomerReportHtml\(snapshotId\)/);
+  assert.match(appSource, /function currentUserHasCustomerReportPermission\(action\)/);
+  assert.match(appSource, /permissions\['campaign\.customer_report'\]/);
+  assert.match(appSource, /function applyCustomerReportExportPermissionPresentation\(\)/);
+  assert.match(
+    appSource,
+    /function applyCustomerReportExportPermissionPresentation\(\)[\s\S]*?aria-busy[\s\S]*?element\.disabled = !canExport \|\| isBusy/
+  );
+  assert.match(
+    appSource,
+    /applyCurrentUserRolePresentation\(\)[\s\S]*?applyCustomerReportExportPermissionPresentation\(\)/
+  );
+  assert.match(appSource, /data-customer-report-export-action=\\"export\\"/);
+  assert.match(
+    appSource,
+    /async function downloadPerformanceCustomerReportPpt\(snapshotId\)[\s\S]*?if \(!currentUserHasCustomerReportPermission\('export'\)\)/
+  );
+  assert.match(
+    appSource,
+    /async function downloadPerformanceCustomerReportHtml\(snapshotId\)[\s\S]*?if \(!currentUserHasCustomerReportPermission\('export'\)\)/
+  );
   assert.match(
     appSource,
     /function performanceCustomerReportPptDownloadIsCurrent\([\s\S]*?context\.generation === performanceCustomerReportPptDownloadGeneration/

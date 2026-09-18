@@ -38,7 +38,9 @@ const {
 } = require('./services/organization_methodology_service');
 const {
   CAMPAIGN_PERFORMANCE_MODULE,
-  CAMPAIGN_PERFORMANCE_EXPORT_ACTION
+  CAMPAIGN_PERFORMANCE_EXPORT_ACTION,
+  CAMPAIGN_CUSTOMER_REPORT_MODULE,
+  CAMPAIGN_CUSTOMER_REPORT_EXPORT_ACTION
 } = require('./services/module_action_permission_service');
 
 function requestId(request) {
@@ -146,7 +148,31 @@ function performanceExportAuditEvent(request, decision, exportKind, outcome, rec
   return event;
 }
 
+function customerReportExportAuditEvent(request, decision, exportKind, outcome) {
+  return {
+    actor_user_id: positiveIntegerOrNull(authenticatedUserId(request)),
+    organization_id: positiveIntegerOrNull(performanceExportOrganizationId(request)),
+    permission: `${CAMPAIGN_CUSTOMER_REPORT_MODULE}.${CAMPAIGN_CUSTOMER_REPORT_EXPORT_ACTION}`,
+    outcome,
+    reason_code: boundedAuditText(decision && decision.code, 'PERMISSION_DECISION_INVALID', 80),
+    request_id: boundedAuditText(requestId(request), 'performance-request', 120),
+    target_type: 'customer_report_snapshot',
+    target_id: positiveIntegerOrNull(request && request.params && request.params.snapshotId),
+    campaign_id: positiveIntegerOrNull(request && request.params && request.params.id),
+    export_kind: exportKind,
+    ip_address: boundedAuditText(request && request.ip, null, 255)
+  };
+}
+
 function sendPerformanceExportError(request, response, statusCode, code, message) {
+  return response.status(statusCode).json({
+    error: message,
+    code,
+    request_id: requestId(request)
+  });
+}
+
+function sendCustomerReportExportError(request, response, statusCode, code, message) {
   return response.status(statusCode).json({
     error: message,
     code,
@@ -277,6 +303,10 @@ function registerPerformanceRoutes(app, options = {}) {
   if (typeof performanceExportAudit !== 'function') {
     throw new TypeError('A performance export audit writer is required.');
   }
+  const customerReportExportAudit = options.customerReportExportAudit;
+  if (typeof customerReportExportAudit !== 'function') {
+    throw new TypeError('A customer report export audit writer is required.');
+  }
   const aiLimiter = typeof options.aiLimiter === 'function'
     ? options.aiLimiter
     : (_request, _response, next) => next();
@@ -319,8 +349,53 @@ function registerPerformanceRoutes(app, options = {}) {
     };
   }
 
+  function requireCustomerReportExport(exportKind) {
+    return function customerReportExportPermissionMiddleware(request, response, next) {
+      let decision;
+      try {
+        decision = moduleActionPermissionService.authorize({
+          principal: request.user,
+          organizationId: performanceExportOrganizationId(request),
+          module: CAMPAIGN_CUSTOMER_REPORT_MODULE,
+          action: CAMPAIGN_CUSTOMER_REPORT_EXPORT_ACTION
+        });
+      } catch {
+        decision = { allowed: false, code: 'AUTHORITATIVE_FACTS_UNAVAILABLE' };
+      }
+      if (decision && decision.allowed === true) {
+        request.customerReportExportPermission = decision;
+        return next();
+      }
+      try {
+        customerReportExportAudit(customerReportExportAuditEvent(
+          request,
+          decision,
+          exportKind,
+          'denied'
+        ));
+      } catch {
+        return sendCustomerReportExportError(
+          request,
+          response,
+          503,
+          'CUSTOMER_REPORT_EXPORT_AUDIT_UNAVAILABLE',
+          'Customer report export audit is unavailable.'
+        );
+      }
+      return sendCustomerReportExportError(
+        request,
+        response,
+        403,
+        'CUSTOMER_REPORT_EXPORT_FORBIDDEN',
+        'Customer report export is forbidden.'
+      );
+    };
+  }
+
   const requireContentCsvExport = requirePerformanceExport('content_csv');
   const requireFeishuSnapshotCsvExport = requirePerformanceExport('feishu_snapshot_csv');
+  const requireCustomerReportPptExport = requireCustomerReportExport('pptx');
+  const requireCustomerReportHtmlExport = requireCustomerReportExport('html');
 
   app.get('/api/campaigns/:id/performance/contents', options.authMiddleware, (request, response) => {
     try {
@@ -693,32 +768,76 @@ function registerPerformanceRoutes(app, options = {}) {
     }
   });
 
-  app.post('/api/campaigns/:id/performance/customer-report-snapshots/:snapshotId/ppt', options.authMiddleware, (request, response) => {
-    try {
-      return sendPptResult(request, response, customerReportDeliveryService.generate({
-        user: request.user,
-        campaignId: request.params.id,
-        snapshotId: request.params.snapshotId,
-        requestId: requestId(request)
-      }));
-    } catch (error) {
-      return sendError(request, response, error);
+  app.post(
+    '/api/campaigns/:id/performance/customer-report-snapshots/:snapshotId/ppt',
+    options.authMiddleware,
+    requireCustomerReportPptExport,
+    (request, response) => {
+      try {
+        const result = customerReportDeliveryService.generate({
+          user: request.user,
+          campaignId: request.params.id,
+          snapshotId: request.params.snapshotId,
+          requestId: requestId(request)
+        });
+        try {
+          customerReportExportAudit(customerReportExportAuditEvent(
+            request,
+            request.customerReportExportPermission,
+            'pptx',
+            'exported'
+          ));
+        } catch {
+          return sendCustomerReportExportError(
+            request,
+            response,
+            503,
+            'CUSTOMER_REPORT_EXPORT_AUDIT_UNAVAILABLE',
+            'Customer report export audit is unavailable.'
+          );
+        }
+        return sendPptResult(request, response, result);
+      } catch (error) {
+        return sendError(request, response, error);
+      }
     }
-  });
+  );
 
-  app.post('/api/campaigns/:id/performance/customer-report-snapshots/:snapshotId/html', options.authMiddleware, (request, response) => {
-    try {
-      requireEmptyJsonObject(request);
-      return sendHtmlResult(response, customerReportDeliveryService.exportHtml({
-        user: request.user,
-        campaignId: request.params.id,
-        snapshotId: request.params.snapshotId,
-        requestId: requestId(request)
-      }));
-    } catch (error) {
-      return sendError(request, response, error);
+  app.post(
+    '/api/campaigns/:id/performance/customer-report-snapshots/:snapshotId/html',
+    options.authMiddleware,
+    requireCustomerReportHtmlExport,
+    (request, response) => {
+      try {
+        requireEmptyJsonObject(request);
+        const result = customerReportDeliveryService.exportHtml({
+          user: request.user,
+          campaignId: request.params.id,
+          snapshotId: request.params.snapshotId,
+          requestId: requestId(request)
+        });
+        try {
+          customerReportExportAudit(customerReportExportAuditEvent(
+            request,
+            request.customerReportExportPermission,
+            'html',
+            'exported'
+          ));
+        } catch {
+          return sendCustomerReportExportError(
+            request,
+            response,
+            503,
+            'CUSTOMER_REPORT_EXPORT_AUDIT_UNAVAILABLE',
+            'Customer report export audit is unavailable.'
+          );
+        }
+        return sendHtmlResult(response, result);
+      } catch (error) {
+        return sendError(request, response, error);
+      }
     }
-  });
+  );
 
   app.post(
     '/api/campaigns/:id/performance/ai-review-draft',

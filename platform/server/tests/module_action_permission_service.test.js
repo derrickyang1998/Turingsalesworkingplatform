@@ -144,6 +144,15 @@ function campaignPerformanceRequest(principal, organizationId, action) {
   };
 }
 
+function campaignCustomerReportRequest(principal, organizationId, action) {
+  return {
+    principal,
+    organizationId,
+    module: 'campaign.customer_report',
+    action
+  };
+}
+
 test('allows the declared platform administration action for an active live platform admin', () => {
   const { db, service } = createFixture();
   try {
@@ -784,6 +793,78 @@ test('projects and authorizes campaign performance export only for writable tena
       [0, 'MALFORMED_ORGANIZATION']
     ]) {
       const request = campaignPerformanceRequest({ id: 2, role: 'user' }, organizationId, 'export');
+      if (organizationId === undefined) delete request.organizationId;
+      assert.deepEqual(service.authorize(request), { allowed: false, code });
+    }
+  } finally {
+    db.close();
+  }
+});
+
+test('projects and authorizes customer report export only for writable tenant roles', () => {
+  const { db, service } = createFixture();
+  try {
+    assert.deepEqual(service.projectModuleAccess({
+      principal: { id: 2, role: 'user' },
+      organizationId: 10,
+      module: 'campaign.customer_report'
+    }), {
+      allowed: true,
+      code: 'ALLOWED',
+      principal: {
+        user_id: 2,
+        organization_id: 10,
+        roles: ['administrator', 'manager', 'member']
+      },
+      actions: ['export']
+    });
+    assert.deepEqual(
+      service.authorize(campaignCustomerReportRequest({ id: 4, role: 'user' }, 20, 'export')),
+      {
+        allowed: true,
+        code: 'ALLOWED',
+        principal: {
+          user_id: 4,
+          organization_id: 20,
+          roles: ['company_owner', 'member']
+        }
+      }
+    );
+    assert.deepEqual(
+      service.authorize(campaignCustomerReportRequest({ id: 2, role: 'user' }, 20, 'export')),
+      {
+        allowed: false,
+        code: 'ACTION_FORBIDDEN',
+        principal: {
+          user_id: 2,
+          organization_id: 20,
+          roles: ['read_only']
+        }
+      }
+    );
+    assert.deepEqual(
+      service.authorize(campaignCustomerReportRequest({ id: 1, role: 'admin' }, 20, 'export')),
+      {
+        allowed: false,
+        code: 'ACTION_FORBIDDEN',
+        principal: {
+          user_id: 1,
+          organization_id: 20,
+          roles: ['platform_admin']
+        }
+      }
+    );
+    for (const [organizationId, code] of [
+      [undefined, 'ORGANIZATION_SCOPE_REQUIRED'],
+      [null, 'MALFORMED_ORGANIZATION'],
+      ['10', 'MALFORMED_ORGANIZATION'],
+      [0, 'MALFORMED_ORGANIZATION']
+    ]) {
+      const request = campaignCustomerReportRequest(
+        { id: 2, role: 'user' },
+        organizationId,
+        'export'
+      );
       if (organizationId === undefined) delete request.organizationId;
       assert.deepEqual(service.authorize(request), { allowed: false, code });
     }

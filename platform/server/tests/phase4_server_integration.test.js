@@ -870,7 +870,8 @@ test('login and auth me preserve the user object and add current auth context', 
       'crm.opportunity': ['read', 'create', 'update'],
       'crm.contact': ['read', 'create', 'update'],
       'crm.task': ['read', 'create', 'update'],
-      'campaign.performance': ['export']
+      'campaign.performance': ['export'],
+      'campaign.customer_report': ['export']
     });
     assert.equal(Array.isArray(login.body.auth_context.teams), true);
     assert.equal(login.body.auth_context.teams.length > 0, true);
@@ -988,7 +989,8 @@ test('read-only access is live, revokes old sessions, permits GET, blocks all bu
       'crm.opportunity': ['read'],
       'crm.contact': ['read'],
       'crm.task': ['read'],
-      'campaign.performance': []
+      'campaign.performance': [],
+      'campaign.customer_report': []
     });
 
     const readable = await jsonRequest(server.baseUrl, '/api/demands', {
@@ -1019,11 +1021,43 @@ test('read-only access is live, revokes old sessions, permits GET, blocks all bu
       assert.equal(rejected.response.headers.has('content-disposition'), false);
     }
 
+    for (const [suffix, requestId] of [
+      ['1/html', 'read-only-customer-report-html-export'],
+      ['1/ppt', 'read-only-customer-report-ppt-export']
+    ]) {
+      const rejected = await jsonRequest(
+        server.baseUrl,
+        `/api/campaigns/${campaignId}/performance/customer-report-snapshots/${suffix}`,
+        {
+          method: 'POST',
+          token: readOnlyLogin.body.token,
+          headers: { 'X-Request-Id': requestId },
+          body: {}
+        }
+      );
+      assert.equal(rejected.response.status, 403, rejected.text);
+      assert.equal(rejected.body.code, 'ORGANIZATION_READ_ONLY');
+      assert.equal(rejected.response.headers.has('content-disposition'), false);
+      assert.equal(rejected.response.headers.get('content-type').includes('text/html'), false);
+      assert.equal(
+        rejected.response.headers.get('content-type').includes(
+          'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+        ),
+        false
+      );
+    }
+
     const auditInspection = new Database(server.dbPath, { readonly: true });
     const exportAudits = auditInspection.prepare(`
       SELECT details
       FROM activity_log
       WHERE action='performance_export_denied' AND module='campaign.performance'
+      ORDER BY id
+    `).all().map((row) => JSON.parse(row.details));
+    const customerReportExportAudits = auditInspection.prepare(`
+      SELECT details
+      FROM activity_log
+      WHERE action='customer_report_export_denied' AND module='campaign.customer_report'
       ORDER BY id
     `).all().map((row) => JSON.parse(row.details));
     auditInspection.close();
@@ -1056,6 +1090,7 @@ test('read-only access is live, revokes old sessions, permits GET, blocks all bu
       }
     ]);
     assert.equal(JSON.stringify(exportAudits).includes('must-not-be-audited'), false);
+    assert.deepEqual(customerReportExportAudits, []);
 
     const writes = [
       ['POST', '/api/demands', { brand_name: 'blocked' }],

@@ -134,6 +134,14 @@ function currentUserHasCampaignPerformancePermission(action) {
   return actions.indexOf(action) !== -1;
 }
 
+function currentUserHasCustomerReportPermission(action) {
+  var permissions = CURRENT_USER && CURRENT_USER.module_permissions;
+  var actions = permissions && Array.isArray(permissions['campaign.customer_report'])
+    ? permissions['campaign.customer_report']
+    : [];
+  return actions.indexOf(action) !== -1;
+}
+
 function currentUserCanUseCrmScope(scope) {
   if (!currentUserHasCrmPermission('read')) return false;
   if (scope === 'my' || scope === 'public_pool') return true;
@@ -203,6 +211,16 @@ function applyPerformanceExportPermissionPresentation() {
   });
 }
 
+function applyCustomerReportExportPermissionPresentation() {
+  var canExport = currentUserHasCustomerReportPermission('export');
+  document.querySelectorAll('[data-customer-report-export-action="export"]').forEach(function(element) {
+    var isBusy = element.getAttribute('aria-busy') === 'true';
+    element.hidden = !canExport;
+    element.disabled = !canExport || isBusy;
+    element.title = canExport ? '' : '当前账号没有客户复盘报告导出权限';
+  });
+}
+
 function applyCurrentUserRolePresentation() {
   var platformAdmin = currentUserIsPlatformAdministrator();
   var governanceAccess = currentUserHasGovernanceAccess();
@@ -221,6 +239,7 @@ function applyCurrentUserRolePresentation() {
   if (heading) heading.textContent = platformAdmin ? '管理控制室' : '组织与成员';
   applyCrmPermissionPresentation();
   applyPerformanceExportPermissionPresentation();
+  applyCustomerReportExportPermissionPresentation();
 }
 
 function syncCrmTeamSelector() {
@@ -14239,6 +14258,7 @@ function renderPerformanceCustomerReportPreview(report, options) {
 function renderPerformanceCustomerReportSnapshots(snapshots, options) {
   var container = document.getElementById('performanceCustomerReportSnapshots');
   if (!container) return;
+  var canExport = currentUserHasCustomerReportPermission('export');
   if (options && options.loading) {
     container.innerHTML = '<div class="tm-state-loading">正在加载已封存版本...</div>';
     return;
@@ -14265,13 +14285,16 @@ function renderPerformanceCustomerReportSnapshots(snapshots, options) {
       + ' · ' + esc(performanceCustomerReportMetricLabel(snapshot.selected_metric)) + ' · '
       + esc(performanceAiReviewShortHash(snapshot.report_sha256)) + '</span></div>'
       + '<div class="tm-performance-customer-report-snapshot-actions"><button class="btn btn-outline btn-sm" type="button" onclick="loadPerformanceCustomerReportSnapshotDetail(' + item.id + ')">查看</button>'
-      + "<button class=\"btn btn-outline btn-sm\" type=\"button\" data-customer-report-html-id=\"" + item.id
-      + "\" onclick=\"downloadPerformanceCustomerReportHtml(" + item.id + ")\"" + (htmlBusy ? ' disabled aria-busy="true"' : '') + ">"
+      + "<button class=\"btn btn-outline btn-sm\" type=\"button\" data-customer-report-export-action=\"export\" data-customer-report-html-id=\"" + item.id
+      + "\" onclick=\"downloadPerformanceCustomerReportHtml(" + item.id + ")\"" + ((!canExport || htmlBusy) ? ' disabled' : '')
+      + (htmlBusy ? ' aria-busy="true"' : '') + (!canExport ? ' hidden title="当前账号没有客户复盘报告导出权限"' : '') + ">"
       + (htmlBusy ? '正在准备...' : '客户版 HTML') + '</button>'
-      + "<button class=\"btn btn-outline btn-sm\" type=\"button\" data-customer-report-ppt-id=\"" + item.id
-      + "\" onclick=\"downloadPerformanceCustomerReportPpt(" + item.id + ")\"" + (pptBusy ? ' disabled aria-busy="true"' : '') + ">"
+      + "<button class=\"btn btn-outline btn-sm\" type=\"button\" data-customer-report-export-action=\"export\" data-customer-report-ppt-id=\"" + item.id
+      + "\" onclick=\"downloadPerformanceCustomerReportPpt(" + item.id + ")\"" + ((!canExport || pptBusy) ? ' disabled' : '')
+      + (pptBusy ? ' aria-busy="true"' : '') + (!canExport ? ' hidden title="当前账号没有客户复盘报告导出权限"' : '') + ">"
       + (pptBusy ? '正在准备...' : '客户版 PPT') + '</button></div></div>';
   }).join('');
+  applyCustomerReportExportPermissionPresentation();
   if (window.TMAccessibility) window.TMAccessibility.refresh();
 }
 
@@ -14279,8 +14302,9 @@ function setPerformanceCustomerReportPptBusy(snapshotId, busy) {
   var normalizedSnapshotId = performancePositiveId(snapshotId);
   if (normalizedSnapshotId === null || typeof document === 'undefined') return;
   var selector = '[data-customer-report-ppt-id="' + normalizedSnapshotId + '"]';
+  var canExport = currentUserHasCustomerReportPermission('export');
   Array.prototype.forEach.call(document.querySelectorAll(selector), function(button) {
-    button.disabled = !!busy;
+    button.disabled = !canExport || !!busy;
     button.textContent = busy ? '正在准备...' : '客户版 PPT';
     button.setAttribute('aria-busy', busy ? 'true' : 'false');
   });
@@ -14290,8 +14314,9 @@ function setPerformanceCustomerReportHtmlBusy(snapshotId, busy) {
   var normalizedSnapshotId = performancePositiveId(snapshotId);
   if (normalizedSnapshotId === null || typeof document === 'undefined') return;
   var selector = '[data-customer-report-html-id="' + normalizedSnapshotId + '"]';
+  var canExport = currentUserHasCustomerReportPermission('export');
   Array.prototype.forEach.call(document.querySelectorAll(selector), function(button) {
-    button.disabled = !!busy;
+    button.disabled = !canExport || !!busy;
     button.textContent = busy ? '正在准备...' : '客户版 HTML';
     button.setAttribute('aria-busy', busy ? 'true' : 'false');
   });
@@ -14308,6 +14333,10 @@ function performanceCustomerReportPptDownloadIsCurrent(context) {
 }
 
 async function downloadPerformanceCustomerReportPpt(snapshotId) {
+  if (!currentUserHasCustomerReportPermission('export')) {
+    toast('当前账号没有客户复盘报告导出权限。', 'error');
+    return null;
+  }
   var campaignId = getPerformanceCampaignId();
   var normalizedSnapshotId = performancePositiveId(snapshotId);
   if (campaignId === null || normalizedSnapshotId === null) {
@@ -14375,6 +14404,10 @@ function performanceCustomerReportHtmlDownloadIsCurrent(context) {
 }
 
 async function downloadPerformanceCustomerReportHtml(snapshotId) {
+  if (!currentUserHasCustomerReportPermission('export')) {
+    toast('当前账号没有客户复盘报告导出权限。', 'error');
+    return null;
+  }
   var campaignId = getPerformanceCampaignId();
   var normalizedSnapshotId = performancePositiveId(snapshotId);
   if (campaignId === null || normalizedSnapshotId === null) {

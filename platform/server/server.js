@@ -72,7 +72,8 @@ const {
   CRM_TASK_MODULE,
   CRM_TASK_CREATE_ACTION,
   CRM_TASK_UPDATE_ACTION,
-  CAMPAIGN_PERFORMANCE_MODULE
+  CAMPAIGN_PERFORMANCE_MODULE,
+  CAMPAIGN_CUSTOMER_REPORT_MODULE
 } = require('./services/module_action_permission_service');
 const moduleActionPermissionService = createModuleActionPermissionService(db);
 
@@ -102,12 +103,18 @@ function projectModulePermissions(principal, organizationId) {
     organizationId,
     module: CAMPAIGN_PERFORMANCE_MODULE
   });
+  const campaignCustomerReportAccess = moduleActionPermissionService.projectModuleAccess({
+    principal,
+    organizationId,
+    module: CAMPAIGN_CUSTOMER_REPORT_MODULE
+  });
   if (
     !crmCustomerAccess.allowed ||
     !crmOpportunityAccess.allowed ||
     !crmContactAccess.allowed ||
     !crmTaskAccess.allowed ||
-    !campaignPerformanceAccess.allowed
+    !campaignPerformanceAccess.allowed ||
+    !campaignCustomerReportAccess.allowed
   ) {
     throw new Error('Module permissions unavailable');
   }
@@ -116,7 +123,8 @@ function projectModulePermissions(principal, organizationId) {
     [CRM_OPPORTUNITY_MODULE]: crmOpportunityAccess.actions.slice(),
     [CRM_CONTACT_MODULE]: crmContactAccess.actions.slice(),
     [CRM_TASK_MODULE]: crmTaskAccess.actions.slice(),
-    [CAMPAIGN_PERFORMANCE_MODULE]: campaignPerformanceAccess.actions.slice()
+    [CAMPAIGN_PERFORMANCE_MODULE]: campaignPerformanceAccess.actions.slice(),
+    [CAMPAIGN_CUSTOMER_REPORT_MODULE]: campaignCustomerReportAccess.actions.slice()
   };
 }
 const {
@@ -535,6 +543,21 @@ function writePerformanceExportAudit(event) {
     event.actor_user_id,
     event.outcome === 'exported' ? 'performance_exported' : 'performance_export_denied',
     'campaign.performance',
+    JSON.stringify(details),
+    event.ip_address || null
+  );
+}
+
+function writeCustomerReportExportAudit(event) {
+  const details = { ...event };
+  delete details.ip_address;
+  db.prepare(`
+    INSERT INTO activity_log (user_id,action,module,details,ip_address)
+    VALUES (?,?,?,?,?)
+  `).run(
+    event.actor_user_id,
+    event.outcome === 'exported' ? 'customer_report_exported' : 'customer_report_export_denied',
+    CAMPAIGN_CUSTOMER_REPORT_MODULE,
     JSON.stringify(details),
     event.ip_address || null
   );
@@ -2042,6 +2065,7 @@ registerPerformanceRoutes(app, {
   customerReportDeliveryService,
   moduleActionPermissionService,
   performanceExportAudit: writePerformanceExportAudit,
+  customerReportExportAudit: writeCustomerReportExportAudit,
   aiLimiter,
   aiQuotaGuard
 });
