@@ -228,9 +228,11 @@ function recordTokenUsage(opts, completion) {
   } catch (e) {}
 }
 
-async function generateStrategy(db, user, prompt, input) {
+async function generateStrategy(db, user, prompt, input, opts) {
+  opts = opts || {};
   const result = await require('./ai_service').handleChat(db, {
     user,
+    organizationId: opts.organizationId,
     message: prompt || input || '',
     allowWeb: true,
     source_module: 'strategy',
@@ -258,6 +260,7 @@ async function generateDemandAnalysis(prompt, input, fileName, opts) {
     const retrievalQuery = [prompt, input].filter(Boolean).join('\n\n');
     const aiResult = await aiService.handleChat(opts.db, {
       user: opts.user,
+      organizationId: opts.organizationId,
       message,
       ragQuery: retrievalQuery,
       webQuery: retrievalQuery,
@@ -362,6 +365,7 @@ async function generatePptOutline(db, user, body, opts) {
     const aiService = opts.aiService || require('./ai_service');
     const aiResult = await aiService.handleChat(db, {
       user,
+      organizationId: opts.organizationId,
       message,
       ragQuery: [query, proposal].filter(Boolean).join('\n\n'),
       webQuery: query,
@@ -400,6 +404,7 @@ async function generatePptOutline(db, user, body, opts) {
   }
   const ragContext = rag.buildRagContext(db, {
     user,
+    organizationId: opts.organizationId,
     query: [query, proposal].filter(Boolean).join('\n\n'),
     limit: body.knowledge_limit || 8,
     business_type: body.business_type || ''
@@ -423,7 +428,8 @@ async function generatePptOutline(db, user, body, opts) {
   knowledgeService.recordKnowledgeUsageTelemetry(
     db,
     ragContext.references.map(function(ref) { return ref.id; }),
-    user
+    user,
+    { organizationId: opts.organizationId }
   );
   try {
     knowledgeService.ingestKnowledge(db, {
@@ -439,6 +445,7 @@ async function generatePptOutline(db, user, body, opts) {
       business_id: demand.id || demand.brand || '',
       created_by: user.id,
       actor_role: user.role,
+      organizationId: opts.organizationId,
       metadata: {
         research_used: !!research.used,
         knowledge_reference_ids: ragContext.references.map(function(ref) { return ref.id; })
@@ -471,12 +478,14 @@ function normalizePptOutline(value, fallback, research) {
   return out;
 }
 
-function similarKnowledge(db, query, user) {
+function similarKnowledge(db, query, user, opts) {
+  opts = opts || {};
   const terms = [query.brand, query.industry, query.product, query.market].filter(Boolean).join(' ');
   return knowledgeService.searchKnowledge(db, {
     q: terms || query.q || '',
     entry_type: query.type || '',
     user,
+    organizationId: opts.organizationId,
     limit: query.limit || 5
   });
 }

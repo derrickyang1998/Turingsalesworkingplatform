@@ -23,16 +23,24 @@ function actor(user) {
 
 function ingest(db, input, user, ownerId) {
   const current = actor(user);
+  const organizationId = input.organizationId === undefined
+    ? current.__active_organization_id
+    : input.organizationId;
   return knowledgeService.ingestKnowledge(db, Object.assign({
     created_by: ownerId || current.id,
     actor_role: current.role
-  }, input));
+  }, input, { organizationId }));
+}
+
+function organizationContextError(error) {
+  return error && /Knowledge organization context is (?:required|unavailable)/i.test(error.message || '');
 }
 
 function safeIngest(db, input, user, ownerId) {
   try {
     return ingest(db, input, user, ownerId);
   } catch (e) {
+    if (organizationContextError(e)) throw e;
     return null;
   }
 }
@@ -67,6 +75,7 @@ function archiveCustomer(db, customer, user) {
     tags: cleanTags(['crm', 'customer', customer.industry, customer.stage, customer.source]),
     business_type: 'customer',
     business_id: customer.id,
+    organizationId: customer.org_id,
     metadata: { module: 'crm' }
   }, user, crmAccess.customerOwnerId(customer, user));
 }
@@ -84,6 +93,7 @@ function archiveOpportunity(db, opportunity, user) {
     tags: cleanTags(['crm', 'opportunity', opportunity.stage, opportunity.product_name, opportunity.channel_type]),
     business_type: 'opportunity',
     business_id: opportunity.id,
+    organizationId: opportunity.org_id,
     metadata: { module: 'crm', customer_id: opportunity.customer_id }
   }, user, crmAccess.opportunityOwnerId(db, opportunity, user));
 }
@@ -128,7 +138,8 @@ function archiveInfluencer(db, influencer, user, options) {
       });
       knowledgeService.applyKnowledgeCapacityGaugePlanInTransaction(db, result.capacityGaugePlan);
       return result;
-    } catch (_error) {
+    } catch (error) {
+      if (organizationContextError(error)) throw error;
       return null;
     }
   }
@@ -143,6 +154,7 @@ function archiveInfluencer(db, influencer, user, options) {
     tags: cleanTags(['influencer', influencer.platform, influencer.category, influencer.region, influencer.tags]),
     business_type: 'influencer',
     business_id: influencer.id || influencer.kol_handle,
+    organizationId,
     metadata: { module: 'influencer' }
   }, user);
 }
@@ -194,6 +206,7 @@ function archiveWorkflowInstance(db, instance, user, action) {
     tags: cleanTags(['workflow', 'instance', action, instance.business_type, instance.status]),
     business_type: instance.business_type || 'workflow_instance',
     business_id: instance.business_id || instance.id,
+    organizationId: instance.org_id,
     metadata: { module: 'workflow', workflow_instance_id: instance.id }
   }, user);
 }

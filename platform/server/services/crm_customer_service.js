@@ -2121,6 +2121,7 @@ function archiveCustomerKnowledge(db, context, input, customer) {
     tags: archive.tags,
     source_type: 'crm_customer_archive',
     source_id: sourceId,
+    organizationId: context.organization.id,
     business_type: 'customer',
     business_id: String(customer.id),
     created_by: customer.assigned_to,

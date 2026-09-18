@@ -46,14 +46,15 @@ function normalizeSelectedEntryIds(value) {
   return ids;
 }
 
-function loadEntryChunks(db, entryId) {
+function loadEntryChunks(db, entryId, organizationId) {
+  const organizationOwned = knowledge.hasKnowledgeOrganizationOwnership(db);
   const entry = db.prepare(`
     SELECT
       id,title,entry_type,source_type,source_id,visibility,is_public,
       source_identity_sha256,content_sha256,summary,content
     FROM knowledge_entries
-    WHERE id=?
-  `).get(entryId);
+    WHERE id=? ${organizationOwned ? 'AND org_id=?' : ''}
+  `).get(...(organizationOwned ? [entryId, organizationId] : [entryId]));
   if (!entry) return null;
   const chunks = db.prepare(`
     SELECT id,entry_id,chunk_index,content,content_sha256
@@ -90,6 +91,18 @@ function renderLinkedRecord(reference, chunk) {
 }
 
 function assertSelectedEntryAccess(db, opts, entryId) {
+  if (!knowledge.campaignKnowledgeEntryAllowsRead(db, {
+    user: opts.user,
+    campaignId: opts.campaignId,
+    entryId,
+    organizationId: opts.organizationId
+  })) {
+    throw ragInputError(
+      'RECORD_NOT_FOUND',
+      'Selected knowledge is unavailable for this campaign.',
+      404
+    );
+  }
   const access = getTargetAccess(db, {
     userId: opts.user && opts.user.id,
     campaignId: opts.campaignId,
@@ -126,7 +139,7 @@ function buildLinkedRagContext(db, opts) {
   const selectedRecords = [];
   for (const entryId of selectedEntryIds) {
     assertSelectedEntryAccess(db, { ...opts, campaignId }, entryId);
-    const record = loadEntryChunks(db, entryId);
+    const record = loadEntryChunks(db, entryId, opts.organizationId);
     if (!record || !record.chunks.length) {
       throw ragInputError('RECORD_NOT_FOUND', 'Selected knowledge is unavailable for this campaign.', 404);
     }
@@ -139,6 +152,7 @@ function buildLinkedRagContext(db, opts) {
     query: opts.query || opts.q || '',
     user: opts.user,
     campaignId,
+    organizationId: opts.organizationId,
     limit: LINKED_RAG_LIMITS.retrievalCandidates,
     entry_type: opts.entry_type,
     source_type: opts.source_type,
@@ -214,6 +228,7 @@ function buildRagContext(db, opts) {
   const results = knowledge.searchKnowledge(db, {
     q: query,
     user: opts.user,
+    organizationId: opts.organizationId,
     limit: limit,
     entry_type: opts.entry_type,
     source_type: opts.source_type,

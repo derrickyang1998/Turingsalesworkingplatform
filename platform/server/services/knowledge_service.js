@@ -461,6 +461,56 @@ function normalizeEntry(row) {
   };
 }
 
+function hasKnowledgeOrganizationOwnership(db) {
+  return Boolean(db.prepare(`
+    SELECT 1 AS present
+    FROM pragma_table_info('knowledge_entries')
+    WHERE name='org_id'
+  `).get());
+}
+
+function knowledgeOrganizationId(value) {
+  const parsed = typeof value === 'string' && /^[1-9][0-9]*$/.test(value)
+    ? Number(value)
+    : value;
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function resolveKnowledgeOrganizationId(db, options, settings) {
+  if (!hasKnowledgeOrganizationOwnership(db)) return null;
+  const input = options || {};
+  const user = input.user || {};
+  const allowAdminGlobal = Boolean(
+    settings && settings.allowAdminGlobal &&
+    input.adminAuditGlobal === true &&
+    user.role === 'admin'
+  );
+  if (allowAdminGlobal) return null;
+  const explicit = knowledgeOrganizationId(
+    input.organizationId === undefined
+      ? user.__active_organization_id
+      : input.organizationId
+  );
+  if (explicit !== null) {
+    const organization = db.prepare('SELECT 1 AS present FROM organizations WHERE id=?').get(explicit);
+    if (!organization) throw new Error('Knowledge organization context is unavailable');
+    return explicit;
+  }
+  const userId = knowledgeOrganizationId(user.id);
+  if (userId !== null) {
+    const memberships = db.prepare(`
+      SELECT membership.org_id
+      FROM organization_memberships membership
+      JOIN organizations organization ON organization.id=membership.org_id
+      WHERE membership.user_id=? AND membership.status='active'
+      ORDER BY membership.org_id
+      LIMIT 2
+    `).all(userId);
+    if (memberships.length === 1) return memberships[0].org_id;
+  }
+  throw new Error('Knowledge organization context is required');
+}
+
 function hasKnowledgeGovernance(db) {
   return Boolean(db.prepare(`
     SELECT 1 AS present
@@ -1299,12 +1349,10 @@ function normalizedBusinessArtifact(options) {
   const artifactType = options.artifactType;
   const artifactState = options.artifactState;
   const definition = businessArtifactDefinition(artifactType, artifactState);
-  const campaignScoped = (
-    options.organizationId !== undefined || options.campaignId !== undefined
-  );
+  const campaignScoped = options.campaignId !== undefined;
   if (
     campaignScoped &&
-    (options.organizationId === undefined || options.campaignId === undefined)
+    options.organizationId === undefined
   ) {
     throw new BusinessKnowledgeArtifactInputError(
       'Campaign business knowledge requires organizationId and campaignId'
@@ -1457,11 +1505,13 @@ function ingestBusinessArtifact(db, options) {
     created_by: normalized.createdBy,
     actor_role: normalized.actorRole,
     metadata: normalized.metadata,
+    organizationId: normalized.organizationId,
     allow_source_hash: true,
     source_hash: legacyBusinessArtifactSourceHash(normalized)
   };
   const prepared = prepareLegacyEntry(input);
-  const existing = findSourceHashEntry(db, prepared.source_hash);
+  const organizationId = resolveKnowledgeOrganizationId(db, input);
+  const existing = findSourceHashEntry(db, prepared.source_hash, organizationId);
   if (existing) {
     if (!exactLegacyBusinessArtifact(existing, prepared)) {
       throw new CampaignKnowledgeConflictError(
@@ -2722,8 +2772,21 @@ function prepareLegacyEntry(input) {
   return entry;
 }
 
-function findSourceHashEntry(db, sourceHash) {
+function findSourceHashEntry(db, sourceHash, organizationId) {
   if (!sourceHash) return null;
+  if (hasKnowledgeOrganizationOwnership(db)) {
+    const scopedOrganizationId = knowledgeOrganizationId(organizationId);
+    if (scopedOrganizationId === null) {
+      throw new Error('Knowledge organization context is required');
+    }
+    return db.prepare(`
+      SELECT
+        id,org_id,entry_type,source_type,source_id,source_hash,business_type,business_id,
+        created_by,visibility,is_public,metadata_json,source_identity_sha256,content_sha256
+      FROM knowledge_entries
+      WHERE org_id=? AND source_hash=?
+    `).get(scopedOrganizationId, sourceHash) || null;
+  }
   return db.prepare(`
     SELECT
       id,entry_type,source_type,source_id,source_hash,business_type,business_id,
@@ -3099,6 +3162,13 @@ function exactOrganizationKnowledgeGraph(db, existing, prepared) {
 }
 
 function findCampaignKnowledgeByIdentity(db, prepared) {
+  if (hasKnowledgeOrganizationOwnership(db)) {
+    return db.prepare(`
+      SELECT id
+      FROM knowledge_entries
+      WHERE org_id=? AND source_identity_sha256=?
+    `).get(prepared.organizationId, prepared.entry.source_identity_sha256) || null;
+  }
   return db.prepare(`
     SELECT id
     FROM knowledge_entries
@@ -3108,12 +3178,17 @@ function findCampaignKnowledgeByIdentity(db, prepared) {
 
 function assertNoConflictingCampaignReview(db, prepared) {
   if (prepared.entry.source_type !== 'campaign_review') return;
+  const organizationClause = hasKnowledgeOrganizationOwnership(db) ? 'AND org_id=?' : '';
+  const params = hasKnowledgeOrganizationOwnership(db)
+    ? [prepared.entry.source_id, prepared.organizationId]
+    : [prepared.entry.source_id];
   const existing = db.prepare(`
     SELECT id,source_identity_sha256
     FROM knowledge_entries
     WHERE source_type='campaign_review'
       AND CAST(source_id AS TEXT)=?
-  `).get(prepared.entry.source_id);
+      ${organizationClause}
+  `).get(...params);
   if (
     existing &&
     existing.source_identity_sha256 !== prepared.entry.source_identity_sha256
@@ -3124,7 +3199,44 @@ function assertNoConflictingCampaignReview(db, prepared) {
   }
 }
 
-function insertCampaignKnowledgeEntry(db, entryId, entry) {
+function insertCampaignKnowledgeEntry(db, entryId, entry, organizationId) {
+  if (hasKnowledgeOrganizationOwnership(db)) {
+    const result = db.prepare(`
+      INSERT INTO knowledge_entries (
+        id,org_id,entry_type,title,summary,source_type,source_id,key_terms,content,
+        created_by,is_public,tags_json,visibility,source_hash,business_type,
+        business_id,metadata_json,embedding_json,source_identity_sha256,
+        content_sha256
+      )
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    `).run(
+      entryId,
+      organizationId,
+      entry.entry_type,
+      entry.title,
+      entry.summary,
+      entry.source_type,
+      entry.source_id,
+      entry.key_terms,
+      entry.content,
+      entry.created_by,
+      entry.is_public,
+      entry.tags_json,
+      entry.visibility,
+      null,
+      'campaign',
+      entry.business_id,
+      entry.metadata_json,
+      entry.embedding_json,
+      entry.source_identity_sha256,
+      entry.content_sha256
+    );
+    if (result.changes !== 1) {
+      throw new Error('campaign knowledge entry insert count mismatch');
+    }
+    verifyKnowledgeEntrySequence(db, entryId);
+    return;
+  }
   const result = db.prepare(`
     INSERT INTO knowledge_entries (
       id,entry_type,title,summary,source_type,source_id,key_terms,content,
@@ -3160,7 +3272,43 @@ function insertCampaignKnowledgeEntry(db, entryId, entry) {
   verifyKnowledgeEntrySequence(db, entryId);
 }
 
-function insertOrganizationKnowledgeEntry(db, entryId, entry) {
+function insertOrganizationKnowledgeEntry(db, entryId, entry, organizationId) {
+  if (hasKnowledgeOrganizationOwnership(db)) {
+    const result = db.prepare(`
+      INSERT INTO knowledge_entries (
+        id,org_id,entry_type,title,summary,source_type,source_id,key_terms,content,
+        created_by,is_public,tags_json,visibility,source_hash,business_type,
+        business_id,metadata_json,embedding_json,source_identity_sha256,
+        content_sha256
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    `).run(
+      entryId,
+      organizationId,
+      entry.entry_type,
+      entry.title,
+      entry.summary,
+      entry.source_type,
+      entry.source_id,
+      entry.key_terms,
+      entry.content,
+      entry.created_by,
+      1,
+      entry.tags_json,
+      'team',
+      null,
+      'organization',
+      entry.business_id,
+      entry.metadata_json,
+      null,
+      entry.source_identity_sha256,
+      entry.content_sha256
+    );
+    if (result.changes !== 1) {
+      throw new Error('organization knowledge entry insert count mismatch');
+    }
+    verifyKnowledgeEntrySequence(db, entryId);
+    return;
+  }
   const result = db.prepare(`
     INSERT INTO knowledge_entries (
       id,entry_type,title,summary,source_type,source_id,key_terms,content,
@@ -3276,7 +3424,7 @@ function writeCampaignKnowledgeInTransaction(db, options) {
 
   const entryId = allocateKnowledgeEntryId(db);
   const chunkIds = allocateKnowledgeChunkIds(db, prepared.chunks.length);
-  insertCampaignKnowledgeEntry(db, entryId, prepared.entry);
+  insertCampaignKnowledgeEntry(db, entryId, prepared.entry, prepared.organizationId);
   insertCampaignKnowledgeChunks(
     db,
     entryId,
@@ -3314,7 +3462,7 @@ function writeOrganizationKnowledgeInTransaction(db, options) {
   const capacityGaugePlan = preflightOrganizationKnowledgeCapacity(db, prepared);
   const entryId = allocateKnowledgeEntryId(db);
   const chunkIds = allocateKnowledgeChunkIds(db, prepared.chunks.length);
-  insertOrganizationKnowledgeEntry(db, entryId, prepared.entry);
+  insertOrganizationKnowledgeEntry(db, entryId, prepared.entry, prepared.organizationId);
   insertCampaignKnowledgeChunks(db, entryId, chunkIds, prepared.chunks);
   insertCampaignKnowledgeFts(db, entryId, prepared.entry, chunkIds, prepared.chunks);
   const graph = readCampaignKnowledgeGraph(db, entryId);
@@ -3325,13 +3473,15 @@ function writeOrganizationKnowledgeInTransaction(db, options) {
 }
 
 function ingestKnowledge(db, input) {
+  const organizationId = resolveKnowledgeOrganizationId(db, input);
   const entry = prepareLegacyEntry(input);
-  const initialExisting = findSourceHashEntry(db, entry.source_hash);
+  entry.org_id = organizationId;
+  const initialExisting = findSourceHashEntry(db, entry.source_hash, organizationId);
   if (initialExisting) existingWriteDecision(db, initialExisting, entry, input);
 
   let id;
   const tx = db.transaction(function() {
-    const existing = findSourceHashEntry(db, entry.source_hash);
+    const existing = findSourceHashEntry(db, entry.source_hash, organizationId);
     if (existing) {
       const decision = existingWriteDecision(db, existing, entry, input);
       id = existing.id;
@@ -3367,15 +3517,16 @@ function ingestKnowledge(db, input) {
     id = allocateKnowledgeEntryId(db);
     entry.id = id;
     entry.source_identity_sha256 = legacySourceIdentityDigest(entry);
-    const insert = db.prepare(`
-      INSERT INTO knowledge_entries (
-        id,entry_type,title,summary,source_type,source_id,key_terms,content,created_by,
+    const columns = hasKnowledgeOrganizationOwnership(db)
+      ? `id,org_id,entry_type,title,summary,source_type,source_id,key_terms,content,created_by,
         is_public,tags_json,visibility,source_hash,business_type,business_id,
-        metadata_json,embedding_json,source_identity_sha256,content_sha256
-      )
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-    `).run(
+        metadata_json,embedding_json,source_identity_sha256,content_sha256`
+      : `id,entry_type,title,summary,source_type,source_id,key_terms,content,created_by,
+        is_public,tags_json,visibility,source_hash,business_type,business_id,
+        metadata_json,embedding_json,source_identity_sha256,content_sha256`;
+    const values = [
       id,
+      ...(hasKnowledgeOrganizationOwnership(db) ? [organizationId] : []),
       entry.entry_type,
       entry.title,
       entry.summary,
@@ -3394,7 +3545,11 @@ function ingestKnowledge(db, input) {
       entry.embedding_json,
       entry.source_identity_sha256,
       entry.content_sha256
-    );
+    ];
+    const insert = db.prepare(`
+      INSERT INTO knowledge_entries (${columns})
+      VALUES (${values.map(function() { return '?'; }).join(',')})
+    `).run(...values);
     if (insert.changes !== 1) throw new Error('knowledge insert count mismatch');
     verifyKnowledgeEntrySequence(db, id);
     rebuildChunks(db, id, entry);
@@ -3655,6 +3810,13 @@ function buildWhere(db, opts, scope, accessOptions) {
   const where = ['1=1'];
   const params = [];
   const user = opts.user || {};
+  const organizationId = resolveKnowledgeOrganizationId(db, opts, {
+    allowAdminGlobal: Boolean(accessOptions && accessOptions.allowAdminGlobal)
+  });
+  if (organizationId !== null) {
+    where.push('entry.org_id = ?');
+    params.push(organizationId);
+  }
   const access = knowledgeAccessParts(db, user, scope, accessOptions);
   const governanceAvailable = hasKnowledgeGovernance(db);
   const includeInactiveGovernance = Boolean(
@@ -3717,7 +3879,7 @@ function buildWhere(db, opts, scope, accessOptions) {
   };
 }
 
-function versionedKnowledgeReferenceProjection(db, reference) {
+function versionedKnowledgeReferenceProjection(db, reference, options) {
   const entryId = reference && reference.knowledge_entry_id;
   const chunkId = reference && reference.knowledge_chunk_id;
   const rank = reference && reference.reference_rank;
@@ -3736,6 +3898,23 @@ function versionedKnowledgeReferenceProjection(db, reference) {
   ) {
     return null;
   }
+  const organizationOwned = hasKnowledgeOrganizationOwnership(db);
+  const adminAuditGlobal = Boolean(options && options.adminAuditGlobal);
+  const scopedOrganizationId = organizationOwned
+    ? knowledgeOrganizationId(options && options.organizationId)
+    : null;
+  if (organizationOwned && !adminAuditGlobal && scopedOrganizationId === null) return null;
+  const parameters = {
+    entryId,
+    chunkId,
+    rank,
+    snippet: typeof reference.snippet === 'string' ? reference.snippet : '',
+    selectionOrigin: reference.selection_origin,
+    sourceIdentitySha256: reference.source_identity_sha256,
+    entryContentSha256: reference.entry_content_sha256,
+    chunkContentSha256: reference.chunk_content_sha256
+  };
+  if (organizationOwned && !adminAuditGlobal) parameters.organizationId = scopedOrganizationId;
   return db.prepare(`
     SELECT
       entry.id AS entry_id,
@@ -3756,27 +3935,26 @@ function versionedKnowledgeReferenceProjection(db, reference) {
     JOIN knowledge_chunks chunk
       ON chunk.entry_id=entry.id AND chunk.id=@chunkId
     WHERE entry.id=@entryId
+      ${organizationOwned && !adminAuditGlobal ? 'AND entry.org_id=@organizationId' : ''}
       AND entry.source_identity_sha256=@sourceIdentitySha256
       AND entry.content_sha256=@entryContentSha256
       AND chunk.content_sha256=@chunkContentSha256
-  `).get({
-    entryId,
-    chunkId,
-    rank,
-    snippet: typeof reference.snippet === 'string' ? reference.snippet : '',
-    selectionOrigin: reference.selection_origin,
-    sourceIdentitySha256: reference.source_identity_sha256,
-    entryContentSha256: reference.entry_content_sha256,
-    chunkContentSha256: reference.chunk_content_sha256
-  }) || null;
+  `).get(parameters) || null;
 }
 
-function historicalKnowledgeCustodyAllowsRead(db, entryId, user) {
+function historicalKnowledgeCustodyAllowsRead(db, entryId, user, options) {
+  const adminAuditGlobal = Boolean(
+    options && options.adminAuditGlobal && user && user.role === 'admin'
+  );
   const where = buildWhere(
     db,
-    { user: user || {} },
+    {
+      user: user || {},
+      organizationId: options && options.organizationId,
+      adminAuditGlobal
+    },
     'knowledge_references',
-    { includeInactiveGovernance: true }
+    { includeInactiveGovernance: true, allowAdminGlobal: adminAuditGlobal }
   );
   return Boolean(db.prepare(`
     ${where.withClause}
@@ -3787,10 +3965,17 @@ function historicalKnowledgeCustodyAllowsRead(db, entryId, user) {
   `).get(...where.params, entryId));
 }
 
-function redactKnowledgeReferences(db, references, user) {
+function redactKnowledgeReferences(db, references, user, options) {
   if (!Array.isArray(references)) {
     throw new TypeError('knowledge references must be an array');
   }
+  const adminAuditGlobal = Boolean(
+    options && options.adminAuditGlobal && user && user.role === 'admin'
+  );
+  const accessOptions = {
+    organizationId: options && options.organizationId,
+    adminAuditGlobal
+  };
   return references.map(function(reference) {
     if (
       !reference ||
@@ -3804,11 +3989,11 @@ function redactKnowledgeReferences(db, references, user) {
     if (!Number.isSafeInteger(rank) || rank < 1) {
       throw new Error('versioned knowledge reference rank is invalid');
     }
-    const projection = versionedKnowledgeReferenceProjection(db, reference);
+    const projection = versionedKnowledgeReferenceProjection(db, reference, accessOptions);
     if (!projection) {
       return serializeKnowledgeReference({ rank }, { target: 'missing' });
     }
-    if (!historicalKnowledgeCustodyAllowsRead(db, projection.entry_id, user)) {
+    if (!historicalKnowledgeCustodyAllowsRead(db, projection.entry_id, user, accessOptions)) {
       return serializeKnowledgeReference({ rank }, { target: 'restricted' });
     }
     return serializeKnowledgeReference(projection, { target: 'available' });
@@ -3903,7 +4088,10 @@ function campaignKnowledgeEntryAllowsRead(db, options) {
   ) return false;
   const where = buildWhere(
     db,
-    { user: input.user || {} },
+    {
+      user: input.user || {},
+      organizationId: input.organizationId
+    },
     'knowledge_rag',
     { campaignId }
   );
@@ -4082,9 +4270,10 @@ function searchKnowledge(db, opts) {
   const query = String(opts.q || opts.query || opts.search || '').trim();
   const limit = Math.min(parseInt(opts.limit || 20, 10) || 20, 100);
   const tags = normalizeTags(opts.tags || opts.tag || []);
-  const adminCandidateFirst = Boolean(
-    opts.user && opts.user.role === 'admin' && !opts.visibility
+  const adminAuditGlobal = Boolean(
+    opts.adminAuditGlobal === true && opts.user && opts.user.role === 'admin'
   );
+  const adminCandidateFirst = adminAuditGlobal && !opts.visibility;
   const where = adminCandidateFirst
     ? adminKnowledgeBaseWhere(db, opts)
     : buildWhere(
@@ -4092,6 +4281,7 @@ function searchKnowledge(db, opts) {
         opts,
         'knowledge',
         {
+          allowAdminGlobal: adminAuditGlobal,
           includeInactiveGovernance: Boolean(
             opts.include_inactive && opts.user && opts.user.role === 'admin'
           )
@@ -4210,7 +4400,10 @@ function searchKnowledge(db, opts) {
 
 function listKnowledgeCategories(db, opts) {
   opts = opts || {};
-  if (opts.user && opts.user.role === 'admin' && !opts.visibility) {
+  const adminAuditGlobal = Boolean(
+    opts.adminAuditGlobal === true && opts.user && opts.user.role === 'admin'
+  );
+  if (adminAuditGlobal && !opts.visibility) {
     const where = adminKnowledgeBaseWhere(db, opts);
     return db.prepare(`
       SELECT entry.entry_type,COUNT(*) AS count
@@ -4220,7 +4413,9 @@ function listKnowledgeCategories(db, opts) {
       ORDER BY entry.entry_type
     `).all(...where.params);
   }
-  const where = buildWhere(db, opts, 'knowledge_categories');
+  const where = buildWhere(db, opts, 'knowledge_categories', {
+    allowAdminGlobal: adminAuditGlobal
+  });
   return db.prepare(`
     ${where.withClause}
     SELECT entry.entry_type,COUNT(*) AS count
@@ -4241,7 +4436,10 @@ function updateKnowledgeUsage(db, ids, user, options) {
   const applyUpdates = function() {
     const where = buildWhere(
       db,
-      { user: user || {} },
+      {
+        user: user || {},
+        organizationId: options && options.organizationId
+      },
       'knowledge',
       { allowPrivateUnlinked: !user }
     );
@@ -4269,12 +4467,12 @@ function updateKnowledgeUsage(db, ids, user, options) {
   return db.transaction(applyUpdates).immediate();
 }
 
-function markKnowledgeUsed(db, ids, user) {
-  return updateKnowledgeUsage(db, ids, user, { telemetry: false });
+function markKnowledgeUsed(db, ids, user, options) {
+  return updateKnowledgeUsage(db, ids, user, Object.assign({}, options, { telemetry: false }));
 }
 
-function recordKnowledgeUsageTelemetry(db, ids, user) {
-  return updateKnowledgeUsage(db, ids, user, { telemetry: true });
+function recordKnowledgeUsageTelemetry(db, ids, user, options) {
+  return updateKnowledgeUsage(db, ids, user, Object.assign({}, options, { telemetry: true }));
 }
 
 function purgeEphemeralKnowledgeEntries(db, options) {
@@ -4422,6 +4620,7 @@ module.exports = {
   normalizeTags,
   hashInput,
   makeChunks,
+  hasKnowledgeOrganizationOwnership,
   CampaignKnowledgeConflictError,
   CampaignKnowledgeCapacityError,
   CampaignKnowledgeInputError,

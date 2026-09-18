@@ -204,6 +204,7 @@ function archiveChatSummary(db, opts) {
     tags: ['ai_chat', 'conversation'],
     createdBy: opts.user.id,
     actorRole: opts.user.role,
+    organizationId: opts.organizationId,
     metadata: {
       conversation_id: opts.conversationId,
       assistant_message_id: opts.assistantMessageId,
@@ -233,6 +234,7 @@ async function handleLegacyChat(db, opts) {
   const ragContext = rag.buildRagContext(db, {
     query: retrievalQuery,
     user: opts.user,
+    organizationId: opts.organizationId,
     limit: clampKnowledgeLimit(opts.knowledgeLimit, 8),
     business_type: opts.business_type,
     business_id: opts.business_id
@@ -301,7 +303,8 @@ async function handleLegacyChat(db, opts) {
   knowledge.recordKnowledgeUsageTelemetry(
     db,
     ragContext.references.map(function(ref) { return ref.id; }),
-    opts.user
+    opts.user,
+    { organizationId: opts.organizationId }
   );
   db.prepare('UPDATE ai_conversations SET updated_at = datetime(\'now\') WHERE id = ?').run(conversation.id);
   if (usage.total_tokens || usage.prompt_tokens || usage.completion_tokens) {
@@ -329,6 +332,7 @@ async function handleLegacyChat(db, opts) {
       assistantMessageId: assistantMessageId,
       visibility: opts.summaryVisibility || 'private',
       source_module: opts.source_module || conversation.source_module,
+      organizationId: opts.organizationId,
       promotion
     });
     if (archived && archived.id) {
@@ -458,7 +462,8 @@ function persistAtomicOneShot(db, opts) {
     knowledge.recordKnowledgeUsageTelemetry(
       db,
       opts.ragContext.references.map(function(reference) { return reference.id; }),
-      opts.user
+      opts.user,
+      { organizationId: opts.organizationId }
     );
     db.prepare('UPDATE ai_conversations SET updated_at=datetime(\'now\') WHERE id=?')
       .run(conversation.id);
@@ -510,6 +515,7 @@ async function handleAtomicLegacyOneShot(db, opts) {
   const ragContext = rag.buildRagContext(db, {
     query: retrievalQuery,
     user: opts.user,
+    organizationId: opts.organizationId,
     limit: clampKnowledgeLimit(opts.knowledgeLimit, 8),
     visibility: opts.visibility || 'private',
     business_type: opts.business_type,
@@ -848,6 +854,30 @@ function positiveId(value) {
   return null;
 }
 
+function requireKnowledgeOrganizationContext(db, opts) {
+  if (!knowledge.hasKnowledgeOrganizationOwnership(db)) return null;
+  const organizationId = positiveId(
+    ownValue(opts, 'organizationId') === undefined
+      ? opts && opts.user && opts.user.__active_organization_id
+      : opts.organizationId
+  );
+  if (organizationId === null) {
+    throw serviceError(
+      403,
+      'KNOWLEDGE_ORGANIZATION_CONTEXT_REQUIRED',
+      'Active organization context is required for AI knowledge access.'
+    );
+  }
+  if (!db.prepare('SELECT 1 AS present FROM organizations WHERE id=?').get(organizationId)) {
+    throw serviceError(
+      403,
+      'KNOWLEDGE_ORGANIZATION_CONTEXT_UNAVAILABLE',
+      'Active organization context is unavailable.'
+    );
+  }
+  return organizationId;
+}
+
 function ownValue(object, key) {
   return object && Object.prototype.hasOwnProperty.call(object, key)
     ? object[key]
@@ -1084,6 +1114,7 @@ function reserveLinkedOperation(db, opts) {
 function replayLinkedPerformanceReview(db, opts) {
   opts = opts || {};
   if (!opts.user || !opts.user.id) throw new Error('User required');
+  const organizationId = requireKnowledgeOrganizationContext(db, opts);
   if (String(opts.source_module || '') !== 'performance_review') {
     throw serviceError(500, 'AI_REVIEW_IDEMPOTENCY_INPUT_INVALID', 'Performance AI review source is invalid.');
   }
@@ -1099,6 +1130,9 @@ function replayLinkedPerformanceReview(db, opts) {
   const requestHashValue = linkedRequestHash('', linked, null, opts);
   const disposition = db.transaction(() => {
     const access = requireLinkedCampaignAccess(db, opts.user.id, linked.campaignId);
+    if (organizationId !== null && Number(access.campaign.org_id) !== organizationId) {
+      throw serviceError(404, 'CAMPAIGN_NOT_FOUND', 'Campaign is unavailable in the active organization.');
+    }
     return idempotency.inspectRetained(db, {
       organizationId: access.campaign.org_id,
       actorUserId: opts.user.id,
@@ -1318,10 +1352,15 @@ function requireFinalConversationCampaign(db, conversationId, campaignId) {
   }
 }
 
-function requireFinalKnowledgeAccess(db, user, campaignId, references) {
+function requireFinalKnowledgeAccess(db, user, organizationId, campaignId, references) {
   const entryIds = [...new Set((references || []).map((reference) => reference.entry_id))];
   for (const entryId of entryIds) {
-    if (!knowledge.campaignKnowledgeEntryAllowsRead(db, { user, campaignId, entryId })) {
+    if (!knowledge.campaignKnowledgeEntryAllowsRead(db, {
+      user,
+      organizationId,
+      campaignId,
+      entryId
+    })) {
       throw serviceError(404, 'KNOWLEDGE_ENTRY_NOT_FOUND', 'Knowledge access changed during linked AI generation.');
     }
   }
@@ -1337,6 +1376,9 @@ function persistLinkedChat(db, opts) {
   return db.transaction(() => {
     assertProviderContextActive(opts.providerContext);
     const access = requireLinkedCampaignAccess(db, opts.user.id, opts.linked.campaignId);
+    if (Number(access.campaign.org_id) !== opts.organizationId) {
+      throw serviceError(404, 'CAMPAIGN_NOT_FOUND', 'Campaign is unavailable in the active organization.');
+    }
     if (typeof opts.validateBeforePersist === 'function') {
       let valid = false;
       try {
@@ -1386,6 +1428,7 @@ function persistLinkedChat(db, opts) {
     requireFinalKnowledgeAccess(
       db,
       opts.user,
+      opts.organizationId,
       opts.linked.campaignId,
       opts.ragContext.references
     );
@@ -1430,7 +1473,8 @@ function persistLinkedChat(db, opts) {
     knowledge.recordKnowledgeUsageTelemetry(
       db,
       opts.ragContext.references.map((reference) => reference.entry_id),
-      opts.user
+      opts.user,
+      { organizationId: opts.organizationId }
     );
     db.prepare('UPDATE ai_conversations SET updated_at=datetime(\'now\') WHERE id=?').run(conversation.id);
     recordLinkedTokenUsageInTransaction(
@@ -1509,12 +1553,16 @@ async function handleLinkedChat(db, opts, linked) {
   const webQuery = String(opts.webQuery || retrievalQuery).trim() || retrievalQuery;
   const user = opts.user;
   const linkedAccess = requireLinkedCampaignAccess(db, user.id, linked.campaignId);
+  if (Number(linkedAccess.campaign.org_id) !== opts.organizationId) {
+    throw serviceError(404, 'CAMPAIGN_NOT_FOUND', 'Campaign is unavailable in the active organization.');
+  }
   if (linked.conversationId !== null) {
     requireLinkedConversationAccess(db, user, linked.conversationId);
   }
   const ragContext = rag.buildLinkedRagContext(db, {
     query: retrievalQuery,
     user,
+    organizationId: opts.organizationId,
     campaignId: linked.campaignId,
     knowledge_entry_ids: opts.knowledge_entry_ids === undefined
       ? opts.knowledgeEntryIds
@@ -1719,6 +1767,8 @@ async function handleLinkedChat(db, opts, linked) {
 async function handleChat(db, opts) {
   opts = opts || {};
   if (!opts.user || !opts.user.id) throw new Error('User required');
+  const organizationId = requireKnowledgeOrganizationContext(db, opts);
+  opts = Object.assign({}, opts, { organizationId });
   const message = String(opts.message || '').trim();
   if (!message) throw new Error('Message required');
   const linked = resolveLinkedContext(db, opts);
@@ -2401,12 +2451,19 @@ function existingPromotedMessageKnowledge(
   db,
   selectedSourceType,
   legacySourceType,
-  messageId
+  messageId,
+  organizationId
 ) {
+  const organizationClause = knowledge.hasKnowledgeOrganizationOwnership(db)
+    ? 'org_id=? AND'
+    : '';
+  const params = knowledge.hasKnowledgeOrganizationOwnership(db)
+    ? [organizationId, String(messageId), selectedSourceType, legacySourceType, selectedSourceType]
+    : [String(messageId), selectedSourceType, legacySourceType, selectedSourceType];
   return db.prepare(`
     SELECT id,visibility,metadata_json
     FROM knowledge_entries
-    WHERE CAST(source_id AS TEXT)=?
+    WHERE ${organizationClause} CAST(source_id AS TEXT)=?
       AND (
         source_type=?
         OR (
@@ -2417,12 +2474,7 @@ function existingPromotedMessageKnowledge(
       )
     ORDER BY CASE WHEN source_type=? THEN 0 ELSE 1 END,id
     LIMIT 1
-  `).get(
-    String(messageId),
-    selectedSourceType,
-    legacySourceType,
-    selectedSourceType
-  ) || null;
+  `).get(...params) || null;
 }
 
 function requireExistingCampaignKnowledgeLink(db, campaignId, knowledgeEntryId) {
@@ -2480,6 +2532,8 @@ function persistManualPromotionAudit(db, actor, opts, values) {
 
 function promoteMessageToKnowledge(db, opts) {
   opts = opts || {};
+  const organizationId = requireKnowledgeOrganizationContext(db, opts);
+  opts = Object.assign({}, opts, { organizationId });
   const conversationId = positiveId(requestedConversationValue(opts));
   const rawMessageId = ownValue(opts, 'message_id') !== undefined
     ? opts.message_id
@@ -2559,7 +2613,8 @@ function promoteMessageToKnowledge(db, opts) {
         db,
         selectedSourceType,
         legacySourceType,
-        messageId
+        messageId,
+        organizationId
       );
       let knowledgeEntryId;
       let result = 'promoted';
@@ -2574,6 +2629,9 @@ function promoteMessageToKnowledge(db, opts) {
         resultVisibility = existing.visibility || visibility;
       } else if (campaignId !== null) {
         const access = requireLinkedCampaignAccess(db, actor.id, campaignId);
+        if (Number(access.campaign.org_id) !== organizationId) {
+          throw serviceError(404, 'CAMPAIGN_NOT_FOUND', 'Campaign is unavailable in the active organization.');
+        }
         const archived = archiveLinkedChatSummary(db, {
           access,
           campaignId,
@@ -2594,6 +2652,7 @@ function promoteMessageToKnowledge(db, opts) {
           conversationId,
           assistantMessageId: messageId,
           source_module: conversation.source_module || 'assistant',
+          organizationId,
           promotion,
           visibility
         });
@@ -2888,7 +2947,11 @@ function getConversation(db, opts) {
       message.references = knowledge.redactKnowledgeReferences(
         db,
         byMessage[message.id] || [],
-        opts.user
+        opts.user,
+        {
+          organizationId: actor.authOrganizationId,
+          adminAuditGlobal: actor.platformAdmin
+        }
       );
       if (message.role === 'assistant') {
         message.run = projectAssistantRun(message, byMessage[message.id] || [], parsedMetadata);

@@ -939,6 +939,13 @@ function authenticateRequest(req) {
       teams: scope.authContext.teams
     };
 
+    Object.defineProperty(user, '__active_organization_id', {
+      value: authContext.organization.id,
+      enumerable: false,
+      configurable: false,
+      writable: false
+    });
+
     req.user = user;
     req.authContext = authContext;
     return {
@@ -1376,7 +1383,7 @@ function sandboxWarning(data) {
   return data.warning || undefined;
 }
 
-function projectKnowledgeUpload(req, parsed, actor) {
+function projectKnowledgeUpload(req, parsed, actor, organizationId) {
   const data = parsed && parsed.data ? parsed.data : {};
   const rows = Array.isArray(data.rows) ? data.rows : [];
   const kind = data.kind || (rows.length ? 'table' : 'document');
@@ -1410,6 +1417,7 @@ function projectKnowledgeUpload(req, parsed, actor) {
       business_id: req.body.business_id,
       created_by: actor.id,
       actor_role: actor.role,
+      organizationId,
       metadata
     }
   };
@@ -1806,7 +1814,8 @@ function createLegacyDemand(req, res) {
         businessType: 'demand',
         businessId: result.lastInsertRowid,
         createdBy: req.user.id,
-        actorRole: req.user.role
+        actorRole: req.user.role,
+        organizationId: req.authContext.organization.id
       });
       return Number(result.lastInsertRowid);
     }).immediate();
@@ -1860,7 +1869,8 @@ function createLegacyProposal(req, res) {
         businessId: result.lastInsertRowid,
         createdBy: req.user.id,
         metadata: { demand_id, template_id },
-        actorRole: req.user.role
+        actorRole: req.user.role,
+        organizationId: req.authContext.organization.id
       });
       return Number(result.lastInsertRowid);
     }).immediate();
@@ -2146,6 +2156,7 @@ function createLegacyPpt(req, res) {
       businessId: req.body.demand_id || payloadSha256,
       createdBy: req.user.id,
       actorRole: req.user.role,
+      organizationId: req.authContext.organization.id,
       metadata: {
         demand_id: req.body.demand_id || null,
         payload_sha256: payloadSha256,
@@ -2226,7 +2237,9 @@ app.get('/api/knowledge', authMiddleware, (req, res) => {
       retention_class: req.query.retention_class,
       include_inactive: req.user.role === 'admin' && boolParam(req.query.include_inactive, false),
       limit: req.query.limit || 100,
-      user: req.user
+      user: req.user,
+      organizationId: req.authContext.organization.id,
+      adminAuditGlobal: req.user.role === 'admin'
     });
     res.json({ entries });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -2248,7 +2261,11 @@ app.post('/api/knowledge', authMiddleware, (req, res) => {
   }
   try {
     validateLegacyKnowledgeBody(req.body);
-    const entry = knowledgeService.ingestKnowledge(db, Object.assign({}, req.body, { created_by: req.user.id, actor_role: req.user.role }));
+    const entry = knowledgeService.ingestKnowledge(db, Object.assign({}, req.body, {
+      created_by: req.user.id,
+      actor_role: req.user.role,
+      organizationId: req.authContext.organization.id
+    }));
     res.json({ entry, id: entry.id });
   } catch (e) {
     if (e instanceof CampaignLinkServiceError) return sendCampaignLinkError(req, res, e);
@@ -2270,7 +2287,8 @@ app.get('/api/knowledge/search', authMiddleware, (req, res) => {
       retention_class: req.query.retention_class,
       include_inactive: req.user.role === 'admin' && boolParam(req.query.include_inactive, false),
       limit: req.query.limit || 50,
-      user: req.user
+      user: req.user,
+      organizationId: req.authContext.organization.id
     });
     res.json({ entries, total: entries.length });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -2294,7 +2312,8 @@ app.post('/api/knowledge/ingest', authMiddleware, (req, res) => {
     validateLegacyKnowledgeBody(req.body);
     const entry = knowledgeService.ingestKnowledge(db, Object.assign({}, req.body, {
       created_by: req.user.id,
-      actor_role: req.user.role
+      actor_role: req.user.role,
+      organizationId: req.authContext.organization.id
     }));
     db.prepare('INSERT INTO activity_log (user_id, action, module, details, ip_address) VALUES (?, ?, ?, ?, ?)')
       .run(req.user.id, 'knowledge_ingest', 'knowledge', 'Ingested knowledge entry ' + entry.id, req.ip);
@@ -2335,7 +2354,13 @@ app.post('/api/knowledge/upload', authMiddleware, async (req, res) => {
       assertAuthorized: () => assertUploadAuthorityFresh(authority),
       finalize(parsed, lifecycle) {
         if (finalizeLinked) {
-          const projected = projectKnowledgeUpload(req, parsed, authority.readFresh(db).user);
+          const current = authority.readFresh(db);
+          const projected = projectKnowledgeUpload(
+            req,
+            parsed,
+            current.user,
+            current.identity.organizationId
+          );
           return finalizeLinked({
             body: linkedKnowledgeBody(campaignId, projected),
             rows: projected.rows,
@@ -2344,7 +2369,12 @@ app.post('/api/knowledge/upload', authMiddleware, async (req, res) => {
         }
         return db.transaction(() => {
           const current = authority.readFresh(db);
-          const projected = projectKnowledgeUpload(req, parsed, current.user);
+          const projected = projectKnowledgeUpload(
+            req,
+            parsed,
+            current.user,
+            current.identity.organizationId
+          );
           const entry = knowledgeService.ingestKnowledge(db, projected.body);
           lifecycle.completeAdmissionInTransaction(db);
           return { entry, rows: projected.rows };
@@ -2694,7 +2724,8 @@ app.post('/api/admin/knowledge/import/obsidian', authMiddleware, adminOnly, asyn
       rootPath: req.body.root_path || req.body.rootPath || process.env.OBSIDIAN_KB_ROOT || 'D:\\主盘\\图灵集市',
       dryRun: boolParam(req.body.dry_run !== undefined ? req.body.dry_run : req.body.dryRun, true),
       visibility: req.body.visibility || 'team',
-      user: req.user
+      user: req.user,
+      organizationId: req.authContext.organization.id
     });
     db.prepare('INSERT INTO activity_log (user_id, action, module, details, ip_address) VALUES (?, ?, ?, ?, ?)')
       .run(req.user.id, result.dryRun ? 'obsidian_dry_run' : 'obsidian_sync', 'knowledge', 'Obsidian sync eligible=' + result.eligible + ' imported=' + result.imported + ' skipped=' + result.skipped, req.ip);
@@ -2724,7 +2755,9 @@ app.post('/api/admin/knowledge/vault/export', authMiddleware, adminOnly, (req, r
 
 app.get('/api/knowledge/similar', authMiddleware, (req, res) => {
   try {
-    const entries = latestUiCompat.similarKnowledge(db, req.query || {}, req.user);
+    const entries = latestUiCompat.similarKnowledge(db, req.query || {}, req.user, {
+      organizationId: req.authContext.organization.id
+    });
     res.json({ entries });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -2783,7 +2816,9 @@ app.post('/api/knowledge/:id/use', authMiddleware, (req, res) => {
       )
     });
     if (linked) return sendCampaignLinkResult(res, linked);
-    knowledgeService.markKnowledgeUsed(db, [req.params.id], req.user);
+    knowledgeService.markKnowledgeUsed(db, [req.params.id], req.user, {
+      organizationId: req.authContext.organization.id
+    });
     return res.json({ success: true });
   } catch (error) {
     return sendCampaignLinkError(req, res, error);
@@ -2796,6 +2831,7 @@ app.post('/api/ai/chat', authMiddleware, aiLimiter, aiQuotaGuard, async (req, re
     const body = req.body && typeof req.body === 'object' ? req.body : {};
     const result = await aiService.handleChat(db, {
       user: req.user,
+      organizationId: req.authContext.organization.id,
       message: body.message,
       campaign_id: body.campaign_id === undefined ? body.campaignId : body.campaign_id,
       conversation_id: body.conversation_id === undefined ? body.conversationId : body.conversation_id,
@@ -2860,6 +2896,7 @@ app.post('/api/ai/conversations/:id/messages/:messageId/promote', authMiddleware
     const result = aiService.promoteMessageToKnowledge(db, {
       user: req.user,
       authContext: req.authContext,
+      organizationId: req.authContext.organization.id,
       conversation_id: req.params.id,
       message_id: req.params.messageId,
       visibility: body.visibility,
@@ -2897,6 +2934,7 @@ app.post('/api/ai/proposal-draft', authMiddleware, aiLimiter, aiQuotaGuard, asyn
         businessId: demandSourceId,
         createdBy: req.user.id,
         actorRole: req.user.role,
+        organizationId: req.authContext.organization.id,
         metadata: {
           demand,
           requested_source_type: body.source_type || null
@@ -2935,6 +2973,7 @@ app.post('/api/ai/proposal-draft', authMiddleware, aiLimiter, aiQuotaGuard, asyn
     ].filter(Boolean).join('\n');
     const result = await aiService.handleChat(db, {
       user: req.user,
+      organizationId: req.authContext.organization.id,
       message: prompt,
       ragQuery: demandText,
       allowWeb: false,
@@ -3005,6 +3044,7 @@ app.post('/api/demand/parse-file', authMiddleware, async (req, res) => {
                 businessId: sourceFile.sha256,
                 createdBy: current.user.id,
                 actorRole: current.user.role,
+                organizationId: current.identity.organizationId,
                 metadata: {
                   file_name: sourceFile.originalname,
                   file_sha256: sourceFile.sha256,
@@ -3032,7 +3072,13 @@ app.post('/api/demand/parse-file', authMiddleware, async (req, res) => {
 
 app.post('/api/ai/strategy', authMiddleware, aiLimiter, aiQuotaGuard, async (req, res) => {
   try {
-    const result = await latestUiCompat.generateStrategy(db, req.user, req.body.prompt, req.body.input);
+    const result = await latestUiCompat.generateStrategy(
+      db,
+      req.user,
+      req.body.prompt,
+      req.body.input,
+      { organizationId: req.authContext.organization.id }
+    );
     res.json(result);
   } catch (e) {
     res.status(500).json({ error: e.message, content: '', fallback: true, warning: e.message });
@@ -3050,6 +3096,7 @@ app.post('/api/ai/demand-analysis', authMiddleware, aiLimiter, aiQuotaGuard, asy
       {
         db,
         user: req.user,
+        organizationId: req.authContext.organization.id,
         allowWeb: boolParam(body.allow_web, false),
         campaignId: body.campaign_id,
         idempotencyKey: req.get('Idempotency-Key'),
@@ -3092,6 +3139,7 @@ app.post('/api/ai/ppt-outline', authMiddleware, aiLimiter, aiQuotaGuard, async (
         })
       : null;
     const result = await latestUiCompat.generatePptOutline(db, req.user, body, {
+      organizationId: req.authContext.organization.id,
       campaignId: body.campaign_id,
       idempotencyKey: req.get('Idempotency-Key'),
       requestId: campaignLinkRequestId(req),
@@ -3114,7 +3162,16 @@ app.post('/api/ai/ppt-outline', authMiddleware, aiLimiter, aiQuotaGuard, async (
 app.get('/api/knowledge/categories', authMiddleware, (req, res) => {
   try {
     const categories = knowledgeService.listKnowledgeCategories(db, {
-      user: req.user
+      user: req.user,
+      organizationId: req.authContext.organization.id,
+      adminAuditGlobal: req.user.role === 'admin',
+      entry_type: req.query.entry_type || req.query.type,
+      source_type: req.query.source_type,
+      visibility: req.query.visibility,
+      business_type: req.query.business_type,
+      business_id: req.query.business_id,
+      quality_state: req.query.quality_state,
+      retention_class: req.query.retention_class
     });
     res.json({ categories });
   } catch (e) { res.status(500).json({ error: e.message }); }

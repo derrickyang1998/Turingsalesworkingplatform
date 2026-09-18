@@ -297,6 +297,7 @@ async function syncObsidianFolder(db, opts) {
         entry_type: candidate.kind === 'table' ? 'obsidian_table' : 'obsidian_note',
         source_type: 'obsidian',
         source_id: candidate.relativePath,
+        organizationId: opts.organizationId,
         visibility: visibility,
         tags: candidate.tags,
         business_type: 'obsidian',

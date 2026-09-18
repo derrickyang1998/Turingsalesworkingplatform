@@ -576,6 +576,7 @@ function archiveImportKnowledge(db, rows, stats, batch, rowsSha256, user, orgId,
   return knowledgeService.ingestBusinessArtifact(db, {
     artifactType: 'influencer_batch',
     artifactState: 'ingested',
+    organizationId: orgId,
     title: shared.title,
     summary: shared.summary,
     content: shared.content,
@@ -674,12 +675,14 @@ function importInfluencerRows(db, rows, opts) {
       SELECT COUNT(*) AS count FROM influencers
       WHERE org_id=? AND import_batch=?
     `).get(orgId, batch).count;
+    const organizationOwnedKnowledge = knowledgeService.hasKnowledgeOrganizationOwnership(db);
     const legacyArchiveExists = existingRowsBeforeArchive > 0 && Boolean(db.prepare(`
       SELECT 1 AS present FROM knowledge_entries
       WHERE source_type='influencer_import' AND source_id=?
+        ${organizationOwnedKnowledge ? 'AND org_id=?' : ''}
         AND business_type<>'organization'
       LIMIT 1
-    `).get(batch));
+    `).get(...(organizationOwnedKnowledge ? [batch, orgId] : [batch])));
     archiveResult = archiveImportKnowledge(
       db,
       normalizedRows,

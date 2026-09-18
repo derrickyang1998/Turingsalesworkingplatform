@@ -876,7 +876,7 @@ function createPerformanceContentAnalysisService(db, options = {}) {
     if (campaignId === null) {
       throw serviceError(400, 'PERFORMANCE_CONTENT_ANALYSIS_INPUT_INVALID', 'Campaign is invalid.');
     }
-    approvalAccess(user, campaignId);
+    const activeAccess = approvalAccess(user, campaignId);
     const key = idempotencyKey(input && input.idempotencyKey);
     const snapshot = contentSnapshot(db, performanceService, user, campaignId, request.contentId);
     const references = evidenceReferences(request);
@@ -895,6 +895,7 @@ function createPerformanceContentAnalysisService(db, options = {}) {
     try {
       ai = await aiService.handleChat(db, {
         user,
+        organizationId: activeAccess.access.campaign.org_id,
         campaign_id: campaignId,
         idempotencyKey: key,
         requestId: input && input.requestId,

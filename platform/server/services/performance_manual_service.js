@@ -3532,9 +3532,22 @@ function createPerformanceAiReviewService(db, options = {}) {
       throw aiReviewError(401, 'PERFORMANCE_AI_REVIEW_UNAUTHORIZED', 'An authenticated user is required.');
     }
     const request = aiReviewInput(input && input.body);
+    const campaignId = aiReviewPositiveId(input && input.campaignId);
+    if (campaignId === null) {
+      throw aiReviewError(400, 'PERFORMANCE_AI_REVIEW_APPROVAL_INVALID', 'Campaign is invalid.');
+    }
+    const activeAccess = getCampaignAccess(db, { userId: user.id, campaignId });
+    if (!activeAccess || activeAccess.ok !== true) {
+      throw aiReviewError(
+        activeAccess && Number.isSafeInteger(activeAccess.status) ? activeAccess.status : 403,
+        activeAccess && activeAccess.code ? activeAccess.code : 'PERFORMANCE_AI_REVIEW_FORBIDDEN',
+        'Campaign access is forbidden.'
+      );
+    }
     const linkedAiInput = {
       user,
-      campaign_id: input && input.campaignId,
+      organizationId: activeAccess.campaign.org_id,
+      campaign_id: campaignId,
       idempotencyKey: input && input.idempotencyKey,
       requestId: input && input.requestId,
       source_module: 'performance_review',
