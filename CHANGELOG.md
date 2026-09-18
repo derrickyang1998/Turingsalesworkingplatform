@@ -1,5 +1,30 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.9.15-influencer-data-export-permission (Production Deployed, 2026-09-18) - 网红数据导出权限
+
+### 交付与范围 / Delivery And Scope
+- 新增组织范围操作者动作权限 `influencer.data.export`，保护网红 CSV 的全部、当前筛选和选中三种既有导出模式；企业所有者、组织管理员、经理及可写成员允许导出，只读成员和仅具平台管理员身份但无租户导出角色的账号失败关闭。
+- 未授权请求在导出器、附件头和 CSV 字节前返回 `403 INFLUENCER_EXPORT_FORBIDDEN`；审计不可用时返回 `503 INFLUENCER_EXPORT_AUDIT_UNAVAILABLE`。成功与拒绝均写入字段有界的 `activity_log`，不保存筛选词、请求体、网红数据或凭据。
+- 登录与 `/api/auth/me` 投影该权限；M4 三个导出按钮按权限隐藏/禁用，直接函数调用也在网络请求前拒绝。全部、筛选和选中模式的活动数据、过滤条件、批准表头及空选中集语义保持不变。
+- 当前 `influencers` 主表是无 `org_id` 的共享全局资源。本版本限制操作者导出动作，不宣称行级租户隔离；组织归属迁移、回填规则与跨组织行测试保留为独立 schema 版本。
+- 本版不修改 schema、导入、字段筛选、保存视图、飞书、合作下单、最新界面、AI/知识库、方案或冻结 PPT。
+
+### 轻量验证与独立审查 / Lightweight Verification And Independent Review
+- 权限策略 `19/19`、导出路由 `4/4`、真实 HTTP/权限投影/只读审计/直接挂载 `4/4`、三视口浏览器 `3/3` 全部通过；四个运行时文件语法、`git diff --check`、定向密钥扫描和本地发布预检通过。
+- 远端候选门禁 `76/76`、部署 Chromium 冒烟 `2/2`；按已批准的一功能一上线节奏未重复繁重全量回归，与本版无关的旧浏览器定位器超时和架构清单夹具漂移继续单独处理。
+- 首轮独立审查阻断通用只读门禁抢先返回和直接挂载依赖缺失；修复并补测后终审 `APPROVE`，本版本边界内无开放发现。
+- 实现提交 `0d9ec5228a5c7cfece3ac31490ca33dc50b8623d` 已在正式部署前推送 GitHub。
+
+### 生产状态 / Production Status
+- 受控运行 `7148a3b27fbd49dcb982e3733d9b03db` 已完成接纳与最终化；可信源码 SHA-256 为 `73b3db8112d456dae90a5e13795eff9a7c106134f820d50241fb642e2df7be16`，候选树 SHA-256 为 `5d9e883760de2be4e5cb66f0e2f26959bdd9f475e4f610d9ee21a68a35d4ebe3`，验收事实 SHA-256 为 `5ccaa9f665a641e749deb407fe532ea072ead68efeec4aafd48ee45243cdc602`。
+- 可恢复备份为 `/root/turingmarket/backups/v060-crm-sales-workspace-20260918-164312`；初始 `337` 项清单 SHA-256 `60e322b3f33b5bdf82f45d6948882e77404d0874558c6b79302e6e4de5d64b6a`，切换 `35` 项清单 SHA-256 `d94695df631134ae5a5df745c7380b3f173476f3852d2ba8c4dcd3c74e2c69f8`，两份清单均通过完整校验。
+- 首次 run `3731f0601d7c4d0d9a0acd1af489bbe4` 在生产变更前因 SOCKS/SSH 断线停止，恢复流程仅清理候选；生产保持 v0.9.14。生产别名启用 30 秒保活后重试；第二次连接在 `release-replay-complete` 后断开，恢复控制器确认远端切换已完成，保留新版本并完成 PM2/Nginx、公网守卫、接纳标记和保留清理。
+- 生产管理员权限投影包含 `influencer.data: ["export"]`；空选中导出返回 `200`、批准表头和正确附件头，成功审计记录模式 `selected`、记录数 `0`。生产浏览器显示三个导出按钮可见可用；注销 `200`、旧令牌 `401`，探针残留会话已精确清理。
+- 公网 `/api/health` 为 `200` 且解析器 ready；schema `v22`、`quick_check=ok`、外键异常 `0`、会话 `0`，PM2 在线且重启次数 `0`，Nginx 与 pm2-root active，发布锁不存在。六个受影响运行时文件本地与远端 SHA-256 一致，冻结 PPT 摘要未改变。
+
+### 下一边界 / Next Boundary
+- 继续 Phase 8 的一个独立模块/动作权限切片；网红 `org_id` 归属迁移、行级租户隔离、套餐权益、配额与真实外部写入继续分离审查和上线。
+
 ## v0.9.14-customer-report-export-permission (Production Deployed, 2026-09-18) - 客户报告导出权限
 
 ### 交付与范围 / Delivery And Scope
