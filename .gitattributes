@@ -30,6 +30,7 @@ platform/server/migrations/020_organization_methodology_promotion.js text eol=lf
 platform/server/migrations/021_organization_role_governance.js text eol=lf
 platform/server/migrations/022_organization_ownership_transfer.js text eol=lf
 platform/server/migrations/023_influencer_tenant_ownership.js text eol=lf
+platform/server/migrations/024_knowledge_tenant_ownership.js text eol=lf
 platform/server/migrations/baselines/legacy_v1.js text eol=lf
 platform/server/migrations/engines/v1.js text eol=lf
 platform/server/migrations/vendor/bcryptjs_v3_0_3.js text eol=lf

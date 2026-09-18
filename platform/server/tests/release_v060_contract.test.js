@@ -219,7 +219,7 @@ test('cutover uses reload-convergent Nginx verification before its public route 
   assert.doesNotMatch(publicEnablement, /expect_stylesheet\(\)/);
 });
 
-test('current deploy inventory ships schema v23 influencer ownership and its focused regressions', () => {
+test('current deploy inventory ships schema v24 knowledge ownership and its focused regressions', () => {
   const files = powerShellArrayEntries(read('platform', 'deploy_v8.ps1'), 'FILES');
   for (const required of [
     'server/migrations/006_crm_sales_workspace.js',
@@ -239,6 +239,7 @@ test('current deploy inventory ships schema v23 influencer ownership and its foc
     'server/migrations/021_organization_role_governance.js',
     'server/migrations/022_organization_ownership_transfer.js',
     'server/migrations/023_influencer_tenant_ownership.js',
+    'server/migrations/024_knowledge_tenant_ownership.js',
     'server/services/crm_contract.js',
     'server/services/crm_customer_service.js',
     'server/services/crm_query_service.js',
@@ -286,6 +287,8 @@ test('current deploy inventory ships schema v23 influencer ownership and its foc
     'server/tests/organization_governance_routes.test.js',
     'server/tests/organization_ownership_transfer_migration.test.js',
     'server/tests/influencer_tenant_ownership_migration.test.js',
+    'server/tests/knowledge_tenant_ownership_migration.test.js',
+    'server/tests/knowledge_tenant_release_gate_inventory.test.js',
     'server/tests/youtube_data_api_client.test.js',
     'server/tests/routes_performance.test.js',
     'server/tests/performance_frontend_contract.test.js',
@@ -296,7 +299,7 @@ test('current deploy inventory ships schema v23 influencer ownership and its foc
   }
 });
 
-test('current trusted source and sanitization contracts accept exact v1 and v6 through v23 sources', () => {
+test('current trusted source and sanitization contracts accept exact v1 and v6 through v24 sources', () => {
   const trustedManifest = JSON.parse(read(
     'platform', 'server', 'scripts', 'trusted_production_source_manifest.json'
   ));
@@ -306,14 +309,14 @@ test('current trusted source and sanitization contracts accept exact v1 and v6 t
   const trustedPaths = new Set(trustedManifest.files.map((entry) => entry.path));
 
   assert.deepEqual(trustedManifest.migrationContract, {
-    acceptedSourceVersions: [1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23],
-    targetVersion: 23,
+    acceptedSourceVersions: [1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24],
+    targetVersion: 24,
     runs: 2,
     deterministicAppendTables: ['activity_log']
   });
   assert.deepEqual(
     sanitizationManifest.exactProfiles.map((profile) => profile.schemaVersion),
-    [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]
+    [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24]
   );
   for (const required of [
     'server/migrations/006_crm_sales_workspace.js',
@@ -334,6 +337,7 @@ test('current trusted source and sanitization contracts accept exact v1 and v6 t
     'server/migrations/021_organization_role_governance.js',
     'server/migrations/022_organization_ownership_transfer.js',
     'server/migrations/023_influencer_tenant_ownership.js',
+    'server/migrations/024_knowledge_tenant_ownership.js',
     'server/services/crm_contract.js',
     'server/services/crm_customer_service.js',
     'server/services/crm_query_service.js',
@@ -364,6 +368,7 @@ test('v0.6 trusted bytes have exact LF rules and release records exist', () => {
     'platform/server/migrations/021_organization_role_governance.js',
     'platform/server/migrations/022_organization_ownership_transfer.js',
     'platform/server/migrations/023_influencer_tenant_ownership.js',
+    'platform/server/migrations/024_knowledge_tenant_ownership.js',
     'platform/server/services/organization_methodology_service.js',
     'platform/server/services/organization_governance_service.js',
     'platform/server/routes_organization_governance.js',
