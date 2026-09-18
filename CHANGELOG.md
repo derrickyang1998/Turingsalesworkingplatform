@@ -1,5 +1,27 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.9.18-knowledge-tenant-isolation (Production Deployed, 2026-09-19) - 知识库租户隔离
+
+### 交付与范围 / Delivery And Scope
+- schema 升级至 v24，为 `knowledge_entries` 增加不可变组织归属、确定性历史回填、组织范围检索/身份索引及六个失败关闭的归属与保管触发器；生产 128 条历史知识全部归属组织 1，空归属为 0。
+- 普通知识入库、上传、去重、检索、分类、相似查询、使用计数、AI/RAG、方案/PPT 上下文及业务产物生产者均按实时认证组织隔离；请求体不能指定归属，多组织歧义调用失败关闭。
+- 平台管理员在显式知识与 AI 对话审计界面继续保留全局可见性，但管理员发起的 AI 生成仍只调用活动组织知识。
+- 保留历史知识 ID、切片、FTS、来源哈希/身份、最新产品界面、M3/M4、方案/报告行为和冻结 PPT；`app.js` SHA-256 保持 `748223da49f003a786ee535e08f9236f406d4cd54958bb2e1291d29c98f7b8d1`，`ppt.js` 保持 `f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e`。
+
+### 验证与独立审查 / Verification And Independent Review
+- v24 迁移 `9/9`、双组织知识/RAG `8/8`、受影响组合回归 `134/134`、定向兼容 `22/22`、发布清单 `5/5`、可信来源 `3/3`、迁移精确性 `18/18`、迁移验证器 `3/3`、Phase 4 目标 `1/1` 和 v24 发布目标 `4/4` 通过。
+- 受控候选通过真实生产 v23→v24 迁移演练、远端 `76/76`、Nginx/只读门禁及 Chromium `2/2`。因本版涉及 schema 与租户权威，保留必要高风险门禁，但未追加无关全量套件。
+- 独立审查发现的旧 v23 发布断言已在部署前修复；终审结论 `APPROVED`，无未关闭 P0-P2，且未错误放宽约束。三个获准替换索引可后续分别补充负向白名单用例，该项不阻断本版。
+
+### 生产状态 / Production Status
+- 生产实现 HEAD `4df9104c0c18911a66a51277fd0a774aabe7ff35` 已先推送 GitHub；受控运行 `4ea0c0d5c1d146568e28cd9f8a4b3591` 返回 `DEPLOY_OK` 与 `RETENTION_CLEANUP_OK`。
+- 历史 v23 SQL/索引结构与旧 v23 门禁断言被发现时，候选均在生产变更前停止；精确修复、回归及独立复审后才重试。一次变更前中断通过正式恢复控制器仅清理候选，生产未被修改。
+- 已校验备份为 `/root/turingmarket/backups/v060-crm-sales-workspace-20260919-012935`；初始 `340` 项和切换 `35` 项清单完整通过，清单 SHA-256 分别为 `9949019f984f5bd93e7a6fbbbfc364e7ab0dbad55b3f47aac8029b479f5e9dbf` 与 `a94e28cc5ac05b509d53efcace0368665f20f51d52b3ed955e5f9a4ba0f9457a`。
+- 公网健康为 `200` 且解析器 ready，PM2 在线、重启次数 0，Nginx 正常；schema v24、SQLite 完整性 `ok`、外键异常 0，128/128 条知识有组织归属。管理员登录、身份、知识搜索、全平台 AI 对话审计及退出均通过 Nginx 定向验收。
+
+### 后续节奏 / Delivery Cadence
+- 继续“一功能一上线”：普通功能只跑精确受影响测试、必要安全门禁和一次独立审查，通过可验证备份后立即部署并做线上定向验收；繁重套件继续仅由阶段收口或 schema、租户权威、鉴权、共享基础设施、真实外部写入等风险边界触发。
+
 ## v0.9.17-influencer-tenant-isolation (Production Deployed, 2026-09-18) - 网红数据租户隔离
 
 ### 交付与范围 / Delivery And Scope
