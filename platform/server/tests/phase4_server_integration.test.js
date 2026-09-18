@@ -291,7 +291,7 @@ const originalClearInterval = global.clearInterval;
 const originalProcessOnce = process.once.bind(process);
 let collaborationInstance = null;
 let janitorRuns = 0;
-let janitorTimer = null;
+const janitorTimers = new Set();
 const shutdownHandlers = new Map();
 
 process.once = function(name, listener) {
@@ -307,16 +307,17 @@ global.setInterval = function(callback, delay, ...args) {
   if (delay === 60 * 60 * 1000 && /server\\.js/.test(stack)) {
     event('janitor_interval_registered', { delay });
     callback(...args);
-    janitorTimer = {
+    const janitorTimer = {
       unref() { event('janitor_interval_unref'); }
     };
+    janitorTimers.add(janitorTimer);
     return janitorTimer;
   }
   return originalSetInterval(callback, delay, ...args);
 };
 
 global.clearInterval = function(timer) {
-  if (timer === janitorTimer) {
+  if (janitorTimers.delete(timer)) {
     event('janitor_interval_cleared');
     return;
   }
@@ -4242,10 +4243,10 @@ test('production owns one collaboration singleton, one PPT route, and the janito
     );
     assert.deepEqual(
       events.filter((entry) => entry.name === 'janitor_interval_registered').map((entry) => entry.delay),
-      [60 * 60 * 1000]
+      [60 * 60 * 1000, 60 * 60 * 1000]
     );
-    assert.equal(events.filter((entry) => entry.name === 'janitor_interval_unref').length, 1);
-    assert.equal(events.filter((entry) => entry.name === 'janitor_interval_cleared').length, 1);
+    assert.equal(events.filter((entry) => entry.name === 'janitor_interval_unref').length, 2);
+    assert.equal(events.filter((entry) => entry.name === 'janitor_interval_cleared').length, 2);
     assert.ok(
       events.findIndex((entry) => entry.name === 'server_listen_called') >
         events.findIndex((entry) => entry.name === 'janitor_run')

@@ -21,7 +21,7 @@ Move all knowledge entries from mixed global/unlinked visibility to immutable or
 
 Add migration `024_knowledge_tenant_ownership` with `knowledge_entries.org_id`. SQLite receives the column as nullable for an additive migration, every historical row is deterministically backfilled, and database triggers reject missing, invalid, unknown, or reassigned ownership for all future inserts and updates. / 新增迁移 `024_knowledge_tenant_ownership` 和 `knowledge_entries.org_id`。SQLite 先追加可空列，随后确定性回填全部历史行；数据库触发器拒绝后续任何缺失、非法、未知或被改派的组织归属。
 
-Backfill precedence is authoritative and fail-closed: current/historical Campaign custody organization, organization-methodology custody organization, one unique active creator membership, then the unique legacy default organization. Conflicting custody organizations abort the migration. Ambiguous or creatorless legacy unlinked rows fall back only to the unique default organization, never to an arbitrary membership. / 回填优先级为：当前/历史 Campaign 保管组织、组织方法论保管组织、创建者唯一有效组织成员关系、唯一历史默认组织；保管组织冲突时迁移失败。多组织歧义或无创建者的旧未关联知识只能回填到唯一默认组织，绝不随机选择成员关系。
+Backfill precedence is authoritative and fail-closed: current/historical Campaign custody organization, organization-methodology custody organization, a valid organization business link, then the unique legacy default organization. Current membership is never used because membership is mutable and cannot prove historical ownership. Conflicting custody organizations abort the migration; every remaining legacy unlinked row, including creatorless rows, is assigned only to the unique default organization. / 回填优先级为：当前/历史 Campaign 保管组织、组织方法论保管组织、有效的组织业务关联、唯一历史默认组织。成员关系可变，不能证明历史归属，因此不得用于回填。保管组织冲突时迁移失败；其余所有旧未关联知识（含无创建者条目）只能归入唯一默认组织。
 
 The migration preserves every pre-v24 knowledge value, ID, chunk, FTS row, digest, and source identity byte-for-byte. New indexes support `(org_id,id)` identity and organization-scoped retrieval order. Link-integrity triggers require Campaign and organization custody rows to match `knowledge_entries.org_id`. / 迁移逐字节保留 v24 前的知识字段、ID、切片、FTS、摘要与来源身份；新增索引支持组织身份与组织范围检索。关联完整性触发器要求 Campaign/组织保管关系与知识条目的 `org_id` 一致。
 
@@ -31,7 +31,7 @@ The migration preserves every pre-v24 knowledge value, ID, chunk, FTS row, diges
 - Browser bodies cannot choose organization ownership. HTTP paths use `req.authContext.organization.id`; Campaign and organization writers use existing server-side access facts. / 浏览器请求体不得指定组织；HTTP 路径只使用 `req.authContext.organization.id`，Campaign/组织写入只使用既有服务端权威事实。
 - Ordinary search, categories, similar-knowledge lookup, RAG, and usage updates add `entry.org_id=current organization` before limiting, ranking, or payload loading. / 普通搜索、分类、相似知识、RAG 和使用计数在限制、排序和读取正文前先限定当前组织。
 - The Admin knowledge control room keeps its global audit/search behavior. Any AI/RAG operation, including one initiated by a platform administrator, explicitly requires the active organization. / 管理端知识控制室保持全局审计/搜索能力；任何 AI/RAG 操作即使由平台管理员发起，也必须显式绑定当前组织。
-- New legacy-source hashes are organization-namespaced. Same-organization replay may reuse an exact historical unscoped hash, while another organization receives a distinct scoped identity. / 新的旧式来源哈希加入组织命名空间；同组织可继续复用精确历史未加范围哈希，其他组织使用不同的组织范围身份。
+- Existing source-hash bytes and source identities remain unchanged. Uniqueness, duplicate lookup, and insert guards become organization-scoped through `(org_id, source_hash)`, so two organizations may retain the same deterministic hash without cross-tenant deduplication. / 现有来源哈希字节和来源身份保持不变；唯一约束、重复查询和新增保护改为按 `(org_id, source_hash)` 限定，使两个组织可保留相同的确定性哈希且不会跨租户去重。
 
 ## Alternatives Rejected / 未采用方案
 
@@ -56,4 +56,3 @@ The migration preserves every pre-v24 knowledge value, ID, chunk, FTS row, diges
 
 - No UI redesign, vector database, embedding rollout, plan/quota/billing, provider console, real Feishu write, organization switcher, or AI conversation ownership migration. / 不包含 UI 重设计、向量库、embedding 上线、套餐/配额/计费、provider 控制台、真实飞书写入、组织切换器或 AI 对话归属迁移。
 - No changes to frozen PPT renderer bytes or previously accepted report/export contracts. / 不修改冻结 PPT 渲染器字节及已验收的报告/导出合同。
-

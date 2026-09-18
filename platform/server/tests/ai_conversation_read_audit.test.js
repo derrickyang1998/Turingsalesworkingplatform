@@ -40,6 +40,55 @@ const MIGRATIONS = Object.freeze([
     sourcePath: 'migrations/005_knowledge_custody_projection.js',
     engineVersion: 1,
     dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
+  }),
+  Object.freeze({
+    version: 6,
+    name: '006_crm_sales_workspace',
+    sourcePath: 'migrations/006_crm_sales_workspace.js',
+    engineVersion: 1,
+    dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
+  }),
+  Object.freeze({
+    version: 7,
+    name: '007_knowledge_governance',
+    sourcePath: 'migrations/007_knowledge_governance.js',
+    engineVersion: 1,
+    dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
+  }),
+  Object.freeze({
+    version: 8,
+    name: '008_feishu_bitable_outbox',
+    sourcePath: 'migrations/008_feishu_bitable_outbox.js',
+    engineVersion: 1,
+    dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
+  }),
+  Object.freeze({
+    version: 9,
+    name: '009_feishu_bitable_retry_lineage',
+    sourcePath: 'migrations/009_feishu_bitable_retry_lineage.js',
+    engineVersion: 1,
+    dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
+  }),
+  Object.freeze({
+    version: 10,
+    name: '010_performance_manual_foundation',
+    sourcePath: 'migrations/010_performance_manual_foundation.js',
+    engineVersion: 1,
+    dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
+  }),
+  Object.freeze({
+    version: 11,
+    name: '011_performance_feishu_connection_config',
+    sourcePath: 'migrations/011_performance_feishu_connection_config.js',
+    engineVersion: 1,
+    dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
+  }),
+  Object.freeze({
+    version: 12,
+    name: '012_performance_ai_review_audit',
+    sourcePath: 'migrations/012_performance_ai_review_audit.js',
+    engineVersion: 1,
+    dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
   })
 ]);
 
