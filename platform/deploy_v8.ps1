@@ -7333,6 +7333,31 @@ public_release_guard close \
   --maintenance-config "$MaintenanceConfig" \
   --recovery-link "$PublicGuardRecoveryLink" \
   --site-link /etc/nginx/sites-enabled/turingmarket
+public_release_guard assert-start-allowed \
+  --state-file "$PublicGuardState" \
+  --maintenance-config "$MaintenanceConfig" \
+  --site-link /etc/nginx/sites-enabled/turingmarket
+nginx -t
+if ! systemctl is-active --quiet nginx; then
+  systemctl start nginx
+fi
+FinalizeMaintenanceReady=0
+for attempt in $(seq 1 30); do
+  FinalizeMaintenanceReady=1
+  for request_path in /api/health /api/auth/login /m0; do
+    FinalizeMaintenanceStatus="$(curl -sS -o /dev/null -w '%{http_code}' "http://localhost$request_path" || true)"
+    if [ "$FinalizeMaintenanceStatus" != "503" ]; then
+      FinalizeMaintenanceReady=0
+      break
+    fi
+  done
+  if [ "$FinalizeMaintenanceReady" = "1" ]; then break; fi
+  if [ "$attempt" = "30" ]; then
+    echo "Accepted-finalize maintenance listener did not converge" >&2
+    exit 1
+  fi
+  sleep 0.1
+done
 public_release_guard arm \
   --state-file "$PublicGuardState" \
   --maintenance-source "$ApiGateConfig" \

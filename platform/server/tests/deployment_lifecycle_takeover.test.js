@@ -1309,26 +1309,38 @@ if ($actual -ne 'sweep,writer,finalize,retention,candidate,release') { throw "Un
   const armedFlag = finalizerShell.indexOf('finalize_public_gate_armed=1');
   const failureTrap = finalizerShell.indexOf("trap 'recover_accepted_finalize_public_failure $?' ERR EXIT", armedFlag);
   const trustedClose = finalizerShell.indexOf('public_release_guard close', failureTrap);
-  const guardArm = finalizerShell.indexOf('public_release_guard arm', trustedClose);
+  const assertStart = finalizerShell.indexOf('public_release_guard assert-start-allowed', trustedClose);
+  const nginxSyntax = finalizerShell.indexOf('nginx -t', assertStart);
+  const inactiveCheck = finalizerShell.indexOf('systemctl is-active --quiet nginx', nginxSyntax);
+  const maintenanceStart = finalizerShell.indexOf('systemctl start nginx', inactiveCheck);
+  const maintenanceRetry = finalizerShell.indexOf('for attempt in $(seq 1 30); do', maintenanceStart);
+  const guardArm = finalizerShell.indexOf('public_release_guard arm', maintenanceRetry);
   const pm2Restart = finalizerShell.indexOf('restart_pm2_from_ecosystem_exactly', guardArm);
   const healthWait = finalizerShell.indexOf('for attempt in $(seq 1 __PARSER_STARTUP_TIMEOUT_SECONDS__)', pm2Restart);
   const identityCheck = finalizerShell.indexOf('public_release_guard verify-armed', healthWait);
   const publicSwap = finalizerShell.indexOf('mv -Tf "$LockDir/nginx-finalize-new.link" /etc/nginx/sites-enabled/turingmarket', identityCheck);
+  const nginxActivation = finalizerShell.indexOf('systemctl reload nginx', publicSwap);
   const exactPublicGate = finalizerShell.indexOf('run_exact_public_nginx_gate - 80', publicSwap);
   const finalPm2Facts = finalizerShell.indexOf('FinalPm2Projection="$(project_pm2_acceptance)"', exactPublicGate);
   const guardDisarm = finalizerShell.indexOf('public_release_guard disarm', finalPm2Facts);
   assert.ok(
-    armedFlag >= 0 && failureTrap > armedFlag && trustedClose > failureTrap && guardArm > trustedClose,
-    'accepted finalization must trap failures, close public traffic through the trusted helper, and arm the watchdog'
+    armedFlag >= 0 && failureTrap > armedFlag && trustedClose > failureTrap && assertStart > trustedClose,
+    'accepted finalization must trap failures and close public traffic through the trusted helper'
+  );
+  assert.ok(
+    nginxSyntax > assertStart && inactiveCheck > nginxSyntax && maintenanceStart > inactiveCheck &&
+      maintenanceRetry > maintenanceStart && guardArm > maintenanceRetry,
+    'accepted finalization must restore and verify closed maintenance before arming the watchdog'
   );
   assert.ok(
     pm2Restart > guardArm && healthWait > pm2Restart,
     'accepted finalization must durably arm maintenance before any PM2 mutation or health wait'
   );
   assert.ok(
-    identityCheck > healthWait && publicSwap > identityCheck && exactPublicGate > publicSwap,
-    'accepted finalization must verify the guard before public activation and then verify exact public Nginx state'
+    identityCheck > healthWait && publicSwap > identityCheck && nginxActivation > publicSwap && exactPublicGate > nginxActivation,
+    'accepted finalization must verify the guard, reload the already-active listener, and then verify exact public state'
   );
+  assert.doesNotMatch(finalizerShell, /systemctl reload nginx \|\| systemctl start nginx/);
   assert.ok(
     finalPm2Facts > exactPublicGate && guardDisarm > finalPm2Facts,
     'accepted finalization may disarm only after exact public and PM2 facts converge'
@@ -1338,6 +1350,83 @@ if ($actual -ne 'sweep,writer,finalize,retention,candidate,release') { throw "Un
     /install -o root -g root -m 0644 "\$ApiGateConfig" "\$MaintenanceConfig"/,
     'accepted finalization must not maintain a second incomplete Nginx closing path'
   );
+});
+
+test('cutover-complete finalization starts only the closed maintenance listener before arming', {
+  skip: !bashAvailable() ? 'requires Linux Bash' : false,
+}, () => {
+  const finalizerShell = remoteBody(
+    read(deployPath), 'Invoke-RemoteAcceptedFinalize', 'Invoke-RemoteCandidateCleanup'
+  );
+  const lifecycleStart = finalizerShell.indexOf('# A post-marker recovery must enter durable guarded maintenance');
+  const blockStart = finalizerShell.indexOf('public_release_guard close \\', lifecycleStart);
+  const blockEnd = finalizerShell.indexOf('\npublic_release_guard arm \\', blockStart);
+  assert.ok(blockStart >= 0 && blockEnd > blockStart, 'accepted maintenance recovery block must be bounded');
+  const maintenanceBlock = finalizerShell.slice(blockStart, blockEnd);
+  const result = runBashSync(['--noprofile', '--norc', '-s'], {
+    input: `
+set -eEuo pipefail
+PublicGuardState=/tmp/state
+ApiGateConfig=/tmp/api-gate.conf
+MaintenanceConfig=/tmp/maintenance.conf
+PublicGuardRecoveryLink=/tmp/recovery.link
+public_release_guard() { printf 'guard:%s\\n' "$1"; }
+nginx() { printf 'nginx:%s\\n' "$*"; }
+systemctl() {
+  if [ "$1" = is-active ]; then printf 'systemctl:is-active\\n'; return 1; fi
+  printf 'systemctl:%s\\n' "$*"
+}
+curl() { printf '503'; }
+sleep() { :; }
+${maintenanceBlock}
+`,
+    encoding: 'utf8',
+    timeout: 10_000,
+  });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /^guard:close$/m);
+  assert.match(result.stdout, /^guard:assert-start-allowed$/m);
+  assert.match(result.stdout, /^nginx:-t$/m);
+  assert.match(result.stdout, /^systemctl:is-active$/m);
+  assert.match(result.stdout, /^systemctl:start nginx$/m);
+});
+
+test('cutover-complete finalization never starts Nginx when closed maintenance validation rejects', {
+  skip: !bashAvailable() ? 'requires Linux Bash' : false,
+}, () => {
+  const finalizerShell = remoteBody(
+    read(deployPath), 'Invoke-RemoteAcceptedFinalize', 'Invoke-RemoteCandidateCleanup'
+  );
+  const lifecycleStart = finalizerShell.indexOf('# A post-marker recovery must enter durable guarded maintenance');
+  const blockStart = finalizerShell.indexOf('public_release_guard close \\', lifecycleStart);
+  const blockEnd = finalizerShell.indexOf('\npublic_release_guard arm \\', blockStart);
+  assert.ok(blockStart >= 0 && blockEnd > blockStart, 'accepted maintenance recovery block must be bounded');
+  const maintenanceBlock = finalizerShell.slice(blockStart, blockEnd);
+  const result = runBashSync(['--noprofile', '--norc', '-s'], {
+    input: `
+set -eEuo pipefail
+PublicGuardState=/tmp/state
+ApiGateConfig=/tmp/api-gate.conf
+MaintenanceConfig=/tmp/maintenance.conf
+PublicGuardRecoveryLink=/tmp/recovery.link
+public_release_guard() {
+  printf 'guard:%s\\n' "$1"
+  if [ "$1" = assert-start-allowed ]; then return 47; fi
+}
+nginx() { printf 'nginx:%s\\n' "$*"; }
+systemctl() { printf 'systemctl:%s\\n' "$*"; }
+curl() { printf '503'; }
+sleep() { :; }
+${maintenanceBlock}
+`,
+    encoding: 'utf8',
+    timeout: 10_000,
+  });
+  assert.notEqual(result.status, 0, 'rejected maintenance validation must abort accepted finalization');
+  assert.match(result.stdout, /^guard:close$/m);
+  assert.match(result.stdout, /^guard:assert-start-allowed$/m);
+  assert.doesNotMatch(result.stdout, /^nginx:|^systemctl:/m,
+    'neither Nginx validation nor startup may run after the trusted check rejects');
 });
 
 test('Phase 4 takeover validates and drains interrupted candidate gate services', () => {
