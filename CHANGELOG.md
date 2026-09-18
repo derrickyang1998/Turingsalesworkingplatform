@@ -1,5 +1,32 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.9.13-pinned-candidate-bundle-upload (Production Deployed, 2026-09-18) - 单连接候选包上传
+
+### 交付与范围 / Delivery And Scope
+- 将候选上传从 `403` 个文件各自建立 SSH 进程，改为每次尝试只建立一个 SSH 进程，并通过确定性二进制帧连续传输全部 `403` 个已钉住文件；上传清单、内容摘要、可信来源、候选隔离、备份、回滚与公网守卫均保持不变。
+- 远端提取器逐条校验相对路径、声明长度和 SHA-256，并使用 no-follow、属主/权限/链接数检查、`fsync` 与原子替换；路径穿越、符号链接、硬链接、截断、追加、摘要不匹配或未完整收尾均失败关闭。
+- 新增 stdin 写入超时、子进程终止与回收后置条件、未回收禁止重试、Windows 最终命令行边界以及上传前计划身份重算；修复 Windows PowerShell 5.1 将 `VoidTaskResult` 泄漏进部署计划的问题。
+- 本版只改变共享部署基础设施，不修改 schema、业务接口或页面；线上产品能力仍为 v0.9.12 的 Campaign 效果导出权限及此前全部已验收功能，最新客户双页面、M3/M4、AI/知识、方案、网红、飞书和冻结 PPT 均未替换。
+- 该优化消除了逐文件 SSH 握手与进程开销，但仍完整传输了约 `29.5 MB` 的候选内容；本版没有实现文件级增量传输或带宽去重。
+
+### 风险触发验证与独立审查 / Risk-Triggered Verification And Independent Review
+- 共享部署基础设施按高风险规则扩展验证：受影响部署矩阵共 `165` 项，`162` 通过、`0` 失败、`3` 项平台条件跳过；公开前端资产 `128/128`、公开静态安全 `9/9`、最终 Windows PowerShell 管线热修聚焦测试 `6/6` 全部通过。
+- PowerShell/Node 语法、本地部署预检、差异检查、计划身份重算、冻结 PPT 摘要和候选上传故障矩阵均通过；远端候选门禁 `76/76`、部署 Chromium 冒烟 `2/2`。
+- 第一轮独立审查阻断陈旧前端合同、stdin 超时/回收、身份声明和 Windows 参数边界四类问题；逐项修正后第二轮终审 `APPROVE`。管线静默热修另经独立复审 `APPROVE`，无未关闭发现。
+- 实现提交为 `a04b7c42e6fa2bdb7a9c88aeeabe615856ab5140`，管线静默热修提交为 `512e50abce569bbf6b0540b606a8e79ddeaa4ae2`，均已在正式部署前推送 GitHub。
+
+### 生产状态 / Production Status
+- 首次正式尝试在 `33.5` 秒内于本机计划复验阶段停止，原因是 Windows PowerShell 5.1 输出六个 `VoidTaskResult`，未解析生产服务器、未建立远端连接、未创建备份且未改变生产；修复并增加回归后才重新发布。
+- 最终受控运行 `d2b3a03d53274f67b086b9df3a341f90` 返回 `DEPLOY_OK` 与 `RETENTION_CLEANUP_OK`；上传门禁输出 `CANDIDATE_PINNED_BUNDLE_OK 403`，完整发布耗时 `999.5` 秒。
+- 可信源码 SHA-256 为 `02e8e1a5d55e616666329bb9ba61c9ffbfe15203ff85572cacd6b5a827ecc3fd`，候选树 SHA-256 为 `807521076e9c65088a570c48def78f3e70ea33d43c8dbe63c150dcc497323236`；部署脚本线上与本地 SHA-256 均为 `d0aaeacd8c8969725cb3147ec1d78826357692f01f4baf8af2b718c5d576120a`。
+- 可恢复备份为 `/root/turingmarket/backups/v060-crm-sales-workspace-20260918-132223`；初始 `337` 项清单和切换 `35` 项清单均通过 `sha256sum --check`，清单文件 SHA-256 分别为 `2013439d4486e5a4df836dfab257339061fa93cf90fdb9db981894d05ee3d8c5` 与 `856623643321a8a2a51594bfad991a3906a31b0c2dbfed45ddc47cabb909d7ab`。
+- 公网 `/api/health` 为 `200` 且解析器 ready；schema `v22`、`quick_check=ok`、外键异常 `0`、活动会话 `0`，PM2 在线且重启次数 `0`，Nginx 与 pm2-root active，部署锁已清理。冻结 `ppt.js` SHA-256 保持 `f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e`。
+
+### 后续节奏 / Delivery Cadence
+- 普通功能继续采用“一功能一上线”：只运行精确受影响测试、必要语法/合同/密钥检查和一次独立审查，通过可验证备份后立即部署并完成线上定向验收。
+- 只有认证、授权架构、schema、租户权威、共享部署基础设施或真实外部写入等高风险边界才扩展测试矩阵；完整回归不再作为每个普通功能的默认要求。
+- 下一切片回到一个有界的 Phase 8 业务权限能力；若实测仍需进一步缩短发布，再把文件级缓存/差量传输作为独立共享基础设施切片审查，不与业务功能捆绑。
+
 ## v0.9.12-campaign-performance-export-permission (Production Deployed, 2026-09-18) - Campaign 效果导出权限
 
 ### 交付与范围 / Delivery And Scope
