@@ -39,9 +39,10 @@
       22,
       23,
       24,
-      25
+      25,
+      26
     ],
-    "targetVersion": 25,
+    "targetVersion": 26,
     "runs": 2,
     "deterministicAppendTables": [
       "activity_log"
@@ -149,6 +150,10 @@
       "sha256": "e04b212b176624a6c3c2abe6ee55d221b3b7d44e12624137c521e4c64bad444e"
     },
     {
+      "path": "server/migrations/026_token_usage_tenant_ownership.js",
+      "sha256": "e110f20d9c01466894baf38ba9ef6b402f9c6d9ac693042e88bba9de2dcecea1"
+    },
+    {
       "path": "server/migrations/baselines/legacy_v1.js",
       "sha256": "13e631ca7e2aef57e39f7dbc38e6f03e2d5323a11f38c6ce31239d793911812c"
     },
@@ -170,7 +175,7 @@
     },
     {
       "path": "server/db.js",
-      "sha256": "73f1767bfa1713c3a065fad382bfdf3fa8b476719a2f74bfeb0caeb123e07abc"
+      "sha256": "b82867255ef1f86d429512a151216731114266c95a625bb653f706ddab9c310f"
     },
     {
       "path": "server/package-lock.json",
@@ -250,11 +255,11 @@
     },
     {
       "path": "server/scripts/sanitization_manifest.json",
-      "sha256": "979393a920dce684c8c73ab89c948979256347a0769768eceb9c978367143905"
+      "sha256": "87d8b79b6b1b0cf8d285826588e4cc94f71bf921144305c54f4e063c3e136e68"
     },
     {
       "path": "server/scripts/sanitize_production_shape.js",
-      "sha256": "7fb3c0596e68f68692a6b78d951c46907c054896a889b8c59f19b4a0514e8f86"
+      "sha256": "ffc6c7593110ff5d5a89f893bb7a2e134d4276465af02f8f133b4bbab34d9023"
     },
     {
       "path": "server/scripts/trusted_parser_runtime_verifier.js",
@@ -266,7 +271,7 @@
     },
     {
       "path": "server/scripts/verify_campaign_migration_gate.js",
-      "sha256": "635de915a266b5ccc2d1857b28c32dbc1d2e6c9115fb32edfebb3e0fcd05423d"
+      "sha256": "936060049eb624a65a15b78c5143d63e3322fa9d8196626c681e3ba1995b3641"
     },
     {
       "path": "server/routes.js",
@@ -278,7 +283,7 @@
     },
     {
       "path": "server/routes_brands.js",
-      "sha256": "8226d47905f6e255d238daf23c1af31aed8d40ca40f1e2bf054f38610e746937"
+      "sha256": "457ae0bcaf14ca8274b3bb2b81a1d0935043ce4531e76695c13c84083bf4e71d"
     },
     {
       "path": "server/routes_campaigns.js",
@@ -306,7 +311,7 @@
     },
     {
       "path": "server/server.js",
-      "sha256": "108c2c1742a488bdf0ac1f02f3ecd19a9be0bdea0fbf9af62626de5a9717b6c8"
+      "sha256": "0f5861ab3a968e5d34069baf481d81681fa2b8743c1e01ef24d38f48a57a92d6"
     },
     {
       "path": "server/workflow_engine.js",
@@ -322,7 +327,7 @@
     },
     {
       "path": "server/services/ai_service.js",
-      "sha256": "69fa2df44ab5bb9c7a0ee37156b91c61a9c30f2bcd89effddcee2ad765276373"
+      "sha256": "7ee8fa3e1dddc2a23b9b94308fcfa09b8259e2915e1b4a6103355d0150037ef1"
     },
     {
       "path": "server/services/business_knowledge_service.js",
@@ -422,7 +427,7 @@
     },
     {
       "path": "server/services/latest_ui_compat_service.js",
-      "sha256": "7ce222c62346b34b8977500b1bd76d16e8bc2a2c4632d3978f06f27599149847"
+      "sha256": "c26dc5333dd3b01704362b0d0f41f08358b0bceb0e9cd57ce639e0d52ef5c73d"
     },
     {
       "path": "server/services/llm_service.js",
@@ -470,7 +475,7 @@
     },
     {
       "path": "server/services/performance_content_analysis_service.js",
-      "sha256": "65182d986c667bfa800d480ff79d6067b6ffbd7605aa3aee26f4091111dd47b5"
+      "sha256": "282814a3a22f2e02008fab19d15d5d42bb619572d48e553e11785a94b86d3050"
     },
     {
       "path": "server/services/performance_feishu_connection_service.js",
@@ -486,7 +491,7 @@
     },
     {
       "path": "server/services/performance_manual_service.js",
-      "sha256": "3989d02802bf11edc9c0deecf5fcb751b0d0a75caaf807b0f5767763c0b7d1e8"
+      "sha256": "4b54431834c731460e97882875558936864b7f8546d8e677bb986e1ea30d64ff"
     },
     {
       "path": "server/services/performance_metrics_service.js",
@@ -515,6 +520,10 @@
     {
       "path": "server/services/sqlite_digest_service.js",
       "sha256": "84f701b14e2e49f7f92a31c2b954996bc331dd564bbcf7a35c8005d04f17d301"
+    },
+    {
+      "path": "server/services/token_usage_service.js",
+      "sha256": "d65dc138df57467b854c8971ef9bd4a1d7590c425d2b2d829c5e4daae4d9314e"
     },
     {
       "path": "server/services/upload_sandbox_service.js",

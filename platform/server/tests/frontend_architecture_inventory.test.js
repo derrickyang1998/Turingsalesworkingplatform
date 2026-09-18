@@ -162,11 +162,8 @@ const task7ConsolidatedDefinitionContracts = Object.freeze({
     "document.getElementById('custModal').style.display = 'none';"
   ],
   trackTokenUsage: [
-    'async function trackTokenUsage(model, endpoint, prompt, completion, total)',
-    "await apiFetch('/token-usage'",
-    'prompt_tokens: prompt',
-    'completion_tokens: completion',
-    'total_tokens: total'
+    'async function trackTokenUsage()',
+    "recorded_by: 'server'"
   ],
   addChatMsg: [
     "var msgs = document.getElementById('chatMessages');",

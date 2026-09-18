@@ -2,6 +2,7 @@ const knowledge = require('./knowledge_service');
 const rag = require('./rag_service');
 const llm = require('./llm_service');
 const webSearch = require('./web_search_service');
+const tokenUsage = require('./token_usage_service');
 const crypto = require('node:crypto');
 const idempotency = require('./idempotency_service');
 const { requestHash } = require('./sqlite_digest_service');
@@ -337,8 +338,15 @@ async function handleLegacyChat(db, opts) {
   db.prepare('UPDATE ai_conversations SET updated_at = datetime(\'now\') WHERE id = ?').run(conversation.id);
   if (usage.total_tokens || usage.prompt_tokens || usage.completion_tokens) {
     try {
-      db.prepare('INSERT INTO token_usage (user_id, model, prompt_tokens, completion_tokens, total_tokens, endpoint) VALUES (?, ?, ?, ?, ?, ?)')
-        .run(opts.user.id, completionModel, usage.prompt_tokens || 0, usage.completion_tokens || 0, usage.total_tokens || 0, 'ai_chat');
+      tokenUsage.recordUsage(db, {
+        organizationId: opts.organizationId,
+        userId: opts.user.id,
+        model: completionModel,
+        promptTokens: usage.prompt_tokens || 0,
+        completionTokens: usage.completion_tokens || 0,
+        totalTokens: usage.total_tokens || 0,
+        endpoint: 'ai_chat'
+      });
     } catch (e) {}
   }
 
@@ -496,18 +504,15 @@ function persistAtomicOneShot(db, opts) {
     db.prepare('UPDATE ai_conversations SET updated_at=datetime(\'now\') WHERE id=?')
       .run(conversation.id);
     if (usage.total_tokens || usage.prompt_tokens || usage.completion_tokens) {
-      db.prepare(`
-        INSERT INTO token_usage (
-          user_id,model,prompt_tokens,completion_tokens,total_tokens,endpoint
-        ) VALUES (?,?,?,?,?,?)
-      `).run(
-        opts.user.id,
-        completionModel,
-        usage.prompt_tokens || 0,
-        usage.completion_tokens || 0,
-        usage.total_tokens || 0,
-        opts.source_module || 'ai_one_shot'
-      );
+      tokenUsage.recordUsage(db, {
+        organizationId: opts.organizationId,
+        userId: opts.user.id,
+        model: completionModel,
+        promptTokens: usage.prompt_tokens || 0,
+        completionTokens: usage.completion_tokens || 0,
+        totalTokens: usage.total_tokens || 0,
+        endpoint: opts.source_module || 'ai_one_shot'
+      });
     }
     if (opts.searchResult.used) {
       webSearch.cacheSearchResultInTransaction(db, opts.webQuery, opts.searchResult);
@@ -660,24 +665,27 @@ function completionUsage(completion) {
   };
 }
 
-function recordLinkedTokenUsageInTransaction(db, user, completion, requestedModel, endpoint, recordZeroUsage) {
+function recordLinkedTokenUsageInTransaction(
+  db,
+  organizationId,
+  user,
+  completion,
+  requestedModel,
+  endpoint,
+  recordZeroUsage
+) {
   const usage = completionUsage(completion);
-  if (!recordZeroUsage && !usage.total_tokens && !usage.prompt_tokens && !usage.completion_tokens) {
-    return Object.assign({ id: null }, usage);
-  }
-  const result = db.prepare(`
-    INSERT INTO token_usage (
-      user_id,model,prompt_tokens,completion_tokens,total_tokens,endpoint
-    ) VALUES (?,?,?,?,?,?)
-  `).run(
-    user.id,
-    resolveCompletionModel(completion, requestedModel),
-    usage.prompt_tokens,
-    usage.completion_tokens,
-    usage.total_tokens,
-    endpoint
-  );
-  return Object.assign({ id: Number(result.lastInsertRowid) }, usage);
+  const recorded = tokenUsage.recordUsage(db, {
+    organizationId,
+    userId: user.id,
+    model: resolveCompletionModel(completion, requestedModel),
+    promptTokens: usage.prompt_tokens,
+    completionTokens: usage.completion_tokens,
+    totalTokens: usage.total_tokens,
+    endpoint,
+    recordZeroUsage
+  });
+  return Object.assign({ id: recorded.id }, usage);
 }
 
 function linkedTerminalRejectionResult(opts, stage, completion) {
@@ -783,6 +791,7 @@ function completeLinkedTerminalRejection(
       });
       const tokenUsage = recordLinkedTokenUsageInTransaction(
         db,
+        currentAccess.campaign.org_id,
         opts.user,
         completion,
         opts.model,
@@ -1538,6 +1547,7 @@ function persistLinkedChat(db, opts) {
     db.prepare('UPDATE ai_conversations SET updated_at=datetime(\'now\') WHERE id=?').run(conversation.id);
     recordLinkedTokenUsageInTransaction(
       db,
+      access.campaign.org_id,
       opts.user,
       opts.completion,
       opts.model,

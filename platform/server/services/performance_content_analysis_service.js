@@ -5,6 +5,7 @@ const { getCampaignAccess: defaultGetCampaignAccess } = require('./campaign_acce
 const idempotency = require('./idempotency_service');
 const knowledge = require('./knowledge_service');
 const { requestHash } = require('./sqlite_digest_service');
+const tokenUsage = require('./token_usage_service');
 
 const DRAFT_CONTRACT_VERSION = 'performance-content-analysis-draft-v1';
 const APPROVAL_CONTRACT_VERSION = 'performance-content-analysis-approval-v1';
@@ -813,11 +814,10 @@ function validateEditedDraft(editedDraft, request, requiredCitations) {
   }
 }
 
-function enforceQuota(db, user) {
+function enforceQuota(db, user, organizationId) {
   const quota = Number(user && user.api_quota || 0);
   if (!quota || (user && user.role === 'admin')) return;
-  const row = db.prepare('SELECT COALESCE(SUM(total_tokens),0) AS total FROM token_usage WHERE user_id=?').get(user.id);
-  if (Number(row && row.total || 0) >= quota) {
+  if (tokenUsage.sumForUser(db, { organizationId, userId: user.id }) >= quota) {
     throw serviceError(429, 'AI_QUOTA_EXCEEDED', 'AI quota exceeded.');
   }
 }
@@ -913,7 +913,7 @@ function createPerformanceContentAnalysisService(db, options = {}) {
         knowledgeLimit: 5,
         max_tokens: 1800,
         beforeProvider() {
-          enforceQuota(db, user);
+          enforceQuota(db, user, activeAccess.access.campaign.org_id);
         },
         validateCompletion(answer) {
           guard.validation = validateProtocol(answer, request, references, snapshot.performance);

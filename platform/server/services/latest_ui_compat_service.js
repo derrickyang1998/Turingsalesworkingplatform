@@ -5,6 +5,7 @@ const knowledgeService = require('./knowledge_service');
 const llm = require('./llm_service');
 const rag = require('./rag_service');
 const webSearch = require('./web_search_service');
+const tokenUsage = require('./token_usage_service');
 
 const TEXT_EXTS = new Set(['.txt', '.md', '.csv', '.json']);
 const DOC_EXTS = new Set(['.pdf', '.docx', '.pptx']);
@@ -223,8 +224,15 @@ function recordTokenUsage(opts, completion) {
   const usage = completion && completion.usage || {};
   if (!opts.db || !opts.user || !(usage.total_tokens || usage.prompt_tokens || usage.completion_tokens)) return;
   try {
-    opts.db.prepare('INSERT INTO token_usage (user_id, model, prompt_tokens, completion_tokens, total_tokens, endpoint) VALUES (?, ?, ?, ?, ?, ?)')
-      .run(opts.user.id, completion.model || 'deepseek-chat', usage.prompt_tokens || 0, usage.completion_tokens || 0, usage.total_tokens || 0, opts.endpoint || 'ai_compat');
+    tokenUsage.recordUsage(opts.db, {
+      organizationId: opts.organizationId,
+      userId: opts.user.id,
+      model: completion.model || 'deepseek-chat',
+      promptTokens: usage.prompt_tokens || 0,
+      completionTokens: usage.completion_tokens || 0,
+      totalTokens: usage.total_tokens || 0,
+      endpoint: opts.endpoint || 'ai_compat'
+    });
   } catch (e) {}
 }
 
@@ -422,7 +430,14 @@ async function generatePptOutline(db, user, body, opts) {
     'Internal knowledge base context:', ragContext.contextText || 'No relevant internal knowledge was found.',
     'Web research:', JSON.stringify((research.results || []).slice(0, 5))
   ].join('\n');
-  const generated = await generateJsonWithDeepSeek(prompt, fallback, { db, user, temperature: 0.25, max_tokens: 3200, endpoint: 'ppt_outline' });
+  const generated = await generateJsonWithDeepSeek(prompt, fallback, {
+    db,
+    user,
+    organizationId: opts.organizationId,
+    temperature: 0.25,
+    max_tokens: 3200,
+    endpoint: 'ppt_outline'
+  });
   const outline = normalizePptOutline(generated.value, fallback, research);
   outline.knowledge_references = ragContext.references;
   knowledgeService.recordKnowledgeUsageTelemetry(

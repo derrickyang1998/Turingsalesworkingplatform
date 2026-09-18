@@ -20,6 +20,7 @@ const {
   createOrganizationMethodologyService
 } = require('./services/organization_methodology_service');
 const aiService = require('./services/ai_service');
+const tokenUsageService = require('./services/token_usage_service');
 const idempotency = require('./services/idempotency_service');
 const uploadAdmissionIdempotency = Object.freeze({
   reserveProcessingInTransaction(database, input) {
@@ -1619,9 +1620,16 @@ function normalizePptRequestPayload(body) {
 function aiQuotaGuard(req, res, next) {
   const quota = Number(req.user.api_quota || 0);
   if (!quota || req.user.role === 'admin') return next();
-  const used = db.prepare('SELECT COALESCE(SUM(total_tokens), 0) AS total FROM token_usage WHERE user_id = ?').get(req.user.id).total;
-  if (used >= quota) return res.status(429).json({ error: 'AI quota exceeded' });
-  next();
+  try {
+    const used = tokenUsageService.sumForUser(db, {
+      organizationId: req.authContext.organization.id,
+      userId: req.user.id
+    });
+    if (used >= quota) return res.status(429).json({ error: 'AI quota exceeded' });
+    return next();
+  } catch (error) {
+    return next(error);
+  }
 }
 
 // ===== AUTH ROUTES =====
@@ -1906,42 +1914,50 @@ app.get('/api/proposals', authMiddleware, (req, res) => {
 
 // ===== TOKEN TRACKING =====
 app.post('/api/token-usage', authMiddleware, (req, res) => {
-  const { model, prompt_tokens, completion_tokens, total_tokens, endpoint } = req.body;
-  db.prepare('INSERT INTO token_usage (user_id, model, prompt_tokens, completion_tokens, total_tokens, endpoint) VALUES (?, ?, ?, ?, ?, ?)').run(
-    req.user.id, model, prompt_tokens, completion_tokens, total_tokens, endpoint
-  );
-  res.json({ success: true });
+  res.status(410).json({
+    error: 'Token usage is recorded only by trusted server-side AI providers.',
+    code: 'TOKEN_USAGE_CLIENT_REPORTING_DISABLED'
+  });
 });
 
 app.get('/api/token-usage', authMiddleware, (req, res) => {
-  const usage = req.user.role === 'admin'
-    ? db.prepare(`
-        SELECT u.username, u.display_name, u.department,
-               COALESCE(SUM(tu.total_tokens), 0) as total_tokens,
-               COALESCE(SUM(tu.prompt_tokens), 0) as prompt_tokens,
-               COALESCE(SUM(tu.completion_tokens), 0) as completion_tokens,
-               COUNT(tu.id) as request_count,
-               MAX(tu.created_at) as last_used
-        FROM users u LEFT JOIN token_usage tu ON u.id = tu.user_id
-        GROUP BY u.id ORDER BY total_tokens DESC
-      `).all()
-    : db.prepare('SELECT * FROM token_usage WHERE user_id = ? ORDER BY created_at DESC LIMIT 100').all(req.user.id);
-  res.json({ usage });
+  try {
+    const usage = tokenUsageService.listUsage(db, {
+      user: req.user,
+      organizationId: req.authContext.organization.id,
+      adminAuditGlobal: req.query.admin_audit === 'global',
+      requestId: identityRequestId(req),
+      ipAddress: req.ip
+    });
+    res.json({ usage });
+  } catch (error) {
+    res.status(error && error.statusCode || 500).json({
+      error: error && error.message || 'Token usage could not be loaded.',
+      code: error && error.code || 'TOKEN_USAGE_READ_FAILED'
+    });
+  }
 });
 
 // ===== ADMIN DASHBOARD =====
 app.get('/api/admin/overview', authMiddleware, adminOnly, (req, res) => {
+  const organizationId = req.authContext.organization.id;
   const stats = {
     totalUsers: db.prepare('SELECT COUNT(*) as count FROM users WHERE is_active = 1').get().count,
     totalDemands: db.prepare('SELECT COUNT(*) as count FROM demands').get().count,
     totalProposals: db.prepare('SELECT COUNT(*) as count FROM proposals').get().count,
-    totalTokens: db.prepare('SELECT COALESCE(SUM(total_tokens), 0) as total FROM token_usage').get().total,
+    totalTokens: db.prepare(`
+      SELECT COALESCE(SUM(total_tokens),0) AS total FROM token_usage WHERE org_id=?
+    `).get(organizationId).total,
     activeSessions: db.prepare(`SELECT COUNT(*) as count FROM sessions WHERE expires_at > datetime('now')`).get().count,
     todayLogins: db.prepare(`SELECT COUNT(DISTINCT user_id) as count FROM activity_log WHERE action = 'login' AND date(created_at) = date('now')`).get().count,
     demandsByStatus: db.prepare('SELECT status, COUNT(*) as count FROM demands GROUP BY status').all(),
     demandsByUser: db.prepare('SELECT u.display_name, u.department, COUNT(d.id) as count FROM users u LEFT JOIN demands d ON u.id = d.user_id GROUP BY u.id ORDER BY count DESC').all(),
     recentActivity: db.prepare('SELECT a.*, u.display_name FROM activity_log a JOIN users u ON a.user_id = u.id ORDER BY a.created_at DESC LIMIT 50').all(),
-    tokenUsageTrend: db.prepare('SELECT date(created_at) as date, SUM(total_tokens) as tokens FROM token_usage GROUP BY date(created_at) ORDER BY date DESC LIMIT 30').all(),
+    tokenUsageTrend: db.prepare(`
+      SELECT date(created_at) AS date,SUM(total_tokens) AS tokens
+      FROM token_usage WHERE org_id=?
+      GROUP BY date(created_at) ORDER BY date DESC LIMIT 30
+    `).all(organizationId),
   };
   res.json({ stats });
 });

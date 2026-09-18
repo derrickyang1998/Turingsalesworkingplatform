@@ -72,6 +72,7 @@ const REQUIRED_BUNDLE_FILES = Object.freeze([
   'server/migrations/023_influencer_tenant_ownership.js',
   'server/migrations/024_knowledge_tenant_ownership.js',
   'server/migrations/025_ai_conversation_tenant_ownership.js',
+  'server/migrations/026_token_usage_tenant_ownership.js',
   'server/migrations/baselines/legacy_v1.js',
   'server/migrations/engines/v1.js',
   'server/migrations/vendor/bcryptjs_v3_0_3.js',
@@ -164,6 +165,7 @@ const REQUIRED_BUNDLE_FILES = Object.freeze([
   'server/services/publication_identity_service.js',
   'server/services/rag_service.js',
   'server/services/sqlite_digest_service.js',
+  'server/services/token_usage_service.js',
   'server/services/upload_sandbox_service.js',
   'server/services/vault_export_service.js',
   'server/services/web_search_service.js',
@@ -193,8 +195,8 @@ const EXPECTED_ENTRYPOINTS = Object.freeze({
 });
 
 const EXPECTED_MIGRATION_CONTRACT = Object.freeze({
-  acceptedSourceVersions: Object.freeze([1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]),
-  targetVersion: 25,
+  acceptedSourceVersions: Object.freeze([1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26]),
+  targetVersion: 26,
   runs: 2,
   deterministicAppendTables: Object.freeze(['activity_log'])
 });

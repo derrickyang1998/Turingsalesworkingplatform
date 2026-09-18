@@ -49,7 +49,7 @@ function openV25Fixture(t) {
   const databasePath = path.join(root, 'source.db');
   const db = migrationService.openMigratedDatabase(databasePath, {
     rootDir: serverRoot,
-    registeredMigrations: migrationGate.REGISTERED_MIGRATIONS
+    registeredMigrations: migrationGate.REGISTERED_MIGRATIONS.filter((migration) => migration.version <= 25)
   });
   t.after(() => {
     try { if (db.open) db.close(); } catch (_error) {}
@@ -58,16 +58,16 @@ function openV25Fixture(t) {
   return db;
 }
 
-test('schema and sanitizer registries end at migration 025', () => {
-  assert.deepEqual(migrationGate.REGISTERED_MIGRATIONS.at(-1), migration025);
-  assert.deepEqual(sanitizer.EXACT_PROFILE_MIGRATIONS.at(-1), migration025);
+test('schema and sanitizer registries retain migration 025 before migration 026', () => {
+  assert.deepEqual(migrationGate.REGISTERED_MIGRATIONS.find((migration) => migration.version === 25), migration025);
+  assert.deepEqual(sanitizer.EXACT_PROFILE_MIGRATIONS.find((migration) => migration.version === 25), migration025);
   const dbSource = fs.readFileSync(path.join(serverRoot, 'db.js'), 'utf8');
   assert.match(dbSource, /version:\s*25,[\s\S]*name:\s*'025_ai_conversation_tenant_ownership'/);
 });
 
 test('v25 sanitizer profile pins AI conversation organization ownership', (t) => {
   const db = openV25Fixture(t);
-  assert.equal(sanitizationManifest.exactProfiles.at(-1).schemaVersion, 25);
+  assert.ok(sanitizationManifest.exactProfiles.some((profile) => profile.schemaVersion === 25));
   const structuralPolicy = sanitizer._testing.structuralColumnPolicyForVersion(25);
   assert.deepEqual(structuralPolicy['ai_conversations.org_id'], {
     storage: 'integer',
@@ -94,11 +94,11 @@ test('v25 sanitizer profile pins AI conversation organization ownership', (t) =>
   assert.doesNotThrow(() => sanitizer.validateManifest(sanitizationManifest, db));
 });
 
-test('trusted source manifest pins the exact v25 source contract', () => {
+test('trusted source manifest retains the exact v25 source inside the v26 contract', () => {
   const manifestPath = path.join(serverRoot, 'scripts', 'trusted_production_source_manifest.json');
   const loaded = trustedGate.loadTrustedManifest(manifestPath);
-  assert.equal(loaded.migrationContract.targetVersion, 25);
-  assert.equal(loaded.migrationContract.acceptedSourceVersions.at(-1), 25);
+  assert.equal(loaded.migrationContract.targetVersion, 26);
+  assert.ok(loaded.migrationContract.acceptedSourceVersions.includes(25));
   for (const requiredPath of [
     'server/migrations/025_ai_conversation_tenant_ownership.js',
     'server/services/ai_service.js',
@@ -130,11 +130,11 @@ test('deploy inventory carries v25 implementation and exact focused tests', () =
   }
   assert.match(
     deploy,
-    /if \(Number\(version\) !== 25\) throw new Error\('Candidate migration target version mismatch'\)/
+    /if \(Number\(version\) !== 26\) throw new Error\('Candidate migration target version mismatch'\)/
   );
   assert.match(
     deploy,
-    /report\.get\('sourceVersion'\) not in \(1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25\)/
+    /report\.get\('sourceVersion'\) not in \(1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26\)/
   );
   assert.equal(
     powerShellStringAssignment(deploy, 'EXPECTED_TRUSTED_SOURCE_GATE_SHA256'),

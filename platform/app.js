@@ -3314,10 +3314,8 @@ async function searchNewBrand() {
   }
 }
 
-async function trackTokenUsage(model, endpoint, prompt, completion, total) {
-  try {
-    await apiFetch('/token-usage', { method: 'POST', body: JSON.stringify({ model, endpoint, prompt_tokens: prompt, completion_tokens: completion, total_tokens: total }) })
-  } catch (e) { }
+async function trackTokenUsage() {
+  return Promise.resolve({ recorded_by: 'server' });
 }
 
 // ===== M2: STRATEGY (unchanged from v3) =====
@@ -10916,13 +10914,13 @@ function adminOrganizationMemberPreviousPage() {
   return loadAdminOrganizationMembers(adminOrganizationMemberPageCursors[previousIndex], true, previousIndex);
 }
 function loadAdminTokens() {
-  apiFetch('/token-usage').then(function(r) { return r.json(); }).then(function(d) {
+  apiFetch('/token-usage?admin_audit=global').then(function(r) { return r.json(); }).then(function(d) {
     var c = document.getElementById('ad_tokenTable');
     if (!c) return;
     var usage = d.usage || [];
     if (!usage.length) { c.innerHTML = '<p style="opacity:.5">No data</p>'; return; }
-    c.innerHTML = '<table><thead><tr><th>User</th><th>Dept</th><th>Requests</th><th>Tokens</th><th>Last</th></tr></thead><tbody>' + usage.map(function(u) {
-      return '<tr><td>' + esc(u.display_name||u.username||'') + '</td><td>' + esc(u.department||'-') + '</td><td>' + (u.request_count||0) + '</td><td>' + (u.total_tokens||0).toLocaleString() + '</td><td>' + (u.last_used||'').substring(0,10) + '</td></tr>';
+    c.innerHTML = '<table><thead><tr><th>Organization</th><th>User</th><th>Dept</th><th>Requests</th><th>Tokens</th><th>Last</th></tr></thead><tbody>' + usage.map(function(u) {
+      return '<tr><td>' + esc(u.organization_name||'-') + '</td><td>' + esc(u.display_name||u.username||'') + '</td><td>' + esc(u.department||'-') + '</td><td>' + (u.request_count||0) + '</td><td>' + (u.total_tokens||0).toLocaleString() + '</td><td>' + (u.last_used||'').substring(0,10) + '</td></tr>';
     }).join('') + '</tbody></table>';
   }).catch(function(e) {});
 }

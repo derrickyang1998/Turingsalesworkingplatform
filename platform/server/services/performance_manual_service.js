@@ -13,6 +13,7 @@ const {
 } = require('./performance_metrics_service');
 const { getCampaignAccess: defaultGetCampaignAccess } = require('./campaign_access_service');
 const knowledge = require('./knowledge_service');
+const tokenUsage = require('./token_usage_service');
 
 const MAX_PAGE_SIZE = 100;
 const DEFAULT_PAGE_SIZE = 50;
@@ -2902,14 +2903,10 @@ function aiReviewApprovalResult(status, entry, input) {
   };
 }
 
-function enforceAiReviewQuota(db, user) {
+function enforceAiReviewQuota(db, user, organizationId) {
   const quota = Number(user && user.api_quota || 0);
   if (!quota || (user && user.role === 'admin')) return;
-  const used = db.prepare(`
-    SELECT COALESCE(SUM(total_tokens), 0) AS total
-    FROM token_usage
-    WHERE user_id=?
-  `).get(user.id).total;
+  const used = tokenUsage.sumForUser(db, { organizationId, userId: user.id });
   if (used >= quota) {
     throw aiReviewError(429, 'AI_QUOTA_EXCEEDED', 'AI quota exceeded.');
   }
@@ -3636,7 +3633,7 @@ function createPerformanceAiReviewService(db, options = {}) {
         max_tokens: 700,
         terminalRejectionAudit: true,
         beforeProvider() {
-          enforceAiReviewQuota(db, user);
+          enforceAiReviewQuota(db, user, linkedAiInput.organizationId);
         },
         validateCompletion(answer) {
           generationGuard.draftValidation = aiReviewDraftSafety(answer);

@@ -2,6 +2,7 @@ module.exports = function(app, db, authMiddleware, aiLimiter, aiQuotaGuard) {
   const businessKnowledge = require('./services/business_knowledge_service');
   const llm = require('./services/llm_service');
   const webSearch = require('./services/web_search_service');
+  const tokenUsage = require('./services/token_usage_service');
   const aiMiddlewares = [authMiddleware];
   if (aiLimiter) aiMiddlewares.push(aiLimiter);
   if (aiQuotaGuard) aiMiddlewares.push(aiQuotaGuard);
@@ -69,8 +70,15 @@ module.exports = function(app, db, authMiddleware, aiLimiter, aiQuotaGuard) {
       if (!Array.isArray(enriched.top_products_featured)) enriched.top_products_featured = String(enriched.top_products_featured || '').split(/[,;，、]/).map(function(v) { return v.trim(); }).filter(Boolean);
       if (completion.usage && (completion.usage.total_tokens || completion.usage.prompt_tokens || completion.usage.completion_tokens)) {
         try {
-          db.prepare('INSERT INTO token_usage (user_id, model, prompt_tokens, completion_tokens, total_tokens, endpoint) VALUES (?, ?, ?, ?, ?, ?)')
-            .run(req.user.id, completion.model || 'deepseek-chat', completion.usage.prompt_tokens || 0, completion.usage.completion_tokens || 0, completion.usage.total_tokens || 0, 'brand_enrich');
+          tokenUsage.recordUsage(db, {
+            organizationId: req.authContext.organization.id,
+            userId: req.user.id,
+            model: completion.model || 'deepseek-chat',
+            promptTokens: completion.usage.prompt_tokens || 0,
+            completionTokens: completion.usage.completion_tokens || 0,
+            totalTokens: completion.usage.total_tokens || 0,
+            endpoint: 'brand_enrich'
+          });
         } catch (e2) {}
       }
       res.json({
