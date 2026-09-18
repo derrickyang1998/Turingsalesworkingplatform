@@ -1,5 +1,30 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.9.11-protected-account-reset (Production Deployed, 2026-09-18) - 受保护账号密码重置门禁
+
+### 交付与范围 / Delivery And Scope
+- 管理端浏览器密码重置现在拒绝平台管理员和当前企业所有者，统一返回 `409 PROTECTED_ACCOUNT_RESET_REQUIRES_BREAK_GLASS`；自助重置、同级管理员重置和所有者重置均不能绕过恢复流程。
+- 被拒绝的操作不修改密码哈希、不撤销既有会话、不写入成功重置/轮换审计，只追加字段有界的 `admin_reset_password_denied` 安全审计；账号不再属于受保护类别后可恢复普通管理端重置。
+- 前端仅在 HTTP 成功时展示临时密码，非 `2xx` 显示服务端错误；命令行 stdin 凭据轮换继续作为受控 break-glass 路径。
+- 发布门禁补充 schema v22 的既有 CRM `task_updated` 审计值；历史 schema 仍拒绝该值，未知值继续 fail closed。本版不修改数据库结构、客户双页面、M3/M4、AI/知识库、网红、飞书、工作流、导出或冻结 PPT。
+
+### 轻量验证与独立审查 / Lightweight Verification And Independent Review
+- 管理端 UI `13/13`、密码重置路由 `4/4`、命令行恢复 `3/3`、脱敏结构策略 `25` 通过/`1` 平台跳过、可信来源聚焦测试 `3/3`、迁移清单版本测试 `1/1`；语法、JSON、差异、变更行密钥/乱码、本地发布预检和冻结 PPT 摘要均通过。
+- 功能独立审查与发布门禁复审最终均为 `APPROVE`。门禁复审要求补齐 v22 校验器版本及 schema v1、v6-v21、v22 接受/拒绝矩阵，补充测试后无未关闭 P1/P2。
+- 生产功能提交 `8b1a580ebaf200cf570daf9dd96c08683ca3677f` 与发布门禁修复提交 `70a03844ad1d7cee9bd821d368521cb1d9ec1413` 均在部署前推送 GitHub。
+
+### 生产状态 / Production Status
+- 首个候选在生产切换前因真实备份包含既有 `task_updated` 审计而被结构策略拒绝，仅创建备份 `/root/turingmarket/backups/v060-crm-sales-workspace-20260918-064010` 并清理候选，未改变生产；修复严格限定为 schema v22 后，隔离重放通过。
+- 最终受控运行 `671ac27b99a3468daf774772c91d30da` 返回 `DEPLOY_OK`；可信源码 SHA-256 为 `598a0d8e5a769f4c178397da2ad23d1ae3cd184d8e5f9ebd46298a7899278a5e`，候选树 SHA-256 为 `2fbb58b1064807113261cc92dbeb8e449f7ccc34fa4b0b75f0339d4270dd9461`。
+- 可恢复备份为 `/root/turingmarket/backups/v060-crm-sales-workspace-20260918-073131`；初始 `337` 项与切换 `35` 项清单、两份数据库摘要均复验通过。远端候选测试 `76/76`、部署 Chromium 冒烟 `2/2`。
+- 线上登录、`/api/auth/me`、无请求体的受保护账号重置、哈希/会话/审计不变量、原密码重新登录、注销和旧令牌 `401` 均通过；桌面 `1440x900` 与手机 `390x844` 仅显示错误通知，无成功/临时密码提示、横向溢出或脚本错误。活动会话为 `0`。
+- 公网健康、`/m0`、`/m0-detail` 与管理端均为 `200`；schema `v22`、`quick_check=ok`、外键异常 `0`，PM2/Nginx/pm2-root 正常。冻结 `ppt.js` SHA-256 保持 `f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e`。
+
+### 下一边界 / Next Boundary
+- 下一版继续选择一个可独立上线的 Phase 8 能力，优先评估活动范围导出或另一项有界管理权限，不捆绑套餐、配额或真实外部投递。
+- 保存视图权限方案暂不实施；其后续版本需先完成 `org_id` 迁移、陈旧异步响应保护和请求体解析前权限门禁。
+- 延续“一功能一上线”：普通功能只执行受影响测试、必要语法/合同/敏感信息检查和一次独立审查，通过后当轮备份、部署及线上冒烟；完整回归仅用于阶段收口或高风险边界。
+
 ## v0.9.10-crm-task-reassignment-editing (Production Deployed, 2026-09-18) - CRM 任务改派与编辑
 
 ### 交付与范围 / Delivery And Scope
