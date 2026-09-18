@@ -625,6 +625,16 @@ function indexSubsetSignature(entries) {
   return sqliteDigest.item('index_list', sqliteDigest.list(records));
 }
 
+function indexSemanticSignature(entry) {
+  return Buffer.concat([
+    sqliteDigest.row([entry.name, entry.isUnique, entry.origin, entry.partial]).subarray(8),
+    sqliteDigest.item(
+      'index_xinfo',
+      sqliteDigest.list(entry.xinfo.map((values) => sqliteDigest.row(values).subarray(8)))
+    )
+  ]);
+}
+
 function tableTopologyMetadata(db, table) {
   const row = db.prepare(`
     SELECT schema,name,type,ncol,wr,strict
@@ -669,6 +679,7 @@ function captureLegacyTopologyShape(db, tables) {
     const indexes = indexEntries(db, table);
     tableMetadata.set(table, Object.freeze({
       ...metadata,
+      indexes: Object.freeze(indexes),
       indexNames: Object.freeze(indexes.map((entry) => entry.name)),
       indexSignature: indexSubsetSignature(indexes)
     }));
@@ -702,6 +713,47 @@ function approvedTargetTopologyReplacement(expected, actual, options) {
     return false;
   }
   return crypto.createHash('sha256').update(actual.sql, 'utf8').digest('hex') === replacement.sqlSha256;
+}
+
+function approvedTargetIndexReplacementNames(current, table, expectedNames, options) {
+  if (!options || options.approvedTopologyReplacements !== true) return new Set();
+  const approved = new Set();
+  for (const replacement of APPROVED_TARGET_TOPOLOGY_REPLACEMENTS) {
+    if (
+      replacement.type !== 'index' ||
+      replacement.tblName !== table ||
+      !expectedNames.has(replacement.name)
+    ) {
+      continue;
+    }
+    const actual = current.objects.get(topologyObjectKey(replacement));
+    if (approvedTargetTopologyReplacement(replacement, actual, options)) approved.add(replacement.name);
+  }
+  return approved;
+}
+
+function legacyIndexMetadataPreserved(current, table, tableMetadata, actualIndexes, options) {
+  const expectedNames = new Set(tableMetadata.indexNames);
+  const approvedReplacements = approvedTargetIndexReplacementNames(
+    current,
+    table,
+    expectedNames,
+    options
+  );
+  if (approvedReplacements.size === 0) {
+    return actualIndexes.length === tableMetadata.indexNames.length &&
+      indexSubsetSignature(actualIndexes).equals(tableMetadata.indexSignature);
+  }
+
+  if (actualIndexes.length !== tableMetadata.indexNames.length) return false;
+  const actualByName = new Map(actualIndexes.map((entry) => [entry.name, entry]));
+  for (const expected of tableMetadata.indexes) {
+    const actual = actualByName.get(expected.name);
+    if (!actual) return false;
+    if (approvedReplacements.has(expected.name)) continue;
+    if (!indexSemanticSignature(actual).equals(indexSemanticSignature(expected))) return false;
+  }
+  return true;
 }
 
 function assertLegacyTopologyPreserved(db, snapshot, options = {}) {
@@ -745,10 +797,7 @@ function assertLegacyTopologyPreserved(db, snapshot, options = {}) {
     );
     const expectedNames = new Set(tableMetadata.indexNames);
     const actualIndexes = indexEntries(db, expected.name).filter((entry) => expectedNames.has(entry.name));
-    if (
-      actualIndexes.length !== tableMetadata.indexNames.length ||
-      !indexSubsetSignature(actualIndexes).equals(tableMetadata.indexSignature)
-    ) {
+    if (!legacyIndexMetadataPreserved(current, expected.name, tableMetadata, actualIndexes, options)) {
       throw new Error(`legacy preservation index metadata drift for ${expected.name}`);
     }
   }

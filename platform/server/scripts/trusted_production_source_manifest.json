@@ -261,7 +261,7 @@
     },
     {
       "path": "server/scripts/verify_campaign_migration_gate.js",
-      "sha256": "7b84cda0f3d3ce25897101088a1b89b7c5bab0f9cffe459f666b0ba8bee13797"
+      "sha256": "aa10e1d71b862c90d81b31d7232bbfb934eb0e02050d8338bb2654aa4775ba3e"
     },
     {
       "path": "server/routes.js",

@@ -182,6 +182,35 @@ test('migration verifier upgrades the current production predecessor version 23 
   assert.equal(sha256File(fixture.databasePath), sourceSha256);
 });
 
+test('migration verifier accepts the historical production v23 knowledge table framing', (t) => {
+  const fixture = createFixture(t, 'production-v23-knowledge-framing', 23);
+  const db = new Database(fixture.databasePath);
+  try {
+    rewriteSchemaSql(db, 'table', 'knowledge_entries', (sql) => sql
+      .split('\n')
+      .map((line) => {
+        if (line.startsWith('      ')) return line.slice(2);
+        if (line.startsWith('    ,')) return line.slice(2);
+        return line;
+      })
+      .join('\n'));
+  } finally {
+    db.close();
+  }
+  const sourceSha256 = sha256File(fixture.databasePath);
+
+  const report = migrationGate.verifySanitizedMigrationCopy({
+    sanitizedPath: fixture.databasePath,
+    sourceVersion: 23,
+    workDir: path.join(fixture.root, 'work')
+  });
+
+  assert.equal(report.sourceVersion, 23);
+  assert.equal(report.targetVersion, 24);
+  assert.equal(report.legacyPreservationVerified, true);
+  assert.equal(sha256File(fixture.databasePath), sourceSha256);
+});
+
 test('migration gate permits only the checksum-bound v12 request transition trigger replacement', (t) => {
   const fixture = createFixture(t, 'v12-transition-trigger', 11);
   const db = new Database(fixture.databasePath);
@@ -194,7 +223,7 @@ test('migration gate permits only the checksum-bound v12 request transition trig
     assert.doesNotThrow(() => migrationGate._testing.assertLegacyLogicalShapePreserved(
       db,
       snapshot,
-      { approvedTopologyReplacements: true }
+      { approvedTopologyReplacements: true, approvedDerivedRebuilds: true }
     ));
 
     db.exec(`
@@ -207,7 +236,7 @@ test('migration gate permits only the checksum-bound v12 request transition trig
       () => migrationGate._testing.assertLegacyLogicalShapePreserved(
         db,
         snapshot,
-        { approvedTopologyReplacements: true }
+        { approvedTopologyReplacements: true, approvedDerivedRebuilds: true }
       ),
       /legacy preservation trigger SQL or metadata drift for request_idempotency_legal_transition/i
     );
