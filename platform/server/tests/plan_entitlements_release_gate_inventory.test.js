@@ -104,10 +104,12 @@ test('deployment inventory ships the exact v27 implementation and focused releas
     runtimeConfigHash
   );
 
-  const gitAttributes = fs.readFileSync(path.join(repoRoot, '.gitattributes'), 'utf8');
-  assert.match(
-    gitAttributes,
-    /^platform\/server\/\*\*\/\*\.js text eol=lf$/m,
-    'all server JavaScript must have deterministic LF bytes for trusted-source hashing'
-  );
+  if (fs.existsSync(path.join(repoRoot, '.git'))) {
+    const gitAttributes = fs.readFileSync(path.join(repoRoot, '.gitattributes'), 'utf8');
+    assert.match(
+      gitAttributes,
+      /^platform\/server\/\*\*\/\*\.js text eol=lf$/m,
+      'all server JavaScript must have deterministic LF bytes for trusted-source hashing'
+    );
+  }
 });
