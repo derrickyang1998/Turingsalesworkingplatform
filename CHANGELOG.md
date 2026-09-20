@@ -1,5 +1,27 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.9.23-plan-catalog-module-entitlements (Production Deployed, 2026-09-20) - 套餐目录与模块权益合同
+
+### 交付与范围 / Delivery And Scope
+- schema 升级至 v27，新增不可变套餐目录、套餐模块清单和仅追加的组织套餐分配历史；现有组织与新建组织默认接入 `legacy_full`，不会因升级丢失既有能力。
+- 上线 `legacy_full` 与 `crm_core` 两个套餐。当前七个受控模块为 CRM 客户、商机、联系人、任务、活动效果、客户复盘报告及网红数据；用户最终权限按“实时角色权限 ∩ 当前套餐权益”在服务端计算。
+- 新增套餐目录、当前组织权益及平台管理员套餐分配 API，并在管理控制室提供紧凑套餐选择器。套餐变更采用期望版本并发控制、原子审计及失败关闭，普通用户不能通过浏览器篡改绕过。
+- AI Token 配额继续作为独立能力；本版不实现收费、价格、订阅到期、组织月度共享配额、持久并发预留或动态套餐编辑。最新 CRM、M3/M4、AI/知识库、方案/报告和 PPT 界面均保持不变，冻结 `ppt.js` SHA-256 仍为 `f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e`。
+
+### 定向验证与独立审查 / Focused Verification And Independent Review
+- 套餐/组织/管理/发布定向测试 `76/76`、迁移与完整重放 `8/8`、脱敏类生产演练 `1/1`、候选 Chromium 冒烟 `2/2` 均通过；JavaScript 语法、`git diff --check`、密钥扫描、可信清单及冻结 PPT 摘要通过。
+- 本版跨越 schema 与鉴权边界，因此保留迁移重跑、完整性、外键、权限拒绝和受控候选检查；未追加与套餐权益无关的重型业务回归。
+- 独立审查首轮发现运行时指纹漂移、目录可变插入和分配历史可出现空当前版本三项阻断问题；经 LF 规范化、精确不可变种子及连续仅追加历史修复后复审结论为 `APPROVE`。后续两个候选夹具修复也分别完成独立复审。
+
+### 生产状态 / Production Status
+- 实现与门禁提交 `1509d5b`、`0600804`、`7992e40`、`dcae2b1`、`a2f95d9`、`b9874d5` 已在生产变更前推送 GitHub；正式运行 `53b27349f77045ceb5f0a2773339a7c8` 返回 `DEPLOY_OK` 与 `RETENTION_CLEANUP_OK`。
+- 三次前置候选分别因旧 schema 重放断言、受限门禁账号无法读取父目录 `.gitattributes`、浏览器基线缺少套餐目录桩而在生产变更前安全停止；修复均保持最小范围并经独立复审，未污染活动生产。
+- 可验证备份为 `/root/turingmarket/backups/v060-crm-sales-workspace-20260920-210744`；备份清单 SHA-256 为 `7f41dc5772c34050b1213d1d168486d49326041eaefe4e7d0be5ca11eeccf2d3`，数据库 SHA-256 为 `6a4277309fd1a1f7c39b2ad7d92b218901a738943846ed85c5f7368372ab7ebe`。
+- 公网健康 `200`、schema v27、SQLite `quick_check=ok`、外键异常 0、PM2 online 且重启 0、Nginx 正常。线上完成 `legacy_full v1 -> crm_core v2 -> legacy_full v3` 可逆验收；CRM 四模块保留，三项非 CRM 能力被服务端拒绝，其中效果导出直接返回 `403` 且未产生文件，审计恰好记录两次套餐变更，最终已恢复 `legacy_full` 且活动会话为 0。
+
+### 后续节奏 / Delivery Cadence
+- 从本版起固定执行“一功能一上线”：普通功能只跑受影响测试、必要安全检查和一次独立审查，完成可验证备份后当轮部署并做线上定向验收；完整重型套件只在阶段收口或 schema、鉴权/授权、租户权威、共享基础设施、真实外部写入等高风险边界触发。下一独立版本为订阅到期控制，其后为组织月度共享配额。
+
 ## v0.9.22-demand-xlsx-parser-compatibility (Production Deployed, 2026-09-20) - 需求 XLSX 解析兼容
 
 ### 交付与范围 / Delivery And Scope
