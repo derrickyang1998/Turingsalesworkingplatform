@@ -107,9 +107,11 @@ test('deployment inventory ships the exact v28 implementation and focused releas
     /report\.get\('sourceVersion'\) not in \(1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28\)/
   );
   assert.match(deploy, /--test-name-pattern="subscription expiry"[\s\\]+server\/tests\/influencer_workflow\.test\.js/);
-  assert.doesNotMatch(
+  assert.match(deploy, /OFFLINE_LOOPBACK_TCP_OK/);
+  assert.match(deploy, /OFFLINE_GATE_EFFECTIVE_PROPERTIES_OK/);
+  assert.match(
     deploy,
-    /--test-name-pattern="login and auth me\|one live session observes\|unavailable entitlement policy"/
+    /node --test --test-reporter=dot --test-name-pattern="login and auth me\|one live session observes\|unavailable entitlement policy"[\s\\]+server\/tests\/phase4_server_integration\.test\.js/
   );
   assert.match(
     phase4Integration,

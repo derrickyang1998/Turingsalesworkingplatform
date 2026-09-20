@@ -1388,6 +1388,40 @@ if ($actual -ne 'sweep,writer,finalize,retention,candidate,release') { throw "Un
   );
 });
 
+test('Phase 4 interrupted recovery keeps retention identity separate from quarantined cleanup path', {
+  skip: !powershellAvailable() ? 'requires Windows PowerShell' : false,
+}, () => {
+  const recovery = functionSource(
+    read(deployPath), 'Invoke-DeploymentFailureRecovery', 'Invoke-InterruptedDeploymentRecovery'
+  );
+  const script = `
+$ErrorActionPreference = 'Stop'
+$script:calls = New-Object System.Collections.Generic.List[string]
+function Invoke-RemoteTrustedSourceInputSweep { $script:calls.Add('sweep') }
+function Get-RemoteDeploymentPhase { param([switch]$DeploymentLockOnly); 'locked' }
+function Enter-RemoteWriterLock { $script:calls.Add('writer') }
+function Get-RemoteDeploymentAcceptanceState { 'current-marker-absent' }
+function Restore-RemoteMigrationGateCleanupControl { param([string]$BackupPath); $script:calls.Add('restore') }
+function Invoke-RemoteRetentionCleanup { param([string]$BackupPath,[string]$ReleaseRoot); $script:calls.Add("retention:$ReleaseRoot") }
+function Invoke-RemoteCandidateCleanup { param([string]$ReleaseRoot); $script:calls.Add("candidate:$ReleaseRoot") }
+function Exit-RemoteDeploymentLock { param([switch]$ReleaseWriterLock); $script:calls.Add('release') }
+${recovery}
+Invoke-DeploymentFailureRecovery -BackupPath backup -ReleaseRoot release -CandidateCleanupRoot quarantine -BackupCreated $true
+$actual = $script:calls -join ','
+if ($actual -ne 'sweep,writer,restore,retention:release,candidate:quarantine,release') { throw "Unexpected calls: $actual" }
+'INTERRUPTED_PATHS_SEPARATED'
+`;
+  const result = spawnSync('powershell.exe', [
+    '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script
+  ], { encoding: 'utf8', timeout: 30_000 });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /INTERRUPTED_PATHS_SEPARATED/);
+
+  const interrupted = functionSource(read(deployPath), 'Invoke-InterruptedDeploymentRecovery', 'Invoke-ManualRollback');
+  assert.match(interrupted, /-ReleaseRoot \(\[string\]\$metadata\.releaseRoot\)/);
+  assert.match(interrupted, /-CandidateCleanupRoot \$cleanupPath/);
+});
+
 test('cutover-complete finalization starts only the closed maintenance listener before arming', {
   skip: !bashAvailable() ? 'requires Linux Bash' : false,
 }, () => {

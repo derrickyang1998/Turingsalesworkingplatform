@@ -8140,9 +8140,16 @@ function Invoke-DeploymentFailureRecovery {
     param(
         [Parameter(Mandatory = $true)][string]$BackupPath,
         [Parameter(Mandatory = $true)][string]$ReleaseRoot,
-        [Parameter(Mandatory = $true)][bool]$BackupCreated
+        [Parameter(Mandatory = $true)][bool]$BackupCreated,
+        [AllowNull()][AllowEmptyString()][string]$CandidateCleanupRoot = ''
     )
 
+    $candidateCleanupPath = if ([string]::IsNullOrWhiteSpace($CandidateCleanupRoot)) {
+        $ReleaseRoot
+    }
+    else {
+        $CandidateCleanupRoot
+    }
     Invoke-RemoteTrustedSourceInputSweep
     $preWriterPhase = Get-RemoteDeploymentPhase -DeploymentLockOnly
     if ($preWriterPhase -cin @('mutation-started', 'release-replay-complete')) {
@@ -8193,14 +8200,14 @@ function Invoke-DeploymentFailureRecovery {
                     Start-Sleep -Seconds (2 * $restoreAttempt)
                 }
             }
-            Invoke-RemoteCandidateCleanup -ReleaseRoot $ReleaseRoot
+            Invoke-RemoteCandidateCleanup -ReleaseRoot $candidateCleanupPath
         }
         { $_ -cin @('mutation-intent', 'maintenance-entered', 'writers-stopped', 'snapshot-ready', 'prior-marker-archived', 'nginx-candidate-staged') } {
             if (-not $BackupCreated) {
                 throw "Pre-mutation recovery requires the completed deployment backup."
             }
             Invoke-RemotePreMutationResume -BackupPath $BackupPath
-            Invoke-RemoteCandidateCleanup -ReleaseRoot $ReleaseRoot
+            Invoke-RemoteCandidateCleanup -ReleaseRoot $candidateCleanupPath
         }
         'locked' {
             Write-Host "Production was not mutated; candidate cleanup only." -ForegroundColor Yellow
@@ -8208,7 +8215,7 @@ function Invoke-DeploymentFailureRecovery {
                 Restore-RemoteMigrationGateCleanupControl -BackupPath $BackupPath
                 Invoke-RemoteRetentionCleanup -BackupPath $BackupPath -ReleaseRoot $ReleaseRoot
             }
-            Invoke-RemoteCandidateCleanup -ReleaseRoot $ReleaseRoot
+            Invoke-RemoteCandidateCleanup -ReleaseRoot $candidateCleanupPath
         }
         'candidate-ready' {
             Write-Host "Candidate validation or cutover transport failed before production mutation; candidate cleanup only." -ForegroundColor Yellow
@@ -8217,13 +8224,13 @@ function Invoke-DeploymentFailureRecovery {
             }
             Restore-RemoteMigrationGateCleanupControl -BackupPath $BackupPath
             Invoke-RemoteRetentionCleanup -BackupPath $BackupPath -ReleaseRoot $ReleaseRoot
-            Invoke-RemoteCandidateCleanup -ReleaseRoot $ReleaseRoot
+            Invoke-RemoteCandidateCleanup -ReleaseRoot $candidateCleanupPath
         }
         'cutover-complete' {
             Write-Warning "Remote cutover completed but local confirmation failed; keep the deployed release and clean transient candidate state."
             Invoke-RemoteAcceptedFinalize -ReleaseRoot $ReleaseRoot
             Invoke-RemoteRetentionCleanup -BackupPath $BackupPath -ReleaseRoot $ReleaseRoot
-            Invoke-RemoteCandidateCleanup -ReleaseRoot $ReleaseRoot
+            Invoke-RemoteCandidateCleanup -ReleaseRoot $candidateCleanupPath
         }
         'accepted' {
             Write-Warning "The candidate was durably accepted; finalize it without rolling back user-visible state."
@@ -8254,7 +8261,8 @@ function Invoke-InterruptedDeploymentRecovery {
     }
     Invoke-DeploymentFailureRecovery `
         -BackupPath ([string]$metadata.backupPath) `
-        -ReleaseRoot $cleanupPath `
+        -ReleaseRoot ([string]$metadata.releaseRoot) `
+        -CandidateCleanupRoot $cleanupPath `
         -BackupCreated ([bool]$metadata.backupReady)
 }
 
@@ -10802,6 +10810,7 @@ timeout --signal=KILL 30m systemd-run --quiet --wait --pipe --unit="$OfflineGate
     /bin/bash --noprofile --norc -s <<'TM_UNPRIVILEGED_GATE' 2>&1 | tail -c 8192
 set -euo pipefail
 python3 - <<'PY'
+import socket
 from pathlib import Path
 
 interfaces = sorted(path.name for path in Path('/sys/class/net').iterdir())
@@ -10815,6 +10824,26 @@ for line in ipv4_routes[1:]:
         raise SystemExit('offline network namespace has a malformed IPv4 route entry')
     if fields[1].upper() == '00000000' and fields[7].upper() == '00000000':
         raise SystemExit('offline network namespace has an IPv4 default route')
+
+listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+listener.settimeout(3)
+try:
+    listener.bind(('127.0.0.1', 0))
+    listener.listen(1)
+    client = socket.create_connection(('127.0.0.1', listener.getsockname()[1]), timeout=3)
+    try:
+        accepted, _address = listener.accept()
+        try:
+            client.sendall(b'tm-loopback-probe')
+            if accepted.recv(64) != b'tm-loopback-probe':
+                raise SystemExit('offline loopback TCP payload mismatch')
+        finally:
+            accepted.close()
+    finally:
+        client.close()
+finally:
+    listener.close()
+print('OFFLINE_LOOPBACK_TCP_OK')
 PY
 printf "%s\n" "OFFLINE_NETWORK_NAMESPACE_OK"
 cd "$CANDIDATE_DIR"
@@ -10901,6 +10930,8 @@ node --test \
   server/tests/customer_workspace_ui.test.js
 node --test --test-name-pattern="subscription expiry" \
   server/tests/influencer_workflow.test.js
+node --test --test-reporter=dot --test-name-pattern="login and auth me|one live session observes|unavailable entitlement policy" \
+  server/tests/phase4_server_integration.test.js
 install -d -m 0700 "$TEST_ROOT/browser-smoke"
 TM_DEPLOYMENT_SMOKE_ROOT="$TEST_ROOT/browser-smoke" \
 TM_DEPLOYMENT_SMOKE_PORT=43188 node node_modules/playwright-deploy/cli.js test -c server/tests/deployment-browser-smoke.config.js
@@ -10946,6 +10977,19 @@ TM_NGINX_TEST
 printf '%s\n' "UNPRIVILEGED_GATE_OK"
 TM_UNPRIVILEGED_GATE
 GateStatus=${PIPESTATUS[0]}
+OfflineGatePrivateNetwork="$(systemctl show "$OfflineGateUnit" --property=PrivateNetwork --value 2>/dev/null)"
+OfflineGateUser="$(systemctl show "$OfflineGateUnit" --property=User --value 2>/dev/null)"
+OfflineGateAddressFamilies="$(systemctl show "$OfflineGateUnit" --property=RestrictAddressFamilies --value 2>/dev/null)"
+OfflineGatePropertyStatus=0
+if [ "$OfflineGatePrivateNetwork" = "yes" ] &&
+   [ "$OfflineGateUser" = "$GateUser" ] &&
+   [ "$OfflineGateAddressFamilies" = "AF_UNIX AF_INET AF_INET6" ]; then
+  printf '%s\n' "OFFLINE_GATE_EFFECTIVE_PROPERTIES_OK"
+else
+  printf 'Offline gate effective properties mismatch: PrivateNetwork=%s User=%s RestrictAddressFamilies=%s\n' \
+    "$OfflineGatePrivateNetwork" "$OfflineGateUser" "$OfflineGateAddressFamilies" >&2
+  OfflineGatePropertyStatus=1
+fi
 set -e
 
 drain_gate_unit "$OfflineGateUnit"
@@ -10953,6 +10997,7 @@ kill_gate_processes "offline candidate validation"
 assert_canonical_candidate
 cleanup_nginx_gate_dir
 [ "$GateStatus" = "0" ] || exit "$GateStatus"
+[ "$OfflineGatePropertyStatus" = "0" ] || exit "$OfflineGatePropertyStatus"
 CANDIDATE_VALIDATION_SHA256_AFTER="$(python3 "$LockDir/candidate_digest.py" "$CandidateDir")"
 test "$CANDIDATE_VALIDATION_SHA256_AFTER" = "$CANDIDATE_VALIDATION_SHA256_BEFORE"
 printf 'CANDIDATE_READONLY_RECHECK_OK=%s\n' "$CANDIDATE_VALIDATION_SHA256_AFTER"
