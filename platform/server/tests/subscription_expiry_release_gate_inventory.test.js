@@ -95,13 +95,15 @@ test('deployment inventory ships the exact v28 implementation and focused releas
   );
   assert.match(deploy, /--test-name-pattern="subscription expiry"[\s\\]+server\/tests\/influencer_workflow\.test\.js/);
   assert.match(deploy, /one live session observes\|unavailable entitlement policy/);
-  for (const testPath of [
-    'server/tests/deployment_source_contract.test.js',
-    'server/tests/deployment_source_trust.test.js',
-    'server/tests/knowledge_tenant_release_gate_inventory.test.js'
-  ]) {
-    assert.match(deploy, new RegExp(testPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
-  }
+  assert.match(
+    deploy,
+    /--test-name-pattern="trusted production source and deployed shell scripts use LF line endings"[\s\\]+server\/tests\/deployment_source_contract\.test\.js/
+  );
+  assert.match(
+    deploy,
+    /--test-name-pattern="trusted source manifest pins the sanitizer closure\|[^"\r\n]+deploy pins trusted sanitizer closure"[\s\\]+server\/tests\/deployment_source_trust\.test\.js/
+  );
+  assert.match(deploy, /node --test server\/tests\/knowledge_tenant_release_gate_inventory\.test\.js/);
 
   const runtimeConfigPath = path.join(serverRoot, 'config', 'runtime_config.js');
   const runtimeConfigHash = sha256File(runtimeConfigPath);
