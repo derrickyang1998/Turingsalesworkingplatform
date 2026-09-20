@@ -67,6 +67,15 @@ test('schema, sanitizer, and trusted source registries terminate at subscription
   }
 });
 
+test('current trusted candidate files are LF-normalized byte-for-byte', () => {
+  const manifestPath = path.join(serverRoot, 'scripts', 'trusted_production_source_manifest.json');
+  const trusted = trustedGate.loadTrustedManifest(manifestPath);
+  for (const entry of trusted.files) {
+    const bytes = fs.readFileSync(path.join(platformRoot, ...entry.path.split('/')));
+    assert.equal(bytes.includes(13), false, `${entry.path} must contain LF bytes only`);
+  }
+});
+
 test('deployment inventory ships the exact v28 implementation and focused release tests', () => {
   const deploy = fs.readFileSync(path.join(repoRoot, 'platform', 'deploy_v8.ps1'), 'utf8');
   const files = powerShellArrayEntries(deploy, 'FILES');
@@ -95,10 +104,6 @@ test('deployment inventory ships the exact v28 implementation and focused releas
   );
   assert.match(deploy, /--test-name-pattern="subscription expiry"[\s\\]+server\/tests\/influencer_workflow\.test\.js/);
   assert.match(deploy, /one live session observes\|unavailable entitlement policy/);
-  assert.match(
-    deploy,
-    /--test-name-pattern="trusted production source and deployed shell scripts use LF line endings"[\s\\]+server\/tests\/deployment_source_contract\.test\.js/
-  );
   assert.match(
     deploy,
     /--test-name-pattern="trusted source manifest pins the sanitizer closure\|[^"\r\n]+deploy pins trusted sanitizer closure"[\s\\]+server\/tests\/deployment_source_trust\.test\.js/

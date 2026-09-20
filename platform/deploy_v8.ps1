@@ -10865,8 +10865,6 @@ NODE_ENV=test TM_DISABLE_DOTENV=1 node server/scripts/verify_phase4_one_request_
 NODE_ENV=test TM_DISABLE_DOTENV=1 node --test server/tests/verify_phase4_one_request_replay.test.js
 node --test server/tests/release_replay_gate.test.js
 node --test server/tests/module_action_permission_service.test.js
-node --test --test-name-pattern="trusted production source and deployed shell scripts use LF line endings" \
-  server/tests/deployment_source_contract.test.js
 node --test --test-name-pattern="trusted source manifest pins the sanitizer closure|trusted source manifest pins the complete parser control plane|trusted source manifest independently pins the migration cleanup control plane|deploy pins trusted sanitizer closure" \
   server/tests/deployment_source_trust.test.js
 node --test server/tests/knowledge_tenant_release_gate_inventory.test.js
