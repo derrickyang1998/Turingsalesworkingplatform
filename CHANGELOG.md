@@ -1,5 +1,27 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.9.21-ai-token-quota-admission (Production Deployed, 2026-09-20) - AI Token 配额准入执行
+
+### 交付与范围 / Delivery And Scope
+- 新增统一 `ai_quota_service`，所有 DeepSeek 生成路径在调用 provider 前按实时用户、角色、活动组织和可信 `token_usage` 账本执行服务端配额准入；平台管理员明确豁免，普通用户配额为 0 时返回 `429 AI_QUOTA_DISABLED`，已耗尽时失败关闭。
+- AI 对话、方案/PPT、品牌策略、绩效手工分析及内容分析统一使用可信 provider 用量记账；成功响应缺失、为负、非整数或总量不一致时返回 `AI_USAGE_ACCOUNTING_FAILED`，不再把不可验证用量静默记为 0。链接会话的幂等重放仍在准入前返回既有结果。
+- 新增 `PUT /api/admin/users/:userId/ai-quota` 与管理控制室配额编辑；更新为原子操作并写入审计，界面展示已用、上限、剩余和状态，空输入会被拒绝而不会误转成 0。
+- 本版复用 schema v26 和既有 `users.api_quota`，计量周期明确为 `legacy_lifetime`。不宣称已完成套餐目录、模块权益、订阅到期、组织月度共享配额、账单或持久并发预留；这些继续按独立版本交付。
+- 最新产品壳层、CRM、M3/M4、AI/知识库、方案、报告及冻结 PPT 均保持不变；`ppt.js` SHA-256 继续为 `f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e`。
+
+### 轻量验证与独立审查 / Lightweight Verification And Independent Review
+- 配额候选核心集 `94/94`、最终独立复审集 `137/137`、可信清单 `129/129`、清单测试 `8/8`、变更 JavaScript 语法 `19/19`、本地发布预检及 PowerShell 解析均通过；受控候选通过 Chromium 冒烟 `2/2`。
+- 独立审查首轮发现成功响应用量缺失/不一致可能绕过计费、绩效路由错误码未保留、空配额输入可能禁用用户、候选门禁未覆盖核心用例及更新状态非实时五项问题；逐项补充失败用例并修复后，复审结论为 `APPROVE`，无开放 Critical/Important 问题。
+- 继续执行“一功能一上线”：本轮只跑受影响测试、必要安全/清单/语法检查和一次独立审查；未因普通功能重复无关重型套件。阶段收口或 schema、鉴权、租户权威、共享基础设施、真实外部写入等高风险边界仍触发扩展门禁。
+
+### 生产状态 / Production Status
+- 实现提交 `f1f9c98e0a4ffa85ac875c1ead66e80cb55f1696` 已在生产变更前推送 GitHub；正式运行 `4e9eaf47f8404033ba3809cf34bcdf94` 返回 `DEPLOY_OK`，可信源码 SHA-256 为 `502866722dced0f153497b69a4ad608012864fa5f67f3a2b78b12cb2d86f367e`，候选树 SHA-256 为 `48e94ed8884e8bbf3a623e96d7f924243be7676187ae086795873c3d11a59c42`。
+- 可验证备份为 `/root/turingmarket/backups/v060-crm-sales-workspace-20260920-171336`；`backup-ready.json` 绑定数据库摘要与 352 项清单，清单 SHA-256 为 `50fde997d0b719d2482424d06fd81a9e46abaad84ca4427930212549b8346e29`，数据库 SHA-256 为 `c1b5fde52e6474c81b20b6fce51ca3d311fd387c651ad6f2ba4d23742df87a7b`。
+- 公网健康 `200` 且解析器 ready，PM2 在线且重启次数 0，schema v26、SQLite `quick_check=ok`、外键异常 0。线上完成管理员配额 `50000 -> 50001 -> 50000` 原子往返、目录投影刷新和两条审计验证；临时普通用户配额为 0 时 `/api/ai/chat` 返回 `429 AI_QUOTA_DISABLED`，且未创建对话、用量或 provider 调用，验收数据已清理。
+
+### 后续边界 / Next Boundary
+- 下一有界版本继续 Phase 8，优先拆分套餐目录与模块权益；订阅到期、组织月度共享配额及持久并发预留分别交付。当前并发请求可能在无持久预留时产生小幅软超额，该残余风险已记录但不扩大本版范围。
+
 ## v0.9.20-token-usage-tenant-ownership (Production Deployed, 2026-09-19) - Token 用量租户归属
 
 ### 交付与范围 / Delivery And Scope

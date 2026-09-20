@@ -1,0 +1,464 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TuringMarket 开发进度</title>
+  <link rel="icon" href="data:,">
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #121826;
+      --muted: #667085;
+      --line: #d9dee8;
+      --panel: #ffffff;
+      --canvas: #f4f6f9;
+      --blue: #2868d7;
+      --green: #117a55;
+      --green-soft: #e8f5ef;
+      --amber: #9a5b08;
+      --amber-soft: #fff2d8;
+      --slate: #344054;
+      --soft: #eef2f7;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-width: 320px;
+      color: var(--ink);
+      background: var(--canvas);
+      font-family: Inter, "Microsoft YaHei", "PingFang SC", Arial, sans-serif;
+      font-size: 14px;
+      line-height: 1.55;
+    }
+
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.97);
+    }
+
+    .bar,
+    main {
+      width: min(1420px, calc(100% - 40px));
+      margin: 0 auto;
+    }
+
+    .bar {
+      min-height: 72px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+    }
+
+    .brand-mark {
+      width: 34px;
+      height: 34px;
+      display: grid;
+      place-items: center;
+      flex: 0 0 auto;
+      border-radius: 7px;
+      color: #fff;
+      background: var(--ink);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    h1,
+    h2,
+    p { margin: 0; }
+
+    h1 {
+      font-size: 18px;
+      line-height: 1.25;
+    }
+
+    .subtitle,
+    .meta,
+    .hint { color: var(--muted); }
+
+    .status-line {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      white-space: nowrap;
+      font-weight: 700;
+      color: var(--green);
+    }
+
+    .status-dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 0 4px var(--green-soft);
+    }
+
+    main {
+      display: grid;
+      gap: 18px;
+      padding: 24px 0 48px;
+    }
+
+    .overview {
+      display: grid;
+      grid-template-columns: minmax(0, 1.55fr) minmax(300px, 0.8fr);
+      gap: 18px;
+    }
+
+    .band,
+    .panel,
+    .metric,
+    .release,
+    .phase {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+    }
+
+    .band,
+    .panel { padding: 22px; }
+
+    .eyebrow {
+      color: var(--blue);
+      font-size: 12px;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+
+    .release-title {
+      margin-top: 7px;
+      font-size: clamp(24px, 3vw, 38px);
+      line-height: 1.18;
+    }
+
+    .release-copy {
+      max-width: 880px;
+      margin-top: 10px;
+      color: var(--slate);
+      font-size: 15px;
+    }
+
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 18px;
+    }
+
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      min-height: 30px;
+      padding: 4px 10px;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      color: var(--slate);
+      background: #fff;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .chip.good {
+      border-color: #a7d7c3;
+      color: var(--green);
+      background: var(--green-soft);
+    }
+
+    .focus h2,
+    .section-head h2 {
+      font-size: 17px;
+      line-height: 1.3;
+    }
+
+    .focus-list {
+      display: grid;
+      gap: 12px;
+      margin-top: 16px;
+    }
+
+    .focus-row {
+      display: grid;
+      grid-template-columns: 28px minmax(0, 1fr);
+      gap: 10px;
+      align-items: start;
+    }
+
+    .index {
+      width: 28px;
+      height: 28px;
+      display: grid;
+      place-items: center;
+      border-radius: 6px;
+      color: var(--blue);
+      background: #edf3ff;
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .metric { padding: 16px; }
+
+    .metric strong {
+      display: block;
+      margin-top: 5px;
+      font-size: 22px;
+      line-height: 1.2;
+    }
+
+    .section-head {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+
+    .phase-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .phase {
+      display: grid;
+      grid-template-columns: 72px minmax(0, 1fr) auto;
+      gap: 14px;
+      align-items: center;
+      padding: 14px;
+    }
+
+    .phase-code {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .phase-name { font-weight: 800; }
+
+    .badge {
+      min-width: 70px;
+      padding: 5px 8px;
+      border-radius: 6px;
+      text-align: center;
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .badge.live {
+      color: var(--green);
+      background: var(--green-soft);
+    }
+
+    .badge.active {
+      color: #174ea6;
+      background: #e8f0fe;
+    }
+
+    .badge.queued {
+      color: var(--amber);
+      background: var(--amber-soft);
+    }
+
+    .release-list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .release {
+      display: grid;
+      grid-template-columns: minmax(210px, 0.55fr) minmax(0, 1fr) auto;
+      gap: 16px;
+      align-items: center;
+      padding: 14px 16px;
+    }
+
+    .release code {
+      color: var(--blue);
+      font-family: Consolas, "SFMono-Regular", monospace;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .pipeline {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: 16px;
+    }
+
+    .step {
+      position: relative;
+      min-height: 84px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-top: 3px solid var(--blue);
+      border-radius: 7px;
+      background: #fff;
+    }
+
+    .step b { display: block; margin-bottom: 4px; }
+
+    .notice {
+      margin-top: 14px;
+      padding: 12px 14px;
+      border-left: 4px solid var(--amber);
+      background: var(--amber-soft);
+      color: #6b4308;
+    }
+
+    footer {
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      padding-top: 4px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    @media (max-width: 920px) {
+      .overview,
+      .phase-grid { grid-template-columns: 1fr; }
+      .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .pipeline { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .release { grid-template-columns: 1fr; gap: 6px; }
+      .release .badge { justify-self: start; }
+    }
+
+    @media (max-width: 560px) {
+      .bar,
+      main { width: min(100% - 24px, 1420px); }
+      .bar { min-height: 86px; align-items: flex-start; padding: 14px 0; }
+      .status-line { white-space: normal; justify-content: flex-end; text-align: right; }
+      .metrics,
+      .pipeline { grid-template-columns: 1fr; }
+      .phase { grid-template-columns: 58px minmax(0, 1fr); }
+      .phase .badge { grid-column: 2; justify-self: start; }
+      .band,
+      .panel { padding: 16px; }
+      footer { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="bar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">TM</div>
+        <div>
+          <h1>TuringMarket 开发进度</h1>
+          <p class="subtitle">Development delivery control board</p>
+        </div>
+      </div>
+      <div class="status-line"><span class="status-dot" aria-hidden="true"></span>生产环境已在线 / Production online</div>
+    </div>
+  </header>
+
+  <main>
+    <section class="overview" aria-label="当前版本概览">
+      <div class="band">
+        <p class="eyebrow">Current production release · 当前生产版本</p>
+        <h2 class="release-title">v0.9.21 · AI Token 配额准入</h2>
+        <p class="release-copy">所有可信 DeepSeek 路径已在服务端执行实时配额准入和可信用量记账；管理员可查看与审计配额状态。最新 CRM、网红、知识库、方案、报告和 PPT 界面保持不变。</p>
+        <div class="chips">
+          <span class="chip good">2026-09-20 已上线</span>
+          <span class="chip">Schema v26</span>
+          <span class="chip">PM2 online · restart 0</span>
+          <span class="chip">Independent review: APPROVE</span>
+          <span class="chip">Rollback backup verified</span>
+        </div>
+      </div>
+
+      <aside class="panel focus" aria-label="当前开发焦点">
+        <h2>下一开发焦点 / Next</h2>
+        <div class="focus-list">
+          <div class="focus-row"><span class="index">1</span><div><b>套餐目录与模块权益</b><p class="hint">Plan catalog and module entitlement contract</p></div></div>
+          <div class="focus-row"><span class="index">2</span><div><b>订阅到期控制</b><p class="hint">Server-enforced subscription expiry</p></div></div>
+          <div class="focus-row"><span class="index">3</span><div><b>组织月度共享配额</b><p class="hint">Monthly organization quota, then concurrency reservation</p></div></div>
+        </div>
+      </aside>
+    </section>
+
+    <section class="metrics" aria-label="发布数据">
+      <div class="metric"><span class="meta">候选核心测试</span><strong>94 / 94</strong><span class="hint">Focused candidate checks</span></div>
+      <div class="metric"><span class="meta">独立终审复跑</span><strong>137 / 137</strong><span class="hint">Reviewer verification</span></div>
+      <div class="metric"><span class="meta">可信源码清单</span><strong>129 / 129</strong><span class="hint">Trusted source inventory</span></div>
+      <div class="metric"><span class="meta">线上定向验收</span><strong>PASS</strong><span class="hint">Quota update + typed 429</span></div>
+    </section>
+
+    <section class="panel" aria-labelledby="roadmap-title">
+      <div class="section-head">
+        <div><h2 id="roadmap-title">路线图位置 / Roadmap position</h2><p class="hint">已验收能力继续增量演进，不把阶段号当作虚假完成百分比。</p></div>
+        <span class="chip good">Phase 8 active</span>
+      </div>
+      <div class="phase-grid">
+        <div class="phase"><span class="phase-code">Phase 1-3</span><div><div class="phase-name">安全、基线与产品壳层</div><div class="hint">Security, regression guardrails, UX shell</div></div><span class="badge live">生产基线</span></div>
+        <div class="phase"><span class="phase-code">Phase 4-5</span><div><div class="phase-name">组织主链与 CRM 工作台</div><div class="hint">Organization spine and CRM workspace</div></div><span class="badge live">生产基线</span></div>
+        <div class="phase"><span class="phase-code">Phase 6</span><div><div class="phase-name">AI、知识库、方案与 PPT</div><div class="hint">Core loop live; continuing bounded upgrades</div></div><span class="badge live">已上线</span></div>
+        <div class="phase"><span class="phase-code">Phase 7/7B</span><div><div class="phase-name">网红执行与内容效果数据</div><div class="hint">Execution and performance intelligence slices</div></div><span class="badge live">已上线</span></div>
+        <div class="phase"><span class="phase-code">Phase 8</span><div><div class="phase-name">管理、权益与多租户治理</div><div class="hint">Current: entitlements, quota, audit, tenant scope</div></div><span class="badge active">进行中</span></div>
+        <div class="phase"><span class="phase-code">Phase 9-10</span><div><div class="phase-name">销售增长候选与 V1 收口</div><div class="hint">Per-feature approval, then production hardening</div></div><span class="badge queued">待排期</span></div>
+      </div>
+    </section>
+
+    <section class="panel" aria-labelledby="release-title">
+      <div class="section-head">
+        <div><h2 id="release-title">近期生产版本 / Recent releases</h2><p class="hint">每个条目均独立备份、上线并做线上验收。</p></div>
+      </div>
+      <div class="release-list">
+        <div class="release"><code>v0.9.21 · 2026-09-20</code><div><b>AI Token 配额准入</b><p class="hint">Server admission, trusted accounting, audited Admin quota controls</p></div><span class="badge live">ONLINE</span></div>
+        <div class="release"><code>v0.9.20 · 2026-09-19</code><div><b>Token 用量租户归属</b><p class="hint">Tenant-owned immutable usage ledger</p></div><span class="badge live">ONLINE</span></div>
+        <div class="release"><code>v0.9.19 · 2026-09-19</code><div><b>AI 对话租户归属</b><p class="hint">Organization-scoped conversations and global Admin audit</p></div><span class="badge live">ONLINE</span></div>
+        <div class="release"><code>v0.9.18 · 2026-09-19</code><div><b>知识库租户隔离</b><p class="hint">Knowledge, RAG, proposal and PPT context isolation</p></div><span class="badge live">ONLINE</span></div>
+      </div>
+    </section>
+
+    <section class="panel" aria-labelledby="cadence-title">
+      <div class="section-head">
+        <div><h2 id="cadence-title">加速后的发布节奏 / Accelerated cadence</h2><p class="hint">普通功能不再等待无关的繁重全量测试。</p></div>
+      </div>
+      <div class="pipeline">
+        <div class="step"><b>1 · 单功能</b><span class="hint">One useful slice</span></div>
+        <div class="step"><b>2 · 定向测试</b><span class="hint">Affected tests only</span></div>
+        <div class="step"><b>3 · 独立审查</b><span class="hint">One reviewer approval</span></div>
+        <div class="step"><b>4 · 验证备份</b><span class="hint">Verified rollback point</span></div>
+        <div class="step"><b>5 · 立即上线</b><span class="hint">Deploy in same round</span></div>
+        <div class="step"><b>6 · 线上冒烟</b><span class="hint">Health, login, feature</span></div>
+      </div>
+      <div class="notice"><b>重型测试触发条件：</b>阶段收口，或涉及 schema、认证/授权、租户权威、共享基础设施、真实外部写入等高风险边界。失败的安全门禁、备份和线上验收仍然阻断发布。</div>
+    </section>
+
+    <footer>
+      <span>Production: http://8.163.129.160/</span>
+      <span>记录更新：2026-09-20 · 浏览器打开时间：<span id="opened-at">--</span></span>
+    </footer>
+  </main>
+
+  <script>
+    const openedAt = document.getElementById('opened-at');
+    if (openedAt) {
+      openedAt.textContent = new Intl.DateTimeFormat('zh-CN', {
+        dateStyle: 'medium',
+        timeStyle: 'short'
+      }).format(new Date());
+    }
+  </script>
+</body>
+</html>
