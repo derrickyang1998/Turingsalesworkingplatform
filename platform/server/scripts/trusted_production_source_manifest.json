@@ -315,7 +315,7 @@
     },
     {
       "path": "server/server.js",
-      "sha256": "944f60fcb4edc2603010fbcd9797ee74f5f6ed46843043cbc6247607a0ab621e"
+      "sha256": "adec2924406158660098e38c7acf0b5d937d7e50dd40fe9333437c6ce057a21d"
     },
     {
       "path": "server/workflow_engine.js",
@@ -555,7 +555,7 @@
     },
     {
       "path": "server/systemd/turingmarket-parser.manifest.json",
-      "sha256": "9e5012f229a20957825740ec7a0871a3ccc0f039764dd1885c2eddf21888fef5"
+      "sha256": "88746a05a67f29742af6dc6cb923c86935a40deb9289c16f7cd475ee2357d4c1"
     },
     {
       "path": "server/systemd/turingmarket-parser.slice",
