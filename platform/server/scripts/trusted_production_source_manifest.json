@@ -12,11 +12,11 @@
     "parserCapacityPlanner": "server/scripts/check_cutover_capacity.py",
     "publicGuard": "server/scripts/public_release_guard.sh",
     "parserSelfTest": "server/scripts/upload_sandbox_self_test.js",
+    "aiConcurrencyAcceptance": "server/scripts/verify_ai_concurrency_acceptance.js",
     "parserVerifier": "server/scripts/trusted_parser_runtime_verifier.js",
     "parserManifest": "server/systemd/turingmarket-parser.manifest.json",
     "parserServiceUnit": "server/systemd/turingmarket-parser@.service",
-    "parserSliceUnit": "server/systemd/turingmarket-parser.slice",
-    "aiConcurrencyAcceptance": "server/scripts/verify_ai_concurrency_acceptance.js"
+    "parserSliceUnit": "server/systemd/turingmarket-parser.slice"
   },
   "migrationContract": {
     "acceptedSourceVersions": [

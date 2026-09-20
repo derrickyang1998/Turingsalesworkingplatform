@@ -562,6 +562,11 @@ test('trusted source manifest pins the complete parser control plane and deploy 
     parserSliceUnit: 'server/systemd/turingmarket-parser.slice'
   };
   assert.deepEqual(manifest.entrypoints, expectedEntrypoints);
+  assert.equal(
+    JSON.stringify(manifest.entrypoints),
+    JSON.stringify(expectedEntrypoints),
+    'trusted source entrypoint order must match the canonical gate contract'
+  );
 
   const records = new Map(manifest.files.map((entry) => [entry.path, entry.sha256]));
   for (const relativePath of [
