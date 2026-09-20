@@ -674,6 +674,40 @@ function apiResponseFor(request, fixture, recorder) {
   if (method === 'POST' && apiPath.startsWith('/admin/knowledge/')) return ok({ success: true, imported: 1 });
 
   if (method === 'GET' && apiPath === '/admin/overview') return ok({ stats: fixture.admin.overview });
+  if (method === 'GET' && apiPath === '/admin/plan-catalog') {
+    return ok({
+      catalog: {
+        catalog_version: 1,
+        plans: [
+          {
+            code: 'crm_core',
+            name_zh: 'CRM 核心版',
+            name_en: 'CRM Core',
+            catalog_version: 1,
+            display_order: 10,
+            modules: ['crm.contact', 'crm.customer', 'crm.opportunity', 'crm.task']
+          },
+          {
+            code: 'legacy_full',
+            name_zh: '完整兼容版',
+            name_en: 'Legacy Full',
+            catalog_version: 1,
+            display_order: 20,
+            modules: [
+              'campaign.customer_report',
+              'campaign.performance',
+              'crm.contact',
+              'crm.customer',
+              'crm.opportunity',
+              'crm.task',
+              'influencer.data'
+            ]
+          }
+        ]
+      },
+      request_id: 'fixture-plan-catalog'
+    });
+  }
   if (method === 'GET' && ['/admin/organizations', '/organization-governance/organizations'].includes(apiPath)) {
     return ok({
       organizations: [{
