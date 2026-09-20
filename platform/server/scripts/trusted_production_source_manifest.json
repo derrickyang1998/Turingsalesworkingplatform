@@ -41,9 +41,10 @@
       24,
       25,
       26,
-      27
+      27,
+      28
     ],
-    "targetVersion": 27,
+    "targetVersion": 28,
     "runs": 2,
     "deterministicAppendTables": [
       "activity_log"
@@ -159,6 +160,10 @@
       "sha256": "71c09953a33f1ec846e08e97735b7473f357f3fc3f6e47f43f69d006f392e837"
     },
     {
+      "path": "server/migrations/028_subscription_expiry.js",
+      "sha256": "fd11df3b4cb16ea883c0b90d48c4ce340a9ece47321192f711e75f9282aa6d14"
+    },
+    {
       "path": "server/migrations/baselines/legacy_v1.js",
       "sha256": "13e631ca7e2aef57e39f7dbc38e6f03e2d5323a11f38c6ce31239d793911812c"
     },
@@ -180,7 +185,7 @@
     },
     {
       "path": "server/db.js",
-      "sha256": "d4917ef4e904ac972d88b9e062c50aac3e5d654160d0ee059c2e1a4dc7b7f58c"
+      "sha256": "f66fe2cd3a1cbc952c51d72222df0be2c87eec89ce9227621f9afa62051e9bf8"
     },
     {
       "path": "server/package-lock.json",
@@ -260,11 +265,11 @@
     },
     {
       "path": "server/scripts/sanitization_manifest.json",
-      "sha256": "956c92f19c3331c8f4d6b1f13fd6196da56a1ba6405e3489d42e4ce83071fb19"
+      "sha256": "8e532cf818078adb7c07c676c251377954ed4b9bda399e0134e4de710daf046f"
     },
     {
       "path": "server/scripts/sanitize_production_shape.js",
-      "sha256": "ea9e20dc52e59be15ef34f00026116510294dd6f05d75961f3da3576a557a8e6"
+      "sha256": "ee795ed6014b25f3d365b80de2f30d467c22ba01b1dfa8ae4f498e86fd87875f"
     },
     {
       "path": "server/scripts/trusted_parser_runtime_verifier.js",
@@ -276,11 +281,11 @@
     },
     {
       "path": "server/scripts/verify_campaign_migration_gate.js",
-      "sha256": "58dc3a9af61e183904f5bec74ec453f460e6f054c97c578fcb0d88082c5e2a26"
+      "sha256": "678613634282321e00a057d626a6ac4d7d6a550293c44268c3dd16c1015dd628"
     },
     {
       "path": "server/routes.js",
-      "sha256": "746c3f7592a4c9d783df35a2bc01e7bfa541bfd3b1474a0fa17aba2181d27838"
+      "sha256": "af16c8052880f7c1ccdf875ed2309637f656b52fe8bec3c827501cc9f246590c"
     },
     {
       "path": "server/routes_admin_ai_quota.js",
@@ -300,7 +305,7 @@
     },
     {
       "path": "server/routes_customers.js",
-      "sha256": "d2e2f90cea5d550b092401a4e2f3b59db79d41c032a8106b402f1f2737305a8d"
+      "sha256": "50570d6bed0be2e01f6391220c02d07b50222ba7623a36ba527d1b634d4157b8"
     },
     {
       "path": "server/routes_feishu.js",
@@ -315,8 +320,12 @@
       "sha256": "35cde921b074fdadeb318058989d291479cd4c6cf5f092bcad8e28ed31937ea3"
     },
     {
+      "path": "server/routes_subscription_expiry.js",
+      "sha256": "a47acbd607ff17c9eb8c8e4b5a2085234125e921af638d0c15cef0c07b13c812"
+    },
+    {
       "path": "server/routes_performance.js",
-      "sha256": "bf8afcbd7d378f6220a1c49e212c5e2fff11ac45524e42845591428de4c75b6a"
+      "sha256": "3d45e2e35e90b23939a603df4662068983afb954870e094ff34b8bcfe5bdb229"
     },
     {
       "path": "server/routes_workflow.js",
@@ -324,7 +333,7 @@
     },
     {
       "path": "server/server.js",
-      "sha256": "000308aa2f32bebcd58ccf13f764b206856cd4a021dc54c97557af49903b5e03"
+      "sha256": "128b463bed1e52eada204e68307646606fb2883f1d26f8181158d30d9128013e"
     },
     {
       "path": "server/workflow_engine.js",
@@ -428,7 +437,7 @@
     },
     {
       "path": "server/services/influencer_data_import_permission_service.js",
-      "sha256": "0fd0c8c76dc42c44dc4cf93e211d0db64634bbc0aaae083a43500921980c5699"
+      "sha256": "fc3997b7370c57038558078e940f14f560c0ec7e257211e623802ee83042ee4e"
     },
     {
       "path": "server/services/influencer_saved_view_service.js",
@@ -456,7 +465,7 @@
     },
     {
       "path": "server/services/module_action_permission_service.js",
-      "sha256": "c647f061ea09312d732607da11d16fb39bbd66e3d22418d8d426c7cafc035554"
+      "sha256": "b1620464aa47fb80264598be70b47346dc7dd42848933fe547d985a7f003a40f"
     },
     {
       "path": "server/services/obsidian_ingest_service.js",
@@ -468,7 +477,7 @@
     },
     {
       "path": "server/services/organization_governance_service.js",
-      "sha256": "5fe4917a5c4c387020e979d21ad4e01631777c2f4874b5c04891f4325cc98b6f"
+      "sha256": "04a870f6b238498f3294f6bc3718d0b7fb23446db77b1089e354178983347f2a"
     },
     {
       "path": "server/services/organization_methodology_service.js",
@@ -477,6 +486,10 @@
     {
       "path": "server/services/plan_entitlement_service.js",
       "sha256": "352b5843dc8be403760e13dc1c76e9d87fc6052454ae2f170333e63bca8ad18e"
+    },
+    {
+      "path": "server/services/subscription_expiry_service.js",
+      "sha256": "91fb028fd0fc205b452565a50b000059207becea9e26d7d2077119840a1c9eaa"
     },
     {
       "path": "server/services/parser_startup_service.js",

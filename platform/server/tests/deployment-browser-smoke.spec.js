@@ -62,6 +62,8 @@ test('deployment browser smoke restores authenticated CRM, influencer, and admin
     if (route === '/admin?tab=organizations') {
       await expect(page.locator('#admin-tab-organizations')).toBeVisible();
       await expect(page.locator('#ad_organizationList')).toContainText('Fixture Organization');
+      await expect(page.locator('#ad_organizationSubscription_1')).toBeVisible();
+      await expect(page.locator('#ad_organizationList')).toContainText('永久');
     }
     if (route === '/admin?tab=users') {
       await expect(page.locator('#admin-tab-users')).toBeVisible();
@@ -70,5 +72,32 @@ test('deployment browser smoke restores authenticated CRM, influencer, and admin
       await expect(page.locator('#ad_userTableBody')).toContainText('Fixture Team');
     }
     await waitForBaselineReady(page);
+  }
+});
+
+test('subscription expiry control remains usable at desktop and mobile viewports', async ({ page, baseURL }) => {
+  await installBaselineBrowserControls(page, { fixture });
+  await installFixtureApi(page, {
+    fixture,
+    expectedOrigin: new URL(baseURL).origin
+  });
+  await installBaselineAuthState(page, fixture.auth.admin);
+
+  for (const viewport of [
+    { width: 1440, height: 900 },
+    { width: 390, height: 844 }
+  ]) {
+    await page.setViewportSize(viewport);
+    await page.goto('/admin?tab=organizations', { waitUntil: 'domcontentloaded' });
+    await waitForBaselineReady(page);
+    const input = page.locator('#ad_organizationSubscription_1');
+    await expect(input).toBeVisible();
+    await expect(input).toHaveAttribute('step', '1');
+    await expect(page.locator('#ad_organizationList')).toContainText('永久');
+    const overflow = await page.evaluate(() => ({
+      viewport: document.documentElement.clientWidth,
+      document: document.documentElement.scrollWidth
+    }));
+    expect(overflow.document).toBeLessThanOrEqual(overflow.viewport + 1);
   }
 });

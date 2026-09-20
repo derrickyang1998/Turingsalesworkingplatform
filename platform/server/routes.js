@@ -347,11 +347,14 @@ function influencerExportAuditEvent(request, decision, outcome, recordCount) {
   return event;
 }
 
-function sendInfluencerExportError(request, response, status, code, message) {
+function sendInfluencerExportError(request, response, status, code, message, reasonCode) {
   return response.status(status).json({
     error: message,
     code,
-    request_id: influencerExportRequestId(request)
+    request_id: influencerExportRequestId(request),
+    ...(['SUBSCRIPTION_EXPIRED', 'ENTITLEMENT_POLICY_UNAVAILABLE', 'AUTHORITATIVE_FACTS_UNAVAILABLE'].includes(reasonCode)
+      ? { reason_code: reasonCode }
+      : {})
   });
 }
 
@@ -385,9 +388,10 @@ function requireInfluencerDataExport(request, response, next) {
   return sendInfluencerExportError(
     request,
     response,
-    403,
+    ['ENTITLEMENT_POLICY_UNAVAILABLE', 'AUTHORITATIVE_FACTS_UNAVAILABLE'].includes(decision && decision.code) ? 503 : 403,
     'INFLUENCER_EXPORT_FORBIDDEN',
-    'Influencer data export is forbidden.'
+    'Influencer data export is forbidden.',
+    decision && decision.code
   );
 }
 
@@ -397,7 +401,10 @@ function sendInfluencerImportError(request, response, error) {
   return response.status(statusCode).json({
     error: controlled && error.message ? error.message : 'Influencer import failed.',
     code: controlled ? error.code : 'INFLUENCER_IMPORT_FAILED',
-    request_id: error.requestId || influencerDataImportPermission.requestId(request)
+    request_id: error.requestId || influencerDataImportPermission.requestId(request),
+    ...(['SUBSCRIPTION_EXPIRED', 'ENTITLEMENT_POLICY_UNAVAILABLE', 'AUTHORITATIVE_FACTS_UNAVAILABLE'].includes(error.reasonCode)
+      ? { reason_code: error.reasonCode }
+      : {})
   });
 }
 
@@ -438,9 +445,10 @@ function requireInfluencerDataImport(importKind) {
       response,
       influencerDataImportPermission.error(
         request,
-        403,
+        ['ENTITLEMENT_POLICY_UNAVAILABLE', 'AUTHORITATIVE_FACTS_UNAVAILABLE'].includes(decision && decision.code) ? 503 : 403,
         'INFLUENCER_IMPORT_FORBIDDEN',
-        'Influencer data import is forbidden.'
+        'Influencer data import is forbidden.',
+        decision && decision.code
       )
     );
   };

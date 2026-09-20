@@ -1045,6 +1045,54 @@ test('influencer create and JSON import require the named import permission and 
   db.close();
 });
 
+test('subscription expiry blocks influencer import and export before rows or bytes are produced', async () => {
+  const db = freshDb();
+  const audits = [];
+  const routes = mountRoutes(db, {
+    moduleActionPermissionService: {
+      authorize(input) {
+        return {
+          allowed: false,
+          code: 'SUBSCRIPTION_EXPIRED',
+          principal: { user_id: input.principal.id, organization_id: input.organizationId, roles: ['member'] }
+        };
+      }
+    },
+    influencerDataImportAudit(event) { audits.push(event); },
+    influencerDataExportAudit(event) { audits.push(event); }
+  });
+  const before = db.prepare('SELECT COUNT(*) AS count FROM influencers').get().count;
+  const cases = [
+    ['POST /api/influencers', {
+      kol_handle: '@expired_manual', profile_link: 'https://example.com/expired-manual'
+    }, 'INFLUENCER_IMPORT_FORBIDDEN'],
+    ['POST /api/influencers/import', {
+      rows: [{ '网红频道名称': '@expired_json' }], batch_id: 'expired-json'
+    }, 'INFLUENCER_IMPORT_FORBIDDEN'],
+    ['POST /api/influencers/export', {
+      mode: 'all'
+    }, 'INFLUENCER_EXPORT_FORBIDDEN']
+  ];
+  for (const [route, body, code] of cases) {
+    const result = await invoke(routes, route, {
+      body,
+      authContext: { organization: { id: 10 } },
+      headers: { 'x-request-id': `expired-${code.toLowerCase()}` }
+    });
+    assert.equal(result.statusCode, 403, route);
+    assert.equal(result.payload.code, code, route);
+    assert.equal(result.payload.reason_code, 'SUBSCRIPTION_EXPIRED', route);
+    assert.equal(result.body, undefined, route);
+  }
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM influencers').get().count, before);
+  assert.deepEqual(audits.map((event) => event.reason_code), [
+    'SUBSCRIPTION_EXPIRED',
+    'SUBSCRIPTION_EXPIRED',
+    'SUBSCRIPTION_EXPIRED'
+  ]);
+  db.close();
+});
+
 test('influencer import success audit commits atomically with rows and knowledge', async () => {
   const db = freshDb();
   const completedAudits = [];

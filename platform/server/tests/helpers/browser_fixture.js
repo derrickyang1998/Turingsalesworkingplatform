@@ -722,6 +722,33 @@ function apiResponseFor(request, fixture, recorder) {
           user_id: fixture.auth.admin.user.id,
           username: fixture.auth.admin.user.username,
           display_name: fixture.auth.admin.user.display_name
+        },
+        plan: {
+          plan_code: 'legacy_full',
+          name_zh: '完整兼容版',
+          name_en: 'Legacy Full',
+          catalog_version: 1,
+          assignment_version: 1,
+          modules: [
+            'campaign.customer_report',
+            'campaign.performance',
+            'crm.contact',
+            'crm.customer',
+            'crm.opportunity',
+            'crm.task',
+            'influencer.data'
+          ]
+        },
+        subscription: {
+          organization_id: 1,
+          expires_at: null,
+          term_version: 1,
+          status: 'perpetual'
+        },
+        allowed_actions: {
+          initialize_owner: false,
+          assign_plan: true,
+          manage_subscription: true
         }
       }],
       page: { limit: 50, next_cursor: null, has_more: false },

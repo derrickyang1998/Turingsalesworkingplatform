@@ -48,8 +48,8 @@ test('schema, sanitizer, and trusted-source registries retain token usage migrat
   const trusted = trustedGate.loadTrustedManifest(
     path.join(serverRoot, 'scripts', 'trusted_production_source_manifest.json')
   );
-  assert.equal(trusted.migrationContract.targetVersion, 27);
-  assert.equal(trusted.migrationContract.acceptedSourceVersions.at(-1), 27);
+  assert.equal(trusted.migrationContract.targetVersion, 28);
+  assert.equal(trusted.migrationContract.acceptedSourceVersions.at(-1), 28);
   for (const requiredPath of [
     'server/migrations/026_token_usage_tenant_ownership.js',
     'server/services/token_usage_service.js',
@@ -76,11 +76,11 @@ test('deployment inventory carries the exact v26 implementation and focused test
   }
   assert.match(
     deploy,
-    /if \(Number\(version\) !== 27\) throw new Error\('Candidate migration target version mismatch'\)/
+    /if \(Number\(version\) !== 28\) throw new Error\('Candidate migration target version mismatch'\)/
   );
   assert.match(
     deploy,
-    /report\.get\('sourceVersion'\) not in \(1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27\)/
+    /report\.get\('sourceVersion'\) not in \(1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28\)/
   );
 });
 

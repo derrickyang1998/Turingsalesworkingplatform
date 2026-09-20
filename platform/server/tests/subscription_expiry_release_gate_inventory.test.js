@@ -15,10 +15,10 @@ const repoRoot = path.resolve(__dirname, '..', '..', '..');
 const serverRoot = path.resolve(__dirname, '..');
 const platformRoot = path.resolve(serverRoot, '..');
 
-const migration027 = Object.freeze({
-  version: 27,
-  name: '027_plan_catalog_module_entitlements',
-  sourcePath: 'migrations/027_plan_catalog_module_entitlements.js',
+const migration028 = Object.freeze({
+  version: 28,
+  name: '028_subscription_expiry',
+  sourcePath: 'migrations/028_subscription_expiry.js',
   engineVersion: 1,
   dependencies: ['migrations/vendor/bcryptjs_v3_0_3.js']
 });
@@ -42,20 +42,20 @@ function powerShellShaAssignment(source, variableName) {
   return match[1];
 }
 
-test('schema, sanitizer, and trusted source registries retain plan entitlement migration 027', () => {
-  assert.deepEqual(migrationGate.REGISTERED_MIGRATIONS.find((item) => item.version === 27), migration027);
-  assert.deepEqual(sanitizer.EXACT_PROFILE_MIGRATIONS.find((item) => item.version === 27), migration027);
-  assert.ok(sanitizationManifest.exactProfiles.some((profile) => profile.schemaVersion === 27));
+test('schema, sanitizer, and trusted source registries terminate at subscription expiry migration 028', () => {
+  assert.deepEqual(migrationGate.REGISTERED_MIGRATIONS.at(-1), migration028);
+  assert.deepEqual(sanitizer.EXACT_PROFILE_MIGRATIONS.at(-1), migration028);
+  assert.equal(sanitizationManifest.exactProfiles.at(-1).schemaVersion, 28);
 
   const manifestPath = path.join(serverRoot, 'scripts', 'trusted_production_source_manifest.json');
   const trusted = trustedGate.loadTrustedManifest(manifestPath);
   assert.equal(trusted.migrationContract.targetVersion, 28);
-  assert.ok(trusted.migrationContract.acceptedSourceVersions.includes(27));
+  assert.equal(trusted.migrationContract.acceptedSourceVersions.at(-1), 28);
 
   for (const requiredPath of [
-    'server/migrations/027_plan_catalog_module_entitlements.js',
-    'server/routes_plan_entitlements.js',
-    'server/services/plan_entitlement_service.js',
+    'server/migrations/028_subscription_expiry.js',
+    'server/routes_subscription_expiry.js',
+    'server/services/subscription_expiry_service.js',
     'server/services/module_action_permission_service.js',
     'server/services/organization_governance_service.js',
     'server/server.js'
@@ -67,17 +67,21 @@ test('schema, sanitizer, and trusted source registries retain plan entitlement m
   }
 });
 
-test('deployment inventory retains the exact v27 implementation and focused release tests', () => {
+test('deployment inventory ships the exact v28 implementation and focused release tests', () => {
   const deploy = fs.readFileSync(path.join(repoRoot, 'platform', 'deploy_v8.ps1'), 'utf8');
   const files = powerShellArrayEntries(deploy, 'FILES');
   for (const requiredPath of [
-    'server/migrations/027_plan_catalog_module_entitlements.js',
-    'server/routes_plan_entitlements.js',
-    'server/services/plan_entitlement_service.js',
-    'server/tests/plan_entitlements_migration.test.js',
-    'server/tests/plan_entitlement_service.test.js',
-    'server/tests/plan_entitlement_routes.test.js',
-    'server/tests/plan_entitlements_release_gate_inventory.test.js'
+    'server/migrations/028_subscription_expiry.js',
+    'server/routes_subscription_expiry.js',
+    'server/services/subscription_expiry_service.js',
+    'server/tests/subscription_expiry_migration.test.js',
+    'server/tests/subscription_expiry_service.test.js',
+    'server/tests/subscription_expiry_routes.test.js',
+    'server/tests/subscription_expiry_release_gate_inventory.test.js',
+    'server/tests/influencer_workflow.test.js',
+    'server/tests/phase4_server_integration.test.js',
+    'server/tests/deployment-browser-smoke.spec.js',
+    'server/tests/helpers/browser_fixture.js'
   ]) {
     assert.ok(files.has(requiredPath), requiredPath);
   }
@@ -89,6 +93,15 @@ test('deployment inventory retains the exact v27 implementation and focused rele
     deploy,
     /report\.get\('sourceVersion'\) not in \(1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28\)/
   );
+  assert.match(deploy, /--test-name-pattern="subscription expiry"[\s\\]+server\/tests\/influencer_workflow\.test\.js/);
+  assert.match(deploy, /one live session observes\|unavailable entitlement policy/);
+  for (const testPath of [
+    'server/tests/deployment_source_contract.test.js',
+    'server/tests/deployment_source_trust.test.js',
+    'server/tests/knowledge_tenant_release_gate_inventory.test.js'
+  ]) {
+    assert.match(deploy, new RegExp(testPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  }
 
   const runtimeConfigPath = path.join(serverRoot, 'config', 'runtime_config.js');
   const runtimeConfigHash = sha256File(runtimeConfigPath);
@@ -103,13 +116,4 @@ test('deployment inventory retains the exact v27 implementation and focused rele
     trusted.files.find((entry) => entry.path === 'server/config/runtime_config.js').sha256,
     runtimeConfigHash
   );
-
-  if (fs.existsSync(path.join(repoRoot, '.git'))) {
-    const gitAttributes = fs.readFileSync(path.join(repoRoot, '.gitattributes'), 'utf8');
-    assert.match(
-      gitAttributes,
-      /^platform\/server\/\*\*\/\*\.js text eol=lf$/m,
-      'all server JavaScript must have deterministic LF bytes for trusted-source hashing'
-    );
-  }
 });

@@ -1871,6 +1871,75 @@ test('crm http: task candidates and strict update use update permission and boun
   assert.equal(harness.calls.length, callsBeforeNullDueAt);
 });
 
+test('crm http: subscription expiry blocks all twelve governed CRM actions before dispatch', async () => {
+  const cases = [
+    ['GET /api/customers', {}, 'crm.customer', 'read'],
+    ['POST /api/customers', {}, 'crm.customer', 'create'],
+    ['PUT /api/customers/:id', { id: '41' }, 'crm.customer', 'update'],
+    ['GET /api/opportunities', {}, 'crm.opportunity', 'read'],
+    ['POST /api/opportunities', {}, 'crm.opportunity', 'create'],
+    ['PUT /api/opportunities/:id', { id: '71' }, 'crm.opportunity', 'update'],
+    ['GET /api/customers/:id/detail', { id: '41' }, 'crm.contact', 'read'],
+    ['POST /api/customers/:customerId/contacts', { customerId: '41' }, 'crm.contact', 'create'],
+    ['PUT /api/customers/:customerId/contacts/:contactId', {
+      customerId: '41', contactId: '81'
+    }, 'crm.contact', 'update'],
+    ['GET /api/customers/:id/detail', { id: '41' }, 'crm.task', 'read'],
+    ['POST /api/customers/:customerId/tasks', { customerId: '41' }, 'crm.task', 'create'],
+    ['PUT /api/customers/:customerId/tasks/:taskId', {
+      customerId: '41', taskId: '91'
+    }, 'crm.task', 'update']
+  ];
+
+  for (const [route, params, targetModule, targetAction] of cases) {
+    const permissionCalls = [];
+    const auditEvents = [];
+    const harness = makeHarness({
+      moduleActionPermissionService: {
+        authorize(input) {
+          permissionCalls.push(input);
+          if (input.module === targetModule && input.action === targetAction) {
+            return {
+              allowed: false,
+              code: 'SUBSCRIPTION_EXPIRED',
+              principal: {
+                user_id: input.principal.id,
+                organization_id: input.organizationId,
+                roles: ['member']
+              }
+            };
+          }
+          return {
+            allowed: true,
+            code: 'ALLOWED',
+            principal: {
+              user_id: input.principal.id,
+              organization_id: input.organizationId,
+              roles: ['member']
+            }
+          };
+        }
+      },
+      crmPermissionAudit(event) { auditEvents.push(event); }
+    });
+    const response = await harness.invoke(route, {
+      params,
+      query: { scope: 'my' },
+      body: { unexpected: 'must-not-be-parsed' },
+      requestId: `expired-${targetModule}-${targetAction}`
+    });
+    assert.equal(response.statusCode, 403, `${targetModule}.${targetAction}`);
+    assert.equal(response.payload.code, 'CRM_PERMISSION_FORBIDDEN');
+    assert.equal(response.payload.reason_code, 'SUBSCRIPTION_EXPIRED');
+    assert.equal(harness.calls.length, 0, `${targetModule}.${targetAction} must not dispatch`);
+    assert.equal(
+      permissionCalls.some((call) => call.module === targetModule && call.action === targetAction),
+      true
+    );
+    assert.equal(auditEvents.at(-1).reason_code, 'SUBSCRIPTION_EXPIRED');
+  }
+});
+
 test('crm http: stale task snapshots serialize as a bounded task conflict', async () => {
   const harness = makeHarness({
     crmCustomerService: {

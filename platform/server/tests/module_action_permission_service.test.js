@@ -67,6 +67,12 @@ function createFixture() {
       plan_code TEXT NOT NULL,
       assignment_version INTEGER NOT NULL
     ) STRICT;
+    CREATE TABLE organization_subscription_terms (
+      id INTEGER PRIMARY KEY,
+      org_id INTEGER NOT NULL,
+      term_version INTEGER NOT NULL,
+      expires_at TEXT
+    ) STRICT;
     INSERT INTO users (id, role, is_active) VALUES
       (1, 'admin', 1),
       (2, 'user', 1),
@@ -109,6 +115,9 @@ function createFixture() {
     INSERT INTO organization_plan_assignments (id,org_id,plan_code,assignment_version) VALUES
       (1,10,'legacy_full',1),
       (2,20,'legacy_full',1);
+    INSERT INTO organization_subscription_terms (id,org_id,term_version,expires_at) VALUES
+      (1,10,1,NULL),
+      (2,20,1,NULL);
     INSERT INTO team_memberships (org_id, team_id, user_id, role_code, status) VALUES
       (10, 100, 1, 'team_lead', 'active'),
       (10, 100, 2, 'team_lead', 'active'),
@@ -775,6 +784,8 @@ test('projects and authorizes campaign performance export only for writable tena
       INSERT INTO organization_authority (org_id,owner_user_id) VALUES (30,9);
       INSERT INTO organization_plan_assignments (id,org_id,plan_code,assignment_version)
         VALUES (3,30,'legacy_full',1);
+      INSERT INTO organization_subscription_terms (id,org_id,term_version,expires_at)
+        VALUES (3,30,1,NULL);
       INSERT INTO team_memberships (org_id, team_id, user_id, role_code, status)
         VALUES (10,102,6,'team_lead','active');
     `);
@@ -1103,6 +1114,135 @@ test('fails closed when authoritative organization plan facts are missing, inact
       VALUES (3,10,'legacy_full',1)
     `).run(),
     (db) => db.exec('DROP TABLE plan_module_entitlements')
+  ]) {
+    const { db, service } = createFixture();
+    try {
+      mutate(db);
+      assert.deepEqual(
+        service.authorize(crmCustomerRequest({ id: 2, role: 'user' }, 10, 'read')),
+        { allowed: false, code: 'ENTITLEMENT_POLICY_UNAVAILABLE' }
+      );
+    } finally {
+      db.close();
+    }
+  }
+});
+
+test('intersects role and plan permission with live subscription expiry for every governed module', () => {
+  const { db, service } = createFixture();
+  try {
+    db.prepare(`
+      INSERT INTO organization_subscription_terms (id,org_id,term_version,expires_at)
+      VALUES (3,10,2,'2000-01-01T00:00:00Z')
+    `).run();
+    for (const [module, action] of [
+      ['crm.customer', 'read'],
+      ['crm.customer', 'create'],
+      ['crm.customer', 'update'],
+      ['crm.opportunity', 'read'],
+      ['crm.opportunity', 'create'],
+      ['crm.opportunity', 'update'],
+      ['crm.contact', 'read'],
+      ['crm.contact', 'create'],
+      ['crm.contact', 'update'],
+      ['crm.task', 'read'],
+      ['crm.task', 'create'],
+      ['crm.task', 'update'],
+      ['campaign.performance', 'export'],
+      ['campaign.customer_report', 'export'],
+      ['influencer.data', 'import'],
+      ['influencer.data', 'export']
+    ]) {
+      const projection = service.projectModuleAccess({
+        principal: { id: 2, role: 'user' },
+        organizationId: 10,
+        module
+      });
+      assert.equal(projection.allowed, true);
+      assert.deepEqual(projection.actions, []);
+      assert.equal(service.authorize({
+        principal: { id: 2, role: 'user' },
+        organizationId: 10,
+        module,
+        action
+      }).code, 'SUBSCRIPTION_EXPIRED', module);
+    }
+    assert.equal(
+      service.authorize(platformAdminRequest({ id: 1, role: 'admin' })).allowed,
+      true,
+      'platform administration remains outside organization expiry'
+    );
+    db.prepare(`
+      INSERT INTO organization_subscription_terms (id,org_id,term_version,expires_at)
+      VALUES (4,20,2,'2000-01-01T00:00:00Z')
+    `).run();
+    assert.equal(
+      service.authorize(crmCustomerRequest({ id: 2, role: 'user' }, 20, 'update')).code,
+      'ACTION_FORBIDDEN',
+      'role denial keeps precedence over subscription state'
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('uses one authoritative time and subscription snapshot at the exact expiry boundary', () => {
+  const fixture = createFixture();
+  const { db } = fixture;
+  try {
+    db.prepare(`
+      INSERT INTO organization_subscription_terms (id,org_id,term_version,expires_at)
+      VALUES (3,10,2,'2026-09-20T12:00:00Z')
+    `).run();
+    let clockReads = 0;
+    const { createModuleActionPermissionService } = loadService();
+    const service = createModuleActionPermissionService(db, {
+      now() {
+        clockReads += 1;
+        return Date.parse('2026-09-20T12:00:00Z');
+      }
+    });
+    const modules = [
+      'crm.customer',
+      'crm.opportunity',
+      'crm.contact',
+      'crm.task',
+      'campaign.performance',
+      'campaign.customer_report',
+      'influencer.data'
+    ];
+    const batch = service.projectModulesAccess({
+      principal: { id: 2, role: 'user' },
+      organizationId: 10,
+      modules
+    });
+    assert.equal(batch.allowed, true);
+    assert.equal(batch.subscription.status, 'expired', 'expires_at equal to admission time is expired');
+    assert.equal(clockReads, 1, 'the entire projection uses one server clock snapshot');
+    assert.deepEqual(batch.projections.map((projection) => projection.actions), modules.map(() => []));
+
+    db.prepare(`
+      INSERT INTO organization_plan_assignments (id,org_id,plan_code,assignment_version)
+      VALUES (4,10,'crm_core',2)
+    `).run();
+    assert.equal(
+      service.authorize(campaignPerformanceRequest({ id: 2, role: 'user' }, 10, 'export')).code,
+      'PLAN_ENTITLEMENT_REQUIRED',
+      'plan denial takes precedence when both plan and subscription deny the action'
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('fails closed when current subscription facts are missing or duplicated', () => {
+  for (const mutate of [
+    (db) => db.prepare('DELETE FROM organization_subscription_terms WHERE org_id=10').run(),
+    (db) => db.prepare(`
+      INSERT INTO organization_subscription_terms (id,org_id,term_version,expires_at)
+      VALUES (3,10,1,NULL)
+    `).run(),
+    (db) => db.exec('DROP TABLE organization_subscription_terms')
   ]) {
     const { db, service } = createFixture();
     try {

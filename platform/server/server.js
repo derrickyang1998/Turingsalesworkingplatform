@@ -83,60 +83,32 @@ const influencerDataImportPermission = require('./services/influencer_data_impor
 const moduleActionPermissionService = createModuleActionPermissionService(db);
 
 function projectModulePermissions(principal, organizationId) {
-  const crmCustomerAccess = moduleActionPermissionService.projectModuleAccess({
+  const modules = [
+    CRM_CUSTOMER_MODULE,
+    CRM_OPPORTUNITY_MODULE,
+    CRM_CONTACT_MODULE,
+    CRM_TASK_MODULE,
+    CAMPAIGN_PERFORMANCE_MODULE,
+    CAMPAIGN_CUSTOMER_REPORT_MODULE,
+    INFLUENCER_DATA_MODULE
+  ];
+  const projection = moduleActionPermissionService.projectModulesAccess({
     principal,
     organizationId,
-    module: CRM_CUSTOMER_MODULE
+    modules
   });
-  const crmOpportunityAccess = moduleActionPermissionService.projectModuleAccess({
-    principal,
-    organizationId,
-    module: CRM_OPPORTUNITY_MODULE
-  });
-  const crmContactAccess = moduleActionPermissionService.projectModuleAccess({
-    principal,
-    organizationId,
-    module: CRM_CONTACT_MODULE
-  });
-  const crmTaskAccess = moduleActionPermissionService.projectModuleAccess({
-    principal,
-    organizationId,
-    module: CRM_TASK_MODULE
-  });
-  const campaignPerformanceAccess = moduleActionPermissionService.projectModuleAccess({
-    principal,
-    organizationId,
-    module: CAMPAIGN_PERFORMANCE_MODULE
-  });
-  const campaignCustomerReportAccess = moduleActionPermissionService.projectModuleAccess({
-    principal,
-    organizationId,
-    module: CAMPAIGN_CUSTOMER_REPORT_MODULE
-  });
-  const influencerDataAccess = moduleActionPermissionService.projectModuleAccess({
-    principal,
-    organizationId,
-    module: INFLUENCER_DATA_MODULE
-  });
-  if (
-    !crmCustomerAccess.allowed ||
-    !crmOpportunityAccess.allowed ||
-    !crmContactAccess.allowed ||
-    !crmTaskAccess.allowed ||
-    !campaignPerformanceAccess.allowed ||
-    !campaignCustomerReportAccess.allowed ||
-    !influencerDataAccess.allowed
-  ) {
-    throw new Error('Module permissions unavailable');
+  if (!projection.allowed) {
+    const error = new Error('Module permissions unavailable');
+    error.code = projection.code || 'ENTITLEMENT_POLICY_UNAVAILABLE';
+    error.statusCode = 503;
+    throw error;
   }
+  const projectedByModule = new Map(
+    projection.projections.map((entry, index) => [modules[index], entry.actions.slice()])
+  );
   return {
-    [CRM_CUSTOMER_MODULE]: crmCustomerAccess.actions.slice(),
-    [CRM_OPPORTUNITY_MODULE]: crmOpportunityAccess.actions.slice(),
-    [CRM_CONTACT_MODULE]: crmContactAccess.actions.slice(),
-    [CRM_TASK_MODULE]: crmTaskAccess.actions.slice(),
-    [CAMPAIGN_PERFORMANCE_MODULE]: campaignPerformanceAccess.actions.slice(),
-    [CAMPAIGN_CUSTOMER_REPORT_MODULE]: campaignCustomerReportAccess.actions.slice(),
-    [INFLUENCER_DATA_MODULE]: influencerDataAccess.actions.slice()
+    modulePermissions: Object.fromEntries(projectedByModule),
+    subscription: projection.subscription
   };
 }
 const {
@@ -181,15 +153,21 @@ const registerAdminTenantDirectoryRoutes = require('./routes_admin_tenant_direct
 const registerAdminAIQuotaRoutes = require('./routes_admin_ai_quota');
 const registerOrganizationGovernanceRoutes = require('./routes_organization_governance');
 const registerPlanEntitlementRoutes = require('./routes_plan_entitlements');
+const registerSubscriptionExpiryRoutes = require('./routes_subscription_expiry');
 const {
   createPlanEntitlementService
 } = require('./services/plan_entitlement_service');
 const {
   createOrganizationGovernanceService
 } = require('./services/organization_governance_service');
+const {
+  createSubscriptionExpiryService
+} = require('./services/subscription_expiry_service');
 const planEntitlementService = createPlanEntitlementService(db);
+const subscriptionExpiryService = createSubscriptionExpiryService(db);
 const organizationGovernanceService = createOrganizationGovernanceService(db, {
-  planEntitlementService
+  planEntitlementService,
+  subscriptionExpiryService
 });
 const {
   createCampaignPptBridgeHandler
@@ -716,11 +694,25 @@ function closeUnreadRequestAfterResponse(req, res) {
   });
 }
 
-function sendEarlyCrmPermissionProblem(req, res, requestId, code, module) {
+const EARLY_PERMISSION_REASON_CODES = new Set([
+  'SUBSCRIPTION_EXPIRED',
+  'ENTITLEMENT_POLICY_UNAVAILABLE',
+  'AUTHORITATIVE_FACTS_UNAVAILABLE'
+]);
+
+function earlyPermissionPolicyUnavailable(reasonCode) {
+  return reasonCode === 'ENTITLEMENT_POLICY_UNAVAILABLE' ||
+    reasonCode === 'AUTHORITATIVE_FACTS_UNAVAILABLE';
+}
+
+function sendEarlyCrmPermissionProblem(req, res, requestId, code, module, reasonCode) {
   const auditFailure = code === 'CRM_PERMISSION_AUDIT_FAILED';
-  const status = auditFailure ? 503 : 403;
+  const policyUnavailable = earlyPermissionPolicyUnavailable(reasonCode);
+  const status = auditFailure || policyUnavailable ? 503 : 403;
   const title = auditFailure
     ? 'CRM permission audit could not be recorded'
+    : policyUnavailable
+      ? 'CRM permission policy is unavailable'
     : (module === CRM_CONTACT_MODULE || module === CRM_TASK_MODULE)
       ? 'CRM permission is not allowed'
       : 'CRM customer permission is not allowed';
@@ -732,7 +724,8 @@ function sendEarlyCrmPermissionProblem(req, res, requestId, code, module) {
     status,
     code,
     request_id: requestId,
-    instance: `urn:turingmarket:request:${requestId}`
+    instance: `urn:turingmarket:request:${requestId}`,
+    ...(EARLY_PERMISSION_REASON_CODES.has(reasonCode) ? { reason_code: reasonCode } : {})
   });
 }
 
@@ -740,7 +733,20 @@ function earlyCrmMutationGuard(req, res, next) {
   const mutation = earlyCrmMutation(req);
   if (!mutation) return next();
   const authentication = authenticateRequest(req);
-  if (!authentication.ok) return next();
+  if (!authentication.ok) {
+    if (authentication.status === 503 && EARLY_PERMISSION_REASON_CODES.has(authentication.code)) {
+      const requestId = identityRequestId(req) || crypto.randomUUID();
+      return sendEarlyCrmPermissionProblem(
+        req,
+        res,
+        requestId,
+        'CRM_PERMISSION_FORBIDDEN',
+        mutation.module,
+        authentication.code
+      );
+    }
+    return next();
+  }
   const organizationId = authentication.authContext.organization.id;
   const decision = moduleActionPermissionService.authorize({
     principal: authentication.user,
@@ -777,7 +783,8 @@ function earlyCrmMutationGuard(req, res, next) {
     res,
     requestId,
     'CRM_PERMISSION_FORBIDDEN',
-    mutation.module
+    mutation.module,
+    decision.code
   );
 }
 
@@ -791,12 +798,13 @@ function earlyInfluencerImportKind(req) {
   return null;
 }
 
-function sendEarlyInfluencerImportProblem(req, res, statusCode, code, message) {
+function sendEarlyInfluencerImportProblem(req, res, statusCode, code, message, reasonCode) {
   closeUnreadRequestAfterResponse(req, res);
   return res.status(statusCode).json({
     error: message,
     code,
-    request_id: influencerDataImportPermission.requestId(req)
+    request_id: influencerDataImportPermission.requestId(req),
+    ...(EARLY_PERMISSION_REASON_CODES.has(reasonCode) ? { reason_code: reasonCode } : {})
   });
 }
 
@@ -805,6 +813,16 @@ function earlyInfluencerImportGuard(req, res, next) {
   if (!importKind) return next();
   const authentication = authenticateRequest(req);
   if (!authentication.ok) {
+    if (authentication.status === 503 && EARLY_PERMISSION_REASON_CODES.has(authentication.code)) {
+      return sendEarlyInfluencerImportProblem(
+        req,
+        res,
+        503,
+        'INFLUENCER_IMPORT_FORBIDDEN',
+        'Influencer data import is forbidden.',
+        authentication.code
+      );
+    }
     return sendEarlyInfluencerImportProblem(
       req,
       res,
@@ -848,9 +866,10 @@ function earlyInfluencerImportGuard(req, res, next) {
   return sendEarlyInfluencerImportProblem(
     req,
     res,
-    403,
+    earlyPermissionPolicyUnavailable(decision && decision.code) ? 503 : 403,
     'INFLUENCER_IMPORT_FORBIDDEN',
-    'Influencer data import is forbidden.'
+    'Influencer data import is forbidden.',
+    decision && decision.code
   );
 }
 
@@ -939,7 +958,12 @@ function authenticateRequest(req) {
     });
     user.access_roles = accessProjection.access_roles;
     user.organization_access = accessProjection.organization_access;
-    user.module_permissions = projectModulePermissions(user, scope.authContext.organization.id);
+    const entitlementProjection = projectModulePermissions(
+      user,
+      scope.authContext.organization.id
+    );
+    user.module_permissions = entitlementProjection.modulePermissions;
+    user.organization_subscription = entitlementProjection.subscription;
     const authContext = {
       organization: {
         ...scope.authContext.organization,
@@ -965,6 +989,14 @@ function authenticateRequest(req) {
       authContext
     };
   } catch(e) {
+    if (e && e.code === 'ENTITLEMENT_POLICY_UNAVAILABLE') {
+      return {
+        ok: false,
+        status: 503,
+        error: 'Entitlement policy unavailable',
+        code: 'ENTITLEMENT_POLICY_UNAVAILABLE'
+      };
+    }
     return { ok: false, error: 'Invalid token' };
   }
 }
@@ -977,7 +1009,10 @@ function authenticatePhase4Request(req) {
 function authMiddleware(req, res, next) {
   const authentication = authenticateRequest(req);
   if (!authentication.ok) {
-    return res.status(401).json({ error: authentication.error });
+    return res.status(authentication.status || 401).json({
+      error: authentication.error,
+      ...(authentication.code ? { code: authentication.code } : {})
+    });
   }
   next();
 }
@@ -1676,7 +1711,18 @@ app.post('/api/auth/login', (req, res) => {
     },
     teams: organizationScope.authContext.teams
   };
-  const modulePermissions = projectModulePermissions(user, organizationScope.authContext.organization.id);
+  let entitlementProjection;
+  try {
+    entitlementProjection = projectModulePermissions(
+      user,
+      organizationScope.authContext.organization.id
+    );
+  } catch (error) {
+    return res.status(503).json({
+      error: 'Entitlement policy unavailable',
+      code: error && error.code || 'ENTITLEMENT_POLICY_UNAVAILABLE'
+    });
+  }
 
   // Create session
   const token = jwt.sign({ userId: user.id, role: user.role, jti: crypto.randomUUID() }, JWT_SECRET, { expiresIn: TOKEN_EXPIRY });
@@ -1698,7 +1744,8 @@ app.post('/api/auth/login', (req, res) => {
       api_quota: user.api_quota,
       access_roles: accessProjection.access_roles,
       organization_access: accessProjection.organization_access,
-      module_permissions: modulePermissions
+      module_permissions: entitlementProjection.modulePermissions,
+      organization_subscription: entitlementProjection.subscription
     },
     auth_context: projectedAuthContext
   });
@@ -2253,6 +2300,11 @@ registerPlanEntitlementRoutes(app, db, {
   authMiddleware,
   adminOnly,
   service: planEntitlementService
+});
+registerSubscriptionExpiryRoutes(app, db, {
+  authMiddleware,
+  adminOnly,
+  service: subscriptionExpiryService
 });
 registerCampaignRoutes(app, db);
 registerPerformanceRoutes(app, {

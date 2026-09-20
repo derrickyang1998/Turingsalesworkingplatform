@@ -303,6 +303,41 @@ test('projects organization plan summaries while reserving assignment to platfor
   }
 });
 
+test('projects subscription status while reserving expiry management to platform administrators', () => {
+  const db = openFixture();
+  try {
+    const { createOrganizationGovernanceService } = loadService();
+    const subscriptionExpiryService = {
+      projectOrganization(input) {
+        return {
+          organization_id: input.organizationId,
+          expires_at: input.organizationId === 20 ? '2099-01-01T00:00:00Z' : null,
+          term_version: 1,
+          status: input.organizationId === 20 ? 'active' : 'perpetual'
+        };
+      }
+    };
+    const service = createOrganizationGovernanceService(db, { subscriptionExpiryService });
+    const platformView = service.listOrganizations({
+      actor: actor(1, 'admin'),
+      requestId: 'organizations-with-subscriptions',
+      query: { limit: 2 }
+    });
+    assert.equal(platformView.organizations[0].subscription.status, 'perpetual');
+    assert.equal(platformView.organizations[0].allowed_actions.manage_subscription, true);
+
+    const ownerView = service.listOrganizations({
+      actor: actor(2),
+      requestId: 'organization-subscription-owner-view',
+      query: {}
+    });
+    assert.equal(ownerView.organizations[0].subscription.status, 'active');
+    assert.equal(ownerView.organizations[0].allowed_actions.manage_subscription, false);
+  } finally {
+    db.close();
+  }
+});
+
 test('applies bounded organization and member search filters before pagination', () => {
   const db = openFixture();
   try {

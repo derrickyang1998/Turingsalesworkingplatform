@@ -477,7 +477,9 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
   function sendProblem(res, req, error) {
     const candidateCode = error && typeof error.code === 'string' ? error.code : 'CRM_HTTP_FAILED';
     const code = KNOWN_ERROR_CODES.has(candidateCode) ? candidateCode : 'CRM_HTTP_FAILED';
-    const status = problemStatus(code);
+    const status = error instanceof CrmHttpError && Number.isInteger(error.status)
+      ? error.status
+      : problemStatus(code);
     const currentRequestId = requestId(req);
     const title = error instanceof CrmHttpError
       ? error.title
@@ -490,6 +492,12 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
       request_id: currentRequestId,
       instance: `urn:turingmarket:request:${currentRequestId}`
     };
+    if (
+      error && typeof error.reasonCode === 'string' &&
+      ['SUBSCRIPTION_EXPIRED', 'ENTITLEMENT_POLICY_UNAVAILABLE', 'AUTHORITATIVE_FACTS_UNAVAILABLE'].includes(error.reasonCode)
+    ) {
+      body.reason_code = error.reasonCode;
+    }
     const conflict = code === 'CRM_CUSTOMER_DUPLICATE' ? safeConflict(error) : null;
     if (conflict) body.conflict = conflict;
     if (code === 'CRM_STORAGE_BUSY' && error && error.retryable === true) body.retryable = true;
@@ -605,11 +613,17 @@ module.exports = function registerCustomerRoutes(app, db, authMiddleware, depend
         if (effectiveDecision.code === 'CRM_SCOPE_FORBIDDEN') {
           return sendProblem(res, req, new CrmHttpError('CRM_SCOPE_FORBIDDEN', 403));
         }
-        return sendProblem(
-          res,
-          req,
-          new CrmHttpError('CRM_PERMISSION_FORBIDDEN', 403, settings.permissionForbiddenTitle)
+        const unavailable = [
+          'ENTITLEMENT_POLICY_UNAVAILABLE',
+          'AUTHORITATIVE_FACTS_UNAVAILABLE'
+        ].includes(effectiveDecision.code);
+        const permissionError = new CrmHttpError(
+          'CRM_PERMISSION_FORBIDDEN',
+          unavailable ? 503 : 403,
+          unavailable ? 'CRM permission policy is unavailable' : settings.permissionForbiddenTitle
         );
+        permissionError.reasonCode = effectiveDecision.code;
+        return sendProblem(res, req, permissionError);
       }
       if (module === CRM_CUSTOMER_MODULE) req.crmCustomerPermission = effectiveDecision;
       if (module === CRM_OPPORTUNITY_MODULE) req.crmOpportunityPermission = effectiveDecision;

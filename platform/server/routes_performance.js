@@ -166,19 +166,25 @@ function customerReportExportAuditEvent(request, decision, exportKind, outcome) 
   };
 }
 
-function sendPerformanceExportError(request, response, statusCode, code, message) {
+function sendPerformanceExportError(request, response, statusCode, code, message, reasonCode) {
   return response.status(statusCode).json({
     error: message,
     code,
-    request_id: requestId(request)
+    request_id: requestId(request),
+    ...(['SUBSCRIPTION_EXPIRED', 'ENTITLEMENT_POLICY_UNAVAILABLE', 'AUTHORITATIVE_FACTS_UNAVAILABLE'].includes(reasonCode)
+      ? { reason_code: reasonCode }
+      : {})
   });
 }
 
-function sendCustomerReportExportError(request, response, statusCode, code, message) {
+function sendCustomerReportExportError(request, response, statusCode, code, message, reasonCode) {
   return response.status(statusCode).json({
     error: message,
     code,
-    request_id: requestId(request)
+    request_id: requestId(request),
+    ...(['SUBSCRIPTION_EXPIRED', 'ENTITLEMENT_POLICY_UNAVAILABLE', 'AUTHORITATIVE_FACTS_UNAVAILABLE'].includes(reasonCode)
+      ? { reason_code: reasonCode }
+      : {})
   });
 }
 
@@ -344,9 +350,10 @@ function registerPerformanceRoutes(app, options = {}) {
       return sendPerformanceExportError(
         request,
         response,
-        403,
+        ['ENTITLEMENT_POLICY_UNAVAILABLE', 'AUTHORITATIVE_FACTS_UNAVAILABLE'].includes(decision && decision.code) ? 503 : 403,
         'PERFORMANCE_EXPORT_FORBIDDEN',
-        'Performance export is forbidden.'
+        'Performance export is forbidden.',
+        decision && decision.code
       );
     };
   }
@@ -387,9 +394,10 @@ function registerPerformanceRoutes(app, options = {}) {
       return sendCustomerReportExportError(
         request,
         response,
-        403,
+        ['ENTITLEMENT_POLICY_UNAVAILABLE', 'AUTHORITATIVE_FACTS_UNAVAILABLE'].includes(decision && decision.code) ? 503 : 403,
         'CUSTOMER_REPORT_EXPORT_FORBIDDEN',
-        'Customer report export is forbidden.'
+        'Customer report export is forbidden.',
+        decision && decision.code
       );
     };
   }

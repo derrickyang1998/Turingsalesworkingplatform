@@ -27,7 +27,8 @@ const migration024 = Object.freeze({
   dependencies: ['migrations/vendor/bcryptjs_v3_0_3.js']
 });
 const supportedSourceVersions = Object.freeze([
-  1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24
+  1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
+  25, 26, 27, 28
 ]);
 const trustedKnowledgeRuntimeFiles = Object.freeze([
   'server/server.js',
@@ -49,7 +50,7 @@ function writeManifest(t, document, name) {
   return manifestPath;
 }
 
-function v24TrustedManifest() {
+function currentTrustedManifest() {
   return structuredClone(trustedManifest);
 }
 
@@ -77,7 +78,7 @@ function openV24Fixture(t) {
   const databasePath = path.join(root, 'source.db');
   const db = migrationService.openMigratedDatabase(databasePath, {
     rootDir: serverRoot,
-    registeredMigrations: migrationGate.REGISTERED_MIGRATIONS
+    registeredMigrations: migrationGate.REGISTERED_MIGRATIONS.filter((entry) => entry.version <= 24)
   });
   t.after(() => {
     try { if (db.open) db.close(); } catch (_error) {}
@@ -86,19 +87,21 @@ function openV24Fixture(t) {
   return db;
 }
 
-test('schema gate registries end at migration 024 without embedding migration bytes', () => {
-  assert.deepEqual(migrationGate.REGISTERED_MIGRATIONS.at(-1), migration024);
-  assert.deepEqual(sanitizer.EXACT_PROFILE_MIGRATIONS.at(-1), migration024);
+test('schema gate registries retain migration 024 and terminate at current migration 028', () => {
+  assert.deepEqual(migrationGate.REGISTERED_MIGRATIONS.find((entry) => entry.version === 24), migration024);
+  assert.deepEqual(sanitizer.EXACT_PROFILE_MIGRATIONS.find((entry) => entry.version === 24), migration024);
+  assert.equal(migrationGate.REGISTERED_MIGRATIONS.at(-1).version, 28);
+  assert.equal(sanitizer.EXACT_PROFILE_MIGRATIONS.at(-1).version, 28);
 });
 
-test('trusted source gate accepts only the exact v24 source contract with migration 024', (t) => {
-  const document = v24TrustedManifest();
-  const manifestPath = writeManifest(t, document, 'trusted-v24.json');
+test('trusted source gate current contract retains the exact migration 024 source', (t) => {
+  const document = currentTrustedManifest();
+  const manifestPath = writeManifest(t, document, 'trusted-current.json');
   const loaded = trustedGate.loadTrustedManifest(manifestPath);
 
   assert.deepEqual(loaded.migrationContract, {
     acceptedSourceVersions: [...supportedSourceVersions],
-    targetVersion: 24,
+    targetVersion: 28,
     runs: 2,
     deterministicAppendTables: ['activity_log']
   });
@@ -111,14 +114,14 @@ test('trusted source gate accepts only the exact v24 source contract with migrat
     (entry) => entry.path !== 'server/migrations/024_knowledge_tenant_ownership.js'
   );
   assert.throws(
-    () => trustedGate.loadTrustedManifest(writeManifest(t, missing024, 'trusted-v24-missing-024.json')),
+    () => trustedGate.loadTrustedManifest(writeManifest(t, missing024, 'trusted-current-missing-024.json')),
     /bundle inventory is not exact/i
   );
 });
 
 test('final v24 sanitizer profile pins knowledge ownership and the migration 024 checksum', (t) => {
   const db = openV24Fixture(t);
-  assert.equal(sanitizationManifest.exactProfiles.at(-1).schemaVersion, 24);
+  assert.equal(sanitizationManifest.exactProfiles.some((entry) => entry.schemaVersion === 24), true);
 
   const structuralPolicy = sanitizer._testing.structuralColumnPolicyForVersion(24);
   assert.deepEqual(structuralPolicy['knowledge_entries.org_id'], {
@@ -148,12 +151,12 @@ test('final v24 sanitizer profile pins knowledge ownership and the migration 024
   assert.doesNotThrow(() => sanitizer.validateManifest(sanitizationManifest, db));
 });
 
-test('committed trusted manifest pins the final v24 source bytes exactly', () => {
+test('committed current trusted manifest still pins migration 024 source bytes exactly', () => {
   const manifestPath = path.join(serverRoot, 'scripts', 'trusted_production_source_manifest.json');
   const loaded = trustedGate.loadTrustedManifest(manifestPath);
 
-  assert.equal(loaded.migrationContract.targetVersion, 24);
-  assert.equal(loaded.migrationContract.acceptedSourceVersions.at(-1), 24);
+  assert.equal(loaded.migrationContract.targetVersion, 28);
+  assert.equal(loaded.migrationContract.acceptedSourceVersions.at(-1), 28);
   const migrationEntry = loaded.files.find(
     (entry) => entry.path === 'server/migrations/024_knowledge_tenant_ownership.js'
   );
@@ -171,7 +174,7 @@ test('committed trusted manifest pins the final v24 source bytes exactly', () =>
   }
 });
 
-test('deploy inventory carries migration 024 and gates candidate and no-op paths at v24', () => {
+test('deploy inventory carries migration 024 while gating candidate and no-op paths at current v28', () => {
   const deploy = fs.readFileSync(path.join(repoRoot, 'platform', 'deploy_v8.ps1'), 'utf8');
   const files = powerShellArrayEntries(deploy, 'FILES');
 
@@ -180,11 +183,11 @@ test('deploy inventory carries migration 024 and gates candidate and no-op paths
   assert.ok(files.has('server/tests/knowledge_tenant_release_gate_inventory.test.js'));
   assert.match(
     deploy,
-    /if \(Number\(version\) !== 24\) throw new Error\('Candidate migration target version mismatch'\)/
+    /if \(Number\(version\) !== 28\) throw new Error\('Candidate migration target version mismatch'\)/
   );
   assert.match(
     deploy,
-    /report\.get\('sourceVersion'\) not in \(1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24\)/
+    /report\.get\('sourceVersion'\) not in \(1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28\)/
   );
   assert.equal(
     powerShellStringAssignment(deploy, 'EXPECTED_TRUSTED_SOURCE_GATE_SHA256'),

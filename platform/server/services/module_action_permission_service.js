@@ -162,6 +162,8 @@ const ORGANIZATION_SCOPED_MODULES = new Set([
   CAMPAIGN_CUSTOMER_REPORT_MODULE,
   INFLUENCER_DATA_MODULE
 ]);
+const ORGANIZATION_POLICY_STATE = Symbol('organizationPolicyState');
+const CANONICAL_UTC_SECONDS = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
 
 function denied(code) {
   return { allowed: false, code };
@@ -267,12 +269,58 @@ function organizationModuleEntitlement(db, organizationId, module) {
   return rows[0].entitled === 1;
 }
 
-function createModuleActionPermissionService(db) {
+function organizationSubscriptionPolicy(db, organizationId, evaluatedAt) {
+  const rows = db.prepare(`
+    SELECT term.term_version,term.expires_at
+    FROM organization_subscription_terms term
+    WHERE term.org_id=? AND term.term_version=(
+      SELECT MAX(current.term_version)
+      FROM organization_subscription_terms current
+      WHERE current.org_id=term.org_id
+    )
+    ORDER BY term.id
+  `).all(organizationId);
+  if (
+    rows.length !== 1 || !Number.isSafeInteger(rows[0].term_version) ||
+    rows[0].term_version < 1
+  ) {
+    throw new Error('organization subscription policy is unavailable');
+  }
+  const expiresAt = rows[0].expires_at;
+  if (expiresAt !== null) {
+    const timestamp = Date.parse(expiresAt);
+    if (
+      typeof expiresAt !== 'string' || !CANONICAL_UTC_SECONDS.test(expiresAt) ||
+      !Number.isFinite(timestamp) ||
+      new Date(timestamp).toISOString().replace('.000Z', 'Z') !== expiresAt
+    ) {
+      throw new Error('organization entitlement policy is unavailable');
+    }
+  }
+  return {
+    termVersion: rows[0].term_version,
+    expiresAt,
+    expired: expiresAt !== null && Date.parse(expiresAt) <= evaluatedAt
+  };
+}
+
+function createModuleActionPermissionService(db, options = {}) {
   if (!db || typeof db.prepare !== 'function') {
     throw new TypeError('database must expose prepare');
   }
+  const now = options.now || Date.now;
+  if (typeof now !== 'function') throw new TypeError('now must be a function');
 
-  function projectModuleAccess(input) {
+  function currentTime() {
+    const value = now();
+    const milliseconds = value instanceof Date ? value.getTime() : Number(value);
+    if (!Number.isFinite(milliseconds)) {
+      throw new Error('organization entitlement policy time is unavailable');
+    }
+    return milliseconds;
+  }
+
+  function projectModuleAccess(input, evaluationContext = null) {
     let requested;
     let module;
     let organizationId = null;
@@ -320,11 +368,22 @@ function createModuleActionPermissionService(db) {
       const actions = Object.entries(POLICY[module])
         .filter(([, allowedRoles]) => allowedRoles.some((role) => principal.roles.includes(role)))
         .map(([action]) => action);
-      if (
-        ORGANIZATION_SCOPED_MODULES.has(module) &&
-        !organizationModuleEntitlement(db, organizationId, module)
-      ) {
-        return { allowed: true, code: 'ALLOWED', principal, actions: [] };
+      if (ORGANIZATION_SCOPED_MODULES.has(module)) {
+        const subscription = evaluationContext && evaluationContext.subscription
+          ? evaluationContext.subscription
+          : organizationSubscriptionPolicy(db, organizationId, currentTime());
+        const policyState = {
+          planEntitled: organizationModuleEntitlement(db, organizationId, module),
+          subscriptionExpired: subscription.expired
+        };
+        if (!policyState.planEntitled || policyState.subscriptionExpired) {
+          const projection = { allowed: true, code: 'ALLOWED', principal, actions: [] };
+          Object.defineProperty(projection, ORGANIZATION_POLICY_STATE, { value: policyState });
+          return projection;
+        }
+        const projection = { allowed: true, code: 'ALLOWED', principal, actions };
+        Object.defineProperty(projection, ORGANIZATION_POLICY_STATE, { value: policyState });
+        return projection;
       }
       return { allowed: true, code: 'ALLOWED', principal, actions };
     } catch {
@@ -370,16 +429,65 @@ function createModuleActionPermissionService(db) {
     const roleWouldAllow = POLICY[module][action].some(
       (role) => projection.principal.roles.includes(role)
     );
+    const policyState = projection[ORGANIZATION_POLICY_STATE];
+    let code = 'ACTION_FORBIDDEN';
+    if (ORGANIZATION_SCOPED_MODULES.has(module) && roleWouldAllow) {
+      code = policyState && policyState.planEntitled && policyState.subscriptionExpired
+        ? 'SUBSCRIPTION_EXPIRED'
+        : 'PLAN_ENTITLEMENT_REQUIRED';
+    }
     return {
       allowed: false,
-      code: ORGANIZATION_SCOPED_MODULES.has(module) && roleWouldAllow
-        ? 'PLAN_ENTITLEMENT_REQUIRED'
-        : 'ACTION_FORBIDDEN',
+      code,
       principal: projection.principal
     };
   }
 
-  return Object.freeze({ authorize, projectModuleAccess });
+  function projectModulesAccess(input) {
+    try {
+      if (!isPlainObject(input) || !Array.isArray(input.modules) || input.modules.length < 1) {
+        return denied('MALFORMED_REQUEST');
+      }
+      const organizationId = input.organizationId;
+      if (!Number.isSafeInteger(organizationId) || organizationId < 1) {
+        return denied('MALFORMED_ORGANIZATION');
+      }
+      const modules = input.modules.slice();
+      if (
+        new Set(modules).size !== modules.length ||
+        modules.some((module) => typeof module !== 'string' || !ORGANIZATION_SCOPED_MODULES.has(module))
+      ) {
+        return denied('UNKNOWN_MODULE');
+      }
+      const evaluatedAt = currentTime();
+      const subscription = organizationSubscriptionPolicy(db, organizationId, evaluatedAt);
+      const projections = modules.map((module) => projectModuleAccess({
+        principal: input.principal,
+        organizationId,
+        module
+      }, { evaluatedAt, subscription }));
+      const failure = projections.find((projection) => !projection.allowed);
+      if (failure) return failure;
+      return {
+        allowed: true,
+        code: 'ALLOWED',
+        evaluated_at: evaluatedAt,
+        subscription: {
+          organization_id: organizationId,
+          expires_at: subscription.expiresAt,
+          term_version: subscription.termVersion,
+          status: subscription.expiresAt === null
+            ? 'perpetual'
+            : (subscription.expired ? 'expired' : 'active')
+        },
+        projections
+      };
+    } catch {
+      return denied('ENTITLEMENT_POLICY_UNAVAILABLE');
+    }
+  }
+
+  return Object.freeze({ authorize, projectModuleAccess, projectModulesAccess });
 }
 
 module.exports = {

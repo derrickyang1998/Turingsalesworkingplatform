@@ -201,6 +201,13 @@ const EXACT_PROFILE_MIGRATIONS = Object.freeze([
     sourcePath: 'migrations/027_plan_catalog_module_entitlements.js',
     engineVersion: 1,
     dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
+  }),
+  Object.freeze({
+    version: 28,
+    name: '028_subscription_expiry',
+    sourcePath: 'migrations/028_subscription_expiry.js',
+    engineVersion: 1,
+    dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
   })
 ]);
 const FTS_MANIFEST = Object.freeze({
@@ -968,6 +975,20 @@ const V27_MIGRATION_LEDGER = Object.freeze({
     'migrations/027_plan_catalog_module_entitlements.js'
   ])
 });
+const V28_MIGRATION_LEDGER = Object.freeze({
+  name: Object.freeze([
+    ...V27_MIGRATION_LEDGER.name,
+    '028_subscription_expiry'
+  ]),
+  checksum: Object.freeze([
+    ...V27_MIGRATION_LEDGER.checksum,
+    '1c5bb4a665512f9ee9efe362f178b21e8f8ebd4c01d526d864ffc0ec983761d5'
+  ]),
+  sourcePath: Object.freeze([
+    ...V27_MIGRATION_LEDGER.sourcePath,
+    'migrations/028_subscription_expiry.js'
+  ])
+});
 const STRUCTURAL_COLUMN_POLICY_V9 = Object.freeze(Object.assign(Object.create(null), STRUCTURAL_COLUMN_POLICY, {
   'feishu_bitable_outbox_retries.id': Object.freeze({ storage: 'integer', kind: 'integer' }),
   'feishu_bitable_outbox_retries.org_id': Object.freeze({ storage: 'integer', kind: 'integer' }),
@@ -1651,6 +1672,35 @@ const STRUCTURAL_POLICY_V27_SHA256 = crypto.createHash('sha256')
     columns: STRUCTURAL_COLUMN_POLICY_V27
   }), 'utf8')
   .digest('hex');
+const STRUCTURAL_COLUMN_POLICY_V28 = Object.freeze(Object.assign(Object.create(null), STRUCTURAL_COLUMN_POLICY_V27, {
+  'organization_subscription_terms.id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'organization_subscription_terms.org_id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'organization_subscription_terms.term_version': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'organization_subscription_terms.expires_at': Object.freeze({ storage: 'text', kind: 'timestamp' }),
+  'organization_subscription_terms.changed_by': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'organization_subscription_terms.source': Object.freeze({
+    storage: 'text',
+    kind: 'enum',
+    allowedValues: Object.freeze(['migration_backfill', 'organization_default', 'admin_update'])
+  }),
+  'organization_subscription_terms.created_at': Object.freeze({ storage: 'text', kind: 'timestamp' }),
+  'schema_migrations.name': Object.freeze({
+    storage: 'text', kind: 'migration-ledger', allowedValues: V28_MIGRATION_LEDGER.name
+  }),
+  'schema_migrations.checksum': Object.freeze({
+    storage: 'text', kind: 'migration-ledger', allowedValues: V28_MIGRATION_LEDGER.checksum
+  }),
+  'schema_migrations.source_path': Object.freeze({
+    storage: 'text', kind: 'migration-ledger', allowedValues: V28_MIGRATION_LEDGER.sourcePath
+  })
+}));
+const STRUCTURAL_POLICY_V28_VALIDATOR_VERSION = 'tm-structural-policy-v26-subscription-expiry';
+const STRUCTURAL_POLICY_V28_SHA256 = crypto.createHash('sha256')
+  .update(JSON.stringify({
+    validatorVersion: STRUCTURAL_POLICY_V28_VALIDATOR_VERSION,
+    columns: STRUCTURAL_COLUMN_POLICY_V28
+  }), 'utf8')
+  .digest('hex');
 
 const TRANSFORMATION_EXCLUDED_CLASSIFICATIONS = new Set([
   'structural',
@@ -1870,8 +1920,17 @@ const V27_SEMANTIC_POLICIES = Object.freeze({
     policySha256: STRUCTURAL_POLICY_V27_SHA256
   })
 });
+const V28_SEMANTIC_POLICIES = Object.freeze({
+  ...V27_SEMANTIC_POLICIES,
+  structuralColumns: Object.freeze({
+    ...V27_SEMANTIC_POLICIES.structuralColumns,
+    validatorVersion: STRUCTURAL_POLICY_V28_VALIDATOR_VERSION,
+    policySha256: STRUCTURAL_POLICY_V28_SHA256
+  })
+});
 
 function structuralColumnPolicyForVersion(schemaVersion) {
+  if (schemaVersion === 28) return STRUCTURAL_COLUMN_POLICY_V28;
   if (schemaVersion === 27) return STRUCTURAL_COLUMN_POLICY_V27;
   if (schemaVersion === 26) return STRUCTURAL_COLUMN_POLICY_V26;
   if (schemaVersion === 25) return STRUCTURAL_COLUMN_POLICY_V25;
@@ -2497,6 +2556,15 @@ function profileContractForVersion(schemaVersion) {
       preservedAccounting: PRESERVED_ACCOUNTING
     });
   }
+  if (schemaVersion === 28) {
+    return Object.freeze({
+      semanticPolicies: V28_SEMANTIC_POLICIES,
+      equalityGroups: V19_EQUALITY_GROUPS,
+      referenceGroups: REFERENCE_GROUPS,
+      derivedRebuilds: V20_DERIVED_REBUILDS,
+      preservedAccounting: PRESERVED_ACCOUNTING
+    });
+  }
   throw new Error(`unsupported exact sanitization profile version ${schemaVersion}`);
 }
 
@@ -2516,16 +2584,16 @@ function assertManifestDocumentShape(manifest) {
   ) {
     throw new Error('malformed sanitization manifest header');
   }
-  if (!Array.isArray(manifest.exactProfiles) || manifest.exactProfiles.length !== 22) {
-    throw new Error('sanitization manifest must contain isolated exact v6 through v27 profiles');
+  if (!Array.isArray(manifest.exactProfiles) || manifest.exactProfiles.length !== 23) {
+    throw new Error('sanitization manifest must contain isolated exact v6 through v28 profiles');
   }
   const profileKeys = [
     'schemaVersion', 'semanticPolicies', 'equalityGroups', 'referenceGroups',
     'derivedRebuilds', 'objects'
   ];
   const versions = manifest.exactProfiles.map((profile) => profile.schemaVersion);
-  if (JSON.stringify(versions) !== JSON.stringify([6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27])) {
-    throw new Error('sanitization manifest exact profiles must be ordered v6 through v27');
+  if (JSON.stringify(versions) !== JSON.stringify([6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28])) {
+    throw new Error('sanitization manifest exact profiles must be ordered v6 through v28');
   }
   for (const compatibilityProfile of manifest.exactProfiles) {
     if (!exactObjectKeys(compatibilityProfile, profileKeys)) {
@@ -2562,12 +2630,12 @@ function exactProfileClassification(db) {
   });
   if (
     classification.status !== 'managed'
-    || ![1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27].includes(classification.currentVersion)
+    || ![1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28].includes(classification.currentVersion)
   ) {
     const observed = classification.currentVersion === undefined || classification.currentVersion === null
       ? classification.status
       : classification.currentVersion;
-    throw new Error(`sanitization source must be an exact managed version 1 or version 6 through version 27 profile; got ${observed}`);
+    throw new Error(`sanitization source must be an exact managed version 1 or version 6 through version 28 profile; got ${observed}`);
   }
   return classification;
 }
@@ -6103,7 +6171,7 @@ function rebuildOrganizationMethodologyDigests(db) {
 }
 
 function rebuildDerivedData(db, manifest) {
-  if (![1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27].includes(manifest.schemaVersion)) {
+  if (![1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28].includes(manifest.schemaVersion)) {
     throw new Error(`unsupported derived rebuild profile ${manifest.schemaVersion}`);
   }
   const hasKnowledge = db.prepare("SELECT 1 AS present FROM sqlite_schema WHERE type='table' AND name='knowledge_entries'").get();

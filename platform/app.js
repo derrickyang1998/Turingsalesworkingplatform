@@ -267,6 +267,32 @@ function applyInfluencerImportPermissionPresentation() {
   }
 }
 
+function applySubscriptionExpiryPresentation() {
+  var main = document.getElementById('mainContent');
+  if (!main) return;
+  var banner = document.getElementById('subscriptionExpiryBanner');
+  var subscription = CURRENT_USER && CURRENT_USER.organization_subscription;
+  var expired = subscription && subscription.status === 'expired';
+  if (!expired) {
+    if (banner && banner.parentNode) banner.parentNode.removeChild(banner);
+    return;
+  }
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.id = 'subscriptionExpiryBanner';
+    banner.setAttribute('role', 'status');
+    banner.style.cssText = 'position:sticky;top:0;z-index:120;padding:10px 18px;background:#fff3f0;border-bottom:1px solid #e7a59a;color:#7f1d1d;font-size:13px;font-weight:600;line-height:1.5';
+    main.insertBefore(banner, main.firstChild);
+  }
+  var expiry = typeof subscription.expires_at === 'string'
+    ? new Date(subscription.expires_at)
+    : null;
+  var expiryText = expiry && Number.isFinite(expiry.getTime())
+    ? expiry.toLocaleString('zh-CN', { hour12: false })
+    : '未知时间';
+  banner.textContent = '当前组织订阅已于 ' + expiryText + ' 到期，业务操作已暂停，请联系平台管理员续期。';
+}
+
 function applyCurrentUserRolePresentation() {
   var platformAdmin = currentUserIsPlatformAdministrator();
   var governanceAccess = currentUserHasGovernanceAccess();
@@ -288,6 +314,7 @@ function applyCurrentUserRolePresentation() {
   applyCustomerReportExportPermissionPresentation();
   applyInfluencerExportPermissionPresentation();
   applyInfluencerImportPermissionPresentation();
+  applySubscriptionExpiryPresentation();
 }
 
 function syncCrmTeamSelector() {
@@ -10507,6 +10534,14 @@ function buildAdminOrganizationMemberQuery(cursor) {
   if (Number.isSafeInteger(parsedCursor) && parsedCursor > 0) query.push('cursor=' + parsedCursor);
   return '?' + query.join('&');
 }
+function adminSubscriptionLocalValue(expiresAt) {
+  if (typeof expiresAt !== 'string' || !expiresAt) return '';
+  var date = new Date(expiresAt);
+  if (!Number.isFinite(date.getTime())) return '';
+  function pad(value) { return String(value).padStart(2, '0'); }
+  return date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate())
+    + 'T' + pad(date.getHours()) + ':' + pad(date.getMinutes()) + ':' + pad(date.getSeconds());
+}
 function renderAdminOrganizations(organizations) {
   var container = document.getElementById('ad_organizationList');
   if (!container) return;
@@ -10518,7 +10553,7 @@ function renderAdminOrganizations(organizations) {
   organizations.forEach(function(organization) {
     adminOrganizationsById[String(organization.id)] = organization;
   });
-  container.innerHTML = '<table><thead><tr><th>组织</th><th>套餐</th><th>团队</th><th>有效成员</th><th>已撤销</th><th>操作</th></tr></thead><tbody>'
+  container.innerHTML = '<table><thead><tr><th>组织</th><th>套餐</th><th>订阅到期</th><th>团队</th><th>有效成员</th><th>已撤销</th><th>操作</th></tr></thead><tbody>'
     + organizations.map(function(organization) {
       var id = Number(organization.id);
       var safeId = Number.isSafeInteger(id) && id > 0 ? id : 0;
@@ -10553,8 +10588,34 @@ function renderAdminOrganizations(organizations) {
           + '<button type="button" id="ad_organizationPlanSave_' + safeId + '" class="btn btn-xs" title="保存套餐" onclick="saveAdminOrganizationPlan(' + safeId + ')">保存</button>'
           + '</div>';
       }
+      var subscription = organization.subscription && typeof organization.subscription === 'object'
+        ? organization.subscription
+        : null;
+      var subscriptionStatus = subscription && subscription.status;
+      var subscriptionExpiry = subscription && typeof subscription.expires_at === 'string'
+        ? subscription.expires_at
+        : null;
+      var subscriptionLabel = '策略不可用';
+      if (subscriptionStatus === 'perpetual') subscriptionLabel = '永久';
+      if (subscriptionStatus === 'active') {
+        subscriptionLabel = '有效至 ' + new Date(subscriptionExpiry).toLocaleString('zh-CN', { hour12: false });
+      }
+      if (subscriptionStatus === 'expired') {
+        subscriptionLabel = '已到期 ' + new Date(subscriptionExpiry).toLocaleString('zh-CN', { hour12: false });
+      }
+      var canManageSubscription = organization.allowed_actions &&
+        organization.allowed_actions.manage_subscription === true;
+      var subscriptionCell = '<span class="tm-member-access-note">' + esc(subscriptionLabel) + '</span>';
+      if (canManageSubscription && subscription) {
+        subscriptionCell = '<div style="display:flex;align-items:center;gap:6px;min-width:268px;flex-wrap:wrap">'
+          + '<input type="datetime-local" step="1" id="ad_organizationSubscription_' + safeId + '" class="form-control" style="width:188px;height:34px;padding:4px 8px" value="' + esc(adminSubscriptionLocalValue(subscriptionExpiry)) + '" title="留空表示永久有效">'
+          + '<button type="button" id="ad_organizationSubscriptionSave_' + safeId + '" class="btn btn-xs" title="保存订阅到期时间" onclick="saveAdminOrganizationSubscription(' + safeId + ')">保存</button>'
+          + '<span class="tm-member-access-note" style="width:100%">' + esc(subscriptionLabel) + '</span>'
+          + '</div>';
+      }
       return '<tr><td><strong>' + esc(organization.name || '-') + '</strong><div style="font-size:11px;opacity:.55">' + esc(organization.code || '-') + '</div><div class="tm-member-access-note">企业所有者：' + esc(ownerName) + '</div></td>'
         + '<td>' + planCell + '</td>'
+        + '<td>' + subscriptionCell + '</td>'
         + '<td>' + (Number(organization.team_count) || 0) + '</td>'
         + '<td>' + (Number(organization.active_member_count) || 0) + '</td>'
         + '<td>' + (Number(organization.revoked_member_count) || 0) + '</td>'
@@ -10625,6 +10686,68 @@ async function saveAdminOrganizationPlan(organizationId) {
     return false;
   } finally {
     select.disabled = false;
+    if (button) button.disabled = false;
+  }
+}
+async function saveAdminOrganizationSubscription(organizationId) {
+  var parsedId = Number(organizationId);
+  var organization = adminOrganizationsById[String(parsedId)];
+  var input = document.getElementById('ad_organizationSubscription_' + parsedId);
+  var button = document.getElementById('ad_organizationSubscriptionSave_' + parsedId);
+  var subscription = organization && organization.subscription;
+  var version = Number(subscription && subscription.term_version);
+  if (!Number.isSafeInteger(parsedId) || parsedId < 1 || !organization || !input ||
+      !Number.isSafeInteger(version) || version < 1) return false;
+  var localValue = String(input.value || '').trim();
+  var expiresAt = null;
+  if (localValue) {
+    var parsedDate = new Date(localValue);
+    if (!Number.isFinite(parsedDate.getTime())) {
+      toast('请输入有效的订阅到期时间', 'error');
+      return false;
+    }
+    expiresAt = parsedDate.toISOString().replace(/\.\d{3}Z$/, 'Z');
+  }
+  var currentExpiry = typeof subscription.expires_at === 'string' ? subscription.expires_at : null;
+  if (expiresAt === currentExpiry) {
+    toast('订阅到期时间未发生变化');
+    return false;
+  }
+  var reason = typeof prompt === 'function'
+    ? prompt('请输入本次订阅期限变更原因')
+    : null;
+  if (reason === null) return false;
+  reason = String(reason || '').trim();
+  if (!reason || reason.length > 500) {
+    toast('请输入 1-500 个字符的订阅期限变更原因', 'error');
+    return false;
+  }
+  input.disabled = true;
+  if (button) button.disabled = true;
+  try {
+    var response = await apiFetch('/admin/organizations/' + parsedId + '/subscription', {
+      method: 'PUT',
+      body: JSON.stringify({
+        expires_at: expiresAt,
+        expected_version: version,
+        reason: reason
+      })
+    });
+    var data = await response.json();
+    if (!response.ok) {
+      if (data && data.code === 'SUBSCRIPTION_TERM_VERSION_CONFLICT') {
+        await loadAdminOrganizations();
+      }
+      throw new Error(data.error || '订阅到期时间更新失败');
+    }
+    toast('组织订阅到期时间已更新');
+    await loadAdminOrganizations();
+    return true;
+  } catch (error) {
+    toast(error.message || '订阅到期时间更新失败', 'error');
+    return false;
+  } finally {
+    input.disabled = false;
     if (button) button.disabled = false;
   }
 }
@@ -15244,7 +15367,7 @@ function switchPage(id, options) {
     'toggleAll', 'syncInfluencerSelectionState', 'loadM4Campaigns', 'changeM4CampaignContext', 'openM4CampaignCloseoutReview', 'closeM4CampaignCloseoutReview', 'submitM4CampaignCloseoutReview', 'startCollab', 'submitCollabOrder', 'closeCollabOrderModal', 'loadCollaborations', 'updateCollabStatus', 'runCampaignCollabAction', 'closeCampaignContractConfirmationModal', 'submitCampaignContractConfirmation', 'closeCampaignContentReviewModal', 'submitCampaignContentReview', 'closeCampaignContentReviewDecisionModal', 'submitCampaignContentReviewDecision', 'renderCampaignPublicationRows', 'syncCampaignPublicationDraftRows', 'addCampaignPublicationRow', 'removeCampaignPublicationRow', 'openCampaignPublicationModal', 'closeCampaignPublicationModal', 'submitCampaignPublicationConfirmation', 'openCollaborationPerformanceTracking', 'openCampaignPublicationHistoryModal', 'loadCampaignPublicationHistoryPage', 'openCampaignPaymentModal', 'closeCampaignPaymentModal', 'submitCampaignPayment', 'voidCampaignPayment', 'closeCampaignSettlementModal', 'submitCampaignSettlement', 'openCampaignSettlementDecisionModal', 'closeCampaignSettlementDecisionModal', 'submitCampaignSettlementDecision',
     'initPerformanceMonitor', 'initPerformanceDashboard', 'refreshPerformanceMonitor', 'refreshPerformanceDashboard', 'changePerformanceCampaignContext', 'handlePerformanceTopMetricChange', 'refreshPerformanceReviewEvidence', 'generatePerformanceAiReviewDraft', 'loadPerformanceContents', 'loadPerformanceFreshnessQueue', 'openPerformanceFreshnessInput', 'refreshPerformanceUpdateStatus', 'runPerformanceProviderRefresh', 'loadPerformanceIntegrationPreview', 'loadPerformanceFeishuConnection', 'savePerformanceFeishuConnectionDraft', 'approvePerformanceFeishuConnectionDraft', 'downloadPerformanceFeishuSnapshot', 'createPerformanceContent', 'downloadPerformanceTemplate', 'handlePerformanceImport', 'handlePerformanceDrop', 'downloadPerformanceMetricsTemplate', 'handlePerformanceMetricsImport', 'handlePerformanceMetricsDrop', 'openPerformanceInputModal', 'closePerformanceInputModal', 'savePerformanceInput', 'loadPerformanceDashboard', 'loadPerformanceReviewEvidence', 'debouncedPerformanceContentSearch', 'exportPerformanceContents',
     'sendChat', 'clearChat', 'clearAIMemory', 'pushToFeishu', 'loadFeishuStatus', 'loadFeishuOutbox', 'testFeishuConnection', 'selectFeishuReconciliationDelivery', 'reconcileFeishuDelivery', 'selectFeishuRetryDelivery', 'retryFeishuDelivery',
-    'switchAdminTab', 'loadAdminDashboard', 'loadAdminUsers', 'adminUserNextPage', 'adminUserPreviousPage', 'loadAdminPlanCatalog', 'loadAdminOrganizations', 'saveAdminOrganizationPlan', 'selectAdminOrganization', 'loadAdminOrganizationMembers', 'adminOrganizationNextPage', 'adminOrganizationPreviousPage', 'adminOrganizationMemberNextPage', 'adminOrganizationMemberPreviousPage', 'saveAdminOrganizationMember', 'initializeAdminOrganizationOwner', 'openAdminOrganizationOwnerTransfer', 'closeAdminOrganizationOwnerTransfer', 'updateAdminOrganizationOwnerTransferSubmit', 'submitAdminOrganizationOwnerTransfer', 'adminAddUser', 'adminCreateInvite', 'adminResetPw',
+    'switchAdminTab', 'loadAdminDashboard', 'loadAdminUsers', 'adminUserNextPage', 'adminUserPreviousPage', 'loadAdminPlanCatalog', 'loadAdminOrganizations', 'saveAdminOrganizationPlan', 'saveAdminOrganizationSubscription', 'selectAdminOrganization', 'loadAdminOrganizationMembers', 'adminOrganizationNextPage', 'adminOrganizationPreviousPage', 'adminOrganizationMemberNextPage', 'adminOrganizationMemberPreviousPage', 'saveAdminOrganizationMember', 'initializeAdminOrganizationOwner', 'openAdminOrganizationOwnerTransfer', 'closeAdminOrganizationOwnerTransfer', 'updateAdminOrganizationOwnerTransferSubmit', 'submitAdminOrganizationOwnerTransfer', 'adminAddUser', 'adminCreateInvite', 'adminResetPw',
     'wfUndo', 'wfRedo', 'wfClearCanvas', 'wfSaveTemplate', 'wfPublishTemplate', 'wfResetTaskFilters', 'wfLoadTasks', 'wfLoadInstances',
     'showRelatedBrands', 'closeBrandRelModal'
   ];

@@ -190,6 +190,198 @@ test('organization directory renders an authoritative plan selector only when as
   });
 });
 
+test('organization directory renders and saves compact subscription expiry controls only for platform admins', async () => {
+  const elements = { ad_organizationList: { innerHTML: '' } };
+  const calls = [];
+  let refreshes = 0;
+  const context = loadFunctions({
+    adminOrganizationsById: {},
+    adminPlanCatalog: [],
+    document: { getElementById(id) { return elements[id] || null; } },
+    prompt() { return 'Annual renewal approved'; },
+    esc,
+    toast() {},
+    Error,
+    Promise,
+    Date,
+    apiFetch(url, options) {
+      calls.push([url, options]);
+      return Promise.resolve(response(200, {
+        subscription: {
+          organization_id: 10,
+          expires_at: '2099-01-01T00:00:00Z',
+          term_version: 2,
+          status: 'active'
+        }
+      }));
+    },
+    loadAdminOrganizations() { refreshes += 1; return Promise.resolve([]); }
+  }, [
+    'adminSubscriptionLocalValue',
+    'renderAdminOrganizations',
+    'saveAdminOrganizationSubscription'
+  ]);
+
+  context.renderAdminOrganizations([{
+    id: 10,
+    code: 'alpha',
+    name: 'Alpha',
+    team_count: 1,
+    active_member_count: 2,
+    revoked_member_count: 0,
+    company_owner: null,
+    subscription: { expires_at: null, term_version: 1, status: 'perpetual' },
+    allowed_actions: { initialize_owner: false, manage_subscription: true }
+  }, {
+    id: 20,
+    code: 'beta',
+    name: 'Beta',
+    team_count: 1,
+    active_member_count: 1,
+    revoked_member_count: 0,
+    company_owner: null,
+    subscription: {
+      expires_at: '2000-01-01T00:00:00Z',
+      term_version: 3,
+      status: 'expired'
+    },
+    allowed_actions: { initialize_owner: false, manage_subscription: false }
+  }]);
+  assert.match(elements.ad_organizationList.innerHTML, /<th>订阅到期<\/th>/);
+  assert.match(elements.ad_organizationList.innerHTML, /id="ad_organizationSubscription_10"/);
+  assert.match(elements.ad_organizationList.innerHTML, /type="datetime-local" step="1"/);
+  assert.match(elements.ad_organizationList.innerHTML, /永久/);
+  assert.doesNotMatch(elements.ad_organizationList.innerHTML, /id="ad_organizationSubscription_20"/);
+  assert.match(elements.ad_organizationList.innerHTML, /已到期/);
+
+  elements.ad_organizationSubscription_10 = {
+    value: '2099-01-01T08:00:45',
+    disabled: false
+  };
+  const updated = await context.saveAdminOrganizationSubscription(10);
+  assert.equal(updated, true);
+  assert.equal(refreshes, 1);
+  assert.equal(calls[0][0], '/admin/organizations/10/subscription');
+  const body = JSON.parse(calls[0][1].body);
+  assert.equal(body.expected_version, 1);
+  assert.equal(body.reason, 'Annual renewal approved');
+  assert.equal(body.expires_at, new Date('2099-01-01T08:00:45').toISOString().replace(/\.\d{3}Z$/, 'Z'));
+  assert.match(context.adminSubscriptionLocalValue('2099-01-01T00:00:45Z'), /:45$/);
+});
+
+test('subscription expiry controls support perpetual terms and refresh after a stale compare-and-swap', async () => {
+  const elements = {
+    ad_organizationSubscription_10: { value: '', disabled: false },
+    ad_organizationSubscriptionSave_10: { disabled: false }
+  };
+  const calls = [];
+  const messages = [];
+  let refreshes = 0;
+  let stale = false;
+  const context = loadFunctions({
+    adminOrganizationsById: {
+      10: {
+        id: 10,
+        subscription: {
+          expires_at: '2099-01-01T00:00:00Z',
+          term_version: 4,
+          status: 'active'
+        }
+      }
+    },
+    document: { getElementById(id) { return elements[id] || null; } },
+    prompt() { return 'Return organization to perpetual access'; },
+    toast(message, type) { messages.push([message, type]); },
+    Promise,
+    Error,
+    Date,
+    JSON,
+    String,
+    Number,
+    async loadAdminOrganizations() { refreshes += 1; },
+    apiFetch(url, options) {
+      calls.push([url, options]);
+      if (stale) {
+        return Promise.resolve(response(409, {
+          error: '订阅期限已被其他管理员更新，请重试。',
+          code: 'SUBSCRIPTION_TERM_VERSION_CONFLICT'
+        }));
+      }
+      return Promise.resolve(response(200, {
+        subscription: {
+          organization_id: 10,
+          expires_at: null,
+          term_version: 5,
+          status: 'perpetual'
+        }
+      }));
+    }
+  }, ['saveAdminOrganizationSubscription']);
+
+  assert.equal(await context.saveAdminOrganizationSubscription(10), true);
+  assert.deepEqual(JSON.parse(calls[0][1].body), {
+    expires_at: null,
+    expected_version: 4,
+    reason: 'Return organization to perpetual access'
+  });
+  assert.equal(refreshes, 1);
+
+  stale = true;
+  elements.ad_organizationSubscription_10.value = '2099-12-31T23:59';
+  assert.equal(await context.saveAdminOrganizationSubscription(10), false);
+  assert.equal(refreshes, 2);
+  assert.deepEqual(messages.at(-1), ['订阅期限已被其他管理员更新，请重试。', 'error']);
+});
+
+test('expired organization members receive a compact read-only shell status', () => {
+  const elements = {};
+  const main = {
+    firstChild: { id: 'first-page' },
+    insertBefore(node) {
+      elements[node.id] = node;
+      node.parentNode = this;
+    },
+    removeChild(node) {
+      delete elements[node.id];
+      node.parentNode = null;
+    }
+  };
+  elements.mainContent = main;
+  const context = loadFunctions({
+    CURRENT_USER: {
+      organization_subscription: {
+        status: 'expired',
+        expires_at: '2026-09-20T12:00:00Z'
+      }
+    },
+    document: {
+      getElementById(id) { return elements[id] || null; },
+      createElement() {
+        return {
+          id: '',
+          style: {},
+          textContent: '',
+          setAttribute(name, value) { this[name] = value; }
+        };
+      }
+    },
+    Date,
+    Number
+  }, ['applySubscriptionExpiryPresentation']);
+
+  context.applySubscriptionExpiryPresentation();
+  assert.ok(elements.subscriptionExpiryBanner);
+  assert.match(elements.subscriptionExpiryBanner.textContent, /订阅已于/);
+  assert.match(elements.subscriptionExpiryBanner.textContent, /业务操作已暂停/);
+  assert.equal(elements.subscriptionExpiryBanner.role, 'status');
+
+  context.CURRENT_USER = {
+    organization_subscription: { status: 'active', expires_at: '2099-01-01T00:00:00Z' }
+  };
+  context.applySubscriptionExpiryPresentation();
+  assert.equal(elements.subscriptionExpiryBanner, undefined);
+});
+
 test('existing users tab exposes searchable entitlement filters and stable paging controls', () => {
   for (const id of [
     'ad_userSearch',

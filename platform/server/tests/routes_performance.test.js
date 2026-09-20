@@ -846,6 +846,34 @@ test('denies both performance CSV downloads before exporters run and records bou
   assert.equal(JSON.stringify(audits).includes('must-not-be-audited'), false);
 });
 
+test('subscription expiry blocks performance and customer-report exports with no artifact bytes', () => {
+  const routesUnderTest = [
+    ['GET /api/campaigns/:id/performance/contents/export', 'export'],
+    ['GET /api/campaigns/:id/performance/feishu-projection-preview/export', 'feishu-projection-export'],
+    ['POST /api/campaigns/:id/performance/customer-report-snapshots/:snapshotId/ppt', 'customer-report-ppt'],
+    ['POST /api/campaigns/:id/performance/customer-report-snapshots/:snapshotId/html', 'customer-report-html']
+  ];
+  for (const [route, forbiddenServiceCall] of routesUnderTest) {
+    const customerReport = route.includes('customer-report-snapshots');
+    const options = customerReport
+      ? { customerReportPermissionDecision: { allowed: false, code: 'SUBSCRIPTION_EXPIRED' } }
+      : { permissionDecision: { allowed: false, code: 'SUBSCRIPTION_EXPIRED' } };
+    const { routes, calls } = createFixture(options);
+    const response = invoke(routes.get(route), {
+      user: { id: 9, role: 'user' },
+      authContext: { organization: { id: 10 } },
+      params: { id: '7', snapshotId: '81' },
+      body: {},
+      query: {},
+      requestId: `expired-${forbiddenServiceCall}`
+    });
+    assert.equal(response.statusCode, 403, route);
+    assert.equal(response.body.reason_code, 'SUBSCRIPTION_EXPIRED', route);
+    assert.deepEqual(response.headers, {}, route);
+    assert.equal(calls.some(([name]) => name === forbiddenServiceCall), false, route);
+  }
+});
+
 test('does not preserve non-canonical campaign ids in performance export denial audits', () => {
   const { routes, calls } = createFixture({
     permissionDecision: { allowed: false, code: 'ACTION_FORBIDDEN' }

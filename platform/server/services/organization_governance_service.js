@@ -300,7 +300,7 @@ function persistAudit(db, input) {
   }
 }
 
-function listOrganizations(db, options, planEntitlementService) {
+function listOrganizations(db, options, planEntitlementService, subscriptionExpiryService) {
   const query = requestQuery(options);
   const q = boundedQuery(query.q);
   const limit = boundedLimit(query.limit);
@@ -344,6 +344,14 @@ function listOrganizations(db, options, planEntitlementService) {
           throw serviceError(503, 'ENTITLEMENT_POLICY_UNAVAILABLE', '组织套餐权益策略不可用。');
         }
       }
+      let subscription;
+      if (subscriptionExpiryService) {
+        try {
+          subscription = subscriptionExpiryService.projectOrganization({ organizationId: row.id });
+        } catch (_error) {
+          throw serviceError(503, 'SUBSCRIPTION_POLICY_UNAVAILABLE', '组织订阅期限策略不可用。');
+        }
+      }
       return {
         id: row.id,
         code: row.code,
@@ -354,9 +362,13 @@ function listOrganizations(db, options, planEntitlementService) {
         revoked_member_count: Number(row.revoked_member_count),
         company_owner: companyOwner,
         ...(plan === undefined ? {} : { plan }),
+        ...(subscription === undefined ? {} : { subscription }),
         allowed_actions: {
           initialize_owner: scope.kind === 'platform_admin' && companyOwner === null,
-          ...(plan === undefined ? {} : { assign_plan: scope.kind === 'platform_admin' })
+          ...(plan === undefined ? {} : { assign_plan: scope.kind === 'platform_admin' }),
+          ...(subscription === undefined ? {} : {
+            manage_subscription: scope.kind === 'platform_admin'
+          })
         }
       };
     });
@@ -877,18 +889,30 @@ function createOrganizationGovernanceService(db, factoryOptions = {}) {
     throw new TypeError('A SQLite database is required.');
   }
   const planEntitlementService = factoryOptions.planEntitlementService || null;
+  const subscriptionExpiryService = factoryOptions.subscriptionExpiryService || null;
   if (
     planEntitlementService !== null &&
     typeof planEntitlementService.projectOrganization !== 'function'
   ) {
     throw new TypeError('planEntitlementService must expose projectOrganization');
   }
+  if (
+    subscriptionExpiryService !== null &&
+    typeof subscriptionExpiryService.projectOrganization !== 'function'
+  ) {
+    throw new TypeError('subscriptionExpiryService must expose projectOrganization');
+  }
   return Object.freeze({
     projectUserAccess(requestOptions) {
       return projectUserAccess(db, requestOptions || {});
     },
     listOrganizations(requestOptions) {
-      return listOrganizations(db, requestOptions || {}, planEntitlementService);
+      return listOrganizations(
+        db,
+        requestOptions || {},
+        planEntitlementService,
+        subscriptionExpiryService
+      );
     },
     listMembers(requestOptions) {
       return listMembers(db, requestOptions || {});

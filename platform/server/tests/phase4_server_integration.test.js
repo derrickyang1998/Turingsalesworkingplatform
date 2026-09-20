@@ -956,6 +956,12 @@ test('login and auth me preserve the user object and add current auth context', 
       'campaign.customer_report': ['export'],
       'influencer.data': ['export', 'import']
     });
+    assert.deepEqual(login.body.user.organization_subscription, {
+      organization_id: login.body.auth_context.organization.id,
+      expires_at: null,
+      term_version: 1,
+      status: 'perpetual'
+    });
     assert.equal(Array.isArray(login.body.auth_context.teams), true);
     assert.equal(login.body.auth_context.teams.length > 0, true);
     for (const team of login.body.auth_context.teams) {
@@ -973,6 +979,164 @@ test('login and auth me preserve the user object and add current auth context', 
     assert.equal(me.response.status, 200);
     assert.deepEqual(me.body.user, login.body.user);
     assert.deepEqual(me.body.auth_context, login.body.auth_context);
+  } finally {
+    await server.close();
+  }
+});
+
+test('one live session observes subscription expiry and renewal without being revoked', {
+  timeout: 30000
+}, async () => {
+  const server = await startTestServer('tm-subscription-expiry-session-');
+  try {
+    const login = await jsonRequest(server.baseUrl, '/api/auth/login', {
+      method: 'POST',
+      body: { username: 'admin', password: 'AdminTest1!Secure' }
+    });
+    assert.equal(login.response.status, 200, login.text + '\n' + server.output());
+    const organizationId = login.body.auth_context.organization.id;
+    assert.equal(login.body.user.organization_subscription.status, 'perpetual');
+
+    const expired = await jsonRequest(
+      server.baseUrl,
+      `/api/admin/organizations/${organizationId}/subscription`,
+      {
+        method: 'PUT',
+        token: login.body.token,
+        body: {
+          expires_at: '2000-01-01T00:00:00Z',
+          expected_version: 1,
+          reason: 'Integration expiry verification'
+        }
+      }
+    );
+    assert.equal(expired.response.status, 200, expired.text);
+    assert.equal(expired.body.subscription.status, 'expired');
+
+    const expiredMe = await jsonRequest(server.baseUrl, '/api/auth/me', {
+      token: login.body.token
+    });
+    assert.equal(expiredMe.response.status, 200, expiredMe.text);
+    assert.equal(expiredMe.body.user.organization_subscription.status, 'expired');
+    for (const actions of Object.values(expiredMe.body.user.module_permissions)) {
+      assert.deepEqual(actions, []);
+    }
+
+    const memberStatus = await jsonRequest(server.baseUrl, '/api/organization-subscription', {
+      token: login.body.token
+    });
+    assert.equal(memberStatus.response.status, 200, memberStatus.text);
+    assert.equal(memberStatus.body.subscription.status, 'expired');
+
+    const denied = await jsonRequest(server.baseUrl, '/api/customers?scope=my', {
+      token: login.body.token
+    });
+    assert.equal(denied.response.status, 403, denied.text);
+    assert.equal(denied.body.code, 'CRM_PERMISSION_FORBIDDEN');
+    assert.equal(denied.body.reason_code, 'SUBSCRIPTION_EXPIRED');
+
+    for (const [method, requestPath, expectedCode] of [
+      ['POST', '/api/opportunities', 'CRM_PERMISSION_FORBIDDEN'],
+      ['PUT', '/api/opportunities/1', 'CRM_PERMISSION_FORBIDDEN'],
+      ['POST', '/api/customers/1/contacts', 'CRM_PERMISSION_FORBIDDEN'],
+      ['PUT', '/api/customers/1/contacts/1', 'CRM_PERMISSION_FORBIDDEN'],
+      ['POST', '/api/customers/1/tasks', 'CRM_PERMISSION_FORBIDDEN'],
+      ['POST', '/api/customers/1/tasks/1/complete', 'CRM_PERMISSION_FORBIDDEN'],
+      ['POST', '/api/influencers', 'INFLUENCER_IMPORT_FORBIDDEN'],
+      ['POST', '/api/influencers/import', 'INFLUENCER_IMPORT_FORBIDDEN'],
+      ['POST', '/api/influencers/upload', 'INFLUENCER_IMPORT_FORBIDDEN']
+    ]) {
+      const response = await fetch(`${server.baseUrl}${requestPath}`, {
+        method,
+        headers: {
+          Authorization: `Bearer ${login.body.token}`,
+          'Content-Type': 'application/json',
+          'X-Request-Id': `expired-ingress-${method}-${requestPath.replace(/[^a-z0-9]+/gi, '-')}`
+        },
+        body: '{'
+      });
+      const body = await response.json();
+      assert.equal(response.status, 403, `${method} ${requestPath}: ${JSON.stringify(body)}`);
+      assert.equal(body.code, expectedCode, `${method} ${requestPath}`);
+      assert.equal(body.reason_code, 'SUBSCRIPTION_EXPIRED', `${method} ${requestPath}`);
+    }
+
+    const renewed = await jsonRequest(
+      server.baseUrl,
+      `/api/admin/organizations/${organizationId}/subscription`,
+      {
+        method: 'PUT',
+        token: login.body.token,
+        body: {
+          expires_at: null,
+          expected_version: 2,
+          reason: 'Integration renewal verification'
+        }
+      }
+    );
+    assert.equal(renewed.response.status, 200, renewed.text);
+    assert.equal(renewed.body.subscription.status, 'perpetual');
+
+    const renewedMe = await jsonRequest(server.baseUrl, '/api/auth/me', {
+      token: login.body.token
+    });
+    assert.equal(renewedMe.response.status, 200, renewedMe.text);
+    assert.deepEqual(renewedMe.body.user.module_permissions['crm.customer'], ['read', 'create', 'update']);
+
+    const logout = await jsonRequest(server.baseUrl, '/api/auth/logout', {
+      method: 'POST',
+      token: login.body.token,
+      body: {}
+    });
+    assert.equal(logout.response.status, 200, logout.text);
+  } finally {
+    await server.close();
+  }
+});
+
+test('authenticated requests report unavailable entitlement policy as 503 instead of invalid token', {
+  timeout: 30000
+}, async () => {
+  const server = await startTestServer('tm-subscription-policy-unavailable-');
+  try {
+    const login = await jsonRequest(server.baseUrl, '/api/auth/login', {
+      method: 'POST',
+      body: { username: 'admin', password: 'AdminTest1!Secure' }
+    });
+    assert.equal(login.response.status, 200, login.text + '\n' + server.output());
+
+    const mutation = new Database(server.dbPath);
+    try {
+      mutation.exec('ALTER TABLE organization_subscription_terms RENAME TO unavailable_subscription_terms');
+    } finally {
+      mutation.close();
+    }
+
+    const me = await jsonRequest(server.baseUrl, '/api/auth/me', {
+      token: login.body.token
+    });
+    assert.equal(me.response.status, 503, me.text);
+    assert.equal(me.body.code, 'ENTITLEMENT_POLICY_UNAVAILABLE');
+    assert.equal(me.body.error, 'Entitlement policy unavailable');
+
+    for (const [requestPath, expectedCode] of [
+      ['/api/opportunities', 'CRM_PERMISSION_FORBIDDEN'],
+      ['/api/influencers/import', 'INFLUENCER_IMPORT_FORBIDDEN']
+    ]) {
+      const response = await fetch(`${server.baseUrl}${requestPath}`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${login.body.token}`,
+          'Content-Type': 'application/json',
+          'X-Request-Id': `unavailable-ingress-${expectedCode.toLowerCase()}`
+        },
+        body: '{'
+      });
+      const body = await response.json();
+      assert.equal(response.status, 503, `${requestPath}: ${JSON.stringify(body)}`);
+      assert.equal(body.code, expectedCode);
+      assert.equal(body.reason_code, 'ENTITLEMENT_POLICY_UNAVAILABLE');
+    }
   } finally {
     await server.close();
   }

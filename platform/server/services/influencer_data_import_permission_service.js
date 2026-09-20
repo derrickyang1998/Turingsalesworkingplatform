@@ -88,11 +88,16 @@ function auditEvent(request, decision, outcome, input = {}) {
   return event;
 }
 
-function error(request, statusCode, code, message) {
+function error(request, statusCode, code, message, reasonCode) {
   const failure = new Error(message);
   failure.statusCode = statusCode;
   failure.code = code;
   failure.requestId = requestId(request);
+  if (
+    ['SUBSCRIPTION_EXPIRED', 'ENTITLEMENT_POLICY_UNAVAILABLE', 'AUTHORITATIVE_FACTS_UNAVAILABLE'].includes(reasonCode)
+  ) {
+    failure.reasonCode = reasonCode;
+  }
   return failure;
 }
 
