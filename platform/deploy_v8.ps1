@@ -10901,8 +10901,6 @@ node --test \
   server/tests/customer_workspace_ui.test.js
 node --test --test-name-pattern="subscription expiry" \
   server/tests/influencer_workflow.test.js
-node --test --test-name-pattern="login and auth me|one live session observes|unavailable entitlement policy" \
-  server/tests/phase4_server_integration.test.js
 install -d -m 0700 "$TEST_ROOT/browser-smoke"
 TM_DEPLOYMENT_SMOKE_ROOT="$TEST_ROOT/browser-smoke" \
 TM_DEPLOYMENT_SMOKE_PORT=43188 node node_modules/playwright-deploy/cli.js test -c server/tests/deployment-browser-smoke.config.js

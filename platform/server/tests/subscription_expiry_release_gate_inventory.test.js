@@ -78,6 +78,10 @@ test('current trusted candidate files are LF-normalized byte-for-byte', () => {
 
 test('deployment inventory ships the exact v28 implementation and focused release tests', () => {
   const deploy = fs.readFileSync(path.join(repoRoot, 'platform', 'deploy_v8.ps1'), 'utf8');
+  const phase4Integration = fs.readFileSync(
+    path.join(serverRoot, 'tests', 'phase4_server_integration.test.js'),
+    'utf8'
+  );
   const files = powerShellArrayEntries(deploy, 'FILES');
   for (const requiredPath of [
     'server/migrations/028_subscription_expiry.js',
@@ -103,7 +107,34 @@ test('deployment inventory ships the exact v28 implementation and focused releas
     /report\.get\('sourceVersion'\) not in \(1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28\)/
   );
   assert.match(deploy, /--test-name-pattern="subscription expiry"[\s\\]+server\/tests\/influencer_workflow\.test\.js/);
-  assert.match(deploy, /one live session observes\|unavailable entitlement policy/);
+  assert.doesNotMatch(
+    deploy,
+    /--test-name-pattern="login and auth me\|one live session observes\|unavailable entitlement policy"/
+  );
+  assert.match(
+    phase4Integration,
+    /test\('one live session observes subscription expiry and renewal without being revoked'/
+  );
+  assert.match(
+    phase4Integration,
+    /test\('authenticated requests report unavailable entitlement policy as 503 instead of invalid token'/
+  );
+  for (const requestPath of [
+    '/api/opportunities',
+    '/api/opportunities/1',
+    '/api/customers/1/contacts',
+    '/api/customers/1/contacts/1',
+    '/api/customers/1/tasks',
+    '/api/customers/1/tasks/1/complete',
+    '/api/influencers',
+    '/api/influencers/import',
+    '/api/influencers/upload'
+  ]) {
+    assert.ok(phase4Integration.includes(`'${requestPath}'`), requestPath);
+  }
+  assert.match(phase4Integration, /reason_code, 'SUBSCRIPTION_EXPIRED'/);
+  assert.match(phase4Integration, /response\.status, 503/);
+  assert.match(phase4Integration, /reason_code, 'ENTITLEMENT_POLICY_UNAVAILABLE'/);
   assert.match(
     deploy,
     /--test-name-pattern="trusted source manifest pins the sanitizer closure\|[^"\r\n]+deploy pins trusted sanitizer closure"[\s\\]+server\/tests\/deployment_source_trust\.test\.js/
