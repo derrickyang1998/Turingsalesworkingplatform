@@ -681,7 +681,7 @@ function apiResponseFor(request, fixture, recorder) {
         plans: [
           {
             code: 'crm_core',
-            name_zh: 'CRM 核心版',
+            name_zh: '客户关系核心版',
             name_en: 'CRM Core',
             catalog_version: 1,
             display_order: 10,
