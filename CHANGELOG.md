@@ -1,5 +1,27 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.9.22-demand-xlsx-parser-compatibility (Production Deployed, 2026-09-20) - 需求 XLSX 解析兼容
+
+### 交付与范围 / Delivery And Scope
+- 修复隔离 ZIP 检查器对标准 OOXML 零字节目录记录（如 `xl/`）的误判；用户上传的有效 XLSX 不再因末尾 `/` 被降级为 `Isolated parser failed`。文件名及其中的 `&` 不是原因。
+- 仅对目录记录移除一个末尾 `/` 后校验规范路径，并要求压缩前后尺寸均为零；绝对路径、盘符、反斜杠、空中间组件、`.`/`..`、软链接、文件/目录规范名碰撞、非零目录记录及压缩炸弹继续失败关闭。
+- 本版不改 schema v26、页面 UI、CRM、网红、AI/知识库、方案/PPT 或权限模型；冻结 `ppt.js` SHA-256 继续为 `f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e`。
+
+### 轻量验证与独立审查 / Lightweight Verification And Independent Review
+- TDD 先复现目录项失败再修复；解析器定向集 `98` 通过、`0` 失败、`19` 个平台限定跳过，最终身份/路由/门禁目标 `6/6` 通过。用户实际 XLSX 在本地完整 worker 链路返回 `xlsx-openxml`、`fallback=false`、1,102 字符、0 警告。
+- JavaScript/PowerShell 语法、JSON 清单、129 项可信源码逐项摘要、`git diff --check`、冻结 PPT 摘要和本地发布预检通过；受控候选通过远端 `76/76` 与 Chromium `2/2`。
+- 独立审查确认路径穿越和重复规范名保护未放宽；权威运行时摘要重固定后再次独立复审，确认清单、服务、测试、部署和文档哈希链一致。
+- 历史广域发布合同仍含与本版无关的旧 v24 期望，本轮按“一功能一上线”未改写旧快照。
+
+### 生产状态 / Production Status
+- 实现提交 `df83db7f5d8680f32ec8c80a2cebe3b03fcdd285` 与权威运行时身份提交 `8f3f07003103b0a8e26f1e58ee7c4028d3298c23` 已在生产变更前推送 GitHub。
+- 首个候选因本地预计算运行时摘要与权威隔离重建不一致，在生产变更前安全停止并恢复控制面；正式运行 `41747c9a690a4e2cb5409debdf26444b` 精确复现权威摘要后返回 `DEPLOY_OK` 与 `RETENTION_CLEANUP_OK`。
+- 可验证备份为 `/root/turingmarket/backups/v060-crm-sales-workspace-20260920-190906`；356 项清单 SHA-256 为 `f860f21ba14ecb7981ecd6dd442dc9831f5acdb8da8bf2377d119b953f43dc19`，数据库 SHA-256 为 `c7185c5bc6120bcab121044a25875711928e94200719bb049e0ea46c9cf3b976`。
+- 公网健康 `200`、解析器 ready、PM2 online 且重启 0；实际用户 XLSX 经生产鉴权 Nginx 路由返回 `200`、非降级提取 1,102 字符并沉淀私有需求知识。验收后活动会话为 0、解析任务目录为空、临时工作簿已清理。
+
+### 后续边界 / Next Boundary
+- 恢复 Phase 8 套餐目录与模块权益合同；继续一功能一上线、定向测试、独立审查、可验证备份和线上验收。
+
 ## v0.9.21-ai-token-quota-admission (Production Deployed, 2026-09-20) - AI Token 配额准入执行
 
 ### 交付与范围 / Delivery And Scope
