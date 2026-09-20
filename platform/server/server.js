@@ -23,6 +23,8 @@ const aiService = require('./services/ai_service');
 const tokenUsageService = require('./services/token_usage_service');
 const aiQuota = require('./services/ai_quota_service');
 const aiQuotaService = aiQuota.createAIQuotaService(db);
+const aiConcurrency = require('./services/ai_concurrency_service');
+const aiConcurrencyService = aiConcurrency.createAIConcurrencyService(db);
 const idempotency = require('./services/idempotency_service');
 const uploadAdmissionIdempotency = Object.freeze({
   reserveProcessingInTransaction(database, input) {
@@ -151,6 +153,7 @@ const registerCampaignRoutes = require('./routes_campaigns');
 const registerPerformanceRoutes = require('./routes_performance');
 const registerAdminTenantDirectoryRoutes = require('./routes_admin_tenant_directory');
 const registerAdminAIQuotaRoutes = require('./routes_admin_ai_quota');
+const registerAdminAIConcurrencyRoutes = require('./routes_admin_ai_concurrency');
 const registerOrganizationGovernanceRoutes = require('./routes_organization_governance');
 const registerPlanEntitlementRoutes = require('./routes_plan_entitlements');
 const registerSubscriptionExpiryRoutes = require('./routes_subscription_expiry');
@@ -168,7 +171,8 @@ const subscriptionExpiryService = createSubscriptionExpiryService(db);
 const organizationGovernanceService = createOrganizationGovernanceService(db, {
   planEntitlementService,
   subscriptionExpiryService,
-  aiQuotaService
+  aiQuotaService,
+  aiConcurrencyService
 });
 const {
   createCampaignPptBridgeHandler
@@ -1812,6 +1816,7 @@ function sendAiChatError(req, res, error) {
   const linkedError = error && (
     error.name === 'AIServiceError' ||
     error.name === 'AIQuotaServiceError' ||
+    error.name === 'AIConcurrencyServiceError' ||
     error.name === 'IdempotencyServiceError'
   );
   if (!linkedError) {
@@ -1826,8 +1831,8 @@ function sendAiChatError(req, res, error) {
     request_id: campaignLinkRequestId(req)
   };
   if (error.details !== undefined) body.details = error.details;
-  if (error.retryAfterSeconds) {
-    res.setHeader('Retry-After', String(error.retryAfterSeconds));
+  if (error.retryAfterSeconds || error.retryAfter) {
+    res.setHeader('Retry-After', String(error.retryAfterSeconds || error.retryAfter));
   }
   return res.status(error.statusCode || 500).json(body);
 }
@@ -2302,6 +2307,11 @@ require('./routes_customers')(app, db, authMiddleware, {
 });
 registerAdminTenantDirectoryRoutes(app, db, { authMiddleware, adminOnly });
 registerAdminAIQuotaRoutes(app, db, { authMiddleware, adminOnly, service: aiQuotaService });
+registerAdminAIConcurrencyRoutes(app, db, {
+  authMiddleware,
+  adminOnly,
+  service: aiConcurrencyService
+});
 registerOrganizationGovernanceRoutes(app, db, {
   authMiddleware,
   service: organizationGovernanceService
@@ -3039,30 +3049,12 @@ app.post('/api/ai/proposal-draft', authMiddleware, aiLimiter, async (req, res) =
     const demandText = String(body.demand_content || body.content || JSON.stringify(demand));
     const demandTitle = body.title || demand.brand || demand.product || '需求方案草稿';
     let demandEntry = null;
+    let demandSourceId = null;
     if (!linkedRequest) {
-      const demandSourceId = body.demand_id || body.source_id || crypto
+      demandSourceId = body.demand_id || body.source_id || crypto
         .createHash('sha256')
         .update(Buffer.from(demandText, 'utf8'))
         .digest('hex');
-      demandEntry = knowledgeService.ingestBusinessArtifact(db, {
-        artifactType: 'requirement_sheet',
-        artifactState: 'ingested',
-        title: '需求归档：' + demandTitle,
-        summary: demandText.slice(0, 240),
-        content: demandText,
-        sourceId: demandSourceId,
-        visibility: body.visibility || 'private',
-        tags: body.tags || ['demand', 'proposal'],
-        businessType: 'demand',
-        businessId: demandSourceId,
-        createdBy: req.user.id,
-        actorRole: req.user.role,
-        organizationId: req.authContext.organization.id,
-        metadata: {
-          demand,
-          requested_source_type: body.source_type || null
-        }
-      }).entry;
     }
     const template = body.template && typeof body.template === 'object' ? body.template : {};
     const templateSections = Array.isArray(template.sections)
@@ -3113,10 +3105,33 @@ app.post('/api/ai/proposal-draft', authMiddleware, aiLimiter, async (req, res) =
       atomicOneShot: true,
       max_tokens: 3200
     });
+    if (!linkedRequest) {
+      demandEntry = knowledgeService.ingestBusinessArtifact(db, {
+        artifactType: 'requirement_sheet',
+        artifactState: 'ingested',
+        title: '需求归档：' + demandTitle,
+        summary: demandText.slice(0, 240),
+        content: demandText,
+        sourceId: demandSourceId,
+        visibility: body.visibility || 'private',
+        tags: body.tags || ['demand', 'proposal'],
+        businessType: 'demand',
+        businessId: demandSourceId,
+        createdBy: req.user.id,
+        actorRole: req.user.role,
+        organizationId: req.authContext.organization.id,
+        metadata: {
+          demand,
+          requested_source_type: body.source_type || null
+        }
+      }).entry;
+    }
     res.json({ draft: result.answer, demand_entry: demandEntry, ai: result });
   } catch (e) {
     if (linkedRequest) return sendAiChatError(req, res, e);
-    if (e && e.name === 'AIQuotaServiceError') return sendAiChatError(req, res, e);
+    if (e && (e.name === 'AIQuotaServiceError' || e.name === 'AIConcurrencyServiceError')) {
+      return sendAiChatError(req, res, e);
+    }
     return res.status(500).json({
       error: 'AI proposal draft request failed.',
       code: 'AI_PROPOSAL_DRAFT_FAILED'
@@ -3211,7 +3226,9 @@ app.post('/api/ai/strategy', authMiddleware, aiLimiter, async (req, res) => {
     );
     res.json(result);
   } catch (e) {
-    if (e && e.name === 'AIQuotaServiceError') return sendAiChatError(req, res, e);
+    if (e && (e.name === 'AIQuotaServiceError' || e.name === 'AIConcurrencyServiceError')) {
+      return sendAiChatError(req, res, e);
+    }
     res.status(500).json({ error: e.message, content: '', fallback: true, warning: e.message });
   }
 });
@@ -3239,7 +3256,9 @@ app.post('/api/ai/demand-analysis', authMiddleware, aiLimiter, async (req, res) 
     res.json(result);
   } catch (e) {
     if (linkedRequest) return sendAiChatError(req, res, e);
-    if (e && e.name === 'AIQuotaServiceError') return sendAiChatError(req, res, e);
+    if (e && (e.name === 'AIQuotaServiceError' || e.name === 'AIConcurrencyServiceError')) {
+      return sendAiChatError(req, res, e);
+    }
     return res.status(500).json({
       error: 'AI demand analysis request failed.',
       code: 'AI_DEMAND_ANALYSIS_FAILED'
@@ -3287,7 +3306,9 @@ app.post('/api/ai/ppt-outline', authMiddleware, aiLimiter, async (req, res) => {
     res.json(result);
   } catch (e) {
     if (linkedRequest) return sendAiChatError(req, res, e);
-    if (e && e.name === 'AIQuotaServiceError') return sendAiChatError(req, res, e);
+    if (e && (e.name === 'AIQuotaServiceError' || e.name === 'AIConcurrencyServiceError')) {
+      return sendAiChatError(req, res, e);
+    }
     return res.status(500).json({
       error: 'AI PPT outline request failed.',
       code: 'AI_PPT_OUTLINE_FAILED'

@@ -56,20 +56,21 @@ function productionProviderCallers() {
   return files.sort();
 }
 
-test('schema, sanitizer, and trusted source registries terminate at organization quota migration 029', () => {
-  assert.deepEqual(migrationGate.REGISTERED_MIGRATIONS.at(-1), migration029);
-  assert.deepEqual(sanitizer.EXACT_PROFILE_MIGRATIONS.at(-1), migration029);
-  assert.equal(sanitizationManifest.exactProfiles.at(-1).schemaVersion, 29);
+test('schema, sanitizer, and trusted source registries retain organization quota migration 029', () => {
+  assert.ok(migrationGate.REGISTERED_MIGRATIONS.some((entry) => entry.version === 29));
+  assert.ok(sanitizer.EXACT_PROFILE_MIGRATIONS.some((entry) => entry.version === 29));
+  const profile29 = sanitizationManifest.exactProfiles.find((entry) => entry.schemaVersion === 29);
+  assert.ok(profile29);
   assert.ok(
-    sanitizationManifest.exactProfiles.at(-1).objects.some(
+    profile29.objects.some(
       (object) => object.name === 'organization_ai_quota_policies'
     )
   );
 
   const manifestPath = path.join(serverRoot, 'scripts', 'trusted_production_source_manifest.json');
   const trusted = trustedGate.loadTrustedManifest(manifestPath);
-  assert.equal(trusted.migrationContract.targetVersion, 29);
-  assert.equal(trusted.migrationContract.acceptedSourceVersions.at(-1), 29);
+  assert.equal(trusted.migrationContract.targetVersion, 30);
+  assert.equal(trusted.migrationContract.acceptedSourceVersions.at(-1), 30);
   for (const requiredPath of [
     'server/migrations/029_organization_monthly_ai_quota.js',
     'server/routes_admin_ai_quota.js',
@@ -85,7 +86,7 @@ test('schema, sanitizer, and trusted source registries terminate at organization
   }
 });
 
-test('deployment inventory ships schema v29 and the focused organization quota gates', () => {
+test('deployment inventory retains schema v29 and the focused organization quota gates', () => {
   const deploy = fs.readFileSync(path.join(repoRoot, 'platform', 'deploy_v8.ps1'), 'utf8');
   const files = powerShellArrayEntries(deploy, 'FILES');
   for (const requiredPath of [
@@ -103,11 +104,11 @@ test('deployment inventory ships schema v29 and the focused organization quota g
   }
   assert.match(
     deploy,
-    /if \(Number\(version\) !== 29\) throw new Error\('Candidate migration target version mismatch'\)/
+    /if \(Number\(version\) !== 30\) throw new Error\('Candidate migration target version mismatch'\)/
   );
   assert.match(
     deploy,
-    /report\.get\('sourceVersion'\) not in \(1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29\)/
+    /report\.get\('sourceVersion'\) not in \(1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30\)/
   );
   assert.match(deploy, /server\/tests\/organization_ai_quota_migration\.test\.js/);
   assert.match(deploy, /server\/tests\/organization_ai_quota_release_gate_inventory\.test\.js/);

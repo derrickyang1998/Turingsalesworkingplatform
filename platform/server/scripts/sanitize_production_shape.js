@@ -215,6 +215,13 @@ const EXACT_PROFILE_MIGRATIONS = Object.freeze([
     sourcePath: 'migrations/029_organization_monthly_ai_quota.js',
     engineVersion: 1,
     dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
+  }),
+  Object.freeze({
+    version: 30,
+    name: '030_ai_provider_concurrency_reservation',
+    sourcePath: 'migrations/030_ai_provider_concurrency_reservation.js',
+    engineVersion: 1,
+    dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
   })
 ]);
 const FTS_MANIFEST = Object.freeze({
@@ -1010,6 +1017,20 @@ const V29_MIGRATION_LEDGER = Object.freeze({
     'migrations/029_organization_monthly_ai_quota.js'
   ])
 });
+const V30_MIGRATION_LEDGER = Object.freeze({
+  name: Object.freeze([
+    ...V29_MIGRATION_LEDGER.name,
+    '030_ai_provider_concurrency_reservation'
+  ]),
+  checksum: Object.freeze([
+    ...V29_MIGRATION_LEDGER.checksum,
+    '8994a2fc6faf292ec7dd2265e137d3ce51af8087559c8f345f658560e8b77041'
+  ]),
+  sourcePath: Object.freeze([
+    ...V29_MIGRATION_LEDGER.sourcePath,
+    'migrations/030_ai_provider_concurrency_reservation.js'
+  ])
+});
 const STRUCTURAL_COLUMN_POLICY_V9 = Object.freeze(Object.assign(Object.create(null), STRUCTURAL_COLUMN_POLICY, {
   'feishu_bitable_outbox_retries.id': Object.freeze({ storage: 'integer', kind: 'integer' }),
   'feishu_bitable_outbox_retries.org_id': Object.freeze({ storage: 'integer', kind: 'integer' }),
@@ -1751,6 +1772,59 @@ const STRUCTURAL_POLICY_V29_SHA256 = crypto.createHash('sha256')
     columns: STRUCTURAL_COLUMN_POLICY_V29
   }), 'utf8')
   .digest('hex');
+const STRUCTURAL_COLUMN_POLICY_V30 = Object.freeze(Object.assign(Object.create(null), STRUCTURAL_COLUMN_POLICY_V29, {
+  'organization_ai_concurrency_policies.id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'organization_ai_concurrency_policies.org_id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'organization_ai_concurrency_policies.policy_version': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'organization_ai_concurrency_policies.concurrency_limit': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'organization_ai_concurrency_policies.changed_by': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'organization_ai_concurrency_policies.source': Object.freeze({
+    storage: 'text',
+    kind: 'enum',
+    allowedValues: Object.freeze(['migration_backfill', 'organization_default', 'admin_update'])
+  }),
+  'organization_ai_concurrency_policies.created_at': Object.freeze({ storage: 'text', kind: 'timestamp' }),
+  'ai_provider_reservations.reservation_id': Object.freeze({ storage: 'text', kind: 'opaque-id' }),
+  'ai_provider_reservations.org_id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'ai_provider_reservations.actor_user_id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'ai_provider_reservations.state': Object.freeze({
+    storage: 'text',
+    kind: 'enum',
+    allowedValues: Object.freeze(['active', 'released', 'timed_out'])
+  }),
+  'ai_provider_reservations.acquired_at': Object.freeze({ storage: 'text', kind: 'timestamp' }),
+  'ai_provider_reservations.provider_deadline_at': Object.freeze({ storage: 'text', kind: 'timestamp' }),
+  'ai_provider_reservations.reclaim_after': Object.freeze({ storage: 'text', kind: 'timestamp' }),
+  'ai_provider_reservations.provider_completed_at': Object.freeze({ storage: 'text', kind: 'timestamp' }),
+  'ai_provider_reservations.terminal_at': Object.freeze({ storage: 'text', kind: 'timestamp' }),
+  'ai_provider_reservation_events.id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'ai_provider_reservation_events.reservation_id': Object.freeze({ storage: 'text', kind: 'opaque-id' }),
+  'ai_provider_reservation_events.org_id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'ai_provider_reservation_events.event_type': Object.freeze({
+    storage: 'text',
+    kind: 'enum',
+    allowedValues: Object.freeze([
+      'acquired', 'rejected', 'dispatch_authorized', 'provider_completed', 'released', 'timed_out'
+    ])
+  }),
+  'ai_provider_reservation_events.event_at': Object.freeze({ storage: 'text', kind: 'timestamp' }),
+  'schema_migrations.name': Object.freeze({
+    storage: 'text', kind: 'migration-ledger', allowedValues: V30_MIGRATION_LEDGER.name
+  }),
+  'schema_migrations.checksum': Object.freeze({
+    storage: 'text', kind: 'migration-ledger', allowedValues: V30_MIGRATION_LEDGER.checksum
+  }),
+  'schema_migrations.source_path': Object.freeze({
+    storage: 'text', kind: 'migration-ledger', allowedValues: V30_MIGRATION_LEDGER.sourcePath
+  })
+}));
+const STRUCTURAL_POLICY_V30_VALIDATOR_VERSION = 'tm-structural-policy-v28-ai-provider-concurrency-reservation';
+const STRUCTURAL_POLICY_V30_SHA256 = crypto.createHash('sha256')
+  .update(JSON.stringify({
+    validatorVersion: STRUCTURAL_POLICY_V30_VALIDATOR_VERSION,
+    columns: STRUCTURAL_COLUMN_POLICY_V30
+  }), 'utf8')
+  .digest('hex');
 
 const TRANSFORMATION_EXCLUDED_CLASSIFICATIONS = new Set([
   'structural',
@@ -1986,8 +2060,17 @@ const V29_SEMANTIC_POLICIES = Object.freeze({
     policySha256: STRUCTURAL_POLICY_V29_SHA256
   })
 });
+const V30_SEMANTIC_POLICIES = Object.freeze({
+  ...V29_SEMANTIC_POLICIES,
+  structuralColumns: Object.freeze({
+    ...V29_SEMANTIC_POLICIES.structuralColumns,
+    validatorVersion: STRUCTURAL_POLICY_V30_VALIDATOR_VERSION,
+    policySha256: STRUCTURAL_POLICY_V30_SHA256
+  })
+});
 
 function structuralColumnPolicyForVersion(schemaVersion) {
+  if (schemaVersion === 30) return STRUCTURAL_COLUMN_POLICY_V30;
   if (schemaVersion === 29) return STRUCTURAL_COLUMN_POLICY_V29;
   if (schemaVersion === 28) return STRUCTURAL_COLUMN_POLICY_V28;
   if (schemaVersion === 27) return STRUCTURAL_COLUMN_POLICY_V27;
@@ -2040,7 +2123,7 @@ const JSON_NAMES = new Set([
 
 const SECRET_NAMES = new Set([
   'password_hash', 'token', 'lease_token', 'reservation_nonce', 'reservation_token', 'idempotency_key',
-  'resource_claim', 'code', 'bitable_app_token'
+  'resource_claim', 'code', 'bitable_app_token', 'fence_token'
 ]);
 
 const DIGEST_NAMES = new Set([
@@ -2633,6 +2716,15 @@ function profileContractForVersion(schemaVersion) {
       preservedAccounting: PRESERVED_ACCOUNTING
     });
   }
+  if (schemaVersion === 30) {
+    return Object.freeze({
+      semanticPolicies: V30_SEMANTIC_POLICIES,
+      equalityGroups: V19_EQUALITY_GROUPS,
+      referenceGroups: REFERENCE_GROUPS,
+      derivedRebuilds: V20_DERIVED_REBUILDS,
+      preservedAccounting: PRESERVED_ACCOUNTING
+    });
+  }
   throw new Error(`unsupported exact sanitization profile version ${schemaVersion}`);
 }
 
@@ -2652,16 +2744,16 @@ function assertManifestDocumentShape(manifest) {
   ) {
     throw new Error('malformed sanitization manifest header');
   }
-  if (!Array.isArray(manifest.exactProfiles) || manifest.exactProfiles.length !== 24) {
-    throw new Error('sanitization manifest must contain isolated exact v6 through v29 profiles');
+  if (!Array.isArray(manifest.exactProfiles) || manifest.exactProfiles.length !== 25) {
+    throw new Error('sanitization manifest must contain isolated exact v6 through v30 profiles');
   }
   const profileKeys = [
     'schemaVersion', 'semanticPolicies', 'equalityGroups', 'referenceGroups',
     'derivedRebuilds', 'objects'
   ];
   const versions = manifest.exactProfiles.map((profile) => profile.schemaVersion);
-  if (JSON.stringify(versions) !== JSON.stringify([6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29])) {
-    throw new Error('sanitization manifest exact profiles must be ordered v6 through v29');
+  if (JSON.stringify(versions) !== JSON.stringify([6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30])) {
+    throw new Error('sanitization manifest exact profiles must be ordered v6 through v30');
   }
   for (const compatibilityProfile of manifest.exactProfiles) {
     if (!exactObjectKeys(compatibilityProfile, profileKeys)) {
@@ -2698,12 +2790,12 @@ function exactProfileClassification(db) {
   });
   if (
     classification.status !== 'managed'
-    || ![1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29].includes(classification.currentVersion)
+    || ![1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30].includes(classification.currentVersion)
   ) {
     const observed = classification.currentVersion === undefined || classification.currentVersion === null
       ? classification.status
       : classification.currentVersion;
-    throw new Error(`sanitization source must be an exact managed version 1 or version 6 through version 29 profile; got ${observed}`);
+    throw new Error(`sanitization source must be an exact managed version 1 or version 6 through version 30 profile; got ${observed}`);
   }
   return classification;
 }
@@ -2951,6 +3043,12 @@ function assertStructuralValueAllowed(context, value, observedStorageType, struc
   if (policy.kind === 'upper-code') {
     if (!/^[A-Z0-9_]{3,100}$/.test(value)) {
       throw new Error(`structural policy rejected ${context}: value is not an uppercase code`);
+    }
+    return true;
+  }
+  if (policy.kind === 'opaque-id') {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) {
+      throw new Error(`structural policy rejected ${context}: value is not a canonical UUID`);
     }
     return true;
   }
@@ -6239,7 +6337,7 @@ function rebuildOrganizationMethodologyDigests(db) {
 }
 
 function rebuildDerivedData(db, manifest) {
-  if (![1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29].includes(manifest.schemaVersion)) {
+  if (![1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30].includes(manifest.schemaVersion)) {
     throw new Error(`unsupported derived rebuild profile ${manifest.schemaVersion}`);
   }
   const hasKnowledge = db.prepare("SELECT 1 AS present FROM sqlite_schema WHERE type='table' AND name='knowledge_entries'").get();

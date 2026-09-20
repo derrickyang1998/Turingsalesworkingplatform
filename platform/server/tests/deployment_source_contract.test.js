@@ -32,7 +32,8 @@ const APP_BUILD = '20260811-v060-crm-sales-workspace';
 const APP_QUERY = '20260811v060crmsalesworkspace';
 const PPT_BUILD = '20260702-v916-kb-bridge-client-cn';
 const PPT_QUERY = '20260702v916kbbridge';
-const PPT_SHA256 = 'f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e';
+const PPT_SHA256 = '1fc70495e7ce641dadc76d751a49eab6ed261640293d2b8e691cea8bd78a6821';
+const BASELINE_PPT_SHA256 = 'f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e';
 const PRE_EDIT_APP_SHA256 = 'e8d2ee19f44e11c6441afe3535dde0ec7b24f3aaeb5693e152a6349ed6ef18fd';
 function read(filePath) {
   return fs.readFileSync(filePath, 'utf8');
@@ -3729,7 +3730,7 @@ test('Task 12 frozen manifest retains approved v0.4 visual and PPT evidence', ()
   assert.equal(manifest.preEdit.files.appJs.sha256, PRE_EDIT_APP_SHA256);
   assert.equal(manifest.preEdit.buildMarkers.app, '20260630-auth-upload-fix');
   assert.equal(manifest.files.appJs.sha256, 'a54d6d632363a615ea809b4c1307c724cc18d14ad0643f5caa40ae8171d74837');
-  assert.equal(manifest.files.pptJs.sha256, PPT_SHA256);
+  assert.equal(manifest.files.pptJs.sha256, BASELINE_PPT_SHA256);
   assert.equal(manifest.buildMarkers.app, '20260714-v040-product-shell-design-system');
   assert.equal(manifest.buildMarkers.ppt, PPT_BUILD);
   assert.equal(manifest.scriptCacheKeys.app, '20260714v040productshelldesignsystem');

@@ -76,6 +76,7 @@ const REQUIRED_BUNDLE_FILES = Object.freeze([
   'server/migrations/027_plan_catalog_module_entitlements.js',
   'server/migrations/028_subscription_expiry.js',
   'server/migrations/029_organization_monthly_ai_quota.js',
+  'server/migrations/030_ai_provider_concurrency_reservation.js',
   'server/migrations/baselines/legacy_v1.js',
   'server/migrations/engines/v1.js',
   'server/migrations/vendor/bcryptjs_v3_0_3.js',
@@ -105,9 +106,11 @@ const REQUIRED_BUNDLE_FILES = Object.freeze([
   'server/scripts/sanitize_production_shape.js',
   'server/scripts/trusted_parser_runtime_verifier.js',
   'server/scripts/upload_sandbox_self_test.js',
+  'server/scripts/verify_ai_concurrency_acceptance.js',
   'server/scripts/verify_campaign_migration_gate.js',
   'server/routes.js',
   'server/routes_admin_ai_quota.js',
+  'server/routes_admin_ai_concurrency.js',
   'server/routes_admin_tenant_directory.js',
   'server/routes_brands.js',
   'server/routes_campaigns.js',
@@ -123,6 +126,7 @@ const REQUIRED_BUNDLE_FILES = Object.freeze([
   'server/services/admin_tenant_directory_service.js',
   'server/services/ai_cost_service.js',
   'server/services/ai_quota_service.js',
+  'server/services/ai_concurrency_service.js',
   'server/services/ai_service.js',
   'server/services/business_knowledge_service.js',
   'server/services/campaign_access_service.js',
@@ -197,6 +201,7 @@ const EXPECTED_ENTRYPOINTS = Object.freeze({
   parserCapacityPlanner: 'server/scripts/check_cutover_capacity.py',
   publicGuard: 'server/scripts/public_release_guard.sh',
   parserSelfTest: 'server/scripts/upload_sandbox_self_test.js',
+  aiConcurrencyAcceptance: 'server/scripts/verify_ai_concurrency_acceptance.js',
   parserVerifier: 'server/scripts/trusted_parser_runtime_verifier.js',
   parserManifest: 'server/systemd/turingmarket-parser.manifest.json',
   parserServiceUnit: 'server/systemd/turingmarket-parser@.service',
@@ -204,8 +209,8 @@ const EXPECTED_ENTRYPOINTS = Object.freeze({
 });
 
 const EXPECTED_MIGRATION_CONTRACT = Object.freeze({
-  acceptedSourceVersions: Object.freeze([1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29]),
-  targetVersion: 29,
+  acceptedSourceVersions: Object.freeze([1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30]),
+  targetVersion: 30,
   runs: 2,
   deterministicAppendTables: Object.freeze(['activity_log'])
 });

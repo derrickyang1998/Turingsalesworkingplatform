@@ -1214,6 +1214,11 @@ async function requireSuccessfulCustomerMutation(response, fallbackMessage) {
   throw error;
 }
 
+function isAIConcurrencyError(error) {
+  var code = error && typeof error.code === 'string' ? error.code.trim() : '';
+  return /^AI_[A-Z0-9_]*CONCURRENCY[A-Z0-9_]*$/.test(code);
+}
+
 // ===== APP INIT =====
 async function initApp() { console.log("[TM] initApp starting");
   // Hide all non-M1 pages (they start visible for text metrics)
@@ -3604,8 +3609,13 @@ async function generateProposal() {
     if (!isCurrentProposalDraftRequest(requestContext)) return;
     lastProposalAI = null;
     var response = await apiFetch('/ai/proposal-draft', buildProposalDraftRequestOptions(curDemand, tpl, requestContext));
-    if (!response.ok) throw new Error('AI proposal request failed');
-    var data = await response.json();
+    var data = await response.json().catch(function() { return {}; });
+    if (!response.ok) {
+      var requestError = new Error(data.error || ('AI proposal request failed: ' + response.status));
+      requestError.code = typeof data.code === 'string' ? data.code : '';
+      requestError.status = response.status;
+      throw requestError;
+    }
     if (!isCurrentProposalDraftRequest(requestContext)) return;
     var generatedDraft = String(data.draft || (data.ai && data.ai.answer) || '').trim();
     if (!generatedDraft) throw new Error('AI proposal response was empty');
@@ -3617,6 +3627,10 @@ async function generateProposal() {
   } catch(e) {
     if (!isCurrentProposalDraftRequest(requestContext)) return;
     lastProposalAI = null;
+    if (isAIConcurrencyError(e)) {
+      toast(e.message || '当前组织的 AI 并发已满，本次请求尚未开始，请稍后重试。', 'error');
+      return;
+    }
     lastProp = localDraft;
     renderProposalDraftResult(lastProp, similarCases, null, 'AI 服务暂不可用，已保留可编辑的基础方案。');
     toast('已生成基础方案，请人工复核', 'warning');
@@ -10553,7 +10567,7 @@ function renderAdminOrganizations(organizations) {
   organizations.forEach(function(organization) {
     adminOrganizationsById[String(organization.id)] = organization;
   });
-  container.innerHTML = '<table><thead><tr><th>组织</th><th>套餐</th><th>订阅到期</th><th>AI 月额度</th><th>团队</th><th>有效成员</th><th>已撤销</th><th>操作</th></tr></thead><tbody>'
+  container.innerHTML = '<table><thead><tr><th>组织</th><th>套餐</th><th>订阅到期</th><th>AI 配额 / 并发</th><th>团队</th><th>有效成员</th><th>已撤销</th><th>操作</th></tr></thead><tbody>'
     + organizations.map(function(organization) {
       var id = Number(organization.id);
       var safeId = Number.isSafeInteger(id) && id > 0 ? id : 0;
@@ -10657,10 +10671,52 @@ function renderAdminOrganizations(organizations) {
             + '</div>';
         }
       }
+      var aiConcurrency = organization.ai_concurrency && typeof organization.ai_concurrency === 'object'
+        ? organization.ai_concurrency
+        : null;
+      var aiConcurrencyCell = '<span class="tm-member-access-note">并发策略不可用</span>';
+      if (aiConcurrency) {
+        var concurrencyActive = Number(aiConcurrency.active);
+        var concurrencyLimit = Number(aiConcurrency.limit);
+        var concurrencyAvailable = Number(aiConcurrency.available);
+        var concurrencyOverCapacity = Number(aiConcurrency.over_capacity);
+        var concurrencyStatusLabels = {
+          available: '可用',
+          full: '已占满',
+          draining: '收敛中',
+          disabled: '已停用',
+          unavailable: '容量状态异常'
+        };
+        var concurrencySummary = (Number.isSafeInteger(concurrencyActive) ? concurrencyActive : '-')
+          + ' / ' + (Number.isSafeInteger(concurrencyLimit) ? concurrencyLimit : '-');
+        var concurrencyMeta = '可用 ' + (Number.isSafeInteger(concurrencyAvailable) ? concurrencyAvailable : '-')
+          + ' · ' + (concurrencyStatusLabels[aiConcurrency.status] || aiConcurrency.status || '未知');
+        if (Number.isSafeInteger(concurrencyOverCapacity) && concurrencyOverCapacity > 0) {
+          concurrencyMeta += ' · 超占 ' + concurrencyOverCapacity;
+        }
+        if (typeof aiConcurrency.earliest_lease_expires_at === 'string' && aiConcurrency.earliest_lease_expires_at) {
+          concurrencyMeta += ' · 最早回收 ' + aiConcurrency.earliest_lease_expires_at.replace('T', ' ').replace('Z', '');
+        }
+        var canManageAiConcurrency = organization.allowed_actions &&
+          organization.allowed_actions.manage_ai_concurrency === true;
+        aiConcurrencyCell = '<div style="min-width:220px"><strong>AI 并发 ' + esc(concurrencySummary) + '</strong>'
+          + '<div class="tm-member-access-note">' + esc(concurrencyMeta) + '</div></div>';
+        if (canManageAiConcurrency && Number.isSafeInteger(Number(aiConcurrency.policy_version))) {
+          aiConcurrencyCell = '<div style="display:flex;align-items:center;gap:6px;min-width:250px;flex-wrap:wrap">'
+            + '<input type="number" min="0" max="64" step="1" id="ad_organizationAiConcurrency_' + safeId + '" class="form-control" style="width:118px;height:34px;padding:4px 8px" value="' + esc(String(concurrencyLimit)) + '" title="0 表示停用，最大 64">'
+            + '<button type="button" id="ad_organizationAiConcurrencySave_' + safeId + '" class="btn btn-xs" title="保存组织 AI 并发上限" onclick="saveAdminOrganizationAiConcurrency(' + safeId + ')">保存</button>'
+            + '<span class="tm-member-access-note" style="width:100%">' + esc('AI 并发 ' + concurrencySummary + ' · ' + concurrencyMeta) + '</span>'
+            + '</div>';
+        }
+      }
+      var aiGovernanceCell = '<div style="display:flex;flex-direction:column;gap:10px">'
+        + aiQuotaCell
+        + '<div style="border-top:1px solid rgba(15,23,42,.1);padding-top:8px">' + aiConcurrencyCell + '</div>'
+        + '</div>';
       return '<tr><td><strong>' + esc(organization.name || '-') + '</strong><div style="font-size:11px;opacity:.55">' + esc(organization.code || '-') + '</div><div class="tm-member-access-note">企业所有者：' + esc(ownerName) + '</div></td>'
         + '<td>' + planCell + '</td>'
         + '<td>' + subscriptionCell + '</td>'
-        + '<td>' + aiQuotaCell + '</td>'
+        + '<td>' + aiGovernanceCell + '</td>'
         + '<td>' + (Number(organization.team_count) || 0) + '</td>'
         + '<td>' + (Number(organization.active_member_count) || 0) + '</td>'
         + '<td>' + (Number(organization.revoked_member_count) || 0) + '</td>'
@@ -10860,6 +10916,67 @@ async function saveAdminOrganizationAiQuota(organizationId) {
     return true;
   } catch (error) {
     toast(error.message || '组织月度 AI 配额更新失败', 'error');
+    return false;
+  } finally {
+    input.disabled = false;
+    if (button) button.disabled = false;
+  }
+}
+async function saveAdminOrganizationAiConcurrency(organizationId) {
+  var parsedId = Number(organizationId);
+  var organization = adminOrganizationsById[String(parsedId)];
+  var input = document.getElementById('ad_organizationAiConcurrency_' + parsedId);
+  var button = document.getElementById('ad_organizationAiConcurrencySave_' + parsedId);
+  var concurrency = organization && organization.ai_concurrency;
+  var version = Number(concurrency && concurrency.policy_version);
+  if (!Number.isSafeInteger(parsedId) || parsedId < 1 || !organization || !input ||
+      !Number.isSafeInteger(version) || version < 1) return false;
+  var rawLimit = String(input.value || '').trim();
+  if (!/^\d+$/.test(rawLimit)) {
+    toast('AI 并发上限必须是 0-64 的整数', 'error');
+    return false;
+  }
+  var concurrencyLimit = Number(rawLimit);
+  if (!Number.isSafeInteger(concurrencyLimit) || concurrencyLimit < 0 || concurrencyLimit > 64) {
+    toast('AI 并发上限必须是 0-64 的整数', 'error');
+    return false;
+  }
+  if (concurrencyLimit === Number(concurrency.limit)) {
+    toast('组织 AI 并发上限未发生变化');
+    return false;
+  }
+  var reason = typeof prompt === 'function'
+    ? prompt('请输入本次组织 AI 并发上限变更原因')
+    : null;
+  if (reason === null) return false;
+  reason = String(reason || '').trim();
+  if (!reason || reason.length > 500) {
+    toast('请输入 1-500 个字符的变更原因', 'error');
+    return false;
+  }
+  input.disabled = true;
+  if (button) button.disabled = true;
+  try {
+    var response = await apiFetch('/admin/organizations/' + parsedId + '/ai-concurrency', {
+      method: 'PUT',
+      body: JSON.stringify({
+        concurrency_limit: concurrencyLimit,
+        expected_version: version,
+        reason: reason
+      })
+    });
+    var data = await response.json();
+    if (!response.ok) {
+      if (data && data.code === 'AI_ORGANIZATION_CONCURRENCY_VERSION_CONFLICT') {
+        await loadAdminOrganizations();
+      }
+      throw new Error(data.error || '组织 AI 并发上限更新失败');
+    }
+    toast('组织 AI 并发上限已更新');
+    await loadAdminOrganizations();
+    return true;
+  } catch (error) {
+    toast(error.message || '组织 AI 并发上限更新失败', 'error');
     return false;
   } finally {
     input.disabled = false;

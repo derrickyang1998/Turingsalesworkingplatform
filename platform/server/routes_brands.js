@@ -3,6 +3,9 @@ module.exports = function(app, db, authMiddleware, aiLimiter, aiQuotaGuard) {
   const llm = require('./services/llm_service');
   const webSearch = require('./services/web_search_service');
   const aiQuota = require('./services/ai_quota_service');
+  const aiConcurrency = require('./services/ai_concurrency_service');
+  const crypto = require('node:crypto');
+  const aiConcurrencyService = aiConcurrency.createAIConcurrencyService(db);
   const aiMiddlewares = [authMiddleware];
   if (aiLimiter) aiMiddlewares.push(aiLimiter);
   if (aiQuotaGuard) aiMiddlewares.push(aiQuotaGuard);
@@ -44,51 +47,68 @@ module.exports = function(app, db, authMiddleware, aiLimiter, aiQuotaGuard) {
     var brand = String(req.body.brand || req.body.name || '').trim();
     if (!brand) return res.status(400).json({ error: 'Brand name required' });
     try {
-      var research = await webSearch.searchWeb(brand + ' brand revenue social media influencer marketing', {
-        db: db,
-        maxResults: 5
-      });
-      webSearch.cacheSearchResult(db, brand, research);
-      var provider = llm.createDeepSeekProvider();
-      var completion = await provider.complete({
-        messages: [
-          { role: 'system', content: 'You are a brand data analyst. Return JSON only. No markdown.' },
-          { role: 'user', content: [
-            'Create structured brand intelligence for "' + brand + '".',
-            'Return JSON with fields: name, name_cn, industry_tags, market, estimated_annual_revenue, user_base, amazon_rating, youtube_followers, instagram_followers, tiktok_followers, brand_search_volume_monthly, total_posts, avg_engagement_rate, avg_views_per_post, top_platform, creative_angles, top_products_featured.',
-            'Use these web sources when useful:',
-            JSON.stringify((research.results || []).slice(0, 5))
-          ].join('\n') }
-        ],
-        temperature: 0.25,
-        max_tokens: 1000
-      });
-      var parsed = parseJsonObject(completion.content);
-      var enriched = Object.assign(fallbackBrand(brand), parsed || {});
-      if (!Array.isArray(enriched.industry_tags)) enriched.industry_tags = String(enriched.industry_tags || 'Other').split(/[,;，、]/).map(function(v) { return v.trim(); }).filter(Boolean);
-      if (!Array.isArray(enriched.creative_angles)) enriched.creative_angles = String(enriched.creative_angles || '').split(/[,;，、]/).map(function(v) { return v.trim(); }).filter(Boolean);
-      if (!Array.isArray(enriched.top_products_featured)) enriched.top_products_featured = String(enriched.top_products_featured || '').split(/[,;，、]/).map(function(v) { return v.trim(); }).filter(Boolean);
-      if (!completion.degraded) {
-        var usage = completion.usage || {};
-        aiQuota.recordUsageOrThrow(db, {
-          organizationId: req.authContext.organization.id,
-          userId: req.user.id,
-          model: completion.model || 'deepseek-chat',
-          promptTokens: usage.prompt_tokens,
-          completionTokens: usage.completion_tokens,
-          totalTokens: usage.total_tokens,
-          endpoint: 'brand_enrich'
+      var payload = await aiConcurrencyService.runWithPermit({
+        organizationId: req.authContext.organization.id,
+        actorUserId: req.user.id,
+        operationKey: ('brand_enrich:' + (req.requestId || crypto.randomUUID())).slice(0, 200),
+        provider: 'tavily_deepseek_sequence'
+      }, async function(permit) {
+        var research = await webSearch.searchWeb(brand + ' brand revenue social media influencer marketing', {
+          db: db,
+          maxResults: 5,
+          signal: permit.signal,
+          deadlineAt: permit.deadlineAt
         });
-      }
-      res.json({
-        brand: enriched,
-        web_results: research.results || [],
-        web_search: { used: !!research.used, provider: research.provider || 'tavily', reason: research.reason || '' },
-        fallback: !!completion.degraded || !parsed,
-        warning: completion.reason || (!parsed ? 'AI returned fallback brand fields' : '')
+        permit.assertActive();
+        var provider = llm.createDeepSeekProvider();
+        var completion = await provider.complete({
+          messages: [
+            { role: 'system', content: 'You are a brand data analyst. Return JSON only. No markdown.' },
+            { role: 'user', content: [
+              'Create structured brand intelligence for "' + brand + '".',
+              'Return JSON with fields: name, name_cn, industry_tags, market, estimated_annual_revenue, user_base, amazon_rating, youtube_followers, instagram_followers, tiktok_followers, brand_search_volume_monthly, total_posts, avg_engagement_rate, avg_views_per_post, top_platform, creative_angles, top_products_featured.',
+              'Use these web sources when useful:',
+              JSON.stringify((research.results || []).slice(0, 5))
+            ].join('\n') }
+          ],
+          temperature: 0.25,
+          max_tokens: 1000,
+          signal: permit.signal,
+          deadlineAt: permit.deadlineAt
+        });
+        permit.assertActive();
+        var parsed = parseJsonObject(completion.content);
+        var enriched = Object.assign(fallbackBrand(brand), parsed || {});
+        if (!Array.isArray(enriched.industry_tags)) enriched.industry_tags = String(enriched.industry_tags || 'Other').split(/[,;，、]/).map(function(v) { return v.trim(); }).filter(Boolean);
+        if (!Array.isArray(enriched.creative_angles)) enriched.creative_angles = String(enriched.creative_angles || '').split(/[,;，、]/).map(function(v) { return v.trim(); }).filter(Boolean);
+        if (!Array.isArray(enriched.top_products_featured)) enriched.top_products_featured = String(enriched.top_products_featured || '').split(/[,;，、]/).map(function(v) { return v.trim(); }).filter(Boolean);
+        if (!completion.degraded) {
+          permit.assertActive();
+          var usage = completion.usage || {};
+          aiQuota.recordUsageOrThrow(db, {
+            organizationId: req.authContext.organization.id,
+            userId: req.user.id,
+            model: completion.model || 'deepseek-chat',
+            promptTokens: usage.prompt_tokens,
+            completionTokens: usage.completion_tokens,
+            totalTokens: usage.total_tokens,
+            endpoint: 'brand_enrich'
+          });
+        }
+        permit.assertActive();
+        webSearch.cacheSearchResult(db, brand, research);
+        return {
+          brand: enriched,
+          web_results: research.results || [],
+          web_search: { used: !!research.used, provider: research.provider || 'tavily', reason: research.reason || '' },
+          fallback: !!completion.degraded || !parsed,
+          warning: completion.reason || (!parsed ? 'AI returned fallback brand fields' : '')
+        };
       });
+      res.json(payload);
     } catch (e) {
-      if (e && e.code === 'AI_USAGE_ACCOUNTING_FAILED') {
+      if (e && (e.code === 'AI_USAGE_ACCOUNTING_FAILED' || e.name === 'AIConcurrencyServiceError')) {
+        if (e.retryAfter) res.setHeader('Retry-After', String(e.retryAfter));
         return res.status(e.statusCode || 503).json({ error: e.message, code: e.code });
       }
       res.json({

@@ -373,7 +373,7 @@ test('Campaign switch and auth cleanup clear artifact state while frozen PPT byt
   assert.match(extractFunction(appSource, 'doLogout'), /resetCampaignPptArtifactState\(\)/);
   assert.equal(
     crypto.createHash('sha256').update(fs.readFileSync(pptPath)).digest('hex'),
-    'f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e'
+    '1fc70495e7ce641dadc76d751a49eab6ed261640293d2b8e691cea8bd78a6821'
   );
 });
 

@@ -405,7 +405,7 @@ test('organization directory renders and saves compact shared monthly AI quota c
     },
     allowed_actions: { initialize_owner: false, manage_ai_quota: false }
   }]);
-  assert.match(elements.ad_organizationList.innerHTML, /<th>AI 月额度<\/th>/);
+  assert.match(elements.ad_organizationList.innerHTML, /<th>AI 配额 \/ 并发<\/th>/);
   assert.match(elements.ad_organizationList.innerHTML, /id="ad_organizationAiQuota_10"/);
   assert.match(elements.ad_organizationList.innerHTML, /id="ad_organizationAiQuotaUnlimited_10"[^>]*checked/);
   assert.match(elements.ad_organizationList.innerHTML, /1,200\s*\/\s*不限额/);

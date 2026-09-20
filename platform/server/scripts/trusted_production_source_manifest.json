@@ -15,7 +15,8 @@
     "parserVerifier": "server/scripts/trusted_parser_runtime_verifier.js",
     "parserManifest": "server/systemd/turingmarket-parser.manifest.json",
     "parserServiceUnit": "server/systemd/turingmarket-parser@.service",
-    "parserSliceUnit": "server/systemd/turingmarket-parser.slice"
+    "parserSliceUnit": "server/systemd/turingmarket-parser.slice",
+    "aiConcurrencyAcceptance": "server/scripts/verify_ai_concurrency_acceptance.js"
   },
   "migrationContract": {
     "acceptedSourceVersions": [
@@ -43,9 +44,10 @@
       26,
       27,
       28,
-      29
+      29,
+      30
     ],
-    "targetVersion": 29,
+    "targetVersion": 30,
     "runs": 2,
     "deterministicAppendTables": [
       "activity_log"
@@ -169,6 +171,10 @@
       "sha256": "17f680eda4fdc945f7d6408c41229b91b529f075e3b5e9addf51285b5aa267bd"
     },
     {
+      "path": "server/migrations/030_ai_provider_concurrency_reservation.js",
+      "sha256": "166adac5696457b458f6bdb979ad683bc70ffb1f1ad71e257b030eb9197457d3"
+    },
+    {
       "path": "server/migrations/baselines/legacy_v1.js",
       "sha256": "13e631ca7e2aef57e39f7dbc38e6f03e2d5323a11f38c6ce31239d793911812c"
     },
@@ -190,7 +196,7 @@
     },
     {
       "path": "server/db.js",
-      "sha256": "6e90baa0991df84d45faaa1c4bfddb5d6cf48c95c19817452637cf578512edc0"
+      "sha256": "d0738f9bc60027cf26f028dcfc91bf37d4a2b9d00b913ead5ac404eb45679ac8"
     },
     {
       "path": "server/package-lock.json",
@@ -270,11 +276,11 @@
     },
     {
       "path": "server/scripts/sanitization_manifest.json",
-      "sha256": "c6c70e38a08184a0d9277d3d02d5e535c9cf8124cba0792a4b91da6f6ec3b8b1"
+      "sha256": "594d4cab76b71b3c6c748ddefb1142e2df6af910b05642cdb672f26c5f0e61cd"
     },
     {
       "path": "server/scripts/sanitize_production_shape.js",
-      "sha256": "cdc498741d84da024683c735b8d8311e2ebbc06ea03a69bfb5ed4b30495824b8"
+      "sha256": "a41e7ff606dd353acab1adb482fb786bfaeb78db57d06c4f36e6f2ab2f2ed7ed"
     },
     {
       "path": "server/scripts/trusted_parser_runtime_verifier.js",
@@ -285,8 +291,12 @@
       "sha256": "36567b9127d3c631f97d7ecb83ff5547c24e6f397af43d21beb12fd7f3bd6e76"
     },
     {
+      "path": "server/scripts/verify_ai_concurrency_acceptance.js",
+      "sha256": "5249bfba1a6dd33b9077038418a89d3876d6190b17007e843c8ef17a3257e0f8"
+    },
+    {
       "path": "server/scripts/verify_campaign_migration_gate.js",
-      "sha256": "8a141cbd800f04fb6ebc4e59d1ad2517bcb771eef31e2015246a4efebdef65b3"
+      "sha256": "542e0daf328b53cac12b0a54dc45d019b4c15685fe87b851a41272b7673e408c"
     },
     {
       "path": "server/routes.js",
@@ -297,12 +307,16 @@
       "sha256": "d7fb75495899d218678a7667ac648d3302e84693daf4896e813515af5d6b12e0"
     },
     {
+      "path": "server/routes_admin_ai_concurrency.js",
+      "sha256": "b9c691846f81e62f050bdab717c983a378fe81df5652f3c8432ab9c0280f4aba"
+    },
+    {
       "path": "server/routes_admin_tenant_directory.js",
       "sha256": "828e8b4dd23ed40500da1640d4fc7083d5ff88bee997c64365b9a5e1fc5b4789"
     },
     {
       "path": "server/routes_brands.js",
-      "sha256": "e2af645986657bdab9649130d7ff3edb1e9f946a80b5ac4ae2659cfc5075f4d7"
+      "sha256": "19bba4b3ad4a6dfec059c35a63c2f266a4465318d730a5fe253603db4f733183"
     },
     {
       "path": "server/routes_campaigns.js",
@@ -330,7 +344,7 @@
     },
     {
       "path": "server/routes_performance.js",
-      "sha256": "3d45e2e35e90b23939a603df4662068983afb954870e094ff34b8bcfe5bdb229"
+      "sha256": "063ac49f9d7f4a5aedc1b3b9a3b71004aadac8e834f5858b78f2ebc904d365b4"
     },
     {
       "path": "server/routes_workflow.js",
@@ -338,7 +352,7 @@
     },
     {
       "path": "server/server.js",
-      "sha256": "0336ae57b6dbd036387c867f1d56f716b4cede2687997fc5220e1bdb3f40081e"
+      "sha256": "bdf5c5f357487212ce75d223d7ba79ecbad973325ab6c4b35b3725d775428290"
     },
     {
       "path": "server/workflow_engine.js",
@@ -357,8 +371,12 @@
       "sha256": "7b8616fd33de3b2479787bc441b155abe83100d004a5059c6701300220fbe454"
     },
     {
+      "path": "server/services/ai_concurrency_service.js",
+      "sha256": "d9b01e6f16f49601ffab80b1bca342b8453ade905b64ebff507f87d478ddfb6e"
+    },
+    {
       "path": "server/services/ai_service.js",
-      "sha256": "1ed466d12927654e4e22e78db63ac92e23fc26570d809e003599139f6cf8cc38"
+      "sha256": "9f1e4719f59203c8cd2341575d040239d6dc7ef54b286d4acd157064e6b6df1d"
     },
     {
       "path": "server/services/business_knowledge_service.js",
@@ -458,7 +476,7 @@
     },
     {
       "path": "server/services/latest_ui_compat_service.js",
-      "sha256": "681b991f174de78233baf5bb5b9ce8d3d203fedf8cbfc8543a1ebd41b48b90f4"
+      "sha256": "ef2e3f2ff17dc96c45f33d0ad7f5f14c11ec54fda692f6a0c50292ca9d4c4e58"
     },
     {
       "path": "server/services/llm_service.js",
@@ -482,7 +500,7 @@
     },
     {
       "path": "server/services/organization_governance_service.js",
-      "sha256": "b45c5d5d74eb6d3ed28cab43489a53b073867f12c43039e471b9e8663444b06a"
+      "sha256": "8f298712c8402a59a6d01bb84e692cb0864aac8acdb0ed2790a86f192fe648cd"
     },
     {
       "path": "server/services/organization_methodology_service.js",
@@ -554,7 +572,7 @@
     },
     {
       "path": "server/services/rag_service.js",
-      "sha256": "e21ec39a3bc334fd4d77ab014df0258f4593904bd9f81c238d8a638eb6a67c31"
+      "sha256": "e1773aaf1e9ef5551fcfe2059499f457227013d0d727aeeb575e2a541e03b829"
     },
     {
       "path": "server/services/sqlite_digest_service.js",

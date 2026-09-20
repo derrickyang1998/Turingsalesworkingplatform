@@ -305,7 +305,8 @@ function listOrganizations(
   options,
   planEntitlementService,
   subscriptionExpiryService,
-  aiQuotaService
+  aiQuotaService,
+  aiConcurrencyService
 ) {
   const query = requestQuery(options);
   const q = boundedQuery(query.q);
@@ -358,6 +359,19 @@ function listOrganizations(
         quotaByOrganization.set(Number(projection.organization_id), projection);
       }
     }
+    const concurrencyByOrganization = new Map();
+    if (aiConcurrencyService && selectedRows.length) {
+      try {
+        for (const row of selectedRows) {
+          const projection = aiConcurrencyService.projectOrganizationConcurrency({
+            organizationId: row.id
+          });
+          concurrencyByOrganization.set(Number(row.id), projection);
+        }
+      } catch (_error) {
+        throw serviceError(503, 'AI_CONCURRENCY_POLICY_UNAVAILABLE', '组织 AI 并发策略不可用。');
+      }
+    }
     const organizations = selectedRows.map((row) => {
       const companyOwner = ownerSummary(db, row.id);
       let plan;
@@ -400,6 +414,22 @@ function listOrganizations(
           policy_version: projection.policy_version
         };
       }
+      let aiConcurrency;
+      if (aiConcurrencyService) {
+        const projection = concurrencyByOrganization.get(Number(row.id));
+        if (!projection) {
+          throw serviceError(503, 'AI_CONCURRENCY_POLICY_UNAVAILABLE', '组织 AI 并发策略不可用。');
+        }
+        aiConcurrency = {
+          active: projection.active,
+          limit: projection.limit,
+          available: projection.available,
+          over_capacity: projection.over_capacity,
+          status: projection.status,
+          policy_version: projection.policy_version,
+          earliest_lease_expires_at: projection.earliest_lease_expires_at
+        };
+      }
       return {
         id: row.id,
         code: row.code,
@@ -412,6 +442,7 @@ function listOrganizations(
         ...(plan === undefined ? {} : { plan }),
         ...(subscription === undefined ? {} : { subscription }),
         ...(aiMonthlyQuota === undefined ? {} : { ai_monthly_quota: aiMonthlyQuota }),
+        ...(aiConcurrency === undefined ? {} : { ai_concurrency: aiConcurrency }),
         allowed_actions: {
           initialize_owner: scope.kind === 'platform_admin' && companyOwner === null,
           ...(plan === undefined ? {} : { assign_plan: scope.kind === 'platform_admin' }),
@@ -420,6 +451,9 @@ function listOrganizations(
           }),
           ...(aiMonthlyQuota === undefined ? {} : {
             manage_ai_quota: scope.kind === 'platform_admin'
+          }),
+          ...(aiConcurrency === undefined ? {} : {
+            manage_ai_concurrency: scope.kind === 'platform_admin'
           })
         }
       };
@@ -943,6 +977,7 @@ function createOrganizationGovernanceService(db, factoryOptions = {}) {
   const planEntitlementService = factoryOptions.planEntitlementService || null;
   const subscriptionExpiryService = factoryOptions.subscriptionExpiryService || null;
   const aiQuotaService = factoryOptions.aiQuotaService || null;
+  const aiConcurrencyService = factoryOptions.aiConcurrencyService || null;
   if (
     planEntitlementService !== null &&
     typeof planEntitlementService.projectOrganization !== 'function'
@@ -961,6 +996,12 @@ function createOrganizationGovernanceService(db, factoryOptions = {}) {
   ) {
     throw new TypeError('aiQuotaService must expose projectOrganizationQuotas');
   }
+  if (
+    aiConcurrencyService !== null &&
+    typeof aiConcurrencyService.projectOrganizationConcurrency !== 'function'
+  ) {
+    throw new TypeError('aiConcurrencyService must expose projectOrganizationConcurrency');
+  }
   return Object.freeze({
     projectUserAccess(requestOptions) {
       return projectUserAccess(db, requestOptions || {});
@@ -971,7 +1012,8 @@ function createOrganizationGovernanceService(db, factoryOptions = {}) {
         requestOptions || {},
         planEntitlementService,
         subscriptionExpiryService,
-        aiQuotaService
+        aiQuotaService,
+        aiConcurrencyService
       );
     },
     listMembers(requestOptions) {

@@ -151,7 +151,7 @@ function runParserAdmissionProbe(source, databasePath) {
   });
 }
 
-test('current release locks the v0.7 branch while retaining the v0.6 shell and frozen PPT identity', () => {
+test('current release locks the v0.7 branch while retaining the v0.6 shell and vetted PPT identity', () => {
   const deploy = read('platform', 'deploy_v8.ps1');
   const buildInfo = read('platform', 'client', 'shared', 'build_info.js');
   const index = read('platform', 'index.html');
@@ -169,11 +169,10 @@ test('current release locks the v0.7 branch while retaining the v0.6 shell and f
   assert.match(index, new RegExp(`client/styles/tokens\\.css\\?v=${appQuery}`));
   assert.match(deploy, /20260702-v916-kb-bridge-client-cn/);
   assert.match(deploy, /20260702v916kbbridge/);
-  assert.match(deploy, /f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e/);
-  assert.match(deploy, /if \(Number\(version\) !== 24\) throw new Error\('Candidate migration target version mismatch'\)/);
-  assert.doesNotMatch(deploy, /if \(Number\(version\) !== 23\) throw new Error\('Candidate migration target version mismatch'\)/);
-  assert.match(deploy, /report\.get\('sourceVersion'\) not in \(1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24\)/);
-  assert.doesNotMatch(deploy, /report\.get\('sourceVersion'\) not in \(1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23\) or/);
+  assert.match(deploy, /1fc70495e7ce641dadc76d751a49eab6ed261640293d2b8e691cea8bd78a6821/);
+  assert.match(deploy, /if \(Number\(version\) !== 30\) throw new Error\('Candidate migration target version mismatch'\)/);
+  assert.doesNotMatch(deploy, /if \(Number\(version\) !== 29\) throw new Error\('Candidate migration target version mismatch'\)/);
+  assert.match(deploy, /report\.get\('sourceVersion'\) not in \(1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30\)/);
   assert.match(server, /const CUSTOMER_REPORT_PPT_CACHE_NAMESPACE = 'customer-reports'/);
   assert.match(server, /reservedRootDirectories: \[CUSTOMER_REPORT_PPT_CACHE_NAMESPACE\]/);
   assert.doesNotMatch(server, /process\.env\.CUSTOMER_REPORT_PPT_(?:CACHE|TMP)_DIR/);
@@ -299,7 +298,7 @@ test('current deploy inventory ships schema v24 knowledge ownership and its focu
   }
 });
 
-test('current trusted source and sanitization contracts accept exact v1 and v6 through v29 sources', () => {
+test('current trusted source and sanitization contracts accept exact v1 and v6 through v30 sources', () => {
   const trustedManifest = JSON.parse(read(
     'platform', 'server', 'scripts', 'trusted_production_source_manifest.json'
   ));
@@ -309,14 +308,14 @@ test('current trusted source and sanitization contracts accept exact v1 and v6 t
   const trustedPaths = new Set(trustedManifest.files.map((entry) => entry.path));
 
   assert.deepEqual(trustedManifest.migrationContract, {
-    acceptedSourceVersions: [1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29],
-    targetVersion: 29,
+    acceptedSourceVersions: [1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30],
+    targetVersion: 30,
     runs: 2,
     deterministicAppendTables: ['activity_log']
   });
   assert.deepEqual(
     sanitizationManifest.exactProfiles.map((profile) => profile.schemaVersion),
-    [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29]
+    [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30]
   );
   for (const required of [
     'server/migrations/006_crm_sales_workspace.js',
@@ -343,6 +342,9 @@ test('current trusted source and sanitization contracts accept exact v1 and v6 t
     'server/migrations/027_plan_catalog_module_entitlements.js',
     'server/migrations/028_subscription_expiry.js',
     'server/migrations/029_organization_monthly_ai_quota.js',
+    'server/migrations/030_ai_provider_concurrency_reservation.js',
+    'server/routes_admin_ai_concurrency.js',
+    'server/services/ai_concurrency_service.js',
     'server/services/crm_contract.js',
     'server/services/crm_customer_service.js',
     'server/services/crm_query_service.js',
@@ -1383,9 +1385,11 @@ test('v0.6 acceptance facts are canonical, root-only, and hash-bound through eve
     'TM_CUTOVER_CAPACITY_JSON="$CutoverCapacityJson"',
     'TM_CANDIDATE_HEALTH_PROJECTION="$CandidateHealthProjection"',
     'TM_PM2_FINAL_PROJECTION=',
-    "'schemaVersion': 1",
+    'TM_AI_CONCURRENCY_ACCEPTANCE_PROJECTION=',
+    "'schemaVersion': 2",
     "'cutoverCapacity': capacity",
     "'candidateHealth': health",
+    "'aiConcurrencyAcceptance': aiConcurrencyAcceptance",
     "'cutoverSnapshotSha256SumsSha256': snapshotSha256",
     "'pm2': {'expected': pm2Expected, 'final': pm2Final}",
     "'nginx': {'expected': nginxExpected, 'final': nginxFinal}",
@@ -1427,6 +1431,7 @@ test('v0.6 acceptance facts are canonical, root-only, and hash-bound through eve
   assert.match(finalAssertion, /sha256sum "\$AcceptanceFacts"/);
   assert.match(finalAssertion, /Cutover snapshot SHA256SUMS digest changed after acceptance/);
   assert.match(finalAssertion, /Acceptance facts final projection mismatch/);
+  assert.match(finalAssertion, /assert_ai_concurrency_acceptance_binding/);
 
   const acceptanceState = sourceBetween(
     deploy,
@@ -1450,6 +1455,7 @@ test('v0.6 acceptance facts are canonical, root-only, and hash-bound through eve
     'accepted finalizer'
   );
   assert.match(finalize, /AcceptanceFacts="\$RemoteRoot\/deployment-evidence\/acceptance-facts-\$RunId\.json"/);
+  assert.match(finalize, /AIConcurrencyAcceptanceEvidence="\$RemoteRoot\/deployment-evidence\/ai-concurrency-acceptance-\$RunId\.json"/);
   assert.match(finalize, /marker\.get\('schemaVersion'\) != 4/);
   assert.match(finalize, /Acceptance facts SHA-256 is invalid/);
   assert.match(finalize, /Acceptance facts final projection mismatch/);

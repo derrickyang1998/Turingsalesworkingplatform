@@ -10,6 +10,7 @@ const latestUiCompat = require('../services/latest_ui_compat_service');
 const aiService = require('../services/ai_service');
 
 const appPath = path.join(__dirname, '..', '..', 'app.js');
+const pptPath = path.join(__dirname, '..', '..', 'ppt.js');
 const indexPath = path.join(__dirname, '..', '..', 'index.html');
 const serverPath = path.join(__dirname, '..', 'server.js');
 
@@ -129,6 +130,81 @@ test('unlinked PPT request enrichment preserves the legacy payload', () => {
 
   assert.equal(context.prepareCampaignPptOutlineRequest('/ai/ppt-outline', original), original);
   assert.equal(context.prepareCampaignPptOutlineRequest('/ai/proposal-draft', original), original);
+});
+
+test('PPT generation does not render or persist a local fallback when AI concurrency is full', async () => {
+  const appSource = fs.readFileSync(appPath, 'utf8');
+  const pptSource = fs.readFileSync(pptPath, 'utf8');
+  const button = { disabled: false, textContent: '生成 / 修改 PPT' };
+  const calls = [];
+  const toasts = [];
+  let fallbackCalls = 0;
+  let renderCalls = 0;
+  const context = {
+    AbortController,
+    setTimeout,
+    clearTimeout,
+    console: { error() {} },
+    curDemand: { brand: 'Acme' },
+    selTpl: 'growth',
+    lastProp: '# Existing proposal',
+    lastPPT: '<html>Existing PPT</html>',
+    lastPPTSource: '{"existing":true}',
+    lastPPTOutline: { sections: [{ title: 'Existing' }] },
+    pptContextFiles: [],
+    document: {
+      getElementById(id) { return id === 'btnGenPPT' ? button : null; }
+    },
+    getCurrentProposalDraft() { return '# Existing proposal'; },
+    buildPPTDeckContext() { return 'Existing context'; },
+    async apiFetch(url) {
+      calls.push(url);
+      if (url === '/ai/ppt-outline') {
+        return {
+          ok: false,
+          status: 429,
+          async json() {
+            return {
+              code: 'AI_ORGANIZATION_CONCURRENCY_LIMIT_REACHED',
+              error: '当前组织的 AI 并发已满，本次请求尚未开始，请稍后重试。'
+            };
+          }
+        };
+      }
+      return { ok: true, status: 200, async json() { return {}; } };
+    },
+    normalizePPTData(value) { return value; },
+    buildClientPPTFallback() {
+      fallbackCalls += 1;
+      return { sections: [{ title: 'Fallback' }] };
+    },
+    buildPPTMaterialReferences() { return []; },
+    buildRevealHTML() { return '<html>Fallback PPT</html>'; },
+    renderPPTResult() { renderCalls += 1; },
+    toast(message, type) { toasts.push({ message, type }); }
+  };
+  context.window = context;
+  context.globalThis = context;
+  vm.createContext(context);
+  vm.runInContext([
+    extractFunction(appSource, 'isAIConcurrencyError'),
+    extractFunction(pptSource, 'generateHTMLPPT')
+  ].join('\n'), context, { filename: pptPath });
+
+  await context.generateHTMLPPT();
+
+  assert.deepEqual(calls, ['/ai/ppt-outline']);
+  assert.equal(fallbackCalls, 0);
+  assert.equal(renderCalls, 0);
+  assert.equal(context.lastPPT, '<html>Existing PPT</html>');
+  assert.equal(context.lastPPTSource, '{"existing":true}');
+  assert.equal(context.lastPPTOutline.sections[0].title, 'Existing');
+  assert.equal(button.disabled, false);
+  assert.equal(button.textContent, '生成 / 修改 PPT');
+  assert.equal(toasts.length, 1);
+  assert.equal(toasts[0].type, 'error');
+  assert.match(toasts[0].message, /AI 并发已满/);
+  assert.doesNotMatch(toasts[0].message, /生成成功/);
 });
 
 test('Campaign PPT render fence aborts and discards a response after the active Campaign changes', () => {

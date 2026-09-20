@@ -37,6 +37,7 @@ const {
   OrganizationMethodologyServiceError
 } = require('./services/organization_methodology_service');
 const { AIQuotaServiceError } = require('./services/ai_quota_service');
+const { AIConcurrencyServiceError } = require('./services/ai_concurrency_service');
 const {
   CAMPAIGN_PERFORMANCE_MODULE,
   CAMPAIGN_PERFORMANCE_EXPORT_ACTION,
@@ -66,6 +67,7 @@ function sendError(request, response, error) {
     error instanceof PerformanceContentAnalysisServiceError ||
     error instanceof OrganizationMethodologyServiceError ||
     error instanceof AIQuotaServiceError ||
+    error instanceof AIConcurrencyServiceError ||
     (error && error.name === 'IdempotencyServiceError') ||
     error instanceof CustomerReportSnapshotServiceError ||
     error instanceof CustomerReportDeliveryServiceError;
@@ -76,6 +78,9 @@ function sendError(request, response, error) {
     request_id: requestId(request)
   };
   if (known && error.details !== undefined) body.details = error.details;
+  if (known && (error.retryAfterSeconds || error.retryAfter)) {
+    response.setHeader('Retry-After', String(error.retryAfterSeconds || error.retryAfter));
+  }
   return response.status(status).json(body);
 }
 

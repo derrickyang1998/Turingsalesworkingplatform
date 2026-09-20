@@ -393,6 +393,52 @@ test('projects shared monthly AI quota while reserving quota management to platf
   }
 });
 
+test('projects aggregate AI concurrency while reserving policy management to platform administrators', () => {
+  const db = openFixture();
+  try {
+    const { createOrganizationGovernanceService } = loadService();
+    const aiConcurrencyService = {
+      projectOrganizationConcurrency({ organizationId }) {
+        return {
+          organization_id: organizationId,
+          active: organizationId === 10 ? 2 : 0,
+          limit: 10,
+          available: organizationId === 10 ? 8 : 10,
+          over_capacity: 0,
+          status: 'available',
+          policy_version: 3,
+          earliest_lease_expires_at: organizationId === 10 ? '2026-09-21T00:02:15Z' : null
+        };
+      }
+    };
+    const service = createOrganizationGovernanceService(db, { aiConcurrencyService });
+    const platformView = service.listOrganizations({
+      actor: actor(1, 'admin'),
+      requestId: 'organizations-with-ai-concurrency',
+      query: { limit: 2 }
+    });
+    assert.deepEqual(platformView.organizations[0].ai_concurrency, {
+      active: 2,
+      limit: 10,
+      available: 8,
+      over_capacity: 0,
+      status: 'available',
+      policy_version: 3,
+      earliest_lease_expires_at: '2026-09-21T00:02:15Z'
+    });
+    assert.equal(platformView.organizations[0].allowed_actions.manage_ai_concurrency, true);
+
+    const ownerView = service.listOrganizations({
+      actor: actor(2),
+      requestId: 'organization-ai-concurrency-owner-view',
+      query: {}
+    });
+    assert.equal(ownerView.organizations[0].allowed_actions.manage_ai_concurrency, false);
+  } finally {
+    db.close();
+  }
+});
+
 test('applies bounded organization and member search filters before pagination', () => {
   const db = openFixture();
   try {

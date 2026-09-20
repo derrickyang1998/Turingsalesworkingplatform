@@ -37,7 +37,7 @@ App build: 20260811-v060-crm-sales-workspace
 App cache key: app.js?v=20260811v060crmsalesworkspace
 PPT build: 20260702-v916-kb-bridge-client-cn
 PPT cache key: ppt.js?v=20260702v916kbbridge
-PPT SHA-256: f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e
+PPT SHA-256: 1fc70495e7ce641dadc76d751a49eab6ed261640293d2b8e691cea8bd78a6821
 window.tmPPTBuild = "20260702-v916-kb-bridge-client-cn"
 Admin inert preview marker: ?preview=v030
 ```

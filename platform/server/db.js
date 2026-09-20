@@ -203,6 +203,13 @@ const db = migrationService.openMigratedDatabase(DB_PATH, {
       sourcePath: 'migrations/029_organization_monthly_ai_quota.js',
       engineVersion: 1,
       dependencies: ['migrations/vendor/bcryptjs_v3_0_3.js']
+    },
+    {
+      version: 30,
+      name: '030_ai_provider_concurrency_reservation',
+      sourcePath: 'migrations/030_ai_provider_concurrency_reservation.js',
+      engineVersion: 1,
+      dependencies: ['migrations/vendor/bcryptjs_v3_0_3.js']
     }
   ]
 });

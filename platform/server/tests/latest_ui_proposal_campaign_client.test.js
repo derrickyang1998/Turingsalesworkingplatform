@@ -163,6 +163,7 @@ function createRuntime(initialCampaignId = 12) {
     extractFunction(appSource, 'renderProposalDraftEvidence'),
     extractFunction(appSource, 'buildLocalProposalDraft'),
     extractFunction(appSource, 'renderProposalDraftResult'),
+    extractFunction(appSource, 'isAIConcurrencyError'),
     extractFunction(appSource, 'generateProposal')
   ].join('\n'), context, { filename: appPath });
   context.elements = elements;
@@ -280,6 +281,34 @@ test('proposal draft keeps the editable local proposal when the AI request fails
   assert.match(context.elements.proposalOutput.innerHTML, /AI 服务暂不可用，已保留可编辑的基础方案/);
   assert.match(context.elements.proposalOutput.innerHTML, /textarea/);
   assert.equal(context.elements.btnGenerateProposal.disabled, false);
+});
+
+test('proposal draft preserves existing work and does not claim fallback success when AI concurrency is full', async () => {
+  const context = createRuntime(null);
+  context.lastProp = '# Existing approved edits';
+  context.elements.proposalOutput.innerHTML = '<div>Existing proposal editor</div>';
+
+  const operation = context.generateProposal();
+  await new Promise((resolve) => setImmediate(resolve));
+  context.pending[0].resolve({
+    ok: false,
+    status: 429,
+    async json() {
+      return {
+        code: 'AI_ORGANIZATION_CONCURRENCY_LIMIT_REACHED',
+        error: '当前组织的 AI 并发已满，本次请求尚未开始，请稍后重试。'
+      };
+    }
+  });
+  await operation;
+
+  assert.equal(context.lastProp, '# Existing approved edits');
+  assert.equal(context.elements.proposalOutput.innerHTML, '<div>Existing proposal editor</div>');
+  assert.equal(context.elements.btnGenerateProposal.disabled, false);
+  assert.equal(context.toasts.length, 1);
+  assert.equal(context.toasts[0].type, 'error');
+  assert.match(context.toasts[0].message, /AI 并发已满/);
+  assert.doesNotMatch(context.toasts[0].message, /已生成|基础方案/);
 });
 
 test('proposal route uses fixed private Campaign RAG without archiving an unconfirmed draft', () => {

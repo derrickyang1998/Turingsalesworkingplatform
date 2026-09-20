@@ -82,12 +82,18 @@ async function generateHTMLPPT() {
       });
       clearTimeout(timer);
       var d = await r.json().catch(function() { return {}; });
-      if (!r.ok) throw new Error(d.error || ("PPT 服务请求失败: " + r.status));
+      if (!r.ok) {
+        var requestError = new Error(d.error || ("PPT 服务请求失败: " + r.status));
+        requestError.code = typeof d.code === "string" ? d.code : "";
+        requestError.status = r.status;
+        throw requestError;
+      }
       parsed = normalizePPTData(d.outline || d);
       if (d.research) parsed.research = d.research;
       else if (d.outline && d.outline.research) parsed.research = d.outline.research;
       fallbackWarning = d.fallback ? (d.warning || "AI PPT 生成处于降级模式，已生成基础可编辑版本") : "";
     } catch (apiError) {
+      if (typeof isAIConcurrencyError === "function" && isAIConcurrencyError(apiError)) throw apiError;
       if (apiError.name === "AbortError") apiError = new Error("联网调研或 AI 大纲生成超时，已使用本地严格模板生成");
       parsed = buildClientPPTFallback(curDemand, [proposalDraft, strictContext].filter(Boolean).join("\n\n"), apiError.message);
       fallbackWarning = apiError.message;

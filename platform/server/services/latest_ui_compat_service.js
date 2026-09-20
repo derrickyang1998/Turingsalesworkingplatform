@@ -6,6 +6,8 @@ const llm = require('./llm_service');
 const rag = require('./rag_service');
 const webSearch = require('./web_search_service');
 const aiQuota = require('./ai_quota_service');
+const aiConcurrency = require('./ai_concurrency_service');
+const crypto = require('node:crypto');
 
 const TEXT_EXTS = new Set(['.txt', '.md', '.csv', '.json']);
 const DOC_EXTS = new Set(['.pdf', '.docx', '.pptx']);
@@ -204,7 +206,7 @@ function normalizeAnalysis(value, fallback) {
 
 async function generateJsonWithDeepSeek(prompt, fallback, opts) {
   opts = opts || {};
-  if (opts.db && opts.user && opts.user.id) {
+  if (opts.db && opts.user && opts.user.id && opts.quotaAdmissionChecked !== true) {
     aiQuota.assertAdmission(opts.db, {
       organizationId: opts.organizationId,
       userId: opts.user.id,
@@ -220,8 +222,12 @@ async function generateJsonWithDeepSeek(prompt, fallback, opts) {
       { role: 'user', content: prompt }
     ],
     temperature: opts && opts.temperature !== undefined ? opts.temperature : 0.2,
-    max_tokens: opts && opts.max_tokens || 2200
+    max_tokens: opts && opts.max_tokens || 2200,
+    signal: opts.signal,
+    deadlineAt: opts.deadlineAt
   });
+  if (opts.signal && opts.signal.aborted) throw opts.signal.reason || new Error('AI provider operation aborted.');
+  if (typeof opts.assertConcurrencyActive === 'function') opts.assertConcurrencyActive();
   recordTokenUsage(opts, completion);
   const raw = String(completion.content || '').replace(/^```json\s*/i, '').replace(/```$/i, '').trim();
   const parsed = safeJson(raw, null);
@@ -431,6 +437,18 @@ async function generatePptOutline(db, user, body, opts) {
     requestId: opts.requestId,
     ipAddress: opts.ipAddress
   });
+  const concurrencyKey = 'ppt_outline:' + (
+    typeof opts.requestId === 'string' && opts.requestId.trim()
+      ? opts.requestId.trim()
+      : crypto.randomUUID()
+  );
+  return aiConcurrency.createAIConcurrencyService(db).runWithPermit({
+    organizationId: opts.organizationId,
+    actorUserId: user.id,
+    operationKey: concurrencyKey.slice(0, 200),
+    provider: 'tavily_deepseek_sequence',
+    signal: opts.signal
+  }, async (permit) => {
   const ragContext = rag.buildRagContext(db, {
     user,
     organizationId: opts.organizationId,
@@ -440,11 +458,14 @@ async function generatePptOutline(db, user, body, opts) {
   });
   const allowWeb = opts.allowWeb === true;
   const research = allowWeb
-    ? await webSearch.searchWeb(query || 'overseas influencer marketing campaign', { db, maxResults: 5 })
+    ? await webSearch.searchWeb(query || 'overseas influencer marketing campaign', {
+        db,
+        maxResults: 5,
+        signal: permit.signal,
+        deadlineAt: permit.deadlineAt
+      })
     : { used: false, provider: 'tavily', results: [], reason: 'disabled' };
-  if (allowWeb) {
-    webSearch.cacheSearchResult(db, query || 'overseas influencer marketing campaign', research);
-  }
+  permit.assertActive();
   const fallback = buildPptOutlineFallback(demand, proposal, '', research);
   const prompt = [
     'Create a client-facing overseas influencer marketing PPT outline for TuringMarket.',
@@ -464,16 +485,26 @@ async function generatePptOutline(db, user, body, opts) {
     max_tokens: 3200,
     endpoint: 'ppt_outline',
     requestId: opts.requestId,
-    ipAddress: opts.ipAddress
+    ipAddress: opts.ipAddress,
+    quotaAdmissionChecked: true,
+    signal: permit.signal,
+    deadlineAt: permit.deadlineAt,
+    assertConcurrencyActive: permit.assertActive
   });
+  permit.assertActive();
   const outline = normalizePptOutline(generated.value, fallback, research);
   outline.knowledge_references = ragContext.references;
+  if (allowWeb) {
+    webSearch.cacheSearchResult(db, query || 'overseas influencer marketing campaign', research);
+  }
+  permit.assertActive();
   knowledgeService.recordKnowledgeUsageTelemetry(
     db,
     ragContext.references.map(function(ref) { return ref.id; }),
     user,
     { organizationId: opts.organizationId }
   );
+  permit.assertActive();
   try {
     knowledgeService.ingestKnowledge(db, {
       title: 'PPT outline: ' + (outline.title || demand.brand || 'campaign'),
@@ -502,6 +533,7 @@ async function generatePptOutline(db, user, body, opts) {
     fallback: generated.fallback,
     warning: generated.warning
   };
+  });
 }
 
 function normalizePptOutline(value, fallback, research) {

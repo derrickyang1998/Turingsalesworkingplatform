@@ -291,6 +291,7 @@ function buildSystemPrompt(opts) {
 module.exports = {
   buildRagContext,
   buildLinkedRagContext,
+  normalizeLinkedSelectedEntryIds: normalizeSelectedEntryIds,
   LINKED_RAG_LIMITS,
   buildSystemPrompt
 };

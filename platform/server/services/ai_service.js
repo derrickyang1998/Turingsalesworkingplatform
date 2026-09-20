@@ -3,6 +3,7 @@ const rag = require('./rag_service');
 const llm = require('./llm_service');
 const webSearch = require('./web_search_service');
 const aiQuota = require('./ai_quota_service');
+const aiConcurrency = require('./ai_concurrency_service');
 const crypto = require('node:crypto');
 const idempotency = require('./idempotency_service');
 const { requestHash } = require('./sqlite_digest_service');
@@ -19,6 +20,29 @@ const SUMMARY_PROMOTION_MIN_QUESTION_LENGTH = 8;
 const SUMMARY_PROMOTION_MIN_ANSWER_LENGTH = 240;
 const PERFORMANCE_REVIEW_IDEMPOTENCY_CONTRACT = 'performance-ai-review-draft-v1';
 const aiCostSqlDatabases = new WeakSet();
+
+function concurrencyOperationKey(opts, scope) {
+  const raw = opts && (
+    opts.idempotencyKey || opts.idempotency_key || opts.requestId || opts.request_id
+  );
+  const candidate = typeof raw === 'string' && raw.trim()
+    ? raw.trim()
+    : crypto.randomUUID();
+  const safe = /[\u0000-\u001f\u007f]/.test(candidate)
+    ? crypto.createHash('sha256').update(candidate).digest('hex')
+    : candidate;
+  return `${scope}:${safe}`.slice(0, 200);
+}
+
+function runWithAIConcurrency(db, opts, scope, operation) {
+  return aiConcurrency.createAIConcurrencyService(db).runWithPermit({
+    organizationId: opts.organizationId,
+    actorUserId: opts.user.id,
+    operationKey: concurrencyOperationKey(opts, scope),
+    provider: 'tavily_deepseek_sequence',
+    signal: opts.signal
+  }, operation);
+}
 
 function hasConversationOrganizationOwnership(db) {
   return Boolean(db.prepare(`
@@ -249,13 +273,15 @@ async function handleLegacyChat(db, opts) {
   const message = String(opts.message || '').trim();
   if (!message) throw new Error('Message required');
 
-  aiQuota.assertAdmission(db, {
-    organizationId: opts.organizationId,
-    userId: opts.user.id,
-    endpoint: opts.source_module || 'ai_chat',
-    requestId: opts.requestId,
-    ipAddress: opts.ipAddress
-  });
+  if (opts.quotaAdmissionChecked !== true) {
+    aiQuota.assertAdmission(db, {
+      organizationId: opts.organizationId,
+      userId: opts.user.id,
+      endpoint: opts.source_module || 'ai_chat',
+      requestId: opts.requestId,
+      ipAddress: opts.ipAddress
+    });
+  }
 
   const conversation = ensureConversation(db, opts);
   const userMessageId = insertMessage(db, {
@@ -284,35 +310,48 @@ async function handleLegacyChat(db, opts) {
     reason_code: 'disabled',
     reason: 'disabled'
   };
-  if (opts.allowWeb !== false) {
-    if (opts.webSearchProvider && typeof opts.webSearchProvider.search === 'function') {
-      searchResult = await opts.webSearchProvider.search(webQuery);
-    } else {
-      searchResult = await webSearch.searchWeb(webQuery, {
-        provider: opts.webProvider || process.env.WEB_SEARCH_PROVIDER || 'tavily',
-        maxResults: opts.webMaxResults || 5,
-        db: db
-      });
+  const providerContext = createOneShotProviderContext(opts);
+  let completion;
+  try {
+    if (opts.allowWeb !== false) {
+      const webOperation = opts.webSearchProvider && typeof opts.webSearchProvider.search === 'function'
+        ? opts.webSearchProvider.search(webQuery, {
+            signal: providerContext.signal,
+            deadlineAt: providerContext.deadlineAt
+          })
+        : webSearch.searchWeb(webQuery, {
+            provider: opts.webProvider || process.env.WEB_SEARCH_PROVIDER || 'tavily',
+            maxResults: opts.webMaxResults || 5,
+            db: db,
+            signal: providerContext.signal,
+            deadlineAt: providerContext.deadlineAt
+          });
+      searchResult = await awaitWithAbort(webOperation, providerContext.signal);
+      searchResult = normalizeWebSearchResult(
+        searchResult,
+        opts.webProvider || process.env.WEB_SEARCH_PROVIDER || 'tavily'
+      );
     }
-    searchResult = normalizeWebSearchResult(
-      searchResult,
-      opts.webProvider || process.env.WEB_SEARCH_PROVIDER || 'tavily'
-    );
-    webSearch.cacheSearchResult(db, webQuery, searchResult);
-  }
 
-  const history = recentMessages(db, conversation.id, 8);
-  const provider = opts.provider || llm.createDeepSeekProvider();
-  const systemPrompt = rag.buildSystemPrompt({
-    contextText: ragContext.contextText,
-    webContext: webSearch.formatWebContext(searchResult)
-  });
-  const completion = await provider.complete({
-    messages: [{ role: 'system', content: systemPrompt }].concat(history),
-    temperature: opts.temperature,
-    max_tokens: clampMaxTokens(opts.max_tokens),
-    model: opts.model
-  });
+    const history = recentMessages(db, conversation.id, 8);
+    const provider = opts.provider || llm.createDeepSeekProvider();
+    const systemPrompt = rag.buildSystemPrompt({
+      contextText: ragContext.contextText,
+      webContext: webSearch.formatWebContext(searchResult)
+    });
+    completion = await awaitWithAbort(provider.complete({
+      messages: [{ role: 'system', content: systemPrompt }].concat(history),
+      temperature: opts.temperature,
+      max_tokens: clampMaxTokens(opts.max_tokens),
+      model: opts.model,
+      signal: providerContext.signal,
+      deadlineAt: providerContext.deadlineAt
+    }), providerContext.signal);
+    assertProviderContextActive(providerContext);
+  } finally {
+    providerContext.dispose();
+  }
+  if (typeof opts.assertConcurrencyActive === 'function') opts.assertConcurrencyActive();
 
   const usage = completion.usage || {};
   const completionModel = resolveCompletionModel(completion, opts.model);
@@ -355,6 +394,9 @@ async function handleLegacyChat(db, opts) {
         totalTokens: usage.total_tokens || 0,
         endpoint: opts.source_module || 'ai_chat'
       });
+    }
+    if (searchResult.used) {
+      webSearch.cacheSearchResultInTransaction(db, webQuery, searchResult);
     }
 
     const promotion = decideSummaryPromotion({
@@ -469,6 +511,7 @@ function validateOneShotCompletion(completion, opts) {
 }
 
 function persistAtomicOneShot(db, opts) {
+  if (typeof opts.assertConcurrencyActive === 'function') opts.assertConcurrencyActive();
   return db.transaction(() => {
     const conversation = ensureConversation(db, opts);
     const userMessageId = insertMessage(db, {
@@ -554,13 +597,15 @@ function persistAtomicOneShot(db, opts) {
 
 async function handleAtomicLegacyOneShot(db, opts) {
   const message = String(opts.message || '').trim();
-  aiQuota.assertAdmission(db, {
-    organizationId: opts.organizationId,
-    userId: opts.user && opts.user.id,
-    endpoint: opts.source_module || 'ai_one_shot',
-    requestId: opts.requestId,
-    ipAddress: opts.ipAddress
-  });
+  if (opts.quotaAdmissionChecked !== true) {
+    aiQuota.assertAdmission(db, {
+      organizationId: opts.organizationId,
+      userId: opts.user && opts.user.id,
+      endpoint: opts.source_module || 'ai_one_shot',
+      requestId: opts.requestId,
+      ipAddress: opts.ipAddress
+    });
+  }
   const retrievalQuery = String(opts.ragQuery || message).trim() || message;
   const webQuery = String(opts.webQuery || retrievalQuery).trim() || retrievalQuery;
   const ragContext = rag.buildRagContext(db, {
@@ -641,6 +686,7 @@ async function handleAtomicLegacyOneShot(db, opts) {
     providerContext.dispose();
   }
 
+  if (typeof opts.assertConcurrencyActive === 'function') opts.assertConcurrencyActive();
   return persistAtomicOneShot(db, {
     ...opts,
     message,
@@ -1453,6 +1499,7 @@ function projectLinkedReferences(references) {
 }
 
 function persistLinkedChat(db, opts) {
+  opts.concurrencyPermit.assertActive();
   return db.transaction(() => {
     assertProviderContextActive(opts.providerContext);
     const access = requireLinkedCampaignAccess(db, opts.user.id, opts.linked.campaignId);
@@ -1657,26 +1704,12 @@ async function handleLinkedChat(db, opts, linked) {
   if (linked.conversationId !== null) {
     requireLinkedConversationAccess(db, user, linked.conversationId, opts.organizationId);
   }
-  const ragContext = rag.buildLinkedRagContext(db, {
-    query: retrievalQuery,
-    user,
-    organizationId: opts.organizationId,
-    campaignId: linked.campaignId,
-    knowledge_entry_ids: opts.knowledge_entry_ids === undefined
-      ? opts.knowledgeEntryIds
-      : opts.knowledge_entry_ids,
-    entry_type: opts.entry_type,
-    source_type: opts.source_type,
-    source_types: opts.source_types,
-    quality_state: opts.quality_state,
-    visibility: opts.visibility,
-    business_type: opts.business_type,
-    business_id: opts.business_id,
-    tags: opts.tags
-  });
+  const selectedEntryIds = rag.normalizeLinkedSelectedEntryIds(
+    opts.knowledge_entry_ids === undefined ? opts.knowledgeEntryIds : opts.knowledge_entry_ids
+  );
   const key = requireLinkedIdempotencyKey(opts);
   const requestId = normalizeRequestId(opts, key);
-  const requestHashValue = linkedRequestHash(message, linked, ragContext, opts);
+  const requestHashValue = linkedRequestHash(message, linked, { selectedEntryIds }, opts);
   const terminalAuditEnabled = opts.terminalRejectionAudit === true &&
     opts.source_module === 'performance_review' && linked.initialLink;
   const terminalOptions = Object.assign({}, opts, {
@@ -1716,14 +1749,6 @@ async function handleLinkedChat(db, opts, linked) {
       requestId,
       ipAddress: opts.ipAddress
     });
-    if (typeof opts.beforeProvider === 'function') {
-      await opts.beforeProvider({
-        db,
-        user,
-        campaignId: linked.campaignId,
-        reservation
-      });
-    }
   } catch (error) {
     const guardError = error && error.statusCode
       ? error
@@ -1731,9 +1756,54 @@ async function handleLinkedChat(db, opts, linked) {
     completeLinkedFailure(db, reservation, requestHashValue, requestId, guardError);
     throw guardError;
   }
-  const providerContext = createLinkedProviderContext(reservation, opts.signal);
-  const startedAt = Date.now();
+  let concurrencyOperationStarted = false;
   try {
+    return await runWithAIConcurrency(
+      db,
+      Object.assign({}, opts, {
+        organizationId: linkedAccess.campaign.org_id,
+        requestId,
+        idempotencyKey: key
+      }),
+      opts.source_module || 'ai_chat_linked',
+      async (permit) => {
+        concurrencyOperationStarted = true;
+        let ragContext;
+        try {
+          ragContext = rag.buildLinkedRagContext(db, {
+            query: retrievalQuery,
+            user,
+            organizationId: opts.organizationId,
+            campaignId: linked.campaignId,
+            knowledge_entry_ids: selectedEntryIds,
+            entry_type: opts.entry_type,
+            source_type: opts.source_type,
+            source_types: opts.source_types,
+            quality_state: opts.quality_state,
+            visibility: opts.visibility,
+            business_type: opts.business_type,
+            business_id: opts.business_id,
+            tags: opts.tags
+          });
+          if (typeof opts.beforeProvider === 'function') {
+            await opts.beforeProvider({
+              db,
+              user,
+              campaignId: linked.campaignId,
+              reservation
+            });
+          }
+          permit.assertActive();
+        } catch (error) {
+          const preparationError = error && error.statusCode
+            ? error
+            : serviceError(500, 'AI_PREPARATION_FAILED', 'Linked AI chat could not be prepared.');
+          completeLinkedFailure(db, reservation, requestHashValue, requestId, preparationError);
+          throw preparationError;
+        }
+        const providerContext = createLinkedProviderContext(reservation, permit.signal);
+        const startedAt = Date.now();
+        try {
     let searchResult;
     let completion;
     try {
@@ -1841,6 +1911,7 @@ async function handleLinkedChat(db, opts, linked) {
         requestId,
         requestHashValue,
         reservation,
+        concurrencyPermit: permit,
         providerContext,
         ragContext,
         searchResult,
@@ -1868,8 +1939,20 @@ async function handleLinkedChat(db, opts, linked) {
       completeLinkedFailure(db, reservation, requestHashValue, requestId, terminalError);
       throw terminalError;
     }
-  } finally {
-    providerContext.dispose();
+        } finally {
+          providerContext.dispose();
+        }
+      }
+    );
+  } catch (error) {
+    if (!concurrencyOperationStarted) {
+      const admissionError = error && error.statusCode
+        ? error
+        : serviceError(503, 'AI_CONCURRENCY_POLICY_UNAVAILABLE', 'AI concurrency admission is unavailable.');
+      completeLinkedFailure(db, reservation, requestHashValue, requestId, admissionError);
+      throw admissionError;
+    }
+    throw error;
   }
 }
 
@@ -1882,8 +1965,30 @@ async function handleChat(db, opts) {
   if (!message) throw new Error('Message required');
   const linked = resolveLinkedContext(db, opts);
   if (linked.linked) return handleLinkedChat(db, opts, linked);
-  if (opts.atomicOneShot === true) return handleAtomicLegacyOneShot(db, opts);
-  return handleLegacyChat(db, opts);
+  aiQuota.assertAdmission(db, {
+    organizationId,
+    userId: opts.user.id,
+    endpoint: opts.source_module || (opts.atomicOneShot === true ? 'ai_one_shot' : 'ai_chat'),
+    requestId: opts.requestId,
+    ipAddress: opts.ipAddress
+  });
+  const admittedOpts = Object.assign({}, opts, { quotaAdmissionChecked: true });
+  return runWithAIConcurrency(
+    db,
+    admittedOpts,
+    admittedOpts.source_module || (admittedOpts.atomicOneShot === true ? 'ai_one_shot' : 'ai_chat'),
+    (permit) => {
+      const protectedOpts = Object.assign({}, admittedOpts, {
+        signal: permit.signal,
+        concurrencyDeadlineAt: permit.deadlineAt,
+        assertConcurrencyActive: permit.assertActive
+      });
+      permit.assertActive();
+      return protectedOpts.atomicOneShot === true
+        ? handleAtomicLegacyOneShot(db, protectedOpts)
+        : handleLegacyChat(db, protectedOpts);
+    }
+  );
 }
 
 function conversationReadLimit(value) {

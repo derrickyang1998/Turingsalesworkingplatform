@@ -8,8 +8,10 @@ const Database = require('better-sqlite3');
 
 const migrationService = require('../services/migration_service');
 const organizationQuotaMigration = require('../migrations/029_organization_monthly_ai_quota');
+const organizationConcurrencyMigration = require('../migrations/030_ai_provider_concurrency_reservation');
 const knowledge = require('../services/knowledge_service');
 const ai = require('../services/ai_service');
+const rag = require('../services/rag_service');
 const llm = require('../services/llm_service');
 const webSearch = require('../services/web_search_service');
 const { resolveConversationCampaign } = require('../services/campaign_access_service');
@@ -114,6 +116,7 @@ function openDatabase() {
   });
   db.exec('ALTER TABLE token_usage ADD COLUMN org_id INTEGER');
   organizationQuotaMigration.apply(db);
+  organizationConcurrencyMigration.apply(db);
   return db;
 }
 
@@ -1446,6 +1449,89 @@ test('linked chat writes no conversation, message, reference, token, archive, ca
       await operation.catch(() => {});
     }
   } finally {
+    db.close();
+  }
+});
+
+test('linked chat rejects at full organization concurrency before provider or domain writes', async () => {
+  const db = openDatabase();
+  const originalBuildLinkedRagContext = rag.buildLinkedRagContext;
+  let ragCalls = 0;
+  try {
+    rag.buildLinkedRagContext = function(...args) {
+      ragCalls += 1;
+      return originalBuildLinkedRagContext(...args);
+    };
+    const fixture = createCampaignFixture(db);
+    db.prepare(`
+      INSERT INTO organization_ai_concurrency_policies
+        (org_id,policy_version,concurrency_limit,changed_by,reason,source)
+      VALUES (?,2,0,?,'focused rejection test','admin_update')
+    `).run(fixture.orgId, fixture.userId);
+    const before = durableLinkedState(db, fixture.campaignId);
+    let providerCalls = 0;
+    const input = linkedInput(fixture, 'concurrency-full', {
+      provider: {
+        async complete() {
+          providerCalls += 1;
+          return { content: 'must not run', usage: {}, model: 'fake-deepseek' };
+        }
+      }
+    });
+
+    const outcome = await settled(ai.handleChat(db, input));
+
+    assertServiceError(outcome, 429, 'AI_ORGANIZATION_CONCURRENCY_LIMIT_REACHED');
+    assert.match(outcome.error.message, /不会消耗 Token/);
+    assert.equal(providerCalls, 0);
+    assert.equal(ragCalls, 0);
+    assert.deepEqual(durableLinkedState(db, fixture.campaignId), before);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM ai_provider_reservations WHERE state='active'").get().count, 0);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM ai_provider_reservation_events WHERE event_type='rejected'").get().count, 1);
+    assert.deepEqual(db.prepare(`
+      SELECT state,status_code,json_extract(response_json,'$.code') AS code
+      FROM request_idempotency WHERE idempotency_key=?
+    `).get(input.idempotencyKey), {
+      state: 'completed',
+      status_code: 429,
+      code: 'AI_ORGANIZATION_CONCURRENCY_LIMIT_REACHED'
+    });
+  } finally {
+    rag.buildLinkedRagContext = originalBuildLinkedRagContext;
+    db.close();
+  }
+});
+
+test('linked successful replay bypasses a later zero concurrency limit without another provider call', async () => {
+  const db = openDatabase();
+  const originalBuildLinkedRagContext = rag.buildLinkedRagContext;
+  let ragCalls = 0;
+  try {
+    rag.buildLinkedRagContext = function(...args) {
+      ragCalls += 1;
+      return originalBuildLinkedRagContext(...args);
+    };
+    const fixture = createCampaignFixture(db);
+    const providerCalls = [];
+    const input = linkedInput(fixture, 'concurrency-replay', {
+      provider: successfulProvider(providerCalls)
+    });
+    const created = await ai.handleChat(db, input);
+    const reservationEventsBefore = tableRowCount(db, 'ai_provider_reservation_events');
+    db.prepare(`
+      INSERT INTO organization_ai_concurrency_policies
+        (org_id,policy_version,concurrency_limit,changed_by,reason,source)
+      VALUES (?,2,0,?,'focused replay test','admin_update')
+    `).run(fixture.orgId, fixture.userId);
+
+    const replayed = await ai.handleChat(db, input);
+
+    assert.deepEqual(replayed, created);
+    assert.equal(providerCalls.length, 1);
+    assert.equal(ragCalls, 1);
+    assert.equal(tableRowCount(db, 'ai_provider_reservation_events'), reservationEventsBefore);
+  } finally {
+    rag.buildLinkedRagContext = originalBuildLinkedRagContext;
     db.close();
   }
 });

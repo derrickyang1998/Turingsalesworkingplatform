@@ -32,7 +32,7 @@ const APP_QUERY = '20260811v060crmsalesworkspace';
 const PPT_BUILD = '20260702-v916-kb-bridge-client-cn';
 const PPT_QUERY = '20260702v916kbbridge';
 const SECURITY_QUERY = '20260714v050campaignbusinessspine';
-const PPT_SHA256 = 'f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e';
+const PPT_SHA256 = '1fc70495e7ce641dadc76d751a49eab6ed261640293d2b8e691cea8bd78a6821';
 
 function read(filePath) {
   return fs.readFileSync(filePath, 'utf8');
