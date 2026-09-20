@@ -1,6 +1,6 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
-## v0.9.25-organization-monthly-ai-quota (Release Candidate, 2026-09-21) - 组织月度共享 AI 配额
+## v0.9.25-organization-monthly-ai-quota (Production Deployed, 2026-09-21) - 组织月度共享 AI 配额
 
 ### 交付与范围 / Delivery And Scope
 - schema 升级至 v29，新增按组织连续、仅追加的月度 AI 配额策略；`null` 表示不限、`0` 表示停用、正安全整数表示 UTC 自然月上限，现有与新建组织默认保持不限。
@@ -12,10 +12,13 @@
 ### 轻量定向验证与独立审查 / Focused Verification And Independent Review
 - 按“一功能一上线”只运行本功能的迁移、UTC 月份、配额准入、API、管理界面、Provider 零调用、可信清单和发布合同门禁；未运行无关 CRM、网红、方案、报告或完整浏览器套件。
 - 初始定向集、迁移精确性、脱敏恢复、重放、语法、JSON、PowerShell、密钥与差异检查均通过。独立审查发现旧 PPT Provider 前置准入、CAS 类型严格性和候选门禁覆盖三项问题；均先以失败测试复现，再完成最小修复，修复定向集 `44/44`、历史/当前发布清单 `21/21`、可信源码固定值 `4/4` 通过。
-- 独立定向复审结论为 `APPROVE`，无剩余 P0-P2；复审者另行复跑相关修复用例 `6/6`。正式本地预检仍是生产发布前置条件，本条在生产备份、部署和线上可逆验收完成前不标记为已上线。
+- 独立定向复审结论为 `APPROVE`，无剩余 P0-P2；复审者另行复跑相关修复用例 `6/6`。正式本地预检返回 `LOCAL_DEPLOY_PREFLIGHT_OK`，随后才执行生产备份、部署和线上可逆验收。
 
-### 发布状态 / Release Status
-- 当前为发布候选，生产仍运行 `v0.9.24` / schema v28。通过独立复审后将先推送 GitHub，再由受控发布器创建可验证备份、迁移至 schema v29，并完成“原配额 -> 停用 -> Provider 前拒绝 -> 精确恢复原配额”的同会话线上验收。
+### 生产状态 / Production Status
+- 功能提交 `f96313255bf26b724c3ad1432c60eebeb15fa554` 已在生产变更前同步 GitHub。正式运行 `762b5ca487234ffb80a016f081c17264` 返回 `DEPLOY_OK`、`RETENTION_CLEANUP_OK`、`PUBLIC_TRAFFIC_RESTORED`、`FINAL_ACCEPTANCE_FACTS_OK` 和 `PUBLIC_RELEASE_GUARD_VERIFIED`。
+- 可验证备份为 `/root/turingmarket/backups/v060-crm-sales-workspace-20260921-042129`；备份清单 SHA-256 为 `962bba5410ad8ec09fb783801d63a393a9cd0bdf4ff3670db98718a1480ce4c8`，数据库 SHA-256 为 `9ee0b4b1b05a264b8d12aac744698df07b247c47393f0aa805adb3efdf5b4a04`。
+- 公网健康 `200`、解析器 ready、schema v29、SQLite `quick_check=ok`、外键异常 0、PM2 online 且重启 0、Nginx 正常。线上标记 `v0.9.25-20260920204849` 完成“不限 v1 -> 停用 0 v2 -> Provider 前 429 拒绝 -> 精确恢复不限 v3”的可逆验收；拒绝期间 AI 对话、知识、Token 用量及搜索缓存新增均为 0，验收身份从已校验备份精确恢复且活动会话为 0。
+- 首次验收清理尝试触发仅追加 `activity_log` 保护并被数据库拒绝，未删除任何审计记录；随后按备份精确恢复身份状态并以只读证据完成复核。验收证据位于 `/root/turingmarket/deployment-evidence/organization-ai-quota-acceptance-762b5ca487234ffb80a016f081c17264-v0.9.25-20260920204849.json`，SHA-256 为 `5f7d7c0d10c1dbcc70d29ebbc8be2b9aad6f22947c0ace3f50f9531c5acd2ef1`。
 
 ### 后续节奏 / Delivery Cadence
 - 继续“一功能一上线”：每个独立功能完成精确受影响测试、必要安全检查、一次独立审查和可验证备份后，当轮部署生产并立即做定向验收；完整重型套件仅由阶段收口或高风险边界触发。下一独立版本为持久并发预留，其后为账单能力。
