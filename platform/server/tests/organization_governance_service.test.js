@@ -267,6 +267,42 @@ test('lists only authorized organizations and members with contract fields and a
   }
 });
 
+test('projects organization plan summaries while reserving assignment to platform administrators', () => {
+  const db = openFixture();
+  try {
+    const { createOrganizationGovernanceService } = loadService();
+    const planEntitlementService = {
+      projectOrganization(input) {
+        return {
+          organization_id: input.organizationId,
+          plan_code: input.organizationId === 20 ? 'crm_core' : 'legacy_full',
+          name_zh: input.organizationId === 20 ? '客户关系核心版' : '完整兼容版',
+          assignment_version: 1,
+          modules: ['crm.customer']
+        };
+      }
+    };
+    const service = createOrganizationGovernanceService(db, { planEntitlementService });
+    const platformView = service.listOrganizations({
+      actor: actor(1, 'admin'),
+      requestId: 'organizations-with-plans',
+      query: { limit: 2 }
+    });
+    assert.equal(platformView.organizations[0].plan.plan_code, 'legacy_full');
+    assert.equal(platformView.organizations[0].allowed_actions.assign_plan, true);
+
+    const ownerView = service.listOrganizations({
+      actor: actor(2),
+      requestId: 'organization-plan-owner-view',
+      query: {}
+    });
+    assert.equal(ownerView.organizations[0].plan.plan_code, 'crm_core');
+    assert.equal(ownerView.organizations[0].allowed_actions.assign_plan, false);
+  } finally {
+    db.close();
+  }
+});
+
 test('applies bounded organization and member search filters before pagination', () => {
   const db = openFixture();
   try {

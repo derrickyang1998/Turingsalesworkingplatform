@@ -10004,7 +10004,7 @@ function switchAdminTab(tab, options) { options = options || {}; if (!currentUse
   ['overview','users','organizations','knowledge','ai-audit','tokens'].forEach(function(t) { var el = document.getElementById('admin-tab-' + t); if (el) el.style.display = t === tab ? 'block' : 'none'; });
   if (tab === 'overview') loadAdminDashboard();
   if (tab === 'users') loadAdminUsers();
-  if (tab === 'organizations') loadAdminOrganizations();
+  if (tab === 'organizations') loadAdminPlanCatalog().then(function() { return loadAdminOrganizations(); });
   if (tab === 'knowledge') loadKnowledgeBase();
   if (tab === 'ai-audit') { loadAdminAIAuditUsers(); loadAdminAIAudit(); }
   if (tab === 'tokens') loadAdminTokens();
@@ -10471,6 +10471,7 @@ function adminUserPreviousPage() {
 var adminSelectedOrganizationId = null;
 var adminOrganizationsById = {};
 var adminOrganizationMembersById = {};
+var adminPlanCatalog = [];
 var adminOwnerTransferSnapshot = null;
 var adminOwnerTransferSubmitting = false;
 var adminOrganizationLoadSequence = 0;
@@ -10517,7 +10518,7 @@ function renderAdminOrganizations(organizations) {
   organizations.forEach(function(organization) {
     adminOrganizationsById[String(organization.id)] = organization;
   });
-  container.innerHTML = '<table><thead><tr><th>组织</th><th>团队</th><th>有效成员</th><th>已撤销</th><th>操作</th></tr></thead><tbody>'
+  container.innerHTML = '<table><thead><tr><th>组织</th><th>套餐</th><th>团队</th><th>有效成员</th><th>已撤销</th><th>操作</th></tr></thead><tbody>'
     + organizations.map(function(organization) {
       var id = Number(organization.id);
       var safeId = Number.isSafeInteger(id) && id > 0 ? id : 0;
@@ -10525,12 +10526,107 @@ function renderAdminOrganizations(organizations) {
       var ownerName = owner && (owner.display_name || owner.username)
         ? (owner.display_name || owner.username)
         : '尚未设置';
+      var plan = organization.plan && typeof organization.plan === 'object'
+        ? organization.plan
+        : null;
+      var planCode = plan && typeof plan.plan_code === 'string' ? plan.plan_code : '';
+      var planName = plan && (plan.name_zh || plan.name_en || planCode)
+        ? (plan.name_zh || plan.name_en || planCode)
+        : '策略不可用';
+      var canAssignPlan = organization.allowed_actions && organization.allowed_actions.assign_plan === true;
+      var catalog = typeof adminPlanCatalog !== 'undefined' && Array.isArray(adminPlanCatalog)
+        ? adminPlanCatalog
+        : [];
+      var planCell = '<span class="tm-member-access-note">' + esc(planName) + '</span>';
+      if (canAssignPlan && plan && catalog.length) {
+        planCell = '<div style="display:flex;align-items:center;gap:6px;min-width:220px">'
+          + '<select id="ad_organizationPlan_' + safeId + '" class="form-control" style="min-width:150px;height:34px;padding:4px 8px">'
+          + catalog.map(function(candidate) {
+              var candidateCode = candidate && typeof candidate.code === 'string' ? candidate.code : '';
+              var candidateName = candidate && (candidate.name_zh || candidate.name_en || candidateCode)
+                ? (candidate.name_zh || candidate.name_en || candidateCode)
+                : candidateCode;
+              return '<option value="' + esc(candidateCode) + '"' + (candidateCode === planCode ? ' selected' : '') + '>'
+                + esc(candidateName) + '</option>';
+            }).join('')
+          + '</select>'
+          + '<button type="button" id="ad_organizationPlanSave_' + safeId + '" class="btn btn-xs" title="保存套餐" onclick="saveAdminOrganizationPlan(' + safeId + ')">保存</button>'
+          + '</div>';
+      }
       return '<tr><td><strong>' + esc(organization.name || '-') + '</strong><div style="font-size:11px;opacity:.55">' + esc(organization.code || '-') + '</div><div class="tm-member-access-note">企业所有者：' + esc(ownerName) + '</div></td>'
+        + '<td>' + planCell + '</td>'
         + '<td>' + (Number(organization.team_count) || 0) + '</td>'
         + '<td>' + (Number(organization.active_member_count) || 0) + '</td>'
         + '<td>' + (Number(organization.revoked_member_count) || 0) + '</td>'
         + '<td><button type="button" class="btn btn-xs" onclick="selectAdminOrganization(' + safeId + ')">查看成员</button></td></tr>';
     }).join('') + '</tbody></table>';
+}
+function loadAdminPlanCatalog() {
+  if (!currentUserIsPlatformAdministrator()) {
+    adminPlanCatalog = [];
+    return Promise.resolve([]);
+  }
+  return apiFetch('/admin/plan-catalog').then(function(response) {
+    return response.json().then(function(data) {
+      if (!response.ok) throw new Error(data.error || '套餐目录加载失败');
+      return data;
+    });
+  }).then(function(data) {
+    var catalog = data && data.catalog;
+    adminPlanCatalog = catalog && Array.isArray(catalog.plans) ? catalog.plans : [];
+    return adminPlanCatalog;
+  }).catch(function(error) {
+    adminPlanCatalog = [];
+    toast(error.message || '套餐目录加载失败', 'error');
+    return [];
+  });
+}
+async function saveAdminOrganizationPlan(organizationId) {
+  var parsedId = Number(organizationId);
+  var organization = adminOrganizationsById[String(parsedId)];
+  var select = document.getElementById('ad_organizationPlan_' + parsedId);
+  var button = document.getElementById('ad_organizationPlanSave_' + parsedId);
+  var plan = organization && organization.plan;
+  var version = Number(plan && plan.assignment_version);
+  if (!Number.isSafeInteger(parsedId) || parsedId < 1 || !organization || !select ||
+      !Number.isSafeInteger(version) || version < 1) return false;
+  var planCode = String(select.value || '');
+  if (!planCode || planCode === plan.plan_code) {
+    toast('套餐未发生变化');
+    return false;
+  }
+  var reason = typeof prompt === 'function'
+    ? prompt('请输入本次套餐变更原因')
+    : null;
+  if (reason === null) return false;
+  reason = String(reason || '').trim();
+  if (!reason || reason.length > 500) {
+    toast('请输入 1-500 个字符的套餐变更原因', 'error');
+    return false;
+  }
+  select.disabled = true;
+  if (button) button.disabled = true;
+  try {
+    var response = await apiFetch('/admin/organizations/' + parsedId + '/plan', {
+      method: 'PUT',
+      body: JSON.stringify({
+        plan_code: planCode,
+        expected_version: version,
+        reason: reason
+      })
+    });
+    var data = await response.json();
+    if (!response.ok) throw new Error(data.error || '套餐更新失败');
+    toast('组织套餐已更新');
+    await loadAdminOrganizations();
+    return true;
+  } catch (error) {
+    toast(error.message || '套餐更新失败', 'error');
+    return false;
+  } finally {
+    select.disabled = false;
+    if (button) button.disabled = false;
+  }
 }
 function adminGovernanceRoleLabel(role) {
   var labels = {
@@ -15148,7 +15244,7 @@ function switchPage(id, options) {
     'toggleAll', 'syncInfluencerSelectionState', 'loadM4Campaigns', 'changeM4CampaignContext', 'openM4CampaignCloseoutReview', 'closeM4CampaignCloseoutReview', 'submitM4CampaignCloseoutReview', 'startCollab', 'submitCollabOrder', 'closeCollabOrderModal', 'loadCollaborations', 'updateCollabStatus', 'runCampaignCollabAction', 'closeCampaignContractConfirmationModal', 'submitCampaignContractConfirmation', 'closeCampaignContentReviewModal', 'submitCampaignContentReview', 'closeCampaignContentReviewDecisionModal', 'submitCampaignContentReviewDecision', 'renderCampaignPublicationRows', 'syncCampaignPublicationDraftRows', 'addCampaignPublicationRow', 'removeCampaignPublicationRow', 'openCampaignPublicationModal', 'closeCampaignPublicationModal', 'submitCampaignPublicationConfirmation', 'openCollaborationPerformanceTracking', 'openCampaignPublicationHistoryModal', 'loadCampaignPublicationHistoryPage', 'openCampaignPaymentModal', 'closeCampaignPaymentModal', 'submitCampaignPayment', 'voidCampaignPayment', 'closeCampaignSettlementModal', 'submitCampaignSettlement', 'openCampaignSettlementDecisionModal', 'closeCampaignSettlementDecisionModal', 'submitCampaignSettlementDecision',
     'initPerformanceMonitor', 'initPerformanceDashboard', 'refreshPerformanceMonitor', 'refreshPerformanceDashboard', 'changePerformanceCampaignContext', 'handlePerformanceTopMetricChange', 'refreshPerformanceReviewEvidence', 'generatePerformanceAiReviewDraft', 'loadPerformanceContents', 'loadPerformanceFreshnessQueue', 'openPerformanceFreshnessInput', 'refreshPerformanceUpdateStatus', 'runPerformanceProviderRefresh', 'loadPerformanceIntegrationPreview', 'loadPerformanceFeishuConnection', 'savePerformanceFeishuConnectionDraft', 'approvePerformanceFeishuConnectionDraft', 'downloadPerformanceFeishuSnapshot', 'createPerformanceContent', 'downloadPerformanceTemplate', 'handlePerformanceImport', 'handlePerformanceDrop', 'downloadPerformanceMetricsTemplate', 'handlePerformanceMetricsImport', 'handlePerformanceMetricsDrop', 'openPerformanceInputModal', 'closePerformanceInputModal', 'savePerformanceInput', 'loadPerformanceDashboard', 'loadPerformanceReviewEvidence', 'debouncedPerformanceContentSearch', 'exportPerformanceContents',
     'sendChat', 'clearChat', 'clearAIMemory', 'pushToFeishu', 'loadFeishuStatus', 'loadFeishuOutbox', 'testFeishuConnection', 'selectFeishuReconciliationDelivery', 'reconcileFeishuDelivery', 'selectFeishuRetryDelivery', 'retryFeishuDelivery',
-    'switchAdminTab', 'loadAdminDashboard', 'loadAdminUsers', 'adminUserNextPage', 'adminUserPreviousPage', 'loadAdminOrganizations', 'selectAdminOrganization', 'loadAdminOrganizationMembers', 'adminOrganizationNextPage', 'adminOrganizationPreviousPage', 'adminOrganizationMemberNextPage', 'adminOrganizationMemberPreviousPage', 'saveAdminOrganizationMember', 'initializeAdminOrganizationOwner', 'openAdminOrganizationOwnerTransfer', 'closeAdminOrganizationOwnerTransfer', 'updateAdminOrganizationOwnerTransferSubmit', 'submitAdminOrganizationOwnerTransfer', 'adminAddUser', 'adminCreateInvite', 'adminResetPw',
+    'switchAdminTab', 'loadAdminDashboard', 'loadAdminUsers', 'adminUserNextPage', 'adminUserPreviousPage', 'loadAdminPlanCatalog', 'loadAdminOrganizations', 'saveAdminOrganizationPlan', 'selectAdminOrganization', 'loadAdminOrganizationMembers', 'adminOrganizationNextPage', 'adminOrganizationPreviousPage', 'adminOrganizationMemberNextPage', 'adminOrganizationMemberPreviousPage', 'saveAdminOrganizationMember', 'initializeAdminOrganizationOwner', 'openAdminOrganizationOwnerTransfer', 'closeAdminOrganizationOwnerTransfer', 'updateAdminOrganizationOwnerTransferSubmit', 'submitAdminOrganizationOwnerTransfer', 'adminAddUser', 'adminCreateInvite', 'adminResetPw',
     'wfUndo', 'wfRedo', 'wfClearCanvas', 'wfSaveTemplate', 'wfPublishTemplate', 'wfResetTaskFilters', 'wfLoadTasks', 'wfLoadInstances',
     'showRelatedBrands', 'closeBrandRelModal'
   ];

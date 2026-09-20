@@ -29,7 +29,7 @@ function powerShellArrayEntries(source, variableName) {
   ));
 }
 
-test('schema, sanitizer, and trusted-source registries end at token usage migration 026', () => {
+test('schema, sanitizer, and trusted-source registries retain token usage migration 026 before 027', () => {
   const expected = {
     version: 26,
     name: '026_token_usage_tenant_ownership',
@@ -37,9 +37,9 @@ test('schema, sanitizer, and trusted-source registries end at token usage migrat
     engineVersion: 1,
     dependencies: ['migrations/vendor/bcryptjs_v3_0_3.js']
   };
-  assert.deepEqual(migrationGate.REGISTERED_MIGRATIONS.at(-1), expected);
-  assert.deepEqual(sanitizer.EXACT_PROFILE_MIGRATIONS.at(-1), expected);
-  assert.equal(sanitizationManifest.exactProfiles.at(-1).schemaVersion, 26);
+  assert.deepEqual(migrationGate.REGISTERED_MIGRATIONS.find((migration) => migration.version === 26), expected);
+  assert.deepEqual(sanitizer.EXACT_PROFILE_MIGRATIONS.find((migration) => migration.version === 26), expected);
+  assert.ok(sanitizationManifest.exactProfiles.some((profile) => profile.schemaVersion === 26));
   assert.deepEqual(sanitizer._testing.structuralColumnPolicyForVersion(26)['token_usage.org_id'], {
     storage: 'integer',
     kind: 'integer'
@@ -48,8 +48,8 @@ test('schema, sanitizer, and trusted-source registries end at token usage migrat
   const trusted = trustedGate.loadTrustedManifest(
     path.join(serverRoot, 'scripts', 'trusted_production_source_manifest.json')
   );
-  assert.equal(trusted.migrationContract.targetVersion, 26);
-  assert.equal(trusted.migrationContract.acceptedSourceVersions.at(-1), 26);
+  assert.equal(trusted.migrationContract.targetVersion, 27);
+  assert.equal(trusted.migrationContract.acceptedSourceVersions.at(-1), 27);
   for (const requiredPath of [
     'server/migrations/026_token_usage_tenant_ownership.js',
     'server/services/token_usage_service.js',
@@ -76,11 +76,11 @@ test('deployment inventory carries the exact v26 implementation and focused test
   }
   assert.match(
     deploy,
-    /if \(Number\(version\) !== 26\) throw new Error\('Candidate migration target version mismatch'\)/
+    /if \(Number\(version\) !== 27\) throw new Error\('Candidate migration target version mismatch'\)/
   );
   assert.match(
     deploy,
-    /report\.get\('sourceVersion'\) not in \(1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26\)/
+    /report\.get\('sourceVersion'\) not in \(1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27\)/
   );
 });
 

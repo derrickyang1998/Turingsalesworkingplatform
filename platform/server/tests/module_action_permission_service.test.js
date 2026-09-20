@@ -52,6 +52,21 @@ function createFixture() {
       org_id INTEGER PRIMARY KEY,
       owner_user_id INTEGER NOT NULL
     ) STRICT;
+    CREATE TABLE plan_catalog (
+      code TEXT PRIMARY KEY,
+      status TEXT NOT NULL
+    ) STRICT;
+    CREATE TABLE plan_module_entitlements (
+      plan_code TEXT NOT NULL,
+      module_code TEXT NOT NULL,
+      PRIMARY KEY (plan_code, module_code)
+    ) STRICT;
+    CREATE TABLE organization_plan_assignments (
+      id INTEGER PRIMARY KEY,
+      org_id INTEGER NOT NULL,
+      plan_code TEXT NOT NULL,
+      assignment_version INTEGER NOT NULL
+    ) STRICT;
     INSERT INTO users (id, role, is_active) VALUES
       (1, 'admin', 1),
       (2, 'user', 1),
@@ -75,6 +90,25 @@ function createFixture() {
       (20,2,'read_only'),
       (20,4,'read_write');
     INSERT INTO organization_authority (org_id,owner_user_id) VALUES (10,1),(20,4);
+    INSERT INTO plan_catalog (code,status) VALUES
+      ('legacy_full','active'),
+      ('crm_core','active'),
+      ('inactive_plan','inactive');
+    INSERT INTO plan_module_entitlements (plan_code,module_code) VALUES
+      ('legacy_full','crm.customer'),
+      ('legacy_full','crm.opportunity'),
+      ('legacy_full','crm.contact'),
+      ('legacy_full','crm.task'),
+      ('legacy_full','campaign.performance'),
+      ('legacy_full','campaign.customer_report'),
+      ('legacy_full','influencer.data'),
+      ('crm_core','crm.customer'),
+      ('crm_core','crm.opportunity'),
+      ('crm_core','crm.contact'),
+      ('crm_core','crm.task');
+    INSERT INTO organization_plan_assignments (id,org_id,plan_code,assignment_version) VALUES
+      (1,10,'legacy_full',1),
+      (2,20,'legacy_full',1);
     INSERT INTO team_memberships (org_id, team_id, user_id, role_code, status) VALUES
       (10, 100, 1, 'team_lead', 'active'),
       (10, 100, 2, 'team_lead', 'active'),
@@ -739,6 +773,8 @@ test('projects and authorizes campaign performance export only for writable tena
         (10,8,'read_write'),
         (30,9,'read_write');
       INSERT INTO organization_authority (org_id,owner_user_id) VALUES (30,9);
+      INSERT INTO organization_plan_assignments (id,org_id,plan_code,assignment_version)
+        VALUES (3,30,'legacy_full',1);
       INSERT INTO team_memberships (org_id, team_id, user_id, role_code, status)
         VALUES (10,102,6,'team_lead','active');
     `);
@@ -978,5 +1014,105 @@ test('projects and authorizes influencer data export and import only for writabl
     }
   } finally {
     db.close();
+  }
+});
+
+test('intersects role permissions with the live organization plan for every organization-scoped module', () => {
+  const { db, service } = createFixture();
+  try {
+    db.prepare(`
+      INSERT INTO organization_plan_assignments (id,org_id,plan_code,assignment_version)
+      VALUES (4,10,'crm_core',2)
+    `).run();
+
+    assert.deepEqual(service.projectModuleAccess({
+      principal: { id: 2, role: 'user' },
+      organizationId: 10,
+      module: 'crm.customer'
+    }).actions, ['read', 'create', 'update']);
+    assert.deepEqual(service.projectModuleAccess({
+      principal: { id: 2, role: 'user' },
+      organizationId: 10,
+      module: 'campaign.performance'
+    }), {
+      allowed: true,
+      code: 'ALLOWED',
+      principal: {
+        user_id: 2,
+        organization_id: 10,
+        roles: ['administrator', 'manager', 'member']
+      },
+      actions: []
+    });
+    assert.deepEqual(
+      service.authorize(campaignPerformanceRequest({ id: 2, role: 'user' }, 10, 'export')),
+      {
+        allowed: false,
+        code: 'PLAN_ENTITLEMENT_REQUIRED',
+        principal: {
+          user_id: 2,
+          organization_id: 10,
+          roles: ['administrator', 'manager', 'member']
+        }
+      }
+    );
+    assert.equal(
+      service.authorize(campaignPerformanceRequest({ id: 4, role: 'user' }, 20, 'export')).allowed,
+      true,
+      'another organization retains its own legacy_full entitlement'
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('keeps role denial distinct from plan denial and leaves platform administration outside plans', () => {
+  const { db, service } = createFixture();
+  try {
+    db.prepare(`
+      INSERT INTO organization_plan_assignments (id,org_id,plan_code,assignment_version)
+      VALUES (4,20,'crm_core',2)
+    `).run();
+    assert.deepEqual(
+      service.authorize(crmCustomerRequest({ id: 2, role: 'user' }, 20, 'update')),
+      {
+        allowed: false,
+        code: 'ACTION_FORBIDDEN',
+        principal: {
+          user_id: 2,
+          organization_id: 20,
+          roles: ['read_only']
+        }
+      }
+    );
+    assert.equal(
+      service.authorize(platformAdminRequest({ id: 1, role: 'admin' })).allowed,
+      true
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('fails closed when authoritative organization plan facts are missing, inactive, duplicated, or unreadable', () => {
+  for (const mutate of [
+    (db) => db.prepare('DELETE FROM organization_plan_assignments WHERE org_id=10').run(),
+    (db) => db.prepare("UPDATE organization_plan_assignments SET plan_code='inactive_plan' WHERE org_id=10").run(),
+    (db) => db.prepare(`
+      INSERT INTO organization_plan_assignments (id,org_id,plan_code,assignment_version)
+      VALUES (3,10,'legacy_full',1)
+    `).run(),
+    (db) => db.exec('DROP TABLE plan_module_entitlements')
+  ]) {
+    const { db, service } = createFixture();
+    try {
+      mutate(db);
+      assert.deepEqual(
+        service.authorize(crmCustomerRequest({ id: 2, role: 'user' }, 10, 'read')),
+        { allowed: false, code: 'ENTITLEMENT_POLICY_UNAVAILABLE' }
+      );
+    } finally {
+      db.close();
+    }
   }
 });

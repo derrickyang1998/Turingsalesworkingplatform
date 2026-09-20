@@ -118,6 +118,78 @@ test('existing admin control room exposes the organization directory as a routed
   assert.match(appSource, /\['overview','users','organizations','knowledge','ai-audit','tokens'\]/);
 });
 
+test('organization directory renders an authoritative plan selector only when assignment is allowed', async () => {
+  const elements = { ad_organizationList: { innerHTML: '' } };
+  const calls = [];
+  let refreshes = 0;
+  const context = loadFunctions({
+    adminOrganizationsById: {},
+    adminPlanCatalog: [
+      { code: 'crm_core', name_zh: '客户关系核心版' },
+      { code: 'legacy_full', name_zh: '完整兼容版' }
+    ],
+    document: { getElementById(id) { return elements[id] || null; } },
+    prompt() { return 'Approved pilot scope'; },
+    esc,
+    toast() {},
+    Error,
+    Promise,
+    apiFetch(url, options) {
+      calls.push([url, options]);
+      return Promise.resolve(response(200, {
+        assignment: { organization_id: 10, plan_code: 'crm_core', assignment_version: 2 }
+      }));
+    },
+    loadAdminOrganizations() { refreshes += 1; return Promise.resolve([]); }
+  }, ['renderAdminOrganizations', 'saveAdminOrganizationPlan']);
+
+  context.renderAdminOrganizations([{
+    id: 10,
+    code: 'alpha',
+    name: 'Alpha',
+    team_count: 1,
+    active_member_count: 2,
+    revoked_member_count: 0,
+    company_owner: null,
+    plan: {
+      plan_code: 'legacy_full',
+      name_zh: '完整兼容版',
+      assignment_version: 1
+    },
+    allowed_actions: { initialize_owner: false, assign_plan: true }
+  }, {
+    id: 20,
+    code: 'beta',
+    name: 'Beta',
+    team_count: 1,
+    active_member_count: 1,
+    revoked_member_count: 0,
+    company_owner: null,
+    plan: {
+      plan_code: 'crm_core',
+      name_zh: '客户关系核心版',
+      assignment_version: 3
+    },
+    allowed_actions: { initialize_owner: false, assign_plan: false }
+  }]);
+  assert.match(elements.ad_organizationList.innerHTML, /<th>套餐<\/th>/);
+  assert.match(elements.ad_organizationList.innerHTML, /id="ad_organizationPlan_10"/);
+  assert.match(elements.ad_organizationList.innerHTML, /legacy_full[^>]*selected/);
+  assert.doesNotMatch(elements.ad_organizationList.innerHTML, /id="ad_organizationPlan_20"/);
+  assert.match(elements.ad_organizationList.innerHTML, /客户关系核心版/);
+
+  elements.ad_organizationPlan_10 = { value: 'crm_core', disabled: false };
+  const updated = await context.saveAdminOrganizationPlan(10);
+  assert.equal(updated, true);
+  assert.equal(refreshes, 1);
+  assert.equal(calls[0][0], '/admin/organizations/10/plan');
+  assert.deepEqual(JSON.parse(calls[0][1].body), {
+    plan_code: 'crm_core',
+    expected_version: 1,
+    reason: 'Approved pilot scope'
+  });
+});
+
 test('existing users tab exposes searchable entitlement filters and stable paging controls', () => {
   for (const id of [
     'ad_userSearch',

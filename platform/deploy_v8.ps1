@@ -33,10 +33,10 @@ $EXPECTED_PPT_SHA256 = "f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57
 $TRUSTED_SOURCE_GATE_RELATIVE_PATH = "server\scripts\trusted_production_source_gate.js"
 $TRUSTED_SOURCE_MANIFEST_RELATIVE_PATH = "server\scripts\trusted_production_source_manifest.json"
 $TRUSTED_RUNTIME_CONFIG_RELATIVE_PATH = "server\config\runtime_config.js"
-$EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "d91d42f694362abcd2d95d2021670a6125a9eac8c912886bb5d250f3a9e1c6fb"
-$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "f08b23d19344d9a0bcb88d75b5276a495fffd4412d55db675036b60567b6393b"
-$EXPECTED_TRUSTED_RUNTIME_CONFIG_SHA256 = "76d43d3e811c6fa8daae987cc9eb2fff2dc8a8095f84b1cd309e4e214df94dcb"
-$EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256 = "936060049eb624a65a15b78c5143d63e3322fa9d8196626c681e3ba1995b3641"
+$EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "8a1f29aaf8ba12b3ca7347cca19471476348f4f557183d4319bebac7f3029019"
+$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "ac1ecacb7c1baacedd1ec34bbc4c99adc17be778d9201c351f59f1c62a0d7aee"
+$EXPECTED_TRUSTED_RUNTIME_CONFIG_SHA256 = "e689e251f313c48b4f27279b1ef44639e3c1a68bb3c255f6ddfa86cabbfaa27d"
+$EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256 = "58dc3a9af61e183904f5bec74ec453f460e6f054c97c578fcb0d88082c5e2a26"
 $EXPECTED_TRUSTED_PARSER_VERIFIER_SHA256 = "7f9efaac02675b21e025891a400474cc7481c1adaf58c88bd8b356d5276f2eaa"
 $EXPECTED_TRUSTED_PUBLIC_GUARD_SHA256 = "d45fe8fcc01587aaa0e73eccfb9714c27801e232cb6c0effd6daedb703316d66"
 $EXPECTED_TRUSTED_MIGRATION_CLEANUP_HELPER_SHA256 = "d5f2befa902522dd9de3e9dd2397a99ee5e78ab1a1c6e526a27f14bb2829e1fa"
@@ -126,6 +126,7 @@ $FILES = @(
     "server\migrations\024_knowledge_tenant_ownership.js",
     "server\migrations\025_ai_conversation_tenant_ownership.js",
     "server\migrations\026_token_usage_tenant_ownership.js",
+    "server\migrations\027_plan_catalog_module_entitlements.js",
     "server\migrations\baselines\legacy_v1.js",
     "server\migrations\engines\v1.js",
     "server\migrations\vendor\bcryptjs_v3_0_3.js",
@@ -155,6 +156,7 @@ $FILES = @(
     "server\routes_customers.js",
     "server\routes_feishu.js",
     "server\routes_feishu_v2.js",
+    "server\routes_plan_entitlements.js",
     "server\routes_workflow.js",
     "server\server.js",
     "server\workflow_engine.js",
@@ -194,6 +196,7 @@ $FILES = @(
     "server\services\organization_access_service.js",
     "server\services\organization_methodology_service.js",
     "server\services\organization_governance_service.js",
+    "server\services\plan_entitlement_service.js",
     "server\services\parser_startup_service.js",
     "server\services\path_policy_service.js",
     "server\services\performance_content_import_service.js",
@@ -343,6 +346,10 @@ $FILES = @(
     "server\tests\token_usage_tenant_ownership_migration.test.js",
     "server\tests\token_usage_service.test.js",
     "server\tests\token_usage_tenant_release_gate_inventory.test.js",
+    "server\tests\plan_entitlements_migration.test.js",
+    "server\tests\plan_entitlement_service.test.js",
+    "server\tests\plan_entitlement_routes.test.js",
+    "server\tests\plan_entitlements_release_gate_inventory.test.js",
     "server\tests\routes_performance.test.js",
     "server\tests\phase4_nginx_ingress.test.js",
     "server\tests\phase4_request_pipeline.test.js",
@@ -10836,7 +10843,7 @@ try {
   if (database.pragma('integrity_check', { simple: true }) !== 'ok') throw new Error('Candidate DB integrity_check failed');
   if (database.pragma('foreign_key_check').length !== 0) throw new Error('Candidate DB foreign_key_check failed');
   const version = database.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version;
-  if (Number(version) !== 26) throw new Error('Candidate migration target version mismatch');
+  if (Number(version) !== 27) throw new Error('Candidate migration target version mismatch');
   console.log('TM_SANITIZED_MIGRATION_COMPATIBILITY_OK');
 } finally {
   database.close();
@@ -10851,6 +10858,13 @@ NODE_ENV=test TM_DISABLE_DOTENV=1 node server/scripts/verify_phase4_one_request_
 NODE_ENV=test TM_DISABLE_DOTENV=1 node --test server/tests/verify_phase4_one_request_replay.test.js
 node --test server/tests/release_replay_gate.test.js
 node --test server/tests/module_action_permission_service.test.js
+node --test \
+  server/tests/plan_entitlements_migration.test.js \
+  server/tests/plan_entitlement_service.test.js \
+  server/tests/plan_entitlement_routes.test.js \
+  server/tests/plan_entitlements_release_gate_inventory.test.js \
+  server/tests/organization_governance_service.test.js \
+  server/tests/admin_tenant_directory_ui.test.js
 node --test \
   server/tests/ai_conversation_tenant_ownership_migration.test.js \
   server/tests/ai_conversation_tenant_runtime.test.js \
@@ -12319,7 +12333,7 @@ if applied:
         if hashlib.sha256(handle.read()).hexdigest() != output_sha256:
             raise SystemExit('Trusted live database adoption stage digest is invalid')
 else:
-    if (report.get('sourceVersion') not in (1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26) or
+    if (report.get('sourceVersion') not in (1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27) or
             report.get('targetVersion') != report.get('sourceVersion') or
             output_sha256 != expected_source_sha256 or
             report.get('baseTableCount') is not None or report.get('baseRowCount') is not None or

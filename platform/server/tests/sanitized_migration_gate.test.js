@@ -1076,7 +1076,7 @@ function compactSqliteClone(sourcePath, outputPath, mutate, options = {}) {
   return outputPath;
 }
 
-test('manifest declares exact managed v1 as primary and keeps isolated v6 through v26 profiles', () => {
+test('manifest declares exact managed v1 as primary and keeps isolated v6 through v27 profiles', () => {
   const v1Fixture = migratedFixture('manifest-v1-primary', 1);
   const v6Fixture = migratedFixture('manifest-v6-isolated', 6);
   const v7Fixture = migratedFixture('manifest-v7-isolated', 7);
@@ -1099,9 +1099,10 @@ test('manifest declares exact managed v1 as primary and keeps isolated v6 throug
   const v24Fixture = migratedFixture('manifest-v24-isolated', 24);
   const v25Fixture = migratedFixture('manifest-v25-isolated', 25);
   const v26Fixture = migratedFixture('manifest-v26-isolated', 26);
+  const v27Fixture = migratedFixture('manifest-v27-isolated', 27);
   try {
     assert.equal(manifest.schemaVersion, 1);
-    assert.deepEqual(manifest.exactProfiles.map((profile) => profile.schemaVersion), [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26]);
+    assert.deepEqual(manifest.exactProfiles.map((profile) => profile.schemaVersion), [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27]);
     assert.equal(
       manifest.categories['sensitive-number'],
       'deterministic rank bucket preserving null/equality/cardinality'
@@ -1129,6 +1130,7 @@ test('manifest declares exact managed v1 as primary and keeps isolated v6 throug
     const v24Profile = sanitizer._testing.manifestProfileForVersion(manifest, 24);
     const v25Profile = sanitizer._testing.manifestProfileForVersion(manifest, 25);
     const v26Profile = sanitizer._testing.manifestProfileForVersion(manifest, 26);
+    const v27Profile = sanitizer._testing.manifestProfileForVersion(manifest, 27);
     assert.equal(v1Profile.schemaVersion, 1);
     assert.equal(v6Profile.schemaVersion, 6);
     assert.equal(v7Profile.schemaVersion, 7);
@@ -1151,6 +1153,7 @@ test('manifest declares exact managed v1 as primary and keeps isolated v6 throug
     assert.equal(v24Profile.schemaVersion, 24);
     assert.equal(v25Profile.schemaVersion, 25);
     assert.equal(v26Profile.schemaVersion, 26);
+    assert.equal(v27Profile.schemaVersion, 27);
     assert.equal(v1Profile.objects.length, sanitizer.actualInventory(v1Fixture.db).length);
     assert.equal(v6Profile.objects.length, sanitizer.actualInventory(v6Fixture.db).length);
     assert.equal(v7Profile.objects.length, sanitizer.actualInventory(v7Fixture.db).length);
@@ -1173,6 +1176,7 @@ test('manifest declares exact managed v1 as primary and keeps isolated v6 throug
     assert.equal(v24Profile.objects.length, sanitizer.actualInventory(v24Fixture.db).length);
     assert.equal(v25Profile.objects.length, sanitizer.actualInventory(v25Fixture.db).length);
     assert.equal(v26Profile.objects.length, sanitizer.actualInventory(v26Fixture.db).length);
+    assert.equal(v27Profile.objects.length, sanitizer.actualInventory(v27Fixture.db).length);
     assert.ok(v21Profile.objects.some((object) => object.name === 'organization_authority'));
     assert.ok(v21Profile.objects.some((object) => object.name === 'organization_member_policy'));
     const v22Authority = v22Profile.objects.find((object) => object.name === 'organization_authority');
@@ -1214,6 +1218,13 @@ test('manifest declares exact managed v1 as primary and keeps isolated v6 throug
     const v26TokenUsage = v26Profile.objects.find((object) => object.name === 'token_usage');
     assert.ok(v26TokenUsage);
     assert.equal(v26TokenUsage.columns.find((column) => column.name === 'org_id').classification, 'structural');
+    const v27Plans = v27Profile.objects.find((object) => object.name === 'plan_catalog');
+    const v27Assignments = v27Profile.objects.find((object) => object.name === 'organization_plan_assignments');
+    assert.ok(v27Plans);
+    assert.ok(v27Assignments);
+    assert.equal(v27Plans.columns.find((column) => column.name === 'code').classification, 'structural');
+    assert.equal(v27Assignments.columns.find((column) => column.name === 'org_id').classification, 'structural');
+    assert.equal(v27Assignments.columns.find((column) => column.name === 'reason').classification, 'synthetic-text');
     for (const profile of [v1Profile, v6Profile, v7Profile, v8Profile]) {
       assert.equal(profile.jsonPolicy.preserveLeafTypes, true);
       assert.equal(
@@ -1248,6 +1259,7 @@ test('manifest declares exact managed v1 as primary and keeps isolated v6 throug
     assert.equal(v24Profile.semanticPolicies.structuralColumns.validatorVersion, 'tm-structural-policy-v22-knowledge-tenant-ownership');
     assert.equal(v25Profile.semanticPolicies.structuralColumns.validatorVersion, 'tm-structural-policy-v23-ai-conversation-tenant-ownership');
     assert.equal(v26Profile.semanticPolicies.structuralColumns.validatorVersion, 'tm-structural-policy-v24-token-usage-tenant-ownership');
+    assert.equal(v27Profile.semanticPolicies.structuralColumns.validatorVersion, 'tm-structural-policy-v25-plan-catalog-module-entitlements');
     assert.doesNotThrow(() => sanitizer.validateManifest(manifest, v1Fixture.db));
     assert.doesNotThrow(() => sanitizer.validateManifest(manifest, v6Fixture.db));
     assert.doesNotThrow(() => sanitizer.validateManifest(manifest, v7Fixture.db));
@@ -1270,6 +1282,7 @@ test('manifest declares exact managed v1 as primary and keeps isolated v6 throug
     assert.doesNotThrow(() => sanitizer.validateManifest(manifest, v24Fixture.db));
     assert.doesNotThrow(() => sanitizer.validateManifest(manifest, v25Fixture.db));
     assert.doesNotThrow(() => sanitizer.validateManifest(manifest, v26Fixture.db));
+    assert.doesNotThrow(() => sanitizer.validateManifest(manifest, v27Fixture.db));
   } finally {
     closeAndRemove(v1Fixture);
     closeAndRemove(v6Fixture);
@@ -1293,6 +1306,7 @@ test('manifest declares exact managed v1 as primary and keeps isolated v6 throug
     closeAndRemove(v24Fixture);
     closeAndRemove(v25Fixture);
     closeAndRemove(v26Fixture);
+    closeAndRemove(v27Fixture);
   }
 });
 
@@ -2519,7 +2533,7 @@ test('secret-null fails closed for non-null data and malformed or partial output
   closeAndRemove(fixture);
 });
 
-test('campaign migration gate sanitizes populated managed v1 and verifies two exact restores through v26', () => {
+test('campaign migration gate sanitizes populated managed v1 and verifies two exact restores through v27', () => {
   const fixture = migratedFixture('twice', 1);
   const populated = populateManagedV1GateFixture(fixture);
   const sourceClassification = migrationService.classifyDatabase(fixture.db, {
@@ -2536,7 +2550,7 @@ test('campaign migration gate sanitizes populated managed v1 and verifies two ex
   assert.equal(report.format, 'tm-campaign-migration-gate-v1');
   assert.equal(report.runs, 2);
   assert.equal(report.sourceVersion, 1);
-  assert.equal(report.targetVersion, 26);
+  assert.equal(report.targetVersion, 27);
   assert.equal(report.preMigrationRestoreVerified, true);
   assert.equal(report.legacyPreservationVerified, true);
   const sanitizedPath = path.join(fixture.root, 'stage-preservation-sanitized.db');

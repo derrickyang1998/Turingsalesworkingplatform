@@ -300,7 +300,7 @@ function persistAudit(db, input) {
   }
 }
 
-function listOrganizations(db, options) {
+function listOrganizations(db, options, planEntitlementService) {
   const query = requestQuery(options);
   const q = boundedQuery(query.q);
   const limit = boundedLimit(query.limit);
@@ -336,6 +336,14 @@ function listOrganizations(db, options) {
     const hasMore = rows.length > limit;
     const organizations = rows.slice(0, limit).map((row) => {
       const companyOwner = ownerSummary(db, row.id);
+      let plan;
+      if (planEntitlementService) {
+        try {
+          plan = planEntitlementService.projectOrganization({ organizationId: row.id });
+        } catch (_error) {
+          throw serviceError(503, 'ENTITLEMENT_POLICY_UNAVAILABLE', '组织套餐权益策略不可用。');
+        }
+      }
       return {
         id: row.id,
         code: row.code,
@@ -345,8 +353,10 @@ function listOrganizations(db, options) {
         active_member_count: Number(row.active_member_count),
         revoked_member_count: Number(row.revoked_member_count),
         company_owner: companyOwner,
+        ...(plan === undefined ? {} : { plan }),
         allowed_actions: {
-          initialize_owner: scope.kind === 'platform_admin' && companyOwner === null
+          initialize_owner: scope.kind === 'platform_admin' && companyOwner === null,
+          ...(plan === undefined ? {} : { assign_plan: scope.kind === 'platform_admin' })
         }
       };
     });
@@ -862,28 +872,35 @@ function updateMember(db, options) {
   }).immediate();
 }
 
-function createOrganizationGovernanceService(db) {
+function createOrganizationGovernanceService(db, factoryOptions = {}) {
   if (!db || typeof db.prepare !== 'function' || typeof db.transaction !== 'function') {
     throw new TypeError('A SQLite database is required.');
   }
+  const planEntitlementService = factoryOptions.planEntitlementService || null;
+  if (
+    planEntitlementService !== null &&
+    typeof planEntitlementService.projectOrganization !== 'function'
+  ) {
+    throw new TypeError('planEntitlementService must expose projectOrganization');
+  }
   return Object.freeze({
-    projectUserAccess(options) {
-      return projectUserAccess(db, options || {});
+    projectUserAccess(requestOptions) {
+      return projectUserAccess(db, requestOptions || {});
     },
-    listOrganizations(options) {
-      return listOrganizations(db, options || {});
+    listOrganizations(requestOptions) {
+      return listOrganizations(db, requestOptions || {}, planEntitlementService);
     },
-    listMembers(options) {
-      return listMembers(db, options || {});
+    listMembers(requestOptions) {
+      return listMembers(db, requestOptions || {});
     },
-    initializeOwner(options) {
-      return initializeOwner(db, options || {});
+    initializeOwner(requestOptions) {
+      return initializeOwner(db, requestOptions || {});
     },
-    transferOwner(options) {
-      return transferOwner(db, options || {});
+    transferOwner(requestOptions) {
+      return transferOwner(db, requestOptions || {});
     },
-    updateMember(options) {
-      return updateMember(db, options || {});
+    updateMember(requestOptions) {
+      return updateMember(db, requestOptions || {});
     }
   });
 }

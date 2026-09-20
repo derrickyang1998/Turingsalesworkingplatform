@@ -180,10 +180,17 @@ const registerPerformanceRoutes = require('./routes_performance');
 const registerAdminTenantDirectoryRoutes = require('./routes_admin_tenant_directory');
 const registerAdminAIQuotaRoutes = require('./routes_admin_ai_quota');
 const registerOrganizationGovernanceRoutes = require('./routes_organization_governance');
+const registerPlanEntitlementRoutes = require('./routes_plan_entitlements');
+const {
+  createPlanEntitlementService
+} = require('./services/plan_entitlement_service');
 const {
   createOrganizationGovernanceService
 } = require('./services/organization_governance_service');
-const organizationGovernanceService = createOrganizationGovernanceService(db);
+const planEntitlementService = createPlanEntitlementService(db);
+const organizationGovernanceService = createOrganizationGovernanceService(db, {
+  planEntitlementService
+});
 const {
   createCampaignPptBridgeHandler
 } = registerCampaignRoutes;
@@ -2241,6 +2248,11 @@ registerAdminAIQuotaRoutes(app, db, { authMiddleware, adminOnly, service: aiQuot
 registerOrganizationGovernanceRoutes(app, db, {
   authMiddleware,
   service: organizationGovernanceService
+});
+registerPlanEntitlementRoutes(app, db, {
+  authMiddleware,
+  adminOnly,
+  service: planEntitlementService
 });
 registerCampaignRoutes(app, db);
 registerPerformanceRoutes(app, {

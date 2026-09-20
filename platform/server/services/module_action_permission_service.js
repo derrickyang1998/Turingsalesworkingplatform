@@ -244,6 +244,29 @@ function projectRoles(db, user, organizationId) {
   return ROLE_ORDER.filter((role) => roles.has(role));
 }
 
+function organizationModuleEntitlement(db, organizationId, module) {
+  const rows = db.prepare(`
+    SELECT
+      assignment.plan_code,
+      plan.status AS plan_status,
+      CASE WHEN entitlement.module_code IS NULL THEN 0 ELSE 1 END AS entitled
+    FROM organization_plan_assignments assignment
+    LEFT JOIN plan_catalog plan ON plan.code=assignment.plan_code
+    LEFT JOIN plan_module_entitlements entitlement
+      ON entitlement.plan_code=assignment.plan_code AND entitlement.module_code=?
+    WHERE assignment.org_id=? AND assignment.assignment_version=(
+      SELECT MAX(current.assignment_version)
+      FROM organization_plan_assignments current
+      WHERE current.org_id=assignment.org_id
+    )
+    ORDER BY assignment.id
+  `).all(module, organizationId);
+  if (rows.length !== 1 || rows[0].plan_status !== 'active') {
+    throw new Error('organization entitlement policy is unavailable');
+  }
+  return rows[0].entitled === 1;
+}
+
 function createModuleActionPermissionService(db) {
   if (!db || typeof db.prepare !== 'function') {
     throw new TypeError('database must expose prepare');
@@ -297,9 +320,19 @@ function createModuleActionPermissionService(db) {
       const actions = Object.entries(POLICY[module])
         .filter(([, allowedRoles]) => allowedRoles.some((role) => principal.roles.includes(role)))
         .map(([action]) => action);
+      if (
+        ORGANIZATION_SCOPED_MODULES.has(module) &&
+        !organizationModuleEntitlement(db, organizationId, module)
+      ) {
+        return { allowed: true, code: 'ALLOWED', principal, actions: [] };
+      }
       return { allowed: true, code: 'ALLOWED', principal, actions };
     } catch {
-      return denied('AUTHORITATIVE_FACTS_UNAVAILABLE');
+      return denied(
+        ORGANIZATION_SCOPED_MODULES.has(module)
+          ? 'ENTITLEMENT_POLICY_UNAVAILABLE'
+          : 'AUTHORITATIVE_FACTS_UNAVAILABLE'
+      );
     }
   }
 
@@ -331,9 +364,19 @@ function createModuleActionPermissionService(db) {
     const projection = projectModuleAccess(projectionInput);
     if (!projection.allowed) return projection;
     const allowed = projection.actions.includes(action);
-    return allowed
-      ? { allowed: true, code: 'ALLOWED', principal: projection.principal }
-      : { allowed: false, code: 'ACTION_FORBIDDEN', principal: projection.principal };
+    if (allowed) {
+      return { allowed: true, code: 'ALLOWED', principal: projection.principal };
+    }
+    const roleWouldAllow = POLICY[module][action].some(
+      (role) => projection.principal.roles.includes(role)
+    );
+    return {
+      allowed: false,
+      code: ORGANIZATION_SCOPED_MODULES.has(module) && roleWouldAllow
+        ? 'PLAN_ENTITLEMENT_REQUIRED'
+        : 'ACTION_FORBIDDEN',
+      principal: projection.principal
+    };
   }
 
   return Object.freeze({ authorize, projectModuleAccess });

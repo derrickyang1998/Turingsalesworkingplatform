@@ -182,6 +182,13 @@ const db = migrationService.openMigratedDatabase(DB_PATH, {
       sourcePath: 'migrations/026_token_usage_tenant_ownership.js',
       engineVersion: 1,
       dependencies: ['migrations/vendor/bcryptjs_v3_0_3.js']
+    },
+    {
+      version: 27,
+      name: '027_plan_catalog_module_entitlements',
+      sourcePath: 'migrations/027_plan_catalog_module_entitlements.js',
+      engineVersion: 1,
+      dependencies: ['migrations/vendor/bcryptjs_v3_0_3.js']
     }
   ]
 });
