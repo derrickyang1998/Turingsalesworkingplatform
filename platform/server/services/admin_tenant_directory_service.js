@@ -1,5 +1,7 @@
 'use strict';
 
+const aiQuota = require('./ai_quota_service');
+
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 100;
 const MAX_QUERY_LENGTH = 120;
@@ -350,6 +352,21 @@ function listUsers(db, options) {
           created_at: membership.created_at,
           revoked_at: membership.revoked_at
         });
+      }
+
+      const quotaProjections = aiQuota.projectMembershipUsage(db, { userIds });
+      for (const projection of quotaProjections) {
+        const organization = organizationByUserAndId.get(
+          `${projection.user_id}:${projection.organization_id}`
+        );
+        if (!organization) continue;
+        organization.ai_quota = {
+          period: projection.period,
+          used: projection.used,
+          limit: projection.limit,
+          remaining: projection.remaining,
+          status: projection.status
+        };
       }
     }
 

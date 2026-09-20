@@ -36,6 +36,7 @@ const {
 const {
   OrganizationMethodologyServiceError
 } = require('./services/organization_methodology_service');
+const { AIQuotaServiceError } = require('./services/ai_quota_service');
 const {
   CAMPAIGN_PERFORMANCE_MODULE,
   CAMPAIGN_PERFORMANCE_EXPORT_ACTION,
@@ -64,6 +65,7 @@ function sendError(request, response, error) {
     error instanceof PerformanceAiReviewServiceError ||
     error instanceof PerformanceContentAnalysisServiceError ||
     error instanceof OrganizationMethodologyServiceError ||
+    error instanceof AIQuotaServiceError ||
     (error && error.name === 'IdempotencyServiceError') ||
     error instanceof CustomerReportSnapshotServiceError ||
     error instanceof CustomerReportDeliveryServiceError;

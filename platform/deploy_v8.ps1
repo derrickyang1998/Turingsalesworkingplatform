@@ -33,8 +33,8 @@ $EXPECTED_PPT_SHA256 = "f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57
 $TRUSTED_SOURCE_GATE_RELATIVE_PATH = "server\scripts\trusted_production_source_gate.js"
 $TRUSTED_SOURCE_MANIFEST_RELATIVE_PATH = "server\scripts\trusted_production_source_manifest.json"
 $TRUSTED_RUNTIME_CONFIG_RELATIVE_PATH = "server\config\runtime_config.js"
-$EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "a4265040651661d7da50a50d6c919b71106f65907b4787340502276b11626592"
-$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "ad924fe809cd6b5b458f535ad693d96190950bf7cbdf31dfe84f6efda08f596d"
+$EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "d91d42f694362abcd2d95d2021670a6125a9eac8c912886bb5d250f3a9e1c6fb"
+$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "86da9c071b16c267eb630bae5c929848158b002e668ad7058c4870d820761be0"
 $EXPECTED_TRUSTED_RUNTIME_CONFIG_SHA256 = "76d43d3e811c6fa8daae987cc9eb2fff2dc8a8095f84b1cd309e4e214df94dcb"
 $EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256 = "936060049eb624a65a15b78c5143d63e3322fa9d8196626c681e3ba1995b3641"
 $EXPECTED_TRUSTED_PARSER_VERIFIER_SHA256 = "7f9efaac02675b21e025891a400474cc7481c1adaf58c88bd8b356d5276f2eaa"
@@ -146,6 +146,7 @@ $FILES = @(
     "server\requirements.txt",
     "server\requirements-ocr.txt",
     "server\routes.js",
+    "server\routes_admin_ai_quota.js",
     "server\routes_admin_tenant_directory.js",
     "server\routes_brands.js",
     "server\routes_campaigns.js",
@@ -159,6 +160,7 @@ $FILES = @(
     "server\workflow_engine.js",
     "server\services\admin_tenant_directory_service.js",
     "server\services\ai_cost_service.js",
+    "server\services\ai_quota_service.js",
     "server\services\ai_service.js",
     "server\services\business_knowledge_service.js",
     "server\services\campaign_access_service.js",
@@ -244,6 +246,8 @@ $FILES = @(
     "server\systemd\turingmarket-parser.slice",
     "server\systemd\turingmarket-parser@.service",
     "server\tests\ai_knowledge_foundation.test.js",
+    "server\tests\admin_ai_quota_routes.test.js",
+    "server\tests\ai_quota_service.test.js",
     "server\tests\accessibility_shell.test.js",
     "server\tests\admin_tenant_directory_routes.test.js",
     "server\tests\admin_tenant_directory_service.test.js",
@@ -10854,6 +10858,13 @@ node --test \
   server/tests/token_usage_tenant_ownership_migration.test.js \
   server/tests/token_usage_service.test.js \
   server/tests/token_usage_tenant_release_gate_inventory.test.js
+node --test \
+  server/tests/ai_quota_service.test.js \
+  server/tests/admin_ai_quota_routes.test.js \
+  server/tests/admin_tenant_directory_service.test.js \
+  server/tests/admin_tenant_directory_ui.test.js \
+  server/tests/ai_knowledge_foundation.test.js \
+  server/tests/campaign_ai_rag.test.js
 node --test \
   server/tests/routes_performance.test.js \
   server/tests/performance_frontend_contract.test.js

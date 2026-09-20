@@ -2,7 +2,7 @@ module.exports = function(app, db, authMiddleware, aiLimiter, aiQuotaGuard) {
   const businessKnowledge = require('./services/business_knowledge_service');
   const llm = require('./services/llm_service');
   const webSearch = require('./services/web_search_service');
-  const tokenUsage = require('./services/token_usage_service');
+  const aiQuota = require('./services/ai_quota_service');
   const aiMiddlewares = [authMiddleware];
   if (aiLimiter) aiMiddlewares.push(aiLimiter);
   if (aiQuotaGuard) aiMiddlewares.push(aiQuotaGuard);
@@ -68,18 +68,17 @@ module.exports = function(app, db, authMiddleware, aiLimiter, aiQuotaGuard) {
       if (!Array.isArray(enriched.industry_tags)) enriched.industry_tags = String(enriched.industry_tags || 'Other').split(/[,;，、]/).map(function(v) { return v.trim(); }).filter(Boolean);
       if (!Array.isArray(enriched.creative_angles)) enriched.creative_angles = String(enriched.creative_angles || '').split(/[,;，、]/).map(function(v) { return v.trim(); }).filter(Boolean);
       if (!Array.isArray(enriched.top_products_featured)) enriched.top_products_featured = String(enriched.top_products_featured || '').split(/[,;，、]/).map(function(v) { return v.trim(); }).filter(Boolean);
-      if (completion.usage && (completion.usage.total_tokens || completion.usage.prompt_tokens || completion.usage.completion_tokens)) {
-        try {
-          tokenUsage.recordUsage(db, {
-            organizationId: req.authContext.organization.id,
-            userId: req.user.id,
-            model: completion.model || 'deepseek-chat',
-            promptTokens: completion.usage.prompt_tokens || 0,
-            completionTokens: completion.usage.completion_tokens || 0,
-            totalTokens: completion.usage.total_tokens || 0,
-            endpoint: 'brand_enrich'
-          });
-        } catch (e2) {}
+      if (!completion.degraded) {
+        var usage = completion.usage || {};
+        aiQuota.recordUsageOrThrow(db, {
+          organizationId: req.authContext.organization.id,
+          userId: req.user.id,
+          model: completion.model || 'deepseek-chat',
+          promptTokens: usage.prompt_tokens,
+          completionTokens: usage.completion_tokens,
+          totalTokens: usage.total_tokens,
+          endpoint: 'brand_enrich'
+        });
       }
       res.json({
         brand: enriched,
@@ -89,6 +88,9 @@ module.exports = function(app, db, authMiddleware, aiLimiter, aiQuotaGuard) {
         warning: completion.reason || (!parsed ? 'AI returned fallback brand fields' : '')
       });
     } catch (e) {
+      if (e && e.code === 'AI_USAGE_ACCOUNTING_FAILED') {
+        return res.status(e.statusCode || 503).json({ error: e.message, code: e.code });
+      }
       res.json({
         brand: fallbackBrand(brand),
         web_results: [],

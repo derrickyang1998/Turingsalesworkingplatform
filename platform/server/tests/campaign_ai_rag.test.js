@@ -111,6 +111,7 @@ function openDatabase() {
     rootDir: SERVER_ROOT,
     registeredMigrations: MIGRATIONS
   });
+  db.exec('ALTER TABLE token_usage ADD COLUMN org_id INTEGER');
   return db;
 }
 
@@ -1015,6 +1016,7 @@ test('performance AI review replays a terminal result after consuming the caller
   const db = openDatabase();
   try {
     const fixture = createCampaignFixture(db);
+    db.prepare('UPDATE users SET api_quota=18 WHERE id=?').run(fixture.userId);
     const performanceService = createPerformanceManualService(db);
     const strongest = performanceService.createContent({
       userId: fixture.userId,
@@ -1058,7 +1060,7 @@ test('performance AI review replays a terminal result after consuming the caller
       }
     });
     const input = {
-      user: Object.assign({}, fixture.user, { api_quota: 18 }),
+      user: Object.assign({}, fixture.user, { role: 'admin', api_quota: 999999 }),
       campaignId: fixture.campaignId,
       body: { top_metric: 'views' },
       idempotencyKey: 'performance-ai-review-quota-replay-0001',
@@ -1076,6 +1078,15 @@ test('performance AI review replays a terminal result after consuming the caller
 
     const replayed = await aiReviewService.createDraft(input);
     assert.deepEqual(replayed, initial);
+    assert.equal(providerCalls.length, 1);
+
+    await assert.rejects(
+      aiReviewService.createDraft(Object.assign({}, input, {
+        idempotencyKey: 'performance-ai-review-quota-new-request-0002',
+        requestId: 'performance-ai-review-quota-new-request-0002'
+      })),
+      (error) => error && error.statusCode === 429 && error.code === 'AI_QUOTA_EXCEEDED'
+    );
     assert.equal(providerCalls.length, 1);
   } finally {
     db.close();
@@ -1432,6 +1443,45 @@ test('linked chat writes no conversation, message, reference, token, archive, ca
       });
       await operation.catch(() => {});
     }
+  } finally {
+    db.close();
+  }
+});
+
+test('linked chat fails closed and replays the failure when successful provider usage is missing', async () => {
+  const db = openDatabase();
+  try {
+    const fixture = createCampaignFixture(db);
+    const before = durableLinkedState(db, fixture.campaignId);
+    let providerCalls = 0;
+    const input = linkedInput(fixture, 'missing-provider-usage', {
+      provider: {
+        async complete() {
+          providerCalls += 1;
+          return {
+            content: 'successful response without trusted token usage',
+            usage: {},
+            model: 'fake-deepseek'
+          };
+        }
+      }
+    });
+
+    const initial = await settled(ai.handleChat(db, input));
+    assertServiceError(initial, 503, 'AI_USAGE_ACCOUNTING_FAILED');
+    assert.deepEqual(durableLinkedState(db, fixture.campaignId), before);
+
+    const replay = await settled(ai.handleChat(db, input));
+    assertServiceError(replay, 503, 'AI_USAGE_ACCOUNTING_FAILED');
+    assert.equal(providerCalls, 1);
+    assert.deepEqual(db.prepare(`
+      SELECT state,status_code,json_extract(response_json,'$.code') AS code
+      FROM request_idempotency WHERE idempotency_key=?
+    `).get(input.idempotencyKey), {
+      state: 'completed',
+      status_code: 503,
+      code: 'AI_USAGE_ACCOUNTING_FAILED'
+    });
   } finally {
     db.close();
   }

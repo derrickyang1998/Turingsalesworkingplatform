@@ -21,6 +21,8 @@ const {
 } = require('./services/organization_methodology_service');
 const aiService = require('./services/ai_service');
 const tokenUsageService = require('./services/token_usage_service');
+const aiQuota = require('./services/ai_quota_service');
+const aiQuotaService = aiQuota.createAIQuotaService(db);
 const idempotency = require('./services/idempotency_service');
 const uploadAdmissionIdempotency = Object.freeze({
   reserveProcessingInTransaction(database, input) {
@@ -176,6 +178,7 @@ const {
 const registerCampaignRoutes = require('./routes_campaigns');
 const registerPerformanceRoutes = require('./routes_performance');
 const registerAdminTenantDirectoryRoutes = require('./routes_admin_tenant_directory');
+const registerAdminAIQuotaRoutes = require('./routes_admin_ai_quota');
 const registerOrganizationGovernanceRoutes = require('./routes_organization_governance');
 const {
   createOrganizationGovernanceService
@@ -1552,14 +1555,12 @@ function updateUserWithIdentity(input) {
           SET
             display_name=COALESCE(?,display_name),
             department=COALESCE(?,department),
-            api_quota=COALESCE(?,api_quota),
             is_active=COALESCE(?,is_active),
             role=COALESCE(?,role)
           WHERE id=?
         `).run(
           input.displayName,
           input.department,
-          input.apiQuota,
           input.isActive,
           input.role,
           current.id
@@ -1618,17 +1619,21 @@ function normalizePptRequestPayload(body) {
 }
 
 function aiQuotaGuard(req, res, next) {
-  const quota = Number(req.user.api_quota || 0);
-  if (!quota || req.user.role === 'admin') return next();
   try {
-    const used = tokenUsageService.sumForUser(db, {
+    aiQuotaService.assertAdmission({
       organizationId: req.authContext.organization.id,
-      userId: req.user.id
+      userId: req.user.id,
+      endpoint: req.path,
+      requestId: identityRequestId(req),
+      ipAddress: req.ip
     });
-    if (used >= quota) return res.status(429).json({ error: 'AI quota exceeded' });
     return next();
   } catch (error) {
-    return next(error);
+    return res.status(error.statusCode || 503).json({
+      error: error.message || 'AI Token quota policy is unavailable.',
+      code: error.code || 'AI_QUOTA_POLICY_UNAVAILABLE',
+      request_id: identityRequestId(req)
+    });
   }
 }
 
@@ -1742,6 +1747,7 @@ function sendCampaignLinkError(req, res, error) {
 function sendAiChatError(req, res, error) {
   const linkedError = error && (
     error.name === 'AIServiceError' ||
+    error.name === 'AIQuotaServiceError' ||
     error.name === 'IdempotencyServiceError'
   );
   if (!linkedError) {
@@ -1995,6 +2001,32 @@ app.post('/api/admin/users', authMiddleware, adminOnly, (req, res) => {
 
 app.put('/api/admin/users/:id', authMiddleware, adminOnly, (req, res) => {
   const { display_name, department, api_quota, is_active, role } = req.body;
+  if (Object.prototype.hasOwnProperty.call(req.body || {}, 'api_quota')) {
+    const hasMixedFields = [display_name, department, is_active, role].some((value) => (
+      value !== undefined && value !== null
+    ));
+    if (hasMixedFields) {
+      return res.status(400).json({
+        error: 'AI Token quota must be updated separately.',
+        code: 'AI_QUOTA_DEDICATED_ROUTE_REQUIRED'
+      });
+    }
+    try {
+      const quota = aiQuotaService.updateUserQuota({
+        actorUserId: req.user.id,
+        userId: req.params.id,
+        quota: api_quota,
+        requestId: identityRequestId(req),
+        ipAddress: req.ip
+      });
+      return res.json({ success: true, quota });
+    } catch (error) {
+      return res.status(error.statusCode || 500).json({
+        error: error.message || 'AI Token quota update failed.',
+        code: error.code || 'AI_QUOTA_UPDATE_FAILED'
+      });
+    }
+  }
   try {
     const result = updateUserWithIdentity({
       actorUserId: req.user.id,
@@ -2002,7 +2034,6 @@ app.put('/api/admin/users/:id', authMiddleware, adminOnly, (req, res) => {
       requestId: identityRequestId(req),
       displayName: display_name,
       department,
-      apiQuota: api_quota,
       isActive: is_active,
       role
     });
@@ -2021,7 +2052,6 @@ app.delete('/api/admin/users/:id', authMiddleware, adminOnly, (req, res) => {
       requestId: identityRequestId(req),
       displayName: undefined,
       department: undefined,
-      apiQuota: undefined,
       isActive: 0,
       role: undefined
     });
@@ -2207,6 +2237,7 @@ require('./routes_customers')(app, db, authMiddleware, {
   crmPermissionAudit: writeCrmPermissionAudit
 });
 registerAdminTenantDirectoryRoutes(app, db, { authMiddleware, adminOnly });
+registerAdminAIQuotaRoutes(app, db, { authMiddleware, adminOnly, service: aiQuotaService });
 registerOrganizationGovernanceRoutes(app, db, {
   authMiddleware,
   service: organizationGovernanceService
@@ -2228,8 +2259,7 @@ registerPerformanceRoutes(app, {
   moduleActionPermissionService,
   performanceExportAudit: writePerformanceExportAudit,
   customerReportExportAudit: writeCustomerReportExportAudit,
-  aiLimiter,
-  aiQuotaGuard
+  aiLimiter
 });
 require('./routes_brands')(app, db, authMiddleware, aiLimiter, aiQuotaGuard);
 
@@ -2842,7 +2872,7 @@ app.post('/api/knowledge/:id/use', authMiddleware, (req, res) => {
 });
 
 // ===== AI CONVERSATION + RAG ROUTES =====
-app.post('/api/ai/chat', authMiddleware, aiLimiter, aiQuotaGuard, async (req, res) => {
+app.post('/api/ai/chat', authMiddleware, aiLimiter, async (req, res) => {
   try {
     const body = req.body && typeof req.body === 'object' ? req.body : {};
     const result = await aiService.handleChat(db, {
@@ -2856,6 +2886,7 @@ app.post('/api/ai/chat', authMiddleware, aiLimiter, aiQuotaGuard, async (req, re
         : body.knowledge_entry_ids,
       idempotencyKey: req.get('Idempotency-Key'),
       requestId: campaignLinkRequestId(req),
+      ipAddress: req.ip,
       allowWeb: boolParam(body.allow_web, false),
       source_module: body.source_module || 'assistant',
       business_type: body.business_type,
@@ -2926,7 +2957,7 @@ app.post('/api/ai/conversations/:id/messages/:messageId/promote', authMiddleware
   }
 });
 
-app.post('/api/ai/proposal-draft', authMiddleware, aiLimiter, aiQuotaGuard, async (req, res) => {
+app.post('/api/ai/proposal-draft', authMiddleware, aiLimiter, async (req, res) => {
   const body = req.body && typeof req.body === 'object' ? req.body : {};
   const linkedRequest = hasCampaignId(body);
   try {
@@ -3000,6 +3031,7 @@ app.post('/api/ai/proposal-draft', authMiddleware, aiLimiter, aiQuotaGuard, asyn
       campaign_id: body.campaign_id,
       idempotencyKey: req.get('Idempotency-Key'),
       requestId: campaignLinkRequestId(req),
+      ipAddress: req.ip,
       knowledge_entry_ids: body.knowledge_entry_ids,
       visibility: 'private',
       knowledgeLimit: 8,
@@ -3010,6 +3042,7 @@ app.post('/api/ai/proposal-draft', authMiddleware, aiLimiter, aiQuotaGuard, asyn
     res.json({ draft: result.answer, demand_entry: demandEntry, ai: result });
   } catch (e) {
     if (linkedRequest) return sendAiChatError(req, res, e);
+    if (e && e.name === 'AIQuotaServiceError') return sendAiChatError(req, res, e);
     return res.status(500).json({
       error: 'AI proposal draft request failed.',
       code: 'AI_PROPOSAL_DRAFT_FAILED'
@@ -3089,22 +3122,27 @@ app.post('/api/demand/parse-file', authMiddleware, async (req, res) => {
   }
 });
 
-app.post('/api/ai/strategy', authMiddleware, aiLimiter, aiQuotaGuard, async (req, res) => {
+app.post('/api/ai/strategy', authMiddleware, aiLimiter, async (req, res) => {
   try {
     const result = await latestUiCompat.generateStrategy(
       db,
       req.user,
       req.body.prompt,
       req.body.input,
-      { organizationId: req.authContext.organization.id }
+      {
+        organizationId: req.authContext.organization.id,
+        requestId: campaignLinkRequestId(req),
+        ipAddress: req.ip
+      }
     );
     res.json(result);
   } catch (e) {
+    if (e && e.name === 'AIQuotaServiceError') return sendAiChatError(req, res, e);
     res.status(500).json({ error: e.message, content: '', fallback: true, warning: e.message });
   }
 });
 
-app.post('/api/ai/demand-analysis', authMiddleware, aiLimiter, aiQuotaGuard, async (req, res) => {
+app.post('/api/ai/demand-analysis', authMiddleware, aiLimiter, async (req, res) => {
   const body = req.body && typeof req.body === 'object' ? req.body : {};
   const linkedRequest = hasCampaignId(body);
   try {
@@ -3120,12 +3158,14 @@ app.post('/api/ai/demand-analysis', authMiddleware, aiLimiter, aiQuotaGuard, asy
         campaignId: body.campaign_id,
         idempotencyKey: req.get('Idempotency-Key'),
         requestId: campaignLinkRequestId(req),
+        ipAddress: req.ip,
         knowledgeLimit: 8
       }
     );
     res.json(result);
   } catch (e) {
     if (linkedRequest) return sendAiChatError(req, res, e);
+    if (e && e.name === 'AIQuotaServiceError') return sendAiChatError(req, res, e);
     return res.status(500).json({
       error: 'AI demand analysis request failed.',
       code: 'AI_DEMAND_ANALYSIS_FAILED'
@@ -3133,7 +3173,7 @@ app.post('/api/ai/demand-analysis', authMiddleware, aiLimiter, aiQuotaGuard, asy
   }
 });
 
-app.post('/api/ai/ppt-outline', authMiddleware, aiLimiter, aiQuotaGuard, async (req, res) => {
+app.post('/api/ai/ppt-outline', authMiddleware, aiLimiter, async (req, res) => {
   const body = req.body && typeof req.body === 'object' ? req.body : {};
   const linkedRequest = hasCampaignId(body);
   try {
@@ -3164,6 +3204,7 @@ app.post('/api/ai/ppt-outline', authMiddleware, aiLimiter, aiQuotaGuard, async (
       campaignId: body.campaign_id,
       idempotencyKey: req.get('Idempotency-Key'),
       requestId: campaignLinkRequestId(req),
+      ipAddress: req.ip,
       knowledgeLimit: 8,
       allowWeb: false,
       demandAudit,
@@ -3172,6 +3213,7 @@ app.post('/api/ai/ppt-outline', authMiddleware, aiLimiter, aiQuotaGuard, async (
     res.json(result);
   } catch (e) {
     if (linkedRequest) return sendAiChatError(req, res, e);
+    if (e && e.name === 'AIQuotaServiceError') return sendAiChatError(req, res, e);
     return res.status(500).json({
       error: 'AI PPT outline request failed.',
       code: 'AI_PPT_OUTLINE_FAILED'

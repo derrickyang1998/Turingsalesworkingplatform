@@ -63,6 +63,18 @@ function openFixture() {
       FOREIGN KEY(org_id,team_id) REFERENCES teams(org_id,id),
       FOREIGN KEY(org_id,user_id) REFERENCES organization_memberships(org_id,user_id)
     ) STRICT;
+    CREATE TABLE token_usage (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      org_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      model TEXT NOT NULL,
+      prompt_tokens INTEGER NOT NULL DEFAULT 0,
+      completion_tokens INTEGER NOT NULL DEFAULT 0,
+      total_tokens INTEGER NOT NULL DEFAULT 0,
+      endpoint TEXT,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY(org_id,user_id) REFERENCES organization_memberships(org_id,user_id)
+    ) STRICT;
     CREATE TABLE activity_log (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       user_id INTEGER NOT NULL,
@@ -78,7 +90,7 @@ function openFixture() {
       (1,'derrick','Derrick Admin','admin','Management','derrick@example.com',200000,'2025-12-01 00:00:00','2026-09-10 08:00:00',1),
       (2,'alice','Alice Zhang','user','Sales','alice@example.com',50000,'2026-01-02 00:00:00','2026-09-09 08:00:00',1),
       (3,'bob','Bob Chen','user','Creative','bob@example.com',50000,'2026-01-03 00:00:00',NULL,0),
-      (4,'carol','Carol Wu','user','Operations','carol@example.com',50000,'2026-02-03 00:00:00','2026-09-08 08:00:00',1);
+      (4,'carol','Carol Wu','user','Operations','carol@example.com',0,'2026-02-03 00:00:00','2026-09-08 08:00:00',1);
     INSERT INTO organizations (id,code,name,created_at) VALUES
       (10,'alpha-market','Alpha Market','2026-01-01 00:00:00'),
       (20,'beta-labs','Beta Labs','2026-02-01 00:00:00');
@@ -90,6 +102,15 @@ function openFixture() {
       (20,1,'org_admin','active','2026-02-01 00:00:00',NULL),
       (20,2,'member','active','2026-02-02 00:00:00',NULL),
       (20,4,'member','active','2026-02-03 00:00:00',NULL);
+    INSERT INTO token_usage
+      (org_id,user_id,model,prompt_tokens,completion_tokens,total_tokens,endpoint,created_at) VALUES
+      (10,1,'deepseek-chat',150000,100001,250001,'/ai/chat','2026-09-01 08:00:00'),
+      (20,1,'deepseek-chat',8,5,13,'/ai/chat','2026-09-01 09:00:00'),
+      (10,2,'deepseek-chat',8000,2000,10000,'/ai/chat','2026-09-02 08:00:00'),
+      (10,2,'deepseek-chat',2000,345,2345,'/ai/strategy','2026-09-02 09:00:00'),
+      (20,2,'deepseek-chat',40000,10000,50000,'/ai/chat','2026-09-03 08:00:00'),
+      (10,3,'deepseek-chat',500,200,700,'/ai/chat','2026-02-15 08:00:00'),
+      (20,4,'deepseek-chat',2,1,3,'/ai/chat','2026-09-04 08:00:00');
     INSERT INTO teams (id,org_id,code,name,created_at) VALUES
       (101,10,'alpha-sales','Alpha Sales','2026-01-01 00:00:00'),
       (102,10,'alpha-creative','Alpha Creative','2026-01-01 00:00:00'),
@@ -275,6 +296,105 @@ test('user entitlement directory searches stable roles, paginates, and audits on
     assert.deepEqual(details.target_organization_ids, [10, 20]);
     assert.equal(audit.details.includes('alpha'), false);
     assert.equal(Object.hasOwn(details, 'filter_sha256'), false);
+  } finally {
+    db.close();
+  }
+});
+
+test('user entitlement directory projects organization-owned lifetime AI quota state', () => {
+  const db = openFixture();
+  try {
+    const service = createAdminTenantDirectoryService(db);
+    const result = service.listUsers({
+      actor: admin(),
+      requestId: 'tenant-users-ai-quota',
+      query: { limit: 20 }
+    });
+
+    assert.deepEqual(result.users.map((user) => ({
+      user_id: user.id,
+      organizations: user.organizations.map((organization) => ({
+        organization_id: organization.id,
+        ai_quota: organization.ai_quota
+      }))
+    })), [
+      {
+        user_id: 1,
+        organizations: [
+          {
+            organization_id: 10,
+            ai_quota: {
+              period: 'legacy_lifetime',
+              used: 250001,
+              limit: 200000,
+              remaining: null,
+              status: 'exempt'
+            }
+          },
+          {
+            organization_id: 20,
+            ai_quota: {
+              period: 'legacy_lifetime',
+              used: 13,
+              limit: 200000,
+              remaining: null,
+              status: 'exempt'
+            }
+          }
+        ]
+      },
+      {
+        user_id: 2,
+        organizations: [
+          {
+            organization_id: 10,
+            ai_quota: {
+              period: 'legacy_lifetime',
+              used: 12345,
+              limit: 50000,
+              remaining: 37655,
+              status: 'active'
+            }
+          },
+          {
+            organization_id: 20,
+            ai_quota: {
+              period: 'legacy_lifetime',
+              used: 50000,
+              limit: 50000,
+              remaining: 0,
+              status: 'exhausted'
+            }
+          }
+        ]
+      },
+      {
+        user_id: 3,
+        organizations: [{
+          organization_id: 10,
+          ai_quota: {
+            period: 'legacy_lifetime',
+            used: 700,
+            limit: 50000,
+            remaining: 49300,
+            status: 'revoked'
+          }
+        }]
+      },
+      {
+        user_id: 4,
+        organizations: [{
+          organization_id: 20,
+          ai_quota: {
+            period: 'legacy_lifetime',
+            used: 3,
+            limit: 0,
+            remaining: 0,
+            status: 'disabled'
+          }
+        }]
+      }
+    ]);
   } finally {
     db.close();
   }

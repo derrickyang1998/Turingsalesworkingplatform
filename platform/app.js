@@ -10275,8 +10275,47 @@ function renderAdminUserTable(users) {
     var organizations = Array.isArray(u.organizations) ? u.organizations : [];
     var organizationHtml = organizations.length ? organizations.map(function(organization) {
       var active = organization.status === 'active';
+      var quota = active && organization.ai_quota && typeof organization.ai_quota === 'object'
+        ? organization.ai_quota
+        : null;
+      var quotaHtml = '';
+      if (quota) {
+        var used = Number(quota.used);
+        var limit = Number(quota.limit);
+        var remaining = quota.remaining === null ? null : Number(quota.remaining);
+        var quotaStatus = String(quota.status || 'active');
+        var quotaStatusLabels = {
+          exempt: '免配额',
+          active: '可用',
+          exhausted: '已用尽',
+          disabled: '已停用',
+          inactive: '用户停用',
+          revoked: '成员已撤销',
+          unassigned: '未分配组织'
+        };
+        var quotaStatusColors = {
+          exempt: '#2563eb',
+          active: '#0f7b3c',
+          exhausted: '#b42318',
+          disabled: '#6b7280',
+          inactive: '#6b7280',
+          revoked: '#6b7280',
+          unassigned: '#6b7280'
+        };
+        var usedText = Number.isSafeInteger(used) && used >= 0 ? used.toLocaleString() : '0';
+        var limitText = Number.isSafeInteger(limit) && limit >= 0 ? limit.toLocaleString() : '0';
+        var remainingText = remaining === null
+          ? '不限'
+          : (Number.isSafeInteger(remaining) && remaining >= 0 ? remaining.toLocaleString() : '0');
+        quotaHtml = '<div style="margin-top:4px;font-size:11px;line-height:1.55">'
+          + '<strong>' + esc(usedText) + ' / ' + esc(limitText) + '</strong>'
+          + '<div style="opacity:.65">剩余 ' + esc(remainingText) + '</div>'
+          + '<span style="color:' + esc(quotaStatusColors[quotaStatus] || '#6b7280') + '">'
+          + esc(quotaStatusLabels[quotaStatus] || quotaStatus) + '</span></div>';
+      }
       return '<div style="margin-bottom:5px"><strong>' + esc(organization.name || organization.code || '-') + '</strong>'
-        + '<div style="font-size:11px;opacity:.6">' + esc(organization.role_code || '-') + ' · ' + (active ? '有效' : '已撤销') + '</div></div>';
+        + '<div style="font-size:11px;opacity:.6">' + esc(organization.role_code || '-') + ' · ' + (active ? '有效' : '已撤销') + '</div>'
+        + quotaHtml + '</div>';
     }).join('') : '<span style="opacity:.5">未分配</span>';
     var teamRows = [];
     organizations.forEach(function(organization) {
@@ -10302,18 +10341,52 @@ function renderAdminUserTable(users) {
     var safeId = Number.isSafeInteger(id) && id > 0 ? id : 0;
     var active = Number(u.is_active) === 1;
     var quota = Number(u.api_quota);
-    var quotaText = Number.isFinite(quota) && quota >= 0 ? quota.toLocaleString() : '0';
+    var safeQuota = Number.isSafeInteger(quota) && quota >= 0 ? quota : 0;
+    var quotaControl = safeId
+      ? '<div style="display:flex;align-items:center;gap:6px;min-width:158px">'
+        + '<input id="ad_aiQuota_' + safeId + '" type="number" min="0" step="1" value="' + safeQuota + '" '
+        + 'aria-label="AI Token 配额" style="width:96px;height:30px;padding:4px 7px;border:1px solid #dfe5ef;border-radius:6px">'
+        + '<button type="button" class="btn btn-xs" onclick="adminUpdateAiQuota(' + safeId + ')">保存</button></div>'
+      : '<span style="opacity:.5">不可编辑</span>';
     return '<tr><td><strong>' + esc(u.display_name || u.username || '-') + '</strong>'
       + '<div style="font-size:11px;opacity:.58">' + esc(u.username || '-') + '</div>'
       + '<div style="font-size:11px;opacity:.58">' + esc(u.email || '-') + '</div></td>'
       + '<td><div style="margin-bottom:4px">' + esc(u.role === 'admin' ? '管理员' : '普通用户') + '</div>' + accessHtml + '</td>'
       + '<td>' + organizationHtml + '</td><td>' + teamHtml + '</td>'
-      + '<td>' + esc(u.department || '-') + '</td><td>' + esc(quotaText) + '</td>'
+      + '<td>' + esc(u.department || '-') + '</td><td>' + quotaControl + '</td>'
       + '<td style="white-space:nowrap">' + esc(String(u.last_login || '').substring(0, 16) || '-') + '</td>'
       + '<td><span style="color:' + (active ? '#0f7b3c' : '#d94641') + '">' + (active ? '启用' : '停用') + '</span></td>'
       + '<td style="white-space:nowrap"><button type="button" class="btn btn-xs" onclick="adminResetPw(' + safeId + ')">重置密码</button> '
       + '<button type="button" class="btn btn-xs" onclick="toggleUserActive(' + safeId + ',' + (active ? 0 : 1) + ')">' + (active ? '停用' : '启用') + '</button></td></tr>';
   }).join('');
+}
+async function adminUpdateAiQuota(id) {
+  var userId = Number(id);
+  if (!Number.isSafeInteger(userId) || userId <= 0) {
+    toast('用户编号无效', 'error');
+    return null;
+  }
+  var input = document.getElementById('ad_aiQuota_' + userId);
+  var rawQuota = input ? String(input.value).trim() : '';
+  var quota = rawQuota === '' ? NaN : Number(rawQuota);
+  if (!Number.isSafeInteger(quota) || quota < 0) {
+    toast('AI Token 配额必须是非负整数', 'error');
+    return null;
+  }
+  try {
+    var response = await apiFetch('/admin/users/' + userId + '/ai-quota', {
+      method: 'PUT',
+      body: JSON.stringify({ api_quota: quota })
+    });
+    var data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'AI Token 配额保存失败');
+    await loadAdminUsers();
+    toast('AI Token 配额已保存');
+    return data;
+  } catch (error) {
+    toast(error.message || 'AI Token 配额保存失败', 'error');
+    return null;
+  }
 }
 function updateAdminUserPager(page) {
   var previous = document.getElementById('ad_userPrevious');

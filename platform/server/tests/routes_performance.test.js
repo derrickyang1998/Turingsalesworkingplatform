@@ -21,6 +21,7 @@ const { CustomerReportSnapshotServiceError } = require('../services/customer_rep
 const { CustomerReportDeliveryServiceError } = require('../services/customer_report_delivery_service');
 const { PerformanceCollectionRunServiceError } = require('../services/performance_collection_run_service');
 const { PerformanceProviderCollectionServiceError } = require('../services/performance_provider_collection_service');
+const { AIQuotaServiceError } = require('../services/ai_quota_service');
 const campaignContract = require('../contracts/campaign_contract');
 
 function createResponse() {
@@ -1384,6 +1385,36 @@ test('creates a campaign-scoped AI review draft through the protected JSON reque
   assert.equal(invalid.statusCode, 422);
   assert.equal(invalid.body.code, 'PERFORMANCE_AI_REVIEW_INVALID');
   assert.equal(invalid.body.request_id, 'ai-review-request-id');
+});
+
+test('preserves typed AI quota denials for both performance AI draft endpoints', async () => {
+  const { routes, aiReviewService, contentAnalysisService } = createFixture();
+  aiReviewService.createDraft = async () => {
+    throw new AIQuotaServiceError(429, 'AI_QUOTA_EXCEEDED', 'AI Token quota has been exhausted.');
+  };
+  contentAnalysisService.createDraft = async () => {
+    throw new AIQuotaServiceError(429, 'AI_QUOTA_DISABLED', 'AI Token access is disabled.');
+  };
+
+  const review = await invokeAsync(routes.get('POST /api/campaigns/:id/performance/ai-review-draft'), {
+    user: { id: 9, role: 'member' },
+    params: { id: '7' },
+    body: {},
+    headers: { 'idempotency-key': 'ai-review-quota-route-0001' },
+    phase4Request: { requestId: 'ai-review-quota-route-request-0001' }
+  });
+  assert.equal(review.statusCode, 429);
+  assert.equal(review.body.code, 'AI_QUOTA_EXCEEDED');
+
+  const content = await invokeAsync(routes.get('POST /api/campaigns/:id/performance/content-analysis-draft'), {
+    user: { id: 9, role: 'member' },
+    params: { id: '7' },
+    body: { content_id: 13 },
+    headers: { 'idempotency-key': 'content-analysis-quota-route-0001' },
+    phase4Request: { requestId: 'content-analysis-quota-route-request-0001' }
+  });
+  assert.equal(content.statusCode, 429);
+  assert.equal(content.body.code, 'AI_QUOTA_DISABLED');
 });
 
 test('creates and confirms authorized content analysis through protected JSON contracts', async () => {

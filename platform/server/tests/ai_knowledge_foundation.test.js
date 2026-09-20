@@ -281,6 +281,160 @@ test('ai service persists conversations and restricts non-admin visibility', asy
   db.close();
 });
 
+test('ai service enforces the live tenant quota before provider I/O and keeps organization usage isolated', async () => {
+  const db = freshDb();
+  try {
+    const ai = require('../services/ai_service');
+    const organizationId = db.prepare(
+      "SELECT id FROM organizations WHERE code='turingmarket-default'"
+    ).get().id;
+    db.prepare('UPDATE users SET api_quota=10 WHERE id=2').run();
+    let providerCalls = 0;
+    const provider = {
+      async complete() {
+        providerCalls += 1;
+        return {
+          content: 'quota accounted answer',
+          usage: { prompt_tokens: 6, completion_tokens: 6, total_tokens: 12 },
+          model: 'deepseek-chat'
+        };
+      }
+    };
+
+    const first = await ai.handleChat(db, {
+      user: { id: 2, role: 'user', api_quota: 999999 },
+      organizationId,
+      message: 'first quota request',
+      provider,
+      allowWeb: false,
+      requestId: 'quota-first-request'
+    });
+    assert.equal(first.answer, 'quota accounted answer');
+    assert.equal(providerCalls, 1);
+    assert.equal(db.prepare(`
+      SELECT COALESCE(SUM(total_tokens),0) AS total
+      FROM token_usage WHERE org_id=? AND user_id=2
+    `).get(organizationId).total, 12);
+
+    await assert.rejects(
+      ai.handleChat(db, {
+        user: { id: 2, role: 'admin', api_quota: 999999 },
+        organizationId,
+        message: 'must be denied from live database policy',
+        provider,
+        allowWeb: false,
+        requestId: 'quota-denied-request'
+      }),
+      (error) => error && error.statusCode === 429 && error.code === 'AI_QUOTA_EXCEEDED'
+    );
+    assert.equal(providerCalls, 1);
+    const denial = db.prepare(`
+      SELECT action,module,details FROM activity_log
+      WHERE action='ai_quota_denied' ORDER BY id DESC LIMIT 1
+    `).get();
+    assert.equal(denial.module, 'ai_quota');
+    assert.equal(JSON.parse(denial.details).organization_id, organizationId);
+  } finally {
+    db.close();
+  }
+});
+
+test('ai service disables zero-quota users and fails closed when trusted token accounting cannot persist', async () => {
+  const db = freshDb();
+  try {
+    const ai = require('../services/ai_service');
+    const organizationId = db.prepare(
+      "SELECT id FROM organizations WHERE code='turingmarket-default'"
+    ).get().id;
+    let providerCalls = 0;
+    const provider = {
+      async complete() {
+        providerCalls += 1;
+        return {
+          content: 'must not be returned without accounting',
+          usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 },
+          model: 'deepseek-chat'
+        };
+      }
+    };
+
+    db.prepare('UPDATE users SET api_quota=0 WHERE id=2').run();
+    await assert.rejects(
+      ai.handleChat(db, {
+        user: { id: 2, role: 'user', api_quota: 50000 },
+        organizationId,
+        message: 'zero quota must disable AI',
+        provider,
+        allowWeb: false,
+        requestId: 'quota-disabled-request'
+      }),
+      (error) => error && error.statusCode === 429 && error.code === 'AI_QUOTA_DISABLED'
+    );
+    assert.equal(providerCalls, 0);
+
+    db.prepare('UPDATE users SET api_quota=50000 WHERE id=2').run();
+    db.exec(`
+      CREATE TRIGGER test_token_usage_accounting_failure
+      BEFORE INSERT ON token_usage
+      BEGIN SELECT RAISE(ABORT,'forced token accounting failure'); END;
+    `);
+    await assert.rejects(
+      ai.handleChat(db, {
+        user: { id: 2, role: 'user' },
+        organizationId,
+        message: 'accounting failure must fail the response',
+        provider,
+        allowWeb: false,
+        requestId: 'quota-accounting-failure'
+      }),
+      (error) => error && error.statusCode === 503 && error.code === 'AI_USAGE_ACCOUNTING_FAILED'
+    );
+    assert.equal(providerCalls, 1);
+    assert.equal(db.prepare(`
+      SELECT COUNT(*) AS count FROM ai_messages
+      WHERE content='must not be returned without accounting'
+    `).get().count, 0);
+  } finally {
+    db.close();
+  }
+});
+
+test('ai service fails closed when a successful provider omits or contradicts token usage', async () => {
+  for (const [label, usage] of [
+    ['missing', {}],
+    ['inconsistent', { prompt_tokens: 6, completion_tokens: 4, total_tokens: 0 }]
+  ]) {
+    const db = freshDb();
+    try {
+      const ai = require('../services/ai_service');
+      const organizationId = db.prepare(
+        "SELECT id FROM organizations WHERE code='turingmarket-default'"
+      ).get().id;
+      const answer = `unmetered ${label} answer`;
+      await assert.rejects(
+        ai.handleChat(db, {
+          user: { id: 2, role: 'user' },
+          organizationId,
+          message: `provider usage ${label}`,
+          provider: {
+            async complete() {
+              return { content: answer, usage, model: 'deepseek-chat', provider: 'deepseek' };
+            }
+          },
+          allowWeb: false,
+          requestId: `provider-usage-${label}`
+        }),
+        (error) => error && error.statusCode === 503 && error.code === 'AI_USAGE_ACCOUNTING_FAILED'
+      );
+      assert.equal(db.prepare(`
+        SELECT COUNT(*) AS count FROM ai_messages WHERE content=?
+      `).get(answer).count, 0);
+    } finally {
+      db.close();
+    }
+  }
+});
+
 test('ppt outline generation retrieves knowledge and archives references', async () => {
   const db = freshDb();
   const oldDeepSeek = process.env.DEEPSEEK_API_KEY;
@@ -290,6 +444,9 @@ test('ppt outline generation retrieves knowledge and archives references', async
   try {
     const knowledge = require('../services/knowledge_service');
     const latestUi = require('../services/latest_ui_compat_service');
+    const organizationId = db.prepare(
+      "SELECT id FROM organizations WHERE code='turingmarket-default'"
+    ).get().id;
     const entry = knowledge.ingestKnowledge(db, {
       title: 'PPT internal case method',
       content: 'PPT generation should use the internal case library and confirmed proposal knowledge before web research.',
@@ -303,7 +460,7 @@ test('ppt outline generation retrieves knowledge and archives references', async
       demand: { brand: 'Aurora', product: 'Solar Kit', market: 'US' },
       proposal: 'Use the internal case library before generating the client deck.',
       knowledge_limit: 5
-    });
+    }, { organizationId });
 
     assert.equal(result.knowledge_references.length, 1);
     assert.equal(result.knowledge_references[0].id, entry.id);

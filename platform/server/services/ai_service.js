@@ -2,7 +2,7 @@ const knowledge = require('./knowledge_service');
 const rag = require('./rag_service');
 const llm = require('./llm_service');
 const webSearch = require('./web_search_service');
-const tokenUsage = require('./token_usage_service');
+const aiQuota = require('./ai_quota_service');
 const crypto = require('node:crypto');
 const idempotency = require('./idempotency_service');
 const { requestHash } = require('./sqlite_digest_service');
@@ -249,6 +249,14 @@ async function handleLegacyChat(db, opts) {
   const message = String(opts.message || '').trim();
   if (!message) throw new Error('Message required');
 
+  aiQuota.assertAdmission(db, {
+    organizationId: opts.organizationId,
+    userId: opts.user.id,
+    endpoint: opts.source_module || 'ai_chat',
+    requestId: opts.requestId,
+    ipAddress: opts.ipAddress
+  });
+
   const conversation = ensureConversation(db, opts);
   const userMessageId = insertMessage(db, {
     conversation_id: conversation.id,
@@ -309,76 +317,77 @@ async function handleLegacyChat(db, opts) {
   const usage = completion.usage || {};
   const completionModel = resolveCompletionModel(completion, opts.model);
   const costSnapshot = completionCostSnapshot(completion, completionModel);
-  const assistantMessageId = insertMessage(db, {
-    conversation_id: conversation.id,
-    user_id: opts.user.id,
-    role: 'assistant',
-    content: completion.content || '',
-    model: completionModel,
-    prompt_tokens: usage.prompt_tokens || 0,
-    completion_tokens: usage.completion_tokens || 0,
-    total_tokens: usage.total_tokens || 0,
-    metadata: {
-      degraded: !!completion.degraded,
-      reason: completion.reason || '',
-      rag_has_knowledge: ragContext.hasKnowledge,
-      web_used: !!searchResult.used,
-      user_message_id: userMessageId,
-      cost_snapshot: costSnapshot
-    }
-  });
+  const persisted = db.transaction(() => {
+    const assistantMessageId = insertMessage(db, {
+      conversation_id: conversation.id,
+      user_id: opts.user.id,
+      role: 'assistant',
+      content: completion.content || '',
+      model: completionModel,
+      prompt_tokens: usage.prompt_tokens || 0,
+      completion_tokens: usage.completion_tokens || 0,
+      total_tokens: usage.total_tokens || 0,
+      metadata: {
+        degraded: !!completion.degraded,
+        reason: completion.reason || '',
+        rag_has_knowledge: ragContext.hasKnowledge,
+        web_used: !!searchResult.used,
+        user_message_id: userMessageId,
+        cost_snapshot: costSnapshot
+      }
+    });
 
-  saveReferences(db, assistantMessageId, ragContext.references, searchResult.results);
-  knowledge.recordKnowledgeUsageTelemetry(
-    db,
-    ragContext.references.map(function(ref) { return ref.id; }),
-    opts.user,
-    { organizationId: opts.organizationId }
-  );
-  db.prepare('UPDATE ai_conversations SET updated_at = datetime(\'now\') WHERE id = ?').run(conversation.id);
-  if (usage.total_tokens || usage.prompt_tokens || usage.completion_tokens) {
-    try {
-      tokenUsage.recordUsage(db, {
+    saveReferences(db, assistantMessageId, ragContext.references, searchResult.results);
+    knowledge.recordKnowledgeUsageTelemetry(
+      db,
+      ragContext.references.map(function(ref) { return ref.id; }),
+      opts.user,
+      { organizationId: opts.organizationId }
+    );
+    db.prepare('UPDATE ai_conversations SET updated_at = datetime(\'now\') WHERE id = ?').run(conversation.id);
+    if (shouldRecordProviderUsage(completion)) {
+      aiQuota.recordUsageOrThrow(db, {
         organizationId: opts.organizationId,
         userId: opts.user.id,
         model: completionModel,
         promptTokens: usage.prompt_tokens || 0,
         completionTokens: usage.completion_tokens || 0,
         totalTokens: usage.total_tokens || 0,
-        endpoint: 'ai_chat'
+        endpoint: opts.source_module || 'ai_chat'
       });
-    } catch (e) {}
-  }
-
-  const promotion = decideSummaryPromotion({
-    message,
-    answer: completion.content || '',
-    knowledgeReferences: ragContext.references,
-    searchResult,
-    archiveSummary: opts.archiveSummary,
-    degraded: !!completion.degraded
-  });
-  let archived = null;
-  if (promotion.status === 'promoted') {
-    archived = archiveChatSummary(db, {
-      user: opts.user,
-      message: message,
-      answer: completion.content || '',
-      conversationId: conversation.id,
-      assistantMessageId: assistantMessageId,
-      visibility: opts.summaryVisibility || 'private',
-      source_module: opts.source_module || conversation.source_module,
-      organizationId: opts.organizationId,
-      promotion
-    });
-    if (archived && archived.id) {
-      db.prepare('UPDATE ai_conversations SET archived_summary_id = ? WHERE id = ?').run(archived.id, conversation.id);
     }
-  }
+
+    const promotion = decideSummaryPromotion({
+      message,
+      answer: completion.content || '',
+      knowledgeReferences: ragContext.references,
+      searchResult,
+      archiveSummary: opts.archiveSummary,
+      degraded: !!completion.degraded
+    });
+    let archived = null;
+    if (promotion.status === 'promoted') {
+      archived = archiveChatSummary(db, {
+        user: opts.user,
+        message: message,
+        answer: completion.content || '',
+        conversationId: conversation.id,
+        assistantMessageId,
+        visibility: opts.summaryVisibility || 'private',
+        source_module: opts.source_module || conversation.source_module,
+        organizationId: opts.organizationId,
+        promotion
+      });
+      if (archived && archived.id) {
+        db.prepare('UPDATE ai_conversations SET archived_summary_id = ? WHERE id = ?').run(archived.id, conversation.id);
+      }
+    }
+    return { assistantMessageId, archived, promotion };
+  }).immediate();
 
   return {
     conversation_id: conversation.id,
-    message_id: assistantMessageId,
+    message_id: persisted.assistantMessageId,
     answer: completion.content || '',
     model: completionModel,
     usage: usage,
@@ -392,8 +401,8 @@ async function handleLegacyChat(db, opts) {
       reason_code: searchResult.reason_code || '',
       cached: searchResult.cached === true
     },
-    archived_summary_id: archived && archived.id ? archived.id : null,
-    summary_promotion: promotion
+    archived_summary_id: persisted.archived && persisted.archived.id ? persisted.archived.id : null,
+    summary_promotion: persisted.promotion
   };
 }
 
@@ -445,16 +454,18 @@ function validateOneShotCompletion(completion, opts) {
       usage: completion && completion.usage || {},
       model: completion && completion.model || opts.model || process.env.AI_MODEL || llm.DEFAULT_DEEPSEEK_MODEL,
       degraded: true,
-      reason: 'AI response format invalid'
+      reason: 'AI response format invalid',
+      _provider_degraded: !!(completion && completion.degraded)
     };
   }
   if (completion.degraded) {
     return Object.assign({}, completion, {
       degraded: true,
-      reason: 'AI provider returned a degraded response'
+      reason: 'AI provider returned a degraded response',
+      _provider_degraded: true
     });
   }
-  return Object.assign({}, completion, { degraded: false, reason: '' });
+  return Object.assign({}, completion, { degraded: false, reason: '', _provider_degraded: false });
 }
 
 function persistAtomicOneShot(db, opts) {
@@ -503,8 +514,8 @@ function persistAtomicOneShot(db, opts) {
     );
     db.prepare('UPDATE ai_conversations SET updated_at=datetime(\'now\') WHERE id=?')
       .run(conversation.id);
-    if (usage.total_tokens || usage.prompt_tokens || usage.completion_tokens) {
-      tokenUsage.recordUsage(db, {
+    if (shouldRecordProviderUsage(opts.completion)) {
+      aiQuota.recordUsageOrThrow(db, {
         organizationId: opts.organizationId,
         userId: opts.user.id,
         model: completionModel,
@@ -543,6 +554,13 @@ function persistAtomicOneShot(db, opts) {
 
 async function handleAtomicLegacyOneShot(db, opts) {
   const message = String(opts.message || '').trim();
+  aiQuota.assertAdmission(db, {
+    organizationId: opts.organizationId,
+    userId: opts.user && opts.user.id,
+    endpoint: opts.source_module || 'ai_one_shot',
+    requestId: opts.requestId,
+    ipAddress: opts.ipAddress
+  });
   const retrievalQuery = String(opts.ragQuery || message).trim() || message;
   const webQuery = String(opts.webQuery || retrievalQuery).trim() || retrievalQuery;
   const ragContext = rag.buildRagContext(db, {
@@ -615,7 +633,8 @@ async function handleAtomicLegacyOneShot(db, opts) {
         usage: {},
         model: opts.model || process.env.AI_MODEL || llm.DEFAULT_DEEPSEEK_MODEL,
         degraded: true,
-        reason: 'AI provider unavailable'
+        reason: 'AI provider unavailable',
+        _provider_degraded: true
       };
     }
   } finally {
@@ -665,6 +684,13 @@ function completionUsage(completion) {
   };
 }
 
+function shouldRecordProviderUsage(completion) {
+  if (!completion) return false;
+  const providerDegraded = completion._provider_degraded === true ||
+    (completion._provider_degraded === undefined && completion.degraded === true);
+  return !providerDegraded;
+}
+
 function recordLinkedTokenUsageInTransaction(
   db,
   organizationId,
@@ -672,10 +698,10 @@ function recordLinkedTokenUsageInTransaction(
   completion,
   requestedModel,
   endpoint,
-  recordZeroUsage
+  allowZeroUsage
 ) {
   const usage = completionUsage(completion);
-  const recorded = tokenUsage.recordUsage(db, {
+  const recorded = aiQuota.recordUsageOrThrow(db, {
     organizationId,
     userId: user.id,
     model: resolveCompletionModel(completion, requestedModel),
@@ -683,7 +709,7 @@ function recordLinkedTokenUsageInTransaction(
     completionTokens: usage.completion_tokens,
     totalTokens: usage.total_tokens,
     endpoint,
-    recordZeroUsage
+    allowZeroUsage
   });
   return Object.assign({ id: recorded.id }, usage);
 }
@@ -796,7 +822,7 @@ function completeLinkedTerminalRejection(
         completion,
         opts.model,
         'ai_chat_linked_rejected',
-        true
+        !shouldRecordProviderUsage(completion)
       );
       if (currentAudit) insertLinkedTerminalAuditInTransaction(db, reservation, tokenUsage, currentAudit);
       idempotency.completeJsonInTransaction(db, {
@@ -1682,21 +1708,28 @@ async function handleLinkedChat(db, opts, linked) {
     reservationInput
   });
   if (reservation.state === 'replay') return reservation.responseBody;
-  if (typeof opts.beforeProvider === 'function') {
-    try {
+  try {
+    aiQuota.assertAdmission(db, {
+      organizationId: linkedAccess.campaign.org_id,
+      userId: user.id,
+      endpoint: opts.source_module || 'ai_chat_linked',
+      requestId,
+      ipAddress: opts.ipAddress
+    });
+    if (typeof opts.beforeProvider === 'function') {
       await opts.beforeProvider({
         db,
         user,
         campaignId: linked.campaignId,
         reservation
       });
-    } catch (error) {
-      const guardError = error && error.statusCode
-        ? error
-        : serviceError(500, 'AI_PREPARATION_FAILED', 'Linked AI chat could not be prepared.');
-      completeLinkedFailure(db, reservation, requestHashValue, requestId, guardError);
-      throw guardError;
     }
+  } catch (error) {
+    const guardError = error && error.statusCode
+      ? error
+      : serviceError(500, 'AI_PREPARATION_FAILED', 'Linked AI chat could not be prepared.');
+    completeLinkedFailure(db, reservation, requestHashValue, requestId, guardError);
+    throw guardError;
   }
   const providerContext = createLinkedProviderContext(reservation, opts.signal);
   const startedAt = Date.now();
@@ -1777,6 +1810,10 @@ async function handleLinkedChat(db, opts, linked) {
       assertProviderContextActive(providerContext);
     } catch (error) {
       if (isLinkedCampaignAccessError(error)) throw error;
+      if (error && error.code === 'AI_USAGE_ACCOUNTING_FAILED') {
+        completeLinkedFailure(db, reservation, requestHashValue, requestId, error);
+        throw error;
+      }
       const providerError = error && error.code === 'AI_PROVIDER_UNAVAILABLE'
         ? error
         : providerUnavailableError();

@@ -278,12 +278,16 @@
       "sha256": "746c3f7592a4c9d783df35a2bc01e7bfa541bfd3b1474a0fa17aba2181d27838"
     },
     {
+      "path": "server/routes_admin_ai_quota.js",
+      "sha256": "903a61b32dabf30fd19bf2a94cc2bcc7125ab5e4f4770e04ec199a9cfcd806de"
+    },
+    {
       "path": "server/routes_admin_tenant_directory.js",
       "sha256": "828e8b4dd23ed40500da1640d4fc7083d5ff88bee997c64365b9a5e1fc5b4789"
     },
     {
       "path": "server/routes_brands.js",
-      "sha256": "457ae0bcaf14ca8274b3bb2b81a1d0935043ce4531e76695c13c84083bf4e71d"
+      "sha256": "e2af645986657bdab9649130d7ff3edb1e9f946a80b5ac4ae2659cfc5075f4d7"
     },
     {
       "path": "server/routes_campaigns.js",
@@ -303,7 +307,7 @@
     },
     {
       "path": "server/routes_performance.js",
-      "sha256": "cc6b0eeed2a77b46dd72d9bb0d13c39e4790ceca3bd92243e416282f0a66ba03"
+      "sha256": "bf8afcbd7d378f6220a1c49e212c5e2fff11ac45524e42845591428de4c75b6a"
     },
     {
       "path": "server/routes_workflow.js",
@@ -311,7 +315,7 @@
     },
     {
       "path": "server/server.js",
-      "sha256": "0f5861ab3a968e5d34069baf481d81681fa2b8743c1e01ef24d38f48a57a92d6"
+      "sha256": "434190998f98500facb4fd150cf9fdc98022d5e80535eba69aa2b4e0f8c6296f"
     },
     {
       "path": "server/workflow_engine.js",
@@ -319,15 +323,19 @@
     },
     {
       "path": "server/services/admin_tenant_directory_service.js",
-      "sha256": "23b2478748f63f58e4a0dd13932b10d2bf966b75cdfaf5cdda2810346825616b"
+      "sha256": "0b29cff375655492c4ce4373a0ead63ccc6d48ab057f9bfa5d3c6e80320ce1fe"
     },
     {
       "path": "server/services/ai_cost_service.js",
       "sha256": "101a87a0574f2bc037e5c75bfb84e581c5ef2190041cc8edb16218c179e83acc"
     },
     {
+      "path": "server/services/ai_quota_service.js",
+      "sha256": "d7ca0241b5321197d1435c836db4b96d5e3f0379daa1fe73d92a454f6a8ef3ef"
+    },
+    {
       "path": "server/services/ai_service.js",
-      "sha256": "7ee8fa3e1dddc2a23b9b94308fcfa09b8259e2915e1b4a6103355d0150037ef1"
+      "sha256": "1ed466d12927654e4e22e78db63ac92e23fc26570d809e003599139f6cf8cc38"
     },
     {
       "path": "server/services/business_knowledge_service.js",
@@ -427,7 +435,7 @@
     },
     {
       "path": "server/services/latest_ui_compat_service.js",
-      "sha256": "c26dc5333dd3b01704362b0d0f41f08358b0bceb0e9cd57ce639e0d52ef5c73d"
+      "sha256": "8d45e053130f3706d8cd8da54870a3395890ffb904bd3cac6945435c2edca44c"
     },
     {
       "path": "server/services/llm_service.js",
@@ -475,7 +483,7 @@
     },
     {
       "path": "server/services/performance_content_analysis_service.js",
-      "sha256": "282814a3a22f2e02008fab19d15d5d42bb619572d48e553e11785a94b86d3050"
+      "sha256": "8ba4a2232a07e9269d4d0d9a9357b68fdf93cfeb9d7aadd93834d2c9b2cf2fae"
     },
     {
       "path": "server/services/performance_feishu_connection_service.js",
@@ -491,7 +499,7 @@
     },
     {
       "path": "server/services/performance_manual_service.js",
-      "sha256": "4b54431834c731460e97882875558936864b7f8546d8e677bb986e1ea30d64ff"
+      "sha256": "63b61f2e785b007f3033964a895c11b1a7e39feb084fa618b2b72820af28cbb5"
     },
     {
       "path": "server/services/performance_metrics_service.js",

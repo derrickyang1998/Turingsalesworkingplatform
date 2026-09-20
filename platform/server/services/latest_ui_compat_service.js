@@ -5,7 +5,7 @@ const knowledgeService = require('./knowledge_service');
 const llm = require('./llm_service');
 const rag = require('./rag_service');
 const webSearch = require('./web_search_service');
-const tokenUsage = require('./token_usage_service');
+const aiQuota = require('./ai_quota_service');
 
 const TEXT_EXTS = new Set(['.txt', '.md', '.csv', '.json']);
 const DOC_EXTS = new Set(['.pdf', '.docx', '.pptx']);
@@ -203,6 +203,16 @@ function normalizeAnalysis(value, fallback) {
 }
 
 async function generateJsonWithDeepSeek(prompt, fallback, opts) {
+  opts = opts || {};
+  if (opts.db && opts.user && opts.user.id) {
+    aiQuota.assertAdmission(opts.db, {
+      organizationId: opts.organizationId,
+      userId: opts.user.id,
+      endpoint: opts.endpoint || 'ai_compat',
+      requestId: opts.requestId,
+      ipAddress: opts.ipAddress
+    });
+  }
   const provider = llm.createDeepSeekProvider();
   const completion = await provider.complete({
     messages: [
@@ -222,18 +232,18 @@ async function generateJsonWithDeepSeek(prompt, fallback, opts) {
 function recordTokenUsage(opts, completion) {
   opts = opts || {};
   const usage = completion && completion.usage || {};
-  if (!opts.db || !opts.user || !(usage.total_tokens || usage.prompt_tokens || usage.completion_tokens)) return;
-  try {
-    tokenUsage.recordUsage(opts.db, {
-      organizationId: opts.organizationId,
-      userId: opts.user.id,
-      model: completion.model || 'deepseek-chat',
-      promptTokens: usage.prompt_tokens || 0,
-      completionTokens: usage.completion_tokens || 0,
-      totalTokens: usage.total_tokens || 0,
-      endpoint: opts.endpoint || 'ai_compat'
-    });
-  } catch (e) {}
+  if (!opts.db || !opts.user || !completion || completion.degraded === true) return;
+  aiQuota.recordUsageOrThrow(opts.db, {
+    organizationId: opts.organizationId,
+    requestId: opts.requestId,
+    ipAddress: opts.ipAddress,
+    userId: opts.user.id,
+    model: completion.model || 'deepseek-chat',
+    promptTokens: usage.prompt_tokens || 0,
+    completionTokens: usage.completion_tokens || 0,
+    totalTokens: usage.total_tokens || 0,
+    endpoint: opts.endpoint || 'ai_compat'
+  });
 }
 
 async function generateStrategy(db, user, prompt, input, opts) {
@@ -241,6 +251,8 @@ async function generateStrategy(db, user, prompt, input, opts) {
   const result = await require('./ai_service').handleChat(db, {
     user,
     organizationId: opts.organizationId,
+    requestId: opts.requestId,
+    ipAddress: opts.ipAddress,
     message: prompt || input || '',
     allowWeb: true,
     source_module: 'strategy',
@@ -277,6 +289,7 @@ async function generateDemandAnalysis(prompt, input, fileName, opts) {
       campaign_id: opts.campaignId,
       idempotencyKey: opts.idempotencyKey,
       requestId: opts.requestId,
+      ipAddress: opts.ipAddress,
       visibility: 'private',
       archiveSummary: false,
       atomicOneShot: true,
@@ -382,6 +395,7 @@ async function generatePptOutline(db, user, body, opts) {
       campaign_id: campaignId,
       idempotencyKey: opts.idempotencyKey,
       requestId: opts.requestId,
+      ipAddress: opts.ipAddress,
       knowledge_entry_ids: body.knowledge_entry_ids,
       visibility: 'private',
       archiveSummary: false,
@@ -436,7 +450,9 @@ async function generatePptOutline(db, user, body, opts) {
     organizationId: opts.organizationId,
     temperature: 0.25,
     max_tokens: 3200,
-    endpoint: 'ppt_outline'
+    endpoint: 'ppt_outline',
+    requestId: opts.requestId,
+    ipAddress: opts.ipAddress
   });
   const outline = normalizePptOutline(generated.value, fallback, research);
   outline.knowledge_references = ragContext.references;

@@ -131,6 +131,244 @@ test('existing users tab exposes searchable entitlement filters and stable pagin
   ]) {
     assert.match(indexSource, new RegExp(`id=["']${id}["']`));
   }
+  assert.ok(
+    /<th[^>]*>\s*AI Token 配额\s*<\/th>/.test(indexSource),
+    'users table quota column must be labeled "AI Token 配额"'
+  );
+});
+
+test('user directory renders every active organization AI quota and per-user save controls', () => {
+  const elements = { ad_userTableBody: { innerHTML: '' } };
+  const context = loadFunctions({
+    document: { getElementById(id) { return elements[id] || null; } },
+    esc
+  }, ['renderAdminUserTable']);
+
+  context.renderAdminUserTable([{
+    id: 1,
+    username: 'derrick',
+    display_name: 'Derrick',
+    department: 'Management',
+    email: 'derrick@example.com',
+    role: 'admin',
+    api_quota: 200000,
+    last_login: '2026-09-10 08:00:00',
+    is_active: 1,
+    access_roles: ['platform_admin'],
+    organizations: [{
+      id: 10,
+      code: 'alpha',
+      name: 'Alpha <Market>',
+      role_code: 'org_admin',
+      status: 'active',
+      teams: [],
+      ai_quota: {
+        period: 'legacy_lifetime',
+        used: 250001,
+        limit: 200000,
+        remaining: null,
+        status: 'exempt'
+      }
+    }]
+  }, {
+    id: 2,
+    username: 'alice',
+    display_name: 'Alice',
+    department: 'Sales',
+    email: 'alice@example.com',
+    role: 'user',
+    api_quota: 50000,
+    last_login: '2026-09-09 08:00:00',
+    is_active: 1,
+    access_roles: ['member'],
+    organizations: [{
+      id: 10,
+      code: 'alpha',
+      name: 'Alpha <Market>',
+      role_code: 'member',
+      status: 'active',
+      teams: [],
+      ai_quota: {
+        period: 'legacy_lifetime',
+        used: 12345,
+        limit: 50000,
+        remaining: 37655,
+        status: 'active'
+      }
+    }, {
+      id: 20,
+      code: 'beta',
+      name: 'Beta & Labs',
+      role_code: 'member',
+      status: 'active',
+      teams: [],
+      ai_quota: {
+        period: 'legacy_lifetime',
+        used: 50000,
+        limit: 50000,
+        remaining: 0,
+        status: 'exhausted'
+      }
+    }, {
+      id: 30,
+      code: 'former',
+      name: 'Former Organization',
+      role_code: 'member',
+      status: 'revoked',
+      teams: [],
+      ai_quota: {
+        period: 'legacy_lifetime',
+        used: 49999,
+        limit: 50000,
+        remaining: 1,
+        status: 'revoked'
+      }
+    }]
+  }, {
+    id: 4,
+    username: 'carol',
+    display_name: 'Carol',
+    department: 'Operations',
+    email: 'carol@example.com',
+    role: 'user',
+    api_quota: 0,
+    last_login: '2026-09-08 08:00:00',
+    is_active: 1,
+    access_roles: ['member'],
+    organizations: [{
+      id: 20,
+      code: 'beta',
+      name: 'Beta & Labs',
+      role_code: 'member',
+      status: 'active',
+      teams: [],
+      ai_quota: {
+        period: 'legacy_lifetime',
+        used: 3,
+        limit: 0,
+        remaining: 0,
+        status: 'disabled'
+      }
+    }]
+  }]);
+
+  const html = elements.ad_userTableBody.innerHTML;
+  assert.match(html, /Alpha &lt;Market&gt;/);
+  assert.doesNotMatch(html, /Alpha <Market>/);
+  for (const [pattern, message] of [
+    [/250,001\s*\/\s*200,000/, 'exempt organization must render used / limit'],
+    [/12,345\s*\/\s*50,000/, 'active organization must render used / limit'],
+    [/50,000\s*\/\s*50,000/, 'exhausted organization must render used / limit'],
+    [/3\s*\/\s*0/, 'disabled organization must render used / limit'],
+    [/剩余\s*不限/, 'exempt organization must render unlimited remaining quota'],
+    [/剩余\s*37,655/, 'active organization must render remaining quota'],
+    [/剩余\s*0/, 'exhausted and disabled organizations must render zero remaining quota'],
+    [/(?:免配额|exempt)/, 'exempt organization must render its quota status'],
+    [/(?:可用|正常|active)/, 'active organization must render its quota status'],
+    [/(?:已用尽|exhausted)/, 'exhausted organization must render its quota status'],
+    [/(?:已停用|disabled)/, 'disabled organization must render its quota status']
+  ]) {
+    assert.ok(pattern.test(html), message);
+  }
+  assert.equal(/49,?999/.test(html), false, 'revoked organizations must not render active quota controls');
+  for (const [id, quota] of [[1, 200000], [2, 50000], [4, 0]]) {
+    const inputPattern = new RegExp(
+      `<input(?=[^>]*id=["']ad_aiQuota_${id}["'])(?=[^>]*type=["']number["'])`
+        + `(?=[^>]*value=["']${quota}["'])[^>]*>`
+    );
+    assert.ok(inputPattern.test(html), `user ${id} must render a numeric AI quota input`);
+    assert.ok(
+      new RegExp(`onclick=["']adminUpdateAiQuota\\(${id}\\)["']`).test(html),
+      `user ${id} must render an AI quota save action`
+    );
+  }
+});
+
+test('AI quota save sends only the numeric quota and refreshes after success', async () => {
+  const elements = { ad_aiQuota_2: { value: '123456' } };
+  const calls = [];
+  const toasts = [];
+  let refreshes = 0;
+  const context = loadFunctions({
+    document: { getElementById(id) { return elements[id] || null; } },
+    apiFetch(url, options) {
+      calls.push({ url, options });
+      return Promise.resolve(response(200, {
+        quota: { user_id: 2, limit: 123456, status: 'active' }
+      }));
+    },
+    loadAdminUsers() {
+      refreshes += 1;
+      return Promise.resolve([]);
+    },
+    toast(message, type) { toasts.push([message, type]); },
+    Promise,
+    Error,
+    JSON,
+    Number
+  }, ['adminUpdateAiQuota']);
+
+  await context.adminUpdateAiQuota(2);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, '/admin/users/2/ai-quota');
+  assert.equal(calls[0].options.method, 'PUT');
+  assert.deepEqual(JSON.parse(calls[0].options.body), { api_quota: 123456 });
+  assert.equal(refreshes, 1);
+  assert.equal(toasts.some((entry) => entry[1] === 'error'), false);
+});
+
+test('AI quota save rejects a blank field instead of disabling the user', async () => {
+  const elements = { ad_aiQuota_2: { value: '   ' } };
+  const calls = [];
+  const toasts = [];
+  const context = loadFunctions({
+    document: { getElementById(id) { return elements[id] || null; } },
+    apiFetch(url, options) {
+      calls.push({ url, options });
+      return Promise.resolve(response(200, {}));
+    },
+    loadAdminUsers() { return Promise.resolve([]); },
+    toast(message, type) { toasts.push([message, type]); },
+    Promise,
+    Error,
+    JSON,
+    Number
+  }, ['adminUpdateAiQuota']);
+
+  await context.adminUpdateAiQuota(2);
+  assert.equal(calls.length, 0);
+  assert.deepEqual(toasts, [['AI Token 配额必须是非负整数', 'error']]);
+});
+
+test('AI quota save surfaces HTTP failures without refreshing or reporting success', async () => {
+  const elements = { ad_aiQuota_2: { value: '123456' } };
+  const calls = [];
+  const toasts = [];
+  let refreshes = 0;
+  const context = loadFunctions({
+    document: { getElementById(id) { return elements[id] || null; } },
+    apiFetch(url, options) {
+      calls.push({ url, options });
+      return Promise.resolve(response(500, {
+        error: 'AI Token 配额保存失败',
+        code: 'AI_QUOTA_AUDIT_FAILED'
+      }));
+    },
+    loadAdminUsers() {
+      refreshes += 1;
+      return Promise.resolve([]);
+    },
+    toast(message, type) { toasts.push([message, type]); },
+    Promise,
+    Error,
+    JSON,
+    Number
+  }, ['adminUpdateAiQuota']);
+
+  await context.adminUpdateAiQuota(2);
+  assert.equal(calls.length, 1);
+  assert.equal(refreshes, 0);
+  assert.deepEqual(toasts, [['AI Token 配额保存失败', 'error']]);
 });
 
 test('user entitlement directory encodes filters, escapes role projections, and pages without duplicate requests', async () => {
