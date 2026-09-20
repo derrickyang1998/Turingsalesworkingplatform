@@ -1,4 +1,5 @@
 platform/app.js text eol=lf
+platform/server/**/*.js text eol=lf
 platform/ppt.js text eol=lf
 platform/deploy_v8.ps1 text eol=lf
 platform/index.html text eol=lf
