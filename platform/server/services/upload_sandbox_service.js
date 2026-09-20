@@ -638,17 +638,21 @@ function inspectZipArchive(bytes) {
     }
     const rawName = bytes.subarray(offset + 46, offset + 46 + nameBytes).toString('utf8');
     const name = normalizedText(rawName, 'ZIP entry name');
-    const components = name.split('/');
+    const directoryEntry = name.endsWith('/');
+    const canonicalName = directoryEntry ? name.slice(0, -1) : name;
+    const components = canonicalName.split('/');
     if (
+      canonicalName.length === 0 ||
       name.startsWith('/') ||
       name.includes('\\') ||
       /^[A-Za-z]:/.test(name) ||
       components.some((component) => component === '' || component === '.' || component === '..') ||
-      names.has(name)
+      names.has(canonicalName) ||
+      (directoryEntry && (compressedBytes !== 0 || uncompressedBytes !== 0))
     ) {
       throw uploadError(400, 'UPLOAD_INVALID_CONTENT', 'Unsafe ZIP entry name');
     }
-    names.add(name);
+    names.add(canonicalName);
     expandedBytes += uncompressedBytes;
     if (!Number.isSafeInteger(expandedBytes) || expandedBytes > SANDBOX_LIMITS.expandedBytes) {
       throw uploadError(413, 'UPLOAD_LIMIT_EXCEEDED', 'Expanded ZIP content exceeds the limit');

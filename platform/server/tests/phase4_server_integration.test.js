@@ -40,7 +40,7 @@ function isolatedChildEnvironment(overrides, sourceEnvironment = process.env) {
   return Object.assign(environment, overrides);
 }
 const RELEASE_PINNED_UPLOAD_MANIFEST_SHA256 =
-  '2bb63e7919ea036a17396773da7ad524ea22bd46ac202f4dc454747a5b3f1771';
+  '9e5012f229a20957825740ec7a0871a3ccc0f039764dd1885c2eddf21888fef5';
 
 test('production parser manifest pin matches the exact checked-in manifest bytes', () => {
   const observed = crypto

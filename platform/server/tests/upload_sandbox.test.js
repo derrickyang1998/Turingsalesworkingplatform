@@ -949,6 +949,105 @@ function zipWithDeclaredExpansion(uncompressedBytes) {
   return Buffer.concat([local, Buffer.from([0x00]), central, eocd]);
 }
 
+function zipWithStoredEntry(entryName, { directory = entryName.endsWith('/') } = {}) {
+  const name = Buffer.from(entryName, 'utf8');
+  const local = Buffer.alloc(30 + name.length);
+  local.writeUInt32LE(0x04034b50, 0);
+  local.writeUInt16LE(20, 4);
+  local.writeUInt16LE(0x0800, 6);
+  local.writeUInt16LE(0, 8);
+  local.writeUInt32LE(0, 14);
+  local.writeUInt32LE(0, 18);
+  local.writeUInt32LE(0, 22);
+  local.writeUInt16LE(name.length, 26);
+  local.writeUInt16LE(0, 28);
+  name.copy(local, 30);
+
+  const central = Buffer.alloc(46 + name.length);
+  central.writeUInt32LE(0x02014b50, 0);
+  central.writeUInt16LE(0x0314, 4);
+  central.writeUInt16LE(20, 6);
+  central.writeUInt16LE(0x0800, 8);
+  central.writeUInt16LE(0, 10);
+  central.writeUInt32LE(0, 16);
+  central.writeUInt32LE(0, 20);
+  central.writeUInt32LE(0, 24);
+  central.writeUInt16LE(name.length, 28);
+  central.writeUInt16LE(0, 30);
+  central.writeUInt16LE(0, 32);
+  central.writeUInt16LE(0, 34);
+  central.writeUInt16LE(0, 36);
+  central.writeUInt32LE((directory ? ((0o40755 << 16) | 0x10) : (0o100444 << 16)) >>> 0, 38);
+  central.writeUInt32LE(0, 42);
+  name.copy(central, 46);
+
+  const eocd = Buffer.alloc(22);
+  eocd.writeUInt32LE(0x06054b50, 0);
+  eocd.writeUInt16LE(1, 8);
+  eocd.writeUInt16LE(1, 10);
+  eocd.writeUInt32LE(central.length, 12);
+  eocd.writeUInt32LE(local.length, 16);
+  return Buffer.concat([local, central, eocd]);
+}
+
+async function stageDemandXlsxJob(service, buffer, ledgerId) {
+  const route = matchUploadRoute('POST', '/api/demand/parse-file');
+  return service.stageJob({
+    route,
+    fields: [],
+    files: [{
+      buffer,
+      basename: 'directory-record.xlsx',
+      mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      length: buffer.length,
+      sha256: require('node:crypto').createHash('sha256').update(buffer).digest('hex')
+    }]
+  }, {
+    ledgerId,
+    requestHash: 'c'.repeat(64),
+    leaseToken: 'd'.repeat(64),
+    route: route.id
+  });
+}
+
+test('worker accepts a canonical zero-byte OOXML directory entry', async () => {
+  const spoolRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-upload-zip-directory-'));
+  const service = createUploadSandboxService({ parserIdentity: TEST_PARSER_IDENTITY, spoolRoot });
+  let job;
+  try {
+    job = await stageDemandXlsxJob(service, zipWithStoredEntry('xl/'), 89);
+    await workerMain([
+      'worker', '--job-id', job.id, '--request', job.requestPath,
+      '--input', job.inputPath, '--output-root', job.outputRoot
+    ]);
+    const parsed = await validateParserOutput(job.outputRoot);
+    assert.equal(parsed.data.parser, 'xlsx-openxml');
+    assert.equal(parsed.data.fallback, true);
+  } finally {
+    if (job) await service.cleanupJob(job);
+    fs.rmSync(spoolRoot, { recursive: true, force: true });
+  }
+});
+
+test('worker rejects an OOXML directory traversal entry', async () => {
+  const spoolRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-upload-zip-traversal-'));
+  const service = createUploadSandboxService({ parserIdentity: TEST_PARSER_IDENTITY, spoolRoot });
+  let job;
+  try {
+    job = await stageDemandXlsxJob(service, zipWithStoredEntry('../'), 90);
+    await assert.rejects(
+      workerMain([
+        'worker', '--job-id', job.id, '--request', job.requestPath,
+        '--input', job.inputPath, '--output-root', job.outputRoot
+      ]),
+      (error) => error && error.code === 'UPLOAD_INVALID_CONTENT'
+    );
+  } finally {
+    if (job) await service.cleanupJob(job);
+    fs.rmSync(spoolRoot, { recursive: true, force: true });
+  }
+});
+
 test('worker rejects a declared zip bomb before parser output is created', async () => {
   const spoolRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-upload-zipbomb-'));
   const boundary = 'tm-worker-zipbomb';
