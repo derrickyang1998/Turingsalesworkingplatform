@@ -375,11 +375,11 @@
     <section class="overview" aria-label="当前版本概览">
       <div class="band">
         <p class="eyebrow">Current production release · 当前生产版本</p>
-        <h2 class="release-title">v0.9.21 · AI Token 配额准入</h2>
-        <p class="release-copy">所有可信 DeepSeek 路径已在服务端执行实时配额准入和可信用量记账；管理员可查看与审计配额状态。最新 CRM、网红、知识库、方案、报告和 PPT 界面保持不变。</p>
+        <h2 class="release-title">v0.9.24 · 订阅到期控制</h2>
+        <p class="release-copy">组织订阅期限已由服务端权威执行；到期后受管业务动作立即停止，管理员仍可诊断并续期。验收已精确恢复原订阅，最新 CRM、网红、知识库、方案、报告和 PPT 界面保持不变。</p>
         <div class="chips">
-          <span class="chip good">2026-09-20 已上线</span>
-          <span class="chip">Schema v26</span>
+          <span class="chip good">2026-09-21 已上线</span>
+          <span class="chip">Schema v28</span>
           <span class="chip">PM2 online · restart 0</span>
           <span class="chip">Independent review: APPROVE</span>
           <span class="chip">Rollback backup verified</span>
@@ -389,18 +389,18 @@
       <aside class="panel focus" aria-label="当前开发焦点">
         <h2>下一开发焦点 / Next</h2>
         <div class="focus-list">
-          <div class="focus-row"><span class="index">1</span><div><b>套餐目录与模块权益</b><p class="hint">Plan catalog and module entitlement contract</p></div></div>
-          <div class="focus-row"><span class="index">2</span><div><b>订阅到期控制</b><p class="hint">Server-enforced subscription expiry</p></div></div>
-          <div class="focus-row"><span class="index">3</span><div><b>组织月度共享配额</b><p class="hint">Monthly organization quota, then concurrency reservation</p></div></div>
+          <div class="focus-row"><span class="index">1</span><div><b>组织月度共享配额</b><p class="hint">Monthly organization AI quota</p></div></div>
+          <div class="focus-row"><span class="index">2</span><div><b>持久并发预留</b><p class="hint">Durable concurrent job reservation</p></div></div>
+          <div class="focus-row"><span class="index">3</span><div><b>账单与阶段收口</b><p class="hint">Billing controls and Phase 8 closeout</p></div></div>
         </div>
       </aside>
     </section>
 
     <section class="metrics" aria-label="发布数据">
-      <div class="metric"><span class="meta">候选核心测试</span><strong>94 / 94</strong><span class="hint">Focused candidate checks</span></div>
-      <div class="metric"><span class="meta">独立终审复跑</span><strong>137 / 137</strong><span class="hint">Reviewer verification</span></div>
-      <div class="metric"><span class="meta">可信源码清单</span><strong>129 / 129</strong><span class="hint">Trusted source inventory</span></div>
-      <div class="metric"><span class="meta">线上定向验收</span><strong>PASS</strong><span class="hint">Quota update + typed 429</span></div>
+      <div class="metric"><span class="meta">最终定向门禁</span><strong>10 / 10</strong><span class="hint">Focused release checks</span></div>
+      <div class="metric"><span class="meta">独立终审</span><strong>APPROVE</strong><span class="hint">No open P0/P1</span></div>
+      <div class="metric"><span class="meta">可信源码清单</span><strong>135 / 135</strong><span class="hint">Trusted source inventory</span></div>
+      <div class="metric"><span class="meta">线上定向验收</span><strong>PASS</strong><span class="hint">Expiry, denial, exact restore</span></div>
     </section>
 
     <section class="panel" aria-labelledby="roadmap-title">
@@ -413,7 +413,7 @@
         <div class="phase"><span class="phase-code">Phase 4-5</span><div><div class="phase-name">组织主链与 CRM 工作台</div><div class="hint">Organization spine and CRM workspace</div></div><span class="badge live">生产基线</span></div>
         <div class="phase"><span class="phase-code">Phase 6</span><div><div class="phase-name">AI、知识库、方案与 PPT</div><div class="hint">Core loop live; continuing bounded upgrades</div></div><span class="badge live">已上线</span></div>
         <div class="phase"><span class="phase-code">Phase 7/7B</span><div><div class="phase-name">网红执行与内容效果数据</div><div class="hint">Execution and performance intelligence slices</div></div><span class="badge live">已上线</span></div>
-        <div class="phase"><span class="phase-code">Phase 8</span><div><div class="phase-name">管理、权益与多租户治理</div><div class="hint">Current: entitlements, quota, audit, tenant scope</div></div><span class="badge active">进行中</span></div>
+        <div class="phase"><span class="phase-code">Phase 8</span><div><div class="phase-name">管理、权益与多租户治理</div><div class="hint">Current: plans, expiry, quota, audit, tenant scope</div></div><span class="badge active">进行中</span></div>
         <div class="phase"><span class="phase-code">Phase 9-10</span><div><div class="phase-name">销售增长候选与 V1 收口</div><div class="hint">Per-feature approval, then production hardening</div></div><span class="badge queued">待排期</span></div>
       </div>
     </section>
@@ -423,10 +423,10 @@
         <div><h2 id="release-title">近期生产版本 / Recent releases</h2><p class="hint">每个条目均独立备份、上线并做线上验收。</p></div>
       </div>
       <div class="release-list">
-        <div class="release"><code>v0.9.21 · 2026-09-20</code><div><b>AI Token 配额准入</b><p class="hint">Server admission, trusted accounting, audited Admin quota controls</p></div><span class="badge live">ONLINE</span></div>
-        <div class="release"><code>v0.9.20 · 2026-09-19</code><div><b>Token 用量租户归属</b><p class="hint">Tenant-owned immutable usage ledger</p></div><span class="badge live">ONLINE</span></div>
-        <div class="release"><code>v0.9.19 · 2026-09-19</code><div><b>AI 对话租户归属</b><p class="hint">Organization-scoped conversations and global Admin audit</p></div><span class="badge live">ONLINE</span></div>
-        <div class="release"><code>v0.9.18 · 2026-09-19</code><div><b>知识库租户隔离</b><p class="hint">Knowledge, RAG, proposal and PPT context isolation</p></div><span class="badge live">ONLINE</span></div>
+        <div class="release"><code>v0.9.24 · 2026-09-21</code><div><b>订阅到期控制</b><p class="hint">Server expiry, typed denial, audited renewal</p></div><span class="badge live">ONLINE</span></div>
+        <div class="release"><code>v0.9.23 · 2026-09-20</code><div><b>套餐目录与模块权益</b><p class="hint">Immutable catalog and live entitlement intersection</p></div><span class="badge live">ONLINE</span></div>
+        <div class="release"><code>v0.9.22 · 2026-09-20</code><div><b>需求 XLSX 解析兼容</b><p class="hint">Standard OOXML directory records accepted safely</p></div><span class="badge live">ONLINE</span></div>
+        <div class="release"><code>v0.9.21 · 2026-09-20</code><div><b>AI Token 配额准入</b><p class="hint">Server admission and trusted accounting</p></div><span class="badge live">ONLINE</span></div>
       </div>
     </section>
 
@@ -447,7 +447,7 @@
 
     <footer>
       <span>Production: http://8.163.129.160/</span>
-      <span>记录更新：2026-09-20 · 浏览器打开时间：<span id="opened-at">--</span></span>
+      <span>记录更新：2026-09-21 · 浏览器打开时间：<span id="opened-at">--</span></span>
     </footer>
   </main>
 

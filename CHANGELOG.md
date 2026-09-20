@@ -1,5 +1,27 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.9.24-subscription-expiry-control (Production Deployed, 2026-09-21) - 订阅到期控制
+
+### 交付与范围 / Delivery And Scope
+- schema 升级至 v28，新增组织订阅期限的连续、仅追加历史；现有组织默认保持永久有效，升级不会改变既有套餐或业务权限。
+- 新增成员订阅状态查询和仅平台管理员可用的到期时间更新 API；管理控制室可设置精确到秒的到期时间或恢复永久有效，更新使用期望版本、原子审计和失败关闭。
+- 到期状态在每次请求时由服务端实时计算，并与现有角色权限及套餐权益共同生效。到期后，七个受管 CRM、活动报告和网红数据模块的业务动作立即清空或返回带 `SUBSCRIPTION_EXPIRED` 原因的类型化 `403`；登录、已认证壳层、状态查询和管理员续期仍可用。
+- 本版不实现组织月度共享配额、收费、账单、持久并发预留或动态套餐编辑；最新 CRM、M3/M4、AI/知识库、方案/报告和 PPT 界面保持不变，冻结 `ppt.js` SHA-256 仍为 `f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57dd0e291e`。
+
+### 风险触发验证与独立审查 / Risk-Triggered Verification And Independent Review
+- 本版跨越 schema、授权及共享解析器发布边界，因此按加速计划的风险例外执行有界迁移、权限拒绝、候选隔离和浏览器检查；最终定向发布门禁 `10/10`、候选 Chromium 冒烟 `3/3`、可信源码清单 `135/135` 均通过。
+- JavaScript、PowerShell、迁移重放、SQLite 完整性/外键、密钥扫描、运行时身份、解析器隔离属性、`git diff --check` 和冻结 PPT 摘要均通过。
+- 独立终审结论为 `APPROVE`，无开放 P0/P1。审查及预切换测量发现的本地 worker spool 属主、运行时身份、systemd 属性排序和 transient unit 生命周期问题均在生产变更前修复。
+
+### 生产状态 / Production Status
+- 功能提交 `fe2aa90` 及发布加固提交至最终接纳 HEAD `6b2d579e1c3c7ceecf76af627d166e7e20a8a961` 已在生产变更前同步 GitHub；正式运行 `3140a10579f74540b3c99000163a0c09` 返回 `DEPLOY_OK`、`RETENTION_CLEANUP_OK`、`PUBLIC_TRAFFIC_RESTORED`、`FINAL_ACCEPTANCE_FACTS_OK` 和 `PUBLIC_RELEASE_GUARD_VERIFIED`。
+- 多次候选因本地 worker spool 属主、可信运行时身份及 systemd 有效属性测量不一致而在生产变更前安全停止；每次均清理候选、恢复控制面且未修改活动生产，修复后才重新执行正式发布。
+- 可验证备份为 `/root/turingmarket/backups/v060-crm-sales-workspace-20260921-020242`；备份清单 SHA-256 为 `069312f5bd6b1080e1ff739cd9493dd57e1e1f6f1ba6543e0507a314e3996019`，数据库 SHA-256 为 `17e8e324c087ceda11a70e917b5e3f477aa0a8a6fc07d4b84b88e8cf34f16ff4`。
+- 公网健康 `200`、解析器 ready、schema v28、SQLite `quick_check=ok`、外键异常 0、PM2 online 且重启 0、Nginx 正常。线上完成“原订阅 -> 到期 -> CRM/网红动作拒绝 -> 精确恢复原订阅”的同会话可逆验收；两条变更审计及连续版本链已复核，验收会话已注销，原有活动会话未被撤销。
+
+### 后续节奏 / Delivery Cadence
+- 后续继续执行“一功能一上线”：普通功能仅跑受影响测试、必要安全检查和一次独立审查，完成可验证备份后当轮部署并做线上定向验收；完整重型套件只由阶段收口或 schema、认证/授权、租户权威、共享基础设施、真实外部写入等高风险边界触发。下一独立版本为组织月度共享配额，其后为持久并发预留和账单能力。
+
 ## v0.9.23-plan-catalog-module-entitlements (Production Deployed, 2026-09-20) - 套餐目录与模块权益合同
 
 ### 交付与范围 / Delivery And Scope
