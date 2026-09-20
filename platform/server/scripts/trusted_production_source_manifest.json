@@ -333,7 +333,7 @@
     },
     {
       "path": "server/server.js",
-      "sha256": "128b463bed1e52eada204e68307646606fb2883f1d26f8181158d30d9128013e"
+      "sha256": "39a8d11ab4ec0282d5b074aef4aaa8b8a1baafe4108800fd614d27af9cd2dd4e"
     },
     {
       "path": "server/workflow_engine.js",
@@ -561,7 +561,7 @@
     },
     {
       "path": "server/services/upload_sandbox_service.js",
-      "sha256": "16bdd920e5e2b6d93b199ec347ba65f6febbdcdb5719e04f11173df0698b7dc6"
+      "sha256": "968f7747aa69fb4337bef42fff82a0229be4c45b8b875695cd03bfb68e917ef4"
     },
     {
       "path": "server/services/vault_export_service.js",
@@ -581,7 +581,7 @@
     },
     {
       "path": "server/systemd/turingmarket-parser.manifest.json",
-      "sha256": "88746a05a67f29742af6dc6cb923c86935a40deb9289c16f7cd475ee2357d4c1"
+      "sha256": "42e97a3ceec5df88ee1a11b9cd63314ed923b2a562a1121e7b8bd5f98f803c13"
     },
     {
       "path": "server/systemd/turingmarket-parser.slice",

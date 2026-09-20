@@ -1046,10 +1046,10 @@ test('parser runtime manifest pins the exact production-built tree', () => {
   assert.deepEqual(manifest.runtime_tree, {
     format: 'tm-parser-runtime-tree-v1',
     root: '/var/lib/turingmarket-parser/runtime-root',
-    sha256: '52d16da88be47a9118e5b58bde1397f934e0244f25b0148294271499f34a0597',
+    sha256: '24905b29e26fe68791a32e931d92322a2ee87df0ae08baded7dec70874455cba',
     files: 3476,
     directories: 435,
-    bytes: 640588133
+    bytes: 640588717
   });
 });
 

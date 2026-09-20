@@ -1726,6 +1726,55 @@ test('startup rejects systemd versions that cannot enforce PrivatePIDs', async (
   }
 });
 
+test('startup readiness honors explicit local-worker spool ownership without weakening the production default', async () => {
+  const runtime = loadRuntimeManifest();
+  const spoolRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-upload-local-owner-'));
+  const spoolOwner = { uid: 12345, gid: 23456 };
+  let inspected = null;
+  try {
+    const readiness = await assertUploadSandboxStartupReady({
+      expectedManifestSha256: runtime.manifestSha256,
+      spoolRoot,
+      spoolOwner,
+      inspectSpoolDirectory: async (target, mode, owner) => {
+        inspected = { target, mode, owner };
+        return fs.promises.lstat(target);
+      },
+      idempotency: {
+        reserveProcessingInTransaction() {},
+        completeAdmissionInTransaction() {},
+        failInternalInTransaction() {}
+      },
+      verifyIdentity: async () => ({ ...runtime.manifest.identity, uid: 64123, gid: 64123 }),
+      verifyInstalledArtifacts: async () => {},
+      systemdVersion: async () => runtime.manifest.minimum_systemd_version,
+      systemctlShow: async (unit) => runtime.manifest.effective_properties[unit],
+      recoverAdmissions: async () => {},
+      staleUnitController: {
+        async kill() {},
+        async stop() {},
+        async resetFailed() {},
+        async assertCollected() {}
+      },
+      inspectSpoolBytes: async () => 0,
+      statfs: statfsWithAvailableBytes(
+        SANDBOX_LIMITS.freeFloorBytes + SANDBOX_LIMITS.reservationBytes
+      ),
+      runSelfTests: async () => Object.fromEntries(
+        runtime.manifest.required_self_tests.map((name) => [name, true])
+      )
+    });
+    assert.equal(readiness.ready, true);
+    assert.deepEqual(inspected, {
+      target: path.resolve(spoolRoot),
+      mode: 0o700,
+      owner: spoolOwner
+    });
+  } finally {
+    fs.rmSync(spoolRoot, { recursive: true, force: true });
+  }
+});
+
 test('private temp and writable /dev submounts are inaccessible and output is capped', async () => {
   const runtime = loadRuntimeManifest();
   const serviceProperties = runtime.manifest.effective_properties['turingmarket-parser@.service'];

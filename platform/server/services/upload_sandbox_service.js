@@ -3005,11 +3005,23 @@ async function assertUploadSandboxStartupReady(options = {}) {
     await options.recoverAdmissions();
 
     const spoolRoot = path.resolve(options.spoolRoot || '/var/lib/turingmarket-parser/jobs');
-    const spoolStat = await assertDirectory(
-      spoolRoot,
-      0o700,
-      process.platform === 'linux' ? { uid: 0, gid: 0 } : undefined
-    );
+    const inspectSpoolDirectory = options.inspectSpoolDirectory || assertDirectory;
+    if (typeof inspectSpoolDirectory !== 'function') {
+      throw new Error('spool directory inspector unavailable');
+    }
+    const spoolOwner = options.spoolOwner === undefined
+      ? (process.platform === 'linux' ? { uid: 0, gid: 0 } : undefined)
+      : options.spoolOwner;
+    if (
+      spoolOwner !== undefined && (
+        !spoolOwner ||
+        !Number.isSafeInteger(spoolOwner.uid) || spoolOwner.uid < 0 ||
+        !Number.isSafeInteger(spoolOwner.gid) || spoolOwner.gid < 0
+      )
+    ) {
+      throw new Error('spool directory owner is invalid');
+    }
+    const spoolStat = await inspectSpoolDirectory(spoolRoot, 0o700, spoolOwner);
     const staleUnitController = options.staleUnitController ||
       createSystemdController(options.systemdOptions);
     if (

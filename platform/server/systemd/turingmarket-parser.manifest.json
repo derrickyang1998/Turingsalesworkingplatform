@@ -26,7 +26,7 @@
     "extract_xlsx_text.py": "69db3140f8d08f2754df0b13d9ba728db5117539a507faabd4088c74b89ee3c8",
     "ocr_document_text.py": "917d5b14872eeb3a7b628d80cc70dbab46a79ef632e031fa599f15e0840e1a0a",
     "services/file_ingest_service.js": "9fbb756a1109939da1c9cb5e3e7b77b0175ec2a9ea602d500a5f293f97f99c70",
-    "services/upload_sandbox_service.js": "16bdd920e5e2b6d93b199ec347ba65f6febbdcdb5719e04f11173df0698b7dc6",
+    "services/upload_sandbox_service.js": "968f7747aa69fb4337bef42fff82a0229be4c45b8b875695cd03bfb68e917ef4",
     "scripts/parse_upload_sandbox.sh": "2d77151dac802ce00d80c9df04ba879232001b014ab672379c36836d767b8d95",
     "systemd/turingmarket-parser@.service": "a363f7ce7021067be99fdf74144b1ca7e25ba6ac68ce070a1bfa07d07a73c49a",
     "systemd/turingmarket-parser.slice": "d0cc089526feff2cbe0240a6fc711b113c2eac0af95c3763a00ef0edc8467c17"
@@ -34,10 +34,10 @@
   "runtime_tree": {
     "format": "tm-parser-runtime-tree-v1",
     "root": "/var/lib/turingmarket-parser/runtime-root",
-    "sha256": "52d16da88be47a9118e5b58bde1397f934e0244f25b0148294271499f34a0597",
+    "sha256": "24905b29e26fe68791a32e931d92322a2ee87df0ae08baded7dec70874455cba",
     "files": 3476,
     "directories": 435,
-    "bytes": 640588133
+    "bytes": 640588717
   },
   "effective_properties": {
     "turingmarket-parser@.service": {

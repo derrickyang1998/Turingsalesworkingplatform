@@ -1487,8 +1487,29 @@ test('candidate dependency and offline gates are filesystem-confined transient s
   assert.doesNotMatch(offline, /runuser|unshare/);
   assert.match(deploy, /DependencyStatus=\$\?[\s\S]*?drain_gate_unit "\$DependencyUnit"[\s\S]*?kill_gate_processes "dependency staging"/);
   assert.match(deploy, /DependencyBuildStatus=\$\?[\s\S]*?drain_gate_unit "\$DependencyBuildUnit"[\s\S]*?kill_gate_processes "dependency build"/);
-  assert.match(deploy, /GateStatus=\$\{PIPESTATUS\[0\]\}[\s\S]*?drain_gate_unit "\$OfflineGateUnit"[\s\S]*?kill_gate_processes "offline candidate validation"/);
+  assert.match(deploy, /OfflineGatePipelinePid=\$![\s\S]*?wait "\$OfflineGatePipelinePid"[\s\S]*?GateStatus=\$\?[\s\S]*?drain_gate_unit "\$OfflineGateUnit"[\s\S]*?kill_gate_processes "offline candidate validation"/);
   assert.match(deploy, /CANDIDATE_VALIDATION_SHA256_BEFORE[\s\S]*?CANDIDATE_VALIDATION_SHA256_AFTER[\s\S]*?CANDIDATE_READONLY_RECHECK_OK/);
+});
+
+test('offline gate accepts systemd address-family canonical ordering without allowing extras', () => {
+  const deploy = read('platform/deploy_v8.ps1');
+
+  assert.match(deploy, /TM_UNPRIVILEGED_GATE' 2>&1 \| tail -c 8192 &/);
+  assert.match(
+    deploy,
+    /OfflineGatePipelinePid=\$![\s\S]*?systemctl show "\$OfflineGateUnit\.service"[\s\S]*?wait "\$OfflineGatePipelinePid"[\s\S]*?GateStatus=\$\?/
+  );
+  assert.match(deploy, /exact_word_set\(\) \{[\s\S]*?\[ "\$\{#Values\[@\]\}" -eq "\$#" \][\s\S]*?\[ "\$Found" -eq 1 \]/);
+  assert.match(
+    deploy,
+    /exact_word_set "\$OfflineGateAddressFamilies" AF_UNIX AF_INET AF_INET6/
+  );
+  assert.doesNotMatch(
+    deploy,
+    /\[ "\$OfflineGateAddressFamilies" = "AF_UNIX AF_INET AF_INET6" \]/,
+    'systemd canonicalizes this set and does not preserve the input order'
+  );
+  assert.doesNotMatch(deploy, /TM_UNPRIVILEGED_GATE\r?\nGateStatus=\$\{PIPESTATUS\[0\]\}/);
 });
 
 test('unprivileged gate uses only variables explicitly passed through env -i', () => {

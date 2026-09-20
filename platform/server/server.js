@@ -200,7 +200,7 @@ const UPLOAD_SANDBOX_SPOOL_ROOT = path.resolve(
   process.env.UPLOAD_SANDBOX_SPOOL_ROOT || '/var/lib/turingmarket-parser/jobs'
 );
 const RELEASE_PINNED_UPLOAD_MANIFEST_SHA256 =
-  '88746a05a67f29742af6dc6cb923c86935a40deb9289c16f7cd475ee2357d4c1';
+  '42e97a3ceec5df88ee1a11b9cd63314ed923b2a562a1121e7b8bd5f98f803c13';
 const UPLOAD_SANDBOX_SELF_TEST_RUNNER =
   '/usr/local/libexec/turingmarket/upload_sandbox_self_test';
 const REQUIRED_UPLOAD_SANDBOX_SELF_TESTS = Object.freeze([
@@ -1173,8 +1173,17 @@ function localUploadCapacityStatfs() {
   });
 }
 
+function localUploadSpoolOwner() {
+  if (process.platform !== 'linux') return undefined;
+  if (typeof process.getuid !== 'function' || typeof process.getgid !== 'function') {
+    throw new Error('Local upload worker identity is unavailable');
+  }
+  return Object.freeze({ uid: process.getuid(), gid: process.getgid() });
+}
+
 function localUploadReadinessAdapters() {
   return {
+    spoolOwner: localUploadSpoolOwner(),
     verifyIdentity: async () => ({
       user: 'turingmarket-parser',
       group: 'turingmarket-parser',

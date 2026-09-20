@@ -34,7 +34,7 @@ $TRUSTED_SOURCE_GATE_RELATIVE_PATH = "server\scripts\trusted_production_source_g
 $TRUSTED_SOURCE_MANIFEST_RELATIVE_PATH = "server\scripts\trusted_production_source_manifest.json"
 $TRUSTED_RUNTIME_CONFIG_RELATIVE_PATH = "server\config\runtime_config.js"
 $EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "c425be7970ca06c55f0edb1ff716d0c5e9c9d024bb7e10c0b323c47cc89fefc7"
-$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "f28924d0fc4833cba9429a311bbce7efa8f55f4152c87f0beefccb1642079765"
+$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "7b7acecbd03716ffcbbd443fba468e54c8c0ad27afb884502aea81b0c2bdd49c"
 $EXPECTED_TRUSTED_RUNTIME_CONFIG_SHA256 = "e689e251f313c48b4f27279b1ef44639e3c1a68bb3c255f6ddfa86cabbfaa27d"
 $EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256 = "678613634282321e00a057d626a6ac4d7d6a550293c44268c3dd16c1015dd628"
 $EXPECTED_TRUSTED_PARSER_VERIFIER_SHA256 = "7f9efaac02675b21e025891a400474cc7481c1adaf58c88bd8b356d5276f2eaa"
@@ -53,7 +53,7 @@ $TRUSTED_SOURCE_MANIFEST_REMOTE_PATH = "$TRUSTED_SOURCE_INSTALL_ROOT/trusted_pro
 $TRUSTED_SOURCE_BUNDLE_REMOTE_PATH = "$TRUSTED_SOURCE_INSTALL_ROOT/bundles/$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256"
 $TRUSTED_SOURCE_RUNTIME_REMOTE_PATH = "$TRUSTED_SOURCE_INSTALL_ROOT/runtime/$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256"
 $CANDIDATE_GATE_TIMEOUT_SECONDS = 7200
-$PARSER_RUNTIME_BYTES = 640588133
+$PARSER_RUNTIME_BYTES = 640588717
 $PARSER_STARTUP_TIMEOUT_SECONDS = 180
 $PUBLIC_GUARD_TIMEOUT_SECONDS = 120
 $ACCEPTED_FINALIZE_PUBLIC_GUARD_TIMEOUT_SECONDS = 7200
@@ -9905,6 +9905,23 @@ kill_gate_processes() {
   return 1
 }
 
+exact_word_set() {
+  local Observed="$1" Expected Candidate Found
+  local -a Values=()
+  shift
+  read -r -a Values <<< "$Observed"
+  [ "${#Values[@]}" -eq "$#" ] || return 1
+  for Expected in "$@"; do
+    Found=0
+    for Candidate in "${Values[@]}"; do
+      if [ "$Candidate" = "$Expected" ]; then
+        Found=$((Found + 1))
+      fi
+    done
+    [ "$Found" -eq 1 ] || return 1
+  done
+}
+
 drain_gate_unit() {
   local Unit="$1" ControlGroup MainPid
   case "$Unit" in
@@ -10807,7 +10824,7 @@ timeout --signal=KILL 30m systemd-run --quiet --wait --pipe --unit="$OfflineGate
     PPT_QUERY="__PPT_QUERY__" \
     PPT_BUILD="__PPT_BUILD__" \
     PPT_SHA256="__PPT_SHA256__" \
-    /bin/bash --noprofile --norc -s <<'TM_UNPRIVILEGED_GATE' 2>&1 | tail -c 8192
+    /bin/bash --noprofile --norc -s <<'TM_UNPRIVILEGED_GATE' 2>&1 | tail -c 8192 &
 set -euo pipefail
 python3 - <<'PY'
 import socket
@@ -10976,20 +10993,30 @@ TM_NGINX_TEST
 )
 printf '%s\n' "UNPRIVILEGED_GATE_OK"
 TM_UNPRIVILEGED_GATE
-GateStatus=${PIPESTATUS[0]}
-OfflineGatePrivateNetwork="$(systemctl show "$OfflineGateUnit" --property=PrivateNetwork --value 2>/dev/null)"
-OfflineGateUser="$(systemctl show "$OfflineGateUnit" --property=User --value 2>/dev/null)"
-OfflineGateAddressFamilies="$(systemctl show "$OfflineGateUnit" --property=RestrictAddressFamilies --value 2>/dev/null)"
-OfflineGatePropertyStatus=0
-if [ "$OfflineGatePrivateNetwork" = "yes" ] &&
-   [ "$OfflineGateUser" = "$GateUser" ] &&
-   [ "$OfflineGateAddressFamilies" = "AF_UNIX AF_INET AF_INET6" ]; then
-  printf '%s\n' "OFFLINE_GATE_EFFECTIVE_PROPERTIES_OK"
-else
-  printf 'Offline gate effective properties mismatch: PrivateNetwork=%s User=%s RestrictAddressFamilies=%s\n' \
-    "$OfflineGatePrivateNetwork" "$OfflineGateUser" "$OfflineGateAddressFamilies" >&2
-  OfflineGatePropertyStatus=1
-fi
+OfflineGatePipelinePid=$!
+OfflineGatePropertyStatus=1
+for _attempt in $(seq 1 200); do
+  OfflineGateLoadState="$(systemctl show "$OfflineGateUnit.service" --property=LoadState --value 2>/dev/null || true)"
+  if [ "$OfflineGateLoadState" = "loaded" ]; then
+    OfflineGatePrivateNetwork="$(systemctl show "$OfflineGateUnit.service" --property=PrivateNetwork --value 2>/dev/null || true)"
+    OfflineGateUser="$(systemctl show "$OfflineGateUnit.service" --property=User --value 2>/dev/null || true)"
+    OfflineGateAddressFamilies="$(systemctl show "$OfflineGateUnit.service" --property=RestrictAddressFamilies --value 2>/dev/null || true)"
+    if [ "$OfflineGatePrivateNetwork" = "yes" ] &&
+       [ "$OfflineGateUser" = "$GateUser" ] &&
+       exact_word_set "$OfflineGateAddressFamilies" AF_UNIX AF_INET AF_INET6; then
+      OfflineGatePropertyStatus=0
+      printf '%s\n' "OFFLINE_GATE_EFFECTIVE_PROPERTIES_OK"
+    else
+      printf 'Offline gate effective properties mismatch: PrivateNetwork=%s User=%s RestrictAddressFamilies=%s\n' \
+        "$OfflineGatePrivateNetwork" "$OfflineGateUser" "$OfflineGateAddressFamilies" >&2
+    fi
+    break
+  fi
+  if ! kill -0 "$OfflineGatePipelinePid" 2>/dev/null; then break; fi
+  sleep 0.05
+done
+wait "$OfflineGatePipelinePid"
+GateStatus=$?
 set -e
 
 drain_gate_unit "$OfflineGateUnit"
@@ -13739,7 +13766,7 @@ const readProductionSystemdProperties = parserStartup.createProductionSystemdPro
 
 (async () => {
   const verified = await uploadSandbox.verifyCheckedInArtifacts({
-    expectedManifestSha256: '88746a05a67f29742af6dc6cb923c86935a40deb9289c16f7cd475ee2357d4c1'
+    expectedManifestSha256: '42e97a3ceec5df88ee1a11b9cd63314ed923b2a562a1121e7b8bd5f98f803c13'
   });
   process.stdout.write('APPLICATION_PARSER_CHECKED_IN_OK\n');
 
