@@ -299,7 +299,7 @@ test('current deploy inventory ships schema v24 knowledge ownership and its focu
   }
 });
 
-test('current trusted source and sanitization contracts accept exact v1 and v6 through v24 sources', () => {
+test('current trusted source and sanitization contracts accept exact v1 and v6 through v29 sources', () => {
   const trustedManifest = JSON.parse(read(
     'platform', 'server', 'scripts', 'trusted_production_source_manifest.json'
   ));
@@ -309,14 +309,14 @@ test('current trusted source and sanitization contracts accept exact v1 and v6 t
   const trustedPaths = new Set(trustedManifest.files.map((entry) => entry.path));
 
   assert.deepEqual(trustedManifest.migrationContract, {
-    acceptedSourceVersions: [1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24],
-    targetVersion: 24,
+    acceptedSourceVersions: [1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29],
+    targetVersion: 29,
     runs: 2,
     deterministicAppendTables: ['activity_log']
   });
   assert.deepEqual(
     sanitizationManifest.exactProfiles.map((profile) => profile.schemaVersion),
-    [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24]
+    [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29]
   );
   for (const required of [
     'server/migrations/006_crm_sales_workspace.js',
@@ -338,6 +338,11 @@ test('current trusted source and sanitization contracts accept exact v1 and v6 t
     'server/migrations/022_organization_ownership_transfer.js',
     'server/migrations/023_influencer_tenant_ownership.js',
     'server/migrations/024_knowledge_tenant_ownership.js',
+    'server/migrations/025_ai_conversation_tenant_ownership.js',
+    'server/migrations/026_token_usage_tenant_ownership.js',
+    'server/migrations/027_plan_catalog_module_entitlements.js',
+    'server/migrations/028_subscription_expiry.js',
+    'server/migrations/029_organization_monthly_ai_quota.js',
     'server/services/crm_contract.js',
     'server/services/crm_customer_service.js',
     'server/services/crm_query_service.js',

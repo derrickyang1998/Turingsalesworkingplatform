@@ -300,7 +300,13 @@ function persistAudit(db, input) {
   }
 }
 
-function listOrganizations(db, options, planEntitlementService, subscriptionExpiryService) {
+function listOrganizations(
+  db,
+  options,
+  planEntitlementService,
+  subscriptionExpiryService,
+  aiQuotaService
+) {
   const query = requestQuery(options);
   const q = boundedQuery(query.q);
   const limit = boundedLimit(query.limit);
@@ -334,7 +340,25 @@ function listOrganizations(db, options, planEntitlementService, subscriptionExpi
       LIMIT ?
     `).all(...parameters);
     const hasMore = rows.length > limit;
-    const organizations = rows.slice(0, limit).map((row) => {
+    const selectedRows = rows.slice(0, limit);
+    const quotaByOrganization = new Map();
+    if (aiQuotaService && selectedRows.length) {
+      let projections;
+      try {
+        projections = aiQuotaService.projectOrganizationQuotas({
+          organizationIds: selectedRows.map((row) => row.id)
+        });
+      } catch (_error) {
+        throw serviceError(503, 'AI_QUOTA_POLICY_UNAVAILABLE', '组织 AI 配额策略不可用。');
+      }
+      if (!Array.isArray(projections) || projections.length !== selectedRows.length) {
+        throw serviceError(503, 'AI_QUOTA_POLICY_UNAVAILABLE', '组织 AI 配额策略不可用。');
+      }
+      for (const projection of projections) {
+        quotaByOrganization.set(Number(projection.organization_id), projection);
+      }
+    }
+    const organizations = selectedRows.map((row) => {
       const companyOwner = ownerSummary(db, row.id);
       let plan;
       if (planEntitlementService) {
@@ -352,6 +376,30 @@ function listOrganizations(db, options, planEntitlementService, subscriptionExpi
           throw serviceError(503, 'SUBSCRIPTION_POLICY_UNAVAILABLE', '组织订阅期限策略不可用。');
         }
       }
+      let aiMonthlyQuota;
+      if (aiQuotaService) {
+        const projection = quotaByOrganization.get(Number(row.id));
+        if (!projection) {
+          throw serviceError(503, 'AI_QUOTA_POLICY_UNAVAILABLE', '组织 AI 配额策略不可用。');
+        }
+        aiMonthlyQuota = {
+          period: projection.period,
+          period_key: projection.period_key,
+          period_start: projection.period_start,
+          period_end: projection.period_end,
+          used: projection.used,
+          limit: projection.limit,
+          remaining: projection.remaining,
+          ...(projection.overage_tokens === undefined ? {} : {
+            overage_tokens: projection.overage_tokens
+          }),
+          ...(projection.utilization_percent === undefined ? {} : {
+            utilization_percent: projection.utilization_percent
+          }),
+          status: projection.status,
+          policy_version: projection.policy_version
+        };
+      }
       return {
         id: row.id,
         code: row.code,
@@ -363,11 +411,15 @@ function listOrganizations(db, options, planEntitlementService, subscriptionExpi
         company_owner: companyOwner,
         ...(plan === undefined ? {} : { plan }),
         ...(subscription === undefined ? {} : { subscription }),
+        ...(aiMonthlyQuota === undefined ? {} : { ai_monthly_quota: aiMonthlyQuota }),
         allowed_actions: {
           initialize_owner: scope.kind === 'platform_admin' && companyOwner === null,
           ...(plan === undefined ? {} : { assign_plan: scope.kind === 'platform_admin' }),
           ...(subscription === undefined ? {} : {
             manage_subscription: scope.kind === 'platform_admin'
+          }),
+          ...(aiMonthlyQuota === undefined ? {} : {
+            manage_ai_quota: scope.kind === 'platform_admin'
           })
         }
       };
@@ -890,6 +942,7 @@ function createOrganizationGovernanceService(db, factoryOptions = {}) {
   }
   const planEntitlementService = factoryOptions.planEntitlementService || null;
   const subscriptionExpiryService = factoryOptions.subscriptionExpiryService || null;
+  const aiQuotaService = factoryOptions.aiQuotaService || null;
   if (
     planEntitlementService !== null &&
     typeof planEntitlementService.projectOrganization !== 'function'
@@ -902,6 +955,12 @@ function createOrganizationGovernanceService(db, factoryOptions = {}) {
   ) {
     throw new TypeError('subscriptionExpiryService must expose projectOrganization');
   }
+  if (
+    aiQuotaService !== null &&
+    typeof aiQuotaService.projectOrganizationQuotas !== 'function'
+  ) {
+    throw new TypeError('aiQuotaService must expose projectOrganizationQuotas');
+  }
   return Object.freeze({
     projectUserAccess(requestOptions) {
       return projectUserAccess(db, requestOptions || {});
@@ -911,7 +970,8 @@ function createOrganizationGovernanceService(db, factoryOptions = {}) {
         db,
         requestOptions || {},
         planEntitlementService,
-        subscriptionExpiryService
+        subscriptionExpiryService,
+        aiQuotaService
       );
     },
     listMembers(requestOptions) {

@@ -196,6 +196,13 @@ const db = migrationService.openMigratedDatabase(DB_PATH, {
       sourcePath: 'migrations/028_subscription_expiry.js',
       engineVersion: 1,
       dependencies: ['migrations/vendor/bcryptjs_v3_0_3.js']
+    },
+    {
+      version: 29,
+      name: '029_organization_monthly_ai_quota',
+      sourcePath: 'migrations/029_organization_monthly_ai_quota.js',
+      engineVersion: 1,
+      dependencies: ['migrations/vendor/bcryptjs_v3_0_3.js']
     }
   ]
 });

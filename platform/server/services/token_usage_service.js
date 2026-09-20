@@ -109,6 +109,32 @@ function sumForUser(db, input) {
   `).get(organizationId, userId).total || 0);
 }
 
+function canonicalLedgerBoundary(value, label) {
+  if (
+    typeof value !== 'string' ||
+    !/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(value) ||
+    !Number.isFinite(Date.parse(value.replace(' ', 'T') + 'Z'))
+  ) {
+    throw new TokenUsageServiceError(400, 'TOKEN_USAGE_INPUT_INVALID', `${label} is invalid.`);
+  }
+  return value;
+}
+
+function sumForOrganizationPeriod(db, input) {
+  requireOrganizationOwnership(db);
+  const organizationId = positiveId(input && input.organizationId, 'organizationId');
+  const periodStart = canonicalLedgerBoundary(input && input.periodStart, 'periodStart');
+  const periodEnd = canonicalLedgerBoundary(input && input.periodEnd, 'periodEnd');
+  if (periodStart >= periodEnd) {
+    throw new TokenUsageServiceError(400, 'TOKEN_USAGE_INPUT_INVALID', 'Token usage period is invalid.');
+  }
+  return Number(db.prepare(`
+    SELECT COALESCE(SUM(total_tokens),0) AS total
+    FROM token_usage
+    WHERE org_id=? AND created_at>=? AND created_at<?
+  `).get(organizationId, periodStart, periodEnd).total || 0);
+}
+
 function globalUsage(db) {
   return db.prepare(`
     SELECT organization.id AS organization_id,organization.name AS organization_name,
@@ -182,5 +208,6 @@ module.exports = {
   hasOrganizationOwnership,
   listUsage,
   recordUsage,
+  sumForOrganizationPeriod,
   sumForUser
 };

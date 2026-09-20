@@ -33,10 +33,10 @@ $EXPECTED_PPT_SHA256 = "f311a7b33ee28e64c8e19a14bae436101272dd17bf2f4f8c5d181d57
 $TRUSTED_SOURCE_GATE_RELATIVE_PATH = "server\scripts\trusted_production_source_gate.js"
 $TRUSTED_SOURCE_MANIFEST_RELATIVE_PATH = "server\scripts\trusted_production_source_manifest.json"
 $TRUSTED_RUNTIME_CONFIG_RELATIVE_PATH = "server\config\runtime_config.js"
-$EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "c425be7970ca06c55f0edb1ff716d0c5e9c9d024bb7e10c0b323c47cc89fefc7"
-$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "7b7acecbd03716ffcbbd443fba468e54c8c0ad27afb884502aea81b0c2bdd49c"
+$EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "c714591ccd730f031268bd15a75db40812a6271ca8f8d9c57b84896b4da47e09"
+$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "3298043444ba5bb0bbf8ca454b8dcb3b8ee57022e29eaaffb700c3448b56b47a"
 $EXPECTED_TRUSTED_RUNTIME_CONFIG_SHA256 = "e689e251f313c48b4f27279b1ef44639e3c1a68bb3c255f6ddfa86cabbfaa27d"
-$EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256 = "678613634282321e00a057d626a6ac4d7d6a550293c44268c3dd16c1015dd628"
+$EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256 = "8a141cbd800f04fb6ebc4e59d1ad2517bcb771eef31e2015246a4efebdef65b3"
 $EXPECTED_TRUSTED_PARSER_VERIFIER_SHA256 = "7f9efaac02675b21e025891a400474cc7481c1adaf58c88bd8b356d5276f2eaa"
 $EXPECTED_TRUSTED_PUBLIC_GUARD_SHA256 = "d45fe8fcc01587aaa0e73eccfb9714c27801e232cb6c0effd6daedb703316d66"
 $EXPECTED_TRUSTED_MIGRATION_CLEANUP_HELPER_SHA256 = "d5f2befa902522dd9de3e9dd2397a99ee5e78ab1a1c6e526a27f14bb2829e1fa"
@@ -128,6 +128,7 @@ $FILES = @(
     "server\migrations\026_token_usage_tenant_ownership.js",
     "server\migrations\027_plan_catalog_module_entitlements.js",
     "server\migrations\028_subscription_expiry.js",
+    "server\migrations\029_organization_monthly_ai_quota.js",
     "server\migrations\baselines\legacy_v1.js",
     "server\migrations\engines\v1.js",
     "server\migrations\vendor\bcryptjs_v3_0_3.js",
@@ -338,6 +339,8 @@ $FILES = @(
     "server\tests\organization_methodology_service.test.js",
     "server\tests\organization_governance_migration.test.js",
     "server\tests\organization_governance_service.test.js",
+    "server\tests\organization_ai_quota_migration.test.js",
+    "server\tests\organization_ai_quota_release_gate_inventory.test.js",
     "server\tests\organization_governance_routes.test.js",
     "server\tests\organization_ownership_transfer_migration.test.js",
     "server\tests\influencer_tenant_ownership_migration.test.js",
@@ -10896,7 +10899,7 @@ try {
   if (database.pragma('integrity_check', { simple: true }) !== 'ok') throw new Error('Candidate DB integrity_check failed');
   if (database.pragma('foreign_key_check').length !== 0) throw new Error('Candidate DB foreign_key_check failed');
   const version = database.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version;
-  if (Number(version) !== 28) throw new Error('Candidate migration target version mismatch');
+  if (Number(version) !== 29) throw new Error('Candidate migration target version mismatch');
   console.log('TM_SANITIZED_MIGRATION_COMPATIBILITY_OK');
 } finally {
   database.close();
@@ -10913,41 +10916,22 @@ node --test server/tests/release_replay_gate.test.js
 node --test server/tests/module_action_permission_service.test.js
 node --test --test-name-pattern="trusted source manifest pins the sanitizer closure|trusted source manifest pins the complete parser control plane|trusted source manifest independently pins the migration cleanup control plane|deploy pins trusted sanitizer closure" \
   server/tests/deployment_source_trust.test.js
-node --test server/tests/knowledge_tenant_release_gate_inventory.test.js
 node --test \
-  server/tests/plan_entitlements_migration.test.js \
-  server/tests/plan_entitlement_service.test.js \
-  server/tests/plan_entitlement_routes.test.js \
-  server/tests/plan_entitlements_release_gate_inventory.test.js \
-  server/tests/subscription_expiry_migration.test.js \
-  server/tests/subscription_expiry_service.test.js \
-  server/tests/subscription_expiry_routes.test.js \
-  server/tests/subscription_expiry_release_gate_inventory.test.js \
+  server/tests/organization_ai_quota_migration.test.js \
+  server/tests/organization_ai_quota_release_gate_inventory.test.js \
   server/tests/organization_governance_service.test.js \
-  server/tests/admin_tenant_directory_ui.test.js
-node --test \
-  server/tests/ai_conversation_tenant_ownership_migration.test.js \
-  server/tests/ai_conversation_tenant_runtime.test.js \
-  server/tests/ai_conversation_tenant_release_gate_inventory.test.js \
-  server/tests/token_usage_tenant_ownership_migration.test.js \
   server/tests/token_usage_service.test.js \
-  server/tests/token_usage_tenant_release_gate_inventory.test.js
-node --test \
   server/tests/ai_quota_service.test.js \
   server/tests/admin_ai_quota_routes.test.js \
   server/tests/admin_tenant_directory_service.test.js \
-  server/tests/admin_tenant_directory_ui.test.js \
-  server/tests/ai_knowledge_foundation.test.js \
+  server/tests/admin_tenant_directory_ui.test.js
+node --test --test-name-pattern="live tenant quota|zero-quota users|legacy PPT quota admission|legacy PPT honors allowWeb false" \
+  server/tests/ai_knowledge_foundation.test.js
+node --test --test-name-pattern="caller quota" \
   server/tests/campaign_ai_rag.test.js
-node --test \
-  server/tests/routes_performance.test.js \
-  server/tests/performance_frontend_contract.test.js
-node --test \
-  server/tests/crm_phase5_http.test.js \
-  server/tests/customer_workspace_ui.test.js
-node --test --test-name-pattern="subscription expiry" \
-  server/tests/influencer_workflow.test.js
-node --test --test-reporter=dot --test-name-pattern="login and auth me|one live session observes|unavailable entitlement policy" \
+node --test --test-name-pattern="typed AI quota denials" \
+  server/tests/routes_performance.test.js
+node --test --test-reporter=dot --test-name-pattern="login and auth me" \
   server/tests/phase4_server_integration.test.js
 install -d -m 0700 "$TEST_ROOT/browser-smoke"
 TM_DEPLOYMENT_SMOKE_ROOT="$TEST_ROOT/browser-smoke" \
@@ -12421,7 +12405,7 @@ if applied:
         if hashlib.sha256(handle.read()).hexdigest() != output_sha256:
             raise SystemExit('Trusted live database adoption stage digest is invalid')
 else:
-    if (report.get('sourceVersion') not in (1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28) or
+    if (report.get('sourceVersion') not in (1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29) or
             report.get('targetVersion') != report.get('sourceVersion') or
             output_sha256 != expected_source_sha256 or
             report.get('baseTableCount') is not None or report.get('baseRowCount') is not None or

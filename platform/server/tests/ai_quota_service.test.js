@@ -7,9 +7,13 @@ const {
   AIQuotaServiceError,
   assertAdmission,
   normalizeQuota,
+  normalizeOrganizationMonthlyLimit,
   projectMembershipUsage,
+  projectOrganizationQuotas,
+  readOrganizationQuotaProjection,
   readLivePolicy,
   recordUsageOrThrow,
+  updateOrganizationMonthlyQuota,
   updateUserQuota,
   writeQuotaUpdateAuditInTransaction
 } = require('../services/ai_quota_service');
@@ -79,6 +83,19 @@ function openDatabase({ withTenantLedger = true } = {}) {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY(user_id) REFERENCES users(id)
     ) STRICT;
+    CREATE TABLE organization_ai_quota_policies (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      org_id INTEGER NOT NULL,
+      policy_version INTEGER NOT NULL,
+      monthly_limit INTEGER,
+      changed_by INTEGER,
+      reason TEXT,
+      source TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(org_id,policy_version),
+      FOREIGN KEY(org_id) REFERENCES organizations(id),
+      FOREIGN KEY(changed_by) REFERENCES users(id)
+    ) STRICT;
 
     INSERT INTO users (id,username,display_name,role,api_quota,is_active) VALUES
       (1,'platform-admin','Platform Admin','admin',0,1),
@@ -102,6 +119,10 @@ function openDatabase({ withTenantLedger = true } = {}) {
       (10,5,'member','active',NULL),
       (10,6,'member','active',NULL),
       (10,7,'member','revoked','2026-09-01 00:00:00');
+    INSERT INTO organization_ai_quota_policies
+      (org_id,policy_version,monthly_limit,changed_by,reason,source) VALUES
+      (10,1,NULL,NULL,NULL,'migration_backfill'),
+      (20,1,NULL,NULL,NULL,'migration_backfill');
   `);
 
   if (withTenantLedger) {
@@ -419,6 +440,170 @@ test('normalizeQuota rejects every other representation', () => {
       quotaError(400, 'AI_QUOTA_INVALID'),
       `expected ${String(value)} to be rejected`
     );
+  }
+});
+
+test('organization monthly quota uses only the current UTC calendar month', () => {
+  const db = openDatabase();
+  try {
+    db.prepare('UPDATE token_usage SET created_at=?').run('2026-09-21 10:00:00');
+    db.prepare(`
+      INSERT INTO token_usage
+        (org_id,user_id,model,prompt_tokens,completion_tokens,total_tokens,endpoint,created_at)
+      VALUES (10,2,'deepseek-chat',400,599,999,'prior_month','2026-08-31 23:59:59')
+    `).run();
+    db.prepare('UPDATE organization_ai_quota_policies SET monthly_limit=1100 WHERE org_id=10').run();
+    const projection = readOrganizationQuotaProjection(
+      db,
+      { organizationId: 10 },
+      Date.UTC(2026, 8, 21, 12, 0, 0)
+    );
+    assert.deepEqual(projection, {
+      organization_id: 10,
+      period: 'utc_calendar_month',
+      period_key: '2026-09',
+      period_start: '2026-09-01T00:00:00Z',
+      period_end: '2026-10-01T00:00:00Z',
+      used: 1040,
+      limit: 1100,
+      remaining: 60,
+      overage_tokens: 0,
+      utilization_percent: 94.55,
+      status: 'active',
+      policy_version: 1
+    });
+  } finally {
+    db.close();
+  }
+});
+
+test('organization monthly shared quota denies before personal quota and audits its scope', () => {
+  const db = openDatabase();
+  try {
+    db.prepare('UPDATE token_usage SET created_at=?').run('2026-09-21 10:00:00');
+    db.prepare('UPDATE organization_ai_quota_policies SET monthly_limit=40 WHERE org_id=10').run();
+    assert.throws(() => assertAdmission(db, {
+      organizationId: 10,
+      userId: 2,
+      endpoint: 'ai_chat',
+      requestId: 'organization-quota-denial'
+    }, Date.UTC(2026, 8, 21, 12, 0, 0)), quotaError(429, 'AI_ORGANIZATION_QUOTA_EXCEEDED'));
+    const details = JSON.parse(latestAudit(db, 'ai_quota_denied').details);
+    assert.equal(details.schema_version, 2);
+    assert.equal(details.scope, 'organization_monthly');
+    assert.equal(details.organization_id, 10);
+    assert.equal(details.period_key, '2026-09');
+    assert.equal(details.used_tokens, 1040);
+    assert.equal(details.limit_tokens, 40);
+    assert.equal(details.reason_code, 'AI_ORGANIZATION_QUOTA_EXCEEDED');
+  } finally {
+    db.close();
+  }
+});
+
+test('platform admin break-glass validates organization policy and audits exhausted admission', () => {
+  const db = openDatabase();
+  try {
+    db.prepare('UPDATE organization_ai_quota_policies SET monthly_limit=0 WHERE org_id=10').run();
+    const decision = assertAdmission(db, {
+      organizationId: 10,
+      userId: 1,
+      requestId: 'admin-break-glass'
+    }, Date.UTC(2026, 8, 21, 12, 0, 0));
+    assert.equal(decision.status, 'exempt');
+    assert.equal(deniedAuditCount(db), 0);
+    const audit = latestAudit(db, 'ai_quota_break_glass_admitted');
+    assert.equal(audit.user_id, 1);
+    assert.equal(audit.module, 'ai_quota');
+    const details = JSON.parse(audit.details);
+    assert.equal(details.organization_id, 10);
+    assert.equal(details.period_key, '2026-09');
+    assert.equal(details.organization_status, 'disabled');
+    assert.equal(details.request_id, 'admin-break-glass');
+  } finally {
+    db.close();
+  }
+});
+
+test('organization quota projection supports unlimited and multiple organizations', () => {
+  const db = openDatabase();
+  try {
+    db.prepare('UPDATE token_usage SET created_at=?').run('2026-09-21 10:00:00');
+    const rows = projectOrganizationQuotas(db, {
+      organizationIds: [10, 20]
+    }, Date.UTC(2026, 8, 21, 12, 0, 0));
+    assert.deepEqual(rows.map((row) => [row.organization_id, row.used, row.limit, row.status]), [
+      [10, 1040, null, 'unlimited'],
+      [20, 140, null, 'unlimited']
+    ]);
+  } finally {
+    db.close();
+  }
+});
+
+test('organization monthly limit normalization and audited versioned updates are strict', () => {
+  assert.equal(normalizeOrganizationMonthlyLimit(null), null);
+  assert.equal(normalizeOrganizationMonthlyLimit(0), 0);
+  assert.equal(normalizeOrganizationMonthlyLimit(5000), 5000);
+  for (const value of [-1, 1.5, '5000', undefined, Number.MAX_SAFE_INTEGER + 1]) {
+    assert.throws(
+      () => normalizeOrganizationMonthlyLimit(value),
+      quotaError(400, 'AI_ORGANIZATION_QUOTA_INVALID')
+    );
+  }
+
+  const db = openDatabase();
+  try {
+    for (const expectedVersion of [true, '1', 1.5]) {
+      assert.throws(() => updateOrganizationMonthlyQuota(db, {
+        actorUserId: 2,
+        organizationId: 10,
+        monthlyLimit: 5000,
+        expectedVersion,
+        reason: 'CAS version must be a numeric integer'
+      }), quotaError(400, 'AI_ORGANIZATION_QUOTA_INVALID'));
+    }
+    assert.throws(() => updateOrganizationMonthlyQuota(db, {
+      actorUserId: 2,
+      organizationId: 10,
+      monthlyLimit: 5000,
+      expectedVersion: 1,
+      reason: 'Forbidden update'
+    }), quotaError(403, 'AI_ORGANIZATION_QUOTA_UPDATE_FORBIDDEN'));
+    const updated = updateOrganizationMonthlyQuota(db, {
+      actorUserId: 1,
+      organizationId: 10,
+      monthlyLimit: 5000,
+      expectedVersion: 1,
+      reason: 'Approved monthly allocation',
+      requestId: 'organization-quota-update',
+      ipAddress: '127.0.0.8'
+    }, Date.UTC(2026, 8, 21, 12, 0, 0));
+    assert.equal(updated.limit, 5000);
+    assert.equal(updated.policy_version, 2);
+    assert.equal(updated.changed, true);
+    assert.throws(() => updateOrganizationMonthlyQuota(db, {
+      actorUserId: 1,
+      organizationId: 10,
+      monthlyLimit: 6000,
+      expectedVersion: 1,
+      reason: 'Stale update'
+    }), quotaError(409, 'AI_ORGANIZATION_QUOTA_VERSION_CONFLICT'));
+    const audit = latestAudit(db, 'organization_ai_monthly_quota_changed');
+    assert.equal(audit.user_id, 1);
+    assert.equal(audit.ip_address, '127.0.0.8');
+    assert.deepEqual(JSON.parse(audit.details), {
+      schema_version: 1,
+      actor_user_id: 1,
+      organization_id: 10,
+      period: 'utc_calendar_month',
+      before: { monthly_limit: null, policy_version: 1 },
+      after: { monthly_limit: 5000, policy_version: 2 },
+      reason: 'Approved monthly allocation',
+      request_id: 'organization-quota-update'
+    });
+  } finally {
+    db.close();
   }
 });
 

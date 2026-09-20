@@ -7,6 +7,7 @@ const path = require('node:path');
 const Database = require('better-sqlite3');
 
 const migrationService = require('../services/migration_service');
+const organizationQuotaMigration = require('../migrations/029_organization_monthly_ai_quota');
 const knowledge = require('../services/knowledge_service');
 const ai = require('../services/ai_service');
 const llm = require('../services/llm_service');
@@ -112,6 +113,7 @@ function openDatabase() {
     registeredMigrations: MIGRATIONS
   });
   db.exec('ALTER TABLE token_usage ADD COLUMN org_id INTEGER');
+  organizationQuotaMigration.apply(db);
   return db;
 }
 

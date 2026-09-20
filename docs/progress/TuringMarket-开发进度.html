@@ -432,7 +432,7 @@
 
     <section class="panel" aria-labelledby="cadence-title">
       <div class="section-head">
-        <div><h2 id="cadence-title">加速后的发布节奏 / Accelerated cadence</h2><p class="hint">普通功能不再等待无关的繁重全量测试。</p></div>
+        <div><h2 id="cadence-title">一功能一上线 / One feature, one release</h2><p class="hint">功能完成后当轮上线，不等待阶段结束，也不等待无关的繁重全量测试。</p></div>
       </div>
       <div class="pipeline">
         <div class="step"><b>1 · 单功能</b><span class="hint">One useful slice</span></div>
@@ -442,7 +442,7 @@
         <div class="step"><b>5 · 立即上线</b><span class="hint">Deploy in same round</span></div>
         <div class="step"><b>6 · 线上冒烟</b><span class="hint">Health, login, feature</span></div>
       </div>
-      <div class="notice"><b>重型测试触发条件：</b>阶段收口，或涉及 schema、认证/授权、租户权威、共享基础设施、真实外部写入等高风险边界。失败的安全门禁、备份和线上验收仍然阻断发布。</div>
+      <div class="notice"><b>执行规则：</b>普通功能只跑受影响测试、必要安全检查和一次独立审查，通过后验证备份并在同一轮立即上线。完整回归仅由阶段收口或 schema、认证/授权、租户权威、共享基础设施、真实外部写入等高风险边界触发；即使触发，也只增加该风险所需门禁。失败的安全门禁、备份和线上验收仍然阻断发布。</div>
     </section>
 
     <footer>

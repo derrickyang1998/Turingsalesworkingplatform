@@ -478,6 +478,137 @@ test('ppt outline generation retrieves knowledge and archives references', async
   }
 });
 
+test('legacy PPT quota admission denies before web, DeepSeek, cache, or artifact writes', async () => {
+  const db = freshDb();
+  const latestUi = require('../services/latest_ui_compat_service');
+  const aiQuota = require('../services/ai_quota_service');
+  const webSearch = require('../services/web_search_service');
+  const llm = require('../services/llm_service');
+  const originalSearchWeb = webSearch.searchWeb;
+  const originalCacheSearchResult = webSearch.cacheSearchResult;
+  const originalCreateProvider = llm.createDeepSeekProvider;
+  let webCalls = 0;
+  let cacheWrites = 0;
+  let deepSeekCalls = 0;
+  webSearch.searchWeb = async function() {
+    webCalls += 1;
+    return { used: true, provider: 'tavily', results: [] };
+  };
+  webSearch.cacheSearchResult = function() { cacheWrites += 1; };
+  llm.createDeepSeekProvider = function() {
+    return {
+      async complete() {
+        deepSeekCalls += 1;
+        return {
+          content: '{"title":"must not persist","sections":[]}',
+          usage: { prompt_tokens: 4, completion_tokens: 2, total_tokens: 6 },
+          model: 'deepseek-chat'
+        };
+      }
+    };
+  };
+  try {
+    const organizationId = db.prepare(
+      "SELECT id FROM organizations WHERE code='turingmarket-default'"
+    ).get().id;
+    aiQuota.updateOrganizationMonthlyQuota(db, {
+      actorUserId: 1,
+      organizationId,
+      monthlyLimit: 0,
+      expectedVersion: 1,
+      reason: 'Disable organization for provider admission test'
+    });
+    const beforeTokenRows = db.prepare('SELECT COUNT(*) AS count FROM token_usage').get().count;
+    const beforeArtifacts = db.prepare(
+      "SELECT COUNT(*) AS count FROM knowledge_entries WHERE entry_type='ppt_outline'"
+    ).get().count;
+
+    await assert.rejects(
+      latestUi.generatePptOutline(db, { id: 2, role: 'user' }, {
+        demand: { brand: 'Quota Guard', product: 'Solar Kit', market: 'US' },
+        proposal: 'No provider may run before quota admission.'
+      }, {
+        organizationId,
+        allowWeb: true,
+        requestId: 'legacy-ppt-quota-denial'
+      }),
+      (error) => error && error.statusCode === 429 && error.code === 'AI_ORGANIZATION_QUOTA_DISABLED'
+    );
+
+    assert.equal(webCalls, 0);
+    assert.equal(cacheWrites, 0);
+    assert.equal(deepSeekCalls, 0);
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM token_usage').get().count, beforeTokenRows);
+    assert.equal(
+      db.prepare("SELECT COUNT(*) AS count FROM knowledge_entries WHERE entry_type='ppt_outline'").get().count,
+      beforeArtifacts
+    );
+  } finally {
+    webSearch.searchWeb = originalSearchWeb;
+    webSearch.cacheSearchResult = originalCacheSearchResult;
+    llm.createDeepSeekProvider = originalCreateProvider;
+    db.close();
+  }
+});
+
+test('legacy PPT honors allowWeb false while still using DeepSeek after admission', async () => {
+  const db = freshDb();
+  const latestUi = require('../services/latest_ui_compat_service');
+  const webSearch = require('../services/web_search_service');
+  const llm = require('../services/llm_service');
+  const originalSearchWeb = webSearch.searchWeb;
+  const originalCacheSearchResult = webSearch.cacheSearchResult;
+  const originalCreateProvider = llm.createDeepSeekProvider;
+  let webCalls = 0;
+  let cacheWrites = 0;
+  let deepSeekCalls = 0;
+  webSearch.searchWeb = async function() {
+    webCalls += 1;
+    return { used: true, provider: 'tavily', results: [] };
+  };
+  webSearch.cacheSearchResult = function() { cacheWrites += 1; };
+  llm.createDeepSeekProvider = function() {
+    return {
+      async complete() {
+        deepSeekCalls += 1;
+        return {
+          content: JSON.stringify({
+            title: 'Quota-safe outline',
+            subtitle: 'No web',
+            sections: [{ title: 'Summary', type: 'content', points: ['Approved'] }]
+          }),
+          usage: { prompt_tokens: 5, completion_tokens: 5, total_tokens: 10 },
+          model: 'deepseek-chat'
+        };
+      }
+    };
+  };
+  try {
+    const organizationId = db.prepare(
+      "SELECT id FROM organizations WHERE code='turingmarket-default'"
+    ).get().id;
+    const result = await latestUi.generatePptOutline(db, { id: 2, role: 'user' }, {
+      demand: { brand: 'No Web', product: 'Solar Kit', market: 'US' },
+      proposal: 'Use knowledge and DeepSeek only.'
+    }, {
+      organizationId,
+      allowWeb: false,
+      requestId: 'legacy-ppt-no-web'
+    });
+
+    assert.equal(webCalls, 0);
+    assert.equal(cacheWrites, 0);
+    assert.equal(deepSeekCalls, 1);
+    assert.equal(result.research.used, false);
+    assert.equal(result.research.reason, 'disabled');
+  } finally {
+    webSearch.searchWeb = originalSearchWeb;
+    webSearch.cacheSearchResult = originalCacheSearchResult;
+    llm.createDeepSeekProvider = originalCreateProvider;
+    db.close();
+  }
+});
+
 test('web search service degrades when tavily api key is missing', async () => {
   const web = require('../services/web_search_service');
   const result = await web.searchWeb('latest influencer trend', { provider: 'tavily', apiKey: '' });

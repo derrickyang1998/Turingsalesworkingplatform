@@ -424,6 +424,13 @@ async function generatePptOutline(db, user, body, opts) {
       ai: aiResult
     };
   }
+  aiQuota.assertAdmission(db, {
+    organizationId: opts.organizationId,
+    userId: user.id,
+    endpoint: 'ppt_outline',
+    requestId: opts.requestId,
+    ipAddress: opts.ipAddress
+  });
   const ragContext = rag.buildRagContext(db, {
     user,
     organizationId: opts.organizationId,
@@ -431,8 +438,13 @@ async function generatePptOutline(db, user, body, opts) {
     limit: body.knowledge_limit || 8,
     business_type: body.business_type || ''
   });
-  const research = await webSearch.searchWeb(query || 'overseas influencer marketing campaign', { db, maxResults: 5 });
-  webSearch.cacheSearchResult(db, query || 'overseas influencer marketing campaign', research);
+  const allowWeb = opts.allowWeb === true;
+  const research = allowWeb
+    ? await webSearch.searchWeb(query || 'overseas influencer marketing campaign', { db, maxResults: 5 })
+    : { used: false, provider: 'tavily', results: [], reason: 'disabled' };
+  if (allowWeb) {
+    webSearch.cacheSearchResult(db, query || 'overseas influencer marketing campaign', research);
+  }
   const fallback = buildPptOutlineFallback(demand, proposal, '', research);
   const prompt = [
     'Create a client-facing overseas influencer marketing PPT outline for TuringMarket.',

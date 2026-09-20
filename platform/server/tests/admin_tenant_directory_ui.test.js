@@ -333,6 +333,99 @@ test('subscription expiry controls support perpetual terms and refresh after a s
   assert.deepEqual(messages.at(-1), ['订阅期限已被其他管理员更新，请重试。', 'error']);
 });
 
+test('organization directory renders and saves compact shared monthly AI quota controls', async () => {
+  const elements = { ad_organizationList: { innerHTML: '' } };
+  const calls = [];
+  let refreshes = 0;
+  const context = loadFunctions({
+    adminOrganizationsById: {},
+    adminPlanCatalog: [],
+    document: { getElementById(id) { return elements[id] || null; } },
+    prompt() { return 'Increase September shared budget'; },
+    esc,
+    toast() {},
+    Error,
+    Promise,
+    JSON,
+    Number,
+    String,
+    Date,
+    apiFetch(url, options) {
+      calls.push([url, options]);
+      return Promise.resolve(response(200, {
+        quota: {
+          organization_id: 10,
+          period: 'utc_calendar_month',
+          period_key: '2026-09',
+          used: 1200,
+          limit: 5000,
+          remaining: 3800,
+          status: 'active',
+          policy_version: 2
+        }
+      }));
+    },
+    loadAdminOrganizations() { refreshes += 1; return Promise.resolve([]); }
+  }, ['renderAdminOrganizations', 'saveAdminOrganizationAiQuota']);
+
+  context.renderAdminOrganizations([{
+    id: 10,
+    code: 'alpha',
+    name: 'Alpha',
+    team_count: 1,
+    active_member_count: 2,
+    revoked_member_count: 0,
+    company_owner: null,
+    ai_monthly_quota: {
+      period: 'utc_calendar_month',
+      period_key: '2026-09',
+      used: 1200,
+      limit: null,
+      remaining: null,
+      status: 'unlimited',
+      policy_version: 1
+    },
+    allowed_actions: { initialize_owner: false, manage_ai_quota: true }
+  }, {
+    id: 20,
+    code: 'beta',
+    name: 'Beta',
+    team_count: 1,
+    active_member_count: 1,
+    revoked_member_count: 0,
+    company_owner: null,
+    ai_monthly_quota: {
+      period: 'utc_calendar_month',
+      period_key: '2026-09',
+      used: 300,
+      limit: 5000,
+      remaining: 4700,
+      status: 'active',
+      policy_version: 3
+    },
+    allowed_actions: { initialize_owner: false, manage_ai_quota: false }
+  }]);
+  assert.match(elements.ad_organizationList.innerHTML, /<th>AI 月额度<\/th>/);
+  assert.match(elements.ad_organizationList.innerHTML, /id="ad_organizationAiQuota_10"/);
+  assert.match(elements.ad_organizationList.innerHTML, /id="ad_organizationAiQuotaUnlimited_10"[^>]*checked/);
+  assert.match(elements.ad_organizationList.innerHTML, /1,200\s*\/\s*不限额/);
+  assert.doesNotMatch(elements.ad_organizationList.innerHTML, /id="ad_organizationAiQuota_20"/);
+  assert.match(elements.ad_organizationList.innerHTML, /300\s*\/\s*5,000/);
+
+  elements.ad_organizationAiQuota_10 = { value: '5000', disabled: false };
+  elements.ad_organizationAiQuotaUnlimited_10 = { checked: false };
+  elements.ad_organizationAiQuotaSave_10 = { disabled: false };
+  const updated = await context.saveAdminOrganizationAiQuota(10);
+  assert.equal(updated, true);
+  assert.equal(refreshes, 1);
+  assert.equal(calls[0][0], '/admin/organizations/10/ai-quota');
+  assert.deepEqual(JSON.parse(calls[0][1].body), {
+    monthly_limit: 5000,
+    expected_version: 1,
+    reason: 'Increase September shared budget'
+  });
+});
+
 test('expired organization members receive a compact read-only shell status', () => {
   const elements = {};
   const main = {
@@ -396,8 +489,8 @@ test('existing users tab exposes searchable entitlement filters and stable pagin
     assert.match(indexSource, new RegExp(`id=["']${id}["']`));
   }
   assert.ok(
-    /<th[^>]*>\s*AI Token 配额\s*<\/th>/.test(indexSource),
-    'users table quota column must be labeled "AI Token 配额"'
+    /<th[^>]*>\s*个人终身 AI 配额\s*<\/th>/.test(indexSource),
+    'users table quota column must distinguish the personal lifetime quota'
   );
 });
 

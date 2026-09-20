@@ -42,15 +42,17 @@ function powerShellShaAssignment(source, variableName) {
   return match[1];
 }
 
-test('schema, sanitizer, and trusted source registries terminate at subscription expiry migration 028', () => {
-  assert.deepEqual(migrationGate.REGISTERED_MIGRATIONS.at(-1), migration028);
-  assert.deepEqual(sanitizer.EXACT_PROFILE_MIGRATIONS.at(-1), migration028);
-  assert.equal(sanitizationManifest.exactProfiles.at(-1).schemaVersion, 28);
+test('schema, sanitizer, and trusted source registries retain subscription expiry migration 028 through current migration 029', () => {
+  assert.deepEqual(migrationGate.REGISTERED_MIGRATIONS.find((entry) => entry.version === 28), migration028);
+  assert.deepEqual(sanitizer.EXACT_PROFILE_MIGRATIONS.find((entry) => entry.version === 28), migration028);
+  assert.equal(migrationGate.REGISTERED_MIGRATIONS.at(-1).version, 29);
+  assert.equal(sanitizer.EXACT_PROFILE_MIGRATIONS.at(-1).version, 29);
+  assert.equal(sanitizationManifest.exactProfiles.at(-1).schemaVersion, 29);
 
   const manifestPath = path.join(serverRoot, 'scripts', 'trusted_production_source_manifest.json');
   const trusted = trustedGate.loadTrustedManifest(manifestPath);
-  assert.equal(trusted.migrationContract.targetVersion, 28);
-  assert.equal(trusted.migrationContract.acceptedSourceVersions.at(-1), 28);
+  assert.equal(trusted.migrationContract.targetVersion, 29);
+  assert.equal(trusted.migrationContract.acceptedSourceVersions.at(-1), 29);
 
   for (const requiredPath of [
     'server/migrations/028_subscription_expiry.js',
@@ -76,7 +78,7 @@ test('current trusted candidate files are LF-normalized byte-for-byte', () => {
   }
 });
 
-test('deployment inventory ships the exact v28 implementation and focused release tests', () => {
+test('deployment inventory retains the exact v28 implementation while targeting current v29', () => {
   const deploy = fs.readFileSync(path.join(repoRoot, 'platform', 'deploy_v8.ps1'), 'utf8');
   const phase4Integration = fs.readFileSync(
     path.join(serverRoot, 'tests', 'phase4_server_integration.test.js'),
@@ -100,18 +102,17 @@ test('deployment inventory ships the exact v28 implementation and focused releas
   }
   assert.match(
     deploy,
-    /if \(Number\(version\) !== 28\) throw new Error\('Candidate migration target version mismatch'\)/
+    /if \(Number\(version\) !== 29\) throw new Error\('Candidate migration target version mismatch'\)/
   );
   assert.match(
     deploy,
-    /report\.get\('sourceVersion'\) not in \(1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28\)/
+    /report\.get\('sourceVersion'\) not in \(1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29\)/
   );
-  assert.match(deploy, /--test-name-pattern="subscription expiry"[\s\\]+server\/tests\/influencer_workflow\.test\.js/);
   assert.match(deploy, /OFFLINE_LOOPBACK_TCP_OK/);
   assert.match(deploy, /OFFLINE_GATE_EFFECTIVE_PROPERTIES_OK/);
   assert.match(
     deploy,
-    /node --test --test-reporter=dot --test-name-pattern="login and auth me\|one live session observes\|unavailable entitlement policy"[\s\\]+server\/tests\/phase4_server_integration\.test\.js/
+    /node --test --test-reporter=dot --test-name-pattern="login and auth me"[\s\\]+server\/tests\/phase4_server_integration\.test\.js/
   );
   assert.match(
     phase4Integration,
@@ -141,7 +142,6 @@ test('deployment inventory ships the exact v28 implementation and focused releas
     deploy,
     /--test-name-pattern="trusted source manifest pins the sanitizer closure\|[^"\r\n]+deploy pins trusted sanitizer closure"[\s\\]+server\/tests\/deployment_source_trust\.test\.js/
   );
-  assert.match(deploy, /node --test server\/tests\/knowledge_tenant_release_gate_inventory\.test\.js/);
 
   const runtimeConfigPath = path.join(serverRoot, 'config', 'runtime_config.js');
   const runtimeConfigHash = sha256File(runtimeConfigPath);

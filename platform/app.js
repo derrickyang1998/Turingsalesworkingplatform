@@ -10372,7 +10372,7 @@ function renderAdminUserTable(users) {
     var quotaControl = safeId
       ? '<div style="display:flex;align-items:center;gap:6px;min-width:158px">'
         + '<input id="ad_aiQuota_' + safeId + '" type="number" min="0" step="1" value="' + safeQuota + '" '
-        + 'aria-label="AI Token 配额" style="width:96px;height:30px;padding:4px 7px;border:1px solid #dfe5ef;border-radius:6px">'
+        + 'aria-label="个人终身 AI 配额" style="width:96px;height:30px;padding:4px 7px;border:1px solid #dfe5ef;border-radius:6px">'
         + '<button type="button" class="btn btn-xs" onclick="adminUpdateAiQuota(' + safeId + ')">保存</button></div>'
       : '<span style="opacity:.5">不可编辑</span>';
     return '<tr><td><strong>' + esc(u.display_name || u.username || '-') + '</strong>'
@@ -10553,7 +10553,7 @@ function renderAdminOrganizations(organizations) {
   organizations.forEach(function(organization) {
     adminOrganizationsById[String(organization.id)] = organization;
   });
-  container.innerHTML = '<table><thead><tr><th>组织</th><th>套餐</th><th>订阅到期</th><th>团队</th><th>有效成员</th><th>已撤销</th><th>操作</th></tr></thead><tbody>'
+  container.innerHTML = '<table><thead><tr><th>组织</th><th>套餐</th><th>订阅到期</th><th>AI 月额度</th><th>团队</th><th>有效成员</th><th>已撤销</th><th>操作</th></tr></thead><tbody>'
     + organizations.map(function(organization) {
       var id = Number(organization.id);
       var safeId = Number.isSafeInteger(id) && id > 0 ? id : 0;
@@ -10613,9 +10613,54 @@ function renderAdminOrganizations(organizations) {
           + '<span class="tm-member-access-note" style="width:100%">' + esc(subscriptionLabel) + '</span>'
           + '</div>';
       }
+      var aiQuota = organization.ai_monthly_quota && typeof organization.ai_monthly_quota === 'object'
+        ? organization.ai_monthly_quota
+        : null;
+      var aiQuotaCell = '<span class="tm-member-access-note">策略不可用</span>';
+      if (aiQuota) {
+        var quotaUsed = Number(aiQuota.used);
+        var quotaLimit = aiQuota.limit === null ? null : Number(aiQuota.limit);
+        var quotaUsedLabel = Number.isSafeInteger(quotaUsed) && quotaUsed >= 0
+          ? quotaUsed.toLocaleString('zh-CN')
+          : '-';
+        var quotaLimitLabel = quotaLimit === null
+          ? '不限额'
+          : Number.isSafeInteger(quotaLimit) && quotaLimit >= 0
+            ? quotaLimit.toLocaleString('zh-CN')
+            : '-';
+        var quotaStatusLabels = {
+          unlimited: '不限额',
+          active: '可用',
+          exhausted: '已用尽',
+          disabled: '已停用'
+        };
+        var quotaSummary = quotaUsedLabel + ' / ' + quotaLimitLabel;
+        var quotaMeta = (aiQuota.period_key || 'UTC 月度') + ' · ' +
+          (quotaStatusLabels[aiQuota.status] || aiQuota.status || '未知');
+        if (typeof aiQuota.period_end === 'string' && aiQuota.period_end) {
+          quotaMeta += ' · UTC 截止 ' + aiQuota.period_end.replace('T', ' ').replace('Z', '');
+        }
+        var quotaOverage = Number(aiQuota.overage_tokens);
+        if (Number.isSafeInteger(quotaOverage) && quotaOverage > 0) {
+          quotaMeta += ' · 超额 ' + quotaOverage.toLocaleString('zh-CN');
+        }
+        var canManageAiQuota = organization.allowed_actions &&
+          organization.allowed_actions.manage_ai_quota === true;
+        aiQuotaCell = '<div style="min-width:220px"><strong>' + esc(quotaSummary) + '</strong>'
+          + '<div class="tm-member-access-note">' + esc(quotaMeta) + '</div></div>';
+        if (canManageAiQuota && Number.isSafeInteger(Number(aiQuota.policy_version))) {
+          aiQuotaCell = '<div style="display:flex;align-items:center;gap:6px;min-width:250px;flex-wrap:wrap">'
+            + '<label style="display:flex;align-items:center;gap:4px;font-size:12px;white-space:nowrap"><input type="checkbox" id="ad_organizationAiQuotaUnlimited_' + safeId + '"' + (quotaLimit === null ? ' checked' : '') + ' onchange="toggleAdminOrganizationAiQuotaLimit(' + safeId + ')">不限额</label>'
+            + '<input type="number" min="0" step="1" id="ad_organizationAiQuota_' + safeId + '" class="form-control" style="width:118px;height:34px;padding:4px 8px" value="' + (quotaLimit === null ? '' : esc(String(quotaLimit))) + '" placeholder="输入额度" title="0 表示停用"' + (quotaLimit === null ? ' disabled' : '') + '>'
+            + '<button type="button" id="ad_organizationAiQuotaSave_' + safeId + '" class="btn btn-xs" title="保存组织月度 AI 配额" onclick="saveAdminOrganizationAiQuota(' + safeId + ')">保存</button>'
+            + '<span class="tm-member-access-note" style="width:100%">' + esc(quotaSummary + ' · ' + quotaMeta) + '</span>'
+            + '</div>';
+        }
+      }
       return '<tr><td><strong>' + esc(organization.name || '-') + '</strong><div style="font-size:11px;opacity:.55">' + esc(organization.code || '-') + '</div><div class="tm-member-access-note">企业所有者：' + esc(ownerName) + '</div></td>'
         + '<td>' + planCell + '</td>'
         + '<td>' + subscriptionCell + '</td>'
+        + '<td>' + aiQuotaCell + '</td>'
         + '<td>' + (Number(organization.team_count) || 0) + '</td>'
         + '<td>' + (Number(organization.active_member_count) || 0) + '</td>'
         + '<td>' + (Number(organization.revoked_member_count) || 0) + '</td>'
@@ -10750,6 +10795,84 @@ async function saveAdminOrganizationSubscription(organizationId) {
     input.disabled = false;
     if (button) button.disabled = false;
   }
+}
+async function saveAdminOrganizationAiQuota(organizationId) {
+  var parsedId = Number(organizationId);
+  var organization = adminOrganizationsById[String(parsedId)];
+  var input = document.getElementById('ad_organizationAiQuota_' + parsedId);
+  var unlimited = document.getElementById('ad_organizationAiQuotaUnlimited_' + parsedId);
+  var button = document.getElementById('ad_organizationAiQuotaSave_' + parsedId);
+  var quota = organization && organization.ai_monthly_quota;
+  var version = Number(quota && quota.policy_version);
+  if (!Number.isSafeInteger(parsedId) || parsedId < 1 || !organization || !input ||
+      !Number.isSafeInteger(version) || version < 1) return false;
+  var rawLimit = String(input.value || '').trim();
+  var monthlyLimit = unlimited && unlimited.checked === true ? null : NaN;
+  if (monthlyLimit !== null) {
+    if (!rawLimit) {
+      toast('请输入月度配额，或选择不限额', 'error');
+      return false;
+    }
+    if (!/^\d+$/.test(rawLimit)) {
+      toast('月度配额必须是非负整数', 'error');
+      return false;
+    }
+    monthlyLimit = Number(rawLimit);
+    if (!Number.isSafeInteger(monthlyLimit) || monthlyLimit < 0) {
+      toast('月度配额超出有效范围', 'error');
+      return false;
+    }
+  }
+  var currentLimit = quota.limit === null ? null : Number(quota.limit);
+  if (monthlyLimit === currentLimit) {
+    toast('组织月度 AI 配额未发生变化');
+    return false;
+  }
+  var reason = typeof prompt === 'function'
+    ? prompt('请输入本次组织月度 AI 配额变更原因')
+    : null;
+  if (reason === null) return false;
+  reason = String(reason || '').trim();
+  if (!reason || reason.length > 500) {
+    toast('请输入 1-500 个字符的配额变更原因', 'error');
+    return false;
+  }
+  input.disabled = true;
+  if (button) button.disabled = true;
+  try {
+    var response = await apiFetch('/admin/organizations/' + parsedId + '/ai-quota', {
+      method: 'PUT',
+      body: JSON.stringify({
+        monthly_limit: monthlyLimit,
+        expected_version: version,
+        reason: reason
+      })
+    });
+    var data = await response.json();
+    if (!response.ok) {
+      if (data && data.code === 'AI_ORGANIZATION_QUOTA_VERSION_CONFLICT') {
+        await loadAdminOrganizations();
+      }
+      throw new Error(data.error || '组织月度 AI 配额更新失败');
+    }
+    toast('组织月度 AI 配额已更新');
+    await loadAdminOrganizations();
+    return true;
+  } catch (error) {
+    toast(error.message || '组织月度 AI 配额更新失败', 'error');
+    return false;
+  } finally {
+    input.disabled = false;
+    if (button) button.disabled = false;
+  }
+}
+function toggleAdminOrganizationAiQuotaLimit(organizationId) {
+  var parsedId = Number(organizationId);
+  var unlimited = document.getElementById('ad_organizationAiQuotaUnlimited_' + parsedId);
+  var input = document.getElementById('ad_organizationAiQuota_' + parsedId);
+  if (!unlimited || !input) return;
+  input.disabled = unlimited.checked === true;
+  if (!input.disabled && typeof input.focus === 'function') input.focus();
 }
 function adminGovernanceRoleLabel(role) {
   var labels = {

@@ -167,7 +167,8 @@ const planEntitlementService = createPlanEntitlementService(db);
 const subscriptionExpiryService = createSubscriptionExpiryService(db);
 const organizationGovernanceService = createOrganizationGovernanceService(db, {
   planEntitlementService,
-  subscriptionExpiryService
+  subscriptionExpiryService,
+  aiQuotaService
 });
 const {
   createCampaignPptBridgeHandler

@@ -42,9 +42,10 @@
       25,
       26,
       27,
-      28
+      28,
+      29
     ],
-    "targetVersion": 28,
+    "targetVersion": 29,
     "runs": 2,
     "deterministicAppendTables": [
       "activity_log"
@@ -164,6 +165,10 @@
       "sha256": "fd11df3b4cb16ea883c0b90d48c4ce340a9ece47321192f711e75f9282aa6d14"
     },
     {
+      "path": "server/migrations/029_organization_monthly_ai_quota.js",
+      "sha256": "17f680eda4fdc945f7d6408c41229b91b529f075e3b5e9addf51285b5aa267bd"
+    },
+    {
       "path": "server/migrations/baselines/legacy_v1.js",
       "sha256": "13e631ca7e2aef57e39f7dbc38e6f03e2d5323a11f38c6ce31239d793911812c"
     },
@@ -185,7 +190,7 @@
     },
     {
       "path": "server/db.js",
-      "sha256": "f66fe2cd3a1cbc952c51d72222df0be2c87eec89ce9227621f9afa62051e9bf8"
+      "sha256": "6e90baa0991df84d45faaa1c4bfddb5d6cf48c95c19817452637cf578512edc0"
     },
     {
       "path": "server/package-lock.json",
@@ -265,11 +270,11 @@
     },
     {
       "path": "server/scripts/sanitization_manifest.json",
-      "sha256": "8e532cf818078adb7c07c676c251377954ed4b9bda399e0134e4de710daf046f"
+      "sha256": "c6c70e38a08184a0d9277d3d02d5e535c9cf8124cba0792a4b91da6f6ec3b8b1"
     },
     {
       "path": "server/scripts/sanitize_production_shape.js",
-      "sha256": "ee795ed6014b25f3d365b80de2f30d467c22ba01b1dfa8ae4f498e86fd87875f"
+      "sha256": "cdc498741d84da024683c735b8d8311e2ebbc06ea03a69bfb5ed4b30495824b8"
     },
     {
       "path": "server/scripts/trusted_parser_runtime_verifier.js",
@@ -281,7 +286,7 @@
     },
     {
       "path": "server/scripts/verify_campaign_migration_gate.js",
-      "sha256": "678613634282321e00a057d626a6ac4d7d6a550293c44268c3dd16c1015dd628"
+      "sha256": "8a141cbd800f04fb6ebc4e59d1ad2517bcb771eef31e2015246a4efebdef65b3"
     },
     {
       "path": "server/routes.js",
@@ -289,7 +294,7 @@
     },
     {
       "path": "server/routes_admin_ai_quota.js",
-      "sha256": "903a61b32dabf30fd19bf2a94cc2bcc7125ab5e4f4770e04ec199a9cfcd806de"
+      "sha256": "d7fb75495899d218678a7667ac648d3302e84693daf4896e813515af5d6b12e0"
     },
     {
       "path": "server/routes_admin_tenant_directory.js",
@@ -333,7 +338,7 @@
     },
     {
       "path": "server/server.js",
-      "sha256": "39a8d11ab4ec0282d5b074aef4aaa8b8a1baafe4108800fd614d27af9cd2dd4e"
+      "sha256": "0336ae57b6dbd036387c867f1d56f716b4cede2687997fc5220e1bdb3f40081e"
     },
     {
       "path": "server/workflow_engine.js",
@@ -349,7 +354,7 @@
     },
     {
       "path": "server/services/ai_quota_service.js",
-      "sha256": "d7ca0241b5321197d1435c836db4b96d5e3f0379daa1fe73d92a454f6a8ef3ef"
+      "sha256": "7b8616fd33de3b2479787bc441b155abe83100d004a5059c6701300220fbe454"
     },
     {
       "path": "server/services/ai_service.js",
@@ -453,7 +458,7 @@
     },
     {
       "path": "server/services/latest_ui_compat_service.js",
-      "sha256": "8d45e053130f3706d8cd8da54870a3395890ffb904bd3cac6945435c2edca44c"
+      "sha256": "681b991f174de78233baf5bb5b9ce8d3d203fedf8cbfc8543a1ebd41b48b90f4"
     },
     {
       "path": "server/services/llm_service.js",
@@ -477,7 +482,7 @@
     },
     {
       "path": "server/services/organization_governance_service.js",
-      "sha256": "04a870f6b238498f3294f6bc3718d0b7fb23446db77b1089e354178983347f2a"
+      "sha256": "b45c5d5d74eb6d3ed28cab43489a53b073867f12c43039e471b9e8663444b06a"
     },
     {
       "path": "server/services/organization_methodology_service.js",
@@ -557,7 +562,7 @@
     },
     {
       "path": "server/services/token_usage_service.js",
-      "sha256": "d65dc138df57467b854c8971ef9bd4a1d7590c425d2b2d829c5e4daae4d9314e"
+      "sha256": "1ad7293907191a65dba7147902ad4c881c04fd44e7cd186ef5c8f10a1f98f7ec"
     },
     {
       "path": "server/services/upload_sandbox_service.js",

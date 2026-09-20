@@ -338,6 +338,61 @@ test('projects subscription status while reserving expiry management to platform
   }
 });
 
+test('projects shared monthly AI quota while reserving quota management to platform administrators', () => {
+  const db = openFixture();
+  try {
+    const { createOrganizationGovernanceService } = loadService();
+    const aiQuotaService = {
+      projectOrganizationQuotas({ organizationIds }) {
+        return organizationIds.map((organizationId) => ({
+          organization_id: organizationId,
+          period: 'utc_calendar_month',
+          period_key: '2026-09',
+          period_start: '2026-09-01T00:00:00Z',
+          period_end: '2026-10-01T00:00:00Z',
+          used: organizationId === 10 ? 1200 : 300,
+          limit: organizationId === 10 ? 5000 : null,
+          remaining: organizationId === 10 ? 3800 : null,
+          overage_tokens: 0,
+          utilization_percent: organizationId === 10 ? 24 : null,
+          status: organizationId === 10 ? 'active' : 'unlimited',
+          policy_version: 2
+        }));
+      }
+    };
+    const service = createOrganizationGovernanceService(db, { aiQuotaService });
+    const platformView = service.listOrganizations({
+      actor: actor(1, 'admin'),
+      requestId: 'organizations-with-ai-quota',
+      query: { limit: 2 }
+    });
+    assert.deepEqual(platformView.organizations[0].ai_monthly_quota, {
+      period: 'utc_calendar_month',
+      period_key: '2026-09',
+      period_start: '2026-09-01T00:00:00Z',
+      period_end: '2026-10-01T00:00:00Z',
+      used: 1200,
+      limit: 5000,
+      remaining: 3800,
+      overage_tokens: 0,
+      utilization_percent: 24,
+      status: 'active',
+      policy_version: 2
+    });
+    assert.equal(platformView.organizations[0].allowed_actions.manage_ai_quota, true);
+
+    const ownerView = service.listOrganizations({
+      actor: actor(2),
+      requestId: 'organization-ai-quota-owner-view',
+      query: {}
+    });
+    assert.equal(ownerView.organizations[0].ai_monthly_quota.status, 'unlimited');
+    assert.equal(ownerView.organizations[0].allowed_actions.manage_ai_quota, false);
+  } finally {
+    db.close();
+  }
+});
+
 test('applies bounded organization and member search filters before pagination', () => {
   const db = openFixture();
   try {
