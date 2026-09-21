@@ -14029,6 +14029,9 @@ install -d -o root -g root -m 0700 "$AcceptedEvidenceRoot"
 test ! -e "$AIConcurrencyAcceptanceEvidence"
 cd "$LiveDir"
 AIConcurrencyAcceptanceOutput="$(
+  NODE_ENV=production \
+  TM_ENV_FILE=/etc/turingmarket/turingmarket.env \
+  DB_PATH=/var/lib/turingmarket/db/turingmarket.db \
   node server/scripts/verify_ai_concurrency_acceptance.js \
     --run-id "__RUN_ID__" \
     --evidence "$AIConcurrencyAcceptanceEvidence" \

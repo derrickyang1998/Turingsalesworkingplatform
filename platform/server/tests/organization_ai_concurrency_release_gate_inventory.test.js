@@ -94,6 +94,10 @@ test('production cutover runs reversible AI concurrency acceptance before durabl
   assert.ok(acceptanceFacts > concurrencyAcceptance);
   assert.ok(publicActivation > acceptanceFacts);
   assert.match(deploy, /AI_CONCURRENCY_ACCEPTANCE_OK/);
+  assert.match(
+    deploy,
+    /NODE_ENV=production[\s\\]+TM_ENV_FILE=\/etc\/turingmarket\/turingmarket\.env[\s\\]+DB_PATH=\/var\/lib\/turingmarket\/db\/turingmarket\.db[\s\\]+node server\/scripts\/verify_ai_concurrency_acceptance\.js/
+  );
   assert.match(deploy, /server\/tests\/verify_ai_concurrency_acceptance\.test\.js/);
   assert.match(deploy, /'aiConcurrencyAcceptance': aiConcurrencyAcceptance/);
   assert.match(deploy, /assert_ai_concurrency_acceptance_binding/);
