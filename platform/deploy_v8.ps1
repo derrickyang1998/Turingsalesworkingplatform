@@ -33,8 +33,8 @@ $EXPECTED_PPT_SHA256 = "1fc70495e7ce641dadc76d751a49eab6ed261640293d2b8e691cea8b
 $TRUSTED_SOURCE_GATE_RELATIVE_PATH = "server\scripts\trusted_production_source_gate.js"
 $TRUSTED_SOURCE_MANIFEST_RELATIVE_PATH = "server\scripts\trusted_production_source_manifest.json"
 $TRUSTED_RUNTIME_CONFIG_RELATIVE_PATH = "server\config\runtime_config.js"
-$EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "da4ee46cd7e2bc433b5dddd6dccee889205125778516598ddba4049db27ed832"
-$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "c3ab890668f20e77459441836d0bdd1b86a3212f5d80266f78b175a6086d9184"
+$EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "a0dcaf3676fe9e4edad01c503b08d6dbf9aef02105be75306bcbd60e0ce61c6f"
+$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "dc1eceb25435877f3f825eb5dc87d3944eac26a1de81e330c0cd84594fae76c7"
 $EXPECTED_TRUSTED_RUNTIME_CONFIG_SHA256 = "e689e251f313c48b4f27279b1ef44639e3c1a68bb3c255f6ddfa86cabbfaa27d"
 $EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256 = "542e0daf328b53cac12b0a54dc45d019b4c15685fe87b851a41272b7673e408c"
 $EXPECTED_TRUSTED_PARSER_VERIFIER_SHA256 = "7f9efaac02675b21e025891a400474cc7481c1adaf58c88bd8b356d5276f2eaa"
@@ -252,6 +252,7 @@ $FILES = @(
     "server\scripts\verify_phase4_one_request_replay_probe.js",
     "server\scripts\verify_campaign_migration_gate.js",
     "server\scripts\verify_ai_concurrency_acceptance.js",
+    "server\scripts\verify_protected_credentials.js",
     "server\systemd\turingmarket-gate-cleanup.service",
     "server\systemd\turingmarket-parser.manifest.json",
     "server\systemd\turingmarket-parser.slice",
@@ -353,6 +354,7 @@ $FILES = @(
     "server\tests\admin_ai_concurrency_ui.test.js",
     "server\tests\organization_ai_concurrency_release_gate_inventory.test.js",
     "server\tests\verify_ai_concurrency_acceptance.test.js",
+    "server\tests\protected_credentials_release_guard.test.js",
     "server\tests\organization_governance_routes.test.js",
     "server\tests\organization_ownership_transfer_migration.test.js",
     "server\tests\influencer_tenant_ownership_migration.test.js",
@@ -10975,6 +10977,7 @@ node --test \
   server/tests/organization_ai_concurrency_migration.test.js \
   server/tests/ai_concurrency_service.test.js \
   server/tests/verify_ai_concurrency_acceptance.test.js \
+  server/tests/protected_credentials_release_guard.test.js \
   server/tests/admin_ai_concurrency_routes.test.js \
   server/tests/admin_ai_concurrency_ui.test.js \
   server/tests/organization_ai_concurrency_release_gate_inventory.test.js \
@@ -13514,6 +13517,34 @@ process.stdout.write(JSON.stringify({ expected, final }));
 NODE
 }
 
+assert_protected_credentials_unchanged() {
+  local ProtectedCredentialCount
+  local ProtectedCredentialsOutput
+  ProtectedCredentialCount="$(python3 - "$CutoverSnapshot/security-overlay.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding='utf-8') as handle:
+    overlay = json.load(handle)
+if (overlay.get('schemaVersion') != 1 or overlay.get('match') != ['id', 'username'] or
+        not isinstance(overlay.get('users'), list)):
+    raise SystemExit('Protected credential overlay is invalid')
+print(len(overlay['users']))
+PY
+)"
+  cd "$LiveDir"
+  ProtectedCredentialsOutput="$(
+    NODE_ENV=production \
+    TM_ENV_FILE=/etc/turingmarket/turingmarket.env \
+    DB_PATH="$DatabasePath" \
+    node server/scripts/verify_protected_credentials.js \
+      --database "$DatabasePath" \
+      --overlay "$CutoverSnapshot/security-overlay.json"
+  )"
+  test "$ProtectedCredentialsOutput" = "PROTECTED_CREDENTIALS_UNCHANGED $ProtectedCredentialCount"
+  printf '%s\n' "$ProtectedCredentialsOutput"
+}
+
 record_acceptance_facts() {
   test ! -e "$AcceptanceFacts"
   test ! -e "$AcceptanceFacts.next"
@@ -14044,6 +14075,7 @@ test "$(stat -c '%U:%G:%a:%h' "$AIConcurrencyAcceptanceEvidence")" = "root:root:
 AIConcurrencyAcceptanceSha256="$(sha256sum "$AIConcurrencyAcceptanceEvidence" | awk '{print $1}')"
 [[ "$AIConcurrencyAcceptanceSha256" =~ ^[0-9a-f]{64}$ ]]
 printf '%s\n' "AI_CONCURRENCY_ACCEPTANCE_EVIDENCE_OK $AIConcurrencyAcceptanceSha256"
+assert_protected_credentials_unchanged
 record_acceptance_facts
 
 install -d -o root -g root -m 0700 "$AcceptedEvidenceRoot"
@@ -14153,6 +14185,7 @@ record_phase accepted-public-enabled
 # The exact verifier retries only transient 503/connection states while Nginx
 # finishes a graceful reload, then enforces every public route contract.
 run_exact_public_nginx_gate - 80
+assert_protected_credentials_unchanged
 assert_final_acceptance_facts
 public_release_guard disarm \
   --state-file "$PublicGateGuard" \

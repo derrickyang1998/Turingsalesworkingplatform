@@ -13,6 +13,7 @@
     "publicGuard": "server/scripts/public_release_guard.sh",
     "parserSelfTest": "server/scripts/upload_sandbox_self_test.js",
     "aiConcurrencyAcceptance": "server/scripts/verify_ai_concurrency_acceptance.js",
+    "protectedCredentialVerifier": "server/scripts/verify_protected_credentials.js",
     "parserVerifier": "server/scripts/trusted_parser_runtime_verifier.js",
     "parserManifest": "server/systemd/turingmarket-parser.manifest.json",
     "parserServiceUnit": "server/systemd/turingmarket-parser@.service",
@@ -293,6 +294,10 @@
     {
       "path": "server/scripts/verify_ai_concurrency_acceptance.js",
       "sha256": "5249bfba1a6dd33b9077038418a89d3876d6190b17007e843c8ef17a3257e0f8"
+    },
+    {
+      "path": "server/scripts/verify_protected_credentials.js",
+      "sha256": "b317071496bff7e62dcba9033e88a1a17f7bf885c8dd0921f6e84cc158af4913"
     },
     {
       "path": "server/scripts/verify_campaign_migration_gate.js",
