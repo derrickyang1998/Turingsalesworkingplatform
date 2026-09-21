@@ -1,5 +1,21 @@
 # Changelog - TuringMarket 图灵商务在线工作平台
 
+## v0.9.26a-production-credential-protection-hotfix (Production Deployed, 2026-09-21) - 生产管理员凭据保护
+
+### 根因与恢复 / Root Cause And Restoration
+- 本次密码异常不是普通功能更新或数据库迁移自动修改，而是发布验收复用历史旧密码，在登录失败后执行了未获当次所有者授权的凭据覆盖。恢复前建立受保护生产备份，随后按所有者当次明确指令恢复凭据、写入脱敏审计并撤销全部旧会话；版本记录不保存密码明文。
+
+### 强制保护 / Enforced Protection
+- 发布、迁移、健康检查和验收禁止使用真实所有者/平台管理员账号 `derrick`；自动化只能使用内部会话注入或专用可撤销冒烟身份。登录失败只允许阻断发布，绝不能触发密码轮换或直接写入 `users.password_hash`。
+- 新增可信 `verify_protected_credentials.js` 门禁，以不可变切换快照核对线上用户身份集合及全部密码哈希且不输出哈希；在可变业务验收后及公网恢复后的最终接纳前各执行一次，任何漂移均在既有公网守护与回滚边界内失败关闭。
+- 凭据恢复仅接受账号所有者在当前任务中的明确指令，并强制受保护备份、脱敏审计和全部会话撤销；项目代理规则、运行手册、部署文档、工程交接、可信源码清单与固定摘要已同步。
+
+### 验证与生产 / Verification And Production
+- 本地保护行为与发布位置 `4/4`、凭据与相关发布矩阵 `37/37`、可信源码 `32/32`、部署合同 `64` 通过、1 项分支限定跳过、0 失败；正式本地预检返回 `LOCAL_DEPLOY_PREFLIGHT_OK`。
+- 生产提交 `a33a122`、运行 `dc3971bef082404cbb108d79b4924e1e` 返回 `DEPLOY_OK`、`RETENTION_CLEANUP_OK`、`PUBLIC_TRAFFIC_RESTORED`、`FINAL_ACCEPTANCE_FACTS_OK` 与 `PUBLIC_RELEASE_GUARD_VERIFIED`；两次门禁均为 `PROTECTED_CREDENTIALS_UNCHANGED 38`。
+- 生产备份为 `/root/turingmarket/backups/v060-crm-sales-workspace-20260921-105104`，清单 SHA-256 为 `c3728ac15028e089207d73e5376c6fbb19d226607aafce616238d6f37a626d4c`，候选 SHA-256 为 `4345d9bf2b6590c8a079272f4ce2294d48247660ecf74ec9edd70c10d8cbfd37`。
+- 独立权威回环复核：管理员登录 `200`、身份 `200`、退出 `200`、健康 `200`；schema v30、SQLite `quick_check=ok`、外键异常 0、最终活动会话 0。本热修复不改 UI、schema、业务模块或所有者当次指定密码。
+
 ## v0.9.26-ai-provider-concurrency-reservation (Production Deployed, 2026-09-21) - AI Provider 持久并发预留
 
 ### 交付与范围 / Delivery And Scope
