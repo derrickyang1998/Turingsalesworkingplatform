@@ -7,6 +7,9 @@ Non-negotiables / 禁止事项：
 - Never write real passwords, JWT secrets, DeepSeek keys, Tavily keys, Feishu webhook values, cookies, or private server evidence into Git, public notes, command arguments, or chat output. / 禁止把真实密码、JWT 密钥、DeepSeek/Tavily 密钥、飞书 Webhook、Cookie 或服务器私密证据写入 Git、公开笔记、命令参数或聊天输出。
 - Preserve CRM, AI, knowledge-base, influencer, and PPT behavior. The production UI must keep `ppt.js?v=20260702v916kbbridge` and `window.tmPPTBuild = "20260702-v916-kb-bridge-client-cn"`. / 保持 CRM、AI、知识库、红人和 PPT 行为不变；生产 UI 必须保留上述 PPT 版本标记。
 - Rotate with `invalidate_all_sessions: true` unless an incident lead explicitly records a narrower scope. / 除非事件负责人书面记录更小范围，否则轮换时必须使用 `invalidate_all_sessions: true`。
+- Never use a protected owner/platform-administrator account for release smoke or acceptance. Use internal session injection or a dedicated revocable smoke identity. / 禁止使用受保护的所有者/平台管理员账号做发布冒烟或验收；必须使用内部会话注入或专用、可撤销的冒烟身份。
+- A failed login is a release blocker, never implicit authorization to reset a password. Only an explicit current-task instruction from the account owner permits break-glass recovery. / 登录失败只能阻断发布，绝不构成重置密码的隐含授权；只有账号所有者在当前任务中的明确指令才能允许应急恢复。
+- Every production cutover compares the cutover security overlay with the live user identity set and password hashes after acceptance mutations and again before final public acceptance. Any drift fails closed. / 每次生产切换都必须在业务验收变更后及公网最终验收前两次比较切换安全覆盖层与线上用户身份集合、密码哈希；任何漂移均失败关闭。
 
 ## Preparation / 准备
 

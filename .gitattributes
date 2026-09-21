@@ -184,3 +184,6 @@ platform/server/tests/organization_ai_concurrency_migration.test.js text eol=lf
 platform/server/tests/organization_ai_concurrency_release_gate_inventory.test.js text eol=lf
 platform/server/scripts/verify_ai_concurrency_acceptance.js text eol=lf
 platform/server/tests/verify_ai_concurrency_acceptance.test.js text eol=lf
+platform/server/scripts/verify_protected_credentials.js text eol=lf
+platform/server/tests/protected_credentials_release_guard.test.js text eol=lf
+platform/server/server_full.js -text
