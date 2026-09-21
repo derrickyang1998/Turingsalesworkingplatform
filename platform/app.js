@@ -10512,6 +10512,7 @@ function adminUserPreviousPage() {
 var adminSelectedOrganizationId = null;
 var adminOrganizationsById = {};
 var adminOrganizationMembersById = {};
+var adminOrganizationBillingHistoryById = {};
 var adminPlanCatalog = [];
 var adminOwnerTransferSnapshot = null;
 var adminOwnerTransferSubmitting = false;
@@ -10556,10 +10557,142 @@ function adminSubscriptionLocalValue(expiresAt) {
   return date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate())
     + 'T' + pad(date.getHours()) + ':' + pad(date.getMinutes()) + ':' + pad(date.getSeconds());
 }
+function adminBillingMonth(offset, now) {
+  var date = now && typeof now.getUTCFullYear === 'function' ? now : new Date();
+  if (!Number.isFinite(date.getTime())) date = new Date();
+  var shift = Number(offset);
+  if (!Number.isSafeInteger(shift)) shift = 0;
+  var month = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + shift, 1));
+  return String(month.getUTCFullYear()).padStart(4, '0') + '-' + String(month.getUTCMonth() + 1).padStart(2, '0');
+}
+function formatAdminBillingInteger(value) {
+  var parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 0) return '-';
+  return String(parsed).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+function formatAdminBillingUsdCents(value) {
+  var parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 0) return 'USD -';
+  var digits = String(parsed).padStart(3, '0');
+  var dollars = digits.slice(0, -2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return 'USD ' + dollars + '.' + digits.slice(-2);
+}
+function adminBillingStatusLabel(status) {
+  var labels = {
+    disabled: '未启用',
+    estimated: '预估',
+    scheduled: '已排期',
+    closable: '可结账',
+    closed: '已结账'
+  };
+  return labels[status] || '状态未知';
+}
+function renderAdminOrganizationBillingCell(organization) {
+  var id = Number(organization && organization.id);
+  var safeId = Number.isSafeInteger(id) && id > 0 ? id : 0;
+  var billing = organization && organization.billing && typeof organization.billing === 'object'
+    ? organization.billing
+    : null;
+  if (!billing) return '<span class="tm-member-access-note">账单不可用</span>';
+  var canManage = organization.allowed_actions && organization.allowed_actions.manage_billing === true;
+  var status = adminBillingStatusLabel(billing.status);
+  var month = /^\d{4}-\d{2}$/.test(String(billing.month || '')) ? billing.month : '-';
+  var effectiveVersion = Number(billing.policy_version);
+  var policyLabel = Number.isSafeInteger(effectiveVersion) && effectiveVersion > 0
+    ? '策略 v' + effectiveVersion
+    : '策略版本未知';
+  var summary = '<div style="min-width:180px">'
+    + '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"><strong>' + esc(status) + '</strong><span class="tm-member-access-note">' + esc(month) + '</span></div>'
+    + '<div class="tm-member-access-note">' + esc(policyLabel) + ' · ' + esc(billing.currency || 'USD') + '</div>'
+    + '</div>';
+  if (!canManage) return summary;
+  var baseFee = Number.isSafeInteger(Number(billing.base_fee_cents)) && Number(billing.base_fee_cents) >= 0
+    ? String(Number(billing.base_fee_cents))
+    : '';
+  var includedTokens = Number.isSafeInteger(Number(billing.included_tokens)) && Number(billing.included_tokens) >= 0
+    ? String(Number(billing.included_tokens))
+    : '';
+  var overageRate = Number.isSafeInteger(Number(billing.overage_cents_per_million_tokens)) && Number(billing.overage_cents_per_million_tokens) >= 0
+    ? String(Number(billing.overage_cents_per_million_tokens))
+    : '';
+  var nextMonth = adminBillingMonth(1);
+  var endedMonth = adminBillingMonth(-1);
+  return '<div style="display:flex;flex-direction:column;gap:6px;min-width:220px">'
+    + summary
+    + '<button type="button" id="ad_organizationBillingToggle_' + safeId + '" class="btn btn-xs" aria-expanded="false" aria-controls="ad_organizationBillingEditor_' + safeId + '" title="管理组织账单" onclick="toggleAdminOrganizationBillingEditor(' + safeId + ')">管理</button>'
+    + '<div id="ad_organizationBillingEditor_' + safeId + '" hidden onkeydown="handleAdminOrganizationBillingKeydown(event,' + safeId + ')" style="padding-top:6px;border-top:1px solid rgba(15,23,42,.1);font-size:12px">'
+    + '<label style="display:flex;align-items:center;gap:5px;margin-bottom:6px"><input type="checkbox" id="ad_organizationBillingEnabled_' + safeId + '"' + (billing.billing_enabled === true ? ' checked' : '') + '>启用 USD 计费</label>'
+    + '<label style="display:block;margin-bottom:6px">基础费（美分）<input type="number" id="ad_organizationBillingBaseFeeCents_' + safeId + '" min="0" step="1" inputmode="numeric" class="form-control" style="height:32px;padding:4px 7px" value="' + esc(baseFee) + '"></label>'
+    + '<label style="display:block;margin-bottom:6px">包含 Token<input type="number" id="ad_organizationBillingIncludedTokens_' + safeId + '" min="0" step="1" inputmode="numeric" class="form-control" style="height:32px;padding:4px 7px" value="' + esc(includedTokens) + '"></label>'
+    + '<label style="display:block;margin-bottom:6px">超额费率（美分/百万 Token）<input type="number" id="ad_organizationBillingOverageCentsPerMillion_' + safeId + '" min="0" step="1" inputmode="numeric" class="form-control" style="height:32px;padding:4px 7px" value="' + esc(overageRate) + '"></label>'
+    + '<label style="display:block;margin-bottom:6px">生效月份（UTC）<input type="month" id="ad_organizationBillingEffectiveMonth_' + safeId + '" min="' + esc(nextMonth) + '" class="form-control" style="height:32px;padding:4px 7px" value="' + esc(nextMonth) + '"></label>'
+    + '<button type="button" id="ad_organizationBillingPolicySave_' + safeId + '" class="btn btn-xs" title="保存下月或更晚月份的账单策略" onclick="saveAdminOrganizationBillingPolicy(' + safeId + ')">保存策略</button>'
+    + '<div style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(15,23,42,.1)">'
+    + '<label style="display:block;margin-bottom:6px">已结束月份<input type="month" id="ad_organizationBillingHistoryMonth_' + safeId + '" max="' + esc(endedMonth) + '" class="form-control" style="height:32px;padding:4px 7px" value="' + esc(endedMonth) + '"></label>'
+    + '<button type="button" id="ad_organizationBillingHistoryLoad_' + safeId + '" class="btn btn-xs" title="查询已结束月份账单" onclick="loadAdminOrganizationBillingMonth(' + safeId + ')">查询</button>'
+    + '<div id="ad_organizationBillingHistoryResult_' + safeId + '" class="tm-member-access-note" aria-live="polite" style="margin-top:6px"></div>'
+    + '</div></div></div>';
+}
+function toggleAdminOrganizationBillingEditor(organizationId) {
+  var parsedId = Number(organizationId);
+  var trigger = document.getElementById('ad_organizationBillingToggle_' + parsedId);
+  var editor = document.getElementById('ad_organizationBillingEditor_' + parsedId);
+  if (!Number.isSafeInteger(parsedId) || parsedId < 1 || !trigger || !editor) return false;
+  var opening = editor.hidden === true;
+  editor.hidden = !opening;
+  trigger.setAttribute('aria-expanded', opening ? 'true' : 'false');
+  if (opening) {
+    var firstInput = document.getElementById('ad_organizationBillingEnabled_' + parsedId);
+    if (firstInput && typeof firstInput.focus === 'function') firstInput.focus();
+  } else if (typeof trigger.focus === 'function') {
+    trigger.focus();
+  }
+  return opening;
+}
+function closeAdminOrganizationBillingEditor(organizationId) {
+  var parsedId = Number(organizationId);
+  var trigger = document.getElementById('ad_organizationBillingToggle_' + parsedId);
+  var editor = document.getElementById('ad_organizationBillingEditor_' + parsedId);
+  if (!Number.isSafeInteger(parsedId) || parsedId < 1 || !trigger || !editor) return false;
+  editor.hidden = true;
+  trigger.setAttribute('aria-expanded', 'false');
+  if (typeof trigger.focus === 'function') trigger.focus();
+  return true;
+}
+function handleAdminOrganizationBillingKeydown(event, organizationId) {
+  if (!event || event.key !== 'Escape') return false;
+  if (typeof event.preventDefault === 'function') event.preventDefault();
+  if (typeof event.stopPropagation === 'function') event.stopPropagation();
+  return closeAdminOrganizationBillingEditor(organizationId);
+}
+function renderAdminOrganizationBillingProjection(organizationId, billing) {
+  var parsedId = Number(organizationId);
+  var result = document.getElementById('ad_organizationBillingHistoryResult_' + parsedId);
+  if (!Number.isSafeInteger(parsedId) || parsedId < 1 || !result || !billing || typeof billing !== 'object') return '';
+  var policy = billing.policy && typeof billing.policy === 'object' ? billing.policy : {};
+  var usage = billing.usage && typeof billing.usage === 'object' ? billing.usage : {};
+  var charges = billing.charges && typeof billing.charges === 'object' ? billing.charges : {};
+  var organization = adminOrganizationsById[String(parsedId)];
+  var canManage = organization && organization.allowed_actions && organization.allowed_actions.manage_billing === true;
+  var policyVersion = Number(policy.policy_version);
+  var html = '<div><strong>' + esc(adminBillingStatusLabel(billing.status)) + '</strong> · ' + esc(billing.month || '-') + '</div>'
+    + '<div>' + esc(formatAdminBillingUsdCents(charges.total_cents)) + ' · ' + esc(formatAdminBillingInteger(usage.total_tokens)) + ' Token</div>'
+    + '<div>基础 ' + esc(formatAdminBillingUsdCents(charges.base_fee_cents)) + ' · 超额 ' + esc(formatAdminBillingUsdCents(charges.overage_fee_cents)) + '</div>'
+    + '<div>包含 ' + esc(formatAdminBillingInteger(policy.included_tokens)) + ' Token · 计费 ' + esc(formatAdminBillingInteger(usage.billable_tokens)) + ' Token</div>';
+  if (billing.statement && Number.isSafeInteger(Number(billing.statement.id))) {
+    html += '<div>账单 #' + esc(String(billing.statement.id)) + '</div>';
+  }
+  if (canManage && billing.status === 'closable' && Number.isSafeInteger(policyVersion) && policyVersion > 0) {
+    html += '<button type="button" id="ad_organizationBillingClose_' + parsedId + '" class="btn btn-xs" style="margin-top:5px" title="结算该已结束月份" onclick="closeAdminOrganizationBillingStatement(' + parsedId + ')">结账</button>';
+  }
+  result.innerHTML = html;
+  return html;
+}
 function renderAdminOrganizations(organizations) {
   var container = document.getElementById('ad_organizationList');
   if (!container) return;
   adminOrganizationsById = {};
+  if (typeof adminOrganizationBillingHistoryById !== 'undefined') adminOrganizationBillingHistoryById = {};
   if (!organizations.length) {
     container.innerHTML = '<p style="font-size:12px;opacity:.55">暂无匹配组织</p>';
     return;
@@ -10567,7 +10700,7 @@ function renderAdminOrganizations(organizations) {
   organizations.forEach(function(organization) {
     adminOrganizationsById[String(organization.id)] = organization;
   });
-  container.innerHTML = '<table><thead><tr><th>组织</th><th>套餐</th><th>订阅到期</th><th>AI 配额 / 并发</th><th>团队</th><th>有效成员</th><th>已撤销</th><th>操作</th></tr></thead><tbody>'
+  container.innerHTML = '<table><thead><tr><th>组织</th><th>套餐</th><th>订阅到期</th><th>AI 配额 / 并发</th><th>账单</th><th>团队</th><th>有效成员</th><th>已撤销</th><th>操作</th></tr></thead><tbody>'
     + organizations.map(function(organization) {
       var id = Number(organization.id);
       var safeId = Number.isSafeInteger(id) && id > 0 ? id : 0;
@@ -10713,15 +10846,174 @@ function renderAdminOrganizations(organizations) {
         + aiQuotaCell
         + '<div style="border-top:1px solid rgba(15,23,42,.1);padding-top:8px">' + aiConcurrencyCell + '</div>'
         + '</div>';
+      var billingCell = typeof renderAdminOrganizationBillingCell === 'function'
+        ? renderAdminOrganizationBillingCell(organization)
+        : '<span class="tm-member-access-note">账单不可用</span>';
       return '<tr><td><strong>' + esc(organization.name || '-') + '</strong><div style="font-size:11px;opacity:.55">' + esc(organization.code || '-') + '</div><div class="tm-member-access-note">企业所有者：' + esc(ownerName) + '</div></td>'
         + '<td>' + planCell + '</td>'
         + '<td>' + subscriptionCell + '</td>'
         + '<td>' + aiGovernanceCell + '</td>'
+        + '<td>' + billingCell + '</td>'
         + '<td>' + (Number(organization.team_count) || 0) + '</td>'
         + '<td>' + (Number(organization.active_member_count) || 0) + '</td>'
         + '<td>' + (Number(organization.revoked_member_count) || 0) + '</td>'
         + '<td><button type="button" class="btn btn-xs" onclick="selectAdminOrganization(' + safeId + ')">查看成员</button></td></tr>';
     }).join('') + '</tbody></table>';
+}
+function readAdminBillingIntegerInput(id, label) {
+  var input = document.getElementById(id);
+  var raw = input ? String(input.value || '').trim() : '';
+  if (!input || !/^\d+$/.test(raw)) {
+    toast(label + '必须是非负整数', 'error');
+    return null;
+  }
+  var value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < 0) {
+    toast(label + '超出有效整数范围', 'error');
+    return null;
+  }
+  return { input: input, value: value };
+}
+async function saveAdminOrganizationBillingPolicy(organizationId) {
+  var parsedId = Number(organizationId);
+  var organization = adminOrganizationsById[String(parsedId)];
+  var billing = organization && organization.billing;
+  var allowed = organization && organization.allowed_actions;
+  var enabled = document.getElementById('ad_organizationBillingEnabled_' + parsedId);
+  var effectiveMonthInput = document.getElementById('ad_organizationBillingEffectiveMonth_' + parsedId);
+  var button = document.getElementById('ad_organizationBillingPolicySave_' + parsedId);
+  var version = Number(billing && billing.policy_head_version);
+  if (!Number.isSafeInteger(parsedId) || parsedId < 1 || !organization || !billing ||
+      !allowed || allowed.manage_billing !== true || !enabled || !effectiveMonthInput ||
+      !Number.isSafeInteger(version) || version < 1) return false;
+  var baseFee = readAdminBillingIntegerInput('ad_organizationBillingBaseFeeCents_' + parsedId, '基础费（美分）');
+  if (!baseFee) return false;
+  var includedTokens = readAdminBillingIntegerInput('ad_organizationBillingIncludedTokens_' + parsedId, '包含 Token');
+  if (!includedTokens) return false;
+  var overageRate = readAdminBillingIntegerInput('ad_organizationBillingOverageCentsPerMillion_' + parsedId, '超额费率（美分/百万 Token）');
+  if (!overageRate) return false;
+  var effectiveMonth = String(effectiveMonthInput.value || '').trim();
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(effectiveMonth) || effectiveMonth < adminBillingMonth(1)) {
+    toast('生效月份必须是下一个或更晚的 UTC 月份', 'error');
+    return false;
+  }
+  var reason = typeof prompt === 'function'
+    ? prompt('请输入本次组织账单策略变更原因')
+    : null;
+  if (reason === null) return false;
+  reason = String(reason || '').trim();
+  if (!reason || reason.length > 500 || /[\u0000-\u001f\u007f]/.test(reason)) {
+    toast('请输入 1-500 个字符且不含控制字符的账单策略变更原因', 'error');
+    return false;
+  }
+  var controls = [enabled, baseFee.input, includedTokens.input, overageRate.input, effectiveMonthInput, button];
+  controls.forEach(function(control) { if (control) control.disabled = true; });
+  try {
+    var response = await apiFetch('/admin/organizations/' + parsedId + '/billing-policy', {
+      method: 'PUT',
+      body: JSON.stringify({
+        billing_enabled: enabled.checked === true,
+        base_fee_cents: baseFee.value,
+        included_tokens: includedTokens.value,
+        overage_cents_per_million_tokens: overageRate.value,
+        effective_month: effectiveMonth,
+        expected_version: version,
+        reason: reason
+      })
+    });
+    var data = await response.json();
+    if (!response.ok) {
+      if (data && data.code === 'ORGANIZATION_BILLING_VERSION_CONFLICT') {
+        await loadAdminOrganizations();
+      }
+      throw new Error(data.error || '组织账单策略更新失败');
+    }
+    toast('组织账单策略已更新');
+    await loadAdminOrganizations();
+    return true;
+  } catch (error) {
+    toast(error.message || '组织账单策略更新失败', 'error');
+    return false;
+  } finally {
+    controls.forEach(function(control) { if (control) control.disabled = false; });
+  }
+}
+async function loadAdminOrganizationBillingMonth(organizationId) {
+  var parsedId = Number(organizationId);
+  var organization = adminOrganizationsById[String(parsedId)];
+  var allowed = organization && organization.allowed_actions;
+  var input = document.getElementById('ad_organizationBillingHistoryMonth_' + parsedId);
+  var button = document.getElementById('ad_organizationBillingHistoryLoad_' + parsedId);
+  var result = document.getElementById('ad_organizationBillingHistoryResult_' + parsedId);
+  if (!Number.isSafeInteger(parsedId) || parsedId < 1 || !allowed || allowed.manage_billing !== true ||
+      !input || !button || !result) return null;
+  var month = String(input.value || '').trim();
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month) || month > adminBillingMonth(-1)) {
+    toast('请选择已结束的 UTC 月份', 'error');
+    return null;
+  }
+  button.disabled = true;
+  result.textContent = '正在查询...';
+  try {
+    var response = await apiFetch('/admin/organizations/' + parsedId + '/billing?month=' + encodeURIComponent(month));
+    var data = await response.json();
+    if (!response.ok) throw new Error(data.error || '组织账单查询失败');
+    var billing = data && data.billing;
+    if (!billing || typeof billing !== 'object') throw new Error('组织账单响应无效');
+    adminOrganizationBillingHistoryById[String(parsedId)] = billing;
+    renderAdminOrganizationBillingProjection(parsedId, billing);
+    return billing;
+  } catch (error) {
+    result.textContent = error.message || '组织账单查询失败';
+    toast(error.message || '组织账单查询失败', 'error');
+    return null;
+  } finally {
+    button.disabled = false;
+  }
+}
+async function closeAdminOrganizationBillingStatement(organizationId) {
+  var parsedId = Number(organizationId);
+  var organization = adminOrganizationsById[String(parsedId)];
+  var allowed = organization && organization.allowed_actions;
+  var billing = adminOrganizationBillingHistoryById[String(parsedId)];
+  var policyVersion = Number(billing && billing.policy && billing.policy.policy_version);
+  var button = document.getElementById('ad_organizationBillingClose_' + parsedId);
+  if (!Number.isSafeInteger(parsedId) || parsedId < 1 || !allowed || allowed.manage_billing !== true ||
+      !billing || billing.status !== 'closable' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(String(billing.month || '')) ||
+      !Number.isSafeInteger(policyVersion) || policyVersion < 1 || !button) return false;
+  var reason = typeof prompt === 'function'
+    ? prompt('结账后账单不可修改，请输入本次结账原因')
+    : null;
+  if (reason === null) return false;
+  reason = String(reason || '').trim();
+  if (!reason || reason.length > 500 || /[\u0000-\u001f\u007f]/.test(reason)) {
+    toast('请输入 1-500 个字符且不含控制字符的结账原因', 'error');
+    return false;
+  }
+  button.disabled = true;
+  try {
+    var response = await apiFetch('/admin/organizations/' + parsedId + '/billing-statements/close', {
+      method: 'POST',
+      body: JSON.stringify({
+        period: billing.month,
+        expected_policy_version: policyVersion,
+        reason: reason
+      })
+    });
+    var data = await response.json();
+    if (!response.ok) throw new Error(data.error || '组织账单结账失败');
+    var closedBilling = data && data.billing;
+    if (!closedBilling || typeof closedBilling !== 'object') throw new Error('组织账单响应无效');
+    adminOrganizationBillingHistoryById[String(parsedId)] = closedBilling;
+    renderAdminOrganizationBillingProjection(parsedId, closedBilling);
+    toast('组织月度账单已结账');
+    return true;
+  } catch (error) {
+    toast(error.message || '组织账单结账失败', 'error');
+    return false;
+  } finally {
+    button.disabled = false;
+  }
 }
 function loadAdminPlanCatalog() {
   if (!currentUserIsPlatformAdministrator()) {

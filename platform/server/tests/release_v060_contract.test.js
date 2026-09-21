@@ -170,9 +170,9 @@ test('current release locks the v0.7 branch while retaining the v0.6 shell and v
   assert.match(deploy, /20260702-v916-kb-bridge-client-cn/);
   assert.match(deploy, /20260702v916kbbridge/);
   assert.match(deploy, /1fc70495e7ce641dadc76d751a49eab6ed261640293d2b8e691cea8bd78a6821/);
-  assert.match(deploy, /if \(Number\(version\) !== 30\) throw new Error\('Candidate migration target version mismatch'\)/);
+  assert.match(deploy, /if \(Number\(version\) !== 31\) throw new Error\('Candidate migration target version mismatch'\)/);
   assert.doesNotMatch(deploy, /if \(Number\(version\) !== 29\) throw new Error\('Candidate migration target version mismatch'\)/);
-  assert.match(deploy, /report\.get\('sourceVersion'\) not in \(1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30\)/);
+  assert.match(deploy, /report\.get\('sourceVersion'\) not in \(1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31\)/);
   assert.match(server, /const CUSTOMER_REPORT_PPT_CACHE_NAMESPACE = 'customer-reports'/);
   assert.match(server, /reservedRootDirectories: \[CUSTOMER_REPORT_PPT_CACHE_NAMESPACE\]/);
   assert.doesNotMatch(server, /process\.env\.CUSTOMER_REPORT_PPT_(?:CACHE|TMP)_DIR/);
@@ -298,7 +298,7 @@ test('current deploy inventory ships schema v24 knowledge ownership and its focu
   }
 });
 
-test('current trusted source and sanitization contracts accept exact v1 and v6 through v30 sources', () => {
+test('current trusted source and sanitization contracts accept exact v1 and v6 through v31 sources', () => {
   const trustedManifest = JSON.parse(read(
     'platform', 'server', 'scripts', 'trusted_production_source_manifest.json'
   ));
@@ -308,14 +308,14 @@ test('current trusted source and sanitization contracts accept exact v1 and v6 t
   const trustedPaths = new Set(trustedManifest.files.map((entry) => entry.path));
 
   assert.deepEqual(trustedManifest.migrationContract, {
-    acceptedSourceVersions: [1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30],
-    targetVersion: 30,
+    acceptedSourceVersions: [1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31],
+    targetVersion: 31,
     runs: 2,
     deterministicAppendTables: ['activity_log']
   });
   assert.deepEqual(
     sanitizationManifest.exactProfiles.map((profile) => profile.schemaVersion),
-    [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30]
+    [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]
   );
   for (const required of [
     'server/migrations/006_crm_sales_workspace.js',
@@ -411,7 +411,7 @@ test('v0.6 trusted bytes have exact LF rules and release records exist', () => {
   assert.match(read('CHANGELOG.md'), /v0\.6\.0-crm-sales-workspace/);
 });
 
-test('v0.6 release records match the trusted-source and parser self-test contracts', () => {
+test('v0.6 release records retain their historical trusted-source and parser self-test contracts', () => {
   const trustedManifest = JSON.parse(read(
     'platform', 'server', 'scripts', 'trusted_production_source_manifest.json'
   ));
@@ -426,7 +426,10 @@ test('v0.6 release records match the trusted-source and parser self-test contrac
     'archive', 'versions', '2026-08-11-v0.6.0-crm-sales-workspace.md'
   );
 
-  assert.equal(trustedManifest.files.length, 66);
+  assert.ok(
+    trustedManifest.files.length >= 66,
+    'the current trusted manifest must retain at least the historical v0.6 inventory'
+  );
   assert.equal(parserManifest.required_self_tests.length, 21);
   assert.match(versionRecord, /Trusted source: 49 SHA-256-pinned files/);
   assert.match(archiveRecord, /trusted-source manifest now pins 49 files/i);
@@ -1386,10 +1389,12 @@ test('v0.6 acceptance facts are canonical, root-only, and hash-bound through eve
     'TM_CANDIDATE_HEALTH_PROJECTION="$CandidateHealthProjection"',
     'TM_PM2_FINAL_PROJECTION=',
     'TM_AI_CONCURRENCY_ACCEPTANCE_PROJECTION=',
-    "'schemaVersion': 2",
+    'TM_ORGANIZATION_BILLING_ACCEPTANCE_PROJECTION=',
+    "'schemaVersion': 3",
     "'cutoverCapacity': capacity",
     "'candidateHealth': health",
     "'aiConcurrencyAcceptance': aiConcurrencyAcceptance",
+    "'organizationBillingAcceptance': organizationBillingAcceptance",
     "'cutoverSnapshotSha256SumsSha256': snapshotSha256",
     "'pm2': {'expected': pm2Expected, 'final': pm2Final}",
     "'nginx': {'expected': nginxExpected, 'final': nginxFinal}",
@@ -1432,6 +1437,7 @@ test('v0.6 acceptance facts are canonical, root-only, and hash-bound through eve
   assert.match(finalAssertion, /Cutover snapshot SHA256SUMS digest changed after acceptance/);
   assert.match(finalAssertion, /Acceptance facts final projection mismatch/);
   assert.match(finalAssertion, /assert_ai_concurrency_acceptance_binding/);
+  assert.match(finalAssertion, /assert_organization_billing_acceptance_binding/);
 
   const acceptanceState = sourceBetween(
     deploy,
@@ -1574,7 +1580,9 @@ test('v0.6 pre-mutation candidate failure cleans only the controlled candidate r
     'deployment failure recovery function'
   );
   assert.match(recovery, /Candidate validation or cutover transport failed before production mutation; candidate cleanup only/);
-  assert.match(recovery, /Invoke-RemoteCandidateCleanup -ReleaseRoot \$ReleaseRoot/);
+  assert.match(recovery, /\$candidateCleanupPath = if \(\[string\]::IsNullOrWhiteSpace\(\$CandidateCleanupRoot\)\)/);
+  assert.match(recovery, /Invoke-RemoteCandidateCleanup -ReleaseRoot \$candidateCleanupPath/);
+  assert.doesNotMatch(recovery, /Invoke-RemoteCandidateCleanup -ReleaseRoot \$CandidateCleanupRoot/);
 });
 
 test('v0.6 candidate inventory ships both root-level release records', () => {
@@ -1704,7 +1712,13 @@ test('captured candidate transport bounds and preserves offline gate diagnostics
     'candidate gate'
   );
   assert.match(candidateGate, /2>&1\s*\|\s*tail -c 8192/);
-  assert.match(candidateGate, /GateStatus=\$\{PIPESTATUS\[0\]\}/);
+  assertOrdered(candidateGate, [
+    'OfflineGatePipelinePid=$!',
+    'wait "$OfflineGatePipelinePid"',
+    'GateStatus=$?',
+    '[ "$GateStatus" = "0" ] || exit "$GateStatus"'
+  ], 'offline gate background pipeline status');
+  assert.doesNotMatch(candidateGate, /PIPESTATUS/);
 
   if (process.platform !== 'win32') {
     t.skip('the native transport harness exercises the Windows deployment host');

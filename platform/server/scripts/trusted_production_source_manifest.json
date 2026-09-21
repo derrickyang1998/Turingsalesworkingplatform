@@ -13,6 +13,7 @@
     "publicGuard": "server/scripts/public_release_guard.sh",
     "parserSelfTest": "server/scripts/upload_sandbox_self_test.js",
     "aiConcurrencyAcceptance": "server/scripts/verify_ai_concurrency_acceptance.js",
+    "organizationBillingAcceptance": "server/scripts/verify_organization_billing_acceptance.js",
     "protectedCredentialVerifier": "server/scripts/verify_protected_credentials.js",
     "parserVerifier": "server/scripts/trusted_parser_runtime_verifier.js",
     "parserManifest": "server/systemd/turingmarket-parser.manifest.json",
@@ -46,9 +47,10 @@
       27,
       28,
       29,
-      30
+      30,
+      31
     ],
-    "targetVersion": 30,
+    "targetVersion": 31,
     "runs": 2,
     "deterministicAppendTables": [
       "activity_log"
@@ -176,6 +178,10 @@
       "sha256": "166adac5696457b458f6bdb979ad683bc70ffb1f1ad71e257b030eb9197457d3"
     },
     {
+      "path": "server/migrations/031_organization_billing_statements.js",
+      "sha256": "adc74e0cb00b898e94304acce4462577caf449ae0567961ca38ea77a09948c87"
+    },
+    {
       "path": "server/migrations/baselines/legacy_v1.js",
       "sha256": "13e631ca7e2aef57e39f7dbc38e6f03e2d5323a11f38c6ce31239d793911812c"
     },
@@ -197,7 +203,7 @@
     },
     {
       "path": "server/db.js",
-      "sha256": "d0738f9bc60027cf26f028dcfc91bf37d4a2b9d00b913ead5ac404eb45679ac8"
+      "sha256": "1ab6bb405072bd87d77746066439a1212482d1448f1945b2a909d4cd94c277f5"
     },
     {
       "path": "server/package-lock.json",
@@ -277,11 +283,11 @@
     },
     {
       "path": "server/scripts/sanitization_manifest.json",
-      "sha256": "594d4cab76b71b3c6c748ddefb1142e2df6af910b05642cdb672f26c5f0e61cd"
+      "sha256": "f258290ae2075bc11a7b18ec82201b1eaa678f17f9d81127dc50a728aff71a85"
     },
     {
       "path": "server/scripts/sanitize_production_shape.js",
-      "sha256": "a41e7ff606dd353acab1adb482fb786bfaeb78db57d06c4f36e6f2ab2f2ed7ed"
+      "sha256": "81467e223ed0f19cd09a5447dc6571de763516bab9a231d25c8d527b08f4d933"
     },
     {
       "path": "server/scripts/trusted_parser_runtime_verifier.js",
@@ -293,7 +299,11 @@
     },
     {
       "path": "server/scripts/verify_ai_concurrency_acceptance.js",
-      "sha256": "5249bfba1a6dd33b9077038418a89d3876d6190b17007e843c8ef17a3257e0f8"
+      "sha256": "42deece670e0a4dfeec9ca2e2411769a48081d5e40ac34b74322d077eb247e57"
+    },
+    {
+      "path": "server/scripts/verify_organization_billing_acceptance.js",
+      "sha256": "0ba4e219b9702d872269ac56279de29c51e0893d0367b468d649aa748d2e1391"
     },
     {
       "path": "server/scripts/verify_protected_credentials.js",
@@ -301,7 +311,7 @@
     },
     {
       "path": "server/scripts/verify_campaign_migration_gate.js",
-      "sha256": "542e0daf328b53cac12b0a54dc45d019b4c15685fe87b851a41272b7673e408c"
+      "sha256": "dcd802c5bf90a2a6cbf8f773bb569534a1e69fcae6ba50b5e2a97174b0174a2e"
     },
     {
       "path": "server/routes.js",
@@ -340,6 +350,10 @@
       "sha256": "fec34edb1c0c23636cf25685baa190d0946fc0c33a91ad629f42b970ce53e3b9"
     },
     {
+      "path": "server/routes_organization_billing.js",
+      "sha256": "bc374d311371d908c4ea4d13abe28ca033a8e66a161909f75dad7b5f22b4ead2"
+    },
+    {
       "path": "server/routes_plan_entitlements.js",
       "sha256": "35cde921b074fdadeb318058989d291479cd4c6cf5f092bcad8e28ed31937ea3"
     },
@@ -357,7 +371,7 @@
     },
     {
       "path": "server/server.js",
-      "sha256": "bdf5c5f357487212ce75d223d7ba79ecbad973325ab6c4b35b3725d775428290"
+      "sha256": "e57e624e1e13253e2a49ca5a7478fa3aff80c63567f27c12d2381fda194fe15d"
     },
     {
       "path": "server/workflow_engine.js",
@@ -504,8 +518,12 @@
       "sha256": "a6a4b7d681e7da163bcf026c5fae9f93a125ef9f6604307f4c51c3bfe8a91505"
     },
     {
+      "path": "server/services/organization_billing_service.js",
+      "sha256": "d8355937c5ab487ca515e3e25a4a79c8cf4ad47332f59fc403da0bf0ac54703a"
+    },
+    {
       "path": "server/services/organization_governance_service.js",
-      "sha256": "8f298712c8402a59a6d01bb84e692cb0864aac8acdb0ed2790a86f192fe648cd"
+      "sha256": "184f4b12257e9390cf2717926b1cef576353f0372037a9c4edb5a556e996ddf4"
     },
     {
       "path": "server/services/organization_methodology_service.js",

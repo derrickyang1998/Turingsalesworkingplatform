@@ -306,7 +306,8 @@ function listOrganizations(
   planEntitlementService,
   subscriptionExpiryService,
   aiQuotaService,
-  aiConcurrencyService
+  aiConcurrencyService,
+  billingService
 ) {
   const query = requestQuery(options);
   const q = boundedQuery(query.q);
@@ -430,6 +431,30 @@ function listOrganizations(
           earliest_lease_expires_at: projection.earliest_lease_expires_at
         };
       }
+      let billing;
+      if (billingService) {
+        let projection;
+        try {
+          projection = billingService.projectOrganizationBillingSummary({ organizationId: row.id });
+        } catch (_error) {
+          throw serviceError(503, 'ORGANIZATION_BILLING_POLICY_UNAVAILABLE', '组织账单策略不可用。');
+        }
+        if (!projection || !projection.policy) {
+          throw serviceError(503, 'ORGANIZATION_BILLING_POLICY_UNAVAILABLE', '组织账单策略不可用。');
+        }
+        billing = {
+          month: projection.month,
+          status: projection.status,
+          billing_enabled: projection.policy.billing_enabled,
+          currency: projection.policy.currency,
+          policy_version: projection.policy.policy_version,
+          policy_head_version: projection.policy_head_version,
+          effective_month: projection.policy.effective_month,
+          base_fee_cents: projection.policy.base_fee_cents,
+          included_tokens: projection.policy.included_tokens,
+          overage_cents_per_million_tokens: projection.policy.overage_cents_per_million_tokens
+        };
+      }
       return {
         id: row.id,
         code: row.code,
@@ -443,6 +468,7 @@ function listOrganizations(
         ...(subscription === undefined ? {} : { subscription }),
         ...(aiMonthlyQuota === undefined ? {} : { ai_monthly_quota: aiMonthlyQuota }),
         ...(aiConcurrency === undefined ? {} : { ai_concurrency: aiConcurrency }),
+        ...(billing === undefined ? {} : { billing }),
         allowed_actions: {
           initialize_owner: scope.kind === 'platform_admin' && companyOwner === null,
           ...(plan === undefined ? {} : { assign_plan: scope.kind === 'platform_admin' }),
@@ -454,6 +480,9 @@ function listOrganizations(
           }),
           ...(aiConcurrency === undefined ? {} : {
             manage_ai_concurrency: scope.kind === 'platform_admin'
+          }),
+          ...(billing === undefined ? {} : {
+            manage_billing: scope.kind === 'platform_admin'
           })
         }
       };
@@ -978,6 +1007,7 @@ function createOrganizationGovernanceService(db, factoryOptions = {}) {
   const subscriptionExpiryService = factoryOptions.subscriptionExpiryService || null;
   const aiQuotaService = factoryOptions.aiQuotaService || null;
   const aiConcurrencyService = factoryOptions.aiConcurrencyService || null;
+  const billingService = factoryOptions.billingService || null;
   if (
     planEntitlementService !== null &&
     typeof planEntitlementService.projectOrganization !== 'function'
@@ -1002,6 +1032,12 @@ function createOrganizationGovernanceService(db, factoryOptions = {}) {
   ) {
     throw new TypeError('aiConcurrencyService must expose projectOrganizationConcurrency');
   }
+  if (
+    billingService !== null &&
+    typeof billingService.projectOrganizationBillingSummary !== 'function'
+  ) {
+    throw new TypeError('billingService must expose projectOrganizationBillingSummary');
+  }
   return Object.freeze({
     projectUserAccess(requestOptions) {
       return projectUserAccess(db, requestOptions || {});
@@ -1013,7 +1049,8 @@ function createOrganizationGovernanceService(db, factoryOptions = {}) {
         planEntitlementService,
         subscriptionExpiryService,
         aiQuotaService,
-        aiConcurrencyService
+        aiConcurrencyService,
+        billingService
       );
     },
     listMembers(requestOptions) {

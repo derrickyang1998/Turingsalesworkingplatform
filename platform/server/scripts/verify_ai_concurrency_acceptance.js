@@ -7,6 +7,8 @@ const jwt = require('jsonwebtoken');
 
 const { createAIConcurrencyService } = require('../services/ai_concurrency_service');
 
+const RELEASE_SMOKE_USERNAME = 'release-smoke';
+
 const BUSINESS_TABLES = Object.freeze([
   'ai_conversations',
   'ai_messages',
@@ -52,27 +54,24 @@ function parseArguments(argv) {
 }
 
 function resolveAcceptanceActor(db) {
-  const organizationAccess = require('../services/organization_access_service');
-  const candidates = db.prepare(`
-    SELECT id,username,role
-    FROM users
-    WHERE role='admin' AND is_active=1
-    ORDER BY CASE WHEN username='derrick' THEN 0 ELSE 1 END,id
-  `).all();
-  for (const candidate of candidates) {
-    const scope = organizationAccess.resolveOrganizationScope(db, {
-      userId: candidate.id,
-      repairMissing: false
-    });
-    if (scope && scope.ok && scope.authContext && scope.authContext.organization) {
-      return {
-        userId: Number(candidate.id),
-        organizationId: Number(scope.authContext.organization.id),
-        role: candidate.role
-      };
-    }
-  }
-  throw acceptanceError('No active platform administrator has a resolvable organization.');
+  const row = db.prepare(`
+    SELECT user.id AS user_id,user.username,user.role,organization.id AS organization_id
+    FROM users user
+    JOIN organization_memberships membership
+      ON membership.user_id=user.id AND membership.status='active'
+    JOIN organizations organization ON organization.id=membership.org_id
+    WHERE user.username=? AND user.role='admin' AND user.is_active=1
+      AND membership.role_code='org_admin'
+    ORDER BY user.id,organization.id
+    LIMIT 1
+  `).get(RELEASE_SMOKE_USERNAME);
+  if (!row) throw acceptanceError('No dedicated release smoke administrator has an organization scope.');
+  return {
+    userId: Number(row.user_id),
+    organizationId: Number(row.organization_id),
+    role: row.role,
+    username: row.username
+  };
 }
 
 function tableExists(db, name) {
@@ -149,7 +148,10 @@ async function runAcceptance(options) {
   const evidencePath = options.evidencePath;
   const baseUrl = options.baseUrl;
   const httpPost = options.httpPost || postJson;
-  if (!db || !actor || !/^[0-9a-f]{32}$/.test(runId || '')) {
+  if (
+    !db || !actor || actor.username !== RELEASE_SMOKE_USERNAME || actor.role !== 'admin' ||
+    !/^[0-9a-f]{32}$/.test(runId || '')
+  ) {
     throw acceptanceError('Acceptance inputs are invalid.');
   }
   if (fs.existsSync(evidencePath)) throw acceptanceError('Acceptance evidence already exists.');
@@ -367,6 +369,7 @@ if (require.main === module) {
 
 module.exports = {
   BUSINESS_TABLES,
+  RELEASE_SMOKE_USERNAME,
   captureBusinessCounts,
   parseArguments,
   resolveAcceptanceActor,

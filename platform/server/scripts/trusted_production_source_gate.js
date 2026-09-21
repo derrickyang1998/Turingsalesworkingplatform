@@ -77,6 +77,7 @@ const REQUIRED_BUNDLE_FILES = Object.freeze([
   'server/migrations/028_subscription_expiry.js',
   'server/migrations/029_organization_monthly_ai_quota.js',
   'server/migrations/030_ai_provider_concurrency_reservation.js',
+  'server/migrations/031_organization_billing_statements.js',
   'server/migrations/baselines/legacy_v1.js',
   'server/migrations/engines/v1.js',
   'server/migrations/vendor/bcryptjs_v3_0_3.js',
@@ -107,6 +108,7 @@ const REQUIRED_BUNDLE_FILES = Object.freeze([
   'server/scripts/trusted_parser_runtime_verifier.js',
   'server/scripts/upload_sandbox_self_test.js',
   'server/scripts/verify_ai_concurrency_acceptance.js',
+  'server/scripts/verify_organization_billing_acceptance.js',
   'server/scripts/verify_protected_credentials.js',
   'server/scripts/verify_campaign_migration_gate.js',
   'server/routes.js',
@@ -118,6 +120,7 @@ const REQUIRED_BUNDLE_FILES = Object.freeze([
   'server/routes_customers.js',
   'server/routes_feishu.js',
   'server/routes_organization_governance.js',
+  'server/routes_organization_billing.js',
   'server/routes_plan_entitlements.js',
   'server/routes_subscription_expiry.js',
   'server/routes_performance.js',
@@ -159,6 +162,7 @@ const REQUIRED_BUNDLE_FILES = Object.freeze([
   'server/services/module_action_permission_service.js',
   'server/services/obsidian_ingest_service.js',
   'server/services/organization_access_service.js',
+  'server/services/organization_billing_service.js',
   'server/services/organization_governance_service.js',
   'server/services/organization_methodology_service.js',
   'server/services/plan_entitlement_service.js',
@@ -203,6 +207,7 @@ const EXPECTED_ENTRYPOINTS = Object.freeze({
   publicGuard: 'server/scripts/public_release_guard.sh',
   parserSelfTest: 'server/scripts/upload_sandbox_self_test.js',
   aiConcurrencyAcceptance: 'server/scripts/verify_ai_concurrency_acceptance.js',
+  organizationBillingAcceptance: 'server/scripts/verify_organization_billing_acceptance.js',
   protectedCredentialVerifier: 'server/scripts/verify_protected_credentials.js',
   parserVerifier: 'server/scripts/trusted_parser_runtime_verifier.js',
   parserManifest: 'server/systemd/turingmarket-parser.manifest.json',
@@ -211,8 +216,8 @@ const EXPECTED_ENTRYPOINTS = Object.freeze({
 });
 
 const EXPECTED_MIGRATION_CONTRACT = Object.freeze({
-  acceptedSourceVersions: Object.freeze([1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30]),
-  targetVersion: 30,
+  acceptedSourceVersions: Object.freeze([1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]),
+  targetVersion: 31,
   runs: 2,
   deterministicAppendTables: Object.freeze(['activity_log'])
 });

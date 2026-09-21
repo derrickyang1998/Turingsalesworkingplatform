@@ -25,6 +25,8 @@ const aiQuota = require('./services/ai_quota_service');
 const aiQuotaService = aiQuota.createAIQuotaService(db);
 const aiConcurrency = require('./services/ai_concurrency_service');
 const aiConcurrencyService = aiConcurrency.createAIConcurrencyService(db);
+const organizationBilling = require('./services/organization_billing_service');
+const organizationBillingService = organizationBilling.createOrganizationBillingService(db);
 const idempotency = require('./services/idempotency_service');
 const uploadAdmissionIdempotency = Object.freeze({
   reserveProcessingInTransaction(database, input) {
@@ -154,6 +156,7 @@ const registerPerformanceRoutes = require('./routes_performance');
 const registerAdminTenantDirectoryRoutes = require('./routes_admin_tenant_directory');
 const registerAdminAIQuotaRoutes = require('./routes_admin_ai_quota');
 const registerAdminAIConcurrencyRoutes = require('./routes_admin_ai_concurrency');
+const registerOrganizationBillingRoutes = require('./routes_organization_billing');
 const registerOrganizationGovernanceRoutes = require('./routes_organization_governance');
 const registerPlanEntitlementRoutes = require('./routes_plan_entitlements');
 const registerSubscriptionExpiryRoutes = require('./routes_subscription_expiry');
@@ -172,7 +175,8 @@ const organizationGovernanceService = createOrganizationGovernanceService(db, {
   planEntitlementService,
   subscriptionExpiryService,
   aiQuotaService,
-  aiConcurrencyService
+  aiConcurrencyService,
+  billingService: organizationBillingService
 });
 const {
   createCampaignPptBridgeHandler
@@ -2311,6 +2315,11 @@ registerAdminAIConcurrencyRoutes(app, db, {
   authMiddleware,
   adminOnly,
   service: aiConcurrencyService
+});
+registerOrganizationBillingRoutes(app, db, {
+  authMiddleware,
+  adminOnly,
+  service: organizationBillingService
 });
 registerOrganizationGovernanceRoutes(app, db, {
   authMiddleware,

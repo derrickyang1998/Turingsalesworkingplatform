@@ -11,6 +11,9 @@ const sqliteDigest = require('../services/sqlite_digest_service');
 const knowledgeService = require('../services/knowledge_service');
 const campaignWorkflowService = require('../services/campaign_workflow_service');
 const { CUSTOMER_LIFECYCLE_REGISTRY, buildCustomerIdentity } = require('../services/crm_contract');
+const {
+  computeOrganizationBillingStatementDigest
+} = require('../services/organization_billing_service');
 
 const MANIFEST_VERSION = 'tm-sanitization-manifest-v1';
 const REPORT_VERSION = 'tm-sanitization-report-v1';
@@ -222,6 +225,13 @@ const EXACT_PROFILE_MIGRATIONS = Object.freeze([
     sourcePath: 'migrations/030_ai_provider_concurrency_reservation.js',
     engineVersion: 1,
     dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
+  }),
+  Object.freeze({
+    version: 31,
+    name: '031_organization_billing_statements',
+    sourcePath: 'migrations/031_organization_billing_statements.js',
+    engineVersion: 1,
+    dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
   })
 ]);
 const FTS_MANIFEST = Object.freeze({
@@ -421,6 +431,10 @@ const V19_DERIVED_REBUILDS = Object.freeze([
 const V20_DERIVED_REBUILDS = Object.freeze([
   ...V19_DERIVED_REBUILDS,
   'organization_methodology_promotion_requests.dedupe_sha256'
+]);
+const V31_DERIVED_REBUILDS = Object.freeze([
+  ...V20_DERIVED_REBUILDS,
+  'organization_billing_statements.statement_sha256'
 ]);
 const V1_DERIVED_REBUILDS = Object.freeze([
   'knowledge_entries.source_hash',
@@ -1029,6 +1043,20 @@ const V30_MIGRATION_LEDGER = Object.freeze({
   sourcePath: Object.freeze([
     ...V29_MIGRATION_LEDGER.sourcePath,
     'migrations/030_ai_provider_concurrency_reservation.js'
+  ])
+});
+const V31_MIGRATION_LEDGER = Object.freeze({
+  name: Object.freeze([
+    ...V30_MIGRATION_LEDGER.name,
+    '031_organization_billing_statements'
+  ]),
+  checksum: Object.freeze([
+    ...V30_MIGRATION_LEDGER.checksum,
+    '7037e6087fc200df025d2c34056241820ac05f828e20207c66002aa68dc63e14'
+  ]),
+  sourcePath: Object.freeze([
+    ...V30_MIGRATION_LEDGER.sourcePath,
+    'migrations/031_organization_billing_statements.js'
   ])
 });
 const STRUCTURAL_COLUMN_POLICY_V9 = Object.freeze(Object.assign(Object.create(null), STRUCTURAL_COLUMN_POLICY, {
@@ -1825,6 +1853,66 @@ const STRUCTURAL_POLICY_V30_SHA256 = crypto.createHash('sha256')
     columns: STRUCTURAL_COLUMN_POLICY_V30
   }), 'utf8')
   .digest('hex');
+const STRUCTURAL_COLUMN_POLICY_V31 = Object.freeze(Object.assign(Object.create(null), STRUCTURAL_COLUMN_POLICY_V30, {
+  'organization_billing_policies.id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'organization_billing_policies.org_id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'organization_billing_policies.policy_version': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'organization_billing_policies.effective_month': Object.freeze({ storage: 'text', kind: 'date' }),
+  'organization_billing_policies.billing_enabled': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'organization_billing_policies.currency': Object.freeze({
+    storage: 'text', kind: 'enum', allowedValues: Object.freeze(['USD'])
+  }),
+  'organization_billing_policies.base_fee_cents': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'organization_billing_policies.included_tokens': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'organization_billing_policies.overage_cents_per_million_tokens': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'organization_billing_policies.changed_by': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'organization_billing_policies.source': Object.freeze({
+    storage: 'text',
+    kind: 'enum',
+    allowedValues: Object.freeze(['migration_backfill', 'organization_default', 'admin_update'])
+  }),
+  'organization_billing_policies.created_at': Object.freeze({ storage: 'text', kind: 'timestamp' }),
+  'organization_billing_statements.id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'organization_billing_statements.org_id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'organization_billing_statements.period_key': Object.freeze({ storage: 'text', kind: 'month' }),
+  'organization_billing_statements.period_start': Object.freeze({ storage: 'text', kind: 'timestamp' }),
+  'organization_billing_statements.period_end': Object.freeze({ storage: 'text', kind: 'timestamp' }),
+  'organization_billing_statements.policy_version': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'organization_billing_statements.billing_enabled': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'organization_billing_statements.currency': Object.freeze({
+    storage: 'text', kind: 'enum', allowedValues: Object.freeze(['USD'])
+  }),
+  'organization_billing_statements.usage_tokens': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'organization_billing_statements.usage_record_count': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'organization_billing_statements.usage_max_id': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'organization_billing_statements.included_tokens': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'organization_billing_statements.billable_tokens': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'organization_billing_statements.base_fee_cents': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'organization_billing_statements.overage_cents_per_million_tokens': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'organization_billing_statements.overage_fee_cents': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'organization_billing_statements.total_cents': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'organization_billing_statements.formula_version': Object.freeze({
+    storage: 'text', kind: 'enum', allowedValues: Object.freeze(['tm-billing-v1'])
+  }),
+  'organization_billing_statements.closed_by': Object.freeze({ storage: 'integer', kind: 'integer' }),
+  'organization_billing_statements.created_at': Object.freeze({ storage: 'text', kind: 'timestamp' }),
+  'schema_migrations.name': Object.freeze({
+    storage: 'text', kind: 'migration-ledger', allowedValues: V31_MIGRATION_LEDGER.name
+  }),
+  'schema_migrations.checksum': Object.freeze({
+    storage: 'text', kind: 'migration-ledger', allowedValues: V31_MIGRATION_LEDGER.checksum
+  }),
+  'schema_migrations.source_path': Object.freeze({
+    storage: 'text', kind: 'migration-ledger', allowedValues: V31_MIGRATION_LEDGER.sourcePath
+  })
+}));
+const STRUCTURAL_POLICY_V31_VALIDATOR_VERSION = 'tm-structural-policy-v29-organization-billing-statements';
+const STRUCTURAL_POLICY_V31_SHA256 = crypto.createHash('sha256')
+  .update(JSON.stringify({
+    validatorVersion: STRUCTURAL_POLICY_V31_VALIDATOR_VERSION,
+    columns: STRUCTURAL_COLUMN_POLICY_V31
+  }), 'utf8')
+  .digest('hex');
 
 const TRANSFORMATION_EXCLUDED_CLASSIFICATIONS = new Set([
   'structural',
@@ -2068,8 +2156,17 @@ const V30_SEMANTIC_POLICIES = Object.freeze({
     policySha256: STRUCTURAL_POLICY_V30_SHA256
   })
 });
+const V31_SEMANTIC_POLICIES = Object.freeze({
+  ...V30_SEMANTIC_POLICIES,
+  structuralColumns: Object.freeze({
+    ...V30_SEMANTIC_POLICIES.structuralColumns,
+    validatorVersion: STRUCTURAL_POLICY_V31_VALIDATOR_VERSION,
+    policySha256: STRUCTURAL_POLICY_V31_SHA256
+  })
+});
 
 function structuralColumnPolicyForVersion(schemaVersion) {
+  if (schemaVersion === 31) return STRUCTURAL_COLUMN_POLICY_V31;
   if (schemaVersion === 30) return STRUCTURAL_COLUMN_POLICY_V30;
   if (schemaVersion === 29) return STRUCTURAL_COLUMN_POLICY_V29;
   if (schemaVersion === 28) return STRUCTURAL_COLUMN_POLICY_V28;
@@ -2725,6 +2822,15 @@ function profileContractForVersion(schemaVersion) {
       preservedAccounting: PRESERVED_ACCOUNTING
     });
   }
+  if (schemaVersion === 31) {
+    return Object.freeze({
+      semanticPolicies: V31_SEMANTIC_POLICIES,
+      equalityGroups: V19_EQUALITY_GROUPS,
+      referenceGroups: REFERENCE_GROUPS,
+      derivedRebuilds: V31_DERIVED_REBUILDS,
+      preservedAccounting: PRESERVED_ACCOUNTING
+    });
+  }
   throw new Error(`unsupported exact sanitization profile version ${schemaVersion}`);
 }
 
@@ -2744,16 +2850,16 @@ function assertManifestDocumentShape(manifest) {
   ) {
     throw new Error('malformed sanitization manifest header');
   }
-  if (!Array.isArray(manifest.exactProfiles) || manifest.exactProfiles.length !== 25) {
-    throw new Error('sanitization manifest must contain isolated exact v6 through v30 profiles');
+  if (!Array.isArray(manifest.exactProfiles) || manifest.exactProfiles.length !== 26) {
+    throw new Error('sanitization manifest must contain isolated exact v6 through v31 profiles');
   }
   const profileKeys = [
     'schemaVersion', 'semanticPolicies', 'equalityGroups', 'referenceGroups',
     'derivedRebuilds', 'objects'
   ];
   const versions = manifest.exactProfiles.map((profile) => profile.schemaVersion);
-  if (JSON.stringify(versions) !== JSON.stringify([6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30])) {
-    throw new Error('sanitization manifest exact profiles must be ordered v6 through v30');
+  if (JSON.stringify(versions) !== JSON.stringify([6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31])) {
+    throw new Error('sanitization manifest exact profiles must be ordered v6 through v31');
   }
   for (const compatibilityProfile of manifest.exactProfiles) {
     if (!exactObjectKeys(compatibilityProfile, profileKeys)) {
@@ -2790,12 +2896,12 @@ function exactProfileClassification(db) {
   });
   if (
     classification.status !== 'managed'
-    || ![1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30].includes(classification.currentVersion)
+    || ![1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31].includes(classification.currentVersion)
   ) {
     const observed = classification.currentVersion === undefined || classification.currentVersion === null
       ? classification.status
       : classification.currentVersion;
-    throw new Error(`sanitization source must be an exact managed version 1 or version 6 through version 30 profile; got ${observed}`);
+    throw new Error(`sanitization source must be an exact managed version 1 or version 6 through version 31 profile; got ${observed}`);
   }
   return classification;
 }
@@ -3056,6 +3162,13 @@ function assertStructuralValueAllowed(context, value, observedStorageType, struc
     const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
     if (!match || !isValidCalendarDate(match[1], match[2], match[3])) {
       throw new Error(`structural policy rejected ${context}: value is not a canonical date`);
+    }
+    return true;
+  }
+  if (policy.kind === 'month') {
+    const match = value.match(/^(\d{4})-(\d{2})$/);
+    if (!match || !isValidCalendarDate(match[1], match[2], '01')) {
+      throw new Error(`structural policy rejected ${context}: value is not a canonical month`);
     }
     return true;
   }
@@ -6336,8 +6449,60 @@ function rebuildOrganizationMethodologyDigests(db) {
   }
 }
 
+function rebuildOrganizationBillingStatementDigests(db) {
+  const present = db.prepare(`
+    SELECT 1 AS present
+    FROM sqlite_schema
+    WHERE type='table' AND name='organization_billing_statements'
+  `).get();
+  if (!present) return;
+  const update = db.prepare(`
+    UPDATE organization_billing_statements
+    SET statement_sha256=?
+    WHERE id=?
+  `);
+  for (const row of db.prepare(`
+    SELECT statement.*,policy.effective_month
+    FROM organization_billing_statements statement
+    JOIN organization_billing_policies policy
+      ON policy.org_id=statement.org_id
+     AND policy.policy_version=statement.policy_version
+    ORDER BY statement.id
+  `).all()) {
+    update.run(computeOrganizationBillingStatementDigest({
+      organizationId: Number(row.org_id),
+      periodKey: row.period_key,
+      periodStart: row.period_start,
+      periodEnd: row.period_end,
+      policy: {
+        policy_version: Number(row.policy_version),
+        effective_month: row.effective_month,
+        billing_enabled: row.billing_enabled === 1,
+        currency: row.currency,
+        base_fee_cents: Number(row.base_fee_cents),
+        included_tokens: Number(row.included_tokens),
+        overage_cents_per_million_tokens: Number(row.overage_cents_per_million_tokens)
+      },
+      usage: {
+        total_tokens: Number(row.usage_tokens),
+        usage_record_count: Number(row.usage_record_count),
+        usage_max_id: row.usage_max_id === null ? null : Number(row.usage_max_id),
+        billable_tokens: Number(row.billable_tokens)
+      },
+      charges: {
+        base_fee_cents: Number(row.base_fee_cents),
+        overage_fee_cents: Number(row.overage_fee_cents),
+        total_cents: Number(row.total_cents)
+      },
+      closedBy: Number(row.closed_by),
+      reason: row.reason,
+      createdAt: row.created_at
+    }), row.id);
+  }
+}
+
 function rebuildDerivedData(db, manifest) {
-  if (![1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30].includes(manifest.schemaVersion)) {
+  if (![1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31].includes(manifest.schemaVersion)) {
     throw new Error(`unsupported derived rebuild profile ${manifest.schemaVersion}`);
   }
   const hasKnowledge = db.prepare("SELECT 1 AS present FROM sqlite_schema WHERE type='table' AND name='knowledge_entries'").get();
@@ -6409,6 +6574,7 @@ function rebuildDerivedData(db, manifest) {
   if (manifest.schemaVersion >= 16) rebuildContractDocumentDigests(db);
   if (manifest.schemaVersion >= 17) rebuildCollaborationPublicationDigests(db);
   if (manifest.schemaVersion >= 20) rebuildOrganizationMethodologyDigests(db);
+  if (manifest.schemaVersion >= 31) rebuildOrganizationBillingStatementDigests(db);
   rebuildCampaignWorkflowDispatchEvidence(db);
   sqliteDigest.rebuildKnowledgeChunksFts(db);
   sqliteDigest.verifyKnowledgeChunksFtsIntegrity(db, FTS_MANIFEST, { checkMainIntegrity: true });
@@ -7428,6 +7594,7 @@ module.exports = {
     assertReplacementSentinelsConfined,
     assertJsonSentinels,
     rebuildCampaignWorkflowDispatchEvidence,
+    rebuildOrganizationBillingStatementDigests,
     assertSemanticShapePreserved,
     captureSemanticShape,
     collectForbiddenValues,

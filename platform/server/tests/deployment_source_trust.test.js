@@ -436,8 +436,8 @@ test('trusted source manifest pins the sanitizer closure and exact supported sou
   const paths = new Set(manifest.files.map((entry) => entry.path));
   assert.equal(manifest.format, 'tm-trusted-production-source-manifest-v1');
   assert.deepEqual(manifest.migrationContract, {
-    acceptedSourceVersions: [1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30],
-    targetVersion: 30,
+    acceptedSourceVersions: [1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31],
+    targetVersion: 31,
     runs: 2,
     deterministicAppendTables: ['activity_log']
   });
@@ -446,6 +446,7 @@ test('trusted source manifest pins the sanitizer closure and exact supported sou
     'server/scripts/sanitization_manifest.json',
     'server/scripts/sanitize_production_shape.js',
     'server/scripts/verify_ai_concurrency_acceptance.js',
+    'server/scripts/verify_organization_billing_acceptance.js',
     'server/scripts/verify_protected_credentials.js',
     'server/scripts/verify_campaign_migration_gate.js',
     'server/server.js',
@@ -514,6 +515,7 @@ test('trusted source manifest pins the sanitizer closure and exact supported sou
     publicGuard: 'server/scripts/public_release_guard.sh',
     parserSelfTest: 'server/scripts/upload_sandbox_self_test.js',
     aiConcurrencyAcceptance: 'server/scripts/verify_ai_concurrency_acceptance.js',
+    organizationBillingAcceptance: 'server/scripts/verify_organization_billing_acceptance.js',
     protectedCredentialVerifier: 'server/scripts/verify_protected_credentials.js',
     parserVerifier: 'server/scripts/trusted_parser_runtime_verifier.js',
     parserManifest: 'server/systemd/turingmarket-parser.manifest.json',
@@ -558,6 +560,7 @@ test('trusted source manifest pins the complete parser control plane and deploy 
     publicGuard: 'server/scripts/public_release_guard.sh',
     parserSelfTest: 'server/scripts/upload_sandbox_self_test.js',
     aiConcurrencyAcceptance: 'server/scripts/verify_ai_concurrency_acceptance.js',
+    organizationBillingAcceptance: 'server/scripts/verify_organization_billing_acceptance.js',
     protectedCredentialVerifier: 'server/scripts/verify_protected_credentials.js',
     parserVerifier: 'server/scripts/trusted_parser_runtime_verifier.js',
     parserManifest: 'server/systemd/turingmarket-parser.manifest.json',
@@ -676,7 +679,7 @@ test('trusted bundle staging rejects a candidate sanitizer that would substitute
   assert.equal(fs.existsSync(bundleRoot), false, 'a forged sanitizer must not publish executable trusted bytes');
 });
 
-test('trusted deployment gate adopts exact legacy v0 before sanitized v1-to-v30 verification', (t) => {
+test('trusted deployment gate adopts exact legacy v0 before sanitized v1-to-v31 verification', (t) => {
   const gate = loadTrustedGate();
   assert.match(
     read(trustedGatePath),
@@ -724,7 +727,7 @@ test('trusted deployment gate adopts exact legacy v0 before sanitized v1-to-v30 
   }, {
     format: 'tm-trusted-production-source-verdict-v1',
     sourceVersion: 1,
-    targetVersion: 30,
+    targetVersion: 31,
     runs: 2,
     adoption: {
       format: 'tm-trusted-legacy-adoption-verdict-v1',
@@ -849,7 +852,7 @@ test('trusted live adoption recognizes exact managed v7 as a no-op', (t) => {
   assert.equal(fs.existsSync(outputPath), false);
 });
 
-test('trusted required sanitize-and-verify migrates the current managed v7 source to v30 twice with preservation', (t) => {
+test('trusted required sanitize-and-verify migrates the current managed v7 source to v31 twice with preservation', (t) => {
   const fixture = createV7Fixture(t, 'required-v7-gate');
   const sanitizedPath = path.join(fixture.root, 'trusted-sanitized-v7.db');
   const workDir = path.join(fixture.root, 'migration-work');
@@ -891,9 +894,9 @@ test('trusted required sanitize-and-verify migrates the current managed v7 sourc
     preMigrationRestoreVerified: report.preMigrationRestoreVerified,
     legacyPreservationVerified: report.legacyPreservationVerified
   }, {
-    verificationMode: 'v7-to-v30-migration',
+    verificationMode: 'v7-to-v31-migration',
     sourceVersion: 7,
-    targetVersion: 30,
+    targetVersion: 31,
     runs: 2,
     preMigrationRestoreVerified: true,
     legacyPreservationVerified: true
@@ -955,7 +958,7 @@ module.exports.apply = function tmMutatingV9Migration(db) {
   assert.equal(sha256(fixture.databasePath), sourceSha256);
 });
 
-test('trusted required sanitize-and-verify path migrates exact managed v8 to v30', (t) => {
+test('trusted required sanitize-and-verify path migrates exact managed v8 to v31', (t) => {
   const fixture = createV8Fixture(t, 'required-v8-gate');
   const sanitizedPath = path.join(fixture.root, 'trusted-sanitized-v8.db');
   const workDir = path.join(fixture.root, 'migration-work');
@@ -998,9 +1001,9 @@ test('trusted required sanitize-and-verify path migrates exact managed v8 to v30
     adoption: report.databaseAdoption
   }, {
     format: 'tm-trusted-production-source-verdict-v1',
-    verificationMode: 'v8-to-v30-migration',
+    verificationMode: 'v8-to-v31-migration',
     sourceVersion: 8,
-    targetVersion: 30,
+    targetVersion: 31,
     runs: 2,
     adoption: {
       format: 'tm-trusted-legacy-adoption-verdict-v1',
@@ -1124,7 +1127,7 @@ test('cutover owns and cleans deterministic database adoption artifacts across r
   );
 });
 
-test('trusted deployment-side verifier independently admits exact populated v1 through two preserved v1-to-v30 runs', (t) => {
+test('trusted deployment-side verifier independently admits exact populated v1 through two preserved v1-to-v31 runs', (t) => {
   const gate = loadTrustedGate();
   const fixture = createV1Fixture(t, 'two-runs');
   const sanitizedPath = path.join(fixture.root, 'trusted-sanitized-v1.db');
@@ -1169,7 +1172,7 @@ test('trusted deployment-side verifier independently admits exact populated v1 t
   }, {
     format: 'tm-trusted-production-source-verdict-v1',
     sourceVersion: 1,
-    targetVersion: 30,
+    targetVersion: 31,
     runs: 2,
     preMigrationRestoreVerified: true,
     legacyPreservationVerified: true

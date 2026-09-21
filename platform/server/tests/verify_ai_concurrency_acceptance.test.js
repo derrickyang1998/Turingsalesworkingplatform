@@ -9,7 +9,10 @@ const Database = require('better-sqlite3');
 
 const migration = require('../migrations/030_ai_provider_concurrency_reservation');
 const { createAIConcurrencyService } = require('../services/ai_concurrency_service');
-const { runAcceptance } = require('../scripts/verify_ai_concurrency_acceptance');
+const {
+  resolveAcceptanceActor,
+  runAcceptance
+} = require('../scripts/verify_ai_concurrency_acceptance');
 
 function fixture() {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-ai-acceptance-'));
@@ -38,9 +41,9 @@ function fixture() {
     CREATE TABLE web_search_cache (id INTEGER PRIMARY KEY) STRICT;
     CREATE TABLE proposals (id INTEGER PRIMARY KEY) STRICT;
     CREATE TABLE request_idempotency (id INTEGER PRIMARY KEY) STRICT;
-    INSERT INTO users VALUES (1,'derrick','admin',1);
+    INSERT INTO users VALUES (1,'derrick','admin',1),(2,'release-smoke','admin',1);
     INSERT INTO organizations VALUES (10,'alpha','Alpha');
-    INSERT INTO organization_memberships VALUES (10,1,'org_admin','active');
+    INSERT INTO organization_memberships VALUES (10,1,'org_admin','active'),(10,2,'org_admin','active');
   `);
   migration.apply(db);
   return {
@@ -54,11 +57,31 @@ function fixture() {
   };
 }
 
+test('AI concurrency acceptance resolves only the dedicated release smoke actor', () => {
+  const state = fixture();
+  try {
+    assert.deepEqual(resolveAcceptanceActor(state.db), {
+      userId: 2,
+      organizationId: 10,
+      role: 'admin',
+      username: 'release-smoke'
+    });
+    state.db.prepare('DELETE FROM organization_memberships WHERE user_id=2').run();
+    state.db.prepare('DELETE FROM users WHERE id=2').run();
+    assert.throws(
+      () => resolveAcceptanceActor(state.db),
+      /dedicated release smoke/i
+    );
+  } finally {
+    state.close();
+  }
+});
+
 function rejectionStub(db, response = null) {
   return async function(_url, _token, _body) {
     const service = createAIConcurrencyService(db);
     assert.throws(
-      () => service.acquire({ organizationId: 10, actorUserId: 1, operationKey: 'http:rejected' }),
+      () => service.acquire({ organizationId: 10, actorUserId: 2, operationKey: 'http:rejected' }),
       (error) => error.code === 'AI_ORGANIZATION_CONCURRENCY_LIMIT_REACHED'
     );
     return response || {
@@ -74,7 +97,7 @@ test('production acceptance rejects the occupied slot, proves no business writes
   try {
     const evidence = await runAcceptance({
       db: state.db,
-      actor: { userId: 1, organizationId: 10, role: 'admin' },
+      actor: { userId: 2, organizationId: 10, role: 'admin', username: 'release-smoke' },
       jwtSecret: 'acceptance-test-secret',
       runId: 'a'.repeat(32),
       evidencePath: state.evidencePath,
@@ -114,7 +137,7 @@ test('failed production acceptance still releases reservations, removes its sess
   try {
     await assert.rejects(runAcceptance({
       db: state.db,
-      actor: { userId: 1, organizationId: 10, role: 'admin' },
+      actor: { userId: 2, organizationId: 10, role: 'admin', username: 'release-smoke' },
       jwtSecret: 'acceptance-test-secret',
       runId: 'b'.repeat(32),
       evidencePath: state.evidencePath,

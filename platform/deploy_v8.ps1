@@ -33,10 +33,10 @@ $EXPECTED_PPT_SHA256 = "1fc70495e7ce641dadc76d751a49eab6ed261640293d2b8e691cea8b
 $TRUSTED_SOURCE_GATE_RELATIVE_PATH = "server\scripts\trusted_production_source_gate.js"
 $TRUSTED_SOURCE_MANIFEST_RELATIVE_PATH = "server\scripts\trusted_production_source_manifest.json"
 $TRUSTED_RUNTIME_CONFIG_RELATIVE_PATH = "server\config\runtime_config.js"
-$EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "a0dcaf3676fe9e4edad01c503b08d6dbf9aef02105be75306bcbd60e0ce61c6f"
-$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "dc1eceb25435877f3f825eb5dc87d3944eac26a1de81e330c0cd84594fae76c7"
+$EXPECTED_TRUSTED_SOURCE_GATE_SHA256 = "15fb525c8ed7e1543cc3afd4eeb528ddf333a2124ea8d88ec4e858ea4a69dc8f"
+$EXPECTED_TRUSTED_SOURCE_MANIFEST_SHA256 = "85d8514f5f849631fc6c062e393cd4dc253580a189d21579a3014a30f4577bbe"
 $EXPECTED_TRUSTED_RUNTIME_CONFIG_SHA256 = "e689e251f313c48b4f27279b1ef44639e3c1a68bb3c255f6ddfa86cabbfaa27d"
-$EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256 = "542e0daf328b53cac12b0a54dc45d019b4c15685fe87b851a41272b7673e408c"
+$EXPECTED_TRUSTED_MIGRATION_VERIFIER_SHA256 = "dcd802c5bf90a2a6cbf8f773bb569534a1e69fcae6ba50b5e2a97174b0174a2e"
 $EXPECTED_TRUSTED_PARSER_VERIFIER_SHA256 = "7f9efaac02675b21e025891a400474cc7481c1adaf58c88bd8b356d5276f2eaa"
 $EXPECTED_TRUSTED_PUBLIC_GUARD_SHA256 = "d45fe8fcc01587aaa0e73eccfb9714c27801e232cb6c0effd6daedb703316d66"
 $EXPECTED_TRUSTED_MIGRATION_CLEANUP_HELPER_SHA256 = "d5f2befa902522dd9de3e9dd2397a99ee5e78ab1a1c6e526a27f14bb2829e1fa"
@@ -130,6 +130,7 @@ $FILES = @(
     "server\migrations\028_subscription_expiry.js",
     "server\migrations\029_organization_monthly_ai_quota.js",
     "server\migrations\030_ai_provider_concurrency_reservation.js",
+    "server\migrations\031_organization_billing_statements.js",
     "server\migrations\baselines\legacy_v1.js",
     "server\migrations\engines\v1.js",
     "server\migrations\vendor\bcryptjs_v3_0_3.js",
@@ -162,6 +163,7 @@ $FILES = @(
     "server\routes_feishu_v2.js",
     "server\routes_plan_entitlements.js",
     "server\routes_subscription_expiry.js",
+    "server\routes_organization_billing.js",
     "server\routes_workflow.js",
     "server\server.js",
     "server\workflow_engine.js",
@@ -202,6 +204,7 @@ $FILES = @(
     "server\services\organization_access_service.js",
     "server\services\organization_methodology_service.js",
     "server\services\organization_governance_service.js",
+    "server\services\organization_billing_service.js",
     "server\services\plan_entitlement_service.js",
     "server\services\subscription_expiry_service.js",
     "server\services\parser_startup_service.js",
@@ -253,6 +256,7 @@ $FILES = @(
     "server\scripts\verify_campaign_migration_gate.js",
     "server\scripts\verify_ai_concurrency_acceptance.js",
     "server\scripts\verify_protected_credentials.js",
+    "server\scripts\verify_organization_billing_acceptance.js",
     "server\systemd\turingmarket-gate-cleanup.service",
     "server\systemd\turingmarket-parser.manifest.json",
     "server\systemd\turingmarket-parser.slice",
@@ -355,6 +359,12 @@ $FILES = @(
     "server\tests\organization_ai_concurrency_release_gate_inventory.test.js",
     "server\tests\verify_ai_concurrency_acceptance.test.js",
     "server\tests\protected_credentials_release_guard.test.js",
+    "server\tests\organization_billing_migration.test.js",
+    "server\tests\organization_billing_service.test.js",
+    "server\tests\organization_billing_routes.test.js",
+    "server\tests\admin_organization_billing_ui.test.js",
+    "server\tests\verify_organization_billing_acceptance.test.js",
+    "server\tests\organization_billing_release_gate_inventory.test.js",
     "server\tests\organization_governance_routes.test.js",
     "server\tests\organization_ownership_transfer_migration.test.js",
     "server\tests\influencer_tenant_ownership_migration.test.js",
@@ -6746,7 +6756,7 @@ if os.path.lexists(currentPath):
         factsRequired = {
             'schemaVersion', 'runId', 'cutoverCapacity', 'candidateHealth',
             'databaseAdoption', 'cutoverSnapshotSha256SumsSha256', 'pm2', 'nginx',
-            'aiConcurrencyAcceptance'
+            'aiConcurrencyAcceptance', 'organizationBillingAcceptance'
         }
         health = acceptanceFacts.get('candidateHealth', {})
         parserHealth = health.get('parser', {}) if isinstance(health, dict) else {}
@@ -6755,9 +6765,10 @@ if os.path.lexists(currentPath):
         pm2Projection = acceptanceFacts.get('pm2', {})
         nginxProjection = acceptanceFacts.get('nginx', {})
         aiConcurrencyAcceptance = acceptanceFacts.get('aiConcurrencyAcceptance', {})
+        organizationBillingAcceptance = acceptanceFacts.get('organizationBillingAcceptance', {})
         snapshotSha256 = acceptanceFacts.get('cutoverSnapshotSha256SumsSha256')
         if (acceptanceFactsBytes != canonicalFacts or set(acceptanceFacts) != factsRequired or
-                acceptanceFacts.get('schemaVersion') != 2 or acceptanceFacts.get('runId') != runId or
+                acceptanceFacts.get('schemaVersion') != 3 or acceptanceFacts.get('runId') != runId or
                 not isinstance(capacity, dict) or capacity.get('contract') != 'tm-cutover-capacity-v1' or
                 not isinstance(databaseAdoption, dict) or
                 databaseAdoption.get('format') != 'tm-trusted-legacy-adoption-verdict-v1' or
@@ -6777,6 +6788,11 @@ if os.path.lexists(currentPath):
                 aiConcurrencyAcceptance.get('schemaVersion') != 1 or
                 not re.fullmatch(r'[0-9a-f]{64}', str(aiConcurrencyAcceptance.get('sha256', '')))):
             raise SystemExit('AI concurrency acceptance binding is invalid')
+        if (set(organizationBillingAcceptance) != {'runId', 'schemaVersion', 'sha256'} or
+                organizationBillingAcceptance.get('runId') != runId or
+                organizationBillingAcceptance.get('schemaVersion') != 1 or
+                not re.fullmatch(r'[0-9a-f]{64}', str(organizationBillingAcceptance.get('sha256', '')))):
+            raise SystemExit('Organization billing acceptance binding is invalid')
         aiConcurrencyAcceptancePath = os.path.join(
             remoteRoot, 'deployment-evidence', f'ai-concurrency-acceptance-{runId}.json'
         )
@@ -6792,6 +6808,21 @@ if os.path.lexists(currentPath):
         if (aiConcurrencyEvidence.get('schemaVersion') != 1 or
                 aiConcurrencyEvidence.get('runId') != runId):
             raise SystemExit('AI concurrency acceptance schema is invalid')
+        organizationBillingAcceptancePath = os.path.join(
+            remoteRoot, 'deployment-evidence', f'organization-billing-acceptance-{runId}.json'
+        )
+        strictFile(organizationBillingAcceptancePath)
+        with open(organizationBillingAcceptancePath, 'rb') as handle:
+            organizationBillingAcceptanceBytes = handle.read()
+        if hashlib.sha256(organizationBillingAcceptanceBytes).hexdigest() != organizationBillingAcceptance.get('sha256'):
+            raise SystemExit('Organization billing acceptance SHA-256 is invalid')
+        try:
+            organizationBillingEvidence = json.loads(organizationBillingAcceptanceBytes.decode('utf-8'))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            raise SystemExit('Organization billing acceptance schema is invalid')
+        if (organizationBillingEvidence.get('schemaVersion') != 1 or
+                organizationBillingEvidence.get('runId') != runId):
+            raise SystemExit('Organization billing acceptance schema is invalid')
         expectedPm2Fields = {'name', 'status', 'pmExecPath', 'pmCwd', 'execMode', 'instances', 'env'}
         expectedNginxFields = {'behaviorContract', 'configSha256', 'enabledTarget'}
         if (set(pm2Projection['expected']) != expectedPm2Fields or
@@ -7220,6 +7251,7 @@ ReplayEvidence="$RemoteRoot/deployment-evidence/replay-$RunId.json"
 ParserAcceptedEvidence="$RemoteRoot/deployment-evidence/parser-$RunId.json"
 AcceptanceFacts="$RemoteRoot/deployment-evidence/acceptance-facts-$RunId.json"
 AIConcurrencyAcceptanceEvidence="$RemoteRoot/deployment-evidence/ai-concurrency-acceptance-$RunId.json"
+OrganizationBillingAcceptanceEvidence="$RemoteRoot/deployment-evidence/organization-billing-acceptance-$RunId.json"
 test -f "$AcceptedEvidence"
 test ! -L "$AcceptedEvidence"
 test "$(stat -c '%U:%G:%a:%h' "$AcceptedEvidence")" = "root:root:600:1"
@@ -7238,6 +7270,9 @@ test "$(stat -c '%U:%G:%a:%h' "$AcceptanceFacts")" = "root:root:600:1"
 test -f "$AIConcurrencyAcceptanceEvidence"
 test ! -L "$AIConcurrencyAcceptanceEvidence"
 test "$(stat -c '%U:%G:%a:%h' "$AIConcurrencyAcceptanceEvidence")" = "root:root:600:1"
+test -f "$OrganizationBillingAcceptanceEvidence"
+test ! -L "$OrganizationBillingAcceptanceEvidence"
+test "$(stat -c '%U:%G:%a:%h' "$OrganizationBillingAcceptanceEvidence")" = "root:root:600:1"
 AcceptanceBinding="$(python3 - "$AcceptedMarker" <<'PY'
 import json
 import re
@@ -7329,12 +7364,12 @@ test "$(cat "$ParserAcceptedEvidence")" = "$CurrentParserAcceptanceBinding" || {
   echo 'Installed parser runtime acceptance binding is invalid' >&2
   exit 1
 }
-AcceptanceFactsBinding="$(python3 - "$CurrentMarker" "$AcceptanceFacts" "$AIConcurrencyAcceptanceEvidence" "$RunId" "$ExpectedDigest" "$(awk 'NR == 1 {print $1}' "$StagedPublicNginxSha")" "$ExpectedReplayEvidenceSha256" "$ExpectedParserEvidenceSha256" "$ExpectedParserRuntimeSha256" "$ExpectedAcceptanceFactsSha256" <<'PY'
+AcceptanceFactsBinding="$(python3 - "$CurrentMarker" "$AcceptanceFacts" "$AIConcurrencyAcceptanceEvidence" "$OrganizationBillingAcceptanceEvidence" "$RunId" "$ExpectedDigest" "$(awk 'NR == 1 {print $1}' "$StagedPublicNginxSha")" "$ExpectedReplayEvidenceSha256" "$ExpectedParserEvidenceSha256" "$ExpectedParserRuntimeSha256" "$ExpectedAcceptanceFactsSha256" <<'PY'
 import hashlib
 import json
 import re
 import sys
-markerPath, factsPath, aiConcurrencyEvidencePath, runId, candidateSha256, nginxSha256, replayEvidenceSha256, parserEvidenceSha256, parserRuntimeSha256, acceptanceFactsSha256 = sys.argv[1:]
+markerPath, factsPath, aiConcurrencyEvidencePath, organizationBillingEvidencePath, runId, candidateSha256, nginxSha256, replayEvidenceSha256, parserEvidenceSha256, parserRuntimeSha256, acceptanceFactsSha256 = sys.argv[1:]
 with open(markerPath, encoding='utf-8') as handle:
     marker = json.load(handle)
 if marker.get('runId') != runId or marker.get('candidateSha256') != candidateSha256 or marker.get('nginxSha256') != nginxSha256:
@@ -7363,7 +7398,7 @@ canonical = (json.dumps(facts, sort_keys=True, separators=(',', ':')) + '\n').en
 requiredFacts = {
     'schemaVersion', 'runId', 'cutoverCapacity', 'candidateHealth',
     'databaseAdoption', 'cutoverSnapshotSha256SumsSha256', 'pm2', 'nginx',
-    'aiConcurrencyAcceptance'
+    'aiConcurrencyAcceptance', 'organizationBillingAcceptance'
 }
 capacity = facts.get('cutoverCapacity', {})
 databaseAdoption = facts.get('databaseAdoption', {})
@@ -7372,8 +7407,9 @@ parserHealth = health.get('parser', {}) if isinstance(health, dict) else {}
 pm2Projection = facts.get('pm2', {})
 nginxProjection = facts.get('nginx', {})
 aiConcurrencyAcceptance = facts.get('aiConcurrencyAcceptance', {})
+organizationBillingAcceptance = facts.get('organizationBillingAcceptance', {})
 snapshotSha256 = facts.get('cutoverSnapshotSha256SumsSha256')
-if (factsBytes != canonical or set(facts) != requiredFacts or facts.get('schemaVersion') != 2 or
+if (factsBytes != canonical or set(facts) != requiredFacts or facts.get('schemaVersion') != 3 or
         facts.get('runId') != runId or not isinstance(capacity, dict) or
         not isinstance(databaseAdoption, dict) or
         databaseAdoption.get('format') != 'tm-trusted-legacy-adoption-verdict-v1' or
@@ -7394,6 +7430,11 @@ if (set(aiConcurrencyAcceptance) != {'runId', 'schemaVersion', 'sha256'} or
         aiConcurrencyAcceptance.get('schemaVersion') != 1 or
         not re.fullmatch(r'[0-9a-f]{64}', str(aiConcurrencyAcceptance.get('sha256', '')))):
     raise SystemExit('AI concurrency acceptance binding is invalid')
+if (set(organizationBillingAcceptance) != {'runId', 'schemaVersion', 'sha256'} or
+        organizationBillingAcceptance.get('runId') != runId or
+        organizationBillingAcceptance.get('schemaVersion') != 1 or
+        not re.fullmatch(r'[0-9a-f]{64}', str(organizationBillingAcceptance.get('sha256', '')))):
+    raise SystemExit('Organization billing acceptance binding is invalid')
 with open(aiConcurrencyEvidencePath, 'rb') as handle:
     aiConcurrencyEvidenceBytes = handle.read()
 if hashlib.sha256(aiConcurrencyEvidenceBytes).hexdigest() != aiConcurrencyAcceptance.get('sha256'):
@@ -7404,6 +7445,16 @@ except (UnicodeDecodeError, json.JSONDecodeError):
     raise SystemExit('AI concurrency acceptance schema is invalid')
 if (aiConcurrencyEvidence.get('schemaVersion') != 1 or aiConcurrencyEvidence.get('runId') != runId):
     raise SystemExit('AI concurrency acceptance schema is invalid')
+with open(organizationBillingEvidencePath, 'rb') as handle:
+    organizationBillingEvidenceBytes = handle.read()
+if hashlib.sha256(organizationBillingEvidenceBytes).hexdigest() != organizationBillingAcceptance.get('sha256'):
+    raise SystemExit('Organization billing acceptance SHA-256 is invalid')
+try:
+    organizationBillingEvidence = json.loads(organizationBillingEvidenceBytes.decode('utf-8'))
+except (UnicodeDecodeError, json.JSONDecodeError):
+    raise SystemExit('Organization billing acceptance schema is invalid')
+if (organizationBillingEvidence.get('schemaVersion') != 1 or organizationBillingEvidence.get('runId') != runId):
+    raise SystemExit('Organization billing acceptance schema is invalid')
 forbiddenFields = {'pid', 'pm_uptime', 'uptime'}
 def rejectVolatile(value):
     if isinstance(value, dict):
@@ -10956,7 +11007,7 @@ try {
   if (database.pragma('integrity_check', { simple: true }) !== 'ok') throw new Error('Candidate DB integrity_check failed');
   if (database.pragma('foreign_key_check').length !== 0) throw new Error('Candidate DB foreign_key_check failed');
   const version = database.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version;
-  if (Number(version) !== 30) throw new Error('Candidate migration target version mismatch');
+  if (Number(version) !== 31) throw new Error('Candidate migration target version mismatch');
   console.log('TM_SANITIZED_MIGRATION_COMPATIBILITY_OK');
 } finally {
   database.close();
@@ -10974,6 +11025,12 @@ node --test server/tests/module_action_permission_service.test.js
 node --test --test-name-pattern="trusted source manifest pins the sanitizer closure|trusted source manifest pins the complete parser control plane|trusted source manifest independently pins the migration cleanup control plane|deploy pins trusted sanitizer closure" \
   server/tests/deployment_source_trust.test.js
 node --test \
+  server/tests/organization_billing_migration.test.js \
+  server/tests/organization_billing_service.test.js \
+  server/tests/organization_billing_routes.test.js \
+  server/tests/admin_organization_billing_ui.test.js \
+  server/tests/verify_organization_billing_acceptance.test.js \
+  server/tests/organization_billing_release_gate_inventory.test.js \
   server/tests/organization_ai_concurrency_migration.test.js \
   server/tests/ai_concurrency_service.test.js \
   server/tests/verify_ai_concurrency_acceptance.test.js \
@@ -11278,6 +11335,7 @@ AcceptedEvidence="$AcceptedEvidenceRoot/accepted-__RUN_ID__.json"
 ParserAcceptedEvidence="$AcceptedEvidenceRoot/parser-__RUN_ID__.json"
 AcceptanceFacts="$AcceptedEvidenceRoot/acceptance-facts-__RUN_ID__.json"
 AIConcurrencyAcceptanceEvidence="$AcceptedEvidenceRoot/ai-concurrency-acceptance-__RUN_ID__.json"
+OrganizationBillingAcceptanceEvidence="$AcceptedEvidenceRoot/organization-billing-acceptance-__RUN_ID__.json"
 DatabaseAdoptionReport="$AcceptedEvidenceRoot/database-adoption-__RUN_ID__.json"
 DatabaseAdoptionError="$LockDir/database-adoption-__RUN_ID__.stderr"
 DatabaseAdoptionStage="$DatabaseDir/.turingmarket.db.adopted"
@@ -12474,7 +12532,7 @@ if applied:
         if hashlib.sha256(handle.read()).hexdigest() != output_sha256:
             raise SystemExit('Trusted live database adoption stage digest is invalid')
 else:
-    if (report.get('sourceVersion') not in (1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30) or
+    if (report.get('sourceVersion') not in (1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31) or
             report.get('targetVersion') != report.get('sourceVersion') or
             output_sha256 != expected_source_sha256 or
             report.get('baseTableCount') is not None or report.get('baseRowCount') is not None or
@@ -13552,6 +13610,10 @@ record_acceptance_facts() {
   test ! -L "$AIConcurrencyAcceptanceEvidence"
   test "$(stat -c '%U:%G:%a:%h' "$AIConcurrencyAcceptanceEvidence")" = "root:root:600:1"
   test "$(sha256sum "$AIConcurrencyAcceptanceEvidence" | awk '{print $1}')" = "$AIConcurrencyAcceptanceSha256"
+  test -f "$OrganizationBillingAcceptanceEvidence"
+  test ! -L "$OrganizationBillingAcceptanceEvidence"
+  test "$(stat -c '%U:%G:%a:%h' "$OrganizationBillingAcceptanceEvidence")" = "root:root:600:1"
+  test "$(sha256sum "$OrganizationBillingAcceptanceEvidence" | awk '{print $1}')" = "$OrganizationBillingAcceptanceSha256"
   test -f "$DatabaseAdoptionReport"
   test ! -L "$DatabaseAdoptionReport"
   test "$(stat -c '%U:%G:%a:%h' "$DatabaseAdoptionReport")" = "root:root:600:1"
@@ -13600,12 +13662,39 @@ projection = {
 print(json.dumps(projection, sort_keys=True, separators=(',', ':')))
 PY
 )"
+  OrganizationBillingAcceptanceProjection="$(python3 - "$OrganizationBillingAcceptanceEvidence" "__RUN_ID__" "$OrganizationBillingAcceptanceSha256" <<'PY'
+import hashlib
+import json
+import re
+import sys
+
+path, runId, evidenceSha256 = sys.argv[1:]
+with open(path, 'rb') as handle:
+    evidenceBytes = handle.read()
+if hashlib.sha256(evidenceBytes).hexdigest() != evidenceSha256:
+    raise SystemExit('Organization billing acceptance SHA-256 is invalid')
+try:
+    evidence = json.loads(evidenceBytes.decode('utf-8'))
+except (UnicodeDecodeError, json.JSONDecodeError):
+    raise SystemExit('Organization billing acceptance schema is invalid')
+if (evidence.get('schemaVersion') != 1 or evidence.get('runId') != runId or
+        not re.fullmatch(r'[0-9a-f]{64}', evidenceSha256)):
+    raise SystemExit('Organization billing acceptance schema is invalid')
+projection = {
+    'runId': runId,
+    'schemaVersion': evidence['schemaVersion'],
+    'sha256': evidenceSha256,
+}
+print(json.dumps(projection, sort_keys=True, separators=(',', ':')))
+PY
+)"
   TM_CUTOVER_CAPACITY_JSON="$CutoverCapacityJson" \
   TM_CANDIDATE_HEALTH_PROJECTION="$CandidateHealthProjection" \
   TM_DATABASE_ADOPTION_JSON="$DatabaseAdoptionJson" \
   TM_PM2_FINAL_PROJECTION="$Pm2Projection" \
   TM_NGINX_FINAL_PROJECTION="$NginxProjection" \
   TM_AI_CONCURRENCY_ACCEPTANCE_PROJECTION="$AIConcurrencyAcceptanceProjection" \
+  TM_ORGANIZATION_BILLING_ACCEPTANCE_PROJECTION="$OrganizationBillingAcceptanceProjection" \
   python3 - "$AcceptanceFacts.next" "__RUN_ID__" "$CutoverSnapshotSha256SumsSha256" <<'PY'
 import json
 import os
@@ -13619,6 +13708,7 @@ databaseAdoption = json.loads(os.environ['TM_DATABASE_ADOPTION_JSON'])
 pm2Projection = json.loads(os.environ['TM_PM2_FINAL_PROJECTION'])
 nginxProjection = json.loads(os.environ['TM_NGINX_FINAL_PROJECTION'])
 aiConcurrencyAcceptance = json.loads(os.environ['TM_AI_CONCURRENCY_ACCEPTANCE_PROJECTION'])
+organizationBillingAcceptance = json.loads(os.environ['TM_ORGANIZATION_BILLING_ACCEPTANCE_PROJECTION'])
 if capacity.get('contract') != 'tm-cutover-capacity-v1' or capacity.get('ok') is not True:
     raise SystemExit('Acceptance facts cutover capacity is invalid')
 adoptionRequired = {
@@ -13647,6 +13737,11 @@ if (set(aiConcurrencyAcceptance) != {'runId', 'schemaVersion', 'sha256'} or
         aiConcurrencyAcceptance.get('schemaVersion') != 1 or
         not re.fullmatch(r'[0-9a-f]{64}', str(aiConcurrencyAcceptance.get('sha256', '')))):
     raise SystemExit('Acceptance facts AI concurrency projection is invalid')
+if (set(organizationBillingAcceptance) != {'runId', 'schemaVersion', 'sha256'} or
+        organizationBillingAcceptance.get('runId') != runId or
+        organizationBillingAcceptance.get('schemaVersion') != 1 or
+        not re.fullmatch(r'[0-9a-f]{64}', str(organizationBillingAcceptance.get('sha256', '')))):
+    raise SystemExit('Acceptance facts organization billing projection is invalid')
 forbiddenFields = {'pid', 'pm_uptime', 'uptime'}
 def rejectVolatile(value):
     if isinstance(value, dict):
@@ -13661,11 +13756,12 @@ rejectVolatile(pm2Projection)
 pm2Expected, pm2Final = pm2Projection['expected'], pm2Projection['final']
 nginxExpected, nginxFinal = nginxProjection['expected'], nginxProjection['final']
 payload = {
-    'schemaVersion': 2,
+    'schemaVersion': 3,
     'runId': runId,
     'cutoverCapacity': capacity,
     'candidateHealth': health,
     'aiConcurrencyAcceptance': aiConcurrencyAcceptance,
+    'organizationBillingAcceptance': organizationBillingAcceptance,
     'databaseAdoption': databaseAdoption,
     'cutoverSnapshotSha256SumsSha256': snapshotSha256,
     'pm2': {'expected': pm2Expected, 'final': pm2Final},
@@ -13773,7 +13869,7 @@ try:
 except (UnicodeDecodeError, json.JSONDecodeError):
     raise SystemExit('AI concurrency acceptance schema is invalid')
 binding = facts.get('aiConcurrencyAcceptance', {})
-if (facts.get('schemaVersion') != 2 or facts.get('runId') != runId or
+if (facts.get('schemaVersion') != 3 or facts.get('runId') != runId or
         set(binding) != {'runId', 'schemaVersion', 'sha256'} or
         binding.get('runId') != runId or binding.get('schemaVersion') != 1 or
         binding.get('sha256') != evidenceSha256 or
@@ -13783,12 +13879,47 @@ if (facts.get('schemaVersion') != 2 or facts.get('runId') != runId or
 PY
 }
 
+assert_organization_billing_acceptance_binding() {
+  test -f "$OrganizationBillingAcceptanceEvidence"
+  test ! -L "$OrganizationBillingAcceptanceEvidence"
+  test "$(stat -c '%U:%G:%a:%h' "$OrganizationBillingAcceptanceEvidence")" = "root:root:600:1"
+  test "$(sha256sum "$OrganizationBillingAcceptanceEvidence" | awk '{print $1}')" = "$OrganizationBillingAcceptanceSha256"
+  python3 - "$AcceptanceFacts" "$OrganizationBillingAcceptanceEvidence" "__RUN_ID__" "$OrganizationBillingAcceptanceSha256" <<'PY'
+import hashlib
+import json
+import re
+import sys
+
+factsPath, evidencePath, runId, evidenceSha256 = sys.argv[1:]
+with open(factsPath, 'rb') as handle:
+    factsBytes = handle.read()
+with open(evidencePath, 'rb') as handle:
+    evidenceBytes = handle.read()
+if hashlib.sha256(evidenceBytes).hexdigest() != evidenceSha256:
+    raise SystemExit('Organization billing acceptance SHA-256 is invalid')
+try:
+    facts = json.loads(factsBytes.decode('ascii'))
+    evidence = json.loads(evidenceBytes.decode('utf-8'))
+except (UnicodeDecodeError, json.JSONDecodeError):
+    raise SystemExit('Organization billing acceptance schema is invalid')
+binding = facts.get('organizationBillingAcceptance', {})
+if (facts.get('schemaVersion') != 3 or facts.get('runId') != runId or
+        set(binding) != {'runId', 'schemaVersion', 'sha256'} or
+        binding.get('runId') != runId or binding.get('schemaVersion') != 1 or
+        binding.get('sha256') != evidenceSha256 or
+        evidence.get('schemaVersion') != 1 or evidence.get('runId') != runId or
+        not re.fullmatch(r'[0-9a-f]{64}', evidenceSha256)):
+    raise SystemExit('Organization billing acceptance binding is invalid')
+PY
+}
+
 assert_final_acceptance_facts() {
   test -f "$AcceptanceFacts"
   test ! -L "$AcceptanceFacts"
   test "$(stat -c '%U:%G:%a:%h' "$AcceptanceFacts")" = "root:root:600:1"
   test "$(sha256sum "$AcceptanceFacts" | awk '{print $1}')" = "$AcceptanceFactsSha256"
   assert_ai_concurrency_acceptance_binding
+  assert_organization_billing_acceptance_binding
   if [ "$(sha256sum "$CutoverSnapshot/SHA256SUMS" | awk '{print $1}')" != "$CutoverSnapshotSha256SumsSha256" ]; then
     echo "Cutover snapshot SHA256SUMS digest changed after acceptance" >&2
     return 1
@@ -13811,7 +13942,7 @@ nginxFinal = {
     'configSha256': nginxSha256,
     'enabledTarget': nginxTarget,
 }
-if (facts.get('schemaVersion') != 2 or
+if (facts.get('schemaVersion') != 3 or
         facts.get('pm2', {}).get('expected') != pm2Projection.get('expected') or
         facts.get('pm2', {}).get('final') != pm2Projection.get('final') or
         facts.get('nginx', {}).get('expected') != nginxFinal or
@@ -13827,6 +13958,7 @@ activate_public_candidate() {
   test "$(stat -c '%U:%G:%a:%h' "$CurrentAcceptedMarker")" = "root:root:600:1"
   assert_installed_parser_acceptance_binding
   assert_ai_concurrency_acceptance_binding
+  assert_organization_billing_acceptance_binding
   python3 - "$CurrentAcceptedMarker" "__RUN_ID__" "$ExpectedCandidateDigest" "$ReplayEvidenceSha" "$ParserEvidenceSha256" "$ParserRuntimeSha256" "$AcceptanceFactsSha256" <<'PY'
 import json
 import sys
@@ -14075,6 +14207,23 @@ test "$(stat -c '%U:%G:%a:%h' "$AIConcurrencyAcceptanceEvidence")" = "root:root:
 AIConcurrencyAcceptanceSha256="$(sha256sum "$AIConcurrencyAcceptanceEvidence" | awk '{print $1}')"
 [[ "$AIConcurrencyAcceptanceSha256" =~ ^[0-9a-f]{64}$ ]]
 printf '%s\n' "AI_CONCURRENCY_ACCEPTANCE_EVIDENCE_OK $AIConcurrencyAcceptanceSha256"
+test ! -e "$OrganizationBillingAcceptanceEvidence"
+OrganizationBillingAcceptanceOutput="$(
+  NODE_ENV=production \
+  TM_ENV_FILE=/etc/turingmarket/turingmarket.env \
+  DB_PATH=/var/lib/turingmarket/db/turingmarket.db \
+  node server/scripts/verify_organization_billing_acceptance.js \
+    --run-id "__RUN_ID__" \
+    --evidence "$OrganizationBillingAcceptanceEvidence" \
+    --base-url http://127.0.0.1:3002
+)"
+test "$OrganizationBillingAcceptanceOutput" = "ORGANIZATION_BILLING_ACCEPTANCE_OK __RUN_ID__"
+test -f "$OrganizationBillingAcceptanceEvidence"
+test ! -L "$OrganizationBillingAcceptanceEvidence"
+test "$(stat -c '%U:%G:%a:%h' "$OrganizationBillingAcceptanceEvidence")" = "root:root:600:1"
+OrganizationBillingAcceptanceSha256="$(sha256sum "$OrganizationBillingAcceptanceEvidence" | awk '{print $1}')"
+[[ "$OrganizationBillingAcceptanceSha256" =~ ^[0-9a-f]{64}$ ]]
+printf '%s\n' "ORGANIZATION_BILLING_ACCEPTANCE_EVIDENCE_OK $OrganizationBillingAcceptanceSha256"
 assert_protected_credentials_unchanged
 record_acceptance_facts
 

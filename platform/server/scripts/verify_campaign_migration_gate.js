@@ -14,7 +14,7 @@ const REPORT_VERSION = 'tm-campaign-migration-gate-v1';
 const PRESERVATION_REPORT_VERSION = 'tm-campaign-migration-preservation-v1';
 const LEGACY_TOPOLOGY_FORMAT = 'tm-legacy-topology-subset-v1';
 const REQUIRED_SOURCE_VERSION = 1;
-const REQUIRED_TARGET_VERSION = 30;
+const REQUIRED_TARGET_VERSION = 31;
 const SUPPORTED_SOURCE_VERSIONS = new Set([REQUIRED_SOURCE_VERSION, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30]);
 const DEFAULT_FROZEN_MIGRATION_TIMESTAMP = '2040-01-02 03:04:05';
 const EXCLUDED_PRESERVATION_TABLES = new Set(['schema_migrations', 'sqlite_sequence']);
@@ -222,6 +222,13 @@ const REGISTERED_MIGRATIONS = Object.freeze([
     version: 30,
     name: '030_ai_provider_concurrency_reservation',
     sourcePath: 'migrations/030_ai_provider_concurrency_reservation.js',
+    engineVersion: 1,
+    dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
+  }),
+  Object.freeze({
+    version: 31,
+    name: '031_organization_billing_statements',
+    sourcePath: 'migrations/031_organization_billing_statements.js',
     engineVersion: 1,
     dependencies: Object.freeze(['migrations/vendor/bcryptjs_v3_0_3.js'])
   })

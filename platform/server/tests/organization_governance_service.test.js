@@ -994,3 +994,52 @@ test('rolls back membership, policy, session revocation, and change result when 
     db.close();
   }
 });
+
+test('projects current organization billing and administrator billing actions in the directory', () => {
+  const db = openFixture();
+  try {
+    const calls = [];
+    const billingService = {
+      projectOrganizationBillingSummary(input) {
+        calls.push(input);
+        return {
+          organization_id: input.organizationId,
+          month: '2026-09',
+          status: input.organizationId === 10 ? 'estimated' : 'disabled',
+          policy: {
+            policy_version: 2,
+            effective_month: '2026-09-01',
+            billing_enabled: input.organizationId === 10,
+            currency: 'USD',
+            base_fee_cents: 2500,
+            included_tokens: 1000000,
+            overage_cents_per_million_tokens: 300
+          },
+          policy_head_version: 4
+        };
+      }
+    };
+    const { createOrganizationGovernanceService } = loadService();
+    const service = createOrganizationGovernanceService(db, { billingService });
+    const result = service.listOrganizations({ actor: actor(1, 'admin'), query: { limit: 20 } });
+    assert.equal(calls.length, 3);
+    assert.deepEqual(result.organizations[0].billing, {
+      month: '2026-09',
+      status: 'estimated',
+      billing_enabled: true,
+      currency: 'USD',
+      policy_version: 2,
+      policy_head_version: 4,
+      effective_month: '2026-09-01',
+      base_fee_cents: 2500,
+      included_tokens: 1000000,
+      overage_cents_per_million_tokens: 300
+    });
+    assert.equal(result.organizations[0].allowed_actions.manage_billing, true);
+
+    const owner = service.listOrganizations({ actor: actor(2), query: { limit: 20 } });
+    assert.equal(owner.organizations[0].allowed_actions.manage_billing, false);
+  } finally {
+    db.close();
+  }
+});
