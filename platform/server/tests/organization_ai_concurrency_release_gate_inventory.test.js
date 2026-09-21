@@ -51,6 +51,8 @@ test('schema and release registries terminate at durable AI concurrency migratio
   assert.match(deploy, /server\\tests\\admin_ai_concurrency_ui\.test\.js/);
   assert.match(deploy, /server\\tests\\organization_ai_concurrency_release_gate_inventory\.test\.js/);
   assert.match(deploy, /server\\scripts\\verify_ai_concurrency_acceptance\.js/);
+  assert.match(deploy, /"server\\tests\\latest_ui_proposal_campaign_client\.test\.js"/);
+  assert.match(deploy, /"server\\tests\\latest_ui_ppt_campaign_rag\.test\.js"/);
 });
 
 test('server wires one shared concurrency service into governance and admin routes', () => {

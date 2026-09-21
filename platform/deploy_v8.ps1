@@ -269,6 +269,8 @@ $FILES = @(
     "server\tests\browser_baseline_tools.test.js",
     "server\tests\campaign_api.test.js",
     "server\tests\campaign_ai_rag.test.js",
+    "server\tests\latest_ui_proposal_campaign_client.test.js",
+    "server\tests\latest_ui_ppt_campaign_rag.test.js",
     "server\tests\campaign_collaboration_security.test.js",
     "server\tests\campaign_collaboration_trigger_migration.test.js",
     "server\tests\campaign_concurrency.test.js",
