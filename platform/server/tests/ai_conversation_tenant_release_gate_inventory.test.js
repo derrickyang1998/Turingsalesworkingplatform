@@ -97,7 +97,7 @@ test('v25 sanitizer profile pins AI conversation organization ownership', (t) =>
 test('trusted source manifest retains the exact v25 source inside the current contract', () => {
   const manifestPath = path.join(serverRoot, 'scripts', 'trusted_production_source_manifest.json');
   const loaded = trustedGate.loadTrustedManifest(manifestPath);
-  assert.equal(loaded.migrationContract.targetVersion, 30);
+  assert.equal(loaded.migrationContract.targetVersion, 31);
   assert.ok(loaded.migrationContract.acceptedSourceVersions.includes(25));
   for (const requiredPath of [
     'server/migrations/025_ai_conversation_tenant_ownership.js',
@@ -130,11 +130,11 @@ test('deploy inventory carries v25 implementation and exact focused tests', () =
   }
   assert.match(
     deploy,
-    /if \(Number\(version\) !== 30\) throw new Error\('Candidate migration target version mismatch'\)/
+    /if \(Number\(version\) !== 31\) throw new Error\('Candidate migration target version mismatch'\)/
   );
   assert.match(
     deploy,
-    /report\.get\('sourceVersion'\) not in \(1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30\)/
+    /report\.get\('sourceVersion'\) not in \(1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31\)/
   );
   assert.equal(
     powerShellStringAssignment(deploy, 'EXPECTED_TRUSTED_SOURCE_GATE_SHA256'),
